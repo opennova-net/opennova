@@ -2,16 +2,167 @@
 
 #include <runtime/terrain/terrain_tile_composition_worker.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 namespace opennova::terrain {
+
+// --- the shared row-stripe lane pool (runtime/terrain/row_stripes.h) --------
+
+namespace {
+
+// One run_lanes_on_pool call: every participant claims lane indices until
+// none remain. Lives on the caller's stack; the caller returns only after
+// every pool thread that picked it up has let go.
+struct LaneBatch {
+	void (*invoke)(const void *, std::size_t) = nullptr;
+	const void *context = nullptr;
+	std::size_t lanes = 0;
+	std::atomic<std::size_t> next{ 0 };
+	// Pool threads inside this batch (guarded by the pool mutex).
+	std::size_t helpers = 0;
+	std::condition_variable released;
+};
+
+void claim_lanes(LaneBatch &batch) noexcept {
+	for (;;) {
+		const std::size_t index = batch.next.fetch_add(1, std::memory_order_relaxed);
+		if (index >= batch.lanes) return;
+		batch.invoke(batch.context, index);
+	}
+}
+
+class LanePool {
+public:
+	LanePool() {
+		const std::size_t hardware = std::max<unsigned>(std::thread::hardware_concurrency(), 2u);
+		try {
+			threads_.reserve(hardware - 1);
+			for (std::size_t index = 0; index + 1 < hardware; ++index)
+				threads_.emplace_back([this]() { worker_loop(); });
+		} catch (...) {
+		}
+	}
+
+	~LanePool() {
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			stopping_ = true;
+		}
+		wake_.notify_all();
+		for (std::thread &thread : threads_) thread.join();
+	}
+
+	LanePool(const LanePool &) = delete;
+	LanePool &operator=(const LanePool &) = delete;
+
+	void run(std::size_t lanes, void (*invoke)(const void *, std::size_t),
+			const void *context) noexcept {
+		LaneBatch batch;
+		batch.invoke = invoke;
+		batch.context = context;
+		batch.lanes = lanes;
+		const std::size_t wanted = std::min(lanes - 1, threads_.size());
+		std::size_t queued = 0;
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			try {
+				for (; queued < wanted; ++queued) queue_.push_back(&batch);
+			} catch (...) {
+			}
+		}
+		for (std::size_t index = 0; index < queued; ++index) wake_.notify_one();
+		claim_lanes(batch);
+		std::unique_lock<std::mutex> lock(mutex_);
+		// Entries no thread reached are withdrawn; every lane is claimed.
+		queue_.erase(std::remove(queue_.begin(), queue_.end(), &batch), queue_.end());
+		batch.released.wait(lock, [&batch]() { return batch.helpers == 0; });
+	}
+
+private:
+	void worker_loop() noexcept {
+		std::unique_lock<std::mutex> lock(mutex_);
+		for (;;) {
+			wake_.wait(lock, [this]() { return stopping_ || !queue_.empty(); });
+			if (stopping_) return;
+			LaneBatch *batch = queue_.front();
+			queue_.pop_front();
+			++batch->helpers;
+			lock.unlock();
+			claim_lanes(*batch);
+			lock.lock();
+			if (--batch->helpers == 0) batch->released.notify_all();
+		}
+	}
+
+	std::mutex mutex_;
+	std::condition_variable wake_;
+	std::deque<LaneBatch *> queue_;
+	bool stopping_ = false;
+	std::vector<std::thread> threads_;
+};
+
+// The pool lives while anything holds a lease (the page workers hold one for
+// their lifetime); a call with no holder builds and retires a pool around
+// itself. No static owns threads, so unloading the library never has to stop
+// one.
+std::mutex g_pool_mutex;
+std::weak_ptr<LanePool> g_pool;
+
+std::shared_ptr<LanePool> acquire_pool() {
+	std::lock_guard<std::mutex> lock(g_pool_mutex);
+	std::shared_ptr<LanePool> pool = g_pool.lock();
+	if (pool == nullptr) {
+		pool = std::make_shared<LanePool>();
+		g_pool = pool;
+	}
+	return pool;
+}
+
+} // namespace
+
+RowStripePoolLease retain_row_stripe_pool() {
+	try {
+		return acquire_pool();
+	} catch (...) {
+		return nullptr;
+	}
+}
+
+namespace detail {
+
+void run_lanes_on_pool(std::size_t lanes, void (*invoke)(const void *, std::size_t),
+		const void *context) noexcept {
+	std::shared_ptr<LanePool> pool;
+	try {
+		pool = acquire_pool();
+	} catch (...) {
+	}
+	if (pool == nullptr) {
+		for (std::size_t index = 0; index < lanes; ++index) invoke(context, index);
+		return;
+	}
+	pool->run(lanes, invoke, context);
+}
+
+} // namespace detail
+
+// --- the page-composition worker --------------------------------------------
 
 std::size_t TerrainTileCompositionWorker::worker_count() noexcept {
 	const std::size_t hardware = std::thread::hardware_concurrency();
 	return std::clamp<std::size_t>(hardware / 2, 2, 8);
 }
 
-TerrainTileCompositionWorker::TerrainTileCompositionWorker() {
+TerrainTileCompositionWorker::TerrainTileCompositionWorker()
+		: lane_pool_(retain_row_stripe_pool()) {
 	const std::size_t count = worker_count();
 	workers_.reserve(count);
 	for (std::size_t index = 0; index < count; ++index)

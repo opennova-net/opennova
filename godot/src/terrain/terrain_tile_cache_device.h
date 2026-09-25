@@ -167,6 +167,12 @@ private:
 	uint64_t frame_compose_us_ = 0;
 	uint64_t frame_compose_page_us_ = 0;
 	uint64_t frame_compose_shadow_plan_us_ = 0;
+	// The shadow split's triangle build (summed per page like the others),
+	// then the main thread's own wall time: the wait on the pool and the
+	// completed pages' uploads.
+	uint64_t frame_compose_shadow_build_us_ = 0;
+	uint64_t frame_compose_wait_us_ = 0;
+	uint64_t frame_upload_us_ = 0;
 	uint64_t frame_uploads_ = 0;
 	uint64_t frame_capacity_fallbacks_ = 0;
 	uint64_t frame_shadow_alpha_changed_bytes_ = 0;

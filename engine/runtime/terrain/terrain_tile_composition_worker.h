@@ -13,6 +13,7 @@
 // witnessed cache semantics live in terrain_tile_composition_cache.h and the
 // pixel rules in terrain_tile_composer.h.
 
+#include <runtime/terrain/row_stripes.h>
 #include <runtime/terrain/terrain_scorch.h>
 #include <runtime/terrain/terrain_static_shadow_alpha.h>
 #include <runtime/terrain/terrain_static_shadow_planner.h>
@@ -181,6 +182,8 @@ private:
 	TerrainTileCompositionDemandQueue demand_queue_;
 	std::deque<Completion> completions_;
 	TerrainTileCompositionDemandQueue completion_queue_;
+	// The page rasters' shared lane pool, kept warm for this worker's life.
+	RowStripePoolLease lane_pool_;
 	std::vector<std::thread> workers_;
 	std::shared_ptr<const SourceSnapshot> current_sources_;
 	std::size_t active_jobs_ = 0;

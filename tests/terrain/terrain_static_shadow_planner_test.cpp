@@ -103,6 +103,35 @@ scrolling_cutout_geometry() {
 	return geometry;
 }
 
+// A dense caster: a 200x200 grid of small front-facing triangles (40k), wide
+// enough that the page's triangle build runs on several lanes.
+std::shared_ptr<TerrainStaticShadowResolvedGeometry> dense_geometry() {
+	auto geometry = box_geometry();
+	geometry->key = 0x4242;
+	TerrainStaticShadowResolvedSurface &surface = geometry->surfaces[0][0];
+	surface.vertices.clear();
+	surface.uvs.clear();
+	surface.indices.clear();
+	for (int row = 0; row < 200; ++row) {
+		for (int column = 0; column < 200; ++column) {
+			const float x = static_cast<float>(column) * 0.15f;
+			const float y = static_cast<float>(row) * 0.15f;
+			const int32_t base = static_cast<int32_t>(surface.vertices.size());
+			surface.vertices.push_back({x, y, 0.0f});
+			surface.vertices.push_back({x + 0.12f, y, 0.0f});
+			surface.vertices.push_back({x, y + 0.12f, 0.0f});
+			surface.uvs.push_back({0.0f, 0.0f});
+			surface.uvs.push_back({1.0f, 0.0f});
+			surface.uvs.push_back({0.0f, 1.0f});
+			surface.indices.push_back(base);
+			surface.indices.push_back(base + 2);
+			surface.indices.push_back(base + 1);
+		}
+	}
+	geometry->model_radius_fixed = 48 << 16;
+	return geometry;
+}
+
 opennova::terrain::TerrainStaticShadowPlannerCaster caster(int team) {
 	opennova::terrain::TerrainStaticShadowPlannerCaster record;
 	record.bms_id = 42;
@@ -294,6 +323,63 @@ int main() {
 	if (!expect(planner.diagnostics().frame_triangles > 0,
 			"raster diagnostics count the submitted triangles")) {
 		return 1;
+	}
+
+	// The triangle build lays a page's triangles out in serial order and
+	// projects runs of it on the lane pool: any lane count rasterizes the
+	// serial bytes and reports the serial diagnostics.
+	{
+		std::vector<uint8_t> reference;
+		uint64_t reference_triangles = 0;
+		float reference_bounds[4] = {};
+		for (const std::size_t threads : {std::size_t{1}, std::size_t{8}}) {
+			TerrainStaticShadowPlanner dense_planner;
+			dense_planner.set_light({0.3f, 0.9f, 0.3f}, {127, 200, 200});
+			TerrainStaticShadowPlannerCaster dense_caster = caster(0);
+			dense_caster.geometry = dense_geometry();
+			dense_planner.replace_casters({std::move(dense_caster)}, false);
+			dense_planner.set_raster_threads(threads);
+			dense_planner.reset_frame_diagnostics();
+			const TerrainStaticShadowPagePlanResult dense_plan = dense_planner.plan(page);
+			TerrainStaticShadowAlphaPage dense_page;
+			dense_page.page = page;
+			dense_page.content = dense_plan.content;
+			dense_page.width = 256;
+			dense_page.height = 256;
+			dense_page.alpha.assign(static_cast<size_t>(256) * 256, 200);
+			if (!expect(dense_plan.valid && dense_planner.rasterize(page, dense_page),
+					"the dense caster's page rasterizes")) {
+				return 1;
+			}
+			const auto &d = dense_planner.diagnostics();
+			if (threads == 1) {
+				reference = dense_page.alpha;
+				reference_triangles = d.frame_triangles;
+				reference_bounds[0] = d.frame_min_u;
+				reference_bounds[1] = d.frame_min_v;
+				reference_bounds[2] = d.frame_max_u;
+				reference_bounds[3] = d.frame_max_v;
+				if (!expect(reference_triangles == 40000 &&
+						std::any_of(reference.begin(), reference.end(),
+								[](uint8_t value) { return value != 200; }),
+						"the dense caster darkens its page")) {
+					return 1;
+				}
+				continue;
+			}
+			if (!expect(dense_page.alpha == reference,
+					"a laned triangle build rasterizes the serial bytes")) {
+				return 1;
+			}
+			if (!expect(d.frame_triangles == reference_triangles &&
+					d.frame_min_u == reference_bounds[0] &&
+					d.frame_min_v == reference_bounds[1] &&
+					d.frame_max_u == reference_bounds[2] &&
+					d.frame_max_v == reference_bounds[3],
+					"a laned triangle build reports the serial diagnostics")) {
+				return 1;
+			}
+		}
 	}
 
 	// A material whose retail effect has no PROJSHAD declaration is an exact

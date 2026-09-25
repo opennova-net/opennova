@@ -1050,6 +1050,11 @@ target_link_libraries(terrain_static_shadow_material_test PRIVATE opennova_runti
 target_include_directories(terrain_static_shadow_material_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_static_shadow_material COMMAND terrain_static_shadow_material_test)
 
+add_executable(row_stripes_test terrain/row_stripes_test.cpp)
+target_link_libraries(row_stripes_test PRIVATE opennova_runtime)
+target_include_directories(row_stripes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME row_stripes COMMAND row_stripes_test)
+
 add_executable(terrain_static_shadow_raster_test terrain/terrain_static_shadow_raster_test.cpp)
 target_link_libraries(terrain_static_shadow_raster_test PRIVATE opennova_runtime)
 target_include_directories(terrain_static_shadow_raster_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
