@@ -3128,7 +3128,7 @@ side h=4.99 w=5.00 q=below rungAbove=-9 rungBelow=0
 side h=5.00 w=5.00 q=above rungAbove=0 rungBelow=-9
 side h=5.01 w=5.00 q=above rungAbove=0 rungBelow=-9
 side h=64.00 w=5.00 q=above rungAbove=0 rungBelow=-9
-ladder body=-14 clouds=-13 viewmodel=-12 p3=-11 mask_far=-10 far=-9 tracer_far=-8 particle_far=-7 foliage_far=-6 water=-5 decals=-4 mask_cam=-3 scars=-2 foliage_cam=-1 cam=0 tracer_cam=1
+ladder dome=-15 body=-14 clouds=-13 viewmodel=-12 p3=-11 mask_far=-10 far=-9 tracer_far=-8 particle_far=-7 foliage_far=-6 water=-5 decals=-4 mask_cam=-3 scars=-2 foliage_cam=-1 cam=0 tracer_cam=1
 # uv-anim v1 (REN-4: scroll/rotate/waveform/controlled channels)
 wave t=01 ph=0000 v=65280
 wave t=01 ph=0180 v=65280

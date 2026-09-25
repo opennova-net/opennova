@@ -145,6 +145,10 @@ void SkyDome::build() {
 			ResourceLoader::get_singleton()->load("res://shaders/sky.gdshader");
 	sky_material_.instantiate();
 	sky_material_->set_shader(sky_shader);
+	// Dome pass 1 writes no depth, so Godot draws it in the transparent list:
+	// its rung opens the sky pass, before the bodies and the clouds
+	// (renderer/render_order kRungSkyDome).
+	sky_material_->set_render_priority(opennova::renderer::kRungSkyDome);
 	// Dome pass 2 draws after the sun/moon discs and before every world
 	// surface: the sky-cloud rung of the frame ladder (renderer/render_order).
 	Ref<Shader> cloud_shader = ResourceLoader::get_singleton()->load(

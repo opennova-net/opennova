@@ -272,7 +272,9 @@ func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 	# Fully fogged dome pixels and the open area beneath it must be the same
 	# color. Comparing rendered pixels catches Godot's background sRGB decode;
 	# comparing uniforms alone cannot detect that device conversion.
+	# Both dome passes fog (the cloud pass draws over the gradient).
 	sky.get_sky_material().set_shader_parameter("u_fog_end", 1.0)
+	sky.get_cloud_material().set_shader_parameter("u_fog_end", 1.0)
 	var samples: Array[Color] = []
 	for direction in [Vector3.UP, Vector3.DOWN]:
 		camera.look_at_from_position(Vector3.ZERO, direction, Vector3.FORWARD)
@@ -348,6 +350,87 @@ func test_cloud_pass_draws_after_the_bodies_on_the_sky_cloud_rung() -> void:
 	assert_eq(clouds.get_shader_parameter("u_cloud_base"),
 			ctx.sky.get_sky_material().get_shader_parameter("u_cloud_base"),
 			"both passes share the dome constants")
+
+
+func _sky_view(clouds_opaque: bool, body_color: Color = Color(0, 0, 0, 0)) -> Dictionary:
+	# A 64 x 64 view up into the dome over the synthetic Full_00 environment.
+	# clouds_opaque: bind solid white cloud maps (the cloud pass then covers
+	# the gradient) or fully transparent ones. body_color.a > 0 adds a
+	# sky-body-rung quad 50 u ahead, drawn like a disc (blended, no depth
+	# write).
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var env_node := MissionEnvironment.new()
+	env_node.name = "SkyTestEnv"
+	viewport.add_child(env_node)
+	var env := EnvFile.new()
+	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	env.load()
+	env_node.environment_data = env
+	var camera := Camera3D.new()
+	camera.far = 2000.0
+	viewport.add_child(camera)
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0.0, 1.0, -1.0), Vector3.UP)
+	camera.make_current()
+	var sky := SkyDome.new()
+	sky.environment_path = NodePath("../SkyTestEnv")
+	viewport.add_child(sky)
+	if body_color.a > 0.0:
+		var quad := MeshInstance3D.new()
+		var mesh := QuadMesh.new()
+		mesh.size = Vector2(200.0, 200.0)
+		quad.mesh = mesh
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.albedo_color = body_color
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		material.render_priority = ObjectShaderCache.RENDER_RUNG_SKY_BODY
+		quad.material_override = material
+		viewport.add_child(quad)
+		quad.global_transform = camera.global_transform.translated_local(Vector3(0.0, 0.0, -50.0))
+	sky.advance_frame(0.0)
+	var cloud_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	cloud_image.fill(Color(1.0, 1.0, 1.0, 1.0 if clouds_opaque else 0.0))
+	var cloud_texture := ImageTexture.create_from_image(cloud_image)
+	var clouds: ShaderMaterial = sky.get_cloud_material()
+	clouds.set_shader_parameter("u_cloud_tex1", cloud_texture)
+	clouds.set_shader_parameter("u_cloud_tex2", cloud_texture)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	return {"pixel": viewport.get_texture().get_image().get_pixel(32, 32),
+			"has_clouds": sky.get_sky_material().next_pass == clouds}
+
+
+func test_the_gradient_pass_opens_the_sky_pass() -> void:
+	# The gradient draw precedes the bodies and the clouds inside render_skybox
+	# [orig: render_skybox @ 0x5798dc, @ 0x5798e0, @ 0x5798f1..0x579b15]. The
+	# pass writes no depth, so Godot orders it in the transparent list by its
+	# rung; on rung 0 it painted over both.
+	var ctx := _make()
+	ctx.sky.advance_frame(0.016)
+	assert_eq(ctx.sky.get_sky_material().render_priority,
+			ObjectShaderCache.RENDER_RUNG_SKY_DOME)
+	assert_lt(ObjectShaderCache.RENDER_RUNG_SKY_DOME, ObjectShaderCache.RENDER_RUNG_SKY_BODY)
+	if DisplayServer.get_name() == "headless":
+		pending("dome pass ordering needs a windowed renderer")
+		return
+	var body: Dictionary = await _sky_view(false, Color(1.0, 0.0, 1.0, 1.0))
+	var pixel: Color = body.pixel
+	assert_gt(pixel.r, 0.9, "a sky-body draw shows over the gradient (%s)" % pixel)
+	assert_lt(pixel.g, 0.1, "no gradient paints over the sky body (%s)" % pixel)
+	assert_gt(pixel.b, 0.9, "a sky-body draw shows over the gradient (%s)" % pixel)
+	var bare: Dictionary = await _sky_view(false)
+	var covered: Dictionary = await _sky_view(true)
+	assert_true(bool(covered.has_clouds), "the fixture's cloud layers attach the cloud pass")
+	var a: Color = bare.pixel
+	var b: Color = covered.pixel
+	assert_gt(absf(a.r - b.r) + absf(a.g - b.g) + absf(a.b - b.b), 0.05,
+			"opaque cloud maps change the dome: the cloud pass draws over the gradient (%s vs %s)"
+			% [a, b])
 
 
 func test_flat_pass_drops_the_cloud_pass() -> void:

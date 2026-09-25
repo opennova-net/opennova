@@ -81,8 +81,10 @@ int main() {
 	// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 — the sky pass sub_579CB0
 	// @ 0x5ca81a, then Player_RenderViewModelIfAlive @ 0x5ca829, then
 	// Terrain_RenderSceneWithReflection @ 0x5c93a0].
-	// Inside render_skybox the bodies precede the cloud layers
-	// [orig: render_skybox @ 0x579080, clouds @ 0x5798f1..0x579b15].
+	// Inside render_skybox the gradient pass precedes the bodies, which
+	// precede the cloud layers [orig: render_skybox @ 0x579080: gradient
+	// draw @ 0x5798dc, bodies @ 0x5798e0, clouds @ 0x5798f1..0x579b15].
+	CHECK(kRungSkyDome < kRungSkyBody);
 	CHECK(kRungSkyBody < kRungSkyClouds);
 	// The viewmodel draws after the whole sky pass and before every world draw.
 	CHECK(kRungSkyClouds < kRungViewmodel);

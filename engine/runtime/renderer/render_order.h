@@ -141,6 +141,13 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // Values keep the sky group
 // before all world alpha and leave the camera-side rung at Godot's default 0
 // so unclassified transparents land there naturally.
+// The dome's gradient pass opens the sky pass [orig: render_skybox @ 0x579080,
+// its first DrawIndexedPrimitive @ 0x5798dc, before render_celestial_bodies
+// @ 0x5798e0]. It writes no depth (pass flags 0x300000 @ 0x579883), and
+// Godot draws every no-depth-write surface in its transparent list, where it
+// is ordered by this rung: without it the gradient (rung 0) would paint over
+// the bodies, the clouds and every sky-group and far-side draw below it.
+constexpr int kRungSkyDome = -15;
 // The sun/moon bodies inside the dome pass [orig: render_skybox @ 0x579080 ->
 // render_celestial_bodies @ 0x5acaa0].
 constexpr int kRungSkyBody = -14;
