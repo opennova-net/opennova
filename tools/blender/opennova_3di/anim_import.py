@@ -470,7 +470,9 @@ class Loader:
             if rm is not None:
                 rm.location = to_rm @ at
                 rm.keyframe_insert("location", frame=f)
-            arm.o3d.anim_trigger = trigger_value(ev["trigger"])
+            # A version 0 event has no trigger word (the text states 0) and the
+            # reader gives it 0xffffffff, the word the game plays.
+            arm.o3d.anim_trigger = trigger_value(0xFFFFFFFF if clip["version"] == 0 else ev["trigger"])
             arm.keyframe_insert("o3d.anim_trigger", frame=f)
             if carry:
                 bottom, top = ev["extents"] or (0.0, 0.0)
