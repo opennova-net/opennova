@@ -579,7 +579,9 @@ class Builder:
         on a rigid model and one per part on a skinned one (the builder's
         derivation, formats/threedi/threedi_build.cpp), each at its part's
         `~PPx attach` helper in the collision LOD, OED's WriteCXLT source
-        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row count that does
+        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row that is its
+        section's own offset, the row the builder derives, needs no helper:
+        export writes a part without one at its pivot. A row count that does
         not fit places none."""
         rows = self.sc["cxlt"]
         if not rows:
@@ -591,8 +593,12 @@ class Builder:
             self.note(f"{len(rows)} CXLT attach points do not fit the collision LOD's {len(parts)} parts (one per "
                       f"part{'' if first == 0 else ' after the root'}); export puts each at its part's pivot")
             return
+        cobjs = self.sc["cobjs"]
         for i, row in enumerate(rows):
             pi = i + first
+            if pi < len(cobjs) and all(round(a * 65536.0) == round(b * 65536.0)
+                                       for a, b in zip(row, cobjs[pi]["offset"])):
+                continue  # the same 16.16 row as the section's offset
             world = Matrix.Translation(self.blender(row))
             helper = self.attach_helpers.get((li, pi))
             if helper is not None:
