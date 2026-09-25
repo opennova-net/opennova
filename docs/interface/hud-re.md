@@ -71,6 +71,7 @@ completed launcher targeting, Inset scene, mortar impact HUD, and pilot instrume
 | Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / friendly brackets ported 2026-09-19) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
 | Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `HudFrameCompiler::element_sights_card` + `godot/game/world/hud_sights_card.gd` materialize the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `simulation_test.gd` + `hud_overlay_test.gd` + ctest `weapon_fsm` |
 | Scoped-view circle mask + reticle cross/grid | **ported** (`engine/runtime/hud/scope_circle_mask.*` → the `HudPos.scope_mask_*` statics → `godot/game/world/hud_scope_circle_mask.gd`; the record's old “rowless-weapon fallback” gate reading corrected 2026-09-16) | `[orig: Hud_DrawScopeCircleMask @0x5d17a0]` + `[orig: draw_minimap_crosshair_and_grid @0x5d1160]`; the unconditional Scoped-arm call + the `!rows` crosshair argument `[orig: Render_ProcessMainSceneFrame @0x5cab08..0x5cab15; render_hud_overlay @0x5d82e5..0x5d82f2]`; ctest `sight_overlay` |
+| First-person view effects: binocular mask/crosshair/rangefinder, NVG mask + gain scale | **ported**, layout witnessed 2026-09-24 (`engine/runtime/hud/view_effects.h` → `godot/game/world/player_view_effects.gd`); the NVG image under the mask is FrameFX's render-to-texture chain, the underwater murk is the render overlay stage's (§First-person view effects) | `[orig: sub_5CFE60 @0x5cfe95..0x5cff5b; sub_5CFF70 @0x5cffab..0x5d004a; HUD_DrawSpeedometer @0x5908c0; render_fullscreen_overlay @0x5d107e..0x5d1080]`; GUT `hud_overlay_test` |
 | ALPHAFADE semantics | **ported** (`hud_math::fade_decay`/`fade_flash_alpha`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
 | Attach labels (seat/armory floats) | **ported** (`VehicleSystem::collect_attach_labels` + `LocalPlayer::local_player_can_fire` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13 CLOSED) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; nearest-entity branch consumes complete `Player_CanFireWeapon @0x5cf780`; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; the bold Arial label font + slot scale `[orig: @0x5a3680; HUD_InitAllFonts @0x51ee20]` ported 2026-08-11; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `simulation_test.gd`/`hud_helpers_test.gd` |
 | Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; eye-offset anchor `[orig: @0x4bf078..0x4bf14c]` + Arial label font `[orig: HUD_InitAllFonts @0x51ee20]` witnessed + ported 2026-08-11; ctest `hud_math`/`hud_frame_compiler`/`infantry`/`promote` |
@@ -209,7 +210,12 @@ differs only for a hand-edited NEGATIVE `hud_detail`.
 - **`showhud`** (code 14, unbound by default) cycles `g_FpWeaponViewFlags =
   (v + 1) & 3` `@0x4e0561`: bit 0 = the FP gun, bit 1 = ONLY the
   FP-weapon+spinmap sub-pass `@0x5a8635`. The whole-overlay master gate is
-  the separate `/NOHUD` `dword_840B18 & 2`.
+  the separate `/NOHUD` `dword_840B18 & 2`. The FP draw's bit-0 test is
+  skipped for an Emplaced weapon def (`@0x4dedd9..0x4dedf1`), and a scoped
+  Inset weapon the player can fire draws no FP model
+  (`Player_CanFireWeapon && IsScoped && def+0xC & 0x200`, `@0x4dedf7..0x4dee19`);
+  both ported 2026-09-24 (`world::fp_viewmodel_retail_submit`,
+  `FpViewmodelSubmitGates`).
 - **The mission HUD item flash** (corrected 2026-09-23: BMS action 28's sub 37,
   `EventAction_HandleSpecialTypes @0x4535A0`, the case `@0x4535CD`, not a WAC
   action): `RenderState_SetLayerVisibilityByIndex @0x5A3020` (a misnomer) stores
@@ -752,7 +758,11 @@ applies per-corner pixel rounding first, then this correction about H/2;
 `HudFrameCompiler` and the thin `HudPos::sight_scale_rect` binding share it.
 Ctest `hud_frame_compiler` pins plain and sliding rows at 1920x1080; GUT
 `hud_overlay_test` pins a square reticle at both 4:3 and 16:9. Explicit aspect-mode
-selection remains absent; the native viewport path is ported.
+selection remains absent; the native viewport path is ported. In the NVG composite's
+Sighted arm (2026-09-24) the rows lay out over the 512-square NVG target with the
+frame's selected ratio in the Y correction (`hud::sight_rect_to_viewport_at_ratio`,
+`HudPos.nvg_scene_sight_rect`; `terrain_scene_render @0x5d08d8..0x5d0927`) and draw
+into the NVG scene, never over the frame (the circle-mask section below).
 
 Port: `world::weapon_sights_card_eligible` owns the dynamic selector, the sim
 publishes it as `scope_card_active`, `engine/runtime/hud/sight_overlay.h`
@@ -782,7 +792,9 @@ the correction in the SIGHTS-card section above for why this is not a fallback.
 
 **Frame.** All of it derives from the viewport rect
 `dword_24C1428..0x24C1434` (x0/y0/x1/y1) and the full surface width
-`overlayCtx @0x24C1420`:
+`overlayCtx @0x24C1420`. The rect is retail's INCLUSIVE overlay rect
+(0, 0)..(W - 1, H - 1) (`Viewport_SetFullScreen @0x5d30e0`; corrected
+2026-09-24, the port had passed (0, 0)..(W, H)):
 
 | Term | Value | Witness |
 |---|---|---|
@@ -795,12 +807,15 @@ the correction in the SIGHTS-card section above for why this is not a fallback.
 | cross/tick unit `t` | `(W + W) * flt_7D00A8` = `W / 320` | `@0x5d12ad..0x5d12b5` |
 | tick pitch | `(W * flt_7C44B4) * flt_7D00A8` = `W / 64` (`flt_7C44B4 = 10.0f`) | `@0x5d160a..0x5d1635` |
 
-At the NATIVE ratio `scaleX == scaleY` and the ring is a true circle; a forced
+At the NATIVE ratio `scaleY` is 1 and `scaleX` is the rect's centre ratio x
+0.75, a hair over 1 (the ring is a circle to within a pixel); a forced
 4:3 / 16:10 / 16:9 / 5:4 ratio pins `scaleY` and widens `scaleX` with the
 surface, so the ring becomes an ellipse that keeps the same fraction of the
-width and height it covered at the authored ratio. On a 1024x768 surface the
-inner radius is 340.8 px and the outer 720 px — past the 640 px corner
-distance, so the annulus really does mask the whole surface outside the circle.
+width and height it covered at the authored ratio. A 1024x768 screen gives
+centre (511, 383), ring size (767 >> 3) + (767 >> 1) = 478, inner radius
+339.38 px and outer 717 px (past the corner distance, so the annulus really does
+mask the whole surface outside the circle), and `scaleX = 511 / 383 x 0.75 =
+1.00065`. The port's native-ratio proxy is (y1 - y0 + 1) / (x1 - x0 + 1).
 
 **The ring.** 64 quad segments over 65 angle stops (the 65th closes the loop),
 two vertices per stop, submitted as ONE 130-vertex `D3DPT_TRIANGLESTRIP`
@@ -822,9 +837,8 @@ exact viewport centre out to `0.71` of the radii and breaks at `0.4`
 (`flt_7C56A0 = 0.4f` `@0x5d11d5`, `flt_7DC624 = 0.71f` `@0x5d1261`); every
 endpoint passes through `_ftol2_sse` and comes straight back in through `fild`
 (`@0x5d121f..0x5d1298`), so the break points are integer pixels — at 1024x768
-the left spoke breaks at `trunc(512 - 0.4*480) = 319` and ends at
-`trunc(512 - 0.71*480) = 171`, because both float literals sit just off the
-round value. The half-thickness `t` spreads across the spoke axis. Colours:
+(A = 1.00065 x 478 = 478.31) the left spoke breaks at
+`trunc(511 - 0.4*A) = 319` and ends at `trunc(511 - 0.71*A) = 171`. The half-thickness `t` spreads across the spoke axis. Colours:
 the shared centre vertex `0x20000000` (`@0x5d132c`), the two on-axis break
 vertices opaque black `0xFF000000` (`@0x5d1344` / `@0x5d1364`), the four
 off-axis vertices fully transparent (`@0x5d1338` and friends). Index block
@@ -872,6 +886,19 @@ the card switch with `draw_crosshair = the AUTHORED row array is empty` (a row
 whose texture fails to load still counts, like retail's). ctest
 `sight_overlay` pins the fork, the frame terms, the ring stops and colours, the
 truncated spoke endpoints and the tick lattice.
+
+**Under the NVG composite (2026-09-24, the rendering parity pass).** Under the
+NVG composite's Scoped arm the circle mask does not draw: the lens draws its
+own ring, then the SIGHTS card on top, then (no authored row)
+`draw_minimap_crosshair_and_grid(ring, cx, cy, 1.0, 1.0)`, the cross and grid
+at unit scale (`draw_minimap_compass_border @0x5d2798..0x5d27bc`;
+`hud::build_nvg_lens_reticle`, `HudPos.scope_mask_*` `nvg_lens`). No NVG mask
+draws under the lens or on the death screen (`render_fullscreen_overlay
+@0x5d1077..0x5d1080`); `LocalPlayerViewFrame::nvg_mask_visible` carries that
+gate. Under the Sighted arm the card draws into the NVG scene (tinted, glowing)
+and never over the frame (`nvg_sights_in_scene`). The arms themselves are
+recorded in [render-order-re.md](../render/render-order-re.md) (the FrameFX
+screen effects).
 
 Residual: the third Sighted term (`MountSlot.currentAction != SWITCHFROM`
 `@0x4dcd30`) is not a def field, so the shell feeds the fork the def bit alone.
@@ -3329,3 +3356,40 @@ draw list while leaving its children (the view effects, the SIGHTS card) drawing
 - the same split retail's two passes have - but it does not short-circuit the
 draw-list build, so `hud_hidden_capture_witness` still reports the quads it would
 have drawn.
+
+## First-person view effects: binoculars, NVG and the underwater murk (2026-09-24)
+
+The rendering parity pass (PR #678) witnessed the layout the view effects had carried as
+"pending witness" and moved the two scene-space effects out of the HUD shell.
+`engine/runtime/hud/view_effects.h` cites every constant below;
+`godot/game/world/player_view_effects.gd` keeps only the texture loads and the CanvasItem
+draws, behind the ordinary HUD (so health, stance and ammo stay visible), in the 1024x768
+virtual overlay space.
+
+| Element | Witness | Port |
+|---|---|---|
+| Binocular mask (`Binoculr.tga`) over the overlay rect, then `BinoCH.tga` stretched into (384, 256)-(640, 512) | `sub_5CFE60 @0x5cfe95..0x5cfee0` (the mask), `@0x5cfee5..0x5cff17` (the rect: `flt_7DC618` / `flt_7D1D70` / `flt_7DC188` / `flt_7C59AC`), drawn `@0x5cff48..0x5cff5b` | `kBinocularCrosshair*` |
+| Binocular rangefinder digits (`BNumbers.tga`): x0 486, y 683, cell 16, step 10 | `HUD_DrawSpeedometer @0x5908c0` (x), `@0x5908cf` (cell), `@0x5908de` (y), `@0x590926` (step) | `kBinocularDigit*`, `binocular_range_step` |
+| NVG mask (`NVG.tga`, state `dword_2BDFADC`) over the overlay rect, then the gain scale (`Nvgscale.tga`, row = `g_NVGBrightnessLevel`) at (960, 32)-(1008, 64) modulated `0xFF7F7F7F` | `sub_5CFF70 @0x5cffab..0x5cfff1` (the mask), `@0x5d0005..0x5d001d` (the rect), `@0x5d003e` (the row), `@0x5d004a` (the modulate) | `kNvgScale*` |
+| The NVG mask draws only with the full-screen composite, never on the death screen nor under the Scoped lens | `render_fullscreen_overlay @0x5d1077..0x5d1080` | `LocalPlayerViewFrame::nvg_mask_visible` |
+
+**The NVG image.** The picture under the mask is not a HUD effect: it is FrameFX's NVG
+render-to-texture chain (the 512² scene, the persistent 256² glow, the tint + MODULATE2X
+composite), recorded with the FrameFX screen effects in
+[render-order-re.md](../render/render-order-re.md). The former CanvasItem NVG post
+(`nvg_view.gdshader`) and its "four-frame history" reading are deleted; the Scoped arm's lens
+and reticle are in the circle-mask section above.
+
+**The underwater murk** is no longer a HUD / `PlayerViewEffects` quad (the `UnderwaterMurk`
+rect and `MissionEnvironment`'s `underwater_overlay_changed` signal are deleted). Retail draws
+it in the scene core's post-particle tail (the `Terrain_DrawScissorRect @0x5c38e0` call `@0x5c96f5`, after the
+coronas and the water glint, before the sun glare), so it draws per view from that view's
+render eye, before the bloom; the port draws it in the scene overlay stage
+(`engine/runtime/renderer/scene_overlay.h`, `SceneOverlayCompositorEffect`), recorded in
+[render-order-re.md](../render/render-order-re.md) and
+[env-tod-re.md](../env/env-tod-re.md) (the underwater murk composite).
+
+**Damage feedback.** The three fullscreen quads of §Local damage feedback stay on
+`PlayerViewEffects`; the same red word also drives FrameFX's type-1 damage blur, and the
+death state its type-4 blur (the FrameFX screen effects in render-order-re.md), so the
+vignette is not the only damage feedback on screen.

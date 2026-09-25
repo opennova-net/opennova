@@ -5904,12 +5904,30 @@ bump); the deferral list above is unchanged.
   (catalog id 104, default N), independent of mission `EnableNVG`; actions 56/57 (OEM +/−)
   clamp gain 0..4 even while off. `StartWithNVGOn 0x400000` reseeds every player init,
   first-person-only environment gain uses the exact hemisphere formula, Inset sights drop/
-  restore through the normal scope toggle, and the post/mask/scale presentation is hosted.
+  restore through the normal scope toggle, and (corrected 2026-09-24, the rendering parity
+  pass) the NVG post is retail's render-to-texture chain: the scene resampled into the 512²
+  NVG target, two ONE/INVSRCALPHA glow passes into a persistent 256² target cleared green on
+  the toggle frame, then the tint + MODULATE2X glow composite over the frame minus its last
+  column/row; the NVG.tga mask and the gain scale draw over it
+  ([render-order-re.md](../render/render-order-re.md), the FrameFX screen effects;
+  `renderer::frame_fx_effects`, `FrameFxCompositorEffect`). While the NVG composite is up the
+  world renders ONCE per frame, into `LocalPlayerPresenter`'s projection target at
+  `world::nvg_view_projection`'s raster (512 rows at the frame's own frustum aspect; the
+  Scoped arm's square frustum into 512 x 512), the surface's own 3D pass off, and clears to
+  the fog colour (`EnvironmentState::nvg_scene_clear_color`, `terrain_scene_render
+  @ 0x5d064e..0x5d0699`); FrameFX resamples that frame into the 512² NVG scene. The Scoped
+  arm's polar lens and the Sighted arm's SIGHTS card drawn into the NVG scene are ported too
+  (`renderer/nvg_scope_lens.h`, `NvgViewDevice`). The former "four-frame temporal history"
+  reading and its CanvasItem post (`nvg_view.gdshader`) are deleted.
   Binocular activation also refuses while the PowerThrow fire-charge tick is live, preserving
   the held windup instead of converting optics input suppression into a release. Bounded
-  residuals: the NVG post collapses the retail four-frame temporal history to the current
-  frame, the NVG style-8 laser and raw-active death-screen exception remain unported, and
-  Binoculars still lacks its capture-point detail overlay.
+  residuals: Godot ties a camera's projection aspect to its target, so the frame-shaped NVG
+  arms rasterise 512 rows x lround(512 x aspect) columns and resample horizontally to 512
+  (retail rasterises 512 columns directly), and the composite / lens rasterise at that
+  target's size before the full-surface blit; the NVG style-8 laser
+  ([world §39.3](../world/world-wac-ai-re.md#393-open-after-the-2026-09-24-pass)) and the
+  raw-active death-screen exception remain unported, and Binoculars still lacks its
+  capture-point detail overlay.
 
 **§5.40 viewmodel correction (2026-07-08, same train):** the FP viewmodel hardcode named a
 model that does not exist in the JO assets ("AKM_1st"), so the gun never loaded and the arms

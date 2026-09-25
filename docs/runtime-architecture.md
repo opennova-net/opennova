@@ -137,14 +137,21 @@ MainGame._process
             typed TickOutcome values
           per-tick Godot presentation sink  effects + fixed-tick listeners
         present entity/effect rows once
-      present local view                    camera/viewmodel placement (D-RORD-8)
+      present local view                    camera/viewmodel placement (D-RORD-8); while the
+                                            NVG composite is up, the NVG scene raster
+      scene environment                     the pass fog/ambient for this render eye, and the
+                                            world pass's 0.2 near plane beside the far plane
+      environment nodes                     weather smoothing, sun direction, sky dome, celestial
       Terrain.render_frame                  compiled TerrainDrawList
-      FoliageDispatcher.render_frame        compiled FoliageDrawList
+      water                                 the strip, the mirror and the wakes
       drive network session edges
-      advance weather
       apply blink gates when a tick ran
-      apply camera occlusion
+      apply camera occlusion                the collector, section masks and sub-pixel floor
+      FoliageDispatcher.render_frame        compiled FoliageDrawList; the MODEL anchors are the
+                                            entities the occlusion walk just admitted
       sample iris
+      sun veil
+      point-light select
       render material frame                 authored RLOD selection (individual models, then the
                                             placer's retained static instances), then the
                                             per-model ObjectModel advance
@@ -152,8 +159,17 @@ MainGame._process
       render slot shadows                   plan the 24/12 admission, publish the armed captures
                                             (drawn by the beauty compositor's PRE_OPAQUE pass)
       render particles
+      precipitation                         the streaks, published to the overlay stage
+      scene overlay                         the post-particle tail (NVG laser slot, precipitation,
+                                            coronas, water glint, underwater murk, sun glare) as
+                                            one immutable frame for each view's overlay pass
+      plan screen effects                   the FrameFX screen-effect plan (distortion, damage/death
+                                            blur, bloom, thermal/monitor, the NVG view) from the
+                                            local view's frame facts; after particles and
+                                            precipitation so the distortion gate reads this frame
       mix mission audio
       update frame clear
+      environment cube
       finish device frame
   local-view fallback only when the world leg was skipped (probe skip / no world)
   HUD compile/apply
@@ -340,6 +356,16 @@ per-model advance is one static driver over a shared awake set
 (`ObjectModel::advance_awake_frame`, per-frame-guarded); the menu shell and
 its portrait models drive that same static advance from the game process loop
 outside a live mission.
+
+While the NVG composite is up, the local-view presenter renders the world into
+its projection target at `world::nvg_view_projection`'s raster (the surface's
+own 3D pass off), and GameWorld's clear leg switches to the NVG scene's
+fog-colour clear (`EnvironmentState::nvg_scene_clear_color`). The scene
+overlay stage and the FrameFX screen effects run inside each view's
+compositor chain: the view's particle pair, then `SceneOverlayCompositorEffect`
+(`renderer/scene_overlay.h`), then `FrameFxCompositorEffect`
+([render-order-re.md](render/render-order-re.md), the 2026-09-24 rendering
+parity pass).
 
 D-RORD-8 (fixed 2026-08-12): the one-frame visibility lag was the CAMERA, not
 the occlusion-after-present order. The local-player camera/viewmodel placement
