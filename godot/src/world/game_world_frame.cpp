@@ -780,6 +780,9 @@ void GameWorld::apply_scene_environment_frame() {
 	}
 	if (Camera3D *cam = render_camera()) {
 		cam->set_far(opennova::renderer::scene_far_plane(env_->get_fog_distance()));
+		// The world pass's near plane, every view and camera mode (retail
+		// Render_ProcessMainSceneFrame @ 0x5ca4d7..0x5ca4e0).
+		cam->set_near(opennova::renderer::kScenePassNearZ);
 	}
 	// The device leg only samples: the strict-vs-inclusive waterline
 	// comparison semantics live in the engine behind apply_render_eye.

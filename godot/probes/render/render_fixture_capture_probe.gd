@@ -525,7 +525,9 @@ func _prepare_pose(
 	camera.projection = Camera3D.PROJECTION_PERSPECTIVE
 	camera.keep_aspect = Camera3D.KEEP_HEIGHT
 	camera.fov = fov_deg
-	camera.near = 0.05
+	# No near write: the world's scene-environment leg pins the retail world
+	# near plane (0.2) on the render camera every frame, the frozen-pose replay
+	# included.
 	camera.h_offset = 0.0
 	camera.v_offset = 0.0
 	camera.global_transform = Transform3D(RenderFixtureContract.camera_basis(yaw_deg, pitch_deg), position)

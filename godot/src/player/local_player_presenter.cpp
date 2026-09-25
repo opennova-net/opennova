@@ -28,6 +28,7 @@
 
 #include <cmath>
 
+#include <runtime/renderer/render_order.h>
 #include <runtime/world/player_present.h>
 
 using namespace godot;
@@ -882,9 +883,9 @@ void LocalPlayerPresenter::update_scope_camera() {
 	// The world pass's near plane is 0.2 u every frame (retail re-pins it
 	// beside the FOV; the far plane is floor(fog)+1, which rides the fog
 	// owner) — Godot's 0.05 default rendered surfaces retail clips.
-	// (engine witness: render-order-re.md, the Render_ProcessMainSceneFrame
-	// per-frame depth pins)
-	cam->set_near(0.2f);
+	// (engine witness: renderer::kScenePassNearZ, the
+	// Render_ProcessMainSceneFrame per-frame depth pins)
+	cam->set_near(opennova::renderer::kScenePassNearZ);
 	update_view_projection(projection);
 }
 

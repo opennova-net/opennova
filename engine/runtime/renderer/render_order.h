@@ -29,6 +29,14 @@ inline bool entity_uses_thermal_wave(int item_type) { return item_type == 3; }
 // [orig: Render_ProcessMainSceneFrame @0x5CA0F0]
 float scene_far_plane(float fog_distance);
 
+// The world pass's near plane, re-pinned by the main scene every frame beside
+// the far plane, whatever the camera mode; only the first-person viewmodel
+// pass swaps in its own 0.05 and restores this after it
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca4d7..0x5ca4e0 ->
+// Render_SwapProjectionNearZ(flt_7C3340 = 0.2); the device default
+// g_ProjectionNearZ @ 0x58ac0a].
+inline constexpr float kScenePassNearZ = 0.2f;
+
 // The six technique classes, batch-selected per entry (flag bits 4-6) and
 // mapped to the material def's cached pass blocks at draw time
 // [orig: CRenderBatchQueue_FlushBatches @ 0x5d9ff3: NORMAL +600,

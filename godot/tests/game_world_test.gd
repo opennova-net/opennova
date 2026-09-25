@@ -1038,6 +1038,11 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	var terrain_material: ShaderMaterial = terrain.get_terrain_material()
 	assert_almost_eq(camera.far, floorf(env.get_fog_distance()) + 1.0, 0.001,
 			"the active scene camera clips at the current fog distance rounded down plus one")
+	# No local player placed this camera: the scene leg itself pins the world
+	# pass's near plane, whatever the camera mode [orig:
+	# Render_ProcessMainSceneFrame @ 0x5ca4d7..0x5ca4e0 (flt_7C3340 = 0.2)].
+	assert_almost_eq(camera.near, 0.2, 0.000001,
+			"the world pass clips at retail's 0.2 near plane, not Godot's 0.05 default")
 	var dry_terrain_fog_color: Vector3 = terrain_material.get_shader_parameter("u_fog_color")
 	var dry_terrain_fog_end := float(terrain_material.get_shader_parameter("u_fog_end"))
 	var dry_terrain_fog_type := int(terrain_material.get_shader_parameter("u_fog_type"))
