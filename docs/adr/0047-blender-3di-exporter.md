@@ -126,7 +126,8 @@ the same text transport, the same add-on.
    layout.
 6. **Lights and occlusion follow the retired OED exporter.** A light is `LP##`
    (`##` the owning part); an omni light keeps retail's default axis (straight
-   down, no cone) and a spot light's axis and cone come from the light object,
+   down, no cone) and a spot light's axis is its local -Z (where Blender draws
+   the cone) and its cone the light's spot size,
    with `view_proj` built as the retired exporter built it (it reproduces
    Armry01's omni-light records to within one ulp in two entries, the NaN
    columns included). An occlusion mesh's planes
@@ -148,14 +149,17 @@ the same text transport, the same add-on.
    scene, and the add-on reproduces how the game combines them without
    writing any of it. The bones of a skinned model follow another model's
    parts of the same index, as retail draws first-person arms with the gun's
-   part matrices [orig: Player_RenderFirstPersonViewModel @ 0x4ded60;
-   Entity_BuildBoneWorldMatrices @ 0x4df028]. Importing both together pairs
-   them. A model mounts on another model's user point, as an ITEMS.DEF
-   `addeweap` child does: the name is matched whole, without case, and a
-   missing name places the child at the parent's root. The child faces the
-   point's direction [orig: build_bone_attachment_matrix @ 0x56C630;
-   build_direction_look_at_matrix @ 0x612C90]. Export reads skinned meshes
-   in their rest pose and every model in its own root's frame.
+   part matrices [orig: Player_RenderFirstPersonViewModel @ 0x4ded60, its
+   Entity_BuildBoneWorldMatrices call @ 0x4df028]. Importing both together
+   pairs them. A model mounts on another model's user point, as an ITEMS.DEF
+   `addeweap` child does: the name is matched whole and trimmed, without case,
+   and a missing name places the child at the parent's root. The child takes
+   the point's look-at frame as retail builds it, the matrix's rows being the
+   child's axes (a level point faces the child along its direction; a pitched
+   one tips it the other way) [orig: build_bone_attachment_matrix @ 0x56C630;
+   build_direction_look_at_matrix @ 0x612C90]. Both the arms' drive and a mount
+   bind with the rigs at rest. Export reads skinned meshes in their rest pose
+   with their Armature modifiers off, and every model in its own root's frame.
 10. **Standing from ADR 0038.** No other Python product code, Qt importer, or
    Python test suite (the stdlib `scripts/lint`, `scripts/ida`, `scripts/net`,
    `scripts/mcp`, `scripts/ci`, `scripts/parity` and `tools/net` scripts and
@@ -173,33 +177,54 @@ the same text transport, the same add-on.
    row shape (parse-equality, the ADR 0021 writer-policy shape). Every frame
    conversion and every derivation lives there, and the mission <-> clip frame
    map reads `threedi_build`'s own permutation rather than minting a second
-   owner of it. What the seam derives -- the bind, the bone positions, the
-   child and parent addresses, the terminal duplicate key and event, the
-   capsule extents -- is never asked of an author.
+   owner of it. The seam derives the bone table's bind, the bone positions
+   (through the set's reset bind, as 30,358 of 32,011 retail bones store them),
+   the child and parent addresses, the translation pad row and, when a clip
+   carries none, the capsule extents (our rule, measured against the reset
+   bind); none of these is asked of an author. The author supplies
+   frame_count + 1 keys (or a duration per key), events and, for a translated
+   bone, translation rows, and the seam counts them: retail's reader lerps
+   translation row trunc(frame_count * t) with the next one [orig: sub_4102D0
+   @ 0x4102d0 via BoneAnim_TransformBones @ 0x410360], so row frame_count is
+   read and the writer repeats it once more as the pad row retail files carry.
 
 12. **`opennova-3di anim`** (`apps/threedi_cli`, one translation unit per
    command as the model commands are) speaks the `.o3a` clip-set text
    (`docs/anim/o3a-scene-format.md`): one file is one rig's table and every
-   clip it names. `anim build` mints the `.adm` and each `.bad` beside it and
-   reads the bytes back before writing them; `anim scene` is build's exact
-   inverse (`build(scene(x))` re-mints a builder-made set byte for byte);
-   `anim info` prints a set; `anim compare` says whether two sets are the same
-   animation, reading a key as a rotation and ignoring the dead bone fields.
-   `catalog` also prints the engine's anim slot keys and event trigger bits.
+   clip it names. `anim build` mints the `.adm` and every `.bad` in memory,
+   reads each back through its parser, and writes nothing unless all of them
+   succeed; a clip name or row variant must be a bare file stem, so nothing is
+   written outside the table's directory. `anim scene` is build's exact inverse
+   (`build(scene(x))` re-mints a builder-made set byte for byte); `anim info`
+   prints a set; `anim compare` says whether two sets are the same animation,
+   reading keys and the bind as rotations and reporting NaN and absent clips as
+   differences. `catalog` also prints the engine's anim slot keys and event
+   trigger bits.
 
 13. **A rig's rest pose is its bind.** A channel key IS the bone's rotation in
    the model's frame, and the bind it is measured against is the reset clip's
-   first key, which the runtime carries as the SKELETON's rest and poses with
-   the key, so what a bone deforms by is `key * bind^-1`
-   [orig: AnimMap_RegisterEntity @0x40bb60 pins the bind; the loaders build the
-   rest from it]. The add-on therefore poses a bone with the key itself and the
-   import turns each rest bone onto the reset clip's key. Heads, lengths and weights do not move, so
-   the model still exports the same model, and a clip shows the pose the game
-   draws. A clip is an Action on the rig's NLA tracks; the table is the rows on
-   the model root; the root track is the bone `!RM`, outside the BN## parts,
-   whose per-frame step is the event velocity; the event bits and, for a clip
-   that carries its own, the capsule extents are keyed on the rig. A bone named
-   `!...` is no part, which also lets a rig hold control bones.
+   first key (the `anim_reset` row's last variant), which the runtime carries
+   as the SKELETON's rest and poses with the key, so what a bone deforms by is
+   `key * bind^-1` [orig: AnimMap_RegisterEntity @0x40bb60 pins the bind;
+   AnimChannel_ComputeBoneMatrices @0x410da0 reads it; the loaders build the
+   rest from it]. The add-on therefore poses a bone with the key itself, and
+   the first table imported onto a rig without clips turns each rest bone onto
+   the reset clip's key; a later table replaces the rows (and any clip of the
+   same name) but keeps the rest, a lone `.bad` leaves both alone, and a table
+   without an `anim_reset` row aligns nothing (retail then binds each clip to
+   its own first key). Heads, lengths and weights do not move, so the model still
+   exports the same model, and a clip shows the pose the game draws. Import
+   keys frames 0..frame_count as the runtime evaluates them (its duration walk
+   and slerp). A clip is an Action on the rig's NLA tracks, exported through its
+   own strip and action slot over the rig's rest, with any drive muted, so a
+   clip keys only what it animates; the table is the rows on the model root;
+   the root track is the bone `!RM`, outside the BN## parts, whose per-frame
+   step is the event velocity; the event bits and, for a clip that carries its
+   own, the capsule extents are keyed on the rig. A bone named `!...` is no
+   part, which also lets a rig hold control bones. A rigid model's parts hang
+   from its LOD root and follow their animation bone through an `O3D follow`
+   Child Of constraint that is muted at Rest Position, so the model exports
+   byte for byte as before its clips were imported.
 
 ## Consequences
 
@@ -212,11 +237,14 @@ the same text transport, the same add-on.
   corpus witnesses the seam derives from, and the `.o3a` grammar is
   `docs/anim/o3a-scene-format.md`.
 - Known animation gaps, each reported rather than carried: the capsule extents
-  retail's own exporter measured follow a rule nothing has witnessed, so the
-  derivation lands within a few centimetres of the shipped numbers and a clip
-  that must keep them carries them; `flags` bit 3 (73 retail clips) is carried
-  and unread; and a bone that keys sparsely imports as a dense Blender channel,
-  so a re-export densifies it (`DVFLEE1E.BAD` alone).
+  retail's own exporter measured follow a rule nothing has witnessed; ours,
+  measured against the reset bind, is a median 0.6 m off at a clip's worst
+  frame over the 82 tables (DT1PRONE: 3.1 cm), so a clip that must keep
+  retail's numbers carries them as keyed channels; `flags` bit 3 (73 retail
+  clips) is carried and unread; import keys every frame, so a bone that keys
+  sparsely or with durations (DVFLEE1E, DT1RST, stgr_RST) re-exports with a key
+  per frame and the same poses, keys past a clip's length (M60_1i) are dropped,
+  and a version 0 clip re-exports as version 1.
 - Known model gaps, each reported rather than carried: retail's own tool is not
   witnessed, so its seam flags and tangent values match the OED rules only
   where that tool agreed with ModSuperOed; CTRL registers nothing references;
