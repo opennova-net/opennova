@@ -267,7 +267,10 @@ Implemented **libs/env-first** so the ENG-2 port inherits the closures. The
 honored-matrix PARTIAL rows (iris, ceiling/floor, lightning, glare_3di)
 map onto these `#` entries. Closed 2026-07-05: **env #21** -> `FIXED` (the frame-clear
 horizon blend ported libs/env-first + consumed by the GameWorld clear; witness in
-[env/env-tod-re.md](env/env-tod-re.md) #21), and **env #19** -> `FIXED` (the
+[env/env-tod-re.md](env/env-tod-re.md) #21; 2026-09-24: the beauty clear has no
+blink leg (thermal ? 0x808080 : eye strictly above water ? skyfog : lit water,
+`Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca792`), the indoors black clear cited
+`@ 0x5c1597` is the water mirror's (`render_main_scene @ 0x5c1474 / @ 0x5c1597`)), and **env #19** -> `FIXED` (the
 observable terrain_rgb consumers are the tile-overlay HALF×MODULATE2X path and
 the effects reciprocal. Fresh foliage re-grill 2026-07-13 proved its sampled
 FULL-tint color is overwritten by the detail bend carrier before emission; the
@@ -304,15 +307,18 @@ Closed 2026-07-06 (the REN-6 port leg): **env #27** -> `FIXED` — the scalar
 springs live in `env::EnvScalarChannels` (witnessed steps + in-tick order,
 ctest-pinned), ticked by the weather core with parsed-value targets
 (targets-only snap `[orig: @ 0x57d1e0]`) and written back through the env
-seam so every consumer (dome, water UV, object/terrain fog ends, the frame
+seam so every consumer (dome, water depth curve, object/terrain fog ends, the frame
 clear) serves the ramp; SunDim is live end-to-end (celestial sun + glare);
 rain%/overcast channels are state-live awaiting their systems, FOV rides the
-camera. **env #33** -> `FIXED` — the witnessed generator + twinkle ported
-(`env::generate_star_instances`/`star_twinkle_tick`/`star_visible_fixed`,
-ctest-pinned) and hosted as the 256-instance camera-anchored billboard field
-(`StarField` + `godot/src/env/celestial.{h,cpp}`; per-star twinkle, 0.98 near-light
-cull, regenerate-per-load); the single-body stand-in deleted. Details:
-[env/env-tod-re.md](env/env-tod-re.md).
+camera. **env #33** -> `FIXED` (RE-GRADED 2026-09-24): retail never draws
+stars. `render_star_field @ 0x5ad9c0` has no caller (no code xref, no E8/E9
+rel32 call, no absolute pointer); `Star_GenerateInstanceTable @ 0x5ac850` still
+runs per celestial load (`EffectWorld_LoadCelestialModels @ 0x5add40`) but only
+the dead renderer reads `Star_Instances`. The 2026-07-06 StarField port
+(`env::generate_star_instances` / `star_twinkle_tick` / `star_visible_fixed`,
+the 256-instance billboard MultiMesh, the sky-stars rung) is deleted; `star_3di`
+is parsed and never drawn, like retail (commit "Delete the star field: retail
+never draws stars"). Details: [env/env-tod-re.md](env/env-tod-re.md).
 
 **env #30** minted NEEDS-RE (the reflection passes exist; spec deferred; internals closed at the REN-6 witness leg). The
 celestial leg (2026-07-06) CLOSED **env #14** (the glare occlusion — the witnessed
@@ -321,7 +327,7 @@ hysteresis, ported libs/env-first with the Celestial terrain ray march) and
 minted-and-closed **env #32** (placement inventions: dir×2000×height_scale, zeroed
 camera height, the dir.y gate — the live renderer places at camera + dir × 64 with
 witnessed alpha folds), plus **env #33** (the 256-instance star field with per-star
-twinkle — specced, table generator unfound; WRD).
+twinkle — specced, table generator unfound; WRD) (re-graded 2026-09-24: never drawn).
 
 The render-consumer rows transferred to the REN track on 2026-07-05
 ([ADR 0023](adr/0023-render-visual-parity.md), Slice column updated): #17 →
@@ -358,10 +364,10 @@ De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
 Closed: **env #17** -> `FIXED` — Iris auto-exposure modulator gain — FIXED 2026-07-06 (REN-5): the modulator CHAIN is live (`env::ModulatorChain` ticks modulator2 → modulator → the hosted blocks in the witnessed order `[orig: @ ... (full detail: env-tod-re.md + git history) Witness: [orig: @ 0x57e512; @ 0x57d940].
-Closed: **env #29** -> `FIXED` — Water surface tessellation — FIXED 2026-07-07 (the REN-6 tail): the DETAILED tier live end to end (`env::water_*` structural translation with 40 ctest pins → `WaterCore.strip_*` packed arrays → ... (full detail: env-tod-re.md + git history).
-Closed: **env #30** -> `FIXED` — Water reflection — FIXED 2026-07-07 (the REN-6 tail): reimpl planar reflection (SubViewport mirror camera about y = wh, up-column-negated proper mirror — the witnessed strip rows pin u = screenU / v ... (full detail: env-tod-re.md + git history) Witness: [orig: Water_InitSurfaceShaders @ 0x5c19b0; render_main_scene @ 0x5c1240] Witness: [orig: allocator @ 0x5c08d1..0x5c0937; viewport @ 0x5c1464..0x5c1614].
-Closed 2026-07-10: **env #35** -> `FIXED` — Water sine LUT provenance: the runtime `std::sin` build forked per libm at trunc boundaries (the GitHub `macos-26-arm64` image flipped non-landmark bytes and every downstream noise pixel (full detail: env-tod-re.md + git history).
-Minted-and-closed 2026-08-16: **env #37** -> `FIXED` — Water reflection-sample brightness (~2.7× at the retail-matched CP01 pose): the WITNESSED mirror dim was unported — retail multiplies the finished reflection RTT by 0x404040 (SRCBLEND=DESTCOLOR/DESTBLEND=ZERO fullscreen quad `[orig: render_main_scene @ 0x5c186c..0x5c189e]`) before the water shader samples it; ported as `env::kReflectionDimFactor` + a multiply quad over the mirror SubViewport. Post-fix matched ratios 0.94–1.03 at three pitches (full detail: env-tod-re.md #37 — the former near-row D-RMAT-8 attribution is retired by the 2026-08-22 gamma-framebuffer cutover; celestial-after-dim ordering and the unwalked second additive quad remain to be remeasured after renderer validation closes; the detail-3 512² RTT residual CLOSED 2026-09-14: `env::kReflectionRttSize` is 512, the shipped max-quality size — `Water_CreateReflectionRenderTarget @ 0x5c08eb..0x5c08ed` selects 256 at detail 2 and 512 at detail >= 3 or the capture override, and the live 00TRa witness runs detail 3 because `Game_StartMission @ 0x524662..0x524668` copies adapter caps 0xFDF so the `@ 0x5c19da` detail-1 downgrade never fires).
+Closed: **env #29** -> `FIXED` — Water surface tessellation — FIXED 2026-07-07 (the REN-6 tail): the DETAILED tier live end to end (`env::water_*` structural translation with 40 ctest pins → `WaterCore.strip_*` packed arrays → ... (full detail: env-tod-re.md + git history). 2026-09-24: strip constants corrected (depth clamp [4.0e-5, 1 - 2^-15] in both tiers, vbase 300, distance alpha 255 x 2^16), texcoords are the render-basis world x/32, z/32, the tracked 3e-4 depth pull is replaced by the retail scene-curve depth (far = w + 1), and the nightvision redraw runs without the `g_WaterActive` gate `[orig: render_water_strip_detailed @ 0x5c2c1f..0x5c2c35; @ 0x5c2f04; @ 0x5c2dfd; @ 0x5c2aec..0x5c2b00; Render_ProcessMainSceneFrame @ 0x5ca4ba..0x5ca4d0; FrameFX_RenderBloomPass @ 0x582a59..0x582a5d]`; commits "Correct the water strip constants and the noise sine LUT", "Port the water strip's texcoords, depth and nightvision redraw", "Map the water depth through the retail scene curve, not the camera's".
+Closed: **env #30** -> `FIXED` — Water reflection — FIXED 2026-07-07 (the REN-6 tail): reimpl planar reflection (SubViewport mirror camera about y = wh, up-column-negated proper mirror — the witnessed strip rows pin u = screenU / v ... (full detail: env-tod-re.md + git history) Witness: [orig: Water_InitSurfaceShaders @ 0x5c19b0; render_main_scene @ 0x5c1240] Witness: [orig: allocator @ 0x5c08d1..0x5c0937; viewport @ 0x5c1464..0x5c1614]. 2026-09-24: the mirror is built only while cam.z >= wh (the live eye below the plane), the reflected pass fogs with the dry `Env_FogBlock`, the per-pixel `GSysClip` CLIP is armed per draw on both sides (the `wh - 0.1` approximation retired), and the RTT renders under the main view's projection at round(512 x aspect) x 512 (the square-projection and (1, h/w) UV-rescale reading retracted); open: the mirror clear (skyfog, black under the indoors bit) is not modeled `[orig: render_main_scene @ 0x5c1361..0x5c1414; @ 0x5c1648..0x5c164c; @ 0x5c1255; @ 0x5c163e; @ 0x5c1474; @ 0x5c1597; Render_CreateSystemTextures @ 0x58acc0..0x58acf6; Terrain_RenderSectorModels @ 0x5c5e57..0x5c5e75; Terrain_RenderSectorEntities @ 0x5c7c1a..0x5c7c2e]`; commits "Port the water mirror's below-water eye, dry fog and clip planes", "Arm the water mirror's CLIP technique per draw, as retail does", "Render the water mirror over the main view's field at 512 rows".
+Closed 2026-07-10: **env #35** -> `FIXED` — Water sine LUT provenance: the runtime `std::sin` build forked per libm at trunc boundaries (the GitHub `macos-26-arm64` image flipped non-landmark bytes and every downstream noise pixel (full detail: env-tod-re.md + git history). 2026-09-24: the committed LUT is the single-precision instance (the device is created without D3DCREATE_FPU_PRESERVE, so i = 64 / 192 give 0xC0 / 0x40) `[orig: Water_InitNoiseFieldAndSineLut @ 0x5c0308..0x5c0334; CGfxDevice_CreateDevice @ 0x67e9fd / @ 0x67ea35]`.
+Minted-and-closed 2026-08-16: **env #37** -> `FIXED` — Water reflection-sample brightness (~2.7× at the retail-matched CP01 pose): the WITNESSED mirror dim was unported — retail multiplies the finished reflection RTT by 0x404040 (SRCBLEND=DESTCOLOR/DESTBLEND=ZERO fullscreen quad `[orig: render_main_scene @ 0x5c186c..0x5c189e]`) before the water shader samples it; ported as `env::kReflectionDimFactor`, since 2026-09-24 a dim batch in the mirror's overlay pass (`renderer::kMirrorOverlayOrder`). Post-fix matched ratios 0.94–1.03 at three pitches (full detail: env-tod-re.md #37 — the former near-row D-RMAT-8 attribution is retired by the 2026-08-22 gamma-framebuffer cutover; the celestial-after-dim ordering CLOSED 2026-09-24 (the dim and the far-band sun/moon/glow redraw close the mirror's overlay pass, the glow at the no-occlusion alpha of the mirror camera's view dot; `render_main_scene @ 0x5c186c..0x5c189e`, `@ 0x5c18c6`, `@ 0x5c18f4`, `@ 0x5c18fb`, `@ 0x5c1904`); the unwalked second additive quad (`Water_ShaderAdditiveFlat`, `@ 0x5c190c..0x5c1990`, adds black) remains; the detail-3 512² RTT residual CLOSED 2026-09-14: `env::kReflectionRttSize` is 512, the shipped max-quality size — `Water_CreateReflectionRenderTarget @ 0x5c08eb..0x5c08ed` selects 256 at detail 2 and 512 at detail >= 3 or the capture override, and the live 00TRa witness runs detail 3 because `Game_StartMission @ 0x524662..0x524668` copies adapter caps 0xFDF so the `@ 0x5c19da` detail-1 downgrade never fires).
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -867,15 +873,14 @@ heightfield-normal atlas now reconstructs bare cached-tile alpha as the
 byte-quantized heightfield/light DOT3; the base tile draw discards authored
 colormap A. The invented camera-distance normal crossfade, colormap-alpha sun
 mask, and final terrain-tint multiply were removed; type-0 fog now uses eye
-depth. This closes D-TERRAIN-5. Runtime now hosts the dynamic producer as a
-128-layer, 256×256 current-frame page cache shared by terrain and detail
-foliage. Its ordered page result is base RGB/A0, mission `.til` source-over
-RGBA, additive heightfield/DOT3 A, then supported selected-LOD static-model
-silhouettes that modify A only. D-TERRAIN-6 closes the base LOD/fog/order and
-D-TIL-3 closes the previously dropped overlay target-alpha recurrence;
-D-TERRAIN-7 tracks the remaining scorch/ordered contributions, exact
-refresh cadence, and final RT edge/address/mip
-behavior. The full PROJSHAD audit closed per-technique pass admission/blending,
+depth. This closes D-TERRAIN-5. Runtime ports retail's 128-record page cache
+shared by terrain and detail foliage (2026-09-24). Its ordered page result is
+base RGB, mission `.til` and scorch RGB (the overlay loops are write-masked
+to RGB, A = the Clear's 0), additive heightfield/DOT3 A, then supported
+selected-LOD static-model silhouettes that modify A only. D-TERRAIN-6 closes
+the base LOD/fog/order; D-TIL-3's ordered-RGB fix stands and its alpha facet
+is refuted (2026-09-24); D-TERRAIN-7 tracks only the page address mode at the
+draw. The full PROJSHAD audit closed per-technique pass admission/blending,
 skinned rigid collapse, one-sided culling, and overlap z ordering. The former terrain-only
 directional static-shadow surrogate and its foliage omission are retired.
 D-TERRAIN-9 was retired with the ONED terrain preview (ADR 0037).
@@ -896,7 +901,7 @@ not expose it, so the correction is pinned by non-flat 08:00 slope vectors.
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-TERRAIN-7 | Retail's t0 is a dynamically composed per-tile render target. Runtime hosts a current-frame 128-layer 256×256 cache shared by terrain and foliage: base RGB/A0, ordered `.til` source-over RGBA, additive TrnNMap/DOT3 A, and static selected-LOD/all-ROBJ A-only projections. Static source lifecycle follows destruction, husk replacement, and runtime transform revisions; all diffuse-alpha frames, content stamps, LRU/generation safety, required-overlay source readiness, and page-local unsupported attribution are typed and tested. The former terrain-only directional surrogate is retired. The max-quality c7/c8 mapping is exact: the packed cache record and D3D foliage axis permutation reduce to the shared `TerrainTilePageProjection`, now consumed by terrain, foliage, MATCHTERRAIN, and the static-shadow raster with no failed-VS compatibility API (`@ 0x60A220..0x60A34F`, uploads `@ 0x6006AB..0x600704`). The 2026-08-23 source-complete PROJSHAD audit admits `_FFP` material blending only, forces the 15 shader declarations opaque, suppresses tracer/flag/glass no-pass surfaces, reduces skinned casters through the collector's identical matrix slots, and applies retail CCW/two-sided culling plus LESSEQUAL z writes. The material-animation leg now shares ordinary rendering's AlphaGen/full row-vector UV evaluator and time/control diffuse-frame selector at the frame tick, with the full captured CTRL array in caster identity and worker-state refresh that does not manufacture a resident spatial-page miss `[orig: submit tick @ 0x5DAD9D; batch CTRL snapshot/restore @ 0x5D91AB..0x5D91DE / 0x5DA1B8..0x5DA1FD; consumer @ 0x58DB80]`. Whole-process CTRL/RNG ordering remains D-3DI-2. The final temporary-blue state is closed by a live D3D9 state/readback probe: RGBA writes, ONE/ONE, no separate alpha, and `(0,0,0,tempBlue)` preserved all observed RGB bytes while installing temp blue in zero destination A; the portable pixel equation is tested. This rejects the old speculative low-sun density controls: the shipped pass sources contain no sun-angle opacity, `PolyTrn_SunToBlendRatioColor` is lower-path-only, and `dword_319FBB8` has no live writer. Scorch updates, remaining ordered contributions, retail cadence matching, and final RT edge/address/mip behavior remain open. Retail cadence itself is witnessed: `terrain_cache_evict_lru @ 0x604600` invalidates the oldest stale visible page after each ~5 s TOD epoch; OpenNova still uses coarser DOT3-byte content epochs. The composite order is DOT3 then silhouettes (`@ 0x60D794..0x60D7C0`, skip gate `@ 0x60E1CE`) `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; all-matrix submit @ 0x60D926..0x60D971; tile composite @ 0x60E0C6..0x60E19D; hit compare @ 0x60DAD1; TOD stamp @ 0x60DBC0]` | B | OPEN, narrowed producer gap | terrain/foliage re-grill |
+| D-TERRAIN-7 | Retail's t0 is a dynamically composed per-tile render target. The runtime ports the 128-record page cache (`TerrainTileCompositionCache`: identity = level, packed source coordinate and routed sector; the age-above-1 LRU claim, first in record order; the TOD-stale eviction and same-frame re-sweep; the record-order point lookup; destruction and scorch page invalidation; t0 unbound for an unclaimed page) and composes every claimed page before the draw with the D3D9 raster (integer pixel positions, quadrant box levels CLAMP/LINEAR/MIPFILTER POINT, the point-sampled DXT5 `.til` atlas, WRAP/LINEAR scorch quads, RGB-only overlays, then DOT3 alpha and the static A-only projections). The 2026-09-24 rendering parity pass closed the refresh cadence and page identity (content stamps, stale-while-recompose, the DOT3-byte light epoch and the analytic cold fallback are retired), the raster/filter/mip behavior and the ordered contributions (`.til`, scorch). `dword_319FBB8` is the adapter TextureOpCaps & 5 flag that picks the scorch stage's `0xFF808080` diffuse, not a sun-angle control. Open: the page render target's address mode at the terrain and foliage draws (its zero flags word selects WRAP unless the draw's pass flags add stage-0 CLAMP; not re-witnessed; the reimpl clamps to the page's texel centres) `[orig: PolyTrn_RenderTile @ 0x60DA70 (hit @ 0x60DAC0..0x60DAD1, claim @ 0x60DAE4..0x60DB45); terrain_cache_evict_lru @ 0x604600; PolyTrn_RenderFrame @ 0x60EAC0 (sweep @ 0x60F080..0x60F0E3); sub_6800D0 @ 0x680106]` | B | OPEN (narrowed 2026-09-24 to the page address mode) | terrain/foliage re-grill |
 
 The build → mesh-simplify → CPT data path remains byte-identical across the
 fixture corpus, and all 16 LOD sublevels now pin the recovered eight-family
@@ -913,7 +918,7 @@ Closed 2026-07-06: **D-TERRAIN-2** -> `FIXED` — Shared surface include stacked
 Closed 2026-07-07: **D-TERRAIN-3** -> `FIXED` — Below-horizon region: cameras see past the sky dome's 1024-unit rim to the raw viewport background (full detail: terrain-re.md + git history) Witness: [orig: @ 0x677100].
 Closed: **D-TERRAIN-4** -> `PERMANENT` — The ported terrain raycast's safe-query bounds (`terrain_raycast.h`): game consumers report no-terrain/no-hit outside valid data where retail clamps the cell to the grid edge (full detail: terrain-re.md + git history) Witness: [orig: OOB masks @ 0x31a0010/0x319fc0c] Witness: [orig: Terrain_SeamFlags_* @ 0x31a17f0..].
 Closed 2026-07-13: **D-TERRAIN-5** -> `FIXED` — Top ps.1.4 inputs and fog were stand-ins: heightmap normal was misused as t3, raw near/far textures were camera-crossfaded, DBlend was unnormalized, authored-detail coefficient/custom mips and the ... (full detail: terrain-re.md + git history).
-Closed 2026-07-13: **D-TERRAIN-6** -> `FIXED` — LOD/fog/overlay base-pass semantics: exact clamped `lod_sub / 2` eight-family selection, type-0 eye-depth vs linear radial fog, and ordered overlay color before lighting; the later target-alpha recurrence correction is D-TIL-3 (full detail: terrain-re.md + git history).
+Closed 2026-07-13: **D-TERRAIN-6** -> `FIXED` — LOD/fog/overlay base-pass semantics: exact clamped `lod_sub / 2` eight-family selection, type-0 eye-depth vs linear radial fog, and ordered overlay color before lighting; D-TIL-3 ordered the `.til` RGB before the DOT3 add (its alpha facet refuted 2026-09-24) (full detail: terrain-re.md + git history).
 Closed 2026-07-14: **D-TERRAIN-10** -> `FIXED` — EnvFile preserves the direct `Environment_GetLightDirectionFloat` tuple `g`, not Godot/world XYZ (full detail: terrain-re.md + git history).
 Closed 2026-08-17: **D-TERRAIN-11** -> `FIXED` — Retail terrain detail UV1 is `source × polytrn_detaildensity / 512`; runtime mesh UVs, authored detail2, and the underwater stage-3 swap share that source-grid conversion (full detail: terrain-re.md + git history).
 Retired 2026-08-24: **D-TERRAIN-9** — the deleted ONED terrain preview was the only raw derived-input consumer; no runtime divergence remained.
@@ -924,14 +929,16 @@ Retired 2026-08-24: **D-TERRAIN-9** — the deleted ONED terrain preview was the
 |---|---|---|---|---|
 
 Overlay entry (12 B), atlas UV, flip/rotate flags, half-texel shift, Z negation,
-and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`.
+atlas sampling (point, nearest box level; 2026-09-24), the RGB-only page alpha
+and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`;
+the DXT5 atlas and the mission BMS tile-set override are ported (2026-09-24).
 
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
 Closed: **D-TIL-1** -> `FIXED` — `TIL_FLAG_OUTLINE` (0x08): the LINELIST outline is jodemo-only; retail JO's render (`render_water_quad @ 0x604700`) omits it and so do we (flag preserved for round-trip, no outline drawn) (full detail: til-re.md + git history).
 Closed 2026-07-15: **D-TIL-2** -> `FIXED` — `ROTATE_90` was the CW transpose `(v, 1−u)`; retail rotates CCW `(1−v, u)` (corner cycle @ `render_water_quad 0x6047d4..0x604806`) (full detail: til-re.md + git history).
-Closed 2026-08-17: **D-TIL-3** -> `FIXED` — The page composer now reproduces overlay render-target alpha recurrence before the additive DOT3 alpha pass, instead of blending `.til` RGB while retaining bare-ground alpha (full detail: til-re.md + git history).
+Closed 2026-08-17: **D-TIL-3** -> `FIXED` (ordered RGB; alpha facet REFUTED 2026-09-24): the page composer draws the ordered `.til` source-over RGB before the additive DOT3 alpha pass. The alpha recurrence the 2026-08-17 fix described does not exist in retail: the base and overlay loops run under COLORWRITEENABLE = 7, so page A is the Clear's 0 plus the DOT3 term; the composer has been RGB-only since #560 `[orig: PolyTrn_RenderTile @ 0x60DD04..0x60DD12, @ 0x60DD6B..0x60DD73; 0xF restore @ 0x60E0EA / @ 0x60E1B6]` (full detail: til-re.md + git history).
 Closed 2026-08-20: **D-TIL-4** -> `FIXED` — Flip/rotate composition order: retail mirrors the corner UVs first and applies `ROTATE_90` as a corner-assignment cycle over the mirrored values (= rotate-then-flip in sampling-function form); flip-then-rotate drew rotate+single-flip tiles (`0x05`/`0x06`) 180° off — the 00TRa driving-course fork the `00tra-tire-marks-retail` fixture exposed (MAE 16.35 → 12.17) (full detail: til-re.md + git history).
 
 ### Foliage — [foliage/foliage-re.md](foliage/foliage-re.md) (D-FOLIAGE catalog; PAR-R2)
@@ -941,26 +948,25 @@ grill corrected its fade and blend: below distance 33, retail re-submits the
 same geometry after HIGH at the SAME unscaled c6 fade under strict
 `D3DCMP_LESS` (not wireframe/fill mode), and every detail draw alpha-blends
 `SRCALPHA/INVSRCALPHA` with tested alpha `t0.a × v0.a`. The 0.1 fade scale
-rides the whole-call reflection flag (`arg_8 = reflectionEnabled`, pushed at
-`Terrain_RenderSceneWithReflection @ 0x5c95c1/0x5c9661`), which also forces
-LOW for all patches — it is the water-reflection scene's dimmed foliage, not
-a main-scene state. [orig: `Foliage_RenderFarPatches @ 0x60a171..0x60a19c,
+rides the scene core's thermal view flag (the held weapon's thermal byte,
+`Render_ProcessMainSceneFrame @ 0x5ca2da..0x5ca2e3`, passed `@ 0x5ca8e3` and
+pushed at `Terrain_RenderSceneWithReflection @ 0x5c95c1/0x5c9661`), which also
+forces one LOW pass for every patch: the thermal view's thinned foliage,
+ported 2026-09-24. [orig: `Foliage_RenderFarPatches @ 0x60a171..0x60a19c,
 0x60a497..0x60a4ae, 0x60a659..0x60a694`; `Foliage_SetupFarSlotDraw @
 0x6008fc..0x600912`; `Foliage_LoadDefAssets @ 0x60141f..0x601427`;
 `SetRenderState` wrapper `0x67cac0..0x67caea`]
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-FOLIAGE-7 | Detail t1 is retail's composed per-tile render target. Runtime detail borrows the terrain frame's exact ready page from the hosted 128-layer 256×256 cache: base RGB/A0, ordered `.til` source-over RGBA, additive heightfield-DOT3 A, and static A-only projections. Retained prior-frame pages cannot win lookup, and the former terrain-only directional surrogate is retired, so alpha-tested foliage and terrain consume the same page result. The required-VS c7/c8 branch, pre-wind coordinate, per-technique PROJSHAD admission/blending, skinned rigid collapse, one-sided culling, overlap z ordering, shared AlphaGen/full-UV/time-or-control diffuse-frame evaluation, and live-probed zero-RGB ONE/ONE temporary-blue composite are exact. Remaining ordered contributions, refresh cadence, and final RT edge/address/mip behavior remain open (the retail cadence is witnessed at D-TERRAIN-7; whole-process CTRL/RNG ordering remains D-3DI-2). | B | OPEN, narrowed; shares D-TERRAIN-7 producer | terrain/foliage re-grill |
-| D-FOLIAGE-9 | Silhouette driver membership: retail walks visible sector entities with `test_sector_entity_occlusion @ 0x5c4610`; the reimpl stands in a camera-frustum test for the surviving stance-gated anchors (class selection itself is closed — D-FOLIAGE-11). Overlapping reimpl anchors retain distinct submissions but coalesce same-frame refreshes of one `(slot, cell key)` | C | OPEN, narrowed to visibility membership (2026-07-16) | foliage runtime reimpl mapping |
-| D-FOLIAGE-10 | Retail inserts each immediate MODEL depth-mask draw after the initial sector flush and before later entity/foliage consumers; the reimpl's transparent-pass depth sorting cannot cull already-drawn farther detail under a nearer mask or reproduce every insertion point. The secondary LOW's strict `LESS` is now emulated exactly (high-pass cutoff discard on identical geometry), and both detail passes blend `SRCALPHA/INVSRCALPHA` at the shared fade. The reflection half retired 2026-09-01: the mirror excludes the foliage blanket outright (retail's reflection prerender collects no foliage, env #30), so the reflection-scene LOW-only `fade × 0.1` pass has nothing left to carry. | C | OPEN, narrowed to the depth-mask ORDER mapping (state half retired 2026-07-15, reflection half 2026-09-01) | foliage runtime reimpl mapping |
+| D-FOLIAGE-7 | Detail t1 is retail's composed per-tile render target. Runtime detail takes the page `TerrainTileCompositionCache::lookup` returns (retail `Terrain_FindSectorPatchRT`'s first-resident-record-in-order rule at granularity 32..512, no LOD or same-frame preference) from the ported 128-record page cache, whose pages compose inside the frame that draws them, and skips a patch with no resident page as retail does; the raw `.til` overlay fallback and the hosted 1024 bake are retired. Open: the address mode the detail pass applies at the page edge (a returned record need not contain the patch; the reimpl clamps to the half-texel border) and whatever D-TERRAIN-7 keeps for the page producer; whole-process CTRL/RNG ordering is D-3DI-2 `[orig: Foliage_RenderFarPatches @ 0x60a1de, null skip @ 0x60a1e6..0x60a1e8 -> @ 0x60a6a2; Terrain_FindSectorPatchRT @ 0x6042B0..0x60430B]` | B | OPEN (narrowed 2026-09-24 to the detail page-edge addressing) | terrain/foliage re-grill |
 
 The fresh core is literal-vector matching for both generators: shared
-0xA55B1EED ROL-hash stream, 36 candidates, high15=X/low15=Z-top keys, the
+0xA55B1EED ROL-hash stream, 36 candidates, high15 = X-min / low15 = Z-min keys (corrected 2026-09-24), the
 match-remapped authored foliage-map gate, 42-unit detail fade/pass split, four silhouette cells,
 21-per-cell cap, eight-sample ground fit, distance alpha refs, and `:fd`.
-The persistent detail cache is strict signed-age LRU with draw-before-update
-miss visibility; the distant cache is 1000 entries per definition with the
+The persistent detail cache is strict signed-age LRU, updated before the
+patches draw so a new cell draws in its generation frame (corrected 2026-09-24); the distant cache is 1000 entries per definition with the
 exact `((sceneCounter + 2×slot) & 7) == 0` refresh phase. Host
 slot/key/revision identities, same-frame submission ordering, and post-submit
 eviction now preserve duplicate draws and in-place terrain mutations reset both
@@ -971,6 +977,8 @@ shadow-off is matching rather than a divergence.
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
+Closed 2026-09-24: **D-FOLIAGE-9** -> `FIXED`: the MODEL anchors ride the occlusion frame's collector verdicts, the waves' contained render_TOC test included, with the stance gate; the local player takes the same verdict; the camera-frustum stand-in and the same-frame refresh coalescing are gone `[orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d96 (skip @ 0x5c7d8b..0x5c7da0); collect_visible_entities_for_terrain @ 0x5c8c60; Foliage_UpdateModelTiles @ 0x602085..0x6020aa]` (full detail: foliage-re.md + git history).
+Closed 2026-09-24: **D-FOLIAGE-10** -> `FIXED`: the MODEL depth masks draw at their retail BySide-wave slots in the transparent list and in a PRE_OPAQUE mask texture that person draws, their P3 layer and blended NORMAL output test; the blended-strip MATCHTERRAIN residual is not a divergence (no blending technique has a MATCHTERRAIN pass); the reflection half was retired 2026-09-01 and its 0.1 flag is the thermal view, ported `[orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7ddf..0x5c7f11; Terrain_RenderSceneWithReflection @ 0x5c955f / @ 0x5c9638]` (full detail: foliage-re.md + git history).
 Closed 2026-07-13: **D-FOLIAGE-1** -> `FIXED` — The prior per-corner colored-emitter premise came from the inverted port and is retracted (full detail: foliage-re.md + git history).
 Closed: **D-FOLIAGE-2** -> `FIXED` — Detail fragment arithmetic differs from the exact lightmap-blend chain `t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8` (full detail: foliage-re.md + git history).
 Closed 2026-07-13: **D-FOLIAGE-3** -> `FIXED` — Tier wind was missing/wrong-axis: detail needs source-height-weighted render-Z sway (full detail: foliage-re.md + git history).
@@ -979,7 +987,7 @@ Closed 2026-07-14: **D-FOLIAGE-5** -> `FIXED` — Exact model-own `:fd` chain: w
 Closed 2026-07-14: **D-FOLIAGE-6** -> `FIXED` — The first fresh pass treated uploaded c6 black as final color and missed the downstream SRC=ONE/DEST=ONE combiner plus retained strict-alpha Z write (full detail: foliage-re.md + git history).
 Closed 2026-07-14: **D-FOLIAGE-8** -> `FIXED` — Retail candidate exclusion linearly scans the shared mission .til array with inclusive 16x16 entry AABBs and a radius-2 candidate square unless attrib bit 0 FORCE_ON (full detail: foliage-re.md + git history).
 Closed 2026-07-16: **D-FOLIAGE-11** -> `FIXED` — The reimpl anchored the MODEL/depth-mask tier on EVERY placed mission object (full detail: foliage-re.md + git history).
-Closed 2026-07-17: **D-FOLIAGE-12** -> `FIXED` — Two retail gate samplers: detail = flat 1024-wrap (`Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0`), MODEL = sector-grid-routed (`Foliage_SampleFoliageMapMask @ 0x606620`) (full detail: foliage-re.md + git history).
+Closed 2026-07-17 (premise corrected 2026-09-24): **D-FOLIAGE-12** -> `FIXED`: detail samples the flat 1024-wrap map at the detail key's atlas position plus the local offsets, which lands on the same sector-routed pixel the MODEL sampler reads; the 2026-07-17 world-position reading is refuted `[orig: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0; generate_foliage_instances_0 @ 0x5fff84..0x5fff9d; Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a; Foliage_SampleFoliageMapMask @ 0x606620]` (full detail: foliage-re.md + git history).
 Closed 2026-07-16: **D-FOLIAGE-13** -> `FIXED` — Detail-cell collection was a standalone radial 42u-disc walk (full detail: foliage-re.md + git history).
 
 ### Fonts — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT catalog; PAR-R4)
@@ -1037,7 +1045,7 @@ block values; the ×1.5/×1.6/spec-0.8 prototype constants deleted; T1
 re-dumped (key set identical, 630 hashes re-hashed under citation), T2
 swatch 116/120 cells moved with the 4 unlit VS_TRACER cells byte-identical
 ([render/render-lighting-re.md](render/render-lighting-re.md); the then-open
-reflection/Phong rider D-RLIT-5 was closed on 2026-08-22 below).
+reflection/Phong rider D-RLIT-5 was closed on 2026-08-22 below); 2026-09-24: the saturation is per vertex (Gouraud-interpolated) and the SELFLUM / glass emissives are sat(colour x gain) before MODULATE2X (commit "Port the object combiner rules the render-parity review found diverging"; render-material-re.md, Object lighting math).
 
 Minted-and-closed 2026-07-06 (the model-parity slice, between REN-5 and
 REN-6): **D-RMAT-7** -> `FIXED` — the retail color pipeline witnessed
@@ -1058,7 +1066,7 @@ re-captured. **D-RMAT-9** -> `FIXED` — the object composer's fog was an
 invented linear ramp + `smoothstep`; now the witnessed device fog table
 (`[orig: @ 0x58a950 → @ 0x677960]`, one text with the terrain/water
 shaders). Full witness: [render/render-material-re.md](render/render-material-re.md)
-§Color pipeline.
+§Color pipeline. 2026-09-24: the fog distance now follows the retail pass path (FOGMODE_SHADER VS families planar linear for every type; fixed-function families radial RANGE fog, type 0 EXP on view depth) and the device start stays overcast-folded (commit "Fog objects by their retail pass path and keep the overcast fog start"; render-material-re.md §Fog parameter sets).
 
 Minted-and-closed 2026-07-07 (REN-7, the T3 "W_RCK1_O watch item"):
 **D-RMAT-10** -> `FIXED` — the `_MT` secondary (detail) stage ran HALF the
@@ -1116,20 +1124,22 @@ object-model rungs), with the sort-key/pass-class semantics T1-pinned.
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-RORD-7 | Particle pass A runs at PRE_TRANSPARENT (before every transparent, water included) and pass B at POST_TRANSPARENT; retail draws far-side (below-water) object ALPHA strips before pass A, here they draw after it — a submerged transparent strip overlapping a far-side particle composites strip-over-particle instead of particle-over-strip. The emitter-scope water predicate, subset reversal, recursive packet order, and the mirror's consecutive pair are ported (render-order-re.md) | A | OPEN (bounded; reopened 2026-08-23 — the 2026-08-22 auxiliary far-alpha view closed it at the price of a second full-resolution scene render every frame and was withdrawn) | reopen only with a scene that shows the strip/particle overlap |
 
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
 Reopened 2026-08-23: **D-RORD-7** — the 2026-08-22 closure's same-world far-alpha SubViewport rendered the entire opaque scene a second time per frame and replaced the beauty color at PRE_TRANSPARENT (additive object variants drew twice through it); withdrawn for the PRE/POST particle split alone, tabled above with the narrowed residual. `framefx_test.gd` keeps the water-attenuation differential.
 
+Closed 2026-09-24: **D-RORD-7** -> `FIXED`: particle pass A (`EffectWorld_RenderParticlePass(0) @0x5c95b5`) draws inside the transparent list at `kRungParticleFarSide`, after the far-side ALPHA strips and tracers and before the far detail foliage and the water, as `ParticleFarPass` render-list runs; only its distortion-pipeline commands stay on the PRE_TRANSPARENT compositor effect, and the class-7 distortion defs draw in FrameFX's type-0 row `[orig: Terrain_RenderSceneWithReflection @0x5c95ac (tracer pass 0), @0x5c95b5 (pass A), @0x5c95c5 (far foliage), @0x5c95dc (water)]`. Commit "Draw particle pass A inside the transparent list" (full detail: render-order-re.md).
+Closed 2026-09-24 (record-only, never tabled): **D-RORD-9** -> `FIXED`: the underwater murk is no longer a PlayerViewEffects CanvasItem; it draws per view in the post-particle overlay stage (spectator, third person and death cam included), and the sun glare draws right after it under the forced 0xFF404040 light scale `[orig: Terrain_RenderSceneWithReflection @0x5c96c5..0x5c9722]`. Commits "Draw the scene's post-particle tail in its own overlay stage" and "Draw the water glint and the sun glare at the end of the overlay tail" (full detail: render-order-re.md).
+
 Closed: **D-RORD-2** -> `PERMANENT` — Opaque state-sort (per-frame CPU quicksort by alpha-test bit → 256-unit depth slabs → effect index → fine depth `[orig: RenderBatch_QuickSort @ 0x5d8b40]`) not reproduced (register below; full detail: render-order-re.md + git history).
-Closed: **D-RORD-4** -> `RESOLVED` — FP render pass ported 2026-07-09: `PlayerViewmodelRig` composites the viewmodel through a dedicated shared-world SubViewport (full detail: render-order-re.md + git history) Witness: [orig: @ 0x4ded60: near swap @0x4dee29/restore @0x4df0aa, fov @0x4dee71 -> h->v @0x58d900, depth remap @ 0x58a7b0; parser key 'renderfov' @0x54482a].
+Closed: **D-RORD-4** -> `RESOLVED` — FP render pass ported 2026-07-09: `PlayerViewmodelRig` composites the viewmodel through a dedicated shared-world SubViewport (full detail: render-order-re.md + git history) Witness: [orig: @ 0x4ded60: near swap @0x4dee29/restore @0x4df0aa, fov @0x4dee71 -> h->v @0x58d900, depth remap @ 0x58a7b0; parser key 'renderfov' @0x54482a]. 2026-09-24: the Z-write residual is witnessed and closed (blended FF strips NOWRITE @0x5afc8d..0x5afcaa; ZWRITEENABLE = ~(passflags >> 6) & 1 @0x5da318..0x5da324); the viewmodel draws after the sky pass (@0x5ca81a sky, @0x5ca829 viewmodel) and the world paints over its blended strips (commit "Let the world paint over the viewmodel's blended strips").
 Closed: **D-RORD-6** -> `PERMANENT` — The two original sort-key quirks (opaque key bits 15+ = residual stack garbage; transparent key lags one strip within a render object) not reproduced (register below; full detail: render-order-re.md + git history).
 Closed 2026-08-12: **D-RORD-8** -> `FIXED` — The frame pipeline now places the current-tick local view before terrain and foliage; terrain samples the live viewport camera and foliage consumes the same render transform, eliminating the hard-cut one-frame lag (full detail: render-order-re.md).
 Closed 2026-08-22: **D-RORD-5** -> `FIXED` — `FrameFx` owns the exact capture, 256² weighted blur, 45-degree half-strength SRCALPHA/ONE composite, and terminal ordering; water contributes its NV bright pass, not its full color. On 2026-08-29 the source became a typed `Q3FrameCompiler` draw list in a compositor-owned full-resolution target attached to resolved beauty depth; the auxiliary camera/view and proxy/fallback paths were deleted (full detail: render-order-re.md).
 Closed 2026-08-29: **D-RORD-10** -> `FIXED` — typed object, static-instance, skinned-pose, water, celestial, and sun producers feed the focused RenderingDevice target against resolved beauty depth, through a retained per-source geometry cache (packed once, device buffer per entry, no per-frame server readback; the water strip publishes its CPU arrays, a static RLOD switch or carve invalidates only its instance rows). No second shared-world submission or depth-occluder rerasterization remains.
-Closed 2026-08-29: **D-RORD-11** -> `FIXED` (MATCHING: the divergence claim was refuted, no drawn behaviour changed) — retail does NOT cross-fade or dual-submit across an RLOD threshold: `Model_SelectRlodLevel @ 0x5c3b20` returns one level in EAX, its overlap fraction goes only to `0x29ACD9C` whose sole reader is the callerless stub `@ 0x5c38c0`, and the `0x10000000` pair at `Terrain_RenderSectorEntitiesBySide @ 0x5c7ffc/@ 0x5c8020` is the head+body player avatar (each part walks its own table with one projected radius). The hard switch is the port; the dead `blend_fraction` output was deleted and the attachment rule (the parent's level clamped to the overlay's own count, `BoneCallback_org0_World @ 0x4e39c4..0x4e3e51`) ported as `renderer::attachment_lod_index` (full detail: render-order-re.md).
+Closed 2026-08-29: **D-RORD-11** -> `FIXED` (MATCHING: the divergence claim was refuted, no drawn behaviour changed) — retail does NOT cross-fade or dual-submit across an RLOD threshold: `Model_SelectRlodLevel @ 0x5c3b20` returns one level in EAX, its overlap fraction goes only to `0x29ACD9C` whose sole reader is the callerless stub `@ 0x5c38c0`, and the `0x10000000` pair at `Terrain_RenderSectorEntitiesBySide @ 0x5c7ffc/@ 0x5c8020` is the head+body player avatar (each part walks its own table with one projected radius). The hard switch is the port; the dead `blend_fraction` output was deleted and the attachment rule (the parent's level clamped to the overlay's own count, `BoneCallback_org0_World @ 0x4e39c4..0x4e3e51`) ported as `renderer::attachment_lod_index` (full detail: render-order-re.md). 2026-09-24: every org0 overlay (held weapon, canopy, goggles, binoculars, carried object) is stamped with its submit's owner; `@0x4e3e34..0x4e3e51` is the CARRIED object's clamp (carrier+0x268), not a seated rider; riders are independent entities in retail as in the port.
 Closed 2026-08-22: **D-RORD-3** -> `FIXED` — every retained rigid alpha strip owns its priority material and is classified from its live transformed authored center whenever its model transform or the water plane changes (2026-08-23: change-driven — the same result as retail's per-frame recompute, without keeping every alpha-strip model awake); bone-path alpha follows retail's entity-side submit selector, and the far/camera-side ladder reverses from the adjusted render eye when underwater (full detail: render-order-re.md; GUT `object_model_runtime_gate_test` / `render_shader_cache_handoff_test`).
 
 ### Render — lighting — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT catalog; REN-5)
@@ -1286,6 +1296,8 @@ Reopened 2026-08-23: **D-RLIT-3** — The 2026-08-19 close covered the local/aut
 
 Closed again 2026-08-23: **D-RLIT-3** -> `FIXED` — decoded pool-0 and eligible pool-1 draw sources now receive their own separately wire-keyed candidate slices on retail's 17-tick cadence and cast the same three rays from the exact scaled bbox midpoint. The identity-aware `get_draw_lighting_changes` cutover emits `[wire,bms,quality]`; `WirePresentPass` caches and applies the factor to both the body and any late-built held weapon. Explicit registry-twin identity is the only self-exclusion, so equal packed H/L values cannot alias `[orig: Entity_BuildProximityListsFromPools @0x4b8eb0; Entity_ComputeSunVisibility @0x5c6800; setup_terrain_effect_for_entity @0x5c74a0]` (full detail: render-lighting-re.md + git history).
 
+2026-09-24 (the rendering parity pass): no lighting row changes. The D-RLIT-3 interior half follows the witnessed wave split for every contained drawn entity through `inmatch::EntityLightingFeed` (the aux t is ItemDef+0x218 `light_transfer`, not model+536; `get_draw_lighting_changes` is now `Simulation::draw_lighting_changes`) `[orig: Terrain_RenderSectorEntitiesBySide @0x5c7f7a..0x5c7f93; Terrain_RenderSectorEntities @0x5c7c05..0x5c7c14; RenderBatchCtx_BeginFrame @0x5d89b6..0x5d89b8; ItemDef_ParseProperty @0x4a1a2c..0x4a1a50]`; the D-RLIT-10 register row (the render-slot capture eye) is unchanged (the capture view axes and the entity-origin key were ported; the eye back-off device fold stands). See render/render-lighting-re.md §2026-09-24 rendering parity pass.
+
 ### Render — occlusion — [render/render-occlusion-re.md](render/render-occlusion-re.md) (D-OCC catalog)
 
 The blink-box/section-mask/portal engine landed 2026-07-17
@@ -1297,11 +1309,16 @@ divergences, and stay out of these tables deliberately).
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-OCC-9 | Forced-visible def bytes (`itemDef+2193/+2194` = +0x891/+0x892, read `@0x5C5D7C` / `@0x5C5D95` in `Terrain_RenderSectorModels @0x5C5D30`) are wired through `OcclusionWorld::EntityDefBits` but default 0. +0x891 is the door bone map's first door section (the `first_door` key, world-wac-ai-re §33.14), which the port stamps as `Entity::door_first_bone` but does not feed to the occlusion bits; the +0x892 writer is unwitnessed. Identical behavior for buildings without door sections (retail skips zero bytes too); re-scoped 2026-09-23 from the closed D-COL-2 | B | WITNESSED-READY-DEFERRED (feed the door bone map) + NEEDS-RE (the +0x892 writer) | PAR-REN |
-| D-OCC-12 | View culling stands in for `Viewport_TransformAndClipPoint @0x4115e0`: 5 frustum planes (near + 4 sides) + a Q22 forward-row depth cull vs the fog distance — same culling intent; the retail projector's screen-space epsilon behavior is not replicated | C | OPEN (bounded stand-in; PERMANENT candidate on ratification) | PAR-REN |
-| D-OCC-13 | The window-glow facet: the slot glow value is computed and banked but no renderer consumes it — retail draws window glows (the renderer-replaced legs of this id are registered class C below) | A | OPEN (awaiting-consumer facet) | PAR-REN |
-| D-OCC-14 | Entity-gate coverage: pooled opaque/alpha-tested MultiMesh rows have no per-instance retail section gate (terrain-aligned 512-unit bins give exact population AABBs; blended rows stay global to preserve ordering); wire avatars ride their own present path ungated; organics without collision instances use a position-centered 1 u bound-sphere stand-in for the graphic bounds | A | OPEN (bounded coverage) | PAR-REN |
-| D-OCC-15 | The staggered-refresh facet: retail refreshes pool-2 static `blink_hits` in staggered batches; the port has no placement or staggered static refresh, so static objects inside rooms can remain unstamped (the re-arm PRNG stream facet is registered class C below) | A | OPEN (coverage facet) | PAR-REN |
+| D-OCC-12 | View culling: the host frustum planes (near + 4 sides, from the camera drawing the frame's image) + a Q22 forward-row depth cull vs the fog distance stand in for `Viewport_TransformAndClipPoint @0x4115e0`'s side planes; the projector culls on plane distance < -radius per side plane plus the depth/fog test (@0x411622..0x411763), its 1.125*radius term only sets clip flags (no screen-space epsilon exists; narrowed 2026-09-24) | C | OPEN (bounded stand-in; PERMANENT candidate on ratification) | PAR-REN |
+
+Closed 2026-09-24 (the rendering parity pass, PR #678; full entries: [render/render-occlusion-re.md](render/render-occlusion-re.md)):
+
+- **D-OCC-9** -> `FIXED`: the forced-visible def bytes are fed: +0x891 = first_door - 1 (or rotor_parts arg 2), +0x892 = first_subobject - 1 (or aux_parts arg 3) `[orig: ItemDef_ParseProperty @0x49F7BA..0x49F7DE, @0x49F9B0..0x49F9CC, @0x49EF5D..0x49EFB6, @0x49EFF3..0x49F04C]`; only the part draw ORs -1 << byte over the raw mask `[orig: Terrain_RenderSectorModels @0x5c5d7c..0x5c5da8]`, every other reader keeps the raw word (`OcclusionWorld::section_mask` / `forced_section_mask` / `section_draw_mask`). Commit "Port the retail occlusion collector, mask and sub-pixel rules".
+- **D-OCC-10** -> `FIXED` (the 2026-08-30 PERMANENT registration was wrong: the clamp to 14 makes the order observable): the stable descending priority sort `@0x5c4443` + `g_PortalSlotCount = min(count, 14)` `@0x5c449f..0x5c44a4`, ported as `OcclusionWorld::sort_portal_slots`.
+- **D-OCC-13 (window-glow facet)** -> `FIXED` (refuted: no divergence exists): slot+8 is a priority key read only by the slot sort compare (xrefs to 0x2983E90: the writer `@0x5c6eb1`, the compare `@0x5c4443`); OOBJ +20 is the slot priority weight (zero in all 806 JO records); no window-glow renderer exists.
+- **D-OCC-14** -> `FIXED`: node-less collector/latch/batch verdicts land on the placer's retained instance (`MissionObjectPlacer::set_static_instance_occlusion_hidden`; a culled instance draws at no level); organics take the retail person leg (entity position + entity+0 radius, the item-185 radius under Flags 0x20, the 0.75 px floor before the latch `[orig: collect_visible_entities_for_terrain @0x5c8df3..0x5c8e10, @0x5c8e5e]`) for placed organics and bare wire rows; the wire-avatar facet was stale since 2026-09-05.
+- **D-OCC-15** -> `FIXED`: the tick & 7 pool-2 blink refresh (`tick_item_event_pool` `[orig: Entity_UpdateAllEntities @0x4C2244..0x4C22C9]`) plus the mission-start stamp (`CollisionWorld::refresh_mission_start_blink` `[orig: Entity_BuildProximityListsForPools12 @0x5240a0, from Game_StartMission @0x525898]`); the re-arm latch draws the world's shared `prng16_c_state` (`mission_kernel.cpp` `bind_focal_wind_random`), so the former class-C stream facet is no divergence.
+- Record-only witness details (D-OCC-1..8, never tabled): **D-OCC-1**, **D-OCC-4** and **D-OCC-5** closed in the record (bit 0x4 gates the whole main sky bracket; the register+weld argument is `Game_StartMission`'s first-start flag, `setz @0x524385`; `sub_5F6D10` is the effect-group section gate over the raw mask).
 
 Minted-and-closed 2026-09-13: **D-OCC-16** -> `FIXED` — `OcclusionWorld::bound_sphere_fixed` computed the smaller half of odd Q16 widths and omitted the scale leg; ported to the witnessed form (per-axis midpoint, positive-side `max - center` halves, +-0x40000000 unset-bound clamps, then center and radius scaled by the nonzero entity Q16 scale with the +0x8000 rule `[orig: Entity_ComputeBoundingSphere @0x5c69a0, @0x5c6a02..0x5c6b52]`); the static-batch, TOC and per-entity visibility callers pass `Entity::uniform_scale_q16`. `occlusion_test` pins radius 7 for (-3,-2,10)..(4,7,15), the 1.5x scaled form and the sentinel bounds. See render/render-occlusion-re.md.
 
@@ -1317,7 +1334,7 @@ draw order, per-light interior section scoping, the water-mirror clip matrix
 leg, and the reflection-pass collector variant (register below; the
 window-glow facet stays OPEN above). **D-OCC-15 (re-arm PRNG stream facet)**
 -> `PERMANENT` — an owned re-arm stream with identical distribution (register
-below; precedent D-NET-115; the staggered-refresh facet stays OPEN above).
+below; precedent D-NET-115; the staggered-refresh facet stays OPEN above). (2026-09-24: the D-OCC-10 registration and the D-OCC-15 stream facet were withdrawn, the window-glow facet refuted and the mirror clip leg ported; see the 2026-09-24 closure lines above.)
 
 ## Count-to-zero scoreboard
 
@@ -1342,13 +1359,12 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | 3DI `.3di` (GP) | 0 | 1 | 0 | 1 | 0 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 0 |
 | Terrain | 1 | 0 | 0 | 1 | 0 |
-| Foliage | 3 | 0 | 0 | 3 | 0 |
+| Foliage | 1 | 0 | 0 | 1 | 0 |
 | Render — materials/state | 0 | 0 | 0 | 0 | 1 |
-| Render — draw order | 1 | 0 | 0 | 1 | 0 |
-| Render — occlusion | 4 | 0 | 1 | 5 | 0 |
-| **Total** | **94** | **6** | **8** | **108** | 4 |
+| Render — occlusion | 1 | 0 | 0 | 1 | 0 |
+| **Total** | **88** | **6** | **7** | **101** | 4 |
 
-Dual-flagged rows (also carry a NEEDS-RE facet): D-NET-136, D-NET-179, D-NET-218, D-NET-97, D-OCC-9.
+Dual-flagged rows (also carry a NEEDS-RE facet): D-NET-136, D-NET-179, D-NET-218, D-NET-97.
 
 <!-- scoreboard:generated:end -->
 
@@ -1413,9 +1429,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-LOADSCR-7 | ESC/disconnect cannot abort the synchronous SP/host map load; retail polls `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` at four asset points | The load has no reachable interruption window (one synchronous call the SceneTree cannot pre-empt) while both joiner waits are coroutines and honour ESC; scope-corrected 2026-07-25 (interface/loading-screen-re.md) |
 | env #8 | envscale applies at interpolation/byte quantization to the engine view's targets; retail bakes it at parse into every `*_rgb` positionally, leaking a stale scale across files in one load | Equivalence holds whenever envscale precedes the colors (corpus-validated); reproducing the positional parse-time bake would re-manufacture the cross-file stale-scale bleed and break the round-trip-preserving raw getters (env/env-tod-re.md #8) |
 | env #9 | The fog→skyfog mirror rides a per-keyframe flag; retail overwrites leftover keyframe slots with the `0xC0C0FF` sentinel value | Equivalent for well-formed files; the sentinel's only extra behavior is accidental leftover-slot bleed — stale-state bytes the flag model cannot manufacture (env/env-tod-re.md #9) |
-| D-OCC-10 | `Terrain_SortSectorCacheByDistance @0x5c4410` is not ported | It orders retail draw calls/slot iteration only; every mask/TOC result is order-independent per candidate and Godot owns draw order (precedent D-RORD-2; render/render-occlusion-re.md D-OCC-10) |
-| D-OCC-13 (renderer-replaced legs) | The two-pass open-building draw order, per-light interior section scoping (`Lighting_SetInteriorLightGroup @0x5a90e0`), the water-mirror clip matrix leg (`@0x5c5e75`), and the reflection-pass collector variant (def-flag 0x2000000) are not ported | Each replaces a D3D-pipeline mechanism Godot's depth buffer, light model, and water reflections already provide; the visibility UNION and admission semantics are ported (render/render-occlusion-re.md D-OCC-13) |
-| D-OCC-15 (re-arm PRNG stream facet) | The three-ray latch re-arm jitter draws from an owned `PRNG_Next16_C`-form stream seeded from the BSS-zero boot state; retail shares one process stream with unrelated consumers | Per-frame re-arm values are irreproducible against any given retail run by construction; the distribution is identical and no coupled value is observable (precedent D-NET-115; render/render-occlusion-re.md D-OCC-15) |
+| D-OCC-13 (renderer-replaced legs) | The two-pass open-building draw order, per-light interior section scoping (`Lighting_SetInteriorLightGroup @0x5a90e0`), and the reflection-pass collector variant (def-flag 0x2000000) are not ported (the water-mirror clip leg is ported 2026-09-24 as per-draw CLIP arming, @0x5c5e57..0x5c5e75) | Each replaces a D3D-pipeline mechanism Godot's depth buffer, light model, and water reflections already provide; the visibility UNION and admission semantics are ported (render/render-occlusion-re.md D-OCC-13) |
 
 ### Original-bug / garbage class (class D; basis: [ADR 0003](adr/0003-no-raw-passthrough-create-from-scratch.md))
 
@@ -1460,10 +1474,10 @@ unknowns.
 |---|---|---|
 | VFS / PFF | PAR-R7 | full record — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) (D-VFS-1..11) |
 | Fonts | PAR-R4 | full record — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT-1..4) |
-| Foliage | PAR-R2 | fresh full record 2026-07-13 plus MODEL and near-secondary LOW corrections 2026-07-14 — [foliage/foliage-re.md](foliage/foliage-re.md); both tier cores MATCHING, D-FOLIAGE-7/-9/-10 bounded reimpl gaps |
-| Tiles | PAR-R3 | full record — [tiles/til-re.md](tiles/til-re.md), overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700` |
+| Foliage | PAR-R2 | fresh full record 2026-07-13, MODEL and near-secondary LOW corrections 2026-07-14, rendering parity pass 2026-09-24 ([foliage/foliage-re.md](foliage/foliage-re.md)); both tier cores MATCHING, D-FOLIAGE-9/-10 FIXED 2026-09-24, D-FOLIAGE-7 bounded to the detail page-edge addressing |
+| Tiles | PAR-R3 | full record, rendering parity pass 2026-09-24 ([tiles/til-re.md](tiles/til-re.md)); overlay/atlas/flip-rotate/page alpha MATCHING vs retail `@0x60df0d`/`@0x604700` |
 | Credits (CBIN) | PAR-R5 | partial — [credits/cbin-re.md](credits/cbin-re.md); codec (magic + header + ROL32/XOR cipher `@0x75e348`) MATCHING vs `engine/formats/cbin`, witnessed read-only via raw disasm; markup + read-path NEEDS-RE |
-| Terrain | PAR-R1 | re-grilled partial through 2026-08-17 — [terrain/terrain-re.md](terrain/terrain-re.md); preprocessing/top shader/LOD/detail coordinates matching, D-TERRAIN-7 runtime gap bounded; D-TERRAIN-1/-9 retired with the ONED preview; D-TERRAIN-8/-11 fixed |
+| Terrain | PAR-R1 | re-grilled partial through 2026-09-24 ([terrain/terrain-re.md](terrain/terrain-re.md)); preprocessing/top shader/LOD/detail coordinates matching, the page record cache, D3D9 page raster and DXT codec ported 2026-09-24, D-TERRAIN-7 narrowed to the page address mode; D-TERRAIN-1/-9 retired with the ONED preview; D-TERRAIN-8/-11 fixed |
 | Importer | PAR-R6 | track retired with ADR 0038 — it was tracked-by-composition (composed RE'd libs, no independent parity surface) and its `docs/importer/importer-audit.md` record went with the asset pipeline, so nothing outlives the composition |
 
 **Notes from the sweep (2026-07-05):** two "which binary" assumptions were
@@ -1539,7 +1553,7 @@ then-existing text. Later evidence passes have extended the particle catalog thr
 - [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..5** (the
   writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row;
   D-MIS-4/-5 minted-and-FIXED at the 2026-07-07 Nile parity pass).
-- [render/render-occlusion-re.md](render/render-occlusion-re.md) → **D-OCC-1..15**
+- [render/render-occlusion-re.md](render/render-occlusion-re.md) → **D-OCC-1..16** (2026-09-24: D-OCC-1/-4/-5/-9/-10/-14/-15 and the D-OCC-13 window-glow facet closed; D-OCC-12 open)
   (D-OCC-1..8: the blink-box visibility consumer witness, 2026-07-16 — open
   WITNESS details, not port divergences; they stay deliberately record-only.
   The port pass's divergences D-OCC-9..15 were record-only until 2026-08-30,

@@ -154,7 +154,7 @@ mission runtime, net codecs) is not a probe: it is a ctest under `tests/<domain>
 
 | Family | Probe | Purpose |
 |---|---|---|
-| perf | `perf_sample` | warm then sample the frame-stats board for `sample_ms` (counter list optional) |
+| perf | `perf_sample` | warm then sample the frame-stats board for `sample_ms` (counter list optional; `nvg` samples with the local player's NVG view up, for the NVG composite's frame cost) |
 | perf | `perf_fire` | the fire-path timing at a pose (`pose_json`, `look_dy`, `fire_seconds`, `weapon`; `baseline_only` on a `--lan-join` launch) |
 | perf | `perf_sweep` | the phase sweep (`phase_ms`) |
 | perf | `perf_mission_rows` | the mission-load / re-ground rows (`warmup_seconds`, `window_seconds`, `windows`, `label`) |
