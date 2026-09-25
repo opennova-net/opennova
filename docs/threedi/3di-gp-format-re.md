@@ -559,7 +559,7 @@ store model axes on disk.
 | CFAC | The plane distance is `-(n . v0)`: the runtime tests `n . p + plane_dist` (`collision_query.cpp`) | 600,378 of 600,378 unambiguous faces (2026-09-24 sweep) |
 | CMDL | The box envelops the collision LOD's faces and LOD 0's triangles; the radii and height (`radii[2]`) are the collision LOD's alone | Derived from the stored corners the box comes back for 679 of 958 models (Dblkhwk1, Armry01, CNet01; not Dtruck2 or ArmsG) and the radii for 24: the retail tool read the authored corners, which the file does not keep. CNet01 (no face) stores radii 0, 0, -20000 |
 | MTRL | A GLASS shader is glass with reflection 128 grey; an EMISSIVE (`*_LUM`) shader is emissive 2; no other material is either | every material of the 958 JO models |
-| BPLN | The plane flag word marks a seam. ModSuperOed's rule (the retired port): each volume triangle's box, shrunk by 0.01, inside another `CB` volume's box flags its plane; retail's own tool is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: @ 0x538e29]`) | 19,695 of 132,856 planes flagged; the OED rule over rebuilt faces agrees on 89.2% of 116,716 |
+| BPLN | The plane flag word marks a seam. ModSuperOed's rule (the retired port): each volume triangle's box, shrunk by 0.01, inside another `CB` volume's box flags its plane; retail's own tool is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: raycast_against_entity_pool @ 0x538720, flag test @ 0x538d00]`) | 19,695 of 132,856 planes flagged; the OED rule over rebuilt faces agrees on 89.2% of 116,716 |
 | BPLN | A ladder (`CL`) volume's plane 0 is its facing, OED's swap of plane 0 with the last triangle's plane | 82 of 102 retail ladders lead with a non-`+x` plane |
 | LGHT | An omni light stores rotation `{+0, -1, 0, 1}` (straight down, no cone), falloff 0, and a `view_proj` whose first two columns are NaN (the perspective of a zero cone); the retired OED exporter's `build_light_view_proj` reproduces the record to within one ulp in two entries | Armry01's three lights (styles 55 and 24) |
 | LGHT | The flag byte carries `0x40`, a bit the retired exporter never set (meaning unknown, §2.14) | Armry01 (`0x40`, `0x41`) |
@@ -570,9 +570,10 @@ store model axes on disk.
 | PANM/MTRX | Skinned models carry non-finite MTRX rows that no PANM row selects (selectors 0 or 255); 258 models carry a non-identity row 0, which a zero selector bypasses | US01, ArmsG; corpus |
 
 `opennova-3di scene` then `build` gives back the same model (`opennova-3di
-compare`: geometry per part and material, materials, tracks and frames, user
-points, lights, occlusion, collision) for 956 of the 958 models; the other two
-draw with a material id they lack. Ctest `threedi_o3d_retail_roundtrip` runs
+compare`, which checks everything the runtime reads) for 881 of the 958
+models; the rest differ in words retail derived from data the file does not
+keep (docs/threedi/o3d-scene-format.md lists them), and two draw with a
+material id they lack. Ctest `threedi_o3d_retail_roundtrip` runs
 Armry01, Dblkhwk1, US01, ArmsG and Mp5b_1st.
 
 ## 2. GP runtime format — corpus probe findings

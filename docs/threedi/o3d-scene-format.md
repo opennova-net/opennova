@@ -74,7 +74,7 @@ import; any other front end may.
 | `of` | a b c [plane] | a face of the open `occ`; its plane index with explicit `op` planes, none without |
 | `cobj` | parent [ox oy oz] | opens collision section i (pairs with part i of the collision LOD: one section per part, as WriteCOBJ walks it): its parent part and offset (the part pivot, as retail stores it) |
 | `cv` | x y z | a collision vertex (\|x\|, \|y\|, \|z\| under 128: CVRT stores 8.8 in an int16) |
-| `cf` | a b c [poly_type flags [nx ny nz]] | a bullet face (poly_type = impact material; the effect row is material + 4; flags 1 both sides, 0x100 bullets pass, 0x800 hit from behind). The normal comes from the given (unquantized) corners; an explicit one is stored as given, for a face the 8.8 grid collapses or whose normal disagrees with its winding (`scene` writes retail's for both). The plane distance is `-(n . v0)` |
+| `cf` | a b c [poly_type [flags [nx ny nz]]] | a bullet face (poly_type = impact material, a byte; the effect row is material + 4; flags a 32-bit word, decimal or `0x`: 1 both sides, 0x100 bullets pass, 0x800 front only: without flag 1 a projectile stops at the face only when it crosses it from the front (`engine/runtime/world/collision_query.cpp`, [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0, the test @ 0x4e5139]; no JO face carries 0x800). The normal comes from the given (unquantized) corners; an explicit one is stored as given, for a face the 8.8 grid collapses or whose normal disagrees with its winding (`scene` writes retail's for both). The plane distance is `-(n . v0)` |
 | `csphere` | cx cy cz r [minx miny minz maxx maxy maxz] | the open section's hit sphere (a skinned model's bone sections) and the bounds of the vertices the bone moves (without them, the sphere's cube) |
 | `cvol` | type flags minx miny minz maxx maxy maxz | an axis-box volume (six planes) |
 | `cvolume` | type flags minx miny minz maxx maxy maxz | a convex volume whose planes follow as `cp` lines |
@@ -96,7 +96,9 @@ distance within 0.03; the last match wins), at most 32
 
 The OED volume rule, for a `cvmesh`, is the same plane rule over its triangles
 (a triangle whose edge cross product is at most 0.0001 long takes plane 0),
-with no plane limit (retail ships volumes of up to 61). The volume is the
+with no plane limit: the retired port stopped a table at 32 planes, but the
+JO corpus ships volumes of up to 61, which a capped table could not have
+built, so build deliberately keeps every plane. The volume is the
 solid all those planes bound, so a mesh must be convex: `build` notes one
 whose vertices reach more than a centimetre outside it. A ladder (type 4)
 swaps plane 0 with the plane its last triangle took: the runtime reads plane
@@ -186,7 +188,14 @@ models' NaN rows, written as the identity); MTRX translations; PANM
 (`rgb_gen2`, `emissive_type2`, `glass_type2`, `reflect_color2`, always zero in
 the corpus) and generator alpha bytes; a strip naming a material id the model
 lacks; light pad bytes; occlusion `glow_scale`. Values build derives are not
-carried: part `rel`, bounds, CMDL, face normal runs and plane
-distances, tangents. Over the 958 JO models, `build(scene(x))` is the same model as `x`
-(`opennova-3di compare`) for 956; the other two draw with a material id they
-lack.
+carried: part `rel`, bounds and spheres (but a part that draws nothing keeps
+its centre), section bounds, CMDL, face normal runs and plane distances,
+tangents. Over the 958 JO models, `build(scene(x))` is byte for byte what
+`build(scene(build(scene(x))))` is, and `opennova-3di compare` calls 881 of
+them the same model as `x` (866 with drift notes). The rest differ in words
+retail derived from what the file does not keep: part spheres no subset of the
+stored geometry gives (61 models, Armry01's part 3 among them), GHDR radii over
+geometry the file does not carry (25: the `fxflsh` family, the first-person
+weapons' own collision LOD), three skinned vehicles authored on bones whose
+strips mix bones (dM1A1, DT801, Ftruck1X), NaN `rel` words (Dmil261x,
+Excavatr), and the two models that draw with a material id they lack.
