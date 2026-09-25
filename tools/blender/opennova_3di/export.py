@@ -73,15 +73,12 @@ import math
 import os
 import re
 import struct
-import subprocess
-import tempfile
 
 import bpy
-from mathutils import Euler, Matrix, Vector
+from mathutils import Euler, Vector
 
-
-class ExportError(Exception):
-    pass
+from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, cli_notes, fmt, quoted, run_cli,
+                      scratch)
 
 
 # Shader capability bits (runtime/renderer/material_descriptor.h), read per
@@ -107,7 +104,6 @@ VOLUME_CODES = {"CB": 1, "CS": 2, "CC": 3, "CL": 4, "CV": 5, "CA": 6, "VC": 7, "
                 "CM": 11, "VK": 12, "CF": 13, "LP": 14, "DH": 16, "DM": 17, "DL": 18, "CP": 19}
 VOLUME_RE = re.compile(r"^([A-Z]{2})([VSWLO]*)(\d{2})([a-z]*)-colonly$")
 BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
-CTRL_REFERENCE_THRESHOLD = 0x70
 
 
 def clean_name(name):
@@ -160,20 +156,6 @@ def dup_rank(letters):
     return rank
 
 
-def axis_basis(forward):
-    """Mission -> Blender as a column matrix B (b = B m); a proper rotation."""
-    if forward == "-Y":
-        return Matrix(((0, 1, 0), (-1, 0, 0), (0, 0, 1)))
-    return Matrix.Identity(3)
-
-
-def axis_map(forward):
-    # Mission axes: x forward, y left, z up (the frame the .o3d carries).
-    if forward == "-Y":
-        return lambda v: (-v.y, v.x, v.z)
-    return lambda v: (v.x, v.y, v.z)
-
-
 def derived_panm_flags(tracks):
     """The PANM flags word build derives from a part's tracks (target, style,
     axis): rotation type 2 for any live rotation track, scale type 2 for any
@@ -183,26 +165,6 @@ def derived_panm_flags(tracks):
     scale = any(t.startswith("scale") for t, _ in live)
     axis = next((a for t, a in live if t == "trans"), 0)
     return (2 if scale else 0) | ((2 if rot else 0) << 8) | (axis << 24)
-
-
-def fmt(*values):
-    out = []
-    for v in values:
-        if isinstance(v, float):
-            s = f"{v:.6f}".rstrip("0").rstrip(".")
-            out.append("0" if s in ("-0", "") else s)
-        else:
-            out.append(str(v))
-    return " ".join(out)
-
-
-def quoted(name):
-    """A .o3d name field: bare when it is one plain token, else "quoted"."""
-    if name and not any(c.isspace() or c == '"' for c in name) and not name.startswith("#"):
-        return name
-    if '"' in name:
-        raise ExportError(f"the name '{name}' holds a double quote")
-    return f'"{name}"'
 
 
 def write_tga(image, path):
@@ -287,6 +249,15 @@ def model_of(ob):
     return None
 
 
+def active_model(context):
+    """The model the active object belongs to, else the scene's only model."""
+    model = model_of(context.object) if context.object is not None else None
+    if model is None:
+        roots = model_roots(context.scene)
+        model = roots[0] if len(roots) == 1 else None
+    return model
+
+
 def descendants(ob):
     for child in ob.children:
         if is_model_root(child):
@@ -333,9 +304,7 @@ class Exporter:
         self.model = model
         self.props = model.o3d  # the model's name, output path, collision LOD
         self.settings = self.scene.o3d  # forward axis, textures, executable
-        self.to_mission = axis_map(self.settings.forward)
-        self.basis = axis_basis(self.settings.forward)
-        self.space = None  # set in run(): the inverse of a moved model root
+        self.space = None  # set in run(): the model root's frame
         self.depsgraph = None  # set in run(), with every rig at rest
         self.registers = []
         self.materials = []
@@ -387,15 +356,6 @@ class Exporter:
                               "its first 12 characters)")
         self.textures[name.lower()] = (name, image)
 
-    def mission(self, v):
-        return self.to_mission(v)
-
-    def world(self, ob):
-        """An object's matrix in the model root's frame, so a model placed,
-        parented or mounted anywhere in the scene exports the same model (a
-        root at the origin reads Blender's world matrices untouched)."""
-        return ob.matrix_world if self.space is None else self.space @ ob.matrix_world
-
     def material_for(self, mat):
         key = mat.name if mat is not None else None
         if key not in self.material_index:
@@ -405,7 +365,7 @@ class Exporter:
 
     def frame_index(self, ob):
         """The MTRX row a rotated PN## selects: its rotation in the model."""
-        return self.frame_of(self.world(ob).to_3x3().normalized(), ob.name)
+        return self.frame_of(self.space.world(ob).to_3x3().normalized(), ob.name)
 
     def frame_of(self, rotation, what):
         """The MTRX row of a part frame given as a Blender rotation in the
@@ -416,7 +376,7 @@ class Exporter:
         if rotation.determinant() < 0:
             self.note(f"{what}: its frame is mirrored (a negative scale), so its tracks turn the other way, as in "
                       "the retail models that store one")
-        q = self.basis.transposed() @ rotation @ self.basis
+        q = self.space.mission_rotation(rotation)
         if all(abs(q[i][j] - (1.0 if i == j else 0.0)) < 1e-6 for i in range(3) for j in range(3)):
             return 0
         r = tuple(round(q[j][i], 6) for i in range(3) for j in range(3))
@@ -676,10 +636,10 @@ class Exporter:
     def part_pivot(self, lod, index):
         if lod.armature is not None:
             if index >= lod.bone_count:
-                return self.mission(self.world(lod.parts[index]).translation)
-            return self.mission(self.world(lod.armature) @ lod.parts[index].head_local)
+                return self.space.mission(self.space.world(lod.parts[index]).translation)
+            return self.space.mission(self.space.world(lod.armature) @ lod.parts[index].head_local)
         ob = lod.centers.get(index, lod.parts[index])
-        return self.mission(self.world(ob).translation)
+        return self.space.mission(self.space.world(ob).translation)
 
     # --- geometry -----------------------------------------------------------
     def uv_layers(self, mesh):
@@ -696,7 +656,7 @@ class Exporter:
         n = (nmat @ normals[loop.index].vector).normalized()
         a = uv0.data[loop.index].uv if uv0 is not None else (0.0, 0.0)
         b = uv1.data[loop.index].uv if uv1 is not None else a
-        pm, nm = self.mission(p), self.mission(n)
+        pm, nm = self.space.mission(p), self.space.mission(n)
         # D3D texture space: v runs down.
         vert = (pm[0], pm[1], pm[2], nm[0], nm[1], nm[2], a[0], 1.0 - a[1])
         if self.uv1:
@@ -708,7 +668,7 @@ class Exporter:
         mesh = ev.to_mesh()
         try:
             mesh.calc_loop_triangles()
-            mw = self.world(ob)
+            mw = self.space.world(ob)
             nmat = mw.to_3x3().inverted_safe().transposed()
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals
@@ -742,7 +702,7 @@ class Exporter:
         mesh = ev.to_mesh()
         try:
             mesh.calc_loop_triangles()
-            mw = self.world(ob)
+            mw = self.space.world(ob)
             nmat = mw.to_3x3().inverted_safe().transposed()
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals
@@ -766,7 +726,7 @@ class Exporter:
                     # Every LOD 0 vertex a bone moves bounds that bone's
                     # section (WriteCOBJ's skinned rule).
                     for _, b in w:
-                        self.bone_points.setdefault(b, []).append(self.mission(mw @ v.co))
+                        self.bone_points.setdefault(b, []).append(self.space.mission(mw @ v.co))
             per_material = {}
             for tri in mesh.loop_triangles:
                 slot = tri.material_index
@@ -873,7 +833,7 @@ class Exporter:
         # A bone's part animation lives on the bone (its tracks turn about
         # its track frame, a rotation of the model's axes: dM1A1's turret
         # ring and wheels); a mesh part has none.
-        arm = self.world(lod.armature).to_3x3().normalized()
+        arm = self.space.world(lod.armature).to_3x3().normalized()
         for i in range(count):
             if i < lod.bone_count:
                 p = lod.parts[i].o3d
@@ -990,8 +950,8 @@ class Exporter:
     def emit_points(self, lod, lines):
         # USRP order: each helper's `order` (the imported index), then label.
         for letter, part, label, ob in sorted(lod.points, key=lambda e: point_key(e[2], e[3])):
-            pos = self.mission(self.world(ob).translation)
-            d = self.mission((self.world(ob).to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
+            pos = self.space.mission(self.space.world(ob).translation)
+            d = self.space.mission((self.space.world(ob).to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
             lines.append(f"userpoint {quoted(label)} {fmt(*pos)} {fmt(*d)} {part} {ord(letter.upper())}")
 
     def emit_lights(self, lod, count, lines):
@@ -1002,7 +962,7 @@ class Exporter:
             spot = data.type == "SPOT"
             if data.type not in ("POINT", "SPOT"):
                 raise ExportError(f"{ob.name}: a light is a point or spot light")
-            pos = self.mission(self.world(ob).translation)
+            pos = self.space.mission(self.space.world(ob).translation)
             phase = str(self.register(p.register, f"{ob.name} colour")) if p.style > CTRL_REFERENCE_THRESHOLD \
                 else fmt(float(p.phase))
             s = [round(c * 255) for c in data.color]
@@ -1014,7 +974,7 @@ class Exporter:
             # The light's local -Z is its stored axis (Blender draws a spot
             # light's cone down it); an omni light pointing straight down, an
             # unrotated one, is the retail default the builder writes itself.
-            d = self.mission((self.world(ob).to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized())
+            d = self.space.mission((self.space.world(ob).to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized())
             falloff = math.degrees(data.spot_size) / 2.0 if spot else 0.0
             if spot or abs(d[0]) > 1e-6 or abs(d[1]) > 1e-6 or d[2] > -1.0 + 1e-9:
                 line += " " + fmt(*d, float(falloff))
@@ -1028,10 +988,10 @@ class Exporter:
                 if len(mesh.vertices) > 128:
                     raise ExportError(f"{ob.name}: an occlusion mesh holds at most 128 vertices")
                 lines.append(f"occ {kind} {section} {connecting}  # {ob.name}")
-                mw = self.world(ob)
+                mw = self.space.world(ob)
                 mirrored = mw.to_3x3().determinant() < 0
                 for v in mesh.vertices:
-                    lines.append("ov " + fmt(*self.mission(mw @ v.co)))
+                    lines.append("ov " + fmt(*self.space.mission(mw @ v.co)))
                 # Counter-clockwise about the outward normal, as retail stores
                 # them; the builder picks each face's plane (the OED rule).
                 mesh.calc_loop_triangles()
@@ -1050,9 +1010,9 @@ class Exporter:
         mesh = ev.to_mesh()
         try:
             mesh.calc_loop_triangles()
-            mw = self.world(ob)
+            mw = self.space.world(ob)
             mirrored = mw.to_3x3().determinant() < 0
-            verts = [self.mission(mw @ v.co) for v in mesh.vertices]
+            verts = [self.space.mission(mw @ v.co) for v in mesh.vertices]
             tris = [tuple(reversed(t.vertices)) if mirrored else tuple(t.vertices) for t in mesh.loop_triangles]
         finally:
             ev.to_mesh_clear()
@@ -1085,12 +1045,12 @@ class Exporter:
                 mesh = ev.to_mesh()
                 try:
                     mesh.calc_loop_triangles()
-                    mw = self.world(ob)
+                    mw = self.space.world(ob)
                     mirrored = mw.to_3x3().determinant() < 0
                     for tri in mesh.loop_triangles:
                         corners = []
                         for vi in reversed(tri.vertices) if mirrored else tri.vertices:
-                            p = self.mission(mw @ mesh.vertices[vi].co)
+                            p = self.space.mission(mw @ mesh.vertices[vi].co)
                             key = tuple(round(x, 4) for x in p)
                             if key not in s["index"]:
                                 s["index"][key] = len(s["verts"])
@@ -1143,7 +1103,7 @@ class Exporter:
         # `~PPx attach` helper in part then x order; with none, the builder
         # derives the rows retail's count rule gives.
         for child, _, _, _, ob in bullet.attach_points:
-            lines.append("cxlt " + fmt(*self.mission(self.world(ob).translation)) + f"  # {ob.name}")
+            lines.append("cxlt " + fmt(*self.space.mission(self.space.world(ob).translation)) + f"  # {ob.name}")
 
     # --- driver -------------------------------------------------------------
     def run(self):
@@ -1180,9 +1140,7 @@ class Exporter:
 
     def run_in_object_mode(self, model, name, out_path, out_dir):
         self.context.view_layer.update()
-        root = self.model.matrix_world
-        if root != Matrix.Identity(4):
-            self.space = root.inverted_safe()
+        self.space = ModelSpace(self.model, self.settings.forward)
         for ob in self.model.children:
             if not (is_lod_root(ob) or is_model_root(ob) or clean_name(ob.name).startswith("!")):
                 self.note(f"{ob.name}: not under a LOD root; not exported")
@@ -1252,30 +1210,20 @@ class Exporter:
             (["uv1 1"] if self.uv1 else []) + [f"register {quoted(r)}" for r in self.registers] + frame_lines + \
             material_lines + lod_lines + tail_lines
 
-        from . import cli_path
-        cli = cli_path(self.context)
-        if not os.path.isfile(cli):
-            raise ExportError(f"opennova-3di not found at {cli}")
         if self.settings.write_textures:
             for tex_name, image in self.textures.values():
                 write_tga(image, os.path.join(out_dir, tex_name))
-        # The scene text is the CLI's input only: it lives in a directory of
-        # its own that goes away with the export, whatever happens.
-        with tempfile.TemporaryDirectory(prefix="opennova3di_") as tmp:
+        # The scene text is the CLI's input only.
+        with scratch() as tmp:
             o3d_path = os.path.join(tmp, "scene.o3d")
             with open(o3d_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write("\n".join(text) + "\n")
-            # The CLI prints paths, which may hold any character: read its
-            # output as UTF-8 whatever this Python's locale is.
-            result = subprocess.run([cli, "build", o3d_path, "-o", out_path], capture_output=True, text=True,
-                                    encoding="utf-8", errors="replace")
-        if result.returncode != 0:
-            said = (result.stderr + result.stdout).replace(o3d_path, "scene text").strip()
-            raise ExportError(said[:2000] or f"opennova-3di build failed (exit {result.returncode})")
+            result = run_cli(self.context, ["build", o3d_path, "-o", out_path], ExportError,
+                             hide=((o3d_path, "scene text"),))
         tris = sum(1 for line in lod_lines if line.startswith("t "))
         # The builder's notes (a non-convex volume, collinear faces, ...),
         # without the scene-file prefix.
-        notes = [line.split("note: ", 1)[1] for line in result.stderr.splitlines() if "note: " in line]
+        notes = cli_notes(result, "note: ")
         message = f"{result.stdout.strip()} ({len(lods)} LODs, {tris} triangles total, {len(self.textures)} textures)"
         return message, self.notes + notes
 

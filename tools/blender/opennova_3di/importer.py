@@ -11,17 +11,13 @@
 
 import math
 import os
-import subprocess
-import tempfile
 
 import bpy
 from mathutils import Matrix, Vector
 
 from . import export
-
-
-class ImportFailed(Exception):
-    pass
+from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, axis_basis, blender_axes, cli_notes, num,
+                      run_cli, scratch, strip_comment, tokens)
 
 
 VOLUME_NAMES = {v: k for k, v in export.VOLUME_CODES.items()}
@@ -45,55 +41,8 @@ def dup_suffix(counter, key):
 
 # --- .o3d reading ---------------------------------------------------------------
 
-def tokens(line):
-    """Whitespace tokens with "quoted names" kept whole (quotes dropped)."""
-    out, i = [], 0
-    while i < len(line):
-        if line[i].isspace():
-            i += 1
-            continue
-        if line[i] == '"':
-            j = line.find('"', i + 1)
-            j = len(line) if j < 0 else j
-            out.append(line[i + 1:j])
-            i = j + 1
-            continue
-        j = i
-        while j < len(line) and not line[j].isspace():
-            j += 1
-        out.append(line[i:j])
-        i = j
-    return out
-
-
-def num(text):
-    """A number the CLI printed. Retail models carry NaNs (J_bsh1's vertex
-    normals, ChmLFP1's occlusion planes), which a C runtime spells `nan` or
-    `-nan` and MSVC's `-nan(ind)`, `1.#QNAN` or `-1.#IND`; infinities `inf` or
-    `1.#INF`."""
-    try:
-        return float(text)
-    except ValueError:
-        t = text.lower()
-        if "nan" in t or "#ind" in t:
-            return math.nan
-        if "inf" in t:
-            return -math.inf if t.startswith("-") else math.inf
-        raise
-
-
 def finite(values):
     return all(math.isfinite(x) for x in values)
-
-
-def strip_comment(line):
-    quoted = False
-    for i, c in enumerate(line):
-        if c == '"':
-            quoted = not quoted
-        elif c == "#" and not quoted and (i == 0 or line[i - 1] in " \t"):
-            return line[:i]
-    return line
 
 
 def read_o3d(path):
@@ -250,12 +199,6 @@ class Builder:
         for mat in self.made_materials:
             bpy.data.materials.remove(mat)
 
-    # mission -> Blender, the inverse of export.axis_map
-    def blender(self, m):
-        if self.forward == "-Y":
-            return Vector((m[1], -m[0], m[2]))
-        return Vector((m[0], m[1], m[2]))
-
     def link(self, ob, parent=None, world=None, parent_world=None):
         self.collection.objects.link(ob)
         if parent is not None:
@@ -303,7 +246,7 @@ class Builder:
                     alpha_by_material[s["material"]] = alpha_by_material.get(s["material"], False) or s["alpha"]
 
         def regname(style, index):
-            if style > 112 and 0 <= index < len(reg):
+            if style > CTRL_REFERENCE_THRESHOLD and 0 <= index < len(reg):
                 return reg[index]
             return ""
 
@@ -491,6 +434,8 @@ class Builder:
         sc = self.sc
         self.scene = scene
         self.forward = scene.o3d.forward
+        # mission -> Blender, the inverse of the export's axis map
+        self.blender = blender_axes(self.forward)
         self.world = {}
         # The output path follows the imported file (Excavatr.3di's GHDR name
         # is OrngFlag), one per model root: a second import of one file writes
@@ -549,10 +494,8 @@ class Builder:
             return Matrix.Identity(3)
         r = self.sc["frames"][index - 1]
         q = Matrix(((r[0], r[3], r[6]), (r[1], r[4], r[7]), (r[2], r[5], r[8])))
-        if self.forward == "-Y":
-            b = Matrix(((0, 1, 0), (-1, 0, 0), (0, 0, 1)))
-            q = b @ q @ b.transposed()
-        return q
+        b = axis_basis(self.forward)
+        return b @ q @ b.transposed()
 
     def rigid_lod(self, li, lod, root, mats):
         objs = []
@@ -671,7 +614,7 @@ class Builder:
             t = p.tracks.add()
             t.target = target
             t.style = style
-            if style > 0x70:
+            if style > CTRL_REFERENCE_THRESHOLD:
                 t.register = reg if reg != "-" else ""
             elif reg not in ("-", ""):
                 try:
@@ -846,7 +789,7 @@ class Builder:
                 data.cutoff_distance = max(l["atten"][1], 0.01)
             p = data.o3d
             p.style = l["style"]
-            if l["style"] > 0x70:
+            if l["style"] > CTRL_REFERENCE_THRESHOLD:
                 idx = int(l["phase"])
                 p.register = self.sc["registers"][idx] if 0 <= idx < len(self.sc["registers"]) else ""
             else:
@@ -1118,24 +1061,12 @@ def volume_facets(planes, ladder=False):
 
 
 def run_scene(context, path):
-    """The model's scene text, read (the .o3d lives in a directory of its own
-    that goes away with the read, whatever happens), and the CLI's notes."""
-    from . import cli_path
-    cli = cli_path(context)
-    if not os.path.isfile(cli):
-        raise ImportFailed(f"opennova-3di not found at {cli}")
-    with tempfile.TemporaryDirectory(prefix="opennova3di_") as tmp:
+    """The model's scene text, read, and the CLI's notes."""
+    with scratch() as tmp:
         o3d = os.path.join(tmp, "scene.o3d")
-        # The CLI prints paths, which may hold any character: read its output
-        # as UTF-8 whatever this Python's locale is.
-        result = subprocess.run([cli, "scene", path, "-o", o3d], capture_output=True, text=True, encoding="utf-8",
-                                errors="replace")
-        if result.returncode != 0:
-            raise ImportFailed((result.stderr + result.stdout).strip()[:2000] or
-                               f"opennova-3di scene failed (exit {result.returncode})")
+        result = run_cli(context, ["scene", path, "-o", o3d], ImportFailed)
         sc = read_o3d(o3d)
-    notes = [line.split("scene drops ", 1)[1] for line in result.stderr.splitlines() if "scene drops " in line]
-    return sc, notes
+    return sc, cli_notes(result, "scene drops ")
 
 
 def import_file(context, path, op=None):
@@ -1148,7 +1079,7 @@ def import_file(context, path, op=None):
         builder.build(context.scene)
     except Exception as e:
         builder.discard()
-        if isinstance(e, export.ExportError):
+        if isinstance(e, ExportError):
             raise ImportFailed(str(e)) from e
         raise
     return builder.model, ["not carried: " + n for n in notes] + builder.notes

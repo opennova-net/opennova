@@ -19,7 +19,6 @@
 
 import importlib
 import os
-import subprocess
 import sys
 
 import bpy
@@ -30,10 +29,12 @@ from bpy_extras.io_utils import ImportHelper
 # Blender re-runs this file when the extension is updated or scripts are
 # reloaded, but keeps the submodules it imported before: reload them first so
 # the property groups registered here and the code that reads them agree.
-for _name in ("export", "importer", "assembly", "animation", "anim_import"):
+for _name in ("o3dtext", "export", "importer", "assembly", "animation", "anim_import"):
     if f"{__name__}.{_name}" in sys.modules:
         importlib.reload(sys.modules[f"{__name__}.{_name}"])
 from . import anim_import, animation, assembly, export, importer
+from .export import active_model
+from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, bundled_cli_path, cli_path, run_cli
 
 # The seven PANM tracks, labelled by the axis retail turns them about
 # (threedi_panm_matrices.cpp: rotation_x turns about the model's up axis,
@@ -49,10 +50,6 @@ TRACK_TARGETS = [
     ("trans", "Translate", "Translation along one axis"),
 ]
 
-# Styles above 0x70 carry a CTRL register (the loader's structural rule,
-# threedi_panm_parameter_is_ctrl_reference); the others carry a phase.
-CTRL_REFERENCE_THRESHOLD = 0x70
-
 # The catalog of the executable it was read from: (path, modified time) ->
 # (tables, the reason they are empty or None).
 _catalog = {}
@@ -61,18 +58,6 @@ _catalog = {}
 # warning on every assignment; 4.2 to 4.4 have no such option.
 PATH_OPTIONS = {"ANIMATABLE", "PATH_SUPPORTS_BLEND_RELATIVE"} \
     if "is_path_supports_blend_relative" in bpy.types.Property.bl_rna.properties else {"ANIMATABLE"}
-
-
-def bundled_cli_path():
-    return os.path.join(os.path.dirname(__file__), "bin", "opennova-3di.exe")
-
-
-def cli_path(context=None):
-    scene = (context or bpy.context).scene
-    custom = scene.o3d.cli_path if scene is not None else ""
-    if custom:
-        return bpy.path.abspath(custom)
-    return bundled_cli_path()
 
 
 def read_catalog():
@@ -88,12 +73,8 @@ def read_catalog():
         registers, styles, shaders, slots, triggers = [], {}, [], [], []
         problem = None
         try:
-            result = subprocess.run([path, "catalog"], capture_output=True, text=True, encoding="utf-8",
-                                    errors="replace", timeout=10)
-            out = result.stdout
-            if result.returncode != 0:
-                problem = f"opennova-3di catalog failed: {(result.stderr or result.stdout).strip()[:500]}"
-        except (OSError, subprocess.SubprocessError) as e:
+            out = run_cli(None, ["catalog"], ExportError, timeout=10).stdout
+        except ExportError as e:
             out, problem = "", f"opennova-3di catalog failed: {e}"
         for line in out.splitlines():
             parts = line.split()
@@ -212,15 +193,6 @@ def search_mount_points(self, context, edit_text):
         return []
     text = edit_text.lower()
     return [label for label, _ in assembly.user_points(self.mount_parent) if text in label.lower()]
-
-
-def active_model(context):
-    """The model the active object belongs to, else the scene's only model."""
-    model = export.model_of(context.object) if context.object is not None else None
-    if model is None:
-        roots = export.model_roots(context.scene)
-        model = roots[0] if len(roots) == 1 else None
-    return model
 
 
 class O3DAdmVariant(bpy.types.PropertyGroup):
@@ -489,7 +461,7 @@ def export_models(op, context, models):
     for model in models:
         try:
             message, notes = export.export_model(context, model)
-        except export.ExportError as e:
+        except ExportError as e:
             op.report({"ERROR"}, str(e))
             return {"CANCELLED"}
         for note in notes:
@@ -574,7 +546,7 @@ class O3D_OT_import(bpy.types.Operator, ImportHelper):
             try:
                 model, notes = importer.import_file(context, path, self)
             except Exception as e:  # noqa: BLE001 (reported per file)
-                kind = "" if isinstance(e, importer.ImportFailed) else f"{type(e).__name__}: "
+                kind = "" if isinstance(e, ImportFailed) else f"{type(e).__name__}: "
                 self.report({"ERROR"}, f"{os.path.basename(path)}: {kind}{e}")
                 continue
             for note in notes:
@@ -599,7 +571,7 @@ def export_animation_sets(op, context, models):
     for model in models:
         try:
             message, notes = animation.export_animations(context, model)
-        except export.ExportError as e:
+        except ExportError as e:
             op.report({"ERROR"}, str(e))
             return {"CANCELLED"}
         for note in notes:
@@ -671,7 +643,7 @@ class O3D_OT_import_anim(bpy.types.Operator, ImportHelper):
             return {"CANCELLED"}
         try:
             message, notes = anim_import.import_file(context, self.filepath, model, self)
-        except (anim_import.ImportFailed, export.ExportError) as e:
+        except (ImportFailed, ExportError) as e:
             self.report({"ERROR"}, f"{os.path.basename(self.filepath)}: {e}")
             return {"CANCELLED"}
         for note in notes:

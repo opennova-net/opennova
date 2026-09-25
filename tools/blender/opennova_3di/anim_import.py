@@ -25,8 +25,6 @@ import contextlib
 import math
 import os
 import re
-import subprocess
-import tempfile
 
 import bpy
 from mathutils import Matrix, Quaternion, Vector
@@ -34,49 +32,15 @@ from mathutils import Matrix, Quaternion, Vector
 from . import assembly
 from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, RM_NAME, bone_rows,
                         clip_actions, part_bone, rig_of, rm_of, trigger_value)
-from .export import (ATTACH_RE, BONE_RE, CENTER_RE, PART_RE, axis_basis, clean_name, descendants,
-                     is_lod_root)
+from .export import ATTACH_RE, BONE_RE, CENTER_RE, PART_RE, active_model, clean_name, descendants, is_lod_root
+from .o3dtext import (ImportFailed, axis_basis, blender_axes, cli_notes, num, run_cli, scratch, strip_comment,
+                      tokens)
 
 # A rigid model's part follows its `!Rig` bone through this constraint.
 FOLLOW = "O3D follow"
 # A clip's own bone name that is a part's label with its BN## in lower case
 # (22 of the 82 retail tables name a weapon's own bones `bn38 bone`).
 LOWER_BONE_RE = re.compile(r"^bn(\d{2})(?: (.*))?$", re.IGNORECASE)
-
-
-class ImportFailed(Exception):
-    pass
-
-
-def tokens(line):
-    """The records' fields: bare tokens and "quoted names"."""
-    out, i = [], 0
-    while i < len(line):
-        if line[i] in " \t":
-            i += 1
-            continue
-        if line[i] == '"':
-            end = line.find('"', i + 1)
-            end = len(line) if end < 0 else end
-            out.append(line[i + 1:end])
-            i = end + 1
-            continue
-        end = i
-        while end < len(line) and line[end] not in " \t":
-            end += 1
-        out.append(line[i:end])
-        i = end
-    return out
-
-
-def strip_comment(line):
-    quote = False
-    for i, c in enumerate(line):
-        if c == '"':
-            quote = not quote
-        if not quote and c == "#" and (i == 0 or line[i - 1] in " \t"):
-            return line[:i]
-    return line
 
 
 def read_o3a(path):
@@ -107,7 +71,7 @@ def read_o3a(path):
             elif key in ("fps", "frames", "version", "flags"):
                 clip[key] = int(parts[1], 0)
             elif key == "capsule":
-                clip["capsule"] = (float(parts[1]), float(parts[2]))
+                clip["capsule"] = (num(parts[1]), num(parts[2]))
             elif key == "bone":
                 bone = {"parent": int(parts[1]), "name": parts[6] if len(parts) > 6 else "",
                         "keys": [], "durations": [], "tr": []}
@@ -115,15 +79,15 @@ def read_o3a(path):
             elif bone is None and key != "event":
                 continue
             elif key == "k":
-                bone["keys"].append(tuple(float(x) for x in parts[1:5]))
+                bone["keys"].append(tuple(num(x) for x in parts[1:5]))
                 bone["durations"].append(max(1, int(parts[5])) if len(parts) > 5 else 1)
             elif key == "tr":
-                bone["tr"].append(tuple(float(x) for x in parts[1:4]))
+                bone["tr"].append(tuple(num(x) for x in parts[1:4]))
             elif key == "event":
                 clip["events"].append({
-                    "velocity": tuple(float(x) for x in parts[1:4]),
+                    "velocity": tuple(num(x) for x in parts[1:4]),
                     "trigger": int(parts[4], 0),
-                    "extents": (float(parts[5]), float(parts[6])) if len(parts) > 6 else None,
+                    "extents": (num(parts[5]), num(parts[6])) if len(parts) > 6 else None,
                 })
     # A clip's `capsule` record is the pair every event carries.
     for clip in set_["clips"]:
@@ -133,19 +97,13 @@ def read_o3a(path):
     return set_
 
 
-def run_scene(context, path, tmp):
-    """opennova-3di anim scene <path> -> an .o3a in `tmp`, and its notes."""
-    from . import cli_path
-    cli = cli_path(context)
-    if not os.path.isfile(cli):
-        raise ImportFailed(f"opennova-3di not found at {cli}")
-    o3a = os.path.join(tmp, "set.o3a")
-    result = subprocess.run([cli, "anim", "scene", path, "-o", o3a], capture_output=True, text=True,
-                            encoding="utf-8", errors="replace")
-    if result.returncode != 0:
-        raise ImportFailed((result.stderr or result.stdout).strip()[:2000])
-    notes = [l.split("scene drops ", 1)[1] for l in result.stderr.splitlines() if "scene drops " in l]
-    return o3a, notes
+def run_scene(context, path):
+    """The clip set's text, read, and the CLI's notes."""
+    with scratch() as tmp:
+        o3a = os.path.join(tmp, "set.o3a")
+        result = run_cli(context, ["anim", "scene", path, "-o", o3a], ImportFailed)
+        set_ = read_o3a(o3a)
+    return set_, cli_notes(result, "scene drops ")
 
 
 def linear(action):
@@ -219,7 +177,7 @@ class Loader:
         self.op = op
         self.notes = []
         self.basis = axis_basis(self.scene.o3d.forward)
-        self.to_blender = lambda m: self.basis @ Vector(m)
+        self.to_blender = blender_axes(self.scene.o3d.forward)
         # What the run changed, each with its inverse: a failure puts the scene
         # back as it found it (never a half-built rig).
         self.undo = []
@@ -736,15 +694,7 @@ def import_file(context, path, model=None, op=None):
     model = model or active_model(context)
     if model is None:
         raise ImportFailed("select an object of the model whose rig these clips animate")
-    with tempfile.TemporaryDirectory(prefix="opennova3di_") as tmp:
-        o3a, notes = run_scene(context, path, tmp)
-        set_ = read_o3a(o3a)
+    set_, notes = run_scene(context, path)
     loader = Loader(context, model, set_, op)
     message, own = loader.run()
     return message, notes + own
-
-
-def active_model(context):
-    from .export import model_of
-    ob = context.active_object
-    return model_of(ob) if ob is not None else None

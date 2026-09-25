@@ -36,13 +36,12 @@
 
 import os
 import re
-import subprocess
 
 import bpy
-from mathutils import Matrix
 
 from . import assembly
-from .export import BONE_RE, ExportError, axis_basis, axis_map, clean_name, is_lod_root, model_roots
+from .export import BONE_RE, clean_name, is_lod_root, model_roots
+from .o3dtext import ExportError, ModelSpace, cli_notes, fmt, quoted, run_cli, scratch
 
 ANIM_FLAG_LOOP = 0x1
 ANIM_FLAG_TRANSLATION = 0x2
@@ -143,23 +142,6 @@ def clip_range(action):
     return int(round(start)), int(round(end))
 
 
-def quoted(name):
-    if name and all(c not in ' \t"#' for c in name):
-        return name
-    return '"' + name.replace('"', "") + '"'
-
-
-def fmt(*values):
-    out = []
-    for v in values:
-        if isinstance(v, float):
-            s = f"{v:.9g}"
-            out.append("0" if s == "-0" else s)
-        else:
-            out.append(str(v))
-    return " ".join(out)
-
-
 class AnimExporter:
     def __init__(self, context, model):
         self.context = context
@@ -167,29 +149,12 @@ class AnimExporter:
         self.model = model
         self.props = model.o3d
         self.settings = self.scene.o3d
-        self.to_mission = axis_map(self.settings.forward)
-        self.basis = axis_basis(self.settings.forward)
-        self.space = None
+        self.space = None  # set in run(): the model root's frame, as the model export reads it
         self.notes = []
 
     def note(self, text):
         if text not in self.notes:
             self.notes.append(text)
-
-    # --- frames -------------------------------------------------------------
-    def world(self, ob):
-        """An object's matrix in the model root's frame, as the model export
-        reads it (export.Exporter.world)."""
-        return ob.matrix_world if self.space is None else self.space @ ob.matrix_world
-
-    def mission(self, v):
-        return self.to_mission(v)
-
-    def mission_rot(self, rotation):
-        """A Blender rotation (3x3, in the model root's frame) as a mission-axes
-        quaternion: the basis change the vector map is, applied to a rotation
-        (export.Exporter.frame_of turns a part frame the same way)."""
-        return (self.basis.transposed() @ rotation @ self.basis).to_quaternion()
 
     # --- the set ------------------------------------------------------------
     def rows(self):
@@ -213,7 +178,7 @@ class AnimExporter:
             parent = int(BONE_RE.match(clean_name(above.name)).group(1)) - 1
             if parent >= index:
                 raise ExportError(f"{pb.name}: its parent is not a lower part")
-        pivot = self.mission((self.world(self.arm) @ rest[index]).translation)
+        pivot = self.space.mission((self.space.world(self.arm) @ rest[index]).translation)
         lines = [f"bone {parent} {fmt(*pivot, pb.bone.length)} {quoted(clean_name(pb.name))}"]
         for q in pose[index]:
             lines.append(" k " + fmt(q.x, q.y, q.z, q.w))
@@ -241,7 +206,7 @@ class AnimExporter:
         extents = []
         arm = self.arm
         rm = rm_of(arm)
-        rm_rest = (self.world(arm) @ rm.bone.matrix_local).translation if rm is not None else None
+        rm_rest = (self.space.world(arm) @ rm.bone.matrix_local).translation if rm is not None else None
         order = {pb.name: i for i, pb in enumerate(bones)}
         above = [order[p.name] if p is not None else None for p in (part_bone(pb) for pb in bones)]
         data = arm.animation_data
@@ -258,7 +223,7 @@ class AnimExporter:
             self.reset_pose()
             for frame in range(start, start + frames + 1):
                 self.scene.frame_set(frame)
-                arm_world = self.world(arm)
+                arm_world = self.space.world(arm)
                 arm_rot = arm_world.to_3x3().normalized()
                 posed = [arm_world @ pb.matrix for pb in bones]
                 for i, pb in enumerate(bones):
@@ -267,7 +232,8 @@ class AnimExporter:
                     # poses it with the key, so the deform is `key * bind^-1`
                     # [orig: BoneAnim_BuildWorldMatrices @0x40c400 over the bind
                     # the reset clip pins, AnimMap_RegisterEntity @0x40bb60].
-                    keys[i].append(self.mission_rot(arm_rot @ pb.matrix.to_3x3().normalized()))
+                    keys[i].append(self.space.mission_rotation(arm_rot @ pb.matrix.to_3x3().normalized())
+                                   .to_quaternion())
                     # The bone's own displacement: where its head sits, less
                     # where the rest offset from its part parent would put it.
                     j = above[i]
@@ -275,9 +241,9 @@ class AnimExporter:
                         base = (arm_world @ rest[i]).translation
                     else:
                         base = (posed[j] @ rest[j].inverted() @ rest[i]).translation
-                    translations[i].append(self.mission(posed[i].translation - base))
+                    translations[i].append(self.space.mission(posed[i].translation - base))
                 if rm is not None:
-                    steps.append(self.mission((arm_world @ rm.matrix).translation - rm_rest))
+                    steps.append(self.space.mission((arm_world @ rm.matrix).translation - rm_rest))
                 else:
                     steps.append((0.0, 0.0, 0.0))
                 triggers.append(trigger_word(arm.o3d.anim_trigger))
@@ -348,9 +314,7 @@ class AnimExporter:
             raise ExportError(f"{model}: {self.arm.name} is in NLA tweak mode; leave it (Tab in the "
                               "NLA editor) before exporting its clips")
         self.context.view_layer.update()
-        root = self.model.matrix_world
-        if root != Matrix.Identity(4):
-            self.space = root.inverted_safe()
+        self.space = ModelSpace(self.model, self.settings.forward)
         bones = bone_rows(self.arm)
         rows = self.rows()
         strips = clip_strips(self.arm)
@@ -400,23 +364,17 @@ class AnimExporter:
             self.arm.data.pose_position = held_position
             self.scene.frame_set(held_frame)
 
-        out_dir = os.path.dirname(out_path)
-        os.makedirs(out_dir, exist_ok=True)
-        o3a_path = os.path.splitext(out_path)[0] + ".o3a"
-        with open(o3a_path, "w", newline="\n", encoding="utf-8") as f:
-            f.write("\n".join(text) + "\n")
-
-        from . import cli_path
-        cli = cli_path(self.context)
-        if not os.path.isfile(cli):
-            raise ExportError(f"opennova-3di not found at {cli}")
-        result = subprocess.run([cli, "anim", "build", o3a_path, "-o", out_path],
-                                capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if result.returncode != 0:
-            raise ExportError((result.stderr or result.stdout).strip()[:2000])
-        for line in result.stderr.splitlines():
-            if "note: " in line:
-                self.note(line.split("note: ", 1)[1])
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        # The clip-set text is the CLI's input only, as the model export's
+        # scene text is: nothing lands beside the table but its clips.
+        with scratch() as tmp:
+            o3a_path = os.path.join(tmp, "set.o3a")
+            with open(o3a_path, "w", newline="\n", encoding="utf-8") as f:
+                f.write("\n".join(text) + "\n")
+            result = run_cli(self.context, ["anim", "build", o3a_path, "-o", out_path], ExportError,
+                             hide=((o3a_path, "clip set text"),))
+        for note in cli_notes(result, "note: "):
+            self.note(note)
         return f"{result.stdout.strip()} ({len(strips)} clips, {len(bones)} bones)", self.notes
 
 

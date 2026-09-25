@@ -31,6 +31,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 from . import export
+from .o3dtext import axis_basis
 
 DRIVE = "O3D drive"
 MOUNT = "O3D mount"
@@ -246,7 +247,7 @@ def mount_frame(parent, point, forward):
     are its ROWS: in model axes (column form) the child's frame is
     look_at(X d)^T with X the x mirror, which engine/runtime/world/
     mounted_pose.cpp writes as X * frame^T * X in its mirrored model world."""
-    basis = export.axis_basis(forward)
+    basis = axis_basis(forward)
     local = parent.matrix_world.inverted_safe() @ point.matrix_world
     d = (local.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
     d_model = LOADER.transposed() @ (basis.transposed() @ d)
