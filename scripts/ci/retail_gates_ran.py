@@ -48,7 +48,9 @@ MUST_RUN = {
         "npruntime_remote_body_state", "npruntime_held_weapon_attach",
         "npruntime_authored_payload_00trg",
         # The shipped .bms missions loose at the tree's root.
-        "mission_corpus", "threedi_o3d_retail_roundtrip",
+        "mission_corpus",
+        # The shipped models through `opennova-3di` scene -> build -> compare.
+        "threedi_o3d_retail_roundtrip",
         # The clip sets through `opennova-3di anim` and back, and the same sets
         # played back through the runtime's own loader.
         "anim_o3a_retail_roundtrip", "anim_o3a_runtime_playback",
@@ -69,7 +71,9 @@ MIXED = {
     ],
     "jo_assets": [
         "occlusion_armry", "particle_smoke_all_fixtures", "sound_profile",
-        "threedi_o3d_retail_roundtrip",  # Every named model must run, including partial-data cases.
+        # Every named model and clip set must run (each prints a SKIP-LEG per
+        # missing file and passes once any one ran).
+        "threedi_o3d_retail_roundtrip", "anim_o3a_retail_roundtrip", "anim_o3a_runtime_playback",
         "def_parse_items", "infantry", "minimap_overlay",
         # The reference fixture set (<assets>/fixtures/**) legs.
         "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",
