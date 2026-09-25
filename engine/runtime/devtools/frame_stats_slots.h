@@ -224,6 +224,7 @@
     X(RENDER_SLOT_CAPTURES, "VALUE: slot captures drawn this frame (armed by the retail cadence)") \
     X(RENDER_SLOT_PACKED_VERTICES, "VALUE: vertices packed for the slot captures this frame (a stable frame packs 0)") \
     X(RENDER_SLOT_SKINNED, "VALUE: skinned slot capture commands (GPU bone palette)") \
+    X(RENDER_SLOT_READBACKS, "VALUE: slot caster surfaces read back through the server this frame (a stable frame reads 0)") \
     /* end */
 
 namespace opennova::devtools {

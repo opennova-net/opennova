@@ -1,5 +1,6 @@
 #include "render/q3_frame_adapter.h"
 #include "render/q3_geometry_cache.h"
+#include "render/retained_array_mesh.h"
 #include "render/q3_source_registry.h"
 #include "render/q3_vertex_format.h"
 #include "render/rd_uniforms.h"
@@ -1328,8 +1329,8 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			}
 			request.pack = surface.pack;
 			const int surface_index = surface.surface;
-			candidate.stream = cache.acquire(request, [&record, surface_index]() {
-				return record.mesh->surface_get_arrays(surface_index);
+			candidate.stream = cache.acquire(request, [&record, surface_index](bool &r_read_back) {
+				return surface_arrays(record.mesh.ptr(), surface_index, r_read_back);
 			});
 			if (!candidate.stream)
 				continue;
