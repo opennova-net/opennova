@@ -235,10 +235,16 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 	}
 }
 
-// What no single record can see: a row naming a clip the set lacks, and two
-// clips under one name (they would write the same file).
+// What no single record can see: a row naming a clip the set lacks, two
+// clips under one name (they would write the same file), and a clip name or a
+// variant that is not a bare file stem (`build` writes each clip beside the
+// table, so a path there would write outside it).
 void validate(Parser &ps, const BadBuildSet &set) {
 	ps.line = 0;
+	for (const BadBuildClip &clip : set.clips) {
+		if (!bad_build_bare_stem(clip.name))
+			ps.errors.push_back(ps.path + ": clip '" + clip.name + "' is not a bare file name");
+	}
 	for (size_t i = 0; i < set.clips.size(); ++i) {
 		for (size_t j = i + 1; j < set.clips.size(); ++j) {
 			if (opennova::strutil::iequals(set.clips[i].name, set.clips[j].name))
@@ -248,6 +254,11 @@ void validate(Parser &ps, const BadBuildSet &set) {
 	for (const BadBuildRow &row : set.rows) {
 		for (const std::string &variant : row.variants) {
 			const std::string stem = bad_build_clip_stem(variant);
+			if (!bad_build_bare_stem(stem)) {
+				ps.errors.push_back(ps.path + ": row '" + row.key + "' names '" + variant +
+						"', which is not a bare file name");
+				continue;
+			}
 			bool found = false;
 			for (const BadBuildClip &clip : set.clips)
 				found = found || opennova::strutil::iequals(clip.name, stem);
@@ -303,32 +314,32 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 	// Every clip of a table composes against its reset clip; a lone clip
 	// against its own first key.
 	const BadBuildClip *reset = lone ? nullptr : bad_build_reset_clip(set);
-	size_t written = 0;
+	// Mint every clip and the table in memory, and read each back, before any
+	// file is written: a set that fails anywhere writes nothing.
+	struct Minted {
+		std::string path;
+		std::vector<uint8_t> bytes;
+	};
+	std::vector<Minted> files;
 	size_t total = 0;
 	for (const BadBuildClip &clip : set.clips) {
-		std::vector<uint8_t> bytes;
+		Minted minted;
 		std::string error;
-		if (!bad_build_mint(clip, reset, bytes, &error)) {
+		if (!bad_build_mint(clip, reset, minted.bytes, &error)) {
 			std::fprintf(stderr, "opennova-3di: clip '%s': %s\n", clip.name.c_str(), error.c_str());
 			return 1;
 		}
 		// Read the bytes back through the loader's own reader before shipping.
 		BadFile check{};
-		if (bad_parse_buffer(bytes.data(), bytes.size(), &check) != 0) {
+		if (bad_parse_buffer(minted.bytes.data(), minted.bytes.size(), &check) != 0) {
 			std::fprintf(stderr, "opennova-3di: clip '%s' does not read back\n", clip.name.c_str());
 			return 1;
 		}
 		bad_free(&check);
-		const std::string path =
-				lone ? out.string() : (out.parent_path() / (clip.name + ".bad")).string();
-		if (!write_bytes(path, bytes)) {
-			std::fprintf(stderr, "opennova-3di: cannot write %s\n", path.c_str());
-			return 1;
-		}
-		++written;
-		total += bytes.size();
+		minted.path = lone ? out.string() : (out.parent_path() / (clip.name + ".bad")).string();
+		total += minted.bytes.size();
+		files.push_back(std::move(minted));
 	}
-
 	if (!lone) {
 		std::string text;
 		std::string error;
@@ -336,13 +347,18 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 			std::fprintf(stderr, "opennova-3di: %s\n", error.c_str());
 			return 1;
 		}
-		const std::vector<uint8_t> bytes(text.begin(), text.end());
-		if (!write_bytes(out.string(), bytes)) {
-			std::fprintf(stderr, "opennova-3di: cannot write %s\n", out_path);
+		files.push_back(Minted{out.string(), std::vector<uint8_t>(text.begin(), text.end())});
+	}
+
+	for (const Minted &minted : files) {
+		if (!write_bytes(minted.path, minted.bytes)) {
+			std::fprintf(stderr, "opennova-3di: cannot write %s\n", minted.path.c_str());
 			return 1;
 		}
+	}
+	if (!lone) {
 		std::printf("wrote %s (%zu rows) and %zu clips (%zu bytes)\n", out_path, set.rows.size(),
-				written, total);
+				set.clips.size(), total);
 		return 0;
 	}
 	std::printf("wrote %s (%zu bytes)\n", out_path, total);

@@ -303,6 +303,14 @@ int main() {
         BadBuildSet wide = set;
         wide.rows[1].variants.assign(9, "walkf");
         TEST_EXPECT(!bad_build_mint_table(wide, text, &error));
+        // A variant names a clip beside the table, never a path.
+        BadBuildSet escape = set;
+        escape.rows[1].variants[0] = "../walkf";
+        TEST_EXPECT(!bad_build_mint_table(escape, text, &error));
+        TEST_EXPECT(bad_build_bare_stem("walkf") && bad_build_bare_stem("a..b"));
+        TEST_EXPECT(!bad_build_bare_stem("") && !bad_build_bare_stem("..") && !bad_build_bare_stem("a/b") &&
+                    !bad_build_bare_stem("a\\b") && !bad_build_bare_stem("C:walk") &&
+                    !bad_build_bare_stem("Armature|Walk"));
         std::printf("table: canonical rows, and four rows refused\n");
     }
 

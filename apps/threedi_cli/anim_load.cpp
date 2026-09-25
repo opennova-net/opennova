@@ -105,6 +105,13 @@ bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error) 
 	for (const BadBuildRow &row : out.rows) {
 		for (const std::string &variant : row.variants) {
 			const std::string stem = bad_build_clip_stem(variant);
+			// A variant names a clip beside the table: a path would read
+			// outside it.
+			if (!bad_build_bare_stem(stem)) {
+				anim_free(out);
+				error = path + " names '" + variant + "', which is not a bare file name";
+				return false;
+			}
 			const bool seen = std::any_of(out.clips.begin(), out.clips.end(),
 					[&](const AnimLoadedClip &c) { return same_name(c.name, stem); });
 			if (seen) continue;

@@ -501,6 +501,15 @@ std::string bad_build_clip_stem(const std::string &variant) {
     return variant;
 }
 
+bool bad_build_bare_stem(const std::string &name) {
+    if (name.empty() || name == "." || name == "..") return false;
+    for (const char c : name) {
+        if (static_cast<unsigned char>(c) < 0x20 || std::strchr("/\\:|*?<>\"", c) != nullptr)
+            return false;
+    }
+    return true;
+}
+
 std::string bad_build_reset_stem(const std::vector<BadBuildRow> &rows) {
     const BadBuildRow *reset = nullptr;
     for (const BadBuildRow &row : rows) {
@@ -537,6 +546,9 @@ bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string 
         for (size_t v = 0; v < row.variants.size(); ++v) {
             if (row.variants[v].size() >= sizeof(entry.variants[v]))
                 return fail(error, "row '" + row.key + "' names a clip that is too long");
+            if (!bad_build_bare_stem(bad_build_clip_stem(row.variants[v])))
+                return fail(error, "row '" + row.key + "' names '" + row.variants[v] +
+                                           "', which is not a bare file name");
             std::memcpy(entry.variants[v], row.variants[v].c_str(), row.variants[v].size());
         }
     }

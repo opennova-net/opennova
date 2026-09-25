@@ -92,12 +92,17 @@ channel.
 
 The build fails, naming the line, on an unknown record, a malformed field, a
 set with no clip, a row outside the `anim_` namespace or naming a clip the set
-lacks, two clips under one name, a bone whose parent is not a lower index, a
+lacks, two clips under one name, a clip name or row variant that is not a
+bare file name (`/ \ : | * ? < > "`, a control character, `.` or `..`: `build`
+writes each clip beside the table), a bone whose parent is not a lower index, a
 key list that is neither `frames + 1` long nor accompanied by durations, a key
 that is not a unit quaternion, a zero duration, a translation block a flag
 promises and the clip lacks, an event list that is not `frames + 1` long, a
-frame count of zero, or a bone name over 31 characters. Every minted clip is
-read back through the loader's own reader before it is written.
+frame count of zero, or a bone name over 31 characters. Every clip and the
+table are minted in memory, each clip read back through the loader's own
+reader, before any file is written, so a set that fails anywhere writes
+nothing. `scene`, `info` and `compare` refuse a table whose variant names a
+path.
 
 ## What `scene` cannot carry
 

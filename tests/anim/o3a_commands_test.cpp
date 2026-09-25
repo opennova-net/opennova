@@ -158,6 +158,44 @@ int main(int argc, char **argv) {
 	build("record-before-clip", replace(text, "clip walk\nfps 30", "fps 30\nclip walk"), false);
 	build("key-before-bone", replace(text, "bone -1 0 0 0 0.5 \"BN01 Pelvis\"\n", ""), false);
 
+	// A clip name or a row variant is a bare file stem: `build` writes each
+	// clip beside the table, so a path would write outside it.
+	{
+		const auto named = [&](const std::string &name) {
+			return replace(replace(replace(text, "clip walk", "clip \"" + name + "\""),
+								   "row anim_reset \"walk\"", "row anim_reset \"" + name + "\""),
+					"row anim_walk_forward \"walk.bad\" \"walk\"",
+					"row anim_walk_forward \"" + name + "\"");
+		};
+		build("clip-escape", named("../../escape"), false);
+		check(!std::filesystem::exists(dir.parent_path() / "escape.bad"), "no clip escapes the table");
+		const std::string absolute = std::filesystem::absolute(dir / "absolute").generic_string();
+		build("clip-absolute", named(absolute), false);
+		check(!std::filesystem::exists(absolute + ".bad"), "no clip lands on an absolute path");
+		build("clip-pipe", named("Armature|Walk"), false);
+		build("variant-escape", replace(text, "row anim_reset \"walk\"", "row anim_reset \"../walk\""),
+				false);
+
+		// A set that fails anywhere writes nothing: the first clip mints, the
+		// second does not, and neither lands nor does the table.
+		const std::string broken = text + "clip broken\nframes 1\nbone -1 0 0 0 0 Root\n k 0 0 0 0\n"
+										  " k 0 0 0 1\n";
+		const std::string table = build("partial", broken, false);
+		check(!std::filesystem::exists(std::filesystem::path(table).parent_path() / "walk.bad") &&
+						!std::filesystem::exists(table),
+				"a failed set writes no file");
+
+		// A table read back refuses a variant that names a path.
+		const std::filesystem::path home = dir / "read-escape" / "table";
+		std::filesystem::remove_all(dir / "read-escape");
+		std::filesystem::create_directories(home);
+		std::filesystem::copy_file(std::filesystem::path(original).parent_path() / "walk.bad",
+				dir / "read-escape" / "walk.bad");
+		std::ofstream(home / "ESCAPE.adm", std::ios::binary) << "\r\nanim_reset\t\"../walk\"\r\n";
+		check(threedi_cli::cmd_anim_info((home / "ESCAPE.adm").string().c_str(), 0) != 0,
+				"a table variant that names a path is refused");
+	}
+
 	// A lone clip writes one `.bad` and takes no table row.
 	{
 		const std::filesystem::path home = dir / "lone";

@@ -164,6 +164,12 @@ struct BadAssembled {
 // carry (4706 of 5146 retail variants do) is dropped.
 std::string bad_build_clip_stem(const std::string &variant);
 
+// Whether `name` is a bare file stem, which is all a clip name or a row
+// variant may be: a clip is written, and a variant read, beside its table.
+// Not empty, not `.` or `..`, and no directory, drive or device character
+// (`/ \ : | * ? < > "`) or control character (no retail table names one).
+bool bad_build_bare_stem(const std::string &name);
+
 // The clip every clip of a table composes against: the reset row's (a key
 // naming slot 0, `reset`, past its first five characters; the last such row)
 // LAST variant, because each reset variant replaces the slot's head instead of
