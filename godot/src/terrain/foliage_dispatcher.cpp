@@ -1045,9 +1045,7 @@ bool FoliageDispatcher::MaterialInputs::operator==(
     const MaterialInputs &p_other) const {
   if (colormap != p_other.colormap ||
       heightfield_normal != p_other.heightfield_normal ||
-      tile_overlay != p_other.tile_overlay ||
-      tile_cache != p_other.tile_cache ||
-      tile_overlay_tint != p_other.tile_overlay_tint) {
+      tile_cache != p_other.tile_cache) {
     return false;
   }
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
@@ -1067,28 +1065,21 @@ void FoliageDispatcher::_update_materials() {
   }
   const bool has_colormap = colormap.is_valid();
   Ref<Texture2D> heightfield_normal;
-  Ref<Texture2D> tile_overlay;
   Ref<Texture2DArray> tile_cache;
-  Vector3 tile_overlay_tint(1.0f, 1.0f, 1.0f);
   if (terrain_ != nullptr) {
     heightfield_normal = terrain_->get_heightfield_normal_texture();
-    tile_overlay = terrain_->get_tile_overlay_texture();
-    tile_overlay_tint = terrain_->get_tile_overlay_tint();
     tile_cache = terrain_->get_tile_cache_texture();
   }
   const bool has_heightfield_normal = heightfield_normal.is_valid();
-  const bool has_tile_overlay = tile_overlay.is_valid();
   const bool has_tile_cache = tile_cache.is_valid();
 
-  // Steady frames write nothing: the inputs are retained textures + one
-  // tint, so their identities decide whether the material parameters moved.
+  // Steady frames write nothing: the inputs are retained textures, so their
+  // identities decide whether the material parameters moved.
   MaterialInputs inputs;
   inputs.colormap = has_colormap ? colormap->get_rid() : RID();
   inputs.heightfield_normal =
       has_heightfield_normal ? heightfield_normal->get_rid() : RID();
-  inputs.tile_overlay = has_tile_overlay ? tile_overlay->get_rid() : RID();
   inputs.tile_cache = has_tile_cache ? tile_cache->get_rid() : RID();
-  inputs.tile_overlay_tint = tile_overlay_tint;
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     inputs.fd_textures[slot] =
         fd_textures_[slot].is_valid() ? fd_textures_[slot]->get_rid() : RID();
@@ -1120,13 +1111,9 @@ void FoliageDispatcher::_update_materials() {
                                      heightfield_normal);
       material->set_shader_parameter("u_has_heightfield_normal",
                                      has_heightfield_normal);
-      material->set_shader_parameter("u_tile_overlay", tile_overlay);
-      material->set_shader_parameter("u_has_tile_overlay", has_tile_overlay);
-      material->set_shader_parameter("u_tile_overlay_tint",
-                                     tile_overlay_tint);
       material->set_shader_parameter("u_tile_cache", tile_cache);
       material->set_shader_parameter("u_has_tile_cache", has_tile_cache);
-      frame_stats_.backend_material_parameter_writes += 11;
+      frame_stats_.backend_material_parameter_writes += 8;
     }
 
     const Ref<ShaderMaterial> silhouette = silhouette_materials_[side][slot];
@@ -1995,6 +1982,37 @@ void FoliageDispatcher::_apply_draw_list(
       // miss means the applier's cache went out of sync with the draw_list.
       continue;
     }
+    // A detail patch borrows its t1 from the terrain page the point lookup
+    // finds for it; a patch with no resident page is not drawn at all (the
+    // lookup's null result skips the patch's slot draw), so under a Terrain
+    // there is no cold fallback. Only a terrain-less preview draws through
+    // the analytic colormap. Retail Foliage_RenderFarPatches: the lookup
+    // Terrain_FindSectorPatchRT @ 0x60a1de, the null skip @ 0x60a1e6..0x60a1e8
+    // to the slot loop's next iteration @ 0x60a6a2.
+    bool page_ready = false;
+    float page_layer = 0.0f;
+    Vector4 page_projection;
+    if (detail && terrain_ != nullptr) {
+      const Vector2 center = foliage_detail_cell_center(command.cell_key);
+      const std::optional<opennova::TerrainTilePageBinding> page =
+          terrain_->get_tile_cache_binding_for_world_point_native(
+              static_cast<float>(center.x), static_cast<float>(center.y));
+      if (page.has_value() && page->ready) {
+        const std::optional<opennova::TerrainTilePageProjection> projection =
+            opennova::TerrainTileCompositionCache::page_projection(page->page);
+        if (projection.has_value()) {
+          page_ready = true;
+          page_layer = static_cast<float>(page->layer);
+          page_projection = Vector4(projection->world_origin_x,
+                                    projection->world_origin_z,
+                                    projection->inverse_world_span,
+                                    projection->world_span);
+        }
+      }
+      if (!page_ready) {
+        continue;
+      }
+    }
 
     const size_t draw_index = detail ? detail_draw_index++ : model_draw_index++;
     std::vector<DrawInstanceStamp> &stamps =
@@ -2122,28 +2140,9 @@ void FoliageDispatcher::_apply_draw_list(
       stamp.wind_sector_origin_z = command.wind_sector_origin_z;
     }
     if (detail) {
-      bool ready = false;
-      float layer = 0.0f;
-      Vector4 projection_row;
-      if (terrain_ != nullptr) {
-        const Vector2 center = foliage_detail_cell_center(command.cell_key);
-        const std::optional<opennova::TerrainTilePageBinding> page =
-            terrain_->get_tile_cache_binding_for_world_point_native(
-                static_cast<float>(center.x), static_cast<float>(center.y));
-        if (page.has_value() && page->ready) {
-          const std::optional<opennova::TerrainTilePageProjection> projection =
-              opennova::TerrainTileCompositionCache::page_projection(
-                  page->page);
-          if (projection.has_value()) {
-            ready = true;
-            layer = static_cast<float>(page->layer);
-            projection_row = Vector4(projection->world_origin_x,
-                                     projection->world_origin_z,
-                                     projection->inverse_world_span,
-                                     projection->world_span);
-          }
-        }
-      }
+      const bool ready = page_ready;
+      const float layer = page_layer;
+      const Vector4 projection_row = page_projection;
       if (fresh || stamp.tile_cache_ready != ready) {
         server->instance_geometry_set_shader_parameter(
             draw, uniform.tile_cache_ready, ready);

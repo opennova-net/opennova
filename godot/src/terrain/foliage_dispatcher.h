@@ -400,14 +400,12 @@ private:
   };
   std::vector<DrawInstanceStamp> detail_draw_stamps_;
   std::vector<DrawInstanceStamp> model_draw_stamps_;
-  // The material inputs last written (texture RIDs + tint): _update_materials
+  // The material inputs last written (texture RIDs): _update_materials
   // writes the ~100 material parameters only when one of them changes.
   struct MaterialInputs {
     RID colormap;
     RID heightfield_normal;
-    RID tile_overlay;
     RID tile_cache;
-    Vector3 tile_overlay_tint;
     RID fd_textures[opennova::FOLIAGE_MAX_DEFS];
     bool operator==(const MaterialInputs &p_other) const;
   };

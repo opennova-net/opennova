@@ -10,9 +10,6 @@ uniform sampler2D u_colormap : filter_linear, repeat_disable;
 uniform bool u_has_colormap = false;
 uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
 uniform bool u_has_heightfield_normal = false;
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
-uniform bool u_has_tile_overlay = false;
-uniform vec3 u_tile_overlay_tint = vec3(1.0);
 uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
 uniform bool u_has_tile_cache = false;
 uniform vec3 u_emitter_color = vec3(0.5019608);
@@ -52,7 +49,6 @@ global uniform float opennova_fog_start;
 global uniform float opennova_fog_end;
 
 varying vec2 v_tile_uv;
-varying vec2 v_overlay_uv;
 varying vec2 v_tile_cache_uv;
 varying vec3 v_heightfield_normal;
 varying float v_fog;
@@ -99,13 +95,7 @@ void vertex() {
 	// from raw world XZ would only be correct for an origin-zero atlas.
 	v_tile_uv = UV2;
 	// Retail projects t1 independently from v0, while only oPos consumes the
-	// wind-displaced r1. The hosted 1024 .til bake uses the same world X/-Z
-	// wrap, so preserve the pre-wind position here. Wrap in the FRAGMENT
-	// stage: a per-vertex fract() would interpolate ~0.999 -> ~0.001 across a
-	// 1024-unit wrap seam and smear the whole overlay atlas over that
-	// triangle (u_tile_overlay is repeat_enable, so unwrapped UV is exact).
-	v_overlay_uv =
-		vec2(pre_wind_world_pos.x, -pre_wind_world_pos.z) * (1.0 / 1024.0);
+	// wind-displaced r1, so the page projection takes the pre-wind position.
 	v_tile_cache_uv =
 		(pre_wind_world_pos.xz - u_instance_tile_cache_projection.xy) *
 		u_instance_tile_cache_projection.z;
@@ -164,21 +154,16 @@ void fragment() {
 			vec3(0.0), vec3(255.0))) / 255.0;
 		vec3 composed_rgb =
 			clamp(raw_colormap * (256.0 / 255.0), vec3(0.0), vec3(1.0));
-		if (u_has_tile_overlay) {
-			vec4 overlay = texture(u_tile_overlay, v_overlay_uv);
-			composed_rgb = mix(
-				composed_rgb, overlay.rgb * u_tile_overlay_tint, overlay.a);
-		}
 		tile = vec4(
 			composed_rgb,
 			clamp(4.0 * dot(normal_byte - 0.5, light_byte - 0.5), 0.0, 1.0));
 	}
 
 	// Exact ps.1.4 combine: t0 * (t1 * (t1.a*c1 + c0)) * v0 * 8.
-	// The analytic bare-ground sample reproduces the byte-quantized heightfield
-	// DOT3 stored in composed tile alpha. The hosted .til overlay is composed
-	// into RGB before this lighting chain; ordered tile-model/depth-alpha
-	// contributions still require the terrain tile-composition cache.
+	// Under a Terrain t1 is always the resident page (the dispatcher skips a
+	// patch without one, as retail does); the analytic bare-ground sample
+	// above is the terrain-less editor preview's stand-in, reproducing the
+	// byte-quantized heightfield DOT3 stored in composed tile alpha.
 	// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0].
 	vec3 lit = tile.rgb * (tile.a * opennova_sun_light + opennova_sky_ambient);
 	vec3 color = clamp(fd.rgb * lit * u_emitter_color * 8.0, vec3(0.0), vec3(1.0));

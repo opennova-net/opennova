@@ -78,8 +78,11 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 
 	# Retail's first terrain frame claims no page record (every record was last
 	# used only one frame ago), so nothing composes and the patches draw
-	# without pages. Foliage submits through its analytic fallback until the
-	# next terrain frame composes every visible page before its draw.
+	# without pages. A detail patch whose page lookup finds nothing is not
+	# drawn at all (retail Foliage_RenderFarPatches skips to the next slot
+	# on a null Terrain_FindSectorPatchRT @ 0x60a1e6..0x60a1e8), so detail
+	# foliage stays away until the next terrain frame composes every visible
+	# page before its draw.
 	terrain.render_frame()
 	var cold := terrain.get_tile_cache_diagnostics()
 	assert_eq(int(cold.get("pending_jobs", -1)), 0)
@@ -91,14 +94,11 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	# resident geometry without giving terrain a frame-start publication point.
 	dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
 	dispatcher.render_frame(camera.global_transform, GameWorld.current_frame_clock_ms())
-	var pending_fallback_draws := 0
-	for row_value in _visible_detail_draws(dispatcher):
-		var pending_draw := row_value as Dictionary
-		pending_fallback_draws += 1
-		assert_false(bool(pending_draw.tile_cache_ready),
-			"pending terrain pages must leave detail foliage on its analytic fallback")
-	assert_gt(pending_fallback_draws, 0,
-		"the cold frame must exercise visible detail foliage fallback")
+	var cold_stats := dispatcher.get_frame_stats()
+	assert_gt(int(cold_stats.detail_cache_submissions), 0,
+		"the cold frame's detail cells are resident and submitted")
+	assert_eq(_visible_detail_draws(dispatcher).size(), 0,
+		"a patch with no resident terrain page draws no detail foliage")
 
 	var settled := await _settle_tile_cache_with_foliage(terrain, dispatcher, camera)
 	assert_eq(int(settled["pending_jobs"]), 0)
@@ -117,6 +117,8 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 		assert_same(material.get_shader_parameter("u_tile_cache"), page_array,
 			"Terrain and detail foliage must sample one shared Texture2DArray.")
 		assert_true(bool(material.get_shader_parameter("u_has_tile_cache")))
+		assert_true(bool(draw.tile_cache_ready),
+			"every drawn detail patch borrows a resident terrain page")
 		if not bool(draw.tile_cache_ready):
 			continue
 		ready_draws += 1
