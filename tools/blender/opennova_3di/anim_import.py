@@ -554,10 +554,11 @@ class Loader:
         # so the collection's order is not the part order once the clip has
         # labelled them.
         by_part = bone_rows(arm)
-        # Every part's parent matrix before any part moves: a part keeps it as
-        # its parent inverse, so its matrix is the same product it was.
+        # Every part's parent matrix (with its parent inverse) before any part
+        # moves: a part keeps it as its parent inverse, so its matrix is the
+        # same product it was.
         into_root = root.matrix_world.inverted_safe()
-        chain = {i: into_root @ parts[i].parent.matrix_world for i in range(count)
+        chain = {i: into_root @ parts[i].parent.matrix_world @ parts[i].matrix_parent_inverse for i in range(count)
                  if parts[i].parent is not None and parts[i].parent != root}
         for i in range(count):
             ob = parts[i]

@@ -207,21 +207,34 @@ class Builder:
         for mat in self.made_materials:
             bpy.data.materials.remove(mat)
 
-    def link(self, ob, parent=None, world=None, parent_world=None):
+    def link(self, ob, parent=None, world=None, part=False):
+        """Put `ob` at `world` under `parent`. Blender holds an object's own
+        matrix as location, rotation and scale, which a retail part frame is
+        not quite (Mp5b_1st's scales run 0.9995 to 1.0005), so every offset is
+        taken from the frame the parent actually got (self.world keeps each
+        object's matrix as Blender holds it). A part empty carries its frame
+        in its own matrix, its offset from its parent part there too, so its
+        pivot lands exactly and only its frame keeps what Blender can hold.
+        Anything else is parented the way Blender's Keep Transform does it:
+        the parent's inverse in the parent inverse, which Blender keeps whole,
+        and `world` as its own matrix, so a part's mesh, helpers, points and
+        volumes land where the file puts them however the part is turned."""
         self.collection.objects.link(ob)
+        above = Matrix.Identity(4)
+        world = world if world is not None else Matrix.Identity(4)
         if parent is not None:
             ob.parent = parent
-            ob.matrix_parent_inverse = Matrix.Identity(4)
-        world = world if world is not None else Matrix.Identity(4)
-        ob.matrix_basis = (parent_world.inverted() if parent_world is not None else Matrix.Identity(4)) @ world
-        self.world[ob.name] = world
+            above = self.world[parent.name]
+            ob.matrix_parent_inverse = Matrix.Identity(4) if part else above.inverted()
+        ob.matrix_basis = above.inverted() @ world if part else world
+        self.world[ob.name] = above @ ob.matrix_parent_inverse @ ob.matrix_basis
         return ob
 
-    def empty(self, name, parent=None, world=None, size=0.1, display="PLAIN_AXES"):
+    def empty(self, name, parent=None, world=None, size=0.1, display="PLAIN_AXES", part=False):
         ob = bpy.data.objects.new(name, None)
         ob.empty_display_type = display
         ob.empty_display_size = size
-        return self.link(ob, parent, world, self.world.get(parent.name) if parent is not None else None)
+        return self.link(ob, parent, world, part)
 
     # --- materials ---------------------------------------------------------
     def image(self, name):
@@ -524,7 +537,7 @@ class Builder:
                 parent_ob = parts[parent]
             else:
                 parent_ob = root  # re-parented below once the parent exists
-            ob = self.empty(f"PN{pi + 1:02d}", parent_ob, world)
+            ob = self.empty(f"PN{pi + 1:02d}", parent_ob, world, part=True)
             parts.append(ob)
             objs.append(ob)
             if pi > 0 and (parent == pi or parent < 0):
@@ -537,7 +550,7 @@ class Builder:
             if part["strips"]:
                 me, _ = self.mesh(f"{pi + 1:02d} Mesh0", part["strips"], pivot, mats, False)
                 mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
-                objs.append(self.link(mob, ob, Matrix.Translation(pivot), world))
+                objs.append(self.link(mob, ob, Matrix.Translation(pivot)))
             elif part["centre"] is not None:
                 objs.append(self.centre_helper(pi, ob, part["centre"]))
         for pi, part in enumerate(lod["parts"]):
@@ -545,10 +558,11 @@ class Builder:
             if pi < parent < len(parts):
                 # A parent listed after its child (retail ships some).
                 ob = parts[pi]
-                world = self.world[ob.name]
+                above = self.world[parts[parent].name]
                 ob.parent = parts[parent]
                 ob.matrix_parent_inverse = Matrix.Identity(4)
-                ob.matrix_basis = self.world[parts[parent].name].inverted() @ world
+                ob.matrix_basis = above.inverted() @ self.world[ob.name]
+                self.world[ob.name] = above @ ob.matrix_basis
         self.part_objects[li] = dict(enumerate(parts))
         if li == 0:
             self.lod0_parts = {i: ob for i, ob in enumerate(parts)}
@@ -587,7 +601,7 @@ class Builder:
             ob.matrix_parent_inverse = Matrix.Identity(4)
             self.world[ob.name] = self.world[parent_ob.name]
         elif bone is None:
-            self.link(ob, parent_ob, world, self.world[parent_ob.name])
+            self.link(ob, parent_ob, world)
         else:
             # A bone child hangs off the bone's tail, at rest here.
             self.collection.objects.link(ob)
@@ -635,8 +649,12 @@ class Builder:
             world = Matrix.Translation(self.blender(row))
             helper = self.attach_helpers.get((li, pi))
             if helper is not None:
-                helper.matrix_basis = self.world[helper.parent.name].inverted() @ world
-                self.world[helper.name] = world
+                # A rigid part's own helper (it names itself or none): moved
+                # off its pivot the way link() places an object.
+                above = self.world[helper.parent.name]
+                helper.matrix_parent_inverse = above.inverted()
+                helper.matrix_basis = world
+                self.world[helper.name] = above @ helper.matrix_parent_inverse @ helper.matrix_basis
                 continue
             parent = parts[pi]["parent"]
             if self.sc["skinned"]:
@@ -688,7 +706,7 @@ class Builder:
             self.note(f"LOD {li}: the mesh parts are not the last parts; export renumbers them after the bones")
         arm = bpy.data.armatures.new(f"{self.sc['name']}_Rig{li}")
         arm_ob = bpy.data.objects.new(f"{self.sc['name']}_Rig{li}", arm)
-        self.link(arm_ob, root, Matrix.Identity(4), self.world[root.name])
+        self.link(arm_ob, root)
         objs.append(arm_ob)
         vl = self.context.view_layer
         with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm_ob, object=arm_ob,
@@ -746,7 +764,7 @@ class Builder:
             pivot = self.blender(part["pivot"])
             me, weights = self.mesh(f"{pi + 1:02d} Mesh0", strips, pivot, mats, True)
             mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
-            self.link(mob, arm_ob, Matrix.Translation(pivot), self.world[arm_ob.name])
+            self.link(mob, arm_ob, Matrix.Translation(pivot))
             if pi in mesh_parts:
                 meshes[pi] = mob
             groups = {}
@@ -867,7 +885,7 @@ class Builder:
             ob = bpy.data.objects.new(name, data)
             world = Matrix.Translation(self.blender(l["p"])) @ rot.to_4x4()
             parent = self.owner(l["part"], lod_objects)
-            self.link(ob, parent, world, self.world.get(parent.name))
+            self.link(ob, parent, world)
             ob.o3d.order = i
             lod_objects[0].append(ob)
 
@@ -893,7 +911,7 @@ class Builder:
             ob = bpy.data.objects.new(name + "-occonly", me)
             ob.display_type = "WIRE"
             parent = lod_objects[0][0]
-            self.link(ob, parent, Matrix.Identity(4), self.world[parent.name])
+            self.link(ob, parent)
             ob.o3d.order = i
             lod_objects[0].append(ob)
 
@@ -947,7 +965,7 @@ class Builder:
                 ob = bpy.data.objects.new(name, me)
                 ob.display_type = "WIRE"
                 parent = self.owner(si, lod_objects)
-                self.link(ob, parent, Matrix.Identity(4), self.world.get(parent.name))
+                self.link(ob, parent)
                 lod_objects[0].append(ob)
         if unbuilt:
             self.note(f"{unbuilt} collision volume planes touch their volume in no face of 1 cm2 or more (or not at "
