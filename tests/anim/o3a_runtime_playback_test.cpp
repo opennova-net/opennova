@@ -1,9 +1,11 @@
 // The engine plays a rebuilt clip set the way it plays the shipped one: take a
 // retail `.adm`, write it out as `.o3a` and mint it again through
 // `opennova-3di anim`, then load BOTH sets through the runtime's own loader
-// (runtime/anim/skeletal_clips) and compare the pose it evaluates, clip by clip
-// and tick by tick. `anim compare` reads the files; this reads what the game
-// would draw from them.
+// (runtime/anim/skeletal_clips) over the paired model's bone table, as
+// production does (runtime/world/entity_pose.cpp, the placer's skeletal
+// rigs), and compare the pose it evaluates, clip by clip and tick by tick.
+// `anim compare` reads the files; this reads what the game would draw from
+// them.
 // Gated on OPENNOVA_JO_ASSETS (docs/asset-gated-tests.md).
 //
 //   o3a_runtime_playback_test <opennova-3di> <scratch dir>
@@ -11,12 +13,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <base/resource_index/resource_index.h>
 #include <formats/adm/adm.h>
 #include <runtime/anim/skeletal_clips.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/world/entity_pose.h>
 
 #include "common/retail_paths.h"
 
@@ -77,19 +81,23 @@ int main(int argc, char **argv) {
 	}
 	const std::string cli = quoted(argv[1]);
 	// The body rig's table, and the two first-person sets the weapon's own
-	// parts and the skinned arms share: a clip pairs with a rig's parts by
-	// index, so one `.bad` drives the gun's parts and the arms' bones alike
+	// parts and the skinned arms share, each with the model whose bone table
+	// the runtime poses it over: a clip pairs with a rig's parts by index, so
+	// one `.bad` drives the gun's parts and the arms' bones alike
 	// [orig: BoneAnim_BuildWorldMatrices @ 0x40c400].
-	const std::vector<std::string> tables = {"US01.ADM", "mp5_1st.adm", "357_1st.adm"};
+	const std::vector<std::pair<std::string, std::string>> sets = {
+			{"US01.ADM", "US01"}, {"mp5_1st.adm", "Mp5b_1st"}, {"357_1st.adm", "357_1st"}};
 	int ran = 0;
-	for (const std::string &table : tables) {
+	for (const auto &[table, model_name] : sets) {
 		// One directory per set, named after its stem: the rebuilt table keeps
 		// its own name inside it.
 		const std::string stem = table.substr(0, table.find('.'));
 		const std::string dir = std::string(argv[2]) + "/o3a-playback-" + stem;
 		const std::string source = retail::asset_file(table.c_str());
-		if (source.empty()) {
-			std::printf("SKIP-LEG: needs %s in OPENNOVA_JO_ASSETS\n", table.c_str());
+		const std::string model_file = retail::asset_file((model_name + ".3di").c_str());
+		if (source.empty() || model_file.empty()) {
+			std::printf("SKIP-LEG: needs %s and %s.3di in OPENNOVA_JO_ASSETS\n", table.c_str(),
+					model_name.c_str());
 			continue;
 		}
 		++ran;
@@ -115,10 +123,20 @@ int main(int argc, char **argv) {
 		assets::AssetStore shipped_assets{&shipped_index};
 		assets::AssetStore rebuilt_assets{&rebuilt_index};
 
+		// The rig is the MODEL's bone table (its parents and pivots); the
+		// clips contribute rotations and translations only.
+		const auto model = shipped_assets.model(model_name);
+		std::vector<anim::Vec3> origins;
+		std::vector<int> parents;
+		expect(model != nullptr && world::model_bone_table(*model, origins, parents),
+				model_name + " carries a bone table");
+		if (origins.empty()) continue;
 		anim::SkeletalClips stock;
 		anim::SkeletalClips minted;
-		expect(stock.load_from_adm(&shipped_assets, table, {}, {}), table + " loads as shipped");
-		expect(minted.load_from_adm(&rebuilt_assets, table, {}, {}), table + " loads as rebuilt");
+		expect(stock.load_from_adm(&shipped_assets, table, origins, parents),
+				table + " loads as shipped");
+		expect(minted.load_from_adm(&rebuilt_assets, table, origins, parents),
+				table + " loads as rebuilt");
 		if (!stock.loaded() || !minted.loaded()) continue;
 		expect(stock.bone_count() == minted.bone_count(),
 				table + " keeps its " + std::to_string(stock.bone_count()) + " bones");
@@ -185,7 +203,8 @@ int main(int argc, char **argv) {
 				worst_origin);
 	}
 	if (ran == 0)
-		return retail::skip("OPENNOVA_JO_ASSETS with US01.ADM, mp5_1st.adm and 357_1st.adm");
+		return retail::skip("OPENNOVA_JO_ASSETS with US01.ADM, mp5_1st.adm and 357_1st.adm and "
+							"their models");
 	if (failures == 0) std::printf("o3a_runtime_playback_test: ok (%d clip sets)\n", ran);
 	return failures == 0 ? 0 : 1;
 }
