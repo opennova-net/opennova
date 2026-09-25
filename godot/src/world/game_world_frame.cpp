@@ -1098,7 +1098,6 @@ void GameWorld::render_light_frame() {
 	// player state for the retail priority/drape gates.
 	if (slot_shadow_ != nullptr) {
 		slot_shadow_->set_light_director(light_director_);
-		slot_shadow_->set_simulation(get_sim());
 		slot_shadow_->set_light_context(light_director_->light_gain(),
 				static_cast<int>(get_frame_clock_ms()), weather_);
 		if (presenter != nullptr) {

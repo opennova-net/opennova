@@ -1,6 +1,7 @@
 #include <runtime/renderer/render_slot_shadow.h>
 
 #include <runtime/renderer/light_runtime.h>
+#include <runtime/world/collision.h>
 
 #include <algorithm>
 #include <cmath>
@@ -278,26 +279,29 @@ std::array<float, 3> drape_attached_light_color(const SlotDrapeLight &light,
 	return out;
 }
 
-std::array<float, 3> slot_march_start(const std::array<float, 3> &position,
-		bool flags_zero, const std::array<std::array<float, 3>, 3> &basis_columns,
-		const std::array<float, 3> &bbox_center_mission) {
+std::array<float, 3> slot_march_start_offset(bool flags_zero, int32_t heading_bam,
+		int32_t pitch_bam, int32_t roll_bam,
+		const std::array<int32_t, 3> &bbox_center_q16) {
 	// `cmp dword [edi+24h], 0; jz` [orig: RenderSlot_UpdateEntityLight
 	// @ 0x5d6ce7..0x5d6ceb]: a set Flags bit keeps the entity position.
 	if (!flags_zero) {
-		return position;
+		return {0.0f, 0.0f, 0.0f};
 	}
 	// The Euler matrix transform of entity+0x1FC, its result loaded as the
-	// march start [orig: @ 0x5d6cfb..0x5d6d20, the load @ 0x5d6d25..0x5d6d2d];
-	// the centre in presentation axes first: (X, Y, Z-up) -> (X, Z, -Y).
-	const std::array<float, 3> local = {bbox_center_mission[0],
-		bbox_center_mission[2], -bbox_center_mission[1]};
-	std::array<float, 3> out = position;
-	for (int axis = 0; axis < 3; ++axis) {
-		out[axis] += basis_columns[0][axis] * local[0] +
-				basis_columns[1][axis] * local[1] +
-				basis_columns[2][axis] * local[2];
-	}
-	return out;
+	// march start [orig: @ 0x5d6cfb..0x5d6d20, the load @ 0x5d6d25..0x5d6d2d;
+	// Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40,
+	// Math_FixedPointTransformPoint22 @ 0x615810]; relative to the position
+	// the translation drops out.
+	const int32_t origin[3] = {0, 0, 0};
+	const world::CollisionMatrix matrix =
+			world::collision_matrix_from_euler(heading_bam, pitch_bam, roll_bam, origin);
+	const int32_t centre[3] = {bbox_center_q16[0], bbox_center_q16[1], bbox_center_q16[2]};
+	int32_t rotated[3] = {0, 0, 0};
+	matrix.rotate_point(centre, rotated);
+	// Mission (X, Y, Z-up) -> presentation (X, Z, -Y).
+	return {static_cast<float>(rotated[0]) / 65536.0f,
+		static_cast<float>(rotated[2]) / 65536.0f,
+		-static_cast<float>(rotated[1]) / 65536.0f};
 }
 
 bool slot_entity_flags_zero(uint32_t flags, uint32_t engine_flags, int item_type) {
@@ -379,6 +383,45 @@ float slot_patch_lift(int lod) {
 	// @ 0x5d5201..0x5d5212 — fild slot+0x28, fmul flt_7DB864 — added to
 	// every height sample @ 0x5d529b].
 	return static_cast<float>(lod + 1) * kSlotPatchLiftStep;
+}
+
+void slot_patch_vertices(const SlotPatch &patch, int lod,
+		const std::function<float(float, float)> &terrain_height,
+		std::vector<std::array<float, 3>> &out) {
+	// The outer loop steps east (x += 0x10000 @ 0x5d52f7), the inner one south
+	// (north - col << 16 @ 0x5d5269..0x5d5274); every vertex adds the lift to
+	// its height sample (@ 0x5d527a..0x5d529f).
+	const int resolution = lod + 1;
+	const float lift = slot_patch_lift(lod);
+	out.clear();
+	out.reserve(static_cast<size_t>(resolution) * static_cast<size_t>(resolution));
+	for (int i = 0; i < resolution; ++i) {
+		const float x = patch.min_x + static_cast<float>(i);
+		for (int j = 0; j < resolution; ++j) {
+			const float z = -(patch.max_north - static_cast<float>(j));
+			const float height = terrain_height ? terrain_height(x, z) : 0.0f;
+			out.push_back({x, height + lift, z});
+		}
+	}
+}
+
+void slot_patch_indices(int lod, std::vector<uint16_t> &out) {
+	// [orig: init_shadow_decal_index_buffer @ 0x5d5453..0x5d54f4 — edi = row
+	// * resolution, ebx = (row + 1) * resolution, six indices per cell].
+	const int resolution = lod + 1;
+	out.clear();
+	out.reserve(static_cast<size_t>(lod) * static_cast<size_t>(lod) * 6u);
+	for (int i = 0; i < lod; ++i) {
+		const int row = i * resolution;
+		const int next = (i + 1) * resolution;
+		for (int j = 0; j < lod; ++j) {
+			const uint16_t a = static_cast<uint16_t>(row + j);
+			const uint16_t b = static_cast<uint16_t>(row + j + 1);
+			const uint16_t c = static_cast<uint16_t>(next + j);
+			const uint16_t d = static_cast<uint16_t>(next + j + 1);
+			out.insert(out.end(), {a, d, c, a, b, d});
+		}
+	}
 }
 
 std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> shadowztex_pixels() {

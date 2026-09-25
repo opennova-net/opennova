@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor_effect.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/rd_texture_format.hpp>
 #include <godot_cpp/classes/rd_texture_view.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
@@ -11,6 +12,7 @@
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -25,9 +27,8 @@
 #include "render/world_environment_lookup.h"
 #include "lights/effect_light_director.h"
 #include "lights/light_scene.h"
-#include "object/entity_ref.h"
 #include "object/object_model.h"
-#include "simulation/simulation.h"
+#include "render/visual_layers.h"
 #include "terrain/terrain_data.h"
 
 namespace godot {
@@ -199,6 +200,8 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::is_capture_effect_installed);
 	ClassDB::bind_method(D_METHOD("get_capture_image", "order"),
 			&SlotShadow::get_capture_image);
+	ClassDB::bind_method(D_METHOD("get_patch_vertices", "order"),
+			&SlotShadow::get_patch_vertices);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_drape_material"),
 			&SlotShadow::get_drape_material);
 }
@@ -210,15 +213,17 @@ void SlotShadow::set_environment_node(MissionEnvironment *p_environment) {
 }
 
 void SlotShadow::set_terrain_data(const Ref<TerrainData> &p_terrain) {
+	if (terrain_data_ != p_terrain) {
+		// The patch heights sample the terrain: a new field rebuilds them.
+		for (PatchMesh &patch : patch_meshes_) {
+			patch.built = false;
+		}
+	}
 	terrain_data_ = p_terrain;
 }
 
 void SlotShadow::set_light_director(const Ref<EffectLightDirector> &p_director) {
 	light_director_ = p_director;
-}
-
-void SlotShadow::set_simulation(const Ref<Simulation> &p_sim) {
-	sim_ = p_sim;
 }
 
 void SlotShadow::set_light_context(const Vector3 &p_gain, int p_time_ms,
@@ -469,6 +474,118 @@ void SlotShadow::_release_captures() {
 	capture_orders_.clear();
 	armed_capture_mask_ = 0;
 	_clear_all_terms();
+	_release_patches();
+}
+
+// The drape patch of one order [orig: RenderSlot_DrawSilhouetteDrape
+// @0x5d5ca0 -> RenderSlot_RebuildPatchVertexBuffer @0x5d5130, the rebuild
+// gate @0x5d51a3..0x5d51bc: origin, lod and resolution unchanged keep the
+// vertices]. The vertices are world positions (identity instance); the
+// shared drape material reads the order from its instance uniform.
+void SlotShadow::_draw_patch(int p_order, const opennova::renderer::SlotPatch &p_patch,
+		int p_lod) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr || !is_inside_tree() || get_world_3d().is_null()) {
+		return;
+	}
+	PatchMesh &slot = patch_meshes_[p_order];
+	if (!slot.mesh.is_valid()) {
+		slot.mesh = rs->mesh_create();
+		slot.instance = rs->instance_create2(slot.mesh, get_world_3d()->get_scenario());
+		rs->instance_set_layer_mask(slot.instance, visual_layers::WORLD);
+		rs->instance_geometry_set_cast_shadows_setting(slot.instance,
+				RenderingServer::SHADOW_CASTING_SETTING_OFF);
+		rs->instance_geometry_set_shader_parameter(slot.instance, "u_slot", p_order);
+		slot.built = false;
+		slot.visible = true;
+	}
+	if (!slot.built || slot.origin_x != p_patch.min_x ||
+			slot.origin_north != p_patch.max_north || slot.lod != p_lod) {
+		const TerrainData *terrain = terrain_data_.is_valid() ? terrain_data_.ptr() : nullptr;
+		opennova::renderer::slot_patch_vertices(p_patch, p_lod,
+				[terrain](float x, float z) {
+					return terrain != nullptr ? terrain->get_height_world(Vector3(x, 0.0f, z))
+											  : 0.0f;
+				},
+				slot.vertices);
+		opennova::renderer::slot_patch_indices(p_lod, patch_indices_scratch_);
+		PackedVector3Array positions;
+		positions.resize(static_cast<int64_t>(slot.vertices.size()));
+		PackedVector3Array normals;
+		normals.resize(positions.size());
+		for (int64_t i = 0; i < positions.size(); ++i) {
+			const std::array<float, 3> &v = slot.vertices[static_cast<size_t>(i)];
+			positions[i] = Vector3(v[0], v[1], v[2]);
+			normals[i] = Vector3(0.0f, 1.0f, 0.0f);
+		}
+		PackedInt32Array indices;
+		indices.resize(static_cast<int64_t>(patch_indices_scratch_.size()));
+		for (int64_t i = 0; i < indices.size(); ++i) {
+			indices[i] = patch_indices_scratch_[static_cast<size_t>(i)];
+		}
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		arrays[Mesh::ARRAY_VERTEX] = positions;
+		arrays[Mesh::ARRAY_NORMAL] = normals;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+		rs->mesh_clear(slot.mesh);
+		rs->mesh_add_surface_from_arrays(slot.mesh, RenderingServer::PRIMITIVE_TRIANGLES, arrays);
+		rs->mesh_surface_set_material(slot.mesh, 0, get_drape_material()->get_rid());
+		slot.origin_x = p_patch.min_x;
+		slot.origin_north = p_patch.max_north;
+		slot.lod = p_lod;
+		slot.built = true;
+	}
+	if (!slot.visible) {
+		rs->instance_set_visible(slot.instance, true);
+		slot.visible = true;
+	}
+}
+
+void SlotShadow::_hide_patches_from(uint32_t p_drawn_mask) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (int order = 0; order < opennova::renderer::kSlotCaptureCount; ++order) {
+		PatchMesh &slot = patch_meshes_[order];
+		if ((p_drawn_mask & (1u << order)) != 0 || !slot.instance.is_valid() || !slot.visible) {
+			continue;
+		}
+		if (rs != nullptr) {
+			rs->instance_set_visible(slot.instance, false);
+		}
+		slot.visible = false;
+	}
+}
+
+void SlotShadow::_release_patches() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (PatchMesh &slot : patch_meshes_) {
+		if (rs != nullptr) {
+			if (slot.instance.is_valid()) {
+				rs->free_rid(slot.instance);
+			}
+			if (slot.mesh.is_valid()) {
+				rs->free_rid(slot.mesh);
+			}
+		}
+		slot = PatchMesh{};
+	}
+}
+
+PackedVector3Array SlotShadow::get_patch_vertices(int p_order) const {
+	PackedVector3Array out;
+	if (p_order < 0 || p_order >= opennova::renderer::kSlotCaptureCount) {
+		return out;
+	}
+	const PatchMesh &slot = patch_meshes_[p_order];
+	if (!slot.visible || !slot.built) {
+		return out;
+	}
+	out.resize(static_cast<int64_t>(slot.vertices.size()));
+	for (int64_t i = 0; i < out.size(); ++i) {
+		const std::array<float, 3> &v = slot.vertices[static_cast<size_t>(i)];
+		out[i] = Vector3(v[0], v[1], v[2]);
+	}
+	return out;
 }
 
 void SlotShadow::_clear_all_terms() {
@@ -478,6 +595,7 @@ void SlotShadow::_clear_all_terms() {
 		return terms;
 	}();
 	get_drape_material()->set_shader_parameter("u_slot_term", zero);
+	_hide_patches_from(0u);
 	// This direct write bypasses the frame's identical-value elision, so the
 	// stamps must forget what they think is resident.
 	_invalidate_uniform_stamps();
@@ -485,10 +603,8 @@ void SlotShadow::_clear_all_terms() {
 
 void SlotShadow::_invalidate_uniform_stamps() {
 	last_silhouette_terms_ = PackedVector4Array();
-	last_silhouette_patches_ = PackedVector4Array();
 	last_clip_u_ = PackedVector4Array();
 	last_clip_v_ = PackedVector4Array();
-	last_slot_lift_ = PackedFloat32Array();
 	last_light_pos_ = PackedVector4Array();
 	last_light_diffuse_ = PackedVector4Array();
 	drape_mat_stamps_.fill(SlotParamStamp{});
@@ -744,17 +860,12 @@ void SlotShadow::advance_frame() {
 	silhouette_terms.resize(opennova::renderer::kSlotCaptureCount);
 	// Per-slot drape patch (world min_x, min_z, max_x, max_z) and the
 	// depth-clip texgen rows.
-	PackedVector4Array silhouette_patches;
-	silhouette_patches.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array clip_u;
 	clip_u.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array clip_v;
 	clip_v.resize(opennova::renderer::kSlotCaptureCount);
-	// Per-slot patch lift (renderer::slot_patch_lift) and the attached-light
-	// drape light as (position, range) and (rescaled diffuse, quadratic);
-	// range 0 = the sun leg.
-	PackedFloat32Array slot_lift;
-	slot_lift.resize(opennova::renderer::kSlotCaptureCount);
+	// The attached-light drape light as (position, range) and (rescaled
+	// diffuse, quadratic); range 0 = the sun leg.
 	PackedVector4Array light_pos;
 	light_pos.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array light_diffuse;
@@ -765,7 +876,7 @@ void SlotShadow::advance_frame() {
 	// z in [-max_north, -min_north].
 	const auto slot_patch = [&](const Vector3 &p_pos, const Vector3 &p_dir, int lod) {
 		std::array<float, 2> anchor = {float(p_pos.x), float(p_pos.z)};
-		// p_pos is the march start (renderer::slot_march_start).
+		// p_pos is the march start (renderer::slot_march_start_offset).
 		if (terrain_data_.is_valid()) {
 			const TerrainData *terrain = terrain_data_.ptr();
 			const auto height_at = [terrain](float x, float z) {
@@ -785,11 +896,10 @@ void SlotShadow::advance_frame() {
 					{float(p_dir.x), float(p_dir.y), float(p_dir.z)},
 					height_at);
 		}
-		const opennova::renderer::SlotPatch patch =
-				opennova::renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
-		return Vector4(patch.min_x, -patch.max_north, patch.max_x,
-				-patch.min_north);
+		return opennova::renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
 	};
+	// The orders whose drape patch draws this frame.
+	uint32_t drawn_patch_mask = 0;
 	report_bound_ = report_captures_ = 0;
 
 	// The retail child walk: models linked capture-with an admitted caster
@@ -1000,38 +1110,18 @@ void SlotShadow::advance_frame() {
 			mat_stamp.mat = drape_mat;
 		}
 		silhouette_terms[order] = Vector4(ambient[0], ambient[1], ambient[2], 1.0f);
-		// The patch around the marched anchor, from the stored direction, and
-		// its per-vertex lift (the grazing-rescaled lod).
+		// The patch around the marched anchor, from the stored direction, at
+		// the grazing-rescaled lod.
 		const int patch_lod = opennova::renderer::grazing_slot_lod(
 				opennova::renderer::slot_lod_for_radius(info.state.bound_radius),
 				dir_y_raw);
 		// The march starts at the rotated collision-bbox centre while the
 		// entity's Flags dword is zero, else at its position (retail:
-		// RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31;
-		// renderer::slot_march_start); the sim holds both facts.
-		Vector3 march_start = entity_pos;
-		if (sim_.is_valid()) {
-			const Ref<EntityRef> ref = model->get_entity_ref();
-			bool flags_zero = false;
-			Vector3 bbox_center;
-			if (sim_->slot_march_facts(ref.is_valid() ? ref->get_wire_handle() : -1,
-						ref.is_valid() ? ref->get_bms_id() : 0, assignment.id == local_id,
-						flags_zero, bbox_center)) {
-				const Basis rotation = model->get_global_transform().basis.orthonormalized();
-				std::array<std::array<float, 3>, 3> columns{};
-				for (int c = 0; c < 3; ++c) {
-					const Vector3 column = rotation.get_column(c);
-					columns[c] = {float(column.x), float(column.y), float(column.z)};
-				}
-				const std::array<float, 3> start = opennova::renderer::slot_march_start(
-						{float(entity_pos.x), float(entity_pos.y), float(entity_pos.z)},
-						flags_zero, columns,
-						{float(bbox_center.x), float(bbox_center.y), float(bbox_center.z)});
-				march_start = Vector3(start[0], start[1], start[2]);
-			}
-		}
-		silhouette_patches[order] = slot_patch(march_start, dir, patch_lod);
-		slot_lift[order] = opennova::renderer::slot_patch_lift(patch_lod);
+		// RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31); every role's
+		// present rows carry that offset (renderer::slot_march_start_offset).
+		const Vector3 march_start = entity_pos + model->get_slot_march_offset();
+		_draw_patch(order, slot_patch(march_start, dir, patch_lod), patch_lod);
+		drawn_patch_mask |= 1u << order;
 		// The depth-clip texgen from the stored direction, the capture half
 		// size and the person steepening (opennova::renderer::slot_depth_clip).
 		const opennova::renderer::SlotDepthClip clip = opennova::renderer::slot_depth_clip(
@@ -1051,10 +1141,6 @@ void SlotShadow::advance_frame() {
 		drape->set_shader_parameter("u_slot_term", silhouette_terms);
 		last_silhouette_terms_ = silhouette_terms;
 	}
-	if (silhouette_patches != last_silhouette_patches_) {
-		drape->set_shader_parameter("u_slot_patch", silhouette_patches);
-		last_silhouette_patches_ = silhouette_patches;
-	}
 	if (clip_u != last_clip_u_) {
 		drape->set_shader_parameter("u_slot_clip_u", clip_u);
 		last_clip_u_ = clip_u;
@@ -1062,10 +1148,6 @@ void SlotShadow::advance_frame() {
 	if (clip_v != last_clip_v_) {
 		drape->set_shader_parameter("u_slot_clip_v", clip_v);
 		last_clip_v_ = clip_v;
-	}
-	if (slot_lift != last_slot_lift_) {
-		drape->set_shader_parameter("u_slot_lift", slot_lift);
-		last_slot_lift_ = slot_lift;
 	}
 	if (light_pos != last_light_pos_) {
 		drape->set_shader_parameter("u_slot_light_pos", light_pos);
@@ -1075,6 +1157,7 @@ void SlotShadow::advance_frame() {
 		drape->set_shader_parameter("u_slot_light_diffuse", light_diffuse);
 		last_light_diffuse_ = light_diffuse;
 	}
+	_hide_patches_from(drawn_patch_mask);
 	// The armed requests compile into this frame's device draw list; an
 	// unarmed order keeps its previous capture (retail's sticky RT).
 	if (effect_.is_valid()) {

@@ -904,6 +904,67 @@ bool test_local_player_person_overlays() {
 // naming a NoClipsNoDraw def hides whatever +0x2B0 draws once that def's pool
 // plus its one-round clip reads zero. The local player keeps its own branch.
 // [orig: Entity_CanFireWeapon @0x4dcb5f..0x4dcbc6]
+// The render-slot march start the rows carry (world::PF_SLOT_MARCH_OFFSET_*):
+// the collision-bbox centre rotated by the entity's Euler matrix while the
+// Flags dword is zero, else zero [orig: RenderSlot_UpdateEntityLight
+// @0x5d6ce7..0x5d6d31; the vehicle 0x400 @0x40e208..0x40e20a].
+bool test_rows_carry_the_slot_march_start() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 64);
+	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
+	if (!expect(e != nullptr, "the bare registry spawns a pool-1 row")) return false;
+	e->yaw = 0;
+	e->pitch = 0;
+	e->roll = 0;
+	e->item_type = 3;
+	e->bbox_center = {1.0f, 2.0f, 1.5f};
+	const im::PresentRowsContext context{kernel, nullptr, false};
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	// Mission yaw 0 is BAM heading 90 degrees: (X, Y) turns to (-Y, X), so
+	// the centre (1, 2, 1.5) lands at mission (-2, 1, 1.5), present (-2, 1.5, -1).
+	const float *r = row_at(rows, 0);
+	bool ok = expect(std::fabs(r[w::PF_SLOT_MARCH_OFFSET_X] + 2.0f) < 1.0e-3f &&
+					std::fabs(r[w::PF_SLOT_MARCH_OFFSET_Y] - 1.5f) < 1.0e-3f &&
+					std::fabs(r[w::PF_SLOT_MARCH_OFFSET_Z] + 1.0f) < 1.0e-3f,
+			"a Flags-clear row starts its march at the rotated bbox centre");
+	e->engine_flags |= w::kEntityFlagIndestructible;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	r = row_at(rows, 0);
+	ok = expect(r[w::PF_SLOT_MARCH_OFFSET_X] == 0.0f && r[w::PF_SLOT_MARCH_OFFSET_Y] == 0.0f &&
+					r[w::PF_SLOT_MARCH_OFFSET_Z] == 0.0f,
+			"a set Flags bit starts the march at the position") && ok;
+	e->engine_flags &= ~w::kEntityFlagIndestructible;
+	e->item_type = 1;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	r = row_at(rows, 0);
+	ok = expect(r[w::PF_SLOT_MARCH_OFFSET_Y] == 0.0f,
+			"a vehicle carries the REFLECTABLE bit: it marches from its position") && ok;
+
+	// A joiner's decoded row composes its own entity's dword: the load-stream
+	// dword, the live compact low byte, the runtime latches, the Player bit.
+	opennova::replication::ClientEntityState es;
+	es.spawn_entity_flags = 0x01000005u;
+	ok = expect(im::replica_entity_flags_dword(es) == 0x01000005u,
+			"a row without a compact sample keeps its load-stream dword") && ok;
+	es.state_flags_known = true;
+	es.state_flags = 0x00u;
+	ok = expect(im::replica_entity_flags_dword(es) == 0x01000000u,
+			"the compact flags byte replaces the low byte") && ok;
+	es.spawn_entity_flags = 0;
+	ok = expect(im::replica_entity_flags_dword(es) == 0u, "a clear row composes zero") && ok;
+	es.rm_entity_flags = w::kEntityFlagInAir;
+	ok = expect(im::replica_entity_flags_dword(es) == w::kEntityFlagInAir,
+			"the client's runtime latch bits join the dword") && ok;
+	es.rm_entity_flags = 0;
+	es.cls = nw::EntityClass::Player;
+	ok = expect(im::replica_entity_flags_dword(es) == w::kEntityFlagPlayer,
+			"a Player-class row carries the Player bit") && ok;
+	return ok;
+}
+
 bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	opennova::mission::MissionKernel kernel;
 	kernel.world.registry.configure_pool(0, 32);
@@ -980,6 +1041,7 @@ int main() {
 	ok = test_replica_rows_publish_the_person_overlays() && ok;
 	ok = test_local_player_person_overlays() && ok;
 	ok = test_host_rows_apply_the_remote_held_weapon_ammo_leg() && ok;
+	ok = test_rows_carry_the_slot_march_start() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;

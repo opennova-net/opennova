@@ -1171,6 +1171,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		// while the row was out (set legs are per-submission re-asserts;
 		// falling edges latched in the publish state still clear).
 		model->set_parachute_deployed(field_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
+		model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
+				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
+				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
 		const bool submitted = present_visible &&
 				!model->is_occlusion_hidden() &&
 				model->is_on_screen();

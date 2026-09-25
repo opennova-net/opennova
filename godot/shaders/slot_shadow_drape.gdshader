@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
+render_mode blend_mul, depth_draw_never, cull_disabled, unshaded, fog_disabled;
 
 // The terrain's fog uniforms and law: the drape shares the device's primary
 // fog config with the terrain batch it multiplies into (SlotShadow pushes the
@@ -7,18 +7,18 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 #include "res://shaders/terrain_lighting.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"
 
-// The render-slot entity ground-shadow drape, as a multiplicative next pass
-// over the hand-lit terrain surface. Retail drapes each bound shadow slot
-// that owns a silhouette RT over a lod x lod terrain-following patch: the
-// per-entity silhouette RT is projected along the slot light direction and
-// multiplied into the terrain with the per-channel ambient law and the
-// 40..80 u distance fade (retail: RenderSlot_DrawAllDrapes @0x5d6e20,
-// RenderSlot_DrawSilhouetteDrape @0x5d5ca0 — see
-// docs/render/render-lighting-re.md). A bound slot without an RT draws
-// nothing: its authored-blob leg (@0x5d59d0) is dead in JO. The terrain
-// surface itself stands in for the patch mesh; the projection is evaluated
-// per pixel at the patch point the fragment stands for (the terrain point
-// raised by the patch lift).
+// The render-slot entity ground-shadow drape: one terrain-following patch
+// mesh per slot that owns a silhouette RT, (lod + 1)^2 vertices at 1 u over
+// the point-sampled terrain heights plus the (lod + 1) * 0.004 u lift, drawn
+// with culling off, no depth writes and the multiply blend right after the
+// terrain (retail: RenderSlot_DrawAllDrapes @0x5d6e20,
+// RenderSlot_DrawSilhouetteDrape @0x5d5ca0, RenderSlot_RebuildPatchVertexBuffer
+// @0x5d5130; the technique's intrinsic flags 0x1520000 @0x5d62f7 — see
+// docs/render/render-lighting-re.md). SlotShadow builds the meshes
+// (renderer::slot_patch_vertices / slot_patch_indices); every instance shares
+// this material and names its slot in the instance uniform u_slot. A bound
+// slot without an RT draws nothing: its authored-blob leg (@0x5d59d0) is dead
+// in JO.
 //
 // Per slot i:
 //   u_slot_mat_i : world -> (u, v) projector matrix (the stage-0 texgen)
@@ -31,25 +31,14 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 //                    a = 0 off (no RT, or culled at >= 80 u), 1 silhouette;
 //                    white for an attached-light slot, whose term is the
 //                    light below
-//   u_slot_lift[i] : the patch vertices' (lod + 1) * 0.004 u lift above the
-//                    terrain (retail: RenderSlot_RebuildPatchVertexBuffer
-//                    @0x5d5201..0x5d529f; renderer::slot_patch_lift): both
-//                    texgens read the lifted point
 //   u_slot_light_pos[i], u_slot_light_diffuse[i] : an attached-light slot's
 //                    D3D light 4 as (position, range) and (rescaled
 //                    negative diffuse, quadratic attenuation); range 0 = the
-//                    sun leg. The term is sat(1 + diffuse * atten * N.L) on
-//                    the (0, 1, 0) patch normal, atten = 1 / (1 + q d^2)
-//                    inside the range and 0 past it (retail: RenderSlot_Draw-
-//                    SilhouetteDrape @0x5d5e50..0x5d5f4c; renderer::
-//                    drape_attached_light_color)
-//   u_slot_patch[i] : the lod x lod terrain patch the slot is draped over,
-//                    as world (min_x, min_z, max_x, max_z) — retail builds a
-//                    (lod+1)^2 terrain-following mesh of side lod = the
-//                    grazing-scaled clamp(2r+1, 6, 20) u around the marched
-//                    anchor and draws nothing outside it (retail:
-//                    RenderSlot_RebuildPatchVertexBuffer @0x5d5130;
-//                    renderer::slot_patch_bounds)
+//                    sun leg. Each patch vertex takes sat(1 + diffuse * atten
+//                    * N.L) on its (0, 1, 0) normal, atten = 1 / (1 + q d^2)
+//                    inside the range and 0 past it, Gouraud-interpolated
+//                    (retail: RenderSlot_DrawSilhouetteDrape @0x5d5e50..0x5d5f4c;
+//                    renderer::drape_attached_light_color)
 //   u_slot_clip_u[i], u_slot_clip_v[i] : the depth-clip stage's texgen as
 //                    world dot products (xyz . p + w) into u_shadowztex —
 //                    retail's second texture stage ADDs that 32x4 texture to
@@ -59,20 +48,17 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 //                    build_shadow_cascade_uv_matrices @0x58cf10,
 //                    shadow_system_init_resources @0x5d6260;
 //                    renderer::slot_depth_clip, shadowztex_pixels)
-// Shadowed terrain = terrain * fog(sat(sat(rt + ambient) + ztex)) inside the
-// patch — exactly retail's two-stage ADD under the multiply blend, the result
-// fogged toward WHITE by the primary fog config (retail: RenderSlot_Draw-
-// AllDrapes @0x5d6ea1, CD3DDevice_SetFogAndBlendMode mode 3). Both samplers
-// clamp (retail: the drape technique's stage-0 clamp, intrinsic flags
-// 0x1520000 @0x5d62f7; shadowztex created clamp @0x5d62a9): the projection is
-// unbounded, the RT edge texels (the white clear) cover the rest of the patch.
+// Both texgens run per patch vertex like retail's texture-transformed
+// camera-space coordinates. Shadowed terrain = terrain * fog(sat(sat(rt +
+// colour) + ztex)): retail's two-stage ADD under the multiply blend, fogged
+// toward WHITE by the primary fog config (retail: RenderSlot_DrawAllDrapes
+// @0x5d6ea1, CD3DDevice_SetFogAndBlendMode mode 3). Both samplers clamp
+// (the technique's stage-0 clamp; shadowztex created clamp @0x5d62a9).
 
-const int MAX_SLOTS = 12;
+instance uniform int u_slot = 0;
 uniform vec4 u_slot_term[12];
-uniform vec4 u_slot_patch[12];
 uniform vec4 u_slot_clip_u[12];
 uniform vec4 u_slot_clip_v[12];
-uniform float u_slot_lift[12];
 uniform vec4 u_slot_light_pos[12];
 uniform vec4 u_slot_light_diffuse[12];
 // The 32x4 "shadowztex" step, CLAMP + bilinear like retail's sampler.
@@ -104,11 +90,9 @@ uniform mat4 u_slot_mat_11;
 
 varying vec3 v_world;
 varying float v_eye_depth;
-
-void vertex() {
-	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	v_eye_depth = max(-(MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).z, 0.0);
-}
+varying vec2 v_uv;
+varying vec2 v_zuv;
+varying vec3 v_colour;
 
 vec4 slot_sample(int i, vec2 uv) {
 	switch (i) {
@@ -144,11 +128,11 @@ mat4 slot_matrix(int i) {
 	}
 }
 
-// An attached-light slot's fixed-function colour at one patch point
+// An attached-light slot's fixed-function colour at one patch vertex
 // (renderer::drape_attached_light_color).
-vec3 attached_light_color(int i, vec3 patch_point) {
+vec3 attached_light_color(int i, vec3 vertex_world) {
 	vec4 light = u_slot_light_pos[i];
-	vec3 to_light = light.xyz - patch_point;
+	vec3 to_light = light.xyz - vertex_world;
 	float d = length(to_light);
 	if (d <= 0.0 || d > light.w) {
 		return vec3(1.0);
@@ -159,45 +143,39 @@ vec3 attached_light_color(int i, vec3 patch_point) {
 			vec3(0.0), vec3(1.0));
 }
 
+void vertex() {
+	int i = clamp(u_slot, 0, 11);
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_eye_depth = max(-(MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).z, 0.0);
+	v_uv = (slot_matrix(i) * vec4(v_world, 1.0)).xy;
+	v_zuv = vec2(dot(u_slot_clip_u[i].xyz, v_world) + u_slot_clip_u[i].w,
+			dot(u_slot_clip_v[i].xyz, v_world) + u_slot_clip_v[i].w);
+	v_colour = u_slot_light_pos[i].w > 0.0
+			? attached_light_color(i, v_world)
+			: u_slot_term[i].rgb;
+}
+
 void fragment() {
-	// Each slot is its own fogged multiply pass toward WHITE. The terrain's
+	int i = clamp(u_slot, 0, 11);
+	if (u_slot_term[i].a < 0.5) {
+		discard;
+	}
+	// The drape is a fogged multiply pass toward WHITE. The terrain's
 	// apply_terrain_fog is the linear mix(fog colour, colour, visibility), so
 	// its white-minus-black response is the visibility itself.
 	float visibility = apply_terrain_fog(vec3(1.0), v_world, CAMERA_POSITION_WORLD,
 			v_eye_depth).r - apply_terrain_fog(vec3(0.0), v_world,
 			CAMERA_POSITION_WORLD, v_eye_depth).r;
-	vec3 factor = vec3(1.0);
-	for (int i = 0; i < MAX_SLOTS; i++) {
-		float mode = u_slot_term[i].a;
-		if (mode < 0.5) {
-			continue;
-		}
-		// The drape patch: nothing outside the slot's lod x lod square.
-		vec4 patch = u_slot_patch[i];
-		if (v_world.x < patch.x || v_world.x > patch.z ||
-				v_world.z < patch.y || v_world.z > patch.w) {
-			continue;
-		}
-		// The patch vertex this fragment stands for rides the lift.
-		vec3 patch_point = v_world + vec3(0.0, u_slot_lift[i], 0.0);
-		vec4 p = slot_matrix(i) * vec4(patch_point, 1.0);
-		vec4 s = slot_sample(i, p.xy);
-		// Retail stage 0 ADDs the black-on-white slot RT RGB to the faded
-		// ambient material; stage 1 ADDs shadowztex, and both stages
-		// saturate. Keeping the resolved/filter RGB is significant: an
-		// alpha-product approximation leaves faint partial-coverage tails at
-		// grazing sun angles (RenderSlot_DrawSilhouetteDrape @0x5d5ca0).
-		vec2 zuv = vec2(dot(u_slot_clip_u[i].xyz, patch_point) + u_slot_clip_u[i].w,
-				dot(u_slot_clip_v[i].xyz, patch_point) + u_slot_clip_v[i].w);
-		float ztex = texture(u_shadowztex, zuv).r;
-		vec3 term = u_slot_light_pos[i].w > 0.0
-				? attached_light_color(i, patch_point)
-				: u_slot_term[i].rgb;
-		vec3 shadowed = min(vec3(1.0), s.rgb + term);
-		vec3 slot_factor = min(vec3(1.0), shadowed + vec3(ztex));
-		factor *= mix(vec3(1.0), slot_factor, visibility);
-	}
+	// Retail stage 0 ADDs the black-on-white slot RT RGB to the vertex colour;
+	// stage 1 ADDs shadowztex, and both stages saturate. Keeping the
+	// resolved/filter RGB is significant: an alpha-product approximation
+	// leaves faint partial-coverage tails at grazing sun angles
+	// (RenderSlot_DrawSilhouetteDrape @0x5d5ca0).
+	vec4 s = slot_sample(i, v_uv);
+	float ztex = texture(u_shadowztex, v_zuv).r;
+	vec3 shadowed = min(vec3(1.0), s.rgb + v_colour);
+	vec3 slot_factor = min(vec3(1.0), shadowed + vec3(ztex));
 	// Retail's drape multiplies gamma-space framebuffer bytes directly. Both
 	// the sampled slot textures and scene target stay in that domain here.
-	ALBEDO = scene_output(factor);
+	ALBEDO = scene_output(mix(vec3(1.0), slot_factor, visibility));
 }

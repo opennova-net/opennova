@@ -376,6 +376,7 @@ private:
 	bool entity_projection_override_ = false;
 	int32_t entity_projection_scale_q16_ = 0;
 	bool parachute_deployed_ = false;
+	Vector3 slot_march_offset_;
 	int32_t parachute_projection_radius_q16_ = 0;
 	void refresh_entity_projection_sphere();
 	// The frame's views a projection is kept for: the frame's image and the
@@ -891,6 +892,10 @@ public:
 	void configure_entity_projection(bool p_person, int32_t p_parachute_radius_q16,
 			bool p_zero_center);
 	void set_parachute_deployed(bool p_deployed);
+	// The render-slot march start relative to the entity position (the
+	// present rows' PF_SLOT_MARCH_OFFSET_*; zero = start at the position).
+	void set_slot_march_offset(const Vector3 &p_offset) { slot_march_offset_ = p_offset; }
+	Vector3 get_slot_march_offset() const { return slot_march_offset_; }
 	// A carved static becomes a live husk visual while retaining the primary
 	// entity's already-derived local sphere and the scale of its pose matrix.
 	void set_entity_projection_override(

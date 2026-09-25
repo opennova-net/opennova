@@ -452,17 +452,16 @@ func test_bound_slot_publishes_its_patch_and_depth_clip() -> void:
 	if ztex != null:
 		assert_eq(ztex.get_width(), 32)
 		assert_eq(ztex.get_height(), 4)
-	var patches: PackedVector4Array = drape.get_shader_parameter("u_slot_patch")
-	assert_eq(patches.size(), 12)
-	var patch := patches[0]
-	var side_x := patch.z - patch.x
-	var side_z := patch.w - patch.y
+	var order := shadow.get_capture_order_of(caster)
+	var bounds := _patch_bounds(shadow.get_patch_vertices(order))
+	var side_x := bounds.z - bounds.x
+	var side_z := bounds.w - bounds.y
 	assert_almost_eq(side_x, side_z, 0.001, "the patch is a square")
 	assert_true(side_x >= 6.0 and side_x <= 20.0,
 			"the patch side is the clamped lod (6..20 u): %s" % str(side_x))
-	assert_true(patch.x <= caster.global_position.x and caster.global_position.x <= patch.z,
+	assert_true(bounds.x <= caster.global_position.x and caster.global_position.x <= bounds.z,
 			"the patch straddles the caster east-west")
-	assert_true(patch.y <= caster.global_position.z and caster.global_position.z <= patch.w,
+	assert_true(bounds.y <= caster.global_position.z and caster.global_position.z <= bounds.w,
 			"the patch straddles the caster north-south")
 	var clip_u: PackedVector4Array = drape.get_shader_parameter("u_slot_clip_u")
 	var clip_v: PackedVector4Array = drape.get_shader_parameter("u_slot_clip_v")
@@ -492,13 +491,13 @@ func test_cached_caster_facts_refresh_on_their_setters() -> void:
 	caster.set_shadow_bound_radii(2.0, 2.0625)
 	shadow.advance_frame()
 	var drape := SlotShadow.get_drape_material()
-	var patch_before: Vector4 = drape.get_shader_parameter("u_slot_patch")[0]
+	var patch_before := _patch_bounds(shadow.get_patch_vertices(0))
 	var clip_v_before: Vector4 = drape.get_shader_parameter("u_slot_clip_v")[0]
 	# A radius stamped after the plan (the husk-swap shape) resizes the patch
 	# and re-derives the clip rows on the very next frame.
 	caster.set_shadow_bound_radii(4.0, 9.0)
 	shadow.advance_frame()
-	var patch_after: Vector4 = drape.get_shader_parameter("u_slot_patch")[0]
+	var patch_after := _patch_bounds(shadow.get_patch_vertices(0))
 	assert_gt(patch_after.z - patch_after.x, patch_before.z - patch_before.x,
 			"a bigger entity bound stamped after a plan grows the next patch")
 	var clip_v_after: Vector4 = drape.get_shader_parameter("u_slot_clip_v")[0]
@@ -881,6 +880,18 @@ func test_capture_follows_the_casters_authored_rlod_switch() -> void:
 	shadow.advance_frame()
 
 
+func _patch_bounds(vertices: PackedVector3Array) -> Vector4:
+	if vertices.is_empty():
+		return Vector4()
+	var bounds := Vector4(INF, INF, -INF, -INF)
+	for vertex in vertices:
+		bounds.x = minf(bounds.x, vertex.x)
+		bounds.y = minf(bounds.y, vertex.z)
+		bounds.z = maxf(bounds.z, vertex.x)
+		bounds.w = maxf(bounds.w, vertex.z)
+	return bounds
+
+
 func _single_caster_term(shadow: SlotShadow, model: ObjectModel) -> Vector4:
 	shadow.advance_frame()
 	var order := shadow.get_capture_order_of(model)
@@ -1174,31 +1185,40 @@ func test_windowed_capture_stops_at_the_stage_textures_last_retail_mip_level() -
 	shadow.advance_frame()
 
 
-## Retail's drape patch vertices ride (lod + 1) * 0.004 u above the terrain
-## they sample, and both stage texgens read the lifted vertex (retail:
-## RenderSlot_RebuildPatchVertexBuffer @0x5d5201..0x5d529f, the resolution
-## lod + 1 stored @0x5d6da9): the terrain stand-in publishes that lift per slot
-## for its lod.
-func test_drape_texgen_reads_the_lifted_patch_point() -> void:
+## The drape is its own patch mesh (retail: RenderSlot_RebuildPatchVertexBuffer
+## @0x5d5130): (lod + 1)^2 vertices at 1 u spacing over the point-sampled
+## terrain height (0 without a terrain here) plus the (lod + 1) * 0.004 u lift,
+## rebuilt only when the patch origin or lod moves; a slot that stops draping
+## hides its mesh.
+func test_drape_patch_is_a_lifted_one_unit_mesh() -> void:
 	var environment := _environment()
-	_camera()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
 	var shadow := _fresh_shadow(environment)
 	var caster := _caster_at(4.0)
 	caster.set_shadow_bound_radii(2.0, 2.0625)
 	shadow.advance_frame()
 	var order := shadow.get_capture_order_of(caster)
 	assert_true(order >= 0, "the caster owns a capture order")
-	var drape := SlotShadow.get_drape_material()
-	var patches: PackedVector4Array = drape.get_shader_parameter("u_slot_patch")
-	var lifts = drape.get_shader_parameter("u_slot_lift")
-	assert_true(lifts is PackedFloat32Array, "the drape carries the per-slot lift")
-	if order >= 0 and lifts is PackedFloat32Array:
-		var lod := patches[order].z - patches[order].x
-		assert_almost_eq(float(lifts[order]), (lod + 1.0) * 0.004, 0.00001,
-				"lift = (lod + 1) * 0.004 for the lod %s patch" % str(lod))
+	var vertices := shadow.get_patch_vertices(order)
+	var bounds := _patch_bounds(vertices)
+	var lod := int(round(bounds.z - bounds.x))
+	assert_eq(vertices.size(), (lod + 1) * (lod + 1), "(lod + 1)^2 vertices")
+	if vertices.size() > lod + 1:
+		assert_almost_eq(vertices[1].z - vertices[0].z, 1.0, 0.0001,
+				"consecutive vertices step 1 u south")
+		assert_almost_eq(vertices[lod + 1].x - vertices[0].x, 1.0, 0.0001,
+				"each row steps 1 u east")
+		for vertex in vertices:
+			assert_almost_eq(vertex.y, (lod + 1) * 0.004, 0.00001,
+					"every vertex rides the (lod + 1) * 0.004 lift over the terrain")
+	# Past 80 u the slot drapes nothing: its mesh hides.
+	caster.position = Vector3(0.0, 0.0, -85.0)
+	shadow.advance_frame()
+	assert_eq(shadow.get_patch_vertices(order).size(), 0,
+			"a culled slot draws no patch")
 	caster.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
-
 
 ## An attached-light slot lights its patch with D3D light 4 (retail:
 ## RenderSlot_DrawSilhouetteDrape @0x5d5e50..0x5d5f4c): D3DRS_AMBIENT white,

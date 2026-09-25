@@ -283,6 +283,16 @@ enum PresentField : int {
 	PF_CARRIED_PITCH_DEG,
 	PF_CARRIED_YAW_DEG,
 	PF_CARRIED_ROLL_DEG,
+	// The render-slot anchor march's start relative to the entity position
+	// (present axes, world units): the collision-bbox centre rotated by the
+	// entity's Euler matrix while its Flags dword is zero, else zero
+	// (renderer::slot_march_start_offset) [orig: RenderSlot_UpdateEntityLight
+	// @0x5d6ce7..0x5d6d31]. An authoritative row reads its entity; a joiner's
+	// wire row reads the replica's Flags words and its type's resolved
+	// collision shape, the facts the retail client's own entity carries.
+	PF_SLOT_MARCH_OFFSET_X,
+	PF_SLOT_MARCH_OFFSET_Y,
+	PF_SLOT_MARCH_OFFSET_Z,
 	PF_STRIDE
 };
 

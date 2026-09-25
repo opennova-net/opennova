@@ -293,16 +293,17 @@ float slot_march_start_height(float caster_height, float terrain_height,
 
 // The march start [orig: RenderSlot_UpdateEntityLight @ 0x5d6ce7..0x5d6d31]:
 // an entity whose Flags dword (entity+0x24) is zero starts from its
-// collision-bbox centre (entity+0x1FC: model-local mission axes, the
+// collision-bbox centre (entity+0x1FC: model-local mission axes Q16, the
 // authored scale folded) rotated by the entity's Euler matrix and placed at
 // its position (Math_BuildFixedPointMatrixFromEulerAngles(entity+4), then
-// Math_FixedPointTransformPoint22); any set bit starts the march at the
-// position itself. Presentation axes (x, z planar, y up): `basis_columns`
-// is the entity's orthonormal presentation rotation (columns x, y, z) and
-// the mission centre (X, Y, Z-up) maps to (X, Z, -Y) before it rotates.
-std::array<float, 3> slot_march_start(const std::array<float, 3> &position,
-		bool flags_zero, const std::array<std::array<float, 3>, 3> &basis_columns,
-		const std::array<float, 3> &bbox_center_mission);
+// Math_FixedPointTransformPoint22); any set bit starts at the position. This
+// returns the start relative to the position in presentation axes (x, y up,
+// z = -mission Y), world units: zero for a set bit. The Euler triple is the
+// entity's live BAM32 heading/pitch/roll (entity+0x10..+0x18); the present
+// rows carry the result (world::PF_SLOT_MARCH_OFFSET_X..Z).
+std::array<float, 3> slot_march_start_offset(bool flags_zero, int32_t heading_bam,
+		int32_t pitch_bam, int32_t roll_bam,
+		const std::array<int32_t, 3> &bbox_center_q16);
 
 // Whether that Flags dword is zero, from the sim's split view of it: the
 // runtime mirror `flags`, the spawn-composed `engine_flags`, and the
@@ -312,7 +313,7 @@ std::array<float, 3> slot_march_start(const std::array<float, 3> &position,
 // flag bit. Every vehicle therefore marches from its position.
 bool slot_entity_flags_zero(uint32_t flags, uint32_t engine_flags, int item_type);
 
-// Marches from the start (slot_march_start) along the (downward) slot
+// Marches from the start (slot_march_start_offset) along the (downward) slot
 // direction in unit-planar steps until the terrain height reaches the ray;
 // the vertical step keeps the direction's own rate and is SUBSTITUTED by
 // 0.5 u of drop only when it would not descend (fixed -32768 stored for a
@@ -353,6 +354,25 @@ SlotPatch slot_patch_bounds(float anchor_x, float anchor_north, int lod);
 // lod-20 patch (0.084 u) shortens the shadow by about 0.33 u.
 inline constexpr float kSlotPatchLiftStep = 0.004f;  // flt_7DB864
 float slot_patch_lift(int lod);
+
+// The drape's own mesh, rebuilt when the patch origin or lod moves
+// [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130 — the rebuild gate
+// @ 0x5d51a3..0x5d51bc]: (lod + 1)^2 vertices at 1 u spacing, vertex
+// (i, j) = index i * (lod + 1) + j at mission (origin_x + i, origin_north - j)
+// (@ 0x5d5246..0x5d52f7), its height the point-sampled terrain height there
+// (Terrain_GetHeightAtPosition @ 0x606720) plus the lift, normal (0, 1, 0)
+// (@ 0x5d52b1..0x5d52c3). Output in presentation axes (x, y up, z = -north);
+// `terrain_height(x, z)` takes presentation planar coordinates.
+void slot_patch_vertices(const SlotPatch &patch, int lod,
+		const std::function<float(float, float)> &terrain_height,
+		std::vector<std::array<float, 3>> &out);
+
+// The patch's triangle list for one lod, the level's run of the shared
+// index buffer [orig: init_shadow_decal_index_buffer @ 0x5d53d0 — per cell
+// (i, j) with a = (i, j), b = (i, j + 1), c = (i + 1, j), d = (i + 1, j + 1):
+// the triangles (a, d, c) and (a, b, d) @ 0x5d5474..0x5d54d0; 2 lod^2
+// triangles]. The drape draws them with culling off.
+void slot_patch_indices(int lod, std::vector<uint16_t> &out);
 
 // ---------------------------------------------------------------------------
 // The depth-clip stage [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0 ->

@@ -18,6 +18,8 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/zone_chain.h> // zone_chain_zone_info_byte
+#include <runtime/world/collision.h> // entity_live_euler_bam, ResolvedCollisionShape
+#include <runtime/renderer/render_slot_shadow.h> // slot_march_start_offset
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
@@ -342,6 +344,41 @@ static void write_world_present_row(const PresentRowsContext &context,
 		int row_index, PoolPresentLifecycleMap &lifecycle, float *r,
 		DoorPhaseTable &door_phases);
 
+// The render-slot march start one row publishes (world::PF_SLOT_MARCH_OFFSET_X)
+// [orig: RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31].
+static void write_present_slot_march(float *r, uint32_t flags_dword, int item_type,
+		const int32_t euler_bam[3], const std::array<int32_t, 3> &bbox_center_q16) {
+	const std::array<float, 3> offset = renderer::slot_march_start_offset(
+			renderer::slot_entity_flags_zero(flags_dword, 0u, item_type),
+			euler_bam[0], euler_bam[1], euler_bam[2], bbox_center_q16);
+	r[PF_SLOT_MARCH_OFFSET_X] = offset[0];
+	r[PF_SLOT_MARCH_OFFSET_Y] = offset[1];
+	r[PF_SLOT_MARCH_OFFSET_Z] = offset[2];
+}
+
+// From the authoritative entity: its split Flags words, live Euler triple and
+// stamped collision-bbox centre (entity+0x1FC).
+static void write_present_slot_march(float *r, const Entity &e) {
+	int32_t euler[3];
+	entity_live_euler_bam(e, euler);
+	write_present_slot_march(r, e.flags | e.engine_flags, e.item_type, euler,
+			{static_cast<int32_t>(std::lround(e.bbox_center.x * 65536.0)),
+					static_cast<int32_t>(std::lround(e.bbox_center.y * 65536.0)),
+					static_cast<int32_t>(std::lround(e.bbox_center.z * 65536.0))});
+}
+
+// From a joiner's decoded row, the facts its own retail entity holds: its
+// Flags dword (replica_entity_flags_dword), the decoded Euler triple, and the
+// type's resolved collision-bbox centre (Entity_InitFromModel
+// @0x40df1e..0x40df4a; the shape the joiner's sun and LOS legs read).
+static void write_present_replica_slot_march(float *r, mission::MissionKernel &kernel,
+		const replication::ClientEntityState &es) {
+	const ResolvedCollisionShape shape = kernel.wire_collision_shape_for_type(es.type_id);
+	const int32_t euler[3] = {es.heading_bam, es.pitch_bam, es.roll_bam};
+	write_present_slot_march(r, replica_entity_flags_dword(es), shape.item_type, euler,
+			{shape.bbox_center_q16.x, shape.bbox_center_q16.y, shape.bbox_center_q16.z});
+}
+
 void build_client_replica_present_rows(const PresentRowsContext &context,
 		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
 	out.clear();
@@ -437,6 +474,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_STANCE_BITS] = static_cast<float>(ent->net_stance_bits & 0x03u);
 			r[PF_PARACHUTE_DEPLOYED] =
 					((ent->flags | ent->engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
+			write_present_slot_march(r, *ent);
 			write_present_section_mask(r, item_hidden_sections(*ent));
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
 			r[PF_RIGHT_HAND_COLLAPSED] =
@@ -643,6 +681,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// Their 0x26 payload is not a compact-transform update.
 		// [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
 		if (joiner) {
+			write_present_replica_slot_march(r, kernel, es);
 			const Entity *local = kernel.world.registry.get(h);
 			if (local && static_cast<uint16_t>(local->item_id) == es.type_id) {
 				r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
@@ -708,6 +747,15 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		write_world_present_row(context, local_player, first_person_usegun, entity, row_index,
 				lifecycle, out.data() + static_cast<size_t>(row_index) * PF_STRIDE, unused_doors);
 	});
+}
+
+uint32_t replica_entity_flags_dword(const replication::ClientEntityState &es) {
+	// The compact record's flags byte IS entity+36's low byte (the 0x0A fold);
+	// a row without one keeps its load-stream byte.
+	const uint32_t low = es.state_flags_known ? es.state_flags : (es.spawn_entity_flags & 0xFFu);
+	uint32_t flags = (es.spawn_entity_flags & ~0xFFu) | low | es.rm_entity_flags;
+	if (es.cls == EntityClass::Player) flags |= kEntityFlagPlayer;
+	return flags;
 }
 
 void build_world_present_rows(const PresentRowsContext &context,
@@ -813,6 +861,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
 	r[PF_PARACHUTE_DEPLOYED] =
 			((e.flags | e.engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
+	write_present_slot_march(r, e);
 	write_present_section_mask(r, item_hidden_sections(e));
 	write_present_doors(r, row_index, w, e, door_phases);
 	r[PF_RIGHT_HAND_COLLAPSED] =

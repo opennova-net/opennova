@@ -349,6 +349,9 @@ public:
 		PF_CARRIED_PITCH_DEG = opennova::world::PF_CARRIED_PITCH_DEG,
 		PF_CARRIED_YAW_DEG = opennova::world::PF_CARRIED_YAW_DEG,
 		PF_CARRIED_ROLL_DEG = opennova::world::PF_CARRIED_ROLL_DEG,
+		PF_SLOT_MARCH_OFFSET_X = opennova::world::PF_SLOT_MARCH_OFFSET_X,
+		PF_SLOT_MARCH_OFFSET_Y = opennova::world::PF_SLOT_MARCH_OFFSET_Y,
+		PF_SLOT_MARCH_OFFSET_Z = opennova::world::PF_SLOT_MARCH_OFFSET_Z,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 
@@ -1402,12 +1405,6 @@ public:
 	// render-slot pass gives that vehicle the local player's slot priority
 	// (EntityPresenter::resolve_present_handle finds its model).
 	int get_local_player_mount_target_handle() const;
-	// Render-slot march start (retail RenderSlot_UpdateEntityLight @0x5d6ce7):
-	// whether the entity's Flags dword is zero (renderer::slot_entity_flags_zero)
-	// and its collision-bbox centre entity+0x1FC (model-local mission axes). False
-	// without the entity (wire handle, else bms id) and on a joiner.
-	bool slot_march_facts(int p_wire_handle, int p_bms_id, bool p_local_player,
-			bool &r_flags_zero, Vector3 &r_bbox_center) const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
 	// to the player's body input at the top of the next frame. Movement keys + the lean
 	// keys (Q/E, catalog ids 6/7) + jump; stance and look are SIM-owned state

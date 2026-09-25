@@ -218,29 +218,26 @@ int main() {
 	// entity Flags dword is zero, else the position
 	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6ce7..0x5d6d31].
 	{
-		const std::array<float, 3> pos{10.0f, 2.0f, -5.0f};
-		const std::array<std::array<float, 3>, 3> identity{{
-				{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
-		// Mission centre (1, 2, 1.5): presentation (1, 1.5, -2).
-		const auto start = slot_march_start(pos, true, identity, {1.0f, 2.0f, 1.5f});
-		CHECK(near_f(start[0], 11.0f) && near_f(start[1], 3.5f) &&
-				near_f(start[2], -7.0f));
-		// A set Flags bit keeps the entity position.
-		const auto flagged = slot_march_start(pos, false, identity, {1.0f, 2.0f, 1.5f});
-		CHECK(near_f(flagged[0], 10.0f) && near_f(flagged[1], 2.0f) &&
-				near_f(flagged[2], -5.0f));
+		const std::array<int32_t, 3> centre{0x10000, 0x20000, 0x18000};
+		// Heading 0: mission centre (1, 2, 1.5) is presentation (1, 1.5, -2).
+		const auto start = slot_march_start_offset(true, 0, 0, 0, centre);
+		CHECK(near_f(start[0], 1.0f) && near_f(start[1], 1.5f) &&
+				near_f(start[2], -2.0f));
+		// A set Flags bit keeps the entity position: no offset.
+		const auto flagged = slot_march_start_offset(false, 0, 0, 0, centre);
+		CHECK(near_f(flagged[0], 0.0f) && near_f(flagged[1], 0.0f) &&
+				near_f(flagged[2], 0.0f));
+		// Heading 90 degrees (0x40000000 BAM) turns the mission (X, Y) pair to
+		// (-Y, X): (-2, 1, 1.5), presentation (-2, 1.5, -1).
+		const auto turned = slot_march_start_offset(true, 0x40000000, 0, 0, centre);
+		CHECK(near_f(turned[0], -2.0f, 1.0e-4f) && near_f(turned[1], 1.5f, 1.0e-4f) &&
+				near_f(turned[2], -1.0f, 1.0e-4f));
 		// The Flags dword read: a vehicle carries the REFLECTABLE bit even
 		// with both sim words clear [orig: Entity_InitFromModel @ 0x40e20a].
 		CHECK(slot_entity_flags_zero(0u, 0u, 3));
 		CHECK(!slot_entity_flags_zero(0u, 0u, 1));
 		CHECK(!slot_entity_flags_zero(0x100u, 0u, 3));
 		CHECK(!slot_entity_flags_zero(0u, 0x4000000u, 0));
-		// Yawed 90 degrees about up (x -> -z, z -> x): the local offset rotates.
-		const std::array<std::array<float, 3>, 3> yaw90{{
-				{0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}};
-		const auto turned = slot_march_start(pos, true, yaw90, {1.0f, 2.0f, 1.5f});
-		CHECK(near_f(turned[0], 10.0f - 2.0f) && near_f(turned[1], 3.5f) &&
-				near_f(turned[2], -5.0f - 1.0f));
 	}
 
 	// --- the attached-light drape light: the D3D fill's 1.5x colour
@@ -384,6 +381,26 @@ int main() {
 		// [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5201..0x5d529f].
 		CHECK(near_f(slot_patch_lift(6), 0.028f));
 		CHECK(near_f(slot_patch_lift(20), 0.084f));
+		// The patch mesh: (lod + 1)^2 vertices at 1 u, east-major, each at the
+		// point-sampled height plus the lift [orig:
+		// RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130].
+		std::vector<std::array<float, 3>> vertices;
+		slot_patch_vertices(p6, 6, [](float x, float z) { return x * 0.5f - z; }, vertices);
+		CHECK(vertices.size() == 49u);
+		CHECK(near_f(vertices[0][0], 7.0f) && near_f(vertices[0][2], -24.0f));
+		CHECK(near_f(vertices[0][1], 7.0f * 0.5f + 24.0f + 0.028f));
+		CHECK(near_f(vertices[1][0], 7.0f) && near_f(vertices[1][2], -23.0f));
+		CHECK(near_f(vertices[7][0], 8.0f) && near_f(vertices[7][2], -24.0f));
+		CHECK(near_f(vertices[48][0], 13.0f) && near_f(vertices[48][2], -18.0f));
+		// Its triangles: (a, d, c), (a, b, d) per cell [orig:
+		// init_shadow_decal_index_buffer @ 0x5d53d0].
+		std::vector<uint16_t> indices;
+		slot_patch_indices(6, indices);
+		CHECK(indices.size() == 6u * 36u);
+		CHECK(indices[0] == 0 && indices[1] == 8 && indices[2] == 7);
+		CHECK(indices[3] == 0 && indices[4] == 1 && indices[5] == 8);
+		CHECK(indices[6] == 1 && indices[7] == 9 && indices[8] == 8);
+		CHECK(indices[indices.size() - 1] == 48);
 	}
 
 	// --- the depth-clip stage [orig: shadow_system_init_resources

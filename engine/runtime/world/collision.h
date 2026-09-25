@@ -271,6 +271,10 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
 // @0x43b56c..0x43b5bd; Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
 // @0x614210; Math_BuildFixedPointMatrixFromEulerAngles @0x613f40].
 CollisionMatrix entity_placement_matrix(const Entity &e);
+// That matrix's live Euler triple (BAM32 heading, pitch, roll), shared with
+// the render-slot march start (renderer::slot_march_start_offset), which
+// builds the same rotation without the scale.
+void entity_live_euler_bam(const Entity &e, int32_t out[3]);
 
 bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose_row_major[16],

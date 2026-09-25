@@ -105,4 +105,11 @@ void build_world_present_rows(const PresentRowsContext &context,
 bool local_player_person_overlays(const PresentRowsContext &context,
 		world::PersonOverlays &out);
 
+// A joiner's decoded row's own entity Flags dword, as its retail client entity
+// holds it: the load-stream dword (0x0C/0x0D/0x10/0x20) with the live compact
+// low byte, the client's runtime latch bits, and the Player class bit the wire
+// class names (kEntityFlagPlayer). The render-slot march start reads it
+// (world::PF_SLOT_MARCH_OFFSET_X).
+uint32_t replica_entity_flags_dword(const replication::ClientEntityState &es);
+
 } // namespace opennova::inmatch

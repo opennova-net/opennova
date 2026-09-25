@@ -816,6 +816,9 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
         destruction_->apply_husk_swap(husk);
     }
 	model->set_parachute_deployed(wfield_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
+	model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
+			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
+			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
 	stamp_match_terrain(model, p, base);
         stamp_destroy_phases(model, p, base);
 	const int32_t respawn_revision =

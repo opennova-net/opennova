@@ -242,23 +242,27 @@ static float retail_x87_mul3_add(float a0, float b0, float a1, float b1,
     return static_cast<float>(value);
 }
 
+void entity_live_euler_bam(const Entity &e, int32_t out[3]) {
+    // entity+0x10 is the live heading: the vehicle motor's BAM mirror when it
+    // has run, else the whole-degree mission yaw every other row carries.
+    out[0] = e.veh.yaw_seeded
+            ? e.veh.yaw_bam
+            : bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
+    out[1] = e.veh.yaw_seeded ? e.veh.air_pitch_bam
+                              : bam_from_degrees_wrapped(static_cast<double>(e.pitch));
+    out[2] = e.veh.yaw_seeded ? e.veh.air_roll_bam
+                              : bam_from_degrees_wrapped(static_cast<double>(e.roll));
+}
+
 CollisionMatrix entity_placement_matrix(const Entity &e) {
     const int32_t position[3] = {
         static_cast<int32_t>(e.position.x * 65536.0f),
         static_cast<int32_t>(e.position.y * 65536.0f),
         static_cast<int32_t>(e.position.z * 65536.0f),
     };
-    // entity+0x10 is the live heading: the vehicle motor's BAM mirror when it
-    // has run, else the whole-degree mission yaw every other row carries.
-    const int32_t heading = e.veh.yaw_seeded
-            ? e.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
-	CollisionMatrix m = collision_matrix_from_euler(heading,
-			e.veh.yaw_seeded ? e.veh.air_pitch_bam
-							 : bam_from_degrees_wrapped(static_cast<double>(e.pitch)),
-			e.veh.yaw_seeded ? e.veh.air_roll_bam
-							 : bam_from_degrees_wrapped(static_cast<double>(e.roll)),
-			position);
+    int32_t euler[3];
+    entity_live_euler_bam(e, euler);
+	CollisionMatrix m = collision_matrix_from_euler(euler[0], euler[1], euler[2], position);
 	if (e.uniform_scale_q16 != 0) {
 		// Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
         // the scale rides the rotation diagonal.

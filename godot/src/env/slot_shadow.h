@@ -28,7 +28,6 @@ class EffectLightDirector;
 class LightScene;
 class MissionEnvironment;
 class ObjectModel;
-class Simulation;
 class TerrainData;
 class Weather;
 
@@ -93,10 +92,6 @@ public:
 	void set_light_director(const Ref<EffectLightDirector> &p_director);
 	void set_light_context(const Vector3 &p_gain, int p_time_ms,
 			Weather *p_weather);
-	// The march-start facts source (the entity Flags dword and collision-bbox
-	// centre, retail RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31); none =
-	// every march starts at the entity position.
-	void set_simulation(const Ref<Simulation> &p_sim);
 	// The retail shadow-detail option (0..4) driving the RT chain base and
 	// the refresh cadence. The packaged runtime serves the top setting.
 	void set_shadow_detail(int p_detail);
@@ -141,6 +136,9 @@ public:
 	int get_capture_target_size(int p_order) const;
 	bool is_capture_effect_installed() const;
 	Ref<Image> get_capture_image(int p_order) const;
+	// The drape patch mesh an order draws this frame (world positions in
+	// vertex order; empty when the order draws no drape).
+	PackedVector3Array get_patch_vertices(int p_order) const;
 
 protected:
 	static void _bind_methods();
@@ -221,10 +219,8 @@ private:
 	RID stamped_drape_rid_;
 	static int live_instances_;
 	PackedVector4Array last_silhouette_terms_;
-	PackedVector4Array last_silhouette_patches_;
 	PackedVector4Array last_clip_u_;
 	PackedVector4Array last_clip_v_;
-	PackedFloat32Array last_slot_lift_;
 	PackedVector4Array last_light_pos_;
 	PackedVector4Array last_light_diffuse_;
 	struct SlotParamStamp {
@@ -236,10 +232,28 @@ private:
 			drape_mat_stamps_{};
 	// The per-slot dominant-light query buffer (reused across frames).
 	std::vector<opennova::renderer::SlotPointLight> slot_lights_;
+	// One drape patch mesh per capture order (retail's per-slot patch vertex
+	// range of the shared static buffer, RenderSlot_RebuildPatchVertexBuffer
+	// @0x5d5130): the mesh and its scenario instance, the origin/lod the
+	// vertices were built for (the rebuild gate), and those vertices.
+	struct PatchMesh {
+		RID mesh;
+		RID instance;
+		bool built = false;
+		float origin_x = 0.0f;
+		float origin_north = 0.0f;
+		int lod = 0;
+		bool visible = false;
+		std::vector<std::array<float, 3>> vertices;
+	};
+	std::array<PatchMesh, opennova::renderer::kSlotCaptureCount> patch_meshes_{};
+	std::vector<uint16_t> patch_indices_scratch_;
+	void _draw_patch(int p_order, const opennova::renderer::SlotPatch &p_patch, int p_lod);
+	void _hide_patches_from(uint32_t p_drawn_mask);
+	void _release_patches();
 	ObjectID environment_node_id_;
 	Ref<TerrainData> terrain_data_;
 	Ref<EffectLightDirector> light_director_;
-	Ref<Simulation> sim_;
 	Vector3 light_gain_ = Vector3(1, 1, 1);
 	int light_time_ms_ = 0;
 	ObjectID weather_id_;
