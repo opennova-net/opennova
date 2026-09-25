@@ -678,8 +678,9 @@ func test_stable_q3_scene_packs_once_and_never_reads_the_server_back() -> void:
 	assert_eq(int(second.get("q3_cached_entries", -1)),
 			int(first.get("q3_cached_entries", 0)))
 
-	# An invalidated source (a rebuilt mesh, carved MultiMesh rows) re-reads
-	# its surfaces exactly once at its next sight, then settles again.
+	# An invalidated source (a rebuilt mesh, carved MultiMesh rows) re-packs
+	# its surfaces once at its next sight, from the mesh's retained arrays
+	# (RetainedArrayMesh: no server readback), then settles again.
 	var bulb := _first_visible_mesh(view.model)
 	assert_not_null(bulb)
 	if bulb == null:
@@ -687,11 +688,10 @@ func test_stable_q3_scene_packs_once_and_never_reads_the_server_back() -> void:
 	FrameFx.invalidate_q3_source(bulb)
 	renderer.advance_frame()
 	var third := renderer.get_backend_report()
-	assert_gt(int(third.get("q3_readbacks_this_frame", 0)), 0,
-			"invalidation re-reads the source once")
-	assert_lte(int(third.get("q3_readbacks_this_frame", 0)),
-			(bulb.mesh as ArrayMesh).get_surface_count())
-	assert_gt(int(third.get("q3_packed_vertices", 0)), 0)
+	assert_eq(int(third.get("q3_readbacks_this_frame", -1)), 0,
+			"invalidation re-reads the retained arrays, never the server")
+	assert_gt(int(third.get("q3_packed_vertices", 0)), 0,
+			"invalidation re-packs the source once")
 	renderer.advance_frame()
 	var fourth := renderer.get_backend_report()
 	assert_eq(int(fourth.get("q3_readbacks_this_frame", -1)), 0)
@@ -814,9 +814,8 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 			"the static population is a typed Q3 source: %s" % first)
 	assert_eq(int(first.get("q3_instance_row_reads_this_frame", -1)), 1,
 			"first sight reads the population's rows once")
-	assert_eq(int(first.get("q3_readbacks_this_frame", -1)),
-			bulb_mesh.get_surface_count(),
-			"first sight reads each surface back once")
+	assert_eq(int(first.get("q3_readbacks_this_frame", -1)), 0,
+			"first sight packs the model's retained arrays, no server readback")
 	renderer.advance_frame()
 	var stable := renderer.get_backend_report()
 	assert_eq(int(stable.get("q3_readbacks_this_frame", -1)), 0)
