@@ -154,17 +154,22 @@ void append_underwater_murk_overlay(const float rgb[3], uint8_t alpha_byte, floa
 		SceneOverlayFrame &out);
 
 // One SELFLUM surface of the glare model (the glare or the water glint): a
-// world-space triangle list, sat(SelfLumColor x gain) as its diffuse and the
-// device fog visibility as its alpha, ZFUNC ALWAYS (submit 0x110)
-// [orig: render_skybox_sun_glow @ 0x5ad0f7; update_sun_glare @ 0x5ad470].
+// world-space triangle list, sat(SelfLumColor x light scale) per channel as
+// its diffuse and the device fog visibility as its alpha, ZFUNC ALWAYS
+// (submit 0x110) [orig: render_skybox_sun_glow @ 0x5ad0f7; update_sun_glare
+// @ 0x5ad470]. The light scale is the unpacked modulator block the draw runs
+// under: Render_LightScaleR/G/B (byte / 64 each, Render_UnpackModulatorToLightScale
+// @ 0x58db30), the effect's ColorSrcGlobalGain [orig: apply_shader_parameters
+// @ 0x58e05d].
 void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, const float *uvs,
-		std::size_t vertex_count, const float self_lum_rgb[3], float gain, float fog_visibility,
-		uint32_t texture, SceneOverlayFrame &out);
+		std::size_t vertex_count, const float self_lum_rgb[3], const float light_scale_rgb[3],
+		float fog_visibility, uint32_t texture, SceneOverlayFrame &out);
 
-// The light scale the glare draws under: the scene forces the modulator
-// block to 0xFF404040 (64/64 = 1.0) around the glow and restores
-// Env_ModulatorBlock after it [orig: Render_UnpackModulatorToLightScale
-// @ 0x5c9702 and @ 0x5c9722].
+// The light scale the glare draws under, every channel: the scene forces the
+// modulator block to 0xFF404040 (0x40 / 64 = 1.0) around the glow and
+// restores Env_ModulatorBlock after it [orig: Render_UnpackModulatorToLightScale
+// @ 0x5c9702 and @ 0x5c9722]. The glint, drawn before that bracket
+// (@ 0x5c96c0), runs under the frame's own modulator.
 inline constexpr float kSunGlareLightScale = 1.0f;
 
 } // namespace opennova::renderer

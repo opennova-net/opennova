@@ -205,7 +205,6 @@ constexpr int kRungAlphaCameraSide = 0;  // world alpha on the camera's side (th
 // before particle pass B [orig: CEffectEmitterPool_RenderMainPass(1, side)
 // @ 0x5c9687].
 constexpr int kRungTracerCameraSide = 1;
-constexpr int kRungSunGlow = 2;          // the sun-glow lens glare, drawn last
 
 // The rung for a world transparent on a given water side. The original
 // flushes the far side first and the camera side last (mode camAbove?3:2

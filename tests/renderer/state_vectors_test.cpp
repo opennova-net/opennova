@@ -340,13 +340,13 @@ std::string generate() {
 	std::snprintf(line, sizeof(line),
 	              "ladder body=%d clouds=%d viewmodel=%d p3=%d mask_far=%d far=%d "
 	              "tracer_far=%d particle_far=%d foliage_far=%d water=%d decals=%d "
-	              "mask_cam=%d scars=%d foliage_cam=%d cam=%d tracer_cam=%d glow=%d\n",
+	              "mask_cam=%d scars=%d foliage_cam=%d cam=%d tracer_cam=%d\n",
 	              kRungSkyBody, kRungSkyClouds, kRungViewmodel,
 	              kRungObjectPostMultiply, kRungFoliageMaskFarSide, kRungAlphaFarSide,
 	              kRungTracerFarSide, kRungParticleFarSide, kRungFoliageFarSide, kRungWater,
 	              kRungWaterDecals, kRungFoliageMaskCameraSide, kRungScars,
 	              kRungFoliageCameraSide, kRungAlphaCameraSide,
-	              kRungTracerCameraSide, kRungSunGlow);
+	              kRungTracerCameraSide);
 	out << line;
 
 	// Section 4 (REN-4): uv-anim vectors over engine/runtime/renderer/uv_anim — the

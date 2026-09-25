@@ -13,6 +13,11 @@ extends GutTest
 const STAGE_TEST_ROOT := "scene_overlay_stage_test"
 const SLOT_LIGHT_CORONAS := 2
 const SLOT_UNDERWATER_MURK := 4
+const SLOT_SUN_GLARE := 5
+# A stock-style sky body: an FF_ST_AD_LUM surface whose RGB generator style
+# 113 reads CTRL UPL_INTENSITY (the mglare authoring), staged under the name
+# the fixture environment's glare_3di line carries.
+const GLARE_FIXTURE := "res://../fixtures/threedi/synth/crate_mtrl0_ad_lum_upl113.3di"
 # A slow round whose in-flight glow light (ammo light_move) stays within the
 # corona walk's 100-unit admission in front of the camera.
 const GLOW_AMMO_DEF := """
@@ -154,3 +159,71 @@ func test_a_live_light_corona_draws_in_the_overlay_pass() -> void:
 	report = _overlay_report(world)
 	assert_true((report.get("drawn_slots", []) as Array).has(SLOT_LIGHT_CORONAS),
 			"the scene view draws the coronas")
+
+
+func _meshes(node: Node, out: Array[MeshInstance3D]) -> void:
+	if node is MeshInstance3D:
+		out.append(node as MeshInstance3D)
+	for child in node.get_children():
+		_meshes(child, out)
+
+
+# The sun glare closes the tail: the stage takes the glow model out of every
+# camera and draws its SELFLUM surfaces after the murk, under the forced
+# 1.0 light scale [orig: Terrain_RenderSceneWithReflection @ 0x5c96fd..0x5c9722,
+# render_skybox_sun_glow(1, 1) @ 0x5c9714].
+func test_the_sun_glare_draws_in_the_overlay_pass_and_leaves_the_cameras() -> void:
+	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_glare", true)
+	_staged_dirs.append(root_dir)
+	assert_eq(DirAccess.copy_absolute(ProjectSettings.globalize_path(GLARE_FIXTURE),
+			root_dir.path_join("mglare.3di")), OK)
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
+	var camera := Camera3D.new()
+	camera.position = Vector3(16, 300, -16)
+	world.add_child(camera)
+	camera.make_current()
+	var celestial := world.get_celestial_node() as Celestial
+	var env := world.get_environment_node() as MissionEnvironment
+	assert_not_null(celestial)
+	assert_not_null(env)
+	if celestial == null or env == null:
+		return
+	var sun_dir: Vector3 = env.get_sun_direction()
+	var up := Vector3.RIGHT if absf(sun_dir.y) > 0.9 else Vector3.UP
+	camera.look_at(camera.global_position + sun_dir, up)
+	await get_tree().process_frame
+	celestial.settle_glare_occlusion()
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	var glare := celestial.get_overlay_body_node("glare")
+	assert_not_null(glare, "the fixture environment names a glare model")
+	if glare == null:
+		return
+	var facing: Dictionary = (celestial.get_diagnostics().get("bodies", {}) as Dictionary).get("glare", {})
+	assert_true(bool(facing.get("drawn", false)), "facing the unoccluded sun submits the glow")
+	var meshes: Array[MeshInstance3D] = []
+	_meshes(glare, meshes)
+	assert_gt(meshes.size(), 0)
+	for mesh in meshes:
+		assert_eq(mesh.layers, 0, "the stage owns the glow draw: no camera sees the mesh")
+	var report := _overlay_report(world)
+	assert_true((report.get("submitted_slots", []) as Array).has(SLOT_SUN_GLARE),
+			"the glow reaches the overlay submission")
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	report = _overlay_report(world)
+	assert_true((report.get("drawn_slots", []) as Array).has(SLOT_SUN_GLARE),
+			"the scene view draws the glow last")
+
+	# Looking away: no glow submit, no glare batch.
+	camera.look_at(camera.global_position - sun_dir, up)
+	await get_tree().process_frame
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	report = _overlay_report(world)
+	assert_false((report.get("submitted_slots", []) as Array).has(SLOT_SUN_GLARE),
+			"a glow retail skips at a non-positive alpha leaves the tail")

@@ -15,8 +15,8 @@ extends GameProbe
 ## local, never committed); the default comparison is EXACT; any tolerance
 ## is an investigation aid, never a gate. The composite ladder: scene 1 is the
 ## water bracket [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0], scene 2
-## the sky ladder [orig: Terrain_RenderSkyboxPass @ 0x610ac0;
-## render_skybox_sun_glow @ 0x5c9714]; docs/render/render-order-re.md.
+## the sky pass then the viewmodel [orig: sub_579CB0 @ 0x5ca81a;
+## Player_RenderViewModelIfAlive @ 0x5ca829]; docs/render/render-order-re.md.
 
 const WINDOW_SIZE := Vector2i(1280, 1024)
 const CELL_WORLD := 2.4
@@ -213,7 +213,7 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 			"layers": [
 				["body", Color(0.95, 0.75, 0.1, 0.75), ObjectShaderCache.RENDER_RUNG_SKY_BODY, 2.0],
 				["clouds", Color(0.95, 0.95, 0.95, 0.75), ObjectShaderCache.RENDER_RUNG_SKY_CLOUDS, 0.0],
-				["glow", Color(0.95, 0.4, 0.7, 0.75), ObjectShaderCache.RENDER_RUNG_SUN_GLOW, -2.0],
+				["viewmodel", Color(0.95, 0.4, 0.7, 0.75), ObjectShaderCache.RENDER_RUNG_VIEWMODEL, -2.0],
 			],
 		},
 	]

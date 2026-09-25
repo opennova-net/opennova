@@ -110,7 +110,6 @@ int main() {
 	CHECK(kRungScars < kRungFoliageCameraSide);
 	CHECK(kRungFoliageCameraSide < kRungAlphaCameraSide);
 	CHECK(kRungAlphaCameraSide < kRungTracerCameraSide);
-	CHECK(kRungTracerCameraSide < kRungSunGlow);
 	CHECK(kRungAlphaCameraSide == 0); // the default rung stays Godot's default
 
 	// --- the water bracket swap [orig: SortAndFlush(camAbove?3:2) @ 0x5c9596;

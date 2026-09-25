@@ -449,6 +449,7 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 // load_*(). Safe to call when nothing is loaded.
 void GameWorld::unload() {
 	world_ready_ = false;
+	scene_overlay_bodies_.clear();
 	minimap_water_mask_.unref();
 	emit_signal(kSignalMinimapWaterChanged, Variant());
 	join_wire_assets_pending_ = false;

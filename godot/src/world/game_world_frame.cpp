@@ -7,6 +7,7 @@
 
 #include "world/game_world.h"
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/device_fog.h>
 #include <runtime/renderer/scene_overlay.h>
 
 #include <godot_cpp/classes/engine.hpp>
@@ -672,7 +673,8 @@ void GameWorld::plan_screen_effects_frame() {
 // the witnessed order: retail Terrain_RenderSceneWithReflection after
 // particle pass B @ 0x5c9690, before the frame effects). The murk quad carries
 // the water height; each view draws it only while its own render eye is at or
-// below the water, whatever the camera mode.
+// below the water, whatever the camera mode. The glint and the glare close
+// the tail (append_celestial_overlays).
 void GameWorld::render_scene_overlay_frame() {
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world == nullptr) {
@@ -695,8 +697,71 @@ void GameWorld::render_scene_overlay_frame() {
 					static_cast<uint8_t>(env_->get_underwater_overlay_alpha_byte()),
 					water_->get_water_height(), submission->frame);
 		}
+		append_celestial_overlays(*submission);
 	}
 	effect_world->publish_scene_overlay(submission);
+}
+
+// The water glint and the sun glare: Celestial places both models and
+// drives their UPL_INTENSITY submit value (the SelfLumColor their SELFLUM
+// materials evaluate) and keeps their Q3 copy; the stage draws them at the
+// scene tail with the SELFLUM combine, ONE / ONE, fogged to black under the
+// frame's fog, depth ALWAYS (submit 0x110), so their meshes leave every
+// camera (the Q3 redraw reads the node, not the layers). The glint leg runs
+// only while the mission water height is nonzero (retail update_sun_glare
+// @ 0x5c96c0 behind the test @ 0x5c96b5) and draws under the frame's own
+// light scale; the glare draws last, under the forced 0xFF404040 modulator
+// (light scale 1.0, retail @ 0x5c96fd..0x5c9722). The glare's own gate is
+// the scene's drawShadows argument (test edi @ 0x5c970a), which the main
+// view and the scope view both pass as 1.
+void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) {
+	if (celestial_ == nullptr || env_ == nullptr || !is_inside_tree()) {
+		return;
+	}
+	Viewport *viewport = get_viewport();
+	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+	const Ref<EnvLightState> light_state = env_->get_light_state();
+	const Ref<EnvLightValues> light = light_state.is_valid() ? light_state->get_values()
+															: Ref<EnvLightValues>();
+	if (camera == nullptr || light.is_null()) {
+		return;
+	}
+	const Transform3D eye = camera->get_camera_transform();
+	const Vector3 forward = -eye.basis.get_column(2).normalized();
+	const opennova::env::SceneFogValues fog =
+			env_->state().build_scene_fog(env_->is_underwater_view());
+	const Celestial::OverlayBodies bodies = celestial_->get_overlay_bodies();
+	const float frame_scale[3] = { static_cast<float>(light->gain.x),
+		static_cast<float>(light->gain.y), static_cast<float>(light->gain.z) };
+	const float glare_scale[3] = { opennova::renderer::kSunGlareLightScale,
+		opennova::renderer::kSunGlareLightScale, opennova::renderer::kSunGlareLightScale };
+	struct Leg {
+		const Celestial::OverlayBody &body;
+		opennova::renderer::SceneOverlaySlot slot;
+		const float *light_scale;
+		bool gated;
+	};
+	const bool water_height_set = water_ != nullptr && water_->get_water_height() != 0.0f;
+	const Leg legs[] = {
+		{ bodies.glint, opennova::renderer::SceneOverlaySlot::WaterGlint, frame_scale,
+				!water_height_set },
+		{ bodies.glare, opennova::renderer::SceneOverlaySlot::SunGlare, glare_scale, false },
+	};
+	for (const Leg &leg : legs) {
+		if (leg.body.model == nullptr) {
+			continue;
+		}
+		scene_overlay_bodies_.take_over(leg.body.model);
+		if (!leg.body.drawn || leg.gated) {
+			continue;
+		}
+		const float view_depth = static_cast<float>(
+				(leg.body.model->get_global_position() - eye.origin).dot(forward));
+		const float visibility = opennova::renderer::device_fog_visibility(view_depth,
+				fog.start, fog.end, fog.type, light->fog_enabled);
+		scene_overlay_bodies_.append(leg.slot, leg.body.model, leg.light_scale, visibility,
+				r_submission);
+	}
 }
 
 void GameWorld::apply_blink_frame() {

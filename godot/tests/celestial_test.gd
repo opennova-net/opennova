@@ -105,7 +105,8 @@ func test_bodies_draw_their_authored_material_through_the_sky_hook() -> void:
 				"the glow draws at its 64 u anchor after the world")
 		assert_eq(material.get_shader_parameter("u_sky_mirror_drawn"), false,
 				"the mirror's base pass never submits the glow")
-		assert_eq(material.render_priority, ObjectShaderCache.RENDER_RUNG_SUN_GLOW)
+		assert_eq(material.render_priority, ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE,
+				"the overlay stage draws the glow; its mesh keeps the default rung")
 
 
 func test_upl_intensity_drives_the_authored_self_lum() -> void:

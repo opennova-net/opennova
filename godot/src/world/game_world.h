@@ -42,6 +42,7 @@
 #include "network/host_session_options.h"
 #include "network/join_target.h"
 #include "object/character_join_profile.h"
+#include "render/scene_overlay_compositor.h"
 #include "object/item_database.h"
 #include "object/object_model.h"
 #include "object/weapon_database.h"
@@ -391,6 +392,7 @@ public:
 	void render_precipitation_frame();
 	void plan_screen_effects_frame();
 	void render_scene_overlay_frame();
+	void append_celestial_overlays(SceneOverlaySubmission &r_submission);
 	void mix_audio_frame(int p_ticks_run);
 	void update_clear_frame();
 	void render_environment_cube_frame();
@@ -681,8 +683,10 @@ private:
 	// Frame-clear cache (divergence #21): recompute only when the env
 	// generation moves or the camera crosses the water plane.
 	int64_t clear_env_generation_ = -1;
-	// The post-particle overlay frames published (the submission id).
+	// The post-particle overlay frames published (the submission id), and
+	// the glare/glint model surfaces the tail draws (geometry read once).
 	uint64_t scene_overlay_frame_id_ = 0;
+	SceneOverlayModelSurfaces scene_overlay_bodies_;
 	bool clear_above_water_ = true;
 	// The render-occlusion frame (OcclusionFrame): the blink letter gates, the
 	// per-frame section-mask/portal apply, the probe A/B seam edges and the

@@ -238,7 +238,6 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_FOLIAGE_CAMERA_SIDE", opennova::renderer::kRungFoliageCameraSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_CAMERA_SIDE", opennova::renderer::kRungAlphaCameraSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_TRACER_CAMERA_SIDE", opennova::renderer::kRungTracerCameraSide);
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SUN_GLOW", opennova::renderer::kRungSunGlow);
 }
 
 Ref<Shader> ObjectShaderCache::get_shader_for_key(int32_t key) {

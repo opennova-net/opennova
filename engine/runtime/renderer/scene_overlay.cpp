@@ -145,8 +145,8 @@ void append_underwater_murk_overlay(const float rgb[3], uint8_t alpha_byte, floa
 }
 
 void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, const float *uvs,
-		std::size_t vertex_count, const float self_lum_rgb[3], float gain, float fog_visibility,
-		uint32_t texture, SceneOverlayFrame &out) {
+		std::size_t vertex_count, const float self_lum_rgb[3], const float light_scale_rgb[3],
+		float fog_visibility, uint32_t texture, SceneOverlayFrame &out) {
 	const std::size_t count = vertex_count - vertex_count % 3;
 	if (count == 0 || positions == nullptr || uvs == nullptr) {
 		return;
@@ -159,11 +159,11 @@ void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, cons
 	batch.texture = texture;
 	batch.first_vertex = vertex_index(out);
 	batch.vertex_count = static_cast<uint32_t>(count);
-	// sat(SelfLumColor x gain): the SELFLUM combine's diffuse term; the fog
-	// visibility rides the alpha so the shader fogs the saturated combine.
-	const float r = std::clamp(self_lum_rgb[0] * gain, 0.0f, 1.0f);
-	const float g = std::clamp(self_lum_rgb[1] * gain, 0.0f, 1.0f);
-	const float b = std::clamp(self_lum_rgb[2] * gain, 0.0f, 1.0f);
+	// sat(SelfLumColor x light scale): the SELFLUM combine's diffuse term; the
+	// fog visibility rides the alpha so the shader fogs the saturated combine.
+	const float r = std::clamp(self_lum_rgb[0] * light_scale_rgb[0], 0.0f, 1.0f);
+	const float g = std::clamp(self_lum_rgb[1] * light_scale_rgb[1], 0.0f, 1.0f);
+	const float b = std::clamp(self_lum_rgb[2] * light_scale_rgb[2], 0.0f, 1.0f);
 	const float fog = std::clamp(fog_visibility, 0.0f, 1.0f);
 	for (std::size_t i = 0; i < count; ++i) {
 		SceneOverlayVertex v;

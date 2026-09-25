@@ -164,7 +164,9 @@ void Celestial::_rebuild_if_needed() {
 	// The witnessed load policy (celestial_frame.h carries the cites): the
 	// sky bracket draws the discs BEFORE all world alpha; the glare is the
 	// frame's final draw. Rungs are single-sourced from
-	// engine/runtime/renderer/render_order (REN-3). The bloom pass redraws
+	// engine/runtime/renderer/render_order (REN-3); the glow and the glint
+	// draw in the post-particle overlay stage (their meshes leave every
+	// camera), so they keep the default rung. The bloom pass redraws
 	// the discs and the glow, never the glint (FrameFX_RenderBloomPass
 	// @ 0x582a77 / @ 0x582a80).
 	const Spec wanted[] = {
@@ -172,13 +174,13 @@ void Celestial::_rebuild_if_needed() {
 				opennova::renderer::Q3Source::CelestialBody, true },
 		{ "moon", env_data->get_moon_3di(), opennova::renderer::kRungSkyBody,
 				opennova::renderer::Q3Source::CelestialBody, true },
-		{ "glare", env_data->get_glare_3di(), opennova::renderer::kRungSunGlow,
+		{ "glare", env_data->get_glare_3di(), opennova::renderer::kRungAlphaCameraSide,
 				opennova::renderer::Q3Source::SunGlow, true },
 		// The water-reflected sun glint reuses the glare 3DI, mirrored below
 		// the eye [orig: update_sun_glare @ 0x5ad130 submits
 		// Celestial_GlareModel at camera + sun * 128 with the height term
 		// negated, flags 0x110, see docs/env/env-tod-re.md].
-		{ "glint", env_data->get_glare_3di(), opennova::renderer::kRungSunGlow,
+		{ "glint", env_data->get_glare_3di(), opennova::renderer::kRungAlphaCameraSide,
 				opennova::renderer::Q3Source::SunGlow, false },
 	};
 	// Rebuild only when the set of names actually changed (undo/scrub safe).

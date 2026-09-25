@@ -41,9 +41,10 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 	const float rgb[3] = {0.2f, 0.4f, 0.6f};
 	const float tri[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
 	const float uv[6] = {0, 0, 1, 0, 0, 1};
-	append_self_lum_overlay(SceneOverlaySlot::SunGlare, tri, uv, 3, rgb, 1.0f, 1.0f, 7, frame);
+	const float unit[3] = {1.0f, 1.0f, 1.0f};
+	append_self_lum_overlay(SceneOverlaySlot::SunGlare, tri, uv, 3, rgb, unit, 1.0f, 7, frame);
 	append_underwater_murk_overlay(rgb, 200, 5.0f, frame);
-	append_self_lum_overlay(SceneOverlaySlot::WaterGlint, tri, uv, 3, rgb, 1.0f, 1.0f, 7, frame);
+	append_self_lum_overlay(SceneOverlaySlot::WaterGlint, tri, uv, 3, rgb, unit, 1.0f, 7, frame);
 	std::vector<LightCoronaQuad> quads(1);
 	quads[0].half_size = 0.5f;
 	append_corona_overlay(quads, 3, frame);
@@ -138,7 +139,8 @@ void test_the_builders_carry_the_pass_states() {
 	const float tri[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
 	const float uv[6] = {0, 0, 1, 0, 0, 1};
 	const float self_lum[3] = {1.0f, 200.0f / 255.0f, 108.0f / 255.0f};
-	append_self_lum_overlay(SceneOverlaySlot::SunGlare, tri, uv, 3, self_lum, 2.0f, 0.75f, 4,
+	const float scale[3] = {2.0f, 2.0f, 2.0f};
+	append_self_lum_overlay(SceneOverlaySlot::SunGlare, tri, uv, 3, self_lum, scale, 0.75f, 4,
 			frame);
 	const SceneOverlayBatch &glare = frame.batches[2];
 	CHECK(glare.shading == SceneOverlayShading::SelfLumAdditive);

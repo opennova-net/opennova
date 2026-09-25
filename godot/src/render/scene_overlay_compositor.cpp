@@ -29,7 +29,11 @@
 #include <godot_cpp/classes/render_scene_data.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -139,6 +143,117 @@ std::uint32_t SceneOverlaySubmission::texture_index(const Ref<Texture2D> &p_text
 	}
 	textures.push_back(rid);
 	return static_cast<std::uint32_t>(textures.size() - 1);
+}
+
+const std::vector<SceneOverlayModelSurfaces::Geometry> &SceneOverlayModelSurfaces::geometry_for(
+		const Ref<Mesh> &p_mesh) {
+	const std::uint64_t key = p_mesh->get_rid().get_id();
+	auto found = geometry_.find(key);
+	if (found != geometry_.end()) {
+		return found->second;
+	}
+	std::vector<Geometry> surfaces;
+	for (int32_t surface = 0; surface < p_mesh->get_surface_count(); ++surface) {
+		Geometry geometry;
+		const Array arrays = p_mesh->surface_get_arrays(surface);
+		if (arrays.size() > Mesh::ARRAY_INDEX) {
+			const PackedVector3Array vertices = arrays[Mesh::ARRAY_VERTEX];
+			const PackedVector2Array uvs = arrays[Mesh::ARRAY_TEX_UV];
+			const PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+			const int64_t count = indices.is_empty() ? vertices.size() : indices.size();
+			for (int64_t i = 0; i + 2 < count; i += 3) {
+				for (int64_t corner = 0; corner < 3; ++corner) {
+					const int64_t at = i + corner;
+					const int64_t index = indices.is_empty() ? at : int64_t(indices[at]);
+					const bool valid = index >= 0 && index < vertices.size();
+					const Vector3 v = valid ? vertices[index] : Vector3();
+					const Vector2 uv = valid && index < uvs.size() ? uvs[index] : Vector2();
+					geometry.positions.push_back(static_cast<float>(v.x));
+					geometry.positions.push_back(static_cast<float>(v.y));
+					geometry.positions.push_back(static_cast<float>(v.z));
+					geometry.uvs.push_back(static_cast<float>(uv.x));
+					geometry.uvs.push_back(static_cast<float>(uv.y));
+				}
+			}
+		}
+		surfaces.push_back(std::move(geometry));
+	}
+	return geometry_.emplace(key, std::move(surfaces)).first->second;
+}
+
+int SceneOverlayModelSurfaces::append_instance(opennova::renderer::SceneOverlaySlot p_slot,
+		MeshInstance3D *p_instance, const float p_light_scale_rgb[3], float p_fog_visibility,
+		SceneOverlaySubmission &r_submission) {
+	const Ref<Mesh> mesh = p_instance->get_mesh();
+	if (mesh.is_null()) {
+		return 0;
+	}
+	const std::vector<Geometry> &surfaces = geometry_for(mesh);
+	const Transform3D placement = p_instance->get_global_transform();
+	int appended = 0;
+	for (std::size_t surface = 0; surface < surfaces.size(); ++surface) {
+		const Geometry &geometry = surfaces[surface];
+		const std::size_t vertex_count = geometry.uvs.size() / 2;
+		const Ref<ShaderMaterial> material =
+				p_instance->get_active_material(static_cast<int32_t>(surface));
+		if (vertex_count == 0 || material.is_null()) {
+			continue;
+		}
+		const Vector3 self_lum = material->get_shader_parameter("u_rgb_mod");
+		const Ref<Texture2D> texture = material->get_shader_parameter("u_diffuse");
+		const float self_lum_rgb[3] = { static_cast<float>(self_lum.x),
+			static_cast<float>(self_lum.y), static_cast<float>(self_lum.z) };
+		placed_.resize(vertex_count * 3);
+		for (std::size_t v = 0; v < vertex_count; ++v) {
+			const Vector3 world = placement.xform(Vector3(geometry.positions[v * 3 + 0],
+					geometry.positions[v * 3 + 1], geometry.positions[v * 3 + 2]));
+			placed_[v * 3 + 0] = static_cast<float>(world.x);
+			placed_[v * 3 + 1] = static_cast<float>(world.y);
+			placed_[v * 3 + 2] = static_cast<float>(world.z);
+		}
+		opennova::renderer::append_self_lum_overlay(p_slot, placed_.data(),
+				geometry.uvs.data(), vertex_count, self_lum_rgb, p_light_scale_rgb,
+				p_fog_visibility, r_submission.texture_index(texture), r_submission.frame);
+		++appended;
+	}
+	return appended;
+}
+
+int SceneOverlayModelSurfaces::append(opennova::renderer::SceneOverlaySlot p_slot,
+		Node *p_model, const float p_light_scale_rgb[3], float p_fog_visibility,
+		SceneOverlaySubmission &r_submission) {
+	if (p_model == nullptr) {
+		return 0;
+	}
+	int appended = 0;
+	if (MeshInstance3D *instance = Object::cast_to<MeshInstance3D>(p_model)) {
+		appended += append_instance(p_slot, instance, p_light_scale_rgb, p_fog_visibility,
+				r_submission);
+	}
+	for (int32_t i = 0; i < p_model->get_child_count(); ++i) {
+		appended += append(p_slot, p_model->get_child(i), p_light_scale_rgb, p_fog_visibility,
+				r_submission);
+	}
+	return appended;
+}
+
+void SceneOverlayModelSurfaces::take_over(Node *p_model) {
+	if (p_model == nullptr) {
+		return;
+	}
+	if (MeshInstance3D *instance = Object::cast_to<MeshInstance3D>(p_model)) {
+		if (instance->get_layer_mask() != 0) {
+			instance->set_layer_mask(0);
+		}
+	}
+	for (int32_t i = 0; i < p_model->get_child_count(); ++i) {
+		take_over(p_model->get_child(i));
+	}
+}
+
+void SceneOverlayModelSurfaces::clear() {
+	geometry_.clear();
+	placed_.clear();
 }
 
 class SceneOverlayCompositorEffect::Impl {

@@ -1,10 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <vector>
 
 #include <godot_cpp/classes/compositor_effect.hpp>
+#include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/render_data.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -27,6 +30,41 @@ struct SceneOverlaySubmission {
 	// The table index of a texture (each texture enters the table once);
 	// kSceneOverlayNoTexture for a null one.
 	std::uint32_t texture_index(const Ref<Texture2D> &p_texture);
+};
+
+// The SELFLUM surfaces of one model for the overlay tail: the sun glare and
+// the water glint, whose placement, UPL_INTENSITY submit value and Q3 copy
+// env/Celestial keeps while this stage draws them (retail submits both with
+// flags 0x110 at the scene tail: render_skybox_sun_glow @ 0x5ad0f7,
+// update_sun_glare @ 0x5ad470). Each mesh's triangle list is read once (the
+// authored geometry never changes) and placed by its instance's global
+// transform every frame; the SelfLumColor (u_rgb_mod) and the diffuse
+// texture (u_diffuse) come from the surface's live material.
+class SceneOverlayModelSurfaces {
+public:
+	// Append every mesh surface under `p_model` as one SELFLUM batch of
+	// `p_slot`; returns the batches appended.
+	int append(opennova::renderer::SceneOverlaySlot p_slot, Node *p_model,
+			const float p_light_scale_rgb[3], float p_fog_visibility,
+			SceneOverlaySubmission &r_submission);
+	// Take the model's meshes out of every camera (layer mask 0) so only the
+	// stage draws them; re-applied every frame because a model rebuild
+	// re-stamps its presentation layers.
+	static void take_over(Node *p_model);
+	void clear();
+
+private:
+	struct Geometry {
+		std::vector<float> positions; // local, 3 per vertex, triangle list
+		std::vector<float> uvs;       // 2 per vertex
+	};
+	const std::vector<Geometry> &geometry_for(const Ref<Mesh> &p_mesh);
+	int append_instance(opennova::renderer::SceneOverlaySlot p_slot,
+			MeshInstance3D *p_instance, const float p_light_scale_rgb[3],
+			float p_fog_visibility, SceneOverlaySubmission &r_submission);
+
+	std::map<std::uint64_t, std::vector<Geometry>> geometry_;
+	std::vector<float> placed_;
 };
 
 // The post-particle overlay stage of one view: a POST_TRANSPARENT compositor
