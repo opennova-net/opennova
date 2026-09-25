@@ -18,6 +18,7 @@ uniform float u_alpha_test_invert = 0.0;
 
 void vertex() {
 	v_water_mirror_pass = obj_water_mirror_pass_flag(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS);
+	v_static_point_light_row = INSTANCE_CUSTOM.x;
 	v_water_mirror_pass *= 1.0 + obj_water_clip_armed_flag(MODEL_MATRIX[3].xyz);
 	v_raw_uv = UV;
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
