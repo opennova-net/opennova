@@ -9,7 +9,10 @@ selection, and the frame's pass sequence, witnessed in retail `Jointops.exe`
 `godot/src/object/object_model.cpp`
 + `object_shader_cache.cpp` (ladder application),
 `godot/src/env/{celestial,water}.cpp` (the generalized
-priority ladder). Landed by maturity REN-3
+priority ladder); since the 2026-09-24 rendering parity pass also
+`engine/runtime/renderer/scene_overlay` (the post-particle overlay tail),
+`engine/runtime/renderer/frame_fx_effects` (the FrameFX screen effects) and
+`godot/src/render/{scene_overlay_compositor,frame_fx}.cpp`. Landed by maturity REN-3
 ([maturity-program.md](../maturity-program.md); standing rules
 [ADR 0023](../adr/0023-render-visual-parity.md) — the queue machinery is
 witness-source, never a port target; the ORDERING SEMANTICS are the port). The
@@ -20,17 +23,21 @@ pass-class functions in this record.
 
 | Component | Verdict | Evidence |
 |---|---|---|
-| Transparent ordering ladder (sky → far-water-side → water → camera-side → glow overlays) | MATCHING | frame bracket `[orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]`, rigid per-strip queue split `[orig: collect_render_objects_for_batch @ 0x5d8f20]`, bone-path submit flag `0x20` `[orig: collect_render_batches_for_entity @ 0x5d95c0..0x5d961f]`; `renderer_render_order` ctest + `renderer_state_vectors` section 3 + `object_model_runtime_gate_test.gd` |
+| Transparent ordering ladder (sky → far-water-side → water → camera-side → glow overlays) | MATCHING | frame bracket `[orig: Terrain_RenderWorldScene @ 0x5c93a0]`, rigid per-strip queue split `[orig: collect_render_objects_for_batch @ 0x5d8f20]`, bone-path submit flag `0x20` `[orig: collect_render_batches_for_entity @ 0x5d95c0..0x5d961f]`; `renderer_render_order` ctest + `renderer_state_vectors` section 3 + `object_model_runtime_gate_test.gd` |
 | Sort keys (opaque composite key; transparent `~float_bits` back-to-front) | MATCHING (key semantics ported as pure functions) | `[orig: @ 0x5d928e..0x5d92c8; @ 0x5d931c..0x5d9326]`; `renderer_state_vectors` sort-key vectors; the two original key quirks are D-RORD-6 (permanent candidates) |
 | Technique-class selection (submit flags + state-stack defaults → 6 classes) | MATCHING for the locked highest-quality path | `[orig: @ 0x5d90d7..0x5d9145; @ 0x5d95c0..0x5d961f]`; `renderer_state_vectors` pins selection and `auxiliary_technique_validation.json` pins each class behavior; D-RMAT-6 fixed |
 | Batch queue machinery (17-DWORD entries, CDynList68, per-frame quicksort) | witnessed / not a port target | ADR 0023: device-era artifact; the reimpl renderer owns its queues — semantics captured in the rows above |
 | Opaque state-sort (coarse depth slabs → effect index → fine depth, alpha-tested last) | witnessed / reimpl-internal equivalent | `[orig: RenderBatch_QuickSort @ 0x5d8b40]` unsigned-ascending + key layout below; Godot's opaque pass sorts front-to-back with its own state batching — same intent, D-RORD-2 permanent candidate |
-| Frame pass sequence (shadow slots → viewmodel → sky → world → overlays → bloom) | witnessed (confirm-only) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0; Terrain_RenderSceneWithReflection @ 0x5c93a0]`; correspondence row |
-| Viewmodel pass (near-Z 0.05 + viewport depth [0, 0.1], drawn FIRST, own flush) | witnessed / reimpl ported | the gun draws INSIDE the beauty pass: every viewmodel instance rewrites its clip position through the weapon `renderfov` focal ratio and the near-Z 0.05 swap, with the clip depth remapped into the nearest tenth of the reversed-Z range (the retail depth band — `shaders/viewmodel_pass.gdshaderinc`, `ObjectModel.set_viewmodel_pass`), so the world drawn after it never overlaps the gun and the murk/bloom composite covers scene and weapon alike; its alpha strips take `kRungViewmodel` (before the sky pass); `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60; Render_SwapProjectionNearZ @ 0x58a8f0; Render_SetViewportDepth01 @ 0x58a7b0]`; the pass's `viewportScaleY` is `flt_8409E8` — the same `Render_SetAspectRatioMode @ 0x58d870` scale the world pass gets through `Render_SetViewProjectionWithDefaults @ 0x58f6b0` — so the FP frustum equals the world frustum (`[orig: Player_RenderViewModelIfAlive @ 0x4e0154 pushes it; @ 0x4dee5a..0x4dee7f]`, net-re §5.40 eighth pass); D-RORD-4 |
-| EffectWorld particle ordering | BOUNDED deterministic port | `ParticleFrameCompiler` orders emitter AABB centers back-to-front with source-index ties, then particles within each emitter by depth/source index, before adjacent state runs. `ParticleCompositorEffect` draws every command sequentially with depth test/no write, so reimpl surface/material sorting cannot reorder packet commands; exact equivalence to retail's recursive alternating-axis/depth-bin order remains open `[orig: CParticleManager_RecursiveSortAndRender @0x5ec980; CParticleManager_RenderBatch @0x5e9890]` |
-| EffectWorld pass placement around water | BOUNDED (D-RORD-7) | the portable compiler applies retail's emitter-scope strict-below/above-inclusive split and reverses far/camera subsets with the main eye. Pass A is the PRE_TRANSPARENT compositor callback (before water and every transparent), pass B the POST_TRANSPARENT one; the mirror publishes the same camera-selected subsets as two consecutive POST effects using its own view basis. Residual: far-side object ALPHA strips draw after pass A instead of before it. The 2026-08-22 auxiliary view that captured sky + far-side alpha and restored it before pass A was withdrawn 2026-08-23 — it cost a second full-resolution scene render per frame for that residual |
-| Glow/envmap duplicate queue (Q3) + bloom flush | MATCHING for the locked highest-quality path | Producers publish typed object/water/celestial snapshots to `Q3FrameCompiler`; `FrameFx` executes its retained draw list into a compositor-owned full-resolution target attached to resolved beauty depth. LUM re-shades the SELFLUM NORMAL block (the GLOW slot is a copy of it), Glass emits depth-tested/no-depth-write rotated specular, and water draws its NV bright pass. The terminal reproduces the witnessed capture, 256² weighted blur, and half-strength additive FrameFX composite; D-RORD-5 and D-RORD-10 fixed. Two admission facts pinned 2026-08-29 on synthetic fixtures (`framefx_test`): an AlphaBlend LUM strip's copy carries SELFLUM's zero material alpha and paints nothing (`mount_mtrl2_ab_lum`), and a per-vertex skinned model never publishes a Q3 source at all (`person_mtrl0_ad_lum`): `Render_SubmitEntity @ 0x5dade0` sends a skinned model (modelData+16 & 1) to `collect_render_batches_for_entity @ 0x5d94b0`, which appends only the opaque list and the Q1/Q2 alpha queues (`@ 0x5d97ca`, `@ 0x5d983b`); the Q3 copy `@ 0x5d93b5..0x5d9447` is `collect_render_objects_for_batch`'s alone (`renderer::q3_object_source_admitted`; no shipped skinned shader tag carries the GLOW capability either, `kMaterialDescriptorTable`) |
-| Authored object RLOD selection | MATCHING (D-RORD-11 selector closed 2026-08-29; D-RORD-12 entity projection producer corrected 2026-09-13) | The native `ObjectProjectionSphere` supplies each ordinary entity's rotated CMDL midpoint and full half-diagonal, scaled once; persons use their initialized entity radius (type-185 model radius when flag 0x20 is set), composed head/body share the projection, and husks retain the primary graphic's sphere. `renderer::select_object_lod` walks the fine-to-coarse authored thresholds against the projected screen radius (`renderer::project_bound_sphere_radius_q16`, the witnessed integer projection) scaled by `renderer::object_lod_frame_scale` (detail 3 = 2.0 quality over the viewport width times 640; lower profiles detail * 0.33 + 0.34), with equality-to-coarser behavior, the coarsest-slot back-off (a final or zero-next row whose UNSCALED radius still exceeds it draws the level one finer), and the missing-level fallback; `kObjectLodSubPixelCullQ16` (0.75 px) drops an instance from every level before the selector. `ObjectModel.update_authored_lods` (individual models, each swapping the selected level onto its own retained surface slots) and `MissionObjectPlacer.update_static_lods` (every retained static instance, per entity inside the 512-unit bins) consume it each frame. Every RLOD remains retained (an individual model caches each level as mesh/material rows, a static graphic as one population per level) and a transition swaps the rows onto the model's slots or moves which level population carries the static slot's row, without rebuilding meshes. Device mechanism (2026-08-30, no semantic change: which level is drawn, when, and its blend/order are untouched): each level's population holds only the slots currently at its level, packed dense from row 0 with `visible_instance_count` = live rows, a crossing swap-removes the row from the old level's population and appends it to the new one (shadow twins and the blended global rows the same), and a population with no live row is hidden so the GPU and every viewport's cull see one row per live instance instead of a zero-scaled row per level. An individual model (animated, portal-carrying, live-PANM) retains ONE `MeshInstance3D` per surface slot, sized to its widest level, and a crossing swaps the level's cached mesh, material, ROBJ/skeleton parent, skin binding and Q3 source registration onto those slots in place (the build serial and the instance ids never move; a slot the coarser level has no submesh for is parked hidden; the placer's shadow-only siblings are bound to their harvested level through `ObjectModel.add_level_bound_visual` and follow the same switch), so every presented transform propagates through one instance per drawn strip rather than through every retained level's hidden instances (`object_model_lod_occluder_test`). Measured 2026-08-30 against the dense-population head on the same machine and protocol (1600x900, `perf_mission_rows` medians of p50, n=2 on 00TRa/CP01 and n=1 on CP19): the retained ObjectModel surface instances fell 1423 -> 560 / 4243 -> 1376 / 5828 -> 1640, the Q3 source registry 76 -> 30 / 63 -> 21 / 138 -> 45, the frame 14.65 -> 14.47 / 14.80 -> 14.50 / 17.45 -> 15.98 ms, `world` 7.97 -> 7.81 / 8.35 -> 8.11 / 11.16 -> 9.91 ms, `present_mission` 0.32 -> 0.30 / 0.42 -> 0.34 / 1.28 -> 0.70 ms and `world_runtime` 1.69 -> 1.69 / 2.15 -> 2.03 / 4.26 -> 3.46 ms, with root draw calls and primitives identical (hidden instances were never drawn). The per-frame selector walks are one flat pass each: `update_static_lods` projects every retained instance (`ObjectLodFrame::project_q16` rejects a sphere outside the frustum before projection arithmetic) and `update_authored_lods` keeps its switch/attachment scratch across frames. A per-512-unit-cell bound-sphere rejection ahead of the projection was tried and dropped 2026-08-30: at the mission spawn poses (most cells in view) every run's `world_material` p50 moved UP with it by 0.015-0.03 ms (CP01 0.326/0.327 -> 0.342/0.342 ms, 00TRa 0.318/0.342 -> 0.353/0.357 ms, n=2 each), a small uniform cost and no gain. Against master the two walks are `world_material`'s measured +0.20 / +0.17 / +0.19 ms (00TRa / CP01 / CP19, the `model_*` sub-rows flat at +0.00..+0.03 ms): the price of selecting a level per retained instance where master retained no level at all. A threshold crossing hard-switches the drawn level exactly as retail does: `Model_SelectRlodLevel @ 0x5c3b20` returns one level in EAX, the overlap fraction it also writes is dead retail data (global `0x29ACD9C`, read only by a callerless stub `@ 0x5c38c0`), and no submit, collector or flush cross-fades or dual-submits across a threshold. Attachments draw at the parent's level clamped to their own LOD count (`renderer::attachment_lod_index`; `ObjectModel.set_authored_lod_owner` stamps the third-person held weapon), and the composed avatar's head and body each walk their own table with the entity's one projected radius |
+| Frame pass sequence (shadow slots → sky → viewmodel → terrain surface → world → overlay tail → FrameFX → HUD) | witnessed (confirm-only; corrected 2026-09-24: the sky pass precedes the viewmodel) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0: SkyDome_RenderWithSkyfog (the sky pass) @ 0x5ca81a, Player_RenderViewModelIfAlive @ 0x5ca829, Terrain_RenderMainSectorPass (the terrain surface) @ 0x5ca867; Terrain_RenderWorldScene @ 0x5c93a0]`; the frame list below; correspondence row |
+| Viewmodel pass (near-Z 0.05 + viewport depth [0, 0.1], after the sky pass, own flush) | witnessed / reimpl ported (gates, blend order and fog ported 2026-09-24) | the gun draws INSIDE the beauty pass: every viewmodel instance rewrites its clip position through the weapon `renderfov` focal ratio and the near-Z 0.05 swap, with the clip depth remapped into the nearest tenth of the reversed-Z range (the retail depth band — `shaders/viewmodel_pass.gdshaderinc`, `ObjectModel.set_viewmodel_pass`), so the world drawn after it never overlaps the gun and the murk/bloom composite covers scene and weapon alike; its alpha strips take `kRungViewmodel`, AFTER the sky group, and the gun's blended strips are discarded where the opaque pass left a world depth (`viewmodel_world_covers`, `OBJ_BLENDED_PASS`), so later world draws paint over them exactly where retail's LESSEQUAL world draws wipe the no-z-write strips ("Let the world paint over the viewmodel's blended strips"); the gun takes the dry-pass fog (step 4 below, "Fog the viewmodel under the dry pass") and the retail draw gates (`fp_viewmodel_retail_submit`, "Port the first-person viewmodel draw gates"); `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60; Render_SwapProjectionNearZ @ 0x58a8f0; Render_SetViewportDepth01 @ 0x58a7b0]`; the pass's `viewportScaleY` is `flt_8409E8` — the same `Render_SetAspectRatioMode @ 0x58d870` scale the world pass gets through `Render_SetViewProjectionWithDefaults @ 0x58f6b0` — so the FP frustum equals the world frustum (`[orig: Player_RenderViewModelIfAlive @ 0x4e0154 pushes it; @ 0x4dee5a..0x4dee7f]`, net-re §5.40 eighth pass); D-RORD-4; GUT `viewmodel_blend_order_test`, ctest `player_view` |
+| EffectWorld particle ordering | MATCHING (deterministic port) | `ParticleFrameCompiler` orders emitter AABB centers back-to-front with source-index ties, then particles within each emitter by depth/source index, before adjacent state runs. `ParticleCompositorEffect` draws every command sequentially with depth test/no write, so reimpl surface/material sorting cannot reorder packet commands; retail's recursive alternating-axis/depth-bin order is ported (D-PTL-21 fixed 2026-08-22, [ptl-format-re.md](../particles/ptl-format-re.md)) `[orig: CParticleManager_RecursiveSortAndRender @0x5ec980; CParticleManager_RenderBatch @0x5e9890]` |
+| EffectWorld pass placement around water | MATCHING (D-RORD-7 closed 2026-09-24, "Draw particle pass A inside the transparent list") | the portable compiler applies retail's emitter-scope strict-below/above-inclusive split and reverses far/camera subsets with the main eye. Pass A (`EffectWorld_RenderParticlePass(0)` `@ 0x5c95b5`) draws inside the transparent list at `kRungParticleFarSide`, after the far-side alpha strips and tracers and before the far-side detail foliage and the water, as `ParticleFarPass` render-list runs (one shared sort origin, sorting offsets keep the compiler's order); only its distortion-pipeline commands stay on the PRE_TRANSPARENT compositor effect, and the class-7 distortion defs draw in FrameFX's type-0 row. Pass B is the POST_TRANSPARENT compositor effect; the mirror publishes the same camera-selected subsets as two consecutive POST effects using its own view basis. The thermal byte selects the secondary particle materials in both passes ("Bind the thermal secondary materials in particle pass A too") |
+| Glow/envmap duplicate queue (Q3) + bloom flush | MATCHING for the locked highest-quality path | Producers publish typed object/water/celestial snapshots to `Q3FrameCompiler`; `FrameFx` executes its retained draw list into a compositor-owned full-resolution target attached to resolved beauty depth. LUM re-shades the SELFLUM NORMAL block (the GLOW slot is a copy of it), Glass emits depth-tested/no-depth-write rotated specular, and water draws its NV bright pass. The terminal runs the bloom as the planner's DrawPass rows (`renderer::frame_fx_bloom_passes`): the altbuffer StretchRect into the power-of-two floor of (frame - 1) per axis (`[orig: create_frame_effect_render_targets @ 0x583c7f..0x583c97]`), its 256² downsample, the two weighted pairs (the first 90+270 degrees with its U taps x0.75, `[orig: FrameFX_BloomKernel @ 0x58429e; FrameFX_BuildWeightedTapQuad @ 0x5815da]`) and the half-strength SRCALPHA/ONE composite; D-RORD-5 and D-RORD-10 fixed. Two admission facts pinned 2026-08-29 on synthetic fixtures (`framefx_test`): an AlphaBlend LUM strip's copy carries SELFLUM's zero material alpha and paints nothing (`mount_mtrl2_ab_lum`), and a per-vertex skinned model never publishes a Q3 source at all (`person_mtrl0_ad_lum`): `Render_SubmitEntity @ 0x5dade0` sends a skinned model (modelData+16 & 1) to `collect_render_batches_for_entity @ 0x5d94b0`, which appends only the opaque list and the Q1/Q2 alpha queues (`@ 0x5d97ca`, `@ 0x5d983b`); the Q3 copy `@ 0x5d93b5..0x5d9447` is `collect_render_objects_for_batch`'s alone (`renderer::q3_object_source_admitted`; no shipped skinned shader tag carries the GLOW capability either, `kMaterialDescriptorTable`) |
+| Post-particle overlay tail (NVG lasers, precipitation, coronas, water glint, murk, sun glare) | MATCHING except the NVG IR laser (slot reserved, unported) (2026-09-24, "Draw the scene's post-particle tail in its own overlay stage", "Draw the water glint and the sun glare at the end of the overlay tail") | retail's scene core ends with a fixed tail after particle pass B `[orig: Terrain_RenderWorldScene @ 0x5c9695..0x5c9722]`; `renderer::scene_overlay` carries it as data (`kSceneOverlayOrder`, `kMirrorOverlayOrder`) with typed batch builders; GameWorld's `scene_overlay` leg gathers one immutable frame and each view's `SceneOverlayCompositorEffect` runs it after that view's particle pair and before FrameFx (§The post-particle overlay stage); ctest `renderer_scene_overlay`, GUT `scene_overlay_stage_test` |
+| FrameFX screen effects (distortion, damage/death blur, thermal, monitor, NVG) | MATCHING (2026-09-24, "Port FrameFX's screen effects and the NVG render-to-texture view", "Port the NVG view's scene raster, Scoped lens and Sighted card", "Draw the distortion particles and tracer ribbons in FrameFX's type-0 row") | `FrameFX_ApplyScreenEffect @ 0x584440` and `FrameFX_ApplyWeaponViewEffect @ 0x5845b0` are FrameFX's dispatchers (types 0/1/2/4 and 8/9), not shadow code; `renderer::plan_frame_fx` turns the frame's facts into the `FrameFX_DrawPass @ 0x582ab0` DrawPass rows in dispatch order (`[orig: Render_ProcessMainSceneFrame @ 0x5ca8f6..0x5caad5]`) and `FrameFxCompositorEffect` executes them; the first-person NVG view replaces the chain with the 512² scene / persistent 256² glow / tint composite (`[orig: @ 0x5ca516..0x5ca5cd; @ 0x5ca6ab..0x5ca73a]`). The NVG view's arms (`Render_ProcessMainSceneFrame @ 0x5ca516..0x5ca5b0` scene, `@ 0x5ca6f5..0x5ca73a` composite): the death screen and the binoculars take the full-screen composite; the Scoped byte takes `NVG_RenderScopedScene` (a square frustum at `ftol(flt_8409EC x 10485760 / zoom x 0.5)` Q16, no viewmodel) and the lens `NVG_DrawScopedLensThunk -> NVG_DrawScopedLens(1) @ 0x5d1d10` in place of the composite and the NVG mask; the Sighted byte takes `NVG_RenderSightedScene @ 0x5d2a50` (the frame's frustum at `ftol(5242880 / zoom)`, no viewmodel), whose `NVG_RenderSceneToTarget` draws the SIGHTS card into the 512 scene (`@ 0x5d08cb..0x5d0952`, overlayCtx 512 x 512), and the full-screen composite; otherwise `NVG_RenderScene` with the viewmodel. Every `NVG_RenderSceneToTarget` ends with the 64 x 16 polar unwrap (`@ 0x5d0a0e..0x5d0eb4`; eight blend-off passes, so pass 7 survives). The type-0 distortion sets draw through `FrameFxDistortionDrawer` (the effects device) with slot 2 bound to 256A / 256B. Ported: `renderer::frame_fx_nvg_view`, `renderer/nvg_scope_lens.h`, `NvgViewDevice`, `world::nvg_view_projection`; ctests `renderer_frame_fx_effects`, `renderer_nvg_scope_lens`, `player_view`, `local_player_view`; GUT `framefx_screen_effects_test`, `local_player_presenter_test` |
+| Tracer ribbon slots | MATCHING (2026-09-24, "Port the tracer ribbon build and its three materials") | `CEffectEmitterPool_RenderMainPass @ 0x5dcaf0` draws only when exactly one of its two arguments is nonzero (`@ 0x5dcaf0..0x5dcb05`); the scene calls it `(0, eyeBelow)` `@ 0x5c95ac` and `(1, eyeBelow)` `@ 0x5c9687`, eyeBelow = `setz @ 0x5c959d` over the eye-above latch `setnl @ 0x5c93b0`: below the water the ribbons draw in the far-side slot, at or above it in the camera-side slot. Ported as `renderer::tracer_rung` on `kRungTracerFarSide` / `kRungTracerCameraSide`; each channel is its own draw call in pool order (the slot walk `@ 0x5dcb17..0x5dcb2e`), not a joined per-family strip. The ribbon build and materials are world-wac-ai-re.md §25; ctest `renderer_tracer_frame` |
+| Scene projection near plane | MATCHING (2026-09-24, "Pin the world pass's 0.2 near plane in every camera mode") | `Render_ProcessMainSceneFrame` re-pins the near plane every frame, whatever the camera mode: `Render_SwapProjectionNearZ(flt_7C3340 = 0.2)` `[orig: @ 0x5ca4d7..0x5ca4e0]` (the device default `g_ProjectionNearZ` is the same 0.2 `@ 0x58ac0a`); only the viewmodel pass swaps in 0.05 (`@ 0x4dee1f..0x4dee29`) and restores 0.2 (`@ 0x4df0a0..0x4df0aa`). `renderer::kScenePassNearZ`, pinned by GameWorld's scene-environment leg on the render camera beside the far plane (live and frozen replay); the render-fixture capture probe no longer forces 0.05 |
+| Authored object RLOD selection | MATCHING (D-RORD-11 selector closed 2026-08-29; D-RORD-12 entity projection producer corrected 2026-09-13; threshold units and slot order, the per-model sub-pixel floor, the frame focal and every org0 overlay's owner corrected 2026-09-24) | The native `ObjectProjectionSphere` supplies each ordinary entity's rotated CMDL midpoint and full half-diagonal, scaled once; persons use their initialized entity radius (type-185 model radius when flag 0x20 is set), composed head/body share the projection, and husks retain the primary graphic's sphere. `renderer::select_object_lod` walks the fine-to-coarse authored thresholds against the projected screen radius (`renderer::project_bound_sphere_radius_q16`, the witnessed integer projection, with the focal from the image camera's surface width) scaled by `renderer::object_lod_frame_scale` (detail 3 = 2.0 quality over the viewport width times 640; lower profiles detail * 0.33 + 0.34): slot i is level i's own threshold, the RMDL integer pixel count shifted into Q16.16 by the loader (`renderer::rlod_threshold_q16_from_rmdl`), and the walk starts at slot 0 and advances while the scaled radius is at or below the slot (equality goes coarser), so a table whose first slot is 0 pins the model to LOD0 (79 JO models); the coarsest-slot back-off compares the UNSCALED radius with the previous level's threshold when the selected level is the last or its own slot is zero, and draws that finer level when it is exceeded; then the missing-level fallback ("Read RLOD thresholds as retail pixel counts in their own level slot"). `kObjectLodSubPixelCullQ16` (0.75 px) drops an instance from every level before the selector, on every world `ObjectModel` (placed, avatar, wire, husk; any level count) as well as the static populations; attachments take their owner's verdict ("Port the retail occlusion collector, mask and sub-pixel rules"). `ObjectModel.update_authored_lods` (individual models, each swapping the selected level onto its own retained surface slots) and `MissionObjectPlacer.update_static_lods` (every retained static instance, per entity inside the 512-unit bins) consume it each frame. Every RLOD remains retained (an individual model caches each level as mesh/material rows, a static graphic as one population per level) and a transition swaps the rows onto the model's slots or moves which level population carries the static slot's row, without rebuilding meshes. Device mechanism (2026-08-30, no semantic change: which level is drawn, when, and its blend/order are untouched): each level's population holds only the slots currently at its level, packed dense from row 0 with `visible_instance_count` = live rows, a crossing swap-removes the row from the old level's population and appends it to the new one (shadow twins and the blended global rows the same), and a population with no live row is hidden so the GPU and every viewport's cull see one row per live instance instead of a zero-scaled row per level. An individual model (animated, portal-carrying, live-PANM) retains ONE `MeshInstance3D` per surface slot, sized to its widest level, and a crossing swaps the level's cached mesh, material, ROBJ/skeleton parent, skin binding and Q3 source registration onto those slots in place (the build serial and the instance ids never move; a slot the coarser level has no submesh for is parked hidden; the placer's shadow-only siblings are bound to their harvested level through `ObjectModel.add_level_bound_visual` and follow the same switch), so every presented transform propagates through one instance per drawn strip rather than through every retained level's hidden instances (`object_model_lod_occluder_test`). Measured 2026-08-30 against the dense-population head on the same machine and protocol (1600x900, `perf_mission_rows` medians of p50, n=2 on 00TRa/CP01 and n=1 on CP19): the retained ObjectModel surface instances fell 1423 -> 560 / 4243 -> 1376 / 5828 -> 1640, the Q3 source registry 76 -> 30 / 63 -> 21 / 138 -> 45, the frame 14.65 -> 14.47 / 14.80 -> 14.50 / 17.45 -> 15.98 ms, `world` 7.97 -> 7.81 / 8.35 -> 8.11 / 11.16 -> 9.91 ms, `present_mission` 0.32 -> 0.30 / 0.42 -> 0.34 / 1.28 -> 0.70 ms and `world_runtime` 1.69 -> 1.69 / 2.15 -> 2.03 / 4.26 -> 3.46 ms, with root draw calls and primitives identical (hidden instances were never drawn). The per-frame selector walks are one flat pass each: `update_static_lods` projects every retained instance (`ObjectLodFrame::project_q16` rejects a sphere outside the frustum before projection arithmetic) and `update_authored_lods` keeps its switch/attachment scratch across frames. A per-512-unit-cell bound-sphere rejection ahead of the projection was tried and dropped 2026-08-30: at the mission spawn poses (most cells in view) every run's `world_material` p50 moved UP with it by 0.015-0.03 ms (CP01 0.326/0.327 -> 0.342/0.342 ms, 00TRa 0.318/0.342 -> 0.353/0.357 ms, n=2 each), a small uniform cost and no gain. Against master the two walks are `world_material`'s measured +0.20 / +0.17 / +0.19 ms (00TRa / CP01 / CP19, the `model_*` sub-rows flat at +0.00..+0.03 ms): the price of selecting a level per retained instance where master retained no level at all. A threshold crossing hard-switches the drawn level exactly as retail does: `Model_SelectRlodLevel @ 0x5c3b20` returns one level in EAX, the overlap fraction it also writes is dead retail data (global `0x29ACD9C`, read only by a callerless stub `@ 0x5c38c0`), and no submit, collector or flush cross-fades or dual-submits across a threshold. Attachments draw at the parent's level clamped to their own LOD count (`renderer::attachment_lod_index`; `ObjectModel.set_authored_lod_owner` stamps every org0 overlay: the held weapon, the parachute canopy, the goggles, the binoculars and the carried object, 2026-09-24), and the composed avatar's head and body each walk their own table with the entity's one projected radius. Multi-view: retail runs the collector, the sub-pixel floor and the RLOD walk once per scene pass (the main view and the weapon Inset pass each compute their own scale and projections); Godot draws both passes from one node per entity, so a model takes the finest level any view selects and drops only when every view that sees it projects it at or below 0.75 px (exact while the Inset pass is inactive) |
 
 ## Witness map
 
@@ -48,7 +55,10 @@ index at `+752` (`g_RenderStateStackTop @ 0x843780`); the active mirror/clip
 matrix at `+756` (`g_ActiveMirrorClipMatrix @ 0x843784`, 64 B); the
 water-split float at `+820` (`g_WaterSplitHeightFloat @ 0x8437C4`); the
 mirror-winding byte at `+840` (REN-2: CULLMODE CW when set); `+841` set at
-frame begin and every flush; dev collector toggles at `+843/+844` (written
+frame begin and every flush (the per-flush first-entry latch of
+`setup_entity_lighting_and_shader_constants`, which pushes the shared
+constants on each flush's first entry and clears it; render-material-re.md
+§Open questions); dev collector toggles at `+843/+844` (written
 only by `Input_HandleActionBinding @ 0x49ad40` — debug keybinds).
 `RenderBatchCtx_BeginFrame @ 0x5d8990` (sole per-frame reset, renamed from
 `RenderBatchCtx_BeginFrame`) zeroes the queue counts, bone count, stats, and stack top, and
@@ -73,14 +83,31 @@ mirrored-pass clip machinery (env #30).
 bound sphere projected into screen pixels, represented as Q16.16: the point
 projector computes `2^32 / depth`, `(focal << 16) * that + 0x8000 >> 16`,
 then `radius * that + 0x8000 >> 16`, and reports a fixed 4096 px when the
-depth is smaller than the radius. The sector-entity draw returns before the
-selector when that radius is at most 0.75 px (49152). The table is ordered
-fine/near to coarse/far; threshold slot 0 is unused, comparison starts at
-slot 1, and equality advances to the coarser level. The selected level is
-clamped to the final row; on the final row (or a row whose next threshold
-is zero) the UNSCALED radius must also exceed the row's threshold, or the
-level one finer is drawn. The submit then walks a missing model back toward
-lower indices (finer geometry). The frame multiplier is the detail profile's quality term
+depth is smaller than the radius. The focal is half the viewport WIDTH over
+tan(fov_h / 2), rounded: `viewport+0x40 = ftol(width x 0.5 / tan(fov_h / 2) +
+0.5)`, the fov at `viewport+0x3C` being Q16 degrees (`dbl_7C3620` =
+pi/180/65536) `[orig: Viewport_BuildProjectionMatrix @ 0x410fb0; (fov >> 1)
+x dbl_7C3620 @ 0x410fc0..0x410fdb, width @ 0x410fc3..0x410fd3, the quotient
++ 0.5 -> _ftol2_sse @ 0x410fe1..0x410ff7, stored @ 0x4110e1]`; the port
+derives the frustum from the camera drawing the frame's image (the stretched
+target's camera while live; the keep-aspect mode decides which axis the Godot
+fov names) and the focal from the surface width. The sector-entity draw
+returns before the selector when that radius is at most 0.75 px (49152). The
+table is ordered fine/near to coarse/far and slot i is level i's OWN
+threshold: the RMDL chunk authors an integer pixel count (Armry01 200, 60,
+20, 0; Ashed1 96, 38, 12, 0; 47gl_3RD 160, 64, 19, 6) that the loader shifts
+into Q16.16 in the level's own slot `[orig: ThreediGp_LoadFromFile
+@ 0x5b5bdf..0x5b5be5; the model is loader+4, ThreediGp_LoadModel @ 0x5b6273]`. The
+walk starts at slot 0 (model+0x40) and advances while the scaled radius is
+at or below the slot, so equality advances to the coarser level and a table
+whose first slot is 0 pins the model to LOD0 (79 JO models)
+`[orig: Model_SelectRlodLevel @ 0x5c3b3b..0x5c3b5a]`. The selected level is
+clamped to the final row; when the level is the last or its own slot is
+zero, the UNSCALED radius is compared with T[level-1] and, if it exceeds it,
+the level one finer is drawn `[orig: @ 0x5c3b5d..0x5c3b8c]` (corrected
+2026-09-24: the earlier reading had slot 0 unused and the walk starting at
+slot 1). The submit then walks a missing model back toward lower indices
+(finer geometry). The frame multiplier is the detail profile's quality term
 (`detail * 0.33 + 0.34`, replaced by the fixed 2.0 on the highest shipped
 profile 3) over the viewport width, times 640; a nonzero capture-quality
 override (`dword_B4C3C0`, an input-binding toggle that also forces the 512
@@ -113,19 +140,26 @@ replaces entity+48 as the RLOD table `@ 0x5c41b4..0x5c41b6`, so head and body
 each walk their own table with one radius. Attachments never run the walk:
 `BoneCallback_org0_World @ 0x4e3940` receives the parent's level as its frame
 index and indexes every overlay model with `min(level, graphicModel[4] - 1)`
-(the item overlay `@ 0x4e39c4..0x4e39ce`, NVG `@ 0x4e3b82..0x4e3b8c`,
+(the parachute canopy `@ 0x4e39c4..0x4e39ce`, NVG `@ 0x4e3b82..0x4e3b8c`,
 binoculars `@ 0x4e3c2d..0x4e3c37`, the held weapon `@ 0x4e3ce8..0x4e3cf2`,
-the mounted child `@ 0x4e3e34..0x4e3e51`), which is
+the carried object `@ 0x4e3e34..0x4e3e51`), which is
 `renderer::attachment_lod_index`, consumed by `ObjectModel.set_authored_lod_owner`
 (the third-person held weapon follows the head part of a composed avatar, the
-body otherwise; the NVG/binocular overlays take the same owner when they are
-ported). Bounded residual (2026-08-30): the mounted child is NOT yet stamped
-— riders are presented as independent wire entities (`entity_presenter_wire.cpp`
-carries no seat leg; the row's `PF_CARRIER_HANDLE` names the carrier) and
-walk their own thresholds from their own projected radius where retail
-indexes them with the vehicle's level `@ 0x4e3e34..0x4e3e51`; the stamp
-belongs beside the wire walk that positions them. The entity+36&4 / entity+52/+56 machinery with
-`compute_lod_fade_timers @ 0x5c3f40` (CTRL registers 65..70, span def+424
+body otherwise). The `@ 0x4e3e34..0x4e3e51` clamp is draw 6 of the PERSON
+callback, the CARRIED object (carrier+0x268, set by the carry attach
+`@ 0x43c144`, the CTF flag), not a vehicle's seat riders (corrected
+2026-09-24). Seated riders are collected independently in retail too: the
+entity collector (`collect_visible_entities_for_terrain @ 0x5c8c60`) has no
+parent test, it skips only Flags & 1 (`@ 0x5c8cef..0x5c8cf4`; riders carry
+0x40) and item type 5 (`@ 0x5c8dd7..0x5c8de0`), and stores each rider's own
+projected radius (`@ 0x5c8eca`), so riders walking their own thresholds IS
+retail. The carried object (draw 6) is PORTED (2026-09-24,
+`PersonOverlayModels`, "Draw the person overlays beside their bodies"): it
+draws at the carrier's first-submit level clamped to its own count, and the
+NVG/binocular/canopy overlays at each submit's level (draws 1, 3 and 4 are not
+gated on 0x10000000 and render in both submits of a composed avatar; the
+draw list is world-wac-ai-re.md §13.1). The entity+36&4 / entity+52/+56 machinery with
+`Entity_PublishSwapFadePhases @ 0x5c3f40` (CTRL registers 65..70, span def+424
 default 50, step def+428 default 25) is a controlled-material MODEL SWAP, not
 an RLOD fade. `[orig: Model_SelectRlodLevel @ 0x5c3b20, back-off
 @ 0x5c3b88..0x5c3b9b, dead fraction store @ 0x5c3bb3/0x5c3bc2; sub-pixel
@@ -133,7 +167,7 @@ gate and level consumption render_sector_entity @ 0x5c42de..0x5c42f0, forced
 table @ 0x5c41b4..0x5c41b6; projected-radius producer
 Viewport_TransformAndClipPoint @ 0x41177a..0x4117ec, stored per entry by
 collect_visible_entities_for_terrain @ 0x5c8eca; frame scale
-Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9499 and
+Terrain_RenderWorldScene @ 0x5c940c..0x5c9499 and
 Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c9121; override
 writers @ 0x5c08d1, @ 0x6106cb]`
 
@@ -151,13 +185,13 @@ ctx+843) or the object-path collector (`collect_render_objects_for_batch
 | `0x2` | PROJSHAD class |
 | `0x4` | DEPTHMASK class; object path renders opaque strips only (`@ 0x5d948b` breaks before the alpha pass) |
 | `0x8` | entry flag bit 2 = run only the technique's FIRST pass (`@ 0x5da23d`) |
-| `0x10` | entry flag bit 3 = force `ZFUNC = ALWAYS` for the entry — a per-entry z-read-off override (witnessed at REN-4 in the FlushBatches pass loop; else the pass zmode bit 0x80 picks ALWAYS/LESSEQUAL) |
+| `0x10` | entry flag bit 3 = force `ZFUNC = ALWAYS` for the entry — a per-entry z-read-off override (witnessed at REN-4 in the FlushBatches pass loop `@ 0x5da32a..0x5da341`; else the pass zmode bit 0x80 picks ALWAYS/LESSEQUAL); the sun glow and the water glint submit with it (0x110: the glow `@ 0x5ad0f7`, the glint `@ 0x5ad470`). `renderer::kSubmitZAlways` (was `kSubmitEntryBit3`, "consumer unwitnessed") |
 | `0x20` | bone path: transparents to Q2 instead of Q1 (the caller picks the water side) |
 | `0x40` | object path: alt-vertex-stream request for sub-objects (`robjIndex > 0`) |
 | `0x80` | alt-vertex-stream request (entry bit 1); used by parented sector entities (`entity+464`) and the armed viewmodel |
 | `0x100` | suppress the Q3 glow/envmap copy (used by celestial submits `@ 0x5acc0a`) |
 | `0x200` | MATCHTERRAIN class (the water-side waves' decal sub-pass) |
-| `0x10000000` | second-part marker of the two-model player avatar (NOT a dual-LOD "far then near" repeat draw; D-RORD-11): `Terrain_RenderSectorEntitiesBySide` draws the HEAD model first (`@ 0x5c7ffc`, after `Avatar_SetHeadCamoCtrl @ 0x57a370`) and then the BODY model with this flag (`@ 0x5c8020`, after `Avatar_SetBodyCamoCtrl @ 0x57a390`); its ONLY consumer is `BoneCallback_org0_World @ 0x4e3c87`, which skips the held-weapon (`@ 0x4e3d99`) and mounted-child (`@ 0x4e3e95`) overlay draws on the second part so they render once per entity (the NVG/binocular overlays are not gated; world §13). It never reaches the batch queues: `collect_render_objects_for_batch` tests only 0x1/2/4/8/0x40/0x80/0x100/0x200 |
+| `0x10000000` | second-part marker of the two-model player avatar (NOT a dual-LOD "far then near" repeat draw; D-RORD-11): `Terrain_RenderSectorEntitiesBySide` draws the HEAD model first (`@ 0x5c7ffc`, after `Avatar_SetHeadCamoCtrl @ 0x57a370`) and then the BODY model with this flag (`@ 0x5c8020`, after `Avatar_SetBodyCamoCtrl @ 0x57a390`); its ONLY consumer is `BoneCallback_org0_World @ 0x4e3c87`, which skips the held-weapon (`@ 0x4e3d99`) and carried-object (`@ 0x4e3e95`) overlay draws on the second part so they render once per entity (the canopy, NVG and binocular overlays are not gated; world §13). It never reaches the batch queues: `collect_render_objects_for_batch` tests only 0x1/2/4/8/0x40/0x80/0x100/0x200. `renderer::kSubmitAvatarSecondPart` (was `kSubmitRepeatDraw`) |
 
 **Batch entries** are 17 DWORDs: `[0]` strip ptr, `[1]` sort key, `[2]` bone
 list offset, `[3]` robj field / bone count, `[4]` flags (bit 0 = bone-path
@@ -220,7 +254,7 @@ mode 1/2/3/4 = sort+flush Q0/Q1/Q2/Q3 alone; **mode 0 = Q0, then Q2, then
 Q1** — the mini-scene flush (viewmodel, loading screen, UI/avatar previews,
 HUD 3D elements, the sky/celestial family, tile models, shadow slots — every
 caller outside the world pass uses mode 0). Q3 is flushed ONLY by
-`FrameFX_RenderBloomPass @ 0x582940` (mode 4 `@ 0x582a54`): the glow/envmap
+`FrameFX_RenderGlowSource @ 0x582940` (mode 4 `@ 0x582a54`): the glow/envmap
 duplicates draw during the bloom overlay after the scene. After flushing,
 counts reset; blend-op and fog state are restored.
 
@@ -230,9 +264,14 @@ backbuffer-sized altbuffer only because D3D9 keeps the beauty depth-stencil
 bound there (`FrameFX_CreateAltBufferTexture` creates it from the D3DPRESENT_PARAMETERS block
 with the backbuffer's size and multisample mode; nothing opaque is ever
 re-rasterized), and the only consumer of that surface is the StretchRect
-into the power-of-two capture feeding the 256² kernel
-(`create_frame_effect_render_targets @ 0x583c40`,
-`FrameFX_CaptureRenderTarget @ 0x584020`). `FrameFxCompositorEffect` owns a
+into the power-of-two capture (the highest power of two not above
+backbuffer - 1 per axis: 1920 x 1080 captures at 1024 x 1024;
+`create_frame_effect_render_targets @ 0x583c7f..0x583c97`) whose 256²
+downsample feeds the kernel (`FrameFX_CaptureAltBuffer
+@ 0x5840a6..0x5841c0`; the kernel itself is `FrameFX_BloomKernel @ 0x5841d0`, which
+calls `FrameFX_RenderGlowSource @ 0x584234` for the source only). The
+altbuffer is created by `IDirect3DDevice9::CreateRenderTarget` (vtable +0x70)
+`@ 0x58217e`, not CreateTexture. `FrameFxCompositorEffect` owns a
 full-resolution Q3 color target with resolved beauty depth attached.
 Main-thread producers publish generation-bound mesh, transform/bone, texture,
 and material values; `Q3FrameCompiler` rejects unsupported rows (a geometry
@@ -362,17 +401,37 @@ particle pair next. The GPU total is what the frame pays, and it is
 The render callback re-shades each LUM copy as the SELFLUM NORMAL block into
 the black-cleared Q3 target (`_FFP.fx` copies the NORMAL pass block into the
 GLOW slot `@ 0x5afc7f`: Diffuse1 x Detail MODULATE2X x RGB modulator x
-min(gain, 1) x 2, the wrapper's fog policy, alpha 0, so blended LUM
-contributes nothing and additive LUM adds its colour; nothing samples the
-beauty colour), then emits Glass's CubeRotSpecular and water's NV bright pass
-(`Water_PSBumpReflectNV`: `color *= saturate(luma(0.25,0.60,0.15)² − 0.15)`
-with the device fog color forced black — `render_water_surface(view, 1)
-@ 0x5c3442..0x5c3492`, `CD3DDevice_SetFogAndBlendMode(2) @ 0x6778ed`),
-then the celestial discs and the glare through the far-band viewport:
+sat(SelfLumColor x gain) x 2 (`renderer::q3_emissive_modulate2x`; the
+earlier min(gain, 1) form corrected 2026-09-24), the wrapper's fog policy,
+alpha 0, so blended LUM contributes nothing and additive LUM adds its colour;
+nothing samples the beauty colour), then emits Glass's CubeRotSpecular and
+water's NV bright pass (`Water_PSBumpReflectNV`: `color *=
+saturate(luma(0.25,0.60,0.15)² − 0.15)` with the device fog color forced
+black; the NV path `@ 0x5c3442..0x5c3458`, `CD3DDevice_SetFogAndBlendMode(2)
+@ 0x6778ed`). The bloom pass calls `render_water_surface(0, 1)`
+(`@ 0x582a59..0x582a5d`) unconditionally: no `g_WaterActive` or blink gate,
+only `render_water_surface`'s own gates (`Env_WaterHeightFixed` != 0, the
+camera STRICTLY above the water `@ 0x5c3304`, detail > 1). It regenerates the
+noise pair and marches the above-water rows with nightvision = 1 (the flat
+0.1 base `@ 0x5c2d5a`, specular RGB dropped `@ 0x5c2ef8`, mode-2 black fog,
+`Water_ShaderBlendNV`), and never draws underwater, so the Q3 copy has no
+underwater branch; the port's water owns a second strip (layer mask 0, the
+typed Q3 `WaterNightVision` source) marched with the NV row colours every
+frame the camera is above the water ("Port the water strip's texcoords,
+depth and nightvision redraw"; env-tod-re.md #29). Then the celestial discs
+(`render_celestial_bodies(1) @ 0x582a77`) and the glow
+(`render_skybox_sun_glow(0, 0) @ 0x582a80`) through the far-band viewport:
 `Render_SetViewportFarDepth @ 0x582a70` (MinZ 0.98 / MaxZ 0.99996948
 `@ 0x58a840`) remaps their depth into that band before the ordinary z-tested
-flush, so they survive only over cleared sky (`kQ3FarBandMinZ..MaxZ` in
-`renderer/q3_frame.h`; depth-tested, no depth writes). No Q3
+flush. The beauty depth they test was written through the scene viewport
+(`Render_SetViewport @ 0x58a720`, MinZ 0 / MaxZ 0.99996948), so a fragment at
+view depth w survives over beauty depth D iff MinZ + (MaxZ - MinZ) z(w) <=
+MaxZ z(D); the port scales its own reverse-Z depth by (MaxZ - MinZ) /
+SceneMaxZ (`q3_far_band_reverse_z` in `renderer/q3_frame.h`, "Test the bloom
+far band against the scene viewport's MaxZ"; depth-tested, no depth writes;
+env-tod-re.md §Celestial bodies). Each disc's colour is its authored SELFLUM
+material's RgbGen at the pass's UPL_INTENSITY, emissive sat(SelfLumColor x
+gain) x 2 ("Saturate the celestial bloom emissive like the SELFLUM copy"). No Q3
 viewport, camera mask, depth-occluder rerasterization, proxy geometry, or
 compatibility renderer remains. The beauty camera is standardized to mask
 `0x78C01` (the viewmodel layer folded in 2026-08-26, the terrain foliage
@@ -381,10 +440,13 @@ empty-sector flat terrain fallback bit 18 admitted 2026-09-13, also dropped by
 the mirror, terrain-re.md "Empty-sector flat fallback").
 
 The POST_TRANSPARENT `FrameFxCompositorEffect` performs the witnessed
-RenderingDevice sequence: RGBA8 capture of the full-resolution focused source
-into the 256² working target; a 256² four-tap downsample at 30° with base `1/2048`, radius
+RenderingDevice sequence as the planner's DrawPass rows
+(`renderer::frame_fx_bloom_passes`): RGBA8 capture of the full-resolution
+focused source into the power-of-two floor of (frame - 1) per axis, then its
+256² downsample; a four-tap downsample at 30° with base `1/2048`, radius
 `1/1024`, and weights `0.50@0.5`, `0.46@2.5`, `0.35@4.5`, `0.19@6.5`; additive
-weighted pairs at 90°/270° then 0°/180°; and a four-tap 45° final average at
+weighted pairs at 90°/270° (its U taps x0.75, the builders' `reduced` flag)
+then 0°/180°; and a four-tap 45° final average at
 radius `0.0027621093`, alpha 0.5, blended SRCALPHA/ONE over the beauty target.
 The terminal gamma decode follows that composite. Particle compositor assembly
 always places this terminal effect last, and built-in Godot glow is disabled.
@@ -464,7 +526,9 @@ native visibility producer; it carries the same midpoint, positive-side half
 and Q16 scale form since D-OCC-16 closed (2026-09-13, `occlusion_test`).
 
 **The frame** (`Render_ProcessMainSceneFrame @ 0x5ca0f0`, the live per-frame
-driver; camera above water shown — the sides mirror when underwater):
+driver; camera above water shown — the sides mirror when underwater;
+re-walked 2026-09-24, which corrected the sky/viewmodel order and the scene
+core's labels):
 
 1. `RenderBatchCtx_BeginFrame`; `Render_TerrainScene @ 0x610c80` runs the
    offscreen prep: the per-entity shadow-slot pass (`render_shadow_pass
@@ -473,103 +537,174 @@ driver; camera above water shown — the sides mirror when underwater):
    (`g_WaterActive @ 0x31BC918` → `Water_ReflectionPrerender @ 0x5c2780` →
    `render_main_scene @ 0x5c1240`, the reusable offscreen scene renderer also
    used by `render_cinematic_multiview @ 0x570940`), the environment cubemap
-   update, and the terrain lighting ramps.
-2. Clear: color = `Env_SkyfogBlock` above water / `Env_WaterColorLit` below
-   (`@ 0x5ca78b..0x5ca792`; gray 0x808080 in scope views).
-3. **Viewmodel first** (`Player_RenderViewModelIfAlive @ 0x4e0140`, renamed
-   from `sub_4E0140` — skips when dead or spectating): the gun+arms mini-scene
-   with projection near-Z swapped to 0.05 (`Render_SwapProjectionNearZ
-   @ 0x58a8f0`, renamed from `Scar_SetShadowBias`; the global is
-   `g_ProjectionNearZ @ 0x8409DC`, consumed by
-   `D3DXMatrixPerspectiveFovLH @ 0x58d9cc`) and the viewport depth range
-   clamped to `[0, 0.1]` (`Render_SetViewportDepth01 @ 0x58a7b0`, renamed
-   from `Scar_SubmitDecalToRenderObject` — it builds a D3D viewport
-   `{x,y,w,h,MinZ 0, MaxZ 0.1}`), per-weapon FOV (`renderfov` @ `Def+0x148`,
-   horizontal; the vertical is derived through the SAME `flt_8409E8` viewport
-   Y-scale the world pass uses — `Player_RenderViewModelIfAlive @ 0x4e0154`
-   pushes it as the pass argument, `Render_SetAspectRatioMode @ 0x58d870` sets
-   it to `target_ratio / (h/w)`, 0.96 in 16:10 mode on 1920×1200 — so the FP
-   and world frusta are identical, `proj[0][0] = cot(40°)` in both), a
-   state-stack push carrying the equipped weapon item's `light_transfer`
-   (`ItemDef+0x218`, entry dword 1 — a lighting term; the effect-scale dword 0
-   keeps 1.0, the sun factor is discarded), submits with flags 0x80 when armed,
-   pops, and flushes mode 0 — the compressed depth band keeps the world from
-   ever overlapping the gun. `[orig: Player_RenderFirstPersonViewModel
+   update, and the terrain lighting ramps. The world pass's near plane is
+   re-pinned to 0.2 every frame, whatever the camera mode
+   (`Render_SwapProjectionNearZ(flt_7C3340)` `@ 0x5ca4d7..0x5ca4e0`), beside
+   the far plane (§Projection and thermal-wave follow-up).
+2. Clear: color = 0x808080 in the THERMAL seat view (the thermal byte is
+   `Player_IsHeldWeaponThermal` `@ 0x5ca2da..0x5ca2e3`), else
+   `Env_SkyfogBlock` while the eye is strictly above the water, else
+   `Env_WaterColorLit` (`@ 0x5ca771..0x5ca792`; the `jle @ 0x5ca790` keeps the
+   lit water at eye == water height). The beauty frame is never cleared black
+   (render-occlusion-re.md §4).
+3. **Sky pass** (`SkyDome_RenderWithSkyfog @ 0x5ca81a` → `render_skybox @ 0x579080`): the
+   dome gradient pass (its draw `@ 0x5798dc`), then `render_celestial_bodies(0)`
+   (`@ 0x5798e0`), then the cloud pass (`@ 0x5798f1..0x579b15`), so the clouds
+   cover the sun and moon. Both dome passes run under pass flags 0x300000
+   (z-write off, ZFUNC ALWAYS): the dome never writes depth. The bracket is
+   skipped under blink bit 0x4 and whenever the eye is not strictly above the
+   water (`@ 0x5ca1a3..0x5ca1bd` → `@ 0x5ca7c4..0x5ca81a`; render-occlusion-re.md
+   §4). The celestial submits write the 16.16 alpha global
+   `g_CtrlGlobal_UplIntensity @ 0x83fde8` (the global CTRL register UPL_INTENSITY,
+   clamped [0, 0x10000] `@ 0x5acbdd..0x5acbfa`), which the authored SELFLUM
+   material's RgbGen reads at flush time, and pass flag 0x100 (no Q3 copy);
+   the sun and moon submit back to back and flush once, mode 0, each batch
+   restoring its own snapshotted register. No star field is drawn (its
+   renderer has no caller). Full witness: env-tod-re.md §Sky dome and
+   §Celestial bodies. The reimpl rungs are `kRungSkyDome` → `kRungSkyBody` →
+   `kRungSkyClouds` (§The ported ordering semantics).
+4. **Viewmodel** (`Player_RenderViewModelIfAlive @ 0x4e0140`, called
+   `@ 0x5ca829`, AFTER the sky pass; renamed from `sub_4E0140`): the gun is
+   skipped when the local entity is dead (Flags & 2 `@ 0x4e0145`) or a round
+   winner is set (`g_endround_winner_team` `@ 0x4e014b`). Inside
+   `Player_RenderFirstPersonViewModel`, an Emplaced weapon skips the showhud
+   bit-0 test (`@ 0x4dedd9..0x4dedf1`), and CanFire && IsScoped && def+0xC &
+   0x200 (INSET) skips the draw (`@ 0x4dedf7..0x4dee19`); ported as
+   `fp_viewmodel_retail_submit` / `FpViewmodelSubmitGates`
+   (`engine/runtime/world/player_present.h`, "Port the first-person viewmodel
+   draw gates"). The gun+arms mini-scene draws with projection near-Z swapped
+   to 0.05 (`Render_SwapProjectionNearZ @ 0x58a8f0`, renamed from
+   `Scar_SetShadowBias`; the global is `g_ProjectionNearZ @ 0x8409DC`,
+   consumed by `D3DXMatrixPerspectiveFovLH @ 0x58d9cc`; swapped in
+   `@ 0x4dee1f..0x4dee29`, 0.2 restored `@ 0x4df0a0..0x4df0aa`) and the
+   viewport depth range clamped to `[0, 0.1]` (`Render_SetViewportDepth01
+   @ 0x58a7b0`, renamed from `Scar_SubmitDecalToRenderObject` — it builds a
+   D3D viewport `{x,y,w,h,MinZ 0, MaxZ 0.1}`), per-weapon FOV (`renderfov` @
+   `Def+0x148`, horizontal; the vertical is derived through the SAME
+   `flt_8409E8` viewport Y-scale the world pass uses:
+   `Player_RenderViewModelIfAlive @ 0x4e0154` pushes it as the pass argument,
+   `Render_SetAspectRatioMode @ 0x58d870` sets it to `target_ratio / (h/w)`,
+   0.96 in 16:10 mode on 1920×1200, so the FP and world frusta are
+   identical, `proj[0][0] = cot(40°)` in both), a state-stack push whose aux
+   is the INTERIOR BUILDING's `light_transfer` (entity+0x1D0's ItemDef+0x218,
+   `@ 0x4def0a..0x4def3c`; the effect-scale dword keeps 1.0, the sun factor is
+   discarded), submits with flags 0x80 iff that interior building is nonzero
+   (`@ 0x4def52..0x4def6a`), pops, and flushes mode 0; the compressed depth
+   band keeps the world from ever overlapping the gun. The viewmodel draws
+   under the DRY pass fog even when the eye is underwater:
+   `Environment_ApplyFogAndAmbient(0, thermal)` `@ 0x5ca3bf..0x5ca3ce` runs
+   before it and the underwater re-apply `@ 0x5ca82e..0x5ca841` after it, with
+   the fog colour `SkyDome_RenderWithSkyfog` restores (`Env_FogBlock`
+   `@ 0x579ce6..0x579cf6`), or 0x808080 under thermal when the dome was drawn;
+   ported as `EnvironmentState::build_viewmodel_fog` into the globals
+   `opennova_viewmodel_fog_color` / `opennova_viewmodel_fog_range` ("Fog the
+   viewmodel under the dry pass"). `[orig: Player_RenderFirstPersonViewModel
    @ 0x4ded60; @ 0x4dee5a..0x4dee7f; @ 0x4def3c]`
-4. Sky pass (`Terrain_RenderSkyboxPass @ 0x610ac0`): dome → celestial bodies
-   → terrain surface, per the env record's witnessed order (env-tod-re.md
-   §Sky dome); the celestial submits write the 16.16 alpha global
-   `Render_SubmitAlpha16 @ 0x83fde8` (clamped [0, 0x10000] `@ 0x5acbdd..0x5acbfa`
-   — a real submit-alpha global, not a queue; the name stands) and pass flag
-   0x100 (no Q3 copy), flushing mode 0.
-5. The world (`Terrain_RenderSceneWithReflection @ 0x5c93a0`):
-   - sector models + the first entity wave → flush(1); the water-side wave
-     (`Terrain_RenderSectorEntitiesBySide @ 0x5c7d50`, renamed from
-     `Terrain_RenderSectorEntities_0` — arg selects BELOW(1)/ABOVE(0) water
-     entities by height vs `Env_WaterHeightFixed`) runs the far side:
-     MATCHTERRAIN sub-pass (submit 0x200, entities gated on `+300 & 0x300`)
-     → flush(1), then normal → flush(1); terrain LOD update → flush(1)
-   - **flush(3)** — the far-side (below-water) transparents
-   - trails (`CEffectEmitterPool_RenderMainPass @ 0x5dcaf0`; this record's earlier
-     `render_all_trail_strips` label was superseded in the IDB by the
-     `CEffectEmitterPool_*` family — see [correspondence.md](../correspondence.md))
-     + particle pass A (`EffectWorld_RenderParticlePass @ 0x5f7240` →
+5. **Terrain surface** (`Terrain_RenderMainSectorPass @ 0x610ac0`, called
+   `@ 0x5ca867`; the name is a misnomer, it draws no sky):
+   `Terrain_RenderSectorBatchLit @ 0x610c34`, then the render-slot drapes
+   `RenderSlot_DrawAllDrapes @ 0x610c47`; skipped indoors (`@ 0x5ca84f`).
+6. The world (`Terrain_RenderWorldScene @ 0x5c93a0`):
+   - sector models + the first (non-person) entity wave → flush(1)
+     (`@ 0x5c9506`, which carries the buildings' and vehicles' post-multiply
+     passes and draws no foliage masks);
+   - the far-side person waves (`Terrain_RenderSectorEntitiesBySide
+     @ 0x5c7d50`, renamed from `Terrain_RenderSectorEntities_0`; the arg
+     selects BELOW(1)/ABOVE(0) water entities by height vs
+     `Env_WaterHeightFixed`, the BySide list `0x2984890` holding ItemDef
+     type-3 persons only): the MATCHTERRAIN sub-pass (submit 0x200, entities
+     gated on `entity+0x12C & 0x300`, MoveOrder prone/crouch `@ 0x5c7dc2`)
+     `@ 0x5c9548` → flush(1) `@ 0x5c9557`, then the normal wave `@ 0x5c955f`
+     → flush(1) `@ 0x5c956e`; inside the wave, after its MATCHTERRAIN
+     sub-pass and before its queued entities, the foliage MODEL depth masks
+     draw immediately (`Foliage_UpdateModelTiles`); terrain LOD update →
+     flush(1) `@ 0x5c9581`;
+   - **flush(3)** `@ 0x5c9596`: the far-side (below-water) transparents;
+   - tracer pass 0 (`CEffectEmitterPool_RenderMainPass(0, eyeBelow)`
+     `@ 0x5c95ac`; this record's earlier `render_all_trail_strips` label was
+     superseded in the IDB by the `CEffectEmitterPool_*` family — see
+     [correspondence.md](../correspondence.md)), then particle pass A
+     (`EffectWorld_RenderParticlePass(0) @ 0x5c95b5` →
      `EffectWorld_DrawParticles @ 0x5f6680`, renamed from the
-     `CNapiSession_*` misnomers — `g_EffectWorld @ 0x2C25CD8`)
-   - decal/scar pass 0; **the water surface** (`Terrain_RenderWaterPass
-     @ 0x610640`, renamed from `sub_610640` → `render_water_surface
-     @ 0x5c32c0`, both view variants, self-gated by camera side)
-   - the camera-side (above-water) entity wave: MATCHTERRAIN → flush(1),
-     normal → flush(1); foliage batches; decal pass 1
-   - **flush(2)** — the camera-side (above-water) transparents
-   - trails + particle pass B; per-entity projectile trails; weather
-     particles; foliage billboards; sun-glare occlusion update
-   - underwater murk scissor overlay (`Terrain_RenderSceneWithReflection
-     @ 0x5c96c5..0x5c96fa`): the independent gate is
-     `camera_z <= Env_WaterHeightFixed` (`jg` skips), so equality is covered
-     even though the environment fog classifier uses strict `<`. It calls
-     `Terrain_DrawScissorRect @ 0x5c38e0` for the full current viewport with
-     RGB = `Env_WaterColorLit` and
-     `alpha = 0x80 - trunc(Env_WaterMurk * -96.0)` =
-     `128 + trunc(96 * murk)` (CP01 `0.8` -> `204/255`). The shader state is
-     standard `SRCALPHA` / `INVSRCALPHA`, so
-     `out = lit_water * alpha + prior * (1 - alpha)`; pass flags disable
-     Z-write and force ZFUNC ALWAYS. The early first-person viewmodel, world,
-     particles, weather, and foliage are therefore all attenuated, while the
-     HUD is not.
-   - skybox sun glow is drawn after the murk overlay (`@ 0x5c9714`) and before
-     the later HUD (`@ 0x5cad04`), so retail glare is deliberately not
-     attenuated by the underwater quad.
-   The 4th argument of `Terrain_RenderSceneWithReflection` is the THERMAL byte
-   (`@ 0x5ca8e3`; the IDB's `reflectionEnabled` is a misnomer, corrected 2026-09-10): under
+     `CNapiSession_*` misnomers — `g_EffectWorld @ 0x2C25CD8`);
+   - the far detail-foliage patches (`Foliage_RenderDetailPatchesPass(0)`
+     `@ 0x5c95c5`), then **the water surface** (`Terrain_RenderWaterPass
+     @ 0x610640`, renamed from `sub_610640`, called `@ 0x5c95dc` →
+     `render_water_surface @ 0x5c32c0`, both view variants, self-gated by
+     camera side; the vehicle wake rings draw inside it, `WaterRing_DrawAll`
+     `@ 0x5c3432`);
+   - the camera-side (above-water) person waves: MATCHTERRAIN `@ 0x5c9621`
+     → flush(1) `@ 0x5c9630`, normal `@ 0x5c9638` (with its MODEL masks) →
+     flush(1) `@ 0x5c9647`; then the impact scars (`Scar_DrawBatches
+     @ 0x5c9658`) and the camera-side detail foliage
+     (`Foliage_RenderDetailPatchesPass(1) @ 0x5c9665`);
+   - **flush(2)** `@ 0x5c967a`: the camera-side (above-water) transparents;
+   - tracer pass 1 (`@ 0x5c9687`), particle pass B (`@ 0x5c9690`);
+   - the post-particle overlay tail (§The post-particle overlay stage): the
+     NVG laser beams (`Render_NVGLaserBeamsForVisiblePersons @ 0x5c9695` → `Entity_RenderNVGLaserBeam`),
+     the precipitation (`render_weather_trail_particles @ 0x5c96a6`), the
+     coronas (`EffectWorld_RenderLightCoronas(1) @ 0x5c96ad`), the water
+     glint (`update_sun_glare @ 0x5c96c0`, only while the water height is
+     nonzero `@ 0x5c96b5`), the underwater murk (`Render_DrawViewportColorQuad
+     @ 0x5c96f5`), the modulator forced to 0xFF404040 (`@ 0x5c96fd` /
+     `@ 0x5c9702`), the sun glare `render_skybox_sun_glow(1, 1)`
+     (`@ 0x5c9714`, function `@ 0x5acd00`, skipped when the scene's stack arg
+     is zero, `test edi @ 0x5c970a`), and the modulator restored
+     (`@ 0x5c9722`). The murk's gate is `camera_z <= Env_WaterHeightFixed`
+     (`cmp/jg @ 0x5c96ca..0x5c96d1`), so equality is covered even though the
+     environment fog classifier uses strict `<`; it covers the full current
+     viewport with RGB = `Env_WaterColorLit` and `alpha = 0x80 -
+     trunc(Env_WaterMurk * -96.0)` = `128 + trunc(96 * murk)` (CP01 `0.8` ->
+     `204/255`, `@ 0x5c96d3..0x5c96f0`), standard `SRCALPHA` / `INVSRCALPHA`,
+     so `out = lit_water * alpha + prior * (1 - alpha)`; pass flags 0x300000
+     (`@ 0x5c39bd`) disable Z-write and force ZFUNC ALWAYS. The viewmodel,
+     world, particles, weather and foliage are therefore all attenuated, while
+     the glare after it and the HUD are not.
+   The 4th argument of `Terrain_RenderWorldScene` is the THERMAL byte
+   (`@ 0x5ca8e3`; the IDB parameter, once `reflectionEnabled`, is `thermalView` since 2026-09-25): under
    it each far-water-side BySide wave runs ONCE under the flat 0.25 block
    (`CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090` arg 1, `@ 0x5c9511` /
    `@ 0x5c95f8`) with its MATCHTERRAIN sub-pass (BySide 4th arg 1) skipped, then Build(0)
-   restores the grey world block (`@ 0x5c9534` / `@ 0x5c9616`). The mirror matrix/CLIP
-   machinery above is the reflection spec proper — env #30 (REN-6).
-6. Player shadow/scar dispatch (`Render_DispatchShadowByType @ 0x584440` —
-   the Scar_ decal/overlay family; out of REN port scope. The render-slot
-   ENTITY ground shadows are a different family and are ported — they render
-   at frame open (step 1's slot pass) and drape during the terrain scene
-   walk via `RenderSlot_DrawAllDrapes @ 0x5d6e20`; see
-   render-lighting-re.md's render-slot section): the death-lerp fade
-   (`type 4 @ 0x5caa3f`), the red damage vignette (`type 1 @ 0x5caa71`), then
-   the quality-3 FrameFX pass.
-7. **`FrameFX_RenderBloomPass` (flush 4 = Q3)** — corrected 2026-09-16: this
+   restores the grey world block (`@ 0x5c9534` / `@ 0x5c9616`); the same byte
+   (stored by `EffectWorld_RenderParticlePass @ 0x5f7274`) selects the
+   secondary particle materials in both particle passes
+   (`CParticleBatch_FlushAndBindMaterial @ 0x5e42bf..0x5e42db`). The mirror
+   matrix/CLIP machinery above is the reflection spec proper — env #30
+   (REN-6).
+7. **FrameFX screen effects** (`FrameFX_ApplyScreenEffect @ 0x584440` and
+   `FrameFX_ApplyWeaponViewEffect @ 0x5845b0`, the FrameFX dispatchers;
+   types 0 = distortion, 1 = damage blur, 2 = bloom, 4 = death blur, 8 =
+   thermal view, 9 = monitor scanlines; 3 and 5 have no live caller). In
+   order: type 0 unless dead in a session or under the red flash outside
+   camera mode 3, at FBEFFECTS >= 2 with a distortion channel or particle
+   (`@ 0x5ca8f6..0x5ca92e`; the backbuffer capture `@ 0x584463..0x58448b`);
+   then type 4 while dead (`d = clamp(tick - g_camera_lerp_start_tick - 30,
+   0, 200) / 15`, `@ 0x5ca9f5..0x5caa3f`) or type 1 under the red flash
+   (`p = word / 120`, `@ 0x5caa41..0x5caa71`); then the bloom (step 8); then
+   types 8/9 on the frame's CanFire latches for weapon.def flags2 & 4 / & 8
+   (`@ 0x5ca2da..0x5ca2f1`, `@ 0x5caa9c..0x5caad5`). The first-person NVG
+   view (`g_NVGActive && g_camera_mode == 0`) skips this whole step and
+   step 8 (`@ 0x5ca6ab..0x5ca73a` jumps to `@ 0x5cab1d`). The red damage
+   VIGNETTE is a separate quad in step 9 (`@ 0x5cabd5`). The render-slot
+   ENTITY ground shadows are not this family: they render at frame open
+   (step 1's slot pass) and drape in step 5 (render-lighting-re.md's
+   render-slot section). Ported as `renderer::plan_frame_fx` /
+   `FrameFxCompositorEffect` (the verdict row).
+8. **`FrameFX_RenderGlowSource` (flush 4 = Q3)** — corrected 2026-09-16: this
    step is NOT after the HUD. It is reached only through
-   `if (FrameFX_QualityAtLeast3()) Render_DispatchShadowByType(..., 2, ...)`
-   `@ 0x5caa7b..0x5caa97` → `sub_5841D0 @ 0x5844eb` →
-   `FrameFX_RenderBloomPass @ 0x584234` (its ONLY caller chain in the image),
+   `if (FrameFX_QualityAtLeast3()) FrameFX_ApplyScreenEffect(..., 2, ...)`
+   `@ 0x5caa7b..0x5caa97` → `FrameFX_BloomKernel @ 0x5844eb` →
+   `FrameFX_RenderGlowSource @ 0x584234` (its ONLY caller chain in the image),
    and that call sits **before** the scoped-view overlay fork
    `@ 0x5caae1..0x5cab26` (binocular mask / SIGHTS card / the scope circle mask
    `Hud_DrawScopeCircleMask @ 0x5cab15` / the entity markers) and before the
    whole HUD block `@ 0x5cab2b` onward. The reimpl already matches the binary:
    the FrameFX compositor effect runs as a viewport compositor pass and the HUD
    is a canvas layer drawn over its output.
-8. Radar/scope overlays and the HUD (`HUD_RenderAllOverlays @ 0x5a8070`,
-   mode-0 flushes for 3D HUD elements), the fullscreen feedback quads, fades,
-   tips.
-9. Present, `RenderBatchCtx_EndFrameStats`.
+9. Radar/scope overlays and the HUD (`HUD_RenderAllOverlays @ 0x5a8070`,
+   mode-0 flushes for 3D HUD elements), the fullscreen feedback quads (the
+   red damage vignette `@ 0x5cabd5`), fades, tips.
+10. Present, `RenderBatchCtx_EndFrameStats`.
 
 **Dead variants** (zero live callers; never order-witness from them):
 `render_skybox_layers @ 0x5ac230`, `render_sun_lens_flare @ 0x5ad490`,
@@ -580,25 +715,57 @@ driver; camera above water shown — the sides mirror when underwater):
 The reimpl keeps its own queues (ADR 0023); what ports is the ORDER as data +
 pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 
-- the transparent priority ladder (sky dome < celestial bodies < glare <
-  far-water-side world alpha < water surface < camera-side world alpha <
-  weather/particle overlays < glow), applied as Godot `render_priority`
-  rungs — `godot/src/env/celestial.cpp`'s local ladder re-derives from it,
-  `godot/src/env/water.cpp` takes the water rung, and `godot/src/object/object_model.cpp` assigns
-  blended object materials their water-side rung;
-- the BmTxMirrT P3 post-multiply rung (`kRungObjectPostMultiply = -3`,
-  between the celestial bodies and far-side alpha): retail has no separate
-  submit for P3 — it is a pass of the opaque strip's own technique, and
-  `CRenderBatchQueue_FlushBatches` runs every pass of one entry back to back
-  (`[orig: the pass loop @ 0x5da20b..0x5da23d; per-pass fog/blend
-  @ 0x5da2f7]`) inside the Q0 flush(1) brackets (`[orig: @ 0x5c9506..0x5c9581;
-  @ 0x5c9630..0x5c9647]`), never inside the Q1/Q2 flushes (`[orig: @ 0x5c9596;
-  @ 0x5c967a]`). Godot cannot blend inside its opaque stage, so the port's
-  rung is the lowest world slot above the sky: after every opaque, before
-  far-side alpha and the water. Bounded residual: retail's far-side opaque
-  flush follows the water pass (`@ 0x5c9630` after `Terrain_RenderWaterPass
-  @ 0x5c95dc`), so a far-side P3 multiplies over the drawn water there while
-  the single rung draws it beneath the water — same class as D-RORD-7;
+- the transparent priority ladder, applied as Godot `render_priority` rungs
+  (`renderer::kRung*` in `render_order.h`, mirrored by
+  `ObjectShaderCache.RENDER_RUNG_*`; renumbered for the retail frame slots
+  2026-09-24, "Renumber the render ladder for the retail frame slots", with
+  the later dome, mask and particle rungs): `kRungSkyDome` -15 (the dome
+  gradient, which writes no depth and so sits in Godot's transparent list;
+  without its rung it would paint over the bodies and clouds, "Open the sky
+  pass with the dome gradient's own rung"), `kRungSkyBody` -14, `kRungSkyClouds`
+  -13, `kRungViewmodel` -12, `kRungObjectPostMultiply` -11,
+  `kRungFoliageMaskFarSide` -10 (the far person wave's foliage MODEL masks,
+  `Foliage_UpdateModelTiles` inside the wave `@ 0x5c955f`), `kRungAlphaFarSide`
+  -9, `kRungTracerFarSide` -8, `kRungParticleFarSide` -7 (particle pass A),
+  `kRungFoliageFarSide` -6, `kRungWater` -5, `kRungWaterDecals` -4 (the vehicle
+  wakes, `WaterRing_DrawAll @ 0x5c3432` inside the water pass),
+  `kRungFoliageMaskCameraSide` -3 (the camera wave's masks `@ 0x5c9638`),
+  `kRungScars` -2 (`Scar_DrawBatches @ 0x5c9658`), `kRungFoliageCameraSide` -1,
+  `kRungAlphaCameraSide` 0 (Godot's default, so unclassified transparents land
+  there), `kRungTracerCameraSide` 1. Particle pass B and the post-particle
+  overlay tail are compositor passes, not rungs; the star rung is gone with
+  the dead star draw, and the former `kRungOverlayFx` / `kRungSunGlow` are gone
+  (the glare and the glint draw in the overlay stage).
+  `godot/src/env/celestial.cpp` takes the sky rungs, `godot/src/env/water.cpp`
+  the water rungs, and `godot/src/object/object_model.cpp` assigns blended
+  object materials their water-side rung. The foliage masks also draw into a
+  PRE_OPAQUE mask texture that the person consumers' opaque shaders test
+  ([foliage-re.md](../foliage/foliage-re.md) D-FOLIAGE-10);
+- the BmTxMirrT P3 post-multiply rung (`kRungObjectPostMultiply`, after the
+  sky group and the viewmodel, before both foliage-mask rungs and every world
+  transparent): retail has no separate submit for P3: it is a pass of the
+  opaque strip's own technique, and `CRenderBatchQueue_FlushBatches` runs
+  every pass of one entry back to back (`[orig: the pass loop
+  @ 0x5da20b..0x5da23d; per-pass fog/blend @ 0x5da2f7]`) inside the Q0
+  flush(1) brackets (`[orig: @ 0x5c9506..0x5c9581; @ 0x5c9630..0x5c9647]`),
+  never inside the Q1/Q2 flushes (`[orig: @ 0x5c9596; @ 0x5c967a]`). Godot
+  cannot blend inside its opaque stage, so the port's rung is the lowest
+  world slot above the sky: after every opaque, before far-side alpha and the
+  water. The buildings' and vehicles' P3 passes flush with the non-person
+  sector wave (flush(1) `@ 0x5c9506`, after `Terrain_RenderSectorEntities`,
+  which draws no masks), before either person wave, so the rung also precedes
+  both mask rungs; person P3 layers test the mask texture themselves. The
+  former "far-side P3 after the water" residual was mis-sided and is deleted
+  (2026-09-24): the far-side BySide wave and its Q0 flushes (`@ 0x5c9548` /
+  `@ 0x5c955f` → `@ 0x5c9557` / `@ 0x5c956e`) run BEFORE
+  `Terrain_RenderWaterPass` (`@ 0x5c95dc`), the same as the single rung; the
+  flush `@ 0x5c9630` after the water belongs to the camera-side wave;
+- the submit-flag names: `kSubmitZAlways` = 0x10 (entry bit 3 forces ZFUNC
+  ALWAYS `@ 0x5da32a..0x5da341`) and `kSubmitAvatarSecondPart` = 0x10000000
+  (the composed avatar's body part), formerly `kSubmitEntryBit3` and
+  `kSubmitRepeatDraw`;
+- the scene pass near plane `renderer::kScenePassNearZ` = 0.2 beside
+  `scene_far_plane` (the verdict row);
 - `opaque_sort_key()` / `transparent_sort_key()` / `transparent_queue_for()`
   / `technique_class_for_submit()` — the witnessed key and class semantics,
   T1-pinned (`renderer_state_vectors` section 3) so future port slices
@@ -611,15 +778,15 @@ pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 | D-RORD-1 | No global transparent ordering: water, world alpha, and weather all at priority 0 (one depth-sorted queue); the celestial ladder local to the celestial presenter (now `godot/src/env/celestial.cpp`) | fixed pass bracket: sky → far-water-side alpha → water → camera-side alpha → overlays → glow (`[orig: @ 0x5c93a0]`) | FIXED (this slice: the ladder in `engine/runtime/renderer/render_order`, applied at celestial/water/object-model sites) |
 | D-RORD-2 | Reimpl-internal opaque ordering (Godot front-to-back + its own state batching) | per-frame CPU quicksort by the composite key (alpha-test bit → 256-unit depth slabs → effect index → fine depth) (`[orig: @ 0x5d8b40; @ 0x5d928e]`) | PERMANENT-candidate (class C): same intent, device-era mechanism; key semantics preserved as T1-pinned functions |
 | D-RORD-3 | One retained material instance per alpha strip; rigid strips classify their transformed authored min/max center whenever their model transform or the water plane changes (a transform notification re-runs the classifier in place; still models park), bone-path strips use the submitting entity side, and the ladder mirrors with the adjusted render-eye side | rigid path: per strip and per frame (`[orig: @ 0x5d932e..0x5d9354]`); bone path: caller-selected Q1/Q2 via submit flag `0x20` (`[orig: @ 0x5d95c0..0x5d961f]`) | **FIXED (2026-08-22; change-driven 2026-08-23)** — straddling, transform changes, and both camera sides are runtime-pinned |
-| D-RORD-4 | Viewmodel is a camera-tracked node with no depth treatment (clips into near walls) | drawn FIRST with near-Z 0.05 + viewport depth range [0, 0.1], own mode-0 flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | RESOLVED — ported 2026-07-09 as a dedicated shared-world SubViewport composite; re-ported 2026-08-26 INSIDE the beauty pass: a shader-side projection override per viewmodel instance (renderfov focal ratio, near 0.05, clip depth remapped into the nearest tenth of the reversed-Z range = the retail depth band) so the gun is under the murk/bloom composite like retail and no second full-window scene render exists. Bounded residual: Godot alpha strips write no depth, so a world transparent nearer than the band could blend over gun glass (retail's Z-write state for the viewmodel flush is unwitnessed) |
-| D-RORD-5 | GLOW was hosted through Forward+ HDR extraction instead of retail's isolated Q3 target and FrameFX kernel | strips with effect capability 0x10000000 get a Q3 copy (GLOW class when present), flushed by `FrameFX_RenderBloomPass` together with the NV water redraw, the celestial bodies, and the sun glow (`[orig: @ 0x5d93b5; @ 0x582a54..0x582a80]`) | **FIXED (2026-08-22; source replaced 2026-08-29)** — typed LUM NORMAL-copy, Glass CubeRotSpecular, water NV, celestial/sun draws, capture, weighted blur/final kernel, SRCALPHA/ONE composite, and terminal ordering are native and RenderingDevice-pinned; no glow proxies or compatibility path remain |
+| D-RORD-4 | Viewmodel is a camera-tracked node with no depth treatment (clips into near walls) | drawn right after the sky pass (before every world draw; the earlier "drawn FIRST" reading corrected 2026-09-24) with near-Z 0.05 + viewport depth range [0, 0.1], own mode-0 flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | RESOLVED — ported 2026-07-09 as a dedicated shared-world SubViewport composite; re-ported 2026-08-26 INSIDE the beauty pass: a shader-side projection override per viewmodel instance (renderfov focal ratio, near 0.05, clip depth remapped into the nearest tenth of the reversed-Z range = the retail depth band) so the gun is under the murk/bloom composite like retail and no second full-window scene render exists. The Z-write residual is witnessed and closed 2026-09-24: blended FF strips have NOWRITE forced (`@ 0x5afc8d..0x5afcaa`) and ZWRITEENABLE = ~(passflags >> 6) & 1 (`@ 0x5da318..0x5da324`); the "nearer world transparent over gun glass" worry does not arise, because world depth enters the [0, 0.1] band only within about 0.222 u in retail (viewport MaxZ 0.1 vs 0.99997, near 0.05 vs 0.2) and in the port alike. The real residual was the sky/world-over-strip order, fixed by "Let the world paint over the viewmodel's blended strips" (the viewmodel rung after the sky group; blended strips discarded where the opaque pass left a world depth) |
+| D-RORD-5 | GLOW was hosted through Forward+ HDR extraction instead of retail's isolated Q3 target and FrameFX kernel | strips with effect capability 0x10000000 get a Q3 copy (GLOW class when present), flushed by `FrameFX_RenderGlowSource` together with the NV water redraw, the celestial bodies, and the sun glow (`[orig: @ 0x5d93b5; @ 0x582a54..0x582a80]`) | **FIXED (2026-08-22; source replaced 2026-08-29)** — typed LUM NORMAL-copy, Glass CubeRotSpecular, water NV, celestial/sun draws, capture, weighted blur/final kernel (the capture at the power-of-two floor of the frame, the first weighted pair's U taps x0.75), SRCALPHA/ONE composite, and terminal ordering are native and RenderingDevice-pinned; no glow proxies or compatibility path remain |
 | D-RORD-6 | Not reproduced | two original key quirks: opaque key bits 15+ carry residual stack garbage (`@ 0x5d92b9`), and the transparent key lags one strip within a render object (`@ 0x5d9326` vs the `fst @ 0x5d9347` overwrite) | PERMANENT-candidates (original-bug/garbage class): reproducing either manufactures garbage (ADR 0022) |
-| D-RORD-7 | Two immutable main-view particle submissions use the exact emitter-scope water predicate: strict `< water` below, equality above, with far/camera order reversing at the main eye. Pass A is the PRE_TRANSPARENT compositor callback (before every transparent, water included) and pass B the POST_TRANSPARENT one; the mirror pair is consecutive after reflected geometry, selected by the main-camera side. Far-side object ALPHA strips therefore draw AFTER pass A | two calls to the global particle manager: pass A between far-side transparents and water, pass B after camera-side transparents (`[orig: Terrain_RenderSceneWithReflection @0x5c93a0; EffectWorld_RenderParticlePass @0x5f7240; CParticleGroup_RenderChildren @0x5e5890]`). Reflection receives the main-camera `< water` boolean and calls its two particle passes consecutively after reflected geometry (`[orig: render_main_scene @0x5c16ed..0x5c171f; Water_RenderReflectedWorldScene @0x5c8510]`) | OPEN (bounded) — the residual is a submerged/far-side transparent strip overlapping a far-side particle in screen space (strip-over-particle instead of particle-over-strip). The 2026-08-22 auxiliary far-alpha view closed it at the price of a second full-resolution scene render every frame and was withdrawn 2026-08-23; `framefx_test.gd` keeps the water-attenuation differential (far packet attenuated by water, camera packet not). The portable adversarial sorter contract separately pins retail's projected Z→X→Y recursive leaves and non-stable equal-key order (D-PTL-21 fixed). Reopen only with a scene that shows the strip/particle overlap |
-| D-RORD-8 | FIXED 2026-08-12. `GameFramePipeline` now runs session tick → local-view placement → terrain → foliage → the remaining device legs. Terrain samples the live viewport camera internally and foliage receives `GameWorld._render_camera_xform()`, so both compile from the view this frame's player state produced; foliage retains the frame-entry transform when no live camera exists, while terrain has no headless draw. Occlusion's post-present slot stands — present re-asserts base visibility, occlusion layers hides, Godot renders after both | collect-then-submit runs inside the render frame, before submission, against the view built from current player state (`Render_ProcessMainSceneFrame @0x5ca0f0`) | MATCHING for the camera-phase contract; `game_frame_pipeline_test` pins the order and a post-present camera-generation marker for both terrain and foliage |
-| D-RORD-10 | The Q3 bloom source was a second shared-world scene submission that rerasterized terrain/opaque depth occluders at kernel size | retail draws Q3 objects, NV water, celestial bodies, and sun glow into a backbuffer-sized altbuffer with beauty depth-stencil still bound; the only consumer is the StretchRect into the power-of-two capture (`[orig: FrameFX_RenderBloomPass @ 0x582940; FrameFX_CreateAltBufferTexture altbuffer CreateRenderTarget @ 0x58217e; create_frame_effect_render_targets @ 0x583c40; FrameFX_CaptureRenderTarget @ 0x584020]`) | **FIXED (2026-08-29)** — `Q3FrameCompiler` retains the retail bracket and typed generation-bound inputs; the terminal compositor draws them into one full-resolution Q3 attachment sharing resolved beauty depth from a retained per-source geometry cache (no per-frame server readback or re-upload). No auxiliary camera/view, camera-mask shader selection, or depth rerasterization remains |
-| D-RORD-11 | The authored RLOD selector, its coarsest-slot back-off, the frame scale, the integer projected radius and the sub-pixel cull are ported, every level remains retained (individual models and the per-instance static populations alike), a threshold crossing hard-switches the drawn level, attachments take the parent's level clamped to their own count (`renderer::attachment_lod_index`, the held weapon through `ObjectModel.set_authored_lod_owner`), and the composed avatar's head and body select independently from one projected radius | the same: `Model_SelectRlodLevel @ 0x5c3b20` returns one level (EAX); its overlap fraction is written only to `0x29ACD9C`, read solely by the callerless stub `@ 0x5c38c0`, and no submit/collector/flush consumes it. The `0x10000000` pair at `@ 0x5c7ffc`/`@ 0x5c8020` is the head+body avatar, not a far/near dual submission; overlays index their LOD with the parent's level `@ 0x4e39c4..0x4e3e51` | **FIXED (MATCHING, 2026-08-29)** — the "dual-submit through the overlap fraction" reading was refuted at the binary: the hard switch IS retail's behaviour, the dead `blend_fraction` output was deleted from `renderer::select_object_lod`, and the attachment rule was ported (`object_lod` ctest, `object_model_lod_occluder_test`, `wire_present_pass_test`). Bounded residual: only the third-person held weapon is stamped with an owner; mounted riders (`@ 0x4e3e34..0x4e3e51`) and the unported NVG/binocular overlays still select their own level (the witness map names the leg) |
+| D-RORD-7 | Particle pass A was the PRE_TRANSPARENT compositor callback (before every transparent, water included) and pass B the POST_TRANSPARENT one, so far-side object ALPHA strips drew AFTER pass A (a submerged strip overlapping a far-side particle composited strip-over-particle) | two calls to the global particle manager: pass A between far-side transparents and water, pass B after camera-side transparents (`[orig: Terrain_RenderWorldScene @0x5c93a0; EffectWorld_RenderParticlePass @0x5f7240; CParticleGroup_RenderChildren @0x5e5890]`). Reflection receives the main-camera `< water` boolean and calls its two particle passes consecutively after reflected geometry (`[orig: render_main_scene @0x5c16ed..0x5c171f; Water_RenderReflectedWorldScene @0x5c8510]`) | **FIXED (2026-09-24, "Draw particle pass A inside the transparent list")**: pass A (`EffectWorld_RenderParticlePass(0) @0x5c95b5`) draws inside the transparent list at `kRungParticleFarSide`, after the far-side ALPHA strips (`kRungAlphaFarSide`) and tracers (`kRungTracerFarSide`) and before the far detail foliage and the water, as `ParticleFarPass` render-list runs (one shared sort origin; sorting offsets keep the compiler's order). Only its distortion-pipeline commands stay on the PRE_TRANSPARENT compositor effect; the class-7 distortion defs draw in FrameFX's type-0 row. The emitter-scope water predicate, subset reversal, recursive packet order (D-PTL-21) and the mirror's consecutive POST pair are unchanged; `framefx_test.gd` keeps the water-attenuation differential |
+| D-RORD-8 | FIXED 2026-08-12. `GameFramePipeline` now runs session tick → local-view placement → terrain → the remaining device legs, with foliage after occlusion (2026-09-24: the MODEL anchors are that frame's collected entities, so the `foliage` leg follows the `occlusion` leg in the live table and in the frozen-pose replay, `godot/src/world/game_world_frame.cpp`). Terrain samples the live viewport camera internally and foliage receives `GameWorld._render_camera_xform()`, so both compile from the view this frame's player state produced; foliage retains the frame-entry transform when no live camera exists, while terrain has no headless draw. Occlusion's post-present slot stands — present re-asserts base visibility, occlusion layers hides, Godot renders after both | collect-then-submit runs inside the render frame, before submission, against the view built from current player state (`Render_ProcessMainSceneFrame @0x5ca0f0`) | MATCHING for the camera-phase contract; `game_frame_pipeline_test` pins the order and a post-present camera-generation marker for both terrain and foliage |
+| D-RORD-10 | The Q3 bloom source was a second shared-world scene submission that rerasterized terrain/opaque depth occluders at kernel size | retail draws Q3 objects, NV water, celestial bodies, and sun glow into a backbuffer-sized altbuffer with beauty depth-stencil still bound; the only consumer is the StretchRect into the power-of-two capture (`[orig: FrameFX_RenderGlowSource @ 0x582940; FrameFX_CreateAltBufferTexture altbuffer CreateRenderTarget @ 0x58217e; create_frame_effect_render_targets @ 0x583c40; FrameFX_CaptureAltBuffer @ 0x584020]`) | **FIXED (2026-08-29)** — `Q3FrameCompiler` retains the retail bracket and typed generation-bound inputs; the terminal compositor draws them into one full-resolution Q3 attachment sharing resolved beauty depth from a retained per-source geometry cache (no per-frame server readback or re-upload). No auxiliary camera/view, camera-mask shader selection, or depth rerasterization remains. The viewmodel's exclusion from Q3 is settled (2026-09-24, "Settle the viewmodel's Q3 exclusion note in FrameFx"): retail flushes Q3 under the world projection and the full viewport (`Render_SetViewport @ 0x582a45`) against the beauty depth, so the gun's copies are self-occluded by the gun's band depth and excluding them is observably equivalent (unverified only when the world FOV differs from `renderfov` while the gun is shown) |
+| D-RORD-11 | The authored RLOD selector, its coarsest-slot back-off, the frame scale, the integer projected radius and the sub-pixel cull are ported, every level remains retained (individual models and the per-instance static populations alike), a threshold crossing hard-switches the drawn level, attachments take the parent's level clamped to their own count (`renderer::attachment_lod_index`, the held weapon through `ObjectModel.set_authored_lod_owner`), and the composed avatar's head and body select independently from one projected radius | the same: `Model_SelectRlodLevel @ 0x5c3b20` returns one level (EAX); its overlap fraction is written only to `0x29ACD9C`, read solely by the callerless stub `@ 0x5c38c0`, and no submit/collector/flush consumes it. The `0x10000000` pair at `@ 0x5c7ffc`/`@ 0x5c8020` is the head+body avatar, not a far/near dual submission; overlays index their LOD with the parent's level `@ 0x4e39c4..0x4e3e51` | **FIXED (MATCHING, 2026-08-29)** — the "dual-submit through the overlap fraction" reading was refuted at the binary: the hard switch IS retail's behaviour, the dead `blend_fraction` output was deleted from `renderer::select_object_lod`, and the attachment rule was ported (`object_lod` ctest, `object_model_lod_occluder_test`, `wire_present_pass_test`). 2026-09-24 ("Draw the person overlays beside their bodies"): every org0 overlay (held weapon, canopy, goggles, binoculars, carried object) is stamped with its submit's owner; `@ 0x4e3e34..0x4e3e51` is the carried object's clamp, and seated riders are independent entities in retail as here (the witness map names the legs) |
 | D-RORD-12 | The authored threshold selector, frame scale, integer projection and hard switch were ported, but individual models supplied GHDR at their origins, static populations supplied render bounds, and composed parts/husks projected independently. | `Model_SelectRlodLevel @ 0x5C3B20` selects one level; `Entity_ComputeBoundingSphere @ 0x5C69A0` supplies the scaled collision midpoint/diagonal for ordinary entities. Person radius/position and flag-0x20 substitution are `@ 0x5C8DF3..0x5C8E21`; head/body share the result at `@ 0x5C7FEA..0x5C8020`; husk draw `@ 0x5C4190` keeps the primary sphere while choosing the replacement table. | **FIXED (2026-09-13, projection producer and consumers)**. The native typed sphere and exact CMDL words feed live/static placement; person mode survives construction/rebuild; current player/infantry parachute flags select type185 radius; head/body and husks share the primary projection while retaining their own tables. Native `object_lod`, `world_model_geometry`, `netsim_present_rows`, GUT `object_projection_lod_test`, plus the existing LOD/attachment suites. The earlier selector/crossfade finding and attachment residual remain D-RORD-11. The native visibility producer shares the arithmetic since D-OCC-16 closed (2026-09-13). |
-| D-RORD-9 | The underwater murk quad is a `PlayerViewEffects` overlay after the shared-world `ViewmodelPass` (CanvasLayer 0) and behind the HUD (CanvasLayer 1), so it correctly covers scene + weapon and excludes HUD; it currently also covers the reimpl's 3D celestial/glow. `PlayerViewEffects` is created with the local-player HUD, so no-local-player/spectator views currently receive no murk quad | retail draws the source-over murk quad after the viewmodel/world/weather/foliage and then draws sun glow bright on top (`[orig: @ 0x5c96c5..0x5c9714]`) | MATCHING for CP01 and the registered full-frame fixtures, whose capture contract requires a spawned local player and HUD; OPEN bounded residuals are glare ordering and generic spectator/no-local-player parity |
+| D-RORD-9 | The underwater murk quad was a `PlayerViewEffects` overlay after the shared-world viewmodel and behind the HUD, created with the local-player HUD, so no-local-player/spectator views received no murk quad and the glare was not drawn after it | retail draws the source-over murk quad after the viewmodel/world/weather/foliage and then draws the sun glare bright on top under the forced 0xFF404040 modulator (`[orig: @ 0x5c96c5..0x5c9722]`) | **FIXED (2026-09-24, "Draw the scene's post-particle tail in its own overlay stage", "Draw the water glint and the sun glare at the end of the overlay tail")**: the murk is no longer a CanvasItem (the `UnderwaterMurk` rect and `MissionEnvironment`'s `underwater_overlay_changed` signal are deleted): it draws in each view's post-particle overlay pass from that view's render eye (spectator, third person and death cam included), before the bloom, and the glare draws in the same pass right after it under the forced 1.0 light scale (§The post-particle overlay stage) |
 
 ## IDB changes made during the session
 
@@ -662,15 +829,18 @@ logged in [render-material-re.md](render-material-re.md).
 
 - **Closed at REN-4**: entry flag bit 3 (= force ZFUNC ALWAYS, the submit-0x10
   override — witnessed in the pass loop); the `+841` byte (its reader is
-  `setup_entity_lighting_and_shader_constants @ 0x5d98a0` — it gates the
-  mirror-clip constants: MatTexClipPlane ← base × the active mirror matrix
-  ctx+756, VecDepthMaskPlane ← ctx+824, with ctx+842 tracking applied
-  clip-plane state); the MATCHTERRAIN class MECHANISM (binds the terrain tile
+  `setup_entity_lighting_and_shader_constants @ 0x5d98a0`; corrected
+  2026-09-24: it is the per-flush FIRST-ENTRY latch, not a mirror gate: on the
+  first entry of every flush the reader pushes the shared constants
+  MatTexClipPlane ← base × the active mirror matrix ctx+756, FloatTicks and
+  DirLightVector, and clears the byte; VecDepthMaskPlane ← ctx+824, with
+  ctx+842 tracking applied clip-plane state; render-material-re.md §Open
+  questions); the MATCHTERRAIN class MECHANISM (binds the terrain tile
   texture under the object — [render-material-re.md](render-material-re.md)
   §Pass execution).
 - **Closed at REN-6 (2026-07-06)** — `Water_RenderReflectedWorldScene` was a 5-byte header
-  (`call sub_58AA80`) falling through into an unclaimed body (the same split
-  shape as `render_water_surface`; a stale NORET flag on `sub_58AA80`
+  (`call Render_ResetFixedFunctionState`) falling through into an unclaimed body (the same split
+  shape as `render_water_surface`; a stale NORET flag on `Render_ResetFixedFunctionState`
   truncated the analysis). Renamed `Water_RenderReflectedWorldScene`: the
   offscreen reflection's world subscene — fog/ambient push, NORMAL lighting
   constants (arg 0), builds `g_WaterMirrorMatrix` as the water CLIP-plane
@@ -679,22 +849,27 @@ logged in [render-material-re.md](render-material-re.md).
   flush(1) → below-side/above-side waves → flush(0) → foliage-tile/LOD
   updates → flush(0) → particles → trails. Full pipeline:
   [env-tod-re.md](../env/env-tod-re.md) §Reflection pipeline.
-- `Terrain_RenderSectorEntities` (list `0x2999518`) vs the BySide wave's list
-  (`0x2984890`) — which world-object populations feed which list (sector
-  models vs placed entities) rides the world-record's population map.
-- The MATCHTERRAIN sub-pass ENTITY gate (`entity+300 & 0x300`) — which item
-  flags those bits are (the consumer side is closed); world-record scope.
+- **Closed 2026-09-24**: the sector-list populations. The BySide list
+  `0x2984890` holds ItemDef type-3 persons only (`@ 0x5c8de6..0x5c8ef9`);
+  `g_SectorEntityList` `0x2999518` holds the other pool-0/1 types
+  (`@ 0x5c9035..0x5c907d`) plus the 512-entry pool from `sub_4E4030`
+  (`@ 0x5c91c6..0x5c936f`) `[orig: collect_visible_entities_for_terrain
+  @ 0x5c8c60; Terrain_RenderWorldScene @ 0x5c93a0]`.
+- **Closed 2026-09-24**: the MATCHTERRAIN sub-pass ENTITY gate
+  (`entity+0x12C & 0x300` = `entity+300`) is the MoveOrder prone/crouch
+  stance bits (`@ 0x5c7dc2`). Retail AI never writes them, so the sub-pass and
+  the foliage MODEL masks are player-only ([foliage-re.md](../foliage/foliage-re.md)).
 
 ## Projection and thermal-wave follow-up (2026-09-11)
 
 The main projection far plane uses floor(raw fog distance)+1. Retail reads
-the signed high word at 0x26C681E, adds one, and passes it to sub_58A8D0,
-the far-Z setter despite its older decal-bias label. The source is the raw
+the signed high word at 0x26C681E, adds one, and passes it to Render_SwapProjectionFarZ,
+the far-Z setter. The source is the raw
 Q16 Env_FogDistCurrent. [orig: Render_ProcessMainSceneFrame @ 0x5CA0F0,
-load/add/call @ 0x5CA4BA/0x5CA4C1/0x5CA4D0; sub_58A8D0 @ 0x58A8D0]
+load/add/call @ 0x5CA4BA/0x5CA4C1/0x5CA4D0; Render_SwapProjectionFarZ @ 0x58A8D0]
 
-In a vehicle-seat thermal frame (Terrain_RenderSceneWithReflection's fourth
-argument, `Player_IsVehicleSeatHasFlag4` pushed by Render_ProcessMainSceneFrame
+In a vehicle-seat thermal frame (Terrain_RenderWorldScene's fourth
+argument, `Player_IsHeldWeaponThermal` pushed by Render_ProcessMainSceneFrame
 @ 0x5CA8E3; every other caller pushes 0) both water-side BySide entity waves,
 the far side @ 0x5C951F (before the water surface) and the camera side
 @ 0x5C9600 (after it), run under
@@ -706,8 +881,120 @@ entities below the water, 0 only those above), so the first wave with
 edx = camera-above is the far side and the second with edi = camera-below is
 the camera side, matching the record's ladder (sky, far-water-side, water,
 camera-side). The object shader applies
-the per-instance value; type-five/FP exclusions remain. Native render_order
-and the object-shader golden pin the pass assignment.
+the per-instance value. No exclusion remains (corrected 2026-09-24): type 5
+is never collected into the waves (`cmp eax,5; jz` `@ 0x5c8ddd`) and the
+first-person pass always builds the normal lane, `Build(0)`
+(`@ 0x4dee9d..0x4deea4`). The same thermal byte selects the secondary
+particle materials (step 6 of the frame). Native render_order pins the pass
+assignment.
 [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5C8090;
-Terrain_RenderSceneWithReflection @ 0x5C93A0; Render_ProcessMainSceneFrame
+Terrain_RenderWorldScene @ 0x5C93A0; Render_ProcessMainSceneFrame
 @ 0x5CA0F0]
+
+## 2026-09-24 rendering parity pass
+
+The pass re-walked `Render_ProcessMainSceneFrame` and the scene core against
+the binary. It corrected the frame order (the sky pass precedes the
+viewmodel; `Terrain_RenderMainSectorPass` is the terrain surface), the scene
+core's labels (foliage far patches, scars, NVG lasers, precipitation,
+coronas, the glint), the ladder, and the FrameFX dispatch, and ported what
+the walk found missing. Commits: "Renumber the render ladder for the retail
+frame slots", "Port the first-person viewmodel draw gates", "Fog the viewmodel
+under the dry pass", "Let the world paint over the viewmodel's blended
+strips", "Pin the world pass's 0.2 near plane in every camera mode", "Draw the
+scene's post-particle tail in its own overlay stage", "Draw the water glint
+and the sun glare at the end of the overlay tail", "Draw particle pass A
+inside the transparent list", "Give the foliage MODEL masks their own ladder
+rungs", "Open the sky pass with the dome gradient's own rung", "Port FrameFX's
+screen effects and the NVG render-to-texture view", "Port the NVG view's scene
+raster, Scoped lens and Sighted card", "Port the tracer ribbon build and its
+three materials", "Draw the distortion particles and tracer ribbons in
+FrameFX's type-0 row", "Read RLOD thresholds as retail pixel counts in their
+own level slot", "Draw the person overlays beside their bodies", "Settle the
+viewmodel's Q3 exclusion note in FrameFx". D-RORD-7 and D-RORD-9 closed;
+D-RORD-4's residual is witnessed and closed; no divergence row was opened.
+
+### The post-particle overlay stage
+
+Retail's scene core ends with a fixed tail after particle pass B
+`[orig: Terrain_RenderWorldScene @ 0x5c93a0]`: the NVG laser beams
+(`Render_NVGLaserBeamsForVisiblePersons @ 0x5c9695`) → the precipitation
+(`render_weather_trail_particles @ 0x5c96a6`) → the coronas
+(`EffectWorld_RenderLightCoronas(1) @ 0x5c96ad`) → the water glint
+(`update_sun_glare @ 0x5c96c0`, only while the water height is nonzero,
+`@ 0x5c96b5`) → the underwater murk (`Render_DrawViewportColorQuad @ 0x5c96f5`) →
+the modulator forced to 0xFF404040 (`@ 0x5c96fd` / `@ 0x5c9702`) → the sun
+glare `render_skybox_sun_glow(1, 1)` (`@ 0x5c9714`; skipped when the scene's
+stack arg is zero, `test edi @ 0x5c970a`) → the modulator restored
+(`@ 0x5c9722`). The frame effects (`FrameFX_QualityAtLeast3 @ 0x5caa7b` →
+`FrameFX_ApplyScreenEffect(2) @ 0x5caa97`, the bloom) come after the whole
+scene. The water mirror (`Water_RenderReflectedWorldScene @ 0x5c8510`) draws
+only the coronas (`@ 0x5c85fd`) after its particle and tracer passes; then
+`render_main_scene` closes the mirror target with the fullscreen dim (at
+water detail >= 2, gate `@ 0x5c1727`; DESTCOLOR / ZERO under 0xFF404040,
+`@ 0x5c1856..0x5c189e`) and, at FrameFX quality >= 3 (`@ 0x5c18c6`), the
+sun/moon redraw and the glow inside the far depth band
+(`Render_SetViewportFarDepth` called `@ 0x5c18f4`, `render_celestial_bodies(0)
+@ 0x5c18fb`, `render_skybox_sun_glow(0, 0) @ 0x5c1904`).
+
+Reimpl: `engine/runtime/renderer/scene_overlay.h` carries the tail as data
+(`kSceneOverlayOrder`, `kMirrorOverlayOrder`) plus the typed batch builders;
+GameWorld's `scene_overlay` frame leg gathers one immutable frame, and each
+view's `SceneOverlayCompositorEffect` (`godot/src/render/scene_overlay_compositor.*`)
+runs after that view's particle pair and before FrameFx (`ParticleRenderer`
+composes the chain).
+
+- **Murk**: the full viewport, `Env_WaterColorLit` under the alpha byte
+  0x80 - ftol(murk x -96) (`@ 0x5c96d3..0x5c96f0`), SRCALPHA / INVSRCALPHA,
+  ZFUNC ALWAYS (pass flags 0x300000 `@ 0x5c39bd`), drawn per VIEW while that
+  view's render eye is at or below the water height (`cmp/jg
+  @ 0x5c96ca..0x5c96d1` includes equality), so every camera mode gets it.
+- **Precipitation**: scene views only, never the mirror. The Precipitation
+  node copies `renderer::compile_precipitation_frame`'s triangles into the
+  stage (`renderer::append_precipitation_overlay`: MODULATE2X,
+  SRCALPHA/INVSRCALPHA, z-test without z-write, the one diffuse
+  `Env_TerrainLightCombined | 0xFF000000`; mode word 0x651, pass flags
+  0x10500000 `[orig: render_weather_trail_particles @ 0x5dee10]`); it owns no
+  mesh or shader of its own any more.
+- **Coronas**: scene and mirror; `renderer::append_corona_overlay` builds the
+  billboards from LightScene's corona walk (`collect_corona_rows`)
+  `[orig: EffectWorld_RenderLightCoronas @ 0x5aaf40]`.
+- **Glint and glare**: the glare model's SELFLUM surfaces, read from
+  Celestial's `get_overlay_bodies` seam (the model, its UPL_INTENSITY value,
+  whether retail submits it), drawn tex.rgb x 2 x sat(SelfLumColor x light
+  scale) ONE / ONE, fogged to black, ZFUNC ALWAYS (submit 0x110). The glint
+  runs under the frame's light scale (`Render_LightScaleR/G/B` = the effect's
+  ColorSrcGlobalGain, `apply_shader_parameters @ 0x58e05d`;
+  `Render_UnpackModulatorToLightScale @ 0x58db30` = byte / 64 per channel);
+  the glare, last, under the forced 0xFF404040 = 1.0. The stage zeroes both
+  meshes' layer masks (the Q3 redraw reads the node).
+- **The mirror's close**: the dim and the far-band disc and glow redraw close
+  the mirror's overlay pass ("Close the water mirror with its dim and the
+  far-band sky redraw"); the mirror glow's alpha is the no-occlusion (0, 0)
+  form at the MIRROR camera's view dot (`env::mirror_glare_upl`), and the
+  discs keep the beauty submit value (env-tod-re.md #30 / #37).
+- **NVG laser beams**: the slot is reserved
+  (`renderer::SceneOverlaySlot::NvgLaserBeams`) and draws nothing yet (below).
+
+Ctest `renderer_scene_overlay`; GUT `scene_overlay_stage_test`.
+
+### Open after the 2026-09-24 pass
+
+- **NVG IR laser beams.** `Entity_RenderNVGLaserBeam @ 0x5c6090` over the
+  visible-person list (`Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0`) needs the non-local entities'
+  action-bone pose (`Entity_ComputeBoneTransform @ 0x401890` /
+  `Entity_GetCameraTransform @ 0x4b8c00` have no engine counterpart for them)
+  and a visible-person feed; the geometry is `renderer::append_tracer_beam`
+  (style 8) and the material the tracer NVG shader. The overlay slot is
+  reserved for it.
+- **Multi-view LOD.** Retail runs the collector, the sub-pixel floor and the
+  RLOD walk once per scene pass; Godot shares one node per entity across the
+  image and the weapon Inset target, so a model takes the finest level any
+  view selects (exact while the Inset pass is inactive;
+  render-occlusion-re.md §8a).
+- **The NVG scene raster.** Godot ties a camera's projection aspect to its
+  target, so the frame-shaped NVG arms rasterise 512 rows x lround(512 x
+  aspect) columns and resample horizontally to 512 where retail rasterises 512
+  columns directly (novaworld-net-re.md, the NVG post).
+- **The viewmodel's Q3 exclusion** is unverified only when the world FOV
+  differs from `renderfov` while the gun is shown (D-RORD-10).

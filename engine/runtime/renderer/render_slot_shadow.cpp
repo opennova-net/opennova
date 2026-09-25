@@ -1,5 +1,8 @@
 #include <runtime/renderer/render_slot_shadow.h>
 
+#include <runtime/renderer/light_runtime.h>
+#include <runtime/world/collision.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -46,10 +49,18 @@ float silhouette_half_extent(float bound_radius_units) {
 	return std::min(bound_radius_units * 1.25f, bound_radius_units + 0.75f);
 }
 
-SlotCaptureBasis silhouette_capture_basis(const std::array<float, 3> &direction) {
+SlotCaptureViewAxes slot_capture_view_axes(const std::array<float, 3> &direction) {
 	// The slot view frame is the shared retail look-at
-	// (direction_look_at.h, build_direction_look_at_matrix @ 0x612c90).
-	return direction_look_at(direction);
+	// [orig: build_direction_look_at_matrix @ 0x612c90 via
+	// setup_shadow_cascade_matrices @ 0x58d31e], its right row mapped
+	// through the render<->presentation reflection (the header derives it).
+	const DirectionLookAt<float> frame = direction_look_at(direction);
+	SlotCaptureViewAxes axes;
+	axes.x = {-frame.right[0], -frame.right[1], -frame.right[2]};
+	axes.y = frame.up;
+	axes.z = {-frame.forward[0], -frame.forward[1], -frame.forward[2]};
+	axes.degenerate = frame.degenerate;
+	return axes;
 }
 
 int slot_texture_size(int texture_order, int shadow_detail) {
@@ -175,17 +186,6 @@ static float ntsc_luminance(const std::array<float, 3> &rgb) {
 	return 0.3f * rgb[0] + 0.6f * rgb[1] + 0.1f * rgb[2];
 }
 
-std::array<float, 3> slot_light_darkening(const std::array<float, 3> &rgb) {
-	// (c + lum) * 0.5 * -3 [orig: RenderSlot_SetupNextLighting
-	// @ 0x5d73d3..0x5d740d].
-	const float lum = ntsc_luminance(rgb);
-	std::array<float, 3> out{};
-	for (int c = 0; c < 3; ++c) {
-		out[c] = (rgb[c] + lum) * 0.5f * -3.0f;
-	}
-	return out;
-}
-
 std::array<float, 3> drape_attached_light_scale(
 		const std::array<float, 3> &rgb, float fade) {
 	// (c + lum) * 0.5 * -2 * (1 - fade) = -(c + lum) * (1 - fade)
@@ -233,6 +233,82 @@ SlotLightPick pick_dominant_light(const std::array<float, 3> &entity_pos,
 		pick.attached_handle = light.handle;
 	}
 	return pick;
+}
+
+SlotDrapeLight drape_attached_light(const SlotPointLight &light, float fade) {
+	SlotDrapeLight out;
+	out.position = light.position;
+	out.range = light.range;
+	// Light_FillD3DPointLight's diffuse is the params colour with the D3D
+	// 1.5x (renderer::point_light_color's D3D leg; the RgbGen multiply
+	// commutes) [orig: Light_FillD3DPointLight @ 0x5aa4a3..0x5aa4de], then
+	// the drape's -(c + lum) * (1 - fade) rescale [orig:
+	// RenderSlot_DrawSilhouetteDrape @ 0x5d5e89..0x5d5f0d].
+	const std::array<float, 3> d3d =
+			point_light_color(light.color, 1.0f, {1.0f, 1.0f, 1.0f}, true);
+	out.diffuse = drape_attached_light_scale(d3d, fade);
+	// atten0 = 1, atten1 = 0, atten2 = 15 / range^2
+	// [orig: Light_FillD3DPointLight @ 0x5aa53e..0x5aa553].
+	out.quadratic = light.attenuation[2];
+	return out;
+}
+
+std::array<float, 3> drape_attached_light_color(const SlotDrapeLight &light,
+		const std::array<float, 3> &patch_point) {
+	// Material ambient 1 x D3DRS_AMBIENT white, plus material diffuse 1 x
+	// light 4 on the (0, 1, 0) patch normal, saturated
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e58 (AMBIENT 0xFFFFFF),
+	// @ 0x5d5f33..0x5d5f4c (material); normals @ 0x5d52b1..0x5d52c3].
+	std::array<float, 3> out{1.0f, 1.0f, 1.0f};
+	if (light.range <= 0.0f) {
+		return out;
+	}
+	const float dx = light.position[0] - patch_point[0];
+	const float dy = light.position[1] - patch_point[1];
+	const float dz = light.position[2] - patch_point[2];
+	const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+	if (d <= 0.0f || d > light.range) {
+		return out;
+	}
+	const float attenuation = 1.0f / (1.0f + light.quadratic * d * d);
+	const float n_dot_l = std::max(0.0f, dy / d);
+	for (int c = 0; c < 3; ++c) {
+		out[c] = std::clamp(1.0f + light.diffuse[c] * attenuation * n_dot_l,
+				0.0f, 1.0f);
+	}
+	return out;
+}
+
+std::array<float, 3> slot_march_start_offset(bool flags_zero, int32_t heading_bam,
+		int32_t pitch_bam, int32_t roll_bam,
+		const std::array<int32_t, 3> &bbox_center_q16) {
+	// `cmp dword [edi+24h], 0; jz` [orig: RenderSlot_UpdateEntityLight
+	// @ 0x5d6ce7..0x5d6ceb]: a set Flags bit keeps the entity position.
+	if (!flags_zero) {
+		return {0.0f, 0.0f, 0.0f};
+	}
+	// The Euler matrix transform of entity+0x1FC, its result loaded as the
+	// march start [orig: @ 0x5d6cfb..0x5d6d20, the load @ 0x5d6d25..0x5d6d2d;
+	// Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40,
+	// Math_FixedPointTransformPoint22 @ 0x615810]; relative to the position
+	// the translation drops out.
+	const int32_t origin[3] = {0, 0, 0};
+	const world::CollisionMatrix matrix =
+			world::collision_matrix_from_euler(heading_bam, pitch_bam, roll_bam, origin);
+	const int32_t centre[3] = {bbox_center_q16[0], bbox_center_q16[1], bbox_center_q16[2]};
+	int32_t rotated[3] = {0, 0, 0};
+	matrix.rotate_point(centre, rotated);
+	// Mission (X, Y, Z-up) -> presentation (X, Z, -Y).
+	return {static_cast<float>(rotated[0]) / 65536.0f,
+		static_cast<float>(rotated[2]) / 65536.0f,
+		-static_cast<float>(rotated[1]) / 65536.0f};
+}
+
+bool slot_entity_flags_zero(uint32_t flags, uint32_t engine_flags, int item_type) {
+	// `or dword [esi+24h], 400h` for ItemDefType 1
+	// [orig: Entity_InitFromModel @ 0x40e208..0x40e20a].
+	const uint32_t vehicle_reflectable = item_type == 1 ? 0x400u : 0u;
+	return (flags | engine_flags | vehicle_reflectable) == 0;
 }
 
 std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
@@ -302,6 +378,52 @@ SlotPatch slot_patch_bounds(float anchor_x, float anchor_north, int lod) {
 	return patch;
 }
 
+float slot_patch_lift(int lod) {
+	// (lod + 1) * 0.004 [orig: RenderSlot_RebuildPatchVertexBuffer
+	// @ 0x5d5201..0x5d5212 — fild slot+0x28, fmul flt_7DB864 — added to
+	// every height sample @ 0x5d529b].
+	return static_cast<float>(lod + 1) * kSlotPatchLiftStep;
+}
+
+void slot_patch_vertices(const SlotPatch &patch, int lod,
+		const std::function<float(float, float)> &terrain_height,
+		std::vector<std::array<float, 3>> &out) {
+	// The outer loop steps east (x += 0x10000 @ 0x5d52f7), the inner one south
+	// (north - col << 16 @ 0x5d5269..0x5d5274); every vertex adds the lift to
+	// its height sample (@ 0x5d527a..0x5d529f).
+	const int resolution = lod + 1;
+	const float lift = slot_patch_lift(lod);
+	out.clear();
+	out.reserve(static_cast<size_t>(resolution) * static_cast<size_t>(resolution));
+	for (int i = 0; i < resolution; ++i) {
+		const float x = patch.min_x + static_cast<float>(i);
+		for (int j = 0; j < resolution; ++j) {
+			const float z = -(patch.max_north - static_cast<float>(j));
+			const float height = terrain_height ? terrain_height(x, z) : 0.0f;
+			out.push_back({x, height + lift, z});
+		}
+	}
+}
+
+void slot_patch_indices(int lod, std::vector<uint16_t> &out) {
+	// [orig: RenderSlot_InitPatchIndexBuffers @ 0x5d5453..0x5d54f4 — edi = row
+	// * resolution, ebx = (row + 1) * resolution, six indices per cell].
+	const int resolution = lod + 1;
+	out.clear();
+	out.reserve(static_cast<size_t>(lod) * static_cast<size_t>(lod) * 6u);
+	for (int i = 0; i < lod; ++i) {
+		const int row = i * resolution;
+		const int next = (i + 1) * resolution;
+		for (int j = 0; j < lod; ++j) {
+			const uint16_t a = static_cast<uint16_t>(row + j);
+			const uint16_t b = static_cast<uint16_t>(row + j + 1);
+			const uint16_t c = static_cast<uint16_t>(next + j);
+			const uint16_t d = static_cast<uint16_t>(next + j + 1);
+			out.insert(out.end(), {a, d, c, a, b, d});
+		}
+	}
+}
+
 std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> shadowztex_pixels() {
 	// [orig: shadow_system_init_resources @ 0x5d6260..0x5d62a7 — 4 rows of
 	//  32 ARGB texels: row 3 white, rows 0..2 white below column 16, the one
@@ -363,9 +485,10 @@ SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
 
 static bool slot_excluded(const SlotCandidateState &state) {
 	// [orig: RenderSlot_SortAndAssign @ 0x5d6581..0x5d6627 —
-	// dead, seat-parented, or standing on a vehicle; the silhouette-render
-	// leg re-checks the same predicates @ 0x5d774e..0x5d77b3].
-	return state.dead || state.seat_parented || state.on_vehicle;
+	// hidden (Flags & 1), seat-parented, or standing on a vehicle; the
+	// silhouette-render leg re-checks the same predicates
+	// @ 0x5d774e..0x5d77b3].
+	return state.hidden || state.seat_parented || state.on_vehicle;
 }
 
 int32_t slot_priority_score(const std::array<float, 2> &camera_pos2d,
@@ -501,8 +624,7 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 	}
 	// Pass 2: bind the leading 24 and hand the first 12 their capture RTs
 	// [orig: @ 0x5d6944..0x5d69ef]; a bound slot with a live silhouette RT
-	// drapes it, a bound slot without one drapes the authored blob
-	// [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..0x5d6ec4].
+	// drapes it [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..0x5d6ec4].
 	int capture_count = 0;
 	for (size_t rank = 0;
 			rank < scored.size() &&
@@ -541,8 +663,6 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 		if (!assignment.excluded) {
 			assignment.draws_silhouette =
 					scored[rank].state.dynamic && assignment.capture_order >= 0;
-			assignment.draws_blob = !assignment.draws_silhouette &&
-					scored[rank].state.has_blob_texture;
 		}
 	}
 	return out;

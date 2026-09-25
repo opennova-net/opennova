@@ -18,10 +18,99 @@
 #include <runtime/renderer/object_shader_template.h>
 #include <runtime/renderer/render_order.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/model_geometry.h>
+#include <base/io/fixed.h>
 
 using namespace opennova::threedi;
 
 namespace godot {
+
+// A model decides its own mirror CLIP arming unless an owning entity does
+// (a linked part), it draws in no arming pass, or it is a BySide person.
+bool ObjectModel::tracks_water_mirror_clip() const {
+	return !water_mirror_clip_inherited_ && !thermal_entity_wave_ &&
+			!entity_light_owner_.is_valid() &&
+			water_mirror_clip_wave_ != opennova::env::MirrorClipWave::kNone;
+}
+
+void ObjectModel::set_water_mirror_clip_wave_id(int p_wave) {
+	set_water_mirror_clip_wave(
+			p_wave == static_cast<int>(opennova::env::MirrorClipWave::kSectorModel) ?
+					opennova::env::MirrorClipWave::kSectorModel :
+			p_wave == static_cast<int>(opennova::env::MirrorClipWave::kEntity) ?
+					opennova::env::MirrorClipWave::kEntity :
+					opennova::env::MirrorClipWave::kNone);
+}
+
+void ObjectModel::set_water_mirror_clip_wave(opennova::env::MirrorClipWave p_wave) {
+	if (water_mirror_clip_wave_ == p_wave) {
+		return;
+	}
+	water_mirror_clip_wave_ = p_wave;
+	if (tracks_water_mirror_clip()) {
+		water_mirror_clip_models_.insert(this);
+		set_notify_transform(true);
+	} else {
+		water_mirror_clip_models_.erase(this);
+	}
+	refresh_water_mirror_clip();
+}
+
+// The per-draw test against the live water plane (the building pass reads
+// the graphic's bound-block floor, the first entity wave the entity+0 bound
+// radius; runtime/environment/water_mirror.h carries the witnesses). No plane
+// means no mirror pass, so nothing is armed.
+void ObjectModel::refresh_water_mirror_clip() {
+	if (water_mirror_clip_inherited_) {
+		return;
+	}
+	if (const ObjectModel *owner = get_entity_light_owner()) {
+		apply_water_mirror_clip_armed(owner->water_mirror_clip_armed_);
+		return;
+	}
+	bool armed = false;
+	const ObjectShaderCache *cache = ObjectShaderCache::get_singleton();
+	if (tracks_water_mirror_clip() && cache != nullptr && cache->has_water_plane() &&
+			is_inside_tree()) {
+		if (water_mirror_clip_wave_ == opennova::env::MirrorClipWave::kSectorModel &&
+				object_data_.is_valid() && object_data_->has_document()) {
+			water_mirror_clip_floor_q16_ = opennova::world::model_bound_floor_q16(
+					object_data_->native_model());
+		}
+		const int32_t extent =
+				water_mirror_clip_wave_ == opennova::env::MirrorClipWave::kSectorModel ?
+				water_mirror_clip_floor_q16_ : entity_bound_radius_q16_;
+		armed = opennova::env::water_mirror_clip_armed(water_mirror_clip_wave_,
+				opennova::io::float_to_fp16_16_round_sat(
+						static_cast<float>(get_global_position().y)),
+				extent,
+				opennova::io::float_to_fp16_16_round_sat(cache->get_water_plane_height()));
+	}
+	apply_water_mirror_clip_armed(armed);
+}
+
+void ObjectModel::apply_water_mirror_clip_armed(bool p_armed) {
+	if (water_mirror_clip_armed_ == p_armed) {
+		return;
+	}
+	water_mirror_clip_armed_ = p_armed;
+	stamp_entity_lighting_instances();
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->apply_water_mirror_clip_armed(p_armed);
+	}
+	for (const ObjectID &id : water_mirror_clip_attached_) {
+		ObjectModel *attached = Object::cast_to<ObjectModel>(ObjectDB::get_instance(id));
+		if (attached != nullptr && attached->get_entity_light_owner() == this) {
+			attached->apply_water_mirror_clip_armed(p_armed);
+		}
+	}
+}
+
+void ObjectModel::refresh_water_mirror_clip_all() {
+	for (ObjectModel *model : water_mirror_clip_models_) {
+		model->refresh_water_mirror_clip();
+	}
+}
 
 
 void ObjectModel::set_material_and_auxiliary_parameter(
@@ -51,6 +140,9 @@ Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index) 
 	Ref<ShaderMaterial> postmultiply;
 	const Ref<ShaderMaterial> material =
 			create_material(array_index, postmultiply);
+	if (material.is_valid() && render_rung_override_ != kRenderRungFromWaterSide) {
+		material->set_render_priority(render_rung_override_);
+	}
 	material_cache_[cache_key] = material;
 	if (postmultiply.is_valid()) {
 		postmultiply_cache_[cache_key] = postmultiply;
@@ -106,10 +198,6 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 			normal = object_data_->load_material_slot_texture(p_array_index, 4);
 		}
 	}
-	if (diffuse.is_null() && detail.is_valid()) {
-		diffuse = detail;
-		detail.unref();
-	}
 
 	int32_t key = shader_cache->classify(shader_tag, material_flags, emissive_type,
 			is_glass_flag, alpha_test_byte);
@@ -153,21 +241,25 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 		proxy_material->set_render_priority(opennova::renderer::kRungObjectPostMultiply);
 		r_postmultiply = proxy_material;
 	}
-	if (diffuse.is_valid()) {
-		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse", diffuse);
-	} else {
-		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse",
-				opennova::prepare_material_texture({}, {}, 0));
-	}
+	// Each stage also carries its texture's last retail mip level
+	// (material_texture_max_lod): pixel-built textures stop at 4x4.
+	const Ref<Texture> bound_diffuse = diffuse.is_valid()
+			? Ref<Texture>(diffuse)
+			: opennova::prepare_material_texture({}, {}, 0);
+	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse", bound_diffuse);
+	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse_max_lod",
+			opennova::material_texture_max_lod(bound_diffuse));
 	if (detail.is_valid()) {
 		material->set_shader_parameter("u_detail", detail);
+		material->set_shader_parameter("u_detail_max_lod",
+				opennova::material_texture_max_lod(detail));
 	}
-	if (normal.is_valid()) {
-		material->set_shader_parameter("u_normal_map", normal);
-	} else {
-		material->set_shader_parameter("u_normal_map",
-				solid_colour_texture(Color(0.5f, 0.5f, 1.0f, 1.0f)));
-	}
+	const Ref<Texture> bound_normal = normal.is_valid()
+			? Ref<Texture>(normal)
+			: Ref<Texture>(solid_colour_texture(Color(0.5f, 0.5f, 1.0f, 1.0f)));
+	material->set_shader_parameter("u_normal_map", bound_normal);
+	material->set_shader_parameter("u_normal_max_lod",
+			opennova::material_texture_max_lod(bound_normal));
 	if ((material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0) {
 		// The ref byte feeds the compare exactly; the shader keeps a > ref
 		// (invert: a <= ref) [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0].
@@ -181,13 +273,24 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold", 0.0f);
 		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert", 0.0f);
 	}
-	const Color reflect = has_info ? info.reflect_color : Color(0.7f, 0.8f, 0.9f, 0.35f);
-	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_reflect_color", reflect);
+	// The draw-invariant effect parameters: routed static colours (ReflectColor
+	// W = 1) and constant generators over the effect defaults. Dynamic
+	// generators overwrite theirs every runtime frame.
+	opennova::renderer::MaterialRuntime initial;
+	if (object_data_.is_valid()) {
+		object_data_->material_static_runtime_native(p_array_index, initial);
+	}
+	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_reflect_color",
+			Vector4(initial.reflect[0], initial.reflect[1], initial.reflect[2],
+					initial.reflect[3]));
 	// The PANM evaluator supplies the complete two-row affine transform.
-	material->set_shader_parameter("u_uv_transform_u", Vector3(1.0f, 0.0f, 0.0f));
-	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
-	material->set_shader_parameter("u_rgb_mod", Vector3(1, 1, 1));
-	material->set_shader_parameter("u_alpha_mod", 1.0f);
+	material->set_shader_parameter("u_uv_transform_u",
+			Vector3(initial.uv.m00, initial.uv.m10, initial.uv.m20));
+	material->set_shader_parameter("u_uv_transform_v",
+			Vector3(initial.uv.m01, initial.uv.m11, initial.uv.m21));
+	material->set_shader_parameter("u_rgb_mod",
+			Vector3(initial.rgb_r, initial.rgb_g, initial.rgb_b));
+	material->set_shader_parameter("u_alpha_mod", initial.alpha);
 	material->set_shader_parameter("u_local_light_count", 0);
 	material->set_shader_parameter("u_local_light_position", Vector3());
 	material->set_shader_parameter("u_local_light_color", Vector3(1, 1, 1));
@@ -213,18 +316,13 @@ void ObjectModel::collect_anim_frames(int p_material_index) {
 	if (frame_names.size() <= 1) {
 		return;
 	}
+	// Each frame is its own texture row, dispatched by that row's type like
+	// any other stage texture.
 	Array frames;
-	for (const String &frame_name : frame_names) {
-		frames.append(load_texture_name(frame_name));
+	for (int frame = 0; frame < frame_names.size(); ++frame) {
+		frames.append(object_data_->load_material_anim_frame(p_material_index, 1, frame));
 	}
 	anim_frames_by_mat_[p_material_index] = frames;
-}
-
-Ref<Texture2D> ObjectModel::load_texture_name(const String &p_texture_name) {
-	if (object_data_.is_null() || p_texture_name.is_empty()) {
-		return Ref<Texture2D>();
-	}
-	return object_data_->load_texture_name(p_texture_name);
 }
 
 Ref<ImageTexture> ObjectModel::solid_colour_texture(const Color &p_color) {
@@ -233,18 +331,13 @@ Ref<ImageTexture> ObjectModel::solid_colour_texture(const Color &p_color) {
 	return ImageTexture::create_from_image(image);
 }
 
-// A surface material needs per-frame UV/RGB/alpha evaluation only if one of
-// its generators animates. Conservative: any non-zero generator style counts.
+// A surface material needs per-frame evaluation only if a parameter its
+// effect reads can change per draw (renderer::material_runtime_is_dynamic).
 bool ObjectModel::material_runtime_is_dynamic(int p_material_index) const {
 	if (object_data_.is_null()) {
-		return true;
+		return false;
 	}
-	MaterialInfo info;
-	if (!object_data_->get_material_info(p_material_index, info)) {
-		return true;
-	}
-	return info.uv_u_style != 0 || info.uv_v_style != 0 ||
-			info.rgb_gen_style != 0 || info.alpha_gen_style != 0;
+	return object_data_->material_runtime_dynamic_native(p_material_index);
 }
 
 // Partition surface materials into runtime-dynamic slots and the static

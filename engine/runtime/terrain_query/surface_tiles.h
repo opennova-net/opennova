@@ -27,16 +27,16 @@ struct SurfaceTileFileSource {
 // `<tilestrip base>.TSD` and parse its INDEX_ rows into the 256-entry
 // tile-index -> surface table (fills out_table, zeroed first). Absent — every
 // shipped JO install — the zeroed table is retail's memset default, so placed
-// tiles read 0 = TSD_NULL. The name derivation is the authored tilestrip
-// value with its extension replaced by .TSD, exactly the retail pairing; the
-// retail BMS tile-set-name override of the tilestrip pair is not modeled (the
-// reimpl BMS document carries no tileset field), so the .trn's authored
-// tilestrip names both the atlas and the .TSD — the recorded D-SND-15 residue.
+// tiles read 0 = TSD_NULL. The name derivation is the tilestrip value with its
+// extension replaced by .TSD, exactly the retail pairing; the caller passes
+// the tilestrip after the mission's BMS tile-set override
+// (formats/trn trn_mission_tilestrip), so one name drives both the atlas and
+// the .TSD.
 // [orig: PolyTrn_InitTextures — table memset @ 0x60c5c9, exists probe
 // @ 0x60c5d3, File_ParseASCIIFile @ 0x60c5ef with the Terrain_ParseTsdRow row
 // callback; the .TSD extension pairing off the tilestrip copy @ 0x610a1c
-// (Terrain_LoadEnvironmentConfig); the unmodeled BMS override
-// Bms_TileSetName @ 0xa762e8, applied @ 0x6109ce]
+// (Terrain_LoadEnvironmentConfig); the BMS override Bms_TileSetName
+// @ 0xa762e8, applied @ 0x6109ce]
 void resolve_tileset_surface_table(const SurfaceTileFileSource &files,
 		const std::string &tilestrip, uint8_t out_table[256]);
 

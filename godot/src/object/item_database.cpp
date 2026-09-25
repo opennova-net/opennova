@@ -248,18 +248,6 @@ uint32_t ItemDatabase::get_attrib2(int id) const {
 	return row == nullptr ? 0u : static_cast<uint32_t>(row->attrib2);
 }
 
-bool ItemDatabase::get_shadow_decal(int id, String &r_texture,
-		Vector4 &r_dims) const {
-	const opennova::def::DefItemDef *row = row_(id);
-	if (row == nullptr || row->shadow_texture[0] == '\0') {
-		return false;
-	}
-	r_texture = String(row->shadow_texture);
-	r_dims = Vector4(row->shadow_width, row->shadow_length,
-			row->shadow_offset_x, row->shadow_offset_y);
-	return true;
-}
-
 PackedInt32Array ItemDatabase::get_vehicle_physics(int id) const {
 	PackedInt32Array out;
 	const opennova::def::DefItemDef *row = row_(id);

@@ -1,8 +1,8 @@
 #pragma once
 
 // Portable static-shadow page planner: owns the caster snapshot (admission +
-// collector candidates), the per-page receiver height minimum, page-job
-// compilation with the config-stamped content identity, draw classification,
+// collector candidates), page-job compilation with the config-stamped
+// content identity, draw classification,
 // and the raster-input build. The Godot binding is reduced to marshalling
 // placer records, decoding alpha textures, and converting diagnostics.
 // Plans are memoized per page under a state epoch: an unchanged epoch makes
@@ -16,8 +16,6 @@
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250; PROJSHAD submit
 // @0x60D960..0x60D97D; see docs/terrain/terrain-re.md]
 
-#include <runtime/terrain_query/height_field.h>
-
 #include <runtime/terrain/terrain_static_shadow.h>
 #include <runtime/terrain/terrain_static_shadow_alpha.h>
 #include <runtime/terrain/terrain_static_shadow_geometry.h>
@@ -28,7 +26,6 @@
 #include <array>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -99,8 +96,6 @@ struct TerrainStaticShadowPlannerDiagnostics {
 	float frame_min_v = 0.0f;
 	float frame_max_u = 0.0f;
 	float frame_max_v = 0.0f;
-	uint64_t frame_receiver_cache_hits = 0;
-	uint64_t frame_receiver_cache_misses = 0;
 	bool snapshot_exact = true;
 	std::size_t caster_count = 0;
 };
@@ -128,11 +123,9 @@ public:
 	// composition job and sets it on the worker's planner copy.
 	void set_material_time(uint32_t time_ms) { material_time_ms_ = time_ms; }
 	uint32_t material_time_ms() const { return material_time_ms_; }
-	// The receiver height field must stay valid until replaced or cleared.
-	// A terrain revision change clears the per-page receiver-minimum cache.
-	void set_receiver_terrain(const TerrainHeightField &field,
-			uint64_t terrain_revision);
-	void clear_receiver_terrain();
+	// Threads a page's shadow pixel loop may use (1 = the calling thread);
+	// the rasterized bytes are the same for every count.
+	void set_raster_threads(std::size_t threads) { raster_threads_ = threads; }
 	// Replaces the caster snapshot. Casters carry resolved geometry; a
 	// missing geometry on an admitted caster (resolution failed) is declared
 	// through admitted_geometry_missing so planning fails closed exactly as
@@ -151,7 +144,7 @@ public:
 	std::size_t caster_count() const { return casters_->records.size(); }
 	// Monotonic identity for the immutable planner state consumed by page
 	// compilation. Diagnostic resets, sub-byte light motion, identical caster
-	// snapshots, repeated receiver clears, and material time do not change it.
+	// snapshots, and material time do not change it.
 	uint64_t state_revision() const { return state_revision_; }
 
 	void reset_frame_diagnostics();
@@ -193,9 +186,7 @@ private:
 
 	void bump_epoch();
 	void update_config_stamp();
-	std::optional<float> page_receiver_minimum(const TerrainTilePageKey &page);
-	bool compile(const TerrainTilePageKey &page,
-			TerrainStaticShadowPageJob &job);
+	TerrainStaticShadowPageJob compile(const TerrainTilePageKey &page) const;
 	const CasterMaterialStates &caster_material_states(
 			MaterialStateTable &table, uint64_t caster_key,
 			const TerrainStaticShadowPlannerCaster &caster) const;
@@ -219,26 +210,16 @@ private:
 	TerrainStaticShadowLightDirection world_light_{};
 	TerrainTileLightEpoch light_epoch_ = kDefaultTerrainTileLightEpoch;
 	uint32_t material_time_ms_ = 0;
+	std::size_t raster_threads_ = 1;
 	uint64_t config_stamp_ = 0;
-	TerrainHeightField receiver_field_{};
-	bool receiver_valid_ = false;
-	uint64_t terrain_revision_ = 0;
 	std::shared_ptr<const CasterSet> casters_;
 	// Stamp of the last adopted caster snapshot; 0 = none adopted yet.
 	uint64_t caster_set_stamp_ = 0;
-	std::unordered_map<TerrainTilePageKey, float, PageKeyHash, PageKeyEq>
-			receiver_minimum_cache_;
 	std::unordered_map<TerrainTilePageKey, CachedPlan, PageKeyHash, PageKeyEq>
 			plan_cache_;
 	TerrainStaticShadowPlannerDiagnostics diagnostics_;
 	uint64_t state_revision_ = 1;
 };
-
-// The world-space caster bounds for a resolved geometry under a rows-major
-// 3x4 transform (8-corner sweep of the authored local bounds).
-TerrainStaticShadowBounds terrain_static_shadow_transformed_bounds(
-		const TerrainStaticShadowResolvedGeometry &geometry,
-		const std::array<float, 12> &world_transform);
 
 // The stable caster key the collector draws carry.
 uint64_t terrain_static_shadow_caster_key(int32_t entity_kind,

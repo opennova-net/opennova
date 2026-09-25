@@ -64,6 +64,15 @@ int Simulation::get_local_player_wire_handle() const {
 			? static_cast<int>(kernel_->world.cached.local_player.packed) : 0;
 }
 
+int Simulation::get_local_player_mount_target_handle() const {
+	if (!kernel_ || !kernel_->world.cached.local_player.valid()) return INVALID_WIRE_HANDLE;
+	const opennova::world::Entity *local =
+			kernel_->world.registry.get(kernel_->world.cached.local_player);
+	if (local == nullptr || !local->mounted) return INVALID_WIRE_HANDLE;
+	const opennova::world::Entity *target = kernel_->world.registry.get(local->mount_target);
+	return target != nullptr ? static_cast<int>(target->handle.packed) : INVALID_WIRE_HANDLE;
+}
+
 // One frame of movement keys: the kernel folds the sim-owned stance latch in
 // and runs the witnessed movement-held unscope [orig:
 // Player_PackInputStateToEntity @ 0x4df450]; this binding only converts the

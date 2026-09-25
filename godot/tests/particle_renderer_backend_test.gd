@@ -193,7 +193,7 @@ func test_world_particles_use_the_uncapped_rd_compositor_contract() -> void:
 	assert_eq(String(backend.get("fog_distance_policy", "")),
 			"type0_eye_depth_else_radial")
 	assert_eq(String(backend.get("fog_material_targets", "")),
-			"scene,black,black,scene,white,gray127,black,scene")
+			"scene,black,black,none,white,gray127,none,none")
 	assert_eq(String(backend.get("view_projection_source", "")),
 			"render_scene_data_corrected")
 	assert_false(bool(backend.get("adds_view_projection_depth_correction", true)),
@@ -382,28 +382,33 @@ func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
 	first.render_now(GameWorld.current_frame_clock_ms())
 	second.render_now(GameWorld.current_frame_clock_ms())
 	assert_not_null(camera.compositor)
-	assert_eq(camera.compositor.get_compositor_effects().size(), 4,
-			"each renderer registers its far-side and camera-side effects once")
+	assert_eq(camera.compositor.get_compositor_effects().size(), 6,
+			"each renderer registers its two particle passes and its overlay pass once")
 	var composed := camera.compositor
 	first.render_now(GameWorld.current_frame_clock_ms())
 	second.render_now(GameWorld.current_frame_clock_ms())
 	assert_eq(camera.compositor, composed,
 			"steady-state renders do not clone the composed resource")
-	assert_eq(camera.compositor.get_compositor_effects().size(), 4,
+	assert_eq(camera.compositor.get_compositor_effects().size(), 6,
 			"steady-state renders do not duplicate effects")
 
-	var first_effects := camera.compositor.get_compositor_effects().slice(0, 2)
+	var first_effects := camera.compositor.get_compositor_effects().slice(0, 3)
+	assert_true(first_effects[2] is SceneOverlayCompositorEffect,
+			"each renderer's overlay pass follows its own particle pair")
 	first.shutdown()
 	first.shutdown()
-	for effect in first_effects:
+	for effect in first_effects.slice(0, 2):
 		assert_true(bool(effect.get_backend_report().get("shutdown", false)),
 				"explicit shutdown retires each compositor effect exactly once")
-	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
-			"shutdown removes only the departing renderer's pair")
+	assert_true(bool((first.get_debug_draw_list_report().get("world_overlay_backend", {})
+			as Dictionary).get("shutdown", false)),
+			"explicit shutdown retires the overlay pass too")
+	assert_eq(camera.compositor.get_compositor_effects().size(), 3,
+			"shutdown removes only the departing renderer's passes")
 	viewport.remove_child(first)
 	first.free()
 	assert_not_null(camera.compositor)
-	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
+	assert_eq(camera.compositor.get_compositor_effects().size(), 3,
 			"EXIT_TREE remains idempotent after explicit shutdown")
 
 	second.shutdown()
@@ -434,7 +439,7 @@ func test_exit_tree_shutdown_is_undone_by_re_entry() -> void:
 	var live := renderer.get_debug_draw_list_report()
 	assert_false(bool(live.get("shutdown", true)), "a fresh renderer is live")
 	assert_true(bool(live.get("world_compositor_attached", false)))
-	assert_eq(camera.compositor.get_compositor_effects().size(), 2)
+	assert_eq(camera.compositor.get_compositor_effects().size(), 3)
 
 	# EXIT_TREE retires the compositor effects for good and latches shutdown.
 	viewport.remove_child(renderer)
@@ -456,14 +461,16 @@ func test_exit_tree_shutdown_is_undone_by_re_entry() -> void:
 		"world_far_backend", "world_camera_backend",
 		"reflection_far_backend", "reflection_camera_backend",
 		"second_scene_far_backend", "second_scene_camera_backend",
+		"world_overlay_backend", "reflection_overlay_backend",
+		"second_scene_overlay_backend",
 	]:
 		assert_false(bool((revived.get(key, {}) as Dictionary).get("shutdown", true)),
 				"%s is a fresh effect after re-entry" % key)
 	assert_true(bool(revived.get("world_compositor_attached", false)),
 			"re-entry re-attaches the world camera")
 	assert_not_null(camera.compositor)
-	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
-			"re-entry installs exactly one fresh pair, no stale effects")
+	assert_eq(camera.compositor.get_compositor_effects().size(), 3,
+			"re-entry installs exactly one fresh pass set, no stale effects")
 	assert_gt(renderer.get_draw_command_count(), 0,
 			"the retained scene publishes again through the new effects")
 	RenderingServer.force_draw(true)
@@ -496,20 +503,29 @@ func test_far_particles_lead_the_camera_chain_and_terminal_stays_last() -> void:
 	particle_renderer.render_now(GameWorld.current_frame_clock_ms())
 	assert_not_null(camera.compositor)
 	var effects := camera.compositor.compositor_effects
-	assert_eq(effects.size(), 3,
-			"far particles + camera particles + terminal are the full cutover")
+	assert_eq(effects.size(), 4,
+			"far particles + camera particles + the overlay tail + terminal")
 	assert_eq(effects[0].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT,
 			"particle pass A draws before the transparent list (before water)")
 	assert_eq(effects[1].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT,
 			"particle pass B follows water and camera-side alpha")
+	# The retail tail (precipitation, coronas, glint, murk, glare) draws after
+	# particle pass B and before the frame effects [orig:
+	# Terrain_RenderWorldScene @ 0x5c9690 (pass B) -> @ 0x5c96a6 ..
+	# @ 0x5c9714; the bloom follows in Render_ProcessMainSceneFrame
+	# @ 0x5caa97].
 	assert_eq(effects[2].effect_callback_type,
+			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT,
+			"the overlay tail follows particle pass B")
+	assert_eq(effects[3].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT,
 			"FrameFX plus the display transfer remain terminal")
 	assert_true(effects[0] is ParticleCompositorEffect)
 	assert_true(effects[1] is ParticleCompositorEffect)
-	assert_true(effects[2] is FrameFxCompositorEffect)
+	assert_true(effects[2] is SceneOverlayCompositorEffect)
+	assert_true(effects[3] is FrameFxCompositorEffect)
 
 
 func test_reflection_camera_receives_two_ordered_camera_correct_submissions() -> void:
@@ -537,9 +553,17 @@ func test_reflection_camera_receives_two_ordered_camera_correct_submissions() ->
 	renderer.render_now(GameWorld.current_frame_clock_ms())
 
 	assert_not_null(reflection_camera.compositor)
-	assert_eq(reflection_camera.compositor.get_compositor_effects().size(), 2,
-			"reflection receives the consecutive far/camera-side pair")
+	assert_eq(reflection_camera.compositor.get_compositor_effects().size(), 3,
+			"reflection receives the consecutive far/camera-side pair and its overlay")
+	assert_true(reflection_camera.compositor.get_compositor_effects()[2]
+			is SceneOverlayCompositorEffect)
 	var report := renderer.get_debug_draw_list_report()
+	# The mirror's reflected scene draws only its coronas after its particle
+	# passes [orig: Water_RenderReflectedWorldScene @ 0x5c85fd].
+	assert_eq(String(_slot(report, "reflection_overlay_backend").get("view_kind", "")),
+			"mirror")
+	assert_eq(String(_slot(report, "world_overlay_backend").get("view_kind", "")),
+			"scene")
 	assert_true(bool(report.get("reflection_compositor_attached", false)))
 	var far_backend: Dictionary = report.get("reflection_far_backend", {})
 	var camera_backend: Dictionary = report.get("reflection_camera_backend", {})
@@ -625,7 +649,7 @@ func test_second_scene_camera_receives_its_own_pair_ahead_of_the_terminal() -> v
 	assert_true(_slot(idle, "second_scene_far_side").is_empty())
 	assert_true(_slot(idle, "second_scene_camera_side").is_empty())
 	var main_chain := camera.compositor.compositor_effects.duplicate()
-	assert_eq(main_chain.size(), 3)
+	assert_eq(main_chain.size(), 4)
 
 	renderer.set_second_scene_camera(second_camera)
 	assert_eq(renderer.get_second_scene_camera(), second_camera)
@@ -634,21 +658,24 @@ func test_second_scene_camera_receives_its_own_pair_ahead_of_the_terminal() -> v
 	if second_camera.compositor == null:
 		return
 	var effects := second_camera.compositor.compositor_effects
-	assert_eq(effects.size(), 3,
-			"far particles + camera-side particles + the scenario's terminal")
+	assert_eq(effects.size(), 4,
+			"far particles + camera-side particles + the overlay tail + the scenario's terminal")
 	assert_true(effects[0] is ParticleCompositorEffect)
 	assert_true(effects[1] is ParticleCompositorEffect)
-	assert_true(effects[2] is FrameFxCompositorEffect,
+	assert_true(effects[2] is SceneOverlayCompositorEffect,
+			"the scope view runs the scene routine's overlay tail too")
+	assert_true(effects[3] is FrameFxCompositorEffect,
 			"FrameFX and the display transfer stay terminal in the second view too")
 	assert_eq(effects[0].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT,
 			"this view draws the water surface, so its far side precedes the transparent list")
 	assert_eq(effects[1].effect_callback_type,
 			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT)
-	assert_eq(effects[2], main_chain[2],
+	assert_eq(effects[3], main_chain[3],
 			"the terminal is the one the shared scenario already ran for this camera")
 	assert_false(main_chain.has(effects[0]), "the pair is this view's own, not the World pair")
 	assert_false(main_chain.has(effects[1]))
+	assert_false(main_chain.has(effects[2]))
 	assert_eq(camera.compositor.compositor_effects, main_chain,
 			"the main camera's chain is untouched by the second view")
 	var report := renderer.get_debug_draw_list_report()
@@ -716,7 +743,8 @@ func test_second_scene_submission_is_compiled_for_its_own_eye() -> void:
 	var world_backend := _slot(report, "world_camera_backend")
 	assert_gt(int(backend.get("submitted_commands", 0)), 0,
 			"the second view publishes a non-empty submission")
-	assert_gt(int(_slot(report, "second_scene_far_backend").get("submitted_commands", 0)), 0)
+	# This view's pass A draws as its own render-list runs (ParticleFarPass).
+	assert_gt(int(report.get("second_scene_far_render_runs", 0)), 0)
 	var eye: Vector3 = backend.get("submitted_camera_position", Vector3.ZERO)
 	var forward: Vector3 = backend.get("submitted_camera_forward", Vector3.ZERO)
 	assert_almost_eq(eye, second_camera.global_position, Vector3.ONE * 0.0001,
@@ -900,7 +928,8 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 				"%s is a fresh effect after re-entry" % key)
 	assert_true(bool(revived.get("second_scene_compositor_attached", false)),
 			"the retained camera re-attaches on re-entry")
-	assert_eq(second_camera.compositor.get_compositor_effects().size(), 2)
+	assert_eq(second_camera.compositor.get_compositor_effects().size(), 3,
+			"the view's particle pair plus its overlay pass")
 
 	# A camera freed while attached retires the view on the next render.
 	second_camera.free()
@@ -917,8 +946,6 @@ func _overlap_texture(name: String) -> Texture2D:
 	var color := Color(0.5, 0.5, 1.0, 1.0)
 	if name == "impact.tga":
 		color = Color.RED
-	elif name == "smoke.tga":
-		color = Color(0.0, 1.0, 0.0, 0.5)
 	image.fill(color)
 	return ImageTexture.create_from_image(image)
 
@@ -950,10 +977,10 @@ func _overlap_image(viewport: SubViewport, renderer: ParticleRenderer) -> Image:
 	return viewport.get_texture().get_image()
 
 
-func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> void:
-	if RenderingServer.get_rendering_device() == null:
-		pending("RenderingDevice unavailable under this Godot renderer")
-		return
+# A viewport whose ParticleRenderer draws its distortion subset through a real
+# FrameFx node's type-0 row (the world wiring registers the same drawer every
+# frame through EffectWorld), over a wall of one-pixel red/black columns.
+func _framefx_distortion_view() -> Dictionary:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(128, 128)
 	viewport.own_world_3d = true
@@ -968,8 +995,28 @@ func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> voi
 	background.environment.background_mode = Environment.BG_COLOR
 	background.environment.background_color = Color.BLACK
 	viewport.add_child(background)
+	var stripes := Shader.new()
+	stripes.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+
+void fragment() {
+	ALBEDO = vec3(mod(floor(FRAGCOORD.x), 2.0), 0.0, 0.0);
+}
+"""
+	var wall_material := ShaderMaterial.new()
+	wall_material.shader = stripes
+	var wall_mesh := QuadMesh.new()
+	wall_mesh.size = Vector2(40.0, 40.0)
+	var wall := MeshInstance3D.new()
+	wall.mesh = wall_mesh
+	wall.material_override = wall_material
+	wall.position = Vector3(0.0, 1.0, -2.0)
+	viewport.add_child(wall)
+	var fx := FrameFx.new()
+	viewport.add_child(fx)
 	var file := ParticleFixture.parse(_overlap_document("impact", 0)
-			+ _overlap_document("smoke", 0) + _overlap_document("haze", 7))
+			+ _overlap_document("haze", 7))
 	var scene := EffectScene.new()
 	scene.open([file])
 	var renderer := ParticleRenderer.new()
@@ -977,30 +1024,80 @@ func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> voi
 	renderer.texture_provider = _overlap_texture
 	renderer.set_water_plane(-100.0, null)
 	viewport.add_child(renderer)
+	renderer.attach_distortion_row(fx)
+	return {"viewport": viewport, "fx": fx, "scene": scene, "renderer": renderer}
 
-	_overlap_spawn(scene, "impact", 0.0)
-	var before := await _overlap_image(viewport, renderer)
-	assert_gt(before.get_pixel(64, 64).r, 0.95, "the distant impact is visible")
+
+func _framefx_image(view: Dictionary) -> Image:
+	var renderer := view["renderer"] as ParticleRenderer
+	var fx := view["fx"] as FrameFx
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	fx.set_view_effects(0, 0, false, false, 0, false, false, false, false, false, false, false)
+	fx.advance_screen_effects()
+	for frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	return (view["viewport"] as SubViewport).get_texture().get_image()
+
+
+# The largest red step between neighbouring pixels of row 64 in [from, to).
+func _column_contrast(image: Image, from: int, to: int) -> float:
+	var contrast := 0.0
+	for x in range(from, to):
+		contrast = maxf(contrast, absf(image.get_pixel(x + 1, 64).r - image.get_pixel(x, 64).r))
+	return contrast
+
+
+# Class-7 emitters (a distort first graphic) leave both water-split scene
+# passes and draw in FrameFX's type-0 row over the finished frame, with texture
+# slot 2 = the row's 256A work target sampled at the particle's own screen
+# position (retail FrameFX_DistortionPass @ 0x5838F8 -> the flag-4 pass of
+# EffectWorld_RenderDistortionPass @ 0x5F72F7; the class test in
+# CParticleGroup_RenderChildren @ 0x5E58D2). The row runs only while such an
+# emitter lives (EffectWorld_HasDistortionParticles @ 0x5F6640).
+func test_distortion_particles_draw_in_the_framefx_row() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var view := _framefx_distortion_view()
+	var scene := view["scene"] as EffectScene
+	var renderer := view["renderer"] as ParticleRenderer
+	var fx := view["fx"] as FrameFx
+
+	# The impact hides behind the wall; it only shows the scene pass still runs.
+	_overlap_spawn(scene, "impact", -3.0)
+	var before := await _framefx_image(view)
+	assert_gt(_column_contrast(before, 58, 70), 0.8, "the wall columns are crisp")
+	var report := renderer.get_debug_draw_list_report()
+	assert_false(bool(report.get("distortion_present", true)),
+			"no class-7 emitter lives, so the row does not run")
+	assert_eq(int(fx.get_backend_report().get("distortion_sets", -1)), 0)
+
 	_overlap_spawn(scene, "haze", 1.0)
-	var after := await _overlap_image(viewport, renderer)
-	assert_almost_eq(after.get_pixel(64, 64).r, before.get_pixel(64, 64).r, 0.05,
-			"neutral muzzle haze must preserve the impact behind it")
-
-	# A color draw between two distortion runs must enter the next snapshot.
-	_overlap_spawn(scene, "smoke", 2.0)
-	var smoke := await _overlap_image(viewport, renderer)
-	var expected := smoke.get_pixel(64, 64)
-	assert_gt(expected.g, 0.5, "the intervening smoke contributes green")
-	_overlap_spawn(scene, "haze", 3.0)
-	var overlapping := await _overlap_image(viewport, renderer)
-	var actual := overlapping.get_pixel(64, 64)
-	assert_almost_eq(actual.r, expected.r, 0.05, "near haze preserves the red impact")
-	assert_almost_eq(actual.g, expected.g, 0.05, "near haze preserves intervening smoke")
-	var backend: Dictionary = renderer.get_debug_draw_list_report().get("world_camera_backend", {})
+	var after := await _framefx_image(view)
+	report = renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1,
+			"the haze leaves the camera-side scene pass; the impact stays")
+	assert_eq(int(_slot(report, "world_far_side").get("selected_emitters", -1)), 0,
+			"and the far-side scene pass")
+	assert_eq(int(_slot(report, "distortion").get("selected_emitters", -1)), 1,
+			"the distortion subset carries the haze")
+	assert_true(bool(report.get("distortion_present", false)))
+	var backend: Dictionary = report.get("distortion_backend", {})
 	assert_eq(String(backend.get("status", "")), "drawn", String(backend.get("failure", "")))
-	assert_eq(int(backend.get("drawn_commands", -1)), int(backend.get("submitted_commands", 0)))
-	assert_eq(int(backend.get("scene_color_copies", 0)), 2,
-			"each ordered distortion run samples the preceding particle draws")
+	assert_eq(int(backend.get("drawn_commands", -1)), 1)
+	var world_backend: Dictionary = report.get("world_camera_backend", {})
+	assert_eq(int(world_backend.get("scene_color_copies", -1)), 0,
+			"no scene pass snapshots the frame for the haze")
+	assert_eq(int(fx.get_backend_report().get("distortion_sets", -1)), 2,
+			"the particle set on 256A and the ribbon set on 256B")
+	# The haze paints the half-resolution capture back at its own position: the
+	# one-pixel columns under it average out, the rest of the frame stays crisp.
+	assert_lt(_column_contrast(after, 58, 70), 0.35,
+			"the haze shows the 256A work target, not the frame")
+	assert_almost_eq(after.get_pixel(64, 64).r, 0.5, 0.25)
+	assert_gt(_column_contrast(after, 4, 16), 0.8, "outside the haze the frame is untouched")
 
 
 func _asymmetric_dirt_texture(_name: String) -> Texture2D:
@@ -1046,4 +1143,124 @@ func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
 	assert_gt(image.get_pixelv(base).r, 0.8, "the dense source edge belongs at the base of the splash")
 	assert_lt(image.get_pixelv(top).r, image.get_pixelv(base).r - 0.2,
 			"the upper plume must fade instead of showing the texture's dense cut edge")
+	assert_engine_error_count(0)
+
+
+# A Bump graphic's material carries SPECULARENABLE instead of FOGENABLE
+# (retail CParticleTexture_InitTextureAndChannels @ 0x5E8424 stores 0x10000 as
+# its intrinsic pass word): the SPECULAR vertex colour (the modulated particle
+# RGB) adds after the DOT3 stages and full scene fog leaves it untinted.
+func test_bump_adds_its_specular_colour_and_does_not_fog() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var background := WorldEnvironment.new()
+	background.environment = Environment.new()
+	background.environment.background_mode = Environment.BG_COLOR
+	background.environment.background_color = Color.BLACK
+	viewport.add_child(background)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_lit_scene()
+	renderer.texture_provider = _overlap_texture
+	renderer.set_water_plane(-100.0, null)
+	var fog_source := _live_fog_source()
+	viewport.add_child(fog_source)
+	renderer.environment_source = fog_source
+	viewport.add_child(renderer)
+	var image := await _overlap_image(viewport, renderer)
+	var center := image.get_pixel(64, 64)
+	var backend: Dictionary = renderer.get_debug_draw_list_report().get("world_camera_backend", {})
+	assert_eq(String(backend.get("status", "")), "drawn", String(backend.get("failure", "")))
+	assert_eq(String(backend.get("fog_material_targets", "")),
+			"scene,black,black,none,white,gray127,none,none")
+	assert_gt(center.r, 0.9, "the specular add lifts the lit bump to the white particle colour: %s" % center)
+	assert_almost_eq(center.b, center.r, 0.03,
+			"the fog colour (0.2, 0.3, 0.4) must not tint an unfogged bump: %s" % center)
+	assert_engine_error_count(0)
+
+
+func _thermal_view_source(thermal: bool) -> MissionEnvironment:
+	var data := EnvFile.new()
+	data.reset_to_default()
+	data.fog_level = 0.0
+	var environment := MissionEnvironment.new()
+	environment.environment_data = data
+	environment.set_thermal_view(thermal, false)
+	return environment
+
+
+# `far_side`: the eye above a water plane the particle sits below, so the
+# particle draws in pass A (the far-side transparent list) instead of the
+# camera-side compositor pass.
+func _thermal_pixel(blend: int, thermal: bool, background: Color,
+		far_side: bool = false) -> Color:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.current = true
+	viewport.add_child(camera)
+	if far_side:
+		camera.look_at_from_position(Vector3(0.0, 2.0, 5.0), Vector3(0.0, 1.0, 0.0))
+	else:
+		camera.position = Vector3(0.0, 1.0, 5.0)
+	var clear := WorldEnvironment.new()
+	clear.environment = Environment.new()
+	clear.environment.background_mode = Environment.BG_COLOR
+	clear.environment.background_color = background
+	viewport.add_child(clear)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _single_quad_scene("thermal", blend)
+	renderer.texture_provider = _overlap_texture
+	renderer.set_water_plane(1.5 if far_side else -100.0, null)
+	var source := _thermal_view_source(thermal)
+	viewport.add_child(source)
+	renderer.environment_source = source
+	viewport.add_child(renderer)
+	var image := await _overlap_image(viewport, renderer)
+	return image.get_pixel(64, 64)
+
+
+# A thermal-view frame binds each texture's secondary material
+# (retail CParticleBatch_FlushAndBindMaterial @ 0x5E42BF): Blend inverts its
+# colour, MODULATE(1 - TEXTURE, 1 - DIFFUSE), and Additive darkens under
+# ZERO/INVSRCCOLOR (retail CParticleTexture_InitTextureAndChannels
+# @ 0x5E8584 / @ 0x5E8390).
+func test_thermal_frames_bind_the_secondary_particle_materials() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	# The texel is (0.5, 0.5, 1.0): its blue complement is zero.
+	var blend := await _thermal_pixel(0, false, Color.BLACK)
+	var blend_thermal := await _thermal_pixel(0, true, Color.BLACK)
+	assert_gt(blend.b, 0.3, "the primary Blend material shows the texel: %s" % blend)
+	assert_lt(blend_thermal.b, 0.05, "the thermal Blend inverts: 1 - T.b = 0: %s" % blend_thermal)
+	var grey := Color(0.5, 0.5, 0.5)
+	var additive := await _thermal_pixel(1, false, grey)
+	var additive_thermal := await _thermal_pixel(1, true, grey)
+	assert_gt(additive.b, 0.55, "the primary Additive material brightens: %s" % additive)
+	assert_lt(additive_thermal.b, 0.45,
+			"the thermal Additive material darkens the grey behind it: %s" % additive_thermal)
+	# Pass A (the water's far side) binds the same secondary materials.
+	var far_blend := await _thermal_pixel(0, false, Color.BLACK, true)
+	var far_blend_thermal := await _thermal_pixel(0, true, Color.BLACK, true)
+	assert_gt(far_blend.b, 0.3, "pass A's primary Blend shows the texel: %s" % far_blend)
+	assert_lt(far_blend_thermal.b, 0.05,
+			"pass A's thermal Blend inverts: %s" % far_blend_thermal)
+	var far_additive := await _thermal_pixel(1, false, grey, true)
+	var far_additive_thermal := await _thermal_pixel(1, true, grey, true)
+	assert_gt(far_additive.b, 0.55, "pass A's primary Additive brightens: %s" % far_additive)
+	assert_lt(far_additive_thermal.b, 0.45,
+			"pass A's thermal Additive darkens the grey behind it: %s" % far_additive_thermal)
 	assert_engine_error_count(0)

@@ -14,6 +14,8 @@
 #include "env/mission_environment.h"
 #include "env/weather.h"
 
+#include <runtime/renderer/render_order.h>
+
 namespace godot {
 
 void SkyDome::_bind_methods() {
@@ -48,8 +50,16 @@ void SkyDome::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_built"), &SkyDome::is_built);
 	ClassDB::bind_method(D_METHOD("get_sky_material"),
 			&SkyDome::get_sky_material);
+	ClassDB::bind_method(D_METHOD("get_cloud_material"),
+			&SkyDome::get_cloud_material);
 	ClassDB::bind_method(D_METHOD("get_mesh_instance"),
 			&SkyDome::get_mesh_instance);
+	ClassDB::bind_method(D_METHOD("set_pass_gates", "beauty_drawn", "mirror_drawn"),
+			&SkyDome::set_pass_gates);
+	ClassDB::bind_method(D_METHOD("is_beauty_pass_drawn"),
+			&SkyDome::is_beauty_pass_drawn);
+	ClassDB::bind_method(D_METHOD("is_mirror_pass_drawn"),
+			&SkyDome::is_mirror_pass_drawn);
 	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
@@ -135,6 +145,21 @@ void SkyDome::build() {
 			ResourceLoader::get_singleton()->load("res://shaders/sky.gdshader");
 	sky_material_.instantiate();
 	sky_material_->set_shader(sky_shader);
+	// Dome pass 1 writes no depth, so Godot draws it in the transparent list:
+	// its rung opens the sky pass, before the bodies and the clouds
+	// (renderer/render_order kRungSkyDome).
+	sky_material_->set_render_priority(opennova::renderer::kRungSkyDome);
+	// Dome pass 2 draws after the sun/moon discs and before every world
+	// surface: the sky-cloud rung of the frame ladder (renderer/render_order).
+	Ref<Shader> cloud_shader = ResourceLoader::get_singleton()->load(
+			"res://shaders/sky_clouds.gdshader");
+	cloud_material_.instantiate();
+	cloud_material_->set_shader(cloud_shader);
+	cloud_material_->set_render_priority(opennova::renderer::kRungSkyClouds);
+	has_clouds_ = false;
+	flat_pass_ = false;
+	_set_dome_parameter("u_beauty_pass_drawn", beauty_pass_drawn_);
+	_set_dome_parameter("u_mirror_pass_drawn", mirror_pass_drawn_);
 
 	// The witnessed 21x21 dome (441 verts / 800 tris), built ONCE at the
 	// reference height (env #20's ratified fold; env_celestial.h carries the
@@ -191,43 +216,38 @@ void SkyDome::advance_frame(double p_delta) {
 			? opennova::env::build_sky_frame(env->state())
 			: opennova::env::SkyFrameState{};
 	if (frame.loaded) {
+		flat_pass_ = frame.flat_pass;
 		if (frame.flat_pass) {
 			sky_material_->set_shader_parameter("u_flat_pass", true);
 			sky_material_->set_shader_parameter("u_flat_color",
 					to_vector3(frame.flat_color));
 		} else {
 			sky_material_->set_shader_parameter("u_flat_pass", false);
-			sky_material_->set_shader_parameter("u_sky_base",
-					to_vector3(frame.sky_base));
-			sky_material_->set_shader_parameter("u_sky_bright",
-					to_vector3(frame.sky_bright));
-			sky_material_->set_shader_parameter("u_sky_highlight",
+			_set_dome_parameter("u_sky_base", to_vector3(frame.sky_base));
+			_set_dome_parameter("u_sky_bright", to_vector3(frame.sky_bright));
+			_set_dome_parameter("u_sky_highlight",
 					to_vector3(frame.sky_highlight));
-			sky_material_->set_shader_parameter("u_cloud_base",
-					to_vector3(frame.cloud_base));
-			sky_material_->set_shader_parameter("u_cloud_highlight",
+			_set_dome_parameter("u_cloud_base", to_vector3(frame.cloud_base));
+			_set_dome_parameter("u_cloud_highlight",
 					to_vector3(frame.cloud_highlight));
-			sky_material_->set_shader_parameter("u_cloud_edge",
-					to_vector3(frame.cloud_edge));
+			_set_dome_parameter("u_cloud_edge", to_vector3(frame.cloud_edge));
 		}
 		// The dome mesh is the engine layout drawn identity into the Godot
 		// world, so its shader dots GODOT-world sun/light vectors: route the
 		// render-float tuples through the util/axes.h swap (2026-08-20 — the
 		// identity mapping put the sun-proximity highlight 90 degrees off in
 		// yaw, the 03tr-sun-sky dome half).
-		sky_material_->set_shader_parameter("u_sun_dir",
-				render_float_to_godot(frame.sun_dir));
-		sky_material_->set_shader_parameter("u_light_dir",
+		_set_dome_parameter("u_sun_dir", render_float_to_godot(frame.sun_dir));
+		_set_dome_parameter("u_light_dir",
 				render_float_to_godot(frame.light_dir));
-		sky_material_->set_shader_parameter("u_fog_color",
-				to_vector3(frame.skyfog_color));
+		_set_dome_parameter("u_fog_color", to_vector3(frame.skyfog_color));
 		// The sky wrapper keeps its dedicated skyfog color and its own fog end
 		// on both sides of the water plane: the engine frame's fog_end is the
 		// raw smoothed distance the dome VS constant c9.x carries unconditionally
 		// (sky_frame.cpp cites render_skybox @ 0x5792c2); the murk-derived
 		// world end is the object/terrain passes' alone.
-		sky_material_->set_shader_parameter("u_fog_end", frame.fog_end);
-		sky_material_->set_shader_parameter("u_sky_height", frame.sky_height);
+		_set_dome_parameter("u_fog_end", frame.fog_end);
+		_set_dome_parameter("u_sky_height", frame.sky_height);
 	}
 
 	_update_cloud_textures(env);
@@ -244,9 +264,9 @@ void SkyDome::advance_frame(double p_delta) {
 	}
 	Weather *weather = _weather_node();
 	if (weather != nullptr) {
-		sky_material_->set_shader_parameter("u_scroll_offset1",
+		cloud_material_->set_shader_parameter("u_scroll_offset1",
 				weather->get_cloud_uv_offset1(cam_x, cam_z));
-		sky_material_->set_shader_parameter("u_scroll_offset2",
+		cloud_material_->set_shader_parameter("u_scroll_offset2",
 				weather->get_cloud_uv_offset2(cam_x, cam_z));
 	} else {
 		fallback_scroll_.advance(p_delta, frame.sky_speed);
@@ -254,10 +274,46 @@ void SkyDome::advance_frame(double p_delta) {
 				opennova::env::cloud_scroll_uv_offsets(
 						fallback_scroll_.core.cloud_scroll,
 						static_cast<float>(cam_x), static_cast<float>(cam_z));
-		sky_material_->set_shader_parameter("u_scroll_offset1",
+		cloud_material_->set_shader_parameter("u_scroll_offset1",
 				Vector2(offsets.u1, offsets.v1));
-		sky_material_->set_shader_parameter("u_scroll_offset2",
+		cloud_material_->set_shader_parameter("u_scroll_offset2",
 				Vector2(offsets.u2, offsets.v2));
+	}
+	_apply_cloud_pass(has_clouds_ && !flat_pass_);
+}
+
+void SkyDome::set_pass_gates(bool p_beauty_drawn, bool p_mirror_drawn) {
+	if (p_beauty_drawn == beauty_pass_drawn_ &&
+			p_mirror_drawn == mirror_pass_drawn_) {
+		return;
+	}
+	beauty_pass_drawn_ = p_beauty_drawn;
+	mirror_pass_drawn_ = p_mirror_drawn;
+	_set_dome_parameter("u_beauty_pass_drawn", beauty_pass_drawn_);
+	_set_dome_parameter("u_mirror_pass_drawn", mirror_pass_drawn_);
+}
+
+void SkyDome::_set_dome_parameter(const StringName &p_name,
+		const Variant &p_value) {
+	if (sky_material_.is_valid()) {
+		sky_material_->set_shader_parameter(p_name, p_value);
+	}
+	if (cloud_material_.is_valid()) {
+		cloud_material_->set_shader_parameter(p_name, p_value);
+	}
+}
+
+// The cloud pass exists only on the shader path with a bound cloud layer
+// (retail render_skybox pass 2 @ 0x5798f1..0x579b15; the flat
+// advanced_clouds=0 path @ 0x579b42 draws the single flat dome).
+void SkyDome::_apply_cloud_pass(bool p_drawn) {
+	if (sky_material_.is_null()) {
+		return;
+	}
+	const Ref<Material> wanted =
+			p_drawn ? Ref<Material>(cloud_material_) : Ref<Material>();
+	if (sky_material_->get_next_pass() != wanted) {
+		sky_material_->set_next_pass(wanted);
 	}
 }
 
@@ -273,14 +329,13 @@ void SkyDome::_update_cloud_textures(MissionEnvironment *p_env) {
 	}
 	bound_cloud_tex1_ = tex1;
 	bound_cloud_tex2_ = tex2;
-	const bool has_clouds = tex1.is_valid() || tex2.is_valid();
-	if (has_clouds) {
-		sky_material_->set_shader_parameter("u_cloud_tex1",
+	has_clouds_ = tex1.is_valid() || tex2.is_valid();
+	if (has_clouds_) {
+		cloud_material_->set_shader_parameter("u_cloud_tex1",
 				tex1.is_valid() ? tex1 : tex2);
-		sky_material_->set_shader_parameter("u_cloud_tex2",
+		cloud_material_->set_shader_parameter("u_cloud_tex2",
 				tex2.is_valid() ? tex2 : tex1);
 	}
-	sky_material_->set_shader_parameter("u_has_clouds", has_clouds);
 }
 
 // The faithful sky dome is open below its rim. Retail clears that region to

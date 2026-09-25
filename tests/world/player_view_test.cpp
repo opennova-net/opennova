@@ -542,9 +542,22 @@ void test_nvg_toggle_gain_and_first_person_visibility() {
     CHECK(player_view_toggle_nvg(v));
     CHECK(player_view_nvg_visible(v));
     v.third_person = true;
+    v.camera_mode = 1;
     CHECK(v.nvg_active); // camera suppression does not consume the toggle
     CHECK(!player_view_nvg_visible(v));
     v.third_person = false;
+    v.camera_mode = 0;
+    CHECK(player_view_nvg_visible(v));
+    // The death lerp camera (mode 4) is not third person, yet retail's NVG
+    // world/post legs all need g_camera_mode == 0 [orig:
+    // CTerrainRenderer_BuildLightingShaderConstants @ 0x5c81fe; Render_TerrainScene
+    // @ 0x610d09; Render_ProcessMainSceneFrame @ 0x5ca6b8].
+    v.local_dead = true;
+    player_view_resolve_mode(v);
+    CHECK(v.camera_mode == 4 && !v.third_person && v.nvg_active);
+    CHECK(!player_view_nvg_visible(v));
+    v.local_dead = false;
+    player_view_resolve_mode(v);
     CHECK(player_view_nvg_visible(v));
 
     CHECK(player_view_adjust_nvg_gain(v, 1) == 1);
@@ -612,6 +625,35 @@ void test_view_projection_retail_stretch() {
     CHECK(std::fabs(viewmodel_focal_ratio(80.0f, 60.0f) - 1.45330f) < 1e-4f);
     CHECK(std::fabs(viewmodel_focal_ratio(20.0f, 80.0f) - 0.21014f) < 1e-4f);
     CHECK(viewmodel_focal_ratio(80.0f, 0.0f) == 1.0f);
+}
+
+// The NVG scene's pass [orig: NVG_RenderScene @0x5d2954..0x5d296d; NVG_RenderScopedScene
+// @0x5d29e4..0x5d2a2a]: the frame's frustum in 512 rows at its own aspect, or
+// the Scoped arm's square frustum in the 512 square.
+void test_nvg_view_projection() {
+    opennova::renderer::FrameFxNvgPlan frame_arm;
+    frame_arm.scene = frame_arm.composite = true;
+    opennova::renderer::FrameFxNvgPlan lens_arm = frame_arm;
+    lens_arm.lens = true;
+    opennova::renderer::FrameFxNvgPlan sighted_arm = frame_arm;
+    sighted_arm.sighted = true;
+    const ViewProjection wide = view_projection(80.0f, 0, 1920, 1080);
+    const ViewProjection nvg = nvg_view_projection(wide, frame_arm, 0.75f, 1);
+    CHECK(nvg.fov_h_deg == wide.fov_h_deg && nvg.fov_v_deg == wide.fov_v_deg);
+    CHECK(nvg.aspect == wide.aspect);
+    CHECK(nvg.target_h == 512 && nvg.target_w == 683); // lround(512 x 4/3)
+    const ViewProjection native = view_projection(80.0f, -1, 1920, 1080);
+    const ViewProjection native_nvg = nvg_view_projection(native, frame_arm, 0.5625f, 1);
+    CHECK(native_nvg.target_h == 512 && native_nvg.target_w == 910);
+    const ViewProjection lens = nvg_view_projection(wide, lens_arm, 0.75f, 4);
+    CHECK(lens.fov_h_deg == 15.0f && lens.fov_v_deg == 15.0f && lens.aspect == 1.0f);
+    CHECK(lens.target_w == 512 && lens.target_h == 512);
+    // The Sighted arm keeps the frame's shape at 80 / zoom
+    // [orig: NVG_RenderSightedScene @0x5d2aa9..0x5d2ada].
+    const ViewProjection sighted = nvg_view_projection(wide, sighted_arm, 0.75f, 4);
+    CHECK(sighted.fov_h_deg == 20.0f && sighted.aspect == wide.aspect);
+    CHECK(std::fabs(sighted.fov_v_deg - fov_vertical_from_horizontal_deg(20.0f, wide.aspect)) < 1e-5f);
+    CHECK(sighted.target_w == 683 && sighted.target_h == 512);
 }
 
 // [orig: Game_RunVideoTestDialog @0x53ed3e..0x53ed6b] The first launch's video
@@ -1575,6 +1617,7 @@ int main() {
     test_nvg_toggle_gain_and_first_person_visibility();
     test_fov_vertical_conversion();
     test_view_projection_retail_stretch();
+    test_nvg_view_projection();
     test_fresh_profile_aspect_seed();
     test_view_bias_blend();
     test_input_dispatch_gates();

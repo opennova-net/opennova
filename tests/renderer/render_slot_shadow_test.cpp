@@ -60,49 +60,60 @@ int main() {
 	CHECK(near_f(silhouette_half_extent(1.0f), 1.25f));   // r*1.25
 	CHECK(near_f(silhouette_half_extent(8.0f), 8.75f));   // clamp r+0.75
 
-	// --- capture view basis [orig: build_direction_look_at_matrix @ 0x612c90]:
-	// forward = the slot direction, right = (fwd.z, 0, -fwd.x) normalized,
-	// up = fwd x right; a vertical direction degenerates (retail zeroes the
-	// right/up rows, the port substitutes x and reports it).
+	// --- capture view axes [orig: build_direction_look_at_matrix @ 0x612c90
+	// via setup_shadow_cascade_matrices @ 0x58d31e]: the retail look-at
+	// (forward = the slot direction, right = (fwd.z, 0, -fwd.x) normalized,
+	// up = fwd x right) in render axes, mapped to presentation axes through
+	// the x/z swap: camera x = -right, y = up, z = -forward, a proper
+	// rotation (det +1) whose back-face cull keeps the light-facing faces.
 	{
-		const SlotCaptureBasis b = silhouette_capture_basis({0.6f, -0.8f, 0.0f});
-		CHECK(!b.degenerate);
-		CHECK(near_f(b.forward[0], 0.6f) && near_f(b.forward[1], -0.8f) &&
-				near_f(b.forward[2], 0.0f));
-		CHECK(near_f(b.right[0], 0.0f) && near_f(b.right[1], 0.0f) &&
-				near_f(b.right[2], -1.0f));
-		CHECK(near_f(b.up[0], 0.8f) && near_f(b.up[1], 0.6f) && near_f(b.up[2], 0.0f));
-		// Unnormalized input: the basis normalizes first.
-		const SlotCaptureBasis scaled = silhouette_capture_basis({1.2f, -1.6f, 0.0f});
-		CHECK(near_f(scaled.forward[0], 0.6f) && near_f(scaled.up[1], 0.6f));
-		// Orthonormal for a general direction.
-		const SlotCaptureBasis g = silhouette_capture_basis({0.3f, -0.5f, 0.7f});
 		const auto dot = [](const std::array<float, 3> &a, const std::array<float, 3> &b) {
 			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 		};
-		CHECK(near_f(dot(g.right, g.forward), 0.0f, 1.0e-4f));
-		CHECK(near_f(dot(g.up, g.forward), 0.0f, 1.0e-4f));
-		CHECK(near_f(dot(g.up, g.right), 0.0f, 1.0e-4f));
-		CHECK(near_f(dot(g.up, g.up), 1.0f, 1.0e-4f));
-		CHECK(near_f(g.right[1], 0.0f));  // the right row stays horizontal
-		// The zenith sun (the clamped-negated (0, -1, 0)): degenerate.
-		const SlotCaptureBasis zenith = silhouette_capture_basis({0.0f, -1.0f, 0.0f});
+		const auto cross = [](const std::array<float, 3> &a, const std::array<float, 3> &b) {
+			return std::array<float, 3>{a[1] * b[2] - a[2] * b[1],
+					a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+		};
+		const SlotCaptureViewAxes b = slot_capture_view_axes({0.6f, -0.8f, 0.0f});
+		CHECK(!b.degenerate);
+		// The camera looks down -z: z is the negated slot direction.
+		CHECK(near_f(b.z[0], -0.6f) && near_f(b.z[1], 0.8f) && near_f(b.z[2], 0.0f));
+		// The look-at right on the presentation direction is (0, 0, -1); the
+		// retail right row mapped back is its negation.
+		CHECK(near_f(b.x[0], 0.0f) && near_f(b.x[1], 0.0f) && near_f(b.x[2], 1.0f));
+		CHECK(near_f(b.y[0], 0.8f) && near_f(b.y[1], 0.6f) && near_f(b.y[2], 0.0f));
+		// Right-handed: x cross y = z (det +1), not the mirrored -z.
+		const auto xy = cross(b.x, b.y);
+		CHECK(near_f(xy[0], b.z[0], 1.0e-4f) && near_f(xy[1], b.z[1], 1.0e-4f) &&
+				near_f(xy[2], b.z[2], 1.0e-4f));
+		// Unnormalized input: the look-at normalizes first.
+		const SlotCaptureViewAxes scaled = slot_capture_view_axes({1.2f, -1.6f, 0.0f});
+		CHECK(near_f(scaled.z[0], -0.6f) && near_f(scaled.y[1], 0.6f));
+		// Orthonormal and right-handed for a general direction.
+		const SlotCaptureViewAxes g = slot_capture_view_axes({0.3f, -0.5f, 0.7f});
+		CHECK(near_f(dot(g.x, g.z), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.y, g.z), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.y, g.x), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.y, g.y), 1.0f, 1.0e-4f));
+		CHECK(near_f(g.x[1], 0.0f));  // the right row stays horizontal
+		CHECK(near_f(dot(cross(g.x, g.y), g.z), 1.0f, 1.0e-4f));
+		// The shared retail look-at frame (mounted_pose consumes the same
+		// one): up and forward carry over, right is its mapped negation.
+		const DirectionLookAt<float> shared = direction_look_at(
+				std::array<float, 3>{0.3f, -0.5f, 0.7f});
+		CHECK(near_f(shared.right[0], -g.x[0]) && near_f(shared.up[1], g.y[1]) &&
+				near_f(shared.forward[2], -g.z[2]) && !shared.degenerate);
+		// The zenith sun (the clamped-negated (0, -1, 0)): degenerate, still
+		// a right-handed frame.
+		const SlotCaptureViewAxes zenith = slot_capture_view_axes({0.0f, -1.0f, 0.0f});
 		CHECK(zenith.degenerate);
-		CHECK(near_f(zenith.forward[1], -1.0f));
-		CHECK(near_f(zenith.right[0], 1.0f));
-		CHECK(near_f(dot(zenith.up, zenith.up), 1.0f, 1.0e-4f));
-		CHECK(near_f(dot(zenith.up, zenith.forward), 0.0f, 1.0e-4f));
-		const SlotCaptureBasis none = silhouette_capture_basis({0.0f, 0.0f, 0.0f});
+		CHECK(near_f(zenith.z[1], 1.0f));
+		CHECK(near_f(dot(cross(zenith.x, zenith.y), zenith.z), 1.0f, 1.0e-4f));
+		const SlotCaptureViewAxes none = slot_capture_view_axes({0.0f, 0.0f, 0.0f});
 		CHECK(none.degenerate);
 		CHECK(kSlotCaptureClearArgb == 0x00FFFFFFu);  // white RGB, alpha 0
 		CHECK(near_f(kSilhouetteCaptureNear, 0.2f));
 		CHECK(near_f(kSilhouetteCaptureFar, 5000.2f));
-		// The slot basis is the shared retail look-at frame (mounted_pose
-		// consumes the same one): identical outputs for the same direction.
-		const DirectionLookAt<float> shared = direction_look_at(
-				std::array<float, 3>{0.3f, -0.5f, 0.7f});
-		CHECK(near_f(shared.right[0], g.right[0]) && near_f(shared.up[1], g.up[1]) &&
-				near_f(shared.forward[2], g.forward[2]) && !shared.degenerate);
 	}
 
 	// --- RT chain [orig: RenderSlot_InitTextureChain @ 0x5d5320].
@@ -194,17 +205,77 @@ int main() {
 				near_f(clipped[2], 1.0f));
 	}
 
-	// --- slot lighting darkening constants
-	// [orig: RenderSlot_SetupNextLighting @ 0x5d73d3..0x5d740d].
+	// --- the attached-light drape diffuse
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e89..0x5d5f14].
 	{
-		const auto dark = slot_light_darkening({1.0f, 1.0f, 1.0f});
-		// lum = 0.3+0.6+0.1 = 1; (1+1)*0.5*-3 = -3 per channel.
-		CHECK(near_f(dark[0], -3.0f) && near_f(dark[1], -3.0f) &&
-				near_f(dark[2], -3.0f));
 		const auto scale =
 				drape_attached_light_scale({1.0f, 1.0f, 1.0f}, 0.5f);
 		// -(c+lum)*(1-fade) = -2*0.5 = -1.
 		CHECK(near_f(scale[0], -1.0f));
+	}
+
+	// --- the march start: the rotated collision-bbox centre when the
+	// entity Flags dword is zero, else the position
+	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6ce7..0x5d6d31].
+	{
+		const std::array<int32_t, 3> centre{0x10000, 0x20000, 0x18000};
+		// Heading 0: mission centre (1, 2, 1.5) is presentation (1, 1.5, -2).
+		const auto start = slot_march_start_offset(true, 0, 0, 0, centre);
+		CHECK(near_f(start[0], 1.0f) && near_f(start[1], 1.5f) &&
+				near_f(start[2], -2.0f));
+		// A set Flags bit keeps the entity position: no offset.
+		const auto flagged = slot_march_start_offset(false, 0, 0, 0, centre);
+		CHECK(near_f(flagged[0], 0.0f) && near_f(flagged[1], 0.0f) &&
+				near_f(flagged[2], 0.0f));
+		// Heading 90 degrees (0x40000000 BAM) turns the mission (X, Y) pair to
+		// (-Y, X): (-2, 1, 1.5), presentation (-2, 1.5, -1).
+		const auto turned = slot_march_start_offset(true, 0x40000000, 0, 0, centre);
+		CHECK(near_f(turned[0], -2.0f, 1.0e-4f) && near_f(turned[1], 1.5f, 1.0e-4f) &&
+				near_f(turned[2], -1.0f, 1.0e-4f));
+		// The Flags dword read: a vehicle carries the REFLECTABLE bit even
+		// with both sim words clear [orig: Entity_InitFromModel @ 0x40e20a].
+		CHECK(slot_entity_flags_zero(0u, 0u, 3));
+		CHECK(!slot_entity_flags_zero(0u, 0u, 1));
+		CHECK(!slot_entity_flags_zero(0x100u, 0u, 3));
+		CHECK(!slot_entity_flags_zero(0u, 0x4000000u, 0));
+	}
+
+	// --- the attached-light drape light: the D3D fill's 1.5x colour
+	// rescaled, lit per patch point on the (0, 1, 0) normal
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e50..0x5d5f4c;
+	// Light_FillD3DPointLight @ 0x5aa450].
+	{
+		SlotPointLight point;
+		point.position = {0.0f, 3.0f, 0.0f};
+		point.color = {0.2f, 0.2f, 0.2f};
+		point.range = 10.0f;
+		point.attenuation = {1.0f, 0.0f, 15.0f / 100.0f, 1.0f};
+		const SlotDrapeLight light = drape_attached_light(point, 0.0f);
+		// D3D diffuse 0.3 (0.2 x 1.5), lum 0.3: -(0.3 + 0.3) = -0.6.
+		CHECK(near_f(light.diffuse[0], -0.6f) && near_f(light.diffuse[2], -0.6f));
+		CHECK(near_f(light.range, 10.0f) && near_f(light.quadratic, 0.15f));
+		// Straight below at d = 3: atten 1 / (1 + 0.15 * 9), N.L = 1.
+		const auto below = drape_attached_light_color(light, {0.0f, 0.0f, 0.0f});
+		CHECK(near_f(below[0], 1.0f - 0.6f / (1.0f + 0.15f * 9.0f)));
+		// 4 u to the side at the same height difference: d = 5, N.L = 3/5.
+		const auto side = drape_attached_light_color(light, {4.0f, 0.0f, 0.0f});
+		CHECK(near_f(side[1], 1.0f - 0.6f * 0.6f / (1.0f + 0.15f * 25.0f)));
+		// The N.L term: a point level with the light gets nothing.
+		const auto level = drape_attached_light_color(light, {5.0f, 3.0f, 0.0f});
+		CHECK(near_f(level[0], 1.0f));
+		// Past the D3D range the light has no effect.
+		const auto far = drape_attached_light_color(light, {0.0f, -8.0f, 0.0f});
+		CHECK(near_f(far[0], 1.0f));
+		// The fade scales the diffuse: at fade 1 the patch stays white.
+		const SlotDrapeLight faded = drape_attached_light(point, 1.0f);
+		CHECK(near_f(drape_attached_light_color(faded, {0.0f, 0.0f, 0.0f})[0], 1.0f));
+		// A strong light saturates the colour at black.
+		point.color = {4.0f, 4.0f, 4.0f};
+		const auto black =
+				drape_attached_light_color(drape_attached_light(point, 0.0f), {0.0f, 2.9f, 0.0f});
+		CHECK(near_f(black[0], 0.0f));
+		// No light (the sun leg, or a failed fill): white.
+		CHECK(near_f(drape_attached_light_color(SlotDrapeLight{}, {0.0f, 0.0f, 0.0f})[2], 1.0f));
 	}
 
 	// --- dominant-light pick [orig: RenderSlot_UpdateEntityLight @ 0x5d6a30].
@@ -306,6 +377,30 @@ int main() {
 		const SlotPatch p20 = slot_patch_bounds(10.3f, 20.6f, 20);
 		CHECK(near_f(p20.min_x, 0.0f) && near_f(p20.max_x, 20.0f));
 		CHECK(near_f(p20.min_north, 12.0f) && near_f(p20.max_north, 32.0f));
+		// The patch lift: (lod + 1) * 0.004 over each height sample
+		// [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5201..0x5d529f].
+		CHECK(near_f(slot_patch_lift(6), 0.028f));
+		CHECK(near_f(slot_patch_lift(20), 0.084f));
+		// The patch mesh: (lod + 1)^2 vertices at 1 u, east-major, each at the
+		// point-sampled height plus the lift [orig:
+		// RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130].
+		std::vector<std::array<float, 3>> vertices;
+		slot_patch_vertices(p6, 6, [](float x, float z) { return x * 0.5f - z; }, vertices);
+		CHECK(vertices.size() == 49u);
+		CHECK(near_f(vertices[0][0], 7.0f) && near_f(vertices[0][2], -24.0f));
+		CHECK(near_f(vertices[0][1], 7.0f * 0.5f + 24.0f + 0.028f));
+		CHECK(near_f(vertices[1][0], 7.0f) && near_f(vertices[1][2], -23.0f));
+		CHECK(near_f(vertices[7][0], 8.0f) && near_f(vertices[7][2], -24.0f));
+		CHECK(near_f(vertices[48][0], 13.0f) && near_f(vertices[48][2], -18.0f));
+		// Its triangles: (a, d, c), (a, b, d) per cell [orig:
+		// RenderSlot_InitPatchIndexBuffers @ 0x5d53d0].
+		std::vector<uint16_t> indices;
+		slot_patch_indices(6, indices);
+		CHECK(indices.size() == 6u * 36u);
+		CHECK(indices[0] == 0 && indices[1] == 8 && indices[2] == 7);
+		CHECK(indices[3] == 0 && indices[4] == 1 && indices[5] == 8);
+		CHECK(indices[6] == 1 && indices[7] == 9 && indices[8] == 8);
+		CHECK(indices[indices.size() - 1] == 48);
 	}
 
 	// --- the depth-clip stage [orig: shadow_system_init_resources
@@ -372,9 +467,9 @@ int main() {
 		player.is_local_player_or_parent = true;
 		CHECK(slot_priority_score(cam, view, player) == s_near / 2);
 		// Exclusions.
-		SlotCandidateState dead = near_front;
-		dead.dead = true;
-		CHECK(slot_priority_score(cam, view, dead) == kSlotScoreExcluded);
+		SlotCandidateState hidden = near_front;
+		hidden.hidden = true;
+		CHECK(slot_priority_score(cam, view, hidden) == kSlotScoreExcluded);
 		SlotCandidateState seated = near_front;
 		seated.seat_parented = true;
 		CHECK(slot_priority_score(cam, view, seated) == kSlotScoreExcluded);
@@ -389,9 +484,8 @@ int main() {
 		CHECK(slot_priority_score(cam, view, distant) != kSlotScoreExcluded);
 	}
 
-	// --- assignment: 24-patch / 12-capture partition, sticky orders,
-	// blob fallback [orig: @ 0x5d68ed..0x5d6a25; RenderSlot_DrawAllDrapes
-	// @ 0x5d6e20].
+	// --- assignment: 24-patch / 12-capture partition, sticky orders
+	// [orig: @ 0x5d68ed..0x5d6a25; RenderSlot_DrawAllDrapes @ 0x5d6e20].
 	{
 		RenderSlotPlan plan;
 		for (uint64_t id = 1; id <= 30; ++id) {
@@ -399,11 +493,10 @@ int main() {
 		}
 		const auto state_for = [](uint64_t id) {
 			SlotCandidateState state;
-			// ids 1..30 at increasing forward distance; id 20 authors a
-			// blob decal; id 29 is seat-parented.
+			// ids 1..30 at increasing forward distance; id 29 is
+			// seat-parented.
 			state.pos2d = {0.0f, static_cast<float>(id) * 2.0f};
 			state.dynamic = true;
-			state.has_blob_texture = id == 20;
 			state.seat_parented = id == 29;
 			return state;
 		};
@@ -412,20 +505,18 @@ int main() {
 		auto out = plan.assign(cam, view, state_for);
 		int bound = 0;
 		int captures = 0;
-		int blobs = 0;
 		for (const auto &a : out) {
 			bound += a.bound ? 1 : 0;
 			captures += a.draws_silhouette ? 1 : 0;
-			blobs += a.draws_blob ? 1 : 0;
 		}
 		CHECK(bound == 24);
 		CHECK(captures == 12);
 		// id 20 ranks 19th: bound to a drape patch but past the 12-capture
-		// budget -> the authored blob drapes in place of a silhouette
-		// [orig: RenderSlot_DrawAllDrapes @ 0x5d6eb6..0x5d6ec4].
-		CHECK(blobs == 1);
+		// budget, so it drapes nothing — the authored-blob leg it would call
+		// is dead in JO [orig: RenderSlot_DrawAllDrapes @ 0x5d6eb6..0x5d6ec4;
+		// RenderSlot_DrawAuthoredBlobDecal @ 0x5d59f4].
 		CHECK(out[19].id == 20 && out[19].bound &&
-				out[19].capture_order == -1 && out[19].draws_blob);
+				out[19].capture_order == -1 && !out[19].draws_silhouette);
 		// The nearest candidate captures at order 0.
 		CHECK(out[0].id == 1 && out[0].capture_order == 0 &&
 				out[0].capture_dirty);

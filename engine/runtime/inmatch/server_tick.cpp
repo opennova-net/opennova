@@ -439,7 +439,7 @@ void route_script_remote_commands(NapiNPServerCtx &ctx, world::World &world) {
 // corresponding 8-B 0x1E event record.
 // The event and 0x2F state use active-player mask 0x80 (host included); CTF's
 // following 0x12 removal uses 0x90 (host excluded).
-// [orig: Entity_AttachToVehicle @0x43C130 -> Server_HandleEntityDeath @0x517460
+// [orig: Entity_AttachCarriedObject @0x43C130 -> Server_HandleEntityDeath @0x517460
 // (pickup event 0x14) -> Server_SendDestructibleDeathPacket @0x50D900;
 // Server_BroadcastEntityDeathEvent @0x517A90 (save event 0x15 then 0x2F);
 // Server_ProcessScoringAndBroadcast @0x5169C0 (capture event 0x13 then CTF

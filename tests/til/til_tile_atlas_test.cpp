@@ -39,7 +39,7 @@ int main() {
 	if (!expect(rotated.valid, "valid atlas dimensions should produce a UV quad")) return 1;
 
 	// FLIP_X then FLIP_Y then the retail CCW ROTATE_90
-	// [orig: render_water_quad flag order @ 0x604782/0x6047a9/0x6047d4]:
+	// [orig: PolyTrn_DrawTileOverlayQuad flag order @ 0x604782/0x6047a9/0x6047d4]:
 	// TL (0,0) -> (1,0) -> (1,1) -> (0,1); tile 6 origin (0.5, 0.5).
 	if (!expect_close(rotated.corners[0].u, 0.5f, "TL U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
 	if (!expect_close(rotated.corners[0].v, 1.0f, "TL V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;

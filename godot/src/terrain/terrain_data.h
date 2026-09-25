@@ -38,6 +38,9 @@ class TerrainData : public Resource {
 
 private:
 	String trn_path;
+	// The loading mission's tile-set name (BMS header), applied over the .trn
+	// tilestrip at load (formats/trn trn_mission_tilestrip). Empty = the .trn's.
+	std::string mission_tile_set;
 
 	// Identity
 	String terrain_name;
@@ -126,6 +129,9 @@ public:
 	~TerrainData();
 
 	void set_trn_path(const String &p_path);
+	// Set before load(): the mission's tile-set name overriding the .trn
+	// tilestrip atlas (and so the .TSD the surface table pairs with it).
+	void set_mission_tile_set(const String &p_tile_set);
 
 	void set_terrain_name(const String &p_name);
 	String get_terrain_name() const;
@@ -202,11 +208,9 @@ public:
 	// a pre-thresholded binary mask is NOT equivalent there.
 	Ref<ImageTexture> build_minimap_water_mask(
 			float p_water_height_wu = NAN) const;
-	// Detail grass reads the flat, 1024-wrapped foliagemap. The fixed overload
-	// keeps runtime candidates on their original Q16 coordinates; the world
-	// overload is the public/GDScript seam.
-	int get_detail_foliage_index_fixed(int32_t world_x_fixed, int32_t world_z_fixed) const;
-	int get_detail_foliage_index_world(double world_x, double world_z) const;
+	// Detail grass reads the flat, 1024-wrapped foliagemap at the candidate's
+	// source-atlas position (foliage::WorldSamplers::detail_foliage_mask_at).
+	int get_detail_foliage_index_fixed(int32_t atlas_x_fixed, int32_t atlas_z_fixed) const;
 	// MODEL masks and gameplay queries use the sector-grid-routed foliagemap.
 	int get_foliage_index_world(float world_x, float world_z) const;
 	// Runtime world->atlas transform: wraps the 16x16 sector grid and preserves

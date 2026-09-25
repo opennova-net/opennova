@@ -101,8 +101,10 @@ void DestructionPresenter::reset_runtime_state() {
 	}
 	for (int slot : piece_slots) {
 		unregister_piece_anchor(slot);
+		free_piece_model(slot);
 	}
 	piece_generation_.clear();
+	piece_models_.clear();
 	piece_pos_.clear();
 
 	if (EffectWorld *effects = fx()) {
@@ -291,7 +293,8 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		model->set_name("HuskModel");
 		if (intact_model != nullptr) model->set_authored_lod_projection_owner(intact_model);
         if (intact_model != nullptr)
-            model->set_section_visibility_mask(intact_model->get_section_visibility_mask());
+            model->set_occlusion_section_mask(intact_model->get_occlusion_section_mask(),
+                    intact_model->get_forced_section_mask());
 		set_husk_static_shadow(model, individual_casts_static_shadow);
 		// The reflect flag belongs to the entity, not its current graphic. The
 		// individual branch must preserve it just like the batched carve branch
@@ -610,8 +613,8 @@ void DestructionPresenter::apply_sound(const String &p_name, const Vector3 &p_po
 }
 
 // Death pieces: the sim owns positions/physics; each live piece carries its
-// type's trail effect as an owned follow group. The single-section husk mesh
-// chunk is the tracked residual (§24).
+// type's trail effect as an owned follow group and its own piece model, which
+// the frame's piece draws place and show (apply_piece_draws).
 void DestructionPresenter::present_pieces(const std::vector<opennova::world::DeathPieceRow> &p_pieces) {
 	EffectWorld *fx_world = fx();
 	stat_pieces_peak_ = MAX(stat_pieces_peak_, static_cast<int64_t>(p_pieces.size()));
@@ -630,8 +633,11 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 		if (is_new_generation) {
 			if (presented != nullptr) {
 				unregister_piece_anchor(slot);
+				free_piece_model(slot);
 			}
 			piece_generation_[slot] = generation;
+			ObjectModel *model = build_piece_model(slot, piece.item_id);
+			piece_models_[slot] = model != nullptr ? model->get_instance_id() : ObjectID();
 		}
 		if (piece.settled) {
 			continue;
@@ -660,8 +666,108 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 	}
 	for (int slot : retired) {
 		unregister_piece_anchor(slot);
+		free_piece_model(slot);
 		piece_generation_.erase(slot);
 		piece_pos_.erase(slot);
+	}
+}
+
+// One piece slot's model: the def's piece graphic, the LOADED huskFinal model
+// else the husk model (runtime/world/present_passes.h death_piece_graphic;
+// retail Entity_SpawnDeathPieces @ 0x4934af stores that pointer at piece+0).
+// Every level is retained and the draws select it; the reflection draws it too
+// (retail Water_RenderReflectedWorldScene @ 0x5c85b7..0x5c85c1 runs the same
+// collect and draw at the shipped water detail). Hidden until a draw shows it.
+ObjectModel *DestructionPresenter::build_piece_model(int p_slot, int p_item_id) {
+	Node3D *parent = container();
+	if (item_db_.is_null() || placer_.is_null() || parent == nullptr) {
+		return nullptr;
+	}
+	const int def_id = p_item_id + MissionData::ITEM_ID_OFFSET; // wire type id -> items.def id
+	const std::string husk = item_db_->get_husk(def_id).utf8().get_data();
+	const std::string huskfinal = item_db_->get_huskfinal(def_id).utf8().get_data();
+	const String graphic(opennova::world::death_piece_graphic(husk, huskfinal).c_str());
+	if (graphic.is_empty()) {
+		return nullptr;
+	}
+	ObjectModel *model = placer_->build_model_from_graphic(
+			graphic, String(), parent, String(), String(), true);
+	if (model == nullptr && !huskfinal.empty() && !husk.empty()) {
+		model = placer_->build_model_from_graphic(
+				String(husk.c_str()), String(), parent, String(), String(), true);
+	}
+	if (model == nullptr) {
+		return nullptr;
+	}
+	model->set_name(vformat("DeathPiece_%d", p_slot));
+	model->set_presenter_driven_lod(true);
+	model->set_mirror_reflected(true);
+	model->rebuild();
+	model->set_present_visible(false);
+	return model;
+}
+
+void DestructionPresenter::free_piece_model(int p_slot) {
+	if (ObjectModel *model = piece_model(p_slot)) {
+		model->set_visible(false);
+		model->queue_free();
+	}
+	piece_models_.erase(p_slot);
+}
+
+ObjectModel *DestructionPresenter::piece_model(int p_slot) const {
+	const ObjectID *id = piece_models_.getptr(p_slot);
+	return id != nullptr ? Object::cast_to<ObjectModel>(live_node3d(*id)) : nullptr;
+}
+
+// retail DeathPiece_RenderSection @ 0x57b690: EulerScale(piece pose,
+// ftol(scale * 65536)) * T(-centre of the drawn section's COBJ row), every
+// bone matrix the same. The pose converts like every entity's (the BAM heading
+// is 90 - the mission yaw); the COBJ centre is in the model's own axes, (x, y,
+// z) -> the model node's (y, z, x) (render/object_lod_frame projection_center).
+Transform3D DestructionPresenter::piece_draw_transform(
+		const opennova::world::DeathPieceDraw &p_draw) {
+	const Basis basis = bms_to_godot_basis(
+			Vector3(p_draw.pitch, 90.0f - p_draw.heading, p_draw.roll))
+								.scaled(Vector3(p_draw.scale, p_draw.scale, p_draw.scale));
+	Transform3D transform(basis, mission_to_godot(p_draw.pos));
+	if (p_draw.pivoted) {
+		const Vector3 centre(p_draw.pivot_q16[1] / 65536.0f, p_draw.pivot_q16[2] / 65536.0f,
+				p_draw.pivot_q16[0] / 65536.0f);
+		transform = transform * Transform3D(Basis(), -centre);
+	}
+	return transform;
+}
+
+// The piece draw's device leg: the drawn level, the collapsed sections (bone
+// matrix w = 0, retail @ 0x57b7d4..0x57b7e7) as the model's hidden sections,
+// and the section matrix. Retail submits the piece only on the frames its
+// collect admits it, so a model no row names this frame hides.
+void DestructionPresenter::apply_piece_draws(
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	HashSet<int> drawn;
+	for (const opennova::world::DeathPieceDraw &draw : p_draws) {
+		const int64_t *generation = piece_generation_.getptr(draw.slot);
+		if (generation == nullptr || *generation != static_cast<int64_t>(draw.generation)) {
+			continue;
+		}
+		ObjectModel *model = piece_model(draw.slot);
+		if (model == nullptr) {
+			continue;
+		}
+		model->set_active_lod(draw.lod_level);
+		model->set_destroyed_section_mask(draw.hidden_mask);
+		model->set_transform(piece_draw_transform(draw));
+		model->set_present_visible(true);
+		drawn.insert(draw.slot);
+	}
+	for (const KeyValue<int, ObjectID> &kv : piece_models_) {
+		if (drawn.has(kv.key)) {
+			continue;
+		}
+		if (ObjectModel *model = piece_model(kv.key)) {
+			model->set_present_visible(false);
+		}
 	}
 }
 

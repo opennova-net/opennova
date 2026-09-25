@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
@@ -90,6 +91,9 @@ struct LocalViewSessionInputs {
     bool death_screen_active = false;
     int death_screen_submode = 0;
     bool end_round_known = false;
+    // The folded S2C 0x1D header's winner team (0 before any header)
+    // [orig: NapiNPClientMsg_0x01D @0x430840 -> g_endround_winner_team].
+    int32_t end_round_winner_team = 0;
     bool local_dead = false;
     // The joiner's death-camera triple is only meaningful with a live
     // client runtime; without one the anchor stays on the player.
@@ -335,8 +339,15 @@ struct LocalPlayerViewFrame {
     bool nvg_active = false;
     bool nvg_visible = false;
     int32_t nvg_gain = 0;
+    // The NVG composite's HUD half (renderer/frame_fx_effects.h): NVG.tga and
+    // its gain scale draw only under the full-screen composite, and the Scoped
+    // arm's lens takes the circle mask's place with its unit-scale reticle.
+    bool nvg_mask_visible = false;
+    bool nvg_lens_active = false;
+    // The Sighted arm: the SIGHTS card draws into the NVG scene, not over it.
+    bool nvg_sights_in_scene = false;
     // The thermal-imaging view of a Thermal-flagged weapon def (flags2 & 4;
-    // the IDB's Player_IsVehicleSeatHasFlag4 @0x4dcd70 reads EquippedSlot
+    // the IDB's Player_IsHeldWeaponThermal @0x4dcd70 reads EquippedSlot
     // (+0x118)->Def(+0x20)->flags2(+0x0C) & 4). `thermal_view` is the frame's
     // latched byte -- the CanFire verdict AND the def bit -- that greys the
     // world lighting block and selects the 0x808080 device fog and clear;
@@ -349,6 +360,13 @@ struct LocalPlayerViewFrame {
     //  Render_TerrainScene @0x610e51..0x610e5b]
     bool thermal_view = false;
     bool thermal_terrain_view = false;
+    // The frame's FrameFX dispatch facts (runtime/renderer/frame_fx_effects.h):
+    // the raw red word, the camera mode, the dead/session bits, the ticks since
+    // the death stamp, the thermal and monitor latches (CanFire && flags2 & 4
+    // / & 8) and the NVG / death-screen state.
+    // [orig: Render_ProcessMainSceneFrame @0x5ca2da..0x5ca2f1 (the latches),
+    //  @0x5ca8f6..0x5caad5 (the dispatch)]
+    renderer::FrameFxViewInputs frame_fx;
     // The three fullscreen damage-feedback quads, already reduced to what the
     // presenting shell draws (player_view.h carries the arms/decays/colours):
     // `screen_flash_white_alpha` is the raw word, `screen_flash_red_alpha` the
@@ -373,6 +391,16 @@ struct LocalPlayerViewFrame {
     float scope_fraction = 0.0f;
     bool suppress_view_bias = false;
     bool scope_card_active = false;
+    // The FP draw's own gates beyond the card switch (player_present.h
+    // fp_viewmodel_retail_submit composes them): the local dead bit, a
+    // decided round winner, the equipped def's Emplaced bit (skips the
+    // showhud test) and the scoped Inset skip [orig:
+    // Player_RenderViewModelIfAlive @0x4E0145/@0x4E014B;
+    // Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEE19].
+    bool fp_local_dead = false;
+    bool fp_round_winner_set = false;
+    bool fp_def_emplaced = false;
+    bool fp_inset_scoped = false;
     float fov_h_deg = 0.0f;
     float tp_anchor[3] = {0.0f, 0.0f, 0.0f}; // mission space
     bool tp_anchor_valid = false;

@@ -17,6 +17,7 @@
 #include "terrain/terrain_foliage_map.h"
 #include "terrain/foliage_dispatcher.h"
 #include "terrain/foliage_frame_stats.h"
+#include "terrain/foliage_mask_pass.h"
 #include "terrain/terrain_tile_entry.h"
 #include "terrain/terrain_tile_info.h"
 #include "env/env_keyframe.h"
@@ -49,6 +50,7 @@
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
+#include "render/scene_overlay_compositor.h"
 #include "world/item_effect_director.h"
 #include "world/occlusion_frame.h"
 #include "world/game_world.h"
@@ -77,6 +79,7 @@
 #include "mission/mission_info.h"
 #include "env/mission_environment_overrides.h"
 #include "simulation/fp_viewmodel_spec.h"
+#include "simulation/person_overlay_models.h"
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
@@ -205,6 +208,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(FoliageFrameStats);
 	GDREGISTER_CLASS(VegGraphicRow);
 	GDREGISTER_CLASS(FoliageDispatcher);
+	GDREGISTER_CLASS(FoliageMaskCompositorEffect);
 	GDREGISTER_CLASS(TerrainTileEntry);
 	GDREGISTER_CLASS(TerrainTileInfo);
 	GDREGISTER_CLASS(EnvKeyframe);
@@ -290,6 +294,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ChatLineRow);
 	GDREGISTER_CLASS(MissionEffect);
 	GDREGISTER_CLASS(DeathPieceRow);
+	GDREGISTER_CLASS(DeathPieceDraw);
 	GDREGISTER_CLASS(RoundGlowRow);
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);
@@ -313,6 +318,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_INTERNAL_CLASS(ThrowablePresenter);
 	GDREGISTER_INTERNAL_CLASS(VehicleTrailPresenter);
 	GDREGISTER_CLASS(EntityPresenter);
+	GDREGISTER_CLASS(PersonOverlayModels);
 	GDREGISTER_CLASS(MissionPresentStats);
 	GDREGISTER_CLASS(EntityRow);
 	GDREGISTER_CLASS(EndRoundState);
@@ -371,6 +377,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ModelLightSpawn);
 	GDREGISTER_CLASS(EffectLightDirector);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
+	GDREGISTER_CLASS(SceneOverlayCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(EffectWorld);
 	GDREGISTER_CLASS(ItemEffectDirectorStats);

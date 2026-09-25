@@ -64,8 +64,11 @@ void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &tr
     piece->veh.vel_x = pos[0]; piece->veh.vel_y = pos[1]; piece->veh.slide_z = pos[2];
     if (world.crt_rand.next() & 1) piece->death_anim_state |= 0xF0;
     for (int i = section; i < count; ++i) entity.spawned_piece_mask |= 1u << (i & 31);
-    // Retail drops baked terrain tiles over the old bounds. Our model masks
-    // are consumed directly by the live collision/present walkers.
+    // The tower's footprint retires the terrain pages composed under it
+    // [orig: Entity_SpawnSectionEntity @ 0x44062E..0x440670].
+    world.out.terrain_scorches.emit_page_invalidation(
+            int32_t(entity.position.x * 65536), int32_t(entity.position.y * 65536),
+            int32_t(entity.bound_radius * 65536));
 }
 void fit_section_to_ground(Entity &entity, const int32_t end[3], int32_t ground) {
     // Per-product Q16 rounding, signed sum, x87 nearest sqrt, then <<8.

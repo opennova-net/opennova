@@ -2,6 +2,10 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
+
+#include <runtime/world/nvg_laser.h>
+
+#include "simulation/fire_presenter.h" // NvgLaserSource
 #include "simulation/hud_view_records.h"
 #include "simulation/destruction_events.h"
 
@@ -231,12 +235,15 @@ TypedArray<RoundImpactRow> Simulation::drain_round_impacts() {
 }
 
 void Simulation::drain_terrain_scorches(
-		std::vector<opennova::world::TerrainScorchEvent> &r_events) {
+		std::vector<opennova::world::TerrainScorchEvent> &r_events,
+		std::vector<opennova::world::TerrainPageInvalidationEvent> &r_invalidations) {
 	r_events.clear();
+	r_invalidations.clear();
 	if (!kernel_) return;
 	// The events carry the mission 16.16 bounds; the terrain consumer folds
 	// mission (x,y,z) -> Godot (x,z,-y) as it inserts them.
 	r_events = kernel_->world.out.terrain_scorches.pending();
+	r_invalidations = kernel_->world.out.terrain_scorches.pending_page_invalidations();
 	kernel_->world.out.terrain_scorches.clear_pending();
 }
 
@@ -362,6 +369,45 @@ void Simulation::fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &
 	r_pieces.clear();
 	if (!world_installed_) return;
 	opennova::world::fill_death_pieces(kernel_->world, r_pieces);
+}
+
+const std::vector<opennova::world::DeathPieceDraw> &Simulation::death_piece_draws() const {
+	return present_.death_piece_draws;
+}
+
+// The visible-person list retail walks holds every collected person; the rows
+// here are every decoded person, and the beam leg keeps the drawn bodies. A
+// row's entity+0x298 is its equipped AdmDef entry (the client's player-record
+// store; 0xFF names none) [retail NetPacket_SerializePlayerState @ 0x4c11f2 /
+// @ 0x4c120d].
+void Simulation::nvg_laser_sources(std::vector<NvgLaserSource> &r_sources) const {
+	r_sources.clear();
+	if (!world_installed_ || runtime_ == nullptr) return;
+	const uint16_t self_handle = runtime_->has_self_handle()
+			? runtime_->self_handle()
+			: opennova::world::EntityHandle::kInvalid;
+	for (const opennova::replication::ClientEntityState &es : runtime_->state().entities) {
+		if (es.cls != opennova::EntityClass::Player && es.cls != opennova::EntityClass::Infantry)
+			continue;
+		const opennova::world::WeaponTableEntry *def =
+				kernel_->world.tables.weapons.by_index(es.equipped_adm_index);
+		NvgLaserSource source;
+		source.handle = es.handle;
+		source.gate.attach_bone = es.mount_bone;
+		source.gate.has_weapon_def = def != nullptr;
+		source.gate.weapon_flags = def != nullptr ? def->flags : 0;
+		source.gate.local_player = es.handle == self_handle;
+		source.launch_userpoint = def != nullptr ? def->launch_userpoint : 0;
+		r_sources.push_back(source);
+	}
+}
+
+// A beam's ray clip through the static then pool-1 walks, Q16 (world/nvg_laser.h).
+int32_t Simulation::nvg_laser_clip_distance(int p_handle, const int32_t p_origin[3],
+		const int32_t p_dir[3]) const {
+	if (!world_installed_) return opennova::world::kNvgLaserRangeQ16;
+	return opennova::world::nvg_laser_clip_distance(kernel_->collision, kernel_->world,
+			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)}, p_origin, p_dir);
 }
 
 // Whether the collision world holds an instance for the placed entity: the
@@ -534,29 +580,10 @@ int Simulation::get_entity_net_id(int p_index) const {
 	return e ? e->net_id : 0;
 }
 
-// The distant MODEL/depth-mask foliage tier is the hide-in-grass mechanic: the
-// sector-entity walk only calls Foliage_UpdateModelTiles around entities whose
-// MoveOrder carries a stance bit (0x100 prone / 0x200 crouch) and whose
-// groundEntity is empty — never around placed objects, which leave MoveOrder 0.
-// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded (flags & 0x300),
-// groundEntity gate @ 0x5c7dd5..0x5c7df7; stance writers
-// Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd,
-// NapiNPServerMsg_HandleStanceChange @ 0x501c60]
+// The distant MODEL/depth-mask foliage tier's anchors of the last occlusion
+// frame (run_occlusion_frame carries the witness).
 PackedVector3Array Simulation::get_foliage_mask_anchor_positions() const {
-	PackedVector3Array out;
-	if (!kernel_) return out;
-	for (int i = 0; i < kernel_->world.ai.count(); ++i) {
-		AiEntity *e = kernel_->world.ai.at(i);
-		if (!e) continue;
-		const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
-		if (!ent) continue;
-		if ((ent->net_stance_bits & 0x3u) == 0) continue;
-		if (ent->ground_target.valid()) continue;
-		out.push_back(Vector3(static_cast<float>(e->pos[0] / kFixed16),
-		                      static_cast<float>(e->pos[2] / kFixed16),
-		                      static_cast<float>(-e->pos[1] / kFixed16)));
-	}
-	return out;
+	return present_.foliage_mask_anchors;
 }
 
 PackedVector3Array Simulation::get_entity_effect_state_for_ssn(int p_ssn) const {
@@ -692,7 +719,8 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	frame.rows.clear();
 	frame.door_phases.clear();
 	if (runtime_ && kernel_) {
-		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner()};
+		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner(),
+				host_ctx()};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
 					context, present_.pool_lifecycle, frame.rows, frame.door_phases);
@@ -726,6 +754,13 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	if (runtime_profiling_enabled_)
 		present_.last_snapshot_us = opennova::io::perf_now_us() - start_us;
 	return present_.snapshot;
+}
+
+bool Simulation::local_player_person_overlays(opennova::world::PersonOverlays &r_out) const {
+	r_out = opennova::world::PersonOverlays{};
+	if (!kernel_) return false;
+	const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner()};
+	return opennova::inmatch::local_player_person_overlays(context, r_out);
 }
 
 PackedFloat32Array Simulation::get_present_snapshot() const {

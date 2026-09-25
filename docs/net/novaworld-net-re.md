@@ -1851,7 +1851,7 @@ pinned more fields, each named for the function that reveals it (`GamePlayerEnti
   `orientationMatrix` +0xb4 (i32[9] fixed-point) + `animData` +0x158 (gate) `[orig: Entity_UpdateOrientationMatrix @0x43b440]`;
   `weaponSlots` +0x1d0 `[orig: Entity_GetWeaponSlotsPtr @0x510010 → entity+464]`; `aiTargetRefCount`
   +0x212 (u16) `[orig: Entity_SetAITarget @0x45d760]`; `mountedChild` +0x268 (`GamePlayerEntity*`, the
-  attached passenger; passenger's +0x170 = `parentVehicle`) `[orig: Entity_AttachToVehicle @0x43c130]`;
+  attached passenger; passenger's +0x170 = `parentVehicle`) `[orig: Entity_AttachCarriedObject @0x43c130]`;
   `damageTimer` +0x2f8 + `wasHit` +0x36b + `lastAttacker` +0x2f4 `[orig: Entity_OnDamageReceived @0x4af800]`;
   `collisionCallback` +0x2b8 `[orig: Entity_InvokeCollisionCallback @0x442350]`; `fireFlag` +0x2c6
   `[orig: Entity_InvokeFireCallback @0x442810]`.
@@ -3335,10 +3335,11 @@ packet ships only when the pilot is the local player (`@ 0x53f6f4`). Reimpl:
 ammo index (off32) and subtype 12 (off33); pin
 `inmatch_joiner_role::run_flare_descriptor_carries_the_pilot_handheld`. Still
 0xFFFF on our side: off28 (ledger D-NET-161 (c)).
-Generic-producer gaps recorded under D-WPN-8 (pre-existing, not this PR): off33 —
-the reimpl sends `round.subtype` (12 on the on-foot hip-fire leg, 0 on
-settled-FP/mounted legs, never bit 0x80) where retail sends the
-`Weapon_GetScopeZoomLevel(can_fire, 12) | (can_fire ? 0x80 : 0)` composition
+Generic-producer gaps recorded under D-WPN-8: off33 — CLOSED 2026-09-24: the
+local fire pump now composes retail's `(can_fire ? 0x80 : 0) +
+Weapon_GetScopeZoomLevel(can_fire, 12)` byte (`local_weapon_pump_tick` over
+`local_player_scope_view_visible` and `weapon_scope_zoom_step`; before, it sent 12
+on the hip-fire leg, 0 on settled-FP/mounted legs and never bit 0x80)
 (`Player_CanFireWeapon @ 0x5cf780` gates: EquippedSlot null → 0, parentSlot 2/5 → 0,
 Flags & 0x2002 → 0, `g_camera_mode` → 0, MoveOrder & 8 without gunner scope → 0, not
 scoped and not gunner-scoped → 0, submerged → 0; `Weapon_GetScopeZoomLevel
@@ -5505,7 +5506,7 @@ position integration → `Entity_ProcessPlatformPhysics` → yaw; the new solve 
 cannot retroactively affect this tick's thrust/drag, and it observes pre-yaw attitude.
 
 **5. `entity+0x24` bit0 rides the wire and is the organic mover-skip — and it means
-"not independently collected/moved", NOT "mounted".** Setters: `Entity_AttachToVehicle
+"not independently collected/moved", NOT "mounted".** Setters: `Entity_AttachCarriedObject
 @ 0x43C14A` — the carried-OBJECT attach (a picked-up/deck-carried item), not the seat
 mount; a SEAT mount sets Flags `0x40` instead [orig: the seat attach
 `@ 0x4946D0/@ 0x494752`; the mounted body mode `@ 0x4B41A2`] — plus
@@ -5904,12 +5905,30 @@ bump); the deferral list above is unchanged.
   (catalog id 104, default N), independent of mission `EnableNVG`; actions 56/57 (OEM +/−)
   clamp gain 0..4 even while off. `StartWithNVGOn 0x400000` reseeds every player init,
   first-person-only environment gain uses the exact hemisphere formula, Inset sights drop/
-  restore through the normal scope toggle, and the post/mask/scale presentation is hosted.
+  restore through the normal scope toggle, and (corrected 2026-09-24, the rendering parity
+  pass) the NVG post is retail's render-to-texture chain: the scene resampled into the 512²
+  NVG target, two ONE/INVSRCALPHA glow passes into a persistent 256² target cleared green on
+  the toggle frame, then the tint + MODULATE2X glow composite over the frame minus its last
+  column/row; the NVG.tga mask and the gain scale draw over it
+  ([render-order-re.md](../render/render-order-re.md), the FrameFX screen effects;
+  `renderer::frame_fx_effects`, `FrameFxCompositorEffect`). While the NVG composite is up the
+  world renders ONCE per frame, into `LocalPlayerPresenter`'s projection target at
+  `world::nvg_view_projection`'s raster (512 rows at the frame's own frustum aspect; the
+  Scoped arm's square frustum into 512 x 512), the surface's own 3D pass off, and clears to
+  the fog colour (`EnvironmentState::nvg_scene_clear_color`, `NVG_RenderSceneToTarget
+  @ 0x5d064e..0x5d0699`); FrameFX resamples that frame into the 512² NVG scene. The Scoped
+  arm's polar lens and the Sighted arm's SIGHTS card drawn into the NVG scene are ported too
+  (`renderer/nvg_scope_lens.h`, `NvgViewDevice`). The former "four-frame temporal history"
+  reading and its CanvasItem post (`nvg_view.gdshader`) are deleted.
   Binocular activation also refuses while the PowerThrow fire-charge tick is live, preserving
   the held windup instead of converting optics input suppression into a release. Bounded
-  residuals: the NVG post collapses the retail four-frame temporal history to the current
-  frame, the NVG style-8 laser and raw-active death-screen exception remain unported, and
-  Binoculars still lacks its capture-point detail overlay.
+  residuals: Godot ties a camera's projection aspect to its target, so the frame-shaped NVG
+  arms rasterise 512 rows x lround(512 x aspect) columns and resample horizontally to 512
+  (retail rasterises 512 columns directly), and the composite / lens rasterise at that
+  target's size before the full-surface blit; the raw-active death-screen exception
+  remains unported (the NVG style-8 laser is ported 2026-09-25,
+  [world §25.3](../world/world-wac-ai-re.md#253-the-ribbon-renderer--ceffectchannel_renderribbon--0x5db8a0)), and Binoculars still lacks its
+  capture-point detail overlay.
 
 **§5.40 viewmodel correction (2026-07-08, same train):** the FP viewmodel hardcode named a
 model that does not exist in the JO assets ("AKM_1st"), so the gun never loaded and the arms
@@ -8101,6 +8120,29 @@ weapon ERROR row is `verticalSpread ? 3 : category`. This selector is **not**
 the HUD selector (`stance + 3*Player_CanFireWeapon()`, hud-re D-HUD-7).
 `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
 
+The local shooter's subtype is `(Player_CanFireWeapon ? 0x80 : 0) +
+Weapon_GetScopeZoomLevel(can_fire, 12)`; any other shooter sends 0. Bit 7 is
+therefore "fired through the raised optic": aimed fire takes ERROR row 3 at
+every stance (WPN_MAG58 `error 0.063 0.35 0.9 0.063 0.12 0.17`: 0.063 degrees
+aimed where standing hip fire is 0.9).
+`[orig: Entity_FireWeaponAndSendPacket @ 0x42bdcb..0x42bdfb]`
+
+The low six bits are the **zero step**. Ahead of every dispatch leg,
+`sourceEntity && step` adds the shooter's equipped AdmDef (`entity+0x2B0`)
+elevation row `+0x3B0[min(step, 39)]` (AdmDef 0 adds nothing) to the descriptor
+pitch, so the knife ray, the claymore and shotgun fans and the ordinary round
+all fly elevated while the ring, copied first, stays pre-elevation. The IDB's
+`Score_GetMultiplierValue @ 0x4fc440` is this lookup (a misname; its
+`byte_24D217C` gate has no writer). The row is `WeaponSlot_CalcElevationTable
+@ 0x545100`'s output. Hip fire's step is the default 12, but every stock JO
+table ends at `scope_max_zero` step 10 or below, so hip fire adds zero; the
+elevation lands for an optic weapon on the automatic (-1) zero, whose step is
+the rangefinder distance rounded to `+0x9C` (`Weapon_GetScopeZoomLevel
+@ 0x422fc0`). Reimpl: `RoundSim::spawn` (`round_zero_elevation`), the replica
+source's `RoundSourceState::equipped_adm_index`; ctest `npruntime_round_sim`.
+`[orig: RoundData_SpawnRound @ 0x4ec155..0x4ec181]`
+`[orig: RoundData_AddRound @ 0x4fdbce..0x4fdc6a]`
+
 For an ordinary weapon round, the spread magnitude in 16.16 degrees is
 
 `S = weapon.ERROR[row] + (entity+0x380 >> 8) + (entity+0x384 >> 7)`.
@@ -8193,7 +8235,15 @@ Before camera construction and the later weapon-action/spawn pass,
 - For recoil `R=entity+0x380`, compute `t=(R+4)>>3`, `half=t>>1`, subtract
   `half`, and snap to zero at signed `R<=0x300`. Add `t>>3` to entity pitch;
   always consume one `PRNG_Next16`, even at zero, and add `half` to yaw for an
-  even result or subtract it for an odd result. There is no upper clamp.
+  even result or subtract it for an odd result. There is no upper clamp. For
+  the local player the same signed `half` also lands on
+  `g_LocalPlayerLookYaw` (`@ 0x4b583c..0x4b5848`), and entity pitch is the
+  mouse's own accumulator (`Input_HandleActionBinding_0` relative
+  `add [eax+14h]` `@ 0x4e0d39`), so sustained fire walks the look sideways and
+  climbs it persistently. The port adds both steps to the local body's staged
+  look (`target_heading`/`look_pitch`), which the post-tick look fold carries
+  into the input-owned look (fixed 2026-09-24; before, the frame's input copy
+  overwrote them every tick).
 - The local-player-only movement producer runs while moving (`MoveOrder&8`),
   on foot, with an equipped definition. It wrap-adds a stance/aim-scaled
   `clipweight+weaponweight` contribution to `M=entity+0x384`: one third when

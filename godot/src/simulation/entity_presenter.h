@@ -3,7 +3,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 
 #include <godot_cpp/classes/camera3d.hpp>
-#include <godot_cpp/classes/immediate_mesh.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
@@ -33,6 +33,7 @@
 #include "simulation/destruction_events.h"
 #include "simulation/destruction_presenter.h"
 #include "simulation/fire_presenter.h"
+#include "simulation/person_overlay_models.h"
 #include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
 #include "simulation/throwable_presenter.h"
@@ -200,11 +201,17 @@ public:
 	ObjectModel *resolve_wire_handle(int p_handle) const;
 	// The live held-weapon model for a wire body (null when unarmed/freed).
 	ObjectModel *held_weapon_node(int p_handle) const;
+	// A wire body's item overlays (canopy, goggles, binoculars, carried
+	// object); null until the body first publishes one.
+	Ref<PersonOverlayModels> person_overlays_for(int p_handle) const;
 	// Cache and apply one wire draw's environment-lighting context to both its
 	// body and held weapon. The cache makes a quality change authoritative even
 	// when cold-spawn budgeting has not built either node yet.
+	// The interior light group (containing building BMS id + blink volume
+	// section) rides along for the per-draw point-light select.
 	void set_entity_lighting_context(int p_handle, float p_effect_scale,
-			bool p_interior_lerp, float p_light_transfer);
+			bool p_interior_lerp, float p_light_transfer, int p_interior_bms = 0,
+			int p_interior_section = 0);
 	// World position of a named userpoint on this wire body's HELD WEAPON —
 	// the anchor retail's adm-arm fire effect spawns at. Falls back to the
 	// body's own origin, never the wire fire position (witness:
@@ -306,7 +313,7 @@ public:
 	Ref<ScarPresentStats> get_scar_present_stats() const;
 	bool has_active_wreck_fire(const String &p_owner_key) const;
 	void warm_fire_pipelines(const Vector3 &p_position);
-	Ref<ImmediateMesh> fire_ribbon_mesh() const;
+	Ref<ArrayMesh> fire_ribbon_mesh() const;
 	// The owned "Scars" child (the device read seam: its ScarWorld mesh).
 	ScarPresenter *scar_presenter() const;
 	// The data legs (the present_snapshot precedent): production
@@ -318,6 +325,22 @@ public:
 	void draw_tracer_rows(const PackedFloat32Array &p_rows);
 	void present_destruction_drained(const Ref<DestructionDrain> &p_events,
 			const TypedArray<DeathPieceRow> &p_pieces);
+	// The frame's death-piece draws (the occlusion frame's collect,
+	// Simulation::death_piece_draws); the typed form is the tests' data leg.
+	void present_death_piece_draws_native(
+			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	void present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws);
+	// A death-piece slot's model (null when none) — the draw leg's read seam.
+	ObjectModel *death_piece_model(int p_slot) const;
+	// The frame's NVG laser beams into the overlay tail (FirePresenter::
+	// append_nvg_laser_beams over Simulation::nvg_laser_sources).
+	int append_nvg_laser_beams(Simulation *p_sim, const NvgLaserView &p_view,
+			SceneOverlaySubmission &r_submission);
+	// The data leg: one candidate row through the same beam path into a
+	// throwaway frame; returns the NvgLaserBeams batches it drew.
+	int nvg_laser_beam_batches(int p_handle, int p_attach_bone, int p_weapon_flags,
+			int p_launch_userpoint, bool p_local_player, bool p_nvg_active, int p_camera_mode,
+			const Transform3D &p_eye);
 	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
 	void present_vehicle_trail_visuals(const TypedArray<VehicleTrailVisualRow> &p_visuals);
 	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);
@@ -430,7 +453,7 @@ private:
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
-		int64_t section_visibility_mask = -2;
+		int64_t destroyed_section_mask = -2;
 		bool transform_stamp_valid = false;
 		std::array<float, 6> transform_stamp = {};
 		bool aim_payload_valid = false;
@@ -460,7 +483,7 @@ private:
 		// Last-applied edge state (-1 = unknown, first hot frame applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
-		int64_t section_visibility_mask = -2;
+		int64_t destroyed_section_mask = -2;
 		// The remote body-transition scalars (re-seeded from the per-handle
 		// cache on every plan build).
 		int32_t anim_state = -2;
@@ -509,6 +532,8 @@ private:
 		float effect_scale = 1.0f;
 		bool interior_lerp = false;
 		float light_transfer = 0.0f;
+		int interior_bms = 0;
+		int interior_section = 0;
 	};
 
 	// --- The per-row legs both walks share (entity_presenter.cpp) ---
@@ -526,12 +551,11 @@ private:
 	// application, never to a stale hold.
 	static bool aim_payload_changed(const float *p, int base,
 			std::array<float, kAimPayloadFloats> &cache, bool &cache_valid);
-	// The row owns the model's section-mask channel only while it publishes
-	// PF_SECTION_MASK_VALID. Rows that never publish must not touch the
-	// channel at all — the occlusion frame pass drives the same ObjectModel
-	// call for buildings, and an unconditional release here would stomp its
-	// applied mask after a plan rebuild. One release when a previously owned
-	// row stops publishing.
+	// The row owns the model's destroyed-section channel only while it
+	// publishes PF_SECTION_MASK_VALID; the occlusion frame owns the model's
+	// separate verdict channel, and ObjectModel ORs the two per part like
+	// retail's entity+0x138 | g_HiddenSectionMask. One release when a
+	// previously owned row stops publishing.
 	void stamp_section_mask(ObjectModel *model, const float *p, int base,
 			int64_t &last_mask);
 	// All four semantic CTRL writers over one typed model (the wire walk's
@@ -572,6 +596,8 @@ private:
 			PresentRowsView snap, int tick_delta);
 	void store_wire_remote_body_cache(const WireRow &row);
 	void update_wire_held_weapon(WireRow &row, Node3D *node,
+			PresentRowsView snap, bool body_visible);
+	void update_wire_person_overlays(const WireRow &row, ObjectModel *body,
 			PresentRowsView snap, bool body_visible);
 	// A freed/swapped wire node invalidates the plan and its per-handle caches.
 	void release_wire_handle(int handle);
@@ -641,6 +667,7 @@ private:
 	HashMap<int32_t, int32_t> unresolved_;
 	HashMap<int32_t, ObjectID> weapon_nodes_;
 	HashMap<int32_t, String> weapon_graphics_;
+	HashMap<int32_t, Ref<PersonOverlayModels>> person_overlays_;
 	HashMap<int32_t, LightingContext> lighting_contexts_;
 	int pending_spawn_count_ = 0;
 	int64_t last_present_logic_tick_ = -1;

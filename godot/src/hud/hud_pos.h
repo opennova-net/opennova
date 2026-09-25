@@ -98,6 +98,11 @@ public:
 	// independently and differences them for the size).
 	static Rect2 scale_rect(const Rect2 &p_design, const Vector2 &p_surface);
 	static Rect2 sight_scale_rect(const Rect2 &p_design, const Vector2 &p_surface);
+	// A SIGHTS row laid out over the 512-square NVG scene for the NVG Sighted
+	// arm: the frame's selected ratio (the aspect mode over `surface`) drives
+	// the Y correction (hud/sight_overlay.h sight_rect_to_viewport_at_ratio).
+	static Rect2 nvg_scene_sight_rect(const Rect2 &p_design, const Vector2 &p_surface,
+			int p_aspect_mode);
 	static Vector2 pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface);
 	static int fade_decay(int p_elapsed_ticks, int p_ramp_ticks);
 	static int fade_flash_alpha(int p_elapsed_ticks, int p_ramp_ticks,
@@ -200,12 +205,19 @@ public:
 		SCOPE_MASK_CROSS = 1,
 		SCOPE_MASK_GRID = 2,
 	};
+	// The surface is retail's inclusive overlay rect (0, 0)..(W - 1, H - 1).
+	// `nvg_lens` builds the NVG lens's reticle instead
+	// (hud/scope_circle_mask.h build_nvg_lens_reticle over the overlay rect
+	// (0, 0)..(W - 1, H - 1)): no ring, the cross and grid at unit scale.
 	static PackedVector2Array scope_mask_points(const Vector2 &p_surface,
-			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode);
+			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode,
+			bool p_nvg_lens);
 	static PackedColorArray scope_mask_colors(const Vector2 &p_surface,
-			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode);
+			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode,
+			bool p_nvg_lens);
 	static PackedInt32Array scope_mask_indices(const Vector2 &p_surface,
-			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode);
+			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode,
+			bool p_nvg_lens);
 	// The derived frame, in order: center x, center y, ring size, inner radius,
 	// outer radius, scale x, scale y, arm half thickness, tick pitch.
 	static PackedFloat32Array scope_mask_frame(const Vector2 &p_surface,

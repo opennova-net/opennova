@@ -1,6 +1,7 @@
 #pragma once
 
 #include <runtime/anim/remote_body_state.h>
+#include <runtime/environment/water_mirror.h>
 #include <runtime/renderer/model_controls.h>
 
 // ObjectModel — the retained visual for one NovaLogic object graphic,
@@ -54,6 +55,8 @@ class Terrain;
 class MeshInstance3D;
 class OccluderInstance3D;
 class VisualInstance3D;
+struct ObjectLodFrame;
+class Camera3D;
 
 // The env-derived world lighting/fog values (ADR 0017's typed record,
 // native). Computed once per env change; the object shader family reads the
@@ -318,8 +321,19 @@ private:
 	Array robj_dense_;
 	bool viewmodel_pass_ = false;
 	uint32_t viewmodel_pass_stamped_serial_ = 0;
+	int32_t render_rung_override_ = kRenderRungFromWaterSide;
 	int64_t panm_applied_revision_ = 0;
-	int64_t section_visibility_mask_ = -1;
+	// The part draw's two section masks: a part is hidden when its bit is set
+	// in the entity's destroyed sections OR clear in the occlusion frame's
+	// draw mask (the RAW verdict ORed with the def's forced sections; -1 =
+	// no verdict, every section). Retail tests bit (i & 31) of
+	// entity+0x138 | g_HiddenSectionMask per bone (BoneCallback_bldg_World
+	// @ 0x4e22cf..0x4e22e2).
+	int64_t occlusion_section_mask_ = -1;
+	uint32_t forced_section_mask_ = 0;
+	uint32_t destroyed_section_mask_ = 0;
+	bool section_part_visible(int p_section) const;
+	void apply_section_visibility();
 	HashMap<int, OccluderInstance3D *> authored_occluders_;
 	PackedInt32Array surface_material_indices_;
 	Vector<Ref<ShaderMaterial>> surface_materials_;
@@ -345,7 +359,12 @@ private:
 	Ref<PanmClock> panm_clock_;
 	int active_lod_ = 0;
 	bool authored_lod_enabled_ = false;
+	bool presenter_driven_lod_ = false;
     bool exact_owner_lod_ = false;
+	bool attachment_pixel_cull_ = false;
+	int32_t attachment_pixel_cull_radius_q16_ = 0;
+	bool camera_pixel_culled_ = false;
+	void set_camera_pixel_culled(bool p_culled);
     bool geometry_visible_ = true;
 	bool focal_sway_active_ = false;
 	Basis focal_sway_basis_;
@@ -359,11 +378,15 @@ private:
 	bool entity_projection_override_ = false;
 	int32_t entity_projection_scale_q16_ = 0;
 	bool parachute_deployed_ = false;
+	Vector3 slot_march_offset_;
 	int32_t parachute_projection_radius_q16_ = 0;
 	void refresh_entity_projection_sphere();
+	// The frame's views a projection is kept for: the frame's image and the
+	// weapon Inset pass (update_authored_lod_views).
+	static constexpr int kMaxLodViews = 2;
 	uint64_t lod_projection_frame_ = 0;
-	int32_t lod_projected_radius_q16_ = 0;
-	bool lod_projection_visible_ = false;
+	int32_t lod_projected_radius_q16_[kMaxLodViews] = {};
+	bool lod_projection_visible_[kMaxLodViews] = {};
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
 	std::vector<bool> authored_lod_available_;
@@ -371,8 +394,22 @@ private:
 	AABB model_bounds_;
 	float lighting_effect_scale_ = 1.0f;
 	bool thermal_entity_wave_ = false;
+	// The water mirror's per-draw CLIP arming (runtime/environment/
+	// water_mirror.h water_mirror_clip_armed): the pass this model's draws
+	// take, its floor for the building pass, the verdict for the current
+	// water plane, and whether an owning entity decides it (a linked part
+	// draws inside its owner's submission).
+	opennova::env::MirrorClipWave water_mirror_clip_wave_ =
+			opennova::env::MirrorClipWave::kEntity;
+	int32_t water_mirror_clip_floor_q16_ = 0;
+	bool water_mirror_clip_armed_ = false;
+	bool water_mirror_clip_inherited_ = false;
 	bool interior_lerp_ = false;
 	float interior_daylight_ = 0.0f;
+	// The containing building (BMS id, 0 = none) and blink volume section this
+	// entity's draws declare as their interior light group.
+	int interior_light_group_bms_ = 0;
+	int interior_light_group_section_ = 0;
 	bool interior_section_lighting_ = false;
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
@@ -388,8 +425,6 @@ private:
 	bool entity_projection_zero_center_ = false;
 	ObjectID slot_shadow_capture_with_;
 	ObjectID entity_light_owner_;
-	String slot_shadow_decal_texture_;
-	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
 	AvatarPart avatar_part_ = AVATAR_PART_NONE;
 	int character_id_ = 0; // the composed avatar's character id (0xffff-masked)
@@ -404,8 +439,20 @@ private:
 	// it, so the visibility-changed notification fires on every edge).
 	bool present_visible_ = true;
 	bool occlusion_hidden_ = false;
+	// The authored-LOD walk's sub-pixel verdict: a world model whose bound
+	// sphere projects to at most 0.75 px in every view that sees it is not
+	// drawn (retail render_sector_entity @ 0x5c42d8..0x5c42de returns before
+	// the RLOD walk); an attachment takes its owner's.
+	bool subpixel_hidden_ = false;
+	void set_subpixel_hidden(bool p_hidden);
+	void apply_node_visibility();
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool match_terrain_enabled_ = false;
+	// The foliage depth-mask wave this model's draws take
+	// (u_foliage_mask_side: 0 none, 1 far, 2 camera side) and the scene build
+	// it was stamped on.
+	float foliage_mask_side_ = 0.0f;
+	uint32_t foliage_mask_stamped_serial_ = 0;
 	// The last MATCHTERRAIN page state the terrain-frame leg stamped
 	// (refresh_match_terrain_frame), kept for instances minted between legs.
 	bool match_terrain_page_ready_ = false;
@@ -427,6 +474,15 @@ private:
 	// Every built model that owns at least one blended strip: the water-plane
 	// owner marks them all dirty when the ladder's inputs change.
 	static HashSet<ObjectModel *> alpha_strip_models_;
+	// Every model deciding its own mirror CLIP arming: a water plane height
+	// change re-tests them all.
+	static HashSet<ObjectModel *> water_mirror_clip_models_;
+	// The attached models (entity light owner = this) that take this model's
+	// verdict: a held weapon or mounted part draws inside its owner's
+	// submission.
+	HashSet<ObjectID> water_mirror_clip_attached_;
+	bool tracks_water_mirror_clip() const;
+	void apply_water_mirror_clip_armed(bool p_armed);
 	// Strip classification runs only when something the ladder reads moved:
 	// the model transform, a part/robj transform, a rebuild, or the water
 	// plane generation (retail recomputes every strip every frame because its
@@ -437,7 +493,14 @@ private:
 	// leg. GameWorld refreshes their resident terrain-page binding after the
 	// terrain cache has processed this frame's requests.
 	static HashSet<ObjectModel *> match_terrain_models_;
+	// Person models and the models drawn inside a person's slot (held
+	// weapons): the foliage depth-mask consumers the foliage leg stamps.
+	static HashSet<ObjectModel *> foliage_mask_models_;
+	void update_foliage_mask_membership();
+	void stamp_foliage_mask_side(float p_side);
 	static HashSet<ObjectModel *> authored_lod_models_;
+	// Attachments whose camera draw carries the held weapon's 2 px gate.
+	static HashSet<ObjectModel *> pixel_cull_models_;
 	// Every GeometryInstance3D the scene builds carries instance uniforms
 	// (u_entity_light, the stance and viewmodel flags), so each one holds 16
 	// vec4 slots of Godot's global shader buffer for as long as it exists,
@@ -595,7 +658,6 @@ private:
 	Ref<ShaderMaterial> create_material(int p_array_index,
 			Ref<ShaderMaterial> &r_postmultiply);
 	void collect_anim_frames(int p_material_index);
-	Ref<Texture2D> load_texture_name(const String &p_texture_name);
 	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
 	// One shader parameter written to a material and, when the material
 	// carries the postmultiply pass, to its proxy as well.
@@ -663,6 +725,19 @@ public:
 	void set_entity_ref(const Ref<EntityRef> &p_ref) { entity_ref_ = p_ref; }
 	void set_thermal_entity_wave(bool p_enabled);
 	bool get_thermal_entity_wave() const { return thermal_entity_wave_; }
+	// The water mirror pass this model's draws take for the CLIP arming: the
+	// first entity wave (the default), the building pass, or none (a draw
+	// outside those walks: the sky bodies). The BySide person wave
+	// (set_thermal_entity_wave) never arms. Re-tested when the model moves or
+	// the water plane height changes; the verdict rides u_entity_light.w's
+	// bit 2.
+	void set_water_mirror_clip_wave(opennova::env::MirrorClipWave p_wave);
+	// The script form (the MirrorClipWave values: 0 none, 1 the building
+	// pass, 2 the first entity wave).
+	void set_water_mirror_clip_wave_id(int p_wave);
+	bool is_water_mirror_clip_armed() const { return water_mirror_clip_armed_; }
+	void refresh_water_mirror_clip();
+	static void refresh_water_mirror_clip_all();
 	Ref<EntityRef> get_entity_ref() const { return entity_ref_; }
 	void set_presentation_layer(PresentationLayer p_layer);
 	void set_shadow_caster_enabled(bool p_enabled);
@@ -671,9 +746,9 @@ public:
 	bool is_static_shadow_caster_enabled() const;
 	// Render-slot ground-shadow profile (SlotShadow consumes): person-type
 	// casters are the depth-clip stage's steepened class (that stage owns the
-	// 4x, not the drape — render_slot_shadow.h); vehicles may author an
-	// items.def `shadow` blob decal fallback [orig: itemdef type 3 / the
-	// +0xA0 decal, see docs/render/render-lighting-re.md]. dims = (w, l, ox, oy).
+	// 4x, not the drape — render_slot_shadow.h) [orig: itemdef type 3, see
+	// docs/render/render-lighting-re.md]. The items.def `shadow` decal line is
+	// parsed but draws nothing in JO (render_slot_shadow.h, the blob leg).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
 	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
@@ -707,9 +782,6 @@ public:
 	ObjectModel *get_entity_light_owner() const;
 	void set_slot_shadow_capture_with(ObjectModel *p_owner);
 	ObjectModel *get_slot_shadow_capture_with() const;
-	void set_slot_shadow_decal(const String &p_texture, const Vector4 &p_dims);
-	String get_slot_shadow_decal_texture() const;
-	Vector4 get_slot_shadow_decal_dims() const;
 	void update_slot_shadow_group();
 	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
 			float p_interior_daylight);
@@ -718,11 +790,23 @@ public:
 	float get_lighting_effect_scale() const { return lighting_effect_scale_; }
 	bool is_interior_lerp() const { return interior_lerp_; }
 	float get_interior_daylight() const { return interior_daylight_; }
+	// The interior light group the entity's draws declare: the building its
+	// first blink hit names plus that volume's section (retail
+	// setup_terrain_effect_for_entity -> Lighting_SetInteriorLightGroup
+	// @0x5a90e0), stamped by the entity lighting feed beside the context.
+	void set_interior_light_group(int p_building_bms, int p_section);
+	int get_interior_light_group_bms() const { return interior_light_group_bms_; }
+	int get_interior_light_group_section() const { return interior_light_group_section_; }
 	void set_interior_section_light_transfer(float p_daylight);
 	AABB get_model_bounds() const { return model_bounds_; }
 	// The rendered model bounds in world space (geometry diagnostics/culling).
 	// Lighting uses the entity origin and get_entity_bound_radius_q16 instead.
 	AABB get_world_bounds() const;
+	// Whether the active RLOD level submits through retail's SKINNED collector:
+	// Render_SubmitEntity dispatches on the model's skinned flag, and only the
+	// rigid collector re-scopes the owner light group per ROBJ (retail
+	// Render_SubmitEntity @0x5daddc; the rule is renderer::submit_owner_group).
+	bool is_active_level_skinned() const;
 	struct PointLightDrawPart {
 		int32_t robj_index = 0;
 		AABB world_bounds;
@@ -762,23 +846,54 @@ public:
 	// must not cull gun parts the wider renderfov shows), and its alpha strips
 	// the viewmodel rung. Re-stamps after a scene rebuild; idempotent per frame.
 	void set_viewmodel_pass(bool p_enabled);
+	// A fixed frame-ladder rung for every strip of the model, in place of the
+	// water-side classification of the blended strips (renderer/render_order):
+	// the celestial bodies flush whole at their own frame slot (the sky
+	// bracket or the frame's glow), whichever strip section a surface sits in.
+	// kRenderRungFromWaterSide restores the classification (and rung 0 for the
+	// strips outside the blended section).
+	static constexpr int32_t kRenderRungFromWaterSide = INT32_MIN;
+	void set_render_rung_override(int32_t p_rung);
 	static void refresh_match_terrain_frame(Terrain *p_terrain);
+	// Stamp every person draw (its linked avatar parts and the models drawn
+	// in its slot included) with its BySide wave for the foliage depth masks
+	// (runtime/renderer/foliage_frame.h carries the witness): the camera and
+	// water heights of the frame the foliage compile used.
+	static void refresh_foliage_mask_frame(float p_camera_y, float p_water_height);
+	float get_foliage_mask_side() const { return foliage_mask_side_; }
 	static int update_authored_lods(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees,
 			float p_viewport_width,
 			float p_viewport_height);
+	// The same walk over every view drawing the world this frame (at most
+	// kMaxLodViews: the frame's image and, while it renders, the weapon Inset
+	// pass). The views share one node per entity, so each model takes the
+	// finest level any view selects and is sub-pixel hidden only when every
+	// view that sees it projects it at or below 0.75 px.
+	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count);
+	// One camera's view (ObjectLodFrame::from_camera): its own drawn frustum
+	// (the keep-aspect mode decides which axis its fov names) and the focal
+	// over `viewport_width`, the width the image reaches the surface at.
+	static int update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width);
 	Dictionary get_render_part_nodes() const;
 	// A model-space attachment through the rendered subobject's live pose.
 	// Skeletal bones need their inverse rest pose; rigid PANM parts already
 	// map model space directly. Missing parts use the model root.
 	Transform3D subobject_model_to_world(int p_subobject) const;
 	void set_focal_sway(bool active, const Basis &basis, const Vector3 &world_offset);
-	void set_section_visibility_mask(int64_t p_mask);
-	// The occlusion pass's last-applied mask (-1 = no verdict yet, all
-	// sections visible). Read by the corona owner-section gate.
-	int64_t get_section_visibility_mask() const {
-		return section_visibility_mask_;
-	}
+	// The occlusion frame's verdict: the RAW section mask (-1 = no verdict,
+	// every section) and the def's forced-visible sections the part draw ORs
+	// over it.
+	void set_occlusion_section_mask(int64_t p_raw_mask, int64_t p_forced_mask);
+	// The raw verdict last applied (-1 = none yet). Read by the corona
+	// owner-section gate, which tests the raw word like retail's
+	// Terrain_IsBuildingSectionBitSet.
+	int64_t get_occlusion_section_mask() const { return occlusion_section_mask_; }
+	int64_t get_forced_section_mask() const { return forced_section_mask_; }
+	// The entity's destroyed sections (the sim's hidden-section mask, 0 =
+	// none): hidden whatever the occlusion verdict says.
+	void set_destroyed_section_mask(int64_t p_hidden_mask);
+	int64_t get_destroyed_section_mask() const { return destroyed_section_mask_; }
 	PackedInt32Array get_surface_material_indices() const { return surface_material_indices_; }
 	Array get_surface_materials() const;
 	bool is_playing() const { return is_playing_; }
@@ -787,6 +902,10 @@ public:
 	void set_active_lod(int p_lod_index);
 	int get_active_lod() const { return active_lod_; }
 	void set_authored_lod_enabled(bool p_enabled);
+	// A model whose level its presenter selects every frame through
+	// set_active_lod (the death pieces' own level walk): it keeps every
+	// retained level but never joins the shared RLOD walk.
+	void set_presenter_driven_lod(bool p_enabled);
 	// Attachment RLOD: an attached model (the third-person held weapon, the
 	// NVG/binocular items, a mounted child) never runs its own threshold
 	// walk; it draws at its owner's selected level clamped to its own LOD
@@ -794,6 +913,13 @@ public:
 	// the owner's level after the frame's selections; a freed owner reads as
 	// level 0.
 	void set_authored_lod_owner(ObjectModel *p_owner, bool p_exact = false);
+	// The held weapon's own projected-size gate (renderer::
+	// held_weapon_projection_culled): update_authored_lods projects this
+	// attachment's model sphere at its origin each frame, and under 2 px the
+	// camera pass skips it — the model moves to the camera-hidden layer and
+	// keeps its render-slot capture, which retail's slot pass draws untested.
+	void set_attachment_pixel_cull(bool p_enabled);
+	bool is_camera_pixel_culled() const { return camera_pixel_culled_; }
     void set_geometry_visible(bool p_visible);
     void set_rigid_parts(bool p_rigid);
 	ObjectModel *get_authored_lod_owner() const;
@@ -804,6 +930,10 @@ public:
 	void configure_entity_projection(bool p_person, int32_t p_parachute_radius_q16,
 			bool p_zero_center);
 	void set_parachute_deployed(bool p_deployed);
+	// The render-slot march start relative to the entity position (the
+	// present rows' PF_SLOT_MARCH_OFFSET_*; zero = start at the position).
+	void set_slot_march_offset(const Vector3 &p_offset) { slot_march_offset_ = p_offset; }
+	Vector3 get_slot_march_offset() const { return slot_march_offset_; }
 	// A carved static becomes a live husk visual while retaining the primary
 	// entity's already-derived local sphere and the scale of its pose matrix.
 	void set_entity_projection_override(
@@ -872,6 +1002,7 @@ public:
 	bool is_present_visible() const { return present_visible_; }
 	void set_occlusion_hidden(bool p_hidden);
 	bool is_occlusion_hidden() const { return occlusion_hidden_; }
+	bool is_subpixel_hidden() const { return subpixel_hidden_; }
 
 	// --- CTRL registers ---
 	void begin_ctrl_update();

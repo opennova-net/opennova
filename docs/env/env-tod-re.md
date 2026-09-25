@@ -44,8 +44,8 @@ remain parsed-but-deferred — is tracked per field in
 | `Environment_GetFogEndDistance @ 0x57e3e0` | `env_render::compute_fog_params` (end distance) |
 | `Environment_ApplyFogAndAmbient @ 0x57e440` | fog application (`engine/runtime/environment/environment_state.h` + `godot/src/env/mission_environment.cpp` + shaders) |
 | `Render_SetFogState @ 0x58a950` | `env_render::compute_fog_params` (per-type start) |
-| `render_skybox @ 0x579080` | `godot/src/env/sky_dome.cpp` (uniforms from `engine/runtime/environment/sky_frame.*`) + `godot/shaders/sky.gdshader` |
-| `EffectWorld_LoadCelestialModels @ 0x5adc50` | `godot/src/env/celestial.cpp` (+ `engine/runtime/environment/celestial_frame.h`) |
+| `render_skybox @ 0x579080` | `godot/src/env/sky_dome.cpp` (uniforms from `engine/runtime/environment/sky_frame.*`) + `godot/shaders/sky.gdshader` (pass 1 / flat dome) + `godot/shaders/sky_clouds.gdshader` (pass 2, the cloud `next_pass`) |
+| `EffectWorld_LoadCelestialModels @ 0x5adc50` | `godot/src/env/celestial.cpp` (+ `engine/runtime/environment/celestial_frame.h`); the bodies draw through their authored ObjectModel materials |
 | `Game_LoadTerrainDuringConnect @ 0x520710` | BMS override application (`EnvFile.apply_mission_overrides`) |
 | `Game_StartMission @ 0x524360` (0x525371..0x525399) | BMS fog overrides + start TOD |
 | `Environment_SetCurrentTime @ 0x57c4b0` / `Environment_SetTodRate @ 0x57c4f0` | runtime TOD state setters |
@@ -54,7 +54,7 @@ remain parsed-but-deferred — is tracked per field in
 | `Environment_MissionStartInit @ 0x57f1e0` (ex `sub_57F1E0`) | `world::WeatherState::mission_start_init` + `env::EnvScalarChannels::mission_start_init`; the 255-tick settle = `MissionKernel::settle_weather_mission_start` |
 | `WacCmd_Rain @ 0x4edf60` / `Snow @ 0x4edfd0` / `Overcast @ 0x4ee040` / `FogDist @ 0x4ee100` / `MoveFog @ 0x4ee0a0` / `SkySpeed @ 0x4edeb0` / `SkyHeight @ 0x4edec0` / `Quake @ 0x4ed4c0` / `Tod @ 0x4edc70` / `FogType @ 0x4eded0` / `SunFade @ 0x4edf10` / `ColorFade @ 0x4edcb0` / `Sun.. @ 0x4edcd0..` / `Script_SetLightningColor @ 0x4ede20` / `Env_TriggerLightningFlashA/B @ 0x4ed500/0x4ed510` | `world::WeatherState::command_*` through `world::EntityCommands` (the VM, the F3 window and the MCP rows share the one path) — §The WAC weather handlers |
 | `NetPacket_WritePlayerState @ 0x4ff6b0` (the 0x0A phase-2 ENV block) / `NapiNPClientMsg_0x00A @ 0x430244..0x43034c` | `replication::connection_fan` narrows the weather home once; `inmatch::JoinerRole::apply_weather_sample` -> `WeatherState::apply_wire_sample` |
-| `Precipitation_Reset @ 0x5df3a0` / `Precipitation_SeedPool @ 0x5debb0` / `Precipitation_FallTick @ 0x5de8f0` / `update_weather_particle_positions @ 0x5dec40` / `render_weather_trail_particles @ 0x5dee10` / `WeatherParticle_LoadTextures @ 0x5de840` | `env::PrecipitationField` (`engine/runtime/environment/precipitation.h`), `MissionKernel::update_precipitation`, `renderer::compile_precipitation_frame` (`engine/runtime/renderer/precipitation_frame.h`), the `Precipitation` node (`godot/src/env/precipitation.cpp`) + `shaders/precipitation.gdshader` — §Precipitation |
+| `Precipitation_Reset @ 0x5df3a0` / `Precipitation_SeedPool @ 0x5debb0` / `Precipitation_FallTick @ 0x5de8f0` / `update_weather_particle_positions @ 0x5dec40` / `render_weather_trail_particles @ 0x5dee10` / `WeatherParticle_LoadTextures @ 0x5de840` | `env::PrecipitationField` (`engine/runtime/environment/precipitation.h`), `MissionKernel::update_precipitation`, `renderer::compile_precipitation_frame` (`engine/runtime/renderer/precipitation_frame.h`), the `Precipitation` node (`godot/src/env/precipitation.cpp`) copying that frame into the scene overlay stage (`renderer::append_precipitation_overlay`, `engine/runtime/renderer/scene_overlay.h`) — §Precipitation |
 | `Sound_PlayTriggerSetScaled @ 0x527b90` (thunder @ 0x57ecfb / @ 0x57edc4) | `world::WeatherSoundEvent` from `MissionKernel::tick_weather` -> `Simulation.drain_weather_sounds` -> `MissionAudio.play_weather_sounds` |
 | `Entity_UpdateInfantryPlayerBody @ 0x4b4747..0x4b490e` (the rain ambient) | `world::infantry_rain_ambient` (`engine/runtime/world/infantry.cpp`) through the sound-emitter mailbox |
 | `Entity_ApplyCollisionForce @ 0x4af4a0` case 3 (the hit blackout arm) | `env::HitDimState::arm`, armed by `world::apply_collision_force` (`engine/runtime/world/collision_force.cpp`, ported 2026-09-14 — local player only, the friendly/enemy split and the in-session NoFriendlyFire suppression; world-wac-ai-re §17.3b) (ex "rain fade" — the kong misnomer; nothing weather-related writes it) |
@@ -177,7 +177,7 @@ render/texture basis is `(-fixed[1], fixed[2], fixed[0]) / 65536`, stored at
 directly as `trunc((component + 1) × 127.5)` at `0x60e1d9..0x60e331` for the cached-tile DOT3 alpha bake. The hosted
 `compute_sun_direction` and `compute_moon_direction` now expose the same direct
 fixed-derived vectors. Consumers normalize only when their own witnessed math requires
-it; the terrain byte-pack and star-field fixed-dot paths keep the getter tuple unchanged.
+it; the terrain byte-pack path keeps the getter tuple unchanged.
 
 ## Color state blocks and the weather tick
 
@@ -265,7 +265,7 @@ the weather keeps advancing while the entities are held (the reimpl's
   **Ring readers (witnessed 2026-08-30 — every path `Env_WindScale` reaches the frame):**
   `Env_WaveAmpRing[(z >> 15) + (y >> 14) + (x >> 14) + Env_WaveRingIndex]` (the low byte)
   is the light flicker sample (`Light_TickGenBlock @ 0x5a8ae0`,
-  `Light_SetupTerrainProjectedPass @ 0x5aaa13`, `foliage_setup_render_matrices
+  `Light_SetupTerrainProjectedPass @ 0x5aaa13`, `Light_SetupTerrainProjectedPassPS
   @ 0x5aadf6` — each writes it into the global CTRL `FLICKER` slot `0x83FD00` before its
   RgbGen evaluation) and, through `HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3dd1`,
   the global CTRL `FLICKER` (ordinal 3, `0x83FD00`) and `SWING` (ordinal 4,
@@ -278,8 +278,10 @@ the weather keeps advancing while the entities are held (the reimpl's
   so a world model with those callbacks swings/flickers on its own position;
   `Env_WaveOscRing[0]` — the ring's slot 0,
   refreshed once per 256 ticks — is the weather term of the DETAIL foliage sway phase,
-  `c24.x = GetTickCount() * 0.003 + Env_WaveOscRing[0] / 65536` with `c24.w = 0.03`
-  (`Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d`;
+  `c24.x = GetTickCount() * 0.003 + Env_WaveOscRing[0] / 655360` (`flt_7DE9D0` =
+  `0x35CCCCCD`, the float nearest 1/655360, not 1/65536), with the 0.03 bend scale on
+  `c25.x` (`flt_7C9B90`), not `c24.w`
+  (`Foliage_SetupVertexShaderConstants @ 0x60074a..0x6007b4`;
   [foliage-re.md](../foliage/foliage-re.md)). Reimpl: `env::WeatherOscillator::ring_slot`
   is the shared hash; the light flicker (`renderer::light_flicker_value`) reads the
   ONE weather home's rings, the `Weather` node publishes the local player's pair as
@@ -374,10 +376,26 @@ the weather keeps advancing while the entities are held (the reimpl's
   `[@ 0x5dec81; @ 0x5dee27]`), and the overcast blend (`@ 0x57ef4c..0x57ef92`);
   eighth-snaps `(d + 7) >> 3` with overshoot snap — sky height (`@ 0x57ee97`) and
   the cloud scroll rate (`@ 0x57eecc`).
-- Derived render colors: `Env_TerrainLightCombined = light*0xB5/256 + sky` (0xB5 ≈ 0.707!),
-  a `0x5A` (0.35) variant, `Env_CeilingFloorBlend = ceiling*0.707 + floor*0.707`,
+- Derived render colors: `Env_TerrainLightCombined` per lane =
+  `min(light × 0xB5 + sky × 257, 0xFFFF) >> 8` (0xB5 ≈ 0.707): the sky byte widens by
+  `punpcklbw mm1, mm1` (× 257), the light byte zero-extends (`punpcklbw mm0, mm2`) and
+  multiplies by the weight, the two add with `paddusw` and shift
+  (`@ 0x57f0a4..0x57f0d5`; the `0x5A` (0.35) variant `@ 0x57f117..0x57f148`), so
+  light = sky = 100 gives 171, not 170 (ported exactly 2026-09-24, "Dim the sky dome under
+  NVG, whiten it under thermal, exact light blend": `combine_terrain_light` in
+  `engine/formats/env/env_render.cpp`); `Env_CeilingFloorBlend = ceiling*0.707 + floor*0.707`,
   `Env_WaterColorLit = water * combined >> 7` (×2 gain), and **fog + skyfog render colors are
   doubled with saturation** — `.env` fog colors are authored at half intensity.
+  These blocks and derived colors stay RAW under NVG: the NVG hemisphere rewrite is applied
+  only to the per-pass object lighting block
+  (`CTerrainRenderer_BuildLightingShaderConstants @ 0x5c820b..0x5c82e9`) and to a stack copy
+  of the terrain sky argument (`Render_TerrainScene @ 0x610d16..0x610e36`), so the water
+  colour, the underwater fog and clear, the particle ambient, the scars and the slot drape
+  are NVG-invariant (`Env_TerrainLightCombined @ 0x57f0d5` and `Env_WaterColorLit @ 0x57f177`
+  read the raw blocks). Ported 2026-09-24 ("Keep the env colour blocks raw under NVG;
+  rebuild the terrain NVG sky as bytes"): the `EnvironmentState` colour getters serve the raw
+  blocks and `build_light_values` / `nvg_terrain_sky` apply the rewrite
+  ([render/render-lighting-re.md](../render/render-lighting-re.md)).
 - **Horizon blend (witnessed 2026-07-05, closes the previously uncited one-liner):** after
   the 16 channel smoothers and **before** the fog/skyfog doubling, when the smoothed
   `Env_FogDistCurrent @ 0x26c681c` is (unsigned) strictly below `Env_FogDistReference/2`
@@ -391,14 +409,16 @@ the weather keeps advancing while the entities are held (the reimpl's
   re-set at terrain init to 768.0/1024.0 by adapter-caps bit 0x40 and forced to 1024.0
   on the session authority `[orig: Terrain_Init @ 0x60fc9a/0x60fca3]`. The witnessed
   consumer is the **frame clear**: every scene entry clears with `is_alternate_fog ?
-  0x808080 : camera above water ? skyfog[0] : Env_WaterColorLit` via CD3DDevice
+  0x808080 : camera strictly above water ? skyfog[0] : Env_WaterColorLit` (the `jle`
+  `@ 0x5ca790` gives the lit water at exact equality; no blink letter reaches this clear)
+  via CD3DDevice
   SetClearColor/SetClearDepth(1-2^-15) -> `IDirect3DDevice9::Clear(TARGET|ZBUFFER)`
-  `[orig: Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; terrain_scene_render
+  `[orig: Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; NVG_RenderSceneToTarget
   @ 0x5d065a-0x5d0699; device Clear @ 0x677100 (IDB-misnamed CGfxTextOverlay_Draw)]`,
   the Clear halving the color `(c>>1)&0x7F7F7F7F` on non-modulate2x devices
   `[@ 0x67715d; cap dword_32656AC, cf. decode_mode_color_stage @ 0x681080]`; the
   sky-dome pass additionally sets the device FOG color to skyfog while drawing the dome
-  and restores fog for the world `[orig: sub_579CB0 @ 0x579cb0]`. Reimpl: tick and
+  and restores fog for the world `[orig: SkyDome_RenderWithSkyfog @ 0x579cb0]`. Reimpl: tick and
   horizon-blend in undoubled block space using the smoothed (pre-overcast) fog
   distance, then double with saturation at the render tail. `MissionEnvironment`
   writes that one final skyfog value through `get_frame_clear_color()` to the
@@ -488,8 +508,13 @@ window no weather tick runs in.
   (`0xC80000`) down to the floor (`Physics_RaycastIntContext @ 0x5385e0` +
   `raycast_proximity_entities @ 0x538350`) lifts the floor to the hit z.
 - **Drawer** (`render_weather_trail_particles @ 0x5dee10`, from
-  `Terrain_RenderSceneWithReflection @ 0x5c96a6` — after the camera-side particle
-  pass and projectile trails, before the foliage billboards and the murk overlay):
+  `Terrain_RenderWorldScene @ 0x5c96a6` — after particle pass B
+  (`@ 0x5c9690`) and the NVG laser beams (`Render_NVGLaserBeamsForVisiblePersons @ 0x5c9695`), before the coronas
+  (`EffectWorld_RenderLightCoronas(1) @ 0x5c96ad`), the water glint and the murk quad;
+  the earlier "projectile trails" / "foliage billboards" labels for those two
+  neighbours were misreadings, corrected 2026-09-24 in
+  [render/render-order-re.md](../render/render-order-re.md); the mirror never draws
+  the streaks):
   only if `RainPct > 48`; velocity = the camera delta since the last frame
   (clamped 0.2), fall = the accumulator (clamped 0.1) then zeroed; snow: trail =
   `cam_up * 0.05`, right `*= 0.025`; rain: trail = `(0, 0.1, 0) + velocity -
@@ -518,9 +543,14 @@ window no weather tick runs in.
   `PrecipitationFloorSampler` callbacks; the kernel supplies the terrain field
   and `CollisionWorld::clip_segment_to_nearest_collision` through the local
   player's candidate slice), `renderer::compile_precipitation_frame` (the
-  triangles in the Godot frame), the `Precipitation` node + `precipitation.gdshader`
-  (unshaded, blend_mix, cull_disabled, depth_draw_never, fog_disabled; texture x
-  diffuse x 2), `world::infantry_rain_ambient` through the sound-emitter
+  triangles in the Godot frame), the `Precipitation` node, which since 2026-09-24
+  ("Draw the scene's post-particle tail in its own overlay stage") owns no mesh or
+  shader: it copies the compiled triangles into the scene overlay stage
+  (`renderer::append_precipitation_overlay`, `engine/runtime/renderer/scene_overlay.h`:
+  MODULATE2X colour, SRCALPHA / INVSRCALPHA, z-test without z-write, the one diffuse
+  `Env_TerrainLightCombined | 0xFF000000`, mode word 0x651, pass flags 0x10500000), drawn
+  in scene views only, never in the water mirror (`precipitation.gdshader` is deleted),
+  `world::infantry_rain_ambient` through the sound-emitter
   mailbox. ctests `precipitation`, `renderer_precipitation_frame`,
   `weather_state`.
 
@@ -562,8 +592,8 @@ witnessed handler.
 ## Environment_ApplyFogAndAmbient walk (C6)
 
 `Environment_ApplyFogAndAmbient @ 0x57e440` is the per-**pass** environment push, called from
-every scene renderer (`render_main_scene @ 0x5c164c`, `terrain_scene_render @ 0x5d07f6`,
-`Render_ProcessMainSceneFrame @ 0x5ca3ce/0x5ca841`, `Terrain_RenderSceneWithReflection
+every scene renderer (`render_main_scene @ 0x5c164c`, `NVG_RenderSceneToTarget @ 0x5d07f6`,
+`Render_ProcessMainSceneFrame @ 0x5ca3ce/0x5ca841`, `Terrain_RenderWorldScene
 @ 0x5c949f`, `Render_RadarCompassOverlay @ 0x5c98b6`, `render_cinematic_multiview @ 0x570adb`)
 with `(is_underwater, is_alternate_fog)`; `is_underwater = g_view_pos_z <
 Env_WaterHeightFixed` at most sites. Complete ordered walk:
@@ -623,10 +653,39 @@ Driven from `Environment_ApplyFogAndAmbient @ 0x57e440`. `Render_SetFogState` pa
 
 | fog_type | behavior |
 |---|---|
-| 0 | exponential fog, density = ln(64) / end (vertex-fog variant ln(64)/(3·end) by device caps) |
+| 0 | exponential fog, density = ln(64) / end; the caps pick table or vertex EXP fog (`@ 0x6779e4..0x677a48`), both on view depth. (The ln(64)/(3·end) form is the dormant LITE block, FOGMODE 4..7; [render/render-material-re.md](../render/render-material-re.md) §Fog parameter sets.) |
 | 1 | linear, start = 0.5 world units (caller constant — effectively zero) |
 | 2 | linear, start = (1 − density) × end × 0.5 |
 | 3 | linear, start = (1 − density) × end × 0.25 |
+
+The start the device receives is already folded: `Render_SetFogState` multiplies the
+type-2/3 start by (1 − density) (`@ 0x58a9c5..0x58a9fe`); the caller's start constant 0.5
+(`Environment_ApplyFogAndAmbient @ 0x57e4d2`, stored `@ 0x58a992`) is the type 0/1 start.
+Every consumer (terrain, objects, water) uses that start as-is. The reimpl's per-type
+shader re-derivation that dropped the overcast fold (`terrain_fog_start_for_type` /
+`terrain_fog_factor_for_distance`) is deleted, and `compute_fog_params` keeps the
+caller's 0.5 for type 0 too (2026-09-24, "Fog objects by their retail pass path and keep
+the overcast fog start" and "Pin the type-0 fog start vector at the caller's 0.5"; the
+`envfile/fog_type0` parity vector now reads start 0.5).
+
+**Fog distance by pass path (2026-09-24).** Linear fog on the fixed-function path is
+vertex fog with `D3DRS_RANGEFOGENABLE` (`CD3DDevice_SetFogParameters @ 0x677a50..0x677a69`):
+the radial eye distance. A FOGMODE_SHADER pass (`SetFogAndBlendMode` modes 8..11 turn
+table and vertex fog off, `@ 0x677783`) fogs from the VS
+`oFog = 1 − (z − FogStart) × FogRangeRecip` (`apply_shader_parameters @ 0x58e20d..0x58e26f`):
+linear in view depth for EVERY fog type, type 0 included, from start 0.5. The per-family
+split (the `OBJ_FOG_VERTEX_SHADER` / `OBJ_FOG_VERTEX_SHADER_DEVICE` defines read by
+`obj_scene_fog_visibility`) lives in [render/render-material-re.md](../render/render-material-re.md)
+§Fog parameter sets.
+
+**The viewmodel's fog (2026-09-24, "Fog the viewmodel under the dry pass").** The
+first-person viewmodel draws under the DRY pass fog even when the eye is underwater:
+`Environment_ApplyFogAndAmbient(0, thermal)` runs `@ 0x5ca3bf..0x5ca3ce` before the
+viewmodel (`@ 0x5ca829`) and the underwater re-apply comes after it
+(`@ 0x5ca82e..0x5ca841`). Its fog colour is the one `SkyDome_RenderWithSkyfog` restores when the sky
+pass drew (`Env_FogBlock`, `@ 0x579ce6..0x579cf6`, under thermal too), else the dry
+pass's own colour (`0x808080` under thermal). Reimpl: `EnvironmentState::build_viewmodel_fog`,
+published as `opennova_viewmodel_fog_color` / `opennova_viewmodel_fog_range`.
 
 `start == end` disables fog entirely. The jodemo-era claims in `engine/runtime/terrain` (exp ln64 for
 type 0, 0.5/0.25 linear starts) are behaviorally correct; only their address citations were
@@ -642,9 +701,9 @@ The applied fog distance also feeds the far clip/culling. The sky dome does NOT 
 
 Distance fog is only the first underwater leg. After the world, first-person
 viewmodel, particles, weather, and foliage have rendered,
-`Terrain_RenderSceneWithReflection @ 0x5c96c5..0x5c96fa` independently tests
+`Terrain_RenderWorldScene @ 0x5c96c5..0x5c96fa` independently tests
 `camera_z <= Env_WaterHeightFixed` (`jg` skips the draw). On the underwater side,
-including exact equality, it calls `Terrain_DrawScissorRect @ 0x5c38e0` over the
+including exact equality, it calls `Render_DrawViewportColorQuad @ 0x5c38e0` over the
 full current viewport with RGB = `Env_WaterColorLit` and alpha
 `0x80 - trunc(Env_WaterMurk * -96.0)` = `128 + trunc(96 * murk)`. Thus CP01's
 `water_murk 0.8` produces byte alpha 204. The pass disables Z-write, forces
@@ -654,12 +713,18 @@ mechanism that gives the sky, terrain, particles, and weapon the near-uniform
 lit-water attenuation while leaving the later HUD untouched.
 
 The ordering has one important tail: skybox sun glow is drawn after the murk
-quad (`@ 0x5c9714`), and the HUD later still (`@ 0x5cad04`). The port draws the
-quad in `PlayerViewEffects`, over the beauty pass (which carries the weapon
-through its shader-side viewmodel projection) and behind HUD CanvasLayer 1,
-which preserves the scene/weapon/HUD contract. Its bounded
-residual is that the reimpl's 3D celestial/glow is also below the overlay; retail
-redraws sun glow above it. See render-order divergence D-RORD-9.
+quad (`@ 0x5c9714`, under the modulator forced to `0xFF404040` `@ 0x5c96fd`), and
+the HUD later still (`@ 0x5cad04`). Since 2026-09-24 ("Draw the scene's post-particle
+tail in its own overlay stage", "Draw the water glint and the sun glare at the end of
+the overlay tail") the port draws the murk in each 3D view's post-particle overlay pass
+(`renderer::kSceneOverlayOrder` in `engine/runtime/renderer/scene_overlay.h`, executed by
+`SceneOverlayCompositorEffect`): full viewport, `Env_WaterColorLit` with the alpha byte
+above, SRCALPHA / INVSRCALPHA, ZFUNC ALWAYS, whenever that view's render eye is at or
+below the water height (spectator, third-person and death cameras included), after the
+view's particle passes and before the bloom; the sun glare follows it in the same pass.
+The former `PlayerViewEffects` murk quad and its "glare below the murk" residual are
+retired, and D-RORD-9 closes (see
+[render/render-order-re.md](../render/render-order-re.md)).
 
 ## Sky dome (`render_skybox @ 0x579080`) — full combine recovered (C6)
 
@@ -677,6 +742,41 @@ one multi-stage pass**, alpha-blended over it. Both vertex shaders are embedded 
 *source text* (`SkyVS_GradientPassSource @ 0x7d7338`, `SkyVS_CloudPassSource @ 0x7d6fc0`)
 and assembled at runtime with the statically-linked `D3DXAssembleShader` in
 `terrain_init_rendering_resources @ 0x5789e0` (handles → sky+116 / sky+120).
+
+**Pass order and depth (2026-09-24 rendering parity pass).** `render_skybox` draws the
+gradient pass (`@ 0x5798dc`), then `render_celestial_bodies(0)` (`@ 0x5798e0`), then the
+cloud pass (constants and draw `@ 0x5798f1..0x579b15`): the clouds cover the sun and
+moon. The flat path (`@ 0x579b42`, `SetFogAndBlendMode(0)`) has no cloud pass. Both dome
+passes run under pass flags 0x300000, z-write off and ZFUNC ALWAYS (`@ 0x579883`
+gradient, `@ 0x579ac1` cloud, `@ 0x579c3e` flat path): the dome never writes depth and
+never occludes the world. The world drawn after it wins everywhere; the bodies drawn
+between the dome passes test only against the cleared depth. Reimpl: `sky.gdshader` (pass
+1 and the flat dome) and `sky_clouds.gdshader` (pass 2, the dome material's `next_pass`,
+`blend_mix`, attached only on the shader path with a bound cloud layer) are both
+`depth_draw_never` with the clip depth pinned to the reverse-Z far plane
+(`POSITION.z = 0`); the part of the dome beyond the Godot far plane is full skyfog, the
+clear, so it is invisible there too. Because a no-depth-write surface sorts in Godot's
+transparent list, each pass rides its own ladder rung
+(`engine/runtime/renderer/render_order.h`): the gradient `kRungSkyDome` (-15) opens the
+sky pass, then the bodies `kRungSkyBody` (-14), then the clouds `kRungSkyClouds` (-13),
+all before the viewmodel and every world transparent. Without the gradient's rung it
+painted over the clouds, the discs and every far-side alpha at the default rung 0
+(found at the 03tr-sun-sky capture; after the fix the upper sky matches retail to within
+1 level). Commits: "Pin the sky dome to the far plane without a depth write", "Split the
+dome's cloud pass after the bodies and port the sky pass gates", "Open the sky pass with
+the dome gradient's own rung". Windowed `sky_dome_test` pins a world quad beyond the dome
+surface at altitude drawing over the sky.
+
+**Sky pass gates (2026-09-24).** The main frame's sky bracket (`SkyDome_RenderWithSkyfog` →
+`render_skybox`, the dome and the bodies it draws, `@ 0x5ca81a`) runs only while blink
+letter 0x4 is clear AND the eye is strictly above the water
+(`@ 0x5ca1a3..0x5ca1bd` → `@ 0x5ca7c4..0x5ca81a`); the water mirror's own sky bracket is
+skipped under the indoors letter 0x2 (`render_main_scene @ 0x5c1342..0x5c1353` →
+`@ 0x5c166b`). The glare, the glint and the sun veil are drawn outside the bracket and are
+never gated. Reimpl: `renderer::scene_pass_gates` (`engine/runtime/renderer/scene_pass_gates.h`)
+→ `OcclusionFrame.apply_scene_pass_gates()` feeds `u_beauty_pass_drawn` /
+`u_mirror_pass_drawn` per pass camera
+([render/render-occlusion-re.md](../render/render-occlusion-re.md) §4).
 
 **Builder internals (ENG-2 sky-leg re-grill, 2026-07-06 — the engine/formats/env port's witness
 set):** the dome profile is a sphere cap of radius 3072 lowered so the rim (radius
@@ -738,6 +838,21 @@ constant; the vs.1.1 `oD0`/`oD1` color outputs are the saturation boundary befor
 fixed-function stages. This scale is separate from the TSS `MODULATE2X` cloud-density
 operation. Fog is deliberately excluded: `D3DRS_FOGCOLOR` receives the active packed fog
 dword verbatim, so that already-weathered color remains byte/255 at the dome pass.
+
+**NVG and thermal dome (2026-09-24, "Dim the sky dome under NVG, whiten it under thermal,
+exact light blend").** Under first-person NVG (`g_NVGActive` && `g_camera_mode` == 0,
+`@ 0x578901..0x578911`) `Color_UnpackToFloat4 @ 0x578900` takes its NVG branch:
+f = (level + 1) × 0.2, channel = byte × 2 × 0.25 / 255 + f × 0.0015625
+(`@ 0x578913..0x57897b`; alpha stays 1); the normal branch is byte × 2/255, unclamped, a = 1
+(`@ 0x578985..0x5789c3`). Under the thermal view `render_skybox` overrides the three sky
+constants to 1.0 and the three cloud constants to 0.9 after the unpack
+(`@ 0x579377..0x579447`, `flt_7C459C` = 0.9), and `SkyDome_RenderWithSkyfog(thermal, z_tested)` fogs the
+dome toward `0x808080` instead of skyfog; the main frame passes the thermal byte
+(`Render_ProcessMainSceneFrame @ 0x5ca363` → `@ 0x5ca81a`), while the water mirror calls
+`SkyDome_RenderWithSkyfog(0, 0)`, so reflections keep the normal sky. Ported in
+`engine/runtime/environment/sky_frame.cpp` (`sky_constant` gated by
+`EnvironmentState::nvg_view_active()`; `kThermalSkyWhite` / `kThermalCloudWhite` /
+`kThermalSkyFog`).
 
 **Pass 1 — sky gradient** (VS `SkyVS_GradientPassSource`, raw UVs, no texture — its effect
 is created with `CEffect_SetTextureParam(NULL)`):
@@ -801,12 +916,13 @@ the keyframed path's cloud colors come exclusively from the cloudbase/cloudedge/
 cloudhighlight blocks). C7 correction: the flat path applies the **pass-1 effect** —
 created with `CEffect_SetTextureParam(NULL)` — so it is **textureless** (the earlier
 "textures still bound" reimpl comment was wrong). A white-sky variant forces sky colors
-to 1.0 and cloud colors to 0.9. `Environment_ApplyFogAndAmbient` pushes the smoothed sky
+to 1.0 and cloud colors to 0.9 (the thermal view's override on the shader path; see
+"NVG and thermal dome" above). `Environment_ApplyFogAndAmbient` pushes the smoothed sky
 height to the dome (`@ 0x57e4f7`) only when it changes.
 
 **Dome fog color (2026-07-21 correction).** The sky wrapper temporarily switches
 `D3DRS_FOGCOLOR` to the final skyfog block while both dome passes run, then restores
-the ordinary world fog `[orig: sub_579CB0 @ 0x579cb0]`. VS fog still comes from
+the ordinary world fog `[orig: SkyDome_RenderWithSkyfog @ 0x579cb0]`. VS fog still comes from
 `CD3DDevice_SetFogAndBlendMode(.., 8)`; its `oFog` blend converges on the same
 post-horizon-blend, saturating-doubled skyfog used by the modulate2x frame clear.
 Terrain and other world passes continue to consume the active ordinary fog block.
@@ -814,7 +930,7 @@ Terrain and other world passes continue to consume the active ordinary fog block
 **Godot background color bridge (2026-09-16 review).** Retail's selected
 packed frame-clear color goes directly to the device clear, while the dome
 fog uses the same final skyfog bytes. `[orig: Render_ProcessMainSceneFrame
-@ 0x5ca776..0x5ca7bf; CGfxTextOverlay_Draw @ 0x677100 (IDB misnomer: calls device Clear); sub_579CB0 @ 0x579cb0]`
+@ 0x5ca776..0x5ca7bf; CGfxTextOverlay_Draw @ 0x677100 (IDB misnomer: calls device Clear); SkyDome_RenderWithSkyfog @ 0x579cb0]`
 Our D-RMAT-7 gamma-domain scene shaders preserve those values, but Godot
 4.6.1's BG_COLOR path calls `srgb_to_linear` on `background_color`
 ([Forward+ implementation](https://github.com/godotengine/godot/blob/4.6.1-stable/servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.cpp)).
@@ -833,53 +949,99 @@ underwater property conversion. No IDB edits were made.
 
 ## Celestial bodies (`EffectWorld_LoadCelestialModels @ 0x5adc50`) — placement re-witnessed 2026-07-06
 
-**The live renderers** (celestial-leg grill; three functions were misnamed, three dead):
+**The live renderers** (celestial-leg grill; three misnamed; four dead, the star
+renderer among them):
 
 - `render_celestial_bodies @ 0x5acaa0` (was "render_skybox_fog_layers"; called from
   `render_skybox @ 0x5798e0/0x579c7a`): sun and moon place at **camera + direction ×
   64.0** — full camera height, identity rotation, submit flag 0x100. Sun alpha =
-  `clamp((1 − Env_OvercastBlend) × (0x640000 − Env_SunDimPctCurrent + 1)/100)`
+  `clamp((1 − Env_OvercastBlend) × (0x640000 − Env_SunDimPctCurrent)/100)` with a
+  signed division (the `+1` the earlier text showed is only the signed-division
+  rounding fix-up, `@ 0x5acb96..0x5acbfa`; `celestial_sun_alpha_fixed` is right)
   (`@ 0x5acbc1..0x5acbfa`; the SunDim channel is one of the #27 spring family, default
   0, no `.env` parser writes it). Moon alpha = `clamp01((fogDistInt − 400)/600) ×
   (1 − overcast)` without the fog shader (`× fogDistInt × 0.0002` with)
   (`@ 0x5acc40..0x5acccd`). The bloom-pass redraw `render_celestial_bodies(1)
   @ 0x582a77` is the fog-shader call (`CD3DDevice_SetFogAndBlendMode(&dword_3262260,
-  2) @ 0x5acb80`), so the typed Q3 disc opacity takes that leg for the moon
-  (`celestial_moon_q3_opacity`, published as `u_q3_opacity`; the sun has no
-  fog-shader variant and publishes its body alpha) and the Q3 blend follows the
-  authored material (the sun/moon `FF_ST_AD_LUM` discs add). There is NO `dir.y` visibility gate and NO
-  `sky_height/175.69` distance scaling — the world overdraws the bodies (draw order:
-  dome → bodies → world), which depth-tested no-write materials reproduce in the reimpl.
+  2) @ 0x5acb80`), so the bloom pass evaluates the discs' RgbGen at the fog-shader leg's
+  UPL_INTENSITY (the Q3 push carries the NormalCopy emissive
+  `sat(SelfLumColor × gain) × 2` under the material's fog policy) and the Q3 blend follows
+  the authored material (the sun/moon `FF_ST_AD_LUM` discs add). There is NO `dir.y`
+  visibility gate and NO `sky_height/175.69` distance scaling — the world overdraws the
+  bodies (draw order: dome gradient → bodies → dome clouds → world). The dome writes no
+  depth, so the bodies test only against the cleared depth; the reimpl pins both to the
+  far plane and lets every world surface win.
+
+  **The alphas reach the discs through the model's CTRL register, not a tint
+  (2026-09-24).** `g_CtrlGlobal_UplIntensity @ 0x83fde8` is the global CTRL register ordinal
+  32, UPL_INTENSITY (`dword_83FCE8 + 32*8`). The submit writes it; the batch FLUSH reads
+  it: `CRenderBatchQueue_FlushBatches` → `apply_shader_parameters @ 0x58ddfb` →
+  `RgbGen_EvaluateColor @ 0x5b2453` evaluates the material's RGB generator (style 113 on
+  register 0) at that value. The stock models are FF_ST_AD_LUM with CTRL 0 named
+  UPL_INTENSITY: Msun 0 → FFFFFF, FMoon4 0 → 828282, Mglare material 1 0 →
+  (255, 200, 108), material 2 (45, 45, 45) → (128, 252, 255). `_FFP.fx` SELFLUM: emissive =
+  SelfLumColor × ColorSrcGlobalGain, MODULATE2X, ONE/ONE, FOGMODE_NORMALADD (fogs toward
+  black). The sun and moon submit back to back and flush once (`@ 0x5acbfa` sun alpha,
+  `@ 0x5acc1c` sun submit, `@ 0x5accc1` moon alpha, `@ 0x5accdd` moon submit, flush
+  `@ 0x5acce9`), but each disc still evaluates its OWN alpha: the submit snapshots the
+  registers its strip's material lists into the batch entry
+  (`collect_render_objects_for_batch @ 0x5d91c0..0x5d91de`, entry +0x2C) and the flush
+  writes them back before that batch's RgbGen (`CRenderBatchQueue_FlushBatches
+  @ 0x5da1d6..0x5da1fd`). The glow flushes alone (`@ 0x5ad118`) and is not submitted at
+  alpha <= 0 (`@ 0x5ad0ae`); the glint draws when its brightness is nonzero
+  (`@ 0x5ad35c..0x5ad36b`, submit `@ 0x5ad470`). Submit flags 0x110 vs 0x100 differ only
+  by ZFUNC ALWAYS; they never override the material blend. Reimpl (2026-09-24, "Draw the
+  celestial bodies through their authored SELFLUM material", "Rebind the celestial sky
+  hook after a model scene rebuild", "Keep each celestial disc's own alpha through the
+  shared flush"): Celestial no longer overrides the body materials; the authored
+  ObjectModel materials draw through the `vertex_standard.gdshaderinc` sky hook (camera
+  re-anchor per pass, far pin, per-pass gates), Celestial writes UPL_INTENSITY per body
+  (`celestial_frame.h` `build_celestial_discs_frame` / `build_glare_frame`, the sun and
+  the moon each with its own value), and the glare and glint bodies go to the
+  post-particle overlay stage through `Celestial.get_overlay_bodies()`. The former
+  `celestial.gdshader` / `celestial_additive.gdshader` are deleted; render diagnostics
+  report `sky_hooked_surfaces`. At the 03tr-sun-sky fixture (revx02, 06:30) the saturated
+  sun area reads 1747 samples against retail's 1823 with the centroid on retail's
+  (542, 381); the first port had the sun take the moon's alpha.
 - `render_skybox_sun_glow @ 0x5acd00` (live: `render_main_scene @ 0x5c1904` +
-  `Terrain_RenderSceneWithReflection @ 0x5c9714`): the glare pass — see the env #14
+  `Terrain_RenderWorldScene @ 0x5c9714`): the glare pass — see the env #14
   closure below.
-- `render_star_field @ 0x5ad9c0` (was "render_foliage_billboards_0"): 256 star
-  instances (`Star_Instances @ 0x27E2E38`, 40-byte entries: camera-relative offset,
-  billboard param, twinkle add/mask, brightness accumulator, direction). Per star:
-  hidden when `dot(star_dir, light_dir) > ~0.98` (masked near the bright body),
-  position = camera + offset, twinkle = `(accum + add + (prng16 & mask)) >> 1` with
-  the rol4/rol11 PRNG (`Star_TwinklePrng @ 0x840B38` — the PRNG_Next16 algorithm on a
-  separate state). A second part renders `Celestial_UplModel`. **The instance-table
-  GENERATOR was found at REN-6 (2026-07-06)**: `Star_GenerateInstanceTable
-  @ 0x5ac850` (ex kong misnomer `init_weather_particles`; its loop pointer starts
-  at table+16 and strides 40 to `Celestial_SunModel @ 0x27e5648` — why no xref to
-  the table base existed). Sole caller `EffectWorld_LoadCelestialModels
-  @ 0x5add40` — the table regenerates per celestial load. Per star, all draws from
-  `Star_TwinklePrng` (low-16 of `state = rol4(state + rol11(state, 11), 4) ^ 1`;
-  a standalone step function exists dead at `Star_TwinklePrngNext_unused
-  @ 0x5ac010` — the live sites inline it): entry dwords `[0]` offX = `(r −
-  0x8000) << 9`, `[1]` offY same, `[2]` offZ = `((r + 0x20000) << 6) − ((|offX| +
-  |offY|) >> 3)` (the dome shaping — high overhead, pulled down toward the rim),
-  `[3]` billboard param = `(r & 0x3FF) + 12288`, `[4]` twinkle add = `r & 0xFF`
-  (0 → 1, clamped to `255 − mask`), `[5]` twinkle mask = `31 >> (r & 3)` ∈
-  {31, 15, 7, 3}, `[6]` UNWRITTEN (BSS zero — the render loop's brightness
-  accumulator), `[7..9]` = `normalize(off >> 8)` 16.16 direction (the
-  near-light cull input). Like the water noise field, the table CONTENT depends
-  on the shared PRNG's call history at load (value-history quirk); a
-  deterministic reimpl builds from a documented seed state.
 - **Dead variants** (zero callers): `render_skybox_layers @ 0x5ac230` (the +64/+16
   fixed offsets + 0x2000 alpha the earlier notes described),
-  `render_sun_lens_flare`, `render_foliage_at_camera`.
+  `render_sun_lens_flare`, `render_foliage_at_camera`, and the star renderer:
+  - `Star_RenderField_unused @ 0x5ad9c0` (was "render_foliage_billboards_0") has NO caller:
+    no code xref, no E8/E9 rel32 call and no absolute `0x005AD9C0` pointer in any
+    segment. The only other reader of `Celestial_StarModel @ 0x27e563c` is the loader
+    (`EffectWorld_LoadCelestialModels @ 0x5adcd6/0x5add06`).
+    `Star_GenerateInstanceTable @ 0x5ac850` still runs per celestial load
+    (`@ 0x5add40`), but only the dead renderer reads `Star_Instances` (`@ 0x5ada86`),
+    and `Celestial_UplModel` is drawn only inside it (`@ 0x5adb92`). **Retail JO shows
+    no stars** (re-graded 2026-09-24, #33). The dead code, kept as a record: 256 star
+    instances (`Star_Instances @ 0x27E2E38`, 40-byte entries: camera-relative offset,
+    billboard param, twinkle add/mask, brightness accumulator, direction). Per star:
+    hidden when `dot(star_dir, light_dir) > ~0.98` (masked near the bright body),
+    position = camera + offset, twinkle = `(accum + add + (prng16 & mask)) >> 1` with
+    the rol4/rol11 PRNG (`Star_TwinklePrng @ 0x840B38` — the PRNG_Next16 algorithm on a
+    separate state). A second part renders `Celestial_UplModel`. **The instance-table
+    GENERATOR was found at REN-6 (2026-07-06)**: `Star_GenerateInstanceTable
+    @ 0x5ac850` (ex kong misnomer `init_weather_particles`; its loop pointer starts
+    at table+16 and strides 40 to `Celestial_SunModel @ 0x27e5648` — why no xref to
+    the table base existed). Sole caller `EffectWorld_LoadCelestialModels
+    @ 0x5add40` — the table regenerates per celestial load. Per star, all draws from
+    `Star_TwinklePrng` (low-16 of `state = rol4(state + rol11(state, 11), 4) ^ 1`;
+    a standalone step function exists dead at `Star_TwinklePrngNext_unused
+    @ 0x5ac010` — the live sites inline it): entry dwords `[0]` offX = `(r −
+    0x8000) << 9`, `[1]` offY same, `[2]` offZ = `((r + 0x20000) << 6) − ((|offX| +
+    |offY|) >> 3)` (the dome shaping — high overhead, pulled down toward the rim),
+    `[3]` billboard param = `(r & 0x3FF) + 12288`, `[4]` twinkle add = `r & 0xFF`
+    (0 → 1, clamped to `255 − mask`), `[5]` twinkle mask = `31 >> (r & 3)` ∈
+    {31, 15, 7, 3}, `[6]` UNWRITTEN (BSS zero — the render loop's brightness
+    accumulator), `[7..9]` = `normalize(off >> 8)` 16.16 direction (the
+    near-light cull input). Like the water noise field, the table CONTENT depends
+    on the shared PRNG's call history at load (value-history quirk). The reimpl's
+    port of the generator and renderer (`env::generate_star_instances` /
+    `star_twinkle_tick` / `star_visible_fixed`, `StarField`) was deleted 2026-09-24
+    ("Delete the star field: retail never draws stars").
 
 **env #14 closure — the glare occlusion** (`@ 0x5acd9e..0x5acf7f`): TWO jittered rays
 per frame feed an 8-bit SLIDING window (`Glare_OcclusionWindow >>= 1` per sample, bit
@@ -896,7 +1058,7 @@ the FBEFFECTS ≥ 3 quality gate quarters it (`FrameFX_QualityAtLeast3 @ 0x581f6
 frame-buffer-effects level, ex the "scope check" misread; `glow_intensity >>= 2
 @ 0x5ad033..0x5ad03c`) — the bloom pass re-adds the glare, so the
 highest-quality program dims the direct draw. The BLOOM-pass call is
-occlusion-INDEPENDENT: `FrameFX_RenderBloomPass @ 0x582a80` calls
+occlusion-INDEPENDENT: `FrameFX_RenderGlowSource @ 0x582a80` calls
 `render_skybox_sun_glow(0, 0)` — no occlusion test — and the no-occlusion
 brightness is `(fog_km + 1.0) × 0.5 × dot_factor`
 (`@ 0x5ad013..0x5ad027`; `flt_7C3280` = 1.0, `flt_7C3B94` = 0.5, fog_km =
@@ -908,15 +1070,34 @@ discs and the glow through the FAR-BAND viewport: `Render_SetViewportFarDepth
 `render_skybox_sun_glow(0, 0) @ 0x582a80`, and both draws end in the ordinary
 z-tested flush (`@ 0x5accee` / `@ 0x5ad118`) with the beauty depth-stencil
 still bound. The viewport remaps the primitives' depth into [0.98, 0.99997],
-so the disc and the glare survive only where the beauty depth is at or near
+and the beauty depth they test was written through the scene viewport
+`Render_SetViewport @ 0x58a720` (MinZ 0 `@ 0x58a72f`, MaxZ 0.99996948 `@ 0x58a739`;
+main frame `@ 0x5ca5fc`, re-set by `FrameFX_RenderGlowSource @ 0x582a45` before the band).
+A fragment at view depth w survives over beauty depth D iff
+MinZ + (MaxZ − MinZ) z(w) <= SceneMaxZ z(D), i.e.
+1/D <= (MinZ/f + (MaxZ − MinZ)/w) / SceneMaxZ, independent of the near plane: at a
+700 u fog a 60 u disc survives only over beauty depth past about 577 u. So the disc and
+the glare survive only where the beauty depth is at or near
 the far plane (cleared sky): EVERY nearer surface, terrain past 64 u included,
 occludes them in the bloom source (the earlier "terrain past 64 u does not
 occlude the disc" reading was wrong). Ported 2026-08-23, source replaced
 2026-08-29, far band ported 2026-08-29: `glare_q3_alpha_fixed` +
-`glare_q3_peak_opacity` + the typed Celestial `SunGlow` producer read of
-`u_q3_opacity`; the beauty-only shader keeps the far-plane disc pin while the
-focused draw remaps its clip depth into `kQ3FarBandMinZ..MaxZ`
-(`renderer/q3_frame.h`) and z-tests it against resolved beauty depth.
+`glare_q3_peak_opacity` + the Celestial `SunGlow` producer's bloom-pass SelfLumColor
+(`FrameFx.set_q3_celestial_self_lum`, since 2026-09-24; the former `u_q3_opacity` read is
+gone). The Q3 disc and glow blend follows the body material's registered
+classification, mapped like the object NormalCopy (_OP replace, _AB alpha, _AD add);
+the submit flags 0x100 / 0x110 (`@ 0x5ad0f5..0x5ad0fe`) differ only by ZFUNC ALWAYS and
+never override it. The Q3 colour is the NormalCopy emissive
+`sat(SelfLumColor × gain) × 2` (`renderer::q3_celestial_emissive`; 2026-09-24, "Saturate
+the celestial bloom emissive like the SELFLUM copy"; the first port's
+`SelfLum × min(gain, 1) × 2` left the glow's bloom source 16% short at the 06:30 gain of
+19/16). The beauty-only shader keeps the far-plane disc pin while the focused draw scales
+its own reverse-Z depth by (MaxZ − MinZ)/SceneMaxZ (`q3_far_band_reverse_z`,
+`engine/runtime/renderer/q3_frame.h`; exact for the beauty camera sharing the scene far
+plane) and z-tests it against resolved beauty depth. The earlier
+[1 − MaxZ, 1 − MinZ] remap treated the beauty depth as [0, 1] and let the disc through
+from about 427 u (fixed 2026-09-24, "Test the bloom far band against the scene viewport's
+MaxZ").
 Ported: `env::GlareOcclusionState`/
 `glare_ray_jitter`/`glare_occlusion_tick`/`glare_glow_alpha_fixed` +
 `celestial_sun/moon_alpha_fixed` + `kCelestialBodyDistance` (ctest landmark-pinned;
@@ -962,7 +1143,7 @@ swap at every consumer seam (render-lighting-re.md carries the closed note
 and the per-seam list).
 
 **The water-reflected sun glint** (`update_sun_glare @ 0x5ad130`, once per
-main scene render from `Terrain_RenderSceneWithReflection @ 0x5c96c0`) —
+main scene render from `Terrain_RenderWorldScene @ 0x5c96c0`) —
 witnessed and ported the same round: its own 4-bit window
 (`dword_27E2E2C`, one sample per frame, bit 8 = visible) and ±16 chase
 toward `popcount × 64` (`dword_27E2E28` — no dead-band, no fog scale). The
@@ -983,14 +1164,29 @@ camera height) is ported as `glare_coarse_start_lift` with the witnessed
 coarse-gate-then-jittered-fine cadence; the fine rays' entity leg keeps the
 documented sun-occlusion statics posture (render-lighting-re.md
 D-RLIT-2/D-RLIT-3). The veil rect draws on the PlayerViewEffects
-behind-parent stack (murk -> veil -> NVG), the reimpl home for the retail
-post-scene overlay quads.
+behind-parent stack (veil, then the NVG mask), the reimpl home for the retail
+post-scene screen quads. Since 2026-09-24 ("Draw the water glint and the sun glare at
+the end of the overlay tail") the glint and the glare are no longer 3D bodies in the
+transparent list: each view's post-particle overlay stage draws the glare model's SELFLUM
+surfaces (read from `Celestial.get_overlay_bodies()`: the model, its UPL_INTENSITY value
+and whether retail submits it) as tex.rgb × 2 × sat(SelfLumColor × light scale), ONE/ONE,
+fogged to black, ZFUNC ALWAYS (submit 0x110). The glint (only while the mission water
+height is nonzero, `@ 0x5c96b5`, drawn `@ 0x5c96c0`) runs under the frame's light scale
+(`Render_UnpackModulatorToLightScale @ 0x58db30`, byte / 64 per channel, read by
+`apply_shader_parameters @ 0x58e05d`); the glare comes last, after the murk, under the
+modulator forced to `0xFF404040` = 1.0 (`@ 0x5c96fd`, glare `@ 0x5c9714`). The murk moved
+out of `PlayerViewEffects` into the same stage (§Underwater full-frame murk composite).
 
 ### Original notes (pre-2026-07-06, kept for provenance)
 
 Lazy-loaded by name into handles: sun (`Celestial_SunModel @ 0x27e5648`), moon (`0x27e5644`),
-glare (`0x27e5640`), star (`0x27e563c`), plus hardcoded `upl.3di` (`0x27e5638`). Glare, star,
-and upl load under render mode `0x300000` (additive); sun/moon load plain.
+glare (`0x27e5640`), star (`0x27e563c`), plus hardcoded `upl.3di` (`0x27e5638`). Glare, star
+and upl load after `Model_SetNextLoadPassFlags(0x300000, 0)`, which sets the next model's pass-state OR word
+(+0x1FC) and AND mask (+0x200 = ~0) (`@ 0x5adcb5 / 0x5adcea / 0x5add16`; stored
+`@ 0x5b020c..0x5b021d`); 0x300000 is z-write off + ZFUNC ALWAYS in the pass-state decode
+(§Water surface), not a blend mode (corrected 2026-09-24; the earlier text read it as
+"additive"). Sun/moon load plain. The additive blend is the authored FF_ST_AD_LUM
+material's.
 `render_skybox_layers @ 0x5ac230` submits the glare/sun models at camera + offsets (+64/+16
 units, alpha `0x2000`, submit flag `0x110`); `render_skybox_sun_glow @ 0x5acd00` drives the
 glare with 8 jittered terrain raycasts feeding a ±16/frame brightness hysteresis
@@ -1002,11 +1198,25 @@ glare with 8 jittered terrain raycasts feeding a ±16/frame brightness hysteresi
 The pass was hiding as a SPLIT function: an 8-byte header (`sub esp, 68h` + a call to
 the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged and named
 `render_water_surface(is_underwater_view, is_reflection_subpass)`. Callers:
-`FrameFX_RenderBloomPass @ 0x582a5d` and the terrain pass wrapper `@ 0x610650`. Flow:
+`FrameFX_RenderGlowSource @ 0x582a5d` and the terrain pass wrapper `@ 0x610650`. Flow:
 
 - **Side gate**: bail when `Env_WaterHeightFixed == 0`, or when the camera is on the
   wrong side for the requested view (`is_underwater_view` ? camera must be below :
   above — the surface renders from either side with its own blend mode + texture set).
+  Both sides are strict: the above-water call skips on `jle` (`@ 0x5c330a`) and the
+  underwater call on `jge` (`@ 0x5c32fc`), so at cam.z == wh neither call draws
+  (`env::water_surface_sides`, 2026-09-24).
+- **The bloom pass's nightvision redraw (2026-09-24, "Port the water strip's texcoords,
+  depth and nightvision redraw").** `FrameFX_RenderGlowSource` calls
+  `render_water_surface(0, 1)` (`@ 0x582a59..0x582a5d`) unconditionally: no
+  `g_WaterActive` or Blink gate, only this function's own gates (water height nonzero,
+  camera strictly above water `@ 0x5c3304`, detail > 1). It regenerates the noise pair and
+  marches the above-water rows with nightvision = 1 (the flat 0.1 base `@ 0x5c2d5a`, the
+  specular RGB dropped `@ 0x5c2ef8`, mode-2 black fog, `Water_ShaderBlendNV`). It never
+  draws underwater, so a Q3 "underwater Replace" branch does not exist. Port: `Water`
+  owns a second strip (`WaterNightVisionStrip`, layer mask 0, the typed Q3
+  `WaterNightVision` source) marched with the NV row colours every frame the camera is
+  above water, independent of the beauty pass.
 - **Per-frame noise textures** (`Water_GenerateNoiseTextures @ 0x5c0360`, was misnamed
   `generate_terrain_noise_textures`): pass 1 animates the static 128×128 field through
   the sine LUT — per byte `lut[(uint8)(field + (counter << (field & 1)))]`, two speed
@@ -1083,16 +1293,28 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   hosted as the shader's `u_underwater_view` branch (`ALPHA = 1` under the
   premul pass = blend-off exactly), and the murk knob is the per-row angle
   chain (env #34).
-- **UV state** (`@ 0x5c3348..0x5c33db`): texture scale `= 0.99996948 · w/(w − 0.2)`
-  with `w` = the INTEGER part of the SMOOTHED fog distance (the word at
-  `Env_FogDistCurrent+2`); bias `= 0.2 · scale` (→ `flt_8412B0/B4`). UV offsets ride
-  the **layer-1 CLOUD-SCROLL accumulators** with a 32× camera term:
-  `u = (uint32)(acc_26C680C + 32·camX_eng)·2⁻²⁸`, `v = (uint32)(acc_26C6810 −
-  32·camY_eng)·2⁻²⁸` — in the render basis `u = cam_z/128 + acc·2⁻²⁸`,
-  `v = cam_x/128 + acc·2⁻²⁸`, both accumulator terms POSITIVE (unlike the sky
-  layers' negative-U). Ported: `env::water_uv_state`, `water_noise_color_pixels`,
-  `water_noise_normal_pixels`, `water_init_noise_tables` (ctest-pinned landmarks +
-  checksums).
+- **Texcoords and the depth curve (re-graded 2026-09-24).** The noise pair samples
+  texcoords 0/3 = the unprojected ABSOLUTE render-basis world x/32, z/32 of each strip
+  vertex (`render_water_strip_detailed @ 0x5c2aec..0x5c2b00`, `flt_7DBFAC` = 1/32; the t3
+  copy `@ 0x5c3095..0x5c30bf`). No texture transform applies to the XYZRHW strip.
+  `flt_8412B0/B4` (scale `0.99996948 · w/(w − 0.2)` with `w` = the INTEGER part of the
+  SMOOTHED fog distance, the `movsx` of `Env_FogDistCurrent+2` `@ 0x5c332d`; bias
+  `0.2 · scale`; stores `@ 0x5c3356` / `@ 0x5c3362`) feed ONLY the per-vertex depth chains
+  (detailed `@ 0x5c2c0e/0x5c2c8b/0x5c2cf7`; low tier `@ 0x5c2201/0x5c22a6/0x5c230a`). The
+  cloud-scroll "offsets" `Water_UvOffsetU_Unread/V` (`@ 0x5c33b9/@ 0x5c33db`) and
+  `flt_29169E8/EC` (`@ 0x5c3379/@ 0x5c3385`) are write-only (a `.text` byte scan finds only
+  those four stores). The earlier reading of this bullet (a "UV state" with the scale/bias
+  as texcoord terms and the cloud-scroll accumulators plus a 32× camera term as UV
+  offsets) is retracted, and so is the reimpl note that Godot world axes coincide
+  componentwise with the render basis: the render basis is the `util/axes.h` x/z swap of
+  the Godot world. The strip now marches in the render basis (`WaterCore` converts the
+  camera in and the positions out), so uv0 and the texm3x2 bases carry retail's
+  components; the old shader's (z, x) order was the right axis mapping, everything else
+  (scale, bias, camera and scroll offsets, /128) was wrong (2026-09-24, "Port the water
+  strip's texcoords, depth and nightvision redraw"). Ported: `water_noise_color_pixels`,
+  `water_noise_normal_pixels`, `water_init_noise_tables`, `water_depth_curve`
+  (`engine/formats/env/env_water_render.h`; ctest-pinned landmarks + checksums); the env
+  parity vectors' water_params key keeps only the water height.
 - **The strips** (both marched in projected screen space, rows advancing away from
   the camera; REN-6 full decode 2026-07-06 — the earlier "2..9 columns" reading was
   wrong: **2..9 is the adaptive ROW-march stride**, `steps = clamp(int(row_1/w ×
@@ -1125,9 +1347,11 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
     gray brightness ×0x10101 + alpha byte; specular = `Env_WaterColorLit` bytes ×
     brightness `>> 8`; distance alpha `255 − dist_scaled/(fogEnd>>16)` clamped;
     murk angle term (`− Env_WaterMurk`, the witnessed constant chain 0.8 / 0.2 /
-    0.15 / 19.2 / 96 / 128 / 255 / 300 / 400 / 0.25); per-vertex fog W clamped to
-    **[4e-5, 1 − 2⁻¹⁵ (0.99996948)]**; UV = `t × fogScale − fogBias`
-    (`flt_8412B0/B4` — the render_water_surface UV state).
+    0.15 / 19.2 / 96 / 128 / 255 / 300 / 400 / 0.25); per-vertex depth
+    `(t × scale − bias) × rhw` (`flt_8412B0/B4`, the depth curve above, read
+    `@ 0x5c2201/0x5c22a6/0x5c230a`) clamped to **[4e-5, 1 − 2⁻¹⁵ (0.99996948)]**
+    (`@ 0x5c2226` / `@ 0x5c2212`); the texcoords are the world x/32, z/32 of the bullet
+    above, not a depth-curve product.
   - `render_water_strip_detailed @ 0x5c27d0` (detail > 1; was MISNAMED
     `render_foliage_sprite_billboards`): 64-byte verts (FVF 0x1404C4 —
     XYZRHW + diffuse + specular + TEX4 sizes 2/3/3/2 `[@ 0x5c28e1]`; t1/t2 =
@@ -1140,15 +1364,23 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
     right-edge camera ray; brightness = `int(lerp(192k, 38.4k, sin))`
     `[flt_7DBFA4/A8]`, alpha_term = `int(lerp(0, 229.5·base, sin))`
     `[flt_7DBFA0 — a FLOAT, distinct from the low tier's dbl_7DBF70]`,
-    `a = clamp(int(t·2²⁴/fogEnd_fp), 0, 255)` `[dbl_7DBF98 = 2²⁴ on BOTH
-    paths]`, dist_alpha = `255 − a²/255`, diffuse =
+    `a = clamp(int(t·16711680/fogEnd_fp), 0, 255)` = 255·t/fogEnd
+    `[dbl_7DBF98 = 16711680.0 = 255 × 2¹⁶ on BOTH paths, fmul @ 0x5c2dfd / @ 0x5c2e4e;
+    the earlier "2²⁴" transcription corrected 2026-09-24]`, dist_alpha =
+    `255 − a²/255`, diffuse =
     `(alpha_term·dist_alpha/255) << 24 | 0x10101·brightness`; specular =
     `(dist_alpha << 24) | WaterColorLit RGB × int(lerp(255(1−base),
     128(1−base), sin)) >> 8` (nightvision drops the RGB `[@ 0x5c2ef8]`);
     per-vertex depth ("fog W") = `(t·uvScale − uvBias)·(1/t)` clamped to
-    **[8.0422355e-05 (0x38A8A8AC), 1 − 2⁻¹⁴ (0x3F7FFC00)]**
-    `[flt_7DBF7C/flt_7C4658 @ 0x5c2c1f..0x5c2c4a]` — the earlier
-    "[4e-5, 1 − 2⁻¹⁵]" reading was the low-tier approximation. Batches lock
+    **[4.0e-5 (0x3827C5AC), 0.99996948 (0x3F7FFE00 = 1 − 2⁻¹⁵)] in BOTH tiers**
+    (`flt_7DBF7C` read `@ 0x5c2c35`, `flt_7C4658` `@ 0x5c2c1f`; low tier `@ 0x5c2226` /
+    `@ 0x5c2212`). The upper bound is the scene viewport MaxZ, the same constant
+    `render_main_scene` clears depth to (`@ 0x5c15af`). The 2026-07-07 "correction" to
+    [8.0422355e-05 (0x38A8A8AC), 1 − 2⁻¹⁴ (0x3F7FFC00)] is retracted; the original
+    "[4e-5, 1 − 2⁻¹⁵]" reading was right (re-read 2026-09-24, "Correct the water strip
+    constants and the noise sine LUT"). The texm3x2 row base uses
+    `vbase = 1 − min(300·rhw + 0.15, 2)/256` (`flt_7DBF68` = `0x43960000` = 300.0, fmul
+    `@ 0x5c2f04`); the port had 297. Batches lock
     `8·rows − 10` VERTICES and draw `8·rows − 12` primitives
     (`DrawPrimitive @ 0x5c3209` passes count − 2; the earlier "8·rows − 10
     primitives" was the vertex count).
@@ -1189,8 +1421,9 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
     @ 0x58abe0` (ex `sub_58ABE0`; near pinned 0.2 `@ 0x58ac0a`, the
     0.99996948 = 1 − 2⁻¹⁵ viewport-depth slot written `@ 0x58ac32`), and
     missions pass **far = 0x400 = 1024** — the dome-rim radius —
-    `[orig: Game_StartMission @ 0x524721]`. Same-family curves (far `w` vs
-    1024, sub-1e-4 apart) + ZWRITE ON + LESSEQUAL give retail its
+    `[orig: Game_StartMission @ 0x524721]`; the scene frame then re-sets far to the
+    fog word + 1 every frame (see the 2026-09-24 depth port below). Same-family curves
+    (far `w` vs `w + 1`, sub-1e-4 apart) + ZWRITE ON + LESSEQUAL give retail its
     deterministic shoreline on the 16/24-bit z-buffer. The pass-state word
     (decoded at this grill, full map in
     [render/render-material-re.md](../render/render-material-re.md)):
@@ -1210,6 +1443,21 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
     fogs by `CUSTOM1.a` (the spec-alpha
     factor) toward the scene fog color, and drops the misported ref-32
     discard (see the material-set bullet re-grade above).
+    **2026-09-24 depth port ("Map the water depth through the retail scene curve, not
+    the camera's"):** the `3×10⁻⁴` pull is retired. The beauty water writes the view
+    depth whose RETAIL scene-curve depth equals the strip's replica z: the scene curve
+    is near 0.2 (`flt_7C3340`, stored to `g_ProjectionNearZ` by
+    `Render_SetProjectionDepthRange @ 0x58ac04..0x58ac0a`; the replica's own 0.2 is the
+    same `flt_7C3340`, `@ 0x5c333e`) and far = w + 1 (the same fog word + 1,
+    `Render_ProcessMainSceneFrame @ 0x5ca4ba..0x5ca4d0`), the replica's far is w. That
+    view depth then takes the drawing Godot camera's own clip depth, so a camera with
+    Godot's default near 0.05 cannot pull the water forward. The water therefore sits
+    slightly behind its true depth (geometry on the plane wins the tie, as in retail),
+    and rows past t = w clamp to the far plane (never far-clipped), so fogged water
+    reaches the horizon. The Q3 copy maps the same way plus the copies' `3×10⁻⁴` pull.
+    The mechanism behind the far band (XYZRHW strip, clamp to the viewport MaxZ,
+    LESSEQUAL against the clear depth 1 − 2⁻¹⁵) is witnessed; whether that band shows
+    water or dome depends on the dome's depth, which writes none (§Sky dome).
 - **The water-active predicate (witnessed 2026-08-26, the World-tick perf
   pass).** `g_WaterActive @ 0x31BC918` is recomputed EVERY frame by
   `terrain_setup_view_and_lighting @ 0x60fe40`: `terrain_render_visible_sectors
@@ -1224,32 +1472,47 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   (`@ 0x60ff12..0x60ff1a`, i.e. the lowest visible terrain sits at or below the
   water) OR the previous frame's `g_BlinkWaterVisible @ 0x29ACE40`
   (`dword_31BC910`, `@ 0x60ff31`). Only under that flag do the reflection
-  prerender, the noise regeneration and the strip march run (`Render_TerrainScene
-  @ 0x610cd9..0x610ce0`; `Terrain_RenderWaterPass @ 0x610640`). Reimpl:
+  prerender and the beauty pass's noise regeneration and strip march run
+  (`Render_TerrainScene @ 0x610cd9..0x610ce0`; `Terrain_RenderWaterPass @ 0x610640`);
+  the bloom pass's nightvision redraw is not gated on it (see above). Reimpl:
   `TerrainFrameCompiler` tracks the same bounds (`track_visible_bounds`,
   `TerrainDrawList::visible_bounds`), the terrain leg now precedes the water leg
-  in the `GameWorld` leg table, and `Water::is_water_pass_active()` gates the strip,
-  the noise pair and the mirror SubViewport; a world with no tracked bounds
+  in the `GameWorld` leg table, and `Water::is_water_pass_active()` gates the beauty
+  strip and the mirror SubViewport (the noise pair regenerates whenever either strip
+  marches, the nightvision strip included); a world with no tracked bounds
   (no terrain in view) keeps the pass live.
 - **Reflection pipeline (#30 internals witnessed at REN-6, 2026-07-06).** The
   reflection prerender runs BEFORE the main frame (`Render_TerrainScene @ 0x610c80`
   → `Water_ReflectionPrerender @ 0x5c2780`, ex `sub_5C2780`, gated on
   `g_WaterActive`): it packs the LIVE camera block {x, y, z, yaw, pitch, roll} and
   calls **`render_main_scene @ 0x5c1240` — the reusable offscreen scene renderer**
-  (also `render_cinematic_multiview`). Its frame: far-plane scale (`sub_58A920`)
+  (also `render_cinematic_multiview`). Its frame: far-plane scale (`Render_GetTargetAspectRatio`)
   → projection → the PolyTrn render context (viewMatrix copy + camera dirs ÷65536 +
   a plane block: when water is active, `plane[4] = waterHeight_float − 0.1` with
-  enable flag — the below-plane clip bias) → clear color ← **`Env_SkyfogBlock`** +
-  clear depth `1 − 2⁻¹⁵` → **`GTexRT_SelectThunk(&Water_ReflectionTexture)` = RTT
+  enable flag, armed while wh != 0 (`@ 0x5c1561..0x5c1578`): the terrain's CLIP
+  plane, see "Mirror CLIP" below; the below-water word ctx+0x74 is 0 (`@ 0x5c153d`), so
+  the reflected pass never swaps the terrain's stage 3 to the water noise) → clear
+  color ← **`Env_SkyfogBlock`** (`@ 0x5c1597`, passed as the clear colour
+  `@ 0x5c15aa` and to the RTT select `@ 0x5c15d3`; under the indoors blink bit 0x2 the
+  PolyTrn render is skipped (`@ 0x5c1342..0x5c1353`, `@ 0x5c14a7..0x5c14ab` →
+  `@ 0x5c15a2`) and the clear colour is the zeroed `esi` (`@ 0x5c1474`): black) +
+  clear depth `1 − 2⁻¹⁵` (`flt_7C4658`, `@ 0x5c15af`) →
+  **`GTexRT_SelectThunk(&Water_ReflectionTexture)` = RTT
   begin** → BeginScene/viewport/proj → scar ctx → `Environment_ApplyFogAndAmbient`
-  (`@ 0x5c164c`) → fog color/mode → the sky dome (`sub_579CB0`) → the lo-res
+  (`@ 0x5c164c`) → fog color/mode → the sky dome (`SkyDome_RenderWithSkyfog`) → the lo-res
   terrain leg (`Terrain_RenderSectorBatchLit`) → projection rebuilds + `sub_5C90A0` +
-  **`Water_RenderReflectedWorldScene @ 0x5c8510`** → an inline effect quad (the
-  `Water_ShaderAdditiveFlat` consumer `@ 0x5c1913`) → **celestial bodies + sun glow
-  mirrored into the reflection** (`@ 0x5c18fb/0x5c1904`) → restore +
-  `GTexRT_RestoreThunk` = RTT end. `Water_RenderReflectedWorldScene` (the ex
-  "Water_RenderReflectedWorldScene three flushes" DECOMPILE-FAIL — a 5-byte header `call sub_58AA80`
-  falling through into the body, real extent → retn `@ 0x5c8af8`): fog/ambient
+  **`Water_RenderReflectedWorldScene @ 0x5c8510`** → at water detail ≥ 2 the mirror
+  dim (`@ 0x5c1727` gate, quad `@ 0x5c186c..0x5c189e`, #37) → at FrameFX quality ≥ 3
+  (`FrameFX_QualityAtLeast3` test `@ 0x5c18c6`) the far depth band
+  (`Render_SetViewportFarDepth` called `@ 0x5c18f4`) around **`render_celestial_bodies(0)`
+  `@ 0x5c18fb` and `render_skybox_sun_glow(0, 0)` `@ 0x5c1904`**, redrawn over the
+  dimmed target → the second inline quad (the `Water_ShaderAdditiveFlat` consumer,
+  pass 0x700000, colour 0xFF000000, `@ 0x5c190c..0x5c1990`; it adds black) → restore +
+  `GTexRT_RestoreThunk` = RTT end (the earlier listing put that quad before the bodies;
+  its addresses follow them). `Water_RenderReflectedWorldScene` (the ex
+  "Water_RenderReflectedWorldScene three flushes" DECOMPILE-FAIL — a 5-byte header `call Render_ResetFixedFunctionState`
+  falling through into the body; real extent `0x5c8510..0x5c860b`, ending in a tail
+  `jmp sub_67CAA0`, corrected 2026-09-24 from "retn `@ 0x5c8af8`"): fog/ambient
   push (0,0) → `CTerrainRenderer_BuildLightingShaderConstants(0)` (NORMAL
   lighting — the arg-1 mirrored-lighting sub-passes belong to the MAIN pass's
   per-wave mirror, not this scene) → zeroes `g_WaterMirrorMatrix` and builds it as
@@ -1266,27 +1529,74 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   first, identically filtered entity wave at
   `0x5c857b` → flush(1) →
   below-side entities → above-side entities → flush(0) → (detail ≥ 2: foliage
-  tile/LOD updates → flush(0)) → particle passes ×2 → trail strips. The camera
-  MIRRORING about the plane is built inside `render_main_scene`'s mid-function
-  view-matrix section (Hex-Rays elides it; the exact transform is pinned at port
-  time). RTT allocation is actually `Water_CreateReflectionRenderTarget @ 0x5c08d1..0x5c0937`:
+  tile/LOD updates → flush(0)) → particle passes ×2 → trail strips → the coronas
+  (`EffectWorld_RenderLightCoronas(1) @ 0x5c85fd`). **The camera block (witnessed
+  2026-09-24):** `render_main_scene` mirrors it ONLY while cam.z >= wh (`cmp`/`jl`
+  `@ 0x5c1361..0x5c1370`; mirror `@ 0x5c1376..0x5c139c`: z' = 2wh − z
+  `@ 0x5c1379..0x5c137b`, pitch and roll negated `@ 0x5c138e/@ 0x5c1390`, yaw kept);
+  below the plane it copies the block unchanged (`@ 0x5c13f6..0x5c1414`), and the
+  underwater strip rows then sample that RTT with V flipped (`@ 0x5c306f..0x5c3085`).
+  **The reflected pass's fog:** `Environment_ApplyFogAndAmbient(0, 0)`
+  (`render_main_scene @ 0x5c1648..0x5c164c`; `Water_RenderReflectedWorldScene
+  @ 0x5c8515..0x5c8519`): `Env_FogBlock` under the dry range and type, never the thermal
+  grey or the underwater lit water; the sky pass sets skyfog and restores `Env_FogBlock`
+  before the terrain (`SkyDome_RenderWithSkyfog @ 0x579ce7..0x579cf6`; the fog colour set
+  `@ 0x5c1654..0x5c165a` is superseded by that wrapper). Reimpl (2026-09-24, "Port the
+  water mirror's below-water eye, dry fog and clip planes"):
+  `env::build_water_mirror_view` keeps the live eye below the plane,
+  `EnvironmentState::build_water_mirror_fog` is published as
+  `opennova_water_mirror_fog_color` / `opennova_water_mirror_fog_range`, and the shaders
+  recognise the mirror pass as the one non-shadow camera whose mask omits the water
+  layer (`godot/src/render/visual_layers.h`; the former `opennova_water_reflection_eye` /
+  `_clip_active` globals are gone). RTT allocation is actually
+  `Water_CreateReflectionRenderTarget @ 0x5c08d1..0x5c0937`:
   **256×256** for detail 2, **512×512** when `Water_DetailLevel >= 3` or the
-  capture/special flag is set. `render_main_scene @ 0x5c1464..0x5c1614`
-  applies `size−1` square viewport bounds and rebuilds projection from that
-  square while preserving horizontal FOV. `sub_5D6150` only initializes
+  capture/special flag is set. The square target renders with the MAIN view's
+  projection: `render_main_scene` hands the main target's h/w as the projection's
+  vertical scale (`Render_GetTargetAspectRatio` returns `flt_8409EC` `@ 0x5c1255`, fed to its
+  `Render_SetViewAndProjectionMatrices` call `@ 0x5c163e`), so the 512 × 512 texels cover
+  exactly the main field with non-square texels, 512 rows across the vertical field.
+  (Re-graded 2026-09-24: the earlier "square projection with preserved horizontal FOV"
+  reading and the (1, h/w) UV rescale built on it, both the 2026-07-07 FIXED note and the
+  2026-07-15 view-registration correction, are retracted.) `RenderSlot_InitSystem` only initializes
   reflection direction/state; it never allocates `Water_ReflectionTexture`.
   The selector is `if (dword_B4C3C0 || (dword_28EE8DC = 256, Water_DetailLevel >= 3))
   dword_28EE8DC = 512;` at `0x5c08eb..0x5c08ed` (`Water_DetailLevel @ 0x24d2050`),
-  then `sub_6800D0(obj, size, size, 1, 1)`. The SHIPPED max-quality path runs
+  then `GTexRT_Construct(obj, size, size, 1, 1)`. The SHIPPED max-quality path runs
   detail 3: `Game_StartMission @ 0x524662..0x524668` copies the adapter caps
   via `sub_5899E0(0)` / `sub_676850`, and with caps 0xFDF the `@ 0x5C19DA`
   downgrade to detail 1 never fires (jo-c candidate 266 live 00TRA witness: a
   populated 512×512 target). PORTED 2026-09-14: `env::kReflectionRttSize` is
   512 (`engine/runtime/environment/water_mirror.h`), the locked max-quality path.
-  The Godot adapter therefore keeps the witnessed texm3x2 row dots intact, then
-  maps their main-viewport-normalized result into the square camera projection
-  around UV center with scale (1, source height/source width). Omitting that
-  sim/present-boundary conversion makes the reflected image swim with view pitch.
+  Since 2026-09-24 ("Render the water mirror over the main view's field at 512 rows")
+  the mirror keeps the source projection over a round(512 × aspect) × 512 target
+  (`env::reflection_rtt_size`), so the strip rows' witnessed texm3x2 lookup
+  (screen U, 1 − screen V) addresses it directly with no rescale. Device limitation: a
+  Godot camera renders square pixels only, so the target has round(512 × aspect)
+  columns where retail has 512.
+
+  **Mirror CLIP (2026-09-24, "Port the water mirror's below-water eye, dry fog and clip
+  planes", "Arm the water mirror's CLIP technique per draw, as retail does").** Retail
+  clips the reflected scene per pixel, on both camera sides, through the 4×4 `GSysClip`
+  texture (`Render_CreateSystemTextures @ 0x58acc0..0x58acf6`: alpha 0 in columns 0-1,
+  255 in 2-3; flags 0x140003 clamp + point + 1 mip) under AlphaRef 0x80. Objects:
+  `g_WaterMirrorMatrix` row 3 = 0.5 − wh (`Water_RenderReflectedWorldScene
+  @ 0x5c8540..0x5c856a`), keep y >= wh. Terrain: plane = wh − 0.1 (`render_main_scene
+  @ 0x5c1561..0x5c1578`, armed while wh != 0), texgen u = y + 0.45 − plane
+  (`render_terrain_sector_batch @ 0x6092c6..0x60935b`, `flt_7C6FAC` = `0x3EE66666`), keep
+  y >= wh − 0.05. The CLIP technique is armed per DRAW inside the reflected pass:
+  `Terrain_RenderSectorModels @ 0x5c5e57..0x5c5e75` arms a building whose Position.Z +
+  graphicModel(+0xB0)->(+0x28) (the CMDL header bbox z-lo) lies below wh − 0x4000
+  (wh − 0.25); `Terrain_RenderSectorEntities @ 0x5c7c1a..0x5c7c2e` arms an entity whose
+  Position.Z − boundRadius (entity+0) lies below wh; the BySide waves (persons) never
+  arm, nor do the sky bracket's celestial draws. An unarmed draw keeps NORMAL in the
+  mirror (full SELFLUM/detail/fog, no clip). Port: the shaders discard in the mirror
+  pass; `env::water_mirror_clip_armed`; `ObjectModel` re-tests on move / plane change and
+  stamps `u_entity_light.w` bit 2 (bit 1 = the BySide wave); static rows carry the test
+  as an origin offset in their lane's w (`env::water_mirror_clip_origin_offset`);
+  `world::model_bound_floor_q16` is the CMDL header z-lo. The earlier "no oblique clip
+  plane, the reimpl does not clip" and "wh − 0.1 tracked approximation" statements
+  (#30) are retracted.
 - **Water height precedence** (witnessed): the `.env` parse writes
   `Env_WaterHeightFixed` first (`Game_LoadTerrainDuringConnect @ 0x52073b`), then
   `Terrain_Init @ 0x60fcb1..0x60fcba` OVERRIDES it — but only when the terrain value
@@ -1346,7 +1656,7 @@ In a network session the server-synced time + TOD rate replace the local start T
     terrain surface is the faithful behavior. (The pre-grill claim that the bake
     reaches the textures was wrong.)
   - `PolyTrn_RenderTile @ 0x60df0d` (every frame via `PolyTrn_RenderFrame @ 0x60eac0` ←
-    `render_main_scene` → `render_water_quad @ 0x604700`): **LIVE** — half tint is the
+    `render_main_scene` → `PolyTrn_DrawTileOverlayQuad @ 0x604700`): **LIVE** — half tint is the
     DIFFUSE on all four vertices of the `.til` tile-overlay quad (tri-strip FVF
     `0x2C4`, SPECULAR `0xFF000000`, composited into the 128-slot tile texture RT with
     `COLORWRITEENABLE=RGB`); combine pass `0x631` runs stage0 TEXTURE × DIFFUSE with
@@ -1393,24 +1703,24 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 17 | Iris auto-exposure (modulator gain) | **FIXED 2026-07-06 (REN-5 — the modulator chain went LIVE); full sixteen-block set completed 2026-07-21.** `env::ModulatorChain` ticks modulator-2 → modulator → all fourteen color blocks in witnessed same-tick order `[orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f03c]`; the modulator chases the iris target over 62 ticks (`WeatherColorBlock::set_step_deltas` `[orig: ColorBlock_SetStepDeltas @ 0x57d940]`), and the ÷64 render scales reach consumers. Skyfog, ceiling/cloud/floor, and the six sky/cloud dome ramps join fill/sun/fog/sky; fog/skyfog operate undoubled through the block pass, then horizon-blend and double at the render tail `[orig: @ 0x57f037..0x57f1b1]`. The static cloud current feeds the flat dome and pre-modulated ceiling/floor feed indoor iris samples. D-RLIT-2 retains only its bounded geometry residuals; see [render/render-lighting-re.md](../render/render-lighting-re.md). |
 | 18 | Earthquake / rain / wind oscillator rings | **FIXED 2026-08-30**: the quake jitter over pools 0/1 with the per-entity PRNG re-roll and the camera-shake arm (`WeatherState::apply_quake_jitter`, `PlayerViewState::shake` sampled into the FP view), the rain/snow drop pool end to end (§Precipitation), the `wind` named value writable into `Env_WindScale`; the WAC weather handlers all land through `EntityCommands` |
 | 19 | `terrain_rgb` terrain-stack consumers | **FIXED; corrected by foliage re-grill 2026-07-13.** The observable renderer consumer is the `.til` tile overlay (`EnvFile.tile_overlay_tint_factor` → `u_tile_overlay_tint`, MODULATE2X over HALF, 254/255 at default `[orig: PolyTrn_RenderTile @ 0x60df0d]`); the reciprocal remains live in `EffectWorld_TickInstancesAndLightScale @ 0x5aa170`. The texture bake is dead. `sample_terrain_colormap_tinted @ 0x606030` executes inside the detail generator, but its result is overwritten by the source-height bend byte before vertex emission, so foliage terrain tint is not observable and the removed reimpl `terrain_tint` property was an invented consumer. Untinted terrain remains faithful. |
-| 20 | Sky dome combine | **FIXED by C7; upload-scale corrected 2026-07-14; reverse-Z facet closed 2026-07-15; skyfog seam corrected 2026-07-21**: `sky.gdshader` + the sky presenter (now `godot/src/env/sky_dome.cpp`) structurally port the recovered two-pass gradient/cloud chains, builder dome, per-pass anchor, textureless flat path, and reverse-Z conversion. Six packed sky/cloud constants upload at **2/255** and saturate at the vs.1.1 outputs. Dome VS fog now consumes the final post-horizon-blend doubled skyfog selected by `sub_579CB0`, matching the frame clear; world passes retain ordinary fog. |
-| 21 | skyfog frame clear color | **FIXED 2026-07-05**: the horizon blend is ported engine/formats/env-first (`horizon_blend_skyfog`, byte-exact vs the MMX sequence, ctest-pinned + parity-vector cell) and consumed - `MissionEnvironment.get_frame_clear_color()` drives the GameWorld `ClearColor` WorldEnvironment (above-water skyfog blend / underwater lit-water, the witnessed choice); the alternate-fog view (= the thermal-scope byte, modeled 2026-09-10 through `EnvironmentState::set_thermal_view` → grey 0x808080 clear + fog, the 0.5 world block and the terrain ramps) and the dome-fog application ride their subsystems. **REN-7 close-note (2026-07-07)**: the consumer was WRITTEN but never RENDERED — the `ClearColor` Environment shipped `background_mode = BG_SKY` (Wave-1) with no Sky resource, which Godot draws as BLACK while ignoring `background_color`; every runtime view carried a pure-black dome-rim seam row (aerial views a black band; #29's grazing fade exposed it in water-horizon views — D-TERRAIN-3's substance). Fixed to `BG_COLOR` + `AMBIENT_SOURCE_DISABLED` (Godot ambient must never inject into the witnessed lighting model), GUT-pinned in `game_world_test`. Rendering the clear exposed a SECOND facet — the 2026-07-05 port's "undoubled = the non-modulate2x device path" reasoning was INVERTED for this reimpl: since D-RMAT-7 the reimpl reproduces the **MODULATE2X** device's framebuffer bytes (the ×2 combine + doubled fog table, calibrate-proved), and on that path the Clear consumes the post-blend DOUBLED skyfog VERBATIM (the halving `(c>>1)&0x7F7F7F7F` `[orig: @ 0x67715d]` is the non-modulate2x fallback, no reimpl analog); the undoubled clear rendered the below-rim band at exactly half the fogged dome rim ((77,91,138) vs (151,179,251) measured at noon). `get_frame_clear_color()` now doubles-with-saturation after the blend (the witnessed order: blend `@ 0x57f037..0x57f0a1` THEN double `@ 0x57f1b1`); the underwater branch was already render-space (`Env_WaterColorLit` = the ×2-gain `>>7` form); and the blend's distance input corrected from the load-time parsed field to the smoothed current (`get_fog_level()` ladder — the witness reads `Env_FogDistCurrent @ 0x26c681c`; #27's "every consumer" claim now actually holds for the clear). Env vectors re-dumped (the frame-clear token only; the input correction moves no corpus row — the bare-env grid never drives the smoothed scalars). The witness gap closed with it: the below-rim region is **clear-only in retail** — no skirt/ring geometry exists anywhere in the frame walk; the sky-pass terrain leg (`Terrain_RenderSkyboxPass @ 0x610ac0` → `Terrain_RenderSectorBatchLit @ 0x60c670`, ex `sub_60C670`) is the plain fogged sector batch bracketed by `D3DRS_AMBIENT=0xFFFFFF`/`LIGHTING=1`, and the seam invisibility mechanism is convergence-in-the-same-block (the dome pass fogs toward the DOUBLED SKYFOG while drawing the dome `[orig: sub_579CB0]` — the same value the clear paints; terrain/water fog out at the 1024 fog reference = the dome rim radius) 2026-09-16 review: the Godot BG_COLOR sRGB decode is compensated at the device property write; windowed dome/background pixel regression and both 00TRa/00TRg captures pass (Sky dome section). |
+| 20 | Sky dome combine | **FIXED by C7; upload-scale corrected 2026-07-14; reverse-Z facet closed 2026-07-15; skyfog seam corrected 2026-07-21**: `sky.gdshader` + the sky presenter (now `godot/src/env/sky_dome.cpp`) structurally port the recovered two-pass gradient/cloud chains, builder dome, per-pass anchor, textureless flat path, and reverse-Z conversion. Six packed sky/cloud constants upload at **2/255** and saturate at the vs.1.1 outputs. Dome VS fog now consumes the final post-horizon-blend doubled skyfog selected by `SkyDome_RenderWithSkyfog`, matching the frame clear; world passes retain ordinary fog. **2026-09-24 (R9-2, R9-3, rendering parity pass):** the dome drew with depth write and test on, hiding distant terrain and aircraft at altitude; it now writes no depth and is far-pinned (pass flags 0x300000 `@ 0x579883/0x579ac1/0x579c3e`), and the cloud pass is a second Godot pass after the bodies (`sky_clouds.gdshader` on `kRungSkyClouds`, the gradient on `kRungSkyDome`), so the clouds cover the sun and moon as in retail. NVG dims and thermal whitens the dome (§Sky dome, "NVG and thermal dome"). |
+| 21 | skyfog frame clear color | **FIXED 2026-07-05**: the horizon blend is ported engine/formats/env-first (`horizon_blend_skyfog`, byte-exact vs the MMX sequence, ctest-pinned + parity-vector cell) and consumed - `MissionEnvironment.get_frame_clear_color()` drives the GameWorld `ClearColor` WorldEnvironment (above-water skyfog blend / underwater lit-water, the witnessed choice); the alternate-fog view (= the thermal-scope byte, modeled 2026-09-10 through `EnvironmentState::set_thermal_view` → grey 0x808080 clear + fog, the 0.5 world block and the terrain ramps) and the dome-fog application ride their subsystems. **REN-7 close-note (2026-07-07)**: the consumer was WRITTEN but never RENDERED — the `ClearColor` Environment shipped `background_mode = BG_SKY` (Wave-1) with no Sky resource, which Godot draws as BLACK while ignoring `background_color`; every runtime view carried a pure-black dome-rim seam row (aerial views a black band; #29's grazing fade exposed it in water-horizon views — D-TERRAIN-3's substance). Fixed to `BG_COLOR` + `AMBIENT_SOURCE_DISABLED` (Godot ambient must never inject into the witnessed lighting model), GUT-pinned in `game_world_test`. Rendering the clear exposed a SECOND facet — the 2026-07-05 port's "undoubled = the non-modulate2x device path" reasoning was INVERTED for this reimpl: since D-RMAT-7 the reimpl reproduces the **MODULATE2X** device's framebuffer bytes (the ×2 combine + doubled fog table, calibrate-proved), and on that path the Clear consumes the post-blend DOUBLED skyfog VERBATIM (the halving `(c>>1)&0x7F7F7F7F` `[orig: @ 0x67715d]` is the non-modulate2x fallback, no reimpl analog); the undoubled clear rendered the below-rim band at exactly half the fogged dome rim ((77,91,138) vs (151,179,251) measured at noon). `get_frame_clear_color()` now doubles-with-saturation after the blend (the witnessed order: blend `@ 0x57f037..0x57f0a1` THEN double `@ 0x57f1b1`); the underwater branch was already render-space (`Env_WaterColorLit` = the ×2-gain `>>7` form); and the blend's distance input corrected from the load-time parsed field to the smoothed current (`get_fog_level()` ladder — the witness reads `Env_FogDistCurrent @ 0x26c681c`; #27's "every consumer" claim now actually holds for the clear). Env vectors re-dumped (the frame-clear token only; the input correction moves no corpus row — the bare-env grid never drives the smoothed scalars). The witness gap closed with it: the below-rim region is **clear-only in retail** — no skirt/ring geometry exists anywhere in the frame walk; the terrain surface pass (`Terrain_RenderMainSectorPass @ 0x610ac0`: it draws no sky, re-read 2026-09-24; → `Terrain_RenderSectorBatchLit @ 0x60c670`, ex `sub_60C670`) is the plain fogged sector batch bracketed by `D3DRS_AMBIENT=0xFFFFFF`/`LIGHTING=1`, and the seam invisibility mechanism is convergence-in-the-same-block (the dome pass fogs toward the DOUBLED SKYFOG while drawing the dome `[orig: SkyDome_RenderWithSkyfog]` — the same value the clear paints; terrain/water fog out at the 1024 fog reference = the dome rim radius) 2026-09-16 review: the Godot BG_COLOR sRGB decode is compensated at the device property write; windowed dome/background pixel regression and both 00TRa/00TRg captures pass (Sky dome section). **2026-09-24 (R9-5):** the reimpl's indoors black clear cited `@ 0x5c1597`, which is the water mirror's clear (skyfog, black under the indoors blink bit, §Reflection pipeline), not the beauty frame's; the beauty clear has no blink leg, thermal ? `0x808080` : eye strictly above water ? skyfog : lit water (`@ 0x5ca771..0x5ca792`; the `jle` `@ 0x5ca790` keeps the lit water at eye == waterHeight). `EnvironmentState::frame_clear_color_for` now selects exactly that; the indoors black leg is deleted ("Split the dome's cloud pass after the bodies and port the sky pass gates"). |
 | 22 | Weather PRNG carry: the GDScript port added bit-31 (0/1) where the original's cdq/and/add idiom adds `0x1ABB09` on a negative rotate — a Hex-Rays transcription bug (signed `(next >> 31) & 0x1ABB09` re-typed unsigned) that silently forked the sequence from the first negative rotate | **FIXED 2026-07-05 (minted-and-closed at the ENG-2 port)**: `env::WeatherOscillator::reroll` implements the signed idiom `[orig: Environment_UpdateWeatherTick @ 0x57e9fc..0x57ea16]`; seed `0x12333333` — the mov imm32 `[orig: @ 0x57d2ff in Environment_SnapStateToTargets @ 0x57d1e0]` (the port initially transcribed it `0x12345633`; corrected as #25); the ctest pins the witnessed word sequence and explicitly guards against the bit-31 variant. Invisible to the sampled sway vectors (the spring saturates), so no wa/wb key moved for THIS fix alone |
 | 23 | Lightning long-sequencer epochs were max-combined (`maxf`) in the GDScript, holding a C8 plateau; the original SETS each epoch level (the witnessed staircase C8 C8 C8 96 96 C8 C8 96 64 32 32 00), and the additives are integer-truncated bytes, not floats | **FIXED 2026-07-05 (minted-and-closed)**: `env::LightningSequencers` + `lightning_additives_packed` port the SET semantics and the exact pmullw/psrlw byte math `[orig: Environment_UpdateWeatherTick @ 0x57ec6f/@ 0x57ed0a; Environment_SetLightningFlash @ 0x57d320 — which also zeroes the directional-light slot]`; parity vectors `wc/long_seq` + `wc/long_k01/k09/k12` re-dumped with this witness |
 | 24 | The Weather wind model vs the witnessed engine: (a) `wind_strength` mapped 0..100 onto 0..8192, but the oscillator's `15*prev` feedback term is stable only for intensity <= 273 — the old mapping drove the 32-bit state divergent and "survived" via GDScript's 64-bit wrap + clamps; (b) the default was still air, where retail runs `Env_WindScale = 256` constantly (`[orig: Environment_InitDefaults @ 0x57c1d1]`, its ONLY writer — the ambient foliage sway every retail map has); (c) the smoothers chased their own written-back output instead of the TOD keyframe targets (`[orig: Environment_ComputeTimeOfDayColors @ 0x57de40]` refreshes every block's target slot each frame) | **FIXED 2026-07-05 (minted-and-closed)**: strength now maps 0..100 → 0..256 with default 100 (= the retail constant); the duration/decay gust remains an OpenNova authoring extension, now armed-only (unarmed wind never decays, matching the constant-WindScale witness); Weather feeds `get_*_target()` keyframe targets into WeatherCore. Parity vectors `wa/*`, `wb/*`, `we/*` re-dumped under these witnesses (`wa` now IS the witnessed ambient-256 series, cross-pinned byte-equal in `env_render_unit_test`) |
 | 25 | Weather-PRNG seed transcription: the reimpl carried `0x12345633` (engine/formats/env slice 1, inherited from engine/runtime/wac); the binary's immediate is `0x12333333` — the SAME constant seeds the WAC RNG (`mov dword_C6EA40` `[orig: WacScript_InitAndLoad @ 0x4f966b]`), where the mistranscription originated | **FIXED 2026-07-06 (minted-and-closed at the ENG-2 sky-leg re-grill)**: `WeatherOscillator.prng = 0x12333333` `[orig: seed imm32 @ 0x57d2ff]`; the WAC VM's `next_rand` ALSO carried #22's unsigned bit-31 carry — both engine/runtime/wac bugs fixed in the same commit `[orig: rol9 + sar/and/add @ 0x4f5a83..0x4f5a91]` (no committed test pinned the wrong WAC stream). env ctest word/wind pins regenerated; the sway-bearing GUT keys (`wa/k004..k256`, `wb/k016..k096`, `wc/long_k*`, `we/k*`) re-dumped under the witness — `wa/k001` is seed-invariant (both seeds share low-12 bits at tick 1); every level-only, color, float, and non-weather key unchanged |
 | 26 | Cloud-scroll consumption model: the float GDScript (a) skipped the rate RAMP — the snap refreshes only the TARGET (`@ 0x57d2da`) and the live rate smooth-eighths toward it (`@ 0x57eecc`), so a fresh scene ran full-rate from tick 1; (b) added the accumulator term POSITIVELY on both UV axes where the witnessed texture transform NEGATES it on U (`@ 0x5791de..0x579260`); (c) the libs field labels had the layer-1 u/v pair inverted (value-equal — both advance at rate) | **FIXED 2026-07-06 (minted-and-closed at the sky binding slice)**: `WeatherCore` owns `CloudScrollState` ticked at the witnessed tick tail; `SkyDome`/`Water` consume through the weather seam (`get_cloud_uv_offset1/2`, `get_cloud_uv_rate_per_second`; standalone hosts fall back to a private core — one math home); the UV translation is `env::cloud_scroll_uv_offsets` (U-negative). `sky/k001`/`sky/k064` re-dumped under the witness; `sky_dome_test` pins the seam + the U sign **2026-07-21 cadence correction:** GameWorld owned a separate fixed 62 Hz accumulator from the 62.5 Hz mission simulation. **2026-08-30 one-clock correction:** that separate clock was itself a divergence — retail runs `Environment_UpdateWeatherTick` once per drained 16 ms quantum right after the entity update (`Game_ProcessMainFrame @ 0x52674b -> @ 0x526774`); the weather now rides the simulation tick (`MissionKernel::tick_weather` -> the render owner's hook), standalone owners bank at the same 62.5 Hz. Water noise generation intentionally remains once per rendered water frame. |
-| 27 | Smoothed scalar spring channels unwired: the tick smooth/spring-steps fog distance (`Env_FogDistCurrent @ 0x57ede2`, consumed by the dome fog c9 `@ 0x5792c2` and `Environment_GetFogEndDistance`), sky height (`Env_SkyHeightCurrent @ 0x57ee97`, gating the dome rebuild `@ 0x57e4f4`), camera FOV (`@ 0x57ee78`), the now-identified `Env_SunDimPct` channel (`0x26c6830` family — dims the sun body + glare, default 0, no parser writes it), the rain percent (`Env_RainPctCurrent @ 0x26c6880` family — identified at REN-6, see the weather-tick smoother list), and the overcast blend (#16's runtime facet, `@ 0x57ef62`); the reimpl's consumers read PARSED `.env` values — a TOD/env scrub snaps instantly where retail ramps in | **FIXED (2026-07-06, the REN-6 port leg)**: `env::EnvScalarChannels` ticks the witnessed springs in-order between the sequencers and the color blocks (`WeatherCore.scalar_channels`, ctest-pinned steps `((d+31)>>5` / eighth-snap); targets refresh from the PARSED values each tick and the mission snap touches targets only — currents always ramp `[orig: @ 0x57d1e0]`; the smoothed currents write back through the env seam (`MissionEnvironment.set_smoothed_scalars`) so EVERY consumer (dome c9/u_sky_height, water UV state, object/terrain fog ends, the #21 frame clear) serves the ramp; the SunDim channel is live end-to-end (celestial sun alpha + glare fold). **2026-08-30:** the rain% channel drives the drop pool and the rain ambient, the overcast channel the two-table cross-fade and the fog end, the per-channel step/max clamps are `Environment_MissionStartInit`'s recovered values (the `EnvScalarChannels` defaults) and every timed WAC step lands through `WeatherState::command_*`; the sun-dim channel is live but inert exactly like retail (no max writer). **2026-09-08 FOV follow-up:** the FOV current/target now live in these scalar channels and take the original eighth step. WAC, scope, optical visibility and player resets share that target; the main camera reads the current. See world-wac-ai-re.md section 33.23. |
+| 27 | Smoothed scalar spring channels unwired: the tick smooth/spring-steps fog distance (`Env_FogDistCurrent @ 0x57ede2`, consumed by the dome fog c9 `@ 0x5792c2` and `Environment_GetFogEndDistance`), sky height (`Env_SkyHeightCurrent @ 0x57ee97`, gating the dome rebuild `@ 0x57e4f4`), camera FOV (`@ 0x57ee78`), the now-identified `Env_SunDimPct` channel (`0x26c6830` family — dims the sun body + glare, default 0, no parser writes it), the rain percent (`Env_RainPctCurrent @ 0x26c6880` family — identified at REN-6, see the weather-tick smoother list), and the overcast blend (#16's runtime facet, `@ 0x57ef62`); the reimpl's consumers read PARSED `.env` values — a TOD/env scrub snaps instantly where retail ramps in | **FIXED (2026-07-06, the REN-6 port leg)**: `env::EnvScalarChannels` ticks the witnessed springs in-order between the sequencers and the color blocks (`WeatherCore.scalar_channels`, ctest-pinned steps `((d+31)>>5` / eighth-snap); targets refresh from the PARSED values each tick and the mission snap touches targets only — currents always ramp `[orig: @ 0x57d1e0]`; the smoothed currents write back through the env seam (`MissionEnvironment.set_smoothed_scalars`) so EVERY consumer (dome c9/u_sky_height, the water depth curve (the "water UV state" of this note, re-graded 2026-09-24), object/terrain fog ends, the #21 frame clear) serves the ramp; the SunDim channel is live end-to-end (celestial sun alpha + glare fold). **2026-08-30:** the rain% channel drives the drop pool and the rain ambient, the overcast channel the two-table cross-fade and the fog end, the per-channel step/max clamps are `Environment_MissionStartInit`'s recovered values (the `EnvScalarChannels` defaults) and every timed WAC step lands through `WeatherState::command_*`; the sun-dim channel is live but inert exactly like retail (no max writer). **2026-09-08 FOV follow-up:** the FOV current/target now live in these scalar channels and take the original eighth step. WAC, scope, optical visibility and player resets share that target; the main camera reads the current. See world-wac-ai-re.md section 33.23. |
 | 28 | Water-height precedence: the reimpl ladder ran override → `.env` → terrain-fallback (env wins over terrain); witnessed retail order is BMS > TRN (bit-31-flagged store at `Terrain_Init @ 0x60fcb5`, AFTER the env parse) > ENV | **FIXED 2026-07-06 (minted at the water grill, closed at the water binding slice)**: the Water ladder reordered — a flagged terrain height beats the `.env` one; the reimpl override rung stays on top as the authoring seam **2026-07-21 lifecycle correction:** the reimpl ladder is direct authoring > explicit BMS (including zero) > signed nonzero TRN > ENV; an authoritative zero disables the surface, shader split, and reflection RTT instead of leaving the packaged scene's former 10.5-unit phantom plane. |
-| 29 | Water surface tessellation: witnessed = screen-marched adaptive strips from the camera (3 vertices per row — left/mid/right of the projected span; adaptive ROW stride `clamp(int(row_1/w × 500), 2, 9)` — the earlier "2..9 columns" reading corrected at REN-6; 1024-row cap; ≤5-row strip batches stepping 4 through static index tables; the low-detail path adds sin-table Y displacement from the shared D-INF-4 table) `[orig: render_water_strip @ 0x5c1d60; render_water_strip_detailed @ 0x5c27d0]`; the reimpl draws a static camera-snapped 65×65 plane | **FIXED (2026-07-07, the REN-6 tail)**: the DETAILED tier is live end to end — `env::water_*` structural translation (screen block + row clip + adaptive stride + backstep hunt + 1024 cap + row colors + batch table; 40 ctest pins), `WaterCore.strip_*` packed-array bridge (godot==render componentwise basis, D3D row-vector view rebuild), `godot/src/env/water.cpp` per-frame strip ArrayMesh (COLOR = row diffuse, CUSTOM0 = depth/rhw/screen UV, CUSTOM1 = specular; witnessed batch-table indices), and `water.gdshader` runs the witnessed ps.1.1 chain (§The strips addendum — alpha = noiseA × diffuseA × 2, reflection ×2 diffuse ×4 noise + specular; `u_water_color` was the historical t2 stand-in, replaced by #30's live RTT). Goldens re-pinned (`water/mesh` strip invariants, `water/strip` basis pin; `water/snap` retired). **2026-07-07 fidelity-grill facets (user-reported draw distance + shoreline z-fight)**: the far-water amputation was #34's misported ref-32 discard (re-graded there — the water passes never enable the alpha test) plus the wrong fog curve (now the witnessed spec-alpha `dist_alpha` factor, see §Depth/fog/pass-state); the shoreline flicker was the unhosted depth model — retail writes a projection-replica depth (ZWRITE ON, deterministic same-curve shoreline), hosted as `depth_draw_always` + the tracked relative `3×10⁻⁴` view-depth pull (the rejected 2⁻¹⁵ NDC form overpainted far-altitude terrain); the underwater opaque `0x20000` swap is now HOSTED (`u_underwater_view` → `ALPHA = 1` under the premul pass = blend-off; selection fed per frame from the camera side). Residuals in-row: the LOW tier (detail ≤ 1, sin-displacement) stays unported (the reimpl runs detail > 1); the high-detail nightvision redraw is hosted by the typed `WaterNightVision` Q3 producer in the terminal compositor |
-| 30 | Water reflection passes exist in retail (`Water_CreateReflectionRenderTarget` RTT allocator `[orig: @ 0x5c08d1..0x5c0937]`, `Terrain_RenderSceneWithReflection @ 0x5c93a0`, per-strip mirrored verts + 229.5 alpha scale) — the reimpl renders none | **WITNESSED-READY-DEFERRED (internals closed at REN-6, 2026-07-06)**: the offscreen pipeline is fully witnessed — `Water_ReflectionPrerender @ 0x5c2780` → `render_main_scene @ 0x5c1240` (RTT begin/end on `Water_ReflectionTexture`, skyfog clear, the clip plane at `waterHeight − 0.1`, mirrored sky/terrain/world/celestial/glare) with `Water_RenderReflectedWorldScene @ 0x5c8510` (the ex three-flush decompile-fail; builds `g_WaterMirrorMatrix` as the water CLIP-plane texture matrix `u = y − wh + 0.5` and arms `g_WaterMirrorActive`) — see §Reflection pipeline; the earlier "strip far-edge mirroring" reading was RE-GRADED at the 2026-07-07 port leg: the `y' = 1 − y` flip / murk skip belong to the strip renderers' UNDERWATER-VIEW arg (§The strips — a t2 texcoord flip on all three row vertices, not a reflection mirror; the ×229.5 double is the low tier's), so the reflection's strip geometry rides the RTT scene itself; the camera-mirror transform sits in the Hex-Rays-elided view-matrix section (pin at port). **FIXED (2026-07-07, the REN-6 tail — reimpl planar reflection)**: a SubViewport (same World3D, fixed retail detail-2 `256×256` RTT with square projection and preserved horizontal FOV) with a mirror camera reflected about y = wh feeds the ps.1.1 chain's t2 sampler; the mirror form negates the UP column after reflection (proper det+1 mirror, yaw kept) because the witnessed rows PIN the mapping u = screenU / v = vbase − screenV — the fragment keeps the witnessed texm3x2 dots, then applies the Godot source-to-square projection scale around UV center before sampling. **2026-07-15 view-registration correction:** that scale is (1, source height/source width); without it the main-normalized V coordinate makes reflections swim with view pitch on widescreen displays. The water excludes itself from the mirror scene via a dedicated visual layer (the witnessed prerender pass list draws no water). Sky/terrain/world/celestial mirror by construction (one world), and the dome now anchors from each render pass camera instead of reusing the main-camera transform. Residual in-row: the witnessed wh − 0.1 clip plane is a TRACKED approximation (no oblique near plane in the reimpl; the mirrored camera predominantly sees above-water geometry). The 512 square branch remains documented for a future detail-3/capture selector **2026-07-21 lifecycle/current-camera correction:** the RTT sleeps for absent, unloaded, hidden, or off-screen water and reacquires viewport camera switches; sun/moon/glare/stars relocate from each active pass camera so the mirror no longer inherits main-view anchoring. **2026-08-16 reflected-world admission correction (PORTED):** the 2026-08-05 "no buildings ever reflect" reading was INCOMPLETE, and an intermediate 2026-08-15 "all pool-2 buildings reflect" reading (never merged) was REFUTED in the same review. The truth: `Water_RenderReflectedWorldScene @ 0x5c8510` does render a sector-building pass (`Terrain_RenderSectorModels @ 0x5c5d30`, called at `0x5c8576`, resolving `g_VisibleBuildingBatch` through BMS pool 2 at `0x5c5d5c`) before the entity waves at `0x5c857b`/`0x5c8590`/`0x5c8599` — but every one of those legs draws only what `Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0` collected, and its filterMask (`camera_below_water ? 0 : 0x400`, asm `@ 0x5c9109..0x5c9119`) is applied by ALL collectors including the building walk (`collect_visible_sector_userpoints @ 0x5c6b60` requires `(flagMatch & entity+36) == flagMatch` at `0x5c6c32..0x5c6c39`). `entity+36` flag `0x400` has exactly TWO writers: `Entity_InitFromModel @ 0x40e208..0x40e20a` (`ItemDefType(+0x5C)==1`, vehicles) and `Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b`, which maps the mission-authored BMS attribute `0x800000` (`bms::BmsiAttributeFlags::Reflective`) into it for every spawned pool. So above water the mirror draws vehicles plus exactly the records the mission author flagged Reflective; below water it is unfiltered; persons never draw (no player-render leg). Shipped data confirms per-record authoring: CP01 flags 217/956 buildings and 5/14 pool-1 items Reflective (the same building graphic appears both flagged and unflagged), 00TRa flags 63/926 buildings, CP12 none. Reimpl port: `placement_is_mirror_reflected(entity_attrib, item_type) = vehicle || (attrib & 0x800000)` (`engine/runtime/mission/placement_traits.h`), same-graphic static batches split per reflection policy with the split key carried through destruction routing, and the husk graft keeps the carved slot's reflect policy (destruction never clears flag `0x400`). Cross-run pixel sheets remain non-gating (water/particle phases differ between launches); the semantic admission tests are the gate. This closes semantic admission, not performance parity: Godot still batches by graphic rather than retail sector cell. **2026-09-01 mirror-terrain re-grade + foliage exclusion (PORTED):** the earlier "lo-res mirror terrain" reading is REFUTED for the poly terrain — the offscreen renderer's PolyTrn context passes the SAME quadtree quality scale as the live beauty scene (`render_main_scene` ctx+0x54 = 1.0 `[orig: @ 0x5c154d]` == `render_scene_with_water_reflection @ 0x5d7ea0` ctx+0x54 = 1.0 `[orig: @ 0x5d8047]`; the scale multiplies the node-size subdivide test via `flt_319FB2C = ctx+0x54 × flt_8493D8` `[orig: PolyTrn_RenderFrame @ 0x60eb4a]`, so equal scales = equal tessellation; `terrain_scene_render @ 0x5d04c0`'s 0.5/1.66 belongs to the separate low-detail/no-water scene path), so the reimpl's full-resolution mirrored terrain IS the witnessed shape and its "tracked approximation" status is retired. The REAL witnessed mirror difference was foliage: the reflection context passes the foliage-collect field 0 where the beauty scene passes 1 (`ctx+0x68 = 0` `[orig: render_main_scene @ 0x5c1522]` vs `= 1` `[orig: @ 0x5d801e]`), and that field alone gates `Terrain_CollectNearFoliagePatches` in the traversal `[orig: Terrain_TraverseQuadtreeNode @ 0x609069]` — retail's mirror draws NO near-foliage patches (and, with the visible-far key list left empty, no far foliage cells either). Ported: the foliage detail blanket rides its own visual layer (`Water::VISUAL_LAYER_TERRAIN_FOLIAGE`, bit 17, alone) admitted by the beauty camera mask (0x78C01; bit 18, the empty-sector `TERRAIN_FLAT_FALLBACK` layer, is likewise beauty-only and mirror-excluded since 2026-09-13, terrain/terrain-re.md "Empty-sector flat fallback") and excluded from `REFLECTION_CULL_MASK` above AND below water (the context field is set unconditionally — no underwater re-add); `foliage_runtime_adapter_test` pins the lone bit and the mirror exclusion. Remaining tracked approximation in-row: the `waterHeight − 0.1` non-oblique clip. |
+| 29 | Water surface tessellation: witnessed = screen-marched adaptive strips from the camera (3 vertices per row — left/mid/right of the projected span; adaptive ROW stride `clamp(int(row_1/w × 500), 2, 9)` — the earlier "2..9 columns" reading corrected at REN-6; 1024-row cap; ≤5-row strip batches stepping 4 through static index tables; the low-detail path adds sin-table Y displacement from the shared D-INF-4 table) `[orig: render_water_strip @ 0x5c1d60; render_water_strip_detailed @ 0x5c27d0]`; the reimpl draws a static camera-snapped 65×65 plane | **FIXED (2026-07-07, the REN-6 tail)**: the DETAILED tier is live end to end — `env::water_*` structural translation (screen block + row clip + adaptive stride + backstep hunt + 1024 cap + row colors + batch table; 40 ctest pins), `WaterCore.strip_*` packed-array bridge (godot==render componentwise basis, D3D row-vector view rebuild), `godot/src/env/water.cpp` per-frame strip ArrayMesh (COLOR = row diffuse, CUSTOM0 = depth/rhw/screen UV, CUSTOM1 = specular; witnessed batch-table indices), and `water.gdshader` runs the witnessed ps.1.1 chain (§The strips addendum — alpha = noiseA × diffuseA × 2, reflection ×2 diffuse ×4 noise + specular; `u_water_color` was the historical t2 stand-in, replaced by #30's live RTT). Goldens re-pinned (`water/mesh` strip invariants, `water/strip` basis pin; `water/snap` retired). **2026-07-07 fidelity-grill facets (user-reported draw distance + shoreline z-fight)**: the far-water amputation was #34's misported ref-32 discard (re-graded there — the water passes never enable the alpha test) plus the wrong fog curve (now the witnessed spec-alpha `dist_alpha` factor, see §Depth/fog/pass-state); the shoreline flicker was the unhosted depth model — retail writes a projection-replica depth (ZWRITE ON, deterministic same-curve shoreline), hosted as `depth_draw_always` + the tracked relative `3×10⁻⁴` view-depth pull (the rejected 2⁻¹⁵ NDC form overpainted far-altitude terrain); the underwater opaque `0x20000` swap is now HOSTED (`u_underwater_view` → `ALPHA = 1` under the premul pass = blend-off; selection fed per frame from the camera side). Residuals in-row: the LOW tier (detail ≤ 1, sin-displacement) stays unported (the reimpl runs detail > 1); the high-detail nightvision redraw is hosted by the typed `WaterNightVision` Q3 producer in the terminal compositor. **2026-09-24 rendering parity pass (FIXED):** (a) the strip constants were mis-transcribed and are corrected: the depth clamp is [4.0e-5 (`0x3827C5AC`), 1 − 2⁻¹⁵ (`0x3F7FFE00`)] in both tiers (the 2026-07-07 "correction" is retracted), the texm3x2 vbase multiplier is 300 (`flt_7DBF68` `@ 0x5c2f04`, not 297), and the distance-alpha scale is `dbl_7DBF98` = 16711680.0 = 255 × 2¹⁶ (not 2²⁴) ("Correct the water strip constants and the noise sine LUT"); (b) the texcoords are the absolute render-basis world x/32, z/32 and the strip marches in the render basis (the "godot==render componentwise basis" above was wrong; the `util/axes.h` x/z swap applies), `flt_8412B0/B4` feed only the depth chain, and the nightvision redraw is a second strip `Water` marches every above-water frame without the `g_WaterActive` gate ("Port the water strip's texcoords, depth and nightvision redraw"); (c) the tracked `3×10⁻⁴` view-depth pull is retired: the water writes the view depth whose retail scene-curve depth (near 0.2, far = w + 1) equals the strip's replica (far = w), mapped through the drawing camera's own clip depth ("Map the water depth through the retail scene curve, not the camera's"); (d) at cam.z == wh neither side draws (`env::water_surface_sides`). See §Water surface. |
+| 30 | Water reflection passes exist in retail (`Water_CreateReflectionRenderTarget` RTT allocator `[orig: @ 0x5c08d1..0x5c0937]`, `Terrain_RenderWorldScene @ 0x5c93a0`, per-strip mirrored verts + 229.5 alpha scale) — the reimpl renders none | **WITNESSED-READY-DEFERRED (internals closed at REN-6, 2026-07-06)**: the offscreen pipeline is fully witnessed — `Water_ReflectionPrerender @ 0x5c2780` → `render_main_scene @ 0x5c1240` (RTT begin/end on `Water_ReflectionTexture`, skyfog clear, the clip plane at `waterHeight − 0.1`, mirrored sky/terrain/world/celestial/glare) with `Water_RenderReflectedWorldScene @ 0x5c8510` (the ex three-flush decompile-fail; builds `g_WaterMirrorMatrix` as the water CLIP-plane texture matrix `u = y − wh + 0.5` and arms `g_WaterMirrorActive`) — see §Reflection pipeline; the earlier "strip far-edge mirroring" reading was RE-GRADED at the 2026-07-07 port leg: the `y' = 1 − y` flip / murk skip belong to the strip renderers' UNDERWATER-VIEW arg (§The strips — a t2 texcoord flip on all three row vertices, not a reflection mirror; the ×229.5 double is the low tier's), so the reflection's strip geometry rides the RTT scene itself; the camera-mirror transform sits in the Hex-Rays-elided view-matrix section (pin at port). **FIXED (2026-07-07, the REN-6 tail — reimpl planar reflection)**: a SubViewport (same World3D, fixed retail detail-2 `256×256` RTT with square projection and preserved horizontal FOV) with a mirror camera reflected about y = wh feeds the ps.1.1 chain's t2 sampler; the mirror form negates the UP column after reflection (proper det+1 mirror, yaw kept) because the witnessed rows PIN the mapping u = screenU / v = vbase − screenV — the fragment keeps the witnessed texm3x2 dots, then applies the Godot source-to-square projection scale around UV center before sampling. **2026-07-15 view-registration correction:** that scale is (1, source height/source width); without it the main-normalized V coordinate makes reflections swim with view pitch on widescreen displays. The water excludes itself from the mirror scene via a dedicated visual layer (the witnessed prerender pass list draws no water). Sky/terrain/world/celestial mirror by construction (one world), and the dome now anchors from each render pass camera instead of reusing the main-camera transform. Residual in-row: the witnessed wh − 0.1 clip plane is a TRACKED approximation (no oblique near plane in the reimpl; the mirrored camera predominantly sees above-water geometry). The 512 square branch remains documented for a future detail-3/capture selector **2026-07-21 lifecycle/current-camera correction:** the RTT sleeps for absent, unloaded, hidden, or off-screen water and reacquires viewport camera switches; sun/moon/glare/stars relocate from each active pass camera so the mirror no longer inherits main-view anchoring. **2026-08-16 reflected-world admission correction (PORTED):** the 2026-08-05 "no buildings ever reflect" reading was INCOMPLETE, and an intermediate 2026-08-15 "all pool-2 buildings reflect" reading (never merged) was REFUTED in the same review. The truth: `Water_RenderReflectedWorldScene @ 0x5c8510` does render a sector-building pass (`Terrain_RenderSectorModels @ 0x5c5d30`, called at `0x5c8576`, resolving `g_VisibleBuildingBatch` through BMS pool 2 at `0x5c5d5c`) before the entity waves at `0x5c857b`/`0x5c8590`/`0x5c8599` — but every one of those legs draws only what `Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0` collected, and its filterMask (`camera_below_water ? 0 : 0x400`, asm `@ 0x5c9109..0x5c9119`) is applied by ALL collectors including the building walk (`collect_visible_sector_userpoints @ 0x5c6b60` requires `(flagMatch & entity+36) == flagMatch` at `0x5c6c32..0x5c6c39`). `entity+36` flag `0x400` has exactly TWO writers: `Entity_InitFromModel @ 0x40e208..0x40e20a` (`ItemDefType(+0x5C)==1`, vehicles) and `Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b`, which maps the mission-authored BMS attribute `0x800000` (`bms::BmsiAttributeFlags::Reflective`) into it for every spawned pool. So above water the mirror draws vehicles plus exactly the records the mission author flagged Reflective; below water it is unfiltered; persons never draw (no player-render leg). Shipped data confirms per-record authoring: CP01 flags 217/956 buildings and 5/14 pool-1 items Reflective (the same building graphic appears both flagged and unflagged), 00TRa flags 63/926 buildings, CP12 none. Reimpl port: `placement_is_mirror_reflected(entity_attrib, item_type) = vehicle || (attrib & 0x800000)` (`engine/runtime/mission/placement_traits.h`), same-graphic static batches split per reflection policy with the split key carried through destruction routing, and the husk graft keeps the carved slot's reflect policy (destruction never clears flag `0x400`). Cross-run pixel sheets remain non-gating (water/particle phases differ between launches); the semantic admission tests are the gate. This closes semantic admission, not performance parity: Godot still batches by graphic rather than retail sector cell. **2026-09-01 mirror-terrain re-grade + foliage exclusion (PORTED):** the earlier "lo-res mirror terrain" reading is REFUTED for the poly terrain — the offscreen renderer's PolyTrn context passes the SAME quadtree quality scale as the live beauty scene (`render_main_scene` ctx+0x54 = 1.0 `[orig: @ 0x5c154d]` == `render_scene_with_water_reflection @ 0x5d7ea0` ctx+0x54 = 1.0 `[orig: @ 0x5d8047]`; the scale multiplies the node-size subdivide test via `flt_319FB2C = ctx+0x54 × flt_8493D8` `[orig: PolyTrn_RenderFrame @ 0x60eb4a]`, so equal scales = equal tessellation; `NVG_RenderSceneToTarget @ 0x5d04c0`'s 0.5/1.66 belongs to the separate low-detail/no-water scene path), so the reimpl's full-resolution mirrored terrain IS the witnessed shape and its "tracked approximation" status is retired. The REAL witnessed mirror difference was foliage: the reflection context passes the foliage-collect field 0 where the beauty scene passes 1 (`ctx+0x68 = 0` `[orig: render_main_scene @ 0x5c1522]` vs `= 1` `[orig: @ 0x5d801e]`), and that field alone gates `Terrain_CollectNearFoliagePatches` in the traversal `[orig: Terrain_TraverseQuadtreeNode @ 0x609069]` — retail's mirror draws NO near-foliage patches (and, with the visible-far key list left empty, no far foliage cells either). Ported: the foliage detail blanket rides its own visual layer (`Water::VISUAL_LAYER_TERRAIN_FOLIAGE`, bit 17, alone) admitted by the beauty camera mask (0x78C01; bit 18, the empty-sector `TERRAIN_FLAT_FALLBACK` layer, is likewise beauty-only and mirror-excluded since 2026-09-13, terrain/terrain-re.md "Empty-sector flat fallback") and excluded from `REFLECTION_CULL_MASK` above AND below water (the context field is set unconditionally — no underwater re-add); `foliage_runtime_adapter_test` pins the lone bit and the mirror exclusion. The former in-row "`waterHeight − 0.1` non-oblique clip" approximation closed 2026-09-24 (below). **2026-09-24 rendering parity pass (FIXED, §Reflection pipeline):** (a) below-water eye: `render_main_scene` mirrors the camera block only while cam.z >= wh (`@ 0x5c1361..0x5c1370`, mirror `@ 0x5c1376..0x5c139c`) and copies it unchanged below (`@ 0x5c13f6..0x5c1414`); the reflected pass fogs with the dry `Env_FogBlock` (`Environment_ApplyFogAndAmbient(0, 0)`, `@ 0x5c1648..0x5c164c`, `@ 0x5c8515..0x5c8519`) and never swaps the terrain's stage 3 (ctx+0x74 = 0 `@ 0x5c153d`); ported as `env::build_water_mirror_view` + `EnvironmentState::build_water_mirror_fog` ("Port the water mirror's below-water eye, dry fog and clip planes"; the render-fixture contract expects the live reflected eye below the water); (b) the "the reimpl exposes no oblique clip plane and does not clip" and "wh − 0.1" statements are retracted: retail clips per pixel through `GSysClip` under AlphaRef 0x80 on both sides (objects keep y >= wh, terrain y >= wh − 0.05), armed per draw (sector models whose CMDL bbox floor lies below wh − 0.25, first-wave entities whose z − boundRadius lies below wh; the BySide person waves and the celestial draws never arm); ported as the mirror-pass discard with per-draw arming (`env::water_mirror_clip_armed`, "Arm the water mirror's CLIP technique per draw, as retail does"); (c) the RTT renders with the MAIN view's projection (`@ 0x5c1255`, `@ 0x5c163e`): the "square projection with preserved horizontal FOV" of the 2026-07-07 note and the 2026-07-15 (1, h/w) UV rescale are retracted; the mirror keeps the source projection over a round(512 × aspect) × 512 target (`env::reflection_rtt_size`, "Render the water mirror over the main view's field at 512 rows"); (d) the mirror's overlay pass closes with the coronas (`@ 0x5c85fd`), the dim (`@ 0x5c186c`) and, inside the far depth band (`@ 0x5c18f4`, gated `@ 0x5c18c6`), `render_celestial_bodies(0)` (`@ 0x5c18fb`) and `render_skybox_sun_glow(0, 0)` (`@ 0x5c1904`), the glow at the no-occlusion alpha of the MIRROR camera's view dot (`env::mirror_glare_upl`), the discs at the beauty submit value (`renderer::kMirrorOverlayOrder`, "Close the water mirror with its dim and the far-band sky redraw"). Open residuals are listed in "Open after the 2026-09-24 pass". |
 | 31 | The water render LOOK was invented: sin/cos shader waves + Fresnel-style alpha with no witness; retail = per-frame animated 128×128 noise color + DuDv textures over `Env_WaterColorLit` per-vertex color, distance-alpha, murk term | **FIXED 2026-07-06 (minted-and-closed at the water binding slice)**: `water.gdshader` rewritten as a structural port of the witnessed detailed-path model over the engine/formats/env textures (`water_noise_color_pixels`/`water_noise_normal_pixels`/`water_uv_state`, ctest-pinned); the invented waves/fresnel are deleted |
-| 32 | Celestial placement inventions: the reimpl placed bodies at `camera.xz + dir × 2000 × (sky_height/175.69)` with ZEROED camera height and a `dir.y > -0.1` visibility gate — none witnessed. The live renderer places at camera + dir × 64 (full height, identity rotation) with alpha folds; the 2000 belongs only to the dome VS proximity ref, the +64/+16 offsets to a dead variant | **FIXED 2026-07-06 (minted-and-closed at the celestial leg)**: placement + witnessed sun/moon alphas ported (`kCelestialBodyDistance`, `celestial_sun/moon_alpha_fixed`, EnvFile statics, vector-pinned); the depth-test flip replaces the invented gate (the world overdraws bodies like retail's draw order) |
-| 33 | Star field: retail renders 256 camera-anchored billboard instances with per-star twinkle (rol4/rol11 PRNG) and a hide-near-the-light dot cull `[orig: render_star_field @ 0x5ad9c0]`; the reimpl renders the star 3DI as ONE body. The instance-table generator is unfound | **FIXED (2026-07-06, the REN-6 port leg)**: the generator witnessed (`Star_GenerateInstanceTable @ 0x5ac850`, ex `init_weather_particles` — per-star math in §Celestial bodies; sole caller `EffectWorld_LoadCelestialModels @ 0x5add40`) and PORTED — `env::generate_star_instances`/`star_twinkle_tick`/`star_visible_fixed` (ctest-pinned: the PRNG draws from seed 1, star[0] offsets, the 256-star invariants) hosted by `StarField` + a 256-instance camera-anchored billboard MultiMesh in `godot/src/env/celestial.cpp` (per-star twinkle via instance color, the 0.98 near-light cull against the active light, regenerate-per-celestial-load, the sky-stars ladder rung). The single-body stand-in and its `0x2000` dead-variant opacity are deleted. Note: the brightness accumulator's exact scale/color application inside `Matrix_BuildTransformFromParts` is Hex-Rays-mangled (x87 handoff) — brightness-as-color-modulation is the structural reading **2026-07-21 reflection correction:** instances are camera-local inside a conservative MultiMesh AABB and the additive shader billboards/reanchors them from each active pass view, preserving far-off mission cameras and the mirror RTT. |
+| 32 | Celestial placement inventions: the reimpl placed bodies at `camera.xz + dir × 2000 × (sky_height/175.69)` with ZEROED camera height and a `dir.y > -0.1` visibility gate — none witnessed. The live renderer places at camera + dir × 64 (full height, identity rotation) with alpha folds; the 2000 belongs only to the dome VS proximity ref, the +64/+16 offsets to a dead variant | **FIXED 2026-07-06 (minted-and-closed at the celestial leg)**: placement + witnessed sun/moon alphas ported (`kCelestialBodyDistance`, `celestial_sun/moon_alpha_fixed`, EnvFile statics, vector-pinned); the depth-test flip replaces the invented gate (the world overdraws bodies like retail's draw order). **2026-09-24:** placement unchanged; the body alpha now rides UPL_INTENSITY into the authored SELFLUM material, each disc with its own value (§Celestial bodies), and the bodies are far-pinned between the no-depth dome passes |
+| 33 | Star field: retail renders 256 camera-anchored billboard instances with per-star twinkle (rol4/rol11 PRNG) and a hide-near-the-light dot cull `[orig: Star_RenderField_unused @ 0x5ad9c0]`; the reimpl renders the star 3DI as ONE body. The instance-table generator is unfound | **RE-GRADED 2026-09-24 (R9-1): retail never draws stars.** `Star_RenderField_unused @ 0x5ad9c0` has no caller (no code xref, no E8/E9 rel32 call, no absolute pointer; §Celestial bodies, Dead variants). The StarField MultiMesh, the Celestial star legs, `env::generate_star_instances` / `star_twinkle_tick` / `star_visible_fixed`, the sky-stars ladder rung (`kRungSkyStars`) and their tests are deleted ("Delete the star field: retail never draws stars"); `star_3di` is still parsed and named, never drawn, like retail. History: the 2026-07-06 REN-6 port leg witnessed the generator and ported the renderer as live ("FIXED"): the generator witnessed (`Star_GenerateInstanceTable @ 0x5ac850`, ex `init_weather_particles` — per-star math in §Celestial bodies; sole caller `EffectWorld_LoadCelestialModels @ 0x5add40`) and PORTED — `env::generate_star_instances`/`star_twinkle_tick`/`star_visible_fixed` (ctest-pinned: the PRNG draws from seed 1, star[0] offsets, the 256-star invariants) hosted by `StarField` + a 256-instance camera-anchored billboard MultiMesh in `godot/src/env/celestial.cpp` (per-star twinkle via instance color, the 0.98 near-light cull against the active light, regenerate-per-celestial-load, the sky-stars ladder rung). The single-body stand-in and its `0x2000` dead-variant opacity are deleted. Note: the brightness accumulator's exact scale/color application inside `Matrix_BuildTransformFromParts` is Hex-Rays-mangled (x87 handoff) — brightness-as-color-modulation is the structural reading **2026-07-21 reflection correction:** instances are camera-local inside a conservative MultiMesh AABB and the additive shader billboards/reanchors them from each active pass view, preserving far-off mission cameras and the mirror RTT. |
 | 34 | Water surface framebuffer blend + far cutoff: the reimpl used standard alpha blending (`blend_mix` — src·α + dst·(1−α), water opaque near / transparent far) and no alpha test; witnessed retail draws the above-water surface with **SrcBlend ONE + DestBlend SRCALPHA** (out = src + dst·α — transparent near, surface-dominant far) `[orig: Water_InitSurfaceShaders @ 0x5c19b0; decode_blend_mode_to_d3d_states @ 0x680f00 mode 11]` | **FIXED (minted-and-closed at REN-4; the alpha-test half RE-GRADED 2026-07-07)**: `water.gdshader` re-expresses the blend exactly via `blend_premul_alpha` with `ALPHA = 1 − a` and stays two-sided (pass flags 0x400000). The REN-4 "alpha-test ref 32 GREATER far-fade cutoff" half was a MISREAD: `CGfxDevice_SetAlphaTestRef(0x20) @ 0x5c3419/@ 0x5c3484` latches ALPHAFUNC/ALPHAREF only `[orig: @ 0x6770a0]`; D3DRS_ALPHATESTENABLE rides pass-flag bit 0x40000 `[orig: CGfxShader_ApplyPass @ 0x68326b]`, which the water passes (0x30000/0x20000) never set — the misported `discard` amputated the far water (the user-reported short draw distance) and is deleted; the witnessed far fade is the fog convergence, not a cutoff. Residuals live in their own rows: tessellation/murk-angle chain #29, reflection RTT #30 (the underwater OPAQUE swap hosted at the 2026-07-07 facet, see #29) |
-| 35 | Water sine LUT provenance: the reimpl built the 256-entry LUT at init from runtime `std::sin`; the original builds once from x87 fsin (`trunc(sin(i·2π/256)·−64)`, stored `0x80 − v` `[orig: Water_InitNoiseFieldAndSineLut @ 0x5c0308..0x5c0334]`) — ONE deterministic instance. Last-ulp libm variance (first seen on the GitHub `macos-26-arm64` runner image, 2026-07-10) flips the truncation at non-landmark indices; the flipped byte survives the LUT landmark+symmetry-sum checks but forks every downstream noise color/DuDv pixel, failing `env_render_unit`'s pinned checksums on that platform only | **FIXED (2026-07-10 — tracked decision)**: the LUT is a committed 256-byte constant in `water_init_noise_tables` — the deterministic instance every existing ctest/GUT pin was generated from (formula-identical on MSVC/UCRT x64; landmarks `0x80/0xAD/0xBF/0x80/0x41` and the 32768 symmetry sum unchanged). Runtime libm no longer participates, so all platforms render the same witnessed-faithful instance. Whether this instance byte-matches the retail x87 build at every index is unverified (needs a retail memory dump) — the same "pinned-current instance" caveat the noise FIELD already carries via the PRNG call-history quirk (§Water surface, Init tables) |
+| 35 | Water sine LUT provenance: the reimpl built the 256-entry LUT at init from runtime `std::sin`; the original builds once from x87 fsin (`trunc(sin(i·2π/256)·−64)`, stored `0x80 − v` `[orig: Water_InitNoiseFieldAndSineLut @ 0x5c0308..0x5c0334]`) — ONE deterministic instance. Last-ulp libm variance (first seen on the GitHub `macos-26-arm64` runner image, 2026-07-10) flips the truncation at non-landmark indices; the flipped byte survives the LUT landmark+symmetry-sum checks but forks every downstream noise color/DuDv pixel, failing `env_render_unit`'s pinned checksums on that platform only | **FIXED (2026-07-10 — tracked decision)**: the LUT is a committed 256-byte constant in `water_init_noise_tables` — the deterministic instance every existing ctest/GUT pin was generated from (formula-identical on MSVC/UCRT x64; landmarks `0x80/0xAD/0xBF/0x80/0x41` and the 32768 symmetry sum unchanged). Runtime libm no longer participates, so all platforms render the same witnessed-faithful instance. Whether this instance byte-matches the retail x87 build at every index is unverified (needs a retail memory dump) — the same "pinned-current instance" caveat the noise FIELD already carries via the PRNG call-history quirk (§Water surface, Init tables). **2026-09-24 (R10-8, "Correct the water strip constants and the noise sine LUT"):** the committed LUT is now the SINGLE-precision instance. `Water_InitNoiseFieldAndSineLut` runs after `CGfxDevice_CreateDevice` created the device without `D3DCREATE_FPU_PRESERVE` (BehaviorFlags 0x80, then 0x20, `@ 0x67e9fd` / `@ 0x67ea35`), so the x87 precision control is 24 bits while the fild / fmul step / fsin / fmul −64 / `_ftol2_sse` loop runs (`@ 0x5c0308..0x5c0334`; step `flt_7DBD14`, amplitude `flt_7C9BD8`). sin × −64 rounds to exactly −64 / +64 at i = 64 / 192: bytes `0xC0` / `0x40` (the double-precision instance had `0xBF` / `0x41`); no other index lies within a float half-ulp of an integer (checked by emulation). Landmarks are now `0x80/0xAD/0xC0/0x80/0x40` (i = 0/32/64/128/192), the 32768 symmetry sum is unchanged, and the t=0 colour checksum is `0x5CA88BA4` (`env_render_unit`). |
 | 36 | Cloud-map alpha: the reimpl's shared texture resolver decoded the sky-map PCX as opaque RGB (alpha = 1 everywhere), so the cloud pass's alpha chain saturated and the cloud layer fully covered the dome — the pass-1 sky gradient never showed through (found at the 2026-07-18 sniper/aircraft retail A/B: our 08:00/06:32 skies read as all-cloud-ramp) | **FIXED (2026-07-18)**: the sky maps load through the witnessed per-pixel palette-luminance alpha synthesis `A[i] = (85·(r+g+b)) >> 8` `[orig: load_texture_from_archive @ 0x58b980 — table @ 0x58bc35..0x58bca9, per-pixel A @ 0x58bcee]` via `build_pcx_luminance_alpha_texture` + `EnvFile::_load_sky_map_texture*`; non-PCX cloud names keep the generic decode (retail's DDS-first path has no alpha synthesis). See §Sky dome, "Cloud texture load + the synthesized alpha" |
-| 37 | Water reflection-sample brightness at matched pose/clock: the 2026-08-16 retail-matched CP01 side-by-side (scripted onHook-bridge pose, mission clock 15:30, identical 80°×53.45° frustum — [render/render-lighting-parity-2026-08-15.md](../render/render-lighting-parity-2026-08-15.md)) measured our open near/mid water at mean L≈175–193 vs retail L≈63–69 (≈2.7–2.8×), neutral sky-mirror vs murky green, with every cited surface-chain term verifying except the reflection sample — retail's t2 reads ≈0.25× what ours read | **FIXED (2026-08-16, same session — the witnessed mirror dim was unported)**: `render_main_scene` does not hand the water shader the raw mirrored scene — at water detail ≥ 2 it multiplies the finished reflection RTT by vertex color `0x404040` (a fullscreen 4-vertex TRIANGLESTRIP drawn with `SetRenderState(D3DRS_SRCBLEND = D3DBLEND_DESTCOLOR, D3DRS_DESTBLEND = D3DBLEND_ZERO)` = out = dst × 64/255, then SRCALPHA/INVSRCALPHA restored) `[orig: detail gate @ 0x5c1727; blend states @ 0x5c1856..0x5c186a; quad + color @ 0x5c186c..0x5c189e; restore @ 0x5c18a3..0x5c18bf]`. The celestial bodies and sun glow draw AFTER the dim `[orig: @ 0x5c18fb/@ 0x5c1904]`. Ported as `env::kReflectionDimFactor` (engine/runtime/environment/water_mirror.h, the witness map) + a multiply ColorRect compositing over the mirror SubViewport (`water.cpp`), pinned by `water_test`'s dim test and the new `env_render_unit` texm3x2 row-constant pins (t1/t2 scales, vbase chain, 0.05 bump clamp — previously unpinned). Post-fix matched measurement at three pitches (−2°/−8.1°/−20°): waterline/mid-water luminance ratios 0.96–1.03 (were 2.5–2.7); committed-panel ratios 1.01/1.03/0.94. The pitch A/B also validated the 2026-07-15 `u_reflection_uv_scale` registration empirically (reflections stay registered at all three pitches in both engines) — candidate (a) retired. Residuals in-row: (1) the former nearest-row D-RMAT-8 attribution is retired by the 2026-08-22 gamma-framebuffer cutover and must be remeasured only after renderer validation closes; (2) the reimpl's mirrored celestials/sun-glow live in the shared 3D world and dim with the scene, where retail redraws them bright after the dim; (3) CLOSED 2026-09-14: the reimpl RTT is the shipped detail-3 512² (`kReflectionRttSize`, see the #30 allocator note); (4) the second fullscreen quad in the same tail (`Water_ShaderAdditiveFlat`, pass 0x700000, color 0xFF000000 @ 0x5c190c..0x5c1990) remains unwalked |
+| 37 | Water reflection-sample brightness at matched pose/clock: the 2026-08-16 retail-matched CP01 side-by-side (scripted onHook-bridge pose, mission clock 15:30, identical 80°×53.45° frustum — [render/render-lighting-parity-2026-08-15.md](../render/render-lighting-parity-2026-08-15.md)) measured our open near/mid water at mean L≈175–193 vs retail L≈63–69 (≈2.7–2.8×), neutral sky-mirror vs murky green, with every cited surface-chain term verifying except the reflection sample — retail's t2 reads ≈0.25× what ours read | **FIXED (2026-08-16, same session — the witnessed mirror dim was unported)**: `render_main_scene` does not hand the water shader the raw mirrored scene — at water detail ≥ 2 it multiplies the finished reflection RTT by vertex color `0x404040` (a fullscreen 4-vertex TRIANGLESTRIP drawn with `SetRenderState(D3DRS_SRCBLEND = D3DBLEND_DESTCOLOR, D3DRS_DESTBLEND = D3DBLEND_ZERO)` = out = dst × 64/255, then SRCALPHA/INVSRCALPHA restored) `[orig: detail gate @ 0x5c1727; blend states @ 0x5c1856..0x5c186a; quad + color @ 0x5c186c..0x5c189e; restore @ 0x5c18a3..0x5c18bf]`. The celestial bodies and sun glow draw AFTER the dim `[orig: @ 0x5c18fb/@ 0x5c1904]`. Ported as `env::kReflectionDimFactor` (engine/runtime/environment/water_mirror.h, the witness map) + a multiply ColorRect compositing over the mirror SubViewport (`water.cpp`), pinned by `water_test`'s dim test and the new `env_render_unit` texm3x2 row-constant pins (t1/t2 scales, vbase chain, 0.05 bump clamp — previously unpinned). Post-fix matched measurement at three pitches (−2°/−8.1°/−20°): waterline/mid-water luminance ratios 0.96–1.03 (were 2.5–2.7); committed-panel ratios 1.01/1.03/0.94. The pitch A/B also validated the 2026-07-15 `u_reflection_uv_scale` registration empirically (reflections stay registered at all three pitches in both engines) — candidate (a) retired. (That rescale itself was retired 2026-09-24 when the mirror took the main view's projection at the source aspect, #30.) Residuals in-row: (1) the former nearest-row D-RMAT-8 attribution is retired by the 2026-08-22 gamma-framebuffer cutover and must be remeasured only after renderer validation closes; (2) CLOSED 2026-09-24 ("Close the water mirror with its dim and the far-band sky redraw"): the dim and the sky redraw now close the mirror's overlay pass (`renderer::kMirrorOverlayOrder` in `engine/runtime/renderer/scene_overlay.h`: coronas `@ 0x5c85fd`, dim `@ 0x5c186c`, then `render_celestial_bodies(0)` `@ 0x5c18fb` and `render_skybox_sun_glow(0, 0)` `@ 0x5c1904` inside `Render_SetViewportFarDepth`'s band called `@ 0x5c18f4`, gated on `FrameFX_QualityAtLeast3` `@ 0x5c18c6`), so the mirrored bodies over the sky stay bright as in retail; the mirror glow's alpha is the no-occlusion (0, 0) form at the MIRROR camera's view dot (`env::mirror_glare_upl`), the discs keep the beauty submit value. The dim moved from the mirror SubViewport's canvas ColorRect into that overlay pass (`renderer::append_mirror_dim_overlay`, after the mirror's particle passes and coronas, before the decode terminal); (3) CLOSED 2026-09-14: the reimpl RTT is the shipped detail-3 512² (`kReflectionRttSize`, see the #30 allocator note; since 2026-09-24 512 rows at the source aspect, #30); (4) the second fullscreen quad in the same tail (`Water_ShaderAdditiveFlat`, pass 0x700000, color 0xFF000000 @ 0x5c190c..0x5c1990) remains unwalked; it adds black |
 
 **2026-08-29 static-batching correction to row 30.** The final historical
 "per graphic" performance note is superseded: opaque and alpha-tested static
@@ -1457,6 +1767,52 @@ frustum cull (fewer primitives, a lower root GPU time) for the same or a
 slightly lower frame time, so they stay; the extra draws they cost are the
 bins holding entities at two levels.
 
+## 2026-09-24 rendering parity pass
+
+The rendering parity pass (PR #678) re-read the sky, celestial, fog and water legs
+against the IDB and ported every divergence it found; the sections above carry the
+witnesses. By system:
+
+- **Sky dome** (#20): no depth write and far-pinned; the cloud pass drawn after the
+  bodies as its own Godot pass; the gradient, bodies and clouds on their own ladder
+  rungs (`kRungSkyDome` / `kRungSkyBody` / `kRungSkyClouds`); the main and mirror sky
+  gates; the NVG unpack and the thermal white dome (§Sky dome).
+- **Celestial bodies** (#32, #33): stars re-graded as never drawn (the renderer has no
+  caller) and deleted; the sun and moon draw through their authored FF_ST_AD_LUM
+  material with UPL_INTENSITY per disc; the bloom copy takes `sat(SelfLumColor × gain) × 2`
+  and tests the far band against the scene viewport's MaxZ; the glint and the glare draw
+  at the end of the post-particle overlay stage (§Celestial bodies).
+- **Fog** (§Fog policy): the overcast-folded start used as-is; type 0 keeps the 0.5 start;
+  the object fog distance follows the retail pass path; the viewmodel takes the dry fog.
+- **Colour blocks**: the exact `Env_TerrainLightCombined` word math; the blocks stay raw
+  under NVG (§Color state blocks).
+- **Frame clear** (#21): the beauty clear has no blink leg; the black clear is the water
+  mirror's.
+- **Water** (#29, #30, #35, #37): the strip constants, the single-precision sine LUT, the
+  world x/32, z/32 texcoords in the render basis, the scene-curve depth, the strict side
+  gates, the ungated nightvision redraw; the mirror's below-water eye, dry fog, per-pixel
+  per-draw CLIP, main-view projection at 512 rows, and its closing dim + far-band sky
+  redraw (§Water surface).
+- **Precipitation and murk**: both draw in the post-particle overlay stage; the
+  precipitation and corona shaders are deleted.
+
+### Open after the 2026-09-24 pass
+
+- The mirror RTT has round(512 × aspect) columns where retail has 512 (Godot renders
+  square pixels only; `env::reflection_rtt_size`), a device limitation.
+- The mirror clear is not modeled: retail clears the RTT to `Env_SkyfogBlock`, or black
+  under the indoors blink bit 0x2 (`render_main_scene @ 0x5c1474`, `@ 0x5c14a7..0x5c14ab`,
+  `@ 0x5c1597`, `@ 0x5c15a2`); the port's mirror camera has no environment of its own and
+  clears through the world's shared background, the beauty frame clear (lit water
+  underwater, grey under thermal).
+- The second fullscreen mirror quad (`Water_ShaderAdditiveFlat`, pass 0x700000, colour
+  0xFF000000, `@ 0x5c190c..0x5c1990`) is unwalked (#37 residual 4); it adds black.
+- The LOW water tier (detail ≤ 1, `render_water_strip @ 0x5c1d60`) stays unported (#29).
+- #37 residual (1): the reflection-sample brightness is remeasured only after renderer
+  validation closes.
+- At the 03tr-sun-sky fixture the saturated sun area reads 1747 samples against retail's
+  1823 with a matching centroid; the remaining brightness gap is unattributed.
+
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 
 `tests/env/jo_env_sweep_test.cpp` (gated on `OPENNOVA_JO_DIR`): 10 `.env` files, all parse
@@ -1471,7 +1827,6 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 - `Terrain_Init` attrib-bit-0x100000 water flag semantics.
 - Day/night `timeofday` enum mapping order (dawn/day/dusk/night → 1/2/3/4-or-0) — classification
   only, no gradient impact.
-- `dword_26C6450` "TOD minutes elapsed" consumer (`WeatherState::tod_minutes_elapsed` counts it; no reader found).
 - `dword_B763E8`, the debug page's `Loc: %i` row — unidentified; the F3 Environment window omits it.
 - `Precipitation_FallTick`'s wind-origin writes (`0x2c059f8..0x2c05a00` from the view matrix) have no readers — not ported.
 - **Closed at REN-4** — the pass-1 sky-gradient stage table: the effect is built
@@ -1497,11 +1852,11 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 | `.env` parse + defaults | **matching** (after fixes; divergences 8/9/11/13 tracked by design) |
 | TOD keyframe interpolation | **matching** (integer-faithful, hours space) |
 | Sun/moon direction math | **matching** (float-vs-fixed quantization noted, sub-1e-4) |
-| Fog policy | **matching** (env_render port; overcast coupling included) |
+| Fog policy | **matching** (env_render port; overcast coupling included; 2026-09-24: the folded start used as-is by every consumer, type 0 keeps the caller's 0.5, the object fog distance follows the retail pass path, the viewmodel takes the dry pass fog; §Fog policy) |
 | Weather tick / smoothing / lightning | **matching (2026-08-30)**: ONE weather home (`world::WeatherState`) on the simulation clock runs the clock, the oscillator, the hit blackout, the quake jitter, both flash sequencers with their thunder, the scalar springs under the recovered clamps, the cloud-scroll ramp, the two-stage iris modulator, all fourteen color blocks and the cloud-scroll tail in witnessed order; the WAC handlers, the 0x0A projection and the joiner's decoder read/write that home; the precipitation drops, the rain ambient, the overcast cross-fade and the F3 Environment page consume it. The `sunfade` channel is inert like retail (no max writer). |
 | Sky dome render: scroll / VS constants / mesh / advanced_clouds=0 | **matching** (including the six-color `2/255` upload and vs.1.1 color-output saturation; verified against `Color_UnpackToFloat4 @ 0x578900`, `render_skybox @ 0x579080`, and `build_sky_dome_mesh @ 0x578db0`) |
-| Sky dome per-fragment combine | **matching** (C7): structural port of the recovered two-pass spec (§Sky dome) folded into one Godot pass; D3D forward clip depth is reconstructed for the proximity dp3 while raster position remains native Godot reverse-Z |
-| Celestial + glare | **matching for the ported scope (ENG-2 celestial leg; #33 star field closed at REN-6, 2026-07-06; sun veil ported 2026-08-20)**: body placement (camera + dir × 64) + witnessed alphas + the #14 occlusion window/hysteresis/glow chain live in `engine/formats/env` behind EnvFile statics + `GlareOcclusion`; the 256-star field generates + twinkles per the witnessed table (`StarField`); the former ENG-3 lo-res-DDA ray residual closed with #209 (2026-07-08) — the glare ray now marches the `engine/runtime/terrain_query` port via `TerrainData.raycast_terrain`. 2026-08-20: the live `@ 0x5ad8b0` consumer witnessed + ported — the fullscreen white sun veil (alpha = dot³² glare byte) and the modulator-2 exposure stop-down (see the #14 closure). Frozen captures previously starved BOTH glare accumulators (occlusion window at one advance, modulator at its reset identity) — the capture refresh now settles them at the fixture pose through the witnessed per-tick math (`Celestial.settle_glare_occlusion`, `Weather.settle_exposure` — capture-seam only, live cadence unchanged). The 2026-08-20 round also witnessed + ported the celestial AXIS map (`godot/src/util/axes.h` — the #14 closure carries the derivation), the water-reflected sun glint (`update_sun_glare @ 0x5ad130` — the "glint" body leg + the veil secondary term), and the glare gate ray's start-height lift/coarse-then-fine cadence |
+| Sky dome per-fragment combine | **matching** (C7): structural port of the recovered two-pass spec (§Sky dome) as two Godot passes (gradient; clouds after the bodies, since 2026-09-24), no depth write, far-pinned, NVG/thermal constants ported; D3D forward clip depth is reconstructed for the proximity dp3 while raster position remains native Godot reverse-Z |
+| Celestial + glare | **matching for the ported scope (ENG-2 celestial leg; #33 star field re-graded 2026-09-24: never drawn; sun veil ported 2026-08-20; bodies through their authored SELFLUM material 2026-09-24)**: body placement (camera + dir × 64) + witnessed alphas (riding UPL_INTENSITY per disc into the authored FF_ST_AD_LUM material, the bloom copy at `sat(SelfLumColor × gain) × 2` and the far band tested against the scene viewport's MaxZ, 2026-09-24) + the #14 occlusion window/hysteresis/glow chain live in `engine/formats/env` behind EnvFile statics + `GlareOcclusion`; the former ENG-3 lo-res-DDA ray residual closed with #209 (2026-07-08) — the glare ray now marches the `engine/runtime/terrain_query` port via `TerrainData.raycast_terrain`. 2026-08-20: the live `@ 0x5ad8b0` consumer witnessed + ported — the fullscreen white sun veil (alpha = dot³² glare byte) and the modulator-2 exposure stop-down (see the #14 closure). Frozen captures previously starved BOTH glare accumulators (occlusion window at one advance, modulator at its reset identity) — the capture refresh now settles them at the fixture pose through the witnessed per-tick math (`Celestial.settle_glare_occlusion`, `Weather.settle_exposure` — capture-seam only, live cadence unchanged). The 2026-08-20 round also witnessed + ported the celestial AXIS map (`godot/src/util/axes.h` — the #14 closure carries the derivation), the water-reflected sun glint (`update_sun_glare @ 0x5ad130` — the glint leg, drawn in the post-particle overlay stage since 2026-09-24, + the veil secondary term), and the glare gate ray's start-height lift/coarse-then-fine cadence |
 | BMS overrides | **matching** application semantics via EnvFile's non-persistent override layer (runtime apply on load / clear on unload; base file never mutated) |
 | iris / terrain_rgb | iris **matching for the ported scope** after #17 and D-RLIT-2: the live modulator is fed by the marched three-point camera-ray average with per-sample indoor/outdoor classification and sun-occlusion rays; the smoothed ÷64 gain reaches shaders. D-RLIT-2 records the bounded entity/light-group geometry residuals. terrain_rgb **matching** after the 2026-07-13 correction to #19: tile overlay HALF×2X and the effects reciprocal are observable; the foliage FULL-tint sample is overwritten before emission, the bake is dead, and the terrain surface is faithfully untinted |
 | Load pipeline overcast precedence | **matching** after C6 correction (additive-after-success; the reimpl two-table model is live since 2026-08-30 — `overcast.def` as the overcast table, the cross-fade by the weather's overcast blend) |
@@ -1514,7 +1869,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
   `OPENNOVA_JO_DIR`-gated install sweep.
 - `godot/src`: EnvFile fog/day-phase/glare/override/`to_bytes` surface +
   the color smoother (now engine-only `ColorChannelState`, ADR 0043 slice G9); engine-faithful `environment`/`sky`/
-  `water`/`weather`; new `celestial` + two celestial shaders;
+  `water`/`weather`; new `celestial` + two celestial shaders (deleted 2026-09-24, the bodies draw through their authored materials);
   BMS override fields through `MissionData`; runtime apply/clear in
   `game_world`.
 - The former `godot/modtools` Environment workspace unified its preview onto
@@ -1589,10 +1944,13 @@ were closed by the grill sections above:
 | §9.1 `.trn`/`.env` pair load order | Closed: two-pass loader documented (§Load pipeline) via `Terrain_LoadEnvironmentConfig @ 0x610940` |
 | §9.2 `terrain_rgb` reciprocal consumer | Closed: `EffectWorld_TickInstancesAndLightScale @ 0x5aa170` effect-brightness compensation (§iris / terrain_rgb) |
 
-New finding kept open from the audit: `Environment_UpdateWeatherTick @ 0x57e9b0` has signature
-`void(int waterHeight, int isReflection)`. The reimpl weather tick does not differentiate a
-reflection pass; whether those parameters drive a reflection-vs-main-pass rendering delta is
-unverified. Tracked.
+The audit's one open finding, that `Environment_UpdateWeatherTick @ 0x57e9b0` has signature
+`void(int waterHeight, int isReflection)`, is closed (R9-15, 2026-09-24): the IDB type is
+bogus. `Environment_UpdateWeatherTick @ 0x57e9b0` takes no arguments (it reads only
+`[ebp-4]` / `[ebp-0Ch]`; its sole caller `@ 0x526774` pushes nothing). There is no
+reflection-specific weather or sky delta; the mirror's sky differences are the gates in
+[render/render-occlusion-re.md](../render/render-occlusion-re.md) §4 and `SkyDome_RenderWithSkyfog(0, 0)`
+(§Sky dome).
 
 ### Visual-parity check dispositions (sky / fog / weather / celestial)
 
@@ -1602,7 +1960,7 @@ dispositioned analytically by the grill instead:
 
 | Check | Disposition |
 |---|---|
-| Reflection-pass sky in water surfaces | **Open** — see the weather-tick `(waterHeight, isReflection)` finding above |
+| Reflection-pass sky in water surfaces | Closed (2026-09-24): no weather-tick parameters exist (see above); the mirror draws its sky under its own gate (`render_main_scene @ 0x5c1342..0x5c1353`) with `SkyDome_RenderWithSkyfog(0, 0)` |
 | Fog-type curves (type 0 exponential, types 2/3 linear starts) | Closed numerically: device-layer mapping witnessed (§Fog policy) |
 | Sun position within ~1° of retail | Closed: sun/moon direction verdict **matching** (float-vs-fixed quantization sub-1e-4, §Verdicts) |
 | Sky horizon gradient (skybase → skybright → skyhighlight) | Closed: VS constant map verified and `sky` aligned (§Sky dome) |
@@ -1650,7 +2008,7 @@ roadmap slice C7).
 | 0x5d7ea0 | `render_scene_with_water_reflection` | (context map, 2026-09-01) | the LIVE beauty scene's PolyTrn context floats after the 16-float view matrix: [3]=the camera FOV in degrees (`dword_A7839C/65536` `@ 0x5d8037`; `PolyTrn_RenderFrame` feeds it to the clip-cone builder `sub_603DA0` `@ 0x60eaf6` — corrected 2026-09-14 from "fog dist"), [4]=water plane −0.1, [5]=quadtree quality scale **1.0** `@ 0x5d8047`, [6]=view dist (`word_26C681E`, the high word of `Env_FogDistCurrent`, `@ 0x5d8052`; `> 0` overrides the traversal far slab `flt_8493E8` = 2000 `@ 0x60eb7e`), [9]=plane flag, [10]=foliage-collect **1** `@ 0x5d801e`, [11]=4 overlay layers, [13]=below-water |
 | 0x5c1240 | `render_main_scene` | (context map, 2026-09-01) | the offscreen/mirror scene passes [5]=**1.0** `@ 0x5c154d` (same tessellation as beauty — the lo-res-mirror-terrain reading is refuted) and [10]=foliage-collect **0** `@ 0x5c1522` (no near-foliage patches, and the far key list stays empty) |
 | 0x60eac0 | `PolyTrn_RenderFrame` | (field consumers, 2026-09-01) | `flt_319FB2C = ctx[5] × flt_8493D8` `@ 0x60eb4a` scales the node-size subdivide test; `dword_319FB34 = ctx[10]` `@ 0x60eb44` gates `Terrain_CollectNearFoliagePatches` at `Terrain_TraverseQuadtreeNode @ 0x609069` |
-| 0x5d04c0 | `terrain_scene_render` | (context note, 2026-09-01) | the separate low-detail/no-water scene path passes ctx[5] = scoped ? 1.66 : 0.5 `@ 0x5d05dc..0x5d05f0` — NOT the beauty-vs-mirror comparison pair |
+| 0x5d04c0 | `NVG_RenderSceneToTarget` | (context note, 2026-09-01) | the separate low-detail/no-water scene path passes ctx[5] = scoped ? 1.66 : 0.5 `@ 0x5d05dc..0x5d05f0` — NOT the beauty-vs-mirror comparison pair |
 
 Plus explanatory comments at 0x57db30/0x57dbca/0x57dbf5/0x57dbf7/0x57dce0 (loader),
 0x60fc66/0x57d4c0/0x606030 (terrain tint), 0x5c7550/0x5c7a00 (exposure), 0x57e440/0x57d940/
@@ -1695,15 +2053,15 @@ checkpoint taken.
 | 0x26c6880 | `dword_26C6880` | `Env_RainPctCurrent` | the `(d+31)>>5` spring at `@ 0x57ef01`; debug label `"Rain: %i%%"` `[orig: @ 0x4efa91]`; >48 gates weather-particle fall decay `[@ 0x5de916]` |
 | 0x26c6884 | `dword_26C6884` | `Env_RainPctTarget` | net-synced (`@ 0x430311`), serialized (`@ 0x4ffae8`), snap (`@ 0x57d2d3`) |
 | 0x26c688c / 0x26c6890 | `dword_26C688C/90` | `Env_RainPctStep` / `Env_RainPctMax` | the spring's step/clamp slots |
-| 0x5c8510 | `sub_5C8510` (5-byte decompile-fail) | `Water_RenderReflectedWorldScene` | the reflected-world subscene (header call + fall-through body to retn `@ 0x5c8af8`); builds the water clip-plane texture matrix + arms `g_WaterMirrorActive` |
+| 0x5c8510 | `sub_5C8510` (5-byte decompile-fail) | `Water_RenderReflectedWorldScene` | the reflected-world subscene (header call + fall-through body; the "retn `@ 0x5c8af8`" extent recorded here was corrected 2026-09-24 to `0x5c8510..0x5c860b`, a tail `jmp sub_67CAA0`); builds the water clip-plane texture matrix + arms `g_WaterMirrorActive` |
 | 0x5c2780 | `sub_5C2780` | `Water_ReflectionPrerender` | packs the live camera block; sole reflection caller of `render_main_scene` |
-| 0x5c90a0 | `sub_5C90A0` | `Terrain_CollectVisibleEntitiesForReflection` | the reflection pass's OWN visibility collection (sole caller `render_main_scene @ 0x5c16fc`): above water every collector gets `filterMask = 0x400`; a below-water view collects unfiltered (`filterMask = 0`); also recomputes the LOD-scale globals `flt_298055C/flt_2980558` |
+| 0x5c90a0 | `sub_5C90A0` | `Terrain_CollectVisibleEntitiesForReflection` | the reflection pass's OWN visibility collection (sole caller `render_main_scene @ 0x5c16fc`): above water every collector gets `filterMask = 0x400`; a below-water view collects unfiltered (`filterMask = 0`); also recomputes the LOD-scale globals `g_RlodFrameScale/g_RlodFrameScaleInv` |
 | 0x40e20a | (in `Entity_InitFromModel`) | entity+36 `\|= 0x400` REFLECTABLE | the flag's SOLE writer: set iff `ItemDefType(+0x5C)==1` (vehicle); read by the reflection collectors' filterMask and the decal projectors `@ 0x5cc924`/`@ 0x5ce59b` |
 | 0x60f150 | `sub_60F150` | `PolyTrn_ResetFrameStatsAndRender` | zeroes 7 frame counters -> `PolyTrn_RenderFrame` |
 | 0x680080 / 0x6800a0 | `sub_680080/A0` | `GTexRT_SelectThunk` / `GTexRT_RestoreThunk` | the RTT begin/end pair (`GTexRT_Select @ 0x67fa90`) around `Water_ReflectionTexture` |
 
 Plus comments at 0x5c8510/0x5c1240 (the full reflection-pipeline walks),
-0x27e2e38 (the star-entry layout), 0x5ac850/0x5ac010. The `sub_58AA80`
+0x27e2e38 (the star-entry layout), 0x5ac850/0x5ac010. The `Render_ResetFixedFunctionState`
 NORET mis-flag was cleared (it returns; the flag was truncating every
 fall-through caller's analysis).
 

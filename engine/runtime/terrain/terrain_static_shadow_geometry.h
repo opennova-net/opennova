@@ -119,10 +119,10 @@ struct TerrainStaticShadowResolvedGeometry {
 	// Model-local names retained because material parameter bytes are local
 	// indices until the retail loader maps them onto the global 96-slot bus.
 	std::vector<std::string> control_register_names;
-	std::array<float, 3> local_min{};
-	std::array<float, 3> local_max{};
-	bool has_bounds = false;
-	bool bounds_exact = true;
+	// The model sphere (model+0x14, GHDR's max radius in 16.16) the tile
+	// collector extends its test by [orig: Terrain_CollectAndRenderTileModels
+	// @0x60D475; world::model_bound_radius_q16_from_3di carries the load].
+	int32_t model_radius_fixed = 0;
 };
 
 // Evaluate the same AlphaGen, complete row-vector UV transform, and diffuse

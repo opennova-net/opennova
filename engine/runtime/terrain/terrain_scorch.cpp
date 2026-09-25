@@ -1,5 +1,4 @@
 #include <runtime/terrain/terrain_scorch.h>
-#include <base/io/hash.h>
 
 #include <algorithm>
 #include <array>
@@ -9,7 +8,6 @@
 namespace opennova::terrain {
 namespace {
 
-constexpr int kMaximumAnisotropy = 16;
 // Bucket cell: the 512-unit routed sector, the coarsest page span.
 constexpr int64_t kSectorCellQ16 = INT64_C(512) << 16;
 // A page spans at most one cell per axis, so its inclusive Q16 extent touches
@@ -26,8 +24,6 @@ uint64_t sector_cell_key(int64_t cell_x, int64_t cell_z) noexcept {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(cell_x)) << 32) |
 			static_cast<uint64_t>(static_cast<uint32_t>(cell_z));
 }
-
-uint64_t mix_entry(uint64_t hash, const TerrainScorchEntry &entry) noexcept;
 
 int wrap(int value, int size) noexcept {
 	value %= size;
@@ -68,51 +64,15 @@ RgbaF sample_mip(const Rgba8Image &mip, float u, float v) noexcept {
 	return result;
 }
 
-RgbaF lerp(RgbaF a, RgbaF b, float t) noexcept {
-	RgbaF result;
-	for (int channel = 0; channel < 4; ++channel) {
-		result.channels[channel] = a.channels[channel] +
-				(b.channels[channel] - a.channels[channel]) * t;
+RgbaF sample_nearest_level(const TerrainScorchTexture &texture,
+		float u, float v, float texels_per_pixel) noexcept {
+	std::size_t level = 0;
+	if (texels_per_pixel > 1.0f) {
+		level = static_cast<std::size_t>(std::clamp(
+				static_cast<int>(std::floor(std::log2(texels_per_pixel) + 0.5f)),
+				0, static_cast<int>(texture.mips.size()) - 1));
 	}
-	return result;
-}
-
-RgbaF sample_trilinear(const TerrainScorchTexture &texture,
-		float u, float v, float lod) noexcept {
-	lod = std::clamp(lod, 0.0f,
-			static_cast<float>(texture.mips.size() - 1));
-	const std::size_t lower = static_cast<std::size_t>(std::floor(lod));
-	const std::size_t upper = std::min(lower + 1, texture.mips.size() - 1);
-	return lerp(sample_mip(texture.mips[lower], u, v),
-			sample_mip(texture.mips[upper], u, v),
-			lod - static_cast<float>(lower));
-}
-
-RgbaF sample_anisotropic(const TerrainScorchTexture &texture,
-		float u, float v, float du_dx, float dv_dy) noexcept {
-	const float rho_x = std::abs(du_dx) * texture.mips[0].width;
-	const float rho_y = std::abs(dv_dy) * texture.mips[0].height;
-	const float major = std::max({1.0f, rho_x, rho_y});
-	const float minor = std::max(1.0f, std::min(rho_x, rho_y));
-	const float ratio = std::clamp(major / minor, 1.0f,
-			static_cast<float>(kMaximumAnisotropy));
-	const int taps = std::clamp(static_cast<int>(std::ceil(ratio)),
-			1, kMaximumAnisotropy);
-	const float lod = std::log2(std::max(1.0f, major / taps));
-	RgbaF result;
-	const bool along_u = rho_x >= rho_y;
-	for (int tap = 0; tap < taps; ++tap) {
-		const float offset =
-				(static_cast<float>(tap) + 0.5f) / taps - 0.5f;
-		const float sample_u = u + (along_u ? offset * du_dx : 0.0f);
-		const float sample_v = v + (along_u ? 0.0f : offset * dv_dy);
-		const RgbaF value = sample_trilinear(texture, sample_u, sample_v, lod);
-		for (int channel = 0; channel < 4; ++channel) {
-			result.channels[channel] += value.channels[channel];
-		}
-	}
-	for (float &channel : result.channels) channel /= taps;
-	return result;
+	return sample_mip(texture.mips[level], u, v);
 }
 
 uint8_t unorm_byte(float value) noexcept {
@@ -120,15 +80,6 @@ uint8_t unorm_byte(float value) noexcept {
 			static_cast<int>(std::lround(
 					std::clamp(value, 0.0f, 1.0f) * 255.0f)),
 			0, 255));
-}
-
-uint64_t mix_entry(uint64_t hash, const TerrainScorchEntry &entry) noexcept {
-	hash = io::fnv1a64_value(hash, entry.texture_index);
-	hash = io::fnv1a64_value(hash, entry.minimum_x_q16);
-	hash = io::fnv1a64_value(hash, entry.minimum_z_q16);
-	hash = io::fnv1a64_value(hash, entry.maximum_x_q16);
-	hash = io::fnv1a64_value(hash, entry.maximum_z_q16);
-	return hash;
 }
 
 } // namespace
@@ -217,13 +168,10 @@ bool TerrainScorchRegistry::overlaps_page(const TerrainScorchEntry &entry,
 // sector cells the page's inclusive extent touches, merged ascending by
 // record index (each cell list is ascending, a record may sit in several).
 bool TerrainScorchRegistry::collect(const TerrainTilePageKey &page,
-		std::vector<TerrainScorchEntry> *entries,
-		uint64_t &content_stamp, uint32_t &count) const {
+		std::vector<TerrainScorchEntry> &entries) const {
 	const int span = TerrainTileCompositionCache::page_world_span(
 			page.page_lod_level);
 	if (span == 0) return false;
-	content_stamp = io::kFnv1a64Offset;
-	count = 0;
 	const int64_t page_minimum_x =
 			(static_cast<int64_t>(page.sector_origin_x) + page.page_local_x) << 16;
 	const int64_t page_minimum_z =
@@ -258,10 +206,7 @@ bool TerrainScorchRegistry::collect(const TerrainTilePageKey &page,
 	}
 
 	const auto emit = [&](const TerrainScorchEntry &entry) {
-		if (!overlaps_page(entry, page)) return;
-		if (entries != nullptr) entries->push_back(entry);
-		content_stamp = mix_entry(content_stamp, entry);
-		++count;
+		if (overlaps_page(entry, page)) entries.push_back(entry);
 	};
 	if (cells_overflowed) {
 		// A page wider than one sector cell is not a routed page; keep the
@@ -290,24 +235,13 @@ bool TerrainScorchRegistry::collect(const TerrainTilePageKey &page,
 			emit(entries_[best_index]);
 		}
 	}
-	content_stamp = io::fnv1a64_value(content_stamp, count);
 	return true;
-}
-
-TerrainScorchPageStamp TerrainScorchRegistry::stamp(
-		const TerrainTilePageKey &page) const {
-	TerrainScorchPageStamp result;
-	result.valid = collect(page, nullptr, result.content_stamp,
-			result.entry_count);
-	if (!result.valid) result = TerrainScorchPageStamp{};
-	return result;
 }
 
 TerrainScorchPagePlan TerrainScorchRegistry::plan(
 		const TerrainTilePageKey &page) const {
 	TerrainScorchPagePlan result;
-	uint32_t count = 0;
-	result.valid = collect(page, &result.entries, result.content_stamp, count);
+	result.valid = collect(page, result.entries);
 	if (!result.valid) result = TerrainScorchPagePlan{};
 	return result;
 }
@@ -324,14 +258,16 @@ bool compose_terrain_scorches(
 			page.height != static_cast<uint32_t>(job.layout.texture_dimension)) {
 		return false;
 	}
-	const float inverse_q16 = 1.0f / 65536.0f;
-	const float world_origin_x = static_cast<float>(
-			job.target.page.sector_origin_x + job.target.page.page_local_x);
-	const float world_origin_z = static_cast<float>(
-			job.target.page.sector_origin_z + job.target.page.page_local_z);
-	const float world_per_texel = static_cast<float>(job.layout.world_span) /
-			job.layout.texture_dimension;
 	const int dimension = job.layout.texture_dimension;
+	const int64_t origin_x_q16 = static_cast<int64_t>(
+			job.target.page.sector_origin_x + job.target.page.page_local_x) << 16;
+	const int64_t origin_z_q16 = static_cast<int64_t>(
+			job.target.page.sector_origin_z + job.target.page.page_local_z) << 16;
+	const double pixels_per_q16 = static_cast<double>(dimension) /
+			static_cast<double>(static_cast<int64_t>(job.layout.world_span) << 16);
+	const auto first_covered = [dimension](double edge) {
+		return std::clamp(static_cast<int>(std::ceil(edge)), 0, dimension);
+	};
 
 	for (const TerrainScorchEntry &entry : plan.entries) {
 		if (!terrain_scorch_texture_index_valid(entry.texture_index) ||
@@ -340,42 +276,54 @@ bool compose_terrain_scorches(
 		}
 		const TerrainScorchTexture &texture = textures[entry.texture_index];
 		if (!texture.is_valid()) return false;
-		const float minimum_x = entry.minimum_x_q16 * inverse_q16;
-		const float minimum_z = entry.minimum_z_q16 * inverse_q16;
-		const float maximum_x = entry.maximum_x_q16 * inverse_q16;
-		const float maximum_z = entry.maximum_z_q16 * inverse_q16;
-		const float width = maximum_x - minimum_x;
-		const float height = maximum_z - minimum_z;
-		if (!(width > 0.0f) || !(height > 0.0f)) return false;
-		const int x0 = std::clamp(static_cast<int>(std::floor(
-				(minimum_x - world_origin_x) / world_per_texel)), 0, dimension);
-		const int y0 = std::clamp(static_cast<int>(std::floor(
-				(minimum_z - world_origin_z) / world_per_texel)), 0, dimension);
-		const int x1 = std::clamp(static_cast<int>(std::ceil(
-				(maximum_x - world_origin_x) / world_per_texel)), 0, dimension);
-		const int y1 = std::clamp(static_cast<int>(std::ceil(
-				(maximum_z - world_origin_z) / world_per_texel)), 0, dimension);
-		const float du_dx = world_per_texel / width;
-		const float dv_dy = world_per_texel / height;
-		for (int y = y0; y < y1; ++y) {
-			const float world_z = world_origin_z +
-					(static_cast<float>(y) + 0.5f) * world_per_texel;
-			if (world_z < minimum_z || world_z >= maximum_z) continue;
-			const float v = (world_z - minimum_z) / height;
-			for (int x = x0; x < x1; ++x) {
-				const float world_x = world_origin_x +
-						(static_cast<float>(x) + 0.5f) * world_per_texel;
-				if (world_x < minimum_x || world_x >= maximum_x) continue;
-				const float u = (world_x - minimum_x) / width;
-				const RgbaF source = sample_anisotropic(
-						texture, u, v, du_dx, dv_dy);
+		// The record's quad: vertex 0 (UV 0,0) at (minimum X, maximum Z),
+		// vertex 3 (UV 1,1) at (maximum X, minimum Z) — the page Z axis runs
+		// against the record's mission-plane Y, so V grows toward minimum Z.
+		// [orig: PolyTrn_RenderTile scorch positions @ 0x60DFD1..0x60E02A,
+		// UV (0,0)-(1,1) @ 0x60E06B..0x60E08E]
+		const double x0 = static_cast<double>(entry.minimum_x_q16 - origin_x_q16) *
+				pixels_per_q16;
+		const double x1 = static_cast<double>(entry.maximum_x_q16 - origin_x_q16) *
+				pixels_per_q16;
+		const double z_v0 = static_cast<double>(entry.maximum_z_q16 - origin_z_q16) *
+				pixels_per_q16;
+		const double z_v1 = static_cast<double>(entry.minimum_z_q16 - origin_z_q16) *
+				pixels_per_q16;
+		const double width = x1 - x0;
+		const double height = z_v0 - z_v1;
+		if (!(width > 0.0) || !(height > 0.0)) return false;
+		// Scorch textures load with flags 0 (WRAP, LINEAR, MIPFILTER POINT):
+		// bilinear on the level nearest the pixel footprint.
+		// [orig: Terrain_LoadScorchTextures @ 0x604CE0 via
+		// Texture_LoadByNameWithChannel flags @ 0x58B728; flag decode
+		// apply_texture_stages @ 0x68084C..0x680870]
+		const float texels_per_pixel = static_cast<float>(std::max(
+				texture.mips.front().width / width,
+				texture.mips.front().height / height));
+		const int x_begin = first_covered(x0);
+		const int x_end = first_covered(x1);
+		const int y_begin = first_covered(z_v1);
+		const int y_end = first_covered(z_v0);
+		for (int y = y_begin; y < y_end; ++y) {
+			const float v = static_cast<float>((z_v0 - y) / height);
+			for (int x = x_begin; x < x_end; ++x) {
+				const float u = static_cast<float>((x - x0) / width);
+				const RgbaF source = sample_nearest_level(
+						texture, u, v, texels_per_pixel);
 				const std::size_t offset = 4u *
 						(static_cast<std::size_t>(y) * page.width + x);
 				for (int channel = 0; channel < 3; ++channel) {
+					// Stage colour MODULATE2X(TEXTURE, 0xFF808080) = tex *
+					// 256/255 saturated; DESTCOLOR/SRCCOLOR doubles it into
+					// the target. [orig: PolyTrn_RenderTile diffuse
+					// @ 0x60E033..0x60E04C; scorch mode 0x300628 @ 0x604CEE]
+					const float stage = std::clamp(
+							source.channels[channel] * (256.0f / 255.0f),
+							0.0f, 1.0f);
 					const float destination =
 							page.pixels[offset + channel] / 255.0f;
 					page.pixels[offset + channel] = unorm_byte(
-							2.0f * source.channels[channel] * destination);
+							2.0f * stage * destination);
 				}
 				// The scorch loop runs inside the same
 				// COLORWRITEENABLE=7 window as the .til overlays, so its

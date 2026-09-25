@@ -162,6 +162,23 @@ EntityLightingUniforms compute_entity_lighting(const WorldLightingBlock &block,
 	return out;
 }
 
+EntityLightingState static_row_entity_lighting(bool is_building, int32_t robj_index,
+                                               float light_transfer, bool contained) {
+	EntityLightingState out;
+	if (is_building) {
+		// The building batch: its own daylight aux, the lerp on ROBJ 1+
+		// [orig: Terrain_RenderSectorModels @ 0x5c5df2..0x5c5e00;
+		// collect_render_objects_for_batch @ 0x5d9156..0x5d9162].
+		out.interior_lerp = robj_index != 0;
+		out.interior_daylight = light_transfer;
+		return out;
+	}
+	// A contained non-person static: the 0x80 flag over the stack-base aux 0
+	// [orig: @ 0x5c7c05..0x5c7c14].
+	out.interior_lerp = contained;
+	return out;
+}
+
 std::array<float, 3> ff_vertex_light(const EntityLightingUniforms &u,
                                      const std::array<float, 3> &normal,
                                      const std::array<float, 3> &to_light) {

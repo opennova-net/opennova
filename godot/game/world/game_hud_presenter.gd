@@ -55,6 +55,7 @@ var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lan
 var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
 var _inset_scope: HudInsetScope = null
 var _sights_card: HudSightsCard = null # child of the overlay (per-row blend controls)
+var _nvg_scene_card_published := false
 var _scope_circle_mask: HudScopeCircleMask = null # child of the overlay (the scoped annulus)
 var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
@@ -288,8 +289,6 @@ func ensure_game_hud() -> void:
 	_view_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_view_effects, false, Node.INTERNAL_MODE_BACK)
 	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_view_effects.set_environment(
-			_world.get_environment_node() if _world != null else null)
 	_inset_scope = HudInsetScope.new()
 	_inset_scope.name = "InsetScope"
 	_inset_scope.show_behind_parent = true
@@ -454,7 +453,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var fov_deg := 80.0
 	var binoculars_view_active := false
 	var binocular_range := 1
-	var nvg_visible := false
+	var nvg_mask := false
+	var nvg_lens := false
+	var nvg_sights_in_scene := false
 	var nvg_gain := 0
 	var vehicle_attack_context := false
 	var keep_crosshair_while_aimed := false
@@ -478,7 +479,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 		binocular_range = lv.aim_range_units
 		fov_deg = lv.fov_h_deg
 		binoculars_view_active = lv.binoculars_view_active
-		nvg_visible = lv.nvg_visible
+		nvg_mask = lv.nvg_mask_visible
+		nvg_lens = lv.nvg_lens_active
+		nvg_sights_in_scene = lv.nvg_sights_in_scene
 		nvg_gain = lv.nvg_gain
 		vehicle_attack_context = lv.vehicle_attack_context
 		stance = lv.hud_stance
@@ -609,26 +612,33 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_apply_objectives()
 	# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80],
 	# suppressed by the binocular view like the ported shell HUD folded it.
+	# The NVG Sighted arm draws the card into the NVG scene instead of over the
+	# frame (lv.nvg_sights_in_scene, the engine's frame_fx_nvg_view).
 	if _sights_card != null:
-		_sights_card.set_card_up(scope_card and not binoculars_view_active)
+		_sights_card.set_card_up(scope_card and not binoculars_view_active
+				and not nvg_sights_in_scene)
+		_publish_nvg_scene_card(nvg_sights_in_scene)
 	# The scoped-view circle mask. retail: the scene frame's overlay fork picks
 	# binoculars, then the Sighted card, then the Scoped card -- and only the
 	# Scoped arm chains the mask, unconditionally, with one argument saying the
 	# card drew no AUTHORED row (a missing texture does not change that count).
 	# The fork itself is the engine's (HudPos.scoped_view_overlay ->
 	# runtime/hud/scope_circle_mask.h); the vehicle-attack context clears both
-	# selector bytes before it. See docs/interface/hud-re.md.
+	# selector bytes before it. See docs/interface/hud-re.md. Under the NVG
+	# composite's Scoped arm the lens draws its own ring, so only the
+	# unit-scale reticle rides here (lv.nvg_lens_active, the engine's
+	# frame_fx_nvg_view).
 	if _scope_circle_mask != null:
 		var card_selectors := scope_card and not vehicle_attack_context \
 				and weapon != null
 		var overlay_branch := HudPos.scoped_view_overlay(binoculars_view_active,
 				card_selectors and weapon.sighted_selector,
 				card_selectors and weapon.scoped_selector)
-		_scope_circle_mask.set_mask_state(overlay_branch == 3,
-				weapon == null or weapon.sights.is_empty())
+		_scope_circle_mask.set_mask_state(overlay_branch == 3 or nvg_lens,
+				weapon == null or weapon.sights.is_empty(), nvg_lens)
 	if _view_effects != null:
 		_view_effects.update_view(binoculars_view_active, binocular_range,
-				nvg_visible, nvg_gain)
+				nvg_mask, nvg_gain)
 		_view_effects.update_damage_feedback(flash_white, flash_red,
 				flash_revive, flash_revive_channel)
 	# retail: while the white hit flash burns, the whole HUD overlay pass
@@ -1103,6 +1113,20 @@ func cycle_sight_scale() -> void:
 		return
 	_game_hud.cycle_sight_scale()
 	_push_sight_state()
+
+
+## The card rows the NVG Sighted arm draws into the scene, re-published every
+## frame the arm is up (the rows follow the sight-scale and slide state) and
+## cleared once when it drops.
+func _publish_nvg_scene_card(up: bool) -> void:
+	if not up and not _nvg_scene_card_published:
+		return
+	var frame_fx: FrameFx = _world.get_frame_fx() if _world != null else null
+	if frame_fx == null or _game_hud == null:
+		return
+	_sights_card.publish_nvg_scene_rows(frame_fx, _game_hud.get_viewport_rect().size,
+			_aspect_mode, up)
+	_nvg_scene_card_published = up
 
 
 ## Live sight-scale and zero/rangefinder slide state from the equipped slot.

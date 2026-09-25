@@ -1,7 +1,14 @@
 # Shader validation contract
 
-The checked-in shader set is a closed inventory: 154 `.gdshader` entry points
-and 39 `.gdshaderinc` implementation files (193 resources total). The executable
+The checked-in shader set is a closed inventory: 166 `.gdshader` entry points
+and 43 `.gdshaderinc` implementation files (209 resources total; pinned by
+`shader_resource_validation_test.gd`, repinned 2026-09-24 after the rendering
+parity pass: the celestial, light-corona, precipitation and CanvasItem NVG
+post shaders were deleted; the far-side particle wrappers and their include,
+the thermal particle wrappers, the three tracer ribbon wrappers,
+`sky_clouds.gdshader`, and the `effect_fog`, `foliage_mask` and `sky`
+includes were added).
+The executable
 contract is `godot/shaders/provenance.json`, validated by
 `godot/tests/shader_resource_validation_test.gd` (every resource loaded through
 Godot). The textual pins over the shader and C++ sources (the former
@@ -55,9 +62,11 @@ corpus).
 
 The manifest distinguishes matching behavior from matching behavior with
 named, bounded residuals. It never converts an open divergence into a pass.
-The important retained exceptions are D-TERRAIN-7/-9 and
-D-FOLIAGE-7/-9/-10. Their scopes and current evidence remain authoritative in
-the linked RE records and divergence ledger.
+The retained ledger exceptions are D-TERRAIN-7 and D-FOLIAGE-7 (D-TERRAIN-9
+retired with the ONED terrain preview on 2026-08-24; D-FOLIAGE-9/-10 and
+D-RORD-7 closed 2026-09-24), plus the water surface's named mirror residuals.
+Their scopes and current evidence remain authoritative in the linked RE records
+and divergence ledger.
 
 Lighting validation is layered:
 
@@ -125,7 +134,7 @@ semantic derivations stay in the cited RE documents.
 | Terrain temporary-blue composite | `0x60e0c6` | `PolyTrn_RenderTile` (`0x60da70`) |
 | Terrain projected lights | `0x5aa830` | `Light_SetupTerrainProjectedPass` |
 | Foliage instances/lightmap/assets | `0x5ffdd0`, `0x5ff7a0`, `0x6015b7` | `generate_foliage_instances_0`, `Foliage_CreateLightmapBlendPS`, `Foliage_LoadDefAssets` (`0x601260`) |
-| Max-quality foliage c7/c8 projection | `0x60a220`, `0x6006f0` | `Foliage_RenderFarPatches` (`0x609de0`), `Foliage_SetupVertexShaderConstants` (`0x600450`) |
+| Max-quality foliage c7/c8 projection | `0x60a220`, `0x6006f0` | `Foliage_RenderDetailPatches` (`0x609de0`), `Foliage_SetupVertexShaderConstants` (`0x600450`) |
 | Water programs | `0x5c19b0` | `Water_InitSurfaceShaders` |
 | Sky/celestial | `0x579080`, `0x5acaa0` | `render_skybox`, `render_celestial_bodies` |
 | Light coronas | `0x5aaf40` | `EffectWorld_RenderLightCoronas` |
@@ -135,6 +144,19 @@ semantic derivations stay in the cited RE documents.
 | Particle blend programs | `0x5e29f0`, `0x5e8380` | `CParticleDefEntry_ParseBlendMode`, `CParticleTexture_InitTextureAndChannels` (`0x5e8210`) |
 | Gamma/display path | `0x679c1b`, `0x677be0` | `CD3DDevice_InitializeDisplay` (`0x679890`), `GLib_SetGammaRamp` |
 | NVG lighting constants | `0x5c8090` | `CTerrainRenderer_BuildLightingShaderConstants` |
+
+The audit is dated. Since the 2026-09-24 rendering parity pass the "Light
+coronas" row names no resource (the corona billboards draw through the
+post-particle overlay stage, `renderer::append_corona_overlay`; the
+`precipitation-streaks` family and the `light_corona` pattern with its
+`0x5aaf40` citation left `provenance.json` with their files), the celestial
+bodies draw through their authored object materials rather than
+`celestial*.gdshader`, and the NVG post is FrameFx's render-to-texture chain
+rather than `nvg_view.gdshader` ([render-order-re.md](render-order-re.md)
+§2026-09-24 rendering parity pass). On 2026-09-25 the `nvg-post` family and
+the `terrain-editor-preview` family (its `terrain_editor.gdshader` left with the
+ONED terrain preview) left `provenance.json` with their files, and the
+`particles` family names the far-side wrappers and `particle_far_pass.gdshaderinc`.
 
 Re-run the GUT contract tests, focused native renderer tests, full GUT suite, and
 windowed probe whenever a shader, shader owner, lighting producer, renderer,

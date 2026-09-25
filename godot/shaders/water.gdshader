@@ -26,8 +26,8 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 // (t1.xy, t2.xy). The reflection RTT consumer is LIVE too (env #30):
 // Water owns the mirrored-scene SubViewport and the fragment below
 // runs the witnessed texm3x2 lookup against it (the fog term rides the
-// per-row spec-alpha factor — see v_fog). Remaining variants: the LOW tier
-// (render_water_strip @ 0x5c1d60) and the nightvision redraw.
+// per-row spec-alpha factor — see v_fog). The LOW tier (render_water_strip
+// @ 0x5c1d60) is unreachable at the shipped water detail.
 //
 // The water material set was decoded at REN-4 [orig: Water_InitSurfaceShaders
 // @ 0x5c19b0; selection in render_water_surface @ 0x5c33e6..0x5c34ea]:
@@ -35,7 +35,8 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 //   the premul trick above); camera BELOW (underwater view of the surface):
 //   the OPAQUE material - ported as the u_underwater_view branch below
 //   (blend-off = ALPHA 1.0 under the premul pass);
-// - nightvision post-redraw picks NV variants (FrameFX; out of scope here);
+// - the FrameFX nightvision redraw (above water only) draws Water's
+//   nightvision strip through the typed Q3 WaterNightVision technique;
 // - all water passes are two-sided (pass flags 0x400000 -> cull NONE
 //   [orig: GfxShader_ApplyPassChecked(shader, 0x400000) @ 0x5c340d;
 //   CGfxShader_ApplyPass @ 0x683190]) = cull_disabled, and NO alpha test is
@@ -68,19 +69,11 @@ uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
 // the display-encoded scene, consumed raw exactly like retail's t2 texels.
 uniform sampler2D u_reflection : filter_linear;
 uniform bool u_has_reflection = false;
-// The witnessed texm3x2 rows are normalized against the MAIN viewport, while
-// Godot derives the mirror camera's vertical projection from its square RTT.
-// Water preserves horizontal FOV, so X is already registered and Y needs
-// the source-to-square focal-scale ratio (source height / source width).
-uniform vec2 u_reflection_uv_scale = vec2(1.0);
 // water_murk [orig: SetWaterMurk @ 0x57d4f0] no longer has a uniform: the
 // witnessed angle-weighted murk x distance chain arrives per vertex in
 // COLOR.a now that the strip march is live (env #29) — the former flat
 // (1 - u_water_murk) knob is retired (Water still sets the parameter for
 // probe compatibility; a ShaderMaterial ignores unknown names).
-// (scale, bias, offset_u, offset_v) [orig: @ 0x5c3348..0x5c33db]: scale/bias
-// from the fog-distance INT part, offsets = cam/128 + cloud accumulators.
-uniform vec4 u_water_uv = vec4(1.0, 0.2, 0.0, 0.0);
 uniform sampler2D u_noise_color : filter_linear, repeat_enable;
 uniform sampler2D u_noise_normal : filter_linear, repeat_enable;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
@@ -97,6 +90,12 @@ const uint NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u; // 0x00000400
 // the ps.1.1 color chain is IDENTICAL on both materials (same 4-tex desc), so one
 // shader serves both sides. The ladder position does not change by side (REN-3).
 uniform bool u_underwater_view = false;
+// The retail scene projection's near/far the strip depth is tested against
+// (Water::_march_strip): near 0.2, far = the fog distance's integer word + 1.
+uniform vec2 u_scene_depth_range = vec2(0.2, 1025.0);
+// The scene viewport MaxZ, the strip depth's upper clamp (flt_7C4658 =
+// 0x3F7FFE00 = 1 - 2^-15; engine kWaterStripDepthMax).
+const float WATER_VIEWPORT_MAX_Z = 0.999969482421875;
 
 varying vec3 v_world_pos;
 // The ps.1.1 v1 specular register: WaterColorLit RGB under the row's
@@ -127,24 +126,34 @@ void vertex() {
 	// @ 0x5c2eb5..0x5c2ef4]. NOT the terrain fog table — the old
 	// jointops_fog_factor curve here was a reimpl invention.
 	v_fog = CUSTOM1.a;
-	// The witnessed depth model: retail computes the strip depth as an arithmetic
-	// replica of the scene projection ((t*uvScale - uvBias)*rhw = viewportMaxZ *
-	// zproj(near 0.2, far = fog-int) [orig: depth chain @ 0x5c2c0c..0x5c2c4a; scale
-	// build @ 0x5c3348; near 0.2 @ 0x58ac0a, mission far 1024 @ 0x524721, viewport
-	// depth 0.99996948 = 1 - 2^-15 @ 0x58ac32]) — same-curve depths make the
-	// shoreline winner deterministic on the 16/24-bit z-buffer. The reimpl cannot
-	// unify cross-shader depth arithmetic, so the water pulls toward the camera by
-	// a RELATIVE view-depth factor (3e-4 of the ray): scaling the view-space
-	// position uniformly preserves NDC x/y exactly (pure depth pull, zero screen
-	// shift), and the bias tracks the ray length — above the per-frame
-	// re-tessellation jitter at the shoreline, far below the water/terrain
-	// separation at range. A TRACKED reimpl approximation (env #29 row) standing in
-	// for retail's same-curve determinism. (The first form — 2^-15 of the
-	// remaining NDC range — swamped the far-field separation under reverse-Z's
-	// hyperbolic compression: water overpainted above-waterline terrain from
-	// altitude, the "waterline rises as you fly" report.)
+	// The witnessed depth model: the pre-transformed strip carries its own
+	// depth, an arithmetic replica of the scene projection with far = the fog
+	// distance's INTEGER word w, z = clamp(scale - bias/t, 4e-5, 1 - 2^-15)
+	// (CUSTOM0.x) [orig: depth chain @ 0x5c2c0c..0x5c2c4a; scale build
+	// @ 0x5c3348; clamps flt_7DBF7C / flt_7C4658; near 0.2 @ 0x58ac0a, mission far
+	// 1024 @ 0x524721, viewport depth 0.99996948 = 1 - 2^-15 @ 0x58ac32], against a
+	// scene drawn at far = w + 1 (retail Render_ProcessMainSceneFrame
+	// @ 0x5CA4BA..0x5CA4D0). The depth test compares those two curves, so the
+	// water is written at the view depth whose retail scene-curve depth equals
+	// the replica: slightly BEHIND its true depth (w < w + 1), and at the far
+	// plane itself beyond t = w, where the clamp holds it — pre-transformed
+	// rows are never far-clipped, so fully fogged water reaches the horizon.
+	// That view depth then takes the drawing camera's own clip depth (view
+	// z = -t, clip w = t: z / w = -P[2][2] + P[3][2] / t), so the test holds
+	// whatever near plane the Godot camera carries. Perspective only; the
+	// constant-W orthographic extension keeps its plain projection.
 	vec3 view_pos = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	POSITION = PROJECTION_MATRIX * vec4(view_pos * (1.0 - 3.0e-4), 1.0);
+	POSITION = PROJECTION_MATRIX * vec4(view_pos, 1.0);
+	float scene_near = u_scene_depth_range.x;
+	float scene_far = u_scene_depth_range.y;
+	if (PROJECTION_MATRIX[2][3] != 0.0 && scene_far > scene_near) {
+		float scene_z = CUSTOM0.x / WATER_VIEWPORT_MAX_Z;
+		float inv_view_depth =
+				(1.0 - scene_z * (scene_far - scene_near) / scene_far) / scene_near;
+		float clip_depth = -PROJECTION_MATRIX[2][2] +
+				PROJECTION_MATRIX[3][2] * inv_view_depth;
+		POSITION.z = max(clip_depth, 0.0) * POSITION.w;
+	}
 }
 
 void fragment() {
@@ -152,14 +161,15 @@ void fragment() {
 			CAMERA_VISIBLE_LAYERS == NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK) {
 		discard;
 	}
-	// The witnessed UV model: strip vertices are camera-relative, so the base
-	// term is (world - camera)/128 through the fog-derived scale - bias, and
-	// the offset carries camera/128 + the scroll accumulators
-	// [orig: per-vertex u = t * flt_8412B0 - flt_8412B4 in both strips;
-	//  offsets @ 0x5c33b9..0x5c33db]. u rides world z, v rides world x.
-	vec2 rel = vec2(v_world_pos.z - CAMERA_POSITION_WORLD.z,
-			v_world_pos.x - CAMERA_POSITION_WORLD.x) / 128.0;
-	vec2 uv = rel * u_water_uv.x - vec2(u_water_uv.y) + vec2(u_water_uv.z, u_water_uv.w);
+	// The witnessed texcoords: t0 is the unprojected ABSOLUTE render-basis
+	// world x/32, z/32 of each strip vertex (Godot world z/32, x/32), and t3
+	// duplicates it (retail render_water_strip_detailed @ 0x5c2aec..0x5c2b00,
+	// the t3 copy @ 0x5c3095..0x5c30bf). The pre-transformed XYZRHW strip
+	// takes no texture transform, so both noise textures sample UV verbatim:
+	// fixed in the world, animated only through the per-frame regenerated
+	// noise. (flt_8412B0/B4 feed only the depth chain, and the cloud-scroll
+	// "offsets" render_water_surface stores are never read back.)
+	vec2 uv = UV;
 
 	// Ridge intensity + its alpha mask (A = 255 - i*i/512, more opaque where
 	// dark) [orig: Water_GenerateNoiseTextures pass 2 @ 0x5c04b7..0x5c0552].
@@ -175,18 +185,16 @@ void fragment() {
 	// the mirror scene RTT render_main_scene @ 0x5c1240]. The DuDv map's
 	// blue byte is the constant 0xFF (engine/formats/env water_noise_normal_pixels),
 	// so _bx2 passes the rows' screen component through at weight 1 while
-	// R/G perturb it. The dots remain the witnessed lookup verbatim. Their
-	// result is then mapped from the main viewport's normalized projection to
-	// Godot's square mirror projection; without that sim/present-boundary conversion,
-	// the reflected image swims vertically as the view rotates on a widescreen
-	// display. The clamp is the RTT edge address mode.
+	// R/G perturb it. The dots remain the witnessed lookup verbatim: the mirror
+	// target covers the main view's field (environment/water_mirror.h
+	// kReflectionRttSize), so the result addresses it directly. The clamp is
+	// the RTT edge address mode.
 	// Reflection-less owners (headless/tests) keep u_water_color as the
 	// tracked t2 stand-in.
 	vec3 t2_sample = u_water_color;
 	if (u_has_reflection) {
 		vec3 dudv_bx2 = texture(u_noise_normal, uv).rgb * 2.0 - 1.0;
 		vec2 refl_uv = vec2(dot(v_refl_row_u, dudv_bx2), dot(v_refl_row_v, dudv_bx2));
-		refl_uv = vec2(0.5) + (refl_uv - vec2(0.5)) * u_reflection_uv_scale;
 		t2_sample = texture(u_reflection, clamp(refl_uv, vec2(0.0), vec2(1.0))).rgb;
 	}
 

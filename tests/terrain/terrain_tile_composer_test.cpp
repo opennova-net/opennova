@@ -4,10 +4,10 @@
 // painter order. The optional CP12 leg follows docs/asset-gated-tests.md.
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
+#include <runtime/renderer/texture_dxt.h>
 
 #include <formats/til/til.h>
 #include <formats/til/til_io.h>
-#include <formats/til/til_overlay_bake.h>
 #include <base/vfs/vfs.h>
 
 #include <algorithm>
@@ -114,6 +114,18 @@ std::array<uint8_t, 4> base_pixel(std::array<uint8_t, 3> color,
 			retail_dot3_alpha(normal, light)};
 }
 
+// A solid atlas cell as the DXT5 tile-set texture reads it back.
+std::array<uint8_t, 4> dxt5_texel(std::array<uint8_t, 4> color) {
+	std::vector<uint8_t> rgba;
+	for (int texel = 0; texel < 16; ++texel) rgba.insert(rgba.end(), color.begin(), color.end());
+	const std::vector<opennova::renderer::DxtSurface> levels =
+			opennova::renderer::build_dxt_texture_levels(rgba.data(), 4, 4,
+					opennova::renderer::TextureDxtFormat::Dxt5, 1);
+	const std::vector<uint8_t> bytes = opennova::renderer::encode_rgba8(
+			opennova::renderer::decode_dxt_surface(levels.front()));
+	return {bytes[0], bytes[1], bytes[2], bytes[3]};
+}
+
 std::array<uint8_t, 4> overlay_render_target_pixel(
 		std::array<uint8_t, 4> destination,
 		std::array<uint8_t, 4> source,
@@ -151,11 +163,24 @@ opennova::TerrainTileCompositionJob cold_job(uint8_t page_lod,
 		opennova::TerrainTilePageKey page = {},
 		int source_origin_x = 0, int source_origin_z = 0) {
 	page.page_lod_level = page_lod;
-	opennova::TerrainTileCompositionCache cache;
-	const auto decision = cache.request(opennova::TerrainTileCompositionRequest{
-			page, 0, source_origin_x, source_origin_z,
-			opennova::TerrainTileContentStamp{1}});
-	return *decision->job;
+	opennova::TerrainTileCompositionJob job;
+	job.target.page = page;
+	job.source_origin_x = source_origin_x;
+	job.source_origin_z = source_origin_z;
+	const int span = opennova::TerrainTileCompositionCache::page_world_span(page_lod);
+	job.layout.texture_dimension = opennova::TerrainTileCompositionCache::kDimension;
+	job.layout.world_span = span;
+	job.layout.texels_per_world_unit =
+			static_cast<float>(job.layout.texture_dimension) / static_cast<float>(span);
+	return job;
+}
+
+opennova::terrain::TerrainTileQuadrantSource quadrants(const Rgba8Image &atlas) {
+	return opennova::terrain::build_terrain_tile_quadrant_source(atlas);
+}
+
+std::vector<Rgba8Image> tile_levels(const Rgba8Image &atlas) {
+	return opennova::terrain::build_terrain_tile_set_mips(atlas);
 }
 
 int bright_pixels(const Rgba8Image &image) {
@@ -170,9 +195,9 @@ int bright_pixels(const Rgba8Image &image) {
 }
 
 bool test_level_density() {
-	const Rgba8Image colormap = solid_image(2, 2, {0, 0, 0, 255});
-	const Rgba8Image normal = solid_image(2, 2, {128, 128, 255, 128});
-	const Rgba8Image tilestrip = solid_image(64, 64, {255, 255, 255, 255});
+	const auto colormap = quadrants(solid_image(2, 2, {0, 0, 0, 255}));
+	const auto normal = quadrants(solid_image(2, 2, {128, 128, 255, 128}));
+	const auto tilestrip = tile_levels(solid_image(64, 64, {255, 255, 255, 255}));
 	opennova::TilFile tiles;
 	tiles.entries.push_back(opennova::make_til_overlay_entry(0, 0, 0, 0));
 
@@ -203,12 +228,14 @@ bool test_flat_page_source_and_overlay_gate() {
 	Rgba8Image normal = solid_image(8, 8, {255, 128, 128, 128});
 	set_pixel(colormap, 0, 0, {31, 63, 95, 255});
 	set_pixel(normal, 0, 0, {128, 128, 255, 128});
-	const Rgba8Image tilestrip = solid_image(64, 64, {255, 0, 255, 255});
+	const auto colormap_quadrants = quadrants(colormap);
+	const auto normal_quadrants = quadrants(normal);
+	const auto tilestrip = tile_levels(solid_image(64, 64, {255, 0, 255, 255}));
 	opennova::TilFile tiles;
 	tiles.entries.push_back(opennova::make_til_overlay_entry(0, 0, 0, 0));
 	opennova::terrain::TerrainTilePageSourceView sources;
-	sources.colormap = &colormap;
-	sources.heightfield_normal = &normal;
+	sources.colormap = &colormap_quadrants;
+	sources.heightfield_normal = &normal_quadrants;
 	sources.tile_info = &tiles;
 	sources.tilestrip = &tilestrip;
 	sources.light_bytes = {128, 128, 255};
@@ -231,19 +258,22 @@ bool test_rejects_source_atlases_without_a_complete_quadrant() {
 			solid_image(2, 1, {128, 128, 255, 255}),
 			solid_image(1, 1, {128, 128, 255, 255}),
 	};
+	const auto valid_quadrants = quadrants(valid);
 	for (const Rgba8Image &source : tiny) {
+		const auto source_quadrants = quadrants(source);
 		opennova::terrain::TerrainTilePageSourceView sources;
-		sources.colormap = &source;
-		sources.heightfield_normal = &valid;
+		sources.colormap = &source_quadrants;
+		sources.heightfield_normal = &valid_quadrants;
 		if (!expect(!opennova::terrain::compose_terrain_tile_page(
 					cold_job(4), sources).is_valid(),
 				"a 1xN, Nx1, or 1x1 colormap cannot provide four quadrants")) {
 			return false;
 		}
 	}
+	const auto tiny_quadrants = quadrants(tiny[0]);
 	opennova::terrain::TerrainTilePageSourceView sources;
-	sources.colormap = &valid;
-	sources.heightfield_normal = &tiny[0];
+	sources.colormap = &valid_quadrants;
+	sources.heightfield_normal = &tiny_quadrants;
 	return expect(!opennova::terrain::compose_terrain_tile_page(
 				cold_job(4), sources).is_valid(),
 			"the mandatory height-normal atlas needs complete quadrants too");
@@ -275,9 +305,11 @@ bool test_source_orientation_quadrant_clamp_and_dot3() {
 	}
 
 	const std::array<uint8_t, 3> light{231, 83, 187};
+	const auto colormap_quadrants = quadrants(colormap);
+	const auto normal_quadrants = quadrants(normal);
 	opennova::terrain::TerrainTilePageSourceView sources;
-	sources.colormap = &colormap;
-	sources.heightfield_normal = &normal;
+	sources.colormap = &colormap_quadrants;
+	sources.heightfield_normal = &normal_quadrants;
 	sources.light_bytes = light;
 	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(
 			cold_job(4, {}, 512, 512), sources);
@@ -318,12 +350,12 @@ bool test_overlay_atlas_flags_tint_clipping_and_order() {
 	const std::array<uint8_t, 4> overlap_first{20, 200, 80, 255};
 	const std::array<uint8_t, 4> overlap_last{220, 40, 180, 128};
 	Rgba8Image tilestrip = solid_image(256, 64, edge);
-	// Keep the first column of cell 1 equal to cell 0. Retail's witnessed
-	// half-texel shift intentionally lets the last sample of cell 0 straddle
-	// that atlas boundary; matching edge texels isolate page clipping here.
-	fill_rect(tilestrip, 65, 0, 96, 32, tile_tl);
+	// The atlas is point-sampled on a 1:1 LOD-4 page, so every cell's texels
+	// stay inside that cell; it is DXT5, so each solid cell reads back as its
+	// block's decode. [orig: atlas flags 0x100203 @ 0x604B24]
+	fill_rect(tilestrip, 64, 0, 96, 32, tile_tl);
 	fill_rect(tilestrip, 96, 0, 128, 32, tile_tr);
-	fill_rect(tilestrip, 65, 32, 96, 64, tile_bl);
+	fill_rect(tilestrip, 64, 32, 96, 64, tile_bl);
 	fill_rect(tilestrip, 96, 32, 128, 64, tile_br);
 	fill_rect(tilestrip, 128, 0, 192, 64, overlap_first);
 	fill_rect(tilestrip, 192, 0, 256, 64, overlap_last);
@@ -340,18 +372,22 @@ bool test_overlay_atlas_flags_tint_clipping_and_order() {
 	tiles.entries.push_back(opennova::make_til_overlay_entry(2, 0, 2, 0));
 	tiles.entries.push_back(opennova::make_til_overlay_entry(2, 0, 3, 0));
 
+	const auto colormap_quadrants = quadrants(colormap);
+	const auto normal_quadrants = quadrants(normal);
+	const auto tilestrip_levels = tile_levels(tilestrip);
 	opennova::terrain::TerrainTilePageSourceView sources;
-	sources.colormap = &colormap;
-	sources.heightfield_normal = &normal;
+	sources.colormap = &colormap_quadrants;
+	sources.heightfield_normal = &normal_quadrants;
 	sources.tile_info = &tiles;
-	sources.tilestrip = &tilestrip;
+	sources.tilestrip = &tilestrip_levels;
 	sources.tile_overlay_tint = tint;
 	sources.light_bytes = light;
 	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(
 			cold_job(4), sources);
 	if (!expect(page.is_valid(), "asymmetric multi-tile page composes")) return false;
 
-	const std::array<uint8_t, 4> edge_result = overlay_pixel(base, edge, tint);
+	const std::array<uint8_t, 4> edge_result =
+			overlay_pixel(base, dxt5_texel(edge), tint);
 	if (!expect_pixel(page, 0, 220, edge_result,
 			"negative-X entry clips onto the page's left edge")) return false;
 	if (!expect_pixel(page, 31, 220, edge_result,
@@ -366,28 +402,175 @@ bool test_overlay_atlas_flags_tint_clipping_and_order() {
 	// FLIP_X|ROTATE_90 (0x05) under retail's mirror-then-corner-cycle order is
 	// T(x,z) = (z, x) — a transpose: destination TL/TR/BL/BR sample source
 	// TL/BL/TR/BR (D-TIL-4). Interior probes avoid interpolation across
-	// quadrant seams. [orig: render_water_quad @ 0x604700 — mirrors
+	// quadrant seams. [orig: PolyTrn_DrawTileOverlayQuad @ 0x604700 — mirrors
 	// @ 0x604782/0x6047a9, rotate cycle @ 0x6047d4..0x604806]
-	if (!expect_pixel(page, 80, 80, overlay_pixel(base, tile_tl, tint),
+	if (!expect_pixel(page, 80, 80, overlay_pixel(base, dxt5_texel(tile_tl), tint),
 			"combined flags map destination TL to source TL")) return false;
-	if (!expect_pixel(page, 112, 80, overlay_pixel(base, tile_bl, tint),
+	if (!expect_pixel(page, 112, 80, overlay_pixel(base, dxt5_texel(tile_bl), tint),
 			"combined flags map destination TR to source BL")) return false;
-	if (!expect_pixel(page, 80, 112, overlay_pixel(base, tile_tr, tint),
+	if (!expect_pixel(page, 80, 112, overlay_pixel(base, dxt5_texel(tile_tr), tint),
 			"output rows follow world +Z through the transposed atlas")) return false;
-	if (!expect_pixel(page, 112, 112, overlay_pixel(base, tile_br, tint),
+	if (!expect_pixel(page, 112, 112, overlay_pixel(base, dxt5_texel(tile_br), tint),
 			"combined flags map destination BR to source BR")) return false;
 	if (!expect(pixel(page, 80, 80)[3] ==
-			overlay_pixel(base, tile_tl, tint)[3],
+			overlay_pixel(base, dxt5_texel(tile_tl), tint)[3],
 			"overlay draws leave the page alpha to the DOT3 pass")) return false;
 
 	std::array<uint8_t, 4> overlay_target = base;
 	overlay_target[3] = 0;
 	const std::array<uint8_t, 4> after_first =
-			overlay_render_target_pixel(overlay_target, overlap_first, tint);
+			overlay_render_target_pixel(overlay_target, dxt5_texel(overlap_first), tint);
 	const std::array<uint8_t, 4> after_last = add_dot3_alpha(
-			overlay_render_target_pixel(after_first, overlap_last, tint), base[3]);
-	return expect_pixel(page, 160, 32, after_last,
-			"later .til entries source-over earlier entries in file order");
+			overlay_render_target_pixel(after_first, dxt5_texel(overlap_last), tint),
+			base[3]);
+	if (!expect_pixel(page, 160, 32, after_last,
+			"later .til entries source-over earlier entries in file order")) return false;
+	// Row stripes (runtime/terrain/row_stripes.h) keep every pixel's base
+	// then .til writes in file order, so any thread count reproduces the
+	// serial page byte for byte.
+	for (const std::size_t threads : {std::size_t{3}, std::size_t{8}}) {
+		const Rgba8Image striped = opennova::terrain::compose_terrain_tile_page(
+				cold_job(4), sources, threads);
+		if (!expect(striped.pixels == page.pixels,
+				"row-striped composition reproduces the serial page bytes")) return false;
+	}
+	return true;
+}
+
+// The page passes are XYZRHW quads whose positions are copied unbiased, so
+// page pixel x samples at position x: a 1:1 LOD-2 page takes base texel
+// coordinate x - 0.5 in its quadrant texture, blending texels x-1 and x.
+// [orig: fill_fullscreen_quad_vertices @ 0x678DFE..0x678E4B (positions
+// unbiased); PolyTrn_RenderTile quad (0,0)-(dim,dim) @ 0x60DC1A..0x60DC7E,
+// UV local/512 @ 0x60DB86..0x60DC02]
+bool test_base_pass_samples_integer_pixel_positions() {
+	Rgba8Image colormap = solid_image(1024, 1024, {0, 0, 0, 255});
+	fill_rect(colormap, 5, 0, 6, 512, {255, 255, 255, 255});
+	const auto colormap_quadrants = quadrants(colormap);
+	const auto normal = quadrants(solid_image(2, 2, {128, 128, 255, 128}));
+	opennova::terrain::TerrainTilePageSourceView sources;
+	sources.colormap = &colormap_quadrants;
+	sources.heightfield_normal = &normal;
+	sources.light_bytes = {128, 128, 255};
+	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(
+			cold_job(2), sources);
+	if (!expect(page.is_valid(), "1:1 base page composes")) return false;
+	const uint8_t half = quantized_byte(0.5f * (256.0f / 255.0f));
+	const std::array<uint8_t, 4> blended{half, half, half, 255};
+	const std::array<uint8_t, 4> black{0, 0, 0, 255};
+	return expect_pixel(page, 4, 40, black,
+			"pixel 4 blends texels 3 and 4 (both dark)") &&
+			expect_pixel(page, 5, 40, blended,
+					"pixel 5 blends texels 4 and 5 at one half each") &&
+			expect_pixel(page, 6, 40, blended,
+					"pixel 6 blends texels 5 and 6 at one half each") &&
+			expect_pixel(page, 7, 40, black,
+					"pixel 7 no longer reaches the stripe");
+}
+
+// A LOD-1 page draws 512 units over 256 pixels: two colormap texels per
+// pixel, so the quadrant texture's MIPFILTER POINT selects box level 1.
+// [orig: Colormap0..3 flags 0x100001 @ 0x60B51C (bit 3 clear: MIPFILTER
+// POINT, bit 1 clear: LINEAR) decoded by apply_texture_stages
+// @ 0x68084C..0x680870 into CGfxDevice_ApplyRenderStates @ 0x67E463..0x67E4A7;
+// box levels GTexture_CreateFromPixelData_0 @ 0x6877BA..0x6878BE]
+bool test_base_pass_coarse_page_samples_box_level_one() {
+	Rgba8Image colormap = solid_image(1024, 1024, {0, 0, 0, 255});
+	for (int x = 0; x < 512; ++x) {
+		if (((x / 2) & 1) != 0) fill_rect(colormap, x, 0, x + 1, 512, {255, 255, 255, 255});
+	}
+	const auto colormap_quadrants = quadrants(colormap);
+	const auto normal = quadrants(solid_image(2, 2, {128, 128, 255, 128}));
+	opennova::terrain::TerrainTilePageSourceView sources;
+	sources.colormap = &colormap_quadrants;
+	sources.heightfield_normal = &normal;
+	sources.light_bytes = {128, 128, 255};
+	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(
+			cold_job(1), sources);
+	if (!expect(page.is_valid(), "coarse base page composes")) return false;
+	// Level 1 alternates 0/255 per texel; pixel x samples it at x - 0.5.
+	const uint8_t half = quantized_byte(0.5f * (256.0f / 255.0f));
+	for (int x = 1; x < 64; ++x) {
+		if (!expect_pixel(page, x, 17, {half, half, half, 255},
+				"each coarse pixel blends two level-1 texels")) return false;
+	}
+	return expect_pixel(page, 0, 17, {0, 0, 0, 255},
+			"the clamped first pixel takes level-1 texel 0");
+}
+
+// A one-texel line on a 1:1 LOD-4 page: the tile-set atlas is POINT-sampled
+// and the half-texel bias puts every pixel on a texel centre, so the line
+// lands on exactly one page column at full strength.
+// [orig: Terrain_LoadTileSetAtlas flags 0x100203 @ 0x604B24 (bit 1: POINT);
+// PolyTrn_DrawTileOverlayQuad half-texel @ 0x604808..0x6048FD; quad positions
+// PolyTrn_RenderTile @ 0x60DE66..0x60DEBB]
+bool test_til_line_is_point_sampled_one_to_one() {
+	const std::array<uint8_t, 3> base_color{40, 80, 120};
+	const std::array<uint8_t, 3> base_normal{128, 128, 255};
+	const std::array<uint8_t, 3> light{128, 128, 255};
+	const auto colormap = quadrants(solid_image(
+			2, 2, {base_color[0], base_color[1], base_color[2], 255}));
+	const auto normal = quadrants(solid_image(
+			2, 2, {base_normal[0], base_normal[1], base_normal[2], 255}));
+	Rgba8Image atlas = solid_image(64, 64, {0, 0, 0, 0});
+	fill_rect(atlas, 10, 0, 11, 64, {255, 255, 255, 255});
+	const auto atlas_levels = tile_levels(atlas);
+	opennova::TilFile tiles;
+	tiles.entries.push_back(opennova::make_til_overlay_entry(0, 0, 0, 0));
+	opennova::terrain::TerrainTilePageSourceView sources;
+	sources.colormap = &colormap;
+	sources.heightfield_normal = &normal;
+	sources.tile_info = &tiles;
+	sources.tilestrip = &atlas_levels;
+	sources.light_bytes = light;
+	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(
+			cold_job(4), sources);
+	if (!expect(page.is_valid(), "1:1 tile page composes")) return false;
+	const std::array<uint8_t, 4> base = base_pixel(base_color, base_normal, light);
+	const std::array<uint8_t, 4> line = overlay_pixel(
+			base, {255, 255, 255, 255}, {1.0f, 1.0f, 1.0f});
+	return expect_pixel(page, 10, 20, line,
+			"the one-texel line fills exactly its page column") &&
+			expect_pixel(page, 9, 20, base, "no half-strength bleed on the left") &&
+			expect_pixel(page, 11, 20, base, "no half-strength bleed on the right");
+}
+
+// A LOD-3 page draws a 16-unit tile over 32 pixels: two atlas texels per
+// pixel, so the point sample takes the tile-set atlas box level 1.
+// [orig: atlas levels GTexture_CreateFromPixelData_0 @ 0x6877BA..0x6878BE;
+// point min/mag/mip @ 0x604B24 via apply_texture_stages @ 0x68084C..0x680870]
+bool test_til_coarse_page_takes_box_level() {
+	const auto colormap = quadrants(solid_image(2, 2, {0, 0, 0, 255}));
+	const auto normal = quadrants(solid_image(2, 2, {128, 128, 255, 128}));
+	Rgba8Image atlas = solid_image(64, 64, {0, 0, 200, 255});
+	for (int x = 0; x < 64; x += 2) fill_rect(atlas, x, 0, x + 1, 64, {200, 0, 0, 255});
+	const auto atlas_levels = tile_levels(atlas);
+	opennova::TilFile tiles;
+	tiles.entries.push_back(opennova::make_til_overlay_entry(0, 0, 0, 0));
+	opennova::terrain::TerrainTilePageSourceView sources;
+	sources.colormap = &colormap;
+	sources.heightfield_normal = &normal;
+	sources.tile_info = &tiles;
+	sources.tilestrip = &atlas_levels;
+	sources.light_bytes = {128, 128, 255};
+	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(
+			cold_job(3), sources);
+	if (!expect(page.is_valid(), "LOD-3 tile page composes")) return false;
+	const std::array<uint8_t, 4> bare =
+			base_pixel({0, 0, 0}, {128, 128, 255}, {128, 128, 255});
+	// The DXT5 atlas decodes the stripes to their 5:6:5 values (197, 0, 0)
+	// and (0, 0, 197); level 1 is D3DXFilterTexture's box average of that
+	// decode, re-encoded: (99, 0, 99).
+	const std::array<uint8_t, 4> purple = overlay_pixel(
+			bare, {99, 0, 99, 255}, {1.0f, 1.0f, 1.0f});
+	for (int y = 0; y < 32; ++y) {
+		for (int x = 0; x < 32; ++x) {
+			if (!expect_pixel(page, x, y, purple,
+					"every covered pixel is the level-1 box average")) return false;
+		}
+	}
+	return expect_pixel(page, 32, 0, bare,
+			"the 16-unit tile covers exactly 32 LOD-3 pixels");
 }
 
 uint16_t little_u16(const uint8_t *p) {
@@ -432,11 +615,6 @@ bool decode_uncompressed_tga_rgba(
 	return output.is_valid();
 }
 
-int wrap(int value, int size) {
-	value %= size;
-	return value < 0 ? value + size : value;
-}
-
 uint64_t fnv_byte(uint64_t hash, uint8_t value) {
 	return (hash ^ value) * UINT64_C(1099511628211);
 }
@@ -447,36 +625,41 @@ bool til_entry_oracle(const opennova::TilOverlayEntry &entry,
 		uint64_t expected_rgb_hash, uint64_t expected_alpha_hash) {
 	opennova::TilFile single;
 	single.entries.push_back(entry);
-	const Rgba8Image colormap = solid_image(2, 2, {0, 0, 0, 255});
+	const auto colormap = quadrants(solid_image(2, 2, {0, 0, 0, 255}));
 	// A neutral normal/light pair quantizes the later DOT3 pass to zero. The
 	// overlay draw itself must contribute NO alpha: retail runs the .til loop
 	// under COLORWRITEENABLE = 7, so the page alpha is exclusively the DOT3
 	// term the terrain lighting pass consumes.
 	// [orig: PolyTrn_RenderTile SetRenderState(0xA8, 7) @ 0x60DD6B..0x60DD73]
-	const Rgba8Image normal = solid_image(2, 2, {128, 128, 128, 128});
+	const auto normal = quadrants(solid_image(2, 2, {128, 128, 128, 128}));
+	const std::vector<Rgba8Image> levels = tile_levels(tilestrip);
 	opennova::terrain::TerrainTilePageSourceView sources;
 	sources.colormap = &colormap;
 	sources.heightfield_normal = &normal;
 	sources.tile_info = &single;
-	sources.tilestrip = &tilestrip;
+	sources.tilestrip = &levels;
 	sources.light_bytes = {128, 128, 128};
 	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(
 			cold_job(2, page_key), sources);
 	if (!expect(page.is_valid(), "til entry page composes")) return false;
+	if (!expect(levels.size() > 2, "the tile-set atlas carries its box mip 2")) return false;
 
-	std::vector<uint8_t> baked;
-	if (!expect(opennova::til_bake_overlay_rgba(single,
-				tilestrip.pixels.data(), static_cast<int>(tilestrip.width),
-				static_cast<int>(tilestrip.height), 1024, 1024, baked),
-			"til entry bakes through the established full-atlas oracle")) {
-		return false;
-	}
+	// A lod-2 page spans 256 world units over 256 pixels: one page pixel per
+	// world unit, so the 16-unit entry covers 16x16 pixels and each pixel's
+	// footprint is 4 atlas texels — the point sample lands on mip 2, at the
+	// texel under the pixel's (flipped/rotated) cell position.
+	// [orig: PolyTrn_DrawTileOverlayQuad half-texel @ 0x604808..0x6048FD; atlas flags
+	// 0x100203 @ 0x604B24 (POINT min/mag/mip, CLAMP)]
+	const Rgba8Image &mip = levels[2];
+	const opennova::TilAtlasLayout layout = opennova::til_make_atlas_layout(
+			static_cast<int>(tilestrip.width), static_cast<int>(tilestrip.height));
+	const int cell_texels = opennova::TIL_ATLAS_TILE_PIXELS / 4;
+	const int cell_x = (entry.tile_index % layout.tiles_x) * cell_texels;
+	const int cell_y = (entry.tile_index / layout.tiles_x) * cell_texels;
 	const int origin_x = static_cast<int>(std::lround(
 			opennova::til_world_x_from_fixed(entry.x_fixed)));
 	const int origin_z = static_cast<int>(std::lround(
 			opennova::til_world_z_from_fixed(entry.z_fixed)));
-	// A lod-2 page spans 256 world units over 256 texels, so page texel
-	// coords are world minus the page's world origin.
 	const int page_x = origin_x -
 			(page_key.sector_origin_x + page_key.page_local_x);
 	const int page_y = origin_z -
@@ -489,18 +672,23 @@ bool til_entry_oracle(const opennova::TilOverlayEntry &entry,
 		for (int x = 0; x < opennova::TIL_CELL_WORLD_UNITS; ++x) {
 			const size_t actual_offset = 4u *
 					(static_cast<size_t>(page_y + z) * page.width + page_x + x);
-			const int baked_x = wrap(origin_x + x, 1024);
-			const int baked_y = wrap(-(origin_z + z) - 1, 1024);
-			const size_t baked_offset = 4u *
-					(static_cast<size_t>(baked_y) * 1024u + baked_x);
-			const uint8_t alpha = baked[baked_offset + 3];
+			const opennova::TilUv local = opennova::til_transform_local_uv(
+					opennova::TilUv{(x + 0.5f) / opennova::TIL_CELL_WORLD_UNITS,
+							(z + 0.5f) / opennova::TIL_CELL_WORLD_UNITS},
+					entry.flags);
+			const int texel_x = cell_x + static_cast<int>(
+					std::floor(local.u * cell_texels));
+			const int texel_y = cell_y + static_cast<int>(
+					std::floor(local.v * cell_texels));
+			const std::array<uint8_t, 4> texel = pixel(mip, texel_x, texel_y);
+			const std::array<uint8_t, 4> expected = overlay_render_target_pixel(
+					{0, 0, 0, 0}, texel, {1.0f, 1.0f, 1.0f});
 			for (int channel = 0; channel < 3; ++channel) {
 				const uint8_t actual = page.pixels[actual_offset + channel];
-				const int expected = static_cast<int>(std::lround(
-						baked[baked_offset + channel] *
-						static_cast<float>(alpha) / 255.0f));
-				if (!expect(std::abs(static_cast<int>(actual) - expected) <= 1,
-						"til page agrees with full-atlas placement/orientation")) {
+				if (!expect(actual == expected[channel],
+						"til page is the point-sampled mip-2 texel under each pixel")) {
+					std::fprintf(stderr, "  entry=%d pixel=(%d,%d) channel=%d actual=%u expected=%u\n",
+							entry_index, x, z, channel, actual, expected[channel]);
 					return false;
 				}
 				hash = fnv_byte(hash, actual);
@@ -606,10 +794,10 @@ bool test_optional_cp12_assets() {
 			"CP12 entry 1013 matches the witnessed tile/flags/placement")) return false;
 	const opennova::TerrainTilePageKey cp12_key{-512, -2048, 0, 256, 2};
 	return til_entry_oracle(entry_53, tilestrip, 53, cp12_key,
-			UINT64_C(0x2d98d83388a18b7f),
+			UINT64_C(0xd99b29b978eb8576),
 			UINT64_C(0xdce53c1df8560f83)) &&
 			til_entry_oracle(entry_1013, tilestrip, 1013, cp12_key,
-					UINT64_C(0x67c1b609d0d0ff60),
+					UINT64_C(0x6e24c8ae86b9ad45),
 					UINT64_C(0xdce53c1df8560f83));
 }
 
@@ -652,31 +840,71 @@ bool test_optional_00tra_fork_oracle() {
 	const opennova::TerrainTilePageKey fork_key{0, 0, 256, 256, 2};
 	// These are regression pins for the retail archive payload
 	// TRNTILE10.TGA (SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490).
-	// The transform itself is independently witnessed in render_water_quad
-	// and pinned synthetically by til_render_uv_test; the full-atlas bake
+	// The transform itself is independently witnessed in PolyTrn_DrawTileOverlayQuad
+	// and pinned synthetically by til_render_uv_test; the per-pixel mip-2
 	// comparison above shares til_transform_local_uv and therefore proves
-	// placement/channel parity, not transform independence. On that payload,
-	// 0x05 -> T(x,z)=(z,x) hashes 5690c9449dabde0f and
-	// 0x06 -> T(x,z)=(1-z,1-x) hashes a03140eb55c2e69d (re-verified against
-	// the live compose 2026-08-23; an earlier swap to 9bd9ceb8/7c7aa42a had
-	// re-broken the asset-gated leg). Alpha pins are the all-zero page hash:
-	// the overlay loops run under COLORWRITEENABLE = 7 and never write A.
+	// placement/channel/level parity, not transform independence. On that
+	// payload, under retail's point-sampled box level 2 on a 1:1 LOD-2 page,
+	// 0x05 -> T(x,z)=(z,x) hashes d0eea35d8f11850b and
+	// 0x06 -> T(x,z)=(1-z,1-x) hashes 1cb6a4f7cec6660f. Alpha pins are the
+	// all-zero page hash: the overlay loops run under COLORWRITEENABLE = 7
+	// and never write A.
 	return til_entry_oracle(entry_761, tilestrip, 761, fork_key,
-			UINT64_C(0x5690c9449dabde0f),
+			UINT64_C(0x5242a373347a260e),
 			UINT64_C(0xdce53c1df8560f83)) &&
 			til_entry_oracle(entry_781, tilestrip, 781, fork_key,
-					UINT64_C(0xa03140eb55c2e69d),
+					UINT64_C(0x5d281e2b51b47088),
 					UINT64_C(0xdce53c1df8560f83));
 }
 
 } // namespace
 
+// The tile-set atlas is created DXT5 (flags 0x100203): the composer's level
+// set is D3DX's level chain read back as bytes, a solid cell comes back as
+// its 5:6:5 colour with its alpha, and the chain ends at 4x4.
+// [orig: Terrain_LoadTileSetAtlas @ 0x604B24; GTexture_CreateFromPixelData_0
+// @ 0x687717..0x687727, @ 0x6877BA..0x687801, @ 0x6878A0, @ 0x6878BE]
+bool test_tile_set_levels_are_the_dxt5_decode() {
+	Rgba8Image atlas = solid_image(64, 64, {200, 80, 40, 64});
+	fill_rect(atlas, 0, 0, 32, 32, {30, 210, 40, 128});
+	for (int x = 32; x < 64; x += 2) fill_rect(atlas, x, 32, x + 1, 64, {250, 90, 10, 200});
+	const std::vector<Rgba8Image> levels =
+			opennova::terrain::build_terrain_tile_set_mips(atlas);
+	if (!expect(levels.size() == 5 && levels.back().width == 4 &&
+			levels.back().height == 4, "a 64x64 atlas carries five levels down to 4x4")) {
+		return false;
+	}
+	if (!expect(pixel(levels[0], 40, 8) == std::array<uint8_t, 4>{197, 81, 41, 64} &&
+			pixel(levels[0], 8, 8) == std::array<uint8_t, 4>{33, 210, 41, 128},
+			"solid cells read back as their 5:6:5 colours with exact alpha")) {
+		return false;
+	}
+	const std::vector<opennova::renderer::DxtSurface> chain =
+			opennova::renderer::build_dxt_texture_levels(atlas.pixels.data(), 64, 64,
+					opennova::renderer::TextureDxtFormat::Dxt5, 5);
+	for (size_t level = 0; level < levels.size(); ++level) {
+		if (!expect(chain.size() == levels.size() &&
+				levels[level].pixels == opennova::renderer::encode_rgba8(
+						opennova::renderer::decode_dxt_surface(chain[level])),
+				"every atlas level is its DXT5 blocks decoded")) {
+			return false;
+		}
+	}
+	return expect(levels[0].pixels != atlas.pixels,
+			"the composer no longer samples the raw TGA texels");
+}
+
 int main() {
+	if (!test_tile_set_levels_are_the_dxt5_decode()) return 1;
 	if (!test_level_density()) return 1;
 	if (!test_flat_page_source_and_overlay_gate()) return 1;
 	if (!test_rejects_source_atlases_without_a_complete_quadrant()) return 1;
 	if (!test_source_orientation_quadrant_clamp_and_dot3()) return 1;
 	if (!test_overlay_atlas_flags_tint_clipping_and_order()) return 1;
+	if (!test_base_pass_samples_integer_pixel_positions()) return 1;
+	if (!test_base_pass_coarse_page_samples_box_level_one()) return 1;
+	if (!test_til_line_is_point_sampled_one_to_one()) return 1;
+	if (!test_til_coarse_page_takes_box_level()) return 1;
 	if (!test_optional_cp12_assets()) return 1;
 	if (!test_optional_00tra_fork_oracle()) return 1;
 	std::printf("OK: terrain tile page composition\n");

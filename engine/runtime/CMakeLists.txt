@@ -112,6 +112,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp # the D3DX DXT texture codec
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     renderer/model_mesh_prepare.cpp
     renderer/model_controls.cpp
@@ -125,9 +126,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/frame_fx_effects.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/nvg_scope_lens.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/fp_viewmodel_spec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_order.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_shadow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scene_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/precipitation_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
@@ -192,6 +196,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/occlusion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/iris_march.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/parachute.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/person_overlays.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_carrier.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_death.cpp         # the once-per-life death edge
@@ -240,6 +245,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_view.cpp  # the per-tick equipped-weapon snapshot
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/death_piece_draw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/nvg_laser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_squib.cpp
@@ -436,9 +443,11 @@ set_target_properties(opennova_runtime PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-# Terrain math keeps a stable FP environment with no FMA contraction. Scoped
-# per-source so the rest of the runtime group keeps the default codegen.
+# Terrain math (and the DXT codec its textures pass through) keeps a stable FP
+# environment with no FMA contraction. Scoped per-source so the rest of the
+# runtime group keeps the default codegen.
 set(_opennova_terrain_fp_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lighting.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree.cpp

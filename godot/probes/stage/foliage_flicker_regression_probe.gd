@@ -288,7 +288,6 @@ func _probe_detail_alpha_equality_contract() -> Dictionary:
 	production_material.set_shader_parameter(&"u_has_fd_texture", true)
 	production_material.set_shader_parameter(&"u_has_colormap", false)
 	production_material.set_shader_parameter(&"u_has_heightfield_normal", false)
-	production_material.set_shader_parameter(&"u_has_tile_overlay", false)
 	foliage.material_override = production_material
 	stage.add_child(foliage)
 	foliage.set_instance_shader_parameter(&"u_fade", 1.0)

@@ -1469,6 +1469,62 @@ bool check_validated_fire_scores_one_shot() {
 			"an alt-fire round is appended without a FIRE event");
 }
 
+// The host's record of a remote player's EquippedSlot: the 0x2F accept points it at
+// the submitted slot and keeps it only for a NoSelect def; an accepted network fire
+// re-points it at the fired combo's personal slot; the 0x0C weapon echo never moves it.
+// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a;
+//  Server_ClientFiredRound @0x50c1d4..0x50c28d]
+bool check_host_tracks_the_remote_equipped_slot() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_rifle_armory(world);
+	w::WeaponTableEntry &selectable = world.tables.weapons.entries[4];
+	selectable = world.tables.weapons.entries[5];
+	selectable.name = "WPN_TESTCHUTE";
+	selectable.rank = 1;
+	selectable.flags2 = w::weapon_flag2::kNoSelect;
+	selectable.ammo_class = "CLS_B"; // its own pool: the rifle keeps its clip
+	selectable.ammo_class_id = 1;
+	world.tables.weapons.ammo_class_names.push_back("CLS_B");
+	world.tables.weapons.ammo_class_caps.push_back(1000);
+	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0, 0, 0));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	inmatch::NapiNPConnection &conn = roster.front();
+	const uint16_t rifle_combo = 3 * 65 + 2;
+	const uint16_t chute_combo = 3 * 65 + 1;
+	using Ref = inmatch::NapiNPConnection::EquippedSlotRef;
+	auto submit = [&](uint32_t slot) {
+		LoadoutSubmit request;
+		request.team = 1;
+		request.player_class = 8;
+		request.weapon_slot_index = slot;
+		request.entries.push_back(LoadoutSubmitEntry{5, 3, 0xFF, 0xFF});
+		request.entries.push_back(LoadoutSubmitEntry{4, 1, 0xFF, 0xFF});
+		conn.link.armory_reuse_seconds = 0;
+		conn.link.preround_loadout_latch = true; // the post-join submit bypasses the window
+		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+				{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
+				100, roster, &world);
+	};
+	submit(rifle_combo);
+	if (!expect(conn.weapon_slots.count(rifle_combo) == 1 && conn.equipped_slot.kind == Ref::kNone,
+			"a selectable submitted slot leaves the EquippedSlot empty"))
+		return false;
+	submit(chute_combo);
+	if (!expect(conn.equipped_slot.kind == Ref::kPersonal && conn.equipped_slot.combo == chute_combo,
+			"a NoSelect submitted slot is kept"))
+		return false;
+	uint32_t client_tick = conn.tick_seed;
+	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+			{make_protocol_message(c2s::FIRED_ROUND, fire_body(conn, shooter.packed, 5, client_tick))},
+			100, roster, &world);
+	return expect(world.out.rounds.count == 1 && conn.equipped_slot.kind == Ref::kPersonal &&
+					conn.equipped_slot.combo == rifle_combo,
+			"an accepted fire re-points the EquippedSlot at the fired combo");
+}
+
 bool check_guidance_waits_for_spawn_frame() {
     inmatch::NapiNPServerCtx ctx;
     inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
@@ -1511,6 +1567,7 @@ bool check_guidance_waits_for_spawn_frame() {
 int main() {
 	bool ok = check_shared_loaded_ammo_fire_and_reload() && check_guidance_waits_for_spawn_frame();
 	ok = check_validated_fire_scores_one_shot() && ok;
+	ok = check_host_tracks_the_remote_equipped_slot() && ok;
 	ok = check_spawn_protection_seeded_at_creation() && ok;
 	ok = check_spawn_protection_countdown_and_gates() && ok;
 	ok = check_spawn_protection_cleared_by_validated_fire() && ok;

@@ -39,8 +39,6 @@ namespace godot {
 	X(int64_t, model_cache_submissions)         \
 	X(int64_t, detail_mesh_hits)                \
 	X(int64_t, detail_mesh_uploads)             \
-	X(int64_t, model_mesh_hits)                 \
-	X(int64_t, model_mesh_uploads)              \
 	X(int64_t, backend_instance_creates)        \
 	X(int64_t, backend_scenario_writes)         \
 	X(int64_t, backend_configuration_writes)    \

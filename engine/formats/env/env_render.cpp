@@ -66,8 +66,13 @@ FogParams compute_fog_params(int fog_type, float fog_end_distance, float overcas
 	const float inv_density = std::clamp(1.0f - overcast, 0.0f, 1.0f);
 	switch (fog_type) {
 	case 0:
+		// The device EXP ignores the start, but Render_SetFogState still
+		// stores the caller's 0.5 [orig: Render_SetFogState @ 0x58a992;
+		// Environment_ApplyFogAndAmbient @ 0x57e4d2], and the vertex-shader
+		// passes fog linearly from it (FogStart through the projection
+		// [orig: apply_shader_parameters @ 0x58e21b]).
 		params.exponential = true;
-		params.start = 0.0f;
+		params.start = 0.5f;
 		params.exp_density = fog_end_distance > 0.0f ? kLn64 / fog_end_distance : 0.0f;
 		break;
 	case 2:
@@ -647,19 +652,25 @@ WaterNoiseTables water_init_noise_tables() {
 	}
 
 	// 128 + 64*sin: the original computes trunc(sin(i * 2pi/256) * -64) at init
-	// and stores 0x80 - value [orig: @ 0x5c0308..0x5c0334; step float 2pi/256,
-	// amplitude float -64] — x87 fsin, one deterministic instance. A runtime
-	// std::sin build forks per libm at the trunc boundaries (macOS 26 images
-	// flip non-landmark bytes and every downstream noise pixel with them), so
-	// the LUT is the committed deterministic instance the parity pins were
-	// generated from (formula-identical on MSVC/UCRT x64; env #35 in
-	// docs/env/env-tod-re.md).
+	// and stores 0x80 - value [orig: Water_InitNoiseFieldAndSineLut
+	// @ 0x5c0308..0x5c0334 (fild i / fmul step / fsin / fmul amplitude /
+	// _ftol2_sse); step flt_7DBD14 = 2pi/256, amplitude flt_7C9BD8 = -64].
+	// The loop runs after CGfxDevice_CreateDevice created the device without
+	// D3DCREATE_FPU_PRESERVE (BehaviorFlags 0x80, fallback 0x20
+	// @ 0x67e9fd/@ 0x67ea35), which leaves the x87 precision control at 24
+	// bits: both fmuls round to single precision, so i*step lands on the float
+	// grid and sin * -64 rounds to exactly -64.0 / +64.0 at i = 64 / 192
+	// (bytes 0xC0 / 0x40; a double-precision build truncates 63.9999... to 63
+	// and gives 0xBF / 0x41). No other index lies within a float half-ulp of an
+	// integer. A runtime std::sin build also forks per libm at the trunc
+	// boundaries, so the LUT is this committed single-precision instance
+	// (env #35 in docs/env/env-tod-re.md).
 	static const uint8_t kSineLut[256] = {
 		0x80, 0x81, 0x83, 0x84, 0x86, 0x87, 0x89, 0x8A, 0x8C, 0x8E, 0x8F, 0x91, 0x92, 0x94, 0x95, 0x97,
 		0x98, 0x99, 0x9B, 0x9C, 0x9E, 0x9F, 0xA0, 0xA2, 0xA3, 0xA4, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAC,
 		0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB6, 0xB7, 0xB8, 0xB9, 0xB9, 0xBA,
 		0xBB, 0xBB, 0xBC, 0xBC, 0xBD, 0xBD, 0xBE, 0xBE, 0xBE, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF,
-		0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBE, 0xBE, 0xBE, 0xBD, 0xBD, 0xBC, 0xBC, 0xBB,
+		0xC0, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF, 0xBE, 0xBE, 0xBE, 0xBD, 0xBD, 0xBC, 0xBC, 0xBB,
 		0xBB, 0xBA, 0xB9, 0xB9, 0xB8, 0xB7, 0xB6, 0xB6, 0xB5, 0xB4, 0xB3, 0xB2, 0xB1, 0xB0, 0xAF, 0xAE,
 		0xAD, 0xAC, 0xAA, 0xA9, 0xA8, 0xA7, 0xA6, 0xA4, 0xA3, 0xA2, 0xA0, 0x9F, 0x9E, 0x9C, 0x9B, 0x99,
 		0x98, 0x97, 0x95, 0x94, 0x92, 0x91, 0x8F, 0x8E, 0x8C, 0x8A, 0x89, 0x87, 0x86, 0x84, 0x83, 0x81,
@@ -667,7 +678,7 @@ WaterNoiseTables water_init_noise_tables() {
 		0x68, 0x67, 0x65, 0x64, 0x62, 0x61, 0x60, 0x5E, 0x5D, 0x5C, 0x5A, 0x59, 0x58, 0x57, 0x56, 0x54,
 		0x53, 0x52, 0x51, 0x50, 0x4F, 0x4E, 0x4D, 0x4C, 0x4B, 0x4A, 0x4A, 0x49, 0x48, 0x47, 0x47, 0x46,
 		0x45, 0x45, 0x44, 0x44, 0x43, 0x43, 0x42, 0x42, 0x42, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
-		0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x42, 0x42, 0x42, 0x43, 0x43, 0x44, 0x44, 0x45,
+		0x40, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x42, 0x42, 0x42, 0x43, 0x43, 0x44, 0x44, 0x45,
 		0x45, 0x46, 0x47, 0x47, 0x48, 0x49, 0x4A, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52,
 		0x53, 0x54, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5C, 0x5D, 0x5E, 0x60, 0x61, 0x62, 0x64, 0x65, 0x67,
 		0x68, 0x69, 0x6B, 0x6C, 0x6E, 0x6F, 0x71, 0x72, 0x74, 0x76, 0x77, 0x79, 0x7A, 0x7C, 0x7D, 0x7F,
@@ -748,30 +759,17 @@ void water_noise_normal_pixels(uint32_t *out_pixels, const uint32_t *color_pixel
 	}
 }
 
-WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float cam_z,
-                            float fog_distance_world) {
-	// [orig: render_water_surface @ 0x5c3348..0x5c33db].
-	WaterUvState state;
+WaterDepthCurve water_depth_curve(float fog_distance_world) {
+	// [orig: render_water_surface @ 0x5c332d..0x5c3362; the w / (w - 0.2)
+	// divide @ 0x5c3348].
+	WaterDepthCurve curve;
 	// w = the INTEGER part of the (smoothed) fog distance — the original
 	// reads the 16-bit word above the 16.16 fraction.
 	const double w = static_cast<double>(static_cast<int16_t>(fog_distance_world));
 	const double v = w / (w - 0.2);
-	state.scale = static_cast<float>(v * static_cast<double>(0.99996948f));
-	state.bias = static_cast<float>(0.2 * v * static_cast<double>(0.99996948f));
-	// Layer-1 cloud accumulators + the 32x camera term; engine axes
-	// (camX_eng = render z, camY_eng = -render x), sums wrap as uint32 like
-	// the original.
-	const uint32_t cam_x_eng = static_cast<uint32_t>(static_cast<int64_t>(
-			static_cast<double>(cam_z) * 65536.0));
-	const uint32_t cam_y_eng = static_cast<uint32_t>(-static_cast<int64_t>(
-			static_cast<double>(cam_x) * 65536.0));
-	state.offset_u = static_cast<float>(
-			static_cast<double>(static_cast<uint32_t>(scroll.acc_l1_v + 32u * cam_x_eng)) *
-			kCloudUvScaleLayer1);
-	state.offset_v = static_cast<float>(
-			static_cast<double>(static_cast<uint32_t>(scroll.acc_l1_u - 32u * cam_y_eng)) *
-			kCloudUvScaleLayer1);
-	return state;
+	curve.scale = static_cast<float>(v * static_cast<double>(0.99996948f));
+	curve.bias = static_cast<float>(0.2 * v * static_cast<double>(0.99996948f));
+	return curve;
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,11 +1055,11 @@ int water_strip_stride(float row_rhw) {
 	return steps;
 }
 
-float water_strip_depth(float view_depth, float uv_scale, float uv_bias) {
+float water_strip_depth(float view_depth, float depth_scale, float depth_bias) {
 	// [orig: @ 0x5c2bfd..0x5c2c4a] — rhw first, then z = (t*scale - bias)*rhw
 	// against the witnessed clamp pair (flt_7C4658 upper / flt_7DBF7C lower).
 	const float rhw = 1.0f / view_depth;
-	float z = (view_depth * uv_scale - uv_bias) * rhw;
+	float z = (view_depth * depth_scale - depth_bias) * rhw;
 	if (z > kWaterStripDepthMax) {
 		z = kWaterStripDepthMax;
 	}
@@ -1106,13 +1104,14 @@ WaterRowColors water_strip_row_colors(float row_view_depth, const float right_de
 	int dist_alpha;
 	if (underwater_view) {
 		// Solid white diffuse; LINEAR distance falloff (no square). Both
-		// tiers' distance term multiplies dbl_7DBF98 = 2^24 (= 256 per world
-		// unit against the 16.16 fog end); the doc's "x255 <-> x229.5" swap
-		// is the LOW tier's dbl_7DBF70 @ 0x5c244b. [orig: @ 0x5c2df3..0x5c2e20]
+		// tiers' distance term multiplies dbl_7DBF98 = 16711680.0 = 255 x 2^16
+		// (a = 255 t / fog end against the 16.16 fog end); the doc's
+		// "x255 <-> x229.5" swap is the LOW tier's dbl_7DBF70 @ 0x5c244b.
+		// [orig: @ 0x5c2df3..0x5c2e20, fmul dbl_7DBF98 @ 0x5c2dfd]
 		brightness = 255;
 		diffuse_alpha = 255;
 		const int a = ftol_trunc(
-				static_cast<double>(row_view_depth) * 16777216.0 / fog_end_fp);
+				static_cast<double>(row_view_depth) * 16711680.0 / fog_end_fp);
 		dist_alpha = clamp_int(255 - a, 0, 255);
 	} else {
 		// [orig: @ 0x5c2e22..0x5c2e9d] — the two lerps ftol-truncate; the
@@ -1120,7 +1119,7 @@ WaterRowColors water_strip_row_colors(float row_view_depth, const float right_de
 		const int alpha_term = ftol_trunc(alpha_lo + (alpha_hi - alpha_lo) * sin_angle);
 		brightness = ftol_trunc(bright_far + (bright_near - bright_far) * (1.0 - sin_angle));
 		const int a = clamp_int(
-				ftol_trunc(static_cast<double>(row_view_depth) * 16777216.0 / fog_end_fp),
+				ftol_trunc(static_cast<double>(row_view_depth) * 16711680.0 / fog_end_fp),
 				0, 255);
 		dist_alpha = 255 - a * a / 255;
 		diffuse_alpha = alpha_term * dist_alpha / 255;
@@ -1294,7 +1293,7 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
 
 		// Row-constant texm3x2 bump rows [orig: @ 0x5c2efd..0x5c2fcd]:
 		// scale = min(rhw, 0.05); right row * -scale/2, forward row * -5*scale;
-		// vbase = 1 - min(297*rhw + 0.15, 2)/256. The rows' world-Y products
+		// vbase = 1 - min(300*rhw + 0.15, 2)/256. The rows' world-Y products
 		// are dead stores in retail and are not emitted.
 		float bump = row_rhw;
 		if (bump > 0.05f) { // flt_7C68E8
@@ -1306,7 +1305,7 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
 		const float t1_y = view.cam_right[2] * right_scale;
 		const float t2_x = view.cam_forward[0] * fwd_scale;
 		const float t2_y = view.cam_forward[2] * fwd_scale;
-		float q = 297.0f * row_rhw + 0.15f; // flt_7DBF68 / flt_7C6FA4
+		float q = 300.0f * row_rhw + 0.15f; // flt_7DBF68 (0x43960000) / flt_7C6FA4 @ 0x5c2f04
 		if (q > 2.0f) {                     // flt_7C3B90
 			q = 2.0f;
 		}
@@ -1323,7 +1322,7 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
 			out.screen_pos.push_back(screen_x[i]);
 			out.screen_pos.push_back(screen_y[i]);
 			out.depth.push_back(water_strip_depth(static_cast<float>(depth_t[i]),
-			                                      params.uv_scale, params.uv_bias));
+			                                      params.depth_scale, params.depth_bias));
 			out.rhw.push_back(reciprocal_clip_w(depth_t[i]));
 			out.diffuse.push_back(colors.diffuse);
 			out.specular.push_back(colors.specular);
@@ -1662,7 +1661,7 @@ int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blen
 int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
                          int overcast_blend_fixed, int sun_dim_fixed,
                          bool frame_effects_quarter) {
-	// The no-occlusion path FrameFX_RenderBloomPass drives
+	// The no-occlusion path FrameFX_RenderGlowSource drives
 	// (render_skybox_sun_glow(0, 0)): brightness = (fog_km + 1.0) * 0.5 *
 	// dot_factor [orig: @ 0x5ad013..0x5ad027 - fog_km = Env_FogDistCurrent *
 	// flt_7DA0C4 (1/65536000) @ 0x5acd8e..0x5acd98; flt_7C3280 = 1.0;
@@ -1682,12 +1681,20 @@ int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
 
 namespace {
 
+// One MMX word lane of the weighted blend: the light byte zero-extended times
+// the weight (pmullw), plus the base byte unpacked WITH ITSELF (punpcklbw
+// mm1, mm1 = base * 257), added with unsigned word saturation (paddusw), then
+// >> 8 (psrlw) [orig: Environment_UpdateWeatherTick @ 0x57f0c2..0x57f0ce].
+int weighted_add_lane(float light, float base, int weight) {
+	const int sum = std::min(rgb_byte(light) * weight + rgb_byte(base) * 257, 0xFFFF);
+	return sum >> 8;
+}
+
 Rgb weighted_add(const Rgb &light, const Rgb &base, int weight) {
-	// (light * weight) >> 8 + base, saturating per byte.
 	Rgb out;
-	out.r = byte_to_float(((rgb_byte(light.r) * weight) >> 8) + rgb_byte(base.r));
-	out.g = byte_to_float(((rgb_byte(light.g) * weight) >> 8) + rgb_byte(base.g));
-	out.b = byte_to_float(((rgb_byte(light.b) * weight) >> 8) + rgb_byte(base.b));
+	out.r = byte_to_float(weighted_add_lane(light.r, base.r, weight));
+	out.g = byte_to_float(weighted_add_lane(light.g, base.g, weight));
+	out.b = byte_to_float(weighted_add_lane(light.b, base.b, weight));
 	return out;
 }
 
@@ -1914,97 +1921,6 @@ Rgb tile_overlay_tint_factor(const TerrainTint &tint) {
 	factor.g = static_cast<float>(2u * ((tint.half >> 8) & 0xFFu)) / 255.0f;
 	factor.b = static_cast<float>(2u * (tint.half & 0xFFu)) / 255.0f;
 	return factor;
-}
-
-// ---------------------------------------------------------------------------
-// Star field (env #33)
-
-namespace {
-
-inline uint32_t star_rotl32(uint32_t value, int count) {
-	return (value << count) | (value >> (32 - count));
-}
-
-} // namespace
-
-uint32_t star_prng_next(uint32_t &state) {
-	// [orig: inlined at Star_GenerateInstanceTable @ 0x5ac850 and
-	// render_star_field @ 0x5adb1a; standalone dead stub @ 0x5ac010]
-	const uint32_t rolled = star_rotl32(state + star_rotl32(state, 11), 4) ^ 1u;
-	state = rolled;
-	return rolled & 0xFFFFu;
-}
-
-namespace {
-
-// int(min(len, 2147418112.0f)) — the generator's ftol overflow guard
-// [orig: flt_7C19E0 = 0x7FFF8000 as float].
-int32_t star_length_int(double len) {
-	const double kCeil = 2147418112.0;
-	return static_cast<int32_t>(len < kCeil ? len : kCeil);
-}
-
-} // namespace
-
-void generate_star_instances(StarInstance *out, uint32_t &prng_state) {
-	// [orig: Star_GenerateInstanceTable @ 0x5ac850] — draw order per star:
-	// offX, offY, offZ, billboard, mask, add; brightness untouched.
-	for (int i = 0; i < kStarInstanceCount; ++i) {
-		StarInstance &star = out[i];
-		const int32_t rx = static_cast<int32_t>(star_prng_next(prng_state));
-		star.offset_fp[0] = (rx - 0x8000) << 9;
-		const int32_t ry = static_cast<int32_t>(star_prng_next(prng_state));
-		star.offset_fp[1] = (ry - 0x8000) << 9;
-		const int32_t abs_x = star.offset_fp[0] < 0 ? -star.offset_fp[0] : star.offset_fp[0];
-		const int32_t abs_y = star.offset_fp[1] < 0 ? -star.offset_fp[1] : star.offset_fp[1];
-		const int32_t rz = static_cast<int32_t>(star_prng_next(prng_state));
-		star.offset_fp[2] = ((rz + 0x20000) << 6) - ((abs_x + abs_y) >> 3);
-		const int32_t rb = static_cast<int32_t>(star_prng_next(prng_state));
-		star.billboard_param = (rb & 0x3FF) + 12288;
-		const int32_t rm = static_cast<int32_t>(star_prng_next(prng_state));
-		star.twinkle_mask = 31 >> (rm & 3);
-		const int32_t ra = static_cast<int32_t>(star_prng_next(prng_state)) & 0xFF;
-		star.twinkle_add = ra == 0 ? 1 : ra;
-		const int32_t max_add = 255 - star.twinkle_mask;
-		if (star.twinkle_add > max_add) {
-			star.twinkle_add = max_add;
-		}
-		// dir = normalize(off >> 8) via 2^32/len with +0x8000 rounding; a
-		// zero integer length leaves the >>8 values unnormalized (the
-		// original stores them first and guards the divide).
-		int32_t scaled[3];
-		double sum_sq = 0.0;
-		for (int c = 0; c < 3; ++c) {
-			scaled[c] = star.offset_fp[c] >> 8;
-			star.dir_fp[c] = scaled[c];
-			sum_sq += static_cast<double>(scaled[c]) * static_cast<double>(scaled[c]);
-		}
-		const int32_t len = star_length_int(std::sqrt(sum_sq));
-		if (len != 0) {
-			const int64_t inv = static_cast<int64_t>(0x100000000LL / len);
-			for (int c = 0; c < 3; ++c) {
-				star.dir_fp[c] = static_cast<int32_t>(
-						static_cast<uint64_t>(inv * static_cast<int64_t>(scaled[c]) + 0x8000) >> 16);
-			}
-		}
-	}
-}
-
-int32_t star_twinkle_tick(StarInstance &star, uint32_t &prng_state) {
-	// [orig: render_star_field @ 0x5adb45]
-	const int32_t r = static_cast<int32_t>(star_prng_next(prng_state));
-	star.brightness = (star.brightness + star.twinkle_add + (r & star.twinkle_mask)) >> 1;
-	return star.brightness;
-}
-
-bool star_visible_fixed(const StarInstance &star, const int32_t light_dir_fp[3]) {
-	// [orig: render_star_field @ 0x5adac4] — hidden when the 16.16 dot
-	// exceeds 64225 (~0.98).
-	const int64_t dot = (static_cast<int64_t>(light_dir_fp[0]) * star.dir_fp[0] +
-								static_cast<int64_t>(light_dir_fp[1]) * star.dir_fp[1] +
-								static_cast<int64_t>(light_dir_fp[2]) * star.dir_fp[2]) >>
-			16;
-	return dot <= 64225;
 }
 
 } // namespace opennova::env

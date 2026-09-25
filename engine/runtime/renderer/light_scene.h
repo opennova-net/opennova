@@ -47,7 +47,7 @@
 // @ 0x5da6a8; the ID3DXEffect count-setter vtable call @ 0x5da6ed and the
 // three vector-array vtable calls @ 0x5da71a/@ 0x5da740/@ 0x5da766 through
 // the handles stored @ 0x5af51b..0x5af566], and for the fixed-function pass first
-// disables EVERY enabled D3D light (CEffectWorld_ClearActiveSamplerStates
+// disables EVERY enabled D3D light (Light_DisableActiveD3DLights
 // @ 0x5da5de) and re-enables only the entry's (Light_ApplyAsD3DLight
 // @ 0x5da61a). The highest-quality object path therefore lights with at
 // most three dynamic lights per strip; the 4-light D3D enable never reaches
@@ -64,7 +64,7 @@
 // FOLIAGE IS NOT A DELIVERY TARGET ON THE LOCKED HIGHEST-QUALITY PATH. The
 // far-patch loop does call Light_SelectAndEnableForDraw @ 0x60a5dc, but
 // Foliage_LoadDefAssets first creates Foliage_WindSwayVS @ 0x601278 and
-// Foliage_SetupFarSlotDraw installs it in the descriptor @ 0x60087a..0x600883.
+// Foliage_SetupDetailSlotDraw installs it in the descriptor @ 0x60087a..0x600883.
 // The complete vs_1_1 literal @ 0x7de648 declares position/color/texcoord only,
 // never normal/light input, and writes oD0 = c6; Foliage_LightmapBlendPS then
 // uses that oD0 plus cached-tile c0/c1. SetLight/LightEnable can affect foliage
@@ -335,7 +335,9 @@ struct LightCoronaOwnerMask {
 // The corona pass inputs. The depth plane is retail's batch-sort camera
 // plane in mission space: depth(p) = dot(normal, p) + w, growing in front of
 // the camera — each segment's alpha is clamp(depth / base_half_size, 0..1)
-// [orig: g_BatchSortDepthPlane reads @ 0x5ab2f8..0x5ab33c].
+// [orig: g_BatchSortDepthPlane reads @ 0x5ab2f8..0x5ab33c], and the light
+// centre itself must clear the viewport near depth on the same axis first
+// [orig: the view-matrix depth row test @ 0x5ab0fc..0x5ab143].
 // Fog: the corona pass runs the PRIMARY device fog with the fog color forced
 // BLACK (additive fades out, never toward the fog color)
 // [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6 -> case 2
@@ -500,6 +502,23 @@ public:
 			bool d3d_light_path,
 			LightDrawSelection *out) const;
 
+	// The render-slot dominant-light candidates for one entity
+	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]: the collector over the
+	// entity cube (position -/+ entity+0 radius @ 0x5d6af1..0x5d6b24) with its
+	// output limit FOUR (`push 4` @ 0x5d6b00 -> collect_nearby_zones_by_aabb
+	// @ 0x5aa250: the capped slot-order scan, the nearest sort, then
+	// min(found, limit) @ 0x5aa418..0x5aa425), each candidate gated only by
+	// Light_PassesActiveGroups (@ 0x5d6b89, the entity's interior group set
+	// @ 0x5d6b40..0x5d6b77) and read through Light_GetPointLightParams
+	// (@ 0x5d6bad) — no objects-disable gate and no three-cap.
+	static constexpr size_t kSlotPickLimit = 4;
+	size_t slot_light_candidates(const std::array<int32_t, 3> &query_min_fixed,
+			const std::array<int32_t, 3> &query_max_fixed,
+			const LightActiveGroups &groups,
+			const std::array<float, 3> &ambient_scale,
+			const LightFlickerInputs &flicker,
+			std::array<SelectedLight, kSlotPickLimit> &out) const;
+
 	// Monotonic identity for changes which can alter a draw's ordered handle
 	// selection: pool membership, position/AABB, owner groups, or hidden state.
 	// Color-only changes (fade blend, RGB-gen time/weather, ambient gain) do
@@ -530,7 +549,9 @@ public:
 	// record rgb x blend x ambient scale x 1/16 (then the RgbGen multiply),
 	// each segment scaled by clamp(camera-plane depth / (0.5 x radius), 0..1)
 	// and skipped at <= 0. Admission: camera distance <= 100 wu (0x640000
-	// fixed), the owned-light visible-section gate (inputs.owner_masks
+	// fixed), the light centre's camera depth beyond the viewport near depth
+	// 1/32 wu [orig: @ 0x5ab0fc..0x5ab143], the owned-light visible-section
+	// gate (inputs.owner_masks
 	// [orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960, gated @ 0x5ab027]),
 	// and a per-frame +-512-fixed x/y jitter phased on frame & 3. A
 	// corona_lower_half_radius instance (retail render flag 0x100) drops
@@ -576,6 +597,14 @@ private:
 
 	const Slot *slot_for(LightHandle handle) const;
 	Slot *slot_for(LightHandle handle);
+	// Light_PassesActiveGroups @ 0x5a9120 over one record.
+	static bool passes_active_groups(const LightSpawnParams &params,
+			const LightActiveGroups &groups, bool admit_owned_unscoped);
+	// Light_GetPointLightParams @ 0x5a9180 into one SelectedLight.
+	void fill_selected(const Slot &slot, LightHandle handle,
+			const std::array<float, 3> &ambient_scale,
+			const LightFlickerInputs &flicker, bool d3d_light_path,
+			SelectedLight &light) const;
 	size_t query_impl(const std::array<int32_t, 3> &query_min_fixed,
 			const std::array<int32_t, 3> &query_max_fixed,
 			bool collect_all_before_cap,
@@ -655,15 +684,35 @@ struct ModelLightOwner {
 // world [orig: Entity_SpawnGlowEffects @ 0x56c89f / @ 0x56c8bd].
 ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
 
+// The OWNER light group one drawn submit declares. Only the person wave sets
+// a nonzero entity: the drawn entity at section 0, before both its head and
+// its body submits [orig: Terrain_RenderSectorEntitiesBySide
+// Lighting_SetOwnerLightGroup calls @ 0x5c7fb1 / @ 0x5c8004]. The RIGID
+// collector then re-scopes every ROBJ it collects to (0, robjIndex)
+// [orig: collect_render_objects_for_batch @ 0x5d8ff7], while the SKINNED
+// collector keeps whatever is set — Render_SubmitEntity dispatches on the
+// model's skinned flag [orig: @ 0x5daddc..0x5dae2d]. Every other context
+// leaves entity 0: the wave's reset @ 0x5c806e..0x5c808a, the terrain's
+// @ 0x609685, and neither the non-person wave nor the first-person pass sets
+// one. So an owned light (the muzzle glow, a subobject lamp) reaches only its
+// owner's skinned person draws, plus the interior-group case where its owner
+// is the containing building. A skinned non-person draw inherits a leftover
+// section (entity 0 either way); 0 here.
+struct SubmitOwnerGroup {
+	uint64_t entity = 0;
+	int32_t section = 0;
+};
+SubmitOwnerGroup submit_owner_group(uint64_t drawn_entity, bool person_wave,
+		bool skinned_level, int32_t robj_index);
+
 // The two witnessed groups one retained static atlas row declares for the
 // per-draw select — the same interior/owner pair the live-model pass stamps
-// per draw context (LightActiveGroups). A BUILDING row is its own interior
-// group at section zero and re-scopes the owner section to the exact ROBJ it
-// draws [orig: Terrain_RenderSectorModels pushes building/section 0 and
-// collect_render_objects_for_batch @ 0x5d8ff7 -> Lighting_SetOwnerLightGroup
-// (0, robjIndex) moves the owner section between the walks]; every other
-// static row is owned by its tagged static owner (section 0) and carries the
-// interior group the blink query at its placement origin resolved — the
+// per draw context (LightActiveGroups). Every static row is a rigid submit, so
+// its owner group is (0, robjIndex) (submit_owner_group). A BUILDING row is
+// also its own interior group at section zero [orig: Terrain_RenderSectorModels
+// pushes building/section 0; collect_render_objects_for_batch @ 0x5d8ff7 ->
+// Lighting_SetOwnerLightGroup (0, robjIndex)]; every other static row carries
+// the interior group the blink query at its placement origin resolved — the
 // building it stands inside plus that blink volume's section, the second
 // witnessed group [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
 // Lighting_SetInteriorLightGroup @ 0x5a90e0]; outdoors (no hit) both
@@ -671,7 +720,7 @@ ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
 struct StaticLightRowInputs {
 	bool is_building = false;
 	uint64_t static_owner = 0;        // the row's tagged static owner id
-	int32_t robj_index = 0;           // the ROBJ this row draws (buildings)
+	int32_t robj_index = 0;           // the ROBJ this row draws
 	bool blink_hit = false;           // the placement-origin blink query hit
 	uint64_t blink_owner_entity = 0;  // slot 0's containing building
 	int32_t blink_section = 0;        // and that volume's section

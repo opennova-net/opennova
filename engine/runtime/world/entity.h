@@ -205,7 +205,7 @@ inline constexpr uint8_t kAdmSlotNone = 0xFF;
 // known-but-unnamed bits stay raw at use sites — do not name: 0x10000, 0x2000000,
 // 0x8000000, and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context
 // meanings unwitnessed).
-inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachToVehicle @0x43C130]
+inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachCarriedObject @0x43C130]
 inline constexpr uint32_t kEntityFlagDead = 0x2;              // [orig: kill writes Flags |= 6 @0x43fbf6]
 inline constexpr uint32_t kEntityFlagHusk = 0x4;              // items/buildings: husk swap [orig: @0x43fbf6]
 inline constexpr uint32_t kEntityFlagNVGWorn = 0x4;           // organics: NVG draw, same bit kind-dependent
@@ -221,8 +221,9 @@ inline constexpr uint32_t kEntityFlagAiClimb = 0x80;          // org1 ladder-cli
                                                               // [orig: test @0x4bf6c1; chase @0x4bf6d2-0x4bf6e5]
 inline constexpr uint32_t kEntityFlagMounted = 0x40;          // carried/mounted; the AI guard family reads it too
                                                               // [orig: @0x494752; guard @0x4bf5a5-family]
-inline constexpr uint32_t kEntityFlagPlayer = 0x100;          // the wire Player class bit; gates held-weapon draws
-                                                              // [orig: §5.10b class; draw gate @0x4e5073-family]
+inline constexpr uint32_t kEntityFlagPlayer = 0x100;          // the wire Player class bit; gates the upper-body
+                                                              // weapon channel [orig: §5.10b class;
+                                                              // Entity_BuildBoneTransformMatrices @0x4b14a7]
 inline constexpr uint32_t kEntityFlagQueuedMount = 0x200;     // the queued Co-op spawn-marker mount: set with
                                                               // +0x16C/+0x180 = the marker's parent by the no-pick
                                                               // team-2 marker arm, consumed (toggle, then cleared)
@@ -1027,7 +1028,7 @@ struct Entity {
     // restore (bms-event-runtime-re §3b item 4). Match owns the live flag
     // producer; the conditions and savegame consumer share this same link.
     // [orig: set
-    // Entity_AttachToVehicle @0x43c130; cleared Entity_DropCarriedObject
+    // Entity_AttachCarriedObject @0x43c130; cleared Entity_DropCarriedObject
     // @0x439df0, the capture-zone clear @0x4ada07, Entity_Destroy @0x43ea03]
     EntityHandle mounted_child;         // kInvalid = carrying nothing
 

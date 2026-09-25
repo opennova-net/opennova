@@ -205,9 +205,12 @@ the draw ownership:
   take the entity's ONE projected radius (`*entityListIter`) and each walks
   its own RLOD table (the `forced_model` table swap `@0x5c41b4`); the head
   submit carries the entity's one-shot overlays (the held weapon, the
-  mounted child) and the body submit's flag `0x10000000` skips them
+  carried object) and the body submit's flag `0x10000000` skips them
   ([render-order-re.md](../render/render-order-re.md) D-RORD-11, closed
-  2026-08-29: the pair is not a dual-LOD submission);
+  2026-08-29: the pair is not a dual-LOD submission); the parachute canopy,
+  NVG goggles and binoculars are not gated on that flag and draw in both
+  submits, each at that part's level (corrected 2026-09-24,
+  [world-wac-ai-re.md §13.1](../world/world-wac-ai-re.md#131-the-render-gate--bonecallback_org0_world--0x4e3940));
 - PLAYER_INFO preview: body `@0x56110B`, head `@0x56113C`;
 - first-person arms: `@0x4DF008` and `@0x4DF070` immediately before the arms
   submit; the arms MODEL is blip +8 (the combo arms graphic,

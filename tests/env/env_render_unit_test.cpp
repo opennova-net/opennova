@@ -37,6 +37,9 @@ int main() {
 		const FogParams exp_fog = compute_fog_params(0, 1000.0f, 0.0f);
 		if (!expect(exp_fog.exponential, "fog type 0 is exponential")) return 1;
 		if (!expect(near(exp_fog.exp_density, 4.1588831f / 1000.0f, 1e-7f), "type 0 density is ln(64)/end")) return 1;
+		// Render_SetFogState keeps the caller's 0.5 start for type 0 too
+		// [orig: @ 0x58a992]; the VS passes fog linearly from it.
+		if (!expect(near(exp_fog.start, 0.5f), "type 0 keeps the caller's 0.5 start")) return 1;
 
 		const FogParams near_start = compute_fog_params(1, 1000.0f, 0.0f);
 		if (!expect(!near_start.exponential && near(near_start.start, 0.5f), "type 1 starts at 0.5 units")) return 1;
@@ -165,55 +168,6 @@ int main() {
 					"local mission start restores the recovered post-WAC clamps")) return 1;
 	}
 
-	// --- Star field (env #33) [orig: Star_GenerateInstanceTable @ 0x5ac850;
-	// render_star_field @ 0x5ad9c0] ------------------------------------------
-	{
-		uint32_t prng = 1u;
-		// The PRNG's first draws from state 1 (hand-derived from the witnessed
-		// rol4(s + rol11(s)) ^ 1): 0x8011, 0x8111.
-		uint32_t check_state = 1u;
-		if (!expect(star_prng_next(check_state) == 0x8011u, "star PRNG first draw from seed 1")) return 1;
-		if (!expect(star_prng_next(check_state) == 0x8111u, "star PRNG second draw")) return 1;
-
-		static StarInstance stars[kStarInstanceCount];
-		generate_star_instances(stars, prng);
-		// star[0] from seed 1: offX = (0x8011-0x8000)<<9, offY = (0x8111-0x8000)<<9.
-		if (!expect(stars[0].offset_fp[0] == (0x11 << 9), "star0 offX")) return 1;
-		if (!expect(stars[0].offset_fp[1] == (0x111 << 9), "star0 offY")) return 1;
-		bool invariants = true;
-		for (int i = 0; i < kStarInstanceCount; ++i) {
-			const StarInstance &st = stars[i];
-			if (st.billboard_param < 12288 || st.billboard_param > 12288 + 0x3FF) invariants = false;
-			if (st.twinkle_mask != 31 && st.twinkle_mask != 15 && st.twinkle_mask != 7 && st.twinkle_mask != 3) invariants = false;
-			if (st.twinkle_add < 1 || st.twinkle_add > 255 - st.twinkle_mask) invariants = false;
-			if (st.brightness != 0) invariants = false;
-			const long long len2 = 1LL * st.dir_fp[0] * st.dir_fp[0] +
-					1LL * st.dir_fp[1] * st.dir_fp[1] + 1LL * st.dir_fp[2] * st.dir_fp[2];
-			// |dir| within ~1% of 1.0 in 16.16 (integer divide + rounding slack).
-			const long long unit2 = 1LL << 32;
-			if (len2 < unit2 * 98 / 100 || len2 > unit2 * 102 / 100) invariants = false;
-		}
-		if (!expect(invariants, "all 256 stars satisfy the witnessed field invariants")) return 1;
-
-		// Twinkle: brightness EMA-chases add + (r & mask); bounded by 255.
-		StarInstance tw = stars[0];
-		uint32_t tw_prng = 99u;
-		int32_t last = 0;
-		for (int i = 0; i < 64; ++i) {
-			last = star_twinkle_tick(tw, tw_prng);
-			if (last < 0 || last > 255) { invariants = false; break; }
-		}
-		if (!expect(invariants && last >= tw.twinkle_add / 2, "twinkle accumulator stays bounded and lit")) return 1;
-
-		// The near-light cull: a star straight at the light hides; opposite shows.
-		StarInstance aligned;
-		aligned.dir_fp[0] = 0; aligned.dir_fp[1] = 0; aligned.dir_fp[2] = 65536;
-		const int32_t light_up[3] = { 0, 0, 65536 };
-		const int32_t light_down[3] = { 0, 0, -65536 };
-		if (!expect(!star_visible_fixed(aligned, light_up), "star inside the 0.98 cone hides")) return 1;
-		if (!expect(star_visible_fixed(aligned, light_down), "star opposite the light shows")) return 1;
-	}
-
 	// --- Channel smoothing [orig: interpolate_weather_color @ 0x57d9e0] -----
 	{
 		ColorChannelState state;
@@ -270,6 +224,18 @@ int main() {
 
 		const Rgb low = combine_terrain_light_low({1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f});
 		if (!expect(byte_of(low.r) == 89, "secondary light weight is 0x5A/256")) return 1;
+
+		// The sky byte rides the word lane unpacked with itself (x 257) and the
+		// sum saturates as a word before >> 8 [orig: Environment_UpdateWeatherTick
+		// @ 0x57f0c5 punpcklbw mm1, mm1; @ 0x57f0cb paddusw].
+		const Rgb mid = combine_terrain_light({100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f},
+		                                      {100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f});
+		if (!expect(byte_of(mid.r) == 171, "(100*181 + 100*257) >> 8 = 171, not 170")) return 1;
+		const Rgb full = combine_terrain_light({1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f});
+		if (!expect(byte_of(full.r) == 255, "the word sum saturates at 0xFFFF")) return 1;
+		const Rgb low_mid = combine_terrain_light_low({100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f},
+		                                              {100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f});
+		if (!expect(byte_of(low_mid.r) == 135, "(100*90 + 100*257) >> 8 = 135")) return 1;
 
 		const Rgb lit = lit_water_color({128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f},
 		                                {128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f});
@@ -813,10 +779,16 @@ int main() {
 		if (!expect(s == 0x4190B11Du, "prng step 4")) return 1;
 
 		const WaterNoiseTables tables = water_init_noise_tables();
-		// Sine LUT: 128 + 64*sin(2pi*i/256), truncating like the original ftol.
+		// Sine LUT: 128 + 64*sin(2pi*i/256), truncating like the original ftol,
+		// under the 24-bit x87 precision control CreateDevice leaves (no
+		// D3DCREATE_FPU_PRESERVE [orig: CGfxDevice_CreateDevice @ 0x67e9fd]):
+		// sin * -64 rounds to exactly -64 / +64 at i = 64 / 192, so those bytes
+		// are 0xC0 / 0x40 [orig: Water_InitNoiseFieldAndSineLut @ 0x5c0316].
 		if (!expect(tables.sine_lut[0] == 128 && tables.sine_lut[32] == 173 &&
-		            tables.sine_lut[64] == 191 && tables.sine_lut[128] == 128 &&
-		            tables.sine_lut[192] == 65, "sine LUT landmarks")) return 1;
+		            tables.sine_lut[64] == 192 && tables.sine_lut[128] == 128 &&
+		            tables.sine_lut[192] == 64 && tables.sine_lut[63] == 191 &&
+		            tables.sine_lut[65] == 191 && tables.sine_lut[191] == 65 &&
+		            tables.sine_lut[193] == 65, "sine LUT landmarks")) return 1;
 		uint32_t lut_sum = 0;
 		for (int i = 0; i < 256; ++i) lut_sum += tables.sine_lut[i];
 		if (!expect(lut_sum == 32768u, "sine LUT sum (symmetry)")) return 1;
@@ -907,7 +879,8 @@ int main() {
 		if (!expect(color7[0] == 0xE17C7C7Cu, "color pixel [0] (t=7)")) return 1;
 		uint32_t sum0 = 0, sum7 = 0;
 		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) { sum0 += color0[i]; sum7 += color7[i]; }
-		if (!expect(sum0 == 0x45E0C3DCu, "color checksum (t=0)")) return 1;
+		// The t=0 pass reads the single-precision LUT bytes 64/192 (0xC0/0x40).
+		if (!expect(sum0 == 0x5CA88BA4u, "color checksum (t=0)")) return 1;
 		if (!expect(sum7 == 0x14D0B3D2u, "color checksum (t=7)")) return 1;
 
 		// Normal/DuDv pass: B=0xFF, G/R = 2x saturated derivative + 0x80.
@@ -919,16 +892,15 @@ int main() {
 		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) nsum += normal0[i];
 		if (!expect(nsum == 0x203FC000u, "normal checksum")) return 1;
 
-		// UV state: scale/bias from the fog-distance INT part, offsets from
-		// the layer-1 cloud accumulators + 32x camera (positive on both).
-		CloudScrollState scroll;
-		scroll.acc_l1_v = 61440;
-		scroll.acc_l1_u = 61440;
-		const WaterUvState uv = water_uv_state(scroll, 100.0f, 200.0f, 1024.0f);
-		if (!expect(near(uv.scale, 1.0001649f, 1e-6f), "uv scale = 0.99996948*w/(w-0.2)")) return 1;
-		if (!expect(near(uv.bias, 0.2000330f, 1e-6f), "uv bias = 0.2*scale")) return 1;
-		if (!expect(near(uv.offset_u, 1.5627289f, 1e-6f), "uv offset u = cam_z/128 + acc*2^-28")) return 1;
-		if (!expect(near(uv.offset_v, 0.7814789f, 1e-6f), "uv offset v = cam_x/128 + acc*2^-28")) return 1;
+		// Depth curve: scale/bias from the fog-distance INT part
+		// [orig: render_water_surface @ 0x5c332d..0x5c3362]; the fraction is
+		// dropped (the movsx of the 16.16 word's high half).
+		const WaterDepthCurve curve = water_depth_curve(1024.0f);
+		if (!expect(near(curve.scale, 1.0001649f, 1e-6f), "depth scale = 0.99996948*w/(w-0.2)")) return 1;
+		if (!expect(near(curve.bias, 0.2000330f, 1e-6f), "depth bias = 0.2*scale")) return 1;
+		const WaterDepthCurve fractional = water_depth_curve(1024.75f);
+		if (!expect(fractional.scale == curve.scale && fractional.bias == curve.bias,
+		            "the depth curve reads only the fog distance's integer word")) return 1;
 	}
 
 	// --- Celestial bodies + glare occlusion [orig: render_celestial_bodies
@@ -1030,11 +1002,17 @@ int main() {
 		if (!expect(water_strip_stride(0.0181f) == 9, "stride lands the high edge (int(9.05) = 9)")) return 1;
 		if (!expect(water_strip_stride(0.1f) == 9, "stride clamps down to 9")) return 1;
 
-		// Depth ("fog W") clamps [orig: flt_7DBF7C / flt_7C4658 @ 0x5c2c1f..0x5c2c4a].
-		if (!expect(water_strip_depth(0.1f, 1.0f, 0.2f) == kWaterStripDepthMin,
-		            "depth clamps at the 8.042e-5 lower bound")) return 1;
-		if (!expect(water_strip_depth(1.0e9f, 1.0001649f, 0.2f) == kWaterStripDepthMax,
-		            "depth clamps at the 1 - 2^-14 upper bound")) return 1;
+		// Depth ("fog W") clamps [orig: flt_7DBF7C / flt_7C4658 @ 0x5c2c1f..0x5c2c4a]:
+		// the witnessed bits 0x3827C5AC (4.0e-5) and 0x3F7FFE00 (1 - 2^-15).
+		const auto float_bits = [](float value) {
+			uint32_t bits = 0;
+			std::memcpy(&bits, &value, sizeof(bits));
+			return bits;
+		};
+		if (!expect(float_bits(water_strip_depth(0.1f, 1.0f, 0.2f)) == 0x3827C5ACu,
+		            "depth clamps at the 4.0e-5 lower bound")) return 1;
+		if (!expect(float_bits(water_strip_depth(1.0e9f, 1.0001649f, 0.2f)) == 0x3F7FFE00u,
+		            "depth clamps at the 1 - 2^-15 upper bound")) return 1;
 		if (!expect(near(water_strip_depth(100.0f, 1.0f, 0.2f), 0.998f, 1e-5f),
 		            "interior depth follows (t*scale - bias)/t")) return 1;
 
@@ -1043,15 +1021,16 @@ int main() {
 		// constants: base 0.5, k = 0.2 + 0.8*0.5 = 0.6;
 		// brightness = int(38.4k + (192k - 38.4k)*(1 - 0.6)) = int(59.904) = 59;
 		// alpha_term = int(229.5*0.5*0.6) = int(68.85) = 68;
-		// a = int(512 * 2^24 / (1024<<16)) = 128; dist = 255 - 128*128/255 = 191;
-		// alpha = 68*191/255 = 50 -> diffuse 0x32 | 0x10101*0x3B.
+		// a = int(512 * 16711680 / (1024<<16)) = int(127.5) = 127 (dbl_7DBF98 =
+		// 255 x 2^16 [orig: fmul @ 0x5c2e4e]); dist = 255 - 127*127/255 = 192;
+		// alpha = 68*192/255 = 51 -> diffuse 0x33 | 0x10101*0x3B.
 		const float ray345[3] = {0.0f, -3.0f, 4.0f};
 		const WaterRowColors murky = water_strip_row_colors(
 				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, false, false);
-		if (!expect(murky.diffuse == 0x323B3B3Bu, "murk-chain diffuse bytes")) return 1;
+		if (!expect(murky.diffuse == 0x333B3B3Bu, "murk-chain diffuse bytes")) return 1;
 		// spec term = int(128*0.5 + 127*0.5*(1 - 0.6)) = int(89.4) = 89:
-		// R 128*89>>8 = 44, G 64*89>>8 = 22, B 32*89>>8 = 11, alpha = 191.
-		if (!expect(murky.specular == 0xBF2C160Bu,
+		// R 128*89>>8 = 44, G 64*89>>8 = 22, B 32*89>>8 = 11, alpha = 192.
+		if (!expect(murky.specular == 0xC02C160Bu,
 		            "specular = WaterColorLit x angle term >> 8 under the dist alpha")) return 1;
 
 		// Underwater view: murk skipped (solid white diffuse) and the LINEAR
@@ -1060,17 +1039,19 @@ int main() {
 		const WaterRowColors under = water_strip_row_colors(
 				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, true, false);
 		if (!expect(under.diffuse == 0xFFFFFFFFu, "underwater diffuse is solid white")) return 1;
-		if (!expect(under.specular == 0x7F000000u,
+		// 255 - int(512 * 16711680 / (1024<<16)) = 255 - 127 = 128
+		// [orig: fmul dbl_7DBF98 @ 0x5c2dfd].
+		if (!expect(under.specular == 0x80000000u,
 		            "underwater specular carries only the linear 255 - a")) return 1;
 
 		// Nightvision redraw: the flat 0.1 base [orig: flt_7C69F4 @ 0x5c2d5a]
 		// and no specular RGB [orig: @ 0x5c2ef8]: k = 0.28,
 		// brightness = int(0.28*(38.4 + 153.6*0.4)) = 27;
-		// alpha = int(229.5*0.1*0.6) = 13 -> 13*191/255 = 9.
+		// alpha = int(229.5*0.1*0.6) = 13 -> 13*192/255 = 9.
 		const WaterRowColors nv = water_strip_row_colors(
 				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, false, true);
 		if (!expect(nv.diffuse == 0x091B1B1Bu, "nightvision diffuse (0.1 base chain)")) return 1;
-		if (!expect(nv.specular == 0xBF000000u, "nightvision drops the specular RGB")) return 1;
+		if (!expect(nv.specular == 0xC0000000u, "nightvision drops the specular RGB")) return 1;
 
 		// Screen block: identity-rotation view 100 units above the plane,
 		// 640x480 viewport, proj m00 = m11 = 1 with w = view z.
@@ -1173,8 +1154,8 @@ int main() {
 		sp.plane_height_fp = 0;
 		sp.water_murk = 0.5f;
 		sp.water_color_lit = 0x00804020u;
-		sp.uv_scale = 1.0f;
-		sp.uv_bias = 0.2f;
+		sp.depth_scale = 1.0f;
+		sp.depth_bias = 0.2f;
 		WaterStripRows rows;
 		const int count = water_build_strip_rows(v, sp, rows);
 		if (!expect(count >= 2, "level view emits rows")) return 1;
@@ -1205,7 +1186,8 @@ int main() {
 
 		// The texm3x2 row-register constants [orig: @ 0x5c2efd..0x5c3067]:
 		// t1 = right.xz * (-min(rhw, 0.05)/2), t2 = fwd.xz * (-5*min(rhw, 0.05)),
-		// vbase = 1 - min(297*rhw + 0.15, 2)/256, screen V = vbase - sy/H.
+		// vbase = 1 - min(300*rhw + 0.15, 2)/256, screen V = vbase - sy/H
+		// (flt_7DBF68 = 0x43960000 = 300.0 [orig: fmul @ 0x5c2f04]).
 		// These were previously unpinned (env #37's investigation found the gap).
 		{
 			WaterStripView vb = v;
@@ -1226,13 +1208,29 @@ int main() {
 			if (!expect(near(rb.t2[0], -5.0f * bump0 * 0.6f, 1e-8f) &&
 			            near(rb.t2[1], -5.0f * bump0 * 0.8f, 1e-8f),
 			            "t2.xy = forward.xz * (-5 * min(rhw, 0.05))")) return 1;
-			float q0 = 297.0f * rhw0 + 0.15f;
+			float q0 = 300.0f * rhw0 + 0.15f;
 			if (q0 > 2.0f) q0 = 2.0f;
 			const float vbase0 = 1.0f - (q0 * 0.5f) * 0.0078125f;
 			if (!expect(near(rb.t1[2], rb.screen_pos[0] / 640.0f, 1e-6f),
 			            "screen U normalizes against the viewport width")) return 1;
 			if (!expect(near(rb.t2[2], vbase0 - rb.screen_pos[1] / 480.0f, 1e-5f),
-			            "screen V = vbase - sy/H (the 297/0.15/2/(1/128) chain)")) return 1;
+			            "screen V = vbase - sy/H (the 300/0.15/2/(1/128) chain)")) return 1;
+			// The nearest row whose 300*rhw + 0.15 stays under the clamp makes
+			// the multiplier itself observable (297 would move V by 3*rhw/256).
+			std::size_t pin_vertex = 0;
+			float pin_rhw = -1.0f;
+			for (int row = 0; row < nb; ++row) {
+				const std::size_t vertex = static_cast<std::size_t>(row) * 3;
+				if (300.0f * rb.rhw[vertex] + 0.15f < 2.0f && rb.rhw[vertex] > pin_rhw) {
+					pin_rhw = rb.rhw[vertex];
+					pin_vertex = vertex;
+				}
+			}
+			const float q_pin = 300.0f * pin_rhw + 0.15f;
+			if (!expect(pin_rhw > 1.0e-3f && near(rb.t2[pin_vertex * 3 + 2],
+			            1.0f - (q_pin * 0.5f) * 0.0078125f -
+			                    rb.screen_pos[pin_vertex * 2 + 1] / 480.0f, 1e-6f),
+			            "unclamped-row screen V pins the flt_7DBF68 = 300 multiplier")) return 1;
 
 			// A low camera reaches near rows whose rhw exceeds the clamp: the
 			// bump saturates at 0.05 [orig: flt_7C68E8 @ 0x5c2f0d].
@@ -1642,18 +1640,6 @@ int main() {
 		if (!expect(block_units(core.sky_color_blocks.cloudbase.render_color, 8, 12, 16), "cloudbase block ticks")) return 1;
 		if (!expect(block_units(core.sky_color_blocks.cloudhighlight.render_color, 9, 13, 17), "cloudhighlight block ticks")) return 1;
 		if (!expect(block_units(core.sky_color_blocks.cloudedge.render_color, 10, 14, 18), "cloudedge block ticks")) return 1;
-	}
-	{
-		// water/uv_state: the witnessed UV transform (scale, bias, offset_u,
-		// offset_v) after 8 ticks at sky_speed 15 via the weather core's shared
-		// accumulators, camera (100, 200), fog 1024 [orig: render_water_surface
-		// @ 0x5c3348..0x5c33db].
-		WeatherCore scroll;
-		for (int i = 0; i < 8; ++i) scroll.tick_cloud_scroll(15.0f);
-		const WaterUvState uv = water_uv_state(scroll.cloud_scroll, 100.0f, 200.0f, 1024.0f);
-		if (!expect(near(uv.scale, 1.000164866f, 1e-4f) && near(uv.bias, 0.200032964f, 1e-4f) &&
-		            near(uv.offset_u, 1.562694907f, 1e-4f) && near(uv.offset_v, 0.781444907f, 1e-4f),
-		            "water/uv_state after 8 ticks at sky speed 15")) return 1;
 	}
 	{
 		// water/noise: the RGBA8 heads of the noise color texture at counters 0

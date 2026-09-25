@@ -271,6 +271,10 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
 // @0x43b56c..0x43b5bd; Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
 // @0x614210; Math_BuildFixedPointMatrixFromEulerAngles @0x613f40].
 CollisionMatrix entity_placement_matrix(const Entity &e);
+// That matrix's live Euler triple (BAM32 heading, pitch, roll), shared with
+// the render-slot march start (renderer::slot_march_start_offset), which
+// builds the same rotation without the scale.
+void entity_live_euler_bam(const Entity &e, int32_t out[3]);
 
 bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose_row_major[16],
@@ -342,8 +346,12 @@ struct BlinkAccum {
 };
 
 inline constexpr uint32_t kBlinkIndoorsBit = 0x2;  // accum bit -> kEntityFlagIndoors
+inline constexpr uint32_t kBlinkSkyOffBit = 0x4;   // authored sky letter — the main frame's
+                                                   // dome + sun/moon bracket skipped
+                                                   // [orig: Render_ProcessMainSceneFrame
+                                                   // @0x5ca1a3..0x5ca1ab -> @0x5ca7c4]
 inline constexpr uint32_t kBlinkWaterOffBit = 0x8; // authored water letter — both water passes
-                                                   // skipped [orig: Terrain_RenderSceneWithReflection
+                                                   // skipped [orig: Terrain_RenderWorldScene
                                                    // @0x5c93cb; docs/render/render-occlusion-re.md §4]
 // The entity Flags bit constants the touch dispatch writes (kEntityFlagIndoors/
 // LadderContact/ArmoryZone/VehicleLoadoutZone) live in world/entity.h — the one
@@ -642,6 +650,9 @@ struct ResolvedCollisionShape {
     // @0x4b9127..0x4b9147 (in-use, ItemDef, Flags bit 0, attrib 0x20 unless
     // type 1); +6.0u @0x4b9152]
     bool pool1_candidate_source_eligible = false;
+    // The raw ItemDef+0x5C type (1 vehicle, 3 person): the client-side blink
+    // walk's branch key [orig: Entity_BuildProximityList @ 0x4b3e47..0x4b3e5f].
+    uint8_t item_type = 0;
 };
 
 // One decoded remote pool-0 person (player or non-player infantry) projected
@@ -1033,6 +1044,14 @@ public:
     // indoors flag; accumulate the local player's flags word.
     // [orig: Entity_BuildProximityList @ 0x4b3dc0]
     void refresh_blink(World &world, Entity &ent);
+    // The mission-start blink stamp over the static table just built: every
+    // pool-1 row, then every pool-2 row that is not a building, takes one
+    // refresh_blink before the portal init.
+    // [orig: Entity_BuildProximityListsForPools12 @ 0x5240a0 — the pool-1 loop
+    //  @ 0x5240b8..0x5240cd, the pool-2 loop with its def-type-5 skip
+    //  @ 0x5240e4..0x524102; called from Game_StartMission @ 0x525898, after
+    //  Entity_InitAllFromModels built the static table]
+    void refresh_mission_start_blink(World &world);
 
     // Point blink query at an arbitrary position (the camera-side analog of
     // refresh_blink): walk the building prefix with per-axis + euclid broad
@@ -1051,6 +1070,18 @@ public:
     // g_local_player_entity from Environment_ApplyFogAndAmbient @ 0x57e51d]
     void query_candidate_blink_boxes_at_point(World &world, EntityHandle source,
                                               const int32_t pos[3], BlinkAccum &accum);
+
+    // The wire-identity twin of refresh_blink for a decoded source without a
+    // registry entity: the retail client runs Entity_BuildProximityList on its
+    // own copy of the entity. A def type 1/3 source (`candidate_walk`) tests
+    // the building-kind entries of its candidate slice — the source's
+    // wire-keyed slice here, the one wire_sun_visibility_blocked_rays walks;
+    // no slice, no hit [orig: @ 0x4b3e53..0x4b3e5f -> @ 0x4b3f3e..0x4b3f93].
+    // Every other type walks the static building prefix [orig: @ 0x4b3e65..
+    // 0x4b3f39]. Clears `accum` first.
+    void query_wire_blink_boxes_at_point(World &world, uint16_t wire_handle,
+                                         const int32_t pos[3], bool candidate_walk,
+                                         BlinkAccum &accum);
 
     // Projectile face raycast against ONE entity's collision instance (the
     // husk-aware target view). kNoFaceMesh = no instance or the model carries

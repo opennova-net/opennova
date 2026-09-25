@@ -18,6 +18,7 @@
 
 #include <cstdint>
 
+#include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/world/death_camera.h>
 
 namespace opennova::terrain {
@@ -433,6 +434,10 @@ struct PlayerViewState {
     int death_screen_submode = 0;
     bool local_dead = false;
     bool round_ended = false;
+    // The client's decided round winner (g_endround_winner_team, the S2C
+    // 0x1D header's winner byte); nonzero hides the FP viewmodel [orig:
+    // Player_RenderViewModelIfAlive @0x4E014B].
+    int32_t end_round_winner_team = 0;
     bool on_foot = true;
     bool in_session = false;
     bool rules_no_death_cam = false;
@@ -666,8 +671,10 @@ bool player_view_toggle_nvg(PlayerViewState &v);
 // [orig: input actions 56/57]
 int32_t player_view_adjust_nvg_gain(PlayerViewState &v, int32_t delta);
 
-// The NVG state remains active in third person, but its world/post treatment
-// is first-person only. [orig: g_camera_mode gates in the NVG render path]
+// The NVG state remains active in every camera, but its world/post treatment
+// needs the resolved mode word g_camera_mode == 0: the chase (1) and the
+// death lerp camera (4) both drop it. [orig: the g_camera_mode gates in the
+// NVG render path, player_view.cpp]
 bool player_view_nvg_visible(const PlayerViewState &v);
 
 // Main-camera horizontal FOV. The weather current is independent of the ADS
@@ -721,6 +728,23 @@ struct ViewProjection {
 };
 ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
                                int surface_h);
+
+// The NVG scene's pass over the 512-square target [orig: NVG_RenderScene
+// @0x5d2954..0x5d296d (scaleY = flt_8409EC x 512 / 512: the frame's own
+// frustum); NVG_RenderSightedScene @0x5d2aa9..0x5d2ada (the
+// same shape at the Sighted arm's fov, nvg_sighted_scene_fov_q16); NVG_RenderScopedScene
+// @0x5d29e4..0x5d2a2a (scaleY 1.0: the square Scoped frustum,
+// renderer/nvg_scope_lens.h nvg_scoped_scene_fov_q16)]. Retail rasterises
+// each into 512 x 512 and stretches it over the surface. A shell whose camera
+// couples the two fovs through its target's aspect renders the frame-shaped
+// frusta into 512 rows at the frustum's own aspect (retail's rows; the
+// columns supersample its 512) and the square one into the 512 square
+// itself. `frame` is the frame's view_projection, `nvg` the frame's NVG arms,
+// `selected_h_over_w` the selected ratio (flt_8409EC), `zoom` the slot's
+// clamped magnification.
+ViewProjection nvg_view_projection(const ViewProjection &frame,
+                                   const renderer::FrameFxNvgPlan &nvg,
+                                   float selected_h_over_w, int32_t zoom);
 
 // The first-person viewmodel pass differs from the world pass only in its
 // horizontal fov (the weapon renderfov): both push scaleX = 1 and the same

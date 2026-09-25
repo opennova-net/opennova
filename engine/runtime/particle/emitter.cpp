@@ -975,7 +975,8 @@ bool emitter_alive(const Emitter &e) noexcept {
 	return !e.particles.empty();
 }
 
-void emitter_advance(Emitter &e, float dt, const EmitterEnvironment &env, Emitter *child) {
+void emitter_advance(Emitter &e, float dt, const EmitterEnvironment &env, Emitter *child,
+		bool group_visible) {
 	if (!e.active || e.def == nullptr || !std::isfinite(dt) || dt <= 0.0f) {
 		return;
 	}
@@ -984,17 +985,21 @@ void emitter_advance(Emitter &e, float dt, const EmitterEnvironment &env, Emitte
 	// NOVISNOUPDATE (0x01): an emitter that still has budget and whose live
 	// bounds (the emitter position when empty) fall outside the view is not
 	// advanced at all this frame — retail freezes it until it is seen again
-	// [orig: CParticleEmitter_AdvanceFrame @ 0x5e6588..0x5e65f3]. Retail also
-	// skips while the manager has no clip state; the port advances instead so
-	// headless simulation keeps running.
+	// [orig: CParticleEmitter_AdvanceFrame @ 0x5e6588..0x5e65f3]. A group the
+	// section gate hides takes that same frozen path before any frustum test
+	// [orig: the group+0x6C test @ 0x5e65c9..0x5e65d0 -> the aliveness return
+	// @ 0x5e65e5..0x5e65ec]. Without a camera (headless) the frustum leg is
+	// skipped and the emitter advances.
 	if ((def.flags & particle_flag::NoVisNoUpdate) != 0) {
 		if (e.particles.empty() || !e.bounds_valid) {
 			e.bounds_min = e.position;
 			e.bounds_max = e.position;
 			e.bounds_valid = true;
 		}
-		if (e.emit_budget > 0 && env.frustum != nullptr && env.frustum->valid &&
-				!emitter_bounds_visible(e, *env.frustum)) {
+		if (e.emit_budget > 0 &&
+				(!group_visible ||
+						(env.frustum != nullptr && env.frustum->valid &&
+								!emitter_bounds_visible(e, *env.frustum)))) {
 			return;
 		}
 	}

@@ -1497,6 +1497,21 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						slot.adm_index = row.adm_index;
 						slot.clip = row.clip;
 					}
+					// The accept points the entity's EquippedSlot at the submitted slot and
+					// keeps it only when that slot's def is NoSelect.
+					// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a]
+					conn.equipped_slot = {};
+					const auto submitted = req.weapon_slot_index <= 0xFFFFu
+							? conn.weapon_slots.find(static_cast<uint16_t>(req.weapon_slot_index))
+							: conn.weapon_slots.end();
+					const world::WeaponTableEntry *submitted_def = submitted != conn.weapon_slots.end()
+							? armory->by_index(submitted->second.adm_index)
+							: nullptr;
+					if (submitted_def != nullptr &&
+							(submitted_def->flags2 & world::weapon_flag2::kNoSelect) != 0) {
+						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
+						conn.equipped_slot.combo = submitted->first;
+					}
 				}
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
@@ -2018,6 +2033,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                 --slot.clip;
                             }
 						}
+					}
+					// The accepted fire re-points the shooter's EquippedSlot: the borrowed
+					// mount slot it fired through, else the personal slot of the fired
+					// combo. [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d]
+					if (shooter->use_gun_slot_swapped && shooter->mount_target.valid()) {
+						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kMount;
+						conn.equipped_slot.mount = shooter->mount_target;
+					} else {
+						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
+						conn.equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
 					}
 					// Primary fire mirrors the equipped weapon onto the entity
 					// [orig: @0x50bd56 entity+688 = adm — the §5.10 off-16 source].

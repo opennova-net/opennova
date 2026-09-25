@@ -911,7 +911,7 @@ bool entity_remove_detaches_children_in_place() {
 // S2C 0x2F updates the flag itself, its occupantEntity pointer, the carrier's
 // mountedChild back-link, and groundEntity. A later detached record clears both
 // sides without respawning the flag. [orig: NapiNPClientMsg_0x02F @0x430E10;
-// Entity_AttachToVehicle @0x43C130]
+// Entity_AttachCarriedObject @0x43C130]
 bool objective_state_attaches_and_detaches_flag() {
 	ns::ClientReplicaPipeline pipeline;
 	nw::PoolSpawnRecord flag;

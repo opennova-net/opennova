@@ -1589,7 +1589,7 @@ void Match::update_flag_objectives(World &world) {
         }
         // An enemy or neutral flag is picked up when the toucher carries
         // nothing. [orig: Entity_ProcessWaypointInteraction @0x4AD820 — the
-        // carried-object test @0x4AD936, the Entity_TryAttachToVehicle call
+        // carried-object test @0x4AD936, the Entity_TryAttachCarriedObject call
         // @0x4AD944, the Server_DispatchScoringEvent call @0x4AD94B, +0x124 = 0
         // @0x4AD955]
         record_flag_pickup(world, contact.source, contact.target);

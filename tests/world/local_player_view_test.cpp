@@ -765,6 +765,52 @@ void test_scope_fov_target_and_render_queries_share_weather_state() {
     CHECK(channels.camera_fov_target_fp == (80 << 16));
 }
 
+// The FP draw's own gates the frame publishes [orig:
+// Player_RenderViewModelIfAlive @0x4E0145 (Flags & 2) / @0x4E014B
+// (g_endround_winner_team); Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEDF1
+// (flags1 & Emplaced skips the showhud bit) / @0x4DEDF7..0x4DEE19 (CanFire &&
+// Player_IsEquippedWeaponScoped && flags2 & Inset skips the model)].
+void test_frame_publishes_the_fp_draw_gates() {
+    LocalWorld lw;
+    lw.w.weather.seed(WeatherSeed{});
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+
+    LocalPlayerWeapon emplaced = scoped_weapon(DEF_WEAPON_FLAG_EMPLACED);
+    local_player_view_frame(&lw.w, emplaced, view, tracker, frame);
+    CHECK(frame.fp_def_emplaced);
+    CHECK(!frame.fp_inset_scoped && !frame.fp_local_dead && !frame.fp_round_winner_set);
+
+    // A settled scope on an Inset def skips the model; the same scope on a
+    // plain Scoped def keeps it (the card switch decides that one).
+    LocalPlayerWeapon inset = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
+    CHECK(local_player_scope_toggle(lw.w, inset, view, inset.slot));
+    settle_ease(view);
+    local_player_view_frame(&lw.w, inset, view, tracker, frame);
+    CHECK(frame.fp_inset_scoped);
+    CHECK(!frame.fp_def_emplaced);
+    LocalPlayerWeapon plain = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
+    local_player_view_frame(&lw.w, plain, view, tracker, frame);
+    CHECK(!frame.fp_inset_scoped);
+
+    // The alive gate folds from the session each tick: the dead bit and the
+    // decided winner of the S2C 0x1D header.
+    PlayerViewState ticked;
+    LocalViewSessionInputs s;
+    s.local_dead = true;
+    local_player_view_tick(&lw.w, ticked, tracker, s);
+    local_player_view_frame(&lw.w, plain, ticked, tracker, frame);
+    CHECK(frame.fp_local_dead);
+    CHECK(!frame.fp_round_winner_set);
+    s.local_dead = false;
+    s.end_round_winner_team = 2;
+    local_player_view_tick(&lw.w, ticked, tracker, s);
+    local_player_view_frame(&lw.w, plain, ticked, tracker, frame);
+    CHECK(!frame.fp_local_dead);
+    CHECK(frame.fp_round_winner_set);
+}
+
 void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     LocalWorld lw;
     LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
@@ -1006,6 +1052,97 @@ void test_frame_reads_the_state_and_the_card_selector() {
     local_player_view_frame(&lw.w, w, v, t, f);
     CHECK(!f.scope_card_active); // the optical view wins over the card
     CHECK(f.fov_h_deg == kBinocularCameraFovHDeg);
+}
+
+// The FrameFX dispatch facts the frame carries for the terminal effect: the
+// RAW red word (not the capped vignette alpha), the dead/session bits, the
+// ticks since the death stamp, g_NVGActive, and the CanFire latches of the
+// equipped def's Thermal (flags2 & 4) and Monitor (flags2 & 8) bits.
+// [orig: Render_ProcessMainSceneFrame @0x5ca2da..0x5ca2f1; @0x5ca8f6..0x5caad5]
+void test_frame_carries_the_framefx_dispatch_facts() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED,
+                                        DEF_WEAPON_FLAG2_THERMAL | DEF_WEAPON_FLAG2_MONITOR);
+    w.scope_max_mag = 4.0f;
+    PlayerViewState v;
+    LocalPlayerViewTracker t;
+    LocalPlayerViewFrame f;
+    v.flash.red = 250;
+    v.nvg_active = true;
+    v.in_session = true;
+    v.local_dead = true;
+    v.view_tick = 400;
+    v.death_cam.start_tick = 150;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.red_word == 250);
+    CHECK(f.screen_flash_red_alpha == 0xC0); // the vignette's capped draw alpha
+    CHECK(f.frame_fx.nvg_active);
+    CHECK(f.frame_fx.in_session && f.frame_fx.local_dead);
+    CHECK(f.frame_fx.death_elapsed_ticks == 250);
+    CHECK(f.frame_fx.camera_mode == 0);
+    CHECK(!f.frame_fx.thermal_view && !f.frame_fx.monitor_view); // no optical view yet
+    // A raised, settled sight is the CanFire verdict: both latches follow it.
+    v.local_dead = false;
+    CHECK(player_view_set_engaged(v, true, false));
+    settle_ease(v);
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.thermal_view && f.thermal_view);
+    CHECK(f.frame_fx.monitor_view);
+    w.def.flags2 = DEF_WEAPON_FLAG2_MONITOR;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(!f.frame_fx.thermal_view && f.frame_fx.monitor_view);
+}
+
+// The NVG arms: the Scoped byte (a settled non-Inset Scoped sight) routes the
+// NVG composite through the lens and drops the NVG.tga mask; the binocular
+// byte rides along. [orig: Render_ProcessMainSceneFrame @0x5ca2be..0x5ca304,
+// @0x5ca6f5..0x5ca71a]
+void test_frame_carries_the_nvg_lens_arm() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, 0);
+    w.scope_max_mag = 4.0f;
+    PlayerViewState v;
+    LocalPlayerViewTracker t;
+    LocalPlayerViewFrame f;
+    v.nvg_active = true;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(!f.frame_fx.scoped_selector && !f.frame_fx.binoculars_view_active);
+    CHECK(f.nvg_mask_visible && !f.nvg_lens_active);
+    CHECK(player_view_set_engaged(v, true, false));
+    settle_ease(v);
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.scoped_selector);
+    CHECK(f.nvg_lens_active && !f.nvg_mask_visible);
+    // Inset takes the other byte: no lens.
+    w.def.flags2 = DEF_WEAPON_FLAG2_INSET;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(!f.frame_fx.scoped_selector && !f.nvg_lens_active && f.nvg_mask_visible);
+    // NVG off: neither.
+    w.def.flags2 = 0;
+    v.nvg_active = false;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.scoped_selector && !f.nvg_lens_active && !f.nvg_mask_visible);
+}
+
+// The Sighted byte routes the NVG scene through the Sighted arm: the card
+// goes into the scene, the mask stays. [orig: Render_ProcessMainSceneFrame
+// @0x5ca2cc..0x5ca2d5, @0x5ca57f..0x5ca591]
+void test_frame_carries_the_nvg_sighted_arm() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, 0);
+    w.scope_max_mag = 4.0f;
+    PlayerViewState v;
+    LocalPlayerViewTracker t;
+    LocalPlayerViewFrame f;
+    v.nvg_active = true;
+    CHECK(player_view_set_engaged(v, true, false));
+    settle_ease(v);
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.sighted_selector && !f.frame_fx.scoped_selector);
+    CHECK(f.nvg_sights_in_scene && !f.nvg_lens_active && f.nvg_mask_visible);
+    v.nvg_active = false;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.sighted_selector && !f.nvg_sights_in_scene);
 }
 
 // The camera's airborne skip is independent of the ongoing scope interp.
@@ -2283,10 +2420,14 @@ int main() {
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
+    test_frame_carries_the_framefx_dispatch_facts();
+    test_frame_carries_the_nvg_lens_arm();
+    test_frame_carries_the_nvg_sighted_arm();
     test_authored_rotation_bias_continues_through_air_reload_and_rebake();
     test_airborne_view_bias_keeps_interp_and_resumes_on_landing();
     test_airborne_bias_is_separate_from_reload_and_force_scope_admission();
     test_scope_fov_target_and_render_queries_share_weather_state();
+    test_frame_publishes_the_fp_draw_gates();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
     test_default_wheel_binding_zooms_in_away_from_the_player();

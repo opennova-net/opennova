@@ -31,13 +31,19 @@ enum class ParticleRenderDomain : std::uint8_t {
 	FirstPerson = 1,
 };
 
-// Retail's two World particle submissions classify the emitter origin, not
-// each generated quad. The below subset is strict; equality belongs to Above.
-// All is reserved for domains/passes that do not use the water partition.
+// The effect world's particle passes [orig: CParticleGroup_RenderChildren
+// @ 0x5E5890 over its renderFlags]. The two scene passes classify the emitter
+// origin against the water split plane, not each generated quad: Below (flag 1)
+// is strict, equality belongs to Above (flag 2). A child whose def leads with
+// a Distort graphic (def class 7) draws in neither; it draws only in the
+// post-scene distortion pass (flag 4) [orig: the `== 7` test @ 0x5E58D2 and the
+// `& 4` arm @ 0x5E58DB..0x5E58EE]. All is reserved for domains/passes that do
+// not use the water partition.
 enum class ParticleWaterSubset : std::uint8_t {
 	All = 0,
 	Below = 1,
 	Above = 2,
+	Distortion = 3,
 };
 
 // Converts the frame-level far/camera-side bracket into the manager's raw
@@ -56,6 +62,26 @@ enum class ParticlePipeline : std::uint8_t {
 	Bumpadd = 6,
 	Distort = 7,
 };
+
+// The material a draw binds in a thermal-view frame. The batch flush binds
+// each texture's secondary material (sample+8) instead of its primary
+// (sample+4) while the effect world's thermal word is set; that word is the
+// main scene's thermal byte, zero in every other scene call
+// [orig: CParticleBatch_FlushAndBindMaterial @ 0x5E42BF..0x5E42DB; the store
+// EffectWorld_RenderParticlePass @ 0x5F7274]. Blend's secondary inverts
+// colour: MODULATE(1 - TEXTURE, 1 - DIFFUSE) under SRCALPHA/INVSRCALPHA;
+// Additive's and Premult's darken: MODULATE(TEXTURE, DIFFUSE) under
+// ZERO/INVSRCCOLOR; every other type's secondary is its primary
+// [orig: CParticleTexture_InitTextureAndChannels — case 0 @ 0x5E833D with the
+// shared tail @ 0x5E8584..0x5E85DD, cases 1/2 @ 0x5E8376..0x5E83AC, the
+// primary copies @ 0x5E8422 / @ 0x5E847C / @ 0x5E8508, Distort's one
+// channel @ 0x5E860B].
+enum class ParticleThermalMaterial : std::uint8_t {
+	Primary = 0,
+	InvertedBlend = 1,
+	DarkeningModulate = 2,
+};
+ParticleThermalMaterial particle_thermal_material(ParticlePipeline pipeline, bool thermal);
 
 enum class ParticleRenderPass : std::uint8_t {
 	Color = 0,
@@ -142,6 +168,12 @@ struct ParticleEmitterSnapshot {
 	// The emitter's live world origin is the water-pass selector. Bounds and
 	// individual particle positions deliberately do not participate.
 	ParticleVec3 position{};
+	// The def's first graphic is Distort (the child's class id +0x1E0 == 7):
+	// the emitter draws only in the distortion pass.
+	bool distortion_class = false;
+	// The owning group's building-section gate (EffectSectionGate, the group's
+	// +0x6C): a hidden group draws in no pass.
+	bool group_visible = true;
 	ParticleAabb bounds{};
 	// This emitter's run inside ParticleFrameSnapshot::particles. A run that
 	// overruns the flat array is clamped by the compiler.
@@ -208,6 +240,8 @@ struct ParticleFrameDebugCounters {
 	std::size_t selected_emitters = 0;
 	std::size_t input_particles = 0;
 	std::size_t domain_filtered_particles = 0;
+	// Emitters of groups the building-section gate hides this frame.
+	std::size_t section_hidden_emitters = 0;
 	std::size_t water_filtered_emitters = 0;
 	std::size_t water_filtered_particles = 0;
 	std::size_t invisible_particles = 0;

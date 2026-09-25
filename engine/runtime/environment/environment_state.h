@@ -52,6 +52,11 @@ struct EnvShaderGlobals {
 	Rgb fill_light;
 	Rgb sun_light;
 	Rgb sky_ambient;
+	// The RAW light block: the environment cube's rotated specular sphere is
+	// lit by Env_LightBlock whatever the terrain ramps or the thermal grey
+	// select [orig: the cube face callback EnvCube_RenderFaceCallback
+	// pushes Env_LightBlock @ 0x5c3863 into render_sky_mesh @ 0x5ac680].
+	Rgb light_block;
 	Vec3 sun_direction{};
 	Rgb fog_color;
 	float fog_end = 0.0f;
@@ -79,7 +84,6 @@ struct TerrainEnvUniforms {
 	Rgb sun_light;
 	Rgb sky_ambient;
 	Vec3 sun_direction{};
-	Rgb tile_overlay_tint;
 	Rgb fog_color;
 	float fog_end = 0.0f;
 	float fog_start = 0.0f;
@@ -221,6 +225,7 @@ public:
 	// true when the state actually changed (the shell then refreshes only the
 	// two affected shader channels).
 	bool set_nvg_view(bool active, int gain);
+	bool nvg_view_active() const { return nvg_view_active_; }
 	int nvg_gain() const { return nvg_gain_; }
 
 	// --- the thermal view -------------------------------------------------
@@ -243,9 +248,18 @@ public:
 
 	// --- current render colors (the smoothed/current slots) ---------------
 
+	// The RAW color blocks. The NVG hemisphere rewrite is not a property of
+	// the blocks: retail applies it only to the per-pass object lighting
+	// block (build_light_values) and to a stack copy of the terrain sky
+	// argument (build_terrain_uniforms); water, the combined terrain light,
+	// particles, scars and the slot drape read the blocks raw [orig:
+	// CTerrainRenderer_BuildLightingShaderConstants @ 0x5c820b..0x5c82e9;
+	// Render_TerrainScene @ 0x610d16..0x610e36; Env_TerrainLightCombined
+	// @ 0x57f0d5 and Env_WaterColorLit @ 0x57f177 from the raw blocks;
+	// RenderSlot_DrawSilhouetteDrape @ 0x5d5f66..0x5d5f6d].
 	Rgb sun_light() const { return sun_light_; }
-	Rgb fill_light() const;  // NVG-gated
-	Rgb sky_ambient() const; // NVG-gated; the SMOOTHED sky block when driven
+	Rgb fill_light() const { return fill_light_; }
+	Rgb sky_ambient() const { return sky_ambient_rt_; } // the SMOOTHED sky block when driven
 	Rgb fog_color() const { return fog_color_rt_; }
 	Rgb skyfog_color() const { return skyfog_color_rt_; }
 	// The frame CLEAR color (divergence #21, closed): the POST-BLEND DOUBLED
@@ -253,25 +267,31 @@ public:
 	// dome pass fogs toward the SAME doubled value so the rim seam is
 	// invisible [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend
 	// @ 0x57f037..0x57f0a1, doubling @ 0x57f1b1; consumer
-	// Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf; dome fog sub_579CB0;
+	// Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf; dome fog SkyDome_RenderWithSkyfog;
 	// device Clear @ 0x677100; defaults @ 0x57c0b0 / 0x60fca3].
 	Rgb frame_clear_color() const { return skyfog_color_rt_; }
 	// The witnessed per-frame clear SELECTION [orig:
-	// Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca792 + the indoors gate
-	// @ 0x5c1597]: BLACK while the blink indoors bit is set (the
-	// Env_SkyfogBlock clear runs only when it is clear), the flat 0x808080
+	// Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca792]: the flat 0x808080
 	// grey while the thermal view is latched (it outranks the water test
-	// [orig: @ 0x5ca771..0x5ca778]), the horizon-blended skyfog above water,
-	// and underwater the lit water color — water x combined terrain light,
-	// the same derived chain the water surface renders with [orig:
-	// @ 0x5ca78b]. Every branch serves RENDER-SPACE (x2-gained) colors for
-	// the modulate2x-path device Clear (D-RMAT-7).
-	Rgb frame_clear_color_for(bool indoors, bool above_water) const;
-	// The interior pair, NVG-gated like sky/ground but with the modulator's
-	// R term on all three channels (apply_nvg_hemi_gain_r).
-	Rgb ceiling_color() const;
+	// [orig: @ 0x5ca771..0x5ca778]), the horizon-blended skyfog while the eye
+	// is strictly above the water plane, and at or below it the lit water
+	// color — water x combined terrain light, the same derived chain the
+	// water surface renders with [orig: @ 0x5ca78b; the `jle` @ 0x5ca790
+	// keeps the water color at exact equality]. No blink letter reaches the beauty clear
+	// (the black clear @ 0x5c1597 is the water mirror's, render_main_scene).
+	// Every branch serves RENDER-SPACE (x2-gained) colors for the
+	// modulate2x-path device Clear (D-RMAT-7).
+	Rgb frame_clear_color_for(bool eye_above_water) const;
+	// The NVG scene's clear: its target clears to the same waterline test's
+	// skyfog / lit water with no thermal branch [orig: NVG_RenderSceneToTarget
+	// @ 0x5d064e..0x5d0699 -- the `jle` @ 0x5d0660 keeps the water color at
+	// exact equality too]; the frame clear's water arm is this.
+	Rgb nvg_scene_clear_color(bool eye_above_water) const;
+	// The raw interior pair (the object block's NVG rewrite gives it the
+	// modulator's R term on all three channels, apply_nvg_hemi_gain_r).
+	Rgb ceiling_color() const { return ceiling_color_rt_; }
 	Rgb cloud_tint() const { return cloud_tint_rt_; }
-	Rgb floor_color() const;
+	Rgb floor_color() const { return floor_color_rt_; }
 	Rgb sky_base() const { return sky_base_rt_; }
 	Rgb sky_bright() const { return sky_bright_rt_; }
 	Rgb sky_highlight() const { return sky_highlight_rt_; }
@@ -419,7 +439,8 @@ public:
 	// The current world lighting/fog record — the witnessed block mapping:
 	// dir_color <- the light block (sun/moon), hemi_sky <- the sky block,
 	// hemi_ground <- the ground block, gain <- the modulator /64; the NVG
-	// rewrite rides the getters and the thermal grey override the tail
+	// rewrite applies to the four hemisphere blocks here (never to the raw
+	// getters) and the thermal grey override the tail
 	// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090
 	//  (thermal grey @ 0x5c837c..0x5c843c); ColorSrcGlobalGain bind
 	//  @ 0x58e05d; sun/moon select Environment_GetLightDirectionFloat
@@ -434,13 +455,34 @@ public:
 	// (foliage inherits the terrain's two device constants).
 	EnvShaderGlobals build_shader_globals(bool underwater_view = false) const;
 	// The terrain c1 light / c0 sky pair plus the pass fog; the thermal
-	// terrain ramps and the NVG sky blend select here
-	// [orig: Render_TerrainScene @ 0x610d10..0x610ea1].
+	// terrain ramps and the NVG sky blend select here. The NVG sky is rebuilt
+	// as BYTES, trunc(sky * 0.25f + modulator * f * 0.0015625 * 255) under a
+	// chop rounding mode, before the ramp init divides by 255
+	// [orig: Render_TerrainScene @ 0x610d10..0x610ea1; the byte rebuild
+	//  @ 0x610d16..0x610e22].
 	TerrainEnvUniforms build_terrain_uniforms(bool underwater_view = false) const;
 	// The per-pass device fog: lit water underwater, else the thermal
 	// 0x808080, else the weather fog block
 	// [orig: Environment_ApplyFogAndAmbient @ 0x57e471..0x57e4ad].
 	SceneFogValues build_scene_fog(bool underwater_view) const;
+	// The first-person viewmodel's pass fog. The frame applies the DRY pass
+	// before the sky dome and the viewmodel and re-applies the eye's own pass
+	// only after the viewmodel, so the gun never takes the underwater fog; the
+	// dome wrapper restores Env_FogBlock once it drew, so under the thermal
+	// view the gun fogs toward the fog block when the dome drew and toward the
+	// thermal grey when it did not [orig: Render_ProcessMainSceneFrame
+	// @ 0x5ca3bf..0x5ca3ce (ApplyFogAndAmbient(0, thermal)), @ 0x5ca81a
+	// (SkyDome_RenderWithSkyfog, the Env_FogBlock restore @ 0x579ce6..0x579cf6), the
+	// viewmodel @ 0x5ca829, the eye's pass @ 0x5ca82e..0x5ca841].
+	SceneFogValues build_viewmodel_fog(bool sky_dome_drawn) const;
+	// The water mirror pass's fog: the reflected scene applies the DRY pass
+	// with no alternate fog whatever side the eye is on [orig:
+	// render_main_scene @ 0x5c1648..0x5c164c and Water_RenderReflectedWorldScene
+	// @ 0x5c8515..0x5c8519 -> Environment_ApplyFogAndAmbient(0, 0)], and the sky
+	// pass puts the device fog color back to Env_FogBlock before the terrain
+	// [orig: SkyDome_RenderWithSkyfog @ 0x579ce7..0x579cf6]: the weather fog block, never the
+	// thermal grey or the underwater lit water.
+	SceneFogValues build_water_mirror_fog() const;
 
 	// The one witnessed render-eye/waterline rule. The device fog selector is
 	// STRICT below [orig: is_underwater = view_z < waterline, the
@@ -527,6 +569,8 @@ private:
 	// The ceiling/floor form: the modulator's R term on all three channels
 	// [orig: @ 0x5c82a5..0x5c82e9].
 	Rgb apply_nvg_hemi_gain_r(const Rgb &color) const;
+	// The terrain's byte form of the sky rewrite (build_terrain_uniforms).
+	Rgb nvg_terrain_sky() const;
 	// The thermal view's two shell-fed gates (see set_thermal_view).
 	bool thermal_view_ = false;
 	bool thermal_terrain_view_ = false;

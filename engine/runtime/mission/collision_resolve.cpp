@@ -1,6 +1,7 @@
 #include <array>
 #include <runtime/mission/collision_resolve.h>
 
+#include <runtime/renderer/object_lod.h> // the RLOD threshold carrier
 #include <runtime/world/model_geometry.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
@@ -226,6 +227,7 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 	if (def == nullptr) return shape;
 	shape.pool1_candidate_source_eligible =
 			(def->attrib & world::kItemAttribEweap) == 0 || def->type == 1;
+	shape.item_type = static_cast<uint8_t>(def->type);
 	if (def->graphic[0] == '\0') return shape;
 
 	const std::string key(def->graphic);
@@ -615,13 +617,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				t->primary_husk_loaded = first_husk_m3 != nullptr;
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
-				// The death-flash radius source is the PIECE model — huskFinal
-				// first [orig: @ 0x4934af huskFinalModel ?: huskModel].
+				// The PIECE model — huskFinal first [orig: @ 0x4934af
+				// huskFinalModel ?: huskModel].
 				const Threedi3di3 *piece_m3 =
 						final_husk_m3 != nullptr ? final_husk_m3 : first_husk_m3;
-				if (piece_m3 != nullptr && t->husk_piece_bound_radius <= 0.0f)
-					t->husk_piece_bound_radius =
-							world::model_bound_radius_from_3di(*piece_m3);
 				// The interned death masks and all three banks use final-husk first.
 				// [orig: resolve_item_materials_and_spawn_bone_trails @0x522EE0]
 				if (piece_m3 != nullptr) {
@@ -723,36 +722,49 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						!dead_it->second.empty())
 					t->bridge_dead_points = dead_it->second;
 			}
-			// The PIECE model is huskFINAL first [orig: @ 0x4934af
-			// huskFinalModel ?: huskModel] — the opposite preference from the
-			// collision husk pick above. Its LOD-0 part table feeds the
-			// death-piece loop bound [orig: renderObj[8]+52 @ 0x49361a], the
-			// per-section centers [orig: the section-row center @ 0x4938bf],
-			// and section 0's z extents (the wreck ground-rest offset
-			// [orig: @ 0x461e23-0x461e4b]). Its own cache, independent of the
+			// The PIECE model is the LOADED huskFinal model, else the husk
+			// model [orig: @ 0x4934af..0x4934c3 huskFinalModel ?: huskModel] —
+			// the opposite preference from the collision husk pick above. Its
+			// LOD-0 part table feeds the death-piece loop bound [orig:
+			// renderObj[8]+52 @ 0x49361a] and section 0's z extents (the wreck
+			// ground-rest offset [orig: @ 0x461e23-0x461e4b]); its level table,
+			// COBJ centres and bound radius feed the piece spawn and draw
+			// (world::DeathPieceModel). Its own cache, independent of the
 			// collision cache: a husk graphic can double as some entity's main
 			// graphic, which would leave the joint cache without an entry.
-			const std::string &piece_key = final_husk_name.empty()
-					? first_husk_name
-					: final_husk_name;
+			const Threedi3di3 *piece_m3 =
+					final_husk_m3 != nullptr ? final_husk_m3 : first_husk_m3;
+			const std::string &piece_key =
+					final_husk_m3 != nullptr ? final_husk_name : first_husk_name;
 			auto hs = state.husk_pieces_by_graphic.find(piece_key);
 			if (hs == state.husk_pieces_by_graphic.end()) {
 				CollisionHuskPieceInfo info;
-				const Threedi3di3 *piece_m3 = final_husk_name.empty()
-						? first_husk_m3
-						: final_husk_m3;
 				if (piece_m3 != nullptr && piece_m3->lod_count > 0 &&
 				    piece_m3->lods != nullptr) {
 					const ThreediLod &lod = piece_m3->lods[0];
 					info.sections = static_cast<int32_t>(lod.render_object_count);
-					for (size_t pi = 0; lod.render_objects != nullptr && pi < lod.render_object_count;
-							++pi) {
-						const ThreediRenderObject &part = lod.render_objects[pi];
-						info.centers.push_back(world::Vec3{
-								part.abs[0] + part.bounding_center[0],
-								part.abs[1] + part.bounding_center[1],
-								part.abs[2] + part.bounding_center[2]});
+					// The RLOD table and each level's section count (model+0x40
+					// +4*i / the level mesh's +0x34 [orig:
+					// DeathPiece_RenderVisible @ 0x57b882..0x57b8ba;
+					// DeathPiece_RenderSection @ 0x57b6d1]).
+					for (size_t li = 0; li < piece_m3->lod_count; ++li) {
+						info.model.lod_threshold_q16.push_back(
+								renderer::rlod_threshold_q16_from_rmdl(
+										piece_m3->lods[li].lod_threshold));
+						info.model.lod_section_count.push_back(static_cast<int32_t>(
+								piece_m3->lods[li].render_object_count));
 					}
+					// The COBJ section centres (the runtime row's +0x38..+0x40)
+					// [orig: the +0x6C array @ 0x4938bf, the centre
+					// @ 0x4938c2..0x4938d0; @ 0x57b6f6..0x57b70b].
+					if (piece_m3->collision != nullptr) {
+						for (size_t ci = 0; ci < piece_m3->collision->object_count; ++ci) {
+							const auto &offset = piece_m3->collision->objects[ci].offset;
+							info.model.section_origin_q16.push_back(
+									{offset[0], offset[1], offset[2]});
+						}
+					}
+					info.model.radius_q16 = world::model_bound_radius_q16_from_3di(*piece_m3);
 					// Section 0 owns the first opaque+alpha strip run (strips are
 					// stored sequentially per render object).
 					if (lod.render_objects != nullptr && lod.render_object_count > 0 &&
@@ -805,8 +817,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						}
 					}
 				}
-				if (t->husk_section_centers.empty() && !info.centers.empty())
-					t->husk_section_centers = info.centers;
+				if (!t->piece_model.loaded() && info.model.loaded())
+					t->piece_model = info.model;
 				t->husk_rest_min_z = info.rest_min_z;
 				t->husk_rest_max_z = info.rest_max_z;
 				// brain[12] is the husk floor's absolute value, read from the
@@ -868,17 +880,38 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					static_cast<float>(scaled[1]) / 65536.0f,
 					static_cast<float>(scaled[2]) / 65536.0f};
 		}
+		if (e->kind == world::EntityKind::Building) {
+			// Every batched building's parts draw with the def's forced
+			// sections ORed in: itemDef +0x891 (first_door - 1) and +0x892
+			// (first_subobject - 1), bytes 1 and 2 of the shared +0x890 dword.
+			// [orig: Terrain_RenderSectorModels @ 0x5c5d7c..0x5c5da8]
+			const uint32_t door_dword = static_cast<uint32_t>(def->deathtime_ticks);
+			deps.occlusion.assign_forced_sections(h,
+					static_cast<uint8_t>(door_dword >> 8), static_cast<uint8_t>(door_dword >> 16));
+		}
 		if (occ_id >= 0 && e->kind == world::EntityKind::Building) {
 			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
 			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows
-			// [orig: itemDef+84 >> 27 @ 0x5c7456]; the destruction bone-map
-			// bytes (+2193/+2194) stay 0 until the destruction system lands
-			// (D-COL-2 / D-OCC-9).
+			// [orig: itemDef+84 >> 27 @ 0x5c7456].
 			world::OcclusionWorld::EntityDefBits bits;
 			bits.weldable = (def->attrib2 & (1u << 6)) != 0;
 			bits.recurse_windows = (def->attrib & (1u << 27)) != 0;
 			deps.occlusion.assign_entity(h, occ_id, bits);
 		}
+	}
+	// The person collector's parachute radius: the special item-185 model's
+	// GHDR radius, unscaled. [orig: Entity_PreloadSpecialItems @ 0x43C220 loads
+	// the model; collect_visible_entities_for_terrain reads model+0x14
+	// @ 0x5c8e10]
+	if (deps.models.has_source()) {
+		const DefItemDef *chute = find_item_def(
+				items, mission::kItemIdOffset + renderer::kParachuteProjectionTypeId);
+		const Threedi3di3 *chute_model = chute != nullptr && chute->graphic[0] != '\0'
+				? deps.models.model(std::string(chute->graphic)).get()
+				: nullptr;
+		deps.occlusion.set_parachute_radius_q16(chute_model != nullptr
+				? world::model_bound_radius_q16_from_3di(*chute_model)
+				: 0);
 	}
 	return attached;
 }

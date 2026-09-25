@@ -1,13 +1,22 @@
-// TerrainTileCompositionCache -- the portable page request/compiler seam for
-// retail's composed terrain texture cache. Tests observe only request results,
-// completion publications, invalidation, and spatial resident lookup.
+// TerrainTileCompositionCache -- the portable port of retail's 128-record
+// composed terrain page cache: page layout and projection, the claim of the
+// least recently used record (never one used this frame or the last), the
+// per-frame sweep with its time-of-day refresh, the exact-identity bind, the
+// spatial lookup, publication safety, and the spatial invalidations.
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 namespace {
+
+using opennova::TerrainTileCompositionCache;
+using opennova::TerrainTileCompositionJob;
+using opennova::TerrainTileCompositionRequest;
+using opennova::TerrainTilePageKey;
+using opennova::TerrainTileResidentPoint;
 
 bool expect(bool condition, const char *message) {
 	if (condition) {
@@ -17,39 +26,51 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-} // namespace
+TerrainTileCompositionRequest page_request(int32_t sector_x, int32_t local_x,
+		int32_t local_z, uint8_t lod, int32_t sector_z = 0) {
+	TerrainTileCompositionRequest request;
+	request.page = TerrainTilePageKey{sector_x, sector_z, local_x, local_z, lod};
+	request.tile_index = 0;
+	request.source_origin_x = local_x;
+	request.source_origin_z = local_z;
+	return request;
+}
 
-int main() {
-	using opennova::TerrainTileCompositionCache;
-	using opennova::TerrainTileCompositionRequest;
-	using opennova::TerrainTileContentStamp;
-	using opennova::TerrainTilePageKey;
+// Claims and publishes one page, as the device does inside one frame.
+bool compose(TerrainTileCompositionCache &cache,
+		const TerrainTileCompositionRequest &request, uint16_t *layer = nullptr) {
+	const auto decision = cache.request(request);
+	if (!decision.has_value() || !decision->job.has_value()) return false;
+	if (layer != nullptr) *layer = decision->job->target.layer;
+	return cache.publish(*decision->job);
+}
 
+bool test_layout_and_projection() {
 	TerrainTileCompositionCache cache;
+	cache.begin_frame(0);
+	cache.begin_frame(0);
 	const std::array<int, 4> expected_spans = {512, 256, 128, 64};
 	const std::array<float, 4> expected_densities = {0.5f, 1.0f, 2.0f, 4.0f};
 	const std::array<int, 4> expected_tile_footprints = {8, 16, 32, 64};
-
 	for (int i = 0; i < 4; ++i) {
 		const uint8_t page_lod = static_cast<uint8_t>(i + 1);
-		const TerrainTilePageKey key{0, 0, 0, 0, page_lod};
-		const auto decision = cache.request(TerrainTileCompositionRequest{
-				key, i, 0, 0,
-				TerrainTileContentStamp{static_cast<uint64_t>(10 + i)}});
-		if (!expect(decision.has_value(), "levels 1-4 are valid page requests")) return 1;
-		if (!expect(decision->job.has_value(), "a cold page request emits a compose job")) return 1;
+		const auto decision = cache.request(page_request(0, 0, 0, page_lod));
+		if (!expect(decision.has_value() && decision->job.has_value(),
+				"a cold page request claims a record")) return false;
 		const auto &layout = decision->job->layout;
 		if (!expect(TerrainTileCompositionCache::kDimension == 256 &&
 				layout.texture_dimension == 256,
-				"active-quality cache pages are 256 texels square")) return 1;
+				"active-quality cache pages are 256 texels square")) return false;
 		if (!expect(TerrainTileCompositionCache::page_world_span(page_lod) ==
 					expected_spans[i] && layout.world_span == expected_spans[i],
-				"page span follows 1024 >> page_lod")) return 1;
+				"page span follows 1024 >> page_lod")) return false;
 		if (!expect(std::fabs(layout.texels_per_world_unit - expected_densities[i]) < 1e-6f,
-				"page texel density follows the retail page level")) return 1;
+				"page texel density follows the retail page level")) return false;
 		if (!expect(layout.texel_footprint(16) == expected_tile_footprints[i],
-				"a 16-unit .til entry keeps its level-dependent footprint")) return 1;
+				"a 16-unit .til entry keeps its level-dependent footprint")) return false;
 	}
+	if (!expect(!cache.request(page_request(0, 0, 0, 5)).has_value(),
+			"a level outside 0..4 is not a page")) return false;
 
 	// The max-quality Foliage_WindSwayVS path uploads c7/c8 from the packed
 	// page record. After its D3D (Z,Y,X) model transform, those rows reduce to
@@ -64,601 +85,222 @@ int main() {
 			projection->inverse_world_span == 1.0f / 64.0f &&
 			projection->world_span == 64.0f,
 			"retail c7/c8 decode preserves routed sector and packed local origin")) {
-		return 1;
+		return false;
 	}
-	if (!expect(projection->project(1088.0f, -384.0f) ==
+	return expect(projection->project(1088.0f, -384.0f) ==
 				std::array<float, 2>({0.0f, 0.0f}) &&
 			projection->project(1104.0f, -368.0f) ==
 				std::array<float, 2>({0.25f, 0.25f}) &&
 			projection->project(1152.0f, -320.0f) ==
 				std::array<float, 2>({1.0f, 1.0f}),
-			"c7/c8 projection maps page edges and interior without an axis swap")) {
-		return 1;
+			"c7/c8 projection maps page edges and interior without an axis swap");
+}
+
+// A miss claims the record with the largest last-use age, first in record
+// order on a tie, and only one whose age exceeds 1.
+// [orig: PolyTrn_RenderTile @ 0x60DAE4..0x60DB45]
+bool test_claim_needs_two_idle_frames() {
+	TerrainTileCompositionCache cache;
+	cache.begin_frame(0); // frame 1: every empty record has age 1
+	if (!expect(!cache.request(page_request(0, 0, 0, 4)).has_value(),
+			"the first frame claims nothing: no record is older than one frame")) {
+		return false;
 	}
-	if (!expect(TerrainTileCompositionCache::page_projection(
-			TerrainTilePageKey{0, 0, 0, 0, 0}).has_value() &&
-			!TerrainTileCompositionCache::page_projection(
-			TerrainTilePageKey{0, 0, 0, 0, 5}).has_value(),
-			"flat and ordinary active-quality retail page levels expose projection state")) {
-		return 1;
-	}
+	cache.begin_frame(0); // frame 2
+	uint16_t layer = 999;
+	if (!expect(compose(cache, page_request(0, 0, 0, 4), &layer) && layer == 0,
+			"the second frame claims the first record")) return false;
+	const auto hit = cache.request(page_request(0, 0, 0, 4));
+	if (!expect(hit.has_value() && !hit->job.has_value() && hit->binding.ready &&
+			hit->binding.layer == 0,
+			"the same identity is a hit that composes nothing")) return false;
+	if (!expect(!cache.request(page_request(0, 0, 0, 3))->binding.ready,
+			"another level is another record")) return false;
 
-	// The flat record's high bit does not exclude it from the retail spatial
-	// probe. Its canonical (0,0) sector identity still rejects other sectors,
-	// and borrowers use the ordinary LOD-0 projection rather than terrain's
-	// zero primary UVs. [orig: terrain_tile_cache_lookup @ 0x604140,
-	// probe @ 0x6041A4..0x6041E1, projection @ 0x604215..0x604292]
-	TerrainTileCompositionCache flat_cache;
-	flat_cache.begin_frame(1000);
-	const TerrainTileCompositionRequest flat_request;
-	const auto flat_pending = flat_cache.request(flat_request);
-	const opennova::TerrainTileResidentPoint flat_point{0, 0, 16.0f, 16.0f};
-	if (!expect(flat_pending && flat_pending->job &&
-			!flat_cache.best_ready(flat_point).has_value(),
-			"a pending flat page is not borrowable before publication")) return 1;
-	if (!expect(flat_cache.publish(*flat_pending->job),
-			"the canonical flat page publishes")) return 1;
-	const auto flat_borrowed = flat_cache.best_ready(flat_point);
-	if (!expect(flat_borrowed && flat_borrowed->page.page_lod_level == 0 &&
-			flat_borrowed->layer == flat_pending->binding.layer,
-			"the origin sector can borrow the ready canonical flat page")) return 1;
-	const auto flat_projection = TerrainTileCompositionCache::page_projection(
-			flat_borrowed->page);
-	if (!expect(flat_projection && flat_projection->world_span == 1024.0f &&
-			flat_projection->inverse_world_span == 1.0f / 1024.0f &&
-			flat_projection->project(16.0f, 16.0f) ==
-				std::array<float, 2>{1.0f / 64.0f, 1.0f / 64.0f},
-			"flat page borrowers retain the ordinary geometric projection")) return 1;
-	if (!expect(!flat_cache.best_ready(
-				opennova::TerrainTileResidentPoint{512, 0, 528.0f, 16.0f}).has_value() &&
-			!flat_cache.best_ready(
-				opennova::TerrainTileResidentPoint{0, 512, 16.0f, 528.0f}).has_value(),
-			"the flat page cannot be borrowed from a different routed sector")) return 1;
-
-	// A repeated source page at two routed world-sector origins is two cache
-	// identities. The compose job retains the exact atlas source selected by
-	// the terrain compiler for the renderer to draw.
-	const TerrainTilePageKey first_sector{1024, -512, 64, 128, 4};
-	const auto first = cache.request(TerrainTileCompositionRequest{
-			first_sector, 73, 576, 640, TerrainTileContentStamp{50}});
-	if (!expect(first.has_value() && first->job.has_value(),
-			"first routed sector emits a compose job")) return 1;
-	if (!expect(first->job->tile_index == 73 &&
-				first->job->source_origin_x == 576 &&
-				first->job->source_origin_z == 640,
-			"compose job carries the selected tile and exact atlas origin")) return 1;
-
-	TerrainTilePageKey second_sector = first_sector;
-	second_sector.sector_origin_x += 512;
-	const auto second = cache.request(TerrainTileCompositionRequest{
-			second_sector, 73, 576, 640, TerrainTileContentStamp{50}});
-	if (!expect(second.has_value() && second->job.has_value(),
-			"the repeated source page in another sector is a cache miss")) return 1;
-	if (!expect(second->binding.layer != first->binding.layer,
-			"distinct routed sector pages receive distinct resident layers")) return 1;
-
-	// Publication is the renderer handoff: until the compose job completes the
-	// layer is not sampleable. A repeated identical request after publication
-	// is a ready hit and emits no duplicate work.
-	TerrainTileCompositionCache hit_cache;
-	const TerrainTileCompositionRequest hit_request{
-			TerrainTilePageKey{0, 0, 128, 64, 4},
-			11, 128, 64, TerrainTileContentStamp{0xA55A}};
-	const auto cold = hit_cache.request(hit_request);
-	if (!expect(cold.has_value() && cold->job.has_value() &&
-				!cold->binding.ready && cold->binding.generation > 0,
-			"cold request reserves a generation but is not ready")) return 1;
-	if (!expect(hit_cache.can_publish(*cold->job),
-			"the current pending generation may be validated before upload")) return 1;
-	if (!expect(hit_cache.publish(*cold->job),
-			"publishing the current compose job succeeds")) return 1;
-	const auto hit = hit_cache.request(hit_request);
-	if (!expect(hit.has_value() && !hit->job.has_value() && hit->binding.ready,
-			"same key, source, and content stamp is a no-job ready hit")) return 1;
-	if (!expect(hit->binding.layer == cold->binding.layer &&
-				hit->binding.generation == cold->binding.generation,
-			"ready hit preserves its layer generation")) return 1;
-
-	// The fixed pool is strict LRU. Refreshing the first of 128 ready pages
-	// protects it, so the 129th distinct request reuses the second page's
-	// layer. Its old job token cannot publish into the reused generation.
-	TerrainTileCompositionCache lru_cache;
-	std::array<TerrainTileCompositionRequest,
-			TerrainTileCompositionCache::kCapacity> resident_requests{};
-	std::optional<opennova::TerrainTileCompositionJob> stale_second_job;
-	uint16_t second_layer = 0;
-	for (int i = 0; i < TerrainTileCompositionCache::kCapacity; ++i) {
-		resident_requests[i] = TerrainTileCompositionRequest{
-				TerrainTilePageKey{i * 512, 0, 0, 0, 1},
-				i, 0, 0, TerrainTileContentStamp{static_cast<uint64_t>(1000 + i)}};
-		const auto inserted = lru_cache.request(resident_requests[i]);
-		if (!expect(inserted.has_value() && inserted->job.has_value(),
-				"each of the first 128 pages gets a compose job")) return 1;
-		if (i == 1) {
-			stale_second_job = inserted->job;
-			second_layer = inserted->binding.layer;
-		}
-		if (!expect(lru_cache.publish(*inserted->job),
-				"each initial cache page publishes")) return 1;
-	}
-	const auto refreshed = lru_cache.request(resident_requests[0]);
-	if (!expect(refreshed.has_value() && !refreshed->job.has_value() &&
-				refreshed->binding.ready,
-			"an exact ready hit refreshes LRU age")) return 1;
-
-	const TerrainTileCompositionRequest page_129{
-			TerrainTilePageKey{TerrainTileCompositionCache::kCapacity * 512,
-					0, 0, 0, 1},
-			999, 0, 0, TerrainTileContentStamp{9999}};
-	const auto evicting = lru_cache.request(page_129);
-	if (!expect(evicting.has_value() && evicting->job.has_value() &&
-				evicting->binding.layer == second_layer,
-			"the 129th page evicts the strict least-recently-used layer")) return 1;
-	if (!expect(stale_second_job.has_value() &&
-				!lru_cache.can_publish(*stale_second_job) &&
-				!lru_cache.publish(*stale_second_job),
-			"an evicted generation cannot publish into its reused layer")) return 1;
-	const auto first_survives = lru_cache.request(resident_requests[0]);
-	if (!expect(first_survives.has_value() && !first_survives->job.has_value(),
-			"the refreshed oldest insertion remains resident")) return 1;
-	const auto second_misses = lru_cache.request(resident_requests[1]);
-	if (!expect(second_misses.has_value() && second_misses->job.has_value(),
-			"the unrefreshed second insertion was evicted")) return 1;
-
-	// The renderer records layer indices into a deferred draw list. Once a
-	// binding has been returned in a frame, that layer must not be recycled
-	// underneath an earlier draw before submission. All 128 unique bindings
-	// fit; the 129th miss fails closed until the next frame releases pins.
-	TerrainTileCompositionCache frame_cache;
-	frame_cache.begin_frame(700);
-	std::array<TerrainTileCompositionRequest,
-			TerrainTileCompositionCache::kCapacity> frame_requests{};
-	for (int i = 0; i < TerrainTileCompositionCache::kCapacity; ++i) {
-		frame_requests[i] = TerrainTileCompositionRequest{
-				TerrainTilePageKey{i * 512, 512, 0, 0, 1},
-				i, 0, 0,
-				TerrainTileContentStamp{static_cast<uint64_t>(2000 + i)}};
-		const auto inserted = frame_cache.request(frame_requests[i]);
-		if (!expect(inserted && inserted->job &&
-				frame_cache.publish(*inserted->job),
-				"each of 128 unique pages can bind and publish in one frame")) return 1;
-	}
-	const TerrainTileCompositionRequest frame_page_129{
-			TerrainTilePageKey{TerrainTileCompositionCache::kCapacity * 512,
-					512, 0, 0, 1},
-			999, 0, 0, TerrainTileContentStamp{9999}};
-	const auto pinned_miss = frame_cache.request(frame_page_129);
-	if (!expect(!pinned_miss.has_value(),
-			"the 129th unique page fails closed instead of overwriting a layer used this frame")) return 1;
-	frame_cache.begin_frame(700);
-	if (!expect(!frame_cache.request(frame_page_129).has_value(),
-			"repeating the same frame id preserves existing layer pins")) return 1;
-	frame_cache.begin_frame(701);
-	const auto next_frame = frame_cache.request(frame_page_129);
-	if (!expect(next_frame && next_frame->job &&
-			next_frame->binding.layer == 0,
-			"a new frame releases pins and evicts the strict least-recently-used layer")) return 1;
-	const auto revisit_first = frame_cache.request(frame_requests[0]);
-	if (!expect(revisit_first && revisit_first->job &&
-			revisit_first->binding.layer == 1 &&
-			revisit_first->binding.layer != next_frame->binding.layer,
-			"next-frame replacement stays pinned while strict LRU chooses an unpinned layer")) return 1;
-
-	// Existing ready bindings are just as dangerous to recycle as cold ones.
-	// Terrain first selects the pages for this frame through request(); the
-	// shared spatial lookup can then hand one of those bindings to foliage.
-	TerrainTileCompositionCache lookup_pin_cache;
-	for (int i = 0; i < TerrainTileCompositionCache::kCapacity; ++i) {
-		const auto inserted = lookup_pin_cache.request(frame_requests[i]);
-		if (!expect(inserted && inserted->job &&
-				lookup_pin_cache.publish(*inserted->job),
-				"lookup-pin fixture fills the resident cache")) return 1;
-	}
-	lookup_pin_cache.begin_frame(800);
-	const auto exact_pin = lookup_pin_cache.request(frame_requests[0]);
-	const auto spatial_candidate = lookup_pin_cache.request(frame_requests[1]);
-	const auto spatial_pin = lookup_pin_cache.best_ready(
-			opennova::TerrainTileResidentPoint{
-					frame_requests[1].page.sector_origin_x,
-					frame_requests[1].page.sector_origin_z,
-					static_cast<float>(frame_requests[1].page.sector_origin_x + 1),
-					static_cast<float>(frame_requests[1].page.sector_origin_z + 1)});
-	if (!expect(exact_pin && exact_pin->binding.ready &&
-			spatial_candidate && spatial_candidate->binding.ready && spatial_pin &&
-			spatial_pin->layer == 1,
-			"spatial lookup returns a terrain-selected current-frame binding")) return 1;
-	const auto after_lookup_pins = lookup_pin_cache.request(frame_page_129);
-	if (!expect(after_lookup_pins && after_lookup_pins->job &&
-			after_lookup_pins->binding.layer == 2,
-			"strict LRU skips layers selected for deferred terrain/foliage draws")) return 1;
-
-	// The opaque content stamp collects renderer-owned contributors without
-	// teaching the cache what they are. A changed stamp or selected source
-	// recompiles the existing page layer; explicit invalidation does the same
-	// when a contributor cannot be represented by the caller's stamp alone.
-	TerrainTileCompositionCache dirty_cache;
-	TerrainTileCompositionRequest dirty_request{
-			TerrainTilePageKey{0, 512, 256, 0, 2},
-			44, 768, 0, TerrainTileContentStamp{100}};
-	const auto original = dirty_cache.request(dirty_request);
-	if (!expect(original.has_value() && original->job.has_value() &&
-				dirty_cache.publish(*original->job),
-			"baseline contributor set publishes")) return 1;
-
-	dirty_request.content = TerrainTileContentStamp{101};
-	const auto changed_content = dirty_cache.request(dirty_request);
-	if (!expect(changed_content.has_value() && changed_content->job.has_value() &&
-				changed_content->binding.layer == original->binding.layer &&
-				changed_content->binding.generation > original->binding.generation,
-			"changed contributor stamp recompiles the same resident layer")) return 1;
-	if (!expect(changed_content->binding.ready && changed_content->binding.stale,
-			"a published layer keeps serving, marked stale, while the replacement composes")) return 1;
-	const auto repeat_during_recompose = dirty_cache.request(dirty_request);
-	if (!expect(repeat_during_recompose.has_value() &&
-				!repeat_during_recompose->job.has_value() &&
-				repeat_during_recompose->binding.ready &&
-				repeat_during_recompose->binding.stale,
-			"a repeated request during recompose is a stale hit without duplicate work")) return 1;
-	if (!expect(dirty_cache.publish(*changed_content->job),
-			"changed contributor generation publishes")) return 1;
-	const auto republished = dirty_cache.request(dirty_request);
-	if (!expect(republished.has_value() && !republished->job.has_value() &&
-				republished->binding.ready && !republished->binding.stale,
-			"publication clears the stale mark")) return 1;
-
-	dirty_request.tile_index = 45;
-	dirty_request.source_origin_x = 512;
-	const auto changed_source = dirty_cache.request(dirty_request);
-	if (!expect(changed_source.has_value() && changed_source->job.has_value() &&
-				changed_source->binding.layer == original->binding.layer,
-			"changed selected terrain source recompiles the page")) return 1;
-	if (!expect(changed_source->binding.ready && changed_source->binding.stale,
-			"a changed selected source also stale-serves the published payload")) return 1;
-	if (!expect(dirty_cache.invalidate(dirty_request.page),
-			"an occupied page can be explicitly invalidated")) return 1;
-	if (!expect(!dirty_cache.can_publish(*changed_source->job) &&
-			!dirty_cache.publish(*changed_source->job),
-			"explicit invalidation rejects an outstanding stale job")) return 1;
-	const auto dirtied = dirty_cache.request(dirty_request);
-	if (!expect(dirtied.has_value() && dirtied->job.has_value() &&
-				dirtied->binding.layer == original->binding.layer &&
-				dirtied->binding.generation > changed_source->binding.generation,
-			"an explicitly dirty page emits fresh work on its next request")) return 1;
-	if (!expect(!dirtied->binding.ready && !dirtied->binding.stale,
-			"explicit invalidation drops the payload instead of stale-serving it")) return 1;
-	if (!expect(!dirty_cache.invalidate(
-				TerrainTilePageKey{999, 999, 0, 0, 1}),
-			"invalidating a nonresident page reports no change")) return 1;
-
-	// Terrain and foliage ask the same spatial question. The cache chooses the
-	// finest ready page containing the point in that routed sector, falling
-	// back to a coarser ready page while finer work is dirty or pending.
-	TerrainTileCompositionCache spatial_cache;
-	const TerrainTileCompositionRequest coarse_request{
-			TerrainTilePageKey{1000, 2000, 0, 0, 1},
-			1, 0, 0, TerrainTileContentStamp{1}};
-	const TerrainTileCompositionRequest middle_request{
-			TerrainTilePageKey{1000, 2000, 256, 0, 2},
-			2, 256, 0, TerrainTileContentStamp{2}};
-	const TerrainTileCompositionRequest fine_request{
-			TerrainTilePageKey{1000, 2000, 256, 64, 4},
-			3, 256, 64, TerrainTileContentStamp{3}};
-	const auto coarse = spatial_cache.request(coarse_request);
-	const auto middle = spatial_cache.request(middle_request);
-	const auto fine = spatial_cache.request(fine_request);
-	if (!expect(coarse && coarse->job && spatial_cache.publish(*coarse->job) &&
-				middle && middle->job && spatial_cache.publish(*middle->job) &&
-				fine && fine->job && spatial_cache.publish(*fine->job),
-			"overlapping coarse-to-fine pages publish")) return 1;
-
-	const opennova::TerrainTileResidentPoint fine_point{
-			1000, 2000, 1300.0f, 2080.0f};
-	const auto best_fine = spatial_cache.best_ready(fine_point);
-	if (!expect(best_fine.has_value() &&
-				best_fine->page.page_lod_level == 4,
-			"spatial lookup chooses the finest ready containing page")) return 1;
-	// A stale-serving page remains the spatial answer while it recomposes.
-	TerrainTileCompositionRequest fine_retarget = fine_request;
-	fine_retarget.content = TerrainTileContentStamp{4};
-	const auto fine_stale = spatial_cache.request(fine_retarget);
-	if (!expect(fine_stale.has_value() && fine_stale->job.has_value() &&
-				fine_stale->binding.ready && fine_stale->binding.stale,
-			"a re-targeted ready page keeps serving stale")) return 1;
-	const auto best_stale = spatial_cache.best_ready(fine_point);
-	if (!expect(best_stale.has_value() &&
-				best_stale->page.page_lod_level == 4 && best_stale->stale,
-			"spatial lookup serves the stale page while its replacement composes")) return 1;
-	if (!expect(spatial_cache.invalidate(fine_request.page),
-			"fine page can be dirtied for fallback probe")) return 1;
-	const auto fallback = spatial_cache.best_ready(fine_point);
-	if (!expect(fallback.has_value() &&
-				fallback->page.page_lod_level == 2,
-			"dirty fine page falls back to the best coarser ready page")) return 1;
-	const auto wrong_sector = spatial_cache.best_ready(
-			opennova::TerrainTileResidentPoint{1512, 2000, 1300.0f, 2080.0f});
-	if (!expect(!wrong_sector.has_value(),
-			"spatial lookup never crosses routed sector identity")) return 1;
-
-	// A resident fine page can outlive the traversal that selected it. Once a
-	// later frame selects only a coarser page for the same ground, foliage must
-	// borrow that current draw page rather than the finer prior-frame resident.
-	TerrainTileCompositionCache current_frame_cache;
-	const TerrainTileCompositionRequest prior_fine_request{
-			TerrainTilePageKey{0, 0, 256, 64, 4},
-			20, 256, 64, TerrainTileContentStamp{700}};
-	const TerrainTileCompositionRequest current_coarse_request{
-			TerrainTilePageKey{0, 0, 0, 0, 1},
-			21, 0, 0, TerrainTileContentStamp{700}};
-	current_frame_cache.begin_frame(900);
-	const auto prior_fine = current_frame_cache.request(prior_fine_request);
-	if (!expect(prior_fine && prior_fine->job &&
-			current_frame_cache.publish(*prior_fine->job),
-			"prior frame publishes a fine resident page")) return 1;
-	current_frame_cache.begin_frame(901);
-	const auto current_coarse = current_frame_cache.request(current_coarse_request);
-	if (!expect(current_coarse && current_coarse->job &&
-			current_frame_cache.publish(*current_coarse->job),
-			"current frame publishes its selected coarse page")) return 1;
-	const auto current_page = current_frame_cache.best_ready(
-			opennova::TerrainTileResidentPoint{0, 0, 300.0f, 80.0f});
-	if (!expect(current_page &&
-			current_page->layer == current_coarse->binding.layer &&
-			current_page->page.page_lod_level == 1,
-			"spatial lookup borrows the current frame's page, not a finer stale resident")) {
-		return 1;
-	}
-
-	// Content changes make the same cross-frame leak observable in lighting and
-	// projected-shadow alpha: an unrequested fine page still carries its old
-	// content generation while the current coarse page has the fresh stamp.
-	TerrainTileCompositionCache current_content_cache;
-	current_content_cache.begin_frame(910);
-	const auto stale_content_fine = current_content_cache.request(
-			TerrainTileCompositionRequest{
-					prior_fine_request.page, prior_fine_request.tile_index,
-					prior_fine_request.source_origin_x,
-					prior_fine_request.source_origin_z,
-					TerrainTileContentStamp{800}});
-	if (!expect(stale_content_fine && stale_content_fine->job &&
-			current_content_cache.publish(*stale_content_fine->job),
-			"prior frame publishes the old-content fine page")) return 1;
-	current_content_cache.begin_frame(911);
-	const TerrainTileCompositionRequest fresh_coarse_request{
-			current_coarse_request.page, current_coarse_request.tile_index,
-			current_coarse_request.source_origin_x,
-			current_coarse_request.source_origin_z,
-			TerrainTileContentStamp{801}};
-	const auto fresh_coarse = current_content_cache.request(fresh_coarse_request);
-	if (!expect(fresh_coarse && fresh_coarse->job &&
-			current_content_cache.publish(*fresh_coarse->job),
-			"current frame publishes the fresh-content coarse page")) return 1;
-	const auto fresh_page = current_content_cache.best_ready(
-			opennova::TerrainTileResidentPoint{0, 0, 300.0f, 80.0f});
-	if (!expect(fresh_page &&
-			fresh_page->layer == fresh_coarse->binding.layer &&
-			fresh_page->page.page_lod_level == 1,
-			"spatial lookup cannot leak stale lighting/shadow content from an old fine page")) {
-		return 1;
-	}
-
-	// Frame ids are caller-owned tokens, not a promised monotonic sequence.
-	// Returning to an older numeric id starts a new logical frame and must not
-	// revive the pages that happened to be selected the last time it was used.
-	TerrainTileCompositionCache reused_frame_id_cache;
-	reused_frame_id_cache.begin_frame(42);
-	const auto first_42 = reused_frame_id_cache.request(prior_fine_request);
-	if (!expect(first_42 && first_42->job &&
-			reused_frame_id_cache.publish(*first_42->job),
-			"first logical frame 42 publishes a fine page")) return 1;
-	reused_frame_id_cache.begin_frame(43);
-	reused_frame_id_cache.begin_frame(42);
-	const auto revived_old_42 = reused_frame_id_cache.best_ready(
-			opennova::TerrainTileResidentPoint{0, 0, 300.0f, 80.0f});
-	if (!expect(!revived_old_42.has_value(),
-			"reusing a numeric frame id does not revive its older logical-frame selection")) {
-		return 1;
-	}
-
-	// Page rectangles are half-open. At a shared edge the point belongs to the
-	// page beginning there, regardless of which adjacent page was touched
-	// most recently; this keeps terrain and foliage sampling unambiguous.
-	TerrainTileCompositionCache edge_cache;
-	const TerrainTileCompositionRequest edge_left{
-			TerrainTilePageKey{0, 0, 0, 0, 2},
-			4, 0, 0, TerrainTileContentStamp{4}};
-	const TerrainTileCompositionRequest edge_right{
-			TerrainTilePageKey{0, 0, 256, 0, 2},
-			5, 256, 0, TerrainTileContentStamp{5}};
-	const auto left = edge_cache.request(edge_left);
-	const auto right = edge_cache.request(edge_right);
-	if (!expect(left && left->job && edge_cache.publish(*left->job) &&
-				right && right->job && edge_cache.publish(*right->job),
-			"adjacent same-level pages publish")) return 1;
-	const opennova::TerrainTileResidentPoint shared_edge{0, 0, 256.0f, 128.0f};
-	const auto boundary_owner = edge_cache.best_ready(shared_edge);
-	if (!expect(boundary_owner && boundary_owner->layer == right->binding.layer,
-			"shared edge belongs to the page whose half-open rect begins there")) return 1;
-	const auto refresh_left = edge_cache.request(edge_left);
-	if (!expect(refresh_left && !refresh_left->job,
-			"exact request refreshes the older edge page")) return 1;
-	const auto refreshed_edge = edge_cache.best_ready(shared_edge);
-	if (!expect(refreshed_edge && refreshed_edge->layer == right->binding.layer,
-			"refreshing the page ending at the edge cannot steal its neighbor's point")) return 1;
-
-	edge_cache.invalidate_all();
-	if (!expect(!edge_cache.best_ready(shared_edge).has_value(),
-			"bulk invalidation removes every page from ready lookup")) return 1;
-	const auto after_bulk_dirty = edge_cache.request(edge_left);
-	if (!expect(after_bulk_dirty && after_bulk_dirty->job,
-			"bulk-invalidated page recompiles on its next exact request")) return 1;
-
-	// Permanent terrain scorch insertion uses the retail cache-record walk:
-	// inclusive AABB overlap retires ready AND pending generations spatially,
-	// while an unrelated resident page remains publishable/ready.
-	TerrainTileCompositionCache scorch_dirty_cache;
-	const TerrainTileCompositionRequest scorch_left{
-			TerrainTilePageKey{0, 0, 0, 0, 4},
-			1, 0, 0, TerrainTileContentStamp{10}};
-	const TerrainTileCompositionRequest scorch_right{
-			TerrainTilePageKey{0, 0, 64, 0, 4},
-			2, 64, 0, TerrainTileContentStamp{10}};
-	const TerrainTileCompositionRequest scorch_far{
-			TerrainTilePageKey{0, 0, 128, 0, 4},
-			3, 128, 0, TerrainTileContentStamp{10}};
-	const auto dirty_left = scorch_dirty_cache.request(scorch_left);
-	const auto dirty_right = scorch_dirty_cache.request(scorch_right);
-	const auto clean_far = scorch_dirty_cache.request(scorch_far);
-	if (!expect(dirty_left && dirty_left->job &&
-			dirty_right && dirty_right->job &&
-			clean_far && clean_far->job &&
-			scorch_dirty_cache.publish(*dirty_left->job) &&
-			scorch_dirty_cache.publish(*clean_far->job),
-			"scorch invalidation fixture has ready, pending, and far pages")) {
-		return 1;
-	}
-	if (!expect(scorch_dirty_cache.invalidate_overlapping_q16(
-				64 << 16, 8 << 16, 65 << 16, 9 << 16) == 2,
-			"shared-edge scorch retires both adjacent occupied records")) return 1;
-	if (!expect(!scorch_dirty_cache.can_publish(*dirty_right->job) &&
-			!scorch_dirty_cache.best_ready(
-					opennova::TerrainTileResidentPoint{0, 0, 32.0f, 8.5f}) &&
-			scorch_dirty_cache.best_ready(
-					opennova::TerrainTileResidentPoint{0, 0, 160.0f, 8.5f}),
-			"overlap-only invalidation kills pending work and preserves far readiness")) {
-		return 1;
-	}
-
-	// Mission/device replacement is a hard cache reset, including same-numbered
-	// frame pins, but must never let a pre-reset composition job publish into a
-	// newly allocated layer with an aliased generation.
-	TerrainTileCompositionCache reset_cache;
-	reset_cache.begin_frame(42);
-	const auto before_reset = reset_cache.request(edge_left);
-	if (!expect(before_reset && before_reset->job,
-			"reset fixture reserves a pending page")) return 1;
-	reset_cache.clear();
-	reset_cache.begin_frame(42);
-	const auto after_reset = reset_cache.request(edge_right);
-	if (!expect(after_reset && after_reset->job &&
-			after_reset->binding.layer == 0 &&
-			after_reset->binding.generation != before_reset->binding.generation,
-			"hard reset releases frame pins and leases layer zero with fresh identity")) return 1;
-	if (!expect(!reset_cache.can_publish(*before_reset->job) &&
-			reset_cache.can_publish(*after_reset->job) &&
-			!reset_cache.publish(*before_reset->job) &&
-			reset_cache.publish(*after_reset->job),
-			"hard reset rejects stale work but accepts the new layer generation")) return 1;
-
-	// CPU page work follows current view demand rather than the historical miss
-	// order. A newer generation for one leased layer replaces its queued work;
-	// newest demand frames run first, with FIFO retained inside one frame.
-	opennova::TerrainTileCompositionDemandQueue demand_queue;
-	if (!expect(demand_queue.enqueue({0, 1, 10, 1}, 4).accepted &&
-			demand_queue.enqueue({1, 1, 10, 2}, 4).accepted &&
-			demand_queue.enqueue({2, 1, 11, 3}, 4).accepted &&
-			demand_queue.enqueue({3, 1, 11, 4}, 4).accepted &&
-			demand_queue.size() == 4,
-			"rapid view demand fills but never exceeds the bounded worker queue")) {
-		return 1;
-	}
-	const auto superseded = demand_queue.enqueue({0, 2, 12, 5}, 4);
-	if (!expect(superseded.accepted &&
-			superseded.removed_sequences.size() == 1 &&
-			superseded.removed_sequences.front() == 1 &&
-			demand_queue.size() == 4,
-			"the current layer generation coalesces its older queued work even at capacity")) {
-		return 1;
-	}
-	const auto stale_demand = demand_queue.enqueue({3, 0, 13, 6}, 4);
-	if (!expect(!stale_demand.accepted && stale_demand.rejected_stale &&
-			demand_queue.size() == 4,
-			"an older generation cannot displace current queued work")) return 1;
-	const auto over_capacity = demand_queue.enqueue({4, 1, 13, 7}, 4);
-	if (!expect(!over_capacity.accepted && !over_capacity.rejected_stale &&
-			demand_queue.size() == 4,
-			"unrelated demand cannot grow the bounded queue past capacity")) return 1;
-	const auto newest = demand_queue.take_next();
-	const auto same_frame_first = demand_queue.take_next();
-	const auto same_frame_second = demand_queue.take_next();
-	const auto oldest = demand_queue.take_next();
-	if (!expect(newest && newest->sequence == 5 &&
-			same_frame_first && same_frame_first->sequence == 3 &&
-			same_frame_second && same_frame_second->sequence == 4 &&
-			oldest && oldest->sequence == 2 && demand_queue.empty(),
-			"workers choose newest demand frame first and preserve FIFO within that frame")) {
-		return 1;
-	}
-
-	// Completed CPU pages use the same ordering before the two-per-frame upload
-	// gate. Superseding a cache layer removes an already-finished old generation,
-	// while unrelated current-frame results still publish ahead of old-view output.
-	opennova::TerrainTileCompositionDemandQueue completion_queue;
-	if (!expect(completion_queue.enqueue({0, 1, 20, 20}, 4).accepted &&
-			completion_queue.enqueue({1, 1, 20, 21}, 4).accepted &&
-			completion_queue.enqueue({2, 1, 21, 22}, 4).accepted,
-			"completed page demand remains bounded by the shared policy")) return 1;
-	const auto removed_completion =
-			completion_queue.remove_older_generations(0, 2);
-	if (!expect(removed_completion.size() == 1 &&
-			removed_completion.front() == 20 && completion_queue.size() == 2,
-			"a replacement generation purges its already-completed stale payload")) {
-		return 1;
-	}
-	if (!expect(completion_queue.enqueue({0, 2, 22, 23}, 4).accepted,
-			"the current generation can occupy the released completion slot")) return 1;
-	const auto current_completion = completion_queue.take_next();
-	const auto prior_frame_completion = completion_queue.take_next();
-	if (!expect(current_completion && current_completion->sequence == 23 &&
-			prior_frame_completion && prior_frame_completion->sequence == 22,
-			"current-frame completion publication cannot sit behind old-view output")) {
-		return 1;
-	}
-
-	opennova::TerrainTileCompositionDemandQueue rapid_churn;
-	std::array<uint64_t, 4> rapid_generations{};
-	for (uint64_t frame = 1; frame <= 64; ++frame) {
-		const uint16_t layer = static_cast<uint16_t>(frame % 4);
-		const auto queued = rapid_churn.enqueue(
-				{layer, ++rapid_generations[layer], 1000 + frame, frame}, 4);
-		if (!expect(queued.accepted && rapid_churn.size() <= 4,
-				"rapid page/view churn stays bounded while each layer coalesces")) {
-			return 1;
+	// Fill the rest of the cache in frame 2: record 129 finds nothing.
+	for (int index = 2; index < TerrainTileCompositionCache::kCapacity; ++index) {
+		if (!compose(cache, page_request(512 * index, 0, 0, 4))) {
+			return expect(false, "all 128 records claim");
 		}
 	}
-	const auto latest_churn = rapid_churn.take_next();
-	if (!expect(latest_churn && latest_churn->sequence == 64,
-			"the latest view wins immediately after sustained page churn")) return 1;
+	if (!expect(!cache.request(page_request(-512, 0, 0, 4)).has_value(),
+			"a full frame leaves the extra page uncomposed")) return false;
+	cache.begin_frame(0); // frame 3: every record was used in frame 2
+	if (!expect(!cache.request(page_request(-512, 0, 0, 4)).has_value(),
+			"a record used in the previous frame never yields")) return false;
+	// Keep record 0 in use this frame.
+	(void)cache.request(page_request(0, 0, 0, 4));
+	cache.begin_frame(0); // frame 4: record 0 used in frame 3, the rest in 2
+	uint16_t claimed = 0;
+	return expect(compose(cache, page_request(-512, 0, 0, 4), &claimed) &&
+			claimed == 1,
+			"the oldest record claims, first in record order among equals");
+}
 
-	TerrainTileCompositionCache churn_cache;
-	opennova::TerrainTileCompositionDemandQueue churn_demand;
-	TerrainTileCompositionRequest churn_request{
-			TerrainTilePageKey{0, 0, 0, 0, 4},
-			1, 0, 0, TerrainTileContentStamp{100}};
-	churn_cache.begin_frame(100);
-	const auto old_view_job = churn_cache.request(churn_request);
-	if (!expect(old_view_job && old_view_job->job &&
-			churn_demand.enqueue({old_view_job->binding.layer,
-					old_view_job->binding.generation, 100, 10}, 4).accepted,
-			"old-view work enters the bounded demand queue")) return 1;
-	churn_cache.begin_frame(101);
-	churn_request.content = TerrainTileContentStamp{101};
-	const auto current_view_job = churn_cache.request(churn_request);
-	if (!expect(current_view_job && current_view_job->job,
-			"current view reserves a replacement generation")) return 1;
-	const auto current_enqueue = churn_demand.enqueue(
-			{current_view_job->binding.layer,
-					current_view_job->binding.generation, 101, 11}, 4);
-	const auto current_demand = churn_demand.take_next();
-	if (!expect(current_enqueue.accepted &&
-			current_enqueue.removed_sequences.size() == 1 &&
-			current_demand && current_demand->sequence == 11 &&
-			!churn_cache.can_publish(*old_view_job->job) &&
-			churn_cache.can_publish(*current_view_job->job) &&
-			churn_cache.publish(*current_view_job->job),
-			"rapid same-layer churn publishes current-frame quality before superseded work")) {
-		return 1;
+// A sweep that composes nothing retires one TOD-stale record, oldest compose
+// first, and re-sweeps: the visible page recomposes under the current light.
+// [orig: PolyTrn_RenderFrame @ 0x60F080..0x60F0E3; Terrain_EvictOldestTodStaleTile
+// @ 0x604600]
+bool test_sweep_refreshes_one_tod_stale_page() {
+	TerrainTileCompositionCache cache;
+	cache.begin_frame(7);
+	cache.begin_frame(7);
+	const std::vector<TerrainTileCompositionRequest> visible = {
+			page_request(0, 0, 0, 4), page_request(0, 64, 0, 4)};
+	std::vector<TerrainTileCompositionJob> jobs = cache.sweep(visible);
+	if (!expect(jobs.size() == 2, "a cold sweep claims every visible page")) return false;
+	for (const TerrainTileCompositionJob &job : jobs) cache.publish(job);
+	cache.begin_frame(7);
+	if (!expect(cache.sweep(visible).empty(),
+			"an all-hit sweep in the same TOD epoch composes nothing")) return false;
+	cache.begin_frame(8); // the TOD epoch advances
+	jobs = cache.sweep(visible);
+	if (!expect(jobs.size() == 1 && jobs[0].target.page.page_local_x == 0 &&
+			jobs[0].target.layer == 0,
+			"one stale visible page (the first composed) recomposes that frame")) {
+		return false;
 	}
+	cache.publish(jobs[0]);
+	cache.begin_frame(8);
+	jobs = cache.sweep(visible);
+	if (!expect(jobs.size() == 1 && jobs[0].target.page.page_local_x == 64,
+			"the next all-hit frame refreshes the next stale page")) return false;
+	cache.publish(jobs[0]);
+	cache.begin_frame(8);
+	return expect(cache.sweep(visible).empty(),
+			"once every page carries the current epoch nothing recomposes");
+}
 
+// The stale-record eviction needs a compose age above 1: a page composed in
+// the previous frame is never retired even though its epoch is old.
+bool test_eviction_waits_one_frame() {
+	TerrainTileCompositionCache cache;
+	cache.begin_frame(1);
+	cache.begin_frame(1);
+	if (!compose(cache, page_request(0, 0, 0, 4))) return expect(false, "page composes");
+	cache.begin_frame(2);
+	if (!expect(!cache.evict_one_tod_stale(),
+			"a page composed one frame ago is not retired")) return false;
+	cache.begin_frame(2);
+	return expect(cache.evict_one_tod_stale(), "two frames later it is");
+}
+
+// PolyTrn_BindStageTextures binds only an exact, composed identity.
+bool test_bind() {
+	TerrainTileCompositionCache cache;
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	const TerrainTileCompositionRequest request = page_request(512, 64, 128, 4);
+	const auto decision = cache.request(request);
+	if (!expect(decision.has_value() && decision->job.has_value() &&
+			!cache.bind(request).has_value(),
+			"a claimed but uncomposed page binds nothing")) return false;
+	cache.publish(*decision->job);
+	const auto bound = cache.bind(request);
+	TerrainTileCompositionRequest other_quadrant = request;
+	other_quadrant.source_origin_x += 512;
+	return expect(bound.has_value() && bound->ready &&
+			bound->layer == decision->job->target.layer,
+			"the composed page binds") &&
+			expect(!cache.bind(other_quadrant).has_value(),
+					"the packed source coordinate is part of the identity");
+}
+
+// terrain_tile_cache_lookup walks granularity 32, 64 ... 512 and takes the
+// first resident record in record order whose masked coordinate matches.
+// [orig: terrain_tile_cache_lookup @ 0x6041A4..0x604206]
+bool test_lookup_granularity_walk() {
+	TerrainTileCompositionCache cache;
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	uint16_t coarse_layer = 0;
+	uint16_t fine_layer = 0;
+	if (!compose(cache, page_request(512, 0, 0, 2), &coarse_layer) ||
+			!compose(cache, page_request(512, 64, 128, 4), &fine_layer)) {
+		return expect(false, "lookup pages compose");
+	}
+	const auto fine = cache.lookup(TerrainTileResidentPoint{512.0f + 70.0f, 130.0f});
+	if (!expect(fine.has_value() && fine->layer == fine_layer,
+			"granularity 32 finds the fine page at the point's corner")) return false;
+	const auto upper_half = cache.lookup(TerrainTileResidentPoint{512.0f + 100.0f, 130.0f});
+	if (!expect(upper_half.has_value() && upper_half->layer == fine_layer,
+			"granularity 64 finds it for the rest of its extent")) return false;
+	// (130, 130): no record matches below granularity 256, where both the
+	// coarse page's (0,0) and the fine page's masked (0,0) match; record order
+	// picks the coarse page claimed first.
+	const auto outside = cache.lookup(TerrainTileResidentPoint{512.0f + 130.0f, 130.0f});
+	if (!expect(outside.has_value() && outside->layer == coarse_layer,
+			"a coarse granularity takes the first record in order")) return false;
+	// A fine page can answer for a point outside it: with no coarse page, the
+	// 64u page at (64,128) answers (200, 140) at granularity 256.
+	TerrainTileCompositionCache fine_only;
+	fine_only.begin_frame(0);
+	fine_only.begin_frame(0);
+	if (!compose(fine_only, page_request(0, 64, 128, 4))) return expect(false, "fine composes");
+	const auto borrowed = fine_only.lookup(TerrainTileResidentPoint{200.0f, 140.0f});
+	if (!expect(borrowed.has_value() && borrowed->page.page_local_x == 64,
+			"a coarse-granularity match returns a page that does not contain the point")) {
+		return false;
+	}
+	if (!expect(!fine_only.lookup(TerrainTileResidentPoint{700.0f, 140.0f}).has_value(),
+			"another sector never matches")) return false;
+	// The flat page's coordinate masks to zero at its canonical sector.
+	TerrainTileCompositionCache flat;
+	flat.begin_frame(0);
+	flat.begin_frame(0);
+	if (!compose(flat, page_request(0, 0, 0, 0))) return expect(false, "flat composes");
+	return expect(flat.lookup(TerrainTileResidentPoint{16.0f, 16.0f}).has_value() &&
+			!flat.lookup(TerrainTileResidentPoint{528.0f, 16.0f}).has_value(),
+			"the flat page answers only in its canonical (0,0) sector");
+}
+
+bool test_publication_and_invalidation() {
+	TerrainTileCompositionCache cache;
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	const TerrainTileCompositionRequest request = page_request(0, 0, 0, 4);
+	const auto decision = cache.request(request);
+	if (!expect(decision.has_value() && decision->job.has_value(), "page claims")) return false;
+	const TerrainTileCompositionJob job = *decision->job;
+	cache.invalidate_all();
+	if (!expect(!cache.can_publish(job) && !cache.publish(job),
+			"a reset retires an outstanding job")) return false;
+
+	// The scorch append and the destroyed-entity walk share the inclusive
+	// page test: an edge-touching rectangle retires both neighbours.
+	// [orig: Terrain_AddScorchRecord @0x605CF7..0x605D5F;
+	// Terrain_InvalidateTileCacheRegion @0x605C21..0x605C7F]
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	uint16_t left_layer = 0;
+	if (!compose(cache, page_request(0, 0, 0, 4), &left_layer) ||
+			!compose(cache, page_request(0, 64, 0, 4)) ||
+			!compose(cache, page_request(0, 256, 0, 4))) {
+		return expect(false, "invalidation pages compose");
+	}
+	if (!expect(cache.invalidate_overlapping_q16(64 << 16, 8 << 16, 65 << 16, 9 << 16) == 2,
+			"an edge rectangle retires both pages it touches")) return false;
+	if (!expect(!cache.bind(page_request(0, 0, 0, 4)).has_value() &&
+			!cache.bind(page_request(0, 64, 0, 4)).has_value() &&
+			cache.bind(page_request(0, 256, 0, 4)).has_value(),
+			"only the overlapped pages retire")) return false;
+	// A retired record's last use drops to 0, so it is the first claimed.
+	uint16_t reclaimed = 999;
+	return expect(compose(cache, page_request(0, 128, 0, 4), &reclaimed) &&
+			reclaimed == left_layer,
+			"the retired record is claimed first, in record order");
+}
+
+} // namespace
+
+int main() {
+	if (!test_layout_and_projection()) return 1;
+	if (!test_claim_needs_two_idle_frames()) return 1;
+	if (!test_sweep_refreshes_one_tod_stale_page()) return 1;
+	if (!test_eviction_waits_one_frame()) return 1;
+	if (!test_bind()) return 1;
+	if (!test_lookup_granularity_walk()) return 1;
+	if (!test_publication_and_invalidation()) return 1;
 	std::printf("OK: terrain tile composition cache\n");
 	return 0;
 }

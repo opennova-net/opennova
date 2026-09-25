@@ -187,7 +187,7 @@ models' NaN rows, written as the identity); MTRX translations; PANM
 `matrix_offset` and `bind_matrix_index`; the second-channel material fields
 (`rgb_gen2`, `emissive_type2`, `glass_type2`, `reflect_color2`, always zero in
 the corpus) and generator alpha bytes; a strip naming a material id the model
-lacks; light pad bytes; occlusion `glow_scale`. Values build derives are not
+lacks; light pad bytes; occlusion `slot_priority_scale` (the portal-slot priority weight). Values build derives are not
 carried: part `rel`, bounds and spheres (but a part that draws nothing keeps
 its centre), section bounds, CMDL, face normal runs and plane distances,
 tangents. Over the 958 JO models, `build(scene(x))` is byte for byte what

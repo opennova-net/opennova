@@ -51,7 +51,9 @@ std::array<uint8_t, 4> pixel(const Rgba8Image &image, int x, int y) {
 opennova::TerrainTileCompositionJob job(
 		opennova::TerrainTilePageKey key) {
 	opennova::TerrainTileCompositionCache cache;
-	const auto decision = cache.request({key, 0, 0, 0, {1}});
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	const auto decision = cache.request({key, 0, 0, 0});
 	return *decision->job;
 }
 
@@ -170,10 +172,6 @@ bool test_mips_registry_and_boundary_overlap() {
 			"inclusive retail overlap invalidates both pages at a shared edge")) {
 		return false;
 	}
-	if (!expect(left_plan.content_stamp == right_plan.content_stamp,
-			"the same ordered page contribution has one stable content stamp")) {
-		return false;
-	}
 	registry.clear();
 	for (std::size_t index = 0;
 			index < opennova::terrain::kTerrainScorchCapacity; ++index) {
@@ -196,10 +194,9 @@ bool same_entry(const opennova::terrain::TerrainScorchEntry &left,
 			left.maximum_z_q16 == right.maximum_z_q16;
 }
 
-// The per-frame stamp walk and the miss-path plan walk are one walk: the
-// records bucketed into the sectors the page touches, merged in insertion
-// order without duplicates, inclusive at sector edges, with the same stamp.
-bool test_registry_buckets_stamp_and_generation() {
+// The plan walk: the records bucketed into the sectors the page touches,
+// merged in insertion order without duplicates, inclusive at sector edges.
+bool test_registry_buckets_and_generation() {
 	opennova::terrain::TerrainScorchRegistry registry;
 	const uint64_t fresh = registry.generation();
 	if (!expect(!registry.append({0, 5 << 16, 5 << 16, 5 << 16, 6 << 16}) &&
@@ -231,9 +228,7 @@ bool test_registry_buckets_stamp_and_generation() {
 		return false;
 	}
 	const auto plan = registry.plan(edge_page);
-	const auto stamp = registry.stamp(edge_page);
-	if (!expect(plan.valid && stamp.valid &&
-			plan.entries.size() == 4 && stamp.entry_count == 4,
+	if (!expect(plan.valid && plan.entries.size() == 4,
 			"the page sees every inclusive overlap across both sector cells")) {
 		return false;
 	}
@@ -242,10 +237,6 @@ bool test_registry_buckets_stamp_and_generation() {
 			same_entry(plan.entries[2], on_edge) &&
 			same_entry(plan.entries[3], ends_on_edge),
 			"the merged bucket walk keeps retail insertion order, once each")) {
-		return false;
-	}
-	if (!expect(stamp.content_stamp == plan.content_stamp,
-			"the per-frame stamp equals the composed plan's content stamp")) {
 		return false;
 	}
 	// A page fully inside sector 1 sees only its own overlaps, in order.
@@ -258,44 +249,42 @@ bool test_registry_buckets_stamp_and_generation() {
 			"a neighbouring sector page walks only its bucketed records")) {
 		return false;
 	}
-	// Identity follows the record list: a later append that touches the page
-	// changes its stamp, one that does not leaves it alone.
+	// A later append that touches the page joins its plan in order; one
+	// that does not leaves it alone.
 	if (!registry.append({0, 700 << 16, 8 << 16, 710 << 16, 9 << 16})) {
 		return expect(false, "far record appends");
 	}
-	if (!expect(registry.stamp(edge_page).content_stamp ==
-			stamp.content_stamp,
-			"a record outside the page leaves its stamp unchanged")) {
+	if (!expect(registry.plan(edge_page).entries.size() == 4,
+			"a record outside the page leaves its plan unchanged")) {
 		return false;
 	}
 	if (!registry.append({0, 460 << 16, 8 << 16, 470 << 16, 9 << 16})) {
 		return expect(false, "near record appends");
 	}
-	if (!expect(registry.stamp(edge_page).content_stamp !=
-			stamp.content_stamp &&
-			registry.stamp(edge_page).entry_count == 5,
-			"a record overlapping the page changes its stamp")) {
+	if (!expect(registry.plan(edge_page).entries.size() == 5,
+			"a record overlapping the page joins its plan")) {
 		return false;
 	}
 	const uint64_t before_clear = registry.generation();
 	registry.clear();
-	const auto cleared = registry.stamp(edge_page);
+	const auto cleared = registry.plan(edge_page);
 	if (!expect(registry.generation() == before_clear + 1 &&
-			cleared.valid && cleared.entry_count == 0 &&
-			registry.plan(edge_page).entries.empty(),
+			cleared.valid && cleared.entries.empty(),
 			"clear advances the generation and empties every page walk")) {
 		return false;
 	}
 	const opennova::TerrainTilePageKey unroutable{0, 0, 0, 0, 5};
-	return expect(!registry.stamp(unroutable).valid &&
-			!registry.plan(unroutable).valid,
+	return expect(!registry.plan(unroutable).valid,
 			"a page level outside 0..4 cannot be routed");
 }
 
 bool test_ordered_page_composition() {
-	const Rgba8Image colormap = solid(2, 2, {100, 120, 140, 255});
-	const Rgba8Image normal = solid(2, 2, {160, 128, 128, 128});
-	const Rgba8Image tilestrip = solid(64, 64, {200, 80, 40, 64});
+	const auto colormap = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid(2, 2, {100, 120, 140, 255}));
+	const auto normal = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid(2, 2, {160, 128, 128, 128}));
+	const auto tilestrip = opennova::terrain::build_terrain_tile_set_mips(
+			solid(64, 64, {200, 80, 40, 64}));
 	opennova::TilFile til;
 	til.entries.push_back(opennova::make_til_overlay_entry(1, 1, 0, 0));
 
@@ -326,14 +315,16 @@ bool test_ordered_page_composition() {
 		return false;
 	}
 
-	// Pixel (80,80) is world (20.125,20.125): inside the authored 16u .til
-	// quad and both later scorch quads. Reproduce the fixed-function order.
+	// Pixel (80,80) samples world (20,20): inside the authored 16u .til quad
+	// and both later scorch quads. Reproduce the fixed-function order.
 	std::array<uint8_t, 4> expected = {
 			byte((100.0f / 255.0f) * (256.0f / 255.0f)),
 			byte((120.0f / 255.0f) * (256.0f / 255.0f)),
 			byte((140.0f / 255.0f) * (256.0f / 255.0f)), 0};
 	const float overlay_alpha = 64.0f / 255.0f;
-	const uint8_t overlay_rgb[3] = {200, 80, 40};
+	// The atlas is DXT5 (flags 0x100203): the solid (200, 80, 40) cell reads
+	// back as its 5:6:5 colour. [orig: Terrain_LoadTileSetAtlas @ 0x604B24]
+	const uint8_t overlay_rgb[3] = {197, 81, 41};
 	for (int channel = 0; channel < 3; ++channel) {
 		expected[channel] = byte(
 				(expected[channel] / 255.0f) * (1.0f - overlay_alpha) +
@@ -341,13 +332,17 @@ bool test_ordered_page_composition() {
 	}
 	// The overlay/scorch loops run with COLORWRITEENABLE = 7: alpha stays 0.
 	// [orig: PolyTrn_RenderTile SetRenderState(0xA8, 7) @ 0x60DD6B..0x60DD73]
+	// The stage colour is MODULATE2X(texture, 0x808080) = texture * 256/255,
+	// saturated, and DESTCOLOR/SRCCOLOR doubles it into the target.
+	// [orig: PolyTrn_RenderTile diffuse 0xFF808080 @ 0x60E033..0x60E04C]
 	const float scorch_rgb[3] = {64.0f / 255.0f,
 			128.0f / 255.0f, 192.0f / 255.0f};
 	for (int draw = 0; draw < 2; ++draw) {
 		for (int channel = 0; channel < 3; ++channel) {
+			const float stage = std::min(1.0f,
+					scorch_rgb[channel] * (256.0f / 255.0f));
 			expected[channel] = byte(
-					2.0f * scorch_rgb[channel] *
-					(expected[channel] / 255.0f));
+					2.0f * stage * (expected[channel] / 255.0f));
 		}
 	}
 	float dot = 0.0f;
@@ -371,14 +366,119 @@ bool test_ordered_page_composition() {
 			"scorch quad does not leak beyond its exact fixed-point bounds");
 }
 
+opennova::terrain::TerrainTilePageSourceView bare_sources(
+		const opennova::terrain::TerrainTileQuadrantSource &colormap,
+		const opennova::terrain::TerrainTileQuadrantSource &normal) {
+	opennova::terrain::TerrainTilePageSourceView sources;
+	sources.colormap = &colormap;
+	sources.heightfield_normal = &normal;
+	sources.light_bytes = {128, 128, 255};
+	return sources;
+}
+
+// The record's quad puts UV (0,0) at (minimum X, maximum Z) and UV (1,1) at
+// (maximum X, minimum Z): the texture's first row lies along the record's
+// maximum-Z edge. [orig: PolyTrn_RenderTile scorch positions
+// @ 0x60DFD1..0x60E02A, UV (0,0)-(1,1) @ 0x60E06B..0x60E08E]
+bool test_scorch_texture_rows_run_from_maximum_z() {
+	const auto colormap = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid(2, 2, {128, 128, 128, 255}));
+	const auto normal = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid(2, 2, {128, 128, 255, 128}));
+	Rgba8Image top_red = solid(64, 64, {0, 0, 255, 255});
+	for (std::size_t offset = 0; offset < 64u * 32u * 4u; offset += 4) {
+		top_red.pixels[offset] = 255;
+		top_red.pixels[offset + 2] = 0;
+	}
+	std::array<opennova::terrain::TerrainScorchTexture,
+			opennova::terrain::kTerrainScorchTextureSlots> textures;
+	for (const uint8_t index : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{4}}) {
+		textures[index] = opennova::terrain::build_terrain_scorch_texture(top_red);
+	}
+	opennova::terrain::TerrainScorchRegistry registry;
+	// A 16x16-unit record over a 1:1-per-quarter-unit LOD-4 page: 64 texels
+	// on 64 pixels, so level 0 samples.
+	if (!registry.append({0, 16 << 16, 16 << 16, 32 << 16, 32 << 16})) {
+		return expect(false, "orientation record appends");
+	}
+	const opennova::TerrainTilePageKey key{0, 0, 0, 0, 4};
+	const auto plan = registry.plan(key);
+	auto sources = bare_sources(colormap, normal);
+	sources.scorch_plan = &plan;
+	sources.scorch_textures = &textures;
+	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(job(key), sources);
+	if (!expect(page.is_valid(), "orientation page composes")) return false;
+	// Page row 70 is world z 17.5 (near minimum Z) -> texture rows near 64:
+	// the blue half. Page row 122 is world z 30.5 (near maximum Z) -> the
+	// red first rows.
+	const auto near_minimum = pixel(page, 80, 70);
+	const auto near_maximum = pixel(page, 80, 122);
+	return expect(near_minimum[2] > near_minimum[0],
+			"rows near the record's minimum Z take the texture's last rows") &&
+			expect(near_maximum[0] > near_maximum[2],
+					"rows near the record's maximum Z take the texture's first rows");
+}
+
+// Scorch textures load with flags 0 (WRAP, LINEAR, MIPFILTER POINT), so a
+// record drawn at four texels per page pixel samples box level 2.
+// [orig: Terrain_LoadScorchTextures @ 0x604CE0 (Texture_LoadByNameWithChannel
+// flags @ 0x58B728); apply_texture_stages @ 0x68084C..0x680870]
+bool test_scorch_samples_the_nearest_box_level() {
+	const auto colormap = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid(2, 2, {255, 255, 255, 255}));
+	const auto normal = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid(2, 2, {128, 128, 255, 128}));
+	// One bright column in four: level 1 alternates 127/0 and level 2 is the
+	// constant truncated 63, while level 0 would blend to 127.
+	Rgba8Image stripes = solid(64, 64, {0, 0, 0, 255});
+	for (uint32_t y = 0; y < 64; ++y) {
+		for (uint32_t x = 0; x < 64; x += 4) {
+			const std::size_t offset = 4u * (static_cast<std::size_t>(y) * 64 + x);
+			stripes.pixels[offset] = 254;
+			stripes.pixels[offset + 1] = 254;
+			stripes.pixels[offset + 2] = 254;
+		}
+	}
+	std::array<opennova::terrain::TerrainScorchTexture,
+			opennova::terrain::kTerrainScorchTextureSlots> textures;
+	for (const uint8_t index : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{4}}) {
+		textures[index] = opennova::terrain::build_terrain_scorch_texture(stripes);
+	}
+	opennova::terrain::TerrainScorchRegistry registry;
+	// 4 world units on a LOD-4 page = 16 pixels for 64 texels.
+	if (!registry.append({0, 16 << 16, 16 << 16, 20 << 16, 20 << 16})) {
+		return expect(false, "level record appends");
+	}
+	const opennova::TerrainTilePageKey key{0, 0, 0, 0, 4};
+	const auto plan = registry.plan(key);
+	auto sources = bare_sources(colormap, normal);
+	sources.scorch_plan = &plan;
+	sources.scorch_textures = &textures;
+	const Rgba8Image page = opennova::terrain::compose_terrain_tile_page(job(key), sources);
+	if (!expect(page.is_valid(), "level page composes")) return false;
+	const float stage = std::min(1.0f, (63.0f / 255.0f) * (256.0f / 255.0f));
+	const uint8_t expected = byte(2.0f * stage * 1.0f);
+	for (int x = 65; x < 80; ++x) {
+		if (!expect(pixel(page, x, 70)[0] == expected,
+				"every covered pixel samples the constant level-2 average")) {
+			std::fprintf(stderr, "  x=%d actual=%u expected=%u\n", x,
+					pixel(page, x, 70)[0], expected);
+			return false;
+		}
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
 	if (!test_crt_and_router()) return 1;
 	if (!test_producer_mailbox_and_capacity()) return 1;
 	if (!test_mips_registry_and_boundary_overlap()) return 1;
-	if (!test_registry_buckets_stamp_and_generation()) return 1;
+	if (!test_registry_buckets_and_generation()) return 1;
 	if (!test_ordered_page_composition()) return 1;
+	if (!test_scorch_texture_rows_run_from_maximum_z()) return 1;
+	if (!test_scorch_samples_the_nearest_box_level()) return 1;
 	std::printf("OK: permanent terrain scorch parity\n");
 	return 0;
 }

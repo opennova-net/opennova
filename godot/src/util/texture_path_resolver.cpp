@@ -15,6 +15,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace opennova {
@@ -287,6 +288,69 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 }
 
 namespace {
+// The textures whose mip chain came from their DDS file (the resolver's own
+// table). ObjectIDs are never reused within a session, so the table outlives
+// cache clears: a material bound before a clear keeps a correct answer.
+std::unordered_set<uint64_t> g_authored_mip_chains;
+} // namespace
+
+float material_texture_max_lod(const godot::Ref<godot::Texture> &texture) {
+	constexpr float kUnbounded = 1000.0f;
+	const godot::Ref<godot::Texture2D> texture_2d = texture;
+	if (texture_2d.is_null() ||
+			g_authored_mip_chains.count(texture_2d->get_instance_id()) != 0) {
+		return kUnbounded;
+	}
+	const uint32_t levels = renderer::pixel_texture_mip_levels(
+			static_cast<uint32_t>(texture_2d->get_width()),
+			static_cast<uint32_t>(texture_2d->get_height()));
+	return levels == 0 ? kUnbounded : static_cast<float>(levels - 1);
+}
+
+godot::Ref<godot::Texture2D> load_material_image_from_bytes(
+		renderer::MaterialImageDecoder decoder, const godot::PackedByteArray &bytes) {
+	using renderer::MaterialImageDecoder;
+	if (bytes.is_empty()) {
+		return godot::Ref<godot::Texture2D>();
+	}
+	switch (decoder) {
+		case MaterialImageDecoder::Dds: {
+			// D3DXCreateTextureFromFileInMemoryEx keeps the file's mip levels;
+			// only a chain-less DDS gets generated ones.
+			if (!godot::bytes_look_like_dds(bytes)) {
+				return godot::Ref<godot::Texture2D>();
+			}
+			godot::Ref<godot::Image> image;
+			image.instantiate();
+			if (image->load_dds_from_buffer(bytes) != godot::OK || image->is_empty()) {
+				return godot::Ref<godot::Texture2D>();
+			}
+			if (image->is_compressed() && image->decompress() != godot::OK) {
+				return godot::Ref<godot::Texture2D>();
+			}
+			if (!image->has_mipmaps()) {
+				image->generate_mipmaps();
+			}
+			godot::Ref<godot::ImageTexture> texture = godot::ImageTexture::create_from_image(image);
+			if (texture.is_valid()) {
+				g_authored_mip_chains.insert(texture->get_instance_id());
+			}
+			return texture;
+		}
+		case MaterialImageDecoder::Tga: {
+			godot::Ref<godot::Texture2D> claimed;
+			return decode_dds_or_tga("tga", bytes, claimed) ? claimed
+					: godot::Ref<godot::Texture2D>();
+		}
+		case MaterialImageDecoder::Pcx:
+			return texture_from_image(decode_pcx_image(bytes.ptr(), static_cast<size_t>(bytes.size())));
+		case MaterialImageDecoder::None:
+			break;
+	}
+	return godot::Ref<godot::Texture2D>();
+}
+
+namespace {
 std::unordered_map<std::string, godot::Ref<godot::Texture>> g_material_cache;
 
 godot::Ref<godot::Texture> upload_material_pixels(
@@ -413,7 +477,37 @@ godot::Ref<godot::Texture> load_material_texture_from_dir(
         return prepare_material_chunk(path.is_empty() ? godot::PackedByteArray() :
                 godot::FileAccess::get_file_as_bytes(path), type);
     }
-    if (type < 4 || type > 7) return prepare_material_texture(load_texture_from_dir(dir, name), name, type);
+    if (type < 4 || type > 7) {
+        // A loose directory is the only source, so no archive entry competes
+        // with a loose file and the DDS sibling rule decides alone.
+        const std::string native = to_std(name);
+        renderer::MaterialImageSource selected;
+        if (type == 1) {
+            selected = renderer::plain_material_image_source(native);
+        } else {
+            const std::string query = renderer::material_texture_query(native);
+            selected = renderer::material_image_source(query, false,
+                    !resolve_file_in_dir(dir, to_gd(renderer::material_dds_sibling(query))).is_empty());
+        }
+        const godot::String path = resolve_file_in_dir(dir, to_gd(selected.file));
+        godot::Ref<godot::Texture2D> source;
+        if (!path.is_empty() && selected.decoder != renderer::MaterialImageDecoder::None) {
+            const std::string key = "material-image:" + to_std(path);
+            auto cached = g_texture_cache.find(key);
+            if (cached == g_texture_cache.end()) {
+                godot::PackedByteArray bytes;
+                godot::Ref<godot::Texture2D> loaded;
+                if (is_resource_dir(dir)) {
+                    loaded = godot::ResourceLoader::get_singleton()->load(path);
+                } else if (godot::read_nova_payload_file(path, bytes)) {
+                    loaded = load_material_image_from_bytes(selected.decoder, bytes);
+                }
+                cached = g_texture_cache.emplace(key, loaded).first;
+            }
+            source = cached->second;
+        }
+        return prepare_material_texture(source, name, type);
+    }
     const bool loose_tga = !resolve_file_in_dir(dir, name).is_empty();
     const godot::String dds = name.get_basename() + ".dds";
     const std::string selected = renderer::normal_material_filename(name.utf8().get_data(),

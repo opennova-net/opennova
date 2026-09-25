@@ -13,6 +13,15 @@ namespace opennova::renderer {
 // [orig: render_sector_entity @ 0x5c42de]
 inline constexpr int32_t kObjectLodSubPixelCullQ16 = 49152;
 
+// The sub-pixel floor as a predicate over a projected radius: TRUE = the
+// entity is not drawn. The sector-entity draw tests it before the RLOD walk,
+// the person collector before its latch.
+// [orig: render_sector_entity `cmp edi,0C000h; jle` @ 0x5c42d8..0x5c42de;
+//  collect_visible_entities_for_terrain @ 0x5c8e5e]
+inline constexpr bool object_subpixel_culled(int32_t projected_radius_q16) {
+  return projected_radius_q16 <= kObjectLodSubPixelCullQ16;
+}
+
 // The projected radius the point projector reports for a sphere whose view
 // depth is smaller than its radius (the eye is inside or behind it): a fixed
 // 4096 px in Q16.16, which selects the finest level.
@@ -20,7 +29,7 @@ inline constexpr int32_t kObjectLodSubPixelCullQ16 = 49152;
 inline constexpr int32_t kObjectLodBehindEyeRadiusQ16 = 0x10000000;
 
 // The highest shipped object-detail profile (the frame scale's fixed-quality
-// leg). [orig: Terrain_RenderSceneWithReflection @ 0x5c944c]
+// leg). [orig: Terrain_RenderWorldScene @ 0x5c944c]
 inline constexpr int kObjectLodDetailLevelMax = 3;
 // The special item preloaded for the person flag-0x20 radius substitution.
 // [orig: Entity_PreloadSpecialItems @ 0x43C220]
@@ -62,16 +71,31 @@ ObjectProjectionSphere person_projection_sphere_q16(
     int32_t entity_bound_radius_q16, bool parachute_deployed = false,
     int32_t parachute_model_radius_q16 = 0);
 
+// The runtime RLOD threshold of one level: the RMDL chunk authors an integer
+// pixel count (the dword after the model type), and the model loader stores
+// it shifted into Q16.16 in the level's own table slot (model+0x40+4*level).
+// Corpus tables descend to zero (Armry01 200, 60, 20, 0).
+// [orig: ThreediGp_LoadFromFile @ 0x5b5bdf..0x5b5be5 — `mov ecx,[ecx+4];
+//  shl ecx,10h; mov [eax+20h],ecx` into loader+0x44+4*i; the model the
+//  wrapper hands out is loader+4 — ThreediGp_LoadModel @ 0x5b6273]
+inline constexpr int32_t rlod_threshold_q16_from_rmdl(int32_t rmdl_threshold_pixels) {
+  return static_cast<int32_t>(static_cast<uint32_t>(rmdl_threshold_pixels) << 16);
+}
+
 struct ObjectLodSelection {
   int lod_index = -1;
   int32_t scaled_projected_radius_q16 = 0;
   // The coarsest-slot back-off fired: the scaled walk landed on the final
-  // row (or a row whose next threshold is zero) while the UNSCALED radius
-  // still exceeds that row's threshold, so the level one finer is drawn.
+  // level (or a level whose own threshold is zero) while the UNSCALED radius
+  // still exceeds the next finer level's threshold, so that finer level is
+  // drawn.
   bool backed_off = false;
 };
 
 // Select an authored object LOD from the retail fine-to-coarse threshold table.
+// thresholds_q16[i] is level i's own threshold (rlod_threshold_q16_from_rmdl):
+// level i draws while the scaled radius exceeds it and the level before did
+// not claim the radius, so a first slot of zero pins the model to level 0.
 // The input is projected screen radius in Q16.16 (project_bound_sphere_radius_q16
 // below). `projection_scale` is the frame's resolution/detail normalization
 // (object_lod_frame_scale). `available`, when supplied, models the
@@ -83,7 +107,7 @@ struct ObjectLodSelection {
 // cross-fade or dual submission exists across an RLOD threshold (D-RORD-11,
 // docs/render/render-order-re.md).
 // [orig: Model_SelectRlodLevel @ 0x5c3b20 (the level in EAX; the walk
-//  @ 0x5c3b45..0x5c3b5a, the back-off @ 0x5c3b88..0x5c3b9b; the dead
+//  from slot 0 @ 0x5c3b3b..0x5c3b5a, the back-off @ 0x5c3b5d..0x5c3b8c; the dead
 //  fraction store @ 0x5c3bb3/0x5c3bc2 -> dword_29ACD9C, read only by the
 //  orphan stub @ 0x5c38c0); null fallback at render_sector_entity
 //  @ 0x5c4303]
@@ -108,13 +132,56 @@ inline int attachment_lod_index(int parent_lod_index, int lod_count) {
   return std::clamp(parent_lod_index, 0, lod_count - 1);
 }
 
+// The held weapon's own projected-size gate (draw 5 of the person callback):
+// outside the render-slot pass (render state bits 2/4 skip the test), the
+// weapon's model sphere (its model header radius, gpm[5]) is projected at the
+// attach point and the weapon is skipped while the RAW projected radius — not
+// the frame-scaled LOD input — is under 2 px (Q16.16 0x20000).
+// [orig: BoneCallback_org0_World @ 0x4e3cf6..0x4e3d4b — the state test
+//  @ 0x4e3cfe, Viewport_TransformAndClipPoint @ 0x4e3d39 with the radius
+//  @ 0x4e3d2b, `cmp dword_A784F0, 20000h` @ 0x4e3d41]
+inline constexpr int32_t kHeldWeaponMinProjectedRadiusQ16 = 0x20000;
+inline bool held_weapon_projection_culled(int32_t projected_radius_q16) {
+  return projected_radius_q16 < kHeldWeaponMinProjectedRadiusQ16;
+}
+
 // The per-frame multiplier applied to every projected radius before the
 // threshold walk: the detail profile's quality term (detail * 0.33 + 0.34,
 // or the fixed 2.0 on detail 3, the highest shipped profile) divided by the
 // viewport width in pixels, times the 640-wide reference.
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9468;
+// [orig: Terrain_RenderWorldScene @ 0x5c940c..0x5c9468;
 //  Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c90f1]
 float object_lod_frame_scale(int detail_level, float viewport_width);
+
+// The death-piece draw's own radius multiplier: the detail profile's quality
+// term alone (detail * 0.33 + 0.34, no width normalization and no detail-3
+// substitution), stored as a float.
+// [orig: DeathPiece_RenderVisible @ 0x57b831..0x57b84a — fild dword_24D2048,
+//  fmul flt_7C59B4, fadd flt_7D76CC, fstp]
+float death_piece_lod_scale(int detail_level);
+
+// The death-piece draw's level chain over its model's RLOD table: the scaled
+// radius (truncated) at or under 0.75 px draws nothing (-1); otherwise level 0
+// above the first threshold or for a one-level model, level 1 above the
+// second while the model has two levels, level 2 above the third while it
+// has three, else level 3; a level past the LOD count clamps to the last
+// level (to 0 for a model without levels). The returned level can equal the
+// LOD count (a three-level model under its third threshold): that level's
+// mesh slot is empty and the section draw returns without drawing.
+// [orig: DeathPiece_RenderVisible @ 0x57b86f..0x57b8ca — the floor
+//  `cmp eax,0C000h; jle` @ 0x57b87b, the chain @ 0x57b882..0x57b8b8, the clamp
+//  @ 0x57b8ba..0x57b8ca; the empty slot `test ebx,ebx; jz` in
+//  DeathPiece_RenderSection @ 0x57b6bc]
+int death_piece_lod_level(int32_t projected_radius_q16, float lod_scale,
+                          const std::vector<int32_t> &thresholds_q16);
+
+// The viewport's focal length in pixels: half the viewport WIDTH over the
+// tangent of half the HORIZONTAL field of view, rounded half up.
+// [orig: Viewport_BuildProjectionMatrix @ 0x410fb0 — (fov >> 1) * dbl_7C3620
+//  (degrees Q16 -> radians) @ 0x410fc0..0x410fdb, the width right-left+1
+//  @ 0x410fc3..0x410fd3, width * 0.5 / fptan + 0.5 -> _ftol2_sse
+//  @ 0x410fe1..0x410ff7, stored to viewport+0x40 @ 0x4110e1]
+int32_t object_lod_focal_pixels(float viewport_width, double tan_half_horizontal);
 
 // The projected bound-sphere radius in Q16.16 pixels: the sphere radius
 // (Q16.16 world units) times the focal length in pixels over the view depth

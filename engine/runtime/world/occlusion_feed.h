@@ -8,11 +8,12 @@
 
 namespace opennova::world {
 
-// One building's occlusion verdict as the feed transports it: the 32-bit
-// section mask (bit N = COBJ section / render part N; bit 0 = exterior;
-// forced-visible def bits already merged) in the low word, the batch/frustum
-// visible flag at bit 32. No engine witness: the packing is the feed's own
-// transport so a presenter reads one integer pair per building.
+// One building's occlusion verdict as the feed transports it: the RAW 32-bit
+// section mask (bit N = COBJ section / render part N; bit 0 = exterior; the
+// def's forced-visible bits travel beside it, OcclusionWorld::
+// forced_section_mask) in the low word, the batch/frustum visible flag at
+// bit 32. No engine witness: the packing is the feed's own transport so a
+// presenter reads one integer per building.
 constexpr int kBuildingVisibleBit = 32;
 
 constexpr int64_t pack_building_visibility(uint32_t section_mask, bool visible) {

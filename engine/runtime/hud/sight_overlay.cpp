@@ -55,8 +55,14 @@ SightRect sight_row_rect(const SightRowSpec &row, int sight_scale_index,
 
 SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, float height, int aspect_mode) {
 	if (width <= 0.0f || height <= 0.0f) return {};
-	const float aspect = renderer::aspect_height_over_width(aspect_mode, width, height);
-	const float correction = 3.0f / (4.0f * aspect);
+	return sight_rect_to_viewport_at_ratio(rect, width, height,
+			renderer::aspect_height_over_width(aspect_mode, width, height));
+}
+
+SightViewportRect sight_rect_to_viewport_at_ratio(const SightRect &rect, float width,
+		float height, float selected_h_over_w) {
+	if (width <= 0.0f || height <= 0.0f || selected_h_over_w <= 0.0f) return {};
+	const float correction = 3.0f / (4.0f * selected_h_over_w);
 	const float center_y = height * 0.5f;
 	SightViewportRect out;
 	out.x1 = static_cast<float>(scale_axis(rect.x1, width, kDesignWidth));

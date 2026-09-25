@@ -18,15 +18,15 @@ namespace opennova::renderer {
 // These are the five witnessed draws in FrameFX's bloom-source bracket:
 // glow-capable object duplicates first, followed by the NV water redraw,
 // celestial discs, and the occlusion-independent sun glow. They draw into
-// FrameFX's altbuffer, a backbuffer-sized render-target texture in the
+// FrameFX's altbuffer, a backbuffer-sized render-target surface in the
 // display format (an X8R8G8B8 display gets an A8R8G8B8 altbuffer) with the
 // beauty depth-stencil still bound; the compiled list is that altbuffer's
 // content.
-// [orig: CRenderBatchQueue_SortAndFlush(4) @ 0x582a54;
-// render_water_surface(view, 1) @ 0x582a62;
-// render_celestial_bodies(1) / render_skybox_sun_glow(0, 0) @ 0x582a77;
+// [orig: FrameFX_RenderGlowSource @ 0x582a54 (CRenderBatchQueue_SortAndFlush(4)),
+// @ 0x582a5d (render_water_surface(0, 1)), @ 0x582a77 (render_celestial_bodies(1)),
+// @ 0x582a80 (render_skybox_sun_glow(0, 0));
 // FrameFX_CreateAltBufferTexture @ 0x582120 (format 22 -> 21 @ 0x582141,
-// CreateTexture @ 0x58217e)].
+// IDirect3DDevice9::CreateRenderTarget, vtable +0x70, @ 0x58217e)].
 enum class Q3Technique : std::uint8_t {
 	NormalCopy = 0,
 	RotatedSpecularGlass = 1,
@@ -98,16 +98,39 @@ inline constexpr float kQ3WaterNvBrightBias = 0.15f;
 // Render_SetViewportFarDepth: a D3DVIEWPORT9 with MinZ 0.98 / MaxZ
 // 0.99996948 remaps their clip depth into that far band before the ordinary
 // z-tested flush, so both survive only where the beauty depth is at (or
-// within the band of) the far plane, i.e. cleared sky. Every nearer surface
-// occludes them in the bloom source. In Godot's reverse-Z [0, 1] clip depth
-// the band is [1 - MaxZ, 1 - MinZ]: z' = (1 - MaxZ) + z * (MaxZ - MinZ).
-// [orig: FrameFX_RenderBloomPass @ 0x582940 (Render_SetViewportFarDepth
+// within the band of) the far plane: cleared sky and the farthest terrain.
+// [orig: FrameFX_RenderGlowSource @ 0x582940 (Render_SetViewportFarDepth
 // @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77 ->
 // render_skybox_sun_glow(0, 0) @ 0x582a80); Render_SetViewportFarDepth
 // @ 0x58a840 (MinZ 0.98000002 @ 0x58a859, MaxZ 0.99996948 @ 0x58a86b); the
 // z-tested flushes CRenderBatchQueue_SortAndFlush(0) @ 0x5acce9 / 0x5ad118].
 inline constexpr float kQ3FarBandMinZ = 0.98000002f;
 inline constexpr float kQ3FarBandMaxZ = 0.99996948f;
+// The beauty depth those flushes test against was written through the scene
+// viewport, MinZ 0 / MaxZ 0.99996948, not [0, 1] [orig: Render_SetViewport
+// @ 0x58a720 (MinZ 0 @ 0x58a72f, MaxZ @ 0x58a739), set for the main frame
+// by Render_ProcessMainSceneFrame @ 0x5ca5fc and again by
+// FrameFX_RenderGlowSource @ 0x582a45 before the far band].
+inline constexpr float kQ3SceneViewportMaxZ = 0.99996948f;
+static_assert(kQ3SceneViewportMaxZ == kQ3FarBandMaxZ,
+		"q3_far_band_reverse_z folds the band MaxZ into the scene viewport MaxZ");
+
+// The far band in the beauty camera's reverse-Z depth. Retail keeps a disc
+// or glow fragment at view depth w over a beauty pixel at view depth D when
+//   MinZ + (MaxZ - MinZ) z(w) <= SceneMaxZ z(D)   (LESSEQUAL),
+// z(x) = f / (f - n) (1 - n / x) the scene projection's depth. Both sides
+// are affine in 1/x with the same far plane f, so with MaxZ == SceneMaxZ
+// the test is 1/D <= (MinZ / f + (MaxZ - MinZ) / w) / SceneMaxZ, whatever
+// the near plane n. In a reverse-Z projection with that same far plane,
+// r(x) = n' (f - x) / (x (f - n')) for any near n', that is exactly
+//   r(D) <= r(w) (MaxZ - MinZ) / SceneMaxZ,
+// so the draw scales its own reverse-Z depth and keeps GREATER_OR_EQUAL.
+// At a 700 u fog a disc 60 u deep survives only over beauty depth past
+// ~577 u; the earlier [1 - MaxZ, 1 - MinZ] remap of a [0, 1] depth let it
+// through from ~427 u, over far terrain that hides it in retail.
+inline float q3_far_band_reverse_z(float reverse_z) {
+	return reverse_z * ((kQ3FarBandMaxZ - kQ3FarBandMinZ) / kQ3SceneViewportMaxZ);
+}
 
 // An opaque portable identity, not a GPU handle. The adapter resolves the
 // resource by its id. A geometry lease names the adapter's cache entry and
@@ -159,6 +182,42 @@ struct Q3Matrix4 {
 	};
 };
 
+// The emissive the NormalCopy (SELFLUM) and RotatedSpecularGlass copies
+// modulate by: the material colour x ColorSrcGlobalGain, saturated by the
+// fixed-function lighting stage, then MODULATE2X. A gain above 1 therefore
+// brightens a colour below 1 until it saturates.
+// [orig: _FFP.fx SELFLUM MaterialEmissive = SelfLumColor*ColorSrcGlobalGain;
+//  Glass.fx MaterialEmissive = ReflectColor*ColorSrcGlobalGain;
+//  apply_shader_parameters @ 0x58E050..0x58E06A (ColorSrcGlobalGain bind)]
+inline std::array<float, 3> q3_emissive_modulate2x(const Q3Vec4 &color,
+		const std::array<float, 3> &gain) {
+	const auto saturate = [](float value) {
+		return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
+	};
+	return {saturate(color.x * gain[0]) * 2.0f, saturate(color.y * gain[1]) * 2.0f,
+			saturate(color.z * gain[2]) * 2.0f};
+}
+
+// The object samplers (sampLinearWrap2D under ANISO) stop at each stage
+// texture's last retail mip level; a texture whose file carried its own chain
+// has none. The object copies and slot captures receive both stage ceilings
+// in one float: each as a 4-bit level code, 15 standing for "no ceiling".
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BC..0x6877D8 (the chain)]
+inline constexpr float kQ3NoMipCeiling = 1000.0f;
+inline float q3_pack_mip_ceilings(float primary, float detail) {
+	const auto code = [](float ceiling) {
+		if (!(ceiling >= 0.0f) || ceiling >= 15.0f)
+			return 15.0f;
+		return static_cast<float>(static_cast<int>(ceiling));
+	};
+	return code(primary) + 16.0f * code(detail);
+}
+inline float q3_unpack_mip_ceiling(float packed, int stage) {
+	const int bits = static_cast<int>(packed + 0.5f);
+	const int level = stage == 0 ? (bits & 15) : ((bits >> 4) & 15);
+	return level == 15 ? kQ3NoMipCeiling : static_cast<float>(level);
+}
+
 // Only values needed by the focused object Q3 techniques live here. The LUM
 // GLOW slot is a copy of the NORMAL pass block, so NormalCopy re-shades the
 // SELFLUM specialization from the leased Diffuse1/Detail textures and
@@ -172,8 +231,12 @@ struct Q3ObjectMaterialParameters {
 	Q3ResourceLease base_texture{};
 	Q3ResourceLease detail_texture{};
 	Q3Vec4 self_lum_color{1.0f, 1.0f, 1.0f, 1.0f};
-	Q3Vec4 reflect_color{0.7f, 0.8f, 0.9f, 0.35f};
+	// _BaseInc.fx's ReflectColor default; routed materials overwrite it.
+	Q3Vec4 reflect_color{0.75f, 0.75f, 0.75f, 0.75f};
 	float alpha_mod = 1.0f;
+	// The stages' last retail mip levels (kQ3NoMipCeiling = unbounded).
+	float diffuse_max_lod = kQ3NoMipCeiling;
+	float detail_max_lod = kQ3NoMipCeiling;
 	std::array<float, 9> uv_transform{
 		1.0f, 0.0f, 0.0f,
 		0.0f, 1.0f, 0.0f,
@@ -188,23 +251,43 @@ struct Q3WaterMaterialParameters {
 	Q3ResourceLease noise_color_texture{};
 	Q3ResourceLease noise_normal_texture{};
 	Q3Vec3 water_color{0.408f, 0.314f, 0.224f};
-	Q3Vec4 water_uv{1.0f, 0.2f, 0.0f, 0.0f};
-	Q3Vec2 reflection_uv_scale{1.0f, 1.0f};
+	// The retail scene projection's near/far the strip depth is tested
+	// against (the beauty water's u_scene_depth_range): the copy maps its
+	// strip depth through the same curve.
+	Q3Vec2 scene_depth_range{0.2f, 1025.0f};
 	bool has_reflection = false;
-	bool underwater_view = false;
 };
 
-// Shared parameter block for the body and sun-glow techniques. `opacity` is
-// already the producer's pass-specific value: body opacity for CelestialBody,
-// or glare_q3_peak_opacity for SunGlow.
+// Shared parameter block for the body and sun-glow techniques. Both redraw
+// the body's AUTHORED material in the bloom pass: the stock bodies are
+// FF_ST_AD_LUM, whose GLOW slot is a copy of the SELFLUM NORMAL block
+// [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f], so the draw re-shades Diffuse1 x
+// sat(SelfLumColor x gain) x 2 under the wrapper's fog policy, with alpha 0.
+// `self_lum` is the producer's pass-specific SelfLumColor: the material's
+// RgbGen evaluated at the bloom pass's UPL_INTENSITY value (the disc and
+// glow submit alphas of FrameFX_RenderGlowSource @ 0x582a77 / @ 0x582a80;
+// runtime/environment/celestial_frame.h). `blend` is the blend the material
+// was classified with, mapped like NormalCopy's (_OP replace, _AB alpha,
+// _AD add): the glow's submit flags (0x100 in the bloom pass, 0x110 in the
+// beauty pass [orig: render_skybox_sun_glow @ 0x5ad0f5..0x5ad0fe]) never
+// override the material blend, so SunGlow follows it like the discs.
 struct Q3CelestialMaterialParameters {
 	Q3ResourceLease diffuse_texture{};
-	Q3Vec3 tint{1.0f, 1.0f, 1.0f};
-	float opacity = 1.0f;
-	Q3Vec3 glare_direction{0.0f, 1.0f, 0.0f};
-	bool additive = false;
-	bool glare_view_fade = false;
+	Q3Vec3 self_lum{1.0f, 1.0f, 1.0f};
+	ObjectBlendMode blend = ObjectBlendMode::Additive;
+	// Diffuse1's last retail mip level, as for the object copies.
+	float diffuse_max_lod = kQ3NoMipCeiling;
 };
+
+// The disc/glow bloom copy's colour: the GLOW slot is the SELFLUM NORMAL
+// block, so it takes the NormalCopy emissive, sat(SelfLumColor x gain) x 2
+// [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f; apply_shader_parameters
+// @ 0x58E050..0x58E06A (ColorSrcGlobalGain)]. A gain above 1 lifts the
+// body's colour; the bodies' low bloom alphas never reach the clamp.
+inline std::array<float, 3> q3_celestial_emissive(const Q3CelestialMaterialParameters &p,
+		const std::array<float, 3> &gain) {
+	return q3_emissive_modulate2x({p.self_lum.x, p.self_lum.y, p.self_lum.z, 1.0f}, gain);
+}
 
 // One producer row. Input order is retail submission order. Ranges address
 // Q3FrameSnapshot's flat arrays and are copied/remapped into the draw list.

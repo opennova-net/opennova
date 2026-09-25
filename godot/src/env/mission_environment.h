@@ -83,6 +83,9 @@ public:
 	// and selects the 0x808080 pass fog and frame clear; the terrain gate
 	// selects the flat terrain ramps.
 	void set_thermal_view(bool p_world, bool p_terrain);
+	// The world gate: the frame's latched thermal byte, which the main scene
+	// also hands the particle passes (the particle secondary materials).
+	bool is_thermal_view() const { return state_.thermal_view(); }
 	// The main scene pass selection, sampled from the render eye after local
 	// camera placement and before terrain/foliage submit. This does not mutate
 	// authored/current weather state; it selects the derived pass fog payload.
@@ -98,6 +101,19 @@ public:
 	}
 	Vector3 get_underwater_overlay_color() const;
 	int get_underwater_overlay_alpha_byte() const;
+	// Whether this frame's sky pass drew the dome (the sky-dome gate owner
+	// reports it); with the eye strictly above water it selects the fog colour
+	// the dome wrapper leaves for the viewmodel (engine build_viewmodel_fog).
+	void set_sky_dome_drawn(bool p_drawn);
+	// The first-person viewmodel's pass fog, published as the
+	// opennova_viewmodel_fog_color / opennova_viewmodel_fog_range globals
+	// (range = start, end, type): the dry pass whatever the eye's side.
+	Vector3 get_viewmodel_fog_color() const;
+	Vector3 get_viewmodel_fog_range() const;
+	// The water mirror pass's fog block as published: color and
+	// (start, end, type).
+	Vector3 get_water_mirror_fog_color() const;
+	Vector3 get_water_mirror_fog_range() const;
 	Vector3 get_scene_fog_color() const;
 	float get_scene_fog_start() const;
 	float get_scene_fog_end() const;
@@ -111,8 +127,11 @@ public:
 	Vector3 get_skyfog_color() const;
 	Vector3 get_frame_clear_color() const;
 	// The witnessed clear SELECTION (environment_state.h carries the
-	// citations): black indoors, skyfog above water, lit water underwater.
-	Color frame_clear_color_for(bool p_indoors, bool p_above_water) const;
+	// citations): thermal grey, skyfog strictly above water, lit water at or
+	// below it.
+	Color frame_clear_color_for(bool p_eye_above_water) const;
+	// The NVG scene's clear (environment_state.h): skyfog / lit water alone.
+	Color nvg_scene_clear_color(bool p_eye_above_water) const;
 	Vector3 get_ceiling_color() const;
 	Vector3 get_cloud_tint() const;
 	Vector3 get_floor_color() const;
@@ -205,6 +224,7 @@ public:
 	// per-frame write while present).
 	void write_shader_globals();
 
+
 	void _ready() override;
 
 protected:
@@ -221,6 +241,13 @@ private:
 	void _after_tod_update();
 	Ref<EnvLightValues> _build_light_values() const;
 	void _write_scene_fog_globals();
+	opennova::env::SceneFogValues _viewmodel_fog() const;
+	void _write_viewmodel_fog_globals();
+	// The water mirror pass's fog block (EnvironmentState::
+	// build_water_mirror_fog) as opennova_water_mirror_fog_color / _range:
+	// the reflected pass selects it per camera in the object and terrain
+	// shaders.
+	void _write_water_mirror_fog_globals();
 	// The object family's per-pass lighting block as global shader
 	// parameters: the world block the object shaders scale per entity at
 	// draw time (renderer/light_runtime.h carries the RenderBatchCtx
@@ -239,6 +266,7 @@ private:
 	int64_t last_published_generation_ = 0;
 	bool underwater_view_ = false;
 	bool underwater_overlay_view_ = false;
+	bool sky_dome_drawn_ = true;
 };
 
 } // namespace godot

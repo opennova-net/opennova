@@ -98,8 +98,8 @@ static int roundtrip(const char *path) {
 
 // OOBJ +20 is an authored float consumed by the occlusion renderer. The retail
 // corpus happens to contain zeros, but the format and writer permit nonzero
-// window glow scales.
-static int roundtrip_nonzero_glow(const char *path) {
+// slot priority weights.
+static int roundtrip_nonzero_slot_priority(const char *path) {
     Threedi3di3 source;
     Threedi3di3 reread;
     char tmp[4096];
@@ -125,9 +125,9 @@ static int roundtrip_nonzero_glow(const char *path) {
         source.occlusion_object_count = 1;
         source.occlusion_object_record_size = 36;
     }
-    source.occlusion_objects[0].glow_scale = 1.25f;
+    source.occlusion_objects[0].slot_priority_scale = 1.25f;
     expected_count = source.occlusion_object_count;
-    snprintf(tmp, sizeof(tmp), "%s.glow-roundtrip", path);
+    snprintf(tmp, sizeof(tmp), "%s.slot-priority-roundtrip", path);
     if (threedi_3di3_write(tmp, &source) != 0) {
         threedi_3di3_free(&source);
         return -1;
@@ -138,7 +138,7 @@ static int roundtrip_nonzero_glow(const char *path) {
         return -1;
     }
     same = reread.occlusion_object_count == expected_count &&
-           reread.occlusion_objects[0].glow_scale == 1.25f;
+           reread.occlusion_objects[0].slot_priority_scale == 1.25f;
     threedi_3di3_free(&reread);
     remove(tmp);
     return same ? 1 : -1;
@@ -179,20 +179,20 @@ int main(void) {
     printf("All roundtrip tests passed.\n");
 
     {
-        int glow_tested = 0;
+        int priority_tested = 0;
         for (const std::string &file : files) {
-            const int result = roundtrip_nonzero_glow(file.c_str());
+            const int result = roundtrip_nonzero_slot_priority(file.c_str());
             if (result < 0) {
-                fprintf(stderr, "Nonzero OOBJ glow roundtrip failed for %s\n", file.c_str());
+                fprintf(stderr, "Nonzero OOBJ slot priority roundtrip failed for %s\n", file.c_str());
                 return EXIT_FAILURE;
             }
             if (result > 0) {
-                glow_tested = 1;
+                priority_tested = 1;
                 break;
             }
         }
-        if (!glow_tested) {
-            fprintf(stderr, "No OOBJ fixture available for the glow roundtrip\n");
+        if (!priority_tested) {
+            fprintf(stderr, "No OOBJ fixture available for the slot priority roundtrip\n");
             return EXIT_FAILURE;
         }
     }

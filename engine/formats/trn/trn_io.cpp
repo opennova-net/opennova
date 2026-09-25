@@ -381,4 +381,19 @@ bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 	return true;
 }
 
+std::string trn_mission_tilestrip(const TrnConfig &trn,
+		const std::string &mission_tile_set) {
+	// An empty mission name leaves the .trn value [orig: the NUL test
+	// @ 0x6109C8 skipping to @ 0x610A24].
+	if (mission_tile_set.empty() || mission_tile_set.front() == '\0') {
+		return trn.tilestrip;
+	}
+	// Everything from the FIRST '.' becomes ".TGA"; without a dot ".TGA" is
+	// appended [orig: Path_ReplaceOrAppendExtension @ 0x53C7C0..0x53C7CD].
+	std::string atlas = mission_tile_set.substr(0, mission_tile_set.find('\0'));
+	const std::size_t dot = atlas.find('.');
+	if (dot != std::string::npos) atlas.resize(dot);
+	return atlas + ".TGA";
+}
+
 } // namespace opennova

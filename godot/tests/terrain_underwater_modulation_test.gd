@@ -131,16 +131,12 @@ func test_runtime_publishes_one_shared_retail_tile_page_array() -> void:
 	assert_same(material.get_shader_parameter("u_tile_cache"), page_array)
 	assert_true(bool(material.get_shader_parameter("u_has_tile_cache")))
 	var requested: Dictionary = terrain.get_tile_cache_diagnostics()
-	assert_gt(int(requested["pending_jobs"]), 0)
+	assert_eq(int(requested["pending_jobs"]), 0)
 	var first: Dictionary = await TestFs.settle_tile_cache(self, terrain)
 	assert_gt(int(first["ready_pages"]), 0)
 	assert_gt(int(first["compose_jobs"]), 0)
 	assert_eq(int(first["frame_compose_jobs"]), 0)
 	assert_eq(int(first["pending_jobs"]), 0)
-	# The per-frame upload budget (upload_budget, pinned below) gates REFRESH
-	# uploads only; cold layers drain unbounded so first-fill completes in a few
-	# frames (TerrainTileCacheDevice::_drain_completed). How many cold completions
-	# land in the settle frame is worker timing, so it is not asserted here.
 	assert_eq(int(first["frame_capacity_fallbacks"]), 0)
 
 	terrain.render_frame()
@@ -153,24 +149,32 @@ func test_runtime_publishes_one_shared_retail_tile_page_array() -> void:
 	assert_gt(int(second["cache_hits"]), int(first["cache_hits"]))
 
 
-func test_cold_page_requests_remain_pending_until_after_the_request_frame() -> void:
+func test_visible_pages_compose_before_their_frame_draws() -> void:
 	var fixture := _make_fixture(7.0)
 	var terrain: Terrain = fixture["terrain"]
 	var cam: Camera3D = fixture["camera"]
 	cam.global_position = Vector3(64.0, 27.0, 64.0)
 
+	# Retail's first terrain frame claims no page record: every record's last
+	# use is only one frame old. (retail PolyTrn_RenderTile @ 0x60DAE4..0x60DB45)
 	terrain.render_frame()
-	var requested: Dictionary = terrain.get_tile_cache_diagnostics()
-	assert_eq(int(requested["ready_pages"]), 0,
-			"A cold render request must not compose, upload, and publish inline.")
-	assert_gt(int(requested.get("pending_jobs", 0)), 0,
-			"Cold visible pages must leave immutable work pending for the CPU queue.")
-	assert_eq(int(requested.get("frame_uploads", -1)), 0,
-			"The request frame must not drain Texture2DArray uploads.")
-	assert_eq(int(requested.get("worker_count", 0)), 2)
-	assert_eq(int(requested.get("upload_budget", 0)), 2)
-	assert_eq(int(requested.get("dimension", 0)), 256,
-			"Async publication preserves the sole highest-quality retail page path.")
+	var first_frame: Dictionary = terrain.get_tile_cache_diagnostics()
+	assert_eq(int(first_frame["ready_pages"]), 0)
+	assert_eq(int(first_frame["frame_capacity_fallbacks"]),
+			int(first_frame["frame_requests"]),
+			"Every patch of the first frame draws without a page.")
+	# The next frame composes every missing visible page inside its sweep and
+	# uploads it before the patches draw; nothing stays queued.
+	# (retail PolyTrn_RenderFrame @ 0x60F080..0x60F0E3)
+	terrain.render_frame()
+	var composed: Dictionary = terrain.get_tile_cache_diagnostics()
+	assert_gt(int(composed["frame_compose_jobs"]), 0)
+	assert_eq(int(composed["frame_uploads"]), int(composed["frame_compose_jobs"]))
+	assert_eq(int(composed.get("pending_jobs", -1)), 0)
+	assert_eq(int(composed["frame_capacity_fallbacks"]), 0)
+	assert_eq(int(composed.get("worker_count", 0)), 2)
+	assert_eq(int(composed.get("dimension", 0)), 256,
+			"The sole highest-quality retail page path.")
 
 
 func test_live_tile_info_mutation_invalidates_resident_page_sources() -> void:
@@ -179,8 +183,9 @@ func test_live_tile_info_mutation_invalidates_resident_page_sources() -> void:
 	var cam: Camera3D = fixture["camera"]
 	cam.global_position = Vector3(64.0, 27.0, 64.0)
 	terrain.render_frame()
+	terrain.render_frame()
 	var before_reset := terrain.get_tile_cache_diagnostics()
-	assert_gt(int(before_reset["pending_jobs"]), 0)
+	assert_gt(int(before_reset["ready_pages"]), 0)
 
 	var tile_info := TerrainTileInfo.new()
 	terrain.set_tile_info_override(tile_info)
@@ -194,3 +199,69 @@ func test_live_tile_info_mutation_invalidates_resident_page_sources() -> void:
 
 	assert_gt(int(mutated["source_revision"]), int(assigned["source_revision"]),
 		"An in-place .til edit must invalidate the device page source immediately.")
+
+
+func test_reflected_pass_clips_terrain_below_the_plane_less_0_05() -> void:
+	# Retail's reflected pass arms a terrain clip plane of wh - 0.1 (retail
+	# render_main_scene @ 0x5c1561..0x5c1578) and the sector batch's texgen
+	# u = y + 0.45 - plane under AlphaRef 0x80 (render_terrain_sector_batch
+	# @ 0x6092c6..0x60935b) keeps y >= wh - 0.05. The terrain shader's LOD
+	# debug colour marks every kept fragment green over a 2x2 card spanning
+	# y -1..1 across 64 rows: rows 32/33 sit at y = -0.016 / -0.047, rows
+	# 34/35 at -0.078 / -0.109.
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var saved := {}
+	for name in ["opennova_water_active", "opennova_water_height"]:
+		var setting = ProjectSettings.get_setting("shader_globals/" + name, {})
+		saved[name] = (setting as Dictionary).get("value") if setting is Dictionary else null
+	RenderingServer.global_shader_parameter_set("opennova_water_active", true)
+	RenderingServer.global_shader_parameter_set("opennova_water_height", 0.0)
+	var reflected: Image = await _render_terrain_card(Water.REFLECTION_CULL_MASK)
+	var beauty: Image = await _render_terrain_card(0xFFFFF)
+	for name in saved:
+		if saved[name] != null:
+			RenderingServer.global_shader_parameter_set(name, saved[name])
+	assert_gt(reflected.get_pixel(32, 32).g, 0.5, "0.016 below the plane is kept")
+	assert_gt(reflected.get_pixel(32, 33).g, 0.5, "0.047 below the plane is kept")
+	assert_lt(reflected.get_pixel(32, 34).g, 0.05, "0.078 below the plane is clipped")
+	assert_lt(reflected.get_pixel(32, 35).g, 0.05, "0.109 below the plane is clipped")
+	assert_gt(beauty.get_pixel(32, 40).g, 0.5, "a camera drawing the water layer never clips")
+
+
+func _render_terrain_card(cull_mask: int) -> Image:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = Color.BLACK
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	environment_resource.glow_enabled = false
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+	var camera := Camera3D.new()
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.size = 2.0
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.cull_mask = cull_mask
+	camera.current = true
+	viewport.add_child(camera)
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/terrain.gdshader") as Shader
+	material.set_shader_parameter("u_debug_mode", 1)
+	var card := MeshInstance3D.new()
+	var card_mesh := QuadMesh.new()
+	card_mesh.size = Vector2(2.0, 2.0)
+	card.mesh = card_mesh
+	card.material_override = material
+	viewport.add_child(card)
+	for _frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	return viewport.get_texture().get_image()

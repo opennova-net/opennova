@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 195,
+  "resource_count": 209,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -54,7 +54,7 @@
       "retail_citations": [
         { "address": "0x679c1b", "function": "CD3DDevice_InitializeDisplay", "function_start": "0x679890" },
         { "address": "0x677be0", "function": "GLib_SetGammaRamp", "function_start": "0x677be0" },
-        { "address": "0x582940", "function": "FrameFX_RenderBloomPass", "function_start": "0x582940" }
+        { "address": "0x582940", "function": "FrameFX_RenderGlowSource", "function_start": "0x582940" }
       ],
       "exceptions": []
     },
@@ -73,18 +73,7 @@
         { "address": "0x60e0c6", "function": "PolyTrn_RenderTile", "function_start": "0x60da70" },
         { "address": "0x5aa830", "function": "Light_SetupTerrainProjectedPass", "function_start": "0x5aa830" }
       ],
-      "exceptions": ["D-TERRAIN-7", "D-TERRAIN-9"]
-    },
-    {
-      "id": "terrain-editor-preview",
-      "patterns": ["terrain_editor.gdshader"],
-      "light_behavior": "editor_visualization_only",
-      "parity_status": "editor_derived",
-      "docs": ["docs/terrain/terrain-re.md"],
-      "retail_citations": [
-        { "address": "0x605260", "function": "compile_terrain_pixel_shaders", "function_start": "0x605260" }
-      ],
-      "exceptions": ["Editor-only authored preview; excluded from the retail gameplay/highest-quality capture path"]
+      "exceptions": ["D-TERRAIN-7"]
     },
     {
       "id": "foliage",
@@ -97,12 +86,12 @@
         { "address": "0x5ffdd0", "function": "generate_foliage_instances_0", "function_start": "0x5ffdd0" },
         { "address": "0x5ff7a0", "function": "Foliage_CreateLightmapBlendPS", "function_start": "0x5ff7a0" },
         { "address": "0x6015b7", "function": "Foliage_LoadDefAssets", "function_start": "0x601260" },
-        { "address": "0x60087a", "function": "Foliage_SetupFarSlotDraw", "function_start": "0x6007c0" },
+        { "address": "0x60087a", "function": "Foliage_SetupDetailSlotDraw", "function_start": "0x6007c0" },
         { "address": "0x6006f0", "function": "Foliage_SetupVertexShaderConstants", "function_start": "0x600450" },
-        { "address": "0x60a220", "function": "Foliage_RenderFarPatches", "function_start": "0x609de0" },
-        { "address": "0x60a5dc", "function": "Foliage_RenderFarPatches", "function_start": "0x609de0" }
+        { "address": "0x60a220", "function": "Foliage_RenderDetailPatches", "function_start": "0x609de0" },
+        { "address": "0x60a5dc", "function": "Foliage_RenderDetailPatches", "function_start": "0x609de0" }
       ],
-      "exceptions": ["D-FOLIAGE-7", "D-FOLIAGE-9", "D-FOLIAGE-10"]
+      "exceptions": ["D-FOLIAGE-7"]
     },
     {
       "id": "water-surface",
@@ -113,39 +102,27 @@
       "retail_citations": [
         { "address": "0x5c19b0", "function": "Water_InitSurfaceShaders", "function_start": "0x5c19b0" }
       ],
-      "exceptions": ["D-RORD-7"]
+      "exceptions": ["The mirror RTT clear and its second fullscreen quad are unmodeled (env-tod-re.md, Open after the 2026-09-24 pass)"]
     },
     {
-      "id": "sky-and-celestial",
-      "patterns": ["sky.gdshader", "celestial.gdshader", "celestial_additive.gdshader"],
+      "id": "sky-dome",
+      "patterns": ["sky.gdshader", "sky_clouds.gdshader", "sky.gdshaderinc"],
       "light_behavior": "active_sun_or_moon_direction_and_tod_color",
-      "parity_status": "matching_with_bounded_residuals",
+      "parity_status": "matching",
       "docs": ["docs/env/env-tod-re.md", "docs/render/render-order-re.md"],
       "retail_citations": [
         { "address": "0x579080", "function": "render_skybox", "function_start": "0x579080" },
         { "address": "0x5acaa0", "function": "render_celestial_bodies", "function_start": "0x5acaa0" }
       ],
-      "exceptions": ["D-RLIT-2"]
-    },
-    {
-      "id": "precipitation-streaks",
-      "patterns": ["precipitation.gdshader"],
-      "light_behavior": "prelit_or_light_derived_effect",
-      "parity_status": "matching",
-      "docs": ["docs/env/env-tod-re.md"],
-      "retail_citations": [
-        { "address": "0x5dee10", "function": "render_weather_trail_particles", "function_start": "0x5dee10" }
-      ],
       "exceptions": []
     },
     {
       "id": "light-derived-effects",
-      "patterns": ["light_corona.gdshader", "scar_quad.gdshader", "scar_quad_hole.gdshader", "slot_shadow_drape.gdshader", "sun_veil_overlay.gdshader"],
+      "patterns": ["scar_quad.gdshader", "scar_quad_hole.gdshader", "slot_shadow_drape.gdshader", "sun_veil_overlay.gdshader"],
       "light_behavior": "prelit_or_light_derived_effect",
       "parity_status": "matching",
       "docs": ["docs/render/render-lighting-re.md", "docs/world/world-wac-ai-re.md", "docs/env/env-tod-re.md"],
       "retail_citations": [
-        { "address": "0x5aaf40", "function": "EffectWorld_RenderLightCoronas", "function_start": "0x5aaf40" },
         { "address": "0x5cc315", "function": "Scar_LoadTextures", "function_start": "0x5cc2e0" },
         { "address": "0x5d6e20", "function": "RenderSlot_DrawAllDrapes", "function_start": "0x5d6e20" },
         { "address": "0x5ad8b0", "function": "Environment_ApplySunVeilAndExposureStopdown", "function_start": "0x5ad8b0" }
@@ -153,27 +130,29 @@
       "exceptions": []
     },
     {
+      "id": "tracer-ribbons",
+      "patterns": ["tracer_ribbon_*.gdshader", "effect_fog.gdshaderinc"],
+      "light_behavior": "unshaded_vertex_color_or_two_layer_alpha",
+      "parity_status": "matching",
+      "docs": ["docs/world/world-wac-ai-re.md", "docs/render/render-order-re.md"],
+      "retail_citations": [
+        { "address": "0x5db8a0", "function": "CEffectChannel_RenderRibbon", "function_start": "0x5db8a0" },
+        { "address": "0x5dc8f0", "function": "CEffectEmitterPool_CreateShaders", "function_start": "0x5dc8f0" },
+        { "address": "0x677740", "function": "CD3DDevice_SetFogAndBlendMode", "function_start": "0x677740" }
+      ],
+      "exceptions": []
+    },
+    {
       "id": "particles",
-      "patterns": ["particle/*.gdshader"],
+      "patterns": ["particle/*.gdshader", "particle/world_far/*.gdshader", "particle/world_far/*.gdshaderinc"],
       "light_behavior": "unshaded_vertex_color_or_dot3_input",
-      "parity_status": "matching_with_bounded_residuals",
+      "parity_status": "matching",
       "docs": ["docs/particles/ptl-format-re.md", "docs/world/world-wac-ai-re.md"],
       "retail_citations": [
         { "address": "0x5e29f0", "function": "CParticleDefEntry_ParseBlendMode", "function_start": "0x5e29f0" },
         { "address": "0x5e8380", "function": "CParticleTexture_InitTextureAndChannels", "function_start": "0x5e8210" }
       ],
-      "exceptions": ["D-RORD-7"]
-    },
-    {
-      "id": "nvg-post",
-      "patterns": ["nvg_view.gdshader"],
-      "light_behavior": "post_processes_lit_frame",
-      "parity_status": "matching_with_bounded_residuals",
-      "docs": ["docs/net/novaworld-net-re.md", "docs/render/render-lighting-re.md"],
-      "retail_citations": [
-        { "address": "0x5c8090", "function": "CTerrainRenderer_BuildLightingShaderConstants", "function_start": "0x5c8090" }
-      ],
-      "exceptions": ["NVG-four-frame-history", "D-AI-12f"]
+      "exceptions": []
     },
     {
       "id": "viewmodel-beauty-pass-projection",
@@ -195,8 +174,8 @@
       "parity_status": "matching",
       "docs": ["docs/world/vehicle-client-movers-re.md"],
       "retail_citations": [
-        { "address": "0x5de0f0", "function": "render_water_surface_decal", "function_start": "0x5de0f0" },
-        { "address": "0x5ddc90", "function": "sub_5DDC90", "function_start": "0x5ddc90" }
+        { "address": "0x5de0f0", "function": "WaterRing_Draw", "function_start": "0x5de0f0" },
+        { "address": "0x5ddc90", "function": "WaterRing_LoadResources", "function_start": "0x5ddc90" }
       ],
       "exceptions": []
     }

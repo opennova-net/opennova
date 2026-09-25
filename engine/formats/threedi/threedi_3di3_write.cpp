@@ -766,7 +766,7 @@ static int build_oobj_chunk(const Threedi3di3 *model, ChunkBuilder *out)
             buffer_append_f32_le(&out->payload, o->position[1]) != 0 ||
             buffer_append_f32_le(&out->payload, o->position[2]) != 0 ||
             buffer_append_f32_le(&out->payload, o->radius) != 0 ||
-            buffer_append_f32_le(&out->payload, o->glow_scale) != 0 ||
+            buffer_append_f32_le(&out->payload, o->slot_priority_scale) != 0 ||
             buffer_append_s32_le(&out->payload, o->num_vertices) != 0 ||
             buffer_append_s32_le(&out->payload, o->num_planes) != 0 ||
             buffer_append_s32_le(&out->payload, o->face_count) != 0) {

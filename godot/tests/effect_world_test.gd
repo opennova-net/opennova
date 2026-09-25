@@ -184,6 +184,36 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 	assert_eq(world.live_group_count(), 0, "finished finite group is swept")
 
 
+# NOVISNOUPDATE freezes an emitter whose bounds lie outside the current
+# camera's view (retail CParticleEmitter_AdvanceFrame @ 0x5e6588..0x5e65f3);
+# the gate reads the viewport camera's Camera3D.get_frustum planes, whose
+# normals point outward. An emitter in front of the camera must advance and
+# one behind it must stay frozen (the 00TRa fire barrel sat frozen at age 0
+# while the flip was inverted).
+func test_novisnoupdate_gate_advances_on_screen_and_freezes_off_screen() -> void:
+	var camera: Camera3D = add_child_autofree(Camera3D.new())
+	camera.current = true
+	camera.global_transform = Transform3D(Basis(), Vector3.ZERO)
+	var world := _make_world()
+	world.load_particle_file(ParticleFixture.catalog("fire dots",
+			"emit_dur = 1;\nemit_rate = 50;\nage = 2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT NOVISNOUPDATE;\n",
+			["fire"]))
+	world.spawn_effect("fire", Vector3(0, 0, -10))
+	world.spawn_effect("fire", Vector3(0, 0, 10))
+	for _i in 4:
+		world.advance_fixed_tick(Simulation.tick_dt())
+	var ahead := -1
+	var behind := -1
+	for group in world.get_debug_group_report():
+		var emitter := (group as EffectGroupReport).emitters[0] as EffectEmitterReport
+		if emitter.position.z < 0.0:
+			ahead = emitter.alive
+		else:
+			behind = emitter.alive
+	assert_gt(ahead, 0, "an emitter in front of the camera advances and emits")
+	assert_eq(behind, 0, "an emitter behind the camera stays frozen")
+
+
 func test_live_group_parameters_drive_rate_and_offset_without_clamping() -> void:
 	var file := ParticleFixture.catalog("wake dots",
 			"emit_dur = 0.1;\nemit_rate = 30;\nemit_rate_adj = 30;\nemit_burst = 1;\ny_offset = 2;\nz_offset = 4;\nage = 1;\nflags = FOREVEREMIT;\n", ["wake"])

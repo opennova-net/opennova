@@ -13,7 +13,7 @@ namespace {
 // profiles (flt_7C59B4 = 0x3EA8F5C3, flt_7D76CC = 0x3EAE147B), replaced by
 // the fixed 2.0 (flt_7C3B90) on the highest shipped profile, and the
 // 640-wide reference width the projection is normalized to (flt_7DC188).
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9462;
+// [orig: Terrain_RenderWorldScene @ 0x5c940c..0x5c9462;
 //  Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c90eb]
 constexpr float kObjectLodDetailQualitySlope = 0.33f;
 constexpr float kObjectLodDetailQualityBias = 0.34f;
@@ -88,15 +88,8 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
     return result;
   }
   const int level_count = static_cast<int>(thresholds_q16.size());
-  // Rows beyond the authored table read as zero, like the unused slots of
-  // retail's fixed-size per-model threshold array.
-  const auto threshold_at = [&](int index) -> int32_t {
-    return index >= 0 && index < level_count
-               ? thresholds_q16[static_cast<std::size_t>(index)]
-               : 0;
-  };
 
-  // scaledDist = viewDist * flt_298055C, truncated toward zero by the
+  // scaledDist = viewDist * g_RlodFrameScale, truncated toward zero by the
   // integer compare (_ftol2_sse) [orig: @ 0x5c3b27..0x5c3b4a].
   const double scaled = static_cast<double>(projected_radius_q16) *
                         static_cast<double>(projection_scale);
@@ -105,21 +98,29 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
       static_cast<double>(std::numeric_limits<int32_t>::max()));
   result.scaled_projected_radius_q16 = static_cast<int32_t>(bounded);
 
-  // The walk starts at row 1 and advances while the scaled radius is at or
-  // below the next row; the index is clamped to the final row
-  // [orig: @ 0x5c3b45..0x5c3b5a].
+  // The walk starts at slot 0 (model+0x40) and advances while the scaled
+  // radius is at or below the slot's own threshold; the index is clamped to
+  // the final level [orig: `xor eax,eax` @ 0x5c3b3b, `lea edx,[esi+40h]`
+  // @ 0x5c3b45, `cmp edi,[edx]; jg` @ 0x5c3b48, the clamp @ 0x5c3b56..0x5c3b5a].
   int selected = 0;
-  while (selected + 1 < level_count &&
-         result.scaled_projected_radius_q16 <= thresholds_q16[selected + 1]) {
+  while (selected < level_count &&
+         result.scaled_projected_radius_q16 <=
+             thresholds_q16[static_cast<std::size_t>(selected)]) {
     ++selected;
   }
+  if (selected >= level_count) {
+    selected = level_count - 1;
+  }
 
-  // Coarsest-slot back-off: on the final row (or a row whose next threshold
-  // is zero) the UNSCALED radius must also exceed the row's threshold, or
-  // the level one finer is drawn [orig: @ 0x5c3b88..0x5c3b9b].
+  // Coarsest-slot back-off: on the final level (or a level whose own
+  // threshold is zero) the UNSCALED radius must not exceed the next finer
+  // level's threshold, or that finer level is drawn [orig: T[level-1] =
+  // [esi+eax*4+3Ch] and T[level] = [esi+eax*4+40h] @ 0x5c3b5f..0x5c3b63,
+  // the gates @ 0x5c3b77..0x5c3b88, `sub eax,1` @ 0x5c3b8c].
   if (selected > 0 &&
-      (selected == level_count - 1 || threshold_at(selected + 1) == 0) &&
-      projected_radius_q16 > threshold_at(selected)) {
+      (selected == level_count - 1 ||
+       thresholds_q16[static_cast<std::size_t>(selected)] == 0) &&
+      projected_radius_q16 > thresholds_q16[static_cast<std::size_t>(selected - 1)]) {
     --selected;
     result.backed_off = true;
   }
@@ -138,10 +139,10 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
   return result;
 }
 
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9468: fild the
+// [orig: Terrain_RenderWorldScene @ 0x5c940c..0x5c9468: fild the
 //  detail level, fmul flt_7C59B4, fadd flt_7D76CC, the fixed flt_7C3B90 when
 //  the level is 3, fidiv by the viewport width dword_A7837C, fmul flt_7DC188,
-//  one float store into flt_298055C. The nonzero-dword_B4C3C0 substitution
+//  one float store into g_RlodFrameScale. The nonzero-dword_B4C3C0 substitution
 //  of flt_7C44B8 (4.0f) @ 0x5c946e..0x5c9478 is the capture-quality
 //  override (an input-binding toggle that also forces the 512 reflection
 //  target @ 0x5c08d1 and a full cubemap refresh @ 0x6106cb), never reached
@@ -159,6 +160,56 @@ float object_lod_frame_scale(int detail_level, float viewport_width) {
                 static_cast<double>(kObjectLodDetailQualityBias);
   return static_cast<float>(quality / static_cast<double>(viewport_width) *
                             static_cast<double>(kObjectLodReferenceWidth));
+}
+
+// [orig: DeathPiece_RenderVisible @ 0x57b831..0x57b84a: the same two .rdata
+//  floats as the frame scale's quality term, one float store into var_4]
+float death_piece_lod_scale(int detail_level) {
+  return static_cast<float>(static_cast<double>(detail_level) *
+                                static_cast<double>(kObjectLodDetailQualitySlope) +
+                            static_cast<double>(kObjectLodDetailQualityBias));
+}
+
+// [orig: DeathPiece_RenderVisible @ 0x57b86f..0x57b8ca: fild the recorded
+//  radius, fmul the float scale, _ftol2_sse; model+0x10 is the level count,
+//  model+0x40/+0x44/+0x48 the first three thresholds]
+int death_piece_lod_level(int32_t projected_radius_q16, float lod_scale,
+                          const std::vector<int32_t> &thresholds_q16) {
+  const double scaled = static_cast<double>(projected_radius_q16) *
+                        static_cast<double>(lod_scale);
+  const int32_t radius = static_cast<int32_t>(std::clamp(
+      scaled, static_cast<double>(std::numeric_limits<int32_t>::min()),
+      static_cast<double>(std::numeric_limits<int32_t>::max())));
+  if (radius <= kObjectLodSubPixelCullQ16) {
+    return -1;
+  }
+  const int count = static_cast<int>(thresholds_q16.size());
+  const auto threshold = [&](int level) {
+    return level < count ? thresholds_q16[static_cast<std::size_t>(level)] : 0;
+  };
+  int level = 3;
+  if (radius > threshold(0) || count == 1) {
+    level = 0;
+  } else if (radius > threshold(1) && count >= 2) {
+    level = 1;
+  } else if (radius > threshold(2) && count >= 3) {
+    level = 2;
+  }
+  if (level > count) {
+    level = count > 0 ? count - 1 : 0;
+  }
+  return level;
+}
+
+// [orig: Viewport_BuildProjectionMatrix @ 0x410fe1..0x410ff7 — x87 keeps the
+//  quotient wide; _ftol2_sse truncates the +0.5 sum]
+int32_t object_lod_focal_pixels(float viewport_width, double tan_half_horizontal) {
+  if (viewport_width <= 0.0f || !(tan_half_horizontal > 0.0)) {
+    return 0;
+  }
+  const double focal =
+      static_cast<double>(viewport_width) * 0.5 / tan_half_horizontal + 0.5;
+  return static_cast<int32_t>(std::min(focal, 2147418112.0));
 }
 
 // [orig: Viewport_TransformAndClipPoint @ 0x41177a..0x4117ec: the

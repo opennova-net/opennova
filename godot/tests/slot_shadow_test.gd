@@ -452,17 +452,16 @@ func test_bound_slot_publishes_its_patch_and_depth_clip() -> void:
 	if ztex != null:
 		assert_eq(ztex.get_width(), 32)
 		assert_eq(ztex.get_height(), 4)
-	var patches: PackedVector4Array = drape.get_shader_parameter("u_slot_patch")
-	assert_eq(patches.size(), 12)
-	var patch := patches[0]
-	var side_x := patch.z - patch.x
-	var side_z := patch.w - patch.y
+	var order := shadow.get_capture_order_of(caster)
+	var bounds := _patch_bounds(shadow.get_patch_vertices(order))
+	var side_x := bounds.z - bounds.x
+	var side_z := bounds.w - bounds.y
 	assert_almost_eq(side_x, side_z, 0.001, "the patch is a square")
 	assert_true(side_x >= 6.0 and side_x <= 20.0,
 			"the patch side is the clamped lod (6..20 u): %s" % str(side_x))
-	assert_true(patch.x <= caster.global_position.x and caster.global_position.x <= patch.z,
+	assert_true(bounds.x <= caster.global_position.x and caster.global_position.x <= bounds.z,
 			"the patch straddles the caster east-west")
-	assert_true(patch.y <= caster.global_position.z and caster.global_position.z <= patch.w,
+	assert_true(bounds.y <= caster.global_position.z and caster.global_position.z <= bounds.w,
 			"the patch straddles the caster north-south")
 	var clip_u: PackedVector4Array = drape.get_shader_parameter("u_slot_clip_u")
 	var clip_v: PackedVector4Array = drape.get_shader_parameter("u_slot_clip_v")
@@ -492,13 +491,13 @@ func test_cached_caster_facts_refresh_on_their_setters() -> void:
 	caster.set_shadow_bound_radii(2.0, 2.0625)
 	shadow.advance_frame()
 	var drape := SlotShadow.get_drape_material()
-	var patch_before: Vector4 = drape.get_shader_parameter("u_slot_patch")[0]
+	var patch_before := _patch_bounds(shadow.get_patch_vertices(0))
 	var clip_v_before: Vector4 = drape.get_shader_parameter("u_slot_clip_v")[0]
 	# A radius stamped after the plan (the husk-swap shape) resizes the patch
 	# and re-derives the clip rows on the very next frame.
 	caster.set_shadow_bound_radii(4.0, 9.0)
 	shadow.advance_frame()
-	var patch_after: Vector4 = drape.get_shader_parameter("u_slot_patch")[0]
+	var patch_after := _patch_bounds(shadow.get_patch_vertices(0))
 	assert_gt(patch_after.z - patch_after.x, patch_before.z - patch_before.x,
 			"a bigger entity bound stamped after a plan grows the next patch")
 	var clip_v_after: Vector4 = drape.get_shader_parameter("u_slot_clip_v")[0]
@@ -508,13 +507,37 @@ func test_cached_caster_facts_refresh_on_their_setters() -> void:
 	shadow.advance_frame()
 
 
-func test_terrain_material_chains_the_shared_drape_passes() -> void:
+## A bound slot past the 12-capture budget drapes nothing: retail's
+## authored-blob leg (RenderSlot_DrawAuthoredBlobDecal @0x5d59d0) gates on
+## ItemDef+0x114, which JO never assigns, so the drape is the silhouette pass
+## alone.
+func test_terrain_drape_is_the_silhouette_pass_alone() -> void:
 	var drape: ShaderMaterial = SlotShadow.get_drape_material()
 	assert_not_null(drape, "the shared drape material exists")
-	assert_not_null(drape.next_pass,
-			"the authored-blob pass chains behind the silhouette pass")
+	assert_null(drape.next_pass, "no authored-blob pass chains behind the silhouette pass")
 	assert_true(drape.shader.resource_path.ends_with(
 			"slot_shadow_drape.gdshader"))
+
+
+func test_slots_past_the_capture_budget_publish_no_drape() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	for i in range(20):
+		var _model := _caster_at(4.0 + 2.0 * float(i))
+	shadow.advance_frame()
+	var report: Dictionary = shadow.get_report()
+	assert_eq(int(report["bound"]), 20, "all twenty casters bind a drape patch")
+	assert_eq(int(report["captures"]), 12, "only the nearest twelve own an RT")
+	assert_false(report.has("blobs"), "no authored-blob leg is reported")
+	var terms: PackedVector4Array = SlotShadow.get_drape_material().get_shader_parameter(
+			"u_slot_term")
+	var drawn := 0
+	for term in terms:
+		if term.w > 0.5:
+			drawn += 1
+	assert_eq(drawn, 12, "only the twelve RT slots publish a drape term")
 
 
 func _crate_caster(scope: Node3D, at: Vector3) -> ObjectModel:
@@ -855,3 +878,395 @@ func test_capture_follows_the_casters_authored_rlod_switch() -> void:
 			"LOD0's entry was retained through the crossing and needs no re-pack")
 	model.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
+
+
+func _patch_bounds(vertices: PackedVector3Array) -> Vector4:
+	if vertices.is_empty():
+		return Vector4()
+	var bounds := Vector4(INF, INF, -INF, -INF)
+	for vertex in vertices:
+		bounds.x = minf(bounds.x, vertex.x)
+		bounds.y = minf(bounds.y, vertex.z)
+		bounds.z = maxf(bounds.z, vertex.x)
+		bounds.w = maxf(bounds.w, vertex.z)
+	return bounds
+
+
+func _single_caster_term(shadow: SlotShadow, model: ObjectModel) -> Vector4:
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(model)
+	assert_true(order >= 0, "the caster owns a capture order")
+	var terms: PackedVector4Array = SlotShadow.get_drape_material().get_shader_parameter(
+			"u_slot_term")
+	return terms[order] if order >= 0 else Vector4()
+
+
+## The drape distance fade is ONE value per slot, from the entity-to-camera 3D
+## distance (retail: RenderSlot_DrawSilhouetteDrape @0x5d5cc4..0x5d5d59), folded
+## into the slot's material ambient 1 - (1 - fade) * q: a caster 60 u out
+## (fade 0.5) publishes half the darkening of the same caster 10 u out.
+func test_drape_fade_is_one_value_per_slot_from_the_entity_distance() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(10.0)
+	var near := _single_caster_term(shadow, caster)
+	assert_eq(near.w, 1.0, "a near slot drapes")
+	assert_lt(near.x, 1.0, "the near ambient darkens")
+	caster.position = Vector3(0.0, 0.0, -60.0)
+	var far := _single_caster_term(shadow, caster)
+	assert_eq(far.w, 1.0, "a 60 u slot still drapes")
+	for channel in 3:
+		assert_almost_eq(far[channel], 1.0 - 0.5 * (1.0 - near[channel]), 0.0005,
+				"channel %d: the 60 u slot carries the 0.5 fade" % channel)
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## At >= 80 u retail skips the drape outright (0x500000 @0x5d5d3b) while the
+## silhouette capture itself still runs.
+func test_drape_is_skipped_past_80_units_while_the_capture_still_arms() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(85.0)
+	var term := _single_caster_term(shadow, caster)
+	assert_eq(term.w, 0.0, "the 85 u slot publishes no drape")
+	var order := shadow.get_capture_order_of(caster)
+	assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0,
+			"its fresh capture order is still armed")
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## The sun leg reads the STORED slot vertical — the raw clamped-negated tuple
+## (retail: fabs of slot+0x6C @0x5d5f63) — so a dawn sun below the 0.25 clamp
+## darkens by sun*0.25 / (sun*0.25 + sky), not by the normalized vertical.
+func test_drape_reads_the_raw_clamped_sun_vertical() -> void:
+	var data := EnvFile.new()
+	data.reset_to_default()
+	data.set_curtime(630)
+	var environment := MissionEnvironment.new()
+	environment.environment_data = data
+	add_child_autofree(environment)
+	var tuple: Vector3 = environment.get_light_direction()
+	if tuple.y >= 0.25 or tuple.y <= 0.0:
+		pending("the 06:30 default sun is not below the 0.25 clamp")
+		return
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(10.0)
+	var term := _single_caster_term(shadow, caster)
+	var sun: Vector3 = environment.get_sun_light()
+	var sky: Vector3 = environment.get_sky_ambient()
+	for channel in 3:
+		var lit := sun[channel] * 0.25
+		var q := lit / (lit + sky[channel]) if lit + sky[channel] > 0.0 else 0.0
+		assert_almost_eq(term[channel], 1.0 - q, 0.0005,
+				"channel %d uses |y| = 0.25, the stored clamp" % channel)
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## The drape fogs with the terrain's primary fog config (toward white): it
+## carries exactly the fog uniforms MissionEnvironment hands the terrain
+## (retail: RenderSlot_DrawAllDrapes @0x5d6ea1, CD3DDevice_SetFogAndBlendMode
+## mode 3; FOGENABLE in the technique's intrinsic flags @0x5d62f7).
+func test_drape_carries_the_terrain_fog_uniforms() -> void:
+	var environment := _environment()
+	_camera()
+	var shadow := _fresh_shadow(environment)
+	shadow.advance_frame()
+	var reference := ShaderMaterial.new()
+	reference.shader = SlotShadow.get_drape_material().shader
+	environment.apply_terrain_uniforms(reference)
+	var drape := SlotShadow.get_drape_material()
+	for name in ["u_fog_color", "u_fog_start", "u_fog_end", "u_fog_type"]:
+		assert_eq(drape.get_shader_parameter(name), reference.get_shader_parameter(name),
+				"%s matches the terrain's fog" % name)
+	assert_eq(drape.render_priority, Material.RENDER_PRIORITY_MIN,
+			"the drape draws first among the transparents, right after the terrain")
+
+
+func _crate_slot_matrix(shadow: SlotShadow, crate: ObjectModel) -> Projection:
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(crate)
+	assert_true(order >= 0, "the crate owns a capture order")
+	return SlotShadow.get_drape_material().get_shader_parameter("u_slot_mat_%d" % maxi(order, 0))
+
+
+## The capture camera is retail's look-at mapped into presentation axes
+## (renderer::slot_capture_view_axes): a right-handed frame, so the device's
+## back-face cull keeps the light-facing faces like retail's CULLMODE CCW over
+## its view (setup_shadow_cascade_matrices @0x58d31e). The drape samples through
+## the same pose: its u row is the camera x axis and its v row the negated y, so
+## u x v points along the camera forward, the downward slot direction. The
+## mirrored (det -1) frame points it up.
+func test_capture_view_is_right_handed_along_the_slot_direction() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var scope := Node3D.new()
+	add_child_autofree(scope)
+	var crate := _crate_caster(scope, Vector3.ZERO)
+	var slot := _crate_slot_matrix(shadow, crate)
+	var u_row := Vector3(slot.x.x, slot.y.x, slot.z.x)
+	var v_row := Vector3(slot.x.y, slot.y.y, slot.z.y)
+	assert_lt(u_row.cross(v_row).y, 0.0,
+			"u x v looks down the slot direction (a right-handed capture view)")
+	assert_almost_eq(u_row.y, 0.0, 0.0001, "the camera right row stays horizontal")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## Every slot quantity keys on the entity origin, never the render bounds
+## (retail: Entity_RenderWithLODCallback @0x5d6fc4..0x5d6fd9 renders the entity at
+## the view origin; the light query box @0x5d6af1..0x5d6b39): the crate's box
+## rises 1 u above its origin, yet the origin projects to the capture centre.
+func test_slot_view_centres_on_the_entity_origin() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var scope := Node3D.new()
+	add_child_autofree(scope)
+	var crate := _crate_caster(scope, Vector3(3.0, 0.0, -2.0))
+	crate.advance_runtime_frame(1.0 / 62.0)
+	assert_gt(crate.get_model_bounds().get_center().y, 0.25,
+			"the crate's render bounds sit above its origin")
+	var slot := _crate_slot_matrix(shadow, crate)
+	var projected: Vector4 = slot * Vector4(3.0, 0.0, -2.0, 1.0)
+	assert_almost_eq(projected.x, 0.5, 0.0001, "the origin lands on the capture centre (u)")
+	assert_almost_eq(projected.y, 0.5, 0.0001, "the origin lands on the capture centre (v)")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## Retail's slot pass reads no render gate: a caster the blink or outdoors
+## latch hides (the occlusion claim) keeps its slot, its capture and its drape,
+## and its geometry still compiles into the black pass (retail:
+## RenderSlot_SortAndAssign excludes only Flags & 1 @0x5d657d;
+## RenderSlot_RenderEntityAndChildren @0x5d7690 has no visibility test). A node
+## hidden for any other reason still leaves.
+func test_occlusion_hidden_caster_keeps_its_slot() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	shadow.set_shadow_detail(4)  # mask 0: every slot compiles every frame
+	var scope := Node3D.new()
+	add_child_autofree(scope)
+	var crate := _crate_caster(scope, Vector3.ZERO)
+	crate.advance_runtime_frame(1.0 / 62.0)
+	crate.set_occlusion_hidden(true)
+	assert_false(crate.visible, "the occlusion claim hides the node")
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(crate)
+	assert_true(order >= 0, "the occluded caster keeps its capture order")
+	assert_gt(int(shadow.get_report()["slot_surfaces_compiled"]), 0,
+			"the occluded caster's geometry still compiles into the black pass")
+	var terms: PackedVector4Array = SlotShadow.get_drape_material().get_shader_parameter(
+			"u_slot_term")
+	assert_eq(terms[order].w, 1.0, "and its drape still publishes")
+	crate.set_occlusion_hidden(false)
+	crate.visible = false
+	shadow.advance_frame()
+	assert_eq(shadow.get_capture_order_of(crate), -1,
+			"a node hidden outside the occlusion claim leaves its slot")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## The vehicle the local player rides shares the local player's halved
+## priority (retail: RenderSlot_SortAndAssign @0x5d669c..0x5d66a6, >> 1
+## @0x5d6864) and its every-frame refresh from detail 3 (retail:
+## RenderSlot_RenderEntityAndChildren @0x5d7707..0x5d7734).
+func test_local_vehicle_rides_the_local_player_priority_and_refresh() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	shadow.set_shadow_detail(3)
+	var near := _caster_at(6.0)
+	var vehicle := _caster_at(10.0)
+	shadow.advance_frame()
+	assert_eq(shadow.get_capture_order_of(near), 0, "the nearer caster ranks first on foot")
+	shadow.set_local_player_parent_model(vehicle)
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(vehicle)
+	assert_eq(order, 0, "the ridden vehicle's halved score ranks it first")
+	for i in range(3):
+		shadow.advance_frame()
+		assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0,
+				"the ridden vehicle re-captures every frame at detail 3")
+	shadow.set_local_player_parent_model(null)
+	near.set_shadow_caster_enabled(false)
+	vehicle.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+
+## A 1024x1024 white texture whose level 0 is opaque and every smaller level
+## fully transparent.
+func _opaque_level0_texture() -> ImageTexture:
+	var data := PackedByteArray()
+	var side := 1024
+	var colour := Color(1, 1, 1, 1)
+	while side >= 1:
+		var level := Image.create(side, side, false, Image.FORMAT_RGBA8)
+		level.fill(colour)
+		data.append_array(level.get_data())
+		colour = Color(1, 1, 1, 0)
+		side /= 2
+	return ImageTexture.create_from_image(
+			Image.create_from_data(1024, 1024, true, Image.FORMAT_RGBA8, data))
+
+
+func test_windowed_capture_stops_at_the_stage_textures_last_retail_mip_level() -> void:
+	# TBoringFFPProjShad samples Diffuse1 through sampLinearWrap2D: the 2x
+	# anisotropic footprint clamped at the stage's last retail mip level
+	# (u_diffuse_max_lod; GTexture_CreateFromPixelData_0, retail). The capture
+	# minifies the 1024 texture past level 0, whose alpha alone is opaque:
+	# unbounded the slab casts nothing, with a ceiling of 0 it casts black.
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var scope := _scope_with_world_environment()
+	var environment := _environment()
+	var camera := Camera3D.new()
+	camera.current = true
+	scope.add_child(camera)
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	shadow.set_environment_node(environment)
+	shadow.set_shadow_detail(3)
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(AB_LUM_3DI)), OK)
+	var model := ObjectModel.new()
+	scope.add_child(model)
+	model.set_process(false)
+	model.set_object_data(data)
+	model.set_shadow_caster_enabled(true)
+	_keep_only_shader_surfaces(model, "/self_lit/")
+	model.advance_runtime_frame(1.0 / 62.0)
+	var slab: Array[ShaderMaterial] = []
+	var texture := _opaque_level0_texture()
+	for row in model.get_surface_materials():
+		var material := row as ShaderMaterial
+		if material != null and material.shader != null 				and "/self_lit/" in material.shader.resource_path:
+			material.set_shader_parameter("u_diffuse", texture)
+			material.set_shader_parameter("u_diffuse_max_lod", 1000.0)
+			material.set_shader_parameter("u_alpha_mod", 1.0)
+			slab.append(material)
+	assert_gt(slab.size(), 0, "the fixture carries the FF_ST_AB_LUM heat slab")
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(model)
+	assert_true(order >= 0, "the slab caster takes a slot")
+	var unbounded := await _capture_after_frames(shadow, order, 3)
+	for material in slab:
+		material.set_shader_parameter("u_diffuse_max_lod", 0.0)
+	shadow.advance_frame()
+	var clamped := await _capture_after_frames(shadow, order, 3)
+	var report: Dictionary = shadow.get_report()
+	assert_eq(String(report["slot_status"]), "drawn", String(report["slot_failure"]))
+	assert_not_null(unbounded)
+	assert_not_null(clamped)
+	if unbounded != null and clamped != null:
+		assert_gt(_darkest_max_channel(unbounded), 0.9,
+				"unbounded, the minified slab samples its transparent small levels")
+		assert_lt(_darkest_max_channel(clamped), 0.1,
+				"the ceiling keeps level 0's opaque alpha: a black silhouette")
+	model.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## The drape is its own patch mesh (retail: RenderSlot_RebuildPatchVertexBuffer
+## @0x5d5130): (lod + 1)^2 vertices at 1 u spacing over the point-sampled
+## terrain height (0 without a terrain here) plus the (lod + 1) * 0.004 u lift,
+## rebuilt only when the patch origin or lod moves; a slot that stops draping
+## hides its mesh.
+func test_drape_patch_is_a_lifted_one_unit_mesh() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(4.0)
+	caster.set_shadow_bound_radii(2.0, 2.0625)
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(caster)
+	assert_true(order >= 0, "the caster owns a capture order")
+	var vertices := shadow.get_patch_vertices(order)
+	var bounds := _patch_bounds(vertices)
+	var lod := int(round(bounds.z - bounds.x))
+	assert_eq(vertices.size(), (lod + 1) * (lod + 1), "(lod + 1)^2 vertices")
+	if vertices.size() > lod + 1:
+		assert_almost_eq(vertices[1].z - vertices[0].z, 1.0, 0.0001,
+				"consecutive vertices step 1 u south")
+		assert_almost_eq(vertices[lod + 1].x - vertices[0].x, 1.0, 0.0001,
+				"each row steps 1 u east")
+		for vertex in vertices:
+			assert_almost_eq(vertex.y, (lod + 1) * 0.004, 0.00001,
+					"every vertex rides the (lod + 1) * 0.004 lift over the terrain")
+	# Past 80 u the slot drapes nothing: its mesh hides.
+	caster.position = Vector3(0.0, 0.0, -85.0)
+	shadow.advance_frame()
+	assert_eq(shadow.get_patch_vertices(order).size(), 0,
+			"a culled slot draws no patch")
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+## An attached-light slot lights its patch with D3D light 4 (retail:
+## RenderSlot_DrawSilhouetteDrape @0x5d5e50..0x5d5f4c): D3DRS_AMBIENT white,
+## a white material, and the Light_FillD3DPointLight fill (@0x5aa450: the
+## params colour x 1.5, range = radius x 1.25, atten2 = 15 / range^2) with
+## its diffuse rescaled to -(c + lum)(1 - fade). The drape publishes that
+## light per slot for the shader's per-point N.L and attenuation, and leaves
+## the slot's material term white; a sun slot publishes no light.
+func test_attached_light_slot_publishes_the_d3d_point_light() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var director := EffectLightDirector.new()
+	var light_position := Vector3(0.0, 2.0, -4.0)
+	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(light_position, 8.0)), 0)
+	shadow.set_light_director(director)
+	shadow.set_light_context(Vector3.ONE, 0, null)
+	var caster := _caster_at(4.0)
+	var term := _single_caster_term(shadow, caster)
+	var order := shadow.get_capture_order_of(caster)
+	var drape := SlotShadow.get_drape_material()
+	var positions = drape.get_shader_parameter("u_slot_light_pos")
+	var diffuses = drape.get_shader_parameter("u_slot_light_diffuse")
+	assert_true(positions is PackedVector4Array and diffuses is PackedVector4Array,
+			"the drape carries the per-slot attached light")
+	if order >= 0 and positions is PackedVector4Array and diffuses is PackedVector4Array:
+		var pos: Vector4 = positions[order]
+		assert_almost_eq(Vector3(pos.x, pos.y, pos.z), light_position,
+				Vector3(0.001, 0.001, 0.001), "the light's world position")
+		assert_almost_eq(pos.w, 10.0, 0.001, "range = radius x 1.25")
+		# White record bytes /256, x 1.5 on the D3D path; lum of a grey equals
+		# the grey, so the rescaled diffuse is -2 x 1.5 x 255/256 at fade 0.
+		var expected := -2.0 * 1.5 * 255.0 / 256.0
+		var diffuse: Vector4 = diffuses[order]
+		for channel in 3:
+			assert_almost_eq(diffuse[channel], expected, 0.001,
+					"channel %d: the rescaled D3D diffuse" % channel)
+		assert_almost_eq(diffuse.w, 15.0 / 100.0, 0.0001, "atten2 = 15 / range^2")
+		for channel in 3:
+			assert_eq(term[channel], 1.0, "the attached slot's material term is white")
+	# Without the light the same caster is a sun slot: no light published.
+	shadow.set_light_director(null)
+	term = _single_caster_term(shadow, caster)
+	positions = drape.get_shader_parameter("u_slot_light_pos")
+	if order >= 0 and positions is PackedVector4Array:
+		assert_eq((positions[order] as Vector4).w, 0.0, "a sun slot publishes no light")
+	assert_lt(term.x, 1.0, "the sun slot darkens through its material term")
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+

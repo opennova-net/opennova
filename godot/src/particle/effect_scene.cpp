@@ -214,9 +214,10 @@ Ref<EffectLoadReport> EffectScene::open(
 }
 
 void EffectScene::spawn_script_effect(const opennova::world::ScriptEffectEvent &event,
-        int64_t slot, int64_t owner, uint32_t age_ticks, float water_height) {
+        int64_t slot, int64_t owner, uint32_t age_ticks, float water_height,
+        const opennova::particle::EffectSectionGate &gate) {
     opennova::particle::spawn_script_effect(*scene_, event,
-            {token_from_godot(slot)}, {token_from_godot(owner)}, age_ticks, water_height);
+            {token_from_godot(slot)}, {token_from_godot(owner)}, age_ticks, water_height, gate);
     snapshot_dirty_ = true;
 }
 
@@ -279,6 +280,13 @@ Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_requ
 	request.kill_plane =
 			static_cast<opennova::particle::EffectKillPlane>(kill_plane);
 	request.kill_plane_y = p_request->get_kill_plane_y();
+	request.section_gate.tagged = p_request->get_section_tagged();
+	const PackedInt64Array hits = p_request->get_blink_hits();
+	for (int64_t i = 0; i < hits.size() &&
+			i < static_cast<int64_t>(request.section_gate.blink_hits.size()); ++i) {
+		request.section_gate.blink_hits[static_cast<std::size_t>(i)] =
+				static_cast<std::uint32_t>(hits[i]);
+	}
 	const opennova::particle::EffectSpawnReceipt receipt = scene_->spawn(request);
 	if (receipt.spawned()) {
 		advance_in_place(0.0);
@@ -366,6 +374,7 @@ void EffectScene::advance_with_forces(
 	request.delta_seconds = static_cast<float>(p_delta_seconds);
 	request.forces = forces;
 	request.frustum = frustum_;
+	request.section_masks = section_masks_;
 	scene_->advance_simulation(request);
 	snapshot_dirty_ = true;
 }
@@ -381,13 +390,13 @@ void EffectScene::set_view_frustum(const TypedArray<Plane> &p_planes,
 		return;
 	}
 	// Godot planes answer `normal . p - d`; the simulator wants
-	// `a x + b y + c z + d >= 0` inside. Camera3D::get_frustum orients its
-	// normals so the probe reads "over" (outside), which the flip below undoes;
-	// a plane set that already reads inside is kept as is.
+	// `a x + b y + c z + d >= 0` inside. Camera3D::get_frustum points its
+	// normals outward, so the inside probe reads negative ("under") and the
+	// set is flipped; a plane set that already reads the probe inside is kept.
 	float sign = 1.0f;
 	{
 		const Plane first = p_planes[0];
-		if (first.normal.dot(p_inside_probe) - first.d > 0.0f) {
+		if (first.normal.dot(p_inside_probe) - first.d < 0.0f) {
 			sign = -1.0f;
 		}
 	}

@@ -67,9 +67,9 @@ void print_occlusion(const Threedi3di3 &m, int verbose) {
 		double c[3];
 		mission_of(ob.position, c);
 		std::printf("occl %zu  type %u  sections %u -> %u  verts %d planes %d faces %d  centre(mission) %.3f %.3f %.3f"
-				"  r %.3f  glow %g\n",
+				"  r %.3f  slot priority %g\n",
 				o, ob.type, ob.parent_subobject_index, ob.connecting_subobject, ob.num_vertices, ob.num_planes,
-				ob.face_count, c[0], c[1], c[2], ob.radius, ob.glow_scale);
+				ob.face_count, c[0], c[1], c[2], ob.radius, ob.slot_priority_scale);
 		for (int k = 0; k < ob.num_vertices && v < m.occlusion_vertex_count; ++k, ++v) {
 			double q[3];
 			mission_of(m.occlusion_vertices[v].position, q);

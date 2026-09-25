@@ -220,6 +220,37 @@ func test_shared_ring_batches_become_one_world_mesh_with_a_surface_per_batch() -
 	entities.teardown()
 
 
+func test_every_strip_draws_on_the_scar_rung() -> void:
+	# The scar batches draw in their own frame slot: after the camera-side
+	# opaque wave, before detail foliage pass 1 and the camera-side alpha
+	# flush [orig: Scar_DrawBatches @0x5C9658 between the BySide flush
+	# @0x5C9647 and Foliage_RenderDetailPatchesPass(1) @0x5C9665]. Both drawer
+	# states ride the one batch pass.
+	var root := _texture_root(["scorch1.tga", "bhole1.tga"])
+	var entities := _make_presenter(null, root)
+	var draw := _draw_list()
+	_batch(draw, 0xFFFF, 0, 0, false, 1)
+	_batch(draw, 0xFFFF, BHOLE_STRIP, 0, false, 1)
+	entities.present_scar_draw_list(draw)
+	var world := _world_mesh(entities)
+	assert_not_null(world)
+	if world == null or world.mesh == null:
+		entities.teardown()
+		return
+	assert_eq(world.mesh.get_surface_count(), 2)
+	for surface in range(world.mesh.get_surface_count()):
+		var material := world.mesh.surface_get_material(surface) as ShaderMaterial
+		assert_not_null(material)
+		if material != null:
+			assert_eq(material.render_priority, ObjectShaderCache.RENDER_RUNG_SCARS,
+					"surface %d draws on the scar rung" % surface)
+	assert_lt(ObjectShaderCache.RENDER_RUNG_WATER_DECALS, ObjectShaderCache.RENDER_RUNG_SCARS,
+			"scars follow the water pass")
+	assert_lt(ObjectShaderCache.RENDER_RUNG_SCARS, ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE,
+			"scars precede the camera-side alpha")
+	entities.teardown()
+
+
 func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
 	# The scorch TGAs are black RGB under an alpha falloff: the mark IS the
 	# SRCALPHA/INVSRCALPHA blend [orig: mode word 0x120651 — blend nibble 1,
@@ -445,3 +476,58 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 	var fresh_draw := fresh.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
 	assert_eq(fresh_draw.batch_owner.size(), 0,
 			"an unbooted simulation lists no scars, never crashes")
+
+
+# Both drawer states carry FOGENABLE (the 0x20000 bit of 0x120651 and
+# 0x460651) and the drawer selects the scene fog colour
+# [orig: Scar_DrawBatches @0x5CCD33 -> CD3DDevice_SetFogAndBlendMode(dev, 0)]:
+# a scar at full pass fog renders the fog colour, not its own texel.
+func test_scar_quads_fog_toward_the_scene_fog_colour() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var background := WorldEnvironment.new()
+	background.environment = Environment.new()
+	background.environment.background_mode = Environment.BG_COLOR
+	background.environment.background_color = Color.BLACK
+	viewport.add_child(background)
+	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.5, 0.5, 0.5, 1.0))
+	var quad := QuadMesh.new()
+	quad.size = Vector2(4.0, 4.0)
+	for shader_path in [SHADER_SCORCH, SHADER_HOLE]:
+		var material := ShaderMaterial.new()
+		material.shader = load(shader_path)
+		material.set_shader_parameter("albedo_tex", ImageTexture.create_from_image(image))
+		var instance := MeshInstance3D.new()
+		instance.mesh = quad
+		instance.material_override = material
+		viewport.add_child(instance)
+		# Full linear fog at 5 units: visibility (end - d) / (end - start) = 0.
+		RenderingServer.global_shader_parameter_set("opennova_fog_enabled", true)
+		RenderingServer.global_shader_parameter_set("opennova_fog_color", Vector3(1.0, 0.0, 0.0))
+		RenderingServer.global_shader_parameter_set("opennova_fog_start", 0.0)
+		RenderingServer.global_shader_parameter_set("opennova_fog_end", 1.0)
+		RenderingServer.global_shader_parameter_set("opennova_fog_type", 1)
+		for _frame in 4:
+			await get_tree().process_frame
+		RenderingServer.force_draw(true)
+		RenderingServer.force_sync()
+		var pixel := viewport.get_texture().get_image().get_pixel(32, 32)
+		RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
+		RenderingServer.global_shader_parameter_set("opennova_fog_color", Vector3(0.5, 0.6, 0.8))
+		RenderingServer.global_shader_parameter_set("opennova_fog_start", 30000.0)
+		RenderingServer.global_shader_parameter_set("opennova_fog_end", 100000.0)
+		instance.queue_free()
+		await get_tree().process_frame
+		assert_gt(pixel.r, 0.9, "%s fogs to the red scene fog colour: %s" % [shader_path, pixel])
+		assert_lt(pixel.g, 0.1, "%s: no texel grey survives full fog: %s" % [shader_path, pixel])

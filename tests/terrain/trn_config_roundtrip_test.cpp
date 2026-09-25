@@ -1,10 +1,17 @@
 #include <formats/trn/trn_io.h>
 
 #include <formats/foliage/foliage.h>
+#include <formats/mission/bms.h>
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <iterator>
 #include <sstream>
+#include <vector>
+
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -16,9 +23,64 @@ bool expect(bool condition, const char *message) {
     return false;
 }
 
+// A mission's BMS tile-set name replaces the .trn tilestrip: the extension
+// from the first '.' becomes "TGA" (or "TGA" is appended); an empty name keeps
+// the .trn value. [orig: Terrain_LoadEnvironmentConfig @ 0x6109C8..0x6109EE;
+// Path_ReplaceOrAppendExtension @ 0x53C780]
+bool test_mission_tilestrip() {
+    opennova::TrnConfig trn;
+    trn.tilestrip = "trntile10.tga";
+    return expect(opennova::trn_mission_tilestrip(trn, "") == "trntile10.tga",
+                   "an empty mission tile set keeps the .trn tilestrip") &&
+           expect(opennova::trn_mission_tilestrip(trn, "trntilec1") == "trntilec1.TGA",
+                   "a bare mission tile-set name gains .TGA") &&
+           expect(opennova::trn_mission_tilestrip(trn, "TRNTILEA1.TGA") == "TRNTILEA1.TGA",
+                   "an authored extension is replaced by TGA") &&
+           expect(opennova::trn_mission_tilestrip(trn, "set.v2.bmp") == "set.TGA",
+                   "everything from the first dot is replaced");
+}
+
+// Retail 06TR authors tile set "trntilec1" over G13.trn's trntile10: its
+// .til roads draw from trntilec1.TGA. Gated on the extracted retail tree
+// (docs/asset-gated-tests.md).
+bool test_retail_06tr_draws_from_its_mission_tile_set() {
+    const std::string bms_path = retail::asset_file("06TR.bms");
+    const std::string trn_path = retail::asset_file("G13.trn");
+    if (bms_path.empty() || trn_path.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS with 06TR.bms and G13.trn");
+        return true;
+    }
+    std::ifstream bms_file(bms_path, std::ios::binary);
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(bms_file)),
+                                     std::istreambuf_iterator<char>());
+    opennova::bms::Header header;
+    std::string error;
+    if (!expect(bytes.size() >= opennova::bms::kHeaderSize &&
+                        opennova::bms::parse_header_blob(bytes.data(), opennova::bms::kHeaderSize,
+                                                         header, error),
+                "06TR.bms header parses")) {
+        return false;
+    }
+    std::ifstream trn_file(trn_path);
+    opennova::TrnConfig trn;
+    if (!expect(opennova::load_trn(trn_file, trn, error), "G13.trn parses")) {
+        return false;
+    }
+    const std::string tile_set(header.terrain_tile,
+                               ::strnlen(header.terrain_tile, sizeof(header.terrain_tile)));
+    return expect(retail::lower_ascii(trn.tilestrip) == "trntile10.tga",
+                   "G13.trn authors the trntile10 strip") &&
+           expect(retail::lower_ascii(opennova::trn_mission_tilestrip(trn, tile_set)) ==
+                          "trntilec1.tga",
+                   "06TR's header tile set replaces it with trntilec1");
+}
+
 } // namespace
 
 int main() {
+    if (!test_mission_tilestrip() || !test_retail_06tr_draws_from_its_mission_tile_set()) {
+        return 1;
+    }
     opennova::TrnConfig saved;
     saved.name = "RoundtripTerrain";
     saved.colormap = "roundtrip_c.tga";

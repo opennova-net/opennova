@@ -1662,6 +1662,19 @@ func test_active_water_capture_requires_the_exact_mirrored_camera_pose() -> void
 	assert_false(RenderFixtureContract.realized_reflection_pose_matches(unwitnessed),
 			"diagnostics without the strip-visibility witness cannot claim a capture")
 
+	# Below the plane the reflected scene renders from the live eye.
+	var below := diagnostics.duplicate(true)
+	below.camera.global_transform = Transform3D(Basis.IDENTITY, Vector3(1000.0, 18.0, 30.0))
+	below.water.reflection.camera.global_transform = Transform3D(
+			Basis.IDENTITY, Vector3(1000.0, 18.0, 30.0))
+	assert_true(RenderFixtureContract.realized_reflection_pose_matches(below),
+			"an eye below the water keeps its live pose in the reflected pass")
+	var mirrored_below := below.duplicate(true)
+	mirrored_below.water.reflection.camera.global_transform = Transform3D(
+			Basis.IDENTITY, Vector3(1000.0, 22.0, 30.0))
+	assert_false(RenderFixtureContract.realized_reflection_pose_matches(mirrored_below),
+			"a mirrored pose below the water is not the reflected camera")
+
 
 func test_capture_requires_the_single_player_post_spawn_equivalent() -> void:
 	var state := {

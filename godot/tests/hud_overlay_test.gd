@@ -710,28 +710,26 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
 			Rect2(0, 0, 1024, 768),
 			"Retail masks cover the viewport while inset art stays in design coordinates.")
-	assert_eq(effects.get_child_count(true), 6,
-			"The underwater murk, sun veil, NVG post-process and the three "
-			+ "fullscreen damage-feedback quads are internal children.")
-	var murk := effects.get_node("UnderwaterMurk") as ColorRect
+	assert_eq(effects.get_child_count(true), 4,
+			"The sun veil and the three fullscreen damage-feedback quads are "
+			+ "internal children; the NVG image is the terminal FrameFx pass's, and "
+			+ "the underwater murk draws in the 3D view's post-particle overlay "
+			+ "pass, before the frame effects [orig: Terrain_RenderWorldScene "
+			+ "@ 0x5c96f5].")
+	assert_null(effects.get_node_or_null("NvgPost"))
+	assert_null(effects.get_node_or_null("UnderwaterMurk"))
 	var veil := effects.get_node("SunVeil") as ColorRect
-	var nvg := effects.get_node("NvgPost") as ColorRect
-	assert_not_null(murk)
-	assert_not_null(veil)
-	assert_not_null(nvg)
-	assert_lt(murk.get_index(true), veil.get_index(true),
-			"Retail composites underwater murk before the sun-glare veil "
-			+ "[orig: the veil draws in Render_ProcessMainSceneFrame @ 0x5cac4b, "
-			+ "after the scene composites].")
-	assert_lt(veil.get_index(true), nvg.get_index(true),
-			"Retail composites underwater murk before later first-person HUD effects.")
+	assert_not_null(veil,
+			"The veil composites after the scene [orig: the veil draws in "
+			+ "Render_ProcessMainSceneFrame @ 0x5cac4b, after the scene composites].")
 	assert_not_null(veil.material as ShaderMaterial,
 			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
-	assert_true(nvg.visible,
-			"First-person-visible NVG enables the post-process.")
+	assert_true(effects.is_nvg_mask_visible(),
+			"First-person-visible NVG draws the NVG.tga mask and gain scale "
+			+ "[orig: NVG_DrawMaskAndGain @0x5cffab..0x5d0055].")
 	effects.update_view(false, 1, false, 0)
-	assert_false(nvg.visible,
-			"Camera suppression hides the post-process without consuming simulation state.")
+	assert_false(effects.is_nvg_mask_visible(),
+			"Camera suppression hides the mask without consuming simulation state.")
 
 
 # The three fullscreen damage-feedback quads. The engine owns every word, decay
@@ -788,31 +786,6 @@ func test_player_view_effects_damage_feedback_quads() -> void:
 
 	effects.update_damage_feedback(0, 0, 0, 255)
 	assert_false(revive.visible, "A cleared word retires its quad.")
-
-
-func test_player_view_effects_tracks_exact_underwater_murk_pass() -> void:
-	var effects := PlayerViewEffectsScript.new()
-	effects.size = Vector2(1024, 768)
-	add_child_autofree(effects)
-	var env := MissionEnvironment.new()
-	add_child_autofree(env)
-	effects.set_environment(env)
-	var murk := effects.get_node("UnderwaterMurk") as ColorRect
-	assert_not_null(murk)
-	assert_false(murk.visible, "The dry view has no murk scissor.")
-
-	env.set_underwater_overlay_view(true)
-	assert_true(murk.visible,
-			"The render-pass edge updates synchronously even when the shell is frozen.")
-	var lit := env.get_underwater_overlay_color()
-	assert_true(Vector3(murk.color.r, murk.color.g, murk.color.b).is_equal_approx(lit))
-	assert_almost_eq(murk.color.a, 204.0 / 255.0, 0.000001,
-			"Default murk 0.8 becomes the witnessed alpha byte 204.")
-	assert_true(murk.show_behind_parent,
-			"The murk quad stays behind the ordinary HUD draw list.")
-
-	env.set_underwater_overlay_view(false)
-	assert_false(murk.visible, "Surfacing retires the murk quad synchronously.")
 
 
 # The mounted-vehicle panel: the rider's VEHICLE_HUD block lands the interface

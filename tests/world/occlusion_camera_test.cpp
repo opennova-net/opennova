@@ -37,6 +37,7 @@ int main() {
 	view.fov_y_deg = 90.0f; // tan_v = 1
 	view.aspect = 2.0f;     // tan_h = 2
 	view.near_units = 1.0f;
+	view.viewport_width = 640.0f;
 	view.fog_dist_units = 300.0f;
 	view.water_z_units = 2.5f;
 	view.local_blink_flags = 0x8;
@@ -97,6 +98,11 @@ int main() {
 			"right row = mission +x");
 	check(cam.view_rows_q22[2][0] == 0 && cam.view_rows_q22[2][1] == 0 && cam.view_rows_q22[2][2] == (1 << 22),
 			"up row = mission +z");
+
+	// The projector focal: half the viewport width over tan(fov_h / 2),
+	// rounded half up — 320 / 2 + 0.5 truncates to 160. [orig:
+	// Viewport_BuildProjectionMatrix @ 0x410fe1..0x410ff7]
+	check(cam.focal_pixels == 160, "focal = width/2 / tan_h, rounded");
 
 	// The environment words and the force-indoors OR.
 	check(cam.fog_dist == 300 << 16, "fog 16.16");

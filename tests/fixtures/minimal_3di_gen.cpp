@@ -625,9 +625,11 @@ const std::vector<Recipe> &recipes() {
 		{"person", make_person, nullptr},
 		{"pump", make_pump, nullptr},
 		// Authored projected-sphere LOD witnesses: identical geometry and CMDL,
-		// distinct coarse thresholds, written through the same parity writer.
-		{"pump_lod20", make_pump, [](Model &m) { m.lods[1].threshold = 20 << 16; }},
-		{"pump_lod80", make_pump, [](Model &m) { m.lods[1].threshold = 80 << 16; }},
+		// distinct LOD0 thresholds in retail's RMDL form (integer pixels in the
+		// level's own slot: LOD0 draws above 20/80 px, the zero LOD1 row below),
+		// written through the same parity writer.
+		{"pump_lod20", make_pump, [](Model &m) { m.lods[0].threshold = 20; }},
+		{"pump_lod80", make_pump, [](Model &m) { m.lods[0].threshold = 80; }},
         {"pump_minefield", make_pump, [](Model &m) {
             m.add_user_point("ignored", Vec3{}, kUp, 0, kUserPointGameplay);
             const char *names[] = {"SMLMARKED", "small", "LrgMarked", "large"};
@@ -647,7 +649,12 @@ const std::vector<Recipe> &recipes() {
 			rename_register(m, 1, "LOD_FRAC");
 			controlled_track(m, 1)->control = 114;
 		}},
+		// The RgbGen writes SelfLumColor, so the row wears the SELFLUM effect
+		// with emissive_type 2 (apply_shader_parameters skips an RgbGen whose
+		// routed colour the effect never reads).
 		{"mount_mtrl0_rgbgen113_reg1", make_mount, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_OP_LUM");
+			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
 			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0.0, kBlack, kWhite);
 		}},
 		// --- Q3 bloom source (framefx_test.gd): the heat slab as an AlphaBlend
@@ -657,6 +664,22 @@ const std::vector<Recipe> &recipes() {
 		}},
 		// --- Q3 bloom source (framefx_test.gd): a per-vertex skinned model wearing
 		// a LUM material; retail's bone path never copies it into Q3 ---
+		// --- celestial bodies (celestial_test.gd): the crate as a stock-style
+		// sky body, an FF_ST_AD_LUM surface whose RGB generator style 113 reads
+		// CTRL UPL_INTENSITY black to white (the msun/fmoon4/mglare authoring) ---
+		{"crate_mtrl0_ad_lum_upl113", make_crate, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AD_LUM");
+			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
+			m.add_control_register("UPL_INTENSITY");
+			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0.0, kBlack, kWhite);
+		}},
+		// ... and the same body authored AlphaBlend (its Q3 glow must not add)
+		{"crate_mtrl0_ab_lum_upl113", make_crate, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AB_LUM");
+			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
+			m.add_control_register("UPL_INTENSITY");
+			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0.0, kBlack, kWhite);
+		}},
 		{"person_mtrl0_ad_lum", make_person, [](Model &m) {
 			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AD_LUM");
 			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
@@ -697,7 +720,9 @@ const std::vector<Recipe> &recipes() {
 			m.lods[0].panm.push_back(sine_rotation_row(0, 0));
 			m.materials[0].u_params.style = 1;
 		}},
+		// Only the #UV twin evaluates MatTexCoord1, so the scrolling row wears it.
 		{"house_mtrl0_uvscroll16_alphatest", make_house, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_OP#UV");
 			m.materials[0].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
 			m.materials[0].u_params.style = 16;
 			m.materials[0].u_params.gen_rate = 1.0f;
@@ -871,7 +896,17 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "mount_yaw_style114" || name == "mount_ctrl1_lod_frac_yaw_style114")
 		expect(p.row(0, 1).rotation_x.control == 114, name + ": yaw style 114");
 	if (name == "mount_ctrl1_lod_frac_yaw_style114") expect(!std::strcmp(p.reg(1), "LOD_FRAC"), name + ": ctrl1");
-	if (name == "mount_mtrl0_rgbgen113_reg1") expect(p.model.materials[0].rgb_gen.style == 113 && p.model.materials[0].rgb_gen.reg == 1, name + ": material alias");
+	if (name == "mount_mtrl0_rgbgen113_reg1")
+		expect(p.model.materials[0].rgb_gen.style == 113 && p.model.materials[0].rgb_gen.reg == 1 &&
+						!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP_LUM") &&
+						p.model.materials[0].emissive_type == THREEDI_EMISSIVE_FULL,
+				name + ": material alias");
+	if (name == "crate_mtrl0_ad_lum_upl113" || name == "crate_mtrl0_ab_lum_upl113")
+		expect(!std::strcmp(p.model.materials[0].shader_name,
+						name == "crate_mtrl0_ad_lum_upl113" ? "FF_ST_AD_LUM" : "FF_ST_AB_LUM") &&
+						p.model.materials[0].rgb_gen.style == 113 &&
+						p.model.materials[0].rgb_gen.reg == 0 && !std::strcmp(p.reg(0), "UPL_INTENSITY"),
+				name + ": UPL_INTENSITY sky body");
 	if (name == "mount_heat_glow_slide_part1") expect(slide_moves_part(p, 1, 0) && !std::strcmp(p.reg(0), "HEAT_GLOW"), name + ": slide");
 	if (name == "armory") expect(!p.live(0), name + ": inert");
 	if (name == "armory_lght0_colorgen113_flicker") expect(p.model.lights[0].style == 113 && p.model.lights[0].phase == 0, name + ": light gen");
@@ -881,8 +916,9 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "tank_special1_slide_ewep01") expect(slide_moves_part(p, 1, 0) && !std::strcmp(p.reg(0), "VEHICLE_SPECIAL1"), name + ": slide");
 	if (name == "pump") expect(p.live(0) && !p.live(1) && p.rows(0) == 5, name + ": LOD0 live, LOD1 inert");
 	if (name == "pump_lod20" || name == "pump_lod80")
-		expect(p.model.lods[1].lod_threshold == ((name == "pump_lod20" ? 20 : 80) << 16),
-				name + ": authored coarse threshold");
+		expect(p.model.lods[0].lod_threshold == (name == "pump_lod20" ? 20 : 80) &&
+						p.model.lods[1].lod_threshold == 0,
+				name + ": authored LOD0 pixel threshold");
 	if (name == "pump_anim0_noise_translation") expect(p.row(0, 0).translation.control == 0x36 && p.row(0, 0).translation.end == 32767, name + ": noise");
 	if (name == "pump_lod0_inert_lod1_sine_rotz") expect(p.rows(0) == 1 && !p.live(0) && p.rows(1) == 1 && p.live(1), name + ": LOD liveness");
 	if (name == "shed_lght0_sub2_origin_atten100") expect(p.model.lights[0].subobj_index == 2 && p.model.lights[0].atten_end == 100.0f, name + ": light");
@@ -890,7 +926,9 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "house_lod0_sine_rotx") expect(p.live(0) && p.model.materials[0].u_params.style == 0, name + ": live, uv 0");
 	if (name == "house_lod0_sine_rotx_uv1") expect(p.live(0) && p.model.materials[0].u_params.style == 1, name + ": live, uv 1");
 	if (name == "house_mtrl0_uvscroll16_alphatest")
-		expect((p.model.materials[0].material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0 && p.model.materials[0].u_params.style == 16 && p.model.materials[0].u_params.gen_rate == 1.0f, name + ": material");
+		expect((p.model.materials[0].material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0 && p.model.materials[0].u_params.style == 16 && p.model.materials[0].u_params.gen_rate == 1.0f &&
+						!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP#UV"),
+				name + ": material");
 	if (base == "panm") {
 		const bool expected_live = name.rfind("panm_live", 0) == 0;
 		expect(p.rows(0) == 1 && p.live(0) == expected_live, name + ": liveness");

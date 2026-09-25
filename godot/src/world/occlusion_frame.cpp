@@ -5,21 +5,27 @@
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 #include "env/celestial.h"
 #include "env/mission_environment.h"
 #include "env/sky_dome.h"
 #include "env/water.h"
+#include "mission/mission_object_placer.h"
 #include "object/entity_index.h"
 #include "object/object_model.h"
+#include "render/object_lod_frame.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "terrain/terrain.h"
+
+#include <runtime/renderer/scene_pass_gates.h>
 
 using namespace godot;
 
@@ -44,8 +50,8 @@ void OcclusionFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "terrain", "sky", "celestial", "water", "env"),
 			&OcclusionFrame::setup);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &OcclusionFrame::set_frame_stats);
-	ClassDB::bind_method(D_METHOD("apply_frame", "camera", "camera_xform", "forces_indoors"),
-			&OcclusionFrame::apply_frame);
+	ClassDB::bind_method(D_METHOD("apply_frame", "camera", "viewport_width", "camera_xform",
+			"forces_indoors"), &OcclusionFrame::apply_frame);
 	ClassDB::bind_method(D_METHOD("reset"), &OcclusionFrame::reset);
 	ClassDB::bind_method(D_METHOD("is_blink_indoors"), &OcclusionFrame::is_blink_indoors);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "blink_indoors"), "", "is_blink_indoors");
@@ -61,10 +67,11 @@ void OcclusionFrame::setup(Terrain *p_terrain, SkyDome *p_sky, Celestial *p_cele
 }
 
 void OcclusionFrame::bind_mission(const Ref<Simulation> &p_sim, const Ref<EntityIndex> &p_index,
-		EntityPresenter *p_entities) {
+		EntityPresenter *p_entities, const Ref<MissionObjectPlacer> &p_placer) {
 	sim_id_ = id_of(p_sim.ptr());
 	index_id_ = id_of(p_index.ptr());
 	entities_id_ = id_of(p_entities);
+	placer_id_ = id_of(p_placer.ptr());
 }
 
 void OcclusionFrame::set_frame_stats(const Ref<FrameStats> &p_board) {
@@ -74,6 +81,7 @@ void OcclusionFrame::set_frame_stats(const Ref<FrameStats> &p_board) {
 Simulation *OcclusionFrame::sim() const { return live<Simulation>(sim_id_); }
 EntityIndex *OcclusionFrame::entity_index() const { return live<EntityIndex>(index_id_); }
 EntityPresenter *OcclusionFrame::entities() const { return live<EntityPresenter>(entities_id_); }
+MissionObjectPlacer *OcclusionFrame::placer() const { return live<MissionObjectPlacer>(placer_id_); }
 Terrain *OcclusionFrame::terrain() const { return live<Terrain>(terrain_id_); }
 SkyDome *OcclusionFrame::sky() const { return live<SkyDome>(sky_id_); }
 Celestial *OcclusionFrame::celestial() const { return live<Celestial>(celestial_id_); }
@@ -90,31 +98,16 @@ void OcclusionFrame::apply_blink_gates(bool p_forces_indoors) {
 	// [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
 	const int flags = s->local_player_blink_flags() |
 			(p_forces_indoors ? static_cast<int>(Simulation::BLINK_INDOORS) : 0);
-	// Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
-	// near-detail and far-foliage tiers are terrain children here, matching
-	// retail where the detail cells ride the skipped terrain traversal and the
-	// far patches carry their own bit-2 gate — and the skybox pass (dome +
-	// celestials) is skipped [orig: render_main_scene @ 0x5c1353 (PolyTrn
-	// skip), terrain_scene_render @ 0x5d0570, Terrain_RenderSkyboxPass skip
-	// @ 0x5ca84f, Foliage_RenderFarPatchesPass skips @ 0x5c95bf/0x5c9665].
-	const bool indoors = (flags & static_cast<int>(Simulation::BLINK_INDOORS)) != 0;
-	if (indoors != blink_indoors_) {
-		blink_indoors_ = indoors;
-		if (Terrain *t = terrain()) {
-			t->set_visible(!indoors);
-		}
-		if (SkyDome *dome = sky()) {
-			dome->set_visible(!indoors);
-		}
-		if (Celestial *c = celestial()) {
-			c->set_visible(!indoors);
-		}
-	}
+	// The letters latch per sim tick; the pass gates combine them with the
+	// eye's waterline side every display frame (apply_scene_pass_gates).
+	blink_letters_ = static_cast<uint32_t>(flags);
+	blink_indoors_ = (flags & static_cast<int>(Simulation::BLINK_INDOORS)) != 0;
+	apply_scene_pass_gates();
 	// Accum bit 0x8 (the authored water letter): both water passes skipped.
 	// Letter bits only accumulate while inside a box, so the outdoors leg of
 	// retail's override is implicit; the remaining g_BlinkWaterVisible legs
 	// (a camera building straddling the water plane, the window latch) ride
-	// the section-mask slice [orig: Terrain_RenderSceneWithReflection
+	// the section-mask slice [orig: Terrain_RenderWorldScene
 	// @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
 	const bool water_off = (flags & static_cast<int>(Simulation::BLINK_WATER_OFF)) != 0;
 	if (water_off != blink_water_suppressed_) {
@@ -125,8 +118,8 @@ void OcclusionFrame::apply_blink_gates(bool p_forces_indoors) {
 	}
 }
 
-void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera_xform,
-		bool p_forces_indoors) {
+void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
+		const Transform3D &p_camera_xform, bool p_forces_indoors) {
 	Simulation *s = sim();
 	if (s == nullptr) {
 		return;
@@ -139,13 +132,14 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 	double near = 0.05;
 	double aspect = 16.0 / 9.0;
 	if (p_camera != nullptr) {
-		fov_y = p_camera->get_fov();
 		near = p_camera->get_near();
-		if (Viewport *viewport = p_camera->get_viewport()) {
-			const Vector2 vs = viewport->get_visible_rect().size;
-			if (vs.y > 0.0f) {
-				aspect = static_cast<double>(vs.x) / static_cast<double>(vs.y);
-			}
+		// The frustum the camera actually draws (its keep-aspect mode decides
+		// which axis its fov names), as a vertical fov plus aspect.
+		float tan_h = 0.0f;
+		float tan_v = 0.0f;
+		if (ObjectLodFrame::camera_tangents(p_camera, tan_h, tan_v)) {
+			fov_y = Math::rad_to_deg(2.0 * std::atan(static_cast<double>(tan_v)));
+			aspect = static_cast<double>(tan_h) / static_cast<double>(tan_v);
 		}
 	}
 	double fog = 1000.0;
@@ -161,7 +155,8 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 	const bool stats_on = frame_stats_.is_valid() && frame_stats_->is_capture_active();
 	const bool timing = probe_timing_ || stats_on;
 	const int64_t native_start = timing ? ticks_usec() : 0;
-	s->run_occlusion_frame(p_camera_xform, fov_y, aspect, near, fog, water_z, p_forces_indoors);
+	s->run_occlusion_frame(p_camera_xform, fov_y, aspect, p_viewport_width, near, fog, water_z,
+			p_forces_indoors);
 	const int64_t native_end = timing ? ticks_usec() : 0;
 	int64_t building_query_us = 0;
 	int64_t building_apply_us = 0;
@@ -171,11 +166,12 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 	int64_t light_apply_us = 0;
 	int64_t water_apply_us = 0;
 
-	// Building batch visibility + per-section masks (bit N = render part N,
-	// forced-visible def bits already merged by the sim), applied as CHANGES:
-	// the sim diffs against what this shell last applied, so a steady frame
-	// walks nothing. Batch culls claim the occlusion-hidden bit; the same
-	// verdicts as the full-walk form land on the nodes.
+	// Building batch visibility + per-section masks (the raw verdict, bit N =
+	// render part N, and the def's forced sections the part draw ORs over
+	// it), applied as CHANGES: the sim diffs against what this shell last
+	// applied, so a steady frame walks nothing. Batch culls claim the
+	// occlusion-hidden bit; a batched static (no node) takes the verdict on
+	// its placer instance instead.
 	// [orig: Terrain_RenderSectorModels @ 0x5c5d30]
 	const int64_t building_query_start = timing ? ticks_usec() : 0;
 	const PackedInt64Array changes = s->get_building_visibility_changes();
@@ -183,14 +179,20 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 		building_query_us = ticks_usec() - building_query_start;
 	}
 	const int64_t building_apply_start = timing ? ticks_usec() : 0;
-	for (int64_t i = 0; i + 1 < changes.size(); i += 2) {
+	MissionObjectPlacer *statics = placer();
+	for (int64_t i = 0; i + 2 < changes.size(); i += 3) {
 		const int64_t bms_id = changes[i];
+		const int64_t packed = changes[i + 1];
 		ObjectModel *node = occlusion_node(registry, bms_id);
 		if (node == nullptr) {
-			continue; // a node-less (batched static) verdict: the blind spot named in the header
+			if (statics != nullptr) {
+				statics->set_static_instance_occlusion_hidden(static_cast<int>(bms_id),
+						!Simulation::building_visibility_visible(packed));
+			}
+			continue;
 		}
-		const int64_t packed = changes[i + 1];
-		node->set_section_visibility_mask(Simulation::building_visibility_mask(packed));
+		node->set_occlusion_section_mask(Simulation::building_visibility_mask(packed),
+				changes[i + 2]);
 		node->set_occlusion_hidden(!Simulation::building_visibility_visible(packed));
 	}
 	if (timing) {
@@ -211,12 +213,16 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 			ObjectModel *node = occlusion_node(registry, culled_changes[i]);
 			if (node != nullptr) {
 				node->set_occlusion_hidden(true);
+			} else if (statics != nullptr) {
+				statics->set_static_instance_occlusion_hidden(culled_changes[i], true);
 			}
 		}
 		for (int64_t i = 2 + added; i < culled_changes.size(); ++i) {
 			ObjectModel *node = occlusion_node(registry, culled_changes[i]);
 			if (node != nullptr) {
 				node->set_occlusion_hidden(false);
+			} else if (statics != nullptr) {
+				statics->set_static_instance_occlusion_hidden(culled_changes[i], false);
 			}
 		}
 	}
@@ -236,41 +242,53 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, const Transform3D &p_camera
 			}
 		}
 	}
+	// The frame's death-piece draws land on the destruction pass's piece
+	// models (the collect rides the same native frame).
+	if (EntityPresenter *presenter_for_pieces = entities()) {
+		presenter_for_pieces->present_death_piece_draws_native(s->death_piece_draws());
+	}
 	if (timing) {
 		cull_apply_us = ticks_usec() - cull_apply_start;
 	}
 
-	// The per-drawn-entity sun-visibility factor (D-RLIT-3), also applied as
-	// changes: quality 1..4 maps to effectScale quality*0.25, dimming only the
-	// directional term (engine/runtime/renderer/light_runtime.h
-	// sun_visibility_factor owns the witness). Placed and wire identities share
-	// this triple feed; wire rays use the separately keyed 17-tick candidate
-	// arena, and the entity presenter retains the value for cold bodies/weapons.
-	// [orig: setup_terrain_effect_for_entity @ 0x5c74a0, pushed per sector
-	// entity draw @ 0x5c7bff]
+	// The per-drawn-entity lighting context (D-RLIT-3 plus the interior lerp),
+	// also applied as changes: quality 1..4 maps to effectScale quality*0.25,
+	// dimming only the directional term (engine/runtime/renderer/light_runtime.h
+	// sun_visibility_factor owns the witness); a contained entity takes the
+	// interior lerp by its daylight t and its interior light group. Placed and
+	// wire identities share this feed; wire rays use the separately keyed
+	// 17-tick candidate arena, and the entity presenter retains the context for
+	// cold bodies/weapons (inmatch/role_feeds.h EntityLightingFeed carries the
+	// witnesses: retail setup_terrain_effect_for_entity @0x5c74a0, the per
+	// entity stack push @0x5c7bff, the 0x80 submit flag @0x5c7c05 /
+	// @0x5c7fb6 and the person wave's daylight aux @0x5c7f93).
 	if (env != nullptr) {
 		const int64_t light_query_start = timing ? ticks_usec() : 0;
-		const PackedInt64Array sun_changes = s->get_draw_lighting_changes(env->get_light_direction());
+		const std::vector<opennova::inmatch::EntityLightingChange> &changes =
+				s->draw_lighting_changes(env->get_light_direction());
 		if (timing) {
 			light_query_us = ticks_usec() - light_query_start;
 		}
 		const int64_t light_apply_start = timing ? ticks_usec() : 0;
 		EntityPresenter *presenter = entities();
-		for (int64_t i = 0; i + 2 < sun_changes.size(); i += 3) {
-			const int wire_handle = static_cast<int>(sun_changes[i]);
-			const int64_t bms_id = sun_changes[i + 1];
+		for (const opennova::inmatch::EntityLightingChange &change : changes) {
+			const opennova::inmatch::EntityLighting &lighting = change.lighting;
 			// quality -> effectScale maps engine-side (one owner:
 			// renderer::sun_visibility_factor via sun_quality_factor).
-			const float effect_scale = s->sun_quality_factor(static_cast<int>(sun_changes[i + 2]));
-			if (wire_handle >= 0) {
+			const float effect_scale = s->sun_quality_factor(lighting.quality);
+			if (change.wire) {
 				if (presenter != nullptr) {
-					presenter->set_entity_lighting_context(wire_handle, effect_scale, false, 0.0f);
+					presenter->set_entity_lighting_context(change.handle, effect_scale,
+							lighting.interior, lighting.light_transfer, lighting.interior_bms,
+							lighting.interior_section);
 				}
 				continue;
 			}
-			ObjectModel *sun_node = occlusion_node(registry, bms_id);
-			if (sun_node != nullptr) {
-				sun_node->set_entity_lighting_context(effect_scale, false, 0.0f);
+			ObjectModel *node = occlusion_node(registry, change.bms_id);
+			if (node != nullptr) {
+				node->set_entity_lighting_context(effect_scale, lighting.interior,
+						lighting.light_transfer);
+				node->set_interior_light_group(lighting.interior_bms, lighting.interior_section);
 			}
 		}
 		if (timing) {
@@ -347,10 +365,13 @@ void OcclusionFrame::release_overrides(bool /*p_reset_semantics*/) {
 		ObjectModel *node = occlusion_hidden_release_node(entry.key);
 		if (node != nullptr) {
 			node->set_occlusion_hidden(false);
-			node->set_section_visibility_mask(-1);
+			node->set_occlusion_section_mask(-1, 0);
 		}
 	}
 	occlusion_node_cache_.clear();
+	if (MissionObjectPlacer *statics = placer()) {
+		statics->clear_static_instance_occlusion();
+	}
 	reset_apply_baseline();
 }
 
@@ -386,19 +407,60 @@ void OcclusionFrame::reset() {
 	sim_id_ = ObjectID();
 	index_id_ = ObjectID();
 	entities_id_ = ObjectID();
+	placer_id_ = ObjectID();
+}
+
+// The blink-letter and waterline pass gates (renderer/scene_pass_gates.h
+// carries the witnesses): the indoors letter hides the terrain render — the
+// near-detail and far-foliage tiers are terrain children here, matching retail
+// where the detail cells ride the skipped terrain traversal and the far
+// patches carry their own bit-2 gate [orig: Foliage_RenderDetailPatchesPass
+// skips @ 0x5c95bf/0x5c9665] — and the water mirror's sky bracket; the sky
+// letter or an eye at/below the water hides the main frame's sky bracket
+// (dome + sun/moon discs). The sun glow, the glint and the veil are never
+// gated here.
+void OcclusionFrame::apply_scene_pass_gates() {
+	MissionEnvironment *env = environment();
+	const bool eye_at_or_below_water =
+			env != nullptr && env->is_underwater_overlay_view();
+	const opennova::renderer::ScenePassGates gates =
+			opennova::renderer::scene_pass_gates(blink_letters_,
+					eye_at_or_below_water);
+	// Edge-triggered like the letters themselves, so another owner's terrain
+	// visibility write is never overridden on a steady frame.
+	if (gates.terrain != terrain_gate_) {
+		terrain_gate_ = gates.terrain;
+		if (Terrain *t = terrain()) {
+			t->set_visible(gates.terrain);
+		}
+	}
+	if (SkyDome *dome = sky()) {
+		dome->set_pass_gates(gates.sky, gates.mirror_sky);
+	}
+	if (env != nullptr) {
+		env->set_sky_dome_drawn(gates.sky);
+	}
+	if (Celestial *c = celestial()) {
+		c->set_sky_pass_gates(gates.sky, gates.mirror_sky);
+	}
 }
 
 void OcclusionFrame::reset_blink_frame_gates() {
-	if (blink_indoors_) {
+	blink_letters_ = 0;
+	if (!terrain_gate_) {
 		if (Terrain *t = terrain()) {
 			t->set_visible(true);
 		}
-		if (SkyDome *dome = sky()) {
-			dome->set_visible(true);
-		}
-		if (Celestial *c = celestial()) {
-			c->set_visible(true);
-		}
+	}
+	terrain_gate_ = true;
+	if (SkyDome *dome = sky()) {
+		dome->set_pass_gates(true, true);
+	}
+	if (MissionEnvironment *env = environment()) {
+		env->set_sky_dome_drawn(true);
+	}
+	if (Celestial *c = celestial()) {
+		c->set_sky_pass_gates(true, true);
 	}
 	if (blink_water_suppressed_) {
 		if (Water *w = water()) {

@@ -2,10 +2,11 @@
 #include <base/io/hash.h>
 
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250; static admission
-// @0x60D421..0x60D450; projected bounds/page reject @0x60D465..0x60D54F;
+// @0x60D421..0x60D450; sphere/tile reject @0x60D465..0x60D54F;
 // selected LOD/all-ROBJ submission @0x60D881..0x60D971]
 
 #include <runtime/mission/placement_traits.h>
+#include <base/io/fixed.h>
 
 #include <algorithm>
 #include <cmath>
@@ -16,10 +17,13 @@ namespace opennova::terrain {
 namespace {
 
 // Retail clamps the fixed vertical light to 0x4000 (= 0.25 in 16.16) before
-// deriving the projection offsets; the raster path clamps its float twin the
-// same way [orig: fixed clamp @ 0x60d325..0x60d32c, float clamp
+// deriving the tile extension; the raster path clamps its float twin the
+// same way [orig: fixed clamp @ 0x60d315..0x60d32c, float clamp
 // @ 0x60d33f..0x60d341].
-constexpr float kMinimumVerticalProjection = 0.25f;
+constexpr int32_t kMinimumVerticalLightFixed = 0x4000;
+// One tile collects at most 0x400 casters, pools 2 and 1 together
+// [orig: @ 0x60d390, @ 0x60d40e].
+constexpr std::size_t kTileCasterCapacity = 0x400;
 
 // Buildings (BMS pool 2) collect before items (pool 1) [orig: pool indirection
 // selects pool 2 then pool 1 @ 0x60d3a2/0x60d3b1 in
@@ -43,51 +47,73 @@ bool candidate_less(const TerrainStaticShadowCandidate &left,
 	return left.geometry.geometry_key < right.geometry.geometry_key;
 }
 
-struct Footprint {
-	float min_x = 0.0f;
-	float min_z = 0.0f;
-	float max_x = 0.0f;
-	float max_z = 0.0f;
+// The tile rectangle in mission 16.16: x runs east from the page's west
+// edge, y (mission north = -Godot z) runs from the page's south edge up to
+// the negated north edge [orig: tileSize = 0x400 >> lod, x0/x1
+// @ 0x60d286..0x60d2b5, y1 = -(row << 16), y0 = y1 - size @ 0x60d299..0x60d2c5].
+struct TileRect {
+	int64_t x0 = 0;
+	int64_t x1 = 0;
+	int64_t y0 = 0;
+	int64_t y1 = 0;
 };
 
-Footprint projected_footprint(const TerrainStaticShadowBounds &bounds,
-		const TerrainStaticShadowPageInput &input) noexcept {
-	// The shadow travels opposite surface->light. Sweeping both vertical AABB
-	// endpoints onto the receiver plane yields a conservative planar bound;
-	// retaining the unswept bound also fails open when the receiver rises into
-	// the caster. Retail clamps the fixed vertical component to 0x4000 before
-	// deriving the same horizontal projection extent.
-	const float vertical = std::max(input.surface_to_light.y,
-			kMinimumVerticalProjection);
-	const float min_drop = std::max(0.0f,
-			bounds.min_y - input.receiver_height);
-	const float max_drop = std::max(0.0f,
-			bounds.max_y - input.receiver_height);
-	const float shift_x0 = -input.surface_to_light.x * min_drop / vertical;
-	const float shift_x1 = -input.surface_to_light.x * max_drop / vertical;
-	const float shift_z0 = -input.surface_to_light.z * min_drop / vertical;
-	const float shift_z1 = -input.surface_to_light.z * max_drop / vertical;
-	return Footprint{
-			std::min({bounds.min_x, bounds.min_x + shift_x0,
-					bounds.min_x + shift_x1}),
-			std::min({bounds.min_z, bounds.min_z + shift_z0,
-					bounds.min_z + shift_z1}),
-			std::max({bounds.max_x, bounds.max_x + shift_x0,
-					bounds.max_x + shift_x1}),
-			std::max({bounds.max_z, bounds.max_z + shift_z0,
-					bounds.max_z + shift_z1})};
+TileRect tile_rect(const TerrainTilePageKey &page, int span) noexcept {
+	TileRect rect;
+	rect.x0 = (static_cast<int64_t>(page.sector_origin_x) + page.page_local_x) *
+			io::kFp16OneInt;
+	rect.x1 = rect.x0 + static_cast<int64_t>(span) * io::kFp16OneInt;
+	rect.y1 = -(static_cast<int64_t>(page.sector_origin_z) + page.page_local_z) *
+			io::kFp16OneInt;
+	rect.y0 = rect.y1 - static_cast<int64_t>(span) * io::kFp16OneInt;
+	return rect;
 }
 
-bool intersects_page(const Footprint &footprint,
-		const TerrainTilePageKey &page, int span) noexcept {
-	const float page_min_x = static_cast<float>(
-			page.sector_origin_x + page.page_local_x);
-	const float page_min_z = static_cast<float>(
-			page.sector_origin_z + page.page_local_z);
-	const float page_max_x = page_min_x + static_cast<float>(span);
-	const float page_max_z = page_min_z + static_cast<float>(span);
-	return footprint.max_x > page_min_x && footprint.min_x < page_max_x &&
-			footprint.max_z > page_min_z && footprint.min_z < page_max_z;
+// The per-axis sun slope t = l * 0.5 / l_vertical in 16.16 over the mission
+// fixed light tuple (Godot x, -z, y), its vertical clamped to 0x4000; idiv
+// truncates toward zero [orig: @ 0x60d35d..0x60d386].
+struct TileLightSlope {
+	int32_t x = 0;
+	int32_t y = 0;
+};
+
+TileLightSlope tile_light_slope(
+		const TerrainStaticShadowLightDirection &surface_to_light) noexcept {
+	const int32_t lx = io::float_to_fp16_16_round_sat(surface_to_light.x);
+	const int32_t ly = io::float_to_fp16_16_round_sat(-surface_to_light.z);
+	const int32_t lz = std::max(
+			io::float_to_fp16_16_round_sat(surface_to_light.y),
+			kMinimumVerticalLightFixed);
+	TileLightSlope slope;
+	slope.x = static_cast<int32_t>(static_cast<int64_t>(lx) * 0x8000 / lz);
+	slope.y = static_cast<int32_t>(static_cast<int64_t>(ly) * 0x8000 / lz);
+	return slope;
+}
+
+// t * r rounded back to 16.16 (imul, + 0x8000, shrd 16) [orig: @ 0x60d47c..0x60d490].
+int64_t tile_extension(int32_t slope, int32_t radius) noexcept {
+	const int64_t product = static_cast<int64_t>(slope) * radius + 0x8000;
+	return static_cast<int32_t>(product >> 16);
+}
+
+// The sphere/tile test: the rectangle grows toward the light by t * r on the
+// side the slope points to, and the caster sphere must overlap it on both
+// axes (inclusive) [orig: extensions @ 0x60d465..0x60d4fe, compares
+// @ 0x60d500..0x60d54f].
+bool sphere_reaches_tile(const TerrainStaticShadowCandidate &candidate,
+		const TileRect &rect, const TileLightSlope &slope) noexcept {
+	const int32_t r = candidate.model_radius_fixed;
+	const int64_t pos_x = slope.x > 0 ? tile_extension(slope.x, r) : 0;
+	const int64_t pos_y = slope.y > 0 ? tile_extension(slope.y, r) : 0;
+	const int64_t neg_x = slope.x < 0 ? tile_extension(slope.x, r) : 0;
+	const int64_t neg_y = slope.y < 0 ? tile_extension(slope.y, r) : 0;
+	const int64_t x = candidate.position_fixed[0];
+	const int64_t y = candidate.position_fixed[1];
+	if (x + r < rect.x0 + neg_x) return false;
+	if (x - r > rect.x1 + pos_x) return false;
+	if (y + r < rect.y0 + neg_y) return false;
+	if (y - r > rect.y1 + pos_y) return false;
+	return true;
 }
 
 // Retail defaults to the first shadow mesh and takes the second only when the
@@ -104,13 +130,6 @@ uint8_t selected_lod(const TerrainStaticShadowCandidate &candidate,
 }
 
 } // namespace
-
-bool TerrainStaticShadowBounds::valid() const noexcept {
-	return std::isfinite(min_x) && std::isfinite(min_y) &&
-			std::isfinite(min_z) && std::isfinite(max_x) &&
-			std::isfinite(max_y) && std::isfinite(max_z) &&
-			min_x <= max_x && min_y <= max_y && min_z <= max_z;
-}
 
 // The STRP index-window convention the runtime decode rides: indices are
 // either relative to the ROBJ's vertex window or absolute into the shared
@@ -154,7 +173,7 @@ void TerrainStaticShadowCollector::replace(
 	admitted_.clear();
 	admitted_.reserve(candidates.size());
 	for (TerrainStaticShadowCandidate &candidate : candidates) {
-		if (!candidate.active || !candidate.world_bounds.valid()) continue;
+		if (!candidate.active) continue;
 		if (!mission::item_casts_static_terrain_shadow(candidate.entity_kind,
 				candidate.entity_attrib, candidate.item_attrib,
 				candidate.item_attrib2)) {
@@ -177,10 +196,11 @@ TerrainStaticShadowPageJob TerrainStaticShadowCollector::compile(
 			input.page.page_lod_level);
 	if (span <= 0 || !std::isfinite(input.surface_to_light.x) ||
 			!std::isfinite(input.surface_to_light.y) ||
-			!std::isfinite(input.surface_to_light.z) ||
-			!std::isfinite(input.receiver_height)) {
+			!std::isfinite(input.surface_to_light.z)) {
 		return job;
 	}
+	const TileRect rect = tile_rect(input.page, span);
+	const TileLightSlope slope = tile_light_slope(input.surface_to_light);
 
 	uint64_t hash = io::kFnv1a64Offset;
 	hash = io::fnv1a64_value(hash, input.page.sector_origin_x);
@@ -191,21 +211,18 @@ TerrainStaticShadowPageJob TerrainStaticShadowCollector::compile(
 	for (const uint8_t light_byte : input.light_epoch) {
 		hash = io::fnv1a64_value(hash, light_byte);
 	}
-	hash = io::fnv1a64_value(hash, input.receiver_height);
 
+	std::size_t collected = 0;
 	for (const TerrainStaticShadowCandidate &candidate : admitted_) {
-		const Footprint footprint = projected_footprint(
-				candidate.world_bounds, input);
-		if (!intersects_page(footprint, input.page, span)) continue;
-		// Bounds participate directly in projection, so they must invalidate a
-		// resident page even if an binding has not yet advanced its optional
-		// transform revision.
-		hash = io::fnv1a64_value(hash, candidate.world_bounds.min_x);
-		hash = io::fnv1a64_value(hash, candidate.world_bounds.min_y);
-		hash = io::fnv1a64_value(hash, candidate.world_bounds.min_z);
-		hash = io::fnv1a64_value(hash, candidate.world_bounds.max_x);
-		hash = io::fnv1a64_value(hash, candidate.world_bounds.max_y);
-		hash = io::fnv1a64_value(hash, candidate.world_bounds.max_z);
+		if (collected >= kTileCasterCapacity) break;
+		if (!sphere_reaches_tile(candidate, rect, slope)) continue;
+		++collected;
+		// The position and sphere decide which pages a caster reaches, so they
+		// must invalidate a resident page even if a binding has not yet
+		// advanced its optional transform revision.
+		hash = io::fnv1a64_value(hash, candidate.position_fixed[0]);
+		hash = io::fnv1a64_value(hash, candidate.position_fixed[1]);
+		hash = io::fnv1a64_value(hash, candidate.model_radius_fixed);
 		const uint8_t lod = selected_lod(candidate,
 				input.page.page_lod_level);
 		const uint16_t render_object_count =

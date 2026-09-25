@@ -21,16 +21,21 @@
 //      light direction down to terrain [orig: RenderSlot_UpdateEntityLight
 //      @ 0x5d6a30, height probe Terrain_GetHeightAtPosition @ 0x606720];
 //   4. renders each live silhouette RT on the detail-scaled refresh cadence
-//      [orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690] with the slot
-//      lighting constants [orig: RenderSlot_SetupNextLighting @ 0x5d7250];
-//   5. drapes each bound slot over a 21x21 terrain-following patch: the
-//      silhouette projected along the slot direction and multiplied into the
-//      terrain with the per-channel ambient law and the 40..80 u distance
-//      fade — or, for a bound slot without a silhouette RT, the authored
-//      items.def `shadow` blob decal, heading-rotated
-//      [orig: RenderSlot_DrawAllDrapes @ 0x5d6e20 -> RenderSlot_DrawSilhouetteDrape
-//      (drape) @ 0x5d5ca0 / RenderSlot_DrawAuthoredBlobDecal (authored blob)
-//      @ 0x5d59d0].
+//      [orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690] — the black
+//      PROJSHAD pass sets no slot lighting; the (c + lum) * 0.5 * -3 c21..c23
+//      constants belong to the sector-model receiver path, dead in JO behind
+//      the always-zero gate [orig: RenderSlot_SetupSectorReceiverPass_Dead @ 0x5d7250,
+//      @ 0x5d73d3..0x5d740d; RenderSlot_CollectReceiverSlots_Stub @ 0x5d724a];
+//   5. drapes each bound slot that owns a silhouette RT over a lod x lod
+//      terrain-following patch: the silhouette projected along the slot
+//      direction and multiplied into the terrain with the per-channel ambient
+//      law and the 40..80 u distance fade [orig: RenderSlot_DrawAllDrapes
+//      @ 0x5d6e20 -> RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0]. A bound slot
+//      without an RT calls the authored-blob leg, which draws nothing in JO:
+//      it gates on ItemDef+0x114, which JO never assigns (only zeroed, by
+//      Entity_InitAllFromModels) — the items.def `shadow` line is parsed and
+//      unused [orig: RenderSlot_DrawAuthoredBlobDecal @ 0x5d59f4;
+//      Entity_InitAllFromModels @ 0x40e486].
 //
 // This unit carries every planning/selection/color law as a structural
 // translation; the device half (godot/src) realizes the silhouette capture
@@ -104,8 +109,27 @@ float silhouette_half_extent(float bound_radius_units);
 // and band around the model sphere (docs/render/render-lighting-re.md,
 // D-RLIT-10) — an orthographic silhouette is invariant under that
 // translation.
-using SlotCaptureBasis = DirectionLookAt<float>;
-SlotCaptureBasis silhouette_capture_basis(const std::array<float, 3> &direction);
+//
+// The view is the look-at matrix itself [orig: @ 0x58d31e -> SetTransform
+// VIEW @ 0x58d368]: camera x = right, y = up, depth = forward, a proper
+// (det +1) rotation in retail's render axes. Presentation axes are the
+// render axes with x and z swapped (util/axes.h), a reflection, so the
+// retail right row mapped to presentation is the NEGATION of the look-at
+// right computed on the presentation direction, while up and forward map
+// unchanged. The capture camera's columns in presentation axes are
+// therefore x = -right, y = up, z = -forward (a Godot camera looks down its
+// local -Z): a right-handed frame whose back-face cull keeps the
+// light-facing faces, exactly retail's CULLMODE CCW over its view [orig:
+// CRenderBatchQueue_FlushBatches @ 0x5da3e4..0x5da401]. Taking the look-at
+// columns unmapped mirrors the view (det -1) and culls the light-facing
+// faces instead.
+struct SlotCaptureViewAxes {
+	std::array<float, 3> x{};  // camera right
+	std::array<float, 3> y{};  // camera up
+	std::array<float, 3> z{};  // camera back (-forward)
+	bool degenerate = false;   // the zenith substitution (direction_look_at)
+};
+SlotCaptureViewAxes slot_capture_view_axes(const std::array<float, 3> &direction);
 inline constexpr float kSilhouetteCaptureNear = 0.2f;     // @ 0x58d3a3
 inline constexpr float kSilhouetteCaptureFar = 5000.2f;   // @ 0x58d399
 
@@ -186,14 +210,11 @@ std::array<float, 3> drape_silhouette_factor(
 		const std::array<float, 3> &shadow_term, float fade,
 		float depth_clip);
 
-// Attached-light slots (the dominant point light won): the silhouette RT is
-// lit by D3D light 4 with NTSC-weighted negated colors
-// (c + lum) * 0.5 * -3 (lum = 0.3r + 0.6g + 0.1b) into PS c21..c23
-// [orig: RenderSlot_SetupNextLighting @ 0x5d73d3..0x5d740d], and the drape
-// scales the light color by -(c + lum) * (1 - fade)
+// Attached-light slots (the dominant point light won): the drape lights its
+// patch with D3D light 4 whose diffuse is the NTSC-weighted negated color
+// -(c + lum) * (1 - fade), lum = 0.3r + 0.6g + 0.1b
 // [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e89..0x5d5f14, flt_7D4B24 = -2.0
 // folded with the 0.5].
-std::array<float, 3> slot_light_darkening(const std::array<float, 3> &rgb);
 std::array<float, 3> drape_attached_light_scale(
 		const std::array<float, 3> &rgb, float fade);
 
@@ -203,10 +224,12 @@ std::array<float, 3> drape_attached_light_scale(
 
 struct SlotPointLight {
 	std::array<float, 3> position{};  // world units
-	std::array<float, 3> color{};     // 0..1
+	// The Light_GetPointLightParams colour (no D3D-fill boost), 0..1.
+	std::array<float, 3> color{};
 	// D3D attenuation form {constant, linear, quadratic, _}
 	// (light_scene.h SelectedLight::attenuation).
 	std::array<float, 4> attenuation{1.0f, 0.0f, 0.0f, 0.0f};
+	float range = 0.0f;  // radius * 1.25 / 65536 (SelectedLight::range)
 	uint32_t handle = 0;
 };
 
@@ -226,6 +249,34 @@ SlotLightPick pick_dominant_light(const std::array<float, 3> &entity_pos,
 		const std::array<float, 3> &default_direction,
 		const SlotPointLight *lights, size_t light_count, bool interior);
 
+// The attached-light drape light. For a slot whose pick attached a point
+// light, RenderSlot_DrawSilhouetteDrape sets D3DRS_AMBIENT white
+// (@ 0x5d5e50..0x5d5e63), fills D3D light 4 from the attached handle
+// (Light_FillD3DPointLight @ 0x5aa450: the params colour with the 1.5x D3D
+// boost, range = radius * 1.25 / 65536, attenuation {1, 0, 15 / range^2}),
+// rescales its diffuse by drape_attached_light_scale, enables it
+// (@ 0x5d5e79..0x5d5f23) and draws the patch with material diffuse =
+// ambient = 1 (@ 0x5d5f25..0x5d5f4c). A failed fill leaves light 4 unset
+// and the same white material: that drape darkens nothing.
+struct SlotDrapeLight {
+	std::array<float, 3> position{};  // world units
+	float range = 0.0f;               // 0 = no light (the sun leg)
+	std::array<float, 3> diffuse{};   // the rescaled, negative diffuse
+	float quadratic = 0.0f;           // atten2 = 15 / range^2
+};
+SlotDrapeLight drape_attached_light(const SlotPointLight &light, float fade);
+
+// The fixed-function colour that light gives one patch vertex. The patch
+// normal is (0, 1, 0) (RenderSlot_RebuildPatchVertexBuffer @ 0x5d52b1..
+// 0x5d52c3) and the material diffuse and ambient are 1 under a white
+// D3DRS_AMBIENT, so
+//   colour_c = sat(1 + diffuse_c * atten * max(0, L.y)),
+// atten = 1 / (1 + quadratic * d^2) within the light's range and 0 past it
+// (the D3D point-light rule), L = normalize(light - vertex). The drape
+// shader evaluates the same law at every fragment's lifted patch point.
+std::array<float, 3> drape_attached_light_color(const SlotDrapeLight &light,
+		const std::array<float, 3> &patch_point);
+
 // ---------------------------------------------------------------------------
 // Anchor march [orig: RenderSlot_UpdateEntityLight @ 0x5d6c86..0x5d6d67]
 // ---------------------------------------------------------------------------
@@ -240,16 +291,36 @@ inline constexpr float kSlotTerrainHeightQuantumUnits = 1.0f / 256.0f;
 float slot_march_start_height(float caster_height, float terrain_height,
 		float contact_tolerance);
 
-// Marches from the entity position along the (downward) slot direction in
-// unit-planar steps until the terrain height reaches the ray; the vertical
-// step keeps the direction's own rate and is SUBSTITUTED by 0.5 u of drop
-// only when it would not descend (fixed -32768 stored for a non-negative
-// step [orig: @ 0x5d6cd7..0x5d6cdf]). The anchor PLACES the drape patch
-// (slot_patch_bounds); the projected UV matrices land the silhouette.
-// Coordinates are (x, z planar, y vertical up). Returns the planar anchor.
-// march start is the entity position (retail substitutes the rotated
-// bbox-center anchor when the entity flag word is zero
-// [orig: @ 0x5d6ce7..0x5d6d2d]).
+// The march start [orig: RenderSlot_UpdateEntityLight @ 0x5d6ce7..0x5d6d31]:
+// an entity whose Flags dword (entity+0x24) is zero starts from its
+// collision-bbox centre (entity+0x1FC: model-local mission axes Q16, the
+// authored scale folded) rotated by the entity's Euler matrix and placed at
+// its position (Math_BuildFixedPointMatrixFromEulerAngles(entity+4), then
+// Math_FixedPointTransformPoint22); any set bit starts at the position. This
+// returns the start relative to the position in presentation axes (x, y up,
+// z = -mission Y), world units: zero for a set bit. The Euler triple is the
+// entity's live BAM32 heading/pitch/roll (entity+0x10..+0x18); the present
+// rows carry the result (world::PF_SLOT_MARCH_OFFSET_X..Z).
+std::array<float, 3> slot_march_start_offset(bool flags_zero, int32_t heading_bam,
+		int32_t pitch_bam, int32_t roll_bam,
+		const std::array<int32_t, 3> &bbox_center_q16);
+
+// Whether that Flags dword is zero, from the sim's split view of it: the
+// runtime mirror `flags`, the spawn-composed `engine_flags`, and the
+// REFLECTABLE bit 0x400 Entity_InitFromModel sets on every vehicle
+// [orig: @ 0x40e208..0x40e20a, ItemDefType(+0x5C) == 1], which the sim keeps
+// as the item-type trait (mission::item_is_mirror_reflected) instead of a
+// flag bit. Every vehicle therefore marches from its position.
+bool slot_entity_flags_zero(uint32_t flags, uint32_t engine_flags, int item_type);
+
+// Marches from the start (slot_march_start_offset) along the (downward) slot
+// direction in unit-planar steps until the terrain height reaches the ray;
+// the vertical step keeps the direction's own rate and is SUBSTITUTED by
+// 0.5 u of drop only when it would not descend (fixed -32768 stored for a
+// non-negative step [orig: @ 0x5d6cd7..0x5d6cdf]). The anchor PLACES the
+// drape patch (slot_patch_bounds); the projected UV matrices land the
+// silhouette. Coordinates are (x, z planar, y vertical up). Returns the
+// planar anchor.
 std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		const std::array<float, 3> &direction,
 		const std::function<float(float, float)> &terrain_height,
@@ -273,6 +344,35 @@ struct SlotPatch {
 	float max_north = 0.0f;
 };
 SlotPatch slot_patch_bounds(float anchor_x, float anchor_north, int lod);
+
+// Every patch vertex rides (lod + 1) * 0.004 u above the terrain height it
+// samples [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5201..0x5d5212 —
+// the resolution slot+0x28 (= lod + 1, stored @ 0x5d6da9..0x5d6dac) times
+// flt_7DB864 = 0.004, added to each Terrain_GetHeightAtPosition sample
+// @ 0x5d529b]. The stage texgens read that lifted vertex, so a light ray
+// meets the patch earlier than the ground: at the 0.25 vertical clamp a
+// lod-20 patch (0.084 u) shortens the shadow by about 0.33 u.
+inline constexpr float kSlotPatchLiftStep = 0.004f;  // flt_7DB864
+float slot_patch_lift(int lod);
+
+// The drape's own mesh, rebuilt when the patch origin or lod moves
+// [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130 — the rebuild gate
+// @ 0x5d51a3..0x5d51bc]: (lod + 1)^2 vertices at 1 u spacing, vertex
+// (i, j) = index i * (lod + 1) + j at mission (origin_x + i, origin_north - j)
+// (@ 0x5d5246..0x5d52f7), its height the point-sampled terrain height there
+// (Terrain_GetHeightAtPosition @ 0x606720) plus the lift, normal (0, 1, 0)
+// (@ 0x5d52b1..0x5d52c3). Output in presentation axes (x, y up, z = -north);
+// `terrain_height(x, z)` takes presentation planar coordinates.
+void slot_patch_vertices(const SlotPatch &patch, int lod,
+		const std::function<float(float, float)> &terrain_height,
+		std::vector<std::array<float, 3>> &out);
+
+// The patch's triangle list for one lod, the level's run of the shared
+// index buffer [orig: RenderSlot_InitPatchIndexBuffers @ 0x5d53d0 — per cell
+// (i, j) with a = (i, j), b = (i, j + 1), c = (i + 1, j), d = (i + 1, j + 1):
+// the triangles (a, d, c) and (a, b, d) @ 0x5d5474..0x5d54d0; 2 lod^2
+// triangles]. The drape draws them with culling off.
+void slot_patch_indices(int lod, std::vector<uint16_t> &out);
 
 // ---------------------------------------------------------------------------
 // The depth-clip stage [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0 ->
@@ -342,7 +442,9 @@ inline constexpr float kSlotBindMaxDistance = 320.0f;
 struct SlotCandidateState {
 	std::array<float, 2> pos2d{};  // world planar (x, z)
 	float bound_radius = 1.0f;     // world units
-	bool dead = false;             // entity flag 1 [orig: @ 0x5d6581]
+	// Entity Flags & 1 — the hidden/carried bit (not the dead bit 2); the
+	// slot pass never reads the render-occlusion gate [orig: @ 0x5d657d].
+	bool hidden = false;
 	// Seat-parented (parentSlot 1/2/5, or 3 with a live parent)
 	// [orig: @ 0x5d65a0..0x5d65eb].
 	bool seat_parented = false;
@@ -351,7 +453,6 @@ struct SlotCandidateState {
 	bool is_local_player_or_parent = false;  // halves the score [orig: @ 0x5d6864]
 	bool interior = false;
 	bool dynamic = true;           // silhouette-class (person / DynamicShadow)
-	bool has_blob_texture = false; // authored items.def `shadow` decal
 	bool is_person = false;        // itemdef type 3: the depth-clip stage's steepened class
 };
 
@@ -365,10 +466,9 @@ struct SlotAssignment {
 	bool capture_dirty = false;    // RT index changed this frame
 	// Drape classification [orig: RenderSlot_DrawAllDrapes @ 0x5d6e54..]:
 	// a bound dynamic slot with an RT drapes its silhouette; a bound slot
-	// without one drapes the authored blob (when the item authors one).
+	// without one draws nothing (the authored-blob leg is dead in JO).
 	bool draws_silhouette = false;
-	bool draws_blob = false;
-	// Excluded from its own slot this frame (seat/vehicle/dead) — the
+	// Excluded from its own slot this frame (seat/vehicle/hidden) — the
 	// silhouette-render leg re-checks the same predicates
 	// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d774e..0x5d77b3].
 	bool excluded = false;
@@ -407,11 +507,12 @@ private:
 	// lifetime, so the refresh cadence keyed on it never re-phases when
 	// another record is released [orig: RenderSlot_AllocSlot @ 0x5d5690
 	// appends at RenderSlot_Count into RenderSlot_Table @ 0x2be3d30, and the
-	// count only resets at subsystem init @ 0x5d61cb — retail binds a slot
-	// per entity for the mission and never releases]. Device fold: a Godot
-	// caster is an instance id that a respawn recreates, so release_entity
-	// exists and the lowest free index is reused to keep the table bounded;
-	// a live record's index is as stable as retail's.
+	// count only resets at subsystem init @ 0x5d61cb; Entity_Destroy's
+	// release zeroes the 128-byte record but never hands its index back
+	// [orig: RenderSlot_ReleaseSlot @ 0x5d5671..0x5d5679]]. Device fold: a Godot caster
+	// is an instance id that a respawn recreates, so the lowest free index is
+	// reused to keep the table bounded; a live record's index is as stable as
+	// retail's.
 	std::array<Record, kSlotRecordCount> records_{};
 	size_t live_count_ = 0;
 	std::array<bool, kSlotPatchCount> patch_used_{};

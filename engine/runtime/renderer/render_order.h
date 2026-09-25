@@ -22,12 +22,20 @@ namespace opennova::renderer {
 // alpha draws flush after the world block is restored; the opaque draws use
 // the flat block. Held models inherit their owner's wave.
 // [orig: collect_visible_entities_for_terrain @0x5C8C60;
-// Terrain_RenderSceneWithReflection @0x5C9511..0x5C9616]
+// Terrain_RenderWorldScene @0x5C9511..0x5C9616]
 inline bool entity_uses_thermal_wave(int item_type) { return item_type == 3; }
 
 // The main scene pins this after applying FOV, independent of camera mode.
 // [orig: Render_ProcessMainSceneFrame @0x5CA0F0]
 float scene_far_plane(float fog_distance);
+
+// The world pass's near plane, re-pinned by the main scene every frame beside
+// the far plane, whatever the camera mode; only the first-person viewmodel
+// pass swaps in its own 0.05 and restores this after it
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca4d7..0x5ca4e0 ->
+// Render_SwapProjectionNearZ(flt_7C3340 = 0.2); the device default
+// g_ProjectionNearZ @ 0x58ac0a].
+inline constexpr float kScenePassNearZ = 0.2f;
 
 // The six technique classes, batch-selected per entry (flag bits 4-6) and
 // mapped to the material def's cached pass blocks at draw time
@@ -49,14 +57,21 @@ constexpr uint32_t kSubmitClipPass = 0x1;        // CLIP class; skinned path ski
 constexpr uint32_t kSubmitProjShadowPass = 0x2;  // PROJSHAD class
 constexpr uint32_t kSubmitDepthMaskPass = 0x4;   // DEPTHMASK class; opaque strips only
 constexpr uint32_t kSubmitFirstPassOnly = 0x8;   // run only the technique's first pass
-constexpr uint32_t kSubmitEntryBit3 = 0x10;      // entry flag bit 3 (consumer unwitnessed - REN-4)
+// Entry flag bit 3: the flush sets ZFUNC ALWAYS for the entry's passes
+// [orig: CRenderBatchQueue_FlushBatches @ 0x5da32a..0x5da341]; the sun glow
+// and the water glint submit with it (0x110: the glow @ 0x5ad0f7, the glint
+// submit @ 0x5ad470).
+constexpr uint32_t kSubmitZAlways = 0x10;
 constexpr uint32_t kSubmitBoneAlphaBelow = 0x20; // bone path: transparents to the below-water queue
 constexpr uint32_t kSubmitAltStreamSub = 0x40;   // alt vertex stream for sub-objects (robj > 0)
 constexpr uint32_t kSubmitAltStream = 0x80;      // alt vertex stream unconditionally
 constexpr uint32_t kSubmitNoGlowCopy = 0x100;    // suppress the Q3 glow/envmap copy
 constexpr uint32_t kSubmitMatchTerrainPass = 0x200; // MATCHTERRAIN class (decal sub-pass)
-constexpr uint32_t kSubmitRepeatDraw = 0x10000000;  // dual-LOD near-LOD redraw; one-shot
-                                                    // overlay children skip (world s13)
+// The second (body) part of the composed player avatar; the one-shot overlay
+// children (held weapon, carried object) skip it so they draw once per entity
+// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c8018; consumer
+// BoneCallback_org0_World @ 0x4e3c87].
+constexpr uint32_t kSubmitAvatarSecondPart = 0x10000000;
 
 // Render-state-stack class-default bits (entry flags at stack entry +8),
 // inherited by everything submitted under the pushed frame
@@ -108,20 +123,42 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 
 // The frame's transparent ordering ladder, applied by the Godot layer as
 // render_priority rungs (within one rung Godot's per-object back-to-front
-// depth sort matches the per-queue ~float-bits keys above). Witnessed frame
-// bracket [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]: sky pass
-// (dome -> star field -> bodies) -> far-water-side alpha -> water surface ->
-// camera-side alpha -> weather/particle overlays -> sun glow last
-// [orig: render_skybox_sun_glow @ 0x5c9714, the frame's final draw].
-// Values keep the celestial group before all world alpha and leave the
-// camera-side rung at Godot's default 0 so unclassified transparents land
-// there naturally.
-// The first-person viewmodel flushes whole (its alpha strips included) before
-// the sky pass [orig: Player_RenderViewModelIfAlive @ 0x4e0140, step 3 of
-// Render_ProcessMainSceneFrame]; its depth band keeps later world alpha off it.
-constexpr int kRungViewmodel = -7;
-constexpr int kRungSkyStars = -6;        // star field (sky pass, before bodies)
-constexpr int kRungSkyBody = -5;         // sun / moon bodies
+// depth sort matches the per-queue ~float-bits keys above). The witnessed
+// frame [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0]: the sky pass
+// (dome -> bodies -> clouds, SkyDome_RenderWithSkyfog @ 0x5ca81a), then the first-person
+// viewmodel (@ 0x5ca829), then the scene core [orig:
+// Terrain_RenderWorldScene @ 0x5c93a0]: the non-person sector wave
+// (its opaque flush @ 0x5c9506 carries the post-multiply passes) -> the
+// far-side person waves with their foliage MODEL masks (@ 0x5c9548,
+// @ 0x5c955f) -> far-water-side alpha (flush @ 0x5c9596) -> tracer pass 0
+// (@ 0x5c95ac) -> particle pass A (@ 0x5c95b5) -> detail foliage pass 0
+// (@ 0x5c95c5) -> the water surface with its decals (@ 0x5c95dc) -> the
+// camera-side person waves with their masks (@ 0x5c9621, @ 0x5c9638) -> the
+// scars (@ 0x5c9658) -> detail foliage pass 1 (@ 0x5c9665) -> camera-side alpha
+// (flush @ 0x5c967a) -> tracer pass 1 (@ 0x5c9687) -> particle pass B
+// (@ 0x5c9690) -> the post-particle overlay tail (@ 0x5c9695..0x5c9714).
+// Particle pass B and the overlay tail are compositor passes, not rungs.
+// Values keep the sky group
+// before all world alpha and leave the camera-side rung at Godot's default 0
+// so unclassified transparents land there naturally.
+// The dome's gradient pass opens the sky pass [orig: render_skybox @ 0x579080,
+// its first DrawIndexedPrimitive @ 0x5798dc, before render_celestial_bodies
+// @ 0x5798e0]. It writes no depth (pass flags 0x300000 @ 0x579883), and
+// Godot draws every no-depth-write surface in its transparent list, where it
+// is ordered by this rung: without it the gradient (rung 0) would paint over
+// the bodies, the clouds and every sky-group and far-side draw below it.
+constexpr int kRungSkyDome = -15;
+// The sun/moon bodies inside the dome pass [orig: render_skybox @ 0x579080 ->
+// render_celestial_bodies @ 0x5acaa0].
+constexpr int kRungSkyBody = -14;
+// The dome's cloud layers, drawn after the bodies inside the same pass
+// [orig: render_skybox cloud pass @ 0x5798f1..0x579b15].
+constexpr int kRungSkyClouds = -13;
+// The first-person viewmodel flushes whole (its alpha strips included) after
+// the sky pass and before every world draw [orig: SkyDome_RenderWithSkyfog @ 0x5ca81a then
+// Player_RenderViewModelIfAlive @ 0x4e0140, called @ 0x5ca829]; its depth
+// band keeps later world alpha off it.
+constexpr int kRungViewmodel = -12;
 // BmTxMirrT's P3 post-multiply is a PASS of the strip's own technique, not a
 // second submit: FlushBatches runs every pass of one entry back to back
 // (the pass loop @ 0x5da20b..0x5da23d over technique+4 passes, fog/blend per
@@ -131,16 +168,50 @@ constexpr int kRungSkyBody = -5;         // sun / moon bodies
 // and never inside the Q1/Q2 transparent flushes [orig: @ 0x5c9596;
 // @ 0x5c967a]. Godot cannot interleave a blended pass into its opaque stage,
 // so the rung sits above every sky rung and below every world transparent —
-// after all opaques, before far-side alpha and the water. Residual: retail's
-// far-side opaque flush (and thus its P3) runs after the water surface
-// (@ 0x5c9630 follows Terrain_RenderWaterPass @ 0x5c95dc); this single rung
-// draws those P3s before the water instead.
-constexpr int kRungObjectPostMultiply = -3;
-constexpr int kRungAlphaFarSide = -2;    // world alpha on the water side AWAY from the camera
-constexpr int kRungWater = -1;           // the water surface (drawn between the side brackets)
+// after all opaques, before far-side alpha and the water. The far-side
+// wave's flushes (@ 0x5c9557, @ 0x5c956e, @ 0x5c9581) precede the water pass
+// (@ 0x5c95dc); the flushes after it (@ 0x5c9630, @ 0x5c9647) carry the
+// camera-side wave, whose strips lie in front of the water surface, so the
+// one rung orders both the way retail does. The non-person entities (every
+// building and vehicle) flush in the first sector wave (@ 0x5c9506), ahead of
+// both person waves and so ahead of the foliage MODEL masks drawn inside them.
+constexpr int kRungObjectPostMultiply = -11;
+// The foliage MODEL depth masks of the far-side person wave: immediate draws
+// inside Terrain_RenderSectorEntitiesBySide (Foliage_UpdateModelTiles) during
+// the far wave @ 0x5c955f, before the far-side alpha flush @ 0x5c9596
+// [orig: Terrain_RenderWorldScene].
+constexpr int kRungFoliageMaskFarSide = -10;
+constexpr int kRungAlphaFarSide = -9;    // world alpha on the water side AWAY from the camera
+// The tracer pool's far-side pass, after the far-side alpha flush
+// [orig: CEffectEmitterPool_RenderMainPass(0, side) @ 0x5c95ac].
+constexpr int kRungTracerFarSide = -8;
+// Particle pass A: the far-side particle subset, after the far-side tracers
+// and before the far-side foliage [orig: EffectWorld_RenderParticlePass(0)
+// @ 0x5c95b5].
+constexpr int kRungParticleFarSide = -7;
+// Detail foliage on the far side of the water, before the water surface
+// [orig: Foliage_RenderDetailPatchesPass(0) @ 0x5c95c5].
+constexpr int kRungFoliageFarSide = -6;
+constexpr int kRungWater = -5;           // the water surface (drawn between the side brackets)
+// The water decals (the vehicle wake rings) inside the water pass, right
+// after the surface strip [orig: render_water_surface @ 0x5c3426 strip then
+// the wake bank scanner WaterRing_DrawAll @ 0x5c3432].
+constexpr int kRungWaterDecals = -4;
+// The foliage MODEL depth masks of the camera-side person wave, drawn inside
+// the camera wave @ 0x5c9638 after the water pass and before
+// Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderWorldScene].
+constexpr int kRungFoliageMaskCameraSide = -3;
+// The impact scars, after the camera-side opaque wave and before foliage
+// pass 1 and the camera-side alpha [orig: Scar_DrawBatches @ 0x5c9658].
+constexpr int kRungScars = -2;
+// Detail foliage on the camera's side of the water, before the camera-side
+// alpha flush [orig: Foliage_RenderDetailPatchesPass(1) @ 0x5c9665].
+constexpr int kRungFoliageCameraSide = -1;
 constexpr int kRungAlphaCameraSide = 0;  // world alpha on the camera's side (the default rung)
-constexpr int kRungOverlayFx = 1;        // weather / particle / trail overlays (PTL substrate)
-constexpr int kRungSunGlow = 2;          // the sun-glow lens glare, drawn last
+// The tracer pool's camera-side pass, after the camera-side alpha flush and
+// before particle pass B [orig: CEffectEmitterPool_RenderMainPass(1, side)
+// @ 0x5c9687].
+constexpr int kRungTracerCameraSide = 1;
 
 // The rung for a world transparent on a given water side. The original
 // flushes the far side first and the camera side last (mode camAbove?3:2

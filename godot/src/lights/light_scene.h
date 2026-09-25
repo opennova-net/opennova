@@ -32,7 +32,6 @@ namespace godot {
 class EffectLightReport;
 
 class EnvLightValues;
-class MultiMesh;
 class Weather;
 
 // Godot adapter for the portable EffectWorld dynamic light pool
@@ -75,7 +74,7 @@ public:
 	void advance_fixed_tick();
 
 	// Report/debug leg: query the pool around a camera point and select the
-	// witnessed <= 4 into the report rows. The gameplay object pass is
+	// witnessed <= 3 into the report rows. The gameplay object pass is
 	// render_model_frame below; this camera-global path publishes nothing.
 	int render_frame(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
@@ -84,11 +83,16 @@ public:
 	int census_frame(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
 
-	// The per-draw gameplay pass [orig: update_light_slots @0x5abc50 per
-	// draw context, see docs/render/render-lighting-re.md]: one draw context
-	// per visible ObjectModel, owner group = that model's entity id, interior
-	// group = the building it currently stands inside + that blink volume's
-	// section. A nonzero p_robj_scoped row expands a building into one context
+	// The per-draw gameplay pass [orig: Light_SelectAndEnableForDraw @0x5ab9d0
+	// and the collectors' group gate @0x5d91f8 per draw context, see
+	// docs/render/render-lighting-re.md]: one draw context
+	// per visible ObjectModel. The owner group is what that submit declares
+	// (renderer::submit_owner_group): p_owner_entities names the drawn entity,
+	// which only a person's skinned draws keep; every other draw declares
+	// entity 0 with its rigid ROBJ section, splitting per visible ROBJ only
+	// where that section can matter (an interior group at section zero). The
+	// interior group = the building it currently stands inside + that blink
+	// volume's section. A nonzero p_robj_scoped row expands a building into one context
 	// per visible ROBJ: the building becomes its own interior group at section
 	// zero and owner_group_section names the current ROBJ, exactly matching the
 	// retail re-scope @0x5d8ff7. All arrays are parallel. Returns the number of
@@ -109,7 +113,11 @@ public:
 	// of that entity. All arrays are parallel. Inactive/carved rows stay zero so their
 	// stable INSTANCE_CUSTOM.x identity never has to move. The RGBAF atlas is
 	// published as opennova_static_point_light_rows: count in texel 0.x, then
-	// four (world position.xyz, attenuation2)/(color.rgb, range) pairs.
+	// four (world position.xyz, attenuation2)/(color.rgb, range) pairs, then
+	// in the last texel the row's per-entry lighting state (effectScale,
+	// interior lerp flag, daylight t, 0 -- the u_entity_light lane a MultiMesh
+	// instance cannot carry; renderer::static_row_entity_lighting), defaulting
+	// to the outdoor (1, 0, 0, 0) for a row p_entity_lights does not cover.
 	// Returns the number of active rows that received at least one light.
 	int render_static_frame(
 			const PackedVector3Array &p_entity_positions,
@@ -120,7 +128,8 @@ public:
 			const PackedInt32Array &p_interior_sections,
 			const PackedByteArray &p_active,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
-			int64_t p_rows_revision = -1);
+			int64_t p_rows_revision = -1,
+			const PackedVector4Array &p_entity_lights = PackedVector4Array());
 
 	// The procedural corona texture "texlightcrn" as RGBA8 bytes,
 	// corona_texture_size() square — opennova::renderer::corona_texture_argb carries
@@ -144,38 +153,36 @@ public:
 	// docs/render/render-lighting-re.md]. A C++ seam (not script-bound):
 	// fills r_out with the planner's typed inputs (positions in Godot world).
 	void slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
+			int64_t p_interior_owner, int p_interior_section,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			std::vector<opennova::renderer::SlotPointLight> &r_out);
 
 	// The corona billboard walk for this frame [orig:
 	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on
-	// opennova::renderer::LightScene::collect_corona_quads] landed as ONE
-	// MultiMesh buffer write: the collect_corona_quads rows packed as
-	// interleaved TRANSFORM_3D + color instance floats (scale-only basis =
-	// half_size, origin = the Godot-world segment center, color = the
-	// premultiplied additive fold including the segment fade and the
-	// fog-to-black fold). models/owner_entities are the SAME parallel arrays
-	// the per-model light pass walks — models carrying an occlusion
-	// section-mask verdict gate their owned coronas on the visible-section
-	// bit; fog is the environment's EnvLightValues (null = no fog; the
-	// primary device fog with the color forced black [orig:
-	// CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). The mesh grows to
-	// the row high-water only; rows beyond this frame's count are hidden
-	// through visible_instance_count, never re-uploaded. Returns the row
-	// count; get_last_corona_buffer is the headless pin of the packing (the
-	// walk's semantics are the renderer_light_scene ctest's).
-	int fill_corona_multimesh(const Vector3 &p_camera_pos,
+	// opennova::renderer::LightScene::collect_corona_quads]: the segment
+	// quads (centre, half size, the premultiplied additive colour including
+	// the segment fade and the fog-to-black fold) the post-particle overlay
+	// stage draws (renderer/scene_overlay.h). models/owner_entities are the
+	// SAME parallel arrays the per-model light pass walks — models carrying an
+	// occlusion section-mask verdict gate their owned coronas on the
+	// visible-section bit; fog is the environment's EnvLightValues (null = no
+	// fog; the primary device fog with the color forced black [orig:
+	// CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). Returns the row count
+	// (the walk's semantics are the renderer_light_scene ctest's).
+	int collect_corona_rows(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
 			const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
-			const Ref<EnvLightValues> &p_fog, const Ref<MultiMesh> &p_mesh);
-	// Test seam: the interleaved instance floats the last fill packed
-	// (capacity x 16; rows beyond the fill's return are zero). Readable
-	// headless, where the dummy RenderingServer stores no MultiMesh data.
-	PackedFloat32Array get_last_corona_buffer() const {
-		return corona_buffer_;
+			const Ref<EnvLightValues> &p_fog);
+	// The last collected quads, for the overlay stage (mission-space centres).
+	const std::vector<opennova::renderer::LightCoronaQuad> &last_corona_quads() const {
+		return corona_quads_scratch_;
 	}
+	// Test seam: the last collect as kCoronaRowFloats per row (the Godot-world
+	// centre xyz, the half size, the colour rgb).
+	static constexpr int kCoronaRowFloats = 7;
+	PackedFloat32Array get_last_corona_rows() const;
 
 	// The terrain leg of the pool: per terrain patch, the <= 16 world lights
 	// whose AABB overlaps the patch and which the authored terrain flag admits,
@@ -237,7 +244,9 @@ private:
 	// The camera-global select behind render_frame and census_frame.
 	int camera_global_select(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
-	static constexpr int STATIC_LIGHT_ROW_TEXELS = 9;
+	// count + three (posr, color) pairs + the entity lighting lane.
+	static constexpr int STATIC_LIGHT_ROW_TEXELS = 10;
+	static constexpr int STATIC_LIGHT_ROW_LANE_TEXEL = STATIC_LIGHT_ROW_TEXELS - 1;
 	struct StaticCachedSelection {
 		int atlas_row = 0;
 		opennova::renderer::LightActiveGroups groups{};
@@ -251,8 +260,8 @@ private:
 		// skipped row's inputs are unchanged, so its count carries over).
 		size_t last_count = 0;
 	};
-	// The corona frame-input build shared by the Dictionary seam and the
-	// MultiMesh fill (owner masks live in the caller's vector for the call).
+	// The corona frame-input build behind collect_corona_rows (owner masks
+	// live in the caller's vector for the call).
 	void build_corona_inputs(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
@@ -266,7 +275,6 @@ private:
 	// Reused per-frame corona scratch (the fill path runs every frame).
 	std::vector<opennova::renderer::LightCoronaOwnerMask> corona_masks_scratch_;
 	std::vector<opennova::renderer::LightCoronaQuad> corona_quads_scratch_;
-	PackedFloat32Array corona_buffer_;
 	std::array<opennova::renderer::SelectedLight, opennova::renderer::LightScene::kSelectLimit>
 			selected_{};
 	size_t selected_count_ = 0;
@@ -288,7 +296,8 @@ private:
 	uint64_t static_cached_color_revision_ = 0;
 	std::array<float, 3> static_cached_ambient_{};
 	// static_light_rows_bytes_ holds the resident texture payload for the
-	// cached row set (the in-place steady path's precondition).
+	// cached row set (the in-place steady path's precondition); the output
+	// clear zeroes that payload and drops the claim.
 	bool static_bytes_resident_ = false;
 	int64_t static_cached_rows_revision_ = -1;
 	int static_cached_row_count_ = -1;

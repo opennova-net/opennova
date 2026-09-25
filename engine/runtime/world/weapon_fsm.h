@@ -61,6 +61,7 @@ enum : int32_t {
 
 namespace weapon_flag2 {
 enum : int32_t {
+    kNoSelect = 0x00000001,
     kInset = 0x00000200,
     kInvisible = 0x00000800,
 };

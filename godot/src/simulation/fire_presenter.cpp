@@ -1,11 +1,19 @@
 #include "simulation/fire_presenter.h"
 
-#include <godot_cpp/classes/base_material3d.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <runtime/audio/oneshot_play.h>
@@ -13,14 +21,41 @@
 #include <runtime/world/player_present.h> // fire_effect_plan (the effect admission, ADR 0040 ladder E0)
 
 #include "audio/mission_audio.h"
+#include "env/mission_environment.h"
 #include "lights/effect_light_director.h"
+#include "object/model_user_point.h"
+#include "object/object_data.h"
+#include "object/object_model.h"
+#include "particle/effect_distortion_drawer.h"
 #include "particle/effect_world.h"
+#include "render/scene_overlay_compositor.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
+#include "util/color_convert.h"
+#include "util/pcx_texture_bridge.h"
 #include "util/string_convert.h"
+#include "world/game_world.h"
 
 namespace godot {
+
+namespace {
+
+using opennova::renderer::TracerShader;
+
+// The normal-pass materials (godot/shaders/tracer_ribbon_*.gdshader).
+const char *ribbon_shader_path(TracerShader p_shader) {
+	switch (p_shader) {
+		case TracerShader::Smoke:
+			return "res://shaders/tracer_ribbon_smoke.gdshader";
+		case TracerShader::NvgLaser:
+			return "res://shaders/tracer_ribbon_nvg.gdshader";
+		default:
+			return "res://shaders/tracer_ribbon_stock.gdshader";
+	}
+}
+
+} // namespace
 
 FirePresenter::FirePresenter(EntityPresenter *p_owner) :
 		owner_(p_owner) {}
@@ -49,6 +84,12 @@ EffectLightDirector *FirePresenter::lights() const {
 			: nullptr;
 }
 
+MissionEnvironment *FirePresenter::environment() const {
+	return environment_id_.is_valid()
+			? Object::cast_to<MissionEnvironment>(ObjectDB::get_instance(environment_id_))
+			: nullptr;
+}
+
 void FirePresenter::free_mesh_instance() {
 	if (mesh_instance_id_.is_valid()) {
 		Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(mesh_instance_id_));
@@ -61,11 +102,21 @@ void FirePresenter::free_mesh_instance() {
 }
 
 void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *p_audio,
-		EffectWorld *p_fx, EffectLightDirector *p_lights) {
+		EffectWorld *p_fx, EffectLightDirector *p_lights,
+		const Ref<ResourceRoot> &p_resource_root, MissionEnvironment *p_environment) {
 	sim_id_ = p_sim != nullptr ? p_sim->get_instance_id() : ObjectID();
 	audio_id_ = p_audio != nullptr ? p_audio->get_instance_id() : ObjectID();
 	fx_id_ = p_fx != nullptr ? p_fx->get_instance_id() : ObjectID();
 	lights_id_ = p_lights != nullptr ? p_lights->get_instance_id() : ObjectID();
+	environment_id_ = p_environment != nullptr ? p_environment->get_instance_id() : ObjectID();
+	if (resource_root_ != p_resource_root) {
+		resource_root_ = p_resource_root;
+		smoke_texture_.unref();
+		smoke_texture_loaded_ = false;
+		for (Ref<ShaderMaterial> &material : materials_) {
+			material.unref();
+		}
+	}
 	// A re-setup replaces the previous tracer geometry instead of stranding it.
 	free_mesh_instance();
 	if (p_container != nullptr) {
@@ -74,29 +125,45 @@ void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *
 		instance->set_name("FireTracers");
 		instance->set_mesh(mesh_);
 		instance->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-		// Both families are unshaded vertex-colored, depth-tested (a world object,
-		// not an overlay — walls occlude tracers), untextured (the witnessed B=0
-		// ribbon writes no UVs). Additive family [orig: ONE:ONE, alpha unused,
-		// fog-to-BLACK via SetFogAndBlendMode mode 2 @ CEffectChannel_RenderRibbon]:
-		// vertex alpha rides at 1.0 so Godot's SRCALPHA:ONE add equals ONE:ONE;
-		// fog off stands in for the fog-to-black leg (tracked in the RE record).
-		mat_additive_.instantiate();
-		mat_additive_->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
-		mat_additive_->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
-		mat_additive_->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
-		mat_additive_->set_blend_mode(BaseMaterial3D::BLEND_MODE_ADD);
-		mat_additive_->set_cull_mode(BaseMaterial3D::CULL_DISABLED); // [orig: pass cull-off]
-		mat_additive_->set_flag(BaseMaterial3D::FLAG_DISABLE_FOG, true);
-		// Smoke family (rocket/at4/grenade) [orig: alpha blend + scene fog, mode 0].
-		mat_alpha_.instantiate();
-		mat_alpha_->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
-		mat_alpha_->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
-		mat_alpha_->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
-		mat_alpha_->set_blend_mode(BaseMaterial3D::BLEND_MODE_MIX);
-		mat_alpha_->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
 		p_container->add_child(instance);
 		mesh_instance_id_ = instance->get_instance_id();
 	}
+}
+
+// smoktest.pcx, the pool's one texture, with its palette-luminance alpha
+// [orig: CEffectEmitterPool_CreateShaders @ 0x5DC8F0 ->
+// load_texture_from_archive("smoktest.pcx", "smoktest.pcx") @ 0x58B980].
+Ref<Texture2D> FirePresenter::smoke_texture() {
+	if (smoke_texture_loaded_ || resource_root_.is_null()) {
+		return smoke_texture_;
+	}
+	smoke_texture_loaded_ = true;
+	const PackedByteArray bytes = resource_root_->read_file("smoktest.pcx");
+	if (!bytes.is_empty()) {
+		smoke_texture_ = opennova::build_pcx_luminance_alpha_texture(bytes);
+	}
+	return smoke_texture_;
+}
+
+Ref<ShaderMaterial> FirePresenter::ribbon_material(TracerShader p_shader, bool p_fog_black) {
+	const std::size_t slot = static_cast<std::size_t>(p_shader) * 2u + (p_fog_black ? 1u : 0u);
+	if (slot >= materials_.size()) {
+		return Ref<ShaderMaterial>();
+	}
+	Ref<ShaderMaterial> &material = materials_[slot];
+	if (material.is_null()) {
+		Ref<Shader> shader = ResourceLoader::get_singleton()->load(ribbon_shader_path(p_shader));
+		if (shader.is_null()) {
+			return Ref<ShaderMaterial>();
+		}
+		material.instantiate();
+		material->set_shader(shader);
+		material->set_shader_parameter("fog_black", p_fog_black);
+		if (p_shader != TracerShader::Stock) {
+			material->set_shader_parameter("smoke_tex", smoke_texture());
+		}
+	}
+	return material;
 }
 
 void FirePresenter::teardown() {
@@ -213,7 +280,10 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 			}
 		}
 		if (fx_world != nullptr && plan.spawn) {
-			fx_world->spawn_effect(String::utf8(plan.effect.c_str()), origin, mission_to_godot(ev.forward));
+			// The shooter is the descriptor tag (retail
+			// WeaponSlot_FireAndSpawnEffects @ 0x53F582): the section gate applies.
+			fx_world->spawn_effect(String::utf8(plan.effect.c_str()), origin,
+					mission_to_godot(ev.forward), true);
 			++stat_effects_;
 		}
 	}
@@ -241,26 +311,51 @@ void FirePresenter::present_fire_sounds(const std::vector<opennova::world::Ready
 	}
 }
 
-// The compiled per-family ribbon strips [orig: CEffectChannel_RenderRibbon
-// @ 0x5DB8A0 — the math and the style tables live natively in
+// The compiled ribbon draws [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0 —
+// the math and the style tables live natively in
 // engine/runtime/renderer/tracer_frame.cpp]. This pass drains the sim's trail
-// rows, hands them with the camera to the native compile (the row framing
-// is [style_id, age, count, then count x (x, y, z, w)] per channel), and
-// uploads each family's vertex run verbatim. The clear runs BEFORE the empty
-// return: that is also what drops warm_pipelines' strips.
+// rows (framed [style_id, age, count, then count x (x, y, z, w)] per channel),
+// compiles them against the viewport's render camera and uploads one surface
+// per run of same-material channel draws, in pool order, on the frame's
+// tracer rung. The clear runs BEFORE the empty return: that is also what drops
+// warm_pipelines' surfaces.
 void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 	if (mesh_.is_null()) {
 		return;
 	}
 	mesh_->clear_surfaces();
+	EffectWorld *fx_world = fx();
+	const std::shared_ptr<EffectDistortionDrawer> distortion =
+			fx_world != nullptr ? fx_world->distortion_drawer() : nullptr;
+	// This frame's distortion ribbons replace the last ones, even when none draw.
+	auto publish_distortion = [&](bool p_channels_present) {
+		if (distortion) {
+			distortion->set_ribbon_channels_present(p_channels_present);
+			distortion->publish_ribbons(distortion_frame_);
+		}
+	};
+	distortion_frame_.clear();
 	if (p_rows.is_empty()) {
+		publish_distortion(false);
 		return;
 	}
-	Vector3 cam = owner_->listener_position();
-	if (!cam.is_finite()) {
-		cam = Vector3();
+	Viewport *viewport = owner_ != nullptr && owner_->is_inside_tree() ? owner_->get_viewport()
+																	   : nullptr;
+	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+	if (camera == nullptr) {
+		publish_distortion(false);
+		return;
 	}
-	std::vector<opennova::renderer::TracerChannelInput> channels;
+	const Transform3D eye = camera->get_global_transform();
+	const Vector3 forward = -eye.basis.get_column(2);
+	opennova::renderer::TracerView view;
+	view.camera = {static_cast<float>(eye.origin.x), static_cast<float>(eye.origin.y),
+			static_cast<float>(eye.origin.z)};
+	view.forward = {static_cast<float>(forward.x), static_cast<float>(forward.y),
+			static_cast<float>(forward.z)};
+	view.projection_x_scale = static_cast<float>(camera->get_camera_projection()[0][0]);
+	view.tick_ms = static_cast<std::uint32_t>(GameWorld::current_frame_clock_ms());
+	channels_.clear();
 	const float *r = p_rows.ptr();
 	const int64_t size = p_rows.size();
 	int64_t i = 0;
@@ -275,31 +370,160 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 		}
 		c.points = r + i;
 		i += static_cast<int64_t>(c.count) * 4;
-		channels.push_back(c);
+		channels_.push_back(c);
 	}
-	opennova::renderer::TracerRibbonFrame frame;
-	opennova::renderer::compile_tracer_ribbons(channels.data(), channels.size(),
-			{static_cast<float>(cam.x), static_cast<float>(cam.y), static_cast<float>(cam.z)},
-			frame);
-	stat_tracer_peak_ = MAX(stat_tracer_peak_, static_cast<int64_t>(frame.channels));
-	emit_strip(frame.additive, mat_additive_);
-	emit_strip(frame.alpha, mat_alpha_);
+	opennova::renderer::compile_tracer_ribbons(channels_.data(), channels_.size(), view,
+			opennova::renderer::TracerPass::Main, frame_);
+	// The distortion pass's ribbons for FrameFX's type-0 row, and its content
+	// gate: an active channel of a +0x828 style (retail
+	// CEffectEmitterPool_HasDistortionChannels @ 0x5DB7F0).
+	opennova::renderer::compile_tracer_ribbons(channels_.data(), channels_.size(), view,
+			opennova::renderer::TracerPass::Distortion, distortion_frame_);
+	publish_distortion(distortion_frame_.channels > 0);
+	stat_tracer_peak_ = MAX(stat_tracer_peak_, static_cast<int64_t>(frame_.channels));
+	const MissionEnvironment *env = environment();
+	const int rung = opennova::renderer::tracer_rung(env == nullptr || !env->is_underwater_view());
+	std::size_t run_start = 0;
+	for (std::size_t d = 1; d <= frame_.draws.size(); ++d) {
+		if (d < frame_.draws.size() && frame_.draws[d].shader == frame_.draws[run_start].shader &&
+				frame_.draws[d].fog_black == frame_.draws[run_start].fog_black) {
+			continue;
+		}
+		emit_surface(frame_, run_start, d, rung);
+		run_start = d;
+	}
 }
 
-// One family's interleaved {x, y, z, r, g, b, a} run as one triangle strip.
-void FirePresenter::emit_strip(const std::vector<float> &p_run,
-		const Ref<StandardMaterial3D> &p_material) {
-	const int64_t verts = static_cast<int64_t>(p_run.size() / 7);
-	if (verts < 4) { // fewer than two pairs draws nothing
+// One run of consecutive same-material draws as one indexed surface. The
+// draws' vertices are contiguous, so the run re-bases its indices on its first
+// vertex.
+void FirePresenter::emit_surface(const opennova::renderer::TracerRibbonFrame &p_frame,
+		std::size_t p_first_draw, std::size_t p_end_draw, int p_rung) {
+	if (p_first_draw >= p_end_draw) {
 		return;
 	}
-	mesh_->surface_begin(Mesh::PRIMITIVE_TRIANGLE_STRIP, p_material);
-	for (int64_t v = 0; v < verts; ++v) {
-		const float *f = p_run.data() + v * 7;
-		mesh_->surface_set_color(Color(f[3], f[4], f[5], f[6]));
-		mesh_->surface_add_vertex(Vector3(f[0], f[1], f[2]));
+	const opennova::renderer::TracerDraw &first = p_frame.draws[p_first_draw];
+	const opennova::renderer::TracerDraw &last = p_frame.draws[p_end_draw - 1];
+	const Ref<ShaderMaterial> material = ribbon_material(first.shader, first.fog_black);
+	if (material.is_null()) {
+		return;
 	}
-	mesh_->surface_end();
+	material->set_render_priority(p_rung);
+	const std::uint32_t base = first.first_vertex;
+	const std::uint32_t vertex_end = last.first_vertex + last.vertex_count;
+	const int64_t vertex_count = static_cast<int64_t>(vertex_end - base);
+	const std::uint32_t index_end = last.first_index + last.index_count;
+	PackedVector3Array positions;
+	PackedColorArray colors;
+	PackedVector2Array uv0;
+	PackedVector2Array uv1;
+	PackedInt32Array indices;
+	positions.resize(vertex_count);
+	colors.resize(vertex_count);
+	uv0.resize(vertex_count);
+	uv1.resize(vertex_count);
+	indices.resize(static_cast<int64_t>(index_end - first.first_index));
+	for (int64_t v = 0; v < vertex_count; ++v) {
+		const opennova::renderer::TracerVertex &src = p_frame.vertices[base + v];
+		positions.set(v, Vector3(src.x, src.y, src.z));
+		colors.set(v, opennova::color_from_argb(src.argb));
+		uv0.set(v, Vector2(src.u0, src.v0));
+		uv1.set(v, Vector2(src.u1, src.v1));
+	}
+	for (std::uint32_t k = first.first_index; k < index_end; ++k) {
+		indices.set(static_cast<int64_t>(k - first.first_index),
+				static_cast<int32_t>(p_frame.indices[k] - base));
+	}
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = positions;
+	arrays[Mesh::ARRAY_COLOR] = colors;
+	arrays[Mesh::ARRAY_TEX_UV] = uv0;
+	arrays[Mesh::ARRAY_TEX_UV2] = uv1;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	mesh_->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	mesh_->surface_set_material(mesh_->get_surface_count() - 1, material);
+}
+
+// retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 walks the frame's visible persons (the drawn
+// bodies) into Entity_RenderNVGLaserBeam @ 0x5c6090. The action point is
+// Entity_ComputeBoneTransform @ 0x401890 for a person on foot:
+// Entity_GetCameraTransform @ 0x4b8c00 poses the weapon matrix with
+// Entity_BuildBoneTransformMatrices @ 0x4b1290 (the held-weapon anchor draw 5
+// also places its gun with), and Userpoint_ComputeWorldTransform @ 0x56c420
+// takes the held definition's +0x2D4 userpoint of its +0x170 model through
+// it, position and authored direction. The drawn gun is that model at that
+// matrix, so its posed userpoint IS the action point; no drawn gun, no pose.
+// The beam is drawn when its run holds more than one point (@ 0x5c6381..0x5c6387).
+int FirePresenter::append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_sources,
+		const NvgLaserView &p_view, SceneOverlaySubmission &r_submission) {
+	if (owner_ == nullptr || p_sources.empty()) {
+		return 0;
+	}
+	Simulation *s = sim();
+	const Vector3 forward = -p_view.eye.basis.get_column(2).normalized();
+	opennova::renderer::TracerView view;
+	view.camera = {static_cast<float>(p_view.eye.origin.x),
+			static_cast<float>(p_view.eye.origin.y), static_cast<float>(p_view.eye.origin.z)};
+	view.forward = {static_cast<float>(forward.x), static_cast<float>(forward.y),
+			static_cast<float>(forward.z)};
+	view.projection_x_scale = p_view.projection_x_scale;
+	view.tick_ms = p_view.tick_ms;
+	int drawn = 0;
+	for (const NvgLaserSource &source : p_sources) {
+		opennova::world::NvgLaserGate gate = source.gate;
+		gate.nvg_active = p_view.nvg_active;
+		gate.camera_mode = p_view.camera_mode;
+		if (!opennova::world::nvg_laser_beam_drawn(gate)) {
+			continue;
+		}
+		ObjectModel *body = owner_->resolve_wire_handle(source.handle);
+		ObjectModel *weapon = owner_->held_weapon_node(source.handle);
+		if (body == nullptr || !body->is_visible_in_tree() || weapon == nullptr ||
+				!weapon->is_visible_in_tree()) {
+			continue;
+		}
+		const Ref<ObjectData> data = weapon->get_object_data();
+		const Ref<ModelUserPoint> point = data.is_valid()
+				? data->get_user_point_info(source.launch_userpoint - 1)
+				: Ref<ModelUserPoint>();
+		if (point.is_null()) {
+			continue;
+		}
+		const Transform3D part = weapon->subobject_model_to_world(point->get_subobject());
+		const opennova::world::Vec3 origin = godot_to_mission<opennova::world::Vec3>(
+				part.xform(point->get_position()));
+		const opennova::world::Vec3 direction = godot_to_mission<opennova::world::Vec3>(
+				part.basis.xform(point->get_rotation()));
+		const int32_t origin_q16[3] = {opennova::world::to_fixed(origin.x),
+				opennova::world::to_fixed(origin.y), opennova::world::to_fixed(origin.z)};
+		const int32_t direction_q16[3] = {opennova::world::to_fixed(direction.x),
+				opennova::world::to_fixed(direction.y), opennova::world::to_fixed(direction.z)};
+		const int32_t clip = s != nullptr
+				? s->nvg_laser_clip_distance(source.handle, origin_q16, direction_q16)
+				: opennova::world::kNvgLaserRangeQ16;
+		float points[opennova::world::kNvgLaserMaxPoints * 4];
+		const int count =
+				opennova::world::nvg_laser_beam_points(origin_q16, direction_q16, clip, points);
+		if (count <= 1) {
+			continue;
+		}
+		for (int i = 0; i < count; ++i) {
+			float *at = points + i * 4;
+			const Vector3 godot_at =
+					mission_to_godot(opennova::world::Vec3{at[0], at[1], at[2]});
+			at[0] = static_cast<float>(godot_at.x);
+			at[1] = static_cast<float>(godot_at.y);
+			at[2] = static_cast<float>(godot_at.z);
+		}
+		laser_frame_.clear();
+		opennova::renderer::append_tracer_beam(points, count,
+				opennova::world::kNvgLaserTracerStyle, view, laser_frame_);
+		opennova::renderer::append_nvg_laser_overlay(laser_frame_,
+				r_submission.texture_index(smoke_texture()), p_view.fog, r_submission.frame);
+		++drawn;
+	}
+	return drawn;
 }
 
 void FirePresenter::warm_pipelines(const Vector3 &p_position) {
@@ -307,16 +531,33 @@ void FirePresenter::warm_pipelines(const Vector3 &p_position) {
 		return;
 	}
 	mesh_->clear_surfaces();
-	for (const Ref<StandardMaterial3D> &mat : {mat_additive_, mat_alpha_}) {
-		if (mat.is_null()) {
+	// One zero-area triangle per normal-pass material.
+	const std::pair<TracerShader, bool> materials[] = {{TracerShader::Stock, true},
+			{TracerShader::Smoke, false}, {TracerShader::NvgLaser, true}};
+	for (const std::pair<TracerShader, bool> &entry : materials) {
+		const Ref<ShaderMaterial> material = ribbon_material(entry.first, entry.second);
+		if (material.is_null()) {
 			continue;
 		}
-		mesh_->surface_begin(Mesh::PRIMITIVE_TRIANGLE_STRIP, mat);
-		for (int i = 0; i < 4; ++i) {
-			mesh_->surface_set_color(Color(1, 1, 1, 0.0f));
-			mesh_->surface_add_vertex(p_position + Vector3(0.001f * i, 0, 0));
+		PackedVector3Array positions;
+		PackedColorArray colors;
+		PackedVector2Array uvs;
+		PackedInt32Array indices;
+		for (int i = 0; i < 3; ++i) {
+			positions.push_back(p_position + Vector3(0.001f * i, 0, 0));
+			colors.push_back(Color(0, 0, 0, 0));
+			uvs.push_back(Vector2());
+			indices.push_back(i);
 		}
-		mesh_->surface_end();
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		arrays[Mesh::ARRAY_VERTEX] = positions;
+		arrays[Mesh::ARRAY_COLOR] = colors;
+		arrays[Mesh::ARRAY_TEX_UV] = uvs;
+		arrays[Mesh::ARRAY_TEX_UV2] = uvs;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+		mesh_->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+		mesh_->surface_set_material(mesh_->get_surface_count() - 1, material);
 	}
 }
 

@@ -1,5 +1,7 @@
 void vertex() {
+	v_water_mirror_pass = obj_water_mirror_pass_flag(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS);
 	v_static_point_light_row = INSTANCE_CUSTOM.x;
+	v_water_mirror_pass *= 1.0 + obj_water_clip_armed_flag(MODEL_MATRIX[3].xyz);
 	v_uv = obj_transform_uv(UV);
 	v_uv2 = obj_transform_uv(UV2);
 	vec3 local_pos = VERTEX;
@@ -9,6 +11,7 @@ void vertex() {
 	local_pos.z += sa * min(VERTEX.x, 1.0) * 0.15;
 	VERTEX = local_pos;
 	v_world_pos = (MODEL_MATRIX * vec4(local_pos, 1.0)).xyz;
+	v_fog_view_depth = -(VIEW_MATRIX * vec4(v_world_pos, 1.0)).z;
 	vec3 animated_local_normal = normalize(vec3(ca * 0.5 + 0.5, -sa * 0.1, abs(sa)));
 	vec3 animated_world_normal = normalize(
 			(MODEL_MATRIX * vec4(animated_local_normal, 0.0)).xyz);
@@ -23,6 +26,10 @@ void vertex() {
 	// Flag.fx has only its hemisphere + directional pass; EffectWorld point
 	// lights do not participate in this effect.
 	v_point_light_diffuse = vec3(0.0);
+	// vsFlag's Out.Diff: hemisphere + directional at vertex rate, saturated
+	// by the colour output. Flag.fx has no CLIP technique.
+	v_ff_diffuse = obj_ff_vertex_diffuse(v_world_normal, vec3(0.0));
+	v_ff_clip_diffuse = vec3(0.0);
 	v_dir_self_shadow = 1.0;
 	v_pixel_point_factor = vec4(0.0);
 	v_pixel_point_attenuation = vec4(0.0);

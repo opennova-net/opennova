@@ -39,7 +39,7 @@ int main() {
 	if (!expect_close(flipped.corners[0].v, 0.5f / 64.0f, "FLIP_X should not reverse V half-texel direction")) return 1;
 
 	// Retail rotate is the CCW corner cycle NW<-NE, NE<-SE, SE<-SW, SW<-NW:
-	// TL local (0,0) -> (1,0) [orig: render_water_quad @ 0x6047d4..0x604806].
+	// TL local (0,0) -> (1,0) [orig: PolyTrn_DrawTileOverlayQuad @ 0x6047d4..0x604806].
 	const opennova::TilUvQuad rotated =
 	    opennova::til_build_entry_render_uv_quad(0, opennova::TIL_FLAG_ROTATE_90, 128, 64);
 	if (!expect(rotated.valid, "valid atlas should produce rotated render UVs")) return 1;
@@ -51,7 +51,7 @@ int main() {
 	// sampling-function form that is rotate-then-flip. The orders differ
 	// exactly for rotate plus a single flip (0x05/0x06) — flip-then-rotate
 	// rendered those tiles 180 degrees off (the 00TRa driving-course fork).
-	// [orig: render_water_quad @ 0x604700 — mirrors @ 0x604782/0x6047a9,
+	// [orig: PolyTrn_DrawTileOverlayQuad @ 0x604700 — mirrors @ 0x604782/0x6047a9,
 	// rotate cycle @ 0x6047d4..0x604806]
 	// 0x05 (FLIP_X|ROTATE_90): T(x,z) = (z, x).
 	{

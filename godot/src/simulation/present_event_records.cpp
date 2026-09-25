@@ -1,5 +1,6 @@
 #include "simulation/present_event_records.h"
 
+#include "simulation/destruction_presenter.h"
 #include "util/axes.h"
 #include "util/color_convert.h"
 #include "util/record_bind.h"
@@ -305,7 +306,7 @@ void ChatLineRow::_bind_methods() {
 
 Ref<DeathPieceRow> DeathPieceRow::make(int p_slot, int64_t p_generation, int p_type_index,
 		const Vector3 &p_pos, bool p_settled, int p_item_id, int p_section, float p_scale,
-		float p_heading, float p_pitch) {
+		float p_heading, float p_pitch, float p_roll) {
 	opennova::world::DeathPieceRow v;
 	v.slot = p_slot;
 	v.generation = static_cast<uint64_t>(p_generation);
@@ -316,6 +317,7 @@ Ref<DeathPieceRow> DeathPieceRow::make(int p_slot, int64_t p_generation, int p_t
 	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
 	v.heading = p_heading;
 	v.pitch = p_pitch;
+	v.roll = p_roll;
 	v.settled = p_settled;
 	Ref<DeathPieceRow> out;
 	out.instantiate();
@@ -334,9 +336,9 @@ Vector3 DeathPieceRow::get_pos() const { return mission_to_godot(value_.pos); }
 void DeathPieceRow::_bind_methods() {
 	ClassDB::bind_static_method("DeathPieceRow",
 			D_METHOD("make", "slot", "generation", "type_index", "pos", "settled", "item_id",
-					"section", "scale", "heading", "pitch"),
+					"section", "scale", "heading", "pitch", "roll"),
 			&DeathPieceRow::make, DEFVAL(false), DEFVAL(0), DEFVAL(0), DEFVAL(1.0f), DEFVAL(0.0f),
-			DEFVAL(0.0f));
+			DEFVAL(0.0f), DEFVAL(0.0f));
 	OPENNOVA_RECORD_READ_ONLY(DeathPieceRow, Variant::INT, slot)
 	OPENNOVA_RECORD_READ_ONLY(DeathPieceRow, Variant::INT, generation)
 	OPENNOVA_RECORD_READ_ONLY(DeathPieceRow, Variant::INT, item_id)
@@ -347,7 +349,53 @@ void DeathPieceRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(DeathPieceRow, Variant::VECTOR3, pos)
 	OPENNOVA_RECORD_READ_ONLY(DeathPieceRow, Variant::FLOAT, heading)
 	OPENNOVA_RECORD_READ_ONLY(DeathPieceRow, Variant::FLOAT, pitch)
+	OPENNOVA_RECORD_READ_ONLY(DeathPieceRow, Variant::FLOAT, roll)
 	OPENNOVA_RECORD_READ_ONLY(DeathPieceRow, Variant::BOOL, settled)
+}
+
+// --- DeathPieceDraw ---------------------------------------------------------
+
+Ref<DeathPieceDraw> DeathPieceDraw::make(int p_slot, int64_t p_generation, int p_lod_level,
+		int64_t p_hidden_mask, int p_section, const Vector3 &p_pivot, const Vector3 &p_pos,
+		float p_heading, float p_pitch, float p_roll, float p_scale) {
+	opennova::world::DeathPieceDraw v;
+	v.slot = p_slot;
+	v.generation = static_cast<uint64_t>(p_generation);
+	v.lod_level = p_lod_level;
+	v.hidden_mask = static_cast<uint32_t>(p_hidden_mask);
+	v.section = p_section;
+	v.pivoted = v.hidden_mask != 0;
+	v.pivot_q16 = {opennova::world::to_fixed(p_pivot.x), opennova::world::to_fixed(p_pivot.y),
+			opennova::world::to_fixed(p_pivot.z)};
+	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
+	v.heading = p_heading;
+	v.pitch = p_pitch;
+	v.roll = p_roll;
+	v.scale = p_scale;
+	Ref<DeathPieceDraw> out;
+	out.instantiate();
+	out->assign(v);
+	return out;
+}
+
+Vector3 DeathPieceDraw::get_pos() const { return mission_to_godot(value_.pos); }
+
+Transform3D DeathPieceDraw::get_transform() const {
+	return DestructionPresenter::piece_draw_transform(value_);
+}
+
+void DeathPieceDraw::_bind_methods() {
+	ClassDB::bind_static_method("DeathPieceDraw",
+			D_METHOD("make", "slot", "generation", "lod_level", "hidden_mask", "section", "pivot",
+					"pos", "heading", "pitch", "roll", "scale"),
+			&DeathPieceDraw::make, DEFVAL(0.0f), DEFVAL(0.0f), DEFVAL(0.0f), DEFVAL(1.0f));
+	OPENNOVA_RECORD_READ_ONLY(DeathPieceDraw, Variant::INT, slot)
+	OPENNOVA_RECORD_READ_ONLY(DeathPieceDraw, Variant::INT, generation)
+	OPENNOVA_RECORD_READ_ONLY(DeathPieceDraw, Variant::INT, lod_level)
+	OPENNOVA_RECORD_READ_ONLY(DeathPieceDraw, Variant::INT, hidden_mask)
+	OPENNOVA_RECORD_READ_ONLY(DeathPieceDraw, Variant::INT, section)
+	OPENNOVA_RECORD_READ_ONLY(DeathPieceDraw, Variant::VECTOR3, pos)
+	OPENNOVA_RECORD_READ_ONLY(DeathPieceDraw, Variant::TRANSFORM3D, transform)
 }
 
 // --- RoundGlowRow -----------------------------------------------------------

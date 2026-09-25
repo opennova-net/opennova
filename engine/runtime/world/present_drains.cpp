@@ -144,6 +144,7 @@ void drain_round_impact_rows(World &world, std::vector<RoundImpactPresentation> 
 		d.age_ticks = now >= imp.tick ? now - imp.tick : 0u;
 		d.source_tick = imp.tick;
 		d.source_order = imp.source_order;
+		d.section_tagged = imp.section_tagged;
 		// The impact flash light rides the effect leg's own gate — retail
 		// requires the effect entry AND the ammo light_impact radius (the
 		// witness map on renderer/light_scene.h).
@@ -243,6 +244,7 @@ void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces)
 		d.pos = p.pos;
 		d.heading = p.heading;
 		d.pitch = p.pitch;
+		d.roll = p.roll;
 		d.settled = p.settled;
 		r_pieces.push_back(std::move(d));
 	}

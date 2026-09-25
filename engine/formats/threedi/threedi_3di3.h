@@ -42,7 +42,14 @@ inline constexpr int THREEDI_TEX_TYPE_NORMAL_TGA = 5;  // Normal map from TGA al
 
 // Texture flags (flags field in ThreediMaterialTexture)
 inline constexpr uint32_t THREEDI_TEX_FLAG_ANIMATED = 0x01u;  // Part of animation sequence
-inline constexpr uint32_t THREEDI_TEX_FLAG_CLAMPED = 0x02u;  // Use clamp addressing (vs wrap)
+// Bind the batch's render-state override texture in place of this row when
+// one is pushed; with no override the row's own texture binds. The only
+// pusher is the player preview, and the blip field it pushes is only ever
+// written zero, so every draw binds the row's own texture.
+// [orig: apply_shader_parameters @ 0x58DC92..0x58DCC1;
+//  PlayerInfo_RenderPlayerPreview3D @ 0x560F43;
+//  MinimapSlot_InitBlipFromPackedId @ 0x57B12D]
+inline constexpr uint32_t THREEDI_TEX_FLAG_STATE_OVERRIDE = 0x02u;
 
 /* 3DI3 chunk-header dword: high bit = parent (has children), low 24 bits =
  * payload length. One home; the reader and writer TUs both use these. */
@@ -127,7 +134,7 @@ typedef struct ThreediMaterialTexture {
     char name[17];   // Texture filename (null-terminated)
     uint8_t slot;    // Texture slot: THREEDI_TEX_SLOT_DIFFUSE/DETAIL/NORMAL
     uint8_t type;    // Texture type: THREEDI_TEX_TYPE_DIFFUSE/NORMAL_MDT/NORMAL_TGA
-    uint8_t flags;   // Texture flags: THREEDI_TEX_FLAG_ANIMATED/CLAMPED
+    uint8_t flags;   // Texture flags: THREEDI_TEX_FLAG_ANIMATED/STATE_OVERRIDE
     uint8_t frame;   // Animation frame index (0 for non-animated)
 } ThreediMaterialTexture;
 
@@ -567,9 +574,12 @@ typedef struct ThreediOcclusionObject {
     uint8_t unused0;
     float position[3];
     float radius;
-    float glow_scale; /* [orig: OOBJ disk +20 -> runtime record +0x2C - the
-                         window-glow scale the slot collector consumes
-                         @ 0x5c6ea3; zero across the JO 3DI3 corpus] */
+    float slot_priority_scale; /* [orig: OOBJ disk +20 -> runtime record +0x2C -
+                                  the portal-slot priority weight the slot
+                                  collector multiplies @ 0x5c6ea3; its only
+                                  consumer is the slot sort's compare
+                                  (Terrain_SortPortalSlotsByPriority @ 0x5c4440);
+                                  zero across the JO 3DI3 corpus] */
     int32_t num_vertices;
     int32_t num_planes;
     int32_t face_count;

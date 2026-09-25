@@ -35,6 +35,7 @@
 #include <runtime/inmatch/session_transport.h>
 #include <runtime/inmatch/udp_session_transport.h>
 
+#include <formats/def/def.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/replication_model.h>
 #include <net/npwire/ingame_encode.h>
@@ -48,6 +49,7 @@
 #include <runtime/world/geom.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/weapon_scope_zero.h>
 #include <runtime/world/world.h>
 
 #include <cmath>
@@ -904,6 +906,112 @@ struct DismembermentRig {
 	}
 };
 
+// The local fire composite and the two spawn legs it drives: bit 7 selects the
+// aimed ERROR row 3 at any stance, and the low six bits add the shooter AdmDef's
+// zero elevation to the flying round only.
+// [orig: Entity_FireWeaponAndSendPacket @0x42bdcb..0x42bdfb; Weapon_GetScopeZoomLevel
+//  @0x422fc0; RoundData_SpawnRound @0x4ec155..0x4ec181 / @0x4ec3bf..0x4ec3d6;
+//  Score_GetMultiplierValue @0x4fc440]
+bool test_spawn_aimed_row_and_zero_elevation() {
+	w::WeaponScopeZero zero;
+	zero.step_metres = 100;
+	const int32_t optic = static_cast<int32_t>(opennova::def::DEF_WEAPON_FLAG_SIGHTED);
+	if (!expect(w::weapon_scope_zoom_step(zero, optic, -1, 250 << 16, false, 12) == 12 &&
+	                    w::weapon_scope_zoom_step(zero, 0, -1, 250 << 16, true, 12) == 12,
+	            "no optic fire or a plain weapon keeps the default zero step"))
+		return false;
+	if (!expect(w::weapon_scope_zoom_step(zero, optic, 3, 250 << 16, true, 12) == 0,
+	            "a manual zero reports step 0"))
+		return false;
+	if (!expect(w::weapon_scope_zoom_step(zero, optic, -1, 249 << 16, true, 12) == 2 &&
+	                    w::weapon_scope_zoom_step(zero, optic, -1, 250 << 16, true, 12) == 3 &&
+	                    w::weapon_scope_zoom_step(zero, optic, -1, 9000 << 16, true, 12) == 39,
+	            "the automatic zero rounds the rangefinder to the step and caps at 39"))
+		return false;
+	zero.step_metres = 0;
+	if (!expect(w::weapon_scope_zoom_step(zero, optic, -1, 60 << 16, true, 12) == 2,
+	            "an unset step spans 25 m"))
+		return false;
+
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::PlayerSpawn seed;
+	seed.net_id = 42;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	w::AiEntity *body = world.ai.for_handle(shooter);
+	if (!expect(shooter.valid() && body != nullptr, "aimed/zero player spawned")) return false;
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	world.tables.weapons.entries.resize(2);
+	w::WeaponTableEntry &weapon = world.tables.weapons.entries[1];
+	weapon.valid = true;
+	weapon.error_fp16[2] = 0x10000; // standing hip row
+	weapon.error_fp16[3] = 0x1000;  // the aimed row
+	weapon.action_fsm.scope_zero.elevation[5] = 0x123456;
+	weapon.action_fsm.scope_zero.elevation[39] = 0x654321;
+
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.ammo_index = 0;
+	params.adm_index = 1;
+	params.shot_seq = 7;
+	params.subtype = 0x80;
+	const w::RandomSpreadOffset aimed = w::weapon_calc_random_spread_offset(0x1000, 7, 0, false);
+	const int aimed_round = world.round_sim.spawn(world, params);
+	if (!expect(aimed_round >= 0 &&
+	                    world.round_sim.rounds[static_cast<size_t>(aimed_round)].yaw_bam ==
+	                            aimed.yaw_bam &&
+	                    world.round_sim.rounds[static_cast<size_t>(aimed_round)].pitch_bam ==
+	                            aimed.pitch_bam,
+	            "bit 7 takes ERROR row 3 even standing, and step 0 adds no elevation"))
+		return false;
+
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	world.round_sim.weapon_spread_enabled = false;
+	params.subtype = 0x85;
+	const int zeroed = world.round_sim.spawn(world, params);
+	if (!expect(zeroed >= 0 &&
+	                    world.round_sim.rounds[static_cast<size_t>(zeroed)].pitch_bam == 0x123456 &&
+	                    world.round_sim.fired.size() == 1 &&
+	                    world.round_sim.fired[0].pitch_bam == 0,
+	            "step 5 elevates the flying round; the fire record keeps the descriptor"))
+		return false;
+
+	world.round_sim.reset();
+	params.subtype = 0x3F;
+	const int clamped = world.round_sim.spawn(world, params);
+	if (!expect(clamped >= 0 &&
+	                    world.round_sim.rounds[static_cast<size_t>(clamped)].pitch_bam == 0x654321,
+	            "a step past 39 reads row 39"))
+		return false;
+
+	world.round_sim.reset();
+	world.registry.get(shooter)->equipped_adm_index = 0;
+	params.subtype = 5;
+	const int no_adm = world.round_sim.spawn(world, params);
+	if (!expect(no_adm >= 0 &&
+	                    world.round_sim.rounds[static_cast<size_t>(no_adm)].pitch_bam == 0,
+	            "AdmDef 0 adds no elevation"))
+		return false;
+
+	// A decoded remote shooter without a local entity keys on its replica's adm.
+	world.round_sim.reset();
+	w::RoundSourceState replica;
+	replica.equipped_adm_index = 1;
+	params.owner = w::EntityHandle{};
+	params.source_state = &replica;
+	const int remote = world.round_sim.spawn(world, params, w::RoundConsequenceMode::VisualOnly);
+	return expect(remote >= 0 &&
+	                      world.round_sim.rounds[static_cast<size_t>(remote)].pitch_bam == 0x123456,
+	              "a replica source elevates by its equipped AdmDef");
+}
+
 bool test_dismemberment_damage_path() {
 	// Each mask is the hit bone's own bit (1 << bone) OR the witnessed case
 	// addend [orig: @0x407601 + the switch @0x407608].
@@ -1121,6 +1229,7 @@ int main() {
 	if (!test_respawned_vehicle_takes_projectile_damage()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
+	if (!test_spawn_aimed_row_and_zero_elevation()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
 	if (!test_person_hit_presentation_legs_run_on_every_hit()) return 1;
 	if (!run_death_feed_classifier_matrix()) return 1;
@@ -2127,21 +2236,31 @@ int main() {
 			return 1;
 		if (!expect(ch.cap == 12, "stdred ring cap = the witnessed 12-entry table"))
 			return 1;
-		for (int t = 0; t < 5; ++t) sim.tick(world, nullptr, nullptr);
-		if (!expect(ch.count == 5, "one trail point per tick while alive")) return 1;
-		if (!expect(ch.pts[0].pos.x == 0.0f && ch.pts[0].pos.z == 500.0f,
-		            "the first point is the PRE-move spawn origin"))
+		// A fresh channel starts at count -1: the first tick's pre-move append
+		// (the spawn origin) only lifts it to 0 [orig: CEffectChannel_Init
+		// @ 0x5db233; CEffectChannel_AppendPoint @ 0x5db2c3 -> @ 0x5db333].
+		if (!expect(ch.count == -1, "a fresh channel starts at count -1")) return 1;
+		sim.tick(world, nullptr, nullptr);
+		if (!expect(ch.count == 0, "the first append stores nothing")) return 1;
+		const w::Vec3 after_first_move = sim.rounds[size_t(slot)].pos;
+		for (int t = 0; t < 4; ++t) sim.tick(world, nullptr, nullptr);
+		if (!expect(ch.count == 4, "one trail point per tick after the first")) return 1;
+		if (!expect(ch.pts[0].pos.x == after_first_move.x &&
+		                    ch.pts[0].pos.y == after_first_move.y &&
+		                    ch.pts[0].pos.z == after_first_move.z &&
+		                    !(after_first_move.x == 0.0f && after_first_move.z == 500.0f),
+		            "the first STORED point is the second tick's pre-move point, not the origin"))
 			return 1;
 		if (!expect(ch.pts[0].w == 1.0f, "std styles carry no width jitter")) return 1;
 		if (!expect(ch.age == 1, "a live channel's age re-arms every append")) return 1;
 		// Death by age-out: final point + kill request, then the drain timeline.
 		sim.rounds[size_t(slot)].max_age_ticks = sim.rounds[size_t(slot)].age_ticks;
 		sim.tick(world, nullptr, nullptr);
-		if (!expect(!sim.rounds[size_t(slot)].active && ch.kill && ch.count == 6,
+		if (!expect(!sim.rounds[size_t(slot)].active && ch.kill && ch.count == 5,
 		            "round death appends the final point and requests the drain"))
 			return 1;
 		for (int t = 0; t < 11; ++t) sim.tick(world, nullptr, nullptr);
-		if (!expect(ch.active && ch.count == 6,
+		if (!expect(ch.active && ch.count == 5,
 		            "the dead trail holds shape through the cap-length grace"))
 			return 1;
 		for (int t = 0; t < 30; ++t) sim.tick(world, nullptr, nullptr);

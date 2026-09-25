@@ -1,7 +1,6 @@
 #pragma once
 
 #include <godot_cpp/classes/image_texture.hpp>
-#include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -38,6 +37,7 @@ class EnvLightValues;
 class MissionEnvironment;
 class MissionRoot;
 class MissionObjectPlacer;
+struct SceneOverlaySubmission;
 class Simulation;
 class Weather;
 
@@ -49,13 +49,14 @@ class Weather;
 // start walks the placed pools spawning per-record instances
 // [orig: Game_StartMission @ 0x525d19 -> Game_SpawnAllEntityGlowEffects @0x5227b0 ->
 // Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
-// group-passing four [orig: collect_nearby_zones_by_aabb @ 0x5aa250;
-// update_light_slots @ 0x5abc50]. The object pass runs per rendered model:
-// one draw context per visible ObjectModel carrying BOTH witnessed groups —
-// its entity as the owner group, and the building it stands inside plus
-// that blink volume's section as the interior group — so owned lights
-// (muzzle glow, subobject records, interior room lights) light only what
-// retail's update_light_slots admits. Corona billboards draw per frame from
+// group-passing three [orig: Light_SelectAndEnableForDraw @ 0x5ab9d0 ->
+// collect_nearby_zones_by_aabb @ 0x5aa250; the batch collectors' group gate
+// @ 0x5d91f8 / @ 0x5d96b8 and 3-cap @ 0x5d9229]. The object pass runs per
+// rendered model: one draw context per visible ObjectModel carrying BOTH
+// witnessed groups — the owner group its submit declares, and the building
+// it stands inside plus that blink volume's section as the interior group —
+// so owned lights (muzzle glow, subobject records, interior room lights)
+// light only what retail's collectors admit. Corona billboards draw per frame from
 // the portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40].
 // The remaining D-RLIT-4 residual is foliage sampling. Authored LGHT
 // positions/lifetimes are spawn-fixed; powerup respawn is routed, and a
@@ -114,29 +115,38 @@ public:
 	// shadow device's dominant-light pick reads the same LightScene).
 	Ref<LightScene> scene() const;
 	Vector3 light_gain() const;
+	// The owner id a containing building's BMS id resolves to -- the id its
+	// interior room lights are owned by, for a co-consumer that stamps an
+	// entity's interior light group (the render-slot pick).
+	int64_t interior_owner_for_bms(int p_bms_id);
 	// The per-frame device leg (the GameWorld leg table, after iris, before the
 	// material frame): one draw context per visible ObjectModel near the
-	// camera (owner group = that model's entity id) plus the first-person
-	// viewmodel parts (owner = the local player, so its own muzzle glow
-	// reaches the arms). The FLICKER phase reads the live weather wave ring;
-	// the ambient scale is the env light-state gain (the ported
+	// camera (the drawn entity id rides along; LightScene::render_model_frame
+	// applies the witnessed owner-group rule) plus the first-person viewmodel
+	// parts, which take the local player's query and interior group but
+	// declare no owner group. The FLICKER phase reads the live weather wave
+	// ring; the ambient scale is the env light-state gain (the ported
 	// EffectWorld_AmbientScale channel).
 	void render_frame(Camera3D *p_camera, int64_t p_time_ms,
 			const TypedArray<ObjectModel> &p_viewmodel_parts = TypedArray<ObjectModel>(),
-			int p_viewmodel_wire_handle = -1, bool p_run_census = true);
+			bool p_run_census = true);
 	// On-demand census refresh for report readers while the capture is off:
 	// the skipped select re-runs with the last frame's camera, so an
 	// MCP/diagnostics read stays exact without the per-frame report cost.
 	void run_census_now();
+	// This frame's corona billboards into the post-particle overlay tail
+	// (renderer/scene_overlay.h). Not bound to Godot.
+	void append_overlay(SceneOverlaySubmission &r_submission);
 	// The 62 Hz lifecycle decay [orig: EffectWorld_TickInstancesAndLightScale
 	// @ 0x5aa170 from the main loop] — beside EffectWorld.advance_fixed_tick.
 	void advance_fixed_tick();
 	// One weapon fire with the ammo MF_Light flag [orig: Entity_UpdateMuzzleGlow-
 	// Effect @ 0x56c960, called per shot from both fire arms]. Owner = the
 	// shooter, so the per-draw owner select (render_model_frame) admits the
-	// glow only on draws declaring that owner — the shooter's body, and the
-	// first-person parts the world tags with the local player's id
-	// (D-AI-8d). The cache is deliberately shared with model LGHT: if
+	// glow only on draws declaring that owner: the shooter's skinned person
+	// draws. The rigid held gun re-scopes to (0, robj) and the first-person
+	// pass declares none, so neither takes the glow (renderer::
+	// submit_owner_group). The cache is deliberately shared with model LGHT: if
 	// mission-start spawn left entity+0x1B4 nonzero, retail re-arms and moves
 	// that final authored lease instead of allocating the 1.5-unit
 	// muzzle-color light.
@@ -210,7 +220,6 @@ private:
 	int64_t _owner_id_for_bms(int p_bms_id);
 	void _render_static_light_rows(const Vector3 &p_gain, Weather *p_weather, int p_time_ms);
 	void _rebuild_static_light_rows();
-	void _refresh_interior_groups();
 	void _ensure_model_registry(Node *p_container);
 	void _rebuild_model_registry(Node *p_container);
 	BlinkOwner _local_player_interior_group();
@@ -219,8 +228,6 @@ private:
 			const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 			MissionEnvironment *p_env);
 	void _clear_coronas();
-	MultiMeshInstance3D *_corona_instance() const;
-	MultiMeshInstance3D *_ensure_corona_instance();
 	Ref<ImageTexture> _corona_texture();
 
 	ObjectID world_id_;
@@ -240,6 +247,7 @@ private:
 	PackedInt64Array static_rows_interior_owners_;
 	PackedInt32Array static_rows_interior_sections_;
 	PackedByteArray static_rows_active_;
+	PackedVector4Array static_rows_entity_lights_;
 	Ref<LightScene> scene_;
 	HashMap<int, Vector<int64_t>> spawned_static_;
 	std::vector<opennova::mission::StaticEffectSource> static_sources_snapshot_;
@@ -255,11 +263,10 @@ private:
 	HashMap<int64_t, int64_t> entity_effect_handles_;
 	// round presentation id -> pool light handle (the light_move follow).
 	HashMap<int64_t, int64_t> round_handles_;
-	// The corona billboard presenter: one MultiMesh of additive camera-facing
-	// quads rebuilt per frame from the portable corona walk
-	// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 — the witness map
-	// lives on renderer::LightScene::collect_corona_quads].
-	ObjectID corona_instance_id_;
+	// This frame's corona quads for the post-particle overlay stage, from the
+	// portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 —
+	// the witness map lives on renderer::LightScene::collect_corona_quads].
+	std::vector<opennova::renderer::LightCoronaQuad> coronas_;
 	int corona_frame_ = 0;
 	// The procedural corona texture "texlightcrn": the law (the 128x128
 	// 0.4 - 0.45 d falloff, truncated, the transparent border) lives
@@ -284,7 +291,6 @@ private:
 	Vector<ObjectID> reg_models_;
 	PackedInt64Array reg_owners_;
 	PackedByteArray reg_robj_scoped_;
-	PackedInt64Array reg_bms_ids_;
 	bool reg_dirty_ = true;
 	uint64_t reg_container_id_ = 0;
 	// Reused per-frame draw-context arrays (the native call reads them
@@ -296,12 +302,6 @@ private:
 	PackedInt64Array frame_interior_owners_;
 	PackedInt32Array frame_interior_sections_;
 	PackedByteArray frame_robj_scoped_;
-	// Interior-group rows latched per logic tick (they are tick products):
-	// the flat sim rows plus a bms_id -> base-index lookup, no per-row
-	// allocations.
-	PackedInt64Array interior_rows_;
-	HashMap<int64_t, int64_t> interior_index_;
-	int64_t interior_tick_ = -1;
 };
 
 } // namespace godot

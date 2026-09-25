@@ -282,12 +282,12 @@ add_test(NAME def_flag_parity COMMAND def_flag_parity_test)
 # weapons and ammo run their inline blocks unconditionally and pin the shipped
 # tables from the reference fixture set as SKIP-LEG legs; every hudpos leg
 # reads the shipped table, so it gates whole on OPENNOVA_JO_ASSETS.
-foreach(test items weapons ammo hudpos item_attrib item_type)
+foreach(test items weapons ammo hudpos item_attrib item_part_bytes item_type)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
     target_link_libraries(def_parse_${test}_test PRIVATE opennova_formats)
     target_include_directories(def_parse_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test items weapons ammo item_attrib item_type)
+foreach(test items weapons ammo item_attrib item_part_bytes item_type)
     add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
 endforeach()
 opennova_add_gated_test(def_parse_hudpos COMMAND def_parse_hudpos_test)
@@ -912,10 +912,10 @@ target_include_directories(mission_seat_spec_extract_test PRIVATE ${CMAKE_CURREN
 add_test(NAME mission_seat_spec_extract COMMAND mission_seat_spec_extract_test)
 
 # Object renderer/shader tests
-foreach(test device_fog environment_cube foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
+foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
         particle_atlas_contract particle_frame_compiler_contract render_order
-        q3_frame render_slot_shadow
-        state_vectors tracer_frame precipitation_frame)
+        frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
+        scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -968,11 +968,6 @@ add_executable(til_render_uv_test til/til_render_uv_test.cpp)
 target_link_libraries(til_render_uv_test PRIVATE opennova_formats)
 target_include_directories(til_render_uv_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME til_render_uv COMMAND til_render_uv_test)
-
-add_executable(til_overlay_bake_test til/til_overlay_bake_test.cpp)
-target_link_libraries(til_overlay_bake_test PRIVATE opennova_formats)
-target_include_directories(til_overlay_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME til_overlay_bake COMMAND til_overlay_bake_test)
 
 add_executable(foliage_map_test foliage/foliage_map_test.cpp)
 target_link_libraries(foliage_map_test PRIVATE opennova_formats)
@@ -1365,10 +1360,6 @@ target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
 
-add_executable(group_render_gate_test particle/group_render_gate_test.cpp)
-target_link_libraries(group_render_gate_test PRIVATE opennova_runtime)
-target_include_directories(group_render_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME group_render_gate COMMAND group_render_gate_test)
 
 add_executable(vehicle_collision_damage_test world/vehicle_collision_damage_test.cpp)
 target_link_libraries(vehicle_collision_damage_test PRIVATE opennova_runtime)
@@ -1773,6 +1764,16 @@ target_link_libraries(destruction_test PRIVATE opennova_runtime)
 target_include_directories(destruction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(destruction_test PRIVATE cxx_std_17)
 add_test(NAME destruction COMMAND destruction_test)
+
+add_executable(death_piece_draw_test world/death_piece_draw_test.cpp)
+target_link_libraries(death_piece_draw_test PRIVATE opennova_runtime)
+target_compile_features(death_piece_draw_test PRIVATE cxx_std_17)
+add_test(NAME death_piece_draw COMMAND death_piece_draw_test)
+
+add_executable(nvg_laser_test world/nvg_laser_test.cpp)
+target_link_libraries(nvg_laser_test PRIVATE opennova_runtime)
+target_compile_features(nvg_laser_test PRIVATE cxx_std_17)
+add_test(NAME nvg_laser COMMAND nvg_laser_test)
 
 add_executable(item_events_test world/item_events_test.cpp)
 target_link_libraries(item_events_test PRIVATE opennova_runtime)

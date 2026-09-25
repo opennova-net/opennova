@@ -295,6 +295,9 @@ void PlayerWeaponEffects::fire_action_effects(const Ref<PlayerWeaponEvent> &p_ev
 	options->set_owner_transform(anchor_transform);
 	options->set_has_owner_transform(true);
 	options->set_initial_age_ticks(std::max(p_event->get_age_ticks(), 0));
+	// The action slot's descriptor carries its entity as the tag (retail
+	// ActionSlot_SpawnEffect @ 0x401F20): the group takes the section gate.
+	options->set_section_tagged(true);
 	fx->spawn_effect_request(particle, anchor_transform, options);
 }
 
@@ -321,7 +324,7 @@ void PlayerWeaponEffects::fire_direct_action_effect(const Ref<PlayerWeaponEvent>
 			opennova::world::kActionEffectSpawnPolicy.world_render_domain
 					? EffectScene::RENDER_DOMAIN_WORLD
 					: EffectScene::RENDER_DOMAIN_FIRST_PERSON,
-			0, 0);
+			0, 0, true);
 }
 
 Variant PlayerWeaponEffects::resolve_anchor(const String &p_userpoint) {

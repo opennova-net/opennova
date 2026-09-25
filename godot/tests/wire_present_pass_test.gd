@@ -1317,6 +1317,15 @@ func test_person_body_and_late_held_weapon_share_the_thermal_wave_lane() -> void
 	expected = Vector4(0.8, 0.0, 0.0, 1.0)
 	_assert_entity_light(body, expected, "a daylight update preserves the person's wave")
 	_assert_entity_light(weapon, expected, "the held model preserves that same wave")
+	# A contained wire draw also declares the containing building's interior
+	# light group on the body and its held weapon (retail
+	# setup_terrain_effect_for_entity -> Lighting_SetInteriorLightGroup @0x5a90e0).
+	p.set_entity_lighting_context(0x0004, 1.0, true, 0.2, 77, 3)
+	for model: ObjectModel in [body, weapon]:
+		assert_eq(model.get_interior_light_group_bms(), 77, "the contained draw names its building")
+		assert_eq(model.get_interior_light_group_section(), 3, "and the blink volume section")
+	p.set_entity_lighting_context(0x0004, 1.0, false, 0.0)
+	assert_eq(body.get_interior_light_group_bms(), 0, "outdoors the interior group clears")
 
 
 # The composed two-part avatar is ONE retail entity submission: the head and
@@ -1325,7 +1334,7 @@ func test_person_body_and_late_held_weapon_share_the_thermal_wave_lane() -> void
 # part linked under a wire body carries the body's thermal wave lane too.
 # [orig: Terrain_RenderSectorEntitiesBySide head submit @0x5c7ffc, body
 #  submit @0x5c8020; CTerrainRenderer_BuildLightingShaderConstants(1)
-#  @0x5c9511 / @0x5c95f8 in Terrain_RenderSceneWithReflection]
+#  @0x5c9511 / @0x5c95f8 in Terrain_RenderWorldScene]
 func test_composed_avatar_head_shares_the_body_thermal_wave_lane() -> void:
 	var avatar_path := ProjectSettings.globalize_path(
 			"user://wire_thermal_avatars_%d.def" % Time.get_ticks_usec())
@@ -1363,6 +1372,50 @@ func test_composed_avatar_head_shares_the_body_thermal_wave_lane() -> void:
 	_assert_entity_light(head, expected,
 			"the linked head part shares the body's thermal wave lane")
 	DirAccess.remove_absolute(avatar_path)
+
+
+# The water mirror's CLIP arming (runtime/environment/water_mirror.h) is the
+# held weapon's OWNER's: retail draws it inside the body's entity submission.
+# The static pump body (first entity wave) arms under a high water plane and
+# its weapon with it; a released plane disarms both, and no plane is left
+# behind for the next test.
+func test_a_wire_held_weapon_takes_its_bodys_mirror_clip_arming() -> void:
+	var sim := _sim()
+	assert_eq(sim.load_weapon_table(_flat_root(), "weapon.def"), OK)
+	var container := PresentPassFixture.container(self)
+	var p := _wire_pass(sim, _placer(), container)
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"type_id": TYPE_PUMP,
+		"handle": 0x1005,
+		"aim_overlay_valid": 1,
+		"held_weapon_adm": 0,
+	}]
+	_present(p, snap)
+	var body: ObjectModel = p.resolve_wire_handle(0x1005)
+	var skeleton := Skeleton3D.new()
+	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
+		skeleton.add_bone("Bone%d" % bone_index)
+	body.add_child(skeleton)
+	snap.entities[0]["held_weapon_adm"] = 1
+	_present(p, snap)
+	var weapon: ObjectModel = p.held_weapon_node(0x1005)
+	assert_not_null(weapon)
+	var cache := ObjectShaderCache.get_singleton()
+	cache.set_water_plane(100.0, true)
+	assert_true(body.is_water_mirror_clip_armed(), "the pump sits deep under the plane")
+	assert_true(weapon.is_water_mirror_clip_armed(), "its held weapon takes the body's verdict")
+	cache.set_water_plane(-100.0, true)
+	assert_false(body.is_water_mirror_clip_armed())
+	assert_false(weapon.is_water_mirror_clip_armed())
+	cache.clear_water_plane()
+	snap.entities[0]["hidden"] = 1
+	_present(p, snap)
+	snap.entities[0]["hidden"] = 0
+	_present(p, snap)
+	assert_false(body.is_water_mirror_clip_armed(),
+			"a hidden-visible cycle without water arms nothing")
+	assert_false(weapon.is_water_mirror_clip_armed())
 
 
 func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:

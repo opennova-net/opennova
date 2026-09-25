@@ -100,12 +100,6 @@ bool pack_surface(const Q3SurfaceArrays &p_arrays,
 			};
 			uv = transform_uv(uv);
 			uv2 = transform_uv(uv2);
-		} else if (p_pack.source == Q3Source::Water) {
-			const Vector2 relative(position.z - p_pack.camera_position.z,
-					position.x - p_pack.camera_position.x);
-			uv = relative * (p_pack.water_uv.x / 128.0f) -
-					Vector2(p_pack.water_uv.y, p_pack.water_uv.y) +
-					Vector2(p_pack.water_uv.z, p_pack.water_uv.w);
 		}
 		writer.vec3(position);
 		writer.vec3(normal);
@@ -165,8 +159,7 @@ std::size_t Q3SurfaceArrays::element_count() const {
 
 bool Q3PackParameters::operator==(const Q3PackParameters &p_other) const {
 	return source == p_other.source && uv_u == p_other.uv_u &&
-			uv_v == p_other.uv_v && water_uv == p_other.water_uv &&
-			camera_position == p_other.camera_position &&
+			uv_v == p_other.uv_v &&
 			skin_channels == p_other.skin_channels;
 }
 

@@ -11,13 +11,17 @@ bool presents_third_person(bool third_person, int camera_mode) {
     return third_person || camera_mode == 4;
 }
 
-// [orig: the card switch @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15 /
-//  @0x5ca32c; the showhud bit @0x4DEDEA; the seat gate inside the draw]
-bool fp_viewmodel_retail_submit(bool third_person, bool scope_card_active,
-                                bool binoculars_view_active, bool fp_gun_visible,
-                                bool seat_hides_weapon) {
-    return !third_person && !scope_card_active && !binoculars_view_active &&
-           fp_gun_visible && !seat_hides_weapon;
+// [orig: the alive gate Player_RenderViewModelIfAlive @0x4E0145/@0x4E014B;
+//  the card switch @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15 / @0x5ca32c;
+//  the seat gate inside the draw; the Emplaced skip of the showhud bit
+//  @0x4DEDD9..0x4DEDF1; the Inset gate @0x4DEDF7..0x4DEE19]
+bool fp_viewmodel_retail_submit(const FpViewmodelSubmitGates &gates) {
+    if (gates.local_dead || gates.round_winner_set) return false;
+    if (gates.third_person || gates.scope_card_active || gates.binoculars_view_active)
+        return false;
+    if (gates.seat_hides_weapon) return false;
+    if (!gates.emplaced && !gates.fp_weapon_view_flag) return false;
+    return !gates.inset_scoped;
 }
 
 // [orig: Player_RenderFirstPersonViewModel @0x4DEEA4..0x4DEF52 -- the FP
@@ -214,7 +218,8 @@ FireEffectPlan fire_effect_plan(const FirePresentationRow &row) {
     // WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position;
     // ActionSlot_SpawnEffect @ 0x402080 at the action-transform muzzle;
     // both gate on ammo +36 MF_Light]. Owner = shooter, so the witnessed
-    // group gate scopes it to the shooter's own draws. The adm arm anchors it
+    // group gate scopes it to the shooter's own skinned person draws
+    // (renderer::submit_owner_group). The adm arm anchors it
     // on the rendered gun's userpoint.
     plan.glow = row.mf_light != 0;
     plan.glow_at_muzzle = plan.glow && row.adm_arm;

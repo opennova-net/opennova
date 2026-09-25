@@ -356,48 +356,90 @@ size_t LightScene::select(const LightHandle *handles, size_t handle_count,
 		if (disabled_for_target) {
 			continue;
 		}
-		// Group gate [orig: Light_PassesActiveGroups @ 0x5a9120..0x5a916e]: an
-		// owned light passes only for the active interior group (section
-		// matched against the interior section, falling back to the owner
-		// section) or the active owner group.
-		if (params.owner_entity != 0 && !options.admit_owned_unscoped) {
-			bool passes = false;
-			if (params.owner_entity == groups.interior_group_entity) {
-				const int32_t wanted = groups.interior_group_section != 0
-						? groups.interior_group_section
-						: groups.owner_group_section;
-				passes = params.owner_section == wanted;
-			} else if (params.owner_entity == groups.owner_group_entity) {
-				passes = true;
-			}
-			if (!passes) {
-				continue;
-			}
+		if (!passes_active_groups(params, groups, options.admit_owned_unscoped)) {
+			continue;
 		}
-		SelectedLight &light = out[selected];
-		for (int axis = 0; axis < 3; ++axis) {
-			light.position[axis] =
-					static_cast<float>(params.position_fixed[axis]) / 65536.0f;
+		fill_selected(*slot, handles[i], ambient_scale, flicker, d3d_light_path,
+				out[selected]);
+		++selected;
+	}
+	return selected;
+}
+
+bool LightScene::passes_active_groups(const LightSpawnParams &params,
+		const LightActiveGroups &groups, bool admit_owned_unscoped) {
+	// Group gate [orig: Light_PassesActiveGroups @ 0x5a9120..0x5a916e]: an
+	// owned light passes only for the active interior group (section
+	// matched against the interior section, falling back to the owner
+	// section) or the active owner group.
+	if (params.owner_entity == 0 || admit_owned_unscoped) {
+		return true;
+	}
+	if (params.owner_entity == groups.interior_group_entity) {
+		const int32_t wanted = groups.interior_group_section != 0
+				? groups.interior_group_section
+				: groups.owner_group_section;
+		return params.owner_section == wanted;
+	}
+	return params.owner_entity == groups.owner_group_entity;
+}
+
+void LightScene::fill_selected(const Slot &slot, LightHandle handle,
+		const std::array<float, 3> &ambient_scale,
+		const LightFlickerInputs &flicker, bool d3d_light_path,
+		SelectedLight &light) const {
+	const LightSpawnParams &params = slot.params;
+	for (int axis = 0; axis < 3; ++axis) {
+		light.position[axis] =
+				static_cast<float>(params.position_fixed[axis]) / 65536.0f;
+	}
+	light.position_w = params.radius_fixed != 0
+			? 65536.0f / static_cast<float>(params.radius_fixed)
+			: 0.0f; // [orig: @ 0x5a91d4]
+	// Record bytes were stored /256 at spawn [orig: @ 0x5a8e51].
+	std::array<float, 3> rgb = {
+		static_cast<float>(params.rgb[0]) / 256.0f,
+		static_cast<float>(params.rgb[1]) / 256.0f,
+		static_cast<float>(params.rgb[2]) / 256.0f,
+	};
+	apply_rgb_gen(params, flicker, rgb);
+	// The intensity term is the LIVE blend (record f14) — spawn seeds it
+	// and the fade tick / SetBlendAmount mutate it [orig: @ 0x5a9207].
+	light.color = point_light_color(rgb, slot.blend, ambient_scale,
+			d3d_light_path);
+	light.attenuation = point_light_attenuation(params.radius_fixed);
+	light.range = static_cast<float>(params.radius_fixed) * 1.25f / 65536.0f;
+	light.lights_terrain = !params.disable_terrain;
+	light.lights_objects = !params.disable_objects;
+	light.handle = handle;
+}
+
+size_t LightScene::slot_light_candidates(const std::array<int32_t, 3> &query_min_fixed,
+		const std::array<int32_t, 3> &query_max_fixed,
+		const LightActiveGroups &groups,
+		const std::array<float, 3> &ambient_scale,
+		const LightFlickerInputs &flicker,
+		std::array<SelectedLight, kSlotPickLimit> &out) const {
+	// The collector's nearest-first list, handed back as min(found, 4)
+	// [orig: `push 4` @ 0x5d6b00; collect_nearby_zones_by_aabb
+	// @ 0x5aa418..0x5aa425].
+	std::array<LightHandle, kQueryLimit> handles{};
+	const size_t found = query(query_min_fixed, query_max_fixed, handles);
+	const size_t count = std::min(found, kSlotPickLimit);
+	size_t selected = 0;
+	for (size_t i = 0; i < count; ++i) {
+		const Slot *slot = slot_for(handles[i]);
+		// Light_GetPointLightParams refuses a dead handle [orig: the jnz
+		// @ 0x5d6bb7].
+		if (slot == nullptr) {
+			continue;
 		}
-		light.position_w = params.radius_fixed != 0
-				? 65536.0f / static_cast<float>(params.radius_fixed)
-				: 0.0f; // [orig: @ 0x5a91d4]
-		// Record bytes were stored /256 at spawn [orig: @ 0x5a8e51].
-		std::array<float, 3> rgb = {
-			static_cast<float>(params.rgb[0]) / 256.0f,
-			static_cast<float>(params.rgb[1]) / 256.0f,
-			static_cast<float>(params.rgb[2]) / 256.0f,
-		};
-		apply_rgb_gen(params, flicker, rgb);
-		// The intensity term is the LIVE blend (record f14) — spawn seeds it
-		// and the fade tick / SetBlendAmount mutate it [orig: @ 0x5a9207].
-		light.color = point_light_color(rgb, slot->blend, ambient_scale,
-				d3d_light_path);
-		light.attenuation = point_light_attenuation(params.radius_fixed);
-		light.range = static_cast<float>(params.radius_fixed) * 1.25f / 65536.0f;
-		light.lights_terrain = !params.disable_terrain;
-		light.lights_objects = !params.disable_objects;
-		light.handle = handles[i];
+		// Only the group gate [orig: Light_PassesActiveGroups @ 0x5d6b89];
+		// no objects-disable test on this path.
+		if (!passes_active_groups(slot->params, groups, false)) {
+			continue;
+		}
+		fill_selected(*slot, handles[i], ambient_scale, flicker, false, out[selected]);
 		++selected;
 	}
 	return selected;
@@ -655,8 +697,11 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 	// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40]. Constants decoded
 	// from the binary: 1/65536 @ 0x7c3310, 0.5 @ 0x7c3b94, 1/16 @ 0x7c486c,
 	// 0.1 @ 0x7c69f4, 0.66 @ 0x7d3e68, the 100-wu cull 0x640000 fixed
-	// @ 0x5ab143.
+	// @ 0x5ab0f1.
 	constexpr double kMaxDistanceFixed = 0x640000;   // 100 wu
+	// The viewport near depth the centre must clear: 0x800 fixed = 1/32 wu
+	// [orig: Viewport_BuildProjectionMatrix @ 0x411093 writes viewport+0x78].
+	constexpr float kNearDepth = static_cast<float>(0x800) / 65536.0f;
 	constexpr float kColorScale = 0.0625f;           // 1/16
 	constexpr float kStepFactor = 0.1f;
 	constexpr float kSegmentShrink = 0.66f;
@@ -719,7 +764,7 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 					static_cast<int64_t>(pos_fixed[1]) - 512); break;
 		}
 		// Camera distance cull at 100 wu, in fixed units like retail's
-		// float-of-fixed sqrt [orig: @ 0x5ab0b7..0x5ab143].
+		// float-of-fixed sqrt [orig: @ 0x5ab09d..0x5ab0f6].
 		double dist_sq = 0.0;
 		for (int axis = 0; axis < 3; ++axis) {
 			const double delta = static_cast<double>(pos_fixed[axis]) -
@@ -734,6 +779,21 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 			static_cast<float>(pos_fixed[1]) / 65536.0f,
 			static_cast<float>(pos_fixed[2]) / 65536.0f,
 		};
+		// The whole corona drops when the (jittered, re-centred) light centre
+		// does not lie beyond the viewport near depth: retail transforms it by
+		// the fixed view matrix's depth row and skips on depth <= near before
+		// any segment is built. The depth plane is that camera depth axis in
+		// world units [orig: @ 0x5ab0fc..0x5ab143 — `shrd eax, edx, 16h` of
+		// the row-0 dot, + the row translation dword_A78428, `cmp eax,
+		// dword_A783D8; jle` to the next slot].
+		const float centre_depth =
+				inputs.depth_plane_normal[0] * light_world[0] +
+				inputs.depth_plane_normal[1] * light_world[1] +
+				inputs.depth_plane_normal[2] * light_world[2] +
+				inputs.depth_plane_w;
+		if (centre_depth <= kNearDepth) {
+			continue;
+		}
 		const float radius_world =
 				static_cast<float>(slot.params.radius_fixed) / 65536.0f;
 		const float base_half = radius_world * 0.5f;
@@ -843,19 +903,36 @@ ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs) {
 	return owner;
 }
 
+SubmitOwnerGroup submit_owner_group(uint64_t drawn_entity, bool person_wave,
+		bool skinned_level, int32_t robj_index) {
+	SubmitOwnerGroup group;
+	if (skinned_level) {
+		// The skinned collector keeps the wave's pair: the drawn entity inside
+		// the person wave [orig: @ 0x5c7fb1 / @ 0x5c8004], else entity 0.
+		if (person_wave) {
+			group.entity = drawn_entity;
+		}
+		return group;
+	}
+	// The rigid collector's per-ROBJ re-scope [orig: @ 0x5d8ff7].
+	group.section = robj_index;
+	return group;
+}
+
 LightActiveGroups static_light_row_groups(const StaticLightRowInputs &inputs) {
 	LightActiveGroups groups;
+	// Every static row is a rigid submit: owner group (0, robjIndex).
+	const SubmitOwnerGroup owner = submit_owner_group(inputs.static_owner,
+			false, false, inputs.robj_index);
+	groups.owner_group_entity = owner.entity;
+	groups.owner_group_section = owner.section;
 	if (inputs.is_building) {
-		// A building declares itself as interior section zero and re-scopes
-		// the owner section to this exact ROBJ [orig: @ 0x5d8ff7].
-		groups.owner_group_entity = 0;
-		groups.owner_group_section = inputs.robj_index;
+		// A building declares itself as interior section zero
+		// [orig: Terrain_RenderSectorModels @ 0x5c5e07].
 		groups.interior_group_entity = inputs.static_owner;
 		groups.interior_group_section = 0;
 		return groups;
 	}
-	groups.owner_group_entity = inputs.static_owner;
-	groups.owner_group_section = 0;
 	// The blink query at the placement origin names the containing building
 	// + section [orig: Lighting_SetInteriorLightGroup @ 0x5a90e0]; no hit
 	// leaves the interior group empty.

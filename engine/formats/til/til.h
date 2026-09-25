@@ -8,7 +8,7 @@
 namespace opennova {
 
 // [orig: jodemo Terrain_DrawTileOverlays2D @0x5C79C0, sub_5C42B0 @0x5C42B0, Terrain_RenderSectorTile @0x5CDAA0]
-// [orig: PolyTrn_RenderTile @0x60df0d -> render_water_quad @0x604700; docs/tiles/til-re.md]
+// [orig: PolyTrn_RenderTile @0x60df0d -> PolyTrn_DrawTileOverlayQuad @0x604700; docs/tiles/til-re.md]
 
 constexpr uint32_t TIL_MAGIC = 0x74696C30u;
 
@@ -17,7 +17,7 @@ constexpr uint8_t TIL_FLAG_FLIP_Y = 0x02u;
 constexpr uint8_t TIL_FLAG_ROTATE_90 = 0x04u;
 // Bit 0x08 - a perimeter-outline flag. jodemo.exe emits a secondary LINELIST pass
 // for it (Terrain_DrawTileOverlays2D@0x5C79C0), but RETAIL JO does NOT: its tile
-// overlay render (render_water_quad@0x604700, via PolyTrn_RenderTile@0x60df0d)
+// overlay render (PolyTrn_DrawTileOverlayQuad@0x604700, via PolyTrn_RenderTile@0x60df0d)
 // handles only flip/rotate (bits 0/1/2) and draws a single TRIANGLESTRIP - no
 // outline pass. We preserve the flag for round-trip fidelity but, like retail JO,
 // render no outline (faithful; the LINELIST outline is jodemo-only). See
@@ -117,7 +117,7 @@ inline TilAtlasLayout til_make_atlas_layout(int atlas_width, int atlas_height) {
 }
 
 inline TilUv til_transform_local_uv(TilUv uv, uint8_t flags) {
-	// [orig: render_water_quad @ 0x604700 — flag blocks @ 0x604782 (U swap),
+	// [orig: PolyTrn_DrawTileOverlayQuad @ 0x604700 — flag blocks @ 0x604782 (U swap),
 	// 0x6047a9 (V swap), 0x6047d4 (rotate)]. Retail's rotate permutes the four
 	// corner UVs as NW<-NE, NE<-SE, SE<-SW, SW<-NW (corner cycle
 	// A<-B, B<-D, D<-C, C<-A @ 0x6047d4..0x604806): per corner (u,v) that is
@@ -192,7 +192,7 @@ inline TilUvQuad til_build_entry_render_uv_quad(uint8_t tile_index,
 		return quad;
 	}
 
-	// [orig: render_water_quad @0x604700 — u += +-0.5*flt_319F7C8, v += +-0.5*flt_319F7CC]
+	// [orig: PolyTrn_DrawTileOverlayQuad @0x604700 — u += +-0.5*flt_319F7C8, v += +-0.5*flt_319F7CC]
 	// (jodemo sub_5C42B0 @0x5C42B0.)
 	// The in-world sector pass shifts the already-transformed UV quad by a
 	// D3D half-texel in the active texture direction before drawing the

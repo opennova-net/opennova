@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <base/io/tick_rate.h>
 #include <cstdint>
@@ -138,6 +139,36 @@ inline constexpr std::uint32_t kEffectInitialAgeTickLimit = 256;
 // sub-tick remainder is retained for deterministic accumulation.
 inline constexpr std::uint32_t kEffectAdvanceTickLimit = 256;
 
+// The building-section gate a descriptor spawn stamps on its group. The
+// descriptor's owner tag lands at group+0 and the blink volumes containing the
+// spawn point at group+0x1C..0x28 [orig: CEffectWorld_SpawnEmitterAtPosition
+// @ 0x5F6DF0 — the tag store @ 0x5F6EFB, Entity_QueryBlinkBoxesAtPoint at the
+// descriptor position @ 0x5F6F5A]. Entity-originated spawns carry their entity
+// as the tag; impacts, terrain user points and weather carry none.
+struct EffectSectionGate {
+	bool tagged = false;
+	// Packed blink hits in the query's layout,
+	// ((section & 0x1F) | (pool-2 entity index << 8)) << 12; 0 = no hit.
+	std::array<std::uint32_t, 4> blink_hits{};
+};
+
+// The live section-visibility words of the buildings the gate names: bit N =
+// COBJ section N is visible this frame [orig: g_BuildingSectionVisMask
+// @ 0x297F250, read raw — no forced bits — by the pool-2 entity index].
+class EffectSectionMasks {
+public:
+	virtual ~EffectSectionMasks() = default;
+	virtual std::uint32_t section_mask(std::int32_t pool_entity_index) const = 0;
+};
+
+// Whether a group draws and updates this frame: an untagged group, or one whose
+// first hit slot is empty, always does; otherwise some hit's section must be
+// visible in its building's mask [orig: CEffectGroup_IsSectionVisible @ 0x5F6D10 — the tag test
+// @ 0x5F6D14, the slot-0 test @ 0x5F6D1F, the per-hit decode @ 0x5F6D37 /
+// @ 0x5F6D45..0x5F6D4A and the mask test @ 0x5F6D5E].
+bool effect_section_gate_visible(const EffectSectionGate &gate,
+		const EffectSectionMasks &masks);
+
 struct EffectSpawnRequest {
 	EffectHandle effect;
 	EffectPose pose;
@@ -159,6 +190,7 @@ struct EffectSpawnRequest {
 	std::uint32_t lod_divisor = 1;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
 	float kill_plane_y = 0.0f;
+	EffectSectionGate section_gate;
 };
 
 enum class EffectSpawnStatus : std::uint8_t {
@@ -202,6 +234,9 @@ struct EffectAdvanceRequest {
 	// The current camera's clip planes for the NOVISNOUPDATE gate; leave
 	// `valid` false (headless, no camera) to advance every emitter.
 	ParticleViewFrustum frustum;
+	// The building section masks the group gate reads; null (no occlusion
+	// state: headless, previews) leaves every group visible.
+	const EffectSectionMasks *section_masks = nullptr;
 };
 
 struct EffectBounds {
@@ -228,6 +263,11 @@ struct EffectGroupFrameSnapshot {
 	std::size_t first_emitter = 0;
 	std::size_t emitter_count = 0;
 	bool detached = false;
+	// The section gate's verdict of the last advance (group+0x6C, 1 from the
+	// allocation until the first advance): a hidden group draws in no pass
+	// [orig: CEffectWorld_AllocGroupSlot @ 0x5E4779;
+	// CEffectGroup_AdvanceChildrenAndReap @ 0x5E59D8].
+	bool section_visible = true;
 };
 
 struct EffectEmitterFrameSnapshot {
@@ -292,6 +332,8 @@ struct EffectGroupDebugSnapshot {
 	EffectSlotToken slot;
 	EffectOwnerToken owner;
 	bool detached = false;
+	EffectSectionGate section_gate;
+	bool section_visible = true;
 	EffectPose pose;
 	std::uint64_t source_tick = 0;
 	std::uint64_t source_order = 0;

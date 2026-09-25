@@ -1,6 +1,7 @@
 #pragma once
 
 #include <formats/trn/trn.h>
+#include <runtime/renderer/texture_dxt.h>
 
 #include <cstdint>
 #include <vector>
@@ -44,6 +45,21 @@ Rgba8Image normalize_detail_blend_map(const Rgba8Image &blendmap);
 std::vector<Rgba8Image> build_paired_detail_mip_chain(
 		const Rgba8Image &base,
 		const Rgba8Image &far_detail);
+
+// One of the three splat detail layers as the device texture retail creates:
+// flags 0x400200 (texture quality above 0) with the terrain-detail flags (0 at
+// full detail) and 8, which pick DXT1 on an adapter outside the NVIDIA DXT5
+// list. Without a far texture the layer's TGA goes through
+// GTexture_CreateFromPixelData_0 (level 0 loaded, later levels
+// D3DXFilterTexture's chain); with one, GTexture_CreateFromPixelDataWithAlphaBlend
+// loads each paired level with D3DX_FILTER_NONE.
+// [orig: PolyTrn_InitTextures @ 0x60AB95..0x60ABE5 (flags), loads
+// @ 0x60ABEF..0x60AC13 and @ 0x60ACB1/0x60AD0B/0x60AD65;
+// Texture_LoadByNameWithChannel @ 0x58B70C (TGA flag 0x100000),
+// @ 0x58B73F; GTexture_CreateFromPixelDataWithAlphaBlend @ 0x6875C5]
+std::vector<renderer::DxtSurface> build_detail_layer_levels(
+		const Rgba8Image &base,
+		const Rgba8Image *far_detail);
 
 // D3DXFilterTexture(D3DX_FILTER_BOX) level chain used by ordinary TGA
 // textures. Retail allocates while min(width,height)>2, so the terminal

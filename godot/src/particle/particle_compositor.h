@@ -14,6 +14,8 @@
 
 #include <runtime/renderer/particle_frame.h>
 
+#include "render/frame_fx_distortion.h"
+
 namespace godot {
 
 // Immutable, upload-ready atlas catalog. The main thread builds this only
@@ -45,6 +47,9 @@ struct ParticleWorldSubmission {
 	float fog_start = 0.0f;
 	float fog_end = 0.0f;
 	std::int32_t fog_type = 1;
+	// The main scene's thermal byte: draws bind their types' secondary
+	// materials (renderer::particle_thermal_material).
+	bool thermal = false;
 	bool valid = true;
 	std::string validation_error;
 };
@@ -68,6 +73,11 @@ public:
 	~ParticleCompositorEffect() override;
 
 	void publish(const std::shared_ptr<const ParticleWorldSubmission> &p_submission);
+	// Render thread, inside FrameFX's type-0 row: draws the latest submission
+	// (the effect world's distortion subset) over the frame with texture slot 2
+	// = the row's screen texture. An effect used this way is attached to no
+	// compositor.
+	bool draw_distortion_set(const FrameFxDistortionTarget &p_target, std::size_t &r_draws);
 	void clear_submission();
 	void set_particles_hidden(bool p_hidden);
 	// The real World path owns RenderingDevice pipelines whose framebuffer

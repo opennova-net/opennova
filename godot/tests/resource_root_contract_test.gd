@@ -612,3 +612,59 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 	var loose: Texture2D = resources.load_material_texture("brick.tga", 4)
 	assert_eq(loose.get_image().get_pixel(0, 0), Color8(127, 127, 255, 233))
 	resources.clear()
+
+
+func _solid_test_tga(r: int, g: int, b: int) -> PackedByteArray:
+	var bytes := _normal_test_tga(b)
+	for i in range(16):
+		bytes[19 + i * 4] = g
+		bytes[20 + i * 4] = r
+		bytes[21 + i * 4] = 255
+	return bytes
+
+
+func _mip_coloured_dds() -> PackedByteArray:
+	# 4x4 red level 0 with an authored green 2x2 and blue 1x1 below it.
+	var data := PackedByteArray()
+	for side_colour in [[4, Color.RED], [2, Color.GREEN], [1, Color.BLUE]]:
+		var colour: Color = side_colour[1]
+		for _texel in side_colour[0] * side_colour[0]:
+			data.append_array(PackedByteArray([colour.r8, colour.g8, colour.b8, 255]))
+	return Image.create_from_data(4, 4, true, Image.FORMAT_RGBA8, data).save_dds_to_buffer()
+
+
+func test_material_diffuse_resolves_exactly_the_file_retail_loads() -> void:
+	# Texture_LoadByNameWithChannel (retail): an existing DDS sibling wins over
+	# the named TGA (unless a loose file wins under loose-first), keeps its
+	# authored mip levels, and nothing else is probed: no "_O" suffix, no
+	# alternate extension. A compound "x.dds.tga" name queries "x.dds".
+	var root := _make_flat_root("material_diffuse_sources")
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
+		{"name": "wall.dds", "bytes": _mip_coloured_dds()},
+		{"name": "wall.tga", "bytes": _solid_test_tga(0, 0, 255)},
+		{"name": "trim_O.tga", "bytes": _solid_test_tga(0, 255, 0)},
+		{"name": "bark.dds", "bytes": _mip_coloured_dds()},
+	])
+	TestFs.write_bytes(self, root.path_join("wall.tga"), _solid_test_tga(255, 255, 0))
+	var resources := ResourceRoot.new()
+	assert_eq(resources.mount_runtime(root, "", false), OK)
+	var wall: Texture2D = resources.load_material_texture("wall.tga", 0)
+	assert_not_null(wall)
+	var image := wall.get_image()
+	assert_eq(image.get_pixel(0, 0), Color8(255, 0, 0), "the DDS sibling wins over wall.tga")
+	assert_true(image.has_mipmaps(), "the DDS keeps a mip chain")
+	var level1 := image.get_mipmap_offset(1)
+	var data := image.get_data()
+	assert_eq(Color8(data[level1], data[level1 + 1], data[level1 + 2]), Color8(0, 255, 0),
+			"the authored level 1 survives instead of a regenerated red one")
+	var trim: Texture2D = resources.load_material_texture("trim.tga", 0)
+	assert_eq(trim.get_width(), 128, "a missing trim.tga binds the checkerboard, never trim_O.tga")
+	assert_eq(trim.get_image().get_pixel(0, 0), Color8(48, 48, 48))
+	var bark: Texture2D = resources.load_material_texture("bark.dds.tga", 0)
+	assert_eq(bark.get_image().get_pixel(0, 0), Color8(255, 0, 0),
+			"bark.dds.tga queries bark.dds")
+	assert_eq(resources.mount_runtime(root, "", true), OK)
+	var loose: Texture2D = resources.load_material_texture("wall.tga", 0)
+	assert_eq(loose.get_image().get_pixel(0, 0), Color8(255, 255, 0),
+			"under loose-first an existing loose wall.tga takes the plain TGA path")
+	resources.clear()

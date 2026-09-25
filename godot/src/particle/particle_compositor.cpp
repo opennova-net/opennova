@@ -117,6 +117,11 @@ layout(push_constant, std430) uniform ParticlePush {
 
 layout(location = 0) out vec4 frag_color;
 
+// The low byte is the PTL type; bit 8 selects Blend's thermal secondary.
+uint particle_mode() {
+	return pc.mode & 0xFFu;
+}
+
 float particle_fog_visibility() {
 	float fog_start = pc.camera_forward_fog_start.w;
 	float fog_end = pc.camera_position_fog_end.w;
@@ -137,14 +142,24 @@ float particle_fog_visibility() {
 			(fog_end - fog_start), 0.0, 1.0);
 }
 
+// Only the materials whose intrinsic pass word carries FOGENABLE fog: every
+// type starts at 0x20000, Bump and Bumpadd replace it with 0x10000
+// (SPECULARENABLE alone) and Distort with 0 (retail
+// CParticleTexture_InitTextureAndChannels @ 0x5E8324 / @ 0x5E8424 / @ 0x5E850A /
+// @ 0x5E8567; the word is OR'd into the pass flags by CGfxShader_ApplyPass
+// @ 0x683221, FOGENABLE @ 0x683243, SPECULARENABLE @ 0x68325F).
+bool particle_fog_enabled() {
+	return particle_mode() != 3u && particle_mode() != 6u && particle_mode() != 7u;
+}
+
 vec3 particle_fog_target() {
-	if (pc.mode == 1u || pc.mode == 2u || pc.mode == 6u) {
+	if (particle_mode() == 1u || particle_mode() == 2u) {
 		return vec3(0.0);
 	}
-	if (pc.mode == 4u) {
+	if (particle_mode() == 4u) {
 		return vec3(1.0);
 	}
-	if (pc.mode == 5u) {
+	if (particle_mode() == 5u) {
 		return vec3(127.0 / 255.0);
 	}
 	return pc.fog_color_type.xyz;
@@ -152,7 +167,13 @@ vec3 particle_fog_target() {
 
 void main() {
 	vec4 texel = texture(atlas_texture, v_uv);
-	if (pc.mode <= 2u) {
+	if ((pc.mode & 0x100u) != 0u) {
+		// Blend's thermal secondary: MODULATE(1 - TEXTURE, 1 - DIFFUSE) on
+		// colour, MODULATE(TEXTURE, DIFFUSE) on alpha (retail
+		// CParticleTexture_InitTextureAndChannels @ 0x5E8584..0x5E85DD).
+		frag_color = vec4((1.0 - texel.rgb) * (1.0 - v_primary.rgb),
+				texel.a * v_primary.a);
+	} else if (particle_mode() <= 2u) {
 		// Blend/additive/premult share one fixed-function stage program —
 		// MODULATE(TEXTURE, DIFFUSE) on color AND alpha [orig: the case 0/1/2
 		// channel descs in CParticleTexture_InitTextureAndChannels @ 0x5e8347/
@@ -161,11 +182,16 @@ void main() {
 		// [orig: BuildTextureAtlases @ 0x5e9116, see docs/particles/ptl-format-re.md], so an additive layer adds at
 		// full strength and DIFFUSE alpha (the alpha curve) never affects it.
 		frag_color = texel * v_primary;
-	} else if (pc.mode == 3u || pc.mode == 6u) {
+	} else if (particle_mode() == 3u || particle_mode() == 6u) {
 		float dot3 = clamp(dot(texel.rgb * 2.0 - 1.0,
 				v_primary.rgb * 2.0 - 1.0), 0.0, 1.0);
-		frag_color = vec4(vec3(dot3), texel.a * v_primary.a);
-	} else if (pc.mode == 4u || pc.mode == 5u) {
+		// SPECULARENABLE: the fixed-function pipe adds the SPECULAR vertex colour
+		// (the modulated particle RGB the lit branch writes, retail
+		// CParticleEmitter_BuildBillboardQuads @ 0x5E7489..0x5E74A3) after the
+		// texture stages; alpha is untouched.
+		frag_color = vec4(min(vec3(dot3) + v_secondary.rgb, vec3(1.0)),
+				texel.a * v_primary.a);
+	} else if (particle_mode() == 4u || particle_mode() == 5u) {
 		// Mod2x's factor-of-two comes from DESTCOLOR/SRCCOLOR blending, not
 		// from a shader approximation.
 		frag_color = texel * v_primary;
@@ -174,7 +200,15 @@ void main() {
 		float wave_x = sin(pc.theta) * 0.01953125;
 		float wave_y = cos(pc.theta) * 0.01953125;
 		float wave_z = -sin(pc.theta) * 0.01953125;
-		vec2 projective_uv = gl_FragCoord.xy / pc.viewport_size;
+		// The fragment's own screen position in the sampled texture, the
+		// FrameFX screen-texture transform: u = 0.5 ndc.x + 0.5 + half a
+		// texel of that texture (retail FrameFX_DistortionPass
+		// @ 0x5837FF..0x5838D2 builds it for its 256-square targets). Retail
+		// rasterizes pixel centres on integers, so the fragment centre steps
+		// back half a pixel; against a frame-size texture this is exactly the
+		// fragment's own texel.
+		vec2 projective_uv = (gl_FragCoord.xy - 0.5) / pc.viewport_size +
+				0.5 / vec2(textureSize(scene_texture, 0));
 		float alpha = v_primary.a;
 		vec2 scene_uv;
 		scene_uv.x = normal.x * (alpha * wave_x) +
@@ -187,10 +221,12 @@ void main() {
 				alpha * texel.a);
 	}
 	// Retail changes the fixed-function fog color per particle material:
-	// ordinary Blend/Bump/Distort use scene fog, additive families use black,
-	// Mod uses white, and Mod2x uses mid-gray. Alpha is not fogged.
-	frag_color.rgb = mix(particle_fog_target(), frag_color.rgb,
-			particle_fog_visibility());
+	// Blend uses the scene fog, Additive/Premult black, Mod white and Mod2x
+	// mid-gray; Bump, Bumpadd and Distort do not fog. Alpha is not fogged.
+	if (particle_fog_enabled()) {
+		frag_color.rgb = mix(particle_fog_target(), frag_color.rgb,
+				particle_fog_visibility());
+	}
 }
 )GLSL";
 
@@ -254,10 +290,12 @@ public:
 		int64_t framebuffer_format = -1;
 		std::uint8_t mode = 0;
 		std::uint16_t variant = 0;
+		std::uint8_t thermal = 0;
 
 		bool operator<(const PipelineKey &other) const {
-			return std::tie(framebuffer_format, mode, variant) <
-					std::tie(other.framebuffer_format, other.mode, other.variant);
+			return std::tie(framebuffer_format, mode, variant, thermal) <
+					std::tie(other.framebuffer_format, other.mode, other.variant,
+							other.thermal);
 		}
 	};
 
@@ -408,6 +446,7 @@ public:
 	void release_all() {
 		RenderingServer *server = RenderingServer::get_singleton();
 		rd = server != nullptr ? server->get_rendering_device() : nullptr;
+		release_distortion_target();
 		release_targets();
 		release_atlas();
 		release_rid(vertex_buffer);
@@ -436,11 +475,26 @@ public:
 	RID scene_snapshot_pipeline_for(int64_t framebuffer_format);
 	bool snapshot_scene_color(ViewTarget &target, std::uint32_t view);
 	RID pipeline_for(const opennova::renderer::ParticleDrawCommand &command,
-			int64_t framebuffer_format);
+			int64_t framebuffer_format,
+			opennova::renderer::ParticleThermalMaterial thermal =
+					opennova::renderer::ParticleThermalMaterial::Primary);
 	bool warm_pipelines(RenderData *render_data);
 	bool validate_submission(const ParticleWorldSubmission &submission) const;
 	bool draw(const ParticleWorldSubmission &submission,
 			RenderData *render_data);
+	bool draw_distortion(const ParticleWorldSubmission &submission,
+			const FrameFxDistortionTarget &target, std::size_t &r_draws);
+	void release_distortion_target();
+	void write_view_push_constants(const ParticleWorldSubmission &submission,
+			RenderSceneData *scene_data, std::uint32_t view, const Vector2i &size);
+
+	// FrameFX's type-0 row target: the frame colour and depth, and slot 2.
+	RID distortion_color;
+	RID distortion_depth;
+	RID distortion_framebuffer;
+	RID distortion_screen_texture;
+	RID distortion_screen_sampler;
+	RID distortion_scene_uniform_set;
 	Dictionary report() const;
 };
 
@@ -993,9 +1047,10 @@ bool ParticleCompositorEffect::Impl::snapshot_scene_color(
 
 RID ParticleCompositorEffect::Impl::pipeline_for(
 		const opennova::renderer::ParticleDrawCommand &command,
-		int64_t framebuffer_format) {
+		int64_t framebuffer_format, opennova::renderer::ParticleThermalMaterial thermal) {
 	const PipelineKey key{framebuffer_format,
-			static_cast<std::uint8_t>(command.pipeline), command.variant};
+			static_cast<std::uint8_t>(command.pipeline), command.variant,
+			static_cast<std::uint8_t>(thermal)};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
@@ -1051,6 +1106,15 @@ RID ParticleCompositorEffect::Impl::pipeline_for(
 			source_alpha = RenderingDevice::BLEND_FACTOR_DST_ALPHA;
 			destination_alpha = RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
 			break;
+	}
+	if (thermal == opennova::renderer::ParticleThermalMaterial::DarkeningModulate) {
+		// Additive's and Premult's thermal secondary blends ZERO/INVSRCCOLOR
+		// (retail CParticleTexture_InitTextureAndChannels @ 0x5E8390..0x5E83A5):
+		// the source darkens what is already drawn.
+		source_color = RenderingDevice::BLEND_FACTOR_ZERO;
+		destination_color = RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+		source_alpha = RenderingDevice::BLEND_FACTOR_ZERO;
+		destination_alpha = RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 	}
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
 	attachment.instantiate();
@@ -1123,6 +1187,14 @@ bool ParticleCompositorEffect::Impl::warm_pipelines(
 				command.pipeline =
 						static_cast<opennova::renderer::ParticlePipeline>(mode);
 				if (!pipeline_for(command, framebuffer_format).is_valid())
+					return false;
+				// The thermal frame's darkening blend is its own pipeline.
+				const opennova::renderer::ParticleThermalMaterial thermal =
+						opennova::renderer::particle_thermal_material(
+								command.pipeline, true);
+				if (thermal == opennova::renderer::ParticleThermalMaterial::
+									DarkeningModulate &&
+						!pipeline_for(command, framebuffer_format, thermal).is_valid())
 					return false;
 			}
 		}
@@ -1242,7 +1314,10 @@ bool ParticleCompositorEffect::Impl::draw(
 	for (const ViewTarget &target : targets) {
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);
 		for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
-			if (!pipeline_for(command, format).is_valid())
+			if (!pipeline_for(command, format,
+						opennova::renderer::particle_thermal_material(
+								command.pipeline, submission.thermal))
+							.is_valid())
 				return false;
 		}
 	}
@@ -1257,36 +1332,7 @@ bool ParticleCompositorEffect::Impl::draw(
 				ensure_scene_color_target(target, view);
 		bool scene_color_available = false;
 
-		// RenderSceneData::get_view_projection(view) already includes Godot's
-		// depth/Y correction and TAA jitter. Applying another depth correction
-		// makes this draw list disagree with ordinary scene geometry as the camera
-		// turns. Only the world-to-view camera inverse remains to be composed.
-		const Projection view_projection =
-				scene_data->get_view_projection(view) *
-				Projection(scene_data->get_cam_transform().affine_inverse());
-		for (std::uint32_t column = 0; column < 4; ++column) {
-			for (std::uint32_t row = 0; row < 4; ++row) {
-				write_f32(push_constants, (column * 4u + row) * 4u,
-						static_cast<float>(view_projection[column][row]));
-			}
-		}
-		write_f32(push_constants, 64, submission.camera_position[0]);
-		write_f32(push_constants, 68, submission.camera_position[1]);
-		write_f32(push_constants, 72, submission.camera_position[2]);
-		write_f32(push_constants, 76, submission.fog_end);
-		write_f32(push_constants, 80, submission.camera_forward[0]);
-		write_f32(push_constants, 84, submission.camera_forward[1]);
-		write_f32(push_constants, 88, submission.camera_forward[2]);
-		write_f32(push_constants, 92, submission.fog_start);
-		write_f32(push_constants, 96, submission.fog_color[0]);
-		write_f32(push_constants, 100, submission.fog_color[1]);
-		write_f32(push_constants, 104, submission.fog_color[2]);
-		write_f32(push_constants, 108,
-				static_cast<float>(submission.fog_type));
-		write_f32(push_constants, 112, static_cast<float>(size.x));
-		write_f32(push_constants, 116, static_cast<float>(size.y));
-		write_f32(push_constants, 120,
-				static_cast<float>(submission.time_ms) * 0.004f);
+		write_view_push_constants(submission, scene_data, view, size);
 
 		int64_t draw_list = RenderingDevice::INVALID_ID;
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);
@@ -1324,9 +1370,15 @@ bool ParticleCompositorEffect::Impl::draw(
 			}
 			const RID scene_uniform_set = scene_color_available ?
 					target.scratch_uniform_set : fallback_scene_uniform_set;
-			const std::uint32_t mode = static_cast<std::uint32_t>(command.pipeline);
+			const opennova::renderer::ParticleThermalMaterial thermal =
+					opennova::renderer::particle_thermal_material(command.pipeline,
+							submission.thermal);
+			const std::uint32_t mode = static_cast<std::uint32_t>(command.pipeline) |
+					(thermal == opennova::renderer::ParticleThermalMaterial::InvertedBlend ?
+									0x100u :
+									0u);
 			write_u32(push_constants, 124, mode);
-			const RID pipeline = pipeline_for(command, format);
+			const RID pipeline = pipeline_for(command, format, thermal);
 			const GpuAtlasPage &atlas_page =
 					gpu_atlas_pages[command.atlas_page];
 			const std::uint64_t byte_offset =
@@ -1369,6 +1421,167 @@ bool ParticleCompositorEffect::Impl::draw(
 	return true;
 }
 
+void ParticleCompositorEffect::Impl::write_view_push_constants(
+		const ParticleWorldSubmission &submission, RenderSceneData *scene_data,
+		std::uint32_t view, const Vector2i &size) {
+	// RenderSceneData::get_view_projection(view) already includes Godot's
+	// depth/Y correction and TAA jitter. Applying another depth correction
+	// makes this draw list disagree with ordinary scene geometry as the camera
+	// turns. Only the world-to-view camera inverse remains to be composed.
+	const Projection view_projection =
+			scene_data->get_view_projection(view) *
+			Projection(scene_data->get_cam_transform().affine_inverse());
+	for (std::uint32_t column = 0; column < 4; ++column) {
+		for (std::uint32_t row = 0; row < 4; ++row) {
+			write_f32(push_constants, (column * 4u + row) * 4u,
+					static_cast<float>(view_projection[column][row]));
+		}
+	}
+	write_f32(push_constants, 64, submission.camera_position[0]);
+	write_f32(push_constants, 68, submission.camera_position[1]);
+	write_f32(push_constants, 72, submission.camera_position[2]);
+	write_f32(push_constants, 76, submission.fog_end);
+	write_f32(push_constants, 80, submission.camera_forward[0]);
+	write_f32(push_constants, 84, submission.camera_forward[1]);
+	write_f32(push_constants, 88, submission.camera_forward[2]);
+	write_f32(push_constants, 92, submission.fog_start);
+	write_f32(push_constants, 96, submission.fog_color[0]);
+	write_f32(push_constants, 100, submission.fog_color[1]);
+	write_f32(push_constants, 104, submission.fog_color[2]);
+	write_f32(push_constants, 108,
+			static_cast<float>(submission.fog_type));
+	write_f32(push_constants, 112, static_cast<float>(size.x));
+	write_f32(push_constants, 116, static_cast<float>(size.y));
+	write_f32(push_constants, 120,
+			static_cast<float>(submission.time_ms) * 0.004f);
+}
+
+void ParticleCompositorEffect::Impl::release_distortion_target() {
+	release_uniform_set_rid(distortion_scene_uniform_set);
+	release_framebuffer_rid(distortion_framebuffer);
+	distortion_color = RID();
+	distortion_depth = RID();
+	distortion_screen_texture = RID();
+	distortion_screen_sampler = RID();
+}
+
+// The effect world's flag-4 pass inside FrameFX's type-0 row: the distortion
+// subset draws over the finished frame with texture slot 2 = the row's 256A
+// work target (retail FrameFX_DistortionPass @ 0x5838F8 -> the flag-4 tail of
+// EffectWorld_RenderDistortionPass @ 0x5F72F7). Depth-tested against the frame,
+// no depth write, each command through its own material as in the scene
+// passes (the thermal word the main scene stored persists into this pass).
+bool ParticleCompositorEffect::Impl::draw_distortion(
+		const ParticleWorldSubmission &submission, const FrameFxDistortionTarget &target,
+		std::size_t &r_draws) {
+	if (submission.commands.empty())
+		return true;
+	if (!initialize_rd() || !validate_submission(submission) ||
+			!ensure_atlas(submission.atlas) ||
+			!ensure_vertex_buffer(submission.triangle_vertices))
+		return false;
+	RenderSceneData *scene_data = target.render_data != nullptr ?
+			target.render_data->get_render_scene_data() : nullptr;
+	if (scene_data == nullptr || !target.color.is_valid() || !target.depth.is_valid() ||
+			!target.screen_texture.is_valid() || !target.screen_sampler.is_valid()) {
+		set_failure("The FrameFX distortion target is incomplete",
+				"distortion_target_invalid");
+		return false;
+	}
+	if (distortion_color != target.color || distortion_depth != target.depth ||
+			!distortion_framebuffer.is_valid() ||
+			!rd->framebuffer_is_valid(distortion_framebuffer)) {
+		release_framebuffer_rid(distortion_framebuffer);
+		TypedArray<RID> attachments;
+		attachments.push_back(target.color);
+		attachments.push_back(target.depth);
+		distortion_framebuffer = rd->framebuffer_create(attachments);
+		if (!distortion_framebuffer.is_valid() ||
+				!rd->framebuffer_is_valid(distortion_framebuffer)) {
+			set_failure("Could not create the distortion framebuffer",
+					"distortion_target_invalid");
+			release_distortion_target();
+			return false;
+		}
+		distortion_color = target.color;
+		distortion_depth = target.depth;
+	}
+	if (distortion_screen_texture != target.screen_texture ||
+			distortion_screen_sampler != target.screen_sampler ||
+			!distortion_scene_uniform_set.is_valid() ||
+			!rd->uniform_set_is_valid(distortion_scene_uniform_set)) {
+		release_uniform_set_rid(distortion_scene_uniform_set);
+		TypedArray<Ref<RDUniform>> uniforms;
+		uniforms.push_back(sampled_texture_uniform(0, target.screen_sampler,
+				target.screen_texture));
+		distortion_scene_uniform_set = rd->uniform_set_create(uniforms, shader, 1);
+		if (!distortion_scene_uniform_set.is_valid()) {
+			set_failure("Could not bind the distortion screen texture",
+					"distortion_target_invalid");
+			release_distortion_target();
+			return false;
+		}
+		distortion_screen_texture = target.screen_texture;
+		distortion_screen_sampler = target.screen_sampler;
+	}
+	const Ref<RDTextureFormat> color_format = rd->texture_get_format(target.color);
+	if (color_format.is_null()) {
+		set_failure("The distortion colour target has no format",
+				"distortion_target_invalid");
+		return false;
+	}
+	const Vector2i size(static_cast<int32_t>(color_format->get_width()),
+			static_cast<int32_t>(color_format->get_height()));
+	const int64_t format = rd->framebuffer_get_format(distortion_framebuffer);
+	for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
+		if (!pipeline_for(command, format,
+					opennova::renderer::particle_thermal_material(
+							command.pipeline, submission.thermal))
+						.is_valid())
+			return false;
+	}
+	write_view_push_constants(submission, scene_data, target.view, size);
+	const int64_t draw_list = rd->draw_list_begin(distortion_framebuffer);
+	if (draw_list == RenderingDevice::INVALID_ID) {
+		set_failure("RenderingDevice could not begin the distortion draw list",
+				"draw_list_failed");
+		return false;
+	}
+	std::size_t drawn = 0;
+	for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
+		const opennova::renderer::ParticleThermalMaterial thermal =
+				opennova::renderer::particle_thermal_material(command.pipeline,
+						submission.thermal);
+		const std::uint32_t mode = static_cast<std::uint32_t>(command.pipeline) |
+				(thermal == opennova::renderer::ParticleThermalMaterial::InvertedBlend ?
+								0x100u :
+								0u);
+		write_u32(push_constants, 124, mode);
+		const GpuAtlasPage &atlas_page = gpu_atlas_pages[command.atlas_page];
+		vertex_offsets[0] = static_cast<int64_t>(
+				static_cast<std::uint64_t>(command.first_quad) *
+				kTriangleVerticesPerQuad * kRetailVertexStride);
+		rd->draw_list_bind_render_pipeline(draw_list, pipeline_for(command, format, thermal));
+		rd->draw_list_bind_uniform_set(draw_list, atlas_page.uniform_set, 0);
+		rd->draw_list_bind_uniform_set(draw_list, distortion_scene_uniform_set, 1);
+		rd->draw_list_bind_vertex_buffers_format(draw_list, vertex_format,
+				command.quad_count * kTriangleVerticesPerQuad, vertex_buffers,
+				vertex_offsets);
+		rd->draw_list_set_push_constant(draw_list, push_constants, kPushConstantBytes);
+		rd->draw_list_draw(draw_list, false, 1);
+		++drawn;
+	}
+	rd->draw_list_end();
+	r_draws += drawn;
+	std::lock_guard<std::mutex> lock(diagnostics_mutex);
+	diagnostics.status = "drawn";
+	diagnostics.failure.clear();
+	diagnostics.drawn_frame_id = submission.frame_id;
+	diagnostics.drawn_commands = drawn;
+	diagnostics.gpu_draw_calls = drawn;
+	return true;
+}
+
 Dictionary ParticleCompositorEffect::Impl::report() const {
 	std::lock_guard<std::mutex> lock(diagnostics_mutex);
 	RenderingServer *server = RenderingServer::get_singleton();
@@ -1392,7 +1605,7 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 	result["fog_source"] = "immutable_opennova_environment_snapshot";
 	result["fog_distance_policy"] = "type0_eye_depth_else_radial";
 	result["fog_material_targets"] =
-			"scene,black,black,scene,white,gray127,black,scene";
+			"scene,black,black,none,white,gray127,none,none";
 	result["view_projection_source"] = "render_scene_data_corrected";
 	result["adds_view_projection_depth_correction"] = false;
 	result["scene_color_copy_policy"] = "before_each_distortion_run";
@@ -1466,6 +1679,17 @@ ParticleCompositorEffect::~ParticleCompositorEffect() = default;
 void ParticleCompositorEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&ParticleCompositorEffect::get_backend_report);
+}
+
+bool ParticleCompositorEffect::draw_distortion_set(const FrameFxDistortionTarget &p_target,
+		std::size_t &r_draws) {
+	if (!impl_ || impl_->shutdown_requested.load(std::memory_order_acquire) ||
+			impl_->hidden.load(std::memory_order_acquire))
+		return true;
+	const std::shared_ptr<const ParticleWorldSubmission> submission = impl_->snapshot();
+	if (!submission)
+		return true;
+	return impl_->draw_distortion(*submission, p_target, r_draws);
 }
 
 void ParticleCompositorEffect::publish(

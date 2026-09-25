@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <runtime/world/death_piece_draw.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/present_drains.h>
 
@@ -56,7 +57,9 @@ class Simulation;
 //    standing, the witnessed fallback);
 //  pieces: Entity_SpawnDeathPieces @ 0x493400 -> the 256-slot pool ticked by
 //    DeathPiece_TickAll @ 0x57b900 (each piece renders ONE husk section with a
-//    per-type trail effect from g_death_piece_types @ 0x8404f0);
+//    per-type trail effect from g_death_piece_types @ 0x8404f0); the draw is
+//    the occlusion frame's collect (world/death_piece_draw.h) applied by
+//    apply_piece_draws;
 //  section debris: Entity_SpawnSectionDebris @ 0x43f580 — collision-face
 //    centroid sampling at stride (scale<<8)/150, Effect_TreeWoodExp per tri
 //    (material 17 -> Effect_TreeFoliageExp), directions away from the blast;
@@ -65,11 +68,10 @@ class Simulation;
 //    family's random crackle Effect_BoatExpSec + EXPLO_SHIP_SM, underwater
 //    steam-out Effect_Boat01Steam).]
 //
-// Remaining stand-ins (tracked in the §24 record + D-ITEM ledger rows): pieces
-// draw as their type's trail effect following the sim piece (the single-section
-// husk MESH chunk needs per-part render instancing); effect anchors ride the
-// entity origin, not the husk Dead/Fire/Other user points. Section debris and
-// glass already arrive as resolved transient effect rows from the simulation.
+// Remaining stand-ins (tracked in the §24 record + D-ITEM ledger rows): effect
+// anchors ride the entity origin, not the husk Dead/Fire/Other user points.
+// Section debris and glass already arrive as resolved transient effect rows
+// from the simulation.
 //
 // The husk render pick, the presentation identity key and the settle tilt
 // retention are the engine's (runtime/world/present_passes.h); the owner-key
@@ -105,6 +107,17 @@ public:
 	// present() drains the typed sim; tests feed the same event/piece rows.
 	void present_drained(const opennova::world::DestructionEvents &p_events,
 			const std::vector<opennova::world::DeathPieceRow> &p_pieces);
+	// The frame's piece draws (the occlusion frame's collect): each drawn
+	// piece's model shows its level with every other section collapsed,
+	// placed by the section draw's matrix; every other piece model hides.
+	// Rows whose slot generation is not the presented one are skipped.
+	void apply_piece_draws(const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	// A piece slot's model (null when the slot presents none).
+	ObjectModel *piece_model(int p_slot) const;
+	// The section draw's matrix in Godot space: the piece pose (the BAM
+	// heading, pitch, roll) scaled at the piece position, times the drawn
+	// section's centre moved to the origin when the draw pivots.
+	static Transform3D piece_draw_transform(const opennova::world::DeathPieceDraw &p_draw);
 	// Whether an owned fire-family effect is still registered for retail wreck
 	// crackle updates. The owner key is the same public identity used by the
 	// effect-anchor registry.
@@ -169,6 +182,8 @@ private:
 	void apply_sound(const String &p_name, const Vector3 &p_pos);
 	void present_pieces(const std::vector<opennova::world::DeathPieceRow> &p_pieces);
 	void unregister_piece_anchor(int p_slot);
+	ObjectModel *build_piece_model(int p_slot, int p_item_id);
+	void free_piece_model(int p_slot);
 	void unregister_effect_anchor(const Variant &p_key);
 	void tick_wreck_fires();
 
@@ -189,6 +204,7 @@ private:
 	HashSet<String> wreck_anchor_keys_;         // registered wreck owner keys
 	HashMap<int, Vector3> piece_pos_;           // piece slot -> Vector3 (anchor resolver source)
 	HashMap<int, int64_t> piece_generation_;    // piece slot -> presented allocation generation
+	HashMap<int, ObjectID> piece_models_;       // piece slot -> its piece model (invalid = none)
 	int64_t stat_husk_swaps_ = 0;
 	int64_t stat_no_husk_ = 0;
 	int64_t stat_pieces_peak_ = 0;

@@ -153,9 +153,8 @@ void RenderWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				static_cast<long long>(f.silhouette_anchors_input),
 				static_cast<long long>(f.runtime_detail_intents),
 				static_cast<long long>(f.runtime_silhouette_intents));
-		ImGui::Text("mesh cache: detail %lld hits / %lld uploads, models %lld / %lld",
-				static_cast<long long>(f.detail_mesh_hits), static_cast<long long>(f.detail_mesh_uploads),
-				static_cast<long long>(f.model_mesh_hits), static_cast<long long>(f.model_mesh_uploads));
+		ImGui::Text("detail mesh cache: %lld hits / %lld uploads",
+				static_cast<long long>(f.detail_mesh_hits), static_cast<long long>(f.detail_mesh_uploads));
 	}
 	if (snapshot_.lights_valid && ImGui::CollapsingHeader("Point lights")) {
 		ImGui::Text("live %lld | high water %lld | last query %lld",

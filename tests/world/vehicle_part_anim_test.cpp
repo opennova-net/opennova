@@ -801,11 +801,31 @@ void test_water_wake_ring_lifetime_and_geometry() {
 	r::compile_water_wakes(pool, 65536, 64, camera, frame);
 	CHECK(frame.vertices.size() == 171 && frame.indices.size() == 864,
 			"water rings use nineteen angular columns and nine radial rows");
-	CHECK(std::abs(frame.vertices.front().z - 2.25f) < 0.00001f &&
+	// The ring is built in the render frame as (sin * r, 0, cos * r)
+	// [orig: WaterRing_BuildMesh @ 0x5de01d..0x5de03e] and lands here
+	// through the render -> presentation x/z swap: column 0 steps along +x,
+	// column 1 turns 20 degrees toward +z.
+	CHECK(std::abs(frame.vertices.front().x - 2.25f) < 0.00001f &&
+					std::abs(frame.vertices.front().z - 2.0f) < 0.00001f &&
 					std::abs(frame.vertices.front().y - 1.03125f) < 0.00001f &&
 					frame.vertices.front().u == 0.125f && frame.vertices.front().v == -0.75f,
 			"ring geometry carries the water depth bias and animated first UV");
-	CHECK(std::abs(frame.vertices[8 * 19].z - 22.25f) < 0.00001f && frame.vertices[8 * 19].v2 == 1,
+	CHECK(std::abs(frame.vertices[1].x - (2.0f + 0.25f * std::cos(0.34906587f))) < 0.00001f &&
+					std::abs(frame.vertices[1].z - (2.0f + 0.25f * std::sin(0.34906587f))) <
+							0.00001f,
+			"the ring's angular sense follows the render frame through the x/z swap");
+	{
+		// Retail's triangles are clockwise seen from above in the left-handed
+		// render frame (the device's default CCW cull keeps them); the x/z swap
+		// into the right-handed presentation frame keeps them clockwise from
+		// above, so (b - a) x (c - a) points down there.
+		const auto &a = frame.vertices[frame.indices[0]];
+		const auto &b = frame.vertices[frame.indices[1]];
+		const auto &c = frame.vertices[frame.indices[2]];
+		const float normal_y = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
+		CHECK(normal_y < 0.0f, "the ring's front faces point up");
+	}
+	CHECK(std::abs(frame.vertices[8 * 19].x - 22.25f) < 0.00001f && frame.vertices[8 * 19].v2 == 1,
 			"outer ring reaches the authored twenty-unit gradient edge");
 	for (int i = 0; i < 20; ++i)
 		pool.tick();

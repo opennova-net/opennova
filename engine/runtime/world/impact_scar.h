@@ -300,7 +300,7 @@ public:
 	// The death clear [orig: Scar_ClearEntriesByEntity @0x5ccec0 — zeroes the
 	// owner dword of every shared-ring slot this entity wrote (256 slots at
 	// 0x2BDB7FC, stride 64) and memsets the entity's own ring, releasing it;
-	// called from Entity_Destroy @0x43e8e4 and Entity_AttachToVehicle @0x43c155].
+	// called from Entity_Destroy @0x43e8e4 and Entity_AttachCarriedObject @0x43c155].
 	void clear_entity(EntityHandle owner);
 	void reset();
 	int leased_count() const;

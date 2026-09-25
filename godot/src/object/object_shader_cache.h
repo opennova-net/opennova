@@ -55,6 +55,7 @@ public:
 	void set_water_plane(float height, bool camera_above);
 	void clear_water_plane();
 	bool has_water_plane() const;
+	float get_water_plane_height() const { return water_split_height; }
 	// Advances only when the plane (height, camera side, presence) actually
 	// changes; strip classifiers compare it to skip frames where nothing the
 	// ladder depends on moved.

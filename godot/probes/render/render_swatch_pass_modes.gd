@@ -128,15 +128,15 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 
 	var rs := RenderingServer
 	rs.global_shader_parameter_set("opennova_water_height", 0.1)
-	rs.global_shader_parameter_set("opennova_water_reflection_eye", camera.position)
+	var beauty_mask := camera.cull_mask
 	var captures := {}
-	var states := ["inactive", "disarmed", "wrong_eye", "reflection"]
+	# The reflected pass is the camera whose mask omits the water layer: the
+	# same water plane leaves a beauty camera unclipped.
+	var states := ["inactive", "beauty", "reflection"]
 	for state in states:
 		rs.global_shader_parameter_set("opennova_water_active", state != "inactive")
-		rs.global_shader_parameter_set("opennova_water_reflection_clip_active",
-				state == "wrong_eye" or state == "reflection")
-		rs.global_shader_parameter_set("opennova_water_reflection_eye",
-				camera.position + (Vector3(2.0, 0.0, 0.0) if state == "wrong_eye" else Vector3.ZERO))
+		camera.cull_mask = Water.REFLECTION_CULL_MASK if state == "reflection" \
+				else beauty_mask
 		var frame: Image = await _capture_lighting_image()
 		if frame == null:
 			_sink.error("render_swatch_probe clip: no viewport image for %s" % state)
@@ -173,10 +173,8 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 				captures["inactive"], captures["reflection"], bottom_rect)
 		var reflection_top_delta := RenderSwatchSupport.lighting_mean_delta(
 				captures["inactive"], captures["reflection"], top_rect)
-		var disarmed_delta := RenderSwatchSupport.lighting_mean_delta(
-				captures["inactive"], captures["disarmed"], bottom_rect)
-		var wrong_eye_delta := RenderSwatchSupport.lighting_mean_delta(
-				captures["inactive"], captures["wrong_eye"], bottom_rect)
+		var beauty_delta := RenderSwatchSupport.lighting_mean_delta(
+				captures["inactive"], captures["beauty"], bottom_rect)
 		var clip_expected: bool = str(entry["clip_class"]) in ["explicit",
 				"explicit_unskinned_or_submit_skip_skinned"]
 		reports.append({
@@ -185,8 +183,7 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 			"inactive_bottom_luma": inactive_bottom_luma,
 			"reflection_bottom_delta": reflection_bottom_delta,
 			"reflection_top_delta": reflection_top_delta,
-			"disarmed_bottom_delta": disarmed_delta,
-			"wrong_eye_bottom_delta": wrong_eye_delta,
+			"beauty_bottom_delta": beauty_delta,
 		})
 		if inactive_bottom_luma < 0.012:
 			failures.append("%s was not visible before clipping (%f)" % [
@@ -194,21 +191,18 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 		RenderSwatchSupport.channel_expect_delta(failures, entry["name"], "reflection CLIP",
 				reflection_bottom_delta, clip_expected, 0.012, 0.001)
 		if reflection_top_delta > 0.001:
-			failures.append("%s clipped above waterHeight-0.1 (%f)" % [
+			failures.append("%s clipped above waterHeight (%f)" % [
 					entry["name"], reflection_top_delta])
-		if disarmed_delta > 0.001:
-			failures.append("%s clipped while reflection CLIP was disarmed (%f)" % [
-					entry["name"], disarmed_delta])
-		if wrong_eye_delta > 0.001:
-			failures.append("%s clipped an unrelated camera (%f)" % [
-					entry["name"], wrong_eye_delta])
+		if beauty_delta > 0.001:
+			failures.append("%s clipped a camera that draws the water layer (%f)" % [
+					entry["name"], beauty_delta])
 
 	var manifest := {
 		"version": 1,
 		"probe": "object-water-reflection-clip",
 		"window": [1280, 360],
 		"water_height": 0.1,
-		"retail_clip_plane": 0.0,
+		"retail_clip_plane": 0.1,
 		"technique_count": entries.size(),
 		"states": states,
 		"techniques": reports,
@@ -228,8 +222,6 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 
 func _clip_probe_disarm() -> void:
 	RenderingServer.global_shader_parameter_set("opennova_water_active", false)
-	RenderingServer.global_shader_parameter_set(
-			"opennova_water_reflection_clip_active", false)
 
 
 # Raster proof for the retail skinned MATCHTERRAIN technique. Retail draws a

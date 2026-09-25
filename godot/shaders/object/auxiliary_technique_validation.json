@@ -56,7 +56,7 @@
         {"path": "godot/src/render/q3_geometry_cache.cpp", "tokens": ["skin_channels", "transform_uv(uv2)"]},
         {"path": "engine/runtime/renderer/object_shader_template.cpp", "tokens": ["object_projected_shadow_coverage", "ObjectProjectedShadowCoverage::DiffuseAlphaFfp", "ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp", "ObjectProjectedShadowCoverage::DiffuseAlpha"]},
         {"path": "godot/src/render/slot_capture_adapter.cpp", "tokens": ["EFFECT_CALLBACK_TYPE_PRE_OPAQUE", "kSlotCaptureClearArgb", "RenderingDevice::TEXTURE_SAMPLES_4", "texture_resolve_multisample(", "frag_color = vec4(0.0, 0.0, 0.0, alpha);", "BLEND_FACTOR_SRC_ALPHA"]},
-        {"path": "godot/src/env/slot_shadow.cpp", "tokens": ["silhouette_capture_basis", "kSilhouetteCaptureNear", "SlotCaptureRequest"]},
+        {"path": "godot/src/env/slot_shadow.cpp", "tokens": ["slot_capture_view_axes", "kSilhouetteCaptureNear", "SlotCaptureRequest"]},
         {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["SlotShadow.new()", "get_capture_image(", "slot_no_pass_surfaces", "slot_blended_commands", "invented a PROJSHAD pass"]}
       ],
       "raster_probes": ["projshadow"],
@@ -90,12 +90,19 @@
       "manifest_contracts": ["techniques[].clip_class"],
       "source_evidence": [
         {"file": "_FFP.fx", "symbols": ["technique TBoringFFPClip", "TexClip1D", "MatTexClipPlane"]},
-        {"file": "Glass.fx", "symbols": ["technique TGlassFFP_clip", "TECHNIQUE_CLIP"]}
+        {"file": "Glass.fx", "symbols": ["technique TGlassFFP_clip", "TECHNIQUE_CLIP"]},
+        {"file": "PhongT.fx", "symbols": ["technique TSegTanDiff_Clip", "vscTanBaseDot3HemiClip", "vscPostMultiplyT1Clip"]},
+        {"file": "Dot3DiffT.fx", "symbols": ["technique TSegTanDiff_Clip", "DotProduct3", "TextureFactor"]},
+        {"file": "Dot3DiffO.fx", "symbols": ["technique TSegObjDiff_clip", "vscObjBaseDot3HemiClip"]},
+        {"file": "BDiffT2.fx", "symbols": ["technique TSegTanDiff_Clip", "vscTanDot3PointClip"]}
       ],
       "runtime_evidence": [
-        {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["OBJ_CLIP_EXPLICIT", "OBJ_CLIP_EXPLICIT_UNSKINNED_OR_SUBMIT_SKIP_SKINNED", "opennova_water_height - 0.1"]},
+        {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["OBJ_CLIP_EXPLICIT", "OBJ_CLIP_EXPLICIT_UNSKINNED_OR_SUBMIT_SKIP_SKINNED", "v_world_pos.y < opennova_water_height", "v_water_mirror_pass"]},
+        {"path": "godot/shaders/object/surface.gdshaderinc", "tokens": ["obj_evaluate_ffp_clip_surface", "v_ff_clip_diffuse", "128.0 / 255.0"]},
+        {"path": "godot/shaders/object/fog/regular.gdshaderinc", "tokens": ["OBJ_CLIP_FOG_GRAY", "127.0 / 255.0", "OBJ_CLIP_DOT3"]},
+        {"path": "godot/shaders/object/surface.gdshaderinc", "tokens": ["obj_evaluate_dot3_clip_surface", "obj_dot3_clip_point", "2.0 * source * target"]},
         {"path": "godot/shaders/object/pipeline_manifest.json", "tokens": ["\"clip_class\": \"normal_fallback\"", "\"clip_class\": \"skinned_submit_skip\""]},
-        {"path": "godot/src/env/water.cpp", "tokens": ["opennova_water_reflection_eye", "opennova_water_reflection_clip_active"]},
+        {"path": "godot/src/render/visual_layers.h", "tokens": ["REFLECTION_CULL_MASK"]},
         {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["object-water-reflection-clip", "reflection CLIP"]}
       ],
       "raster_probes": ["clip"],
@@ -114,7 +121,7 @@
       "runtime_evidence": [
         {"path": "docs/render/render-material-re.md", "tokens": ["LUM effects copy their NORMAL pass block into the GLOW slot"]},
         {"path": "godot/src/render/q3_frame_adapter.cpp", "tokens": ["kQ3GlassWhiteLobePower", "kQ3GlassWarmLobePower", "Q3Technique::RotatedSpecularGlass", "Q3Technique::NormalCopy", "self_lum_color", "vec3 lit = base * pc.draw_color.rgb;"]},
-        {"path": "godot/src/render/frame_fx.cpp", "tokens": ["FramePass::AverageFour", "FramePass::WeightedFour", "FramePass::FinalAverage", "BlendMode::SourceAlphaAdd"]},
+        {"path": "godot/src/render/frame_fx.cpp", "tokens": ["FramePass::Weighted", "FramePass::Average", "BlendMode::SourceAlphaAdd"]},
         {"path": "godot/game/world/game_world.tscn", "tokens": ["type=\"FrameFx\""]},
         {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["glow_off_away", "sun glint", "no-pass contracts"]}
       ],

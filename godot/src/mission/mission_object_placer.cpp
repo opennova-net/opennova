@@ -114,6 +114,10 @@ void MissionObjectPlacer::_bind_methods() {
 			D_METHOD("update_static_lods", "camera_transform",
 					"vertical_fov_degrees", "viewport_width", "viewport_height"),
 			&MissionObjectPlacer::update_static_lods);
+	ClassDB::bind_method(D_METHOD("set_static_instance_occlusion_hidden", "bms_id", "hidden"),
+			&MissionObjectPlacer::set_static_instance_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("clear_static_instance_occlusion"),
+			&MissionObjectPlacer::clear_static_instance_occlusion);
 	ClassDB::bind_method(D_METHOD("get_static_instance_lod", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_lod);
 	ClassDB::bind_method(
@@ -1060,6 +1064,11 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 		model->set_authored_lod_enabled(true);
 		model->set_authored_occluders_enabled(kind == MissionData::KIND_BUILDING &&
 				_has_occlusion_records(item_id));
+		// A building draws in the mirror's building pass, every other placed
+		// entity in its first entity wave (runtime/environment/water_mirror.h).
+		model->set_water_mirror_clip_wave(kind == MissionData::KIND_BUILDING ?
+						opennova::env::MirrorClipWave::kSectorModel :
+						opennova::env::MirrorClipWave::kEntity);
 		// Drive the build explicitly (not via _ready) so it is independent
 		// of when place() runs relative to the main loop.
 		model->set_object_data(data);
@@ -1516,11 +1525,6 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 					_item_projection_zero_center(p_item_id));
 		}
 	}
-	String decal_texture;
-	Vector4 decal_dims;
-	if (item_db_->get_shadow_decal(p_item_id, decal_texture, decal_dims)) {
-		p_model->set_slot_shadow_decal(decal_texture, decal_dims);
-	}
 	// The static tile pass must ignore the visible model's portal/section
 	// mask; eligible mission entities get independent all-section siblings
 	// after their visible model is built.
@@ -1532,12 +1536,13 @@ void MissionObjectPlacer::_configure_item_lighting(ObjectModel *p_model,
 	if (p_model == nullptr || item_db_.is_null()) {
 		return;
 	}
-	// Retail's building collector marks ROBJ 1+ as interior-lighting entries
-	// while ROBJ 0 remains the exterior shell. Only portal buildings take
-	// this model-section path (witness: placement_traits.h ledger,
-	// per-section building visibility).
-	if (item_db_->get_item_type(p_item_id) != ItemDatabase::TYPE_BUILDING ||
-			!_has_occlusion_records(p_item_id)) {
+	// Every type-5 building draws only through the building batch, which
+	// pushes its own ItemDef+0x218 daylight and submits with 0x40; the rigid
+	// collector marks ROBJ 1+ as interior-lighting entries while ROBJ 0 stays
+	// the exterior shell -- portal or not (retail Terrain_RenderSectorModels
+	// @0x5c5df2..0x5c5e00, push 40h @0x5c5f1f; collect_render_objects_for_batch
+	// @0x5d9156..0x5d9162; the rule is renderer::static_row_entity_lighting).
+	if (item_db_->get_item_type(p_item_id) != ItemDatabase::TYPE_BUILDING) {
 		return;
 	}
 	p_model->set_interior_section_light_transfer(
@@ -1643,7 +1648,8 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 			const Threedi3di3 &native_model = data->native_model();
 			const int lod_count = MAX(1, static_cast<int>(native_model.lod_count));
 			for (int lod = 0; lod < lod_count; ++lod) {
-				profile.thresholds_q16.push_back(native_model.lods[lod].lod_threshold);
+				profile.thresholds_q16.push_back(opennova::renderer::rlod_threshold_q16_from_rmdl(
+						native_model.lods[lod].lod_threshold));
 			}
 			profile.projection_sphere =
 					opennova::world::collision_projection_sphere_from_3di(native_model);
@@ -1721,13 +1727,38 @@ void MissionObjectPlacer::_complete_static_lod_profile(
 int MissionObjectPlacer::update_static_lods(
 		const Transform3D &p_camera_transform, float p_vertical_fov_degrees,
 		float p_viewport_width, float p_viewport_height) {
-	static_lod_switches_ = 0;
-	if (static_lod_instances_.is_empty()) {
-		return 0;
-	}
 	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
 			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
-	if (!frame.valid) {
+	return update_static_lod_views(&frame, 1);
+}
+
+void MissionObjectPlacer::set_static_instance_occlusion_hidden(int p_bms_id, bool p_hidden) {
+	const auto *rec = static_sources_.instance(p_bms_id);
+	if (rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return;
+	}
+	static_lod_instances_.ptrw()[rec->lod_instance].occlusion_hidden = p_hidden;
+}
+
+void MissionObjectPlacer::clear_static_instance_occlusion() {
+	StaticLodInstance *instances = static_lod_instances_.ptrw();
+	for (int row = 0; row < static_lod_instances_.size(); ++row) {
+		instances[row].occlusion_hidden = false;
+	}
+}
+
+int MissionObjectPlacer::update_static_lod_views(const ObjectLodFrame *p_frames,
+		int p_frame_count) {
+	static_lod_switches_ = 0;
+	if (static_lod_instances_.is_empty() || p_frames == nullptr) {
+		return 0;
+	}
+	int valid_frames = 0;
+	for (int f = 0; f < p_frame_count; ++f) {
+		valid_frames += p_frames[f].valid ? 1 : 0;
+	}
+	if (valid_frames == 0) {
 		return 0;
 	}
 	// The touched set allocates only when a slot actually moves; a frame
@@ -1745,17 +1776,33 @@ int MissionObjectPlacer::update_static_lods(
 				instance.profile >= static_lod_profiles_.size()) {
 			continue;
 		}
-		int32_t radius_q16 = 0;
-		if (!frame.project_q16(instance.origin, instance.radius_q16, radius_q16)) {
-			continue;
-		}
+		// An instance the occlusion frame culled draws at no level.
 		int next_lod = -1;
-		if (radius_q16 > opennova::renderer::kObjectLodSubPixelCullQ16) {
-			const StaticLodProfile &profile =
-					static_lod_profiles_[instance.profile];
-			next_lod = opennova::renderer::select_object_lod(
-					profile.thresholds_q16, radius_q16, frame.projection_scale,
-					profile.available).lod_index;
+		if (!instance.occlusion_hidden) {
+			bool projected_any = false;
+			for (int f = 0; f < p_frame_count; ++f) {
+				const ObjectLodFrame &frame = p_frames[f];
+				int32_t radius_q16 = 0;
+				if (!frame.valid ||
+						!frame.project_q16(instance.origin, instance.radius_q16, radius_q16)) {
+					continue;
+				}
+				projected_any = true;
+				if (opennova::renderer::object_subpixel_culled(radius_q16)) {
+					continue;
+				}
+				const StaticLodProfile &profile =
+						static_lod_profiles_[instance.profile];
+				const int lod = opennova::renderer::select_object_lod(
+						profile.thresholds_q16, radius_q16, frame.projection_scale,
+						profile.available).lod_index;
+				if (lod >= 0 && (next_lod < 0 || lod < next_lod)) {
+					next_lod = lod;
+				}
+			}
+			if (!projected_any) {
+				continue;
+			}
 		}
 		if (next_lod == instance.active_lod) {
 			continue;

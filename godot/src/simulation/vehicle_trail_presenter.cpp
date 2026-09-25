@@ -62,6 +62,10 @@ void VehicleTrailPresenter::sync_fixed_tick_effects() {
 			options.instantiate();
 			options->set_source_tick(effect.source_tick);
 			options->set_force_zone(effect.force_zone);
+			// The vehicle is the descriptor tag (retail
+			// Entity_ProcessWheeledVehiclePhysics @ 0x47757B and its siblings):
+			// the section gate applies; the zone groups below carry none.
+			options->set_section_tagged(true);
 			effect_world->spawn_effect_request(opennova::to_gd(effect.effect),
 					EffectWorld::forward_pose(pos, dir), options);
 		}

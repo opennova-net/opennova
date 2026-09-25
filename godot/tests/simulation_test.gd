@@ -587,7 +587,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.occlusion_init_mission()
 	assert_true(sim.step())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
 	# The full verdict set through the delta forms: a baseline reset re-arms
 	# the complete emission (the same walk the occlusion frame consumes).
@@ -605,7 +605,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.set_runtime_profiling_enabled(true)
 	assert_true(sim.is_runtime_profiling_enabled())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	sim.reset_occlusion_apply_baseline()
 	assert_eq(sim.get_building_visibility_changes(), unprofiled_buildings,
 			"profiling does not change building submission")
@@ -664,7 +664,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	_assert_native_runtime_timings_zero(sim.get_runtime_perf_counters())
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	assert_true(sim.step())
 	sim.get_present_snapshot()
 	counters = sim.get_runtime_perf_counters()
@@ -4012,26 +4012,57 @@ end
 
 
 
+# A camera 12 units south of the fixture spawn (24, 0, -12), looking at it
+# down -Z; the default IDENTITY camera stands off to its side.
+const _ANCHOR_CAMERA := Transform3D(Basis(), Vector3(24.0, 2.0, 0.0))
+
+
+func _occlusion_frame(sim: Simulation, camera: Transform3D = Transform3D.IDENTITY) -> void:
+	sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+
+
 func test_foliage_mask_anchors_track_local_player_stance() -> void:
 	# The hide-in-grass selection: only infantry with a stance bit set
 	# ((net_stance_bits & 0x3) != 0) and no groundEntity anchor the distant
 	# MODEL/depth-mask foliage tier [orig: Terrain_RenderSectorEntitiesBySide
 	# @ 0x5c7dc2/0x5c7ded (MoveOrder & 0x300), groundEntity gate
 	# @ 0x5c7dd5..0x5c7df7]. The local player's SELECT latches are the stance
-	# writer [orig: Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd].
+	# writer [orig: Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd]. The
+	# occlusion frame selects the anchors.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	var spawn := Vector3(24.0, 0.0, -12.0)
 	assert_true(sim.spawn_local_player(spawn, 0.0, 1))
+	# The player's visual item (105310, graphic US01) over the synthetic
+	# person model gives the body its entity+0 bound radius, which the
+	# collector's person leg projects.
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/person.3di", "US01.3di")
+	_native_asset_root(sim, dir)
+	assert_gt(sim.resolve_collision_instances(item_db), 0)
+	sim.occlusion_init_mission()
 
 	sim.step()
+	_occlusion_frame(sim, _ANCHOR_CAMERA)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"a STANDING infantry entity never anchors the silhouette tier")
 
 	assert_true(sim.request_local_player_stance(1))  # crouch (SELECT 169)
 	sim.step()
+	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
+		"the anchors are the last occlusion frame's, not the tick's")
+	# The collector gates the local player like any other person: turned
+	# away, the crouched body is not collected and anchors nothing
+	# [orig: collect_visible_entities_for_terrain @ 0x5c8c60, no
+	# local-player exception].
+	_occlusion_frame(sim, Transform3D(Basis(Vector3.UP, PI), _ANCHOR_CAMERA.origin))
+	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
+		"a crouched local player outside the view is not collected")
+	_occlusion_frame(sim, _ANCHOR_CAMERA)
 	var crouched: PackedVector3Array = sim.get_foliage_mask_anchor_positions()
 	assert_eq(crouched.size(), 1, "the crouched local player anchors the silhouette tier")
 	if crouched.size() == 1:
@@ -4041,11 +4072,13 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 
 	assert_true(sim.request_local_player_stance(2))  # prone (SELECT 170)
 	sim.step()
+	_occlusion_frame(sim, _ANCHOR_CAMERA)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 1,
 		"prone anchors too - both MoveOrder stance bits gate the tier")
 
 	assert_true(sim.request_local_player_stance(0))  # stand (SELECT 172)
 	sim.step()
+	_occlusion_frame(sim, _ANCHOR_CAMERA)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"standing back up empties the anchor list")
 
@@ -4059,8 +4092,10 @@ func test_foliage_mask_anchors_ignore_standing_npcs() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()
 	assert_eq(sim.get_entity_count(), 2, "the demo mission has AI infantry to reject")
+	sim.occlusion_init_mission()
 	for _i in range(4):
 		sim.step()
+		_occlusion_frame(sim)
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"standing NPCs never anchor the hide-in-grass tier")
 
@@ -4321,15 +4356,56 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
-	assert_eq(visibility.size(), 2, "collision-backed no-OOBJ building stays in the host batch")
-	if visibility.size() == 2:
+	assert_eq(visibility.size(), 3, "collision-backed no-OOBJ building stays in the host batch")
+	if visibility.size() == 3:
 		assert_eq(int(visibility[0]), placed.bms_id)
 		var packed := int(visibility[1])
-		assert_eq(Simulation.building_visibility_mask(packed), 0xFFFFFFFF,
-			"without a section map the host preserves every de-batched render part")
+		# Outdoors a windowless batch member draws its exterior section only
+		# (retail build_sector_visibility_masks @0x5c87d7..0x5c8830: the
+		# +0x2CD flag clear -> mask 1), the same word every batched building
+		# carries; the fixture item authors no forced sections.
+		assert_eq(Simulation.building_visibility_mask(packed), 1,
+			"the raw retail mask reaches the no-OOBJ building too")
+		assert_eq(int(visibility[2]), 0, "no forced sections")
 		assert_true(Simulation.building_visibility_visible(packed), "the in-frustum building is visible")
+
+
+func test_building_feed_carries_the_def_forced_sections() -> void:
+	# The part draw ORs the def's forced sections over the raw verdict: items.def
+	# first_door N stores N - 1 at itemDef +0x891, and every section at or above
+	# it draws whatever the raw mask says (retail ItemDef_ParseProperty
+	# @0x49F7BA..0x49F7DE; Terrain_RenderSectorModels @0x5c5d7c..0x5c5da8).
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+		MissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
+	assert_not_null(placed)
+	var dir := _native_fixture_dir()
+	var item_db := _item_db_from_text(dir, """begin "Guard Tower door"
+  id 102001
+  type building
+  graphic GuardTwr1
+  num_doors 1
+  First_Door 3
+end
+""" + _fixture_items_text())
+	var sim := Simulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/house.3di", "GuardTwr1.3di")
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	sim.occlusion_init_mission()
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
+	assert_eq(visibility.size(), 3)
+	if visibility.size() == 3:
+		assert_eq(int(visibility[0]), placed.bms_id)
+		assert_eq(Simulation.building_visibility_mask(int(visibility[1])), 1,
+				"the raw word stays the outdoor exterior bit")
+		assert_eq(int(visibility[2]), 0xFFFFFFFC,
+				"first_door 3 forces sections 2 and up (-1 << 2)")
 
 
 func test_occlusion_delta_calls_emit_changes_only() -> void:
@@ -4351,14 +4427,14 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 
 	var first: PackedInt64Array = sim.get_building_visibility_changes()
-	assert_eq(first.size(), 2, "the first delta call emits the building's state")
+	assert_eq(first.size(), 3, "the first delta call emits the building's state")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
 			"no entities to cull in this mission")
 
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
 	assert_eq(sim.get_building_visibility_changes().size(), 0,
 			"an unchanged frame emits no building deltas")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),

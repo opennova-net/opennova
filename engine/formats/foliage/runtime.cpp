@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -20,18 +19,16 @@ namespace {
 constexpr uint32_t kSeedConstant = 0xA55B1EEDu;
 constexpr int kGridWidth = 6;
 constexpr int kCandidates = 36;
-constexpr int kSilhouetteCellCap = 21;
 constexpr float kGridStep = 2.6f;
 constexpr float kGridBase = 1.0f;
 constexpr float kJitterScale = 1.8f / 65536.0f;
-constexpr float kYawScale = 6.28318530717958647692f / 65536.0f;
+// flt_7CD4DC = 0x38C90FD0, retail's yaw step: slightly below the float
+// nearest 2*pi/65536 (0x38C90FDB). [orig: generate_foliage_instances_0
+// @ 0x5fff7a; Foliage_GenerateModelTileInstances @ 0x600aeb]
+constexpr float kYawScale = 0x1.921FA0p-14f;
 constexpr float kPathRange = 2.0f;
 constexpr float kDetailFadeStart = 20.0f;
 constexpr float kDetailPassSwitch = 33.0f;
-// The witnessed 0.1 c6 fade scale (flt_7C69F4 @ 0x60a4a8) belongs to the
-// water-REFLECTION scene invocation only (arg_8 = reflectionEnabled), which
-// also forces every patch to the LOW pass. The main scene never scales the
-// fade; this runtime models the main scene.
 constexpr float kDetailLimit = 42.0f;
 constexpr float kSilhouetteDepth = 38.0f;
 constexpr int32_t kFixedOne = io::kFp16OneInt;
@@ -90,6 +87,9 @@ int32_t midpoint_fixed(int32_t a, int32_t b) {
 	return static_cast<int32_t>(-((-sum + 1) / 2));
 }
 
+// One candidate of the shared 6x6 stream. x_fixed/z_fixed are the Godot
+// plane (z = -mission y); the MODEL tier additionally keeps its mission-y
+// value, the frame its key and corner arithmetic run in.
 struct Candidate {
 	uint8_t index = 0;
 	float local_a = 0.0f;
@@ -99,38 +99,74 @@ struct Candidate {
 	int32_t z_fixed = 0;
 };
 
-Candidate next_candidate(uint32_t key, int index, uint32_t &state) {
-	// Both retail generators decode HIGH15 as X and LOW15 as the Z-top base;
-	// the local B axis runs toward decreasing world/Godot Z.
-	// [orig: generate_foliage_instances_0 @ 0x5ffdd0, 0x5fff84..0x600029;
-	// Foliage_GenerateModelTileInstances @ 0x600980]
+// Negating a mission-y fixed value into the Godot plane; the one
+// unrepresentable input (INT32_MIN) saturates instead of overflowing.
+int32_t negate_fixed(int32_t value) {
+	return value == std::numeric_limits<int32_t>::min()
+	         ? std::numeric_limits<int32_t>::max()
+	         : -value;
+}
+
+Candidate next_candidate(int index, uint32_t &state) {
+	// Both retail generators draw local A (grid column) then local B (grid
+	// row) then the yaw from the one stream. The tiers place them on
+	// different key frames (detail_candidate / model_candidate).
+	// [orig: generate_foliage_instances_0 @ 0x5ffe88..0x5fff80;
+	// Foliage_GenerateModelTileInstances @ 0x600a17..0x600af1]
 	const uint16_t draw_a = next_draw(state);
 	const uint16_t draw_b = next_draw(state);
 	const uint16_t draw_yaw = next_draw(state);
-	const float local_a = kGridBase +
-	                      static_cast<float>(index % kGridWidth) * kGridStep +
-	                      static_cast<float>(draw_a) * kJitterScale;
-	const float local_b = kGridBase +
-	                      static_cast<float>(index / kGridWidth) * kGridStep +
-	                      static_cast<float>(draw_b) * kJitterScale;
-	const int32_t base_x = sign_extend_15(key >> 16u);
-	const int32_t base_z = sign_extend_15(key);
 	Candidate candidate;
 	candidate.index = static_cast<uint8_t>(index);
-	candidate.local_a = local_a;
-	candidate.local_b = local_b;
+	candidate.local_a = kGridBase +
+	                    static_cast<float>(index % kGridWidth) * kGridStep +
+	                    static_cast<float>(draw_a) * kJitterScale;
+	candidate.local_b = kGridBase +
+	                    static_cast<float>(index / kGridWidth) * kGridStep +
+	                    static_cast<float>(draw_b) * kJitterScale;
 	candidate.yaw = static_cast<float>(draw_yaw) * kYawScale;
-	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + local_a);
-	candidate.z_fixed = to_fixed(static_cast<float>(base_z) - local_b);
 	return candidate;
 }
 
-uint32_t pack_silhouette_key(int32_t snap_x, int32_t snap_z) {
+Candidate detail_candidate(uint32_t key, int index, uint32_t &state) {
+	// The detail key's HIGH15 is the cell's X-min and LOW15 its Z-min on the
+	// Godot plane (the collector packs PolyTrn's -camera_y sector, FB20, into
+	// the low half); local A and local B both ADD. Retail's blocker, map and
+	// height samples all take (keyHi + A, keyLo + B).
+	// [orig: generate_foliage_instances_0 @ 0x5fff84..0x5fffa2 (placement),
+	// 0x5fffb8..0x60000e (blocker), 0x600021..0x600065 (samples);
+	// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a (key)]
+	Candidate candidate = next_candidate(index, state);
+	const int32_t base_x = sign_extend_15(key >> 16u);
+	const int32_t base_z = sign_extend_15(key);
+	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + candidate.local_a);
+	candidate.z_fixed = to_fixed(static_cast<float>(base_z) + candidate.local_b);
+	return candidate;
+}
+
+Candidate model_candidate(uint32_t key, int index, uint32_t &state,
+                          int32_t &r_mission_y_fixed) {
+	// The MODEL key's HIGH15 is the cell's X-min and LOW15 its MISSION-y top
+	// (y_snap + 16); the candidate is (keyHi + A, keyLo - B) in mission x/y,
+	// so on the Godot plane z = B - keyLo.
+	// [orig: Foliage_GenerateModelTileInstances @ 0x600af5..0x600b0c;
+	// Foliage_UpdateModelTiles @ 0x601fd0..0x60205b (key)]
+	Candidate candidate = next_candidate(index, state);
+	const int32_t base_x = sign_extend_15(key >> 16u);
+	const int32_t base_y = sign_extend_15(key);
+	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + candidate.local_a);
+	r_mission_y_fixed =
+	    to_fixed(static_cast<float>(base_y) - candidate.local_b);
+	candidate.z_fixed = negate_fixed(r_mission_y_fixed);
+	return candidate;
+}
+
+uint32_t pack_silhouette_key(int32_t snap_x, int32_t snap_y) {
 	const uint32_t x_part = static_cast<uint32_t>(snap_x) & 0x7FFF0000u;
-	const uint32_t z_part =
-	    ((static_cast<uint32_t>(snap_z) + static_cast<uint32_t>(kTileSizeFixed)) >> 16u) &
+	const uint32_t y_part =
+	    ((static_cast<uint32_t>(snap_y) + static_cast<uint32_t>(kTileSizeFixed)) >> 16u) &
 	    0x7FFFu;
-	return x_part | z_part;
+	return x_part | y_part;
 }
 
 struct SilhouetteCell {
@@ -138,13 +174,17 @@ struct SilhouetteCell {
 	uint8_t quadrant = 0;
 };
 
+// The four cells around one anchor, keyed in the MISSION frame: quadrant bit
+// 0 steps x by -8 (else +8), bit 1 steps mission y by -8 (else +8), each
+// snapped to the 16-unit grid; the low half keys the mission-y cell top.
+// [orig: Foliage_UpdateModelTiles @ 0x601fd0..0x60205b]
 std::array<SilhouetteCell, 4> silhouette_cells(int32_t anchor_x,
-                                               int32_t anchor_z) {
+                                               int32_t anchor_mission_y) {
 	std::array<SilhouetteCell, 4> result{};
 	for (int quadrant = 0; quadrant < 4; ++quadrant) {
 		const int32_t x_offset =
 		    (quadrant & 1) != 0 ? -kQuadrantOffsetFixed : kQuadrantOffsetFixed;
-		const int32_t z_offset =
+		const int32_t y_offset =
 		    (quadrant & 2) != 0 ? -kQuadrantOffsetFixed : kQuadrantOffsetFixed;
 		// Retail integer addition wraps in 32 bits. Perform it unsigned so
 		// public coordinates near the fixed-point limits cannot trigger C++
@@ -153,11 +193,11 @@ std::array<SilhouetteCell, 4> silhouette_cells(int32_t anchor_x,
 		    (static_cast<uint32_t>(anchor_x) +
 		     static_cast<uint32_t>(x_offset)) &
 		    kTileSnapMask);
-		const int32_t snap_z = static_cast<int32_t>(
-		    (static_cast<uint32_t>(anchor_z) +
-		     static_cast<uint32_t>(z_offset)) &
+		const int32_t snap_y = static_cast<int32_t>(
+		    (static_cast<uint32_t>(anchor_mission_y) +
+		     static_cast<uint32_t>(y_offset)) &
 		    kTileSnapMask);
-		result[quadrant].key = pack_silhouette_key(snap_x, snap_z);
+		result[quadrant].key = pack_silhouette_key(snap_x, snap_y);
 		result[quadrant].quadrant = static_cast<uint8_t>(quadrant);
 	}
 	return result;
@@ -191,8 +231,9 @@ uint8_t silhouette_alpha_reference(float camera_distance) {
 std::vector<DetailInstance> generate_detail_cell(
     int slot_index,
     const RuntimeSlot &slot,
-    uint32_t cell_key,
+    const DetailCell &cell,
     const WorldSamplers &world) {
+	const uint32_t cell_key = cell.key;
 	// The detail tier expands the def model's full source geometry for every
 	// accepted transform. This module returns the transforms; the render
 	// binding samples terrain height per transformed source vertex.
@@ -202,17 +243,23 @@ std::vector<DetailInstance> generate_detail_cell(
 	// Flat-sector keys remain ordinary cache residents, but their generator
 	// writes zero index/vertex counts before any placement or terrain sample.
 	// [orig: generate_foliage_instances_0 @ 0x5FFDD0, flag gate @ 0x5FFE05,
-	// zero counts @ 0x5FFE10..0x5FFE16; Foliage_UpdateFarCellSlots @ 0x601B30]
+	// zero counts @ 0x5FFE10..0x5FFE16; Foliage_UpdateDetailCellSlots @ 0x601B30]
 	if ((cell_key & 0x80000000u) != 0u) return result;
 	uint32_t state = seed_for_key(cell_key);
 	for (int index = 0; index < kCandidates; ++index) {
-		const Candidate candidate = next_candidate(cell_key, index, state);
+		const Candidate candidate = detail_candidate(cell_key, index, state);
 		if (candidate_is_blocked(slot, world, candidate)) continue;
-		const uint32_t mask = world.detail_foliage_mask_at
-		                        ? world.detail_foliage_mask_at(
-		                              candidate.x_fixed,
-		                              candidate.z_fixed)
-		                        : 0u;
+		// The map gate takes the key's atlas halves (& 0x3FF) plus the same
+		// local offsets, while the blocker takes the world position.
+		// [orig: generate_foliage_instances_0 @ 0x5fff84..0x5fff9d (atlas
+		// sample coordinates), 0x5fffb8..0x60000e (world blocker),
+		// @ 0x600065 (Terrain_GetSurfaceTypeAtFixedPoint)]
+		const uint32_t mask =
+		    world.detail_foliage_mask_at
+		        ? world.detail_foliage_mask_at(
+		              to_fixed(static_cast<float>(cell.atlas_x) + candidate.local_a),
+		              to_fixed(static_cast<float>(cell.atlas_z) + candidate.local_b))
+		        : 0u;
 		if ((mask & (1u << slot_index)) == 0u) continue;
 
 		DetailInstance instance;
@@ -253,12 +300,18 @@ bool make_silhouette_instance(
 	instance.yaw_radians = candidate.yaw;
 	instance.alpha_reference = alpha_reference;
 
+	// The corner arithmetic runs in the MODEL key's mission frame: corner
+	// (keyHi + A', keyLo - B') with (A', B') the rotated footprint offsets,
+	// the edge midpoints are the arithmetic-shift halves of those fixed
+	// coordinates, and every height sample takes mission (x, y), i.e. the
+	// Godot plane (x, -y). [orig: Foliage_GenerateModelTileInstances
+	// @ 0x600bd0..0x600c6a (corners), 0x600c70..0x600d32 (midpoints)]
 	const float cosine = std::cos(candidate.yaw);
 	const float sine = std::sin(candidate.yaw);
 	const int32_t base_x = sign_extend_15(cell_key >> 16u);
-	const int32_t base_z = sign_extend_15(cell_key);
+	const int32_t base_y = sign_extend_15(cell_key);
 	std::array<int32_t, 4> corner_x{};
-	std::array<int32_t, 4> corner_z{};
+	std::array<int32_t, 4> corner_y{};
 
 	for (int corner = 0; corner < 4; ++corner) {
 		const float local_a = (corner & 1) != 0 ? footprint : -footprint;
@@ -269,14 +322,17 @@ bool make_silhouette_instance(
 		                        local_a * sine + local_b * cosine;
 		if (!try_to_fixed(static_cast<float>(base_x) + rotated_a,
 		                  corner_x[corner]) ||
-		    !try_to_fixed(static_cast<float>(base_z) - rotated_b,
-		                  corner_z[corner])) {
+		    !try_to_fixed(static_cast<float>(base_y) - rotated_b,
+		                  corner_y[corner])) {
 			return false;
 		}
+		instance.corner_local_a[corner] = rotated_a;
+		instance.corner_local_b[corner] = rotated_b;
+		const int32_t corner_z = negate_fixed(corner_y[corner]);
 		instance.corners[corner] = {
 		    from_fixed(corner_x[corner]),
-		    from_fixed(corner_z[corner]),
-		    sampled_height(world, corner_x[corner], corner_z[corner]),
+		    from_fixed(corner_z),
+		    sampled_height(world, corner_x[corner], corner_z),
 		};
 	}
 
@@ -290,7 +346,7 @@ bool make_silhouette_instance(
 		midpoint_height[edge] = sampled_height(
 		    world,
 		    midpoint_fixed(corner_x[first], corner_x[second]),
-		    midpoint_fixed(corner_z[first], corner_z[second]));
+		    negate_fixed(midpoint_fixed(corner_y[first], corner_y[second])));
 	}
 
 	const float d_minus_a =
@@ -323,7 +379,7 @@ std::vector<SilhouetteInstance> generate_silhouette_cell(
     const RuntimeSlot &slot,
     const SilhouetteCell &cell,
     int32_t anchor_x,
-    int32_t anchor_z,
+    int32_t anchor_mission_y,
 	const WorldSamplers &world) {
 	std::vector<SilhouetteInstance> result;
 	if (!std::isfinite(slot.model_radius) || slot.model_radius < 0.0f) {
@@ -332,13 +388,17 @@ std::vector<SilhouetteInstance> generate_silhouette_cell(
 	const float footprint = slot.model_radius * 0.75f;
 	uint32_t state = seed_for_key(cell.key);
 	for (int index = 0; index < kCandidates; ++index) {
-		const Candidate candidate = next_candidate(cell.key, index, state);
+		int32_t mission_y = 0;
+		const Candidate candidate =
+		    model_candidate(cell.key, index, state, mission_y);
+		// The +-4u box around the anchor, in the mission frame.
+		// [orig: Foliage_GenerateModelTileInstances @ 0x600b11..0x600b45]
 		const int64_t dx =
 		    static_cast<int64_t>(candidate.x_fixed) - anchor_x;
-		const int64_t dz =
-		    static_cast<int64_t>(candidate.z_fixed) - anchor_z;
+		const int64_t dy =
+		    static_cast<int64_t>(mission_y) - anchor_mission_y;
 		if (std::llabs(dx) > kAnchorRadiusFixed ||
-		    std::llabs(dz) > kAnchorRadiusFixed) {
+		    std::llabs(dy) > kAnchorRadiusFixed) {
 			continue;
 		}
 		if (candidate_is_blocked(slot, world, candidate)) continue;
@@ -361,7 +421,7 @@ std::vector<SilhouetteInstance> generate_silhouette_cell(
 			continue;
 		}
 		result.push_back(instance);
-		if (static_cast<int>(result.size()) >= kSilhouetteCellCap) break;
+		if (static_cast<int>(result.size()) >= kModelTileInstanceCap) break;
 	}
 	return result;
 }
@@ -503,78 +563,16 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 		return best_index;
 	};
 
-	// Detail geometry is consumed before the cache update. A miss generated at
-	// the update tail therefore first appears on the next terrain render.
-	// [orig: PolyTrn_RenderFrame @ 0x60f0ea..0x60f10f]
-	for (const DetailCell &cell : request.detail_cells) {
-		if (!detail_cell_is_visible(cell)) continue;
-		const float alpha = cell.camera_distance <= kDetailFadeStart
-		                      ? 1.0f
-		                      : std::clamp(
-		                            1.0f -
-		                                (cell.camera_distance - kDetailFadeStart) /
-		                                    (kDetailLimit - kDetailFadeStart),
-		                            0.0f,
-		                            1.0f);
-
-		for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
-			if (!request.slots[slot_index].enabled) continue;
-			const auto &entries = detail_cache_[slot_index];
-			const size_t index = find_detail_index(entries, cell.key);
-			if (index == entries.size() || entries[index].instances.empty()) {
-				continue;
-			}
-			const DetailCacheEntry &entry = entries[index];
-			const auto append_submission =
-			    [this, &entry, &output](DetailPass pass,
-			                           uint8_t alpha_reference,
-			                           float submission_alpha,
-			                           bool near_secondary) {
-				++stats_.detail.submissions;
-				const uint64_t submission_id = ++next_submission_id_;
-				for (const DetailInstance &cached_instance : entry.instances) {
-					DetailInstance instance = cached_instance;
-					instance.cache_revision = entry.revision;
-					instance.submission_id = submission_id;
-					instance.alpha = submission_alpha;
-					instance.alpha_reference = alpha_reference;
-					instance.pass = pass;
-					instance.near_secondary = near_secondary;
-					output.detail.push_back(instance);
-				}
-			};
-
-			// Retail submits the near resident twice in one main-scene pass:
-			// the 180-reference depth-writing HIGH draw first, then the exact
-			// same cached geometry under the 8-reference no-depth-write LOW
-			// draw at the SAME c6 fade with strict D3DCMP_LESS. At and beyond
-			// the 33-unit switch only the primary LOW pass is submitted. The
-			// 0.1 fade scale rides the whole-call reflection flag (arg_8 =
-			// reflectionEnabled, pushed at 0x5c95c1/0x5c9661), which also
-			// forces LOW for every patch; it never applies to the main scene.
-			// [orig: Foliage_RenderFarPatches @ 0x60a171..0x60a19c pass
-			// select, 0x60a497..0x60a4ae reflection fade scale,
-			// 0x60a659..0x60a694 secondary setup/draw;
-			// Terrain_RenderSceneWithReflection @ 0x5c95c5/0x5c9665]
-			if (cell.camera_distance < kDetailPassSwitch) {
-				append_submission(DetailPass::HighAlphaTest, 180u, alpha, false);
-				append_submission(DetailPass::LowAlphaTest, 8u, alpha, true);
-			} else {
-				append_submission(DetailPass::LowAlphaTest, 8u, alpha, false);
-			}
-		}
-	}
-
 	// Detail update: resident lookup stops at the first key; duplicate missing
 	// keys allocate once. Geometry persists until strict signed-age LRU reuse.
-	// [orig: Foliage_UpdateFarCellSlots @ 0x601b30]
+	// [orig: Foliage_UpdateDetailCellSlots @ 0x601b30]
 	for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
 		const RuntimeSlot &slot = request.slots[slot_index];
 		auto &entries = detail_cache_[slot_index];
 		if (!slot.enabled || entries.empty()) continue;
 
-		std::vector<uint32_t> pending_keys;
-		pending_keys.reserve(request.detail_cells.size());
+		std::vector<const DetailCell *> pending_cells;
+		pending_cells.reserve(request.detail_cells.size());
 		for (const DetailCell &cell : request.detail_cells) {
 			if (!detail_cell_is_visible(cell)) continue;
 			const size_t resident_index = find_detail_index(entries, cell.key);
@@ -585,13 +583,16 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			}
 
 			++stats_.detail.misses;
-			if (std::find(pending_keys.begin(), pending_keys.end(), cell.key) ==
-			    pending_keys.end()) {
-				pending_keys.push_back(cell.key);
+			if (std::find_if(pending_cells.begin(), pending_cells.end(),
+			                 [&cell](const DetailCell *pending) {
+				                 return pending->key == cell.key;
+			                 }) == pending_cells.end()) {
+				pending_cells.push_back(&cell);
 			}
 		}
 
-		for (uint32_t key : pending_keys) {
+		for (const DetailCell *pending : pending_cells) {
+			const uint32_t key = pending->key;
 			const size_t index = lru_index(entries);
 			if (index == entries.size()) continue;
 			DetailCacheEntry &entry = entries[index];
@@ -605,24 +606,106 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			entry.last_use = terrain_scene_counter_;
 			entry.revision = ++next_cache_revision_;
 			entry.instances =
-			    generate_detail_cell(slot_index, slot, key, world);
+			    generate_detail_cell(slot_index, slot, *pending, world);
 			++stats_.detail.regenerations;
 			output.detail_generated.push_back(CacheIdentity{
 			    static_cast<uint8_t>(slot_index), entry.key, entry.revision});
 		}
 	}
 
-	// Distant model cache: one fixed 1000-entry pool per definition. Hits touch
-	// the resident entry on the definition's exact eight-scene refresh phase.
-	//
-	// Nearby anchors (clustered crouched/prone infantry) can visit one cell
-	// several times in a frame. Refresh a resident key only on its first visit
-	// this scene frame; later callers retain their distinct draw submissions
-	// while reusing that refreshed resident. Retail's visible
-	// sector-entity/occlusion walk bounds the same fanout (D-FOLIAGE-9).
-	// [orig: Foliage_UpdateModelTiles @ 0x601f50]
-	std::array<std::unordered_set<uint32_t>, FOLIAGE_MAX_DEFS>
-	    refreshed_model_keys;
+	// The detail draw consumes the pool the update above just filled: the
+	// terrain frame (PolyTrn_RenderFrame, whose tail runs the update) renders
+	// before the scene core's two detail passes, so a newly collected key
+	// draws in the frame it was generated.
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca654 (terrain frame) then
+	// @ 0x5ca8ec (Terrain_RenderWorldScene); PolyTrn_RenderFrame
+	// @ 0x60f0ea..0x60f10f (update); Foliage_SetupDetailSlotDraw
+	// @ 0x600807..0x60081c (key lookup)]
+	for (const DetailCell &cell : request.detail_cells) {
+		if (!detail_cell_is_visible(cell)) continue;
+		const float alpha = cell.camera_distance <= kDetailFadeStart
+		                      ? 1.0f
+		                      : std::clamp(
+		                            1.0f -
+		                                (cell.camera_distance - kDetailFadeStart) /
+		                                    (kDetailLimit - kDetailFadeStart),
+		                            0.0f,
+		                            1.0f);
+
+		// The two detail passes split patches by the collected leaf's maximum
+		// height against the water: formatType XOR cameraBelowWater selects
+		// the patches with some height above the water, so a patch lying
+		// wholly at or below it draws in the far pass (formatType 0) while
+		// the camera is above, and in the camera pass while it is below.
+		// [orig: Foliage_RenderDetailPatches @ 0x609df4..0x609e1b (flag),
+		// @ 0x60a1a0..0x60a1c6 (node +0x28 vs water); Foliage_RenderDetailPatchesPass
+		// calls @ 0x5c95c5 (formatType 0) / @ 0x5c9665 (formatType 1)]
+		const bool patch_below_water = request.water_height >= cell.max_height;
+		const DetailWaterPass water_pass =
+		    (patch_below_water != request.camera_below_water)
+		        ? DetailWaterPass::FarSide
+		        : DetailWaterPass::CameraSide;
+		for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
+			if (!request.slots[slot_index].enabled) continue;
+			const auto &entries = detail_cache_[slot_index];
+			const size_t index = find_detail_index(entries, cell.key);
+			if (index == entries.size() || entries[index].instances.empty()) {
+				continue;
+			}
+			const DetailCacheEntry &entry = entries[index];
+			const auto append_submission =
+			    [this, &entry, &output, water_pass](DetailPass pass,
+			                           uint8_t alpha_reference,
+			                           float submission_alpha,
+			                           bool near_secondary) {
+				++stats_.detail.submissions;
+				const uint64_t submission_id = ++next_submission_id_;
+				for (const DetailInstance &cached_instance : entry.instances) {
+					DetailInstance instance = cached_instance;
+					instance.cache_revision = entry.revision;
+					instance.submission_id = submission_id;
+					instance.alpha = submission_alpha;
+					instance.alpha_reference = alpha_reference;
+					instance.pass = pass;
+					instance.near_secondary = near_secondary;
+					instance.water_pass = water_pass;
+					output.detail.push_back(instance);
+				}
+			};
+
+			// Retail submits the near resident twice in one main-scene pass:
+			// the 180-reference depth-writing HIGH draw first, then the exact
+			// same cached geometry under the 8-reference no-depth-write LOW
+			// draw at the SAME c6 fade with strict D3DCMP_LESS. At and beyond
+			// the 33-unit switch only the primary LOW pass is submitted. The
+			// thermal view (the scene core's fourth argument, the held
+			// weapon's thermal byte) forces the primary LOW pass for every
+			// patch and scales its c6 fade by flt_7C69F4 = 0.1 (the fmul
+			// @ 0x60a4a8).
+			// [orig: Foliage_RenderDetailPatches @ 0x60a171..0x60a19c pass
+			// select, 0x60a497..0x60a4ae thermal fade scale,
+			// 0x60a659..0x60a694 secondary setup/draw;
+			// Terrain_RenderWorldScene @ 0x5c95c1/0x5c9661 (arg);
+			// Render_ProcessMainSceneFrame @ 0x5ca2da..0x5ca2e3, 0x5ca8e3]
+			if (request.thermal_view) {
+				append_submission(DetailPass::LowAlphaTest, 8u, alpha * 0.1f,
+				                  false);
+			} else if (cell.camera_distance < kDetailPassSwitch) {
+				append_submission(DetailPass::HighAlphaTest, 180u, alpha, false);
+				append_submission(DetailPass::LowAlphaTest, 8u, alpha, true);
+			} else {
+				append_submission(DetailPass::LowAlphaTest, 8u, alpha, false);
+			}
+		}
+	}
+
+	// Distant model cache: one fixed 1000-entry pool per definition. Every hit
+	// touches its resident entry, and on the definition's eight-scene phase
+	// every visit regenerates it around THAT visit's anchor before drawing it,
+	// so clustered anchors sharing a cell each redraw it around themselves.
+	// [orig: Foliage_UpdateModelTiles @ 0x601f50, hit touch @ 0x60208b,
+	// phase test @ 0x602085..0x60209a, regeneration @ 0x6020aa, draw
+	// @ 0x6021a5]
 	for (const SilhouetteAnchor &anchor : request.silhouette_anchors) {
 		if (!std::isfinite(anchor.position.x) ||
 		    !std::isfinite(anchor.position.z) ||
@@ -631,13 +714,16 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			continue;
 		}
 		if (anchor.view_depth < kSilhouetteDepth) continue;
+		// The anchor enters the MODEL walk as its mission (x, y) position;
+		// the Godot plane's z is -y. [orig: Terrain_RenderSectorEntitiesBySide
+		// @ 0x5c7e1e..0x5c7e24 (tile_coords = entity +4/+8)]
 		int32_t anchor_x = 0;
-		int32_t anchor_z = 0;
+		int32_t anchor_mission_y = 0;
 		if (!try_to_fixed(anchor.position.x, anchor_x) ||
-		    !try_to_fixed(anchor.position.z, anchor_z)) {
+		    !try_to_fixed(-anchor.position.z, anchor_mission_y)) {
 			continue;
 		}
-		const auto cells = silhouette_cells(anchor_x, anchor_z);
+		const auto cells = silhouette_cells(anchor_x, anchor_mission_y);
 		const uint8_t alpha_reference =
 		    silhouette_alpha_reference(anchor.camera_distance);
 
@@ -662,16 +748,13 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 				if (entry != nullptr) {
 					++stats_.model.hits;
 					entry->last_use = terrain_scene_counter_;
-					const bool first_refresh =
-					    regenerate_hit &&
-					    refreshed_model_keys[slot_index].insert(cell.key).second;
-					if (first_refresh) {
+					if (regenerate_hit) {
 						auto refreshed_instances = generate_silhouette_cell(
 						    slot_index,
 						    slot,
 						    cell,
 						    anchor_x,
-						    anchor_z,
+						    anchor_mission_y,
 						    world);
 						++stats_.model.regenerations;
 						if (!same_silhouette_geometry(
@@ -711,7 +794,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 					    slot,
 					    cell,
 					    anchor_x,
-					    anchor_z,
+					    anchor_mission_y,
 					    world);
 					++stats_.model.regenerations;
 					output.model_generated.push_back(CacheIdentity{
@@ -719,10 +802,6 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 					    entry->key,
 					    entry->revision});
 				}
-				if (regenerate_hit) {
-					refreshed_model_keys[slot_index].insert(cell.key);
-				}
-
 				if (entry->instances.empty()) continue;
 				++stats_.model.submissions;
 				const uint64_t submission_id = ++next_submission_id_;
@@ -733,6 +812,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 					instance.submission_id = submission_id;
 					instance.quadrant = cell.quadrant;
 					instance.alpha_reference = alpha_reference;
+					instance.far_side = anchor.far_side;
 					output.silhouettes.push_back(instance);
 				}
 			}

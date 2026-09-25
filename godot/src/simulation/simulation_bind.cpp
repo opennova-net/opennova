@@ -380,7 +380,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("occlusion_init_mission"),
 	                     &Simulation::occlusion_init_mission);
 	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_y_deg", "aspect",
-	                              "near", "fog_dist_units", "water_z_units", "force_indoors"),
+	                              "viewport_width", "near", "fog_dist_units", "water_z_units",
+	                              "force_indoors"),
 	                     &Simulation::run_occlusion_frame);
 	ClassDB::bind_method(D_METHOD("get_building_visibility_changes"),
 	                     &Simulation::get_building_visibility_changes);
@@ -594,6 +595,19 @@ void Simulation::_bind_methods() {
     BIND_ENUM_CONSTANT(PF_OBJECT_DESTROY04);
     BIND_ENUM_CONSTANT(PF_OBJECT_DESTROY05);
 	BIND_ENUM_CONSTANT(PF_PARACHUTE_DEPLOYED);
+	BIND_ENUM_CONSTANT(PF_CANOPY_PARA);
+	BIND_ENUM_CONSTANT(PF_CANOPY_PARA_O);
+	BIND_ENUM_CONSTANT(PF_CANOPY_YAW_DEG);
+	BIND_ENUM_CONSTANT(PF_NVG_WORN);
+	BIND_ENUM_CONSTANT(PF_NVG_FLIP);
+	BIND_ENUM_CONSTANT(PF_BINOCULARS_RAISED);
+	BIND_ENUM_CONSTANT(PF_CARRIED_TYPE_ID);
+	BIND_ENUM_CONSTANT(PF_CARRIED_PITCH_DEG);
+	BIND_ENUM_CONSTANT(PF_CARRIED_YAW_DEG);
+	BIND_ENUM_CONSTANT(PF_CARRIED_ROLL_DEG);
+	BIND_ENUM_CONSTANT(PF_SLOT_MARCH_OFFSET_X);
+	BIND_ENUM_CONSTANT(PF_SLOT_MARCH_OFFSET_Y);
+	BIND_ENUM_CONSTANT(PF_SLOT_MARCH_OFFSET_Z);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);

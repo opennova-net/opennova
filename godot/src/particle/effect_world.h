@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -15,6 +17,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
+#include <memory>
 
 #include "particle/effect_group_report.h"
 #include "particle/effect_load_report.h"
@@ -29,8 +32,11 @@ class ParticleForceField;
 namespace godot {
 
 class Camera3D;
+class EffectDistortionDrawer;
 class ParticleRenderer;
+struct SceneOverlaySubmission;
 class ResourceRoot;
+class Simulation;
 
 // World-facing owner for the portable effect scene and draw-list renderer
 // (the former effect_world.gd, ADR 0043 d9). Effects, emitters, and
@@ -89,6 +95,13 @@ public:
 	// of that view hands it in every frame; clear_world() drops it.
 	void set_second_scene_camera(Camera3D *p_camera);
 	Camera3D *get_second_scene_camera() const;
+	// FrameFX's type-0 row device (ParticleRenderer::distortion_drawer): the
+	// world registers it with FrameFx; the fire presenter publishes the tracer
+	// distortion ribbons into it.
+	std::shared_ptr<EffectDistortionDrawer> distortion_drawer();
+	// ParticleRenderer::attach_distortion_row for embedders without the world
+	// frame (previews, tests).
+	void attach_distortion_row(Node *p_frame_fx);
 
 	// Loads every mounted .ptl AND the active gore set in VFS order, then
 	// opens the catalog once. The gore set is a second extension carrying
@@ -155,23 +168,29 @@ public:
 	// Dictionary report this facade keeps (the allowlisted transport edge).
 	Dictionary get_debug_draw_list_report();
 
+	// `p_section_tagged`: the retail descriptor carries an owner tag, so the
+	// group takes the building-section gate (particle::EffectSectionGate);
+	// entity-originated spawns are tagged, impacts on terrain/water, knife
+	// impacts and the weather emitters are not.
 	int64_t spawn_effect_transient(const String &p_name, const Vector3 &p_position,
 			const Vector3 &p_orientation = Vector3(), int p_initial_age_ticks = 0,
 			int p_render_domain = RENDER_DOMAIN_WORLD, int64_t p_source_tick = 0,
-			int64_t p_source_order = 0);
+			int64_t p_source_order = 0, bool p_section_tagged = false);
 	int64_t spawn_effect(const String &p_name, const Vector3 &p_position,
-			const Vector3 &p_orientation = Vector3());
+			const Vector3 &p_orientation = Vector3(), bool p_section_tagged = false);
 	Ref<EffectSpawnReceipt> spawn_effect_owned_request(const Variant &p_owner_key,
 			const String &p_name, const Vector3 &p_position,
-			const Vector3 &p_orientation = Vector3());
+			const Vector3 &p_orientation = Vector3(), bool p_section_tagged = false);
 	int64_t spawn_effect_owned(const Variant &p_owner_key, const String &p_name,
-			const Vector3 &p_position, const Vector3 &p_orientation = Vector3());
+			const Vector3 &p_position, const Vector3 &p_orientation = Vector3(),
+			bool p_section_tagged = false);
 	Ref<EffectSpawnReceipt> spawn_effect_attached_request(const Variant &p_owner_key,
 			const String &p_name, const Transform3D &p_initial_transform,
-			const Vector3 &p_local_pos, const Vector3 &p_local_dir);
+			const Vector3 &p_local_pos, const Vector3 &p_local_dir,
+			bool p_section_tagged = false);
 	int64_t spawn_effect_attached(const Variant &p_owner_key, const String &p_name,
 			const Transform3D &p_initial_transform, const Vector3 &p_local_pos,
-			const Vector3 &p_local_dir);
+			const Vector3 &p_local_dir, bool p_section_tagged = false);
 	int64_t spawn_effect_unless_alive(const Variant &p_owner_key, const String &p_name,
 			const Vector3 &p_position, const Vector3 &p_orientation = Vector3());
 	bool spawn_effect_by_handle(int64_t p_handle, const Vector3 &p_position,
@@ -218,10 +237,17 @@ public:
 	// helicopter focal-wind pool); null leaves ordinary effects unchanged.
 	void advance_simulation_tick(double p_delta,
 			const opennova::particle::ParticleForceField *p_forces);
+	// The simulation the section gate reads: the blink volumes at each tagged
+	// spawn point and the live building section masks on every advance. Null
+	// (previews, tests) leaves every group ungated.
+	void set_section_source(Simulation *p_source);
 	// Explicit GameWorld device leg. Attachment poses and the
 	// immutable draw list are refreshed once at the pipeline's chosen point;
 	// particles never advance on render delta.
 	void render_frame(int64_t p_time_ms);
+	// The frame's post-particle overlay tail, handed to every view's overlay
+	// pass (ParticleRenderer::publish_scene_overlay). Not bound to Godot.
+	void publish_scene_overlay(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
 	// Value-only F3 read model (particle/effect_group_report.h). Emitter ids
 	// join portable simulation values to the renderer's draw list bounds; no
 	// particle/render Nodes escape this facade. Hidden particles report
@@ -263,6 +289,12 @@ private:
 	float water_height_ = 0.0f;
 	ObjectID reflection_camera_id_;
 	ObjectID second_scene_camera_id_;
+	ObjectID section_source_id_;
+	Simulation *_section_source() const;
+	// Stamps a tagged request with the blink volumes containing its spawn
+	// point (the descriptor spawn's Entity_QueryBlinkBoxesAtPoint).
+	void _stamp_section_gate(const Ref<EffectSpawnRequest> &p_request,
+			const Vector3 &p_position) const;
 	bool particles_disabled_ = false;
 
 	// Keys never become native tokens by hashing. A shared monotonic

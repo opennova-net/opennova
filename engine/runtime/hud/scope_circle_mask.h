@@ -45,7 +45,7 @@ enum class ScopedViewOverlay {
 	// [orig: Render_DrawEntityOverlayMarkers @0x5cab26]
 	kEntityMarkers = 0,
 	// The binocular mask (its own drawer, no circle mask).
-	// [orig: sub_5CFE60 @0x5caaec]
+	// [orig: Binoculars_DrawMask @0x5caaec]
 	kBinocularMask = 1,
 	// The Sighted selector: the SIGHTS card alone, never the circle mask.
 	// [orig: draw_weapon_sight_overlays @0x5caafa]
@@ -86,7 +86,7 @@ struct ScopeCircleMaskGeometry {
 	// cx / cy * 0.75 and 3 / (selected H/W ratio * 4): at the native ratio the
 	// two are equal and the ring is a true circle; a forced 4:3/16:10/16:9/5:4
 	// ratio keeps scale_y fixed and stretches the ring horizontally.
-	// [orig: @0x5d17f5 / @0x5d1811 over sub_58A920 -> flt_8409EC]
+	// [orig: @0x5d17f5 / @0x5d1811 over Render_GetTargetAspectRatio -> flt_8409EC]
 	float scale_x = 0.0f;
 	float scale_y = 0.0f;
 	// ((y1 - y0) >> 3) + ((y1 - y0) >> 1) — five eighths of the viewport
@@ -159,16 +159,28 @@ struct ScopeCircleMask {
 	std::vector<uint16_t> grid_indices;
 };
 
+// (x0, y0)..(x1, y1) is retail's INCLUSIVE overlay rect: the full surface is
+// (0, 0)..(W - 1, H - 1) [orig: Viewport_SetFullScreen @0x5d30e0].
 // `aspect_mode` is the renderer's selected-ratio mode (renderer/aspect_ratio.h):
 // 0..3 are the four literal ratios, anything else (the port's default) is the
-// viewport's own H/W. `screen_width` is the full surface width the cross/grid
-// unit keys on (retail's overlayCtx @0x24C1420), which the viewport rect does
-// not supply.
+// viewport's own H/W, (y1 - y0 + 1) / (x1 - x0 + 1). `screen_width` is the full
+// surface width the cross/grid unit keys on (retail's overlayCtx @0x24C1420),
+// which the viewport rect does not supply.
 ScopeCircleMaskGeometry scope_circle_mask_geometry(int32_t x0, int32_t y0,
 		int32_t x1, int32_t y1, int32_t screen_width, int aspect_mode = -1);
 
 ScopeCircleMask build_scope_circle_mask(int32_t x0, int32_t y0, int32_t x1,
 		int32_t y1, int32_t screen_width, bool draw_crosshair,
 		int aspect_mode = -1);
+
+// The NVG view's scoped lens (renderer/nvg_scope_lens.h) draws its own ring;
+// when the SIGHTS card drew no authored row it chains only the cross and the
+// grid, about the same centre and ring size but at UNIT scale -- no aspect
+// stretch, no annulus. The result's ring is empty.
+// [orig: NVG_DrawScopedLens @0x5d2798..0x5d27bc:
+//  `if (!draw_weapon_sight_overlays()) draw_minimap_crosshair_and_grid(ring,
+//  cx, cy, 1.0, 1.0)`]
+ScopeCircleMask build_nvg_lens_reticle(int32_t x0, int32_t y0, int32_t x1,
+		int32_t y1, int32_t screen_width);
 
 } // namespace opennova::hud

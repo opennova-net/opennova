@@ -28,6 +28,9 @@
 
 #include <cmath>
 
+#include <runtime/renderer/aspect_ratio.h>
+#include <runtime/renderer/frame_fx_effects.h>
+#include <runtime/renderer/render_order.h>
 #include <runtime/world/player_present.h>
 
 using namespace godot;
@@ -118,6 +121,7 @@ void feed_world_thermal_view(Node *p_world, bool p_world_gate, bool p_terrain_ga
 
 LocalPlayerPresenter::LocalPlayerPresenter() {
 	viewmodel_rig_.instantiate();
+	person_overlays_.instantiate();
 }
 
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
@@ -490,6 +494,7 @@ void LocalPlayerPresenter::clear_models() {
 	}
 	held_weapon_id_ = ObjectID();
 	held_weapon_graphic_ = String();
+	person_overlays_->release();
 	if (ObjectModel *body = avatar()) {
 		body->queue_free();
 	}
@@ -684,6 +689,18 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 		return;
 	}
 	ObjectModel *body = avatar();
+	// Drawn inside the avatar's HEAD submit, at that part's RLOD level clamped
+	// to the weapon's own count (the body when not composed), never through a
+	// threshold walk of its own. [retail BoneCallback_org0_World
+	// @ 0x4e3ce1..0x4e3cf2; the head submit Terrain_RenderSectorEntitiesBySide
+	// @ 0x5c7ffc]
+	if (body != nullptr) {
+		ObjectModel *head = MissionObjectPlacer::avatar_head_part(body);
+		ObjectModel *owner = head != nullptr ? head : body;
+		if (weapon->get_authored_lod_owner() != owner) {
+			weapon->set_authored_lod_owner(owner);
+		}
+	}
 	const Variant attach = body != nullptr
 			? EntityPresenter::held_weapon_attach_transform(body, p_overlay->get_weapon_attach_angles(),
 					  p_overlay->get_weapon_hand_frame())
@@ -783,6 +800,15 @@ void LocalPlayerPresenter::update_model_lighting_context() {
 	set_model_lighting_context(avatar(), context.interior, context.light_transfer, context.body_effect_scale);
 	set_model_lighting_context(held_weapon(), context.interior, context.light_transfer,
 			context.body_effect_scale);
+	// The third-person body and gun also declare the player's interior light
+	// group for the per-draw point-light select (the FP parts take it from
+	// the director's local-player query).
+	const PackedInt64Array group = light_sim.is_valid() ? light_sim->local_player_interior_group()
+														: PackedInt64Array();
+	const int group_bms = group.size() >= 2 ? static_cast<int>(group[0]) : 0;
+	const int group_section = group.size() >= 2 ? static_cast<int>(group[1]) : 0;
+	if (avatar()) avatar()->set_interior_light_group(group_bms, group_section);
+	if (held_weapon()) held_weapon()->set_interior_light_group(group_bms, group_section);
 	const TypedArray<ObjectModel> parts = vm_parts();
 	for (int64_t i = 0; i < parts.size(); ++i) {
 		set_model_lighting_context(Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i])),
@@ -859,10 +885,27 @@ void LocalPlayerPresenter::update_scope_camera() {
 	// The world pass's near plane is 0.2 u every frame (retail re-pins it
 	// beside the FOV; the far plane is floor(fog)+1, which rides the fog
 	// owner) — Godot's 0.05 default rendered surfaces retail clips.
-	// (engine witness: render-order-re.md, the Render_ProcessMainSceneFrame
-	// per-frame depth pins)
-	cam->set_near(0.2f);
-	update_view_projection(projection);
+	// (engine witness: renderer::kScenePassNearZ, the
+	// Render_ProcessMainSceneFrame per-frame depth pins)
+	cam->set_near(opennova::renderer::kScenePassNearZ);
+	// While the NVG composite is up the world pass IS the NVG scene: retail
+	// renders it into the 512-square target instead of the backbuffer (retail
+	// Render_ProcessMainSceneFrame @0x5ca516..0x5ca5b0 -> NVG_RenderSceneToTarget,
+	// whose clear is GameWorld's fog-colour clear), so the target carries the
+	// scene's raster and the gameplay camera keeps the frame's frustum as the
+	// culling superset (the Scoped arm's square frustum lies inside it).
+	const opennova::renderer::FrameFxNvgPlan nvg =
+			opennova::renderer::frame_fx_nvg_view(view_->native_frame().frame_fx);
+	if (nvg.composite) {
+		const float selected = opennova::renderer::aspect_height_over_width(
+				projection_sim.is_valid() ? projection_sim->get_local_player_aspect_mode() : -1,
+				size.x, size.y);
+		update_view_projection(opennova::world::nvg_view_projection(projection, nvg, selected,
+									   view_->get_scope_magnification()),
+				true);
+		return;
+	}
+	update_view_projection(projection, false);
 }
 
 // The stretched-mode target (view_projection): a SubViewport of the selected
@@ -872,11 +915,12 @@ void LocalPlayerPresenter::update_scope_camera() {
 // surface (whose own 3D draw is switched off meanwhile). Built on the first
 // stretched frame, sized and mirrored every frame, released when the mode
 // returns to the surface's ratio or the player goes away.
-void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection) {
+void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection,
+		bool p_nvg_raster) {
 	Camera3D *cam = camera();
 	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
 	if (surface == nullptr || !is_inside_tree() ||
-			Math::abs(p_projection.scale_y - 1.0f) < kViewProjectionUnstretched) {
+			(!p_nvg_raster && Math::abs(p_projection.scale_y - 1.0f) < kViewProjectionUnstretched)) {
 		release_view_projection();
 		return;
 	}
@@ -939,6 +983,7 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 		projection_surface_id_ = ObjectID(surface->get_instance_id());
 	}
 	projection_scale_y_ = p_projection.scale_y;
+	nvg_raster_active_ = p_nvg_raster;
 }
 
 // Leaving the tree without a teardown (the shell freeing the presenter, a
@@ -965,6 +1010,7 @@ void LocalPlayerPresenter::release_view_projection() {
 	projection_viewport_id_ = ObjectID();
 	projection_camera_id_ = ObjectID();
 	projection_scale_y_ = 1.0f;
+	nvg_raster_active_ = false;
 }
 
 void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
@@ -1055,6 +1101,29 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	}
 	// Attach only after this frame's body clip and weapon layer have been posed.
 	update_held_weapon(overlay);
+	update_person_overlays();
+}
+
+// The avatar's item overlays: retail's draws 1, 3, 4 and 6 for the local body.
+// The canopy draws BEFORE the camera-tracked gate, so the local player sees his
+// own canopy in first person; the goggles, the binoculars and the carried
+// object follow the body's first-person layer rule (hidden from the camera,
+// still casting into the render slot).
+// [retail BoneCallback_org0_World @ 0x4e3940 — the canopy submit @ 0x4e3aa5,
+//  the tracked gate @ 0x4e3ab3..0x4e3aca]
+void LocalPlayerPresenter::update_person_overlays() {
+	if (visuals_.is_null()) {
+		return;
+	}
+	opennova::world::PersonOverlays state;
+	const Ref<Simulation> overlay_sim = sim();
+	if (overlay_sim.is_valid()) {
+		overlay_sim->local_player_person_overlays(state);
+	}
+	const bool draw_body = third_person_ || debug_body_in_first_person_;
+	visuals_->present_local_player_person_overlays(*person_overlays_.ptr(), state, avatar(),
+			draw_body ? PersonOverlayModels::PRESENT_LOCAL_THIRD_PERSON
+					  : PersonOverlayModels::PRESENT_LOCAL_FIRST_PERSON);
 }
 
 void LocalPlayerPresenter::_bind_methods() {
@@ -1088,12 +1157,14 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("vm_parts"), &LocalPlayerPresenter::vm_parts);
 	ClassDB::bind_method(D_METHOD("viewmodel"), &LocalPlayerPresenter::viewmodel);
 	ClassDB::bind_method(D_METHOD("held_weapon"), &LocalPlayerPresenter::held_weapon);
+	ClassDB::bind_method(D_METHOD("person_overlays"), &LocalPlayerPresenter::person_overlays);
 	ClassDB::bind_method(D_METHOD("camera"), &LocalPlayerPresenter::camera);
 	ClassDB::bind_method(D_METHOD("view_projection"), &LocalPlayerPresenter::view_projection);
 	ClassDB::bind_method(D_METHOD("presented_view"), &LocalPlayerPresenter::presented_view);
 	ClassDB::bind_method(D_METHOD("projection_camera"), &LocalPlayerPresenter::projection_camera);
 	ClassDB::bind_method(D_METHOD("projection_viewport"), &LocalPlayerPresenter::projection_viewport);
 	ClassDB::bind_method(D_METHOD("projection_scale_y"), &LocalPlayerPresenter::projection_scale_y);
+	ClassDB::bind_method(D_METHOD("is_nvg_raster_active"), &LocalPlayerPresenter::is_nvg_raster_active);
 	ClassDB::bind_method(D_METHOD("viewmodel_rig"), &LocalPlayerPresenter::viewmodel_rig);
 	ClassDB::bind_method(D_METHOD("set_viewmodel_capture_hidden", "hidden"),
 			&LocalPlayerPresenter::set_viewmodel_capture_hidden);

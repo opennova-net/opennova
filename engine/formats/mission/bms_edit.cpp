@@ -192,6 +192,7 @@ MissionInfo mission_info(const bms::File &file) {
 	out.terrain = strip_reference_extension(fixed_string(header.terrain, 16), ".trn");
 	out.environment = strip_reference_extension(
 			fixed_string(header.environment, sizeof(header.environment)), ".env");
+	out.tile_set = fixed_string(header.terrain_tile, sizeof(header.terrain_tile));
 	out.climate = static_cast<int>(header.climate);
 	out.weather = static_cast<int>(header.weather_type);
 	out.mission_type = static_cast<int>(header.mission_type);

@@ -285,8 +285,6 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &TerrainData::get_height_world_bilinear);
 	ClassDB::bind_method(D_METHOD("build_minimap_water_mask", "water_height_wu"),
 			&TerrainData::build_minimap_water_mask, DEFVAL(NAN));
-	ClassDB::bind_method(D_METHOD("get_detail_foliage_index_world", "world_x", "world_z"),
-	                     &TerrainData::get_detail_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &TerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_runtime_source_coords", "world_x", "world_z"),
 	                     &TerrainData::world_to_runtime_source_coords);
@@ -446,6 +444,9 @@ Error TerrainData::_import_pcx_slot_bytes(const String &slot_id, const String &f
 // ---------------------------------------------------------------------------
 
 void TerrainData::set_trn_path(const String &p_path) { trn_path = p_path; }
+void TerrainData::set_mission_tile_set(const String &p_tile_set) {
+	mission_tile_set = p_tile_set.utf8().get_data();
+}
 
 void TerrainData::set_terrain_name(const String &p_name) { terrain_name = p_name; _notify_terrain_changed(); }
 String TerrainData::get_terrain_name() const { return terrain_name; }
@@ -694,7 +695,8 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 	};
 	const String charmap_filename = String(trn.charmap.c_str());
 	const String foliagemap_filename = String(trn.foliagemap.c_str());
-	const String tilestrip_filename = String(trn.tilestrip.c_str());
+	const String tilestrip_filename = String(
+			opennova::trn_mission_tilestrip(trn, mission_tile_set).c_str());
 	colormap = load_tex("colormap", String(trn.colormap.c_str()));
 	detailmap = load_tex("detailmap", String(trn.detailmap.c_str()));
 	detailmap_c1 = load_tex("detailmap_c1", String(trn.detailmap_c1.c_str()));
@@ -1080,21 +1082,14 @@ int TerrainData::get_tile_count() const {
 	return static_cast<int>(cpt.tiles.size());
 }
 
-int TerrainData::get_detail_foliage_index_fixed(int32_t world_x_fixed,
-                                                    int32_t world_z_fixed) const {
+int TerrainData::get_detail_foliage_index_fixed(int32_t atlas_x_fixed,
+                                                    int32_t atlas_z_fixed) const {
 	// [orig: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0, see docs/terrain/terrain-re.md]
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}
 	return static_cast<int>(foliage_map_resource->sample_detail_flat_wrap(
-			world_x_fixed, world_z_fixed));
-}
-
-int TerrainData::get_detail_foliage_index_world(double world_x, double world_z) const {
-	if (!loaded || foliage_map_resource.is_null()) {
-		return 0;
-	}
-	return foliage_map_resource->sample_detail_index_world(world_x, world_z);
+			atlas_x_fixed, atlas_z_fixed));
 }
 
 int TerrainData::get_foliage_index_world(float world_x, float world_z) const {

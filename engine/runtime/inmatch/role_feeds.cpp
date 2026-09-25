@@ -435,10 +435,33 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 	return true;
 }
 
-void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3],
+namespace {
+
+// The contained half of one drawn entity's lighting from its first blink hit
+// (entity+0x1D0): the containing pool-2 building's identity and blink volume
+// section, and for a PERSON the building's ItemDef+0x218 daylight: only the
+// person wave loads the aux [orig: Terrain_RenderSectorEntitiesBySide
+// @0x5c7da8..0x5c7db6 (Pool_GetEntryUnchecked(2, hit >> 20)) and
+// @0x5c7f7a..0x5c7f93 (entry+0x20 -> ItemDef+0x218 when non-null)].
+EntityLighting contained_lighting(const world::World &w, uint32_t first_hit, bool person) {
+	EntityLighting out;
+	out.interior = true;
+	out.interior_section = world::BlinkAccum::hit_section(first_hit);
+	const world::Entity *parent = w.registry.get(world::EntityHandle::make(
+			2, world::BlinkAccum::hit_pool_entity_index(first_hit)));
+	if (parent != nullptr) {
+		out.interior_bms = parent->bms_id;
+		if (person && parent->has_item_def) out.light_transfer = parent->light_transfer;
+	}
+	return out;
+}
+
+} // namespace
+
+void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q16[3],
 		const std::unordered_set<int32_t> &culled_bms,
 		const std::unordered_set<int32_t> &culled_wire, int64_t layout_revision,
-		std::vector<SunQualityChange> &out) {
+		std::vector<EntityLightingChange> &out) {
 	out.clear();
 	if (view.kernel == nullptr) return;
 	mission::MissionKernel &kernel = *view.kernel;
@@ -448,22 +471,25 @@ void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3]
 		layout_revision_seen = layout_revision;
 	}
 
-	const auto entity_quality = [&](const world::Entity &e) {
-		// Contained entities route through the interior light group; the
-		// outdoor factor stays 1.0 [orig: the blink-ref branch @0x5c74b7].
-		// The +0x1C0 slice gate [orig: @0x5c6808] lives inside the ray walk:
-		// an entity with no proximity-candidate slice blocks nothing and holds
-		// quality 4 — statics never ray, and only slice candidates (structures
-		// overlapping the entity's inflated bubble) can shade it.
-		if (e.blink_hits[0] != 0) return static_cast<uint8_t>(4);
+	// One registry entity's context. Contained entities route through the
+	// interior light group; the outdoor factor stays 1.0 [orig: the blink-ref
+	// branch @0x5c74b7]. The +0x1C0 slice gate [orig: @0x5c6808] lives inside
+	// the ray walk: an entity with no proximity-candidate slice blocks nothing
+	// and holds quality 4 — statics never ray, and only slice candidates
+	// (structures overlapping the entity's inflated bubble) can shade it.
+	const auto entity_lighting = [&](const world::Entity &e) {
+		if (e.blink_hits[0] != 0)
+			return contained_lighting(w, e.blink_hits[0], e.item_type == 3);
+		EntityLighting outdoor;
 		const int blocked = kernel.collision.sun_visibility_blocked_rays(w, e, sun_step_q16);
-		return static_cast<uint8_t>(4 - blocked);
+		outdoor.quality = static_cast<uint8_t>(4 - blocked);
+		return outdoor;
 	};
 
 	// The local player is a spawned entity (bms_id 0, outside the placed-node
 	// walk); its quality feeds the presenter seam only.
 	const world::Entity *local = w.registry.get(w.cached.local_player);
-	local_quality = local != nullptr ? entity_quality(*local) : 4;
+	local_quality = local != nullptr ? entity_lighting(*local).quality : 4;
 
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.kind == world::EntityKind::Building || e.kind == world::EntityKind::Marker) return;
@@ -472,15 +498,15 @@ void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3]
 		// their net id), but the wire walk owns their rendering.
 		if (e.bms_id == 0 || e.spawn_origin == world::kSpawnOriginNone) return;
 		if (e.handle == w.cached.local_player) return;
-		// Retail only rays a drawn entity; a culled one keeps its last factor
-		// until it renders again (the stack slot is simply never pushed).
+		// Retail only lights a drawn entity; a culled one keeps its last
+		// context until it renders again (the stack slot is simply never pushed).
 		if (culled_bms.count(e.bms_id) != 0) return;
-		const uint8_t quality = entity_quality(e);
+		const EntityLighting lighting = entity_lighting(e);
 		const auto it = last_by_bms.find(e.bms_id);
-		const uint8_t last = it != last_by_bms.end() ? it->second : 4;
-		if (quality == last) return;
-		last_by_bms[e.bms_id] = quality;
-		out.push_back(SunQualityChange{ false, e.bms_id, 0, quality });
+		const EntityLighting last = it != last_by_bms.end() ? it->second : EntityLighting{};
+		if (lighting == last) return;
+		last_by_bms[e.bms_id] = lighting;
+		out.push_back(EntityLightingChange{ false, e.bms_id, 0, lighting });
 	});
 
 	// Every rendered role consumes ClientState. Placed rows above continue to
@@ -514,7 +540,7 @@ void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3]
 					return;
 				}
 				// A hidden row is not drawn, so retail does not push a new stack
-				// value; preserve the last emitted quality (see the wire loop).
+				// value; preserve the last emitted context (see the wire loop).
 				if ((e.flags & 0x01u) != 0) return;
 				const EntityClass cls = replication::entity_class_of(e);
 				const bool person_source = pool == 0 &&
@@ -522,16 +548,19 @@ void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3]
 				const bool dynamic_source = pool == 1 &&
 						kernel.wire_collision_shape_for_type(static_cast<uint16_t>(e.item_id))
 								.pool1_candidate_source_eligible;
-				if (!person_source && !dynamic_source) {
-					last_by_wire.erase(handle);
-					return;
+				// A drawn row without a candidate slice never rays (quality 4)
+				// but still takes the interior route when contained.
+				EntityLighting lighting;
+				if (e.blink_hits[0] != 0) {
+					lighting = contained_lighting(w, e.blink_hits[0], e.item_type == 3);
+				} else if (person_source || dynamic_source) {
+					lighting = entity_lighting(e);
 				}
-				const uint8_t quality = entity_quality(e);
 				const auto it = last_by_wire.find(handle);
-				const uint8_t last = it != last_by_wire.end() ? it->second : 4;
-				if (quality == last) return;
-				last_by_wire[handle] = quality;
-				out.push_back(SunQualityChange{ true, 0, handle, quality });
+				const EntityLighting last = it != last_by_wire.end() ? it->second : EntityLighting{};
+				if (lighting == last) return;
+				last_by_wire[handle] = lighting;
+				out.push_back(EntityLightingChange{ true, 0, handle, lighting });
 			});
 		}
 	} else if (view.runtime != nullptr) {
@@ -543,13 +572,13 @@ void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3]
 				last_by_wire.erase(handle);
 				continue;
 			}
-			// Retail only rays a drawn entity; a culled one keeps its last
-			// factor until it renders again (see the registry walk above).
+			// Retail only lights a drawn entity; a culled one keeps its last
+			// context until it renders again (see the registry walk above).
 			if (culled_wire.count(static_cast<int32_t>(handle)) != 0) continue;
 			// A hidden row is not drawn, so retail does not push a new stack
-			// value. Preserve the last emitted quality: if it moves while hidden,
+			// value. Preserve the last emitted context: if it moves while hidden,
 			// the first visible frame must compare against that retained material
-			// state and emit the restoration instead of assuming default quality 4.
+			// state and emit the restoration instead of assuming the default.
 			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
 
 			const world::EntityHandle h{ handle };
@@ -572,24 +601,35 @@ void SunQualityFeed::collect(const RoleView &view, const int32_t sun_step_q16[3]
 					(es.cls == EntityClass::Player || es.cls == EntityClass::Infantry);
 			const world::ResolvedCollisionShape shape = kernel.wire_collision_shape_for_type(es.type_id);
 			const bool dynamic_source = h.pool() == 1 && shape.pool1_candidate_source_eligible;
-			if (!person_source && !dynamic_source) {
-				last_by_wire.erase(handle);
-				continue;
-			}
 
-			uint8_t quality = 4;
-			if ((es.rm_entity_flags & world::kEntityFlagIndoors) == 0 &&
-					(joiner_twin == nullptr || joiner_twin->blink_hits[0] == 0)) {
+			// The client's own +0x1D0 for the row: a pool-1 twin carries it; a
+			// decoded source without one runs the client-side blink walk at its
+			// decoded position [orig: Entity_BuildProximityList @0x4b3dc0 from
+			// the client entity updates, e.g. Entity_UpdatePool1Slot @0x4b8e25].
+			uint32_t first_hit = 0;
+			if (joiner_twin != nullptr) {
+				first_hit = joiner_twin->blink_hits[0];
+			} else {
+				const int32_t pos[3] = { es.x, es.y, es.z };
+				world::BlinkAccum blink;
+				kernel.collision.query_wire_blink_boxes_at_point(w, handle, pos,
+						person_source || shape.item_type == 1 || shape.item_type == 3, blink);
+				first_hit = blink.hits[0];
+			}
+			EntityLighting lighting;
+			if (first_hit != 0) {
+				lighting = contained_lighting(w, first_hit, person_source || shape.item_type == 3);
+			} else if (person_source || dynamic_source) {
 				const int blocked = kernel.collision.wire_sun_visibility_blocked_rays(w, handle,
 						world::FixedVec3{ es.x, es.y, es.z }, shape.bbox_center_q16, sun_step_q16);
-				quality = static_cast<uint8_t>(4 - blocked);
+				lighting.quality = static_cast<uint8_t>(4 - blocked);
 			}
 
 			const auto it = last_by_wire.find(handle);
-			const uint8_t last = it != last_by_wire.end() ? it->second : 4;
-			if (quality == last) continue;
-			last_by_wire[handle] = quality;
-			out.push_back(SunQualityChange{ true, 0, handle, quality });
+			const EntityLighting last = it != last_by_wire.end() ? it->second : EntityLighting{};
+			if (lighting == last) continue;
+			last_by_wire[handle] = lighting;
+			out.push_back(EntityLightingChange{ true, 0, handle, lighting });
 		}
 	}
 }

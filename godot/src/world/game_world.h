@@ -42,6 +42,7 @@
 #include "network/host_session_options.h"
 #include "network/join_target.h"
 #include "object/character_join_profile.h"
+#include "render/scene_overlay_compositor.h"
 #include "object/item_database.h"
 #include "object/object_model.h"
 #include "object/weapon_database.h"
@@ -309,6 +310,9 @@ public:
 	bool is_water_render_active() const;
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
+	// The world's FrameFX node (the shell's SIGHTS card feeds the NVG Sighted
+	// arm through it); null before the scene is wired.
+	FrameFx *get_frame_fx() const { return framefx_; }
 	// The narrow live view of this world (its sim and resource root,
 	// re-resolved per call) the in-world screens and the click picker depend
 	// on.
@@ -389,6 +393,10 @@ public:
 	void render_slot_shadow_frame();
 	void render_particle_frame();
 	void render_precipitation_frame();
+	void plan_screen_effects_frame();
+	void render_scene_overlay_frame();
+	void append_celestial_overlays(SceneOverlaySubmission &r_submission);
+	void append_nvg_laser_overlays(SceneOverlaySubmission &r_submission);
 	void mix_audio_frame(int p_ticks_run);
 	void update_clear_frame();
 	void render_environment_cube_frame();
@@ -547,6 +555,8 @@ private:
 	LegResult leg_slot_shadows(FrameContext &r_ctx);
 	LegResult leg_particles(FrameContext &r_ctx);
 	LegResult leg_precipitation(FrameContext &r_ctx);
+	LegResult leg_screen_effects(FrameContext &r_ctx);
+	LegResult leg_scene_overlay(FrameContext &r_ctx);
 	LegResult leg_audio(FrameContext &r_ctx);
 	LegResult leg_clear(FrameContext &r_ctx);
 	LegResult leg_environment_cube(FrameContext &r_ctx);
@@ -561,6 +571,13 @@ private:
 	void sample_panm_clock();
 	void session_frame_failed(const String &p_reason);
 	Camera3D *render_camera() const;
+	// The camera whose frustum the frame's image is drawn through: the local
+	// view presenter's stretched-frame camera while its target is live (the
+	// surface camera then only carries a culling superset), else
+	// render_camera().
+	Camera3D *image_camera() const;
+	// The surface (window) width in pixels: the retail viewport width.
+	float surface_width() const;
 	Transform3D render_camera_xform() const;
 	void stamp_iris_samples(const Transform3D &p_camera_xform);
 	void render_terrain_light_leg();
@@ -602,7 +619,7 @@ private:
 	bool apply_join_wire_til_if_ready();
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
 	void clear_mission_tile_info();
-	bool load_terrain(const String &p_trn_path);
+	bool load_terrain(const String &p_trn_path, const String &p_tile_set);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void load_player_weapon_profile();
@@ -670,7 +687,13 @@ private:
 	// Frame-clear cache (divergence #21): recompute only when the env
 	// generation moves or the camera crosses the water plane.
 	int64_t clear_env_generation_ = -1;
+	// The post-particle overlay frames published (the submission id), and
+	// the glare/glint model surfaces the tail draws (geometry read once).
+	uint64_t scene_overlay_frame_id_ = 0;
+	SceneOverlayModelSurfaces scene_overlay_bodies_;
+	void append_water_mirror_overlays(SceneOverlaySubmission &r_submission);
 	bool clear_above_water_ = true;
+	bool clear_nvg_scene_ = false;
 	// The render-occlusion frame (OcclusionFrame): the blink letter gates, the
 	// per-frame section-mask/portal apply, the probe A/B seam edges and the
 	// unload reset. Constructed once, wired to the retained scene nodes in

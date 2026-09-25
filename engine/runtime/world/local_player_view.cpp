@@ -538,6 +538,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     v.death_screen_active = s.death_screen_active;
     v.death_screen_submode = s.death_screen_submode;
     v.round_ended = world->match.outcome().ended || s.end_round_known;
+    v.end_round_winner_team = s.end_round_winner_team;
     v.on_foot = !e->mounted;
     v.in_session = s.in_session;
     v.view_tick = world->logic_tick;
@@ -808,12 +809,37 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     const bool thermal_def = w.active && (w.def.flags2 & DEF_WEAPON_FLAG2_THERMAL) != 0;
     out.thermal_view = optical_view && thermal_def;
     out.thermal_terrain_view = thermal_def && v.camera_mode == 0;
+    // The FrameFX dispatch facts: the monitor latch is the thermal latch's
+    // sibling on flags2 & 8 (Player_IsHeldWeaponMonitor), and the dispatch
+    // reads the RAW red word, the dead bit, the session, the death stamp and
+    // g_NVGActive [orig: Render_ProcessMainSceneFrame @0x5ca2e8..0x5ca2f1;
+    // @0x5ca8f6..0x5ca92e; @0x5ca9f5..0x5caa62; @0x5ca516..0x5ca554].
+    const bool monitor_def = w.active && (w.def.flags2 & DEF_WEAPON_FLAG2_MONITOR) != 0;
+    out.frame_fx.in_session = v.in_session;
+    out.frame_fx.local_dead = v.local_dead;
+    out.frame_fx.red_word = v.flash.red;
+    out.frame_fx.camera_mode = v.camera_mode;
+    out.frame_fx.death_elapsed_ticks = static_cast<int32_t>(v.view_tick - v.death_cam.start_tick);
+    out.frame_fx.thermal_view = out.thermal_view;
+    out.frame_fx.monitor_view = optical_view && monitor_def;
+    out.frame_fx.nvg_active = v.nvg_active;
+    out.frame_fx.death_screen_active = v.death_screen_active;
     const bool sighted = out.scope_card_active &&
                          (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
                          active_slot->current != weapon_action::kSwitchFrom;
     const bool scoped = out.scope_card_active &&
                         (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0 &&
                         (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) == 0;
+    // The NVG arms read the binocular byte and the frame's Scoped byte, which
+    // the vehicle-attack context clears [orig: @0x5ca2ff..0x5ca304]; the HUD
+    // takes the mask gate and the lens arm from the same planner.
+    out.frame_fx.binoculars_view_active = v.binoculars_view_active;
+    out.frame_fx.scoped_selector = scoped && !out.vehicle_attack_context;
+    out.frame_fx.sighted_selector = sighted && !out.vehicle_attack_context;
+    const renderer::FrameFxNvgPlan nvg = renderer::frame_fx_nvg_view(out.frame_fx);
+    out.nvg_mask_visible = renderer::frame_fx_nvg_mask_visible(out.frame_fx);
+    out.nvg_lens_active = nvg.lens;
+    out.nvg_sights_in_scene = nvg.sighted;
     // The modern main-scene branches: Sighted requires a nonzero max-zero
     // definition; Scoped always applies its slot offsets. Binoculars bypass
     // both. [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0,
@@ -840,6 +866,17 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     out.scope_zero_default = w.def.scope_zero.default_metres;
 	out.inset_scope_active = optical_view && out.scope_details_scoped &&
 			(w.def.flags2 & DEF_WEAPON_FLAG2_INSET) && !v.binoculars_view_active;
+	// The FP draw's own gates (player_present.h fp_viewmodel_retail_submit):
+	// the alive gate reads the local dead bit and the decided winner; the draw
+	// skips the showhud test for an Emplaced def and skips the model for a
+	// scoped Inset def while CanFire holds [orig: Player_RenderViewModelIfAlive
+	// @0x4E0145/@0x4E014B; Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEDF1
+	// and @0x4DEDF7..0x4DEE19].
+	out.fp_local_dead = v.local_dead;
+	out.fp_round_winner_set = v.end_round_winner_team != 0;
+	out.fp_def_emplaced = w.active && (w.def.flags & DEF_WEAPON_FLAG_EMPLACED) != 0;
+	out.fp_inset_scoped = optical_view && out.scope_details_scoped &&
+			(w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0;
 	out.inset_fov_over_zoom = out.inset_scope_active
 			? float(current_fov) / 65536.0f / local_player_scope_zoom(w, *active_slot)
 			: 0;

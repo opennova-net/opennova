@@ -810,6 +810,31 @@ RoundSourceState resolve_round_source(World &world,
     return source;
 }
 
+// The zero elevation a descriptor's zero step (subtype & 0x3F) selects: the
+// shooter's equipped AdmDef +0x3B0 row, the step clamped to 39. No source
+// entity, step 0 or AdmDef 0 adds nothing. The IDB's Score_GetMultiplierValue
+// is a misname: the row is WeaponSlot_CalcElevationTable's output. Its
+// byte_24D217C gate has no writer in the image (hud/sight_overlay.h).
+// [orig: RoundData_SpawnRound @0x4ec155 (& 0x3F), sourceEntity && step
+//  @0x4ec16a, entity+0x2B0 @0x4ec16f; Score_GetMultiplierValue @0x4fc440 --
+//  the 39 clamp @0x4fc44f..0x4fc451, AdmDefs+0x3B0 @0x4fc46d]
+int32_t round_zero_elevation(const World &world, const RoundSpawnParams &params) {
+    uint8_t adm = 0;
+    if (params.source_state != nullptr) {
+        adm = params.source_state->equipped_adm_index;
+    } else if (const Entity *shooter = world.registry.get(params.owner)) {
+        adm = shooter->equipped_adm_index;
+    } else {
+        return 0;
+    }
+    const int step = std::min(params.subtype & 0x3F, 39);
+    if (step == 0 || adm == 0) return 0;
+    const WeaponTableEntry *weapon = world.tables.weapons.by_index(adm);
+    return weapon != nullptr
+            ? weapon_scope_zero_pitch(weapon->action_fsm.scope_zero, static_cast<int16_t>(step))
+            : 0;
+}
+
 // A spawned round that is not SILENCED (ammo flag 8) marks its shooter with
 // Flags 0x4000, the SM scan's x6 priority weight until a perception scan
 // clears it; both Flags views carry the bit.
@@ -946,10 +971,18 @@ void RoundSim::present_fire(World &world, const RoundSpawnParams &params) {
     record_round_fire(world, *this, params);
 }
 
-int RoundSim::spawn(World &world, const RoundSpawnParams &params,
+int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     RoundConsequenceMode mode) {
-    const AmmoTableEntry *ammo = world.tables.ammo.by_index(params.ammo_index);
+    const AmmoTableEntry *ammo = world.tables.ammo.by_index(descriptor.ammo_index);
     if (ammo == nullptr) return -1;
+    // The descriptor's pitch takes the shooter's zero elevation ahead of every
+    // dispatch leg; the ring/presentation record keeps the angles it copied
+    // before the spawn ran.
+    // [orig: RoundData_SpawnRound @0x4ec155..0x4ec181; RoundData_AddRound
+    //  copies the angles @0x4fdbce..0x4fdbf7 ahead of the spawn @0x4fdc6a]
+    RoundSpawnParams params = descriptor;
+    params.dir_pitch_bam = io::bam_add(params.dir_pitch_bam,
+            round_zero_elevation(world, descriptor));
     const bool authoritative =
         mode == RoundConsequenceMode::Authoritative &&
         (!world.rules.mp_session || world.rules.projectile_authority);
@@ -1077,7 +1110,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
         // [orig: RoundData_SpawnRound @0x4EC378]
         const int first = spawn_burst(
                 world, params, *ammo, mode, /*shotgun_spread=*/true);
-        record_round_fire(world, *this, params);
+        record_round_fire(world, *this, descriptor);
         apply_round_recoil(*ammo, source);
         return first;
     }
@@ -1265,7 +1298,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // Record the fire for the host present layer (sound + muzzle effect) — the
     // inline-presentation moment of the original [orig: WeaponSlot_FireAndSpawnEffects
     // @0x53f440 runs its presentation right after Entity_FireWeaponAndSendPacket].
-    record_round_fire(world, *this, params);
+    record_round_fire(world, *this, descriptor);
     ++active_count;
     // The shooter's fired mark precedes the recoil in the spawn tail [orig:
     // RoundData_SpawnRound `test byte ptr [edi],8; jnz; or dword ptr
@@ -2077,6 +2110,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // direction helper emits it around world +Y, so a dirt puff rises out
         // of the ground instead of following the round into it.
         imp.direction = flight_direction(vec_from_fixed(incoming_velocity_q16));
+        imp.section_tagged = impact_target != nullptr;
         if (collision.hit_class == ProjectileHitClass::Terrain ||
             collision.hit_class == ProjectileHitClass::Water) {
             imp.direction = Vec3{0.0f, 0.0f, 0.0f};

@@ -390,65 +390,57 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 			"the atlas carries the authored LGHT transformed by its static entity")
 
 
-## The corona billboards land as ONE MultiMesh buffer write (the D-RLIT-4
-## corona leg): pin the interleaved TRANSFORM_3D + color float layout against
-## the engine walk's witnessed values [orig: EffectWorld_RenderLightCoronas
+## The corona billboards (the D-RLIT-4 corona leg): pin the collected rows
+## against the engine walk's witnessed values [orig: EffectWorld_RenderLightCoronas
 ## @ 0x5aaf40 — three segments toward the camera, 0.1 x radius apart, half
 ## size radius/2, white record color x 1/16 at full fade; the semantics are
-## the renderer_light_scene ctest's] through the headless-safe buffer seam
-## (the dummy RenderingServer stores no MultiMesh instance data).
-func test_fill_corona_multimesh_packs_the_witnessed_segments() -> void:
+## the renderer_light_scene ctest's] through the row seam the post-particle
+## overlay stage draws from (7 floats per row: the Godot-world centre, the
+## half size, the colour).
+func test_collect_corona_rows_packs_the_witnessed_segments() -> void:
 	var scene := LightScene.new()
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 4.0)), 0)
 	var no_models: Array[Node3D] = []
-	var mesh := MultiMesh.new()
-	mesh.transform_format = MultiMesh.TRANSFORM_3D
-	mesh.use_colors = true
-	var count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
+	var count := scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), null, mesh)
+			PackedInt64Array(), null)
 	assert_eq(count, 3, "an enabled corona draws three segments")
-	var buffer := scene.get_last_corona_buffer()
-	assert_true(buffer.size() >= count * 16, "one 16-float record per row")
-	if buffer.size() >= 16:
-		# The scale-only basis carries the half size (radius/2) on its diagonal.
-		assert_almost_eq(buffer[0], 2.0, 0.001)
-		assert_almost_eq(buffer[5], 2.0, 0.001)
-		assert_almost_eq(buffer[10], 2.0, 0.001)
+	var rows := scene.get_last_corona_rows()
+	assert_eq(rows.size(), count * 7, "one 7-float row per segment")
+	if rows.size() >= 7:
 		# The origin is the Godot-world segment center: the first segment
 		# steps 0.1 x radius from the light toward the camera.
-		assert_almost_eq(buffer[3], 0.0, 0.02)
-		assert_almost_eq(buffer[7], 1.0, 0.02)
-		assert_almost_eq(buffer[11], 0.4, 0.02)
-		# White record color x 1/16 at full fade, opaque.
-		assert_almost_eq(buffer[12], 255.0 / 256.0 / 16.0, 0.002)
-		assert_almost_eq(buffer[15], 1.0, 0.000001)
+		assert_almost_eq(rows[0], 0.0, 0.02)
+		assert_almost_eq(rows[1], 1.0, 0.02)
+		assert_almost_eq(rows[2], 0.4, 0.02)
+		# The half size is radius/2.
+		assert_almost_eq(rows[3], 2.0, 0.001)
+		# White record color x 1/16 at full fade.
+		assert_almost_eq(rows[4], 255.0 / 256.0 / 16.0, 0.002)
 	# A corona-disabled record adds nothing.
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(2.0, 1.0, 0.0), 4.0)
 			.masking(true, false, false)), 0)
-	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
+	count = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), null, mesh)
+			PackedInt64Array(), null)
 	assert_eq(count, 3,
 			"the corona-disabled record adds nothing to the first light's three segments")
 	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
 	# past the fog end the corona color folds to black but the quads remain.
-	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
+	count = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), _fog_values(true, 1, 2.0, 8.0), mesh)
+			PackedInt64Array(), _fog_values(true, 1, 2.0, 8.0))
 	assert_eq(count, 3)
-	buffer = scene.get_last_corona_buffer()
-	if buffer.size() >= 16:
-		assert_almost_eq(buffer[12], 0.0, 0.0001,
+	rows = scene.get_last_corona_rows()
+	if rows.size() >= 7:
+		assert_almost_eq(rows[4], 0.0, 0.0001,
 				"a corona past the fog end fades fully to black")
-	# A camera past the 100-wu cull empties the frame; the mesh keeps its
-	# high-water capacity and hides every instance instead of reallocating.
-	var far_count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 500.0),
+	# A camera past the 100-wu cull empties the frame.
+	var far_count := scene.collect_corona_rows(Vector3(0.0, 1.0, 500.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
-			PackedInt64Array(), _fog_values(true, 1, 2.0, 40.0), mesh)
+			PackedInt64Array(), _fog_values(true, 1, 2.0, 40.0))
 	assert_eq(far_count, 0)
-	assert_eq(mesh.visible_instance_count, 0)
-	assert_eq(mesh.instance_count, 3, "capacity persists at the high-water mark")
+	assert_eq(scene.get_last_corona_rows().size(), 0)
 
 
 ## Static-row dirty maintenance: steady frames rewrite only gen-animated rows
@@ -555,6 +547,55 @@ func test_director_reset_retires_pool_and_published_output() -> void:
 			"reset retires every mission light")
 	assert_eq(report.selected, 0,
 			"reset synchronously clears shader output")
+
+
+## The static atlas's entity lighting lane (texel 9) outlives the director's
+## output clears. Reloading the same mission runs the persistent director
+## through reset() and reattach() against rows whose draw-source revision and
+## row count equal the departed mission's, and a camera-loss frame clears the
+## output with the rows untouched: both zero the published atlas while the
+## static selection cache still matches, and a lightless mission leaves the
+## pool's selection revision where it was. The next frame must rewrite every
+## active row's lane; a lane left zero is effectScale 0, which drew every
+## static model of a reloaded CP01 without its sun. Retail derives the factor
+## per draw, every frame: 1.0 for an entity with no proximity slice
+## [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
+## Entity_ComputeSunVisibility @ 0x5c6800].
+func test_static_row_lanes_republish_after_the_director_clears_its_output() -> void:
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	var placer := StaticSourceFixture.place(self, world,
+			[_fixture_object_data("house.3di")], [Vector3(5.0, 1.0, 0.0)])
+	var director := EffectLightDirector.new()
+	director.setup(world, placer)
+	director.reattach()
+	assert_eq(director.get_report().live, 0, "the house carries no light record")
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	camera.position = Vector3(5.0, 2.0, 8.0)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
+	assert_almost_eq(_static_row_effect_scale(director), 1.0, 0.001,
+			"an outdoor static row publishes effectScale 1")
+	director.reset()
+	assert_almost_eq(_static_row_effect_scale(director), 0.0, 0.001,
+			"reset zeroes the published atlas")
+	director.reattach()
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
+	assert_almost_eq(_static_row_effect_scale(director), 1.0, 0.001,
+			"a same-revision reattach republishes the row's lane")
+	director.render_frame(null, GameWorld.current_frame_clock_ms())
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
+	assert_almost_eq(_static_row_effect_scale(director), 1.0, 0.001,
+			"the frame after a camera loss republishes the row's lane")
+
+
+func _static_row_effect_scale(director: EffectLightDirector) -> float:
+	var atlas := director.scene().get_static_light_rows_image()
+	assert_not_null(atlas)
+	if atlas == null:
+		return -1.0
+	return atlas.get_pixel(9, 0).r
 
 
 func test_wire_node_exit_retires_its_cached_light_without_duplicate_registration() -> void:

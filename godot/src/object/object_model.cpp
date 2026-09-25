@@ -27,6 +27,8 @@
 #include "object/object_shader_cache.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
+#include "util/texture_path_resolver.h"
+#include <runtime/renderer/foliage_frame.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/renderer/render_order.h>
@@ -154,7 +156,9 @@ ObjectModel::~ObjectModel() {
 		awake_models_.erase(this);
 	}
 	match_terrain_models_.erase(this);
+	foliage_mask_models_.erase(this);
 	authored_lod_models_.erase(this);
+	pixel_cull_models_.erase(this);
 	retire_geometry_instances();
 }
 
@@ -216,6 +220,11 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 	presentation_links_.push_back(link);
 	p_model->set_match_terrain_enabled(match_terrain_enabled_);
 	p_model->set_thermal_entity_wave(thermal_entity_wave_);
+	// A linked part draws inside its owner's submission: its CLIP arming is
+	// the owner's.
+	p_model->water_mirror_clip_inherited_ = true;
+	water_mirror_clip_models_.erase(p_model);
+	p_model->apply_water_mirror_clip_armed(water_mirror_clip_armed_);
 }
 
 
@@ -248,6 +257,7 @@ void ObjectModel::set_slot_shadow_person(bool p_person) {
 		SlotShadow::bump_caster_group_revision();
 	}
 	slot_shadow_person_ = p_person;
+	update_foliage_mask_membership();
 }
 
 bool ObjectModel::is_slot_shadow_person() const {
@@ -299,8 +309,22 @@ float ObjectModel::get_entity_bound_radius() const {
 }
 
 void ObjectModel::set_entity_light_owner(ObjectModel *p_owner) {
+	if (ObjectModel *previous = get_entity_light_owner()) {
+		previous->water_mirror_clip_attached_.erase(ObjectID(get_instance_id()));
+	}
 	entity_light_owner_ = p_owner != nullptr && p_owner != this
 			? ObjectID(p_owner->get_instance_id()) : ObjectID();
+	// An attached model (a held weapon, a mounted part) draws inside its
+	// owner's entity submission, so the owner's mirror CLIP arming is its own
+	// (runtime/environment/water_mirror.h).
+	if (ObjectModel *owner = get_entity_light_owner()) {
+		owner->water_mirror_clip_attached_.insert(ObjectID(get_instance_id()));
+		water_mirror_clip_models_.erase(this);
+		apply_water_mirror_clip_armed(owner->water_mirror_clip_armed_);
+	} else if (tracks_water_mirror_clip()) {
+		water_mirror_clip_models_.insert(this);
+		refresh_water_mirror_clip();
+	}
 }
 
 ObjectModel *ObjectModel::get_entity_light_owner() const {
@@ -315,28 +339,12 @@ void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
 		SlotShadow::bump_caster_group_revision();
 	}
 	slot_shadow_capture_with_ = next;
+	update_foliage_mask_membership();
 }
 
 ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
 	return Object::cast_to<ObjectModel>(
 			ObjectDB::get_instance(slot_shadow_capture_with_));
-}
-
-void ObjectModel::set_slot_shadow_decal(const String &p_texture,
-		const Vector4 &p_dims) {
-	if (slot_shadow_decal_texture_ != p_texture) {
-		SlotShadow::bump_caster_group_revision();
-	}
-	slot_shadow_decal_texture_ = p_texture;
-	slot_shadow_decal_dims_ = p_dims;
-}
-
-String ObjectModel::get_slot_shadow_decal_texture() const {
-	return slot_shadow_decal_texture_;
-}
-
-Vector4 ObjectModel::get_slot_shadow_decal_dims() const {
-	return slot_shadow_decal_dims_;
 }
 
 bool ObjectModel::is_shadow_caster_enabled() const {
@@ -390,6 +398,11 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 			base = LAYER_VIEWMODEL;
 			markers = false;
 			break;
+	}
+	// A camera-culled attachment leaves every camera by layer, like the hidden
+	// first-person body, and stays in its render-slot capture.
+	if (camera_pixel_culled_ && presentation_layer_ != PRESENTATION_LAYER_VIEWMODEL) {
+		base = LAYER_FP_BODY_SHADOW_ONLY;
 	}
 	return markers ? (base | shadow_caster_layers_) : base;
 }
@@ -449,6 +462,7 @@ void ObjectModel::set_thermal_entity_wave(bool p_enabled) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->set_thermal_entity_wave(p_enabled);
 	}
+	refresh_water_mirror_clip();
 }
 
 void ObjectModel::set_entity_lighting_context(float p_effect_scale,
@@ -464,6 +478,11 @@ void ObjectModel::set_entity_lighting_context(float p_effect_scale,
 	interior_lerp_ = p_interior_lerp;
 	interior_daylight_ = next_daylight;
 	stamp_entity_lighting_instances();
+}
+
+void ObjectModel::set_interior_light_group(int p_building_bms, int p_section) {
+	interior_light_group_bms_ = p_building_bms;
+	interior_light_group_section_ = p_building_bms != 0 ? p_section : 0;
 }
 
 void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
@@ -492,11 +511,13 @@ void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
 // opennova::renderer::compute_entity_lighting].
 void ObjectModel::stamp_entity_lighting_instances() {
 	const StringName name("u_entity_light");
+	// w: bit 1 the BySide person wave, bit 2 the mirror CLIP arming.
+	const float clip_bit = water_mirror_clip_armed_ ? 2.0f : 0.0f;
 	const Vector4 entity = interior_section_lighting_
-			? Vector4(1.0f, 0.0f, 1.0f, 0.0f)
+			? Vector4(1.0f, 0.0f, 1.0f, clip_bit)
 			: Vector4(lighting_effect_scale_, interior_lerp_ ? 1.0f : 0.0f,
-					interior_daylight_, thermal_entity_wave_ ? 1.0f : 0.0f);
-	const Vector4 section(1.0f, 1.0f, interior_section_daylight_, 0.0f);
+					interior_daylight_, (thermal_entity_wave_ ? 1.0f : 0.0f) + clip_bit);
+	const Vector4 section(1.0f, 1.0f, interior_section_daylight_, clip_bit);
 	const auto apply_to = [&](Node *p_parent, const Vector4 &p_value) {
 		if (p_parent == nullptr) {
 			return;
@@ -565,28 +586,53 @@ Dictionary ObjectModel::get_render_part_nodes() const {
 	return result;
 }
 
-void ObjectModel::set_section_visibility_mask(int64_t p_mask) {
-	// [orig: g_HiddenSectionMask @ 0xB7965C consumption in
-	//  Terrain_RenderSectorModels @ 0x5c5d30 — per-draw hidden mask is ~mask;
-	//  the renderer-specific two-pass legs are D-OCC-13]
-	if (section_visibility_mask_ == p_mask) {
-		return;
+// Retail hides part i when bit (i & 31) of entity+0x138 | g_HiddenSectionMask
+// is set; g_HiddenSectionMask (retail @ 0xB7965C) is ~(raw | forced) for a batched building
+// (retail Terrain_RenderSectorModels @ 0x5c5d72..0x5c5e4f) and 0 for every
+// other sector entity (@ 0x5c7b6b), so a model without a verdict hides only
+// its destroyed sections (retail BoneCallback_bldg_World @ 0x4e22cf..0x4e22e2).
+bool ObjectModel::section_part_visible(int p_section) const {
+	const uint32_t bit = 1u << (static_cast<uint32_t>(p_section) & 31u);
+	if ((destroyed_section_mask_ & bit) != 0) {
+		return false;
 	}
-	section_visibility_mask_ = p_mask;
+	if (occlusion_section_mask_ == -1) {
+		return true;
+	}
+	return ((static_cast<uint32_t>(occlusion_section_mask_) | forced_section_mask_) & bit) != 0;
+}
+
+void ObjectModel::apply_section_visibility() {
 	point_light_draw_parts_dirty_ = true;
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
 		if (kv.value != nullptr) {
-			kv.value->set_visible(p_mask == -1 || ((p_mask >> kv.key) & 1) == 1);
+			kv.value->set_visible(section_part_visible(kv.key));
 		}
 	}
 	for (const KeyValue<int, OccluderInstance3D *> &kv : authored_occluders_) {
 		if (kv.value != nullptr) {
-			kv.value->set_visible(
-					p_mask == -1 ||
-					(kv.key < 63 &&
-							((static_cast<uint64_t>(p_mask) >> kv.key) & 1u) != 0));
+			kv.value->set_visible(section_part_visible(kv.key));
 		}
 	}
+}
+
+void ObjectModel::set_occlusion_section_mask(int64_t p_raw_mask, int64_t p_forced_mask) {
+	const uint32_t forced = static_cast<uint32_t>(p_forced_mask);
+	if (occlusion_section_mask_ == p_raw_mask && forced_section_mask_ == forced) {
+		return;
+	}
+	occlusion_section_mask_ = p_raw_mask;
+	forced_section_mask_ = forced;
+	apply_section_visibility();
+}
+
+void ObjectModel::set_destroyed_section_mask(int64_t p_hidden_mask) {
+	const uint32_t hidden = static_cast<uint32_t>(p_hidden_mask);
+	if (destroyed_section_mask_ == hidden) {
+		return;
+	}
+	destroyed_section_mask_ = hidden;
+	apply_section_visibility();
 }
 
 Array ObjectModel::get_surface_materials() const {
@@ -643,6 +689,27 @@ void ObjectModel::set_authored_lod_owner(ObjectModel *p_owner, bool p_exact) {
 	authored_lod_owner_ = p_owner != nullptr && p_owner != this
 			? p_owner->get_instance_id()
 			: ObjectID();
+}
+
+void ObjectModel::set_attachment_pixel_cull(bool p_enabled) {
+	attachment_pixel_cull_ = p_enabled;
+	if (!p_enabled) {
+		pixel_cull_models_.erase(this);
+		set_camera_pixel_culled(false);
+		return;
+	}
+	// The weapon model's own header sphere (gpm[5]) — the radius the gate
+	// projects. [retail BoneCallback_org0_World @ 0x4e3d2b]
+	attachment_pixel_cull_radius_q16_ = object_data_.is_valid()
+			? opennova::world::model_bound_radius_q16_from_3di(object_data_->native_model())
+			: 0;
+	pixel_cull_models_.insert(this);
+}
+
+void ObjectModel::set_camera_pixel_culled(bool p_culled) {
+	if (camera_pixel_culled_ == p_culled) return;
+	camera_pixel_culled_ = p_culled;
+	apply_presentation_layer_below(this);
 }
 
 ObjectModel *ObjectModel::get_authored_lod_owner() const {
@@ -716,6 +783,15 @@ void ObjectModel::set_authored_lod_enabled(bool p_enabled) {
 		return;
 	}
 	authored_lod_models_.erase(this);
+}
+
+void ObjectModel::set_presenter_driven_lod(bool p_enabled) {
+	presenter_driven_lod_ = p_enabled;
+	if (p_enabled) {
+		authored_lod_models_.erase(this);
+	} else if (authored_lod_enabled_ && !authored_lod_thresholds_q16_.empty()) {
+		authored_lod_models_.insert(this);
+	}
 }
 
 void ObjectModel::set_authored_occluders_enabled(bool p_enabled) {
@@ -887,10 +963,13 @@ void ObjectModel::refresh_render_order() {
 					? static_cast<float>(get_global_position().y)
 					: static_cast<float>(draw.instance->get_global_transform()
 							.xform(draw.local_center).y);
-			// The viewmodel flushes whole before the sky pass; its depth band
-			// keeps later world alpha off it (renderer/render_order).
+			// The viewmodel flushes whole after the sky pass and before every
+			// world draw; its depth band keeps later world alpha off it
+			// (renderer/render_order).
 			const int32_t rung = viewmodel_pass_
 					? opennova::renderer::kRungViewmodel
+					: render_rung_override_ != kRenderRungFromWaterSide
+					? render_rung_override_
 					: shader_cache->alpha_rung_for_height(world_height);
 			if (rung != draw.rung) {
 				draw.rung = rung;
@@ -914,8 +993,11 @@ void ObjectModel::mark_render_order_dirty_all() {
 // off Godot's frame outside that one driver.
 HashSet<ObjectModel *> ObjectModel::awake_models_;
 HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
+HashSet<ObjectModel *> ObjectModel::water_mirror_clip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
+HashSet<ObjectModel *> ObjectModel::foliage_mask_models_;
 HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
+HashSet<ObjectModel *> ObjectModel::pixel_cull_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
 int64_t ObjectModel::live_geometry_instance_count_ = 0;
 
@@ -928,34 +1010,87 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		float p_vertical_fov_degrees,
 		float p_viewport_width,
 		float p_viewport_height) {
-	if (authored_lod_models_.is_empty()) {
-		return 0;
-	}
 	// The frame scale, the projected radius and the selector are engine facts
 	// (runtime/renderer/object_lod.h); the frame struct converts the camera.
 	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
 			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
-	if (!frame.valid) {
+	return update_authored_lod_views(&frame, 1);
+}
+
+int ObjectModel::update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width) {
+	const ObjectLodFrame frame = ObjectLodFrame::from_camera(p_camera, p_viewport_width);
+	return update_authored_lod_views(&frame, 1);
+}
+
+// [engine: renderer::select_object_lod, object_subpixel_culled and
+//  project_bound_sphere_radius_q16 own the witnessed rules — the sector-entity
+//  draw returns before the RLOD walk below 0.75 px (retail render_sector_entity
+//  @ 0x5c42d8..0x5c42de); this walk feeds them each registered model per view]
+int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
+		int p_frame_count) {
+	if ((authored_lod_models_.is_empty() && pixel_cull_models_.is_empty()) ||
+			p_frames == nullptr) {
 		return 0;
 	}
-	// The cheap math runs over the registered set in place; a level change is
-	// applied after the walk so set_active_lod's runtime-state refresh never
-	// runs against the set being iterated. Nothing allocates while no model
-	// crosses a threshold.
+	const int view_count = std::min(p_frame_count, static_cast<int>(kMaxLodViews));
+	bool any_valid = false;
+	for (int v = 0; v < view_count; ++v) {
+		any_valid = any_valid || p_frames[v].valid;
+	}
+	if (!any_valid) {
+		return 0;
+	}
+	// The held weapon's own 2 px gate: its model sphere projected at its
+	// attach point, the raw radius against 0x20000, per view; the shared node
+	// leaves the camera only when every view that sees it culls it. A sphere
+	// no view sees is not drawn by any camera either way. [retail
+	// BoneCallback_org0_World @ 0x4e3d07..0x4e3d4b]
+	for (ObjectModel *model : pixel_cull_models_) {
+		bool seen = false;
+		bool drawn = false;
+		if (model->is_inside_tree()) {
+			const Vector3 origin = model->get_global_transform().origin;
+			for (int v = 0; v < view_count; ++v) {
+				int32_t projected_q16 = 0;
+				if (!p_frames[v].valid || !p_frames[v].project_q16(origin,
+								model->attachment_pixel_cull_radius_q16_, projected_q16)) {
+					continue;
+				}
+				seen = true;
+				drawn = drawn ||
+						!opennova::renderer::held_weapon_projection_culled(projected_q16);
+			}
+		}
+		model->set_camera_pixel_culled(seen && !drawn);
+	}
+	if (authored_lod_models_.is_empty()) {
+		return 0;
+	}
+	// The cheap math runs over the registered set in place; visibility and
+	// level changes are applied after the walk so a visibility notification or
+	// set_active_lod's runtime-state refresh never runs against the set being
+	// iterated. Nothing allocates while no model crosses a threshold.
 	struct LodSwitch {
 		ObjectModel *model = nullptr;
 		int lod_index = 0;
+	};
+	struct SubpixelChange {
+		ObjectModel *model = nullptr;
+		bool hidden = false;
 	};
 	// Frame scratch that keeps its capacity across calls (deliberately never
 	// freed: a static with a Godot allocator destructor would run after the
 	// extension's allocator hooks are gone), so a frame with attachments or
 	// crossings allocates nothing once warm.
 	static LocalVector<LodSwitch> &switches = *memnew(LocalVector<LodSwitch>);
+	static LocalVector<SubpixelChange> &subpixel_changes =
+			*memnew(LocalVector<SubpixelChange>);
 	switches.clear();
+	subpixel_changes.clear();
 	static uint64_t projection_frame = 0;
 	++projection_frame;
-	// Attachments take their owner's level after the owners' own selections
-	// have been applied (renderer::attachment_lod_index).
+	// Attachments take their owner's level (and sub-pixel verdict) after the
+	// owners' own selections have been applied (renderer::attachment_lod_index).
 	static LocalVector<ObjectModel *> &attachments =
 			*memnew(LocalVector<ObjectModel *>);
 	attachments.clear();
@@ -973,44 +1108,74 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 			source->lod_projection_frame_ = projection_frame;
 			const Transform3D world = source->get_global_transform();
 			const auto &sphere = source->entity_projection_sphere_;
-			if (sphere.valid) {
-				const Vector3 center = ObjectLodFrame::projection_center(
-						world, sphere, source->entity_projection_scale_q16_);
-				source->lod_projection_visible_ = frame.project_q16(center,
-						sphere.radius_q16, source->lod_projected_radius_q16_);
-			} else {
-				// Document-less previews have no entity collision-bound producer.
-				const float radius = (source->model_sphere_radius_ > 0.0f
-						? source->model_sphere_radius_
-						: source->model_bounds_.get_longest_axis_size() * 0.5f) *
-						ObjectLodFrame::uniform_scale(world.basis);
-				source->lod_projection_visible_ = frame.project(
-						world.origin, radius, source->lod_projected_radius_q16_);
+			for (int v = 0; v < view_count; ++v) {
+				const ObjectLodFrame &frame = p_frames[v];
+				if (!frame.valid) {
+					source->lod_projection_visible_[v] = false;
+					continue;
+				}
+				if (sphere.valid) {
+					const Vector3 center = ObjectLodFrame::projection_center(
+							world, sphere, source->entity_projection_scale_q16_);
+					source->lod_projection_visible_[v] = frame.project_q16(center,
+							sphere.radius_q16, source->lod_projected_radius_q16_[v]);
+				} else {
+					// Document-less previews have no entity collision-bound producer.
+					const float radius = (source->model_sphere_radius_ > 0.0f
+							? source->model_sphere_radius_
+							: source->model_bounds_.get_longest_axis_size() * 0.5f) *
+							ObjectLodFrame::uniform_scale(world.basis);
+					source->lod_projection_visible_[v] = frame.project(
+							world.origin, radius, source->lod_projected_radius_q16_[v]);
+				}
 			}
 		}
-		// A rejected entity never reaches any part's threshold selector.
-		if (!source->lod_projection_visible_) continue;
-		const int32_t projected_q16 = source->lod_projected_radius_q16_;
-		const opennova::renderer::ObjectLodSelection selection =
-				opennova::renderer::select_object_lod(
-						model->authored_lod_thresholds_q16_, projected_q16,
-						frame.projection_scale, model->authored_lod_available_);
-		if (selection.lod_index < 0 || selection.lod_index == model->active_lod_) {
-			continue;
+		// A view that rejected the entity never reaches its selector; an
+		// entity no view sees keeps its level and its sub-pixel verdict.
+		bool seen = false;
+		bool above_floor = false;
+		int lod_index = -1;
+		for (int v = 0; v < view_count; ++v) {
+			if (!source->lod_projection_visible_[v]) {
+				continue;
+			}
+			seen = true;
+			const int32_t projected_q16 = source->lod_projected_radius_q16_[v];
+			if (opennova::renderer::object_subpixel_culled(projected_q16)) {
+				continue;
+			}
+			above_floor = true;
+			const opennova::renderer::ObjectLodSelection selection =
+					opennova::renderer::select_object_lod(
+							model->authored_lod_thresholds_q16_, projected_q16,
+							p_frames[v].projection_scale, model->authored_lod_available_);
+			if (selection.lod_index >= 0 &&
+					(lod_index < 0 || selection.lod_index < lod_index)) {
+				lod_index = selection.lod_index;
+			}
 		}
-		// The tree-visibility walk only for the models that actually cross: a
-		// hidden model re-selects on the frame it becomes visible.
-		if (!model->is_visible_in_tree()) {
-			continue;
+		if (!seen) continue;
+		if (above_floor == model->subpixel_hidden_) {
+			subpixel_changes.push_back(SubpixelChange{ model, !above_floor });
 		}
-		switches.push_back(LodSwitch{ model, selection.lod_index });
+		if (lod_index >= 0 && lod_index != model->active_lod_) {
+			switches.push_back(LodSwitch{ model, lod_index });
+		}
+	}
+	for (const SubpixelChange &change : subpixel_changes) {
+		if (authored_lod_models_.has(change.model)) {
+			change.model->set_subpixel_hidden(change.hidden);
+		}
 	}
 	int applied = 0;
 	for (const LodSwitch &change : switches) {
 		// A switch applied earlier in this loop can unregister or free another
 		// queued model (set_active_lod's runtime-state refresh reaches child
-		// nodes); only a still-registered model is dereferenced.
-		if (!authored_lod_models_.has(change.model)) {
+		// nodes); only a still-registered model is dereferenced. The
+		// tree-visibility walk only for the models that actually cross: a
+		// hidden model re-selects on the frame it becomes visible.
+		if (!authored_lod_models_.has(change.model) ||
+				!change.model->is_visible_in_tree()) {
 			continue;
 		}
 		change.model->set_active_lod(change.lod_index);
@@ -1021,6 +1186,9 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 			continue;
 		}
 		const ObjectModel *owner = attachment->get_authored_lod_owner();
+		// Retail draws an attachment inside its owner's bone callback, so the
+		// owner's sub-pixel return drops it too.
+		attachment->set_subpixel_hidden(owner != nullptr && owner->subpixel_hidden_);
 		const int level = attachment->exact_owner_lod_ && owner != nullptr ? owner->active_lod_
                 : opennova::renderer::attachment_lod_index(
 				owner != nullptr ? owner->active_lod_ : 0,
@@ -1085,7 +1253,7 @@ void ObjectModel::advance_awake_frame_impl(double p_delta,
 }
 
 // MATCHTERRAIN-class instances read the terrain page projection (the c7/c8 fold at
-// Foliage_RenderFarPatches @0x60a220..0x60a34f; class selection CRenderBatchQueue_FlushBatches
+// Foliage_RenderDetailPatches @0x60a220..0x60a34f; class selection CRenderBatchQueue_FlushBatches
 // @0x5d9ff3 - docs/render/render-material-re.md).
 void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 		float p_layer, const Vector4 &p_projection) {
@@ -1136,10 +1304,31 @@ void ObjectModel::stamp_instance_uniforms(GeometryInstance3D *p_instance) const 
 	p_instance->set_instance_shader_parameter(
 			StringName("u_match_terrain_page_projection"),
 			match_terrain_page_projection_);
+	p_instance->set_instance_shader_parameter(
+			StringName("u_foliage_mask_side"), foliage_mask_side_);
 	// The same flag and margin set_viewmodel_pass stamps on the built set.
 	p_instance->set_instance_shader_parameter(
 			StringName("u_viewmodel_pass"), viewmodel_pass_);
 	p_instance->set_extra_cull_margin(viewmodel_pass_ ? 8.0f : 0.0f);
+}
+
+void ObjectModel::set_render_rung_override(int32_t p_rung) {
+	if (render_rung_override_ == p_rung) {
+		return;
+	}
+	render_rung_override_ = p_rung;
+	// The strips outside the blended section keep the model's retained
+	// material (material_for_index); the blended strips own duplicates the
+	// render-order refresh re-ranks.
+	const int32_t retained_rung = p_rung == kRenderRungFromWaterSide ? 0 : p_rung;
+	for (KeyValue<int64_t, Ref<ShaderMaterial>> &entry : material_cache_) {
+		if (entry.value.is_valid()) {
+			entry.value->set_render_priority(retained_rung);
+		}
+	}
+	render_order_dirty_ = true;
+	wake_runtime_frame();
+	refresh_render_order();
 }
 
 void ObjectModel::set_viewmodel_pass(bool p_enabled) {
@@ -1242,6 +1431,83 @@ void ObjectModel::refresh_match_terrain_frame(Terrain *p_terrain) {
 	}
 }
 
+void ObjectModel::update_foliage_mask_membership() {
+	if (slot_shadow_person_ || slot_shadow_capture_with_.is_valid()) {
+		foliage_mask_models_.insert(this);
+	} else {
+		foliage_mask_models_.erase(this);
+		stamp_foliage_mask_side(0.0f);
+	}
+}
+
+void ObjectModel::stamp_foliage_mask_side(float p_side) {
+	if (foliage_mask_side_ == p_side &&
+			foliage_mask_stamped_serial_ == scene_build_serial_) {
+		return;
+	}
+	foliage_mask_side_ = p_side;
+	foliage_mask_stamped_serial_ = scene_build_serial_;
+	const StringName side_name("u_foliage_mask_side");
+	const auto apply_to = [&](Node *p_parent) {
+		if (p_parent == nullptr) {
+			return;
+		}
+		const int children = p_parent->get_child_count();
+		for (int child = 0; child < children; ++child) {
+			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
+					p_parent->get_child(child));
+			if (instance != nullptr) {
+				instance->set_instance_shader_parameter(side_name, p_side);
+			}
+		}
+	};
+	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
+		apply_to(Object::cast_to<Node>(static_cast<Object *>(robj_dense_[entry])));
+	}
+	apply_to(skeleton_);
+}
+
+// A person entity rides the BySide wave of its side of the water; the
+// models it draws with (its linked avatar parts, and the held weapon or
+// mounted child submitted through its bone callback with its flags) share
+// that wave. The first-person viewmodel is drawn before the scene and never
+// takes the masks (the engine's foliage_entity_far_side carries the wave
+// witness; retail BoneCallback_org0_World @ 0x4e3c87 submits the children).
+void ObjectModel::refresh_foliage_mask_frame(float p_camera_y, float p_water_height) {
+	if (foliage_mask_models_.is_empty()) {
+		return;
+	}
+	LocalVector<ObjectModel *> batch;
+	batch.reserve(foliage_mask_models_.size());
+	for (ObjectModel *model : foliage_mask_models_) {
+		batch.push_back(model);
+	}
+	const auto side_of = [&](ObjectModel *p_person) {
+		if (p_person == nullptr || !p_person->slot_shadow_person_ ||
+				!p_person->is_inside_tree()) {
+			return 0.0f;
+		}
+		const float y = static_cast<float>(p_person->get_global_position().y);
+		return opennova::renderer::foliage_entity_far_side(y, p_camera_y, p_water_height)
+				? 1.0f
+				: 2.0f;
+	};
+	for (ObjectModel *model : batch) {
+		if (!foliage_mask_models_.has(model)) {
+			continue;
+		}
+		ObjectModel *person =
+				model->slot_shadow_person_ ? model : model->get_slot_shadow_capture_with();
+		const float side = model->viewmodel_pass_ ? 0.0f : side_of(person);
+		model->stamp_foliage_mask_side(side);
+		if (model->slot_shadow_person_) {
+			for (ObjectModel *linked : model->live_presentation_links()) {
+				linked->stamp_foliage_mask_side(linked->viewmodel_pass_ ? 0.0f : side);
+			}
+		}
+	}
+}
+
 // Event-driven scheduling for the per-frame runtime advance. Models self-park:
 // every mutation that can create per-frame work wakes the model (adds it to the
 // shared set), and advance_runtime_frame parks it again the first frame nothing
@@ -1290,11 +1556,15 @@ void ObjectModel::_notification(int p_what) {
 		point_light_draw_parts_dirty_ = true;
 		wake_runtime_frame();
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
-		// Only models with blended strips enable this notification: a moved
-		// model re-classifies its strips against the water plane in place,
-		// without waking the full runtime walk.
-		render_order_dirty_ = true;
-		refresh_render_order();
+		// Models with blended strips or their own mirror CLIP arming enable
+		// this notification: a moved model re-classifies its strips against
+		// the water plane in place, without waking the full runtime walk, and
+		// re-tests its arming.
+		if (alpha_strip_models_.has(this)) {
+			render_order_dirty_ = true;
+			refresh_render_order();
+		}
+		refresh_water_mirror_clip();
 	} else if (p_what == NOTIFICATION_PREDELETE) {
 		// Only a model an EntityPresenter row plan retains by pointer moves the
 		// stamp: a throwable, viewmodel, wire-body, or preview model freeing
@@ -1307,6 +1577,7 @@ void ObjectModel::_notification(int p_what) {
 			awake_models_.erase(this);
 		}
 		alpha_strip_models_.erase(this);
+		water_mirror_clip_models_.erase(this);
 		retire_geometry_instances();
 	}
 }
@@ -1408,10 +1679,8 @@ Node3D *ObjectModel::get_or_create_robj_node(int p_robj_index) {
 	}
 	Node3D *node = memnew(Node3D);
 	node->set_name(String("Robj_") + String::num_int64(p_robj_index));
-	// Rebuilds honor the applied section mask.
-	if (section_visibility_mask_ != -1) {
-		node->set_visible(((section_visibility_mask_ >> p_robj_index) & 1) == 1);
-	}
+	// Rebuilds honor the applied section masks.
+	node->set_visible(section_part_visible(p_robj_index));
 	add_child(node);
 	robj_nodes_[p_robj_index] = node;
 	// The dense part-index -> node array apply_panm_to_nodes writes through
@@ -1539,6 +1808,14 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					material->set_shader_parameter("u_alpha_mod", runtime.alpha);
 					q3_parameters_changed = true;
 				}
+				if (!stamp.runtime_valid || runtime.reflect != previous.reflect) {
+					set_material_and_auxiliary_parameter(material,
+							postmultiply_material_for_index(material_index),
+							"u_reflect_color",
+							Vector4(runtime.reflect[0], runtime.reflect[1],
+									runtime.reflect[2], runtime.reflect[3]));
+					q3_parameters_changed = true;
+				}
 				stamp.runtime = runtime;
 				stamp.runtime_valid = true;
 			}
@@ -1551,8 +1828,11 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					frame_index < frames->size()) {
 				const Ref<Texture2D> frame = (*frames)[frame_index];
 				if (frame.is_valid()) {
-					set_material_and_auxiliary_parameter(material,
-							postmultiply_material_for_index(material_index), "u_diffuse", frame);
+					const Ref<ShaderMaterial> postmultiply =
+							postmultiply_material_for_index(material_index);
+					set_material_and_auxiliary_parameter(material, postmultiply, "u_diffuse", frame);
+					set_material_and_auxiliary_parameter(material, postmultiply,
+							"u_diffuse_max_lod", opennova::material_texture_max_lod(frame));
 					stamp.anim_frame = frame_index;
 					q3_parameters_changed = true;
 				}
@@ -1638,14 +1918,26 @@ void ObjectModel::set_on_screen(bool p_value) {
 // fights the other and a sim-hidden entity never flashes. Node3D::set_visible
 // no-ops on an unchanged flag, so the visibility-changed notification (light
 // draw parts dirty + the runtime wake) fires exactly on the product's edges.
+void ObjectModel::apply_node_visibility() {
+	set_visible(present_visible_ && !occlusion_hidden_ && !subpixel_hidden_);
+}
+
 void ObjectModel::set_present_visible(bool p_visible) {
 	present_visible_ = p_visible;
-	set_visible(present_visible_ && !occlusion_hidden_);
+	apply_node_visibility();
 }
 
 void ObjectModel::set_occlusion_hidden(bool p_hidden) {
 	occlusion_hidden_ = p_hidden;
-	set_visible(present_visible_ && !occlusion_hidden_);
+	apply_node_visibility();
+}
+
+void ObjectModel::set_subpixel_hidden(bool p_hidden) {
+	if (subpixel_hidden_ == p_hidden) {
+		return;
+	}
+	subpixel_hidden_ = p_hidden;
+	apply_node_visibility();
 }
 
 void ObjectModel::set_model_bounds(const AABB &p_bounds) {
@@ -1666,6 +1958,10 @@ AABB ObjectModel::get_world_bounds() const {
 		return AABB(get_position(), Vector3());
 	}
 	return get_global_transform().xform(model_bounds_);
+}
+
+bool ObjectModel::is_active_level_skinned() const {
+	return object_data_.is_valid() && object_data_->is_skinned(active_lod_);
 }
 
 void ObjectModel::collect_point_light_draw_parts(
@@ -1831,6 +2127,9 @@ void ObjectModel::_bind_methods() {
 					"viewport_width", "viewport_height"),
 			&ObjectModel::update_authored_lods);
 	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("update_authored_lods_for_camera", "camera", "viewport_width"),
+			&ObjectModel::update_authored_lods_for_camera);
+	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("get_live_geometry_instance_count"),
 			&ObjectModel::get_live_geometry_instance_count);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
@@ -1884,8 +2183,37 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_entity_uniform_scale_q16);
 	ClassDB::bind_method(D_METHOD("set_shadow_bound_radii", "model_sphere", "entity_bound"),
 			&ObjectModel::set_shadow_bound_radii);
+	ClassDB::bind_method(D_METHOD("set_thermal_entity_wave", "enabled"),
+			&ObjectModel::set_thermal_entity_wave);
+	ClassDB::bind_method(D_METHOD("set_water_mirror_clip_wave_id", "wave"),
+			&ObjectModel::set_water_mirror_clip_wave_id);
+	ClassDB::bind_method(D_METHOD("is_water_mirror_clip_armed"),
+			&ObjectModel::is_water_mirror_clip_armed);
+	ClassDB::bind_integer_constant(get_class_static(), "", "WATER_MIRROR_CLIP_NONE",
+			static_cast<int>(opennova::env::MirrorClipWave::kNone));
+	ClassDB::bind_integer_constant(get_class_static(), "", "WATER_MIRROR_CLIP_SECTOR_MODEL",
+			static_cast<int>(opennova::env::MirrorClipWave::kSectorModel));
+	ClassDB::bind_integer_constant(get_class_static(), "", "WATER_MIRROR_CLIP_ENTITY",
+			static_cast<int>(opennova::env::MirrorClipWave::kEntity));
+	ClassDB::bind_method(D_METHOD("set_slot_shadow_person", "person"),
+			&ObjectModel::set_slot_shadow_person);
+	ClassDB::bind_method(D_METHOD("is_slot_shadow_person"),
+			&ObjectModel::is_slot_shadow_person);
+	ClassDB::bind_method(D_METHOD("is_active_level_skinned"),
+			&ObjectModel::is_active_level_skinned);
+	ClassDB::bind_method(D_METHOD("set_interior_light_group", "building_bms", "section"),
+			&ObjectModel::set_interior_light_group);
+	ClassDB::bind_method(D_METHOD("get_interior_light_group_bms"),
+			&ObjectModel::get_interior_light_group_bms);
+	ClassDB::bind_method(D_METHOD("get_interior_light_group_section"),
+			&ObjectModel::get_interior_light_group_section);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
 			&ObjectModel::set_slot_shadow_capture_with);
+	ClassDB::bind_method(D_METHOD("get_foliage_mask_side"),
+			&ObjectModel::get_foliage_mask_side);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("refresh_foliage_mask_frame", "camera_y", "water_height"),
+			&ObjectModel::refresh_foliage_mask_frame);
 	ClassDB::bind_method(
 			D_METHOD("set_entity_lighting_context", "effect_scale", "interior_lerp",
 					"interior_daylight"),
@@ -1902,8 +2230,14 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_model_light_world_position);
 	ClassDB::bind_method(D_METHOD("get_render_part_nodes"),
 			&ObjectModel::get_render_part_nodes);
-	ClassDB::bind_method(D_METHOD("set_section_visibility_mask", "mask"),
-			&ObjectModel::set_section_visibility_mask);
+	ClassDB::bind_method(D_METHOD("set_occlusion_section_mask", "raw_mask", "forced_mask"),
+			&ObjectModel::set_occlusion_section_mask);
+	ClassDB::bind_method(D_METHOD("get_occlusion_section_mask"),
+			&ObjectModel::get_occlusion_section_mask);
+	ClassDB::bind_method(D_METHOD("set_destroyed_section_mask", "hidden_mask"),
+			&ObjectModel::set_destroyed_section_mask);
+	ClassDB::bind_method(D_METHOD("get_destroyed_section_mask"),
+			&ObjectModel::get_destroyed_section_mask);
 	ClassDB::bind_method(D_METHOD("get_surface_material_indices"),
 			&ObjectModel::get_surface_material_indices);
 	ClassDB::bind_method(D_METHOD("get_surface_materials"),
@@ -1919,6 +2253,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_authored_lod_enabled);
 	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner", "exact"),
             &ObjectModel::set_authored_lod_owner, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("set_attachment_pixel_cull", "enabled"),
+			&ObjectModel::set_attachment_pixel_cull);
+	ClassDB::bind_method(D_METHOD("is_camera_pixel_culled"),
+			&ObjectModel::is_camera_pixel_culled);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_projection_owner"),
 			&ObjectModel::get_authored_lod_projection_owner);
     ClassDB::bind_method(D_METHOD("set_geometry_visible", "visible"), &ObjectModel::set_geometry_visible);
@@ -1946,6 +2284,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::is_present_visible);
 	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),
 			&ObjectModel::set_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("is_subpixel_hidden"),
+			&ObjectModel::is_subpixel_hidden);
 
 	ClassDB::bind_method(D_METHOD("set_ctrl_value", "name", "value"),
 			&ObjectModel::set_ctrl_value);

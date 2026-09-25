@@ -218,10 +218,13 @@ func test_render_tiers_use_distinct_foliage_sampler_callbacks() -> void:
 func test_detail_preview_uses_foliage_map() -> void:
 	_foliage_index = 1
 	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
-	var warmup := _dispatcher.get_frame_stats()
-	assert_eq(int(warmup.runtime_detail_intents), 0,
-		"Retail fills detail cache misses after the current draw.")
-	assert_gt(int(warmup.detail_cache_regenerations), 0)
+	var first := _dispatcher.get_frame_stats()
+	# Retail updates the detail cache before the patches draw, so a new cell
+	# draws in the frame that generates it.
+	assert_gt(int(first.runtime_detail_intents), 0,
+		"Retail fills detail cache misses before the current draw.")
+	assert_gt(int(first.detail_cache_regenerations), 0)
+	assert_gt(int(first.detail_mesh_uploads), 0)
 	# Pin the detail sway clock: retail's c24.x = ms x 0.003 + OscRing[0] /
 	# 65536 (Foliage_SetupVertexShaderConstants), no weather attached here.
 	_dispatcher.set_wind_clock_override_ms(1000)
@@ -239,7 +242,8 @@ func test_detail_preview_uses_foliage_map() -> void:
 		_dispatcher.get_total_instances(),
 		int(stats.detail_high_instances) + int(stats.detail_low_instances)
 	)
-	assert_gt(int(stats.detail_mesh_uploads), 0)
+	assert_gt(int(stats.detail_mesh_hits), 0,
+		"the second frame draws the resident meshes the first frame uploaded")
 	assert_eq(int(stats.terrain_scene_counter), 2)
 
 	var draws := _backend_draws("detail")
@@ -497,8 +501,8 @@ func test_reset_clears_render_batches() -> void:
 
 
 func test_detail_mesh_cache_reuses_resident_geometry() -> void:
-	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms()) # cache fill after draw
-	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms()) # first resident mesh upload
+	# The cache fills before the draw: the first frame uploads and draws.
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var uploaded := _dispatcher.get_frame_stats()
 	assert_gt(int(uploaded.detail_mesh_uploads), 0)
 	assert_gt(int(uploaded.detail_mesh_hits), 0,
@@ -517,19 +521,116 @@ func test_detail_mesh_cache_reuses_resident_geometry() -> void:
 	assert_eq(int(reused.detail_mesh_hits), int(reused.detail_cache_submissions))
 
 
-func test_duplicate_silhouette_anchors_reuse_mesh_but_submit_twice() -> void:
+func test_duplicate_silhouette_anchors_submit_twice() -> void:
 	_foliage_index = 1
 	var anchor := Vector3(0.0, 0.0, -64.0)
 	_dispatcher.silhouette_anchors = PackedVector3Array([anchor, anchor])
 	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var stats := _dispatcher.get_frame_stats()
 
-	assert_gt(int(stats.model_mesh_uploads), 0)
-	assert_gt(int(stats.model_mesh_hits), 0,
-		"The second identical anchor must reuse each resident model mesh.")
+	assert_gt(int(stats.model_cache_submissions), 0)
 	assert_eq(int(stats.render_batches), int(stats.model_cache_submissions),
 		"Repeated anchors remain distinct retail draw submissions.")
-	assert_eq(int(stats.model_cache_submissions), int(stats.model_mesh_uploads) * 2)
+	var draws := _backend_draws("silhouette")
+	assert_eq(draws.size(), int(stats.model_cache_submissions),
+		"every MODEL submission is its own instanced draw")
+	var per_cell := {}
+	for draw_value in draws:
+		var draw := draw_value as Dictionary
+		assert_gt(int(draw.instance_count), 0,
+			"a MODEL draw instances the slot mesh once per placed candidate")
+		var cell := int(draw.cell_key)
+		per_cell[cell] = int(per_cell.get(cell, 0)) + 1
+	for cell in per_cell:
+		assert_eq(int(per_cell[cell]), 2,
+			"the second identical anchor draws each resident cell again")
+
+
+# The MODEL depth masks are immediate draws inside the BySide waves: the far
+# wave's lead the far-side alpha rung, the camera wave's lead the scars, and
+# a sorting offset beyond any view depth keeps each ahead of its rung.
+func test_model_masks_lead_their_side_rung() -> void:
+	_foliage_index = 1
+	_dispatcher.silhouette_anchors = PackedVector3Array([Vector3(0.0, 0.0, -64.0)])
+	# Camera at 10 over water at 0: the anchor's z - 1 is below the water.
+	_dispatcher.set_water_height(0.0)
+	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
+	var far_draws := _backend_draws("silhouette")
+	assert_gt(far_draws.size(), 0)
+	for draw_value in far_draws:
+		var draw := draw_value as Dictionary
+		assert_true(bool(draw.far_side))
+		assert_eq(int(draw.render_priority), ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE)
+		assert_eq(int((draw.material as ShaderMaterial).render_priority),
+			ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE,
+			"the bound material carries the rung")
+		assert_lt(float(draw.sorting_offset), -100000.0,
+			"the masks sort ahead of every far-side alpha draw")
+
+	# Water at -5: the anchor stands above it, on the camera side.
+	_dispatcher.set_water_height(-5.0)
+	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
+	var camera_draws := _backend_draws("silhouette")
+	assert_gt(camera_draws.size(), 0)
+	for draw_value in camera_draws:
+		var draw := draw_value as Dictionary
+		assert_false(bool(draw.far_side))
+		assert_eq(int(draw.render_priority), ObjectShaderCache.RENDER_RUNG_SCARS)
+		assert_eq(int((draw.material as ShaderMaterial).render_priority),
+			ObjectShaderCache.RENDER_RUNG_SCARS)
+
+
+# The detail passes take their own rungs by the patch side of the water, and
+# a near secondary LOW draw sorts a hair nearer than its HIGH twin so the
+# equal-depth pair keeps the retail HIGH-then-LOW order.
+func test_detail_passes_take_their_side_rungs_and_order_the_secondary() -> void:
+	_dispatcher.set_water_height(-1000.0)
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	var draws := _backend_draws("detail")
+	assert_gt(draws.size(), 0)
+	var secondaries := 0
+	for draw_value in draws:
+		var draw := draw_value as Dictionary
+		assert_false(bool(draw.far_side), "every patch is above the far-below water")
+		assert_eq(int(draw.render_priority), ObjectShaderCache.RENDER_RUNG_FOLIAGE_CAMERA_SIDE)
+		assert_eq(int((draw.material as ShaderMaterial).render_priority),
+			ObjectShaderCache.RENDER_RUNG_FOLIAGE_CAMERA_SIDE)
+		if is_equal_approx(float(draw.high_pass_cutoff), 180.0 / 255.0):
+			secondaries += 1
+			assert_gt(float(draw.sorting_offset), 0.0,
+				"the near secondary LOW draws after its HIGH twin")
+		else:
+			assert_eq(float(draw.sorting_offset), 0.0)
+	assert_gt(secondaries, 0)
+
+	# Water above every patch with the camera over it: the far pass.
+	_dispatcher.set_water_height(20.0)
+	var high_camera := Transform3D(Basis(), Vector3(0.0, 30.0, 0.0))
+	_dispatcher.height_sampler = Callable(self, "_sample_flat_height")
+	_dispatcher.render_preview(high_camera, GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(high_camera, GameWorld.current_frame_clock_ms())
+	var far_draws := _backend_draws("detail")
+	assert_gt(far_draws.size(), 0)
+	for draw_value in far_draws:
+		var draw := draw_value as Dictionary
+		assert_true(bool(draw.far_side))
+		assert_eq(int(draw.render_priority), ObjectShaderCache.RENDER_RUNG_FOLIAGE_FAR_SIDE)
+
+
+# The thermal view keeps only one faint LOW draw per patch (the engine
+# compiler carries the witness); the dispatcher forwards its flag.
+func test_thermal_view_draws_one_faint_low_pass_per_patch() -> void:
+	_dispatcher.set_thermal_view(true)
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	var draws := _backend_draws("detail")
+	assert_gt(draws.size(), 0)
+	for draw_value in draws:
+		var draw := draw_value as Dictionary
+		assert_eq(String(draw.pass), "low")
+		assert_eq(float(draw.high_pass_cutoff), 0.0, "no near secondary under thermal")
+		assert_lte(float(draw.fade), 0.1 + 0.000001)
 
 
 func test_terrain_change_invalidates_resident_geometry() -> void:

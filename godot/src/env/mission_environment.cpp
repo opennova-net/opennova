@@ -62,6 +62,10 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::is_weather_driven);
 	ClassDB::bind_method(D_METHOD("set_nvg_view", "active", "gain"),
 			&MissionEnvironment::set_nvg_view);
+	ClassDB::bind_method(D_METHOD("set_thermal_view", "world", "terrain"),
+			&MissionEnvironment::set_thermal_view);
+	ClassDB::bind_method(D_METHOD("is_thermal_view"),
+			&MissionEnvironment::is_thermal_view);
 	ClassDB::bind_method(D_METHOD("set_underwater_view", "underwater"),
 			&MissionEnvironment::set_underwater_view);
 	ClassDB::bind_method(D_METHOD("is_underwater_view"),
@@ -74,6 +78,16 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_underwater_overlay_color);
 	ClassDB::bind_method(D_METHOD("get_underwater_overlay_alpha_byte"),
 			&MissionEnvironment::get_underwater_overlay_alpha_byte);
+	ClassDB::bind_method(D_METHOD("set_sky_dome_drawn", "drawn"),
+			&MissionEnvironment::set_sky_dome_drawn);
+	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_color"),
+			&MissionEnvironment::get_viewmodel_fog_color);
+	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_range"),
+			&MissionEnvironment::get_viewmodel_fog_range);
+	ClassDB::bind_method(D_METHOD("get_water_mirror_fog_color"),
+			&MissionEnvironment::get_water_mirror_fog_color);
+	ClassDB::bind_method(D_METHOD("get_water_mirror_fog_range"),
+			&MissionEnvironment::get_water_mirror_fog_range);
 	ClassDB::bind_method(D_METHOD("get_scene_fog_color"),
 			&MissionEnvironment::get_scene_fog_color);
 	ClassDB::bind_method(D_METHOD("get_scene_fog_end"),
@@ -195,8 +209,6 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sky_map2_tex"),
 			&MissionEnvironment::get_sky_map2_tex);
 
-	ADD_SIGNAL(MethodInfo("underwater_overlay_changed"));
-
 	ClassDB::bind_integer_constant(get_class_static(), "", "HOURS_PER_DAY", 24);
 	ClassDB::bind_integer_constant(get_class_static(), "", "HHMM_DAY", 2400);
 	ClassDB::bind_integer_constant(get_class_static(), "", "MINUTES_PER_HOUR", 60);
@@ -312,6 +324,8 @@ void MissionEnvironment::flush_publication(bool p_pass_changed) {
 	const Ref<EnvLightValues> values = _build_light_values();
 	light_state_->publish(values, p_pass_changed);
 	_write_lighting_block_globals(values);
+	_write_viewmodel_fog_globals();
+	_write_water_mirror_fog_globals();
 }
 
 MissionEnvironment *MissionEnvironment::lighting_block_writer_ = nullptr;
@@ -413,6 +427,8 @@ void MissionEnvironment::write_shader_globals() {
 			to_vector3(globals.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
 			to_vector3(globals.sky_ambient));
+	rs->global_shader_parameter_set("opennova_env_light_block",
+			to_vector3(globals.light_block));
 	rs->global_shader_parameter_set("opennova_sun_direction",
 			to_vector3(globals.sun_direction));
 	rs->global_shader_parameter_set("opennova_fog_color",
@@ -576,7 +592,65 @@ void MissionEnvironment::set_underwater_overlay_view(bool p_underwater) {
 		return;
 	}
 	underwater_overlay_view_ = p_underwater;
-	emit_signal("underwater_overlay_changed");
+	// The dome draws only while the eye is strictly above water, the same
+	// side test as the murk's (the viewmodel fog colour reads it).
+	_write_viewmodel_fog_globals();
+}
+
+void MissionEnvironment::set_sky_dome_drawn(bool p_drawn) {
+	if (sky_dome_drawn_ == p_drawn) {
+		return;
+	}
+	sky_dome_drawn_ = p_drawn;
+	_write_viewmodel_fog_globals();
+}
+
+opennova::env::SceneFogValues MissionEnvironment::_viewmodel_fog() const {
+	// The dome drew only when its gate held and the eye was strictly above
+	// the water (engine build_viewmodel_fog carries the frame witness).
+	return state_.build_viewmodel_fog(sky_dome_drawn_ && !underwater_overlay_view_);
+}
+
+void MissionEnvironment::_write_viewmodel_fog_globals() {
+	if (!state_.is_loaded()) {
+		return;
+	}
+	const opennova::env::SceneFogValues fog = _viewmodel_fog();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_viewmodel_fog_color",
+			to_vector3(fog.color));
+	rs->global_shader_parameter_set("opennova_viewmodel_fog_range",
+			Vector3(fog.start, fog.end, static_cast<float>(fog.type)));
+}
+
+void MissionEnvironment::_write_water_mirror_fog_globals() {
+	if (!state_.is_loaded()) {
+		return;
+	}
+	const opennova::env::SceneFogValues fog = state_.build_water_mirror_fog();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_water_mirror_fog_color",
+			to_vector3(fog.color));
+	rs->global_shader_parameter_set("opennova_water_mirror_fog_range",
+			Vector3(fog.start, fog.end, static_cast<float>(fog.type)));
+}
+
+Vector3 MissionEnvironment::get_water_mirror_fog_color() const {
+	return to_vector3(state_.build_water_mirror_fog().color);
+}
+
+Vector3 MissionEnvironment::get_water_mirror_fog_range() const {
+	const opennova::env::SceneFogValues fog = state_.build_water_mirror_fog();
+	return Vector3(fog.start, fog.end, static_cast<float>(fog.type));
+}
+
+Vector3 MissionEnvironment::get_viewmodel_fog_color() const {
+	return to_vector3(_viewmodel_fog().color);
+}
+
+Vector3 MissionEnvironment::get_viewmodel_fog_range() const {
+	const opennova::env::SceneFogValues fog = _viewmodel_fog();
+	return Vector3(fog.start, fog.end, static_cast<float>(fog.type));
 }
 
 Vector3 MissionEnvironment::get_underwater_overlay_color() const {
@@ -632,10 +706,13 @@ Vector3 MissionEnvironment::get_frame_clear_color() const {
 	return to_vector3(state_.frame_clear_color());
 }
 
-Color MissionEnvironment::frame_clear_color_for(bool p_indoors,
-		bool p_above_water) const {
-	const opennova::env::Rgb rgb =
-			state_.frame_clear_color_for(p_indoors, p_above_water);
+Color MissionEnvironment::frame_clear_color_for(bool p_eye_above_water) const {
+	const opennova::env::Rgb rgb = state_.frame_clear_color_for(p_eye_above_water);
+	return Color(rgb.r, rgb.g, rgb.b);
+}
+
+Color MissionEnvironment::nvg_scene_clear_color(bool p_eye_above_water) const {
+	const opennova::env::Rgb rgb = state_.nvg_scene_clear_color(p_eye_above_water);
 	return Color(rgb.r, rgb.g, rgb.b);
 }
 
@@ -755,8 +832,6 @@ void MissionEnvironment::apply_terrain_uniforms(
 			to_vector3(uniforms.sky_ambient));
 	material->set_shader_parameter("u_sun_direction",
 			to_vector3(uniforms.sun_direction));
-	material->set_shader_parameter("u_tile_overlay_tint",
-			to_vector3(uniforms.tile_overlay_tint));
 	material->set_shader_parameter("u_fog_color",
 			to_vector3(uniforms.fog_color));
 	material->set_shader_parameter("u_fog_end", uniforms.fog_end);
@@ -780,7 +855,7 @@ float MissionEnvironment::get_water_height() const {
 // serve the GODOT-world direction through the util/axes.h swap (2026-08-20).
 // Raw-tuple consumers (the opennova_sun_direction global and the terrain
 // u_sun_direction uniform, whose shaders re-swizzle into the engine texture
-// basis; the star-field cull) read state_ directly and never route here.
+// basis) read state_ directly and never route here.
 Vector3 MissionEnvironment::get_sun_direction() const {
 	return render_float_to_godot(state_.sun_direction());
 }

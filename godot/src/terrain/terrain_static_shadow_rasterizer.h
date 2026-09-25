@@ -44,8 +44,6 @@ public:
 	std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 	compilation_snapshot() const override;
 	uint32_t material_time_ms() const noexcept override;
-	opennova::terrain::TerrainStaticShadowPagePlanResult plan_page(
-			const opennova::TerrainTilePageKey &p_page) override;
 	void merge_async_diagnostics(
 			const opennova::terrain::TerrainStaticShadowPlannerDiagnostics
 					&p_diagnostics) noexcept override;

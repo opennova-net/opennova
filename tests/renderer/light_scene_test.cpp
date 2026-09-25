@@ -793,18 +793,39 @@ int main() {
                        quads[0].center[0] < 0.0f,
                "odd frames jitter x by -512 fixed");
 
-        // A camera plane near the light fades the segments by
-        // depth / (radius/2) and skips non-positive depths.
+        // A light CENTRE at or behind the viewport near depth (1/32 wu)
+        // drops the whole corona before any segment is built, even where
+        // the segments' own plane depths would be positive
+        // [orig: @ 0x5ab0fc..0x5ab143, near 0x800 from
+        // Viewport_BuildProjectionMatrix @ 0x411093].
         inputs.frame_index = 0;
-        inputs.depth_plane_w = -0.6f;  // depth(z) = -z - 0.6 + 10 - 10...
+        inputs.depth_plane_w = -0.6f;
         inputs.depth_plane_normal = {0.0f, 0.0f, 1.0f};
-        // depth(center) = z - 0.6: segment 1 at 0.4 -> -0.2 skipped,
-        // segment 2 at 0.8 -> 0.2 -> fade 0.1, segment 3 at 1.2 -> 0.6 ->
-        // fade 0.3.
-        expect(scene.collect_corona_quads(inputs, quads) == 2,
+        // depth(z) = z - 0.6: the centre sits at -0.6 while segments 2/3
+        // (z 0.8 / 1.2) would read 0.2 / 0.6.
+        expect(scene.collect_corona_quads(inputs, quads) == 0,
+               "a light centre behind the near depth draws no corona");
+        inputs.depth_plane_w = 0.02f;  // centre depth 0.02 <= 1/32
+        expect(scene.collect_corona_quads(inputs, quads) == 0,
+               "a centre inside the near depth draws no corona");
+
+        // A centre in front of the near depth: segments fade by
+        // depth / (radius/2) and skip non-positive depths. The camera at
+        // z = 10 looks down -z (depth = 10 - z); the light sits 0.5 wu in
+        // front of it.
+        LightScene near_scene;
+        LightSpawnParams near_params = params;
+        near_params.position_fixed = {0, 0, 0x98000};  // z = 9.5
+        near_scene.spawn(near_params);
+        inputs.depth_plane_normal = {0.0f, 0.0f, -1.0f};
+        inputs.depth_plane_w = 10.0f;
+        // Segment centres step 0.4 toward the camera: z 9.9 -> depth 0.1
+        // (fade 0.05); z 10.3 and 10.7 sit behind the camera and skip.
+        expect(near_scene.collect_corona_quads(inputs, quads) == 1,
                "segments behind the camera plane are skipped");
-        expect(nearly_equal(quads[0].rgb[0], 128.0f / 256.0f / 16.0f * 0.1f,
-                       1e-4f),
+        expect(!quads.empty() &&
+                       nearly_equal(quads[0].rgb[0], 128.0f / 256.0f / 16.0f * 0.05f,
+                               1e-4f),
                "the plane fade scales the corona color by depth/(radius/2)");
 
         // The authored corona disable and the 100-wu cull.
@@ -1184,8 +1205,11 @@ int main() {
         indoors.blink_owner_entity = 99;
         indoors.blink_section = 4;
         const auto i = static_light_row_groups(indoors);
-        expect(i.owner_group_entity == indoors.static_owner && i.owner_group_section == 0,
-               "a non-building row is owned by its static owner at section 0");
+        // Every static row is a rigid submit: the rigid collector re-scopes the
+        // owner group to (0, robjIndex) [orig: collect_render_objects_for_batch
+        // @ 0x5d8ff7], so a static's own owned light never lights its draw.
+        expect(i.owner_group_entity == 0 && i.owner_group_section == 9,
+               "a non-building row declares the rigid (0, robj) owner group");
         expect(i.interior_group_entity == 99 && i.interior_group_section == 4,
                "a non-building row carries the blink interior group");
         StaticLightRowInputs outdoors = indoors;
@@ -1193,6 +1217,100 @@ int main() {
         const auto o = static_light_row_groups(outdoors);
         expect(o.interior_group_entity == 0 && o.interior_group_section == 0,
                "outdoors the interior group stays empty");
+    }
+    // The owner group a submit declares [orig: Terrain_RenderSectorEntitiesBySide
+    // @ 0x5c7fb1 / @ 0x5c8004; collect_render_objects_for_batch @ 0x5d8ff7;
+    // Render_SubmitEntity @ 0x5daddc]: the drawn entity only for a skinned
+    // draw inside the person wave; the rigid collector re-scopes to
+    // (0, robjIndex); a skinned draw outside the person wave keeps entity 0.
+    {
+        using opennova::renderer::submit_owner_group;
+        const auto body = submit_owner_group(77, true, true, 3);
+        expect(body.entity == 77 && body.section == 0,
+               "a person's skinned draw declares its entity at section 0");
+        const auto held = submit_owner_group(77, true, false, 3);
+        expect(held.entity == 0 && held.section == 3,
+               "a person's rigid draw (the held gun) re-scopes to (0, robj)");
+        const auto vehicle = submit_owner_group(77, false, false, 5);
+        expect(vehicle.entity == 0 && vehicle.section == 5,
+               "a non-person rigid draw re-scopes to (0, robj)");
+        const auto skinned_other = submit_owner_group(77, false, true, 5);
+        expect(skinned_other.entity == 0,
+               "a skinned draw outside the person wave declares entity 0");
+        // Through the gate: a light owned by 77 passes only the body.
+        LightScene scene;
+        LightSpawnParams owned;
+        owned.position_fixed = {0, 0, 0};
+        owned.radius_fixed = 4 << 16;
+        owned.owner_entity = 77;
+        const LightHandle handle = scene.spawn(owned);
+        LightActiveGroups groups;
+        groups.owner_group_entity = body.entity;
+        groups.owner_group_section = body.section;
+        std::array<SelectedLight, LightScene::kSelectLimit> selected{};
+        expect(scene.select(&handle, 1, groups, LightSelectionOptions{}, {1.0f, 1.0f, 1.0f},
+                       LightFlickerInputs{}, false, selected) == 1,
+               "the owner's skinned person draw takes its owned light");
+        groups.owner_group_entity = held.entity;
+        groups.owner_group_section = held.section;
+        expect(scene.select(&handle, 1, groups, LightSelectionOptions{}, {1.0f, 1.0f, 1.0f},
+                       LightFlickerInputs{}, false, selected) == 0,
+               "the owner's rigid draw never takes its owned light");
+    }
+    // The render-slot dominant-light candidates [orig:
+    // RenderSlot_UpdateEntityLight @ 0x5d6a30]: the nearest FOUR of the
+    // entity cube (`push 4` @ 0x5d6b00), group-gated with the entity's
+    // interior group, with no objects-disable test and no three-cap.
+    {
+        LightScene scene;
+        LightSpawnParams base;
+        base.radius_fixed = 4 << 16;
+        const auto at = [&](int32_t x) {
+            LightSpawnParams p = base;
+            p.position_fixed = {x << 16, 0, 0};
+            return p;
+        };
+        // Five world lights at 1..5 wu; the fifth is the farthest.
+        LightSpawnParams objects_off = at(1);
+        objects_off.disable_objects = true;
+        const LightHandle nearest = scene.spawn(objects_off);
+        scene.spawn(at(2));
+        scene.spawn(at(3));
+        scene.spawn(at(4));
+        const LightHandle farthest = scene.spawn(at(5));
+        const std::array<int32_t, 3> qmin = {-(8 << 16), -(8 << 16), -(8 << 16)};
+        const std::array<int32_t, 3> qmax = {8 << 16, 8 << 16, 8 << 16};
+        std::array<SelectedLight, LightScene::kSlotPickLimit> picks{};
+        const size_t n = scene.slot_light_candidates(qmin, qmax, LightActiveGroups{},
+                {1.0f, 1.0f, 1.0f}, LightFlickerInputs{}, picks);
+        expect(n == 4, "the slot pick walks the nearest four, past the object 3-cap");
+        bool saw_nearest = false;
+        bool saw_farthest = false;
+        for (size_t i = 0; i < n; ++i) {
+            saw_nearest = saw_nearest || picks[i].handle == nearest;
+            saw_farthest = saw_farthest || picks[i].handle == farthest;
+        }
+        expect(saw_nearest, "an objects-disabled light still competes for the slot");
+        expect(!saw_farthest, "the fifth-nearest light is past the collector's limit");
+        // A room light owned by building 90 section 2 reaches the pick only
+        // with the entity's interior group (the owner group stays empty).
+        LightScene room;
+        LightSpawnParams lamp = at(1);
+        lamp.owner_entity = 90;
+        lamp.owner_section = 2;
+        room.spawn(lamp);
+        LightActiveGroups outdoors;
+        expect(room.slot_light_candidates(qmin, qmax, outdoors, {1.0f, 1.0f, 1.0f},
+                       LightFlickerInputs{}, picks) == 0,
+               "an owned room light never reaches an outdoor entity's pick");
+        LightActiveGroups inside;
+        inside.interior_group_entity = 90;
+        inside.interior_group_section = 2;
+        expect(room.slot_light_candidates(qmin, qmax, inside, {1.0f, 1.0f, 1.0f},
+                       LightFlickerInputs{}, picks) == 1,
+               "the contained entity's interior group admits its room light");
+        expect(nearly_equal(picks[0].color[0], 255.0f / 256.0f),
+               "the pick reads the unboosted Light_GetPointLightParams colour");
     }
     // The light_move round glow lifts its spawn half a radius and follows at
     // the raw round position.

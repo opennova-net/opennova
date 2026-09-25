@@ -2,22 +2,22 @@
 
 // THE TERRAIN TILE-COMPOSITION WORKER: the CPU half of the 128-page tile
 // cache — the immutable source snapshot pages compose from, the demand queue
-// two worker threads drain (the newest generation per layer wins, an epoch
+// the worker threads drain (the newest generation per layer wins, an epoch
 // bump cancels everything queued), the page composition itself
 // (compose_terrain_tile_page plus the static-shadow alpha pass the requesting
 // frame's material time drives) and the completion queue the embedder drains
-// under its per-frame upload budget. The embedder owns the texture upload and
-// the generation validation (the composition cache); nothing here touches a
-// rendering API. Infrastructure, not a port: the witnessed cache semantics
-// live in terrain_tile_composition_cache.h and the pixel rules in
-// terrain_tile_composer.h.
+// once wait_idle() returns, before the frame's terrain draw (retail composes
+// every missing visible page inside PolyTrn_RenderFrame). The embedder owns
+// the texture upload and the generation validation (the composition cache);
+// nothing here touches a rendering API. Infrastructure, not a port: the
+// witnessed cache semantics live in terrain_tile_composition_cache.h and the
+// pixel rules in terrain_tile_composer.h.
 
 #include <runtime/terrain/terrain_scorch.h>
 #include <runtime/terrain/terrain_static_shadow_alpha.h>
 #include <runtime/terrain/terrain_static_shadow_planner.h>
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
-#include <runtime/terrain_query/terrain_field_store.h>
 
 #include <algorithm>
 #include <array>
@@ -35,27 +35,29 @@
 namespace opennova::terrain {
 
 // Main-thread-owned provider state published once per semantic shadow epoch
-// (caster set, light quantum, receiver terrain, config — never material time,
-// which rides each work item). Worker threads clone only the planner, whose
-// immutable caster set is shared by pointer, and keep the receiver terrain
-// store (the engine's one cpt/trn field builder, ADR 0042 d4) alive.
+// (caster set, light quantum, config — never material time, which rides each
+// work item). Worker threads clone only the planner, whose immutable caster
+// set is shared by pointer.
 struct TerrainStaticShadowCompilationSnapshot {
 	uint64_t revision = 0;
-	std::shared_ptr<const TerrainFieldStore> receiver_storage;
 	TerrainStaticShadowPlanner planner;
 };
 
 class TerrainTileCompositionWorker {
 public:
-	static constexpr std::size_t kWorkerCount = 2;
+	// Pages compose on this pool while the terrain frame waits for them
+	// (retail composes each missing visible page inside the frame that draws
+	// it), so a frame that claims several pages spends its wait on the
+	// slowest worker: half the hardware threads, 2..8.
+	static std::size_t worker_count() noexcept;
 	static constexpr std::size_t kMaximumQueuedJobs = TerrainTileCompositionCache::kCapacity * 2;
-	static constexpr std::size_t kUploadBudgetPerFrame = 2;
 
-	// The immutable page sources one mission's cache composes from.
+	// The immutable page sources one mission's cache composes from, already
+	// split into the retail quadrant textures and level sets.
 	struct SourceSnapshot {
-		Rgba8Image colormap;
-		Rgba8Image heightfield_normal;
-		Rgba8Image tilestrip;
+		TerrainTileQuadrantSource colormap;
+		TerrainTileQuadrantSource heightfield_normal;
+		std::vector<Rgba8Image> tilestrip;
 		TilFile tile_info;
 		bool tile_overlay_ready = false;
 		std::array<TerrainScorchTexture, kTerrainScorchTextureSlots> scorch_textures;
@@ -84,6 +86,10 @@ public:
 		TerrainTileCompositionJob job;
 		Rgba8Image pixels;
 		uint64_t compose_us = 0;
+		// The split of compose_us: the page raster, then the static-shadow
+		// plan (the shadow raster and its alpha apply are the remainder).
+		uint64_t page_us = 0;
+		uint64_t shadow_plan_us = 0;
 		bool success = false;
 		bool shadow_attempted = false;
 		uint64_t shadow_alpha_changed_bytes = 0;
@@ -112,6 +118,9 @@ public:
 			uint32_t shadow_material_time_ms, bool capture_diagnostics);
 
 	std::optional<Completion> take_completion();
+	// Blocks until every job of the current epoch has completed (or been
+	// dropped by a cancel); the completions then wait in the queue.
+	void wait_idle();
 
 	// take_completion, but a completion the predicate rejects stays queued
 	// (with its policy ordering) for a later frame's budget instead of being
@@ -167,11 +176,12 @@ private:
 
 	mutable std::mutex mutex_;
 	std::condition_variable wake_;
+	std::condition_variable idle_;
 	std::deque<WorkItem> work_;
 	TerrainTileCompositionDemandQueue demand_queue_;
 	std::deque<Completion> completions_;
 	TerrainTileCompositionDemandQueue completion_queue_;
-	std::array<std::thread, kWorkerCount> workers_;
+	std::vector<std::thread> workers_;
 	std::shared_ptr<const SourceSnapshot> current_sources_;
 	std::size_t active_jobs_ = 0;
 	std::unordered_map<uint64_t, std::size_t> active_jobs_by_epoch_;

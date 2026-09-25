@@ -414,7 +414,7 @@ void write_occlusion(Writer &w, const Threedi3di3 &m) {
 		const ThreediOcclusionObject &ob = m.occlusion_objects[o];
 		w.line("occ " + std::to_string(ob.type) + " " + std::to_string(ob.parent_subobject_index) + " " +
 				std::to_string(ob.connecting_subobject) + "  # record " + std::to_string(o));
-		if (ob.glow_scale != 0.0f) w.note("occ record " + std::to_string(o) + " glow_scale");
+		if (ob.slot_priority_scale != 0.0f) w.note("occ record " + std::to_string(o) + " slot_priority_scale");
 		for (int k = 0; k < ob.num_vertices && v < m.occlusion_vertex_count; ++k, ++v)
 			w.line("ov " + vec9(m.occlusion_vertices[v].position));
 		for (int k = 0; k < ob.num_planes && p < m.occlusion_plane_count; ++k, ++p)

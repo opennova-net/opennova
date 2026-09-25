@@ -101,6 +101,8 @@ Dictionary ObjectData::eval_material_runtime(int p_index, int64_t p_time_ms, con
 	out["uv_transform_u"] = Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20);
 	out["uv_transform_v"] = Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21);
 	out["rgb_mod"] = Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b);
+	out["reflect_color"] = Vector4(runtime.reflect[0], runtime.reflect[1],
+			runtime.reflect[2], runtime.reflect[3]);
 	out["alpha_mod"] = runtime.alpha;
 	return out;
 }
@@ -163,6 +165,22 @@ bool ObjectData::eval_material_runtime_native(int p_index, int64_t p_time_ms,
 			threedi_panm_runtime_time_ms(p_time_ms), _runtime_control_names(),
 			p_ctrl_values);
 	return true;
+}
+
+bool ObjectData::material_static_runtime_native(int p_index,
+		opennova::renderer::MaterialRuntime &r_runtime) const {
+	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().material_count) {
+		return false;
+	}
+	r_runtime = opennova::renderer::material_static_runtime(native_model().materials[p_index]);
+	return true;
+}
+
+bool ObjectData::material_runtime_dynamic_native(int p_index) const {
+	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().material_count) {
+		return false;
+	}
+	return opennova::renderer::material_runtime_is_dynamic(native_model().materials[p_index]);
 }
 
 int ObjectData::compute_anim_frame_native(int p_index, int64_t p_time_ms,

@@ -24,14 +24,13 @@
 // texel bytes enter the ps.1.4 math as-is. The gamma-space convention
 // (D-RMAT-7) lives in color.gdshaderinc; consumers encode the final
 // color once at their ALBEDO write.
-// The device-global texfilter mode applies to EVERY active stage
-// [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e],
-// and the reference machine runs the anisotropic mode, so every mipped
-// terrain input samples anisotropically. The colormap here is the box-mipped
-// surrogate for the per-LOD tile-cache RT (D-TERRAIN-7); the DBlendmap
-// quadrants are box-mipped in retail (created with flags 0x100001
-// [orig: PolyTrn_InitTextures @ 0x60b2c9]).
-uniform sampler2D u_colormap : filter_linear_mipmap_anisotropic, repeat_disable;
+// The device-global texfilter mode applies to every stage whose texture
+// carries the mip-filter flag bit 3 (retail CGfxDevice_ApplyRenderStates
+// per-stage loop @ 0x67e3b5..0x67e50e; apply_texture_stages @ 0x68084c..
+// 0x680870), and the reference machine runs the anisotropic mode, so every
+// detail input samples anisotropically. The DBlendmap quadrants are
+// box-mipped in retail (created with flags 0x100001, retail
+// PolyTrn_InitTextures @ 0x60b2c9).
 uniform sampler2D u_detail_c1 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c2 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c3 : filter_linear_mipmap_anisotropic, repeat_enable;
@@ -63,15 +62,6 @@ uniform float u_detail2_density = 8.0;
 //  texcoord @ 0x609786..0x6097D6]
 uniform sampler2D u_water_noise : filter_linear, repeat_enable;
 uniform bool u_below_water = false;
-// Retail creates a mip chain but the TileBakeDot3 pass explicitly uses
-// base-level bilinear sampling with quadrant CLAMP.
-uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
-uniform bool u_has_heightfield_normal = false;
-// PolyTrn_RenderTile composes the mission .til base layer into the terrain
-// tile before the same ps.1.4 lighting chain used by runtime and ONED.
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
-uniform bool u_has_tile_overlay = false;
-uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
 // Declared for the ONED authored-slot binding only; the top-tier chain does
 // not consume it (the generated coefficient map belongs to the unported
 // ps.1.1 tiers at stage 7).
@@ -87,10 +77,30 @@ uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 uniform float u_fog_start = 0.0;
 uniform float u_fog_end = 1024.0;
 uniform int u_fog_type = 0;
+// The water mirror pass (the one non-shadow camera whose mask omits the water
+// layer, render/visual_layers.h): the reflected scene fogs with the dry
+// weather block (EnvironmentState::build_water_mirror_fog), keeps the
+// authored stage 3 (the mirror context's below-water word is 0 — retail
+// render_main_scene @ 0x5c153d), and cuts the terrain at wh - 0.05: the GSysClip
+// texgen u = y + 0.45 - (wh - 0.1) under AlphaRef 0x80 (retail
+// render_terrain_sector_batch @ 0x6092c6..0x60935b, plane wh - 0.1 from
+// render_main_scene @ 0x5c1561..0x5c1578, armed while wh != 0).
+global uniform bool opennova_water_active;
+global uniform float opennova_water_height;
+global uniform vec3 opennova_water_mirror_fog_color;
+// (start, end, type)
+global uniform vec3 opennova_water_mirror_fog_range;
+const float TERRAIN_WATER_MIRROR_CLIP_OFFSET = 0.05;
+
+float terrain_water_mirror_pass_flag(uint camera_layers, bool in_shadow_pass) {
+	return (!in_shadow_pass && (camera_layers & 1024u) == 0u) ? 1.0 : 0.0;
+}
 
 // --- The terrain leg of the EffectWorld light pool --------------------------
-// Retail re-draws each terrain batch once more PER pool light, additively,
-// through a two-stage projected-texture shader: stage 0 samples the 64x64
+// Retail re-draws each terrain batch once more PER pool light (the first
+// opaquely, later ones additively; terrain.gdshader composites the pool with
+// the page and the fogged ordinary pass) through a two-stage projected-
+// texture shader: stage 0 samples the 64x64
 // "texlight2d" disc projected on the ground plane around the light, stage 1
 // the 64x8 "texlightspot1d" strip by height above/below it, both MODULATE2X
 // over the pixel constants c4..c6 the pass uploads (the light colour already
@@ -114,6 +124,15 @@ uniform sampler2D u_terrain_light_disc : filter_linear, repeat_disable, hint_def
 uniform sampler2D u_terrain_light_strip : filter_linear, repeat_disable, hint_default_black;
 uniform bool u_terrain_light_enabled = false;
 const int TERRAIN_LIGHT_ROWS_PER_PATCH = 16;
+
+// The pool lights the patch re-draws with (0 = the batch draws only its
+// ordinary pass).
+int terrain_point_light_count(float slot) {
+	if (!u_terrain_light_enabled) {
+		return 0;
+	}
+	return int(texelFetch(u_terrain_light_rows, ivec2(1, int(slot + 0.5)), 0).a + 0.5);
+}
 
 vec3 terrain_point_light_pool(vec3 world_pos, float slot) {
 	vec3 sum = vec3(0.0);
@@ -182,60 +201,12 @@ vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {
 	return clamp(uv, minimum_uv, maximum_uv);
 }
 
-vec3 quantize_retail_signed_vector(vec3 value) {
-	// Both Terrain_GenerateNormalMap and PolyTrn_RenderTile truncate
-	// (component+1)*127.5 to bytes before D3DTA_TEXTURE/D3DTA_DIFFUSE DOT3.
-	ivec3 encoded = ivec3(clamp((value + 1.0) * 127.5,
-		vec3(0.0), vec3(255.0)));
-	return vec3(encoded) / 255.0;
-}
-
-float retail_tile_light_alpha(vec3 heightfield_normal, vec2 terrain_uv,
-		vec2 quadrant) {
-	vec3 normal_byte = u_has_heightfield_normal
-		? texture(u_heightfield_normal, clamp_retail_quadrant_uv(
-			terrain_uv, quadrant, textureSize(u_heightfield_normal, 0))).rgb
-		: quantize_retail_signed_vector(normalize(vec3(
-			heightfield_normal.x, heightfield_normal.z, heightfield_normal.y)));
-	// Env exposes the direct retail getter tuple. PolyTrn packs that tuple into
-	// D3DCOLOR RGB as (Z, X, Y) before the heightfield-normal DOT3.
-	// [orig: Environment_GetLightDirectionFloat @ 0x57d870;
-	//  Terrain_GenerateNormalMap @ 0x603210;
-	//  PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e].
-	vec3 texture_basis_light = vec3(u_sun_direction.z, u_sun_direction.x, u_sun_direction.y);
-	vec3 light_byte = quantize_retail_signed_vector(texture_basis_light);
-	return clamp(4.0 * dot(normal_byte - 0.5, light_byte - 0.5), 0.0, 1.0);
-}
-
-vec4 retail_bare_terrain_tile(vec3 raw_colormap_rgb, vec3 heightfield_normal,
-		vec2 terrain_uv, vec2 quadrant) {
-	// The base tile bake uses diffuse 0x00808080: RGB MODULATE2X gives
-	// raw*256/255 while its zero diffuse alpha discards authored colormap A.
-	// The following additive DOT3 pass writes the heightfield light term to A.
-	return vec4(
-		clamp(raw_colormap_rgb * (256.0 / 255.0), vec3(0.0), vec3(1.0)),
-		retail_tile_light_alpha(heightfield_normal, terrain_uv, quadrant));
-}
-
-vec4 compose_retail_tile_overlay(vec4 colormap, vec3 world_pos) {
-	if (u_has_tile_overlay) {
-		vec2 tile_uv = fract(vec2(world_pos.x, -world_pos.z) * (1.0 / 1024.0));
-		vec4 tile = texture(u_tile_overlay, tile_uv);
-		// Analytic/editor fallback: the legacy full-atlas surrogate retains
-		// standard coverage but not retail's ordered render-target alpha. The
-		// canonical runtime page cache composes exact overlay RGBA before DOT3;
-		// this cold path therefore applies the overlay to RGB only.
-		colormap.rgb = mix(colormap.rgb, tile.rgb * u_tile_overlay_tint, tile.a);
-	}
-	return colormap;
-}
-
 // NovaLogic terrain surface shading — the witnessed ps.1.4 splat chain
 // [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0]. No fog/overlays — callers
 // layer those on top. Colormap/detail UVs come from the caller's geometry
 // (runtime: baked patch mesh; editor: sculpted heightmap mesh).
 vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
-		vec2 detail_uv, vec2 blendmap_uv, vec2 quadrant) {
+		vec2 detail_uv, vec2 blendmap_uv, vec2 quadrant, bool below_water) {
 	// Stage 2 has its own transform: flat sectors collapse only this input,
 	// while stages 1 and 3 keep their independent detail/noise coordinates.
 	// [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0;
@@ -263,7 +234,7 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 		// modulation then IS the underwater caustic term, neutral at mid-gray.
 		// The noise pair is a per-frame mipless dynamic texture — plain
 		// bilinear, no retail mip chain to emulate.
-		vec3 modulator = u_below_water
+		vec3 modulator = below_water
 			? texture(u_water_noise,
 				retail_detail_uv_from_atlas(colormap_uv, 8.0)).rgb
 			: sample_retail_detail_mips(
@@ -273,9 +244,10 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	}
 
 	// mad_d2: light = (tile.a * c1 + c0) / 2 with the WITNESSED constants.
-	// tile.a is the ordered overlay render-target alpha plus the additive,
-	// byte-quantized heightfield-normal DOT3 bake on canonical cache pages; raw
-	// authored colormap alpha is cleared by the base pass and never reaches t0.
+	// tile.a is the page's cleared alpha plus the additive, byte-quantized
+	// heightfield-normal DOT3 bake on canonical cache pages (the .til and scorch
+	// overlays write RGB only); raw authored colormap alpha is cleared by the
+	// base pass and never reaches t0.
 	// [orig: PolyTrn_RenderTile @ 0x60da70; Terrain_GenerateNormalMap
 	// @ 0x603210; terrain_setup_lighting_and_shader @ 0x604420 pushes
 	//  c0 <- PolyTrn_PSConstC0_SkyColorR @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light
@@ -290,19 +262,15 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	return lit * detail * 4.0;
 }
 
+// The pass start is already Render_SetFogState's per-type start, overcast
+// fold included (type 2 = (1 - density) * end * 0.5, type 3 = (1 - density) *
+// end * 0.25) [orig: Render_SetFogState @ 0x58a9c5..0x58a9fe].
 float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
 	float safe_end = max(fog_end, 1.0);
 	if (fog_type == 0) {
 		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
 	}
-
-	float start = fog_start;
-	if (fog_type == 2) {
-		start = safe_end * 0.5;
-	} else if (fog_type == 3) {
-		start = safe_end * 0.25;
-	}
-	float fog_range = max(safe_end - start, 1.0);
+	float fog_range = max(safe_end - fog_start, 1.0);
 	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
 }
 
@@ -314,4 +282,18 @@ vec3 apply_terrain_fog(vec3 color, vec3 world_pos, vec3 camera_pos, float eye_de
 	float dist = u_fog_type == 0 ? max(eye_depth, 0.0) : radial_distance;
 	float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
 	return mix(u_fog_color, color, fog_factor);
+}
+
+// The terrain batch's fog in the pass drawing it: the water mirror pass fogs
+// with its own (dry) block, every other pass with the scene block.
+vec3 apply_terrain_pass_fog(vec3 color, vec3 world_pos, vec3 camera_pos, float eye_depth,
+		bool water_mirror) {
+	if (!water_mirror) {
+		return apply_terrain_fog(color, world_pos, camera_pos, eye_depth);
+	}
+	int fog_type = int(opennova_water_mirror_fog_range.z);
+	float dist = fog_type == 0 ? max(eye_depth, 0.0) : length(world_pos - camera_pos);
+	float fog_factor = jointops_fog_factor(dist, opennova_water_mirror_fog_range.x,
+		opennova_water_mirror_fog_range.y, fog_type);
+	return mix(opennova_water_mirror_fog_color, color, fog_factor);
 }

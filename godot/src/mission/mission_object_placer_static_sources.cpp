@@ -86,6 +86,7 @@ int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 	source.world_transform = to_static_source_transform(p_xform);
 	source.asset_id = _retain_static_source_asset(data);
 	source.entity_bound_radius_q16 = _item_entity_bound_radius_q16(p_item_id, data);
+	source.model_floor_q16 = opennova::world::model_bound_floor_q16(data->native_model());
 	return static_sources_.append_effect(std::move(source));
 }
 
@@ -99,6 +100,7 @@ int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
 	source.bms_id = p_bms_id;
 	source.item_id = p_item_id;
 	source.robj_index = p_robj_index;
+	source.light_transfer = item_db_.is_valid() ? item_db_->get_light_transfer(p_item_id) : 0.0f;
 	for (int i = 0; i < 3; ++i) {
 		source.bounds_position[i] = p_world_bounds.position[i];
 		source.bounds_size[i] = p_world_bounds.size[i];
@@ -285,7 +287,8 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 	} else if (p_data->has_document()) {
 		const Threedi3di3 &native_model = p_data->native_model();
 		for (std::size_t lod = 0; lod < native_model.lod_count; ++lod) {
-			profile.thresholds_q16.push_back(native_model.lods[lod].lod_threshold);
+			profile.thresholds_q16.push_back(opennova::renderer::rlod_threshold_q16_from_rmdl(
+					native_model.lods[lod].lod_threshold));
 		}
 	}
 	if (p_lod_profile.has("sphere_radius")) {
