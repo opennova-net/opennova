@@ -7,10 +7,9 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
-#include <string_view>
 #include <vector>
 
-#include <base/io/strutil.h>
+#include <formats/adm/adm.h>
 #include <formats/bad/bad_build.h>
 
 using namespace opennova::bad;
@@ -105,8 +104,7 @@ std::string anim_info_row(const BadBuildRow &row) {
 	// is no ring: each reset variant replaces the head, so the last is the
 	// rig's bind [orig: AnimMap_RegisterBoneNode @0x40C2D0, slot 0 self-rings
 	// @0x40c38b].
-	const bool reset = row.key.size() > 5 &&
-			opennova::strutil::iequals(std::string_view(row.key).substr(5), "reset");
+	const bool reset = opennova::adm::adm_key_names_slot(row.key, "reset");
 	if (reset && row.variants.size() > 1) {
 		for (const std::string &variant : row.variants) out += " " + variant;
 		return out + "   (no ring: the last is the rig's bind)";

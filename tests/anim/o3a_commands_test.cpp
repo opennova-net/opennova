@@ -137,6 +137,11 @@ int main(int argc, char **argv) {
 			true); // both variants name one clip, so the ring is the same
 	// A capsule the author states, against the one the rig derives.
 	compare("capsule", replace(text, "frames 3\n", "frames 3\ncapsule 0 0.6\n"), false);
+	// A row key names its slot past its first five characters, whatever they
+	// are: the table keeps the keys as written and they are the same slots.
+	compare("slot-prefix", replace(replace(text, "row anim_reset", "row ANIM_RESET"), "row anim_walk_forward",
+								   "row xxxx_walk_forward"),
+			true);
 
 	// What `build` refuses, by name.
 	build("no-header", replace(text, "o3a 1", "o3d 1"), false);

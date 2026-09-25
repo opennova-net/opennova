@@ -43,10 +43,16 @@ token is a quoted run's contents; an unquoted `//` or `;` ends the line; at
 most 30 tokens [orig: `Terrain_TokenizeConfigLine @ 0x53CB60`, the comment
 cuts `@0x53CC16..0x53CC31`]. A line with no token or whose first token starts
 with `/` is skipped [orig: `@0x53D90D..0x53D91E`]. Token 0 names the anim
-slot (`AnimMap_FindSlotByName @ 0x40CFA0` compares from its sixth character;
-the parser keeps `anim_` keys and leaves the lookup to the runtime), and every
-later token is a clip variant registered on that one slot until a token that
-starts with `/` ends the row [orig: `AnimMap_ParseConfigLine @ 0x40cb60`, the
+slot past its first five characters, whatever they are
+(`AnimMap_FindSlotByName @ 0x40CFA0` compares from the sixth character without
+case, so `ANIM_RESET` and `xxxx_reset` name slot 0 as `anim_reset` does; every
+retail key is `anim_`). The parser keeps every key longer than five characters
+and leaves the lookup to the runtime, whose slot names live in `runtime/world`
+and whose every consumer registers a row under the slot its key names
+(`adm::adm_slot_key`); a key of five or fewer names no slot, our rule, since
+retail's lookup would read on past its end into the rest of the tokenized
+line. Every later token is a clip variant registered on that one slot until a
+token that starts with `/` ends the row [orig: `AnimMap_ParseConfigLine @ 0x40cb60`, the
 break `@0x40CBD0..0x40CBD2`]. A row with no clip registers nothing; it never
 fails the file. The engine serves the variants as a circular ring —
 `AnimMap_PlayAnimBySlot @ 0x40bda0` and `Anim_GetDurationTicks @ 0x53ee10`
@@ -71,7 +77,11 @@ of the head and points the table at the new node (node->next = head
 `@0x40C37F`, tail->next = node `@0x40C382`, table = node `@0x40C385`; the first
 token and every `anim_reset` token self-ring, `@0x40C38B..0x40C38F`; slot 0's
 backfill of the empty entries `@0x40C39A..0x40C3E2`), so a row `"A" "B" "C"`
-serves C, B, A, C, and so on. The ring heads are ONE table per loaded `.adm`,
+serves C, B, A, C, and so on. A later row naming the same slot registers onto the same
+ring, since each token goes through the slot lookup on its own row (FSldr02
+repeats its five `anim_emplaced*` rows, FSldr05 its `anim_burn_2` row); the
+root-motion source (`AdmRootMotion`) kept only the first such row until
+2026-09-25. The ring heads are ONE table per loaded `.adm`,
 not per entity: `AnimMap_LoadAdmFile @0x40CC40` reuses an already loaded entry
 by name (the `AnimMap_FindByName` call `@0x40CD2F`), and
 `AnimMap_RegisterEntity @0x40BB60` allocates the primary (+0x188) and

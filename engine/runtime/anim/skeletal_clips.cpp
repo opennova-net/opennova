@@ -115,8 +115,7 @@ bool SkeletalClips::load_from_adm(
 	std::string reset_value;
 	for (size_t i = 0; i < map->count; ++i) {
 		const auto &entry = map->entries[i];
-		const std::string_view key(entry.key);
-		if (key.size() <= 5 || !strutil::iequals(key.substr(5), "reset")) continue;
+		if (!adm_key_names_slot(entry.key, "reset")) continue;
 		for (size_t v = 0; v < entry.variant_count; ++v)
 			if (entry.variants[v][0] != '\0' && assets->bone_animation(entry.variants[v]))
 				reset_value = entry.variants[v];
@@ -127,13 +126,18 @@ bool SkeletalClips::load_from_adm(
 	// @0x40ce11..0x40ce16; AnimMap_RegisterEntity @0x40bb60, the free @0x40bbc4]
 	if (reset_value.empty()) return false;
 	std::vector<std::pair<std::string, std::string>> clips;
-	// Every authored token registers a variant, including repeated files.
-	// [orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode @0x40c2d0]
+	// Every authored token registers a variant, including repeated files, on the
+	// slot its row's key names past the first five characters, so a row keyed
+	// `ANIM_IDLE` or `xxxx_idle` registers under the `anim_idle` every lookup
+	// spells. [orig: AnimMap_ParseConfigLine @0x40cb60 -> AnimMap_FindSlotByName
+	// @0x40cfa0; AnimMap_RegisterBoneNode @0x40c2d0]
 	for (size_t i = 0; i < map->count; ++i) {
 		const auto &entry = map->entries[i];
+		const std::string key = adm_slot_key(entry.key);
+		if (key.empty()) continue;
 		for (size_t v = 0; v < entry.variant_count; ++v)
 			if (entry.variants[v] && entry.variants[v][0])
-				clips.emplace_back(entry.key, entry.variants[v]);
+				clips.emplace_back(key, entry.variants[v]);
 	}
 	if (!load_from_files(assets, reset_value, clips, model_bone_origins, model_bone_parents))
 		return false;

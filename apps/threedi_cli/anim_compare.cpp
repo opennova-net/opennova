@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+#include <formats/adm/adm.h>
 #include <formats/bad/bad_build.h>
 
 using namespace opennova::bad;
@@ -197,8 +198,11 @@ void compare_rows(const AnimLoadedSet &a, const AnimLoadedSet &b, Report &r) {
 	const size_t rows = std::min(a.rows.size(), b.rows.size());
 	for (size_t i = 0; i < rows; ++i) {
 		// Row order is the ring's order and the slot-0 reset's place, so the
-		// rows compare in order.
-		if (!opennova::strutil::iequals(a.rows[i].key, b.rows[i].key)) {
+		// rows compare in order, each by the slot its key names past the first
+		// five characters (`ANIM_RESET`, `xxxx_reset` and `anim_reset` are one
+		// slot) [orig: AnimMap_FindSlotByName @0x40cfa0, stricmp on key + 5].
+		if (opennova::adm::adm_slot_key(a.rows[i].key) !=
+				opennova::adm::adm_slot_key(b.rows[i].key)) {
 			r.differ("row " + std::to_string(i) + ": '" + a.rows[i].key + "' vs '" +
 					b.rows[i].key + "'");
 			continue;

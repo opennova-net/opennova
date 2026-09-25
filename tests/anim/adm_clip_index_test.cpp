@@ -3,9 +3,11 @@
    (resolvable .bads) and a rig map staged in a temp dir whose .bads are
    absent (the continue-on-failure edge). */
 
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -79,6 +81,37 @@ int main() {
         TEST_EXPECT(clips.load(&index_assets, "mp5_1st.adm") == 0);
         TEST_EXPECT(!clips.loaded());
         TEST_EXPECT(clips.lengths_for("anim_wpn_fire") == nullptr);
+    }
+
+    {
+        // A row names its slot by its key past the first five characters,
+        // whatever they are: `ANIM_RESET` is anim_reset and `xxxx_idle` is
+        // anim_idle. [orig: AnimMap_FindSlotByName @ 0x40cfa0, stricmp on
+        // key + 5]
+        const std::string dir = std::string(test_paths_temp_dir()) + "/opennova_clipindex_slots";
+#ifdef _WIN32
+        _mkdir(dir.c_str());
+#else
+        mkdir(dir.c_str(), 0777);
+#endif
+        opennova::ResourceIndex fixtures;
+        TEST_EXPECT(fixtures.scan(std::string(root) + "/fixtures/anim"));
+        std::vector<uint8_t> idle;
+        TEST_EXPECT(fixtures.read_file("idle.bad", idle));
+        {
+            std::ofstream bad(dir + "/idle.bad", std::ios::binary);
+            bad.write(reinterpret_cast<const char *>(idle.data()), static_cast<std::streamsize>(idle.size()));
+            std::ofstream f(dir + "/slots.adm", std::ios::binary);
+            f << "\r\nANIM_RESET\t\t\t\t\"idle\"\r\nxxxx_idle\t\t\t\t\"idle\"\r\n";
+            TEST_EXPECT(static_cast<bool>(bad) && static_cast<bool>(f));
+        }
+        opennova::ResourceIndex index;
+        opennova::assets::AssetStore index_assets{&index};
+        TEST_EXPECT(index.scan(dir));
+        AdmClipIndex clips;
+        TEST_EXPECT(clips.load(&index_assets, "slots.adm") == 2);
+        TEST_EXPECT(clips.lengths_for("anim_reset") != nullptr);
+        TEST_EXPECT(clips.lengths_for("anim_idle") != nullptr);
     }
 
     {

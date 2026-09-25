@@ -31,7 +31,10 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 	adm_name_ = name;
 
 	for (size_t i = 0; i < adm.count; ++i) {
-		const std::string key = strutil::to_lower(adm.entries[i].key);
+		// The slot the row's key names past its first five characters, as
+		// every lookup spells it (`ANIM_IDLE` and `xxxx_idle` are anim_idle)
+		// [orig: AnimMap_FindSlotByName @ 0x40cfa0, stricmp on key + 5].
+		const std::string key = adm_slot_key(adm.entries[i].key);
 		if (key.empty()) {
 			continue;
 		}

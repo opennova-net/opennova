@@ -201,6 +201,30 @@ int main() {
         const int n_walk = rings.scan_triggers(rid, kWalkForward, -1, 7, walk_words, 8, 0);
         TEST_EXPECT(n_v1 == n_walk);
         for (int i = 0; i < n_v1; ++i) TEST_EXPECT(ring_words_v1[i] == walk_words[i]);
+
+        // A row names its slot by its key past the first five characters,
+        // whatever they are, and a later row naming the same slot adds to that
+        // slot's ring (retail FSldr02 repeats its emplaced rows).
+        // [orig: AnimMap_ParseConfigLine @0x40cb60 -> AnimMap_FindSlotByName
+        //  @0x40cfa0, stricmp on key + 5; AnimMap_RegisterBoneNode @0x40c2d0]
+        {
+            std::ofstream f(dir + "/slots.adm", std::ios::binary);
+            f << "\r\nANIM_RESET\t\t\t\t\"idle\"\r\n"
+                 "xxxx_walk_forward\t\t\t\"walk\"\r\n"
+                 "anim_idle\t\t\t\t\"idle\"\r\n"
+                 "ANIM_IDLE\t\t\t\t\"walk\"\r\n\r\n\r\n";
+            TEST_EXPECT(static_cast<bool>(f));
+        }
+        opennova::ResourceIndex slot_index;
+        opennova::assets::AssetStore slot_assets{&slot_index};
+        TEST_EXPECT(slot_index.scan(dir));
+        AdmRootMotion slots;
+        const int sid = slots.register_adm(&slot_assets, "slots.adm");
+        TEST_EXPECT(sid == 0);
+        TEST_EXPECT(slots.has_clip(sid, opennova::world::anim_state::kReset));
+        TEST_EXPECT(slots.has_clip(sid, kWalkForward));
+        TEST_EXPECT(slots.variant_count(sid, kIdle) == 2);
+        TEST_EXPECT(slots.clip_length_ticks(sid, kIdle, 1) == walk_len);
     }
 
     // THE CROSSED-FRAME TRIGGER SCAN — one entry per authored frame entered,

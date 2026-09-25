@@ -401,6 +401,8 @@ int main() {
         TEST_EXPECT(table("resetx.adm", "anim_resetx \"two\"\r\nanim_RESET \"three\"\r\n"));
         TEST_EXPECT(table("absent_last.adm", "anim_reset \"two\" \"absent\"\r\n"));
         TEST_EXPECT(table("no_reset.adm", "anim_idle \"two\"\r\nanim_walk_forward \"walk\"\r\n"));
+        TEST_EXPECT(table("upper_keys.adm", "ANIM_RESET \"three\"\r\nANIM_WALK_FORWARD \"walk\"\r\n"));
+        TEST_EXPECT(table("other_prefix.adm", "xxxx_reset \"three\"\r\nxxxx_walk_forward \"walk\"\r\n"));
 
         opennova::ResourceIndex index;
         TEST_EXPECT(index.scan(dir.string()));
@@ -439,6 +441,15 @@ int main() {
         TEST_EXPECT(rig.bone_count() == 3);
         TEST_EXPECT(rig.load_from_adm(&assets, "absent_last", {}, {}));
         TEST_EXPECT(rig.bone_count() == 2);
+        // The first five characters of a key are never read: `ANIM_RESET` and
+        // `xxxx_reset` bind slot 0, and their rows' clips register under the
+        // slot keys every lookup spells.
+        for (const char *name : {"upper_keys", "other_prefix"}) {
+            TEST_EXPECT(rig.load_from_adm(&assets, name, {}, {}));
+            TEST_EXPECT(rig.bone_count() == 3);
+            TEST_EXPECT(rig.find_clip("anim_walk_forward") != nullptr);
+            TEST_EXPECT(rig.find_clip("anim_reset") != nullptr);
+        }
         // A table with no reset row never binds, so the rig does not load.
         // [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16;
         //  AnimMap_RegisterEntity @0x40bb60, @0x40bbc4]

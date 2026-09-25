@@ -57,7 +57,7 @@ it was authored on and to any rig that matches it.
 | Record | Fields | Meaning |
 | --- | --- | --- |
 | `adm` | name | the table this set writes (the file name alone; `-o` names the file `build` writes, and a different `adm` name is noted, not used) |
-| `row` | key variant [variant ...] | a table row: the `anim_<name>` slot and its clip ring, in the order the file stores. A variant names a clip with or without the `.bad` extension (440 of 5146 retail variants omit it). The engine serves a row from its LAST variant back [orig: `AnimMap_RegisterBoneNode @ 0x40C2D0`] |
+| `row` | key variant [variant ...] | a table row: the slot and its clip ring, in the order the file stores. The key names its slot past its first five characters, whatever they are and in any case (`anim_reset`, `ANIM_RESET` and `xxxx_reset` all name slot 0) [orig: `AnimMap_FindSlotByName @ 0x40cfa0`]; `anim_<name>` is the convention every retail table keeps, and `opennova-3di catalog` prints the slot keys the runtime names. A variant names a clip with or without the `.bad` extension (440 of 5146 retail variants omit it). The engine serves a row from its LAST variant back [orig: `AnimMap_RegisterBoneNode @ 0x40C2D0`] |
 | `clip` | name | opens a clip: the `.bad` file stem `build` writes beside the table |
 | `fps` | n | the clip's own rate; every retail clip ships 30 |
 | `flags` | word | 1 loop, 2 translations, 8 unwitnessed (73 retail clips carry it) |
@@ -105,9 +105,9 @@ The build fails, naming the line (a clip the seam refuses is named by the line
 it opens on), on an unknown record, a malformed or trailing field, a quote
 that never closes or runs into the next field, a `"` inside a bare field, an
 empty row variant, an event capsule with one value, a
-set with no clip, a row outside the `anim_` namespace or naming a clip the set
-lacks, two clips under one name, a clip name or row variant that is not a
-bare file name (`/ \ : | * ? < > "`, a control character, `.` or `..`: `build`
+set with no clip, a row key of five characters or fewer (it names no slot) or
+a row naming a clip the set lacks, two clips under one name, a clip name or
+row variant that is not a bare file name (`/ \ : | * ? < > "`, a control character, `.` or `..`: `build`
 writes each clip beside the table), a bone whose parent is not a lower index, a
 key list that is neither `frames + 1` long nor accompanied by durations (a
 bone states a duration on every key or on none), a key

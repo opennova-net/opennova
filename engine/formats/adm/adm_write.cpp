@@ -8,8 +8,10 @@
 //  the row (@0x40cbd2). The tokenizer (io/ascii_config.h) splits on space,
 //  comma and tab outside quotes and cuts the line at an unquoted "//" or ';'.]
 // So the writer quotes every variant and refuses what would not read back as
-// written: a key that is not one plain token, a variant with a quote, a
-// control character, a leading '/' or edge whitespace (the parser trims it).
+// written: a key of five characters or fewer (adm_slot_name: it names no
+// slot, and the parser drops its row) or that is not one plain token, a
+// variant with a quote, a control character, a leading '/' or edge whitespace
+// (the parser trims it).
 
 #include <formats/adm/adm.h>
 
@@ -53,8 +55,8 @@ int adm_write_buffer(const AdmFile *af, std::string &out) {
     out += "\r\n";
     for (size_t i = 0; i < af->count; ++i) {
         const AdmEntry &e = af->entries[i];
-        if (std::memchr(e.key, '\0', sizeof(e.key)) == nullptr || e.key[0] == '\0' ||
-            std::strncmp(e.key, "anim_", 5) != 0 || !plain_key(e.key))
+        if (std::memchr(e.key, '\0', sizeof(e.key)) == nullptr || adm_slot_name(e.key).empty() ||
+            !plain_key(e.key))
             return -1;
         if (e.variant_count == 0 || e.variant_count > static_cast<size_t>(ADM_MAX_VARIANTS)) return -1;
         out += e.key;

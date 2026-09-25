@@ -52,8 +52,9 @@ int main() {
     TEST_EXPECT(adm_write_buffer(&empty, bytes) == 0);
     TEST_EXPECT(bytes == std::string("\r\n\r\n\r\n\r\n") + std::string(1, '\0'));
 
-    // Rows the parser would drop or misread are refused: a key without the
-    // anim_ prefix, no variants, a quote inside a clip name.
+    // Rows the parser would drop or misread are refused: a key of five
+    // characters or fewer (it names no slot), no variants, a quote inside a
+    // clip name.
     AdmEntry bad = {};
     std::strcpy(bad.key, "reset");
     bad.variant_count = 1;
@@ -62,6 +63,14 @@ int main() {
     one.entries = &bad;
     one.count = 1;
     TEST_EXPECT(adm_write_buffer(&one, bytes) == -1);
+    // Any other first five characters name the slot past them, so the row
+    // reads back as written. [orig: AnimMap_FindSlotByName @0x40cfa0]
+    std::strcpy(bad.key, "ANIM_RESET");
+    TEST_EXPECT(adm_write_buffer(&one, bytes) == 0);
+    AdmFile upper = {};
+    TEST_EXPECT(adm_parse_buffer(bytes.data(), bytes.size(), &upper) == 0);
+    TEST_EXPECT(upper.count == 1 && std::strcmp(upper.entries[0].key, "ANIM_RESET") == 0);
+    adm_free(&upper);
     std::strcpy(bad.key, "anim_reset");
     bad.variant_count = 0;
     TEST_EXPECT(adm_write_buffer(&one, bytes) == -1);

@@ -81,21 +81,23 @@ int AdmRootMotion::parse_adm(const opennova::assets::AssetStore *assets,
 		return it->second.frame_count > 0 ? &it->second : nullptr;
 	};
 
-	// adm key lookup, case-insensitive (keys are authored "anim_<name>", same names as
-	// the state table off_8135F0). EVERY quoted token on a row registers on that one
-	// slot, in authored order — the variant ring [orig: AnimMap_ParseConfigLine
-	// @0x40cb60 -> AnimMap_RegisterBoneNode @0x40c2d0 links each into the slot's
-	// circular list; duplication is the rotation weighting].
+	// A row names its slot by its key past the first five characters, without
+	// case, against the state table off_8135F0 (so `ANIM_IDLE` and `xxxx_idle`
+	// are anim_idle). EVERY quoted token on a row registers on that one slot, in
+	// authored order, and a later row naming the same slot adds its tokens to
+	// the same ring (FSldr02's emplaced rows, FSldr05's burn_2) — the variant
+	// ring [orig: AnimMap_ParseConfigLine @0x40cb60 -> AnimMap_FindSlotByName
+	// @0x40cfa0 (stricmp on key + 5), then AnimMap_RegisterBoneNode @0x40c2d0
+	// links each into the slot's circular list; duplication is the rotation
+	// weighting].
 	std::unordered_map<std::string, std::vector<std::string>> values;
 	for (size_t i = 0; i < adm.count; ++i) {
-		const std::string key = strutil::to_lower(adm.entries[i].key);
-		std::vector<std::string> ring;
+		const std::string key = adm_slot_key(adm.entries[i].key);
+		if (key.empty()) continue;
+		std::vector<std::string> &ring = values[key];
 		for (size_t v = 0; v < adm.entries[i].variant_count; ++v) {
 			const std::string value = adm.entries[i].variants[v];
 			if (!value.empty()) ring.push_back(value);
-		}
-		if (!ring.empty()) {
-			values.emplace(key, std::move(ring));
 		}
 	}
 

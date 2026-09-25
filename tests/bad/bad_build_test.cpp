@@ -317,9 +317,17 @@ int main() {
         TEST_EXPECT(std::strcmp(table.entries[1].variants[1], "walkf2") == 0);
         opennova::adm::adm_free(&table);
 
+        // A key names its slot past its first five characters, whatever they
+        // are, so one of five or fewer names none and is refused, and any other
+        // prefix reads back as written.
         BadBuildSet outside = set;
-        outside.rows[0].key = "walk_forward";
+        outside.rows[1].key = "walk";
         TEST_EXPECT(!bad_build_mint_table(outside, text, &error));
+        BadBuildSet upper = set;
+        upper.rows[0].key = "ANIM_RESET";
+        upper.rows[1].key = "xxxx_walk_forward";
+        TEST_EXPECT(bad_build_mint_table(upper, text, &error));
+        TEST_EXPECT(text.find("ANIM_RESET\t\t\t\t\"authored\"") != std::string::npos);
         BadBuildSet bare = set;
         bare.rows[1].variants.clear();
         TEST_EXPECT(!bad_build_mint_table(bare, text, &error));

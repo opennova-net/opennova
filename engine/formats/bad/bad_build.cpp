@@ -528,9 +528,7 @@ bool bad_build_bare_stem(const std::string &name) {
 std::string bad_build_reset_stem(const std::vector<BadBuildRow> &rows) {
     const BadBuildRow *reset = nullptr;
     for (const BadBuildRow &row : rows) {
-        if (row.key.size() > 5 && !row.variants.empty() &&
-            strutil::iequals(std::string_view(row.key).substr(5), "reset"))
-            reset = &row;
+        if (!row.variants.empty() && adm::adm_key_names_slot(row.key, "reset")) reset = &row;
     }
     return reset != nullptr ? bad_build_clip_stem(reset->variants.back()) : std::string();
 }
@@ -571,8 +569,9 @@ bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string 
     table.entries = entries.empty() ? nullptr : entries.data();
     table.count = entries.size();
     if (adm::adm_write_buffer(&table, out) != 0)
-        return fail(error, "the table writer refused a row (a key outside the anim_ namespace or "
-                           "not one plain token, no variants, or a variant it cannot quote)");
+        return fail(error, "the table writer refused a row (a key of five characters or fewer, "
+                           "which names no slot, or not one plain token, no variants, or a variant "
+                           "it cannot quote)");
     // Parse-equality is the table's parity (ADR 0047): read the text back
     // through the parser and require every row as it went in.
     adm::AdmFile back{};
