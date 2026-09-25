@@ -4,6 +4,7 @@
 // Drives the command handlers the CLI dispatches (opennova_3di_commands).
 //
 //   o3d_build_test <scratch dir>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -84,6 +85,36 @@ int main(int argc, char **argv) {
 	// A skinned model's LOD with no parts (retail ships empty LODs) scenes and
 	// rebuilds like any other.
 	round_trip("skinned-empty-lod", kSkinned + "lod 0 gnrc\n");
+
+	// NaN and infinity (retail J_bsh1's vertex normals, ChmLFP1's occlusion
+	// planes carry both NaN signs) print as nan, -nan, inf and -inf, which
+	// strtod and Python's float() read, and rebuild to the same bits.
+	{
+		const std::string text = "o3d 1\nmodel NAN\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+				"v 0 0 0 nan -nan inf 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 -inf 0 1 0 1\nt 0 1 2\n"
+				"occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\nop 0 0 1 nan\nop 0 0 -1 -nan\nof 0 1 2 0\n";
+		round_trip("nan", text);
+		const std::string scene = slurp(path_of("nan", ".rt.o3d"));
+		check(scene.find("nan(") == std::string::npos, "nan: no printf-specific NaN spelling");
+		check(scene.find(" -nan") != std::string::npos && scene.find(" nan") != std::string::npos &&
+						scene.find(" inf") != std::string::npos && scene.find(" -inf") != std::string::npos,
+				"nan: both NaN signs and both infinities are written");
+		// `nan` is the quiet NaN retail stores (0x7FC00000, 0xFFC00000 with
+		// the sign), whatever the C library's strtod makes of the word.
+		Threedi3di3 m{};
+		if (threedi_3di3_read(path_of("nan", ".3di").c_str(), &m) == 0) {
+			uint32_t bits[4] = {};
+			const float values[4] = {m.lods[0].vertices.items[0].normal[0], m.lods[0].vertices.items[0].normal[2],
+					m.occlusion_planes[0].radius, m.occlusion_planes[1].radius};
+			std::memcpy(bits, values, sizeof(bits));
+			// Model axes (-y, z, x): the mission -nan in y lands negated in x.
+			check(bits[0] == 0x7FC00000u && bits[1] == 0x7FC00000u, "nan: vertex normals hold the quiet NaN");
+			check(bits[2] == 0x7FC00000u && bits[3] == 0xFFC00000u, "nan: occlusion planes keep the NaN sign");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "nan: read the model back");
+		}
+	}
 
 	std::printf("o3d_build_test: %d failures\n", failures);
 	return failures == 0 ? 0 : 1;

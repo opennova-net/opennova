@@ -36,19 +36,22 @@ namespace threedi_cli {
 
 namespace {
 
-// Floats print with 9 significant digits (a float32 round-trips exactly);
-// values that come from fixed-point words print with 17 (exact re-quantization).
-std::string f9(double v) {
+// A number as `build` and Python's float() both read it. NaN and infinity are
+// spelled nan, -nan, inf and -inf: MSVC's printf writes "-nan(ind)", which
+// Python refuses (retail J_bsh1's vertex normals and ChmLFP1's occlusion
+// planes carry NaNs of both signs).
+std::string number(double v, const char *format) {
+	if (std::isnan(v)) return std::signbit(v) ? "-nan" : "nan";
+	if (std::isinf(v)) return v < 0.0 ? "-inf" : "inf";
 	char buf[40];
-	std::snprintf(buf, sizeof(buf), "%.9g", v);
+	std::snprintf(buf, sizeof(buf), format, v);
 	return std::strcmp(buf, "-0") == 0 ? std::string("0") : std::string(buf);
 }
 
-std::string f17(double v) {
-	char buf[40];
-	std::snprintf(buf, sizeof(buf), "%.17g", v);
-	return std::strcmp(buf, "-0") == 0 ? std::string("0") : std::string(buf);
-}
+// Floats print with 9 significant digits (a float32 round-trips exactly);
+// values that come from fixed-point words print with 17 (exact re-quantization).
+std::string f9(double v) { return number(v, "%.9g"); }
+std::string f17(double v) { return number(v, "%.17g"); }
 
 std::string vec9(const float *model) {
 	const ThreediBuildVec3 m = threedi_build_to_mission(ThreediBuildVec3{model[0], model[1], model[2]});

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -46,10 +47,17 @@ struct Parser {
 };
 
 // Numbers read through strtod so the nan/inf that retail files carry
-// (occlusion planes, light matrices) survive a scene round trip.
+// (vertex normals, occlusion planes) survive a scene round trip. `nan` and
+// `-nan` are the quiet NaN retail stores (0x7FC00000 and its negation: J_bsh1,
+// ChmLFP1), whatever payload the C library's strtod gives the word (MSVC's
+// sets every mantissa bit).
 bool read_double(std::istringstream &in, double &out) {
 	std::string token;
 	if (!(in >> token)) return false;
+	if (token == "nan" || token == "-nan") {
+		out = token[0] == '-' ? -std::numeric_limits<double>::quiet_NaN() : std::numeric_limits<double>::quiet_NaN();
+		return true;
+	}
 	char *end = nullptr;
 	out = std::strtod(token.c_str(), &end);
 	return end != nullptr && *end == '\0' && end != token.c_str();
