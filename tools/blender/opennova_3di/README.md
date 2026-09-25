@@ -64,7 +64,7 @@ F16                   Empty: the model root (model name, output .3di, collision 
 F16_LOD0              Empty under the model root, custom property _lod_index = 0
   PN01                Empty: part 1 (its origin is the pivot)
     01 Mesh0          the part's render mesh
-    _01 center        helper: the part pivot
+    _01 center        helper: the part pivot (its origin)
     UPG01 ctrlx05     user point: type G, part 01, label ctrlx05 (+Z = facing)
     LP01              light owned by part 01 (a point or spot light, aimed down its -Z)
     CB01-colonly      collision volume on part 01 (a convex mesh)
@@ -84,8 +84,15 @@ a part's helper is also the attach point the game stores for its section: when
 that LOD holds any helper, export writes an attach point for every section
 after the root (every section on a skinned model), at the section's helper or,
 where it has none, at its pivot. Without any helper, export leaves them to the
-builder, which puts each at its section's pivot. Export warns about any object
-whose name it does not use.
+builder, which puts each at its section's pivot, so the few retail models
+that store no attach point at all (Chair03X) come back with them; import says
+so. Export warns about any object whose name it does not use.
+
+A part that draws nothing (a first-person weapon's moving parts often do) can
+still give the game a point its bounds sit on: make its `_## center` helper a
+mesh, and its first vertex is that point, and in the collision LOD the
+section's one collision vertex, as the retail tool seeded such parts. Import
+makes one for every such part of a rigid model.
 
 Add Model (in the sidebar) makes a model root and its `_LOD0` root to start
 from.

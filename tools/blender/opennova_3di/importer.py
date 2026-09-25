@@ -47,7 +47,8 @@ def finite(values):
 
 def read_o3d(path):
     sc = {"name": "MODEL", "skinned": False, "uv1": False, "registers": [], "frames": [], "materials": [],
-          "texfiles": {}, "lods": [], "points": [], "lights": [], "occ": [], "cobjs": [], "cxlt": []}
+          "texfiles": {}, "lods": [], "points": [], "lights": [], "occ": [], "cobjs": [], "cxlt": [],
+          "cxlt_given": False}
     lod = part = strip = panm = mat = cobj = volume = occ = None
     with open(path, encoding="utf-8", errors="replace") as f:
         for raw in f:
@@ -95,7 +96,10 @@ def read_o3d(path):
                        "panm": []}
                 sc["lods"].append(lod)
             elif k == "part":
-                part = {"parent": int(a[0]), "pivot": tuple(num(x) for x in a[1:4]), "strips": []}
+                # A part that draws nothing may carry the point its bounds sit
+                # on after its pivot.
+                part = {"parent": int(a[0]), "pivot": tuple(num(x) for x in a[1:4]),
+                        "centre": tuple(num(x) for x in a[4:7]) if len(a) >= 7 else None, "strips": []}
                 lod["parts"].append(part)
             elif k == "strip":
                 strip = {"material": int(a[0]), "alpha": len(a) > 1 and a[1] != "0", "bones": [], "verts": [],
@@ -165,7 +169,10 @@ def read_o3d(path):
             elif k == "cp":
                 volume["planes"].append((tuple(num(x) for x in a[:3]), num(a[3])))
             elif k == "cxlt":
-                sc["cxlt"].append(tuple(num(x) for x in a[:3]))
+                # A bare `cxlt` declares the table empty.
+                sc["cxlt_given"] = True
+                if a:
+                    sc["cxlt"].append(tuple(num(x) for x in a[:3]))
     return sc
 
 
@@ -530,6 +537,8 @@ class Builder:
                 me, _ = self.mesh(f"{pi + 1:02d} Mesh0", part["strips"], pivot, mats, False)
                 mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
                 objs.append(self.link(mob, ob, Matrix.Translation(pivot), world))
+            elif part["centre"] is not None:
+                objs.append(self.centre_helper(pi, ob, part["centre"]))
         for pi, part in enumerate(lod["parts"]):
             parent = part["parent"]
             if pi < parent < len(parts):
@@ -543,6 +552,23 @@ class Builder:
         if li == 0:
             self.lod0_parts = {i: ob for i, ob in enumerate(parts)}
         return objs
+
+    def centre_helper(self, pi, part_ob, centre):
+        """Part pi's `_## center` helper mesh, for a part that draws nothing:
+        OED seeded such a part with its helper's first vertex, the point its
+        bounds sit on at radius 0 (5fc5b4f6a^ engine/formats/oed/
+        convert_internal.cpp, the placeholder injection), which retail keeps
+        near the pivot. The helper's origin is the part's pivot, as export
+        reads it, so it sits on its PN## empty with no offset of its own and
+        its one vertex is that point."""
+        me = bpy.data.meshes.new(f"_{pi + 1:02d} center")
+        me.from_pydata([tuple(self.world[part_ob.name].inverted() @ self.blender(centre))], [], [])
+        ob = bpy.data.objects.new(f"_{pi + 1:02d} center", me)
+        self.collection.objects.link(ob)
+        ob.parent = part_ob
+        ob.matrix_parent_inverse = Matrix.Identity(4)
+        self.world[ob.name] = self.world[part_ob.name]
+        return ob
 
     def attach_helper(self, li, pi, parent_ob, parent, world=None, bone=None):
         """Part pi's `~PP attach` helper in LOD li, naming its parent part
@@ -582,9 +608,15 @@ class Builder:
         (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row that is its
         section's own offset, the row the builder derives, needs no helper:
         export writes a part without one at its pivot. A row count that does
-        not fit places none."""
+        not fit places none, and an empty table (Chair03X: seven sections, no
+        row) has no scene form: an attach point is a helper, and a collision
+        LOD without one exports the rows the builder derives."""
         rows = self.sc["cxlt"]
         if not rows:
+            if self.sc["cxlt_given"]:
+                self.note("the model stores no CXLT attach point, which a scene cannot say: export leaves the rows to "
+                          "the builder, which derives one per collision section"
+                          f"{'' if self.sc['skinned'] else ' after the root'} at its pivot")
             return
         li = self.model.o3d.poly_collision_lod
         parts = self.sc["lods"][li]["parts"] if li < len(self.sc["lods"]) else []
@@ -727,6 +759,12 @@ class Builder:
             mod.object = arm_ob
             objs.append(mob)
         self.skinned_parts[li] = (arm_ob, meshes)
+        seeded = sum(1 for p in lod["parts"] if p["centre"] is not None)
+        if seeded:
+            # dM1A1 and DT801 only: a skinned part's pivot is its bone head,
+            # and no helper of a skinned model carries this point.
+            self.note(f"LOD {li}: {seeded} bones that draw nothing keep the point their bounds sit on, which a "
+                      "skinned model's scene does not carry; export leaves it at the origin")
         if li == 0:
             self.lod0_parts = {pi: arm_ob for pi in range(len(lod["parts"]))}
         return objs

@@ -22,7 +22,9 @@
 #                 is a PANM rotation frame (an MTRX row: its tracks turn about
 #                 the empty's axes, like Dblkhwk1's canted tail rotor).
 #   ## Mesh<n>    Mesh: render geometry of part ##.
-#   _## center    helper: part ##'s pivot.
+#   _## center    helper: part ##'s pivot (its origin). A mesh one's first
+#                 vertex seeds a rigid part that draws nothing: the point
+#                 its bounds sit on, and its section's collision vertex.
 #   ~PPx attach   helper under a child part: that child's parent is part PP
 #                 (00 = -1, a part's own number = itself); the first in x
 #                 order counts. In the collision LOD it is also the part's
@@ -643,6 +645,17 @@ class Exporter:
         ob = lod.centers.get(index, lod.parts[index])
         return self.space.mission(self.space.world(ob).translation)
 
+    def part_centre(self, lod, index):
+        """The point a rigid part that draws nothing seeds its bounds with
+        (radius 0): its `_## center` helper mesh's first vertex, as OED's
+        placeholder injection took it (5fc5b4f6a^ engine/formats/oed/
+        convert_internal.cpp); None without one, and the part's bounds sit at
+        the origin."""
+        ob = lod.centers.get(index)
+        if ob is None or ob.type != "MESH" or len(ob.data.vertices) == 0:
+            return None
+        return self.space.mission(self.space.world(ob) @ ob.data.vertices[0].co)
+
     # --- geometry -----------------------------------------------------------
     def uv_layers(self, mesh):
         """UV0 is the UV map Blender renders with, UV1 (the detail stage's)
@@ -776,10 +789,14 @@ class Exporter:
         lines.append(f"lod {p.lod_threshold} {quoted(p.lod_type or 'gnrc')}  # {lod.root.name}")
         count = len(lod.parts)
         for i in range(count):
-            lines.append(f"part {self.part_parent(lod, i)} {fmt(*self.part_pivot(lod, i))}  # PN{i + 1:02d}")
             strips = {}
             for _, ob in sorted(lod.meshes.get(i, []), key=lambda e: e[0]):
                 self.mesh_strips(ob, strips)
+            line = f"part {self.part_parent(lod, i)} {fmt(*self.part_pivot(lod, i))}"
+            centre = self.part_centre(lod, i) if not strips else None
+            if centre is not None:
+                line += " " + fmt(*centre)
+            lines.append(line + f"  # PN{i + 1:02d}")
             for mi, s in sorted(strips.items()):
                 if len(s["verts"]) > 65535:
                     raise ExportError(f"PN{i + 1:02d}: one material has more than 65535 vertices")
@@ -1065,6 +1082,18 @@ class Exporter:
                         s["faces"].append((corners, mat.o3d.surface if mat is not None else 14, self.face_flags(mat)))
                 finally:
                     ev.to_mesh_clear()
+        # A part that draws nothing keeps the vertex OED seeded it with (its
+        # `_## center` helper's first), and WriteCVRT wrote a section's part
+        # vertices, faces or not: 1,779 of the 2,411 such retail parts carry
+        # it as their section's only collision vertex (every first-person
+        # weapon's empty parts).
+        for i, s in enumerate(sections):
+            centre = self.part_centre(bullet, i) if not self.skinned and not s["verts"] else None
+            if centre is not None:
+                if not all(abs(x) < 128.0 for x in centre):
+                    raise ExportError(f"{bullet.centers[i].name}: its first vertex lies at ({fmt(*centre)}); a "
+                                      "collision vertex stays under 128 from the model origin on each axis")
+                s["verts"].append(centre)
         for vtype, flags, part, ob, key in lod0.volumes:
             if not 0 <= part < count:
                 raise ExportError(f"{ob.name}: its section {part + 1:02d} is not a part of the collision LOD "

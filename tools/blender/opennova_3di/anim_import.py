@@ -35,7 +35,8 @@ from mathutils import Matrix, Quaternion, Vector
 from . import assembly
 from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, RM_NAME, bone_rows,
                         clip_actions, part_bone, rig_of, rm_of, trigger_value)
-from .export import ATTACH_RE, BONE_RE, CENTER_RE, PART_RE, active_model, clean_name, descendants, is_lod_root
+from .export import (ATTACH_RE, BONE_RE, CENTER_RE, PART_RE, Exporter, active_model, clean_name, descendants,
+                     is_lod_root)
 from .o3dtext import (ImportFailed, axis_basis, blender_axes, cli_notes, num, run_cli, scratch, strip_comment,
                       tokens)
 
@@ -581,16 +582,21 @@ class Loader:
             var.targets[0].id = arm.data
             var.targets[0].data_path = "pose_position"
             rest.expression = "rest"
-            if i == 0 or any(ATTACH_RE.match(clean_name(c.name)) for c in ob.children):
+            # A `_## center` below the part is its pivot: the helper sits on
+            # it with no offset of its own, so it reads back as the very
+            # pivot (one elsewhere is reached through its world matrix).
+            centre = centers.get(i)
+            on = centre if centre is not None and Exporter.owning_part(centre) == i else ob
+            if i == 0 or any(ATTACH_RE.match(clean_name(c.name)) and Exporter.helper_part(c) == i
+                             for c in ob.children_recursive):
                 continue
             helper = bpy.data.objects.new(f"~{above[i] + 1:02d} attach", None)
             helper.empty_display_size = 0.02
             self.model.users_collection[0].objects.link(helper)
             self.undo.append(lambda helper=helper: bpy.data.objects.remove(helper))
-            helper.parent = ob
+            helper.parent = on
             helper.matrix_parent_inverse = Matrix.Identity(4)
-            if i in centers:
-                # A `_## center` pivot: the helper sits there.
+            if centre is not None and on is ob:
                 helper.matrix_world = Matrix.Translation(pivots[i])
 
     # --- the run ------------------------------------------------------------
