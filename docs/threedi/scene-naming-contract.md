@@ -127,12 +127,15 @@ on the model the rig belongs to:
 - **A clip is an Action** on the rig armature's NLA tracks, one strip per track,
   in track order. Its name is the `.bad` file stem. Its own properties carry the
   clip's rate, its loop and translation flags, the unwitnessed flag bit 3, and a
-  frame count longer than its keys (retail's `DT1RST` holds its last key for an
-  extra frame).
+  length longer than the Action's own when it has one, whose extra frames hold
+  the Action's last pose.
 - **The table** is the rows on the model root: an `anim_<name>` slot and its clip
   ring, in the order the `.adm` stores. The engine serves a row from its LAST
   variant back [orig: AnimMap_RegisterBoneNode @ 0x40C2D0], and the reset row
-  names the clip whose bind the rest pose is.
+  (`anim_reset`, the last one) names in its last variant the clip whose bind
+  the rest pose is, each reset variant replacing the one before [orig:
+  AnimMap_FindSlotByName @ 0x40cfa0; AnimMap_RegisterEntity @ 0x40bb60]; a
+  table without one binds each clip to its own first key.
 - **`!RM`** is a bone of the rig outside its `BN##` parts, keyed per frame: its
   step between two frames is that frame's event velocity (the body animates in
   place and the engine moves the entity by these). Any bone named `!...` is no
@@ -144,19 +147,24 @@ on the model the rig belongs to:
 - **The rest pose is the bind.** A channel is the bone's own rotation in the
   model's frame, and the runtime carries the reset clip's first key as the
   skeleton's rest, so a bone deforms by `key * bind^-1`: with the rest pose set
-  to that key, a clip poses the rig exactly as the game draws it. Import turns each rest bone onto
-  that key; heads, lengths and weights stay put, so the model is unchanged.
+  to that key, a clip poses the rig exactly as the game draws it. The first
+  table imported onto a rig that holds no clip turns each rest bone onto that
+  key; heads, lengths and weights stay put, so the model is unchanged. A lone
+  `.bad` and a table without a reset row name no bind, and a rig that already
+  holds clips keeps its rest, since their Actions are keyed against it.
 - **Bone names live in the clip.** A model's part table carries none, so a rig
   imported from a `.3di` alone names its bones `BN##`; a clip labels them
   (`BN16 L Hand`), and their vertex groups follow.
 
 **A rigid model's clips** (a first-person weapon's own: they pair with its
 `PN##` parts by the same index rule) ride an armature named `!Rig` under the
-LOD 0 root, whose `BN##` bones mirror the parts. Each part follows its bone's
-step away from rest, and a `~PPx attach` helper carries the model's own part
-hierarchy, because the part's Blender parent is now its bone. The model export
-ignores a `!`-named armature and reads every rig at rest, so the model is the
-authored layout whatever a clip is doing.
+LOD 0 root, whose `BN##` bones mirror the parts. Each part hangs from the LOD
+root and follows its bone's step away from rest through an `O3D follow` Child
+Of constraint, which the rig's Rest Position mutes. A `~PPx attach` helper
+carries the model's own part hierarchy, because the part's Blender parent is
+now the LOD root: a part that already has one keeps it, and a new one sits at
+the part's pivot. The model export ignores a `!`-named armature and reads every
+rig at rest, so the model is the authored layout whatever a clip is doing.
 
 A clip set is as wide as the rig it was authored on. A first-person set belongs
 to the weapon's rig and the arms follow it by index (`mp5_1st.adm` carries 40

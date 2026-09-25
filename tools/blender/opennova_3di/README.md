@@ -208,8 +208,10 @@ beside a first-person gun). **File > Import > NovaLogic Animations** reads a
 - **The table** is the row list on the model root: a slot (`anim_reset`,
   `anim_walk_forward`, ...) and the clips that answer it. Several clips on one
   row are a ring the game rotates through, and it serves a row from its LAST
-  entry back. The reset row's first clip is the bind every clip is measured
-  against.
+  entry back. The reset row (`anim_reset`) names the bind every clip is
+  measured against: its last clip, since each clip on that row replaces the one
+  before it (every retail table holds one). A table without a reset row binds
+  each clip to its own first key.
 - **Root motion** is the bone `!RM`: key it along the path the body travels and
   the clip carries the step between each pair of frames. The body itself
   animates in place; the game moves the entity by those steps. Any bone named
@@ -227,8 +229,9 @@ beside a first-person gun). **File > Import > NovaLogic Animations** reads a
   bone onto that key, and a clip then poses the rig exactly as the game draws
   it. The bone heads, lengths and weights do not move, so the model still
   exports the same model. A rig that already holds clips keeps its rest, since
-  their Actions are keyed against it, and a single `.bad` carries no table, so
-  it leaves the rest and the model's rows as they are. Bone names come from the
+  their Actions are keyed against it; a table without a reset row names no bind
+  and leaves the rest as it is; and a single `.bad` carries no table, so it
+  leaves the rest and the model's rows as they are. Bone names come from the
   clips (a `.3di` carries none), and their vertex groups are renamed with them;
   a lower-case `bn38 bone` becomes `BN38 bone`.
 - **Import keys what the game plays.** Every clip is keyed on each frame of its
