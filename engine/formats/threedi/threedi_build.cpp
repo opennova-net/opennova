@@ -100,6 +100,31 @@ uint32_t threedi_build_panm_flags(const ThreediPartAnimation &row, uint8_t trans
 	return threedi_panm_pack_flags(scale ? 2 : 0, rot ? 2 : 0, 0, live(row.translation) ? trans_axis : 0);
 }
 
+void threedi_build_part_sphere(const std::vector<const ThreediVertex *> &vertices, float center[3], float &radius) {
+	center[0] = center[1] = center[2] = 0.0f;
+	radius = 0.0f;
+	if (vertices.empty()) return;
+	double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
+	for (const ThreediVertex *v : vertices)
+		for (int k = 0; k < 3; ++k) {
+			mn[k] = std::min<double>(mn[k], v->position[k]);
+			mx[k] = std::max<double>(mx[k], v->position[k]);
+		}
+	for (int k = 0; k < 3; ++k) center[k] = static_cast<float>((mn[k] + mx[k]) * 0.5);
+	double far2 = 0.0;
+	for (const ThreediVertex *v : vertices) {
+		double d2 = 0.0;
+		for (int k = 0; k < 3; ++k) {
+			const double d = static_cast<double>(v->position[k]) - center[k];
+			d2 += d * d;
+		}
+		far2 = std::max(far2, d2);
+	}
+	radius = static_cast<float>(std::sqrt(far2));
+}
+
+float threedi_build_light_cone_cos(float falloff) { return std::cos(falloff * kDegreeToRadian); }
+
 ThreediPartAnimation threedi_build_inert_panm(int part, int parent) {
 	ThreediPartAnimation row{};
 	row.parent_subobject = static_cast<uint8_t>(parent);
@@ -443,9 +468,7 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 				ro.rel[1] = ro.abs[1] - parent_abs[1];
 				ro.rel[2] = ro.abs[2] - parent_abs[2];
 			}
-			double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
 			std::vector<const ThreediVertex *> authored; // the vertices the part's bounds cover
-			bool any = false;
 			// Opaque strips first, then alpha strips (the renderer's walk).
 			// A skinned model's strips are all owned by the root ROBJ while
 			// each part keeps the bounds of the geometry authored on it: the
@@ -457,14 +480,9 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 					if (strip.alpha != (pass == 1)) continue;
 					if (m.skinned) {
 						for (const ThreediVertex &v : strip.vertices) {
-							for (int k = 0; k < 3; ++k) {
-								mn[k] = std::min<double>(mn[k], v.position[k]);
-								mx[k] = std::max<double>(mx[k], v.position[k]);
-							}
 							reach(v);
 							authored.push_back(&v);
 						}
-						any = any || !strip.vertices.empty();
 						continue;
 					}
 					ThreediTriangleStrip rec{};
@@ -488,11 +506,6 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 						rec.min[k] = static_cast<float>(smn[k]);
 						rec.max[k] = static_cast<float>(smx[k]);
 					}
-					for (int k = 0; k < 3; ++k) {
-						mn[k] = std::min(mn[k], smn[k]);
-						mx[k] = std::max(mx[k], smx[k]);
-					}
-					any = any || !strip.vertices.empty();
 					verts.insert(verts.end(), strip.vertices.begin(), strip.vertices.end());
 					indices.insert(indices.end(), strip.indices.begin(), strip.indices.end());
 					strips.push_back(rec);
@@ -501,25 +514,7 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 					else ++ro.num_strips;
 				}
 			}
-			// The part's sphere: its vertex box's centre and the farthest vertex
-			// from it, the distance taken wide and stored as a float (the retired
-			// port's WriteRDTA takes the farthest vertex too; 5fc5b4f6a^:
-			// engine/formats/oed/rdta.cpp). That reproduces 5,168 of the 5,932
-			// rigid JO parts and 244 of the 256 skinned mesh parts the corpus can
-			// attribute; the box's half-diagonal reproduces 704 and none.
-			if (any) {
-				for (int k = 0; k < 3; ++k) ro.bounding_center[k] = static_cast<float>((mn[k] + mx[k]) * 0.5);
-				double far2 = 0.0;
-				for (const ThreediVertex *v : authored) {
-					double d2 = 0.0;
-					for (int k = 0; k < 3; ++k) {
-						const double d = static_cast<double>(v->position[k]) - ro.bounding_center[k];
-						d2 += d * d;
-					}
-					far2 = std::max(far2, d2);
-				}
-				ro.bounding_radius = static_cast<float>(std::sqrt(far2));
-			}
+			threedi_build_part_sphere(authored, ro.bounding_center, ro.bounding_radius);
 			parts.push_back(ro);
 		}
 		if (m.skinned && !parts.empty()) {
@@ -950,7 +945,7 @@ int ThreediBuildModel::add_light(ThreediBuildVec3 pos, double atten_start, doubl
 	l.rotation[0] = static_cast<float>(d.x) + 0.0f;
 	l.rotation[1] = static_cast<float>(d.y) + 0.0f;
 	l.rotation[2] = static_cast<float>(d.z) + 0.0f;
-	l.rotation[3] = std::cos(static_cast<float>(falloff) * kDegreeToRadian);
+	l.rotation[3] = threedi_build_light_cone_cos(static_cast<float>(falloff));
 	threedi_build_light_view_proj(l, static_cast<float>(falloff));
 	lights.push_back(l);
 	return static_cast<int>(lights.size()) - 1;

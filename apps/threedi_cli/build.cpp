@@ -359,6 +359,10 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 					ps.error("t references a vertex not yet declared in this strip");
 					continue;
 				}
+				if (a == b || b == c || a == c) {
+					ps.error("t repeats a vertex (the loader drops such a triangle)");
+					continue;
+				}
 				// The scene winds counter-clockwise about the outward normal in
 				// mission axes; model axes mirror mission, and retail winds
 				// counter-clockwise in MODEL axes (`opennova-3di info` prints the

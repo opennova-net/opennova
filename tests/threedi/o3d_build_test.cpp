@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_build.h>
 
 #include "threedi_cli.h"
 
@@ -196,6 +197,54 @@ int main(int argc, char **argv) {
 		} else {
 			check(false, "occ-empty: read back");
 		}
+	}
+
+	// A spot light's cone survives the scene: whatever the half-angle, the
+	// rebuilt cosine, byte and view_proj are the ones stored.
+	for (int i = 0; i < 40; ++i) {
+		char text[256];
+		std::snprintf(text, sizeof(text),
+				"o3d 1\nmodel L\nlod 0\npart 0 0 0 0\n"
+				"light 0 1 0 1.5 0 6 24 0 0 255 255 255 0 0 0 0x48 0.3 0.1 -1 %.6f\n",
+				1.0 + i * 0.4371);
+		round_trip("spot-" + std::to_string(i), text);
+	}
+
+	// A skinned strip authored on a bone (dM1A1's hull has no mesh part)
+	// comes back on that bone, so the bone keeps its bounds.
+	round_trip("skinned-on-bones",
+			"o3d 1\nmodel BONES\nskinned 1\nmaterial VS_SKBASIC\nlod 0\npart 0 0 0 0\n"
+			"strip 0\nbones 0\nv 1 1 0 0 0 1 0 0 0 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 0 0 1 0 0\nv -1 -1 1 0 0 1 1 1 0 0 0 1 0 0\nt 0 1 2\n"
+			"part 0 3 0 0\n"
+			"strip 0\nbones 1\nv 4 0 0 0 0 1 0 0 0 0 0 1 0 0\nv 3 1 0 0 0 1 0 1 0 0 0 1 0 0\nv 3 0 2 0 0 1 1 1 0 0 0 1 0 0\nt 0 1 2\n"
+			"panm 0 0\npanm 1 0\n");
+
+	// A strip with vertices and no triangle is carried as it is.
+	round_trip("empty-strip", "o3d 1\nmodel E\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0 0\nv 0 0 0 0 0 1 0 0\n");
+	check(slurp(path_of("empty-strip", ".rt.o3d")).find("# dropped") == std::string::npos,
+			"empty-strip: nothing is reported dropped");
+
+	// A triangle that repeats a corner is refused: the scene of the model
+	// could not carry it (the loader's decode drops it).
+	refuses("repeated-corner", "o3d 1\nmodel R\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+			"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 0 1\n");
+
+	// What the scene text cannot hold is reported: a nameless model and a
+	// LOD without a type.
+	{
+		ThreediBuildModel m;
+		const int lod = m.add_lod(0, "");
+		m.add_part(lod, 0, ThreediBuildVec3{});
+		std::vector<uint8_t> bytes;
+		check(threedi_build_mint(m, bytes), "nameless: mint");
+		std::ofstream(path_of("nameless", ".3di"), std::ios::binary)
+				.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		check(threedi_cli::cmd_scene(path_of("nameless", ".3di").c_str(), path_of("nameless", ".rt.o3d").c_str()) == 0,
+				"nameless: scene");
+		const std::string text = slurp(path_of("nameless", ".rt.o3d"));
+		check(text.find("# dropped: the model has no name") != std::string::npos &&
+						text.find("# dropped: lod 0 has no type") != std::string::npos,
+				"nameless: the empty name and LOD type are reported");
 	}
 
 	// A light's rate and phase pack as WriteLGHT packs them: times 256 in

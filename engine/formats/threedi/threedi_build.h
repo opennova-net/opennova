@@ -163,12 +163,26 @@ struct ThreediBuildOcclusionRecord {
 
 ThreediPartAnimation threedi_build_inert_panm(int part, int parent);
 
+// A part's ROBJ sphere over the render vertices authored on it: the vertex
+// box's centre and the farthest vertex from it, the distance taken wide and
+// stored as a float (the retired port's WriteRDTA takes the farthest vertex
+// too; 5fc5b4f6a^:engine/formats/oed/rdta.cpp). That reproduces 5,168 of the
+// 5,932 rigid JO parts and 244 of the 256 skinned mesh parts the corpus can
+// attribute; the box's half-diagonal reproduces 704 and none. No vertex: a
+// zero sphere at the origin.
+void threedi_build_part_sphere(const std::vector<const ThreediVertex *> &vertices, float center[3], float &radius);
+
 // A LGHT record's view_proj from its offset, rotation (the light's Z axis in
 // model axes), atten_end and the cone half-angle `falloff` in degrees: a view
 // looking along the axis times a perspective of fov 2 * falloff, near 0.1, far
 // atten_end. An omni light (falloff 0) yields the NaN columns retail ships
 // (Armry01's LGHT); the JO runtime never reads it.
 void threedi_build_light_view_proj(ThreediLight &light, float falloff);
+
+// The cosine a LGHT record stores for the cone half-angle `falloff` (degrees),
+// through the D3DX degree constant the exporter converts with (the retired
+// port's deg_to_rad).
+float threedi_build_light_cone_cos(float falloff);
 
 ThreediTransform threedi_build_track(uint8_t control, uint8_t param, int16_t rate, int16_t start, int16_t end);
 

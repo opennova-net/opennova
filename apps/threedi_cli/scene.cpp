@@ -70,10 +70,12 @@ std::string name_field(const std::string &name) {
 	return "\"" + name + "\"";
 }
 
-// The scene text, written out whole once the model has been walked.
+// The scene text, written out whole once the model has been walked. `note`
+// reports what the text cannot carry (`# dropped: ...`); `remark` what it
+// carries in a form worth knowing about (`# note: ...`).
 struct Writer {
 	std::string text;
-	std::vector<std::string> notes;
+	std::vector<std::string> notes, remarks;
 
 	void line(const std::string &s) {
 		text += s;
@@ -82,6 +84,10 @@ struct Writer {
 	void note(const std::string &s) {
 		notes.push_back(s);
 		line("# dropped: " + s);
+	}
+	void remark(const std::string &s) {
+		remarks.push_back(s);
+		line("# note: " + s);
 	}
 };
 
@@ -205,11 +211,16 @@ void write_strip(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const T
 		}
 		w.line(s);
 	}
+	if (st.num_indices == 0) return; // vertices and no triangle: build writes the same
 	std::vector<uint16_t> tris;
 	if (!threedi_decode_strip_indices(lod, st, tris)) {
 		w.note("a strip whose indices escape its vertex window");
 		return;
 	}
+	// The loader's decode drops a triangle that repeats a corner; so does the
+	// scene (build refuses one).
+	if (!st.is_strip && tris.size() < static_cast<size_t>(st.num_indices / 3) * 3)
+		w.note("a strip's " + std::to_string(st.num_indices / 3 - tris.size() / 3) + " triangles that repeat a corner");
 	// Retail winds counter-clockwise in model axes; the scene winds
 	// counter-clockwise in mission axes, the mirror of model: swap the second
 	// and third corners (the inverse of build's swap).
@@ -222,6 +233,7 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 	const bool skinned = m.header.mesh_type == THREEDI_MESH_SKINNED;
 	w.line("lod " + std::to_string(lod.lod_threshold) + " " + (lod.model_type[0] != '\0' ? lod.model_type : "gnrc") +
 			"  # lod " + std::to_string(li));
+	if (lod.model_type[0] == '\0') w.note("lod " + std::to_string(li) + " has no type (written as gnrc)");
 	// Which strips each part owns: the ROBJ walk (each part's opaque strips,
 	// then its alpha strips, in part order).
 	std::vector<std::vector<std::pair<size_t, bool>>> owned(lod.render_object_count);
@@ -236,38 +248,49 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 		// The retail skinned layout keeps every strip on the root ROBJ; the
 		// scene authors them on the mesh part(s), which the builder moves back.
 		// A LOD with no part owns no strip (retail ships empty LODs).
-		std::vector<int> mesh = skinned_mesh_parts(lod);
 		std::vector<std::pair<size_t, bool>> all;
 		for (auto &o : owned) {
 			all.insert(all.end(), o.begin(), o.end());
 			o.clear();
 		}
+		// The parts geometry was authored on carry bounds: the mesh parts no
+		// bone table names, else (a model authored on its bones, dM1A1's hull)
+		// every part with bounds.
+		std::vector<int> mesh = skinned_mesh_parts(lod);
+		if (mesh.empty())
+			for (size_t p = 0; p < lod.render_object_count; ++p)
+				if (lod.render_objects[p].bounding_radius > 0.0f) mesh.push_back(static_cast<int>(p));
 		if (mesh.empty()) {
-			if (!all.empty()) w.note("lod " + std::to_string(li) + ": no mesh part (strips kept on the root)");
+			if (!all.empty()) w.remark("lod " + std::to_string(li) + ": no part carries bounds (strips kept on the root)");
 			owned[0] = all;
 		} else {
-			if (mesh.back() != static_cast<int>(lod.render_object_count) - 1 ||
-					mesh.front() != static_cast<int>(lod.render_object_count - mesh.size()))
-				w.note("lod " + std::to_string(li) + ": mesh parts are not the last parts");
+			// Each strip goes to the tightest of those parts whose sphere holds
+			// every vertex of it (the first when none does).
+			int homeless = 0;
 			for (const auto &entry : all) {
-				// Several mesh parts: the one whose bounding sphere holds the
-				// strip's vertex centroid (the first otherwise).
 				const ThreediTriangleStrip &st = lod.strips[entry.first];
-				double c[3] = {0, 0, 0};
-				for (int i = 0; i < st.num_vertices; ++i)
-					for (int k = 0; k < 3; ++k) c[k] += lod.vertices.items[st.start_vertex + i].position[k] / st.num_vertices;
 				int best = mesh.front();
+				float best_radius = -1.0f;
 				for (int p : mesh) {
 					const ThreediRenderObject &ro = lod.render_objects[p];
-					double d = 0;
-					for (int k = 0; k < 3; ++k) d += (c[k] - ro.bounding_center[k]) * (c[k] - ro.bounding_center[k]);
-					if (std::sqrt(d) <= ro.bounding_radius * 1.001 + 1e-4) {
+					bool inside = true;
+					for (int i = 0; i < st.num_vertices && inside; ++i) {
+						const float *v = lod.vertices.items[st.start_vertex + i].position;
+						double d = 0;
+						for (int k = 0; k < 3; ++k) d += (v[k] - ro.bounding_center[k]) * (v[k] - ro.bounding_center[k]);
+						inside = std::sqrt(d) <= ro.bounding_radius * 1.0001 + 1e-5;
+					}
+					if (inside && (best_radius < 0.0f || ro.bounding_radius < best_radius)) {
 						best = p;
-						break;
+						best_radius = ro.bounding_radius;
 					}
 				}
+				if (best_radius < 0.0f) ++homeless;
 				owned[best].push_back(entry);
 			}
+			if (homeless > 0)
+				w.remark("lod " + std::to_string(li) + ": " + std::to_string(homeless) +
+						" skinned strips lie in no part's bounds (placed on part " + std::to_string(mesh.front()) + ")");
 		}
 	}
 	for (size_t p = 0; p < lod.render_object_count; ++p) {
@@ -395,6 +418,38 @@ void write_occlusion(Writer &w, const Threedi3di3 &m) {
 	}
 }
 
+// A spot light's cone half-angle as the float build re-derives the record
+// from: its byte (wrapped), the cosine and the view_proj all follow from it.
+// The float nearest the angle the cosine holds rarely gives back the same
+// cosine, and a small cone leaves thousands of floats with one cosine, so the
+// floats around it are tried for one that reproduces the byte, the cosine
+// and the view_proj, then the byte and the cosine (a retail record whose
+// view_proj another tool built), else the angle itself.
+float cone_half_angle(const ThreediLight &l) {
+	const double cosine = std::max(-1.0, std::min(1.0, static_cast<double>(l.rotation[3])));
+	const float estimate = static_cast<float>(std::acos(cosine) * 57.29577951308232);
+	const auto same_cone = [&l](float falloff, bool with_view_proj) {
+		if (static_cast<uint8_t>(static_cast<int32_t>(falloff) & 0xFF) != l.falloff_byte) return false;
+		const float c = threedi_build_light_cone_cos(falloff);
+		if (std::memcmp(&c, &l.rotation[3], sizeof(c)) != 0) return false;
+		if (!with_view_proj) return true;
+		ThreediLight rebuilt = l;
+		threedi_build_light_view_proj(rebuilt, falloff);
+		return std::memcmp(rebuilt.view_proj, l.view_proj, sizeof(l.view_proj)) == 0;
+	};
+	for (const bool with_view_proj : {true, false}) {
+		if (same_cone(static_cast<float>(l.falloff_byte), with_view_proj)) return static_cast<float>(l.falloff_byte);
+		float up = estimate, down = estimate;
+		for (int step = 0; step < 16384; ++step) {
+			if (same_cone(up, with_view_proj)) return up;
+			if (same_cone(down, with_view_proj)) return down;
+			up = std::nextafter(up, 1000.0f);
+			down = std::nextafter(down, -1000.0f);
+		}
+	}
+	return estimate;
+}
+
 void write_lights(Writer &w, const Threedi3di3 &m) {
 	for (size_t i = 0; i < m.light_count; ++i) {
 		const ThreediLight &l = m.lights[i];
@@ -410,14 +465,7 @@ void write_lights(Writer &w, const Threedi3di3 &m) {
 		// The light's axis and cone, unless they are the omni default.
 		const bool omni = l.rotation[0] == 0.0f && l.rotation[1] == -1.0f && l.rotation[2] == 0.0f &&
 				l.rotation[3] == 1.0f && l.falloff_byte == 0;
-		if (!omni) {
-			// The cone half-angle: its whole-degree byte when the cosine agrees
-			// (build re-derives both from it), else the angle the cosine holds.
-			const double cosine = std::max(-1.0, std::min(1.0, static_cast<double>(l.rotation[3])));
-			double falloff = std::acos(cosine) * 57.29577951308232;
-			if (std::fabs(falloff - l.falloff_byte) < 1e-3) falloff = l.falloff_byte;
-			s += " " + vec9(l.rotation) + " " + f9(falloff);
-		}
+		if (!omni) s += " " + vec9(l.rotation) + " " + f9(cone_half_angle(l));
 		w.line(s);
 		if (l.unknown1 != 0 || l.color_start[3] != 0 || l.color_end[3] != 0)
 			w.note("light " + std::to_string(i) + " unknown/pad bytes");
@@ -438,6 +486,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	w.line("o3d 1");
 	w.line(std::string("# scene of ") + model_path + " (opennova-3di scene)");
 	w.line("model " + name_field(m.header.name[0] != '\0' ? m.header.name : "MODEL"));
+	if (m.header.name[0] == '\0') w.note("the model has no name (written as MODEL)");
 	const bool skinned = m.header.mesh_type == THREEDI_MESH_SKINNED;
 	if (skinned) w.line("skinned 1");
 	bool tangents = false, uv1 = false;
@@ -494,6 +543,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	threedi_3di3_free(&m);
 	if (!write_output(out_path, w.text.data(), w.text.size())) return 1;
 	for (const std::string &n : w.notes) std::fprintf(stderr, "opennova-3di: note: scene drops %s\n", n.c_str());
+	for (const std::string &n : w.remarks) std::fprintf(stderr, "opennova-3di: note: %s\n", n.c_str());
 	return 0;
 }
 

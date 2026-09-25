@@ -53,7 +53,7 @@ import; any other front end may.
 | `strip` | material [alpha] | opens a triangle-list strip on the open part |
 | `bones` | p0 p1 ... | a skinned strip's bone table (1 to 16 part indices; before its vertices) |
 | `v` | x y z nx ny nz u v [u1 v1] [i0 i1 i2 w0 w1 w2] | a strip vertex (at most 65535 per strip); `u1 v1` with `uv1 1`; skinned: three bone-table slots and weights |
-| `t` | a b c | a strip triangle |
+| `t` | a b c | a strip triangle, three distinct vertices (the loader drops one that repeats a corner) |
 | `panm` | part parent [flags [matrix]] | a part-animation row in the open LOD; `flags` (a word, `0x` allowed) replaces the flags the tracks imply, `matrix` selects an `mtrx` frame |
 | `track` | target style REG\|-\|param rate start end [axis] | a track on the last `panm`: target `rotx roty rotz scalex scaley scalez trans`. Styles above 0x70 name a declared register; the others may carry an integer phase param. Rotations in 1/16384 turn, others 8.8, all int16; `axis` 1/2/3 for `trans` |
 | `userpoint` | name x y z dx dy dz part [type] | a USRP point (15 characters; part -1 = none; type 71 G / 83 S) |
@@ -141,8 +141,14 @@ back before the file is written. The ctest fixtures are
 
 A skinned model's strips are all owned by the root ROBJ while each part keeps
 the bounds of the geometry authored on it (the retail layout; the builder
-applies it). `scene` writes them back on the skinned mesh parts (the parts no
-bone table names that carry bounds: FSldr03 part 19, ArmsG part 37).
+applies it). `scene` writes each strip back on the tightest part whose sphere
+holds all its vertices, among the skinned mesh parts (the parts no bone table
+names that carry bounds: FSldr03 part 19, ArmsG part 37), or, for a model
+authored on its bones (dM1A1's hull), among every part that carries bounds.
+
+A spot light's cone is written as the float half-angle that gives back the
+stored byte, cosine and `view_proj` (a small cone leaves thousands of floats
+with one cosine); `acos` of the cosine alone does not.
 
 ## What `scene` cannot carry
 
