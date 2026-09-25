@@ -105,7 +105,10 @@ func test_null_terrain_reapply_clears_every_material_input() -> void:
 	assert_eq(float(material.get_shader_parameter("u_detail_density")), 0.0)
 
 
-func test_tile_overlay_composite_is_shared_and_independently_refreshable() -> void:
+func test_surface_inputs_report_the_til_source_without_baking_it() -> void:
+	# The .til overlay composes into the terrain pages (TerrainTileCacheDevice);
+	# the surface inputs keep no hosted overlay texture of their own and only
+	# report the parsed source.
 	var data := TerrainData.new()
 	data.set_tilestrip_tex(_solid_texture(Color8(12, 90, 34, 255), 64))
 	var tile_info := TerrainTileInfo.new()
@@ -115,29 +118,14 @@ func test_tile_overlay_composite_is_shared_and_independently_refreshable() -> vo
 	tile_info.add_entry(entry)
 
 	var inputs := TerrainSurfaceInputs.new()
-	assert_true(inputs.rebuild(data, tile_info, true))
-	assert_true(inputs.has_tile_overlay())
-	assert_eq(inputs.get_tile_overlay_texture().get_size(), Vector2(1024, 1024))
-	var overlay_bytes := inputs.get_tile_overlay_texture().get_image().get_data()
-	assert_true(255 in overlay_bytes, "The authored tile must contribute opaque pixels to the composite.")
+	assert_true(inputs.rebuild(data, tile_info))
 	var diagnostics: Dictionary = inputs.get_diagnostics()
-	assert_true(bool(diagnostics["tile_overlay_available"]))
 	assert_true(bool(diagnostics["tile_info_available"]))
 	assert_eq(int(diagnostics["tile_entry_count"]), 1)
 	assert_true(bool(diagnostics["tilestrip_available"]))
-	var overlay_texture := (diagnostics["textures"] as Dictionary)["tile_overlay"] as Dictionary
-	assert_eq(overlay_texture["size"], Vector2i(1024, 1024))
-	assert_eq(int(overlay_texture["mipmap_count"]), 0,
-		"The current composed overlay has no mip chain.")
-
-	inputs.set_tile_overlay_enabled(false)
-	assert_false(inputs.rebuild_tile_overlay())
-	assert_false(inputs.has_tile_overlay())
-	diagnostics = inputs.get_diagnostics()
-	assert_false(bool(diagnostics["tile_overlay_enabled"]))
-	assert_false(bool(diagnostics["tile_overlay_available"]))
-	assert_true(bool(diagnostics["tile_info_available"]),
-		"Disabling composition must not hide the parsed .til source.")
+	assert_false(diagnostics.has("tile_overlay_available"),
+		"no hosted overlay is baked")
+	assert_false((diagnostics["textures"] as Dictionary).has("tile_overlay"))
 
 
 func test_terrain_delegates_surface_input_ownership() -> void:

@@ -10,7 +10,6 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <runtime/terrain/texture_preprocess.h>
-#include <formats/til/til_overlay_bake.h>
 
 #include <algorithm>
 #include <cmath>
@@ -201,20 +200,10 @@ void TerrainSurfaceInputs::_bind_methods() {
 		PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
 		"set_tile_info_override", "get_tile_info_override");
 
-	ClassDB::bind_method(D_METHOD("set_tile_overlay_enabled", "enabled"),
-		&TerrainSurfaceInputs::set_tile_overlay_enabled);
-	ClassDB::bind_method(D_METHOD("get_tile_overlay_enabled"),
-		&TerrainSurfaceInputs::get_tile_overlay_enabled);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "tile_overlay_enabled"),
-		"set_tile_overlay_enabled", "get_tile_overlay_enabled");
-
-	ClassDB::bind_method(D_METHOD("rebuild", "terrain_data", "tile_info", "tile_overlay_enabled"),
-		&TerrainSurfaceInputs::rebuild,
-		DEFVAL(Ref<TerrainTileInfo>()), DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("rebuild", "terrain_data", "tile_info"),
+		&TerrainSurfaceInputs::rebuild, DEFVAL(Ref<TerrainTileInfo>()));
 	ClassDB::bind_method(D_METHOD("rebuild_blend"),
 		&TerrainSurfaceInputs::rebuild_blend);
-	ClassDB::bind_method(D_METHOD("rebuild_tile_overlay"),
-		&TerrainSurfaceInputs::rebuild_tile_overlay);
 	ClassDB::bind_method(D_METHOD("apply_to_material", "material"),
 		&TerrainSurfaceInputs::apply_to_material);
 
@@ -234,8 +223,6 @@ void TerrainSurfaceInputs::_bind_methods() {
 		&TerrainSurfaceInputs::get_detail2_texture);
 	ClassDB::bind_method(D_METHOD("has_detail2"),
 		&TerrainSurfaceInputs::has_detail2);
-	ClassDB::bind_method(D_METHOD("get_tile_overlay_texture"),
-		&TerrainSurfaceInputs::get_tile_overlay_texture);
 	ClassDB::bind_method(D_METHOD("get_detail_density"),
 		&TerrainSurfaceInputs::get_detail_density);
 	ClassDB::bind_method(D_METHOD("has_normalized_blend"),
@@ -246,8 +233,6 @@ void TerrainSurfaceInputs::_bind_methods() {
 		&TerrainSurfaceInputs::has_detail_layer);
 	ClassDB::bind_method(D_METHOD("has_heightfield_normal"),
 		&TerrainSurfaceInputs::has_heightfield_normal);
-	ClassDB::bind_method(D_METHOD("has_tile_overlay"),
-		&TerrainSurfaceInputs::has_tile_overlay);
 	ClassDB::bind_method(D_METHOD("get_diagnostics"),
 		&TerrainSurfaceInputs::get_diagnostics);
 }
@@ -259,7 +244,6 @@ void TerrainSurfaceInputs::set_terrain_data(
 	}
 	terrain_data = p_data;
 	clear_derived_textures();
-	clear_tile_overlay();
 }
 
 Ref<TerrainData> TerrainSurfaceInputs::get_terrain_data() const {
@@ -272,38 +256,22 @@ void TerrainSurfaceInputs::set_tile_info_override(
 		return;
 	}
 	tile_info_override = p_info;
-	clear_tile_overlay();
 }
 
 Ref<TerrainTileInfo> TerrainSurfaceInputs::get_tile_info_override() const {
 	return tile_info_override;
 }
 
-void TerrainSurfaceInputs::set_tile_overlay_enabled(bool p_enabled) {
-	if (tile_overlay_enabled == p_enabled) {
-		return;
-	}
-	tile_overlay_enabled = p_enabled;
-	clear_tile_overlay();
-}
-
-bool TerrainSurfaceInputs::get_tile_overlay_enabled() const {
-	return tile_overlay_enabled;
-}
-
 bool TerrainSurfaceInputs::rebuild(const Ref<TerrainData> &p_data,
-		const Ref<TerrainTileInfo> &p_tile_info,
-		bool p_tile_overlay_enabled) {
+		const Ref<TerrainTileInfo> &p_tile_info) {
 	set_terrain_data(p_data);
 	set_tile_info_override(p_tile_info);
-	set_tile_overlay_enabled(p_tile_overlay_enabled);
 	if (terrain_data.is_null()) {
 		return false;
 	}
 	rebuild_heightfield();
 	rebuild_blend();
 	rebuild_detail_textures();
-	rebuild_tile_overlay();
 	return true;
 }
 
@@ -405,43 +373,6 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		paired_detail2_texture.is_valid();
 }
 
-bool TerrainSurfaceInputs::rebuild_tile_overlay() {
-	clear_tile_overlay();
-	if (!tile_overlay_enabled || terrain_data.is_null()) {
-		return false;
-	}
-
-	Ref<TerrainTileInfo> tile_info = tile_info_override;
-	if (tile_info.is_null()) {
-		tile_info = terrain_data->get_tileinfo_resource();
-	}
-	const Ref<Texture2D> tilestrip = terrain_data->get_tilestrip_tex();
-	if (tile_info.is_null() || tilestrip.is_null() ||
-			tile_info->get_entry_count() <= 0) {
-		return false;
-	}
-
-	opennova::terrain::Rgba8Image atlas;
-	if (!texture_to_rgba8(tilestrip, atlas)) {
-		return false;
-	}
-	constexpr int overlay_dimension = 1024;
-	std::vector<uint8_t> overlay_rgba;
-	if (!opennova::til_bake_overlay_rgba(tile_info->to_native(),
-			atlas.pixels.data(), static_cast<int>(atlas.width),
-			static_cast<int>(atlas.height), overlay_dimension,
-			overlay_dimension, overlay_rgba)) {
-		return false;
-	}
-
-	opennova::terrain::Rgba8Image overlay;
-	overlay.width = overlay_dimension;
-	overlay.height = overlay_dimension;
-	overlay.pixels = std::move(overlay_rgba);
-	tile_overlay_texture = texture_from_rgba8(overlay, false);
-	return tile_overlay_texture.is_valid();
-}
-
 void TerrainSurfaceInputs::clear_derived_textures() {
 	detail_coefficient_texture.unref();
 	paired_detail2_texture.unref();
@@ -450,10 +381,6 @@ void TerrainSurfaceInputs::clear_derived_textures() {
 	for (auto &texture : detail_layer_textures) {
 		texture.unref();
 	}
-}
-
-void TerrainSurfaceInputs::clear_tile_overlay() {
-	tile_overlay_texture.unref();
 }
 
 bool TerrainSurfaceInputs::apply_to_material(
@@ -536,10 +463,6 @@ Ref<Texture2D> TerrainSurfaceInputs::get_heightfield_normal_texture() const {
 	return heightfield_normal_texture;
 }
 
-Ref<Texture2D> TerrainSurfaceInputs::get_tile_overlay_texture() const {
-	return tile_overlay_texture;
-}
-
 int TerrainSurfaceInputs::get_detail_density() const {
 	return terrain_data.is_valid() ? terrain_data->get_detail_density() : 0;
 }
@@ -568,10 +491,6 @@ bool TerrainSurfaceInputs::has_heightfield_normal() const {
 	return heightfield_normal_texture.is_valid();
 }
 
-bool TerrainSurfaceInputs::has_tile_overlay() const {
-	return tile_overlay_texture.is_valid();
-}
-
 Dictionary TerrainSurfaceInputs::get_diagnostics() const {
 	Dictionary result;
 	result["terrain_data_available"] = terrain_data.is_valid();
@@ -582,9 +501,6 @@ Dictionary TerrainSurfaceInputs::get_diagnostics() const {
 	result["detail_layer_c3"] = has_detail_layer(2);
 	result["paired_detail2"] = has_detail2();
 	result["heightfield_normal"] = has_heightfield_normal();
-	result["tile_overlay_enabled"] = tile_overlay_enabled;
-	result["tile_overlay"] = has_tile_overlay();
-	result["tile_overlay_available"] = has_tile_overlay();
 	Ref<TerrainTileInfo> tile_info = tile_info_override;
 	if (tile_info.is_null() && terrain_data.is_valid()) {
 		tile_info = terrain_data->get_tileinfo_resource();
@@ -607,7 +523,6 @@ Dictionary TerrainSurfaceInputs::get_diagnostics() const {
 	textures["detail2"] = texture_diagnostics(get_detail2_texture());
 	textures["heightfield_normal"] =
 		texture_diagnostics(get_heightfield_normal_texture());
-	textures["tile_overlay"] = texture_diagnostics(get_tile_overlay_texture());
 	result["textures"] = textures;
 	return result;
 }

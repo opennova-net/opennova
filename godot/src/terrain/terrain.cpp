@@ -215,10 +215,6 @@ Ref<Texture2D> Terrain::get_heightfield_normal_texture() const {
 	return surface_inputs->get_heightfield_normal_texture();
 }
 
-Ref<Texture2D> Terrain::get_tile_overlay_texture() const {
-	return surface_inputs->get_tile_overlay_texture();
-}
-
 Ref<Texture2DArray> Terrain::get_tile_cache_texture() const {
 	return tile_cache_device.get_texture();
 }
@@ -288,10 +284,6 @@ Terrain::get_tile_cache_binding_for_world_point_native(
 			opennova::TerrainTileResidentPoint{p_world_x, p_world_z});
 }
 
-Vector3 Terrain::get_tile_overlay_tint() const {
-	return tile_overlay_tint;
-}
-
 void Terrain::set_lod_quality(float p_quality) {
 	lod_quality = p_quality;
 }
@@ -305,9 +297,8 @@ void Terrain::set_tile_overlay_enabled(bool p_enabled) {
 		return;
 	}
 	tile_overlay_enabled = p_enabled;
-	surface_inputs->set_tile_overlay_enabled(p_enabled);
 	if (built) {
-		_rebuild_tile_overlay_texture();
+		_rebuild_tile_overlay_pages();
 	}
 }
 
@@ -327,7 +318,7 @@ void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
 	}
 	surface_inputs->set_tile_info_override(p_info);
 	if (built) {
-		_rebuild_tile_overlay_texture();
+		_rebuild_tile_overlay_pages();
 	}
 }
 
@@ -336,7 +327,7 @@ Ref<TerrainTileInfo> Terrain::get_tile_info_override() const {
 }
 
 void Terrain::rebuild_tile_overlay() {
-	_rebuild_tile_overlay_texture();
+	_rebuild_tile_overlay_pages();
 }
 
 void Terrain::set_environment_path(const NodePath& p_path) {
@@ -668,10 +659,6 @@ void Terrain::render_frame() {
 			// consumes only c1 = light + c0 = sky [orig: @ 0x604420, see
 			// docs/terrain/terrain-re.md].
 			cached_env_node->apply_terrain_uniforms(terrain_material);
-			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
-			// one multiply; the page composer and the detail foliage read it.
-			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].
-			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
 		}
 	}
 }
@@ -891,8 +878,7 @@ void Terrain::_load_textures() {
 	if (terrain_material.is_null() || terrain_data.is_null()) {
 		return;
 	}
-	surface_inputs->rebuild(
-		terrain_data, tile_info_override, tile_overlay_enabled);
+	surface_inputs->rebuild(terrain_data, tile_info_override);
 	surface_inputs->apply_to_material(terrain_material);
 	tile_cache_device.rebuild(terrain_data, surface_inputs,
 			tile_info_override, tile_overlay_enabled);
@@ -902,22 +888,12 @@ void Terrain::_load_textures() {
 			"u_has_tile_cache", tile_cache_device.is_ready());
 }
 
-void Terrain::_clear_tile_overlay_texture() {
-	surface_inputs->clear_tile_overlay();
-	if (terrain_material.is_valid()) {
-		surface_inputs->apply_to_material(terrain_material);
-	}
-}
-
-void Terrain::_rebuild_tile_overlay_texture() {
+void Terrain::_rebuild_tile_overlay_pages() {
 	if (terrain_material.is_null()) {
 		return;
 	}
 	surface_inputs->set_terrain_data(terrain_data);
 	surface_inputs->set_tile_info_override(tile_info_override);
-	surface_inputs->set_tile_overlay_enabled(tile_overlay_enabled);
-	surface_inputs->rebuild_tile_overlay();
-	surface_inputs->apply_to_material(terrain_material);
 	tile_cache_device.rebuild(terrain_data, surface_inputs,
 			tile_info_override, tile_overlay_enabled);
 	terrain_material->set_shader_parameter(
@@ -938,7 +914,7 @@ void Terrain::_on_terrain_changed() {
 
 void Terrain::_on_tile_info_changed() {
 	if (!built || terrain_data.is_null()) return;
-	_rebuild_tile_overlay_texture();
+	_rebuild_tile_overlay_pages();
 }
 
 void Terrain::_hide_visible_patches() {
@@ -989,7 +965,6 @@ void Terrain::_clear_terrain() {
 	}
 	light_patches_lit = 0;
 	light_rows_total = 0;
-	_clear_tile_overlay_texture();
 	_clear_derived_textures();
 
 	tile_infos.clear();

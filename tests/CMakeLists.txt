@@ -845,11 +845,6 @@ target_link_libraries(til_render_uv_test PRIVATE opennova_formats)
 target_include_directories(til_render_uv_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME til_render_uv COMMAND til_render_uv_test)
 
-add_executable(til_overlay_bake_test til/til_overlay_bake_test.cpp)
-target_link_libraries(til_overlay_bake_test PRIVATE opennova_formats)
-target_include_directories(til_overlay_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME til_overlay_bake COMMAND til_overlay_bake_test)
-
 add_executable(foliage_map_test foliage/foliage_map_test.cpp)
 target_link_libraries(foliage_map_test PRIVATE opennova_formats)
 target_include_directories(foliage_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

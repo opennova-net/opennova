@@ -706,9 +706,7 @@ func _print_foliage_material_state(world: GameWorld) -> void:
 				"u_colormap": _texture_meta(material.get_shader_parameter("u_colormap")),
 				"u_has_heightfield_normal": material.get_shader_parameter("u_has_heightfield_normal"),
 				"u_heightfield_normal": _texture_meta(material.get_shader_parameter("u_heightfield_normal")),
-				"u_has_tile_overlay": material.get_shader_parameter("u_has_tile_overlay"),
-				"u_tile_overlay": _texture_meta(material.get_shader_parameter("u_tile_overlay")),
-				"u_tile_overlay_tint": material.get_shader_parameter("u_tile_overlay_tint"),
+				"u_has_tile_cache": material.get_shader_parameter("u_has_tile_cache"),
 				"u_emitter_color": material.get_shader_parameter("u_emitter_color"),
 			}])
 		var mesh := draw.get("mesh") as Mesh

@@ -45,7 +45,7 @@ func test_render_snapshot_carries_the_live_terrain_surface_inputs() -> void:
 	# The raw colormap: the page composer builds its own quadrant levels.
 	assert_eq(int((surface_inputs["textures"] as Dictionary)[
 			"colormap"]["mipmap_count"]), 0)
-	assert_true(surface_inputs.has("tile_overlay_available"))
+	assert_true(surface_inputs.has("tile_info_available"))
 
 
 func test_game_world_exposes_an_exact_json_safe_render_snapshot() -> void:
