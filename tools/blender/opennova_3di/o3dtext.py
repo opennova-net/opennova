@@ -37,14 +37,18 @@ BLANKS = " \t\n\v\f\r"
 # --- the text ---------------------------------------------------------------
 
 def fmt(*values):
-    """Numbers as tokens: an int as it is, a float with nine significant
-    digits (what Blender holds is a float32, which nine digits give back
-    exactly, as the CLI prints its own), -0 as 0."""
+    """Numbers as tokens: an int as it is, a float as the shortest text that
+    reads back as the very same double (a float32 Blender holds, exactly),
+    -0 as 0, and `nan`, `inf`, `-inf`. Nine digits would give a float32 back,
+    but the CLI reads a double and truncates the fixed-point words from it
+    (CXLT rows, section offsets and user points to 16.16, collision vertices
+    to 8.8): a retail value on that grid, printed to nine digits, can read a
+    hair below it and truncate a whole step down."""
     out = []
     for v in values:
         if isinstance(v, float):
-            s = f"{v:.9g}"
-            out.append("0" if s == "-0" else s)
+            s = repr(v)
+            out.append("0" if s == "-0.0" else s)
         else:
             out.append(str(v))
     return " ".join(out)
