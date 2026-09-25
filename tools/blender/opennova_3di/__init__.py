@@ -279,8 +279,8 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     panm_flags: IntProperty(name="PANM flags", default=-1,
                             description="The part's raw PANM flags word; -1 derives it from the tracks")
     lod_threshold: IntProperty(name="LOD threshold", default=0, min=0,
-                               description="On a LOD root: the projected radius above which this LOD draws "
-                                           "(0 = the coarsest)")
+                               description="On a LOD root: the projected radius in pixels above which this "
+                                           "LOD draws (0 = the coarsest; Armry01's run 200, 60, 20, 0)")
     lod_type: StringProperty(name="LOD type", default="gnrc", maxlen=4,
                              description="On a LOD root: the RMDL model type (gnrc, bldg, door, veh0)")
     order: IntProperty(name="Export order", default=-1,

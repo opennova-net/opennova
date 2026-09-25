@@ -163,8 +163,8 @@ with), 3 and 4 normal maps. Write TGA writes `.tga` entries only.
   then the active object's model: its name, output `.3di`, the collision LOD
   (whose meshes also become the bullet faces; 0 = the most detailed), Bones
   follow, Mount on, and Export Model. Export All Models writes every model.
-- **Object properties** on a model root: the same model settings. On a LOD root: the LOD threshold (projected radius;
-  0 = the coarsest) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##`
+- **Object properties** on a model root: the same model settings. On a LOD root: the LOD threshold (projected radius
+  in pixels; 0 = the coarsest) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##`
   part: part animation tracks (rotation about the part's up, side or forward
   axis, scale, or translation, driven by an engine register such as
   `HELO_ROTOR` or by a spin or wave), and an optional raw PANM flags word. On a

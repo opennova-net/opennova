@@ -23,7 +23,7 @@ export refuses one that carries modifiers or shape keys.
 | Scene element | Name form | Meaning |
 | --- | --- | --- |
 | Model root | any name (the Empty above the LOD roots) | one model, one `.3di`: its model name, output path and collision LOD are properties. A scene holds any number of models (a first-person gun and its arms, a hull and its turret); each exports in its root's own frame, so placing or mounting a model does not change it |
-| LOD root | any name, custom property `_lod_index` | render LOD `_lod_index` (0 = primary); its threshold and RMDL type (`gnrc`, `bldg`, `door`, `veh0`) are properties. A root with no parts is an empty LOD (retail ships them) |
+| LOD root | any name, custom property `_lod_index` | render LOD `_lod_index` (0 = primary); its threshold (the projected radius in pixels above which it draws; 0 the coarsest) and RMDL type (`gnrc`, `bldg`, `door`, `veh0`) are properties. A root with no parts is an empty LOD (retail ships them) |
 | Part | `PN##` (Empty) | 3DI subobject `##`; its origin is the pivot. A rotated `PN##` is a PANM rotation frame (an MTRX row): its tracks turn about the empty's axes (Dblkhwk1's canted tail rotor). A mirrored one (a negative scale) is a reflection frame, whose tracks turn the other way; retail stores five (dtaxi1, PKM_1st, ...) |
 | Part mesh | `## Mesh<n>` | mesh `<n>` of part `##` (sits under its `PN##`); the UV map Blender renders with is the base UV0, the first other one the detail stage's UV1 |
 | Part center | `_## center` | part `##`'s transform center (pivot) |
