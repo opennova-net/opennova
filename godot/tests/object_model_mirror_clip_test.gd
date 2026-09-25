@@ -64,6 +64,38 @@ func test_an_entity_arms_while_its_bound_sphere_reaches_below_the_water() -> voi
 	cache.clear_water_plane()
 
 
+# A held weapon or mounted part draws inside its owner's entity submission:
+# it takes the owner's verdict, never its own. A person's (the BySide wave)
+# never arms, so neither does anything it holds.
+func test_an_attached_model_takes_its_owners_verdict() -> void:
+	var cache := ObjectShaderCache.get_singleton()
+	cache.set_water_plane(100.0, true)
+	var person := _model()
+	person.set_thermal_entity_wave(true)
+	var weapon := _model()
+	weapon.set_entity_light_owner(person)
+	await get_tree().process_frame
+	assert_false(person.is_water_mirror_clip_armed(), "a person never arms")
+	assert_false(weapon.is_water_mirror_clip_armed(),
+			"a person's held weapon never arms, deep under the plane or not")
+	assert_eq(_clip_bit(weapon), 0.0)
+	var vehicle := _model()
+	var turret := _model()
+	turret.set_entity_light_owner(vehicle)
+	turret.global_position = Vector3(0.0, 500.0, 0.0)
+	await get_tree().process_frame
+	assert_true(vehicle.is_water_mirror_clip_armed(), "the owner under the plane arms")
+	assert_true(turret.is_water_mirror_clip_armed(),
+			"its part arms with it, wherever the part itself sits")
+	cache.set_water_plane(-100.0, true)
+	assert_false(vehicle.is_water_mirror_clip_armed())
+	assert_false(turret.is_water_mirror_clip_armed(), "and follows the owner's re-test")
+	turret.set_entity_light_owner(null)
+	cache.set_water_plane(1000.0, true)
+	assert_true(turret.is_water_mirror_clip_armed(), "a detached model decides again")
+	cache.clear_water_plane()
+
+
 func test_a_building_arms_while_its_floor_sits_a_quarter_below_the_water() -> void:
 	var cache := ObjectShaderCache.get_singleton()
 	var model := _model()

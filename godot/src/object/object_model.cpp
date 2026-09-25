@@ -309,8 +309,22 @@ float ObjectModel::get_entity_bound_radius() const {
 }
 
 void ObjectModel::set_entity_light_owner(ObjectModel *p_owner) {
+	if (ObjectModel *previous = get_entity_light_owner()) {
+		previous->water_mirror_clip_attached_.erase(ObjectID(get_instance_id()));
+	}
 	entity_light_owner_ = p_owner != nullptr && p_owner != this
 			? ObjectID(p_owner->get_instance_id()) : ObjectID();
+	// An attached model (a held weapon, a mounted part) draws inside its
+	// owner's entity submission, so the owner's mirror CLIP arming is its own
+	// (runtime/environment/water_mirror.h).
+	if (ObjectModel *owner = get_entity_light_owner()) {
+		owner->water_mirror_clip_attached_.insert(ObjectID(get_instance_id()));
+		water_mirror_clip_models_.erase(this);
+		apply_water_mirror_clip_armed(owner->water_mirror_clip_armed_);
+	} else if (tracks_water_mirror_clip()) {
+		water_mirror_clip_models_.insert(this);
+		refresh_water_mirror_clip();
+	}
 }
 
 ObjectModel *ObjectModel::get_entity_light_owner() const {

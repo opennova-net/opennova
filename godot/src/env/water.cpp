@@ -174,6 +174,13 @@ void Water::release_runtime_renderer_resources() {
 	if (server != nullptr) {
 		server->global_shader_parameter_set("opennova_water_active", false);
 	}
+	// The session's water split this node pushed leaves with it (the later
+	// _exit_tree no longer clears it once built_ drops below): a stale plane
+	// would keep ranking blended strips and arming the mirror's CLIP draws
+	// for worlds that have no water.
+	if (built_) {
+		ObjectShaderCache::get_singleton()->clear_water_plane();
+	}
 	has_drawable_surface_ = false;
 	if (reflection_viewport_ != nullptr) {
 		reflection_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);

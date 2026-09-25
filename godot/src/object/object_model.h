@@ -476,6 +476,10 @@ private:
 	// Every model deciding its own mirror CLIP arming: a water plane height
 	// change re-tests them all.
 	static HashSet<ObjectModel *> water_mirror_clip_models_;
+	// The attached models (entity light owner = this) that take this model's
+	// verdict: a held weapon or mounted part draws inside its owner's
+	// submission.
+	HashSet<ObjectID> water_mirror_clip_attached_;
 	bool tracks_water_mirror_clip() const;
 	void apply_water_mirror_clip_armed(bool p_armed);
 	// Strip classification runs only when something the ladder reads moved:

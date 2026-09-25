@@ -176,6 +176,20 @@ func test_reflection_rtt_covers_the_main_field_at_512_rows() -> void:
 			water, cam, strip_vp, Vector3(100.3, 12.0, -133.7))
 
 
+func test_releasing_the_renderer_takes_its_water_split_with_it() -> void:
+	# The split height this water pushed is the session's (the render order's
+	# transparent bracket and the mirror's per-draw CLIP arming read it): a
+	# released water must not leave it behind for the next world, since the
+	# later tree exit no longer clears it.
+	var fixture := _make_water_fixture()
+	var water: Water = fixture["water"]
+	water.advance_frame(TICK)
+	var cache := ObjectShaderCache.get_singleton()
+	assert_true(cache.has_water_plane(), "a live water publishes its split")
+	water.release_runtime_renderer_resources()
+	assert_false(cache.has_water_plane(), "the released water takes its split with it")
+
+
 func test_process_exit_releases_the_reflection_decode_before_its_viewport() -> void:
 	var fixture := _make_water_fixture()
 	var water := fixture["water"] as Water

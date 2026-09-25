@@ -29,6 +29,7 @@ namespace godot {
 // (a linked part), it draws in no arming pass, or it is a BySide person.
 bool ObjectModel::tracks_water_mirror_clip() const {
 	return !water_mirror_clip_inherited_ && !thermal_entity_wave_ &&
+			!entity_light_owner_.is_valid() &&
 			water_mirror_clip_wave_ != opennova::env::MirrorClipWave::kNone;
 }
 
@@ -63,6 +64,10 @@ void ObjectModel::refresh_water_mirror_clip() {
 	if (water_mirror_clip_inherited_) {
 		return;
 	}
+	if (const ObjectModel *owner = get_entity_light_owner()) {
+		apply_water_mirror_clip_armed(owner->water_mirror_clip_armed_);
+		return;
+	}
 	bool armed = false;
 	const ObjectShaderCache *cache = ObjectShaderCache::get_singleton();
 	if (tracks_water_mirror_clip() && cache != nullptr && cache->has_water_plane() &&
@@ -92,6 +97,12 @@ void ObjectModel::apply_water_mirror_clip_armed(bool p_armed) {
 	stamp_entity_lighting_instances();
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->apply_water_mirror_clip_armed(p_armed);
+	}
+	for (const ObjectID &id : water_mirror_clip_attached_) {
+		ObjectModel *attached = Object::cast_to<ObjectModel>(ObjectDB::get_instance(id));
+		if (attached != nullptr && attached->get_entity_light_owner() == this) {
+			attached->apply_water_mirror_clip_armed(p_armed);
+		}
 	}
 }
 
