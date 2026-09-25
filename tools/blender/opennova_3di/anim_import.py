@@ -272,9 +272,17 @@ class Loader:
 
     def align_rest(self, arm, bones, clip):
         """Turn each rest bone onto the bind, the reset clip's first key: the
-        rig's rest pose is the bind. Heads and lengths keep their places."""
+        rig's rest pose is the bind. Heads and lengths keep their places, and
+        so does an object hung from a turned bone (a skinned part's `~PPx
+        attach` helper, whose place is a CXLT row): the model is unchanged."""
         rows = clip["bones"]
         to_arm = self.arm_space(arm).inverted()
+        turned = {pb.name for pb in bones[:len(rows)]}
+        position = arm.data.pose_position
+        arm.data.pose_position = "REST"
+        self.context.view_layer.update()
+        hung = [(ob, ob.matrix_world.copy(), ob.matrix_basis.copy()) for ob in arm.children
+                if ob.parent_type == "BONE" and ob.parent_bone in turned]
         held = {}
         with self.editing(arm) as edit_bones:
             for i, pb in enumerate(bones[:len(rows)]):
@@ -288,6 +296,23 @@ class Loader:
                 length = eb.length if eb.length > 1e-6 else 0.05
                 eb.tail = eb.head + m @ Vector((0.0, length, 0.0))
                 eb.align_roll(m @ Vector((0.0, 0.0, 1.0)))
+        self.context.view_layer.update()
+        for ob, world, _ in hung:
+            ob.matrix_world = world
+        # Through the turned bone's matrix the place comes back a float step
+        # or so off, which moves a CXLT row a 16.16 step: its own offset takes
+        # up the difference, one step at a time, until the place is the bits
+        # it was.
+        for _ in range(8):
+            self.context.view_layer.update()
+            off = [(ob, world.translation - ob.matrix_world.translation) for ob, world, _ in hung]
+            off = [(ob, d) for ob, d in off if d.length > 0.0]
+            if not off:
+                break
+            for ob, d in off:
+                ob.location += (ob.matrix_world @ ob.matrix_basis.inverted()).to_3x3().inverted() @ d
+        arm.data.pose_position = position
+        self.context.view_layer.update()
 
         def restore():
             with self.editing(arm) as edit_bones:
@@ -296,6 +321,8 @@ class Loader:
                     if eb is not None:
                         eb.tail = tail
                         eb.roll = roll
+            for ob, _, basis in hung:
+                ob.matrix_basis = basis
         self.undo.append(restore)
 
     def redrive(self):
