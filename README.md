@@ -15,7 +15,7 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
 | `apps/` | Native command-line and NovaWorld service applications. |
-| `tools/blender/opennova_3di/` | Blender add-on for importing and exporting NovaLogic 3DI models. |
+| `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
 | `tests/` | Native CTest suite. |
 | `launcher/` | Windows launcher and its .NET tests. |
@@ -23,9 +23,10 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `deploy/`, `infra/`, `backend/` | Local and hosted service infrastructure. |
 
 Runtime asset loading is native and the supported object input is 3DI. The
-experimental [Blender add-on](tools/blender/opennova_3di/README.md) provides
-3DI import and export for authoring, using the bundled native `opennova-3di`
-reader and writer. See its documentation for round-trip limitations.
+experimental [Blender add-on](tools/blender/opennova_3di/README.md) imports and
+exports 3DI models and their ADM/BAD animations for authoring, using the
+bundled native `opennova-3di` readers and writers. See its documentation for
+round-trip limitations.
 
 ## Build and test
 
@@ -85,7 +86,7 @@ CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
 contains `opennova.exe`, the matching native dependencies, and launch instructions.
 Game data is supplied separately. Debug builds include the game's F3 tools.
 
-The PR's CI build comment also links `opennova-blender-addon-windows.zip`.
+A PR's CI build comment also links `opennova-blender-addon-windows.zip`.
 Tagged [releases](https://github.com/opennova-net/opennova/releases) include
 `opennova-blender-addon-windows-v<version>.zip`. Install that zip directly in
 Blender 4.2 or newer using **Preferences > Get Extensions > Install from Disk**.
