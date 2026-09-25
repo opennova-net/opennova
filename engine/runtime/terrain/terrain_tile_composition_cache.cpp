@@ -72,7 +72,7 @@ int TerrainTilePageLayout::texel_footprint(int world_units) const noexcept {
 			std::lround(static_cast<float>(world_units) * texels_per_world_unit));
 }
 
-// The c7/c8 page projection retail uploads per page [orig: Foliage_RenderFarPatches
+// The c7/c8 page projection retail uploads per page [orig: Foliage_RenderDetailPatches
 //  @0x60a220..0x60a34f; Foliage_SetupVertexShaderConstants @0x6006ab..0x600704].
 std::array<float, 2> TerrainTilePageProjection::project(
 		float world_x, float world_z) const noexcept {
@@ -161,7 +161,7 @@ std::optional<TerrainTileCompositionDecision> TerrainTileCompositionCache::reque
 	}
 
 	// [orig: the claim stamps @ 0x60DB56..0x60DBF0 — last use and compose
-	// frame = frame, TOD epoch = Env_TodMinutesElapsed, then lod, packed
+	// frame = frame, TOD epoch = Env_TodEpoch, then lod, packed
 	// coordinate and sector]
 	Slot &slot = slots_[static_cast<size_t>(claimed)];
 	slot.lod_valid = true;
@@ -190,8 +190,8 @@ std::optional<TerrainTileCompositionDecision> TerrainTileCompositionCache::reque
 }
 
 bool TerrainTileCompositionCache::evict_one_tod_stale() noexcept {
-	// [orig: terrain_cache_evict_lru @ 0x604600 — candidates @ 0x604620..
-	// 0x6046AA (lod and coordinate valid, TOD stamp != Env_TodMinutesElapsed,
+	// [orig: Terrain_EvictOldestTodStaleTile @ 0x604600 — candidates @ 0x604620..
+	// 0x6046AA (lod and coordinate valid, TOD stamp != Env_TodEpoch,
 	// compose age above the best so far, starting at 1), retire @ 0x6046C5..
 	// 0x6046EA (lod = coordinate = -1, last use = frame - 0x10000)]
 	int32_t oldest_age = 1;
@@ -221,7 +221,7 @@ std::vector<TerrainTileCompositionJob> TerrainTileCompositionCache::sweep(
 		const std::vector<TerrainTileCompositionRequest> &visible) {
 	// [orig: PolyTrn_RenderFrame @ 0x60EAC0 — the PolyTrn_RenderTile sweep
 	// @ 0x60F080..0x60F0A7 ORs each "composed" result; a sweep composing
-	// nothing calls terrain_cache_evict_lru @ 0x60F0AD and re-sweeps the list
+	// nothing calls Terrain_EvictOldestTodStaleTile @ 0x60F0AD and re-sweeps the list
 	// @ 0x60F0C0..0x60F0E3]
 	std::vector<TerrainTileCompositionJob> jobs;
 	const auto run = [&]() {
@@ -341,7 +341,7 @@ bool TerrainTileCompositionCache::invalidate(
 
 // Page extent from the per-LOD world span; the inclusive overlap both
 // retail walks share [orig: Terrain_AddScorchRecord @0x605CF7..0x605D5F;
-// CVertexBuffer_RemoveFromList @0x605C21..0x605C7F].
+// Terrain_InvalidateTileCacheRegion @0x605C21..0x605C7F].
 bool TerrainTileCompositionCache::page_overlaps_q16(
 		const TerrainTilePageKey &page,
 		int32_t minimum_x_q16, int32_t minimum_z_q16,
@@ -371,7 +371,7 @@ std::size_t TerrainTileCompositionCache::invalidate_overlapping_q16(
 	// Both walks retire the coordinate and zero the last use, keeping the
 	// level: the page recomposes the next time it is visible.
 	// [orig: Terrain_AddScorchRecord @0x605D49..0x605D4F;
-	// CVertexBuffer_RemoveFromList @0x605C72..0x605C78]
+	// Terrain_InvalidateTileCacheRegion @0x605C72..0x605C78]
 	std::size_t invalidated = 0;
 	for (Slot &slot : slots_) {
 		if (!slot.resident || !page_overlaps_q16(slot.page,

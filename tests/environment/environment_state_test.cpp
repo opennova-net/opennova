@@ -288,7 +288,7 @@ int main() {
 				"the sun/sky globals publish the terrain pair");
 		// The environment cube's specular sphere stays lit by the RAW light
 		// block under the thermal ramps [orig: the cube face callback
-		// setup_shadow_cascade_and_render pushes Env_LightBlock @ 0x5c3863].
+		// EnvCube_RenderFaceCallback pushes Env_LightBlock @ 0x5c3863].
 		ok &= expect(rgb_near(env.build_shader_globals(false).light_block,
 							 env.sun_light()) &&
 						!rgb_near(env.build_shader_globals(false).light_block,
@@ -410,7 +410,7 @@ int main() {
 		// The water mirror pass fogs with the dry weather block on either side
 		// of the plane and never takes the thermal grey [orig: render_main_scene
 		// @ 0x5c1648..0x5c164c / Water_RenderReflectedWorldScene @ 0x5c8515..
-		// 0x5c8519 -> Environment_ApplyFogAndAmbient(0, 0); sub_579CB0
+		// 0x5c8519 -> Environment_ApplyFogAndAmbient(0, 0); SkyDome_RenderWithSkyfog
 		// @ 0x579ce7..0x579cf6 restores Env_FogBlock after the sky].
 		const opennova::env::SceneFogValues mirror = env.build_water_mirror_fog();
 		ok &= expect(rgb_near(mirror.color, dry.color) && near(mirror.end, dry.end) &&
@@ -1023,7 +1023,7 @@ int main() {
 		ok &= expect(!away.drawn && away.upl == 0 && !away.q3_drawn,
 				"looking away submits no glow in either pass");
 		ok &= expect(opennova::env::kCelestialUplRegister == 32,
-				"UPL_INTENSITY is CTRL ordinal 32 (Render_SubmitAlpha16 @ 0x83fde8)");
+				"UPL_INTENSITY is CTRL ordinal 32 (g_CtrlGlobal_UplIntensity @ 0x83fde8)");
 	}
 
 	// --- the dome constants under NVG and the thermal view -------------------
@@ -1065,7 +1065,7 @@ int main() {
 				"the dome fog color never takes the NVG dim (FOGCOLOR is the packed block)");
 		env.set_nvg_view(false, 0);
 		// The thermal view: sky constants 1.0, cloud constants 0.9, fog 0x808080
-		// [orig: render_skybox @ 0x579377..0x579447; sub_579CB0 @ 0x579cbc].
+		// [orig: render_skybox @ 0x579377..0x579447; SkyDome_RenderWithSkyfog @ 0x579cbc].
 		env.set_thermal_view(true, false);
 		const opennova::env::SkyFrameState thermal = opennova::env::build_sky_frame(env);
 		ok &= expect(near(thermal.sky_base.r, 1.0f) && near(thermal.sky_bright.g, 1.0f) &&

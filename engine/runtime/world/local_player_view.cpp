@@ -810,7 +810,7 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     out.thermal_view = optical_view && thermal_def;
     out.thermal_terrain_view = thermal_def && v.camera_mode == 0;
     // The FrameFX dispatch facts: the monitor latch is the thermal latch's
-    // sibling on flags2 & 8 (Player_IsVehicleSeatHasFlag8), and the dispatch
+    // sibling on flags2 & 8 (Player_IsHeldWeaponMonitor), and the dispatch
     // reads the RAW red word, the dead bit, the session, the death stamp and
     // g_NVGActive [orig: Render_ProcessMainSceneFrame @0x5ca2e8..0x5ca2f1;
     // @0x5ca8f6..0x5ca92e; @0x5ca9f5..0x5caa62; @0x5ca516..0x5ca554].

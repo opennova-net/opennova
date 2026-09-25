@@ -23,7 +23,7 @@ class ParticleCompositorEffect;
 // The effects device of FrameFX's type-0 row (render/frame_fx_distortion.h):
 // the effect world's distortion subset and the tracer pool's distortion
 // ribbons, drawn over the finished frame with slot 2 = the row's work
-// targets (retail render_projected_shadow @ 0x5838F8 / @ 0x583928).
+// targets (retail FrameFX_DistortionPass @ 0x5838F8 / @ 0x583928).
 //
 // Main thread: ParticleRenderer publishes the distortion particle subset
 // through its own compositor effect (attached to no camera) plus the frame's
@@ -38,7 +38,7 @@ public:
 	void set_particle_effect(const Ref<ParticleCompositorEffect> &p_effect);
 	Ref<ParticleCompositorEffect> get_particle_effect() const;
 	// This frame's content gate halves: a live class-7 emitter (the misnamed
-	// CNapiSession_HasActiveDataTransfer @ 0x5F6640) and an active channel of a
+	// EffectWorld_HasDistortionParticles @ 0x5F6640) and an active channel of a
 	// distortion style (CEffectEmitterPool_HasDistortionChannels @ 0x5DB7F0).
 	void set_particles_present(bool p_present);
 	void set_ribbon_channels_present(bool p_present);

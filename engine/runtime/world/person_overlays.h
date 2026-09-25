@@ -19,7 +19,7 @@ namespace opennova::world {
 
 // The three special items the overlays draw, resolved once per mission by
 // runtime type id. [orig: Entity_PreloadSpecialItems @ 0x43c220 — 185 ->
-//  dword_A892A0 @ 0x43c22b, 1904 -> g_NightVissionGoggleItemIndex
+//  g_ParachuteItemIndex @ 0x43c22b, 1904 -> g_NightVissionGoggleItemIndex
 //  @ 0x43c240, 1424 -> g_BinocItemIndex @ 0x43c255]
 inline constexpr int32_t kParachuteItemTypeId = 185;
 inline constexpr int32_t kNightVisionGogglesItemTypeId = 1904;

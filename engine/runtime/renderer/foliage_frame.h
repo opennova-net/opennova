@@ -10,7 +10,7 @@
 // retained scenario-instance RID pooling, and material binding.
 // [orig: generate_foliage_instances_0 @ 0x5ffdd0;
 //  Foliage_GenerateModelTileInstances @ 0x600980;
-//  Foliage_RenderFarPatches @ 0x60a659..0x60a694]
+//  Foliage_RenderDetailPatches @ 0x60a659..0x60a694]
 
 #include <formats/foliage/runtime.h>
 #include <runtime/renderer/render_order.h>
@@ -102,7 +102,7 @@ float foliage_model_wind_offset(double angle);
 
 // The camera's side of the water: retail compares the camera z against
 // Env_WaterHeightFixed with setnl (camera >= water is above).
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a1..0x5c93b0]
+// [orig: Terrain_RenderWorldScene @ 0x5c93a1..0x5c93b0]
 bool foliage_camera_above_water(float camera_y, float water_height);
 
 // The BySide wave a person entity rides: entity z - 1.0 below the water is
@@ -110,24 +110,24 @@ bool foliage_camera_above_water(float camera_y, float water_height);
 // above the water; the other wave is the camera side. The MODEL masks drawn
 // inside a wave and every person the wave queues share this side.
 // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dd2 (z - 0x10000),
-// @ 0x5c7dfd..0x5c7e18 (side); Terrain_RenderSceneWithReflection
+// @ 0x5c7dfd..0x5c7e18 (side); Terrain_RenderWorldScene
 // @ 0x5c953e..0x5c955f (far wave first)]
 bool foliage_entity_far_side(float entity_y, float camera_y, float water_height);
 
 // Where each foliage draw sits in the transparent ladder (render_order.h).
-// The detail passes take their own rungs [orig: Foliage_RenderFarPatchesPass
+// The detail passes take their own rungs [orig: Foliage_RenderDetailPatchesPass
 // (0) @ 0x5c95c5, (1) @ 0x5c9665]. The MODEL depth masks are immediate draws
 // inside the BySide entity waves: the far wave's inside BySide(far, 0)
 // @ 0x5c955f, before the far-side alpha flush @ 0x5c9596; the camera wave's
 // inside BySide(camera, 0) @ 0x5c9638, after the water pass @ 0x5c95dc and
-// before Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderSceneWithReflection].
+// before Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderWorldScene].
 // They lead the first rung drawn after them, sorted ahead of everything in
 // it by a sorting offset beyond any view depth.
 inline constexpr int kFoliageMaskFarSideRung = kRungAlphaFarSide;
 inline constexpr int kFoliageMaskCameraSideRung = kRungScars;
 inline constexpr float kFoliageMaskSortingOffset = -1.0e6f;
 // The near secondary LOW draw follows its HIGH draw of the same geometry
-// [orig: Foliage_RenderFarPatches: the primary draw @ 0x60a653, the
+// [orig: Foliage_RenderDetailPatches: the primary draw @ 0x60a653, the
 // secondary @ 0x60a659..0x60a694]; an embedder that
 // depth-sorts within a rung needs the pair's equal depths ordered, so the
 // secondary sorts a hair nearer.

@@ -135,7 +135,7 @@ struct TraversalStats {
 
 // Select one of the eight terrain mesh families from the recovered 0..15 LOD
 // sublevel: family = family_count * lod_sub / 16 over the tile's eight.
-// [orig: sub_602850 @ 0x60288E..0x6028B1, called from
+// [orig: Terrain_GetLodSlotFamily @ 0x60288E..0x6028B1, called from
 // render_terrain_sector_batch @ 0x609581]
 int terrain_lod_family(int lod_sub) noexcept;
 

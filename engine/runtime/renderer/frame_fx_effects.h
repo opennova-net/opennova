@@ -6,15 +6,15 @@
 // blur (type 4) or the damage blur (type 1), the bloom (type 2), then the
 // thermal (8) and monitor (9) views; the first-person NVG view replaces the
 // whole chain. Every pass is one DrawPass descriptor (the 52-byte block
-// render_scar_decal_batch walks): a source texture, a target, a pixel stage
+// FrameFX_DrawPass walks): a source texture, a target, a pixel stage
 // with its blend, and one of four tap-geometry builders. The planner turns
 // one frame's facts into those rows; the device (godot/src/render/frame_fx)
 // runs them in order and evaluates the pixel stages this header also states
 // as CPU references.
 // [orig: Render_ProcessMainSceneFrame @0x5ca8f6..0x5caad5 (the dispatch);
-//  Render_DispatchShadowByType @0x584440 (types 0-5) and sub_5845B0
+//  FrameFX_ApplyScreenEffect @0x584440 (types 0-5) and FrameFX_ApplyWeaponViewEffect
 //  @0x5845b0 (types 8/9) -- both are the FrameFX dispatchers despite their
-//  names; render_scar_decal_batch @0x582ab0 (DrawPass);
+//  names; FrameFX_DrawPass @0x582ab0 (DrawPass);
 //  CFrameFX_CreatePixelShaders @0x5821d0 (the pixel stages and blends)]
 
 #include <array>
@@ -41,9 +41,9 @@ int frame_fx_capture_side(int backbuffer_side);
 
 // DrawPass's degree-to-radian factor (the float the binary stores, not pi/180)
 // and the U scale of every builder's `reduced` flag (+0x11).
-// [orig: render_scar_decal_batch @0x582beb (flt_7D838C);
-//  build_scar_decal_quad_vertices @0x581307 / scar_build_quad_vertices
-//  @0x5815da / build_scar_decal_vertices_extended @0x581d2a (flt_7C3DC8)]
+// [orig: FrameFX_DrawPass @0x582beb (flt_7D838C);
+//  FrameFX_BuildRotatedTapQuad @0x581307 / FrameFX_BuildWeightedTapQuad
+//  @0x5815da / FrameFX_BuildRadialTapFan @0x581d2a (flt_7C3DC8)]
 inline constexpr float kFrameFxDegreesToRadians = 0.017453279f;
 inline constexpr float kFrameFxReducedU = 0.75f;
 
@@ -80,25 +80,25 @@ enum class FrameFxStage : std::uint8_t {
 };
 
 // The four tap-geometry builders, by DrawPass type.
-// [orig: render_scar_decal_batch @0x582be8..0x582d3e]
+// [orig: FrameFX_DrawPass @0x582be8..0x582d3e]
 enum class FrameFxTaps : std::uint8_t {
-	// build_scar_decal_quad_vertices @0x581300: four taps at the radius about
+	// FrameFX_BuildRotatedTapQuad @0x581300: four taps at the radius about
 	// the texel, (+s,+c), (+c,-s), (-s,-c), (-c,+s) for (s, c) = radius x
 	// (sin a, cos a), the U parts scaled by the reduced factor.
 	Rotated = 1,
-	// scar_build_quad_vertices @0x5815d0: four taps along (s, c) at 0.5, 2.5,
+	// FrameFX_BuildWeightedTapQuad @0x5815d0: four taps along (s, c) at 0.5, 2.5,
 	// 4.5 and 6.5 radii.
 	Weighted = 2,
-	// build_scar_decal_vertices_extended @0x581d20: a six-vertex fan about the
+	// FrameFX_BuildRadialTapFan @0x581d20: a six-vertex fan about the
 	// rect centre (see frame_fx_fan_*).
 	RadialFan = 3,
-	// build_tiled_decal_quad_vertices @0x5819c0: a 256 x 64-pixel tiling of the
+	// FrameFX_BuildTiledQuad @0x5819c0: a 256 x 64-pixel tiling of the
 	// source with a per-draw texel offset.
 	Tiled = 4,
 };
 
 // One DrawPass descriptor. The offsets are the 52-byte block's.
-// [orig: render_scar_decal_batch @0x582ab0]
+// [orig: FrameFX_DrawPass @0x582ab0]
 struct FrameFxPass {
 	FrameFxBuffer source = FrameFxBuffer::Capture;  // +0x00
 	FrameFxBuffer target = FrameFxBuffer::Frame;    // +0x0C (0 = the backbuffer)
@@ -108,7 +108,7 @@ struct FrameFxPass {
 	bool reduced_u = false;     // +0x11
 	float base = 0.0f;          // +0x08: the UV offset every vertex carries
 	// Replaces `base` with half a texel of the capture's smaller side
-	// (0.5 / [fx+98h]); the thermal view's only [orig: sub_584390 @0x5843b0..0x5843d3].
+	// (0.5 / [fx+98h]); the thermal view's only [orig: FrameFX_ThermalView @0x5843b0..0x5843d3].
 	bool base_from_capture = false;
 	float radius = 0.0f;               // +0x28
 	std::int32_t angle_degrees = 0;    // +0x1C
@@ -123,8 +123,8 @@ struct FrameFxPass {
 // The two distortion draw sets the type-0 row executes with texture slot 2
 // bound: the effect world's distortion particles on WorkA, then the tracer
 // pool's distortion ribbons on WorkB.
-// [orig: render_projected_shadow @0x5838f8 (EffectWorld_DrawParticles(4)
-//  through the misnamed CNapiSession_SetViewMatrix, slot 2 = [fx+4]),
+// [orig: FrameFX_DistortionPass @0x5838f8 (EffectWorld_DrawParticles(4)
+//  through EffectWorld_RenderDistortionPass, slot 2 = [fx+4]),
 //  @0x583928 (CEffectEmitterPool_RenderDistortionPass, slot 2 = [fx+8])]
 enum class FrameFxDistortionSet : std::uint8_t {
 	Particles = 0,
@@ -133,7 +133,7 @@ enum class FrameFxDistortionSet : std::uint8_t {
 
 enum class FrameFxStepKind : std::uint8_t {
 	// IDirect3DDevice9::StretchRect(render target 0 -> [fx+0], LINEAR).
-	// [orig: FrameFX_CaptureBackBufferAndSubmitDecal @0x583dc0 (@0x583ebb)]
+	// [orig: FrameFX_CaptureBackBuffer @0x583dc0 (@0x583ebb)]
 	CaptureFrame = 0,
 	Pass = 1,
 	Distortion = 2,
@@ -173,7 +173,7 @@ struct FrameFxFrameInputs {
 	FrameFxViewInputs view;
 	int frame_effects_level = kLockedFrameEffectsLevel;
 	// CEffectEmitterPool_HasDistortionChannels @0x5db7f0 ||
-	// CNapiSession_HasActiveDataTransfer @0x5f6640 (the effect world's
+	// EffectWorld_HasDistortionParticles @0x5f6640 (the effect world's
 	// distortion-particle test): the type-0 row's content gate.
 	bool distortion_present = false;
 	// GetTickCount(), the type-0 jitter's clock (any millisecond clock: only
@@ -193,12 +193,12 @@ struct FrameFxFrameInputs {
 // `clear_glow` clears the persistent glow target to green on the frame
 // g_NVGActive changed.
 // [orig: Render_ProcessMainSceneFrame @0x5ca516..0x5ca5cd (the scene arms --
-//  the Scoped one sub_5D2990 @0x5ca575, the Sighted one
-//  Math_BuildScaledFixedPointToFloatMatrix @0x5ca591 -- and the dword_29D6BA4
-//  latch), @0x5ca6ab..0x5ca73a (the composite, the Scoped arm's sub_5D2B10
-//  @0x5ca71a, the Sighted arm's j_render_fullscreen_overlay @0x5ca72b, and the
+//  the Scoped one NVG_RenderScopedScene @0x5ca575, the Sighted one
+//  NVG_RenderSightedScene @0x5ca591 -- and the dword_29D6BA4
+//  latch), @0x5ca6ab..0x5ca73a (the composite, the Scoped arm's NVG_DrawScopedLensThunk
+//  @0x5ca71a, the Sighted arm's j_NVG_Composite @0x5ca72b, and the
 //  jump past every FrameFX dispatch to @0x5cab1d); the card into the scene
-//  terrain_scene_render @0x5d08cb..0x5d0952]
+//  NVG_RenderSceneToTarget @0x5d08cb..0x5d0952]
 struct FrameFxNvgPlan {
 	bool scene = false;
 	bool composite = false;
@@ -213,8 +213,8 @@ FrameFxNvgPlan frame_fx_nvg_view(const FrameFxViewInputs &view);
 
 // NVG.tga and its gain scale draw at the end of the full-screen composite,
 // never on the death screen, and never under the lens (whose arm skips that
-// composite). [orig: render_fullscreen_overlay @0x5d1077..0x5d1080
-//  (sub_5CFF70 unless g_death_screen_active)]
+// composite). [orig: NVG_Composite @0x5d1077..0x5d1080
+//  (NVG_DrawMaskAndGain unless g_death_screen_active)]
 bool frame_fx_nvg_mask_visible(const FrameFxViewInputs &view);
 
 struct FrameFxFramePlan {
@@ -241,7 +241,7 @@ FrameFxFramePlan plan_frame_fx(const FrameFxFrameInputs &in, FrameFxPlannerState
 
 // The bloom's rows after the Q3 altbuffer capture: the 256A downsample, the
 // two weighted pairs and the half-strength composite.
-// [orig: FrameFX_CaptureRenderTarget @0x584165..0x5841c0; sub_5841D0 @0x584248..0x58437a]
+// [orig: FrameFX_CaptureAltBuffer @0x584165..0x5841c0; FrameFX_BloomKernel @0x584248..0x58437a]
 std::vector<FrameFxPass> frame_fx_bloom_passes();
 
 // --- CPU references of the pixel stages ---------------------------------------
@@ -254,7 +254,7 @@ inline constexpr FrameFxRgb kFrameFxLumaWeights = {0.20f, 0.30f, 0.10f};
 // WeightedAdd's four tap weights at 0.5 / 2.5 / 4.5 / 6.5 radii (ps text 0x7D7F00).
 inline constexpr std::array<float, 4> kFrameFxWeightedTapWeights = {0.50f, 0.46f, 0.35f, 0.19f};
 inline constexpr std::array<float, 4> kFrameFxWeightedTapSteps = {0.5f, 2.5f, 4.5f, 6.5f};
-// The fan's four tap distances. [orig: build_scar_decal_vertices_extended @0x581d20]
+// The fan's four tap distances. [orig: FrameFX_BuildRadialTapFan @0x581d20]
 inline constexpr std::array<float, 4> kFrameFxFanTapSteps = {0.5f, 1.5f, 2.5f, 3.5f};
 
 // Thermal: L = dot(1 - average, (0.30, 0.60, 0.10)); out = (L^2, L + 0.05, L^2)
@@ -276,7 +276,7 @@ std::array<float, 2> frame_fx_fan_tap(float s, float t, int k, float radius, flo
 // 2048 draws in row-major order. The Tiled pass maps it at 256 x 64 pixels
 // per repeat under MODULATE2X with diffuse 0x808080 and DESTCOLOR/SRCCOLOR:
 // out = 2 sat(2 texel x 128/255) x dst.
-// [orig: CFrameFX_CreatePixelShaders @0x58289f..0x582912; sub_583A60 @0x583a60]
+// [orig: CFrameFX_CreatePixelShaders @0x58289f..0x582912; FrameFX_ScanlineOverlay @0x583a60]
 inline constexpr int kFrameFxScanlineSide = 64;
 inline constexpr int kFrameFxScanlineTileWidth = 256;
 inline constexpr int kFrameFxScanlineTileHeight = 64;
@@ -288,7 +288,7 @@ std::vector<std::uint8_t> frame_fx_scanline_texels(const FrameFxRand &rand);
 // The NVG targets: the scene renders into a 512-square target and the glow
 // accumulates in a persistent 256-square one.
 // [orig: sub_5CF400 @0x5cf422..0x5cf42c (0x200 x 0x200 on pixel-shader
-//  hardware); init_water_reflection_render_targets @0x5cf665..0x5cf690 (the
+//  hardware); ViewFx_CreateRenderTargets @0x5cf665..0x5cf690 (the
 //  glow at half that)]
 inline constexpr int kNvgSceneSide = 512;
 inline constexpr int kNvgGlowSide = 256;
@@ -306,8 +306,8 @@ FrameFxRgb nvg_tint_color(const FrameFxRgb &scene);
 // into the persistent target twice a frame: diagonal taps at +-1.5/512, then
 // axial taps at +-3/512. The composite adds it MODULATE2X by 0x808080.
 // [orig: init_view_effect_shaders_and_textures @0x5cfb60 (ps text 0x7DC228,
-//  state dword_2BDFABC); render_water_caustic_overlay @0x5d032e..0x5d0453;
-//  render_fullscreen_overlay @0x5d0f90..0x5d1059]
+//  state dword_2BDFABC); NVG_AccumulateGlow @0x5d032e..0x5d0453;
+//  NVG_Composite @0x5d0f90..0x5d1059]
 inline constexpr FrameFxRgb kNvgGlowLuma = {0.30f, 0.60f, 0.10f};
 inline constexpr float kNvgGlowThreshold = 0.15f;
 inline constexpr FrameFxRgb kNvgGlowScale = {0.20f, 0.60f, 0.20f};

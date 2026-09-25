@@ -53,7 +53,7 @@ struct TerrainTilePageLayout {
 // D3D world (Godot Z, Y, X), then c7/c8 undo the packed page origin and scale
 // by 1/(1024 >> lod). The reduced result is therefore exactly
 // ((world_x-origin_x), (world_z-origin_z)) * inverse_world_span.
-// [orig: Foliage_RenderFarPatches @0x60A1DE..0x60A34F; c7/c8 uploads
+// [orig: Foliage_RenderDetailPatches @0x60A1DE..0x60A34F; c7/c8 uploads
 // @0x6006AB..0x600704; Foliage_WindSwayVS source @0x7DE648 (assembled @0x5ff691)]
 struct TerrainTilePageProjection {
 	float world_origin_x = 0.0f;
@@ -146,7 +146,7 @@ public:
 	// with 0x12345678 and the indices with -1; one extra square target of
 	// dimension dword_31A00D0 (the model-shadow target) follows and is not
 	// this cache's. The Godot device binding fills its blank layers with this
-	// colour. [orig: sub_604DD0 @ 0x604DD0, GTexRT_SelectThunk(0x12345678,
+	// colour. [orig: Terrain_CreateTileCacheTargets @ 0x604DD0, GTexRT_SelectThunk(0x12345678,
 	// rt, -40864, 0.99994999) per slot]
 	static constexpr uint32_t kTileClearColorArgb = 0xFFFF6060u;
 
@@ -167,7 +167,7 @@ public:
 			const TerrainTilePageKey &page, bool zero_primary_uv = false) noexcept;
 
 	// One PolyTrn_RenderFrame: the frame counter advances, and the records the
-	// frame claims stamp `tod_epoch` (Env_TodMinutesElapsed).
+	// frame claims stamp `tod_epoch` (Env_TodEpoch).
 	// [orig: dword_319FC04 += 1 @ 0x60EAE8]
 	void begin_frame(uint32_t tod_epoch) noexcept;
 	uint32_t frame() const noexcept { return frame_; }
@@ -179,7 +179,7 @@ public:
 	// such record the page is not composed this frame (null).
 	std::optional<TerrainTileCompositionDecision> request(
 			const TerrainTileCompositionRequest &request);
-	// terrain_cache_evict_lru: retires the record composed longest ago among
+	// Terrain_EvictOldestTodStaleTile: retires the record composed longest ago among
 	// those stamped with an older TOD epoch and composed more than one frame
 	// ago, so the next sweep recomposes it under the current light. False when
 	// no record qualifies.
@@ -228,7 +228,7 @@ public:
 	// Terrain_ResetTileCache: every record empties and becomes claimable; the
 	// frame counter keeps running (it is never reset). Per-layer generations
 	// advance so outstanding pre-reset jobs stay stale.
-	// [orig: sub_605FB0 @ 0x605FB0..0x605FD2 / sub_60C640 @ 0x60C640]
+	// [orig: Terrain_ResetTileCache @ 0x605FB0..0x605FD2 / Terrain_ResetTileCache_0 @ 0x60C640]
 	void invalidate_all() noexcept;
 
 private:

@@ -1,7 +1,7 @@
 #include <runtime/terrain/terrain_tile_composer.h>
 
 // [orig: PolyTrn_RenderTile @ 0x60DA70; tile overlay submission
-// render_water_quad @ 0x604700; docs/tiles/til-re.md]
+// PolyTrn_DrawTileOverlayQuad @ 0x604700; docs/tiles/til-re.md]
 
 #include <runtime/renderer/texture_dxt.h>
 
@@ -297,10 +297,10 @@ Rgba8Image compose_terrain_tile_page(
 	// POINT min/mag, MIPFILTER POINT), so a covered pixel takes the single
 	// texel under its interpolated UV on the level nearest its footprint.
 	// [orig: PolyTrn_RenderTile ordered entry loop @ 0x60DDD4..0x60DF1B
-	// (tile-set bind, then one render_water_quad per entry), entry AABB test
+	// (tile-set bind, then one PolyTrn_DrawTileOverlayQuad per entry), entry AABB test
 	// @ 0x60DE20..0x60DE60, quad positions @ 0x60DE66..0x60DEBB, atlas cell
 	// UV @ 0x60DEBF..0x60DF05;
-	// render_water_quad flips/rotate @ 0x604772..0x604806, half-texel
+	// PolyTrn_DrawTileOverlayQuad flips/rotate @ 0x604772..0x604806, half-texel
 	// @ 0x604808..0x6048FD; atlas flags @ 0x604B24]
 	const int64_t page_span_q16 = static_cast<int64_t>(job.layout.world_span) << 16;
 	const int64_t origin_x_q16 = static_cast<int64_t>(world_origin_x) << 16;

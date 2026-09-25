@@ -1661,7 +1661,7 @@ int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blen
 int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
                          int overcast_blend_fixed, int sun_dim_fixed,
                          bool frame_effects_quarter) {
-	// The no-occlusion path FrameFX_RenderBloomPass drives
+	// The no-occlusion path FrameFX_RenderGlowSource drives
 	// (render_skybox_sun_glow(0, 0)): brightness = (fog_km + 1.0) * 0.5 *
 	// dot_factor [orig: @ 0x5ad013..0x5ad027 - fog_km = Env_FogDistCurrent *
 	// flt_7DA0C4 (1/65536000) @ 0x5acd8e..0x5acd98; flt_7C3280 = 1.0;

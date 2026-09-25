@@ -255,7 +255,7 @@ bool NvgViewDevice::initialize(RenderingDevice *p_rd, std::string &r_failure) {
 	TypedArray<Ref<RDUniform>> uniforms;
 	uniforms.push_back(storage);
 	vertex_uniform_ = p_rd->uniform_set_create(uniforms, shader_, 1);
-	// The polar target: 64 x 16 (retail init_water_reflection_render_targets
+	// The polar target: 64 x 16 (retail ViewFx_CreateRenderTargets
 	// @0x5cf6c1..0x5cf6de).
 	Ref<RDTextureFormat> format;
 	format.instantiate();
@@ -475,7 +475,7 @@ bool NvgViewDevice::draw(RenderingDevice *p_rd, const Inputs &p_inputs, std::siz
 	}
 
 	// The polar unwrap: the target cleared to 0xFFFF0000, then the eight
-	// passes, blending off (retail terrain_scene_render @0x5d0a1e..0x5d0e7f).
+	// passes, blending off (retail NVG_RenderSceneToTarget @0x5d0a1e..0x5d0e7f).
 	PackedColorArray polar_clear;
 	polar_clear.push_back(color_from_argb(r::kNvgPolarClearColor));
 	const Vector2i polar_size(r::kNvgPolarWidth, r::kNvgPolarHeight);
@@ -498,7 +498,7 @@ bool NvgViewDevice::draw(RenderingDevice *p_rd, const Inputs &p_inputs, std::siz
 
 	// The frame: cleared black, the tint pass, the four glow passes, the ring
 	// (retail Render_ProcessMainSceneFrame @0x5ca6c1..0x5ca6eb, then
-	// draw_minimap_compass_border @0x5d1f22..0x5d2793).
+	// NVG_DrawScopedLens @0x5d1f22..0x5d2793).
 	PackedColorArray black;
 	black.push_back(Color(0.0f, 0.0f, 0.0f, 1.0f));
 	list = p_rd->draw_list_begin(p_inputs.frame_framebuffer,

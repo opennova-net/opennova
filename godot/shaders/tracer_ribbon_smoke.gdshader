@@ -1,6 +1,6 @@
 shader_type spatial;
 // The rocket/at4/grenade smoke ribbon, pool+0x3004 (retail
-// create_effect_channel_render_textures @ 0x5DC8F0): smoktest.pcx on both
+// CEffectEmitterPool_CreateShaders @ 0x5DC8F0): smoktest.pcx on both
 // stages, SRCALPHA/INVSRCALPHA; stage 0 colour = DIFFUSE, alpha =
 // SUBTRACT(DIFFUSE, TEXTURE); stage 1 colour = CURRENT, alpha =
 // SUBTRACT(CURRENT, TEXTURE) on the second coordinate set; the scene fog

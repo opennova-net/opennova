@@ -132,7 +132,7 @@ semantic derivations stay in the cited RE documents.
 | Terrain temporary-blue composite | `0x60e0c6` | `PolyTrn_RenderTile` (`0x60da70`) |
 | Terrain projected lights | `0x5aa830` | `Light_SetupTerrainProjectedPass` |
 | Foliage instances/lightmap/assets | `0x5ffdd0`, `0x5ff7a0`, `0x6015b7` | `generate_foliage_instances_0`, `Foliage_CreateLightmapBlendPS`, `Foliage_LoadDefAssets` (`0x601260`) |
-| Max-quality foliage c7/c8 projection | `0x60a220`, `0x6006f0` | `Foliage_RenderFarPatches` (`0x609de0`), `Foliage_SetupVertexShaderConstants` (`0x600450`) |
+| Max-quality foliage c7/c8 projection | `0x60a220`, `0x6006f0` | `Foliage_RenderDetailPatches` (`0x609de0`), `Foliage_SetupVertexShaderConstants` (`0x600450`) |
 | Water programs | `0x5c19b0` | `Water_InitSurfaceShaders` |
 | Sky/celestial | `0x579080`, `0x5acaa0` | `render_skybox`, `render_celestial_bodies` |
 | Light coronas | `0x5aaf40` | `EffectWorld_RenderLightCoronas` |

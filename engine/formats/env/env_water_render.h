@@ -10,7 +10,7 @@ namespace opennova::env {
 
 // ---------------------------------------------------------------------------
 // Water surface — the witnessed pipeline of render_water_surface @ 0x5c32c0
-// (the frame pass: FrameFX_RenderBloomPass @ 0x582a5d / @ 0x610650 call it per
+// (the frame pass: FrameFX_RenderGlowSource @ 0x582a5d / @ 0x610650 call it per
 // side; camera-side gate against Env_WaterHeightFixed). Per frame it
 // regenerates the animated noise texture pair [orig: Water_GenerateNoiseTextures
 // @ 0x5c0360], derives the strip depth curve from the SMOOTHED fog distance
@@ -21,7 +21,7 @@ namespace opennova::env {
 // ABSOLUTE render-basis world x/32, z/32 (texcoords 0 and 3, see
 // WaterStripRows::uv0): no scale, bias, offset or scroll reaches a texcoord.
 // render_water_surface also stores two cloud-scroll "offsets" and a zero pair
-// [orig: Water_UvOffsetU/V @ 0x5c33b9/@ 0x5c33db, flt_29169E8/EC @ 0x5c3379/
+// [orig: Water_UvOffsetU_Unread/V @ 0x5c33b9/@ 0x5c33db, flt_29169E8/EC @ 0x5c3379/
 // @ 0x5c3385] that nothing in the binary reads back; they are not ported.
 // This section owns the texture + depth math both paths share.
 

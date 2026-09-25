@@ -10,7 +10,7 @@
 
 namespace opennova::world {
 
-// [orig: Entity_BuildBoneTransformMatrices_0 @ 0x57b6c5..0x57b6f4 — `xor eax,
+// [orig: DeathPiece_RenderSection @ 0x57b6c5..0x57b6f4 — `xor eax,
 //  eax` then the first ecx with (1 << cl) clear in piece+0x7C, ecx < the level
 //  mesh's +0x34]
 int32_t death_piece_render_section(uint32_t hidden_mask, int32_t section_count) {
@@ -21,8 +21,8 @@ int32_t death_piece_render_section(uint32_t hidden_mask, int32_t section_count) 
 	return 0;
 }
 
-// [orig: update_terrain_lod_levels @ 0x57b863..0x57b8dc (the model and the
-//  level), Entity_BuildBoneTransformMatrices_0 @ 0x57b69b..0x57b81a (the level
+// [orig: DeathPiece_RenderVisible @ 0x57b863..0x57b8dc (the model and the
+//  level), DeathPiece_RenderSection @ 0x57b69b..0x57b81a (the level
 //  mesh, the pivot, the collapse and the submit flags)]
 bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 		int32_t projected_radius_q16, float lod_scale, int32_t water_z_q16,
@@ -65,13 +65,13 @@ bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 	return true;
 }
 
-// [orig: collect_visible_minimap_slots @ 0x57b560 — per active slot (piece+0
+// [orig: DeathPiece_CollectVisible @ 0x57b560 — per active slot (piece+0
 //  nonzero @ 0x57b5a1): the per-axis x/y box against radius + fog
 //  (@ 0x57b5b4..0x57b5de, `jg` skips), the view depth against radius + fog
 //  (Math_FixedPointTransformPoint22 @ 0x57b5ef, `jge` @ 0x57b607), the
 //  viewport clip (Viewport_TransformAndClipPoint @ 0x57b614, 1 = culled) and
 //  the recorded projected radius dword_A784F0 @ 0x57b627; then
-//  update_terrain_lod_levels @ 0x57b830 walks the rows at the frame's detail
+//  DeathPiece_RenderVisible @ 0x57b830 walks the rows at the frame's detail
 //  level]
 void OcclusionWorld::collect_death_piece_draws(const World &world,
 		const OcclusionFrameCamera &cam, std::vector<DeathPieceDraw> &out) const {

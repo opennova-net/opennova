@@ -20,7 +20,7 @@ bool water_subset_selects(const ParticleEmitterSnapshot &emitter,
 	// distortion pass (flag 4) and on no other; every other child skips it
 	// [orig: CParticleGroup_RenderChildren @ 0x5E58D2 -> the `& 4` arm
 	// @ 0x5E58DB..0x5E58EE; the flag-4 pass is EffectWorld_DrawParticles(4),
-	// the tail @ 0x5F72F7..0x5F72FF of the misnamed CNapiSession_SetViewMatrix,
+	// the tail @ 0x5F72F7..0x5F72FF of EffectWorld_RenderDistortionPass,
 	// called only from the FrameFX distortion row @ 0x5838F8].
 	if (view.water_subset == ParticleWaterSubset::Distortion)
 		return emitter.distortion_class;
@@ -345,7 +345,7 @@ void build_quad(const ParticleQuadSnapshot &particle,
 
 ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 		bool camera_side) {
-	// Terrain_RenderSceneWithReflection swaps EffectWorld's mode-1/mode-2
+	// Terrain_RenderWorldScene swaps EffectWorld's mode-1/mode-2
 	// submissions when the render eye crosses Env_WaterHeightFixed
 	// [orig: @ 0x5c93a0 -> EffectWorld_RenderParticlePass @ 0x5f7240].
 	const bool select_above = camera_above_water == camera_side;

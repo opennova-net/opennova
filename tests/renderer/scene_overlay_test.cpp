@@ -1,7 +1,7 @@
 // The post-particle overlay tail (runtime/renderer/scene_overlay): the
 // witnessed slot order of the main scene and the mirror, the per-view murk
 // gate, and the four builders' pass states.
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c9695..0x5c9714;
+// [orig: Terrain_RenderWorldScene @ 0x5c9695..0x5c9714;
 //  Water_RenderReflectedWorldScene @ 0x5c85fd]
 
 #include <runtime/renderer/scene_overlay.h>
@@ -205,7 +205,7 @@ void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
 // writes, both coordinate sets kept (uv1 rides `corner`), each vertex's
 // diffuse fogged to black at its own distance, its alpha untouched.
 // [orig: Entity_RenderNVGLaserBeam @ 0x5c6399 -> Render_DrawTrailOrBeamSegments
-//  @ 0x5dcb80; create_effect_channel_render_textures @ 0x5dc8f0]
+//  @ 0x5dcb80; CEffectEmitterPool_CreateShaders @ 0x5dc8f0]
 void test_the_nvg_laser_beam_overlay() {
 	const float points[12] = {
 		0.0f, 1.0f, 0.0f, 1.0f,

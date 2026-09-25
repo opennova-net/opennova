@@ -813,7 +813,7 @@ bool test_rows_publish_the_person_overlays() {
 // Retail's collector never draws an entity whose Flags carry bit 0 — the
 // carried object is hidden on the host exactly as on a joiner.
 // [orig: collect_visible_entities_for_terrain @0x5c8cef..0x5c8cf4;
-//  Entity_AttachToVehicle @0x43c14a]
+//  Entity_AttachCarriedObject @0x43c14a]
 bool test_world_rows_hide_the_carried_object() {
 	opennova::mission::MissionKernel kernel;
 	kernel.world.registry.configure_pool(1, 32);

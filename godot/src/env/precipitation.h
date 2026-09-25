@@ -27,7 +27,7 @@ struct SceneOverlaySubmission;
 // after particle pass B and before the coronas (retail
 // render_weather_trail_particles @ 0x5dee10 refills one vertex stream per
 // frame under a fixed layout, 768-vertex batches, from
-// Terrain_RenderSceneWithReflection @ 0x5c96a6 — its only caller, so the
+// Terrain_RenderWorldScene @ 0x5c96a6 — its only caller, so the
 // water mirror never draws it; WeatherParticle_LoadTextures @ 0x5de840 from
 // Render_InitMissionTextures @ 0x587120). Drives nothing itself: GameWorld's
 // render ladder calls render_frame once per display frame after the particle

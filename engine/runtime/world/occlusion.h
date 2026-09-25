@@ -275,8 +275,8 @@ public:
     // live pieces through the collect's box, depth and viewport gates, each
     // projecting its piece-model radius, then the level walk and the section
     // draw. `out` is cleared first; rows keep pool order.
-    // [orig: collect_visible_minimap_slots @ 0x57b560 from
-    //  Terrain_CollectVisibleEntities @ 0x5c91bc; update_terrain_lod_levels
+    // [orig: DeathPiece_CollectVisible @ 0x57b560 from
+    //  Terrain_CollectVisibleEntities @ 0x5c91bc; DeathPiece_RenderVisible
     //  @ 0x57b830]
     void collect_death_piece_draws(const World &world, const OcclusionFrameCamera &cam,
                                    std::vector<DeathPieceDraw> &out) const;
@@ -417,7 +417,7 @@ private:
     // Order the collected portal slots by descending priority (a stable
     // bubble sort) and keep the first 14: only those become occluders and
     // carry the bit-30/31 markers.
-    // [orig: Terrain_SortSectorCacheByDistance @ 0x5c4410 — the compare
+    // [orig: Terrain_SortPortalSlotsByPriority @ 0x5c4410 — the compare
     //  @ 0x5c4440, the clamp @ 0x5c449f..0x5c44a4]
     void sort_portal_slots();
     // [orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0 ->

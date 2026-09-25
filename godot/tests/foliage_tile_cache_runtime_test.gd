@@ -79,7 +79,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	# Retail's first terrain frame claims no page record (every record was last
 	# used only one frame ago), so nothing composes and the patches draw
 	# without pages. A detail patch whose page lookup finds nothing is not
-	# drawn at all (retail Foliage_RenderFarPatches skips to the next slot
+	# drawn at all (retail Foliage_RenderDetailPatches skips to the next slot
 	# on a null Terrain_FindSectorPatchRT @ 0x60a1e6..0x60a1e8), so detail
 	# foliage stays away until the next terrain frame composes every visible
 	# page before its draw.

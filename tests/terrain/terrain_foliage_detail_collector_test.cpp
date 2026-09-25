@@ -78,7 +78,7 @@ int main() {
 				"detail key must pack high15=X-min and low15=Z-min");
 		// The leaf's AABB max y (node+0x28) rides along for the detail
 		// passes' water split: mip max 40 is 20 units.
-		// [orig: Foliage_RenderFarPatches @ 0x60a1a0..0x60a1a2]
+		// [orig: Foliage_RenderDetailPatches @ 0x60a1a0..0x60a1a2]
 		ok &= expect(patches[0].max_height == 20.0f,
 				"the patch carries its node's maximum height");
 	}

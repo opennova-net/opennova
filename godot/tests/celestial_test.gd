@@ -246,7 +246,7 @@ func test_additive_source_material_keeps_black_as_transparent_zero() -> void:
 
 func test_no_star_field_is_drawn() -> void:
 	# Retail loads the star 3DI but its only renderer has no caller in the
-	# image [orig: render_star_field @ 0x5ad9c0]: a named star_3di draws nothing.
+	# image [orig: Star_RenderField_unused @ 0x5ad9c0]: a named star_3di draws nothing.
 	var fixture := _make_fixture()
 	for child in fixture.celestial.get_children():
 		assert_false(child is MultiMeshInstance3D, "no star instances: %s" % child.name)

@@ -113,7 +113,7 @@ enum class DetailPass : uint8_t {
 	LowAlphaTest,
 };
 
-// The detail pass a patch draws in: retail's Foliage_RenderFarPatchesPass
+// The detail pass a patch draws in: retail's Foliage_RenderDetailPatchesPass
 // formatType 0 (the water side away from the camera, before the water
 // surface) or 1 (the camera's side, after the camera-side entity wave).
 enum class DetailWaterPass : uint8_t {
@@ -140,8 +140,8 @@ struct DetailInstance {
 	// pass. Retail draws it at the same c6 fade under strict D3DCMP_LESS, so
 	// it only lands where the HIGH pass rejected alpha; bindings emulate the
 	// equality rule by discarding texels above the HIGH reference.
-	// [orig: Foliage_RenderFarPatches @ 0x60a659..0x60a694;
-	// Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
+	// [orig: Foliage_RenderDetailPatches @ 0x60a659..0x60a694;
+	// Foliage_SetupDetailSlotDraw @ 0x6008fc..0x600912]
 	bool near_secondary = false;
 	DetailWaterPass water_pass = DetailWaterPass::CameraSide;
 };

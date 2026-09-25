@@ -50,14 +50,14 @@ struct WorldLightingInputs {
 	// The thermal-view grey override: dir 0.1, everything else 0.5, dir
 	// disabled [orig: @ 0x5c837c..0x5c843c, gated on Player_CanFireWeapon &&
 	// the equipped weapon def's flags2 & 4 (Thermal) — the IDB's
-	// Player_IsVehicleSeatHasFlag4 @ 0x4dcd70 reads EquippedSlot(+0x118)
+	// Player_IsHeldWeaponThermal @ 0x4dcd70 reads EquippedSlot(+0x118)
 	// ->Def(+0x20)->flags2(+0x0C)]. The production feed is
 	// env::EnvironmentState::set_thermal_view.
 	bool thermal_grey = false;
 	// The flat quarter block (the function's bool arg): everything 0.25, dir
 	// zeroed and disabled [orig: @ 0x5c8448..0x5c84f0]. Its one caller passes
 	// 1 only under the thermal byte, bracketing the two BySide sector-entity
-	// waves, and restores with 0 [orig: Terrain_RenderSceneWithReflection
+	// waves, and restores with 0 [orig: Terrain_RenderWorldScene
 	// @ 0x5c9511/0x5c9534, @ 0x5c95f8/0x5c9616].
 	bool thermal_wave_dim = false;
 };

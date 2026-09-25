@@ -1851,7 +1851,7 @@ pinned more fields, each named for the function that reveals it (`GamePlayerEnti
   `orientationMatrix` +0xb4 (i32[9] fixed-point) + `animData` +0x158 (gate) `[orig: Entity_UpdateOrientationMatrix @0x43b440]`;
   `weaponSlots` +0x1d0 `[orig: Entity_GetWeaponSlotsPtr @0x510010 → entity+464]`; `aiTargetRefCount`
   +0x212 (u16) `[orig: Entity_SetAITarget @0x45d760]`; `mountedChild` +0x268 (`GamePlayerEntity*`, the
-  attached passenger; passenger's +0x170 = `parentVehicle`) `[orig: Entity_AttachToVehicle @0x43c130]`;
+  attached passenger; passenger's +0x170 = `parentVehicle`) `[orig: Entity_AttachCarriedObject @0x43c130]`;
   `damageTimer` +0x2f8 + `wasHit` +0x36b + `lastAttacker` +0x2f4 `[orig: Entity_OnDamageReceived @0x4af800]`;
   `collisionCallback` +0x2b8 `[orig: Entity_InvokeCollisionCallback @0x442350]`; `fireFlag` +0x2c6
   `[orig: Entity_InvokeFireCallback @0x442810]`.
@@ -5505,7 +5505,7 @@ position integration → `Entity_ProcessPlatformPhysics` → yaw; the new solve 
 cannot retroactively affect this tick's thrust/drag, and it observes pre-yaw attitude.
 
 **5. `entity+0x24` bit0 rides the wire and is the organic mover-skip — and it means
-"not independently collected/moved", NOT "mounted".** Setters: `Entity_AttachToVehicle
+"not independently collected/moved", NOT "mounted".** Setters: `Entity_AttachCarriedObject
 @ 0x43C14A` — the carried-OBJECT attach (a picked-up/deck-carried item), not the seat
 mount; a SEAT mount sets Flags `0x40` instead [orig: the seat attach
 `@ 0x4946D0/@ 0x494752`; the mounted body mode `@ 0x4B41A2`] — plus
@@ -5914,7 +5914,7 @@ bump); the deferral list above is unchanged.
   world renders ONCE per frame, into `LocalPlayerPresenter`'s projection target at
   `world::nvg_view_projection`'s raster (512 rows at the frame's own frustum aspect; the
   Scoped arm's square frustum into 512 x 512), the surface's own 3D pass off, and clears to
-  the fog colour (`EnvironmentState::nvg_scene_clear_color`, `terrain_scene_render
+  the fog colour (`EnvironmentState::nvg_scene_clear_color`, `NVG_RenderSceneToTarget
   @ 0x5d064e..0x5d0699`); FrameFX resamples that frame into the 512² NVG scene. The Scoped
   arm's polar lens and the Sighted arm's SIGHTS card drawn into the NVG scene are ported too
   (`renderer/nvg_scope_lens.h`, `NvgViewDevice`). The former "four-frame temporal history"

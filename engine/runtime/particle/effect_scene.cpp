@@ -254,7 +254,7 @@ struct EffectScene::Impl {
 		group.source_order = 0;
 		group.detached = false;
 		group.section_gate = {};
-		// [orig: allocate_effect_emitter_slot @ 0x5E4779]
+		// [orig: CEffectWorld_AllocGroupSlot @ 0x5E4779]
 		group.section_visible = true;
 		group.emitter_slots.clear();
 		return slot;

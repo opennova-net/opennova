@@ -27,7 +27,7 @@ namespace opennova::renderer {
 //  handle whose flags lack 0x400); the per-light loop @0x60984c..0x609953
 //  then re-draws the batch once per passing handle with NO four-light cap —
 //  the render-mode dword_319FBD4 & 0x100 @0x609890 selects
-//  foliage_setup_render_matrices @0x6098a5 (the 0.4/r alt pass) or the
+//  Light_SetupTerrainProjectedPassPS @0x6098a5 (the 0.4/r alt pass) or the
 //  normal Light_SetupTerrainProjectedPass @0x6098b4 (ex
 //  `render_foliage_instance`: its argument is a Light_InstanceTable slot
 //  index @0x5AA857, not a foliage instance). The whole leg is skipped when
@@ -115,7 +115,7 @@ inline std::array<float, 3> terrain_per_channel_factor(uint32_t packed_rgb) {
 // texture's 0..1 span covers exactly one diameter, centred by the +0.5
 // translation @0x5AA900/@0x5AA915. The alternate pass under render-mode bit
 // 0x100 scales by 26214.4 / range instead, i.e. 0.4 / radius
-// [orig: foliage_setup_render_matrices @0x6098A5]. A bigger light casts a
+// [orig: Light_SetupTerrainProjectedPassPS @0x6098A5]. A bigger light casts a
 // WIDER pool, not a brighter one.
 inline constexpr float kTerrainProjectScale = 0.5f;      // 32768 / 65536
 inline constexpr float kTerrainProjectScaleAlt = 0.4f;   // 26214.4 / 65536

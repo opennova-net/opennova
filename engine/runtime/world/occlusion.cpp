@@ -658,7 +658,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
 // Per-frame: the slot sort
 // ----------------------------------------------------------------------------
 
-// [orig: Terrain_SortSectorCacheByDistance @ 0x5c4410 — count passes of
+// [orig: Terrain_SortPortalSlotsByPriority @ 0x5c4410 — count passes of
 // adjacent 20-byte swaps whenever slot[j].key < slot[j+1].key (`cmp ecx,
 // [eax+1Ch]; jge` @ 0x5c4443): a stable descending order; then
 // g_PortalSlotCount = min(count, 14) @ 0x5c449f..0x5c44a4. JO's authored
@@ -1569,7 +1569,7 @@ bool OcclusionWorld::blink_hits_render_active(const uint32_t hits[4]) const {
 // [orig: collect_visible_entities_for_terrain @ 0x5c8c60 — `mov esi,[edi]`
 // (entity+0) @ 0x5c8df3, and under Flags 0x20 (`test byte ptr [edi+24h],20h`
 // @ 0x5c8def) the special item-185 model's radius instead: gItemDefs[
-// dword_A892A0]+0xF0 -> model +0x14 @ 0x5c8df7..0x5c8e10]
+// g_ParachuteItemIndex]+0xF0 -> model +0x14 @ 0x5c8df7..0x5c8e10]
 int32_t OcclusionWorld::person_collector_radius(int32_t bound_radius_q16,
                                                 bool parachute) const {
     return parachute ? parachute_radius_q16_ : bound_radius_q16;

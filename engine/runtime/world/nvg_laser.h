@@ -4,8 +4,8 @@
 // first static or vehicle it meets, drawn through the tracer pool's immediate
 // beam path in the tracer NVG style.
 //
-// [orig: sub_5C63B0 @ 0x5c63b0 (the walk over the visible-person list
-//  dword_2984890, count dword_2984888) from Terrain_RenderSceneWithReflection
+// [orig: Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 (the walk over the visible-person list
+//  dword_2984890, count dword_2984888) from Terrain_RenderWorldScene
 //  @ 0x5c9695 -> Entity_RenderNVGLaserBeam @ 0x5c6090 ->
 //  Render_DrawTrailOrBeamSegments @ 0x5dcb80 (style 8, the NVG laser block
 //  g_TracerStyle_NVGLaser); the draw is renderer::append_tracer_beam and the

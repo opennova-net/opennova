@@ -1,20 +1,20 @@
 #pragma once
 
 // The post-particle overlay tail of the retail scene frame, as pure data: the
-// draws Terrain_RenderSceneWithReflection issues after particle pass B, in
+// draws Terrain_RenderWorldScene issues after particle pass B, in
 // their witnessed order, and the typed draw list an embedding renderer
 // executes after its own pass-B composite and before the frame effects (the
 // bloom and the screen quads). No Godot dependencies.
 //
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0 — particle pass B
-// @ 0x5c9690, then sub_5C63B0 (the NVG laser beams) @ 0x5c9695,
+// [orig: Terrain_RenderWorldScene @ 0x5c93a0 — particle pass B
+// @ 0x5c9690, then Render_NVGLaserBeamsForVisiblePersons (the NVG laser beams) @ 0x5c9695,
 // render_weather_trail_particles @ 0x5c96a6, EffectWorld_RenderLightCoronas(1)
 // @ 0x5c96ad, update_sun_glare (the water glint; only while the water height
 // is nonzero, @ 0x5c96b5) @ 0x5c96c0, the underwater murk quad
-// Terrain_DrawScissorRect @ 0x5c96f5, and the sun glare
+// Render_DrawViewportColorQuad @ 0x5c96f5, and the sun glare
 // render_skybox_sun_glow(1, 1) @ 0x5c9714; the frame effects follow in
 // Render_ProcessMainSceneFrame (FrameFX_QualityAtLeast3 @ 0x5caa7b ->
-// Render_DispatchShadowByType @ 0x5caa97, the bloom)].
+// FrameFX_ApplyScreenEffect @ 0x5caa97, the bloom)].
 
 #include <runtime/environment/precipitation.h>
 #include <runtime/renderer/light_scene.h>
@@ -42,7 +42,7 @@ enum class SceneOverlaySlot : uint8_t {
 };
 
 // The main scene's tail, in draw order. The scope's aperture view runs the
-// same scene routine [orig: terrain_scene_render @ 0x5d08c3].
+// same scene routine [orig: NVG_RenderSceneToTarget @ 0x5d08c3].
 inline constexpr std::array<SceneOverlaySlot, 6> kSceneOverlayOrder = {
 	SceneOverlaySlot::NvgLaserBeams,  // @ 0x5c9695
 	SceneOverlaySlot::Precipitation,  // @ 0x5c96a6
@@ -92,7 +92,7 @@ enum class SceneOverlayShading : uint8_t {
 	// stages, the second stage on the second coordinate set; colour = DIFFUSE,
 	// alpha = DIFFUSE.a x (1 - T0.a) x (1 - T1.a), SRCALPHA / ONE; the
 	// texture wraps. The diffuse carries the fog fold already.
-	// [orig: create_effect_channel_render_textures @ 0x5dc8f0 (the pool's
+	// [orig: CEffectEmitterPool_CreateShaders @ 0x5dc8f0 (the pool's
 	//  0x3008 shader); the render-state layout RenderState_ApplyToDevice
 	//  @ 0x681920]
 	NvgLaser = 5,
@@ -178,8 +178,8 @@ void append_corona_overlay(const std::vector<LightCoronaQuad> &quads, uint32_t t
 
 // The full-viewport murk quad: Env_WaterColorLit under the alpha byte
 // 0x80 - ftol(murk x -96), source-over, ZFUNC ALWAYS (the scene passes the
-// alternate pass state 0x300000) [orig: Terrain_RenderSceneWithReflection
-// @ 0x5c96d3..0x5c96f5 -> Terrain_DrawScissorRect @ 0x5c38e0, pass flags
+// alternate pass state 0x300000) [orig: Terrain_RenderWorldScene
+// @ 0x5c96d3..0x5c96f5 -> Render_DrawViewportColorQuad @ 0x5c38e0, pass flags
 // @ 0x5c39bd..0x5c39c6].
 void append_underwater_murk_overlay(const float rgb[3], uint8_t alpha_byte, float water_height,
 		SceneOverlayFrame &out);
@@ -219,7 +219,7 @@ struct SceneOverlayFog {
 // each vertex's diffuse is fogged at its own distance (exponential fog by the
 // eye depth, the linear modes by the radial distance) toward black for the
 // style's black-fog word, else toward the scene colour.
-// [orig: sub_5C63B0 @ 0x5c63b0 from Terrain_RenderSceneWithReflection
+// [orig: Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 from Terrain_RenderWorldScene
 //  @ 0x5c9695 -> Entity_RenderNVGLaserBeam @ 0x5c6090 ->
 //  Render_DrawTrailOrBeamSegments @ 0x5dcb80 (the ribbon pass flags
 //  0x10520000: fog on, z-write off, z-test on)]

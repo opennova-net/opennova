@@ -510,7 +510,7 @@ linked-part lists. The relevant retail facts were rechecked in live
 | Surface | Verdict | Anchored witness |
 |---|---|---|
 | Load-time name resolution | MATCHING (read-only grill) of the existing catalog contract | `[orig: CtrlName_ToOrdinal @ 0x57B290]` scans the case-insensitive descriptor table; `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` calls it at `@ 0x5B46D7` and stores the ordinal in record `+0x18` at `@ 0x5B46E6`. Names need not be resolved at every publication. |
-| Destruction stores and timing | MATCHING (read-only grill) of the direct-store witness; retained ownership remains D-3DI-2 | `[orig: compute_lod_fade_timers @ 0x5C3F40]` zeroes six signed dword slots at `@ 0x5C3F48..0x5C3F66`, then computes destruction/husk phases. `[orig: render_sector_entity @ 0x5C4190]` calls it at `@ 0x5C4200`, before the later subpixel rejection at `@ 0x5C42DE`. The curated function name is retained; an older foliage/LOD description does not describe these stores. |
+| Destruction stores and timing | MATCHING (read-only grill) of the direct-store witness; retained ownership remains D-3DI-2 | `[orig: Entity_PublishSwapFadePhases @ 0x5C3F40]` zeroes six signed dword slots at `@ 0x5C3F48..0x5C3F66`, then computes destruction/husk phases. `[orig: render_sector_entity @ 0x5C4190]` calls it at `@ 0x5C4200`, before the later subpixel rejection at `@ 0x5C42DE`. The curated function name is retained; an older foliage/LOD description does not describe these stores. |
 | Part phases and door/team stores | MATCHING (read-only grill) of the existing publication contract | `[orig: HUD_CacheEntityDisplayInfo @ 0x4A3D90]` writes channels at `@ 0x4A3E2D` / `@ 0x4A3E38`; `[orig: build_bone_transforms @ 0x4E3070]` indexes consecutive door ordinals at `@ 0x4E3145`; `[orig: render_sector_entity @ 0x5C4190]` writes signed team at `@ 0x5C425F`. These are direct values, without a same-value publication gate. |
 | Native bridge and linked retained models | host code / not grillable | `ObjectModel` consumes catalog ordinals and native owner tags; linked-part masks resolve once when linked. Every propagation revalidates its ObjectID. `renderer_model_controls`, `mission_present_pass_test.gd`, `object_model_part_anim_test.gd`, and `player_visual_resolver_test.gd` cover the retained semantics. |
 
@@ -546,7 +546,7 @@ witnessed in retail `Jointops.exe`:
   radius in PIXELS, not a Q16.16 distance. The runtime loader stores it shifted
   left 16 in the level's OWN table slot (model+0x40+4 x level)
   `[orig: ThreediGp_LoadFromFile @ 0x5b5bdf..0x5b5be5; the model is loader+4,
-  sub_5B6160 @ 0x5b6273]`, and `Model_SelectRlodLevel` walks the slots from
+  ThreediGp_LoadModel @ 0x5b6273]`, and `Model_SelectRlodLevel` walks the slots from
   slot 0 (render-order-re.md, Object RLOD selection). Corpus tables descend to
   zero: Armry01 200, 60, 20, 0; Ashed1 96, 38, 12, 0; 47gl_3RD 160, 64, 19, 6.
   A table whose first slot is 0 pins the model to LOD0 (79 JO models). The
@@ -555,7 +555,7 @@ witnessed in retail `Jointops.exe`:
   `renderer::rlod_threshold_q16_from_rmdl`.
 - **OOBJ disk +20** (runtime +0x2C): the portal-slot priority weight that the
   slot collector folds into the slot's sort key, whose only reader is the slot
-  sort (`Terrain_SortSectorCacheByDistance @ 0x5c4410`, the compare
+  sort (`Terrain_SortPortalSlotsByPriority @ 0x5c4410`, the compare
   `@ 0x5c4443`), not a window-glow scale; zero in all 806 JO OOBJ records.
   Named `slot_priority_scale` in `engine/formats/threedi`
   (render-occlusion-re.md §1, D-OCC-13).

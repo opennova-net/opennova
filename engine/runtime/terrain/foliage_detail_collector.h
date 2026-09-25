@@ -32,7 +32,7 @@ struct FoliageDetailPatch {
 	float distance = 0.0f;
 	// The collected leaf's maximum height (the node's AABB max y at
 	// node+0x28): the detail passes split patches by it against the water
-	// [orig: Foliage_RenderFarPatches @ 0x60a1a0..0x60a1a2].
+	// [orig: Foliage_RenderDetailPatches @ 0x60a1a0..0x60a1a2].
 	float max_height = 0.0f;
 	// The leaf's minimum in the 1024 source atlas (foliage::DetailCell).
 	int32_t atlas_x = 0;

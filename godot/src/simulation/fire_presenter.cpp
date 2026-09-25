@@ -131,7 +131,7 @@ void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *
 }
 
 // smoktest.pcx, the pool's one texture, with its palette-luminance alpha
-// [orig: create_effect_channel_render_textures @ 0x5DC8F0 ->
+// [orig: CEffectEmitterPool_CreateShaders @ 0x5DC8F0 ->
 // load_texture_from_archive("smoktest.pcx", "smoktest.pcx") @ 0x58B980].
 Ref<Texture2D> FirePresenter::smoke_texture() {
 	if (smoke_texture_loaded_ || resource_root_.is_null()) {
@@ -445,7 +445,7 @@ void FirePresenter::emit_surface(const opennova::renderer::TracerRibbonFrame &p_
 	mesh_->surface_set_material(mesh_->get_surface_count() - 1, material);
 }
 
-// retail sub_5C63B0 @ 0x5c63b0 walks the frame's visible persons (the drawn
+// retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 walks the frame's visible persons (the drawn
 // bodies) into Entity_RenderNVGLaserBeam @ 0x5c6090. The action point is
 // Entity_ComputeBoneTransform @ 0x401890 for a person on foot:
 // Entity_GetCameraTransform @ 0x4b8c00 poses the weapon matrix with

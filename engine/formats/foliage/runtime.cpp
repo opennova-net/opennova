@@ -243,7 +243,7 @@ std::vector<DetailInstance> generate_detail_cell(
 	// Flat-sector keys remain ordinary cache residents, but their generator
 	// writes zero index/vertex counts before any placement or terrain sample.
 	// [orig: generate_foliage_instances_0 @ 0x5FFDD0, flag gate @ 0x5FFE05,
-	// zero counts @ 0x5FFE10..0x5FFE16; Foliage_UpdateFarCellSlots @ 0x601B30]
+	// zero counts @ 0x5FFE10..0x5FFE16; Foliage_UpdateDetailCellSlots @ 0x601B30]
 	if ((cell_key & 0x80000000u) != 0u) return result;
 	uint32_t state = seed_for_key(cell_key);
 	for (int index = 0; index < kCandidates; ++index) {
@@ -565,7 +565,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 
 	// Detail update: resident lookup stops at the first key; duplicate missing
 	// keys allocate once. Geometry persists until strict signed-age LRU reuse.
-	// [orig: Foliage_UpdateFarCellSlots @ 0x601b30]
+	// [orig: Foliage_UpdateDetailCellSlots @ 0x601b30]
 	for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
 		const RuntimeSlot &slot = request.slots[slot_index];
 		auto &entries = detail_cache_[slot_index];
@@ -618,8 +618,8 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 	// before the scene core's two detail passes, so a newly collected key
 	// draws in the frame it was generated.
 	// [orig: Render_ProcessMainSceneFrame @ 0x5ca654 (terrain frame) then
-	// @ 0x5ca8ec (Terrain_RenderSceneWithReflection); PolyTrn_RenderFrame
-	// @ 0x60f0ea..0x60f10f (update); Foliage_SetupFarSlotDraw
+	// @ 0x5ca8ec (Terrain_RenderWorldScene); PolyTrn_RenderFrame
+	// @ 0x60f0ea..0x60f10f (update); Foliage_SetupDetailSlotDraw
 	// @ 0x600807..0x60081c (key lookup)]
 	for (const DetailCell &cell : request.detail_cells) {
 		if (!detail_cell_is_visible(cell)) continue;
@@ -637,8 +637,8 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 		// the patches with some height above the water, so a patch lying
 		// wholly at or below it draws in the far pass (formatType 0) while
 		// the camera is above, and in the camera pass while it is below.
-		// [orig: Foliage_RenderFarPatches @ 0x609df4..0x609e1b (flag),
-		// @ 0x60a1a0..0x60a1c6 (node +0x28 vs water); Foliage_RenderFarPatchesPass
+		// [orig: Foliage_RenderDetailPatches @ 0x609df4..0x609e1b (flag),
+		// @ 0x60a1a0..0x60a1c6 (node +0x28 vs water); Foliage_RenderDetailPatchesPass
 		// calls @ 0x5c95c5 (formatType 0) / @ 0x5c9665 (formatType 1)]
 		const bool patch_below_water = request.water_height >= cell.max_height;
 		const DetailWaterPass water_pass =
@@ -682,10 +682,10 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 			// weapon's thermal byte) forces the primary LOW pass for every
 			// patch and scales its c6 fade by flt_7C69F4 = 0.1 (the fmul
 			// @ 0x60a4a8).
-			// [orig: Foliage_RenderFarPatches @ 0x60a171..0x60a19c pass
+			// [orig: Foliage_RenderDetailPatches @ 0x60a171..0x60a19c pass
 			// select, 0x60a497..0x60a4ae thermal fade scale,
 			// 0x60a659..0x60a694 secondary setup/draw;
-			// Terrain_RenderSceneWithReflection @ 0x5c95c1/0x5c9661 (arg);
+			// Terrain_RenderWorldScene @ 0x5c95c1/0x5c9661 (arg);
 			// Render_ProcessMainSceneFrame @ 0x5ca2da..0x5ca2e3, 0x5ca8e3]
 			if (request.thermal_view) {
 				append_submission(DetailPass::LowAlphaTest, 8u, alpha * 0.1f,

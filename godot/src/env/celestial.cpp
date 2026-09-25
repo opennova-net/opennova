@@ -167,7 +167,7 @@ void Celestial::_rebuild_if_needed() {
 	// engine/runtime/renderer/render_order (REN-3); the glow and the glint
 	// draw in the post-particle overlay stage (their meshes leave every
 	// camera), so they keep the default rung. The bloom pass redraws
-	// the discs and the glow, never the glint (FrameFX_RenderBloomPass
+	// the discs and the glow, never the glint (FrameFX_RenderGlowSource
 	// @ 0x582a77 / @ 0x582a80).
 	const Spec wanted[] = {
 		{ "sun", env_data->get_sun_3di(), opennova::renderer::kRungSkyBody,

@@ -132,7 +132,7 @@ void test_new_detail_cell_draws_in_its_generation_frame() {
 		CHECK(list.commands[1].near_secondary);
 		// The secondary follows the HIGH draw of the same geometry: a
 		// depth-sorting embedder draws it a hair nearer, the primary unbiased.
-		// [orig: Foliage_RenderFarPatches @ 0x60a653, @ 0x60a659..0x60a694]
+		// [orig: Foliage_RenderDetailPatches @ 0x60a653, @ 0x60a659..0x60a694]
 		CHECK(list.commands[0].sorting_offset == 0.0f);
 		CHECK(list.commands[1].sorting_offset ==
 				r::kFoliageSecondaryLowSortingOffset);
@@ -142,7 +142,7 @@ void test_new_detail_cell_draws_in_its_generation_frame() {
 
 // The thermal view reaches the runtime through the view input: one primary
 // LOW command per patch at one tenth of the distance fade.
-// [orig: Foliage_RenderFarPatches @ 0x60a193..0x60a19c, 0x60a497..0x60a4ae]
+// [orig: Foliage_RenderDetailPatches @ 0x60a193..0x60a19c, 0x60a497..0x60a4ae]
 void test_thermal_view_commands_one_faint_low_pass() {
 	r::FoliageFrameCompiler compiler = one_triangle_compiler();
 	r::FoliageViewInput view = detail_view();
@@ -257,7 +257,7 @@ void test_model_commands_carry_retail_instance_blocks() {
 // camera is at or above it; a detail patch whose maximum height is at or
 // below the water draws in the far pass while the camera is above.
 // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dd2, @ 0x5c7dfd..0x5c7e18;
-// Foliage_RenderFarPatches @ 0x609df4..0x609e1b, @ 0x60a1a0..0x60a1c6]
+// Foliage_RenderDetailPatches @ 0x609df4..0x609e1b, @ 0x60a1a0..0x60a1c6]
 void test_water_sides() {
 	{
 		r::FoliageFrameCompiler compiler = one_triangle_compiler(2.0f);
@@ -269,7 +269,7 @@ void test_water_sides() {
 		for (const r::FoliageDrawCommand &command : list.commands) {
 			CHECK(command.far_side);
 			// The far wave's masks lead the far-side alpha rung.
-			// [orig: Terrain_RenderSceneWithReflection @ 0x5c955f, @ 0x5c9596]
+			// [orig: Terrain_RenderWorldScene @ 0x5c955f, @ 0x5c9596]
 			CHECK(command.render_rung == opennova::renderer::kRungAlphaFarSide);
 			CHECK(command.sorting_offset == r::kFoliageMaskSortingOffset);
 		}
@@ -284,7 +284,7 @@ void test_water_sides() {
 		for (const r::FoliageDrawCommand &command : list.commands) {
 			CHECK(!command.far_side);
 			// The camera wave's masks follow the water pass and lead the
-			// scars. [orig: Terrain_RenderSceneWithReflection @ 0x5c95dc,
+			// scars. [orig: Terrain_RenderWorldScene @ 0x5c95dc,
 			// @ 0x5c9638, @ 0x5c9658]
 			CHECK(command.render_rung == opennova::renderer::kRungScars);
 			CHECK(command.sorting_offset == r::kFoliageMaskSortingOffset);
@@ -324,7 +324,7 @@ void test_water_sides() {
 		for (const r::FoliageDrawCommand &command : list.commands) {
 			CHECK(command.far_side == detail_case.far);
 			// Detail pass 0 before the water, pass 1 before the camera-side
-			// alpha. [orig: Terrain_RenderSceneWithReflection @ 0x5c95c5,
+			// alpha. [orig: Terrain_RenderWorldScene @ 0x5c95c5,
 			// @ 0x5c9665]
 			CHECK(command.render_rung ==
 					(detail_case.far ? opennova::renderer::kRungFoliageFarSide
@@ -336,7 +336,7 @@ void test_water_sides() {
 // The BySide wave split every mask consumer shares: the camera is above at
 // or over the water (setnl), and an entity whose z - 1.0 is below the water
 // rides the far wave exactly while the camera is above.
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a1..0x5c93b0;
+// [orig: Terrain_RenderWorldScene @ 0x5c93a1..0x5c93b0;
 // Terrain_RenderSectorEntitiesBySide @ 0x5c7dd2, @ 0x5c7dfd..0x5c7e18]
 void test_entity_water_side() {
 	CHECK(r::foliage_camera_above_water(0.5f, 0.5f));

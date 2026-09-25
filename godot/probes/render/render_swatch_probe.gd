@@ -14,8 +14,8 @@ extends GameProbe
 ## POLICY (ADR 0023): baselines live under .scratch/golden/render/ (machine-
 ## local, never committed); the default comparison is EXACT; any tolerance
 ## is an investigation aid, never a gate. The composite ladder: scene 1 is the
-## water bracket [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0], scene 2
-## the sky pass then the viewmodel [orig: sub_579CB0 @ 0x5ca81a;
+## water bracket [orig: Terrain_RenderWorldScene @ 0x5c93a0], scene 2
+## the sky pass then the viewmodel [orig: SkyDome_RenderWithSkyfog @ 0x5ca81a;
 ## Player_RenderViewModelIfAlive @ 0x5ca829]; docs/render/render-order-re.md.
 
 const WINDOW_SIZE := Vector2i(1280, 1024)

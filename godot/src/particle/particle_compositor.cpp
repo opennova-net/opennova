@@ -202,7 +202,7 @@ void main() {
 		float wave_z = -sin(pc.theta) * 0.01953125;
 		// The fragment's own screen position in the sampled texture, the
 		// FrameFX screen-texture transform: u = 0.5 ndc.x + 0.5 + half a
-		// texel of that texture (retail render_projected_shadow
+		// texel of that texture (retail FrameFX_DistortionPass
 		// @ 0x5837FF..0x5838D2 builds it for its 256-square targets). Retail
 		// rasterizes pixel centres on integers, so the fragment centre steps
 		// back half a pixel; against a frame-size texture this is exactly the
@@ -1467,8 +1467,8 @@ void ParticleCompositorEffect::Impl::release_distortion_target() {
 
 // The effect world's flag-4 pass inside FrameFX's type-0 row: the distortion
 // subset draws over the finished frame with texture slot 2 = the row's 256A
-// work target (retail render_projected_shadow @ 0x5838F8 -> the flag-4 tail of
-// CNapiSession_SetViewMatrix @ 0x5F72F7). Depth-tested against the frame,
+// work target (retail FrameFX_DistortionPass @ 0x5838F8 -> the flag-4 tail of
+// EffectWorld_RenderDistortionPass @ 0x5F72F7). Depth-tested against the frame,
 // no depth write, each command through its own material as in the scene
 // passes (the thermal word the main scene stored persists into this pass).
 bool ParticleCompositorEffect::Impl::draw_distortion(

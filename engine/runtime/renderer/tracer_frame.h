@@ -23,7 +23,7 @@ namespace opennova::renderer {
 
 // The material a ribbon draw binds [orig: CEffectChannel_Init @ 0x5DB130 —
 // channel+0x20 is the normal-pass shader, channel+0x24 the distortion shader;
-// the shaders are built by create_effect_channel_render_textures @ 0x5DC8F0].
+// the shaders are built by CEffectEmitterPool_CreateShaders @ 0x5DC8F0].
 enum class TracerShader : std::uint8_t {
 	// The device's stock slot 6 (mode word 0x222): ONE/ONE, colour = alpha =
 	// DIFFUSE, untextured [orig: CD3DDevice_GetRenderStateByIndex(6) @ 0x5DB1D6;

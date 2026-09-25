@@ -20,12 +20,12 @@ struct TerrainScorchEvent {
 // One destroyed entity's cached terrain-page invalidation, in the mission
 // ground plane (x,y): the entity's position +-2 bound radii on both axes. The
 // renderer-facing drain folds it to terrain x,-z like the scorch bounds.
-// [orig: CVertexBuffer_RemoveFromList @0x605C10, reached through
-// j_j_CVertexBuffer_RemoveFromList @0x610900 from
+// [orig: Terrain_InvalidateTileCacheRegion @0x605C10, reached through
+// j_j_Terrain_InvalidateTileCacheRegion @0x610900 from
 // Entity_ProcessDestructibleDeath @0x43FC12..0x43FC5E,
-// Entity_ProcessCraneDestruction @0x43F192..0x43F1DA (the bld2 collapse),
-// the crane collapse's twin block @0x440036..0x44007E (inside the body at
-// 0x43FC70 the IDB leaves undefined) and Entity_SpawnSectionEntity
+// Entity_ProcessBld2Destruction @0x43F192..0x43F1DA (the bld2 collapse),
+// the crane collapse's twin block Entity_ProcessCraneCollapse
+// @0x440036..0x44007E and Entity_SpawnSectionEntity
 // @0x44062E..0x440670]
 struct TerrainPageInvalidationEvent {
 	int32_t minimum_x_q16 = 0;

@@ -62,7 +62,7 @@ public:
 			bool p_tile_overlay_enabled);
 	void clear();
 	// One PolyTrn_RenderFrame: the cache frame advances and this frame's
-	// claims stamp the given TOD epoch (Env_TodMinutesElapsed).
+	// claims stamp the given TOD epoch (Env_TodEpoch).
 	void begin_frame(uint64_t p_frame_id, uint32_t p_tod_epoch);
 	// Byte-level capture diagnostics (full-page FNV output hash, pre/post
 	// shadow byte diffs) copy and re-walk every composed 256 KB page — that

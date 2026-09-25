@@ -163,7 +163,7 @@ public:
 
 // Whether a group draws and updates this frame: an untagged group, or one whose
 // first hit slot is empty, always does; otherwise some hit's section must be
-// visible in its building's mask [orig: sub_5F6D10 @ 0x5F6D10 — the tag test
+// visible in its building's mask [orig: CEffectGroup_IsSectionVisible @ 0x5F6D10 — the tag test
 // @ 0x5F6D14, the slot-0 test @ 0x5F6D1F, the per-hit decode @ 0x5F6D37 /
 // @ 0x5F6D45..0x5F6D4A and the mask test @ 0x5F6D5E].
 bool effect_section_gate_visible(const EffectSectionGate &gate,
@@ -265,7 +265,7 @@ struct EffectGroupFrameSnapshot {
 	bool detached = false;
 	// The section gate's verdict of the last advance (group+0x6C, 1 from the
 	// allocation until the first advance): a hidden group draws in no pass
-	// [orig: allocate_effect_emitter_slot @ 0x5E4779;
+	// [orig: CEffectWorld_AllocGroupSlot @ 0x5E4779;
 	// CEffectGroup_AdvanceChildrenAndReap @ 0x5E59D8].
 	bool section_visible = true;
 };

@@ -1,6 +1,6 @@
 shader_type spatial;
 // The NVG laser ribbon, pool+0x3008 (retail
-// create_effect_channel_render_textures @ 0x5DC8F0): smoktest.pcx on both
+// CEffectEmitterPool_CreateShaders @ 0x5DC8F0): smoktest.pcx on both
 // stages, SRCALPHA/ONE; colour = DIFFUSE, alpha = DIFFUSE.a x (1 - T0.a) x
 // (1 - T1.a), the second texture on the second coordinate set; the style's
 // +0 word fogs to black (SetFogAndBlendMode mode 2, retail

@@ -1007,7 +1007,7 @@ func test_cleared_water_strip_leaves_the_q3_draw_list() -> void:
 
 	# The g_WaterActive gate (every tracked visible terrain sector above the
 	# water height) clears the beauty strip, but the bloom pass's nightvision
-	# redraw is not gated on it (retail FrameFX_RenderBloomPass @ 0x582a59..
+	# redraw is not gated on it (retail FrameFX_RenderGlowSource @ 0x582a59..
 	# 0x582a5d calls render_water_surface(0, 1) unconditionally): its strip
 	# stays in the Q3 draw list.
 	water.set_visible_terrain_bounds(true, 100.0, 200.0)
@@ -1210,7 +1210,7 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	assert_gt(int(far.get("rendered_quad_count", 0)), 0)
 	assert_gt(int(camera_side.get("rendered_quad_count", 0)), 0)
 	# Pass A draws inside the transparent list (retail
-	# Terrain_RenderSceneWithReflection @ 0x5c95b5, before the water pass
+	# Terrain_RenderWorldScene @ 0x5c95b5, before the water pass
 	# @ 0x5c95dc): render-list runs at the particle far-side rung.
 	assert_gt(int(report.get("world_far_render_runs", 0)), 0,
 			"pass A draws as render-list runs")
@@ -1266,7 +1266,7 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 
 func test_far_side_alpha_objects_draw_before_particle_pass_a() -> void:
 	# Retail draws the far-side object ALPHA strips and tracers before pass A
-	# (Terrain_RenderSceneWithReflection @ 0x5c95ac..0x5c95b5), so a
+	# (Terrain_RenderWorldScene @ 0x5c95ac..0x5c95b5), so a
 	# half-transparent far-side card lies UNDER the far blue particle. Over the
 	# red backdrop a magenta card at alpha 0.5 then a blue particle at alpha a
 	# leave blue - red = 1.5a - 0.5 (0.25 at the particle's 0.5 peak); the

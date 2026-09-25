@@ -139,7 +139,7 @@ bool test_claim_needs_two_idle_frames() {
 
 // A sweep that composes nothing retires one TOD-stale record, oldest compose
 // first, and re-sweeps: the visible page recomposes under the current light.
-// [orig: PolyTrn_RenderFrame @ 0x60F080..0x60F0E3; terrain_cache_evict_lru
+// [orig: PolyTrn_RenderFrame @ 0x60F080..0x60F0E3; Terrain_EvictOldestTodStaleTile
 // @ 0x604600]
 bool test_sweep_refreshes_one_tod_stale_page() {
 	TerrainTileCompositionCache cache;
@@ -269,7 +269,7 @@ bool test_publication_and_invalidation() {
 	// The scorch append and the destroyed-entity walk share the inclusive
 	// page test: an edge-touching rectangle retires both neighbours.
 	// [orig: Terrain_AddScorchRecord @0x605CF7..0x605D5F;
-	// CVertexBuffer_RemoveFromList @0x605C21..0x605C7F]
+	// Terrain_InvalidateTileCacheRegion @0x605C21..0x605C7F]
 	cache.begin_frame(0);
 	cache.begin_frame(0);
 	uint16_t left_layer = 0;

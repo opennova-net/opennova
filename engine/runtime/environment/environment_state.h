@@ -54,7 +54,7 @@ struct EnvShaderGlobals {
 	Rgb sky_ambient;
 	// The RAW light block: the environment cube's rotated specular sphere is
 	// lit by Env_LightBlock whatever the terrain ramps or the thermal grey
-	// select [orig: the cube face callback setup_shadow_cascade_and_render
+	// select [orig: the cube face callback EnvCube_RenderFaceCallback
 	// pushes Env_LightBlock @ 0x5c3863 into render_sky_mesh @ 0x5ac680].
 	Rgb light_block;
 	Vec3 sun_direction{};
@@ -267,7 +267,7 @@ public:
 	// dome pass fogs toward the SAME doubled value so the rim seam is
 	// invisible [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend
 	// @ 0x57f037..0x57f0a1, doubling @ 0x57f1b1; consumer
-	// Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf; dome fog sub_579CB0;
+	// Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf; dome fog SkyDome_RenderWithSkyfog;
 	// device Clear @ 0x677100; defaults @ 0x57c0b0 / 0x60fca3].
 	Rgb frame_clear_color() const { return skyfog_color_rt_; }
 	// The witnessed per-frame clear SELECTION [orig:
@@ -283,7 +283,7 @@ public:
 	// modulate2x-path device Clear (D-RMAT-7).
 	Rgb frame_clear_color_for(bool eye_above_water) const;
 	// The NVG scene's clear: its target clears to the same waterline test's
-	// skyfog / lit water with no thermal branch [orig: terrain_scene_render
+	// skyfog / lit water with no thermal branch [orig: NVG_RenderSceneToTarget
 	// @ 0x5d064e..0x5d0699 -- the `jle` @ 0x5d0660 keeps the water color at
 	// exact equality too]; the frame clear's water arm is this.
 	Rgb nvg_scene_clear_color(bool eye_above_water) const;
@@ -472,7 +472,7 @@ public:
 	// view the gun fogs toward the fog block when the dome drew and toward the
 	// thermal grey when it did not [orig: Render_ProcessMainSceneFrame
 	// @ 0x5ca3bf..0x5ca3ce (ApplyFogAndAmbient(0, thermal)), @ 0x5ca81a
-	// (sub_579CB0, the Env_FogBlock restore @ 0x579ce6..0x579cf6), the
+	// (SkyDome_RenderWithSkyfog, the Env_FogBlock restore @ 0x579ce6..0x579cf6), the
 	// viewmodel @ 0x5ca829, the eye's pass @ 0x5ca82e..0x5ca841].
 	SceneFogValues build_viewmodel_fog(bool sky_dome_drawn) const;
 	// The water mirror pass's fog: the reflected scene applies the DRY pass
@@ -480,7 +480,7 @@ public:
 	// render_main_scene @ 0x5c1648..0x5c164c and Water_RenderReflectedWorldScene
 	// @ 0x5c8515..0x5c8519 -> Environment_ApplyFogAndAmbient(0, 0)], and the sky
 	// pass puts the device fog color back to Env_FogBlock before the terrain
-	// [orig: sub_579CB0 @ 0x579ce7..0x579cf6]: the weather fog block, never the
+	// [orig: SkyDome_RenderWithSkyfog @ 0x579ce7..0x579cf6]: the weather fog block, never the
 	// thermal grey or the underwater lit water.
 	SceneFogValues build_water_mirror_fog() const;
 

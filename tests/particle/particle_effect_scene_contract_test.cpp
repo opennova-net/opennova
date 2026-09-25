@@ -853,7 +853,7 @@ bool initial_age_uses_scene_wind_contract() {
 	return true;
 }
 
-// The building-section gate [orig: sub_5F6D10 @ 0x5F6D10]: masks indexed by
+// The building-section gate [orig: CEffectGroup_IsSectionVisible @ 0x5F6D10]: masks indexed by
 // the blink hit's pool-2 entity index, the hits packed as the blink query
 // packs them.
 struct SectionMasks final : p::EffectSectionMasks {

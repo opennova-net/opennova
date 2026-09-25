@@ -583,7 +583,7 @@ as a fraction of the end and dropped the overcast fold, and the unused `terrain_
 `terrain_fog_factor_for_distance` helpers are deleted). Final mesh selection is the
 eight-family mapping `floor(lod_sub × 8 / 16) = lod_sub / 2`, clamped to
 families 0..7 [`orig: render_terrain_sector_batch @ 0x6092a0`; the family
-select `sub_602850 @ 0x60288E..0x6028B1` (`count × lod_sub / 16`), called
+select `Terrain_GetLodSlotFamily @ 0x60288E..0x6028B1` (`count × lod_sub / 16`), called
 `@ 0x609581`].
 
 **Include correction (2026-07-06, D-TERRAIN-2)**: `terrain_lighting.gdshaderinc`
@@ -613,7 +613,7 @@ consumed by `sub_681720`; these are not mip-LOD-bias writes), opaque +
 additive variants; the four texture slot ids 1-4
 = the terrain's dynamic texture registry) and the framebuffer-mod2x overlay
 (`dword_319f934`, mode 0x628 — DESTCOLOR/SRCCOLOR). Draw-time consumers:
-`render_terrain_sector_batch @ 0x6092a0`, `Foliage_RenderFarPatches
+`render_terrain_sector_batch @ 0x6092a0`, `Foliage_RenderDetailPatches
 @ 0x609de0` (renamed 2026-08-15, ex render_terrain_lightmaps; REN-5), `Terrain_CollectAndRenderTileModels @ 0x60d250`,
 `PolyTrn_RenderTile @ 0x60da70`.
 
@@ -637,7 +637,7 @@ reflected terrain keeps the authored stage 3 (detail2) and never takes the
 noise swap, whichever side of the plane the eye is on. The reflected pass fogs
 with `Environment_ApplyFogAndAmbient(0, 0)` (`@ 0x5c1648..0x5c164c`), the dry
 weather block, and the sky wrapper restores `Env_FogBlock` before the terrain
-(`sub_579CB0 @ 0x579ce7..0x579cf6`). The terrain is clipped per pixel on both
+(`SkyDome_RenderWithSkyfog @ 0x579ce7..0x579cf6`). The terrain is clipped per pixel on both
 sides of the plane: `render_main_scene @ 0x5c1561..0x5c1578` arms the plane
 at `wh - 0.1` while the water height is nonzero, and
 `render_terrain_sector_batch @ 0x6092c6..0x60935b` generates the clip-texture
@@ -836,7 +836,7 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   POINT on their box level set (`GTexture_CreateFromPixelData_0
   @ 0x6877BA..0x6878BE`), so a LOD-1 page reads level 1; the ordered `.til`
   quads (`@ 0x60DE66..0x60DEBB`) point-sample the tile-set atlas (flags
-  0x100203 `@ 0x604B24`: CLAMP, POINT min/mag/mip) with `render_water_quad`'s
+  0x100203 `@ 0x604B24`: CLAMP, POINT min/mag/mip) with `PolyTrn_DrawTileOverlayQuad`'s
   half-texel bias landing each pixel on a texel centre of the nearest box
   level (LOD4 = level 0 ... LOD1 = level 3); the ordered scorch quads sample
   WRAP + LINEAR + MIPFILTER POINT (flags 0 via `Texture_LoadByNameWithChannel
@@ -902,7 +902,7 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   only the page address mode at the draw.
 
   **Creation-time clear — WITNESSED 2026-09-14 (jo-c cross-check), PORTED.**
-  `sub_604DD0 @ 0x604DD0` creates the 128 tile render targets (stride 8 dwords,
+  `Terrain_CreateTileCacheTargets @ 0x604DD0` creates the 128 tile render targets (stride 8 dwords,
   `dword_319A2E0..0x319B2E0`, dimension `dword_31A00D4`) and clears each to
   D3DCOLOR `0xFFFF6060` (ARGB: R=FF G=60 B=60) with z `0.99994999`
   (`GTexRT_SelectThunk(0x12345678, rt, -40864, 0.99994999)`), stamping the
@@ -921,11 +921,11 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   Retail's 128-slot hit compare keys ONLY on `(lod, packed source coordinate,
   routed sector z/x)` (`PolyTrn_RenderTile @ 0x60DAC0..0x60DAD1`; the earlier
   "quadrant" is the key's bits 9/25); no caster, light-epoch, or TOD input
-  participates in the HIT. Slots stamp `Env_TodMinutesElapsed` at compose
+  participates in the HIT. Slots stamp `Env_TodEpoch` at compose
   time (`@ 0x60DBC0`, `dword_319A2F8`), and that stamp is READ by the evictor:
-  `terrain_cache_evict_lru @ 0x604600` walks the 128 slots four at a time and
+  `Terrain_EvictOldestTodStaleTile @ 0x604600` walks the 128 slots four at a time and
   picks, among the slots whose stamp differs from the current
-  `Env_TodMinutesElapsed` (`@ 0x60463B/0x60465E/0x604681/0x6046A3` — indexed
+  `Env_TodEpoch` (`@ 0x60463B/0x60465E/0x604681/0x6046A3` — indexed
   reads through the slot base, which is why a plain xref of `dword_319A2F8`
   shows only the write), the OLDEST-composed one (compose frame
   `dword_319A2F4` vs the frame counter, compose age above 1: the running best
@@ -936,7 +936,7 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   `PolyTrn_RenderFrame @ 0x60EAC0` calls it only on a frame where NO
   tile was composed (`@ 0x60F0AB..0x60F0AD`) and then re-sweeps every visible
   patch (`@ 0x60F0CF`), so the evicted tile recomposes with the current sun
-  that same frame. `Env_TodMinutesElapsed` steps every 311 logic ticks (~5 s)
+  that same frame. `Env_TodEpoch` steps every 311 logic ticks (~5 s)
   while the clock advances (`Environment_UpdateWeatherTick @ 0x57E9DA..
   0x57E9EF`). Net: retail re-bakes stale visible tiles one per all-hit frame
   after every ~5 s TOD epoch, oldest first — static shadows track the sun with
@@ -949,11 +949,11 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   record order, only if the age exceeds 1 (`@ 0x60DAE4..0x60DB45`,
   empty-handed `@ 0x60DDC6`), so the first frame claims nothing and a frame
   with more pages than claimable records draws the rest with t0 unbound;
-  claims stamp last use, compose frame and `Env_TodMinutesElapsed`
+  claims stamp last use, compose frame and `Env_TodEpoch`
   (`@ 0x60DB56..0x60DBF0`; `WeatherState::tod_minutes_elapsed`); the sweep
   composes every missing visible page synchronously before the draw (the
   device waits on the worker pool); an all-hit sweep evicts one TOD-stale
-  record (`terrain_cache_evict_lru @ 0x604600`) and re-sweeps
+  record (`Terrain_EvictOldestTodStaleTile @ 0x604600`) and re-sweeps
   (`@ 0x60F0AD..0x60F0E3`). Casters and light are sampled when a page
   composes; nothing re-targets a page. The earlier reimpl (a content-stamped
   LRU fed by an asynchronous queue, stale-while-recompose, a DOT3-byte light
@@ -1007,16 +1007,16 @@ via c7/c8) and the per-patch GRID-PLACEMENT vs_1_1 (`Foliage_GridPlacementVS
 `Foliage_CreateLightmapBlendPS @ 0x5ff7a0` (`Foliage_LightmapBlendPS
 @ 0x2c25e64`) is the fragment combine `rgb = t0 × (t1 × (t1.a·c1 + c0)) ×
 v0 × 8, a = t0.a × v0.a` (t1 = the planar-projected lightmap).
-`Foliage_SetupFarSlotDraw @ 0x6007c0` (ex-misnomer
+`Foliage_SetupDetailSlotDraw @ 0x6007c0` (ex
 `terrain_setup_display_adapter`; per model slot 0-3) picks the LOD entry,
 binds the wind VS + FVF 338, fog mode 8 (VS fog, linear in eye depth for
 every fog type; foliage-re.md) when the wind VS exists,
 and **alpha-test ref 180 (high quality) / 8 (low)**. The c6.a ×0.1 scale in caller
-`Foliage_RenderFarPatches @ 0x60a4a8/0x60a16c` is gated on arg_8, which is
+`Foliage_RenderDetailPatches @ 0x60a4a8/0x60a16c` is gated on arg_8, which is
 the THERMAL view flag, not a reflection flag: `Render_ProcessMainSceneFrame`
 passes the held weapon's thermal byte (`@ 0x5ca2da..0x5ca2e3`) as the scene
 core's fourth argument (`@ 0x5ca8e3`), which
-`Terrain_RenderSceneWithReflection` pushes to both detail passes
+`Terrain_RenderWorldScene` pushes to both detail passes
 (`@ 0x5c95c1/0x5c9661`); under thermal each patch draws one primary LOW
 (`@ 0x60a193..0x60a19c`) at fade ×0.1 and no secondary. Outside thermal the
 near secondary LOW shares the unscaled fade (the 2026-07-15 grill). Corrected
@@ -1092,7 +1092,7 @@ quadrant textures at page-local / 512 (`@ 0x60DB86..0x60DC02`, quad
 `(0,0)-(dim,dim)` `@ 0x60DC1A..0x60DC7E`) on the box level the page's LOD
 selects (a LOD-1 page reads level 1); the `.til` quads sit at
 `(entry - origin) × dim / span` (`@ 0x60DE66..0x60DEBB`) and
-`render_water_quad`'s half-texel bias (`@ 0x604808..0x6048FD`) lands each
+`PolyTrn_DrawTileOverlayQuad`'s half-texel bias (`@ 0x604808..0x6048FD`) lands each
 pixel on a texel centre of the nearest atlas box level (LOD4 = level 0 ...
 LOD1 = level 3), the stage colour saturating before the blend. The old
 composer sampled at x + 0.5 and kept the half-texel bias on top of that,
@@ -1118,8 +1118,8 @@ CULLMODE NONE, so the upside-down quad draws. The textures load with flags 0
 (`Texture_LoadByNameWithChannel @ 0x58B728`): WRAP, LINEAR, MIPFILTER POINT.
 The stage colour is MODULATE2X(texture, `0xFF808080`) = texture × 256/255
 saturated (`@ 0x60E033..0x60E04C`) before the DESTCOLOR/SRCCOLOR doubling;
-the `0xFF808080` diffuse is chosen by `dword_319FBB8`, which is
-`g_TerrainAdapterCapsStorage` (0x319FBA0) + 0x18, filled by
+the `0xFF808080` diffuse is chosen by
+`g_TerrainAdapterCapsStorage.TexOpDisableOrArg2` (0x319FBA0 + 0x18), filled by
 `CGfxDevice_QueryAdapterCaps @ 0x67DF72..0x67DF8E` (TextureOpCaps & 5,
 cleared by the vendor quirk at device `+0xE8`) through `sub_676850` (called
 `@ 0x60E4FE`) and normally set. The records and their page walk landed with
@@ -1139,12 +1139,12 @@ level `+0x00`, packed coordinate `+0x04`, sector `+0x08/+0x0C`, last use
   order, only if the age exceeds 1 (`@ 0x60DAE4..0x60DB45`, empty-handed
   `@ 0x60DDC6`), so the first terrain frame claims nothing and a frame with
   more pages than claimable records draws the rest with t0 unbound; a claim
-  stamps last use, compose frame and `Env_TodMinutesElapsed`
+  stamps last use, compose frame and `Env_TodEpoch`
   (`@ 0x60DB56..0x60DBF0`); the frame counter advances once per terrain frame
   (`dword_319FC04 += 1 @ 0x60EAE8`) and never resets;
 - `PolyTrn_RenderFrame` sweeps the visible list in emission order; a sweep
   that composed nothing evicts one TOD-stale record
-  (`terrain_cache_evict_lru @ 0x604600`, compose age above 1, no visibility
+  (`Terrain_EvictOldestTodStaleTile @ 0x604600`, compose age above 1, no visibility
   check) and sweeps again (`@ 0x60F080..0x60F0E3`); the device composes the
   claimed pages on the worker pool and waits before the batch draws;
 - `PolyTrn_BindStageTextures @ 0x604330` clears t0 before the exact-key
@@ -1160,18 +1160,18 @@ level `+0x00`, packed coordinate `+0x04`, sector `+0x08/+0x0C`, last use
   whose masked coordinate matches in the point's sector: no LOD preference,
   no same-frame restriction, and a coarse match can return a page that does
   not contain the point (`TerrainTileCompositionCache::lookup`);
-- `CVertexBuffer_RemoveFromList @ 0x605C10` (an IDB misnomer; proposed
-  `Terrain_InvalidateTileCacheRegion`) retires every resident page the
+- `Terrain_InvalidateTileCacheRegion @ 0x605C10` (ex `CVertexBuffer_RemoveFromList`,
+  renamed 2026-09-25) retires every resident page the
   destroyed entity's footprint (position ± 2 bound radii) overlaps
   (coordinate = -1, last use = 0, walk `@ 0x605C21..0x605C7F`), from
   `Entity_ProcessDestructibleDeath @ 0x43FC12..0x43FC5E`,
-  `Entity_ProcessCraneDestruction @ 0x43F192..0x43F1DA` (the bld2 collapse;
-  the IDB name is a misnomer), the crane collapse's twin block
-  `@ 0x440036..0x44007E` (inside the body at 0x43FC70 that the IDB leaves
-  undefined) and `Entity_SpawnSectionEntity @ 0x44062E..0x440670`; ported as
+  `Entity_ProcessBld2Destruction @ 0x43F192..0x43F1DA` (the bld2 collapse),
+  the crane collapse's twin block
+  `Entity_ProcessCraneCollapse @ 0x440036..0x44007E` (the `cran` class think,
+  defined in the IDB 2026-09-25) and `Entity_SpawnSectionEntity @ 0x44062E..0x440670`; ported as
   `world::TerrainScorchEvents::emit_page_invalidation` →
   `Terrain.invalidate_tile_cache_region`. A mission reset empties every record
-  (`sub_605FB0 @ 0x605FC0..0x605FC5`).
+  (`Terrain_ResetTileCache @ 0x605FC0..0x605FC5`).
 
 Casters and light are sampled when a page composes; nothing re-targets a
 page. A static-shadow planner state change therefore never retires a page.
@@ -1196,7 +1196,7 @@ fogged ordinary pass (`terrain_setup_lighting_and_shader(2)` →
 (`renderer::terrain_light_pool_composite`, mirrored per channel in
 `terrain.gdshader`); the shader had added the pool to the lit colour and
 fogged the sum. On the PS path (`caps+0x34 & 0x100 @ 0x609890`) the per-light
-setup is `foliage_setup_render_matrices @ 0x5AAB30` (an IDB misnomer) with the
+setup is `Light_SetupTerrainProjectedPassPS @ 0x5AAB30` with the
 cube-normalize map bound (`@ 0x5AAEA2..0x5AAEB7`); the light values are
 [render/render-lighting-re.md](../render/render-lighting-re.md)'s.
 
@@ -1216,7 +1216,7 @@ DECODED blocks (`D3DXFilterTexture`, `@ 0x6912AD..0x6912F9`). The device runs
 without `D3DCREATE_FPU_PRESERVE` (`CGfxDevice_CreateDevice @ 0x67EA17`), so
 the codec's x87 math is single precision and its conversions run under
 round-toward-zero. Retail quirks kept: the eight-alpha weight table ends at
-8/7 (`unk_7FB57C`), the alpha Newton step uses texel minus step, and the
+8/7 (`g_D3DXTex_AlphaD8`), the alpha Newton step uses texel minus step, and the
 colour refinement has no lower index guard. Reimplemented in
 `engine/runtime/renderer/texture_dxt`; the page composer samples the decoded
 DXT5 atlas levels and `TerrainSurfaceInputs` uploads the detail layers as
@@ -1227,7 +1227,7 @@ alpha 1.0).
 **Page sampling at the draw (the anisotropy lead is REFUTED).** The page
 render target is sampled LINEAR / MIPFILTER POINT (one level) with no
 anisotropy: the render-target resource's flags word (`+0x18`) is zeroed at
-construction (`sub_6800D0 @ 0x680106`), and `apply_texture_stages`
+construction (`GTexRT_Construct @ 0x680106`), and `apply_texture_stages`
 (`@ 0x68084C..0x680870`) derives the per-stage words from it (bit 3 clear, so
 no aniso). `terrain.gdshader`'s `filter_linear` is retail; no code change.
 
@@ -1378,11 +1378,11 @@ as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
 |---|---|---|---|
 | D-TERRAIN-1 | C | **RETIRED (2026-08-24)** | **Former terrain-shader edit/runtime split**: the deleted ONED terrain preview used a live-sculpt shader while the runtime used the baked shader. ADR 0037 removed the preview and therefore removed the divergence; this row remains as history only. |
 | D-TERRAIN-2 | A | **FIXED (2026-07-06)** | **Doubled detail-normal factor** (the gobj-era chimera): `terrain_lighting.gdshaderinc` stacked TWO ×2 `dp3(normalmap, blendmap)` factors on the 3-way splat; the witnessed top-tier ps.1.4 applies exactly ONE `[orig: PolyTrn_PS14SplatNormalMap source @ 0x7dece0; PolyTrn_PS14Splat source aPs14TexldR0T0T @ 0x7dee18; compile_terrain_pixel_shaders @ 0x605260]` (the dual-normal product belongs to the separate non-splat ps.1.1 tier). Post-gamma (D-RMAT-7) the squared factor clipped whole regions to white. See §Include correction above; ledger row carries the full witness. |
-| D-TERRAIN-3 | C | **FIXED (REN-7, 2026-07-07)** | **Below-horizon fill**: retail fills the below-rim region with the frame clear alone — the env #21 horizon-blended skyfog `[orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]`; no skirt/ring geometry exists in the frame walk (`Terrain_RenderSkyboxPass @ 0x610ac0`, an IDB misnomer, is the terrain surface pass and draws no sky: `Terrain_RenderSectorBatchLit @ 0x60c670`, the plain fogged sector batch, called `@ 0x610c34`, then `RenderSlot_DrawAllDrapes` `@ 0x610c47`; corrected 2026-09-24), the seam hidden by fog convergence at the 1024 fog reference (= the dome rim radius). The reimpl's clear consumer was swallowed by a `BG_SKY`(null-sky) Environment rendering BLACK; fixed to `BG_COLOR` + `AMBIENT_SOURCE_DISABLED` in `game_world.tscn`, GUT-pinned — and `get_frame_clear_color()` corrected to the post-blend DOUBLED skyfog (the modulate2x-path Clear takes it verbatim; the "undoubled" 07-05 reasoning was the non-modulate2x fallback, no reimpl analog). The former ONED far-environment preview residual disappeared with the preview. |
+| D-TERRAIN-3 | C | **FIXED (REN-7, 2026-07-07)** | **Below-horizon fill**: retail fills the below-rim region with the frame clear alone — the env #21 horizon-blended skyfog `[orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]`; no skirt/ring geometry exists in the frame walk (`Terrain_RenderMainSectorPass @ 0x610ac0` is the terrain surface pass and draws no sky: `Terrain_RenderSectorBatchLit @ 0x60c670`, the plain fogged sector batch, called `@ 0x610c34`, then `RenderSlot_DrawAllDrapes` `@ 0x610c47`; corrected 2026-09-24), the seam hidden by fog convergence at the 1024 fog reference (= the dome rim radius). The reimpl's clear consumer was swallowed by a `BG_SKY`(null-sky) Environment rendering BLACK; fixed to `BG_COLOR` + `AMBIENT_SOURCE_DISABLED` in `game_world.tscn`, GUT-pinned — and `get_frame_clear_color()` corrected to the post-blend DOUBLED skyfog (the modulate2x-path Clear takes it verbatim; the "undoubled" 07-05 reasoning was the non-modulate2x fallback, no reimpl analog). The former ONED far-environment preview residual disappeared with the preview. |
 | D-TERRAIN-4 | C | **PERMANENT (runtime safety boundary)** | **Safe terrain-query bounds** (ENG-3 B1): beyond-extent = no-terrain/no-hit vs retail's clamp-to-edge `[orig: @ 0x31a0010/0x319fc0c]`; no-data = clear/NAN vs retail's return-HIT `[orig: @ 0x60ccf7]`; contiguous-atlas bilinear vs the per-quadrant seam flags `[orig: @ 0x31a17f0..]`. Game consumers use these guards. Returning no result outside valid data avoids inventing an edge hit; §Runtime terrain queries carries the retail forms for any consumer that specifically requires them. |
 | D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the reimpl incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are ported. **Corrected 2026-07-15**: the fix's own first reading (t3 = the generated authored-detail B-channel coefficient) was also wrong — t3 is the authored second detail pair (`polytrn_detailmap2` ⊕ `dist2`) at density2; the generated coefficient belongs to the ps.1.1 tiers at stage 7 [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap source aPs14TexldR0T0T_0 @ 0x7dece0`]. |
 | D-TERRAIN-6 | A | **FIXED (2026-07-13)** | **LOD/fog/overlay base-pass semantics**: both raw `lod_sub / 2` sites use the exact clamped eight-family selector; exponential fog uses eye-space depth while linear types use radial distance; ordered `.til` color is composed before terrain lighting. The render-target-alpha recurrence the 2026-08-17 D-TIL-3 fix added within that order was refuted 2026-09-24: the overlay loops run under `COLORWRITEENABLE = 7` and never write page alpha (tiles/til-re.md D-TIL-3) [`orig: render_terrain_sector_batch @ 0x6092a0`; `Render_SetFogState @ 0x58a950`; `PolyTrn_RenderTile @ 0x60da70`]. |
-| D-TERRAIN-7 | A | **OPEN (narrowed 2026-09-24)** | **Tile-composition RT/update parity**: the runtime ports retail's 128-record page cache (`TerrainTileCompositionCache`: identity = level, packed source coordinate and routed sector; the age-above-1 LRU claim, first in record order; the TOD-stale eviction and same-frame re-sweep; the record-order point lookup for MATCHTERRAIN and detail foliage; spatial invalidation on destruction and scorch appends; t0 unbound for an unclaimed page) and composes every claimed page before the batch draws with the D3D9 raster: integer pixel positions, the quadrant box levels CLAMP/LINEAR/MIPFILTER POINT, the point-sampled DXT5 `.til` atlas, the WRAP/LINEAR scorch quads, RGB-only overlays, then the DOT3 alpha and the static A-only projections. The 2026-09-24 rendering parity pass closed the refresh cadence and page identity (the content-stamp LRU, stale-while-recompose, the DOT3-byte light epoch and the analytic cold fallback are retired), the raster/filter/mip behavior, the static collector's sphere test and the temp raster's pixel centres; the ordered contributions are the `.til` and scorch loops, both ported (scorch records since #560). Resolved earlier and kept: the max-quality c7/c8 `TerrainTilePageProjection`; DOT3 before silhouettes (`@ 0x60D794..0x60D7C0`, skip gate `@ 0x60E1CE`); the live-probed temp-blue composite state; the PROJSHAD admission/blending/culling/z audit and the skinned rigid collapse; the shared material-animation evaluator (whole-process CTRL/RNG ordering is D-3DI-2). `dword_319FBB8` is the adapter TextureOpCaps & 5 flag (normally set) that picks the scorch stage's `0xFF808080` diffuse, not a sun-angle control, so the 2026-08-23 rejection of a low-sun "density mechanism" stands. Open: the page render target's address mode at the terrain and foliage draws (its flags word is zero, which selects WRAP unless the draw's pass flags add stage-0 CLAMP; not re-witnessed; the reimpl clamps to the page's texel centres). §2026-09-24 rendering parity pass carries the witnesses `[orig: PolyTrn_RenderTile @ 0x60DA70 (hit @ 0x60DAC0..0x60DAD1, claim @ 0x60DAE4..0x60DB45, stamps @ 0x60DB56..0x60DBF0); terrain_cache_evict_lru @ 0x604600; PolyTrn_RenderFrame @ 0x60EAC0 (sweep @ 0x60F080..0x60F0E3); PolyTrn_BindStageTextures @ 0x604330; terrain_tile_cache_lookup @ 0x604140; Terrain_CollectAndRenderTileModels @ 0x60D250; apply_texture_stages @ 0x68084C..0x680870]`. |
+| D-TERRAIN-7 | A | **OPEN (narrowed 2026-09-24)** | **Tile-composition RT/update parity**: the runtime ports retail's 128-record page cache (`TerrainTileCompositionCache`: identity = level, packed source coordinate and routed sector; the age-above-1 LRU claim, first in record order; the TOD-stale eviction and same-frame re-sweep; the record-order point lookup for MATCHTERRAIN and detail foliage; spatial invalidation on destruction and scorch appends; t0 unbound for an unclaimed page) and composes every claimed page before the batch draws with the D3D9 raster: integer pixel positions, the quadrant box levels CLAMP/LINEAR/MIPFILTER POINT, the point-sampled DXT5 `.til` atlas, the WRAP/LINEAR scorch quads, RGB-only overlays, then the DOT3 alpha and the static A-only projections. The 2026-09-24 rendering parity pass closed the refresh cadence and page identity (the content-stamp LRU, stale-while-recompose, the DOT3-byte light epoch and the analytic cold fallback are retired), the raster/filter/mip behavior, the static collector's sphere test and the temp raster's pixel centres; the ordered contributions are the `.til` and scorch loops, both ported (scorch records since #560). Resolved earlier and kept: the max-quality c7/c8 `TerrainTilePageProjection`; DOT3 before silhouettes (`@ 0x60D794..0x60D7C0`, skip gate `@ 0x60E1CE`); the live-probed temp-blue composite state; the PROJSHAD admission/blending/culling/z audit and the skinned rigid collapse; the shared material-animation evaluator (whole-process CTRL/RNG ordering is D-3DI-2). `g_TerrainAdapterCapsStorage.TexOpDisableOrArg2` (0x319FBB8) is the adapter TextureOpCaps & 5 flag (normally set) that picks the scorch stage's `0xFF808080` diffuse, not a sun-angle control, so the 2026-08-23 rejection of a low-sun "density mechanism" stands. Open: the page render target's address mode at the terrain and foliage draws (its flags word is zero, which selects WRAP unless the draw's pass flags add stage-0 CLAMP; not re-witnessed; the reimpl clamps to the page's texel centres). §2026-09-24 rendering parity pass carries the witnesses `[orig: PolyTrn_RenderTile @ 0x60DA70 (hit @ 0x60DAC0..0x60DAD1, claim @ 0x60DAE4..0x60DB45, stamps @ 0x60DB56..0x60DBF0); Terrain_EvictOldestTodStaleTile @ 0x604600; PolyTrn_RenderFrame @ 0x60EAC0 (sweep @ 0x60F080..0x60F0E3); PolyTrn_BindStageTextures @ 0x604330; terrain_tile_cache_lookup @ 0x604140; Terrain_CollectAndRenderTileModels @ 0x60D250; apply_texture_stages @ 0x68084C..0x680870]`. |
 | D-TERRAIN-8 | A | **FIXED (2026-08-13; coordinate corrected 2026-08-17)** | **Underwater terrain water-noise modulation**: the engine terrain frame stamps `below_water` from the render eye vs the live water height (the bare unguarded strict `<` `@ 0x60fea5` — NO zero sentinel; the water height is plumbed unconditionally), and the shared surface include swaps the ps.1.4 stage-3 dp3 INPUT to the water module's per-frame regenerated noise texture at the swapped `source × 8/512` (`colormap_uv × 16` for the normalized 1024 atlas) texcoord — the witnessed TOP-TIER behavior (the 2026-08-13 selector decode above): the noise rides the PS14SplatNormalMap dp3 on detail2-authored maps, detail2-less splat maps faithfully render NO underwater modulation, and the `saturate(4·t3²)·t0.a` PSShadow pair belongs to the unported ps.1.1 tiers `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; texcoord @ 0x609786..0x6097D6]`. Tests: ctest `terrain_frame_compiler` (flag pins) + GUT `terrain_underwater_modulation_test` (the Dvxi5 flip drive). |
 | D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old reimpl `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 | D-TERRAIN-11 | A | **FIXED (2026-08-17)** | **Terrain detail coordinate scale**: retail constructs mesh UV1 as `source × polytrn_detaildensity / 512`; OpenNova had multiplied normalized 1024-atlas UV by density, halving every detail frequency. Runtime mesh UVs, authored detail2, and the underwater stage-3 swap now share the exact source-grid conversion. Deterministic 00TRa A/B probes select 2× with the existing axis at high correlation and reject the UV-swap alternative [`orig: parser @ 0x60f993..0x60f9b3; config load @ 0x60e634..0x60e63b; density/512 write @ 0x6029a0..0x6029aa; UV1 @ 0x602db5..0x602dbe; stage-3 transforms @ 0x609786..0x609810`]. |

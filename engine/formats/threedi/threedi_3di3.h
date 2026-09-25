@@ -577,7 +577,7 @@ typedef struct ThreediOcclusionObject {
                                   the portal-slot priority weight the slot
                                   collector multiplies @ 0x5c6ea3; its only
                                   consumer is the slot sort's compare
-                                  (Terrain_SortSectorCacheByDistance @ 0x5c4440);
+                                  (Terrain_SortPortalSlotsByPriority @ 0x5c4440);
                                   zero across the JO 3DI3 corpus] */
     int32_t num_vertices;
     int32_t num_planes;

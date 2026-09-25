@@ -802,7 +802,7 @@ void test_water_wake_ring_lifetime_and_geometry() {
 	CHECK(frame.vertices.size() == 171 && frame.indices.size() == 864,
 			"water rings use nineteen angular columns and nine radial rows");
 	// The ring is built in the render frame as (sin * r, 0, cos * r)
-	// [orig: create_water_surface_mesh @ 0x5de01d..0x5de03e] and lands here
+	// [orig: WaterRing_BuildMesh @ 0x5de01d..0x5de03e] and lands here
 	// through the render -> presentation x/z swap: column 0 steps along +x,
 	// column 1 turns 20 degrees toward +z.
 	CHECK(std::abs(frame.vertices.front().x - 2.25f) < 0.00001f &&

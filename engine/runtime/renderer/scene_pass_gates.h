@@ -3,7 +3,7 @@
 // The blink-letter and waterline gates of the passes one frame draws: the
 // main frame's terrain sector pass and sky bracket, and the water mirror's
 // own sky bracket. The sky bracket is the dome AND the sun/moon discs
-// (sub_579CB0 -> render_skybox -> render_celestial_bodies); the sun glow,
+// (SkyDome_RenderWithSkyfog -> render_skybox -> render_celestial_bodies); the sun glow,
 // the water glint and the sun veil are drawn outside it and are never gated
 // here.
 
@@ -16,9 +16,9 @@ namespace opennova::renderer {
 struct ScenePassGates {
 	// The main frame's PolyTrn sector pass: skipped while the indoors letter
 	// is set [orig: Render_ProcessMainSceneFrame @ 0x5ca197..0x5ca19f -> the
-	// skip @ 0x5ca84f over Terrain_RenderSkyboxPass @ 0x5ca867, the sector
+	// skip @ 0x5ca84f over Terrain_RenderMainSectorPass @ 0x5ca867, the sector
 	// batch]; the water mirror [orig: render_main_scene @ 0x5c1353] and the
-	// weapon inset's scene [orig: terrain_scene_render @ 0x5d0570] skip their
+	// weapon inset's scene [orig: NVG_RenderSceneToTarget @ 0x5d0570] skip their
 	// own PolyTrn pass on the same letter.
 	bool terrain = true;
 	// The main frame's sky bracket: drawn only while the sky letter is clear

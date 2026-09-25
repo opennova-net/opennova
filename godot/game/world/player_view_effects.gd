@@ -183,7 +183,7 @@ func update_damage_feedback(white_alpha: int, red_alpha: int, revive: int,
 ## the final digits settle one unit at a time; the value is intentionally retained
 ## while the binocular view is temporarily suppressed or toggled away. The math
 ## is the engine's HudPos.binocular_range_step — the witness lives at the engine
-## home, hud/view_effects.h [orig: the misnamed HUD_DrawSpeedometer @0x590810].
+## home, hud/view_effects.h [orig: Binoculars_DrawRangefinder @0x590810].
 static func smooth_range_value(current: int, target: int) -> int:
 	return HudPos.binocular_range_step(current, target)
 

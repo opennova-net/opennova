@@ -5,8 +5,8 @@
 // independent transcription agrees with this one on 3000 random blocks).
 // [orig: GTexture_CreateFromPixelData_0 @ 0x687717..0x687801;
 //  D3DXTex_D3DXEncodeDXT1 @ 0x72170F; D3DXTex_EncodeDXT1Block @ 0x720AB7;
-//  D3DXTex_OptimizeDXTEndpoints @ 0x720537; D3DXTex_EncodeDXT5Block
-//  @ 0x721962; D3DXTex_OptimizeEndpoints1D @ 0x720210; D3DXTex_D3DXDecodeDXT1
+//  D3DXTex_OptimizeRGB @ 0x720537; D3DXTex_EncodeDXT5Block
+//  @ 0x721962; D3DXTex_OptimizeAlpha @ 0x720210; D3DXTex_D3DXDecodeDXT1
 //  @ 0x72140A; D3DXTex_D3DXDecodeDXT5 @ 0x7215D1; D3DXFilterTexture
 //  @ 0x6910C9]
 

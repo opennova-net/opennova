@@ -54,7 +54,7 @@
       "retail_citations": [
         { "address": "0x679c1b", "function": "CD3DDevice_InitializeDisplay", "function_start": "0x679890" },
         { "address": "0x677be0", "function": "GLib_SetGammaRamp", "function_start": "0x677be0" },
-        { "address": "0x582940", "function": "FrameFX_RenderBloomPass", "function_start": "0x582940" }
+        { "address": "0x582940", "function": "FrameFX_RenderGlowSource", "function_start": "0x582940" }
       ],
       "exceptions": []
     },
@@ -97,10 +97,10 @@
         { "address": "0x5ffdd0", "function": "generate_foliage_instances_0", "function_start": "0x5ffdd0" },
         { "address": "0x5ff7a0", "function": "Foliage_CreateLightmapBlendPS", "function_start": "0x5ff7a0" },
         { "address": "0x6015b7", "function": "Foliage_LoadDefAssets", "function_start": "0x601260" },
-        { "address": "0x60087a", "function": "Foliage_SetupFarSlotDraw", "function_start": "0x6007c0" },
+        { "address": "0x60087a", "function": "Foliage_SetupDetailSlotDraw", "function_start": "0x6007c0" },
         { "address": "0x6006f0", "function": "Foliage_SetupVertexShaderConstants", "function_start": "0x600450" },
-        { "address": "0x60a220", "function": "Foliage_RenderFarPatches", "function_start": "0x609de0" },
-        { "address": "0x60a5dc", "function": "Foliage_RenderFarPatches", "function_start": "0x609de0" }
+        { "address": "0x60a220", "function": "Foliage_RenderDetailPatches", "function_start": "0x609de0" },
+        { "address": "0x60a5dc", "function": "Foliage_RenderDetailPatches", "function_start": "0x609de0" }
       ],
       "exceptions": ["D-FOLIAGE-7", "D-FOLIAGE-9", "D-FOLIAGE-10"]
     },
@@ -148,7 +148,7 @@
       "docs": ["docs/world/world-wac-ai-re.md", "docs/render/render-order-re.md"],
       "retail_citations": [
         { "address": "0x5db8a0", "function": "CEffectChannel_RenderRibbon", "function_start": "0x5db8a0" },
-        { "address": "0x5dc8f0", "function": "create_effect_channel_render_textures", "function_start": "0x5dc8f0" },
+        { "address": "0x5dc8f0", "function": "CEffectEmitterPool_CreateShaders", "function_start": "0x5dc8f0" },
         { "address": "0x677740", "function": "CD3DDevice_SetFogAndBlendMode", "function_start": "0x677740" }
       ],
       "exceptions": []
@@ -196,8 +196,8 @@
       "parity_status": "matching",
       "docs": ["docs/world/vehicle-client-movers-re.md"],
       "retail_citations": [
-        { "address": "0x5de0f0", "function": "render_water_surface_decal", "function_start": "0x5de0f0" },
-        { "address": "0x5ddc90", "function": "sub_5DDC90", "function_start": "0x5ddc90" }
+        { "address": "0x5de0f0", "function": "WaterRing_Draw", "function_start": "0x5de0f0" },
+        { "address": "0x5ddc90", "function": "WaterRing_LoadResources", "function_start": "0x5ddc90" }
       ],
       "exceptions": []
     }

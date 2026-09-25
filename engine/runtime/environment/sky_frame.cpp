@@ -32,7 +32,7 @@ Rgb sky_constant(const Rgb &value, bool nvg_view, int nvg_level) {
 // bright and highlight with 1.0 and the three cloud blocks with 0.9
 // [orig: render_skybox @ 0x579377..0x579447 (flt_7C459C = 0.9)], and the sky
 // wrapper fogs toward 0x808080 instead of the skyfog block
-// [orig: sub_579CB0 @ 0x579cbc].
+// [orig: SkyDome_RenderWithSkyfog @ 0x579cbc].
 constexpr float kThermalSkyWhite = 1.0f;
 constexpr float kThermalCloudWhite = 0.9f;
 constexpr Rgb kThermalSkyFog{128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f};
@@ -69,7 +69,7 @@ SkyFrameState build_sky_frame(const EnvironmentState &env) {
 	frame.light_dir = env.light_direction();
 	// The main frame hands the thermal latch to the sky wrapper as its first
 	// argument [orig: Render_ProcessMainSceneFrame @ 0x5ca363 (edi = the
-	// thermal byte) -> sub_579CB0 @ 0x5ca81a].
+	// thermal byte) -> SkyDome_RenderWithSkyfog @ 0x5ca81a].
 	frame.skyfog_color = env.thermal_view() ? kThermalSkyFog : env.skyfog_color();
 	// The dome's fog constant c9.x is the RAW smoothed fog distance
 	// (Env_FogDistCurrent x 0.9 / 65536; the shader applies the 0.9), never

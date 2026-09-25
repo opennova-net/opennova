@@ -18,7 +18,7 @@
 // - Every body renders through its AUTHORED material (the stock models are
 //   FF_ST_AD_LUM): the submit alpha is not a blend factor but the value of
 //   the global CTRL register UPL_INTENSITY (ordinal 32; the IDB's
-//   Render_SubmitAlpha16 @ 0x83fde8 = the register table dword_83FCE8 +
+//   g_CtrlGlobal_UplIntensity @ 0x83fde8 = the register table dword_83FCE8 +
 //   32 * 8), which the material's RgbGen style 113 reads into SelfLumColor
 //   when the batch FLUSHES [orig: RgbGen_EvaluateColor @ 0x5b2453, called by
 //   apply_shader_parameters @ 0x58ddfb from CRenderBatchQueue_FlushBatches].
@@ -33,7 +33,7 @@
 namespace opennova::env {
 
 // One frame of the water-glint leg [orig: update_sun_glare @ 0x5ad130, once
-// per main scene render from Terrain_RenderSceneWithReflection @ 0x5c96c0]:
+// per main scene render from Terrain_RenderWorldScene @ 0x5c96c0]:
 // one sample per frame — the reflected-sun point on the water (with the
 // 0.25 * (frame & 3) reflected-height jitter and the +-2 point x/z jitter),
 // visible when the point sees BOTH the sun (point -> camera + sun * 2048) and
@@ -118,7 +118,7 @@ struct CelestialDiscsFrame {
 	int32_t sun_upl = 0;
 	int32_t moon_upl = 0;
 	// The same for the bloom pass's redraw render_celestial_bodies(1), the
-	// fog-shader path [orig: FrameFX_RenderBloomPass @ 0x582a77]: the moon
+	// fog-shader path [orig: FrameFX_RenderGlowSource @ 0x582a77]: the moon
 	// alpha leg is fogDistInt x 0.0002 x (1 - overcast) instead of the
 	// (fogDistInt - 400) / 600 ramp [orig: render_celestial_bodies
 	// @ 0x5acc37..0x5acc61]; the sun has no fog-shader variant.

@@ -627,7 +627,7 @@ void test_view_projection_retail_stretch() {
     CHECK(viewmodel_focal_ratio(80.0f, 0.0f) == 1.0f);
 }
 
-// The NVG scene's pass [orig: sub_5D28D0 @0x5d2954..0x5d296d; sub_5D2990
+// The NVG scene's pass [orig: NVG_RenderScene @0x5d2954..0x5d296d; NVG_RenderScopedScene
 // @0x5d29e4..0x5d2a2a]: the frame's frustum in 512 rows at its own aspect, or
 // the Scoped arm's square frustum in the 512 square.
 void test_nvg_view_projection() {
@@ -649,7 +649,7 @@ void test_nvg_view_projection() {
     CHECK(lens.fov_h_deg == 15.0f && lens.fov_v_deg == 15.0f && lens.aspect == 1.0f);
     CHECK(lens.target_w == 512 && lens.target_h == 512);
     // The Sighted arm keeps the frame's shape at 80 / zoom
-    // [orig: Math_BuildScaledFixedPointToFloatMatrix @0x5d2aa9..0x5d2ada].
+    // [orig: NVG_RenderSightedScene @0x5d2aa9..0x5d2ada].
     const ViewProjection sighted = nvg_view_projection(wide, sighted_arm, 0.75f, 4);
     CHECK(sighted.fov_h_deg == 20.0f && sighted.aspect == wide.aspect);
     CHECK(std::fabs(sighted.fov_v_deg - fov_vertical_from_horizontal_deg(20.0f, wide.aspect)) < 1e-5f);

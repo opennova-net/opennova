@@ -338,7 +338,7 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 					static_cast<float>(first.alpha_reference) / 255.0f;
 			// The near secondary LOW draw runs under strict D3DCMP_LESS in
 			// retail; the cutoff discard keeps it off every texel the HIGH
-			// pass accepted. [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
+			// pass accepted. [orig: Foliage_SetupDetailSlotDraw @ 0x6008fc..0x600912]
 			command.high_pass_cutoff =
 					first.near_secondary ? 180.0f / 255.0f : 0.0f;
 			command.wind_phase = detail_wind_phase;

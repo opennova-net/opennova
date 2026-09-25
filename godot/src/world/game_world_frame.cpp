@@ -136,7 +136,7 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	{ "slot_shadows", FrameStats::WORLD_SLOT_SHADOW, &GameWorld::leg_slot_shadows, kLegNone },
 	{ "particles", FrameStats::WORLD_PARTICLES, &GameWorld::leg_particles, kLegNone },
 	// The precipitation streaks after the particle pass and the trails,
-	// before the murk overlay (retail Terrain_RenderSceneWithReflection
+	// before the murk overlay (retail Terrain_RenderWorldScene
 	// @ 0x5c96a6).
 	{ "precipitation", FrameStats::WORLD_WEATHER, &GameWorld::leg_precipitation, kLegNone },
 	// The post-particle overlay tail (renderer/scene_overlay.h): every
@@ -679,7 +679,7 @@ void GameWorld::plan_screen_effects_frame() {
 
 // The post-particle overlay tail, gathered once per frame in slot order and
 // published to every view's overlay pass (renderer/scene_overlay.h carries
-// the witnessed order: retail Terrain_RenderSceneWithReflection after
+// the witnessed order: retail Terrain_RenderWorldScene after
 // particle pass B @ 0x5c9690, before the frame effects). The murk quad carries
 // the water height; each view draws it only while its own render eye is at or
 // below the water, whatever the camera mode. The glint and the glare close
@@ -713,7 +713,7 @@ void GameWorld::render_scene_overlay_frame() {
 	effect_world->publish_scene_overlay(submission);
 }
 
-// The NVG laser beams, the tail's first slot (retail sub_5C63B0 @ 0x5c63b0,
+// The NVG laser beams, the tail's first slot (retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0,
 // called @ 0x5c9695): the local view's g_NVGActive and g_camera_mode gate
 // every beam (the defaults with no local player or for a spectator), the
 // frame's render camera builds the ribbons and the frame's scene fog folds
@@ -1039,7 +1039,7 @@ void GameWorld::apply_occlusion_frame() {
 	// and consumes the RENDER camera the local-view leg just placed
 	// (D-RORD-8).
 	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
-	// Terrain_RenderSceneWithReflection @ 0x5c94f0]
+	// Terrain_RenderWorldScene @ 0x5c94f0]
 	if (world_ready_ && !frame_skip_occlusion_) {
 		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
 				mission_forces_indoors_);

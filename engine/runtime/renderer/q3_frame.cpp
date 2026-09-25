@@ -150,7 +150,7 @@ std::optional<Q3Technique> technique_for(
 // Stage order is the witnessed FrameFX bloom-source bracket: the sorted Q3
 // object flush, then the fixed follow-up draws — NV water redraw, celestial
 // discs, sun glow — in call order.
-// [orig: FrameFX_RenderBloomPass @ 0x582940 —
+// [orig: FrameFX_RenderGlowSource @ 0x582940 —
 // CRenderBatchQueue_SortAndFlush(4) @ 0x582a54;
 // render_water_surface(0, 1) @ 0x582a5d; render_celestial_bodies(1) /
 // render_skybox_sun_glow(0, 0) @ 0x582a77..0x582a80]

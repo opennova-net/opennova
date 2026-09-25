@@ -1986,7 +1986,7 @@ void FoliageDispatcher::_apply_draw_list(
     // finds for it; a patch with no resident page is not drawn at all (the
     // lookup's null result skips the patch's slot draw), so under a Terrain
     // there is no cold fallback. Only a terrain-less preview draws through
-    // the analytic colormap. Retail Foliage_RenderFarPatches: the lookup
+    // the analytic colormap. Retail Foliage_RenderDetailPatches: the lookup
     // Terrain_FindSectorPatchRT @ 0x60a1de, the null skip @ 0x60a1e6..0x60a1e8
     // to the slot loop's next iteration @ 0x60a6a2.
     bool page_ready = false;
@@ -2114,7 +2114,7 @@ void FoliageDispatcher::_apply_draw_list(
     if (detail && (fresh || stamp.high_pass_cutoff != command.high_pass_cutoff)) {
       // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
       // the cutoff discard keeps it off every texel the HIGH pass accepted.
-      // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912, see docs/foliage/foliage-re.md]
+      // [orig: Foliage_SetupDetailSlotDraw @ 0x6008fc..0x600912, see docs/foliage/foliage-re.md]
       server->instance_geometry_set_shader_parameter(
           draw, uniform.high_pass_cutoff, command.high_pass_cutoff);
       ++frame_stats_.backend_uniform_writes;

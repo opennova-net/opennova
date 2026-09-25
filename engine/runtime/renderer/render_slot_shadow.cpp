@@ -406,7 +406,7 @@ void slot_patch_vertices(const SlotPatch &patch, int lod,
 }
 
 void slot_patch_indices(int lod, std::vector<uint16_t> &out) {
-	// [orig: init_shadow_decal_index_buffer @ 0x5d5453..0x5d54f4 — edi = row
+	// [orig: RenderSlot_InitPatchIndexBuffers @ 0x5d5453..0x5d54f4 — edi = row
 	// * resolution, ebx = (row + 1) * resolution, six indices per cell].
 	const int resolution = lod + 1;
 	out.clear();

@@ -115,8 +115,8 @@ func test_capture_is_the_power_of_two_floor_of_the_frame() -> void:
 	assert_eq(report.get("capture_size", Vector2i.ZERO), Vector2i(128, 64))
 
 
-# Type 8 then its scanlines [orig: sub_584390 @0x584390; ps @0x7D7C48;
-# sub_583A60 @0x583a60]: a 0.5 grey becomes (L^2, L + 0.05, L^2) at
+# Type 8 then its scanlines [orig: FrameFX_ThermalView @0x584390; ps @0x7D7C48;
+# FrameFX_ScanlineOverlay @0x583a60]: a 0.5 grey becomes (L^2, L + 0.05, L^2) at
 # L = 0.498 (the 8-bit capture), then even rows multiply by 2 x 0x60 texel
 # x 128/255 = 0.756 and odd rows by 1.008 .. 1.188.
 func test_thermal_view_inverts_the_luma_into_green_then_scans() -> void:
@@ -137,7 +137,7 @@ func test_thermal_view_inverts_the_luma_into_green_then_scans() -> void:
 	assert_gt(odd.g, even.g + 0.1, "alternate rows differ")
 
 
-# Type 9 alone [orig: sub_5845B0 @0x5845dd -> sub_583A60 @0x583a60].
+# Type 9 alone [orig: FrameFX_ApplyWeaponViewEffect @0x5845dd -> FrameFX_ScanlineOverlay @0x583a60].
 func test_monitor_view_scans_the_frame() -> void:
 	var view := _view(Vector2i(128, 96))
 	_rect(view, Rect2(0, 0, 128, 96), Color(0.5, 0.5, 0.5))
@@ -184,8 +184,8 @@ func test_nvg_flashes_green_on_the_toggle_frame_then_settles() -> void:
 			"only the toggle frame clears the persistent glow")
 
 
-# The NVG view's Scoped arm [orig: draw_minimap_compass_border @0x5d1d10;
-# terrain_scene_render @0x5d0a0e..0x5d0eb4]: the frame clears black and the
+# The NVG view's Scoped arm [orig: NVG_DrawScopedLens @0x5d1d10;
+# NVG_RenderSceneToTarget @0x5d0a0e..0x5d0eb4]: the frame clears black and the
 # lens draws instead of the full-screen composite. On a 256 x 96 surface the
 # ring is (95 >> 3) + (95 >> 1) = 58 about (127, 47): the disc (to 0.71 x 58)
 # carries the tint + the four quarter-strength glow passes -- the full
@@ -225,7 +225,7 @@ func test_nvg_scoped_arm_draws_the_lens_over_a_black_clear() -> void:
 	assert_gt(image.get_pixel(10, 47).g, 0.9, "the composite covers the whole frame")
 
 
-# The NVG view's Sighted arm [orig: terrain_scene_render @0x5d08cb..0x5d0952 ->
+# The NVG view's Sighted arm [orig: NVG_RenderSceneToTarget @0x5d08cb..0x5d0952 ->
 # draw_weapon_sight_overlays @0x4dce00]: the SIGHTS card draws INTO the 512
 # scene before its glow and tint, so a white row over the scene's left half
 # tints to (0.4, 1, 0.4) where the 0.3 grey right half tints to
@@ -257,7 +257,7 @@ func test_nvg_sighted_arm_draws_the_card_into_the_scene() -> void:
 			"off the Sighted arm the card stays out of the scene")
 
 
-# Type 1 [orig: Scar_SubmitShadowDecal @0x5830f0]: one hit (red 120, p = 1)
+# Type 1 [orig: FrameFX_DamageBlur @0x5830f0]: one hit (red 120, p = 1)
 # replaces the frame with the 256-square downsample through a half-texel
 # 60-degree blur, softening a hard edge; red 30 (p = 0.25) cross-fades that
 # image over the frame at alpha 0.5.
@@ -285,7 +285,7 @@ func test_damage_blur_softens_the_frame_then_cross_fades() -> void:
 	assert_almost_eq(faded.get_pixel(514, 256).r, 0.5 * outside, 0.03)
 
 
-# Type 4 [orig: Scar_SubmitCascadeShadowPasses @0x5833a0]: 200 ticks past the
+# Type 4 [orig: FrameFX_DeathBlur @0x5833a0]: 200 ticks past the
 # 30-tick hold (d = 13.3, three fan passes) the radial fan leaves the centre
 # column sharp and smears a stripe at the border.
 func test_death_blur_keeps_the_centre_and_blurs_the_border() -> void:

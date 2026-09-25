@@ -328,7 +328,7 @@ int main() {
 
 		// The NVG Sighted arm lays the card over the 512 square with the
 		// frame's own selected ratio: a 16:9 native frame corrects Y by
-		// 3 / (4 x 0.5625) about 256. [orig: terrain_scene_render
+		// 3 / (4 x 0.5625) about 256. [orig: NVG_RenderSceneToTarget
 		// @0x5d08d8..0x5d0927]
 		const hud::SightViewportRect nvg_card = hud::sight_rect_to_viewport_at_ratio(
 				hud::SightRect{256, 288, 768, 480}, 512.0f, 512.0f, 0.5625f);
@@ -340,7 +340,7 @@ int main() {
 		// The NVG lens's reticle: no annulus, the cross at UNIT scale about
 		// the same centre and ring size -- on a forced 4:3 ratio over a 16:9
 		// surface the spokes stay round where the mask's would stretch.
-		// [orig: draw_minimap_compass_border @0x5d2798..0x5d27bc]
+		// [orig: NVG_DrawScopedLens @0x5d2798..0x5d27bc]
 		const hud::ScopeCircleMask lens =
 				hud::build_nvg_lens_reticle(0, 0, 1919, 1079, 1920);
 		expect(lens.ring.empty() && lens.ring_indices.empty(), "the lens draws its own ring");

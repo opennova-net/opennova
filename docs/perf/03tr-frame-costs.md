@@ -57,7 +57,7 @@ linked parts. Destruction zeroes retain owner-scoped release semantics.
 Retail resolves names while loading model CTRL records and publishes into
 numeric slots: `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` calls
 `[orig: CtrlName_ToOrdinal @ 0x57B290]`. Its six destruction stores are in
-`[orig: compute_lod_fade_timers @ 0x5C3F40]`, called before the later subpixel
+`[orig: Entity_PublishSwapFadePhases @ 0x5C3F40]`, called before the later subpixel
 rejection by `[orig: render_sector_entity @ 0x5C4190]`. See the
 [CTRL witness and jo-c provenance](../threedi/3di-gp-format-re.md#native-ctrl-publication-2026-09-21).
 Retail's global persistent bus differs from our per-model owner lifetime;

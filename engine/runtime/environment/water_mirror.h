@@ -53,7 +53,7 @@ namespace opennova::env {
 // Retail sizes the square reflection RTT from the water detail level:
 // `if (dword_B4C3C0 || (size = 256, Water_DetailLevel >= 3)) size = 512;`
 // i.e. 256 at detail 2, 512 at detail >= 3 or under the capture override,
-// then `sub_6800D0(obj, size, size, 1, 1)` allocates it
+// then `GTexRT_Construct(obj, size, size, 1, 1)` allocates it
 // [orig: Water_CreateReflectionRenderTarget @ 0x5c08b0, the allocation body
 // @ 0x5c08d1..0x5c0937, the size selector @ 0x5c08eb..0x5c08ed;
 // Water_DetailLevel @ 0x24d2050]. The shipped
@@ -64,7 +64,7 @@ namespace opennova::env {
 // target. The reimpl carries no detail selector; it fixes the max-quality size.
 // That square target renders with the MAIN view's projection: render_main_scene
 // hands the main target's h/w as the projection's vertical scale
-// [orig: render_main_scene @ 0x5c1255 (sub_58A920 returns flt_8409EC), its
+// [orig: render_main_scene @ 0x5c1255 (Render_GetTargetAspectRatio returns flt_8409EC), its
 // Render_SetViewAndProjectionMatrices call @ 0x5c163e], so the 512 x 512
 // texels cover exactly the main view's field (non-square texels, 512 rows
 // across the vertical field) and the strip rows sample it at (screen U,

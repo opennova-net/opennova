@@ -1085,7 +1085,7 @@ EntityHandle add_slab(Rig &rig, double x, double y, float priority = 0.0f) {
 }
 
 // The slot sort keeps the 14 highest-priority slots in stable order: a 15th
-// collected occluder occludes nothing. [orig: Terrain_SortSectorCacheByDistance
+// collected occluder occludes nothing. [orig: Terrain_SortPortalSlotsByPriority
 // @ 0x5c4410 — the compare @ 0x5c4440, the clamp @ 0x5c449f..0x5c44a4]
 void test_portal_slot_sort_and_clamp() {
     for (int weighted = 0; weighted < 2; ++weighted) {

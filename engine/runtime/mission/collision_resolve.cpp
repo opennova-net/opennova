@@ -745,8 +745,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					info.sections = static_cast<int32_t>(lod.render_object_count);
 					// The RLOD table and each level's section count (model+0x40
 					// +4*i / the level mesh's +0x34 [orig:
-					// update_terrain_lod_levels @ 0x57b882..0x57b8ba;
-					// Entity_BuildBoneTransformMatrices_0 @ 0x57b6d1]).
+					// DeathPiece_RenderVisible @ 0x57b882..0x57b8ba;
+					// DeathPiece_RenderSection @ 0x57b6d1]).
 					for (size_t li = 0; li < piece_m3->lod_count; ++li) {
 						info.model.lod_threshold_q16.push_back(
 								renderer::rlod_threshold_q16_from_rmdl(

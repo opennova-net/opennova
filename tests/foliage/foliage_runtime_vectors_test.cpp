@@ -195,7 +195,7 @@ bool detail_vectors_and_gates() {
 // The thermal view (the scene core's fourth argument, the held weapon's
 // thermal byte) forces every detail patch onto the primary LOW pass and
 // scales its c6 fade by flt_7C69F4 = 0.1: no HIGH, no strict-LESS secondary.
-// [orig: Foliage_RenderFarPatches @ 0x60a193..0x60a19c (forced LOW),
+// [orig: Foliage_RenderDetailPatches @ 0x60a193..0x60a19c (forced LOW),
 // @ 0x60a497..0x60a4ae (x0.1); Render_ProcessMainSceneFrame
 // @ 0x5ca2da..0x5ca2e3, 0x5ca8e3]
 bool detail_thermal_view_forces_low_at_a_tenth_fade() {
@@ -933,7 +933,7 @@ bool detail_cache_lru_evicts_oldest_at_capacity_three() {
 	// where eviction order is distinguishable: with residents A,B,C and only
 	// A,B re-touched, a new key replaces the OLDEST-stamped entry C — not the
 	// newest and not slot zero.
-	// [orig: Foliage_UpdateFarCellSlots @ 0x601b30;
+	// [orig: Foliage_UpdateDetailCellSlots @ 0x601b30;
 	// terrain_tile_init_buffers @ 0x5ff920 — pool sizing]
 	if (!expect(Runtime::detail_cache_capacity(500) == 3,
 	            "source vertex count 500 sizes the pool to three cells")) {

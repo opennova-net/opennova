@@ -23,7 +23,7 @@ namespace godot {
 // The World particle pass on the water's far side (retail pass A) as
 // transparent render-list geometry. Retail submits it after the far-side
 // tracers and before the far-side foliage and the water surface (retail
-// Terrain_RenderSceneWithReflection @ 0x5c95ac..0x5c95dc), a slot no
+// Terrain_RenderWorldScene @ 0x5c95ac..0x5c95dc), a slot no
 // compositor callback reaches, so every non-distortion draw command of the
 // compiled far-side list becomes one run instance at kRungParticleFarSide
 // (the material's render priority). Runs share one sort origin (the world

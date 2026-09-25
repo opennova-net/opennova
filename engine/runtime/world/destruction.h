@@ -123,7 +123,7 @@ struct DeathPieceModel {
     // Section i's centre: the 108-B runtime COBJ row's +0x38..+0x40 (the
     // model+0xB0 collision block's +0x6C array, Q16.16 model axes) — the
     // spawn offset and the draw pivot [orig: Entity_SpawnDeathPieces
-    // @ 0x4938b2..0x4938cc; Entity_BuildBoneTransformMatrices_0
+    // @ 0x4938b2..0x4938cc; DeathPiece_RenderSection
     // @ 0x57b6f6..0x57b70b].
     std::vector<std::array<int32_t, 3>> section_origin_q16;
     // The model's bound radius (model+0x14, GHDR's Q16.16 max radius): the

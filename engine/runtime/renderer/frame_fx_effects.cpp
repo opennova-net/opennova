@@ -8,8 +8,8 @@ namespace opennova::renderer {
 namespace {
 
 // The DrawPass constants the rows share.
-// [orig: FrameFX_CaptureBackBufferAndSubmitDecal @0x583f71 / @0x583f82
-//  (flt_7D83BC / flt_7D68F4, the capture downsample); sub_5841D0 @0x58424b
+// [orig: FrameFX_CaptureBackBuffer @0x583f71 / @0x583f82
+//  (flt_7D83BC / flt_7D68F4, the capture downsample); FrameFX_BloomKernel @0x58424b
 //  (flt_7D83A4, every 256-square pass's base) / @0x58425b (flt_7C6950, the
 //  1/256 blur radius unit)]
 constexpr float kDownsampleBase = 1.0f / 2048.0f;
@@ -19,8 +19,8 @@ constexpr float kWorkBase = 1.0f / 512.0f;
 constexpr float kWorkTexel = 1.0f / 256.0f;
 
 // The capture downsample into 256A: LumaAverage, four taps at 30 degrees,
-// the 256-square rect. [orig: FrameFX_CaptureBackBufferAndSubmitDecal
-// @0x583f64..0x583fcb; FrameFX_CaptureRenderTarget @0x584165..0x5841c0]
+// the 256-square rect. [orig: FrameFX_CaptureBackBuffer
+// @0x583f64..0x583fcb; FrameFX_CaptureAltBuffer @0x584165..0x5841c0]
 FrameFxPass capture_downsample() {
 	FrameFxPass pass;
 	pass.source = FrameFxBuffer::Capture;
@@ -55,7 +55,7 @@ FrameFxStep distortion_step(FrameFxDistortionSet set, FrameFxBuffer screen) {
 }
 
 // The backbuffer capture plus its 256A downsample: FrameFX_CaptureBackBuffer-
-// AndSubmitDecal(1) [orig: Render_DispatchShadowByType @0x584487].
+// AndSubmitDecal(1) [orig: FrameFX_ApplyScreenEffect @0x584487].
 void append_capture_and_downsample(std::vector<FrameFxStep> &steps) {
 	steps.push_back(capture_step());
 	steps.push_back(pass_step(capture_downsample()));
@@ -64,7 +64,7 @@ void append_capture_and_downsample(std::vector<FrameFxStep> &steps) {
 // Type 0, the distortion pass: the jittered 256A -> 256B pass, then the two
 // distortion sets with slot 2 bound. The jitter is (GetTickCount() >> 1) +
 // (rand() & 15) degrees.
-// [orig: render_projected_shadow @0x583748..0x5837ea (the pass), @0x5838f3
+// [orig: FrameFX_DistortionPass @0x583748..0x5837ea (the pass), @0x5838f3
 //  (slot 2 = [fx+4]) / @0x583922 (slot 2 = [fx+8])]
 void append_distortion(std::vector<FrameFxStep> &steps, std::uint32_t clock_ms,
 		const FrameFxRand &rand) {
@@ -76,7 +76,7 @@ void append_distortion(std::vector<FrameFxStep> &steps, std::uint32_t clock_ms,
 	jitter.taps = FrameFxTaps::Rotated;
 	jitter.reduced_u = true;
 	jitter.base = kWorkBase;
-	jitter.radius = 0.0027617188f; // flt_7D83B8 [orig: render_projected_shadow @0x583764]
+	jitter.radius = 0.0027617188f; // flt_7D83B8 [orig: FrameFX_DistortionPass @0x583764]
 	const std::int32_t tick_half = static_cast<std::int32_t>(clock_ms >> 1);
 	jitter.angle_degrees = tick_half + static_cast<std::int32_t>(rand() & 15u);
 	jitter.constant_alpha = 0.99f; // flt_7C6A00 @0x583792 (c0.a, unread by the stage)
@@ -88,7 +88,7 @@ void append_distortion(std::vector<FrameFxStep> &steps, std::uint32_t clock_ms,
 // Type 1, the damage blur at p = red / 120: from p = 0.5 the frame is
 // replaced by 256A blurred at radius min(p - 0.5, 2) / 256 through 60-degree
 // taps; below it 256A cross-fades over the frame at alpha 2p.
-// [orig: Scar_SubmitShadowDecal @0x5830f0 (p >= 0.5 @0x58312d..0x5831c0;
+// [orig: FrameFX_DamageBlur @0x5830f0 (p >= 0.5 @0x58312d..0x5831c0;
 //  p < 0.5 @0x5831ce..0x58323e); p = word x flt_7DC1A4 @0x5caa5c..0x5caa62]
 void append_damage_blur(std::vector<FrameFxStep> &steps, std::int32_t red_word) {
 	append_capture_and_downsample(steps);
@@ -118,7 +118,7 @@ void append_damage_blur(std::vector<FrameFxStep> &steps, std::int32_t red_word) 
 // radial-fan passes that keep the rect centre and blur toward its border,
 // one pass below d = 2, two (256A -> 256B at d/4) below 8, three (d/16 into
 // 256B, d/4 back into 256A) from 8, the last blending into the frame.
-// [orig: Scar_SubmitCascadeShadowPasses @0x5833a0 (d < 2 @0x5833df..0x583421,
+// [orig: FrameFX_DeathBlur @0x5833a0 (d < 2 @0x5833df..0x583421,
 //  2 <= d < 8 @0x58345f..0x5834a3 then @0x583548..0x583584, d >= 8
 //  @0x5834a8..0x583584); d @0x5ca9fb..0x5caa34 (flt_7DC1A8)]
 void append_death_blur(std::vector<FrameFxStep> &steps, std::int32_t elapsed_ticks) {
@@ -163,7 +163,7 @@ void append_death_blur(std::vector<FrameFxStep> &steps, std::int32_t elapsed_tic
 
 // The Tiled scanline pass over the frame: "ffscan" at base 1/128, two rand()
 // draws per pass (the first gives the V offset, the second the U offset).
-// [orig: sub_583A60 @0x583a60; render_scar_decal_batch @0x582cc2..0x582cd8]
+// [orig: FrameFX_ScanlineOverlay @0x583a60; FrameFX_DrawPass @0x582cc2..0x582cd8]
 FrameFxPass scanline_pass(const FrameFxRand &rand) {
 	FrameFxPass pass;
 	pass.source = FrameFxBuffer::Scanlines;
@@ -180,8 +180,8 @@ FrameFxPass scanline_pass(const FrameFxRand &rand) {
 
 // Type 8, the thermal view: the backbuffer capture without its downsample,
 // the inverted-luma green stage over the frame, then the scanlines.
-// [orig: sub_5845B0 @0x5845f5 (FrameFX_CaptureBackBufferAndSubmitDecal(0));
-//  sub_584390 @0x584390 (@0x5843b0..0x58441a, then sub_583A60 @0x584433)]
+// [orig: FrameFX_ApplyWeaponViewEffect @0x5845f5 (FrameFX_CaptureBackBuffer(0));
+//  FrameFX_ThermalView @0x584390 (@0x5843b0..0x58441a, then FrameFX_ScanlineOverlay @0x584433)]
 void append_thermal(std::vector<FrameFxStep> &steps, const FrameFxRand &rand) {
 	steps.push_back(capture_step());
 	FrameFxPass pass;
@@ -243,7 +243,7 @@ FrameFxFramePlan plan_frame_fx(const FrameFxFrameInputs &in, FrameFxPlannerState
 	if (plan.nvg.composite)
 		return plan;
 
-	// Render_DispatchShadowByType returns at once below FBEFFECTS 1.
+	// FrameFX_ApplyScreenEffect returns at once below FBEFFECTS 1.
 	// [orig: @0x584440..0x58444a]
 	const bool dispatcher = in.frame_effects_level > 0;
 	const bool red_flash = view.red_word != 0 && view.camera_mode != 3;
@@ -262,7 +262,7 @@ FrameFxFramePlan plan_frame_fx(const FrameFxFrameInputs &in, FrameFxPlannerState
 	}
 	// Type 2 at FBEFFECTS 3. [orig: FrameFX_QualityAtLeast3 @0x5caa7b; @0x5844c4..0x5844eb]
 	plan.bloom = dispatcher && in.frame_effects_level >= 3;
-	// Types 8 and 9 on the frame's CanFire latches; sub_5845B0 has no level
+	// Types 8 and 9 on the frame's CanFire latches; FrameFX_ApplyWeaponViewEffect has no level
 	// gate. [orig: @0x5caa9c..0x5caad5]
 	if (view.thermal_view)
 		append_thermal(plan.after_bloom, rand);
@@ -276,7 +276,7 @@ std::vector<FrameFxPass> frame_fx_bloom_passes() {
 	passes.push_back(capture_downsample());
 	// The two weighted pairs: 90 + 270 degrees from 256A into 256B with the
 	// U taps reduced, then 0 + 180 degrees back into 256A.
-	// [orig: sub_5841D0 @0x584248..0x5842a3, @0x5842a8..0x5842f8]
+	// [orig: FrameFX_BloomKernel @0x584248..0x5842a3, @0x5842a8..0x5842f8]
 	FrameFxPass pair;
 	pair.stage = FrameFxStage::WeightedAdd;
 	pair.taps = FrameFxTaps::Weighted;
@@ -296,7 +296,7 @@ std::vector<FrameFxPass> frame_fx_bloom_passes() {
 	second.angle_degrees = 0;
 	passes.push_back(second);
 	// The composite: 256A added over the frame at c0.a = 0.5 through 45-degree
-	// taps. [orig: sub_5841D0 @0x5842fd..0x58437a (flt_7D844C, flt_7C3B94)]
+	// taps. [orig: FrameFX_BloomKernel @0x5842fd..0x58437a (flt_7D844C, flt_7C3B94)]
 	FrameFxPass composite;
 	composite.source = FrameFxBuffer::WorkA;
 	composite.target = FrameFxBuffer::Frame;

@@ -283,7 +283,7 @@ func test_tracer_rung_follows_the_eye_water_side() -> void:
 # The tracer pool's distortion ribbons (the styles with a +0x828 word: the
 # rocket, the AT4, the sniper) publish into the effect world's FrameFX drawer
 # and draw in the type-0 row with slot 2 = 256B (retail
-# CEffectEmitterPool_RenderDistortionPass, called from render_projected_shadow
+# CEffectEmitterPool_RenderDistortionPass, called from FrameFX_DistortionPass
 # @ 0x583928); a live channel of such a style is what opens the row (retail
 # CEffectEmitterPool_HasDistortionChannels @ 0x5DB7F0). The stock styles have
 # no distortion ribbon.

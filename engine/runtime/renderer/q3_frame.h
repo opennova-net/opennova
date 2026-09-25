@@ -22,7 +22,7 @@ namespace opennova::renderer {
 // display format (an X8R8G8B8 display gets an A8R8G8B8 altbuffer) with the
 // beauty depth-stencil still bound; the compiled list is that altbuffer's
 // content.
-// [orig: FrameFX_RenderBloomPass @ 0x582a54 (CRenderBatchQueue_SortAndFlush(4)),
+// [orig: FrameFX_RenderGlowSource @ 0x582a54 (CRenderBatchQueue_SortAndFlush(4)),
 // @ 0x582a5d (render_water_surface(0, 1)), @ 0x582a77 (render_celestial_bodies(1)),
 // @ 0x582a80 (render_skybox_sun_glow(0, 0));
 // FrameFX_CreateAltBufferTexture @ 0x582120 (format 22 -> 21 @ 0x582141,
@@ -99,7 +99,7 @@ inline constexpr float kQ3WaterNvBrightBias = 0.15f;
 // 0.99996948 remaps their clip depth into that far band before the ordinary
 // z-tested flush, so both survive only where the beauty depth is at (or
 // within the band of) the far plane: cleared sky and the farthest terrain.
-// [orig: FrameFX_RenderBloomPass @ 0x582940 (Render_SetViewportFarDepth
+// [orig: FrameFX_RenderGlowSource @ 0x582940 (Render_SetViewportFarDepth
 // @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77 ->
 // render_skybox_sun_glow(0, 0) @ 0x582a80); Render_SetViewportFarDepth
 // @ 0x58a840 (MinZ 0.98000002 @ 0x58a859, MaxZ 0.99996948 @ 0x58a86b); the
@@ -110,7 +110,7 @@ inline constexpr float kQ3FarBandMaxZ = 0.99996948f;
 // viewport, MinZ 0 / MaxZ 0.99996948, not [0, 1] [orig: Render_SetViewport
 // @ 0x58a720 (MinZ 0 @ 0x58a72f, MaxZ @ 0x58a739), set for the main frame
 // by Render_ProcessMainSceneFrame @ 0x5ca5fc and again by
-// FrameFX_RenderBloomPass @ 0x582a45 before the far band].
+// FrameFX_RenderGlowSource @ 0x582a45 before the far band].
 inline constexpr float kQ3SceneViewportMaxZ = 0.99996948f;
 static_assert(kQ3SceneViewportMaxZ == kQ3FarBandMaxZ,
 		"q3_far_band_reverse_z folds the band MaxZ into the scene viewport MaxZ");
@@ -265,7 +265,7 @@ struct Q3WaterMaterialParameters {
 // sat(SelfLumColor x gain) x 2 under the wrapper's fog policy, with alpha 0.
 // `self_lum` is the producer's pass-specific SelfLumColor: the material's
 // RgbGen evaluated at the bloom pass's UPL_INTENSITY value (the disc and
-// glow submit alphas of FrameFX_RenderBloomPass @ 0x582a77 / @ 0x582a80;
+// glow submit alphas of FrameFX_RenderGlowSource @ 0x582a77 / @ 0x582a80;
 // runtime/environment/celestial_frame.h). `blend` is the blend the material
 // was classified with, mapped like NormalCopy's (_OP replace, _AB alpha,
 // _AD add): the glow's submit flags (0x100 in the bloom pass, 0x110 in the

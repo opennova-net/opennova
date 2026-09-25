@@ -714,7 +714,7 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 			"The sun veil and the three fullscreen damage-feedback quads are "
 			+ "internal children; the NVG image is the terminal FrameFx pass's, and "
 			+ "the underwater murk draws in the 3D view's post-particle overlay "
-			+ "pass, before the frame effects [orig: Terrain_RenderSceneWithReflection "
+			+ "pass, before the frame effects [orig: Terrain_RenderWorldScene "
 			+ "@ 0x5c96f5].")
 	assert_null(effects.get_node_or_null("NvgPost"))
 	assert_null(effects.get_node_or_null("UnderwaterMurk"))
@@ -726,7 +726,7 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
 	assert_true(effects.is_nvg_mask_visible(),
 			"First-person-visible NVG draws the NVG.tga mask and gain scale "
-			+ "[orig: sub_5CFF70 @0x5cffab..0x5d0055].")
+			+ "[orig: NVG_DrawMaskAndGain @0x5cffab..0x5d0055].")
 	effects.update_view(false, 1, false, 0)
 	assert_false(effects.is_nvg_mask_visible(),
 			"Camera suppression hides the mask without consuming simulation state.")

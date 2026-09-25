@@ -83,7 +83,7 @@ SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, flo
 // The same corners with the Y correction's selected ratio given: the NVG
 // view's Sighted arm lays the card out over the 512-square NVG target
 // (overlayCtx 512 x 512) while flt_8409EC keeps the frame's selected ratio.
-// [orig: terrain_scene_render @0x5d08d8..0x5d0927]
+// [orig: NVG_RenderSceneToTarget @0x5d08d8..0x5d0927]
 SightViewportRect sight_rect_to_viewport_at_ratio(const SightRect &rect, float width,
 		float height, float selected_h_over_w);
 

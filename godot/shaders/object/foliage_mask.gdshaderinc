@@ -10,7 +10,7 @@
 // every other camera unmasked. Every pass of a person strip reads it: the
 // opaque and blended NORMAL outputs and the post-multiply (P3) layer, which
 // retail draws inside the same wave flush after the masks. Retail
-// Terrain_RenderSceneWithReflection @ 0x5c953e..0x5c9567 (far wave:
+// Terrain_RenderWorldScene @ 0x5c953e..0x5c9567 (far wave:
 // MATCHTERRAIN subpass, then the wave with its masks), @ 0x5c9600..0x5c9647
 // (camera wave); Terrain_RenderSectorEntitiesBySide @ 0x5c7ddf..0x5c7f11
 // (masks) before render_sector_entity @ 0x5c7ffc.

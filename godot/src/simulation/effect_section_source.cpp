@@ -33,7 +33,7 @@ void EffectSectionSource::blink_hits(const Vector3 &p_godot_position,
 }
 
 // The raw word by the hit's pool-2 entity index: no forced bits (retail
-// sub_5F6D10 reads g_BuildingSectionVisMask directly).
+// CEffectGroup_IsSectionVisible reads g_BuildingSectionVisMask directly).
 std::uint32_t EffectSectionSource::section_mask(std::int32_t p_pool_entity_index) const {
 	return occlusion_ != nullptr
 			? occlusion_->section_mask(opennova::world::EntityHandle::make(2, p_pool_entity_index))

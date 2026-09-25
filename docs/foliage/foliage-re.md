@@ -93,7 +93,7 @@ landed these corrections; the sections below carry the detail.
 - The indoor blink gate's reach. Retail skips the terrain traversal and both
   detail passes while the local player's blink flags carry `0x2`
   (`g_LocalPlayerBlinkFlags` test at
-  `Terrain_RenderSceneWithReflection @ 0x5c93d5..0x5c93e0`, pass gates
+  `Terrain_RenderWorldScene @ 0x5c93d5..0x5c93e0`, pass gates
   `@ 0x5c95bd` / `@ 0x5c965d`), but the BySide waves, and the MODEL masks
   drawn inside them, still run. The port hides the whole `FoliageDispatcher`
   with the terrain (`OcclusionFrame::apply_scene_pass_gates`), and a hidden
@@ -210,7 +210,7 @@ literal, not the quality-scaled near zone the LOD decision subtracts: the x87
 stack carries `[dist, 16.0]` through the emit block and the gate is
 `fsubrp; fcomp 42.0; jp skip`, so a node farther than 58 units is never
 handed off however near its own leaves are. Cells behind the camera therefore never
-enter the visible-key list (`Foliage_VisibleFarKeyList`, cap 128), which is
+enter the visible-key list (`Foliage_VisibleDetailKeyList`, cap 128), which is
 what keeps the far-slot pool's working set below its 16-bit-index capacity
 (D-FOLIAGE-13). `Terrain_CollectNearFoliagePatches @ 0x603e60` then
 recursively reaches 16-unit leaves over the height mipchain, rejects a leaf
@@ -271,11 +271,11 @@ consumer. `terrain_render_visible_sectors @ 0x6090C0` sets `0x80000000` at
 `0x60924A`, then traverses quadrant 1. The collector retains the raw node `+52`
 height center at `0x603F46` and combines the flat flag into the key at
 `0x603F7E..0x603F8A`; zero-height terrain drawing does not flatten this distance
-input. `Foliage_UpdateFarCellSlots @ 0x601B30` performs ordinary key lookup,
+input. `Foliage_UpdateDetailCellSlots @ 0x601B30` performs ordinary key lookup,
 allocation and LRU touching for flagged keys. The flag test belongs to
 `generate_foliage_instances_0 @ 0x5FFDD0`, at `0x5FFE05`: it writes zero index
 and vertex counts at `0x5FFE10..0x5FFE16` before placement/map/height sampling.
-`Foliage_SetupFarSlotDraw @ 0x6007C0` subsequently reads those zero counts,
+`Foliage_SetupDetailSlotDraw @ 0x6007C0` subsequently reads those zero counts,
 so these are real empty cache residents, not drawable flat grass.
 
 The collector's nonleaf branch descends all four children before any distance
@@ -394,21 +394,22 @@ secondary (`0x60a193..0x60a19c`). **Corrected 2026-09-24:** that argument is
 the THERMAL view flag, not a reflection flag. `Render_ProcessMainSceneFrame`
 reads the held weapon's thermal byte (`@ 0x5ca2da..0x5ca2e3`) and passes it
 as the scene core's fourth argument (`@ 0x5ca8e3`), which
-`Terrain_RenderSceneWithReflection` pushes to both detail passes
+`Terrain_RenderWorldScene` pushes to both detail passes
 (`@ 0x5c95c1/0x5c9661`). Under the thermal view every patch therefore draws
-one LOW pass at a tenth of its fade. (The IDB still types the argument
-`reflectionEnabled`; the water mirror draws no foliage at all, env #30.)
+one LOW pass at a tenth of its fade. (The IDB typed the argument
+`reflectionEnabled` until 2026-09-25, now `thermalView`; the water mirror
+draws no foliage at all, env #30.)
 
 The main scene invokes the renderer twice per frame, split by water side:
-`Foliage_RenderFarPatchesPass(0) @ 0x5c95c5` before the water surface and
-`Foliage_RenderFarPatchesPass(1) @ 0x5c9665` after it (the wrapper
-`Foliage_RenderFarPatchesPass @ 0x60c6d0` brackets `Foliage_RenderFarPatches`
+`Foliage_RenderDetailPatchesPass(0) @ 0x5c95c5` before the water surface and
+`Foliage_RenderDetailPatchesPass(1) @ 0x5c9665` after it (the wrapper
+`Foliage_RenderDetailPatchesPass @ 0x60c6d0` brackets `Foliage_RenderDetailPatches`
 with fog on/off). The side test compares the collected node's AABB maximum
 height (node `+0x28`, `fcom [ecx+28h]` @ 0x60a1a2) with
 `Env_WaterHeightFixed`: pass `formatType` 0 draws the patches lying wholly
 at or below the water while the camera is above it (and the patches reaching
 above the water while the camera is below), pass 1 the rest
-[`orig: Foliage_RenderFarPatches @ 0x609df4..0x609e1b, @ 0x60a1a0..0x60a1c6`].
+[`orig: Foliage_RenderDetailPatches @ 0x609df4..0x609e1b, @ 0x60a1a0..0x60a1c6`].
 The former reading "patch min-height" was wrong.
 
 Both detail passes alpha-blend: the technique block enables
@@ -421,7 +422,7 @@ fringe into hard sheets and makes cells pop as the fade crosses per-texel
 thresholds.
 
 The setup flag is also a depth-comparison toggle, not a wireframe or fill-mode
-toggle. `Foliage_SetupFarSlotDraw @ 0x6007c0` selects value 2 for the
+toggle. `Foliage_SetupDetailSlotDraw @ 0x6007c0` selects value 2 for the
 secondary call at `0x6008fc..0x600912`; wrapper `0x67cac0..0x67caea` applies
 that value to render state `0x17` (`D3DRS_ZFUNC`), so value 2 is
 `D3DCMP_LESS` and the normal value 4 is `D3DCMP_LESSEQUAL`. Both passes are
@@ -467,7 +468,7 @@ The same literal ends `dp4 r1, r1, c2; add r1, r1, -c5.x; mad oFog, -r1.x,
 c5.y, c5.z`, with `c5` built from the device fog start/end
 (`@ 0x6005ee..0x600652`), and the fog-mode-8 draw turns table and vertex fog
 off (`CD3DDevice_SetFogAndBlendMode @ 0x677768..0x67779a`;
-`Foliage_SetupFarSlotDraw` selects mode 8 when the wind VS exists). The
+`Foliage_SetupDetailSlotDraw` selects mode 8 when the wind VS exists). The
 detail fog is therefore linear in eye depth between start and end for EVERY
 fog type, clamped per vertex and read from the wind-displaced position.
 Ported 2026-09-24 (`foliage_vertex_fog` in `foliage_detail.gdshaderinc`); the
@@ -487,7 +488,7 @@ where:
 The reimpl implements the exact arithmetic and render states. Under a
 `Terrain`, `t1` is always the composed page the lookup returns; a patch with
 no resident page is not drawn, as retail's null lookup result skips the
-patch's slot draw [`orig: Foliage_RenderFarPatches: Terrain_FindSectorPatchRT
+patch's slot draw [`orig: Foliage_RenderDetailPatches: Terrain_FindSectorPatchRT
 call @ 0x60a1de, null skip @ 0x60a1e6..0x60a1e8 to the slot loop's next
 iteration @ 0x60a6a2`] (corrected 2026-09-24; the cold fallback and the raw
 `.til` overlay path `u_tile_overlay` are retired). Only the terrain-less
@@ -500,7 +501,7 @@ plus the byte-quantized heightfield-normal/light DOT3 alpha.
 instead. The preview's 1024 normal atlas is clamped to the selected
 quadrant's texel-center bounds, matching four retail 512 CLAMP samplers. The
 detail emitter color is not a second dynamic time-of-day input.
-`Foliage_RenderFarPatches @ 0x609efc..0x609f2a` computes c6.rgb as the
+`Foliage_RenderDetailPatches @ 0x609efc..0x609f2a` computes c6.rgb as the
 componentwise product
 `0x319F9D0/D4/D8 × 0x319F9E0/E4/E8`. The complete xref set for the second
 vector contains only the render reads plus the writes of literal `1.0` at
@@ -519,12 +520,12 @@ non-splat path. c6.a is still the distance/pass fade described above, and
 MODEL masks do not use this emitter factor.
 
 The apparent EffectWorld point-light hook is inert on that selected path.
-`Foliage_RenderFarPatches` does call `Light_SelectAndEnableForDraw` once per
+`Foliage_RenderDetailPatches` does call `Light_SelectAndEnableForDraw` once per
 patch at `0x60a5dc`, after building the patch AABB, so the legacy device state
 really does select and enable up to four D3D lights. But asset load first
 creates `Foliage_WindSwayVS` unconditionally (`Foliage_LoadDefAssets
 @ 0x601278 -> Terrain_CreateFoliageVertexShaders @ 0x5ff630`), and
-`Foliage_SetupFarSlotDraw` installs that nonzero handle in every selected draw
+`Foliage_SetupDetailSlotDraw` installs that nonzero handle in every selected draw
 descriptor at `0x60087a..0x600883`. The complete `vs_1_1` literal at
 `0x7de648` declares only position, color, and texcoord; it has no normal or
 light input and emits `mov oD0,c6`. The `ps_1_1` blend then uses that vertex
@@ -570,7 +571,7 @@ page that does not contain the point
 (corrected 2026-09-24; the earlier text named the function
 `Terrain_FindSectorTileRT` and called the match exact). The live quality
 branch is not the inverse-view fallback: `Foliage_WindSwayVS != 0 @ 0x5ffbb0`
-is true after required shader creation, so `Foliage_RenderFarPatches @
+is true after required shader creation, so `Foliage_RenderDetailPatches @
 0x60a25d..0x60a297` builds c7/c8 from the packed page origin and
 `1/(1024>>lod)`. Its model translation is D3D `(world Z,0,world X)`
 (`@ 0x60a35c..0x60a3da`); the literal's `m4x3 r10,v0,c12` followed by c7/c8
@@ -618,7 +619,7 @@ and the reimpl's AI (which never sets `net_stance_bits`) matches.
 
 A passing entity rides the BySide wave of its water side (entity z − 1.0
 against the water, `@ 0x5c7dd2`, side `@ 0x5c7dfd..0x5c7e18`; the far wave
-draws first, `Terrain_RenderSceneWithReflection @ 0x5c953e..0x5c955f`) and
+draws first, `Terrain_RenderWorldScene @ 0x5c953e..0x5c955f`) and
 enters the tier at view depth 38 (`Foliage_UpdateModelTiles`'s own
 `>= 38.0` view-Z gate, `@ 0x601f99..0x601fab`). The per-entity
 draw parameter is `clamp(4096 / (distance_units + 1), 8, 128)` — the model
@@ -662,7 +663,7 @@ local-player exception [`orig: collect_visible_entities_for_terrain
 view-depth floor and each anchor's water side
 (`renderer::foliage_entity_far_side`, camera side
 `renderer::foliage_camera_above_water`,
-`Terrain_RenderSceneWithReflection @ 0x5c93a1..0x5c93b0`). The foliage frame
+`Terrain_RenderWorldScene @ 0x5c93a1..0x5c93b0`). The foliage frame
 leg now runs after the occlusion leg, in the live table and the frozen-pose
 replay.
 
@@ -728,7 +729,7 @@ Foliage_UpdateModelTiles @ 0x601f50 -> Foliage_DrawModelTileSlot
 @ 0x601d90`]: the far wave inside `BySide(far, 0) @ 0x5c955f`, before the
 far-side alpha flush `@ 0x5c9596`; the camera wave inside
 `BySide(camera, 0) @ 0x5c9638`, after the water pass `@ 0x5c95dc` and before
-`Scar_DrawBatches @ 0x5c9658` [`orig: Terrain_RenderSceneWithReflection`].
+`Scar_DrawBatches @ 0x5c9658` [`orig: Terrain_RenderWorldScene`].
 Every person of that wave, and everything drawn after it, depth-tests
 against them. The reimpl draws the masks in two places:
 
@@ -851,14 +852,14 @@ grazing footprint sharper.
 ## Persistent caches and submission identity
 
 The detail tier uses the persistent slot pool in
-`Foliage_UpdateFarCellSlots @ 0x601b30`, with strict signed-age LRU
+`Foliage_UpdateDetailCellSlots @ 0x601b30`, with strict signed-age LRU
 replacement; duplicate misses in one update allocate once. **Corrected
 2026-09-24:** retail updates the slots BEFORE the patches draw, so a newly
 collected cell draws in its generation frame. The terrain frame
 (`Render_ProcessMainSceneFrame @ 0x5ca654` -> `PolyTrn_RenderFrame`) ends with
 the four per-definition slot updates (`@ 0x60f0ea..0x60f10f`), and only the
-later scene core (`Terrain_RenderSceneWithReflection`, called `@ 0x5ca8ec`)
-reaches `Foliage_RenderFarPatches`, whose `Foliage_SetupFarSlotDraw` finds
+later scene core (`Terrain_RenderWorldScene`, called `@ 0x5ca8ec`)
+reaches `Foliage_RenderDetailPatches`, whose `Foliage_SetupDetailSlotDraw` finds
 this frame's key (`@ 0x600807..0x60081c`). The earlier reading ("cached
 geometry is drawn before the update, a miss first shows on the next terrain
 render") was wrong; the runtime now updates, then draws. Retail's 16-bit index
@@ -1047,7 +1048,7 @@ claim or divergence.
 | D-FOLIAGE-4 | **SUPERSEDED/FIXED 2026-07-13.** The 2026-07-08 two-tier port was itself inverted and has been deleted. Fresh detail expansion and MODEL ground-fit paths replace it. |
 | D-FOLIAGE-5 | **FIXED for the authored chain and sampler selection; bounded terminal-LOD approximation.** The portable custom chain keeps authored RGB at mip 0, blends recursively downsampled later retail mips toward `0x808080` with `w=min(256,floor(320*i/N))`, preserves base-chain alpha, and supplies Godot's required terminal levels without generic mip regeneration. The round-4 filtering adjudication pins anisotropic sampling. The host's longest-gradient guard keeps the synthetic 2x2/1x1 tail out, but can choose a sharper grazing footprint than the device's minor-axis/maximum-anisotropy LOD selection. |
 | D-FOLIAGE-6 | **FIXED 2026-07-14.** The former opaque-black conclusion missed the downstream ONE/ONE blend state. The reimpl now preserves destination color while retaining the recovered strict-alpha-tested MODEL depth write. |
-| D-FOLIAGE-7 | **OPEN, narrowed 2026-09-24 to the detail pass's page-edge addressing (previously narrowed 2026-08-23).** The foliage half of the page input is ported: detail `t1` is the page `TerrainTileCompositionCache::lookup` returns, retail's `Terrain_FindSectorPatchRT @ 0x6042a0` rule (first resident record in record order at granularity 32..512 in the point's sector, no LOD or same-frame preference, `@ 0x6042B0..0x60430B`), from the ported 128-record cache whose pages compose inside the frame that draws them, with retail's TOD refresh ("Port retail's terrain page record cache and compose pages before they draw"); a patch with no resident page is skipped, as retail's null lookup skips it (`Foliage_RenderFarPatches @ 0x60a1de`, `@ 0x60a1e6..0x60a1e8` -> `@ 0x60a6a2`; "Retire the detail foliage's raw .til overlay fallback"); the raw `.til` overlay path and the hosted 1024 bake are gone ("Retire the hosted 1024 .til overlay bake"), so the overlay reaches foliage only through the page composer, whose `.til` quads are RGB only over the DXT5 atlas ("Compose terrain pages with the retail D3D9 raster and texture filters", "Encode the terrain atlas and detail layers with retail's D3DX DXT codec"). The c7/c8 reduction, PROJSHAD admission/blending and the temporary-blue composite stay exact as recorded 2026-08-23. What stays open: (1) the address mode the detail pass applies to the page render target where the patch UV leaves the returned page (a coarse or finer record need not contain the patch); the reimpl clamps to the page's half-texel border, retail's edge behavior on this stage is unwitnessed; (2) anything D-TERRAIN-7 still carries for the page producer itself (the page composition is D-TERRAIN-7's). Generic whole-process CTRL/RNG ordering is D-3DI-2. |
+| D-FOLIAGE-7 | **OPEN, narrowed 2026-09-24 to the detail pass's page-edge addressing (previously narrowed 2026-08-23).** The foliage half of the page input is ported: detail `t1` is the page `TerrainTileCompositionCache::lookup` returns, retail's `Terrain_FindSectorPatchRT @ 0x6042a0` rule (first resident record in record order at granularity 32..512 in the point's sector, no LOD or same-frame preference, `@ 0x6042B0..0x60430B`), from the ported 128-record cache whose pages compose inside the frame that draws them, with retail's TOD refresh ("Port retail's terrain page record cache and compose pages before they draw"); a patch with no resident page is skipped, as retail's null lookup skips it (`Foliage_RenderDetailPatches @ 0x60a1de`, `@ 0x60a1e6..0x60a1e8` -> `@ 0x60a6a2`; "Retire the detail foliage's raw .til overlay fallback"); the raw `.til` overlay path and the hosted 1024 bake are gone ("Retire the hosted 1024 .til overlay bake"), so the overlay reaches foliage only through the page composer, whose `.til` quads are RGB only over the DXT5 atlas ("Compose terrain pages with the retail D3D9 raster and texture filters", "Encode the terrain atlas and detail layers with retail's D3DX DXT codec"). The c7/c8 reduction, PROJSHAD admission/blending and the temporary-blue composite stay exact as recorded 2026-08-23. What stays open: (1) the address mode the detail pass applies to the page render target where the patch UV leaves the returned page (a coarse or finer record need not contain the patch); the reimpl clamps to the page's half-texel border, retail's edge behavior on this stage is unwitnessed; (2) anything D-TERRAIN-7 still carries for the page producer itself (the page composition is D-TERRAIN-7's). Generic whole-process CTRL/RNG ordering is D-3DI-2. |
 | D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadTileInfoFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
 | D-FOLIAGE-9 | **FIXED 2026-09-24** ("Port the foliage depth masks, their water sides and anchors", "Close the foliage mask residuals: atlas map gate, local anchor, P3 order", "Run render_TOC on collected entities outside blink boxes"). Narrowed 2026-07-16 to visibility membership: a camera frustum stood in for retail's visible-sector walk and `test_sector_entity_occlusion @ 0x5c4610`, and same-frame refreshes of one `(slot, cell key)` were coalesced. The anchors are now the occlusion frame's collected organics with stance bits and no ground entity (placed rows via `entity_render_visible`, runtime twins via their live verdict, bare wire rows via the person/sphere collector legs with the received stance bits and no carrier); the waves' contained render_TOC test (`Terrain_RenderSectorEntitiesBySide @ 0x5c7d96`, skipped for contained entities `@ 0x5c7d8b..0x5c7da0`) runs inside those verdicts (`OcclusionWorld::render_wave_toc_occluded`); the local player takes the same collector verdict, since `collect_visible_entities_for_terrain @ 0x5c8c60` has no local-player exception. The compiler keeps only the MODEL walk's `>= 38` floor (`Foliage_UpdateModelTiles @ 0x601f99..0x601fab`), and every on-phase visit regenerates around its own anchor (`@ 0x602085..0x6020aa`), so the coalescing is gone. The weapon Inset view still reuses the main view's anchors (Open after the 2026-09-24 pass). |
 | D-FOLIAGE-11 | **FIXED 2026-07-16.** The reimpl fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity`, the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query (over the occlusion frame's collector verdicts since 2026-09-24, D-FOLIAGE-9). The former ONED preview had no infantry and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |

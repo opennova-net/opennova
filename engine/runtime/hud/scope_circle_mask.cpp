@@ -185,7 +185,7 @@ ScopeCircleMaskGeometry scope_circle_mask_geometry(int32_t x0, int32_t y0,
 	g.scale_x = cy != 0 ? static_cast<float>(static_cast<double>(cx) /
 										   static_cast<double>(cy) * 0.75)
 						: 0.0f;
-	// [orig: `scaleY = 3.0 / (sub_58A920() * 4.0)` @0x5d1811; sub_58A920
+	// [orig: `scaleY = 3.0 / (Render_GetTargetAspectRatio() * 4.0)` @0x5d1811; Render_GetTargetAspectRatio
 	//  @0x58a920 returns flt_8409EC, the selected H/W ratio
 	//  Render_SetAspectRatioMode @0x58d870 stores]
 	const float ratio = renderer::aspect_height_over_width(aspect_mode,
@@ -255,7 +255,7 @@ ScopeCircleMask build_nvg_lens_reticle(int32_t x0, int32_t y0, int32_t x1,
 	ScopeCircleMask out;
 	out.geometry = scope_circle_mask_geometry(x0, y0, x1, y1, screen_width);
 	// The lens passes its own ring size and centre -- the same shift pair and
-	// sums as the mask's -- and unit scales. [orig: draw_minimap_compass_border
+	// sums as the mask's -- and unit scales. [orig: NVG_DrawScopedLens
 	//  `fld1; fst [scaleY]; fstp [scaleX]` @0x5d27a1..0x5d27b6]
 	out.geometry.scale_x = 1.0f;
 	out.geometry.scale_y = 1.0f;

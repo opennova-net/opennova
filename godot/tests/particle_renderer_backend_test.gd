@@ -513,7 +513,7 @@ func test_far_particles_lead_the_camera_chain_and_terminal_stays_last() -> void:
 			"particle pass B follows water and camera-side alpha")
 	# The retail tail (precipitation, coronas, glint, murk, glare) draws after
 	# particle pass B and before the frame effects [orig:
-	# Terrain_RenderSceneWithReflection @ 0x5c9690 (pass B) -> @ 0x5c96a6 ..
+	# Terrain_RenderWorldScene @ 0x5c9690 (pass B) -> @ 0x5c96a6 ..
 	# @ 0x5c9714; the bloom follows in Render_ProcessMainSceneFrame
 	# @ 0x5caa97].
 	assert_eq(effects[2].effect_callback_type,
@@ -1052,10 +1052,10 @@ func _column_contrast(image: Image, from: int, to: int) -> float:
 # Class-7 emitters (a distort first graphic) leave both water-split scene
 # passes and draw in FrameFX's type-0 row over the finished frame, with texture
 # slot 2 = the row's 256A work target sampled at the particle's own screen
-# position (retail render_projected_shadow @ 0x5838F8 -> the flag-4 pass of
-# CNapiSession_SetViewMatrix @ 0x5F72F7; the class test in
+# position (retail FrameFX_DistortionPass @ 0x5838F8 -> the flag-4 pass of
+# EffectWorld_RenderDistortionPass @ 0x5F72F7; the class test in
 # CParticleGroup_RenderChildren @ 0x5E58D2). The row runs only while such an
-# emitter lives (the misnamed CNapiSession_HasActiveDataTransfer @ 0x5F6640).
+# emitter lives (EffectWorld_HasDistortionParticles @ 0x5F6640).
 func test_distortion_particles_draw_in_the_framefx_row() -> void:
 	if RenderingServer.get_rendering_device() == null:
 		pending("RenderingDevice unavailable under this Godot renderer")

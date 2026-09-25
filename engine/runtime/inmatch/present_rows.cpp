@@ -46,7 +46,7 @@ inline constexpr double kFixed16 = io::kFp16OneD;
 // marker, an SSN hide — so the host row is hidden exactly as the decoded
 // joiner row is.
 // [orig: collect_visible_entities_for_terrain @0x5c8cef..0x5c8cf4;
-//  Entity_AttachToVehicle @0x43c14a]
+//  Entity_AttachCarriedObject @0x43c14a]
 bool pool_row_hidden(const Entity &e) {
 	return e.hidden || ((e.flags | e.engine_flags) & kEntityFlagCarried) != 0;
 }

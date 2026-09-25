@@ -197,7 +197,7 @@ void taps4(out vec2 uv[4], out float fan_alpha) {
 	vec2 reduced = vec2(pc.params.x, 1.0);
 	fan_alpha = 1.0;
 	if (taps == 3) {
-		// build_scar_decal_vertices_extended: the fan's interpolated alpha and
+		// FrameFX_BuildRadialTapFan: the fan's interpolated alpha and
 		// taps (runtime/renderer/frame_fx_effects.h frame_fx_fan_*).
 		fan_alpha = 2.0 * max(abs(st.x - 0.5), abs(st.y - 0.5));
 		vec2 origin = st + pc.base_direction.xy * fan_alpha;
@@ -230,7 +230,7 @@ void taps4(out vec2 uv[4], out float fan_alpha) {
 		uv[3] = origin + vec2(0.0, o);
 		return;
 	}
-	// build_scar_decal_quad_vertices: (+s,+c), (+c,-s), (-s,-c), (-c,+s).
+	// FrameFX_BuildRotatedTapQuad: (+s,+c), (+c,-s), (-s,-c), (-c,+s).
 	vec2 perpendicular = vec2(pc.base_direction.w, -pc.base_direction.z) * reduced;
 	uv[0] = origin + direction;
 	uv[1] = origin + perpendicular;
@@ -1150,7 +1150,7 @@ bool FrameFxCompositorEffect::Impl::stretch(const RID &framebuffer,
 
 // One DrawPass row (runtime/renderer/frame_fx_effects.h FrameFxPass): the
 // descriptor's source, target, stage and taps, `count` draws stepping the
-// angle (retail render_scar_decal_batch @0x582b9b..0x582d82).
+// angle (retail FrameFX_DrawPass @0x582b9b..0x582d82).
 bool FrameFxCompositorEffect::Impl::run_pass(ViewTarget &target,
 		const FrameFxPass &pass, std::size_t &draws) {
 	RID framebuffer;
@@ -1338,9 +1338,9 @@ bool FrameFxCompositorEffect::Impl::composite_q3(ViewTarget &target,
 // The first-person NVG view: the scene into the 512-square target, the two
 // glow passes into the persistent 256-square target (cleared green on the
 // toggle frame), and the tint + glow composite replacing the frame (retail
-// sub_5D28D0 @0x5d296d; render_water_caustic_overlay @0x5d0290..0x5d048a;
-// render_fullscreen_overlay @0x5d0f28..0x5d1059) or, on the Scoped arm, the
-// polar unwrap and the lens (NvgViewDevice; retail sub_5D2B10 @0x5d2b10).
+// NVG_RenderScene @0x5d296d; NVG_AccumulateGlow @0x5d0290..0x5d048a;
+// NVG_Composite @0x5d0f28..0x5d1059) or, on the Scoped arm, the
+// polar unwrap and the lens (NvgViewDevice; retail NVG_DrawScopedLensThunk @0x5d2b10).
 // While the composite is up the world renders into 512 rows
 // (LocalPlayerPresenter's NVG raster), so the scene here is that frame
 // resampled to 512 x 512.
@@ -1355,7 +1355,7 @@ bool FrameFxCompositorEffect::Impl::run_nvg(ViewTarget &target,
 				target.size, draws))
 			return false;
 		// The Sighted arm's card draws into the scene before its glow and tint
-		// read it (retail terrain_scene_render @0x5d08cb..0x5d0952).
+		// read it (retail NVG_RenderSceneToTarget @0x5d08cb..0x5d0952).
 		if (nvg.sighted && screen != nullptr && !screen->nvg_sights.empty()) {
 			const std::size_t before = draws;
 			std::string reason;

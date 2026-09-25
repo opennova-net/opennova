@@ -91,7 +91,7 @@ uint8_t material_texture_runtime_type(uint8_t authored_type) {
 	return authored_type;
 }
 
-// [orig: sub_5B16F0 @0x5B16F0; dedicated cases @0x5B179A (6),
+// [orig: Material_LoadStageTexture @0x5B16F0; dedicated cases @0x5B179A (6),
 // @0x5B17B7 (7), @0x5B17D4 (16), @0x5B17DD (17), @0x5B17E6 (18)]
 MaterialTextureTransform material_texture_transform(
 		uint8_t type, std::string_view name, bool loaded) {

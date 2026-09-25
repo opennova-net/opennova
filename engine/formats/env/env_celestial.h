@@ -87,7 +87,7 @@ int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixe
 // @ 0x5adc50) and its instance table regenerates per load
 // [orig: Star_GenerateInstanceTable @ 0x5ac850], but the only renderer that
 // reads the table has no caller in the image (no code xref, no rel32 call, no
-// absolute pointer) [orig: render_star_field @ 0x5ad9c0], so nothing is ported.
+// absolute pointer) [orig: Star_RenderField_unused @ 0x5ad9c0], so nothing is ported.
 
 // Glare occlusion (env #14) [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f]:
 // TWO jittered rays per frame feed an 8-bit SLIDING window (>>1 per sample,
@@ -112,7 +112,7 @@ inline float glare_coarse_start_lift(uint32_t frame_index) {
 
 // ---------------------------------------------------------------------------
 // The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130, once per
-// main scene render from Terrain_RenderSceneWithReflection @ 0x5c96c0]: its
+// main scene render from Terrain_RenderWorldScene @ 0x5c96c0]: its
 // own 4-bit visibility window (dword_27E2E2C, >> 1 per frame, bit 3
 // (value 8) = visible) and +-16 brightness chase toward popcount * 64 (no
 // dead-band, no fog scale — dword_27E2E28). The settled brightness draws the glare model
@@ -171,7 +171,7 @@ void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visib
 int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
                            int sun_dim_fixed, bool frame_effects_quarter);
 
-// The BLOOM-SOURCE (Q3) glow alpha, 16.16: FrameFX_RenderBloomPass calls
+// The BLOOM-SOURCE (Q3) glow alpha, 16.16: FrameFX_RenderGlowSource calls
 // render_skybox_sun_glow(0, 0) - no occlusion test - so the Q3 draw uses the
 // fog-based brightness (fog_km + 1) * 0.5 * dot_factor instead of the
 // occlusion accumulator [orig: @ 0x5ad013..0x5ad027; flt_7C3280 = 1.0,

@@ -205,7 +205,7 @@ inline constexpr uint8_t kAdmSlotNone = 0xFF;
 // known-but-unnamed bits stay raw at use sites — do not name: 0x10000, 0x2000000,
 // 0x8000000, and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context
 // meanings unwitnessed).
-inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachToVehicle @0x43C130]
+inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachCarriedObject @0x43C130]
 inline constexpr uint32_t kEntityFlagDead = 0x2;              // [orig: kill writes Flags |= 6 @0x43fbf6]
 inline constexpr uint32_t kEntityFlagHusk = 0x4;              // items/buildings: husk swap [orig: @0x43fbf6]
 inline constexpr uint32_t kEntityFlagNVGWorn = 0x4;           // organics: NVG draw, same bit kind-dependent
@@ -1028,7 +1028,7 @@ struct Entity {
     // restore (bms-event-runtime-re §3b item 4). Match owns the live flag
     // producer; the conditions and savegame consumer share this same link.
     // [orig: set
-    // Entity_AttachToVehicle @0x43c130; cleared Entity_DropCarriedObject
+    // Entity_AttachCarriedObject @0x43c130; cleared Entity_DropCarriedObject
     // @0x439df0, the capture-zone clear @0x4ada07, Entity_Destroy @0x43ea03]
     EntityHandle mounted_child;         // kInvalid = carrying nothing
 

@@ -1272,8 +1272,8 @@ org0/org1/org2 *motor* split of §1.2). It builds the bone matrices
 `Render_SubmitEntity @ 0x5dad80` draws, in order (corrected 2026-09-24, the rendering
 parity pass; draws 1, 3, 4 and 6 are PORTED, §39.1):
 1. **parachute canopy**: gated on either canopy word (`entity+0x378` inflation / `+0x37A`
-   flap) nonzero `[orig: @ 0x4e3988..0x4e399a]`; model `gItemDefs[dword_A892A0].graphicModel`,
-   `dword_A892A0 = ItemList_FindIndexByTypeId(185)` (items.def "Parachute", graphic
+   flap) nonzero `[orig: @ 0x4e3988..0x4e399a]`; model `gItemDefs[g_ParachuteItemIndex].graphicModel`,
+   `g_ParachuteItemIndex = ItemList_FindIndexByTypeId(185)` (items.def "Parachute", graphic
    `Parachut`, CTRL `PARA`/`PARA_O`) `[orig: Entity_PreloadSpecialItems @ 0x43c220, store
    @ 0x43c22b]`. It writes CTRL `PARA` (ordinal 14, `dword_83FD58`) = 2 x inflation and
    `PARA_O` (15, `dword_83FD60`) = 2 x flap even when the model is null
@@ -1289,7 +1289,7 @@ parity pass; draws 1, 3, 4 and 6 are PORTED, §39.1):
    both submits. (This row read "shadow blob" until 2026-09-24, a misreading of the
    `+0x378`/`+0x37A` gate.)
 2. **the camera-tracked gate, then the body**: `entity == g_camera_tracked_entity` with no
-   cinematic target (`sub_56FBF0`) and `g_camera_mode == 0` returns here, skipping draws
+   cinematic target (`Cine_IsTargetActive`) and `g_camera_mode == 0` returns here, skipping draws
    2..6 `[orig: @ 0x4e3ab3..0x4e3aca]`; otherwise the body `key` model submits `@ 0x4e3b3b`
    (see §5.39 / correspondence.md `Camera_SetTrackedEntity @ 0x4391d0`),
 3. **night-vision goggles** — gated on `Flags & 4` (`entity+0x24`), model
@@ -1316,7 +1316,7 @@ parity pass; draws 1, 3, 4 and 6 are PORTED, §39.1):
    X flips: the loader's X negation leaves an X-axis block alone),
 5. **held weapon** — see §13.2,
 6. **carried object** (was "mounted-child overlay"): `mountedChild` (`entity+0x268`) is the
-   CARRIED object that `Entity_AttachToVehicle @ 0x43c130` links (a misnomer: the carry
+   CARRIED object that `Entity_AttachCarriedObject @ 0x43c130` links (the carry
    attach; it stores carrier+0x268 `@ 0x43c144`, sets the child's `Flags |= 1` `@ 0x43c14a`
    and its occupant `@ 0x43c14f`, flag ids 4091/4093/4095); the child must have an item def
    `[orig: @ 0x4e3da6..0x4e3db7]`. The child's OWN model (+0x30) draws in the first submit
@@ -1476,10 +1476,7 @@ The predicate gates the weapon node's visibility, reusing the existing seat
 taxonomy (`item_seat_specs.gd`, now `engine/runtime/mission/seat_spec_extract.h`; SEAT_PASSENGER/CONTROLLER/GUNNER/
 DRIVER) and the `mount_type` already exported through `simulation.cpp`. The exact
 `Entity_CanFireWeapon` predicate (incl. the `Flags & 2` weapon-disabled gate and the local
-gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
-`pad_2b0` → `heldWeaponAdmIndex`; comment `Entity_CanFireWeapon` as the weapon-visibility
-gate, sole caller `BoneCallback_org0_World @ 0x4e3ca5`) is proposed but unapplied (shared
-IDB state).
+gunner third-person condition) is the faithful rule.
 
 ### 13.6 The skin callback — `BoneCallback_org0_Skin @ 0x4e3620` (TALK / DEATH, witnessed 2026-09-12)
 
@@ -7047,7 +7044,7 @@ inserted with the GHDR/GPM+20 model radius as its explicit half extent
 (the four-argument call at 0x43F1E3..0x43F1F1). Retail also invalidates its baked terrain-item cache over the bounds;
 the current renderer has no corresponding cache. After step 64 the callback
 arms 62. Phase four stamps death immediately and enters the same step sequence.
-[orig: Entity_ProcessCraneDestruction @ 0x43EEE0; CVertexBuffer_RemoveFromList @ 0x605C10]
+[orig: Entity_ProcessBld2Destruction @ 0x43EEE0; Terrain_InvalidateTileCacheRegion @ 0x605C10]
 
 **Crane pairing and fade.** `cran` shares that collapse sequence but arms 1860
 while alive. If attachParent is empty, it finds the first pool-2 opposite
@@ -7058,7 +7055,7 @@ Its floor is terrain plus abs(parent COBJ-0 minZ) minus abs(maxZ). Contact
 clamps Z, sets health -1 and the class clock zero, and installs **0x4A92E0**;
 it preserves the downward velocity. Crane collapse passes scorch kind **zero**,
 so it emits no scorch and consumes no CRT random draw.
-[orig: crane callback @ 0x43FC70; Entity_ApplyGravityAndGroundCheck @ 0x43FB30;
+[orig: Entity_ProcessCraneCollapse @ 0x43FC70; Entity_ApplyGravityAndGroundCheck @ 0x43FB30;
 scorch call @ 0x440087..0x440095; sized scorch switch @ 0x606180]
 
 0x4A92E0 is the `upfx` move-function row, despite its water-physics IDB name.
@@ -7072,7 +7069,7 @@ immediately when the primary husk model is absent. The callback's replicated
 state send and the renderer's five intermediate fade words remain separate
 consumers; the native tests establish the motion and late-blast clock.
 [orig: Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
-compute_lod_fade_timers @ 0x5C3F40; move-function row @ 0x82AC40]
+Entity_PublishSwapFadePhases @ 0x5C3F40; move-function row @ 0x82AC40]
 
 **Emitter callback.** `emit` runs only phase zero with a loaded graphic and
 item definition. A still-live owned particle group is released, ownership
@@ -7167,7 +7164,7 @@ bound is only `> 0` `@ 0x4406C2`) or the loaded COBJ count are inert; the
 per-section damage bytes live in a bank that grows to the written section, so an
 unwritten section reads zero. Retail dereferences these unchecked (D-ITEM-7).
 [orig: Entity_UpdateSectionDamage @ 0x4406A0; WeaponOverlay_HandleDamage @ 0x53C4C0;
-entity_spawn_bone_trail_effect @ 0x43F8F0; crane callback @ 0x43FC70;
+entity_spawn_bone_trail_effect @ 0x43F8F0; Entity_ProcessCraneCollapse @ 0x43FC70;
 Entity_ApplyGravityAndGroundCheck @ 0x43FB30; Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
 squib callback @ 0x449810]
 
@@ -7235,7 +7232,7 @@ walks, including a linked husk first materialized after death. The upfx motor
 retains subtype-0x20 one-time state and subtype-0x80 late-blast gates. Live upfx
 rows use the time-region sound profile, handle-nibble stagger, SOUND userpoint
 or bounding-box center, same-set blend suppression, and type lifetimes
-31/72/62/10. [orig: compute_lod_fade_timers @ 0x5C3F40;
+31/72/62/10. [orig: Entity_PublishSwapFadePhases @ 0x5C3F40;
 Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
 Entity_UpdateEnvSoundEmitter @ 0x4A8080]
 
@@ -7383,10 +7380,10 @@ suppression, bounce silence, and underwater-free silence.
 
 **The piece draw (witnessed and PORTED 2026-09-25, "Draw every death piece as its
 husk section, spun, at its own level").** The pieces draw with the frame's
-entities: `Terrain_CollectVisibleEntities @ 0x5c91bc` -> `collect_visible_minimap_slots
-@ 0x57b560` (misnamed: the death-piece collect), then `Terrain_RenderSceneWithReflection
-@ 0x5c9575` -> `update_terrain_lod_levels @ 0x57b830` (misnamed: the piece render walk)
--> `Entity_BuildBoneTransformMatrices_0 @ 0x57b690` (misnamed: the section draw); the
+entities: `Terrain_CollectVisibleEntities @ 0x5c91bc` -> `DeathPiece_CollectVisible
+@ 0x57b560`, then `Terrain_RenderWorldScene
+@ 0x5c9575` -> `DeathPiece_RenderVisible @ 0x57b830`
+-> `DeathPiece_RenderSection @ 0x57b690`; the
 reflection pass runs the same pair `@ 0x5c85b7` / `@ 0x5c85c1` at water detail >= 2.
 The collect keeps a live slot (piece+0 nonzero) whose |dx| and |dy| to the eye are
 within radius + `Env_FogDistCurrent` (`jg` skips, `@ 0x57b5b4..0x57b5de`), whose view
@@ -7585,11 +7582,11 @@ the FFI structs.
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
 | D-ITEM-3 | FIXED 2026-09-23: blast/shot section marking plus material-energy continuation; the prior lawr/fgrenade-only interpretation was incorrect (§15.8) | @0x4E6C5E..0x4E6E6B; @0x4E9070; @0x4E9390 | destruction covers blast flags and repeated sounds; projectile_combat covers glass survival, energy exhaustion and the next obstruction. |
-| D-ITEM-4 | Presentation FIXED 2026-09-25: every death piece draws its piece model (the loaded huskFinal model, else the husk model) showing only its own section at its own level, spun from the wreck's pose, with the explosion glow (§24.4). Open: one world-local PRNG stream stands in for the three retail streams | `Entity_SpawnDeathPieces @ 0x493400`; `collect_visible_minimap_slots @ 0x57b560`; `update_terrain_lod_levels @ 0x57b830`; `Entity_BuildBoneTransformMatrices_0 @ 0x57b690`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | ctest `death_piece_draw` + `destruction`; GUT `destruction_present_pass_test`. The PRNG stream leg stays OPEN |
+| D-ITEM-4 | Presentation FIXED 2026-09-25: every death piece draws its piece model (the loaded huskFinal model, else the husk model) showing only its own section at its own level, spun from the wreck's pose, with the explosion glow (§24.4). Open: one world-local PRNG stream stands in for the three retail streams | `Entity_SpawnDeathPieces @ 0x493400`; `DeathPiece_CollectVisible @ 0x57b560`; `DeathPiece_RenderVisible @ 0x57b830`; `DeathPiece_RenderSection @ 0x57b690`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | ctest `death_piece_draw` + `destruction`; GUT `destruction_present_pass_test`. The PRNG stream leg stays OPEN |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), and the S2C 0x26/0x2F/0x21 wire emits. Narrowed 2026-09-22: the type-1 leg is the knife kill zone (ported, §24.1), the occupant damage scale is ported in the blast leg, and `g_destroy_buildings` was already ported (`destruction::test_multiplayer_destroy_buildings_rule`). Narrowed 2026-09-23: the medic (type 3) queue leg's heal is ported (`Server_RouteMedicInteractions`, `GameEvent_HealPlayer @ 0x50de30`, §38.10). Carried 2026-09-23: `Entity_UpdateVehicleWreck @ 0x445500`'s hit-record write (the call @ 0x445936) and `Entity_KillBySlotId @ 0x42BCE0`'s section store (@ 0x42BD47) have no port; the hit record's class-callback legs lack the ammo +72 burn emitter and the 173 clip (the live round-hit path lacks them too); the item class-callback dispatch keys on `Entity::is_ai_capable` as the stand-in for a brain-class row, so gnrc 104652, stng 101906, rokt 104502 and the flags 104091/104093/104095 get no item callback; and the vehicle dying enter still kills the addeweap emplacement children, a list retail's child loop (@ 0x467B90..0x467BCC) does not walk, and clears their attacker (`destruction_test::test_vehicle_death_kills_authored_children`) | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eaddd`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | FIXED: all #645 deferred item classes, cohort clocks, shared fade/ambient/scoring and ordered 0x21/0x26/0x12 effects are ported (§24.3a/b) | The class table selects event and motor; gnl2/barrel retain requested explosion counts and SP PRNG history | Invalid target/model/section data is bounded as documented in §24.3b; the uninitialized SP shrapnel pointer is refuted |
-| D-ITEM-8 | FIXED (§24.3a): the crane/water-tower special death (the "scrane" pairing and the crane callback `@ 0x43fc70`), `Entity_ProcessCraneDestruction @ 0x43eee0`, the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are ported (`item_events.cpp`) | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
+| D-ITEM-8 | FIXED (§24.3a): the crane/water-tower special death (the "scrane" pairing and the crane callback `Entity_ProcessCraneCollapse @ 0x43fc70`), `Entity_ProcessBld2Destruction @ 0x43eee0`, the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are ported (`item_events.cpp`) | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
 | D-ITEM-9 | The Falling/Generic wreck callbacks and unitType-3's four short slope rays ground on TERRAIN only. Falling/Generic use sec0 z extents synthesized from LOD-0 primitive bounds (upright leg only); PiecePhysics uses the husk-flag pick — the husk collision shell's floor for a husked piece (the section-AABB union stands in for the CMDL header z-lo), `box_z_lo` otherwise. Static's separate terrain/water thresholds are ported as described in §24.5 | `Entity_RaycastGroundHeightAndObject @0x414320` (Falling/Generic, terrain + objects, mask 0x200000); `Entity_RaycastGroundHeight @0x4142c0` x4 from `Entity_CalcSlopeForces @0x4b0b00`; section-row +84/+88 extents `@0x461e23-0x461e4b` | a wreck dying on a roof can sink to terrain below; port the object-return leg for both query shapes and verify the generic runtime section-row fields against the render-model builder |
 | D-ITEM-10 | `dword_2C25C64` is resolved and both routed/specialized water crossings now emit `Effect_MedSplash`; fallback sounds are ported (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`, and specialized `EXPLO_HELO_WATER` / `EXPLO_VEHCL_LG`). The def per-item landing (+140) and water (+156) sound slots remain unmodeled | `@0x4940c6-0x494100 / @0x49417c-0x4941af`; specialized twins `@0x48f547..0x48f588 / @0x48f726..0x48f759` | items authoring custom impact sounds still play the matching fallback; splash visuals now route through the ordinary destruction-effect presenter |
 | D-ITEM-11 | The round exclusion set skips shooter + mount (Controller/Gunner/Driver seats only — a Passenger's rounds can hit their own vehicle) + the Gunner mount's standing-on carrier, PORTED 2026-07-18 (§15.8a); the FOURTH slot — `projectile+388` ← the fire request's dword +40 — is consumed by every prox walk but its fill is an uninitialized extra on the client fire path, provenance OPEN (the server path `Server_ClientFiredRound @ 0x50baa0` unwalked) | `ray[17..20] @ 0x4ea2a5-0x4ea2f8`; `RoundData_SpawnRound @ 0x4ec0d0` ([97] ← hitData+40); compares `@ 0x4e5572/@ 0x4e5782/@ 0x4e5983/@ 0x4e4c4e` | firing from Controller/Gunner/Driver seats no longer self-hits the hull; walk 0x50baa0's cmd[21]→spawn plumbing to close the +388 slot |
@@ -7767,7 +7764,7 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   in the order `C−A−B (0,0)`, `C+A−B (1,0)`, `C−A+B (0,1)`, `C+A−B (1,0)`,
   `C+A+B (1,1)`, `C−A+B (0,1)` in `Env_TerrainLightCombined | FF000000`,
   appended per texture via `Terrain_ParseSectorTypeCallback @0x5cf390`. The
-  drawer `Scar_DrawBatches @0x5ccd10` (ex `Terrain_RenderFoliageBatches`, renamed; caller `Terrain_RenderSceneWithReflection @0x5c9658`
+  drawer `Scar_DrawBatches @0x5ccd10` (ex `Terrain_RenderFoliageBatches`, renamed; caller `Terrain_RenderWorldScene @0x5c9658`
   after the lit sector entities): `CD3DDevice_SetFogAndBlendMode(dev, 0)` (the
   fog COLOUR select — scene fog colour; it never touches a blend state),
   identity world, vertex shader 0, FVF 0x142, the 1000-vertex dynamic VB
@@ -7781,7 +7778,7 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   word — `0 -> 0x120651` `@0x5cc315`, `1 -> 0x460651` `@0x5cc321` (the
   decompiler shows the latter as a bogus `offset loc_46064F+2`), else 0 — fed
   to `GfxShader_Create1TexModeId(tex, modeWord) @0x679030`, then clamp wrap
-  (`CGfxTexture_SetSamplerAddressing (ex sub_680720)(effect, 1, 0, 0, 0)`). Every strip but bhole1 (idx 27) carries
+  (`GfxShader_SetFfpLightingSources (ex CGfxTexture_SetSamplerAddressing, ex sub_680720)(effect, 1, 0, 0, 0)`: FFP lighting on with the material sources on MATERIAL, not a sampler address mode). Every strip but bhole1 (idx 27) carries
   modeId 0. Decoded through the mode-word layout
   ([render-material-re.md](../render/render-material-re.md) "The mode word"):
   **scorch 0x120651** = SRCALPHA/INVSRCALPHA blend, stage 0
@@ -7812,7 +7809,7 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
 - **Clear** `Scar_ClearEntriesByEntity @0x5ccec0`: zeroes the owner's
   shared-ring slots and memsets its entity ring, then
   `Scar_FreeProjectedDecals`; called from `Entity_Destroy @0x43e8e4` (24.3)
-  AND `Entity_AttachToVehicle @0x43c155` (the boarding passenger's scars).
+  AND `Entity_AttachCarriedObject @0x43c155` (the boarding passenger's scars).
 
 **Scar owner-visibility re-grill (2026-09-21, ADR 0040 B).** The live
 retail `Jointops.exe.kong.i64` at imagebase `0x400000` was checked by
@@ -7921,7 +7918,7 @@ the style's table count, [4] count, [5] age, [6] style id, [7] style desc ptr,
   map 25.2) and the shader: stock device slot 6 for the tracer families
   `[orig: CD3DDevice_GetRenderStateByIndex(dev, 6) @ 0x5db1cf]`, pool+0x3004/8
   for smoke/NVG, pool+0x300C for the distortion pass (all three built by
-  `create_effect_channel_render_textures @ 0x5dc8f0`, witnessed 2026-09-24, §25.3).
+  `CEffectEmitterPool_CreateShaders @ 0x5dc8f0`, witnessed 2026-09-24, §25.3).
 - **Append** `[orig: CEffectChannel_AppendPoint @ 0x5db290 — ex kong
   "CNetRateSampler_RecordSample", renamed]`: ring append (full -> drop oldest);
   `w = 1.0 + PRNG_Next16() * 1e-5` on jitter styles (desc+4: smoke/sniper/NVG),
@@ -8027,7 +8024,7 @@ and its three materials"; `engine/runtime/renderer/tracer_frame.cpp` +
 - **Wave words** (+0x81C/+0x820/+0x824): rocket 1/1/1, at4 2/1.5/1, grenade 8/4/1,
   NVG 2/2/0.1, sniper 0/0/0 (static `.data @ 0x8458B0`). The distortion flag
   (+0x828) is set for rocket, at4 and sniper red/green.
-- **Materials** (`create_effect_channel_render_textures @ 0x5dc8f0`): stock device
+- **Materials** (`CEffectEmitterPool_CreateShaders @ 0x5dc8f0`): stock device
   slot 6 (std/rapid/sniper/df1; mode word 0x222 via `CEffectChannel_Init @ 0x5db1d6`
   / `sub_6780A0 @ 0x678113`): ONE/ONE, colour = alpha = DIFFUSE, untextured. Smoke
   (pool+0x3004): `smoktest.pcx` on two stages, SRCALPHA/INVSRCALPHA, stage 0
@@ -8050,13 +8047,13 @@ and its three materials"; `engine/runtime/renderer/tracer_frame.cpp` +
   on `kRungTracerFarSide` / `kRungTracerCameraSide`. Each channel is its own draw
   call in pool order (the slot walk `@ 0x5dcb17..0x5dcb2e`), not a joined
   per-family strip.
-- **Distortion pass** (pool+0x300C, built by `create_effect_channel_render_textures @ 0x5dc8f0`):
+- **Distortion pass** (pool+0x300C, built by `CEffectEmitterPool_CreateShaders @ 0x5dc8f0`):
   one stage, colour SELECTARG(TEXTURE) = slot 2, alpha SELECTARG(DIFFUSE),
   SRCALPHA/INVSRCALPHA, texgen state 14 (`TCI_CAMERASPACEPOSITION`,
-  COUNT3|PROJECTED) through the projective screen matrix `render_projected_shadow`
+  COUNT3|PROJECTED) through the projective screen matrix `FrameFX_DistortionPass`
   builds (`@ 0x5837ff..0x5838d2`): u = 0.5 ndc.x + 0.5 + half a 256 texel; scene fog
   (`SetFogAndBlendMode(0)` `@ 0x5dc0a6`). It runs inside FrameFX's type-0 row with
-  slot 2 = the 256B work target (`render_projected_shadow @ 0x583928`). PORTED
+  slot 2 = the 256B work target (`FrameFX_DistortionPass @ 0x583928`). PORTED
   2026-09-24 ("Draw the distortion particles and tracer ribbons in FrameFX's type-0
   row"): `compile_tracer_ribbons(TracerPass::Distortion)` +
   `godot/src/particle/effect_distortion_drawer.cpp`; the gate
@@ -8068,7 +8065,7 @@ and its three materials"; `engine/runtime/renderer/tracer_frame.cpp` +
   `[orig: Entity_RenderNVGLaserBeam @ 0x5c6090, ex kong
   "Entity_BuildProjectileTrailRay", renamed]`, witnessed in full and PORTED
   2026-09-25 ("Draw the NVG IR laser beams of armed remote players"):
-  `sub_5C63B0 @ 0x5c63b0` (called `@ 0x5c9695` in the post-particle overlay tail) walks
+  `Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0` (called `@ 0x5c9695` in the post-particle overlay tail) walks
   the BySide person list (`dword_2984890`, 20-B rows, count `dword_2984888`). The gate
   `@ 0x5c609a..0x5c60e6` requires entity+0x157 == 0 (the seat attach bone: not
   seat-mounted), entity+0x298 (the held AdmDef entry) with def+8 & 0x40000000
@@ -9175,7 +9172,7 @@ armor gate (§17.2) and the damage gates read that pair (`mission_item_traits` c
 
 | Bit | Constant | Meaning | Witness |
 |---|---|---|---|
-| 0x1 | `kEntityFlagCarried` | hidden: a carried object while attached to its carrier (the flag/carryable pickup family), and the WAC hideSSN bit; distinct from 0x40, which marks the CARRIER/mounted body. The destruction sweeps skip it and it rides the `0x2000001` / `0x43` composites | `[orig: Entity_AttachToVehicle @ 0x43C130; WacCmd_HideSsn @ 0x4F7750 (or Flags,1 @ 0x4F779D); unhideSSN @ 0x4F77FD]`; the Match flag producer (§15.5 D-COL-8 flag leg); readers include `WacCmd_SsnArea` @ 0x4F1081 |
+| 0x1 | `kEntityFlagCarried` | hidden: a carried object while attached to its carrier (the flag/carryable pickup family), and the WAC hideSSN bit; distinct from 0x40, which marks the CARRIER/mounted body. The destruction sweeps skip it and it rides the `0x2000001` / `0x43` composites | `[orig: Entity_AttachCarriedObject @ 0x43C130; WacCmd_HideSsn @ 0x4F7750 (or Flags,1 @ 0x4F779D); unhideSSN @ 0x4F77FD]`; the Match flag producer (§15.5 D-COL-8 flag leg); readers include `WacCmd_SsnArea` @ 0x4F1081 |
 | 0x2 | `kEntityFlagDead` | dead (kill writes `Flags \|= 6`) | `[orig: @ 0x43fbf6]`; the SP dead gate reads `entity+36 & 2` (§20) |
 | 0x4 | `kEntityFlagHusk` | items/buildings: husk swap (with 0x2 on kill) | `[orig: @ 0x43fbf6]`; §24 |
 | 0x4 | `kEntityFlagNVGWorn` | organics: NVG worn — draw gate for the goggle model; same bit, kind-dependent read | `[orig: draw @ 0x4e3b54]`; §13.1 draw 3 |
@@ -13654,7 +13651,7 @@ world-side facts of the slice:
   ends with `add [esi+2ACh],-1` (@ 0x4B8EA0). After the walk: `HeliLift_UpdateAll`
   (@ 0x4C21F6), the facials (`sub_580000`, @ 0x4C21FB), `Precipitation_FallTick`
   (@ 0x4C2214), `DeathPiece_TickAll` (@ 0x4C221C), `sub_590950` (@ 0x4C2221), the timed
-  AI events (@ 0x4C2226), `sub_5DDE10` (@ 0x4C222B), `Cinematic_EpilogUpdate`
+  AI events (@ 0x4C2226), `WaterRing_TickAll` (@ 0x4C222B), `Cinematic_EpilogUpdate`
   (@ 0x4C2230), `WeatherParticle_UpdateAllEmitters` (@ 0x4C2235),
   `Weapon_UpdateAllProjectiles` (@ 0x4C223A), `Projectile_ProcessExplosionQueue`
   (@ 0x4C223F), pool 2 (@ 0x4C2244..0x4C2302), `FadeEffect_UpdateAll` (@ 0x4C2307),

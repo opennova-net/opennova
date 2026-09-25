@@ -215,7 +215,7 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 # until the frame draws it; the draw shows ONE section with every other section
 # collapsed, placed so that section's COBJ centre lands on the piece position,
 # at the drawn level; a frame that does not draw the piece hides it again
-# (retail Entity_BuildBoneTransformMatrices_0 @ 0x57b690, the matrix
+# (retail DeathPiece_RenderSection @ 0x57b690, the matrix
 # EulerScale(pose) * T(-centre) @ 0x57b6f6..0x57b759, the collapse
 # @ 0x57b7d4..0x57b7e7).
 func test_piece_draw_shows_one_section_at_the_piece_position() -> void:

@@ -24,8 +24,8 @@
 //      [orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690] — the black
 //      PROJSHAD pass sets no slot lighting; the (c + lum) * 0.5 * -3 c21..c23
 //      constants belong to the sector-model receiver path, dead in JO behind
-//      the always-zero gate [orig: RenderSlot_SetupNextLighting @ 0x5d7250,
-//      @ 0x5d73d3..0x5d740d; sub_5D7240 @ 0x5d724a];
+//      the always-zero gate [orig: RenderSlot_SetupSectorReceiverPass_Dead @ 0x5d7250,
+//      @ 0x5d73d3..0x5d740d; RenderSlot_CollectReceiverSlots_Stub @ 0x5d724a];
 //   5. drapes each bound slot that owns a silhouette RT over a lod x lod
 //      terrain-following patch: the silhouette projected along the slot
 //      direction and multiplied into the terrain with the per-channel ambient
@@ -368,7 +368,7 @@ void slot_patch_vertices(const SlotPatch &patch, int lod,
 		std::vector<std::array<float, 3>> &out);
 
 // The patch's triangle list for one lod, the level's run of the shared
-// index buffer [orig: init_shadow_decal_index_buffer @ 0x5d53d0 — per cell
+// index buffer [orig: RenderSlot_InitPatchIndexBuffers @ 0x5d53d0 — per cell
 // (i, j) with a = (i, j), b = (i, j + 1), c = (i + 1, j), d = (i + 1, j + 1):
 // the triangles (a, d, c) and (a, b, d) @ 0x5d5474..0x5d54d0; 2 lod^2
 // triangles]. The drape draws them with culling off.
@@ -509,7 +509,7 @@ private:
 	// appends at RenderSlot_Count into RenderSlot_Table @ 0x2be3d30, and the
 	// count only resets at subsystem init @ 0x5d61cb; Entity_Destroy's
 	// release zeroes the 128-byte record but never hands its index back
-	// [orig: sub_5D5640 @ 0x5d5671..0x5d5679]]. Device fold: a Godot caster
+	// [orig: RenderSlot_ReleaseSlot @ 0x5d5671..0x5d5679]]. Device fold: a Godot caster
 	// is an instance id that a respawn recreates, so the lowest free index is
 	// reused to keep the table bounded; a live record's index is as stable as
 	// retail's.

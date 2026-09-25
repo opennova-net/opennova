@@ -13,7 +13,7 @@ namespace {
 // profiles (flt_7C59B4 = 0x3EA8F5C3, flt_7D76CC = 0x3EAE147B), replaced by
 // the fixed 2.0 (flt_7C3B90) on the highest shipped profile, and the
 // 640-wide reference width the projection is normalized to (flt_7DC188).
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9462;
+// [orig: Terrain_RenderWorldScene @ 0x5c940c..0x5c9462;
 //  Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c90eb]
 constexpr float kObjectLodDetailQualitySlope = 0.33f;
 constexpr float kObjectLodDetailQualityBias = 0.34f;
@@ -89,7 +89,7 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
   }
   const int level_count = static_cast<int>(thresholds_q16.size());
 
-  // scaledDist = viewDist * flt_298055C, truncated toward zero by the
+  // scaledDist = viewDist * g_RlodFrameScale, truncated toward zero by the
   // integer compare (_ftol2_sse) [orig: @ 0x5c3b27..0x5c3b4a].
   const double scaled = static_cast<double>(projected_radius_q16) *
                         static_cast<double>(projection_scale);
@@ -139,10 +139,10 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
   return result;
 }
 
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9468: fild the
+// [orig: Terrain_RenderWorldScene @ 0x5c940c..0x5c9468: fild the
 //  detail level, fmul flt_7C59B4, fadd flt_7D76CC, the fixed flt_7C3B90 when
 //  the level is 3, fidiv by the viewport width dword_A7837C, fmul flt_7DC188,
-//  one float store into flt_298055C. The nonzero-dword_B4C3C0 substitution
+//  one float store into g_RlodFrameScale. The nonzero-dword_B4C3C0 substitution
 //  of flt_7C44B8 (4.0f) @ 0x5c946e..0x5c9478 is the capture-quality
 //  override (an input-binding toggle that also forces the 512 reflection
 //  target @ 0x5c08d1 and a full cubemap refresh @ 0x6106cb), never reached
@@ -162,7 +162,7 @@ float object_lod_frame_scale(int detail_level, float viewport_width) {
                             static_cast<double>(kObjectLodReferenceWidth));
 }
 
-// [orig: update_terrain_lod_levels @ 0x57b831..0x57b84a: the same two .rdata
+// [orig: DeathPiece_RenderVisible @ 0x57b831..0x57b84a: the same two .rdata
 //  floats as the frame scale's quality term, one float store into var_4]
 float death_piece_lod_scale(int detail_level) {
   return static_cast<float>(static_cast<double>(detail_level) *
@@ -170,7 +170,7 @@ float death_piece_lod_scale(int detail_level) {
                             static_cast<double>(kObjectLodDetailQualityBias));
 }
 
-// [orig: update_terrain_lod_levels @ 0x57b86f..0x57b8ca: fild the recorded
+// [orig: DeathPiece_RenderVisible @ 0x57b86f..0x57b8ca: fild the recorded
 //  radius, fmul the float scale, _ftol2_sse; model+0x10 is the level count,
 //  model+0x40/+0x44/+0x48 the first three thresholds]
 int death_piece_lod_level(int32_t projected_radius_q16, float lod_scale,

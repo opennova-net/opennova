@@ -491,7 +491,7 @@ struct ClientEntityState {
 	// re-composed against the carrier's CURRENT chased pose every mover tick —
 	// the row-level translation of retail rendering mounted riders through the
 	// carrier attach each frame (the rider's own mover is bit0-skipped)
-	// [orig: Entity_AttachToVehicle bit0 set @0x43C14A; the D-NET-67 lift]. A
+	// [orig: Entity_AttachCarriedObject bit0 set @0x43C14A; the D-NET-67 lift]. A
 	// record with carrier 0xFFFF clears it (per-record consumption, D-NET-195).
 	// A world-mover VEHICLE row is only a seat-follow when its carrier is a
 	// pool-1 deck; on a static carrier (pool 2/3) the fold composes the record

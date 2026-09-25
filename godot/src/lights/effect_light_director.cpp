@@ -735,7 +735,7 @@ void EffectLightDirector::append_overlay(SceneOverlaySubmission &r_submission) {
 	}
 	// The coronas draw after particle pass B, in the main scene and in the
 	// mirror's reflected scene alike (retail EffectWorld_RenderLightCoronas(1)
-	// from Terrain_RenderSceneWithReflection @ 0x5c96ad and from
+	// from Terrain_RenderWorldScene @ 0x5c96ad and from
 	// Water_RenderReflectedWorldScene @ 0x5c85fd).
 	const uint32_t texture = r_submission.texture_index(_corona_texture());
 	opennova::renderer::append_corona_overlay(coronas_, texture, r_submission.frame);

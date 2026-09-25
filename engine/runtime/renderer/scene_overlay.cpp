@@ -129,7 +129,7 @@ void append_underwater_murk_overlay(const float rgb[3], uint8_t alpha_byte, floa
 	batch.eye_at_or_below_water_gate = true;
 	batch.water_height = water_height;
 	batch.first_vertex = vertex_index(out);
-	// The viewport rectangle [orig: Terrain_DrawScissorRect @ 0x5c38ff reads
+	// The viewport rectangle [orig: Render_DrawViewportColorQuad @ 0x5c38ff reads
 	// CD3DDevice_GetViewportRect; one colour, alpha << 24, on all four corners].
 	static constexpr float kCorner[6][2] = {
 		{-1.0f, -1.0f}, {1.0f, -1.0f}, {-1.0f, 1.0f},

@@ -96,7 +96,7 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	reset_material_slots(drape_material_);
 	// Retail draws the drapes right after the terrain batch, before the
 	// sector models, entities and every transparent pass (retail:
-	// Terrain_RenderSkyboxPass — Terrain_RenderSectorBatchLit @0x610c34, then
+	// Terrain_RenderMainSectorPass — Terrain_RenderSectorBatchLit @0x610c34, then
 	// RenderSlot_DrawAllDrapes @0x610c47), so the multiply lands on the
 	// terrain alone: first among the transparents here.
 	drape_material_->set_render_priority(Material::RENDER_PRIORITY_MIN);

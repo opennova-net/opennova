@@ -110,7 +110,7 @@ extends GutTest
 #   and per-tick writeback. Fog and skyfog chase the undoubled authored bytes;
 #   the horizon blend precedes the saturating render-space double
 #   [orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f1b1], and SkyDome
-#   consumes that same final skyfog as the frame clear [orig: sub_579CB0
+#   consumes that same final skyfog as the frame clear [orig: SkyDome_RenderWithSkyfog
 #   @ 0x579cb0]. The 12 listed weather rows moved only in their fog tokens;
 #   ten low-fog grid rows moved only the skyfog token to the already-pinned
 #   horizon-blended frame-clear value. D-RLIT-1 records the same witness.

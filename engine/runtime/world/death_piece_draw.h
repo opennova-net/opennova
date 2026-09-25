@@ -4,12 +4,11 @@
 // entities, then draws each as its model's level mesh with every bone matrix
 // set to the piece matrix and every other section's matrix collapsed.
 //
-// [orig: collect_visible_minimap_slots @ 0x57b560 (the collect, misnamed:
-//  DeathPiece_CollectVisible) from Terrain_CollectVisibleEntities @ 0x5c91bc,
-//  update_terrain_lod_levels @ 0x57b830 (the level walk, misnamed:
-//  DeathPiece_RenderVisible) from Terrain_RenderSceneWithReflection
-//  @ 0x5c9575, and Entity_BuildBoneTransformMatrices_0 @ 0x57b690 (the section
-//  draw, misnamed: DeathPiece_RenderSection); the 256 x 180-B pool
+// [orig: DeathPiece_CollectVisible @ 0x57b560 (the collect) from
+//  Terrain_CollectVisibleEntities @ 0x5c91bc, DeathPiece_RenderVisible
+//  @ 0x57b830 (the level walk) from Terrain_RenderWorldScene @ 0x5c9575,
+//  and DeathPiece_RenderSection @ 0x57b690 (the section draw); the
+//  256 x 180-B pool
 //  g_death_piece_pool @ 0x26bac58]
 #pragma once
 
@@ -50,15 +49,15 @@ struct DeathPieceDraw {
 
 // The section a piece's draw shows: the first index below `section_count`
 // whose bit (index & 31) is clear in `hidden_mask`, else 0.
-// [orig: Entity_BuildBoneTransformMatrices_0 @ 0x57b6c5..0x57b6f4]
+// [orig: DeathPiece_RenderSection @ 0x57b6c5..0x57b6f4]
 int32_t death_piece_render_section(uint32_t hidden_mask, int32_t section_count);
 
 // One collected piece through the level walk and the section draw: false when
 // the draw returns without submitting (the sub-pixel floor, an empty level
 // slot). `projected_radius_q16` is the collect's recorded radius, `lod_scale`
 // renderer::death_piece_lod_scale, `water_z_q16` the mission water plane.
-// [orig: update_terrain_lod_levels @ 0x57b830 ->
-//  Entity_BuildBoneTransformMatrices_0 @ 0x57b690]
+// [orig: DeathPiece_RenderVisible @ 0x57b830 ->
+//  DeathPiece_RenderSection @ 0x57b690]
 bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 		int32_t projected_radius_q16, float lod_scale, int32_t water_z_q16,
 		DeathPieceDraw &out);

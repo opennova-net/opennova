@@ -87,7 +87,7 @@ void quiet_frame_plans_only_the_bloom() {
 	CHECK(!plan_frame_fx(low, state, rand.fn()).bloom);
 }
 
-// [orig: sub_5841D0 @0x584248..0x58437a; FrameFX_CaptureRenderTarget @0x584165..0x5841c0]
+// [orig: FrameFX_BloomKernel @0x584248..0x58437a; FrameFX_CaptureAltBuffer @0x584165..0x5841c0]
 void bloom_kernel_reduces_u_on_the_first_weighted_pair() {
 	const std::vector<FrameFxPass> passes = frame_fx_bloom_passes();
 	CHECK(passes.size() == 4);
@@ -111,7 +111,7 @@ void bloom_kernel_reduces_u_on_the_first_weighted_pair() {
 	CHECK(near(composite.radius, 0.0027621093f) && near(composite.constant_alpha, 0.5f));
 }
 
-// Type 1 [orig: Scar_SubmitShadowDecal @0x5830f0; the dispatch @0x5caa41..0x5caa71]
+// Type 1 [orig: FrameFX_DamageBlur @0x5830f0; the dispatch @0x5caa41..0x5caa71]
 void damage_blur_replaces_then_cross_fades() {
 	FrameFxPlannerState state;
 	ScriptedRand rand;
@@ -145,7 +145,7 @@ void damage_blur_replaces_then_cross_fades() {
 	CHECK(rand.next == 0);
 }
 
-// Type 4 [orig: Scar_SubmitCascadeShadowPasses @0x5833a0; d @0x5ca9fb..0x5caa34]
+// Type 4 [orig: FrameFX_DeathBlur @0x5833a0; d @0x5ca9fb..0x5caa34]
 void death_blur_grows_through_one_two_and_three_fan_passes() {
 	FrameFxPlannerState state;
 	ScriptedRand rand;
@@ -189,7 +189,7 @@ void death_blur_grows_through_one_two_and_three_fan_passes() {
 	CHECK(last != nullptr && last->radius == 0.0f);
 }
 
-// Type 0 [orig: @0x5ca8f6..0x5ca92e; render_projected_shadow @0x583720]
+// Type 0 [orig: @0x5ca8f6..0x5ca92e; FrameFX_DistortionPass @0x583720]
 void distortion_row_jitters_and_binds_both_work_targets() {
 	FrameFxPlannerState state;
 	ScriptedRand rand;
@@ -237,7 +237,7 @@ void distortion_row_jitters_and_binds_both_work_targets() {
 			FrameFxStepKind::Distortion) == 2);
 }
 
-// Types 8 / 9 [orig: @0x5caa9c..0x5caad5; sub_584390 @0x584390; sub_583A60 @0x583a60]
+// Types 8 / 9 [orig: @0x5caa9c..0x5caad5; FrameFX_ThermalView @0x584390; FrameFX_ScanlineOverlay @0x583a60]
 void thermal_and_monitor_follow_the_bloom() {
 	FrameFxPlannerState state;
 	ScriptedRand rand;
@@ -266,7 +266,7 @@ void thermal_and_monitor_follow_the_bloom() {
 		CHECK(after[3].pass.tile_offset_x == (0x0033 & 0xFF));
 	}
 	CHECK(rand.next == 4);
-	// The latches ignore FBEFFECTS: sub_5845B0 has no level gate.
+	// The latches ignore FBEFFECTS: FrameFX_ApplyWeaponViewEffect has no level gate.
 	in.frame_effects_level = 0;
 	CHECK(plan_frame_fx(in, state, rand.fn()).after_bloom.size() == 4);
 }
@@ -305,7 +305,7 @@ void nvg_replaces_the_chain_and_clears_its_glow_on_the_toggle_frame() {
 }
 
 // The Scoped arm's lens and the NVG.tga mask gate [orig: @0x5ca549..0x5ca575;
-// @0x5ca6f5..0x5ca71a; render_fullscreen_overlay @0x5d1077..0x5d1080]
+// @0x5ca6f5..0x5ca71a; NVG_Composite @0x5d1077..0x5d1080]
 void nvg_scoped_arm_draws_the_lens_and_drops_the_mask() {
 	FrameFxViewInputs view;
 	view.nvg_active = true;
@@ -381,7 +381,7 @@ void thermal_stage_inverts_the_luma_into_green() {
 	CHECK(near(white[0], 0.0f) && near(white[1], 0.05f) && near(white[2], 0.0f));
 }
 
-// [orig: build_scar_decal_vertices_extended @0x581d20]
+// [orig: FrameFX_BuildRadialTapFan @0x581d20]
 void fan_keeps_the_centre_and_blurs_toward_the_border() {
 	CHECK(near(frame_fx_fan_alpha(0.5f, 0.5f), 0.0f));
 	CHECK(near(frame_fx_fan_alpha(0.0f, 0.5f), 1.0f));

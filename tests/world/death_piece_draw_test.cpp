@@ -1,8 +1,8 @@
 // The death-piece draw (world/death_piece_draw.h): the collect's box, depth
 // and viewport gates over the pool, the level walk over the piece model's
 // RLOD table, and the section draw's pivot, collapse mask and water flag.
-// [orig: collect_visible_minimap_slots @ 0x57b560, update_terrain_lod_levels
-//  @ 0x57b830, Entity_BuildBoneTransformMatrices_0 @ 0x57b690]
+// [orig: DeathPiece_CollectVisible @ 0x57b560, DeathPiece_RenderVisible
+//  @ 0x57b830, DeathPiece_RenderSection @ 0x57b690]
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -164,7 +164,7 @@ OcclusionFrameCamera camera_at(float x, float y, float z, float fog) {
 }
 
 // The collect's gates over the pool, pool order kept, each projecting the
-// piece model radius [orig: collect_visible_minimap_slots @ 0x57b5a1..0x57b627].
+// piece model radius [orig: DeathPiece_CollectVisible @ 0x57b5a1..0x57b627].
 void test_collect_gates() {
 	auto w_heap = std::make_unique<World>();
 	World &w = *w_heap;

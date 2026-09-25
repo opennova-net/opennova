@@ -24,7 +24,7 @@ double table_sin(std::uint32_t angle) {
 
 std::array<NvgLensStrip, kNvgPolarPasses> nvg_polar_unwrap_passes() {
 	std::array<NvgLensStrip, kNvgPolarPasses> out;
-	// [orig: terrain_scene_render `mov esi, 2200000h` @0x5d0a75, `add esi,
+	// [orig: NVG_RenderSceneToTarget `mov esi, 2200000h` @0x5d0a75, `add esi,
 	//  800000h` @0x5d0e8c -- an eighth of a stop per pass]
 	std::uint32_t base = 0x2200000u;
 	for (int p = 0; p < kNvgPolarPasses; ++p, base += 0x800000u) {
@@ -67,7 +67,7 @@ std::array<NvgLensStrip, kNvgPolarPasses> nvg_polar_unwrap_passes() {
 NvgScopeLens build_nvg_scope_lens(std::int32_t x0, std::int32_t y0, std::int32_t x1,
 		std::int32_t y1, int scene_side) {
 	NvgScopeLens out;
-	// [orig: draw_minimap_compass_border `(x0 + x1) >> 1` @0x5d1d63,
+	// [orig: NVG_DrawScopedLens `(x0 + x1) >> 1` @0x5d1d63,
 	//  `((h) >> 3) + ((h) >> 1)` @0x5d1d7a, `(y0 + y1) >> 1` @0x5d1d8b]
 	const std::int32_t cx = (x0 + x1) >> 1;
 	const std::int32_t height = y1 - y0;
@@ -194,8 +194,8 @@ std::int32_t nvg_scoped_scene_fov_q16(float selected_h_over_w, std::int32_t zoom
 	// own optical fov does (world/player_view.cpp player_view_fov_h_deg).
 	if (zoom < 1)
 		zoom = 1;
-	// [orig: sub_5D2990 `fild zoom; fld1; fdivrp` then `fstp [var_20]`
-	//  @0x5d29ed..0x5d29fd; `sub_58A920() * flt_7DC640 * var_20 * dbl_7C3618`
+	// [orig: NVG_RenderScopedScene `fild zoom; fld1; fdivrp` then `fstp [var_20]`
+	//  @0x5d29ed..0x5d29fd; `Render_GetTargetAspectRatio() * flt_7DC640 * var_20 * dbl_7C3618`
 	//  @0x5d2a0a..0x5d2a19; `_ftol2_sse` @0x5d2a1f]
 	const float reciprocal = static_cast<float>(1.0 / static_cast<double>(zoom));
 	const double fov = static_cast<double>(selected_h_over_w) * 10485760.0 *
@@ -206,7 +206,7 @@ std::int32_t nvg_scoped_scene_fov_q16(float selected_h_over_w, std::int32_t zoom
 std::int32_t nvg_sighted_scene_fov_q16(std::int32_t zoom) {
 	if (zoom < 1)
 		zoom = 1;
-	// [orig: Math_BuildScaledFixedPointToFloatMatrix `fild zoom; fld1; fdivrp`
+	// [orig: NVG_RenderSightedScene `fild zoom; fld1; fdivrp`
 	//  @0x5d2ac1..0x5d2ac7 (the reciprocal stays on the stack),
 	//  `fmul flt_7DBD20` @0x5d2ac9, `_ftol2_sse` @0x5d2acf]
 	const double fov = (1.0 / static_cast<double>(zoom)) * 5242880.0;

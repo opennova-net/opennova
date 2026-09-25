@@ -720,7 +720,7 @@ ObjectModel *DestructionPresenter::piece_model(int p_slot) const {
 	return id != nullptr ? Object::cast_to<ObjectModel>(live_node3d(*id)) : nullptr;
 }
 
-// retail Entity_BuildBoneTransformMatrices_0 @ 0x57b690: EulerScale(piece pose,
+// retail DeathPiece_RenderSection @ 0x57b690: EulerScale(piece pose,
 // ftol(scale * 65536)) * T(-centre of the drawn section's COBJ row), every
 // bone matrix the same. The pose converts like every entity's (the BAM heading
 // is 90 - the mission yaw); the COBJ centre is in the model's own axes, (x, y,

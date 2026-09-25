@@ -4098,7 +4098,7 @@ record's own names were corrected to the IDB's — `Entity_DispatchPhysics_catv`
 @0x48F1A0` (one name, misnomer noted); `Physics_ResolveEntityCollision` →
 `Entity_MovementCollisionResolver @0x4B2BD0`; `Entity_ProcessAirPhysics` →
 `Entity_ProcessAircraftContactPhysics @0x47EF10`; the `WaterWake_*` names →
-`sub_5DDC60` / `CWeatherSlot_Init` / `sub_5DDDB0` / `sub_5DDE10`; the bike/boat
+`sub_5DDC60` / `WaterRing_InitSlot` / `WaterRing_RemoveSlot` / `WaterRing_TickAll`; the bike/boat
 lean pairing (`Entity_SmoothHeadingToTarget @0x45B2C0` = bike,
 `Vehicle_UpdateTurretRotation @0x45AEA0` = boat) restored from `xrefs_to`; the
 §1.13 cadence rewritten to `36*DcbId` (the `lea` pair `@0x490334`/`@0x490340`);
@@ -5201,7 +5201,7 @@ releases at death init (`destruction.cpp entity_init_aircraft_death`), at the
 rotor tick's dead/gone-owner sweep, and still on respawn. Deliberately NOT
 ported: retail's stale group pointer aliasing a REUSED pool slot (a later hit
 would re-trigger whatever group now occupies the slot;
-`allocate_effect_emitter_slot @0x5E46B0` reuses round-robin) — a lifetime
+`CEffectWorld_AllocGroupSlot @0x5E46B0` reuses round-robin) — a lifetime
 hazard, not behavior; the reimpl treats a reaped group as the freed-slot no-op.
 
 Every spawned particle binds its force zone at spawn:
@@ -5228,24 +5228,24 @@ dword 31, i.e. slot dword 30, which `terrain_overlay_alloc @0x5CAFC4` stamps
 with the extent; the ray radius's `*(_ESI - 4)` `@0x5CB265` is the DWORD index
 −4 = slot dword 27 = the inner radius (the review's "divide by inner" claim was
 refuted 2026-09-08). Bank name map: `sub_5DDC60 @0x5DDC60` allocation,
-`CWeatherSlot_Init @0x5DDD80` (IDB misnomer: one surface-ring row init),
-`sub_5DDDB0 @0x5DDDB0` row removal, `sub_5DDE10 @0x5DDE10` per-tick fade.
+`WaterRing_InitSlot @0x5DDD80` (one surface-ring row init),
+`WaterRing_RemoveSlot @0x5DDDB0` row removal, `WaterRing_TickAll @0x5DDE10` per-tick fade.
 [orig: sub_6108E0 @ 0x6108E0; sub_56BD20 @ 0x56BD20;
-sub_5DDC60 @ 0x5DDC60; CWeatherSlot_Init @ 0x5DDD80; sub_5DDDB0 @ 0x5DDDB0;
-sub_5DDE10 @ 0x5DDE10; create_water_surface_mesh @ 0x5DDEF0;
-render_water_surface_decal @ 0x5DE0F0; sub_5DDC90 @ 0x5DDC90]
+sub_5DDC60 @ 0x5DDC60; WaterRing_InitSlot @ 0x5DDD80; WaterRing_RemoveSlot @ 0x5DDDB0;
+WaterRing_TickAll @ 0x5DDE10; WaterRing_BuildMesh @ 0x5DDEF0;
+WaterRing_Draw @ 0x5DE0F0; WaterRing_LoadResources @ 0x5DDC90]
 
 `vehicle_part_anim` pins rotor sounds, focal forces, lifetime ownership,
 material selection, foliage waves and ring geometry. Device coverage lives
 in `vehicle_trail_present_pass_test.gd`.
 
-The render side (corrected 2026-09-08): `create_water_surface_mesh @0x5DDEF0`
-builds the 19×9 ring geometry; `render_water_surface_decal @0x5DE0F0` owns the
+The render side (corrected 2026-09-08): `WaterRing_BuildMesh @0x5DDEF0`
+builds the 19×9 ring geometry; `WaterRing_Draw @0x5DE0F0` owns the
 draw state — the 0.4 ambient material `@0x5DE202..0x5DE217`, `SetMaterial`
 `@0x5DE232`, `D3DRS_AMBIENT` (139) white `@0x5DE1EC`, `GfxShader_ApplyPassChecked`
 pass 0x100000 `@0x5DE245`, and the first-UV scroll `(g_entity_update_counter & 0x1FF) / 512`
-and `(g_entity_update_counter & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`. `sub_5DDC90
-@0x5DDC90` loads wake5.tga / wakegrad.tga, and its `CGfxTexture_SetSamplerAddressing`
+and `(g_entity_update_counter & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`. `WaterRing_LoadResources
+@0x5DDC90` loads wake5.tga / wakegrad.tga, and its `GfxShader_SetFfpLightingSources`
 (`@0x680720`) call also turns on FFP lighting with DIFFUSEMATERIALSOURCE =
 AMBIENTMATERIALSOURCE = MATERIAL (it writes +0x58..+0x5B, committed as RS 0x89 / 0x91 /
 0x93 by `CGfxShader_ApplyPassRenderStates @0x6808CA..0x68091F`): the ring alpha is the
@@ -5253,7 +5253,7 @@ material diffuse alpha (the slot alpha) and its colour the 0.4 ambient (correcte
 2026-09-24; this read "only loads the textures and sets sampler addressing"). The pass
 flags (`@0x5DE23A`, 0x100000) carry no cull-none bit, so the rings are one-sided, front
 faces up. The ring mesh is built in the render frame as (sin r, 0, cos r)
-(`create_water_surface_mesh @0x5DE01D..0x5DE03E`) and placed through
+(`WaterRing_BuildMesh @0x5DE01D..0x5DE03E`) and placed through
 `Math_FixedPointToFloat3_YNegated` (`@0x5DE181`), so in the presentation frame (the render
 x/z swap) its offsets are (cos r, 0, sin r). FIXED 2026-09-24 ("Place the water wake rings
 in the presentation frame and cull their backs"): the port had carried the render-frame
@@ -5262,7 +5262,7 @@ both sides; `compile_water_wakes` now writes the swapped offsets and
 `water_wake.gdshader` culls back faces, so an eye below the water sees no ring (pinned by
 ctest `vehicle_part_anim` and GUT `water_test.gd`). The Godot shader implements the
 two-texture draw through the compiled mesh (`provenance.json` cites
-`render_water_surface_decal` / `sub_5DDC90`).
+`WaterRing_Draw` / `WaterRing_LoadResources`).
 The UV scroll counter `g_entity_update_counter` is the ENTITY-UPDATE counter, not a render
 frame counter: its one writer is `add g_entity_update_counter,esi` (`@0x4C2639`) at the tail
 of a non-epilog `Entity_UpdateAllEntities @0x4C2100`, and nothing resets it, so it
@@ -5450,7 +5450,7 @@ also checking the authoritative pose and mounted prediction order.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-VEH-2 | Clear the vacated tail when compacting the water-ring bank | `sub_5DDDB0 @ 0x5DDDB0` zeroes the removed slot and shifts the suffix (`@0x5DDDCB..0x5DDDFC`) without ever clearing slot 127; `sub_5DDE10 @ 0x5DDE10` steps its cursor back onto the removed index (`@0x5DDEAD..0x5DDEC0`) | PERMANENT: proposed in PR #640 (2026-09-07) and ratified by its merge (2026-09-08; [ADR 0022](../adr/0022-divergence-burn-down.md#permanent-register) original-bug class): a completely full bank otherwise re-copies and re-expires the duplicated final row forever. The saturation regression fills all 128 slots and proves retirement terminates. Normal non-full ring behavior is unchanged. |
+| D-VEH-2 | Clear the vacated tail when compacting the water-ring bank | `WaterRing_RemoveSlot @ 0x5DDDB0` zeroes the removed slot and shifts the suffix (`@0x5DDDCB..0x5DDDFC`) without ever clearing slot 127; `WaterRing_TickAll @ 0x5DDE10` steps its cursor back onto the removed index (`@0x5DDEAD..0x5DDEC0`) | PERMANENT: proposed in PR #640 (2026-09-07) and ratified by its merge (2026-09-08; [ADR 0022](../adr/0022-divergence-burn-down.md#permanent-register) original-bug class): a completely full bank otherwise re-copies and re-expires the duplicated final row forever. The saturation regression fills all 128 slots and proves retirement terminates. Normal non-full ring behavior is unchanged. |
 | D-VEH-3 | Player steering reads the full BAM heading; analog input clears inactive digital direction; prior brake state and the retained +0x3C8 direction select the original ground/bike branches. | Ground @ 0x48B847..0x48C095 and bike @ 0x48496D..0x48526F; section 39. | FIXED 2026-09-18 in PR #652. 640 original-instruction command-state vectors cover heading precision, analog cancellation, stale directions and brake transitions. |
 | D-VEH-4 | Pointer row: owned by the [tank record](tank-parity-re.md#divergence-catalog). Tank corner support now uses merged wheel/belly contact, clears the sinks on a supported diagonal and keeps each corner's drop in the airborne fit. | `Entity_ProcessWheeledVehiclePhysics @ 0x475DE0`: merge @ 0x4784CC, growth @ 0x478510, catch-up @ 0x478DA4, diagonal @ 0x478FF2..0x479040, tail @ 0x47931B..0x47934C, fit call @ 0x478B1C | Minted-and-closed 2026-09-22 (FIXED) in PR #671; `vehicle_followups`. |
 | D-VEH-5 | Pointer row: owned by the [tank record](tank-parity-re.md#divergence-catalog). The Godot gameplay and Inset cameras stamp a basis built from the composed angles instead of `look_at(eye + forward)`. | Retail builds the view from the euler triple: `Viewport_BuildProjectionMatrix @ 0x410FB0`, rotations @ 0x4112A4..0x4112EB | Minted-and-closed 2026-09-22 (FIXED) in PR #671; a presentation precision fix for every far-from-origin view, filed here where it was found. GUT `local_player_presenter_test.gd`, `game_hud_presenter_declutter_test.gd`. |

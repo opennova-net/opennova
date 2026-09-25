@@ -28,7 +28,7 @@ instance uniform vec4 u_instance_tile_cache_projection = vec4(0.0);
 // D3DCMP_LESS there, so identical geometry only lands where the preceding
 // HIGH draw rejected alpha and left no depth. Discarding texels the HIGH
 // pass accepted reproduces that selection without a compare-op toggle.
-// [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912;
+// [orig: Foliage_SetupDetailSlotDraw @ 0x6008fc..0x600912;
 // CGfxDevice ZFUNC wrapper @ 0x67cac0..0x67caea]
 instance uniform float u_high_pass_cutoff = 0.0;
 
@@ -43,7 +43,7 @@ global uniform vec3 opennova_sun_direction;
 // D3D SetLight/LightEnable state can affect only the failed-VS fixed-function
 // fallback, which is outside the locked highest-quality profile.
 // [orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630;
-// Foliage_RenderFarPatches @ 0x609de0]
+// Foliage_RenderDetailPatches @ 0x609de0]
 global uniform vec3 opennova_fog_color;
 global uniform float opennova_fog_start;
 global uniform float opennova_fog_end;

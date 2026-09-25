@@ -729,10 +729,10 @@ struct ViewProjection {
 ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
                                int surface_h);
 
-// The NVG scene's pass over the 512-square target [orig: sub_5D28D0
+// The NVG scene's pass over the 512-square target [orig: NVG_RenderScene
 // @0x5d2954..0x5d296d (scaleY = flt_8409EC x 512 / 512: the frame's own
-// frustum); Math_BuildScaledFixedPointToFloatMatrix @0x5d2aa9..0x5d2ada (the
-// same shape at the Sighted arm's fov, nvg_sighted_scene_fov_q16); sub_5D2990
+// frustum); NVG_RenderSightedScene @0x5d2aa9..0x5d2ada (the
+// same shape at the Sighted arm's fov, nvg_sighted_scene_fov_q16); NVG_RenderScopedScene
 // @0x5d29e4..0x5d2a2a (scaleY 1.0: the square Scoped frustum,
 // renderer/nvg_scope_lens.h nvg_scoped_scene_fov_q16)]. Retail rasterises
 // each into 512 x 512 and stretches it over the surface. A shell whose camera

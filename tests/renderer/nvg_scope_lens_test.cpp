@@ -1,6 +1,6 @@
 // The NVG view's scoped lens and its polar unwrap
 // (runtime/renderer/nvg_scope_lens.h), pinned against the retail witnesses:
-// draw_minimap_compass_border @0x5d1d10 and terrain_scene_render's tail
+// NVG_DrawScopedLens @0x5d1d10 and NVG_RenderSceneToTarget's tail
 // @0x5d0a0e..0x5d0eb4.
 
 #include <runtime/renderer/nvg_scope_lens.h>
@@ -40,7 +40,7 @@ double q22_cos(int index) {
 	return static_cast<double>(static_cast<std::int32_t>(v * 4194304.0)) / 4194304.0;
 }
 
-// [orig: terrain_scene_render @0x5d0a75..0x5d0e9d]
+// [orig: NVG_RenderSceneToTarget @0x5d0a75..0x5d0e9d]
 void test_polar_unwrap_passes() {
 	const auto passes = nvg_polar_unwrap_passes();
 	for (int p = 0; p < kNvgPolarPasses; ++p) {
@@ -76,7 +76,7 @@ void test_polar_unwrap_passes() {
 	CHECK(passes[0][0].v0 > 0.5f);
 }
 
-// [orig: draw_minimap_compass_border @0x5d1d65..0x5d2328]
+// [orig: NVG_DrawScopedLens @0x5d1d65..0x5d2328]
 void test_lens_bands() {
 	// A 640 x 480 screen's overlay rect is (0, 0)..(639, 479): centre
 	// (319, 239), ring (479 >> 3) + (479 >> 1) = 298.
@@ -140,7 +140,7 @@ void test_lens_bands() {
 	CHECK(near(lens.passes[0][0][0].v0, 0.5 - half_texel));
 }
 
-// [orig: draw_minimap_compass_border @0x5d23be..0x5d2770]
+// [orig: NVG_DrawScopedLens @0x5d23be..0x5d2770]
 void test_lens_ring() {
 	const NvgScopeLens lens = build_nvg_scope_lens(0, 0, 639, 479, 512);
 	CHECK(lens.ring.size() == static_cast<std::size_t>(kNvgLensStripVertices));
@@ -163,7 +163,7 @@ void test_lens_ring() {
 	CHECK(lens.ring[1].x == 766.0f && lens.ring[1].y == 239.0f);
 }
 
-// [orig: sub_5D2990 @0x5d29e4..0x5d2a2a]
+// [orig: NVG_RenderScopedScene @0x5d29e4..0x5d2a2a]
 void test_scoped_scene_fov() {
 	// 4:3 at 4x: 0.75 x 160 x 0.25 x 0.5 = 15 degrees exactly.
 	CHECK(nvg_scoped_scene_fov_q16(0.75f, 4) == 15 << 16);
@@ -173,7 +173,7 @@ void test_scoped_scene_fov() {
 	CHECK(nvg_scoped_scene_fov_q16(0.75f, 0) == nvg_scoped_scene_fov_q16(0.75f, 1));
 }
 
-// [orig: Math_BuildScaledFixedPointToFloatMatrix @0x5d2ab8..0x5d2acf]
+// [orig: NVG_RenderSightedScene @0x5d2ab8..0x5d2acf]
 void test_sighted_scene_fov() {
 	CHECK(nvg_sighted_scene_fov_q16(1) == 80 << 16);
 	CHECK(nvg_sighted_scene_fov_q16(4) == 20 << 16);

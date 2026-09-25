@@ -13,7 +13,7 @@ namespace opennova::hud {
 
 // The binocular crosshair overlay rect (BinoCH.tga stretched into it), drawn
 // after the mask over the whole overlay rect.
-// [orig: sub_5CFE60 @0x5cfe95..0x5cfee0 (the mask), @0x5cfee5..0x5cff17 (the
+// [orig: Binoculars_DrawMask @0x5cfe95..0x5cfee0 (the mask), @0x5cfee5..0x5cff17 (the
 //  rect: flt_7DC618 / flt_7D1D70 / flt_7DC188 / flt_7C59AC), @0x5cff48..0x5cff5b
 //  (the crosshair)]
 inline constexpr int kBinocularCrosshairX = 384;
@@ -24,7 +24,7 @@ inline constexpr int kBinocularCrosshairH = 256;
 // The rangefinder readout: four digits starting here, advancing
 // kBinocularDigitStep per digit; each digit blits one kViewDigitCell-square
 // cell from the 16px digit strip (BNumbers.tga row = digit * cell).
-// [orig: HUD_DrawSpeedometer @0x5908c0 (x), @0x5908cf (the cell),
+// [orig: Binoculars_DrawRangefinder @0x5908c0 (x), @0x5908cf (the cell),
 //  @0x5908de (y), @0x590926 (the step)]
 inline constexpr int kBinocularDigitX = 486;
 inline constexpr int kBinocularDigitY = 683;
@@ -35,9 +35,9 @@ inline constexpr int kViewDigitCell = 16;
 // at half brightness (kNvgScaleModulate/255 per channel) after the NVG.tga
 // mask over the whole overlay rect; the composite draws both except under the
 // death screen.
-// [orig: sub_5CFF70 @0x5cffab..0x5cfff1 (the mask), @0x5d0005..0x5d001d (the
+// [orig: NVG_DrawMaskAndGain @0x5cffab..0x5cfff1 (the mask), @0x5d0005..0x5d001d (the
 //  rect), @0x5d003e (the gain row), @0x5d004a (modulate 0xFF7F7F7F);
-//  render_fullscreen_overlay @0x5d107e..0x5d1080]
+//  NVG_Composite @0x5d107e..0x5d1080]
 inline constexpr int kNvgScaleX = 960;
 inline constexpr int kNvgScaleY = 32;
 inline constexpr int kNvgScaleW = 48;
@@ -45,7 +45,7 @@ inline constexpr int kNvgScaleH = 32;
 inline constexpr int kNvgScaleModulate = 127;
 
 // Retail's persistent rangefinder easing [orig: the misnamed
-// HUD_DrawSpeedometer @ 0x590810]: the target clamps to 1..1000; a
+// Binoculars_DrawRangefinder @ 0x590810]: the target clamps to 1..1000; a
 // correction beyond 1000 snaps; otherwise the displayed value steps toward
 // the target on the 111/33/11/3/1 magnitude ladder, so large corrections
 // move quickly while the final digits settle one unit at a time. The value

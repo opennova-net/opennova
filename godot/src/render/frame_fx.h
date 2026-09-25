@@ -57,8 +57,8 @@ struct FrameFxScreenFrame {
 // (distortion, death or damage blur, the bloom, thermal and monitor) or, in
 // the first-person NVG view, the NVG scene/glow/composite chain in their
 // place (Render_ProcessMainSceneFrame @0x5ca8f6..0x5caad5 / @0x5ca6ab; the
-// bloom kernel sub_5841D0 @0x5841d0 over the Q3 source FrameFX_RenderBloomPass
-// @0x582940 draws and FrameFX_CaptureRenderTarget @0x584020 captures; targets
+// bloom kernel FrameFX_BloomKernel @0x5841d0 over the Q3 source FrameFX_RenderGlowSource
+// @0x582940 draws and FrameFX_CaptureAltBuffer @0x584020 captures; targets
 // create_frame_effect_render_targets @0x583c40).
 // The Q3 source is an effect-owned full-resolution color target sharing the
 // resolved beauty depth; the capture is the power-of-two floor of the frame.

@@ -1253,7 +1253,7 @@ void ObjectModel::advance_awake_frame_impl(double p_delta,
 }
 
 // MATCHTERRAIN-class instances read the terrain page projection (the c7/c8 fold at
-// Foliage_RenderFarPatches @0x60a220..0x60a34f; class selection CRenderBatchQueue_FlushBatches
+// Foliage_RenderDetailPatches @0x60a220..0x60a34f; class selection CRenderBatchQueue_FlushBatches
 // @0x5d9ff3 - docs/render/render-material-re.md).
 void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 		float p_layer, const Vector4 &p_projection) {

@@ -5,8 +5,8 @@
 
 namespace opennova::renderer {
 
-// [orig: sub_56BD20 @ 0x56BD20; IDB: CWeatherSlot_Init @ 0x5DDD80 (misnomer,
-//  the surface-ring row init)]
+// [orig: sub_56BD20 @ 0x56BD20; WaterRing_InitSlot @ 0x5DDD80 (the
+//  surface-ring row init)]
 void WaterWakePool::add(int32_t x, int32_t y, float opacity) {
 	for (auto &row : rows_) {
 		if (row.active)
@@ -17,7 +17,7 @@ void WaterWakePool::add(int32_t x, int32_t y, float opacity) {
 	}
 }
 
-// [orig: sub_5DDE10 @ 0x5DDE10 (the per-tick fade); sub_5DDDB0 @ 0x5DDDB0 (the
+// [orig: WaterRing_TickAll @ 0x5DDE10 (the per-tick fade); WaterRing_RemoveSlot @ 0x5DDDB0 (the
 //  row removal)]
 void WaterWakePool::tick() {
 	for (int i = 0; i < 128; ++i) {
@@ -42,13 +42,13 @@ void WaterWakePool::tick() {
 	}
 }
 
-// [orig: create_water_surface_mesh @ 0x5DDEF0; render_water_surface_decal @ 0x5DE0F0]
+// [orig: WaterRing_BuildMesh @ 0x5DDEF0; WaterRing_Draw @ 0x5DE0F0]
 void compile_water_wakes(const WaterWakePool &pool, int32_t water_height,
 		uint32_t entity_update_counter, const int32_t camera[3], WaterWakeFrame &out) {
 	out.clear();
 	// The first UV scrolls by (counter & 0x1FF) / 512 and (counter & 0x3FF) *
 	// -0.01171875, the counter being the entity-update counter (see the header)
-	// [orig: render_water_surface_decal @ 0x5DE0F0, the scroll @ 0x5DE277..0x5DE2AD].
+	// [orig: WaterRing_Draw @ 0x5DE0F0, the scroll @ 0x5DE277..0x5DE2AD].
 	const float scroll_u = float(entity_update_counter & 511u) * 0.001953125f;
 	const float scroll_v = float(entity_update_counter & 1023u) * -0.01171875f;
 	for (const auto &wake : pool.rows()) {
@@ -63,7 +63,7 @@ void compile_water_wakes(const WaterWakePool &pool, int32_t water_height,
 					z = -float(wake.y) * io::kInvFp16One;
 		const int32_t base = int32_t(out.vertices.size());
 		// The static ring mesh is built in the render (d3d) frame as
-		// (sin * r, 0, cos * r) [orig: create_water_surface_mesh @ 0x5de01d..
+		// (sin * r, 0, cos * r) [orig: WaterRing_BuildMesh @ 0x5de01d..
 		// 0x5de03e] and placed through Math_FixedPointToFloat3_YNegated
 		// (@ 0x5de181); the output frame here is the render frame's x/z swap
 		// (godot/src/util/axes.h), so the ring's render x offset lands on z and

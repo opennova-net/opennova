@@ -71,7 +71,7 @@ completed launcher targeting, Inset scene, mortar impact HUD, and pilot instrume
 | Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / friendly brackets ported 2026-09-19) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
 | Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `HudFrameCompiler::element_sights_card` + `godot/game/world/hud_sights_card.gd` materialize the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `simulation_test.gd` + `hud_overlay_test.gd` + ctest `weapon_fsm` |
 | Scoped-view circle mask + reticle cross/grid | **ported** (`engine/runtime/hud/scope_circle_mask.*` → the `HudPos.scope_mask_*` statics → `godot/game/world/hud_scope_circle_mask.gd`; the record's old “rowless-weapon fallback” gate reading corrected 2026-09-16) | `[orig: Hud_DrawScopeCircleMask @0x5d17a0]` + `[orig: draw_minimap_crosshair_and_grid @0x5d1160]`; the unconditional Scoped-arm call + the `!rows` crosshair argument `[orig: Render_ProcessMainSceneFrame @0x5cab08..0x5cab15; render_hud_overlay @0x5d82e5..0x5d82f2]`; ctest `sight_overlay` |
-| First-person view effects: binocular mask/crosshair/rangefinder, NVG mask + gain scale | **ported**, layout witnessed 2026-09-24 (`engine/runtime/hud/view_effects.h` → `godot/game/world/player_view_effects.gd`); the NVG image under the mask is FrameFX's render-to-texture chain, the underwater murk is the render overlay stage's (§First-person view effects) | `[orig: sub_5CFE60 @0x5cfe95..0x5cff5b; sub_5CFF70 @0x5cffab..0x5d004a; HUD_DrawSpeedometer @0x5908c0; render_fullscreen_overlay @0x5d107e..0x5d1080]`; GUT `hud_overlay_test` |
+| First-person view effects: binocular mask/crosshair/rangefinder, NVG mask + gain scale | **ported**, layout witnessed 2026-09-24 (`engine/runtime/hud/view_effects.h` → `godot/game/world/player_view_effects.gd`); the NVG image under the mask is FrameFX's render-to-texture chain, the underwater murk is the render overlay stage's (§First-person view effects) | `[orig: Binoculars_DrawMask @0x5cfe95..0x5cff5b; NVG_DrawMaskAndGain @0x5cffab..0x5d004a; Binoculars_DrawRangefinder @0x5908c0; NVG_Composite @0x5d107e..0x5d1080]`; GUT `hud_overlay_test` |
 | ALPHAFADE semantics | **ported** (`hud_math::fade_decay`/`fade_flash_alpha`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
 | Attach labels (seat/armory floats) | **ported** (`VehicleSystem::collect_attach_labels` + `LocalPlayer::local_player_can_fire` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13 CLOSED) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; nearest-entity branch consumes complete `Player_CanFireWeapon @0x5cf780`; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; the bold Arial label font + slot scale `[orig: @0x5a3680; HUD_InitAllFonts @0x51ee20]` ported 2026-08-11; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `simulation_test.gd`/`hud_helpers_test.gd` |
 | Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; eye-offset anchor `[orig: @0x4bf078..0x4bf14c]` + Arial label font `[orig: HUD_InitAllFonts @0x51ee20]` witnessed + ported 2026-08-11; ctest `hud_math`/`hud_frame_compiler`/`infantry`/`promote` |
@@ -761,7 +761,7 @@ Ctest `hud_frame_compiler` pins plain and sliding rows at 1920x1080; GUT
 selection remains absent; the native viewport path is ported. In the NVG composite's
 Sighted arm (2026-09-24) the rows lay out over the 512-square NVG target with the
 frame's selected ratio in the Y correction (`hud::sight_rect_to_viewport_at_ratio`,
-`HudPos.nvg_scene_sight_rect`; `terrain_scene_render @0x5d08d8..0x5d0927`) and draw
+`HudPos.nvg_scene_sight_rect`; `NVG_RenderSceneToTarget @0x5d08d8..0x5d0927`) and draw
 into the NVG scene, never over the frame (the circle-mask section below).
 
 Port: `world::weapon_sights_card_eligible` owns the dynamic selector, the sim
@@ -800,7 +800,7 @@ the correction in the SIGHTS-card section above for why this is not a fallback.
 |---|---|---|
 | centre | `((x1 + x0) >> 1, (y0 + y1) >> 1)` — arithmetic shifts of the summed edges | `@0x5d17cc` / `@0x5d17e1` |
 | `scaleX` | `(double)cx / (double)cy * 0.75` | `@0x5d17f5` |
-| `scaleY` | `3.0 / (flt_8409EC * 4.0)` — `sub_58A920 @0x58a920` returns the selected H/W ratio `Render_SetAspectRatioMode @0x58d870` stores (0.75 / 0.6 / 0.5625 / 0.625, or the viewport's own H/W in the native mode) | `@0x5d1811` |
+| `scaleY` | `3.0 / (flt_8409EC * 4.0)` — `Render_GetTargetAspectRatio @0x58a920` returns the selected H/W ratio `Render_SetAspectRatioMode @0x58d870` stores (0.75 / 0.6 / 0.5625 / 0.625, or the viewport's own H/W in the native mode) | `@0x5d1811` |
 | ring size | `((y1 - y0) >> 3) + ((y1 - y0) >> 1)` = five eighths of the viewport height, as an INTEGER shift pair | `@0x5d1830` |
 | inner radius | `0.71f * ring_size` | `@0x5d184d` |
 | outer radius | `ring_size * 1.5f` | `@0x5d1857` |
@@ -891,9 +891,9 @@ truncated spoke endpoints and the tick lattice.
 NVG composite's Scoped arm the circle mask does not draw: the lens draws its
 own ring, then the SIGHTS card on top, then (no authored row)
 `draw_minimap_crosshair_and_grid(ring, cx, cy, 1.0, 1.0)`, the cross and grid
-at unit scale (`draw_minimap_compass_border @0x5d2798..0x5d27bc`;
+at unit scale (`NVG_DrawScopedLens @0x5d2798..0x5d27bc`;
 `hud::build_nvg_lens_reticle`, `HudPos.scope_mask_*` `nvg_lens`). No NVG mask
-draws under the lens or on the death screen (`render_fullscreen_overlay
+draws under the lens or on the death screen (`NVG_Composite
 @0x5d1077..0x5d1080`); `LocalPlayerViewFrame::nvg_mask_visible` carries that
 gate. Under the Sighted arm the card draws into the NVG scene (tinted, glowing)
 and never over the frame (`nvg_sights_in_scene`). The arms themselves are
@@ -1583,7 +1583,7 @@ wide as it is tall; its segment count keys on the unscaled radius
 (`clamp(ftol(radius * (1/3) * 4pi), 4, 95)`), and the four radial stops are
 `radius -+ (stroke/2 - 1)` with a 1-pixel transparent fringe either side. The
 Inset aperture ring is the same record with `+0x1C` = the viewport aspect
-factor `sub_58A910` and stroke 2.0 `[orig: @0x5C9E16..0x5C9E7F]`.
+factor `Render_GetViewportScaleY` and stroke 2.0 `[orig: @0x5C9E16..0x5C9E7F]`.
 
 **The HUD's death gate is `g_death_screen_active @0xA860EC`, alone.** Neither
 the local dead bit (`Flags & 2`) nor the death lerp camera (`g_camera_mode`
@@ -1611,7 +1611,7 @@ the port keeps the structure rather than the accident.
 `Render_RadarCompassOverlay @0x5C9740` recomputes the view
 (`Camera_ComputeThirdPersonView @0x5C9841`, slot offsets `@0x5C98F7..0x5C9903`),
 draws the two depth-mask fans, then renders the scene with the SAME function
-the main view uses: `Terrain_RenderSceneWithReflection(view, 0, 0, 0)
+the main view uses: `Terrain_RenderWorldScene(view, 0, 0, 0)
 @0x5C9DE9`. Its arguments switch off only the sun glow (second argument,
 tested `@0x5C970E`) and the water-mirror subpasses (fourth argument); the
 sector models and entities, both `CEffectEmitterPool_RenderMainPass` +
@@ -3032,7 +3032,7 @@ call; IDB saved):
   inner cross/grid. The function comment carried the old fallback gloss and was
   rewritten this session. The second caller remains `render_hud_overlay
   @0x5d82f2`. The sibling reticle drawer `draw_minimap_crosshair_and_grid
-  @0x5d1160` keeps its name (its second caller is `draw_minimap_compass_border
+  @0x5d1160` keeps its name (its second caller is `NVG_DrawScopedLens
   @0x5d27bc`, which IS a minimap element) and carries a candidate-rename
   comment for the next HUD grill.
 - **Comment** at `0x59e3d6` noting `dword_25510DC` = the user crosshair-style
@@ -3117,7 +3117,7 @@ Applied 2026-09-16 (the scoped-view circle-mask grill; comments only, IDB saved)
   geometry, the two colours, the 130-vertex strip and the vertex stride.
 - **Comment** at `0x5d1160` — the four tapered spokes and the sixteen tick
   diamonds with their fractions, ftol truncation, `W/320` / `W/64` units and
-  colours; records that the second caller `draw_minimap_compass_border
+  colours; records that the second caller `NVG_DrawScopedLens
   @0x5d27bc` IS a minimap element, which is why the name stays.
 - **Comment** at `0x59b0f0` — the 8-bit `shl`/`and cl,dl` arithmetic and the
   absence of any clamp on the level (cfg `@0x550339`, apply `@0x55154d`, cycle
@@ -3368,10 +3368,10 @@ virtual overlay space.
 
 | Element | Witness | Port |
 |---|---|---|
-| Binocular mask (`Binoculr.tga`) over the overlay rect, then `BinoCH.tga` stretched into (384, 256)-(640, 512) | `sub_5CFE60 @0x5cfe95..0x5cfee0` (the mask), `@0x5cfee5..0x5cff17` (the rect: `flt_7DC618` / `flt_7D1D70` / `flt_7DC188` / `flt_7C59AC`), drawn `@0x5cff48..0x5cff5b` | `kBinocularCrosshair*` |
-| Binocular rangefinder digits (`BNumbers.tga`): x0 486, y 683, cell 16, step 10 | `HUD_DrawSpeedometer @0x5908c0` (x), `@0x5908cf` (cell), `@0x5908de` (y), `@0x590926` (step) | `kBinocularDigit*`, `binocular_range_step` |
-| NVG mask (`NVG.tga`, state `dword_2BDFADC`) over the overlay rect, then the gain scale (`Nvgscale.tga`, row = `g_NVGBrightnessLevel`) at (960, 32)-(1008, 64) modulated `0xFF7F7F7F` | `sub_5CFF70 @0x5cffab..0x5cfff1` (the mask), `@0x5d0005..0x5d001d` (the rect), `@0x5d003e` (the row), `@0x5d004a` (the modulate) | `kNvgScale*` |
-| The NVG mask draws only with the full-screen composite, never on the death screen nor under the Scoped lens | `render_fullscreen_overlay @0x5d1077..0x5d1080` | `LocalPlayerViewFrame::nvg_mask_visible` |
+| Binocular mask (`Binoculr.tga`) over the overlay rect, then `BinoCH.tga` stretched into (384, 256)-(640, 512) | `Binoculars_DrawMask @0x5cfe95..0x5cfee0` (the mask), `@0x5cfee5..0x5cff17` (the rect: `flt_7DC618` / `flt_7D1D70` / `flt_7DC188` / `flt_7C59AC`), drawn `@0x5cff48..0x5cff5b` | `kBinocularCrosshair*` |
+| Binocular rangefinder digits (`BNumbers.tga`): x0 486, y 683, cell 16, step 10 | `Binoculars_DrawRangefinder @0x5908c0` (x), `@0x5908cf` (cell), `@0x5908de` (y), `@0x590926` (step) | `kBinocularDigit*`, `binocular_range_step` |
+| NVG mask (`NVG.tga`, state `dword_2BDFADC`) over the overlay rect, then the gain scale (`Nvgscale.tga`, row = `g_NVGBrightnessLevel`) at (960, 32)-(1008, 64) modulated `0xFF7F7F7F` | `NVG_DrawMaskAndGain @0x5cffab..0x5cfff1` (the mask), `@0x5d0005..0x5d001d` (the rect), `@0x5d003e` (the row), `@0x5d004a` (the modulate) | `kNvgScale*` |
+| The NVG mask draws only with the full-screen composite, never on the death screen nor under the Scoped lens | `NVG_Composite @0x5d1077..0x5d1080` | `LocalPlayerViewFrame::nvg_mask_visible` |
 
 **The NVG image.** The picture under the mask is not a HUD effect: it is FrameFX's NVG
 render-to-texture chain (the 512² scene, the persistent 256² glow, the tint + MODULATE2X
@@ -3382,7 +3382,7 @@ and reticle are in the circle-mask section above.
 
 **The underwater murk** is no longer a HUD / `PlayerViewEffects` quad (the `UnderwaterMurk`
 rect and `MissionEnvironment`'s `underwater_overlay_changed` signal are deleted). Retail draws
-it in the scene core's post-particle tail (the `Terrain_DrawScissorRect @0x5c38e0` call `@0x5c96f5`, after the
+it in the scene core's post-particle tail (the `Render_DrawViewportColorQuad @0x5c38e0` call `@0x5c96f5`, after the
 coronas and the water glint, before the sun glare), so it draws per view from that view's
 render eye, before the bloom; the port draws it in the scene overlay stage
 (`engine/runtime/renderer/scene_overlay.h`, `SceneOverlayCompositorEffect`), recorded in

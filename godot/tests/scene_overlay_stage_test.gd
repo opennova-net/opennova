@@ -5,7 +5,7 @@ extends GutTest
 # right after particle pass B, before the frame effects) receives it. The
 # underwater murk quad draws per VIEW from that view's own render eye, at or
 # below the water, whatever the camera mode [orig:
-# Terrain_RenderSceneWithReflection @ 0x5c96c5..0x5c96f5; the tail order and
+# Terrain_RenderWorldScene @ 0x5c96c5..0x5c96f5; the tail order and
 # its witnesses live in engine/runtime/renderer/scene_overlay.h]. The draw
 # checks need the real rendering device and are pending under the headless
 # dummy renderer.
@@ -235,7 +235,7 @@ func _meshes(node: Node, out: Array[MeshInstance3D]) -> void:
 
 # The sun glare closes the tail: the stage takes the glow model out of every
 # camera and draws its SELFLUM surfaces after the murk, under the forced
-# 1.0 light scale [orig: Terrain_RenderSceneWithReflection @ 0x5c96fd..0x5c9722,
+# 1.0 light scale [orig: Terrain_RenderWorldScene @ 0x5c96fd..0x5c9722,
 # render_skybox_sun_glow(1, 1) @ 0x5c9714].
 func test_the_sun_glare_draws_in_the_overlay_pass_and_leaves_the_cameras() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_glare", true)

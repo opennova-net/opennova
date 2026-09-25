@@ -18,12 +18,12 @@ namespace godot {
 
 // The NVG view's draws beyond the full-screen composite, on the
 // RenderingDevice: the Sighted arm's SIGHTS card into the NVG scene (retail
-// terrain_scene_render @0x5d08cb..0x5d0952 -> draw_weapon_sight_overlays
+// NVG_RenderSceneToTarget @0x5d08cb..0x5d0952 -> draw_weapon_sight_overlays
 // @0x4dce00), and the Scoped arm's lens -- the 64 x 16 polar unwrap of the
 // NVG scene, then the frame cleared black and the lens's five band passes and
 // ring drawn over it (runtime/renderer/nvg_scope_lens.h carries the geometry
-// and every witness; retail draw_minimap_compass_border @0x5d1d10 and
-// terrain_scene_render @0x5d0a0e..0x5d0eb4). Every draw is submitted as
+// and every witness; retail NVG_DrawScopedLens @0x5d1d10 and
+// NVG_RenderSceneToTarget @0x5d0a0e..0x5d0eb4). Every draw is submitted as
 // retail submits it: pre-transformed vertices whose pixel-space coordinates
 // land on D3D9 pixel centres. FrameFxCompositorEffect owns one and calls it
 // from its render thread.

@@ -347,7 +347,7 @@ struct LocalPlayerViewFrame {
     // The Sighted arm: the SIGHTS card draws into the NVG scene, not over it.
     bool nvg_sights_in_scene = false;
     // The thermal-imaging view of a Thermal-flagged weapon def (flags2 & 4;
-    // the IDB's Player_IsVehicleSeatHasFlag4 @0x4dcd70 reads EquippedSlot
+    // the IDB's Player_IsHeldWeaponThermal @0x4dcd70 reads EquippedSlot
     // (+0x118)->Def(+0x20)->flags2(+0x0C) & 4). `thermal_view` is the frame's
     // latched byte -- the CanFire verdict AND the def bit -- that greys the
     // world lighting block and selects the 0x808080 device fog and clear;

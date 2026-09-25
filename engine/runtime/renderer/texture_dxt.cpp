@@ -29,7 +29,7 @@ constexpr float kInverseLuminanceB = 0x1.3d83bap+3f;
 
 // Endpoint weight tables. [orig: unk_7FB620/unk_7FB614 (three colors),
 // unk_7FB604/unk_7FB5F4 (four colors), unk_7FB5D4/unk_7FB5BC (six alphas),
-// unk_7FB59C/unk_7FB57C (eight alphas)]. The eight-alpha D table's last entry
+// unk_7FB59C/g_D3DXTex_AlphaD8 (eight alphas)]. The eight-alpha D table's last entry
 // is 8/7 (0x3F924925), not 1.
 constexpr float kC3[] = {1.0f, 0.5f, 0.0f};
 constexpr float kD3[] = {0.0f, 0.5f, 1.0f};
@@ -76,7 +76,7 @@ void diffuse_error(float *error, size_t stride, uint32_t index, float value) {
 	}
 }
 
-// [orig: sub_72010D @ 0x72010D (clamp @ 0x720115..0x720196, round toward
+// [orig: D3DXTex_EncodeR5G6B5 @ 0x72010D (clamp @ 0x720115..0x720196, round toward
 // zero @ 0x720199..0x7201FB)]
 uint16_t encode_565(float r, float g, float b) {
 	if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
@@ -102,7 +102,7 @@ DxtColor decode_565(uint16_t packed) {
 }
 
 // Least-squares endpoint search over the luminance-weighted points.
-// [orig: D3DXTex_OptimizeDXTEndpoints @ 0x720537]
+// [orig: D3DXTex_OptimizeRGB @ 0x720537]
 void optimize_rgb(DxtColor &out_x, DxtColor &out_y, const DxtColor *points,
 		uint32_t steps) {
 	const float *pc = steps == 3 ? kC3 : kC4;
@@ -414,7 +414,7 @@ void encode_color_block(const DxtColor *texels, uint8_t *block, bool colorkey,
 
 // Newton iterations on the alpha endpoints; the step difference is taken as
 // texel minus step.
-// [orig: D3DXTex_OptimizeEndpoints1D @ 0x720210]
+// [orig: D3DXTex_OptimizeAlpha @ 0x720210]
 void optimize_alpha(float &out_x, float &out_y, const float *points,
 		uint32_t steps) {
 	const float *pc = steps == 6 ? kC6 : kC8;

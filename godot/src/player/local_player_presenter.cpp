@@ -890,7 +890,7 @@ void LocalPlayerPresenter::update_scope_camera() {
 	cam->set_near(opennova::renderer::kScenePassNearZ);
 	// While the NVG composite is up the world pass IS the NVG scene: retail
 	// renders it into the 512-square target instead of the backbuffer (retail
-	// Render_ProcessMainSceneFrame @0x5ca516..0x5ca5b0 -> terrain_scene_render,
+	// Render_ProcessMainSceneFrame @0x5ca516..0x5ca5b0 -> NVG_RenderSceneToTarget,
 	// whose clear is GameWorld's fog-colour clear), so the target carries the
 	// scene's raster and the gameplay camera keeps the frame's frustum as the
 	// culling superset (the Scoped arm's square frustum lies inside it).

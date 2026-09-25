@@ -691,7 +691,7 @@ sees a nonzero handle and retail binds a never-filled 1x1 managed texture.
 The port keeps the checkerboard as its bounded fallback for that row (an
 unfilled device texture is garbage under ADR 0003); whether that carve-out is
 registered as a class-D entry is the maintainer's call.
-[orig: sub_5B16F0 @ 0x5B16F0; load_texture_as_normalmap @ 0x58C480;
+[orig: Material_LoadStageTexture @ 0x5B16F0; load_texture_as_normalmap @ 0x58C480;
 GTexture_CreateFromPixelData_0 @ 0x6876C0]
 
 ## 2026-09-24 rendering parity pass
@@ -749,10 +749,4 @@ ends at 1.0 and it keeps index 1 for alpha 1.0, where retail's table ends at
 
 ### Open after the 2026-09-24 pass
 
-- None for the object material path. The IDB comment corrections the pass
-  proposed (`0x5B2320` / `0x58DDA6`: style 113 reads the CTRL slot
-  `@ 0x5B2343..0x5B2359`, it does not return the base; `0x5B1600`: the
-  checkerboard colours are grey 0x30/0x50; `0x5D98A0`: ctx+841 is the
-  first-entry latch; `0x5AA7C0` `CEffectWorld_ClearActiveSamplerStates` is
-  `LightEnable(idx, FALSE)` over the active D3D point lights) belong to the
-  IDB sweep.
+- None for the object material path.

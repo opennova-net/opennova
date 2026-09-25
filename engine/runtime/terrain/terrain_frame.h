@@ -12,7 +12,7 @@
 // its instance pool.
 // [orig: Terrain_CollectVisibleSectors @ 0x5C9120 (jodemo.exe) — the 512-unit sector
 //  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe);
-//  sub_602850 @ 0x60288E..0x6028B1 — the per-batch family select, called from
+//  Terrain_GetLodSlotFamily @ 0x60288E..0x6028B1 — the per-batch family select, called from
 //  render_terrain_sector_batch @ 0x609581]
 
 #include <runtime/terrain/foliage_detail_collector.h>

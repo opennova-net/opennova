@@ -116,8 +116,8 @@ struct WeatherState {
     uint32_t command_generation = 0;  // bumped by commands only
 
     // The mission clock [orig: Env_CurTimeFixed24 @ 0x26c6448 (8.24 hours),
-    // Env_TodAdvancePerTick @ 0x26c644c, Env_TodMinuteTickdown @ 0x26c6064,
-    // Env_TodMinutesElapsed @ 0x26c6450].
+    // Env_TodAdvancePerTick @ 0x26c644c, Env_TodEpochTickdown @ 0x26c6064,
+    // Env_TodEpoch @ 0x26c6450].
     static constexpr uint32_t kTodDayFixed24 = 24u << 24;
     static constexpr int32_t kTodMinuteTicks = 310;
     // The 62 ticks-per-second scale every WAC seconds argument multiplies by

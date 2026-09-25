@@ -1,9 +1,9 @@
 // The World particle pass on the water's far side (retail pass A) drawn as
 // transparent render-list geometry: retail submits it after the far-side
 // tracers and before the far-side foliage and the water surface
-// (Terrain_RenderSceneWithReflection: CEffectEmitterPool_RenderMainPass
+// (Terrain_RenderWorldScene: CEffectEmitterPool_RenderMainPass
 // @ 0x5c95ac -> EffectWorld_RenderParticlePass(0) @ 0x5c95b5 ->
-// Foliage_RenderFarPatchesPass(0) @ 0x5c95c5 -> Terrain_RenderWaterPass
+// Foliage_RenderDetailPatchesPass(0) @ 0x5c95c5 -> Terrain_RenderWaterPass
 // @ 0x5c95dc), so its runs sit at kRungParticleFarSide, ordered among
 // themselves by the instances' sorting offsets (ParticleFarPass). The stage
 // program per type is retail's (CParticleTexture_InitTextureAndChannels):

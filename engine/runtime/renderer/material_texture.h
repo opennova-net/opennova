@@ -11,7 +11,7 @@ enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, Hori
 
 // The texture-row dispatcher selects the loader by TYPE, not the sampler slot.
 // MDT is already a normal map; TGA carries height in A and output alpha in B.
-// [orig: sub_5B16F0 @0x5B16F0; load_texture_as_normalmap @0x58C480]
+// [orig: Material_LoadStageTexture @0x5B16F0; load_texture_as_normalmap @0x58C480]
 // DDS sibling wins over a TGA unless the session allows an existing loose
 // TGA override. The selected file is decoded exactly: a broken DDS does not
 // fall through to a different extension. [orig: load_texture_as_normalmap @0x58C480]

@@ -36,7 +36,7 @@ static_assert(sizeof(opennova::renderer::TracerVertex) == 32 &&
 		"the ribbon vertex is position, ARGB colour and two coordinate sets");
 
 // The distortion ribbon material, pool+0x300C (retail
-// create_effect_channel_render_textures @ 0x5DC8F0): one stage, colour =
+// CEffectEmitterPool_CreateShaders @ 0x5DC8F0): one stage, colour =
 // SELECTARG2(TEXTURE) = slot 2, alpha = SELECTARG1(DIFFUSE),
 // SRCALPHA/INVSRCALPHA. Its coordinates are generated from the camera-space
 // position through the projective screen matrix (state 14 = the

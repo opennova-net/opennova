@@ -22,7 +22,7 @@ namespace opennova::renderer {
 // alpha draws flush after the world block is restored; the opaque draws use
 // the flat block. Held models inherit their owner's wave.
 // [orig: collect_visible_entities_for_terrain @0x5C8C60;
-// Terrain_RenderSceneWithReflection @0x5C9511..0x5C9616]
+// Terrain_RenderWorldScene @0x5C9511..0x5C9616]
 inline bool entity_uses_thermal_wave(int item_type) { return item_type == 3; }
 
 // The main scene pins this after applying FOV, independent of camera mode.
@@ -125,9 +125,9 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // render_priority rungs (within one rung Godot's per-object back-to-front
 // depth sort matches the per-queue ~float-bits keys above). The witnessed
 // frame [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0]: the sky pass
-// (dome -> bodies -> clouds, sub_579CB0 @ 0x5ca81a), then the first-person
+// (dome -> bodies -> clouds, SkyDome_RenderWithSkyfog @ 0x5ca81a), then the first-person
 // viewmodel (@ 0x5ca829), then the scene core [orig:
-// Terrain_RenderSceneWithReflection @ 0x5c93a0]: the non-person sector wave
+// Terrain_RenderWorldScene @ 0x5c93a0]: the non-person sector wave
 // (its opaque flush @ 0x5c9506 carries the post-multiply passes) -> the
 // far-side person waves with their foliage MODEL masks (@ 0x5c9548,
 // @ 0x5c955f) -> far-water-side alpha (flush @ 0x5c9596) -> tracer pass 0
@@ -155,7 +155,7 @@ constexpr int kRungSkyBody = -14;
 // [orig: render_skybox cloud pass @ 0x5798f1..0x579b15].
 constexpr int kRungSkyClouds = -13;
 // The first-person viewmodel flushes whole (its alpha strips included) after
-// the sky pass and before every world draw [orig: sub_579CB0 @ 0x5ca81a then
+// the sky pass and before every world draw [orig: SkyDome_RenderWithSkyfog @ 0x5ca81a then
 // Player_RenderViewModelIfAlive @ 0x4e0140, called @ 0x5ca829]; its depth
 // band keeps later world alpha off it.
 constexpr int kRungViewmodel = -12;
@@ -179,7 +179,7 @@ constexpr int kRungObjectPostMultiply = -11;
 // The foliage MODEL depth masks of the far-side person wave: immediate draws
 // inside Terrain_RenderSectorEntitiesBySide (Foliage_UpdateModelTiles) during
 // the far wave @ 0x5c955f, before the far-side alpha flush @ 0x5c9596
-// [orig: Terrain_RenderSceneWithReflection].
+// [orig: Terrain_RenderWorldScene].
 constexpr int kRungFoliageMaskFarSide = -10;
 constexpr int kRungAlphaFarSide = -9;    // world alpha on the water side AWAY from the camera
 // The tracer pool's far-side pass, after the far-side alpha flush
@@ -190,22 +190,22 @@ constexpr int kRungTracerFarSide = -8;
 // @ 0x5c95b5].
 constexpr int kRungParticleFarSide = -7;
 // Detail foliage on the far side of the water, before the water surface
-// [orig: Foliage_RenderFarPatchesPass(0) @ 0x5c95c5].
+// [orig: Foliage_RenderDetailPatchesPass(0) @ 0x5c95c5].
 constexpr int kRungFoliageFarSide = -6;
 constexpr int kRungWater = -5;           // the water surface (drawn between the side brackets)
 // The water decals (the vehicle wake rings) inside the water pass, right
 // after the surface strip [orig: render_water_surface @ 0x5c3426 strip then
-// the wake bank scanner sub_5DE340 @ 0x5c3432].
+// the wake bank scanner WaterRing_DrawAll @ 0x5c3432].
 constexpr int kRungWaterDecals = -4;
 // The foliage MODEL depth masks of the camera-side person wave, drawn inside
 // the camera wave @ 0x5c9638 after the water pass and before
-// Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderSceneWithReflection].
+// Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderWorldScene].
 constexpr int kRungFoliageMaskCameraSide = -3;
 // The impact scars, after the camera-side opaque wave and before foliage
 // pass 1 and the camera-side alpha [orig: Scar_DrawBatches @ 0x5c9658].
 constexpr int kRungScars = -2;
 // Detail foliage on the camera's side of the water, before the camera-side
-// alpha flush [orig: Foliage_RenderFarPatchesPass(1) @ 0x5c9665].
+// alpha flush [orig: Foliage_RenderDetailPatchesPass(1) @ 0x5c9665].
 constexpr int kRungFoliageCameraSide = -1;
 constexpr int kRungAlphaCameraSide = 0;  // world alpha on the camera's side (the default rung)
 // The tracer pool's camera-side pass, after the camera-side alpha flush and

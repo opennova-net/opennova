@@ -89,7 +89,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
   confirms `0xf0…0x12c` are load-time model pointers, not runtime counters —
   **D-ITEMDEF-2**).
 - **`EntityDef_LoadModelsAndCallbacks @ 0x439f50`** — loads each name string
-  via `sub_5B6160` into its model pointer (`graphic→0xf0`, `husk→0xf4`,
+  via `ThreediGp_LoadModel` into its model pointer (`graphic→0xf0`, `husk→0xf4`,
   `huskFinal→0xf8`, `graphicEnemy→0xfc`, `huskShadow→0x118`,
   `virtualDisplay→0x12c`), binds bone callbacks, and resolves seat attach
   points from the primary model's bone user-points: `"sitex"` → `seatMask`

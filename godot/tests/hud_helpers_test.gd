@@ -252,7 +252,7 @@ func test_scope_circle_mask_geometry() -> void:
 
 	# The NVG lens's reticle: no ring (the lens draws it), the cross and grid
 	# at unit scale, nothing at all once the card drew rows.
-	# [orig: draw_minimap_compass_border @0x5d2798..0x5d27bc]
+	# [orig: NVG_DrawScopedLens @0x5d2798..0x5d27bc]
 	assert_eq(HudPos.scope_mask_points(surface, 1024, true, HudPos.SCOPE_MASK_RING, -1,
 			true).size(), 0, "the lens draws its own ring")
 	assert_eq(HudPos.scope_mask_points(surface, 1024, true, HudPos.SCOPE_MASK_CROSS, -1,

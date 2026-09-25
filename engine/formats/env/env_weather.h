@@ -530,7 +530,7 @@ Rgb double_saturate(const Rgb &color);
 // (a 1/255 channel blends to 0 at t=0).
 // [orig: Environment_UpdateWeatherTick @ 0x57e9b0, blend @ 0x57f037..0x57f0a1;
 //  frame-clear consumer Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf,
-//  device Clear @ 0x677100; dome-fog consumer sub_579CB0 @ 0x579cb0]
+//  device Clear @ 0x677100; dome-fog consumer SkyDome_RenderWithSkyfog @ 0x579cb0]
 Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
                          uint32_t fog_dist_fixed, uint32_t fog_dist_reference_fixed);
 
@@ -575,7 +575,7 @@ int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
 // surface is the faithful behavior, not a divergence. The two LIVE consumers:
 // the .til tile-overlay quad (DIFFUSE = HALF on all four vertices under a
 // TEXTURE x DIFFUSE MODULATE2X combine — caps toggle dword_32656AC defaults
-// true [orig: PolyTrn_RenderTile @ 0x60df0d -> render_water_quad @ 0x604700])
+// true [orig: PolyTrn_RenderTile @ 0x60df0d -> PolyTrn_DrawTileOverlayQuad @ 0x604700])
 // and the foliage lightmap sample below.
 
 struct TerrainTint {

@@ -107,7 +107,7 @@ void OcclusionFrame::apply_blink_gates(bool p_forces_indoors) {
 	// Letter bits only accumulate while inside a box, so the outdoors leg of
 	// retail's override is implicit; the remaining g_BlinkWaterVisible legs
 	// (a camera building straddling the water plane, the window latch) ride
-	// the section-mask slice [orig: Terrain_RenderSceneWithReflection
+	// the section-mask slice [orig: Terrain_RenderWorldScene
 	// @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
 	const bool water_off = (flags & static_cast<int>(Simulation::BLINK_WATER_OFF)) != 0;
 	if (water_off != blink_water_suppressed_) {
@@ -414,7 +414,7 @@ void OcclusionFrame::reset() {
 // carries the witnesses): the indoors letter hides the terrain render — the
 // near-detail and far-foliage tiers are terrain children here, matching retail
 // where the detail cells ride the skipped terrain traversal and the far
-// patches carry their own bit-2 gate [orig: Foliage_RenderFarPatchesPass
+// patches carry their own bit-2 gate [orig: Foliage_RenderDetailPatchesPass
 // skips @ 0x5c95bf/0x5c9665] — and the water mirror's sky bracket; the sky
 // letter or an eye at/below the water hides the main frame's sky bracket
 // (dome + sun/moon discs). The sun glow, the glint and the veil are never

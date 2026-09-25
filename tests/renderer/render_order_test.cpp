@@ -78,9 +78,9 @@ int main() {
 	CHECK(transparent_queue_for(4.99f, 5.0f) == TransparentQueue::BelowWater);
 
 	// --- the ladder: strict frame order
-	// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 — the sky pass sub_579CB0
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 — the sky pass SkyDome_RenderWithSkyfog
 	// @ 0x5ca81a, then Player_RenderViewModelIfAlive @ 0x5ca829, then
-	// Terrain_RenderSceneWithReflection @ 0x5c93a0].
+	// Terrain_RenderWorldScene @ 0x5c93a0].
 	// Inside render_skybox the gradient pass precedes the bodies, which
 	// precede the cloud layers [orig: render_skybox @ 0x579080: gradient
 	// draw @ 0x5798dc, bodies @ 0x5798e0, clouds @ 0x5798f1..0x579b15].
@@ -102,7 +102,7 @@ int main() {
 	CHECK(kRungParticleFarSide < kRungFoliageFarSide);
 	CHECK(kRungFoliageFarSide < kRungWater);
 	// The wake decals inside the water pass, after the surface strip
-	// [orig: render_water_surface @ 0x5c3426 then sub_5DE340 @ 0x5c3432].
+	// [orig: render_water_surface @ 0x5c3426 then WaterRing_DrawAll @ 0x5c3432].
 	CHECK(kRungWater < kRungWaterDecals);
 	// The camera person wave's masks @ 0x5c9638 -> Scar_DrawBatches @ 0x5c9658
 	// -> foliage pass 1 @ 0x5c9665 -> camera-side alpha flush @ 0x5c967a ->

@@ -2061,8 +2061,8 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			world_camera, impl_->world_effects[1], thermal);
 	// The post-scene distortion pass: the class-7 emitters, compiled for the
 	// main eye and drawn by FrameFX's type-0 row through the drawer (retail
-	// render_projected_shadow @ 0x5838F8). The row's content gate reads the
-	// live class-7 emitters (the misnamed CNapiSession_HasActiveDataTransfer
+	// FrameFX_DistortionPass @ 0x5838F8). The row's content gate reads the
+	// live class-7 emitters (EffectWorld_HasDistortionParticles
 	// @ 0x5F6640); the pass fog rides along for the tracer distortion ribbons.
 	compile_world(kDistortion, opennova::renderer::ParticleWaterSubset::Distortion,
 			world_camera, impl_->distortion_effect, thermal);

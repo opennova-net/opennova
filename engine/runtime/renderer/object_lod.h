@@ -29,7 +29,7 @@ inline constexpr bool object_subpixel_culled(int32_t projected_radius_q16) {
 inline constexpr int32_t kObjectLodBehindEyeRadiusQ16 = 0x10000000;
 
 // The highest shipped object-detail profile (the frame scale's fixed-quality
-// leg). [orig: Terrain_RenderSceneWithReflection @ 0x5c944c]
+// leg). [orig: Terrain_RenderWorldScene @ 0x5c944c]
 inline constexpr int kObjectLodDetailLevelMax = 3;
 // The special item preloaded for the person flag-0x20 radius substitution.
 // [orig: Entity_PreloadSpecialItems @ 0x43C220]
@@ -77,7 +77,7 @@ ObjectProjectionSphere person_projection_sphere_q16(
 // Corpus tables descend to zero (Armry01 200, 60, 20, 0).
 // [orig: ThreediGp_LoadFromFile @ 0x5b5bdf..0x5b5be5 — `mov ecx,[ecx+4];
 //  shl ecx,10h; mov [eax+20h],ecx` into loader+0x44+4*i; the model the
-//  wrapper hands out is loader+4 — sub_5B6160 @ 0x5b6273]
+//  wrapper hands out is loader+4 — ThreediGp_LoadModel @ 0x5b6273]
 inline constexpr int32_t rlod_threshold_q16_from_rmdl(int32_t rmdl_threshold_pixels) {
   return static_cast<int32_t>(static_cast<uint32_t>(rmdl_threshold_pixels) << 16);
 }
@@ -149,14 +149,14 @@ inline bool held_weapon_projection_culled(int32_t projected_radius_q16) {
 // threshold walk: the detail profile's quality term (detail * 0.33 + 0.34,
 // or the fixed 2.0 on detail 3, the highest shipped profile) divided by the
 // viewport width in pixels, times the 640-wide reference.
-// [orig: Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9468;
+// [orig: Terrain_RenderWorldScene @ 0x5c940c..0x5c9468;
 //  Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c90f1]
 float object_lod_frame_scale(int detail_level, float viewport_width);
 
 // The death-piece draw's own radius multiplier: the detail profile's quality
 // term alone (detail * 0.33 + 0.34, no width normalization and no detail-3
 // substitution), stored as a float.
-// [orig: update_terrain_lod_levels @ 0x57b831..0x57b84a — fild dword_24D2048,
+// [orig: DeathPiece_RenderVisible @ 0x57b831..0x57b84a — fild dword_24D2048,
 //  fmul flt_7C59B4, fadd flt_7D76CC, fstp]
 float death_piece_lod_scale(int detail_level);
 
@@ -168,10 +168,10 @@ float death_piece_lod_scale(int detail_level);
 // level (to 0 for a model without levels). The returned level can equal the
 // LOD count (a three-level model under its third threshold): that level's
 // mesh slot is empty and the section draw returns without drawing.
-// [orig: update_terrain_lod_levels @ 0x57b86f..0x57b8ca — the floor
+// [orig: DeathPiece_RenderVisible @ 0x57b86f..0x57b8ca — the floor
 //  `cmp eax,0C000h; jle` @ 0x57b87b, the chain @ 0x57b882..0x57b8b8, the clamp
 //  @ 0x57b8ba..0x57b8ca; the empty slot `test ebx,ebx; jz` in
-//  Entity_BuildBoneTransformMatrices_0 @ 0x57b6bc]
+//  DeathPiece_RenderSection @ 0x57b6bc]
 int death_piece_lod_level(int32_t projected_radius_q16, float lod_scale,
                           const std::vector<int32_t> &thresholds_q16);
 

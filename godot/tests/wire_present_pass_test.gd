@@ -1334,7 +1334,7 @@ func test_person_body_and_late_held_weapon_share_the_thermal_wave_lane() -> void
 # part linked under a wire body carries the body's thermal wave lane too.
 # [orig: Terrain_RenderSectorEntitiesBySide head submit @0x5c7ffc, body
 #  submit @0x5c8020; CTerrainRenderer_BuildLightingShaderConstants(1)
-#  @0x5c9511 / @0x5c95f8 in Terrain_RenderSceneWithReflection]
+#  @0x5c9511 / @0x5c95f8 in Terrain_RenderWorldScene]
 func test_composed_avatar_head_shares_the_body_thermal_wave_lane() -> void:
 	var avatar_path := ProjectSettings.globalize_path(
 			"user://wire_thermal_avatars_%d.def" % Time.get_ticks_usec())

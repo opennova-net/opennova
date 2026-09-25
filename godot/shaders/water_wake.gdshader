@@ -1,10 +1,10 @@
-// [orig: render_water_surface_decal @ 0x5DE0F0; sub_5DDC90 @ 0x5DDC90]
-// render_water_surface_decal owns the draw state: the 0.4 ambient material
+// [orig: WaterRing_Draw @ 0x5DE0F0; WaterRing_LoadResources @ 0x5DDC90]
+// WaterRing_Draw owns the draw state: the 0.4 ambient material
 // (@ 0x5DE202..0x5DE217, SetMaterial @ 0x5DE232), D3DRS_AMBIENT (139) white
 // (@ 0x5DE1EC), GfxShader_ApplyPassChecked pass 0x100000 on the wake effect
 // (@ 0x5DE245) and the first-UV scroll off the render frame counter
-// (@ 0x5DE277..0x5DE2AD). sub_5DDC90 loads wake5.tga / wakegrad.tga, and its
-// CGfxTexture_SetSamplerAddressing call (@ 0x680720) also enables FFP
+// (@ 0x5DE277..0x5DE2AD). WaterRing_LoadResources loads wake5.tga / wakegrad.tga, and its
+// GfxShader_SetFfpLightingSources call (@ 0x680720) also enables FFP
 // lighting with the diffuse and ambient material sources on MATERIAL (the
 // +0x58..+0x5B writes CGfxShader_ApplyPassRenderStates commits as RS 0x89 /
 // 0x91 / 0x93 @ 0x6808ca..0x68091f): the lit colour is the 0.4 ambient under

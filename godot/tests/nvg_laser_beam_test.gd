@@ -1,7 +1,7 @@
 extends GutTest
 
 # The NVG IR laser beams (retail Entity_RenderNVGLaserBeam @ 0x5c6090 over the
-# frame's visible persons, sub_5C63B0 @ 0x5c63b0): a remote person's beam
+# frame's visible persons, Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0): a remote person's beam
 # rides the overlay tail's NvgLaserBeams slot only under the local view's
 # night vision and the first-person camera, only for an unmounted person that
 # is not the local player and whose held weapon carries LaserBeam, and only

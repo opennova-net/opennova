@@ -492,7 +492,7 @@ void Terrain::render_frame() {
 	}
 	static_shadow_rasterizer.begin_frame(page_light_direction,
 			light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
-	// The page claims stamp the weather clock's TOD epoch (Env_TodMinutesElapsed,
+	// The page claims stamp the weather clock's TOD epoch (Env_TodEpoch,
 	// one step per 311 logic ticks); a page whose stamp falls behind is
 	// refreshed on an all-hit frame.
 	const uint32_t tod_epoch = cached_env_node != nullptr &&
@@ -684,10 +684,11 @@ void Terrain::_bind_light_textures() {
 	}
 	// The two procedural textures, built once per process like the corona
 	// texture [orig: Lighting_InitTextures @0x5a94f0 creates "texlight2d"
-	// 64x64 and "texlightspot1d" 64x8, both without mips, and the 0x600 shader
-	// they bind addresses CLAMP — CGfxTexture_SetSamplerAddressing (ex sub_680720)(this, clamp=1, 0, 0, 0)
-	// @0x5a98eb..0x5a98f4; the shader samplers carry the matching
-	// filter_linear, repeat_disable hints].
+	// 64x64 and "texlightspot1d" 64x8, both without mips; the 0x600 shader
+	// they bind gets GfxShader_SetFfpLightingSources (ex sub_680720)(this, 1,
+	// 0, 0, 0) @0x5a98eb..0x5a98f4, FFP lighting on with the material
+	// sources on MATERIAL (not a sampler address mode); the shader samplers
+	// carry filter_linear, repeat_disable hints].
 	const int size = LightScene::terrain_light_texture_size();
 	const int rows = LightScene::terrain_light_strip_rows();
 	if (light_disc_texture.is_null()) {

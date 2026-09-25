@@ -29,7 +29,7 @@
 // technique-class selection, the water bracket + priority ladder) pinning
 // engine/runtime/renderer/render_order against docs/render/render-order-re.md
 // [orig: RenderBatch_QuickSort @ 0x5d8b40; collect_render_objects_for_batch
-// @ 0x5d8f20; Terrain_RenderSceneWithReflection @ 0x5c93a0].
+// @ 0x5d8f20; Terrain_RenderWorldScene @ 0x5c93a0].
 //
 // REN-5 added section 5: lighting scalars over engine/runtime/renderer/light_runtime
 // (docs/render/render-lighting-re.md) — the modulator /64 scale, the world

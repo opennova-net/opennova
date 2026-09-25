@@ -45,7 +45,7 @@ enum class ScopedViewOverlay {
 	// [orig: Render_DrawEntityOverlayMarkers @0x5cab26]
 	kEntityMarkers = 0,
 	// The binocular mask (its own drawer, no circle mask).
-	// [orig: sub_5CFE60 @0x5caaec]
+	// [orig: Binoculars_DrawMask @0x5caaec]
 	kBinocularMask = 1,
 	// The Sighted selector: the SIGHTS card alone, never the circle mask.
 	// [orig: draw_weapon_sight_overlays @0x5caafa]
@@ -86,7 +86,7 @@ struct ScopeCircleMaskGeometry {
 	// cx / cy * 0.75 and 3 / (selected H/W ratio * 4): at the native ratio the
 	// two are equal and the ring is a true circle; a forced 4:3/16:10/16:9/5:4
 	// ratio keeps scale_y fixed and stretches the ring horizontally.
-	// [orig: @0x5d17f5 / @0x5d1811 over sub_58A920 -> flt_8409EC]
+	// [orig: @0x5d17f5 / @0x5d1811 over Render_GetTargetAspectRatio -> flt_8409EC]
 	float scale_x = 0.0f;
 	float scale_y = 0.0f;
 	// ((y1 - y0) >> 3) + ((y1 - y0) >> 1) — five eighths of the viewport
@@ -177,7 +177,7 @@ ScopeCircleMask build_scope_circle_mask(int32_t x0, int32_t y0, int32_t x1,
 // when the SIGHTS card drew no authored row it chains only the cross and the
 // grid, about the same centre and ring size but at UNIT scale -- no aspect
 // stretch, no annulus. The result's ring is empty.
-// [orig: draw_minimap_compass_border @0x5d2798..0x5d27bc:
+// [orig: NVG_DrawScopedLens @0x5d2798..0x5d27bc:
 //  `if (!draw_weapon_sight_overlays()) draw_minimap_crosshair_and_grid(ring,
 //  cx, cy, 1.0, 1.0)`]
 ScopeCircleMask build_nvg_lens_reticle(int32_t x0, int32_t y0, int32_t x1,

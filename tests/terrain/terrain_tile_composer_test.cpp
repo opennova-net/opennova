@@ -402,7 +402,7 @@ bool test_overlay_atlas_flags_tint_clipping_and_order() {
 	// FLIP_X|ROTATE_90 (0x05) under retail's mirror-then-corner-cycle order is
 	// T(x,z) = (z, x) — a transpose: destination TL/TR/BL/BR sample source
 	// TL/BL/TR/BR (D-TIL-4). Interior probes avoid interpolation across
-	// quadrant seams. [orig: render_water_quad @ 0x604700 — mirrors
+	// quadrant seams. [orig: PolyTrn_DrawTileOverlayQuad @ 0x604700 — mirrors
 	// @ 0x604782/0x6047a9, rotate cycle @ 0x6047d4..0x604806]
 	if (!expect_pixel(page, 80, 80, overlay_pixel(base, dxt5_texel(tile_tl), tint),
 			"combined flags map destination TL to source TL")) return false;
@@ -492,7 +492,7 @@ bool test_base_pass_coarse_page_samples_box_level_one() {
 // and the half-texel bias puts every pixel on a texel centre, so the line
 // lands on exactly one page column at full strength.
 // [orig: Terrain_LoadTileSetAtlas flags 0x100203 @ 0x604B24 (bit 1: POINT);
-// render_water_quad half-texel @ 0x604808..0x6048FD; quad positions
+// PolyTrn_DrawTileOverlayQuad half-texel @ 0x604808..0x6048FD; quad positions
 // PolyTrn_RenderTile @ 0x60DE66..0x60DEBB]
 bool test_til_line_is_point_sampled_one_to_one() {
 	const std::array<uint8_t, 3> base_color{40, 80, 120};
@@ -638,7 +638,7 @@ bool til_entry_oracle(const opennova::TilOverlayEntry &entry,
 	// world unit, so the 16-unit entry covers 16x16 pixels and each pixel's
 	// footprint is 4 atlas texels — the point sample lands on mip 2, at the
 	// texel under the pixel's (flipped/rotated) cell position.
-	// [orig: render_water_quad half-texel @ 0x604808..0x6048FD; atlas flags
+	// [orig: PolyTrn_DrawTileOverlayQuad half-texel @ 0x604808..0x6048FD; atlas flags
 	// 0x100203 @ 0x604B24 (POINT min/mag/mip, CLAMP)]
 	const Rgba8Image &mip = levels[2];
 	const opennova::TilAtlasLayout layout = opennova::til_make_atlas_layout(
@@ -830,7 +830,7 @@ bool test_optional_00tra_fork_oracle() {
 	const opennova::TerrainTilePageKey fork_key{0, 0, 256, 256, 2};
 	// These are regression pins for the retail archive payload
 	// TRNTILE10.TGA (SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490).
-	// The transform itself is independently witnessed in render_water_quad
+	// The transform itself is independently witnessed in PolyTrn_DrawTileOverlayQuad
 	// and pinned synthetically by til_render_uv_test; the per-pixel mip-2
 	// comparison above shares til_transform_local_uv and therefore proves
 	// placement/channel/level parity, not transform independence. On that

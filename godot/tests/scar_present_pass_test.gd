@@ -224,7 +224,7 @@ func test_every_strip_draws_on_the_scar_rung() -> void:
 	# The scar batches draw in their own frame slot: after the camera-side
 	# opaque wave, before detail foliage pass 1 and the camera-side alpha
 	# flush [orig: Scar_DrawBatches @0x5C9658 between the BySide flush
-	# @0x5C9647 and Foliage_RenderFarPatchesPass(1) @0x5C9665]. Both drawer
+	# @0x5C9647 and Foliage_RenderDetailPatchesPass(1) @0x5C9665]. Both drawer
 	# states ride the one batch pass.
 	var root := _texture_root(["scorch1.tga", "bhole1.tga"])
 	var entities := _make_presenter(null, root)

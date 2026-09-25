@@ -659,7 +659,7 @@ func _strip_arrays(instance: MeshInstance3D) -> Array:
 
 func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() -> void:
 	# The FrameFX bloom pass redraws the strip as render_water_surface(0, 1)
-	# (retail FrameFX_RenderBloomPass @ 0x582a59..0x582a5d): the above-water
+	# (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d): the above-water
 	# march with the nightvision row colors — the flat 0.1 base and no
 	# specular RGB (retail render_water_strip_detailed @ 0x5c2d5a / @ 0x5c2ef8)
 	# — on the same geometry as the beauty strip.
@@ -722,7 +722,7 @@ func test_eye_exactly_on_the_plane_draws_neither_water_side() -> void:
 
 func test_night_vision_redraw_is_not_gated_on_the_visible_terrain() -> void:
 	# The beauty pass follows g_WaterActive, the bloom pass's redraw does not
-	# (retail FrameFX_RenderBloomPass @ 0x582a59..0x582a5d).
+	# (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d).
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
 	water.set_visible_terrain_bounds(true, 100.0, 200.0)
@@ -896,7 +896,7 @@ func test_water_depth_follows_the_retail_scene_curve_under_any_camera_near() -> 
 
 
 func test_wake_rings_face_up_and_hide_from_below() -> void:
-	# The wake pass flags (0x100000, retail render_water_surface_decal
+	# The wake pass flags (0x100000, retail WaterRing_Draw
 	# @ 0x5DE245) carry no cull-none bit, so the rings keep the device's
 	# back-face cull. A card wound like the compiled ring (its right-hand
 	# normal down, renderer/water_wake_frame.cpp) draws for an eye above it

@@ -461,7 +461,7 @@ void Water::build() {
 	mesh_instance_->set_layer_mask(VISUAL_LAYER_WATER);
 	add_child(mesh_instance_);
 	// The FrameFX bloom pass redraws the strip with the nightvision row
-	// colors into the Q3 target (retail FrameFX_RenderBloomPass @ 0x582a59..
+	// colors into the Q3 target (retail FrameFX_RenderGlowSource @ 0x582a59..
 	// 0x582a5d -> render_water_surface(0, 1)): its own surface, drawn by no
 	// camera (layer mask 0), only by the typed Q3 WaterNightVision pass.
 	Ref<ArrayMesh> night_vision_mesh;
@@ -679,7 +679,7 @@ void Water::advance_frame(double) {
 	if (night_vision_active) {
 		// The bloom pass's call is render_water_surface(0, 1): the above-water
 		// march with the nightvision row colors (flat 0.1 base, no specular
-		// RGB) (retail FrameFX_RenderBloomPass @ 0x582a59..0x582a5d;
+		// RGB) (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d;
 		// render_water_surface @ 0x5c3489..0x5c3492).
 		const int rows = _march_strip(view_cam, false, true, murk, fog_end, depth_curve,
 				lit, env_data);

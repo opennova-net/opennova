@@ -393,7 +393,7 @@ int main() {
 		CHECK(near_f(vertices[7][0], 8.0f) && near_f(vertices[7][2], -24.0f));
 		CHECK(near_f(vertices[48][0], 13.0f) && near_f(vertices[48][2], -18.0f));
 		// Its triangles: (a, d, c), (a, b, d) per cell [orig:
-		// init_shadow_decal_index_buffer @ 0x5d53d0].
+		// RenderSlot_InitPatchIndexBuffers @ 0x5d53d0].
 		std::vector<uint16_t> indices;
 		slot_patch_indices(6, indices);
 		CHECK(indices.size() == 6u * 36u);

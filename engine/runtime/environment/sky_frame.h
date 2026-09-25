@@ -43,7 +43,7 @@ struct SkyFrameState {
 	Vec3 light_dir{};
 	// The sky pass temporarily swaps the device fog color from world fog to
 	// the post-horizon-blend, doubled skyfog block (0x808080 in the thermal
-	// view), then restores world fog [orig: sky fog wrapper sub_579CB0
+	// view), then restores world fog [orig: sky fog wrapper SkyDome_RenderWithSkyfog
 	// @ 0x579cb0].
 	Rgb skyfog_color;
 	float fog_end = 1000.0f;

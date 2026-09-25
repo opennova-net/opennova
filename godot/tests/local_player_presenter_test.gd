@@ -514,7 +514,7 @@ func test_wheel_factor_accumulates_whole_notches() -> void:
 # renders once, into a target of the NVG raster (512 rows at the frame's own
 # frustum; engine world::nvg_view_projection), the surface's own 3D pass off,
 # and the target goes away with NVG. [orig: Render_ProcessMainSceneFrame
-# @0x5ca516..0x5ca5b0; sub_5D28D0 @0x5d2954..0x5d296d]
+# @0x5ca516..0x5ca5b0; NVG_RenderScene @0x5d2954..0x5d296d]
 func test_nvg_composite_renders_the_world_into_the_nvg_raster() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()
