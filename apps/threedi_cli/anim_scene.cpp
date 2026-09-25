@@ -173,8 +173,11 @@ void write_clip(Writer &w, const AnimLoadedClip &clip, const BadBuildClip *reset
 		const BadEvent &ev = file.events[e];
 		const BadBuildVec3 v = bad_mission_from_clip(
 				BadBuildVec3{ev.velocity[0], ev.velocity[1], ev.velocity[2]});
+		// A version 0 record carries no trigger word (the reader fills in -1),
+		// so its event states none.
 		char trigger[24];
-		std::snprintf(trigger, sizeof(trigger), "0x%x", static_cast<unsigned>(ev.trigger));
+		std::snprintf(trigger, sizeof(trigger), "0x%x",
+				file.version == 0 ? 0u : static_cast<unsigned>(ev.trigger));
 		w.line("event " + f9(v.x) + " " + f9(v.y) + " " + f9(v.z) + " " + trigger + " " +
 				f9(ev.bottom) + " " + f9(ev.top));
 	}

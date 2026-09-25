@@ -43,9 +43,11 @@ static void copy_trimmed(char *dst, size_t dst_size,
 // variant on that one slot's ring until a token starting with '/' ends the
 // row; an empty token is skipped [orig: AnimMap_ParseConfigLine @0x40CB60 —
 // the slot lookup @0x40CB97, the '/' break @0x40CBD0..0x40CBD2, the empty
-// skip @0x40CBD4..0x40CBD6]. The slot table lookup is the runtime's
-// (AnimMap_FindSlotByName @0x40CFA0); this parser keeps `anim_` keys. A row
-// with no clip registers nothing and never fails the file.
+// skip @0x40CBD4..0x40CBD6]. The slot lookup is the runtime's: it compares
+// the key past its first five characters with the 252 slot names
+// (AnimMap_FindSlotByName @0x40CFA0, stricmp on key + 5) and drops a row that
+// names none; this parser keeps `anim_` keys and leaves that lookup to the
+// runtime. A row with no clip registers nothing and never fails the file.
 int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
     if (!bytes || !out) return -1;
     memset(out, 0, sizeof(AdmFile));

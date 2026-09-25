@@ -59,6 +59,12 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
         (bf->translations == nullptr || bf->num_translations < translation_rows)) {
         return -1;
     }
+    if (bf->num_events > 0 && bf->events == nullptr) return -1;
+    // A name fills at most 31 of its 32 bytes and a NUL: a longer one would
+    // come back cut.
+    for (uint32_t i = 0; i < bone_count; ++i) {
+        if (std::memchr(bf->bones[i].name, '\0', 32) == nullptr) return -1;
+    }
 
     std::vector<uint8_t> buf;
     buf.resize(kHeaderBytes, 0);
@@ -88,7 +94,7 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
     // Events: version 1 rows carry the trigger word.
     const uint32_t event_count = static_cast<uint32_t>(bf->num_events);
     uint32_t events_offset = 0;
-    if (event_count > 0 && bf->events != nullptr) {
+    if (event_count > 0) {
         events_offset = static_cast<uint32_t>(buf.size());
         for (uint32_t i = 0; i < event_count; ++i) {
             const BadEvent &ev = bf->events[i];

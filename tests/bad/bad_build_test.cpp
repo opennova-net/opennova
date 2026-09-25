@@ -266,6 +266,32 @@ int main() {
         BadBuildClip events = clip;
         events.events.pop_back();
         TEST_EXPECT(!bad_build_assemble(events, nullptr, built, &error));
+
+        // The loader knows event records of version 1 (with the trigger word)
+        // and 0 (without): any other version is refused, and so is a trigger
+        // on a version 0 event, which the writer would drop.
+        BadBuildClip version2 = clip;
+        version2.version = 2;
+        TEST_EXPECT(!bad_build_assemble(version2, nullptr, built, &error));
+        BadBuildClip version0 = clip;
+        version0.version = 0;
+        TEST_EXPECT(!bad_build_assemble(version0, nullptr, built, &error));
+        for (BadBuildEvent &ev : version0.events) ev.trigger = 0;
+        TEST_EXPECT(bad_build_assemble(version0, nullptr, built, &error));
+
+        // Translations the flags do not carry would be dropped: refused.
+        BadBuildClip unflagged = two_bone_clip(BAD_FLAG_TRANSLATION);
+        unflagged.flags = 0;
+        TEST_EXPECT(!bad_build_assemble(unflagged, nullptr, built, &error));
+
+        // The loader refuses a file over 500,000 bytes, so the mint does too.
+        BadBuildClip huge = clip;
+        huge.frame_count = 30000;
+        huge.events.clear();
+        for (BadBuildBone &bone : huge.bones) bone.keys.assign(30001, BadBuildQuat{});
+        TEST_EXPECT(bad_build_assemble(huge, nullptr, built, &error));
+        std::vector<uint8_t> huge_bytes;
+        TEST_EXPECT(!bad_build_mint(huge, nullptr, huge_bytes, &error));
         std::printf("validation: every malformed clip is refused by name\n");
     }
 

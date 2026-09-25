@@ -104,10 +104,14 @@ writes each clip beside the table), a bone whose parent is not a lower index, a
 key list that is neither `frames + 1` long nor accompanied by durations (a
 bone states a duration on every key or on none), a key
 that is not a unit quaternion, a zero duration, a translation block a flag
-promises and the clip lacks, an event list that is not `frames + 1` long, a
-frame count of zero, or a bone name over 31 characters. Every clip and the
-table are minted in memory, each clip read back through the loader's own
-reader, before any file is written, so a set that fails anywhere writes
+promises and the clip lacks or that the flags do not carry, an event list that
+is not `frames + 1` long, a `version` other than 0 or 1, a trigger word on a
+version 0 event (its record has none), a frame count of zero, a bone name over
+31 characters, or a clip over the 500,000 bytes the loader accepts
+[orig: `BoneFile_Load @ 0x40fff0`]. Every clip and the table are minted in
+memory, each clip read back through the loader's own reader and the table
+through the `.adm` parser (every row must come back as written), before any
+file is written, so a set that fails anywhere writes
 nothing. `scene`, `info` and `compare` refuse a table whose variant names a
 path.
 

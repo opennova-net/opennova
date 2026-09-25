@@ -352,6 +352,9 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
     const size_t bones = clip.bones.size();
     if (bones == 0) return fail(error, "a clip holds no bones");
     if (clip.frame_count == 0) return fail(error, "a clip holds no frames");
+    // The two event record shapes the loader knows: version 1 (24 bytes, with
+    // the trigger word) and version 0 (20 bytes, none).
+    if (clip.version > 1) return fail(error, "a clip's version is 0 or 1");
     const size_t keys = static_cast<size_t>(clip.frame_count) + 1;
     const bool translated = (clip.flags & BAD_FLAG_TRANSLATION) != 0;
 
@@ -387,6 +390,9 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
                 return fail(error, "bone " + std::to_string(i) + " holds a key that is not a unit "
                                                                  "quaternion");
         }
+        if (!translated && !bone.translations.empty())
+            return fail(error, "bone " + std::to_string(i) +
+                                       " holds translations the clip's flags do not carry");
         if (translated && bone.translations.size() != keys)
             return fail(error, "bone " + std::to_string(i) + " holds " +
                                        std::to_string(bone.translations.size()) +
@@ -395,6 +401,10 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
     if (!clip.events.empty() && clip.events.size() != keys)
         return fail(error, "a clip holds " + std::to_string(clip.events.size()) + " events, not " +
                                    std::to_string(keys));
+    for (const BadBuildEvent &ev : clip.events) {
+        if (clip.version == 0 && ev.trigger != 0)
+            return fail(error, "a version 0 clip's event carries no trigger word");
+    }
 
     // Channels first: the bone table's rotation is the transpose of the stored
     // first key, and a bone's position turns through its parent's.
@@ -492,6 +502,11 @@ bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, std::ve
     if (!bad_build_assemble(clip, reset, assembled, error)) return false;
     if (bad_write_buffer(&assembled.file, out) != 0)
         return fail(error, "the writer refused the clip");
+    // The loader refuses a file over 500,000 bytes [orig: BoneFile_Load
+    // @0x40fff0, the 0x7A120 size gate]; the largest retail clip is 298,172.
+    if (out.size() > kBadFileMaxBytes)
+        return fail(error, "the clip is " + std::to_string(out.size()) +
+                                   " bytes, over the loader's 500000");
     return true;
 }
 
@@ -556,8 +571,27 @@ bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string 
     table.entries = entries.empty() ? nullptr : entries.data();
     table.count = entries.size();
     if (adm::adm_write_buffer(&table, out) != 0)
-        return fail(error, "the table writer refused a row (a key outside the anim_ namespace, no "
-                           "variants, or a quote in a name)");
+        return fail(error, "the table writer refused a row (a key outside the anim_ namespace or "
+                           "not one plain token, no variants, or a variant it cannot quote)");
+    // Parse-equality is the table's parity (ADR 0047): read the text back
+    // through the parser and require every row as it went in.
+    adm::AdmFile back{};
+    if (adm::adm_parse_buffer(out.data(), out.size(), &back) != 0)
+        return fail(error, "the table does not read back");
+    std::string differs = back.count == entries.size() ? "" : "the table does not read back as written";
+    for (size_t i = 0; differs.empty() && i < entries.size(); ++i) {
+        const adm::AdmEntry &a = entries[i];
+        const adm::AdmEntry &b = back.entries[i];
+        bool same = std::strcmp(a.key, b.key) == 0 && a.variant_count == b.variant_count;
+        for (size_t v = 0; same && v < a.variant_count; ++v)
+            same = std::strcmp(a.variants[v], b.variants[v]) == 0;
+        if (!same) differs = "row '" + set.rows[i].key + "' does not read back as written";
+    }
+    adm::adm_free(&back);
+    if (!differs.empty()) {
+        out.clear();
+        return fail(error, differs);
+    }
     return true;
 }
 

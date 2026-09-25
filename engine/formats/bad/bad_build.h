@@ -53,6 +53,10 @@ inline constexpr uint32_t BAD_FLAG_LOOP = 0x1u;
 inline constexpr uint32_t BAD_FLAG_TRANSLATION = 0x2u;
 inline constexpr uint32_t BAD_FLAG_BIT3 = 0x8u;
 
+// The largest `.bad` the loader accepts [orig: BoneFile_Load @0x40fff0, the
+// 0x7A120 size gate].
+inline constexpr size_t kBadFileMaxBytes = 500000;
+
 struct BadBuildVec3 {
     double x = 0.0, y = 0.0, z = 0.0;
 };
@@ -209,12 +213,14 @@ void bad_clip_extents(const BadBuildClip &clip, const BadBuildClip *reset,
 // set's reset clip (bad_build_reset_clip), null for a lone clip. False with
 // `error` set for a clip the format cannot hold (no bones, a parent that is
 // not a lower index, a key list that is not frame_count + 1 long, a
-// translation block a flag promises and the clip lacks, a name over 31
-// characters).
+// translation block a flag promises and the clip lacks or holds without the
+// flag, a name over 31 characters, a version other than 0 or 1, a trigger
+// word on a version 0 event).
 bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, BadAssembled &out,
                         std::string *error);
 
-// Assemble and serialize in one step.
+// Assemble and serialize in one step, refusing a file the loader would not
+// load (over kBadFileMaxBytes).
 bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, std::vector<uint8_t> &out,
                     std::string *error);
 

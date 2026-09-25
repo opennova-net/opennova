@@ -176,6 +176,11 @@ int main(int argc, char **argv) {
 			false);
 	build("lone-capsule-value", replace(text, "event 0.06 0 0 0x1", "event 0.06 0 0 0x1 0.5"), false);
 	build("unterminated-quote", replace(text, "\"BN02 Spine\"", "\"BN02 Spine"), false);
+	// What the writer would drop: translations the flags do not carry, and a
+	// trigger on a version 0 event; a version the loader does not know.
+	build("tr-without-flag", replace(text, "flags 0x3", "flags 0x1"), false);
+	build("version-0-trigger", replace(text, "frames 3\n", "frames 3\nversion 0\n"), false);
+	build("version-2", replace(text, "frames 3\n", "frames 3\nversion 2\n"), false);
 	build("empty-variant", replace(text, "\"walk.bad\" \"walk\"", "\"walk.bad\" \"\" \"walk\""), false);
 
 	// A clip name or a row variant is a bare file stem: `build` writes each

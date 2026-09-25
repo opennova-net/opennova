@@ -221,7 +221,11 @@ asking an author for it:
   `anim scene` recovers the pivots through the same bind, so every clip of a
   table recovers the rig's one set of pivots.
 - **`fps` is 30 in every clip.** `version` is 1 in 474 and 0 in 3 (a 20-byte
-  event record with no trigger word).
+  event record with no trigger word), so the seam refuses any other version and
+  a trigger on a version 0 event.
+- **The loader refuses a file over 500,000 bytes** [orig: `BoneFile_Load
+  @ 0x40fff0`, the `0x7A120` gate]; the largest shipped clip is 298,172 bytes
+  (`M60_1i`), and the seam refuses to mint a larger one.
 - **The header words the reader never names are constant**: word 8 = 0,
   9 = 0, 10 = 8, 14 = 1, 17 = 1, 18 = 0, 19 = 0 across all 477.
 - **`event_count == frame_count + 1`** wherever a clip carries events, as the

@@ -29,7 +29,10 @@ void adm_free(AdmFile *af);
 // `key<4 tabs>"variant" "variant"`, CRLF line ends and the CRLF x3 + NUL
 // trailer the stock tables end with. Parity with retail's hand-edited files is
 // parse-equality over this form. Returns -1 for a row the parser could not
-// read back (a key without the anim_ prefix, no variants, a quote in a name).
+// read back as written: a key without the anim_ prefix or that is not one
+// plain token (a space, tab, comma, quote, ';' or "//" splits or cuts it), no
+// variants, or a variant holding a quote or a control character, starting
+// with '/' (which ends a row) or with edge whitespace (which the parser trims).
 int adm_write_buffer(const AdmFile *af, std::string &out);
 int adm_write(const char *path, const AdmFile *af);
 

@@ -69,6 +69,29 @@ int main() {
     std::strcpy(bad.variants[0], "a\"b");
     TEST_EXPECT(adm_write_buffer(&one, bytes) == -1);
 
+    // A key is one plain token: a space, tab or comma would split it, a quote
+    // toggle quoting, and ';' or "//" cut the line.
+    std::strcpy(bad.variants[0], "x");
+    for (const char *key : {"anim_a b", "anim_a\tb", "anim_a,b", "anim_a\"b", "anim_a;b", "anim_a//b",
+                            "anim_a\rb"}) {
+        std::strcpy(bad.key, key);
+        TEST_EXPECT(adm_write_buffer(&one, bytes) == -1);
+    }
+    // A variant starting with '/' ends the row, edge whitespace is trimmed on
+    // read, and a line break splits the row.
+    std::strcpy(bad.key, "anim_reset");
+    for (const char *variant : {"/x", " x", "x\t", "x\r\ny"}) {
+        std::strcpy(bad.variants[0], variant);
+        TEST_EXPECT(adm_write_buffer(&one, bytes) == -1);
+    }
+    // Inside the quotes a comma, ';' and "//" are the name's own.
+    std::strcpy(bad.variants[0], "a,b;c//d");
+    TEST_EXPECT(adm_write_buffer(&one, bytes) == 0);
+    AdmFile quoted = {};
+    TEST_EXPECT(adm_parse_buffer(bytes.data(), bytes.size(), &quoted) == 0);
+    TEST_EXPECT(quoted.count == 1 && std::strcmp(quoted.entries[0].variants[0], "a,b;c//d") == 0);
+    adm_free(&quoted);
+
     std::printf("adm_write: canonical form pinned, parse-equal, refusals hold\n");
     return 0;
 }

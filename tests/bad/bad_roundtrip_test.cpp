@@ -177,6 +177,16 @@ int main(int argc, char **argv) {
         // A translation block shorter than bone_count x (frame_count + 1) cannot be represented.
         scratch.file.num_translations = 7;
         TEST_EXPECT(bad_write_buffer(&scratch.file, bytes) == -1);
+        scratch.file.num_translations = 8;
+
+        // An event count with no events, and a 32-byte name with no NUL (it
+        // would read back cut to 31), cannot be represented either.
+        scratch.file.events = nullptr;
+        TEST_EXPECT(bad_write_buffer(&scratch.file, bytes) == -1);
+        scratch.file.events = scratch.events;
+        std::memset(scratch.bones[1].name, 'x', 32);
+        scratch.bones[1].name[32] = '\0';
+        TEST_EXPECT(bad_write_buffer(&scratch.file, bytes) == -1);
     }
 
     // The retail leg: the shipped 19-bone BINOC.bad parses -> writes -> parses field-equal.

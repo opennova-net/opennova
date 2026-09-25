@@ -41,7 +41,8 @@ namespace opennova::bad {
 
 // Serialize `bf` into `out` (replaced). Returns 0, or -1 when the file cannot be
 // represented: a null input, a channel or bone table shorter than bone_count,
-// or a translation block (flags & 2) shorter than bone_count x (frame_count + 1).
+// a translation block (flags & 2) shorter than bone_count x (frame_count + 1),
+// an event count with no events, or a bone name with no NUL in its 32 bytes.
 int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out);
 
 // Serialize to a path. Returns 0 on success, -1 on a representation or I/O error.
