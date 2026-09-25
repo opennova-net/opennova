@@ -6,7 +6,11 @@
 // register and generator-style tables for a front end.
 #pragma once
 
+#include <cstddef>
+#include <cstdio>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 namespace threedi_cli {
 
@@ -20,6 +24,29 @@ inline int track_index(const std::string &name) {
 	for (int i = 0; i < kTrackCount; ++i)
 		if (name == track_label(i)) return i;
 	return -1;
+}
+
+// Write `size` bytes to `path` whole or not at all: into `path`.part, checked
+// through fclose, then renamed over `path`. A full disk, a crash or a refused
+// model never leaves a truncated file where the last good one was.
+inline bool write_output(const char *path, const void *data, size_t size) {
+	const std::filesystem::path target(path);
+	std::filesystem::path part = target;
+	part += ".part";
+	FILE *f = std::fopen(part.string().c_str(), "wb");
+	bool ok = f != nullptr;
+	if (ok) {
+		ok = size == 0 || std::fwrite(data, 1, size, f) == size;
+		ok = std::fclose(f) == 0 && ok;
+	}
+	std::error_code ec;
+	if (ok) std::filesystem::rename(part, target, ec);
+	if (!ok || ec) {
+		std::filesystem::remove(part, ec);
+		std::fprintf(stderr, "opennova-3di: cannot write %s\n", path);
+		return false;
+	}
+	return true;
 }
 
 int cmd_info(const char *path, int verbose);

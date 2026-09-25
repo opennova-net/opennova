@@ -67,11 +67,15 @@ std::string name_field(const std::string &name) {
 	return "\"" + name + "\"";
 }
 
+// The scene text, written out whole once the model has been walked.
 struct Writer {
-	FILE *f = nullptr;
+	std::string text;
 	std::vector<std::string> notes;
 
-	void line(const std::string &s) { std::fprintf(f, "%s\n", s.c_str()); }
+	void line(const std::string &s) {
+		text += s;
+		text += '\n';
+	}
 	void note(const std::string &s) {
 		notes.push_back(s);
 		line("# dropped: " + s);
@@ -414,12 +418,6 @@ int cmd_scene(const char *model_path, const char *out_path) {
 		return 1;
 	}
 	Writer w;
-	w.f = std::fopen(out_path, "w");
-	if (w.f == nullptr) {
-		std::fprintf(stderr, "opennova-3di: cannot write %s\n", out_path);
-		threedi_3di3_free(&m);
-		return 1;
-	}
 	std::error_code ec;
 	const FolderListing folder = list_folder(std::filesystem::absolute(std::filesystem::path(model_path), ec).parent_path());
 	w.line("o3d 1");
@@ -483,9 +481,9 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	write_lights(w, m);
 	write_occlusion(w, m);
 	write_collision(w, m);
-	std::fclose(w.f);
-	for (const std::string &n : w.notes) std::fprintf(stderr, "opennova-3di: note: scene drops %s\n", n.c_str());
 	threedi_3di3_free(&m);
+	if (!write_output(out_path, w.text.data(), w.text.size())) return 1;
+	for (const std::string &n : w.notes) std::fprintf(stderr, "opennova-3di: note: scene drops %s\n", n.c_str());
 	return 0;
 }
 

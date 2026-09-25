@@ -922,13 +922,7 @@ int cmd_build(const char *scene_path, const char *out_path) {
 		return 1;
 	}
 	threedi_3di3_free(&check);
-	FILE *f = std::fopen(out_path, "wb");
-	if (f == nullptr || std::fwrite(bytes.data(), 1, bytes.size(), f) != bytes.size()) {
-		if (f != nullptr) std::fclose(f);
-		std::fprintf(stderr, "opennova-3di: cannot write %s\n", out_path);
-		return 1;
-	}
-	std::fclose(f);
+	if (!write_output(out_path, bytes.data(), bytes.size())) return 1;
 	std::printf("wrote %s (%zu bytes)\n", out_path, bytes.size());
 	return 0;
 }

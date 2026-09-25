@@ -116,6 +116,29 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	// Output is written whole or not at all: a refused build or an unwritable
+	// target leaves the last good file and no partial one.
+	{
+		const std::string good = kSkinned;
+		check(build("write-safety", good), "write-safety: build");
+		const std::string before = slurp(path_of("write-safety", ".3di"));
+		std::ofstream(path_of("write-safety-bad", ".o3d"), std::ios::binary) << good << "bogus 1\n";
+		check(threedi_cli::cmd_build(path_of("write-safety-bad", ".o3d").c_str(), path_of("write-safety", ".3di").c_str()) != 0,
+				"write-safety: the bad scene is refused");
+		check(slurp(path_of("write-safety", ".3di")) == before, "write-safety: a refused build keeps the last model");
+		const std::string scene_out = path_of("write-safety", ".rt.o3d");
+		std::ofstream(scene_out, std::ios::binary) << "stale";
+		check(threedi_cli::cmd_scene(path_of("write-safety", ".3di").c_str(), scene_out.c_str()) == 0 &&
+						slurp(scene_out).rfind("o3d 1", 0) == 0,
+				"write-safety: scene replaces an existing file");
+		std::filesystem::create_directories(dir / "a-folder.o3d");
+		check(threedi_cli::cmd_scene(path_of("write-safety", ".3di").c_str(), (dir / "a-folder.o3d").string().c_str()) != 0,
+				"write-safety: scene onto a folder fails");
+		check(!std::filesystem::exists(scene_out + ".part") && !std::filesystem::exists(dir / "a-folder.o3d.part") &&
+						!std::filesystem::exists(path_of("write-safety", ".3di.part")),
+				"write-safety: no partial file is left behind");
+	}
+
 	std::printf("o3d_build_test: %d failures\n", failures);
 	return failures == 0 ? 0 : 1;
 }
