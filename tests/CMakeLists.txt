@@ -85,11 +85,8 @@ endforeach()
 # Command regressions, including invalid inputs and semantic differences.
 # The anim commands over the same handlers the CLI dispatches: the clip-set
 # round trip, what compare calls the same animation, and the scenes build refuses.
-add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp
-    ../apps/threedi_cli/anim_load.cpp ../apps/threedi_cli/anim_build.cpp
-    ../apps/threedi_cli/anim_scene.cpp ../apps/threedi_cli/anim_info.cpp
-    ../apps/threedi_cli/anim_compare.cpp)
-target_link_libraries(anim_o3a_commands_test PRIVATE opennova_base)
+add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp)
+target_link_libraries(anim_o3a_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_BINARY_DIR})
 # `catalog` prints the anim slot keys and the event trigger bits a front end
 # offers (the Blender add-on parses both), and `info` refuses a flag it does
@@ -104,9 +101,8 @@ add_test(NAME threedi_cli_info_flag COMMAND opennova_3di info unread.3di --bogus
 set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "info takes --verbose, --planes or --verts")
 
-add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp
-    ../apps/threedi_cli/build.cpp ../apps/threedi_cli/compare.cpp ../apps/threedi_cli/scene.cpp)
-target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_base)
+add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
+target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
 
 # Retail clip sets through anim scene -> anim build -> anim compare (OPENNOVA_JO_ASSETS).

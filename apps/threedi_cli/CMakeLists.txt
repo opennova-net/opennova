@@ -5,10 +5,17 @@
 # engine's own construction API and parity writer (formats/threedi), so there
 # is one 3DI3 encoder. Ships inside the add-on's bin/ directory.
 
-add_executable(opennova_3di main.cpp build.cpp scene.cpp info.cpp compare.cpp
+# The command handlers, one translation unit per command: the exe dispatches
+# them and the command tests (tests/threedi, tests/anim) call them directly.
+# The CLI links opennova_base alone, so the runtime headers it reads its tables
+# from (runtime/renderer/material_descriptor.h, runtime/world/body_anim.h,
+# runtime/anim/anim_event_bits.h) must stay header-only.
+add_library(opennova_3di_commands STATIC build.cpp scene.cpp info.cpp compare.cpp
     anim_load.cpp anim_build.cpp anim_scene.cpp anim_info.cpp anim_compare.cpp)
+target_link_libraries(opennova_3di_commands PUBLIC opennova_base)
+target_include_directories(opennova_3di_commands PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(opennova_3di_commands PUBLIC cxx_std_17)
+
+add_executable(opennova_3di main.cpp)
 set_target_properties(opennova_3di PROPERTIES OUTPUT_NAME opennova-3di)
-
-target_link_libraries(opennova_3di PRIVATE opennova_base)
-
-target_compile_features(opennova_3di PRIVATE cxx_std_17)
+target_link_libraries(opennova_3di PRIVATE opennova_3di_commands)

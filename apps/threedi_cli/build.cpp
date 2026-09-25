@@ -22,6 +22,7 @@
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
+// Header-only (the shader table): opennova-3di links opennova_base alone.
 #include <runtime/renderer/material_descriptor.h>
 
 #include "threedi_cli.h"
