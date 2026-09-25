@@ -84,16 +84,23 @@ game combines them, but the assembly settings never reach a `.3di`:
 - **Bones follow** (on a skinned model): its `BN##` bones follow another
   model's `PN##` parts of the same index. Retail draws a first-person gun and
   the player's skinned arms with one array of bone matrices built from the
-  gun's parts [orig: Player_RenderFirstPersonViewModel @ 0x4ded60;
-  Entity_BuildBoneWorldMatrices @ 0x4df028]. Importing a gun and its arms
-  together pairs them.
+  gun's parts [orig: Player_RenderFirstPersonViewModel @ 0x4ded60, its
+  Entity_BuildBoneWorldMatrices call @ 0x4df028]. Importing a gun and its arms
+  together pairs them; a gun whose clips ride a `!Rig` armature is still the
+  rigid model they pair with, its hierarchy in its `~PPx attach` helpers.
 - **Mount on** + **user point** (on any model): the model sits on another
   model's user point, as an ITEMS.DEF `addeweap`/`addeweapC <userpoint>` child
-  (the M1A1's turret on the hull's `ewep01`) sits on its parent. The name is
-  matched whole, without regard to case, and the first match wins. A missing
-  name leaves the child on the parent's root. The child faces the user
-  point's direction [orig: build_bone_attachment_matrix @ 0x56C630;
-  build_direction_look_at_matrix @ 0x612C90].
+  (the M1A1's turret on the hull's `ewep01`) sits on its parent. The names are
+  matched whole and trimmed (retail labels carry trailing blanks), without
+  regard to case, and the first match wins. A missing name leaves the child
+  on the parent's root. The child takes the point's look-at frame as retail
+  builds it: the direction read mirrored against the position, and the
+  look-at matrix's rows as the child's axes, so a level point faces the child
+  along it and a pitched one tips it the other way [orig:
+  build_bone_attachment_matrix @ 0x56C630; build_direction_look_at_matrix @
+  0x612C90].
+- Both settings bind with every rig of the two models at rest, so the pose a
+  clip holds when they are set is not baked in.
 
 ## Bullet faces
 
