@@ -1239,7 +1239,7 @@ First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (net-re §5.
 | `Math_FixedPointTransformPoint22` | `0x615810` | transforms a point by a 10.22 fixed matrix (round 1<<21, >>22); preserves the point's unit scale | disasm; §5.40 | confirm-only |
 | `Math_FixedPointCrossProduct` | `0x6134a0` | 16.16 cross product: EACH 64-bit product is rounded `(+0x8000)>>16` before the subtraction `@0x6134f7/@0x61353f/@0x613588`; callers include the vehicle orientation solvers and `Scar_AddEntry @0x5ccada/@0x5ccae6` | decompile 2026-09-10 | ported (`impact_scar.cpp cross_q16`, `vehicle_motor_detail.h q16_cross`) |
 
-Held-weapon visibility on mount/attach (engine-research, 2026-06-24; world-wac-ai-re §13; the local and every remote player render their held weapon, D-WPN-32 increments 1-3; AI bodies and the NVG/binocular overlays remain, D-WPN-32 OPEN):
+Held-weapon visibility on mount/attach (engine-research, 2026-06-24; world-wac-ai-re §13; the local and every remote player render their held weapon, D-WPN-32 increments 1-3; the NVG/binocular/canopy/carried overlays ported and the AI-body residual settled as retail-faithful 2026-09-24, D-WPN-32 OPEN only for the org1 mounted rider copy edge):
 
 | original | addr | role | evidence | status |
 |---|---|---|---|---|
