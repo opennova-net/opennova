@@ -53,9 +53,10 @@ struct Writer {
 	std::vector<std::string> notes;
 
 	void line(const std::string &s) { std::fprintf(f, "%s\n", s.c_str()); }
+	// What the text cannot carry, as a comment in the scene and on stderr.
 	void note(const std::string &s) {
 		notes.push_back(s);
-		line("# dropped: " + s);
+		line("# note: " + s);
 	}
 };
 
@@ -80,6 +81,41 @@ BadBuildClip clip_shape(const AnimLoadedClip &clip) {
 		}
 	}
 	return shape;
+}
+
+// Why `build` could not mint this clip again from its text, or empty: the
+// scene notes such a clip and leaves it out rather than write a set that
+// build refuses whole.
+std::string inexpressible(const AnimLoadedClip &clip) {
+	const BadFile &file = clip.file;
+	const size_t keys = static_cast<size_t>(file.frame_count) + 1;
+	if (file.num_bones == 0) return "it holds no bones";
+	if (file.frame_count == 0) return "it holds no frames";
+	if (file.version > 1) return "its version is " + std::to_string(file.version) + ", not 0 or 1";
+	if (file.num_events != 0 && file.num_events != keys)
+		return "it holds " + std::to_string(file.num_events) + " events, not the " +
+				std::to_string(keys) + " its frame count implies";
+	for (size_t i = 0; i < file.num_bones; ++i) {
+		const BadBone &bone = file.bones[i];
+		const std::string at = "bone " + std::to_string(i);
+		if (std::strlen(bone.name) > 31) return at + "'s name fills all 32 bytes";
+		if (std::strchr(bone.name, '"') != nullptr) return at + "'s name holds a quote";
+		if (i > 0 && (bone.parent_index < 0 || static_cast<size_t>(bone.parent_index) >= i))
+			return at + "'s parent is not a lower index";
+		const BadChannel &ch = file.channels[i];
+		if (ch.frame_count == 0 || ch.rotations == nullptr) return at + " holds no key";
+		for (uint32_t k = 0; k < ch.frame_count; ++k) {
+			const BadQuaternion &q = ch.rotations[k];
+			const double len = std::sqrt(static_cast<double>(q.x) * q.x + static_cast<double>(q.y) * q.y +
+					static_cast<double>(q.z) * q.z + static_cast<double>(q.w) * q.w);
+			if (!(std::fabs(len - 1.0) <= 1e-3)) return at + " holds a key that is not a unit quaternion";
+			if (ch.frame_lengths != nullptr && ch.frame_lengths[k] == 0)
+				return at + " holds a zero duration";
+		}
+		if (ch.frame_count != keys && ch.frame_lengths == nullptr)
+			return at + " keys sparsely with no duration table";
+	}
+	return std::string();
 }
 
 void write_clip(Writer &w, const AnimLoadedClip &clip, const BadBuildClip *reset) {
@@ -181,10 +217,6 @@ void write_clip(Writer &w, const AnimLoadedClip &clip, const BadBuildClip *reset
 		w.line("event " + f9(v.x) + " " + f9(v.y) + " " + f9(v.z) + " " + trigger + " " +
 				f9(ev.bottom) + " " + f9(ev.top));
 	}
-	if (file.num_events != 0 && file.num_events != keys)
-		w.note("the clip holds " + std::to_string(file.num_events) + " events, not the " +
-				std::to_string(keys) + " the header's frame count implies");
-	if (file.num_events == 0) w.note("the clip carries no event record (no root motion, no capsule)");
 }
 
 } // namespace
@@ -206,28 +238,39 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 	w.line("o3a 1");
 	w.line(std::string("# clip set of ") + in_path + " (opennova-3di anim scene)");
 	if (!set.table_name.empty()) w.line("adm " + name_field(set.table_name));
+	// A clip the text cannot express is left out, and its variants with it.
+	std::vector<std::string> left_out;
+	for (const AnimLoadedClip &clip : set.clips) {
+		const std::string why = inexpressible(clip);
+		if (why.empty()) continue;
+		left_out.push_back(clip.name);
+		w.note("left out clip '" + clip.name + "': " + why);
+	}
+	const auto written = [&](const std::string &stem) {
+		for (const std::string &name : left_out)
+			if (opennova::strutil::iequals(name, stem)) return false;
+		for (const AnimLoadedClip &clip : set.clips)
+			if (opennova::strutil::iequals(clip.name, stem)) return true;
+		return false;
+	};
 	for (const BadBuildRow &row : set.rows) {
 		std::string line = "row " + name_field(row.key);
 		size_t held = 0;
 		for (const std::string &variant : row.variants) {
-			// A variant whose clip did not load is dropped from its row: build
-			// refuses a row naming a clip the set does not hold.
-			const std::string stem = bad_build_clip_stem(variant);
-			bool loaded = false;
-			for (const AnimLoadedClip &clip : set.clips)
-				loaded = loaded || opennova::strutil::iequals(clip.name, stem);
-			if (!loaded) continue;
+			// A variant whose clip did not load, or is left out, is dropped
+			// from its row: build refuses a row naming a clip the set lacks.
+			if (!written(bad_build_clip_stem(variant))) continue;
 			line += " \"" + variant + "\"";
 			++held;
 		}
 		if (held == 0) {
-			w.note("row '" + row.key + "' names no clip that loaded");
+			w.note("dropped row '" + row.key + "': it names no clip the scene holds");
 			continue;
 		}
 		w.line(line);
 	}
 	for (const AnimMissingClip &absent : set.missing)
-		w.note("the table names '" + absent.variant + "' (" + absent.reason + ")");
+		w.note("dropped '" + absent.variant + "' from its rows: " + absent.reason);
 	// The set's reset clip, whose bind every clip's positions turn through; a
 	// lone clip, or a table whose reset clip is absent, turns through its own.
 	const std::string reset_stem = bad_build_reset_stem(set.rows);
@@ -239,10 +282,12 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 			reset = &reset_shape;
 		}
 	}
-	for (const AnimLoadedClip &clip : set.clips) write_clip(w, clip, reset);
+	for (const AnimLoadedClip &clip : set.clips) {
+		if (inexpressible(clip).empty()) write_clip(w, clip, reset);
+	}
 	std::fclose(w.f);
 	for (const std::string &n : w.notes)
-		std::fprintf(stderr, "opennova-3di: note: scene drops %s\n", n.c_str());
+		std::fprintf(stderr, "opennova-3di: note: %s\n", n.c_str());
 	std::printf("wrote %s (%zu rows, %zu clips)\n", out_path, set.rows.size(), set.clips.size());
 	anim_free(set);
 	return 0;

@@ -117,9 +117,16 @@ path.
 
 ## What `scene` cannot carry
 
-`scene` comments these (`# dropped: ...`) and lists them on stderr: a row whose
-clips are not beside the table, and a clip with no event record. Values build
-derives are not carried, except where it cannot reproduce them (`bonepos`).
+`scene` comments these (`# note: ...`) and lists them on stderr: a variant
+whose clip is absent or does not parse, which is dropped from its rows (a row
+left with none is dropped whole), and a clip `build` could not mint again from
+its text (an event count other than `frames + 1`, a `version` other than 0 or
+1, a bone name filling all 32 bytes or holding a quote, a parent that is not a
+lower index, a key that is not a unit quaternion, a zero duration, a sparse
+channel with no duration table), which is left out with its variants. A
+version 0 clip's events carry trigger 0: its record has no trigger word. Values
+build derives are not carried, except where it cannot reproduce them
+(`bonepos`).
 Over the corpus under `OPENNOVA_JO_ASSETS`, `build(scene(x))` is the same
 animation as `x` (`opennova-3di anim compare`) for all 477 clips and 81 of the
 82 tables; the one exception, `ESTAND02.ADM`, names a clip the corpus does not

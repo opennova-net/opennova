@@ -53,6 +53,10 @@ struct AnimLoadedSet {
 bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error);
 void anim_free(AnimLoadedSet &set);
 
+// One table row as `info` prints it: the key, then the variants in the order
+// the engine serves them (a ring from the last back; a reset row is no ring).
+std::string anim_info_row(const opennova::bad::BadBuildRow &row);
+
 int cmd_anim_build(const char *scene_path, const char *out_path);
 int cmd_anim_scene(const char *in_path, const char *out_path);
 int cmd_anim_info(const char *in_path, int verbose);

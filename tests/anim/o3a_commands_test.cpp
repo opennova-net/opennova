@@ -351,6 +351,39 @@ int main(int argc, char **argv) {
 				"a variant with no clip differs");
 	}
 
+	// A clip the text cannot express is noted and left out, not written for
+	// build to refuse: a clip one event short of its frame count.
+	{
+		const std::filesystem::path home = dir / "inexpressible";
+		std::filesystem::remove_all(home);
+		std::filesystem::create_directories(home);
+		std::vector<char> walk;
+		check(read_file((std::filesystem::path(original).parent_path() / "walk.bad").string(), walk),
+				"read the built clip");
+		const uint32_t short_events = 3;
+		std::memcpy(walk.data() + 0x3C, &short_events, sizeof(short_events));
+		std::ofstream((home / "walk.bad").string(), std::ios::binary)
+				.write(walk.data(), static_cast<std::streamsize>(walk.size()));
+		const std::string scene = (home / "set.o3a").string();
+		check(threedi_cli::cmd_anim_scene((home / "walk.bad").string().c_str(), scene.c_str()) == 0,
+				"scene of a clip it cannot express");
+		std::vector<char> text_out;
+		check(read_file(scene, text_out), "read the scene");
+		const std::string written(text_out.begin(), text_out.end());
+		check(written.find("# note: left out clip 'walk'") != std::string::npos &&
+						written.find("\nclip ") == std::string::npos,
+				"the clip is noted and left out");
+	}
+
+	// `info` prints a ring from its last variant back, and a reset row, which
+	// is no ring, in file order with its bind named.
+	check(threedi_cli::anim_info_row(opennova::bad::BadBuildRow{"anim_walk", {"a", "b"}})
+							.find(" b a   (ring order)") != std::string::npos,
+			"info prints a ring last to first");
+	check(threedi_cli::anim_info_row(opennova::bad::BadBuildRow{"anim_reset", {"a", "b"}})
+							.find(" a b   (no ring: the last is the rig's bind)") != std::string::npos,
+			"info prints a reset row as no ring");
+
 	// `info` reads a table and a lone clip.
 	check(threedi_cli::cmd_anim_info(original.c_str(), 2) == 0, "info");
 

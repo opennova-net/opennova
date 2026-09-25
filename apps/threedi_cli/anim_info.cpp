@@ -7,8 +7,10 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <formats/bad/bad_build.h>
 
 using namespace opennova::bad;
@@ -95,6 +97,24 @@ void print_clip(const AnimLoadedClip &clip, int verbose) {
 
 } // namespace
 
+std::string anim_info_row(const BadBuildRow &row) {
+	char key[48];
+	std::snprintf(key, sizeof(key), "%-40s", row.key.c_str());
+	std::string out = key;
+	// The ring serves a row from its last variant back, but slot 0 (`reset`)
+	// is no ring: each reset variant replaces the head, so the last is the
+	// rig's bind [orig: AnimMap_RegisterBoneNode @0x40C2D0, slot 0 self-rings
+	// @0x40c38b].
+	const bool reset = row.key.size() > 5 &&
+			opennova::strutil::iequals(std::string_view(row.key).substr(5), "reset");
+	if (reset && row.variants.size() > 1) {
+		for (const std::string &variant : row.variants) out += " " + variant;
+		return out + "   (no ring: the last is the rig's bind)";
+	}
+	for (size_t v = row.variants.size(); v-- > 0;) out += " " + row.variants[v];
+	return out + (row.variants.size() > 1 ? "   (ring order)" : "");
+}
+
 int cmd_anim_info(const char *in_path, int verbose) {
 	AnimLoadedSet set;
 	std::string error;
@@ -105,14 +125,7 @@ int cmd_anim_info(const char *in_path, int verbose) {
 	if (!set.table_name.empty()) {
 		std::printf("table %s: %zu rows, %zu clips\n", set.table_name.c_str(), set.rows.size(),
 				set.clips.size());
-		for (const BadBuildRow &row : set.rows) {
-			// The ring serves a row from its last variant back
-			// [orig: AnimMap_RegisterBoneNode @0x40C2D0].
-			std::printf("  %-40s", row.key.c_str());
-			for (size_t v = row.variants.size(); v-- > 0;)
-				std::printf(" %s", row.variants[v].c_str());
-			std::printf("%s\n", row.variants.size() > 1 ? "   (ring order)" : "");
-		}
+		for (const BadBuildRow &row : set.rows) std::printf("  %s\n", anim_info_row(row).c_str());
 		for (const AnimMissingClip &absent : set.missing)
 			std::printf("  missing: %s (%s)\n", absent.variant.c_str(), absent.reason.c_str());
 	}
