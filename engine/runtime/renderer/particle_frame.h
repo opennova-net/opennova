@@ -31,13 +31,19 @@ enum class ParticleRenderDomain : std::uint8_t {
 	FirstPerson = 1,
 };
 
-// Retail's two World particle submissions classify the emitter origin, not
-// each generated quad. The below subset is strict; equality belongs to Above.
-// All is reserved for domains/passes that do not use the water partition.
+// The effect world's particle passes [orig: CParticleGroup_RenderChildren
+// @ 0x5E5890 over its renderFlags]. The two scene passes classify the emitter
+// origin against the water split plane, not each generated quad: Below (flag 1)
+// is strict, equality belongs to Above (flag 2). A child whose def leads with
+// a Distort graphic (def class 7) draws in neither; it draws only in the
+// post-scene distortion pass (flag 4) [orig: the `== 7` test @ 0x5E58D2 and the
+// `& 4` arm @ 0x5E58DB..0x5E58EE]. All is reserved for domains/passes that do
+// not use the water partition.
 enum class ParticleWaterSubset : std::uint8_t {
 	All = 0,
 	Below = 1,
 	Above = 2,
+	Distortion = 3,
 };
 
 // Converts the frame-level far/camera-side bracket into the manager's raw
@@ -162,6 +168,9 @@ struct ParticleEmitterSnapshot {
 	// The emitter's live world origin is the water-pass selector. Bounds and
 	// individual particle positions deliberately do not participate.
 	ParticleVec3 position{};
+	// The def's first graphic is Distort (the child's class id +0x1E0 == 7):
+	// the emitter draws only in the distortion pass.
+	bool distortion_class = false;
 	ParticleAabb bounds{};
 	// This emitter's run inside ParticleFrameSnapshot::particles. A run that
 	// overruns the flat array is clamped by the compiler.

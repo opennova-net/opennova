@@ -658,6 +658,14 @@ bool EffectWorld::trigger_group_children(int64_t p_group_id, const Vector3 &p_po
 			scene_->trigger_group_children(p_group_id, p_position, p_forward, p_force_zone);
 }
 
+std::shared_ptr<EffectDistortionDrawer> EffectWorld::distortion_drawer() {
+	return _ensure_renderer()->distortion_drawer();
+}
+
+void EffectWorld::attach_distortion_row(Node *p_frame_fx) {
+	_ensure_renderer()->attach_distortion_row(p_frame_fx);
+}
+
 void EffectWorld::render_frame(int64_t p_time_ms) {
 	_sync_owner_poses(true);
 	_ensure_renderer()->render_now(p_time_ms);
@@ -777,6 +785,8 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::spawn_effect_request, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("warm_all_effects", "position"), &EffectWorld::warm_all_effects);
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"), &EffectWorld::render_now);
+	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
+			&EffectWorld::attach_distortion_row);
 	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),
 			&EffectWorld::get_debug_draw_list_report);
 	ClassDB::bind_method(D_METHOD("spawn_effect_transient", "name", "position", "orientation",

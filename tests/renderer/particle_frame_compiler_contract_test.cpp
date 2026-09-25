@@ -189,6 +189,43 @@ bool water_emitter_partition_contract() {
 			"unsplit FirstPerson compilation ignores the water plane");
 }
 
+bool distortion_class_pass_contract() {
+	// A child whose def leads with a Distort graphic (class 7) draws only on
+	// the distortion pass; every other child skips that pass
+	// [orig: CParticleGroup_RenderChildren @ 0x5E58D2..0x5E58EE].
+	const auto blend = state(r::ParticlePipeline::Blend, 1, 0, 0);
+	const auto haze = state(r::ParticlePipeline::Distort, 2, 7, 0,
+			r::ParticleRenderPass::Distortion);
+	r::ParticleFrameSnapshot snapshot;
+	add_emitter(snapshot, 1, r::ParticleRenderDomain::World, 30.0f,
+			{quad(30.0f, 0x11u, blend)}, 9.0f);
+	const std::size_t distort_below = add_emitter(snapshot, 2,
+			r::ParticleRenderDomain::World, 20.0f, {quad(20.0f, 0x22u, haze)}, 9.0f);
+	const std::size_t distort_above = add_emitter(snapshot, 3,
+			r::ParticleRenderDomain::World, 10.0f, {quad(10.0f, 0x33u, haze)}, 11.0f);
+	snapshot.emitters[distort_below].distortion_class = true;
+	snapshot.emitters[distort_above].distortion_class = true;
+
+	r::ParticleFrameCompiler compiler;
+	r::ParticleViewInput view;
+	view.water_height = 10.0f;
+	for (const bool camera_side : {false, true}) {
+		view.water_subset = r::particle_water_subset_for_side(true, camera_side);
+		const auto &pass = compiler.compile(snapshot, view);
+		for (const auto &bounds : pass.emitter_bounds)
+			if (!check(bounds.emitter_id == 1,
+					"class-7 emitters never draw in the water-split passes")) return false;
+	}
+	view.water_subset = r::ParticleWaterSubset::Distortion;
+	const auto &distortion = compiler.compile(snapshot, view);
+	return check(distortion.emitter_bounds.size() == 2 &&
+			distortion.emitter_bounds[0].emitter_id == 2 &&
+			distortion.emitter_bounds[1].emitter_id == 3 &&
+			distortion.commands.size() == 1 &&
+			distortion.commands[0].pipeline == r::ParticlePipeline::Distort,
+			"the distortion pass takes both class-7 emitters, either water side, depth sorted");
+}
+
 bool domain_sort_and_material_run_contract() {
 	const auto shared = state(r::ParticlePipeline::Additive, 3, 1, 7);
 	const auto split = state(r::ParticlePipeline::Distort, 4, 7, 8,
@@ -651,5 +688,6 @@ int main() {
 	if (!retained_sort_stack_contract()) return 1;
 	if (!empty_batch_leaves_emitters_unstamped_contract()) return 1;
 	if (!thermal_material_contract()) return 1;
+	if (!distortion_class_pass_contract()) return 1;
 	return 0;
 }

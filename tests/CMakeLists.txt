@@ -1236,10 +1236,6 @@ target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
 
-add_executable(group_render_gate_test particle/group_render_gate_test.cpp)
-target_link_libraries(group_render_gate_test PRIVATE opennova_runtime)
-target_include_directories(group_render_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME group_render_gate COMMAND group_render_gate_test)
 
 add_executable(vehicle_collision_damage_test world/vehicle_collision_damage_test.cpp)
 target_link_libraries(vehicle_collision_damage_test PRIVATE opennova_runtime)

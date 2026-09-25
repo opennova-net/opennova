@@ -25,6 +25,8 @@
 
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
+#include "particle/effect_distortion_drawer.h"
+#include "particle/effect_world.h"
 #include "render/object_lod_frame.h"
 #include "simulation/entity_presenter.h"
 #include "render/scene_overlay_compositor.h"
@@ -666,6 +668,12 @@ void GameWorld::plan_screen_effects_frame() {
 		}
 	}
 	framefx_->set_view_effects(view);
+	// The effects device draws the row's distortion sets (the class-7
+	// particles and the tracer distortion ribbons).
+	EffectWorld *effect_world = get_effect_world();
+	framefx_->set_distortion_drawer(effect_world != nullptr ?
+					effect_world->distortion_drawer() :
+					std::shared_ptr<FrameFxDistortionDrawer>());
 	framefx_->advance_screen_effects();
 }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -30,6 +32,7 @@ class ParticleForceField;
 namespace godot {
 
 class Camera3D;
+class EffectDistortionDrawer;
 class ParticleRenderer;
 struct SceneOverlaySubmission;
 class ResourceRoot;
@@ -91,6 +94,13 @@ public:
 	// of that view hands it in every frame; clear_world() drops it.
 	void set_second_scene_camera(Camera3D *p_camera);
 	Camera3D *get_second_scene_camera() const;
+	// FrameFX's type-0 row device (ParticleRenderer::distortion_drawer): the
+	// world registers it with FrameFx; the fire presenter publishes the tracer
+	// distortion ribbons into it.
+	std::shared_ptr<EffectDistortionDrawer> distortion_drawer();
+	// ParticleRenderer::attach_distortion_row for embedders without the world
+	// frame (previews, tests).
+	void attach_distortion_row(Node *p_frame_fx);
 
 	// Loads every mounted .ptl AND the active gore set in VFS order, then
 	// opens the catalog once. The gore set is a second extension carrying

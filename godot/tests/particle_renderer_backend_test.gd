@@ -946,8 +946,6 @@ func _overlap_texture(name: String) -> Texture2D:
 	var color := Color(0.5, 0.5, 1.0, 1.0)
 	if name == "impact.tga":
 		color = Color.RED
-	elif name == "smoke.tga":
-		color = Color(0.0, 1.0, 0.0, 0.5)
 	image.fill(color)
 	return ImageTexture.create_from_image(image)
 
@@ -979,10 +977,10 @@ func _overlap_image(viewport: SubViewport, renderer: ParticleRenderer) -> Image:
 	return viewport.get_texture().get_image()
 
 
-func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> void:
-	if RenderingServer.get_rendering_device() == null:
-		pending("RenderingDevice unavailable under this Godot renderer")
-		return
+# A viewport whose ParticleRenderer draws its distortion subset through a real
+# FrameFx node's type-0 row (the world wiring registers the same drawer every
+# frame through EffectWorld), over a wall of one-pixel red/black columns.
+func _framefx_distortion_view() -> Dictionary:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(128, 128)
 	viewport.own_world_3d = true
@@ -997,8 +995,28 @@ func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> voi
 	background.environment.background_mode = Environment.BG_COLOR
 	background.environment.background_color = Color.BLACK
 	viewport.add_child(background)
+	var stripes := Shader.new()
+	stripes.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+
+void fragment() {
+	ALBEDO = vec3(mod(floor(FRAGCOORD.x), 2.0), 0.0, 0.0);
+}
+"""
+	var wall_material := ShaderMaterial.new()
+	wall_material.shader = stripes
+	var wall_mesh := QuadMesh.new()
+	wall_mesh.size = Vector2(40.0, 40.0)
+	var wall := MeshInstance3D.new()
+	wall.mesh = wall_mesh
+	wall.material_override = wall_material
+	wall.position = Vector3(0.0, 1.0, -2.0)
+	viewport.add_child(wall)
+	var fx := FrameFx.new()
+	viewport.add_child(fx)
 	var file := ParticleFixture.parse(_overlap_document("impact", 0)
-			+ _overlap_document("smoke", 0) + _overlap_document("haze", 7))
+			+ _overlap_document("haze", 7))
 	var scene := EffectScene.new()
 	scene.open([file])
 	var renderer := ParticleRenderer.new()
@@ -1006,30 +1024,80 @@ func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> voi
 	renderer.texture_provider = _overlap_texture
 	renderer.set_water_plane(-100.0, null)
 	viewport.add_child(renderer)
+	renderer.attach_distortion_row(fx)
+	return {"viewport": viewport, "fx": fx, "scene": scene, "renderer": renderer}
 
-	_overlap_spawn(scene, "impact", 0.0)
-	var before := await _overlap_image(viewport, renderer)
-	assert_gt(before.get_pixel(64, 64).r, 0.95, "the distant impact is visible")
+
+func _framefx_image(view: Dictionary) -> Image:
+	var renderer := view["renderer"] as ParticleRenderer
+	var fx := view["fx"] as FrameFx
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	fx.set_view_effects(0, 0, false, false, 0, false, false, false, false, false, false, false)
+	fx.advance_screen_effects()
+	for frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	return (view["viewport"] as SubViewport).get_texture().get_image()
+
+
+# The largest red step between neighbouring pixels of row 64 in [from, to).
+func _column_contrast(image: Image, from: int, to: int) -> float:
+	var contrast := 0.0
+	for x in range(from, to):
+		contrast = maxf(contrast, absf(image.get_pixel(x + 1, 64).r - image.get_pixel(x, 64).r))
+	return contrast
+
+
+# Class-7 emitters (a distort first graphic) leave both water-split scene
+# passes and draw in FrameFX's type-0 row over the finished frame, with texture
+# slot 2 = the row's 256A work target sampled at the particle's own screen
+# position (retail render_projected_shadow @ 0x5838F8 -> the flag-4 pass of
+# CNapiSession_SetViewMatrix @ 0x5F72F7; the class test in
+# CParticleGroup_RenderChildren @ 0x5E58D2). The row runs only while such an
+# emitter lives (the misnamed CNapiSession_HasActiveDataTransfer @ 0x5F6640).
+func test_distortion_particles_draw_in_the_framefx_row() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var view := _framefx_distortion_view()
+	var scene := view["scene"] as EffectScene
+	var renderer := view["renderer"] as ParticleRenderer
+	var fx := view["fx"] as FrameFx
+
+	# The impact hides behind the wall; it only shows the scene pass still runs.
+	_overlap_spawn(scene, "impact", -3.0)
+	var before := await _framefx_image(view)
+	assert_gt(_column_contrast(before, 58, 70), 0.8, "the wall columns are crisp")
+	var report := renderer.get_debug_draw_list_report()
+	assert_false(bool(report.get("distortion_present", true)),
+			"no class-7 emitter lives, so the row does not run")
+	assert_eq(int(fx.get_backend_report().get("distortion_sets", -1)), 0)
+
 	_overlap_spawn(scene, "haze", 1.0)
-	var after := await _overlap_image(viewport, renderer)
-	assert_almost_eq(after.get_pixel(64, 64).r, before.get_pixel(64, 64).r, 0.05,
-			"neutral muzzle haze must preserve the impact behind it")
-
-	# A color draw between two distortion runs must enter the next snapshot.
-	_overlap_spawn(scene, "smoke", 2.0)
-	var smoke := await _overlap_image(viewport, renderer)
-	var expected := smoke.get_pixel(64, 64)
-	assert_gt(expected.g, 0.5, "the intervening smoke contributes green")
-	_overlap_spawn(scene, "haze", 3.0)
-	var overlapping := await _overlap_image(viewport, renderer)
-	var actual := overlapping.get_pixel(64, 64)
-	assert_almost_eq(actual.r, expected.r, 0.05, "near haze preserves the red impact")
-	assert_almost_eq(actual.g, expected.g, 0.05, "near haze preserves intervening smoke")
-	var backend: Dictionary = renderer.get_debug_draw_list_report().get("world_camera_backend", {})
+	var after := await _framefx_image(view)
+	report = renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1,
+			"the haze leaves the camera-side scene pass; the impact stays")
+	assert_eq(int(_slot(report, "world_far_side").get("selected_emitters", -1)), 0,
+			"and the far-side scene pass")
+	assert_eq(int(_slot(report, "distortion").get("selected_emitters", -1)), 1,
+			"the distortion subset carries the haze")
+	assert_true(bool(report.get("distortion_present", false)))
+	var backend: Dictionary = report.get("distortion_backend", {})
 	assert_eq(String(backend.get("status", "")), "drawn", String(backend.get("failure", "")))
-	assert_eq(int(backend.get("drawn_commands", -1)), int(backend.get("submitted_commands", 0)))
-	assert_eq(int(backend.get("scene_color_copies", 0)), 2,
-			"each ordered distortion run samples the preceding particle draws")
+	assert_eq(int(backend.get("drawn_commands", -1)), 1)
+	var world_backend: Dictionary = report.get("world_camera_backend", {})
+	assert_eq(int(world_backend.get("scene_color_copies", -1)), 0,
+			"no scene pass snapshots the frame for the haze")
+	assert_eq(int(fx.get_backend_report().get("distortion_sets", -1)), 2,
+			"the particle set on 256A and the ribbon set on 256B")
+	# The haze paints the half-resolution capture back at its own position: the
+	# one-pixel columns under it average out, the rest of the frame stays crisp.
+	assert_lt(_column_contrast(after, 58, 70), 0.35,
+			"the haze shows the 256A work target, not the frame")
+	assert_almost_eq(after.get_pixel(64, 64).r, 0.5, 0.25)
+	assert_gt(_column_contrast(after, 4, 16), 0.8, "outside the haze the frame is untouched")
 
 
 func _asymmetric_dirt_texture(_name: String) -> Texture2D:

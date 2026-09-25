@@ -23,6 +23,7 @@
 #include "audio/mission_audio.h"
 #include "env/mission_environment.h"
 #include "lights/effect_light_director.h"
+#include "particle/effect_distortion_drawer.h"
 #include "particle/effect_world.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
@@ -316,13 +317,26 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 		return;
 	}
 	mesh_->clear_surfaces();
+	EffectWorld *fx_world = fx();
+	const std::shared_ptr<EffectDistortionDrawer> distortion =
+			fx_world != nullptr ? fx_world->distortion_drawer() : nullptr;
+	// This frame's distortion ribbons replace the last ones, even when none draw.
+	auto publish_distortion = [&](bool p_channels_present) {
+		if (distortion) {
+			distortion->set_ribbon_channels_present(p_channels_present);
+			distortion->publish_ribbons(distortion_frame_);
+		}
+	};
+	distortion_frame_.clear();
 	if (p_rows.is_empty()) {
+		publish_distortion(false);
 		return;
 	}
 	Viewport *viewport = owner_ != nullptr && owner_->is_inside_tree() ? owner_->get_viewport()
 																	   : nullptr;
 	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
 	if (camera == nullptr) {
+		publish_distortion(false);
 		return;
 	}
 	const Transform3D eye = camera->get_global_transform();
@@ -353,6 +367,12 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 	}
 	opennova::renderer::compile_tracer_ribbons(channels_.data(), channels_.size(), view,
 			opennova::renderer::TracerPass::Main, frame_);
+	// The distortion pass's ribbons for FrameFX's type-0 row, and its content
+	// gate: an active channel of a +0x828 style (retail
+	// CEffectEmitterPool_HasDistortionChannels @ 0x5DB7F0).
+	opennova::renderer::compile_tracer_ribbons(channels_.data(), channels_.size(), view,
+			opennova::renderer::TracerPass::Distortion, distortion_frame_);
+	publish_distortion(distortion_frame_.channels > 0);
 	stat_tracer_peak_ = MAX(stat_tracer_peak_, static_cast<int64_t>(frame_.channels));
 	const MissionEnvironment *env = environment();
 	const int rung = opennova::renderer::tracer_rung(env == nullptr || !env->is_underwater_view());

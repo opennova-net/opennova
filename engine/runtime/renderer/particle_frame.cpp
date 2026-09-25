@@ -16,10 +16,28 @@ bool water_subset_selects(const ParticleEmitterSnapshot &emitter,
 		const ParticleViewInput &view) {
 	if (view.water_subset == ParticleWaterSubset::All)
 		return true;
+	// A class-7 child (its def's first graphic is Distort) draws on the
+	// distortion pass (flag 4) and on no other; every other child skips it
+	// [orig: CParticleGroup_RenderChildren @ 0x5E58D2 -> the `& 4` arm
+	// @ 0x5E58DB..0x5E58EE; the flag-4 pass is EffectWorld_DrawParticles(4),
+	// the tail @ 0x5F72F7..0x5F72FF of the misnamed CNapiSession_SetViewMatrix,
+	// called only from the FrameFX distortion row @ 0x5838F8].
+	if (view.water_subset == ParticleWaterSubset::Distortion)
+		return emitter.distortion_class;
+	if (emitter.distortion_class)
+		return false;
 	// CParticleGroup_RenderChildren tests the emitter origin at +28 against
 	// the active split plane: render flag 1 accepts y < plane, while flag 2
-	// accepts y >= plane [orig: @ 0x5e5890]. A NaN follows the hardware compare
-	// into the above-inclusive subset because the strict-below test is false.
+	// accepts y >= plane [orig: the `& 1` arm @ 0x5e5903, compare
+	// @ 0x5e5934; the `& 2` arm @ 0x5e5940, compare @ 0x5e5971]. The plane is
+	// read through the manager's split pointer, 0.0 while it is null
+	// [orig: the null guards @ 0x5e5925 / @ 0x5e5962 over the fldz]; a word
+	// with no flag draws every non-class-7 child [orig: @ 0x5e58f3, the draw
+	// @ 0x5e58ff] and one with neither water bit draws none [orig: @ 0x5e5943].
+	// The manager runs the two scene passes as two walks of the live effect
+	// list [orig: CParticleManager_BeginFrame @ 0x5ecfc0, the calls @ 0x5ed034
+	// and @ 0x5ed07c]. A NaN follows the hardware compare into the
+	// above-inclusive subset because the strict-below test is false.
 	const bool below = emitter.position.y < view.water_height;
 	return view.water_subset == ParticleWaterSubset::Below ? below : !below;
 }

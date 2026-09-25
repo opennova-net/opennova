@@ -160,6 +160,7 @@ private:
 	Ref<Texture2D> smoke_texture_; // smoktest.pcx [orig: pool+0x3000]
 	bool smoke_texture_loaded_ = false;
 	opennova::renderer::TracerRibbonFrame frame_;
+	opennova::renderer::TracerRibbonFrame distortion_frame_;
 	std::vector<opennova::renderer::TracerChannelInput> channels_;
 	int64_t stat_fires_ = 0;
 	int64_t stat_sounds_ = 0;

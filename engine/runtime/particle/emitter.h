@@ -55,6 +55,16 @@ constexpr std::uint32_t LitColor     = 0x80;  // graphic+472 ∈ {Bump=3, Bumpad
 constexpr std::uint32_t Distort      = 0x100; // graphic+472 == Distort=7
 } // namespace particle_runtime_flag
 
+// The emitter's class id is its def's first graphic blend id (def+0x1E0, in
+// the doc frame graphic[0]+324): a Distort lead graphic (class 7) keeps the
+// emitter out of both scene particle passes and draws it only in the
+// post-scene distortion pass [orig: CParticleGroup_RenderChildren
+// @ 0x5E58D2; the same test in the misnamed CNapiSession_HasActiveDataTransfer
+// @ 0x5E986B].
+inline bool particle_def_is_distortion_class(const ParticleDef &definition) noexcept {
+	return definition.graphics[0].blend_mode == BlendMode::Distort;
+}
+
 struct Particle;
 // Borrowed for one simulation advance; an absent field leaves ordinary effects unchanged.
 class ParticleForceField {

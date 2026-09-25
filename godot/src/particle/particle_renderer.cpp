@@ -58,6 +58,7 @@
 #include <runtime/renderer/render_order.h>
 
 #include "particle/particle_compositor.h"
+#include "particle/effect_distortion_drawer.h"
 #include "particle/particle_convert.h"
 #include "particle/particle_far_pass.h"
 #include "render/frame_fx.h"
@@ -87,7 +88,9 @@ enum ParticleDrawSlot : std::size_t {
 	kSecondSceneFarSide = 4,
 	kSecondSceneCameraSide = 5,
 	kFirstPerson = 6,
-	kParticleDrawSlotCount = 7,
+	// The post-scene distortion pass (class-7 emitters, main view).
+	kDistortion = 7,
+	kParticleDrawSlotCount = 8,
 };
 
 using ParticleEffectPair = std::array<Ref<ParticleCompositorEffect>, 2>;
@@ -650,6 +653,11 @@ public:
 	Ref<SceneOverlayCompositorEffect> world_overlay;
 	Ref<SceneOverlayCompositorEffect> reflection_overlay;
 	Ref<SceneOverlayCompositorEffect> second_scene_overlay;
+	// FrameFX's type-0 row: the distortion subset's effect (attached to no
+	// camera) and the drawer FrameFX calls; the drawer outlives effect sets.
+	Ref<ParticleCompositorEffect> distortion_effect;
+	std::shared_ptr<EffectDistortionDrawer> distortion_drawer =
+			std::make_shared<EffectDistortionDrawer>();
 	ObjectID attached_world_camera;
 	ObjectID attached_reflection_camera;
 	ObjectID attached_second_scene_camera;
@@ -693,6 +701,7 @@ public:
 			for (Ref<ParticleCompositorEffect> &effect : *pair)
 				visit(effect);
 		}
+		visit(distortion_effect);
 	}
 
 	template <typename Visitor>
@@ -725,6 +734,9 @@ public:
 		// The mirror's reflected scene draws only its coronas after its
 		// particle passes.
 		reflection_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
+		// The distortion subset draws inside FrameFX's type-0 row through the
+		// drawer, never as a camera compositor pass.
+		distortion_drawer->set_particle_effect(distortion_effect);
 	}
 
 	// ParticleRenderer::shutdown() detaches while camera and server ownership
@@ -936,6 +948,7 @@ public:
 		});
 		world_far_pass.clear();
 		second_scene_far_pass.clear();
+		distortion_drawer->set_particles_present(false);
 		if (first_person_mesh.is_valid())
 			first_person_mesh->clear_surfaces();
 		slot_present.fill(false);
@@ -1264,6 +1277,8 @@ public:
 			} else {
 				emitter.domain = opennova::renderer::ParticleRenderDomain::World;
 			}
+			emitter.distortion_class =
+					opennova::particle::particle_def_is_distortion_class(definition);
 
 			int fallback_layer = 0;
 			for (int layer = 0; layer < kGraphicLayerCount; ++layer) {
@@ -1658,6 +1673,8 @@ void ParticleRenderer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"),
 			&ParticleRenderer::render_now);
 	ClassDB::bind_method(D_METHOD("shutdown"), &ParticleRenderer::shutdown);
+	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
+			&ParticleRenderer::attach_distortion_row);
 	ClassDB::bind_method(D_METHOD("get_rendered_quad_count"),
 			&ParticleRenderer::get_rendered_quad_count);
 	ClassDB::bind_method(D_METHOD("get_draw_command_count"),
@@ -1855,6 +1872,16 @@ void ParticleRenderer::shutdown() {
 	impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
 		overlay->release_device_resources();
 	});
+	impl_->distortion_drawer->release_device_resources();
+}
+
+std::shared_ptr<EffectDistortionDrawer> ParticleRenderer::distortion_drawer() const {
+	return impl_ ? impl_->distortion_drawer : std::shared_ptr<EffectDistortionDrawer>();
+}
+
+void ParticleRenderer::attach_distortion_row(Node *p_frame_fx) {
+	if (FrameFx *frame_fx = Object::cast_to<FrameFx>(p_frame_fx))
+		frame_fx->set_distortion_drawer(distortion_drawer());
 }
 
 void ParticleRenderer::publish_scene_overlay(
@@ -2005,6 +2032,17 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	compile_world(kWorldCameraSide,
 			opennova::renderer::particle_water_subset_for_side(camera_above_water, true),
 			world_camera, impl_->world_effects[1], thermal);
+	// The post-scene distortion pass: the class-7 emitters, compiled for the
+	// main eye and drawn by FrameFX's type-0 row through the drawer (retail
+	// render_projected_shadow @ 0x5838F8). The row's content gate reads the
+	// live class-7 emitters (the misnamed CNapiSession_HasActiveDataTransfer
+	// @ 0x5F6640); the pass fog rides along for the tracer distortion ribbons.
+	compile_world(kDistortion, opennova::renderer::ParticleWaterSubset::Distortion,
+			world_camera, impl_->distortion_effect, thermal);
+	impl_->distortion_drawer->set_particles_present(
+			impl_->compilers[kDistortion].draw_list().debug.selected_emitters > 0);
+	impl_->distortion_drawer->set_pass_fog(impl_->fog_color, impl_->fog_start,
+			impl_->fog_end, impl_->fog_type);
 
 	opennova::renderer::ParticleViewInput first_person_view;
 	first_person_view.domain = opennova::renderer::ParticleRenderDomain::FirstPerson;
@@ -2114,6 +2152,13 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["second_scene_far_side"] = slot_report(kSecondSceneFarSide);
 	result["second_scene_camera_side"] = slot_report(kSecondSceneCameraSide);
 	result["first_person"] = slot_report(kFirstPerson);
+	result["distortion"] = slot_report(kDistortion);
+	result["distortion_backend"] = impl_->distortion_effect->get_backend_report();
+	result["distortion_present"] = impl_->distortion_drawer->frame_has_distortion();
+	result["distortion_ribbon_indices"] = static_cast<int64_t>(
+			impl_->distortion_drawer->published_ribbon_indices());
+	result["distortion_ribbon_draws"] = static_cast<int64_t>(
+			impl_->distortion_drawer->drawn_ribbon_draws());
 	result["world_far_backend"] =
 			impl_->world_effects[0]->get_backend_report();
 	result["world_camera_backend"] =

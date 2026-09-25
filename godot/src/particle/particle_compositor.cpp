@@ -200,7 +200,15 @@ void main() {
 		float wave_x = sin(pc.theta) * 0.01953125;
 		float wave_y = cos(pc.theta) * 0.01953125;
 		float wave_z = -sin(pc.theta) * 0.01953125;
-		vec2 projective_uv = gl_FragCoord.xy / pc.viewport_size;
+		// The fragment's own screen position in the sampled texture, the
+		// FrameFX screen-texture transform: u = 0.5 ndc.x + 0.5 + half a
+		// texel of that texture (retail render_projected_shadow
+		// @ 0x5837FF..0x5838D2 builds it for its 256-square targets). Retail
+		// rasterizes pixel centres on integers, so the fragment centre steps
+		// back half a pixel; against a frame-size texture this is exactly the
+		// fragment's own texel.
+		vec2 projective_uv = (gl_FragCoord.xy - 0.5) / pc.viewport_size +
+				0.5 / vec2(textureSize(scene_texture, 0));
 		float alpha = v_primary.a;
 		vec2 scene_uv;
 		scene_uv.x = normal.x * (alpha * wave_x) +
@@ -438,6 +446,7 @@ public:
 	void release_all() {
 		RenderingServer *server = RenderingServer::get_singleton();
 		rd = server != nullptr ? server->get_rendering_device() : nullptr;
+		release_distortion_target();
 		release_targets();
 		release_atlas();
 		release_rid(vertex_buffer);
@@ -473,6 +482,19 @@ public:
 	bool validate_submission(const ParticleWorldSubmission &submission) const;
 	bool draw(const ParticleWorldSubmission &submission,
 			RenderData *render_data);
+	bool draw_distortion(const ParticleWorldSubmission &submission,
+			const FrameFxDistortionTarget &target, std::size_t &r_draws);
+	void release_distortion_target();
+	void write_view_push_constants(const ParticleWorldSubmission &submission,
+			RenderSceneData *scene_data, std::uint32_t view, const Vector2i &size);
+
+	// FrameFX's type-0 row target: the frame colour and depth, and slot 2.
+	RID distortion_color;
+	RID distortion_depth;
+	RID distortion_framebuffer;
+	RID distortion_screen_texture;
+	RID distortion_screen_sampler;
+	RID distortion_scene_uniform_set;
 	Dictionary report() const;
 };
 
@@ -1310,36 +1332,7 @@ bool ParticleCompositorEffect::Impl::draw(
 				ensure_scene_color_target(target, view);
 		bool scene_color_available = false;
 
-		// RenderSceneData::get_view_projection(view) already includes Godot's
-		// depth/Y correction and TAA jitter. Applying another depth correction
-		// makes this draw list disagree with ordinary scene geometry as the camera
-		// turns. Only the world-to-view camera inverse remains to be composed.
-		const Projection view_projection =
-				scene_data->get_view_projection(view) *
-				Projection(scene_data->get_cam_transform().affine_inverse());
-		for (std::uint32_t column = 0; column < 4; ++column) {
-			for (std::uint32_t row = 0; row < 4; ++row) {
-				write_f32(push_constants, (column * 4u + row) * 4u,
-						static_cast<float>(view_projection[column][row]));
-			}
-		}
-		write_f32(push_constants, 64, submission.camera_position[0]);
-		write_f32(push_constants, 68, submission.camera_position[1]);
-		write_f32(push_constants, 72, submission.camera_position[2]);
-		write_f32(push_constants, 76, submission.fog_end);
-		write_f32(push_constants, 80, submission.camera_forward[0]);
-		write_f32(push_constants, 84, submission.camera_forward[1]);
-		write_f32(push_constants, 88, submission.camera_forward[2]);
-		write_f32(push_constants, 92, submission.fog_start);
-		write_f32(push_constants, 96, submission.fog_color[0]);
-		write_f32(push_constants, 100, submission.fog_color[1]);
-		write_f32(push_constants, 104, submission.fog_color[2]);
-		write_f32(push_constants, 108,
-				static_cast<float>(submission.fog_type));
-		write_f32(push_constants, 112, static_cast<float>(size.x));
-		write_f32(push_constants, 116, static_cast<float>(size.y));
-		write_f32(push_constants, 120,
-				static_cast<float>(submission.time_ms) * 0.004f);
+		write_view_push_constants(submission, scene_data, view, size);
 
 		int64_t draw_list = RenderingDevice::INVALID_ID;
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);
@@ -1425,6 +1418,167 @@ bool ParticleCompositorEffect::Impl::draw(
 				distortion_commands_skipped;
 		diagnostics.view_count = view_count;
 	}
+	return true;
+}
+
+void ParticleCompositorEffect::Impl::write_view_push_constants(
+		const ParticleWorldSubmission &submission, RenderSceneData *scene_data,
+		std::uint32_t view, const Vector2i &size) {
+	// RenderSceneData::get_view_projection(view) already includes Godot's
+	// depth/Y correction and TAA jitter. Applying another depth correction
+	// makes this draw list disagree with ordinary scene geometry as the camera
+	// turns. Only the world-to-view camera inverse remains to be composed.
+	const Projection view_projection =
+			scene_data->get_view_projection(view) *
+			Projection(scene_data->get_cam_transform().affine_inverse());
+	for (std::uint32_t column = 0; column < 4; ++column) {
+		for (std::uint32_t row = 0; row < 4; ++row) {
+			write_f32(push_constants, (column * 4u + row) * 4u,
+					static_cast<float>(view_projection[column][row]));
+		}
+	}
+	write_f32(push_constants, 64, submission.camera_position[0]);
+	write_f32(push_constants, 68, submission.camera_position[1]);
+	write_f32(push_constants, 72, submission.camera_position[2]);
+	write_f32(push_constants, 76, submission.fog_end);
+	write_f32(push_constants, 80, submission.camera_forward[0]);
+	write_f32(push_constants, 84, submission.camera_forward[1]);
+	write_f32(push_constants, 88, submission.camera_forward[2]);
+	write_f32(push_constants, 92, submission.fog_start);
+	write_f32(push_constants, 96, submission.fog_color[0]);
+	write_f32(push_constants, 100, submission.fog_color[1]);
+	write_f32(push_constants, 104, submission.fog_color[2]);
+	write_f32(push_constants, 108,
+			static_cast<float>(submission.fog_type));
+	write_f32(push_constants, 112, static_cast<float>(size.x));
+	write_f32(push_constants, 116, static_cast<float>(size.y));
+	write_f32(push_constants, 120,
+			static_cast<float>(submission.time_ms) * 0.004f);
+}
+
+void ParticleCompositorEffect::Impl::release_distortion_target() {
+	release_uniform_set_rid(distortion_scene_uniform_set);
+	release_framebuffer_rid(distortion_framebuffer);
+	distortion_color = RID();
+	distortion_depth = RID();
+	distortion_screen_texture = RID();
+	distortion_screen_sampler = RID();
+}
+
+// The effect world's flag-4 pass inside FrameFX's type-0 row: the distortion
+// subset draws over the finished frame with texture slot 2 = the row's 256A
+// work target (retail render_projected_shadow @ 0x5838F8 -> the flag-4 tail of
+// CNapiSession_SetViewMatrix @ 0x5F72F7). Depth-tested against the frame,
+// no depth write, each command through its own material as in the scene
+// passes (the thermal word the main scene stored persists into this pass).
+bool ParticleCompositorEffect::Impl::draw_distortion(
+		const ParticleWorldSubmission &submission, const FrameFxDistortionTarget &target,
+		std::size_t &r_draws) {
+	if (submission.commands.empty())
+		return true;
+	if (!initialize_rd() || !validate_submission(submission) ||
+			!ensure_atlas(submission.atlas) ||
+			!ensure_vertex_buffer(submission.triangle_vertices))
+		return false;
+	RenderSceneData *scene_data = target.render_data != nullptr ?
+			target.render_data->get_render_scene_data() : nullptr;
+	if (scene_data == nullptr || !target.color.is_valid() || !target.depth.is_valid() ||
+			!target.screen_texture.is_valid() || !target.screen_sampler.is_valid()) {
+		set_failure("The FrameFX distortion target is incomplete",
+				"distortion_target_invalid");
+		return false;
+	}
+	if (distortion_color != target.color || distortion_depth != target.depth ||
+			!distortion_framebuffer.is_valid() ||
+			!rd->framebuffer_is_valid(distortion_framebuffer)) {
+		release_framebuffer_rid(distortion_framebuffer);
+		TypedArray<RID> attachments;
+		attachments.push_back(target.color);
+		attachments.push_back(target.depth);
+		distortion_framebuffer = rd->framebuffer_create(attachments);
+		if (!distortion_framebuffer.is_valid() ||
+				!rd->framebuffer_is_valid(distortion_framebuffer)) {
+			set_failure("Could not create the distortion framebuffer",
+					"distortion_target_invalid");
+			release_distortion_target();
+			return false;
+		}
+		distortion_color = target.color;
+		distortion_depth = target.depth;
+	}
+	if (distortion_screen_texture != target.screen_texture ||
+			distortion_screen_sampler != target.screen_sampler ||
+			!distortion_scene_uniform_set.is_valid() ||
+			!rd->uniform_set_is_valid(distortion_scene_uniform_set)) {
+		release_uniform_set_rid(distortion_scene_uniform_set);
+		TypedArray<Ref<RDUniform>> uniforms;
+		uniforms.push_back(sampled_texture_uniform(0, target.screen_sampler,
+				target.screen_texture));
+		distortion_scene_uniform_set = rd->uniform_set_create(uniforms, shader, 1);
+		if (!distortion_scene_uniform_set.is_valid()) {
+			set_failure("Could not bind the distortion screen texture",
+					"distortion_target_invalid");
+			release_distortion_target();
+			return false;
+		}
+		distortion_screen_texture = target.screen_texture;
+		distortion_screen_sampler = target.screen_sampler;
+	}
+	const Ref<RDTextureFormat> color_format = rd->texture_get_format(target.color);
+	if (color_format.is_null()) {
+		set_failure("The distortion colour target has no format",
+				"distortion_target_invalid");
+		return false;
+	}
+	const Vector2i size(static_cast<int32_t>(color_format->get_width()),
+			static_cast<int32_t>(color_format->get_height()));
+	const int64_t format = rd->framebuffer_get_format(distortion_framebuffer);
+	for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
+		if (!pipeline_for(command, format,
+					opennova::renderer::particle_thermal_material(
+							command.pipeline, submission.thermal))
+						.is_valid())
+			return false;
+	}
+	write_view_push_constants(submission, scene_data, target.view, size);
+	const int64_t draw_list = rd->draw_list_begin(distortion_framebuffer);
+	if (draw_list == RenderingDevice::INVALID_ID) {
+		set_failure("RenderingDevice could not begin the distortion draw list",
+				"draw_list_failed");
+		return false;
+	}
+	std::size_t drawn = 0;
+	for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
+		const opennova::renderer::ParticleThermalMaterial thermal =
+				opennova::renderer::particle_thermal_material(command.pipeline,
+						submission.thermal);
+		const std::uint32_t mode = static_cast<std::uint32_t>(command.pipeline) |
+				(thermal == opennova::renderer::ParticleThermalMaterial::InvertedBlend ?
+								0x100u :
+								0u);
+		write_u32(push_constants, 124, mode);
+		const GpuAtlasPage &atlas_page = gpu_atlas_pages[command.atlas_page];
+		vertex_offsets[0] = static_cast<int64_t>(
+				static_cast<std::uint64_t>(command.first_quad) *
+				kTriangleVerticesPerQuad * kRetailVertexStride);
+		rd->draw_list_bind_render_pipeline(draw_list, pipeline_for(command, format, thermal));
+		rd->draw_list_bind_uniform_set(draw_list, atlas_page.uniform_set, 0);
+		rd->draw_list_bind_uniform_set(draw_list, distortion_scene_uniform_set, 1);
+		rd->draw_list_bind_vertex_buffers_format(draw_list, vertex_format,
+				command.quad_count * kTriangleVerticesPerQuad, vertex_buffers,
+				vertex_offsets);
+		rd->draw_list_set_push_constant(draw_list, push_constants, kPushConstantBytes);
+		rd->draw_list_draw(draw_list, false, 1);
+		++drawn;
+	}
+	rd->draw_list_end();
+	r_draws += drawn;
+	std::lock_guard<std::mutex> lock(diagnostics_mutex);
+	diagnostics.status = "drawn";
+	diagnostics.failure.clear();
+	diagnostics.drawn_frame_id = submission.frame_id;
+	diagnostics.drawn_commands = drawn;
+	diagnostics.gpu_draw_calls = drawn;
 	return true;
 }
 
@@ -1525,6 +1679,17 @@ ParticleCompositorEffect::~ParticleCompositorEffect() = default;
 void ParticleCompositorEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&ParticleCompositorEffect::get_backend_report);
+}
+
+bool ParticleCompositorEffect::draw_distortion_set(const FrameFxDistortionTarget &p_target,
+		std::size_t &r_draws) {
+	if (!impl_ || impl_->shutdown_requested.load(std::memory_order_acquire) ||
+			impl_->hidden.load(std::memory_order_acquire))
+		return true;
+	const std::shared_ptr<const ParticleWorldSubmission> submission = impl_->snapshot();
+	if (!submission)
+		return true;
+	return impl_->draw_distortion(*submission, p_target, r_draws);
 }
 
 void ParticleCompositorEffect::publish(

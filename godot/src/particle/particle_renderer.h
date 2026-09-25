@@ -23,6 +23,7 @@ namespace godot {
 
 class Camera3D;
 struct SceneOverlaySubmission;
+class EffectDistortionDrawer;
 
 // Thin Godot adapter for the portable particle scene/frame modules. World
 // draw lists are immutable values: the water-far subset (pass A) draws as
@@ -101,6 +102,13 @@ public:
 	// behind are undone by the next ENTER_TREE (fresh effects, latch cleared),
 	// so a renderer removed from and re-added to the tree renders again.
 	void shutdown();
+	// FrameFX's type-0 row device: this renderer publishes the class-7
+	// distortion subset into it each render; the tracer ribbons join it from
+	// the fire presenter. The world registers it with FrameFx.
+	std::shared_ptr<EffectDistortionDrawer> distortion_drawer() const;
+	// Registers that device with a FrameFx node. The world does this every
+	// frame through EffectWorld; previews and tests bind it once.
+	void attach_distortion_row(Node *p_frame_fx);
 
 	// Compiles the latest fixed-tick scene snapshot for both render domains and
 	// publishes an immutable World copy across the render-thread boundary.

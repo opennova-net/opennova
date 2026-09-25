@@ -82,6 +82,7 @@ add_library(${TARGET_NAME} SHARED
     lights/effect_light_report.cpp
     lights/light_scene.cpp
     lights/light_spawn.cpp
+    particle/effect_distortion_drawer.cpp
     particle/effect_group_report.cpp
     particle/effect_load_report.cpp
     particle/effect_scene.cpp
