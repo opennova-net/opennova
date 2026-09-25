@@ -23,11 +23,6 @@
 
 using namespace opennova::threedi;
 
-namespace threedi_cli {
-// `compare --strict`: DRIFT counts as a difference.
-int cmd_compare(const char *expected_path, const char *actual_path, bool strict);
-} // namespace threedi_cli
-
 namespace {
 int failures = 0;
 void check(bool ok, const char *what) {

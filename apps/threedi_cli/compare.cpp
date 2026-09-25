@@ -1469,8 +1469,4 @@ int cmd_compare(const char *expected_path, const char *actual_path, bool strict)
 	return same ? 0 : 1;
 }
 
-int cmd_compare(const char *expected_path, const char *actual_path) {
-	return cmd_compare(expected_path, actual_path, false);
-}
-
 } // namespace threedi_cli

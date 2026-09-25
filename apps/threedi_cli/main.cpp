@@ -4,7 +4,7 @@
 //   opennova-3di build   <scene.o3d> -o <out.3di>
 //   opennova-3di scene   <model.3di> -o <scene.o3d>
 //   opennova-3di info    <model.3di> [--verbose | --planes | --verts]
-//   opennova-3di compare <expected.3di> <actual.3di>
+//   opennova-3di compare [--strict] <expected.3di> <actual.3di>
 //   opennova-3di anim    build|scene|info|compare  (the .bad/.adm clip set)
 //   opennova-3di catalog
 //
@@ -14,8 +14,9 @@
 // (docs/anim/o3a-scene-format.md) for its animations; every 3DI3, .bad and
 // .adm byte is read and written by the engine (formats/threedi, formats/bad,
 // formats/adm), so there is one encoder and one decoder.
-// Exit codes: 0 ok (compare: same model), 1 error (compare: differences),
-// 2 usage.
+// Exit codes: 0 ok (compare: same model, drift notes allowed), 1 error
+// (compare: a difference, or a file it cannot read or that is malformed;
+// with --strict, drift too), 2 usage.
 
 #include <cstdio>
 #include <cstring>
@@ -40,7 +41,7 @@ int usage(const char *why) {
 			"usage: opennova-3di build   <scene.o3d> -o <out.3di>\n"
 			"       opennova-3di scene   <model.3di> -o <scene.o3d>\n"
 			"       opennova-3di info    <model.3di> [--verbose | --planes | --verts]\n"
-			"       opennova-3di compare <expected.3di> <actual.3di>\n"
+			"       opennova-3di compare [--strict] <expected.3di> <actual.3di>\n"
 			"       opennova-3di anim build   <set.o3a> -o <out.adm|out.bad>\n"
 			"       opennova-3di anim scene   <in.adm|in.bad> -o <set.o3a>\n"
 			"       opennova-3di anim info    <in.adm|in.bad> [--verbose | --keys]\n"
@@ -99,8 +100,9 @@ int main(int argc, char **argv) {
 		return threedi_cli::cmd_scene(argv[2], argv[4]);
 	}
 	if (cmd == "compare") {
-		if (argc != 4) return usage("compare needs <expected.3di> <actual.3di>");
-		return threedi_cli::cmd_compare(argv[2], argv[3]);
+		const bool strict = argc == 5 && std::strcmp(argv[2], "--strict") == 0;
+		if (argc != (strict ? 5 : 4)) return usage("compare needs [--strict] <expected.3di> <actual.3di>");
+		return threedi_cli::cmd_compare(argv[strict ? 3 : 2], argv[strict ? 4 : 3], strict);
 	}
 	if (cmd == "anim") {
 		const std::string sub = argv[2];

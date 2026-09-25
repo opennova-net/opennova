@@ -25,6 +25,8 @@ inline int track_index(const std::string &name) {
 int cmd_info(const char *path, int verbose);
 int cmd_build(const char *scene_path, const char *out_path);
 int cmd_scene(const char *model_path, const char *out_path);
-int cmd_compare(const char *expected_path, const char *actual_path);
+// `strict`: drift (a heuristic derived value, or a move within tolerance)
+// counts as a difference too.
+int cmd_compare(const char *expected_path, const char *actual_path, bool strict = false);
 
 } // namespace threedi_cli
