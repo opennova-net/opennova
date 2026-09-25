@@ -27,6 +27,7 @@ fixtures/**/*.ini -text -eol filter= diff= merge=
 fixtures/**/*.mns -text -eol filter= diff= merge=
 fixtures/**/*.mnu -text -eol filter= diff= merge=
 fixtures/**/*.nwmsg -text -eol filter= diff= merge=
+fixtures/**/*.o3d -text -eol filter= diff= merge=
 fixtures/**/*.ptl -text -eol filter= diff= merge=
 fixtures/**/*.ptu -text -eol filter= diff= merge=
 fixtures/**/*.trn -text -eol filter= diff= merge=

@@ -45,7 +45,7 @@ add_test(NAME threedi_ctrl_catalog COMMAND threedi_ctrl_catalog_test)
 # opennova-3di (the Blender add-on's CLI): build the fixture scenes, read the
 # minted models back and check the conversions the CLI owns.
 add_test(NAME threedi_cli_build
-         COMMAND opennova_3di build ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/threedi/o3d/spinner.o3d
+         COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/spinner.o3d
                  -o ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
 set_tests_properties(threedi_cli_build PROPERTIES FIXTURES_SETUP threedi_cli_spinner)
 add_executable(threedi_o3d_cli_test threedi/o3d_cli_test.cpp)
@@ -53,13 +53,13 @@ target_link_libraries(threedi_o3d_cli_test PRIVATE opennova_formats)
 add_test(NAME threedi_o3d_cli COMMAND threedi_o3d_cli_test ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
 set_tests_properties(threedi_o3d_cli PROPERTIES FIXTURES_REQUIRED threedi_cli_spinner)
 add_test(NAME threedi_cli_build_skinned
-         COMMAND opennova_3di build ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/threedi/o3d/skinned.o3d
+         COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/skinned.o3d
                  -o ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
 set_tests_properties(threedi_cli_build_skinned PROPERTIES FIXTURES_SETUP threedi_cli_skinned)
 add_test(NAME threedi_o3d_skinned COMMAND threedi_o3d_cli_test --skinned ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
 set_tests_properties(threedi_o3d_skinned PROPERTIES FIXTURES_REQUIRED threedi_cli_skinned)
 add_test(NAME threedi_cli_build_building
-         COMMAND opennova_3di build ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/threedi/o3d/building.o3d
+         COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/building.o3d
                  -o ${CMAKE_CURRENT_BINARY_DIR}/building.3di)
 set_tests_properties(threedi_cli_build_building PROPERTIES FIXTURES_SETUP threedi_cli_building)
 add_test(NAME threedi_o3d_building COMMAND threedi_o3d_cli_test --building ${CMAKE_CURRENT_BINARY_DIR}/building.3di)

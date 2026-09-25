@@ -164,7 +164,7 @@ mesh that is not convex, more than 16 user points (the item-effect scan
 reads 16), weighted bone slots past their strip's table (retail FSldr03 ships
 them), collision faces whose corners are collinear. The minted bytes are read
 back before the file is written. The ctest fixtures are
-`tests/fixtures/threedi/o3d/spinner.o3d`, `skinned.o3d` and `building.o3d`.
+`fixtures/threedi/o3d/spinner.o3d`, `skinned.o3d` and `building.o3d`.
 
 A skinned model's strips are all owned by the root ROBJ while each part keeps
 the bounds of the geometry authored on it (the retail layout; the builder

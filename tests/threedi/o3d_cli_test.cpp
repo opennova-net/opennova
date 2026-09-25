@@ -1,4 +1,4 @@
-// Reads back the .3di opennova-3di minted from tests/fixtures/threedi/o3d/
+// Reads back the .3di opennova-3di minted from fixtures/threedi/o3d/
 // spinner.o3d, skinned.o3d or building.o3d (the threedi_cli_build* ctests run
 // first) and checks the scene -> model conversions the CLI owns: mission ->
 // model axes, the counter-clockwise-in-model render winding and the
@@ -201,8 +201,8 @@ int main(int argc, char **argv) {
 		CHECK(c.plane_count == 13 && c.planes[6].flags == 1 && near(c.planes[6].normal[0], 1.0f) &&
 				near(c.planes[6].radius, -1.0f));
 		CHECK(c.plane_count == 13 && near(c.planes[12].normal[2], 0.70709f) && near(c.planes[12].radius, -1.2f));
-		// Counter-clockwise from outside in the scene becomes retail's clockwise
-		// order, so the stored face normal still points out of the top (+z).
+		// The scene's counter-clockwise-from-outside order is retail's, stored
+		// as given, so the face normal points out of the top (+z).
 		CHECK(c.face_count == 1 && near(c.normals[c.faces[0].normal_index].normal[2], 1.0f));
 		CHECK(c.faces[0].poly_type == 14);
 		CHECK(collision_facing(c, 0, 0, c.faces[0]) > 0.0);
