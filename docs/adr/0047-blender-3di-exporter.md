@@ -41,15 +41,22 @@ the same text transport, the same add-on.
 2. **`opennova-3di`** (`apps/threedi_cli`, one translation unit per command)
    speaks the `.o3d` scene text
    ([`docs/threedi/o3d-scene-format.md`](../threedi/o3d-scene-format.md)).
-   `build` reads it into the construction API, validates what retail imposes
-   (u16 indices, name lengths, int16 tracks, the 8-seat scan, declared
-   registers, volume plane counts, occlusion vertex and plane limits), mints the
-   model and reads the bytes back before writing them. `scene` is build's exact
-   inverse (`build(scene(x))` re-mints a builder-made model byte for byte) and
+   `build` reads it into the construction API strictly (every field parsed and
+   range-checked against the word it fills, no trailing tokens, no unclosed
+   quote), validates what retail imposes (u16 indices, name lengths, int16
+   tracks, the 8-seat scan in any case, declared registers, volume plane counts,
+   occlusion vertex and plane limits, the 8.8 collision range, PANM rows in part
+   order), mints the model, reads the bytes back, and writes the file whole or
+   not at all. `scene` is build's exact inverse (`build(scene(x))` re-mints a
+   builder-made model byte for byte; NaN and infinity are spelled so the text
+   reads back) and
    names the file each texture resolves to beside the model, by the runtime's
    own candidate order (`engine/base/resource_index/texture_candidates.h`,
    shared with the Godot resolver). `info` prints what any `.3di` holds,
-   `compare` tells whether two files hold the same model, and `catalog` prints
+   `compare` tells whether two files hold the same model (anything the runtime
+   reads, beyond storage noise, is a difference; heuristic derived values and
+   moves within tolerance print as `drift:` lines with counts, which `--strict`
+   also fails), and `catalog` prints
    the engine's CTRL register and generator-style tables. The CLI owns both
    winding conversions: render triangles flip (retail winds counter-clockwise
    in model axes, the mirror of mission); collision and occlusion faces keep
@@ -98,16 +105,31 @@ the same text transport, the same add-on.
    taken from the unquantized corners (retail keeps faces the 8.8 grid
    collapses) and plane distances `-(n . v0)`, the plane the runtime tests.
    There is one section per part of that LOD (WriteCOBJ walks its
-   subobjects), at the part's pivot, the COBJ offset and CXLT translation
-   retail carries (Dtruck2's wheels, Dblkhwk1's rotors); its bounds cover its
-   vertices and volumes and its radius the farthest vertex (a volume-only
-   section's is 0). The CMDL box envelops the collision faces and LOD 0's
-   triangles, its radii and height (`radii[2]`) the collision faces' alone,
-   as the retail corpus stores them. A skinned model follows the retail
-   person layout: one section per bone at its pivot, bounded by every LOD 0
-   vertex the bone moves, the bullet faces on the mesh part's section. The
-   derived collision values are truncated as OED's writer truncated them,
-   from the stored (quantized) positions so `build(scene(x))` stays exact.
+   subobjects), at the part's pivot, the COBJ offset retail carries
+   (Dtruck2's wheels, Dblkhwk1's rotors); its bounds cover its source mesh
+   (the part's render floats), its volume boxes and the occlusion records it
+   parents, its midpoint is the floor of the bounds' mean and its radius the
+   farthest point from it (a volume-only section's is 0). The CXLT table is
+   WriteCXLT's: the collision LOD's attach points, the `~PPx attach` helpers
+   (in the add-on, any helper in that LOD writes a whole table, a part without
+   one contributing its pivot); with none, build derives one row per non-root
+   section at its offset, our rule and the retail row count in 917 of the 958
+   JO models. The CMDL box envelops the collision faces and LOD 0's triangles,
+   its radii and height (`radii[2]`) the collision faces' alone, as the retail
+   corpus stores them. A skinned model follows the retail person layout: one
+   section per bone at its pivot, bounded by every LOD 0 vertex the bone moves,
+   the bullet faces on the mesh part's section, whose own bounds stay at the
+   empty sentinels (a derived sphere there would be a phantom shootable bone).
+   The derived values are truncated as OED's writer truncated them (GHDR,
+   user points and section offsets included). The CMDL and the bullet-face
+   words come from the stored corners and normals, our rule: retail took them
+   from the authored corners, which the file keeps only for a rigid section's
+   own part, and deriving from what is stored lets `build(scene(x))` stay exact.
+   The render words follow the same writer: GHDR's radius is the farthest
+   render vertex, truncated; a part's sphere is its vertex box's centre and the
+   farthest vertex from it; a part that draws nothing keeps the centre its
+   `_## center` helper gives it, with radius 0. The full rule set is in the
+   `.o3d` record.
 5. **Skinned models follow the retail corpus.** The parts are the armature's
    bones (hierarchy and pivots, which retail animations pair with by index),
    then any mesh parts, as the retail exporter wrote bones then mesh objects
@@ -132,7 +154,8 @@ the same text transport, the same add-on.
    Armry01's omni-light records to within one ulp in two entries, the NaN
    columns included). An occlusion mesh's planes
    follow the OED rule (the six bounding planes, then deduplicated face planes,
-   at most 32), which reproduces Armry01's OCCL records plane for plane.
+   at most 32), which reproduces Armry01's OCCL records plane for plane; a
+   record's centre sums its vertices in double and divides once, as OED did.
 7. **Materials and vertices follow the OED rules too.** A blending shader's
    strips draw in the alpha pass (FFP_GLASS among them); a glass shader
    reflects 128 grey unless another colour is set and is glass; a `*_LUM`
@@ -254,7 +277,17 @@ the same text transport, the same add-on.
   planes cut (Armry02: one), are rebuilt from the faces; volume order within
   a section follows the names (OED kept its scene order, which a Blender
   scene lacks); retail bullet faces whose corners collapse on the 8.8 grid
-  are dropped (a mesh cannot hold them).
+  are dropped (a mesh cannot hold them); flat `CB`/`CP` volumes (38 in the
+  corpus) import as nothing, with a note, since no single polygon rebuilds
+  their planes (flat ladders do import, as their one polygon). Words retail
+  derived from what the file does not keep rebuild differently: part spheres
+  no subset of the stored geometry gives (61 models, Armry01's part 3 among
+  them), GHDR radii over geometry the file lacks (25: the `fxflsh` family and
+  the first-person weapons' own collision LOD), three skinned vehicles
+  authored on their bones (dM1A1, DT801, Ftruck1X), NaN `rel` words (Dmil261x,
+  Excavatr), and occlusion centres taken before LOD recentering (Armry01, 7
+  of 8); the CMDL and bullet-face words, derived from the stored corners (our
+  rule), sit up to a few millimetres from retail's.
 - `base/resource_index/texture_candidates.cpp` joins `citation_allowlist_engine`
   (our loose-folder resolver policy, moved down from the Godot resolver so the
   CLI shares it; the `texture_candidates` ctest pins its order). `threedi_build.cpp` and `bad_build.cpp` carry the `[orig:]`
