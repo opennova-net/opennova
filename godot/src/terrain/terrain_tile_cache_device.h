@@ -165,6 +165,8 @@ private:
 	uint64_t frame_selected_ready_pages_ = 0;
 	uint64_t frame_compose_jobs_ = 0;
 	uint64_t frame_compose_us_ = 0;
+	uint64_t frame_compose_page_us_ = 0;
+	uint64_t frame_compose_shadow_plan_us_ = 0;
 	uint64_t frame_uploads_ = 0;
 	uint64_t frame_capacity_fallbacks_ = 0;
 	uint64_t frame_shadow_alpha_changed_bytes_ = 0;

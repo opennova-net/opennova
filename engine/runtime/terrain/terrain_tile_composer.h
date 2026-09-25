@@ -67,9 +67,12 @@ struct TerrainTilePageSourceView {
 // invalid. Output is one tightly packed RGBA8 cache layer. RGB carries the
 // base colormap and the ordered .til and scorch overlays; A is the additive,
 // byte-quantized heightfield DOT3 light term alone (the overlay loops run with
-// the alpha channel write-masked).
+// the alpha channel write-masked). `threads` splits the base and .til passes
+// across row stripes (runtime/terrain/row_stripes.h); the bytes are the same
+// for every count.
 Rgba8Image compose_terrain_tile_page(
 		const TerrainTileCompositionJob &job,
-		const TerrainTilePageSourceView &sources);
+		const TerrainTilePageSourceView &sources,
+		std::size_t threads = 1);
 
 } // namespace opennova::terrain

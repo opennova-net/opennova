@@ -45,7 +45,11 @@ struct TerrainStaticShadowCompilationSnapshot {
 
 class TerrainTileCompositionWorker {
 public:
-	static constexpr std::size_t kWorkerCount = 2;
+	// Pages compose on this pool while the terrain frame waits for them
+	// (retail composes each missing visible page inside the frame that draws
+	// it), so a frame that claims several pages spends its wait on the
+	// slowest worker: half the hardware threads, 2..8.
+	static std::size_t worker_count() noexcept;
 	static constexpr std::size_t kMaximumQueuedJobs = TerrainTileCompositionCache::kCapacity * 2;
 
 	// The immutable page sources one mission's cache composes from, already
@@ -82,6 +86,10 @@ public:
 		TerrainTileCompositionJob job;
 		Rgba8Image pixels;
 		uint64_t compose_us = 0;
+		// The split of compose_us: the page raster, then the static-shadow
+		// plan (the shadow raster and its alpha apply are the remainder).
+		uint64_t page_us = 0;
+		uint64_t shadow_plan_us = 0;
 		bool success = false;
 		bool shadow_attempted = false;
 		uint64_t shadow_alpha_changed_bytes = 0;
@@ -173,7 +181,7 @@ private:
 	TerrainTileCompositionDemandQueue demand_queue_;
 	std::deque<Completion> completions_;
 	TerrainTileCompositionDemandQueue completion_queue_;
-	std::array<std::thread, kWorkerCount> workers_;
+	std::vector<std::thread> workers_;
 	std::shared_ptr<const SourceSnapshot> current_sources_;
 	std::size_t active_jobs_ = 0;
 	std::unordered_map<uint64_t, std::size_t> active_jobs_by_epoch_;

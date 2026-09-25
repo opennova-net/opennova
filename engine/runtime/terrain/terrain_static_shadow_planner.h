@@ -123,6 +123,9 @@ public:
 	// composition job and sets it on the worker's planner copy.
 	void set_material_time(uint32_t time_ms) { material_time_ms_ = time_ms; }
 	uint32_t material_time_ms() const { return material_time_ms_; }
+	// Threads a page's shadow pixel loop may use (1 = the calling thread);
+	// the rasterized bytes are the same for every count.
+	void set_raster_threads(std::size_t threads) { raster_threads_ = threads; }
 	// Replaces the caster snapshot. Casters carry resolved geometry; a
 	// missing geometry on an admitted caster (resolution failed) is declared
 	// through admitted_geometry_missing so planning fails closed exactly as
@@ -207,6 +210,7 @@ private:
 	TerrainStaticShadowLightDirection world_light_{};
 	TerrainTileLightEpoch light_epoch_ = kDefaultTerrainTileLightEpoch;
 	uint32_t material_time_ms_ = 0;
+	std::size_t raster_threads_ = 1;
 	uint64_t config_stamp_ = 0;
 	std::shared_ptr<const CasterSet> casters_;
 	// Stamp of the last adopted caster snapshot; 0 = none adopted yet.

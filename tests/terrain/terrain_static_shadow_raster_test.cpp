@@ -419,6 +419,61 @@ bool test_retail_world_to_page_projection() {
 
 } // namespace
 
+// Row stripes (runtime/terrain/row_stripes.h) deal each lane whole rows and
+// the full triangle list in order, so every pixel sees its fragments in the
+// serial order: overlapping, depth-tested, alpha-tested and blended
+// triangles resolve to the serial bytes for any thread count.
+bool test_row_stripes_reproduce_the_serial_bytes() {
+	std::vector<uint8_t> storage;
+	std::vector<TerrainStaticShadowAlphaMipView> mips;
+	storage.resize(16 * 16 + 8 * 8);
+	for (std::size_t index = 0; index < storage.size(); ++index) {
+		storage[index] = static_cast<uint8_t>((index * 37u + 11u) & 0xFFu);
+	}
+	mips = {{16, 16, 16, storage.data()}, {8, 8, 8, storage.data() + 256}};
+	TerrainStaticShadowAlphaTextureView texture;
+	texture.mips = mips.data();
+	texture.mip_count = mips.size();
+	texture.mip_filter = TerrainStaticShadowMipFilter::Linear;
+
+	TerrainStaticShadowRasterInput input;
+	input.alpha_textures.push_back(texture);
+	uint32_t seed = 0x2545F491u;
+	const auto next = [&seed]() {
+		seed = seed * 1664525u + 1013904223u;
+		return static_cast<float>(seed >> 8) / static_cast<float>(1u << 24);
+	};
+	for (int index = 0; index < 600; ++index) {
+		auto shape = triangle(
+				vertex(next() * 1.4f - 0.2f, next() * 1.4f - 0.2f, next() * 0.4f,
+						next() * 4.0f, next() * 4.0f),
+				vertex(next() * 1.4f - 0.2f, next() * 1.4f - 0.2f, next() * 0.4f,
+						next() * 4.0f, next() * 4.0f),
+				vertex(next() * 1.4f - 0.2f, next() * 1.4f - 0.2f, next() * 0.4f,
+						next() * 4.0f, next() * 4.0f),
+				index % 3 == 0 ? -1 : 0, static_cast<uint8_t>(next() * 255.0f));
+		shape.two_sided = index % 2 == 0;
+		shape.alpha_test_enabled = index % 3 == 1;
+		shape.blend = static_cast<TerrainStaticShadowBlend>(index % 4);
+		shape.alpha_scale = 0.25f + next() * 0.75f;
+		input.triangles.push_back(shape);
+	}
+	TerrainStaticShadowAlphaPage serial = alpha_page(64, 64,
+			std::vector<uint8_t>(64 * 64, 255));
+	input.threads = 1;
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, serial),
+			"serial stress raster succeeds")) return false;
+	for (const std::size_t threads : {std::size_t{2}, std::size_t{5}, std::size_t{8}}) {
+		TerrainStaticShadowAlphaPage striped = alpha_page(64, 64,
+				std::vector<uint8_t>(64 * 64, 255));
+		input.threads = threads;
+		if (!expect(rasterize_terrain_static_shadow_alpha(input, striped) &&
+						striped.alpha == serial.alpha,
+				"row-striped raster reproduces the serial bytes")) return false;
+	}
+	return true;
+}
+
 int main() {
 	if (!test_opaque_projection_preserves_outside_and_resolves_edges()) return 1;
 	if (!test_depth_and_winding_admission()) return 1;
@@ -431,6 +486,7 @@ int main() {
 	if (!test_invalid_views_fail_closed()) return 1;
 	if (!test_d3d9_pixel_centres_sit_on_integer_temp_coordinates()) return 1;
 	if (!test_retail_world_to_page_projection()) return 1;
+	if (!test_row_stripes_reproduce_the_serial_bytes()) return 1;
 	std::puts("OK: terrain static-shadow 2x projection/alpha-test raster");
 	return 0;
 }

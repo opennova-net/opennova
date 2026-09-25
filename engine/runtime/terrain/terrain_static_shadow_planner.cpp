@@ -479,6 +479,7 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 		if (page_job.draws.empty()) return true;
 
 		TerrainStaticShadowRasterInput input;
+		input.threads = raster_threads_;
 		std::unordered_map<const TerrainStaticShadowAlphaPyramid *, int32_t>
 				texture_indices;
 		MaterialStateTable material_states;

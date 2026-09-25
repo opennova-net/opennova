@@ -423,8 +423,18 @@ bool test_overlay_atlas_flags_tint_clipping_and_order() {
 	const std::array<uint8_t, 4> after_last = add_dot3_alpha(
 			overlay_render_target_pixel(after_first, dxt5_texel(overlap_last), tint),
 			base[3]);
-	return expect_pixel(page, 160, 32, after_last,
-			"later .til entries source-over earlier entries in file order");
+	if (!expect_pixel(page, 160, 32, after_last,
+			"later .til entries source-over earlier entries in file order")) return false;
+	// Row stripes (runtime/terrain/row_stripes.h) keep every pixel's base
+	// then .til writes in file order, so any thread count reproduces the
+	// serial page byte for byte.
+	for (const std::size_t threads : {std::size_t{3}, std::size_t{8}}) {
+		const Rgba8Image striped = opennova::terrain::compose_terrain_tile_page(
+				cold_job(4), sources, threads);
+		if (!expect(striped.pixels == page.pixels,
+				"row-striped composition reproduces the serial page bytes")) return false;
+	}
+	return true;
 }
 
 // The page passes are XYZRHW quads whose positions are copied unbiased, so

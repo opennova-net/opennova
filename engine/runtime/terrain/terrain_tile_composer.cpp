@@ -4,6 +4,7 @@
 // PolyTrn_DrawTileOverlayQuad @ 0x604700; docs/tiles/til-re.md]
 
 #include <runtime/renderer/texture_dxt.h>
+#include <runtime/terrain/row_stripes.h>
 
 #include <algorithm>
 #include <cmath>
@@ -209,7 +210,8 @@ std::vector<Rgba8Image> build_terrain_tile_set_mips(const Rgba8Image &atlas) {
 
 Rgba8Image compose_terrain_tile_page(
 		const TerrainTileCompositionJob &job,
-		const TerrainTilePageSourceView &sources) {
+		const TerrainTilePageSourceView &sources,
+		std::size_t threads) {
 	Rgba8Image output;
 	if (job.layout.texture_dimension <= 0 || job.layout.world_span <= 0 ||
 			sources.colormap == nullptr || !sources.colormap->is_valid() ||
@@ -263,7 +265,8 @@ Rgba8Image compose_terrain_tile_page(
 			static_cast<float>(uv_per_pixel * normal_levels.front().width),
 			normal_levels.size())];
 
-	for (int y = 0; y < dimension; ++y) {
+	const auto base_rows = [&](int row_begin, int row_end) {
+	for (int y = row_begin; y < row_end; ++y) {
 		const float v = static_cast<float>(local_z / 512.0 + y * uv_per_pixel);
 		for (int x = 0; x < dimension; ++x) {
 			const float u = static_cast<float>(local_x / 512.0 + x * uv_per_pixel);
@@ -290,6 +293,7 @@ Rgba8Image compose_terrain_tile_page(
 					byte(4.0f * dot);
 		}
 	}
+	};
 
 	// Each .til entry is one 16-unit quad placed at (entry - page origin) *
 	// dim / span in the page, its atlas corners flipped/rotated and shifted
@@ -307,8 +311,9 @@ Rgba8Image compose_terrain_tile_page(
 	const int64_t origin_z_q16 = static_cast<int64_t>(world_origin_z) << 16;
 	const double pixels_per_q16 =
 			static_cast<double>(dimension) / static_cast<double>(page_span_q16);
-	if (!flat_page && sources.tile_info != nullptr &&
-			sources.tilestrip != nullptr && valid_chain(*sources.tilestrip)) {
+	const bool draw_tiles = !flat_page && sources.tile_info != nullptr &&
+			sources.tilestrip != nullptr && valid_chain(*sources.tilestrip);
+	const auto tile_rows = [&](std::size_t lane, std::size_t lanes) {
 		const std::vector<Rgba8Image> &atlas_levels = *sources.tilestrip;
 		const Rgba8Image &atlas = atlas_levels.front();
 		for (const TilOverlayEntry &entry : sources.tile_info->entries) {
@@ -348,7 +353,8 @@ Rgba8Image compose_terrain_tile_page(
 			const int x_end = first_covered(x0 + extent, dimension);
 			const int z_begin = first_covered(z0, dimension);
 			const int z_end = first_covered(z0 + extent, dimension);
-			for (int y = z_begin; y < z_end; ++y) {
+			for_lane_stripes(lane, lanes, z_begin, z_end, [&](int row_begin, int row_end) {
+			for (int y = row_begin; y < row_end; ++y) {
 				const float local_z = static_cast<float>((y - z0) / extent);
 				for (int x = x_begin; x < x_end; ++x) {
 					const float local_x = static_cast<float>((x - x0) / extent);
@@ -359,8 +365,16 @@ Rgba8Image compose_terrain_tile_page(
 							sources.tile_overlay_tint);
 				}
 			}
+			});
 		}
-	}
+	};
+	// Each lane owns whole rows, so its base pass lands before its .til
+	// writes exactly as the serial order has it.
+	const std::size_t lanes = std::max<std::size_t>(threads, 1);
+	run_row_stripe_lanes(lanes, [&](std::size_t lane) noexcept {
+		for_lane_stripes(lane, lanes, 0, dimension, base_rows);
+		if (draw_tiles) tile_rows(lane, lanes);
+	});
 	// Permanent terrain scorch quads are the second ordered overlay loop:
 	// after every mission .til entry and before the DOT3/static-model alpha
 	// contribution. Fail closed if a declared plan cannot be composed.

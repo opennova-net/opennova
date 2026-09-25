@@ -118,6 +118,9 @@ struct TerrainStaticShadowRasterInput {
 	std::vector<TerrainStaticShadowRasterTriangle> triangles;
 	std::vector<TerrainStaticShadowAlphaTextureView> alpha_textures;
 	float receiver_depth = 0.5f;
+	// Threads the pixel loop may split its rows across (1 = the calling
+	// thread only). Every count produces the same bytes.
+	std::size_t threads = 1;
 };
 
 // Atomically mutates only page.alpha. Invalid page storage, non-finite input,

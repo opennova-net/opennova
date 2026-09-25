@@ -250,6 +250,8 @@ void TerrainTileCacheDevice::clear() {
 	frame_selected_ready_pages_ = 0;
 	frame_compose_jobs_ = 0;
 	frame_compose_us_ = 0;
+	frame_compose_page_us_ = 0;
+	frame_compose_shadow_plan_us_ = 0;
 	frame_uploads_ = 0;
 	frame_capacity_fallbacks_ = 0;
 	frame_shadow_alpha_changed_bytes_ = 0;
@@ -270,6 +272,8 @@ void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id, uint32_t p_tod_epo
 	frame_selected_ready_pages_ = 0;
 	frame_compose_jobs_ = 0;
 	frame_compose_us_ = 0;
+	frame_compose_page_us_ = 0;
+	frame_compose_shadow_plan_us_ = 0;
 	frame_uploads_ = 0;
 	frame_capacity_fallbacks_ = 0;
 	frame_shadow_alpha_changed_bytes_ = 0;
@@ -377,6 +381,8 @@ void TerrainTileCacheDevice::_upload_completed() {
 		if (!ready.has_value()) break;
 		opennova::terrain::TerrainTileCompositionWorker::Completion &completion = *ready;
 		frame_compose_us_ += completion.compose_us;
+		frame_compose_page_us_ += completion.page_us;
+		frame_compose_shadow_plan_us_ += completion.shadow_plan_us;
 		const opennova::TerrainTileCompositionJob &job = completion.job;
 		// Validate the claim before touching its Texture2DArray layer. The cache
 		// is render-thread-owned, so it cannot become stale between this check
@@ -652,13 +658,17 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 			static_cast<int64_t>(frame_compose_jobs_);
 	diagnostics["frame_compose_us"] =
 			static_cast<int64_t>(frame_compose_us_);
+	diagnostics["frame_compose_page_us"] =
+			static_cast<int64_t>(frame_compose_page_us_);
+	diagnostics["frame_compose_shadow_plan_us"] =
+			static_cast<int64_t>(frame_compose_shadow_plan_us_);
 	diagnostics["frame_uploads"] = static_cast<int64_t>(frame_uploads_);
 	diagnostics["pending_jobs"] = static_cast<int64_t>(
 			async_->pending_jobs());
 	diagnostics["active_jobs"] = static_cast<int64_t>(
 			async_->current_epoch_active_jobs());
 	diagnostics["worker_count"] = static_cast<int64_t>(
-			opennova::terrain::TerrainTileCompositionWorker::kWorkerCount);
+			opennova::terrain::TerrainTileCompositionWorker::worker_count());
 	diagnostics["frame_capacity_fallbacks"] =
 			static_cast<int64_t>(frame_capacity_fallbacks_);
 	diagnostics["frame_shadow_alpha_changed_bytes"] =
