@@ -11,7 +11,9 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 
+#include <array>
 #include <memory>
+#include <unordered_map>
 
 #include <runtime/environment/celestial_frame.h>
 #include <runtime/renderer/q3_frame.h>
@@ -79,6 +81,23 @@ public:
 	// The script read of the same seam: the node for "glare" or "glint"
 	// (null when the mission names no such model).
 	Node3D *get_overlay_body_node(const String &p_body) const;
+
+	// The water mirror's post-dim redraw (retail render_main_scene after the
+	// dim: render_celestial_bodies(0) @ 0x5c18fb, render_skybox_sun_glow(0, 0)
+	// @ 0x5c1904): the discs at their beauty submit value (their live
+	// materials), the glow at the no-occlusion value of the MIRROR camera's
+	// view dot (env::mirror_glare_upl) with each surface's SelfLumColor
+	// evaluated there. The bodies sit at `anchor` + direction * 64; the
+	// mirror places them at its own camera.
+	struct MirrorRedraw {
+		ObjectModel *sun = nullptr;
+		ObjectModel *moon = nullptr;
+		ObjectModel *glare = nullptr;
+		bool glare_drawn = false;
+		std::unordered_map<const MeshInstance3D *, std::array<float, 3>> glare_self_lum;
+		Vector3 anchor;
+	};
+	MirrorRedraw get_mirror_redraw(const Vector3 &p_mirror_forward);
 
 	// Which scene passes draw the sun/moon discs this frame: they ride the sky
 	// bracket (OcclusionFrame owns the gates; renderer/scene_pass_gates.h
@@ -186,6 +205,8 @@ private:
 	uint32_t environment_capture_layer_mask_ = 0;
 	bool sky_beauty_pass_drawn_ = true;
 	bool sky_mirror_pass_drawn_ = true;
+	// The camera position the last advance placed the bodies at.
+	Vector3 body_anchor_;
 	// Stamp the current sky pass gates onto the sun/moon materials.
 	void _apply_sky_pass_gates();
 	// The last advanced frame's sun-veil pair (env_celestial.h SunVeil).

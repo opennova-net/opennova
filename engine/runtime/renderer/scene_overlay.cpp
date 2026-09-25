@@ -146,7 +146,8 @@ void append_underwater_murk_overlay(const float rgb[3], uint8_t alpha_byte, floa
 
 void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, const float *uvs,
 		std::size_t vertex_count, const float self_lum_rgb[3], const float light_scale_rgb[3],
-		float fog_visibility, uint32_t texture, SceneOverlayFrame &out) {
+		float fog_visibility, uint32_t texture, SceneOverlayFrame &out,
+		SceneOverlayDepth depth) {
 	const std::size_t count = vertex_count - vertex_count % 3;
 	if (count == 0 || positions == nullptr || uvs == nullptr) {
 		return;
@@ -154,7 +155,7 @@ void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, cons
 	SceneOverlayBatch batch;
 	batch.slot = slot;
 	batch.shading = SceneOverlayShading::SelfLumAdditive;
-	batch.depth = SceneOverlayDepth::Always;
+	batch.depth = depth;
 	batch.geometry = SceneOverlayGeometry::World;
 	batch.texture = texture;
 	batch.first_vertex = vertex_index(out);
@@ -175,6 +176,31 @@ void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, cons
 		set_color(v, r, g, b, fog);
 		out.vertices.push_back(v);
 	}
+	out.batches.push_back(batch);
+}
+
+void append_mirror_dim_overlay(float factor, SceneOverlayFrame &out) {
+	SceneOverlayBatch batch;
+	batch.slot = SceneOverlaySlot::MirrorDim;
+	batch.shading = SceneOverlayShading::DimMultiply;
+	batch.depth = SceneOverlayDepth::Always;
+	batch.geometry = SceneOverlayGeometry::Screen;
+	batch.texture = kSceneOverlayNoTexture;
+	batch.first_vertex = vertex_index(out);
+	// The full target, one colour on all four corners [orig: render_main_scene
+	// @ 0x5c1882..0x5c1897, the strip's four diffuse stores].
+	static constexpr float kCorner[6][2] = {
+		{-1.0f, -1.0f}, {1.0f, -1.0f}, {-1.0f, 1.0f},
+		{1.0f, -1.0f}, {1.0f, 1.0f}, {-1.0f, 1.0f},
+	};
+	for (const auto &corner : kCorner) {
+		SceneOverlayVertex v;
+		v.position[0] = corner[0];
+		v.position[1] = corner[1];
+		set_color(v, factor, factor, factor, 1.0f);
+		out.vertices.push_back(v);
+	}
+	batch.vertex_count = 6;
 	out.batches.push_back(batch);
 }
 

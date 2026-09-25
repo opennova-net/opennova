@@ -34,6 +34,10 @@ enum class SceneOverlaySlot : uint8_t {
 	WaterGlint = 3,
 	UnderwaterMurk = 4,
 	SunGlare = 5,
+	// The water mirror's closing draws (kMirrorOverlayOrder).
+	MirrorDim = 6,
+	MirrorCelestialBodies = 7,
+	MirrorSunGlow = 8,
 };
 
 // The main scene's tail, in draw order. The scope's aperture view runs the
@@ -51,9 +55,19 @@ inline constexpr std::array<SceneOverlaySlot, 6> kSceneOverlayOrder = {
 // particle passes and its tracer pass [orig: Water_RenderReflectedWorldScene
 // @ 0x5c8510 — EffectWorld_RenderLightCoronas(1) @ 0x5c85fd]; the
 // precipitation drawer's one caller is the main scene core
-// [orig: render_weather_trail_particles <- @ 0x5c96a6].
-inline constexpr std::array<SceneOverlaySlot, 1> kMirrorOverlayOrder = {
+// [orig: render_weather_trail_particles <- @ 0x5c96a6]. render_main_scene
+// then closes the mirror target: at water detail >= 2 the fullscreen dim
+// (DESTCOLOR / ZERO under 0xFF404040 [orig: render_main_scene @ 0x5c1727
+// gate, @ 0x5c1856..0x5c189e]), and at FrameFX quality >= 3 the far depth
+// band around the sun/moon redraw and the glow [orig: render_main_scene
+// @ 0x5c18c6 FrameFX_QualityAtLeast3 test, @ 0x5c18f4 Render_SetViewportFarDepth,
+// @ 0x5c18fb render_celestial_bodies(0), @ 0x5c1904 render_skybox_sun_glow(0, 0)].
+// The locked profile runs both.
+inline constexpr std::array<SceneOverlaySlot, 4> kMirrorOverlayOrder = {
 	SceneOverlaySlot::LightCoronas,
+	SceneOverlaySlot::MirrorDim,
+	SceneOverlaySlot::MirrorCelestialBodies,
+	SceneOverlaySlot::MirrorSunGlow,
 };
 
 // The fixed-function combine a batch draws with.
@@ -70,11 +84,17 @@ enum class SceneOverlayShading : uint8_t {
 	SelfLumAdditive = 2,
 	// The untextured diffuse, SRCALPHA / INVSRCALPHA (the murk quad).
 	FlatBlend = 3,
+	// The untextured diffuse multiplied into the target, DESTCOLOR / ZERO
+	// (the mirror dim).
+	DimMultiply = 4,
 };
 
 enum class SceneOverlayDepth : uint8_t {
 	TestNoWrite = 0, // ZFUNC LESSEQUAL, z-write off
 	Always = 1,      // ZFUNC ALWAYS (submit flag 0x10, pass flag 0x200000)
+	// ZFUNC LESSEQUAL inside the viewport depth band
+	// [kQ3FarBandMinZ, kQ3FarBandMaxZ] (Render_SetViewportFarDepth), z-write off.
+	FarBand = 2,
 };
 
 enum class SceneOverlayGeometry : uint8_t {
@@ -153,17 +173,27 @@ void append_corona_overlay(const std::vector<LightCoronaQuad> &quads, uint32_t t
 void append_underwater_murk_overlay(const float rgb[3], uint8_t alpha_byte, float water_height,
 		SceneOverlayFrame &out);
 
-// One SELFLUM surface of the glare model (the glare or the water glint): a
-// world-space triangle list, sat(SelfLumColor x light scale) per channel as
-// its diffuse and the device fog visibility as its alpha, ZFUNC ALWAYS
-// (submit 0x110) [orig: render_skybox_sun_glow @ 0x5ad0f7; update_sun_glare
-// @ 0x5ad470]. The light scale is the unpacked modulator block the draw runs
-// under: Render_LightScaleR/G/B (byte / 64 each, Render_UnpackModulatorToLightScale
-// @ 0x58db30), the effect's ColorSrcGlobalGain [orig: apply_shader_parameters
-// @ 0x58e05d].
+// One SELFLUM surface of a sky body (the glare, the water glint, the mirror's
+// redrawn discs): a world-space triangle list, sat(SelfLumColor x light
+// scale) per channel as its diffuse and the device fog visibility as its
+// alpha. The main tail's glare and glint submit with 0x110, ZFUNC ALWAYS
+// [orig: render_skybox_sun_glow @ 0x5ad0f7; update_sun_glare @ 0x5ad470];
+// the mirror's redraws submit 0x100 inside the far band (`depth` FarBand)
+// [orig: render_skybox_sun_glow @ 0x5ad10c; render_celestial_bodies submits
+// 0x100 @ 0x5acc1c / @ 0x5accdd]. The light scale is the unpacked modulator
+// block the draw runs under: Render_LightScaleR/G/B (byte / 64 each,
+// Render_UnpackModulatorToLightScale @ 0x58db30), the effect's
+// ColorSrcGlobalGain [orig: apply_shader_parameters @ 0x58e05d].
 void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, const float *uvs,
 		std::size_t vertex_count, const float self_lum_rgb[3], const float light_scale_rgb[3],
-		float fog_visibility, uint32_t texture, SceneOverlayFrame &out);
+		float fog_visibility, uint32_t texture, SceneOverlayFrame &out,
+		SceneOverlayDepth depth = SceneOverlayDepth::Always);
+
+// The mirror's dim: one viewport quad whose flat diffuse (`factor` on every
+// channel, the 0xFF404040 vertex colour) multiplies the finished mirror
+// target, DESTCOLOR / ZERO, ZFUNC ALWAYS [orig: render_main_scene
+// @ 0x5c1856..0x5c189e].
+void append_mirror_dim_overlay(float factor, SceneOverlayFrame &out);
 
 // The light scale the glare draws under, every channel: the scene forces the
 // modulator block to 0xFF404040 (0x40 / 64 = 1.0) around the glow and

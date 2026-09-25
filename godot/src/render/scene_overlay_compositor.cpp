@@ -2,9 +2,12 @@
 #include "render/rd_uniforms.h"
 #include "util/string_convert.h"
 
+#include <runtime/renderer/q3_frame.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -56,7 +59,9 @@ static_assert(sizeof(SceneOverlayVertex) == 44,
 constexpr std::uint32_t kPushConstantBytes = 112;
 constexpr std::uint32_t kMinimumVertexCapacity = 4096 * kVertexStride;
 
-const char *kVertexShader = R"GLSL(#version 450
+// The far depth band's two constants (runtime/renderer/q3_frame.h
+// kQ3FarBandMinZ/MaxZ) splice into the vertex stage at compile.
+const char *kVertexShaderTemplate = R"GLSL(#version 450
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec2 a_uv;
 layout(location = 2) in vec4 a_color;
@@ -69,7 +74,7 @@ layout(push_constant, std430) uniform OverlayPush {
 	mat4 view_projection;
 	vec4 view_right;
 	vec4 view_up;
-	uvec4 mode; // x = shading, y = geometry
+	uvec4 mode; // x = shading, y = geometry, z = the far depth band
 } pc;
 
 void main() {
@@ -86,8 +91,38 @@ void main() {
 		world_position += pc.view_right.xyz * a_corner.x + pc.view_up.xyz * a_corner.y;
 	}
 	gl_Position = pc.view_projection * vec4(world_position, 1.0);
+	if (pc.mode.z == 1u && gl_Position.w > 0.0) {
+		// Render_SetViewportFarDepth's viewport MinZ/MaxZ band in reverse-Z
+		// clip depth: z' = (1 - MaxZ) + z * (MaxZ - MinZ).
+		float z_rev = gl_Position.z / gl_Position.w;
+		gl_Position.z = (@FAR_BAND_REV_MIN@ + z_rev * @FAR_BAND_REV_SPAN@) *
+				gl_Position.w;
+	}
 }
 )GLSL";
+
+std::string glsl_float(float p_value) {
+	char buffer[64];
+	std::snprintf(buffer, sizeof(buffer), "%.9g", static_cast<double>(p_value));
+	std::string text(buffer);
+	if (text.find_first_of(".eE") == std::string::npos)
+		text += ".0";
+	return text;
+}
+
+std::string vertex_shader_source() {
+	std::string source(kVertexShaderTemplate);
+	const auto splice = [&source](const char *p_token, const std::string &p_value) {
+		const std::string token(p_token);
+		for (std::size_t at = source.find(token); at != std::string::npos;
+				at = source.find(token, at + p_value.size()))
+			source.replace(at, token.size(), p_value);
+	};
+	splice("@FAR_BAND_REV_MIN@", glsl_float(1.0f - opennova::renderer::kQ3FarBandMaxZ));
+	splice("@FAR_BAND_REV_SPAN@", glsl_float(opennova::renderer::kQ3FarBandMaxZ -
+			opennova::renderer::kQ3FarBandMinZ));
+	return source;
+}
 
 const char *kFragmentShader = R"GLSL(#version 450
 layout(location = 0) in vec2 v_uv;
@@ -120,6 +155,9 @@ void main() {
 		// SELFLUM: tex x 2 x sat(SelfLumColor x gain), then the fog to black.
 		frag_color = vec4(clamp(texel.rgb * 2.0 * v_color.rgb, 0.0, 1.0) * v_color.a,
 				0.0);
+	} else if (shading == 4u) {
+		// The flat diffuse the DESTCOLOR / ZERO blend multiplies in.
+		frag_color = vec4(v_color.rgb, 1.0);
 	} else {
 		frag_color = v_color;
 	}
@@ -183,13 +221,20 @@ const std::vector<SceneOverlayModelSurfaces::Geometry> &SceneOverlayModelSurface
 
 int SceneOverlayModelSurfaces::append_instance(opennova::renderer::SceneOverlaySlot p_slot,
 		MeshInstance3D *p_instance, const float p_light_scale_rgb[3], float p_fog_visibility,
-		SceneOverlaySubmission &r_submission) {
+		SceneOverlaySubmission &r_submission, const AppendOptions &p_options) {
 	const Ref<Mesh> mesh = p_instance->get_mesh();
 	if (mesh.is_null()) {
 		return 0;
 	}
 	const std::vector<Geometry> &surfaces = geometry_for(mesh);
-	const Transform3D placement = p_instance->get_global_transform();
+	Transform3D placement = p_instance->get_global_transform();
+	placement.origin += p_options.offset;
+	const std::array<float, 3> *self_lum_override = nullptr;
+	if (p_options.self_lum != nullptr) {
+		const auto found = p_options.self_lum->find(p_instance);
+		if (found != p_options.self_lum->end())
+			self_lum_override = &found->second;
+	}
 	int appended = 0;
 	for (std::size_t surface = 0; surface < surfaces.size(); ++surface) {
 		const Geometry &geometry = surfaces[surface];
@@ -199,7 +244,10 @@ int SceneOverlayModelSurfaces::append_instance(opennova::renderer::SceneOverlayS
 		if (vertex_count == 0 || material.is_null()) {
 			continue;
 		}
-		const Vector3 self_lum = material->get_shader_parameter("u_rgb_mod");
+		const Vector3 self_lum = self_lum_override != nullptr ?
+				Vector3((*self_lum_override)[0], (*self_lum_override)[1],
+						(*self_lum_override)[2]) :
+				Vector3(material->get_shader_parameter("u_rgb_mod"));
 		const Ref<Texture2D> texture = material->get_shader_parameter("u_diffuse");
 		const float self_lum_rgb[3] = { static_cast<float>(self_lum.x),
 			static_cast<float>(self_lum.y), static_cast<float>(self_lum.z) };
@@ -213,7 +261,8 @@ int SceneOverlayModelSurfaces::append_instance(opennova::renderer::SceneOverlayS
 		}
 		opennova::renderer::append_self_lum_overlay(p_slot, placed_.data(),
 				geometry.uvs.data(), vertex_count, self_lum_rgb, p_light_scale_rgb,
-				p_fog_visibility, r_submission.texture_index(texture), r_submission.frame);
+				p_fog_visibility, r_submission.texture_index(texture), r_submission.frame,
+				p_options.depth);
 		++appended;
 	}
 	return appended;
@@ -221,18 +270,18 @@ int SceneOverlayModelSurfaces::append_instance(opennova::renderer::SceneOverlayS
 
 int SceneOverlayModelSurfaces::append(opennova::renderer::SceneOverlaySlot p_slot,
 		Node *p_model, const float p_light_scale_rgb[3], float p_fog_visibility,
-		SceneOverlaySubmission &r_submission) {
+		SceneOverlaySubmission &r_submission, const AppendOptions &p_options) {
 	if (p_model == nullptr) {
 		return 0;
 	}
 	int appended = 0;
 	if (MeshInstance3D *instance = Object::cast_to<MeshInstance3D>(p_model)) {
 		appended += append_instance(p_slot, instance, p_light_scale_rgb, p_fog_visibility,
-				r_submission);
+				r_submission, p_options);
 	}
 	for (int32_t i = 0; i < p_model->get_child_count(); ++i) {
 		appended += append(p_slot, p_model->get_child(i), p_light_scale_rgb, p_fog_visibility,
-				r_submission);
+				r_submission, p_options);
 	}
 	return appended;
 }
@@ -390,7 +439,8 @@ bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 	Ref<RDShaderSource> source;
 	source.instantiate();
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX, String::utf8(kVertexShader));
+	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
+			String::utf8(vertex_shader_source().c_str()));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
 			String::utf8(kFragmentShader));
 	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
@@ -560,12 +610,17 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 	// No overlay draw writes depth. LESSEQUAL on retail's forward depth is
 	// GREATER_OR_EQUAL on Godot's reversed depth; ALWAYS drops the test.
 	depth->set_enable_depth_write(false);
-	depth->set_enable_depth_test(p_batch.depth == SceneOverlayDepth::TestNoWrite);
+	depth->set_enable_depth_test(p_batch.depth != SceneOverlayDepth::Always);
 	depth->set_depth_compare_operator(RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
 	attachment.instantiate();
 	attachment->set_enable_blend(true);
-	if (additive(p_batch.shading)) {
+	if (p_batch.shading == SceneOverlayShading::DimMultiply) {
+		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_DST_COLOR);
+		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
+		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
+		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
+	} else if (additive(p_batch.shading)) {
 		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
 		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
 		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
@@ -688,7 +743,8 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 				continue;
 			write_u32(push_constants, 96, static_cast<std::uint32_t>(batch.shading));
 			write_u32(push_constants, 100, static_cast<std::uint32_t>(batch.geometry));
-			write_u32(push_constants, 104, 0u);
+			write_u32(push_constants, 104,
+					batch.depth == SceneOverlayDepth::FarBand ? 1u : 0u);
 			write_u32(push_constants, 108, 0u);
 			vertex_offsets[0] = static_cast<int64_t>(batch.first_vertex) * kVertexStride;
 			rd->draw_list_bind_render_pipeline(list, pipeline);

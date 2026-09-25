@@ -31,9 +31,14 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 	CHECK(kSceneOverlayOrder[3] == SceneOverlaySlot::WaterGlint);
 	CHECK(kSceneOverlayOrder[4] == SceneOverlaySlot::UnderwaterMurk);
 	CHECK(kSceneOverlayOrder[5] == SceneOverlaySlot::SunGlare);
-	// The mirror draws only the coronas (@ 0x5c85fd).
-	CHECK(kMirrorOverlayOrder.size() == 1);
+	// The mirror draws the coronas (@ 0x5c85fd), then render_main_scene's dim
+	// (@ 0x5c186c) and the far-band sun/moon and glow redraw (@ 0x5c18fb,
+	// @ 0x5c1904).
+	CHECK(kMirrorOverlayOrder.size() == 4);
 	CHECK(kMirrorOverlayOrder[0] == SceneOverlaySlot::LightCoronas);
+	CHECK(kMirrorOverlayOrder[1] == SceneOverlaySlot::MirrorDim);
+	CHECK(kMirrorOverlayOrder[2] == SceneOverlaySlot::MirrorCelestialBodies);
+	CHECK(kMirrorOverlayOrder[3] == SceneOverlaySlot::MirrorSunGlow);
 
 	// Submitted out of order, compiled in the witnessed order; within a slot
 	// the submission order holds.
@@ -153,10 +158,51 @@ void test_the_builders_carry_the_pass_states() {
 	CHECK(kSunGlareLightScale == 1.0f);
 }
 
+void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
+	// The dim: one viewport quad under 0xFF404040, DESTCOLOR / ZERO, ALWAYS
+	// [orig: render_main_scene @ 0x5c1856..0x5c189e].
+	SceneOverlayFrame frame;
+	const float tri[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+	const float uv[6] = {0, 0, 1, 0, 0, 1};
+	const float rgb[3] = {0.5f, 0.5f, 0.5f};
+	const float unit[3] = {1.0f, 1.0f, 1.0f};
+	append_self_lum_overlay(SceneOverlaySlot::MirrorSunGlow, tri, uv, 3, rgb, unit, 1.0f, 1,
+			frame, SceneOverlayDepth::FarBand);
+	append_self_lum_overlay(SceneOverlaySlot::MirrorCelestialBodies, tri, uv, 3, rgb, unit, 1.0f,
+			2, frame, SceneOverlayDepth::FarBand);
+	append_mirror_dim_overlay(64.0f / 255.0f, frame);
+	std::vector<LightCoronaQuad> quads(1);
+	quads[0].half_size = 0.5f;
+	append_corona_overlay(quads, 3, frame);
+	std::vector<SceneOverlayBatch> list;
+	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
+	CHECK(list.size() == 4);
+	if (list.size() == 4) {
+		CHECK(list[0].slot == SceneOverlaySlot::LightCoronas);
+		CHECK(list[1].slot == SceneOverlaySlot::MirrorDim);
+		CHECK(list[1].shading == SceneOverlayShading::DimMultiply);
+		CHECK(list[1].depth == SceneOverlayDepth::Always);
+		CHECK(list[1].geometry == SceneOverlayGeometry::Screen);
+		CHECK(list[1].vertex_count == 6);
+		const SceneOverlayVertex &dim = frame.vertices[list[1].first_vertex];
+		CHECK(dim.color[0] == 64.0f / 255.0f && dim.color[1] == 64.0f / 255.0f &&
+				dim.color[2] == 64.0f / 255.0f && dim.color[3] == 1.0f);
+		CHECK(list[2].slot == SceneOverlaySlot::MirrorCelestialBodies);
+		CHECK(list[2].depth == SceneOverlayDepth::FarBand);
+		CHECK(list[2].shading == SceneOverlayShading::SelfLumAdditive);
+		CHECK(list[3].slot == SceneOverlaySlot::MirrorSunGlow);
+		CHECK(list[3].depth == SceneOverlayDepth::FarBand);
+	}
+	// The main scene never draws the mirror's closing slots.
+	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
+	CHECK(list.size() == 1);
+}
+
 } // namespace
 
 int main() {
 	test_the_main_scene_order_and_the_mirror_subset();
+	test_the_mirror_closes_with_the_dim_and_the_far_band_redraw();
 	test_the_murk_gate_includes_the_waterline();
 	test_the_builders_carry_the_pass_states();
 	if (failures != 0) {

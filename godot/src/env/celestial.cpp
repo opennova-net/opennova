@@ -417,6 +417,7 @@ void Celestial::advance_frame(double p_delta) {
 	Camera3D *cam = _resolve_camera();
 	const Vector3 cam_pos =
 			cam != nullptr ? cam->get_global_position() : Vector3();
+	body_anchor_ = cam_pos;
 
 	// The GODOT-world sun direction and view forward (util/axes.h swap — the
 	// 2026-08-20 correction: the earlier identity mapping placed every body
@@ -600,6 +601,45 @@ Celestial::OverlayBodies Celestial::get_overlay_bodies() const {
 	OverlayBodies out;
 	out.glare = row("glare");
 	out.glint = row("glint");
+	return out;
+}
+
+Celestial::MirrorRedraw Celestial::get_mirror_redraw(const Vector3 &p_mirror_forward) {
+	MirrorRedraw out;
+	out.anchor = body_anchor_;
+	if (Body *sun = bodies_.getptr("sun")) {
+		out.sun = sun->model;
+	}
+	if (Body *moon = bodies_.getptr("moon")) {
+		out.moon = moon->model;
+	}
+	Body *glare = bodies_.getptr("glare");
+	MissionEnvironment *env = _env_node();
+	if (glare == nullptr || env == nullptr || !env->is_loaded()) {
+		return out;
+	}
+	const opennova::env::EnvironmentState &state = env->state();
+	const Vector3 sun_dir = render_float_to_godot(state.sun_direction());
+	const int view_dot_fixed = static_cast<int>(
+			p_mirror_forward.normalized().dot(sun_dir) * 65536.0f);
+	const int32_t upl = opennova::env::mirror_glare_upl(state, view_dot_fixed);
+	const Ref<ObjectData> data = glare->model->get_object_data();
+	if (upl <= 0 || data.is_null()) {
+		return out;
+	}
+	out.glare = glare->model;
+	out.glare_drawn = true;
+	opennova::renderer::ControlRegisterValues registers{};
+	registers[static_cast<size_t>(opennova::env::kCelestialUplRegister)] = upl;
+	for (int i = 0; i < glare->meshes.size(); ++i) {
+		opennova::renderer::MaterialRuntime runtime;
+		if (glare->material_indices[i] < 0 ||
+				!data->eval_material_runtime_native(glare->material_indices[i], 0,
+						registers, runtime)) {
+			continue;
+		}
+		out.glare_self_lum[glare->meshes[i]] = { runtime.rgb_r, runtime.rgb_g, runtime.rgb_b };
+	}
 	return out;
 }
 

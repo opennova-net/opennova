@@ -2,9 +2,6 @@
 #include "render/frame_fx.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
-#include <godot_cpp/classes/canvas_item_material.hpp>
-#include <godot_cpp/classes/canvas_layer.hpp>
-#include <godot_cpp/classes/color_rect.hpp>
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
@@ -534,27 +531,10 @@ void Water::build() {
 		reflection_camera_->set_cull_mask(REFLECTION_CULL_MASK);
 		reflection_viewport_->add_child(reflection_camera_);
 		reflection_camera_->make_current();
-		// The witnessed post-scene dim: retail multiplies the finished mirror
-		// RTT by 64/255 before the water shader ever samples it. This
-		// viewport's canvas pass composites over its 3D scene, so a
-		// full-target multiply ColorRect is the same one-quad structural
-		// port (constant + witness map: runtime/environment/water_mirror.h
-		// kReflectionDimFactor; celestial-after-dim residual noted there).
-		CanvasLayer *dim_layer = memnew(CanvasLayer);
-		dim_layer->set_name("ReflectionDimLayer");
-		reflection_viewport_->add_child(dim_layer);
-		ColorRect *dim_rect = memnew(ColorRect);
-		dim_rect->set_name("ReflectionDim");
-		Ref<CanvasItemMaterial> dim_material;
-		dim_material.instantiate();
-		dim_material->set_blend_mode(CanvasItemMaterial::BLEND_MODE_MUL);
-		dim_rect->set_material(dim_material);
-		const float dim = opennova::env::kReflectionDimFactor;
-		dim_rect->set_color(Color(dim, dim, dim, 1.0f));
-		dim_rect->set_size(Vector2(
-				static_cast<float>(opennova::env::kReflectionRttSize),
-				static_cast<float>(opennova::env::kReflectionRttSize)));
-		dim_layer->add_child(dim_rect);
+		// The witnessed post-scene dim and the sun/moon/glow redraw after it
+		// close the mirror target in its overlay pass, after the mirror's
+		// particles and coronas (runtime/renderer/scene_overlay.h
+		// kMirrorOverlayOrder; GameWorld's scene_overlay leg).
 	}
 	reflection_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
 	// Hold the RTT in a named Ref: passing the get_texture() temporary
@@ -823,11 +803,6 @@ void Water::_update_reflection_camera(Camera3D *p_cam) {
 	const Vector2i rtt_size(view.rtt.width, view.rtt.height);
 	if (reflection_viewport_->get_size() != rtt_size) {
 		reflection_viewport_->set_size(rtt_size);
-		if (ColorRect *dim = Object::cast_to<ColorRect>(
-					reflection_viewport_->get_node_or_null(
-							NodePath("ReflectionDimLayer/ReflectionDim")))) {
-			dim->set_size(Vector2(rtt_size));
-		}
 	}
 	// These offsets are independent of the projection mode and are otherwise
 	// lost when the reflection camera is rebuilt from the source transform.

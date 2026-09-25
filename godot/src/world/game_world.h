@@ -690,6 +690,7 @@ private:
 	// the glare/glint model surfaces the tail draws (geometry read once).
 	uint64_t scene_overlay_frame_id_ = 0;
 	SceneOverlayModelSurfaces scene_overlay_bodies_;
+	void append_water_mirror_overlays(SceneOverlaySubmission &r_submission);
 	bool clear_above_water_ = true;
 	bool clear_nvg_scene_ = false;
 	// The render-occlusion frame (OcclusionFrame): the blink letter gates, the

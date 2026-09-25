@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <godot_cpp/classes/compositor_effect.hpp>
@@ -13,6 +15,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/rid.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/renderer/scene_overlay.h>
 
@@ -42,11 +45,24 @@ struct SceneOverlaySubmission {
 // texture (u_diffuse) come from the surface's live material.
 class SceneOverlayModelSurfaces {
 public:
+	// How one model's surfaces enter the tail: the world offset every placed
+	// vertex takes (a sky body placed at the main camera, redrawn at another
+	// view's camera), the depth state, and per-instance SelfLumColor
+	// overrides (a redraw at another submit value); an instance without one
+	// takes its material's u_rgb_mod.
+	struct AppendOptions {
+		Vector3 offset;
+		opennova::renderer::SceneOverlayDepth depth =
+				opennova::renderer::SceneOverlayDepth::Always;
+		const std::unordered_map<const MeshInstance3D *, std::array<float, 3>>
+				*self_lum = nullptr;
+	};
 	// Append every mesh surface under `p_model` as one SELFLUM batch of
 	// `p_slot`; returns the batches appended.
 	int append(opennova::renderer::SceneOverlaySlot p_slot, Node *p_model,
 			const float p_light_scale_rgb[3], float p_fog_visibility,
-			SceneOverlaySubmission &r_submission);
+			SceneOverlaySubmission &r_submission,
+			const AppendOptions &p_options = AppendOptions());
 	// Take the model's meshes out of every camera (layer mask 0) so only the
 	// stage draws them; re-applied every frame because a model rebuild
 	// re-stamps its presentation layers.
@@ -61,7 +77,8 @@ private:
 	const std::vector<Geometry> &geometry_for(const Ref<Mesh> &p_mesh);
 	int append_instance(opennova::renderer::SceneOverlaySlot p_slot,
 			MeshInstance3D *p_instance, const float p_light_scale_rgb[3],
-			float p_fog_visibility, SceneOverlaySubmission &r_submission);
+			float p_fog_visibility, SceneOverlaySubmission &r_submission,
+			const AppendOptions &p_options);
 
 	std::map<std::uint64_t, std::vector<Geometry>> geometry_;
 	std::vector<float> placed_;
@@ -80,7 +97,7 @@ class SceneOverlayCompositorEffect : public CompositorEffect {
 public:
 	enum ViewKind {
 		VIEW_SCENE = 0,  // the main view and the scope aperture: the full tail
-		VIEW_MIRROR = 1, // the water mirror: the coronas only
+		VIEW_MIRROR = 1, // the water mirror: the coronas, the dim and the sky redraw
 	};
 
 	SceneOverlayCompositorEffect();

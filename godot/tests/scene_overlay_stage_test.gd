@@ -14,6 +14,9 @@ const STAGE_TEST_ROOT := "scene_overlay_stage_test"
 const SLOT_LIGHT_CORONAS := 2
 const SLOT_UNDERWATER_MURK := 4
 const SLOT_SUN_GLARE := 5
+const SLOT_MIRROR_DIM := 6
+const SLOT_MIRROR_CELESTIAL_BODIES := 7
+const SLOT_MIRROR_SUN_GLOW := 8
 # A stock-style sky body: an FF_ST_AD_LUM surface whose RGB generator style
 # 113 reads CTRL UPL_INTENSITY (the mglare authoring), staged under the name
 # the fixture environment's glare_3di line carries.
@@ -131,6 +134,68 @@ func test_the_murk_rides_the_overlay_pass_of_the_eye_below_the_water() -> void:
 # view's overlay pass after particle pass B, and the mirror's overlay pass
 # admits them too [orig: EffectWorld_RenderLightCoronas(1) @ 0x5c96ad and
 # @ 0x5c85fd].
+func _mirror_overlay_report(world: GameWorld) -> Dictionary:
+	var renderer := world.get_effect_world().get_node("ParticleRenderer") as ParticleRenderer
+	return renderer.get_debug_draw_list_report().get(
+			"reflection_overlay_backend", {}) as Dictionary
+
+
+# The water mirror closes its target in its own overlay pass: the dim over
+# the finished mirror after its coronas, then the sun/moon discs and the glow
+# redrawn at the mirror camera inside the far depth band [orig:
+# render_main_scene @ 0x5c186c (dim), @ 0x5c18fb (render_celestial_bodies(0)),
+# @ 0x5c1904 (render_skybox_sun_glow(0, 0))]. The glow's no-occlusion alpha
+# follows the MIRROR camera's view of the sun.
+func test_the_mirror_closes_with_the_dim_and_the_sky_redraw() -> void:
+	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_mirror", true)
+	_staged_dirs.append(root_dir)
+	for body in ["mglare.3di", "msun.3di"]:
+		assert_eq(DirAccess.copy_absolute(ProjectSettings.globalize_path(GLARE_FIXTURE),
+				root_dir.path_join(body)), OK)
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
+	var camera := Camera3D.new()
+	camera.position = Vector3(16, 300, -16)
+	world.add_child(camera)
+	camera.make_current()
+	var env := world.get_environment_node() as MissionEnvironment
+	var water := world.get_node("Water") as Water
+	water.set_mission_water_height_override(10.0)
+	var sun_dir: Vector3 = env.get_sun_direction()
+	# Look at the sun's image in the water: the mirrored eye then faces the sun.
+	var toward_image := Vector3(sun_dir.x, -absf(sun_dir.y), sun_dir.z).normalized()
+	var up := Vector3.RIGHT if absf(toward_image.y) > 0.9 else Vector3.UP
+	camera.look_at(camera.global_position + toward_image, up)
+	await get_tree().process_frame
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	var report := _mirror_overlay_report(world)
+	var submitted: Array = report.get("submitted_slots", []) as Array
+	assert_eq(String(report.get("view_kind", "")), "mirror")
+	assert_true(submitted.has(SLOT_MIRROR_DIM), "the mirror's dim reaches its overlay pass")
+	assert_true(submitted.has(SLOT_MIRROR_CELESTIAL_BODIES),
+			"the sun disc is redrawn after the dim")
+	assert_true(submitted.has(SLOT_MIRROR_SUN_GLOW),
+			"the mirrored eye faces the sun: the glow is redrawn")
+	var main_report := _overlay_report(world)
+	assert_false((main_report.get("drawn_slots", []) as Array).has(SLOT_MIRROR_DIM),
+			"the scene view never draws the mirror's slots")
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	report = _mirror_overlay_report(world)
+	var drawn: Array = report.get("drawn_slots", []) as Array
+	assert_true(drawn.has(SLOT_MIRROR_DIM), "the mirror draws its dim")
+	assert_true(drawn.has(SLOT_MIRROR_CELESTIAL_BODIES), "and the far-band disc redraw")
+	assert_true(drawn.has(SLOT_MIRROR_SUN_GLOW), "and the far-band glow")
+	assert_true(drawn.find(SLOT_MIRROR_DIM) < drawn.find(SLOT_MIRROR_SUN_GLOW),
+			"the glow follows the dim")
+
+
 func test_a_live_light_corona_draws_in_the_overlay_pass() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_corona", true,
 			{"ammo.def": GLOW_AMMO_DEF})

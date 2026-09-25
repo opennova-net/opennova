@@ -171,4 +171,15 @@ inline GlareFrame build_glare_frame(const EnvironmentState &env,
 	return frame;
 }
 
+// The water mirror's post-dim glow, render_skybox_sun_glow(0, 0) from
+// render_main_scene [orig: render_main_scene @ 0x5c1904]: no occlusion test,
+// so the fog-based brightness of the bloom pass's call at the MIRROR view's
+// dot, the same quarter and fold; a non-positive value submits nothing
+// [orig: render_skybox_sun_glow @ 0x5ad0b0].
+inline int32_t mirror_glare_upl(const EnvironmentState &env, int mirror_view_dot_fixed) {
+	return glare_q3_alpha_fixed(mirror_view_dot_fixed, env.fog_level(),
+			io::float_to_fp16_16(env.overcast_blend()),
+			io::float_to_fp16_16(env.sun_dim_pct()), true);
+}
+
 } // namespace opennova::env

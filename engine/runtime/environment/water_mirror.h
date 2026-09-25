@@ -108,11 +108,11 @@ inline ReflectionRttSize reflection_rtt_size(float source_width, float source_he
 // D3DBLEND_ZERO), i.e. out = dst * 64/255, then SRCALPHA/INVSRCALPHA restored
 // [orig: render_main_scene @ 0x5c1727 detail gate; blend states
 // @ 0x5c1856..0x5c186a; quad color 0xFF404040 + TRIANGLESTRIP draw
-// @ 0x5c186c..0x5c189e; restore @ 0x5c18a3..0x5c18bf]. The celestial bodies
-// and the sun glow render AFTER the dim [orig: @ 0x5c18fb/0x5c1904], so
-// retail's mirrored sun/moon/glare stay bright; the reimpl's celestials live
-// in the shared 3D world and dim with the scene — a TRACKED residual on the
-// env #37 row.
+// @ 0x5c186c..0x5c189e; restore @ 0x5c18a3..0x5c18bf]. The sun/moon discs
+// and the sun glow are redrawn AFTER the dim, inside the far depth band
+// [orig: render_main_scene @ 0x5c18fb / @ 0x5c1904], so retail's mirrored
+// bodies over the sky stay bright. Both close the mirror's overlay pass
+// (runtime/renderer/scene_overlay.h kMirrorOverlayOrder).
 inline constexpr float kReflectionDimFactor = 64.0f / 255.0f;
 
 enum class MirrorProjection {
