@@ -39,7 +39,10 @@ cmake --build "$root/build" --config Release -j "$jobs"
 echo "Running tests..."
 # The JUnit report is what scripts/ci/retail_gates_ran.py reads to prove the
 # asset-gated tests ran (rather than skipped) once the reference data is mounted.
+# ctest keeps only the first 1 KiB of a passing test's output by default, which
+# would hide a SKIP-LEG line printed late by a mixed test; keep it all.
 ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" \
+  --test-output-size-passed 1048576 --test-output-size-failed 1048576 \
   --output-junit "$root/build/Testing/ctest.xml"
 
 if [[ "$build_godot" == "1" ]]; then
