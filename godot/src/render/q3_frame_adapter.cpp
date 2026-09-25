@@ -1101,9 +1101,10 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 						frame->camera_far};
 			} else {
 				// The disc/glow SELFLUM push: the producer's bloom-pass
-				// SelfLumColor x min(gain, 1) x 2 (the NormalCopy formula),
-				// the material's fog policy (additive folds toward black,
-				// otherwise the regular fog colour), no alpha test or detail.
+				// SelfLumColor x gain, saturated by the lighting stage, x 2 (the
+				// NormalCopy formula, q3_celestial_emissive), the material's
+				// fog policy (additive folds toward black, otherwise the regular
+				// fog colour), no alpha test or detail.
 				push.params[1] = fog_flags;
 				if (draw.celestial.blend != ObjectBlendMode::Additive)
 					push.params[1] += 32.0f;
@@ -1111,11 +1112,9 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 						kQ3NoMipCeiling);
 				push.light_local_gain[3] = std::max(1.0e-6f,
 						std::cbrt(std::abs(model.basis.determinant())));
-				push.draw_color = {
-					draw.celestial.self_lum.x * std::min(light_gain.x, 1.0f) * 2.0f,
-					draw.celestial.self_lum.y * std::min(light_gain.y, 1.0f) * 2.0f,
-					draw.celestial.self_lum.z * std::min(light_gain.z, 1.0f) * 2.0f,
-					fog_end};
+				const std::array<float, 3> self_lum = q3_celestial_emissive(
+						draw.celestial, {light_gain.x, light_gain.y, light_gain.z});
+				push.draw_color = {self_lum[0], self_lum[1], self_lum[2], fog_end};
 				push.camera_local[3] = fog_start;
 				push.light_local_gain[0] = frame->fog_color.x;
 				push.light_local_gain[1] = frame->fog_color.y;

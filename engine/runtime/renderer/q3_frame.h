@@ -279,6 +279,16 @@ struct Q3CelestialMaterialParameters {
 	float diffuse_max_lod = kQ3NoMipCeiling;
 };
 
+// The disc/glow bloom copy's colour: the GLOW slot is the SELFLUM NORMAL
+// block, so it takes the NormalCopy emissive, sat(SelfLumColor x gain) x 2
+// [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f; apply_shader_parameters
+// @ 0x58E050..0x58E06A (ColorSrcGlobalGain)]. A gain above 1 lifts the
+// body's colour; the bodies' low bloom alphas never reach the clamp.
+inline std::array<float, 3> q3_celestial_emissive(const Q3CelestialMaterialParameters &p,
+		const std::array<float, 3> &gain) {
+	return q3_emissive_modulate2x({p.self_lum.x, p.self_lum.y, p.self_lum.z, 1.0f}, gain);
+}
+
 // One producer row. Input order is retail submission order. Ranges address
 // Q3FrameSnapshot's flat arrays and are copied/remapped into the draw list.
 struct Q3SubmissionSnapshot {

@@ -358,6 +358,16 @@ void check_emissive_copies_saturate_colour_times_gain() {
 	CHECK(std::fabs(dim[0] - 0.5f) < 1.0e-6f);
 	CHECK(std::fabs(dim[1] - 1.0f) < 1.0e-6f);
 	CHECK(dim[2] == 0.0f);
+	// The disc/glow bloom copies take the same emissive: at the 06:30 03TR
+	// gain of 19/16 the glare's grey SelfLumColor is lifted, not clipped to
+	// the gain-free colour (the earlier SelfLum x min(gain, 1) x 2).
+	Q3CelestialMaterialParameters glare;
+	glare.self_lum = {0.2f, 0.24f, 0.9f};
+	const std::array<float, 3> glow =
+			q3_celestial_emissive(glare, {1.1875f, 1.1875f, 1.1875f});
+	CHECK(std::fabs(glow[0] - 0.2f * 1.1875f * 2.0f) < 1.0e-6f);
+	CHECK(std::fabs(glow[1] - 0.24f * 1.1875f * 2.0f) < 1.0e-6f);
+	CHECK(std::fabs(glow[2] - 2.0f) < 1.0e-6f);
 }
 
 // The bloom pass's disc and glow keep a fragment where retail's LESSEQUAL
