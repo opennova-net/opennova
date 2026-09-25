@@ -17,14 +17,16 @@
 //   evt    events            per event f32 vx,vy,vz,bottom,top (+ i32 trigger when version 1)
 //   bone   bone table        bone_count x 100: name[32], 3 pad + index byte, num_children,
 //                            first_child_addr, parent_addr, length, position[3], rotation[9]
-//   trn    translations      when flags & 2: bone_count x frame_count x f32 x,y,z, frame-major
+//   trn    translations      when flags & 2: (frame_count + 2) x bone_count x f32 x,y,z,
+//                            frame-major: rows 0..frame_count, then a pad row
+//                            repeating row frame_count (bad_write.cpp)
 //
 // Header words the reader never names carry the values every retail clip ships
 // ([8] 0, [9] 0, [10] 8, [14] 1, [17] 1, [18] 0, [19] 0); a grill of the loader
 // is what would type them on BadFile.
 //
-// Conventions the corpus pins: channels and events carry frame_count + 1
-// entries (the header counts intervals); child/parent are absolute byte
+// Conventions the corpus pins: channels, events and translation rows carry
+// frame_count + 1 entries (the header counts intervals); child/parent are absolute byte
 // addresses recomputed from parent_index; a root bone's parent address and a
 // leaf's child address are 0 (the reader's "no parent"); the bone's +35 byte
 // is its own index.
@@ -39,7 +41,7 @@ namespace opennova::bad {
 
 // Serialize `bf` into `out` (replaced). Returns 0, or -1 when the file cannot be
 // represented: a null input, a channel or bone table shorter than bone_count,
-// or a translation block (flags & 2) shorter than bone_count x frame_count.
+// or a translation block (flags & 2) shorter than bone_count x (frame_count + 1).
 int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out);
 
 // Serialize to a path. Returns 0 on success, -1 on a representation or I/O error.

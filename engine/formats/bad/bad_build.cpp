@@ -271,10 +271,10 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
                 return fail(error, "bone " + std::to_string(i) + " holds a key that is not a unit "
                                                                  "quaternion");
         }
-        if (translated && bone.translations.size() != clip.frame_count)
+        if (translated && bone.translations.size() != keys)
             return fail(error, "bone " + std::to_string(i) + " holds " +
                                        std::to_string(bone.translations.size()) +
-                                       " translations, not " + std::to_string(clip.frame_count));
+                                       " translations, not " + std::to_string(keys));
     }
     if (!clip.events.empty() && clip.events.size() != keys)
         return fail(error, "a clip holds " + std::to_string(clip.events.size()) + " events, not " +
@@ -370,8 +370,8 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
     }
 
     if (translated) {
-        out.translations.resize(bones * clip.frame_count);
-        for (size_t f = 0; f < clip.frame_count; ++f) {
+        out.translations.resize(bones * keys);
+        for (size_t f = 0; f < keys; ++f) {
             for (size_t i = 0; i < bones; ++i) {
                 const BadBuildVec3 t = bad_clip_from_mission(clip.bones[i].translations[f]);
                 std::array<float, 3> &row = out.translations[f * bones + i];

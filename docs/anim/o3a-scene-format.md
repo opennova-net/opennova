@@ -27,8 +27,11 @@ it was authored on and to any rig that matches it.
   The seam converts to the clip's own frame (x side, y up, z forward), which is
   the model frame mirrored on x — the frame the runtime's skeleton is built in.
 - A clip's `frames` is its INTERVAL count: every key list holds one more, and
-  the event list likewise. The translation block alone holds exactly `frames`
-  rows, because that is what the loader reads; its last row holds past the end.
+  the event list and the translation rows likewise. The runtime reads
+  translation row `trunc(frames * t)` and lerps it with the next one, so the
+  last interval of every cycle reaches row `frames`
+  [orig: `sub_4102D0 @ 0x4102d0` via `BoneAnim_TransformBones @ 0x410360`];
+  the pad row retail's files carry past it is the writer's, never authored.
 - A key is the bone's rotation composed against the bind, and the bind is the
   bone's own FIRST key: the runtime reads `bind^-1 * key`
   [orig: `AnimChannel_ComputeBoneMatrices @ 0x410da0`], so a clip's first key is
@@ -48,7 +51,7 @@ it was authored on and to any rig that matches it.
 | `capsule` | bottom top | one capsule pair for every event, the shape retail's viewmodel clips carry (0.0/0.6 or 1.07/1.07 across the JO `_1st` sets) |
 | `bone` | parent x y z length name | opens a bone: its parent (a lower index, -1 for the root), its pivot (the paired model part's, absolute), its length and its name. The name is the clip's own: a model's part table carries none |
 | `k` | qx qy qz qw [duration] | a key of the open bone, `frames + 1` of them. A `duration` (in frames) states how long the key holds; a bone that gives durations may key any number of times, which is how `DT1RST`, `stgr_RST`, `M60_1i` and the sparsely keyed `DVFLEE1E` are shaped |
-| `tr` | x y z | a frame's displacement of the open bone, `frames` of them, under `flags & 2` |
+| `tr` | x y z | a frame's displacement of the open bone, `frames + 1` of them (rows 0 to `frames`), under `flags & 2` |
 | `bonepos` | x y z | the open bone's stored `position[3]`, verbatim and in the clip's own frame. `build` derives that field from the pivots, and the field is dead at runtime; `scene` writes this only where the derivation cannot reproduce the bytes (retail's exporter left junk in 6720 of 13517 bones) |
 | `event` | vx vy vz trigger [bottom top] | a frame's event, `frames + 1` of them: the root's step for that frame (the body animates in place and the engine moves the entity by these), the event bit word (`opennova-3di catalog` prints the bits), and the capsule pair when the clip carries its own |
 
@@ -63,6 +66,8 @@ the values the text carries, so `build(scene(x))` stays exact:
   `position[i] = rotation[parent(i)] . clip(pivot[i] - pivot[parent(i)])`,
   unless a `bonepos` overrides it;
 - `num_children`, the child and parent addresses, and the bone's own index byte;
+- the translation block's pad row after row `frames` (a repeat of it: retail's
+  pad holds exporter memory that no read weights);
 - the header words no field names (0, 0, 8, 1, 1, 0, 0 in every retail clip);
 - an event's capsule pair, when neither the event nor a `capsule` record gives
   one: the lowest and highest bone origin about bone 0 over the clip's composed

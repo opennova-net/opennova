@@ -251,6 +251,38 @@ int main() {
                                  oclip.frames[1][0].world_rotation));
     }
 
+    // --- translation rows: frame f reads row f, and the final frame reads row
+    // frame_count. The original lerps row trunc(frame_count * t) with the next
+    // row [orig: sub_4102D0 @0x4102d0 via BoneAnim_TransformBones @0x410360],
+    // so the block carries frame_count + 1 rows like the keys; holding row
+    // frame_count - 1 at the final frame drops the clip's last step.
+    {
+        BadBone tbone[1] = {};
+        tbone[0].parent_index = -1;
+        tbone[0].rotation[0] = tbone[0].rotation[4] = tbone[0].rotation[8] = 1.0f;
+        uint16_t tfl[3] = {1, 1, 1};
+        BadQuaternion trot[3] = {{0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}};
+        BadChannel tchan[1] = {};
+        tchan[0].frame_count = 3; tchan[0].frame_lengths = tfl; tchan[0].rotations = trot;
+        float rows[3][3] = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}};
+        BadFile tfile = {};
+        tfile.fps = 30; tfile.frame_count = 2; tfile.flags = 2;
+        tfile.bones = tbone; tfile.num_bones = 1;
+        tfile.channels = tchan; tfile.num_channels = 1;
+        tfile.translations = rows; tfile.num_translations = 3;
+
+        Clip tclip = sample_clip(tfile);
+        TEST_EXPECT(tclip.frames.size() == 3);
+        TEST_EXPECT(approx(tclip.frames[0][0].world_position.y, 0.0f));
+        TEST_EXPECT(approx(tclip.frames[1][0].world_position.y, 0.5f));
+        TEST_EXPECT(approx(tclip.frames[2][0].world_position.y, 1.0f));
+
+        // A file that holds fewer rows than its frame count holds the last one.
+        tfile.num_translations = 2;
+        Clip short_clip = sample_clip(tfile);
+        TEST_EXPECT(approx(short_clip.frames[2][0].world_position.y, 0.5f));
+    }
+
     // --- model_bind: the witnessed faithful channel semantics (the FP viewmodel fix). ---
     // Channels are re-based against the .bad's own bind 3x3 (a delta from the bind), rest
     // rotations become identity (the original's skin bind-inverse is the pure translation

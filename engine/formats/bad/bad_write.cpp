@@ -28,25 +28,13 @@ constexpr uint32_t kHeaderWord17 = 1;
 constexpr uint32_t kHeaderWord18 = 0;
 constexpr uint32_t kHeaderWord19 = 0;
 
-void put_u32(std::vector<uint8_t> &buf, uint32_t v) {
-    uint8_t bytes[4];
-    opennova::io::write_u32_le(bytes, v);
-    buf.insert(buf.end(), bytes, bytes + 4);
-}
+void put_u32(std::vector<uint8_t> &buf, uint32_t v) { opennova::io::append_u32_le(buf, v); }
 
-void put_s32(std::vector<uint8_t> &buf, int32_t v) { put_u32(buf, static_cast<uint32_t>(v)); }
+void put_s32(std::vector<uint8_t> &buf, int32_t v) { opennova::io::append_i32_le(buf, v); }
 
-void put_u16(std::vector<uint8_t> &buf, uint16_t v) {
-    uint8_t bytes[2];
-    opennova::io::write_u16_le(bytes, v);
-    buf.insert(buf.end(), bytes, bytes + 2);
-}
+void put_u16(std::vector<uint8_t> &buf, uint16_t v) { opennova::io::append_u16_le(buf, v); }
 
-void put_f32(std::vector<uint8_t> &buf, float v) {
-    uint32_t bits;
-    std::memcpy(&bits, &v, sizeof(bits));
-    put_u32(buf, bits);
-}
+void put_f32(std::vector<uint8_t> &buf, float v) { opennova::io::append_f32_le(buf, v); }
 
 void set_u32(std::vector<uint8_t> &buf, size_t off, uint32_t v) {
     opennova::io::write_u32_le(buf.data() + off, v);
@@ -65,8 +53,9 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
     if (bone_count > 0 && (bf->bones == nullptr || bf->num_bones < bone_count)) return -1;
     if (bone_count > 0 && (bf->channels == nullptr || bf->num_channels < bone_count)) return -1;
     const bool translated = (bf->flags & 2u) != 0;
-    const size_t translation_rows = static_cast<size_t>(bone_count) * bf->frame_count;
-    if (translated && translation_rows > 0 &&
+    // Rows 0..frame_count: every row the runtime's read gives weight (bad.cpp).
+    const size_t translation_rows = static_cast<size_t>(bone_count) * (static_cast<size_t>(bf->frame_count) + 1);
+    if (translated && bone_count > 0 &&
         (bf->translations == nullptr || bf->num_translations < translation_rows)) {
         return -1;
     }
@@ -149,12 +138,20 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
         buf.resize(start + kBoneStride, 0);
     }
 
-    // Translations follow the bone table (where the reader looks), frame-major.
+    // Translations follow the bone table (where the reader looks), frame-major:
+    // rows 0..frame_count, then one pad row. Retail's exporter wrote a row per
+    // key and one more (200 of the 202 translated clips key every frame and hold
+    // rows 0..frame_count + 1), and that last row holds exporter memory that
+    // matches no row of the clip; the one read past row frame_count is a
+    // one-frame clip at t == 0, which takes row 1 and weights row 2 by zero
+    // [orig: sub_4102D0 @0x4102f7..0x410304, a frame_count * t of 0 read as
+    // 1.0]. The pad repeats row frame_count, so that read stays finite.
     if (translated) {
-        for (size_t row = 0; row < translation_rows; ++row) {
-            put_f32(buf, bf->translations[row][0]);
-            put_f32(buf, bf->translations[row][1]);
-            put_f32(buf, bf->translations[row][2]);
+        for (size_t row = 0; row < translation_rows + bone_count; ++row) {
+            const size_t from = row < translation_rows ? row : row - bone_count;
+            put_f32(buf, bf->translations[from][0]);
+            put_f32(buf, bf->translations[from][1]);
+            put_f32(buf, bf->translations[from][2]);
         }
     }
 

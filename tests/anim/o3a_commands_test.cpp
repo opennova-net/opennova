@@ -26,14 +26,14 @@ const std::string head = "o3a 1\nadm CHECK.adm\nrow anim_reset \"walk\"\n"
 const std::string root = "bone -1 0 0 0 0.5 \"BN01 Pelvis\"\n"
 						 " k 0 0 0 1\n k 0 0 0.0871557427 0.996194698\n"
 						 " k 0 0 0.173648178 0.984807753\n k 0 0 0.258819045 0.965925826\n"
-						 " tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n";
+						 " tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n";
 const std::string spine = "bone 0 0 0 1 0.4 \"BN02 Spine\"\n"
 						  " k 0 0 0 1\n k 0 0 0 1\n k 0 0 0 1\n k 0 0 0 1\n"
-						  " tr 0 0 0\n tr 0 0 0.01 \n tr 0 0 0.02\n";
+						  " tr 0 0 0\n tr 0 0 0.01 \n tr 0 0 0.02\n tr 0 0 0.03\n";
 const std::string hand = "bone 1 0 0.25 1 0.1 \"BN03 L Hand\"\n"
 						 " k 0.258819045 0 0 0.965925826\n k 0.258819045 0 0 0.965925826\n"
 						 " k 0.258819045 0 0 0.965925826\n k 0.258819045 0 0 0.965925826\n"
-						 " tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n";
+						 " tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n";
 const std::string events = "event 0 0 0 0x0\nevent 0.06 0 0 0x1\nevent 0.06 0 0 0x0\n"
 						   "event 0.06 0 0 0x2\n";
 
@@ -123,6 +123,9 @@ int main(int argc, char **argv) {
 	compare("bone-name", replace(text, "BN03 L Hand", "BN03 R Hand"), false);
 	compare("bone-parent", replace(text, "bone 1 0 0.25 1 0.1", "bone 0 0 0.25 1 0.1"), false);
 	compare("translation", replace(text, " tr 0 0 0.02", " tr 0 0 0.5"), false);
+	// Row frame_count is a translation the runtime reads, not a hold of the one
+	// before it.
+	compare("last-translation", replace(text, " tr 0 0 0.03", " tr 0 0 0.5"), false);
 	compare("trigger", replace(text, "event 0.06 0 0 0x1", "event 0.06 0 0 0x4"), false);
 	compare("velocity", replace(text, "event 0.06 0 0 0x1", "event 0.6 0 0 0x1"), false);
 	compare("row-order", replace(replace(text, "row anim_reset \"walk\"\n", ""),
@@ -188,7 +191,7 @@ int main(int argc, char **argv) {
 	{
 		const std::string sparse = head + root +
 				"bone 0 0 0 1 0.4 \"BN02 Spine\"\n k 0 0 0 1 2\n k 0 0 0.0871557427 0.996194698 2\n"
-				" tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n" +
+				" tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n" +
 				hand + events;
 		const std::string table = build("sparse", sparse);
 		const std::filesystem::path home = dir / "sparse-roundtrip";

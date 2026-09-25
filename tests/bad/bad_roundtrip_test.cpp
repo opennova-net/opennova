@@ -75,7 +75,9 @@ struct Scratch {
     BadQuaternion rot1[2] = {{0, 0, 0, 1}, {0.5f, 0.5f, 0.5f, 0.5f}};
     BadChannel channels[2] = {};
     BadEvent events[4] = {};
-    float translations[6][3] = {{0, 0, 0}, {1, 2, 3}, {0.5f, 0, 0}, {1.5f, 2, 3}, {1, 0, 0}, {2, 2, 3}};
+    // Rows 0..frame_count, frame-major: the fence-post row the runtime reads.
+    float translations[8][3] = {{0, 0, 0}, {1, 2, 3}, {0.5f, 0, 0}, {1.5f, 2, 3},
+                                {1, 0, 0}, {2, 2, 3}, {1.5f, 0, 0}, {2.5f, 2, 3}};
     BadFile file = {};
 
     Scratch() {
@@ -120,7 +122,7 @@ struct Scratch {
         file.events = events;
         file.num_events = 4;
         file.translations = translations;
-        file.num_translations = 6;
+        file.num_translations = 8;
     }
 };
 
@@ -157,7 +159,14 @@ int main(int argc, char **argv) {
         TEST_EXPECT(back.num_channels == 2 && back.channels[0].frame_count == 4 && back.channels[1].frame_count == 2);
         TEST_EXPECT(back.channels[0].frame_lengths[2] == 2 && same_float(back.channels[1].rotations[1].w, 0.5f));
         TEST_EXPECT(back.num_events == 4 && back.events[0].trigger == 1 && same_float(back.events[3].velocity[0], 0.03f));
-        TEST_EXPECT(back.num_translations == 6 && same_float(back.translations[5][0], 2.0f));
+        TEST_EXPECT(back.num_translations == 8 && same_float(back.translations[7][0], 2.5f));
+        // The block ends on a pad row that repeats row frame_count.
+        TEST_EXPECT(bytes.size() >= 24);
+        for (int k = 0; k < 6; ++k) {
+            float stored;
+            std::memcpy(&stored, bytes.data() + bytes.size() - 24 + 4 * k, sizeof(float));
+            TEST_EXPECT(same_float(stored, scratch.translations[6 + k / 3][k % 3]));
+        }
         TEST_EXPECT(std::strcmp(back.bones[1].name, "BN02 Lower Spine") == 0);
         std::vector<uint8_t> again;
         TEST_EXPECT(bad_write_buffer(&back, again) == 0);
@@ -165,8 +174,8 @@ int main(int argc, char **argv) {
         bad_free(&back);
         std::printf("from-scratch clip: write -> parse field-equal, re-write byte-equal (%zu bytes)\n", bytes.size());
 
-        // A translation block shorter than bone_count x frame_count cannot be represented.
-        scratch.file.num_translations = 5;
+        // A translation block shorter than bone_count x (frame_count + 1) cannot be represented.
+        scratch.file.num_translations = 7;
         TEST_EXPECT(bad_write_buffer(&scratch.file, bytes) == -1);
     }
 

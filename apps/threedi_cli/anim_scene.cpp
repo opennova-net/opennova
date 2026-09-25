@@ -147,9 +147,9 @@ void write_clip(Writer &w, const AnimLoadedClip &clip) {
 			w.line(row);
 		}
 		if (translated) {
-			// The loader reads bone_count * frame_count rows, frame-major, and
-			// holds the last past the end, so the scene carries exactly those.
-			for (size_t k = 0; k < file.frame_count; ++k) {
+			// Rows 0..frame_count, frame-major: every row the runtime's read
+			// gives weight. The pad row past them is the writer's.
+			for (size_t k = 0; k < keys; ++k) {
 				const size_t index = k * bones + i;
 				if (index >= file.num_translations) break;
 				const BadBuildVec3 t = bad_mission_from_clip(BadBuildVec3{

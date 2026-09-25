@@ -20,10 +20,12 @@
 //     The runtime never reads it (6720 of 13517 retail bones triplicate X,
 //     477 are zero) [orig: BoneAnim_BuildWorldMatrices @0x40c400].
 //   * `num_children`, `child_offset` and `parent_offset` from `parent`, and the
-//     terminal duplicate key, event and translation the header's interval count
-//     implies (`event_count == frame_count + 1` in every retail clip).
+//     translation block's pad row past row frame_count (bad_write.cpp).
 //   * A capsule `bottom`/`top` pair per event when the author gives neither an
 //     explicit pair nor a constant one.
+// What the author supplies and the seam only counts: frame_count + 1 keys per
+// bone (or a duration table), events and translation rows, the fence-post
+// count every retail clip carries (`event_count == frame_count + 1`).
 // What the builder keeps verbatim: the key quaternions. Retail stores
 // opposite-hemisphere neighbours (4573 of 657788 key pairs, 218 of 477 files)
 // and the slerp short-arcs anyway [orig: Math_QuaternionSlerp @0x615e20], so
@@ -87,10 +89,12 @@ struct BadBuildBone {
     // Empty: every key lasts one frame, as 476 of 477 retail clips do; else one
     // duration per key.
     std::vector<uint16_t> durations;
-    // frame_count entries under BAD_FLAG_TRANSLATION, mission axes. This block
-    // alone carries no terminal duplicate: the loader reads exactly
-    // bone_count * frame_count rows and holds the last one past the end
-    // [orig: BoneFile_Load @0x40fff0, header words 16 and 19].
+    // frame_count + 1 entries under BAD_FLAG_TRANSLATION (rows 0..frame_count),
+    // mission axes, as the keys and events carry: the runtime reads row
+    // trunc(frame_count * t) and lerps it with the next one, so the last
+    // interval of every cycle reaches row frame_count [orig: sub_4102D0
+    // @0x4102d0 via BoneAnim_TransformBones @0x410360]. The writer appends the
+    // pad row retail's clips carry past it (bad_write.cpp); no author gives it.
     std::vector<BadBuildVec3> translations;
     // The stored `position[3]`, as given, for a bone whose pivot cannot
     // re-derive it: retail's own exporter left junk in this dead field (6720 of

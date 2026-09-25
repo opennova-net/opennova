@@ -127,11 +127,11 @@ the from-scratch writer `bad_write.cpp`, never passthrough per ADR 0003):
 | … | per-channel data | `u16 frame_lengths[]`, pad to 4, then `f32 x,y,z,w` quaternions (rot_stride each) |
 | evt | events (optional) | per event `f32 vx,vy,vz,bottom,top`, plus `i32 trigger` when version == 1 |
 | bone | bone table | bone_count × stride: `name[32]`, 3 pad + index byte, `num_children`, `child_addr`, `parent_addr`, `length`, `position[3]`, `rotation[9]` (row-major 3×3) |
-| trn | translations | when `flags & 2`: `num_translations` × `f32 x,y,z`, frame-major |
+| trn | translations | when `flags & 2`: `(frame_count + 1) × bone_count` × `f32 x,y,z`, frame-major, then retail's pad row |
 
 Conventions preserved from stock assets and the historical exporter (the
-writer's head carries them, with the corpus counts in the section below): channels and events carry `frame_count + 1` entries (the
-terminal duplicate); child/parent are absolute byte addresses recomputed from
+writer's head carries them, with the corpus counts in the section below): channels, events and translation rows carry `frame_count + 1`
+entries (the header counts intervals); child/parent are absolute byte addresses recomputed from
 `parent_index`; root bones write `parent_offset 0` — a deliberate correction
 over the historical exporter's `-1`, which only ever parsed correctly for
 bone 0 because the parser force-overrides it.
@@ -210,10 +210,31 @@ asking an author for it:
   9 = 0, 10 = 8, 14 = 1, 17 = 1, 18 = 0, 19 = 0 across all 477.
 - **`event_count == frame_count + 1`** wherever a clip carries events, as the
   channel key lists do: the header counts intervals.
-- **The translation block holds `bone_count * frame_count` rows**, frame-major
-  — no terminal duplicate. That is what the loader reads and the last row holds
-  past the end; retail files carry rows beyond it that no reader reaches
-  (357_RST: 120 rows for a 40-bone, one-frame clip, of which 40 are read).
+- **The translation block holds rows 0 to `frame_count`**, frame-major, the
+  fence-post count the keys and events carry. The runtime reads row
+  `trunc(frame_count * t)` and lerps it with the NEXT row by the remainder
+  [orig: `sub_4102D0 @ 0x4102d0`, the row base `[6] + [5] * (100 + 12 * row)`
+  `@0x410327..0x41033b`, called from `BoneAnim_TransformBones @ 0x410360`
+  `@0x41048b`, the next row at `+12 * bone_count` and the `(1 - w, w)` weights
+  `@0x410497..0x4104cd`], so the last interval of every cycle reaches row
+  `frame_count` (one-shots park at 0.99999, loops wrap, so `t` never reaches
+  1.0 [orig: `AnimChannel_AdvancePlayback @ 0x40B140`]). A `frame_count * t` of
+  exactly 0 is read as 1.0 (`@0x4102f7..0x410304`), so the sample at `t == 0`
+  takes row 1 and weights row 2 by zero. Row `frame_count` is real data, the
+  terminal key's translation: it equals row `frame_count - 1` (within 1e-6) in
+  118 of the 202 translated clips and carries the clip's last step in 83
+  (G17_1f's continues its 4.2 cm per frame; RPG7_1f's is 0.62 m). Retail's
+  exporter wrote a row per KEY and one row more: 200 clips key every frame and
+  hold rows 0 to `frame_count + 1`, M60_1i (181 keys over 150 frames) holds 182
+  rows and stgr_RST (two keys over two frames) 3. That extra row holds exporter
+  memory that matches no row of the clip (357_1f's puts bones whose
+  translation is zero 1.7 m out; stgr_RST's, its row 2, reaches 6.8e22), and
+  past row `frame_count` the only read that reaches it is a one-frame clip at
+  `t == 0`, at weight zero. The writer repeats row `frame_count` there, so
+  that read stays finite. The runtime's pose table bakes row `f` at frame `f`,
+  which is the original's read everywhere but the `t == 0` instant: frame 0 is
+  also the left end of the first window the pose evaluator interpolates, where
+  the original reads the lerp of rows 0 and 1.
 - **A bone may key fewer times than the frame count.** 476 of 477 clips key
   every bone once per frame, but the count is the duration table's business,
   not the header's [orig: `BoneAnim_FindKeyframeAtTime @ 0x410220`]: `DT1RST`

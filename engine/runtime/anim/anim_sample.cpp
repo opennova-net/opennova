@@ -328,16 +328,23 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             Vec3 translation = kZeroVec;
             if (translated && bad.translations != nullptr && b < bad_bone_count) {
                 // The translation block is laid out by the FILE's own bone count (its stride),
-                // regardless of the rig's row count in model-table mode. It carries exactly
-                // frame_count rows (no fence-post key): the final key's pose HOLDS the last
-                // row — a zero fallback would pop translated clips' last key to the origin.
-                // (The original's translation read at the final key window is unwalked; the
-                // hold mirrors the rotation walk's hold-last shape.)
-                const uint32_t tf = (bad.frame_count > 0 && f >= bad.frame_count)
-                        ? bad.frame_count - 1 : f;
-                const size_t idx = static_cast<size_t>(tf) * bad_bone_count + b;
-                if (idx < bad.num_translations) {
-                    const float *t = bad.translations[idx];
+                // regardless of the rig's row count in model-table mode. The original reads
+                // row trunc(frame_count * t) and lerps it with the NEXT row by the fraction:
+                // at frame f that is row f at weight 0 against row f + 1, so the final frame
+                // reads row frame_count, the fence-post row the block carries like the keys.
+                // [orig: sub_4102D0 @0x4102d0 via BoneAnim_TransformBones @0x410360 --
+                //  row = trunc(frame_count * t) under the 0xC00 control word @0x410317,
+                //  weight = the remainder @0x41034f, (1 - w) * row + w * next row with the
+                //  next row at +12 * bone_count @0x410497..0x4104cd.]
+                // A frame_count * t of exactly 0 is read as 1.0 (@0x4102f7..0x410304), so
+                // the one sample at t == 0 takes row 1; the pose table cannot carry that
+                // instant, because frame 0 is also the left end of the first window
+                // eval_clip_pose interpolates, where the original reads the lerp of rows 0
+                // and 1. A file shorter than its frame count holds the last row it has.
+                const size_t rows = bad.num_translations / bad_bone_count;
+                if (rows > 0) {
+                    const size_t row = f < rows ? static_cast<size_t>(f) : rows - 1;
+                    const float *t = bad.translations[row * bad_bone_count + b];
                     translation = {t[0], t[1], t[2]};
                 }
             }
