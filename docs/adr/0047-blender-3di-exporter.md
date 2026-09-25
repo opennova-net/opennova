@@ -4,10 +4,14 @@
 - **Owners**: the 3DI format library (`engine/formats/threedi`), the animation
   formats (`engine/formats/bad`, `engine/formats/adm`), `apps/threedi_cli`,
   `tools/blender/opennova_3di`
-- **Supersedes/updates**: replaces ADR 0038 (deleted with this record). Its standing
-  decisions are restated below; its ban on a Blender add-on, on Blender custom
-  properties and on an import route is lifted for this add-on. [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)
-  and [ADR 0027](0027-3di3-first-class.md) stand unchanged and are what this record
+- **Supersedes/updates**: supersedes [ADR 0038](0038-native-runtime-assets-glb-editor.md),
+  which stays as the record of its hard cut (the retired Python, Qt and DCC
+  surfaces, the flat C ABI with `opennova_shared`, the `abi_exports_check.py`
+  gate). Its standing decisions are restated in decision 10; its ban on a
+  Blender add-on, on Blender custom properties and on an import route is lifted
+  for this add-on, and its retirement of the `.bad`/`.adm` writers is reversed
+  (decisions 11 to 13). [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)
+  and [ADR 0027](0027-3di3-only-no-model-ir.md) stand unchanged and are what this record
   builds on.
 
 ## Context
@@ -154,7 +158,9 @@ the same text transport, the same add-on.
    in their rest pose and every model in its own root's frame.
 10. **Standing from ADR 0038.** No other Python product code, Qt importer, or
    Python test suite (the stdlib `scripts/lint`, `scripts/ida`, `scripts/net`,
-   `scripts/mcp`, `scripts/ci` and `tools/net` scripts remain); no native
+   `scripts/mcp`, `scripts/ci`, `scripts/parity` and `tools/net` scripts and
+   the `scripts/oracles` witness regenerators, which drive the pinned retail
+   executable under Unicorn, remain); no native
    ASE/TDP/OED modules; Godot `ObjectData` loads immutable 3DI documents. A
    GLB/GLTF <-> 3DI editor seam remains future work and uses the same naming
    contract. ADM and BAD are no longer read-only: decisions 11 to 13 give them
