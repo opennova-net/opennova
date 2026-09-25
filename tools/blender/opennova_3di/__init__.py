@@ -218,8 +218,8 @@ class O3DActionProps(bpy.types.PropertyGroup):
                        description="The clip's own frame rate; every retail clip ships 30")
     frames: IntProperty(name="Frames", default=0, min=0,
                         description="The clip's length in frames; 0 takes the Action's own keyed "
-                                    "range. A longer one holds the last key, which is how retail's "
-                                    "DT1RST, stgr_RST and M60_1i are shaped")
+                                    "range. A longer one holds the Action's last pose over the "
+                                    "extra frames")
     capsule_keys: BoolProperty(name="Own capsule", default=False,
                                description="The clip carries the capsule extents keyed on the rig; "
                                            "clear it and the engine derives them from the pose, "
@@ -269,10 +269,12 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     capsule_top: FloatProperty(name="Capsule top", default=0.0,
                                description="How tall this frame's pose stands, measured from the "
                                            "capsule bottom")
-    anim_trigger: IntProperty(name="Trigger", default=0, min=0,
+    anim_trigger: IntProperty(name="Trigger", default=0,
                               description="The animation event bits this frame fires: 1 and 2 the "
                                           "left and right footstep, 4 8 and 16 the ammo rows, "
-                                          "0x20..0x400 the six foley sounds")
+                                          "0x20..0x400 the six foley sounds. The word is 32 bits, "
+                                          "so one with bit 31 set shows negative (a version 0 "
+                                          "clip's 0xffffffff is -1)")
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
                             description="The part's raw PANM flags word; -1 derives it from the tracks")

@@ -67,6 +67,13 @@ def trigger_word(value):
     return int(value) & 0xFFFFFFFF
 
 
+def trigger_value(word):
+    """An event's 32-bit trigger word as the signed property Blender holds:
+    a word with bit 31 set (the 0xffffffff of a version 0 clip) is negative."""
+    word &= 0xFFFFFFFF
+    return word - (1 << 32) if word >= 1 << 31 else word
+
+
 def rig_of(model):
     """A model's rig: the armature under its lowest LOD root."""
     roots = sorted((c for c in model.children if is_lod_root(c)), key=lambda o: o.get("_lod_index", 0))

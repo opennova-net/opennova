@@ -16,8 +16,13 @@
 # so the model still exports the same model, and a clip then shows in Blender
 # the pose the game draws. A rig that already holds clips keeps its rest (their
 # Actions are keyed against it), and a lone `.bad` names no bind at all.
+#
+# A clip is sampled the way the runtime evaluates it: one pose per frame of the
+# header's length, frames 0..frame_count, each bone's key found by walking its
+# key durations and blending inside the window, the last key held past them.
 
 import contextlib
+import math
 import os
 import re
 import subprocess
@@ -28,7 +33,7 @@ from mathutils import Matrix, Quaternion, Vector
 
 from . import assembly
 from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, RM_NAME, bone_rows,
-                        clip_actions, part_bone, rig_of, rm_of)
+                        clip_actions, part_bone, rig_of, rm_of, trigger_value)
 from .export import BONE_RE, PART_RE, axis_basis, clean_name, descendants, is_lod_root
 
 # An object's own transform channels, as a rollback puts them back.
@@ -156,6 +161,41 @@ def linear(action):
             point.interpolation = "LINEAR"
 
 
+def slerp(a, b, t):
+    """Two stored keys blended as the runtime blends them: the short arc, plain
+    linear weights when the keys lie within 1 - dot <= 0.01, and no
+    normalization [orig: Math_QuaternionSlerp @0x615e20, as
+    runtime/anim/anim_sample.cpp quat_slerp ports it]."""
+    dot = sum(x * y for x, y in zip(a, b))
+    if dot < 0.0:
+        b = tuple(-y for y in b)
+        dot = -dot
+    if 1.0 - dot <= 0.0099999998:
+        wa, wb = 1.0 - t, t
+    else:
+        omega = math.acos(min(dot, 1.0))
+        inv = 1.0 / math.sin(omega)
+        wa, wb = math.sin((1.0 - t) * omega) * inv, inv * math.sin(t * omega)
+    return tuple(wa * x + wb * y for x, y in zip(a, b))
+
+
+def key_at(keys, durations, frame):
+    """A bone's stored key at a frame, as the runtime finds it: the key whose
+    duration window holds the frame, blended toward the next key (the last
+    key's next is key 0) by the frame's place in the window, and the last key
+    held past the summed durations [orig: BoneAnim_FindKeyframeAtTime @0x410220,
+    as runtime/anim/anim_sample.cpp sample_bone_world_rot ports it]."""
+    if len(keys) == 1:
+        return keys[0]
+    at = 0
+    for i, key in enumerate(keys):
+        if at + durations[i] > frame:
+            blend = (frame - at) / durations[i]
+            return key if blend == 0.0 else slerp(key, keys[(i + 1) % len(keys)], blend)
+        at += durations[i]
+    return keys[-1]
+
+
 def bone_name(index, name):
     """The rig bone for part `index`, named from the clip's own bone name: kept
     when it already reads BN## with that index, otherwise BN## and the label (a
@@ -188,9 +228,18 @@ class Loader:
             self.notes.append(text)
 
     def blender_rot(self, quat):
-        """A mission-axes key as a Blender rotation in the model root's frame."""
-        m = Quaternion((quat[3], quat[0], quat[1], quat[2])).to_matrix()
+        """A mission-axes key as a Blender rotation in the model root's frame.
+        Normalized, as the runtime reads a channel key (anim_sample.cpp
+        bad_channel_quat): two keys blended on the linear path fall short of
+        unit length (|q|^2 >= 0.995), and the matrix of such a quaternion is no
+        rotation."""
+        m = Quaternion((quat[3], quat[0], quat[1], quat[2])).normalized().to_matrix()
         return self.basis @ m @ self.basis.transposed()
+
+    def arm_space(self, arm):
+        """The rig's rotation in the model root's frame, which is the frame a key
+        is in (export reads it back through the same root)."""
+        return (self.model.matrix_world.inverted_safe() @ arm.matrix_world).to_3x3().normalized()
 
     @contextlib.contextmanager
     def editing(self, arm):
@@ -255,7 +304,7 @@ class Loader:
         """Turn each rest bone onto the bind, the reset clip's first key: the
         rig's rest pose is the bind. Heads and lengths keep their places."""
         rows = clip["bones"]
-        arm_rot = arm.matrix_world.to_3x3().normalized()
+        to_arm = self.arm_space(arm).inverted()
         held = {}
         with self.editing(arm) as edit_bones:
             for i, pb in enumerate(bones[:len(rows)]):
@@ -265,7 +314,7 @@ class Loader:
                 held[eb.name] = (eb.tail.copy(), eb.roll)
                 # The key is the bone's rotation in the model's frame; the rest
                 # bone's own space is the armature's.
-                m = arm_rot.inverted() @ self.blender_rot(rows[i]["keys"][0])
+                m = to_arm @ self.blender_rot(rows[i]["keys"][0])
                 length = eb.length if eb.length > 1e-6 else 0.05
                 eb.tail = eb.head + m @ Vector((0.0, length, 0.0))
                 eb.align_roll(m @ Vector((0.0, 0.0, 1.0)))
@@ -298,6 +347,27 @@ class Loader:
             self.context.view_layer.update()
 
     # --- the clips ----------------------------------------------------------
+    def shape_notes(self, clip):
+        """What a clip keys that Blender's one-pose-per-frame channels cannot
+        hold as it is stored."""
+        name, frames = clip["name"], clip["frames"]
+        spans = [sum(b["durations"]) for b in clip["bones"]]
+        past = [i for i, s in enumerate(spans) if s > frames + 1]
+        held = [i for i, s in enumerate(spans) if s < frames + 1]
+        spread = [i for i, b in enumerate(clip["bones"]) if any(d > 1 for d in b["durations"])]
+        if past:
+            self.note(f"{name}: bones {past[:6]} key past the clip's {frames} frames, which it never "
+                      "plays; those keys are not imported")
+        if spread:
+            self.note(f"{name}: bones {spread[:6]} hold a key over several frames; Blender keys each "
+                      "frame with the pose the runtime blends there, so a re-export keys every frame")
+        if held:
+            self.note(f"{name}: bones {held[:6]} stop keying before the clip's last frame and hold "
+                      "their last key; a re-export keys those frames too")
+        if clip["version"] == 0:
+            self.note(f"{name}: a version 0 clip, whose events carry no trigger word (the reader "
+                      "gives each 0xffffffff); it re-exports as version 1 with that word")
+
     def action_for(self, clip, arm, bones, rest):
         name = clip["name"]
         action = bpy.data.actions.new(name)
@@ -306,19 +376,16 @@ class Loader:
         action.o3d.loop = bool(clip["flags"] & ANIM_FLAG_LOOP)
         action.o3d.translation = bool(clip["flags"] & ANIM_FLAG_TRANSLATION)
         action.o3d.raw_flag_8 = bool(clip["flags"] & ANIM_FLAG_BIT3)
-        action.o3d.frames = clip["frames"]
         rows = clip["bones"]
         if len(rows) > len(bones):
             self.note(f"{name}: the clip carries {len(rows)} bones, the rig {len(bones)}; the extra "
                       "channels are dropped")
-        samples = max((len(b["keys"]) for b in rows), default=0)
+        self.shape_notes(clip)
+        frames = clip["frames"]
         translated = bool(clip["flags"] & ANIM_FLAG_TRANSLATION)
-        sparse = [i for i, b in enumerate(rows) if len(b["keys"]) != clip["frames"] + 1]
-        if sparse:
-            self.note(f"{name}: bones {sparse[:6]} key fewer times than the clip's frame count; "
-                      "Blender keys every frame, so a re-export densifies them")
-        arm_rot = arm.matrix_world.to_3x3().normalized()
+        to_arm = self.arm_space(arm).inverted()
         order = {pb.name: i for i, pb in enumerate(bones)}
+        above = [order[p.name] if p is not None else None for p in (part_bone(pb) for pb in bones)]
         data = arm.animation_data or arm.animation_data_create()
         slotted = hasattr(data, "action_slot")
         held = (data.action, data.use_nla, data.action_slot if slotted else None)
@@ -328,30 +395,24 @@ class Loader:
             # The pose that shows what the game draws: a key IS the bone's
             # rotation in the model's frame, and the rig's rest pose is the bind
             # the runtime measures it against, so the key poses the bone
-            # directly. The head follows the rest kinematics.
-            for f in range(samples):
-                world = []
+            # directly. The head follows its part parent's rest offset.
+            for f in range(frames + 1):
+                posed = []
                 for i, pb in enumerate(bones):
                     if i >= len(rows):
-                        world.append(arm.matrix_world @ rest[i])
+                        posed.append(rest[i])
                         continue
-                    keys = rows[i]["keys"]
-                    key = keys[min(f, len(keys) - 1)]
-                    pose = Quaternion((key[3], key[0], key[1], key[2]))
-                    rot = arm_rot.inverted() @ (self.basis @ pose.to_matrix() @ self.basis.transposed())
-                    parent = pb.parent
-                    if parent is None:
-                        head = (arm.matrix_world @ rest[i]).translation
-                    else:
-                        j = order[parent.name]
-                        follow = (arm.matrix_world @ rest[j]).inverted() @ (arm.matrix_world @ rest[i])
-                        head = (world[j] @ follow).translation
-                    if translated and rows[i]["tr"]:
-                        tr = rows[i]["tr"][min(f, len(rows[i]["tr"]) - 1)]
-                        head = head + self.to_blender(tr)
-                    world.append(Matrix.Translation(head) @ (arm.matrix_world.to_3x3() @ rot).to_4x4())
-                self.write_frame(arm, bones, rest, world, f, translated)
-            action.o3d.capsule_keys = bool(self.write_events(arm, clip, samples))
+                    key = key_at(rows[i]["keys"], rows[i]["durations"], f)
+                    rot = to_arm @ self.blender_rot(key)
+                    j = above[i]
+                    head = rest[i].translation if j is None else \
+                        (posed[j] @ rest[j].inverted() @ rest[i]).translation
+                    tr = rows[i]["tr"]
+                    if translated and tr:
+                        head = head + to_arm @ self.to_blender(tr[min(f, len(tr) - 1)])
+                    posed.append(Matrix.Translation(head) @ rot.to_4x4())
+                self.write_frame(bones, rest, above, posed, f, translated)
+            action.o3d.capsule_keys = self.write_events(arm, clip, frames)
             linear(action)
             slot = data.action_slot if slotted else None
         finally:
@@ -360,19 +421,26 @@ class Loader:
                 data.action_slot = held[2]
         return action, slot
 
-    def write_frame(self, arm, bones, rest, world, frame, translated):
-        """One frame's pose, keyed on the rig's bone channels."""
-        inverse = arm.matrix_world.inverted()
+    def write_frame(self, bones, rest, above, posed, frame, translated):
+        """One frame's pose, keyed on the rig's bone channels: each bone's basis
+        against its Blender parent's pose, a `!` control bone's being its rest
+        under the nearest part bone (the clip keys no control bone)."""
         order = {pb.name: i for i, pb in enumerate(bones)}
         for i, pb in enumerate(bones):
-            local = inverse @ world[i]
             parent = pb.parent
             if parent is None:
-                basis = rest[i].inverted() @ local
+                basis = rest[i].inverted() @ posed[i]
             else:
-                j = order[parent.name]
-                follow = rest[j].inverted() @ rest[i]
-                basis = (inverse @ world[j] @ follow).inverted() @ local
+                j = order.get(parent.name)
+                parent_rest = parent.bone.matrix_local
+                if j is not None:
+                    parent_pose = posed[j]
+                elif above[i] is None:
+                    parent_pose = parent_rest
+                else:
+                    a = above[i]
+                    parent_pose = posed[a] @ rest[a].inverted() @ parent_rest
+                basis = (parent_pose @ parent_rest.inverted() @ rest[i]).inverted() @ posed[i]
             pb.rotation_mode = "QUATERNION"
             pb.rotation_quaternion = basis.to_quaternion()
             pb.keyframe_insert("rotation_quaternion", frame=frame)
@@ -380,28 +448,32 @@ class Loader:
                 pb.location = basis.translation
                 pb.keyframe_insert("location", frame=frame)
 
-    def write_events(self, arm, clip, samples):
+    def write_events(self, arm, clip, frames):
         """The root track and the trigger word, on the clip's own Action: the
         `!RM` bone walks the summed event steps, and the rig carries the keyed
-        trigger word."""
+        trigger word. Returns whether the clip carries its capsule extents."""
         events = clip["events"]
         if not events:
             self.note(f"{clip['name']}: the clip carries no event record (no root motion, no capsule)")
-            return
+            return False
         rm = rm_of(arm)
-        rest = rm.bone.matrix_local.to_3x3().normalized().inverted() if rm is not None else None
+        # A step is a displacement in the model's frame; the bone's location is
+        # in its own rest frame, under the rig's.
+        to_rm = (self.arm_space(arm) @ rm.bone.matrix_local.to_3x3().normalized()).inverted() \
+            if rm is not None else None
         at = Vector((0.0, 0.0, 0.0))
         # The extents the clip carries are keyed beside the trigger: the rule
         # retail's own tool measured them by is not witnessed, and the engine's
         # derivation from the pose lands within centimetres of it.
         carry = any(ev["extents"] is not None for ev in events)
-        for f in range(samples):
+        for f in range(frames + 1):
             ev = events[min(f, len(events) - 1)]
-            at = at + self.to_blender(ev["velocity"])
+            if f < len(events):
+                at = at + self.to_blender(ev["velocity"])
             if rm is not None:
-                rm.location = rest @ at
+                rm.location = to_rm @ at
                 rm.keyframe_insert("location", frame=f)
-            arm.o3d.anim_trigger = ev["trigger"]
+            arm.o3d.anim_trigger = trigger_value(ev["trigger"])
             arm.keyframe_insert("o3d.anim_trigger", frame=f)
             if carry:
                 bottom, top = ev["extents"] or (0.0, 0.0)
