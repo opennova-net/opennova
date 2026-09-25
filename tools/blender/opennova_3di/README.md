@@ -167,45 +167,73 @@ normal maps.
 
 ## Animations
 
-A skinned model's clips live on its rig, and the whole set writes at once:
-**Export Animations** makes the `.adm` table the model root names and one
-`<clip>.bad` beside it for every clip. **File > Import > NovaLogic Animations**
-reads a `.adm` (or a single `.bad`) back onto the active model's rig.
+A model's clips live on its rig, and the whole set writes at once:
+**Export Animations** makes the `.adm` table the model root names (empty: one
+named after the model, beside the `.blend`) and one `<clip>.bad` beside it for
+every clip. **Export All Animations** does that for every model with a rig,
+and skips, with a warning, a rig that carries no clip set of its own (the arms
+beside a first-person gun). **File > Import > NovaLogic Animations** reads a
+`.adm` (or a single `.bad`) back onto the active model's rig.
 
 - **A clip is an Action.** Push each one onto its own NLA track; the track order
-  is the set's order and the Action's name is the `.bad` file name. The clip's
-  own settings live in the Dope Sheet sidebar's OpenNova panel: its rate (retail
-  ships 30 everywhere), whether it loops, whether it carries per-bone
-  translations (a bolt, a magazine, a rig that slides), the unwitnessed flag bit
-  3, and a frame count longer than the keys, which holds the last pose.
+  is the set's order and the Action's name is the `.bad` file name. Export plays
+  each Action through its strip's action slot (Blender 4.4 and newer), so an
+  Action keyed on another rig exports its own motion, and it refuses a rig in
+  NLA tweak mode. The clip's own settings live in the Dope Sheet sidebar's
+  OpenNova panel: its rate (retail ships 30 everywhere), whether it loops,
+  whether it carries per-bone translations (a bolt, a magazine, a rig that
+  slides), the unwitnessed flag bit 3, and a frame count longer than the
+  Action, whose extra frames hold its last pose.
+- **Each clip exports on its own.** A channel a clip does not key is at rest:
+  a bone it leaves alone keeps its rest pose, `!RM` stays at the origin and the
+  trigger and capsule are 0, whatever the clip before it did. A bone that
+  follows another model's parts (**Bones follow**) follows its own clip while
+  the set exports.
 - **The table** is the row list on the model root: a slot (`anim_reset`,
   `anim_walk_forward`, ...) and the clips that answer it. Several clips on one
   row are a ring the game rotates through, and it serves a row from its LAST
-  entry back. `anim_reset` is the rig's own pose and the bind every other clip
-  is measured against.
+  entry back. The reset row's first clip is the bind every clip is measured
+  against.
 - **Root motion** is the bone `!RM`: key it along the path the body travels and
   the clip carries the step between each pair of frames. The body itself
   animates in place; the game moves the entity by those steps. Any bone named
-  `!something` is not a part, so control bones live there too.
+  `!something` is not a part, so control bones live there too; a `BN##` bone
+  under one takes the nearest `BN##` above it as its part parent.
 - **Events** are the rig's keyed **Trigger** word: 1 and 2 place the left and
   right footstep, 4, 8 and 16 fire the ammo rows, and 0x20 upwards play the six
   foley sounds of the body's sound profile. `opennova-3di catalog` lists them.
-- **The rest pose is the bind.** A clip's channel is the bone's own rotation,
-  measured in the game against the reset clip's first key, so import turns each
-  rest bone onto that key and a clip then poses the rig exactly as the game
-  draws it. The
-  bone heads, lengths and weights do not move, so the model still exports the
-  same model. Bone names come from the clips (a `.3di` carries none), and their
-  vertex groups are renamed with them.
+  The word is 32 bits, so a word with the top bit set shows as a negative
+  number (a version 0 clip's 0xffffffff is -1).
+- **The rest pose is the bind.** A clip's channel is the bone's own rotation in
+  the model's frame. The game binds every clip of a table to the reset clip: a
+  bone deforms by `key * bind^-1`, the bind being the reset clip's first key.
+  So the first table imported onto a rig that holds no clip turns each rest
+  bone onto that key, and a clip then poses the rig exactly as the game draws
+  it. The bone heads, lengths and weights do not move, so the model still
+  exports the same model. A rig that already holds clips keeps its rest, since
+  their Actions are keyed against it, and a single `.bad` carries no table, so
+  it leaves the rest and the model's rows as they are. Bone names come from the
+  clips (a `.3di` carries none), and their vertex groups are renamed with them;
+  a lower-case `bn38 bone` becomes `BN38 bone`.
+- **Import keys what the game plays.** Every clip is keyed on each frame of its
+  length: a bone that holds a key over several frames gets the pose the game
+  blends between its keys there, and a bone that stops keying early holds its
+  last key. A re-export therefore keys every frame (`DVFLEE1E`, `DT1RST` and
+  `stgr_RST` come back with more keys and the same poses), and keys past the
+  clip's own length (`M60_1i`), which the game never plays, are left out. The
+  import lists these in its warnings, and a failed import leaves the scene as
+  it found it.
 
 **A first-person weapon** animates its own parts rather than bones, so its clips
-get an armature named `!Rig` whose bones mirror them; import builds it and each
-part follows its bone. The gun's parts then move in the viewport, and the model
-still exports as the authored layout (one collision vertex can land 4 mm away on
-the bullet-face grid). The arms follow the weapon's parts by index -- pick the
-arms model's **Bones follow** -- so a first-person set belongs to the weapon, and
-exporting it from the arms alone writes only the channels the arms have bones
-for.
+get an armature named `!Rig` whose bones mirror them; import builds it. Each
+part then hangs from the LOD root and follows its bone through an `O3D follow`
+constraint, which the rig's Rest Position turns off, and a `~PPx attach` helper
+keeps the part hierarchy (a part that already has one keeps it; a new one sits
+at the part's pivot). The gun's parts move in the viewport, and the model still
+exports byte for byte as it did before the import. The arms follow the
+weapon's parts by index (pick the arms model's **Bones follow**), so a
+first-person set belongs to the weapon, and exporting it from the arms alone
+writes only the channels the arms have bones for.
 
 To reuse retail's own clips, match the retail rig: JO's people are 19 bones plus
 a mesh part, a first-person weapon 40 parts, and a clip's channels pair with the
