@@ -226,6 +226,29 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 	return result;
 }
 
+std::vector<renderer::DxtSurface> build_detail_layer_levels(
+		const Rgba8Image &base,
+		const Rgba8Image *far_detail) {
+	// Full texture quality and full terrain detail.
+	// [orig: PolyTrn_InitTextures @ 0x60ABBC (0x400200), @ 0x60ABA0 (| 8)]
+	constexpr uint32_t kDetailLayerFlags = 0x400208u;
+	const renderer::TextureDxtFormat format = renderer::select_texture_dxt_format(
+			kDetailLayerFlags, renderer::kReferenceTextureDxtCaps);
+	std::vector<renderer::DxtSurface> levels;
+	if (!base.is_valid() || format == renderer::TextureDxtFormat::None) return levels;
+	if (far_detail != nullptr) {
+		for (const Rgba8Image &level : build_paired_detail_mip_chain(base, *far_detail)) {
+			levels.push_back(renderer::encode_dxt_surface(
+					renderer::decode_rgba8(level.pixels.data(), level.width, level.height),
+					level.width, level.height, format));
+		}
+		return levels;
+	}
+	return renderer::build_dxt_texture_levels(base.pixels.data(), base.width,
+			base.height, format,
+			renderer::texture_level_count(base.width, base.height, kDetailLayerFlags));
+}
+
 // [orig: GTexture_CreateFromPixelDataWithAlphaBlend @0x687270 — the custom mip builder stops
 //  after the 4x4 level, each level a GTexture_Downsample2x2_RGBA8 @0x687000 box reduction]
 std::vector<Rgba8Image> build_box_mip_chain_to_4x4(

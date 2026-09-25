@@ -3,6 +3,8 @@
 // [orig: PolyTrn_RenderTile @ 0x60DA70; tile overlay submission
 // render_water_quad @ 0x604700; docs/tiles/til-re.md]
 
+#include <runtime/renderer/texture_dxt.h>
+
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -183,7 +185,26 @@ TerrainTileQuadrantSource build_terrain_tile_quadrant_source(
 }
 
 std::vector<Rgba8Image> build_terrain_tile_set_mips(const Rgba8Image &atlas) {
-	return retail_box_levels(atlas);
+	// [orig: Terrain_LoadTileSetAtlas @ 0x604B24 (flags 0x100203)]
+	constexpr uint32_t kTileSetAtlasFlags = 0x100203u;
+	const renderer::TextureDxtFormat format = renderer::select_texture_dxt_format(
+			kTileSetAtlasFlags, renderer::kReferenceTextureDxtCaps);
+	if (!atlas.is_valid() || format == renderer::TextureDxtFormat::None) {
+		return retail_box_levels(atlas);
+	}
+	const std::vector<renderer::DxtSurface> levels = renderer::build_dxt_texture_levels(
+			atlas.pixels.data(), atlas.width, atlas.height, format,
+			renderer::texture_level_count(atlas.width, atlas.height, kTileSetAtlasFlags));
+	std::vector<Rgba8Image> result;
+	result.reserve(levels.size());
+	for (const renderer::DxtSurface &level : levels) {
+		Rgba8Image image;
+		image.width = level.width;
+		image.height = level.height;
+		image.pixels = renderer::encode_rgba8(renderer::decode_dxt_surface(level));
+		result.push_back(std::move(image));
+	}
+	return result;
 }
 
 Rgba8Image compose_terrain_tile_page(

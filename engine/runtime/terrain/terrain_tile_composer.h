@@ -42,9 +42,12 @@ struct TerrainTileQuadrantSource {
 TerrainTileQuadrantSource build_terrain_tile_quadrant_source(
 		const Rgba8Image &atlas);
 
-// The tile-set atlas texture's level set: created with flags 0x100203, so it
-// carries the ordinary box mip chain.
-// [orig: Terrain_LoadTileSetAtlas @ 0x604A90, flags @ 0x604B24]
+// The tile-set atlas texture's level set as its texels decode: created with
+// flags 0x100203, which ask for DXT5, so level 0 is the atlas through D3DX's
+// DXT5 encoder and every later level D3DXFilterTexture's box filter of the
+// level before it, each read back as bytes for the composer to sample.
+// [orig: Terrain_LoadTileSetAtlas @ 0x604A90, flags @ 0x604B24;
+// GTexture_CreateFromPixelData_0 @ 0x687717..0x687727]
 std::vector<Rgba8Image> build_terrain_tile_set_mips(const Rgba8Image &atlas);
 
 struct TerrainTilePageSourceView {

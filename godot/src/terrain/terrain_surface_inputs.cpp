@@ -102,6 +102,51 @@ Ref<Texture2D> texture_from_retail_mips(
 	return ImageTexture::create_from_image(image);
 }
 
+// Uploads the blocks as they are, so the GPU decodes them as the retail
+// device did. Godot needs the pyramid down to 1x1 where retail stops at 4
+// texels; the tail continues D3DXFilterTexture's box chain, and
+// sample_retail_detail_mips never selects it.
+Ref<Texture2D> texture_from_dxt_levels(
+		const std::vector<opennova::renderer::DxtSurface> &p_levels) {
+	using opennova::renderer::DxtSurface;
+	if (p_levels.empty() || !p_levels.front().is_valid()) {
+		return {};
+	}
+	std::vector<DxtSurface> chain = p_levels;
+	uint32_t expected_width = chain.front().width;
+	uint32_t expected_height = chain.front().height;
+	for (const DxtSurface &level : chain) {
+		if (!level.is_valid() || level.format != chain.front().format ||
+				level.width != expected_width || level.height != expected_height) {
+			return {};
+		}
+		expected_width = std::max(1u, expected_width >> 1);
+		expected_height = std::max(1u, expected_height >> 1);
+	}
+	while (chain.back().width > 1 || chain.back().height > 1) {
+		const DxtSurface last = chain.back();
+		chain.push_back(opennova::renderer::encode_dxt_surface(
+			opennova::renderer::box_filter_half(
+				opennova::renderer::decode_dxt_surface(last), last.width, last.height),
+			std::max(1u, last.width >> 1), std::max(1u, last.height >> 1),
+			last.format));
+	}
+	std::vector<uint8_t> bytes;
+	for (const DxtSurface &level : chain) {
+		bytes.insert(bytes.end(), level.blocks.begin(), level.blocks.end());
+	}
+	const Image::Format format =
+		chain.front().format == opennova::renderer::TextureDxtFormat::Dxt1
+			? Image::FORMAT_DXT1 : Image::FORMAT_DXT5;
+	Ref<Image> image = Image::create_from_data(
+		static_cast<int>(chain.front().width), static_cast<int>(chain.front().height),
+		true, format, to_packed_bytes(bytes));
+	if (image.is_null() || image->is_empty()) {
+		return {};
+	}
+	return ImageTexture::create_from_image(image);
+}
+
 bool live_depth_to_u16(const Ref<TerrainData> &p_data,
 		std::vector<uint16_t> &r_depth, uint32_t &r_width, uint32_t &r_height) {
 	if (p_data.is_null()) {
@@ -183,8 +228,8 @@ void TerrainSurfaceInputs::_bind_methods() {
 		&TerrainSurfaceInputs::get_normalized_blend_texture);
 	ClassDB::bind_method(D_METHOD("get_detail_coefficient_texture"),
 		&TerrainSurfaceInputs::get_detail_coefficient_texture);
-	ClassDB::bind_method(D_METHOD("get_paired_detail_texture", "layer"),
-		&TerrainSurfaceInputs::get_paired_detail_texture);
+	ClassDB::bind_method(D_METHOD("get_detail_layer_texture", "layer"),
+		&TerrainSurfaceInputs::get_detail_layer_texture);
 	ClassDB::bind_method(D_METHOD("get_detail2_texture"),
 		&TerrainSurfaceInputs::get_detail2_texture);
 	ClassDB::bind_method(D_METHOD("has_detail2"),
@@ -197,8 +242,8 @@ void TerrainSurfaceInputs::_bind_methods() {
 		&TerrainSurfaceInputs::has_normalized_blend);
 	ClassDB::bind_method(D_METHOD("has_detail_coefficient"),
 		&TerrainSurfaceInputs::has_detail_coefficient);
-	ClassDB::bind_method(D_METHOD("has_paired_detail", "layer"),
-		&TerrainSurfaceInputs::has_paired_detail);
+	ClassDB::bind_method(D_METHOD("has_detail_layer", "layer"),
+		&TerrainSurfaceInputs::has_detail_layer);
 	ClassDB::bind_method(D_METHOD("has_heightfield_normal"),
 		&TerrainSurfaceInputs::has_heightfield_normal);
 	ClassDB::bind_method(D_METHOD("has_tile_overlay"),
@@ -304,7 +349,7 @@ bool TerrainSurfaceInputs::rebuild_heightfield() {
 
 bool TerrainSurfaceInputs::rebuild_detail_textures() {
 	detail_coefficient_texture.unref();
-	for (auto &texture : paired_detail_textures) {
+	for (auto &texture : detail_layer_textures) {
 		texture.unref();
 	}
 	paired_detail2_texture.unref();
@@ -326,14 +371,14 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		terrain_data->get_detailmap_c2(),
 		terrain_data->get_detailmap_c3(),
 	};
-	if (have_far) {
-		for (int layer = 0; layer < 3; ++layer) {
-			opennova::terrain::Rgba8Image base_source;
-			if (texture_to_rgba8(authored_layers[layer], base_source)) {
-				paired_detail_textures[layer] = texture_from_retail_mips(
-					opennova::terrain::build_paired_detail_mip_chain(
-						base_source, far_source));
-			}
+	// Every layer is the DXT texture retail creates from it, paired with the
+	// far texture when one is authored.
+	for (int layer = 0; layer < 3; ++layer) {
+		opennova::terrain::Rgba8Image base_source;
+		if (texture_to_rgba8(authored_layers[layer], base_source)) {
+			detail_layer_textures[layer] = texture_from_dxt_levels(
+				opennova::terrain::build_detail_layer_levels(
+					base_source, have_far ? &far_source : nullptr));
 		}
 	}
 
@@ -354,9 +399,9 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		}
 	}
 	return detail_coefficient_texture.is_valid() ||
-		paired_detail_textures[0].is_valid() ||
-		paired_detail_textures[1].is_valid() ||
-		paired_detail_textures[2].is_valid() ||
+		detail_layer_textures[0].is_valid() ||
+		detail_layer_textures[1].is_valid() ||
+		detail_layer_textures[2].is_valid() ||
 		paired_detail2_texture.is_valid();
 }
 
@@ -402,7 +447,7 @@ void TerrainSurfaceInputs::clear_derived_textures() {
 	paired_detail2_texture.unref();
 	normalized_blend_texture.unref();
 	heightfield_normal_texture.unref();
-	for (auto &texture : paired_detail_textures) {
+	for (auto &texture : detail_layer_textures) {
 		texture.unref();
 	}
 }
@@ -447,24 +492,24 @@ Ref<Texture2D> TerrainSurfaceInputs::get_blend_texture() const {
 }
 
 Ref<Texture2D> TerrainSurfaceInputs::get_detail_c1_texture() const {
-	if (paired_detail_textures[0].is_valid()) {
-		return paired_detail_textures[0];
+	if (detail_layer_textures[0].is_valid()) {
+		return detail_layer_textures[0];
 	}
 	return terrain_data.is_valid()
 		? terrain_data->get_detailmap_c1() : Ref<Texture2D>();
 }
 
 Ref<Texture2D> TerrainSurfaceInputs::get_detail_c2_texture() const {
-	if (paired_detail_textures[1].is_valid()) {
-		return paired_detail_textures[1];
+	if (detail_layer_textures[1].is_valid()) {
+		return detail_layer_textures[1];
 	}
 	return terrain_data.is_valid()
 		? terrain_data->get_detailmap_c2() : Ref<Texture2D>();
 }
 
 Ref<Texture2D> TerrainSurfaceInputs::get_detail_c3_texture() const {
-	if (paired_detail_textures[2].is_valid()) {
-		return paired_detail_textures[2];
+	if (detail_layer_textures[2].is_valid()) {
+		return detail_layer_textures[2];
 	}
 	return terrain_data.is_valid()
 		? terrain_data->get_detailmap_c3() : Ref<Texture2D>();
@@ -478,9 +523,9 @@ Ref<Texture2D> TerrainSurfaceInputs::get_detail_coefficient_texture() const {
 	return detail_coefficient_texture;
 }
 
-Ref<Texture2D> TerrainSurfaceInputs::get_paired_detail_texture(int p_layer) const {
+Ref<Texture2D> TerrainSurfaceInputs::get_detail_layer_texture(int p_layer) const {
 	return p_layer >= 0 && p_layer < 3
-		? paired_detail_textures[p_layer] : Ref<Texture2D>();
+		? detail_layer_textures[p_layer] : Ref<Texture2D>();
 }
 
 Ref<Texture2D> TerrainSurfaceInputs::get_detail2_texture() const {
@@ -511,8 +556,8 @@ bool TerrainSurfaceInputs::has_detail_coefficient() const {
 	return detail_coefficient_texture.is_valid();
 }
 
-bool TerrainSurfaceInputs::has_paired_detail(int p_layer) const {
-	return p_layer >= 0 && p_layer < 3 && paired_detail_textures[p_layer].is_valid();
+bool TerrainSurfaceInputs::has_detail_layer(int p_layer) const {
+	return p_layer >= 0 && p_layer < 3 && detail_layer_textures[p_layer].is_valid();
 }
 
 bool TerrainSurfaceInputs::has_detail2() const {
@@ -532,9 +577,9 @@ Dictionary TerrainSurfaceInputs::get_diagnostics() const {
 	result["terrain_data_available"] = terrain_data.is_valid();
 	result["normalized_blend"] = has_normalized_blend();
 	result["detail_coefficient"] = has_detail_coefficient();
-	result["paired_detail_c1"] = has_paired_detail(0);
-	result["paired_detail_c2"] = has_paired_detail(1);
-	result["paired_detail_c3"] = has_paired_detail(2);
+	result["detail_layer_c1"] = has_detail_layer(0);
+	result["detail_layer_c2"] = has_detail_layer(1);
+	result["detail_layer_c3"] = has_detail_layer(2);
 	result["paired_detail2"] = has_detail2();
 	result["heightfield_normal"] = has_heightfield_normal();
 	result["tile_overlay_enabled"] = tile_overlay_enabled;

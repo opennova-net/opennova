@@ -24,7 +24,7 @@ private:
 
 	Ref<Texture2D> detail_coefficient_texture;
 	Ref<Texture2D> normalized_blend_texture;
-	Ref<Texture2D> paired_detail_textures[3];
+	Ref<Texture2D> detail_layer_textures[3];
 	Ref<Texture2D> paired_detail2_texture;
 	Ref<Texture2D> heightfield_normal_texture;
 	Ref<Texture2D> tile_overlay_texture;
@@ -62,7 +62,7 @@ public:
 	Ref<Texture2D> get_detail_c3_texture() const;
 	Ref<Texture2D> get_normalized_blend_texture() const;
 	Ref<Texture2D> get_detail_coefficient_texture() const;
-	Ref<Texture2D> get_paired_detail_texture(int p_layer) const;
+	Ref<Texture2D> get_detail_layer_texture(int p_layer) const;
 	Ref<Texture2D> get_detail2_texture() const;
 	Ref<Texture2D> get_heightfield_normal_texture() const;
 	Ref<Texture2D> get_tile_overlay_texture() const;
@@ -71,7 +71,7 @@ public:
 
 	bool has_normalized_blend() const;
 	bool has_detail_coefficient() const;
-	bool has_paired_detail(int p_layer) const;
+	bool has_detail_layer(int p_layer) const;
 	bool has_detail2() const;
 	bool has_heightfield_normal() const;
 	bool has_tile_overlay() const;

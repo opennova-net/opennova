@@ -322,7 +322,9 @@ bool test_ordered_page_composition() {
 			byte((120.0f / 255.0f) * (256.0f / 255.0f)),
 			byte((140.0f / 255.0f) * (256.0f / 255.0f)), 0};
 	const float overlay_alpha = 64.0f / 255.0f;
-	const uint8_t overlay_rgb[3] = {200, 80, 40};
+	// The atlas is DXT5 (flags 0x100203): the solid (200, 80, 40) cell reads
+	// back as its 5:6:5 colour. [orig: Terrain_LoadTileSetAtlas @ 0x604B24]
+	const uint8_t overlay_rgb[3] = {197, 81, 41};
 	for (int channel = 0; channel < 3; ++channel) {
 		expected[channel] = byte(
 				(expected[channel] / 255.0f) * (1.0f - overlay_alpha) +

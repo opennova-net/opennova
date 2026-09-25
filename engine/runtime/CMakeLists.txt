@@ -112,6 +112,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp # the D3DX DXT texture codec
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     renderer/model_mesh_prepare.cpp
     renderer/model_controls.cpp
@@ -440,9 +441,11 @@ set_target_properties(opennova_runtime PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-# Terrain math keeps a stable FP environment with no FMA contraction. Scoped
-# per-source so the rest of the runtime group keeps the default codegen.
+# Terrain math (and the DXT codec its textures pass through) keeps a stable FP
+# environment with no FMA contraction. Scoped per-source so the rest of the
+# runtime group keeps the default codegen.
 set(_opennova_terrain_fp_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lighting.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree.cpp

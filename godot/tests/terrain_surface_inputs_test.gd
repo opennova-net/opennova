@@ -16,7 +16,11 @@ func test_full_rebuild_produces_retail_surface_inputs() -> void:
 	assert_true(inputs.has_detail2())
 	assert_false(inputs.has_heightfield_normal())
 	for layer in 3:
-		assert_true(inputs.has_paired_detail(layer))
+		assert_true(inputs.has_detail_layer(layer))
+		# Retail creates the splat detail layers DXT1 on a current adapter
+		# (flags 0x400208); the blocks go to the GPU as they are.
+		assert_eq(inputs.get_detail_layer_texture(layer).get_image().get_format(),
+			Image.FORMAT_DXT1)
 
 	var blend_bytes := inputs.get_normalized_blend_texture().get_image().get_data()
 	assert_eq(int(blend_bytes[0]), 127, "Retail integer normalization should truncate red to 127.")
@@ -71,14 +75,14 @@ func test_partial_rebuilds_replace_only_the_changed_allocation_family() -> void:
 
 	var first_blend: Texture2D = inputs.get_normalized_blend_texture()
 	var first_coefficient: Texture2D = inputs.get_detail_coefficient_texture()
-	var first_c1: Texture2D = inputs.get_paired_detail_texture(0)
+	var first_c1: Texture2D = inputs.get_detail_layer_texture(0)
 
 	var replacement_blend := _solid_image(Color8(32, 128, 96, 255), 4)
 	data.set_detailblendmap(ImageTexture.create_from_image(replacement_blend))
 	assert_true(inputs.rebuild_blend())
 	assert_ne(inputs.get_normalized_blend_texture(), first_blend)
 	assert_same(inputs.get_detail_coefficient_texture(), first_coefficient)
-	assert_same(inputs.get_paired_detail_texture(0), first_c1)
+	assert_same(inputs.get_detail_layer_texture(0), first_c1)
 
 
 func test_null_terrain_reapply_clears_every_material_input() -> void:
