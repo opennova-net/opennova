@@ -1,5 +1,7 @@
 #include <runtime/renderer/render_slot_shadow.h>
 
+#include <runtime/renderer/light_runtime.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -232,6 +234,72 @@ SlotLightPick pick_dominant_light(const std::array<float, 3> &entity_pos,
 	return pick;
 }
 
+SlotDrapeLight drape_attached_light(const SlotPointLight &light, float fade) {
+	SlotDrapeLight out;
+	out.position = light.position;
+	out.range = light.range;
+	// Light_FillD3DPointLight's diffuse is the params colour with the D3D
+	// 1.5x (renderer::point_light_color's D3D leg; the RgbGen multiply
+	// commutes) [orig: Light_FillD3DPointLight @ 0x5aa4a3..0x5aa4de], then
+	// the drape's -(c + lum) * (1 - fade) rescale [orig:
+	// RenderSlot_DrawSilhouetteDrape @ 0x5d5e89..0x5d5f0d].
+	const std::array<float, 3> d3d =
+			point_light_color(light.color, 1.0f, {1.0f, 1.0f, 1.0f}, true);
+	out.diffuse = drape_attached_light_scale(d3d, fade);
+	// atten0 = 1, atten1 = 0, atten2 = 15 / range^2
+	// [orig: Light_FillD3DPointLight @ 0x5aa53e..0x5aa553].
+	out.quadratic = light.attenuation[2];
+	return out;
+}
+
+std::array<float, 3> drape_attached_light_color(const SlotDrapeLight &light,
+		const std::array<float, 3> &patch_point) {
+	// Material ambient 1 x D3DRS_AMBIENT white, plus material diffuse 1 x
+	// light 4 on the (0, 1, 0) patch normal, saturated
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e58 (AMBIENT 0xFFFFFF),
+	// @ 0x5d5f33..0x5d5f4c (material); normals @ 0x5d52b1..0x5d52c3].
+	std::array<float, 3> out{1.0f, 1.0f, 1.0f};
+	if (light.range <= 0.0f) {
+		return out;
+	}
+	const float dx = light.position[0] - patch_point[0];
+	const float dy = light.position[1] - patch_point[1];
+	const float dz = light.position[2] - patch_point[2];
+	const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+	if (d <= 0.0f || d > light.range) {
+		return out;
+	}
+	const float attenuation = 1.0f / (1.0f + light.quadratic * d * d);
+	const float n_dot_l = std::max(0.0f, dy / d);
+	for (int c = 0; c < 3; ++c) {
+		out[c] = std::clamp(1.0f + light.diffuse[c] * attenuation * n_dot_l,
+				0.0f, 1.0f);
+	}
+	return out;
+}
+
+std::array<float, 3> slot_march_start(const std::array<float, 3> &position,
+		bool flags_zero, const std::array<std::array<float, 3>, 3> &basis_columns,
+		const std::array<float, 3> &bbox_center_mission) {
+	// `cmp dword [edi+24h], 0; jz` [orig: RenderSlot_UpdateEntityLight
+	// @ 0x5d6ce7..0x5d6ceb]: a set Flags bit keeps the entity position.
+	if (!flags_zero) {
+		return position;
+	}
+	// The Euler matrix transform of entity+0x1FC, its result loaded as the
+	// march start [orig: @ 0x5d6cfb..0x5d6d20, the load @ 0x5d6d25..0x5d6d2d];
+	// the centre in presentation axes first: (X, Y, Z-up) -> (X, Z, -Y).
+	const std::array<float, 3> local = {bbox_center_mission[0],
+		bbox_center_mission[2], -bbox_center_mission[1]};
+	std::array<float, 3> out = position;
+	for (int axis = 0; axis < 3; ++axis) {
+		out[axis] += basis_columns[0][axis] * local[0] +
+				basis_columns[1][axis] * local[1] +
+				basis_columns[2][axis] * local[2];
+	}
+	return out;
+}
+
 std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		const std::array<float, 3> &direction,
 		const std::function<float(float, float)> &terrain_height,
@@ -297,6 +365,13 @@ SlotPatch slot_patch_bounds(float anchor_x, float anchor_north, int lod) {
 	patch.max_north = origin_north;
 	patch.min_north = origin_north - static_cast<float>(lod);
 	return patch;
+}
+
+float slot_patch_lift(int lod) {
+	// (lod + 1) * 0.004 [orig: RenderSlot_RebuildPatchVertexBuffer
+	// @ 0x5d5201..0x5d5212 — fild slot+0x28, fmul flt_7DB864 — added to
+	// every height sample @ 0x5d529b].
+	return static_cast<float>(lod + 1) * kSlotPatchLiftStep;
 }
 
 std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> shadowztex_pixels() {

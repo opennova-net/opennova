@@ -28,6 +28,7 @@ class EffectLightDirector;
 class LightScene;
 class MissionEnvironment;
 class ObjectModel;
+class Simulation;
 class TerrainData;
 class Weather;
 
@@ -92,6 +93,10 @@ public:
 	void set_light_director(const Ref<EffectLightDirector> &p_director);
 	void set_light_context(const Vector3 &p_gain, int p_time_ms,
 			Weather *p_weather);
+	// The march-start facts source (the entity Flags dword and collision-bbox
+	// centre, retail RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31); none =
+	// every march starts at the entity position.
+	void set_simulation(const Ref<Simulation> &p_sim);
 	// The retail shadow-detail option (0..4) driving the RT chain base and
 	// the refresh cadence. The packaged runtime serves the top setting.
 	void set_shadow_detail(int p_detail);
@@ -219,6 +224,9 @@ private:
 	PackedVector4Array last_silhouette_patches_;
 	PackedVector4Array last_clip_u_;
 	PackedVector4Array last_clip_v_;
+	PackedFloat32Array last_slot_lift_;
+	PackedVector4Array last_light_pos_;
+	PackedVector4Array last_light_diffuse_;
 	struct SlotParamStamp {
 		bool valid = false;
 		Projection mat;
@@ -231,6 +239,7 @@ private:
 	ObjectID environment_node_id_;
 	Ref<TerrainData> terrain_data_;
 	Ref<EffectLightDirector> light_director_;
+	Ref<Simulation> sim_;
 	Vector3 light_gain_ = Vector3(1, 1, 1);
 	int light_time_ms_ = 0;
 	ObjectID weather_id_;

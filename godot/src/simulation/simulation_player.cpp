@@ -73,6 +73,31 @@ int Simulation::get_local_player_mount_target_handle() const {
 	return target != nullptr ? static_cast<int>(target->handle.packed) : INVALID_WIRE_HANDLE;
 }
 
+bool Simulation::slot_march_facts(int p_wire_handle, int p_bms_id,
+		bool p_local_player, bool &r_flags_zero, Vector3 &r_bbox_center) const {
+	// A joiner's kernel holds its own local motor entity, not the host's
+	// numbering the wire handles name: it has no facts to offer.
+	if (!kernel_ || is_joiner()) return false;
+	const opennova::world::Entity *entity = nullptr;
+	if (p_local_player) {
+		entity = kernel_->world.registry.get(kernel_->world.cached.local_player);
+	}
+	if (entity == nullptr && p_wire_handle >= 0 &&
+			p_wire_handle < opennova::world::EntityHandle::kInvalid) {
+		opennova::world::EntityHandle handle;
+		handle.packed = static_cast<uint16_t>(p_wire_handle);
+		entity = kernel_->world.registry.get(handle);
+	}
+	if (entity == nullptr && p_bms_id != 0) {
+		entity = kernel_->world.registry.get(handle_for_bms_id(p_bms_id));
+	}
+	if (entity == nullptr) return false;
+	r_flags_zero = (entity->flags | entity->engine_flags) == 0;
+	r_bbox_center = Vector3(entity->bbox_center.x, entity->bbox_center.y,
+			entity->bbox_center.z);
+	return true;
+}
+
 // One frame of movement keys: the kernel folds the sim-owned stance latch in
 // and runs the witnessed movement-held unscope [orig:
 // Player_PackInputStateToEntity @ 0x4df450]; this binding only converts the

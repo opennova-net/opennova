@@ -17,7 +17,8 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 // docs/render/render-lighting-re.md). A bound slot without an RT draws
 // nothing: its authored-blob leg (@0x5d59d0) is dead in JO. The terrain
 // surface itself stands in for the patch mesh; the projection is evaluated
-// per pixel.
+// per pixel at the patch point the fragment stands for (the terrain point
+// raised by the patch lift).
 //
 // Per slot i:
 //   u_slot_mat_i : world -> (u, v) projector matrix (the stage-0 texgen)
@@ -27,7 +28,21 @@ render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 //                    slot from the entity-to-camera distance (retail:
 //                    RenderSlot_DrawSilhouetteDrape @0x5d5cc4..0x5d5d59 and
 //                    @0x5d5f63..0x5d6008; renderer::drape_sun_ambient);
-//                    a = 0 off (no RT, or culled at >= 80 u), 1 silhouette
+//                    a = 0 off (no RT, or culled at >= 80 u), 1 silhouette;
+//                    white for an attached-light slot, whose term is the
+//                    light below
+//   u_slot_lift[i] : the patch vertices' (lod + 1) * 0.004 u lift above the
+//                    terrain (retail: RenderSlot_RebuildPatchVertexBuffer
+//                    @0x5d5201..0x5d529f; renderer::slot_patch_lift): both
+//                    texgens read the lifted point
+//   u_slot_light_pos[i], u_slot_light_diffuse[i] : an attached-light slot's
+//                    D3D light 4 as (position, range) and (rescaled
+//                    negative diffuse, quadratic attenuation); range 0 = the
+//                    sun leg. The term is sat(1 + diffuse * atten * N.L) on
+//                    the (0, 1, 0) patch normal, atten = 1 / (1 + q d^2)
+//                    inside the range and 0 past it (retail: RenderSlot_Draw-
+//                    SilhouetteDrape @0x5d5e50..0x5d5f4c; renderer::
+//                    drape_attached_light_color)
 //   u_slot_patch[i] : the lod x lod terrain patch the slot is draped over,
 //                    as world (min_x, min_z, max_x, max_z) — retail builds a
 //                    (lod+1)^2 terrain-following mesh of side lod = the
@@ -57,6 +72,9 @@ uniform vec4 u_slot_term[12];
 uniform vec4 u_slot_patch[12];
 uniform vec4 u_slot_clip_u[12];
 uniform vec4 u_slot_clip_v[12];
+uniform float u_slot_lift[12];
+uniform vec4 u_slot_light_pos[12];
+uniform vec4 u_slot_light_diffuse[12];
 // The 32x4 "shadowztex" step, CLAMP + bilinear like retail's sampler.
 uniform sampler2D u_shadowztex : filter_linear, repeat_disable;
 uniform sampler2D u_slot_tex_0 : filter_linear, repeat_disable;
@@ -126,6 +144,21 @@ mat4 slot_matrix(int i) {
 	}
 }
 
+// An attached-light slot's fixed-function colour at one patch point
+// (renderer::drape_attached_light_color).
+vec3 attached_light_color(int i, vec3 patch_point) {
+	vec4 light = u_slot_light_pos[i];
+	vec3 to_light = light.xyz - patch_point;
+	float d = length(to_light);
+	if (d <= 0.0 || d > light.w) {
+		return vec3(1.0);
+	}
+	float attenuation = 1.0 / (1.0 + u_slot_light_diffuse[i].w * d * d);
+	float n_dot_l = max(0.0, to_light.y / d);
+	return clamp(vec3(1.0) + u_slot_light_diffuse[i].rgb * (attenuation * n_dot_l),
+			vec3(0.0), vec3(1.0));
+}
+
 void fragment() {
 	// Each slot is its own fogged multiply pass toward WHITE. The terrain's
 	// apply_terrain_fog is the linear mix(fog colour, colour, visibility), so
@@ -145,17 +178,22 @@ void fragment() {
 				v_world.z < patch.y || v_world.z > patch.w) {
 			continue;
 		}
-		vec4 p = slot_matrix(i) * vec4(v_world, 1.0);
+		// The patch vertex this fragment stands for rides the lift.
+		vec3 patch_point = v_world + vec3(0.0, u_slot_lift[i], 0.0);
+		vec4 p = slot_matrix(i) * vec4(patch_point, 1.0);
 		vec4 s = slot_sample(i, p.xy);
 		// Retail stage 0 ADDs the black-on-white slot RT RGB to the faded
 		// ambient material; stage 1 ADDs shadowztex, and both stages
 		// saturate. Keeping the resolved/filter RGB is significant: an
 		// alpha-product approximation leaves faint partial-coverage tails at
 		// grazing sun angles (RenderSlot_DrawSilhouetteDrape @0x5d5ca0).
-		vec2 zuv = vec2(dot(u_slot_clip_u[i].xyz, v_world) + u_slot_clip_u[i].w,
-				dot(u_slot_clip_v[i].xyz, v_world) + u_slot_clip_v[i].w);
+		vec2 zuv = vec2(dot(u_slot_clip_u[i].xyz, patch_point) + u_slot_clip_u[i].w,
+				dot(u_slot_clip_v[i].xyz, patch_point) + u_slot_clip_v[i].w);
 		float ztex = texture(u_shadowztex, zuv).r;
-		vec3 shadowed = min(vec3(1.0), s.rgb + u_slot_term[i].rgb);
+		vec3 term = u_slot_light_pos[i].w > 0.0
+				? attached_light_color(i, patch_point)
+				: u_slot_term[i].rgb;
+		vec3 shadowed = min(vec3(1.0), s.rgb + term);
 		vec3 slot_factor = min(vec3(1.0), shadowed + vec3(ztex));
 		factor *= mix(vec3(1.0), slot_factor, visibility);
 	}

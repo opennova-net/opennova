@@ -1172,3 +1172,81 @@ func test_windowed_capture_stops_at_the_stage_textures_last_retail_mip_level() -
 				"the ceiling keeps level 0's opaque alpha: a black silhouette")
 	model.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
+
+
+## Retail's drape patch vertices ride (lod + 1) * 0.004 u above the terrain
+## they sample, and both stage texgens read the lifted vertex (retail:
+## RenderSlot_RebuildPatchVertexBuffer @0x5d5201..0x5d529f, the resolution
+## lod + 1 stored @0x5d6da9): the terrain stand-in publishes that lift per slot
+## for its lod.
+func test_drape_texgen_reads_the_lifted_patch_point() -> void:
+	var environment := _environment()
+	_camera()
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(4.0)
+	caster.set_shadow_bound_radii(2.0, 2.0625)
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(caster)
+	assert_true(order >= 0, "the caster owns a capture order")
+	var drape := SlotShadow.get_drape_material()
+	var patches: PackedVector4Array = drape.get_shader_parameter("u_slot_patch")
+	var lifts = drape.get_shader_parameter("u_slot_lift")
+	assert_true(lifts is PackedFloat32Array, "the drape carries the per-slot lift")
+	if order >= 0 and lifts is PackedFloat32Array:
+		var lod := patches[order].z - patches[order].x
+		assert_almost_eq(float(lifts[order]), (lod + 1.0) * 0.004, 0.00001,
+				"lift = (lod + 1) * 0.004 for the lod %s patch" % str(lod))
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
+## An attached-light slot lights its patch with D3D light 4 (retail:
+## RenderSlot_DrawSilhouetteDrape @0x5d5e50..0x5d5f4c): D3DRS_AMBIENT white,
+## a white material, and the Light_FillD3DPointLight fill (@0x5aa450: the
+## params colour x 1.5, range = radius x 1.25, atten2 = 15 / range^2) with
+## its diffuse rescaled to -(c + lum)(1 - fade). The drape publishes that
+## light per slot for the shader's per-point N.L and attenuation, and leaves
+## the slot's material term white; a sun slot publishes no light.
+func test_attached_light_slot_publishes_the_d3d_point_light() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var director := EffectLightDirector.new()
+	var light_position := Vector3(0.0, 2.0, -4.0)
+	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(light_position, 8.0)), 0)
+	shadow.set_light_director(director)
+	shadow.set_light_context(Vector3.ONE, 0, null)
+	var caster := _caster_at(4.0)
+	var term := _single_caster_term(shadow, caster)
+	var order := shadow.get_capture_order_of(caster)
+	var drape := SlotShadow.get_drape_material()
+	var positions = drape.get_shader_parameter("u_slot_light_pos")
+	var diffuses = drape.get_shader_parameter("u_slot_light_diffuse")
+	assert_true(positions is PackedVector4Array and diffuses is PackedVector4Array,
+			"the drape carries the per-slot attached light")
+	if order >= 0 and positions is PackedVector4Array and diffuses is PackedVector4Array:
+		var pos: Vector4 = positions[order]
+		assert_almost_eq(Vector3(pos.x, pos.y, pos.z), light_position,
+				Vector3(0.001, 0.001, 0.001), "the light's world position")
+		assert_almost_eq(pos.w, 10.0, 0.001, "range = radius x 1.25")
+		# White record bytes /256, x 1.5 on the D3D path; lum of a grey equals
+		# the grey, so the rescaled diffuse is -2 x 1.5 x 255/256 at fade 0.
+		var expected := -2.0 * 1.5 * 255.0 / 256.0
+		var diffuse: Vector4 = diffuses[order]
+		for channel in 3:
+			assert_almost_eq(diffuse[channel], expected, 0.001,
+					"channel %d: the rescaled D3D diffuse" % channel)
+		assert_almost_eq(diffuse.w, 15.0 / 100.0, 0.0001, "atten2 = 15 / range^2")
+		for channel in 3:
+			assert_eq(term[channel], 1.0, "the attached slot's material term is white")
+	# Without the light the same caster is a sun slot: no light published.
+	shadow.set_light_director(null)
+	term = _single_caster_term(shadow, caster)
+	positions = drape.get_shader_parameter("u_slot_light_pos")
+	if order >= 0 and positions is PackedVector4Array:
+		assert_eq((positions[order] as Vector4).w, 0.0, "a sun slot publishes no light")
+	assert_lt(term.x, 1.0, "the sun slot darkens through its material term")
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+

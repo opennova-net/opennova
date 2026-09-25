@@ -224,10 +224,12 @@ std::array<float, 3> drape_attached_light_scale(
 
 struct SlotPointLight {
 	std::array<float, 3> position{};  // world units
-	std::array<float, 3> color{};     // 0..1
+	// The Light_GetPointLightParams colour (no D3D-fill boost), 0..1.
+	std::array<float, 3> color{};
 	// D3D attenuation form {constant, linear, quadratic, _}
 	// (light_scene.h SelectedLight::attenuation).
 	std::array<float, 4> attenuation{1.0f, 0.0f, 0.0f, 0.0f};
+	float range = 0.0f;  // radius * 1.25 / 65536 (SelectedLight::range)
 	uint32_t handle = 0;
 };
 
@@ -247,6 +249,34 @@ SlotLightPick pick_dominant_light(const std::array<float, 3> &entity_pos,
 		const std::array<float, 3> &default_direction,
 		const SlotPointLight *lights, size_t light_count, bool interior);
 
+// The attached-light drape light. For a slot whose pick attached a point
+// light, RenderSlot_DrawSilhouetteDrape sets D3DRS_AMBIENT white
+// (@ 0x5d5e50..0x5d5e63), fills D3D light 4 from the attached handle
+// (Light_FillD3DPointLight @ 0x5aa450: the params colour with the 1.5x D3D
+// boost, range = radius * 1.25 / 65536, attenuation {1, 0, 15 / range^2}),
+// rescales its diffuse by drape_attached_light_scale, enables it
+// (@ 0x5d5e79..0x5d5f23) and draws the patch with material diffuse =
+// ambient = 1 (@ 0x5d5f25..0x5d5f4c). A failed fill leaves light 4 unset
+// and the same white material: that drape darkens nothing.
+struct SlotDrapeLight {
+	std::array<float, 3> position{};  // world units
+	float range = 0.0f;               // 0 = no light (the sun leg)
+	std::array<float, 3> diffuse{};   // the rescaled, negative diffuse
+	float quadratic = 0.0f;           // atten2 = 15 / range^2
+};
+SlotDrapeLight drape_attached_light(const SlotPointLight &light, float fade);
+
+// The fixed-function colour that light gives one patch vertex. The patch
+// normal is (0, 1, 0) (RenderSlot_RebuildPatchVertexBuffer @ 0x5d52b1..
+// 0x5d52c3) and the material diffuse and ambient are 1 under a white
+// D3DRS_AMBIENT, so
+//   colour_c = sat(1 + diffuse_c * atten * max(0, L.y)),
+// atten = 1 / (1 + quadratic * d^2) within the light's range and 0 past it
+// (the D3D point-light rule), L = normalize(light - vertex). The drape
+// shader evaluates the same law at every fragment's lifted patch point.
+std::array<float, 3> drape_attached_light_color(const SlotDrapeLight &light,
+		const std::array<float, 3> &patch_point);
+
 // ---------------------------------------------------------------------------
 // Anchor march [orig: RenderSlot_UpdateEntityLight @ 0x5d6c86..0x5d6d67]
 // ---------------------------------------------------------------------------
@@ -261,16 +291,27 @@ inline constexpr float kSlotTerrainHeightQuantumUnits = 1.0f / 256.0f;
 float slot_march_start_height(float caster_height, float terrain_height,
 		float contact_tolerance);
 
-// Marches from the entity position along the (downward) slot direction in
-// unit-planar steps until the terrain height reaches the ray; the vertical
-// step keeps the direction's own rate and is SUBSTITUTED by 0.5 u of drop
-// only when it would not descend (fixed -32768 stored for a non-negative
-// step [orig: @ 0x5d6cd7..0x5d6cdf]). The anchor PLACES the drape patch
-// (slot_patch_bounds); the projected UV matrices land the silhouette.
-// Coordinates are (x, z planar, y vertical up). Returns the planar anchor.
-// march start is the entity position (retail substitutes the rotated
-// bbox-center anchor when the entity flag word is zero
-// [orig: @ 0x5d6ce7..0x5d6d2d]).
+// The march start [orig: RenderSlot_UpdateEntityLight @ 0x5d6ce7..0x5d6d31]:
+// an entity whose Flags dword (entity+0x24) is zero starts from its
+// collision-bbox centre (entity+0x1FC: model-local mission axes, the
+// authored scale folded) rotated by the entity's Euler matrix and placed at
+// its position (Math_BuildFixedPointMatrixFromEulerAngles(entity+4), then
+// Math_FixedPointTransformPoint22); any set bit starts the march at the
+// position itself. Presentation axes (x, z planar, y up): `basis_columns`
+// is the entity's orthonormal presentation rotation (columns x, y, z) and
+// the mission centre (X, Y, Z-up) maps to (X, Z, -Y) before it rotates.
+std::array<float, 3> slot_march_start(const std::array<float, 3> &position,
+		bool flags_zero, const std::array<std::array<float, 3>, 3> &basis_columns,
+		const std::array<float, 3> &bbox_center_mission);
+
+// Marches from the start (slot_march_start) along the (downward) slot
+// direction in unit-planar steps until the terrain height reaches the ray;
+// the vertical step keeps the direction's own rate and is SUBSTITUTED by
+// 0.5 u of drop only when it would not descend (fixed -32768 stored for a
+// non-negative step [orig: @ 0x5d6cd7..0x5d6cdf]). The anchor PLACES the
+// drape patch (slot_patch_bounds); the projected UV matrices land the
+// silhouette. Coordinates are (x, z planar, y vertical up). Returns the
+// planar anchor.
 std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		const std::array<float, 3> &direction,
 		const std::function<float(float, float)> &terrain_height,
@@ -294,6 +335,16 @@ struct SlotPatch {
 	float max_north = 0.0f;
 };
 SlotPatch slot_patch_bounds(float anchor_x, float anchor_north, int lod);
+
+// Every patch vertex rides (lod + 1) * 0.004 u above the terrain height it
+// samples [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5201..0x5d5212 —
+// the resolution slot+0x28 (= lod + 1, stored @ 0x5d6da9..0x5d6dac) times
+// flt_7DB864 = 0.004, added to each Terrain_GetHeightAtPosition sample
+// @ 0x5d529b]. The stage texgens read that lifted vertex, so a light ray
+// meets the patch earlier than the ground: at the 0.25 vertical clamp a
+// lod-20 patch (0.084 u) shortens the shadow by about 0.33 u.
+inline constexpr float kSlotPatchLiftStep = 0.004f;  // flt_7DB864
+float slot_patch_lift(int lod);
 
 // ---------------------------------------------------------------------------
 // The depth-clip stage [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0 ->

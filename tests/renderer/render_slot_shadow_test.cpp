@@ -214,6 +214,67 @@ int main() {
 		CHECK(near_f(scale[0], -1.0f));
 	}
 
+	// --- the march start: the rotated collision-bbox centre when the
+	// entity Flags dword is zero, else the position
+	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6ce7..0x5d6d31].
+	{
+		const std::array<float, 3> pos{10.0f, 2.0f, -5.0f};
+		const std::array<std::array<float, 3>, 3> identity{{
+				{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
+		// Mission centre (1, 2, 1.5): presentation (1, 1.5, -2).
+		const auto start = slot_march_start(pos, true, identity, {1.0f, 2.0f, 1.5f});
+		CHECK(near_f(start[0], 11.0f) && near_f(start[1], 3.5f) &&
+				near_f(start[2], -7.0f));
+		// A set Flags bit keeps the entity position.
+		const auto flagged = slot_march_start(pos, false, identity, {1.0f, 2.0f, 1.5f});
+		CHECK(near_f(flagged[0], 10.0f) && near_f(flagged[1], 2.0f) &&
+				near_f(flagged[2], -5.0f));
+		// Yawed 90 degrees about up (x -> -z, z -> x): the local offset rotates.
+		const std::array<std::array<float, 3>, 3> yaw90{{
+				{0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}};
+		const auto turned = slot_march_start(pos, true, yaw90, {1.0f, 2.0f, 1.5f});
+		CHECK(near_f(turned[0], 10.0f - 2.0f) && near_f(turned[1], 3.5f) &&
+				near_f(turned[2], -5.0f - 1.0f));
+	}
+
+	// --- the attached-light drape light: the D3D fill's 1.5x colour
+	// rescaled, lit per patch point on the (0, 1, 0) normal
+	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e50..0x5d5f4c;
+	// Light_FillD3DPointLight @ 0x5aa450].
+	{
+		SlotPointLight point;
+		point.position = {0.0f, 3.0f, 0.0f};
+		point.color = {0.2f, 0.2f, 0.2f};
+		point.range = 10.0f;
+		point.attenuation = {1.0f, 0.0f, 15.0f / 100.0f, 1.0f};
+		const SlotDrapeLight light = drape_attached_light(point, 0.0f);
+		// D3D diffuse 0.3 (0.2 x 1.5), lum 0.3: -(0.3 + 0.3) = -0.6.
+		CHECK(near_f(light.diffuse[0], -0.6f) && near_f(light.diffuse[2], -0.6f));
+		CHECK(near_f(light.range, 10.0f) && near_f(light.quadratic, 0.15f));
+		// Straight below at d = 3: atten 1 / (1 + 0.15 * 9), N.L = 1.
+		const auto below = drape_attached_light_color(light, {0.0f, 0.0f, 0.0f});
+		CHECK(near_f(below[0], 1.0f - 0.6f / (1.0f + 0.15f * 9.0f)));
+		// 4 u to the side at the same height difference: d = 5, N.L = 3/5.
+		const auto side = drape_attached_light_color(light, {4.0f, 0.0f, 0.0f});
+		CHECK(near_f(side[1], 1.0f - 0.6f * 0.6f / (1.0f + 0.15f * 25.0f)));
+		// The N.L term: a point level with the light gets nothing.
+		const auto level = drape_attached_light_color(light, {5.0f, 3.0f, 0.0f});
+		CHECK(near_f(level[0], 1.0f));
+		// Past the D3D range the light has no effect.
+		const auto far = drape_attached_light_color(light, {0.0f, -8.0f, 0.0f});
+		CHECK(near_f(far[0], 1.0f));
+		// The fade scales the diffuse: at fade 1 the patch stays white.
+		const SlotDrapeLight faded = drape_attached_light(point, 1.0f);
+		CHECK(near_f(drape_attached_light_color(faded, {0.0f, 0.0f, 0.0f})[0], 1.0f));
+		// A strong light saturates the colour at black.
+		point.color = {4.0f, 4.0f, 4.0f};
+		const auto black =
+				drape_attached_light_color(drape_attached_light(point, 0.0f), {0.0f, 2.9f, 0.0f});
+		CHECK(near_f(black[0], 0.0f));
+		// No light (the sun leg, or a failed fill): white.
+		CHECK(near_f(drape_attached_light_color(SlotDrapeLight{}, {0.0f, 0.0f, 0.0f})[2], 1.0f));
+	}
+
 	// --- dominant-light pick [orig: RenderSlot_UpdateEntityLight @ 0x5d6a30].
 	{
 		const std::array<float, 3> entity{0.0f, 0.0f, 0.0f};
@@ -313,6 +374,10 @@ int main() {
 		const SlotPatch p20 = slot_patch_bounds(10.3f, 20.6f, 20);
 		CHECK(near_f(p20.min_x, 0.0f) && near_f(p20.max_x, 20.0f));
 		CHECK(near_f(p20.min_north, 12.0f) && near_f(p20.max_north, 32.0f));
+		// The patch lift: (lod + 1) * 0.004 over each height sample
+		// [orig: RenderSlot_RebuildPatchVertexBuffer @ 0x5d5201..0x5d529f].
+		CHECK(near_f(slot_patch_lift(6), 0.028f));
+		CHECK(near_f(slot_patch_lift(20), 0.084f));
 	}
 
 	// --- the depth-clip stage [orig: shadow_system_init_resources

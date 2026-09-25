@@ -406,6 +406,9 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 		point.color = { light.color[0], light.color[1], light.color[2] };
 		point.attenuation = { light.attenuation[0], light.attenuation[1],
 			light.attenuation[2], light.attenuation[3] };
+		// The D3D range the attached-light drape fills light 4 with (retail
+		// Light_FillD3DPointLight @0x5aa532..0x5aa53b).
+		point.range = light.range;
 		point.handle = static_cast<uint32_t>(light.handle.retail_value) |
 				(static_cast<uint32_t>(light.handle.generation) << 16);
 		r_out.push_back(point);
