@@ -22,6 +22,10 @@ it was authored on and to any rig that matches it.
   of a line or after whitespace. The first record is `o3a 1`.
 - A name field (the table, a slot key, a clip, a bone) is a bare token, or
   `"quoted"` when it holds spaces (a bone is named `BN01 Pelvis`).
+- A number is the whole token and finite (no `nan` or `inf`); a whole-number
+  field (`fps`, `frames`, `version`, `flags`, a parent, a trigger word, a
+  duration) is decimal or `0x` hex and within its field's range, so nothing
+  wraps. A record takes exactly its fields: a trailing token is an error.
 - Pivots, translations and event velocities are **mission axes**: x forward,
   y left, z up, metres. A rotation is a quaternion `x y z w` in the same axes.
   The seam converts to the clip's own frame (x side, y up, z forward), which is
@@ -45,7 +49,7 @@ it was authored on and to any rig that matches it.
 
 | Record | Fields | Meaning |
 | --- | --- | --- |
-| `adm` | name | the table this set writes (the file name alone; the path comes from `-o`) |
+| `adm` | name | the table this set writes (the file name alone; `-o` names the file `build` writes, and a different `adm` name is noted, not used) |
 | `row` | key variant [variant ...] | a table row: the `anim_<name>` slot and its clip ring, in the order the file stores. A variant names a clip with or without the `.bad` extension (440 of 5146 retail variants omit it). The engine serves a row from its LAST variant back [orig: `AnimMap_RegisterBoneNode @ 0x40C2D0`] |
 | `clip` | name | opens a clip: the `.bad` file stem `build` writes beside the table |
 | `fps` | n | the clip's own rate; every retail clip ships 30 |
@@ -54,7 +58,7 @@ it was authored on and to any rig that matches it.
 | `version` | n | the record version; 1 (a 24-byte event) unless stated, and 3 retail clips ship 0 (20 bytes, no trigger) |
 | `capsule` | bottom top | one capsule pair for every event, the shape retail's viewmodel clips carry (0.0/0.6 or 1.07/1.07 across the JO `_1st` sets) |
 | `bone` | parent x y z length name | opens a bone: its parent (a lower index, -1 for the root), its pivot (the paired model part's, absolute), its length and its name. The name is the clip's own: a model's part table carries none |
-| `k` | qx qy qz qw [duration] | a key of the open bone, `frames + 1` of them. A `duration` (in frames) states how long the key holds; a bone that gives durations may key any number of times, which is how `DT1RST`, `stgr_RST`, `M60_1i` and the sparsely keyed `DVFLEE1E` are shaped |
+| `k` | qx qy qz qw [duration] | a key of the open bone, `frames + 1` of them. A `duration` (in frames, 1 to 65535) states how long the key holds; a bone that gives one gives it on every key, and may then key any number of times, which is how `DT1RST`, `stgr_RST`, `M60_1i` and the sparsely keyed `DVFLEE1E` are shaped |
 | `tr` | x y z | a frame's displacement of the open bone, `frames + 1` of them (rows 0 to `frames`), under `flags & 2` |
 | `bonepos` | x y z | the open bone's stored `position[3]`, verbatim and in the clip's own frame. `build` derives that field from the pivots, and the field is dead at runtime; `scene` writes this only where the derivation cannot reproduce the bytes (retail's exporter left junk in 6720 of 13517 bones) |
 | `event` | vx vy vz trigger [bottom top] | a frame's event, `frames + 1` of them: the root's step for that frame (the body animates in place and the engine moves the entity by these), the event bit word (`opennova-3di catalog` prints the bits), and the capsule pair when the clip carries its own |
@@ -90,12 +94,15 @@ channel.
 
 ## Validation
 
-The build fails, naming the line, on an unknown record, a malformed field, a
+The build fails, naming the line (a clip the seam refuses is named by the line
+it opens on), on an unknown record, a malformed or trailing field, a quote
+that never closes, an empty row variant, an event capsule with one value, a
 set with no clip, a row outside the `anim_` namespace or naming a clip the set
 lacks, two clips under one name, a clip name or row variant that is not a
 bare file name (`/ \ : | * ? < > "`, a control character, `.` or `..`: `build`
 writes each clip beside the table), a bone whose parent is not a lower index, a
-key list that is neither `frames + 1` long nor accompanied by durations, a key
+key list that is neither `frames + 1` long nor accompanied by durations (a
+bone states a duration on every key or on none), a key
 that is not a unit quaternion, a zero duration, a translation block a flag
 promises and the clip lacks, an event list that is not `frames + 1` long, a
 frame count of zero, or a bone name over 31 characters. Every clip and the

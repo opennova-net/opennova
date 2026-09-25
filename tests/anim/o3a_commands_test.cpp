@@ -114,10 +114,6 @@ int main(int argc, char **argv) {
 	compare("rotated-key", replace(text, " k 0 0 0.173648178 0.984807753",
 								   " k 0 0 0.258819045 0.965925826"),
 			false);
-	// A bone that keys fewer times than the frame count is a sparse channel, not
-	// a malformed one: its keys hold past their durations, which is a different
-	// animation from the dense clip.
-	compare("short-key-list", replace(text, " k 0 0 0.258819045 0.965925826\n", ""), false);
 	compare("fps", replace(text, "fps 30", "fps 15"), false);
 	compare("loop-flag", replace(text, "flags 0x3", "flags 0x2"), false);
 	compare("bone-name", replace(text, "BN03 L Hand", "BN03 R Hand"), false);
@@ -157,6 +153,30 @@ int main(int argc, char **argv) {
 	build("two-clips-one-name", text + "clip walk\nfps 30\nframes 1\n" + root, false);
 	build("record-before-clip", replace(text, "clip walk\nfps 30", "fps 30\nclip walk"), false);
 	build("key-before-bone", replace(text, "bone -1 0 0 0 0.5 \"BN01 Pelvis\"\n", ""), false);
+	// A key list one short of `frames + 1` with no durations is malformed, not
+	// sparse: only a bone that states its durations may key sparsely.
+	build("short-key-list", replace(text, " k 0 0 0.258819045 0.965925826\n", ""), false);
+	build("mixed-durations", replace(text, " k 0 0 0.0871557427 0.996194698\n",
+									 " k 0 0 0.0871557427 0.996194698 1\n"),
+			false);
+	// Every field is whole and in range, and nothing trails a record.
+	build("partial-duration", replace(text, " k 0 0 0.0871557427 0.996194698\n",
+									  " k 0 0 0.0871557427 0.996194698 5x\n"),
+			false);
+	build("nan-pivot", replace(text, "bone 0 0 0 1 0.4", "bone 0 nan 0 1 0.4"), false);
+	build("inf-translation", replace(text, " tr 0 0 0.02", " tr 0 0 inf"), false);
+	build("inf-velocity", replace(text, "event 0.06 0 0 0x1", "event -inf 0 0 0x1"), false);
+	build("trailing-token", replace(text, "fps 30", "fps 30 60"), false);
+	build("trailing-key-token", replace(text, " k 0 0 0.0871557427 0.996194698\n",
+										" k 0 0 0.0871557427 0.996194698 1 2\n"),
+			false);
+	build("wrapping-frames", replace(text, "frames 3", "frames 4294967299"), false);
+	build("wrapping-parent", replace(text, "bone 0 0 0 1 0.4", "bone 4294967296 0 0 1 0.4"), false);
+	build("wrapping-trigger", replace(text, "event 0.06 0 0 0x1", "event 0.06 0 0 0x100000001"),
+			false);
+	build("lone-capsule-value", replace(text, "event 0.06 0 0 0x1", "event 0.06 0 0 0x1 0.5"), false);
+	build("unterminated-quote", replace(text, "\"BN02 Spine\"", "\"BN02 Spine"), false);
+	build("empty-variant", replace(text, "\"walk.bad\" \"walk\"", "\"walk.bad\" \"\" \"walk\""), false);
 
 	// A clip name or a row variant is a bare file stem: `build` writes each
 	// clip beside the table, so a path would write outside it.

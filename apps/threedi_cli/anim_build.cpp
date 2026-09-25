@@ -8,6 +8,8 @@
 
 #include "anim_cli.h"
 
+#include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,18 +33,24 @@ struct Parser {
 	std::string path;
 	int line = 0;
 	std::vector<std::string> errors;
+	// The line each clip opens on, in set order: a seam refusal names it.
+	std::vector<int> clip_lines;
 
-	void error(const std::string &what) {
-		errors.push_back(path + ":" + std::to_string(line) + ": " + what);
+	void error(const std::string &what) { error_at(line, what); }
+	void error_at(int at, const std::string &what) {
+		errors.push_back(path + ":" + std::to_string(at) + ": " + what);
 	}
 };
 
+// A finite number, the whole token: a clip holds no nan or inf anywhere.
 bool read_double(std::istringstream &in, double &out) {
 	std::string token;
 	if (!(in >> token)) return false;
 	char *end = nullptr;
-	out = std::strtod(token.c_str(), &end);
-	return end != nullptr && *end == '\0' && end != token.c_str();
+	const double value = std::strtod(token.c_str(), &end);
+	if (end == token.c_str() || *end != '\0' || !std::isfinite(value)) return false;
+	out = value;
+	return true;
 }
 
 bool read_doubles(std::istringstream &in, double *out, int n) {
@@ -51,24 +59,44 @@ bool read_doubles(std::istringstream &in, double *out, int n) {
 	return true;
 }
 
-// An integer field in decimal or 0x hex (the flag and trigger words).
-bool read_word(std::istringstream &in, long long &out) {
+// An integer field in decimal or 0x hex (the flag and trigger words), the
+// whole token, within [lo, hi]: nothing wraps into a narrower field.
+bool read_word(std::istringstream &in, long long &out, long long lo, long long hi) {
 	std::string token;
 	if (!(in >> token)) return false;
+	const bool hex = token.size() > 2 && token[0] == '0' && (token[1] == 'x' || token[1] == 'X');
 	char *end = nullptr;
-	out = std::strtoll(token.c_str(), &end, 0);
-	return end != nullptr && *end == '\0';
+	errno = 0;
+	const long long value = std::strtoll(token.c_str(), &end, hex ? 16 : 10);
+	if (end == token.c_str() || *end != '\0' || errno == ERANGE || value < lo || value > hi)
+		return false;
+	out = value;
+	return true;
 }
 
+constexpr long long kWordMax = 0xFFFFFFFFll;
+
 // A name field: a bare token, or "a quoted one" that may hold spaces (a bone
-// name is `BN01 Pelvis`).
+// name is `BN01 Pelvis`). A quote that never closes is refused.
 bool read_name(std::istringstream &in, std::string &out) {
 	out.clear();
 	in >> std::ws;
 	if (in.peek() != '"') return static_cast<bool>(in >> out);
 	in.get();
 	std::getline(in, out, '"');
-	return !in.bad();
+	return !in.fail() && !in.eof();
+}
+
+// Whether the record ends here: every record refuses a trailing token.
+bool at_end(std::istringstream &in) {
+	std::string extra;
+	return !(in >> extra);
+}
+
+// Whether no token is left, without taking one: an optional field follows.
+bool at_end_peek(std::istringstream &in) {
+	in >> std::ws;
+	return in.peek() == std::char_traits<char>::eof();
 }
 
 // Strip a comment: `#` at the start of a line or after whitespace, never
@@ -84,11 +112,22 @@ void strip_comment(std::string &line) {
 	}
 }
 
+// Per bone, which of its keys stated a duration: a bone gives one on every
+// key or on none.
+struct BoneKeys {
+	size_t clip = 0;
+	size_t bone = 0;
+	int line = 0;
+	size_t with = 0;
+	size_t without = 0;
+};
+
 void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 	std::string raw;
 	bool header = false;
 	BadBuildClip *clip = nullptr;
 	BadBuildBone *bone = nullptr;
+	std::vector<BoneKeys> bone_keys;
 	while (std::getline(file, raw)) {
 		++ps.line;
 		if (!raw.empty() && raw.back() == '\r') raw.pop_back();
@@ -99,7 +138,7 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 
 		if (!header) {
 			long long version = 0;
-			if (key != "o3a" || !read_word(in, version) || version != 1) {
+			if (key != "o3a" || !read_word(in, version, 1, 1) || !at_end(in)) {
 				ps.error("a clip set starts with `o3a 1`");
 				return;
 			}
@@ -108,28 +147,39 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 		}
 
 		if (key == "adm") {
-			if (!read_name(in, set.adm_name)) ps.error("adm needs a name");
+			if (!read_name(in, set.adm_name) || set.adm_name.empty() || !at_end(in))
+				ps.error("adm needs one name");
 		} else if (key == "row") {
 			BadBuildRow row;
-			if (!read_name(in, row.key)) {
+			if (!read_name(in, row.key) || row.key.empty()) {
 				ps.error("row needs a slot key");
 				continue;
 			}
 			std::string variant;
-			while (read_name(in, variant) && !variant.empty()) row.variants.push_back(variant);
+			bool whole = true;
+			while (whole && !at_end_peek(in)) {
+				whole = read_name(in, variant) && !variant.empty();
+				if (whole) row.variants.push_back(variant);
+			}
+			if (!whole) {
+				ps.error("row '" + row.key + "' names an empty or unterminated clip");
+				continue;
+			}
 			if (row.variants.empty()) ps.error("row '" + row.key + "' names no clip");
 			set.rows.push_back(row);
 		} else if (key == "clip") {
 			set.clips.push_back(BadBuildClip{});
+			ps.clip_lines.push_back(ps.line);
 			clip = &set.clips.back();
 			bone = nullptr;
-			if (!read_name(in, clip->name) || clip->name.empty()) ps.error("clip needs a name");
+			if (!read_name(in, clip->name) || clip->name.empty() || !at_end(in))
+				ps.error("clip needs one name");
 		} else if (clip == nullptr) {
 			ps.error("`" + key + "` before any clip");
 		} else if (key == "fps" || key == "frames" || key == "version" || key == "flags") {
 			long long value = 0;
-			if (!read_word(in, value) || value < 0) {
-				ps.error(key + " needs a whole number");
+			if (!read_word(in, value, 0, kWordMax) || !at_end(in)) {
+				ps.error(key + " needs one whole number from 0 to 0xffffffff");
 				continue;
 			}
 			if (key == "fps") clip->fps = static_cast<uint32_t>(value);
@@ -138,7 +188,7 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			if (key == "flags") clip->flags = static_cast<uint32_t>(value);
 		} else if (key == "capsule") {
 			double pair[2];
-			if (!read_doubles(in, pair, 2)) {
+			if (!read_doubles(in, pair, 2) || !at_end(in)) {
 				ps.error("capsule needs a bottom and a top");
 				continue;
 			}
@@ -150,8 +200,8 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			double pivot[3];
 			double length = 0.0;
 			std::string name;
-			if (!read_word(in, parent) || !read_doubles(in, pivot, 3) || !read_double(in, length) ||
-					!read_name(in, name)) {
+			if (!read_word(in, parent, -1, 0x7FFFFFFFll) || !read_doubles(in, pivot, 3) ||
+					!read_double(in, length) || !read_name(in, name) || !at_end(in)) {
 				ps.error("bone needs a parent, a pivot, a length and a name");
 				continue;
 			}
@@ -162,6 +212,7 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			row.name = name;
 			clip->bones.push_back(row);
 			bone = &clip->bones.back();
+			bone_keys.push_back(BoneKeys{set.clips.size() - 1, clip->bones.size() - 1, ps.line});
 		} else if (key == "k" || key == "tr" || key == "bonepos") {
 			if (bone == nullptr) {
 				ps.error("`" + key + "` before any bone");
@@ -173,25 +224,31 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 					ps.error("k needs four quaternion components");
 					continue;
 				}
-				bone->keys.push_back(BadBuildQuat{q[0], q[1], q[2], q[3]});
-				long long duration = 1;
-				if (read_word(in, duration) && (duration < 1 || duration > 0xFFFF)) {
-					ps.error("a key duration is outside 1..65535");
+				// A duration states how long the key holds; a bone that gives
+				// one gives it on every key, and keeps a table only then.
+				long long duration = 0;
+				const bool stated = !at_end_peek(in);
+				if (stated && (!read_word(in, duration, 1, 0xFFFF) || !at_end(in))) {
+					ps.error("a key duration is one whole number from 1 to 65535");
 					continue;
 				}
-				// One entry per key; an all-ones table is dropped below, so the
-				// seam's own default is what a uniform clip takes.
-				bone->durations.push_back(static_cast<uint16_t>(duration < 1 ? 1 : duration));
+				bone->keys.push_back(BadBuildQuat{q[0], q[1], q[2], q[3]});
+				if (stated) {
+					bone->durations.push_back(static_cast<uint16_t>(duration));
+					++bone_keys.back().with;
+				} else {
+					++bone_keys.back().without;
+				}
 			} else if (key == "tr") {
 				double t[3];
-				if (!read_doubles(in, t, 3)) {
+				if (!read_doubles(in, t, 3) || !at_end(in)) {
 					ps.error("tr needs three components");
 					continue;
 				}
 				bone->translations.push_back(BadBuildVec3{t[0], t[1], t[2]});
 			} else {
 				double p[3];
-				if (!read_doubles(in, p, 3)) {
+				if (!read_doubles(in, p, 3) || !at_end(in)) {
 					ps.error("bonepos needs three components");
 					continue;
 				}
@@ -201,15 +258,19 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 		} else if (key == "event") {
 			double v[3];
 			long long trigger = 0;
-			if (!read_doubles(in, v, 3) || !read_word(in, trigger)) {
+			if (!read_doubles(in, v, 3) || !read_word(in, trigger, 0, kWordMax)) {
 				ps.error("event needs a velocity and a trigger word");
 				continue;
 			}
 			BadBuildEvent ev;
 			ev.velocity = BadBuildVec3{v[0], v[1], v[2]};
-			ev.trigger = static_cast<int32_t>(trigger);
-			double pair[2];
-			if (read_doubles(in, pair, 2)) {
+			ev.trigger = static_cast<int32_t>(static_cast<uint32_t>(trigger));
+			if (!at_end_peek(in)) {
+				double pair[2];
+				if (!read_doubles(in, pair, 2) || !at_end(in)) {
+					ps.error("an event's capsule needs a bottom and a top");
+					continue;
+				}
 				ev.extents_given = true;
 				ev.bottom = pair[0];
 				ev.top = pair[1];
@@ -220,18 +281,24 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 		}
 	}
 	if (!header) ps.error("the file is empty");
-	// A uniform duration table over one key per frame is no table at all: the
-	// reader reads a missing table as ones. A bone that keys a different number
-	// of times keeps its table, uniform or not, because the count is what the
-	// table accounts for (retail's DT1RST, stgr_RST and M60_1i key uniformly
-	// but not once per frame).
-	for (BadBuildClip &c : set.clips) {
-		for (BadBuildBone &b : c.bones) {
-			if (b.keys.size() != static_cast<size_t>(c.frame_count) + 1) continue;
-			bool uniform = true;
-			for (const uint16_t d : b.durations) uniform = uniform && d == 1;
-			if (uniform) b.durations.clear();
+	// A bone keeps a duration table only when its keys state one. A uniform
+	// table over one key per frame is no table at all (the reader reads a
+	// missing table as ones); a bone that keys a different number of times
+	// keeps its table, uniform or not, because the count is what the table
+	// accounts for (retail's DT1RST, stgr_RST and M60_1i key uniformly but not
+	// once per frame).
+	for (const BoneKeys &keys : bone_keys) {
+		BadBuildClip &c = set.clips[keys.clip];
+		BadBuildBone &b = c.bones[keys.bone];
+		if (keys.with != 0 && keys.without != 0) {
+			ps.error_at(keys.line, "bone '" + b.name + "' states a duration on some keys and not "
+												 "on others");
+			continue;
 		}
+		if (b.keys.size() != static_cast<size_t>(c.frame_count) + 1) continue;
+		bool uniform = true;
+		for (const uint16_t d : b.durations) uniform = uniform && d == 1;
+		if (uniform) b.durations.clear();
 	}
 }
 
@@ -310,6 +377,11 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 							 "instead)\n");
 		return 1;
 	}
+	// `-o` names the file; an `adm` record that names another is only noted.
+	if (!set.adm_name.empty() &&
+			(lone || !opennova::strutil::iequals(set.adm_name, out.filename().string())))
+		std::fprintf(stderr, "opennova-3di: note: the set names its table '%s'; -o writes %s\n",
+				set.adm_name.c_str(), out_path);
 
 	// Every clip of a table composes against its reset clip; a lone clip
 	// against its own first key.
@@ -322,11 +394,14 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 	};
 	std::vector<Minted> files;
 	size_t total = 0;
-	for (const BadBuildClip &clip : set.clips) {
+	for (size_t c = 0; c < set.clips.size(); ++c) {
+		const BadBuildClip &clip = set.clips[c];
 		Minted minted;
 		std::string error;
 		if (!bad_build_mint(clip, reset, minted.bytes, &error)) {
-			std::fprintf(stderr, "opennova-3di: clip '%s': %s\n", clip.name.c_str(), error.c_str());
+			// The seam's refusal names the line the clip opens on.
+			std::fprintf(stderr, "%s:%d: clip '%s': %s\n", scene_path, ps.clip_lines[c],
+					clip.name.c_str(), error.c_str());
 			return 1;
 		}
 		// Read the bytes back through the loader's own reader before shipping.
