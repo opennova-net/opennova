@@ -34,10 +34,11 @@ from mathutils import Matrix, Quaternion, Vector
 from . import assembly
 from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, RM_NAME, bone_rows,
                         clip_actions, part_bone, rig_of, rm_of, trigger_value)
-from .export import BONE_RE, PART_RE, axis_basis, clean_name, descendants, is_lod_root
+from .export import (ATTACH_RE, BONE_RE, CENTER_RE, PART_RE, axis_basis, clean_name, descendants,
+                     is_lod_root)
 
-# An object's own transform channels, as a rollback puts them back.
-BASIS_CHANNELS = ("location", "rotation_euler", "rotation_quaternion", "scale")
+# A rigid model's part follows its `!Rig` bone through this constraint.
+FOLLOW = "O3D follow"
 # A clip's own bone name that is a part's label with its BN## in lower case
 # (22 of the 82 retail tables name a weapon's own bones `bn38 bone`).
 LOWER_BONE_RE = re.compile(r"^bn(\d{2})(?: (.*))?$", re.IGNORECASE)
@@ -505,18 +506,21 @@ class Loader:
         """A rigid model's animation rig: an Armature named `!Rig` whose BN##
         bones mirror the model's parts, one per channel the clip carries. The
         model export ignores it (its name starts with `!`) and still reads the
-        PN## empties, which follow their bones, so a first-person weapon's own
-        clips are authored the same way a body's are."""
+        PN## empties, which follow their bones (attach_parts), so a first-person
+        weapon's own clips are authored the same way a body's are."""
         roots = sorted((c for c in self.model.children if is_lod_root(c)),
                        key=lambda o: o.get("_lod_index", 0))
         if not roots:
             raise ImportFailed(f"{self.model.name}: the model has no LOD root")
         root = roots[0]
-        parts = {}
+        parts, centers = {}, {}
         for ob in descendants(root):
             m = PART_RE.match(clean_name(ob.name))
             if m is not None:
                 parts[int(m.group(1)) - 1] = ob
+            m = CENTER_RE.match(clean_name(ob.name))
+            if m is not None:
+                centers[int(m.group(1)) - 1] = ob
         if not parts:
             raise ImportFailed(f"{self.model.name}: the model has neither a rig nor PN## parts")
         rows = clip["bones"]
@@ -524,7 +528,10 @@ class Loader:
             self.note(f"the clip carries {len(rows)} channels, the model {len(parts)} parts; the "
                       "extra channels are dropped")
         count = min(len(rows), len(parts))
-        held = {i: parts[i].matrix_world.copy() for i in parts}
+        # A part's pivot: its `_## center` helper, else its origin (the model
+        # export reads it the same way).
+        pivots = {i: (centers[i] if i in centers else parts[i]).matrix_world.translation.copy()
+                  for i in parts}
         index_of = {ob.name: i for i, ob in parts.items()}
         above = {}
         for i, ob in parts.items():
@@ -547,7 +554,7 @@ class Loader:
             bones = {}
             for i in range(count):
                 eb = edit_bones.new(bone_name(i, rows[i]["name"]))
-                eb.head = (arm.matrix_world.inverted() @ held[i]).translation
+                eb.head = arm.matrix_world.inverted() @ pivots[i]
                 eb.tail = eb.head + Vector((0.0, 0.05, 0.0))
                 eb.use_connect = False
                 bones[i] = eb
@@ -555,37 +562,64 @@ class Loader:
                 parent = rows[i]["parent"]
                 if 0 <= parent < i:
                     bones[i].parent = bones[parent]
-        self.pending = (arm, rows, parts, count, held, above)
+        self.pending = (arm, root, parts, count, pivots, above)
         return arm
 
     def attach_parts(self):
-        """Each part follows its bone's step away from rest, and keeps the model
-        hierarchy in a `~PPx attach` helper, because its Blender parent is now
-        the bone."""
-        arm, rows, parts, count, held, above = self.pending
+        """Each part follows its bone's step away from rest: a Child Of on the
+        bone, measured from the bone's rest. The rig's Rest Position mutes it
+        (a driver), so at rest, where the model export reads every rig, a part
+        is the very matrix it was authored as and the model exports the same
+        bytes; a part hung from its bone would be taken apart into location,
+        rotation and scale instead, and a retail part frame is not orthonormal
+        (Mp5b_1st's scales run 0.9995 to 1.0005). A following part hangs from
+        the LOD root, so it moves once, not again through a part above it, and
+        keeps the model hierarchy in a `~PPx attach` helper: its own when it
+        has one (the helper's position is the part's CXLT row), else a new one
+        at its pivot."""
+        arm, root, parts, count, pivots, above = self.pending
         self.pending = None
         # By NAME through the part order: Blender keeps its bones sorted by name,
         # so the collection's order is not the part order once the clip has
         # labelled them.
         by_part = bone_rows(arm)
+        # Every part's parent matrix before any part moves: a part keeps it as
+        # its parent inverse, so its matrix is the same product it was.
+        into_root = root.matrix_world.inverted_safe()
+        chain = {i: into_root @ parts[i].parent.matrix_world for i in range(count)
+                 if parts[i].parent is not None and parts[i].parent != root}
         for i in range(count):
             ob = parts[i]
-            state = (ob.parent, ob.parent_type, ob.parent_bone, ob.matrix_parent_inverse.copy(),
-                     [(c, getattr(ob, c).copy()) for c in BASIS_CHANNELS])
+            state = (ob.parent, ob.parent_type, ob.parent_bone, ob.matrix_parent_inverse.copy())
             self.undo.append(lambda ob=ob, state=state: restore_parent(ob, state))
-            ob.parent = arm
-            ob.parent_type = "BONE"
-            ob.parent_bone = by_part[i].name
-            ob.matrix_parent_inverse = Matrix.Identity(4)
-            ob.matrix_world = held[i]
-            if i > 0:
-                helper = bpy.data.objects.new(f"~{above[i] + 1:02d} attach", None)
-                helper.empty_display_size = 0.02
-                self.model.users_collection[0].objects.link(helper)
-                self.undo.append(lambda helper=helper: bpy.data.objects.remove(helper))
-                helper.parent = ob
-                helper.matrix_parent_inverse = Matrix.Identity(4)
-                helper.matrix_world = held[i]
+            if i in chain:
+                ob.parent = root
+                ob.matrix_parent_inverse = chain[i]
+            bone = by_part[i]
+            follow = ob.constraints.new("CHILD_OF")
+            follow.name = FOLLOW
+            follow.target = arm
+            follow.subtarget = bone.name
+            follow.inverse_matrix = (arm.matrix_world @ bone.bone.matrix_local).inverted()
+            self.undo.append(lambda ob=ob, follow=follow: drop_follow(ob, follow))
+            rest = follow.driver_add("mute").driver
+            rest.type = "SCRIPTED"
+            var = rest.variables.new()
+            var.name = "rest"
+            var.type = "SINGLE_PROP"
+            var.targets[0].id_type = "ARMATURE"
+            var.targets[0].id = arm.data
+            var.targets[0].data_path = "pose_position"
+            rest.expression = "rest"
+            if i == 0 or any(ATTACH_RE.match(clean_name(c.name)) for c in ob.children):
+                continue
+            helper = bpy.data.objects.new(f"~{above[i] + 1:02d} attach", None)
+            helper.empty_display_size = 0.02
+            self.model.users_collection[0].objects.link(helper)
+            self.undo.append(lambda helper=helper: bpy.data.objects.remove(helper))
+            helper.parent = ob
+            helper.matrix_parent_inverse = Matrix.Identity(4)
+            helper.matrix_world = Matrix.Translation(pivots[i])
 
     # --- the run ------------------------------------------------------------
     def run(self):
@@ -678,14 +712,17 @@ class Loader:
         return f"{len(clips)} clips on {arm.name}", self.notes
 
 
+def drop_follow(ob, follow):
+    follow.driver_remove("mute")
+    ob.constraints.remove(follow)
+
+
 def restore_parent(ob, state):
-    parent, parent_type, parent_bone, inverse, basis = state
+    parent, parent_type, parent_bone, inverse = state
     ob.parent = parent
     ob.parent_type = parent_type
     ob.parent_bone = parent_bone
     ob.matrix_parent_inverse = inverse
-    for channel, value in basis:
-        setattr(ob, channel, value)
 
 
 def rename(arm, name, old):
