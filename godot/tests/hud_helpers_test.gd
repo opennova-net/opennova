@@ -224,16 +224,18 @@ func test_scope_circle_mask_geometry() -> void:
 	# height, as a 130-vertex strip, and the reticle cross plus sixteen grid
 	# diamonds only join it when the SIGHTS card drew no authored row.
 	var surface := Vector2(HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
+	# The surface is retail's inclusive overlay rect (0, 0)..(1023, 767)
+	# [orig: Viewport_SetFullScreen @0x5d30e0].
 	var frame := HudPos.scope_mask_frame(surface, 1024)
 	assert_eq(frame.size(), 9, "The frame reports nine derived terms.")
-	assert_eq(Vector2(frame[0], frame[1]), Vector2(512, 384),
-		"The mask centres on the surface.")
-	assert_almost_eq(frame[2], 480.0, 0.01, "Ring size is (768 >> 3) + (768 >> 1).")
-	assert_almost_eq(frame[3], 340.8, 0.01, "The inner radius is 0.71 of it.")
-	assert_almost_eq(frame[4], 720.0, 0.01,
+	assert_eq(Vector2(frame[0], frame[1]), Vector2(511, 383),
+		"The mask centres on the inclusive rect.")
+	assert_almost_eq(frame[2], 478.0, 0.01, "Ring size is (767 >> 3) + (767 >> 1).")
+	assert_almost_eq(frame[3], 339.38, 0.01, "The inner radius is 0.71 of it.")
+	assert_almost_eq(frame[4], 717.0, 0.01,
 		"The outer radius is 1.5 of it, past the 640 px corner.")
-	assert_almost_eq(frame[5], 1.0, 0.0001, "4:3 gives both mask scales 1.")
-	assert_almost_eq(frame[6], 1.0, 0.0001, "4:3 gives both mask scales 1.")
+	assert_almost_eq(frame[5], 1.00065, 0.0001, "scale_x is 511 / 383 x 0.75.")
+	assert_almost_eq(frame[6], 1.0, 0.0001, "The native 4:3 ratio pins scale_y at 1.")
 	assert_almost_eq(frame[7], 3.2, 0.001, "The arm half thickness is W / 320.")
 	assert_almost_eq(frame[8], 16.0, 0.001, "The tick pitch is W / 64.")
 

@@ -627,7 +627,7 @@ const opennova::hud::ScopeCircleMask *scope_mask_build(const Vector2 &p_surface,
 				? opennova::hud::build_nvg_lens_reticle(0, 0, w - 1, h - 1, screen_w)
 				: opennova::hud::ScopeCircleMask();
 	} else {
-		cache.mask = opennova::hud::build_scope_circle_mask(0, 0, w, h, screen_w,
+		cache.mask = opennova::hud::build_scope_circle_mask(0, 0, w - 1, h - 1, screen_w,
 				p_draw_crosshair, p_aspect_mode);
 	}
 	cache.valid = true;
@@ -731,7 +731,7 @@ PackedFloat32Array HudPos::scope_mask_frame(const Vector2 &p_surface, int p_scre
 		return out;
 	}
 	const opennova::hud::ScopeCircleMaskGeometry g = opennova::hud::scope_circle_mask_geometry(
-			0, 0, w, h, p_screen_width > 0 ? p_screen_width : w, p_aspect_mode);
+			0, 0, w - 1, h - 1, p_screen_width > 0 ? p_screen_width : w, p_aspect_mode);
 	out.resize(9);
 	out[0] = g.center_x;
 	out[1] = g.center_y;

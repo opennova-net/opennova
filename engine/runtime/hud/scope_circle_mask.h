@@ -159,11 +159,13 @@ struct ScopeCircleMask {
 	std::vector<uint16_t> grid_indices;
 };
 
+// (x0, y0)..(x1, y1) is retail's INCLUSIVE overlay rect: the full surface is
+// (0, 0)..(W - 1, H - 1) [orig: Viewport_SetFullScreen @0x5d30e0].
 // `aspect_mode` is the renderer's selected-ratio mode (renderer/aspect_ratio.h):
 // 0..3 are the four literal ratios, anything else (the port's default) is the
-// viewport's own H/W. `screen_width` is the full surface width the cross/grid
-// unit keys on (retail's overlayCtx @0x24C1420), which the viewport rect does
-// not supply.
+// viewport's own H/W, (y1 - y0 + 1) / (x1 - x0 + 1). `screen_width` is the full
+// surface width the cross/grid unit keys on (retail's overlayCtx @0x24C1420),
+// which the viewport rect does not supply.
 ScopeCircleMaskGeometry scope_circle_mask_geometry(int32_t x0, int32_t y0,
 		int32_t x1, int32_t y1, int32_t screen_width, int aspect_mode = -1);
 

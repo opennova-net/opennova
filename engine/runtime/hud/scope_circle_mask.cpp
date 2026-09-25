@@ -189,7 +189,7 @@ ScopeCircleMaskGeometry scope_circle_mask_geometry(int32_t x0, int32_t y0,
 	//  @0x58a920 returns flt_8409EC, the selected H/W ratio
 	//  Render_SetAspectRatioMode @0x58d870 stores]
 	const float ratio = renderer::aspect_height_over_width(aspect_mode,
-			static_cast<float>(x1 - x0), static_cast<float>(y1 - y0));
+			static_cast<float>(x1 - x0 + 1), static_cast<float>(y1 - y0 + 1));
 	g.scale_y = ratio != 0.0f ? 3.0f / (ratio * 4.0f) : 0.0f;
 	// [orig: `((h) >> 3) + ((h) >> 1)` @0x5d1830]
 	const int32_t height = y1 - y0;

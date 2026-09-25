@@ -205,6 +205,7 @@ public:
 		SCOPE_MASK_CROSS = 1,
 		SCOPE_MASK_GRID = 2,
 	};
+	// The surface is retail's inclusive overlay rect (0, 0)..(W - 1, H - 1).
 	// `nvg_lens` builds the NVG lens's reticle instead
 	// (hud/scope_circle_mask.h build_nvg_lens_reticle over the overlay rect
 	// (0, 0)..(W - 1, H - 1)): no ring, the cross and grid at unit scale.
