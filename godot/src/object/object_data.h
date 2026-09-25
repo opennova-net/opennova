@@ -98,7 +98,7 @@ public:
 		MATERIAL_FLAG_ALPHA_INVERT = opennova::threedi::THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
 		MATERIAL_FLAG_TWO_SIDED = opennova::threedi::THREEDI_MATERIAL_FLAG_TWO_SIDED,
 		TEX_FLAG_ANIMATED = opennova::threedi::THREEDI_TEX_FLAG_ANIMATED,
-		TEX_FLAG_CLAMPED = opennova::threedi::THREEDI_TEX_FLAG_CLAMPED,
+		TEX_FLAG_STATE_OVERRIDE = opennova::threedi::THREEDI_TEX_FLAG_STATE_OVERRIDE,
 		TEX_SLOT_DIFFUSE = opennova::threedi::THREEDI_TEX_SLOT_DIFFUSE,
 		TEX_SLOT_DETAIL = opennova::threedi::THREEDI_TEX_SLOT_DETAIL,
 		TEX_SLOT_NORMAL = opennova::threedi::THREEDI_TEX_SLOT_NORMAL,
@@ -171,6 +171,9 @@ public:
 	// loose source dir; null when none does.
 	Ref<Texture2D> load_material_slot_texture(int p_array_index, int p_slot) const;
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
+	// The texture of one flipbook frame row (slot, frame), dispatched by the
+	// row's runtime type; null when the material has no row for that frame.
+	Ref<Texture2D> load_material_anim_frame(int p_index, int p_slot, int p_frame) const;
 	static String canonical_control_register_name(const String &p_name);
 	// Drops the register-name memo; the module terminator calls it so no
 	// godot::String outlives the extension.
@@ -247,6 +250,11 @@ public:
 	bool eval_material_runtime_native(int p_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_values,
 			opennova::renderer::MaterialRuntime &r_runtime) const;
+	// The draw-invariant parameters (routed static colours, constant
+	// generators) and whether any read parameter changes per draw.
+	bool material_static_runtime_native(int p_index,
+			opennova::renderer::MaterialRuntime &r_runtime) const;
+	bool material_runtime_dynamic_native(int p_index) const;
 	int compute_anim_frame_native(int p_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_values) const;
 	Dictionary evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;

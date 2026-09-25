@@ -223,17 +223,19 @@ int main() {
 		expect(hud::sighted_selector_from_def(2u, false), "Flags & 2 is Sighted");
 		expect(!hud::sighted_selector_from_def(2u, true), "SWITCHFROM clears the Sighted byte");
 
-		// The retail 1024x768 design surface: centre (512, 384), ring size
-		// (768 >> 3) + (768 >> 1) = 480, radii 340.8 / 720, and at the native
-		// 4:3 ratio scale_x == scale_y == 1 (a true circle).
+		// A 1024x768 screen's inclusive overlay rect (0, 0)..(1023, 767)
+		// [orig: Viewport_SetFullScreen @0x5d30e0]: centre (511, 383), ring
+		// size (767 >> 3) + (767 >> 1) = 478, radii 339.38 / 717; the native
+		// 4:3 ratio pins scale_y at 1 and scale_x = 511 / 383 x 0.75, a hair
+		// over 1.
 		const hud::ScopeCircleMaskGeometry g =
-				hud::scope_circle_mask_geometry(0, 0, 1024, 768, 1024);
-		expect(g.center_x == 512.0f && g.center_y == 384.0f, "the mask centres on the rect");
-		expect(g.ring_size == 480.0f, "ring size = (h >> 3) + (h >> 1)");
-		expect(std::abs(g.radius_inner - 340.8f) < .01f, "inner radius = 0.71 * ring size");
-		expect(g.radius_outer == 720.0f, "outer radius = 1.5 * ring size");
-		expect(std::abs(g.scale_x - 1.0f) < .0001f && std::abs(g.scale_y - 1.0f) < .0001f,
-				"4:3 makes both mask scales 1");
+				hud::scope_circle_mask_geometry(0, 0, 1023, 767, 1024);
+		expect(g.center_x == 511.0f && g.center_y == 383.0f, "the mask centres on the rect");
+		expect(g.ring_size == 478.0f, "ring size = (h >> 3) + (h >> 1)");
+		expect(std::abs(g.radius_inner - 339.38f) < .01f, "inner radius = 0.71 * ring size");
+		expect(g.radius_outer == 717.0f, "outer radius = 1.5 * ring size");
+		expect(std::abs(g.scale_x - 1.0006528f) < .00001f && std::abs(g.scale_y - 1.0f) < .0001f,
+				"the native 4:3 ratio: scale_y 1, scale_x 511 / 383 x 0.75");
 		expect(std::abs(g.arm_half_thickness - 3.2f) < .0001f, "arm half thickness = W / 320");
 		expect(std::abs(g.tick_spacing - 16.0f) < .0001f, "tick pitch = W / 64");
 		// The outer radius clears the corner, so the annulus really masks the
@@ -244,28 +246,29 @@ int main() {
 		// A forced 4:3 ratio on a 16:9 surface keeps scale_y at 1 and widens
 		// scale_x, the retail ellipse.
 		const hud::ScopeCircleMaskGeometry wide =
-				hud::scope_circle_mask_geometry(0, 0, 1920, 1080, 1920, 0);
+				hud::scope_circle_mask_geometry(0, 0, 1919, 1079, 1920, 0);
 		expect(std::abs(wide.scale_y - 1.0f) < .0001f, "mode 0 pins scale_y at 1");
-		expect(std::abs(wide.scale_x - (1920.0f / 1080.0f) * 0.75f) < .001f,
-				"scale_x follows the surface ratio");
+		expect(std::abs(wide.scale_x - (959.0f / 539.0f) * 0.75f) < .0001f,
+				"scale_x follows the rect's centre ratio");
 
 		const hud::ScopeCircleMask rowless =
-				hud::build_scope_circle_mask(0, 0, 1024, 768, 1024, true);
+				hud::build_scope_circle_mask(0, 0, 1023, 767, 1024, true);
 		expect(static_cast<int>(rowless.ring.size()) == hud::kScopeRingVertexCount,
 				"the ring submits 130 strip vertices");
 		expect(rowless.ring_indices.size() == 128u * 3u, "128 triangles expand the strip");
 		expect(rowless.ring[0].argb == hud::kScopeRingInnerColor &&
 						rowless.ring[1].argb == hud::kScopeRingOuterColor,
 				"inner 0xFF181820, outer 0xFF040408");
-		// Segment 0 sits at table index 0: cos 1, sin 0 -> due right of centre.
-		expect(std::abs(rowless.ring[0].x - (512.0f + 340.8f)) < .05f &&
-						std::abs(rowless.ring[0].y - 384.0f) < .05f,
+		// Segment 0 sits at table index 0: cos 1, sin 0 -> due right of centre
+		// (x scaled by scale_x).
+		expect(std::abs(rowless.ring[0].x - 850.6016f) < .05f &&
+						std::abs(rowless.ring[0].y - 383.0f) < .05f,
 				"segment 0 is the inner vertex due right of centre");
-		expect(std::abs(rowless.ring[1].x - (512.0f + 720.0f)) < .05f,
+		expect(std::abs(rowless.ring[1].x - 1228.468f) < .05f,
 				"its outer twin shares the angle");
 		// Segment 16 is a quarter turn: +Y in the table is UP on screen.
-		expect(std::abs(rowless.ring[32].x - 512.0f) < .05f &&
-						std::abs(rowless.ring[32].y - (384.0f - 340.8f)) < .05f,
+		expect(std::abs(rowless.ring[32].x - 511.0f) < .05f &&
+						std::abs(rowless.ring[32].y - (383.0f - 339.38f)) < .05f,
 				"a quarter of the ring is straight up");
 		// The 65th stop closes the loop back onto the first.
 		expect(std::abs(rowless.ring[128].x - rowless.ring[0].x) < .05f &&
@@ -276,53 +279,84 @@ int main() {
 		// radii, breaking at 0.4, with the half-thickness across the axis.
 		expect(rowless.crosshair.size() == 28u && rowless.crosshair_indices.size() == 72u,
 				"four 7-vertex spokes");
-		expect(rowless.crosshair[0].x == 512.0f && rowless.crosshair[0].y == 384.0f &&
+		expect(rowless.crosshair[0].x == 511.0f && rowless.crosshair[0].y == 383.0f &&
 						rowless.crosshair[0].argb == hud::kScopeCrosshairCenterColor,
 				"each spoke starts at the centre with alpha 0x20");
-		// Every endpoint passes through retail's ftol truncation, and the
-		// float 0.4 / 0.71 literals sit just off the round value: 0.4 * 480 is
-		// 192.0000029, so cx - it truncates DOWN to 319, and 0.71 * 480 is
-		// 340.7999897, so cx - it truncates to 171.
+		// Every endpoint passes through retail's ftol truncation: A = scale_x x
+		// 478 = 478.31, so cx - 0.4 A = 319.68 truncates to 319 and cx - 0.71 A
+		// = 171.40 to 171.
 		expect(rowless.crosshair[2].x == 319.0f &&
 						rowless.crosshair[2].argb == hud::kScopeCrosshairAxisColor,
-				"the left spoke breaks at trunc(cx - 0.4 * 480) = 319");
+				"the left spoke breaks at trunc(cx - 0.4 A) = 319");
 		expect(rowless.crosshair[5].x == 171.0f,
-				"its outer end is trunc(cx - 0.71 * 480) = 171");
+				"its outer end is trunc(cx - 0.71 A) = 171");
 		expect(rowless.crosshair[1].argb == hud::kScopeCrosshairEdgeColor &&
-						std::abs(rowless.crosshair[1].y - (384.0f - 3.2f)) < .001f,
+						std::abs(rowless.crosshair[1].y - (383.0f - 3.2f)) < .001f,
 				"the off-axis vertices are transparent at +/- W/320");
 		expect(rowless.crosshair[7 + 2].y == 191.0f &&
-						rowless.crosshair[7 + 2].x == 512.0f,
-				"spoke 1 runs up to trunc(cy - 0.4 * 480) = 191");
+						rowless.crosshair[7 + 2].x == 511.0f,
+				"spoke 1 runs up to trunc(cy - 0.4 * 478) = 191");
 		expect(rowless.crosshair[7 + 5].y == 43.0f, "and out to 43");
-		expect(rowless.crosshair[14 + 2].x == 704.0f &&
-						rowless.crosshair[14 + 5].x == 852.0f,
-				"spoke 2 runs right (704 / 852)");
-		expect(rowless.crosshair[21 + 2].y == 576.0f &&
-						rowless.crosshair[21 + 5].y == 724.0f,
-				"spoke 3 runs down (576 / 724)");
+		expect(rowless.crosshair[14 + 2].x == 702.0f &&
+						rowless.crosshair[14 + 5].x == 850.0f,
+				"spoke 2 runs right (702 / 850)");
+		expect(rowless.crosshair[21 + 2].y == 574.0f &&
+						rowless.crosshair[21 + 5].y == 722.0f,
+				"spoke 3 runs down (574 / 722)");
 
 		// The grid: 4 ticks per direction at i * W/64, unscaled screen pixels.
 		expect(rowless.grid.size() == 80u && rowless.grid_indices.size() == 192u,
 				"sixteen 5-vertex diamonds");
-		expect(rowless.grid[0].x == 512.0f + 16.0f && rowless.grid[0].y == 384.0f &&
+		expect(rowless.grid[0].x == 511.0f + 16.0f && rowless.grid[0].y == 383.0f &&
 						rowless.grid[0].argb == hud::kScopeGridTickCenterColor,
 				"the first tick is one pitch to the right");
-		expect(rowless.grid[15 * 5].y == 384.0f - 64.0f &&
-						rowless.grid[15 * 5].x == 512.0f,
+		expect(rowless.grid[15 * 5].y == 383.0f - 64.0f &&
+						rowless.grid[15 * 5].x == 511.0f,
 				"the last tick is four pitches up");
 		expect(rowless.grid[1].argb == hud::kScopeGridTickEdgeColor &&
-						std::abs(rowless.grid[1].x - (512.0f + 16.0f + 3.2f)) < .001f,
+						std::abs(rowless.grid[1].x - (511.0f + 16.0f + 3.2f)) < .001f,
 				"the diamond points sit one arm half-thickness out at alpha 0x10");
 
 		// A card that DREW rows suppresses only the cross and the grid; the
 		// annulus is unconditional on the Scoped arm.
 		const hud::ScopeCircleMask carded =
-				hud::build_scope_circle_mask(0, 0, 1024, 768, 1024, false);
+				hud::build_scope_circle_mask(0, 0, 1023, 767, 1024, false);
 		expect(static_cast<int>(carded.ring.size()) == hud::kScopeRingVertexCount,
 				"authored SIGHTS rows never suppress the circle mask");
 		expect(carded.crosshair.empty() && carded.grid.empty(),
 				"they suppress the inner cross and grid only");
+
+		// The NVG Sighted arm lays the card over the 512 square with the
+		// frame's own selected ratio: a 16:9 native frame corrects Y by
+		// 3 / (4 x 0.5625) about 256. [orig: NVG_RenderSceneToTarget
+		// @0x5d08d8..0x5d0927]
+		const hud::SightViewportRect nvg_card = hud::sight_rect_to_viewport_at_ratio(
+				hud::SightRect{256, 288, 768, 480}, 512.0f, 512.0f, 0.5625f);
+		expect(nvg_card.x1 == 128.0f && nvg_card.x2 == 384.0f, "x scales to the 512 square");
+		expect(std::abs(nvg_card.y1 - (256.0f + (192.0f - 256.0f) * (4.0f / 3.0f))) < .01f &&
+						std::abs(nvg_card.y2 - (256.0f + (320.0f - 256.0f) * (4.0f / 3.0f))) < .01f,
+				"y scales to the 512 square, then corrects about 256 by the frame's ratio");
+
+		// The NVG lens's reticle: no annulus, the cross at UNIT scale about
+		// the same centre and ring size -- on a forced 4:3 ratio over a 16:9
+		// surface the spokes stay round where the mask's would stretch.
+		// [orig: NVG_DrawScopedLens @0x5d2798..0x5d27bc]
+		const hud::ScopeCircleMask lens =
+				hud::build_nvg_lens_reticle(0, 0, 1919, 1079, 1920);
+		expect(lens.ring.empty() && lens.ring_indices.empty(), "the lens draws its own ring");
+		expect(lens.geometry.scale_x == 1.0f && lens.geometry.scale_y == 1.0f,
+				"unit scales");
+		expect(lens.geometry.center_x == 959.0f && lens.geometry.center_y == 539.0f &&
+						lens.geometry.ring_size == 673.0f,
+				"the lens's centre and (1079 >> 3) + (1079 >> 1) ring");
+		expect(lens.crosshair.size() == 28u && lens.grid.size() == 80u,
+				"the four spokes and sixteen ticks");
+		// trunc(959 - 0.4 x 673) = 689 and trunc(959 - 0.71 x 673) = 481 on
+		// the left spoke; the up spoke uses the SAME ring at unit scale.
+		expect(lens.crosshair[2].x == 689.0f && lens.crosshair[5].x == 481.0f,
+				"the left spoke at unit scale");
+		expect(lens.crosshair[7 + 2].y == 269.0f && lens.crosshair[7 + 5].y == 61.0f,
+				"the up spoke at unit scale");
 	}
 
 	if (failures != 0) {

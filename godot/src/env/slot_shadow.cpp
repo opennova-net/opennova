@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor_effect.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/rd_texture_format.hpp>
 #include <godot_cpp/classes/rd_texture_view.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
@@ -11,6 +12,7 @@
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -23,15 +25,15 @@
 #include "env/mission_environment.h"
 #include "env/weather.h"
 #include "render/world_environment_lookup.h"
+#include "lights/effect_light_director.h"
 #include "lights/light_scene.h"
 #include "object/object_model.h"
-#include "resource_index/resource_root.h"
+#include "render/visual_layers.h"
 #include "terrain/terrain_data.h"
 
 namespace godot {
 
 Ref<ShaderMaterial> SlotShadow::drape_material_;
-Ref<ShaderMaterial> SlotShadow::blob_material_;
 int SlotShadow::live_instances_ = 0;
 Ref<ImageTexture> SlotShadow::shadowztex_;
 Ref<Texture2DRD> SlotShadow::capture_textures_[opennova::renderer::kSlotCaptureCount];
@@ -92,19 +94,12 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	drape_material_.instantiate();
 	drape_material_->set_shader(shader);
 	reset_material_slots(drape_material_);
-	blob_material_.instantiate();
-	blob_material_->set_shader(shader);
-	reset_material_slots(blob_material_);
-	// The authored-blob pass chains behind the silhouette pass: retail draws
-	// both legs over the same patches in the same drape walk
-	// [orig: RenderSlot_DrawAllDrapes @0x5d6e54..0x5d6ec4, see
-	// docs/render/render-lighting-re.md].
-	drape_material_->set_next_pass(blob_material_);
-	// The drape distance fade thresholds — opennova::renderer::drape_fade owns them.
-	const Vector2 fade_range(opennova::renderer::kDrapeFadeStartUnits,
-			opennova::renderer::kDrapeFadeEndUnits - opennova::renderer::kDrapeFadeStartUnits);
-	drape_material_->set_shader_parameter("u_drape_fade_range", fade_range);
-	blob_material_->set_shader_parameter("u_drape_fade_range", fade_range);
+	// Retail draws the drapes right after the terrain batch, before the
+	// sector models, entities and every transparent pass (retail:
+	// Terrain_RenderMainSectorPass — Terrain_RenderSectorBatchLit @0x610c34, then
+	// RenderSlot_DrawAllDrapes @0x610c47), so the multiply lands on the
+	// terrain alone: first among the transparents here.
+	drape_material_->set_render_priority(Material::RENDER_PRIORITY_MIN);
 	// The depth-clip stage's texture: the witnessed 32x4 ARGB step, sampled
 	// CLAMP + bilinear by the shader's sampler hints [orig:
 	// shadow_system_init_resources @0x5d6260..0x5d62d7 — the planner carries
@@ -150,7 +145,6 @@ int SlotShadow::get_capture_count() {
 
 void SlotShadow::cleanup_statics() {
 	drape_material_.unref();
-	blob_material_.unref();
 	shadowztex_.unref();
 	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
 		capture_textures_[i].unref();
@@ -171,15 +165,17 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_environment_node);
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "terrain"),
 			&SlotShadow::set_terrain_data);
+	ClassDB::bind_method(D_METHOD("set_light_director", "director"),
+			&SlotShadow::set_light_director);
 	ClassDB::bind_method(
 			D_METHOD("set_light_context", "gain", "time_ms", "weather"),
 			&SlotShadow::set_light_context);
-	ClassDB::bind_method(D_METHOD("set_resource_root", "root"),
-			&SlotShadow::set_resource_root);
 	ClassDB::bind_method(D_METHOD("set_shadow_detail", "detail"),
 			&SlotShadow::set_shadow_detail);
 	ClassDB::bind_method(D_METHOD("set_local_player_model", "model"),
 			&SlotShadow::set_local_player_model);
+	ClassDB::bind_method(D_METHOD("set_local_player_parent_model", "model"),
+			&SlotShadow::set_local_player_parent_model);
 	ClassDB::bind_method(
 			D_METHOD("set_local_player_first_person", "first_person"),
 			&SlotShadow::set_local_player_first_person);
@@ -204,6 +200,8 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::is_capture_effect_installed);
 	ClassDB::bind_method(D_METHOD("get_capture_image", "order"),
 			&SlotShadow::get_capture_image);
+	ClassDB::bind_method(D_METHOD("get_patch_vertices", "order"),
+			&SlotShadow::get_patch_vertices);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_drape_material"),
 			&SlotShadow::get_drape_material);
 }
@@ -215,11 +213,17 @@ void SlotShadow::set_environment_node(MissionEnvironment *p_environment) {
 }
 
 void SlotShadow::set_terrain_data(const Ref<TerrainData> &p_terrain) {
+	if (terrain_data_ != p_terrain) {
+		// The patch heights sample the terrain: a new field rebuilds them.
+		for (PatchMesh &patch : patch_meshes_) {
+			patch.built = false;
+		}
+	}
 	terrain_data_ = p_terrain;
 }
 
-void SlotShadow::set_light_scene(const Ref<LightScene> &p_scene) {
-	light_scene_ = p_scene;
+void SlotShadow::set_light_director(const Ref<EffectLightDirector> &p_director) {
+	light_director_ = p_director;
 }
 
 void SlotShadow::set_light_context(const Vector3 &p_gain, int p_time_ms,
@@ -230,14 +234,6 @@ void SlotShadow::set_light_context(const Vector3 &p_gain, int p_time_ms,
 									   : ObjectID();
 }
 
-void SlotShadow::set_resource_root(const Ref<ResourceRoot> &p_root) {
-	if (resource_root_ == p_root) {
-		return;
-	}
-	resource_root_ = p_root;
-	blob_textures_.clear();
-}
-
 void SlotShadow::set_shadow_detail(int p_detail) {
 	shadow_detail_ = CLAMP(p_detail, 0, 4);
 }
@@ -245,6 +241,12 @@ void SlotShadow::set_shadow_detail(int p_detail) {
 void SlotShadow::set_local_player_model(ObjectModel *p_model) {
 	local_player_id_ = p_model != nullptr ? ObjectID(p_model->get_instance_id())
 										  : ObjectID();
+}
+
+void SlotShadow::set_local_player_parent_model(ObjectModel *p_model) {
+	local_player_parent_id_ = p_model != nullptr
+			? ObjectID(p_model->get_instance_id())
+			: ObjectID();
 }
 
 void SlotShadow::set_local_player_first_person(bool p_first_person) {
@@ -472,6 +474,118 @@ void SlotShadow::_release_captures() {
 	capture_orders_.clear();
 	armed_capture_mask_ = 0;
 	_clear_all_terms();
+	_release_patches();
+}
+
+// The drape patch of one order [orig: RenderSlot_DrawSilhouetteDrape
+// @0x5d5ca0 -> RenderSlot_RebuildPatchVertexBuffer @0x5d5130, the rebuild
+// gate @0x5d51a3..0x5d51bc: origin, lod and resolution unchanged keep the
+// vertices]. The vertices are world positions (identity instance); the
+// shared drape material reads the order from its instance uniform.
+void SlotShadow::_draw_patch(int p_order, const opennova::renderer::SlotPatch &p_patch,
+		int p_lod) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr || !is_inside_tree() || get_world_3d().is_null()) {
+		return;
+	}
+	PatchMesh &slot = patch_meshes_[p_order];
+	if (!slot.mesh.is_valid()) {
+		slot.mesh = rs->mesh_create();
+		slot.instance = rs->instance_create2(slot.mesh, get_world_3d()->get_scenario());
+		rs->instance_set_layer_mask(slot.instance, visual_layers::WORLD);
+		rs->instance_geometry_set_cast_shadows_setting(slot.instance,
+				RenderingServer::SHADOW_CASTING_SETTING_OFF);
+		rs->instance_geometry_set_shader_parameter(slot.instance, "u_slot", p_order);
+		slot.built = false;
+		slot.visible = true;
+	}
+	if (!slot.built || slot.origin_x != p_patch.min_x ||
+			slot.origin_north != p_patch.max_north || slot.lod != p_lod) {
+		const TerrainData *terrain = terrain_data_.is_valid() ? terrain_data_.ptr() : nullptr;
+		opennova::renderer::slot_patch_vertices(p_patch, p_lod,
+				[terrain](float x, float z) {
+					return terrain != nullptr ? terrain->get_height_world(Vector3(x, 0.0f, z))
+											  : 0.0f;
+				},
+				slot.vertices);
+		opennova::renderer::slot_patch_indices(p_lod, patch_indices_scratch_);
+		PackedVector3Array positions;
+		positions.resize(static_cast<int64_t>(slot.vertices.size()));
+		PackedVector3Array normals;
+		normals.resize(positions.size());
+		for (int64_t i = 0; i < positions.size(); ++i) {
+			const std::array<float, 3> &v = slot.vertices[static_cast<size_t>(i)];
+			positions[i] = Vector3(v[0], v[1], v[2]);
+			normals[i] = Vector3(0.0f, 1.0f, 0.0f);
+		}
+		PackedInt32Array indices;
+		indices.resize(static_cast<int64_t>(patch_indices_scratch_.size()));
+		for (int64_t i = 0; i < indices.size(); ++i) {
+			indices[i] = patch_indices_scratch_[static_cast<size_t>(i)];
+		}
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		arrays[Mesh::ARRAY_VERTEX] = positions;
+		arrays[Mesh::ARRAY_NORMAL] = normals;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+		rs->mesh_clear(slot.mesh);
+		rs->mesh_add_surface_from_arrays(slot.mesh, RenderingServer::PRIMITIVE_TRIANGLES, arrays);
+		rs->mesh_surface_set_material(slot.mesh, 0, get_drape_material()->get_rid());
+		slot.origin_x = p_patch.min_x;
+		slot.origin_north = p_patch.max_north;
+		slot.lod = p_lod;
+		slot.built = true;
+	}
+	if (!slot.visible) {
+		rs->instance_set_visible(slot.instance, true);
+		slot.visible = true;
+	}
+}
+
+void SlotShadow::_hide_patches_from(uint32_t p_drawn_mask) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (int order = 0; order < opennova::renderer::kSlotCaptureCount; ++order) {
+		PatchMesh &slot = patch_meshes_[order];
+		if ((p_drawn_mask & (1u << order)) != 0 || !slot.instance.is_valid() || !slot.visible) {
+			continue;
+		}
+		if (rs != nullptr) {
+			rs->instance_set_visible(slot.instance, false);
+		}
+		slot.visible = false;
+	}
+}
+
+void SlotShadow::_release_patches() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (PatchMesh &slot : patch_meshes_) {
+		if (rs != nullptr) {
+			if (slot.instance.is_valid()) {
+				rs->free_rid(slot.instance);
+			}
+			if (slot.mesh.is_valid()) {
+				rs->free_rid(slot.mesh);
+			}
+		}
+		slot = PatchMesh{};
+	}
+}
+
+PackedVector3Array SlotShadow::get_patch_vertices(int p_order) const {
+	PackedVector3Array out;
+	if (p_order < 0 || p_order >= opennova::renderer::kSlotCaptureCount) {
+		return out;
+	}
+	const PatchMesh &slot = patch_meshes_[p_order];
+	if (!slot.visible || !slot.built) {
+		return out;
+	}
+	out.resize(static_cast<int64_t>(slot.vertices.size()));
+	for (int64_t i = 0; i < out.size(); ++i) {
+		const std::array<float, 3> &v = slot.vertices[static_cast<size_t>(i)];
+		out[i] = Vector3(v[0], v[1], v[2]);
+	}
+	return out;
 }
 
 void SlotShadow::_clear_all_terms() {
@@ -481,7 +595,7 @@ void SlotShadow::_clear_all_terms() {
 		return terms;
 	}();
 	get_drape_material()->set_shader_parameter("u_slot_term", zero);
-	blob_material_->set_shader_parameter("u_slot_term", zero);
+	_hide_patches_from(0u);
 	// This direct write bypasses the frame's identical-value elision, so the
 	// stamps must forget what they think is resident.
 	_invalidate_uniform_stamps();
@@ -489,48 +603,32 @@ void SlotShadow::_clear_all_terms() {
 
 void SlotShadow::_invalidate_uniform_stamps() {
 	last_silhouette_terms_ = PackedVector4Array();
-	last_silhouette_patches_ = PackedVector4Array();
 	last_clip_u_ = PackedVector4Array();
 	last_clip_v_ = PackedVector4Array();
-	last_blob_terms_ = PackedVector4Array();
-	last_blob_patches_ = PackedVector4Array();
+	last_light_pos_ = PackedVector4Array();
+	last_light_diffuse_ = PackedVector4Array();
 	drape_mat_stamps_.fill(SlotParamStamp{});
-	blob_stamps_.fill(SlotParamStamp{});
 }
 
-Ref<Texture2D> SlotShadow::_blob_texture(const String &p_name) {
-	if (p_name.is_empty()) {
-		return Ref<Texture2D>();
-	}
-	const Ref<Texture2D> *cached = blob_textures_.getptr(p_name);
-	if (cached != nullptr) {
-		return *cached;
-	}
-	Ref<Texture2D> texture;
-	if (resource_root_.is_valid()) {
-		texture = resource_root_->load_texture(p_name);
-	}
-	blob_textures_[p_name] = texture;
-	return texture;
-}
-
-// World -> (u, v, depth01) projector for a camera-style pose (local -Z
-// forward): the drape samples the capture along the same slot direction it
-// was rendered from [orig: the shared unscaled direction of the capture
-// and drape matrices, setup_shadow_cascade_matrices @0x58d300 /
+// World -> (u, v) projector for a camera-style pose (local -Z forward): the
+// drape samples the capture along the same slot direction it was rendered
+// from [orig: the shared unscaled direction of the capture and drape
+// matrices, setup_shadow_cascade_matrices @0x58d300 /
 // build_shadow_cascade_uv_matrices @0x58cf10 lookat_dir1; the person 4x
-// belongs to the separate depth-clip stage — render_slot_shadow.h].
+// belongs to the separate depth-clip stage — render_slot_shadow.h]. The
+// stage-0 texgen has no depth bound: the capture's own near/far band never
+// clips the drape (the clamped sampler covers the rest of the patch).
 Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
-		float p_half_u, float p_half_v, float p_far) const {
+		float p_half_u, float p_half_v) const {
 	const Transform3D view = p_pose.affine_inverse();
 	const float inv_u = 1.0f / (2.0f * MAX(p_half_u, 0.001f));
 	const float inv_v = 1.0f / (2.0f * MAX(p_half_v, 0.001f));
 	// Columns (godot-cpp Projection(x, y, z, w) takes column vectors):
-	// u = x*inv_u + 0.5, v = 0.5 - y*inv_v (image y-down), depth01 = -z / far.
+	// u = x*inv_u + 0.5, v = 0.5 - y*inv_v (image y-down).
 	const Projection to_uv(
 			Vector4(inv_u, 0, 0, 0),
 			Vector4(0, -inv_v, 0, 0),
-			Vector4(0, 0, -1.0f / MAX(p_far, 0.001f), 0),
+			Vector4(0, 0, 0, 0),
 			Vector4(0.5f, 0.5f, 0, 1));
 	return to_uv * Projection(view);
 }
@@ -639,8 +737,6 @@ void SlotShadow::advance_frame() {
 				info.state.bound_radius = info.capture_radius;
 			}
 			info.state.is_person = record.is_person;
-			info.has_blob_texture = record.has_blob_texture;
-			info.decal_texture = record.decal_texture;
 			info.state.seat_parented = record.seat_parented_ancestor;
 			casters.push_back(info);
 			caster_index[uint64_t(record.id)] = casters.size() - 1;
@@ -666,11 +762,16 @@ void SlotShadow::advance_frame() {
 		if (effect_.is_valid()) {
 			effect_->adapter().clear_frame();
 		}
-		report_bound_ = report_captures_ = report_blobs_ = 0;
+		report_bound_ = report_captures_ = 0;
 		return;
 	}
 
 	const uint64_t local_id = uint64_t(local_player_id_);
+	// The vehicle the local player rides (entity+0x16C) shares the local
+	// player's halved priority and every-frame refresh (retail:
+	// RenderSlot_SortAndAssign @0x5d669c..0x5d66a6; RenderSlot_RenderEntity-
+	// AndChildren @0x5d7707..0x5d7734).
+	const uint64_t local_parent_id = uint64_t(local_player_parent_id_);
 	// The frame-open slot projection direction: get_light_direction now
 	// serves the Godot-axes vector (the util/axes.h x/z swap IS the witnessed
 	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
@@ -684,10 +785,17 @@ void SlotShadow::advance_frame() {
 			Vector3(sun_dir[0], sun_dir[1], sun_dir[2]).normalized();
 	const Vector3 sun_rgb = env->get_sun_light();
 	const Vector3 sky_rgb = env->get_sky_ambient();
+	// The drape fogs with the device's primary fog config — the terrain's —
+	// toward WHITE (retail: RenderSlot_DrawAllDrapes @0x5d6ea1 selects
+	// CD3DDevice_SetFogAndBlendMode mode 3 = primary fog, white fog colour;
+	// the drape technique's intrinsic pass flags 0x1520000 carry FOGENABLE,
+	// shadow_system_init_resources @0x5d62f7). The shader shares the
+	// terrain's fog law and uniforms.
+	env->apply_terrain_uniforms(drape);
 
 	// Build per-caster planner state. capture_links collects (child, parent)
 	// for models linked capture-with another caster. The stamped radii, the
-	// person flag, the decal fact, and the ancestor half of seat_parented
+	// person flag, and the ancestor half of seat_parented
 	// come off the registry record (their mutation sites bump the group
 	// revision); only the live per-frame facts — position, visibility, the
 	// capture-with link — read the node here.
@@ -700,7 +808,15 @@ void SlotShadow::advance_frame() {
 		const Vector3 pos = model->get_global_position();
 		opennova::renderer::SlotCandidateState &state = info.state;
 		state.pos2d = {float(pos.x), float(pos.z)};
-		state.dead = !model->is_visible_in_tree();
+		// Hidden = the sim's present intent (retail Flags & 1), never the
+		// render-occlusion claim: retail's slot pass reads no render gate, so
+		// a caster hidden by the blink or outdoors latch keeps its shadow
+		// (retail: RenderSlot_SortAndAssign @0x5d657d, RenderSlot_DrawAllDrapes
+		// @0x5d6e6a).
+		const bool shown = model->is_occlusion_hidden() ? model->is_present_visible()
+													 : model->is_visible();
+		const Node3D *parent = Object::cast_to<Node3D>(model->get_parent());
+		state.hidden = !shown || (parent != nullptr && !parent->is_visible_in_tree());
 		// A caster parented under another caster renders with its parent in
 		// retail (the seat/standing child walk of the parent's slot RT);
 		// its own slot is excluded.
@@ -711,10 +827,15 @@ void SlotShadow::advance_frame() {
 					{ id, uint64_t(capture_with->get_instance_id()) });
 		}
 		state.on_vehicle = false;
-		state.is_local_player_or_parent = id == local_id;
-		state.interior = false;
+		state.is_local_player_or_parent =
+				id == local_id || (local_parent_id != 0 && id == local_parent_id);
+		// entity+0x1D0: a contained entity zeroes the pick threshold
+		// (retail RenderSlot_UpdateEntityLight @0x5d6adc..0x5d6aed); the
+		// entity lighting feed stamps the same first-blink-hit fact as the
+		// model's interior lerp.
+		ObjectModel *entity_model = model->get_entity_light_owner();
+		state.interior = (entity_model != nullptr ? entity_model : model)->is_interior_lerp();
 		state.dynamic = true;
-		state.has_blob_texture = info.has_blob_texture;
 	}
 
 	const Vector3 cam_pos = camera->get_global_position();
@@ -727,7 +848,7 @@ void SlotShadow::advance_frame() {
 		const size_t *index = caster_index.getptr(id);
 		if (index == nullptr) {
 			opennova::renderer::SlotCandidateState gone;
-			gone.dead = true;
+			gone.hidden = true;
 			return gone;
 		}
 		return casters[*index].state;
@@ -737,28 +858,25 @@ void SlotShadow::advance_frame() {
 
 	PackedVector4Array silhouette_terms;
 	silhouette_terms.resize(opennova::renderer::kSlotCaptureCount);
-	PackedVector4Array blob_terms;
-	blob_terms.resize(opennova::renderer::kSlotCaptureCount);
 	// Per-slot drape patch (world min_x, min_z, max_x, max_z) and the
-	// depth-clip texgen rows for the silhouette pass; the blob pass takes the
-	// same patch (retail drapes both legs over the slot's patch).
-	PackedVector4Array silhouette_patches;
-	silhouette_patches.resize(opennova::renderer::kSlotCaptureCount);
-	PackedVector4Array blob_patches;
-	blob_patches.resize(opennova::renderer::kSlotCaptureCount);
+	// depth-clip texgen rows.
 	PackedVector4Array clip_u;
 	clip_u.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array clip_v;
 	clip_v.resize(opennova::renderer::kSlotCaptureCount);
+	// The attached-light drape light as (position, range) and (rescaled
+	// diffuse, quadratic); range 0 = the sun leg.
+	PackedVector4Array light_pos;
+	light_pos.resize(opennova::renderer::kSlotCaptureCount);
+	PackedVector4Array light_diffuse;
+	light_diffuse.resize(opennova::renderer::kSlotCaptureCount);
 	// The slot's lod x lod patch around the marched anchor
 	// (opennova::renderer::slot_patch_bounds; the march probes TerrainData when set).
 	// Planar mission north is Godot -z, so the patch's north range maps to
 	// z in [-max_north, -min_north].
-	const auto slot_patch = [&](const Vector3 &p_pos, const Vector3 &p_dir,
-									float p_radius, float p_dir_y_raw) {
-		const int base_lod = opennova::renderer::slot_lod_for_radius(p_radius);
-		const int lod = opennova::renderer::grazing_slot_lod(base_lod, p_dir_y_raw);
+	const auto slot_patch = [&](const Vector3 &p_pos, const Vector3 &p_dir, int lod) {
 		std::array<float, 2> anchor = {float(p_pos.x), float(p_pos.z)};
+		// p_pos is the march start (renderer::slot_march_start_offset).
 		if (terrain_data_.is_valid()) {
 			const TerrainData *terrain = terrain_data_.ptr();
 			const auto height_at = [terrain](float x, float z) {
@@ -778,13 +896,11 @@ void SlotShadow::advance_frame() {
 					{float(p_dir.x), float(p_dir.y), float(p_dir.z)},
 					height_at);
 		}
-		const opennova::renderer::SlotPatch patch =
-				opennova::renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
-		return Vector4(patch.min_x, -patch.max_north, patch.max_x,
-				-patch.min_north);
+		return opennova::renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
 	};
-	int blob_cursor = 0;
-	report_bound_ = report_captures_ = report_blobs_ = 0;
+	// The orders whose drape patch draws this frame.
+	uint32_t drawn_patch_mask = 0;
+	report_bound_ = report_captures_ = 0;
 
 	// The retail child walk: models linked capture-with an admitted caster
 	// (held weapons, mounted children) render into the parent's slot
@@ -813,21 +929,38 @@ void SlotShadow::advance_frame() {
 		if (assignment.bound && !assignment.excluded) {
 			++report_bound_;
 		}
-		// The dominant-light pick for every bound slot (the clamped sun by
-		// default; the strongest nearby point light overrides) — retail runs
-		// it from the entity update for silhouette and blob slots alike, so
-		// the blob leg's patch follows the same stored direction [orig:
-		// RenderSlot_UpdateEntityLight @0x5d6a30 <- Entity_UpdateAllEntities].
-		const Vector3 center = model->get_world_bounds().get_center();
+		// Only a slot with a silhouette RT draws anything; the light pick,
+		// patch and depth clip below feed that drape alone.
+		if (!captures) {
+			continue;
+		}
+		// The dominant-light pick (the clamped sun by default; the strongest
+		// nearby point light overrides) [orig: RenderSlot_UpdateEntityLight
+		// @0x5d6a30 <- Entity_UpdateAllEntities]. Every slot quantity keys on
+		// the entity origin (entity+4..+0xC) — the light query box, the pick
+		// distance, the capture's view origin, the drape projection — never on
+		// the render bounds, which move with part animation and RLOD switches
+		// (retail: the query box @0x5d6af1..0x5d6b39, the pick distance origin
+		// @0x5d6bbd..0x5d6bc9, the entity rendered at the view origin by
+		// Entity_RenderWithLODCallback @0x5d6fc4..0x5d6fd9).
+		const Vector3 center = model->get_global_position();
 		opennova::renderer::SlotLightPick pick;
 		pick.direction = {default_dir.x, default_dir.y, default_dir.z};
 		pick.attached_handle = 0;
-		Vector3 attached_color;
-		float attached_atten = 0.0f;
-		if (light_scene_.is_valid() && assignment.bound && !assignment.excluded) {
+		opennova::renderer::SlotPointLight attached_light;
+		bool attached_found = false;
+		if (light_director_.is_valid()) {
 			Weather *weather = Object::cast_to<Weather>(
 					ObjectDB::get_instance(weather_id_));
-			light_scene_->slot_shadow_lights(center, info.state.bound_radius,
+			// The entity's interior light group from its first blink hit
+			// (retail @0x5d6b40..0x5d6b77 -> Lighting_SetInteriorLightGroup).
+			ObjectModel *entity_model = model->get_entity_light_owner();
+			if (entity_model == nullptr) entity_model = model;
+			const int interior_bms = entity_model->get_interior_light_group_bms();
+			const int64_t interior_owner = interior_bms != 0
+					? light_director_->interior_owner_for_bms(interior_bms) : 0;
+			light_director_->scene()->slot_shadow_lights(center, info.state.bound_radius,
+					interior_owner, entity_model->get_interior_light_group_section(),
 					light_gain_, light_time_ms_, weather, slot_lights_);
 			pick = opennova::renderer::pick_dominant_light(
 					{float(center.x), float(center.y), float(center.z)},
@@ -837,16 +970,8 @@ void SlotShadow::advance_frame() {
 			if (pick.attached_handle != 0) {
 				for (const opennova::renderer::SlotPointLight &point : slot_lights_) {
 					if (point.handle == pick.attached_handle) {
-						attached_color = Vector3(point.color[0],
-								point.color[1], point.color[2]);
-						const float dx = center.x - point.position[0];
-						const float dy = center.y - point.position[1];
-						const float dz = center.z - point.position[2];
-						const float d2 = dx * dx + dy * dy + dz * dz;
-						attached_atten = 1.0f /
-								MAX(0.001f,
-										d2 * point.attenuation[2] +
-												point.attenuation[0]);
+						attached_light = point;
+						attached_found = true;
 						break;
 					}
 				}
@@ -863,68 +988,20 @@ void SlotShadow::advance_frame() {
 		const std::array<float, 3> stored_dir = pick.attached_handle != 0
 				? std::array<float, 3>{float(dir.x), float(dir.y), float(dir.z)}
 				: sun_dir;
-		if (!captures) {
-			if (assignment.draws_blob && !assignment.excluded &&
-					blob_cursor < opennova::renderer::kSlotCaptureCount) {
-				// The authored items.def blob decal for a bound slot past
-				// the capture budget: top-down, heading-rotated, sized
-				// w x l with the authored UV offset [orig: the blob drape
-				// @0x5d59d0 — 1/w 1/l UV scale, offset + 0.5 UV center].
-				const Ref<Texture2D> texture = _blob_texture(
-						info.decal_texture);
-				if (texture.is_valid()) {
-					const Vector4 dims = model->get_slot_shadow_decal_dims();
-					const float w = MAX(dims.x, 0.25f);
-					const float l = MAX(dims.y, 0.25f);
-					const Vector3 pos = model->get_global_position();
-					const float heading =
-							float(model->get_global_rotation().y);
-					const Basis yaw(Vector3(0, 1, 0), heading);
-					Transform3D projector;
-					// Top-down projector: local -Z maps to world -Y.
-					projector.basis =
-							yaw * Basis(Vector3(1, 0, 0), -Math_PI / 2.0f);
-					// The authored offset is in UV fractions of the decal.
-					projector.origin = pos +
-							yaw.xform(Vector3(dims.z * w, 0.0f, dims.w * l)) +
-							Vector3(0.0f, 100.0f, 0.0f);
-					const int slot = blob_cursor++;
-					const Projection blob_mat = _drape_projection(projector,
-							w * 0.5f, l * 0.5f, 200.0f);
-					SlotParamStamp &blob_stamp = blob_stamps_[slot];
-					const uint64_t tex_id = texture->get_instance_id();
-					if (!blob_stamp.valid || blob_stamp.tex_id != tex_id) {
-						blob_material_->set_shader_parameter(
-								slot_uniforms().tex[slot], texture);
-					}
-					if (!blob_stamp.valid || blob_stamp.mat != blob_mat) {
-						blob_material_->set_shader_parameter(
-								slot_uniforms().mat[slot], blob_mat);
-					}
-					blob_stamp.valid = true;
-					blob_stamp.tex_id = tex_id;
-					blob_stamp.mat = blob_mat;
-					blob_terms[slot] = Vector4(0, 0, 0, 2.0f);
-					blob_patches[slot] = slot_patch(pos, dir,
-							info.state.bound_radius, dir_y_raw);
-					++report_blobs_;
-				}
-			}
-			continue;
-		}
 
 		// The capture view along the slot direction, sized from the MODEL
 		// sphere [orig: RenderSlot_RenderEntityAndChildren @0x5d7835 —
 		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)]: the witnessed
-		// rotation-only basis (renderer::silhouette_capture_basis, its
-		// zenith degeneracy substituted).
+		// rotation-only look-at mapped into presentation axes
+		// (renderer::slot_capture_view_axes: right-handed, so the back-face
+		// cull keeps the light-facing faces like retail's CULLMODE CCW).
 		const int order = assignment.capture_order;
 		const float radius = info.capture_radius;
 		const float half_extent = opennova::renderer::silhouette_half_extent(radius);
-		const opennova::renderer::SlotCaptureBasis basis =
-				opennova::renderer::silhouette_capture_basis(
+		const opennova::renderer::SlotCaptureViewAxes axes =
+				opennova::renderer::slot_capture_view_axes(
 						{float(dir.x), float(dir.y), float(dir.z)});
-		const Vector3 forward(basis.forward[0], basis.forward[1], basis.forward[2]);
+		const Vector3 forward(-axes.z[0], -axes.z[1], -axes.z[2]);
 		// The RenderingDevice depth band (the device fold D-RLIT-10 in
 		// docs/render/render-lighting-re.md): retail renders the entity at the
 		// origin of that rotation-only view under its 0.2..5000.2 band
@@ -938,16 +1015,15 @@ void SlotShadow::advance_frame() {
 		const float eye_near = opennova::renderer::kSilhouetteCaptureNear * 0.25f;
 		const float eye_far = eye_distance * 2.0f + radius;
 		Transform3D pose;
-		// A Godot camera looks down its local -Z: columns x = right, y = up,
-		// z = -forward.
-		pose.basis = Basis(Vector3(basis.right[0], basis.right[1], basis.right[2]),
-				Vector3(basis.up[0], basis.up[1], basis.up[2]), -forward);
+		pose.basis = Basis(Vector3(axes.x[0], axes.x[1], axes.x[2]),
+				Vector3(axes.y[0], axes.y[1], axes.y[2]),
+				Vector3(axes.z[0], axes.z[1], axes.z[2]));
 		pose.origin = center - forward * eye_distance;
 
 		// The refresh cadence (opennova::renderer::slot_refresh_mask_for carries the
 		// local-player exception).
 		const uint32_t effective_mask = opennova::renderer::slot_refresh_mask_for(
-				shadow_detail_, assignment.id == local_id);
+				shadow_detail_, info.state.is_local_player_or_parent);
 		const int want_size =
 				opennova::renderer::slot_texture_size(order, shadow_detail_);
 		const std::vector<uint64_t> children = claimed_children(assignment.id);
@@ -983,41 +1059,69 @@ void SlotShadow::advance_frame() {
 			continue;
 		}
 
-		// Per-slot drape term.
-		Vector3 q;
+		// The drape distance: the entity-to-camera 3D distance, taken once
+		// per slot. At >= 80 u retail skips the drape outright; inside it the
+		// one fade scales the whole patch's material ambient (retail:
+		// RenderSlot_DrawSilhouetteDrape @0x5d5cc4..0x5d5d59; renderer::
+		// drape_culled / drape_fade). The capture above is unaffected.
+		const Vector3 entity_pos = model->get_global_position();
+		const float camera_distance = float((entity_pos - cam_pos).length());
+		if (opennova::renderer::drape_culled(camera_distance)) {
+			silhouette_terms[order] = Vector4();
+			continue;
+		}
+		const float fade = opennova::renderer::drape_fade(camera_distance);
+
+		// The slot's fixed-function material ambient, per channel.
+		std::array<float, 3> ambient{};
+		light_pos[order] = Vector4();
+		light_diffuse[order] = Vector4();
 		if (pick.attached_handle != 0) {
-			// The attached-light darkening folds the light's attenuation at
-			// the entity into the constant term (retail lights the patch
-			// with the negated color — drape_attached_light_scale; the
-			// per-pixel attenuation across a patch is folded to its center).
-			const std::array<float, 3> scale =
-					opennova::renderer::drape_attached_light_scale(
-							{float(attached_color.x), float(attached_color.y),
-									float(attached_color.z)},
-							0.0f);
-			q = Vector3(CLAMP(-scale[0] * attached_atten, 0.0f, 1.0f),
-					CLAMP(-scale[1] * attached_atten, 0.0f, 1.0f),
-					CLAMP(-scale[2] * attached_atten, 0.0f, 1.0f));
+			// An attached light lights the patch with D3D light 4 over a
+			// white material under a white D3DRS_AMBIENT: the term is 1 plus
+			// the light's negative diffuse at each patch point, which the
+			// shader evaluates (renderer::drape_attached_light and
+			// drape_attached_light_color). A handle the fill cannot read
+			// leaves the white material alone.
+			ambient = {1.0f, 1.0f, 1.0f};
+			if (attached_found) {
+				const opennova::renderer::SlotDrapeLight light =
+						opennova::renderer::drape_attached_light(attached_light, fade);
+				light_pos[order] = Vector4(light.position[0], light.position[1],
+						light.position[2], light.range);
+				light_diffuse[order] = Vector4(light.diffuse[0], light.diffuse[1],
+						light.diffuse[2], light.quadratic);
+			}
 		} else {
-			const std::array<float, 3> term = opennova::renderer::drape_shadow_term(
+			// The sun leg reads the STORED slot vertical — the raw
+			// clamped-negated sun, not its normalized twin (retail: fabs of
+			// slot+0x6C @0x5d5f63).
+			ambient = opennova::renderer::drape_sun_ambient(
 					{float(sun_rgb.x), float(sun_rgb.y), float(sun_rgb.z)},
 					{float(sky_rgb.x), float(sky_rgb.y), float(sky_rgb.z)},
-					dir.y);
-			q = Vector3(term[0], term[1], term[2]);
+					dir_y_raw, fade);
 		}
 		const Projection drape_mat =
-				_drape_projection(pose, half_extent, half_extent, eye_far);
+				_drape_projection(pose, half_extent, half_extent);
 		SlotParamStamp &mat_stamp = drape_mat_stamps_[order];
 		if (!mat_stamp.valid || mat_stamp.mat != drape_mat) {
 			drape->set_shader_parameter(slot_uniforms().mat[order], drape_mat);
 			mat_stamp.valid = true;
 			mat_stamp.mat = drape_mat;
 		}
-		silhouette_terms[order] = Vector4(q.x, q.y, q.z, 1.0f);
-		// The patch around the marched anchor, from the stored direction.
-		const Vector3 entity_pos = model->get_global_position();
-		silhouette_patches[order] =
-				slot_patch(entity_pos, dir, info.state.bound_radius, dir_y_raw);
+		silhouette_terms[order] = Vector4(ambient[0], ambient[1], ambient[2], 1.0f);
+		// The patch around the marched anchor, from the stored direction, at
+		// the grazing-rescaled lod.
+		const int patch_lod = opennova::renderer::grazing_slot_lod(
+				opennova::renderer::slot_lod_for_radius(info.state.bound_radius),
+				dir_y_raw);
+		// The march starts at the rotated collision-bbox centre while the
+		// entity's Flags dword is zero, else at its position (retail:
+		// RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31); every role's
+		// present rows carry that offset (renderer::slot_march_start_offset).
+		const Vector3 march_start = entity_pos + model->get_slot_march_offset();
+		_draw_patch(order, slot_patch(march_start, dir, patch_lod), patch_lod);
+		drawn_patch_mask |= 1u << order;
 		// The depth-clip texgen from the stored direction, the capture half
 		// size and the person steepening (opennova::renderer::slot_depth_clip).
 		const opennova::renderer::SlotDepthClip clip = opennova::renderer::slot_depth_clip(
@@ -1037,10 +1141,6 @@ void SlotShadow::advance_frame() {
 		drape->set_shader_parameter("u_slot_term", silhouette_terms);
 		last_silhouette_terms_ = silhouette_terms;
 	}
-	if (silhouette_patches != last_silhouette_patches_) {
-		drape->set_shader_parameter("u_slot_patch", silhouette_patches);
-		last_silhouette_patches_ = silhouette_patches;
-	}
 	if (clip_u != last_clip_u_) {
 		drape->set_shader_parameter("u_slot_clip_u", clip_u);
 		last_clip_u_ = clip_u;
@@ -1049,14 +1149,15 @@ void SlotShadow::advance_frame() {
 		drape->set_shader_parameter("u_slot_clip_v", clip_v);
 		last_clip_v_ = clip_v;
 	}
-	if (blob_terms != last_blob_terms_) {
-		blob_material_->set_shader_parameter("u_slot_term", blob_terms);
-		last_blob_terms_ = blob_terms;
+	if (light_pos != last_light_pos_) {
+		drape->set_shader_parameter("u_slot_light_pos", light_pos);
+		last_light_pos_ = light_pos;
 	}
-	if (blob_patches != last_blob_patches_) {
-		blob_material_->set_shader_parameter("u_slot_patch", blob_patches);
-		last_blob_patches_ = blob_patches;
+	if (light_diffuse != last_light_diffuse_) {
+		drape->set_shader_parameter("u_slot_light_diffuse", light_diffuse);
+		last_light_diffuse_ = light_diffuse;
 	}
+	_hide_patches_from(drawn_patch_mask);
 	// The armed requests compile into this frame's device draw list; an
 	// unarmed order keeps its previous capture (retail's sticky RT).
 	if (effect_.is_valid()) {
@@ -1110,8 +1211,6 @@ void SlotShadow::_rebuild_caster_records() {
 		record.slot_radius = model->get_entity_bound_radius();
 		record.radius_fallback = record.capture_radius <= 0.0f;
 		record.is_person = model->is_slot_shadow_person();
-		record.decal_texture = model->get_slot_shadow_decal_texture();
-		record.has_blob_texture = !record.decal_texture.is_empty();
 		for (Node *ancestor = model->get_parent(); ancestor != nullptr;
 				ancestor = ancestor->get_parent()) {
 			ObjectModel *parent_model = Object::cast_to<ObjectModel>(ancestor);
@@ -1131,7 +1230,6 @@ Dictionary SlotShadow::get_report() const {
 	Dictionary report;
 	report["bound"] = report_bound_;
 	report["captures"] = report_captures_;
-	report["blobs"] = report_blobs_;
 	report["registered"] = int(plan_.registered_count());
 	report["detail"] = shadow_detail_;
 	report["armed"] = static_cast<int>(requests_.size());

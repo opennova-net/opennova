@@ -58,8 +58,6 @@ struct Q3PackParameters {
 	opennova::renderer::Q3Source source = opennova::renderer::Q3Source::Object;
 	Vector3 uv_u = Vector3(1, 0, 0);
 	Vector3 uv_v = Vector3(0, 1, 0);
-	Vector4 water_uv = Vector4(1.0f, 0.2f, 0.0f, 0.0f);
-	Vector3 camera_position;
 	// GPU-skin packing (the slot capture pass): the bind-space positions stay
 	// unskinned and the surface's bone indices ride CUSTOM0 (as floats) with
 	// the weights in CUSTOM1, so a consumer with a bone-palette buffer skins

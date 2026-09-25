@@ -230,12 +230,14 @@ static func _build_definitions() -> Array[ProbeDef]:
 		ProbeDef.make("perf_sample",
 				"Sample the shell's frame-time counters (world tick legs, the audio "
 				+ "leg, the runtime's sim/present/effects spans) for a fixed window "
-				+ "after a warm-up, vsync off; avg/p95/max per counter and the frame wall time.",
+				+ "after a warm-up, vsync off; avg/p95/max per counter and the frame wall time "
+				+ "(nvg: with the local player's NVG view up).",
 				PERF + "perf_sample_probe.gd", {
 					"warm_ms": { "type": "integer", "minimum": 0, "default": 6000 },
 					"sample_ms": { "type": "integer", "minimum": 100, "default": 10000 },
 					"counters": { "type": "array", "items": { "type": "string" },
 							"default": ["audio", "audio_tick", "present", "sim", "world"] },
+					"nvg": { "type": "boolean", "default": false },
 				}, [], false, true, 120_000),
 		ProbeDef.make("perf_fire",
 				"The full-auto performance probe: equip a clip weapon, tap for the "

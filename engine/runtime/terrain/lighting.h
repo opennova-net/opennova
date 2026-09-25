@@ -14,16 +14,6 @@ namespace opennova::terrain {
 uint32_t terrain_light_color_from_ambient_diffuse_argb(uint32_t ambient_argb,
                                                        uint32_t diffuse_argb) noexcept;
 
-// Engine: [orig: Render_SetFogState @ 0x58a950] -> [orig:
-// CD3DDevice_SetFogParameters @ 0x677960] (re-anchored 2026-06-09; the old
-// 0x54B4B0/0x5F9890 citations were stale and wrong for the retail image —
-// see docs/env/env-tod-re.md).
-// fog_type 0 is exponential with density ln(64) / end. Types 1/2/3 are
-// linear; type 2 starts at 0.5*end and type 3 at 0.25*end (the engine also
-// scales those starts by (1 - overcast density); wired via engine/formats/env).
-float terrain_fog_start_for_type(float fog_end, int fog_type) noexcept;
-float terrain_fog_factor_for_distance(float distance, float fog_end, int fog_type) noexcept;
-
 // Foliage detail-tier parity helper (jodemo Foliage_BuildGeometry @0x5BF5F0 was the
 // pre-retail anchor): the nibble-split four-sample colormap average
 // [orig: generate_foliage_instances_0 @0x5ffdd0 — four sample_terrain_colormap_tinted taps at

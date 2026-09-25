@@ -42,8 +42,9 @@ int converted_index_count(const CptTileLOD &lod, std::vector<uint32_t> &scratch)
 } // namespace
 
 // The unpacked CPT vertices use the same coordinates and locked height taps
-// as the original decoder. Normals are device metadata for the existing debug
-// and cold-cache shader path; retail's packed vertices have no normal channel.
+// as the original decoder. Normals are device metadata for the debug normal
+// view (terrain.gdshader debug mode 3); retail's packed vertices have no
+// normal channel.
 // [orig: decode_terrain_tile_vertices @ 0x602AA0, zero-height store @ 0x602DC9]
 std::vector<TerrainTileVertex> build_terrain_tile_vertices(
 		const CptFile &cpt, const TrnConfig &trn, int tile_index, bool zero_height) {
@@ -89,9 +90,8 @@ std::vector<TerrainTileVertex> build_terrain_tile_vertices(
 
 // [orig: PolyTrn_RenderTile @ 0x60DA70, flat-key canonicalization @ 0x60DA98..0x60DAA8]
 TerrainTileCompositionRequest terrain_tile_composition_request(
-		const TerrainPatchDraw &draw, TerrainTileContentStamp content) {
+		const TerrainPatchDraw &draw) {
 	TerrainTileCompositionRequest request;
-	request.content = content;
 	if (draw.zero_height) return request; // LOD 0, zero coordinates, no mesh identity
 	request.page = {draw.sector_x * 512, draw.sector_z * 512,
 			draw.local_page_x, draw.local_page_z,
@@ -404,11 +404,11 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 		}
 	}
 
-	std::sort(visible_.begin(), visible_.end(),
-			[](const VisiblePatch &a, const VisiblePatch &b) {
-				return a.distance < b.distance;
-			});
-
+	// Retail draws the visible list in emission order: the batch's bubble
+	// sort keys on entry +0x14, which no writer fills (the traversal stores
+	// +0/+4/+8/+0xC/+0x10/+0x18 only), so it never reorders.
+	// [orig: render_terrain_sector_batch sort @ 0x6093C0..0x609550;
+	// Terrain_TraverseQuadtreeNode list stores @ 0x608FDA..0x609006]
 	draw_list_.debug.visible_patches = static_cast<int>(visible_.size());
 	const int count = std::min(static_cast<int>(visible_.size()), kPatchBudget);
 	if (draw_list_.patches.capacity() < static_cast<size_t>(count)) {

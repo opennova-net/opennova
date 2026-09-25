@@ -2236,21 +2236,31 @@ int main() {
 			return 1;
 		if (!expect(ch.cap == 12, "stdred ring cap = the witnessed 12-entry table"))
 			return 1;
-		for (int t = 0; t < 5; ++t) sim.tick(world, nullptr, nullptr);
-		if (!expect(ch.count == 5, "one trail point per tick while alive")) return 1;
-		if (!expect(ch.pts[0].pos.x == 0.0f && ch.pts[0].pos.z == 500.0f,
-		            "the first point is the PRE-move spawn origin"))
+		// A fresh channel starts at count -1: the first tick's pre-move append
+		// (the spawn origin) only lifts it to 0 [orig: CEffectChannel_Init
+		// @ 0x5db233; CEffectChannel_AppendPoint @ 0x5db2c3 -> @ 0x5db333].
+		if (!expect(ch.count == -1, "a fresh channel starts at count -1")) return 1;
+		sim.tick(world, nullptr, nullptr);
+		if (!expect(ch.count == 0, "the first append stores nothing")) return 1;
+		const w::Vec3 after_first_move = sim.rounds[size_t(slot)].pos;
+		for (int t = 0; t < 4; ++t) sim.tick(world, nullptr, nullptr);
+		if (!expect(ch.count == 4, "one trail point per tick after the first")) return 1;
+		if (!expect(ch.pts[0].pos.x == after_first_move.x &&
+		                    ch.pts[0].pos.y == after_first_move.y &&
+		                    ch.pts[0].pos.z == after_first_move.z &&
+		                    !(after_first_move.x == 0.0f && after_first_move.z == 500.0f),
+		            "the first STORED point is the second tick's pre-move point, not the origin"))
 			return 1;
 		if (!expect(ch.pts[0].w == 1.0f, "std styles carry no width jitter")) return 1;
 		if (!expect(ch.age == 1, "a live channel's age re-arms every append")) return 1;
 		// Death by age-out: final point + kill request, then the drain timeline.
 		sim.rounds[size_t(slot)].max_age_ticks = sim.rounds[size_t(slot)].age_ticks;
 		sim.tick(world, nullptr, nullptr);
-		if (!expect(!sim.rounds[size_t(slot)].active && ch.kill && ch.count == 6,
+		if (!expect(!sim.rounds[size_t(slot)].active && ch.kill && ch.count == 5,
 		            "round death appends the final point and requests the drain"))
 			return 1;
 		for (int t = 0; t < 11; ++t) sim.tick(world, nullptr, nullptr);
-		if (!expect(ch.active && ch.count == 6,
+		if (!expect(ch.active && ch.count == 5,
 		            "the dead trail holds shape through the cap-length grace"))
 			return 1;
 		for (int t = 0; t < 30; ++t) sim.tick(world, nullptr, nullptr);

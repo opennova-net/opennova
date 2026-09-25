@@ -7,6 +7,9 @@
 
 #include "world/game_world.h"
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/device_fog.h>
+#include <runtime/renderer/scene_overlay.h>
+#include <runtime/environment/water_mirror.h>
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -22,6 +25,11 @@
 
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
+#include "particle/effect_distortion_drawer.h"
+#include "particle/effect_world.h"
+#include "render/object_lod_frame.h"
+#include "simulation/entity_presenter.h"
+#include "render/scene_overlay_compositor.h"
 
 using namespace godot;
 
@@ -94,15 +102,18 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// after the terrain draw.
 	{ "terrain", FrameStats::WORLD_TERRAIN, &GameWorld::leg_terrain, kLegNone },
 	{ "water", FrameStats::WORLD_WATER, &GameWorld::leg_water, kLegNone },
-	// Foliage receives the same live render transform and consumes this
-	// frame's detail-cell handoff, so it follows terrain (banked at finish).
-	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
 	// Net-session edges; a failed streamed-asset leg STOPS the frame.
 	{ "network", FrameStats::WORLD_NETWORK_FRAME, &GameWorld::leg_network, kStopsFrame },
 	// Blink flags only change on sim ticks (the body gates on did_tick).
 	{ "blink", FrameStats::WORLD_BLINK, &GameWorld::leg_blink, kLegNone },
 	// The OCCL_* slots land inside OcclusionFrame.apply_frame itself.
 	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kLegNone },
+	// Foliage receives the same live render transform and consumes this
+	// frame's detail-cell handoff (after terrain) and the MODEL anchors the
+	// visible-entity walk just admitted (after occlusion: retail collects the
+	// visible entities before the BySide walks that update the model tiles;
+	// banked at finish).
+	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
 	{ "iris", FrameStats::WORLD_IRIS, &GameWorld::leg_iris, kLegNone },
 	// The sun-veil stop-down feed for the weather ticks banked above (the
 	// veil alpha itself rides the Celestial shader-global push).
@@ -125,9 +136,18 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	{ "slot_shadows", FrameStats::WORLD_SLOT_SHADOW, &GameWorld::leg_slot_shadows, kLegNone },
 	{ "particles", FrameStats::WORLD_PARTICLES, &GameWorld::leg_particles, kLegNone },
 	// The precipitation streaks after the particle pass and the trails,
-	// before the murk overlay (retail Terrain_RenderSceneWithReflection
+	// before the murk overlay (retail Terrain_RenderWorldScene
 	// @ 0x5c96a6).
 	{ "precipitation", FrameStats::WORLD_WEATHER, &GameWorld::leg_precipitation, kLegNone },
+	// The post-particle overlay tail (renderer/scene_overlay.h): every
+	// producer above has published this frame's streaks, coronas and murk
+	// state, so one immutable frame reaches each view's overlay pass.
+	{ "scene_overlay", kNoSlot, &GameWorld::leg_scene_overlay, kLegNone },
+	// Plan the frame's FrameFX screen effects (retail's post-scene dispatch)
+	// once the particle and tracer producers have published this frame, so
+	// the distortion row's content gate reads it; the terminal compositor
+	// executes the plan after every transparent.
+	{ "screen_effects", kNoSlot, &GameWorld::leg_screen_effects, kLegNone },
 	// The audio leg (banked at finish).
 	{ "audio", kNoSlot, &GameWorld::leg_audio, kLegNone },
 	{ "clear", FrameStats::WORLD_CLEAR, &GameWorld::leg_clear, kLegNone },
@@ -165,12 +185,12 @@ const GameWorld::FrameLeg GameWorld::kFrozenPoseRefresh[] = {
 	{ "weather_settle", kNoSlot, &GameWorld::leg_weather_settle, kLegNone },
 	// Keep the same camera-producer order as the live table, omitting every
 	// time-owning leg. Terrain publishes the detail-cell handoff consumed by
-	// foliage; occlusion then resolves the world visibility for this exact
-	// view.
+	// foliage; occlusion resolves the world visibility for this exact view
+	// and the MODEL anchors foliage then consumes.
 	{ "scene_environment", kNoSlot, &GameWorld::leg_scene_environment, kLegNone },
 	{ "terrain", kNoSlot, &GameWorld::leg_terrain, kLegNone },
-	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
 	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kLegNone },
+	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
 	// These native devices advance as live legs (sky/celestial before
 	// terrain, water between terrain and foliage). A fixture freezes their
 	// parent before moving the capture camera, so drive their public
@@ -192,6 +212,9 @@ const GameWorld::FrameLeg GameWorld::kFrozenPoseRefresh[] = {
 	// Re-plan the render-slot ground shadows for the moved capture camera
 	// (slot priority and the capture poses are camera-relative).
 	{ "slot_shadows", kNoSlot, &GameWorld::leg_slot_shadows, kLegNone },
+	// The overlay tail for the capture pose: the coronas the light leg just
+	// re-collected and the murk side of the moved eye.
+	{ "scene_overlay", kNoSlot, &GameWorld::leg_scene_overlay, kLegNone },
 	{ "clear", kNoSlot, &GameWorld::leg_clear, kLegNone },
 };
 const int GameWorld::kFrozenPoseRefreshCount =
@@ -420,6 +443,16 @@ GameWorld::LegResult GameWorld::leg_precipitation(FrameContext &r_ctx) {
 	return kLegRan;
 }
 
+GameWorld::LegResult GameWorld::leg_screen_effects(FrameContext &r_ctx) {
+	plan_screen_effects_frame();
+	return kLegRan;
+}
+
+GameWorld::LegResult GameWorld::leg_scene_overlay(FrameContext &r_ctx) {
+	render_scene_overlay_frame();
+	return kLegRan;
+}
+
 GameWorld::LegResult GameWorld::leg_audio(FrameContext &r_ctx) {
 	mix_audio_frame(r_ctx.outcome.is_valid() ? r_ctx.outcome->get_ticks_run() : 0);
 	return kLegRan;
@@ -553,11 +586,12 @@ void GameWorld::render_foliage_frame() {
 	perf_foliage_us_ = 0;
 	if (world_ready_ && dispatcher_ != nullptr) {
 		// The silhouette tier is the hide-in-grass mechanic: retail's
-		// sector-entity walk generates model foliage only around
-		// CROUCHED/PRONE infantry standing on terrain -- never around placed
-		// objects, whose MoveOrder stays 0
+		// sector-entity walk generates model foliage only around the
+		// visible CROUCHED/PRONE infantry standing on terrain -- never around
+		// placed objects, whose MoveOrder stays 0
 		// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
-		// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7].
+		// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7]; the
+		// occlusion leg's visible-entity walk selected them this frame.
 		PackedVector3Array silhouette_anchors;
 		MissionRoot *runtime = get_runtime();
 		if (runtime != nullptr) {
@@ -567,7 +601,17 @@ void GameWorld::render_foliage_frame() {
 			}
 		}
 		dispatcher_->set_silhouette_anchors(silhouette_anchors);
-		dispatcher_->render_frame(render_camera_xform(), get_frame_clock_ms());
+		// The scene core's thermal byte is the environment's world gate
+		// (the engine foliage runtime carries the witness).
+		dispatcher_->set_thermal_view(env_ != nullptr && env_->state().thermal_view());
+		// Env_WaterHeightFixed (0 = no water): the detail passes, the MODEL
+		// masks and their person consumers split by it.
+		const float water_height = water_ != nullptr ? water_->get_water_height() : 0.0f;
+		dispatcher_->set_water_height(water_height);
+		const Transform3D camera_xform = render_camera_xform();
+		dispatcher_->render_frame(camera_xform, get_frame_clock_ms());
+		ObjectModel::refresh_foliage_mask_frame(
+				static_cast<float>(camera_xform.origin.y), water_height);
 		perf_foliage_us_ = now_us() - foliage_start;
 	}
 }
@@ -604,6 +648,240 @@ void GameWorld::render_precipitation_frame() {
 			// 0x5dee48 before touching the device).
 			precipitation_->hide_frame();
 		}
+	}
+}
+
+// The FrameFX screen-effect plan: the local player's frame facts (defaults
+// with no local player or for a spectator) through the engine planner
+// (runtime/renderer/frame_fx_effects.h, retail Render_ProcessMainSceneFrame
+// @0x5ca8f6..0x5caad5).
+void GameWorld::plan_screen_effects_frame() {
+	if (framefx_ == nullptr) {
+		return;
+	}
+	opennova::renderer::FrameFxViewInputs view;
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	if (presenter != nullptr && !presenter->is_local_spectator()) {
+		const Ref<PlayerLocalView> local = presenter->presented_view();
+		if (local.is_valid()) {
+			view = local->native_frame().frame_fx;
+		}
+	}
+	framefx_->set_view_effects(view);
+	// The effects device draws the row's distortion sets (the class-7
+	// particles and the tracer distortion ribbons).
+	EffectWorld *effect_world = get_effect_world();
+	framefx_->set_distortion_drawer(effect_world != nullptr ?
+					effect_world->distortion_drawer() :
+					std::shared_ptr<FrameFxDistortionDrawer>());
+	framefx_->advance_screen_effects();
+}
+
+// The post-particle overlay tail, gathered once per frame in slot order and
+// published to every view's overlay pass (renderer/scene_overlay.h carries
+// the witnessed order: retail Terrain_RenderWorldScene after
+// particle pass B @ 0x5c9690, before the frame effects). The murk quad carries
+// the water height; each view draws it only while its own render eye is at or
+// below the water, whatever the camera mode. The glint and the glare close
+// the tail (append_celestial_overlays).
+void GameWorld::render_scene_overlay_frame() {
+	EffectWorld *effect_world = get_effect_world();
+	if (effect_world == nullptr) {
+		return;
+	}
+	std::shared_ptr<SceneOverlaySubmission> submission = std::make_shared<SceneOverlaySubmission>();
+	submission->frame_id = ++scene_overlay_frame_id_;
+	if (world_ready_) {
+		append_nvg_laser_overlays(*submission);
+		if (precipitation_ != nullptr) {
+			precipitation_->append_overlay(*submission);
+		}
+		if (light_director_.is_valid()) {
+			light_director_->append_overlay(*submission);
+		}
+		if (env_ != nullptr && is_water_render_active()) {
+			const Vector3 lit = env_->get_underwater_overlay_color();
+			const float rgb[3] = { static_cast<float>(lit.x), static_cast<float>(lit.y),
+				static_cast<float>(lit.z) };
+			opennova::renderer::append_underwater_murk_overlay(rgb,
+					static_cast<uint8_t>(env_->get_underwater_overlay_alpha_byte()),
+					water_->get_water_height(), submission->frame);
+		}
+		append_celestial_overlays(*submission);
+		append_water_mirror_overlays(*submission);
+	}
+	effect_world->publish_scene_overlay(submission);
+}
+
+// The NVG laser beams, the tail's first slot (retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0,
+// called @ 0x5c9695): the local view's g_NVGActive and g_camera_mode gate
+// every beam (the defaults with no local player or for a spectator), the
+// frame's render camera builds the ribbons and the frame's scene fog folds
+// into them; the entity presenter's third-person guns carry the action
+// points (FirePresenter::append_nvg_laser_beams).
+void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) {
+	MissionRoot *runtime = get_runtime();
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	const Ref<Simulation> sim = get_sim();
+	Viewport *viewport = get_viewport();
+	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+	if (entities == nullptr || sim.is_null() || camera == nullptr || env_ == nullptr) {
+		return;
+	}
+	opennova::renderer::FrameFxViewInputs local;
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	if (presenter != nullptr && !presenter->is_local_spectator()) {
+		const Ref<PlayerLocalView> view = presenter->presented_view();
+		if (view.is_valid()) {
+			local = view->native_frame().frame_fx;
+		}
+	}
+	if (!local.nvg_active) {
+		return;
+	}
+	NvgLaserView view;
+	view.eye = camera->get_camera_transform();
+	view.projection_x_scale = static_cast<float>(camera->get_camera_projection()[0][0]);
+	view.tick_ms = static_cast<std::uint32_t>(current_frame_clock_ms());
+	view.nvg_active = local.nvg_active;
+	view.camera_mode = local.camera_mode;
+	const opennova::env::SceneFogValues fog =
+			env_->state().build_scene_fog(env_->is_underwater_view());
+	const Ref<EnvLightState> light_state = env_->get_light_state();
+	const Ref<EnvLightValues> light = light_state.is_valid() ? light_state->get_values()
+															: Ref<EnvLightValues>();
+	const Vector3 forward = -view.eye.basis.get_column(2).normalized();
+	view.fog.eye[0] = static_cast<float>(view.eye.origin.x);
+	view.fog.eye[1] = static_cast<float>(view.eye.origin.y);
+	view.fog.eye[2] = static_cast<float>(view.eye.origin.z);
+	view.fog.forward[0] = static_cast<float>(forward.x);
+	view.fog.forward[1] = static_cast<float>(forward.y);
+	view.fog.forward[2] = static_cast<float>(forward.z);
+	view.fog.start = fog.start;
+	view.fog.end = fog.end;
+	view.fog.type = fog.type;
+	view.fog.enabled = light.is_valid() && light->fog_enabled;
+	view.fog.color[0] = fog.color.r;
+	view.fog.color[1] = fog.color.g;
+	view.fog.color[2] = fog.color.b;
+	entities->append_nvg_laser_beams(sim.ptr(), view, r_submission);
+}
+
+// The water glint and the sun glare: Celestial places both models and
+// drives their UPL_INTENSITY submit value (the SelfLumColor their SELFLUM
+// materials evaluate) and keeps their Q3 copy; the stage draws them at the
+// scene tail with the SELFLUM combine, ONE / ONE, fogged to black under the
+// frame's fog, depth ALWAYS (submit 0x110), so their meshes leave every
+// camera (the Q3 redraw reads the node, not the layers). The glint leg runs
+// only while the mission water height is nonzero (retail update_sun_glare
+// @ 0x5c96c0 behind the test @ 0x5c96b5) and draws under the frame's own
+// light scale; the glare draws last, under the forced 0xFF404040 modulator
+// (light scale 1.0, retail @ 0x5c96fd..0x5c9722). The glare's own gate is
+// the scene's drawShadows argument (test edi @ 0x5c970a), which the main
+// view and the scope view both pass as 1.
+void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) {
+	if (celestial_ == nullptr || env_ == nullptr || !is_inside_tree()) {
+		return;
+	}
+	Viewport *viewport = get_viewport();
+	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+	const Ref<EnvLightState> light_state = env_->get_light_state();
+	const Ref<EnvLightValues> light = light_state.is_valid() ? light_state->get_values()
+															: Ref<EnvLightValues>();
+	if (camera == nullptr || light.is_null()) {
+		return;
+	}
+	const Transform3D eye = camera->get_camera_transform();
+	const Vector3 forward = -eye.basis.get_column(2).normalized();
+	const opennova::env::SceneFogValues fog =
+			env_->state().build_scene_fog(env_->is_underwater_view());
+	const Celestial::OverlayBodies bodies = celestial_->get_overlay_bodies();
+	const float frame_scale[3] = { static_cast<float>(light->gain.x),
+		static_cast<float>(light->gain.y), static_cast<float>(light->gain.z) };
+	const float glare_scale[3] = { opennova::renderer::kSunGlareLightScale,
+		opennova::renderer::kSunGlareLightScale, opennova::renderer::kSunGlareLightScale };
+	struct Leg {
+		const Celestial::OverlayBody &body;
+		opennova::renderer::SceneOverlaySlot slot;
+		const float *light_scale;
+		bool gated;
+	};
+	const bool water_height_set = water_ != nullptr && water_->get_water_height() != 0.0f;
+	const Leg legs[] = {
+		{ bodies.glint, opennova::renderer::SceneOverlaySlot::WaterGlint, frame_scale,
+				!water_height_set },
+		{ bodies.glare, opennova::renderer::SceneOverlaySlot::SunGlare, glare_scale, false },
+	};
+	for (const Leg &leg : legs) {
+		if (leg.body.model == nullptr) {
+			continue;
+		}
+		scene_overlay_bodies_.take_over(leg.body.model);
+		if (!leg.body.drawn || leg.gated) {
+			continue;
+		}
+		const float view_depth = static_cast<float>(
+				(leg.body.model->get_global_position() - eye.origin).dot(forward));
+		const float visibility = opennova::renderer::device_fog_visibility(view_depth,
+				fog.start, fog.end, fog.type, light->fog_enabled);
+		scene_overlay_bodies_.append(leg.slot, leg.body.model, leg.light_scale, visibility,
+				r_submission);
+	}
+}
+
+// The water mirror's closing draws (runtime/renderer/scene_overlay.h
+// kMirrorOverlayOrder; only the mirror's overlay pass admits these slots):
+// the dim over the finished mirror target, then the sun/moon discs and the
+// glow redrawn at the MIRROR camera inside the far depth band, fogged by the
+// mirror's own dry block (EnvironmentState::build_water_mirror_fog) under
+// the frame's light scale. The discs keep their beauty submit value (their
+// live materials); the glow takes the mirror view's no-occlusion value
+// (Celestial::get_mirror_redraw).
+void GameWorld::append_water_mirror_overlays(SceneOverlaySubmission &r_submission) {
+	if (water_ == nullptr || !is_water_render_active()) {
+		return;
+	}
+	Camera3D *mirror = water_->get_reflection_camera();
+	if (mirror == nullptr || !mirror->is_inside_tree()) {
+		return;
+	}
+	opennova::renderer::append_mirror_dim_overlay(opennova::env::kReflectionDimFactor,
+			r_submission.frame);
+	if (celestial_ == nullptr || env_ == nullptr) {
+		return;
+	}
+	const Ref<EnvLightState> light_state = env_->get_light_state();
+	const Ref<EnvLightValues> light = light_state.is_valid() ? light_state->get_values()
+															: Ref<EnvLightValues>();
+	if (light.is_null()) {
+		return;
+	}
+	const Transform3D eye = mirror->get_global_transform();
+	const Vector3 forward = -eye.basis.get_column(2).normalized();
+	const Celestial::MirrorRedraw redraw = celestial_->get_mirror_redraw(forward);
+	const opennova::env::SceneFogValues fog = env_->state().build_water_mirror_fog();
+	const float light_scale[3] = { static_cast<float>(light->gain.x),
+		static_cast<float>(light->gain.y), static_cast<float>(light->gain.z) };
+	SceneOverlayModelSurfaces::AppendOptions options;
+	options.offset = eye.origin - redraw.anchor;
+	options.depth = opennova::renderer::SceneOverlayDepth::FarBand;
+	const auto visibility_of = [&](ObjectModel *p_model) {
+		const float view_depth = static_cast<float>(
+				(p_model->get_global_position() + options.offset - eye.origin).dot(forward));
+		return opennova::renderer::device_fog_visibility(view_depth, fog.start, fog.end,
+				fog.type, light->fog_enabled);
+	};
+	for (ObjectModel *disc : { redraw.sun, redraw.moon }) {
+		if (disc != nullptr) {
+			scene_overlay_bodies_.append(
+					opennova::renderer::SceneOverlaySlot::MirrorCelestialBodies, disc,
+					light_scale, visibility_of(disc), r_submission, options);
+		}
+	}
+	if (redraw.glare_drawn && redraw.glare != nullptr) {
+		options.self_lum = &redraw.glare_self_lum;
+		scene_overlay_bodies_.append(opennova::renderer::SceneOverlaySlot::MirrorSunGlow,
+				redraw.glare, light_scale, visibility_of(redraw.glare), r_submission, options);
 	}
 }
 
@@ -688,6 +966,9 @@ void GameWorld::apply_scene_environment_frame() {
 	}
 	if (Camera3D *cam = render_camera()) {
 		cam->set_far(opennova::renderer::scene_far_plane(env_->get_fog_distance()));
+		// The world pass's near plane, every view and camera mode (retail
+		// Render_ProcessMainSceneFrame @ 0x5ca4d7..0x5ca4e0).
+		cam->set_near(opennova::renderer::kScenePassNearZ);
 	}
 	// The device leg only samples: the strict-vs-inclusive waterline
 	// comparison semantics live in the engine behind apply_render_eye.
@@ -702,6 +983,11 @@ void GameWorld::apply_scene_environment_frame() {
 		}
 	}
 	env_->apply_render_eye(eye_y, water_active ? water_->get_water_height() : 0.0f, water_active);
+	// The main frame's sky bracket follows the eye's waterline side every
+	// frame (the blink letters latch per tick); OcclusionFrame owns the gates.
+	if (occlusion_.is_valid()) {
+		occlusion_->apply_scene_pass_gates();
+	}
 	// Publish the same adjusted render eye to the per-strip Q1/Q2 classifier.
 	// This frame leg runs after camera placement and before ObjectModel's
 	// retained material walk, so water crossings flip the ladder immediately.
@@ -723,6 +1009,19 @@ Camera3D *GameWorld::render_camera() const {
 	return nullptr;
 }
 
+Camera3D *GameWorld::image_camera() const {
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	Camera3D *through = presenter != nullptr ? presenter->projection_camera() : nullptr;
+	if (through != nullptr && presenter->projection_viewport() != nullptr) {
+		return through;
+	}
+	return render_camera();
+}
+
+float GameWorld::surface_width() const {
+	return is_inside_tree() ? get_viewport()->get_visible_rect().size.x : 0.0f;
+}
+
 // The view the imminent render uses: the live camera AFTER the local-view
 // leg placed it; the frame-entry stash only when no camera exists (headless
 // worlds/tests) (D-RORD-8).
@@ -740,9 +1039,10 @@ void GameWorld::apply_occlusion_frame() {
 	// and consumes the RENDER camera the local-view leg just placed
 	// (D-RORD-8).
 	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
-	// Terrain_RenderSceneWithReflection @ 0x5c94f0]
+	// Terrain_RenderWorldScene @ 0x5c94f0]
 	if (world_ready_ && !frame_skip_occlusion_) {
-		occlusion_->apply_frame(render_camera(), render_camera_xform(), mission_forces_indoors_);
+		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
+				mission_forces_indoors_);
 	}
 }
 
@@ -842,17 +1142,29 @@ void GameWorld::render_material_frame() {
 	// at a defined ladder slot (after occlusion resolves visibility, before
 	// the particle composite) [orig: Terrain_RenderSectorModels @ 0x5c5d30
 	// computes model runtime constants during the render sector walk].
-	Viewport *viewport = is_inside_tree() ? get_viewport() : nullptr;
-	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
-	if (camera != nullptr) {
-		const Vector2 viewport_size = viewport->get_visible_rect().size;
-		ObjectModel::update_authored_lods(camera->get_global_transform(), camera->get_fov(),
-				viewport_size.x, viewport_size.y);
+	// Every view drawing the world this frame: the frame's image (the
+	// stretched target's camera while it is live) over the surface width, the
+	// retail viewport width the focal and frame scale derive from, and the
+	// weapon Inset pass over its own target while it renders.
+	ObjectLodFrame frames[2];
+	int frame_count = 0;
+	if (Camera3D *image = image_camera()) {
+		frames[frame_count] = ObjectLodFrame::from_camera(image, surface_width());
+		frame_count += frames[frame_count].valid ? 1 : 0;
+	}
+	EffectWorld *effects = get_effect_world();
+	Camera3D *inset = effects != nullptr ? effects->get_second_scene_camera() : nullptr;
+	if (inset != nullptr && inset->is_inside_tree() && inset->get_viewport() != nullptr) {
+		frames[frame_count] = ObjectLodFrame::from_camera(
+				inset, inset->get_viewport()->get_visible_rect().size.x);
+		frame_count += frames[frame_count].valid ? 1 : 0;
+	}
+	if (frame_count > 0) {
+		ObjectModel::update_authored_lod_views(frames, frame_count);
 		// The retained static instances select their RLOD per entity from the
-		// same camera frame (the placer rewrites only the slots that crossed).
+		// same views (the placer rewrites only the slots that crossed).
 		if (placer_.is_valid()) {
-			placer_->update_static_lods(camera->get_global_transform(), camera->get_fov(),
-					viewport_size.x, viewport_size.y);
+			placer_->update_static_lod_views(frames, frame_count);
 		}
 	}
 	if (!frame_stats_on_) {
@@ -883,10 +1195,10 @@ void GameWorld::render_particle_frame() {
 }
 
 // The EffectWorld point-light device leg: per visible model, select the
-// witnessed <= 4 pool lights for that draw context and write them as
+// witnessed <= 3 pool lights for that draw context and write them as
 // per-instance shader parameters (godot/src/lights/effect_light_director
 // carries the seam notes). The viewmodel parts ride along with the local
-// player as owner so first-person self-lights gate correctly.
+// player's query and interior group; they declare no owner group.
 void GameWorld::render_light_frame() {
 	if (light_director_.is_null() || !is_inside_tree()) {
 		return;
@@ -897,13 +1209,8 @@ void GameWorld::render_light_frame() {
 	if (presenter != nullptr) {
 		viewmodel_parts = presenter->vm_parts();
 	}
-	int viewmodel_owner = -1;
-	Ref<Simulation> sim = get_sim();
-	if (sim.is_valid() && sim->has_local_player()) {
-		viewmodel_owner = sim->get_local_player_wire_handle();
-	}
 	light_director_->render_frame(viewport != nullptr ? viewport->get_camera_3d() : nullptr,
-			get_frame_clock_ms(), viewmodel_parts, viewmodel_owner, frame_stats_on_);
+			get_frame_clock_ms(), viewmodel_parts, frame_stats_on_);
 	// The terrain leg of the same pool: the next terrain frame re-draws its
 	// patches with the pool lights they overlap.
 	render_terrain_light_leg();
@@ -911,16 +1218,25 @@ void GameWorld::render_light_frame() {
 	// per-slot dominant-light pick reads the shared pool) plus the local
 	// player state for the retail priority/drape gates.
 	if (slot_shadow_ != nullptr) {
-		slot_shadow_->set_light_scene(light_director_->scene());
+		slot_shadow_->set_light_director(light_director_);
 		slot_shadow_->set_light_context(light_director_->light_gain(),
 				static_cast<int>(get_frame_clock_ms()), weather_);
-		if (resource_root_.is_valid()) {
-			slot_shadow_->set_resource_root(resource_root_);
-		}
 		if (presenter != nullptr) {
 			slot_shadow_->set_local_player_model(presenter->avatar());
 			slot_shadow_->set_local_player_first_person(!presenter->is_third_person());
 		}
+		const Ref<Simulation> sim = get_sim();
+		ObjectModel *local_vehicle = nullptr;
+		MissionRoot *slot_runtime = get_runtime();
+		EntityPresenter *entities =
+				slot_runtime != nullptr ? slot_runtime->get_entity_presenter() : nullptr;
+		if (sim.is_valid() && entities != nullptr) {
+			const int ride = sim->get_local_player_mount_target_handle();
+			if (ride != Simulation::INVALID_WIRE_HANDLE) {
+				local_vehicle = entities->resolve_present_handle(ride);
+			}
+		}
+		slot_shadow_->set_local_player_parent_model(local_vehicle);
 		if (sim.is_valid()) {
 			slot_shadow_->set_local_player_prone(
 					sim->get_local_player_stance_latch() == Simulation::STANCE_PRONE);
@@ -1102,12 +1418,14 @@ void GameWorld::restore_idle_frame_clear_color() {
 }
 
 // The witnessed frame clear: the thermal view's flat grey, else the
-// horizon-blended skyfog above water, the lit water color underwater [orig:
-// Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792 - clear color =
-// thermal ? 0x808080 : cam above water ? skyfog[0] : Env_WaterColorLit; the
-// selection is the engine's frame_clear_color_for, and the thermal latch
-// reaches it through MissionEnvironment::set_thermal_view, whose generation
-// bump re-runs this leg]. Every branch serves RENDER-SPACE (x2-gained) colors, consumed
+// horizon-blended skyfog while the eye is strictly above the water, the lit
+// water color at or below it [orig: Render_ProcessMainSceneFrame
+// @ 0x5ca771..0x5ca792 - clear color = thermal ? 0x808080 : cam above water ?
+// skyfog[0] : Env_WaterColorLit, the `jle` inclusive of the waterline; no
+// blink letter reaches the beauty clear]. The selection is the engine's
+// frame_clear_color_for, and the thermal latch reaches it through
+// MissionEnvironment::set_thermal_view, whose generation bump re-runs this
+// leg. Every branch serves RENDER-SPACE (x2-gained) colors, consumed
 // VERBATIM by the modulate2x-path Clear this renderer reproduces (D-RMAT-7):
 // above water the post-blend DOUBLED skyfog, underwater Env_WaterColorLit =
 // water x light >> 7; the halving branch [orig: @ 0x67715d] is the
@@ -1119,18 +1437,19 @@ void GameWorld::update_frame_clear_color() {
 		return;
 	}
 	Ref<Environment> environment = clear_color_->get_environment();
-	// The clear SELECTION (black indoors / skyfog above water / lit water
-	// underwater) is the engine's (environment_state.h carries the witness);
-	// this device classifies the eye and writes the color. The sentinel
-	// generation (-2) forces a recompute on indoors exit.
-	if (occlusion_->is_blink_indoors()) {
-		if (clear_env_generation_ != -2) {
-			clear_env_generation_ = -2;
-			environment->set_bg_color(env_->frame_clear_color_for(true, true).linear_to_srgb());
-		}
-		return;
+	// While the NVG composite is up the world renders as the NVG scene, whose
+	// target clears to the fog colour alone (environment_state.h
+	// nvg_scene_clear_color; LocalPlayerPresenter::is_nvg_raster_active).
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	const bool nvg_scene = presenter != nullptr && presenter->is_nvg_raster_active();
+	if (nvg_scene != clear_nvg_scene_) {
+		clear_nvg_scene_ = nvg_scene;
+		clear_env_generation_ = -1;
 	}
-	const bool above = !env_->is_underwater_view();
+	// The clear SELECTION (thermal grey / skyfog above water / lit water at
+	// or below it) is the engine's (environment_state.h carries the witness);
+	// this device reads the eye's inclusive waterline side and writes the color.
+	const bool above = !env_->is_underwater_overlay_view();
 	Ref<EnvLightState> light_state = env_->get_light_state();
 	const int64_t gen = light_state.is_valid() ? light_state->get_generation() : 0;
 	if (gen == clear_env_generation_ && above == clear_above_water_) {
@@ -1141,7 +1460,9 @@ void GameWorld::update_frame_clear_color() {
 	// Godot decodes BG_COLOR from sRGB before writing the scene target.
 	// Pre-encode the retail gamma-domain value so the clear and spatial
 	// shader output share one numeric domain (D-RMAT-7), including underwater.
-	environment->set_bg_color(env_->frame_clear_color_for(false, above).linear_to_srgb());
+	environment->set_bg_color((nvg_scene ? env_->nvg_scene_clear_color(above)
+										 : env_->frame_clear_color_for(above))
+					.linear_to_srgb());
 }
 
 // Re-drive the gamemus vars from the local player each frame: the engine names

@@ -7,11 +7,13 @@
 #pragma once
 
 #include <runtime/inmatch/effect_pose_index.h> // EffectPoseIndex (+ the BmsHandleIndex it resolves through)
-#include <runtime/inmatch/role_feeds.h> // SunQualityFeed
+#include <runtime/inmatch/role_feeds.h> // EntityLightingFeed
 
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
+#include <runtime/world/death_piece_draw.h> // DeathPieceDraw
 #include <runtime/world/entity.h>         // EntityHandle
 
 #include <cstdint>
@@ -88,6 +90,11 @@ struct SimulationPresentState {
 	std::vector<int32_t> occlusion_culled_wire;
 	std::vector<int32_t> occl_apply_culled_wire_last;
 	std::unordered_map<uint16_t, uint8_t> wire_occlusion_latch;
+	// The MODEL foliage tier's anchors this frame: the collected (visible)
+	// person entities with a stance bit and no groundEntity, Godot space.
+	PackedVector3Array foliage_mask_anchors;
+	// The death pieces this frame draws (OcclusionWorld::collect_death_piece_draws).
+	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
 	// Reused probe scratch (cleared per frame, capacity retained).
 	std::vector<opennova::world::EntityHandle> occlusion_probe_handles;
 	// Delta baselines for the render-occlusion apply path: what the shell last
@@ -96,9 +103,11 @@ struct SimulationPresentState {
 	// re-emit).
 	std::unordered_map<uint32_t, int64_t> occl_apply_building_last;
 	std::vector<int32_t> occl_apply_culled_last;
-	// The per-drawn-entity sun-visibility diff and its last-emitted caches
-	// (inmatch/role_feeds.h SunQualityFeed carries the witnesses).
-	opennova::inmatch::SunQualityFeed sun_quality;
+	// The per-drawn-entity lighting diff and its last-emitted caches
+	// (inmatch/role_feeds.h EntityLightingFeed carries the witnesses), plus
+	// the frame's change list draw_lighting_changes hands out.
+	opennova::inmatch::EntityLightingFeed entity_lighting;
+	std::vector<opennova::inmatch::EntityLightingChange> entity_lighting_changes;
 	// Mutable retail Lighting_SetInteriorLightGroup state left by the marched
 	// iris samples. Outdoor samples clear it, indoor samples with interior data
 	// replace it, and indoor-no-data samples intentionally retain the previous

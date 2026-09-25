@@ -10,13 +10,13 @@ uniform sampler2D u_colormap : filter_linear, repeat_disable;
 uniform bool u_has_colormap = false;
 uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
 uniform bool u_has_heightfield_normal = false;
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
-uniform bool u_has_tile_overlay = false;
-uniform vec3 u_tile_overlay_tint = vec3(1.0);
 uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
 uniform bool u_has_tile_cache = false;
 uniform vec3 u_emitter_color = vec3(0.5019608);
 instance uniform float u_wind_phase = 0.0;
+// The patch's sector origin on the Godot-Z axis (the D3D world translation
+// the sway's v0.x is measured from; the engine compiler resolves it).
+instance uniform float u_wind_sector_origin_z = 0.0;
 instance uniform float u_fade = 1.0;
 instance uniform float u_alpha_ref = 0.0;
 instance uniform bool u_instance_tile_cache_ready = false;
@@ -28,7 +28,7 @@ instance uniform vec4 u_instance_tile_cache_projection = vec4(0.0);
 // D3DCMP_LESS there, so identical geometry only lands where the preceding
 // HIGH draw rejected alpha and left no depth. Discarding texels the HIGH
 // pass accepted reproduces that selection without a compare-op toggle.
-// [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912;
+// [orig: Foliage_SetupDetailSlotDraw @ 0x6008fc..0x600912;
 // CGfxDevice ZFUNC wrapper @ 0x67cac0..0x67caea]
 instance uniform float u_high_pass_cutoff = 0.0;
 
@@ -43,33 +43,32 @@ global uniform vec3 opennova_sun_direction;
 // D3D SetLight/LightEnable state can affect only the failed-VS fixed-function
 // fallback, which is outside the locked highest-quality profile.
 // [orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630;
-// Foliage_RenderFarPatches @ 0x609de0]
+// Foliage_RenderDetailPatches @ 0x609de0]
 global uniform vec3 opennova_fog_color;
 global uniform float opennova_fog_start;
 global uniform float opennova_fog_end;
-global uniform int opennova_fog_type;
 
 varying vec2 v_tile_uv;
-varying vec2 v_overlay_uv;
 varying vec2 v_tile_cache_uv;
 varying vec3 v_heightfield_normal;
-varying float v_fog_distance;
+varying float v_fog;
 
-float foliage_fog_factor(float fog_distance) {
-	if (opennova_fog_start == opennova_fog_end) {
-		return 1.0;
+// Foliage_WindSwayVS ends `dp4 r1, r1, c2; add r1, r1, -c5.x; mad oFog,
+// -r1.x, c5.y, c5.z`: c2 is the view-projection's clip-z row (linear in eye
+// depth) and c5 = (start*zs + zo, 1/(zs*(end - start)), 1) comes from the
+// device fog pair Render_SetFogState stored, so the vertex fog is
+// (end - eye_depth) / (end - start) for EVERY fog type, clamped per vertex
+// and interpolated; the fog-mode-8 draw selects that vertex fog (table and
+// vertex fog modes off). Retail Foliage_WindSwayVS literal @ 0x7de648;
+// Foliage_SetupVertexShaderConstants @ 0x6005ee..0x600652;
+// CD3DDevice_SetFogAndBlendMode(8) @ 0x677768..0x67779a.
+float foliage_vertex_fog(float eye_depth) {
+	float range = opennova_fog_end - opennova_fog_start;
+	if (range == 0.0) {
+		// c5.y = 1/0: the vertex fog steps at the start distance.
+		return eye_depth < opennova_fog_start ? 1.0 : 0.0;
 	}
-	if (opennova_fog_end <= 0.0) {
-		return 1.0;
-	}
-	if (opennova_fog_type == 0) {
-		return clamp(exp(-max(fog_distance, 0.0) *
-			(4.1588830833596715 / opennova_fog_end)), 0.0, 1.0);
-	}
-
-	float start = opennova_fog_start;
-	return clamp((opennova_fog_end - fog_distance) /
-		(opennova_fog_end - start), 0.0, 1.0);
+	return clamp((opennova_fog_end - eye_depth) / range, 0.0, 1.0);
 }
 
 vec2 foliage_quadrant_clamped_uv(vec2 uv, ivec2 dimensions) {
@@ -84,31 +83,25 @@ vec2 foliage_quadrant_clamped_uv(vec2 uv, ivec2 dimensions) {
 void vertex() {
 	vec3 world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec3 pre_wind_world_pos = world_pos;
-	// v5.x is the source-height bend byte. The retail VS displaces render-Z
-	// by sin(position.x + phase) * bend * 0.03
-	// [orig: Foliage_WindSwayVS source @ 0x5ff691].
-	world_pos.z += sin(world_pos.x + u_wind_phase) * COLOR.r * 0.03;
+	// v5.x is the source-height bend byte. The retail VS takes the sine of
+	// the pre-wind vertex's render x (Godot Z, sector-local) plus c24.x and
+	// displaces render z (Godot X) by sine * bend * c25.x (0.03): retail
+	// Foliage_WindSwayVS literal @ 0x7de648 (copied @ 0x5ff691).
+	world_pos.x += sin((pre_wind_world_pos.z - u_wind_sector_origin_z) +
+			u_wind_phase) * COLOR.r * 0.03;
 
 	// CPU-expanded vertices carry the retail c7/c8 planar terrain projection
 	// in UV2. This preserves TRN sector-origin/quadrant mapping; deriving it
 	// from raw world XZ would only be correct for an origin-zero atlas.
 	v_tile_uv = UV2;
 	// Retail projects t1 independently from v0, while only oPos consumes the
-	// wind-displaced r1. The hosted 1024 .til bake uses the same world X/-Z
-	// wrap, so preserve the pre-wind position here. Wrap in the FRAGMENT
-	// stage: a per-vertex fract() would interpolate ~0.999 -> ~0.001 across a
-	// 1024-unit wrap seam and smear the whole overlay atlas over that
-	// triangle (u_tile_overlay is repeat_enable, so unwrapped UV is exact).
-	v_overlay_uv =
-		vec2(pre_wind_world_pos.x, -pre_wind_world_pos.z) * (1.0 / 1024.0);
+	// wind-displaced r1, so the page projection takes the pre-wind position.
 	v_tile_cache_uv =
 		(pre_wind_world_pos.xz - u_instance_tile_cache_projection.xy) *
 		u_instance_tile_cache_projection.z;
 	v_heightfield_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
-	float eye_depth = max(-(VIEW_MATRIX * vec4(world_pos, 1.0)).z, 0.0);
-	v_fog_distance = opennova_fog_type == 0
-		? eye_depth
-		: length(world_pos - CAMERA_POSITION_WORLD);
+	// The fog reads the wind-displaced position (the VS's r1).
+	v_fog = foliage_vertex_fog(-(VIEW_MATRIX * vec4(world_pos, 1.0)).z);
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
 }
 
@@ -161,25 +154,20 @@ void fragment() {
 			vec3(0.0), vec3(255.0))) / 255.0;
 		vec3 composed_rgb =
 			clamp(raw_colormap * (256.0 / 255.0), vec3(0.0), vec3(1.0));
-		if (u_has_tile_overlay) {
-			vec4 overlay = texture(u_tile_overlay, v_overlay_uv);
-			composed_rgb = mix(
-				composed_rgb, overlay.rgb * u_tile_overlay_tint, overlay.a);
-		}
 		tile = vec4(
 			composed_rgb,
 			clamp(4.0 * dot(normal_byte - 0.5, light_byte - 0.5), 0.0, 1.0));
 	}
 
 	// Exact ps.1.4 combine: t0 * (t1 * (t1.a*c1 + c0)) * v0 * 8.
-	// The analytic bare-ground sample reproduces the byte-quantized heightfield
-	// DOT3 stored in composed tile alpha. The hosted .til overlay is composed
-	// into RGB before this lighting chain; ordered tile-model/depth-alpha
-	// contributions still require the terrain tile-composition cache.
+	// Under a Terrain t1 is always the resident page (the dispatcher skips a
+	// patch without one, as retail does); the analytic bare-ground sample
+	// above is the terrain-less editor preview's stand-in, reproducing the
+	// byte-quantized heightfield DOT3 stored in composed tile alpha.
 	// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0].
 	vec3 lit = tile.rgb * (tile.a * opennova_sun_light + opennova_sky_ambient);
 	vec3 color = clamp(fd.rgb * lit * u_emitter_color * 8.0, vec3(0.0), vec3(1.0));
-	color = mix(opennova_fog_color, color, foliage_fog_factor(v_fog_distance));
+	color = mix(opennova_fog_color, color, v_fog);
 	ALBEDO = scene_output(color);
 	// D3D fog folds into the source color before blending, so the blended
 	// weight is exactly the retail SRCALPHA term.

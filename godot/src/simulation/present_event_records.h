@@ -5,10 +5,12 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/replication/client_state.h> // ClientChatLine
 #include <runtime/world/fire_sound.h> // ReadyFireSound
+#include <runtime/world/death_piece_draw.h> // DeathPieceDraw
 #include <runtime/world/present_drains.h> // the present drain rows (mission space)
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent
 #include <runtime/world/world.h> // SoundSlotEvent, Effect
@@ -255,7 +257,8 @@ public:
 	// The test constructor (the destruction pass's data leg).
 	static Ref<DeathPieceRow> make(int p_slot, int64_t p_generation, int p_type_index,
 			const Vector3 &p_pos, bool p_settled = false, int p_item_id = 0, int p_section = 0,
-			float p_scale = 1.0f, float p_heading = 0.0f, float p_pitch = 0.0f);
+			float p_scale = 1.0f, float p_heading = 0.0f, float p_pitch = 0.0f,
+			float p_roll = 0.0f);
 
 	int get_slot() const { return value_.slot; }
 	int64_t get_generation() const { return static_cast<int64_t>(value_.generation); }
@@ -267,7 +270,40 @@ public:
 	Vector3 get_pos() const;
 	float get_heading() const { return value_.heading; }
 	float get_pitch() const { return value_.pitch; }
+	float get_roll() const { return value_.roll; }
 	bool get_settled() const { return value_.settled; }
+};
+
+// One piece the frame draws (world::DeathPieceDraw, the occlusion frame's
+// collect): its level, its collapse mask and the drawn section's pivot.
+class DeathPieceDraw : public RefCounted {
+	GDCLASS(DeathPieceDraw, RefCounted)
+
+	opennova::world::DeathPieceDraw value_;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void assign(const opennova::world::DeathPieceDraw &p_value) { value_ = p_value; }
+	const opennova::world::DeathPieceDraw &value() const { return value_; }
+	// The test constructor (the destruction pass's draw leg). `pivot` is the
+	// drawn section's COBJ centre in model units (the model's own x, y, z);
+	// a zero `hidden_mask` draws unpivoted.
+	static Ref<DeathPieceDraw> make(int p_slot, int64_t p_generation, int p_lod_level,
+			int64_t p_hidden_mask, int p_section, const Vector3 &p_pivot, const Vector3 &p_pos,
+			float p_heading = 0.0f, float p_pitch = 0.0f, float p_roll = 0.0f,
+			float p_scale = 1.0f);
+
+	int get_slot() const { return value_.slot; }
+	int64_t get_generation() const { return static_cast<int64_t>(value_.generation); }
+	int get_lod_level() const { return value_.lod_level; }
+	int64_t get_hidden_mask() const { return value_.hidden_mask; }
+	int get_section() const { return value_.section; }
+	Vector3 get_pos() const;
+	// The model-local placement of the drawn piece in Godot space (the matrix
+	// the section draw submits).
+	Transform3D get_transform() const;
 };
 
 // One in-flight round glow (world::RoundGlowRow).

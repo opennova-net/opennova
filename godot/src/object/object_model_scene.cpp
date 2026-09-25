@@ -92,7 +92,8 @@ void ObjectModel::rebuild_scene() {
 			lod_index < retained_lod_end;
 			++lod_index) {
 		authored_lod_thresholds_q16_.push_back(
-				native_model.lods[lod_index].lod_threshold);
+				opennova::renderer::rlod_threshold_q16_from_rmdl(
+						native_model.lods[lod_index].lod_threshold));
 	}
 	refresh_live_panm_classification();
 	// A loaded .adm drives the model: build a Skeleton3D from its .bad
@@ -203,7 +204,8 @@ void ObjectModel::rebuild_scene() {
 	apply_level_surfaces();
 
 	refresh_active_lod_rest_transforms();
-	if (authored_lod_enabled_ && authored_lod_thresholds_q16_.size() > 1) {
+	if (authored_lod_enabled_ && !presenter_driven_lod_ &&
+			!authored_lod_thresholds_q16_.empty()) {
 		authored_lod_models_.insert(this);
 	}
 
@@ -235,12 +237,7 @@ void ObjectModel::rebuild_scene() {
 				instance->set_name(String("AuthoredOccluder_Section") +
 						String::num_int64(section.section));
 				instance->set_occluder(occluder);
-				instance->set_visible(
-						section_visibility_mask_ == -1 ||
-						(section.section < 63 &&
-								((static_cast<uint64_t>(section_visibility_mask_) >>
-										 section.section) &
-										1u) != 0));
+				instance->set_visible(section_part_visible(section.section));
 				add_child(instance);
 				authored_occluders_[section.section] = instance;
 			}
@@ -266,6 +263,11 @@ void ObjectModel::rebuild_scene() {
 		alpha_strip_models_.insert(this);
 		set_notify_transform(true);
 	}
+	if (tracks_water_mirror_clip()) {
+		water_mirror_clip_models_.insert(this);
+		set_notify_transform(true);
+	}
+	refresh_water_mirror_clip();
 	refresh_render_order();
 }
 

@@ -16,6 +16,11 @@ std::string husk_render_graphic(const std::string &husk, const std::string &husk
     return huskfinal;
 }
 
+std::string death_piece_graphic(const std::string &husk, const std::string &huskfinal) {
+    if (!huskfinal.empty()) return huskfinal;
+    return husk;
+}
+
 bool husk_identity_is_dynamic(int32_t bms_id, int64_t spawn_origin, int32_t wire_handle) {
     if (wire_handle < 0 || wire_handle == static_cast<int32_t>(EntityHandle::kInvalid) ||
         bms_id != 0) {

@@ -181,13 +181,9 @@ public:
 	uint32_t terrain_light_combined_rgb() const;
 
 	// The witnessed cloud-scroll UV translations for a camera at
-	// (cam_x, cam_z) world units [orig: render_skybox @ 0x5791de..0x579260]
-	// and the water UV transform sharing the layer-1 accumulators
-	// [orig: render_water_surface @ 0x5c3348..0x5c33db].
+	// (cam_x, cam_z) world units [orig: render_skybox @ 0x5791de..0x579260].
 	CloudUvOffsets cloud_uv_offsets(float cam_x, float cam_z) const;
 	float cloud_uv_rate_per_second() const;
-	WaterUvState water_uv_state(float cam_x, float cam_z,
-			float fog_distance) const;
 
 	// The boxed witnessed state cluster (read-only for consumers).
 	const WeatherCore &core() const { return state_->core; }

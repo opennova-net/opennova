@@ -50,6 +50,7 @@
 #include <runtime/wac/wac_system.h>
 
 namespace opennova::world {
+struct PersonOverlays;
 struct RayDebugRow;
 struct ContactDebugRow;
 namespace inspect {
@@ -81,6 +82,7 @@ class CharacterJoinProfile; // the two-side character selection (object/characte
 class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
 class HostSessionOptions;   // the hosted-session request (network/host_session_options.h)
 class PlayerLocalView;      // the local view-state snapshot (simulation/player_local_view.h)
+struct NvgLaserSource;      // one NVG laser candidate (simulation/fire_presenter.h)
 class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/player_aim_overlay.h)
 class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weapon_view.h)
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
@@ -338,6 +340,19 @@ public:
 		PF_OBJECT_DESTROY04 = opennova::world::PF_OBJECT_DESTROY04,
 		PF_OBJECT_DESTROY05 = opennova::world::PF_OBJECT_DESTROY05,
 		PF_PARACHUTE_DEPLOYED = opennova::world::PF_PARACHUTE_DEPLOYED,
+		PF_CANOPY_PARA = opennova::world::PF_CANOPY_PARA,
+		PF_CANOPY_PARA_O = opennova::world::PF_CANOPY_PARA_O,
+		PF_CANOPY_YAW_DEG = opennova::world::PF_CANOPY_YAW_DEG,
+		PF_NVG_WORN = opennova::world::PF_NVG_WORN,
+		PF_NVG_FLIP = opennova::world::PF_NVG_FLIP,
+		PF_BINOCULARS_RAISED = opennova::world::PF_BINOCULARS_RAISED,
+		PF_CARRIED_TYPE_ID = opennova::world::PF_CARRIED_TYPE_ID,
+		PF_CARRIED_PITCH_DEG = opennova::world::PF_CARRIED_PITCH_DEG,
+		PF_CARRIED_YAW_DEG = opennova::world::PF_CARRIED_YAW_DEG,
+		PF_CARRIED_ROLL_DEG = opennova::world::PF_CARRIED_ROLL_DEG,
+		PF_SLOT_MARCH_OFFSET_X = opennova::world::PF_SLOT_MARCH_OFFSET_X,
+		PF_SLOT_MARCH_OFFSET_Y = opennova::world::PF_SLOT_MARCH_OFFSET_Y,
+		PF_SLOT_MARCH_OFFSET_Z = opennova::world::PF_SLOT_MARCH_OFFSET_Z,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 
@@ -534,6 +549,7 @@ private:
 	// the local-player frame state all live inside. Recreated per load
 	// (reset_world) and NEVER null after construction; this binding converts
 	// Godot Refs into the kernel's sources and orders device work around it.
+	friend class EffectSectionSource; // the effect section gate's kernel reads
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
 	// The private state by owner, each plain data in its own header (ADR 0043
 	// d9; the class-body fragments are gone): the net-session shell inputs and
@@ -1386,6 +1402,11 @@ public:
 	// The host returns its pool-0 player; a joiner returns H, the host-assigned identity that its
 	// wire-present pass excludes while LocalPlayerPresenter draws the distinct local motor entity L.
 	int get_local_player_wire_handle() const;
+	// The packed handle of the entity the local player rides (its mount
+	// target, retail entity+0x16C), or INVALID_WIRE_HANDLE on foot — the
+	// render-slot pass gives that vehicle the local player's slot priority
+	// (EntityPresenter::resolve_present_handle finds its model).
+	int get_local_player_mount_target_handle() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
 	// to the player's body input at the top of the next frame. Movement keys + the lean
 	// keys (Q/E, catalog ids 6/7) + jump; stance and look are SIM-owned state
@@ -1489,6 +1510,8 @@ public:
 	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
 	// feeds ObjectModel.set_aim_overlay. Empty/invalid when no player.
 	Ref<PlayerAimOverlay> get_local_player_aim_overlay() const;
+	// The local avatar's item overlays (inmatch::local_player_person_overlays).
+	bool local_player_person_overlays(opennova::world::PersonOverlays &r_out) const;
 	// The third-person held-weapon model name for an ADM index (weapon.def gfx3).
 	String get_weapon_third_person_model(int p_adm_index) const;
 
@@ -1632,10 +1655,11 @@ public:
 	std::vector<std::string> script_effect_names() const;
 	void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
 	TypedArray<RoundImpactRow> drain_round_impacts();
-	// Destructively drain permanent terrain-cache scorch insertions (mission
-	// 16.16 bounds; the consumer folds mission (x,y) to terrain/Godot (x,z)).
-	// NOT ClassDB-bound.
-	void drain_terrain_scorches(std::vector<opennova::world::TerrainScorchEvent> &r_events);
+	// Destructively drain permanent terrain-cache scorch insertions and the
+	// destroyed-entity page invalidations (mission 16.16 bounds; the consumer
+	// folds mission (x,y) to terrain/Godot (x,z)). NOT ClassDB-bound.
+	void drain_terrain_scorches(std::vector<opennova::world::TerrainScorchEvent> &r_events,
+			std::vector<opennova::world::TerrainPageInvalidationEvent> &r_invalidations);
 	// Drain this frame's folded S2C 0x1E game events as typed feed rows — one
 	// per line the original posts to its message feed. The fold (suppression,
 	// the own/verbose gate, the camp keys, the bonus recompose, the color) is
@@ -1928,9 +1952,11 @@ public:
 	// events; the tests author a DestructionDrain through its data leg.
 	void drain_vehicle_effects(std::vector<opennova::world::VehicleEffectEvent> &r_events);
 	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
-	// The live death-piece pool — each piece renders as its single husk-model
-	// section. NOT ClassDB-bound. (engine: runtime/world/destruction.cpp)
+	// NOT ClassDB-bound: the piece pool + frame draws; the NVG laser persons + ray clip.
 	void fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const;
+	const std::vector<opennova::world::DeathPieceDraw> &death_piece_draws() const;
+	void nvg_laser_sources(std::vector<NvgLaserSource> &r_sources) const;
+	int32_t nvg_laser_clip_distance(int p_handle, const int32_t p_origin[3], const int32_t p_dir[3]) const;
 	// Whether the collision world holds an instance for the placed entity
 	// `bms_id` — the one destruction-gate fact the GUT collision cases read
 	// (the item-trait banks themselves are pinned by the
@@ -2205,20 +2231,22 @@ public:
 	// attribute override (engine: formats/mission/bms.h).
 	// (engine: runtime/world/occlusion.cpp)
 	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
-	                         double p_aspect, double p_near, double p_fog_dist_units,
-	                         double p_water_z_units, bool p_force_indoors);
+	                         double p_aspect, double p_viewport_width, double p_near,
+	                         double p_fog_dist_units, double p_water_z_units,
+	                         bool p_force_indoors);
 
-	// Frame results: [bms_id, packed] pairs for the buildings the occlusion
-	// frame touched; the packed word is world/occlusion_feed.h's
-	// pack_building_visibility (section mask low, visible flag at bit 32),
-	// read back through the two static decoders below. The frame consumes
-	// the delta form (get_building_visibility_changes).
-	// The section mask of a packed building verdict (bit N = COBJ section /
-	// render part N; bit 0 = exterior; forced-visible def bits merged).
+	// Frame results: [bms_id, packed, forced] triples for the buildings the
+	// occlusion frame touched; the packed word is world/occlusion_feed.h's
+	// pack_building_visibility (the RAW section mask low, visible flag at bit
+	// 32), read back through the two static decoders below, and `forced` the
+	// def's forced-visible sections the part draw ORs over the raw mask. The
+	// frame consumes the delta form (get_building_visibility_changes).
+	// The raw section mask of a packed building verdict (bit N = COBJ
+	// section / render part N; bit 0 = exterior).
 	static int64_t building_visibility_mask(int64_t p_packed);
 	// The batch/frustum visible flag of a packed building verdict.
 	static bool building_visibility_visible(int64_t p_packed);
-	// Only the building pairs whose packed value changed since the last
+	// Only the building triples whose packed value changed since the last
 	// call, so the shell applies changes instead of re-walking the whole
 	// building set every frame.
 	PackedInt64Array get_building_visibility_changes();
@@ -2228,17 +2256,19 @@ public:
 	// The same delta over the decoded rows the EntityPresenter wire walk
 	// draws (culled wire handles this frame against the applied baseline).
 	PackedInt32Array get_wire_render_culled_changes();
-	// Per-draw sun-visibility feed (D-RLIT-3): triples
-	// [wire_handle_or_-1, bms_id_or_0, quality 1..4] whose quality changed.
-	// Exactly one identity is live per row. This is a cutover API: no bms-only
-	// pair form remains. The shell maps quality through sun_visibility_factor;
-	// the wire presenter applies it to late-built bodies and held weapons too.
-	// The local player's quality is
+	// Per-drawn-entity lighting feed (D-RLIT-3 plus the interior lerp,
+	// inmatch/role_feeds.h EntityLightingFeed): the identities whose context
+	// (sun quality, contained flag, daylight t, interior light group) changed
+	// this frame, placed rows by BMS id and wire rows by handle. Native only;
+	// the returned vector is reused by the next call. The shell maps quality
+	// through sun_quality_factor; the wire presenter applies the context to
+	// late-built bodies and held weapons too. The local player's quality is
 	// computed but never emitted here — the presenter reads it via
 	// get_local_player_sun_quality() so the FP parts can keep their witnessed
 	// exemption while the third-person body dims.
-	PackedInt64Array get_draw_lighting_changes(const Vector3 &p_light_dir);
-	int get_local_player_sun_quality() const { return present_.sun_quality.local_quality; }
+	const std::vector<opennova::inmatch::EntityLightingChange> &draw_lighting_changes(
+			const Vector3 &p_light_dir);
+	int get_local_player_sun_quality() const { return present_.entity_lighting.local_quality; }
 	// Quality (1..4) -> the effectScale the render-state stack multiplies —
 	// engine-owned so the mapping has ONE writer (renderer::
 	// sun_visibility_factor carries the Entity_ComputeSunVisibility cite,
@@ -2371,19 +2401,9 @@ public:
 	// query at all (engine: runtime/renderer/light_scene.cpp).
 	PackedInt64Array query_blink_owner_at(const Vector3 &p_world);
 
-	// The per-drawn-entity interior light group: every placed entity currently
-	// standing inside a blink volume, as [bms_id, containing bms_id, section]
-	// triples. Retail pushes this pair per entity draw so an interior room
-	// light reaches exactly the entities in its own section [orig:
-	// setup_terrain_effect_for_entity @0x5c74a0 -> Lighting_SetInteriorLightGroup
-	// @0x5a90e0, the gate Light_PassesActiveGroups @0x5a9120, see
-	// docs/render/render-lighting-re.md]. Entities outside every blink volume
-	// are absent (their group is (0, 0)).
-	PackedInt64Array get_entity_interior_groups() const;
-
 	// The local player's interior light group: [containing bms_id, section], or
 	// an empty array outdoors. The local player is a spawned entity with no
-	// bms_id, so it is absent from get_entity_interior_groups; its group is what
+	// bms_id, so the entity lighting feed never emits it; its group is what
 	// scopes interior lights onto the first-person arms and weapon.
 	PackedInt64Array local_player_interior_group() const;
 

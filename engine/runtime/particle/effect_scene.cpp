@@ -163,6 +163,9 @@ struct EffectScene::Impl {
 		std::uint64_t source_tick = 0;
 		std::uint64_t source_order = 0;
 		bool detached = false;
+		EffectSectionGate section_gate;
+		// group+0x6C: 1 at allocation, rewritten by every advance.
+		bool section_visible = true;
 		std::vector<std::size_t> emitter_slots;
 	};
 
@@ -250,6 +253,9 @@ struct EffectScene::Impl {
 		group.source_tick = 0;
 		group.source_order = 0;
 		group.detached = false;
+		group.section_gate = {};
+		// [orig: CEffectWorld_AllocGroupSlot @ 0x5E4779]
+		group.section_visible = true;
 		group.emitter_slots.clear();
 		return slot;
 	}
@@ -724,6 +730,7 @@ EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
 	group.owner_relative_pose = request.owner_relative_pose;
 	group.source_tick = request.source_tick;
 	group.source_order = request.source_order;
+	group.section_gate = request.section_gate;
 	group.emitter_slots.reserve(effect->definition_indices.size());
 
 	if (group.binding == EffectBinding::FollowOwner) {
@@ -1035,6 +1042,24 @@ void EffectScene::set_global_wind(const Vec3 &wind) noexcept {
 			std::isfinite(wind.z) ? wind : Vec3{};
 }
 
+bool effect_section_gate_visible(const EffectSectionGate &gate,
+		const EffectSectionMasks &masks) {
+	if (!gate.tagged || gate.blink_hits[0] == 0) {
+		return true;
+	}
+	for (const std::uint32_t hit : gate.blink_hits) {
+		if (hit == 0) {
+			continue;
+		}
+		const std::int32_t owner = static_cast<std::int32_t>(hit >> 20);
+		const std::uint32_t section = (hit >> 12) & 0x1Fu;
+		if ((masks.section_mask(owner) & (1u << section)) != 0u) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 	double requested_seconds = static_cast<double>(request.delta_seconds);
 	if (!std::isfinite(requested_seconds) || requested_seconds < 0.0) {
@@ -1076,6 +1101,12 @@ void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 	for (std::uint32_t step = 0; step < step_count; ++step) {
 		for (const std::size_t group_slot : impl_->active_group_slots) {
 			Impl::GroupRecord &group = impl_->group_pool[group_slot];
+			// The section gate first, then the children: group+0x6C is what
+			// this tick's NOVISNOUPDATE children and the next draw read
+			// [orig: CEffectGroup_AdvanceChildrenAndReap @ 0x5E59CF..0x5E59D8].
+			group.section_visible = request.section_masks == nullptr ||
+					effect_section_gate_visible(group.section_gate,
+							*request.section_masks);
 			// Group order is parent-then-child, so a parent's spawns land in
 			// the child before the child's own expiry/update this tick
 			// [orig: CEffectGroup_AdvanceChildrenAndReap @ 0x5e59a0].
@@ -1083,7 +1114,8 @@ void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 				Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
 				if (record.active) {
 					emitter_advance(record.emitter, impl_->config.simulation_tick_seconds,
-							environment, impl_->child_emitter_of(record));
+							environment, impl_->child_emitter_of(record),
+							group.section_visible);
 				}
 			}
 		}
@@ -1136,6 +1168,7 @@ void EffectScene::write_snapshot(ParticleFrameSnapshot &snapshot) const {
 		group_snapshot.first_emitter = snapshot.emitters.size();
 		group_snapshot.emitter_count = group.emitter_slots.size();
 		group_snapshot.detached = group.detached;
+		group_snapshot.section_visible = group.section_visible;
 		const std::size_t group_index = snapshot.groups.size();
 		snapshot.groups.push_back(std::move(group_snapshot));
 
@@ -1211,6 +1244,8 @@ EffectDebugSnapshot EffectScene::inspect(bool p_include_bounds) const {
 		group_snapshot.slot = group.slot;
 		group_snapshot.owner = group.owner;
 		group_snapshot.detached = group.detached;
+		group_snapshot.section_gate = group.section_gate;
+		group_snapshot.section_visible = group.section_visible;
 		group_snapshot.pose = group.pose;
 		group_snapshot.source_tick = group.source_tick;
 		group_snapshot.source_order = group.source_order;

@@ -21,6 +21,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include "terrain/foliage_frame_stats.h"
+#include "terrain/foliage_mask_pass.h"
 
 #include <formats/foliage/runtime.h>
 #include <runtime/renderer/foliage_frame.h>
@@ -66,10 +67,13 @@ private:
 //
 // opennova::renderer::FoliageFrameCompiler owns the whole frame compilation: the anchor
 // gate, both retail placement algorithms, per-identity vertex expansion, the
-// per-submission uniform state, and both wind clocks. This node applies the
-// typed FoliageDrawList: source Mesh extraction at configure time, sampler
-// bindings, ArrayMesh uploads for the draw list's mesh builds, retained
-// scenario-instance pooling, and material binding.
+// MODEL tier's GridPlacementVS instance blocks, the per-submission uniform
+// state, the water sides and ladder rungs, and both wind clocks. This node
+// applies the typed FoliageDrawList: source Mesh extraction at configure
+// time, sampler bindings, ArrayMesh uploads for the detail builds, one
+// MultiMesh per MODEL submission over the slot's normalized mesh, retained
+// scenario-instance pooling, material binding, and the opaque-pass depth
+// masks (FoliageMaskPass).
 // [orig: generate_foliage_instances_0 @ 0x5ffdd0;
 // Foliage_GenerateModelTileInstances @ 0x600980, see docs/foliage/foliage-re.md]
 class FoliageDispatcher : public Node3D {
@@ -157,6 +161,15 @@ public:
   // Tests and raster probes pin the detail sway clock (the wall-clock
   // milliseconds behind the phase); a negative value restores the live clock.
   void set_wind_clock_override_ms(int64_t p_ms);
+  // The local player's thermal view, fed per frame by the GameWorld leg from
+  // the environment's world gate (the engine compiler carries the witness).
+  void set_thermal_view(bool p_thermal);
+  bool is_thermal_view() const { return thermal_view_; }
+  // Env_WaterHeightFixed in world units (0 = no water), fed per frame by the
+  // GameWorld leg: the detail passes and the MODEL masks split by it (the
+  // engine compiler carries the witness).
+  void set_water_height(float p_height);
+  float get_water_height() const { return water_height_; }
 
   // Runtime fast path. Height, authored foliage-map, and terrain-atlas
   // projection all come directly from this resource.
@@ -173,8 +186,10 @@ public:
   void set_colormap_source(const Ref<TerrainData> &p_data);
   Ref<TerrainData> get_colormap_source() const;
 
-  // Optional samplers: (world_x, world_z) -> height / foliage palette index.
-  // Detail uses retail's flat wrapped map lookup; foliage_sampler retains the
+  // Optional samplers: (x, z) -> height / foliage palette index. Detail uses
+  // retail's flat wrapped map lookup at the candidate's source-atlas
+  // position (world in the preview, which has no sector routing);
+  // foliage_sampler retains the
   // sector-routed MODEL lookup and is the compatibility fallback for detail.
   void set_height_sampler(const Callable &p_sampler);
   Callable get_height_sampler() const;
@@ -183,9 +198,10 @@ public:
   void set_foliage_sampler(const Callable &p_sampler);
   Callable get_foliage_sampler() const;
 
-  // Anchors for the distant silhouette/depth-mask tier: crouched/prone
-  // infantry standing on terrain, supplied per frame by the binding from the
-  // simulation's stance query. Callers without entity data leave this empty.
+  // Anchors for the distant silhouette/depth-mask tier: the visible
+  // crouched/prone infantry standing on terrain, supplied per frame by the
+  // binding from the simulation's occlusion frame. Callers without entity
+  // data leave this empty.
   // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded, see docs/foliage/foliage-re.md].
   void set_silhouette_anchors(const PackedVector3Array &p_anchors);
   PackedVector3Array get_silhouette_anchors() const;
@@ -207,7 +223,8 @@ public:
     return compiler_.last_draw_list().debug;
   }
   // Device-only diagnostics for tests and live inspection. `draws` is the
-  // active draw-list order; the retained RenderingServer RIDs stay opaque.
+  // active draw-list order; the retained RenderingServer RIDs stay opaque;
+  // `mask` is the opaque-pass depth-mask pass (FoliageMaskPass::get_report).
   Dictionary get_backend_report() const;
   // Immediate diagnostic control for the current retained draw list. Raster
   // probes use this after render_frame/render_preview to pin wind, optionally
@@ -317,6 +334,7 @@ private:
   ObjectID weather_id_;
   Weather *_weather() const;
   int64_t wind_clock_override_ms_ = -1;
+  bool thermal_view_ = false;
   Ref<TerrainData> terrain_data_;
   Ref<TerrainTileInfo> tile_info_;
   Ref<TerrainData> colormap_source_;
@@ -328,19 +346,27 @@ private:
   Ref<Shader> detail_high_shader_;
   Ref<Shader> detail_low_shader_;
   Ref<Shader> silhouette_shader_;
-  std::array<Ref<ShaderMaterial>, opennova::FOLIAGE_MAX_DEFS>
-      detail_high_materials_{};
-  std::array<Ref<ShaderMaterial>, opennova::FOLIAGE_MAX_DEFS>
-      detail_low_materials_{};
-  std::array<Ref<ShaderMaterial>, opennova::FOLIAGE_MAX_DEFS>
-      silhouette_materials_{};
+  // Materials per water side (0 = far, 1 = camera side) and slot: a
+  // material carries its side's ladder rung as its render priority.
+  using SlotMaterials =
+      std::array<Ref<ShaderMaterial>, opennova::FOLIAGE_MAX_DEFS>;
+  std::array<SlotMaterials, 2> detail_high_materials_{};
+  std::array<SlotMaterials, 2> detail_low_materials_{};
+  std::array<SlotMaterials, 2> silhouette_materials_{};
   std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash>
       detail_mesh_cache_;
-  std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash>
-      model_mesh_cache_;
+  // The slots' normalized MODEL meshes (compiler_.model_mesh) the
+  // silhouette MultiMeshes instance, rebuilt when the compiler's mesh
+  // generation moves.
+  std::array<Ref<ArrayMesh>, opennova::FOLIAGE_MAX_DEFS> model_meshes_{};
+  uint64_t model_mesh_generation_ = 0;
   std::vector<RID> detail_draw_pool_;
   std::vector<RID> model_draw_pool_;
+  // One MultiMesh per model pool instance (its base), sized for a full tile.
+  std::vector<RID> model_multimesh_pool_;
   RID draw_scenario_;
+  FoliageMaskPass mask_pass_;
+  float water_height_ = 0.0f;
   // What each pool instance currently holds on the RenderingServer. The draw
   // list is diff-applied per slot (mesh, material, instance uniforms), so a
   // stable frame only writes fields whose compiler clock advanced; only the
@@ -361,20 +387,25 @@ private:
     float alpha_reference = 0.0f;
     float high_pass_cutoff = 0.0f;
     float wind_phase = 0.0f;
+    float wind_sector_origin_z = 0.0f;
+    bool far_side = false;
+    int render_rung = 0;
+    float sorting_offset = 0.0f;
+    // MODEL draws: the MultiMesh content identity and the c9.x wind term.
+    int64_t instance_count = 0;
+    float wind_offset = 0.0f;
     bool tile_cache_ready = false;
     float tile_cache_layer = 0.0f;
     Vector4 tile_cache_projection;
   };
   std::vector<DrawInstanceStamp> detail_draw_stamps_;
   std::vector<DrawInstanceStamp> model_draw_stamps_;
-  // The material inputs last written (texture RIDs + tint): _update_materials
+  // The material inputs last written (texture RIDs): _update_materials
   // writes the ~100 material parameters only when one of them changes.
   struct MaterialInputs {
     RID colormap;
     RID heightfield_normal;
-    RID tile_overlay;
     RID tile_cache;
-    Vector3 tile_overlay_tint;
     RID fd_textures[opennova::FOLIAGE_MAX_DEFS];
     bool operator==(const MaterialInputs &p_other) const;
   };
@@ -389,13 +420,14 @@ private:
   _extract_source_geometry(const Ref<Mesh> &p_mesh) const;
   void _ensure_visuals();
   void _update_materials();
+  void _refresh_model_meshes();
   // Grow one pool to cover p_index. The apply loop binds the scenario once
   // (_bind_current_scenario) and passes the server down: nothing here walks
   // the tree per draw.
   RID _ensure_draw_instance(RenderingServer *p_server,
                             std::vector<RID> &r_pool,
                             std::vector<DrawInstanceStamp> &r_stamps,
-                            size_t p_index);
+                            size_t p_index, bool p_model_tier);
   bool _bind_current_scenario();
   void _set_draw_pool_visibility(bool p_visible);
   void _release_draw_pools();
@@ -403,7 +435,7 @@ private:
   // this frame's bindings.
   void _hide_pool_tail(std::vector<RID> &r_pool,
                        std::vector<DrawInstanceStamp> &r_stamps,
-                       size_t p_first);
+                       size_t p_first, bool p_model_tier);
   void _on_terrain_data_changed();
   void _on_tile_info_changed();
   void _on_colormap_source_changed();
@@ -419,8 +451,9 @@ private:
 
   opennova::foliage::WorldSamplers _world_samplers();
   float _sample_height(float p_world_x, float p_world_z) const;
-  int _sample_detail_foliage_index(int32_t p_world_x_fixed,
-                                   int32_t p_world_z_fixed) const;
+  // At the candidate's source-atlas position (foliage::WorldSamplers).
+  int _sample_detail_foliage_index(int32_t p_atlas_x_fixed,
+                                   int32_t p_atlas_z_fixed) const;
   int _sample_model_foliage_index(int32_t p_world_x_fixed,
                                   int32_t p_world_z_fixed) const;
   uint32_t _mask_for_palette_index(int p_index) const;

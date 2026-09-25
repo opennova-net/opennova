@@ -10,10 +10,10 @@ const ROUTED_WITNESS_WORLD := Vector2(-120.0, -24.0)
 const ROUTED_WITNESS_MAP := Vector2i(98, 122)
 const ROUTED_WITNESS_FLAT_MAP := Vector2i(226, 250)
 const ROUTED_WITNESS_MIRRORED_MAP := Vector2i(98, 134)
-const DETAIL_WITNESS_WORLD := Vector2(120.0, 428.0)
-const DETAIL_WITNESS_FLAT_MAP := Vector2i(30, 107)
-const DETAIL_WITNESS_ROUTED_MAP := Vector2i(158, 235)
-const DETAIL_WITNESS_MIRRORED_MAP := Vector2i(30, 149)
+const FLAT_WITNESS_WORLD := Vector2(120.0, 428.0)
+const FLAT_WITNESS_FLAT_MAP := Vector2i(30, 107)
+const FLAT_WITNESS_ROUTED_MAP := Vector2i(158, 235)
+const FLAT_WITNESS_MIRRORED_MAP := Vector2i(30, 149)
 const FOLIAGE_MATCH := 254
 
 
@@ -56,9 +56,13 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 		world.unload()
 		return
 
-	# Two disjoint witnesses prove the authored foliagemap is interpreted with
-	# the retail policy for each consumer: flat wrapping for detail grass and
-	# sector routing for MODEL masks.
+	# Two disjoint witnesses prove the authored foliagemap is read at the
+	# retail coordinate: the MODEL masks route the world position through the
+	# sector grid, and detail grass samples the leaf's source-atlas position
+	# (the key's low ten bits plus the local offsets), which is the same
+	# routed pixel; the world position's own low ten bits (the flat witness)
+	# never match. [orig: generate_foliage_instances_0 @ 0x5ffddb..0x5ffdee,
+	# @ 0x5fff84..0x5fff9d; Foliage_SampleFoliageMapMask @ 0x606620]
 	var foliage_map: TerrainFoliageMap = data.get_foliage_map()
 	assert_not_null(foliage_map)
 	if foliage_map == null:
@@ -74,26 +78,20 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 		ROUTED_WITNESS_MIRRORED_MAP.x, ROUTED_WITNESS_MIRRORED_MAP.y)), 255,
 		"The routed witness's mirrored coordinate should remain negative.")
 	assert_eq(int(foliage_map.get_index(
-		DETAIL_WITNESS_FLAT_MAP.x, DETAIL_WITNESS_FLAT_MAP.y)), FOLIAGE_MATCH,
-		"The flat detail coordinate should retain the authored foliage match.")
+		FLAT_WITNESS_FLAT_MAP.x, FLAT_WITNESS_FLAT_MAP.y)), FOLIAGE_MATCH,
+		"The flat witness's world-wrapped coordinate should retain the match.")
 	assert_eq(int(foliage_map.get_index(
-		DETAIL_WITNESS_ROUTED_MAP.x, DETAIL_WITNESS_ROUTED_MAP.y)), 255,
-		"The detail witness's routed coordinate should remain negative.")
+		FLAT_WITNESS_ROUTED_MAP.x, FLAT_WITNESS_ROUTED_MAP.y)), 255,
+		"The flat witness's routed coordinate should remain negative.")
 	assert_eq(int(foliage_map.get_index(
-		DETAIL_WITNESS_MIRRORED_MAP.x, DETAIL_WITNESS_MIRRORED_MAP.y)), 255,
-		"The detail witness's mirrored coordinate should remain negative.")
+		FLAT_WITNESS_MIRRORED_MAP.x, FLAT_WITNESS_MIRRORED_MAP.y)), 255,
+		"The flat witness's mirrored coordinate should remain negative.")
 	assert_eq(int(data.get_foliage_index_world(
 		ROUTED_WITNESS_WORLD.x, ROUTED_WITNESS_WORLD.y)), FOLIAGE_MATCH,
 		"MODEL sampling must use the routed authored-map coordinate.")
-	assert_eq(int(data.get_detail_foliage_index_world(
-		ROUTED_WITNESS_WORLD.x, ROUTED_WITNESS_WORLD.y)), 255,
-		"Detail sampling must not inherit MODEL's sector-routed match.")
-	assert_eq(int(data.get_detail_foliage_index_world(
-		DETAIL_WITNESS_WORLD.x, DETAIL_WITNESS_WORLD.y)), FOLIAGE_MATCH,
-		"Detail sampling must use the flat wrapped authored-map coordinate.")
 	assert_eq(int(data.get_foliage_index_world(
-		DETAIL_WITNESS_WORLD.x, DETAIL_WITNESS_WORLD.y)), 255,
-		"MODEL sampling must not inherit detail's flat wrapped match.")
+		FLAT_WITNESS_WORLD.x, FLAT_WITNESS_WORLD.y)), 255,
+		"MODEL sampling must not read the world-wrapped coordinate.")
 
 	var defs: Array = data.get_foliage_defs()
 	assert_eq(defs.size(), 2, "Tmap should retain both authored foliage definitions.")
@@ -105,21 +103,19 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 		if mesh != null:
 			assert_gt(mesh.get_surface_count(), 0)
 
-	# Render from the flat-positive detail witness so the production dispatcher
-	# must choose the correct data policy to produce visible grass.
+	# From the flat-only witness the production detail gate finds no grass:
+	# its atlas samples are the routed, negative pixels.
 	dispatcher.reset()
-	var position := Vector3(DETAIL_WITNESS_WORLD.x, 0.0, DETAIL_WITNESS_WORLD.y)
-	position.y = data.get_height_world_bilinear(position)
-	camera.global_position = position + Vector3(0.0, 2.2, 0.0)
-	camera.look_at(position + Vector3(0.0, 0.5, -12.0), Vector3.UP)
+	var flat_stats := await _render_detail_at(world, camera, dispatcher, data, FLAT_WITNESS_WORLD)
+	assert_gt(flat_stats.detail_cells, 0,
+		"The flat witness camera should still collect native detail cells.")
+	assert_eq(flat_stats.runtime_detail_intents, 0,
+		"Detail grass must not read the world-wrapped coordinate: %s" % flat_stats.to_json_value())
 
-	var stats: FoliageFrameStats = null
-	for _frame in range(60):
-		await get_tree().process_frame
-		world.tick(camera.global_position, camera.global_transform, 1.0 / 60.0)
-		stats = dispatcher.get_frame_stats()
-		if _has_complete_detail_output(dispatcher, stats):
-			break
+	# From the routed-positive witness the detail gate's atlas samples land on
+	# the authored match and the production dispatcher produces visible grass.
+	dispatcher.reset()
+	var stats := await _render_detail_at(world, camera, dispatcher, data, ROUTED_WITNESS_WORLD)
 
 	assert_true(stats.native_detail_source,
 		"GameWorld foliage must consume Terrain native detail cells.")
@@ -137,6 +133,22 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	dispatcher.reset()
 	world.unload()
 	await get_tree().process_frame
+
+
+func _render_detail_at(world: GameWorld, camera: Camera3D, dispatcher: FoliageDispatcher,
+		data: TerrainData, witness: Vector2) -> FoliageFrameStats:
+	var position := Vector3(witness.x, 0.0, witness.y)
+	position.y = data.get_height_world_bilinear(position)
+	camera.global_position = position + Vector3(0.0, 2.2, 0.0)
+	camera.look_at(position + Vector3(0.0, 0.5, -12.0), Vector3.UP)
+	var stats: FoliageFrameStats = null
+	for _frame in range(60):
+		await get_tree().process_frame
+		world.tick(camera.global_position, camera.global_transform, 1.0 / 60.0)
+		stats = dispatcher.get_frame_stats()
+		if _has_complete_detail_output(dispatcher, stats):
+			break
+	return stats
 
 
 func _has_complete_detail_output(dispatcher: FoliageDispatcher, stats: FoliageFrameStats) -> bool:

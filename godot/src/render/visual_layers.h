@@ -45,9 +45,12 @@ enum : uint32_t {
 	TERRAIN_FLAT_FALLBACK = 1u << 18,
 	SHADOW_CASTER_MASK = STATIC_SHADOW_CASTER | DYNAMIC_SHADOW_CASTER,
 	// The mirror camera's above-water mask; a below-water view adds
-	// WORLD_NO_MIRROR back (retail collects unfiltered there). The render-slot
-	// captures draw through SlotShadow's RenderingDevice pass and reserve no
-	// visual layer.
+	// WORLD_NO_MIRROR back (retail collects unfiltered there). The mirror is
+	// the only non-shadow camera whose mask omits WATER (it never draws the
+	// water surface), which is how the object and terrain shaders recognise
+	// the reflected pass (its clip and fog block). The render-slot captures
+	// draw through SlotShadow's RenderingDevice pass and reserve no visual
+	// layer.
 	REFLECTION_CULL_MASK = 0xFFFFFu &
 			~(WATER | VIEWMODEL | FP_BODY_SHADOW_ONLY | SHADOW_CASTER_MASK |
 					WORLD_NO_MIRROR | TERRAIN_FOLIAGE | TERRAIN_FLAT_FALLBACK),

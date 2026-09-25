@@ -1,4 +1,6 @@
 #include "simulation/entity_presenter.h"
+
+#include "render/scene_overlay_compositor.h"
 #include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
@@ -140,9 +142,12 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::resolve_wire_handle);
 	ClassDB::bind_method(D_METHOD("held_weapon_node", "wire_handle"),
 			&EntityPresenter::held_weapon_node);
+	ClassDB::bind_method(D_METHOD("person_overlays_for", "wire_handle"),
+			&EntityPresenter::person_overlays_for);
 	ClassDB::bind_method(D_METHOD("set_entity_lighting_context", "wire_handle",
-			"effect_scale", "interior_lerp", "light_transfer"),
-			&EntityPresenter::set_entity_lighting_context);
+			"effect_scale", "interior_lerp", "light_transfer", "interior_bms",
+			"interior_section"),
+			&EntityPresenter::set_entity_lighting_context, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("muzzle_world_for", "handle", "userpoint"),
 			&EntityPresenter::muzzle_world_for);
 	ClassDB::bind_method(D_METHOD("wire_entity_count"),
@@ -194,6 +199,14 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::draw_tracer_rows);
 	ClassDB::bind_method(D_METHOD("present_destruction_drained", "events", "pieces"),
 			&EntityPresenter::present_destruction_drained);
+	ClassDB::bind_method(D_METHOD("present_death_piece_draws", "draws"),
+			&EntityPresenter::present_death_piece_draws);
+	ClassDB::bind_method(D_METHOD("death_piece_model", "slot"),
+			&EntityPresenter::death_piece_model);
+	ClassDB::bind_method(D_METHOD("nvg_laser_beam_batches", "handle", "attach_bone",
+			"weapon_flags", "launch_userpoint", "local_player", "nvg_active", "camera_mode",
+			"eye"),
+			&EntityPresenter::nvg_laser_beam_batches);
 	ClassDB::bind_method(D_METHOD("present_throwable_visuals", "visuals"),
 			&EntityPresenter::present_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("present_vehicle_trail_visuals", "visuals"),
@@ -317,7 +330,7 @@ void EntityPresenter::setup_passes(Node3D *p_container, const Ref<ItemDatabase> 
 		ItemEffectDirector *p_anchors) {
 	Simulation *s = sim();
 	const Ref<ItemEffectDirector> anchors(p_anchors);
-	fire_->setup(s, p_container, p_audio, p_fx, p_lights);
+	fire_->setup(s, p_container, p_audio, p_fx, p_lights, p_resource_root, p_environment);
 	destruction_->setup(this, s, p_container, index_, placer_, p_item_db, anchors, p_audio,
 			p_fx, p_lights);
 	throwable_->setup(s, p_container, placer_, p_item_db, p_fx, anchors);
@@ -408,7 +421,7 @@ void EntityPresenter::warm_fire_pipelines(const Vector3 &p_position) {
 	fire_->warm_pipelines(p_position);
 }
 
-Ref<ImmediateMesh> EntityPresenter::fire_ribbon_mesh() const {
+Ref<ArrayMesh> EntityPresenter::fire_ribbon_mesh() const {
 	return fire_->ribbon_mesh();
 }
 
@@ -458,6 +471,53 @@ void EntityPresenter::present_destruction_drained(const Ref<DestructionDrain> &p
 	const opennova::world::DestructionEvents none;
 	destruction_->present_drained(p_events.is_valid() ? p_events->value() : none,
 			unwrap_rows<opennova::world::DeathPieceRow, DeathPieceRow>(p_pieces));
+}
+
+void EntityPresenter::present_death_piece_draws_native(
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	destruction_->apply_piece_draws(p_draws);
+}
+
+void EntityPresenter::present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws) {
+	destruction_->apply_piece_draws(
+			unwrap_rows<opennova::world::DeathPieceDraw, DeathPieceDraw>(p_draws));
+}
+
+ObjectModel *EntityPresenter::death_piece_model(int p_slot) const {
+	return destruction_->piece_model(p_slot);
+}
+
+int EntityPresenter::append_nvg_laser_beams(Simulation *p_sim, const NvgLaserView &p_view,
+		SceneOverlaySubmission &r_submission) {
+	if (p_sim == nullptr) {
+		return 0;
+	}
+	std::vector<NvgLaserSource> sources;
+	p_sim->nvg_laser_sources(sources);
+	return fire_->append_nvg_laser_beams(sources, p_view, r_submission);
+}
+
+int EntityPresenter::nvg_laser_beam_batches(int p_handle, int p_attach_bone,
+		int p_weapon_flags, int p_launch_userpoint, bool p_local_player, bool p_nvg_active,
+		int p_camera_mode, const Transform3D &p_eye) {
+	NvgLaserSource source;
+	source.handle = p_handle;
+	source.gate.attach_bone = static_cast<uint8_t>(p_attach_bone);
+	source.gate.has_weapon_def = true;
+	source.gate.weapon_flags = p_weapon_flags;
+	source.gate.local_player = p_local_player;
+	source.launch_userpoint = p_launch_userpoint;
+	NvgLaserView view;
+	view.eye = p_eye;
+	view.nvg_active = p_nvg_active;
+	view.camera_mode = p_camera_mode;
+	SceneOverlaySubmission submission;
+	fire_->append_nvg_laser_beams({source}, view, submission);
+	int batches = 0;
+	for (const opennova::renderer::SceneOverlayBatch &batch : submission.frame.batches) {
+		batches += batch.slot == opennova::renderer::SceneOverlaySlot::NvgLaserBeams ? 1 : 0;
+	}
+	return batches;
 }
 
 void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals) {
@@ -920,22 +980,22 @@ bool EntityPresenter::aim_payload_changed(const float *p, int base,
 void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
 	model = destruction_->visual_model(model);
+	// The sim's destroyed sections (entity+0x138), the model's own hidden
+	// mask beside the occlusion frame's verdict (ObjectModel ORs the two).
 	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
-		const uint32_t hidden_mask =
+		const int64_t hidden_mask = static_cast<int64_t>(
 				static_cast<uint32_t>(field_i(
 						p, base, Simulation::PF_SECTION_MASK_LO)) |
 				(static_cast<uint32_t>(field_i(
 						p, base, Simulation::PF_SECTION_MASK_HI))
-						<< 16);
-		const int64_t section_visibility_mask = static_cast<int64_t>(
-				hidden_mask ^ 0xffffffffu);
-		if (section_visibility_mask != last_mask) {
-			model->set_section_visibility_mask(section_visibility_mask);
-			last_mask = section_visibility_mask;
+						<< 16));
+		if (hidden_mask != last_mask) {
+			model->set_destroyed_section_mask(hidden_mask);
+			last_mask = hidden_mask;
 		}
-	} else if (last_mask != -2 && last_mask != -1) {
-		model->set_section_visibility_mask(-1);
-		last_mask = -1;
+	} else if (last_mask != -2 && last_mask != 0) {
+		model->set_destroyed_section_mask(0);
+		last_mask = 0;
 	}
 }
 
@@ -1168,6 +1228,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		// while the row was out (set legs are per-submission re-asserts;
 		// falling edges latched in the publish state still clear).
 		model->set_parachute_deployed(field_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
+		model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
+				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
+				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
 		const bool submitted = present_visible &&
 				!model->is_occlusion_hidden() &&
 				model->is_on_screen();
@@ -1424,7 +1487,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			profile_phase_start = now;
 		}
 		if ((output_channels_ & OUTPUT_VISIBILITY) != 0) {
-			stamp_section_mask(model, p, base, row.section_visibility_mask);
+			stamp_section_mask(model, p, base, row.destroyed_section_mask);
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed.

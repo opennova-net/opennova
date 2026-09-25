@@ -116,7 +116,7 @@ func test_fp_models_query_the_player_even_after_camera_restamping() -> void:
 		part.set_shadow_bound_radii(1000, 1000)
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(parts[0].global_position, 0.01)), 0)
 	var camera_light := parts[0].global_position
-	director.render_frame(_camera, GameWorld.current_frame_clock_ms(), parts, -1, false)
+	director.render_frame(_camera, GameWorld.current_frame_clock_ms(), parts, false)
 	for part in parts:
 		var surfaces: Array[Node] = part.find_children("*", "GeometryInstance3D", true, false)
 		assert_gt(surfaces.size(), 0)
@@ -127,9 +127,19 @@ func test_fp_models_query_the_player_even_after_camera_restamping() -> void:
 			assert_almost_eq(Vector3(posr.x, posr.y, posr.z), entity_position,
 					Vector3.ONE * 0.001, "FP lights use the native player's sphere")
 	assert_gt(camera_light.distance_to(entity_position), 30.0)
+	# The first-person pass declares no owner group (retail
+	# Player_RenderFirstPersonViewModel sets only the interior group
+	# @0x4DEEB0): the player's own muzzle glow, owned by the player, never
+	# reaches the FP arms or gun even inside the shared query cube.
+	director.on_muzzle_fire(sim.get_local_player_wire_handle(), entity_position)
+	director.render_frame(_camera, GameWorld.current_frame_clock_ms(), parts, false)
+	for part in parts:
+		var surface := part.find_children("*", "GeometryInstance3D", true, false)[0] as GeometryInstance3D
+		assert_eq(float(surface.get_instance_shader_parameter("u_point_light_count")), 1.0,
+				"the FP parts never take the player's own owned muzzle glow")
 	_camera.global_position += Vector3(20, 10, 15)
 	_presenter.restamp_viewmodel_at_camera()
-	director.render_frame(_camera, GameWorld.current_frame_clock_ms(), parts, -1, false)
+	director.render_frame(_camera, GameWorld.current_frame_clock_ms(), parts, false)
 	for part in parts:
 		var surface := part.find_children("*", "GeometryInstance3D", true, false)[0] as GeometryInstance3D
 		assert_eq(float(surface.get_instance_shader_parameter("u_point_light_count")), 1.0,

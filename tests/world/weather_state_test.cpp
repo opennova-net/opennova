@@ -176,7 +176,7 @@ void test_tick_advances_the_clock_and_fires_thunder() {
 	CHECK(!events.thunder_a && !events.thunder_b && !events.quake_shake_local);
 	// 310 ticks later the minute counter wraps and counts one elapsed minute.
 	for (int i = 0; i < 310; ++i) ws.tick_sim(nullptr, events);
-	CHECK(ws.tod_minutes_elapsed == 1);
+	CHECK(ws.tod_epoch == 1);
 	// flash: timer A 16 -> thunder on the 16th tick; farflash: B 32.
 	ws.command_flash();
 	int thunder_tick = -1;

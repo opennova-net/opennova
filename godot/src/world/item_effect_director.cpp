@@ -461,8 +461,10 @@ int ItemEffectDirector::_attach_item_effect_to_node(ObjectModel *p_node, int p_k
 	for (const int i : plan.user_points) {
 		const Ref<ModelUserPoint> info = data->get_user_point_info(i);
 		const String key = item_fx_point_key(node_id, i);
+		// The item's own descriptor tag gates the group by building section
+		// (retail Entity_SpawnBoneEffectsAtMask @ 0x458750).
 		const Ref<EffectSpawnReceipt> receipt = effect_world->spawn_effect_attached_request(
-				key, effect, node_transform, info->get_position(), info->get_rotation());
+				key, effect, node_transform, info->get_position(), info->get_rotation(), true);
 		if (receipt->get_spawned()) {
 			item_fx_nodes_.insert(key, ObjectID(node_id));
 			item_fx_owner_refs_.insert(key, entity_ref);
@@ -477,7 +479,7 @@ int ItemEffectDirector::_attach_item_effect_to_node(ObjectModel *p_node, int p_k
 		// entity origin.
 		const String key = item_fx_origin_key(node_id);
 		const Ref<EffectSpawnReceipt> receipt = effect_world->spawn_effect_attached_request(
-				key, effect, node_transform, Vector3(), Vector3());
+				key, effect, node_transform, Vector3(), Vector3(), true);
 		if (receipt->get_spawned()) {
 			item_fx_nodes_.insert(key, ObjectID(node_id));
 			item_fx_owner_refs_.insert(key, entity_ref);
@@ -501,6 +503,7 @@ bool ItemEffectDirector::_spawn_static_item_effect(EffectWorld *p_effect_world,
 	options->set_admission(EffectScene::ADMISSION_ALWAYS);
 	options->set_binding(EffectScene::BINDING_WORLD);
 	options->set_render_domain(EffectScene::RENDER_DOMAIN_WORLD);
+	options->set_section_tagged(true);
 	const Ref<EffectSpawnReceipt> receipt =
 			p_effect_world->spawn_effect_request(p_effect, p_transform, options);
 	return receipt->get_spawned();

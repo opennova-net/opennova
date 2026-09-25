@@ -20,15 +20,12 @@ class TerrainSurfaceInputs : public RefCounted {
 private:
 	Ref<TerrainData> terrain_data;
 	Ref<TerrainTileInfo> tile_info_override;
-	bool tile_overlay_enabled = true;
 
 	Ref<Texture2D> detail_coefficient_texture;
 	Ref<Texture2D> normalized_blend_texture;
-	Ref<Texture2D> paired_detail_textures[3];
+	Ref<Texture2D> detail_layer_textures[3];
 	Ref<Texture2D> paired_detail2_texture;
-	Ref<Texture2D> mipped_colormap_texture;
 	Ref<Texture2D> heightfield_normal_texture;
-	Ref<Texture2D> tile_overlay_texture;
 
 protected:
 	static void _bind_methods();
@@ -40,19 +37,13 @@ public:
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;
 
-	void set_tile_overlay_enabled(bool p_enabled);
-	bool get_tile_overlay_enabled() const;
-
 	bool rebuild(const Ref<TerrainData> &p_data,
-			const Ref<TerrainTileInfo> &p_tile_info = Ref<TerrainTileInfo>(),
-			bool p_tile_overlay_enabled = true);
+			const Ref<TerrainTileInfo> &p_tile_info = Ref<TerrainTileInfo>());
 	bool rebuild_blend();
 	bool rebuild_heightfield();
 	bool rebuild_detail_textures();
-	bool rebuild_tile_overlay();
 
 	void clear_derived_textures();
-	void clear_tile_overlay();
 	bool apply_to_material(const Ref<ShaderMaterial> &p_material) const;
 
 	Ref<Texture2D> get_colormap_texture() const;
@@ -63,19 +54,17 @@ public:
 	Ref<Texture2D> get_detail_c3_texture() const;
 	Ref<Texture2D> get_normalized_blend_texture() const;
 	Ref<Texture2D> get_detail_coefficient_texture() const;
-	Ref<Texture2D> get_paired_detail_texture(int p_layer) const;
+	Ref<Texture2D> get_detail_layer_texture(int p_layer) const;
 	Ref<Texture2D> get_detail2_texture() const;
 	Ref<Texture2D> get_heightfield_normal_texture() const;
-	Ref<Texture2D> get_tile_overlay_texture() const;
 	int get_detail_density() const;
 	int get_detail2_density() const;
 
 	bool has_normalized_blend() const;
 	bool has_detail_coefficient() const;
-	bool has_paired_detail(int p_layer) const;
+	bool has_detail_layer(int p_layer) const;
 	bool has_detail2() const;
 	bool has_heightfield_normal() const;
-	bool has_tile_overlay() const;
 	Dictionary get_diagnostics() const;
 };
 

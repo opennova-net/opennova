@@ -32,6 +32,12 @@ void test_husk_render_pick_is_husk_first_then_huskfinal() {
 	CHECK(w::husk_render_graphic("", "Dbuggy1F") == "Dbuggy1F");
 	CHECK(w::husk_render_graphic("Dbuggy1X", "") == "Dbuggy1X");
 	CHECK(w::husk_render_graphic("", "").empty());
+	// The piece model is huskFINAL first, the other order.
+	// [orig: Entity_SpawnDeathPieces @0x4934af..0x4934c3]
+	CHECK(w::death_piece_graphic("Dbuggy1X", "Dbuggy1F") == "Dbuggy1F");
+	CHECK(w::death_piece_graphic("Dbuggy1X", "") == "Dbuggy1X");
+	CHECK(w::death_piece_graphic("", "Dbuggy1F") == "Dbuggy1F");
+	CHECK(w::death_piece_graphic("", "").empty());
 }
 
 void test_dynamic_identity_needs_a_wire_handle_zero_bms_and_the_sentinel_origin() {

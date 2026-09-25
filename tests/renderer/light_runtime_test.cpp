@@ -154,6 +154,29 @@ int main() {
                       "fully open interior should reach outdoor sky");
     }
 
+    // The static-row lane [orig: Terrain_RenderSectorModels @ 0x5c5df2..
+    // 0x5c5e00 + collect_render_objects_for_batch @ 0x5d9156..0x5d9162 for
+    // buildings; Terrain_RenderSectorEntities @ 0x5c7c05..0x5c7c14 over the
+    // zeroed stack-base aux for every other static].
+    {
+        const auto shell = static_row_entity_lighting(true, 0, 0.6f, false);
+        expect(shell.effect_scale == 1.0f && !shell.interior_lerp,
+               "a building's exterior shell (ROBJ 0) never lerps");
+        const auto room = static_row_entity_lighting(true, 2, 0.6f, false);
+        expect(room.effect_scale == 1.0f && room.interior_lerp && room.interior_daylight == 0.6f,
+               "a building's ROBJ 1+ lerps by its own daylight");
+        const auto closed = static_row_entity_lighting(true, 1, 0.0f, false);
+        expect(closed.interior_lerp && closed.interior_daylight == 0.0f,
+               "a closed building's rooms take pure floor/ceiling");
+        const auto crate_in = static_row_entity_lighting(false, 0, 0.6f, true);
+        expect(crate_in.effect_scale == 1.0f && crate_in.interior_lerp &&
+                       crate_in.interior_daylight == 0.0f,
+               "a contained static lerps with the stack-base t = 0");
+        const auto crate_out = static_row_entity_lighting(false, 0, 0.6f, false);
+        expect(crate_out.effect_scale == 1.0f && !crate_out.interior_lerp,
+               "an outdoor static stays on the outdoor path");
+    }
+
     {
         EntityLightingUniforms u;
         u.dir_color = {0.4f, 0.1f, 0.0f};

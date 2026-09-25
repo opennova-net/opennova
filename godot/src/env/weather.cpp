@@ -108,9 +108,6 @@ void Weather::_bind_methods() {
 			&Weather::get_cloud_uv_offset2);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"),
 			&Weather::get_cloud_uv_rate_per_second);
-	ClassDB::bind_method(
-			D_METHOD("get_water_uv_state", "cam_x", "cam_z", "fog_distance"),
-			&Weather::get_water_uv_state);
 
 	// The render-frame drive: the frame pipeline's environment leg and the
 	// tests call it; the node never self-clocks through a process callback.
@@ -176,6 +173,8 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 			to_vector3(globals.base.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
 			to_vector3(globals.base.sky_ambient));
+	rs->global_shader_parameter_set("opennova_env_light_block",
+			to_vector3(globals.base.light_block));
 	rs->global_shader_parameter_set("opennova_fog_color",
 			to_vector3(globals.base.fog_color));
 	rs->global_shader_parameter_set("opennova_sun_direction",
@@ -607,13 +606,6 @@ Vector2 Weather::get_cloud_uv_offset2(float p_cam_x, float p_cam_z) const {
 
 float Weather::get_cloud_uv_rate_per_second() const {
 	return runtime_.cloud_uv_rate_per_second();
-}
-
-Vector4 Weather::get_water_uv_state(float p_cam_x, float p_cam_z,
-		float p_fog_distance) const {
-	const opennova::env::WaterUvState state =
-			runtime_.water_uv_state(p_cam_x, p_cam_z, p_fog_distance);
-	return Vector4(state.scale, state.bias, state.offset_u, state.offset_v);
 }
 
 } // namespace godot

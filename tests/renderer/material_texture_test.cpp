@@ -86,7 +86,60 @@ int main() {
 			"diffuse TGA retains authored pixels");
 	expect(material_texture_transform(3, "Body.tga", true) == MaterialTextureTransform::Checkerboard &&
 			material_texture_transform(0, "Missing.tga", false) == MaterialTextureTransform::Checkerboard,
-			"unsupported rows and failed loads bind the checkerboard");
+			"unsupported runtime rows and failed loads bind the checkerboard");
+	// Pixel-built textures (TGA/MDT/PCX rows, normal maps, the checkerboard)
+	// get one level per halving while the smaller side exceeds 2.
+	// [orig: GTexture_CreateFromPixelData_0 @0x6877BC..0x6877D8]
+	expect(pixel_texture_mip_levels(256, 256) == 7 && pixel_texture_mip_levels(128, 128) == 6 &&
+			pixel_texture_mip_levels(256, 64) == 5 && pixel_texture_mip_levels(4, 4) == 1 &&
+			pixel_texture_mip_levels(3, 8) == 1 && pixel_texture_mip_levels(2, 2) == 0 &&
+			pixel_texture_mip_levels(48, 48) == 5,
+			"pixel-built mip chains end at the last level above min-dim 2");
+	// Texture_LoadByNameWithChannel's single-file resolution.
+	// [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B6E6;
+	// load_texture_and_register @0x58B80E..0x58B881]
+	expect(material_texture_query("Jbark_2.dds.tga") == "Jbark_2.dds" &&
+			material_texture_query("wall.tga") == "wall.tga" &&
+			material_texture_query("noext") == "noext",
+			"the query keeps three characters after the first dot");
+	expect(material_dds_sibling("wall.tga") == "wall.dds" &&
+			material_dds_sibling("Jbark_2.dds") == "Jbark_2.dds" &&
+			material_dds_sibling("noext") == "noext.dds",
+			"the DDS sibling replaces the last extension");
+	{
+		const MaterialImageSource dds = material_image_source("wall.tga", false, true);
+		expect(dds.file == "wall.dds" && dds.decoder == MaterialImageDecoder::Dds,
+				"an existing DDS sibling wins");
+		const MaterialImageSource loose = material_image_source("wall.tga", true, true);
+		expect(loose.file == "wall.tga" && loose.decoder == MaterialImageDecoder::Tga,
+				"a loose-first hit takes the plain path");
+		const MaterialImageSource mdt = material_image_source("Body.MDT", false, true);
+		expect(mdt.file == "Body.MDT" && mdt.decoder == MaterialImageDecoder::Tga,
+				"an upper-case .MDT query skips the DDS probe");
+		const MaterialImageSource lower_mdt = material_image_source("body.mdt", false, true);
+		expect(lower_mdt.decoder == MaterialImageDecoder::Dds,
+				"the .MDT probe is case-sensitive");
+		expect(material_image_source("flag.pcx", false, false).decoder == MaterialImageDecoder::Pcx,
+				"PCX takes the PCX reader");
+		expect(material_image_source("photo.png", false, false).decoder == MaterialImageDecoder::None,
+				"any other extension fails");
+		const MaterialImageSource plain = plain_material_image_source("wall.tga");
+		expect(plain.file == "wall.tga" && plain.decoder == MaterialImageDecoder::Tga,
+				"type 1 never probes a DDS sibling");
+	}
+	// The loader never stores those runtime values: authored 3, 9..15 and
+	// > 18 keep the memset zero and load as ordinary diffuse rows.
+	// [orig: convert_material_definition @0x5B045B..0x5B04A0]
+	for (unsigned authored = 0; authored < 256; ++authored) {
+		const bool dropped = authored == 3 || (authored >= 9 && authored <= 15) || authored > 18;
+		const uint8_t runtime = material_texture_runtime_type(static_cast<uint8_t>(authored));
+		expect(runtime == (dropped ? 0 : authored), "loader texture-type remap");
+	}
+	expect(material_texture_transform(material_texture_runtime_type(3), "Body.tga", true) ==
+					MaterialTextureTransform::Unchanged &&
+			material_texture_transform(material_texture_runtime_type(12), "Body.tga", true) ==
+					MaterialTextureTransform::Unchanged,
+			"authored types the loader drops load as plain diffuse, not the checkerboard");
 	// One result test for every row (test eax,eax @0x5B17F0 -> checkerboard
 	// @0x5B17F4): a normal row whose source yields no readable image is a
 	// failed load, never a null the material would replace with the flat normal.

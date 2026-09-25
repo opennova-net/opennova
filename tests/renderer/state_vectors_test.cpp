@@ -29,7 +29,7 @@
 // technique-class selection, the water bracket + priority ladder) pinning
 // engine/runtime/renderer/render_order against docs/render/render-order-re.md
 // [orig: RenderBatch_QuickSort @ 0x5d8b40; collect_render_objects_for_batch
-// @ 0x5d8f20; Terrain_RenderSceneWithReflection @ 0x5c93a0].
+// @ 0x5d8f20; Terrain_RenderWorldScene @ 0x5c93a0].
 //
 // REN-5 added section 5: lighting scalars over engine/runtime/renderer/light_runtime
 // (docs/render/render-lighting-re.md) — the modulator /64 scale, the world
@@ -338,9 +338,15 @@ std::string generate() {
 
 	// The ladder itself.
 	std::snprintf(line, sizeof(line),
-	              "ladder stars=%d body=%d far=%d water=%d cam=%d fx=%d glow=%d\n",
-	              kRungSkyStars, kRungSkyBody, kRungAlphaFarSide, kRungWater,
-	              kRungAlphaCameraSide, kRungOverlayFx, kRungSunGlow);
+	              "ladder dome=%d body=%d clouds=%d viewmodel=%d p3=%d mask_far=%d far=%d "
+	              "tracer_far=%d particle_far=%d foliage_far=%d water=%d decals=%d "
+	              "mask_cam=%d scars=%d foliage_cam=%d cam=%d tracer_cam=%d\n",
+	              kRungSkyDome, kRungSkyBody, kRungSkyClouds, kRungViewmodel,
+	              kRungObjectPostMultiply, kRungFoliageMaskFarSide, kRungAlphaFarSide,
+	              kRungTracerFarSide, kRungParticleFarSide, kRungFoliageFarSide, kRungWater,
+	              kRungWaterDecals, kRungFoliageMaskCameraSide, kRungScars,
+	              kRungFoliageCameraSide, kRungAlphaCameraSide,
+	              kRungTracerCameraSide);
 	out << line;
 
 	// Section 4 (REN-4): uv-anim vectors over engine/runtime/renderer/uv_anim — the

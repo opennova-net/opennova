@@ -129,7 +129,6 @@ public:
 	// The authored items.def `shadow` blob decal (C++ seam for the placer):
 	// false when the item authors none; dims = (width, length, offset_x,
 	// offset_y) in the decal's own units.
-	bool get_shadow_decal(int id, String &r_texture, Vector4 &r_dims) const;
 	// The pre-scaled vehicle physics block as [physics, player_speed, acceleration,
 	// deceleration, turn_rate, turn_rate2, unit_type, torque, water_speed, climb_speed,
 	// turn_roll, speed_pitch, max_slope, slip_slope, mass, lean, lean_velocity, pitch,

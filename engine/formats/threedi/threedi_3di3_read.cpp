@@ -1193,7 +1193,7 @@ static int parse_oobj(const ThreediChunk *chunk, ThreediOcclusionObject **out_ob
         objs[i].position[1] = read_f32_le(base + 8);
         objs[i].position[2] = read_f32_le(base + 12);
         objs[i].radius = read_f32_le(base + 16);
-        objs[i].glow_scale = read_f32_le(base + 20);
+        objs[i].slot_priority_scale = read_f32_le(base + 20);
         objs[i].num_vertices = read_s32_le(base + 24);
         objs[i].num_planes = read_s32_le(base + 28);
         objs[i].face_count = read_s32_le(base + 32);

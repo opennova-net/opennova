@@ -6,9 +6,11 @@
 // world block, 0x808080 fog/clear, flat terrain ramps), generation
 // discipline, the reset/prewarm epoch, the network wire units, and the
 // shader-global publication policy. RE record: docs/env/env-tod-re.md.
+#include <runtime/environment/celestial_frame.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/sky_frame.h>
 #include <runtime/environment/water_frame.h>
+#include <runtime/environment/water_mirror.h>
 #include <runtime/environment/weather_runtime.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/world/weather_state.h>
@@ -148,9 +150,13 @@ int main() {
 		ok &= expect(env.env_generation() == gen + 2,
 				"a settled writeback stops bumping");
 		ok &= expect(env.set_nvg_view(true, 2), "NVG change reported");
-		// f = (2+1)*.2 = .6: c' = c*.15 + gain*.06.
-		ok &= expect(near(env.fill_light().r, 0.8f * 0.15f + 0.5f * 0.06f),
+		// f = (2+1)*.2 = .6: c' = c*.15 + gain*.06, in the object block only.
+		opennova::env::WorldLightValues values;
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
+						near(values.hemi_ground.r, 0.8f * 0.15f + 0.5f * 0.06f),
 				"the NVG hemisphere rewrite (modulator*f/640 as gain*f/10)");
+		ok &= expect(rgb_near(env.fill_light(), {0.8f, 0.4f, 0.2f}),
+				"the ground getter stays the raw block under NVG");
 		ok &= expect(!env.set_nvg_view(true, 2), "identical NVG is idempotent");
 	}
 
@@ -167,30 +173,59 @@ int main() {
 		// envscale .5): read it raw before NVG instead of assuming the authored
 		// value.
 		const opennova::env::Rgb sky_raw = env.sky_ambient();
+		const opennova::env::SceneFogValues underwater_raw = env.build_scene_fog(true);
+		const opennova::env::TerrainEnvUniforms terrain_raw = env.build_terrain_uniforms(false);
 		ok &= expect(env.set_nvg_view(true, 2), "NVG change reported");
+		opennova::env::WorldLightValues values;
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values),
+				"the block builds under NVG");
 		// f = .6: ceiling'/floor' = c*.15 + gain.r*.06 on EVERY channel (the
 		// R term reused [orig: @ 0x5c82a5..0x5c82e9]) ...
-		ok &= expect(rgb_near(env.ceiling_color(),
+		ok &= expect(rgb_near(values.ceiling,
 					{0.8f * 0.15f + 0.03f, 0.4f * 0.15f + 0.03f,
 							0.2f * 0.15f + 0.03f}),
 				"the NVG ceiling rewrite adds the modulator R term to all channels");
-		ok &= expect(rgb_near(env.floor_color(),
+		ok &= expect(rgb_near(values.floor_color,
 					{0.2f * 0.15f + 0.03f, 0.4f * 0.15f + 0.03f,
 							0.8f * 0.15f + 0.03f}),
 				"the NVG floor rewrite adds the modulator R term to all channels");
 		// ... while sky/ground keep their per-channel terms (gain.g on g, not
 		// the R term) [orig: @ 0x5c8258..0x5c82a1].
-		ok &= expect(near(env.sky_ambient().g, sky_raw.g * 0.15f + 0.25f * 0.06f) &&
-						!near(env.sky_ambient().g, sky_raw.g * 0.15f + 0.5f * 0.06f),
+		ok &= expect(near(values.hemi_sky.g, sky_raw.g * 0.15f + 0.25f * 0.06f) &&
+						!near(values.hemi_sky.g, sky_raw.g * 0.15f + 0.5f * 0.06f),
 				"sky/ground keep the per-channel modulator terms");
-		opennova::env::WorldLightValues values;
-		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
-						rgb_near(values.ceiling, env.ceiling_color()) &&
-						rgb_near(values.floor_color, env.floor_color()),
-				"the published block carries the rewritten interior pair");
-		env.set_nvg_view(false, 2);
-		ok &= expect(rgb_near(env.ceiling_color(), {0.8f, 0.4f, 0.2f}) &&
+		// The rewrite is the object block's alone: the colour getters, lit
+		// water / the underwater fog and the combined terrain light read the raw
+		// blocks [orig: Env_WaterColorLit @ 0x57f177 and Env_TerrainLightCombined
+		// @ 0x57f0d5 are built from the raw blocks in the weather tick].
+		ok &= expect(rgb_near(env.sky_ambient(), sky_raw) &&
+						rgb_near(env.ceiling_color(), {0.8f, 0.4f, 0.2f}) &&
 						rgb_near(env.floor_color(), {0.2f, 0.4f, 0.8f}),
+				"the colour getters stay raw under NVG");
+		ok &= expect(rgb_near(env.build_scene_fog(true).color, underwater_raw.color),
+				"the lit water colour ignores the NVG rewrite");
+		// The terrain rebuilds its NVG sky as BYTES with a chop:
+		// trunc(sky_byte * 0.15 + mod_byte * 0.6 * 0.0015625 * 255)
+		// [orig: Render_TerrainScene @ 0x610d16..0x610e22]. The modulator bytes
+		// are gain * 64 = (32, 16, 48).
+		const auto terrain_nvg_byte = [](float sky, int mod_byte) {
+			const int sky_byte = static_cast<int>(std::lround(sky * 255.0f));
+			const float sum = static_cast<float>(sky_byte) * (0.25f * 0.6f) +
+					static_cast<float>(mod_byte) * (0.6f * 0.0015625f * 255.0f);
+			return static_cast<float>(static_cast<int>(sum)) / 255.0f;
+		};
+		const opennova::env::TerrainEnvUniforms terrain_nvg = env.build_terrain_uniforms(false);
+		ok &= expect(rgb_near(terrain_nvg.sky_ambient,
+					{terrain_nvg_byte(sky_raw.r, 32), terrain_nvg_byte(sky_raw.g, 16),
+							terrain_nvg_byte(sky_raw.b, 48)}, 1.0e-6f) &&
+						rgb_near(terrain_nvg.sun_light, terrain_raw.sun_light),
+				"the terrain NVG sky is the truncated byte rebuild over the raw light");
+		ok &= expect(!near(terrain_nvg.sky_ambient.g, values.hemi_sky.g, 1.0e-6f),
+				"the terrain byte rebuild differs from the object block's float rewrite");
+		env.set_nvg_view(false, 2);
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
+						rgb_near(values.ceiling, {0.8f, 0.4f, 0.2f}) &&
+						rgb_near(values.floor_color, {0.2f, 0.4f, 0.8f}),
 				"NVG off serves the raw interior pair");
 	}
 
@@ -233,12 +268,9 @@ int main() {
 		ok &= expect(rgb_near(env.build_scene_fog(true).color,
 					underwater_before.color),
 				"underwater lit water outranks the thermal fog");
-		ok &= expect(rgb_near(env.frame_clear_color_for(false, true), grey_fog) &&
-						rgb_near(env.frame_clear_color_for(false, false), grey_fog),
+		ok &= expect(rgb_near(env.frame_clear_color_for(true), grey_fog) &&
+						rgb_near(env.frame_clear_color_for(false), grey_fog),
 				"the thermal clear outranks the water test");
-		ok &= expect(rgb_near(env.frame_clear_color_for(true, true),
-					{0.0f, 0.0f, 0.0f}),
-				"indoors still clears black");
 		// The terrain ramps: c1 light 0x101010, c0 sky 0xF0F0F0.
 		const opennova::env::Rgb ramp_light{16.0f / 255.0f, 16.0f / 255.0f,
 				16.0f / 255.0f};
@@ -254,11 +286,19 @@ int main() {
 						rgb_near(env.build_shader_globals(false).sky_ambient,
 								ramp_sky),
 				"the sun/sky globals publish the terrain pair");
+		// The environment cube's specular sphere stays lit by the RAW light
+		// block under the thermal ramps [orig: the cube face callback
+		// EnvCube_RenderFaceCallback pushes Env_LightBlock @ 0x5c3863].
+		ok &= expect(rgb_near(env.build_shader_globals(false).light_block,
+							 env.sun_light()) &&
+						!rgb_near(env.build_shader_globals(false).light_block,
+								ramp_light),
+				"the cube light block stays raw under the thermal terrain ramps");
 		// NVG precedence differs per side: NVG in first person takes the
 		// terrain's NVG blend, while the world block's grey outranks NVG.
 		env.set_nvg_view(true, 0);
-		ok &= expect(rgb_near(env.build_terrain_uniforms(false).sky_ambient,
-							 env.sky_ambient()) &&
+		ok &= expect(!rgb_near(env.build_terrain_uniforms(false).sky_ambient,
+							 ramp_sky) &&
 						rgb_near(env.build_terrain_uniforms(false).sun_light,
 								env.sun_light()),
 				"NVG in first person outranks the thermal terrain ramps");
@@ -275,7 +315,7 @@ int main() {
 						rgb_near(values.dir_color, env.sun_light()),
 				"the world block needs the CanFire gate");
 		ok &= expect(rgb_near(env.build_scene_fog(false).color, env.fog_color()) &&
-						rgb_near(env.frame_clear_color_for(false, true),
+						rgb_near(env.frame_clear_color_for(true),
 								env.frame_clear_color()),
 				"the fog and clear need the CanFire gate");
 		ok &= expect(rgb_near(env.build_terrain_uniforms(false).sun_light,
@@ -287,6 +327,37 @@ int main() {
 						rgb_near(env.build_terrain_uniforms(false).sky_ambient,
 								env.sky_ambient()),
 				"thermal off restores the light/sky ramps");
+	}
+
+	// --- the viewmodel's pass fog -------------------------------------------
+	// The frame fogs the viewmodel under the DRY pass (ApplyFogAndAmbient(0,
+	// thermal) @ 0x5ca3bf..0x5ca3ce precedes the viewmodel @ 0x5ca829; the
+	// eye's pass is re-applied only after it, @ 0x5ca82e..0x5ca841), and the
+	// dome wrapper restores Env_FogBlock once it drew (@ 0x579ce6..0x579cf6).
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		const opennova::env::SceneFogValues dry = env.build_scene_fog(false);
+		const opennova::env::SceneFogValues gun = env.build_viewmodel_fog(true);
+		ok &= expect(rgb_near(gun.color, dry.color) && near(gun.start, dry.start) &&
+						near(gun.end, dry.end) && gun.type == dry.type,
+				"the viewmodel fogs under the dry pass payload");
+		ok &= expect(!rgb_near(gun.color, env.build_scene_fog(true).color) &&
+						!near(gun.end, env.build_scene_fog(true).end),
+				"the viewmodel never takes the underwater pass");
+		ok &= expect(rgb_near(env.build_viewmodel_fog(false).color, dry.color),
+				"with no dome the dry pass colour stays");
+		env.set_thermal_view(true, true);
+		const opennova::env::Rgb grey_fog{128.0f / 255.0f, 128.0f / 255.0f,
+				128.0f / 255.0f};
+		ok &= expect(rgb_near(env.build_viewmodel_fog(false).color, grey_fog),
+				"thermal without the dome keeps the pass grey");
+		ok &= expect(rgb_near(env.build_viewmodel_fog(true).color, env.fog_color()) &&
+						near(env.build_viewmodel_fog(true).end, dry.end),
+				"thermal after the dome fogs toward the restored fog block");
+		env.set_thermal_view(false, false);
 	}
 
 	// --- per-scene-pass underwater fog --------------------------------------
@@ -304,7 +375,7 @@ int main() {
 					dry.type == env.fog_type(),
 				"the dry scene pass preserves current weather fog");
 		ok &= expect(rgb_near(underwater.color,
-					env.frame_clear_color_for(false, false)),
+					env.frame_clear_color_for(false)),
 				"the underwater scene fog target is Env_WaterColorLit");
 		ok &= expect(near(underwater.end,
 					opennova::env::fog_end_underwater(cfg.water_murk)) &&
@@ -336,6 +407,110 @@ int main() {
 					opennova::env::underwater_murk_overlay_alpha_byte(0.8f) == 204 &&
 					opennova::env::underwater_murk_overlay_alpha_byte(0.99f) == 223,
 				"the underwater scissor uses raw 128 + trunc(96 * murk) alpha");
+		// The water mirror pass fogs with the dry weather block on either side
+		// of the plane and never takes the thermal grey [orig: render_main_scene
+		// @ 0x5c1648..0x5c164c / Water_RenderReflectedWorldScene @ 0x5c8515..
+		// 0x5c8519 -> Environment_ApplyFogAndAmbient(0, 0); SkyDome_RenderWithSkyfog
+		// @ 0x579ce7..0x579cf6 restores Env_FogBlock after the sky].
+		const opennova::env::SceneFogValues mirror = env.build_water_mirror_fog();
+		ok &= expect(rgb_near(mirror.color, dry.color) && near(mirror.end, dry.end) &&
+					near(mirror.start, dry.start) && mirror.type == dry.type,
+				"the mirror fog is the dry pass while the main eye is underwater");
+		env.set_thermal_view(true, true);
+		ok &= expect(rgb_near(env.build_water_mirror_fog().color, env.fog_color()) &&
+					!rgb_near(env.build_scene_fog(false).color, env.fog_color()),
+				"the thermal view greys the scene fog but not the mirror's");
+		env.set_thermal_view(false, false);
+
+		// The reflected-scene camera [orig: render_main_scene @ 0x5c1361..
+		// 0x5c1370]: mirrored (z' = 2wh - z, pitch/roll negated) at or above
+		// the plane, the live block unchanged below it.
+		opennova::env::MirrorSourceView source;
+		source.basis_x = {1.0f, 0.0f, 0.0f};
+		source.basis_y = {0.0f, 0.8f, -0.6f};
+		source.basis_z = {0.0f, 0.6f, 0.8f};
+		source.origin = {3.0f, 12.0f, -4.0f};
+		source.viewport_width = 1024.0f;
+		source.viewport_height = 600.0f;
+		source.v_offset = 0.5f;
+		const opennova::env::WaterMirrorView mirrored =
+				opennova::env::build_water_mirror_view(source, 7.0f);
+		ok &= expect(!mirrored.below_water && near(mirrored.origin.y, 2.0f) &&
+					near(mirrored.basis_y.y, 0.8f) && near(mirrored.basis_y.z, 0.6f) &&
+					near(mirrored.basis_z.y, -0.6f) && near(mirrored.v_offset, -0.5f),
+				"above the plane the reflected camera is the proper mirror");
+		source.origin.y = 2.0f;
+		const opennova::env::WaterMirrorView live =
+				opennova::env::build_water_mirror_view(source, 7.0f);
+		ok &= expect(live.below_water && near(live.origin.x, 3.0f) &&
+					near(live.origin.y, 2.0f) && near(live.origin.z, -4.0f) &&
+					near(live.basis_y.y, 0.8f) && near(live.basis_y.z, -0.6f) &&
+					near(live.basis_z.y, 0.6f) && near(live.v_offset, 0.5f),
+				"below the plane the reflected camera is the live camera unchanged");
+
+		// The reflected pass projects with the main view's field on both axes
+		// [orig: render_main_scene @ 0x5c1255, its
+		// Render_SetViewAndProjectionMatrices call @ 0x5c163e]: the mirror keeps
+		// the source projection and a target of 512 rows at the source aspect.
+		source.origin.y = 12.0f;
+		source.fov_deg = 60.0f;
+		source.keep_aspect_height = true;
+		const opennova::env::WaterMirrorView field =
+				opennova::env::build_water_mirror_view(source, 7.0f);
+		ok &= expect(field.projection == opennova::env::MirrorProjection::kPerspective &&
+					near(field.fov_deg, 60.0f) && field.keep_aspect_height &&
+					field.rtt.width == 874 && field.rtt.height == 512,
+				"the mirror takes the source field over a 512-row target at its aspect");
+		const opennova::env::ReflectionRttSize thin =
+				opennova::env::reflection_rtt_size(1024.0f, 2.0f);
+		const opennova::env::ReflectionRttSize tall =
+				opennova::env::reflection_rtt_size(600.0f, 1024.0f);
+		ok &= expect(thin.width == 16384 && thin.height == 32 && tall.width == 300 &&
+					tall.height == 512,
+				"a degenerate aspect keeps its ratio inside the device width");
+
+		// The mirror's per-draw CLIP arming [orig: Terrain_RenderSectorModels
+		// @ 0x5c5e57..0x5c5e75, Terrain_RenderSectorEntities @ 0x5c7c1a..0x5c7c2e]:
+		// a building below wh - 0.25, an entity whose z - radius sits below wh,
+		// never a draw outside the sector walks, in 16.16.
+		{
+			using opennova::env::MirrorClipWave;
+			using opennova::env::water_mirror_clip_armed;
+			using opennova::env::water_mirror_clip_origin_offset;
+			const int32_t wh = 10 << 16;
+			const int32_t floor_q16 = -(1 << 16);
+			ok &= expect(water_mirror_clip_armed(MirrorClipWave::kSectorModel,
+								(10 << 16) + (3 << 14) - 1, floor_q16, wh) &&
+						!water_mirror_clip_armed(MirrorClipWave::kSectorModel,
+								(10 << 16) + (3 << 14), floor_q16, wh),
+					"a building arms while its floor sits below wh - 0.25");
+			const int32_t radius = 2 << 16;
+			ok &= expect(water_mirror_clip_armed(MirrorClipWave::kEntity, (12 << 16) - 1,
+								radius, wh) &&
+						!water_mirror_clip_armed(MirrorClipWave::kEntity, 12 << 16, radius, wh),
+					"an entity arms while z - boundRadius sits below wh");
+			ok &= expect(!water_mirror_clip_armed(MirrorClipWave::kNone, -(100 << 16), 0, wh),
+					"a draw outside the sector walks never arms");
+			ok &= expect(near(water_mirror_clip_origin_offset(MirrorClipWave::kSectorModel,
+								floor_q16), -0.75f) &&
+						near(water_mirror_clip_origin_offset(MirrorClipWave::kEntity, radius),
+								-2.0f),
+					"the static rows' offset form is the same test");
+		}
+
+		// render_water_surface's side gate [orig: @ 0x5c32f6 jge / @ 0x5c3304
+		// jle]: strictly above draws the view-0 side (and the bloom pass's
+		// nightvision redraw), strictly below the underwater side, and an eye
+		// exactly on the plane draws neither.
+		const opennova::env::WaterSurfaceSides above =
+				opennova::env::water_surface_sides(7.5f, 7.0f);
+		const opennova::env::WaterSurfaceSides below =
+				opennova::env::water_surface_sides(6.5f, 7.0f);
+		const opennova::env::WaterSurfaceSides level =
+				opennova::env::water_surface_sides(7.0f, 7.0f);
+		ok &= expect(above.above && !above.underwater && below.underwater &&
+					!below.above && !level.above && !level.underwater,
+				"the water surface draws strictly above or strictly below the plane");
 	}
 
 	// --- WeatherRuntime reset epoch + prewarm + snapshot units --------------
@@ -728,6 +903,8 @@ int main() {
 						thermal.base.fog_type == ticked.base.fog_type &&
 						rgb_near(thermal.base.fill_light, ticked.base.fill_light),
 				"the weather publication carries the thermal fog and terrain ramps");
+		ok &= expect(rgb_near(thermal.base.light_block, weather.smooth_sun()),
+				"the weather publication keeps the cube's light block raw under thermal");
 		ok &= expect(rgb_near(opennova::env::build_weather_shader_globals(
 											env, weather, true)
 									.base.fog_color,
@@ -805,6 +982,103 @@ int main() {
 						!near(sky.fog_end, device_end),
 				"the dome fog end is the unscaled smoothed fog distance, not the "
 				"overcast-scaled device end");
+	}
+
+	// --- the celestial submit values (UPL_INTENSITY) -------------------------
+	{
+		EnvironmentState env;
+		opennova::env::Config cfg = make_config();
+		cfg.fog_level = 700.0f;
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		const opennova::env::Vec3 cam{10.0f, 20.0f, 30.0f};
+		// The discs share one flush but not one value: each batch entry
+		// snapshots its material's registers at submit and the flush restores
+		// them before its RgbGen [orig: collect_render_objects_for_batch
+		// @ 0x5d91c0..0x5d91de; CRenderBatchQueue_FlushBatches
+		// @ 0x5da1d6..0x5da1fd], so the sun keeps its own alpha beside a moon.
+		const opennova::env::CelestialDiscsFrame discs =
+				opennova::env::build_celestial_discs_frame(env, cam);
+		const int moon_alpha = opennova::env::celestial_moon_alpha_fixed(700.0f, 0, false);
+		ok &= expect(discs.sun_upl == 0x10000 && discs.sun_q3_upl == 0x10000,
+				"the sun keeps its own alpha in both passes");
+		ok &= expect(discs.moon_upl == moon_alpha && moon_alpha == 0x8000,
+				"the moon takes its ramp, (700-400)/600");
+		ok &= expect(discs.moon_q3_upl ==
+						opennova::env::celestial_moon_alpha_fixed(700.0f, 0, true),
+				"the moon's bloom redraw takes the fog-shader leg");
+		ok &= expect(near(discs.sun_position.x, cam.x + env.sun_direction().x * 64.0f) &&
+						near(discs.moon_position.y,
+								cam.y + env.moon_direction().y * 64.0f),
+				"the discs place at camera + direction * 64");
+		// The glow folds the MAIN camera's view dot and skips its submit at a
+		// non-positive alpha [orig: render_skybox_sun_glow @ 0x5ad0ae].
+		const opennova::env::GlareFrame facing =
+				opennova::env::build_glare_frame(env, cam, 0x10000, 255);
+		ok &= expect(facing.drawn && facing.upl ==
+						opennova::env::glare_glow_alpha_fixed(0x10000, 255, 0, 0, true),
+				"facing the sun the glow draws the witnessed alpha");
+		const opennova::env::GlareFrame away =
+				opennova::env::build_glare_frame(env, cam, -0x8000, 255);
+		ok &= expect(!away.drawn && away.upl == 0 && !away.q3_drawn,
+				"looking away submits no glow in either pass");
+		ok &= expect(opennova::env::kCelestialUplRegister == 32,
+				"UPL_INTENSITY is CTRL ordinal 32 (g_CtrlGlobal_UplIntensity @ 0x83fde8)");
+	}
+
+	// --- the dome constants under NVG and the thermal view -------------------
+	{
+		EnvironmentState env;
+		opennova::env::Config cfg = make_config();
+		cfg.advanced_clouds = 1;
+		cfg.keyframes[0].skybase = {60.0f / 255.0f, 80.0f / 255.0f, 140.0f / 255.0f};
+		cfg.keyframes[0].skybright = {20.0f / 255.0f, 20.0f / 255.0f, 32.0f / 255.0f};
+		cfg.keyframes[0].skyhighlight = {150.0f / 255.0f, 160.0f / 255.0f, 150.0f / 255.0f};
+		cfg.keyframes[0].cloudbase = {140.0f / 255.0f, 140.0f / 255.0f, 140.0f / 255.0f};
+		cfg.keyframes[0].cloudhighlight = {20.0f / 255.0f, 24.0f / 255.0f, 10.0f / 255.0f};
+		cfg.keyframes[0].cloudedge = {150.0f / 255.0f, 160.0f / 255.0f, 170.0f / 255.0f};
+		cfg.keyframes[0].skyfog = {80.0f / 255.0f, 96.0f / 255.0f, 100.0f / 255.0f};
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		// make_config's envscale 0.5 halves the authored keyframe bytes; the
+		// dome unpacks the scaled render bytes.
+		const float base_b = env.sky_base().b * 255.0f;
+		const float edge_r = env.cloud_edge().r * 255.0f;
+		const float highlight_g = env.sky_highlight().g * 255.0f;
+		const opennova::env::SkyFrameState plain = opennova::env::build_sky_frame(env);
+		ok &= expect(!plain.flat_pass && near(base_b, 70.0f) &&
+						near(plain.sky_base.b, base_b * (2.0f / 255.0f)),
+				"the plain unpack is byte * 2/255 [orig: Color_UnpackToFloat4 @ 0x578985]");
+		// NVG level 0: f = 0.2, a = 0.05, b = 0.0003125 per channel
+		// [orig: Color_UnpackToFloat4 @ 0x578913..0x57897b].
+		env.set_nvg_view(true, 0);
+		const opennova::env::SkyFrameState nvg0 = opennova::env::build_sky_frame(env);
+		ok &= expect(near(nvg0.sky_base.b, base_b * 0.05f * (2.0f / 255.0f) + 0.0003125f) &&
+						near(nvg0.cloud_edge.r, edge_r * 0.05f * (2.0f / 255.0f) + 0.0003125f),
+				"first-person NVG dims every dome constant to byte*a*2/255 + b at level 0");
+		env.set_nvg_view(true, 4);
+		const opennova::env::SkyFrameState nvg4 = opennova::env::build_sky_frame(env);
+		ok &= expect(near(nvg4.sky_highlight.g,
+							 highlight_g * 0.25f * (2.0f / 255.0f) + 0.0015625f),
+				"NVG level 4: f = 1.0, a = 0.25, b = 0.0015625");
+		ok &= expect(rgb_near(nvg4.skyfog_color, plain.skyfog_color),
+				"the dome fog color never takes the NVG dim (FOGCOLOR is the packed block)");
+		env.set_nvg_view(false, 0);
+		// The thermal view: sky constants 1.0, cloud constants 0.9, fog 0x808080
+		// [orig: render_skybox @ 0x579377..0x579447; SkyDome_RenderWithSkyfog @ 0x579cbc].
+		env.set_thermal_view(true, false);
+		const opennova::env::SkyFrameState thermal = opennova::env::build_sky_frame(env);
+		ok &= expect(near(thermal.sky_base.r, 1.0f) && near(thermal.sky_bright.g, 1.0f) &&
+						near(thermal.sky_highlight.b, 1.0f) && near(thermal.cloud_base.r, 0.9f) &&
+						near(thermal.cloud_highlight.g, 0.9f) && near(thermal.cloud_edge.b, 0.9f),
+				"the thermal dome is white: sky 1.0, clouds 0.9");
+		ok &= expect(rgb_near(thermal.skyfog_color,
+							 {128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f}),
+				"the thermal sky wrapper fogs toward 0x808080");
+		env.set_nvg_view(true, 2);
+		const opennova::env::SkyFrameState thermal_nvg = opennova::env::build_sky_frame(env);
+		ok &= expect(near(thermal_nvg.sky_base.r, 1.0f) && near(thermal_nvg.cloud_edge.r, 0.9f),
+				"the thermal overwrite runs after the NVG unpack");
 	}
 
 	// --- the 62.5 Hz autonomous accumulator clamp ----------------------------

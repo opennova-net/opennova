@@ -263,6 +263,36 @@ enum PresentField : int {
     // radius. This carries received/copy-propagated state; it does not invent
     // the still-unported parachute deployment physics.
     PF_PARACHUTE_DEPLOYED,
+	// The person callback's item overlays beside the held weapon
+	// (world/person_overlays.h owns the gates and the calibration). The
+	// zero-filled default draws none of them.
+	// [orig: BoneCallback_org0_World @0x4e3940]
+	// Draw 1, the parachute canopy: its CTRL PARA / PARA_O values (both zero =
+	// no canopy) and its up-axis turn as a mission yaw.
+	PF_CANOPY_PARA,
+	PF_CANOPY_PARA_O,
+	PF_CANOPY_YAW_DEG,
+	// Draw 3, the night-vision goggles, and their NVG_FLIP value.
+	PF_NVG_WORN,
+	PF_NVG_FLIP,
+	// Draw 4, the binoculars.
+	PF_BINOCULARS_RAISED,
+	// Draw 6, the carried object: its runtime type (0 = none) and the
+	// carrier's entity triple (mission euler degrees) it is oriented by.
+	PF_CARRIED_TYPE_ID,
+	PF_CARRIED_PITCH_DEG,
+	PF_CARRIED_YAW_DEG,
+	PF_CARRIED_ROLL_DEG,
+	// The render-slot anchor march's start relative to the entity position
+	// (present axes, world units): the collision-bbox centre rotated by the
+	// entity's Euler matrix while its Flags dword is zero, else zero
+	// (renderer::slot_march_start_offset) [orig: RenderSlot_UpdateEntityLight
+	// @0x5d6ce7..0x5d6d31]. An authoritative row reads its entity; a joiner's
+	// wire row reads the replica's Flags words and its type's resolved
+	// collision shape, the facts the retail client's own entity carries.
+	PF_SLOT_MARCH_OFFSET_X,
+	PF_SLOT_MARCH_OFFSET_Y,
+	PF_SLOT_MARCH_OFFSET_Z,
 	PF_STRIDE
 };
 

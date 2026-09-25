@@ -22,12 +22,17 @@ struct ParticleEmitterDrawBounds;
 namespace godot {
 
 class Camera3D;
+struct SceneOverlaySubmission;
+class EffectDistortionDrawer;
 
 // Thin Godot adapter for the portable particle scene/frame modules. World
-// draw lists are immutable values consumed by the ordered compositor effects:
-// a water-far PRE_TRANSPARENT subset, a camera-side POST_TRANSPARENT subset,
-// two consecutive POST_TRANSPARENT mirror subsets, and, while a second scene
-// camera is handed in, that view's own far/camera-side pair. Only the
+// draw lists are immutable values: the water-far subset (pass A) draws as
+// render-list runs inside the transparent list at kRungParticleFarSide
+// (ParticleFarPass) with only its distortion on a PRE_TRANSPARENT compositor
+// effect, the camera-side subset on a POST_TRANSPARENT effect, the mirror on
+// two consecutive POST_TRANSPARENT effects, and, while a second scene camera
+// is handed in, that view gets its own far runs and camera-side effect; each view's
+// camera-side pass is followed by its post-particle overlay pass. Only the
 // explicitly diagnosed FirstPerson tool path uses ArrayMesh. Effects,
 // emitters, and particles remain values in EffectScene.
 class ParticleRenderer : public Node3D {
@@ -97,12 +102,26 @@ public:
 	// behind are undone by the next ENTER_TREE (fresh effects, latch cleared),
 	// so a renderer removed from and re-added to the tree renders again.
 	void shutdown();
+	// FrameFX's type-0 row device: this renderer publishes the class-7
+	// distortion subset into it each render; the tracer ribbons join it from
+	// the fire presenter. The world registers it with FrameFx.
+	std::shared_ptr<EffectDistortionDrawer> distortion_drawer() const;
+	// Registers that device with a FrameFx node. The world does this every
+	// frame through EffectWorld; previews and tests bind it once.
+	void attach_distortion_row(Node *p_frame_fx);
 
 	// Compiles the latest fixed-tick scene snapshot for both render domains and
 	// publishes an immutable World copy across the render-thread boundary.
 	// Process-driven rendering calls this automatically; tests and previews may
 	// call it explicitly after advancing a scene.
 	void render_now(int64_t p_time_ms);
+
+	// The post-particle overlay tail (runtime/renderer/scene_overlay.h): every
+	// view this renderer composes carries one overlay pass right after its
+	// particle pass B (the main view and the scope aperture draw the full
+	// tail, the mirror its coronas); one immutable frame reaches all three.
+	// Null clears them. Not bound to Godot.
+	void publish_scene_overlay(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
 
 	// Renderer-owned diagnostics are plain values. No MeshInstance or material
 	// references escape through the F3/debug seam. They are read from each

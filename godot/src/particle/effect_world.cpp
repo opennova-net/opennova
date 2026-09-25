@@ -4,8 +4,11 @@
 #include "particle/particle_effect.h"
 #include "particle/particle_renderer.h"
 #include "resource_index/resource_root.h"
+#include "simulation/effect_section_source.h"
+#include "simulation/simulation.h"
 #include "util/string_convert.h"
 
+#include <array>
 #include <vector>
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -361,6 +364,9 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_request(const String &p_name,
 	request->set_source_order(options->get_source_order());
 	request->set_kill_plane(KILL_PLANE_DISABLED);
 	request->set_kill_plane_y(water_height_);
+	if (options->get_section_tagged()) {
+		_stamp_section_gate(request, p_transform.origin);
+	}
 	Ref<EffectSpawnReceipt> receipt = scene_->spawn(request);
 	if (seed_owner_after_spawn && receipt.is_valid() && receipt->get_spawned()) {
 		_seed_owner_pose(owner_token, owner_transform);
@@ -373,7 +379,43 @@ void EffectWorld::spawn_script_effect(const opennova::world::ScriptEffectEvent &
     const String key = vformat("script_entity:%d", int(event.owner.packed));
     const int64_t slot = event.store_slot ? _slot_token_for(key) : 0;
     const int64_t owner = event.owner.valid() ? _owner_token_for(key) : 0;
-    scene_->spawn_script_effect(event, slot, owner, age_ticks, water_height_);
+    // Every script handler tags its descriptor with its entity
+    // (particle::spawn_script_effect); the blink query runs at the
+    // descriptor's mission position.
+    opennova::particle::EffectSectionGate gate;
+    gate.tagged = true;
+    if (Simulation *source = _section_source()) {
+        const Vector3 position(float(event.position[0]) / 65536.0f,
+                float(event.position[2]) / 65536.0f, -float(event.position[1]) / 65536.0f);
+        EffectSectionSource(source).blink_hits(position, gate.blink_hits);
+    }
+    scene_->spawn_script_effect(event, slot, owner, age_ticks, water_height_, gate);
+}
+
+Simulation *EffectWorld::_section_source() const {
+	return section_source_id_.is_valid()
+			? Object::cast_to<Simulation>(ObjectDB::get_instance(section_source_id_))
+			: nullptr;
+}
+
+void EffectWorld::set_section_source(Simulation *p_source) {
+	section_source_id_ = p_source != nullptr ? p_source->get_instance_id() : ObjectID();
+}
+
+void EffectWorld::_stamp_section_gate(const Ref<EffectSpawnRequest> &p_request,
+		const Vector3 &p_position) const {
+	p_request->set_section_tagged(true);
+	Simulation *source = _section_source();
+	if (source == nullptr) {
+		return;
+	}
+	std::array<uint32_t, 4> hits{};
+	EffectSectionSource(source).blink_hits(p_position, hits);
+	PackedInt64Array packed;
+	for (const uint32_t hit : hits) {
+		packed.push_back(static_cast<int64_t>(hit));
+	}
+	p_request->set_blink_hits(packed);
 }
 
 int EffectWorld::warm_all_effects(const Vector3 &p_position) {
@@ -425,9 +467,10 @@ Dictionary EffectWorld::get_debug_draw_list_report() {
 
 int64_t EffectWorld::spawn_effect_transient(const String &p_name, const Vector3 &p_position,
 		const Vector3 &p_orientation, int p_initial_age_ticks, int p_render_domain,
-		int64_t p_source_tick, int64_t p_source_order) {
+		int64_t p_source_tick, int64_t p_source_order, bool p_section_tagged) {
 	Ref<EffectSpawnOptions> options;
 	options.instantiate();
+	options->set_section_tagged(p_section_tagged);
 	options->set_initial_age_ticks(p_initial_age_ticks);
 	options->set_render_domain(p_render_domain);
 	options->set_source_tick(p_source_tick);
@@ -438,12 +481,14 @@ int64_t EffectWorld::spawn_effect_transient(const String &p_name, const Vector3 
 }
 
 int64_t EffectWorld::spawn_effect(const String &p_name, const Vector3 &p_position,
-		const Vector3 &p_orientation) {
-	return spawn_effect_transient(p_name, p_position, p_orientation);
+		const Vector3 &p_orientation, bool p_section_tagged) {
+	return spawn_effect_transient(p_name, p_position, p_orientation, 0, RENDER_DOMAIN_WORLD, 0,
+			0, p_section_tagged);
 }
 
 Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_owned_request(const Variant &p_owner_key,
-		const String &p_name, const Vector3 &p_position, const Vector3 &p_orientation) {
+		const String &p_name, const Vector3 &p_position, const Vector3 &p_orientation,
+		bool p_section_tagged) {
 	if (particles_disabled_) {
 		return _disabled_receipt();
 	}
@@ -456,19 +501,20 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_owned_request(const Variant &p
 	options->set_owner_key(p_owner_key);
 	options->set_owner_transform(initial_transform);
 	options->set_has_owner_transform(true);
+	options->set_section_tagged(p_section_tagged);
 	return spawn_effect_request(p_name, initial_transform, options);
 }
 
 int64_t EffectWorld::spawn_effect_owned(const Variant &p_owner_key, const String &p_name,
-		const Vector3 &p_position, const Vector3 &p_orientation) {
-	const Ref<EffectSpawnReceipt> receipt =
-			spawn_effect_owned_request(p_owner_key, p_name, p_position, p_orientation);
+		const Vector3 &p_position, const Vector3 &p_orientation, bool p_section_tagged) {
+	const Ref<EffectSpawnReceipt> receipt = spawn_effect_owned_request(
+			p_owner_key, p_name, p_position, p_orientation, p_section_tagged);
 	return receipt->get_effect_handle();
 }
 
 Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_attached_request(const Variant &p_owner_key,
 		const String &p_name, const Transform3D &p_initial_transform,
-		const Vector3 &p_local_pos, const Vector3 &p_local_dir) {
+		const Vector3 &p_local_pos, const Vector3 &p_local_dir, bool p_section_tagged) {
 	if (particles_disabled_) {
 		return _disabled_receipt();
 	}
@@ -480,14 +526,15 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_attached_request(const Variant
 	options->set_owner_transform(p_initial_transform);
 	options->set_has_owner_transform(true);
 	options->set_owner_relative_transform(local_transform);
+	options->set_section_tagged(p_section_tagged);
 	return spawn_effect_request(p_name, p_initial_transform * local_transform, options);
 }
 
 int64_t EffectWorld::spawn_effect_attached(const Variant &p_owner_key, const String &p_name,
 		const Transform3D &p_initial_transform, const Vector3 &p_local_pos,
-		const Vector3 &p_local_dir) {
-	const Ref<EffectSpawnReceipt> receipt = spawn_effect_attached_request(
-			p_owner_key, p_name, p_initial_transform, p_local_pos, p_local_dir);
+		const Vector3 &p_local_dir, bool p_section_tagged) {
+	const Ref<EffectSpawnReceipt> receipt = spawn_effect_attached_request(p_owner_key, p_name,
+			p_initial_transform, p_local_pos, p_local_dir, p_section_tagged);
 	if (!receipt->get_spawned()) {
 		return 0;
 	}
@@ -649,7 +696,12 @@ void EffectWorld::advance_simulation_tick(double p_delta,
 	} else {
 		scene_->clear_view_frustum();
 	}
+	// The group section gate reads this frame's building masks
+	// (particle::EffectSectionGate); without a simulation every group stays visible.
+	const EffectSectionSource masks(_section_source());
+	scene_->set_section_masks(masks.valid() ? &masks : nullptr);
 	scene_->advance_with_forces(p_delta > 0.0 ? p_delta : 0.0, p_forces);
+	scene_->set_section_masks(nullptr);
 }
 
 bool EffectWorld::trigger_group_children(int64_t p_group_id, const Vector3 &p_position,
@@ -658,9 +710,22 @@ bool EffectWorld::trigger_group_children(int64_t p_group_id, const Vector3 &p_po
 			scene_->trigger_group_children(p_group_id, p_position, p_forward, p_force_zone);
 }
 
+std::shared_ptr<EffectDistortionDrawer> EffectWorld::distortion_drawer() {
+	return _ensure_renderer()->distortion_drawer();
+}
+
+void EffectWorld::attach_distortion_row(Node *p_frame_fx) {
+	_ensure_renderer()->attach_distortion_row(p_frame_fx);
+}
+
 void EffectWorld::render_frame(int64_t p_time_ms) {
 	_sync_owner_poses(true);
 	_ensure_renderer()->render_now(p_time_ms);
+}
+
+void EffectWorld::publish_scene_overlay(
+		const std::shared_ptr<const SceneOverlaySubmission> &p_submission) {
+	_ensure_renderer()->publish_scene_overlay(p_submission);
 }
 
 TypedArray<EffectGroupReport> EffectWorld::get_debug_group_report(bool p_include_hidden) {
@@ -772,22 +837,27 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::spawn_effect_request, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("warm_all_effects", "position"), &EffectWorld::warm_all_effects);
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"), &EffectWorld::render_now);
+	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
+			&EffectWorld::attach_distortion_row);
 	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),
 			&EffectWorld::get_debug_draw_list_report);
 	ClassDB::bind_method(D_METHOD("spawn_effect_transient", "name", "position", "orientation",
-								 "initial_age_ticks", "render_domain", "source_tick", "source_order"),
+								 "initial_age_ticks", "render_domain", "source_tick", "source_order",
+								 "section_tagged"),
 			&EffectWorld::spawn_effect_transient, DEFVAL(Vector3()), DEFVAL(0),
-			DEFVAL(static_cast<int>(RENDER_DOMAIN_WORLD)), DEFVAL(0), DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("spawn_effect", "name", "position", "orientation"),
-			&EffectWorld::spawn_effect, DEFVAL(Vector3()));
-	ClassDB::bind_method(
-			D_METHOD("spawn_effect_owned_request", "owner_key", "name", "position", "orientation"),
-			&EffectWorld::spawn_effect_owned_request, DEFVAL(Vector3()));
-	ClassDB::bind_method(D_METHOD("spawn_effect_owned", "owner_key", "name", "position", "orientation"),
-			&EffectWorld::spawn_effect_owned, DEFVAL(Vector3()));
+			DEFVAL(static_cast<int>(RENDER_DOMAIN_WORLD)), DEFVAL(0), DEFVAL(0), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("spawn_effect", "name", "position", "orientation",
+								 "section_tagged"),
+			&EffectWorld::spawn_effect, DEFVAL(Vector3()), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("spawn_effect_owned_request", "owner_key", "name", "position",
+								 "orientation", "section_tagged"),
+			&EffectWorld::spawn_effect_owned_request, DEFVAL(Vector3()), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("spawn_effect_owned", "owner_key", "name", "position",
+								 "orientation", "section_tagged"),
+			&EffectWorld::spawn_effect_owned, DEFVAL(Vector3()), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("spawn_effect_attached", "owner_key", "name", "initial_transform",
-								 "local_pos", "local_dir"),
-			&EffectWorld::spawn_effect_attached);
+								 "local_pos", "local_dir", "section_tagged"),
+			&EffectWorld::spawn_effect_attached, DEFVAL(false));
 	ClassDB::bind_method(
 			D_METHOD("spawn_effect_unless_alive", "owner_key", "name", "position", "orientation"),
 			&EffectWorld::spawn_effect_unless_alive, DEFVAL(Vector3()));

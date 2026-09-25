@@ -8,8 +8,7 @@
 #include <formats/env/env.h> // Vec3
 
 // Celestial-side render state math: sun glare, the celestial body alphas,
-// the star field, glare occlusion, and the sky-dome constants + mesh
-// builder.
+// glare occlusion, and the sky-dome constants + mesh builder.
 
 namespace opennova::env {
 
@@ -62,9 +61,9 @@ int glare_brightness_step(int current, int target);
 // ---------------------------------------------------------------------------
 // Celestial bodies + glare occlusion — witnessed at the ENG-2 celestial leg
 // [orig: render_celestial_bodies @ 0x5acaa0 (the LIVE sun/moon renderer,
-//  was misnamed render_skybox_fog_layers); render_skybox_sun_glow @ 0x5acd00;
-//  render_star_field @ 0x5ad9c0]. The old render_skybox_layers @ 0x5ac230 is
-//  a caller-less dead variant (its +64/+16 fixed offsets never run).
+//  was misnamed render_skybox_fog_layers); render_skybox_sun_glow @ 0x5acd00].
+//  The old render_skybox_layers @ 0x5ac230 is a caller-less dead variant (its
+//  +64/+16 fixed offsets never run).
 
 // Sun/moon bodies place at camera + direction * 64 world units, identity
 // rotation, FULL camera height [orig: @ 0x5acaa0, constant flt_7C3DD0].
@@ -83,76 +82,11 @@ int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixe
                                bool fog_shader_path);
 
 // ---------------------------------------------------------------------------
-// Star field (env #33) [orig: Star_GenerateInstanceTable @ 0x5ac850 (ex kong
-// misnomer init_weather_particles); render_star_field @ 0x5ad9c0]. 256
-// camera-anchored billboard instances regenerated per celestial load; per
-// render tick each visible star's brightness accumulator EMA-chases its
-// twinkle band. Engine axes throughout (x, y ground plane, z up), 16.16.
-
-inline constexpr int kStarInstanceCount = 256;
-
-// The star/weather PRNG: state = rol4(state + rol11(state), 4) ^ 1, low 16
-// bits returned [orig: inlined at both sites; the dead standalone step is
-// Star_TwinklePrngNext_unused @ 0x5ac010, state Star_TwinklePrng @ 0x840B38].
-// Like the water noise field, the retail table content depends on the shared
-// state's call history at load — a deterministic reimpl documents its seed.
-uint32_t star_prng_next(uint32_t &state);
-
-struct StarInstance {
-	int32_t offset_fp[3] = { 0, 0, 0 };  // camera-relative offset, 16.16
-	int32_t billboard_param = 12288;     // 12288..13311 (4096-fixed scale)
-	int32_t twinkle_add = 1;             // 1..255, clamped to 255 - mask
-	int32_t twinkle_mask = 31;           // 31 >> (r & 3): {31, 15, 7, 3}
-	int32_t brightness = 0;              // runtime accumulator (BSS-zero at generate)
-	int32_t dir_fp[3] = { 0, 0, 0 };     // normalize(offset >> 8), 16.16
-};
-
-// Fills out[0..255] with the witnessed per-star generation [orig: @ 0x5ac850]:
-// offX/offY = (r - 0x8000) << 9; offZ = ((r + 0x20000) << 6) -
-// ((|offX| + |offY|) >> 3) (the dome shaping); billboard = (r & 0x3FF) +
-// 12288; add = r & 0xFF (0 -> 1, <= 255 - mask); mask = 31 >> (r & 3);
-// brightness untouched; dir = normalize(off >> 8) via the 2^32/len + 0x8000
-// rounding divide.
-void generate_star_instances(StarInstance *out, uint32_t &prng_state);
-
-// One render-tick twinkle update: brightness = (brightness + add +
-// (r16 & mask)) >> 1; returns the new brightness [orig: @ 0x5adb45].
-int32_t star_twinkle_tick(StarInstance &star, uint32_t &prng_state);
-
-// The near-light cull: HIDDEN when dot(light_dir_fixed, star_dir) > 64225
-// (16.16 ~0.98) [orig: @ 0x5adac4]. light_dir is the direct near-unit active
-// light direction in engine axes.
-bool star_visible_fixed(const StarInstance &star, const int32_t light_dir_fp[3]);
-
-// billboard_param is a 4096-fixed world size (12288..13311 -> 3.0..3.25
-// world units) [orig: render_star_field billboard submit @ 0x5adb45..].
-inline constexpr int32_t kStarBillboardScaleFixed = 4096;
-
-inline float star_billboard_world_size(const StarInstance &star) {
-	return static_cast<float>(star.billboard_param) /
-			static_cast<float>(kStarBillboardScaleFixed);
-}
-
-// The render-basis emit swizzle for one star offset: d3d/render float3 =
-// (-engY, engZ, engX) / 65536 [orig: Math_FixedPointToFloat3_YNegated
-// @ 0x611210] — the one home for the fixed->render conversion, so shells
-// never restate the axis order or the 16.16 scale.
-inline void star_offset_render_float3(const StarInstance &star, float out[3]) {
-	constexpr float kInvFixed = io::kInvFp16One;
-	out[0] = -static_cast<float>(star.offset_fp[1]) * kInvFixed;
-	out[1] = static_cast<float>(star.offset_fp[2]) * kInvFixed;
-	out[2] = static_cast<float>(star.offset_fp[0]) * kInvFixed;
-}
-
-// The inverse swizzle for the visibility test's light direction: an engine
-// fixed3 from a render-basis float3 (render = (-engY, engZ, engX)/65536, so
-// eng = (-r.x, r.z, r.y) * 65536 with the reimpl's light handedness).
-inline void star_light_dir_fixed3_from_render(float rx, float ry, float rz,
-		int32_t out[3]) {
-	out[0] = static_cast<int32_t>(-rx * 65536.0f);
-	out[1] = static_cast<int32_t>(rz * 65536.0f);
-	out[2] = static_cast<int32_t>(ry * 65536.0f);
-}
+// Stars: retail draws none. The star 3DI loads (EffectWorld_LoadCelestialModels
+// @ 0x5adc50) and its instance table regenerates per load
+// [orig: Star_GenerateInstanceTable @ 0x5ac850], but the only renderer that
+// reads the table has no caller in the image (no code xref, no rel32 call, no
+// absolute pointer) [orig: Star_RenderField_unused @ 0x5ad9c0], so nothing is ported.
 
 // Glare occlusion (env #14) [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f]:
 // TWO jittered rays per frame feed an 8-bit SLIDING window (>>1 per sample,
@@ -177,7 +111,7 @@ inline float glare_coarse_start_lift(uint32_t frame_index) {
 
 // ---------------------------------------------------------------------------
 // The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130, once per
-// main scene render from Terrain_RenderSceneWithReflection @ 0x5c96c0]: its
+// main scene render from Terrain_RenderWorldScene @ 0x5c96c0]: its
 // own 4-bit visibility window (dword_27E2E2C, >> 1 per frame, bit 3
 // (value 8) = visible) and +-16 brightness chase toward popcount * 64 (no
 // dead-band, no fog scale — dword_27E2E28). The settled brightness draws the glare model
@@ -236,7 +170,7 @@ void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visib
 int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
                            int sun_dim_fixed, bool frame_effects_quarter);
 
-// The BLOOM-SOURCE (Q3) glow alpha, 16.16: FrameFX_RenderBloomPass calls
+// The BLOOM-SOURCE (Q3) glow alpha, 16.16: FrameFX_RenderGlowSource calls
 // render_skybox_sun_glow(0, 0) - no occlusion test - so the Q3 draw uses the
 // fog-based brightness (fog_km + 1) * 0.5 * dot_factor instead of the
 // occlusion accumulator [orig: @ 0x5ad013..0x5ad027; flt_7C3280 = 1.0,

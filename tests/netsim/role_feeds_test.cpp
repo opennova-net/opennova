@@ -42,13 +42,13 @@ int main() {
 		CHECK(status.statics_text.call_medic == "Press M to call a medic");
 		std::vector<hud::HudLfpZone> zones;
 		CHECK(!collect_lfp_zones(bare, world::SpawnZoneRegistry(), 1, zones) && zones.empty());
-		// The sun-visibility diff without a kernel emits nothing and keeps its
+		// The entity lighting diff without a kernel emits nothing and keeps its
 		// caches; a layout change forgets the wire-domain cache.
-		SunQualityFeed sun;
-		sun.last_by_wire[7] = 2;
-		sun.last_by_bms[3] = 1;
+		EntityLightingFeed sun;
+		sun.last_by_wire[7].quality = 2;
+		sun.last_by_bms[3].quality = 1;
 		const int32_t step[3] = { 0, 0, 65536 * 200 };
-		std::vector<SunQualityChange> changes;
+		std::vector<EntityLightingChange> changes;
 		sun.collect(bare, step, {}, {}, 5, changes);
 		CHECK(changes.empty() && sun.last_by_wire.size() == 1 && sun.layout_revision_seen == -1);
 	}
@@ -201,6 +201,83 @@ int main() {
 		cs.spawn_waves = replication::ClientSpawnWaveStatus();
 		cs.roster[0] = replication::ClientRosterSlot();
 		cs.entities.clear();
+	}
+
+	// The per-drawn-entity lighting feed's CONTAINED leg: an entity whose first
+	// blink hit names a building skips the sun rays (quality 4) and takes the
+	// interior lerp with the building's interior light group; only a PERSON
+	// takes the building's ItemDef+0x218 daylight — the non-person wave never
+	// loads the aux, so a contained vehicle or prop lerps with t = 0
+	// [orig: Terrain_RenderSectorEntitiesBySide @0x5c7f83..0x5c7f93 (the aux),
+	//  @0x5c7fb6..0x5c7fc3 / Terrain_RenderSectorEntities @0x5c7c05..0x5c7c14
+	//  (the 0x80 submit flag); RenderBatchCtx_BeginFrame zeroes the stack base
+	//  aux @0x5d89b6..0x5d89b8].
+	{
+		mission::MissionKernel kernel;
+		world::World &w = kernel.world;
+		w.registry.configure_pool(0, 8);
+		w.registry.configure_pool(1, 8);
+		w.registry.configure_pool(2, 8);
+		world::Entity building;
+		building.kind = world::EntityKind::Building;
+		building.item_type = 5;
+		building.has_item_def = true;
+		building.light_transfer = 0.4f;
+		building.bms_id = 40;
+		building.spawn_origin = world::spawn_origin_pack(2, 0);
+		const world::EntityHandle house = w.registry.spawn(2, building);
+		const uint32_t hit = (static_cast<uint32_t>(house.slot()) << 20) | (3u << 12);
+		world::Entity person;
+		person.kind = world::EntityKind::Organic;
+		person.item_type = 3;
+		person.bms_id = 41;
+		person.spawn_origin = world::spawn_origin_pack(0, 1);
+		person.blink_hits[0] = hit;
+		w.registry.spawn(0, person);
+		world::Entity crate;
+		crate.kind = world::EntityKind::Item;
+		crate.item_type = 4;
+		crate.bms_id = 42;
+		crate.spawn_origin = world::spawn_origin_pack(2, 2);
+		crate.blink_hits[0] = hit;
+		w.registry.spawn(2, crate);
+		world::Entity outdoor = crate;
+		outdoor.bms_id = 43;
+		outdoor.blink_hits[0] = 0;
+		w.registry.spawn(2, outdoor);
+		RoleView view;
+		view.kernel = &kernel;
+		EntityLightingFeed feed;
+		const int32_t step[3] = { 0, 0, 65536 * 200 };
+		std::vector<EntityLightingChange> changes;
+		feed.collect(view, step, {}, {}, 0, changes);
+		const EntityLightingChange *person_change = nullptr;
+		const EntityLightingChange *crate_change = nullptr;
+		bool outdoor_emitted = false;
+		for (const EntityLightingChange &c : changes) {
+			if (!c.wire && c.bms_id == 41) person_change = &c;
+			if (!c.wire && c.bms_id == 42) crate_change = &c;
+			if (!c.wire && c.bms_id == 43) outdoor_emitted = true;
+		}
+		CHECK(person_change != nullptr && person_change->lighting.interior &&
+				person_change->lighting.quality == 4 &&
+				person_change->lighting.light_transfer == 0.4f &&
+				person_change->lighting.interior_bms == 40 &&
+				person_change->lighting.interior_section == 3);
+		CHECK(crate_change != nullptr && crate_change->lighting.interior &&
+				crate_change->lighting.quality == 4 &&
+				crate_change->lighting.light_transfer == 0.0f &&
+				crate_change->lighting.interior_bms == 40 &&
+				crate_change->lighting.interior_section == 3);
+		CHECK(!outdoor_emitted); // an outdoor static stays the default context
+		// A steady frame emits nothing.
+		feed.collect(view, step, {}, {}, 0, changes);
+		CHECK(changes.empty());
+		// Walking out restores the outdoor context.
+		w.registry.get(world::EntityHandle::make(0, 0))->blink_hits[0] = 0;
+		feed.collect(view, step, {}, {}, 0, changes);
+		CHECK(changes.size() == 1 && changes[0].bms_id == 41 && !changes[0].lighting.interior &&
+				changes[0].lighting.interior_bms == 0 && changes[0].lighting.light_transfer == 0.0f);
 	}
 
 	// The present-effect pose index over a joiner's decoded rows: a lookup

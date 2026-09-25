@@ -5,6 +5,7 @@
 #include <runtime/inmatch/client_replica_emplaced.h> // the joiner's carrier gun words
 #include <runtime/inmatch/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 #include <runtime/inmatch/replica_query.h> // client_entity_for_handle
+#include <runtime/inmatch/napi_np_server_ctx.h> // the listen host's player slots (EquippedSlot)
 #include <runtime/world/mounted_pose.h> // the ONE mounted matrix path (S4b)
 #include <runtime/world/pose_inputs.h> // seat/mount pose predicates + aim inputs (ADR 0028)
 #include <runtime/mission/seat_spec_extract.h> // item_seat_spec_for_type
@@ -12,10 +13,13 @@
 #include <runtime/world/present_rows.h>
 #include <runtime/world/vehicle_motor.h> // vehicle_ctrl_registers
 #include <runtime/world/infantry.h> // infantry_weapon_channel_visible
+#include <runtime/world/player_weapon.h> // weapon_flag::kNoClipsNoDraw
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/zone_chain.h> // zone_chain_zone_info_byte
+#include <runtime/world/collision.h> // entity_live_euler_bam, ResolvedCollisionShape
+#include <runtime/renderer/render_slot_shadow.h> // slot_march_start_offset
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
@@ -35,6 +39,89 @@ using namespace opennova::world;
 namespace {
 
 inline constexpr double kFixed16 = io::kFp16OneD;
+
+// An authoritative pool row's collector verdict: retail's terrain collector
+// never draws an entity whose Flags carry bit 0 — the carried object (the
+// carry attach sets it), an undeployed or spectating player, a blocked spawn
+// marker, an SSN hide — so the host row is hidden exactly as the decoded
+// joiner row is.
+// [orig: collect_visible_entities_for_terrain @0x5c8cef..0x5c8cf4;
+//  Entity_AttachCarriedObject @0x43c14a]
+bool pool_row_hidden(const Entity &e) {
+	return e.hidden || ((e.flags | e.engine_flags) & kEntityFlagCarried) != 0;
+}
+
+// One authoritative person's item-overlay inputs: its Flags, the canopy
+// words, the pose triple and body heading the bone build reads, and the
+// carried child (entity+0x268) when it has an item def.
+// [orig: BoneCallback_org0_World @0x4e3940 — the child gate @0x4e3da6..0x4e3db7]
+PersonOverlayInputs pool_person_overlay_inputs(const World &w, const Entity &e,
+		const AiEntity &ae, const anim::AimOverlayInputs &pose) {
+	PersonOverlayInputs in;
+	in.flags = e.flags | e.engine_flags;
+	in.pose = pose;
+	in.chute = ae.inf.parachute;
+	if (const Entity *child = w.registry.get(e.mounted_child);
+			child != nullptr && child->has_item_def)
+		in.carried_type_id = child->item_id;
+	return in;
+}
+
+// The ammo leg of the held-weapon draw gate's REMOTE branch, on the authority:
+// when the player entity's EquippedSlot (the host's record of it, which the
+// weapon echo never moves) holds a NoClipsNoDraw def, the model hides once that
+// def's ammo class pool plus — for a one-round clip — its loaded rounds (the
+// shared bucket when the def names one, else the slot's own clip) reads zero.
+// The debug no-ammo-cost bit answers every class with its carry cap.
+// [orig: Entity_CanFireWeapon @0x4dcb5f..0x4dcbc6 — EquippedSlot @0x4dcb30;
+//  Entity_GetScoreValueBySlotType @0x5406E0 (the cap @0x5406fc, the validated
+//  player's pools @0x5407b3); sub_5405F0 @0x5405F0 (its loaded buckets @0x540657)]
+bool remote_held_weapon_out_of_ammo(const World &w, const NapiNPServerCtx &server,
+		const Entity &e) {
+	for (const NapiNPConnection &conn : server.np_protocol.connection_list) {
+		if (conn.link.owned_entity.packed != e.handle.packed) continue;
+		const WeaponTableEntry *def = nullptr;
+		int16_t slot_clip = 0;
+		switch (conn.equipped_slot.kind) {
+			case NapiNPConnection::EquippedSlotRef::kNone:
+				return false;
+			case NapiNPConnection::EquippedSlotRef::kPersonal: {
+				const auto slot = conn.weapon_slots.find(conn.equipped_slot.combo);
+				if (slot == conn.weapon_slots.end()) return false;
+				def = w.tables.weapons.by_index(slot->second.adm_index);
+				slot_clip = slot->second.clip;
+				break;
+			}
+			case NapiNPConnection::EquippedSlotRef::kMount: {
+				const Entity *mount = w.registry.get(conn.equipped_slot.mount);
+				if (mount == nullptr) return false;
+				def = w.tables.weapons.by_index(mount->primary_weapon_slot_adm);
+				slot_clip = static_cast<int16_t>(mount->primary_weapon_slot.clip);
+				break;
+			}
+		}
+		if (def == nullptr || (def->flags & weapon_flag::kNoClipsNoDraw) == 0) return false;
+		const int cls = def->ammo_class_id;
+		const auto pool = [&](int id) -> int64_t {
+			if (id < 0 || id >= 128) return 0;
+			if (w.rules.ignore_weapon_ammo_cost)
+				return id < static_cast<int>(w.tables.weapons.ammo_class_caps.size())
+						? w.tables.weapons.ammo_class_caps[static_cast<size_t>(id)]
+						: 0;
+			return conn.reply.ammo_pools[static_cast<size_t>(id)];
+		};
+		int64_t ammo = pool(cls);
+		if (def->clipsize == 1) {
+			const int32_t bucket = def->ammo_bucket;
+			ammo += bucket != 0
+					? (bucket > 0 && bucket < 128 ? conn.reply.shared_clips[static_cast<size_t>(bucket)] : 0)
+					: slot_clip;
+		}
+		return ammo == 0;
+	}
+	return false;
+}
+
 // The EWEAP articulation registers a mounted gun's .3di CTRL table names.
 inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
@@ -257,6 +344,41 @@ static void write_world_present_row(const PresentRowsContext &context,
 		int row_index, PoolPresentLifecycleMap &lifecycle, float *r,
 		DoorPhaseTable &door_phases);
 
+// The render-slot march start one row publishes (world::PF_SLOT_MARCH_OFFSET_X)
+// [orig: RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31].
+static void write_present_slot_march(float *r, uint32_t flags_dword, int item_type,
+		const int32_t euler_bam[3], const std::array<int32_t, 3> &bbox_center_q16) {
+	const std::array<float, 3> offset = renderer::slot_march_start_offset(
+			renderer::slot_entity_flags_zero(flags_dword, 0u, item_type),
+			euler_bam[0], euler_bam[1], euler_bam[2], bbox_center_q16);
+	r[PF_SLOT_MARCH_OFFSET_X] = offset[0];
+	r[PF_SLOT_MARCH_OFFSET_Y] = offset[1];
+	r[PF_SLOT_MARCH_OFFSET_Z] = offset[2];
+}
+
+// From the authoritative entity: its split Flags words, live Euler triple and
+// stamped collision-bbox centre (entity+0x1FC).
+static void write_present_slot_march(float *r, const Entity &e) {
+	int32_t euler[3];
+	entity_live_euler_bam(e, euler);
+	write_present_slot_march(r, e.flags | e.engine_flags, e.item_type, euler,
+			{static_cast<int32_t>(std::lround(e.bbox_center.x * 65536.0)),
+					static_cast<int32_t>(std::lround(e.bbox_center.y * 65536.0)),
+					static_cast<int32_t>(std::lround(e.bbox_center.z * 65536.0))});
+}
+
+// From a joiner's decoded row, the facts its own retail entity holds: its
+// Flags dword (replica_entity_flags_dword), the decoded Euler triple, and the
+// type's resolved collision-bbox centre (Entity_InitFromModel
+// @0x40df1e..0x40df4a; the shape the joiner's sun and LOS legs read).
+static void write_present_replica_slot_march(float *r, mission::MissionKernel &kernel,
+		const replication::ClientEntityState &es) {
+	const ResolvedCollisionShape shape = kernel.wire_collision_shape_for_type(es.type_id);
+	const int32_t euler[3] = {es.heading_bam, es.pitch_bam, es.roll_bam};
+	write_present_slot_march(r, replica_entity_flags_dword(es), shape.item_type, euler,
+			{shape.bbox_center_q16.x, shape.bbox_center_q16.y, shape.bbox_center_q16.z});
+}
+
 void build_client_replica_present_rows(const PresentRowsContext &context,
 		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
 	out.clear();
@@ -269,8 +391,10 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 	const Entity *local_player = kernel.world.registry.get(kernel.world.cached.local_player);
 	const bool first_person_usegun = local_first_person_usegun(kernel, local_player);
 	const int count = static_cast<int>(cs.entities.size());
+	const std::unordered_map<uint16_t, uint16_t> carried_types =
+			carried_object_types_by_carrier(cs);
 	const ClientReplicaPresentContext replica_present_context{
-			&kernel.seat_specs, &kernel.world.tables.weapons, joiner};
+			&kernel.seat_specs, &kernel.world.tables.weapons, joiner, &carried_types};
 	out.assign(static_cast<size_t>(count) * PF_STRIDE, 0.0f);
 	door_phases.clear();
 	float *w = out.data();
@@ -331,7 +455,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_BODY_ANIM_SLOT] = static_cast<float>(ent->body_anim_slot);
 			r[PF_PITCH_DEG] = static_cast<float>(pool_present_pitch_deg(*ent));
 			r[PF_ROLL_DEG] = static_cast<float>(pool_present_roll_deg(*ent));
-			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
+			r[PF_HIDDEN] = pool_row_hidden(*ent) ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
 			r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
 			for (int phase = 0; phase < 6; ++phase)
@@ -350,6 +474,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_STANCE_BITS] = static_cast<float>(ent->net_stance_bits & 0x03u);
 			r[PF_PARACHUTE_DEPLOYED] =
 					((ent->flags | ent->engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
+			write_present_slot_march(r, *ent);
 			write_present_section_mask(r, item_hidden_sections(*ent));
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
 			r[PF_RIGHT_HAND_COLLAPSED] =
@@ -532,15 +657,23 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 					anim::compute_aim_overlay_angles(inputs, angles);
 					write_present_overlay(r, angles);
-					// This body's third-person gun. Player rows only: retail's
-					// composition gate is the Flags 0x100 player classifier, and
-					// placed NPCs carry no equipped index anyway.
+					// This body's third-person gun. Player rows only: an NPC's
+					// entity+0x2B0 is zero whenever a frame draws it — the org
+					// init never writes it and org1's fire stamps clear it after
+					// the shot [orig: Entity_InitOrganicAI @0x4bfcc0; stamp and
+					// clear @0x4bf347..0x4bf369], so draw 5's own precondition
+					// [orig: @0x4e3c97] skips every NPC.
 					if ((ent->engine_flags & kEntityFlagPlayer) != 0) {
+						const bool out_of_ammo = context.server != nullptr &&
+								ent != local_player &&
+								remote_held_weapon_out_of_ammo(kernel.world, *context.server, *ent);
 						write_present_held_weapon(
-								r, ent->equipped_adm_index,
+								r, out_of_ammo ? 0 : ent->equipped_adm_index,
 								(ent->flags & kEntityFlagDead) != 0, inputs,
 								ae->inf.wpn_state);
 					}
+					write_present_person_overlays(r, person_overlays(
+							pool_person_overlay_inputs(kernel.world, *ent, *ae, inputs)));
 				}
 			}
 		}
@@ -548,6 +681,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// Their 0x26 payload is not a compact-transform update.
 		// [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
 		if (joiner) {
+			write_present_replica_slot_march(r, kernel, es);
 			const Entity *local = kernel.world.registry.get(h);
 			if (local && static_cast<uint16_t>(local->item_id) == es.type_id) {
 				r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
@@ -613,6 +747,15 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		write_world_present_row(context, local_player, first_person_usegun, entity, row_index,
 				lifecycle, out.data() + static_cast<size_t>(row_index) * PF_STRIDE, unused_doors);
 	});
+}
+
+uint32_t replica_entity_flags_dword(const replication::ClientEntityState &es) {
+	// The compact record's flags byte IS entity+36's low byte (the 0x0A fold);
+	// a row without one keeps its load-stream byte.
+	const uint32_t low = es.state_flags_known ? es.state_flags : (es.spawn_entity_flags & 0xFFu);
+	uint32_t flags = (es.spawn_entity_flags & ~0xFFu) | low | es.rm_entity_flags;
+	if (es.cls == EntityClass::Player) flags |= kEntityFlagPlayer;
+	return flags;
 }
 
 void build_world_present_rows(const PresentRowsContext &context,
@@ -700,7 +843,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_BMS_ID] = static_cast<float>(e.bms_id);
 	r[PF_NET_ID] = static_cast<float>(e.net_id);
 	r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
-	r[PF_HIDDEN] = e.hidden ? 1.0f : 0.0f;
+	r[PF_HIDDEN] = pool_row_hidden(e) ? 1.0f : 0.0f;
 	r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
 	r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
 	for (int phase = 0; phase < 6; ++phase)
@@ -718,6 +861,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
 	r[PF_PARACHUTE_DEPLOYED] =
 			((e.flags | e.engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
+	write_present_slot_march(r, e);
 	write_present_section_mask(r, item_hidden_sections(e));
 	write_present_doors(r, row_index, w, e, door_phases);
 	r[PF_RIGHT_HAND_COLLAPSED] =
@@ -826,13 +970,44 @@ static void write_world_present_row(const PresentRowsContext &context,
 	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 	anim::compute_aim_overlay_angles(inputs, angles);
 	write_present_overlay(r, angles);
-	// This body's third-person gun. Player rows only: retail's composition
-	// gate is the Flags 0x100 player classifier.
+	// This body's third-person gun. Player rows only: an NPC's entity+0x2B0 is
+	// zero whenever a frame draws it (the org init never writes it; org1's fire
+	// stamps clear it after the shot) [orig: Entity_InitOrganicAI @0x4bfcc0;
+	// @0x4bf347..0x4bf369], so draw 5's precondition [orig: @0x4e3c97] skips it.
 	if ((e.engine_flags & kEntityFlagPlayer) != 0) {
+		// A remote player's gun also answers the gate's ammo leg on the host.
+		const bool out_of_ammo = context.server != nullptr && &e != local_player &&
+				remote_held_weapon_out_of_ammo(w, *context.server, e);
 		write_present_held_weapon(
-				r, e.equipped_adm_index, (e.flags & kEntityFlagDead) != 0, inputs,
-				ae->inf.wpn_state);
+				r, out_of_ammo ? 0 : e.equipped_adm_index, (e.flags & kEntityFlagDead) != 0,
+				inputs, ae->inf.wpn_state);
 	}
+	// The body's item overlays: the canopy, the goggles, the binoculars and the
+	// carried object. [orig: BoneCallback_org0_World @0x4e3940]
+	write_present_person_overlays(r, person_overlays(pool_person_overlay_inputs(w, e, *ae, inputs)));
+}
+
+bool local_player_person_overlays(const PresentRowsContext &context, PersonOverlays &out) {
+	out = PersonOverlays{};
+	const World &w = context.kernel.world;
+	const Entity *e = w.registry.get(w.cached.local_player);
+	const AiEntity *ae = e != nullptr ? w.ai.for_handle(e->handle) : nullptr;
+	if (ae == nullptr || !ae->inf.active) return false;
+	PersonOverlayInputs in =
+			pool_person_overlay_inputs(w, *e, *ae, world::aim_overlay_inputs_for(*ae, *e));
+	// A joiner's own body carries what the authority attached to its entity
+	// there: the S2C 0x2F relation names that entity's handle (H), and the
+	// retail client's 0x0A local block attaches the carried object to the
+	// local player itself [orig: NapiNPClientMsg_0x00A @0x43066c..0x430695;
+	// NapiNPClientMsg_0x02F @0x430E10].
+	if (context.joiner && context.runtime != nullptr && context.runtime->has_self_handle()) {
+		const std::unordered_map<uint16_t, uint16_t> carried =
+				carried_object_types_by_carrier(context.runtime->state());
+		const auto it = carried.find(context.runtime->self_handle());
+		if (it != carried.end()) in.carried_type_id = it->second;
+	}
+	out = person_overlays(in);
+	return true;
 }
 
 } // namespace opennova::inmatch

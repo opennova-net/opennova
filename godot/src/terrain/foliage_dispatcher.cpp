@@ -23,7 +23,6 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
-#include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
@@ -31,7 +30,9 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
@@ -43,6 +44,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -71,14 +73,12 @@ bool finite_vector(const Vector3 &p_value) {
 }
 
 uint32_t pack_preview_detail_key(int p_cell_min_x, int p_cell_min_z) {
-  // The generator decodes HIGH15 as the X cell origin and LOW15 as the
-  // positive-Z edge. Candidates run lowBase - localB, so a preview cell
-  // [z, z+cell] stores z+cell in the low half.
+  // The same packing as the runtime collector: HIGH15 = the cell's X-min,
+  // LOW15 = its Z-min (engine/runtime/terrain/foliage_detail_collector.cpp
+  // carries the witness).
   const uint32_t x = static_cast<uint32_t>(p_cell_min_x) & 0x7FFFu;
-  const uint32_t z_top = static_cast<uint32_t>(
-                             p_cell_min_z + opennova::kFoliageDetailCellSize) &
-                         0x7FFFu;
-  return (x << 16u) | z_top;
+  const uint32_t z = static_cast<uint32_t>(p_cell_min_z) & 0x7FFFu;
+  return (x << 16u) | z;
 }
 
 // The pass names and per-draw uniform names the applier writes every frame.
@@ -106,6 +106,8 @@ struct DrawUniformNames {
   StringName alpha_reference{"u_alpha_ref"};
   StringName high_pass_cutoff{"u_high_pass_cutoff"};
   StringName wind_phase{"u_wind_phase"};
+  StringName wind_sector_origin_z{"u_wind_sector_origin_z"};
+  StringName wind_offset{"u_wind_offset"};
   StringName tile_cache_ready{"u_instance_tile_cache_ready"};
   StringName tile_cache_layer{"u_instance_tile_cache_layer"};
   StringName tile_cache_projection{"u_instance_tile_cache_projection"};
@@ -121,11 +123,21 @@ int32_t decode_foliage_cell_axis(uint32_t p_packed) {
   return (value & 0x4000) != 0 ? value - 0x8000 : value;
 }
 
+// The material set of one water side: 0 = the far side, 1 = the camera's.
+size_t side_index(bool p_far_side) { return p_far_side ? 0u : 1u; }
+
+// The floats of one MODEL-tier MultiMesh instance: the 3x4 transform rows
+// carry the first three GridPlacementVS rows, the custom data the fold.
+constexpr int kModelInstanceFloats = 16;
+static_assert(sizeof(opennova::renderer::FoliageModelInstance) ==
+                  kModelInstanceFloats * sizeof(float),
+              "a MultiMesh TRANSFORM_3D + custom instance is the block");
+
 Vector2 foliage_detail_cell_center(uint32_t p_cell_key) {
   const int32_t minimum_x = decode_foliage_cell_axis(p_cell_key >> 16u);
-  const int32_t maximum_z = decode_foliage_cell_axis(p_cell_key);
+  const int32_t minimum_z = decode_foliage_cell_axis(p_cell_key);
   return Vector2(static_cast<float>(minimum_x) + 8.0f,
-                 static_cast<float>(maximum_z) - 8.0f);
+                 static_cast<float>(minimum_z) + 8.0f);
 }
 
 } // namespace
@@ -133,6 +145,7 @@ Vector2 foliage_detail_cell_center(uint32_t p_cell_key) {
 FoliageDispatcher::FoliageDispatcher() = default;
 FoliageDispatcher::~FoliageDispatcher() {
   _release_draw_pools();
+  mask_pass_.release();
   const Callable terrain_changed =
       callable_mp(this, &FoliageDispatcher::_on_terrain_data_changed);
   if (terrain_data_.is_valid() &&
@@ -161,6 +174,14 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::set_terrain);
   ClassDB::bind_method(D_METHOD("set_wind_clock_override_ms", "ms"),
                        &FoliageDispatcher::set_wind_clock_override_ms);
+  ClassDB::bind_method(D_METHOD("set_thermal_view", "thermal"),
+                       &FoliageDispatcher::set_thermal_view);
+  ClassDB::bind_method(D_METHOD("is_thermal_view"),
+                       &FoliageDispatcher::is_thermal_view);
+  ClassDB::bind_method(D_METHOD("set_water_height", "height"),
+                       &FoliageDispatcher::set_water_height);
+  ClassDB::bind_method(D_METHOD("get_water_height"),
+                       &FoliageDispatcher::get_water_height);
   ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
                        &FoliageDispatcher::set_terrain_data);
   ClassDB::bind_method(D_METHOD("get_terrain_data"),
@@ -257,6 +278,7 @@ void FoliageDispatcher::_notification(int p_what) {
     _bind_current_scenario();
   } else if (p_what == NOTIFICATION_EXIT_WORLD) {
     _release_draw_pools();
+    mask_pass_.release();
   } else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
     _set_draw_pool_visibility(is_visible_in_tree());
   }
@@ -362,6 +384,14 @@ void FoliageDispatcher::set_weather(Weather *p_weather) {
 
 void FoliageDispatcher::set_wind_clock_override_ms(int64_t p_ms) {
   wind_clock_override_ms_ = p_ms;
+}
+
+void FoliageDispatcher::set_thermal_view(bool p_thermal) {
+  thermal_view_ = p_thermal;
+}
+
+void FoliageDispatcher::set_water_height(float p_height) {
+  water_height_ = p_height;
 }
 
 Weather *FoliageDispatcher::_weather() const {
@@ -995,16 +1025,18 @@ void FoliageDispatcher::_ensure_visuals() {
     }
   };
 
-  for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
-    const bool fresh = detail_high_materials_[slot].is_null() ||
-                       detail_low_materials_[slot].is_null() ||
-                       silhouette_materials_[slot].is_null();
-    ensure_material(detail_high_materials_[slot], detail_high_shader_);
-    ensure_material(detail_low_materials_[slot], detail_low_shader_);
-    ensure_material(silhouette_materials_[slot], silhouette_shader_);
-    if (fresh) {
-      // A new material holds no parameters yet: force the next write.
-      material_inputs_written_ = false;
+  for (size_t side = 0; side < 2; ++side) {
+    for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
+      const bool fresh = detail_high_materials_[side][slot].is_null() ||
+                         detail_low_materials_[side][slot].is_null() ||
+                         silhouette_materials_[side][slot].is_null();
+      ensure_material(detail_high_materials_[side][slot], detail_high_shader_);
+      ensure_material(detail_low_materials_[side][slot], detail_low_shader_);
+      ensure_material(silhouette_materials_[side][slot], silhouette_shader_);
+      if (fresh) {
+        // A new material holds no parameters yet: force the next write.
+        material_inputs_written_ = false;
+      }
     }
   }
 }
@@ -1013,9 +1045,7 @@ bool FoliageDispatcher::MaterialInputs::operator==(
     const MaterialInputs &p_other) const {
   if (colormap != p_other.colormap ||
       heightfield_normal != p_other.heightfield_normal ||
-      tile_overlay != p_other.tile_overlay ||
-      tile_cache != p_other.tile_cache ||
-      tile_overlay_tint != p_other.tile_overlay_tint) {
+      tile_cache != p_other.tile_cache) {
     return false;
   }
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
@@ -1035,28 +1065,21 @@ void FoliageDispatcher::_update_materials() {
   }
   const bool has_colormap = colormap.is_valid();
   Ref<Texture2D> heightfield_normal;
-  Ref<Texture2D> tile_overlay;
   Ref<Texture2DArray> tile_cache;
-  Vector3 tile_overlay_tint(1.0f, 1.0f, 1.0f);
   if (terrain_ != nullptr) {
     heightfield_normal = terrain_->get_heightfield_normal_texture();
-    tile_overlay = terrain_->get_tile_overlay_texture();
-    tile_overlay_tint = terrain_->get_tile_overlay_tint();
     tile_cache = terrain_->get_tile_cache_texture();
   }
   const bool has_heightfield_normal = heightfield_normal.is_valid();
-  const bool has_tile_overlay = tile_overlay.is_valid();
   const bool has_tile_cache = tile_cache.is_valid();
 
-  // Steady frames write nothing: the inputs are retained textures + one
-  // tint, so their identities decide whether the material parameters moved.
+  // Steady frames write nothing: the inputs are retained textures, so their
+  // identities decide whether the material parameters moved.
   MaterialInputs inputs;
   inputs.colormap = has_colormap ? colormap->get_rid() : RID();
   inputs.heightfield_normal =
       has_heightfield_normal ? heightfield_normal->get_rid() : RID();
-  inputs.tile_overlay = has_tile_overlay ? tile_overlay->get_rid() : RID();
   inputs.tile_cache = has_tile_cache ? tile_cache->get_rid() : RID();
-  inputs.tile_overlay_tint = tile_overlay_tint;
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     inputs.fd_textures[slot] =
         fd_textures_[slot].is_valid() ? fd_textures_[slot]->get_rid() : RID();
@@ -1067,13 +1090,14 @@ void FoliageDispatcher::_update_materials() {
   material_inputs_ = inputs;
   material_inputs_written_ = true;
 
+  for (size_t side = 0; side < 2; ++side) {
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     const Ref<Texture2D> fd_texture = fd_textures_[slot];
     const bool has_fd_texture = fd_texture.is_valid();
 
     const Ref<ShaderMaterial> detail_materials[2] = {
-        detail_high_materials_[slot],
-        detail_low_materials_[slot],
+        detail_high_materials_[side][slot],
+        detail_low_materials_[side][slot],
     };
     for (const Ref<ShaderMaterial> &material : detail_materials) {
       if (material.is_null()) {
@@ -1087,27 +1111,65 @@ void FoliageDispatcher::_update_materials() {
                                      heightfield_normal);
       material->set_shader_parameter("u_has_heightfield_normal",
                                      has_heightfield_normal);
-      material->set_shader_parameter("u_tile_overlay", tile_overlay);
-      material->set_shader_parameter("u_has_tile_overlay", has_tile_overlay);
-      material->set_shader_parameter("u_tile_overlay_tint",
-                                     tile_overlay_tint);
       material->set_shader_parameter("u_tile_cache", tile_cache);
       material->set_shader_parameter("u_has_tile_cache", has_tile_cache);
-      frame_stats_.backend_material_parameter_writes += 11;
+      frame_stats_.backend_material_parameter_writes += 8;
     }
 
-    const Ref<ShaderMaterial> silhouette = silhouette_materials_[slot];
+    const Ref<ShaderMaterial> silhouette = silhouette_materials_[side][slot];
     if (silhouette.is_valid()) {
       silhouette->set_shader_parameter("u_fd_texture", fd_texture);
       silhouette->set_shader_parameter("u_has_fd_texture", has_fd_texture);
       frame_stats_.backend_material_parameter_writes += 2;
     }
   }
+  }
+}
+
+void FoliageDispatcher::_refresh_model_meshes() {
+  if (model_mesh_generation_ == compiler_.model_mesh_generation()) {
+    return;
+  }
+  model_mesh_generation_ = compiler_.model_mesh_generation();
+  for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
+    const opennova::renderer::FoliageSlotModelMesh &source =
+        compiler_.model_mesh(slot);
+    Ref<ArrayMesh> &mesh = model_meshes_[static_cast<size_t>(slot)];
+    mesh.unref();
+    if (!source.valid) {
+      continue;
+    }
+    const int64_t vertex_count = static_cast<int64_t>(source.vertices.size());
+    PackedVector3Array positions;
+    PackedVector2Array uvs;
+    PackedInt32Array indices;
+    positions.resize(vertex_count);
+    uvs.resize(vertex_count);
+    for (int64_t i = 0; i < vertex_count; ++i) {
+      const opennova::renderer::FoliageModelVertex &v =
+          source.vertices[static_cast<size_t>(i)];
+      positions.set(i, Vector3(v.x, v.y, v.z));
+      uvs.set(i, Vector2(v.u, v.v));
+    }
+    indices.resize(static_cast<int64_t>(source.indices.size()));
+    for (size_t i = 0; i < source.indices.size(); ++i) {
+      indices.set(static_cast<int64_t>(i),
+                  static_cast<int32_t>(source.indices[i]));
+    }
+    Array arrays;
+    arrays.resize(Mesh::ARRAY_MAX);
+    arrays[Mesh::ARRAY_VERTEX] = positions;
+    arrays[Mesh::ARRAY_TEX_UV] = uvs;
+    arrays[Mesh::ARRAY_INDEX] = indices;
+    mesh.instantiate();
+    mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+  }
 }
 
 RID FoliageDispatcher::_ensure_draw_instance(
     RenderingServer *p_server, std::vector<RID> &r_pool,
-    std::vector<DrawInstanceStamp> &r_stamps, size_t p_index) {
+    std::vector<DrawInstanceStamp> &r_stamps, size_t p_index,
+    bool p_model_tier) {
   if (r_stamps.size() <= p_index) {
     r_stamps.resize(p_index + 1);
   }
@@ -1140,6 +1202,19 @@ RID FoliageDispatcher::_ensure_draw_instance(
     frame_stats_.backend_configuration_writes += 4;
     server->instance_set_visible(instance, false);
     ++frame_stats_.backend_visibility_writes;
+    if (p_model_tier) {
+      // A MODEL draw is one MultiMesh of up to a full tile's instances: the
+      // TRANSFORM_3D rows and the custom data carry the block.
+      const RID multimesh = server->multimesh_create();
+      server->multimesh_allocate_data(
+          multimesh, opennova::foliage::kModelTileInstanceCap,
+          RenderingServer::MULTIMESH_TRANSFORM_3D, false, true);
+      server->multimesh_set_visible_instances(multimesh, 0);
+      server->instance_set_base(instance, multimesh);
+      frame_stats_.backend_configuration_writes += 2;
+      ++frame_stats_.backend_base_writes;
+      model_multimesh_pool_.push_back(multimesh);
+    }
     r_pool.push_back(instance);
   }
   return r_pool[p_index];
@@ -1213,9 +1288,11 @@ void FoliageDispatcher::_release_draw_pools() {
     };
     release(detail_draw_pool_);
     release(model_draw_pool_);
+    release(model_multimesh_pool_);
   } else {
     detail_draw_pool_.clear();
     model_draw_pool_.clear();
+    model_multimesh_pool_.clear();
   }
   detail_draw_stamps_.clear();
   model_draw_stamps_.clear();
@@ -1224,7 +1301,8 @@ void FoliageDispatcher::_release_draw_pools() {
 
 void FoliageDispatcher::_hide_pool_tail(
     std::vector<RID> &r_pool,
-    std::vector<DrawInstanceStamp> &r_stamps, size_t p_first) {
+    std::vector<DrawInstanceStamp> &r_stamps, size_t p_first,
+    bool p_model_tier) {
   RenderingServer *server = RenderingServer::get_singleton();
   if (server == nullptr) {
     return;
@@ -1240,10 +1318,13 @@ void FoliageDispatcher::_hide_pool_tail(
       server->instance_set_visible(instance, false);
       ++frame_stats_.backend_visibility_writes;
     }
-    // Drop the draw's mesh ownership: resident meshes stay owned by the
-    // caches, an evicted identity frees with its last binding.
-    server->instance_set_base(instance, RID());
-    ++frame_stats_.backend_base_writes;
+    if (!p_model_tier) {
+      // Drop the draw's mesh ownership: resident meshes stay owned by the
+      // caches, an evicted identity frees with its last binding. A MODEL
+      // instance keeps its MultiMesh base (the slot meshes are long-lived).
+      server->instance_set_base(instance, RID());
+      ++frame_stats_.backend_base_writes;
+    }
     *stamp = DrawInstanceStamp{};
   }
 }
@@ -1253,8 +1334,8 @@ void FoliageDispatcher::reset() {
   frame_stats_ = FrameStats{};
   total_frame_calls_ = 0;
   detail_mesh_cache_.clear();
-  model_mesh_cache_.clear();
   _release_draw_pools();
+  mask_pass_.clear();
 }
 
 int FoliageDispatcher::get_total_instances() const {
@@ -1349,6 +1430,12 @@ Dictionary FoliageDispatcher::get_backend_report() const {
       row["alpha_reference"] = stamp.alpha_reference;
       row["high_pass_cutoff"] = stamp.high_pass_cutoff;
       row["wind_phase"] = stamp.wind_phase;
+      row["wind_sector_origin_z"] = stamp.wind_sector_origin_z;
+      row["far_side"] = stamp.far_side;
+      row["render_priority"] = stamp.render_rung;
+      row["sorting_offset"] = stamp.sorting_offset;
+      row["instance_count"] = stamp.instance_count;
+      row["wind_offset"] = stamp.wind_offset;
       row["tile_cache_ready"] = stamp.tile_cache_ready;
       row["tile_cache_layer"] = stamp.tile_cache_layer;
       row["tile_cache_projection"] = stamp.tile_cache_projection;
@@ -1378,6 +1465,20 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   result["uniform_writes"] = frame_stats_.backend_uniform_writes;
   result["visibility_writes"] = frame_stats_.backend_visibility_writes;
   result["server_writes"] = backend_server_writes();
+  const FoliageMaskReport mask = mask_pass_.get_report();
+  Dictionary mask_row;
+  mask_row["callback_seen"] = mask.callback_seen;
+  mask_row["status"] = String::utf8(mask.status.c_str());
+  mask_row["failure"] = String::utf8(mask.failure.c_str());
+  mask_row["drawn_frame_id"] = static_cast<int64_t>(mask.drawn_frame_id);
+  mask_row["drawn_draws"] = mask.drawn_draws;
+  mask_row["views"] = mask.views;
+  mask_row["installed"] = mask.installed;
+  mask_row["active"] = mask.active;
+  mask_row["target_size"] = mask.target_size;
+  mask_row["draws"] = mask.draws;
+  mask_row["instances"] = mask.instances;
+  result["mask"] = mask_row;
   return result;
 }
 
@@ -1432,10 +1533,18 @@ Dictionary FoliageDispatcher::apply_probe_draw_control(
         ++kept;
         fade_min = std::min(fade_min, stamp.fade);
         fade_max = std::max(fade_max, stamp.fade);
-        server->instance_geometry_set_shader_parameter(
-            instance, draw_uniform_names().wind_phase, p_wind_phase);
+        if (p_detail) {
+          server->instance_geometry_set_shader_parameter(
+              instance, draw_uniform_names().wind_phase, p_wind_phase);
+          stamp.wind_phase = p_wind_phase;
+        } else {
+          // The MODEL tier's c9.x term for the pinned angle.
+          stamp.wind_offset =
+              opennova::renderer::foliage_model_wind_offset(p_wind_phase);
+          server->instance_geometry_set_shader_parameter(
+              instance, draw_uniform_names().wind_offset, stamp.wind_offset);
+        }
         ++frame_stats_.backend_uniform_writes;
-        stamp.wind_phase = p_wind_phase;
         if (p_detail && p_fade_adjust != 0.0f) {
           const float adjusted_fade =
               std::max(stamp.fade + p_fade_adjust, 0.0f);
@@ -1487,6 +1596,9 @@ void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform, int64_t 
       view.detail_cells.push_back(opennova::foliage::DetailCell{
           patch.key,
           patch.distance,
+          patch.max_height,
+          patch.atlas_x,
+          patch.atlas_z,
       });
     }
   }
@@ -1518,6 +1630,8 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time
   if (const Weather *weather = _weather(); weather != nullptr) {
     input.wind_osc_ring0 = weather->runtime().core().oscillator.osc_ring[0];
   }
+  input.thermal_view = thermal_view_;
+  input.water_height = water_height_;
 
   // Column-major view matrix from the camera's inverse transform (the same
   // construction Terrain feeds TerrainFrameCompiler).
@@ -1528,26 +1642,6 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time
   input.view[4] = b[0][1]; input.view[5] = b[1][1]; input.view[6] = b[2][1]; input.view[7] = 0;
   input.view[8] = b[0][2]; input.view[9] = b[1][2]; input.view[10] = b[2][2]; input.view[11] = 0;
   input.view[12] = o.x; input.view[13] = o.y; input.view[14] = o.z; input.view[15] = 1;
-
-  Camera3D *active_camera = nullptr;
-  if (is_inside_tree()) {
-    Viewport *viewport = get_viewport();
-    if (viewport != nullptr) {
-      active_camera = viewport->get_camera_3d();
-    }
-  }
-  if (active_camera != nullptr) {
-    const Projection proj = active_camera->get_camera_projection();
-    for (int col = 0; col < 4; ++col) {
-      input.proj[col * 4 + 0] = proj.columns[col][0];
-      input.proj[col * 4 + 1] = proj.columns[col][1];
-      input.proj[col * 4 + 2] = proj.columns[col][2];
-      input.proj[col * 4 + 3] = proj.columns[col][3];
-    }
-  } else {
-    // A preview without a live camera gates anchors on view depth alone.
-    input.no_frustum = true;
-  }
 
   input.silhouette_anchors.reserve(silhouette_anchors_.size());
   for (int index = 0; index < silhouette_anchors_.size(); ++index) {
@@ -1606,10 +1700,16 @@ FoliageDispatcher::_preview_cells(const Vector3 &p_camera_position) const {
         continue;
       }
 
+      // The preview's one sampled height stands in for the leaf's maximum,
+      // and without a sector routing its world minimum stands in for the
+      // atlas minimum.
       cells.push_back(opennova::foliage::DetailCell{
           pack_preview_detail_key(static_cast<int>(min_x),
                                   static_cast<int>(min_z)),
           distance,
+          center_y,
+          static_cast<int32_t>(min_x),
+          static_cast<int32_t>(min_z),
       });
     }
   }
@@ -1633,10 +1733,10 @@ opennova::foliage::WorldSamplers FoliageDispatcher::_world_samplers() {
   world.height_at = [this](float p_world_x, float p_world_z) {
     return _sample_height(p_world_x, p_world_z);
   };
-  world.detail_foliage_mask_at = [this](int32_t p_world_x_fixed,
-                                        int32_t p_world_z_fixed) {
+  world.detail_foliage_mask_at = [this](int32_t p_atlas_x_fixed,
+                                        int32_t p_atlas_z_fixed) {
     return _mask_for_palette_index(
-        _sample_detail_foliage_index(p_world_x_fixed, p_world_z_fixed));
+        _sample_detail_foliage_index(p_atlas_x_fixed, p_atlas_z_fixed));
   };
   world.model_foliage_mask_at = [this](int32_t p_world_x_fixed,
                                        int32_t p_world_z_fixed) {
@@ -1675,26 +1775,26 @@ float FoliageDispatcher::_sample_height(float p_world_x,
 }
 
 int FoliageDispatcher::_sample_detail_foliage_index(
-    int32_t p_world_x_fixed, int32_t p_world_z_fixed) const {
+    int32_t p_atlas_x_fixed, int32_t p_atlas_z_fixed) const {
   if (terrain_data_.is_valid()) {
     return terrain_data_->get_detail_foliage_index_fixed(
-        p_world_x_fixed, p_world_z_fixed);
+        p_atlas_x_fixed, p_atlas_z_fixed);
   }
   if (detail_foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / 65536.0);
     return static_cast<int>(detail_foliage_sampler_.callv(arguments));
   }
   if (foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / 65536.0);
     return static_cast<int>(foliage_sampler_.callv(arguments));
   }
   if (colormap_source_.is_valid()) {
     return colormap_source_->get_detail_foliage_index_fixed(
-        p_world_x_fixed, p_world_z_fixed);
+        p_atlas_x_fixed, p_atlas_z_fixed);
   }
   return 0;
 }
@@ -1761,7 +1861,13 @@ void FoliageDispatcher::_compile_and_apply(
 
   const opennova::renderer::FoliageDrawList &draw_list =
       compiler_.compile(p_view, _world_samplers(), expansion);
+  _refresh_model_meshes();
   _apply_draw_list(draw_list);
+  if (is_visible_in_tree()) {
+    mask_pass_.publish(this, draw_list, compiler_, fd_textures_);
+  } else {
+    mask_pass_.clear();
+  }
 }
 
 Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
@@ -1828,19 +1934,19 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
 
 void FoliageDispatcher::_apply_draw_list(
     const opennova::renderer::FoliageDrawList &p_draw_list) {
-  // 1) Upload every mesh the compiler built this frame (empty builds cache an
-  // empty entry so repeated submissions of a barren identity stay cheap).
+  // 1) Upload every detail mesh the compiler built this frame (empty builds
+  // cache an empty entry so repeated submissions of a barren identity stay
+  // cheap). The MODEL tier draws the slots' normalized meshes, instanced.
   for (const opennova::renderer::FoliageMeshBuild &build : p_draw_list.mesh_builds) {
+    if (build.tier != opennova::renderer::FoliageTier::Detail) {
+      continue;
+    }
     CachedMesh entry;
     entry.mesh = _upload_mesh_build(p_draw_list, build);
     entry.instances = build.instance_count;
     entry.vertices = static_cast<int64_t>(build.vertex_count);
-    const MeshCacheKey key{build.slot, build.cell_key, build.revision};
-    if (build.tier == opennova::renderer::FoliageTier::Detail) {
-      detail_mesh_cache_[key] = std::move(entry);
-    } else {
-      model_mesh_cache_[key] = std::move(entry);
-    }
+    detail_mesh_cache_[MeshCacheKey{build.slot, build.cell_key, build.revision}] =
+        std::move(entry);
   }
 
   // 2) Bind the draw list's draw commands onto the pools, in draw-list order.
@@ -1854,19 +1960,58 @@ void FoliageDispatcher::_apply_draw_list(
   size_t detail_draw_index = 0;
   size_t model_draw_index = 0;
   int64_t draw_order = 0;
+  PackedFloat32Array model_buffer;
   for (const opennova::renderer::FoliageDrawCommand &command : p_draw_list.commands) {
     const int slot = command.slot;
     if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
       continue;
     }
-    const MeshCacheKey key{command.slot, command.cell_key, command.revision};
     const bool detail = command.tier == opennova::renderer::FoliageTier::Detail;
-    auto &cache = detail ? detail_mesh_cache_ : model_mesh_cache_;
-    const auto found = cache.find(key);
-    if (found == cache.end() || found->second.mesh.is_null()) {
+    Ref<Mesh> mesh;
+    if (detail) {
+      const auto found = detail_mesh_cache_.find(
+          MeshCacheKey{command.slot, command.cell_key, command.revision});
+      if (found != detail_mesh_cache_.end()) {
+        mesh = found->second.mesh;
+      }
+    } else {
+      mesh = model_meshes_[static_cast<size_t>(slot)];
+    }
+    if (mesh.is_null()) {
       // The compiler only commands identities it built or knows resident; a
       // miss means the applier's cache went out of sync with the draw_list.
       continue;
+    }
+    // A detail patch borrows its t1 from the terrain page the point lookup
+    // finds for it; a patch with no resident page is not drawn at all (the
+    // lookup's null result skips the patch's slot draw), so under a Terrain
+    // there is no cold fallback. Only a terrain-less preview draws through
+    // the analytic colormap. Retail Foliage_RenderDetailPatches: the lookup
+    // Terrain_FindSectorPatchRT @ 0x60a1de, the null skip @ 0x60a1e6..0x60a1e8
+    // to the slot loop's next iteration @ 0x60a6a2.
+    bool page_ready = false;
+    float page_layer = 0.0f;
+    Vector4 page_projection;
+    if (detail && terrain_ != nullptr) {
+      const Vector2 center = foliage_detail_cell_center(command.cell_key);
+      const std::optional<opennova::TerrainTilePageBinding> page =
+          terrain_->get_tile_cache_binding_for_world_point_native(
+              static_cast<float>(center.x), static_cast<float>(center.y));
+      if (page.has_value() && page->ready) {
+        const std::optional<opennova::TerrainTilePageProjection> projection =
+            opennova::TerrainTileCompositionCache::page_projection(page->page);
+        if (projection.has_value()) {
+          page_ready = true;
+          page_layer = static_cast<float>(page->layer);
+          page_projection = Vector4(projection->world_origin_x,
+                                    projection->world_origin_z,
+                                    projection->inverse_world_span,
+                                    projection->world_span);
+        }
+      }
+      if (!page_ready) {
+        continue;
+      }
     }
 
     const size_t draw_index = detail ? detail_draw_index++ : model_draw_index++;
@@ -1877,9 +2022,9 @@ void FoliageDispatcher::_apply_draw_list(
     }
     const RID draw = detail
                          ? _ensure_draw_instance(server, detail_draw_pool_,
-                                                 stamps, draw_index)
+                                                 stamps, draw_index, false)
                          : _ensure_draw_instance(server, model_draw_pool_,
-                                                 stamps, draw_index);
+                                                 stamps, draw_index, true);
     if (!draw.is_valid()) {
       continue;
     }
@@ -1888,26 +2033,71 @@ void FoliageDispatcher::_apply_draw_list(
     // portable compiler clock advanced reach the server as uniform writes.
     DrawInstanceStamp &stamp = stamps[draw_index];
     const bool fresh = !stamp.bound;
-    const Ref<Mesh> mesh = found->second.mesh;
-    if (fresh || stamp.mesh != mesh) {
-      server->instance_set_base(draw, mesh->get_rid());
-      ++frame_stats_.backend_base_writes;
-      stamp.mesh = mesh;
-    }
-    Ref<Material> material;
+    const size_t side = side_index(command.far_side);
+    Ref<ShaderMaterial> material;
     bool high = false;
     if (detail) {
       high = command.pass == opennova::foliage::DetailPass::HighAlphaTest;
-      material = high ? detail_high_materials_[slot]
-                      : detail_low_materials_[slot];
+      material = high ? detail_high_materials_[side][slot]
+                      : detail_low_materials_[side][slot];
+      if (fresh || stamp.mesh != mesh) {
+        server->instance_set_base(draw, mesh->get_rid());
+        ++frame_stats_.backend_base_writes;
+        stamp.mesh = mesh;
+      }
     } else {
-      material = silhouette_materials_[slot];
+      // The MultiMesh content: the slot mesh and this submission's blocks.
+      // A resident cache entry's blocks only change with its revision.
+      const RID multimesh = model_multimesh_pool_[draw_index];
+      if (fresh || stamp.mesh != mesh) {
+        server->multimesh_set_mesh(multimesh, mesh->get_rid());
+        ++frame_stats_.backend_base_writes;
+        stamp.mesh = mesh;
+      }
+      const int64_t instance_count = static_cast<int64_t>(command.instance_count);
+      if (fresh || stamp.slot != slot || stamp.cell_key != int64_t(command.cell_key) ||
+          stamp.revision != int64_t(command.revision) ||
+          stamp.instance_count != instance_count) {
+        model_buffer.resize(opennova::foliage::kModelTileInstanceCap *
+                            kModelInstanceFloats);
+        model_buffer.fill(0.0f);
+        const int64_t copied = std::min<int64_t>(
+            instance_count, opennova::foliage::kModelTileInstanceCap);
+        std::memcpy(model_buffer.ptrw(),
+                    p_draw_list.model_instances.data() + command.first_instance,
+                    static_cast<size_t>(copied) * sizeof(float) *
+                        kModelInstanceFloats);
+        server->multimesh_set_buffer(multimesh, model_buffer);
+        server->multimesh_set_visible_instances(multimesh,
+                                                static_cast<int32_t>(copied));
+        server->multimesh_set_custom_aabb(
+            multimesh,
+            AABB(Vector3(command.aabb_min[0], command.aabb_min[1],
+                         command.aabb_min[2]),
+                 Vector3(command.aabb_max[0] - command.aabb_min[0],
+                         command.aabb_max[1] - command.aabb_min[1],
+                         command.aabb_max[2] - command.aabb_min[2])));
+        frame_stats_.backend_configuration_writes += 3;
+        stamp.instance_count = instance_count;
+      }
+      material = silhouette_materials_[side][slot];
+    }
+    // The material of a side carries that side's ladder rung.
+    if (material.is_valid() &&
+        material->get_render_priority() != command.render_rung) {
+      material->set_render_priority(command.render_rung);
+      ++frame_stats_.backend_material_parameter_writes;
     }
     if (fresh || stamp.material != material) {
       server->instance_geometry_set_material_override(
           draw, material.is_valid() ? material->get_rid() : RID());
       ++frame_stats_.backend_material_writes;
       stamp.material = material;
+    }
+    if (fresh || stamp.sorting_offset != command.sorting_offset) {
+      server->instance_set_pivot_data(draw, command.sorting_offset, true);
+      ++frame_stats_.backend_configuration_writes;
+      stamp.sorting_offset = command.sorting_offset;
     }
     if (detail && (fresh || stamp.fade != command.fade)) {
       server->instance_geometry_set_shader_parameter(
@@ -1924,41 +2114,35 @@ void FoliageDispatcher::_apply_draw_list(
     if (detail && (fresh || stamp.high_pass_cutoff != command.high_pass_cutoff)) {
       // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
       // the cutoff discard keeps it off every texel the HIGH pass accepted.
-      // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912, see docs/foliage/foliage-re.md]
+      // [orig: Foliage_SetupDetailSlotDraw @ 0x6008fc..0x600912, see docs/foliage/foliage-re.md]
       server->instance_geometry_set_shader_parameter(
           draw, uniform.high_pass_cutoff, command.high_pass_cutoff);
       ++frame_stats_.backend_uniform_writes;
       stamp.high_pass_cutoff = command.high_pass_cutoff;
     }
-    if (fresh || stamp.wind_phase != command.wind_phase) {
+    if (detail && (fresh || stamp.wind_phase != command.wind_phase)) {
       server->instance_geometry_set_shader_parameter(
           draw, uniform.wind_phase, command.wind_phase);
       ++frame_stats_.backend_uniform_writes;
       stamp.wind_phase = command.wind_phase;
     }
+    if (!detail && (fresh || stamp.wind_offset != command.wind_offset)) {
+      server->instance_geometry_set_shader_parameter(
+          draw, uniform.wind_offset, command.wind_offset);
+      ++frame_stats_.backend_uniform_writes;
+      stamp.wind_offset = command.wind_offset;
+    }
+    if (detail && (fresh || stamp.wind_sector_origin_z !=
+                                command.wind_sector_origin_z)) {
+      server->instance_geometry_set_shader_parameter(
+          draw, uniform.wind_sector_origin_z, command.wind_sector_origin_z);
+      ++frame_stats_.backend_uniform_writes;
+      stamp.wind_sector_origin_z = command.wind_sector_origin_z;
+    }
     if (detail) {
-      bool ready = false;
-      float layer = 0.0f;
-      Vector4 projection_row;
-      if (terrain_ != nullptr) {
-        const Vector2 center = foliage_detail_cell_center(command.cell_key);
-        const std::optional<opennova::TerrainTilePageBinding> page =
-            terrain_->get_tile_cache_binding_for_world_point_native(
-                static_cast<float>(center.x), static_cast<float>(center.y));
-        if (page.has_value() && page->ready) {
-          const std::optional<opennova::TerrainTilePageProjection> projection =
-              opennova::TerrainTileCompositionCache::page_projection(
-                  page->page);
-          if (projection.has_value()) {
-            ready = true;
-            layer = static_cast<float>(page->layer);
-            projection_row = Vector4(projection->world_origin_x,
-                                     projection->world_origin_z,
-                                     projection->inverse_world_span,
-                                     projection->world_span);
-          }
-        }
-      }
+      const bool ready = page_ready;
+      const float layer = page_layer;
+      const Vector4 projection_row = page_projection;
       if (fresh || stamp.tile_cache_ready != ready) {
         server->instance_geometry_set_shader_parameter(
             draw, uniform.tile_cache_ready, ready);
@@ -1983,6 +2167,8 @@ void FoliageDispatcher::_apply_draw_list(
     stamp.cell_key = static_cast<int64_t>(command.cell_key);
     stamp.revision = static_cast<int64_t>(command.revision);
     stamp.slot = slot;
+    stamp.far_side = command.far_side;
+    stamp.render_rung = command.render_rung;
     stamp.pass = detail ? (high ? pass_name_high() : pass_name_low())
                         : pass_name_silhouette();
     stamp.bound = true;
@@ -1994,14 +2180,14 @@ void FoliageDispatcher::_apply_draw_list(
   }
   // Pool instances past this frame's command count held the previous frame's
   // draws: hide them once (they stay hidden until rebound).
-  _hide_pool_tail(detail_draw_pool_, detail_draw_stamps_, detail_draw_index);
-  _hide_pool_tail(model_draw_pool_, model_draw_stamps_, model_draw_index);
+  _hide_pool_tail(detail_draw_pool_, detail_draw_stamps_, detail_draw_index,
+                  false);
+  _hide_pool_tail(model_draw_pool_, model_draw_stamps_, model_draw_index, true);
 
   // 3) A regenerated identity may still have been submitted earlier in this
   // same draw_list. Draw instances retain its Ref<ArrayMesh>; remove cache ownership
   // only after every command has consumed the frame.
   _erase_cache_identities(p_draw_list.detail_evicted, detail_mesh_cache_);
-  _erase_cache_identities(p_draw_list.model_evicted, model_mesh_cache_);
 
   // 4) Mirror the draw list's debug counters into the stable stats surface.
   const opennova::renderer::FoliageFrameDebugCounters &debug = p_draw_list.debug;
@@ -2018,8 +2204,6 @@ void FoliageDispatcher::_apply_draw_list(
   frame_stats_.render_batches = debug.render_batches;
   frame_stats_.detail_mesh_hits = debug.detail_mesh_hits;
   frame_stats_.detail_mesh_uploads = debug.detail_mesh_uploads;
-  frame_stats_.model_mesh_hits = debug.model_mesh_hits;
-  frame_stats_.model_mesh_uploads = debug.model_mesh_uploads;
   const opennova::foliage::RuntimeStats &runtime_stats = debug.runtime;
   frame_stats_.detail_cache_hits =
       static_cast<int64_t>(runtime_stats.detail.hits);

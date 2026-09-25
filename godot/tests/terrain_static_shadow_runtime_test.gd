@@ -56,12 +56,16 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), caster_point), true)
 	terrain.set_static_shadow_placer(placer)
 
+	# Retail composes every visible page inside its frame's sweep: the second
+	# frame (the first whose page records are old enough to claim) composes and
+	# uploads the old receiver's pages, and no job outlives the frame.
+	terrain.render_frame()
 	terrain.render_frame()
 	var old_epoch := terrain.get_tile_cache_diagnostics()
-	assert_gt(int(old_epoch.get("pending_jobs", 0)), 0,
-			"the replacement must happen while old receiver jobs are outstanding")
-	assert_gt(int(old_epoch.get("active_jobs", 0)), 0,
-			"the replacement regression must cancel an executing receiver job, not only queued work")
+	assert_gt(int(old_epoch.get("frame_uploads", 0)), 0,
+			"the old receiver's pages compose before the frame draws")
+	assert_eq(int(old_epoch.get("pending_jobs", -1)), 0,
+			"no composition job outlives its frame")
 	var old_weak: WeakRef = weakref(old_data)
 	var replacement := TerrainData.new()
 	replacement.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
@@ -164,13 +168,15 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 		Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
 	terrain.set_static_shadow_placer(placer)
 
+	# Attaching the placer retires every page; the next frame recomposes every
+	# visible page with its static raster before the draw.
 	terrain.render_frame()
-	var queued_shadow := terrain.get_tile_cache_diagnostics()
-	assert_eq(int(queued_shadow["ready_pages"]), 0)
-	assert_gt(int(queued_shadow["pending_jobs"]), 0)
-	assert_eq(int(queued_shadow["frame_uploads"]), 0)
-	assert_eq(int(queued_shadow["shadow_epoch_raster_jobs"]), 0,
-			"static planning and rasterization must not complete inside request()")
+	var recomposed := terrain.get_tile_cache_diagnostics()
+	assert_gt(int(recomposed["ready_pages"]), 0)
+	assert_eq(int(recomposed["pending_jobs"]), 0)
+	assert_gt(int(recomposed["frame_uploads"]), 0)
+	assert_gt(int(recomposed["shadow_epoch_raster_jobs"]), 0,
+			"the static raster runs inside the frame that composes the page")
 	var diagnostics := await TestFs.settle_tile_cache(self, terrain)
 	assert_true(bool(diagnostics["shadow_raster_available"]))
 	assert_gt(int(diagnostics["shadow_raster_jobs"]), 0,
@@ -229,12 +235,8 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 			"sub-byte light movement must reuse resident composed output")
 		assert_eq(int(stable["frame_ready_hits"]), int(stable["frame_requests"]),
 			"a quantized-light cache-hit frame still proves current request coverage")
-		assert_gt(int(stable["frame_selected_ready_pages"]), 0,
-			"cache-hit coverage must identify currently selected ready pages")
 		assert_eq(int(stable["shadow_provider_frame_plan_compiles"]), 0,
 			"sub-quantum light movement must reuse cached page plans outright")
-		assert_eq(int(stable["shadow_provider_frame_receiver_cache_misses"]), 0,
-			"unchanged terrain must not rescan page receiver samples")
 		previous_raw_light = current_raw_light
 	assert_eq(environment.debug_set_mission_minute_of_day(9.0 * 60.0), OK)
 	assert_eq(environment.get_light_direction_render_tuple(), initial_raw_light,
@@ -277,6 +279,9 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	# (Material 0's uv_u_style 1 — the time/control-driven UV mutation — is
 	# the minimal_3di_gen ctest's pin on house_lod0_sine_rotx_uv1.)
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE_UV1)), OK)
+	# Retail samples casters only when a page composes: retire the pages
+	# spatially (the destroyed-entity walk) so they recompose with the change.
+	_retire_every_page(terrain)
 	var animated_uv := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(animated_uv["shadow_provider_epoch_plan_failures"]), 0,
 		"the shared runtime evaluator must keep dynamic projected-shadow UV exact")
@@ -290,14 +295,15 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_gt(int(animated_uv["shadow_provider_epoch_triangles"]), 0,
 		"the dynamically transformed material must still submit its silhouettes")
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE)), OK)
+	_retire_every_page(terrain)
 	var restored_material := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(restored_material["shadow_provider_epoch_plan_failures"]), 0,
 		"restoring a supported static material must make every page plan exact again")
 	assert_gt(int(restored_material["shadow_epoch_alpha_changed_bytes"]), 0)
 	assert_eq(int(restored_material["shadow_epoch_rgb_changed_bytes"]), 0)
 
-	# Force a fresh semantic epoch and prove the asynchronous rebuild converges
-	# to the identical canonical resident-page output.
+	# Force a fresh semantic epoch and prove the rebuild converges to the
+	# identical canonical resident-page output.
 	terrain.set_static_terrain_shadow_enabled(false)
 	terrain.set_static_terrain_shadow_enabled(true)
 	var fully_rebuilt_material := await TestFs.settle_tile_cache(self, terrain)
@@ -317,7 +323,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	terrain_data = null
 
 
-func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_serving() -> void:
+func test_caster_motion_waits_for_its_pages_to_recompose() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
@@ -354,10 +360,11 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	assert_gt(settled_ready_pages, 0)
 	assert_eq(int(settled["shadow_raster_failures"]), 0)
 
-	# Move only the second caster. The bump must localize: pages the mover
-	# never touched stay exact hits, its own pages keep serving their last-
-	# published payload (stale) while the replacement composes, and the
-	# resident set never collapses to the fallback shader path.
+	# Move only the second caster. Retail keys pages spatially and samples the
+	# casters when a page composes, so the move alone recomposes nothing: every
+	# page keeps serving as composed until its record is claimed again,
+	# refreshed by the TOD epoch, or retired spatially.
+	# (retail PolyTrn_RenderTile hit compare @ 0x60DAC0..0x60DAD1)
 	mover_origin.x += 8.0
 	mover_origin.y = terrain_data.get_height_world(mover_origin)
 	placer.register_static_instance(101, "house", 1,
@@ -366,25 +373,32 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	var moved := terrain.get_tile_cache_diagnostics()
 	assert_eq(int(moved["ready_pages"]), settled_ready_pages,
 		"a moved caster must not collapse the resident page set")
-	assert_gt(int(moved["frame_compose_jobs"]), 0,
-		"the mover's own footprint pages must recompose")
-	assert_lt(int(moved["frame_compose_jobs"]), int(moved["frame_requests"]),
-		"pages the mover never touched must stay exact hits, not recompose")
-	assert_eq(int(moved["frame_ready_hits"]) + int(moved["frame_stale_hits"]),
-			int(moved["frame_requests"]),
-		"every request must be served — exact or stale — during a caster move")
-	assert_gt(int(moved["frame_stale_hits"]), 0,
-		"the mover's re-targeted pages must keep serving their published payload")
+	assert_eq(int(moved["frame_compose_jobs"]), 0,
+		"a caster move alone recomposes no page")
+	assert_eq(int(moved["frame_ready_hits"]), int(moved["frame_requests"]))
+	assert_eq(int(moved["resident_output_hash"]), settled_hash)
 
+	# The spatial walk over the mover's footprint (a destroyed entity or a
+	# scorch) retires exactly the pages it touches; they recompose that frame
+	# with the moved silhouette while the others stay exact hits.
+	var reach := 32
+	var retired: int = terrain.invalidate_tile_cache_region(
+			(int(mover_origin.x) - reach) << 16, (int(mover_origin.z) - reach) << 16,
+			(int(mover_origin.x) + reach) << 16, (int(mover_origin.z) + reach) << 16)
+	assert_gt(retired, 0, "the mover's footprint overlaps resident pages")
+	terrain.render_frame()
+	var refreshed := terrain.get_tile_cache_diagnostics()
+	assert_eq(int(refreshed["frame_compose_jobs"]), retired,
+		"exactly the retired pages recompose")
+	assert_lt(int(refreshed["frame_compose_jobs"]), int(refreshed["frame_requests"]),
+		"pages outside the footprint stay exact hits")
 	var resettled := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(resettled["shadow_raster_failures"]), 0)
-	assert_eq(int(resettled["frame_stale_hits"]), 0,
-		"a settled cache serves no stale payloads")
 	assert_ne(int(resettled["resident_output_hash"]), settled_hash,
 		"the moved silhouette must change the stable CPU page aggregate")
 
-	# Epoch-neutral still frames: nothing moved, so nothing may recompose and
-	# the provider's source revision must hold.
+	# Still frames: nothing moved, so nothing may recompose and the provider's
+	# source revision must hold.
 	var still_revision := int(resettled["shadow_provider_source_revision"])
 	for _frame in 3:
 		terrain.render_frame()
@@ -392,7 +406,6 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 		var still := terrain.get_tile_cache_diagnostics()
 		assert_eq(int(still["frame_compose_jobs"]), 0,
 			"an unchanged world must not recompose any page")
-		assert_eq(int(still["frame_stale_hits"]), 0)
 		assert_eq(int(still["frame_ready_hits"]), int(still["frame_requests"]))
 		assert_eq(int(still["shadow_provider_source_revision"]), still_revision,
 			"still frames must not bump the placer's shadow source revision")
@@ -531,6 +544,12 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 	object_data = null
 	resource_root = null
 	terrain_data = null
+
+
+# Retires every cached page (the destroyed-entity walk over the whole map) so
+# the next frame recomposes them from the current casters.
+static func _retire_every_page(terrain: Terrain) -> void:
+	terrain.invalidate_tile_cache_region(-(1 << 30), -(1 << 30), 1 << 30, 1 << 30)
 
 
 # Material 0's evaluated constant alpha at t = 0 with no controls (the

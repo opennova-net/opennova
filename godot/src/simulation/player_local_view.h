@@ -57,6 +57,10 @@ public:
 	bool get_suppress_view_bias() const { return value_.suppress_view_bias; }
 	// A Scoped/Sighted weapon at full raise shows its SIGHTS rows instead of the viewmodel.
 	bool get_scope_card_active() const { return value_.scope_card_active; }
+	bool get_fp_local_dead() const { return value_.fp_local_dead; }
+	bool get_fp_round_winner_set() const { return value_.fp_round_winner_set; }
+	bool get_fp_def_emplaced() const { return value_.fp_def_emplaced; }
+	bool get_fp_inset_scoped() const { return value_.fp_inset_scoped; }
 	bool get_binoculars_requested() const { return value_.binoculars_requested; }
 	bool get_binoculars_raised() const { return value_.binoculars_raised; }
 	bool get_binoculars_view_active() const { return value_.binoculars_view_active; }
@@ -65,6 +69,9 @@ public:
 	bool get_nvg_active() const { return value_.nvg_active; }
 	bool get_nvg_visible() const { return value_.nvg_visible; }
 	int get_nvg_gain() const { return value_.nvg_gain; }
+	bool get_nvg_mask_visible() const { return value_.nvg_mask_visible; }
+	bool get_nvg_lens_active() const { return value_.nvg_lens_active; }
+	bool get_nvg_sights_in_scene() const { return value_.nvg_sights_in_scene; }
 	// The thermal-imaging view's two gates (the engine struct carries the
 	// witnesses): the world block / fog / clear latch, and the terrain-ramp gate.
 	bool get_thermal_view() const { return value_.thermal_view; }

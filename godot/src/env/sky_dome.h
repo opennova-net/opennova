@@ -22,9 +22,11 @@ class Weather;
 // the Y-only height scale + anisotropic normals live in the vertex shader,
 // so height changes never rebuild — env #20's ratified fold; retail re-bakes
 // per smoothed-height change). This node keeps only device work: the
-// ArrayMesh/ShaderMaterial ownership, per-frame shader-parameter pushes from
+// ArrayMesh/ShaderMaterial ownership (the gradient pass and its cloud-pass
+// next_pass on the sky-cloud rung), per-frame shader-parameter pushes from
 // the typed SkyFrameState, the camera-anchored dome position, change-detected
-// cloud Texture2D binds, and the owner-supplied BG_COLOR Environment mirror.
+// cloud Texture2D binds, the per-scene-pass draw gates, and the
+// owner-supplied BG_COLOR Environment mirror.
 // Ported from sky.gd (2026-08-10 de-scripting); RE record:
 // docs/env/env-tod-re.md.
 class SkyDome : public Node3D {
@@ -53,7 +55,17 @@ public:
 	// The below-rim clear mirror used by the runtime environment pass.
 	void sync_frame_clear_color();
 	Ref<ShaderMaterial> get_sky_material() const { return sky_material_; }
+	// The cloud pass (dome pass 2) rides the gradient material's next_pass
+	// while the environment authors cloud layers on the shader path.
+	Ref<ShaderMaterial> get_cloud_material() const { return cloud_material_; }
 	MeshInstance3D *get_mesh_instance() const { return mesh_instance_; }
+
+	// Which scene passes draw the dome this frame: the main frame's sky
+	// bracket and the water mirror's own (OcclusionFrame owns the gates;
+	// renderer/scene_pass_gates.h carries the witnesses).
+	void set_pass_gates(bool p_beauty_drawn, bool p_mirror_drawn);
+	bool is_beauty_pass_drawn() const { return beauty_pass_drawn_; }
+	bool is_mirror_pass_drawn() const { return mirror_pass_drawn_; }
 
 	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
@@ -68,13 +80,22 @@ private:
 	MissionEnvironment *_env_node();
 	Weather *_weather_node();
 	void _update_cloud_textures(MissionEnvironment *p_env);
+	// One uniform onto both dome passes (the shared sky.gdshaderinc stage).
+	void _set_dome_parameter(const StringName &p_name, const Variant &p_value);
+	// Attach or drop the cloud pass: the shader path with a bound layer.
+	void _apply_cloud_pass(bool p_drawn);
 
 	NodePath environment_path_;
 	NodePath weather_path_;
 	Ref<Environment> frame_clear_environment_;
 	MeshInstance3D *mesh_instance_ = nullptr;
 	Ref<ShaderMaterial> sky_material_;
+	Ref<ShaderMaterial> cloud_material_;
 	bool built_ = false;
+	bool has_clouds_ = false;
+	bool flat_pass_ = false;
+	bool beauty_pass_drawn_ = true;
+	bool mirror_pass_drawn_ = true;
 	Ref<Texture2D> bound_cloud_tex1_;
 	Ref<Texture2D> bound_cloud_tex2_;
 	ObjectID env_node_id_;

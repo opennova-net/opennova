@@ -111,7 +111,6 @@ add_library(opennova_formats STATIC
     # til — terrain tiles
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_io.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_foliage_blocker.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/til/til_overlay_bake.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_tsd.cpp
     # trn — terrain config
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/trn_io.cpp

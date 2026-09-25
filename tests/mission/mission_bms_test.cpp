@@ -637,6 +637,9 @@ int main() {
 		TEST_EXPECT(opennova::bms::parse_header_blob(blob.data(), blob.size(), wire_doc.header, err));
 		TEST_EXPECT(mission_info(wire_doc).terrain == "G11");
 		TEST_EXPECT(mission_info(wire_doc).environment == "FULL_07");
+		// The tile-set name keeps its authored extension; the terrain loader
+		// replaces it (formats/trn trn_mission_tilestrip).
+		TEST_EXPECT(mission_info(wire_doc).tile_set == "TRNTILEA1.TGA");
 	}
 
 	// --- Phase 1: hidden entity fields (name1/name2/no_less_than/map_symbol) round-trip,

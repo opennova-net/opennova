@@ -327,6 +327,98 @@ void check_shading_constants_are_engine_homed() {
 
 } // namespace
 
+void check_mip_ceilings_pack_both_stages() {
+	// 256x256 pixel-built Diffuse1 ends at level 6, a DDS detail has no
+	// ceiling; both survive one push float. [orig:
+	// GTexture_CreateFromPixelData_0 @ 0x6877BC..0x6877D8]
+	const float packed = q3_pack_mip_ceilings(6.0f, kQ3NoMipCeiling);
+	CHECK(q3_unpack_mip_ceiling(packed, 0) == 6.0f);
+	CHECK(q3_unpack_mip_ceiling(packed, 1) == kQ3NoMipCeiling);
+	const float both = q3_pack_mip_ceilings(0.0f, 14.0f);
+	CHECK(q3_unpack_mip_ceiling(both, 0) == 0.0f);
+	CHECK(q3_unpack_mip_ceiling(both, 1) == 14.0f);
+	CHECK(q3_unpack_mip_ceiling(q3_pack_mip_ceilings(-1.0f, 15.0f), 0) == kQ3NoMipCeiling);
+	const Q3ObjectMaterialParameters defaults{};
+	CHECK(defaults.diffuse_max_lod == kQ3NoMipCeiling);
+	CHECK(defaults.detail_max_lod == kQ3NoMipCeiling);
+}
+
+void check_emissive_copies_saturate_colour_times_gain() {
+	// SELFLUM / glass emissive: sat(colour x gain) x 2, so a gain above 1
+	// lifts a sub-1 colour (0.25 x 2 -> 1.0, 0.1 x 4 -> 0.8) instead of being
+	// clipped alone. [orig: _FFP.fx SELFLUM; Glass.fx TGlassFFP;
+	// apply_shader_parameters @ 0x58E050..0x58E06A]
+	const std::array<float, 3> doubled =
+			q3_emissive_modulate2x({0.25f, 0.1f, 0.6f, 1.0f}, {2.0f, 4.0f, 2.0f});
+	CHECK(std::fabs(doubled[0] - 1.0f) < 1.0e-6f);
+	CHECK(std::fabs(doubled[1] - 0.8f) < 1.0e-6f);
+	CHECK(std::fabs(doubled[2] - 2.0f) < 1.0e-6f);
+	const std::array<float, 3> dim =
+			q3_emissive_modulate2x({0.5f, 0.5f, 0.5f, 1.0f}, {0.5f, 1.0f, 0.0f});
+	CHECK(std::fabs(dim[0] - 0.5f) < 1.0e-6f);
+	CHECK(std::fabs(dim[1] - 1.0f) < 1.0e-6f);
+	CHECK(dim[2] == 0.0f);
+	// The disc/glow bloom copies take the same emissive: at the 06:30 03TR
+	// gain of 19/16 the glare's grey SelfLumColor is lifted, not clipped to
+	// the gain-free colour (the earlier SelfLum x min(gain, 1) x 2).
+	Q3CelestialMaterialParameters glare;
+	glare.self_lum = {0.2f, 0.24f, 0.9f};
+	const std::array<float, 3> glow =
+			q3_celestial_emissive(glare, {1.1875f, 1.1875f, 1.1875f});
+	CHECK(std::fabs(glow[0] - 0.2f * 1.1875f * 2.0f) < 1.0e-6f);
+	CHECK(std::fabs(glow[1] - 0.24f * 1.1875f * 2.0f) < 1.0e-6f);
+	CHECK(std::fabs(glow[2] - 2.0f) < 1.0e-6f);
+}
+
+// The bloom pass's disc and glow keep a fragment where retail's LESSEQUAL
+// holds between the far band and the beauty depth written through the scene
+// viewport [orig: Render_SetViewportFarDepth @ 0x58a840; Render_SetViewport
+// @ 0x58a720]. The reverse-Z scale must reproduce that test for any beauty
+// camera near plane sharing the scene far plane.
+void check_far_band_matches_the_retail_depth_test() {
+	CHECK(kQ3SceneViewportMaxZ == 0.99996948f);
+	const double far_plane = 701.0; // scene_far_plane(700 u fog)
+	const double retail_near = 0.2;  // g_ProjectionNearZ
+	const auto retail_depth = [&](double x) {
+		return far_plane / (far_plane - retail_near) * (1.0 - retail_near / x);
+	};
+	const auto retail_keeps = [&](double w, double d) {
+		return kQ3FarBandMinZ + (double(kQ3FarBandMaxZ) - kQ3FarBandMinZ) *
+						retail_depth(w) <=
+				double(kQ3SceneViewportMaxZ) * retail_depth(d);
+	};
+	for (const double camera_near : {0.05, 0.2, 1.0}) {
+		const auto reverse = [&](double x) {
+			return camera_near * (far_plane - x) / (x * (far_plane - camera_near));
+		};
+		int disagreements = 0;
+		for (double w = 30.0; w <= 64.0; w += 2.0) {
+			for (double d = 1.0; d < far_plane; d += 1.5) {
+				const double band = q3_far_band_reverse_z(float(reverse(w)));
+				const bool kept = band >= reverse(d);
+				// float rounding of the band may flip the pixel sitting on the
+				// threshold itself; nothing else may differ.
+				const double threshold = double(kQ3SceneViewportMaxZ) /
+						(kQ3FarBandMinZ / far_plane +
+								(double(kQ3FarBandMaxZ) - kQ3FarBandMinZ) / w);
+				if (kept != retail_keeps(w, d) && std::fabs(d - threshold) > 1.0)
+					++disagreements;
+			}
+		}
+		CHECK(disagreements == 0);
+	}
+	// The 03TR 06:30 pose: a disc 60 u deep behind terrain 490 u out stays
+	// hidden (retail's threshold is ~577 u), and shows over 650 u terrain and
+	// cleared sky. The former [1 - MaxZ, 1 - MinZ] remap kept it from ~427 u.
+	const auto reverse_godot = [&](double x) {
+		return 0.05 * (far_plane - x) / (x * (far_plane - 0.05));
+	};
+	const double disc = q3_far_band_reverse_z(float(reverse_godot(60.0)));
+	CHECK(!retail_keeps(60.0, 490.0) && disc < reverse_godot(490.0));
+	CHECK(retail_keeps(60.0, 650.0) && disc >= reverse_godot(650.0));
+	CHECK(disc >= 0.0);
+}
+
 int main() {
 	check_shading_constants_are_engine_homed();
 	check_technique_derivation_and_ordering();
@@ -335,6 +427,9 @@ int main() {
 	check_object_blend_and_coverage_contracts();
 	check_multitexture_detail_contract();
 	check_stale_geometry_leases_are_rejected();
+	check_emissive_copies_saturate_colour_times_gain();
+	check_mip_ceilings_pack_both_stages();
+	check_far_band_matches_the_retail_depth_test();
 
 	if (failures != 0) {
 		std::printf("renderer_q3_frame: %d failure(s)\n", failures);

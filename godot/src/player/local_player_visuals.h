@@ -18,6 +18,7 @@
 #include "player/first_person_arms_witness.h"
 #include "player/player_spawn_loadout.h"
 #include "player/player_viewmodel_def.h"
+#include "simulation/person_overlay_models.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
 #include "simulation/player_weapon_view.h"
@@ -82,6 +83,12 @@ public:
 	// [orig: BoneCallback_org0_World draw 5 @0x4e3c87..0x4e3d99; model =
 	//  WeaponDef.tpModel (+0x170, weapon.def gfx3) @0x4e3cd3]
 	ObjectModel *build_local_player_held_weapon(const String &p_graphic);
+	// The local avatar's item overlays (canopy, goggles, binoculars, carried
+	// object) build and parent exactly like its held weapon: world siblings of
+	// the avatar through the mission placer.
+	void present_local_player_person_overlays(PersonOverlayModels &p_overlays,
+			const opennova::world::PersonOverlays &p_state, ObjectModel *p_avatar,
+			PersonOverlayModels::Presentation p_presentation);
 	// Build a GameWorld-managed avatar model for the local player (which has
 	// no BMS placement of its own). The caller (LocalPlayerPresenter)
 	// positions it and swaps its visual/shadow policy per first/third person.

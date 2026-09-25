@@ -38,8 +38,8 @@ struct SlotCaptureRequest {
 	int order = 0;
 	// renderer::slot_texture_size(order, detail): the square target side.
 	int size = 0;
-	// The capture pose (renderer::silhouette_capture_basis columns, the eye
-	// backed off along -forward by renderer::silhouette_capture_eye) and the
+	// The capture pose (renderer::slot_capture_view_axes columns, the eye
+	// backed off from the entity origin along -forward) and the
 	// orthographic projection of half-extent renderer::silhouette_half_extent;
 	// the adapter applies the RenderingDevice depth correction itself.
 	Transform3D view;

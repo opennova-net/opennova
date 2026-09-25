@@ -86,25 +86,32 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
 		} else {
 			const uint16_t phase16 = channel_phase16(ch, time_units16);
 			if (mode == 0x10) {
-				// time scroll: translate = phase/65536, type 16 = +, 17 = -
-				// [orig: @ 0x5b19f5..0x5b1a34]
-				t.m00 = 1.0f;
+				// time scroll: translate = phase/65536, type 16 = +, 17 = -.
+				// Any other 0x1X type writes nothing, so its diagonal stays
+				// at the memset zero [orig: compute_uv_transform_matrix
+				// @ 0x5b19fb..0x5b1a49; unauthored types @ 0x5b1a27..0x5b1a2d]
 				const double v = static_cast<double>(phase16) * kInv65536;
-				if (ch.type == 16)
+				if (ch.type == 16) {
+					t.m00 = 1.0f;
 					t.m20 = static_cast<float>(v);
-				else if (ch.type == 17)
+				} else if (ch.type == 17) {
+					t.m00 = 1.0f;
 					t.m20 = static_cast<float>(-v);
+				}
 			} else if (mode == 0x20) {
 				// rotation about UV center, angle = phase * 2pi/65536,
-				// type 32 = +, 33 = - [orig: @ 0x5b1a45..0x5b1ad2]
+				// type 32 = +, 33 = -; any other 0x2X type writes nothing
+				// [orig: compute_uv_transform_matrix @ 0x5b1a4e..0x5b1ab4;
+				// unauthored types @ 0x5b1a84..0x5b1a86]
 				const double a = static_cast<double>(phase16) * kTwoPiOver65536;
 				const double c = std::cos(a);
 				const double s = std::sin(a);
-				t.m00 = static_cast<float>(c);
 				if (ch.type == 32) {
+					t.m00 = static_cast<float>(c);
 					t.m10 = static_cast<float>(s);
 					t.m20 = static_cast<float>(0.5 - (c + s) * 0.5);
 				} else if (ch.type == 33) {
+					t.m00 = static_cast<float>(c);
 					t.m10 = static_cast<float>(-s);
 					t.m20 = static_cast<float>(0.5 - (c - s) * 0.5);
 				}
@@ -158,23 +165,28 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
 		} else {
 			const uint16_t phase16 = channel_phase16(ch, time_units16);
 			if (mode == 0x10) {
-				// [orig: @ 0x5b1d4a..0x5b1d9d]
-				t.m11 = 1.0f;
+				// Only 16/17 write the V row [orig: compute_uv_transform_matrix
+				// @ 0x5b1c60..0x5b1cb2; unauthored types @ 0x5b1c88..0x5b1c8b]
 				const double v = static_cast<double>(phase16) * kInv65536;
-				if (ch.type == 16)
+				if (ch.type == 16) {
+					t.m11 = 1.0f;
 					t.m21 = static_cast<float>(v);
-				else if (ch.type == 17)
+				} else if (ch.type == 17) {
+					t.m11 = 1.0f;
 					t.m21 = static_cast<float>(-v);
+				}
 			} else if (mode == 0x20) {
-				// [orig: @ 0x5b1f0a..0x5b1f7f]
+				// Only 32/33 rotate the V row [orig: compute_uv_transform_matrix
+				// @ 0x5b1cb8..0x5b1d0b; unauthored types @ 0x5b1ccd..0x5b1cd0]
 				const double a = static_cast<double>(phase16) * kTwoPiOver65536;
 				const double c = std::cos(a);
 				const double s = std::sin(a);
-				t.m11 = static_cast<float>(c);
 				if (ch.type == 32) {
+					t.m11 = static_cast<float>(c);
 					t.m01 = static_cast<float>(-s);
 					t.m21 = static_cast<float>(0.5 - (c - s) * 0.5);
 				} else if (ch.type == 33) {
+					t.m11 = static_cast<float>(c);
 					t.m01 = static_cast<float>(s);
 					t.m21 = static_cast<float>(0.5 - (s + c) * 0.5);
 				}

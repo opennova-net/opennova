@@ -3,6 +3,7 @@
 #include <base/io/fixed.h>
 #include <runtime/inmatch/client_replica_present.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/person_overlays.h>
 
 #include <algorithm>
 
@@ -223,6 +224,30 @@ void project_client_replica_present_row(
 				(entity.state_flags & world::kEntityFlagDead) != 0,
 				inputs, weapon_hold_state);
 	}
+	// The body's item overlays from the decoded state: the wire flags byte
+	// (entity+0x24's low byte; bits 2-4 are the sender's own view flags), the
+	// replica's canopy words and the carry relation.
+	// [orig: BoneCallback_org0_World @0x4e3940]
+	world::PersonOverlayInputs overlay_inputs;
+	overlay_inputs.flags = entity.state_flags;
+	overlay_inputs.pose = inputs;
+	overlay_inputs.chute = entity.rm_parachute;
+	if (context.carried_types != nullptr) {
+		const auto it = context.carried_types->find(entity.handle);
+		if (it != context.carried_types->end()) overlay_inputs.carried_type_id = it->second;
+	}
+	world::write_present_person_overlays(row, world::person_overlays(overlay_inputs));
+}
+
+std::unordered_map<uint16_t, uint16_t> carried_object_types_by_carrier(
+		const replication::ClientState &state) {
+	std::unordered_map<uint16_t, uint16_t> out;
+	for (const replication::ClientEntityState &row : state.entities) {
+		if (row.type_id != 4091 && row.type_id != 4093 && row.type_id != 4095) continue;
+		if (row.parent_handle == wire_handle::kInvalid) continue;
+		out[row.parent_handle] = row.type_id;
+	}
+	return out;
 }
 
 } // namespace opennova::inmatch

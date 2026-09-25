@@ -12,25 +12,10 @@
 namespace godot {
 
 void SunShadow::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_projection_mode", "mode"),
-			&SunShadow::set_projection_mode);
-	ClassDB::bind_method(D_METHOD("get_projection_mode"),
-			&SunShadow::get_projection_mode);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "projection_mode",
-						 PROPERTY_HINT_ENUM, "Dynamic,Static Terrain"),
-			"set_projection_mode", "get_projection_mode");
 	ClassDB::bind_method(D_METHOD("set_environment_node", "environment"),
 			&SunShadow::set_environment_node);
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&SunShadow::advance_frame);
-
-	BIND_ENUM_CONSTANT(PROJECTION_DYNAMIC);
-	BIND_ENUM_CONSTANT(PROJECTION_STATIC_TERRAIN);
-}
-
-void SunShadow::set_projection_mode(ProjectionMode p_mode) {
-	projection_mode_ = p_mode;
-	_apply_projection_masks();
 }
 
 void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
@@ -42,55 +27,30 @@ void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
 }
 
 void SunShadow::_ready() {
-	// The light's OWN visual layer decides which views render it - and
-	// therefore which views re-render the directional shadow
-	// atlas. The beauty camera (0x78C01) and the water mirror (0x8001) need
-	// it. Focused Q3 attaches resolved beauty depth and renders only typed
-	// self-lit draws, so it never submits this Light3D or pays another shadow
-	// atlas render. TERRAIN_SHADOW_RECEIVER (bit 15) is in exactly the beauty
-	// and mirror camera masks, so the light lives there.
+	// The light's OWN visual layer decides which views render it: the beauty
+	// camera (0x78C01) and the water mirror (0x8001). Focused Q3 attaches
+	// resolved beauty depth and renders only typed self-lit draws, so it never
+	// submits this Light3D. TERRAIN_SHADOW_RECEIVER (bit 15) is in exactly the
+	// beauty and mirror camera masks, so the light lives there.
 	set_layer_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
-	// One-time Godot shadow-map quality tuning (device knobs, not witnessed
-	// retail constants).
-	set_shadow(true);
-	set_param(Light3D::PARAM_SHADOW_MAX_DISTANCE, 192.0f);
-	set_shadow_mode(DirectionalLight3D::SHADOW_PARALLEL_4_SPLITS);
-	set_param(Light3D::PARAM_SHADOW_FADE_START, 0.95f);
-	set_blend_splits(true);
-	set_param(Light3D::PARAM_SHADOW_BIAS, 0.02f);
-	set_param(Light3D::PARAM_SHADOW_NORMAL_BIAS, 0.2f);
 	set_param(Light3D::PARAM_SIZE, 0.0f);
 	set_param(Light3D::PARAM_ENERGY, 1.0f);
 	set_param(Light3D::PARAM_SPECULAR, 0.0f);
 	set_param(Light3D::PARAM_INDIRECT_ENERGY, 0.0f);
 	set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
-	_apply_projection_masks();
+	// The dynamic receiver/caster mask pair over the Water visual-layer
+	// allocation (the mask VALUES are device plumbing; the pairing is the
+	// witnessed list taxonomy, docs/render/render-lighting-re.md): receivers
+	// on both world-entity layers plus the hidden FP body, casters on the
+	// dynamic layer. No shadow map: the SlotShadow capture pipeline renders
+	// the live entity ground shadows (retail's per-slot RT + terrain drape)
+	// and the tile composer the static ones.
+	set_cull_mask(Water::VISUAL_LAYER_WORLD |
+			Water::VISUAL_LAYER_WORLD_NO_MIRROR |
+			Water::VISUAL_LAYER_FP_BODY_SHADOW_ONLY);
+	set_shadow_caster_mask(Water::VISUAL_LAYER_DYNAMIC_SHADOW_CASTER);
+	set_shadow(false);
 	_update_direction();
-}
-
-// The retail two-list split as Godot mask pairs: receivers via
-// light_cull_mask, casters via shadow_caster_mask, both over the Water
-// visual-layer allocation. The mask VALUES are device plumbing; the pairing
-// policy they encode is the witnessed list taxonomy
-// (docs/render/render-lighting-re.md).
-void SunShadow::_apply_projection_masks() {
-	if (projection_mode_ == PROJECTION_STATIC_TERRAIN) {
-		set_cull_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
-		set_shadow_caster_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
-		set_shadow(true);
-	} else {
-		// Receivers: both world-entity layers plus the hidden FP body (its
-		// silhouette must land on the world the player sees).
-		set_cull_mask(Water::VISUAL_LAYER_WORLD |
-				Water::VISUAL_LAYER_WORLD_NO_MIRROR |
-				Water::VISUAL_LAYER_FP_BODY_SHADOW_ONLY);
-		set_shadow_caster_mask(Water::VISUAL_LAYER_DYNAMIC_SHADOW_CASTER);
-		// The SlotShadow capture pipeline renders the live entity ground
-		// shadows (retail's per-slot RT + terrain drape, see
-		// docs/render/render-lighting-re.md); the dynamic light keeps the
-		// direction law but does not allocate a second shadow map.
-		set_shadow(false);
-	}
 }
 
 void SunShadow::advance_frame(double p_delta) {
@@ -124,8 +84,8 @@ void SunShadow::_update_direction() {
 	// three; opennova::renderer::slot_projection_direction is the one owner of that
 	// law — see docs/render/render-lighting-re.md]. A DirectionalLight3D
 	// emits along local -Z, so emission is that negated form. The SlotShadow
-	// capture pipeline owns the entity ground shadows; this light remains
-	// the direction-law reference and the static-terrain bake device.
+	// capture pipeline owns the entity ground shadows and the tile composer
+	// the static ones; this light remains the direction-law reference.
 	const std::array<float, 3> slot_dir = opennova::renderer::slot_projection_direction(
 			{ float(light_tuple.x), float(light_tuple.y), float(light_tuple.z) });
 	const Vector3 emission =

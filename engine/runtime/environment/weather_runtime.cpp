@@ -481,12 +481,6 @@ float WeatherRuntime::cloud_uv_rate_per_second() const {
 	return opennova::env::cloud_uv_rate_per_second(state_->core.cloud_scroll);
 }
 
-WaterUvState WeatherRuntime::water_uv_state(float cam_x, float cam_z,
-		float fog_distance) const {
-	return opennova::env::water_uv_state(state_->core.cloud_scroll, cam_x, cam_z,
-			fog_distance);
-}
-
 WeatherShaderGlobals build_weather_shader_globals(
 		const EnvironmentState &env, const WeatherRuntime &weather,
 		bool underwater_view) {
@@ -502,6 +496,7 @@ WeatherShaderGlobals build_weather_shader_globals(
 	const TerrainEnvUniforms terrain = env.build_terrain_uniforms(underwater_view);
 	globals.base.sun_light = terrain.sun_light;
 	globals.base.sky_ambient = terrain.sky_ambient;
+	globals.base.light_block = env.sun_light();
 	globals.base.fog_color = terrain.fog_color;
 	// Terrain tile DOT3 and foliage follow the current environment light
 	// (sun by day, moon by night), not the always-solar sky highlight vector

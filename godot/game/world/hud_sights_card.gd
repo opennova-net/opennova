@@ -168,6 +168,28 @@ func row_count() -> int:
 	return _rows.size()
 
 
+## Publish the card to the world's FrameFX for the NVG Sighted arm: the
+## original draws the card INTO the NVG scene, laid out over its 512 square,
+## so it is tinted and glows with the scene (the engine carries the witness,
+## runtime/renderer/frame_fx_effects.h FrameFxNvgPlan::sighted). An empty
+## publication clears it.
+func publish_nvg_scene_rows(frame_fx: FrameFx, surface: Vector2, aspect_mode: int,
+		up: bool) -> void:
+	var textures: Array[Texture2D] = []
+	var rects := PackedFloat32Array()
+	var blends := PackedInt32Array()
+	if up:
+		for row: SightRowControl in _rows:
+			if not is_instance_valid(row) or row.tex == null or row.sight == null:
+				continue
+			var scene_rect := HudPos.nvg_scene_sight_rect(row.rect_v, surface, aspect_mode)
+			textures.append(row.tex)
+			rects.append_array([scene_rect.position.x, scene_rect.position.y,
+					scene_rect.end.x, scene_rect.end.y])
+			blends.append(row.sight.get_blend())
+	frame_fx.set_nvg_sights_card(textures, rects, blends)
+
+
 ## A row's current design-space rect (a read seam for the tests).
 func row_rect(index: int) -> Rect2:
 	if index < 0 or index >= _rows.size():

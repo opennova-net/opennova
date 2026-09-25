@@ -195,14 +195,19 @@ inline bool aim_overlay_inputs_for_client(
 // The third-person held weapon for ONE presented row: which ADM model it is holding and
 // the weapon's own attach orientation. Retail applies one predicate to the model's
 // visibility — it is drawn iff the soldier may FIRE it — and for a NON-local body that
-// predicate reduces to "alive, and not in a control/gunner/driver seat": the remote branch
-// never consults an EquippedSlot, so a peer whose slot we do not model still passes.
-// MountMode::OnFoot is exactly the complement of retail's {2,3,5} hide set (a PASSENGER
-// keeps its weapon and maps to OnFoot here), so the seat half needs no extra state.
-// Reports adm 0 when hidden, which is both our table's null row and the original's own
-// `if (entity->equippedAdmIndex)` precondition.
-// [orig: Entity_CanFireWeapon @ 0x4dcb10 remote branch @0x4dcb3c..0x4dcb57;
-//  draw precondition @ 0x4e3c97; attach basis @ 0x4b1bdc..0x4b1bf8]
+// predicate is "alive, not in a control/gunner/driver seat" plus an ammo leg over the
+// entity's EquippedSlot. A pure client never points a remote body's EquippedSlot at a
+// personal slot (those writers are local-player only), so here the leg never runs; the
+// listen host runs it from its own record (present_rows.cpp, remote_held_weapon_out_of_ammo)
+// and passes adm 0. MountMode::OnFoot is exactly the complement of retail's {2,3,5} hide
+// set (a PASSENGER keeps its weapon and maps to OnFoot here), so the seat half needs no
+// extra state. Reports adm 0 when hidden, which is both our table's null row and the
+// original's own `if (entity->equippedAdmIndex)` precondition.
+// [orig: Entity_CanFireWeapon @ 0x4dcb10 remote branch — the seat test @0x4dcb3c..0x4dcb57,
+//  the EquippedSlot ammo leg @0x4dcb5f..0x4dcbc6; the
+//  local-only EquippedSlot writers WeaponAction_SwitchFrom @0x543475 /
+//  WeaponAction_SwitchRank @0x543539; draw precondition @ 0x4e3c97; attach basis
+//  @ 0x4b1bdc..0x4b1bf8]
 inline void write_present_held_weapon(
 		float *r, uint8_t p_equipped_adm_index, bool p_dead,
 		const anim::AimOverlayInputs &p_in,

@@ -1,6 +1,7 @@
 // Literal vectors independently calculated from the recovered instructions.
 #include <formats/foliage/runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -60,13 +61,17 @@ FrameRequest one_silhouette(float depth, float distance) {
 bool detail_vectors_and_gates() {
 	Runtime runtime;
 	auto world = world_with_foliage_mask(0x1u);
-	if (!expect(runtime.render_frame(one_detail(10.0f), world).detail.empty(),
-	            "detail cache miss warms without drawing")) return false;
+	// The terrain frame's tail generates a missing key before the scene
+	// core's detail passes draw, so a new key draws in its own frame.
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca654 then @ 0x5ca8ec;
+	// PolyTrn_RenderFrame @ 0x60f0ea..0x60f10f]
 	auto out = runtime.render_frame(one_detail(10.0f), world);
 	const auto near_stats = runtime.get_stats();
 	if (!expect(out.detail.size() == 72 &&
+	                near_stats.detail.misses == 1 &&
+	                near_stats.detail.regenerations == 1 &&
 	                near_stats.detail.submissions == 2,
-	            "near detail submits the resident cell twice")) return false;
+	            "a newly collected near cell generates and draws twice in one frame")) return false;
 
 	const uint64_t high_submission = out.detail[0].submission_id;
 	const uint64_t low_submission = out.detail[36].submission_id;
@@ -115,10 +120,15 @@ bool detail_vectors_and_gates() {
 	            "near detail expands 36 accepted candidates into two passes")) return false;
 	if (!expect(out.silhouettes.empty(), "detail cells never emit silhouettes")) return false;
 
+	// Key 0x00100030 is the cell X [16,32), Z [48,64): the low half is the
+	// Z-MIN and local B ADDS to it; the yaw step is retail's flt_7CD4DC
+	// (0x38C90FD0), a hair below 2*pi/65536. Vectors from an independent
+	// emulation of the instruction sequence.
+	// [orig: generate_foliage_instances_0 @ 0x5ffe88..0x5fffa2]
 	const struct Expected { float x, z, yaw; } expected[3] = {
-	    {18.63215637f, 46.30134583f, 4.83127260f},
-	    {20.66067505f, 45.73469543f, 1.83435345f},
-	    {23.21640015f, 46.72764587f, 4.25919342f},
+	    {18.63215637f, 49.69863892f, 4.83126879f},
+	    {20.66067505f, 50.26528931f, 1.83435190f},
+	    {23.21640015f, 49.27233887f, 4.25919008f},
 	};
 	for (int i = 0; i < 3; ++i) {
 		const auto &got = out.detail[static_cast<size_t>(i)];
@@ -126,7 +136,7 @@ bool detail_vectors_and_gates() {
 		            "detail preserves key and candidate index")) return false;
 		if (!expect(near(got.center.x, expected[i].x) &&
 		                near(got.center.z, expected[i].z) &&
-		                near(got.yaw_radians, expected[i].yaw),
+		                near(got.yaw_radians, expected[i].yaw, 1.0e-6f),
 		            "detail position/yaw matches the recovered literal vector")) return false;
 		if (!expect(near(got.alpha, 1.0f) &&
 		                got.pass == DetailPass::HighAlphaTest &&
@@ -182,6 +192,40 @@ bool detail_vectors_and_gates() {
 	return true;
 }
 
+// The thermal view (the scene core's fourth argument, the held weapon's
+// thermal byte) forces every detail patch onto the primary LOW pass and
+// scales its c6 fade by flt_7C69F4 = 0.1: no HIGH, no strict-LESS secondary.
+// [orig: Foliage_RenderDetailPatches @ 0x60a193..0x60a19c (forced LOW),
+// @ 0x60a497..0x60a4ae (x0.1); Render_ProcessMainSceneFrame
+// @ 0x5ca2da..0x5ca2e3, 0x5ca8e3]
+bool detail_thermal_view_forces_low_at_a_tenth_fade() {
+	Runtime runtime;
+	auto world = world_with_foliage_mask(0x1u);
+	auto near_request = one_detail(10.0f);
+	near_request.thermal_view = true;
+	const auto near_out = runtime.render_frame(near_request, world);
+	if (!expect(near_out.detail.size() == 36 &&
+	                runtime.get_stats().detail.submissions == 1,
+	            "a thermal near patch submits once")) return false;
+	for (const DetailInstance &instance : near_out.detail) {
+		if (!expect(instance.pass == DetailPass::LowAlphaTest &&
+		                instance.alpha_reference == 8 &&
+		                !instance.near_secondary &&
+		                near(instance.alpha, 0.1f, 1.0e-6f),
+		            "thermal near patch is the primary LOW pass at fade 0.1")) {
+			return false;
+		}
+	}
+	auto fading = one_detail(31.0f);
+	fading.thermal_view = true;
+	const auto fading_out = runtime.render_frame(fading, world);
+	if (!expect(fading_out.detail.size() == 36 &&
+	                fading_out.detail[0].pass == DetailPass::LowAlphaTest &&
+	                near(fading_out.detail[0].alpha, 0.05f, 1.0e-6f),
+	            "the thermal scale multiplies the distance fade")) return false;
+	return true;
+}
+
 bool silhouette_vectors_and_tier_role() {
 	Runtime runtime;
 	auto world = world_with_foliage_mask(0x1u);
@@ -194,10 +238,13 @@ bool silhouette_vectors_and_tier_role() {
 	if (!expect(out.silhouettes.size() == 9,
 	            "four quadrants plus +/-4 anchor gate match the golden count")) return false;
 
+	// The anchor at Godot (32, 48) is mission (x, y) = (32, -48): quadrant
+	// bit 1 steps mission y, and the low half keys the mission-y cell TOP.
+	// [orig: Foliage_UpdateModelTiles @ 0x601fd0..0x60205b]
 	const uint32_t quadrant_keys[4] = {
-	    0x00200040u, 0x00100040u, 0x00200030u, 0x00100030u,
+	    0x00207FE0u, 0x00107FE0u, 0x00207FD0u, 0x00107FD0u,
 	};
-	const int quadrant_counts[4] = {3, 3, 1, 2};
+	const int quadrant_counts[4] = {1, 3, 2, 3};
 	std::map<uint32_t, int> counts;
 	for (const auto &inst : out.silhouettes) {
 		++counts[inst.cell_key];
@@ -214,20 +261,25 @@ bool silhouette_vectors_and_tier_role() {
 		            "each silhouette cell respects the retail cap")) return false;
 	}
 
+	// Mission candidate (keyHi + A, keyLo - B), Godot z = B - keyLo.
+	// [orig: Foliage_GenerateModelTileInstances @ 0x600af5..0x600b0c]
 	const auto &first = out.silhouettes[0];
-	if (!expect(first.cell_key == 0x00200040u &&
-	                first.quadrant == 0 && first.candidate == 24,
+	if (!expect(first.cell_key == 0x00207FE0u &&
+	                first.quadrant == 0 && first.candidate == 30,
 	            "silhouette retains quadrant/key/candidate identity")) return false;
-	if (!expect(near(first.center.x, 33.30752563f) &&
-	                near(first.center.z, 51.89562988f) &&
-	                near(first.yaw_radians, 0.47121975f),
+	if (!expect(near(first.center.x, 34.00364685f) &&
+	                near(first.center.z, 46.20242310f) &&
+	                near(first.yaw_radians, 1.53810215f, 1.0e-6f),
 	            "silhouette placement matches the PRNG literal")) return false;
 
+	// Corners (keyHi + A', keyLo - B') in the mission frame, sampled on the
+	// Godot plane. [orig: Foliage_GenerateModelTileInstances
+	// @ 0x600bd0..0x600c6a]
 	const GroundCorner expected_corners[4] = {
-	    {32.65196228f, 53.91311646f, 93.90994263f},
-	    {35.32501221f, 52.55119324f, 98.91120148f},
-	    {31.29003906f, 51.24006653f, 85.56327820f},
-	    {33.96308899f, 49.87815857f, 90.40946960f},
+	    {35.45381165f, 44.65419006f, 86.08673096f},
+	    {35.55187988f, 47.65258789f, 91.14562988f},
+	    {32.45541382f, 44.75225830f, 78.07762146f},
+	    {32.55348206f, 47.75065613f, 83.05718231f},
 	};
 	for (int i = 0; i < 4; ++i) {
 		if (!expect(near(first.corners[i].x, expected_corners[i].x) &&
@@ -237,13 +289,13 @@ bool silhouette_vectors_and_tier_role() {
 		            "silhouette corner vector matches four ground samples")) return false;
 	}
 	const float expected_fold[4] = {
-	    -0.04954147f, 0.00000381f, -0.05598831f, 0.00000381f,
+	    -0.06971931f, 0.00000572f, -0.03578377f, -0.00000191f,
 	};
 	for (int i = 0; i < 4; ++i) {
 		if (!expect(near(first.fold[i], expected_fold[i], 2.0e-4f),
 		            "silhouette fold matches four midpoint controls")) return false;
 	}
-	if (!expect(near(first.center_height, 92.09294128f, 2.0e-4f),
+	if (!expect(near(first.center_height, 84.48628807f, 2.0e-4f),
 	            "silhouette center height uses the eight-sample fit")) return false;
 
 	world.model_foliage_mask_at = [](int32_t, int32_t) { return 0u; };
@@ -273,19 +325,28 @@ bool tier_specific_foliage_sampler_routing() {
 		++model_calls;
 		return 0u;
 	};
+	// The detail map gate samples the key's ATLAS halves plus the local
+	// offsets (keyHi & 0x3FF + A, keyLo & 0x3FF + B), not the world position:
+	// a cell whose world minimum is (16, 48) routed to atlas (528, 560) takes
+	// its first candidate (world 18.63215637, 49.69863892) at atlas
+	// (530.63215637, 561.69863892).
+	// [orig: generate_foliage_instances_0 @ 0x5ffddb..0x5ffdee (& 0x3FF),
+	// @ 0x5fff84..0x5fff9d (sample coordinates), @ 0x600065 (the gate)]
+	FrameRequest routed = one_detail(10.0f);
+	routed.detail_cells[0].atlas_x = 528;
+	routed.detail_cells[0].atlas_z = 560;
 	Runtime detail_runtime;
-	detail_runtime.render_frame(one_detail(10.0f), world);
-	const auto detail_output =
-	    detail_runtime.render_frame(one_detail(10.0f), world);
+	const auto detail_output = detail_runtime.render_frame(routed, world);
+	const auto atlas_near = [](int32_t fixed, double expected) {
+		return std::fabs(static_cast<double>(fixed) - expected * 65536.0) <= 2.0;
+	};
 	if (!expect(detail_calls > 0 && model_calls == 0 &&
 	                detail_output.detail.size() == 72 &&
-	                sampled_detail_x ==
-	                    static_cast<int32_t>(
-	                        detail_output.detail[0].center.x * 65536.0f) &&
-	                sampled_detail_z ==
-	                    static_cast<int32_t>(
-	                        detail_output.detail[0].center.z * 65536.0f),
-	            "detail generation uses only the flat-map sampler")) {
+	                atlas_near(sampled_detail_x, 530.63215637) &&
+	                atlas_near(sampled_detail_z, 561.69863892) &&
+	                near(detail_output.detail[0].center.x, 18.63215637f) &&
+	                near(detail_output.detail[0].center.z, 49.69863892f),
+	            "detail generation samples only the flat map, at atlas coordinates")) {
 		return false;
 	}
 
@@ -332,12 +393,13 @@ bool detail_cache_temporal_semantics() {
 
 	const auto first = runtime.render_frame(request, world);
 	const auto first_stats = runtime.get_stats();
-	if (!expect(first.detail.empty() &&
+	if (!expect(first.detail.size() == 144 &&
 	                first_stats.detail.misses == 2 &&
 	                first_stats.detail.regenerations == 1 &&
 	                first_stats.detail.residents == 1 &&
+	                first_stats.detail.submissions == 4 &&
 	                first.detail_generated.size() == 1,
-	            "duplicate detail misses allocate one warm resident")) return false;
+	            "duplicate detail misses allocate one resident both keys draw at once")) return false;
 	const uint64_t revision = first.detail_generated[0].revision;
 
 	const auto second = runtime.render_frame(request, world);
@@ -367,7 +429,7 @@ bool detail_cache_temporal_semantics() {
 	            "runtime reset invalidates detail state and cadence")) return false;
 	foliage_mask = 0x1u;
 	const auto rewarmed = runtime.render_frame(request, world);
-	if (!expect(rewarmed.detail.empty() &&
+	if (!expect(rewarmed.detail.size() == 144 &&
 	                rewarmed.detail_generated.size() == 1 &&
 	                rewarmed.detail_generated[0].revision != revision,
 	            "reset forces a new detail cache revision")) return false;
@@ -401,18 +463,21 @@ bool detail_capacity_and_eviction() {
 	auto second_request = first_request;
 	second_request.detail_cells[0].key = 0x00200030u;
 	const auto second = runtime.render_frame(second_request, world);
-	if (!expect(second.detail.empty() &&
+	if (!expect(second.detail.size() == 72 &&
+	                second.detail[0].cache_revision ==
+	                    second.detail_generated[0].revision &&
 	                second.detail_evicted.size() == 1 &&
 	                second.detail_generated.size() == 1 &&
 	                second.detail_evicted[0].revision ==
 	                    first.detail_generated[0].revision &&
 	                runtime.get_stats().detail.evictions == 1,
-	            "detail replacement emits old and new cache identities")) return false;
+	            "detail replacement emits old and new identities and draws the new "
+	            "geometry in its generation frame")) return false;
 	const auto third = runtime.render_frame(second_request, world);
 	if (!expect(third.detail.size() == 72 &&
 	                third.detail[0].cache_revision ==
 	                    second.detail_generated[0].revision,
-	            "replacement detail geometry appears one render later")) return false;
+	            "the replacement resident keeps its revision on the next hit")) return false;
 	return true;
 }
 
@@ -447,12 +512,12 @@ bool flat_detail_keys_retain_empty_cache_entries() {
 
 	request.detail_cells[0].key = authored_key;
 	const auto restored = runtime.render_frame(request, world);
-	if (!expect(restored.detail.empty() && restored.detail_evicted.size() == 1 &&
+	if (!expect(restored.detail.size() == 72 &&
+	                restored.detail_evicted.size() == 1 &&
 	                restored.detail_evicted[0].key == flat_key &&
 	                restored.detail_generated.size() == 1 && samples > 0,
-	            "returning to authored terrain must evict the empty flat resident and regenerate")) return false;
-	if (!expect(runtime.render_frame(request, world).detail.size() == 72,
-	            "the authored replacement draws only on the following render")) return false;
+	            "returning to authored terrain evicts the empty flat resident, "
+	            "regenerates and draws in that frame")) return false;
 	return true;
 }
 
@@ -494,13 +559,15 @@ bool model_cache_phase_negative_and_identity() {
 		                runtime.get_stats().model.regenerations == 0,
 		            "definition zero reuses model geometry before phase eight")) return false;
 	}
+	// On the phase every visit regenerates: both anchors' four visits.
+	// [orig: Foliage_UpdateModelTiles @ 0x602085..0x6020aa]
 	const auto phase_eight = runtime.render_frame(request, world);
 	if (!expect(phase_eight.silhouettes.empty() &&
 	                runtime.get_stats().model.hits == 8 &&
-	                runtime.get_stats().model.regenerations == 4 &&
+	                runtime.get_stats().model.regenerations == 8 &&
 	                phase_eight.model_evicted.size() == 4 &&
 	                phase_eight.model_generated.size() == 4,
-	            "each resident key refreshes once on definition zero phase")) return false;
+	            "every visit regenerates on definition zero's phase")) return false;
 
 	foliage_mask = 0x1u;
 	if (!expect(runtime.render_frame(request, world).silhouettes.empty() &&
@@ -511,51 +578,71 @@ bool model_cache_phase_negative_and_identity() {
 	}
 	const auto phase_sixteen = runtime.render_frame(request, world);
 	if (!expect(phase_sixteen.silhouettes.size() == 18 &&
-	                runtime.get_stats().model.regenerations == 4,
-	            "negative model entries recover once per key on the next phase")) return false;
+	                runtime.get_stats().model.regenerations == 8,
+	            "negative model entries recover on every visit of the next phase")) return false;
 	return true;
 }
 
-bool overlapping_model_cells_refresh_once_per_frame() {
+// Two anchors 8 units apart share two cells. On the definition's phase each
+// visit regenerates the shared resident around ITS OWN anchor and draws it at
+// once, so the second anchor's submission is placed around the second anchor;
+// off the phase both visits draw the resident as the last visit left it.
+// [orig: Foliage_UpdateModelTiles @ 0x601f50, hit touch/phase/regenerate
+// @ 0x60208b..0x6020aa, the immediate draw @ 0x6021a5;
+// Foliage_GenerateModelTileInstances @ 0x600b11..0x600b45 (+-4 box)]
+bool overlapping_model_cells_regenerate_per_visit_on_phase() {
 	Runtime runtime;
 	auto world = world_with_foliage_mask(0x1u);
 	auto request = one_silhouette(38.0f, 63.0f);
-	request.silhouette_anchors.push_back(
-	    {{34.0f, 48.0f}, 38.0f, 63.0f});
+	request.silhouette_anchors.push_back({{40.0f, 48.0f}, 38.0f, 63.0f});
 
-	const auto first = runtime.render_frame(request, world);
-	if (!expect(!first.silhouettes.empty() &&
-	                runtime.get_stats().model.regenerations == 4,
-	            "overlapping MODEL anchors warm four unique cell keys")) {
+	runtime.render_frame(request, world);
+	if (!expect(runtime.get_stats().model.misses == 6 &&
+	                runtime.get_stats().model.hits == 2,
+	            "the second anchor hits the two cells the first one warmed")) {
 		return false;
 	}
-	const size_t stable_count = first.silhouettes.size();
 	for (int frame = 2; frame <= 7; ++frame) {
-		if (!expect(runtime.render_frame(request, world).silhouettes.size() ==
-		                stable_count,
-		            "overlapping MODEL cells remain stable before refresh")) {
-			return false;
-		}
+		runtime.render_frame(request, world);
 	}
 
+	const auto near_anchor = [](const FrameOutput &output, uint32_t key,
+	                            float anchor_x, int visit) {
+		std::vector<uint64_t> submissions;
+		for (const SilhouetteInstance &instance : output.silhouettes) {
+			if (instance.cell_key == key &&
+			    std::find(submissions.begin(), submissions.end(),
+			              instance.submission_id) == submissions.end()) {
+				submissions.push_back(instance.submission_id);
+			}
+		}
+		if (static_cast<int>(submissions.size()) <= visit) return false;
+		int count = 0;
+		for (const SilhouetteInstance &instance : output.silhouettes) {
+			if (instance.submission_id != submissions[static_cast<size_t>(visit)]) continue;
+			if (std::fabs(instance.center.x - anchor_x) > 4.0f) return false;
+			++count;
+		}
+		return count > 0;
+	};
+	const uint32_t shared_key = 0x00207FE0u;
 	const auto phase_eight = runtime.render_frame(request, world);
-	if (!expect(phase_eight.silhouettes.size() == stable_count &&
-	                runtime.get_stats().model.hits == 8 &&
-	                runtime.get_stats().model.regenerations == 4 &&
-	                phase_eight.model_generated.empty() &&
-	                phase_eight.model_evicted.empty(),
-	            "unchanged overlapping MODEL cells keep their resident mesh revision")) {
+	if (!expect(runtime.get_stats().model.hits == 8 &&
+	                runtime.get_stats().model.regenerations == 8,
+	            "every on-phase visit regenerates, shared cells included")) {
 		return false;
 	}
-	std::map<uint32_t, std::set<uint64_t>> revisions_by_key;
-	for (const SilhouetteInstance &instance : phase_eight.silhouettes) {
-		revisions_by_key[instance.cell_key].insert(instance.cache_revision);
+	if (!expect(near_anchor(phase_eight, shared_key, 32.0f, 0) &&
+	                near_anchor(phase_eight, shared_key, 40.0f, 1),
+	            "each on-phase visit draws the shared cell around its own anchor")) {
+		return false;
 	}
-	for (const auto &item : revisions_by_key) {
-		if (!expect(item.second.size() == 1,
-		            "overlapping submissions share the first refreshed cell revision")) {
-			return false;
-		}
+	const auto after = runtime.render_frame(request, world);
+	if (!expect(runtime.get_stats().model.regenerations == 0 &&
+	                near_anchor(after, shared_key, 40.0f, 0) &&
+	                near_anchor(after, shared_key, 40.0f, 1),
+	            "off the phase both visits draw the last visit's regeneration")) {
+		return false;
 	}
 	return true;
 }
@@ -774,10 +861,12 @@ bool per_slot_mask_bit_selection_in_both_tiers() {
 
 bool negative_anchor_cell_keys_sign_extend() {
 	// Negative-coordinate cells: the quadrant snap wraps in 32 bits and the
-	// packed key's 15-bit halves sign-extend back to the negative bases, with
-	// X = high15 + localA and Z = low15 - localB (local B runs toward -Z).
-	// [orig: Foliage_UpdateModelTiles @ 0x601f50 — quadrant snap / key form;
-	// Foliage_GenerateModelTileInstances @ 0x600980 — 15-bit decode]
+	// packed key's 15-bit halves sign-extend back to their bases, with
+	// X = high15 + localA and MISSION y = low15 - localB (Godot z = -y). The
+	// anchor at Godot z = -48 is mission y = +48, so its y keys are positive.
+	// [orig: Foliage_UpdateModelTiles @ 0x601fd0..0x60205b — quadrant snap /
+	// key form; Foliage_GenerateModelTileInstances @ 0x600986..0x6009aa —
+	// 15-bit decode]
 	Runtime runtime;
 	auto world = world_with_foliage_mask(0x1u);
 	FrameRequest request;
@@ -791,12 +880,12 @@ bool negative_anchor_cell_keys_sign_extend() {
 		return false;
 	}
 
-	// Hand-derived quadrant keys for anchor (-32, -48): snap(anchor +- 8u)
-	// masked to 16u tiles gives x in {-32, -48}, z-top in {-32, -48}.
+	// Hand-derived quadrant keys for mission anchor (-32, +48): snap(anchor
+	// +- 8u) masked to 16u tiles gives x in {-32, -48}, y-top in {64, 48}.
 	const uint32_t quadrant_keys[4] = {
-	    0x7FE07FE0u, 0x7FD07FE0u, 0x7FE07FD0u, 0x7FD07FD0u,
+	    0x7FE00040u, 0x7FD00040u, 0x7FE00030u, 0x7FD00030u,
 	};
-	const int quadrant_counts[4] = {2, 2, 2, 2};
+	const int quadrant_counts[4] = {3, 2, 1, 2};
 
 	// Independent 15-bit sign extension (subtraction form, distinct from the
 	// runtime's OR-mask form).
@@ -808,19 +897,20 @@ bool negative_anchor_cell_keys_sign_extend() {
 	for (const SilhouetteInstance &instance : out.silhouettes) {
 		++counts[instance.cell_key];
 		const int32_t base_x = sext15(instance.cell_key >> 16u);
-		const int32_t base_z = sext15(instance.cell_key);
-		if (!expect(base_x < 0 && base_z < 0,
-		            "negative-anchor keys decode to negative 16u bases")) {
+		const int32_t base_y = sext15(instance.cell_key);
+		if (!expect(base_x < 0 && base_y > 0,
+		            "the anchor keys decode to a negative x and positive y top")) {
 			return false;
 		}
 		const float local_a = instance.center.x - static_cast<float>(base_x);
-		const float local_b = static_cast<float>(base_z) - instance.center.z;
+		const float mission_y = -instance.center.z;
+		const float local_b = static_cast<float>(base_y) - mission_y;
 		if (!expect(local_a >= 1.0f - 1.0e-4f && local_a <= 15.8f + 1.0e-4f,
 		            "X decodes as high15 + localA for negative keys")) {
 			return false;
 		}
 		if (!expect(local_b >= 1.0f - 1.0e-4f && local_b <= 15.8f + 1.0e-4f,
-		            "Z decodes as low15 - localB for negative keys")) {
+		            "mission y decodes as low15 - localB")) {
 			return false;
 		}
 		if (!expect(std::fabs(instance.center.x + 32.0f) <= 4.0f &&
@@ -843,7 +933,7 @@ bool detail_cache_lru_evicts_oldest_at_capacity_three() {
 	// where eviction order is distinguishable: with residents A,B,C and only
 	// A,B re-touched, a new key replaces the OLDEST-stamped entry C — not the
 	// newest and not slot zero.
-	// [orig: Foliage_UpdateFarCellSlots @ 0x601b30;
+	// [orig: Foliage_UpdateDetailCellSlots @ 0x601b30;
 	// terrain_tile_init_buffers @ 0x5ff920 — pool sizing]
 	if (!expect(Runtime::detail_cache_capacity(500) == 3,
 	            "source vertex count 500 sizes the pool to three cells")) {
@@ -1096,13 +1186,14 @@ bool fd_bake_vector() {
 
 int main() {
 	if (!detail_vectors_and_gates()) return 1;
+	if (!detail_thermal_view_forces_low_at_a_tenth_fade()) return 1;
 	if (!silhouette_vectors_and_tier_role()) return 1;
 	if (!tier_specific_foliage_sampler_routing()) return 1;
 	if (!detail_cache_temporal_semantics()) return 1;
 	if (!detail_capacity_and_eviction()) return 1;
 	if (!flat_detail_keys_retain_empty_cache_entries()) return 1;
 	if (!model_cache_phase_negative_and_identity()) return 1;
-	if (!overlapping_model_cells_refresh_once_per_frame()) return 1;
+	if (!overlapping_model_cells_regenerate_per_visit_on_phase()) return 1;
 	if (!model_key_lookup_work_is_bounded_by_cell_visits()) return 1;
 	if (!model_definition_stagger()) return 1;
 	if (!model_cache_lru_and_identity_events()) return 1;

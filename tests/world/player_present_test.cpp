@@ -35,12 +35,44 @@ void test_camera_mode_split() {
 }
 
 void test_fp_submit_is_the_and_of_its_gates() {
-	CHECK(w::fp_viewmodel_retail_submit(false, false, false, true, false));
-	CHECK(!w::fp_viewmodel_retail_submit(true, false, false, true, false));
-	CHECK(!w::fp_viewmodel_retail_submit(false, true, false, true, false));
-	CHECK(!w::fp_viewmodel_retail_submit(false, false, true, true, false));
-	CHECK(!w::fp_viewmodel_retail_submit(false, false, false, false, false));
-	CHECK(!w::fp_viewmodel_retail_submit(false, false, false, true, true));
+	const w::FpViewmodelSubmitGates open{};
+	CHECK(w::fp_viewmodel_retail_submit(open));
+	w::FpViewmodelSubmitGates g = open;
+	g.third_person = true;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
+	g = open;
+	g.scope_card_active = true;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
+	g = open;
+	g.binoculars_view_active = true;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
+	g = open;
+	g.fp_weapon_view_flag = false;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
+	g = open;
+	g.seat_hides_weapon = true;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
+	// The alive gate [orig: Player_RenderViewModelIfAlive @0x4E0145 /
+	// @0x4E014B]: a dead local entity or a decided winner draws no gun.
+	g = open;
+	g.local_dead = true;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
+	g = open;
+	g.round_winner_set = true;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
+	// An Emplaced def skips the showhud bit [orig: @0x4DEDD9..0x4DEDF1] but
+	// nothing else.
+	g = open;
+	g.fp_weapon_view_flag = false;
+	g.emplaced = true;
+	CHECK(w::fp_viewmodel_retail_submit(g));
+	g.seat_hides_weapon = true;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
+	// A scoped Inset def shows the aperture, not the model
+	// [orig: @0x4DEDF7..0x4DEE19].
+	g = open;
+	g.inset_scoped = true;
+	CHECK(!w::fp_viewmodel_retail_submit(g));
 }
 
 void test_lighting_context_splits_body_and_fp() {

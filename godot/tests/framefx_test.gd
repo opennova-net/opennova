@@ -166,6 +166,9 @@ func _controlled_water_material() -> ShaderMaterial:
 			_solid_texture(Color(1.0, 1.0, 1.0, 0.25)))
 	material.set_shader_parameter("u_noise_normal",
 			_solid_texture(Color(0.5, 0.5, 1.0, 1.0)))
+	# The QuadMesh stand-in carries no strip depth replica (CUSTOM0.x), so it
+	# keeps its projected depth.
+	material.set_shader_parameter("u_scene_depth_range", Vector2.ZERO)
 	return material
 
 
@@ -366,6 +369,78 @@ func test_display_decode_reentry_recreates_released_terminal_effect() -> void:
 	assert_null(environment.compositor)
 	assert_false(second_effect.enabled)
 	decoder.free()
+
+
+# A flat gamma-domain grey behind a DisplayDecode, at the given 3D MSAA.
+func _decoded_grey_view(msaa: Viewport.MSAA) -> Dictionary:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(32, 32)
+	viewport.own_world_3d = true
+	viewport.msaa_3d = msaa
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = Color.BLACK
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+
+	var camera := Camera3D.new()
+	camera.current = true
+	viewport.add_child(camera)
+
+	var quad := MeshInstance3D.new()
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(8.0, 8.0)
+	quad.mesh = mesh
+	var shader := Shader.new()
+	shader.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+void fragment() {
+	ALBEDO = vec3(0.5);
+}
+"""
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	quad.material_override = material
+	quad.position = Vector3(0.0, 0.0, -2.0)
+	viewport.add_child(quad)
+
+	viewport.add_child(DisplayDecode.new())
+	var effect := environment.compositor.compositor_effects[0] \
+			as FrameFxCompositorEffect
+	return {"viewport": viewport, "effect": effect}
+
+
+# The menu avatar preview renders its SubViewport at 4x MSAA. There the
+# renderer's resolved scene depth is a sampled copy with no depth-attachment
+# usage, so the decode-only terminal (no Q3 source) must never bind it as a
+# framebuffer attachment: binding it failed the whole target chain every frame
+# with a RenderingDevice error and skipped the decode, double-encoding the
+# preview. The MSAA view decodes exactly like a single-sample one.
+func test_display_decode_decodes_a_multisampled_view() -> void:
+	var single := _decoded_grey_view(Viewport.MSAA_DISABLED)
+	var multi := _decoded_grey_view(Viewport.MSAA_4X)
+	for _frame in 4:
+		await get_tree().process_frame
+	var multi_effect := multi["effect"] as FrameFxCompositorEffect
+	var report := multi_effect.get_backend_report()
+	if not bool(report.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_eq(String(report.get("status", "")), "drawn_without_q3",
+			String(report.get("failure", "the MSAA terminal failed")))
+	assert_gt(int(report.get("rendered_frames", 0)), 0)
+	var single_center := (single["viewport"] as SubViewport).get_texture() \
+			.get_image().get_pixel(16, 16)
+	var multi_center := (multi["viewport"] as SubViewport).get_texture() \
+			.get_image().get_pixel(16, 16)
+	assert_almost_eq(multi_center.g, single_center.g, 0.02,
+			"the MSAA preview gets the same one terminal decode")
 
 
 func test_framefx_reentry_recreates_released_terminal_effect() -> void:
@@ -930,21 +1005,35 @@ func test_cleared_water_strip_leaves_the_q3_draw_list() -> void:
 	assert_gt(int(drawn.get("q3_submitted_commands", 0)), 0,
 			"the strip compiles into Q3: %s" % drawn)
 
-	# The witnessed g_WaterActive gate: every tracked visible terrain sector
-	# above the water height turns the pass off, and the strip clears while
-	# the source node itself stays visible.
+	# The g_WaterActive gate (every tracked visible terrain sector above the
+	# water height) clears the beauty strip, but the bloom pass's nightvision
+	# redraw is not gated on it (retail FrameFX_RenderGlowSource @ 0x582a59..
+	# 0x582a5d calls render_water_surface(0, 1) unconditionally): its strip
+	# stays in the Q3 draw list.
 	water.set_visible_terrain_bounds(true, 100.0, 200.0)
 	water.advance_frame(1.0 / 62.0)
 	assert_eq((water.get_mesh_instance().mesh as ArrayMesh).get_surface_count(), 0,
-			"the inactive water pass clears the strip")
+			"the inactive water pass clears the beauty strip")
+	renderer.advance_frame()
+	var ungated := renderer.get_backend_report()
+	assert_gt(int(ungated.get("q3_submitted_commands", 0)), 0,
+			"the nightvision redraw ignores g_WaterActive: %s" % ungated)
+
+	# Below the plane the redraw has no side: the view-0 call requires the
+	# camera strictly above the water (retail render_water_surface @ 0x5c3304).
+	# Its strip clears and names the source, so the last publication is never
+	# drawn again.
+	camera.position = Vector3(100.3, 5.0, -33.7)
+	water.advance_frame(1.0 / 62.0)
 	renderer.advance_frame()
 	var cleared := renderer.get_backend_report()
 	assert_eq(int(cleared.get("q3_submitted_commands", -1)), 0,
 			"the cleared strip is not drawn from its last publication: %s" % cleared)
 	assert_eq(int(cleared.get("q3_readbacks_this_frame", -1)), 0)
 
-	# The pass comes back: the rebuilt strip is published and drawn again,
-	# from memory.
+	# The camera comes back above: the rebuilt strip is published and drawn
+	# again, from memory.
+	camera.position = Vector3(100.3, 27.0, -33.7)
 	water.set_visible_terrain_bounds(false, 0.0, 0.0)
 	water.advance_frame(1.0 / 62.0)
 	renderer.advance_frame()
@@ -1038,7 +1127,9 @@ func test_q3_viewport_resize_retires_invalidated_uniform_sets_cleanly() -> void:
 	renderer.shutdown()
 
 
-func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_order() -> void:
+# A 64x64 beauty view over an opaque red backdrop (drawn by the beauty pass
+# itself, nothing in Q3), the camera 5 u in front of it.
+func _particle_order_view() -> SubViewport:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 64)
 	viewport.own_world_3d = true
@@ -1060,7 +1151,6 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	viewport.add_child(camera)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
 
-	# An opaque red backdrop drawn by the beauty pass itself (nothing in Q3).
 	var backdrop := MeshInstance3D.new()
 	var backdrop_mesh := QuadMesh.new()
 	backdrop_mesh.size = Vector2(20.0, 20.0)
@@ -1068,7 +1158,34 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	backdrop.material_override = _canary_material(Color(1.0, 0.0, 0.0))
 	backdrop.position = Vector3(0.0, 0.0, 0.0)
 	viewport.add_child(backdrop)
+	return viewport
 
+
+# The two water-order particles (far-side blue, camera-side green) over the
+# water plane at height 0, rendered once.
+func _particle_order_renderer(viewport: SubViewport) -> ParticleRenderer:
+	var frame_renderer := FrameFx.new()
+	viewport.add_child(frame_renderer)
+	var particle_renderer := ParticleRenderer.new()
+	particle_renderer.scene = _water_order_particle_scene()
+	particle_renderer.procedural_fallback_enabled = true
+	particle_renderer.set_water_plane(0.0, null)
+	viewport.add_child(particle_renderer)
+	particle_renderer.render_now(GameWorld.current_frame_clock_ms())
+	return particle_renderer
+
+
+func _particle_far_runs(particle_renderer: ParticleRenderer) -> Array[MeshInstance3D]:
+	var runs: Array[MeshInstance3D] = []
+	for child in particle_renderer.get_children():
+		if child is MeshInstance3D and (child as MeshInstance3D).visible \
+				and String(child.name).begins_with("ParticleFarRun"):
+			runs.append(child as MeshInstance3D)
+	return runs
+
+
+func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_order() -> void:
+	var viewport := _particle_order_view()
 	var water := MeshInstance3D.new()
 	var water_mesh := QuadMesh.new()
 	water_mesh.size = Vector2(20.0, 20.0)
@@ -1079,14 +1196,7 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	viewport.add_child(water)
 
-	var frame_renderer := FrameFx.new()
-	viewport.add_child(frame_renderer)
-	var particle_renderer := ParticleRenderer.new()
-	particle_renderer.scene = _water_order_particle_scene()
-	particle_renderer.procedural_fallback_enabled = true
-	particle_renderer.set_water_plane(0.0, null)
-	viewport.add_child(particle_renderer)
-	particle_renderer.render_now(GameWorld.current_frame_clock_ms())
+	var particle_renderer := _particle_order_renderer(viewport)
 	for _frame in 6:
 		await get_tree().process_frame
 	RenderingServer.force_draw(true)
@@ -1099,18 +1209,24 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 	assert_eq(int(camera_side.get("selected_emitters", -1)), 1)
 	assert_gt(int(far.get("rendered_quad_count", 0)), 0)
 	assert_gt(int(camera_side.get("rendered_quad_count", 0)), 0)
-	var far_backend: Dictionary = report.get("world_far_backend", {})
+	# Pass A draws inside the transparent list (retail
+	# Terrain_RenderWorldScene @ 0x5c95b5, before the water pass
+	# @ 0x5c95dc): render-list runs at the particle far-side rung.
+	assert_gt(int(report.get("world_far_render_runs", 0)), 0,
+			"pass A draws as render-list runs")
+	var runs := _particle_far_runs(particle_renderer)
+	assert_gt(runs.size(), 0, "the far runs are visible instances")
+	for run in runs:
+		var material := run.mesh.surface_get_material(0) as ShaderMaterial
+		assert_eq(material.render_priority, ObjectShaderCache.RENDER_RUNG_PARTICLE_FAR_SIDE,
+				"a far run sorts at the particle far-side rung")
+	assert_lt(ObjectShaderCache.RENDER_RUNG_PARTICLE_FAR_SIDE, ObjectShaderCache.RENDER_RUNG_WATER)
 	var camera_backend: Dictionary = report.get("world_camera_backend", {})
-	if not bool(far_backend.get("rd_available", false)):
+	if not bool(camera_backend.get("rd_available", false)):
 		pending("RenderingDevice unavailable under this Godot renderer")
 		return
-	assert_eq(String(far_backend.get("status", "")), "drawn",
-			String(far_backend.get("failure", "far particle pass failed")))
 	assert_eq(String(camera_backend.get("status", "")), "drawn",
 			String(camera_backend.get("failure", "camera particle pass failed")))
-	assert_eq(int(far_backend.get("callback_type", -1)),
-			CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT,
-			"pass A runs before the transparent list (and therefore before water)")
 	assert_eq(int(camera_backend.get("callback_type", -1)),
 			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT,
 			"pass B runs after the transparent list (and therefore after water)")
@@ -1128,11 +1244,10 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 			with_water, _channel_peaks(with_water_image),
 			without_water, _channel_peaks(without_water_image)]
 	# Before the terminal decode the order is red opaque backdrop -> far blue
-	# source-over (PRE_TRANSPARENT) -> water x0.5 -> near green source-over
-	# (POST_TRANSPARENT). Compare the same immutable particle packet with water
-	# hidden: red and blue must rise, while green must remain unchanged
-	# because its pass follows water. (The far-side object ALPHA strips that
-	# retail draws before pass A are the documented D-RORD-7 residual.)
+	# source-over (the particle far-side rung) -> water x0.5 (the water rung)
+	# -> near green source-over (POST_TRANSPARENT). Compare the same immutable
+	# particle packet with water hidden: red and blue must rise, while green
+	# must remain unchanged because its pass follows water.
 	assert_gt(with_water.g, 0.12,
 			"the camera-side green particle must be applied after water")
 	assert_gt(with_water.r, 0.002,
@@ -1147,6 +1262,61 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 			"water must attenuate the earlier far particle; " + diagnostic)
 	assert_almost_eq(without_water.g, with_water.g, 0.02,
 			"water must not attenuate the later camera-side particle; " + diagnostic)
+
+
+func test_far_side_alpha_objects_draw_before_particle_pass_a() -> void:
+	# Retail draws the far-side object ALPHA strips and tracers before pass A
+	# (Terrain_RenderWorldScene @ 0x5c95ac..0x5c95b5), so a
+	# half-transparent far-side card lies UNDER the far blue particle. Over the
+	# red backdrop a magenta card at alpha 0.5 then a blue particle at alpha a
+	# leave blue - red = 1.5a - 0.5 (0.25 at the particle's 0.5 peak); the
+	# particle drawn first leaves blue - red = a - 0.5, never positive.
+	var viewport := _particle_order_view()
+	var card_shader := Shader.new()
+	card_shader.code = """
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, fog_disabled;
+
+void fragment() {
+	ALBEDO = vec3(1.0, 0.0, 1.0);
+	ALPHA = 0.5;
+}
+"""
+	var card_material := ShaderMaterial.new()
+	card_material.shader = card_shader
+	card_material.render_priority = ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE
+	var card := MeshInstance3D.new()
+	var card_mesh := QuadMesh.new()
+	card_mesh.size = Vector2(20.0, 20.0)
+	card.mesh = card_mesh
+	card.material_override = card_material
+	# Nearer than the particles: the rung, not the depth, orders the two.
+	card.position = Vector3(0.0, 0.0, 3.0)
+	viewport.add_child(card)
+
+	var particle_renderer := _particle_order_renderer(viewport)
+	var far_runs := int(particle_renderer.get_debug_draw_list_report().get(
+			"world_far_render_runs", 0))
+	assert_gt(far_runs, 0, "pass A drew render-list runs")
+	for _frame in 6:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	# The camera-side green particle composites on top of both and scales the
+	# difference by its own 1 - alpha; take the best row through the centre.
+	var image := viewport.get_texture().get_image()
+	var best := -1.0
+	var best_pixel := Color.BLACK
+	for y in range(24, 44):
+		var pixel := image.get_pixel(32, y)
+		if pixel.b - pixel.r > best:
+			best = pixel.b - pixel.r
+			best_pixel = pixel
+	assert_gt(best, 0.05,
+			"the far particle lands on top of the far-side alpha card: %s" % best_pixel)
 
 
 const Q3_ADDITIVE_LUM_3DI := "res://../fixtures/threedi/synth/mount.3di"
@@ -1293,8 +1463,14 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	assert_gt(full_peak, quarter_peak + 0.02,
 			"a larger NV alpha retains MORE of the copy (dst x a, not dst x (1 - a)); "
 			+ diagnostic)
-	assert_gt(full_peak, 0.1 * alone_peak,
+	assert_gt(full_peak, 0.02 * alone_peak,
 			"the redraw weights the copy instead of erasing it; " + diagnostic)
+	# The redraw marches the nightvision rows (retail render_water_surface(0, 1)
+	# @ 0x582a59): the flat 0.1 base caps the row alpha at 0.1 x 229.5 / 255,
+	# so even a full noise alpha keeps under a fifth of the copy (the beauty
+	# rows' 1 - murk base would keep most of it).
+	assert_lt(full_peak, 0.2 * alone_peak,
+			"the nightvision rows' 0.1 base bounds the retained copy; " + diagnostic)
 	renderer.shutdown()
 	water.release_runtime_renderer_resources()
 
@@ -1468,3 +1644,56 @@ func test_lum_q3_copy_is_the_selflum_block_not_the_beauty_pixel() -> void:
 			[copy, black_copy])
 	blue_renderer.shutdown()
 	black_renderer.shutdown()
+
+
+## A 1024x1024 texture whose level 0 is red and every smaller level white.
+func _red_level0_texture() -> ImageTexture:
+	var data := PackedByteArray()
+	var side := 1024
+	var colour := Color.RED
+	while side >= 1:
+		var level := Image.create(side, side, false, Image.FORMAT_RGBA8)
+		level.fill(colour)
+		data.append_array(level.get_data())
+		colour = Color.WHITE
+		side /= 2
+	return ImageTexture.create_from_image(
+			Image.create_from_data(1024, 1024, true, Image.FORMAT_RGBA8, data))
+
+
+func test_lum_q3_copy_stops_at_the_stage_textures_last_retail_mip_level() -> void:
+	# The Q3 copy samples Diffuse1 like the beauty wrapper: the 2x anisotropic
+	# footprint clamped at the stage's last retail mip level
+	# (u_diffuse_max_lod; GTexture_CreateFromPixelData_0, retail). The bulb
+	# minifies a 1024 texture far past level 0: unbounded it reads the white
+	# small levels, with a ceiling of 0 it keeps level 0's red.
+	var view := _q3_lum_view(true)
+	var renderer := view.terminal as FrameFx
+	var bulb := _first_visible_mesh(view.model)
+	assert_not_null(bulb)
+	if bulb == null:
+		return
+	var camera := (view.viewport as SubViewport).get_camera_3d()
+	var pixel := Vector2i(camera.unproject_position(
+			bulb.global_transform * bulb.get_aabb().get_center()))
+	var material := bulb.get_active_material(0) as ShaderMaterial
+	material.set_shader_parameter("u_diffuse", _red_level0_texture())
+	material.set_shader_parameter("u_diffuse_max_lod", 1000.0)
+	FrameFx.invalidate_q3_object_material(material)
+	var unbounded: Image = await _render_q3_frame(renderer)
+	if not bool(renderer.get_backend_report().get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	material.set_shader_parameter("u_diffuse_max_lod", 0.0)
+	FrameFx.invalidate_q3_object_material(material)
+	var ceiling: Image = await _render_q3_frame(renderer)
+	assert_not_null(unbounded)
+	assert_not_null(ceiling)
+	if unbounded == null or ceiling == null:
+		return
+	var free_pixel := unbounded.get_pixelv(pixel)
+	var clamped_pixel := ceiling.get_pixelv(pixel)
+	assert_gt(free_pixel.g, 0.5, "unbounded, the minified copy reads a white level: %s" % free_pixel)
+	assert_gt(clamped_pixel.r, 0.5, "the ceiling keeps level 0's red: %s" % clamped_pixel)
+	assert_lt(clamped_pixel.g, 0.2, "and never a smaller white level: %s" % clamped_pixel)
+	renderer.shutdown()

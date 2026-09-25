@@ -97,7 +97,6 @@ private:
 	// device during reverse-order member destruction.
 	TerrainStaticShadowRasterizer static_shadow_rasterizer;
 	TerrainTileCacheDevice tile_cache_device;
-	Vector3 tile_overlay_tint = Vector3(1.0f, 1.0f, 1.0f);
 
 	bool built = false;
 
@@ -157,8 +156,7 @@ private:
 	bool _build_terrain();
 	void _load_textures();
 	void _clear_derived_textures();
-	void _rebuild_tile_overlay_texture();
-	void _clear_tile_overlay_texture();
+	void _rebuild_tile_overlay_pages();
 	void _clear_terrain();
 	void _hide_visible_patches();
 	void _clear_patch_pool();
@@ -190,17 +188,20 @@ public:
 	PackedInt32Array get_suppressed_static_shadow_bms_ids() const;
 	Ref<TerrainSurfaceInputs> get_surface_inputs() const;
 	Ref<Texture2D> get_heightfield_normal_texture() const;
-	Ref<Texture2D> get_tile_overlay_texture() const;
 	Ref<Texture2DArray> get_tile_cache_texture() const;
 	Dictionary get_tile_cache_diagnostics() const;
 	bool append_terrain_scorch(int64_t p_texture_index,
 			int64_t p_minimum_x_q16, int64_t p_minimum_z_q16,
 			int64_t p_maximum_x_q16, int64_t p_maximum_z_q16);
 	void clear_terrain_scorches();
+	// Retires the cached pages a destroyed entity's Q16 bounds touch; returns
+	// how many.
+	int64_t invalidate_tile_cache_region(int64_t p_minimum_x_q16,
+			int64_t p_minimum_z_q16, int64_t p_maximum_x_q16,
+			int64_t p_maximum_z_q16);
 	std::optional<opennova::TerrainTilePageBinding>
 	get_tile_cache_binding_for_world_point_native(
 			float p_world_x, float p_world_z);
-	Vector3 get_tile_overlay_tint() const;
 
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;

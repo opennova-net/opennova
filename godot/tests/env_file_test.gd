@@ -266,6 +266,51 @@ func test_underwater_pass_transition_publishes_once_and_is_idempotent() -> void:
 	assert_gt(state.get_generation(), underwater_generation)
 
 
+func test_the_viewmodel_keeps_the_dry_pass_fog_underwater() -> void:
+	# Retail fogs the first-person gun under the DRY pass: the frame applies
+	# ApplyFogAndAmbient(0, thermal) before the sky dome and the viewmodel and
+	# re-applies the eye's own pass only after the viewmodel [orig:
+	# Render_ProcessMainSceneFrame @0x5ca3bf..0x5ca3ce, the viewmodel
+	# @0x5ca829, the re-apply @0x5ca82e..0x5ca841].
+	var env_node := MissionEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	var dry_color: Vector3 = env_node.get_scene_fog_color()
+	var dry_end: float = env_node.get_scene_fog_end()
+	assert_eq(env_node.get_viewmodel_fog_color(), dry_color,
+			"above water the gun and the world share the pass")
+	env_node.set_underwater_view(true)
+	env_node.set_underwater_overlay_view(true)
+	assert_ne(env_node.get_scene_fog_color(), dry_color,
+			"the world's pass swaps to the lit water fog underwater")
+	assert_eq(env_node.get_viewmodel_fog_color(), dry_color,
+			"the gun keeps the dry pass colour underwater")
+	assert_almost_eq(env_node.get_viewmodel_fog_range().y, dry_end, 0.001,
+			"the gun keeps the dry pass range underwater")
+	assert_ne(env_node.get_viewmodel_fog_range().y, env_node.get_scene_fog_end())
+
+
+func test_the_water_mirror_keeps_the_dry_weather_fog_on_either_side() -> void:
+	# The reflected scene applies ApplyFogAndAmbient(0, 0) whatever side the
+	# eye is on (retail render_main_scene @ 0x5c1648..0x5c164c,
+	# Water_RenderReflectedWorldScene @ 0x5c8515..0x5c8519): the weather fog
+	# block, never the underwater lit water.
+	var env_node := MissionEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	var dry_color: Vector3 = env_node.get_scene_fog_color()
+	var dry_end: float = env_node.get_scene_fog_end()
+	assert_eq(env_node.get_water_mirror_fog_color(), dry_color,
+			"above water the mirror and the world share the dry block")
+	env_node.set_underwater_view(true)
+	assert_ne(env_node.get_scene_fog_color(), dry_color,
+			"the world's pass swaps to the lit water fog underwater")
+	assert_eq(env_node.get_water_mirror_fog_color(), dry_color,
+			"the mirror keeps the dry colour underwater")
+	assert_almost_eq(env_node.get_water_mirror_fog_range().y, dry_end, 0.001,
+			"the mirror keeps the dry range underwater")
+
+
 func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
 	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)
@@ -398,10 +443,22 @@ func test_field_consumption_table_mirrors_the_matrix() -> void:
 	var table := EnvFile.get_field_consumption()
 	assert_false(table.is_empty(), "the consumption table is populated")
 
+	# env-honored-matrix.md: terrain_rgb is honored through the .til tile overlay
+	# (divergence #19 FIXED) [retail PolyTrn_RenderTile @ 0x60df0d].
 	var terrain: Dictionary = table.get("terrain_tint", {})
-	assert_eq(String(terrain.get("status", "")), "partial", "terrain_tint is partial (divergence #19)")
-	assert_string_contains(String(terrain.get("anchor", "")), "0x60b8cb", "anchored to the bake consumer")
-	assert_false(String(terrain.get("note", "")).is_empty(), "deferred rows explain themselves")
+	assert_eq(String(terrain.get("status", "")), "honored", "terrain_tint is honored (divergence #19 FIXED)")
+	assert_string_contains(String(terrain.get("anchor", "")), "0x60df0d", "anchored to the tile-overlay consumer")
+	assert_false(String(terrain.get("note", "")).is_empty(), "honored-with-scope rows explain themselves")
+
+	# The matrix's other rows the pass settled: ceiling/floor, lightning and
+	# glare are honored; the star model is faithfully unconsumed (env #33,
+	# retail Star_RenderField_unused @ 0x5ad9c0 has no caller).
+	for field in ["ceiling_color", "floor_color", "lightning_color", "glare_3di"]:
+		assert_eq(String((table.get(field, {}) as Dictionary).get("status", "")), "honored",
+				"%s is honored in the matrix" % field)
+	var star: Dictionary = table.get("star_3di", {})
+	assert_eq(String(star.get("status", "")), "unconsumed", "star_3di loads but never draws")
+	assert_true(bool(star.get("faithful", false)), "retail never draws the star model either")
 
 	# The modulator chain landed at REN-5 (divergence #17 FIXED) — the outdoor
 	# exposure runs; the row keeps its interior-sampling caveat as the note
@@ -409,7 +466,7 @@ func test_field_consumption_table_mirrors_the_matrix() -> void:
 	assert_eq(String((table.get("iris_percent", {}) as Dictionary).get("status", "")), "honored",
 		"iris is honored since REN-5 (the modulator chain is live, divergence #17)")
 	assert_false(String((table.get("iris_percent", {}) as Dictionary).get("note", "")).is_empty(),
-		"the iris row keeps its interior-sampling caveat")
+		"the iris row explains itself")
 	assert_true(bool((table.get("vertex_tint", {}) as Dictionary).get("faithful", false)),
 		"vertex_tint is faithfully unconsumed (retail ignores it too)")
 

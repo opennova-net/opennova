@@ -33,7 +33,6 @@ weather_path = NodePath("../Weather")
 
 [node name="Water" type="Water" parent="."]
 environment_path = NodePath("../MissionEnvironment")
-weather_path = NodePath("../Weather")
 
 [node name="EnvironmentCubeCapture" type="EnvironmentCubeCapture" parent="."]
 

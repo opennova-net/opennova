@@ -136,16 +136,11 @@ public:
 	// The witnessed cloud-scroll UV translations for a camera at
 	// (cam_x, cam_z) world units — U carries the accumulator NEGATIVELY, V
 	// positively (weather_runtime.h carries the cites). The sky dome
-	// (and the water scroll below) consume these through this seam, like the
-	// terrain consumes get_smooth_sun.
+	// consumes these through this seam, like the terrain consumes
+	// get_smooth_sun.
 	Vector2 get_cloud_uv_offset1(float p_cam_x, float p_cam_z) const;
 	Vector2 get_cloud_uv_offset2(float p_cam_x, float p_cam_z) const;
 	float get_cloud_uv_rate_per_second() const;
-	// The witnessed water UV transform (scale, bias, offset_u, offset_v) —
-	// the water surface shares the layer-1 cloud accumulators with a 32x
-	// camera term (weather_runtime.h carries the cites).
-	Vector4 get_water_uv_state(float p_cam_x, float p_cam_z,
-			float p_fog_distance) const;
 
 	// C++-only seams for sibling native appliers.
 	opennova::env::WeatherRuntime &runtime() { return runtime_; }

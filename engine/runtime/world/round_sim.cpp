@@ -2110,6 +2110,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // direction helper emits it around world +Y, so a dirt puff rises out
         // of the ground instead of following the round into it.
         imp.direction = flight_direction(vec_from_fixed(incoming_velocity_q16));
+        imp.section_tagged = impact_target != nullptr;
         if (collision.hit_class == ProjectileHitClass::Terrain ||
             collision.hit_class == ProjectileHitClass::Water) {
             imp.direction = Vec3{0.0f, 0.0f, 0.0f};

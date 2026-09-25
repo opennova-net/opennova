@@ -696,7 +696,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `netsim_present_rows` covers received player/infantry records and authority flags;
     GUT `object_projection_lod_test` covers live set/clear and unscaled parachute radius.
     Deployment, descent, steer and animation are ported (2026-09-18) and our server
-    publishes the flag; fresh marker authoring and a live canopy/leg comparison remain open.
+    publishes the flag; the canopy draw is ported 2026-09-24 (§13.1 draw 1); fresh marker authoring and a live canopy/leg comparison remain open.
   - **D-INF-21** the "!Poof!" ghost mode is deliberately unported: `g_localPlayerPoofMode
     @ 0xA82298` (renamed this session, ex `dword_A82298`) is toggled by a net-message
     handler that debug-prints `!Poof!` [orig: `@0x42d450` — the handler is
@@ -1269,24 +1269,64 @@ The per-class render callback for **organic** entities (the model class tag `org
 local player, remote players, AND NPCs alike — render is class-keyed independently of the
 org0/org1/org2 *motor* split of §1.2). It builds the bone matrices
 (`Entity_BuildBoneTransformMatrices @ 0x4b1290`) then issues up to **six**
-`Render_SubmitEntity @ 0x5dad80` draws, in order:
-1. **shadow blob** (gated on `entity+0x378`/`+0x37A`),
-2. **body** — `key` model; suppressed for the camera-tracked entity in first person
-   (`entity == dword_A890CC` = the camera target, unless `dword_A890C8` third-person — see
-   §5.39 / correspondence.md `Camera_SetTrackedEntity @ 0x4391d0`),
+`Render_SubmitEntity @ 0x5dad80` draws, in order (corrected 2026-09-24, the rendering
+parity pass; draws 1, 3, 4 and 6 are PORTED, §39.1):
+1. **parachute canopy**: gated on either canopy word (`entity+0x378` inflation / `+0x37A`
+   flap) nonzero `[orig: @ 0x4e3988..0x4e399a]`; model `gItemDefs[g_ParachuteItemIndex].graphicModel`,
+   `g_ParachuteItemIndex = ItemList_FindIndexByTypeId(185)` (items.def "Parachute", graphic
+   `Parachut`, CTRL `PARA`/`PARA_O`) `[orig: Entity_PreloadSpecialItems @ 0x43c220, store
+   @ 0x43c22b]`. It writes CTRL `PARA` (ordinal 14, `dword_83FD58`) = 2 x inflation and
+   `PARA_O` (15, `dword_83FD60`) = 2 x flap even when the model is null
+   `[orig: @ 0x4e3a16..0x4e3a56]`. The matrix is an axis-2 (render Y = up) rotation fed
+   `sinFixed = sin(h) * dbl_7C3600 (+2^22)`, `cosFixed = cos(h) * dbl_7C57B0 (-2^22)` of the
+   BODY heading `h = entity+0x8C`, the builder's (cos, -sin) form of h + pi
+   `[orig: @ 0x4e39d6..0x4e3a0a via Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0]`, with
+   bone slot 0's translation row copied in (where the model origin lands under the hips
+   bone, not the hip joint) `[orig: @ 0x4e3a0f..0x4e3a48]`; rigid (the all-bones fill
+   `@ 0x4e3a70..0x4e3a89`), submitted with the caller's flags `@ 0x4e3aa5`. It is drawn
+   BEFORE the camera-tracked gate, so the local player sees his own canopy in first person,
+   and it is not gated on the body-submit flag 0x10000000, so a composed avatar draws it in
+   both submits. (This row read "shadow blob" until 2026-09-24, a misreading of the
+   `+0x378`/`+0x37A` gate.)
+2. **the camera-tracked gate, then the body**: `entity == g_camera_tracked_entity` with no
+   cinematic target (`Cine_IsTargetActive`) and `g_camera_mode == 0` returns here, skipping draws
+   2..6 `[orig: @ 0x4e3ab3..0x4e3aca]`; otherwise the body `key` model submits `@ 0x4e3b3b`
+   (see §5.39 / correspondence.md `Camera_SetTrackedEntity @ 0x4391d0`),
 3. **night-vision goggles** — gated on `Flags & 4` (`entity+0x24`), model
    `gItemDefs[g_NightVissionGoggleItemIndex].graphicModel`, rigid at the `outMuzzleFlashMatrix`
    bone [orig: `@ 0x4e3b54`..`@ 0x4e3be7`]. **Corrected 2026-07-26**: this row read
    "muzzle flash" until the draw was decompiled in full — it is the NVG item model, and the
-   caller's local name `muzzleFlashMatrix` is an IDB misnomer for the head bone matrix,
+   caller's local name `muzzleFlashMatrix` is an IDB misnomer for the head bone matrix.
+   `NVG_FLIP` (ordinal 7, `dword_83FD20`) = `Flags & 2 ? 0xFFFF : 0` is written before the
+   draw `[orig: @ 0x4e3b90..0x4e3b9d]`; the matrix is bone slot 14 (BN15 Head, +0x380) with
+   its pivot (+0x3A4) nudged by (0, +0.15, +0.10) (`flt_7C6FA4` / `flt_7C69F4`) before the
+   bone carries it `[orig: Entity_BuildBoneTransformMatrices @ 0x4b24e3..0x4b258e]`,
 4. **binoculars** — gated on `g_animStateFlagsTable[animStateId] & 0x40 && (Flags & 8)`
    (the per-anim-state flag table of §3.4), model `gItemDefs[g_BinocItemIndex].graphicModel`,
-   rigid at the `outSightMatrix` bone [orig: `@ 0x4e3c04`..`@ 0x4e3c82`]. **Corrected
-   2026-07-26** from "weapon sight/scope" for the same reason; `sightMatrix` is the face/eye
-   bone matrix, not a scope,
+   rigid at the `outSightMatrix` frame [orig: `@ 0x4e3c04`..`@ 0x4e3c82`]. **Corrected
+   2026-07-26** from "weapon sight/scope", and **2026-09-24** on the frame: it is bone slot
+   **15 = BN16 L Hand** (+0x3C0; the arm overlay class, switch case 15 `@ 0x4b1f7a`), pivot
+   row +0x3E4 nudged by (-0.12, -0.03, +0.03) (`flt_7C9B94` = 0.12 `@ 0x4b232e`,
+   `flt_7C9B90` = 0.03 `@ 0x4b233a`), turned by a fixed calibration composed row-major on
+   the LEFT of the bone matrix, `Ry(dbl_7C9B78 = 1.745382 rad = 100.003 deg) *
+   Rx(dbl_7C9B80 = -0.261807 = -15.0005 deg) * Rz(dbl_7C9B88 = -2.356266 = -135.004 deg) *
+   M15`, each block built with the sine negated `[orig: @ 0x4b2308..0x4b24d2; Rz
+   @ 0x4b2394..0x4b23d0, Rx @ 0x4b23d5..0x4b242b, Ry @ 0x4b2430..0x4b2486]`. In the Godot
+   column form that is `B15 * Rz(+z) * Rx(-x) * Ry(+y)` (Z and Y keep their authored sign,
+   X flips: the loader's X negation leaves an X-axis block alone),
 5. **held weapon** — see §13.2,
-6. **mounted-child overlay** — gated on `mountedChild` (`entity+0x268`), draws the carried
-   child/flag at a Z-rotated transform.
+6. **carried object** (was "mounted-child overlay"): `mountedChild` (`entity+0x268`) is the
+   CARRIED object that `Entity_AttachCarriedObject @ 0x43c130` links (the carry
+   attach; it stores carrier+0x268 `@ 0x43c144`, sets the child's `Flags |= 1` `@ 0x43c14a`
+   and its occupant `@ 0x43c14f`, flag ids 4091/4093/4095); the child must have an item def
+   `[orig: @ 0x4e3da6..0x4e3db7]`. The child's OWN model (+0x30) draws in the first submit
+   only, rigid at `Math_BuildFixedPointToFloatMatrix4x4(carrier+4) * RotZ(flt_7CD438)`
+   (`@ 0x4e3dc6`, `Math_BuildRotationMatrixZ_Float @ 0x613010` called `@ 0x4e3ddf`, product
+   `@ 0x4e3df1`): the carrier's own position and entity yaw/pitch/roll (restored after the
+   bone build `@ 0x4b1eba..0x4b1ec0`) times a fixed Z turn of 205887.421875 rad (pi x 65536
+   stored as float, about 0.328 deg once reduced), with the translation overwritten by the
+   draw-4 (left hand) frame's `@ 0x4e3df6..0x4e3e26`. The collector never draws the child
+   itself (it skips `Flags & 1` `@ 0x5c8cef..0x5c8cf4`).
 
 Draws 5 and 6 are *both* additionally suppressed wholesale when the render-pass flag
 `numEntries & 0x10000000` is set. REN-3 identified that word as `Render_SubmitEntity`'s
@@ -1294,11 +1334,12 @@ RENDER FLAGS argument; the 2026-08-29 D-RORD-11 witness corrected what the flag 
 it is the **second part of the two-model player avatar**, not a dual-LOD repeat draw.
 `Terrain_RenderSectorEntitiesBySide @ 0x5c7fea..0x5c8020` draws a composed avatar twice
 with the same projected radius, the HEAD model first (`@ 0x5c7ffc`, carrying draws 5
-and 6) and then the BODY model with the flag (`@ 0x5c8020`), so the one-shot overlay
-children render once per entity ([render-order-re.md](../render/render-order-re.md),
-submit-flags table). Every overlay model here draws at the parent's selected RLOD
-clamped to its own LOD count (`graphicModel[4]`, `@ 0x4e39c4..0x4e3e51`), never through
-a threshold walk of its own (`renderer::attachment_lod_index`).
+and 6) and then the BODY model with the flag (`@ 0x5c8020`), so draws 5 and 6 render
+once per entity ([render-order-re.md](../render/render-order-re.md), submit-flags table).
+Draws 1, 3 and 4 are not gated on 0x10000000 and render in BOTH submits of a composed
+avatar, each at that part's RLOD level. Every overlay model here draws at the parent's
+selected RLOD clamped to its own LOD count (`graphicModel[4]`, `@ 0x4e39c4..0x4e3e51`),
+never through a threshold walk of its own (`renderer::attachment_lod_index`).
 
 ### 13.2 The held-weapon submit (draw 5) and its predicate
 [orig: `BoneCallback_org0_World @ 0x4e3940`]
@@ -1334,7 +1375,19 @@ if ( !(numEntries & 0x10000000) )            // not the overlay-skip pass
   [orig: `Math_BuildFixedPointToFloatMatrix4x4 @ 0x4b12f2`].
 - A size/visibility cull sits in front of the submit: the draw is skipped unless the render
   state carries bits `& 6`, or the projected point clears `dword_A784F0 >= 0x20000`
-  [orig: `@ 0x4e3d4b`].
+  [orig: `@ 0x4e3d4b`]. Witnessed in full 2026-09-24: the render-state 2/4 bypass
+  `@ 0x4e3cfe`, `Viewport_TransformAndClipPoint @ 0x4e3d39` with the gfx3 header radius
+  `[esi+14h]` `@ 0x4e3d2b`, and `cmp dword_A784F0, 20000h` `@ 0x4e3d41` against the RAW
+  projected radius (2 px, no detail scaling). When the projector frustum-rejects the point
+  (`return 1`) retail compares a STALE `dword_A784F0`; the weapon is outside the view then,
+  so the port treats it as drawn (the camera draws nothing there either). PORTED
+  2026-09-24 ("Publish the person callback's item overlays and held-weapon ammo leg"):
+  `renderer::held_weapon_projection_culled` (`kHeldWeaponMinProjectedRadiusQ16 = 0x20000`,
+  `engine/runtime/renderer/object_lod.h`); `ObjectModel::set_attachment_pixel_cull` (wire
+  and local held weapons) evaluates it in the frame's LOD views (the shared node is culled
+  only when every view that sees it, the image and the weapon Inset, culls it) and moves a
+  culled weapon to the camera-excluded layer only, so the render-slot capture still draws
+  it, as retail's slot pass does.
 - **The weapon is drawn iff the soldier may *fire* it.** One predicate,
   `Entity_CanFireWeapon @ 0x4dcb10`, drives both gameplay fire-permission and this draw.
 
@@ -1349,6 +1402,25 @@ Returns 0 (→ weapon hidden) by the rider's **seat type in `parentSlot` (`entit
   (third-person/vehicle camera, §5.39); `parentSlot == 5 → 0`.
 - In both branches `parentSlot == 1` (passenger) is **not** in the hide set → the personal
   weapon stays visible (subject to the normal ammo checks).
+- `Entity_CanFireWeapon`'s only caller is `BoneCallback_org0_World @ 0x4e3ca5`: it is purely
+  the held-weapon draw gate. A dead body never draws the weapon: it returns 0 on `Flags & 2`
+  `@ 0x4dcb1e..0x4dcb24`.
+- **The remote branch's ammo leg (corrected 2026-09-24)** reads the entity's `EquippedSlot`,
+  NOT the weapon it draws (+0x2B0). On a pure client a remote body's `EquippedSlot` never
+  points at a personal slot (the writers `WeaponAction_SwitchFrom @ 0x543475` /
+  `WeaponAction_SwitchRank @ 0x543539` and `Player_SelectWeaponSlot` are local-player only;
+  `NetPacket_SerializePlayerState @ 0x4c139d / @ 0x4c13f8` only borrows mount slots), so the
+  leg never runs there. On the authority, `NapiNPServerMsg_HandlePlayerLoadout
+  @ 0x515f52..0x515f8a` points it at the 0x2F submitted slot and keeps it only when that def
+  is NoSelect (flags2 & 1); `Server_ClientFiredRound @ 0x50c1d4..0x50c28d` re-points it at
+  the accepted fire's mount slot or the fired combo's personal slot; the C2S 0x0C echo
+  (`@ 0x4C20A3`) moves only +0x2B0. So a host hides a remote gun when the LAST FIRED (or
+  NoSelect-submitted) slot's NoClipsNoDraw def has no ammo, even after the player has
+  switched weapons. `sub_517530` (a first-populated-slot `EquippedSlot` writer) has no code
+  references. The dword `def+0x58 == 1` test is clipsize == 1: +0x58 is the clipsize DWORD
+  (the total-clips reader loads it whole, `WeaponSlot_GetTotalClips @ 0x54260e`). PORTED
+  2026-09-24: `NapiNPConnection::equipped_slot` + `present_rows.cpp`
+  `remote_held_weapon_out_of_ammo` (the listen host's rows only).
 
 ### 13.4 Seat-type source and assignment
 `parentSlot` is the seat-type code, classified from the vehicle/emplacement model's
@@ -1377,22 +1449,34 @@ evaluates two of that branch's terms — alive, and `MountMode::OnFoot`, which i
 complement of retail's `{2,3,5}` hide set, so a passenger keeps its weapon. The remote verdict
 is folded into the `PF_HELD_WEAPON_ADM` snapshot field: a hidden or unarmed body reports index
 0, which is simultaneously our table's null row and the original's own
-`if (entity->equippedAdmIndex)` precondition. STILL UNPORTED from this callback: AI/NPC bodies
-(an unmounted placed `.bms` soldier's equipped ADM index has no witnessed source: the org1
-mounted request copies its parent's byte into every mounted rider and the NPC detach zeroes
-it (§38.3), and the other witnessed writers of `entity+0x2B0` are player paths, so that
-increment is blocked on research rather than effort), the NVG and BINOCULAR draws 3 and 4, the
-projected-size cull `@ 0x4e3d4b`, the mounted-branch correlation of §14.4, and the DEATH
-family's rows in the same 0x80 flag table the hand-frame branch reads. The original guidance
-below still describes the seat taxonomy the port reuses.
+`if (entity->equippedAdmIndex)` precondition. The residual list this paragraph carried was
+settled on 2026-09-24 (the rendering parity pass, §39.1):
+- **AI/NPC bodies: RESOLVED, retail draws NO draw-5 weapon for on-foot NPCs.** org0/org1
+  init through `Entity_InitOrganicAI @ 0x4bfcc0` (class table rows `@ 0x813010/0x813028`)
+  never writes +0x2B0; only 'plyr' does (`PlayerClass_InitEntity @ 0x4b1060`). org1's
+  +0x2B0 writes are transient fire stamps zeroed right after `WeaponSlot_FireAndSpawnEffects`
+  (`@ 0x4bf347 -> @ 0x4bf369`, `@ 0x4bf3cb -> @ 0x4bf3e8`, `@ 0x4bf442 -> @ 0x4bf44d`,
+  `@ 0x4bf474 -> @ 0x4bf4a0`); NPC guns are body geometry (e.g. "Indonesian Soldier #1 with
+  AK47" = graphic `Eindo01` with `launchups_closeattack mflash01`). The remaining edge: the
+  org1 mounted fire-request window copies the parent vehicle's +0x2B0 into the rider
+  `@ 0x4bf4f4..0x4bf4fa` (a seat-1 rider would then draw it); unported.
+- **The DEATH family's rows in the 0x80 flag table: moot.** `Entity_CanFireWeapon` returns 0
+  on `Flags & 2` (§13.3), so a dead body never draws the weapon.
+- **The mounted-branch correlation of §14.4: moot.** Seats 2/3/5 hide the weapon, and a
+  passenger (seat 1) never sets the seated flag `@ 0x4b12b5..0x4b12ca`, so the on-foot
+  attach triple applies to every seat that draws.
+- **The projected-size cull** (the earlier `@ 0x4b3d4b` was a typo for `@ 0x4e3d4b`): PORTED,
+  §13.2.
+- **The NVG and BINOCULAR draws 3 and 4**, with the canopy (draw 1) and the carried object
+  (draw 6): PORTED, §13.1 / §39.1.
+
+The original guidance below still describes the seat taxonomy the port reuses.
 
 The predicate gates the weapon node's visibility, reusing the existing seat
 taxonomy (`item_seat_specs.gd`, now `engine/runtime/mission/seat_spec_extract.h`; SEAT_PASSENGER/CONTROLLER/GUNNER/
 DRIVER) and the `mount_type` already exported through `simulation.cpp`. The exact
 `Entity_CanFireWeapon` predicate (incl. the `Flags & 2` weapon-disabled gate and the local
-gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
-`pad_2b0` → `heldWeaponAdmIndex`; comment `Entity_CanFireWeapon` as the weapon-visibility
-gate) is proposed but unapplied (shared IDB state).
+gunner third-person condition) is the faithful rule.
 
 ### 13.6 The skin callback — `BoneCallback_org0_Skin @ 0x4e3620` (TALK / DEATH, witnessed 2026-09-12)
 
@@ -2920,10 +3004,12 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   function's DEFAULT slotType (neither 1 nor 2) walks the PERSON prox table
   through this same face walk — the consumer set of a person model's CFAC mesh:
   the knife kill zone (`Weapon_RaycastAndSpawnImpact @ 0x4e8460`, all three slot
-  legs), the NVG laser (`Entity_RenderNVGLaserBeam @ 0x5c6090`), wreck/falling/
+  legs), wreck/falling/
   shell physics (`@ 0x445500/0x4472f0/0x4482a0`), `compute_clamped_displacement
   @ 0x4ad6a0`, and `raycast_proximity_entities @ 0x538350`. Ordinary bullets
-  never see person CFAC — their person leg is the bone-sphere pair above.
+  never see person CFAC — their person leg is the bone-sphere pair above. (The NVG
+  laser, listed here until 2026-09-25, calls slots 2 and 1 only and never walks the
+  person table, §25.3.)
 - **The refNum self-site gates** (witnessed 2026-07-20; ported in
   `trace_projectile`): the mission-authored refNum group (BMS byte 153 →
   entity+533, D-NET-94) suppresses hits through two DIFFERENT reference
@@ -3941,8 +4027,10 @@ D-SND-10..15). All plays go through `Entity_GetProfileSlotSound @ 0x528300`
   `@ 0x4b42c1-0x4b42cd`) — net-pulled remote bodies stay silent, matching our
   net-peer motor skip. Ported: the freefall leg and, with the chute motor
   (2026-09-18, D-INF-20; `parachute_tick`, `parachute.cpp`), the chute edge 41/42, the flap 43,
-  the brake and the accumulator pair; the pair's visual consumer is unwalked (likely the canopy
-  flap).
+  the brake and the accumulator pair. The pair's visual consumer is the canopy draw (witnessed
+  and ported 2026-09-24): draw 1 of `BoneCallback_org0_World` renders the parachute model while
+  either word is nonzero and writes CTRL `PARA` = 2 x `+0x378` and `PARA_O` = 2 x `+0x37A`
+  (§13.1, §39.1).
 
 ### 17.5 The aim model — lead, error, concealment
 
@@ -4478,9 +4566,10 @@ passes its active `WeaponSlotState::tracer_shot_counter` through
 switches; slot-less NPC fire keeps the shooter-entity byte and draws its
 ammo from the §33.35 organic family, D-AI-5 closed 2026-09-09); the trail pool =
 `world/tracer_trails.{h,cpp}`, the spawn-time style select + NoTracers gate =
-`RoundSim::spawn`, the ribbons = `fire_presenter.cpp` via
-`get_tracer_trails()`; the round graphic / glow / smoke-anim residuals are
-D-AI-12.
+`RoundSim::spawn`, the ribbons = `renderer::compile_tracer_ribbons`
+(`tracer_frame.cpp`, rebuilt to the retail ribbon 2026-09-24, §25.3) uploaded by
+`fire_presenter.cpp` via `get_tracer_trails()`; the round graphic's procedural
+channels remain a D-AI-12 residual (the NVG laser is ported 2026-09-25, §25.3).
 
 ### 18.5 `Physics_RaycastTerrainAndSectors @ 0x539910` — the LOS raycast (closes the §16.5 raycast follow-up)
 
@@ -6955,7 +7044,7 @@ inserted with the GHDR/GPM+20 model radius as its explicit half extent
 (the four-argument call at 0x43F1E3..0x43F1F1). Retail also invalidates its baked terrain-item cache over the bounds;
 the current renderer has no corresponding cache. After step 64 the callback
 arms 62. Phase four stamps death immediately and enters the same step sequence.
-[orig: Entity_ProcessCraneDestruction @ 0x43EEE0; CVertexBuffer_RemoveFromList @ 0x605C10]
+[orig: Entity_ProcessBld2Destruction @ 0x43EEE0; Terrain_InvalidateTileCacheRegion @ 0x605C10]
 
 **Crane pairing and fade.** `cran` shares that collapse sequence but arms 1860
 while alive. If attachParent is empty, it finds the first pool-2 opposite
@@ -6966,7 +7055,7 @@ Its floor is terrain plus abs(parent COBJ-0 minZ) minus abs(maxZ). Contact
 clamps Z, sets health -1 and the class clock zero, and installs **0x4A92E0**;
 it preserves the downward velocity. Crane collapse passes scorch kind **zero**,
 so it emits no scorch and consumes no CRT random draw.
-[orig: crane callback @ 0x43FC70; Entity_ApplyGravityAndGroundCheck @ 0x43FB30;
+[orig: Entity_ProcessCraneCollapse @ 0x43FC70; Entity_ApplyGravityAndGroundCheck @ 0x43FB30;
 scorch call @ 0x440087..0x440095; sized scorch switch @ 0x606180]
 
 0x4A92E0 is the `upfx` move-function row, despite its water-physics IDB name.
@@ -6980,7 +7069,7 @@ immediately when the primary husk model is absent. The callback's replicated
 state send and the renderer's five intermediate fade words remain separate
 consumers; the native tests establish the motion and late-blast clock.
 [orig: Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
-compute_lod_fade_timers @ 0x5C3F40; move-function row @ 0x82AC40]
+Entity_PublishSwapFadePhases @ 0x5C3F40; move-function row @ 0x82AC40]
 
 **Emitter callback.** `emit` runs only phase zero with a loaded graphic and
 item definition. A still-live owned particle group is released, ownership
@@ -7075,7 +7164,7 @@ bound is only `> 0` `@ 0x4406C2`) or the loaded COBJ count are inert; the
 per-section damage bytes live in a bank that grows to the written section, so an
 unwritten section reads zero. Retail dereferences these unchecked (D-ITEM-7).
 [orig: Entity_UpdateSectionDamage @ 0x4406A0; WeaponOverlay_HandleDamage @ 0x53C4C0;
-entity_spawn_bone_trail_effect @ 0x43F8F0; crane callback @ 0x43FC70;
+entity_spawn_bone_trail_effect @ 0x43F8F0; Entity_ProcessCraneCollapse @ 0x43FC70;
 Entity_ApplyGravityAndGroundCheck @ 0x43FB30; Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
 squib callback @ 0x449810]
 
@@ -7143,7 +7232,7 @@ walks, including a linked husk first materialized after death. The upfx motor
 retains subtype-0x20 one-time state and subtype-0x80 late-blast gates. Live upfx
 rows use the time-region sound profile, handle-nibble stagger, SOUND userpoint
 or bounding-box center, same-set blend suppression, and type lifetimes
-31/72/62/10. [orig: compute_lod_fade_timers @ 0x5C3F40;
+31/72/62/10. [orig: Entity_PublishSwapFadePhases @ 0x5C3F40;
 Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
 Entity_UpdateEnvSoundEmitter @ 0x4A8080]
 
@@ -7233,10 +7322,24 @@ WHEEL, CHUNK_S/M/L, ROCK_S/M/L, CHUNKNP_S/M/L, CACTUS_, CHUNKSF_M — the
 `DeathPieceType` mirror in engine/runtime/world carries the full decoded constants and
 resolved effect/sound names), rolls the row probability, allocates from the
 256x180-B ring `g_death_piece_pool @ 0x26BAC58`
-(`DeathPiece_AllocSlot @ 0x57b4f0`, ex `SoundEmitter_AllocSlot`), renders ONLY
-its own section (mask piece[31] excludes every other), spawns AT the section's
-center (the render section-row dwords 14..16 through the entity orientation
-matrix `@ 0x4938bf-0x493900`), budgets `rand % lifetime + 1` bounces (floor
+(`DeathPiece_AllocSlot @ 0x57b4f0`, ex `SoundEmitter_AllocSlot`), starts in the
+wreck's live pose (corrected 2026-09-25): entity+4..+0x18 (position, BAM heading,
+pitch, roll) are copied into piece+4..+0x18 `@ 0x4936be..0x4936de` (heading and
+pitch then spin, roll stays); it stores the piece MODEL's bound radius (model+0x14;
+the stack slot read `@ 0x4936a7..0x4936ae` holds the model pointer since
+`@ 0x4934b6` / `@ 0x4934bf`, not the entity) at piece+0x84 and def+0x1BC at
+piece+0x88 unless zero (else 1.0, `@ 0x4936f1..0x493708`), collapses every other
+LOD-0 section of the piece model (piece+0x7C, `@ 0x493889..0x4938b0`), and spawns
+AT its section's COBJ centre: the model+0xB0 collision block's +0x6C array, the
+108-B runtime row's +0x38..+0x40 (`@ 0x4938b2..0x4938da`, the array read
+`@ 0x4938bf`), through the entity orientation matrix entity+0xB4 (rebuilt at entry
+from the live Euler triple and the entity scale +0x158, else def+0x1B8 unless the
+entity is a building, `@ 0x493455..0x4934ac`) and added to the piece position
+(`@ 0x4938eb..0x493900`). The COBJ centre is the section's render-object `abs` in
+the model's own axes: COBJ (x, y, z) = (abs.z, -abs.x, abs.y) (witnessed on
+`Cboat01X.3di`'s nine sections). (Until 2026-09-25 this read "spawns AT the
+section's center, the render section-row dwords 14..16", and the port used the
+render-object centres in the render axes.) It budgets `rand % lifetime + 1` bounces (floor
 lifetime/8), attaches the row trail effect + looped sound, and stamps the
 spawned-section mask into entity+0x138 (`1 << section`, an x86 `shl` that
 wraps the count mod 32).
@@ -7274,6 +7377,39 @@ scorch router with id 7 (`@ 0x492fdf..0x492fec`) before the final effect/sound.
 `DeathPieceSim::tick` now preserves that gate and call order; the focused
 `destruction` ctest pins scorch bounds/CRT texture selection, cactus
 suppression, bounce silence, and underwater-free silence.
+
+**The piece draw (witnessed and PORTED 2026-09-25, "Draw every death piece as its
+husk section, spun, at its own level").** The pieces draw with the frame's
+entities: `Terrain_CollectVisibleEntities @ 0x5c91bc` -> `DeathPiece_CollectVisible
+@ 0x57b560`, then `Terrain_RenderWorldScene
+@ 0x5c9575` -> `DeathPiece_RenderVisible @ 0x57b830`
+-> `DeathPiece_RenderSection @ 0x57b690`; the
+reflection pass runs the same pair `@ 0x5c85b7` / `@ 0x5c85c1` at water detail >= 2.
+The collect keeps a live slot (piece+0 nonzero) whose |dx| and |dy| to the eye are
+within radius + `Env_FogDistCurrent` (`jg` skips, `@ 0x57b5b4..0x57b5de`), whose view
+depth is under radius + fog (`jge` skips, `@ 0x57b607`) and that the viewport clip
+admits (`@ 0x57b614`), recording the projected radius (`dword_A784F0`). The render walk
+scales it by the detail term alone, `detail * 0.33 + 0.34` (no width normalization, no
+detail-3 substitution; 1.33 on the shipped profile, `@ 0x57b831..0x57b84a`), draws
+nothing at or under 0.75 px (`@ 0x57b87b`) and picks the level from the model's
+thresholds: level 0 above model+0x40 or for a one-level model, 1 above +0x44 with two
+levels, 2 above +0x48 with three, else 3, a level past the count clamped to the last
+(`@ 0x57b882..0x57b8ca`); a three-level model under its third threshold keeps level 3,
+and its empty mesh slot draws nothing (`@ 0x57b6bc`). The section draw takes the first
+section whose piece+0x7C bit is clear below the LEVEL's section count
+(`@ 0x57b6c5..0x57b6f4`), builds `EulerScale(piece pose, ftol(scale * 65536)) *
+T(-that section's COBJ centre)` (`@ 0x57b6f6..0x57b759`; the plain EulerScale when
+piece+0x7C is zero), gives every section that matrix and collapses each masked one
+(matrix[15] = 0, `@ 0x57b7d4..0x57b7e7`), and submits the level mesh with 0x20 unless the
+piece is strictly above the water plane (`@ 0x57b7fb..0x57b80e`). `sub_57B2E0 @ 0x57b2e0`,
+the LOD_FRAC name-table zeroing the render walk calls first, returns at once (its first
+entry's name is nonempty): a dead call, not reproduced. Port:
+`engine/runtime/world/death_piece_draw` (`OcclusionWorld::collect_death_piece_draws`,
+`death_piece_draw`), `renderer::death_piece_lod_scale` / `death_piece_lod_level`, and the
+Godot `DestructionPresenter` (one piece model per slot, the frame's draws applied from
+the occlusion leg, undrawn pieces hidden); ctest `death_piece_draw`, `destruction`,
+`present_passes`; GUT `destruction_present_pass_test`
+(`test_piece_draw_shows_one_section_at_the_piece_position`).
 
 ### 24.5 Death sounds + the wreck effect banks
 
@@ -7446,11 +7582,11 @@ the FFI structs.
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
 | D-ITEM-3 | FIXED 2026-09-23: blast/shot section marking plus material-energy continuation; the prior lawr/fgrenade-only interpretation was incorrect (§15.8) | @0x4E6C5E..0x4E6E6B; @0x4E9070; @0x4E9390 | destruction covers blast flags and repeated sounds; projectile_combat covers glass survival, energy exhaustion and the next obstruction. |
-| D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
+| D-ITEM-4 | Presentation FIXED 2026-09-25: every death piece draws its piece model (the loaded huskFinal model, else the husk model) showing only its own section at its own level, spun from the wreck's pose, with the explosion glow (§24.4). Open: one world-local PRNG stream stands in for the three retail streams | `Entity_SpawnDeathPieces @ 0x493400`; `DeathPiece_CollectVisible @ 0x57b560`; `DeathPiece_RenderVisible @ 0x57b830`; `DeathPiece_RenderSection @ 0x57b690`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | ctest `death_piece_draw` + `destruction`; GUT `destruction_present_pass_test`. The PRNG stream leg stays OPEN |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), and the S2C 0x26/0x2F/0x21 wire emits. Narrowed 2026-09-22: the type-1 leg is the knife kill zone (ported, §24.1), the occupant damage scale is ported in the blast leg, and `g_destroy_buildings` was already ported (`destruction::test_multiplayer_destroy_buildings_rule`). Narrowed 2026-09-23: the medic (type 3) queue leg's heal is ported (`Server_RouteMedicInteractions`, `GameEvent_HealPlayer @ 0x50de30`, §38.10). Carried 2026-09-23: `Entity_UpdateVehicleWreck @ 0x445500`'s hit-record write (the call @ 0x445936) and `Entity_KillBySlotId @ 0x42BCE0`'s section store (@ 0x42BD47) have no port; the hit record's class-callback legs lack the ammo +72 burn emitter and the 173 clip (the live round-hit path lacks them too); the item class-callback dispatch keys on `Entity::is_ai_capable` as the stand-in for a brain-class row, so gnrc 104652, stng 101906, rokt 104502 and the flags 104091/104093/104095 get no item callback; and the vehicle dying enter still kills the addeweap emplacement children, a list retail's child loop (@ 0x467B90..0x467BCC) does not walk, and clears their attacker (`destruction_test::test_vehicle_death_kills_authored_children`) | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eaddd`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | FIXED: all #645 deferred item classes, cohort clocks, shared fade/ambient/scoring and ordered 0x21/0x26/0x12 effects are ported (§24.3a/b) | The class table selects event and motor; gnl2/barrel retain requested explosion counts and SP PRNG history | Invalid target/model/section data is bounded as documented in §24.3b; the uninitialized SP shrapnel pointer is refuted |
-| D-ITEM-8 | FIXED (§24.3a): the crane/water-tower special death (the "scrane" pairing and the crane callback `@ 0x43fc70`), `Entity_ProcessCraneDestruction @ 0x43eee0`, the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are ported (`item_events.cpp`) | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
+| D-ITEM-8 | FIXED (§24.3a): the crane/water-tower special death (the "scrane" pairing and the crane callback `Entity_ProcessCraneCollapse @ 0x43fc70`), `Entity_ProcessBld2Destruction @ 0x43eee0`, the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are ported (`item_events.cpp`) | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
 | D-ITEM-9 | The Falling/Generic wreck callbacks and unitType-3's four short slope rays ground on TERRAIN only. Falling/Generic use sec0 z extents synthesized from LOD-0 primitive bounds (upright leg only); PiecePhysics uses the husk-flag pick — the husk collision shell's floor for a husked piece (the section-AABB union stands in for the CMDL header z-lo), `box_z_lo` otherwise. Static's separate terrain/water thresholds are ported as described in §24.5 | `Entity_RaycastGroundHeightAndObject @0x414320` (Falling/Generic, terrain + objects, mask 0x200000); `Entity_RaycastGroundHeight @0x4142c0` x4 from `Entity_CalcSlopeForces @0x4b0b00`; section-row +84/+88 extents `@0x461e23-0x461e4b` | a wreck dying on a roof can sink to terrain below; port the object-return leg for both query shapes and verify the generic runtime section-row fields against the render-model builder |
 | D-ITEM-10 | `dword_2C25C64` is resolved and both routed/specialized water crossings now emit `Effect_MedSplash`; fallback sounds are ported (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`, and specialized `EXPLO_HELO_WATER` / `EXPLO_VEHCL_LG`). The def per-item landing (+140) and water (+156) sound slots remain unmodeled | `@0x4940c6-0x494100 / @0x49417c-0x4941af`; specialized twins `@0x48f547..0x48f588 / @0x48f726..0x48f759` | items authoring custom impact sounds still play the matching fallback; splash visuals now route through the ordinary destruction-effect presenter |
 | D-ITEM-11 | The round exclusion set skips shooter + mount (Controller/Gunner/Driver seats only — a Passenger's rounds can hit their own vehicle) + the Gunner mount's standing-on carrier, PORTED 2026-07-18 (§15.8a); the FOURTH slot — `projectile+388` ← the fire request's dword +40 — is consumed by every prox walk but its fill is an uninitialized extra on the client fire path, provenance OPEN (the server path `Server_ClientFiredRound @ 0x50baa0` unwalked) | `ray[17..20] @ 0x4ea2a5-0x4ea2f8`; `RoundData_SpawnRound @ 0x4ec0d0` ([97] ← hitData+40); compares `@ 0x4e5572/@ 0x4e5782/@ 0x4e5983/@ 0x4e4c4e` | firing from Controller/Gunner/Driver seats no longer self-hits the hull; walk 0x50baa0's cmd[21]→spawn plumbing to close the +388 slot |
@@ -7628,7 +7764,7 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   in the order `C−A−B (0,0)`, `C+A−B (1,0)`, `C−A+B (0,1)`, `C+A−B (1,0)`,
   `C+A+B (1,1)`, `C−A+B (0,1)` in `Env_TerrainLightCombined | FF000000`,
   appended per texture via `Terrain_ParseSectorTypeCallback @0x5cf390`. The
-  drawer `Scar_DrawBatches @0x5ccd10` (ex `Terrain_RenderFoliageBatches`, renamed; caller `Terrain_RenderSceneWithReflection @0x5c9658`
+  drawer `Scar_DrawBatches @0x5ccd10` (ex `Terrain_RenderFoliageBatches`, renamed; caller `Terrain_RenderWorldScene @0x5c9658`
   after the lit sector entities): `CD3DDevice_SetFogAndBlendMode(dev, 0)` (the
   fog COLOUR select — scene fog colour; it never touches a blend state),
   identity world, vertex shader 0, FVF 0x142, the 1000-vertex dynamic VB
@@ -7642,7 +7778,7 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
   word — `0 -> 0x120651` `@0x5cc315`, `1 -> 0x460651` `@0x5cc321` (the
   decompiler shows the latter as a bogus `offset loc_46064F+2`), else 0 — fed
   to `GfxShader_Create1TexModeId(tex, modeWord) @0x679030`, then clamp wrap
-  (`CGfxTexture_SetSamplerAddressing (ex sub_680720)(effect, 1, 0, 0, 0)`). Every strip but bhole1 (idx 27) carries
+  (`GfxShader_SetFfpLightingSources (ex CGfxTexture_SetSamplerAddressing, ex sub_680720)(effect, 1, 0, 0, 0)`: FFP lighting on with the material sources on MATERIAL, not a sampler address mode). Every strip but bhole1 (idx 27) carries
   modeId 0. Decoded through the mode-word layout
   ([render-material-re.md](../render/render-material-re.md) "The mode word"):
   **scorch 0x120651** = SRCALPHA/INVSRCALPHA blend, stage 0
@@ -7673,7 +7809,7 @@ IDB-renamed 2026-08-21 (the old names are in 24.8).
 - **Clear** `Scar_ClearEntriesByEntity @0x5ccec0`: zeroes the owner's
   shared-ring slots and memsets its entity ring, then
   `Scar_FreeProjectedDecals`; called from `Entity_Destroy @0x43e8e4` (24.3)
-  AND `Entity_AttachToVehicle @0x43c155` (the boarding passenger's scars).
+  AND `Entity_AttachCarriedObject @0x43c155` (the boarding passenger's scars).
 
 **Scar owner-visibility re-grill (2026-09-21, ADR 0040 B).** The live
 retail `Jointops.exe.kong.i64` at imagebase `0x400000` was checked by
@@ -7715,10 +7851,18 @@ frame (Z up), so the packer folds it `(x, y, z) -> (y, z, x)` onto the
 render-part node, the frame its mesh is built in. The device state is per strip from the
 witnessed mode words (`world::scar_texture_strip_mode_word`,
 `renderer::decode_scar_strip_mode`, the draw list's `strip_mode_words`):
-`scar_quad.gdshader` carries the scorch state (blend_mix, unshaded, fog,
+`scar_quad.gdshader` carries the scorch state (blend_mix, unshaded,
 depth_draw_never, cull_back, no alpha test, `saturate(2 · tex · COLOR)` in
 gamma space) and `scar_quad_hole.gdshader` the bhole state (plus the
-GREATER/128 discard, depth_draw_always, cull_disabled); Godot's front face is
+GREATER/128 discard, depth_draw_always, cull_disabled). **Fog (fixed
+2026-09-24, "Fog the impact scars toward the scene fog colour"):** both states
+carry FOGENABLE, the 0x20000 bit of the mode words 0x120651 / 0x460651
+(`CGfxShader_ApplyPass @0x683243`), and the drawer selects the scene fog colour
+(`CD3DDevice_SetFogAndBlendMode(dev, 0) @0x5CCD33`); the shaders fog the colour
+toward `opennova_fog_color` themselves through
+`godot/shaders/effect_fog.gdshaderinc` (alpha is not fogged), since Godot's
+Environment fog is never enabled (`game_world.tscn` `Environment_clear`), so
+before the fix every scar drew unfogged; Godot's front face is
 clockwise like D3D's but in a right-handed frame, so the witnessed order is
 already front on the struck side under both of the packer's folds (world and
 entity-local are ROTATIONS), so both rings keep it and the scorch `cull_back`
@@ -7773,11 +7917,17 @@ the style's table count, [4] count, [5] age, [6] style id, [7] style desc ptr,
   `[orig: CEffectChannel_Init @ 0x5db130]` binds the style block per id (case
   map 25.2) and the shader: stock device slot 6 for the tracer families
   `[orig: CD3DDevice_GetRenderStateByIndex(dev, 6) @ 0x5db1cf]`, pool+0x3004/8
-  for smoke/NVG, pool+0x300C for the distortion pass (writers unwitnessed).
+  for smoke/NVG, pool+0x300C for the distortion pass (all three built by
+  `CEffectEmitterPool_CreateShaders @ 0x5dc8f0`, witnessed 2026-09-24, §25.3).
 - **Append** `[orig: CEffectChannel_AppendPoint @ 0x5db290 — ex kong
   "CNetRateSampler_RecordSample", renamed]`: ring append (full -> drop oldest);
   `w = 1.0 + PRNG_Next16() * 1e-5` on jitter styles (desc+4: smoke/sniper/NVG),
-  else exactly 1.0; every append resets the channel age.
+  else exactly 1.0; every append resets the channel age. **A fresh channel starts at
+  count -1** (witnessed 2026-09-24): `CEffectChannel_Init` stores -1 `@ 0x5db233`, and
+  the append only increments a negative count (`jl @ 0x5db2c3 -> count++ @ 0x5db333`:
+  no store, no age reset), so a round's first pre-move point (the spawn origin) never
+  enters the ring. PORTED 2026-09-24 ("Start a fresh tracer channel at count -1",
+  `TracerTrailPool::alloc/append`).
 - **Tick** `[orig: CEffectEmitterPool_Tick @ 0x5db830, once per 62 Hz frame from
   Game_ProcessMainFrame @ 0x526758]`: per active channel `age < cap -> age++`,
   else pop the oldest point; kill + empty frees the slot. Because appends re-arm
@@ -7785,7 +7935,9 @@ the style's table count, [4] count, [5] age, [6] style id, [7] style desc ptr,
   cap-length grace then evaporates one point per tick.
 - **Round integration** `[orig: Projectile_UpdatePhysics @ 0x4e9d70]`: one append
   per tick at the PRE-move anchor (guided @ 0x4ea04f, ballistic @ 0x4ea97a) —
-  the streak head trails the round by a tick; the anchor is
+  the streak head trails the round by a tick, and because the first append only
+  lifts the count from -1 to 0 the streak starts one tick of flight out from the
+  muzzle and appears a tick after the spawn; the anchor is
   `Projectile_GetTrailAnchorPos @ 0x4e64e0` (ex kong "Entity_GetRecoilOffset",
   renamed): position, or position + a rotated `{0, ampY sin, ampZ sin}` spiral
   offset when round+0x2AC carries the oscillation block (the rocket corkscrew;
@@ -7831,39 +7983,118 @@ Main pass per channel `[orig: CEffectEmitterPool_RenderMainPass @ 0x5dcaf0]`,
 distortion pass over +0x828-flagged channels only `[orig:
 CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40, gated by
 CEffectEmitterPool_HasDistortionChannels @ 0x5db7f0 behind a backbuffer-capture
-FrameFX leg]`. The normal-pass geometry:
+FrameFX leg]`. **Rewritten 2026-09-24** (the rendering parity pass: the ribbon build,
+the three materials, fog and the frame slot are PORTED, "Port the tracer ribbon build
+and its three materials"; `engine/runtime/renderer/tracer_frame.cpp` +
+`godot/shaders/tracer_ribbon_{stock,smoke,nvg}.gdshader`). The normal-pass geometry
+`[orig: @ 0x5dc0bb..0x5dc8e0]`:
 
-- One +/- right vertex pair per point over points [0..count-2] — the newest
-  point steers direction only (the visible head is the second-newest point);
-  `right = normalize(cross(dir_to_next, camera - point))`.
-- Half-width = `max(size[idx] * point.w, dist * ~1.83e-8 fixed / proj)` — the
-  distance term is the minimum-screen-width clamp (`flt_7DC69C = 1.83e-8`
-  against the 16.16 camera distance; the projection divisor operand is an open
-  item — ported as 0.0012/u).
+- One vertex set per point over points [0..count-2]; the newest point steers
+  direction only (the visible head is the second-newest point).
+- **Side vector**: `c = normalize(p - eye) x normalize(next - p)` in retail's
+  Y-negated upload frame, then `r = normalize(c - F (c . F))` with F = the view
+  matrix's third column (`viewMatrix @ 0xA7845C`: `_13/_23/_33` = `flt_A78464/74/84`)
+  `[orig: @ 0x5dc2f9..0x5dc3ce]`. Every zero-length normalize yields a zero vector
+  (`@ 0x5dc27c`, `@ 0x5dc2db`, `@ 0x5dc3ba`), so a stalled segment draws a
+  zero-width pair (it does not keep the last facing).
+- **Half-width** = `max(size[idx] * point.w, min_width)` with `min_width =
+  int(min(|eye - p|_q16, 2147418112.0)) x (1 / mat._11) x 1.831054774e-8`
+  (`@ 0x5dc0d6..0x5dc0f7`, `@ 0x5dc46f..0x5dc484`; `mat @ 0x2721980` is the
+  `D3DXMatrixPerspectiveFovLH` projection), so the clamp scales with cot(hfov/2): a
+  4x scope divides it by about 4.
 - Table index = `(count - i) + age - 1`, clamped per table — one expression
   makes the ramp BOTH the along-trail gradient and the post-death fade (the
-  whole trail slides down the ramp as age grows). The oldest pair takes the
-  style base color (+0x14). Colors are used RAW in the normal pass; the cubic
-  alpha boost `255 - ((255-a)^3 >> 16)` belongs to the DISTORTION pass only.
-- B=0 styles: 36-B FVF verts (pos + packed color; UV dwords left UNWRITTEN in
-  the shared scratch `g_TrailStripVertexScratch @ 0x2BED830` — the stock trail
-  shader cannot be sampling a texture), one D3DPT_TRIANGLESTRIP draw
-  `[orig: Render_DrawDynamicPrimitive @ 0x56be90]`.
-- B=1 styles (smoke/sniper/NVG): 4 verts per point (a 3-quad-wide ribbon),
-  indexed triangle-list draw, `GetTickCount`-driven wave animation from the
-  style +0x81C/+0x820/+0x824 params (x 0.3 / 0.2 / 4e-4 consts) and animated
-  UVs; the distortion pass widens x1.2 (`flt_7D8FB4`).
-- Fog: additive styles force the fog COLOR to black
-  `[orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x677740 — a fog-color
-  select, NOT a blend set]` so distance fog fades an additive streak out
-  instead of tinting it; smoke styles keep scene fog (mode 0). Shader pass id
-  0x10520000 via `CGfxShader_ApplyPass @ 0x683190`.
+  whole trail slides down the ramp as age grows). The oldest point (i = 0) takes
+  the style base colour (+0x14) on every vertex. Colors are used RAW in the normal
+  pass; the cubic alpha boost `255 - ((255-a)^3 >> 16)` belongs to the DISTORTION
+  pass only.
+- **B=0 styles** (style +4 clear): two vertices per point, one strip draw from four
+  vertices up (`@ 0x5dc8cb`; `Render_DrawDynamicPrimitive @ 0x56be90`).
+- **B=1 styles** (style +4 set: smoke, sniper, NVG): four vertices per point, the
+  3-quad cross-section `[orig: @ 0x5dc4f6..0x5dc58d]`: V0 `P + r s` base colour
+  (+0x14) uv0 `(ui + uoff, -A)` uv1 `(u1, -B)`; V1 `P + 0.4 r s` ramp uv0
+  `(ui + uoff + voff, -0.4 A)` uv1 `(u1, -0.4 B)`; V2 `P - 0.4 r s` ramp
+  (`+0.4 A`, `+0.4 B`); V3 `P - r s` base (`A`, `B`). With T = `GetTickCount`
+  (`@ 0x5dc104`): `ph = T x s824 x 0.0004`, `uoff = 0.1 w + ph`, `ui = i x 0.3 x
+  s81C`, `u1 = i x 0.11 x s81C + ph`, `A = 0.2 x size x w x s820`, `B = 0.2 x w x
+  s820`, `voff = 0.1 (c > 0 ? -c^4 : c^4)` with c = the segment's dot with the eye
+  ray. The index list (18 per point while i < count - 2) is built
+  `@ 0x5dc6ff..0x5dc793`; the indexed list draws from eight vertices up
+  (`@ 0x5dc89b`). The distortion pass widens x1.2 (`flt_7D8FB4`).
+- **Wave words** (+0x81C/+0x820/+0x824): rocket 1/1/1, at4 2/1.5/1, grenade 8/4/1,
+  NVG 2/2/0.1, sniper 0/0/0 (static `.data @ 0x8458B0`). The distortion flag
+  (+0x828) is set for rocket, at4 and sniper red/green.
+- **Materials** (`CEffectEmitterPool_CreateShaders @ 0x5dc8f0`): stock device
+  slot 6 (std/rapid/sniper/df1; mode word 0x222 via `CEffectChannel_Init @ 0x5db1d6`
+  / `sub_6780A0 @ 0x678113`): ONE/ONE, colour = alpha = DIFFUSE, untextured. Smoke
+  (pool+0x3004): `smoktest.pcx` on two stages, SRCALPHA/INVSRCALPHA, stage 0
+  alpha = SUBTRACT(DIFFUSE, T), colour = DIFFUSE; stage 1 alpha = SUBTRACT(CURRENT,
+  T) on uv1, colour = CURRENT. NVG (pool+0x3008): SRCALPHA/ONE, alpha = `D.a (1 -
+  T0.a)(1 - T1.a)`. The render-state descriptor layout (`RenderState_ApplyToDevice
+  @ 0x681920`): [0] stage count, [1] SRCBLEND, [2] DESTBLEND, [3] blend enable,
+  stage k at [4 + 9k]: ALPHAOP, ALPHAARG0, ALPHAARG1, ALPHAARG2, COLOROP, COLORARG0,
+  COLORARG1, COLORARG2, RESULTARG.
+- **Fog**: every ribbon draw fogs (pass flags 0x10520000 `@ 0x5dc86c`, via
+  `CGfxShader_ApplyPass @ 0x683190`); the fog COLOR is black for the +0 (additive)
+  styles (`CD3DDevice_SetFogAndBlendMode(dev, 2)` `@ 0x5dc85a`; `@ 0x677740` is a
+  fog-colour select, not a blend set), else the scene colour (mode 0). The
+  shaders carry the fog themselves (Godot's Environment fog is never enabled).
+- **Frame slot**: `CEffectEmitterPool_RenderMainPass` (`@ 0x5dcaf0..0x5dcb05`) draws
+  only when exactly one argument is nonzero; it is called `(0, eyeBelow)`
+  `@ 0x5c95ac` and `(1, eyeBelow)` `@ 0x5c9687`, `eyeBelow` = `setz @ 0x5c959d` over
+  the eye-above latch `setnl @ 0x5c93b0`: below the water the ribbons draw in the
+  far-side slot, at or above it in the camera-side slot. Ported as `tracer_rung()`
+  on `kRungTracerFarSide` / `kRungTracerCameraSide`. Each channel is its own draw
+  call in pool order (the slot walk `@ 0x5dcb17..0x5dcb2e`), not a joined
+  per-family strip.
+- **Distortion pass** (pool+0x300C, built by `CEffectEmitterPool_CreateShaders @ 0x5dc8f0`):
+  one stage, colour SELECTARG(TEXTURE) = slot 2, alpha SELECTARG(DIFFUSE),
+  SRCALPHA/INVSRCALPHA, texgen state 14 (`TCI_CAMERASPACEPOSITION`,
+  COUNT3|PROJECTED) through the projective screen matrix `FrameFX_DistortionPass`
+  builds (`@ 0x5837ff..0x5838d2`): u = 0.5 ndc.x + 0.5 + half a 256 texel; scene fog
+  (`SetFogAndBlendMode(0)` `@ 0x5dc0a6`). It runs inside FrameFX's type-0 row with
+  slot 2 = the 256B work target (`FrameFX_DistortionPass @ 0x583928`). PORTED
+  2026-09-24 ("Draw the distortion particles and tracer ribbons in FrameFX's type-0
+  row"): `compile_tracer_ribbons(TracerPass::Distortion)` +
+  `godot/src/particle/effect_distortion_drawer.cpp`; the gate
+  `CEffectEmitterPool_HasDistortionChannels` is `FirePresenter`'s channel presence.
 - `Render_DrawTrailOrBeamSegments @ 0x5dcb80` is the immediate-points sibling
-  (caller-supplied point array, same style machinery) — the NVG laser draws
-  through it with style 8 `[orig: Entity_RenderNVGLaserBeam @ 0x5c6090, ex kong
-  "Entity_BuildProjectileTrailRay", renamed: gate = weapon def+8 flag
-  0x40000000 + g_NVGActive + not the local player; aim ray clipped by the
-  vehicle/infantry proximity raycasts, max 8.0 u, one sample per 0.25 u]`.
+  (caller-supplied point array, same style machinery; the ramp is anchored to the
+  run's end, age = colour count - point count, `sub eax, ebp @ 0x5dcc34`); ported
+  as `renderer::append_tracer_beam`. The NVG laser draws through it with style 8
+  `[orig: Entity_RenderNVGLaserBeam @ 0x5c6090, ex kong
+  "Entity_BuildProjectileTrailRay", renamed]`, witnessed in full and PORTED
+  2026-09-25 ("Draw the NVG IR laser beams of armed remote players"):
+  `Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0` (called `@ 0x5c9695` in the post-particle overlay tail) walks
+  the BySide person list (`dword_2984890`, 20-B rows, count `dword_2984888`). The gate
+  `@ 0x5c609a..0x5c60e6` requires entity+0x157 == 0 (the seat attach bone: not
+  seat-mounted), entity+0x298 (the held AdmDef entry) with def+8 & 0x40000000
+  (LaserBeam), `g_NVGActive`, `g_camera_mode == 0`, and not the local player. The
+  entity+0x298 writers are draw 5 (`BoneCallback_org0_World @ 0x4e3cc7`, only under
+  `Entity_CanFireWeapon`, from +0x2B0, which a drawn NPC never carries), the client's
+  player-record store (`NetPacket_SerializePlayerState @ 0x4c120d`, +0x2B0 `@ 0x4c11f2`)
+  and the detach clears (`Entity_DetachFromVehicle @ 0x4356aa`,
+  `entity_detach_from_parent @ 0x494c26`, `entity_detach_from_mount @ 0x546dd2`): the
+  beam is a multiplayer effect, other human players holding an M4-family LaserBeam
+  weapon. The action point is the held def's +0x2D4 userpoint on its +0x170 model (the
+  gfx3) through the held-weapon anchor matrix (`Entity_ComputeBoneTransformWithClear
+  @ 0x4dc950` -> `Entity_ComputeBoneTransform @ 0x401890` -> `Entity_GetCameraTransform
+  @ 0x4b8c00` over `Entity_BuildBoneTransformMatrices @ 0x4b1290`'s optional out matrix,
+  the matrix draw 5 places the gun with, then `Userpoint_ComputeWorldTransform
+  @ 0x56c420` while parentSlot != 3, `@ 0x4019a0`). The 8.0 u ray (end = pos + ((dir <<
+  5) >> 2)) is clipped by the STATIC (slot 2) then POOL-1 (slot 1) proximity walks
+  (`Projectile_RaycastProximitySlots @ 0x5c61ef / @ 0x5c6218`, each replacing only a
+  nearer hit; persons, terrain and water never clip; the former "vehicle/infantry" wording
+  was the IDB comment's error); one sample per 0.25 u while `(i << 14) < clip`, up to 32,
+  then the clip point twice (`@ 0x5c6233..0x5c637e`); drawn when the run holds more than
+  one point (`@ 0x5c6384`, `@ 0x5c6399`). Port: `engine/runtime/world/nvg_laser`
+  (`nvg_laser_beam_drawn`, `nvg_laser_clip_distance`, `nvg_laser_beam_points`),
+  `renderer::append_nvg_laser_overlay` into `SceneOverlaySlot::NvgLaserBeams` with the
+  pool+0x3008 combine as `SceneOverlayShading::NvgLaser` (SRCALPHA / ONE, alpha
+  `D.a (1 - T0.a)(1 - T1.a)`, T1 on the second coordinate set, a wrapping sampler, fogged
+  per vertex toward black), and `FirePresenter::append_nvg_laser_beams`, which takes the
+  action point off the drawn third-person gun; ctest `nvg_laser`,
+  `renderer_scene_overlay`; GUT `nvg_laser_beam_test`.
 
 ### 25.4 The round graphic + glow legs (witness completed)
 
@@ -7900,19 +8131,20 @@ FrameFX leg]`. The normal-pass geometry:
 | Spawn-time friendly/enemy style select + NoTracers gate | MATCHING (the rules bit itself = the D-AI-8e net seam, sim field `no_tracers_rule`) | `round_sim.cpp` spawn at the 0x4ec740 cite; ctest section 7 |
 | Per-tick pre-move append + death append | MATCHING | `RoundSim::tick`; ctest section 7 |
 | Style tables (12 ids: colors/sizes/caps/base/flags) | MATCHING (data transcribed from the six static blocks + the builder) | `tracer_frame.cpp` (the transcribed style tables); caps in `tracer_trails.h` |
-| Ribbon geometry (pairs, facing, widths, ramp index) | MATCHING (structural; min-width proj divisor approximated 0.0012/u) | `tracer_frame.cpp` ribbon build; ctest `renderer_tracer_frame` |
-| Blend/fog (additive fog-black vs alpha smoke) | MATCHING (family-level; Godot `disable_fog` stands in for fog-to-black — D-AI-12c) | materials in `fire_presenter.cpp` |
-| B=1 wave anim + 4-wide cross-section + anim UVs | divergent (single-ribbon stand-in; params recorded 25.3) | D-AI-12a |
-| Distortion pass (+0x828 channels) | not ported (witnessed structurally) | D-AI-12b |
+| Ribbon geometry (side vector, widths, min-width clamp, ramp index) | MATCHING (2026-09-24: the view-plane side vector, the zero-vector normalize and the `1/mat._11` min-width divisor ported, D-AI-12g closed) | `tracer_frame.cpp` ribbon build; ctest `renderer_tracer_frame` |
+| Blend/fog (the three materials, fog to black vs scene colour) | MATCHING (2026-09-24: stock slot 6, smoke and NVG materials as witnessed; every ribbon fogs in its shader, D-AI-12c closed) | `godot/shaders/tracer_ribbon_{stock,smoke,nvg}.gdshader`; `fire_presenter.cpp` |
+| B=1 wave anim + 4-wide cross-section + anim UVs | MATCHING (2026-09-24, D-AI-12a closed) | `tracer_frame.cpp`; ctest `renderer_tracer_frame` |
+| Frame slot (far-side vs camera-side call) | MATCHING (2026-09-24: `tracer_rung()`, one draw per channel in pool order) | `tracer_frame.h`; `render_order.h` |
+| Distortion pass (+0x828 channels) | MATCHING (2026-09-24: drawn in FrameFX's type-0 row on 256B, D-AI-12b closed) | `compile_tracer_ribbons(TracerPass::Distortion)`; `godot/src/particle/effect_distortion_drawer.cpp` |
 | Round item graphic + TRACER_SCALE/WIDTH channels | visible TrcrID item model ported (including friendly/enemy fallback and non-tracer suppression); procedural SCALE/WIDTH channels unported | `Simulation::get_throwable_visuals` + `throwable_presenter.cpp`; D-AI-12d |
 | light_move glow | ported 2026-08-16 through the D-RLIT-4 light pool (`Simulation::fill_round_glows` → `EffectLightDirector::sync_round_glows`) | D-AI-12e (closed leg) |
-| NVG laser beam | not ported (witnessed; needs NVG mode) | D-AI-12f |
+| NVG laser beam | MATCHING (ported 2026-09-25: `world/nvg_laser` gate, ray clip and point run; `renderer::append_tracer_beam` style 8 + `renderer::append_nvg_laser_overlay` in the `NvgLaserBeams` overlay slot with `SceneOverlayShading::NvgLaser`; `FirePresenter::append_nvg_laser_beams`) | D-AI-12f closed |
 
 ### 25.6 Divergences
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-12 | Tracer ribbon residuals: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `Simulation::get_throwable_visuals` and `throwable_presenter.cpp`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) presented 2026-08-16 through the D-RLIT-4 light pool (mode 1, radius/2 spawn lift, per-tick follow at the raw position, despawn on drop); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness |
+| D-AI-12 | Tracer ribbon residuals. **NARROWED 2026-09-24** (the rendering parity pass, §25.3): (a), (b), (c) and (g) are FIXED ("Port the tracer ribbon build and its three materials"; "Draw the distortion particles and tracer ribbons in FrameFX's type-0 row"): the cross-section, the wave and the animated UVs, the distortion pass, the per-shader fog (black for the additive styles, the scene colour otherwise) and the `1/mat._11` min-width divisor are ported. The original facets, kept for their witnesses: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `Simulation::get_throwable_visuals` and `throwable_presenter.cpp`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) presented 2026-08-16 through the D-RLIT-4 light pool (mode 1, radius/2 spawn lift, per-tick follow at the raw position, despawn on drop); (f) CLOSED 2026-09-25: the NVG laser beam is ported (`world/nvg_laser`, the scene overlay's `NvgLaserBeams` slot; §25.3); (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness; open after 2026-09-25: (d), (h), (i), (j) |
 
 ### 25.7 IDB write-backs (2026-07-18 session, saved)
 
@@ -7936,18 +8168,12 @@ Entry comments on `@ 0x5db290 / 0x4e64e0 / 0x4e8280 / 0x5db830 / 0x5db3a0 /
 
 ### 25.8 Open follow-ups
 
-1. The stock shader in device slot 6 (`this[41]`,
-   `CD3DDevice_GetRenderStateByIndex(dev, 6)`) — its loader/technique (blend
-   states) is unwalked; the pool+0x3004/8/C smoke/NVG/distortion shader writers
-   likewise.
-2. The `fdiv` projection operand in the min-width clamp (25.3) — resolve and
-   replace the 0.0012 approximation.
-3. The TRACER_SCALE/TRACER_WIDTH node-channel evaluator (the 0x41bxxx undefined
+1. The TRACER_SCALE/TRACER_WIDTH node-channel evaluator (the 0x41bxxx undefined
    region) — define + walk; the item graphic now renders without these
    procedural scale/width channels.
-4. The round+0x2AC spiral-offset writer (the rocket corkscrew source).
-5. The style blocks' +8/+0xC words — find the consumer (possibly the distortion
-   or an unwalked LOD path).
+2. The round+0x2AC spiral-offset writer (the rocket corkscrew source).
+3. The style blocks' +8/+0xC words — find the consumer (possibly an unwalked LOD
+   path).
 
 ### 25.9 The in-flight round effect's lifecycle — the `move`-row emitter (witnessed + ported 2026-08-21)
 
@@ -8946,7 +9172,7 @@ armor gate (§17.2) and the damage gates read that pair (`mission_item_traits` c
 
 | Bit | Constant | Meaning | Witness |
 |---|---|---|---|
-| 0x1 | `kEntityFlagCarried` | hidden: a carried object while attached to its carrier (the flag/carryable pickup family), and the WAC hideSSN bit; distinct from 0x40, which marks the CARRIER/mounted body. The destruction sweeps skip it and it rides the `0x2000001` / `0x43` composites | `[orig: Entity_AttachToVehicle @ 0x43C130; WacCmd_HideSsn @ 0x4F7750 (or Flags,1 @ 0x4F779D); unhideSSN @ 0x4F77FD]`; the Match flag producer (§15.5 D-COL-8 flag leg); readers include `WacCmd_SsnArea` @ 0x4F1081 |
+| 0x1 | `kEntityFlagCarried` | hidden: a carried object while attached to its carrier (the flag/carryable pickup family), and the WAC hideSSN bit; distinct from 0x40, which marks the CARRIER/mounted body. The destruction sweeps skip it and it rides the `0x2000001` / `0x43` composites | `[orig: Entity_AttachCarriedObject @ 0x43C130; WacCmd_HideSsn @ 0x4F7750 (or Flags,1 @ 0x4F779D); unhideSSN @ 0x4F77FD]`; the Match flag producer (§15.5 D-COL-8 flag leg); readers include `WacCmd_SsnArea` @ 0x4F1081 |
 | 0x2 | `kEntityFlagDead` | dead (kill writes `Flags \|= 6`) | `[orig: @ 0x43fbf6]`; the SP dead gate reads `entity+36 & 2` (§20) |
 | 0x4 | `kEntityFlagHusk` | items/buildings: husk swap (with 0x2 on kill) | `[orig: @ 0x43fbf6]`; §24 |
 | 0x4 | `kEntityFlagNVGWorn` | organics: NVG worn — draw gate for the goggle model; same bit, kind-dependent read | `[orig: draw @ 0x4e3b54]`; §13.1 draw 3 |
@@ -8955,9 +9181,9 @@ armor gate (§17.2) and the damage gates read that pair (`mission_item_traits` c
 | 0x20 | `kEntityFlagParachute` | parachute deployed (motor ported 2026-09-18, D-INF-20) | `[orig: repulsion radius leg @ 0x4b3aac]`; §15.4 |
 | 0x40 | `kEntityFlagMounted` | carried / vehicle-mounted; the AI guard family also reads it | `[orig: Entity_AttachToVehicleSlot @ 0x494752-0x494775]`; §1, §15, §17, D-COL-9 |
 | 0x80 | `kEntityFlagAiClimb` | org1 ladder-CLIMB order mode (named 2026-08-15): the capped sixteenth-step Z chase to +0x304 replacing gravity (floor -16384), PORTED §30. The eighth-step x/y chase to +0x2FC/+0x300 is the self-attachment move (attachParent == self) and does not test this bit. Writers: ChangeAI sub 23 (runtime-only, no dfx2med token; NOT sub 17, which is the AI-slot CLIMBER bit 0x400, §32.2) and the BMS attribute fold (FlyingOrganic 0x4000 and attribute 0x20000, §38.1), both ported | `[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; self-attachment move @ 0x4bf651-0x4bf664; command case 0x17 @ 0x43afae; Entity_SpawnFromBMSRecord @ 0x40EE2A, @ 0x40EE70..0x40EE94]`; §30 |
-| 0x100 | `kEntityFlagPlayer` | player — the wire Player dispatch class; gates held-weapon draws and the death-event leg | §5.10b (net-re); §13.2; §16.2 |
+| 0x100 | `kEntityFlagPlayer` | player — the wire Player dispatch class; gates the upper-body weapon channel (`Entity_BuildBoneTransformMatrices @ 0x4b14a7`) and the death-event leg. Draw 5 (§13.2) has NO `Flags & 0x100` test: the former "draw gate `@0x4e5073`" cite is a raycast skip (`test [ebp+24h],100h` `@0x4e5055`) inside `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (corrected 2026-09-24) | §5.10b (net-re); §13.2; §16.2 |
 | 0x200 | `kEntityFlagQueuedMount` | the queued Co-op spawn-marker mount (named 2026-09-12): set by the no-pick team-2 marker arm together with +364/+384 = the marker's parent; consumed by the first org2 body update (restore +0x28 from +0x180 when null, toggle, clear); the toggle's `Entity_FindBestSeatSlot(groundEntity)` arm keys on it alone, with no scan fallback — a deck stander never has it | `[orig: Server_PositionPlayerForSpawn @ 0x50D442..0x50D45A; Entity_UpdateInfantryPlayerBody @ 0x4B424A..0x4B4272; Entity_TryEnterNearestVehicle @ 0x4368CF..0x436903]`; §23.1; vehicle-client-movers-re §36 |
-| 0x400 | `kEntityFlagReflective` | BMS Reflective trait | `[orig: @ 0x40e9f0]` |
+| 0x400 | `kEntityFlagReflective` | BMS Reflective trait; also set on every vehicle (ItemDefType 1) by `Entity_InitFromModel @ 0x40E208..0x40E20A`, which the sim keeps as an item-type trait (§39.3) | `[orig: @ 0x40e9f0]` |
 | 0x800 | `kEntityFlagVehicleLoadoutZone` | type-11 volume touch — gates vehicle.mnu | `[orig: @ 0x4aeb92, @ 0x49b858]`; §15.4. NOTE: the critical-hit latch the damage path writes is bit 0x800 of a DIFFERENT dword, `entity+0x2C` (`Entity::cause_flags`, §19.2a) — never this Flags bit |
 | 0x2000 | `kEntityFlagInAir` | airborne / swimming | `[orig: grounded selector @ 0x4b78ab]`; §3, §15.3 |
 | 0x4000 | `kEntityFlagPriorityTarget` | the shooter mark: set by the organic fire and by `RoundData_SpawnRound` for every non-silenced ballistic round and the shotgun fan (§38.2); decays per perception scan (the §16.2 x6 scoring flag) AND by the 744-tick host sweep: `g_dirtyflag_clear_timer @0xC8D810` (zeroed per mission by `Nbstat_StartupInit @0x4fde30` <- `Game_StartMission @0x526108`) at the head of `Server_TickUpdate @0x51d82b..0x51d840` fires when zero, `EntityPool_ClearDirtyFlags @0x508E30` strips the bit from every used row of pools 0/1, reload 744 — the only decay for pool-1 shooters and dead rows (ported 2026-09-12, `clear_priority_target_marks`) | `[orig: set @ 0x4bf370; @ 0x4EC842..0x4EC847; @ 0x4EBE61..0x4EBE66; clear @ 0x4BBF88; sweep @ 0x508e59 / @ 0x508e79]` |
@@ -9448,7 +9674,7 @@ ledger, transplanted verbatim at the 2026-08-06 compaction (Standing rule 6).
 - **D-WPN-17** [FIXED 2026-07-15 (owner-bound spawn + the GameWorld live-anchor resolver polled by the owner-pose sync; underwater release rides the §8 water plumb)] The local muzzle flash spawned `BINDING_WORLD` at its spawn-time userpoint where retail re-anchors the live action-effect emitter (`MountSlot+0x18 actionEffectHandle` + anchor action `+0x28`) to the action's bone EVERY pump tick (`WeaponAction_ProcessFrame` tracker leg `@0x540edf` → `CEffectEmitter_UpdatePositionAndParams @0x5f6810`), releasing it underwater — a moving/turning shooter's flash trailed the muzzle (net-re §5.62)
 - **D-WPN-33** [FIXED 2026-07-27 — ported: fire row, both paths; the recoil row remains] Fire particles spawned at the shooter's EYE instead of the muzzle, on two independent paths. REMOTE: the wire fire position genuinely IS the eye — retail sends `Position + CameraOffset` `[orig: Entity_CalcWeaponFirePosition @ 0x4dc750]` — but retail does not spawn an ammo-def effect there for an adm-indexed round. `NetPacket_DeserializeRoundEvent @ 0x42f270` has TWO mutually exclusive arms, bit 0 tested first `@ 0x42f521`: set -> the ammo-def arm (`ammoDef+64` sound `@ 0x42f5dc`, `ammoDef+68` effect `@ 0x42f6c2`) at the wire position; bit 0 clear with bit 1 set `@ 0x42f6ce` -> the adm arm, which spawns NO ammo-def leg and calls `ActionSlot_ExecuteAction` on the WIRE-ADDRESSED def (`AdmDef_GetEntryByIndex @ 0x42f6d9`, NOT the observed shooter's equipped def) at four sites in two sub-paths chosen by `entity+0x168`: `@ 0x42f777`/`@ 0x42f785` and `@ 0x42f98f`/`@ 0x42f9d0`; `RoundData_SpawnRound` still runs `@ 0x42fa6c`. We admitted `flags & 0x03` identically and ran the ammo legs on both. LOCAL 3P: `_action_particle_world_position` resolved against `_vm_parts`, the FIRST-person viewmodel — re-pinned to the camera every frame and merely HIDDEN in third person, never detached — with a deepest fallback that was literally the eye position; retail requires `g_camera_mode == 0` for the first-person leg `[orig: gate @ 0x540e8c..0x540eca]` and otherwise resolves the same authored userpoint name against gfx3, falling back to the ENTITY ORIGIN `[orig: loc_401867 @ 0x401867..0x401887]`. PORTED 2026-07-27: `FireEvent`/`RoundSpawnParams` carry the wire flags byte and the addressed ADM index; presentation exposes the arm plus the FIRE row's sound/effect/userpoint; `FirePresentPass` swaps in that row on the adm arm and re-anchors to `EntityPresenter.muzzle_world_for()`; the local 3P path resolves against the gfx3 world gun. No new parsing was needed — the row index is identity: retail's per-def action array is 12 pointer slots at `def+676` in the order of `g_weaponActionTable @ 0x830B90` `[orig: base/stride @ 0x54203d/@ 0x542231, bound @ 0x542239]`, so `def+684` IS slot 2 and our `weapon_action::kFire` is the same ordinal. Scoped so a ZERO flags byte (host/AI-originated fire, which retail presents inline at the shooter `[orig: WeaponSlot_FireAndSpawnEffects @ 0x53f440]`) keeps the ammo-def legs untouched. RESIDUAL: `actions[3]` (recoil) is NOT ported — retail runs it beside fire with its own action context and userpoint byte, but only `actions[2]` carries the muzzle flash (the sole row that can reach the muzzle-glow leg, gated on the context being 2 `[orig: @ 0x40205e/@ 0x402080, stamped @ 0x42f8a0]`) and the recoil row's presentation legs are not witnessed well enough to port without inventing them. MUZZLE-ANCHOR AUTHORITY DECIDED (2026-08-08, closing the S12a shadow seam): the rendered held-weapon node's own userpoint (`EntityPresenter.muzzle_world_for`) is the PERMANENT anchor — it is the direct analog of retail's spawn at its rendered model's userpoint, it covers entity-less wire shooters the sim cannot pose, and the weapon node's transform already comes from the native attach walk (one impl). The S12a sim-posed re-derivation (`resolve_held_weapon_muzzle`), the event's shadow `muzzle` field, and the `muzzle_ab` counters are deleted; the anchor fallback chain stays the provider's body origin (retail's entity-origin fallback `@ 0x401867..0x401887`).
 - **D-WPN-34** [FIXED 2026-07-31 (`def_parse_ammo`, `def_parse_weapons`, `npruntime_weapon_table`, `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, Godot simulation/HUD regressions)] Spawn-time weapon spread and physical recoil were absent/approximate: ERROR/theta and ammo recoil values lost their exact integer carriers; `Weapon_CalcRandomSpreadOffset @0x4e4120` was unported; ordinary rounds omitted the player/rules/UseSpreadTwo gates and the intentionally asymmetric `pitchBlend>>8` versus HUD `>>7`; the shotgun path reused the claymore rectangular fan instead of `Weapon_SpawnProjectileBurstWithSpread @0x4ebbb0`; the per-shot impulse and both infantry-body accumulators had no writer/decay path. The 2026-07-31 grill recovered the exact stance/vertical selectors, uint32 hash, x87-precision constants/distributions (including the shotgun radial fan), special-ammo ordering, post-spawn recoil impulse, movement-weight producer with the exact shared `Player_CanFireWeapon` gates, signed decay/drift, and local/remote/AI body-pass order `[orig: RoundData_SpawnRound @ 0x4ec0d0; Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`. OpenNova now retains the exact DEF integers and applies that path to local authority/SP, C2S authority, own-fire prediction, and decoded tag-2 visual rounds; the ring remains pre-spread. The world-side below-water eye-height projection remains D-INF-18, and whole-process recoil-yaw PRNG call-history identity is isolated as D-WPN-35; neither changes spread/hash, accumulator, impulse, or HUD math.
-- **D-WPN-32** [OPEN — row history de-tabled 2026-08-06; the ledger row now carries the open scope only] No entity in the port renders a THIRD-PERSON held weapon — not remote players, not AI, and not the local player's own body. The body `.adm` clip names encode gait+weapon so the pose reads roughly right, which is why this went unnoticed, but every soldier's hands are empty. Retail draws it as draw 5 of `BoneCallback_org0_World @ 0x4e3940`: model = the WeaponDef's `tpModel` (+0x170 = weapon.def `gfx3`) read `@ 0x4e3cd3`, drawn **RIGID** — one matrix `qmemcpy`'d into EVERY bone slot `@ 0x4e3d71` — so it carries no clip, no skeleton and no pose of its own. The placement matrix is bone slot 16's posed matrix applied to that bone's own PIVOT plus a fixed nudge: the model bone-def table is `*(modelDef+56)` with row stride 64 and the pivot float3 at row `+0x24`, so the original's `modelDef+0x424` IS row 16's pivot, and the sight/muzzle triples fall out of the same arithmetic (`0x3E4` = row 15, `0x3A4` = row 14), 1:1 with bone matrix slots `+1024`/`+960`/`+896` `[orig: base load @ 0x4b2186; row walk @ 0x4b201e..0x4b2036; stride @ 0x4b2145]`. Its ORIENTATION is neither bone 16's rotation nor any of the nine aim-overlay classes — the head class carries full-aim pitch and the arm class the 3/4-blended yaw, so reusing either aims the gun visibly off-axis; the original instead writes a triple onto the ENTITY and builds a transform from it (`Roll = savedRoll + lean` `@ 0x4b1bdc`, `Yaw = aimYaw` `@ 0x4b1bf2`, `Pitch = savedPitch + pitchKickAccum + 2*pitchBlend` `@ 0x4b1bf5`, then `Math_BuildFixedPointToFloatMatrix4x4` `@ 0x4b1bf8`), dropping the head-look term outside an aim state `@ 0x4b1dd9..0x4b1dfa`. Visibility is one predicate — the weapon is drawn iff the soldier may FIRE it `[orig: Entity_CanFireWeapon @ 0x4dcb10]`, whose LOCAL branch additionally requires the weapon to author a FIRST-person model, so a `gfx3`-without-`gfx1` weapon is visible to every observer and invisible on your own body (retail asymmetry, cited at the port site). **INCREMENTS 1-2 LANDED 2026-07-26/27 — the local player's own avatar, then every REMOTE player.** Increment 1: `anim::compute_held_weapon_attach_angles` (both on-foot branches, pinned by `aim_overlay_test::test_held_weapon_attach_basis` against the arm/head classes), `Simulation::local_held_weapon_visible` (the local gate incl. the dead, empty-pool, no-`gfx1` and seat legs), `PlayerViewmodelDef.gfx3` + `PlayerAimOverlay.weapon_attach_angles/weapon_visible`, and `LocalPlayerPresenter._update_held_weapon` building the model through `MissionObjectPlacer.build_model_from_graphic` as a SIBLING of the avatar (`ObjectModel.rebuild()` frees all children, so a child would vanish on every body rebuild). **Increment 2** extends it to every remote player, live-confirmed as the gap after increment 1 (the maintainer, joined to a stock retail host: "none of them are holding their weapon. Empty hands"). `world::WeaponTableEntry` gained `third_person_model` (`gfx3`) so a held weapon resolves through THE SAME table the wire's ADM index refers to — routing it through `WeaponDatabase` instead would have coupled two independent `weapon.def` parses whose index bases differ (0-based file order vs this table's 1-based null-row-0), an untested assumption behind a runtime index. Four snapshot fields (`PF_HELD_WEAPON_ADM` + the attach euler) are written by one shared helper from both the host and joiner legs, with the DRAW GATE FOLDED INTO THE ADM FIELD: a hidden or unarmed body reports 0, which is simultaneously our table's null row and the original's own `if (entity->equippedAdmIndex)` precondition, so the zero-filled default is correct by construction and there is no sentinel to invert. The REMOTE branch of the gate reduces to two terms — alive, and `MountMode::OnFoot` — because that mount mode is exactly the complement of retail's `{2,3,5}` hide set (a PASSENGER maps to OnFoot and keeps its weapon), and because the remote branch never consults an `EquippedSlot`, so a peer whose slot we do not model still passes as retail intends. `wire_present_pass` owns a weapon node per wire handle beside `_nodes`, and the placement math is now shared with the local path through `PresentHeldWeapon` rather than duplicated. RESIDUAL: AI/NPCs still render no held weapon — placed `.bms` soldiers never receive an equipped ADM index at all and its source in the original is UNWITNESSED, so increment 3 is blocked on that research rather than on effort. Also unported from the same callback: the NVG and BINOCULAR item-model draws (`Flags & 4` / `animStateFlags & 0x40 && Flags & 8`, draws 3 and 4), the death-pose weapon branch `@ 0x4b21b0`, the projected-size cull `@ 0x4b3d4b`, and the mount-branch correlation for the attach basis (the original copies the body or arm matrix per branch `@ 0x4b193e`/`0x4b19cf`/`0x4b1ab2`/`0x4b1b35`/`0x4b1b94`; the draw gate hides control/gunner/driver seats anyway, leaving only the passenger seat exposed). **INCREMENT 3 LANDED 2026-07-27 — the SECOND attach frame**, after the weapon was reported "rotated, often near-vertical". The entity-frame half was verified matching and needed no constant moved: (a) the out-matrix 3×3 is the attachment matrix verbatim — only the translation row is overwritten before the copy `@ 0x4b22cf..0x4b22f8` — and the draw site adds nothing `@ 0x4e3d71/0x4e3d99`; (b) the attach builder `Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200` is the same one that places an ordinary world object `@ 0x4e2912`, so a `gfx3` is posed exactly like a placed `.3di`; conjugating its Z→X→Y row-vector composition (quantized trig stores −sin θ) through the render↔Godot X↔Z relabel and the loader's X-negation gives `swap ∘ Mᵀ ∘ flipX`, which is `bms_to_godot_basis` term for term, trailing `Ry(+90°)` included — pinned by `present_held_weapon_test.gd::test_bms_basis_matches_the_original_placement_matrix` over five triples including two with pitch, yaw AND roll non-zero (the earlier live sample had roll = 0 and could not have caught an axis or ordering swap); (c) the authored model frame is muzzle `+Z` / up `+Y`, from `M4_3RD`'s `MFLASH01` `(+0.003, +0.089, +0.781)` and `scope` `(−0.002, +0.194, +0.141)` userpoints with identity node transforms throughout, closing the "which end is the muzzle" and "which way is up" questions the AABB could not. **The actual defect was a MISSING BRANCH.** Retail has TWO attach frames and picks on one bit: `g_animStateFlagsTable[entity+0x2C8] & 0x80` `[orig: gate @ 0x4b21b6, branch @ 0x4b220f]` selects `Ry_e · Rz_e · boneMatrix[16]` — the HAND frame — instead of the entity triple. A first re-measurement called that branch death-only; **that was wrong**, and the error was assuming `+0x2C8` holds a `wpn_*` id (rows 240–251, all flag `0x0`). Its writer `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b5dad..0x4b5ea9]` stores `AdmDefs[+0x2B0].kind + 0x31`, a HOLD state in the 43–66 band, where 0x80 is set for 50 `knife`, 52 `grenade`, 54 `designator`, 62/63 the melee attacks, 64 `binoculars` and 65/66 BOTH reloads. The asset side corroborates exactly: of 41 distinct `gfx3`, 33 are `+Z`-long and the 8 `+Y`-long ones (`M9K_3rd`, `mach_3rd`, `Flsh_3RD`, `Frag_3RD`, `smok_3RD`, `medp_3rd`, `stch_3rd`, `det_3rd`) are precisely the kinds that stamp a 0x80 row — authored blade-up because retail poses them at the hand. Under the entity frame `elev(B·+Y) = 90 − pitch`, so they drew at +72.05° at the measured live triple and at exactly 90° when level: the reported symptom, reproduced numerically. PORTED: `PF_HELD_WEAPON_HAND_FRAME` written by the one shared helper from both legs (the joiner's hold state hoisted OUT of the channel-visibility gate — the pose is gated, the FRAME is not), `PlayerAimOverlay.weapon_hand_frame`, and `PresentHeldWeapon.hand_frame_basis`. Both constants are used with their authored signs, which is derived and not chosen: `Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0` is fed `sin = −sin θ` (making each block a rotation by −θ) and the conjugation through the loader's X-negation flips the sign back — two inversions. Pinned by `test_hand_frame_constants_match_the_original_composition`, which re-derives the calibration from the builder's ELEMENT PLACEMENT rather than from the constants' signs. Also fixed: the nudge was rotated by bone 16's own posed basis and added to a WORLD position, so at rest it picked up that bone's large rest rotation (`BN17 R Hand`'s rest basis is nowhere near identity); it now rides the bone's MODEL→WORLD rotation (`pose · rest⁻¹`, in world), matching `nudge · M16_rotation` `@ 0x4b2186..0x4b220b`. Recorded while here: ADM index 1 IS `WPN_KNIFE` — `AnimDef_InitAll @ 0x5435c0` consumes slot 0 with a reserved `"null"` def before any `weapon.def` row parses and `AdmDef_GetEntryByIndex @ 0x53fc80` applies no bias, so the wire index is 1-based over file order, validating `world::WeaponTable`'s null-row-0 layout and confirming `WeaponDatabase`'s 0-based enumeration (which also drops rows, exposing 72 of 94) must never back a runtime ADM index. STILL OPEN: the mounted-branch correlation, the NVG/binocular draws, AI bodies, and the death family's own use of the same 0x80 branch
+- **D-WPN-32** [OPEN, NARROWED 2026-09-24 to the org1 mounted rider copy edge; row history de-tabled 2026-08-06; the ledger row now carries the open scope only] No entity in the port renders a THIRD-PERSON held weapon — not remote players, not AI, and not the local player's own body. The body `.adm` clip names encode gait+weapon so the pose reads roughly right, which is why this went unnoticed, but every soldier's hands are empty. Retail draws it as draw 5 of `BoneCallback_org0_World @ 0x4e3940`: model = the WeaponDef's `tpModel` (+0x170 = weapon.def `gfx3`) read `@ 0x4e3cd3`, drawn **RIGID** — one matrix `qmemcpy`'d into EVERY bone slot `@ 0x4e3d71` — so it carries no clip, no skeleton and no pose of its own. The placement matrix is bone slot 16's posed matrix applied to that bone's own PIVOT plus a fixed nudge: the model bone-def table is `*(modelDef+56)` with row stride 64 and the pivot float3 at row `+0x24`, so the original's `modelDef+0x424` IS row 16's pivot, and the sight/muzzle triples fall out of the same arithmetic (`0x3E4` = row 15, `0x3A4` = row 14), 1:1 with bone matrix slots `+1024`/`+960`/`+896` `[orig: base load @ 0x4b2186; row walk @ 0x4b201e..0x4b2036; stride @ 0x4b2145]`. Its ORIENTATION is neither bone 16's rotation nor any of the nine aim-overlay classes — the head class carries full-aim pitch and the arm class the 3/4-blended yaw, so reusing either aims the gun visibly off-axis; the original instead writes a triple onto the ENTITY and builds a transform from it (`Roll = savedRoll + lean` `@ 0x4b1bdc`, `Yaw = aimYaw` `@ 0x4b1bf2`, `Pitch = savedPitch + pitchKickAccum + 2*pitchBlend` `@ 0x4b1bf5`, then `Math_BuildFixedPointToFloatMatrix4x4` `@ 0x4b1bf8`), dropping the head-look term outside an aim state `@ 0x4b1dd9..0x4b1dfa`. Visibility is one predicate — the weapon is drawn iff the soldier may FIRE it `[orig: Entity_CanFireWeapon @ 0x4dcb10]`, whose LOCAL branch additionally requires the weapon to author a FIRST-person model, so a `gfx3`-without-`gfx1` weapon is visible to every observer and invisible on your own body (retail asymmetry, cited at the port site). **INCREMENTS 1-2 LANDED 2026-07-26/27 — the local player's own avatar, then every REMOTE player.** Increment 1: `anim::compute_held_weapon_attach_angles` (both on-foot branches, pinned by `aim_overlay_test::test_held_weapon_attach_basis` against the arm/head classes), `Simulation::local_held_weapon_visible` (the local gate incl. the dead, empty-pool, no-`gfx1` and seat legs), `PlayerViewmodelDef.gfx3` + `PlayerAimOverlay.weapon_attach_angles/weapon_visible`, and `LocalPlayerPresenter._update_held_weapon` building the model through `MissionObjectPlacer.build_model_from_graphic` as a SIBLING of the avatar (`ObjectModel.rebuild()` frees all children, so a child would vanish on every body rebuild). **Increment 2** extends it to every remote player, live-confirmed as the gap after increment 1 (the maintainer, joined to a stock retail host: "none of them are holding their weapon. Empty hands"). `world::WeaponTableEntry` gained `third_person_model` (`gfx3`) so a held weapon resolves through THE SAME table the wire's ADM index refers to — routing it through `WeaponDatabase` instead would have coupled two independent `weapon.def` parses whose index bases differ (0-based file order vs this table's 1-based null-row-0), an untested assumption behind a runtime index. Four snapshot fields (`PF_HELD_WEAPON_ADM` + the attach euler) are written by one shared helper from both the host and joiner legs, with the DRAW GATE FOLDED INTO THE ADM FIELD: a hidden or unarmed body reports 0, which is simultaneously our table's null row and the original's own `if (entity->equippedAdmIndex)` precondition, so the zero-filled default is correct by construction and there is no sentinel to invert. The REMOTE branch of the gate reduces to two terms — alive, and `MountMode::OnFoot` — because that mount mode is exactly the complement of retail's `{2,3,5}` hide set (a PASSENGER maps to OnFoot and keeps its weapon), and because the remote branch never consults an `EquippedSlot`, so a peer whose slot we do not model still passes as retail intends. `wire_present_pass` owns a weapon node per wire handle beside `_nodes`, and the placement math is now shared with the local path through `PresentHeldWeapon` rather than duplicated. RESIDUAL: AI/NPCs still render no held weapon — placed `.bms` soldiers never receive an equipped ADM index at all and its source in the original is UNWITNESSED, so increment 3 is blocked on that research rather than on effort. Also unported from the same callback: the NVG and BINOCULAR item-model draws (`Flags & 4` / `animStateFlags & 0x40 && Flags & 8`, draws 3 and 4), the death-pose weapon branch `@ 0x4b21b0`, the projected-size cull `@ 0x4b3d4b`, and the mount-branch correlation for the attach basis (the original copies the body or arm matrix per branch `@ 0x4b193e`/`0x4b19cf`/`0x4b1ab2`/`0x4b1b35`/`0x4b1b94`; the draw gate hides control/gunner/driver seats anyway, leaving only the passenger seat exposed). **INCREMENT 3 LANDED 2026-07-27 — the SECOND attach frame**, after the weapon was reported "rotated, often near-vertical". The entity-frame half was verified matching and needed no constant moved: (a) the out-matrix 3×3 is the attachment matrix verbatim — only the translation row is overwritten before the copy `@ 0x4b22cf..0x4b22f8` — and the draw site adds nothing `@ 0x4e3d71/0x4e3d99`; (b) the attach builder `Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200` is the same one that places an ordinary world object `@ 0x4e2912`, so a `gfx3` is posed exactly like a placed `.3di`; conjugating its Z→X→Y row-vector composition (quantized trig stores −sin θ) through the render↔Godot X↔Z relabel and the loader's X-negation gives `swap ∘ Mᵀ ∘ flipX`, which is `bms_to_godot_basis` term for term, trailing `Ry(+90°)` included — pinned by `present_held_weapon_test.gd::test_bms_basis_matches_the_original_placement_matrix` over five triples including two with pitch, yaw AND roll non-zero (the earlier live sample had roll = 0 and could not have caught an axis or ordering swap); (c) the authored model frame is muzzle `+Z` / up `+Y`, from `M4_3RD`'s `MFLASH01` `(+0.003, +0.089, +0.781)` and `scope` `(−0.002, +0.194, +0.141)` userpoints with identity node transforms throughout, closing the "which end is the muzzle" and "which way is up" questions the AABB could not. **The actual defect was a MISSING BRANCH.** Retail has TWO attach frames and picks on one bit: `g_animStateFlagsTable[entity+0x2C8] & 0x80` `[orig: gate @ 0x4b21b6, branch @ 0x4b220f]` selects `Ry_e · Rz_e · boneMatrix[16]` — the HAND frame — instead of the entity triple. A first re-measurement called that branch death-only; **that was wrong**, and the error was assuming `+0x2C8` holds a `wpn_*` id (rows 240–251, all flag `0x0`). Its writer `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b5dad..0x4b5ea9]` stores `AdmDefs[+0x2B0].kind + 0x31`, a HOLD state in the 43–66 band, where 0x80 is set for 50 `knife`, 52 `grenade`, 54 `designator`, 62/63 the melee attacks, 64 `binoculars` and 65/66 BOTH reloads. The asset side corroborates exactly: of 41 distinct `gfx3`, 33 are `+Z`-long and the 8 `+Y`-long ones (`M9K_3rd`, `mach_3rd`, `Flsh_3RD`, `Frag_3RD`, `smok_3RD`, `medp_3rd`, `stch_3rd`, `det_3rd`) are precisely the kinds that stamp a 0x80 row — authored blade-up because retail poses them at the hand. Under the entity frame `elev(B·+Y) = 90 − pitch`, so they drew at +72.05° at the measured live triple and at exactly 90° when level: the reported symptom, reproduced numerically. PORTED: `PF_HELD_WEAPON_HAND_FRAME` written by the one shared helper from both legs (the joiner's hold state hoisted OUT of the channel-visibility gate — the pose is gated, the FRAME is not), `PlayerAimOverlay.weapon_hand_frame`, and `PresentHeldWeapon.hand_frame_basis`. Both constants are used with their authored signs, which is derived and not chosen: `Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0` is fed `sin = −sin θ` (making each block a rotation by −θ) and the conjugation through the loader's X-negation flips the sign back — two inversions. Pinned by `test_hand_frame_constants_match_the_original_composition`, which re-derives the calibration from the builder's ELEMENT PLACEMENT rather than from the constants' signs. Also fixed: the nudge was rotated by bone 16's own posed basis and added to a WORLD position, so at rest it picked up that bone's large rest rotation (`BN17 R Hand`'s rest basis is nowhere near identity); it now rides the bone's MODEL→WORLD rotation (`pose · rest⁻¹`, in world), matching `nudge · M16_rotation` `@ 0x4b2186..0x4b220b`. Recorded while here: ADM index 1 IS `WPN_KNIFE` — `AnimDef_InitAll @ 0x5435c0` consumes slot 0 with a reserved `"null"` def before any `weapon.def` row parses and `AdmDef_GetEntryByIndex @ 0x53fc80` applies no bias, so the wire index is 1-based over file order, validating `world::WeaponTable`'s null-row-0 layout and confirming `WeaponDatabase`'s 0-based enumeration (which also drops rows, exposing 72 of 94) must never back a runtime ADM index. STILL OPEN: the mounted-branch correlation, the NVG/binocular draws, AI bodies, and the death family's own use of the same 0x80 branch. **NARROWED 2026-09-24 (the rendering parity pass, §13.5 / §39.1):** the NVG, binocular, canopy and carried-object draws are PORTED (`engine/runtime/world/person_overlays.{h,cpp}`, `PersonOverlayModels`), the 2 px projected-size cull is PORTED (`renderer::held_weapon_projection_culled`), and the remote ammo leg reads the host's `EquippedSlot` (`remote_held_weapon_out_of_ammo`). AI bodies, the death family and the mounted-branch correlation are settled as retail-faithful: on-foot NPCs never draw a draw-5 weapon, a dead body fails `Entity_CanFireWeapon`, and every seat that draws uses the on-foot triple. The one open item is the org1 mounted fire-request window copying the parent vehicle's +0x2B0 into the rider `@ 0x4bf4f4..0x4bf4fa` (a seat-1 rider would then draw it).
 
 
 ## 31. The AI convoy movement chain, audited end to end (2026-08-24)
@@ -13425,7 +13651,7 @@ world-side facts of the slice:
   ends with `add [esi+2ACh],-1` (@ 0x4B8EA0). After the walk: `HeliLift_UpdateAll`
   (@ 0x4C21F6), the facials (`sub_580000`, @ 0x4C21FB), `Precipitation_FallTick`
   (@ 0x4C2214), `DeathPiece_TickAll` (@ 0x4C221C), `sub_590950` (@ 0x4C2221), the timed
-  AI events (@ 0x4C2226), `sub_5DDE10` (@ 0x4C222B), `Cinematic_EpilogUpdate`
+  AI events (@ 0x4C2226), `WaterRing_TickAll` (@ 0x4C222B), `Cinematic_EpilogUpdate`
   (@ 0x4C2230), `WeatherParticle_UpdateAllEmitters` (@ 0x4C2235),
   `Weapon_UpdateAllProjectiles` (@ 0x4C223A), `Projectile_ProcessExplosionQueue`
   (@ 0x4C223F), pool 2 (@ 0x4C2244..0x4C2302), `FadeEffect_UpdateAll` (@ 0x4C2307),
@@ -13838,3 +14064,66 @@ Still misleading and not renamed: `AI_CalcGroundVehicleTarget @ 0x4613A0` and
 `AI_CalcHelicopterTarget @ 0x461870` are the helicopter mover (0x10000) and the plane mover
 (0x10005); `Entity_UpdateSuspensionBounce @ 0x456710` is the unreferenced PLAYPARTANIM phase
 integrator; `RenderState_SetLayerVisibilityByIndex @ 0x5A3020` arms a HUD item-flash timer.
+
+## 39. Rendering parity pass (2026-09-24)
+
+The 2026-09-24 rendering parity pass (PR #678) reviewed every on-screen system against the
+binary and ported what diverged. This section indexes what it changed in this record and
+carries what it could not port. All addresses `Jointops.exe.kong.i64`, imagebase 0x400000.
+
+### 39.1 The person callback's item overlays (draws 1, 3, 4, 6)
+
+PORTED ("Publish the person callback's item overlays and held-weapon ammo leg"; "Draw the
+person overlays beside their bodies"): draws 1 (parachute canopy), 3 (NVG goggles), 4
+(binoculars) and 6 (carried object) of `BoneCallback_org0_World @ 0x4e3940`, with the
+witness per draw in §13.1.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Gates and placement calibration (canopy bone 0 + heading + pi; NVG bone 14 + (0, 0.15, 0.10); binoculars bone 15 + (+0.12, -0.03, +0.03) in the X-negated Godot frame + the Z/X/Y calibration; carried `flt_7CD438`) | MATCHING | `engine/runtime/world/person_overlays.{h,cpp}`; the item ids 185 / 1904 / 1424 `[orig: Entity_PreloadSpecialItems @ 0x43c220]`; GUT `person_overlay_models_test` re-derives each basis from the builders' element placement |
+| Present rows | MATCHING | both producers publish the ten `PF_*` tail fields (`PF_CANOPY_PARA/_PARA_O/_YAW_DEG`, `PF_NVG_WORN/_FLIP`, `PF_BINOCULARS_RAISED`, `PF_CARRIED_TYPE_ID/_PITCH/_YAW/_ROLL_DEG`); host rows read registry `mounted_child`, joiner rows the S2C 0x2F carry relation (`NapiNPClientMsg_0x02F @ 0x430E10`, flag-id gate `@ 0x430f03..0x430f19`); the local avatar reads `inmatch::local_player_person_overlays` (a joiner maps the 0x2F relation on its authority handle onto its own body, as retail's 0x0A local block attaches to `g_local_player_entity` `@ 0x43066c..0x430695`); ctest `netsim_present_rows` |
+| Presentation | MATCHING | `godot/src/simulation/person_overlay_models.*`: each overlay is a sibling of its body (the owner's occlusion and sub-pixel verdicts reach it through the attachment walk), rigid at its frame, in the body's render slot and light group, at the first submit's RLOD level (the head part of a composed avatar); the canopy, goggles and binoculars also at the body submit's level, since only draws 5/6 are gated on 0x10000000. The local canopy draws in first person (it precedes the tracked gate); the local goggles, binoculars and carried object follow the body's first-person layer rule |
+| Host rows hide `Flags & 1` entities | MATCHING | `collect_visible_entities_for_terrain @ 0x5c8cef..0x5c8cf4` skips the carried flag, undeployed/spectating players and blocked spawn markers; `present_rows.cpp`, the same rule the joiner's decoded rows already applied |
+| Held-weapon 2 px cull (draw 5) | MATCHING | §13.2; `renderer::held_weapon_projection_culled`; ctest `object_lod` |
+| Remote held-weapon ammo leg | MATCHING | §13.3; `remote_held_weapon_out_of_ammo` (listen host rows); ctest `netsim_present_rows` |
+
+Godot-side conversion rules (re-derived in `person_overlay_models_test.gd`): the canopy's
+world turn is the mission-yaw basis of heading + pi; NVG = bone 14's model->world basis;
+binoculars = `B15 * Rz(+z) * Rx(-x) * Ry(+y)`; carried = `Rx_godot(-k) * bms_basis(carrier
+triple)` (render Z is Godot X; the float builder stores +sin).
+
+The draw-6 clamp `@ 0x4e3e34..0x4e3e51` belongs to the carried object, not to vehicle seat
+riders. Seated riders are collected independently in retail too: the entity collector
+(`collect_visible_entities_for_terrain @ 0x5c8c60`) has no parent test, it skips only
+`Flags & 1` and item type 5 (`@ 0x5c8dd7..0x5c8de0`) and stores each rider's own projected
+radius (`@ 0x5c8eca`), so riders walking their own RLOD thresholds is retail
+([render-order-re.md](../render/render-order-re.md) D-RORD-11).
+
+### 39.2 Tracers and scars
+
+- The tracer channel's count -1 start (§25.1), the ribbon rebuild with its three
+  materials, fog and frame slot, and the distortion pass (§25.3): D-AI-12 (a), (b), (c),
+  (g) FIXED.
+- The impact scars fog toward the scene fog colour (§24.9).
+- The death-piece meshes (D-ITEM-4's presentation legs) are ported on 2026-09-25, after
+  this section's first landing (§24.4, "Draw every death piece as its husk section, spun,
+  at its own level"). The open question the first landing carried is settled:
+  piece+0x84 is the piece MODEL's bound radius, not the entity's pitch, so a flat or
+  nose-down wreck's pieces are not culled. D-ITEM-4 keeps only its PRNG-stream leg.
+- The NVG IR laser beams of armed remote players are ported on 2026-09-25 (§25.3, "Draw
+  the NVG IR laser beams of armed remote players"), filling the overlay tail's
+  `NvgLaserBeams` slot; D-AI-12 (f) closed.
+- The effect groups' building-section gate (the descriptor's owner tag and blink hits at
+  spawn) is recorded with the particle system:
+  [ptl-format-re.md](../particles/ptl-format-re.md#rendering-parity-pass-2026-09-24).
+
+### 39.3 Open after the 2026-09-24 pass
+
+1. **The org1 mounted rider's held weapon (D-WPN-32).** The org1 mounted fire-request window
+   copies the parent vehicle's +0x2B0 into the rider `@ 0x4bf4f4..0x4bf4fa`, so a seat-1
+   rider would draw it; unported.
+2. **The vehicle REFLECTABLE bit.** `Entity_InitFromModel @ 0x40E208..0x40E20A` sets Flags
+   0x400 on every vehicle (ItemDefType 1); the sim keeps it as an item-type trait, not in
+   `Entity::engine_flags`. The slot march reads it (`world::PF_SLOT_MARCH_OFFSET_*`, joiner
+   rows through `inmatch::replica_entity_flags_dword`); any other consumer that streams or
+   compares the raw Flags dword for a vehicle must add it the same way. Not audited further.

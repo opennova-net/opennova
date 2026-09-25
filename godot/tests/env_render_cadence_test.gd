@@ -47,7 +47,6 @@ func _weather_state_after_one_second(hz: int) -> Array:
 	return [
 		weather.get_cloud_uv_offset1(0.0, 0.0),
 		weather.get_cloud_uv_offset2(0.0, 0.0),
-		weather.get_water_uv_state(0.0, 0.0, env.get_fog_level()),
 		weather.get_sway_amount(),
 		weather.get_sway_phase(),
 	]
@@ -73,11 +72,10 @@ func _world_driven_weather_fixture() -> Array:
 	return [env, weather]
 
 
-func _world_driven_weather_state(weather: Weather, env: MissionEnvironment) -> Array:
+func _world_driven_weather_state(weather: Weather) -> Array:
 	return [
 		weather.get_cloud_uv_offset1(0.0, 0.0),
 		weather.get_cloud_uv_offset2(0.0, 0.0),
-		weather.get_water_uv_state(0.0, 0.0, env.get_fog_level()),
 		weather.get_sway_amount(),
 		weather.get_sway_phase(),
 		weather.get_lightning_intensity(),
@@ -100,7 +98,6 @@ func _world_driven_weather_state(weather: Weather, env: MissionEnvironment) -> A
 
 func test_world_driven_mission_restart_reseeds_complete_weather_state() -> void:
 	var reused_fixture := _world_driven_weather_fixture()
-	var reused_env := reused_fixture[0] as MissionEnvironment
 	var reused := reused_fixture[1] as Weather
 	reused.trigger_lightning_long()
 	for _tick in range(47):
@@ -109,16 +106,15 @@ func test_world_driven_mission_restart_reseeds_complete_weather_state() -> void:
 
 	reused.prepare_world_driven()
 	var fresh_fixture := _world_driven_weather_fixture()
-	var fresh_env := fresh_fixture[0] as MissionEnvironment
 	var fresh := fresh_fixture[1] as Weather
-	assert_eq(_world_driven_weather_state(reused, reused_env),
-			_world_driven_weather_state(fresh, fresh_env))
+	assert_eq(_world_driven_weather_state(reused),
+			_world_driven_weather_state(fresh))
 
 	for _tick in range(64):
 		reused.tick_fixed()
 		fresh.tick_fixed()
-	assert_eq(_world_driven_weather_state(reused, reused_env),
-			_world_driven_weather_state(fresh, fresh_env))
+	assert_eq(_world_driven_weather_state(reused),
+			_world_driven_weather_state(fresh))
 
 
 func test_frozen_fixture_exposure_settle_publishes_a_non_identity_gain() -> void:
@@ -295,33 +291,6 @@ func test_standalone_sky_scroll_is_invariant_across_render_refresh_rates() -> vo
 	var expected := _sky_fallback_state_after_one_second(62)
 	assert_eq(_sky_fallback_state_after_one_second(30), expected)
 	assert_eq(_sky_fallback_state_after_one_second(144), expected)
-
-
-func _water_fallback_state_after_one_second(hz: int) -> Vector4:
-	var viewport := SubViewport.new()
-	viewport.size = Vector2i(160, 90)
-	add_child_autofree(viewport)
-	var env_data := _loaded_env()
-	env_data.set_water_height(14.0)
-	var env := MissionEnvironment.new()
-	env.name = "Env"
-	env.environment_data = env_data
-	viewport.add_child(env)
-	var water := Water.new()
-	water.environment_path = NodePath("../Env")
-	viewport.add_child(water)
-	var camera := Camera3D.new()
-	camera.position = Vector3(20.0, 27.0, -30.0)
-	viewport.add_child(camera)
-	camera.make_current()
-	_advance_one_second(water, hz)
-	return water.get_water_material().get_shader_parameter("u_water_uv")
-
-
-func test_standalone_water_scroll_is_invariant_across_render_refresh_rates() -> void:
-	var expected := _water_fallback_state_after_one_second(62)
-	assert_eq(_water_fallback_state_after_one_second(30), expected)
-	assert_eq(_water_fallback_state_after_one_second(144), expected)
 
 
 # The noise pair's frame counter is the world's entity-update counter once a

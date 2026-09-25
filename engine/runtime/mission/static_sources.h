@@ -26,6 +26,9 @@ struct StaticEffectSource {
 	int item_id = 0;
 	int source_index = -1;
 	int32_t entity_bound_radius_q16 = 0;
+	// The graphic's bound-block floor (world::model_bound_floor_q16): a
+	// building row's mirror clip extent.
+	int32_t model_floor_q16 = 0;
 	std::string graphic;
 	StaticSourceTransform world_transform = kStaticSourceIdentity;
 	uint64_t asset_id = 0;
@@ -42,6 +45,9 @@ struct StaticLightDrawSource {
 	std::array<float, 3> bounds_position{};
 	std::array<float, 3> bounds_size{};
 	bool active = true;
+	// The item's ItemDef+0x218 daylight (items.def light_transfer / 100): a
+	// building row's interior aux (renderer::static_row_entity_lighting).
+	float light_transfer = 0.0f;
 };
 
 struct StaticTerrainShadowSource {

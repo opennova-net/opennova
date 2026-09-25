@@ -59,9 +59,9 @@
         "sources": [{"file": "_FFP.fx", "symbols": ["technique TBoringFFP", "TSSColor(0, Modulate2x", "TSSAlpha(0, Modulate"]}]
       },
       "channels": "Diffuse1.rgb is modulated by saturated vertex diffuse at 2x. MaterialDiffuse.a (AlphaGenValue) multiplies Diffuse1.a only on this _FFP path; the resulting alpha supplies blend/cutout coverage.",
-      "light_response": "Geometric vertex normal; hemisphere plus directional plus selected D3D-style point lights, saturated before MODULATE2X.",
+      "light_response": "Geometric vertex normal; hemisphere plus directional plus selected D3D-style point lights, summed and saturated per vertex and Gouraud-interpolated into MODULATE2X.",
       "state": "NORMAL pass; static policy table selects opaque/alpha/additive, cutout compare, culling, depth write, and regular/additive fog.",
-      "shader_tokens": ["obj_ff_lighting", "v_point_light_diffuse"],
+      "shader_tokens": ["obj_ff_lighting", "obj_ff_vertex_diffuse", "v_point_light_diffuse"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -79,7 +79,7 @@
       "channels": "Diffuse1 supplies RGB and coverage directly. Unlike _FFP, SkBasic never consumes MaterialDiffuse/AlphaGenValue and has no SELFLUM specialization.",
       "light_response": "Skinned geometric vertex normal; hemisphere plus directional plus selected D3D-style point lights.",
       "state": "SkBasic NORMAL pass; opaque with optional alpha-test cutout, back-face culling, depth write, and regular fog.",
-      "shader_tokens": ["obj_ff_lighting", "v_point_light_diffuse"],
+      "shader_tokens": ["obj_ff_lighting", "obj_ff_vertex_diffuse", "v_point_light_diffuse"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -108,7 +108,7 @@
         "kind": "scr_fx",
         "sources": [{"file": "_FFP.fx", "symbols": ["technique TBoringFFP", "#ifdef SELFLUM", "SelfLumColor*ColorSrcGlobalGain"]}]
       },
-      "channels": "Diffuse1.rgb is multiplied by SelfLumColor (RgbGen) and saturated ColorSrcGlobalGain at 2x. Retail SELFLUM writes alpha zero; AlphaGenValue is not consumed.",
+      "channels": "Diffuse1.rgb is multiplied by the saturated SelfLumColor x ColorSrcGlobalGain emissive at 2x. Retail SELFLUM writes alpha zero; AlphaGenValue is not consumed.",
       "light_response": "Unlit by world or point lights; responds only to ColorSrcGlobalGain as retail SELFLUM does.",
       "state": "NORMAL SELFLUM specialization with the six static material policies.",
       "shader_tokens": ["obj_self_lit", "opennova_light_block_gain"],
@@ -125,7 +125,7 @@
         "kind": "scr_fx",
         "sources": [{"file": "_FFP.fx", "symbols": ["#ifdef SELFLUM", "TEX_MULTIPLE", "TSSColor(1, Modulate2x", "TSSAlpha(1, Modulate"]}]
       },
-      "channels": "Self-lit Diffuse1 is multiplied by SelfLumColor (RgbGen), global source gain, and Diffuse2.rgb at 2x stages. Retail SELFLUM still writes alpha zero; AlphaGenValue is not consumed.",
+      "channels": "Self-lit Diffuse1 is multiplied by the saturated SelfLumColor x global source gain emissive and Diffuse2.rgb at 2x stages. Retail SELFLUM still writes alpha zero; AlphaGenValue is not consumed.",
       "light_response": "Unlit by world or point lights; responds only to the global source gain.",
       "state": "NORMAL SELFLUM specialization with the six static material policies.",
       "shader_tokens": ["obj_self_lit", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
@@ -163,7 +163,7 @@
       "channels": "Diffuse1.rgb is MODULATE2X with the animated vertex diffuse; Diffuse1.a supplies optional cutout coverage.",
       "light_response": "Animated/camera-oriented reconstructed normal responds to hemisphere and directional light only; Flag.fx has no point-light pass and no SELFLUM technique.",
       "state": "Opaque NORMAL pass with regular shader fog and optional cutout coverage.",
-      "shader_tokens": ["obj_ff_lighting", "v_point_light_diffuse is zero", "ca * 0.5 + 0.5", "-sa * 0.1", "abs(sa)"],
+      "shader_tokens": ["obj_ff_lighting", "v_ff_diffuse carries no point light", "ca * 0.5 + 0.5", "-sa * 0.1", "abs(sa)"],
       "raster_checks": {"directional_axis_reversal": false, "hemisphere_axis_reversal": false},
       "raster_check_note": "Flag.fx reconstructs norm.x as ca*0.5+0.5 (never negative) and norm.y as -sa*0.1; response deltas are required, but a generic left/right or sky/ground spatial-lobe sign flip is not.",
       "parity_status": "matching",

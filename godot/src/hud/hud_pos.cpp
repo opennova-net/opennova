@@ -16,6 +16,8 @@
 #include <runtime/hud/sight_overlay.h>
 #include <runtime/hud/loading_screen.h>
 #include <runtime/hud/view_effects.h>
+#include <runtime/renderer/aspect_ratio.h>
+#include <runtime/renderer/frame_fx_effects.h>
 
 using namespace opennova::def;
 
@@ -73,6 +75,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("scale_point", "design", "surface"), &HudPos::scale_point);
 	ClassDB::bind_static_method("HudPos", D_METHOD("scale_rect", "design", "surface"), &HudPos::scale_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("sight_scale_rect", "design", "surface"), &HudPos::sight_scale_rect);
+	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scene_sight_rect", "design", "surface", "aspect_mode"), &HudPos::nvg_scene_sight_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("pixel_delta_to_design", "delta", "surface"), &HudPos::pixel_delta_to_design);
 	ClassDB::bind_static_method("HudPos", D_METHOD("fade_decay", "elapsed_ticks", "ramp_ticks"), &HudPos::fade_decay);
 	ClassDB::bind_static_method("HudPos", D_METHOD("fade_flash_alpha", "elapsed_ticks", "ramp_ticks", "base_alpha", "max_alpha"), &HudPos::fade_flash_alpha);
@@ -126,9 +129,9 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_modulate"), &HudPos::nvg_scale_modulate);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_range_step", "current", "target"), &HudPos::binocular_range_step);
-	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_points", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode"), &HudPos::scope_mask_points, DEFVAL(-1));
-	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_colors", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode"), &HudPos::scope_mask_colors, DEFVAL(-1));
-	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_indices", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode"), &HudPos::scope_mask_indices, DEFVAL(-1));
+	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_points", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode", "nvg_lens"), &HudPos::scope_mask_points, DEFVAL(-1), DEFVAL(false));
+	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_colors", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode", "nvg_lens"), &HudPos::scope_mask_colors, DEFVAL(-1), DEFVAL(false));
+	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_indices", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode", "nvg_lens"), &HudPos::scope_mask_indices, DEFVAL(-1), DEFVAL(false));
 	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_frame", "surface", "screen_width", "aspect_mode"), &HudPos::scope_mask_frame, DEFVAL(-1));
 	ClassDB::bind_static_method("HudPos", D_METHOD("scoped_view_overlay", "binoculars_view_active", "sighted", "scoped"), &HudPos::scoped_view_overlay);
 	ClassDB::bind_static_method("HudPos", D_METHOD("scoped_selector_from_def", "weapon_flags", "weapon_flags2"), &HudPos::scoped_selector_from_def);
@@ -283,6 +286,21 @@ Rect2 HudPos::sight_scale_rect(const Rect2 &p_design, const Vector2 &p_surface) 
 			static_cast<int32_t>(p_design.position.y + p_design.size.y)};
 	const auto screen = opennova::hud::sight_rect_to_viewport(rect, p_surface.x, p_surface.y);
 	return Rect2(screen.x1, screen.y1, screen.x2 - screen.x1, screen.y2 - screen.y1);
+}
+
+Rect2 HudPos::nvg_scene_sight_rect(const Rect2 &p_design, const Vector2 &p_surface,
+		int p_aspect_mode) {
+	if (p_surface.x <= 0.0f || p_surface.y <= 0.0f) {
+		return Rect2();
+	}
+	const opennova::hud::SightRect rect{static_cast<int32_t>(p_design.position.x),
+			static_cast<int32_t>(p_design.position.y),
+			static_cast<int32_t>(p_design.position.x + p_design.size.x),
+			static_cast<int32_t>(p_design.position.y + p_design.size.y)};
+	const float side = static_cast<float>(opennova::renderer::kNvgSceneSide);
+	const auto scene = opennova::hud::sight_rect_to_viewport_at_ratio(rect, side, side,
+			opennova::renderer::aspect_height_over_width(p_aspect_mode, p_surface.x, p_surface.y));
+	return Rect2(scene.x1, scene.y1, scene.x2 - scene.x1, scene.y2 - scene.y1);
 }
 
 Vector2 HudPos::pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface) {
@@ -584,11 +602,12 @@ struct ScopeMaskCache {
 	int32_t screen_w = 0;
 	bool draw_crosshair = false;
 	int aspect_mode = 0;
+	bool nvg_lens = false;
 	opennova::hud::ScopeCircleMask mask;
 };
 
 const opennova::hud::ScopeCircleMask *scope_mask_build(const Vector2 &p_surface,
-		int p_screen_width, bool p_draw_crosshair, int p_aspect_mode) {
+		int p_screen_width, bool p_draw_crosshair, int p_aspect_mode, bool p_nvg_lens) {
 	static ScopeMaskCache cache;
 	const int32_t w = static_cast<int32_t>(p_surface.x);
 	const int32_t h = static_cast<int32_t>(p_surface.y);
@@ -597,17 +616,27 @@ const opennova::hud::ScopeCircleMask *scope_mask_build(const Vector2 &p_surface,
 	}
 	const int32_t screen_w = p_screen_width > 0 ? p_screen_width : w;
 	if (cache.valid && cache.w == w && cache.h == h && cache.screen_w == screen_w &&
-			cache.draw_crosshair == p_draw_crosshair && cache.aspect_mode == p_aspect_mode) {
+			cache.draw_crosshair == p_draw_crosshair && cache.aspect_mode == p_aspect_mode &&
+			cache.nvg_lens == p_nvg_lens) {
 		return &cache.mask;
 	}
-	cache.mask = opennova::hud::build_scope_circle_mask(0, 0, w, h, screen_w,
-			p_draw_crosshair, p_aspect_mode);
+	if (p_nvg_lens) {
+		// The lens's reticle only when the card drew no row; the lens draws the
+		// ring itself.
+		cache.mask = p_draw_crosshair
+				? opennova::hud::build_nvg_lens_reticle(0, 0, w - 1, h - 1, screen_w)
+				: opennova::hud::ScopeCircleMask();
+	} else {
+		cache.mask = opennova::hud::build_scope_circle_mask(0, 0, w - 1, h - 1, screen_w,
+				p_draw_crosshair, p_aspect_mode);
+	}
 	cache.valid = true;
 	cache.w = w;
 	cache.h = h;
 	cache.screen_w = screen_w;
 	cache.draw_crosshair = p_draw_crosshair;
 	cache.aspect_mode = p_aspect_mode;
+	cache.nvg_lens = p_nvg_lens;
 	return &cache.mask;
 }
 
@@ -634,10 +663,11 @@ const std::vector<uint16_t> *scope_mask_ids(const opennova::hud::ScopeCircleMask
 } // namespace
 
 PackedVector2Array HudPos::scope_mask_points(const Vector2 &p_surface, int p_screen_width,
-		bool p_draw_crosshair, int p_batch, int p_aspect_mode) {
+		bool p_draw_crosshair, int p_batch, int p_aspect_mode, bool p_nvg_lens) {
 	PackedVector2Array out;
 	const opennova::hud::ScopeCircleMask *mask =
-			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode);
+			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode,
+					p_nvg_lens);
 	if (mask == nullptr) {
 		return out;
 	}
@@ -653,10 +683,11 @@ PackedVector2Array HudPos::scope_mask_points(const Vector2 &p_surface, int p_scr
 }
 
 PackedColorArray HudPos::scope_mask_colors(const Vector2 &p_surface, int p_screen_width,
-		bool p_draw_crosshair, int p_batch, int p_aspect_mode) {
+		bool p_draw_crosshair, int p_batch, int p_aspect_mode, bool p_nvg_lens) {
 	PackedColorArray out;
 	const opennova::hud::ScopeCircleMask *mask =
-			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode);
+			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode,
+					p_nvg_lens);
 	if (mask == nullptr) {
 		return out;
 	}
@@ -672,10 +703,11 @@ PackedColorArray HudPos::scope_mask_colors(const Vector2 &p_surface, int p_scree
 }
 
 PackedInt32Array HudPos::scope_mask_indices(const Vector2 &p_surface, int p_screen_width,
-		bool p_draw_crosshair, int p_batch, int p_aspect_mode) {
+		bool p_draw_crosshair, int p_batch, int p_aspect_mode, bool p_nvg_lens) {
 	PackedInt32Array out;
 	const opennova::hud::ScopeCircleMask *mask =
-			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode);
+			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode,
+					p_nvg_lens);
 	if (mask == nullptr) {
 		return out;
 	}
@@ -699,7 +731,7 @@ PackedFloat32Array HudPos::scope_mask_frame(const Vector2 &p_surface, int p_scre
 		return out;
 	}
 	const opennova::hud::ScopeCircleMaskGeometry g = opennova::hud::scope_circle_mask_geometry(
-			0, 0, w, h, p_screen_width > 0 ? p_screen_width : w, p_aspect_mode);
+			0, 0, w - 1, h - 1, p_screen_width > 0 ? p_screen_width : w, p_aspect_mode);
 	out.resize(9);
 	out[0] = g.center_x;
 	out[1] = g.center_y;

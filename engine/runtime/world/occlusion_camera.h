@@ -12,6 +12,7 @@
 //  Env_FogDistCurrent @ 0x26C681C; Env_WaterHeightFixed @ 0x26C6454; the
 //  force-indoors attribute Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
 
+#include <runtime/renderer/object_lod.h> // object_lod_focal_pixels
 #include <runtime/world/collision.h> // kBlinkIndoorsBit
 #include <runtime/world/geom.h>
 #include <runtime/world/occlusion.h>
@@ -25,7 +26,8 @@
 namespace opennova::world {
 
 // The shell's view, presentation frame: a unit forward/right/up triad, the
-// eye, the vertical field of view, the aspect and the near distance, plus the
+// eye, the vertical field of view, the aspect (tan_h / tan_v of the drawn
+// frustum), the near distance and the viewport width in pixels, plus the
 // environment words the occlusion frame carries.
 struct OcclusionViewSpec {
 	float eye[3] = { 0.0f, 0.0f, 0.0f };
@@ -35,6 +37,7 @@ struct OcclusionViewSpec {
 	float fov_y_deg = 90.0f;
 	float aspect = 1.0f;
 	float near_units = 0.05f;
+	float viewport_width = 0.0f;
 	float fog_dist_units = 0.0f;
 	float water_z_units = 0.0f;
 	uint32_t local_blink_flags = 0;
@@ -119,6 +122,9 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 	mission_dir_q22_from_presentation(view.right, cam.view_rows_q22[1]);
 	mission_dir_q22_from_presentation(view.up, cam.view_rows_q22[2]);
 
+	// The projector's focal length over the viewport width and the horizontal
+	// half-angle (the person leg's sub-pixel floor reads it).
+	cam.focal_pixels = renderer::object_lod_focal_pixels(view.viewport_width, tan_h);
 	cam.fog_dist = to_fixed(view.fog_dist_units);
 	cam.water_z = to_fixed(view.water_z_units);
 	// The mission-attribute force-indoors override ORs the indoors bit into

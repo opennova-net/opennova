@@ -196,6 +196,11 @@ ObjectModel *EntityPresenter::held_weapon_node(int p_handle) const {
 	return id != nullptr ? model_for_id(*id) : nullptr;
 }
 
+Ref<PersonOverlayModels> EntityPresenter::person_overlays_for(int p_handle) const {
+	const Ref<PersonOverlayModels> *set = person_overlays_.getptr(p_handle);
+	return set != nullptr ? *set : Ref<PersonOverlayModels>();
+}
+
 TypedArray<ObjectModel> EntityPresenter::wire_nodes() const {
 	TypedArray<ObjectModel> live;
 	for (const KeyValue<int32_t, ObjectID> &kv : nodes_) {
@@ -208,11 +213,14 @@ TypedArray<ObjectModel> EntityPresenter::wire_nodes() const {
 }
 
 void EntityPresenter::set_entity_lighting_context(int p_handle,
-		float p_effect_scale, bool p_interior_lerp, float p_light_transfer) {
+		float p_effect_scale, bool p_interior_lerp, float p_light_transfer,
+		int p_interior_bms, int p_interior_section) {
 	LightingContext context;
 	context.effect_scale = CLAMP(p_effect_scale, 0.0f, 1.0f);
 	context.interior_lerp = p_interior_lerp;
 	context.light_transfer = CLAMP(p_light_transfer, 0.0f, 1.0f);
+	context.interior_bms = p_interior_bms;
+	context.interior_section = p_interior_section;
 	lighting_contexts_[p_handle] = context;
 	apply_lighting_context(p_handle);
 }
@@ -223,12 +231,14 @@ void EntityPresenter::apply_lighting_context(int p_handle) {
 	if (ObjectModel *body = resolve_wire_handle(p_handle)) {
 		body->set_entity_lighting_context(context->effect_scale,
 				context->interior_lerp, context->light_transfer);
+		body->set_interior_light_group(context->interior_bms, context->interior_section);
 	}
 	if (ObjectModel *weapon = held_weapon_node(p_handle)) {
 		const ObjectModel *body = resolve_wire_handle(p_handle);
 		weapon->set_thermal_entity_wave(body != nullptr && body->get_thermal_entity_wave());
 		weapon->set_entity_lighting_context(context->effect_scale,
 				context->interior_lerp, context->light_transfer);
+		weapon->set_interior_light_group(context->interior_bms, context->interior_section);
 	}
 }
 
@@ -238,6 +248,10 @@ void EntityPresenter::free_wire_node(int p_handle) {
 	}
 	nodes_.erase(p_handle);
 	free_held_weapon(p_handle);
+	if (Ref<PersonOverlayModels> *overlays = person_overlays_.getptr(p_handle)) {
+		(*overlays)->release();
+		person_overlays_.erase(p_handle);
+	}
 	release_wire_handle(p_handle);
 	lighting_contexts_.erase(p_handle);
 }
@@ -269,6 +283,10 @@ void EntityPresenter::reset_wire_runtime_state() {
 	}
 	weapon_nodes_.clear();
 	weapon_graphics_.clear();
+	for (const KeyValue<int32_t, Ref<PersonOverlayModels>> &kv : person_overlays_) {
+		kv.value->release();
+	}
+	person_overlays_.clear();
 	lighting_contexts_.clear();
 	nodes_.clear();
 	unresolved_.clear();
@@ -628,6 +646,9 @@ Node3D *EntityPresenter::rebuild_held_weapon(int p_handle, int p_adm) {
 			ObjectModel *body = resolve_wire_handle(p_handle);
 			ObjectModel *head = MissionObjectPlacer::avatar_head_part(body);
 			built->set_authored_lod_owner(head != nullptr ? head : body);
+			// ...and skips the camera pass under 2 px of its own sphere
+			// (renderer::held_weapon_projection_culled).
+			built->set_attachment_pixel_cull(true);
 			weapon_nodes_[p_handle] = built->get_instance_id();
 			apply_lighting_context(p_handle);
 		}
@@ -772,6 +793,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		// the body's submit; a culled body never draws its gun
 		// [see RenderSlot_RenderEntityAndChildren in the engine's witness map]).
 		update_wire_held_weapon(row, model, snap, false);
+		update_wire_person_overlays(row, model, snap, false);
 		// A pending remote body blend is entity-update work, not draw work
 		// (retail advances it in AnimMap_UpdateEntity): keep consuming the
 		// tick delta so the blend finishes on schedule while occluded. Only a
@@ -794,6 +816,9 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
         destruction_->apply_husk_swap(husk);
     }
 	model->set_parachute_deployed(wfield_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
+	model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
+			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
+			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
 	stamp_match_terrain(model, p, base);
         stamp_destroy_phases(model, p, base);
 	const int32_t respawn_revision =
@@ -919,8 +944,9 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// PF_SECTION_MASK_VALID drives the model's section mask; a VALID -> clear
 	// transition releases once, and never-publishing rows leave the channel to
 	// its other writer (the occlusion frame pass on buildings).
-	stamp_section_mask(model, p, base, row.section_visibility_mask);
+	stamp_section_mask(model, p, base, row.destroyed_section_mask);
 	update_wire_held_weapon(row, model, snap, next_visible);
+	update_wire_person_overlays(row, model, snap, next_visible);
 	wire_respawn_revisions_.insert(row.handle, respawn_revision);
 	if (model->is_visible() != next_visible) {
 		model->set_visible(next_visible);
@@ -1180,6 +1206,31 @@ void EntityPresenter::update_wire_held_weapon(WireRow &row, Node3D *node,
 	}
 	weapon->set_global_transform(attach);
 	weapon->set_visible(true);
+}
+
+// This body's item overlays — retail's draws 1, 3, 4 and 6 for a remote
+// person: the engine published which are drawn and their angles; the models
+// build beside the body and follow its visibility (a culled or hidden body
+// draws none of them, like its held weapon). Nothing is allocated for a body
+// that has never published an overlay.
+// [retail BoneCallback_org0_World @ 0x4e3940]
+void EntityPresenter::update_wire_person_overlays(const WireRow &row, ObjectModel *body,
+		PresentRowsView snap, bool body_visible) {
+	const opennova::world::PersonOverlays overlays =
+			opennova::world::read_present_person_overlays(snap.ptr() + row.base);
+	Ref<PersonOverlayModels> *existing = person_overlays_.getptr(row.handle);
+	if (existing == nullptr) {
+		if (!overlays.canopy() && !overlays.nvg && !overlays.binoculars &&
+				overlays.carried_type_id == 0) {
+			return;
+		}
+		Ref<PersonOverlayModels> created;
+		created.instantiate();
+		person_overlays_.insert(row.handle, created);
+		existing = person_overlays_.getptr(row.handle);
+	}
+	(*existing)->present(overlays, body, body_visible, placer_.ptr(), container(),
+			PersonOverlayModels::PRESENT_WORLD);
 }
 
 } // namespace godot

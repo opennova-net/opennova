@@ -240,6 +240,10 @@ static void test_retail_door_pose() {
     mission::resolve_item_traits(w, items, {});
     const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
     CHECK(mission::resolve_collision_instances(w, items, resolve, deps) == 1);
+    // first_door 2 stores 1 at itemDef +0x891: the retail part draw forces
+    // every section from 1 up (the door), whatever the windowless raw mask
+    // says. [orig: Terrain_RenderSectorModels @ 0x5c5d7c..0x5c5d8d]
+    CHECK(occlusion.forced_section_mask(h) == 0xFFFFFFFEu);
     w.pose_provider = &pose;
     collision.set_pose_provider(&pose);
     w.collision = &collision;

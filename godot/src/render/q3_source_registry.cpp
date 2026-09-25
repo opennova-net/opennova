@@ -252,7 +252,6 @@ void Q3SourceRegistry::register_object_source(GeometryInstance3D *p_source,
 	Q3SourceRecord &record = register_record(p_source);
 	record.source = Q3Source::Object;
 	record.material_id = p_material->get_instance_id();
-	record.additive_surfaces = 0;
 	record.active = true;
 }
 
@@ -262,8 +261,17 @@ void Q3SourceRegistry::unregister_source(GeometryInstance3D *p_source) {
 		record->active = false;
 }
 
+void Q3SourceRegistry::set_celestial_self_lum(GeometryInstance3D *p_source,
+		const Q3Vec3 &p_self_lum) {
+	if (p_source == nullptr)
+		return;
+	std::lock_guard<std::recursive_mutex> lock(g_mutex);
+	if (Q3SourceRecord *record = find_record(p_source))
+		record->celestial_self_lum = p_self_lum;
+}
+
 void Q3SourceRegistry::register_source(GeometryInstance3D *p_source,
-		Q3Source p_kind, std::uint32_t p_additive_surfaces) {
+		Q3Source p_kind) {
 	if (p_source == nullptr || p_kind == Q3Source::Object ||
 			p_kind == Q3Source::LightCorona)
 		return;
@@ -271,7 +279,6 @@ void Q3SourceRegistry::register_source(GeometryInstance3D *p_source,
 	Q3SourceRecord &record = register_record(p_source);
 	record.source = p_kind;
 	record.material_id = 0;
-	record.additive_surfaces = p_additive_surfaces;
 	record.geometry_generation = 1;
 	record.instance_generation = 1;
 }
@@ -395,7 +402,12 @@ void Q3SourceRegistry::refresh_surfaces(Q3SourceRecord &r_record,
 		row.surface = surface;
 		row.material = material;
 		row.material_id = material->get_instance_id();
-		if (r_record.source == Q3Source::Object) {
+		// Object copies and the celestial redraws both shade the surface's
+		// authored material, so both take its registered classification
+		// (the celestial blend follows it; runtime/renderer/q3_frame.h).
+		if (r_record.source == Q3Source::Object ||
+				r_record.source == Q3Source::CelestialBody ||
+				r_record.source == Q3Source::SunGlow) {
 			const auto classification = g_materials.find(row.material_id);
 			if (classification == g_materials.end())
 				continue;
@@ -475,12 +487,16 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 		object.base_texture = lease_for(base);
 		object.detail_texture = lease_for(detail);
 		const Vector4 reflect = vector4_parameter(material, "u_reflect_color",
-				Vector4(0.7f, 0.8f, 0.9f, 0.35f));
+				Vector4(0.75f, 0.75f, 0.75f, 0.75f));
 		object.reflect_color = {reflect.x, reflect.y, reflect.z, reflect.w};
 		const Vector3 self_lum = vector3_parameter(material, "u_rgb_mod",
 				Vector3(1, 1, 1));
 		object.self_lum_color = {self_lum.x, self_lum.y, self_lum.z, 1.0f};
 		object.alpha_mod = float_parameter(material, "u_alpha_mod", 1.0f);
+		object.diffuse_max_lod = float_parameter(material, "u_diffuse_max_lod",
+				kQ3NoMipCeiling);
+		object.detail_max_lod = float_parameter(material, "u_detail_max_lod",
+				kQ3NoMipCeiling);
 		r_surface.primary_texture_resource = base;
 		r_surface.secondary_texture_resource = detail;
 		r_surface.tertiary_texture_resource.unref();
@@ -502,14 +518,9 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 		const Vector3 water_color = vector3_parameter(material, "u_water_color",
 				Vector3(0.408f, 0.314f, 0.224f));
 		water.water_color = {water_color.x, water_color.y, water_color.z};
-		const Vector4 uv = vector4_parameter(material, "u_water_uv",
-				Vector4(1.0f, 0.2f, 0.0f, 0.0f));
-		water.water_uv = {uv.x, uv.y, uv.z, uv.w};
-		r_surface.pack.water_uv = uv;
-		const Vector2 scale = vector2_parameter(material, "u_reflection_uv_scale",
-				Vector2(1, 1));
-		water.reflection_uv_scale = {scale.x, scale.y};
-		water.underwater_view = bool_parameter(material, "u_underwater_view", false);
+		const Vector2 depth_range = vector2_parameter(material, "u_scene_depth_range",
+				Vector2(0.2f, 1025.0f));
+		water.scene_depth_range = {depth_range.x, depth_range.y};
 		r_surface.primary_texture_resource = noise_color;
 		r_surface.secondary_texture_resource = noise_normal;
 		r_surface.tertiary_texture_resource = reflection;
@@ -521,22 +532,15 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 	Q3CelestialMaterialParameters &celestial = r_surface.celestial;
 	const Ref<Texture2D> diffuse = texture_parameter(material, "u_diffuse");
 	celestial.diffuse_texture = lease_for(diffuse);
-	const Vector3 tint = vector3_parameter(material, "u_tint", Vector3(1, 1, 1));
-	celestial.tint = {tint.x, tint.y, tint.z};
-	// Every celestial producer publishes its bloom-pass opacity as
-	// u_q3_opacity (the moon's fog-shader leg, the sun's body alpha, the
-	// glare's occlusion-free peak); an unpublished row draws nothing rather
-	// than borrowing the beauty formula.
-	celestial.opacity = float_parameter(material, "u_q3_opacity", 0.0f);
-	const Vector3 glare = vector3_parameter(material, "u_glare_direction",
-			Vector3(0, 1, 0));
-	celestial.glare_direction = {glare.x, glare.y, glare.z};
-	celestial.glare_view_fade = bool_parameter(material, "u_glare_view_fade", false);
-	// The blend is the one the Celestial installed for this surface
-	// (registered beside the source), never the source kind: the authored
-	// sun/moon FF_ST_AD_LUM discs add like the glare.
-	celestial.additive = r_surface.surface < 32 &&
-			((p_record.additive_surfaces >> r_surface.surface) & 1u) != 0u;
+	celestial.diffuse_max_lod = float_parameter(material, "u_diffuse_max_lod",
+			kQ3NoMipCeiling);
+	// The body's own authored material draws; its bloom-pass SelfLumColor
+	// is the producer's per-frame value (Celestial evaluates the material's
+	// RgbGen at the bloom pass's UPL_INTENSITY).
+	celestial.self_lum = p_record.celestial_self_lum;
+	// The blend is the one the body's material was classified with, never
+	// the source kind: the authored sun/moon/glare FF_ST_AD_LUM surfaces add.
+	celestial.blend = r_surface.classification.blend;
 	r_surface.primary_texture_resource = diffuse;
 	r_surface.secondary_texture_resource.unref();
 	r_surface.tertiary_texture_resource.unref();

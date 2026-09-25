@@ -272,7 +272,7 @@ void test_ctrl_register_projection() {
 
 // Forward drive: moving bit + dir 0 ramps speed by the accel clamp toward
 // player_speed and advances the position along the heading.
-// Boarding clears the player's impact-scar ring [orig: Entity_AttachToVehicle
+// Boarding clears the player's impact-scar ring [orig: Entity_AttachCarriedObject
 // @0x43c155 -> Scar_ClearEntriesByEntity @0x5ccec0].
 void test_boarding_clears_the_scar_ring() {
     Rig r;

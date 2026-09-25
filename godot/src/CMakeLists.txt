@@ -51,6 +51,7 @@ add_library(${TARGET_NAME} SHARED
     terrain/terrain_foliage_map.cpp
     terrain/foliage_dispatcher.cpp
     terrain/foliage_frame_stats.cpp
+    terrain/foliage_mask_pass.cpp
     terrain/terrain_tile_entry.cpp
     terrain/terrain_tile_info.cpp
     cbin/cbin_credits_resource.cpp
@@ -74,7 +75,6 @@ add_library(${TARGET_NAME} SHARED
     env/weather.cpp
     env/precipitation.cpp
     env/water_core.cpp
-    env/star_field.cpp
     env/glare_occlusion.cpp
     particle/particle_effect.cpp
     particle/particle_file.cpp
@@ -82,19 +82,23 @@ add_library(${TARGET_NAME} SHARED
     lights/effect_light_report.cpp
     lights/light_scene.cpp
     lights/light_spawn.cpp
+    particle/effect_distortion_drawer.cpp
     particle/effect_group_report.cpp
     particle/effect_load_report.cpp
     particle/effect_scene.cpp
     particle/effect_spawn_records.cpp
     particle/effect_world.cpp
     particle/particle_compositor.cpp
+    particle/particle_far_pass.cpp
     particle/particle_renderer.cpp
     render/environment_cube_blit.cpp
     render/frame_fx.cpp
+    render/nvg_view_device.cpp
     render/object_lod_frame.cpp
     render/q3_frame_adapter.cpp
     render/q3_geometry_cache.cpp
     render/q3_source_registry.cpp
+    render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
     object/entity_index.cpp
     object/entity_ref.cpp
@@ -159,6 +163,7 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_setup_options.cpp
     simulation/entity_presenter.cpp
     simulation/entity_presenter_wire.cpp
+    simulation/person_overlay_models.cpp
     simulation/fire_presenter.cpp
     simulation/destruction_presenter.cpp
     simulation/throwable_presenter.cpp
@@ -183,6 +188,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_end_round.cpp
     simulation/simulation_player_view.cpp
     simulation/simulation_player_weapon.cpp
+    simulation/effect_section_source.cpp
     simulation/simulation_present.cpp
     simulation/simulation_script_voice.cpp
     simulation/simulation_scars.cpp

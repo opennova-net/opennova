@@ -3,7 +3,6 @@
 #include "terrain/terrain.h"
 #include "terrain/terrain_surface_inputs.h"
 #include "terrain/terrain_tile_info.h"
-#include "env/slot_shadow.h"
 #include "env/water.h"
 #include "render/visual_layers.h"
 #include "mission/mission_object_placer.h"
@@ -77,6 +76,9 @@ void Terrain::_bind_methods() {
 		&Terrain::get_tile_cache_texture);
 	ClassDB::bind_method(D_METHOD("get_tile_cache_diagnostics"),
 		&Terrain::get_tile_cache_diagnostics);
+	ClassDB::bind_method(D_METHOD("invalidate_tile_cache_region", "minimum_x_q16",
+			"minimum_z_q16", "maximum_x_q16", "maximum_z_q16"),
+			&Terrain::invalidate_tile_cache_region);
 	ClassDB::bind_method(D_METHOD("append_terrain_scorch", "texture_index",
 			"minimum_x_q16", "minimum_z_q16", "maximum_x_q16",
 			"maximum_z_q16"), &Terrain::append_terrain_scorch);
@@ -213,10 +215,6 @@ Ref<Texture2D> Terrain::get_heightfield_normal_texture() const {
 	return surface_inputs->get_heightfield_normal_texture();
 }
 
-Ref<Texture2D> Terrain::get_tile_overlay_texture() const {
-	return surface_inputs->get_tile_overlay_texture();
-}
-
 Ref<Texture2DArray> Terrain::get_tile_cache_texture() const {
 	return tile_cache_device.get_texture();
 }
@@ -260,25 +258,30 @@ void Terrain::clear_terrain_scorches() {
 	tile_cache_device.clear_terrain_scorches();
 }
 
+int64_t Terrain::invalidate_tile_cache_region(int64_t p_minimum_x_q16,
+		int64_t p_minimum_z_q16, int64_t p_maximum_x_q16,
+		int64_t p_maximum_z_q16) {
+	if (p_minimum_x_q16 < INT32_MIN || p_minimum_x_q16 > INT32_MAX ||
+			p_minimum_z_q16 < INT32_MIN || p_minimum_z_q16 > INT32_MAX ||
+			p_maximum_x_q16 < INT32_MIN || p_maximum_x_q16 > INT32_MAX ||
+			p_maximum_z_q16 < INT32_MIN || p_maximum_z_q16 > INT32_MAX) {
+		return 0;
+	}
+	return static_cast<int64_t>(tile_cache_device.invalidate_region(
+			static_cast<int32_t>(p_minimum_x_q16),
+			static_cast<int32_t>(p_minimum_z_q16),
+			static_cast<int32_t>(p_maximum_x_q16),
+			static_cast<int32_t>(p_maximum_z_q16)));
+}
+
 std::optional<opennova::TerrainTilePageBinding>
 Terrain::get_tile_cache_binding_for_world_point_native(
 		float p_world_x, float p_world_z) {
 	if (!std::isfinite(p_world_x) || !std::isfinite(p_world_z)) {
 		return std::nullopt;
 	}
-	constexpr float SECTOR_SIZE = 512.0f;
-	opennova::TerrainTileResidentPoint point;
-	point.sector_origin_x = static_cast<int32_t>(
-			std::floor(p_world_x / SECTOR_SIZE)) * 512;
-	point.sector_origin_z = static_cast<int32_t>(
-			std::floor(p_world_z / SECTOR_SIZE)) * 512;
-	point.world_x = p_world_x;
-	point.world_z = p_world_z;
-	return tile_cache_device.best_ready(point);
-}
-
-Vector3 Terrain::get_tile_overlay_tint() const {
-	return tile_overlay_tint;
+	return tile_cache_device.lookup(
+			opennova::TerrainTileResidentPoint{p_world_x, p_world_z});
 }
 
 void Terrain::set_lod_quality(float p_quality) {
@@ -294,9 +297,8 @@ void Terrain::set_tile_overlay_enabled(bool p_enabled) {
 		return;
 	}
 	tile_overlay_enabled = p_enabled;
-	surface_inputs->set_tile_overlay_enabled(p_enabled);
 	if (built) {
-		_rebuild_tile_overlay_texture();
+		_rebuild_tile_overlay_pages();
 	}
 }
 
@@ -316,7 +318,7 @@ void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
 	}
 	surface_inputs->set_tile_info_override(p_info);
 	if (built) {
-		_rebuild_tile_overlay_texture();
+		_rebuild_tile_overlay_pages();
 	}
 }
 
@@ -325,7 +327,7 @@ Ref<TerrainTileInfo> Terrain::get_tile_info_override() const {
 }
 
 void Terrain::rebuild_tile_overlay() {
-	_rebuild_tile_overlay_texture();
+	_rebuild_tile_overlay_pages();
 }
 
 void Terrain::set_environment_path(const NodePath& p_path) {
@@ -490,7 +492,18 @@ void Terrain::render_frame() {
 	}
 	static_shadow_rasterizer.begin_frame(page_light_direction,
 			light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
-	tile_cache_device.begin_frame(draw_list.frame_id);
+	// The page claims stamp the weather clock's TOD epoch (Env_TodEpoch,
+	// one step per 311 logic ticks); a page whose stamp falls behind is
+	// refreshed on an all-hit frame.
+	const uint32_t tod_epoch = cached_env_node != nullptr &&
+					cached_env_node->state().weather() != nullptr
+			? cached_env_node->state().weather()->tod_epoch
+			: 0u;
+	tile_cache_device.begin_frame(draw_list.frame_id, tod_epoch);
+	// Every missing visible page composes before the patches draw.
+	const std::vector<opennova::TerrainTilePageBinding> &pages =
+			tile_cache_device.compose_frame(draw_list, page_tile_tint,
+					page_light_direction);
 
 	// Apply the draw list onto the instance pool: draw-list index == pool slot.
 	RenderingServer* rs = RenderingServer::get_singleton();
@@ -550,9 +563,7 @@ void Terrain::render_frame() {
 			last_quadrant[i] = quadrant;
 		}
 
-		const opennova::TerrainTilePageBinding page =
-				tile_cache_device.request(
-					draw, page_tile_tint, page_light_direction);
+		const opennova::TerrainTilePageBinding &page = pages[i];
 		const std::optional<opennova::TerrainTilePageProjection> projection =
 				page.ready
 						? opennova::TerrainTileCompositionCache::page_projection(
@@ -648,12 +659,6 @@ void Terrain::render_frame() {
 			// consumes only c1 = light + c0 = sky [orig: @ 0x604420, see
 			// docs/terrain/terrain-re.md].
 			cached_env_node->apply_terrain_uniforms(terrain_material);
-			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
-			// one multiply; the tile path consumes this uniform.
-			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].
-			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
-			terrain_material->set_shader_parameter(
-				"u_tile_overlay_tint", tile_overlay_tint);
 		}
 	}
 }
@@ -679,10 +684,11 @@ void Terrain::_bind_light_textures() {
 	}
 	// The two procedural textures, built once per process like the corona
 	// texture [orig: Lighting_InitTextures @0x5a94f0 creates "texlight2d"
-	// 64x64 and "texlightspot1d" 64x8, both without mips, and the 0x600 shader
-	// they bind addresses CLAMP — CGfxTexture_SetSamplerAddressing (ex sub_680720)(this, clamp=1, 0, 0, 0)
-	// @0x5a98eb..0x5a98f4; the shader samplers carry the matching
-	// filter_linear, repeat_disable hints].
+	// 64x64 and "texlightspot1d" 64x8, both without mips; the 0x600 shader
+	// they bind gets GfxShader_SetFfpLightingSources (ex sub_680720)(this, 1,
+	// 0, 0, 0) @0x5a98eb..0x5a98f4, FFP lighting on with the material
+	// sources on MATERIAL (not a sampler address mode); the shader samplers
+	// carry filter_linear, repeat_disable hints].
 	const int size = LightScene::terrain_light_texture_size();
 	const int rows = LightScene::terrain_light_strip_rows();
 	if (light_disc_texture.is_null()) {
@@ -873,8 +879,7 @@ void Terrain::_load_textures() {
 	if (terrain_material.is_null() || terrain_data.is_null()) {
 		return;
 	}
-	surface_inputs->rebuild(
-		terrain_data, tile_info_override, tile_overlay_enabled);
+	surface_inputs->rebuild(terrain_data, tile_info_override);
 	surface_inputs->apply_to_material(terrain_material);
 	tile_cache_device.rebuild(terrain_data, surface_inputs,
 			tile_info_override, tile_overlay_enabled);
@@ -884,22 +889,12 @@ void Terrain::_load_textures() {
 			"u_has_tile_cache", tile_cache_device.is_ready());
 }
 
-void Terrain::_clear_tile_overlay_texture() {
-	surface_inputs->clear_tile_overlay();
-	if (terrain_material.is_valid()) {
-		surface_inputs->apply_to_material(terrain_material);
-	}
-}
-
-void Terrain::_rebuild_tile_overlay_texture() {
+void Terrain::_rebuild_tile_overlay_pages() {
 	if (terrain_material.is_null()) {
 		return;
 	}
 	surface_inputs->set_terrain_data(terrain_data);
 	surface_inputs->set_tile_info_override(tile_info_override);
-	surface_inputs->set_tile_overlay_enabled(tile_overlay_enabled);
-	surface_inputs->rebuild_tile_overlay();
-	surface_inputs->apply_to_material(terrain_material);
 	tile_cache_device.rebuild(terrain_data, surface_inputs,
 			tile_info_override, tile_overlay_enabled);
 	terrain_material->set_shader_parameter(
@@ -920,7 +915,7 @@ void Terrain::_on_terrain_changed() {
 
 void Terrain::_on_tile_info_changed() {
 	if (!built || terrain_data.is_null()) return;
-	_rebuild_tile_overlay_texture();
+	_rebuild_tile_overlay_pages();
 }
 
 void Terrain::_hide_visible_patches() {
@@ -971,7 +966,6 @@ void Terrain::_clear_terrain() {
 	}
 	light_patches_lit = 0;
 	light_rows_total = 0;
-	_clear_tile_overlay_texture();
 	_clear_derived_textures();
 
 	tile_infos.clear();
@@ -1058,18 +1052,6 @@ bool Terrain::_build_terrain() {
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
-	// Terrain receives the LIVE entity ground shadows: the render-slot drape
-	// next pass multiplies each bound slot's silhouette capture (or authored
-	// blob decal) into the terrain along the slot projection direction with
-	// the per-channel ambient law and the 40..80 u fade. Retail drapes over
-	// 21x21 terrain-following patches; the terrain surface itself stands in
-	// for the patch mesh and the projection is evaluated per pixel [orig:
-	// RenderSlot_DrawAllDrapes @0x5d6e20, render_sector_model @0x5d5ca0 —
-	// engine/runtime/renderer/render_slot_shadow.h carries the witness map;
-	// SlotShadow is the capture device]. Entity shadows land on TERRAIN ONLY,
-	// like retail's terrain-following patches; static building silhouettes
-	// stay page-alpha in the tile composer.
-	terrain_material->set_next_pass(SlotShadow::get_drape_material());
 
 	tile_infos.resize(cpt.tiles.size());
 

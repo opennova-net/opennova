@@ -1,15 +1,15 @@
 #pragma once
 
 // Portable static terrain-shadow collector for the composed terrain page
-// cache. Mission placement supplies stable caster/geometry identities and
-// world bounds; this module owns witnessed admission, sun-swept page culling,
-// selected shadow LOD, all-ROBJ ordering, and a deterministic contribution
-// stamp. The device binding remains responsible for resolving geometry refs
-// and rasterizing/compositing them.
+// cache. Mission placement supplies stable caster/geometry identities, the
+// entity position and the model sphere; this module owns witnessed
+// admission, the sun-extended tile test, selected shadow LOD, all-ROBJ
+// ordering, and a deterministic contribution stamp. The device binding
+// remains responsible for resolving geometry refs and rasterizing/compositing
+// them.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250; admission
-// @0x60D421..0x60D450; projected bound/page intersection
-// @0x60D465..0x60D54F; selected LOD/all-ROBJ submit
-// @0x60D881..0x60D971]
+// @0x60D421..0x60D450; sphere/tile test @0x60D465..0x60D54F; selected
+// LOD/all-ROBJ submit @0x60D881..0x60D971]
 
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain/terrain_tile_light_epoch.h>
@@ -20,17 +20,6 @@
 #include <vector>
 
 namespace opennova::terrain {
-
-struct TerrainStaticShadowBounds {
-	float min_x = 0.0f;
-	float min_y = 0.0f;
-	float min_z = 0.0f;
-	float max_x = 0.0f;
-	float max_y = 0.0f;
-	float max_z = 0.0f;
-
-	bool valid() const noexcept;
-};
 
 // Binding-owned stable model identity plus the two render-LOD populations the
 // retail collector can select. Each output draw adds an explicit ROBJ index.
@@ -81,7 +70,12 @@ struct TerrainStaticShadowCandidate {
 	uint32_t item_attrib = 0;
 	uint32_t item_attrib2 = 0;
 	bool active = true;
-	TerrainStaticShadowBounds world_bounds{};
+	// The entity's planar position in mission 16.16 (entity+4 X, entity+8 Y;
+	// Godot x and -z) and its model's sphere radius (model+0x14, the husk
+	// model once swapped) — the only caster inputs the tile test reads
+	// [orig: @0x60D45E, @0x60D475, @0x60D50A..0x60D531].
+	std::array<int32_t, 2> position_fixed{};
+	int32_t model_radius_fixed = 0;
 	TerrainStaticShadowGeometrySource geometry{};
 	uint64_t transform_revision = 0;
 };
@@ -94,17 +88,15 @@ struct TerrainStaticShadowLightDirection {
 
 struct TerrainStaticShadowPageInput {
 	TerrainTilePageKey page{};
-	// Normalized surface-to-light direction. Like retail, the collector clamps
-	// the vertical projection divisor to 0.25 before expanding the footprint.
+	// The raw surface-to-light direction in presentation axes (the
+	// environment getter tuple through the (g2, g1, g0) reduction). The tile
+	// test reads its 16.16 twin, the mission-axis Environment_GetLightDirection-
+	// Fixed tuple, with the vertical clamped to 0x4000.
 	TerrainStaticShadowLightDirection surface_to_light{};
 	// Cache identity shared with the terrain DOT3 pass. The binding derives
 	// these bytes from the raw environment getter tuple through the one portable
 	// (g2,g0,g1) quantizer; raw direction remains the projection input above.
 	TerrainTileLightEpoch light_epoch = kDefaultTerrainTileLightEpoch;
-	// Conservative receiver plane for broad-phase projection. Raster bindings
-	// can use the actual page geometry; this value only decides candidate/page
-	// intersection and therefore should be the page's minimum terrain height.
-	float receiver_height = 0.0f;
 };
 
 struct TerrainStaticShadowGeometryRef {

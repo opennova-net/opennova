@@ -1102,6 +1102,11 @@ void process_destructible_death(World &world, Entity &target) {
                                           target.bms_id,
                                           target.spawn_origin, target.item_id,
                                           target.spawned_piece_mask, target.position});
+    // The item's footprint retires the terrain pages composed under it
+    // [orig: Entity_ProcessDestructibleDeath @ 0x43fc12..0x43fc5e].
+    world.out.terrain_scorches.emit_page_invalidation(
+            int32_t(target.position.x * 65536), int32_t(target.position.y * 65536),
+            int32_t(target.bound_radius * 65536));
     // The S2C 0x26 entity-state broadcast (Server_SendEntityStatePacket
     // @ 0x509d70) is the net track's emit — staged with the other MP legs
     // (tracked §24).
@@ -1124,9 +1129,10 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     // (@ 0x5a8d83) call inside Entity_SpawnDeathPieces @ 0x49351a — 2x the
     // piece model's bound radius, non-decorations only; the presenter's light
     // pool renders it (renderer/light_scene.h)].
-    if (!traits->is_decoration && traits->husk_piece_bound_radius > 0.0f) {
+    if (!traits->is_decoration && traits->piece_model.radius_q16 > 0) {
         world.out.destruction.death_lights.push_back(DeathLightEvent{
-                target.position, 2.0f * traits->husk_piece_bound_radius});
+                target.position,
+                2.0f * (traits->piece_model.radius_q16 * io::kInvFp16One)});
     }
     uint32_t mask = 0;
     // The loop bound is the HUSK MODEL's section count [orig: renderObj[8]+52
@@ -1160,10 +1166,16 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
             dir_ai_y = wreck_vy / alen;
         }
     }
-    // Section centers use the complete entity orientation, exactly like KZ
-    // points and collision [orig: Math_TransformPointFixedPoint22
+    // Section centres ride the entity's orientation matrix entity+0xB4, which
+    // the entry rebuilds from the live Euler triple and the entity scale
+    // (+0x158 ?: def+0x1B8) unless the entity is a building
+    // [orig: @ 0x493455..0x4934ac; Math_TransformPointFixedPoint22
     // (orientationMatrix) @ 0x4938e6].
-    const CollisionMatrix orientation = destruction_orientation(target);
+    const CollisionMatrix orientation = entity_placement_matrix(target);
+    // Every piece starts in the wreck's own pose, heading and pitch then spin
+    // [orig: the entity+4..+0x18 copy @ 0x4936be..0x4936de].
+    int32_t pose_bam[3];
+    entity_live_euler_bam(target, pose_bam);
     for (int s = 1; s < sections; ++s) {
         // Every section spawns; only the TYPE lookup clamps at slot 16
         // [orig: the loop bound @ 0x493918 vs the index clamp @ 0x49362f].
@@ -1179,16 +1191,29 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
         p.item_id = target.item_id;
         p.section = static_cast<uint8_t>(s);
         p.type_index = static_cast<uint8_t>(type_idx);
-        p.render_scale = traits->debris_scale > 0.0f ? traits->debris_scale : 1.0f;
+        // def+0x1BC unless it is zero [orig: fcomp/jnp @ 0x4936f1..0x493708].
+        p.render_scale = traits->debris_scale != 0.0f ? traits->debris_scale : 1.0f;
         p.pos = target.position;
-        if (static_cast<size_t>(s) < traits->husk_section_centers.size()) {
-            // The piece starts at its section's center, not the entity origin
-            // [orig: the section-row center add @ 0x4938bf-0x493900].
-            const Vec3 &c = traits->husk_section_centers[static_cast<size_t>(s)];
-            const Vec3 offset = rotate_authored_point(orientation, c);
-            p.pos.x += offset.x;
-            p.pos.y += offset.y;
-            p.pos.z += offset.z;
+        p.heading = static_cast<float>(pose_bam[0] * kDegreesPerBam);
+        p.pitch = static_cast<float>(pose_bam[1] * kDegreesPerBam);
+        p.roll = static_cast<float>(pose_bam[2] * kDegreesPerBam);
+        p.radius_q16 = traits->piece_model.radius_q16;
+        // The piece collapses every other LOD-0 section of the piece model
+        // [orig: @ 0x493889..0x4938b0 — shl wraps the count mod 32].
+        for (int other = 0; other < sections; ++other)
+            if (other != s) p.hidden_mask |= 1u << (other & 31);
+        if (static_cast<size_t>(s) < traits->piece_model.section_origin_q16.size()) {
+            // The piece starts at its section's COBJ centre through the
+            // orientation matrix, not at the entity origin
+            // [orig: the COBJ +0x38 read @ 0x4938b2..0x4938da, the add
+            // @ 0x4938eb..0x493900].
+            int32_t offset[3];
+            orientation.rotate_point(
+                    traits->piece_model.section_origin_q16[static_cast<size_t>(s)].data(),
+                    offset);
+            p.pos.x += offset[0] * io::kInvFp16One;
+            p.pos.y += offset[1] * io::kInvFp16One;
+            p.pos.z += offset[2] * io::kInvFp16One;
         }
         // Launch direction, the witnessed two-stage build [orig: @ 0x493718-
         // 0x49380e]: (1) 2D-normalize the +-0.5 random spread around the wreck
@@ -1218,8 +1243,6 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
         // per tick, uniform{0..99}/100 of max clamped up to min].
         p.spin_a = spin_rate_roll(world, tp);
         p.spin_b = spin_rate_roll(world, tp);
-        p.heading = 0.0f;
-        p.pitch = 0.0f;
         // Bounce budget: rand % lifetime + 1, floored at lifetime/8
         // [orig: @ 0x49385b-0x493885].
         int bounces = tp.lifetime > 0 ? (death_rand16(world) % tp.lifetime) + 1 : 1;

@@ -933,8 +933,9 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 				"mesh": coarse, "material": null,
 				"offset": Transform3D.IDENTITY, "submesh": 1, "lod_index": 1,
 			}], {
-				# Fine to coarse; row 0 is unused, row 1 = 20 px in Q16.16.
-				"thresholds_q16": PackedInt32Array([0, 20 << 16]),
+				# Fine to coarse; slot i is level i's own threshold (retail
+				# Model_SelectRlodLevel @0x5c3b3b): level 0 above 20 px, level 1 below.
+				"thresholds_q16": PackedInt32Array([20 << 16, 0]),
 				"sphere_radius": 2.0,
 			}))
 	var parent := Node3D.new()
@@ -1089,7 +1090,7 @@ func _dense_lod_switches(placer: MissionObjectPlacer, camera: Transform3D) -> in
 
 
 # Three same-graphic buildings in one 512-unit bin at Godot z = 10 / 100 /
-# 200 (BMS y = -10 / -100 / -200), a two-level graphic (row 1 = 20 px). The
+# 200 (BMS y = -10 / -100 / -200), a two-level graphic (level 0 above 20 px). The
 # second one optionally carries the BMS NoShadow gate so the level
 # populations need a filtered shadow twin.
 func _dense_fixture(parent: Node3D, no_shadow_second: bool) -> Dictionary:
@@ -1121,7 +1122,7 @@ func _dense_fixture(parent: Node3D, no_shadow_second: bool) -> Dictionary:
 				"mesh": coarse, "material": null,
 				"offset": Transform3D.IDENTITY, "submesh": 1, "lod_index": 1,
 			}], {
-				"thresholds_q16": PackedInt32Array([0, 20 << 16]),
+				"thresholds_q16": PackedInt32Array([20 << 16, 0]),
 				"sphere_radius": 2.0,
 			}))
 	var stats := placer.place(mission, parent)
@@ -1200,6 +1201,44 @@ func test_dense_population_packs_only_live_rows_and_hides_empty_levels() -> void
 	assert_eq(placer.get_static_live_population_count(), 0)
 	assert_eq(level0.multimesh.instance_count, 3,
 			"the capacity never changes; only the live count does")
+
+
+func test_occlusion_verdict_drops_a_batched_static_at_every_level() -> void:
+	# A batched static has no ObjectModel, so the occlusion frame's collector
+	# and building-batch verdicts land on its retained instance: a culled
+	# instance carries no row at any level until released (retail
+	# Terrain_CollectVisibleEntities_0 @0x5c7022..0x5c708a / @0x5c7118..0x5c7162,
+	# collect_visible_sector_userpoints @0x5c6cd1..0x5c6d0d).
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var fixture := _dense_fixture(parent, false)
+	var placer: MissionObjectPlacer = fixture.placer
+	var bms: Array[int] = fixture.bms
+	_dense_lod_switches(placer, DENSE_NEAR_CAMERA)
+	var first_level := placer.get_static_instance_lod(bms[0])
+	var second_level := placer.get_static_instance_lod(bms[1])
+	assert_true(first_level >= 0, "the fixture instance draws before any verdict")
+	assert_true(second_level >= 0)
+
+	placer.set_static_instance_occlusion_hidden(bms[0], true)
+	_dense_lod_switches(placer, DENSE_NEAR_CAMERA)
+	assert_eq(placer.get_static_instance_lod(bms[0]), -1, "a culled static draws at no level")
+	assert_eq(_live_populations(placer, bms[0]), [], "every level population drops its row")
+	assert_eq(placer.get_static_instance_lod(bms[1]), second_level,
+			"the verdict is per instance")
+
+	placer.set_static_instance_occlusion_hidden(bms[0], false)
+	_dense_lod_switches(placer, DENSE_NEAR_CAMERA)
+	assert_eq(placer.get_static_instance_lod(bms[0]), first_level,
+			"a released instance re-selects its level on the next walk")
+
+	placer.set_static_instance_occlusion_hidden(bms[1], true)
+	_dense_lod_switches(placer, DENSE_NEAR_CAMERA)
+	assert_eq(placer.get_static_instance_lod(bms[1]), -1)
+	placer.clear_static_instance_occlusion()
+	_dense_lod_switches(placer, DENSE_NEAR_CAMERA)
+	assert_eq(placer.get_static_instance_lod(bms[1]), second_level,
+			"the unload/A-B release clears every verdict")
 
 
 func test_dense_population_carve_and_restore_follow_the_compaction() -> void:

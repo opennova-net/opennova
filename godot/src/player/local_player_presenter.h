@@ -26,6 +26,7 @@
 #include "player/player_viewmodel_rig.h"
 #include "player/player_weapon_effects.h"
 #include "simulation/inmatch_session_values.h"
+#include "simulation/person_overlay_models.h"
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
@@ -163,6 +164,9 @@ public:
 	Node3D *viewmodel() const;
 	// The 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals).
 	ObjectModel *held_weapon() const;
+	// The avatar's item overlays (canopy, goggles, binoculars, carried
+	// object); siblings of the avatar like the held weapon.
+	Ref<PersonOverlayModels> person_overlays() const { return person_overlays_; }
 	Camera3D *camera() const;
 	// THE FRAME'S PROJECTION over the surface (the engine's world::view_projection
 	// for the session aspect mode): the horizontal fov is the policy fov in
@@ -184,6 +188,11 @@ public:
 	SubViewport *projection_viewport() const;
 	// The vertical stretch of the frame onto the surface (1 = none).
 	float projection_scale_y() const { return projection_scale_y_; }
+	// True while the NVG composite is up: the world renders as the NVG scene,
+	// through the target at world::nvg_view_projection's raster (512 rows at
+	// the frame's frustum, or the Scoped arm's 512-square square frustum),
+	// the surface's own 3D pass off -- one world render a frame.
+	bool is_nvg_raster_active() const { return nvg_raster_active_; }
 	// The FP viewmodel owner (tests and probes inspect the projection feed and
 	// sweep the placement tunables through it).
 	Ref<PlayerViewmodelRig> viewmodel_rig() const { return viewmodel_rig_; }
@@ -267,6 +276,7 @@ private:
 	Vector2 aim_angles_deg() const;
 	Vector3 eye_position(const Vector3 &p_pos) const;
 	void update_held_weapon(const Ref<PlayerAimOverlay> &p_overlay);
+	void update_person_overlays();
 	void update_player_camera();
 	void stamp_camera_pose();
 	void update_model_lighting_context();
@@ -278,7 +288,8 @@ private:
 	// presenter, which owns the carrier nodes and draws the display model in
 	// the hidden hull's place. `p_live` false feeds the inactive frame.
 	void feed_virtual_display(bool p_live);
-	void update_view_projection(const opennova::world::ViewProjection &p_projection);
+	void update_view_projection(const opennova::world::ViewProjection &p_projection,
+			bool p_nvg_raster);
 	void release_view_projection();
 	void update_avatar(const Vector3 &p_pos);
 	GameplayCamera *fly_camera() const;
@@ -290,6 +301,7 @@ private:
 	ObjectID avatar_id_;
 	ObjectID held_weapon_id_; // the 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals)
 	String held_weapon_graphic_; // the gfx3 the live node was built from
+	Ref<PersonOverlayModels> person_overlays_;
 	Ref<PlayerWeaponEffects> weapon_effects_;
 	PlayerInputRouter input_router_;
 	Ref<PlayerViewmodelRig> viewmodel_rig_;
@@ -305,6 +317,7 @@ private:
 	ObjectID projection_blit_layer_id_;
 	ObjectID projection_surface_id_;
 	float projection_scale_y_ = 1.0f;
+	bool nvg_raster_active_ = false;
 	bool debug_force_viewmodel_ = false;
 	bool debug_body_in_first_person_ = false;
 	bool debug_third_person_ = false;

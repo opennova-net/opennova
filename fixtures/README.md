@@ -95,7 +95,9 @@ control register 0, values 0..4, no speed):
 | `mount_ctrl1_not_retail` | mount | CTRL 1 renamed `NOT_RETAIL` | ctrl_bus unknown alias |
 | `mount_yaw_style114` | mount | the first LOD0 track with control 113 on register 1 (the cradle's yaw) becomes style 114 | ctrl_bus wave style, normal |
 | `mount_ctrl1_lod_frac_yaw_style114` | mount | CTRL 1 renamed `LOD_FRAC` + the same track edit | ctrl_bus wave style, patched |
-| `mount_mtrl0_rgbgen113_reg1` | mount | material 0 RGB generator style 113 on register 1, black to white | ctrl_bus material alias |
+| `mount_mtrl0_rgbgen113_reg1` | mount | material 0 as FF_ST_OP_LUM (emissive 2), RGB generator style 113 on register 1, black to white | ctrl_bus material alias |
+| `crate_mtrl0_ad_lum_upl113` | crate | material 0 `FF_ST_AD_LUM` (emissive full), CTRL 0 `UPL_INTENSITY`, RGB generator style 113 on register 0, black to white | `celestial_test.gd` sky bodies |
+| `crate_mtrl0_ab_lum_upl113` | crate | the same edits with material 0 `FF_ST_AB_LUM` | `celestial_test.gd` Q3 glow blend |
 | `armory_lght0_colorgen113_flicker` | armory | light 0: style 113, phase 0, black to white, objects enabled | ctrl_bus light bus |
 | `pump_minefield` | pump | ignored USRP followed by sixteen mixed-case mine names across the existing five parts; only the first fourteen bind | native `minefield`; GUT `minefield_present_test` |
 | `pump_anim0_noise_translation` | pump | LOD0 row 0: translation z enabled, control 0x36, end 32767 | `object_data_panm_apply_test.gd` same-time noise |
@@ -103,13 +105,13 @@ control register 0, values 0..4, no speed):
 | `armory_lght0_sub1_offset` | armory | light 0: subobject 1, Godot position (0.25, 0.5, -0.75), atten_end 1000 | effect_light spawn-time matrix |
 | `house_lod0_sine_rotx` | house | one appended LOD0 row: rotation x sine 0..90 deg at speed 1 | `terrain_static_shadow_runtime_test.gd` resident pages |
 | `house_lod0_sine_rotx_uv1` | house | the previous edit + material 0 `uv_u_style` 1 | terrain dynamic-UV phase |
-| `house_mtrl0_uvscroll16_alphatest` | house | material 0 alpha test on, `uv_u_style` 16, `uv_u_rate` 1.0 | terrain worker snapshot |
+| `house_mtrl0_uvscroll16_alphatest` | house | material 0 as FF_ST_OP#UV, alpha test on, `uv_u_style` 16, `uv_u_rate` 1.0 | terrain worker snapshot |
 | `mount_heat_glow_slide_part1` | mount | delete rows; slide(1) on `HEAT_GLOW` | `simulation_test.gd` heat glow |
 | `armory_special1_slide_part1` | armory | CTRL 0 renamed `VEHICLE_SPECIAL1`; delete rows; slide(1) | simulation animated collision + FastRope SPECIAL1 |
 | `armory_special2_slide_part1` | armory | CTRL 0 renamed `VEHICLE_SPECIAL2`; delete rows; slide(1) | simulation FastRope SPECIAL2 |
 | `tank_special1_slide_ewep01` | tank | CTRL 0 renamed `VEHICLE_SPECIAL1`; delete rows; slide(the part that owns `ewep01`) | simulation listen-snapshot attachment |
 | `pump_lod0_inert_lod1_sine_rotz` | pump | LOD0: one inert row on part 0; LOD1: one rotation z sine row | simulation effective LOD0 collision |
-| `pump_lod20`, `pump_lod80` | pump | LOD1 threshold 20 or 80 pixels in Q16.16; original geometry, GHDR and CMDL retained | entity projection sphere, fallback/composed persons and primary-sphere husk LOD selection |
+| `pump_lod20`, `pump_lod80` | pump | LOD0 RMDL threshold 20 or 80 (integer pixels, retail's authored form: LOD0 draws above it, LOD1 below); original geometry, GHDR and CMDL retained | entity projection sphere, fallback/composed persons and primary-sphere husk LOD selection |
 | `panm_live_01_spinner` .. `panm_inert_10_rotrev` | shed | delete rows; one row on part 0 with flags F and every track control 0 except the live tracks (control 0x10). (F, live): 01 `1<<8` none; 02 `3<<8` none; 03 `4<<8` none; 04 `2<<8` rotation z; 05 `2<<8` scale x; 06 `1` scale y; 07 `1` scale x; 08 `2` scale y; 09 `1<<24` translation; 10 `1<<16` none | simulation PANM liveness family |
 
 Every consumer that pins a number pins the authored one: the bird's 18 faces,

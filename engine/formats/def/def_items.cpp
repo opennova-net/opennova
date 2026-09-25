@@ -59,6 +59,14 @@ static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx
         safe_copy(slot->secondary_effect, sizeof(slot->secondary_effect), tok[2].s, tok[2].len);
 }
 
+/* One byte (0 = low) of a little-endian ItemDef dword the byte-writing keys
+   share (the +0x890 door/death dword, the +0x894 clipsize dword). */
+static void set_def_byte(int32_t &dword, int byte_index, uint8_t value) {
+    const unsigned shift = static_cast<unsigned>(byte_index) * 8u;
+    dword = static_cast<int32_t>((static_cast<uint32_t>(dword) & ~(0xFFu << shift)) |
+                                 (static_cast<uint32_t>(value) << shift));
+}
+
 /* Retail's per-block ItemDef defaults. Every items.def `begin` allocates a slot
    through ItemDef_AllocateWithDefaults, which zeroes the record and then stamps
    this physics block BEFORE any key is parsed, so an item that declares none of
@@ -160,18 +168,52 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             else current.door_type = static_cast<uint32_t>(io::retail_ftol_sse2(number * 65536.0));
             parsed = 1;
         } else if (lower_match_key(lower, ll, "num_doors", 9) ||
-                lower_match_key(lower, ll, "first_door", 10)) {
-            const bool first = lower_match_key(lower, ll, "first_door", 10);
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, first ? 10 : 9, &vl);
-            int64_t count = parse_int_n(v, vl);
-            if (first) --count;
-            if (count < 0) count = 0;
-            if (count > 30) count = 30;
-            const unsigned shift = first ? 8 : 0;
-            const uint32_t bits = (static_cast<uint32_t>(current.deathtime_ticks) &
-                    ~(0xFFu << shift)) | (static_cast<uint32_t>(count) << shift);
-            current.deathtime_ticks = static_cast<int32_t>(bits);
-            current.attrib |= DEF_ITEM_ATTRIB_DOOR;
+                lower_match_key(lower, ll, "first_door", 10) ||
+                lower_match_key(lower, ll, "first_subobject", 15)) {
+            // One byte of the polymorphic +0x890 dword each: the low byte of
+            // atol read signed, first_door/first_subobject one less (`sub
+            // al,1`), negative -> 0, above 30 -> 30. num_doors -> +0x890 and
+            // first_door -> +0x891 also set the Door attrib; first_subobject
+            // -> +0x892 does not. [orig: ItemDef_ParseProperty — num_doors
+            // @0x49F766..0x49F78A, first_door @0x49F7BA..0x49F7DE,
+            // first_subobject @0x49F9B0..0x49F9CC]
+            const bool door = lower_match_key(lower, ll, "first_door", 10);
+            const bool subobject = lower_match_key(lower, ll, "first_subobject", 15);
+            size_t vl;
+            const char *v = consume_value_span(trimmed, tlen, subobject ? 15 : door ? 10 : 9, &vl);
+            int8_t value = static_cast<int8_t>(static_cast<uint8_t>(parse_int_n(v, vl)));
+            if (door || subobject) value = static_cast<int8_t>(static_cast<uint8_t>(value - 1));
+            if (value < 0) value = 0;
+            else if (value > 30) value = 30;
+            set_def_byte(current.deathtime_ticks, subobject ? 2 : door ? 1 : 0,
+                    static_cast<uint8_t>(value));
+            if (!subobject) current.attrib |= DEF_ITEM_ATTRIB_DOOR;
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "rotor_parts", 11) ||
+                lower_match_key(lower, ll, "aux_parts", 9)) {
+            // Four raw atol low bytes into the +0x890..+0x897 byte run the door
+            // (+0x890 dword) and clipsize (+0x894 dword) fields share:
+            // rotor_parts -> +0x890, +0x891, +0x894, +0x895; aux_parts ->
+            // +0x896, +0x897, +0x892, +0x893. [orig: ItemDef_ParseProperty —
+            // rotor_parts @0x49EF5D..0x49EFB6, aux_parts @0x49EFF3..0x49F04C]
+            const bool rotor = lower_match_key(lower, ll, "rotor_parts", 11);
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, rotor ? 11 : 9, &vl);
+            Token tok[4];
+            const int n = tokenize(v, vl, tok, 4);
+            uint8_t bytes[4] = {};
+            for (int i = 0; i < n; ++i)
+                bytes[i] = static_cast<uint8_t>(parse_int_n(tok[i].s, tok[i].len));
+            if (rotor) {
+                set_def_byte(current.deathtime_ticks, 0, bytes[0]);
+                set_def_byte(current.deathtime_ticks, 1, bytes[1]);
+                set_def_byte(current.clipsize, 0, bytes[2]);
+                set_def_byte(current.clipsize, 1, bytes[3]);
+            } else {
+                set_def_byte(current.clipsize, 2, bytes[0]);
+                set_def_byte(current.clipsize, 3, bytes[1]);
+                set_def_byte(current.deathtime_ticks, 2, bytes[2]);
+                set_def_byte(current.deathtime_ticks, 3, bytes[3]);
+            }
             parsed = 1;
         } else if (lower_match_key(lower, ll, "door_type", 9) ||
                 lower_match_key(lower, ll, "door_dir", 8)) {

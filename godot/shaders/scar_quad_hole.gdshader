@@ -9,11 +9,14 @@ shader_type spatial;
 //       latch is LIVE here — ALPHAFUNC GREATER, ALPHAREF 128  -> the discard
 //   z-write ON (no 0x100000)                      -> depth_draw_always
 //   CULLMODE NONE (0x400000)                      -> cull_disabled
+//   FOGENABLE (0x20000), shared with the scorch word -> the pass fog toward
+//       the scene fog colour, effect_fog.gdshaderinc
 render_mode unshaded, blend_mix, depth_draw_always, cull_disabled;
 
 // Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
 // the exact inverse of the blit's transfer curve on the way out.
 #include "res://shaders/color.gdshaderinc"
+#include "res://shaders/effect_fog.gdshaderinc"
 
 uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
 
@@ -23,8 +26,13 @@ const float SCAR_VIEW_PULL = 0.998;
 // D3DRS_ALPHAREF 128 under ALPHAFUNC GREATER, on the 8-bit stage output.
 const float SCAR_ALPHA_TEST_REF = 128.0;
 
+varying float v_eye_depth;
+varying float v_radial_distance;
+
 void vertex() {
 	vec4 view_pos = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
+	v_eye_depth = -view_pos.z;
+	v_radial_distance = length(view_pos.xyz);
 	view_pos.xyz *= SCAR_VIEW_PULL;
 	POSITION = PROJECTION_MATRIX * view_pos;
 }
@@ -37,6 +45,8 @@ void fragment() {
 		discard;
 	}
 	// MODULATE2X(TEXTURE, DIFFUSE), saturating.
-	ALBEDO = scene_output(min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0)));
+	vec3 rgb = min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0));
+	ALBEDO = scene_output(effect_fog_scene(rgb,
+			effect_fog_visibility(v_eye_depth, v_radial_distance)));
 	ALPHA = alpha;
 }

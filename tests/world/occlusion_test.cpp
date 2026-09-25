@@ -65,7 +65,7 @@ struct QuadSpec {
     // normal (mission) points a->b.
     double corners[4][3];
     double normal[3];
-    float glow = 0.0f;
+    float priority = 0.0f;
 };
 
 // Build an OcclusionModel from quad records (two tris per quad, shared-diagonal
@@ -83,7 +83,7 @@ OcclusionModel occ_model(const std::vector<QuadSpec> &quads) {
         rec.plane_count = 1;
         rec.face_start = static_cast<int32_t>(m.faces.size());
         rec.face_count = 2;
-        rec.glow_scale = q.glow;
+        rec.slot_priority_scale = q.priority;
 
         float center[3] = {0, 0, 0};
         for (int i = 0; i < 4; ++i) {
@@ -344,6 +344,9 @@ struct Rig {
         cam.view_rows_q22[2][0] = 0;
         cam.view_rows_q22[2][1] = 0;
         cam.view_rows_q22[2][2] = 1 << 22;
+        // A 640-wide viewport at a 77.3 deg horizontal fov: the person leg's
+        // sub-pixel floor projects radius * 400 / depth.
+        cam.focal_pixels = 400;
         cam.fog_dist = fx(500.0);
         cam.water_z = fx(-100.0);
         cam.local_blink_flags = blink_flags;
@@ -449,10 +452,10 @@ void test_weld_and_flags() {
     // the coplanarity term measures along A's normal: |dot(nA, pB - pA)| =
     // 0.5 > 0.2 fails!). Put B at 14.1 so the gap is 0.1 u.
     OcclusionModel occ_a = one_room_window();
-    // An inward-facing authored window in section 2 is deliberately invisible
-    // from the camera's section 1. If a welded type-5 face incorrectly takes
-    // the bit-27 same-building recursion, the exterior seed walk reaches it
-    // and leaks bit 2 into A's mask.
+    // An authored window in section 2 lies on the welded face's plane. A's
+    // def carries the recurse-windows bit, so the welded type-5 face ALSO
+    // recurses into its far section (the exterior), and that walk reaches the
+    // section-2 window: bit 2 enters A's mask.
     QuadSpec hidden;
     hidden.type = kOccRecWindow;
     hidden.section_a = 2;
@@ -527,7 +530,10 @@ void test_weld_and_flags() {
 
     const OcclusionFrameCamera cam = rig.camera(10.0, 10.0, 1.0, 0x2);
     rig.ow.build_frame(rig.world, rig.cw, cam);
-    CHECK((rig.ow.section_mask(a) & (1u << 2)) == 0);
+    // [orig: render_visibility_portal_traversal — the type-5 track leg's
+    // `jmp loc_5C560C` @ 0x5c5519 joins the recurse-windows gate @ 0x5c560c
+    // and the recursion @ 0x5c5619]
+    CHECK((rig.ow.section_mask(a) & (1u << 2)) != 0);
     CHECK((rig.ow.section_mask(b) & (1u << 1)) != 0);
 
     // Distance gate: a third building far away does not weld.
@@ -742,6 +748,7 @@ void test_indoor_masks_and_gate() {
     npc.kind = EntityKind::Organic;
     npc.net_id = 5;
     npc.position = {20.0f, 10.0f, 0.0f};
+    npc.bound_radius = 1.5625f;
     npc.alive = true;
     const EntityHandle nh = rig.world.registry.spawn(0, npc);
     rig.rebuild();
@@ -886,6 +893,7 @@ void test_three_ray_latch() {
     npc.kind = EntityKind::Organic;
     npc.net_id = 7;
     npc.position = {60.0f, 10.0f, 0.0f};
+    npc.bound_radius = 1.5625f;
     npc.alive = true;
     const EntityHandle nh = rig.world.registry.spawn(0, npc);
     rig.rebuild();
@@ -918,6 +926,7 @@ void test_three_ray_latch() {
     npc3.kind = EntityKind::Organic;
     npc3.net_id = 8;
     npc3.position = {60.0f, 10.0f, 0.0f};
+    npc3.bound_radius = 1.5625f;
     npc3.alive = true;
     const EntityHandle nh3 = rig3.world.registry.spawn(0, npc3);
     rig3.rebuild();
@@ -950,19 +959,370 @@ void test_camera_blink_query() {
 }
 
 // ---------------------------------------------------------------------------
+// The def's forced sections (itemDef +0x891 first_door - 1, +0x892
+// first_subobject - 1) OR into the DRAW mask only; every other reader keeps
+// the raw word. [orig: Terrain_RenderSectorModels @ 0x5c5d7c..0x5c5da8]
 void test_forced_visible_bits() {
     Rig rig;
-    OcclusionWorld::EntityDefBits bits;
-    bits.forced_lo = 5; // destruction bone map base
     const EntityHandle building =
-        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window(), bits);
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    // A windowless building without OOBJ (the Iblock01 shape): outdoors its
+    // raw mask is the exterior bit alone, and first_door 2 forces its door.
+    const EntityHandle windowless =
+        rig.add_building(20.0, 30.0, building_collision(2, 2, 3), OcclusionModel{});
+    rig.ow.assign_forced_sections(building, 5, 0);
+    rig.ow.assign_forced_sections(windowless, 1, 0);
     rig.rebuild();
     rig.ow.init_mission(rig.world, rig.cw);
     OcclusionFrameCamera cam = rig.camera(20.0, 480.0, 1.5);
     cam.fog_dist = fx(50.0); // out of range -> raw mask 0
     rig.ow.build_frame(rig.world, rig.cw, cam);
-    // [orig: mask |= -1 << def+2193 @ 0x5c5d7c-0x5c5da8]
-    CHECK(rig.ow.section_mask(building) == (0xFFFFFFFFu << 5));
+    CHECK(rig.ow.section_mask(building) == 0u);
+    CHECK(rig.ow.forced_section_mask(building) == (0xFFFFFFFFu << 5));
+    CHECK(rig.ow.section_draw_mask(building) == (0xFFFFFFFFu << 5));
+
+    const OcclusionFrameCamera near_cam = rig.camera(5.0, 30.0, 1.5);
+    rig.ow.build_frame(rig.world, rig.cw, near_cam);
+    CHECK(rig.ow.building_visible(windowless));
+    CHECK(rig.ow.section_mask(windowless) == 1u);
+    CHECK(rig.ow.section_draw_mask(windowless) == 0xFFFFFFFFu);
+    // Both bytes merge; a zero byte forces nothing; the pair clears.
+    rig.ow.assign_forced_sections(windowless, 0, 4);
+    CHECK(rig.ow.forced_section_mask(windowless) == (0xFFFFFFFFu << 4));
+    rig.ow.assign_forced_sections(windowless, 3, 4);
+    CHECK(rig.ow.forced_section_mask(windowless) == (0xFFFFFFFFu << 3));
+    rig.ow.assign_forced_sections(windowless, 0, 0);
+    CHECK(rig.ow.forced_section_mask(windowless) == 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Raise a terrain ridge across x = 29..33 (wider than one LOS march stride).
+// The LOS sampler reads half-unit steps (raw16 >> 7), so heights are 0.5 u
+// multiples.
+void raise_ridge(Rig &rig, double height_units) {
+    const uint16_t raw = static_cast<uint16_t>(height_units * 256.0 + 0.5);
+    for (int y = 0; y < Field::kDim; ++y)
+        for (int x = 29; x <= 33; ++x) rig.field.heightmap[y * Field::kDim + x] = raw;
+}
+
+// The three rays start ONE unit above the eye. [orig:
+// terrain_occlusion_check_three_rays `add edx, 10000h` @ 0x610eef] A 0.9 u
+// sphere 55 u out behind a 1.5 u crest: from eye + 0.25 every ray dips below
+// the crest (the top ray at most 1.39 u over it), from eye + 1.0 the top ray
+// clears it (at least 1.67 u).
+void test_three_rays_start_one_unit_up() {
+    Rig rig;
+    raise_ridge(rig, 1.5);
+    rig.rebuild();
+    const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    const int32_t center[3] = {fx(60.0), fx(10.0), 0};
+    uint8_t latch = 0;
+    CHECK(rig.ow.sphere_render_visible(rig.cw, cam, center, fx(0.9), latch, 0));
+    CHECK(latch >= 16 && latch <= 23);
+}
+
+// The person leg: the entity position with the entity+0 bound radius, the
+// item-185 radius under the parachute flag, and the sub-pixel floor ahead of
+// the latch. [orig: collect_visible_entities_for_terrain @ 0x5c8dd7..0x5c8e10,
+// @ 0x5c8e5e, the latch @ 0x5c8e7b..0x5c8eab]
+void test_person_collector_leg() {
+    Rig rig;
+    // A 2 u crest: the top ray to a 1 u sphere dips below it (at most 1.86 u
+    // over the crest); to a 2 u person radius it clears (at least 2.24 u).
+    raise_ridge(rig, 2.0);
+    auto spawn_person = [&](double x, float bound, uint32_t flags) {
+        Entity p;
+        p.kind = EntityKind::Organic;
+        p.net_id = rig.next_net_id++;
+        p.position = {static_cast<float>(x), 10.0f, 0.0f};
+        p.bound_radius = bound;
+        p.flags = flags;
+        p.alive = true;
+        return rig.world.registry.spawn(0, p);
+    };
+    const EntityHandle person = spawn_person(60.0, 2.0f, 0);
+    const EntityHandle small = spawn_person(60.0, 1.0f, 0);
+    const EntityHandle chute = spawn_person(60.0, 1.0f, kEntityFlagParachute);
+    const EntityHandle far = spawn_person(1005.0, 1.5625f, 0);
+    rig.rebuild();
+    rig.ow.set_parachute_radius_q16(fx(3.0));
+    OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    cam.fog_dist = fx(2000.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+
+    Entity *p = rig.world.registry.get(person);
+    Entity *s = rig.world.registry.get(small);
+    Entity *c = rig.world.registry.get(chute);
+    Entity *f = rig.world.registry.get(far);
+    CHECK(p != nullptr && s != nullptr && c != nullptr && f != nullptr);
+    if (p == nullptr || s == nullptr || c == nullptr || f == nullptr) return;
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *p, cam));
+    CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *s, cam));
+    CHECK(rig.ow.person_collector_radius(fx(1.0), true) == fx(3.0));
+    CHECK(rig.ow.person_collector_radius(fx(1.0), false) == fx(1.0));
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *c, cam));
+
+    // 1000 u out: 1.5625 * 400 / 1000 = 0.625 px <= 0.75 px -> dropped, and
+    // the held latch is not counted down.
+    f->occlusion_latch = 5;
+    CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *f, cam));
+    CHECK(f->occlusion_latch == 5);
+    // The same person 100 u out projects 6.25 px and takes the latch.
+    const int32_t near_pos[3] = {fx(105.0), fx(10.0), 0};
+    uint8_t latch = 5;
+    CHECK(rig.ow.person_render_visible(rig.cw, cam, near_pos, fx(1.5625), latch, 0));
+    CHECK(latch == 4);
+}
+
+// A slab occluder building (type 0 record) at mission (x, y).
+EntityHandle add_slab(Rig &rig, double x, double y, float priority = 0.0f) {
+    const double mn[3] = {2.0, -8.0, 0.0};
+    const double mx[3] = {3.0, 8.0, 6.0};
+    OcclusionModel om = box_occluder(kOccRecOccluder, mn, mx);
+    om.records[0].slot_priority_scale = priority;
+    return rig.add_building(x, y, building_collision(2, 8, 6), std::move(om));
+}
+
+// The slot sort keeps the 14 highest-priority slots in stable order: a 15th
+// collected occluder occludes nothing. [orig: Terrain_SortPortalSlotsByPriority
+// @ 0x5c4410 — the compare @ 0x5c4440, the clamp @ 0x5c449f..0x5c44a4]
+void test_portal_slot_sort_and_clamp() {
+    for (int weighted = 0; weighted < 2; ++weighted) {
+        Rig rig;
+        rig.world.registry.configure_pool(2, 32);
+        Entity filler; // slot 0 stays occupied, like the Rig's own filler
+        filler.kind = EntityKind::Marker;
+        filler.net_id = 99;
+        rig.world.registry.spawn(2, filler);
+        // Fourteen slabs off to the side (y = 40), each a collected slot.
+        for (int k = 0; k < 14; ++k) add_slab(rig, 8.0 + 5.0 * k, 40.0);
+        // The fifteenth, collected last, is the only one between the camera
+        // and the candidate.
+        const EntityHandle blocker = add_slab(rig, 20.0, 10.0, weighted ? 1.0f : 0.0f);
+        const EntityHandle candidate =
+            rig.add_building(40.0, 10.0, building_collision(1.0, 1.0, 2.0), OcclusionModel{});
+        rig.rebuild();
+        rig.ow.init_mission(rig.world, rig.cw);
+        const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+        rig.ow.build_frame(rig.world, rig.cw, cam);
+        CHECK(rig.ow.slot_count() == 14);
+        CHECK(rig.ow.building_visible(blocker));
+        if (weighted) {
+            // A nonzero weight sorts the blocker ahead of the zero-weight
+            // slots, so it survives the clamp and occludes the candidate.
+            CHECK(!rig.ow.building_visible(candidate));
+        } else {
+            // All weights zero: collection order holds and the blocker is cut.
+            CHECK(rig.ow.building_visible(candidate));
+        }
+    }
+}
+
+// render_TOC measures the candidate by its entity+0 bound radius. [orig:
+// test_sector_entity_occlusion `mov eax,[esi]; fild dword ptr [eax]`
+// @ 0x5c463e..0x5c4640] A 1 u bound sphere 1.5 u inside the slab's shadow
+// wedge is fully inside it; the wide collision box's corner length would
+// reach past the wedge and let the 8-corner refinement keep it visible.
+void test_toc_candidate_uses_entity_bound_radius() {
+    Rig rig;
+    add_slab(rig, 20.0, 10.0);
+    const EntityHandle candidate =
+        rig.add_building(40.0, 24.8, building_collision(1.0, 3.0, 2.0), OcclusionModel{});
+    Entity *c = rig.world.registry.get(candidate);
+    CHECK(c != nullptr);
+    if (c == nullptr) return;
+    c->bound_radius = 1.0f;
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(candidate));
+    CHECK(!rig.ow.building_visible(candidate));
+}
+
+// Both render waves run render_TOC on every collected entity in no blink box
+// and skip it for a contained one (entity+0x1D0, the first blink hit,
+// nonzero), which draws on the collector's section gate alone. [orig:
+// Terrain_RenderSectorEntities @ 0x5c7b92..0x5c7ba6,
+// Terrain_RenderSectorEntitiesBySide @ 0x5c7d8b..0x5c7da0]
+void test_render_wave_toc_skips_contained_entities() {
+    auto spawn_person = [](Rig &rig, double x, uint16_t net_id) {
+        Entity p;
+        p.kind = EntityKind::Organic;
+        p.net_id = net_id;
+        p.position = {static_cast<float>(x), 10.0f, 0.0f};
+        p.bound_radius = 1.0f;
+        p.alive = true;
+        return rig.world.registry.spawn(0, p);
+    };
+
+    // Indoors: a blink room with no occlusion records. The camera inside it
+    // latches camera-inside mode with no exterior plane, where render_TOC
+    // culls every candidate outright. [orig: test_sector_entity_occlusion
+    // @ 0x5c4693..0x5c46b0]
+    {
+        Rig rig;
+        const EntityHandle room =
+            rig.add_building(20.0, 10.0, building_collision(2, 2, 3), OcclusionModel{});
+        const EntityHandle inside = spawn_person(rig, 21.0, 5);
+        const EntityHandle outside = spawn_person(rig, 60.0, 6);
+        rig.rebuild();
+        rig.ow.init_mission(rig.world, rig.cw);
+        Entity *in = rig.world.registry.get(inside);
+        Entity *out = rig.world.registry.get(outside);
+        CHECK(in != nullptr && out != nullptr);
+        if (in == nullptr || out == nullptr) return;
+        rig.cw.refresh_blink(rig.world, *in);
+        rig.cw.refresh_blink(rig.world, *out);
+        CHECK(in->blink_hits[0] != 0);
+        CHECK(out->blink_hits[0] == 0);
+
+        const OcclusionFrameCamera cam = rig.camera(20.0, 10.0, 1.0, 0x2);
+        rig.ow.build_frame(rig.world, rig.cw, cam);
+        CHECK(rig.ow.camera_indoors());
+        CHECK((rig.ow.section_mask(room) & 0x2u) != 0);
+        // Contained: the section gate passes and render_TOC never runs.
+        CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *in, cam));
+        // Outside every blink box: collected (in view, indoors = no rays),
+        // then culled by render_TOC.
+        CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *out, cam));
+
+        // The same rule over a caller-built candidate (a decoded wire row).
+        OcclusionWorld::TocCandidate row;
+        row.pos_fixed[0] = fx(60.0);
+        row.pos_fixed[1] = fx(10.0);
+        row.radius_q16 = fx(1.0);
+        const uint32_t no_hits[4] = {0, 0, 0, 0};
+        CHECK(rig.ow.render_wave_toc_occluded(no_hits, row));
+        CHECK(!rig.ow.render_wave_toc_occluded(in->blink_hits, row));
+    }
+
+    // Outdoors: a person inside the slab's shadow wedge passes the collector
+    // (flat terrain clears the rays) and render_TOC culls it; one beside the
+    // wedge draws.
+    {
+        Rig rig;
+        add_slab(rig, 20.0, 10.0);
+        const EntityHandle behind = spawn_person(rig, 40.0, 7);
+        Entity beside_def;
+        beside_def.kind = EntityKind::Organic;
+        beside_def.net_id = 8;
+        beside_def.position = {40.0f, 60.0f, 0.0f};
+        beside_def.bound_radius = 1.0f;
+        beside_def.alive = true;
+        const EntityHandle beside = rig.world.registry.spawn(0, beside_def);
+        rig.rebuild();
+        rig.ow.init_mission(rig.world, rig.cw);
+        const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+        rig.ow.build_frame(rig.world, rig.cw, cam);
+        Entity *b = rig.world.registry.get(behind);
+        Entity *s = rig.world.registry.get(beside);
+        CHECK(b != nullptr && s != nullptr);
+        if (b == nullptr || s == nullptr) return;
+        CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *b, cam));
+        CHECK(b->occlusion_latch != 0); // the collector took it before the TOC
+        CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *s, cam));
+    }
+}
+
+// A weld-linked building straddles the water plane by its bound SPHERE (z +
+// center z +- radius), not its collision header. [orig:
+// build_sector_visibility_masks @ 0x5c8985..0x5c89a9] The linked box spans z
+// 0..3 (header: below 3.5 u water) while its sphere (center 1.5, radius 3.2)
+// reaches above it.
+void test_link_water_straddle_uses_bound_sphere() {
+    Rig rig;
+    QuadSpec qb;
+    qb.type = kOccRecWindow;
+    qb.section_a = 1;
+    qb.section_b = 0;
+    const double cb[4][3] = {
+        {-2.0, -1.0, 1.0}, {-2.0, 1.0, 1.0}, {-2.0, 1.0, 2.5}, {-2.0, -1.0, 2.5}};
+    std::memcpy(qb.corners, cb, sizeof(cb));
+    qb.normal[0] = -1.0;
+    OcclusionWorld::EntityDefBits weldable;
+    weldable.weldable = true;
+    rig.add_building(10.0, 10.0, building_collision(2, 2, 3), one_room_window(), weldable);
+    const EntityHandle b =
+        rig.add_building(14.1, 10.0, building_collision(2, 2, 3), occ_model({qb}), weldable);
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    CHECK(rig.ow.weld_records().size() == 2);
+    // Inside A (the only record is the welded link: no exterior latch).
+    OcclusionFrameCamera cam = rig.camera(10.0, 10.0, 1.0, 0x2);
+    cam.water_z = fx(3.5);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.camera_indoors());
+    CHECK(!rig.ow.exterior_visible());
+    CHECK((rig.ow.section_mask(b) & 0xFFFFFFEu) != 0);
+    CHECK(rig.ow.water_visible());
+    // Water above the sphere top: neither form straddles.
+    cam.water_z = fx(5.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(!rig.ow.water_visible());
+}
+
+// The collectors place the sphere center through the full Euler pose.
+// [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40 from
+// collect_visible_sector_userpoints @ 0x5c6c6a] A building whose bounds sit
+// 10..12 u ahead of its origin is admitted yaw-only; pitched 180 deg the
+// center swings 11 u behind the camera and the batch drops it.
+void test_collector_center_uses_full_euler_pose() {
+    for (int pitched = 0; pitched < 2; ++pitched) {
+        Rig rig;
+        // The volumes' extents feed the model bounds (finalize_sections);
+        // shifting them moves the bound sphere 11 u ahead of the origin.
+        CollisionModel cm = building_collision(1, 1, 2);
+        for (CollisionVolume &v : cm.volumes) {
+            v.min_x += fx(11.0);
+            v.max_x += fx(11.0);
+        }
+        const EntityHandle h = rig.add_building(20.0, 10.0, std::move(cm), OcclusionModel{});
+        Entity *e = rig.world.registry.get(h);
+        CHECK(e != nullptr);
+        if (e == nullptr) return;
+        e->pitch = pitched ? 180.0f : 0.0f;
+        e->occlusion_latch = 200;
+        rig.rebuild();
+        rig.ow.init_mission(rig.world, rig.cw);
+        const OcclusionFrameCamera cam = rig.camera(21.0, 10.0, 1.0);
+        rig.ow.build_frame(rig.world, rig.cw, cam);
+        CHECK(rig.ow.building_batched(h) == (pitched == 0));
+    }
+}
+
+// The mission-start blink stamp: every pool-1 row and every non-building
+// pool-2 row carries its blink hits (and the indoors flag) before the first
+// entity tick. [orig: Entity_BuildProximityListsForPools12 @ 0x5240a0, from
+// Game_StartMission @ 0x525898]
+void test_mission_start_blink_stamp() {
+    Rig rig;
+    rig.world.registry.configure_pool(1, 4);
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), OcclusionModel{});
+    auto spawn_inside = [&](int pool) {
+        Entity e;
+        e.kind = EntityKind::Item;
+        e.net_id = rig.next_net_id++;
+        e.position = {20.0f, 10.0f, 1.0f};
+        e.alive = true;
+        return rig.world.registry.spawn(pool, e);
+    };
+    const EntityHandle item = spawn_inside(2);
+    const EntityHandle vehicle = spawn_inside(1);
+    rig.rebuild();
+    Entity *i = rig.world.registry.get(item);
+    Entity *v = rig.world.registry.get(vehicle);
+    CHECK(i != nullptr && v != nullptr);
+    if (i == nullptr || v == nullptr) return;
+    CHECK(i->blink_hits[0] == 0 && v->blink_hits[0] == 0);
+    rig.cw.refresh_mission_start_blink(rig.world);
+    CHECK(EntityHandle::make(2, BlinkAccum::hit_pool_entity_index(i->blink_hits[0])) == building);
+    CHECK(BlinkAccum::hit_section(i->blink_hits[0]) == 1);
+    CHECK((i->flags & kEntityFlagIndoors) != 0);
+    CHECK(v->blink_hits[0] == i->blink_hits[0]);
+    CHECK((v->flags & kEntityFlagIndoors) != 0);
 }
 
 // The feed's building verdict word round-trips the full 32-bit mask (its top
@@ -999,6 +1359,14 @@ int main() {
     test_three_ray_latch();
     test_camera_blink_query();
     test_forced_visible_bits();
+    test_three_rays_start_one_unit_up();
+    test_person_collector_leg();
+    test_portal_slot_sort_and_clamp();
+    test_toc_candidate_uses_entity_bound_radius();
+    test_render_wave_toc_skips_contained_entities();
+    test_link_water_straddle_uses_bound_sphere();
+    test_collector_center_uses_full_euler_pose();
+    test_mission_start_blink_stamp();
     test_building_visibility_feed_word();
     if (failures == 0) std::printf("occlusion_test: all passed\n");
     return failures == 0 ? 0 : 1;

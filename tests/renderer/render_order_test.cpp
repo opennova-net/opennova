@@ -2,6 +2,7 @@
 // technique-class, and ladder rules of docs/render/render-order-re.md.
 
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/scene_pass_gates.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -77,13 +78,40 @@ int main() {
 	CHECK(transparent_queue_for(4.99f, 5.0f) == TransparentQueue::BelowWater);
 
 	// --- the ladder: strict frame order
-	// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0 + the sky pass].
-	CHECK(kRungSkyStars < kRungSkyBody);
-	CHECK(kRungSkyBody < kRungAlphaFarSide);
-	CHECK(kRungAlphaFarSide < kRungWater);
-	CHECK(kRungWater < kRungAlphaCameraSide);
-	CHECK(kRungAlphaCameraSide < kRungOverlayFx);
-	CHECK(kRungOverlayFx < kRungSunGlow);
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 — the sky pass SkyDome_RenderWithSkyfog
+	// @ 0x5ca81a, then Player_RenderViewModelIfAlive @ 0x5ca829, then
+	// Terrain_RenderWorldScene @ 0x5c93a0].
+	// Inside render_skybox the gradient pass precedes the bodies, which
+	// precede the cloud layers [orig: render_skybox @ 0x579080: gradient
+	// draw @ 0x5798dc, bodies @ 0x5798e0, clouds @ 0x5798f1..0x579b15].
+	CHECK(kRungSkyDome < kRungSkyBody);
+	CHECK(kRungSkyBody < kRungSkyClouds);
+	// The viewmodel draws after the whole sky pass and before every world draw.
+	CHECK(kRungSkyClouds < kRungViewmodel);
+	CHECK(kRungViewmodel < kRungObjectPostMultiply);
+	// The non-person wave's flush @ 0x5c9506 (the post-multiply passes) ->
+	// the far person wave's foliage MODEL masks @ 0x5c955f -> the far-side
+	// alpha flush @ 0x5c9596.
+	CHECK(kRungObjectPostMultiply < kRungFoliageMaskFarSide);
+	CHECK(kRungFoliageMaskFarSide < kRungAlphaFarSide);
+	// Far-side alpha flush @ 0x5c9596 -> tracer pass 0 @ 0x5c95ac -> particle
+	// pass A @ 0x5c95b5 -> foliage pass 0 @ 0x5c95c5 -> the water pass
+	// @ 0x5c95dc.
+	CHECK(kRungAlphaFarSide < kRungTracerFarSide);
+	CHECK(kRungTracerFarSide < kRungParticleFarSide);
+	CHECK(kRungParticleFarSide < kRungFoliageFarSide);
+	CHECK(kRungFoliageFarSide < kRungWater);
+	// The wake decals inside the water pass, after the surface strip
+	// [orig: render_water_surface @ 0x5c3426 then WaterRing_DrawAll @ 0x5c3432].
+	CHECK(kRungWater < kRungWaterDecals);
+	// The camera person wave's masks @ 0x5c9638 -> Scar_DrawBatches @ 0x5c9658
+	// -> foliage pass 1 @ 0x5c9665 -> camera-side alpha flush @ 0x5c967a ->
+	// tracer pass 1 @ 0x5c9687.
+	CHECK(kRungWaterDecals < kRungFoliageMaskCameraSide);
+	CHECK(kRungFoliageMaskCameraSide < kRungScars);
+	CHECK(kRungScars < kRungFoliageCameraSide);
+	CHECK(kRungFoliageCameraSide < kRungAlphaCameraSide);
+	CHECK(kRungAlphaCameraSide < kRungTracerCameraSide);
 	CHECK(kRungAlphaCameraSide == 0); // the default rung stays Godot's default
 
 	// --- the water bracket swap [orig: SortAndFlush(camAbove?3:2) @ 0x5c9596;
@@ -99,6 +127,25 @@ int main() {
 	CHECK(!entity_uses_thermal_wave(5));
 	CHECK(scene_far_plane(1000.9f) == 1001.0f);
 	CHECK(scene_far_plane(1000.0f) == 1001.0f);
+
+	// --- the blink/waterline pass gates [orig: Render_ProcessMainSceneFrame
+	// @ 0x5ca192..0x5ca1bd; render_main_scene @ 0x5c1342..0x5c1353]: the
+	// indoors letter 0x2 skips the terrain pass and the MIRROR's sky, the sky
+	// letter 0x4 and an eye at/below the water skip the main frame's sky.
+	{
+		const ScenePassGates open = scene_pass_gates(0, false);
+		CHECK(open.terrain && open.sky && open.mirror_sky);
+		const ScenePassGates indoors = scene_pass_gates(0x2, false);
+		CHECK(!indoors.terrain);
+		CHECK(indoors.sky); // indoors alone keeps the beauty sky bracket
+		CHECK(!indoors.mirror_sky);
+		const ScenePassGates sky_off = scene_pass_gates(0x4, false);
+		CHECK(sky_off.terrain && !sky_off.sky && sky_off.mirror_sky);
+		const ScenePassGates underwater = scene_pass_gates(0, true);
+		CHECK(underwater.terrain && !underwater.sky && underwater.mirror_sky);
+		const ScenePassGates water_letter = scene_pass_gates(0x8, false);
+		CHECK(water_letter.terrain && water_letter.sky && water_letter.mirror_sky);
+	}
 
 	if (failures != 0) {
 		std::printf("renderer_render_order: %d failure(s)\n", failures);

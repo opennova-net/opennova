@@ -635,11 +635,11 @@ bit flip it.
    sub_43C870) = walk pool 0, gate `ItemTypeIndex` (+0x1C) nonzero, first
    entity with `commandGroup == p1 && mountedChild->commandGroup == p2` → true.
 4. **The +0x268 writer/clear census** (re-verifying the ledger's "write-sites
-   CLOSED"): set by `Entity_AttachToVehicle @ 0x43c130` (parent+0x268 = child,
+   CLOSED"): set by `Entity_AttachCarriedObject @ 0x43c130` (parent+0x268 = child,
    child Flags |= 1 @0x43c14a, child back-link +0x170 = parent; flag defs
    4091/4093/4095 additionally take the CTF return-timer/death-broadcast leg;
    other defs draw the carry progress bar) — callers: the authority pickup
-   `Entity_ProcessWaypointInteraction @ 0x4ad820` (via `Entity_TryAttachToVehicle
+   `Entity_ProcessWaypointInteraction @ 0x4ad820` (via `Entity_TryAttachCarriedObject
    @ 0x43c1f0`; requires `Flags & 0x100`, no current child, and target def
    `attrib & 0x2000` carryable — also the flag-return and capture-zone logic
    for marker defs 0xFFB/0xFFD/0xFFF/0x1002/0x1004/0x1006/0x1007), and the
@@ -1733,7 +1733,7 @@ Case 38 (@0x4549BC) calls `sub_5A8C80 @0x5A8C80`: `(unsigned)p1 <= 3`
 (@0x5A8C84), then `dword_272ED88[p1] = p2 ? 0x10000 : 0` (@0x5A8C97).
 `sub_5A9F70 @0x5A9F70` copies the four words each frame into
 `dword_83FDF0` / `dword_83FDF8` / `dword_83FE00` / `dword_83FE08`
-(@0x5A9F92..0x5A9FB4, every other dword after `Render_SubmitAlpha16 @0x83FDE8`);
+(@0x5A9F92..0x5A9FB4, every other dword after `g_CtrlGlobal_UplIntensity @0x83FDE8`);
 `CEffectWorld_GetViewPosition @0x5A8CA0` (a misnomer) and `sub_5A8CD0 @0x5A8CD0`
 copy the four words out and in (a save/restore pair);
 `EffectWorld_ResetPoolAndInitLighting` (@0x5AB8C2) and `sub_60FD70` (its chunk

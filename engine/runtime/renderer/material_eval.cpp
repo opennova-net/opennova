@@ -1,5 +1,6 @@
 #include <runtime/renderer/material_eval.h>
 
+#include <runtime/renderer/material_descriptor.h>
 #include <base/crt/crt_rng.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
@@ -138,6 +139,13 @@ void eval_rgb_gen(uint8_t style,
                        float* out_b) {
     // [orig: RgbGen_EvaluateColor @ 0x5B23D0]
     constexpr float kByteToFloat = 1.0f / 255.0f;
+    // A generator with no high nibble is inactive and writes zero, not the
+    // start colour [orig: RgbGen_EvaluateColor @ 0x5B23D5 test al,0F0h ->
+    // @ 0x5B2506 zero fill].
+    if ((style & 0xF0) == 0) {
+        *out_r = *out_g = *out_b = 0.0f;
+        return;
+    }
     const int32_t fraction =
             style == 24
                     ? 0
@@ -155,39 +163,172 @@ void eval_rgb_gen(uint8_t style,
              kByteToFloat;
 }
 
+// The effect a material draws with: its tag's registry row, or the first
+// registry entry (FF_ST_OP) when the tag is unknown.
+// [orig: convert_material_definition @ 0x5B0664..0x5B0672 (a negative
+//  HLSLEffect_FindByName result becomes index 0)]
+const MaterialDescriptorRecord& material_effect(const ThreediMaterial& mat) {
+    const MaterialDescriptorRecord* descriptor =
+            find_material_descriptor(mat.shader_name);
+    return descriptor != nullptr ? *descriptor : kMaterialDescriptorTable[0];
+}
+
+// Whether the effect resolved a handle for the colour a channel routes to.
+// HLSLEffect_LoadFromFile zeroes every handle no technique reads, and
+// apply_shader_parameters skips a channel whose handle is zero. SelfLumColor
+// is read only by the _FFP.fx SELFLUM block (the EMISSIVE rows); ReflectColor
+// only by Glass, SkGlass, BumpMirrT, BmTxMirrT and EnvPhongT (the GLASS rows).
+// [orig: HLSLEffect_LoadFromFile @ 0x5AF6C0..0x5AF737; apply_shader_parameters
+//  @ 0x58DD2F..0x58DD38 (static colours), @ 0x58DDEC..0x58DDF4 (RgbGen)]
+bool effect_reads_color(const MaterialDescriptorRecord& effect,
+                        MaterialColorTarget target) {
+    switch (target) {
+        case MaterialColorTarget::ReflectColor:
+            return (effect.shader_flags & MATERIAL_FLAG_GLASS) != 0;
+        case MaterialColorTarget::SelfLumColor:
+            return (effect.shader_flags & MATERIAL_FLAG_EMISSIVE) != 0;
+        case MaterialColorTarget::None:
+            break;
+    }
+    return false;
+}
+
+void store_color(MaterialRuntime& rt, MaterialColorTarget target,
+                 float r, float g, float b, float a) {
+    if (target == MaterialColorTarget::ReflectColor) {
+        rt.reflect = {r, g, b, a};
+    } else if (target == MaterialColorTarget::SelfLumColor) {
+        rt.rgb_r = r;
+        rt.rgb_g = g;
+        rt.rgb_b = b;
+    }
+}
+
+// One static colour: the BGRA bytes as (R, G, B)/255 with W forced to 1.
+// [orig: apply_shader_parameters @ 0x58DD3A..0x58DD7F (fld1 @ 0x58DD7D)]
+void apply_static_color(MaterialRuntime& rt,
+                        const MaterialDescriptorRecord& effect,
+                        const float (&color)[4],
+                        uint8_t is_glass) {
+    const MaterialColorTarget target = material_color_target(is_glass);
+    if (!effect_reads_color(effect, target)) {
+        return;
+    }
+    constexpr float kByteToFloat = 1.0f / 255.0f;
+    store_color(rt, target,
+            static_cast<float>(quantize_byte(color[2], 255.0f)) * kByteToFloat,
+            static_cast<float>(quantize_byte(color[1], 255.0f)) * kByteToFloat,
+            static_cast<float>(quantize_byte(color[0], 255.0f)) * kByteToFloat,
+            1.0f);
+}
+
+void apply_rgb_gen(MaterialRuntime& rt,
+                   const MaterialDescriptorRecord& effect,
+                   const ThreediRgbGen& gen,
+                   uint8_t emissive_type,
+                   uint32_t time_ms,
+                   const std::vector<std::string>& ctrl_names,
+                   const ControlRegisterValues& ctrl_bus) {
+    const MaterialColorTarget target = material_color_target(emissive_type);
+    if (!effect_reads_color(effect, target)) {
+        return;
+    }
+    const std::array<uint8_t, 3> start = {
+        quantize_byte(gen.start_color[0], 255.0f),
+        quantize_byte(gen.start_color[1], 255.0f),
+        quantize_byte(gen.start_color[2], 255.0f),
+    };
+    const std::array<uint8_t, 3> end = {
+        quantize_byte(gen.end_color[0], 255.0f),
+        quantize_byte(gen.end_color[1], 255.0f),
+        quantize_byte(gen.end_color[2], 255.0f),
+    };
+    float r = 0.0f;
+    float g = 0.0f;
+    float b = 0.0f;
+    eval_rgb_gen(
+            gen.style,
+            phase_or_register_byte(gen.style, gen.phase, gen.reg, ctrl_names),
+            quantize_s16(gen.rate, 256.0f),
+            start,
+            end,
+            time_ms,
+            reg_value(gen.reg, ctrl_names, ctrl_bus),
+            &r,
+            &g,
+            &b);
+    // The fourth output float is never written by an active generator; the
+    // colour targets read only RGB (SelfLumColor is a float3) and ReflectColor
+    // keeps the W it already holds.
+    store_color(rt, target, r, g, b,
+            target == MaterialColorTarget::ReflectColor ? rt.reflect[3] : 1.0f);
+}
+
 } // namespace
 
-MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
-                                      uint32_t time_ms,
-                                      const std::vector<std::string>& ctrl_names,
-                                      const ControlRegisterValues& ctrl_values) {
-    MaterialRuntime rt;
-    // Retail patches every model-local material parameter to one of the 96
-    // global CTRL slots during load. Authored unknown/missing local references
-    // inherit the loader's ordinal-zero result.
-    // [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290]
-    const ControlRegisterValues& ctrl_bus = ctrl_values;
+MaterialColorTarget material_color_target(uint8_t routing_byte) {
+    // [orig: convert_material_definition @ 0x5B0567..0x5B057B]
+    if (routing_byte == 1) return MaterialColorTarget::ReflectColor;
+    if (routing_byte == 2) return MaterialColorTarget::SelfLumColor;
+    return MaterialColorTarget::None;
+}
 
-    if (mat.alpha_gen.style == 0) {
+namespace {
+
+// A generator with an active style other than the constant 24 changes with
+// the clock or the CTRL bus. [orig: AlphaGen_EvaluateValue @ 0x5B2328,
+// @ 0x5B233E; RgbGen_EvaluateColor @ 0x5B23D5, @ 0x5B2411]
+bool generator_is_dynamic(uint8_t style) {
+    return (style & 0xF0) != 0 && style != 24;
+}
+
+bool uv_is_dynamic(const MaterialDescriptorRecord& effect, const ThreediMaterial& mat) {
+    return (effect.descriptor_flags & MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0 &&
+           ((mat.u_params.style & 0xF0) != 0 || (mat.v_params.style & 0xF0) != 0);
+}
+
+bool rgb_gen_is_dynamic(const MaterialDescriptorRecord& effect,
+                        const ThreediRgbGen& gen, uint8_t emissive_type) {
+    return effect_reads_color(effect, material_color_target(emissive_type)) &&
+           generator_is_dynamic(gen.style);
+}
+
+// apply_shader_parameters' parameter order: static colours, AlphaGen, both
+// RgbGen channels, then the UV transform. static_only skips every dynamic
+// generator, leaving its effect default.
+MaterialRuntime evaluate(const ThreediMaterial& mat,
+                         uint32_t time_ms,
+                         const std::vector<std::string>& ctrl_names,
+                         const ControlRegisterValues& ctrl_bus,
+                         bool static_only) {
+    MaterialRuntime rt;
+    const MaterialDescriptorRecord& effect = material_effect(mat);
+
+    // Static colours first, both channels in order.
+    // [orig: apply_shader_parameters @ 0x58DD11..0x58DD9C]
+    apply_static_color(rt, effect, mat.reflect_color, mat.is_glass);
+    apply_static_color(rt, effect, mat.reflect_color2, mat.glass_type2);
+
+    // AlphaGen runs for every effect; only its upload needs the AlphaGenValue
+    // handle [orig: apply_shader_parameters @ 0x58DDA6 call, @ 0x58DDAB
+    // handle test]. An inactive style (no high nibble) returns 1.0, style 24
+    // the start, style 113 the start + (end - start) * CTRL >> 16, and every
+    // other style the waveform.
+    // [orig: AlphaGen_EvaluateValue @ 0x5B2328 (inactive), @ 0x5B233E (24),
+    //  @ 0x5B2343..0x5B2359 (113)]
+    const uint8_t alpha_style = mat.alpha_gen.style;
+    if ((alpha_style & 0xF0) == 0) {
         rt.alpha = 1.0f;
-    } else {
-        // [orig: AlphaGen_EvaluateValue @ 0x5B2320 — `if (style != 24 && style
-        //  != 113) { waveform } return start`: style 113 ('q') is a CONSTANT
-        //  start like 24, not the register-driven form RgbGen 113/114 use
-        //  (@0x5B24AC); its sole caller @0x58DB80 uploads the value to constant
-        //  223 with no 113 special case. The earlier port drove it from the
-        //  CTRL register (jo-c cross-check 2026-09-10).]
-        const int32_t ctrl = reg_value(mat.alpha_gen.reg, ctrl_names, ctrl_bus);
-        (void)ctrl;
+    } else if (!static_only || !generator_is_dynamic(alpha_style)) {
         const int32_t fraction =
-                mat.alpha_gen.style == 24
+                alpha_style == 24
                         ? 0
-                        : (mat.alpha_gen.style == 113
-                                   ? 0
+                        : (alpha_style == 113
+                                   ? reg_value(mat.alpha_gen.reg, ctrl_names, ctrl_bus)
                                    : waveform_fraction(
-                                             mat.alpha_gen.style,
+                                             alpha_style,
                                              phase_or_register_byte(
-                                                     mat.alpha_gen.style,
+                                                     alpha_style,
                                                      mat.alpha_gen.phase,
                                                      mat.alpha_gen.reg,
                                                      ctrl_names),
@@ -199,40 +340,26 @@ MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
         rt.alpha = static_cast<float>(value) * (1.0f / 255.0f);
     }
 
-    if (mat.rgb_gen.style == 0) {
-        rt.rgb_r = rt.rgb_g = rt.rgb_b = 1.0f;
-    } else {
-        const int32_t ctrl = reg_value(mat.rgb_gen.reg, ctrl_names, ctrl_bus);
-        const std::array<uint8_t, 3> start = {
-            quantize_byte(mat.rgb_gen.start_color[0], 255.0f),
-            quantize_byte(mat.rgb_gen.start_color[1], 255.0f),
-            quantize_byte(mat.rgb_gen.start_color[2], 255.0f),
-        };
-        const std::array<uint8_t, 3> end = {
-            quantize_byte(mat.rgb_gen.end_color[0], 255.0f),
-            quantize_byte(mat.rgb_gen.end_color[1], 255.0f),
-            quantize_byte(mat.rgb_gen.end_color[2], 255.0f),
-        };
-        eval_rgb_gen(
-                mat.rgb_gen.style,
-                phase_or_register_byte(
-                        mat.rgb_gen.style,
-                        mat.rgb_gen.phase,
-                        mat.rgb_gen.reg,
-                        ctrl_names),
-                quantize_s16(mat.rgb_gen.rate, 256.0f),
-                start,
-                end,
-                time_ms,
-                ctrl,
-                &rt.rgb_r,
-                &rt.rgb_g,
-                &rt.rgb_b);
+    // Both RgbGen channels, each only when its routed colour handle exists.
+    // [orig: apply_shader_parameters @ 0x58DDC7..0x58DE4D]
+    if (!static_only || !generator_is_dynamic(mat.rgb_gen.style)) {
+        apply_rgb_gen(rt, effect, mat.rgb_gen, mat.emissive_type, time_ms,
+                ctrl_names, ctrl_bus);
+    }
+    if (!static_only || !generator_is_dynamic(mat.rgb_gen2.style)) {
+        apply_rgb_gen(rt, effect, mat.rgb_gen2, mat.emissive_type2, time_ms,
+                ctrl_names, ctrl_bus);
     }
 
-    // Retail evaluates AlphaGen, RgbGen, then UV in this order. Preserve that
-    // ordering because noise waveforms share the CRT random stream.
-    // [orig: apply_shader_parameters @ 0x58DB80]
+    // The UV transform runs only for effects that read MatTexCoord1: the #UV
+    // (TEX_UVXFORM) twins. Every other effect keeps the identity rows and
+    // draws no noise sample for its UV channels.
+    // [orig: apply_shader_parameters @ 0x58DE4F..0x58DE56; _FFP.fx and the
+    //  VS effects reference MatTexCoord1 only under TEX_UVXFORM]
+    if ((effect.descriptor_flags & MATERIAL_DESCRIPTOR_UV_TRANSFORM) == 0 ||
+            (static_only && uv_is_dynamic(effect, mat))) {
+        return rt;
+    }
     const UvAnimChannel u_channel = raw_uv_channel(mat.u_params, ctrl_names);
     const UvAnimChannel v_channel = raw_uv_channel(mat.v_params, ctrl_names);
     const bool u_uses_noise = uv_channel_uses_noise(u_channel);
@@ -254,8 +381,32 @@ MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
             reg_value(mat.v_params.reg, ctrl_names, ctrl_bus),
             u_random,
             v_random);
-
     return rt;
+}
+
+} // namespace
+
+MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
+                                      uint32_t time_ms,
+                                      const std::vector<std::string>& ctrl_names,
+                                      const ControlRegisterValues& ctrl_values) {
+    // Retail patches every model-local material parameter to one of the 96
+    // global CTRL slots during load. Authored unknown/missing local references
+    // inherit the loader's ordinal-zero result.
+    // [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290]
+    return evaluate(mat, time_ms, ctrl_names, ctrl_values, false);
+}
+
+bool material_runtime_is_dynamic(const ThreediMaterial& mat) {
+    const MaterialDescriptorRecord& effect = material_effect(mat);
+    return generator_is_dynamic(mat.alpha_gen.style) ||
+           rgb_gen_is_dynamic(effect, mat.rgb_gen, mat.emissive_type) ||
+           rgb_gen_is_dynamic(effect, mat.rgb_gen2, mat.emissive_type2) ||
+           uv_is_dynamic(effect, mat);
+}
+
+MaterialRuntime material_static_runtime(const ThreediMaterial& mat) {
+    return evaluate(mat, 0, {}, ControlRegisterValues{}, true);
 }
 
 LightRuntime eval_light_runtime(uint8_t style,
@@ -313,9 +464,18 @@ int compute_anim_frame(const ThreediMaterial& mat,
     const int frame_count = static_cast<int>(bounded_count);
 
     if (mat.animation.animation_type == 0) {
-        int frame_ms = static_cast<int>(mat.animation.cycle_frame_time);
-        if (frame_ms <= 0) frame_ms = 100;
-        return (time_ms / static_cast<uint32_t>(frame_ms)) % frame_count;
+        // The loader rewrites a zero frame time to 1 and the draw divides by
+        // the unsigned word. [orig: convert_material_definition @ 0x5B06F6..
+        // 0x5B070A; apply_shader_parameters @ 0x58DBD8..0x58DBEC]
+        const uint16_t authored = static_cast<uint16_t>(mat.animation.cycle_frame_time);
+        const uint32_t frame_ms = authored == 0 ? 1u : authored;
+        return static_cast<int>((time_ms / frame_ms) %
+                static_cast<uint32_t>(frame_count));
+    }
+    // Only type 1 is the controlled branch; any other type keeps frame zero.
+    // [orig: apply_shader_parameters @ 0x58DBF0..0x58DBF2]
+    if (mat.animation.animation_type != 1) {
+        return 0;
     }
 
     const int reg_index = static_cast<int>(mat.animation.cycle_frame_time);

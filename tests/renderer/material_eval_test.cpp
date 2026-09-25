@@ -3,6 +3,7 @@
 #include <formats/threedi/threedi_panm_runtime.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -66,6 +67,19 @@ void expect_uv(const opennova::renderer::UvAnimTransform& actual,
            message);
 }
 
+// A material wearing the named effect. The evaluator only runs the
+// parameters that effect reads: the UV rows for #UV twins, SelfLumColor for
+// the SELFLUM rows (routed by emissive_type 2), ReflectColor for the glass
+// and mirror rows. [orig: apply_shader_parameters @ 0x58DB80]
+ThreediMaterial tagged(const char* tag, uint8_t emissive_type = 0) {
+    ThreediMaterial material{};
+    std::snprintf(material.shader_name, sizeof(material.shader_name), "%s", tag);
+    material.emissive_type = emissive_type;
+    return material;
+}
+
+constexpr uint8_t kSelfLum = 2;
+
 }  // namespace
 
 int main() {
@@ -90,7 +104,7 @@ int main() {
         // srand(1) yields 41, 18467, 6334...
         // [orig: wave_lookup @ 0x5DE6B0 low-nibble-6 branch;
         //  apply_shader_parameters @ 0x58DB80 evaluates U then V]
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.u_params.style = 0x36;
         material.u_params.end = 1.0f;
         material.v_params.style = 0x36;
@@ -123,7 +137,7 @@ int main() {
     }
 
     {
-        material = {};
+        material = tagged("FF_ST_OP_LUM", kSelfLum);
         material.rgb_gen.style = 24;
         material.rgb_gen.start_color[0] = 89.0f * kInv255;
         material.rgb_gen.start_color[1] = 26.0f * kInv255;
@@ -145,7 +159,7 @@ int main() {
     }
 
     {
-        material = {};
+        material = tagged("FF_ST_OP_LUM", kSelfLum);
         material.rgb_gen.style = 50;
         material.rgb_gen.rate = 0.75f;
         material.rgb_gen.start_color[0] = 100.0f * kInv255;
@@ -165,7 +179,7 @@ int main() {
     }
 
     {
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.u_params.style = 16;
         material.u_params.phase = 0.25f;
         material.u_params.gen_rate = 1.0f;
@@ -173,7 +187,7 @@ int main() {
         expect_uv(runtime.uv, 1.0f, 0.0f, 0.0f, 1.0f, 0.75f, 0.0f,
                   "UV style 16 should use the retail wrapping phase accumulator");
 
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.u_params.style = 114;
         material.u_params.start = 128.0f; // 32768 packed as signed s16 -> -32768.
         expect_uv(eval_runtime(material, 0, {"LOD_FRAC"},
@@ -181,7 +195,7 @@ int main() {
                   1.0f, 0.0f, 0.0f, 1.0f, -128.0f, 0.0f,
                   "Runtime preview should use the exported signed-word wrap");
 
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.v_params.style = 17;
         material.v_params.phase = 0.25f;
         material.v_params.gen_rate = 1.0f;
@@ -191,7 +205,7 @@ int main() {
     }
 
     {
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.u_params.style = 32;
         material.u_params.phase = 0.25f;
         const opennova::renderer::MaterialRuntime clockwise = eval_runtime(material, 0);
@@ -208,7 +222,7 @@ int main() {
         const std::vector<std::string> names = {"LOD_FADE_IN", "FLICKER"};
         const std::unordered_map<std::string, int32_t> values = {{"FLICKER", 32768}};
 
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.u_params.style = 113;
         material.u_params.reg = 1;
         material.u_params.start = 0.0f;
@@ -241,7 +255,7 @@ int main() {
                   0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f,
                   "Controlled UV 117 should interpret its value as turns");
 
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.v_params.style = 115;
         material.v_params.reg = 1;
         material.v_params.start = 0.0f;
@@ -250,7 +264,7 @@ int main() {
                   1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f,
                   "The material adapter should preserve the V-channel shear term");
 
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.u_params.style = 115;
         material.u_params.reg = 1;
         material.u_params.start = 0.0f;
@@ -261,7 +275,7 @@ int main() {
     }
 
     {
-        material = {};
+        material = tagged("FF_ST_OP#UV");
         material.u_params.style = 114;
         material.u_params.reg = 0;
         material.u_params.end = 2.0f;
@@ -279,7 +293,7 @@ int main() {
                   1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
                   "Duplicate local names and case variants should alias one global CTRL slot");
 
-        material = {};
+        material = tagged("FF_ST_OP_LUM", kSelfLum);
         material.rgb_gen.style = 113;
         material.rgb_gen.reg = 0;
         material.rgb_gen.end_color[0] = 1.0f;
@@ -299,7 +313,7 @@ int main() {
     {
         const std::vector<std::string> names = {"FLICKER"};
         for (uint8_t style : {uint8_t{113}, uint8_t{114}}) {
-            material = {};
+            material = tagged("FF_ST_OP_LUM", kSelfLum);
             material.rgb_gen.style = style;
             material.rgb_gen.reg = 0;
             material.rgb_gen.start_color[0] = 200.0f * kInv255;
@@ -317,7 +331,7 @@ int main() {
                    "RGB styles 113/114 should use integer CTRL interpolation");
         }
 
-        material = {};
+        material = tagged("FF_ST_OP_LUM", kSelfLum);
         material.rgb_gen.style = 113;
         material.rgb_gen.reg = 0;
         material.rgb_gen.end_color[0] = 1.0f;
@@ -344,7 +358,7 @@ int main() {
     }
 
     {
-        material = {};
+        material = tagged("FF_ST_OP_LUM", kSelfLum);
         material.rgb_gen.style = 115;
         material.rgb_gen.reg = 37;  // The packed parameter byte becomes waveform phase.
         material.rgb_gen.rate = 0.75f;
@@ -386,17 +400,23 @@ int main() {
         material.alpha_gen.reg = 0;
         material.alpha_gen.start = 10;
         material.alpha_gen.end = 210;
-        // Style 113 is a CONSTANT style like 24: the evaluator returns the
-        // packed start for both and never reads a register or the clock
-        // [orig: AlphaGen_EvaluateValue @0x5B2320 `if (style != 24 && style != 113)`].
+        // Style 113 reads the CTRL slot the loader patched into its parameter
+        // byte: start + ((end - start) * CTRL >> 16).
+        // [orig: AlphaGen_EvaluateValue @ 0x5B2343..0x5B2359]
         const opennova::renderer::MaterialRuntime controlled =
                 eval_runtime(material, 999, {"FLICKER"}, {{"FLICKER", 32768}});
-        expect(nearly_equal(controlled.alpha, 10.0f * kInv255),
-               "Alpha style 113 should hold the packed start regardless of CTRL");
+        expect(nearly_equal(controlled.alpha, 110.0f * kInv255),
+               "Alpha style 113 should interpolate by its CTRL register");
         const opennova::renderer::MaterialRuntime endpoint =
                 eval_runtime(material, 999, {"FLICKER"}, {{"FLICKER", 65536}});
-        expect(nearly_equal(endpoint.alpha, 10.0f * kInv255),
-               "Alpha style 113 should ignore a saturated CTRL register");
+        expect(nearly_equal(endpoint.alpha, 210.0f * kInv255),
+               "Alpha style 113 should reach the end at CTRL 0x10000");
+
+        // A style with no high nibble is inactive and returns 1.0, never the
+        // waveform [orig: AlphaGen_EvaluateValue @ 0x5B2328].
+        material.alpha_gen.style = 0x05;
+        expect(nearly_equal(eval_runtime(material, 999).alpha, 1.0f),
+               "Alpha styles below 0x10 should be inactive");
 
         material.alpha_gen.style = 114;
         material.alpha_gen.reg = 37;
@@ -452,6 +472,187 @@ int main() {
                        nearly_equal(low.g, high.g) &&
                        nearly_equal(low.b, high.b),
                "Light RGB style 115 should remain a waveform");
+    }
+
+    {
+        // Only the #UV twins read MatTexCoord1: a plain FF_ST_OP keeps the
+        // identity rows and draws no noise sample for its UV channels.
+        // J_Tre15.3di materials 1/2 are FF_ST_OP with u 0x52 / v 0x42.
+        // [orig: apply_shader_parameters @ 0x58DE4F..0x58DE56]
+        material = tagged("FF_ST_OP");
+        material.u_params.style = 0x52;
+        material.u_params.gen_rate = 1.0f;
+        material.u_params.end = 1.0f;
+        material.v_params.style = 0x36;
+        material.v_params.end = 1.0f;
+        crt_srand(1);
+        expect_uv(eval_runtime(material, 750).uv, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+                  "A non-#UV effect must keep the identity UV rows");
+        expect(crt_rand15() == 41,
+               "A non-#UV effect must not draw its UV noise sample");
+
+        ThreediMaterial twin = material;
+        std::snprintf(twin.shader_name, sizeof(twin.shader_name), "%s", "FF_ST_OP#UV");
+        crt_srand(1);
+        const opennova::renderer::MaterialRuntime animated = eval_runtime(twin, 750);
+        expect(nearly_equal(animated.uv.m21, 16.0f * 41.0f / 65535.0f),
+               "The #UV twin should evaluate its V noise channel");
+        expect(crt_rand15() == 18467,
+               "The #UV twin should draw exactly its one noise sample");
+    }
+
+    {
+        // RgbGen runs only when the effect reads the colour its emissive
+        // byte routes to; otherwise SelfLumColor keeps the effect default and
+        // no noise sample is drawn.
+        // [orig: apply_shader_parameters @ 0x58DDE0..0x58DDF4]
+        material = tagged("FF_ST_OP_LUM");  // emissive_type 0 routes nowhere
+        material.rgb_gen.style = 0x36;
+        material.rgb_gen.end_color[0] = 1.0f;
+        crt_srand(1);
+        opennova::renderer::MaterialRuntime unrouted = eval_runtime(material, 0);
+        expect(nearly_equal(unrouted.rgb_r, 1.0f) && nearly_equal(unrouted.rgb_g, 1.0f) &&
+                       nearly_equal(unrouted.rgb_b, 1.0f) && crt_rand15() == 41,
+               "An unrouted RgbGen must neither write SelfLumColor nor draw noise");
+
+        material = tagged("FF_ST_OP", kSelfLum);  // the effect has no SelfLumColor
+        material.rgb_gen.style = 0x36;
+        material.rgb_gen.end_color[0] = 1.0f;
+        crt_srand(1);
+        unrouted = eval_runtime(material, 0);
+        expect(nearly_equal(unrouted.rgb_r, 1.0f) && crt_rand15() == 41,
+               "An effect without SelfLumColor must skip its RgbGen");
+
+        // A routed generator with no high nibble writes zero.
+        // [orig: RgbGen_EvaluateColor @ 0x5B23D5 -> @ 0x5B2506]
+        material = tagged("FF_ST_OP_LUM", kSelfLum);
+        material.rgb_gen.style = 0x05;
+        material.rgb_gen.start_color[0] = 1.0f;
+        const opennova::renderer::MaterialRuntime inactive = eval_runtime(material, 0);
+        expect(nearly_equal(inactive.rgb_r, 0.0f) && nearly_equal(inactive.rgb_g, 0.0f) &&
+                       nearly_equal(inactive.rgb_b, 0.0f),
+               "A routed inactive RgbGen should zero SelfLumColor");
+    }
+
+    {
+        // Static colours route by is_glass: 1 -> ReflectColor as (R, G, B, 1)
+        // from the BGRA bytes, 2 -> SelfLumColor; a later RgbGen overrides.
+        // [orig: apply_shader_parameters @ 0x58DD23..0x58DD83 (W = fld1 @ 0x58DD7D)]
+        material = tagged("FFP_GLASS");
+        material.is_glass = 1;
+        material.reflect_color[0] = 32.0f * kInv255;   // B
+        material.reflect_color[1] = 64.0f * kInv255;   // G
+        material.reflect_color[2] = 128.0f * kInv255;  // R
+        material.reflect_color[3] = 0.0f;              // authored A (every stock row)
+        opennova::renderer::MaterialRuntime glass = eval_runtime(material, 0);
+        expect(nearly_equal(glass.reflect[0], 128.0f * kInv255) &&
+                       nearly_equal(glass.reflect[1], 64.0f * kInv255) &&
+                       nearly_equal(glass.reflect[2], 32.0f * kInv255) &&
+                       nearly_equal(glass.reflect[3], 1.0f),
+               "A routed static colour should reach ReflectColor with W = 1");
+
+        material.is_glass = 0;
+        glass = eval_runtime(material, 0);
+        expect(nearly_equal(glass.reflect[0], 0.75f) && nearly_equal(glass.reflect[3], 0.75f),
+               "An unrouted static colour should leave the _BaseInc.fx ReflectColor default");
+
+        // emissive_type 0 so the (inactive) RgbGen routes nowhere and the
+        // static colour survives.
+        material = tagged("FF_ST_OP_LUM");
+        material.is_glass = 2;
+        material.reflect_color[0] = 10.0f * kInv255;
+        material.reflect_color[1] = 20.0f * kInv255;
+        material.reflect_color[2] = 30.0f * kInv255;
+        opennova::renderer::MaterialRuntime lum = eval_runtime(material, 0);
+        expect(nearly_equal(lum.rgb_r, 30.0f * kInv255) &&
+                       nearly_equal(lum.rgb_g, 20.0f * kInv255) &&
+                       nearly_equal(lum.rgb_b, 10.0f * kInv255),
+               "is_glass 2 should route the static colour to SelfLumColor");
+        material.emissive_type = kSelfLum;
+        material.rgb_gen.style = 24;
+        material.rgb_gen.start_color[0] = 200.0f * kInv255;
+        lum = eval_runtime(material, 0);
+        expect(nearly_equal(lum.rgb_r, 200.0f * kInv255),
+               "The RgbGen evaluated after the static colours should win");
+    }
+
+    {
+        // Only parameters the effect reads can make a material dynamic, and
+        // the static evaluation draws no noise sample.
+        material = tagged("FF_ST_OP");
+        material.u_params.style = 0x52;
+        expect(!opennova::renderer::material_runtime_is_dynamic(material),
+               "A non-#UV effect's UV styles are not dynamic");
+        std::snprintf(material.shader_name, sizeof(material.shader_name), "%s", "FF_ST_OP#UV");
+        expect(opennova::renderer::material_runtime_is_dynamic(material),
+               "The #UV twin's UV styles are dynamic");
+
+        material = tagged("FF_ST_OP_LUM");
+        material.rgb_gen.style = 113;
+        expect(!opennova::renderer::material_runtime_is_dynamic(material),
+               "An unrouted RgbGen is not dynamic");
+        material.emissive_type = kSelfLum;
+        expect(opennova::renderer::material_runtime_is_dynamic(material),
+               "A routed CTRL RgbGen is dynamic");
+        material.rgb_gen.style = 24;
+        material.rgb_gen.start_color[0] = 1.0f;
+        expect(!opennova::renderer::material_runtime_is_dynamic(material),
+               "A constant RgbGen is not dynamic");
+        expect(nearly_equal(opennova::renderer::material_static_runtime(material).rgb_r, 1.0f),
+               "The static evaluation should include constant generators");
+        material.rgb_gen.style = 0;
+        expect(nearly_equal(opennova::renderer::material_static_runtime(material).rgb_r, 0.0f),
+               "The static evaluation should include the inactive zero fill");
+
+        material = {};
+        material.alpha_gen.style = 0x36;
+        expect(opennova::renderer::material_runtime_is_dynamic(material),
+               "AlphaGen runs for every effect, so a noise AlphaGen is dynamic");
+        crt_srand(1);
+        expect(nearly_equal(opennova::renderer::material_static_runtime(material).alpha, 1.0f) &&
+                       crt_rand15() == 41,
+               "The static evaluation must not draw a noise sample");
+    }
+
+    {
+        // Unauthored scroll/rotate types (0x12..0x1F, 0x22..0x2F) write no
+        // row, so the memset-zero diagonal survives.
+        // [orig: compute_uv_transform_matrix @ 0x5B1A27..0x5B1A2D,
+        //  @ 0x5B1A84..0x5B1A86 (U); @ 0x5B1C88..0x5B1C8B, @ 0x5B1CCD..0x5B1CD0 (V)]
+        opennova::renderer::UvAnimChannel scroll_u;
+        scroll_u.type = 0x12;
+        opennova::renderer::UvAnimChannel rotate_v;
+        rotate_v.type = 0x2A;
+        rotate_v.phase = 0x40;
+        expect_uv(opennova::renderer::uv_anim_transform(scroll_u, rotate_v, 300, 0, 0, 0, 0),
+                  0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                  "Unauthored scroll/rotate types should leave both diagonals zero");
+        opennova::renderer::UvAnimChannel rotate_u;
+        rotate_u.type = 0x21;
+        rotate_u.phase = 0x40;
+        expect_uv(opennova::renderer::uv_anim_transform(rotate_u, scroll_u, 0, 0, 0, 0, 0),
+                  0.0f, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f,
+                  "Authored type 33 still rotates while an unauthored V stays zero");
+    }
+
+    {
+        // A time flipbook divides by the unsigned frame-time word, which the
+        // loader rewrote from 0 to 1; types other than 0/1 keep frame zero.
+        // [orig: convert_material_definition @ 0x5B06F6..0x5B070A;
+        //  apply_shader_parameters @ 0x58DBD8..0x58DBF2]
+        material = {};
+        material.animation.num_frames = 4;
+        material.animation.animation_type = 0;
+        material.animation.cycle_frame_time = 0;
+        expect(opennova::renderer::compute_anim_frame(material, 0, 7, {}, ctrl_bus({})) == 3,
+               "A zero frame time should advance one frame per millisecond");
+        material.animation.cycle_frame_time = -1;  // 0xFFFF
+        expect(opennova::renderer::compute_anim_frame(material, 0, 70000, {}, ctrl_bus({})) == 1,
+               "The frame time should divide as an unsigned word");
+        material.animation.animation_type = 2;
+        expect(opennova::renderer::compute_anim_frame(
+                       material, 0, 70000, {"FLICKER"}, ctrl_bus({{"FLICKER", 32768}})) == 0,
+               "Animation types other than 0/1 should keep frame zero");
     }
 
     {

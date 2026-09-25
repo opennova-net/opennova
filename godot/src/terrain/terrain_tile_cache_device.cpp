@@ -1,9 +1,10 @@
-// Device leg only: Godot Image/Texture2DArray marshalling, the completion
-// drain under the upload budget, and upload counters. Page identity, LRU,
-// and invalidation — the witnessed cache semantics — live in engine/runtime/terrain/
-// terrain_tile_composition_cache.{h,cpp}, held here as a member (see the
-// class header's witness block and docs/terrain/terrain-re.md; retail's
-// device-side twin is the D3D tile-texture pool the record maps).
+// Device leg only: Godot Image/Texture2DArray marshalling, the frame's
+// synchronous compose-and-upload, and upload counters. Page identity, the
+// per-frame sweep, and invalidation — the witnessed cache semantics — live in
+// engine/runtime/terrain/terrain_tile_composition_cache.{h,cpp}, held here as
+// a member (see the class header's witness block and
+// docs/terrain/terrain-re.md; retail's device-side twin is the D3D
+// tile-texture pool the record maps).
 #include "terrain/terrain_tile_cache_device.h"
 #include "util/data_format.h"
 
@@ -98,18 +99,14 @@ bool TerrainTileCacheDevice::_refresh_shadow_snapshot() {
 	std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot> snapshot =
 			static_shadow_rasterizer_->compilation_snapshot();
 	if (snapshot == nullptr) {
-		async_->cancel(false);
-		cache_.invalidate_all();
-		ready_generations_.fill(0);
-		ready_page_output_hashes_.fill(0);
+		_invalidate_all();
 		shadow_snapshot_.reset();
 		_reset_shadow_epoch_diagnostics();
 		return false;
 	}
-	// A planner state change is NOT a global invalidation: every page's cache
-	// identity mixes its own plan_page() stamp, so only pages an actually
-	// changed caster (or light quantum) touches re-target, and in-flight jobs
-	// for unaffected pages still publish under their unchanged stamps.
+	// A planner state change is NOT an invalidation: retail samples the
+	// casters when a page composes and keeps the page until the record is
+	// claimed again, retired by its TOD epoch, or invalidated spatially.
 	shadow_snapshot_ = std::move(snapshot);
 	return true;
 }
@@ -125,14 +122,23 @@ bool TerrainTileCacheDevice::rebuild(
 	}
 	auto snapshot = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>();
 
+	opennova::terrain::Rgba8Image colormap;
+	opennova::terrain::Rgba8Image heightfield_normal;
 	const Ref<Image> live_colormap = p_data->get_colormap_image();
 	const bool have_colormap = live_colormap.is_valid() && !live_colormap->is_empty()
-			? image_to_rgba8(live_colormap, snapshot->colormap)
-			: texture_to_rgba8(p_data->get_colormap(), snapshot->colormap);
+			? image_to_rgba8(live_colormap, colormap)
+			: texture_to_rgba8(p_data->get_colormap(), colormap);
 	const bool have_normal = texture_to_rgba8(
 			p_surface_inputs->get_heightfield_normal_texture(),
-			snapshot->heightfield_normal);
+			heightfield_normal);
 	if (!have_colormap || !have_normal) {
+		return false;
+	}
+	snapshot->colormap =
+			opennova::terrain::build_terrain_tile_quadrant_source(colormap);
+	snapshot->heightfield_normal =
+			opennova::terrain::build_terrain_tile_quadrant_source(heightfield_normal);
+	if (!snapshot->colormap.is_valid() || !snapshot->heightfield_normal.is_valid()) {
 		return false;
 	}
 	// Scorch decals are an OPTIONAL overlay source, not a base page source.
@@ -184,8 +190,13 @@ bool TerrainTileCacheDevice::rebuild(
 	if (p_tile_overlay_enabled && tile_info.is_valid() &&
 			tile_info->get_entry_count() > 0) {
 		tile_overlay_required_ = true;
-		if (!texture_to_rgba8(p_data->get_tilestrip_tex(),
-				snapshot->tilestrip)) {
+		opennova::terrain::Rgba8Image tilestrip;
+		if (!texture_to_rgba8(p_data->get_tilestrip_tex(), tilestrip)) {
+			return false;
+		}
+		snapshot->tilestrip =
+				opennova::terrain::build_terrain_tile_set_mips(tilestrip);
+		if (snapshot->tilestrip.empty()) {
 			return false;
 		}
 		snapshot->tile_info = tile_info->to_native();
@@ -206,7 +217,7 @@ bool TerrainTileCacheDevice::rebuild(
 
 void TerrainTileCacheDevice::clear() {
 	async_->cancel(true);
-	cache_.clear();
+	cache_.invalidate_all();
 	texture_.unref();
 	tile_overlay_required_ = false;
 	tile_overlay_ready_ = false;
@@ -215,6 +226,8 @@ void TerrainTileCacheDevice::clear() {
 	ready_generations_.fill(0);
 	ready_page_keys_.fill(opennova::TerrainTilePageKey{});
 	ready_page_output_hashes_.fill(0);
+	frame_visible_.clear();
+	frame_bindings_.clear();
 	compose_jobs_ = 0;
 	cache_hits_ = 0;
 	cache_misses_ = 0;
@@ -234,11 +247,11 @@ void TerrainTileCacheDevice::clear() {
 	diagnostic_frame_id_ = 0;
 	frame_requests_ = 0;
 	frame_ready_hits_ = 0;
-	frame_stale_hits_ = 0;
 	frame_selected_ready_pages_ = 0;
-	frame_selected_ready_layers_.fill(false);
 	frame_compose_jobs_ = 0;
 	frame_compose_us_ = 0;
+	frame_compose_page_us_ = 0;
+	frame_compose_shadow_plan_us_ = 0;
 	frame_uploads_ = 0;
 	frame_capacity_fallbacks_ = 0;
 	frame_shadow_alpha_changed_bytes_ = 0;
@@ -248,30 +261,35 @@ void TerrainTileCacheDevice::clear() {
 	frame_output_hash_ = 0;
 }
 
-void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id) {
-	if (!diagnostic_frame_active_ || diagnostic_frame_id_ != p_frame_id) {
-		diagnostic_frame_active_ = true;
-		diagnostic_frame_id_ = p_frame_id;
-		frame_requests_ = 0;
-		frame_ready_hits_ = 0;
-		frame_stale_hits_ = 0;
-		frame_selected_ready_pages_ = 0;
-		frame_selected_ready_layers_.fill(false);
-		frame_compose_jobs_ = 0;
-		frame_compose_us_ = 0;
-		frame_uploads_ = 0;
-		frame_capacity_fallbacks_ = 0;
-		frame_shadow_alpha_changed_bytes_ = 0;
-		frame_shadow_rgb_changed_bytes_ = 0;
-		frame_shadow_base_nonzero_alpha_bytes_ = 0;
-		frame_output_pages_ = 0;
-		frame_output_hash_ = opennova::io::kFnv1a64Offset;
-		_refresh_shadow_snapshot();
-		cache_.begin_frame(p_frame_id);
-		_drain_completed();
+void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id, uint32_t p_tod_epoch) {
+	if (diagnostic_frame_active_ && diagnostic_frame_id_ == p_frame_id) {
 		return;
 	}
-	cache_.begin_frame(p_frame_id);
+	diagnostic_frame_active_ = true;
+	diagnostic_frame_id_ = p_frame_id;
+	frame_requests_ = 0;
+	frame_ready_hits_ = 0;
+	frame_selected_ready_pages_ = 0;
+	frame_compose_jobs_ = 0;
+	frame_compose_us_ = 0;
+	frame_compose_page_us_ = 0;
+	frame_compose_shadow_plan_us_ = 0;
+	frame_uploads_ = 0;
+	frame_capacity_fallbacks_ = 0;
+	frame_shadow_alpha_changed_bytes_ = 0;
+	frame_shadow_rgb_changed_bytes_ = 0;
+	frame_shadow_base_nonzero_alpha_bytes_ = 0;
+	frame_output_pages_ = 0;
+	frame_output_hash_ = opennova::io::kFnv1a64Offset;
+	_refresh_shadow_snapshot();
+	cache_.begin_frame(p_tod_epoch);
+}
+
+void TerrainTileCacheDevice::_invalidate_all() {
+	async_->cancel(false);
+	cache_.invalidate_all();
+	ready_generations_.fill(0);
+	ready_page_output_hashes_.fill(0);
 }
 
 void TerrainTileCacheDevice::set_static_shadow_rasterizer(
@@ -282,62 +300,19 @@ void TerrainTileCacheDevice::set_static_shadow_rasterizer(
 	static_shadow_rasterizer_ = p_rasterizer;
 	shadow_snapshot_.reset();
 	// Existing layers were published under a different alpha producer (or no
-	// producer). Keep the allocated array but make every binding cold.
-	async_->cancel(false);
-	cache_.invalidate_all();
-	ready_generations_.fill(0);
-	ready_page_output_hashes_.fill(0);
+	// producer). Keep the allocated array but make every page cold.
+	_invalidate_all();
 	_reset_shadow_epoch_diagnostics();
 }
 
 void TerrainTileCacheDevice::invalidate_static_shadow_pages() {
 	// Provider control changes alter the final page-alpha result independently
-	// of the terrain source images. Retire every ready binding immediately so
-	// foliage cannot observe a prior enabled/suppression state before terrain
-	// requests and publishes the replacement pages.
-	async_->cancel(false);
-	cache_.invalidate_all();
-	ready_generations_.fill(0);
-	ready_page_output_hashes_.fill(0);
+	// of the terrain source images. Retire every page immediately so foliage
+	// cannot observe a prior enabled/suppression state before terrain
+	// recomposes the replacement pages.
+	_invalidate_all();
 	shadow_snapshot_.reset();
 	_reset_shadow_epoch_diagnostics();
-}
-
-void TerrainTileCacheDevice::_invalidate_page(
-		const opennova::TerrainTilePageKey &p_page) {
-	cache_.invalidate(p_page);
-	for (std::size_t layer = 0; layer < ready_generations_.size(); ++layer) {
-		if (ready_generations_[layer] == 0 ||
-				!opennova::same_page(ready_page_keys_[layer], p_page)) {
-			continue;
-		}
-		ready_generations_[layer] = 0;
-		ready_page_output_hashes_[layer] = 0;
-		if (frame_selected_ready_layers_[layer]) {
-			frame_selected_ready_layers_[layer] = false;
-			--frame_selected_ready_pages_;
-		}
-		return;
-	}
-}
-
-void TerrainTileCacheDevice::_retire_ready_scorch_overlaps(
-		const opennova::terrain::TerrainScorchEntry &p_entry) {
-	for (std::size_t layer = 0; layer < ready_generations_.size(); ++layer) {
-		if (ready_generations_[layer] == 0 ||
-				!opennova::TerrainTileCompositionCache::page_overlaps_q16(
-						ready_page_keys_[layer], p_entry.minimum_x_q16,
-						p_entry.minimum_z_q16, p_entry.maximum_x_q16,
-						p_entry.maximum_z_q16)) {
-			continue;
-		}
-		ready_generations_[layer] = 0;
-		ready_page_output_hashes_[layer] = 0;
-		if (frame_selected_ready_layers_[layer]) {
-			frame_selected_ready_layers_[layer] = false;
-			--frame_selected_ready_pages_;
-		}
-	}
 }
 
 bool TerrainTileCacheDevice::append_terrain_scorch(
@@ -346,24 +321,23 @@ bool TerrainTileCacheDevice::append_terrain_scorch(
 		++scorch_records_rejected_;
 		return false;
 	}
-	const std::size_t invalidated = cache_.invalidate_overlapping_q16(
+	scorch_page_invalidations_ += cache_.invalidate_overlapping_q16(
 			p_entry.minimum_x_q16, p_entry.minimum_z_q16,
 			p_entry.maximum_x_q16, p_entry.maximum_z_q16);
-	scorch_page_invalidations_ += invalidated;
-	_retire_ready_scorch_overlaps(p_entry);
 	return true;
+}
+
+std::size_t TerrainTileCacheDevice::invalidate_region(
+		int32_t p_minimum_x_q16, int32_t p_minimum_z_q16,
+		int32_t p_maximum_x_q16, int32_t p_maximum_z_q16) {
+	return cache_.invalidate_overlapping_q16(p_minimum_x_q16, p_minimum_z_q16,
+			p_maximum_x_q16, p_maximum_z_q16);
 }
 
 void TerrainTileCacheDevice::clear_terrain_scorches() {
 	if (scorch_registry_.size() == 0) return;
-	// A reset removes every record, so every compiled page's content identity
-	// changes. Cancel queued plans before invalidating their generations.
-	async_->cancel(false);
-	cache_.invalidate_all();
-	ready_generations_.fill(0);
-	ready_page_output_hashes_.fill(0);
-	frame_selected_ready_layers_.fill(false);
-	frame_selected_ready_pages_ = 0;
+	// A reset removes every record and every page they were composed into.
+	_invalidate_all();
 	scorch_registry_.clear();
 	scorch_records_rejected_ = 0;
 }
@@ -399,26 +373,18 @@ bool TerrainTileCacheDevice::_allocate_texture() {
 	return true;
 }
 
-void TerrainTileCacheDevice::_drain_completed() {
+void TerrainTileCacheDevice::_upload_completed() {
 	if (texture_.is_null()) return;
-	// Refresh uploads (layers that already serve a published payload — during
-	// the refresh they serve it stale) trickle under the per-frame budget;
-	// cold layers have nothing on screen but the fallback shader path, so
-	// they drain unbounded and first-fill/teleport completes in a few frames.
-	std::size_t refresh_uploads = 0;
 	while (true) {
-		std::optional<opennova::terrain::TerrainTileCompositionWorker::Completion> ready = async_->take_completion_if(
-				[&](const opennova::terrain::TerrainTileCompositionWorker::Completion &candidate) {
-					return ready_generations_[candidate.job.target.layer] == 0 ||
-							refresh_uploads < opennova::terrain::TerrainTileCompositionWorker::kUploadBudgetPerFrame;
-				});
+		std::optional<opennova::terrain::TerrainTileCompositionWorker::Completion> ready =
+				async_->take_completion();
 		if (!ready.has_value()) break;
 		opennova::terrain::TerrainTileCompositionWorker::Completion &completion = *ready;
-		const bool refresh_upload =
-				ready_generations_[completion.job.target.layer] != 0;
 		frame_compose_us_ += completion.compose_us;
+		frame_compose_page_us_ += completion.page_us;
+		frame_compose_shadow_plan_us_ += completion.shadow_plan_us;
 		const opennova::TerrainTileCompositionJob &job = completion.job;
-		// Validate the lease before touching its Texture2DArray layer. The cache
+		// Validate the claim before touching its Texture2DArray layer. The cache
 		// is render-thread-owned, so it cannot become stale between this check
 		// and publish() below.
 		if (!cache_.can_publish(job)) continue;
@@ -477,7 +443,6 @@ void TerrainTileCacheDevice::_drain_completed() {
 			cache_.invalidate(job.target.page);
 			continue;
 		}
-		if (refresh_upload) ++refresh_uploads;
 		++frame_uploads_;
 		++frame_output_pages_;
 		ready_generations_[job.target.layer] = job.target.generation;
@@ -502,170 +467,99 @@ void TerrainTileCacheDevice::_drain_completed() {
 	}
 }
 
-void TerrainTileCacheDevice::_record_frame_selected_ready(
-		const opennova::TerrainTilePageBinding &p_binding) {
-	if (!p_binding.ready ||
-			p_binding.layer >= frame_selected_ready_layers_.size() ||
-			frame_selected_ready_layers_[p_binding.layer]) {
-		return;
-	}
-	frame_selected_ready_layers_[p_binding.layer] = true;
-	++frame_selected_ready_pages_;
-}
-
-uint64_t TerrainTileCacheDevice::_content_stamp(
-		const Vector3 &p_tile_tint,
-		const Vector3 &p_light_direction,
-		opennova::terrain::TerrainTilePageSourceView &r_sources) const {
-	const uint8_t tint[3] = {
-		quantize_unorm(p_tile_tint.x),
-		quantize_unorm(p_tile_tint.y),
-		quantize_unorm(p_tile_tint.z),
-	};
-	// Environment_GetLightDirectionFloat is packed into texture-basis
-	// (g2,g0,g1) before the tile-cache DOT3 pass.
-	const opennova::terrain::TerrainTileLightEpoch light =
-			opennova::terrain::terrain_tile_light_epoch_from_environment_tuple(
-					p_light_direction.x, p_light_direction.y,
-					p_light_direction.z);
-	for (int channel = 0; channel < 3; ++channel) {
-		r_sources.tile_overlay_tint[channel] = tint[channel] / 255.0f;
-		r_sources.light_bytes[channel] = light[channel];
-	}
-
-	uint64_t hash = opennova::io::kFnv1a64Offset;
-	for (int shift = 0; shift < 64; shift += 8) {
-		hash = opennova::io::fnv1a64_byte(hash,
-				static_cast<uint8_t>(source_revision_ >> shift));
-	}
-	for (uint8_t value : tint) hash = opennova::io::fnv1a64_byte(hash, value);
-	for (uint8_t value : light) hash = opennova::io::fnv1a64_byte(hash, value);
-	return hash;
-}
-
-opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
-		const opennova::TerrainPatchDraw &p_draw,
+const std::vector<opennova::TerrainTilePageBinding> &
+TerrainTileCacheDevice::compose_frame(
+		const opennova::TerrainDrawList &p_draw_list,
 		const Vector3 &p_tile_tint,
 		const Vector3 &p_light_direction) {
-	opennova::TerrainTilePageBinding unavailable;
+	frame_bindings_.assign(p_draw_list.patches.size(), opennova::TerrainTilePageBinding{});
 	if (!is_ready()) {
-		return unavailable;
+		return frame_bindings_;
 	}
-
-	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot> source_snapshot =
-			async_->sources();
-	if (source_snapshot == nullptr) return unavailable;
-	opennova::terrain::TerrainTilePageSourceView sources =
-			source_snapshot->view({}, {}, nullptr);
-
-	opennova::TerrainTileCompositionRequest request =
-			opennova::terrain_tile_composition_request(p_draw);
-	if (opennova::TerrainTileCompositionCache::page_world_span(
-			request.page.page_lod_level) == 0) {
-		return unavailable;
+	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>
+			source_snapshot = async_->sources();
+	if (source_snapshot == nullptr) {
+		return frame_bindings_;
 	}
 	std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 			shadow_snapshot = shadow_snapshot_;
 	if (static_shadow_rasterizer_ != nullptr) {
 		if (shadow_snapshot == nullptr && !_refresh_shadow_snapshot()) {
 			++shadow_raster_failures_;
-			_invalidate_page(request.page);
-			return unavailable;
+			return frame_bindings_;
 		}
 		shadow_snapshot = shadow_snapshot_;
 		if (!shadow_snapshot->planner.is_enabled()) shadow_snapshot.reset();
 	}
-	opennova::terrain::TerrainStaticShadowPagePlanResult shadow_plan;
-	if (shadow_snapshot != nullptr) {
-		shadow_plan = static_shadow_rasterizer_->plan_page(request.page);
-		if (!shadow_plan.valid) {
-			// Planning failed before we can identify a trustworthy shadow
-			// content stamp. Retire only this spatial page; unrelated ready
-			// terrain remains usable.
-			++shadow_raster_failures_;
-			_invalidate_page(request.page);
-			return unavailable;
-		}
-	}
-	opennova::TerrainTileContentStamp content{
-			_content_stamp(p_tile_tint, p_light_direction, sources)};
-	if (shadow_plan.raster_required) {
-		content = opennova::terrain::mix_terrain_static_shadow_content_stamp(
-				content, shadow_plan.content);
-	}
-	request.content = content;
-	// Permanent scorch identity: the page's insertion-ordered overlap stamp,
-	// walked from the registry's sector buckets with no entry list built.
-	// The entries are built only on the miss path below. A page the registry
-	// cannot route gets its base page with no overlay; scorch is an optional
-	// overlay and never a reason to drop the tile binding.
-	const opennova::terrain::TerrainScorchPageStamp scorch_stamp =
-			scorch_registry_.stamp(request.page);
-	if (scorch_stamp.valid) {
-		request.content.value = opennova::io::fnv1a64_value(
-				request.content.value, scorch_stamp.content_stamp);
-	}
+	// The page inputs sampled at compose time: the tile tint as the
+	// D3DCOLOR retail passes as the overlay diffuse, and the environment
+	// light tuple packed into texture-basis (g2,g0,g1) bytes for the DOT3 pass.
+	std::array<float, 3> tint{};
+	tint[0] = quantize_unorm(p_tile_tint.x) / 255.0f;
+	tint[1] = quantize_unorm(p_tile_tint.y) / 255.0f;
+	tint[2] = quantize_unorm(p_tile_tint.z) / 255.0f;
+	const opennova::terrain::TerrainTileLightEpoch light =
+			opennova::terrain::terrain_tile_light_epoch_from_environment_tuple(
+					p_light_direction.x, p_light_direction.y,
+					p_light_direction.z);
 
-	++frame_requests_;
-	const std::optional<opennova::TerrainTileCompositionDecision> decision =
-			cache_.request(request);
-	if (!decision.has_value()) {
-		++cache_misses_;
-		++frame_capacity_fallbacks_;
-		return unavailable;
+	frame_visible_.clear();
+	frame_visible_.reserve(p_draw_list.patches.size());
+	for (const opennova::TerrainPatchDraw &draw : p_draw_list.patches) {
+		frame_visible_.push_back(opennova::terrain_tile_composition_request(draw));
 	}
-	if (!decision->job.has_value()) {
-		if (decision->binding.ready) {
-			++cache_hits_;
-			if (decision->binding.stale) {
-				++frame_stale_hits_;
-			} else {
-				++frame_ready_hits_;
-			}
-			_record_frame_selected_ready(decision->binding);
-		}
-		return decision->binding;
-	}
-
-	++cache_misses_;
-	++compose_jobs_;
-	++frame_compose_jobs_;
-	const opennova::TerrainTileCompositionJob &job = *decision->job;
-	if (decision->binding.ready) {
-		// Stale-serving: the layer keeps its published payload (and its ready
-		// bookkeeping) while the replacement generation composes.
-		++frame_stale_hits_;
-		_record_frame_selected_ready(decision->binding);
-	} else {
-		// request() may have invalidated or evicted the previously published
-		// page in this layer. Do not report it ready if composition/upload
-		// fails.
-		ready_generations_[job.target.layer] = 0;
-		ready_page_output_hashes_[job.target.layer] = 0;
-	}
-	opennova::terrain::TerrainScorchPagePlan scorch_plan;
-	if (scorch_stamp.valid) scorch_plan = scorch_registry_.plan(request.page);
+	frame_requests_ += frame_visible_.size();
+	const std::vector<opennova::TerrainTileCompositionJob> jobs =
+			cache_.sweep(frame_visible_);
 	const uint32_t shadow_material_time = shadow_snapshot != nullptr
 			? static_shadow_rasterizer_->material_time_ms()
 			: 0u;
-	if (!async_->enqueue(job, source_snapshot, sources.tile_overlay_tint,
-			sources.light_bytes, std::move(scorch_plan),
-			diagnostic_frame_id_, shadow_snapshot, shadow_material_time,
-			capture_diagnostics_)) {
-		cache_.invalidate(job.target.page);
-		++frame_capacity_fallbacks_;
-		return unavailable;
+	for (const opennova::TerrainTileCompositionJob &job : jobs) {
+		++compose_jobs_;
+		++frame_compose_jobs_;
+		ready_generations_[job.target.layer] = 0;
+		ready_page_output_hashes_[job.target.layer] = 0;
+		opennova::terrain::TerrainScorchPagePlan scorch_plan =
+				scorch_registry_.plan(job.target.page);
+		if (!async_->enqueue(job, source_snapshot, tint, light,
+				std::move(scorch_plan), diagnostic_frame_id_, shadow_snapshot,
+				shadow_material_time, capture_diagnostics_)) {
+			cache_.invalidate(job.target.page);
+		}
 	}
-	return decision->binding;
+	// Retail composes every missing visible page inside the sweep, before the
+	// batch draws bind them. (retail PolyTrn_RenderFrame @ 0x60F080..0x60F0E3)
+	async_->wait_idle();
+	_upload_completed();
+
+	std::array<bool, opennova::TerrainTileCompositionCache::kCapacity> selected{};
+	for (std::size_t index = 0; index < frame_visible_.size(); ++index) {
+		const std::optional<opennova::TerrainTilePageBinding> bound =
+				cache_.bind(frame_visible_[index]);
+		if (!bound.has_value()) {
+			++frame_capacity_fallbacks_;
+			continue;
+		}
+		frame_bindings_[index] = *bound;
+		if (!selected[bound->layer]) {
+			selected[bound->layer] = true;
+			++frame_selected_ready_pages_;
+		}
+	}
+	frame_ready_hits_ = frame_requests_ - std::min<uint64_t>(
+			frame_requests_, frame_compose_jobs_ + frame_capacity_fallbacks_);
+	cache_hits_ += frame_ready_hits_;
+	cache_misses_ += frame_compose_jobs_ + frame_capacity_fallbacks_;
+	return frame_bindings_;
 }
 
 std::optional<opennova::TerrainTilePageBinding>
-TerrainTileCacheDevice::best_ready(
+TerrainTileCacheDevice::lookup(
 		const opennova::TerrainTileResidentPoint &p_point) {
 	if (!is_ready()) {
 		return std::nullopt;
 	}
-	return cache_.best_ready(p_point);
+	return cache_.lookup(p_point);
 }
 
 Dictionary TerrainTileCacheDevice::get_diagnostics() const {
@@ -673,7 +567,10 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 	int ready_pages = 0;
 	std::vector<std::size_t> ready_layers;
 	for (std::size_t layer = 0; layer < ready_generations_.size(); ++layer) {
-		if (ready_generations_[layer] != 0) {
+		const std::optional<opennova::TerrainTilePageBinding> resident =
+				cache_.resident_layer(static_cast<uint16_t>(layer));
+		if (resident.has_value() && ready_generations_[layer] != 0 &&
+				resident->generation == ready_generations_[layer]) {
 			++ready_pages;
 			ready_layers.push_back(layer);
 		}
@@ -755,22 +652,23 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 			static_cast<int64_t>(shadow_epoch_base_nonzero_alpha_bytes_);
 	diagnostics["frame_requests"] = static_cast<int64_t>(frame_requests_);
 	diagnostics["frame_ready_hits"] = static_cast<int64_t>(frame_ready_hits_);
-	diagnostics["frame_stale_hits"] = static_cast<int64_t>(frame_stale_hits_);
 	diagnostics["frame_selected_ready_pages"] =
 			static_cast<int64_t>(frame_selected_ready_pages_);
 	diagnostics["frame_compose_jobs"] =
 			static_cast<int64_t>(frame_compose_jobs_);
 	diagnostics["frame_compose_us"] =
 			static_cast<int64_t>(frame_compose_us_);
+	diagnostics["frame_compose_page_us"] =
+			static_cast<int64_t>(frame_compose_page_us_);
+	diagnostics["frame_compose_shadow_plan_us"] =
+			static_cast<int64_t>(frame_compose_shadow_plan_us_);
 	diagnostics["frame_uploads"] = static_cast<int64_t>(frame_uploads_);
 	diagnostics["pending_jobs"] = static_cast<int64_t>(
 			async_->pending_jobs());
 	diagnostics["active_jobs"] = static_cast<int64_t>(
 			async_->current_epoch_active_jobs());
 	diagnostics["worker_count"] = static_cast<int64_t>(
-			opennova::terrain::TerrainTileCompositionWorker::kWorkerCount);
-	diagnostics["upload_budget"] = static_cast<int64_t>(
-			opennova::terrain::TerrainTileCompositionWorker::kUploadBudgetPerFrame);
+			opennova::terrain::TerrainTileCompositionWorker::worker_count());
 	diagnostics["frame_capacity_fallbacks"] =
 			static_cast<int64_t>(frame_capacity_fallbacks_);
 	diagnostics["frame_shadow_alpha_changed_bytes"] =

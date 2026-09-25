@@ -5,7 +5,6 @@ extends GutTest
 # code (verified by visual A/B); these pin what SkyDome pushes into it.
 
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
-const SKY_SHADER := "res://shaders/sky.gdshader"
 const TICK := 1.0 / 62.0
 
 
@@ -154,7 +153,7 @@ func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
 func test_cloud_textures_rebind_and_clear_after_environment_edits() -> void:
 	var ctx := _make()
 	ctx.sky.advance_frame(0.016)
-	var mat: ShaderMaterial = ctx.sky.get_sky_material()
+	var mat: ShaderMaterial = ctx.sky.get_cloud_material()
 	var before: Texture2D = mat.get_shader_parameter("u_cloud_tex1")
 	assert_not_null(before, "fixture starts with a bound cloud layer")
 
@@ -164,31 +163,13 @@ func test_cloud_textures_rebind_and_clear_after_environment_edits() -> void:
 	assert_ne(after, before,
 			"editing a cloud map refreshes the live sky binding")
 
+	assert_eq(ctx.sky.get_sky_material().next_pass, mat,
+			"bound cloud layers draw the cloud pass")
 	ctx.env.set_sky_map1("no_such_cloud_a.pcx")
 	ctx.env.set_sky_map2("no_such_cloud_b.pcx")
 	ctx.sky.advance_frame(0.016)
-	assert_eq(mat.get_shader_parameter("u_has_clouds"), false,
-			"removing both maps disables stale cloud sampling")
-
-
-func test_dome_shader_anchors_to_each_render_pass_camera() -> void:
-	var shader := load(SKY_SHADER) as Shader
-	var code := shader.code
-	assert_true(code.contains("vec3 world_pos = vec3(eye.x, eye.y * 0.5, eye.z) + scaled;"),
-			"the dome anchor comes from the active render pass camera")
-	assert_true(code.contains("POSITION = clip;"),
-			"the pass-relative world point overrides the final clip position")
-	assert_false(code.contains("MODEL_MATRIX * vec4(scaled"),
-			"the reflection pass must not reuse the main-camera model anchor")
-
-
-func test_proximity_uses_d3d_depth_without_changing_godot_position() -> void:
-	var shader := load(SKY_SHADER) as Shader
-	var code := shader.code
-	assert_true(code.contains("return vec3(clip.xy, clip.w - clip.z);"),
-			"proximity converts Godot reverse-Z to the original D3D depth convention")
-	assert_true(code.contains("POSITION = clip;"),
-			"the render position stays in Godot's native clip convention")
+	assert_null(ctx.sky.get_sky_material().next_pass,
+			"removing both maps drops the cloud pass (no stale cloud sampling)")
 
 
 func test_dome_cannot_be_culled_before_reflection_pass_reanchor() -> void:
@@ -197,20 +178,6 @@ func test_dome_cannot_be_culled_before_reflection_pass_reanchor() -> void:
 			"the CPU AABB stays conservative while the shader moves the dome per pass")
 	assert_true(ctx.sky.get_mesh_instance().ignore_occlusion_culling,
 			"reflection-pass sky must reach the vertex shader even when the main view occludes it")
-
-
-func test_cloud_tint_uniform_is_gone_from_the_shader() -> void:
-	var shader := load(SKY_SHADER) as Shader
-	assert_false(shader.code.contains("u_cloud_tint"),
-		"the fabricated keyframed-path cloud tint is deleted (divergence #20 fix)")
-	assert_false(shader.code.contains("u_moon_dir"),
-		"sun/moon glow terms are deleted - celestial bodies are Celestial's job")
-
-
-func test_cloud_layers_keep_the_recovered_anisotropic_stage_filter() -> void:
-	var shader := load(SKY_SHADER) as Shader
-	assert_eq(shader.code.count("filter_linear_mipmap_anisotropic"), 2,
-		"both active cloud stages use the reference device's anisotropic minification")
 
 
 func test_dome_rides_at_half_camera_height() -> void:
@@ -249,8 +216,8 @@ func test_scroll_offsets_come_from_the_weather_core() -> void:
 	for _i in 8:
 		weather.advance_frame(0.016)
 	ctx.sky.advance_frame(0.016)
-	var off1: Vector2 = ctx.sky.get_sky_material().get_shader_parameter("u_scroll_offset1")
-	var off2: Vector2 = ctx.sky.get_sky_material().get_shader_parameter("u_scroll_offset2")
+	var off1: Vector2 = ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset1")
+	var off2: Vector2 = ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset2")
 	assert_eq(off1, weather.get_cloud_uv_offset1(0.0, 0.0),
 		"sky reads layer 1 from the weather core [orig: @ 0x57f1a5]")
 	assert_eq(off2, weather.get_cloud_uv_offset2(0.0, 0.0),
@@ -264,10 +231,10 @@ func test_scroll_offsets_come_from_the_weather_core() -> void:
 func test_scroll_falls_back_to_a_private_core_without_weather() -> void:
 	var ctx := _make()
 	ctx.sky.advance_frame(0.016)
-	var first: Vector2 = ctx.sky.get_sky_material().get_shader_parameter("u_scroll_offset1")
+	var first: Vector2 = ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset1")
 	ctx.sky.advance_frame(0.016)
-	var second: Vector2 = ctx.sky.get_sky_material().get_shader_parameter("u_scroll_offset2")
-	var off1: Vector2 = ctx.sky.get_sky_material().get_shader_parameter("u_scroll_offset1")
+	var second: Vector2 = ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset2")
+	var off1: Vector2 = ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset1")
 	assert_ne(off1, first, "the fallback core keeps ticking the accumulators")
 	assert_lt(off1.x, 0.0, "fallback layer-1 U is negative too")
 	assert_ne(second, Vector2.ZERO, "layer 2 advances as well")
@@ -305,7 +272,9 @@ func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 	# Fully fogged dome pixels and the open area beneath it must be the same
 	# color. Comparing rendered pixels catches Godot's background sRGB decode;
 	# comparing uniforms alone cannot detect that device conversion.
+	# Both dome passes fog (the cloud pass draws over the gradient).
 	sky.get_sky_material().set_shader_parameter("u_fog_end", 1.0)
+	sky.get_cloud_material().set_shader_parameter("u_fog_end", 1.0)
 	var samples: Array[Color] = []
 	for direction in [Vector3.UP, Vector3.DOWN]:
 		camera.look_at_from_position(Vector3.ZERO, direction, Vector3.FORWARD)
@@ -316,3 +285,209 @@ func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 	for channel in 3:
 		assert_almost_eq(samples[0][channel], samples[1][channel], 0.01,
 				"fogged sky and frame clear agree in channel %d" % channel)
+
+
+func test_world_beyond_the_dome_surface_draws_over_the_sky() -> void:
+	# Retail draws the dome with z-write off and ZFUNC ALWAYS before any world
+	# geometry (pass flags 0x300000 [orig: render_skybox @ 0x579883]), so the
+	# world overdraws it wherever it is. From 300 u up the dome (anchored at
+	# half the eye height) meets a horizontal view ray ~400 u out; a surface
+	# 600 u out must still draw over it.
+	if DisplayServer.get_name() == "headless":
+		pending("dome/world depth ordering needs a windowed renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var env_node := MissionEnvironment.new()
+	env_node.name = "SkyTestEnv"
+	viewport.add_child(env_node)
+	var env := EnvFile.new()
+	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	env.load()
+	env_node.environment_data = env
+	var camera := Camera3D.new()
+	camera.far = 2000.0
+	viewport.add_child(camera)
+	camera.look_at_from_position(Vector3(0.0, 300.0, 0.0), Vector3(0.0, 300.0, -1.0), Vector3.UP)
+	camera.make_current()
+	var sky := SkyDome.new()
+	sky.environment_path = NodePath("../SkyTestEnv")
+	viewport.add_child(sky)
+	var wall := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(200.0, 200.0, 10.0)
+	wall.mesh = box
+	var red := StandardMaterial3D.new()
+	red.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	red.albedo_color = Color(1.0, 0.0, 0.0)
+	wall.material_override = red
+	viewport.add_child(wall)
+	wall.global_position = Vector3(0.0, 300.0, -600.0)
+	sky.advance_frame(0.0)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var pixel := viewport.get_texture().get_image().get_pixel(32, 32)
+	assert_gt(pixel.r, 0.9, "the far wall draws over the dome (red %s)" % pixel)
+	assert_lt(pixel.g, 0.1, "no dome colour survives over the wall (%s)" % pixel)
+	assert_lt(pixel.b, 0.1, "no dome colour survives over the wall (%s)" % pixel)
+
+
+func test_cloud_pass_draws_after_the_bodies_on_the_sky_cloud_rung() -> void:
+	# Retail draws the gradient, then render_celestial_bodies(0), then the
+	# cloud pass [orig: render_skybox @ 0x5798e0 / @ 0x5798f1..0x579b15]: the
+	# cloud pass is its own transparent draw one rung after the sky bodies.
+	var ctx := _make()
+	ctx.sky.advance_frame(0.016)
+	var clouds: ShaderMaterial = ctx.sky.get_cloud_material()
+	assert_eq(ctx.sky.get_sky_material().next_pass, clouds,
+			"the fixture's cloud layers attach the cloud pass")
+	assert_eq(clouds.render_priority, ObjectShaderCache.RENDER_RUNG_SKY_CLOUDS)
+	assert_gt(ObjectShaderCache.RENDER_RUNG_SKY_CLOUDS, ObjectShaderCache.RENDER_RUNG_SKY_BODY,
+			"the clouds veil the sun/moon discs")
+	assert_eq(clouds.get_shader_parameter("u_cloud_base"),
+			ctx.sky.get_sky_material().get_shader_parameter("u_cloud_base"),
+			"both passes share the dome constants")
+
+
+func _sky_view(clouds_opaque: bool, body_color: Color = Color(0, 0, 0, 0)) -> Dictionary:
+	# A 64 x 64 view up into the dome over the synthetic Full_00 environment.
+	# clouds_opaque: bind solid white cloud maps (the cloud pass then covers
+	# the gradient) or fully transparent ones. body_color.a > 0 adds a
+	# sky-body-rung quad 50 u ahead, drawn like a disc (blended, no depth
+	# write).
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var env_node := MissionEnvironment.new()
+	env_node.name = "SkyTestEnv"
+	viewport.add_child(env_node)
+	var env := EnvFile.new()
+	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	env.load()
+	env_node.environment_data = env
+	var camera := Camera3D.new()
+	camera.far = 2000.0
+	viewport.add_child(camera)
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0.0, 1.0, -1.0), Vector3.UP)
+	camera.make_current()
+	var sky := SkyDome.new()
+	sky.environment_path = NodePath("../SkyTestEnv")
+	viewport.add_child(sky)
+	if body_color.a > 0.0:
+		var quad := MeshInstance3D.new()
+		var mesh := QuadMesh.new()
+		mesh.size = Vector2(200.0, 200.0)
+		quad.mesh = mesh
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.albedo_color = body_color
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		material.render_priority = ObjectShaderCache.RENDER_RUNG_SKY_BODY
+		quad.material_override = material
+		viewport.add_child(quad)
+		quad.global_transform = camera.global_transform.translated_local(Vector3(0.0, 0.0, -50.0))
+	sky.advance_frame(0.0)
+	var cloud_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	cloud_image.fill(Color(1.0, 1.0, 1.0, 1.0 if clouds_opaque else 0.0))
+	var cloud_texture := ImageTexture.create_from_image(cloud_image)
+	var clouds: ShaderMaterial = sky.get_cloud_material()
+	clouds.set_shader_parameter("u_cloud_tex1", cloud_texture)
+	clouds.set_shader_parameter("u_cloud_tex2", cloud_texture)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	return {"pixel": viewport.get_texture().get_image().get_pixel(32, 32),
+			"has_clouds": sky.get_sky_material().next_pass == clouds}
+
+
+func test_the_gradient_pass_opens_the_sky_pass() -> void:
+	# The gradient draw precedes the bodies and the clouds inside render_skybox
+	# [orig: render_skybox @ 0x5798dc, @ 0x5798e0, @ 0x5798f1..0x579b15]. The
+	# pass writes no depth, so Godot orders it in the transparent list by its
+	# rung; on rung 0 it painted over both.
+	var ctx := _make()
+	ctx.sky.advance_frame(0.016)
+	assert_eq(ctx.sky.get_sky_material().render_priority,
+			ObjectShaderCache.RENDER_RUNG_SKY_DOME)
+	assert_lt(ObjectShaderCache.RENDER_RUNG_SKY_DOME, ObjectShaderCache.RENDER_RUNG_SKY_BODY)
+	if DisplayServer.get_name() == "headless":
+		pending("dome pass ordering needs a windowed renderer")
+		return
+	var body: Dictionary = await _sky_view(false, Color(1.0, 0.0, 1.0, 1.0))
+	var pixel: Color = body.pixel
+	assert_gt(pixel.r, 0.9, "a sky-body draw shows over the gradient (%s)" % pixel)
+	assert_lt(pixel.g, 0.1, "no gradient paints over the sky body (%s)" % pixel)
+	assert_gt(pixel.b, 0.9, "a sky-body draw shows over the gradient (%s)" % pixel)
+	var bare: Dictionary = await _sky_view(false)
+	var covered: Dictionary = await _sky_view(true)
+	assert_true(bool(covered.has_clouds), "the fixture's cloud layers attach the cloud pass")
+	var a: Color = bare.pixel
+	var b: Color = covered.pixel
+	assert_gt(absf(a.r - b.r) + absf(a.g - b.g) + absf(a.b - b.b), 0.05,
+			"opaque cloud maps change the dome: the cloud pass draws over the gradient (%s vs %s)"
+			% [a, b])
+
+
+func test_flat_pass_drops_the_cloud_pass() -> void:
+	# advanced_clouds 0 draws the single flat dome [orig: render_skybox
+	# @ 0x579b42..0x579c76] and no cloud pass.
+	var ctx := _make()
+	ctx.env.set_advanced_clouds(0)
+	ctx.sky.advance_frame(0.016)
+	assert_null(ctx.sky.get_sky_material().next_pass)
+
+
+func test_pass_gates_reach_both_dome_passes() -> void:
+	var ctx := _make()
+	ctx.sky.advance_frame(0.016)
+	ctx.sky.set_pass_gates(false, true)
+	assert_false(ctx.sky.is_beauty_pass_drawn())
+	assert_true(ctx.sky.is_mirror_pass_drawn())
+	for mat: ShaderMaterial in [ctx.sky.get_sky_material(), ctx.sky.get_cloud_material()]:
+		assert_eq(mat.get_shader_parameter("u_beauty_pass_drawn"), false)
+		assert_eq(mat.get_shader_parameter("u_mirror_pass_drawn"), true)
+
+
+func test_closed_beauty_gate_draws_no_dome_in_the_main_view() -> void:
+	# The main frame skips its sky bracket (sky letter / eye at or below the
+	# water [orig: Render_ProcessMainSceneFrame @ 0x5ca7c4]): the clear shows.
+	if DisplayServer.get_name() == "headless":
+		pending("per-pass dome gating needs a windowed renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var clear := WorldEnvironment.new()
+	clear.environment = Environment.new()
+	clear.environment.background_mode = Environment.BG_COLOR
+	clear.environment.background_color = Color(0.0, 1.0, 0.0)
+	viewport.add_child(clear)
+	var env_node := MissionEnvironment.new()
+	env_node.name = "SkyTestEnv"
+	viewport.add_child(env_node)
+	var env := EnvFile.new()
+	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	env.load()
+	env_node.environment_data = env
+	var camera := Camera3D.new()
+	camera.far = 2000.0
+	viewport.add_child(camera)
+	camera.look_at_from_position(Vector3.ZERO, Vector3.UP, Vector3.FORWARD)
+	camera.make_current()
+	var sky := SkyDome.new()
+	sky.environment_path = NodePath("../SkyTestEnv")
+	viewport.add_child(sky)
+	sky.advance_frame(0.0)
+	sky.set_pass_gates(false, true)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var pixel := viewport.get_texture().get_image().get_pixel(32, 32)
+	assert_almost_eq(pixel.g, 1.0, 0.02, "the green clear shows (%s)" % pixel)
+	assert_lt(pixel.r, 0.05, "no dome pixel in the gated beauty view (%s)" % pixel)

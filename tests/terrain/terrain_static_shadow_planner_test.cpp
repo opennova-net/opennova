@@ -43,10 +43,8 @@ std::shared_ptr<TerrainStaticShadowResolvedGeometry> box_geometry() {
 	coverage.authored_surface_count = 1;
 	coverage.valid_surface_count = 1;
 	geometry->coverage[0].push_back(coverage);
-	geometry->local_min = {0.0f, 0.0f, 0.0f};
-	geometry->local_max = {2.0f, 2.0f, 2.0f};
-	geometry->has_bounds = true;
-	geometry->bounds_exact = true;
+	// The model sphere the tile collector reads (model+0x14).
+	geometry->model_radius_fixed = 2 << 16;
 	return geometry;
 }
 
@@ -96,6 +94,9 @@ scrolling_cutout_geometry() {
 	material.alpha_test_enabled = true;
 	material.alpha_ref = 127;
 	material.samples_diffuse_alpha = true;
+	// Only the #UV twins evaluate MatTexCoord1.
+	std::snprintf(material.runtime_material.shader_name,
+			sizeof(material.runtime_material.shader_name), "%s", "FF_ST_OP#UV");
 	material.runtime_material.u_params.style = 16;
 	material.runtime_material.u_params.gen_rate = 1.0f;
 	material.diffuse_alpha_frames = {half_cutout_alpha()};
@@ -136,18 +137,6 @@ int main() {
 	using namespace opennova;
 	using namespace opennova::terrain;
 
-	// Flat 64x64 height field at 0.
-	const int dim = 64;
-	std::vector<uint16_t> heightmap(static_cast<size_t>(dim) * dim, 0);
-	std::vector<int> sector_grid(256, 1);
-	TerrainHeightField field;
-	field.heightmap = heightmap.data();
-	field.dim = dim;
-	field.layout.sector_grid = sector_grid.data();
-	if (!expect(field.valid(), "the synthetic height field is valid")) {
-		return 1;
-	}
-
 	TerrainTilePageKey page;
 	page.sector_origin_x = 0;
 	page.sector_origin_z = 0;
@@ -156,7 +145,6 @@ int main() {
 	page.page_lod_level = 4; // 64-unit span
 
 	TerrainStaticShadowPlanner planner;
-	planner.set_receiver_terrain(field, 1);
 	planner.set_light({0.3f, 0.9f, 0.3f}, {127, 200, 200});
 	planner.replace_casters({caster(0)}, false);
 	if (!expect(planner.snapshot_exact(),
@@ -260,21 +248,6 @@ int main() {
 		return 1;
 	}
 
-	// A repeated receiver clear is a no-op; the first clear still bumps.
-	const uint64_t revision_before_clear = planner.state_revision();
-	planner.clear_receiver_terrain();
-	const uint64_t revision_after_clear = planner.state_revision();
-	if (!expect(revision_after_clear != revision_before_clear,
-			"clearing a live receiver bumps the state revision")) {
-		return 1;
-	}
-	planner.clear_receiver_terrain();
-	if (!expect(planner.state_revision() == revision_after_clear,
-			"clearing an absent receiver keeps the state revision")) {
-		return 1;
-	}
-	planner.set_receiver_terrain(field, 1);
-
 	// A missing-geometry admitted caster fails planning closed.
 	planner.replace_casters({caster(0)}, true);
 	if (!expect(!planner.snapshot_exact(),
@@ -326,7 +299,6 @@ int main() {
 	// A material whose retail effect has no PROJSHAD declaration is an exact
 	// no-op, not a guessed NORMAL fallback and not an unsupported caster.
 	TerrainStaticShadowPlanner no_pass_planner;
-	no_pass_planner.set_receiver_terrain(field, 1);
 	no_pass_planner.set_light({0.3f, 0.9f, 0.3f}, {127, 200, 200});
 	TerrainStaticShadowPlannerCaster no_pass_caster = caster(0);
 	auto no_pass_geometry = box_geometry();
@@ -365,7 +337,6 @@ int main() {
 	// (state revision) nor recompiles the cached plan; the next raster simply
 	// samples the frame current at its tick.
 	TerrainStaticShadowPlanner animated_planner;
-	animated_planner.set_receiver_terrain(field, 1);
 	animated_planner.set_light({0.3f, 0.9f, 0.3f}, {127, 200, 200});
 	TerrainStaticShadowPlannerCaster animated_caster = caster(0);
 	animated_caster.geometry = animated_alpha_geometry();
@@ -419,7 +390,6 @@ int main() {
 	// across every tick; rasters agree inside one 1/256 s evaluator unit
 	// ((3 << 8) / 1000 == 0) and differ across a half-period scroll.
 	TerrainStaticShadowPlanner scroll_planner;
-	scroll_planner.set_receiver_terrain(field, 1);
 	scroll_planner.set_light({0.3f, 0.9f, 0.3f}, {127, 200, 200});
 	TerrainStaticShadowPlannerCaster scroll_caster = caster(0);
 	scroll_caster.geometry = scrolling_cutout_geometry();

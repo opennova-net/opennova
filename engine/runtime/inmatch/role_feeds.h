@@ -130,30 +130,56 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		int local_team, std::vector<hud::HudLfpZone> &out);
 
-// THE PER-DRAWN-ENTITY SUN-VISIBILITY FEED (D-RLIT-3). Retail computes the
-// factor inside the sector render walk for every entity it draws and pushes
-// it onto the render-state stack around that entity's submits
-// [orig: setup_terrain_effect_for_entity @0x5c74a0 -> Entity_ComputeSunVisibility
-//  @0x5c6800, stack write @0x5c7bff, see docs/render/render-lighting-re.md];
-// contained entities take the interior light group instead and the factor
-// stays 1.0. The blocked-ray count and eligibility gate are the collision
-// world's; this feed mirrors both drawn identity domains (placed rows by BMS
-// id, wire-rendered rows by handle) and diffs the quality per identity so a
-// steady frame emits nothing. Unlisted entities are quality 4 (factor 1.0).
-struct SunQualityChange {
+// THE PER-DRAWN-ENTITY LIGHTING FEED (D-RLIT-3 plus the interior lerp).
+// Retail pushes a render-state stack level around every drawn entity's
+// submits [orig: Terrain_RenderSectorEntities @0x5c7bb6..0x5c7c14,
+// Terrain_RenderSectorEntitiesBySide @0x5c7f3c..0x5c7fc3]:
+//  - effectScale, the sun-visibility factor [orig: setup_terrain_effect_for_entity
+//    @0x5c74a0 -> Entity_ComputeSunVisibility @0x5c6800, stack write @0x5c7bff];
+//    a CONTAINED entity (+0x1D0, the first blink hit, nonzero) skips the rays,
+//    keeps 1.0 and takes the containing building's interior light group
+//    [orig: @0x5c74ae..0x5c74f3];
+//  - the submit flag 0x80 for a contained entity (`neg/sbb/and 80h` @0x5c7c05..
+//    0x5c7c14 and @0x5c7fb6..0x5c7fc3), which the batch collectors turn into
+//    entry bit 1, the interior lerp [orig: @0x5d962f..0x5d963b skinned,
+//    @0x5d9167..0x5d916e rigid];
+//  - the aux daylight t = the containing building's ItemDef+0x218
+//    (light_transfer / 100), loaded ONLY by the person wave for a contained
+//    person [orig: @0x5c7f83..0x5c7f93]. The non-person wave never writes it,
+//    so a contained vehicle or prop lerps with the stack base 0, which
+//    RenderBatchCtx_BeginFrame zeroes [orig: @0x5d89b6..0x5d89b8]: floor and
+//    ceiling only, no sun.
+// The blocked-ray count and eligibility gate are the collision world's; this
+// feed mirrors both drawn identity domains (placed rows by BMS id,
+// wire-rendered rows by handle) and diffs the context per identity so a
+// steady frame emits nothing. Unlisted entities are outdoor quality 4.
+struct EntityLighting {
+	uint8_t quality = 4;          // 1..4 sun quality; 4 when contained
+	bool interior = false;        // contained: the submit flag 0x80
+	float light_transfer = 0.0f;  // the aux daylight t (persons only)
+	int32_t interior_bms = 0;     // the containing building's BMS id (0 = none)
+	int32_t interior_section = 0; // the containing blink volume's section
+	bool operator==(const EntityLighting &o) const {
+		return quality == o.quality && interior == o.interior &&
+				light_transfer == o.light_transfer && interior_bms == o.interior_bms &&
+				interior_section == o.interior_section;
+	}
+	bool operator!=(const EntityLighting &o) const { return !(*this == o); }
+};
+struct EntityLightingChange {
 	bool wire = false; // false: `bms_id` names a placed row; true: `handle` a wire row
 	int32_t bms_id = 0;
 	uint16_t handle = 0;
-	uint8_t quality = 4;
+	EntityLighting lighting;
 };
-struct SunQualityFeed {
-	// Per-entity quality last emitted, split by identity domain: wire handle
+struct EntityLightingFeed {
+	// Per-entity context last emitted, split by identity domain: wire handle
 	// zero and a placed BMS id zero are both valid sentinels in their own
 	// schemas, so they never share one integer map.
-	std::unordered_map<int32_t, uint8_t> last_by_bms;
-	std::unordered_map<uint16_t, uint8_t> last_by_wire;
+	std::unordered_map<int32_t, EntityLighting> last_by_bms;
+	std::unordered_map<uint16_t, EntityLighting> last_by_wire;
 	int64_t layout_revision_seen = -1;
-	// The local player's own quality (a spawned entity outside the placed
+	// The local player's own sun quality (a spawned entity outside the placed
 	// walk): the presenter seam's only — the FP parts keep the witnessed
 	// effectScale=1 exemption while the third-person body dims.
 	uint8_t local_quality = 4;
@@ -166,7 +192,7 @@ struct SunQualityFeed {
 	void collect(const RoleView &view, const int32_t sun_step_q16[3],
 			const std::unordered_set<int32_t> &culled_bms,
 			const std::unordered_set<int32_t> &culled_wire, int64_t layout_revision,
-			std::vector<SunQualityChange> &out);
+			std::vector<EntityLightingChange> &out);
 };
 
 } // namespace opennova::inmatch

@@ -15,7 +15,6 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 
-#include <runtime/environment/sky_frame.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/environment/water_mirror.h>
 
@@ -28,7 +27,6 @@ class Compositor;
 class EnvFile;
 class FrameFxCompositorEffect;
 class MissionEnvironment;
-class Weather;
 
 // The water-plane applier — the ADR 0033 device leg over the engine's
 // witnessed water pieces: the height precedence ladder + per-frame inputs
@@ -71,8 +69,6 @@ public:
 
 	void set_environment_path(const NodePath &p_path);
 	NodePath get_environment_path() const { return environment_path_; }
-	void set_weather_path(const NodePath &p_path);
-	NodePath get_weather_path() const { return weather_path_; }
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_water_height(float p_value);
@@ -122,6 +118,12 @@ public:
 	// water module, matching the retail data direction). Null before build().
 	Ref<Texture2D> get_noise_color_texture() const { return noise_color_tex_; }
 	MeshInstance3D *get_mesh_instance() const { return mesh_instance_; }
+	// The FrameFX bloom pass's nightvision redraw of the strip (the typed Q3
+	// WaterNightVision source): the same march with the nightvision row
+	// colors, drawn by no camera (layer mask 0), only by the Q3 pass.
+	MeshInstance3D *get_night_vision_mesh_instance() const {
+		return night_vision_mesh_instance_;
+	}
 	SubViewport *get_reflection_viewport() const { return reflection_viewport_; }
 	Camera3D *get_reflection_camera() const { return reflection_camera_; }
 
@@ -138,7 +140,6 @@ protected:
 
 private:
 	MissionEnvironment *_env_node();
-	Weather *_weather_node();
 	void _recompute_terrain_water_fallback();
 	void _apply_environment_water_height();
 	void _push_water_split_height();
@@ -151,13 +152,20 @@ private:
 	void _update_reflection_camera(Camera3D *p_cam);
 	void _install_reflection_decode();
 	void _release_reflection_decode();
-	void _rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
-			float p_murk, float p_fog_end, const Vector4 &p_uv_state,
+	// One strip march for `p_cam` into WaterCore's rows; returns the row count
+	// (0 when the view cannot march). The pass fog end follows the side.
+	int _march_strip(Camera3D *p_cam, bool p_underwater, bool p_nightvision,
+			float p_murk, float p_fog_end,
+			const opennova::env::WaterDepthCurve &p_depth_curve,
 			const Color &p_lit, const Ref<EnvFile> &p_env_data);
+	// The last march as ArrayMesh surface arrays.
+	Array _strip_arrays() const;
+	static void _upload_strip(MeshInstance3D *p_mesh_instance, const Array &p_arrays,
+			const Ref<ShaderMaterial> &p_material);
 	void _clear_strip_surfaces();
+	void _clear_night_vision_surfaces();
 
 	NodePath environment_path_;
-	NodePath weather_path_;
 	Ref<TerrainData> terrain_data_;
 	float water_height_ = 0.0f;
 	float water_alpha_ = 0.6f;
@@ -172,6 +180,7 @@ private:
 	bool blink_water_visible_ = false;
 
 	MeshInstance3D *mesh_instance_ = nullptr;
+	MeshInstance3D *night_vision_mesh_instance_ = nullptr;
 	Ref<ShaderMaterial> water_material_;
 	SubViewport *reflection_viewport_ = nullptr;
 	Camera3D *reflection_camera_ = nullptr;
@@ -183,7 +192,6 @@ private:
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
 	ObjectID env_node_id_;
-	ObjectID weather_node_id_;
 	ObjectID cached_cam_id_;
 	std::unique_ptr<WaterCore> water_core_;
 	Ref<Image> noise_color_img_;
@@ -192,7 +200,6 @@ private:
 	Ref<ImageTexture> noise_normal_tex_;
 	int frame_counter_ = 0;
 	bool frame_counter_fed_ = false;
-	opennova::env::ScrollFallback fallback_scroll_;
 };
 
 } // namespace godot

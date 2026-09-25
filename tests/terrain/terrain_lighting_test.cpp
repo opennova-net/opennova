@@ -1,6 +1,5 @@
 #include <runtime/terrain/lighting.h>
 
-#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -13,20 +12,10 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-bool near(float actual, float expected, float epsilon = 0.0001f) {
-	if (std::fabs(actual - expected) <= epsilon) {
-		return true;
-	}
-	std::fprintf(stderr, "FAIL: expected %.6f, got %.6f\n", expected, actual);
-	return false;
-}
-
 } // namespace
 
 int main() {
 	using opennova::terrain::terrain_average_four_argb;
-	using opennova::terrain::terrain_fog_factor_for_distance;
-	using opennova::terrain::terrain_fog_start_for_type;
 	using opennova::terrain::terrain_light_color_from_ambient_diffuse_argb;
 	using opennova::terrain::terrain_modulate_color_argb;
 
@@ -53,17 +42,6 @@ int main() {
 	if (!expect(terrain_average_four_argb(0x40010203u, 0x80050607u, 0xC0090A0Bu, 0xFF0D0E0Fu) == 0x9F070809u,
 	            "four-sample foliage color average should truncate each ARGB channel")) return 1;
 
-	// Jointops.exe Render_SetFogState@0x58a950 adjusts start distance for
-	// linear fog modes, then CD3DDevice_SetFogParameters@0x677960 uses
-	// exp(-d*ln64/end) for mode 0 and linear fog otherwise.
-	if (!expect(near(terrain_fog_start_for_type(1000.0f, 1), 0.5f), "fog type 1 keeps the caller's 0.5 start")) return 1;
-	if (!expect(near(terrain_fog_start_for_type(1000.0f, 2), 500.0f), "fog type 2 starts at half end")) return 1;
-	if (!expect(near(terrain_fog_start_for_type(1000.0f, 3), 250.0f), "fog type 3 starts at quarter end")) return 1;
-	if (!expect(near(terrain_fog_factor_for_distance(1000.0f, 1000.0f, 0), 1.0f / 64.0f),
-	            "fog type 0 should use exp density ln(64)/end")) return 1;
-	if (!expect(near(terrain_fog_factor_for_distance(750.0f, 1000.0f, 2), 0.5f),
-	            "fog type 2 should linearly fade between half end and end")) return 1;
-
-	std::printf("OK: terrain lighting, foliage color averaging, and fog helpers match recovered math\n");
+	std::printf("OK: terrain lighting and foliage color averaging match recovered math\n");
 	return 0;
 }

@@ -15,6 +15,7 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <runtime/renderer/render_order.h>
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/present_passes.h>
@@ -164,6 +165,10 @@ ScarPresenter::StripMaterial &ScarPresenter::material_for_strip_(int p_strip,
 		if (shader.is_valid()) {
 			entry.material->set_shader(shader);
 		}
+		// Every strip draws in the one scar batch pass, after the camera-side
+		// opaque wave and before foliage pass 1 and the camera-side alpha
+		// (renderer::kRungScars carries the witness).
+		entry.material->set_render_priority(opennova::renderer::kRungScars);
 		materials_[p_strip] = entry;
 		cached = materials_.getptr(p_strip);
 	}

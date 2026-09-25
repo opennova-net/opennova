@@ -297,7 +297,7 @@ camera, resolution and gameplay state. Helper tests do not prove a button is wir
 **P2; source comparison; new D-RMAT-12.**
 
 [`material_texture_transform`](../engine/runtime/renderer/material_texture.cpp)
-raw-loads types 6, 7, 16, 17 and 18. jo-c's pinned `sub_5B16F0 @ 0x5B16F0`
+raw-loads types 6, 7, 16, 17 and 18. jo-c's pinned `Material_LoadStageTexture @ 0x5B16F0`
 dispatches to distinct environment-map, alpha-overlay and normal-map loaders. The
 type-4/5 normal filter and checkerboard work already landed; do not redo them.
 

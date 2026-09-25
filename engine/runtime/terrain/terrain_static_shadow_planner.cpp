@@ -1,4 +1,5 @@
 #include <runtime/terrain/terrain_static_shadow_planner.h>
+#include <base/io/fixed.h>
 #include <base/io/hash.h>
 
 #include <runtime/mission/placement_traits.h>
@@ -17,7 +18,6 @@ constexpr std::size_t kMaxUnsupportedAttribution = 128;
 // cache capacity; twice that comfortably covers epoch transitions.
 constexpr std::size_t kMaxCachedPlans =
 		2 * TerrainTileCompositionCache::kCapacity;
-constexpr std::size_t kMaxReceiverCacheEntries = 1024;
 
 std::array<float, 3> transform_point(const std::array<float, 12> &transform,
 		const std::array<float, 3> &point) {
@@ -82,7 +82,6 @@ uint64_t caster_set_stamp(
 		hash = io::fnv1a64_bytes(hash, record.graphic.data(), record.graphic.size());
 		hash = hash_transform(hash, record.world_transform);
 		hash = io::fnv1a64_value(hash, record.geometry->key);
-		hash = io::fnv1a64_value(hash, record.geometry->bounds_exact);
 		hash = io::fnv1a64_value(hash, record.ground_y);
 		hash = io::fnv1a64_value(hash, record.caster_identity);
 	}
@@ -114,41 +113,6 @@ uint64_t terrain_static_shadow_caster_key(int32_t entity_kind,
 	hash = io::fnv1a64_value(hash, entity_index);
 	hash = io::fnv1a64_value(hash, bms_id);
 	return hash == 0 ? 1 : hash;
-}
-
-TerrainStaticShadowBounds terrain_static_shadow_transformed_bounds(
-		const TerrainStaticShadowResolvedGeometry &geometry,
-		const std::array<float, 12> &world_transform) {
-	TerrainStaticShadowBounds result;
-	if (!geometry.has_bounds) {
-		result.min_x = 1.0f;
-		result.max_x = 0.0f;
-		return result;
-	}
-	bool first = true;
-	for (int mask = 0; mask < 8; ++mask) {
-		const std::array<float, 3> local{
-			(mask & 1) != 0 ? geometry.local_max[0] : geometry.local_min[0],
-			(mask & 2) != 0 ? geometry.local_max[1] : geometry.local_min[1],
-			(mask & 4) != 0 ? geometry.local_max[2] : geometry.local_min[2],
-		};
-		const std::array<float, 3> world = transform_point(world_transform,
-				local);
-		if (first) {
-			result.min_x = result.max_x = world[0];
-			result.min_y = result.max_y = world[1];
-			result.min_z = result.max_z = world[2];
-			first = false;
-			continue;
-		}
-		result.min_x = std::min(result.min_x, world[0]);
-		result.min_y = std::min(result.min_y, world[1]);
-		result.min_z = std::min(result.min_z, world[2]);
-		result.max_x = std::max(result.max_x, world[0]);
-		result.max_y = std::max(result.max_y, world[1]);
-		result.max_z = std::max(result.max_z, world[2]);
-	}
-	return result;
 }
 
 TerrainStaticShadowPlanner::TerrainStaticShadowPlanner() :
@@ -200,29 +164,6 @@ void TerrainStaticShadowPlanner::set_light(
 	if (epoch_changed) bump_epoch();
 }
 
-void TerrainStaticShadowPlanner::set_receiver_terrain(
-		const TerrainHeightField &field, uint64_t terrain_revision) {
-	receiver_field_ = field;
-	receiver_valid_ = field.valid();
-	if (terrain_revision != terrain_revision_) {
-		terrain_revision_ = terrain_revision;
-		receiver_minimum_cache_.clear();
-	}
-	bump_epoch();
-}
-
-void TerrainStaticShadowPlanner::clear_receiver_terrain() {
-	if (!receiver_valid_ && receiver_minimum_cache_.empty()) {
-		// Already cleared: a caller re-asserting an absent receiver every
-		// refresh must not invalidate cached plans.
-		return;
-	}
-	receiver_field_ = TerrainHeightField{};
-	receiver_valid_ = false;
-	receiver_minimum_cache_.clear();
-	bump_epoch();
-}
-
 void TerrainStaticShadowPlanner::replace_casters(
 		std::vector<TerrainStaticShadowPlannerCaster> casters,
 		bool admitted_geometry_missing) {
@@ -248,16 +189,6 @@ void TerrainStaticShadowPlanner::replace_casters(
 			// resolution failed; a record without geometry carries nothing.
 			continue;
 		}
-		const bool admitted = record.active &&
-				mission::item_casts_static_terrain_shadow(record.entity_kind,
-						record.entity_attrib, record.item_attrib,
-						record.item_attrib2);
-		if (admitted && !record.geometry->bounds_exact) {
-			// Without conservative authored bounds we cannot know which page
-			// should carry the unsupported draw attribution. Reject planning
-			// globally instead of publishing a false exact baseline.
-			next->exact = false;
-		}
 		const uint64_t key = terrain_static_shadow_caster_key(
 				record.entity_kind, record.entity_index, record.bms_id);
 
@@ -271,8 +202,12 @@ void TerrainStaticShadowPlanner::replace_casters(
 		candidate.item_attrib = record.item_attrib;
 		candidate.item_attrib2 = record.item_attrib2;
 		candidate.active = record.active;
-		candidate.world_bounds = terrain_static_shadow_transformed_bounds(
-				*record.geometry, record.world_transform);
+		// Mission axes: x east = Godot x, y north = -Godot z (the origin
+		// sits at rows-major [9..11]).
+		candidate.position_fixed = {
+			io::float_to_fp16_16_round_sat(record.world_transform[9]),
+			io::float_to_fp16_16_round_sat(-record.world_transform[11])};
+		candidate.model_radius_fixed = record.geometry->model_radius_fixed;
 		candidate.geometry.geometry_key = record.geometry->key;
 		candidate.geometry.render_object_counts =
 				record.geometry->render_object_counts;
@@ -306,57 +241,21 @@ void TerrainStaticShadowPlanner::reset_frame_diagnostics() {
 	diagnostics_.caster_count = count;
 }
 
-std::optional<float> TerrainStaticShadowPlanner::page_receiver_minimum(
-		const TerrainTilePageKey &page) {
-	const int span = TerrainTileCompositionCache::page_world_span(
-			page.page_lod_level);
-	if (!receiver_valid_ || span <= 0) return std::nullopt;
-	const auto cached = receiver_minimum_cache_.find(page);
-	if (cached != receiver_minimum_cache_.end()) {
-		++diagnostics_.frame_receiver_cache_hits;
-		return cached->second;
-	}
-	++diagnostics_.frame_receiver_cache_misses;
-
-	const int64_t origin_x = static_cast<int64_t>(page.sector_origin_x) +
-			page.page_local_x;
-	const int64_t origin_z = static_cast<int64_t>(page.sector_origin_z) +
-			page.page_local_z;
-	float minimum = std::numeric_limits<float>::infinity();
-	for (int z = 0; z <= span; ++z) {
-		for (int x = 0; x <= span; ++x) {
-			const float height = height_field_height_world(receiver_field_,
-					static_cast<float>(origin_x + x),
-					static_cast<float>(origin_z + z));
-			if (std::isfinite(height)) minimum = std::min(minimum, height);
-		}
-	}
-	if (!std::isfinite(minimum)) return std::nullopt;
-	if (receiver_minimum_cache_.size() >= kMaxReceiverCacheEntries) {
-		receiver_minimum_cache_.clear();
-	}
-	receiver_minimum_cache_.emplace(page, minimum);
-	return minimum;
-}
-
 // Per-page compilation mirrors retail's per-tile collect-and-render walk:
-// admitted casters project onto the requested page, the selected shadow LOD's
-// ROBJs become draws in collector order, and the receiver height bounds the
-// broad phase [orig: Terrain_CollectAndRenderTileModels @ 0x60D250 —
-// admission @ 0x60D421..0x60D450, projection @ 0x60D465..0x60D54F,
+// admitted casters whose model sphere reaches the sun-extended tile become
+// draws of the selected shadow LOD's ROBJs in collector order
+// [orig: Terrain_CollectAndRenderTileModels @ 0x60D250 — admission
+// @ 0x60D421..0x60D450, sphere/tile test @ 0x60D465..0x60D54F,
 // submit @ 0x60D881..0x60D971].
-bool TerrainStaticShadowPlanner::compile(const TerrainTilePageKey &page,
-		TerrainStaticShadowPageJob &job) {
-	const std::optional<float> receiver = page_receiver_minimum(page);
-	if (!receiver.has_value()) return false;
+TerrainStaticShadowPageJob TerrainStaticShadowPlanner::compile(
+		const TerrainTilePageKey &page) const {
 	TerrainStaticShadowPageInput input;
 	input.page = page;
 	input.surface_to_light = world_light_;
 	input.light_epoch = light_epoch_;
-	input.receiver_height = *receiver;
-	job = casters_->collector.compile(input);
+	TerrainStaticShadowPageJob job = casters_->collector.compile(input);
 	job.content.value = mix_content(job.content.value, config_stamp_);
-	return true;
+	return job;
 }
 
 // Retail evaluates a tile model's materials (AlphaGen, the complete UV
@@ -519,8 +418,8 @@ TerrainStaticShadowPlanner::plan_for(const TerrainTilePageKey &page) {
 	}
 	++diagnostics_.frame_plan_compiles;
 	CachedPlan plan;
-	if (compile(page, plan.job) &&
-			classify_page_job(plan.job, &plan.supported, true)) {
+	plan.job = compile(page);
+	if (classify_page_job(plan.job, &plan.supported, true)) {
 		plan.valid = true;
 		plan.supported_draws = static_cast<uint64_t>(std::count(
 				plan.supported.begin(), plan.supported.end(),
@@ -580,6 +479,7 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 		if (page_job.draws.empty()) return true;
 
 		TerrainStaticShadowRasterInput input;
+		input.threads = raster_threads_;
 		std::unordered_map<const TerrainStaticShadowAlphaPyramid *, int32_t>
 				texture_indices;
 		MaterialStateTable material_states;

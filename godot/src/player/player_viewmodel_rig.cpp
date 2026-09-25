@@ -230,20 +230,28 @@ void PlayerViewmodelRig::update_viewmodel(const Ref<PlayerLocalView> &p_view,
 			part->set_viewmodel_pass(true);
 		}
 	}
-	// The card switch, the showhud bit-0 gate and the SEAT gate compose the
+	// The alive gate, the card switch, the showhud bit-0 gate (skipped by an
+	// Emplaced def), the SEAT gate and the scoped Inset skip compose the
 	// retail submission decision (world/player_present.h
 	// fp_viewmodel_retail_submit carries the witnesses); per-frame is what
 	// makes MOUNTING take effect -- the HUD-init path only ran on the showhud
 	// key.
-	const bool carded = p_view.is_valid() && p_view->get_scope_card_active();
-	const bool binoculars = p_view.is_valid() && p_view->get_binoculars_view_active();
-	bool seat_hides_weapon = false;
+	opennova::world::FpViewmodelSubmitGates gates;
+	gates.third_person = p_third_person;
+	gates.fp_weapon_view_flag = fp_gun_visible_;
+	if (p_view.is_valid()) {
+		gates.scope_card_active = p_view->get_scope_card_active();
+		gates.binoculars_view_active = p_view->get_binoculars_view_active();
+		gates.local_dead = p_view->get_fp_local_dead();
+		gates.round_winner_set = p_view->get_fp_round_winner_set();
+		gates.emplaced = p_view->get_fp_def_emplaced();
+		gates.inset_scoped = p_view->get_fp_inset_scoped();
+	}
 	const Ref<Simulation> vm_sim = sim();
 	if (vm_sim.is_valid()) {
-		seat_hides_weapon = vm_sim->local_player_fp_weapon_hidden();
+		gates.seat_hides_weapon = vm_sim->local_player_fp_weapon_hidden();
 	}
-	const bool retail_submit = opennova::world::fp_viewmodel_retail_submit(
-			p_third_person, carded, binoculars, fp_gun_visible_, seat_hides_weapon);
+	const bool retail_submit = opennova::world::fp_viewmodel_retail_submit(gates);
 	// The debug override intentionally extends retail's submission scope, but
 	// a model made visible by that probe still needs a coherent CTRL snapshot.
 	const bool submit_viewmodel = retail_submit || p_force_visible;
