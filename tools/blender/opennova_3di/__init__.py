@@ -611,9 +611,10 @@ class O3D_OT_import_anim(bpy.types.Operator, ImportHelper):
     filename_ext = ".adm"
     filter_glob: StringProperty(default="*.adm;*.bad", options={"HIDDEN"})
     align_rest: BoolProperty(name="Rest pose from the reset clip", default=True,
-                             description="Turn each rest bone onto the reset clip's bind, so a clip "
-                                         "shows the pose the game draws. Heads, lengths and weights "
-                                         "do not move, so the model still exports the same bytes")
+                             description="On a rig that holds no clip yet, turn each rest bone onto "
+                                         "the reset clip's bind, so a clip shows the pose the game "
+                                         "draws. Heads, lengths and weights do not move, so the "
+                                         "model still exports the same model")
 
     def execute(self, context):
         model = active_model(context)
@@ -622,7 +623,7 @@ class O3D_OT_import_anim(bpy.types.Operator, ImportHelper):
             return {"CANCELLED"}
         try:
             message, notes = anim_import.import_file(context, self.filepath, model, self)
-        except anim_import.ImportFailed as e:
+        except (anim_import.ImportFailed, export.ExportError) as e:
             self.report({"ERROR"}, f"{os.path.basename(self.filepath)}: {e}")
             return {"CANCELLED"}
         for note in notes:

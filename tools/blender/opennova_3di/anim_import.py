@@ -6,24 +6,36 @@
 # the bone positions, the capsule extents and the terminal duplicate key are the
 # engine's derivations, and what the scene form cannot carry is reported.
 #
-# The rig's rest pose is the bind. A rig imported from a `.3di` carries only
-# pivots, so its bones point wherever the model importer put them; this importer
-# turns each rest bone onto the reset clip's first key, which is the bind the
-# runtime composes against [orig: AnimChannel_ComputeBoneMatrices @0x410da0].
-# The heads, the lengths and the weights do not move, so the model exports the
-# same bytes, and a clip then shows in Blender the pose the game draws.
+# The rig's rest pose is the bind. The runtime binds every clip of a table to
+# the reset clip and composes each key as `key * bind^-1`, the bind being that
+# clip's first key [orig: AnimChannel_ComputeBoneMatrices @0x410da0 over the
+# bind AnimMap_RegisterEntity @0x40bb60 pins]. A rig imported from a `.3di`
+# carries only pivots, so its bones point wherever the model importer put
+# them; the first table imported onto a rig that holds no clip yet turns each
+# rest bone onto that bind. The heads, the lengths and the weights do not move,
+# so the model still exports the same model, and a clip then shows in Blender
+# the pose the game draws. A rig that already holds clips keeps its rest (their
+# Actions are keyed against it), and a lone `.bad` names no bind at all.
 
+import contextlib
 import os
+import re
 import subprocess
 import tempfile
 
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
+from . import assembly
 from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, RM_NAME, bone_rows,
-                        rig_of, rm_of)
-from .export import (ATTACH_RE, PART_RE, axis_basis, axis_map, clean_name, descendants,
-                     is_lod_root)
+                        clip_actions, part_bone, rig_of, rm_of)
+from .export import BONE_RE, PART_RE, axis_basis, clean_name, descendants, is_lod_root
+
+# An object's own transform channels, as a rollback puts them back.
+BASIS_CHANNELS = ("location", "rotation_euler", "rotation_quaternion", "scale")
+# A clip's own bone name that is a part's label with its BN## in lower case
+# (22 of the 82 retail tables name a weapon's own bones `bn38 bone`).
+LOWER_BONE_RE = re.compile(r"^bn(\d{2})(?: (.*))?$", re.IGNORECASE)
 
 
 class ImportFailed(Exception):
@@ -62,12 +74,12 @@ def strip_comment(line):
 
 
 def read_o3a(path):
-    """The .o3a clip set: its table rows and every clip's bones, keys,
-    translations and events."""
+    """The .o3a clip set: its table rows and every clip's header, bones, keys
+    with their durations, translations and events."""
     set_ = {"adm": "", "rows": [], "clips": []}
     clip = None
     bone = None
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
         for raw in f:
             parts = tokens(strip_comment(raw.rstrip("\n")))
             if not parts:
@@ -91,37 +103,39 @@ def read_o3a(path):
             elif key == "capsule":
                 clip["capsule"] = (float(parts[1]), float(parts[2]))
             elif key == "bone":
-                bone = {"parent": int(parts[1]), "pivot": tuple(float(x) for x in parts[2:5]),
-                        "length": float(parts[5]), "name": parts[6] if len(parts) > 6 else "",
-                        "keys": [], "durations": [], "tr": [], "position": None}
+                bone = {"parent": int(parts[1]), "name": parts[6] if len(parts) > 6 else "",
+                        "keys": [], "durations": [], "tr": []}
                 clip["bones"].append(bone)
-            elif bone is None:
+            elif bone is None and key != "event":
                 continue
             elif key == "k":
                 bone["keys"].append(tuple(float(x) for x in parts[1:5]))
-                bone["durations"].append(int(parts[5]) if len(parts) > 5 else 1)
+                bone["durations"].append(max(1, int(parts[5])) if len(parts) > 5 else 1)
             elif key == "tr":
                 bone["tr"].append(tuple(float(x) for x in parts[1:4]))
-            elif key == "bonepos":
-                bone["position"] = tuple(float(x) for x in parts[1:4])
             elif key == "event":
                 clip["events"].append({
                     "velocity": tuple(float(x) for x in parts[1:4]),
                     "trigger": int(parts[4], 0),
                     "extents": (float(parts[5]), float(parts[6])) if len(parts) > 6 else None,
                 })
+    # A clip's `capsule` record is the pair every event carries.
+    for clip in set_["clips"]:
+        for ev in clip["events"]:
+            if ev["extents"] is None:
+                ev["extents"] = clip["capsule"]
     return set_
 
 
-def run_scene(context, path):
-    """opennova-3di anim scene <path> -> a temporary .o3a, and its notes."""
+def run_scene(context, path, tmp):
+    """opennova-3di anim scene <path> -> an .o3a in `tmp`, and its notes."""
     from . import cli_path
     cli = cli_path(context)
     if not os.path.isfile(cli):
         raise ImportFailed(f"opennova-3di not found at {cli}")
-    tmp = tempfile.mkdtemp(prefix="opennova3di_")
     o3a = os.path.join(tmp, "set.o3a")
-    result = subprocess.run([cli, "anim", "scene", path, "-o", o3a], capture_output=True, text=True)
+    result = subprocess.run([cli, "anim", "scene", path, "-o", o3a], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace")
     if result.returncode != 0:
         raise ImportFailed((result.stderr or result.stdout).strip()[:2000])
     notes = [l.split("scene drops ", 1)[1] for l in result.stderr.splitlines() if "scene drops " in l]
@@ -142,6 +156,19 @@ def linear(action):
             point.interpolation = "LINEAR"
 
 
+def bone_name(index, name):
+    """The rig bone for part `index`, named from the clip's own bone name: kept
+    when it already reads BN## with that index, otherwise BN## and the label (a
+    lower-case `bn38 bone` becomes `BN38 bone`, which the model export and
+    compare read as the same bone)."""
+    m = BONE_RE.match(name)
+    if m is not None and int(m.group(1)) == index + 1:
+        return name
+    m = LOWER_BONE_RE.match(name)
+    label = (m.group(2) or "") if m is not None and int(m.group(1)) == index + 1 else name
+    return f"BN{index + 1:02d} {label}".strip()
+
+
 class Loader:
     def __init__(self, context, model, set_, op=None):
         self.context = context
@@ -152,32 +179,54 @@ class Loader:
         self.notes = []
         self.basis = axis_basis(self.scene.o3d.forward)
         self.to_blender = lambda m: self.basis @ Vector(m)
+        # What the run changed, each with its inverse: a failure puts the scene
+        # back as it found it (never a half-built rig).
+        self.undo = []
 
     def note(self, text):
         if text not in self.notes:
             self.notes.append(text)
-
-    def mission_rot(self, rotation):
-        """A Blender rotation (3x3, in the model root's frame) as a mission-axes
-        quaternion: what animation.AnimExporter reads back."""
-        return (self.basis.transposed() @ rotation @ self.basis).to_quaternion()
 
     def blender_rot(self, quat):
         """A mission-axes key as a Blender rotation in the model root's frame."""
         m = Quaternion((quat[3], quat[0], quat[1], quat[2])).to_matrix()
         return self.basis @ m @ self.basis.transposed()
 
+    @contextlib.contextmanager
+    def editing(self, arm):
+        """The rig in edit mode for the block."""
+        vl = self.scene.view_layers[0]
+        held = vl.objects.active
+        with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm,
+                                        object=arm, selected_objects=[arm]):
+            vl.objects.active = arm
+            bpy.ops.object.mode_set(mode="EDIT")
+            try:
+                yield arm.data.edit_bones
+            finally:
+                bpy.ops.object.mode_set(mode="OBJECT")
+        if held is not None:
+            vl.objects.active = held
+
     # --- the rig ------------------------------------------------------------
-    def reset_clip(self):
-        """The clip the table's reset row names, which carries the bind; else
-        the first clip."""
+    def bind_clip(self):
+        """The clip every other is bound to: the reset row's first variant, else
+        the first row's, as the runtime's loader picks it
+        (runtime/anim/skeletal_clips.cpp load_from_adm); None for a set with no
+        table (a lone .bad)."""
+        pick = None
         for key, variants in self.set["rows"]:
-            if "reset" in key.lower() and variants:
-                stem = os.path.splitext(variants[-1])[0].lower()
-                for clip in self.set["clips"]:
-                    if clip["name"].lower() == stem:
-                        return clip
-        return self.set["clips"][0] if self.set["clips"] else None
+            if not variants:
+                continue
+            if pick is None:
+                pick = variants[0]
+            if "reset" in key.lower():
+                pick = variants[0]
+                break
+        if pick is None:
+            return None
+        stem = os.path.splitext(pick)[0].lower()
+        return next((c for c in self.set["clips"] if c["name"].lower() == stem), None)
 
     def name_bones(self, arm, bones, clip):
         """The bone names the clip carries. A model's part table has none, so a
@@ -188,55 +237,71 @@ class Loader:
         for i, pb in enumerate(bones):
             if i >= len(clip["bones"]):
                 break
-            name = clip["bones"][i]["name"]
-            if not name or name == pb.name:
-                continue
+            name = bone_name(i, clip["bones"][i]["name"])
             old = pb.name
             bone = arm.data.bones.get(old)
-            if bone is None:
+            if name == old or bone is None:
                 continue
             bone.name = name
             for ob in meshes:
                 group = ob.vertex_groups.get(old)
                 if group is not None:
                     group.name = name
+            # By name: edit mode rebuilds the bones, so a held Bone goes stale.
+            self.undo.append(lambda name=name, old=old: rename(arm, name, old))
         return bone_rows(arm)
 
     def align_rest(self, arm, bones, clip):
-        """Turn each rest bone onto the reset clip's first key: the rig's rest
-        pose is the bind. Heads and lengths keep their places."""
+        """Turn each rest bone onto the bind, the reset clip's first key: the
+        rig's rest pose is the bind. Heads and lengths keep their places."""
         rows = clip["bones"]
-        vl = self.scene.view_layers[0]
-        held = self.context.view_layer.objects.active
-        with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm,
-                                        object=arm, selected_objects=[arm]):
-            vl.objects.active = arm
-            bpy.ops.object.mode_set(mode="EDIT")
-            arm_rot = arm.matrix_world.to_3x3().normalized()
-            for i, pb in enumerate(bones):
-                if i >= len(rows):
-                    break
-                eb = arm.data.edit_bones.get(pb.name)
+        arm_rot = arm.matrix_world.to_3x3().normalized()
+        held = {}
+        with self.editing(arm) as edit_bones:
+            for i, pb in enumerate(bones[:len(rows)]):
+                eb = edit_bones.get(pb.name)
                 if eb is None:
                     continue
+                held[eb.name] = (eb.tail.copy(), eb.roll)
                 # The key is the bone's rotation in the model's frame; the rest
                 # bone's own space is the armature's.
                 m = arm_rot.inverted() @ self.blender_rot(rows[i]["keys"][0])
                 length = eb.length if eb.length > 1e-6 else 0.05
                 eb.tail = eb.head + m @ Vector((0.0, length, 0.0))
                 eb.align_roll(m @ Vector((0.0, 0.0, 1.0)))
-            bpy.ops.object.mode_set(mode="OBJECT")
-        if held is not None:
-            vl.objects.active = held
+
+        def restore():
+            with self.editing(arm) as edit_bones:
+                for name, (tail, roll) in held.items():
+                    eb = edit_bones.get(name)
+                    if eb is not None:
+                        eb.tail = tail
+                        eb.roll = roll
+        self.undo.append(restore)
+
+    def redrive(self):
+        """A skinned model whose bones follow another model's parts (arms on a
+        gun) rides sockets made at its rest; make them again at the rest the
+        rig has now (assembly.drive), the parts at theirs."""
+        rig = self.model.o3d.drive_rig
+        if rig is None:
+            return
+        held = [(a.data, a.data.pose_position) for a in assembly.armatures(rig)]
+        for data, _ in held:
+            data.pose_position = "REST"
+        self.context.view_layer.update()
+        try:
+            assembly.drive(self.model, rig)
+        finally:
+            for data, position in held:
+                data.pose_position = position
+            self.context.view_layer.update()
 
     # --- the clips ----------------------------------------------------------
     def action_for(self, clip, arm, bones, rest):
         name = clip["name"]
         action = bpy.data.actions.new(name)
-        data = arm.animation_data or arm.animation_data_create()
-        held = (data.action, data.use_nla)
-        data.use_nla = False
-        data.action = action
+        self.undo.append(lambda: bpy.data.actions.remove(action))
         action.o3d.fps = float(clip["fps"])
         action.o3d.loop = bool(clip["flags"] & ANIM_FLAG_LOOP)
         action.o3d.translation = bool(clip["flags"] & ANIM_FLAG_TRANSLATION)
@@ -254,36 +319,46 @@ class Loader:
                       "Blender keys every frame, so a re-export densifies them")
         arm_rot = arm.matrix_world.to_3x3().normalized()
         order = {pb.name: i for i, pb in enumerate(bones)}
-        # The pose that shows what the game draws: a key IS the bone's rotation
-        # in the model's frame, and the rig's rest pose is the bind the runtime
-        # measures it against, so the key poses the bone directly. The head
-        # follows the rest kinematics.
-        for f in range(samples):
-            world = []
-            for i, pb in enumerate(bones):
-                if i >= len(rows):
-                    world.append(arm.matrix_world @ rest[i])
-                    continue
-                keys = rows[i]["keys"]
-                key = keys[min(f, len(keys) - 1)]
-                pose = Quaternion((key[3], key[0], key[1], key[2]))
-                rot = arm_rot.inverted() @ (self.basis @ pose.to_matrix() @ self.basis.transposed())
-                parent = pb.parent
-                if parent is None:
-                    head = (arm.matrix_world @ rest[i]).translation
-                else:
-                    j = order[parent.name]
-                    follow = (arm.matrix_world @ rest[j]).inverted() @ (arm.matrix_world @ rest[i])
-                    head = (world[j] @ follow).translation
-                if translated and rows[i]["tr"]:
-                    tr = rows[i]["tr"][min(f, len(rows[i]["tr"]) - 1)]
-                    head = head + self.to_blender(tr)
-                world.append(Matrix.Translation(head) @ (arm.matrix_world.to_3x3() @ rot).to_4x4())
-            self.write_frame(arm, bones, rest, world, f, translated)
-        action.o3d.capsule_keys = bool(self.write_events(arm, clip, samples))
-        linear(action)
-        data.action, data.use_nla = held
-        return action
+        data = arm.animation_data or arm.animation_data_create()
+        slotted = hasattr(data, "action_slot")
+        held = (data.action, data.use_nla, data.action_slot if slotted else None)
+        try:
+            data.use_nla = False
+            data.action = action
+            # The pose that shows what the game draws: a key IS the bone's
+            # rotation in the model's frame, and the rig's rest pose is the bind
+            # the runtime measures it against, so the key poses the bone
+            # directly. The head follows the rest kinematics.
+            for f in range(samples):
+                world = []
+                for i, pb in enumerate(bones):
+                    if i >= len(rows):
+                        world.append(arm.matrix_world @ rest[i])
+                        continue
+                    keys = rows[i]["keys"]
+                    key = keys[min(f, len(keys) - 1)]
+                    pose = Quaternion((key[3], key[0], key[1], key[2]))
+                    rot = arm_rot.inverted() @ (self.basis @ pose.to_matrix() @ self.basis.transposed())
+                    parent = pb.parent
+                    if parent is None:
+                        head = (arm.matrix_world @ rest[i]).translation
+                    else:
+                        j = order[parent.name]
+                        follow = (arm.matrix_world @ rest[j]).inverted() @ (arm.matrix_world @ rest[i])
+                        head = (world[j] @ follow).translation
+                    if translated and rows[i]["tr"]:
+                        tr = rows[i]["tr"][min(f, len(rows[i]["tr"]) - 1)]
+                        head = head + self.to_blender(tr)
+                    world.append(Matrix.Translation(head) @ (arm.matrix_world.to_3x3() @ rot).to_4x4())
+                self.write_frame(arm, bones, rest, world, f, translated)
+            action.o3d.capsule_keys = bool(self.write_events(arm, clip, samples))
+            linear(action)
+            slot = data.action_slot if slotted else None
+        finally:
+            data.action, data.use_nla = held[0], held[1]
+            if slotted and held[0] is not None and held[2] is not None:
+                data.action_slot = held[2]
+        return action, slot
 
     def write_frame(self, arm, bones, rest, world, frame, translated):
         """One frame's pose, keyed on the rig's bone channels."""
@@ -341,17 +416,19 @@ class Loader:
         origin, outside the BN## parts."""
         if rm_of(arm) is not None:
             return
-        vl = self.scene.view_layers[0]
-        with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm,
-                                        object=arm, selected_objects=[arm]):
-            vl.objects.active = arm
-            bpy.ops.object.mode_set(mode="EDIT")
-            eb = arm.data.edit_bones.new(RM_NAME)
+        with self.editing(arm) as edit_bones:
+            eb = edit_bones.new(RM_NAME)
             eb.head = Vector((0.0, 0.0, 0.0))
             eb.tail = Vector((0.0, 0.2, 0.0))
-            bpy.ops.object.mode_set(mode="OBJECT")
 
-    # --- the run ------------------------------------------------------------
+        def remove():
+            with self.editing(arm) as edit_bones:
+                eb = edit_bones.get(RM_NAME)
+                if eb is not None:
+                    edit_bones.remove(eb)
+        self.undo.append(remove)
+
+    # --- a rigid model ------------------------------------------------------
     def rigid_rig(self, clip):
         """A rigid model's animation rig: an Armature named `!Rig` whose BN##
         bones mirror the model's parts, one per channel the clip carries. The
@@ -383,19 +460,21 @@ class Loader:
             while walk is not None and walk.name not in index_of:
                 walk = walk.parent
             above[i] = index_of.get(walk.name, 0) if walk is not None else 0
-        arm = bpy.data.objects.new("!Rig", bpy.data.armatures.new("!Rig"))
+        data = bpy.data.armatures.new("!Rig")
+        arm = bpy.data.objects.new("!Rig", data)
         self.model.users_collection[0].objects.link(arm)
+
+        def remove():
+            bpy.data.objects.remove(arm)
+            bpy.data.armatures.remove(data)
+        self.undo.append(remove)
         arm.parent = root
         arm.matrix_parent_inverse = Matrix.Identity(4)
         arm.matrix_world = root.matrix_world
-        vl = self.scene.view_layers[0]
-        with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm,
-                                        object=arm, selected_objects=[arm]):
-            vl.objects.active = arm
-            bpy.ops.object.mode_set(mode="EDIT")
+        with self.editing(arm) as edit_bones:
             bones = {}
             for i in range(count):
-                eb = arm.data.edit_bones.new(f"BN{i + 1:02d} {rows[i]['name']}".strip())
+                eb = edit_bones.new(bone_name(i, rows[i]["name"]))
                 eb.head = (arm.matrix_world.inverted() @ held[i]).translation
                 eb.tail = eb.head + Vector((0.0, 0.05, 0.0))
                 eb.use_connect = False
@@ -404,7 +483,6 @@ class Loader:
                 parent = rows[i]["parent"]
                 if 0 <= parent < i:
                     bones[i].parent = bones[parent]
-            bpy.ops.object.mode_set(mode="OBJECT")
         self.pending = (arm, rows, parts, count, held, above)
         return arm
 
@@ -420,6 +498,9 @@ class Loader:
         by_part = bone_rows(arm)
         for i in range(count):
             ob = parts[i]
+            state = (ob.parent, ob.parent_type, ob.parent_bone, ob.matrix_parent_inverse.copy(),
+                     [(c, getattr(ob, c).copy()) for c in BASIS_CHANNELS])
+            self.undo.append(lambda ob=ob, state=state: restore_parent(ob, state))
             ob.parent = arm
             ob.parent_type = "BONE"
             ob.parent_bone = by_part[i].name
@@ -429,28 +510,61 @@ class Loader:
                 helper = bpy.data.objects.new(f"~{above[i] + 1:02d} attach", None)
                 helper.empty_display_size = 0.02
                 self.model.users_collection[0].objects.link(helper)
+                self.undo.append(lambda helper=helper: bpy.data.objects.remove(helper))
                 helper.parent = ob
                 helper.matrix_parent_inverse = Matrix.Identity(4)
                 helper.matrix_world = held[i]
 
+    # --- the run ------------------------------------------------------------
     def run(self):
+        try:
+            return self.load()
+        except BaseException:
+            for undo in reversed(self.undo):
+                try:
+                    undo()
+                except Exception:
+                    pass  # already gone with what it hung from; put back the rest
+            self.context.view_layer.update()
+            raise
+
+    def load(self):
         clips = self.set["clips"]
         if not clips:
             raise ImportFailed("the clip set holds no clip")
-        reset = self.reset_clip()
+        bind = self.bind_clip()
         self.pending = None
         arm = rig_of(self.model)
-        if arm is None:
+        if arm is not None:
+            data = arm.animation_data
+            if data is not None and data.use_tweak_mode:
+                raise ImportFailed(f"{arm.name} is in NLA tweak mode; leave it (Tab in the NLA editor) "
+                                   "before importing clips onto it")
+            bones = bone_rows(arm)
+            order = {pb.name: i for i, pb in enumerate(bones)}
+            for i, pb in enumerate(bones):
+                above = part_bone(pb)
+                if above is not None and order[above.name] >= i:
+                    raise ImportFailed(f"{pb.name}: its parent is not a lower part")
+        else:
             # A rigid model (a first-person weapon): its clips get an animation
-            # rig whose bones mirror its parts, built from the reset clip.
-            arm = self.rigid_rig(reset if reset is not None else clips[0])
+            # rig whose bones mirror its parts, built from the bind clip.
+            arm = self.rigid_rig(bind if bind is not None else clips[0])
             self.context.view_layer.update()
+        fresh = not clip_actions(arm)
         bones = bone_rows(arm)
-        if reset is not None:
-            bones = self.name_bones(arm, bones, reset)
-        if reset is not None and (self.op is None or self.op.align_rest):
-            self.align_rest(arm, bones, reset)
+        if fresh:
+            bones = self.name_bones(arm, bones, bind if bind is not None else clips[0])
+        if bind is not None and fresh and (self.op is None or self.op.align_rest):
+            if self.model.o3d.drive_rig is not None:
+                # Undone after the rest is put back, so the sockets sit at it.
+                self.undo.append(self.redrive)
+            self.align_rest(arm, bones, bind)
+            self.redrive()
             self.context.view_layer.update()
+        elif bind is not None and not fresh:
+            self.note(f"{arm.name} already holds clips keyed against its rest pose, so its rest "
+                      f"stays; {bind['name']}'s bind shows only on a rig without clips")
         if self.pending is not None:
             self.attach_parts()
             self.context.view_layer.update()
@@ -460,14 +574,22 @@ class Loader:
         data = arm.animation_data or arm.animation_data_create()
         made = {}
         for clip in clips:
-            action = self.action_for(clip, arm, bones, rest)
+            action, slot = self.action_for(clip, arm, bones, rest)
             made[clip["name"].lower()] = action
             track = data.nla_tracks.new()
+            self.undo.append(lambda track=track: data.nla_tracks.remove(track))
             track.name = clip["name"]
-            track.strips.new(clip["name"], 0, action)
+            strip = track.strips.new(clip["name"], 0, action)
+            if slot is not None and strip.action_slot is None:
+                strip.action_slot = slot
 
-        # The table: its rows in file order, each variant an Action.
+        # The table: its rows in file order, each variant an Action. A set with
+        # no table (a lone .bad) leaves the model's rows as they are.
         props = self.model.o3d
+        if not self.set["rows"]:
+            self.note("the set carries no table, so the model's rows stay; add the clip to a row "
+                      "for the game to play it")
+            return f"{len(clips)} clips on {arm.name}", self.notes
         props.rows.clear()
         if self.set["adm"]:
             props.adm_path = f"//{self.set['adm']}"
@@ -484,13 +606,30 @@ class Loader:
         return f"{len(clips)} clips on {arm.name}", self.notes
 
 
+def restore_parent(ob, state):
+    parent, parent_type, parent_bone, inverse, basis = state
+    ob.parent = parent
+    ob.parent_type = parent_type
+    ob.parent_bone = parent_bone
+    ob.matrix_parent_inverse = inverse
+    for channel, value in basis:
+        setattr(ob, channel, value)
+
+
+def rename(arm, name, old):
+    bone = arm.data.bones.get(name)
+    if bone is not None:
+        bone.name = old
+
+
 def import_file(context, path, model=None, op=None):
     """Read a .adm table (or a lone .bad) onto a model's rig."""
-    o3a, notes = run_scene(context, path)
-    set_ = read_o3a(o3a)
     model = model or active_model(context)
     if model is None:
         raise ImportFailed("select an object of the model whose rig these clips animate")
+    with tempfile.TemporaryDirectory(prefix="opennova3di_") as tmp:
+        o3a, notes = run_scene(context, path, tmp)
+        set_ = read_o3a(o3a)
     loader = Loader(context, model, set_, op)
     message, own = loader.run()
     return message, notes + own
