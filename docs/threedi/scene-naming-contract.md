@@ -135,13 +135,16 @@ on the model the rig belongs to:
   properties carry the clip's rate, its loop and translation flags, the
   unwitnessed flag bit 3, and a length longer than the Action's own when it has
   one, whose extra frames hold the Action's last pose.
-- **The table** is the rows on the model root: an `anim_<name>` slot and its clip
+- **The table** is the rows on the model root: an `anim_<name>` key and its clip
   ring, in the order the `.adm` stores. The engine serves a row from its LAST
   variant back [orig: AnimMap_RegisterBoneNode @ 0x40C2D0], and the reset row
   (`anim_reset`, the last one) names in its last variant the clip whose bind
   the rest pose is, each reset variant replacing the one before [orig:
-  AnimMap_FindSlotByName @ 0x40cfa0; AnimMap_RegisterEntity @ 0x40bb60]; a
-  table without one binds each clip to its own first key.
+  AnimMap_FindSlotByName @ 0x40cfa0; AnimMap_RegisterEntity @ 0x40bb60]. A
+  row names its slot by its key past the first five characters, without case
+  (`ANIM_RESET` and `xxxx_reset` are the reset row too). The game cannot load a
+  table without a reset row [orig: AnimMap_LoadAdmFile @ 0x40cc40, the read of
+  slot 0's head @ 0x40ce11], so export refuses one.
 - **`!RM`** is a bone of the rig outside its `BN##` parts, keyed per frame: its
   step between two frames is that frame's event velocity (the body animates in
   place and the engine moves the entity by these). Any bone named `!...` is no

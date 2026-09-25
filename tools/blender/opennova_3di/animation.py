@@ -46,9 +46,19 @@ from .o3dtext import ExportError, ModelSpace, cli_notes, fmt, quoted, run_cli, s
 ANIM_FLAG_LOOP = 0x1
 ANIM_FLAG_TRANSLATION = 0x2
 ANIM_FLAG_BIT3 = 0x8
-# The .adm slot key namespace (AnimMap_ParseConfigLine @0x40cb60 keeps rows
-# whose first token starts with anim_).
-SLOT_RE = re.compile(r"^anim_[A-Za-z0-9_]+$")
+# A row names its anim slot by its key past the first five characters,
+# whatever they are, without case: `anim_reset`, `ANIM_RESET` and `xxxx_reset`
+# are all slot 0 [orig: AnimMap_FindSlotByName @0x40cfa0, stricmp on key + 5].
+# Every retail table spells its keys anim_<name>.
+SLOT_KEY_RE = re.compile(r"^[^\s\"]{6,}$")
+
+
+def slot_of(key):
+    """The anim slot a row key names, lower case; empty for a key of five
+    characters or fewer, which names none."""
+    return key[5:].lower() if len(key) > 5 else ""
+
+
 # The root track: a bone of the rig, outside the BN## parts, whose per-frame
 # step is the clip's event velocity. It rides the clip's own Action, so one
 # Action holds a clip whole.
@@ -161,14 +171,21 @@ class AnimExporter:
         out = []
         for row in self.props.rows:
             key = row.key.strip()
-            if not SLOT_RE.match(key):
-                raise ExportError(f"'{key}' is not an anim slot key (anim_<name>)")
+            if not SLOT_KEY_RE.match(key):
+                raise ExportError(f"'{key}' is not an anim slot key: a row names its slot by what follows the "
+                                  "key's first five characters (anim_reset, anim_idle_5), with no blank or quote")
             variants = [clean_name(v.action.name) for v in row.variants if v.action is not None]
             if not variants:
                 raise ExportError(f"the row '{key}' names no clip")
             out.append((key, variants))
         if not out:
             raise ExportError("the model has no .adm row (a clip set needs at least the reset row)")
+        # Retail cannot load a table without a reset row: it reads slot 0's
+        # head without a test [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..
+        # 0x40ce16], and the CLI refuses one.
+        if not any(slot_of(key) == "reset" for key, _ in out):
+            raise ExportError("the table has no reset row (a key naming slot reset, as anim_reset does), which "
+                              "the game cannot load: its last clip is the bind every clip is measured against")
         return out
 
     def bone_lines(self, pb, index, rest, pose, translations):

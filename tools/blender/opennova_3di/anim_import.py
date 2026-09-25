@@ -17,8 +17,8 @@
 # so the model still exports the same model, and a clip then shows in Blender
 # the pose the game draws. A rig that already holds clips keeps its rest (their
 # Actions are keyed against it), and a lone `.bad`, or a table with no reset
-# row, names no bind at all (the game then binds each clip to its own first
-# key).
+# row, names no bind at all (the game cannot load such a table, and export
+# refuses one).
 #
 # A clip is sampled the way the runtime evaluates it: one pose per frame of the
 # header's length, frames 0..frame_count, each bone's key found by walking its
@@ -34,7 +34,7 @@ from mathutils import Matrix, Quaternion, Vector
 
 from . import assembly
 from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, RM_NAME, bone_rows,
-                        clip_actions, part_bone, rig_of, rm_of, trigger_value)
+                        clip_actions, part_bone, rig_of, rm_of, slot_of, trigger_value)
 from .export import (ATTACH_RE, BONE_RE, CENTER_RE, PART_RE, Exporter, active_model, clean_name, descendants,
                      is_lod_root)
 from .o3dtext import (ImportFailed, axis_basis, blender_axes, cli_notes, num, run_cli, scratch, strip_comment,
@@ -240,7 +240,7 @@ class Loader:
         with no table (a lone .bad)."""
         reset = None
         for key, variants in self.set["rows"]:
-            if len(key) > 5 and variants and key[5:].lower() == "reset":
+            if variants and slot_of(key) == "reset":
                 reset = variants
         if reset is None:
             return None
@@ -648,8 +648,8 @@ class Loader:
             raise ImportFailed("the clip set holds no clip")
         bind = self.bind_clip()
         if bind is None and self.set["rows"]:
-            self.note("the table binds no clip (no anim_reset row naming a clip of the set): the game binds "
-                      "each clip to its own first key, and the rig's rest pose stays as it is")
+            self.note("the table has no reset row naming a clip of the set, which the game cannot load: the "
+                      "rig's rest pose stays as it is, and export refuses the table until a row names one")
         self.pending = None
         arm = rig_of(self.model)
         if arm is not None:

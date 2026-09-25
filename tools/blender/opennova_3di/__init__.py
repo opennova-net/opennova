@@ -115,7 +115,8 @@ def search_registers(self, context, edit_text):
 
 def search_slots(self, context, edit_text):
     """The anim slot keys the engine itself names. Retail's namespace is far
-    wider (the JOX corpus authors 240), so the field takes any anim_<name>."""
+    wider (the JOX corpus authors 240), so the field takes any key: a row names
+    its slot by what follows the key's first five characters."""
     text = edit_text.lower()
     return [k for k in catalog()[3] if text in k]
 
@@ -205,9 +206,10 @@ class O3DAdmRow(bpy.types.PropertyGroup):
     # stores. The engine serves a row from its LAST variant back
     # [orig: AnimMap_RegisterBoneNode @0x40C2D0].
     key: StringProperty(name="Slot", default="anim_reset", search=search_slots,
-                        description="The anim slot this row answers (anim_reset is the rig's bind "
-                                    "and rest pose); retail authors far more keys than the engine "
-                                    "names, so any anim_<name> is allowed")
+                        description="The anim slot this row answers, named by what follows the key's "
+                                    "first five characters (anim_reset is the rig's bind and rest pose, "
+                                    "and a table needs it); retail authors far more keys than the "
+                                    "engine names, so any anim_<name> is allowed")
     variants: CollectionProperty(type=O3DAdmVariant)
 
 
