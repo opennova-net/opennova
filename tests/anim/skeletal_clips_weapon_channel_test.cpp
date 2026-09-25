@@ -20,10 +20,11 @@
    the wrong reason (channel-at-reset == bind). So the second clip is BINOC.bad
    with ONE mask bone (BN06 R UpperArm) rotated 90 deg and ONE unmasked bone
    (BN08 R Thigh) rotated 90 deg: the reference set's bad/BINOC_twist.bad,
-   minted once from the retired from-scratch .bad writer (ADR 0038). Its
-   provenance is ASSERTED below against twist_channel's in-memory expectation,
-   never assumed, and it is staged into the temp dir beside a byte copy of
-   BINOC.bad and a two-key .adm. */
+   minted once by the from-scratch .bad writer before ADR 0038 retired it
+   (ADR 0047 returned it: formats/bad/bad_write.h). Its provenance is ASSERTED
+   below against twist_channel's in-memory expectation, never assumed, and it
+   is staged into the temp dir beside a byte copy of BINOC.bad and a two-key
+   .adm. */
 
 #include <cmath>
 #include <cstdio>
@@ -123,7 +124,7 @@ int main() {
         return retail::skip("OPENNOVA_JO_ASSETS/fixtures/bad/BINOC.bad + BINOC_twist.bad (the shipped rig and its twist)");
 
     // ---- fixture provenance: BINOC_twist.bad IS BINOC.bad with bones 5 and 7 twisted ----
-    // Parse-level, not a byte diff: the retired writer zero-filled the 32-byte
+    // Parse-level, not a byte diff: that writer zero-filled the 32-byte
     // name fields where BINOC carries residual bytes after the NUL, so the two
     // files re-parse identical without being byte-identical. The twisted
     // channels are compared within 1e-5 (another libm's cosf/sinf at mint time

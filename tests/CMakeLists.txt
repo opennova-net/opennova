@@ -188,7 +188,8 @@ endforeach()
 opennova_add_gated_test(adm_parse COMMAND adm_parse_test)
 
 # BAD tests: the null guard unconditionally, the shipped BINOC.bad pins as the
-# reference-set SKIP-LEG leg.
+# reference-set SKIP-LEG leg, and 357_RST.bad's translation rows 0..frame_count
+# (OPENNOVA_JO_ASSETS, SKIP-LEG).
 add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_formats)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -201,8 +202,9 @@ target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 # bad_build: the construction seam -- the frame maps, the derived bind and
-# position, the capsule extents, the refusals, and the canonical table, with the
-# shipped BINOC.bad as the SKIP-LEG leg over both derivations.
+# position, the capsule extents against the reset bind, the refusals, and the
+# canonical table, with SKIP-LEG retail legs over both derivations (BINOC.bad's
+# bind; DT1PRONE.BAD's positions through DT1RST.BAD's bind).
 add_executable(bad_build_test bad/bad_build_test.cpp)
 target_link_libraries(bad_build_test PRIVATE opennova_formats)
 target_include_directories(bad_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

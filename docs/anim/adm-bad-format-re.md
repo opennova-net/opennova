@@ -26,7 +26,7 @@ in place.
 | `.adm` grammar (rows, comments, variant rings) | MATCHING | ctests `adm_parse`, `adm_comment`, `adm_trim_value`, `adm_variants`; 3 `[orig]` cites in `adm/adm.h` |
 | `.adm` writer | MATCHING (canonical form, not byte identity with hand-edited files) | ctests `adm_write`, `adm_parse`, `adm_variants`; the 82-table corpus sweep below |
 | `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `anim_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`) |
-| `.bad` writer and the construction seam | MATCHING (field-equal over the 477-clip corpus; byte-exact for our own files; the runtime poses a rebuilt set identically) | ctests `bad_roundtrip` (the fixtures byte-exact, BINOC.bad field-equal), `bad_build` (the derivations, with BINOC.bad as the retail leg), `anim_o3a_commands`, the gated `anim_o3a_retail_roundtrip` and `anim_o3a_runtime_playback` (US01.ADM and both first-person sets through `runtime/anim/skeletal_clips`, 1,827 poses, worst 2.4e-6 degrees); the corpus sweep below |
+| `.bad` writer and the construction seam | MATCHING (field-equal over the 477-clip corpus; byte-exact for our own files; the runtime poses a rebuilt set identically); the capsule-extent RULE is ours and unwitnessed (below) | ctests `bad_parse` (357_RST.bad's rows 0..frame_count), `bad_roundtrip` (the fixtures byte-exact, BINOC.bad field-equal, the pad row), `bad_build` (the derivations: BINOC.bad's bind, DT1PRONE's positions through DT1RST's bind), `anim_o3a_commands`, the gated `anim_o3a_retail_roundtrip` and `anim_o3a_runtime_playback` (US01.ADM and both first-person sets through `runtime/anim/skeletal_clips` over US01.3di, Mp5b_1st.3di and 357_1st.3di's bone tables, 1,827 poses, worst 2.4e-6 degrees); the corpus sweep below |
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
 | `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
 | `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; ctest `anim_sample` (synthetic) + the asset-gated ctest `anim_positions_from_model_corpus` (retail rigs) |
@@ -192,8 +192,10 @@ clip-set text into it; `docs/anim/o3a-scene-format.md`).
 Retail ships no `.bad` writer, so the on-disk shape is the loader's
 [orig: `BoneFile_Load @0x40fff0`] plus what the shipped corpus carries. A sweep
 of all 477 `.bad` clips and 82 `.adm` tables under `OPENNOVA_JO_ASSETS`
-(2026-09-24) pins these, and the seam derives every one of them rather than
-asking an author for it:
+(2026-09-24, refreshed 2026-09-25) pins these. The seam derives the bone
+table, the header words and the translation pad row rather than asking an
+author for them; what an author supplies (the keys, events and translation
+rows, `frame_count + 1` of each) it counts and refuses when short:
 
 - **The bone table's `rotation[9]` is the TRANSPOSE of the bone's first
   channel key as a matrix**, in 13,517 of 13,517 bones (worst deviation
@@ -278,9 +280,10 @@ asking an author for it:
   for the root's parent, and `anim compare` reads none of these fields.
 
 Round-trip results (`opennova-3di anim scene` -> `anim build` -> `anim
-compare`): **477 of 477 clips and 81 of 82 tables are the same animation.**
-The one table, `ESTAND02.ADM`, names `AttckAct1.bad`, which the corpus does not
-ship; the row is dropped and reported. Our own files write back byte for byte;
+compare`, re-run 2026-09-25 with `compare` reading the bind and absent clips):
+**477 of 477 clips and 81 of 82 tables are the same animation.** The one
+table, `ESTAND02.ADM`, names `AttckAct1.bad`, which the corpus does not ship;
+`scene` drops that variant with a note and `compare` reports it. Our own files write back byte for byte;
 retail's differ only where nothing can reproduce them — the uninitialized bytes
 its exporter left after each name's NUL, the stale child addresses, and the
 bind's low mantissa bits (the stored 3x3 carries more than the float key it is
