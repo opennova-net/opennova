@@ -172,7 +172,8 @@ func test_visible_pages_compose_before_their_frame_draws() -> void:
 	assert_eq(int(composed["frame_uploads"]), int(composed["frame_compose_jobs"]))
 	assert_eq(int(composed.get("pending_jobs", -1)), 0)
 	assert_eq(int(composed["frame_capacity_fallbacks"]), 0)
-	assert_eq(int(composed.get("worker_count", 0)), 2)
+	assert_between(int(composed.get("worker_count", 0)), 2, 8,
+			"half the hardware threads compose the pages, 2..8")
 	assert_eq(int(composed.get("dimension", 0)), 256,
 			"The sole highest-quality retail page path.")
 
