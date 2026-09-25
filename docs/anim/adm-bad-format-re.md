@@ -28,6 +28,7 @@ in place.
 | `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `anim_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`) |
 | `.bad` writer and the construction seam | MATCHING (field-equal over the 477-clip corpus; byte-exact for our own files; the runtime poses a rebuilt set identically); the capsule-extent RULE is ours and unwitnessed (below) | ctests `bad_parse` (357_RST.bad's rows 0..frame_count), `bad_roundtrip` (the fixtures byte-exact, BINOC.bad field-equal, the pad row), `bad_build` (the derivations: BINOC.bad's bind, DT1PRONE's positions through DT1RST's bind), `anim_o3a_commands`, the gated `anim_o3a_retail_roundtrip` and `anim_o3a_runtime_playback` (US01.ADM and both first-person sets through `runtime/anim/skeletal_clips` over US01.3di, Mp5b_1st.3di and 357_1st.3di's bone tables, 1,827 poses, worst 2.4e-6 degrees); the corpus sweep below |
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
+| `.bad` runtime consumption — which clip binds the rig, and the translation gate | MATCHING (witnessed 2026-09-25, below); translation under a cross-fade is not ported | ctest `anim_sample` (the gate in the sampler, and the rig loader over synthetic tables); the 82-table scan below; the gated `anim_o3a_runtime_playback` |
 | `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
 | `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; ctest `anim_sample` (synthetic) + the asset-gated ctest `anim_positions_from_model_corpus` (retail rigs) |
 
@@ -155,7 +156,9 @@ actually mean:
   clip composes `Transpose(bind 3×3) × channel`
   [orig: `AnimChannel_ComputeBoneMatrices @ 0x410da0`]. Per-clip self-bind
   was a 2026-07-08 misreading (it self-cancels at clip start — the T-pose
-  freeze), corrected 2026-07-09 (D-INF-14).
+  freeze), corrected 2026-07-09 (D-INF-14). Which clip of the table that is,
+  and the translation gate the bind also decides, are in the 2026-09-25
+  section below.
 - **The rig is the model table.** Bone count, hierarchy, and pivots come from
   the MODEL's bone table (`modelDef+52/+56`), never from the `.bad`'s bone
   table; `.bad` channel rows pair with model rows BY INDEX, and rows past the
@@ -167,8 +170,9 @@ actually mean:
   renders them all). It is reconstructible from bind + model
   (`positions_from_model`; synthetic pin in `tests/anim/anim_sample_test.cpp`, retail pin in the `OPENNOVA_JO_ASSETS`-gated `anim_positions_from_model_corpus` ctest).
 - **Channel evaluation** slerps the quaternion keyframes per bone
-  [orig: `BoneAnim_TransformBones @ 0x410360`]; translations apply only under
-  `flags & 2`. The blend itself is `Math_QuaternionSlerp @ 0x615e20`
+  [orig: `BoneAnim_TransformBones @ 0x410360`]; translations apply only when
+  the playing clip AND the bind carry `flags & 2` (below). The blend itself
+  is `Math_QuaternionSlerp @ 0x615e20`
   (witnessed 2026-09-10): no input or output normalization; a negative dot flips
   B onto the short arc `@0x615e51`; `1 - dot <= 0.01` (float `0x3C23D70A
   @0x7c56a8`, tested `@0x615ea6`) takes the LINEAR path with plain weights
@@ -179,6 +183,77 @@ actually mean:
   pose chain still normalizes at the bind compose / parent-local extraction, so
   the sub-unit linear-path length (|q|² ≥ 0.995) never becomes a bone scale —
   a presentation residual below visibility, not a motion-timing one.
+
+## The bind clip and the translation gate (witnessed 2026-09-25)
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Which clip binds the rig | MATCHING | ctest `anim_sample` (a two-variant reset row, a second reset row, an `anim_resetx` row ahead of the reset row, a reset variant that does not load); the 82-table scan below |
+| A table with no reset row | MATCHING (the rig does not load) | ctest `anim_sample` |
+| The translation gate | MATCHING | ctest `anim_sample` (the sampler over an untranslated bind (both modes) and a translated one, and the rig loader over an untranslated and a translated reset) |
+| Translation under a cross-fade | NOT PORTED (follow-up below) | |
+
+**Which clip binds.** A row names its slot by its key past the first five
+characters, compared without case against the 252 slot names, and slot 0's
+name is `reset` [orig: `AnimMap_FindSlotByName @ 0x40CFA0`, the table
+`g_animStateNameTable @ 0x8135F0`, entry 0 `"reset" @ 0x7C3264`]: `anim_reset`
+and `ANIM_RESET` name slot 0, `anim_resetx` and `anim_idle_reset` do not. Every
+clip registered on slot 0 replaces the slot's head instead of joining a ring
+(`AnimMap_RegisterBoneNode @ 0x40C2D0`: a zero slot index takes the jump
+`@0x40C365..0x40C367` to the head store `@0x40C38B` and the self-ring
+`@0x40C38F`), and a variant whose `.bad` does not load registers nothing
+(`AnimMap_ParseConfigLine @ 0x40CB60`, the null test `@0x40CBE7`). The rig's
+bind is therefore the last variant that loads, of the last row naming slot 0.
+That head is what `AnimMap_LoadAdmFile @ 0x40CC40` pins into the table's own
+channel (`@0x40CE19`) and `AnimMap_RegisterEntity @ 0x40BB60` into both
+channels of every body (`@0x40BBE3`, `@0x40BCF7`). An unauthored slot still
+serves the FIRST reset variant: slot 0's first registration backfills every
+empty slot with the head of that moment (`@0x40C39A..0x40C3E2`), and a later
+reset variant replaces only the head. `SkeletalClips::load_from_adm` used to
+take the first variant of the first row whose key merely contained `reset`,
+and the first row's first variant when no row did; it now takes the rule
+above (`[orig]`-cited in `engine/runtime/anim/skeletal_clips.cpp`).
+
+**A table with no reset row does not bind.** When clips registered but slot 0
+did not, `AnimMap_LoadAdmFile` reads slot 0's head without a test and faults on
+the null head (`@0x40CE11..0x40CE16`, the read of `[head + 0x20]`); when nothing
+registered, the load fails (`@0x40CE03..0x40CE07`); and
+`AnimMap_RegisterEntity` frees the channel it allocated when slot 0 is empty
+(`@0x40BBC4`, `@0x40BD8B`). No retail entity animates through such a table, so
+`load_from_adm` declines it (the rig does not load) instead of borrowing the
+first row's clip. `AnimChannel_ComputeBoneMatrices` does fall back to the
+playing clip's own bone table when `channel+44` is null (`@0x410DE5`), but no
+table reaches that path: every initializer witnessed pins `channel+44` (the
+three above, and the menu preview's `Dt1rst.bad`,
+`PlayerInfo_InitPreviewModel @ 0x5600D0` `@0x560183`).
+
+**The translation gate.** `BoneAnim_TransformBones @ 0x410360` writes each
+bone's translation into a shared scratch (`dword_A78350`) from the PLAYING
+clip: its lerped rows when that clip carries `flags & 2` (the test
+`@0x41038D`, the rows through `sub_4102D0 @ 0x4102D0`), zeros when it does not
+(`@0x4103F6..0x4103FE`). `AnimChannel_ComputeBoneMatrices @ 0x410DA0` then
+copies the scratch into each bone matrix only when the BIND carries
+`flags & 2`: the test reads header word 4 of `channel+44`'s `.bad`, or of the
+playing clip's when that is null (`test byte [ebp+0x10], 2 @0x410DE7`,
+`ebp` = `channel+44` `@0x410DD8`, else the playing clip `@0x410DE5`; the copy
+`@0x410EA0..0x410EB7`). Its other branch builds every matrix through
+`Math_TransposeMatrix3x3ToMatrix4x4 @ 0x616740`, which zeroes the translation
+row (`@0x61675A..0x616784`), and `BoneAnim_BuildWorldMatrices @ 0x40C400` adds
+that row to the bone's position (`@0x40C6E9..0x40C71D`). A bone therefore
+moves only when the clip AND the bind are translated: a translated clip over
+an untranslated reset moves nothing, an untranslated clip over a translated
+reset moves nothing (the scratch holds its zeros), and with no bind pinned the
+clip's own flag decides. `sample_clip` reads the gate from its `bind_source`
+in both modes and the rig loader passes the reset `.bad`; it used to gate on
+the clip's own flag alone. Over the 5,145 clip registrations of the 82 retail
+tables (2026-09-25 scan), 430 translated clips play over a translated reset, 3
+untranslated clips over a translated reset, 4,712 neither, and no translated
+clip over an untranslated reset, so no retail rig changes; an authored set can
+hold that pairing. Every table has exactly one reset row with one variant,
+which the old and the new rule both pick. Retail reads the scratch past what
+the playing clip wrote in one more case: a bone of a translated bind past the
+playing clip's own bone count keeps whatever the scratch last held. No retail
+clip has fewer bones than its reset, and the port reads zero there.
 
 ## The writers and the construction seam (2026-09-24)
 
@@ -323,6 +398,21 @@ All existing ledger IDs — this record mints none:
 - `flags` bit 3 and the capsule-extent rule are the two unwitnessed corners
   above: both want a look at what writes them, the first in the loader, the
   second in whatever retail's exporter was.
+- Translation under a cross-fade (witnessed 2026-09-25, not ported).
+  `AnimChannel_BlendTwoChannels @ 0x410740` always blends the rotations, but
+  fills the translation scratch by the two clips' flags: both translated, their
+  lerped rows blend by the channel weight (`@0x410C71..0x410D61`); one, that
+  clip's rows go in whole and unweighted (`@0x41099B..0x4109E1`,
+  `@0x410B12..0x410B58`); neither, the scratch keeps what it last held (the
+  rotation-only loop `@0x4107BA..0x410894`). The bind gate above then applies.
+  `SkeletalClips::eval_pose_blended` lerps the two sampled poses' origins, so a
+  translated clip cross-faded with an untranslated one reaches its translation
+  over the window instead of at its start.
+- The `.adm` parser keeps only rows whose key starts `anim_`, compared with
+  case; retail reads no prefix (the slot is the key past its first five
+  characters, above), so a row keyed `ANIM_RESET` binds in retail and is
+  dropped by the parser. No shipped table keys a row without `anim_` (the
+  82-table scan).
 
 ## Playback clock follow-up (2026-09-11)
 
