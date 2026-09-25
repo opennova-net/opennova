@@ -75,7 +75,7 @@ is the record. Sizes are payload bytes (exclusive of the 8-byte header).
 | ROOT/CDTA/CXLT | 8 | no | find `0x472417`, loop `0x472C79` | `[orig: WriteCXLT @ 0x455920]` | 12 B runtime each (3 x f32 translation). count=0 here. |
 | ROOT/RDTA | 1388 | yes | `Load3DI` find at `0x470059` | begun at `0x45DBB3` | Render-data container; one RLOD child per LOD. |
 | ROOT/RDTA/RLOD | 1380 | yes | `[orig: Threedi_LoadLodEntry @ 0x474920]` (loop `0x4704B0..0x47050E`) | `[orig: WriteRDTA @ 0x459000]`, skinned `[orig: WriteRDTA_Skinned @ 0x45C580]` | Contains RMDL/VERT/INDX/STRP/ROBJ/PANM. |
-| .../RMDL | 12 | no | find at `0x474945` | via `WriteRDTA` | `model_type[4]`, `lod_threshold_fp16` u32, `render_object_count` u32. |
+| .../RMDL | 12 | no | find at `0x474945` | via `WriteRDTA` | `model_type[4]`, `lod_threshold_pixels` u32 (an integer projected-radius pixel count; the runtime loader shifts it into Q16.16, see "Retail RMDL thresholds, OOBJ priority and texture-row flags"), `render_object_count` u32. |
 | .../VERT | 1012 | no | `[orig: LoadRenderVertexBuffer @ 0x474380]` (invoked `0x474A56`) | `[orig: WriteVertices_Basic @ 0x457AD0]` / `[orig: WriteVertices_Extended @ 0x457CE0]` / `[orig: WriteVertices_SkinnedBasic @ 0x457F20]` / `[orig: WriteVertices_SkinnedExtended @ 0x4581A0]` | `{count u32, stride u32, flags u32, vertex_records[]}`. Flag `0x14` = tangents, `0x40` = skinned; stride selects layout. |
 | .../INDX | 116 | no | find `0x474977`, loop `0x474AB7` | via `WriteRDTA` | `{count u32, pad u32, u16 indices[]}`, copied verbatim. |
 | .../STRP | 56 | no | find `0x47498F`; basic loop `0x474CAF`, skinned `0x474B60` | via `WriteRDTA` / `WriteRDTA_Skinned` | Disk record 12 dwords static / 17 dwords skinned; runtime 36 B / 48 B. material_idx, index_offset, num_indices, num_triangles, is_strip, start_vertex, num_vertices, bbox min/max (static) or bone_table (skinned). |
@@ -85,7 +85,7 @@ is the record. Sizes are payload bytes (exclusive of the 8-byte header).
 | ROOT/OCCL/OVRT | 8 | no | find `0x473E82`, loop `0x473FF2` | via `WriteOCCL` | 12 B runtime (3 x f32). count=0 here. |
 | ROOT/OCCL/OPLN | 8 | no | find `0x473E9D`, loop `0x47405C` | via `WriteOCCL` | 16 B runtime (3 x f32 normal + f32 radius). count=0. |
 | ROOT/OCCL/OFAC | 8 | no | find `0x473EB9`, loop `0x4740E0` | via `WriteOCCL` | 12 B runtime (raw_indices, edge_data, other_edge_data). count=0. |
-| ROOT/OCCL/OOBJ | 8 | no | find `0x473ED4`, loop `0x4741BF` | via `WriteOCCL` | 60 B runtime per object (type/parent/connecting bytes, position[3], radius, indices, counts, ptr slots). count=0. |
+| ROOT/OCCL/OOBJ | 8 | no | find `0x473ED4`, loop `0x4741BF` | via `WriteOCCL` | 60 B runtime per object (type/parent/connecting bytes, position[3], radius, indices, counts, ptr slots); disk +20 is the portal-slot priority weight (`slot_priority_scale`, runtime +0x2C). count=0. |
 | ROOT/LGHT | 8 | no | `[orig: LoadLightsFromChunk @ 0x473940]` (invoked `0x470664`) | `[orig: WriteLGHT @ 0x456DF0]` | `{count, record_size, light_records[]}`. 116 B disk (36 B legacy) -> 120 B runtime. count=0 here. |
 | ROOT/MTRX | 72 | no | `[orig: Threedi_LoadMtrxChunk @ 0x473850]` (invoked `0x47047C`) | `[orig: WriteMTRX @ 0x452FA0]` | `{count, record_size=64, Matrix4x4f[]}` row-major; 1 matrix here. |
 
@@ -536,6 +536,37 @@ IDB changes: appended anchored entry comments at `0x5B4640` and `0x5C3F40`
 with the resolver/store sites, destruction interpretation and reimplementation
 cross-links. No curated names or types were changed; the IDB was saved.
 [03TR frame costs](../perf/03tr-frame-costs.md) owns the measured effect.
+
+### Retail RMDL thresholds, OOBJ priority and texture-row flags (2026-09-24)
+
+Three field meanings corrected by the 2026-09-24 rendering parity pass,
+witnessed in retail `Jointops.exe`:
+
+- **RMDL threshold** (the dword after `model_type`): an integer projected
+  radius in PIXELS, not a Q16.16 distance. The runtime loader stores it shifted
+  left 16 in the level's OWN table slot (model+0x40+4 x level)
+  `[orig: ThreediGp_LoadFromFile @ 0x5b5bdf..0x5b5be5; the model is loader+4,
+  sub_5B6160 @ 0x5b6273]`, and `Model_SelectRlodLevel` walks the slots from
+  slot 0 (render-order-re.md, Object RLOD selection). Corpus tables descend to
+  zero: Armry01 200, 60, 20, 0; Ashed1 96, 38, 12, 0; 47gl_3RD 160, 64, 19, 6.
+  A table whose first slot is 0 pins the model to LOD0 (79 JO models). The
+  prose name is `lod_threshold_pixels`; the parser field is
+  `ThreediLod::lod_threshold` and the runtime conversion
+  `renderer::rlod_threshold_q16_from_rmdl`.
+- **OOBJ disk +20** (runtime +0x2C): the portal-slot priority weight that the
+  slot collector folds into the slot's sort key, whose only reader is the slot
+  sort (`Terrain_SortSectorCacheByDistance @ 0x5c4410`, the compare
+  `@ 0x5c4443`), not a window-glow scale; zero in all 806 JO OOBJ records.
+  Named `slot_priority_scale` in `engine/formats/threedi`
+  (render-occlusion-re.md §1, D-OCC-13).
+- **Texture-row flag bit 1** (`THREEDI_TEX_FLAG_STATE_OVERRIDE` = 0x02,
+  beside bit 0 `ANIMATED`): binds the batch's render-state override texture in
+  place of the row's `[orig: apply_shader_parameters @ 0x58DC92..0x58DCC1]`;
+  the only pusher of the override (`PlayerInfo_RenderPlayerPreview3D
+  @ 0x560F43`) always pushes zero, so every draw binds the row texture. It is
+  not a clamp flag. Stock carriers: the soldier camo body flipbooks
+  (JntOpsB1/B2/B4, RebelB1/B4, slot 1 flags 3), IJava05, Imdec07
+  (render-material-re.md §2026-09-24 rendering parity pass).
 
 ## 2. GP runtime format — corpus probe findings
 
