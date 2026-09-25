@@ -326,7 +326,7 @@ class AnimExporter:
     # --- the run ------------------------------------------------------------
     def run(self):
         model = self.model.name
-        out_path = bpy.path.abspath(self.props.adm_path)
+        out_path = bpy.path.abspath(self.props.adm_path or adm_default(self.model))
         if not out_path.lower().endswith(".adm"):
             raise ExportError(f"{model}: the animation output path must end in .adm")
         if not os.path.isabs(out_path):
@@ -413,6 +413,12 @@ class AnimExporter:
         return f"{result.stdout.strip()} ({len(strips)} clips, {len(bones)} bones)", self.notes
 
 
+def adm_default(model):
+    """A model's table path when its root names none: beside the .blend,
+    after the model."""
+    return f"//{clean_name(model.name)}.adm"
+
+
 def export_animations(context, model):
     """Export one model's clip set; returns the summary line and the notes."""
     return AnimExporter(context, model).run()
@@ -421,3 +427,14 @@ def export_animations(context, model):
 def models_with_rigs(scene):
     return [m for m in model_roots(scene) if rig_of(m) is not None]
 
+
+def clip_set_gap(model):
+    """Why a rigged model has no clip set to export, or None when it has one:
+    a table row and a clip on its rig."""
+    rows = len(model.o3d.rows) > 0
+    clips = bool(clip_actions(rig_of(model)))
+    if rows and clips:
+        return None
+    if not rows and not clips:
+        return "no clip set (no .adm row, no clip on its rig)"
+    return "no .adm row" if not rows else "no clip on its rig"

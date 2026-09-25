@@ -254,9 +254,10 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                 description="The parent's user point (the addeweap row's name, e.g. ewep01); none or "
                                             "not found: the parent's root")
     # On a model root: its animations (the clip set its rig carries).
-    adm_path: StringProperty(name="Output .adm", subtype="FILE_PATH", default="//model.adm",
+    adm_path: StringProperty(name="Output .adm", subtype="FILE_PATH", default="",
                              description="Where Export Animations writes the clip table; every clip "
-                                         "it names is written beside it as <clip>.bad")
+                                         "it names is written beside it as <clip>.bad. Empty: "
+                                         "//<model name>.adm")
     rows: CollectionProperty(type=O3DAdmRow)
     # On a skinned model's Armature: the clip's per-frame event word. Key it to
     # place footsteps, fire and foley (opennova-3di catalog lists the bits).
@@ -585,7 +586,19 @@ class O3D_OT_export_all_anim(bpy.types.Operator):
             self.report({"ERROR"}, "the scene holds no rigged model (a skinned model's LOD 0 carries "
                                    "its BN## armature)")
             return {"CANCELLED"}
-        return export_animation_sets(self, context, models)
+        # A rig with no clip set of its own (the arms beside a first-person
+        # gun, whose set the gun carries) is skipped, not an error.
+        ready = []
+        for model in models:
+            gap = animation.clip_set_gap(model)
+            if gap is None:
+                ready.append(model)
+            else:
+                self.report({"WARNING"}, f"{model.name}: {gap}; skipped")
+        if not ready:
+            self.report({"ERROR"}, "no rigged model carries a clip set (a table row and a clip)")
+            return {"CANCELLED"}
+        return export_animation_sets(self, context, ready)
 
 
 class O3D_OT_import_anim(bpy.types.Operator, ImportHelper):
@@ -678,6 +691,8 @@ def draw_animations(layout, model):
         box.label(text="No rig: a skinned model's LOD 0 carries its BN## armature")
         return
     box.prop(p, "adm_path")
+    if not p.adm_path:
+        box.label(text=f"Writes {animation.adm_default(model)}")
     clips = animation.clip_actions(rig)
     box.label(text=f"{len(clips)} clips on {rig.name} (its NLA tracks)")
     for i, row in enumerate(p.rows):
