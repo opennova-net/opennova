@@ -184,7 +184,8 @@ public:
     // Register every building's type-2 faces, weld coincident opposite pairs of
     // DIFFERENT buildings into type-5 cross-links, stamp the per-building flag
     // bytes. The register+weld half runs when do_register_weld (the original's
-    // arg, structurally nonzero at mission start — D-OCC-4).
+    // arg: Game_StartMission's argument == 0, so nonzero on the first start and
+    // zero on a round restart; D-OCC-4).
     // [orig: Terrain_InitBuildingPortals @ 0x5c7480, tail @ 0x5c5860, from
     // Game_StartMission @ 0x525e11]
     void init_mission(World &world, CollisionWorld &collision, bool do_register_weld = true);
@@ -468,7 +469,7 @@ private:
                               const int32_t center_world[3], int32_t radius,
                               uint8_t &latch, uint32_t logic_tick);
 
-    // [orig: PRNG_Next16_C @ 0x6131b0 — rol4(s + rol11(s)) ^ 1, own stream]
+    // [orig: PRNG_Next16_C @ 0x6131b0 — rol4(s + rol11(s)) ^ 1, the shared stream]
     uint16_t latch_rand16();
 
     std::vector<OcclusionModel> models_;

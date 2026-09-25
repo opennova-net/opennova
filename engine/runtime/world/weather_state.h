@@ -126,7 +126,7 @@ struct WeatherState {
     uint32_t tod_fixed24 = 12u << 24;
     uint32_t tod_advance_per_tick = 0;
     int32_t tod_minute_tickdown = kTodMinuteTicks;
-    uint32_t tod_minutes_elapsed = 0;
+    uint32_t tod_epoch = 0;
     // Script lvalue, preserved until a keyframed TOD computation writes 0/1.
     // [orig: WacCmd_Set @ 0x4ED520; Environment_ComputeTimeOfDayColors @ 0x57DE40]
     int32_t night_phase = 0; // Env_IsNightPhase @ 0x26C645C

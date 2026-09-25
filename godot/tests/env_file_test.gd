@@ -443,10 +443,22 @@ func test_field_consumption_table_mirrors_the_matrix() -> void:
 	var table := EnvFile.get_field_consumption()
 	assert_false(table.is_empty(), "the consumption table is populated")
 
+	# env-honored-matrix.md: terrain_rgb is honored through the .til tile overlay
+	# (divergence #19 FIXED) [retail PolyTrn_RenderTile @ 0x60df0d].
 	var terrain: Dictionary = table.get("terrain_tint", {})
-	assert_eq(String(terrain.get("status", "")), "partial", "terrain_tint is partial (divergence #19)")
-	assert_string_contains(String(terrain.get("anchor", "")), "0x60b8cb", "anchored to the bake consumer")
-	assert_false(String(terrain.get("note", "")).is_empty(), "deferred rows explain themselves")
+	assert_eq(String(terrain.get("status", "")), "honored", "terrain_tint is honored (divergence #19 FIXED)")
+	assert_string_contains(String(terrain.get("anchor", "")), "0x60df0d", "anchored to the tile-overlay consumer")
+	assert_false(String(terrain.get("note", "")).is_empty(), "honored-with-scope rows explain themselves")
+
+	# The matrix's other rows the pass settled: ceiling/floor, lightning and
+	# glare are honored; the star model is faithfully unconsumed (env #33,
+	# retail Star_RenderField_unused @ 0x5ad9c0 has no caller).
+	for field in ["ceiling_color", "floor_color", "lightning_color", "glare_3di"]:
+		assert_eq(String((table.get(field, {}) as Dictionary).get("status", "")), "honored",
+				"%s is honored in the matrix" % field)
+	var star: Dictionary = table.get("star_3di", {})
+	assert_eq(String(star.get("status", "")), "unconsumed", "star_3di loads but never draws")
+	assert_true(bool(star.get("faithful", false)), "retail never draws the star model either")
 
 	# The modulator chain landed at REN-5 (divergence #17 FIXED) — the outdoor
 	# exposure runs; the row keeps its interior-sampling caveat as the note
@@ -454,7 +466,7 @@ func test_field_consumption_table_mirrors_the_matrix() -> void:
 	assert_eq(String((table.get("iris_percent", {}) as Dictionary).get("status", "")), "honored",
 		"iris is honored since REN-5 (the modulator chain is live, divergence #17)")
 	assert_false(String((table.get("iris_percent", {}) as Dictionary).get("note", "")).is_empty(),
-		"the iris row keeps its interior-sampling caveat")
+		"the iris row explains itself")
 	assert_true(bool((table.get("vertex_tint", {}) as Dictionary).get("faithful", false)),
 		"vertex_tint is faithfully unconsumed (retail ignores it too)")
 

@@ -1827,7 +1827,6 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 - `Terrain_Init` attrib-bit-0x100000 water flag semantics.
 - Day/night `timeofday` enum mapping order (dawn/day/dusk/night → 1/2/3/4-or-0) — classification
   only, no gradient impact.
-- `dword_26C6450` "TOD minutes elapsed" consumer (`WeatherState::tod_minutes_elapsed` counts it; no reader found).
 - `dword_B763E8`, the debug page's `Loc: %i` row — unidentified; the F3 Environment window omits it.
 - `Precipitation_FallTick`'s wind-origin writes (`0x2c059f8..0x2c05a00` from the view matrix) have no readers — not ported.
 - **Closed at REN-4** — the pass-1 sky-gradient stage table: the effect is built

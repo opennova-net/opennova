@@ -244,9 +244,10 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	}
 
 	// mad_d2: light = (tile.a * c1 + c0) / 2 with the WITNESSED constants.
-	// tile.a is the ordered overlay render-target alpha plus the additive,
-	// byte-quantized heightfield-normal DOT3 bake on canonical cache pages; raw
-	// authored colormap alpha is cleared by the base pass and never reaches t0.
+	// tile.a is the page's cleared alpha plus the additive, byte-quantized
+	// heightfield-normal DOT3 bake on canonical cache pages (the .til and scorch
+	// overlays write RGB only); raw authored colormap alpha is cleared by the
+	// base pass and never reaches t0.
 	// [orig: PolyTrn_RenderTile @ 0x60da70; Terrain_GenerateNormalMap
 	// @ 0x603210; terrain_setup_lighting_and_shader @ 0x604420 pushes
 	//  c0 <- PolyTrn_PSConstC0_SkyColorR @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light

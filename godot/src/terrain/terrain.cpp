@@ -497,7 +497,7 @@ void Terrain::render_frame() {
 	// refreshed on an all-hit frame.
 	const uint32_t tod_epoch = cached_env_node != nullptr &&
 					cached_env_node->state().weather() != nullptr
-			? cached_env_node->state().weather()->tod_minutes_elapsed
+			? cached_env_node->state().weather()->tod_epoch
 			: 0u;
 	tile_cache_device.begin_frame(draw_list.frame_id, tod_epoch);
 	// Every missing visible page composes before the patches draw.

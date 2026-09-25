@@ -42,8 +42,9 @@ int converted_index_count(const CptTileLOD &lod, std::vector<uint32_t> &scratch)
 } // namespace
 
 // The unpacked CPT vertices use the same coordinates and locked height taps
-// as the original decoder. Normals are device metadata for the existing debug
-// and cold-cache shader path; retail's packed vertices have no normal channel.
+// as the original decoder. Normals are device metadata for the debug normal
+// view (terrain.gdshader debug mode 3); retail's packed vertices have no
+// normal channel.
 // [orig: decode_terrain_tile_vertices @ 0x602AA0, zero-height store @ 0x602DC9]
 std::vector<TerrainTileVertex> build_terrain_tile_vertices(
 		const CptFile &cpt, const TrnConfig &trn, int tile_index, bool zero_height) {

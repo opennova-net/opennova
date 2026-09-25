@@ -651,9 +651,9 @@ Dictionary EnvFile::get_field_consumption() {
 	add("envscale", "honored", false, "Env_ParseEnvScale @ 0x840950", "");
 	add("fog_level", "honored", false, "Render_SetFogState @ 0x58a950", "");
 	add("fog_type", "honored", false, "Render_SetFogState @ 0x58a950", "");
-	add("terrain_tint", "partial", false,
-			"PolyTrn_InitTextures @ 0x60b8cb; PolyTrn_RenderTile @ 0x60df0d; sample_terrain_colormap_tinted @ 0x606030",
-			"In the game this tints the ground, shoreline water, and plants. That part of the picture isn't built yet, so edits won't show in the preview.");
+	add("terrain_tint", "honored", false,
+			"PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d; EffectWorld_TickInstancesAndLightScale @ 0x5aa170; the dead bake PolyTrn_InitTextures @ 0x60b8cb",
+			"Tints the ground's tile overlays and the lighting of effects.");
 	add("vertex_tint", "unconsumed", true, "vestigial; retail modulator identity",
 			"The game itself never uses this value; it's kept so files save back unchanged.");
 	add("water_color", "honored", false, "TimeOfDay_ParseProperty @ 0x57c590", "");
@@ -661,16 +661,16 @@ Dictionary EnvFile::get_field_consumption() {
 	add("water_murk", "honored", false, "Environment_SetWaterMurk @ 0x57d4f0", "");
 	add("iris_percent", "honored", false,
 			"terrain_sector_compute_lighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
-			"The game's automatic exposure - how the view brightens in dark scenes. The outdoor exposure runs; looking into buildings does not dim yet (interiors aren't built).");
+			"The game's automatic exposure - how the view brightens in dark scenes, indoors and out.");
 	add("iris_center", "honored", false,
 			"terrain_sector_compute_lighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
-			"The game's automatic exposure - how the view brightens in dark scenes. The outdoor exposure runs; looking into buildings does not dim yet (interiors aren't built).");
-	add("ceiling_color", "partial", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
-			"Indoor light color. It takes effect when indoor lighting is built.");
-	add("floor_color", "partial", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
-			"Indoor light color. It takes effect when indoor lighting is built.");
-	add("lightning_color", "partial", false, "Environment_SetLightningFlash @ 0x57d320",
-			"Lightning flash color. Storms aren't triggered yet, so flashes don't fire in the preview.");
+			"The game's automatic exposure - how the view brightens in dark scenes, indoors and out.");
+	add("ceiling_color", "honored", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
+			"Indoor light color: lights things inside buildings and sets the indoor exposure.");
+	add("floor_color", "honored", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
+			"Indoor light color: lights things inside buildings and sets the indoor exposure.");
+	add("lightning_color", "honored", false, "Environment_SetLightningFlash @ 0x57d320",
+			"Lightning flash color.");
 	add("cloud_tint", "honored", false, "render_skybox @ 0x579b42",
 			"Colors the whole sky only when advanced clouds are off. With advanced clouds on, the sky uses the cloud keyframe colors instead.");
 	add("sky_speed", "honored", false, "render_skybox @ 0x5791de", "");
@@ -680,9 +680,10 @@ Dictionary EnvFile::get_field_consumption() {
 	add("advanced_clouds", "honored", false, "render_skybox fixed-function pass @ 0x579b42", "");
 	add("sun_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
 	add("moon_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
-	add("star_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
-	add("glare_3di", "partial", false, "render_skybox_sun_glow @ 0x5acd00",
-			"The sun glare always shows at full strength; hills don't block it yet.");
+	add("star_3di", "unconsumed", true,
+			"EffectWorld_LoadCelestialModels @ 0x5adcd6; Star_RenderField_unused @ 0x5ad9c0 has no caller",
+			"The game loads the star model but never draws it.");
+	add("glare_3di", "honored", false, "render_skybox_sun_glow @ 0x5acd00", "");
 	return table;
 }
 

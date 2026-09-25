@@ -137,12 +137,3 @@ UNCONSUMED (○) rows with tooltips instead of silently accepting edits. C7 also
 the previously-unexposed fields (water murk, lightning, ceiling/floor, vertex tint,
 iris) as editable Advanced rows, badged where deferred. The table mirrors this matrix;
 rows in both flip only with a citation from the grill record.
-
-## Open after the 2026-09-24 pass
-
-- `EnvFile.get_field_consumption()` (godot/src/env/env_file.cpp) lags this
-  matrix: `ceiling_color` / `floor_color` still read partial ("takes effect when
-  indoor lighting is built"), the iris note says interiors are not built,
-  `lightning_color` reads partial ("Storms aren't triggered yet"), `star_3di`
-  reads honored, and `glare_3di` reads partial ("hills don't block it yet").
-  The table is code; it flips with its own change.

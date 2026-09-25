@@ -864,7 +864,7 @@ logged in [render-material-re.md](render-material-re.md).
 
 The main projection far plane uses floor(raw fog distance)+1. Retail reads
 the signed high word at 0x26C681E, adds one, and passes it to Render_SwapProjectionFarZ,
-the far-Z setter despite its older decal-bias label. The source is the raw
+the far-Z setter. The source is the raw
 Q16 Env_FogDistCurrent. [orig: Render_ProcessMainSceneFrame @ 0x5CA0F0,
 load/add/call @ 0x5CA4BA/0x5CA4C1/0x5CA4D0; Render_SwapProjectionFarZ @ 0x58A8D0]
 

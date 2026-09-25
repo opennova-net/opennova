@@ -855,7 +855,7 @@ float MissionEnvironment::get_water_height() const {
 // serve the GODOT-world direction through the util/axes.h swap (2026-08-20).
 // Raw-tuple consumers (the opennova_sun_direction global and the terrain
 // u_sun_direction uniform, whose shaders re-swizzle into the engine texture
-// basis; the star-field cull) read state_ directly and never route here.
+// basis) read state_ directly and never route here.
 Vector3 MissionEnvironment::get_sun_direction() const {
 	return render_float_to_godot(state_.sun_direction());
 }

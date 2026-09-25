@@ -5,8 +5,9 @@
 // writes into the bodies: placement and the UPL_INTENSITY submit value.
 // Engine equivalents (docs/env/env-tod-re.md "Celestial bodies"):
 // - [orig: EffectWorld_LoadCelestialModels @ 0x5adc50] resolves
-//   sun_3di/moon_3di/star_3di/glare_3di (glare/star under additive mode
-//   0x300000).
+//   sun_3di/moon_3di/star_3di/glare_3di; glare, star and upl load after
+//   Model_SetNextLoadPassFlags(0x300000, 0), z-write off + ZFUNC ALWAYS (not
+//   a blend mode). The star model is never drawn (env #33).
 // - [orig: render_celestial_bodies @ 0x5acaa0] places sun/moon at
 //   camera + direction * 64 (full camera height, identity rotation) with the
 //   witnessed overcast/SunDim (sun) and fog-distance (moon @ 0x5acc40)

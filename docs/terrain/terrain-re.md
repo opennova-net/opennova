@@ -950,7 +950,7 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   empty-handed `@ 0x60DDC6`), so the first frame claims nothing and a frame
   with more pages than claimable records draws the rest with t0 unbound;
   claims stamp last use, compose frame and `Env_TodEpoch`
-  (`@ 0x60DB56..0x60DBF0`; `WeatherState::tod_minutes_elapsed`); the sweep
+  (`@ 0x60DB56..0x60DBF0`; `WeatherState::tod_epoch`); the sweep
   composes every missing visible page synchronously before the draw (the
   device waits on the worker pool); an all-hit sweep evicts one TOD-stale
   record (`Terrain_EvictOldestTodStaleTile @ 0x604600`) and re-sweeps

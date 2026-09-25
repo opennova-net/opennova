@@ -62,9 +62,11 @@ corpus).
 
 The manifest distinguishes matching behavior from matching behavior with
 named, bounded residuals. It never converts an open divergence into a pass.
-The important retained exceptions are D-TERRAIN-7/-9 and
-D-FOLIAGE-7/-9/-10. Their scopes and current evidence remain authoritative in
-the linked RE records and divergence ledger.
+The retained ledger exceptions are D-TERRAIN-7 and D-FOLIAGE-7 (D-TERRAIN-9
+retired with the ONED terrain preview on 2026-08-24; D-FOLIAGE-9/-10 and
+D-RORD-7 closed 2026-09-24), plus the water surface's named mirror residuals.
+Their scopes and current evidence remain authoritative in the linked RE records
+and divergence ledger.
 
 Lighting validation is layered:
 
@@ -151,7 +153,10 @@ post-particle overlay stage, `renderer::append_corona_overlay`; the
 bodies draw through their authored object materials rather than
 `celestial*.gdshader`, and the NVG post is FrameFx's render-to-texture chain
 rather than `nvg_view.gdshader` ([render-order-re.md](render-order-re.md)
-§2026-09-24 rendering parity pass).
+§2026-09-24 rendering parity pass). On 2026-09-25 the `nvg-post` family and
+the `terrain-editor-preview` family (its `terrain_editor.gdshader` left with the
+ONED terrain preview) left `provenance.json` with their files, and the
+`particles` family names the far-side wrappers and `particle_far_pass.gdshaderinc`.
 
 Re-run the GUT contract tests, focused native renderer tests, full GUT suite, and
 windowed probe whenever a shader, shader owner, lighting producer, renderer,

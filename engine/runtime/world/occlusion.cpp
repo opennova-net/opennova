@@ -234,7 +234,8 @@ OcclusionWorld::Instance *OcclusionWorld::instance(EntityHandle h) {
 // ----------------------------------------------------------------------------
 
 // [orig: Terrain_InitBuildingPortals @ 0x5c7480 — arg != 0 runs register + weld
-// (the sole call site pushes ebp, structurally nonzero at mission start,
+// (the sole call site @ 0x525e11 pushes Game_StartMission's argument == 0:
+// nonzero on the first start, zero on Game_RestartRoundSP's round restart,
 // D-OCC-4); the flag-stamp tail @ 0x5c5860 always runs.]
 void OcclusionWorld::init_mission(World &world, CollisionWorld &collision,
                                   bool do_register_weld) {
@@ -445,7 +446,9 @@ bool OcclusionWorld::sphere_in_view(const OcclusionFrameCamera &cam,
     return true;
 }
 
-// [orig: PRNG_Next16_C @ 0x6131b0 — its own state word (BSS-zero boot);
+// [orig: PRNG_Next16_C @ 0x6131b0 on the process-wide stream its other
+// consumers share: the world's prng16_c_state when bound through
+// bind_focal_wind_random, latch_rng_ only when unbound;
 // state = rol4(state + rol11(state)); return low16 ^ 1; state ^= 1.]
 uint16_t OcclusionWorld::latch_rand16() {
     auto rol = [](uint32_t v, int n) { return (v << n) | (v >> (32 - n)); };
