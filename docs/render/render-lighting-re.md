@@ -27,19 +27,18 @@ scalar function in this record; the GUT env vectors
 | Modulator → shader gain unpack (÷64, 64 = identity) | MATCHING | `renderer::unpack_modulator_scale` `[orig: Render_UnpackModulatorToLightScale @ 0x58db30 → Render_LightScaleR/G/B @ 0x8409f4..fc; EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaef0 → @ 0x840b24..2c]`; `renderer_state_vectors` section 5 (identity 0x404040 → exactly 1.0, 0xFF → 255/64) |
 | The modulator chain (modulator2 → modulator → every color block, same tick) | MATCHING (ported; env #17 CLOSED) | `env::ModulatorChain` + the witnessed block order `[orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..0x57f03c]`; 62-tick target chase `[orig: @ 0x57e512..0x57e538; ColorBlock_SetStepDeltas @ 0x57d940]`; env vectors re-dumped surgically (exactly the 8 weather checkpoint rows; hand-check wb/k064 `0x31·61/64 = 0x2E`) |
 | Iris auto-exposure sampling | MATCHING (full marched port) | the curve was already ported (env record §Iris); the 3-point camera-ray march is complete as of 2026-08-22: `Simulation::compute_iris_samples` clips the 8 u camera ray against terrain and the local player's candidate solids, samples thirds, classifies blink interiors only through that same fixed candidate slice, preserves the per-sample interior-group state transition, and casts all three outdoor rays against both pool-1 and pool-2 slice entries behind the local-player count gate; `WeatherCore::set_exposure_from_iris_samples` applies ceiling/floor indoors, ×level/8 sun outdoors, and INT /3 average `[orig: Environment_ApplyFogAndAmbient @ 0x57e440; compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550; raycast_entity_collision @ 0x413760; raycast_find_collision_entity @ 0x539a70]`; the outdoor sample stays the no-world fallback |
-| World lighting block (per-pass build + ctx store) | MATCHING (math ported; production-fed 2026-09-10) | `renderer::build_world_lighting` `[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090; RenderBatchCtx_StoreLightingConstants @ 0x5d89e0]` incl. the NVG hemi rewrite (now live on `EnvironmentState::ceiling_color()/floor_color()` too — the interior pair takes the R term on all three channels `@ 0x5c82a5..0x5c82e9`, previously only sky/ground were rewritten in production), the thermal-view grey (`Player_CanFireWeapon && Def flags2 & Thermal` — the IDB name `Player_IsVehicleSeatHasFlag4` is a misnomer for EquippedSlot+0x118 → Def+0x20 → flags2+0x0C & 4; fed by `EnvironmentState::set_thermal_view` from the local view frame, only shipped trigger WPN_EMP50BD), the thermal frame's BySide-wave 0.25 block (the bool arg; NOT an NVG dim), and the two hemisphere averages; the terrain leg `Render_TerrainScene @ 0x610e51..0x610e65` (0x101010/0xF0F0F0 ramps, def bit + camera mode 0, NVG outranks) rides `build_terrain_uniforms`; `renderer_state_vectors` section 5. Residual (documented, not ledgered): the 0.25 flat block under the two far-water-side entity waves needs a per-instance lane in the object shader |
-| Per-entity uniforms (slots 227-230) + interior daylight lerp | MATCHING (math ported; reimpl transfer wired; delivery shape ported 2026-08-26) | `renderer::compute_entity_lighting` `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`; the aux float = the parent interior's daylight openness (model+536), NOT a dual-LOD fade. The reimpl now parses `items.def light_transfer` as a clamped percentage, carries it through `ItemDatabase`, and applies the normalized value to interior ROBJ sections and contained player/viewmodel lighting. Delivery follows retail's split: the world block is the per-pass constant set (`opennova_light_block_*` global shader parameters written by `MissionEnvironment` once per env change, the `RenderBatchCtx` block), and the per-entry factors (effectScale, interior flag, daylight t) are one `u_entity_light` instance uniform stamped on the entity's surface instances on change; `shared.gdshaderinc` evaluates the same lerp/scale per draw, with `renderer::compute_entity_lighting` as the pinned oracle. No material carries lighting or fog state and nothing restamps per frame |
-| Object NORMAL-pass lighting | MATCHING except named cube-content residual | Fixed function: `renderer::ff_vertex_light` + checked-in `fixed`/`flag` techniques reproduce ambient + directional + hemisphere delta lights and selected point lights at vertex rate, saturated then MODULATE2X `[orig: Lighting_SetHemisphereD3DLights @ 0x5d8cb0; D3D light 0 @ 0x5d9ce2..0x5d9d76; _FFP.fx TBoringFFP]`. Highest-quality DOT3/Phong effects retain their authored mapped-normal pixel N.L/N.H. Source-specific vertex factors stay distinct: ordinary bump/Phong effects carry attenuation × geometric self-shadow, BDiffT2's point stage carries attenuation only, and SkBDiffT2/SkBDiffO2 also use geometric/Gouraud hemisphere with no directional self-shadow `[orig: _vsDiffT/O, _vsPhongT/O, _vsSkDfT/O, _vsSkPhT/O; BDiffT2.fx; SkBDiffT2.fx; SkBDiffO2.fx; _psDiff.fx; _psPhong.fx]`. The 24-technique decoded-source ledger and raster response matrix are `object/technique_validation.json` + the `render_swatch` probe. |
-| Per-entity sun visibility (effectScale source) | MATCHING (all roles, 2026-08-23) | `renderer::sun_visibility_factor` `[orig: Entity_ComputeSunVisibility @ 0x5c6800; stack write @ 0x5c7fa5]`; local/authority rows use `world::CollisionWorld::sun_visibility_blocked_rays`, while decoded rows use `wire_sun_visibility_blocked_rays` over a separately wire-keyed candidate arena rebuilt on the same 17-tick edge. Both cast the witnessed one-segment/three-radius query from the exact scaled bbox midpoint and only against the source's own `+0x1BC`/`+0x1C0`-equivalent slice. `Simulation::get_draw_lighting_changes` emits typed identity triples; `EntityPresenter::set_entity_lighting_context` caches the factor across cold body/held-weapon construction. The local player's third-person body dims while FP parts keep the witnessed effectScale=1 exemption (D-RLIT-3). |
+| World lighting block (per-pass build + ctx store) | MATCHING (math ported; production-fed 2026-09-10) | `renderer::build_world_lighting` `[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090; RenderBatchCtx_StoreLightingConstants @ 0x5d89e0]` incl. the NVG hemi rewrite, applied by `EnvironmentState::build_light_values` to the four hemisphere colours (sky/ground per channel, ceiling/floor on the R term `@ 0x5c82a5..0x5c82e9`) under the `g_camera_mode == 0` gate (2026-09-24, "Keep the env colour blocks raw under NVG; rebuild the terrain NVG sky as bytes" and "Gate the NVG world treatment on camera mode 0"); the colour getters stay RAW, matching the consumers that read the raw blocks (`Env_WaterColorLit @ 0x57f177`, `Env_TerrainLightCombined @ 0x57f0d5`, the slot drape `@ 0x5d5f66..0x5d5f6d`), the thermal-view grey (`Player_CanFireWeapon && Def flags2 & Thermal` — the IDB name `Player_IsVehicleSeatHasFlag4` is a misnomer for EquippedSlot+0x118 → Def+0x20 → flags2+0x0C & 4; fed by `EnvironmentState::set_thermal_view` from the local view frame, only shipped trigger WPN_EMP50BD), the thermal frame's BySide-wave 0.25 block (the bool arg; NOT an NVG dim; retail brackets BOTH BySide calls with it, `@ 0x5c9511` and `@ 0x5c95f8`, and the port carries it on the live per-instance lane `u_entity_light.w` + `u_thermal_wave_draw` in `shared.gdshaderinc`), and the two hemisphere averages; the terrain leg `Render_TerrainScene @ 0x610e51..0x610e65` (0x101010/0xF0F0F0 ramps, def bit + camera mode 0, NVG outranks) rides `build_terrain_uniforms`; `renderer_state_vectors` section 5 |
+| Per-entity uniforms (slots 227-230) + interior daylight lerp | MATCHING (math ported; reimpl transfer wired; delivery shape ported 2026-08-26) | `renderer::compute_entity_lighting` `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`; the aux float = the containing building's ItemDef+0x218 `light_transfer` / 100 (written only by `ItemDef_ParseProperty @ 0x4a1a2c..0x4a1a50`), NOT a dual-LOD fade. The reimpl parses `items.def light_transfer` as a clamped percentage, carries it through `ItemDatabase`, and (2026-09-24, "Give every contained drawn entity the interior lighting lerp and group") applies the witnessed wave split: every building's ROBJ 1+ lerps by its own transfer, a contained person by its building's, a contained non-person with t = 0 (see the per-entity reader and the "Hosted `light_transfer` wiring" section). Delivery follows retail's split: the world block is the per-pass constant set (`opennova_light_block_*` global shader parameters written by `MissionEnvironment` once per env change, the `RenderBatchCtx` block), and the per-entry factors (effectScale, interior flag, daylight t) are one `u_entity_light` instance uniform stamped on the entity's surface instances on change; `shared.gdshaderinc` evaluates the same lerp/scale per draw, with `renderer::compute_entity_lighting` as the pinned oracle. No material carries lighting or fog state and nothing restamps per frame |
+| Object NORMAL-pass lighting | MATCHING except named cube-content residual | Fixed function: `renderer::ff_vertex_light` + checked-in `fixed`/`flag` techniques reproduce ambient + directional + hemisphere delta lights and selected point lights at vertex rate, summed and saturated per vertex, Gouraud-interpolated, then MODULATE2X `[orig: Lighting_SetHemisphereD3DLights @ 0x5d8cb0; D3D light 0 @ 0x5d9ce2..0x5d9d76; _FFP.fx TBoringFFP]`. Only the D3D fixed-function point lights carry the 1.5× diffuse boost; every shader pass reads the unboosted `Light_GetPointLightParams` colour (2026-09-24, "Deliver the unboosted point-light colour; keep the 1.5 on the FF lights"; see the EffectWorld witness below). Highest-quality DOT3/Phong effects retain their authored mapped-normal pixel N.L/N.H. Source-specific vertex factors stay distinct: ordinary bump/Phong effects carry attenuation × geometric self-shadow, BDiffT2's point stage carries attenuation only, and SkBDiffT2/SkBDiffO2 also use geometric/Gouraud hemisphere with no directional self-shadow `[orig: _vsDiffT/O, _vsPhongT/O, _vsSkDfT/O, _vsSkPhT/O; BDiffT2.fx; SkBDiffT2.fx; SkBDiffO2.fx; _psDiff.fx; _psPhong.fx]`. The 24-technique decoded-source ledger and raster response matrix are `object/technique_validation.json` + the `render_swatch` probe. |
+| Per-entity sun visibility (effectScale source) | MATCHING (all roles, 2026-08-23) | `renderer::sun_visibility_factor` `[orig: Entity_ComputeSunVisibility @ 0x5c6800; stack write @ 0x5c7fa5]`; local/authority rows use `world::CollisionWorld::sun_visibility_blocked_rays`, while decoded rows use `wire_sun_visibility_blocked_rays` over a separately wire-keyed candidate arena rebuilt on the same 17-tick edge. Both cast the witnessed one-segment/three-radius query from the exact scaled bbox midpoint and only against the source's own `+0x1BC`/`+0x1C0`-equivalent slice. `Simulation::draw_lighting_changes` (ex `get_draw_lighting_changes`, over `inmatch::EntityLightingFeed` since 2026-09-24) emits the typed per-identity context; `EntityPresenter::set_entity_lighting_context` caches the factor across cold body/held-weapon construction. The local player's third-person body dims while FP parts keep the witnessed effectScale=1 exemption (D-RLIT-3). |
 | EffectWorld dynamic point lights (instance pool, spawn/query/select, color × modulator × RgbGen, {1,0,15/r²,1}, ≤3 per batch entry, owner/interior groups, fade/decay lifecycle, transient spawners, coronas) | **MATCHING on the locked highest-quality path (≤3 per strip) (2026-08-23; Spot/Target and foliage delivery premises witnessed DEAD)** | `renderer::LightScene` hosts the 4096×176B pool, safe generation leases, target-disable gates, object first-63 overlap query (general/terrain first-64), group-passing nearest-THREE select (the batch-entry cap; the 4 of `Light_SelectAndEnableForDraw` is the transient D3D enable count), and per-draw delivery `[orig: Light_InstanceTable @0x2732e28; collect_nearby_zones_by_aabb @0x5aa250; Light_SelectAndEnableForDraw @0x5ab9d0; collect_render_objects_for_batch @0x5d9229; CRenderBatchQueue_FlushBatches @0x5da26b/@0x5da5de]`. `EffectLightDirector` routes mission-start and powerup-respawn LGHT plus four transient families. Authored positions use the entity matrix once and remain spawn-fixed; `subobject` selects an owner section only. The final spawned handle shares entity+0x1B4 with muzzle glow, a husk swap does not rescan, and entity removal clears only that final handle `[orig: Entity_SpawnGlowEffects @0x56c82d..0x56c92c; powerup callback @0x442b40/@0x442ba0 registered @0x442ce6; Entity_UpdateMuzzleGlowEffect @0x56c960; Entity_Destroy @0x43e903..0x43e916]`. BUILDING ObjectModels and static atlas rows share one initialized entity query cube across their ROBJ owner sections; static props carry containing-blink groups (D-RLIT-11, minted and closed 2026-09-13). Native/GUT tests pin selection, isolation, lifecycle, and replacement; the 24-technique Forward+ D3D12 probe proves atlas/live raster identity. Coronas and terrain projected lights are ported end to end `[orig: EffectWorld_RenderLightCoronas @0x5aaf40; Light_SetupTerrainProjectedPass @0x5aa830]`. The apparent foliage leg is inert in retail's max-quality program: the call at `Foliage_RenderFarPatches @0x60a5dc` enables D3D lights, but `Foliage_WindSwayVS` declares no normal/light input and writes `oD0=c6`, leaving no consumer outside the failed-VS fixed-function fallback `[orig: Terrain_CreateFoliageVertexShaders @0x5ff630; Foliage_SetupFarSlotDraw @0x60087a]`. |
 | Model-authored `LGHT` chunks | **MATCHING on the runtime path (2026-08-23)**: consumed at spawn via EffectWorld, never via per-material uniforms | `Entity_SpawnGlowEffects @0x56c7c0` walks the model's light array (count +0xC4, records +0xC8, stride 120) and spawns one instance per record: entity-matrix position, white base color, radius = atten_end × 65536, RGB-gen block, subobject/blink owner group, and disable flags 512/1024/2048 `[orig: @0x56c82d..0x56c92c]`. There is no authored-light position update caller and no husk-model rescan. The per-material `u_local_light_*` path has no gameplay caller (`u_local_light_count = 0`); gameplay illumination flows through `renderer::LightScene`. |
 | Terrain surface c0/c1 | MATCHING (ported) | c0 = SKY block, c1 = LIGHT block (both [0] ÷255): `renderer::terrain_surface_light`, `terrain_lighting.gdshaderinc` corrected from the gobj-era combined/fill guess `[orig: terrain_setup_lighting_and_shader @ 0x604420; init_terrain_lighting_color_ramps @ 0x604ee0 ← Render_TerrainScene @ 0x610c80]` |
-| Dynamic projected entity shadows | WITNESSED / reimpl-native approximation | Retail allocates the independent projected render-slot path for people (and the local player) or ItemDef `DynamicShadow`; attached third-person weapons join their entity, while the first-person viewmodel does not cast. ItemDef `NoShadow` does not gate this path. Mission placement carries that admission policy (the aspirational streamed-model resolver twin was deleted 2026-08-11 — unreferenced since birth) `[orig: Entity_InitFromModel @ 0x40E1BC..0x40E1F7; GUT: mission_object_placer_test, object_model_runtime_gate_test]` |
 | Static sector/model sun shadows onto terrain/foliage | WITNESSED / hosted page-alpha subset | pool-2 buildings cast unless `NoShadow`; pool-1 items additionally require `StaticShadow`; every ROBJ in the selected LOD enters a black PROJSHAD temporary RT which is composited into terrain-tile alpha, not back onto sector models. Runtime now collects typed static sources, resolves selected LOD/all-ROBJ geometry and every diffuse-alpha frame, evaluates AlphaGen/full UV transforms and time/control flipbooks through the ordinary-object runtime functions, rasterizes A-only projections into the shared terrain/foliage page, and retires the global directional surrogate. The max-quality c7/c8 projection, skinned rigid collapse, material pass state, animation evaluator, and final ONE/ONE composite are exact `[orig: c7/c8 @ 0x60A220..0x60A34F; Terrain_CollectAndRenderTileModels @ 0x60D250; submit tick @ 0x5DAD9D; batch CTRL snapshot/restore @ 0x5D91AB..0x5D91DE / 0x5DA1B8..0x5DA1FD; material consumer @ 0x58DB80; PolyTrn_RenderTile composite @ 0x60E0C6..0x60E19D]`; scorch/order and cache cadence/edge/address/mip tails remain D-TERRAIN-7, while whole-process CTRL/RNG ordering remains D-3DI-2 |
 | Foliage/sector-model lighting constants | MATCHING (witnessed; values and max-quality non-response pinned) | the blend PS inherits the terrain device's c0/c1 and consumes cached-tile `t1.a*c1+c0`; `Foliage_WindSwayVS` writes `oD0=c6` and declares no normal/light input. The per-patch `Light_SelectAndEnableForDraw @0x60a5dc` call therefore mutates state with no consumer while that VS is bound; only the excluded failed-VS FVF fallback could consume it `[orig: Terrain_CreateFoliageVertexShaders @0x5ff630; Foliage_SetupFarSlotDraw @0x60087a; Foliage_RenderFarPatches @0x609de0]`. |
 | Lighting textures + DOT3 dynamic-light shader | witnessed / reimpl-native equivalent | procedural falloff set + the last embedded PS outside FrameFX `[orig: Lighting_InitTextures @ 0x5a94f0]` — the ps.1.1 DOT3 per-pixel light is the fixed-function era's OmniLight; the reimpl's real per-pixel lights serve the intent |
 | Cubemap and Phong lookup sources | MATCHING | the highest-quality 256² CubeEnvironment shell synchronously re-renders the exact sky + sun/moon callback on all six faces every 128 frames, applies the 0x60 gamma-byte dim (the faces reach the published RD cubemap through a RenderingDevice copy leg, no CPU readback), and adds the rotated static lobe `[orig: init_render_textures @ 0x58f6e0; update_environment_cubemap @ 0x6106a0; callback @ 0x5c3700]`; the Forward+ D3D12 axis/orientation/byte probe validates the final samplerCube. Static sun-glint cube = white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; `Render_CreateSystemTextures @ 0x58aca0` creates the exact 256×256 `gsys_phong` lookup with N.H exponents 4/16/64 in RGB and N.L in alpha. |
-| Render-slot (entity ground shadow) pipeline | **PORTED with open 03TR low-sun defect (2026-08-24)** | the full slot family is witnessed and hosted: frame-open sun default with the 0.25 vertical clamp then negation `[orig: render_shadow_pass @ 0x5d7b70]`, slot registration + LOD `[orig: RenderSlot_AllocSlot @ 0x5d5690]`, priority scoring / 24-patch / 12-RT assignment `[orig: RenderSlot_SortAndAssign @ 0x5d6530]`, RT size chain `[orig: RenderSlot_InitTextureChain @ 0x5d5320]`, dominant-light pick + anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]`, refresh cadence `[orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690]`, and the terrain drape + authored blob decal `[orig: RenderSlot_DrawAllDrapes @ 0x5d6e20; RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0; RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]`. Planning/color laws portable in `engine/runtime/renderer/render_slot_shadow` (ctest `renderer_render_slot_shadow`) with the PROJSHAD coverage and blend-state tables in `object_shader_template` (ctest `renderer_material_classify`); the device (since 2026-08-29) is `godot/src/env/slot_shadow.cpp` publishing one typed request per armed slot, `godot/src/render/slot_capture_adapter.cpp` drawing them as a PRE_OPAQUE RenderingDevice pass into the twelve resolve targets (the retail white clear, black under the technique's coverage and blend state, GPU bone-palette skinning) and `godot/shaders/slot_shadow_drape.gdshader` sampling them (GUT `slot_shadow_test` headless + windowed, `sun_shadow_test`). This supersedes the earlier ADR-0023-era "Shadow_/Scar_ family exclusion" note for the RenderSlot_* half; the Scar_ decal family remains out of REN scope. Open symptom: the 03TR dawn M939 drape has the same excess tail at rest and visibly flickers under lateral camera movement; see the note below. |
+| Render-slot (entity ground shadow) pipeline | **PORTED (2026-09-24 rendering parity pass; the 2026-08-24 03TR low-sun symptom not reproduced, see "The render-slot side")** | the full slot family is witnessed and hosted: admission for people (and the local player) or ItemDef `DynamicShadow`, not gated by `NoShadow`, attached third-person weapons joining their entity and the first-person viewmodel never casting `[orig: Entity_InitFromModel @ 0x40E1BC..0x40E1F7]`; frame-open sun default with the 0.25 vertical clamp then negation `[orig: render_shadow_pass @ 0x5d7b70]`, slot registration + LOD `[orig: RenderSlot_AllocSlot @ 0x5d5690]`, priority scoring / 24-patch / 12-RT assignment `[orig: RenderSlot_SortAndAssign @ 0x5d6530]`, RT size chain `[orig: RenderSlot_InitTextureChain @ 0x5d5320]`, dominant-light pick + march start + anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, refresh cadence and the unlit black capture `[orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690]` (the receiver lighting `RenderSlot_SetupNextLighting @ 0x5d7250` is dead behind the always-zero `sub_5D7240 @ 0x5d7240`), and the per-slot patch-mesh terrain drape `[orig: RenderSlot_DrawAllDrapes @ 0x5d6e20; RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0; RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130]` (the authored blob leg `RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0` is dead in JO). Planning/color laws portable in `engine/runtime/renderer/render_slot_shadow` (ctest `renderer_render_slot_shadow`) with the PROJSHAD coverage and blend-state tables in `object_shader_template` (ctest `renderer_material_classify`); the device (since 2026-08-29) is `godot/src/env/slot_shadow.cpp` publishing one typed request per armed slot, `godot/src/render/slot_capture_adapter.cpp` drawing them as a PRE_OPAQUE RenderingDevice pass into the twelve resolve targets (the retail white clear, black under the technique's coverage and blend state, GPU bone-palette skinning) and `godot/shaders/slot_shadow_drape.gdshader` sampling them (GUT `slot_shadow_test` headless + windowed, `sun_shadow_test`). This supersedes the earlier ADR-0023-era "Shadow_/Scar_ family exclusion" note for the RenderSlot_* half; the Scar_ decal family remains out of REN scope. The 2026-09-24 pass ported the per-slot fade/cull/fog, the per-slot patch mesh and lift, the march start, the attached-light drape, the capture axes and the Flags-&-1 slot gate; the drape's draw order is a new device fold beside the existing ones (D-RLIT-10's capture eye, the multisampled capture, the display-frame pick cadence); see "Open after the 2026-09-24 pass". |
 
 **2026-08-22 object-point-light correction.** The broad "point lighting is
 vertex-rate" wording in the historical EffectWorld row applies only to fixed
@@ -97,9 +96,14 @@ slice):
   `+0x1BC`/`+0x1C0` candidate slice for every sample and tests only type-5
   building entries
   (`Entity_TestCollisionSections @ 0x4aef90`, flags 0x8000). INDOOR (hit slot 0
-  nonzero): pool-2 entity = `hit >> 20`; **no interior data (`pool_entry[12]`
-  == 0) short-circuits to the curve with ALL inputs zero — the ÷2m limb
-  diverges and the clamp serves gain 255** `[orig: @ 0x5c7652]`; else
+  nonzero): pool-2 entity = `hit >> 20`; **no render model (`pool_entry[12]`,
+  the entity's +0x30 render-model pointer, == 0) short-circuits to the curve
+  with ALL inputs zero — the ÷2m limb diverges and the clamp serves gain 255**
+  `[orig: @ 0x5c7652]` (corrected 2026-09-24: +0x30 is the model pointer the
+  collectors skip model-less entities on, `collect_visible_entities_for_terrain
+  @ 0x5c8cf6..0x5c8cff`, `collect_visible_sector_userpoints @ 0x5c6c3f`, and
+  `Terrain_RenderSectorModels` reads as model data `@ 0x5c5dac`, not interior
+  data); else
   directional = 0, sky/ground ← the CEILING/FLOOR blocks' [1] slots
   (@ 0x26C6474 / @ 0x26C64DC), interior light group = `(hit >> 12) & 0x1F`
   (`Lighting_SetInteriorLightGroup @ 0x5a90e0`, pair @ 0x272ED84/0x272ED80).
@@ -160,7 +164,10 @@ remains the no-world fallback.
 `Render_LightScaleR/G/B @ 0x8409f4..fc` = modulator bytes ÷ 64; its SOLE
 consumer is `apply_shader_parameters @ 0x58e05d` binding **ColorSrcGlobalGain
 (handle slot 232)** — in the shipped `.fx` corpus the SELFLUM emissive
-(`SelfLumColor × ColorSrcGlobalGain`). `EffectWorld_UnpackModulatorToAmbientScale
+(`SelfLumColor × ColorSrcGlobalGain`) and the glass / mirror FFP emissive
+(`ReflectColor × ColorSrcGlobalGain`), both saturated by the lighting stage
+before MODULATE2X (`_FFP.fx` SELFLUM block, `Glass.fx TGlassFFP`; gain bind
+`apply_shader_parameters @ 0x58e050..0x58e06a`). `EffectWorld_UnpackModulatorToAmbientScale
 @ 0x5aaef0` writes `EffectWorld_AmbientScaleR/G/B @ 0x840b24..2c`, consumed
 by `Light_GetPointLightParams @ 0x5a9180`, `Light_FillD3DPointLight
 @ 0x5aa450`, `Light_SetupTerrainProjectedPass @ 0x5aa830` (ex `render_foliage_instance`, renamed 2026-08-21 — the per-light terrain projected pass, its argument a `Light_InstanceTable` slot),
@@ -178,9 +185,29 @@ world lighting through the block colors themselves) ÷255: [0] dir-enable
 flag, [1..3] ← `Env_LightBlock`, [5..7] ← −normalize(`Environment_GetLightDirectionFloat
 @ 0x57d870`), [8..10] ← `Env_SkyBlock`, [12..14] ← `Env_GroundBlock`,
 [16..18] ← `Env_FloorBlock`, [20..22] ← `Env_CeilingBlock`. Overrides: the
-NVG hemisphere rewrite (`g_NVGActive @ 0xb7654c` && !`dword_A890C8`):
+NVG hemisphere rewrite (`g_NVGActive @ 0xb7654c` && `g_camera_mode @ 0xa890c8`
+== 0, the camera mode written by `Camera_SetTrackedEntity @ 0x439267 /
+0x4392c3`: 0 first person, 1 chase, 3 overhead, 4 death lerp):
 `c' = c·0.25f' + modulator_byte·f'/640`, `f' = (g_NVGBrightnessLevel+1)·0.2`
-(`@ 0x5c8205..0x5c82e9`, ceiling/floor included — R term on all six channels); the thermal-view grey (`Player_CanFireWeapon` &&
+(`@ 0x5c8205..0x5c82e9`, ceiling/floor included — R term on all six channels).
+Every NVG world/post leg shares that gate
+(`CTerrainRenderer_BuildLightingShaderConstants @ 0x5c81c4..0x5c8205`,
+`Render_TerrainScene @ 0x610cfc..0x610d10`, `Render_ProcessMainSceneFrame
+@ 0x5ca6ab..0x5ca6bf`), so the death lerp camera (mode 4) drops the
+treatment; port `world::player_view_nvg_visible` (`camera_mode == 0`,
+2026-09-24 "Gate the NVG world treatment on camera mode 0"). The rewrite is the
+object block's (and the terrain sky's, below) only: `EnvironmentState::
+build_light_values` applies it to the four hemisphere colours, the colour
+getters stay raw, and water colour, the underwater fog, particle ambient,
+scars and the slot drape are NVG-invariant (2026-09-24, "Keep the env colour
+blocks raw under NVG; rebuild the terrain NVG sky as bytes"). The sky dome's
+colour unpack `Color_UnpackToFloat4 @ 0x578900` reads the same NVG pair:
+f = (level+1) × 0.2, channel = byte × 2 × 0.25 / 255 + f × 0.0015625
+(`@ 0x578913..0x57897b`); the normal branch is byte × 2/255, unclamped,
+a = 1 (`@ 0x578985..0x5789c3`); ported in `runtime/environment/sky_frame.cpp`
+(`sky_constant`), gated by `EnvironmentState::nvg_view_active()` (2026-09-24,
+"Dim the sky dome under NVG, whiten it under thermal, exact light blend"). The
+thermal-view grey (`Player_CanFireWeapon` &&
 `Player_IsVehicleSeatHasFlag4` = equipped Def flags2 & Thermal(4), no scope test): dir 0.1, all hemis 0.5, flag cleared
 (`@ 0x5c8389..0x5c843c`), latched per frame `@ 0x5ca2da..0x5ca2e3` and driving the 0x808080 clear/fog; the thermal BySide-wave block (the bool arg, formerly misread as an NVG world dim): everything 0.25,
 dir zeroed (`@ 0x5c8448..0x5c84f0`). `RenderBatchCtx_StoreLightingConstants
@@ -195,14 +222,40 @@ slots pinned by their `GetParameterByName` stores
 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor,
 230 AmbientColor**. Outdoor path: 227 ← ctx dir color × entry[9]
 (effectScale), 228/229/230 ← ground/sky/outdoor-average direct. Under batch
-entry flag bit 1 (submit 0x80 — interior-parented entities and the armed
-viewmodel): 227 additionally × entry[10], 228 ← lerp(floor, ground, t),
-229 ← lerp(ceiling, sky, t), 230 ← lerp(indoorAvg, outdoorAvg, t) where
-**t = entry[10] = the parent interior's daylight-openness float** (interior
-model data +536, captured into the render-state stack aux by the wave
-`[orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7f8a..0x5c7f93]` and the
-viewmodel `[orig: @ 0x4def3c]`) — a closed building gets pure floor/ceiling
-ambience with no sun. **entry[9] = the sun-visibility factor**.
+entry flag bit 1 (submit 0x80 for a contained entity and the viewmodel inside
+a building; a building's own `push 40h` submits, which the rigid collector
+turns into bit 1 for ROBJ != 0 only): 227 additionally × entry[10],
+228 ← lerp(floor, ground, t), 229 ← lerp(ceiling, sky, t),
+230 ← lerp(indoorAvg, outdoorAvg, t) where **t = entry[10] = the
+render-state stack aux**: the containing building's ItemDef+0x218 =
+`light_transfer` / 100 (`atol` clamped 0..100 × `flt_7C56A8` = 0.01, written
+only by `ItemDef_ParseProperty @ 0x4a1a2c..0x4a1a50`; corrected 2026-09-24,
+formerly read as "interior model data +536"). Exactly three sites write the
+aux (a full indexed-operand scan): the viewmodel `[orig: @ 0x4def3c]`, the
+building batch with its OWN transfer `[orig: Terrain_RenderSectorModels
+@ 0x5c5df2..0x5c5e00]`, and the person wave with the parent pool-2 entry's
+transfer when its ItemDef is non-null `[orig: Terrain_RenderSectorEntitiesBySide
+@ 0x5c7f7a..0x5c7f93]`. The wave split (2026-09-24): the person wave submits
+0x80 when entity+0x1D0 != 0 `[orig: @ 0x5c7fb6..0x5c7fc3]`, so a contained
+person lerps by its building's `light_transfer`; the non-person wave sets the
+same 0x80 `[orig: Terrain_RenderSectorEntities @ 0x5c7c05..0x5c7c14]` but
+never writes the aux, which stays the stack base's 0 `[orig:
+RenderBatchCtx_BeginFrame @ 0x5d89b6..0x5d89b8]`, so a contained vehicle or
+prop gets floor/ceiling only, no sun; every building's ROBJ 1+ (not only
+portal buildings) lerps by its own transfer, t = 0 when unauthored `[orig:
+Terrain_RenderSectorModels push 40h @ 0x5c5f1f (and its other two submit
+sites); collect_render_objects_for_batch @ 0x5d9156..0x5d9162]` (type-5
+buildings draw only through the building batch:
+`collect_visible_entities_for_terrain` skips type 5 `@ 0x5c8dd7..0x5c8de0`,
+`collect_visible_sector_userpoints` admits every static-prox building with a
+model `@ 0x5c6c3f..0x5c6c43`). A contained entity takes effectScale 1.0
+`[orig: setup_terrain_effect_for_entity @ 0x5c74a3 / @ 0x5c74b7]`. Statics are
+contained too: `Game_StartMission` -> `Entity_BuildProximityListsForPools12
+@ 0x5240c5 / @ 0x5240fa` runs `Entity_BuildProximityList` (which writes
++0x1D0 `@ 0x4b406b`) for pool 1 and non-building pool 2, and the client runs
+the same list for replicated entities (`NetPacket_HandleEntityCreate
+@ 0x42f227`, `Entity_UpdatePool1Slot @ 0x4b8e25`, `Entity_UpdateAllEntities
+@ 0x4c229c`). **entry[9] = the sun-visibility factor**.
 `Entity_ComputeSunVisibility @ 0x5c6800` returns 1.0 when the entity's
 proximity-source count at +0x1C0 is zero. Otherwise its origin is entity
 position plus the uniformly scaled collision-AABB midpoint stored at
@@ -225,10 +278,24 @@ direction = ctx dir or the defaults `g_DefaultLightDir{X,Y,Z} @ 0x8437e0`
 `setup_d3d_clip_planes`): **D3D light 2** = directional {0,−1,0} with
 diffuse = sky − ambientAvg, **D3D light 3** = {0,+1,0} with ground −
 ambientAvg — the fixed-function hemisphere as two DELTA lights pivoting on
-the average (identically `mix(ground, sky, N.y·0.5+0.5)`). Under the mirror
-gate (ctx+841) slot 226 gets the re-negated direction (w = 0.8); in normal
-passes 226 is never pushed — the FF path lights through D3D light 0. The
-combined FF vertex diffuse saturates and the output stage doubles it:
+the average (identically `mix(ground, sky, N.y·0.5+0.5)`). ctx+841
+(`RenderBatchQueues+0x349`) is a per-flush FIRST-ENTRY latch, not a mirror
+gate (corrected 2026-09-24): `RenderBatchCtx_BeginFrame @ 0x5d89c4` and every
+`CRenderBatchQueue_SortAndFlush @ 0x5dae4e` set it, the reader tests it
+`@ 0x5d98c9` and clears it at the first entry `@ 0x5d9f34`. On the first entry
+of every flush slot 226 gets the re-negated direction −(ctx+0x84..0x8C) with
+w = 0.8 (`flt_7C6F9C`), with MatTexClipPlane and FloatTicks
+`[orig: setup_entity_lighting_and_shader_constants @ 0x5d995f..0x5d99a6]`, so
+Flag.fx and the VS effects always read the live direction; the FF path lights
+through D3D light 0. The FF hemisphere D3D lights 2/3 (and LightEnable 0) are
+per-flush state too: they are re-set only on the first entry and on an
+interior/outdoor transition, tracked by ctx+0x34A (`@ 0x5d9d78..0x5d9da2`,
+`@ 0x5d9eee..0x5d9f14`), so two consecutive interior FF strips with different
+`light_transfer` share the first strip's lerped hemisphere (the port evaluates
+per draw; see "Open after the 2026-09-24 pass"). The combined FF vertex
+diffuse is summed and saturated PER VERTEX and the saturated colour
+Gouraud-interpolates (`v_ff_diffuse`); SELFLUM saturates
+SelfLumColor × gain the same way; the output stage doubles it:
 `TSSColor(0, Modulate2x, Texture, Diffuse)` — **pixel = tex × min(lit,1) × 2**
 (VS_TRACER alone modulates 1×).
 
@@ -237,8 +304,10 @@ recognizes `light_transfer`, clamps the authored integer percentage to
 `0..100`, and stores its normalized `0.0..1.0` value through the def FFI and
 `ItemDatabase` (Ihq01 is the shipped witness: `20` → `0.2`). Mission
 placement supplies that value before building the model's section materials.
-The portal split leaves ROBJ 0 on outdoor lighting and interpolates ROBJ 1+
-toward the floor/ceiling blocks by the parent transfer. A player inside the
+The building split leaves ROBJ 0 on outdoor lighting and interpolates ROBJ 1+
+toward the floor/ceiling blocks by the building's own transfer (every
+building, not only portal buildings; corrected 2026-09-24, see the per-entity
+reader). A player inside the
 building's blink volume, including first-person arms/weapon lighting, inherits
 the same parent value even when the coarse `local_player_indoors` state is
 false. This closed the interior half of D-RLIT-3; the outdoor half landed
@@ -251,8 +320,23 @@ solids whose inflated sphere overlaps the entity's bubble ever block; a far buil
 long shadow leaves it in full sun; clip radii −0x2000/−0x5000/−0x8000 shared
 with the iris march) and applies the `(4 − blocked) × 0.25` factor through
 `ObjectModel.set_entity_lighting_context` as a per-bms change list.
-Contained entities keep the interior route (factor 1.0); pool-2 statics,
-slice-less rows, and the FP viewmodel keep the witnessed full-sun default.
+Pool-2 statics, slice-less rows, and the FP viewmodel keep the witnessed
+full-sun default. Since 2026-09-24 ("Give every contained drawn entity the
+interior lighting lerp and group") the per-drawn-identity feed is
+`inmatch::EntityLightingFeed` (`engine/runtime/inmatch/role_feeds.h`, ex
+SunQualityFeed): it emits (quality, interior, t, interior building BMS id,
+section) per drawn identity, placed and wire, following the wave split above
+(a contained entity keeps factor 1.0, takes the 0x80 lerp and its building's
+interior light group; only a contained person carries the building's
+transfer). Joiner rows without a registry twin resolve containment through
+`CollisionWorld::query_wire_blink_boxes_at_point` (the def type 1/3 candidate
+walk `[orig: Entity_BuildProximityList @ 0x4b3f3e..0x4b3f93]`, else the static
+building prefix `[orig: @ 0x4b3e65..0x4b3f39]`); static MultiMesh rows carry
+the lane in the atlas row's last texel (`renderer::static_row_entity_lighting`).
+The feed replaces `Simulation::get_entity_interior_groups` (removed): the
+director reads the interior group off the model stamp
+(`ObjectModel::set_interior_light_group`), so wire rows now get their interior
+light group for the point-light select too.
 
 **EffectWorld dynamic point lights.** 176-byte records in `Light_InstanceTable
 @ 0x2732e28`, handle-indexed; per-frame in-frustum handles in
@@ -264,7 +348,18 @@ gen block ticked by `Light_TickGenBlock @ 0x5a8ae0`), attenuation
 `{1, 0, 15/range², 1}` with range = fixed × 1.25/65536 — the same set the
 OED preview emits (`PrepareLightParams @ 0x46A500` in ModSuperOed.exe). `Light_FillD3DPointLight
 @ 0x5aa450` fills a D3DLIGHT9 (type POINT) with the same values and a
-**1.5× diffuse boost**. Group culling: each light carries an owner pair
+**1.5× diffuse boost** (`flt_7D4B80` `@ 0x5aa4b2`). Only the D3D
+fixed-function lights carry it: the per-frame SetLight upload
+(`Render_ProcessMainSceneFrame @ 0x5ca6a1` -> `sub_5AA560` ->
+`Light_FillD3DPointLight`) and the flush's re-enable (`Light_ApplyAsD3DLight
+@ 0x5da61a`). Every shader pass (DOT3/Phong/env/mirror) reads the unboosted
+`Light_GetPointLightParams` colour (the `POINTLIGHT_VARIATIONS` arrays
+`@ 0x5da6a8`, the per-light pass `@ 0x5da8ae`; decoded `_vsDiffT.fx`:
+`Out.Diff = PointLightColor * selfshadowterm * atten`). Port (2026-09-24,
+"Deliver the unboosted point-light colour; keep the 1.5 on the FF lights"):
+every object select delivers the params colour (`godot/src/lights/light_scene.cpp`
+`kObjectLightD3DFill = false`) and the FF evaluation `obj_point_light_one`
+(`shared.gdshaderinc`) multiplies by 1.5. Group culling: each light carries an owner pair
 (entity ptr + section at record +76/+80); `Light_PassesActiveGroups
 @ 0x5a9120` accepts lights owned by the sample position's interior
 (`Lighting_SetInteriorLightGroup @ 0x5a90e0`, section-matched) or by the
@@ -365,7 +460,7 @@ reuse (intentional safety divergence). Four transient spawners are routed:
   owner = shooter/section 0, muzzle position, blend 1.0; its authored radius,
   base color, and gen block remain. Only when the word is zero does retail
   spawn radius 1.5/color 0xFFE0A0. Owner ≠ 0 means the result lights only the
-  shooter's draws. Once the five-tick fade kills the slot, the cached nonzero
+  shooter's skinned person draws (the owner-group producers below). Once the five-tick fade kills the slot, the cached nonzero
   handle re-arms a dead/reused slot rather than allocating again (the port's
   generation lease rejects the reused-slot write-through safety hazard).
 - **Impact flash** (`AmmoDef_ProcessImpactEffect @ 0x40a2b3`): ammo
@@ -420,20 +515,38 @@ owned lights illuminate only the draws that declare them. Both groups are now
 supplied per draw:
 
 - **Owner group** — `Lighting_SetOwnerLightGroup @ 0x5a9100` (pair
-  `@ 0x272ED7C/78`). The sector walk pushes the drawn entity `@ 0x5c7fb1`, and
-  inside the model the batch collector re-scopes it PER RENDER OBJECT as
-  `(0, robjIndex)` `@ 0x5d8ff7` — which is what section-matches a building's
-  own interior lights to the room being drawn.
+  `@ 0x272ED7C/78`). Producers (witnessed 2026-09-24): a nonzero owner
+  entity is set ONLY by the person wave, the drawn entity at section 0
+  before its head submit and again before its body submit
+  (`Terrain_RenderSectorEntitiesBySide @ 0x5c7fb1 / @ 0x5c8004`); the RIGID
+  collector re-scopes every ROBJ it collects to `(0, robjIndex)`
+  (`collect_render_objects_for_batch @ 0x5d8ff7`), which is what
+  section-matches a building's own interior lights to the room being drawn,
+  while the SKINNED collector keeps whatever is set (`Render_SubmitEntity`
+  dispatches on the model's skinned flag `@ 0x5daddc..0x5dae2d`); the pair
+  resets to (0, 0) at the wave tail (`@ 0x5c806e..0x5c808a`) and in
+  `render_terrain_sector_batch @ 0x609685`; the non-person wave and
+  `Player_RenderFirstPersonViewModel` never set one. Consequence: an owned
+  light (the MF_Light muzzle glow, a subobject lamp) reaches only its owner's
+  skinned person draws, plus the interior case where the owner is the
+  containing building; a subobject-attached record's light therefore lights
+  none of its owner's rigid draws (corona only, unless the owner is a person).
+  Port (2026-09-24, "Scope owned point lights by the owner group each submit
+  declares"): `renderer::submit_owner_group`, `static_light_row_groups` (every
+  static row `(0, robj)`), the per-model pass keyed on
+  `ObjectModel::is_active_level_skinned` plus the person flag; first-person
+  parts declare no owner.
 - **Interior group** — `Lighting_SetInteriorLightGroup @ 0x5a90e0` (pair
   `@ 0x272ED84/80`). An entity draw pushes its containing building + blink
   section, read straight off the entity's packed blink ref (entity+464, the
   `blink_hits[0]` quad); retail additionally gates on the containing entry
-  carrying interior data (`pool_entry + 48`, the same field the iris march's
-  no-interior-data short-circuit reads), where the port's stand-in is simply
-  that the containing building resolves to a presented model
+  carrying a render model (`pool_entry + 0x30`, the entity's render-model
+  pointer, the same field the iris march's short-circuit reads), and the
+  port's "the containing building resolves to a presented model" check is
+  that literal gate, not a stand-in (corrected 2026-09-24)
   `[orig: setup_terrain_effect_for_entity @ 0x5c74a0]`. The same pair feeds the
   render-slot dominant-light pick `[orig: RenderSlot_UpdateEntityLight
-  @ 0x5d6b66]`. A building draw pushes itself + section 0 `@ 0x5c5e07`. The
+  @ 0x5d6b40..0x5d6b77]`. A building draw pushes itself + section 0 `@ 0x5c5e07`. The
   terrain batch clears BOTH pairs `@ 0x60967c/@ 0x609685`, so only unowned
   lights reach terrain.
 
@@ -442,8 +555,10 @@ light always passes; an owned one passes when its owner is the interior group
 entity AND its section matches the interior section (falling back to the OWNER
 section when the interior section is 0 — the building-draw case), or when its
 owner is the owner-group entity outright. `LightScene::select` is that
-function; `LightDrawContext::groups` carries the pair per draw, filled from
-`Simulation::get_entity_interior_groups` / `local_player_interior_group` (the
+function; `LightDrawContext::groups` carries the pair per draw, the interior
+half read off the model's stamp (`ObjectModel::set_interior_light_group`, fed
+by `inmatch::EntityLightingFeed` for placed and wire rows alike since
+2026-09-24) and the local player's through `local_player_interior_group` (the
 first-person parts inherit the local player's group, so a room's lights reach
 the arms and weapon).
 
@@ -549,16 +664,28 @@ never reaches the runtime and every model light renders omni. The REAL
 corona renderer is `EffectWorld_RenderLightCoronas @ 0x5aaf40` (ex
 CEffect_RenderFoliageBillboards; the witness map lives on
 engine/runtime/renderer/light_scene.h — three additive segments marching
-toward the camera, the `texlightcrn` procedural radial, the 100-wu cull,
-flag 512 disable, the owner visible-section gate).
+toward the camera, the `texlightcrn` procedural radial, the 100-wu cull
+(`@ 0x5ab09d..0x5ab0f6`, the compare `@ 0x5ab0f1`), flag 512 disable, the
+owner visible-section gate). The whole corona is also skipped when the
+(jittered, re-centred) light centre's view depth is not beyond the viewport
+near value: the fixed view-matrix row-0 dot (`shrd eax, edx, 16h`) plus the row
+translation `dword_A78428`, then `cmp eax, dword_A783D8; jle`
+(`@ 0x5ab0fc..0x5ab143`); that near is 0x800 = 1/32 wu, written by
+`Viewport_BuildProjectionMatrix @ 0x411093` (viewport+0x78). Port 2026-09-24
+("Drop a corona whose light centre is inside the viewport near depth").
 `EffectWorld_ResetPoolAndInitLighting @ 0x5ab890` is
 the mission-start reset (zero pool, identity ambient, `Lighting_InitTextures
 @ 0x5a94f0`).
 
 **Terrain/foliage lighting constants.** `Render_TerrainScene @ 0x610c80`
 (per frame) calls `init_terrain_lighting_color_ramps @ 0x604ee0` with
-**(Env_LightBlock[0], Env_SkyBlock[0])** — NVG blends the sky arg toward the
-modulator (`@ 0x610d28..0x610e36`), the vehicle scope forces
+**(Env_LightBlock[0], Env_SkyBlock[0])** — NVG rebuilds the sky arg as bytes,
+`trunc(sky_byte·0.25f' + modulator_byte·f'·0.0015625·255)` per channel under
+a chop control word (`or eax, 0C00h; fldcw; fistp` `@ 0x610d16..0x610e22`;
+`flt_7C3340` = 0.2, `flt_7C333C` = 0.25, `flt_7D00A8` = 0.0015625,
+`flt_7CA29C` = 255; the alpha byte stays the sky block's), then
+`init_terrain_lighting_color_ramps(Env_LightBlock, nvgSky)` `@ 0x610e36`
+(port `EnvironmentState::nvg_terrain_sky`, 2026-09-24), the vehicle scope forces
 `(0x101010, 0xF0F0F0)`. The ramps function stores **c1 = light ÷255
 (`PolyTrn_PSConstC1_Light @ 0x31a182c`)** and **c0 = sky ÷255
 (`PolyTrn_PSConstC0_Sky @ 0x31a183c`)**, seven VS ramp blocks of
@@ -751,7 +878,19 @@ resource exists: the 2026-08-22 shell read the six faces back with
 probe measured at 19.4 ms mean / 52.7 ms max on the publish frame's env-cube
 leg (2026-08-30, before); the copy leg measured 0.11 ms mean / 0.18 ms max on the same run shape (after), the publish-frame wall time within 1 ms of its neighbours. The
 static sphere is evaluated analytically as the same white pow-800 plus warm
-pow-40 lobe times the live light block. The render-float→Godot X/Z swap, the
+pow-40 lobe times the live light block. Since 2026-09-24 ("Align the
+environment-cube sun lobe in Godot axes and light it raw") the analytic lobe
+aligns with the light block's Godot-world −normalize(light dir)
+(`opennova_light_block_dir`), the same vector the Q3 glass copy uses; the raw
+render-float `opennova_sun_direction` tuple (x/z swapped against Godot) is
+never compared with a Godot-world reflection (retail rotates the lobe through
+`build_direction_look_at_matrix(Environment_GetLightDirectionFloat)`,
+`apply_shader_parameters @ 0x58e146..0x58e1cb`). The lobe colour is the RAW
+`Env_LightBlock` (`opennova_env_light_block`, `EnvShaderGlobals.light_block`):
+the face callback (IDB `setup_shadow_cascade_and_render`, which is the cube
+face callback) pushes `Env_LightBlock` `@ 0x5c3863` into `sub_5AC840` /
+`render_sky_mesh @ 0x5ac680`, so the first-person thermal terrain ramp
+(0x101010) never reaches it. The render-float→Godot X/Z swap, the
 cube layer order, every face orientation, same-frame publication, and
 full/midtone byte values are exercised through the final `samplerCube` by
 the `environment_cube_capture` probe
@@ -814,12 +953,16 @@ padded + 0x1000 only when the
 graphic carries a collision block (`Entity_InitFromModel @ 0x40dc30`'s
 gpm[44] gate `@ 0x40de8f`; a collision-less model keeps entity+0 = 0, so its
 slot takes the lod floor 6) and sizes the lod/patch and the light query. The
-blob leg places its patch with the slot's stored direction too (the
 dominant-light pick runs for every bound slot, as
-`RenderSlot_UpdateEntityLight` does from the entity update). The D-COL-3 def
+`RenderSlot_UpdateEntityLight` does from the entity update. The D-COL-3 def
 scale/collision-gate/first-husk fold now feeds the entity-bound slot stamp.
 Residual: a model the placer did not build (no stamp) falls back to half its
-render-bounds diagonal for both radii.
+render-bounds diagonal for both radii. (2026-09-24: the patch is now the
+drape's own mesh, see *Drape* and *The port*; the projection itself is
+unbounded, no near/far band or projector UV box is tested: the clamped
+samplers cover the rest of the patch, the RT's white clear at its edge texels,
+and shadowztex's clamped rows. The technique's stage-0 sampler clamps
+(intrinsic 0x1000000) and shadowztex is created clamp `@ 0x5d62a9`.)
 
 *Registration* — `Entity_InitFromModel @ 0x40E1C8..0x40E1F7`: persons
 always, items via the `DynamicShadow` attrib2 bit, gated on the
@@ -844,8 +987,14 @@ shadows as if the sun sat at ~14.5°).
 *Assignment* — `RenderSlot_SortAndAssign @ 0x5d6530` (ex
 `terrain_sort_and_assign_render_slots`) scores every record:
 2D camera distance ÷ 4 (fixed, `flt_7C333C`) × (1.5 − the view-alignment
-dot, Q16 98304), halved for the local player or its parent vehicle;
-excluded (score 0x40000000): dead entities, seat-parented entities
+dot, Q16 98304), halved for the local player OR the entity it rides
+(`cmp ecx, [ebp+16Ch]` `@ 0x5d669c..0x5d66a6`, `>> 1` `@ 0x5d6864`);
+excluded (score 0x40000000): entities with Flags & 1, the hidden / carried
+bit written by `WacCmd_HideSsn @ 0x4f779d`, `Entity_AttachToVehicle
+@ 0x43c14a` and `Server_KillPlayerAndNotify @ 0x519e92` (`@ 0x5d657d`; NOT
+the dead bit 2, corrected 2026-09-24; the render-occlusion claim, blink hits
+and the outdoors three-ray latch, never removes a slot or its capture, and
+`RenderSlot_RenderEntityAndChildren` has no visibility test), seat-parented entities
 (parentSlot 1/2/5, or 3 with a live parent — they render as CHILDREN in
 the parent's slot), entities standing on a vehicle-type ground entity
 (itemdef +0x5C == 1), and anything whose base score exceeds 0x500000 — the
@@ -862,14 +1011,47 @@ down to a 32 px floor (`RenderSlot_TextureTable @ 0x2be3c94`).
 
 *Per-slot light + anchor* — `RenderSlot_UpdateEntityLight @ 0x5d6a30`
 (ex `Entity_UpdateRenderState`): default = the clamped sun trio, then the
-brightest passing point light near the entity (the same
-`collect_nearby_zones_by_aabb @ 0x5aa250` pool as D-RLIT-4, queried at
-position ± boundRadius) wins when NTSC luminance 0.3R + 0.6G + 0.1B over
-`dist²·quadratic + constant` exceeds 0.1 (zeroed for an interior-parented
-entity); the winning direction is `normalize(entity − light)`. The shadow
-anchor then marches from the entity (or its rotated bbox-center anchor
-when the entity flag word is zero) along the light direction in unit-planar
-steps down to `Terrain_GetHeightAtPosition @ 0x606720`; the vertical step
+brightest passing point light near the entity wins when NTSC luminance
+0.3R + 0.6G + 0.1B over `dist²·quadratic + constant` exceeds the threshold
+0.1 (`flt_7C69F4`); the winning direction is `normalize(entity − light)`.
+The candidate list (witnessed 2026-09-24) is the collector over the ENTITY
+origin ± entity+0 radius (`@ 0x5d6af1..0x5d6b24`) with output limit 4
+(`push 4` `@ 0x5d6b00`; `collect_nearby_zones_by_aabb @ 0x5aa250` returns
+min(found, limit) `@ 0x5aa418..0x5aa425` after its 64-cap scan and nearest
+sort), the interior group from entity+0x1D0 (`@ 0x5d6b40..0x5d6b77`), each
+candidate gated only by `Light_PassesActiveGroups` (`@ 0x5d6b89`) and
+`Light_GetPointLightParams` validity (`@ 0x5d6bad`, the `jnz` `@ 0x5d6bb7`):
+NO objects-disable gate and NO three-cap. A contained entity zeroes the
+threshold (`@ 0x5d6adc..0x5d6aed`, also slot+0x78 = 1). Port:
+`LightScene::slot_light_candidates` + `SlotShadow` at the entity origin with
+the model's stamped interior group ("Give every contained drawn entity the
+interior lighting lerp and group"). The shadow anchor then marches from the
+march start along the light direction in unit-planar steps down to
+`Terrain_GetHeightAtPosition @ 0x606720`. The march start
+(`@ 0x5d6ce7..0x5d6d31`: `cmp dword [edi+24h], 0; jz`) is the rotated
+collision-bbox centre when the entity Flags dword is zero
+(`Math_BuildFixedPointMatrixFromEulerAngles(entity+4)` then
+`Math_FixedPointTransformPoint22(matrix, entity+0x1FC)`, the result
+`@ 0x5d6d25..0x5d6d2d`; entity+0x1FC is the collision-bbox centre written by
+`Entity_InitFromModel @ 0x40df0a / @ 0x40df2e / @ 0x40dfd6` and
+`Entity_ComputeBoundingSphere @ 0x5c6a8c`, the CMDL midpoint, scaled), else
+the entity position; with a raised centre the march walks the patch down the
+light, so a tall caster's long tail stays inside its patch. Vehicles never take
+the centre start: their Flags carry the REFLECTABLE bit 0x400 that
+`Entity_InitFromModel @ 0x40e208..0x40e20a` sets on every ItemDefType 1, so in
+JO only Flags-clear props and persons start at the rotated centre (the 03TR
+retail frame confirms it: the M939 tail ends at the origin-anchored lod-20
+patch edge). Port (2026-09-24, "Port the slot march start, the patch lift and
+the attached-light drape", "Read the vehicle REFLECTABLE bit in the slot
+march's Flags test", "Drape each slot over its own patch mesh and carry the
+march start on the present rows"): `renderer::slot_march_start_offset` +
+`slot_entity_flags_zero` (the sim keeps the vehicle 0x400 as an item-type
+trait, not in `Entity::engine_flags`), carried for every role on the present
+rows (`world::PF_SLOT_MARCH_OFFSET_X/Y/Z`); a joiner row composes its retail
+client entity's Flags dword (`inmatch::replica_entity_flags_dword`: the
+load-stream dword with the compact low byte, the runtime latch bits, the Player
+class bit 0x100) and reads its type's resolved collision shape for
+entity+0x1FC. The vertical step
 keeps the direction's own rate and is SUBSTITUTED by 0.5 u of drop (fixed
 −32768) only when it would not descend (`test eax, eax; jl` `@ 0x5d6cd7..
 0x5d6cdd` — corrected 2026-08-22; the earlier "clamped to ≥ 0.5 u" reading
@@ -890,13 +1072,14 @@ adjacent `entity+0x1B8` feeds the scar-decal position restamp `sub_57FFD0
 same pick from the Godot shadow device leg once per DISPLAY frame
 (`godot/src/env/slot_shadow.cpp`, the per-assignment `pick_dominant_light`
 block), not once per entity update. The pick is a pure function of the entity
-centre, its bound radius, the clamped sun default and the nearby-zone light
-pool, so the only observable difference is the sampling cadence: above 62.5 fps
+origin, its bound radius, its interior group, the clamped sun default and the
+nearby-zone light pool, so the only observable difference is the sampling
+cadence: above 62.5 fps
 the direction is re-picked more often than retail would, below it less, and a
 light that appears and disappears inside one display frame can be missed. The
 `[orig:` citation lives here rather than at the port site because `godot/src`
-carries no witness tags (ADR 0042 d7 / ADR 0043); `slot_shadow.cpp:834-838`
-names the same call site in prose.
+carries no witness tags (ADR 0042 d7 / ADR 0043); the pick block's comment in
+`slot_shadow.cpp` names the same call site in prose.
 
 *Silhouette render* — `RenderSlot_RenderEntityAndChildren @ 0x5d7690`
 renders the entity plus its standing/mounted children into the slot RT
@@ -909,21 +1092,42 @@ at that view's origin (`Entity_RenderWithLODCallback @ 0x5d6ef0` zeroes the
 position for a null origin, children at their offset `@ 0x5d795a/0x5d79c8`)
 under an orthographic projection of scale 1/extent over the depth band
 0.2..5000.2 (`@ 0x58d38b..0x58d3a3`: 1/(far − near) = 0.0002, −near/(far −
-near) = −0.00004); ported 2026-08-29 as `renderer::silhouette_capture_basis`
-(since 2026-08-30 the one engine look-at, `renderer::direction_look_at` in
-`direction_look_at.h`, which the addeweap attachment frame in
-`world/mounted_pose.cpp` consumes too) and the `kSilhouetteCaptureNear/Far`
+near) = −0.00004); the look-at is the one engine `renderer::direction_look_at`
+(`direction_look_at.h`, which the addeweap attachment frame in
+`world/mounted_pose.cpp` consumes too) with the `kSilhouetteCaptureNear/Far`
 constants; as read, that band starts 0.2 u in front of the view origin the
 entity is rendered at, and the render state that admits the entity's near
-half is unwitnessed — D-RLIT-10 records the shell's eye), on the detail-scaled refresh
+half is unwitnessed — D-RLIT-10 records the shell's eye). The capture view
+is the look-at matrix itself (`setup_shadow_cascade_matrices @ 0x58d31e` ->
+SetTransform VIEW `@ 0x58d368`): camera x = right, y = up, depth = forward, a
+proper rotation in render axes, and the PROJSHAD pass culls CCW over it
+(`CRenderBatchQueue_FlushBatches @ 0x5da3e4..0x5da401`), keeping the
+light-facing faces. Presentation axes are the render axes with x and z
+swapped (a reflection), so the capture pose maps the retail right row to
+presentation as the negated look-at right of the presentation direction
+(`renderer::slot_capture_view_axes`: x = −right, y = up, z = −forward,
+right-handed); an unmapped look-at basis is mirrored (det −1) and its
+back-face cull keeps the light-averted faces (fixed 2026-09-24, "Map the slot
+capture view into presentation axes and key it on the entity origin"; the
+former `silhouette_capture_basis` is gone). The capture view origin, the drape
+projection and the light query centre on the entity origin (the capture
+renders the entity at the view origin `Entity_RenderWithLODCallback
+@ 0x5d6fc4..0x5d6fd9`, the light query box is entity+4 ± entity+0
+`@ 0x5d6af1..0x5d6b39`, the drape texgen uses slot+0x54..0x5C = the entity
+position `@ 0x5d6a5f..0x5d6a9d`), never the render-bounds centre, which moves
+with part animation and RLOD switches. The refresh runs on the detail-scaled
 cadence: `(frame & mask) == (slotIndex & mask)` with mask 7 below detail 2,
-3 at 2, 1 at 3, every frame at 4+; the local player (or its parent) skips
-only below detail 3; the dirty bit forces. Lighting via
-`RenderSlot_SetupNextLighting @ 0x5d7250` (ex
-`setup_entity_render_lighting`): D3DRS_AMBIENT white, then either the
-attached light (D3D light 4 + luminance-weighted NEGATED colors
-`(c+lum)/2 × −3` into PS c21..c23 — the silhouette darkening math) or a
-white directional with 0.75 ambient material. The PROJSHAD effect output is
+3 at 2, 1 at 3, every frame at 4+; the local player OR the entity it rides
+refreshes every frame from detail 3 (`@ 0x5d7707..0x5d7734`); the dirty bit
+forces. The capture sets no lighting beyond
+`RenderBatchCtx_StoreLightingConstants(0)`: the PROJSHAD black pass needs
+none. `RenderSlot_SetupNextLighting @ 0x5d7250` (ex
+`setup_entity_render_lighting`; c21..c23 = (c + lum) × 0.5 × −3, the
+darkening math this record formerly assigned to the capture) is the dead
+sector-model receiver path: `sub_5D7240 @ 0x5d7240` only zeroes
+`RenderSlot_PendingCount` and returns 0, and its callers gate the receiver
+path on that result (`@ 0x5c5f04..0x5c5f0c`, `@ 0x5c7c8d..0x5c7c8f`)
+(corrected 2026-09-24, "Delete the dead slot receiver darkening law"). The PROJSHAD effect output is
 black, not the normally lit material: `_vsPost.fx::vsPostBlackT1` writes
 `Diff = (0,0,0,1)` and `_vsSkPost.fx::vsSkinPostBlackT1` writes `Diff = 0`;
 every PROJSHAD pass selects that diffuse for color (`TSSColor SelectArg2
@@ -931,13 +1135,30 @@ Diffuse`; `_FFP.fx TBoringFFPProjShad` zeroes the material), so RGB is black
 over the RT's white clear, with the effect-family diffuse/detail/AlphaGen
 policy supplying coverage.
 
-*Drape* — `RenderSlot_DrawAllDrapes @ 0x5d6e20` (detail > 0, dead entities
-skip; the LOCAL player in first person skips while prone-latched
+*Drape* — `RenderSlot_DrawAllDrapes @ 0x5d6e20` (detail > 0; an entity with
+Flags & 1 skips, the same hidden / carried bit the assignment tests
+`@ 0x5d6e6a`; the LOCAL player in first person skips while prone-latched
 (`g_PlayerStanceProneLatch @ 0xb76484`) or below detail 2): a dynamic slot
 with a live RT draws `RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0` — the
-silhouette projected over the 21×21 terrain-following patch, distance fade
-`f = clamp((d − 40 u)/40 u)` with a hard skip at ≥ 80 u, a SECOND texture
-stage that clips the projection by depth — `shadowztex`
+silhouette projected over the slot's own terrain-following patch mesh
+(`RenderSlot_RebuildPatchVertexBuffer @ 0x5d5130`: (lod + 1)² vertices,
+vertex (i, j) = index i·(lod+1)+j at mission (origin_x + i, origin_north − j)
+`@ 0x5d5246..0x5d52f7`, height = `Terrain_GetHeightAtPosition @ 0x606720`
+(POINT sample, `u16 << 8`) plus the lift (lod + 1) × 0.004 u (`flt_7DB864`;
+the resolution slot+0x28 = lod + 1 is stored `@ 0x5d6da9..0x5d6dac`;
+`@ 0x5d5201..0x5d529f`), normal (0, 1, 0) `@ 0x5d52b1..0x5d52c3`, FVF 0x212
+stride 40, rebuilt when origin/lod/resolution change `@ 0x5d51a3..0x5d51bc`;
+indices from `init_shadow_decal_index_buffer @ 0x5d53d0`: per level L,
+2L² triangles, per cell (a, d, c), (a, b, d) with a = (i, j), b = (i, j+1),
+c = (i+1, j), d = (i+1, j+1) `@ 0x5d5474..0x5d54d0`; lod is 6..20, so the
+441-vertex region is the lod-20 maximum). The distance fade is taken ONCE per
+slot from the 3D entity-to-camera distance (slot+0x18..0x20 against the
+camera fixed position `@ 0x5d5cc4..0x5d5d14`): a slot at ≥ 0x500000 (80 u)
+returns without drawing (`@ 0x5d5d3b..0x5d5d40`; its capture still
+refreshes), else `f = (d − 0x280000) × 1/2621440` (`@ 0x5d5d46..0x5d5d53`) is
+folded into the material ambient every patch vertex shares
+(`@ 0x5d5f63..0x5d6008`). A SECOND texture
+stage clips the projection by depth — `shadowztex`
 (`shadow_system_init_resources @ 0x5d62d2`: a 32×4 white/black step, one
 gray texel at the boundary, row 3 all white) addressed by
 `build_shadow_cascade_uv_matrices @ 0x58cf10`'s detail matrix (u = depth
@@ -950,30 +1171,66 @@ steepen the CLIP direction's vertical component 4× (`flt_7C44B8`
 projection keeps the unscaled lookat_dir1 — re-witnessed 2026-08-21, the
 earlier "elongated 4× along the projection direction" reading was wrong),
 and the **sun ambient law** per channel:
-`ambient_c = 1 − (1−f)·L_c·|dirY| / (L_c·|dirY| + S_c)` with
-`L = Env_LightBlock`, `S = Env_SkyBlock` — the shadow removes only the
-direct sun term scaled by the projection vertical, never the sky ambient
-(attached-light slots instead light the patch with the color scaled
-`−(c+lum)·(1−f)`). A bound slot WITHOUT a live RT draws
-`RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0` — the items.def
-`shadow <name>.tga w l ox oy` decal (name → ItemDef +0xA0, floats →
-+0x11C/+0x120/+0x124/+0x128, `ItemDef_ParseProperty @ 0x49f3a5..0x49f44c`;
-resolved texture at +0x114) heading-rotated over the same patch at 1/w,
-1/l UV scale with the authored UV offset + 0.5, black-ambient material
-(plain multiply), no distance fade. Entity ground shadows therefore land
-on TERRAIN ONLY — the patches are terrain-following meshes.
+`ambient_c = 1 − (1−f)·q_c`, `q_c = L_c·|y| / (L_c·|y| + S_c)` with
+`L = Env_LightBlock`, `S = Env_SkyBlock` and `y = fabs(slot+0x6C)`, the
+stored RAW clamped-negated vertical (`@ 0x5d5f63`; −0.25 at a dawn sun under
+the clamp), not a normalized copy; the shadow removes only the
+direct sun term scaled by the projection vertical, never the sky ambient.
+The drape IS fogged: `RenderSlot_DrawAllDrapes` selects
+`CD3DDevice_SetFogAndBlendMode` mode 3 before it (`@ 0x5d6ea1`): mode & ~3 = 0
+is the primary fog block (`@ 0x67782c..0x6778b2`) and mode & 3 = 3 the fog
+colour WHITE (`@ 0x6778f9`), so the multiply fades to a no-op with distance;
+the technique's intrinsic pass flags 0x1520000
+(`shadow_system_init_resources @ 0x5d62f7`, stored by
+`CGfxShader_SetRenderStateDesc` at +0x3C) carry 0x20000 = FOGENABLE
+(`CGfxShader_ApplyPass @ 0x683241..0x68324f`), 0x100000 z-write off,
+0x400000 cull none and 0x1000000 stage-0 clamp. An attached-light slot
+lights its patch through D3D light 4 instead: D3DRS_AMBIENT = 0xFFFFFF
+(`SetRenderState(0x8B)` `@ 0x5d5e50..0x5d5e63`), light 4 filled from the
+attached handle slot+0x74 through `Light_FillD3DPointLight @ 0x5aa450`
+(type point; diffuse = rgb × intensity × AmbientScale × 1.5 (`flt_7D4B80`)
+× RgbGen; position the YNegated float; range = radius_fixed × 1.25/65536
+(`flt_7D9F90`); attenuation {1, 0, 15/range²} (`flt_7D9F8C` = 15); the fill
+fails for an empty or hidden slot), diffuse_c rescaled to
+(c + lum) × 0.5 × (1 − f) × −2 (lum = 0.3r + 0.6g + 0.1b,
+`@ 0x5d5e89..0x5d5f0d`), `SetLight(4)` + `LightEnable(4, TRUE)`
+(`@ 0x5d5f14..0x5d5f23`), then `SetMaterial` with diffuse = ambient =
+(1, 1, 1, 0) (`@ 0x5d5f25..0x5d5f4c`); each patch vertex takes
+sat(1 + diffuse × atten × N.L) on its (0, 1, 0) normal, zero past the range.
+A failed fill still sets the white material: that drape darkens nothing.
+A bound slot WITHOUT a live RT calls
+`RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0` (fog mode 0), which draws
+nothing in JO: its second gate reads ItemDef+0x114 (`cmp dword ptr [eax+114h],
+0; jz` `@ 0x5d59f4..0x5d59fb`, eax = entity+0x20, the ItemDef
+`RenderSlot_AllocSlot` reads the `shadow` w/l from `@ 0x5d572a..0x5d5754`),
+and JO never assigns +0x114 a non-null value: a full store scan finds only two
+writers, both zeroing it (`Entity_InitAllFromModels @ 0x40e486` over every
+def, and the orphan loop at `0x40d1a6`); `ItemDef_ParseProperty
+@ 0x49f3a5..0x49f44c` stores only the TGA name (+0xA0) and the w/l/ox/oy
+floats (+0x11C..+0x128) and never loads a texture, and
+`EntityDef_LoadModelsAndCallbacks @ 0x439f50` loads only `huskshadow` (+0xB0,
+a 3DI model) into +0x118 (`@ 0x43a369..0x43a38a`). The authored `shadow` line
+is parsed and unused (corrected 2026-09-24, "Remove the authored blob drape,
+dead in JO"; the earlier reading had it drape a heading-rotated decal). As a
+note on the dead function only, its UV matrix decodes to
+u = (a cos t + b sin t)/w + 0.5 + ox, v = (−a sin t + b cos t)/l + 0.5 + oy
+over (render x − slot+0x54, render z − slot+0x5C), t = heading + 2^31 BAM.
+Entity ground shadows therefore land on TERRAIN ONLY — the patches are
+terrain-following meshes.
 
 *The port* — planning and color laws are portable in
 `engine/runtime/renderer/render_slot_shadow.{h,cpp}` (direction clamp,
 alloc/grazing LOD, RT chain, cadence, scoring/24-12 assignment with sticky
-captures, dominant-light pick, anchor march, the capture view basis and
-depth band, fade + ambient/darkening and silhouette-combine laws; ctest
+captures, dominant-light pick, march start and anchor march, the patch
+mesh and lift, the capture view axes and depth band, the per-slot fade + the
+sun ambient law, the attached-light drape colour and the silhouette-combine
+laws; ctest
 `renderer_render_slot_shadow` pins each), and the per-technique PROJSHAD
 coverage source in `object_shader_template` (`object_projected_shadow_coverage`
 beside the pass-state table; ctest `renderer_material_classify`). The device
 half (`godot/src/env/slot_shadow.cpp` + `godot/src/render/slot_capture_adapter.cpp`
-+ `slot_shadow_drape.gdshader` on the terrain material; `engine/formats/def`
-parses the `shadow` line; GUT `slot_shadow_test`) realizes the capture
++ `slot_shadow_drape.gdshader`; `engine/formats/def` parses the `shadow`
+line, which nothing consumes, as in retail; GUT `slot_shadow_test`) realizes the capture
 (since 2026-08-29) as one RenderingDevice pass: `SlotShadow` publishes a
 typed request per armed slot (order, the capture pose from the witnessed
 basis, the ortho projection of the witnessed extent, the caster and its
@@ -1009,18 +1266,38 @@ single-sampled end to end (`RenderSlot_InitTextureChain @ 0x5d5320` ->
 texture and a `D3DMULTISAMPLE_NONE` depth surface) and its drape samples the
 RT bilinearly — the resolve keeps a partial-coverage edge so a hard-aliased
 1-2 px silhouette line does not scintillate against the breathing
-first-person camera; the terrain surface stands in for the 21×21 patch mesh and
-the projection is evaluated per pixel, bounded (since 2026-08-22) by the
-lod × lod patch the anchor march places (`renderer::slot_patch_bounds` over
-`TerrainData`'s height query) and clipped by the shadowztex stage
-(`renderer::slot_depth_clip`), both published per slot to the shader; held
+first-person camera; held
 weapons ride their owner's slot via the capture-with link
 (`ObjectModel.set_slot_shadow_capture_with` — the
 `RenderSlot_RenderEntityAndChildren` child walk) while tree-parented
-riders fold into the ancestor exclusion; the attached-light drape folds
-the light's attenuation at the entity into the per-slot term (retail
-varies it per patch vertex); and `scene_output` leaves the factor in
-the retail gamma-byte domain for the shared FrameFx display decode. The
+riders fold into the ancestor exclusion; and `scene_output` leaves the factor in
+the retail gamma-byte domain for the shared FrameFx display decode. Since
+2026-09-24 ("Drape each slot over its own patch mesh and carry the march start
+on the present rows", "Fade, cull and fog the slot drape per slot like
+retail", "Port the slot march start, the patch lift and the attached-light
+drape") `SlotShadow` draws each drape over its own RenderingServer patch mesh
+(`renderer::slot_patch_vertices` / `slot_patch_indices`, rebuilt on retail's
+origin/lod/resolution gate, the heights from `TerrainData::get_height_world`
+plus `renderer::slot_patch_lift`), every instance sharing one drape material at
+`RENDER_PRIORITY_MIN` with its slot in the instance uniform `u_slot`; both
+texgens and the attached-light colour (`renderer::drape_attached_light_color`,
+sat(1 + diffuse × atten × N.L) with the 1.5× D3D boost and the range cutoff)
+run per patch vertex and Gouraud-interpolate as in retail; the fade and the
+80 u cull are one per slot (`drape_fade` / `drape_culled`) and the drape fogs
+toward white with the terrain's primary fog config. The former terrain-surface
+stand-in for the patch, its per-pixel evaluation and the per-slot attenuation
+fold at the entity are retired. One device fold remains, the draw order:
+Godot draws the drape after all opaque geometry where retail draws it right
+after the terrain batch (`Terrain_RenderSkyboxPass`:
+`Terrain_RenderSectorBatchLit @ 0x610c34`, then `RenderSlot_DrawAllDrapes
+@ 0x610c47`), so an opaque surface lying inside the 0.028..0.084 u lift above
+the terrain (a flush road/pad model, a tire's lowest sliver) is multiplied
+where retail's later draw would overwrite it; anything higher occludes the
+drape by depth exactly as retail's later draw covers it. The other callers of
+`RenderSlot_DrawAllDrapes` are `terrain_scene_render @ 0x5d0833`,
+`render_hud_overlay @ 0x5d82ac`, `render_terrain_scene_with_lod @ 0x610155`,
+`render_terrain_scene_scaled @ 0x6102af` and
+`Terrain_SetupViewAndRender_ScaledWithLOD @ 0x61040b`. The
 object wrappers carry no PROJSHAD branch (the twelve-layer capture-camera
 signature, its `OBJ_PROJSHAD_*` defines and the reserved `Water` layers
 were retired 2026-08-30 with the shader hash golden regenerated); the
@@ -1045,8 +1322,8 @@ frame wall 16.80 ms -> 14.60 ms with `render_slot_cpu` 2.18 ms and
 2.0 captures/frame, 18 surfaces, 8 skinned commands; a stable frame packs
 0 vertices on both.
 
-**Low-sun drape defect remains open (revalidated 2026-08-24, 03TR dawn,
-PR #560).** At the 03TR spawn the M939 drape remains visibly different, and
+**Low-sun drape defect (revalidated 2026-08-24, 03TR dawn, PR #560;
+not reproduced 2026-09-24, see below).** At the 03TR spawn the M939 drape remains visibly different, and
 strafing exposes temporal flicker in the same projection. The first attempted
 fix changed the PROJSHAD edge representation and drape combine to a
 black-on-white additive form; an in-game before/after check showed no visible
@@ -1056,10 +1333,22 @@ is the silhouette-drape leg, but the capture/update/projection path must now be
 measured under deterministic lateral motion before another correction is
 claimed.
 
+*2026-09-24 re-measurement.* A strafe capture at the 03TR fixture pose (13
+lateral steps of 0.5 u, terrain "Detail levels" draw mode) found the ground
+under every 03TR drape within the 80 u drape range to be one flat terrain LOD
+family, with the shadow locked to the truck across the strafe and no shift or
+flicker. The retail frame's M939 tail ends at the origin-anchored lod-20 patch
+edge: a vehicle's Flags carry the REFLECTABLE bit 0x400, so it marches from its
+position, the extent the ported march start, patch mesh and per-slot fade
+reproduce (the *Per-slot light + anchor* and *Drape* paragraphs above). No
+open symptom is recorded after the pass.
+
 ## The per-light terrain projected pass (witnessed + ported 2026-08-21)
 
-The pool's GROUND leg: each terrain batch is re-drawn once more PER LIGHT,
-additively, through a two-stage projected-texture technique. Witnessed in
+The pool's GROUND leg: each terrain batch is re-drawn once more PER LIGHT
+through a two-stage projected-texture technique, then composited with the
+page and the fogged ordinary pass (the composite below; corrected 2026-09-24,
+the earlier reading added every light on top of the batch). Witnessed in
 full this round (read-only decompiles; the facts are cited in
 `engine/runtime/renderer/light_terrain_pass.h`):
 
@@ -1078,7 +1367,14 @@ full this round (read-only decompiles; the facts are cited in
   `@ 0x609850/@ 0x60989a`, so the normal pass applies `dword_2732DC8` (state
   0x600); `dword_319FBD4 & 0x100` `@ 0x609890` selects
   `foliage_setup_render_matrices @ 0x6098a5` (the 0.4/r alt pass) instead of
-  `Light_SetupTerrainProjectedPass @ 0x6098b4`. Skipped when
+  `Light_SetupTerrainProjectedPass @ 0x6098b4`. `dword_319FBD4` is the
+  adapter caps word `g_TerrainAdapterCapsStorage` (0x319FBA0) + 0x34, and bit
+  0x100 is the pixel-shader path: there the per-light setup is `0x5AAB30`
+  (IDB `foliage_setup_render_matrices`, a misnomer) with the cube-normalize
+  map bound (`@ 0x5aaea2..0x5aaeb7`), not `Light_SetupTerrainProjectedPass`
+  (the terrain stream's 2026-09-24 witness; the port still evaluates the
+  `Light_SetupTerrainProjectedPass` values, see "Open after the 2026-09-24
+  pass"). Skipped when
   `PolyTrn_UsePixelShaderPath == 0 @ 0x6095e4` or `dword_319FB84 != 0 @ 0x60983f`.
 - **The pass setup** `[orig: Light_SetupTerrainProjectedPass @ 0x5aa830]`: the
   argument is a `Light_InstanceTable` slot `@ 0x5aa844`; `inv = 32768 /
@@ -1107,6 +1403,21 @@ full this round (read-only decompiles; the facts are cited in
   y²)))` clamped ≥ 0 with alpha = i, `x = (2·col − 65)/64` (c0 = 2.0, flt_7C44B8
   = 4.0, dbl_7D9F98 = 255), border 0; the 64×8 `Light_TexSpot1D` strip is built
   inline: `(col·(row+1)) >> 1` grey, end columns white.
+- **The composite** (witnessed and ported 2026-09-24, "Composite terrain pool
+  lights with the page the way retail's lit batch does") `[orig:
+  render_terrain_sector_batch @ 0x60984c..0x609ab6]`: a batch with pool
+  lights never draws its ordinary pass alone. It draws each light unfogged,
+  the first drawn light with blending off (`dword_2732DC0` on the PS path /
+  `dword_2732DC8` mode 0x600 on the fixed-function path) and later ones
+  ONE/ONE (`dword_2732DBC` / `dword_2732DC4` mode 0x602) (`Lighting_InitTextures
+  @ 0x5a9a56..0x5a9b04`, `@ 0x5a98d2..0x5a9933`), so the target holds the
+  saturated sum `pool`; then multiplies the target by the page with
+  `dword_319F934` (`sub_6791A0(1, 0x1000628) @ 0x60c499..0x60c4ad`:
+  MODULATE2X(page, the lit white diffuse), DESTCOLOR/SRCCOLOR, unfogged;
+  drawn `@ 0x609960..0x609a19`); then adds the fogged ordinary pass
+  (`terrain_setup_lighting_and_shader(2)` -> `dword_319F930` mode 0x1020002;
+  `@ 0x609a49..0x609ab6`). Pixel = sat(sat(2 × sat(2 × page) × pool) +
+  fogged lit) (`renderer::terrain_light_pool_composite`).
 
 **Port.** `LightScene::collect_terrain_pass_rows` (engine/runtime/renderer/
 `light_terrain_pass.{h,cpp}`) runs the collect + gates per patch and publishes
@@ -1117,8 +1428,11 @@ terrain_color_recip_packed` serve the factor. The device (`godot/src/lights/
 light_scene`, `terrain_lighting.gdshaderinc`'s `terrain_point_light_pool`,
 `GameWorld::render_terrain_light_leg` in `godot/src/world/game_world_frame.cpp`) uploads the two generated textures once
 and pushes per-patch light uniforms, summing `2·2·pixel_rgb·tex2d·tex1d`
-additively after the base composite — the explicit `2·`s are the MODULATE2X
-fold — published in `render_light_frame` for the NEXT terrain frame (one-frame
+into the saturated pool (the explicit `2·`s are the MODULATE2X fold), which
+`terrain.gdshader` composites as retail's lit batch does:
+sat(sat(2 × sat(2 × page) × pool) + the fogged ordinary pass) for a patch with
+pool lights, the ordinary fogged pass alone otherwise; the rows are
+published in `render_light_frame` for the NEXT terrain frame (one-frame
 latency at 62 Hz, stated as the device fold). Pinned by ctest
 `renderer_light_terrain_pass` (selection, gates, the 0.5/r and 0.4/r scalars,
 the recip default, the projection u/v, the 2× round trip) and the GUT terrain
@@ -1139,25 +1453,33 @@ shader contract / light isolation tests.
   the env's iris params and writes the gain back to `MissionEnvironment`
   (`opennova_color_src_gain` global + the object-material uniform).
 - The checked-in object technique resources now implement the witnessed model:
-  `pixel = tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) +
-  DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex ×
-  min(ColorSrcGlobalGain,1) × 2`, uniform surface
+  `pixel = tex × sat(mix(HemiGround, HemiSky, N.y·0.5+0.5) +
+  DirLightColor·max(0,N·L) + points) × 2`, summed and saturated PER VERTEX
+  and Gouraud-interpolated for the fixed-function families (Fixed,
+  FixedDetail, FixedSkinned, Flag); SELFLUM = `tex × sat(SelfLumColor ×
+  ColorSrcGlobalGain) × 2`; FFP_GLASS = `cube × sat(ReflectColor ×
+  ColorSrcGlobalGain) × 2` (corrected 2026-09-24, "Port the object combiner
+  rules the render-parity review found diverging": the earlier text read
+  `min(lit, 1)` per pixel and SELFLUM as `min(ColorSrcGlobalGain, 1)`); uniform surface
   `u_hemi_sky_color/u_hemi_ground_color/u_dir_light_dir/u_dir_light_color/
   u_color_src_global_gain` (D-RMAT-5 closed in
   [render-material-re.md](render-material-re.md)).
 - `engine/runtime/renderer/render_slot_shadow`: the render-slot entity
   ground-shadow planner (2026-08-20) — direction clamp, alloc/grazing LOD,
   RT chain, refresh cadence, priority scoring + 24-patch/12-capture
-  assignment with sticky orders, dominant-light pick, anchor march, drape
-  fade + the per-channel sun ambient law + the attached-light darkening
-  constants, the capture view basis and depth band — ctest
+  assignment with sticky orders, dominant-light pick, march start and anchor
+  march, the patch mesh and lift, the per-slot drape fade + the per-channel
+  sun ambient law + the attached-light drape colour, the capture view axes and
+  depth band: ctest
   `renderer_render_slot_shadow`; the PROJSHAD coverage source per technique
   in `object_shader_template`. Device: `godot/src/env/slot_shadow.cpp`
-  (the per-armed-slot capture requests + the drape uniform push) +
+  (the per-armed-slot capture requests, the per-slot patch meshes and the
+  drape uniform push) +
   `godot/src/render/slot_capture_adapter.cpp` (the PRE_OPAQUE
   RenderingDevice capture pass over the shared Q3 geometry cache) +
-  `godot/shaders/slot_shadow_drape.gdshader` (the terrain drape next pass);
-  `engine/formats/def` parses the authored `shadow` decal line.
+  `godot/shaders/slot_shadow_drape.gdshader` (the drape material the patch
+  meshes share); `engine/formats/def` parses the authored `shadow` decal line
+  (unused, as in retail).
 - `terrain_lighting.gdshaderinc`: c0/c1 corrected to (sky, light) — the
   prior combined/fill pairing was a gobj-era stand-in. Its tile-alpha path also
   preserves EnvFile's direct retail getter tuple and applies the witnessed
@@ -1196,7 +1518,7 @@ limit; see the row below and the "Entity query cube correction" section above.
 |---|---|---|---|
 | D-RLIT-1 | Hosted weather runs the complete 16-block chain: modulator2/modulator plus all 14 color blocks | 16 blocks modulate in witnessed order (including skyfog and the static ceiling/cloud/floor trio) `[orig: @ 0x57ef97..0x57f03c]` | **FIXED (2026-07-21)** — `SkyWeatherColorBlocks` preserves the witnessed order; skyfog gets its lightning additive, horizon blend, and tail double; and `MissionEnvironment` writes every color current back. `SkyDome` and the frame clear share the final doubled skyfog, the flat dome consumes smoothed `cloud_rgb`, and indoor iris samples consume the pre-modulated ceiling/floor currents. |
 | D-RLIT-2 | Iris exposure uses the marched 3-point camera-ray average with per-sample indoor/outdoor classification and sun occlusion | 3-point average marched back from the terrain/entity-clipped camera ray. `Environment_ApplyFogAndAmbient` passes `g_local_player_entity`; all samples reuse its `+0x1BC/+0x1C0` candidate slice for building blink tests and the nonzero-count outdoor ray gate; the three allow-all-types rays therefore test pool-1 dynamics and pool-2 statics. Indoor-with-data sets the interior light group, indoor-no-data retains it, and outdoor clears it `[orig: Environment_ApplyFogAndAmbient @ 0x57e440/0x57e51d; compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550; raycast_entity_collision @ 0x413760; raycast_find_collision_entity @ 0x539a70]` | **FIXED (2026-08-22)** — `compute_iris_samples` now uses the shared nearest-collision clip, candidate-scoped blink query, exact local-player count gate, and candidate-scoped radiused walker; pool-1 source slices use the witnessed ItemDef gate instead of vehicle physics. The mutable iris light-group pair preserves the exact set/retain/clear sequence while typed per-draw groups own every actual light selection, avoiding a compatibility global. The original march/curve, indoor gain-255 short circuit, sun level 8−hits at −0x2000/−0x5000/−0x8000, and INT /3 average remain unchanged. Native `collision` regressions pin nearest clipping, indoor terrain bypass, candidate-only blink, dynamic blockers, and pool-1 eligibility. Measurement note (2026-08-20): frozen render fixtures previously published the modulator's mission-reset identity gain; capture now stamps the marched samples and settles the chase at the fixture pose (`Weather.settle_exposure`, capture-seam only). |
-| D-RLIT-3 | `items.def light_transfer` drives interior ROBJ sections plus the contained player/viewmodel, and drawn outdoor pool-0/pool-1 entities dim DirLightColor by the witnessed 3-radius sun query | interior-parented entities lerp to floor/ceiling ambience by the parent daylight openness (model+536). Eligible outdoor pool-0/pool-1 entities cast one 200-u sun segment at clip radii −0x2000/−0x5000/−0x8000 from position + collision-AABB midpoint, walking the entity's OWN `+0x1BC`/`+0x1C0` candidate slice (self excluded at slice build; only bubble-overlapping solids can block); each blocked cast steps DirLightColor 1.0→0.75→0.5→0.25; contained entities, empty-slice sources, and pool-2 statics stay 1.0 `[orig: setup_terrain_effect_for_entity @ 0x5c74a0; Entity_ComputeSunVisibility @ 0x5c6800; raycast_find_collision_entity @ 0x539a70; Entity_BuildProximityListsFromPools @ 0x4b8eb0; the FP-pass discard @ 0x4deeb0]` | **FIXED (2026-08-23)** — local/authority and decoded-client draw paths now share the exact bound/center and three-radius method. Wire pool-0 and eligible pool-1 sources receive separately keyed 17-tick slices; explicit registry-twin identity is the only self-exclusion, so equal H/L packed values cannot alias. `get_draw_lighting_changes` replaces the bms-only API with `[wire,bms,quality]` triples, and the wire presenter applies/caches the factor for both bodies and late-built held weapons. Native collision proofs pin the 16-tick empty window, wire/local key separation, all-three-ray hit, and pool-1 EWeap exclusion; `wire_present_pass_test` pins body/weapon directional-light delivery. |
+| D-RLIT-3 | `items.def light_transfer` drives interior ROBJ sections plus the contained player/viewmodel, and drawn outdoor pool-0/pool-1 entities dim DirLightColor by the witnessed 3-radius sun query | interior-parented entities lerp to floor/ceiling ambience by the aux daylight t: the containing building's ItemDef+0x218 `light_transfer` / 100 for a contained person, the stack base 0 for a contained non-person, a building's own transfer for its ROBJ 1+ (corrected 2026-09-24; formerly read as "model+536"). Eligible outdoor pool-0/pool-1 entities cast one 200-u sun segment at clip radii −0x2000/−0x5000/−0x8000 from position + collision-AABB midpoint, walking the entity's OWN `+0x1BC`/`+0x1C0` candidate slice (self excluded at slice build; only bubble-overlapping solids can block); each blocked cast steps DirLightColor 1.0→0.75→0.5→0.25; contained entities, empty-slice sources, and pool-2 statics stay 1.0 `[orig: setup_terrain_effect_for_entity @ 0x5c74a0; Entity_ComputeSunVisibility @ 0x5c6800; raycast_find_collision_entity @ 0x539a70; Entity_BuildProximityListsFromPools @ 0x4b8eb0; the FP-pass discard @ 0x4deeb0]` | **FIXED (2026-08-23)** — local/authority and decoded-client draw paths now share the exact bound/center and three-radius method. Wire pool-0 and eligible pool-1 sources receive separately keyed 17-tick slices; explicit registry-twin identity is the only self-exclusion, so equal H/L packed values cannot alias. `get_draw_lighting_changes` (since 2026-09-24 `Simulation::draw_lighting_changes` over `inmatch::EntityLightingFeed`) replaces the bms-only API with `[wire,bms,quality]` triples, and the wire presenter applies/caches the factor for both bodies and late-built held weapons. Native collision proofs pin the 16-tick empty window, wire/local key separation, all-three-ray hit, and pool-1 EWeap exclusion; `wire_present_pass_test` pins body/weapon directional-light delivery. 2026-09-24 ("Give every contained drawn entity the interior lighting lerp and group"): the interior half follows the witnessed wave split for every contained drawn entity, placed and wire, through `inmatch::EntityLightingFeed` (see the per-entity reader). |
 | D-RLIT-4 | The portable EffectWorld core, decay lifecycle, safe opaque handles, mission-start/powerup model-light spawn, four transient routes, target gates, both active groups, live/static per-draw selection, top-tier technique response, terrain projection, and coronas are hosted. Authored LGHT is spawn-fixed; static rows keep exact per-entity/per-ROBJ bounds and atlas identity; node teardown uses the one shared model/muzzle entity handle. | Retail transforms each LGHT point by the entity matrix once, uses `subobject` only for owner grouping, stores only the final handle at entity+0x1B4, reuses it for MF_Light, does not rescan husks, and clears it once at Entity_Destroy. Object draws query nearest 64 with the ENTITY's position ± boundRadius box and the batch entry keeps the first THREE group-passing, objects-enabled handles (the 4 in `Light_SelectAndEnableForDraw` is the D3D enable count FlushBatches tears down per entry) `[orig: Entity_SpawnGlowEffects @0x56c7c0; Entity_UpdateMuzzleGlowEffect @0x56c960; Entity_Destroy @0x43e903; collect_render_objects_for_batch @0x5d8ff7/@0x5d9229; collect_nearby_zones_by_aabb @0x5aa250; Light_SelectAndEnableForDraw @0x5ab9d0; setup_terrain_effect_for_entity @0x5c74fb; CRenderBatchQueue_FlushBatches @0x5da26b/@0x5da5de]`. Coronas use the owner-section visibility gate; Spot/Target delivery is dead code. Foliage also has no max-quality point-light consumer: its selector call at `0x60a5dc` is followed by a VS/PS pair whose only light fold is cached-tile c0/c1 and whose `oD0` is authored c6 `[orig: Terrain_CreateFoliageVertexShaders @0x5ff630; Foliage_SetupFarSlotDraw @0x60087a]`. | **FIXED (2026-08-23; cap corrected to three the same day)** — live ObjectModels, static MultiMesh rows, blink/interior groups, per-ROBJ sections, spawn/respawn/destruction lifecycle, highest-quality VS/PS technique consumption, terrain projection, and coronas are closed. The per-ROBJ/model query box must be the entity's position ± boundRadius cube stamped on every split draw (the engine contract `renderer::LightDrawContext` documents; `light_scene.cpp` currently stamps each ROBJ part's own AABB and the model AABB — the one remaining host-side mismatch of this row). `effect_light_world_test`, `per_model_light_isolation_test`, native `renderer_light_scene`, the 24-technique D3D12 swatch, and the foliage shader contract pin the routes. Generation leases intentionally reject retail's stale-handle write-through memory alias. |
 | D-RLIT-5 | The earlier implementation substituted hemisphere-along-reflection for CubeEnvironment and approximated Phong channels | NORMAL now samples a synchronously hosted 256² CubeEnvironment with the exact callback/cadence/origin/camera/dim/static-lobe chain; PhongMap is generated byte-for-byte and every ordinary/point lobe and Diffuse1-alpha role is source-pinned `[orig: update_environment_cubemap @ 0x6106a0; callback @ 0x5c3700; Render_CreateSystemTextures @ 0x58aca0; _psPhong.fx; _psPhong2.fx]` | **FIXED (2026-08-22)** — `EnvironmentCubeCapture`, the generated PhongMap binder, the 24-technique swatches, and the Forward+ D3D12 cubemap axis/orientation/gamma-byte probe close the former source and hosting residuals; 2026-08-30: the faces are copied into the published RD cubemap on the RenderingDevice (`EnvironmentCubeBlit`), the former per-publish CPU readback stall gone and the byte parity kept exact. The same cutover's `FrameFx` closes the former D-RORD-5 GLOW post backend. |
 | D-RLIT-6 | Shared terrain/foliage page cache hosts the configured tile-set strip, ordered `.til` RGBA, and DOT3 lighting alpha | `Terrain_LoadTileSetAtlas` loads `polytrn_tilestrip`/`Bms_TileSetName` + `.TGA`, divides it into 64-pixel cells, and `PolyTrn_RenderTile` indexes those cells for `.til` overlay quads before the DOT3 pass; no independently loaded mission-lightmap TGA exists `[orig: Terrain_LoadEnvironmentConfig @ 0x610940; Terrain_LoadTileSetAtlas @ 0x604A90; tile bind/index/draw @ 0x60DDD4..0x60DF1B]` | **FIXED / false premise closed (2026-08-23)** — `TerrainTilePageSourceView::tilestrip` and `compose_terrain_tile_page` host that exact producer; terrain and detail foliage consume the same published cache layer. Static model silhouettes and remaining RT mechanics stay scoped to D-TERRAIN-7. |
@@ -1218,7 +1540,7 @@ limit; see the row below and the "Entity query cube correction" section above.
 | 0x5d89e0 | set_bounding_volume_from_box | RenderBatchCtx_StoreLightingConstants | qmemcpy of the 32-float block to ctx+112 + the two hemisphere averages; NOT a bbox |
 | 0x5d8cb0 | setup_d3d_clip_planes | Lighting_SetHemisphereD3DLights | creates D3D lights 2/3 with the sky−avg / ground−avg delta colors; NOT clip planes |
 | 0x5c6800 | sub_5C6800 | Entity_ComputeSunVisibility | 3 raycasts toward the light; (4−blocked)·0.25 |
-| 0x5d7250 | setup_entity_render_lighting | RenderSlot_SetupNextLighting | pops the pending slot list; slot-render D3D lighting |
+| 0x5d7250 | setup_entity_render_lighting | RenderSlot_SetupNextLighting | pops the pending slot list; the sector-model receiver lighting (dead in JO behind the always-zero `sub_5D7240 @ 0x5d7240`, 2026-09-24) |
 | 0x5d6a30 | Entity_UpdateRenderState | RenderSlot_UpdateEntityLight | the shadow-slot dominant-light pick + terrain anchor march |
 | 0x604ce0 | sub_604CE0 | Terrain_LoadScorchTextures | trscrch1-3.tga + qburn01.tga (the brief's "4 lightmap materials" guess was wrong — scorch decals) |
 | 0x606030 | sample_terrain_lightmap | sample_terrain_colormap_tinted | samples the CPU colormap (not the tile-set atlas or composed tile RT) × tint >>7; foliage instance colors |
@@ -1248,10 +1570,10 @@ limit; see the row below and the "Entity query cube correction" section above.
 | 0x4c25e0 | Entity_UpdateAllEntities | (unchanged) | the per-entity call site of RenderSlot_UpdateEntityLight: `enabled @0x24D2054 > 0` + the slot handle at `entity+0x1B6` (2026-09-16); OpenNova runs the same pick per display frame instead — see the render-slot section |
 | 0x24d2054 | enabled | RenderSlot_ShadowQualityCfg | the cfg word gating the per-entity light update and the slot family (2026-09-16) |
 | 0x5d5320 | init_render_target_chain | RenderSlot_InitTextureChain | the 12-RT halving size chain (2026-08-20) |
-| 0x5d5130 | terrain_tile_rebuild_vertex_buffer | RenderSlot_RebuildPatchVertexBuffer | the 441-vertex terrain drape patch build (2026-08-20) |
+| 0x5d5130 | terrain_tile_rebuild_vertex_buffer | RenderSlot_RebuildPatchVertexBuffer | the (lod + 1)² vertex terrain drape patch build in a 441-vertex region (2026-08-20) |
 | 0x5d6e20 | sub_5D6E20 | RenderSlot_DrawAllDrapes | the per-slot drape walk + local-FP/prone gates (2026-08-20) |
 | 0x5d5ca0 | render_sector_model | RenderSlot_DrawSilhouetteDrape | the projected silhouette drape: fade, the depth-clip stage (person 4x steepens its direction), the sun ambient law (2026-08-20; clip stage 2026-08-21) |
-| 0x5d59d0 | render_minimap_tile_overlay | RenderSlot_DrawAuthoredBlobDecal | the items.def `shadow` decal drape (2026-08-20) |
+| 0x5d59d0 | render_minimap_tile_overlay | RenderSlot_DrawAuthoredBlobDecal | the items.def `shadow` decal drape (2026-08-20); dead in JO, its ItemDef+0x114 gate is never assigned (2026-09-24) |
 | 0x2be3c0c | dword_2BE3C0C | RenderSlot_DetailLevel | the shadow-detail level driving chain size + cadence (2026-08-20) |
 | 0x2be3bb4 | dword_2BE3BB4 | RenderSlot_Count | live slot-record count (2026-08-20) |
 | 0x2be3a90/94/98 | dword_* / frameState | RenderSlot_PendingCursor/Count/PendingList | the slot iteration state |
@@ -1266,13 +1588,81 @@ limit; see the row below and the "Entity query cube correction" section above.
 | 0x27213a0 / 0x27213d4 | unk_/dword_ | Render_DeviceCapsBlock / Render_DeviceCapsFlags | the caps block the cube fills gate on |
 | 0xb7654c / 0xb76550 | dword_* | g_NVGActive / g_NVGBrightnessLevel | the NVG state (written by Player_ToggleWeaponScope / input bindings) |
 
+## 2026-09-24 rendering parity pass
+
+What the pass changed in this record (commit subjects of the integration
+branch; the witnesses are in the sections named):
+
+- **NVG scope.** The NVG world treatment is gated on `g_camera_mode == 0`
+  ("Gate the NVG world treatment on camera mode 0"); the hemisphere rewrite
+  touches only the object block and the terrain sky, which NVG rebuilds as
+  bytes; the colour getters stay raw ("Keep the env colour blocks raw under
+  NVG; rebuild the terrain NVG sky as bytes"); the dome unpack's NVG dim is
+  ported ("Dim the sky dome under NVG, whiten it under thermal, exact light
+  blend"). Witnesses: the world lighting block and the terrain/foliage
+  constants sections.
+- **Per-flush state.** ctx+841 is the first-entry latch (slot 226 and the
+  shared constants are pushed on every flush's first entry), and the FF
+  hemisphere lights are per-flush state (the per-entity reader).
+- **Object point lights.** The 1.5× boost rides the D3D fixed-function lights
+  only ("Deliver the unboosted point-light colour; keep the 1.5 on the FF
+  lights"); the owner light group follows the per-submit producers ("Scope
+  owned point lights by the owner group each submit declares"); coronas drop
+  when the light centre is inside the viewport near depth ("Drop a corona
+  whose light centre is inside the viewport near depth").
+- **Interior lighting.** The aux daylight t is ItemDef+0x218 `light_transfer`;
+  the wave split, every building's ROBJ 1+ and contained statics are ported
+  through `inmatch::EntityLightingFeed` ("Give every contained drawn entity the
+  interior lighting lerp and group"; the per-entity reader, D-RLIT-3).
+- **Environment cube.** The analytic sun lobe aligns in Godot axes and takes
+  the raw light block ("Align the environment-cube sun lobe in Godot axes and
+  light it raw").
+- **Render slots.** The per-slot fade, 80 u cull and white fog; the Flags & 1
+  gate and the ridden vehicle's local priority; the capture axes and the
+  entity-origin key; the march start (with the vehicle REFLECTABLE bit); the
+  patch mesh and lift; the attached-light drape; the dead blob and receiver
+  legs removed; the dominant-light candidate query ("Fade, cull and fog the
+  slot drape per slot like retail", "Keep occluded casters' slots and give
+  the ridden vehicle the local priority", "Map the slot capture view into
+  presentation axes and key it on the entity origin", "Port the slot march
+  start, the patch lift and the attached-light drape", "Read the vehicle
+  REFLECTABLE bit in the slot march's Flags test", "Drape each slot over its
+  own patch mesh and carry the march start on the present rows", "Remove the
+  authored blob drape, dead in JO", "Delete the dead slot receiver darkening
+  law"). `SunShadow` lost its dead static-terrain projection mode ("Drop
+  SunShadow's dead static-terrain projection mode"): it carries the dynamic
+  receiver/caster masks and the slot direction law and allocates no shadow
+  map (the SlotShadow capture pipeline renders the entity ground shadows, the
+  tile composer the static ones); the render diagnostics key
+  `shadows.sun.projection_mode` is gone.
+- **Terrain pool lights.** The lit-batch composite ("Composite terrain pool
+  lights with the page the way retail's lit batch does").
+- **Object combiner.** Per-vertex saturation and the saturated SELFLUM /
+  glass emissive ("Port the object combiner rules the render-parity review
+  found diverging"; the ported chain).
+
 ## Open questions
 
-- `dword_A890C8` (the NVG-branch suppressor read beside `g_NVGActive`) — a
-  view-mode byte written by the player camera path; identify at the
-  viewmodel/scope slice.
-- The interior daylight-openness float's WRITER (interior model data +536 —
-  the reader side is witnessed at three sites); world-record scope with the
-  interior system.
-- `Color_UnpackToFloat4 @ 0x578900` reads the NVG pair — the sky-dome color
-  unpack's NVG dim; env-record scope when the dome NVG look lands.
+The three questions open before the pass are answered in the witness map:
+`dword_A890C8` is `g_camera_mode` (the NVG gate), the aux daylight float is
+the containing building's ItemDef+0x218 `light_transfer` written only by
+`ItemDef_ParseProperty @ 0x4a1a2c..0x4a1a50`, and `Color_UnpackToFloat4
+@ 0x578900`'s NVG branch is ported.
+
+### Open after the 2026-09-24 pass
+
+- **Drape draw order (device fold).** Godot draws the slot drape after all
+  opaque geometry; retail draws it right after the terrain batch
+  (`Terrain_RenderSkyboxPass`: `@ 0x610c34`, then `@ 0x610c47`). Only an
+  opaque surface inside the 0.028..0.084 u patch lift differs (see *The port*).
+- **FF hemisphere sharing across a flush.** Retail re-sets D3D lights 2/3 only
+  on a flush's first entry and on an interior/outdoor transition
+  (`@ 0x5d9d78..0x5d9da2`, `@ 0x5d9eee..0x5d9f14`), so consecutive interior FF
+  strips with different `light_transfer` share the first strip's lerped
+  hemisphere; the port evaluates each draw's own lerp. Only FF materials in
+  adjacent interiors with different transfer can differ.
+- **Terrain pool lights on the PS path.** With adapter caps bit 0x100 retail
+  sets each light up through `0x5AAB30` (the 0.4/r pass with the
+  cube-normalize map bound `@ 0x5aaea2..0x5aaeb7`); the port evaluates the
+  `Light_SetupTerrainProjectedPass` values (`alt_pass = false` in
+  `light_terrain_pass.h`). The composite itself is ported.
