@@ -1,7 +1,14 @@
 # Shader validation contract
 
-The checked-in shader set is a closed inventory: 154 `.gdshader` entry points
-and 39 `.gdshaderinc` implementation files (193 resources total). The executable
+The checked-in shader set is a closed inventory: 166 `.gdshader` entry points
+and 43 `.gdshaderinc` implementation files (209 resources total; pinned by
+`shader_resource_validation_test.gd`, repinned 2026-09-24 after the rendering
+parity pass: the celestial, light-corona, precipitation and CanvasItem NVG
+post shaders were deleted; the far-side particle wrappers and their include,
+the thermal particle wrappers, the three tracer ribbon wrappers,
+`sky_clouds.gdshader`, and the `effect_fog`, `foliage_mask` and `sky`
+includes were added).
+The executable
 contract is `godot/shaders/provenance.json`, validated by
 `godot/tests/shader_resource_validation_test.gd` (every resource loaded through
 Godot). The textual pins over the shader and C++ sources (the former
@@ -135,6 +142,16 @@ semantic derivations stay in the cited RE documents.
 | Particle blend programs | `0x5e29f0`, `0x5e8380` | `CParticleDefEntry_ParseBlendMode`, `CParticleTexture_InitTextureAndChannels` (`0x5e8210`) |
 | Gamma/display path | `0x679c1b`, `0x677be0` | `CD3DDevice_InitializeDisplay` (`0x679890`), `GLib_SetGammaRamp` |
 | NVG lighting constants | `0x5c8090` | `CTerrainRenderer_BuildLightingShaderConstants` |
+
+The audit is dated. Since the 2026-09-24 rendering parity pass the "Light
+coronas" row names no resource (the corona billboards draw through the
+post-particle overlay stage, `renderer::append_corona_overlay`; the
+`precipitation-streaks` family and the `light_corona` pattern with its
+`0x5aaf40` citation left `provenance.json` with their files), the celestial
+bodies draw through their authored object materials rather than
+`celestial*.gdshader`, and the NVG post is FrameFx's render-to-texture chain
+rather than `nvg_view.gdshader` ([render-order-re.md](render-order-re.md)
+§2026-09-24 rendering parity pass).
 
 Re-run the GUT contract tests, focused native renderer tests, full GUT suite, and
 windowed probe whenever a shader, shader owner, lighting producer, renderer,

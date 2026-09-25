@@ -8,7 +8,7 @@ land here as the grill slices convert the three `UNAUDITED` render systems
 | Record | Lands at | Catalog | Covers |
 |---|---|---|---|
 | [`render-material-re.md`](render-material-re.md) | **landed at REN-2** | D-RMAT | the runtime flag/tag→state path down to the device boundary (registry @ 0x5af790/0x5ae690, resolution @ 0x5b03c0, state application @ 0x5d9f50; the planning anchor "Entity_UpdateRenderState @ 0x5d6a30" resolved at REN-5 to the render-slot light updater, renamed `RenderSlot_UpdateEntityLight`) |
-| [`render-order-re.md`](render-order-re.md) | **landed at REN-3** | D-RORD | batching, sort keys, technique-class selection, the render-state stack, and the frame pass sequence (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Terrain_RenderSceneWithReflection @ 0x5c93a0) |
+| [`render-order-re.md`](render-order-re.md) | **landed at REN-3** | D-RORD | batching, sort keys, technique-class selection, the render-state stack, and the frame pass sequence (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Terrain_RenderSceneWithReflection @ 0x5c93a0); since the 2026-09-24 rendering parity pass also the post-particle overlay stage and the FrameFX screen effects |
 | [`render-lighting-re.md`](render-lighting-re.md) | **landed at REN-5** | D-RLIT | the iris/modulator chain (env #17), the world lighting block + per-entity uniforms and hemisphere D3D lights, dynamic point lights + group culling, terrain/foliage c0/c1, lighting textures, the cubemap sources (CubeRotSpecular = D-RORD-5's answer), the render-slot shadow lighting |
 | [`render-occlusion-re.md`](render-occlusion-re.md) | **landed 2026-07-16** (outside the original three REN slices) | D-OCC | blink-box visibility: section masks, portal traversal, occluder culling, indoor frame gates, the GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` occlusion chunks, and the sound-occlusion witness (which closed D-SND-7). Sound occlusion (2026-07-16, `CollisionWorld` + `engine/runtime/terrain_query`), the indoor frame gates (2026-07-16, `OcclusionFramePass`), and the section-mask/portal engine (init, mask build, traversal, occluder culling — 2026-07-17, `engine/runtime/world/occlusion.cpp`) are all ported; residuals ride the D-OCC rows |
 | [`shader-validation.md`](shader-validation.md) | **landed with the FrameFx slice (2026-08-23)** | shader provenance | the checked-in shader inventory, its citation coverage, the bounded parity statuses, and the light-response validation procedure; machine-readable twin `godot/shaders/provenance.json` |
@@ -36,11 +36,10 @@ maps that descriptor to one of the finite checked-in resources under
 (`renderer_state_vectors_test --dump`) rewrites the
 golden and deliberately fails. Re-dumps carry witness citations in the same
 commit. A thin GUT leg (`godot/tests/render_shader_cache_handoff_test.gd`)
-pins the GDScript→native binding, while
-`godot/tests/shader_resource_contract_test.gd` pins the complete resource
-manifest and rejects runtime topology switches or source-generation paths.
-The former transitive-source hash golden over the 132 object wrappers was
-retired on 2026-09-21 with the other textual source pins: a shader change is
+pins the GDScript→native binding. The former
+`shader_resource_contract_test.gd` manifest pin and the transitive-source
+hash golden over the 132 object wrappers were retired on 2026-09-21 with the
+other textual source pins: a shader change is
 reviewed as a diff and validated by loading every resource
 (`shader_resource_validation_test.gd`) and by the swatch A/B below.
 
@@ -180,8 +179,19 @@ tail (the per-light TERRAIN projected pass is ported 2026-08-21 end to end —
 two-stage fold in `terrain_lighting.gdshaderinc`; a dusk pool on the ground is
 the next fixture to register). The `03tr-sun-sky-retail` fixture (same session)
 measures low-sun sky-dome/sun/ambient response on the 03TR airfield; its
-deltas ride D-RLIT-2, D-RLIT-5, and the deferred env #16 first-pass TOD
-table.
+deltas then rode D-RLIT-2, D-RLIT-5 (both since closed), and the deferred
+env #16 first-pass TOD table. The 2026-09-24 rendering parity pass used its
+pose for the sun (placement, the body and bloom colour, the dome order;
+env-tod-re.md §Celestial bodies) and found one global gain behind a ~15 %
+uniform lit-ground gap against the superseded 2026-08-20 frame: every iris
+sample at that pose lies inside the hangar's blink volume (bms 71), so all
+three take the indoor ceiling/floor branch `[orig:
+terrain_sector_compute_lighting @ 0x5c7660..0x5c76fe]` and the settled
+modulator is 76/64 = 1.1875, while that frame was captured three frames
+after its fixture apply, before the modulator had chased its target
+(`ColorBlock_SetStepDeltas(62) @ 0x57e538`); no engine change followed.
+The capture rule under "Capture procedures" covers
+it.
 
 ## Capture procedures
 
@@ -221,7 +231,26 @@ Only then does it wait the declared settle frames, realize the catalog camera
 and minute, freeze simulation and weather, and capture the declared variants in
 order. Each selected fixture/minute emits five lossless PNGs and five
 `.state.json` sidecars sampled in the same completed draw callback as their
-PNG, plus one `<fixture-id>-manifest.json` per invocation.
+PNG, plus one `<fixture-id>-manifest.json` per invocation. Since 2026-09-24
+the probe no longer forces the 0.05 near plane: the world's scene-environment
+leg pins retail's 0.2 world near plane on the render camera every frame
+(render-order-re.md, the scene projection near plane). The fixture contract's
+water-mirror check (`realized_reflection_pose_matches`,
+`godot/probes/render/render_fixture_contract.gd`) expects the reflection
+camera to mirror the eye only at or above the water plane; below it the
+reflected pass keeps the live eye, as `render_main_scene` copies the camera
+block unchanged there (env-tod-re.md #30).
+
+Retail references carry the same settle obligation as OpenNova captures: a
+retail frame must be taken after the iris modulator has settled at the pose,
+or the whole frame carries a stale global gain. The modulator chases its
+target over 62 ticks (`ColorBlock_SetStepDeltas(62) @ 0x57e538`), and before
+the local player exists `Environment_ApplyFogAndAmbient`
+`@ 0x57e50b..0x57e512` skips the retarget and leaves the 0x40 identity; the
+2026-09-24 pass used about 300 ticks after the local player exists at the
+pose as its margin. The superseded 2026-08-20 `03tr-sun-sky-retail` frame,
+three frames after its apply, read ~64-66 against the settled 76; the
+registered 2026-08-22 frame was taken 4.03 s (530 frames) after its apply.
 
 Two catalogs drive it. [`render-fixtures-v1.json`](render-fixtures-v1.json) is
 the `world_only` diagnostic catalog at 1600x900 / vertical FOV 50.534, for
