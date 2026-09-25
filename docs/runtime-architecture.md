@@ -160,7 +160,7 @@ MainGame._process
                                             (drawn by the beauty compositor's PRE_OPAQUE pass)
       render particles
       precipitation                         the streaks, published to the overlay stage
-      scene overlay                         the post-particle tail (NVG laser slot, precipitation,
+      scene overlay                         the post-particle tail (NVG laser beams, precipitation,
                                             coronas, water glint, underwater murk, sun glare) as
                                             one immutable frame for each view's overlay pass
       plan screen effects                   the FrameFX screen-effect plan (distortion, damage/death

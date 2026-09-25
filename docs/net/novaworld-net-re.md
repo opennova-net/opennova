@@ -5924,9 +5924,9 @@ bump); the deferral list above is unchanged.
   residuals: Godot ties a camera's projection aspect to its target, so the frame-shaped NVG
   arms rasterise 512 rows x lround(512 x aspect) columns and resample horizontally to 512
   (retail rasterises 512 columns directly), and the composite / lens rasterise at that
-  target's size before the full-surface blit; the NVG style-8 laser
-  ([world §39.3](../world/world-wac-ai-re.md#393-open-after-the-2026-09-24-pass)) and the
-  raw-active death-screen exception remain unported, and Binoculars still lacks its
+  target's size before the full-surface blit; the raw-active death-screen exception
+  remains unported (the NVG style-8 laser is ported 2026-09-25,
+  [world §25.3](../world/world-wac-ai-re.md#253-the-ribbon-renderer--ceffectchannel_renderribbon--0x5db8a0)), and Binoculars still lacks its
   capture-point detail overlay.
 
 **§5.40 viewmodel correction (2026-07-08, same train):** the FP viewmodel hardcode named a

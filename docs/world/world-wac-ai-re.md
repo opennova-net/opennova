@@ -3007,10 +3007,12 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   function's DEFAULT slotType (neither 1 nor 2) walks the PERSON prox table
   through this same face walk — the consumer set of a person model's CFAC mesh:
   the knife kill zone (`Weapon_RaycastAndSpawnImpact @ 0x4e8460`, all three slot
-  legs), the NVG laser (`Entity_RenderNVGLaserBeam @ 0x5c6090`), wreck/falling/
+  legs), wreck/falling/
   shell physics (`@ 0x445500/0x4472f0/0x4482a0`), `compute_clamped_displacement
   @ 0x4ad6a0`, and `raycast_proximity_entities @ 0x538350`. Ordinary bullets
-  never see person CFAC — their person leg is the bone-sphere pair above.
+  never see person CFAC — their person leg is the bone-sphere pair above. (The NVG
+  laser, listed here until 2026-09-25, calls slots 2 and 1 only and never walks the
+  person table, §25.3.)
 - **The refNum self-site gates** (witnessed 2026-07-20; ported in
   `trace_projectile`): the mission-authored refNum group (BMS byte 153 →
   entity+533, D-NET-94) suppresses hits through two DIFFERENT reference
@@ -4570,7 +4572,7 @@ ammo from the §33.35 organic family, D-AI-5 closed 2026-09-09); the trail pool 
 `RoundSim::spawn`, the ribbons = `renderer::compile_tracer_ribbons`
 (`tracer_frame.cpp`, rebuilt to the retail ribbon 2026-09-24, §25.3) uploaded by
 `fire_presenter.cpp` via `get_tracer_trails()`; the round graphic's procedural
-channels and the NVG laser are the remaining D-AI-12 residuals.
+channels remain a D-AI-12 residual (the NVG laser is ported 2026-09-25, §25.3).
 
 ### 18.5 `Physics_RaycastTerrainAndSectors @ 0x539910` — the LOS raycast (closes the §16.5 raycast follow-up)
 
@@ -8064,10 +8066,38 @@ and its three materials"; `engine/runtime/renderer/tracer_frame.cpp` +
   run's end, age = colour count - point count, `sub eax, ebp @ 0x5dcc34`); ported
   as `renderer::append_tracer_beam`. The NVG laser draws through it with style 8
   `[orig: Entity_RenderNVGLaserBeam @ 0x5c6090, ex kong
-  "Entity_BuildProjectileTrailRay", renamed: gate = weapon def+8 flag
-  0x40000000 + g_NVGActive + not the local player; aim ray clipped by the
-  vehicle/infantry proximity raycasts, max 8.0 u, one sample per 0.25 u]`; the
-  beam itself is not drawn yet (§39.3).
+  "Entity_BuildProjectileTrailRay", renamed]`, witnessed in full and PORTED
+  2026-09-25 ("Draw the NVG IR laser beams of armed remote players"):
+  `sub_5C63B0 @ 0x5c63b0` (called `@ 0x5c9695` in the post-particle overlay tail) walks
+  the BySide person list (`dword_2984890`, 20-B rows, count `dword_2984888`). The gate
+  `@ 0x5c609a..0x5c60e6` requires entity+0x157 == 0 (the seat attach bone: not
+  seat-mounted), entity+0x298 (the held AdmDef entry) with def+8 & 0x40000000
+  (LaserBeam), `g_NVGActive`, `g_camera_mode == 0`, and not the local player. The
+  entity+0x298 writers are draw 5 (`BoneCallback_org0_World @ 0x4e3cc7`, only under
+  `Entity_CanFireWeapon`, from +0x2B0, which a drawn NPC never carries), the client's
+  player-record store (`NetPacket_SerializePlayerState @ 0x4c120d`, +0x2B0 `@ 0x4c11f2`)
+  and the detach clears (`Entity_DetachFromVehicle @ 0x4356aa`,
+  `entity_detach_from_parent @ 0x494c26`, `entity_detach_from_mount @ 0x546dd2`): the
+  beam is a multiplayer effect, other human players holding an M4-family LaserBeam
+  weapon. The action point is the held def's +0x2D4 userpoint on its +0x170 model (the
+  gfx3) through the held-weapon anchor matrix (`Entity_ComputeBoneTransformWithClear
+  @ 0x4dc950` -> `Entity_ComputeBoneTransform @ 0x401890` -> `Entity_GetCameraTransform
+  @ 0x4b8c00` over `Entity_BuildBoneTransformMatrices @ 0x4b1290`'s optional out matrix,
+  the matrix draw 5 places the gun with, then `Userpoint_ComputeWorldTransform
+  @ 0x56c420` while parentSlot != 3, `@ 0x4019a0`). The 8.0 u ray (end = pos + ((dir <<
+  5) >> 2)) is clipped by the STATIC (slot 2) then POOL-1 (slot 1) proximity walks
+  (`Projectile_RaycastProximitySlots @ 0x5c61ef / @ 0x5c6218`, each replacing only a
+  nearer hit; persons, terrain and water never clip; the former "vehicle/infantry" wording
+  was the IDB comment's error); one sample per 0.25 u while `(i << 14) < clip`, up to 32,
+  then the clip point twice (`@ 0x5c6233..0x5c637e`); drawn when the run holds more than
+  one point (`@ 0x5c6384`, `@ 0x5c6399`). Port: `engine/runtime/world/nvg_laser`
+  (`nvg_laser_beam_drawn`, `nvg_laser_clip_distance`, `nvg_laser_beam_points`),
+  `renderer::append_nvg_laser_overlay` into `SceneOverlaySlot::NvgLaserBeams` with the
+  pool+0x3008 combine as `SceneOverlayShading::NvgLaser` (SRCALPHA / ONE, alpha
+  `D.a (1 - T0.a)(1 - T1.a)`, T1 on the second coordinate set, a wrapping sampler, fogged
+  per vertex toward black), and `FirePresenter::append_nvg_laser_beams`, which takes the
+  action point off the drawn third-person gun; ctest `nvg_laser`,
+  `renderer_scene_overlay`; GUT `nvg_laser_beam_test`.
 
 ### 25.4 The round graphic + glow legs (witness completed)
 
@@ -8111,13 +8141,13 @@ and its three materials"; `engine/runtime/renderer/tracer_frame.cpp` +
 | Distortion pass (+0x828 channels) | MATCHING (2026-09-24: drawn in FrameFX's type-0 row on 256B, D-AI-12b closed) | `compile_tracer_ribbons(TracerPass::Distortion)`; `godot/src/particle/effect_distortion_drawer.cpp` |
 | Round item graphic + TRACER_SCALE/WIDTH channels | visible TrcrID item model ported (including friendly/enemy fallback and non-tracer suppression); procedural SCALE/WIDTH channels unported | `Simulation::get_throwable_visuals` + `throwable_presenter.cpp`; D-AI-12d |
 | light_move glow | ported 2026-08-16 through the D-RLIT-4 light pool (`Simulation::fill_round_glows` → `EffectLightDirector::sync_round_glows`) | D-AI-12e (closed leg) |
-| NVG laser beam | not ported (witnessed; the beam geometry `append_tracer_beam` and the overlay slot `SceneOverlaySlot::NvgLaserBeams` exist; the non-local bone transform and the visible-person feed do not, §39.3) | D-AI-12f |
+| NVG laser beam | MATCHING (ported 2026-09-25: `world/nvg_laser` gate, ray clip and point run; `renderer::append_tracer_beam` style 8 + `renderer::append_nvg_laser_overlay` in the `NvgLaserBeams` overlay slot with `SceneOverlayShading::NvgLaser`; `FirePresenter::append_nvg_laser_beams`) | D-AI-12f closed |
 
 ### 25.6 Divergences
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-12 | Tracer ribbon residuals. **NARROWED 2026-09-24** (the rendering parity pass, §25.3): (a), (b), (c) and (g) are FIXED ("Port the tracer ribbon build and its three materials"; "Draw the distortion particles and tracer ribbons in FrameFX's type-0 row"): the cross-section, the wave and the animated UVs, the distortion pass, the per-shader fog (black for the additive styles, the scene colour otherwise) and the `1/mat._11` min-width divisor are ported. The original facets, kept for their witnesses: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `Simulation::get_throwable_visuals` and `throwable_presenter.cpp`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) presented 2026-08-16 through the D-RLIT-4 light pool (mode 1, radius/2 spawn lift, per-tick follow at the raw position, despawn on drop); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness; open after 2026-09-24: (d), (f), (h), (i), (j) |
+| D-AI-12 | Tracer ribbon residuals. **NARROWED 2026-09-24** (the rendering parity pass, §25.3): (a), (b), (c) and (g) are FIXED ("Port the tracer ribbon build and its three materials"; "Draw the distortion particles and tracer ribbons in FrameFX's type-0 row"): the cross-section, the wave and the animated UVs, the distortion pass, the per-shader fog (black for the additive styles, the scene colour otherwise) and the `1/mat._11` min-width divisor are ported. The original facets, kept for their witnesses: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `Simulation::get_throwable_visuals` and `throwable_presenter.cpp`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) presented 2026-08-16 through the D-RLIT-4 light pool (mode 1, radius/2 spawn lift, per-tick follow at the raw position, despawn on drop); (f) CLOSED 2026-09-25: the NVG laser beam is ported (`world/nvg_laser`, the scene overlay's `NvgLaserBeams` slot; §25.3); (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness; open after 2026-09-25: (d), (h), (i), (j) |
 
 ### 25.7 IDB write-backs (2026-07-18 session, saved)
 
@@ -14083,35 +14113,19 @@ radius (`@ 0x5c8eca`), so riders walking their own RLOD thresholds is retail
   at its own level"). The open question the first landing carried is settled:
   piece+0x84 is the piece MODEL's bound radius, not the entity's pitch, so a flat or
   nose-down wreck's pieces are not culled. D-ITEM-4 keeps only its PRNG-stream leg.
+- The NVG IR laser beams of armed remote players are ported on 2026-09-25 (§25.3, "Draw
+  the NVG IR laser beams of armed remote players"), filling the overlay tail's
+  `NvgLaserBeams` slot; D-AI-12 (f) closed.
 - The effect groups' building-section gate (the descriptor's owner tag and blink hits at
   spawn) is recorded with the particle system:
   [ptl-format-re.md](../particles/ptl-format-re.md#rendering-parity-pass-2026-09-24).
 
 ### 39.3 Open after the 2026-09-24 pass
 
-1. **The NVG IR laser (D-AI-12f).** `Entity_RenderNVGLaserBeam @ 0x5C6090` over the
-   visible-person list (`sub_5C63B0 @ 0x5C63B0`, 20-B rows `@ 0x2984890`): gates
-   `@ 0x5C609A..0x5C60E6` (entity+0x157 == 0, the equipped ADM def (+0x298) flag
-   0x40000000, `g_NVGActive`, `g_camera_mode == 0`, not the local player); origin and
-   direction from `Entity_ComputeBoneTransformWithClear @ 0x4DC950` ->
-   `Entity_ComputeBoneTransform @ 0x401890` (action bone byte +724 / slot byte +57 into the
-   anim bone table, `Entity_GetCameraTransform @ 0x4B8C00` + `Userpoint_ComputeWorldTransform
-   @ 0x56C420`, the mount branches); an 8.0 u ray clipped by
-   `Projectile_RaycastProximitySlots` slot 2 then slot 1 (`@ 0x5C61E0..0x5C622F`); points
-   every 0.25 u (`i << 14 < hit`) up to 32, then the hit point twice; drawn when count > 1
-   through `Render_DrawTrailOrBeamSegments` (style 8) `@ 0x5C6399`. Ported pieces: the beam
-   geometry (`renderer::append_tracer_beam`), the reserved order slot
-   (`renderer::SceneOverlaySlot::NvgLaserBeams`, `@ 0x5C9695`, filled from
-   `GameWorld::render_scene_overlay_frame`), and the slot-2-then-1 walk
-   (`CollisionWorld::trace_projectile` with `walk_terrain` / `walk_water` / `walk_persons`
-   false). Missing: `Entity_ComputeBoneTransform` / `Entity_GetCameraTransform` for
-   non-local entities (only the local player's action pose is ported), the visible-person
-   list feed, and the NVG laser material as a scene-overlay shading (the tracer vertex with
-   two coordinate sets; SRCALPHA/ONE, alpha `D.a (1 - T0.a)(1 - T1.a)`).
-2. **The org1 mounted rider's held weapon (D-WPN-32).** The org1 mounted fire-request window
+1. **The org1 mounted rider's held weapon (D-WPN-32).** The org1 mounted fire-request window
    copies the parent vehicle's +0x2B0 into the rider `@ 0x4bf4f4..0x4bf4fa`, so a seat-1
    rider would draw it; unported.
-3. **The vehicle REFLECTABLE bit.** `Entity_InitFromModel @ 0x40E208..0x40E20A` sets Flags
+2. **The vehicle REFLECTABLE bit.** `Entity_InitFromModel @ 0x40E208..0x40E20A` sets Flags
    0x400 on every vehicle (ItemDefType 1); the sim keeps it as an item-type trait, not in
    `Entity::engine_flags`. The slot march reads it (`world::PF_SLOT_MARCH_OFFSET_*`, joiner
    rows through `inmatch::replica_entity_flags_dword`); any other consumer that streams or
