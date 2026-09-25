@@ -19,3 +19,11 @@ target_compile_features(opennova_3di_commands PUBLIC cxx_std_17)
 add_executable(opennova_3di main.cpp)
 set_target_properties(opennova_3di PROPERTIES OUTPUT_NAME opennova-3di)
 target_link_libraries(opennova_3di PRIVATE opennova_3di_commands)
+
+# Windows hands a program its arguments and file names in the ANSI code page
+# unless its manifest opts into UTF-8: without it a model under a folder the
+# code page cannot spell (Japanese, on a Western system) fails to open. MSVC
+# merges a .manifest source into the manifest it embeds (both generators).
+if(MSVC)
+    target_sources(opennova_3di PRIVATE utf8.manifest)
+endif()

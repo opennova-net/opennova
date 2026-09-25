@@ -78,27 +78,40 @@ struct Writer {
 	}
 };
 
-// Case-insensitive lookup of a texture's candidate names in `dir`.
-std::string resolve_texture(const std::filesystem::path &dir, const std::string &name) {
+std::string lower(std::string s) {
+	std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return s;
+}
+
+// The regular files beside the model, keyed by lower-case name, with their
+// paths in UTF-8 (the importer reads the scene text as UTF-8). Listed once per
+// scene: a retail asset folder holds some 10,000 files. A name UTF-8 cannot
+// carry (an unpaired surrogate) is no texture, so it is skipped, never fatal.
+using FolderListing = std::map<std::string, std::string>;
+
+FolderListing list_folder(const std::filesystem::path &dir) {
+	FolderListing listing;
 	std::error_code ec;
-	std::map<std::string, std::string> listing;
-	for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
-		if (!entry.is_regular_file(ec)) continue;
-		std::string file = entry.path().filename().string();
-		std::string key = file;
-		std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		listing.emplace(key, entry.path().string());
+	for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+		try {
+			if (!it->is_regular_file(ec)) continue;
+			listing.emplace(lower(it->path().filename().u8string()), it->path().u8string());
+		} catch (const std::exception &) {
+		}
 	}
-	for (std::string candidate : opennova::texture_candidate_filenames(name)) {
-		std::transform(candidate.begin(), candidate.end(), candidate.begin(),
-				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		const auto it = listing.find(candidate);
+	return listing;
+}
+
+// Case-insensitive lookup of a texture's candidate names beside the model.
+std::string resolve_texture(const FolderListing &listing, const std::string &name) {
+	for (const std::string &candidate : opennova::texture_candidate_filenames(name)) {
+		const auto it = listing.find(lower(candidate));
 		if (it != listing.end()) return it->second;
 	}
 	return std::string();
 }
 
-void write_materials(Writer &w, const Threedi3di3 &m, const std::filesystem::path &dir) {
+void write_materials(Writer &w, const Threedi3di3 &m, const FolderListing &folder) {
 	std::set<std::string> resolved;
 	for (uint32_t i = 0; i < m.material_count; ++i) {
 		const ThreediMaterial &mt = m.materials[i];
@@ -110,7 +123,7 @@ void write_materials(Writer &w, const Threedi3di3 &m, const std::filesystem::pat
 			w.line("texture " + name_field(tx.name) + " " + std::to_string(tx.slot) + " " + std::to_string(tx.type) + " " +
 					std::to_string(tx.flags) + " " + std::to_string(tx.frame));
 			if (resolved.insert(tx.name).second) {
-				const std::string path = resolve_texture(dir, tx.name);
+				const std::string path = resolve_texture(folder, tx.name);
 				w.line("texfile " + name_field(tx.name) + " " + (path.empty() ? "-" : path));
 			}
 		}
@@ -407,7 +420,8 @@ int cmd_scene(const char *model_path, const char *out_path) {
 		threedi_3di3_free(&m);
 		return 1;
 	}
-	const std::filesystem::path dir = std::filesystem::absolute(std::filesystem::path(model_path)).parent_path();
+	std::error_code ec;
+	const FolderListing folder = list_folder(std::filesystem::absolute(std::filesystem::path(model_path), ec).parent_path());
 	w.line("o3d 1");
 	w.line(std::string("# scene of ") + model_path + " (opennova-3di scene)");
 	w.line("model " + name_field(m.header.name[0] != '\0' ? m.header.name : "MODEL"));
@@ -458,7 +472,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 		for (int k = 0; k < 16; ++k) same = same && identity.m[k] == m.mtrx.matrices[0].m[k];
 		if (!same) w.note("mtrx 0 is not the identity");
 	}
-	write_materials(w, m, dir);
+	write_materials(w, m, folder);
 	for (size_t li = 0; li < m.lod_count; ++li) write_lod(w, m, li, uv1);
 	for (size_t i = 0; i < m.user_point_count; ++i) {
 		const ThreediUserPoint &u = m.user_points[i];

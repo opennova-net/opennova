@@ -108,6 +108,15 @@ add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CUR
 add_executable(threedi_o3d_build_test threedi/o3d_build_test.cpp)
 target_link_libraries(threedi_o3d_build_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_build COMMAND threedi_o3d_build_test ${CMAKE_CURRENT_BINARY_DIR})
+# opennova-3di over paths the ANSI code page cannot hold (the exe's UTF-8
+# manifest); the test embeds the manifest so its own command line is UTF-8.
+add_executable(threedi_o3d_unicode_test threedi/o3d_unicode_test.cpp)
+target_compile_features(threedi_o3d_unicode_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_sources(threedi_o3d_unicode_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/threedi_cli/utf8.manifest)
+endif()
+add_test(NAME threedi_o3d_unicode
+         COMMAND threedi_o3d_unicode_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
 
 # Retail clip sets through anim scene -> anim build -> anim compare (OPENNOVA_JO_ASSETS).
 add_executable(anim_o3a_retail_roundtrip_test anim/o3a_retail_roundtrip_test.cpp)
