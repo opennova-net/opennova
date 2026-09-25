@@ -13,12 +13,18 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/rid.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 
 #include <runtime/renderer/frame_fx_effects.h>
+#include <runtime/renderer/nvg_scope_lens.h>
 #include <runtime/renderer/q3_frame.h>
 
 #include "render/frame_fx_distortion.h"
+#include "render/nvg_view_device.h"
 
 namespace godot {
 
@@ -26,16 +32,23 @@ class Camera3D;
 class Compositor;
 class GeometryInstance3D;
 class Material;
+class Texture2D;
 class Viewport;
 class WorldEnvironment;
 
 // One frame's FrameFX screen-effect plan as the terminal effect consumes it:
-// the planner's rows (runtime/renderer/frame_fx_effects.h) plus the effects
-// device that draws the type-0 distortion sets.
+// the planner's rows (runtime/renderer/frame_fx_effects.h), the effects
+// device that draws the type-0 distortion sets, on the NVG lens arm the lens
+// over the surface's overlay rect (runtime/renderer/nvg_scope_lens.h) with
+// the surface size its pixels span, and on the NVG Sighted arm the SIGHTS
+// card's rows in the NVG scene's pixels.
 struct FrameFxScreenFrame {
 	std::uint64_t frame_id = 0;
 	opennova::renderer::FrameFxFramePlan plan;
 	std::shared_ptr<FrameFxDistortionDrawer> distortion;
+	std::shared_ptr<const opennova::renderer::NvgScopeLens> lens;
+	Vector2i screen_size;
+	std::vector<NvgViewDevice::SightsRow> nvg_sights;
 };
 
 // The frame's terminal compositor effect: the post-transparent device leg
@@ -112,6 +125,11 @@ private:
 	std::shared_ptr<FrameFxDistortionDrawer> distortion_drawer_;
 	std::uint64_t screen_frame_id_ = 0;
 	std::vector<std::uint8_t> scanline_texels_;
+	// The NVG lens over the last surface size it was built for.
+	std::shared_ptr<const opennova::renderer::NvgScopeLens> nvg_lens_;
+	Vector2i nvg_lens_size_;
+	// The SIGHTS card rows the NVG Sighted arm draws into the scene.
+	std::vector<NvgViewDevice::SightsRow> nvg_sights_;
 
 	void build_compositor();
 	void install_compositor();
@@ -187,13 +205,21 @@ public:
 	void set_view_effects(const opennova::renderer::FrameFxViewInputs &p_view);
 	void set_view_effects_values(int p_red_word, int p_camera_mode, bool p_local_dead,
 			bool p_in_session, int p_death_elapsed_ticks, bool p_thermal_view,
-			bool p_monitor_view, bool p_nvg_active, bool p_death_screen_active);
+			bool p_monitor_view, bool p_nvg_active, bool p_death_screen_active,
+			bool p_binoculars_view_active, bool p_scoped_selector, bool p_sighted_selector);
+	// The equipped SIGHTS card for the NVG Sighted arm: each row's texture,
+	// its rect in the 512-square NVG scene's pixels (x1, y1, x2, y2 per row;
+	// HudPos.nvg_scene_sight_rect) and its DefSightBlendMode, in draw order.
+	// The shell's card publishes it; the rows draw only on that arm.
+	void set_nvg_sights_card(const TypedArray<Texture2D> &p_textures,
+			const PackedFloat32Array &p_rects, const PackedInt32Array &p_blends);
 	// The effects device that draws the type-0 distortion sets; null = none.
 	void set_distortion_drawer(const std::shared_ptr<FrameFxDistortionDrawer> &p_drawer);
 	// Ordered device leg after the particle and precipitation legs: plan the
 	// frame's screen effects from the view facts, the distortion drawer's
 	// content and the millisecond clock, drawing from the render CRT stream,
-	// and publish the plan to the terminal effect.
+	// and publish the plan to the terminal effect (with the NVG lens over this
+	// node's viewport, the surface, on the lens arm).
 	void advance_screen_effects();
 	// The mission-texture init: the "ffscan" scanline texture, 2048 draws from
 	// the render CRT stream (retail CFrameFX_CreatePixelShaders @0x58289f, from

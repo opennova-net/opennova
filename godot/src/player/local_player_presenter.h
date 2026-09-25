@@ -188,6 +188,11 @@ public:
 	SubViewport *projection_viewport() const;
 	// The vertical stretch of the frame onto the surface (1 = none).
 	float projection_scale_y() const { return projection_scale_y_; }
+	// True while the NVG composite is up: the world renders as the NVG scene,
+	// through the target at world::nvg_view_projection's raster (512 rows at
+	// the frame's frustum, or the Scoped arm's 512-square square frustum),
+	// the surface's own 3D pass off -- one world render a frame.
+	bool is_nvg_raster_active() const { return nvg_raster_active_; }
 	// The FP viewmodel owner (tests and probes inspect the projection feed and
 	// sweep the placement tunables through it).
 	Ref<PlayerViewmodelRig> viewmodel_rig() const { return viewmodel_rig_; }
@@ -283,7 +288,8 @@ private:
 	// presenter, which owns the carrier nodes and draws the display model in
 	// the hidden hull's place. `p_live` false feeds the inactive frame.
 	void feed_virtual_display(bool p_live);
-	void update_view_projection(const opennova::world::ViewProjection &p_projection);
+	void update_view_projection(const opennova::world::ViewProjection &p_projection,
+			bool p_nvg_raster);
 	void release_view_projection();
 	void update_avatar(const Vector3 &p_pos);
 	GameplayCamera *fly_camera() const;
@@ -311,6 +317,7 @@ private:
 	ObjectID projection_blit_layer_id_;
 	ObjectID projection_surface_id_;
 	float projection_scale_y_ = 1.0f;
+	bool nvg_raster_active_ = false;
 	bool debug_force_viewmodel_ = false;
 	bool debug_body_in_first_person_ = false;
 	bool debug_third_person_ = false;

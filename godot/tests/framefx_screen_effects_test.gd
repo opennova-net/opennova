@@ -89,12 +89,13 @@ func _device_ready(view: Dictionary) -> bool:
 
 
 # FrameFx.set_view_effects(red_word, camera_mode, local_dead, in_session,
-# death_elapsed_ticks, thermal_view, monitor_view, nvg_active, death_screen).
+# death_elapsed_ticks, thermal_view, monitor_view, nvg_active, death_screen,
+# binoculars_view_active, scoped_selector, sighted_selector).
 func _plan(view: Dictionary, red_word: int, local_dead: bool, elapsed: int,
-		thermal: bool, monitor: bool, nvg: bool) -> void:
+		thermal: bool, monitor: bool, nvg: bool, scoped := false, sighted := false) -> void:
 	var fx := view["fx"] as FrameFx
 	fx.set_view_effects(red_word, 0, local_dead, false, elapsed, thermal, monitor,
-			nvg, false)
+			nvg, false, false, scoped, sighted)
 	fx.advance_screen_effects()
 
 
@@ -181,6 +182,79 @@ func test_nvg_flashes_green_on_the_toggle_frame_then_settles() -> void:
 			"tint + the steady glow: %s" % settled)
 	assert_eq(int(fx.get_backend_report().get("nvg_glow_clears", -1)), 1,
 			"only the toggle frame clears the persistent glow")
+
+
+# The NVG view's Scoped arm [orig: draw_minimap_compass_border @0x5d1d10;
+# terrain_scene_render @0x5d0a0e..0x5d0eb4]: the frame clears black and the
+# lens draws instead of the full-screen composite. On a 256 x 96 surface the
+# ring is (95 >> 3) + (95 >> 1) = 58 about (127, 47): the disc (to 0.71 x 58)
+# carries the tint + the four quarter-strength glow passes -- the full
+# composite's sum at the centre -- the ring (to 1.5 x 58 = 87) the doubled
+# polar unwrap through the ring colours, and beyond it the black clear stays.
+# A white scene unwraps to 4 x 0.247 = 0.988 grey; 50 px out the inner/outer
+# colours interpolate to (0.079, 0.079, 0.107), so the ring reads
+# 2 x (2 x 0.988 x d) x 0.988 = (0.31, 0.31, 0.42).
+func test_nvg_scoped_arm_draws_the_lens_over_a_black_clear() -> void:
+	var view := _view(Vector2i(256, 96))
+	_rect(view, Rect2(0, 0, 256, 96), Color.WHITE)
+	if not await _device_ready(view):
+		return
+	var fx := view["fx"] as FrameFx
+	_plan(view, 0, false, 0, false, false, true, true)
+	var image := _render(view)
+	var report := fx.get_backend_report()
+	assert_true(bool(report.get("nvg_lens_drawn", false)), "the Scoped arm draws the lens")
+	assert_false(bool(report.get("nvg_composited", true)),
+			"the lens replaces the full-screen composite")
+	var centre := image.get_pixel(127, 47)
+	assert_true(centre.r >= 0.38 and centre.g >= 0.97,
+			"the disc: the white tint (0.4, 1, 0.4) plus the glow: %s" % centre)
+	var ring := image.get_pixel(177, 47)
+	assert_true(_near(ring, Vector3(0.31, 0.31, 0.42), 0.06),
+			"the ring's doubled polar unwrap: %s" % ring)
+	assert_gt(ring.b, ring.r + 0.05, "the ring colours lean blue")
+	var outside := image.get_pixel(10, 47)
+	assert_true(_near(outside, Vector3.ZERO, 0.01),
+			"beyond 1.5 x the ring the black clear stays: %s" % outside)
+	# Off the Scoped arm the full-screen composite returns.
+	_plan(view, 0, false, 0, false, false, true, false)
+	image = _render(view)
+	report = fx.get_backend_report()
+	assert_false(bool(report.get("nvg_lens_drawn", true)))
+	assert_true(bool(report.get("nvg_composited", false)))
+	assert_gt(image.get_pixel(10, 47).g, 0.9, "the composite covers the whole frame")
+
+
+# The NVG view's Sighted arm [orig: terrain_scene_render @0x5d08cb..0x5d0952 ->
+# draw_weapon_sight_overlays @0x4dce00]: the SIGHTS card draws INTO the 512
+# scene before its glow and tint, so a white row over the scene's left half
+# tints to (0.4, 1, 0.4) where the 0.3 grey right half tints to
+# (0.12, 0.74, 0.12); off the arm the published card does not draw.
+func test_nvg_sighted_arm_draws_the_card_into_the_scene() -> void:
+	var view := _view(Vector2i(128, 96))
+	_rect(view, Rect2(0, 0, 128, 96), Color(0.3, 0.3, 0.3))
+	if not await _device_ready(view):
+		return
+	var fx := view["fx"] as FrameFx
+	var image := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	image.fill(Color.WHITE)
+	var textures: Array[Texture2D] = [ImageTexture.create_from_image(image)]
+	fx.set_nvg_sights_card(textures, PackedFloat32Array([0.0, 0.0, 256.0, 512.0]),
+			PackedInt32Array([0]))
+	_plan(view, 0, false, 0, false, false, true, false, true)
+	var frame := _render(view)
+	var report := fx.get_backend_report()
+	assert_eq(int(report.get("nvg_sights_drawn", -1)), 1, "the card's one row draws")
+	assert_true(bool(report.get("nvg_composited", false)), "the full-screen composite")
+	var left := frame.get_pixel(20, 48)
+	var right := frame.get_pixel(100, 48)
+	assert_gt(left.r, 0.38, "the card tints white: %s" % left)
+	assert_gt(left.r, right.r + 0.15, "the card sits in the scene, left of centre: %s / %s"
+			% [left, right])
+	_plan(view, 0, false, 0, false, false, true)
+	frame = _render(view)
+	assert_eq(int(fx.get_backend_report().get("nvg_sights_drawn", -1)), 0,
+			"off the Sighted arm the card stays out of the scene")
 
 
 # Type 1 [orig: Scar_SubmitShadowDecal @0x5830f0]: one hit (red 120, p = 1)

@@ -1317,6 +1317,15 @@ void GameWorld::update_frame_clear_color() {
 		return;
 	}
 	Ref<Environment> environment = clear_color_->get_environment();
+	// While the NVG composite is up the world renders as the NVG scene, whose
+	// target clears to the fog colour alone (environment_state.h
+	// nvg_scene_clear_color; LocalPlayerPresenter::is_nvg_raster_active).
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	const bool nvg_scene = presenter != nullptr && presenter->is_nvg_raster_active();
+	if (nvg_scene != clear_nvg_scene_) {
+		clear_nvg_scene_ = nvg_scene;
+		clear_env_generation_ = -1;
+	}
 	// The clear SELECTION (thermal grey / skyfog above water / lit water at
 	// or below it) is the engine's (environment_state.h carries the witness);
 	// this device reads the eye's inclusive waterline side and writes the color.
@@ -1331,7 +1340,9 @@ void GameWorld::update_frame_clear_color() {
 	// Godot decodes BG_COLOR from sRGB before writing the scene target.
 	// Pre-encode the retail gamma-domain value so the clear and spatial
 	// shader output share one numeric domain (D-RMAT-7), including underwater.
-	environment->set_bg_color(env_->frame_clear_color_for(above).linear_to_srgb());
+	environment->set_bg_color((nvg_scene ? env_->nvg_scene_clear_color(above)
+										 : env_->frame_clear_color_for(above))
+					.linear_to_srgb());
 }
 
 // Re-drive the gamemus vars from the local player each frame: the engine names

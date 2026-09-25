@@ -310,6 +310,9 @@ public:
 	bool is_water_render_active() const;
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
+	// The world's FrameFX node (the shell's SIGHTS card feeds the NVG Sighted
+	// arm through it); null before the scene is wired.
+	FrameFx *get_frame_fx() const { return framefx_; }
 	// The narrow live view of this world (its sim and resource root,
 	// re-resolved per call) the in-world screens and the click picker depend
 	// on.
@@ -688,6 +691,7 @@ private:
 	uint64_t scene_overlay_frame_id_ = 0;
 	SceneOverlayModelSurfaces scene_overlay_bodies_;
 	bool clear_above_water_ = true;
+	bool clear_nvg_scene_ = false;
 	// The render-occlusion frame (OcclusionFrame): the blink letter gates, the
 	// per-frame section-mask/portal apply, the probe A/B seam edges and the
 	// unload reset. Constructed once, wired to the retained scene nodes in

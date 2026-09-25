@@ -28,11 +28,13 @@ static var BATCHES: Array[int] = [
 
 var _mask_up := false
 var _draw_crosshair := false
+var _nvg_lens := false
 var _points: Array[PackedVector2Array] = []
 var _colors: Array[PackedColorArray] = []
 var _indices: Array[PackedInt32Array] = []
 var _cached_size := Vector2.ZERO
 var _cached_crosshair := false
+var _cached_lens := false
 var _cached := false
 
 
@@ -44,12 +46,15 @@ func _ready() -> void:
 ## The Scoped-arm verdict plus the card's row count.
 ## `up` is true only on the scoped branch (never binocular, never the Sighted
 ## card); `draw_crosshair` is retail's single argument to the mask drawer -- the
-## SIGHTS card drew no authored row.
-func set_mask_state(up: bool, draw_crosshair: bool) -> void:
-	if up == _mask_up and draw_crosshair == _draw_crosshair:
+## SIGHTS card drew no authored row. `nvg_lens` is the NVG composite's Scoped
+## arm: the lens (FrameFX) draws its own ring, and without authored rows only
+## the cross and grid draw here, at unit scale (HudPos.scope_mask_* nvg_lens).
+func set_mask_state(up: bool, draw_crosshair: bool, nvg_lens := false) -> void:
+	if up == _mask_up and draw_crosshair == _draw_crosshair and nvg_lens == _nvg_lens:
 		return
 	_mask_up = up
 	_draw_crosshair = draw_crosshair
+	_nvg_lens = nvg_lens
 	visible = up
 	queue_redraw()
 
@@ -58,7 +63,8 @@ func _resolve(surface: Vector2) -> void:
 	if surface.x <= 0.0 or surface.y <= 0.0:
 		_cached = false
 		return
-	if _cached and surface == _cached_size and _draw_crosshair == _cached_crosshair:
+	if _cached and surface == _cached_size and _draw_crosshair == _cached_crosshair \
+			and _nvg_lens == _cached_lens:
 		return
 	# The cross/grid unit keys on the full surface width (retail's screen-width
 	# global), which equals the viewport width here.
@@ -67,12 +73,16 @@ func _resolve(surface: Vector2) -> void:
 	_colors.clear()
 	_indices.clear()
 	for batch in BATCHES:
-		_points.append(HudPos.scope_mask_points(surface, width, _draw_crosshair, batch))
-		_colors.append(HudPos.scope_mask_colors(surface, width, _draw_crosshair, batch))
-		_indices.append(HudPos.scope_mask_indices(surface, width, _draw_crosshair, batch))
+		_points.append(HudPos.scope_mask_points(surface, width, _draw_crosshair, batch,
+				-1, _nvg_lens))
+		_colors.append(HudPos.scope_mask_colors(surface, width, _draw_crosshair, batch,
+				-1, _nvg_lens))
+		_indices.append(HudPos.scope_mask_indices(surface, width, _draw_crosshair, batch,
+				-1, _nvg_lens))
 	_cached = true
 	_cached_size = surface
 	_cached_crosshair = _draw_crosshair
+	_cached_lens = _nvg_lens
 
 
 func _draw() -> void:

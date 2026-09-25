@@ -8,8 +8,11 @@
 #include <cassert>
 
 #include <base/io/bam.h>
+#include <base/io/fixed.h>
 
 #include <runtime/renderer/aspect_ratio.h>
+#include <runtime/renderer/frame_fx_effects.h>
+#include <runtime/renderer/nvg_scope_lens.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/geom.h>
@@ -523,6 +526,33 @@ ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
         // Wider than the surface: keep its height, grow the width.
         out.target_w = static_cast<int>(std::lround(h / selected));
     }
+    return out;
+}
+
+ViewProjection nvg_view_projection(const ViewProjection &frame,
+                                   const renderer::FrameFxNvgPlan &nvg,
+                                   float selected_h_over_w, int32_t zoom) {
+    ViewProjection out = frame;
+    const int side = renderer::kNvgSceneSide;
+    if (nvg.lens) {
+        const float fov =
+            static_cast<float>(renderer::nvg_scoped_scene_fov_q16(selected_h_over_w, zoom)) /
+            io::kFp16One;
+        out.fov_h_deg = fov;
+        out.fov_v_deg = fov;
+        out.aspect = 1.0f;
+        out.target_w = side;
+        out.target_h = side;
+        return out;
+    }
+    if (nvg.sighted) {
+        out.fov_h_deg =
+            static_cast<float>(renderer::nvg_sighted_scene_fov_q16(zoom)) / io::kFp16One;
+        out.fov_v_deg = fov_vertical_from_horizontal_deg(out.fov_h_deg, out.aspect);
+    }
+    out.target_h = side;
+    out.target_w = static_cast<int>(std::lround(static_cast<double>(side) * frame.aspect));
+    if (out.target_w < 1) out.target_w = 1;
     return out;
 }
 

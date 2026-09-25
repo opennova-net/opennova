@@ -248,6 +248,15 @@ func test_scope_circle_mask_geometry() -> void:
 	assert_eq(HudPos.scope_mask_points(surface, 1024, true, HudPos.SCOPE_MASK_GRID).size(),
 		80, "Sixteen 5-vertex diamonds.")
 
+	# The NVG lens's reticle: no ring (the lens draws it), the cross and grid
+	# at unit scale, nothing at all once the card drew rows.
+	# [orig: draw_minimap_compass_border @0x5d2798..0x5d27bc]
+	assert_eq(HudPos.scope_mask_points(surface, 1024, true, HudPos.SCOPE_MASK_RING, -1,
+			true).size(), 0, "the lens draws its own ring")
+	assert_eq(HudPos.scope_mask_points(surface, 1024, true, HudPos.SCOPE_MASK_CROSS, -1,
+			true).size(), 28, "the unit-scale cross")
+	assert_eq(HudPos.scope_mask_points(surface, 1024, false, HudPos.SCOPE_MASK_CROSS, -1,
+			true).size(), 0, "a card with rows draws no reticle")
 	assert_eq(HudPos.scope_mask_points(surface, 1024, false, HudPos.SCOPE_MASK_RING).size(),
 		130, "Authored SIGHTS rows never suppress the annulus.")
 	assert_true(HudPos.scope_mask_points(surface, 1024, false, HudPos.SCOPE_MASK_CROSS).is_empty(),

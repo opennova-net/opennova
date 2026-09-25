@@ -282,6 +282,11 @@ public:
 	// Every branch serves RENDER-SPACE (x2-gained) colors for the
 	// modulate2x-path device Clear (D-RMAT-7).
 	Rgb frame_clear_color_for(bool eye_above_water) const;
+	// The NVG scene's clear: its target clears to the same waterline test's
+	// skyfog / lit water with no thermal branch [orig: terrain_scene_render
+	// @ 0x5d064e..0x5d0699 -- the `jle` @ 0x5d0660 keeps the water color at
+	// exact equality too]; the frame clear's water arm is this.
+	Rgb nvg_scene_clear_color(bool eye_above_water) const;
 	// The raw interior pair (the object block's NVG rewrite gives it the
 	// modulator's R term on all three channels, apply_nvg_hemi_gain_r).
 	Rgb ceiling_color() const { return ceiling_color_rt_; }

@@ -672,6 +672,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_water_render_active"), &GameWorld::is_water_render_active);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &GameWorld::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &GameWorld::get_resource_root);
+	ClassDB::bind_method(D_METHOD("get_frame_fx"), &GameWorld::get_frame_fx);
 	ClassDB::bind_method(D_METHOD("world_view"), &GameWorld::world_view);
 	ClassDB::bind_method(D_METHOD("armory_view"), &GameWorld::armory_view);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &GameWorld::is_loaded);

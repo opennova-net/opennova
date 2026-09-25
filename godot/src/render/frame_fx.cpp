@@ -1,6 +1,7 @@
 #include "render/frame_fx.h"
 #include "render/q3_frame_adapter.h"
 #include "render/q3_source_registry.h"
+#include "render/rd_glsl.h"
 #include "render/rd_fullscreen.h"
 #include "render/rd_timestamp_span.h"
 #include "render/rd_uniforms.h"
@@ -42,6 +43,7 @@
 #include <godot_cpp/classes/render_scene_buffers_rd.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
@@ -323,32 +325,9 @@ void main() {
 }
 )GLSL";
 
-// A GLSL float literal for an engine constant: %.9g round-trips every float,
-// and a trailing ".0" keeps integral values typed as floats.
-std::string glsl_float(float p_value) {
-	char buffer[32];
-	std::snprintf(buffer, sizeof(buffer), "%.9g", static_cast<double>(p_value));
-	std::string text(buffer);
-	if (text.find_first_of(".eE") == std::string::npos)
-		text += ".0";
-	return text;
-}
-
-std::string glsl_vec3(const opennova::renderer::FrameFxRgb &p_value) {
-	return "vec3(" + glsl_float(p_value[0]) + ", " + glsl_float(p_value[1]) + ", " +
-			glsl_float(p_value[2]) + ")";
-}
-
 std::string glsl_list4(const std::array<float, 4> &p_values) {
 	return glsl_float(p_values[0]) + ", " + glsl_float(p_values[1]) + ", " +
 			glsl_float(p_values[2]) + ", " + glsl_float(p_values[3]);
-}
-
-void splice_token(std::string &p_text, const char *p_token, const std::string &p_value) {
-	const std::string token(p_token);
-	for (std::size_t at = p_text.find(token); at != std::string::npos;
-			at = p_text.find(token, at + p_value.size()))
-		p_text.replace(at, token.size(), p_value);
 }
 
 std::string frame_fragment_shader_source() {
@@ -529,6 +508,8 @@ public:
 	std::size_t distortion_sets = 0;
 	bool nvg_scene_drawn = false;
 	bool nvg_composited = false;
+	bool nvg_lens_drawn = false;
+	std::size_t nvg_sights_drawn = 0;
 	std::uint64_t nvg_glow_clears = 0;
 	std::atomic<bool> shutdown_requested{false};
 	// F3-only GPU timing (rd_timestamp_span.h carries the barrier contract).
@@ -552,6 +533,7 @@ public:
 	RID scanline_uniform;
 	std::map<PipelineKey, RID> pipelines;
 	std::vector<ViewTarget> targets;
+	NvgViewDevice nvg_view;
 	std::uint64_t target_buffers_id = 0;
 	PackedByteArray push_constants;
 	PackedColorArray clear_black;
@@ -644,6 +626,7 @@ public:
 		RenderingServer *server = RenderingServer::get_singleton();
 		rd = server != nullptr ? server->get_rendering_device() : nullptr;
 		q3_adapter.release_device(rd);
+		nvg_view.release(rd);
 		release_targets();
 		release_scanlines();
 		for (auto &entry : pipelines)
@@ -676,7 +659,7 @@ public:
 	bool composite_q3(ViewTarget &target, RenderData *render_data,
 			std::uint32_t view, std::size_t &draws);
 	bool run_nvg(ViewTarget &target, const FrameFxNvgPlan &nvg, bool first_use,
-			std::size_t &draws);
+			const FrameFxScreenFrame *screen, std::size_t &draws);
 	bool render(RenderData *render_data);
 	Ref<Image> capture_q3_target();
 	Dictionary report() const;
@@ -1322,10 +1305,14 @@ bool FrameFxCompositorEffect::Impl::composite_q3(ViewTarget &target,
 // glow passes into the persistent 256-square target (cleared green on the
 // toggle frame), and the tint + glow composite replacing the frame (retail
 // sub_5D28D0 @0x5d296d; render_water_caustic_overlay @0x5d0290..0x5d048a;
-// render_fullscreen_overlay @0x5d0f28..0x5d1059). The scene here is the
-// finished beauty frame resampled to 512 x 512.
+// render_fullscreen_overlay @0x5d0f28..0x5d1059) or, on the Scoped arm, the
+// polar unwrap and the lens (NvgViewDevice; retail sub_5D2B10 @0x5d2b10).
+// While the composite is up the world renders into 512 rows
+// (LocalPlayerPresenter's NVG raster), so the scene here is that frame
+// resampled to 512 x 512.
 bool FrameFxCompositorEffect::Impl::run_nvg(ViewTarget &target,
-		const FrameFxNvgPlan &nvg, bool first_use, std::size_t &draws) {
+		const FrameFxNvgPlan &nvg, bool first_use, const FrameFxScreenFrame *screen,
+		std::size_t &draws) {
 	namespace r = opennova::renderer;
 	const Vector2i scene_size(r::kNvgSceneSide, r::kNvgSceneSide);
 	const Vector2i glow_size(r::kNvgGlowSide, r::kNvgGlowSide);
@@ -1333,6 +1320,18 @@ bool FrameFxCompositorEffect::Impl::run_nvg(ViewTarget &target,
 		if (!stretch(target.nvg_scene_framebuffer, scene_size, target.color_uniform,
 				target.size, draws))
 			return false;
+		// The Sighted arm's card draws into the scene before its glow and tint
+		// read it (retail terrain_scene_render @0x5d08cb..0x5d0952).
+		if (nvg.sighted && screen != nullptr && !screen->nvg_sights.empty()) {
+			const std::size_t before = draws;
+			std::string reason;
+			if (!nvg_view.draw_sights(rd, target.nvg_scene_framebuffer, scene_size, sampler,
+						screen->nvg_sights, draws, reason)) {
+				set_failure(reason, "nvg_sights_failed");
+				return false;
+			}
+			nvg_sights_drawn = draws - before;
+		}
 		std::array<FramePush, 2> glow;
 		for (std::size_t i = 0; i < glow.size(); ++i) {
 			FramePush &push = glow[i];
@@ -1355,7 +1354,24 @@ bool FrameFxCompositorEffect::Impl::run_nvg(ViewTarget &target,
 			++nvg_glow_clears;
 		nvg_scene_drawn = true;
 	}
-	if (nvg.composite) {
+	if (nvg.lens) {
+		NvgViewDevice::Inputs lens;
+		lens.frame_framebuffer = target.color_framebuffer;
+		lens.scene = target.nvg_scene;
+		lens.glow = target.nvg_glow;
+		lens.clamp_sampler = sampler;
+		lens.repeat_sampler = repeat_sampler;
+		if (screen != nullptr) {
+			lens.screen_size = screen->screen_size;
+			lens.lens = screen->lens;
+		}
+		std::string reason;
+		if (!nvg_view.draw(rd, lens, draws, reason)) {
+			set_failure(reason, "nvg_lens_failed");
+			return false;
+		}
+		nvg_lens_drawn = true;
+	} else if (nvg.composite) {
 		FramePush tint;
 		tint.pass = FramePass::NvgTint;
 		tint.rect_w = static_cast<float>(target.size.x - 1);
@@ -1446,6 +1462,8 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	distortion_sets = 0;
 	nvg_scene_drawn = false;
 	nvg_composited = false;
+	nvg_lens_drawn = false;
+	nvg_sights_drawn = 0;
 	std::size_t draws = 0;
 	bool sampled_q3 = false;
 	bool q3_failed = false;
@@ -1464,7 +1482,7 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		// decode below: a frame presented without it is double-encoded and
 		// flickers as glow sources enter and leave.
 		if (plan.nvg.scene || plan.nvg.composite) {
-			if (!run_nvg(target, plan.nvg, first_use, draws))
+			if (!run_nvg(target, plan.nvg, first_use, screen.get(), draws))
 				effects_failed = true;
 		}
 		if (!plan.nvg.composite && !effects_failed) {
@@ -1555,6 +1573,8 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["distortion_sets"] = static_cast<int64_t>(distortion_sets);
 	result["nvg_scene_drawn"] = nvg_scene_drawn;
 	result["nvg_composited"] = nvg_composited;
+	result["nvg_lens_drawn"] = nvg_lens_drawn;
+	result["nvg_sights_drawn"] = static_cast<int64_t>(nvg_sights_drawn);
 	result["nvg_glow_clears"] = static_cast<int64_t>(nvg_glow_clears);
 	result["q3_gpu_us"] = static_cast<int64_t>(gpu_span_us);
 	result["q3_gpu_valid"] = gpu_span_valid;
@@ -1724,10 +1744,13 @@ void FrameFx::_bind_methods() {
 			&FrameFx::get_q3_target_image);
 	ClassDB::bind_method(D_METHOD("set_view_effects", "red_word", "camera_mode",
 			"local_dead", "in_session", "death_elapsed_ticks", "thermal_view",
-			"monitor_view", "nvg_active", "death_screen_active"),
+			"monitor_view", "nvg_active", "death_screen_active",
+			"binoculars_view_active", "scoped_selector", "sighted_selector"),
 			&FrameFx::set_view_effects_values);
 	ClassDB::bind_method(D_METHOD("advance_screen_effects"),
 			&FrameFx::advance_screen_effects);
+	ClassDB::bind_method(D_METHOD("set_nvg_sights_card", "textures", "rects", "blends"),
+			&FrameFx::set_nvg_sights_card);
 	ClassDB::bind_method(D_METHOD("init_mission_textures"),
 			&FrameFx::init_mission_textures);
 	ClassDB::bind_static_method("FrameFx",
@@ -1832,7 +1855,8 @@ void FrameFx::set_view_effects(const opennova::renderer::FrameFxViewInputs &p_vi
 void FrameFx::set_view_effects_values(int p_red_word, int p_camera_mode,
 		bool p_local_dead, bool p_in_session, int p_death_elapsed_ticks,
 		bool p_thermal_view, bool p_monitor_view, bool p_nvg_active,
-		bool p_death_screen_active) {
+		bool p_death_screen_active, bool p_binoculars_view_active,
+		bool p_scoped_selector, bool p_sighted_selector) {
 	opennova::renderer::FrameFxViewInputs view;
 	view.red_word = p_red_word;
 	view.camera_mode = p_camera_mode;
@@ -1843,7 +1867,33 @@ void FrameFx::set_view_effects_values(int p_red_word, int p_camera_mode,
 	view.monitor_view = p_monitor_view;
 	view.nvg_active = p_nvg_active;
 	view.death_screen_active = p_death_screen_active;
+	view.binoculars_view_active = p_binoculars_view_active;
+	view.scoped_selector = p_scoped_selector;
+	view.sighted_selector = p_sighted_selector;
 	set_view_effects(view);
+}
+
+void FrameFx::set_nvg_sights_card(const TypedArray<Texture2D> &p_textures,
+		const PackedFloat32Array &p_rects, const PackedInt32Array &p_blends) {
+	nvg_sights_.clear();
+	RenderingServer *server = RenderingServer::get_singleton();
+	const int64_t count = std::min<int64_t>(p_textures.size(),
+			std::min<int64_t>(p_rects.size() / 4, p_blends.size()));
+	for (int64_t i = 0; i < count; ++i) {
+		const Ref<Texture2D> texture = p_textures[i];
+		if (texture.is_null() || server == nullptr)
+			continue;
+		NvgViewDevice::SightsRow row;
+		// The linear (UNORM) view: the frame's numbers are gamma-domain.
+		row.texture = server->texture_get_rd_texture(texture->get_rid(), false);
+		row.x1 = p_rects[i * 4 + 0];
+		row.y1 = p_rects[i * 4 + 1];
+		row.x2 = p_rects[i * 4 + 2];
+		row.y2 = p_rects[i * 4 + 3];
+		row.blend = p_blends[i];
+		if (row.texture.is_valid())
+			nvg_sights_.push_back(row);
+	}
 }
 
 void FrameFx::set_distortion_drawer(
@@ -1865,6 +1915,26 @@ void FrameFx::advance_screen_effects() {
 	frame->plan = opennova::renderer::plan_frame_fx(inputs, planner_state_,
 			[]() { return opennova::crt::crt_rand15(); });
 	frame->distortion = distortion_drawer_;
+	// The lens spans the surface's overlay rect, (0, 0)..(W - 1, H - 1)
+	// (retail Viewport_SetFullScreen @0x5d30e0 over overlayCtx), rebuilt only
+	// when the surface resizes.
+	if (frame->plan.nvg.lens) {
+		Viewport *viewport = get_viewport();
+		const Vector2 surface = viewport != nullptr ? viewport->get_visible_rect().size : Vector2();
+		const Vector2i size(static_cast<int>(surface.x), static_cast<int>(surface.y));
+		if (size.x > 0 && size.y > 0) {
+			if (!nvg_lens_ || size != nvg_lens_size_) {
+				nvg_lens_ = std::make_shared<const opennova::renderer::NvgScopeLens>(
+						opennova::renderer::build_nvg_scope_lens(0, 0, size.x - 1, size.y - 1,
+								opennova::renderer::kNvgSceneSide));
+				nvg_lens_size_ = size;
+			}
+			frame->lens = nvg_lens_;
+			frame->screen_size = size;
+		}
+	}
+	if (frame->plan.nvg.sighted)
+		frame->nvg_sights = nvg_sights_;
 	terminal_effect_->publish_screen_effects(frame);
 }
 

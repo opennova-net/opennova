@@ -1093,6 +1093,58 @@ void test_frame_carries_the_framefx_dispatch_facts() {
     CHECK(!f.frame_fx.thermal_view && f.frame_fx.monitor_view);
 }
 
+// The NVG arms: the Scoped byte (a settled non-Inset Scoped sight) routes the
+// NVG composite through the lens and drops the NVG.tga mask; the binocular
+// byte rides along. [orig: Render_ProcessMainSceneFrame @0x5ca2be..0x5ca304,
+// @0x5ca6f5..0x5ca71a]
+void test_frame_carries_the_nvg_lens_arm() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, 0);
+    w.scope_max_mag = 4.0f;
+    PlayerViewState v;
+    LocalPlayerViewTracker t;
+    LocalPlayerViewFrame f;
+    v.nvg_active = true;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(!f.frame_fx.scoped_selector && !f.frame_fx.binoculars_view_active);
+    CHECK(f.nvg_mask_visible && !f.nvg_lens_active);
+    CHECK(player_view_set_engaged(v, true, false));
+    settle_ease(v);
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.scoped_selector);
+    CHECK(f.nvg_lens_active && !f.nvg_mask_visible);
+    // Inset takes the other byte: no lens.
+    w.def.flags2 = DEF_WEAPON_FLAG2_INSET;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(!f.frame_fx.scoped_selector && !f.nvg_lens_active && f.nvg_mask_visible);
+    // NVG off: neither.
+    w.def.flags2 = 0;
+    v.nvg_active = false;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.scoped_selector && !f.nvg_lens_active && !f.nvg_mask_visible);
+}
+
+// The Sighted byte routes the NVG scene through the Sighted arm: the card
+// goes into the scene, the mask stays. [orig: Render_ProcessMainSceneFrame
+// @0x5ca2cc..0x5ca2d5, @0x5ca57f..0x5ca591]
+void test_frame_carries_the_nvg_sighted_arm() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, 0);
+    w.scope_max_mag = 4.0f;
+    PlayerViewState v;
+    LocalPlayerViewTracker t;
+    LocalPlayerViewFrame f;
+    v.nvg_active = true;
+    CHECK(player_view_set_engaged(v, true, false));
+    settle_ease(v);
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.sighted_selector && !f.frame_fx.scoped_selector);
+    CHECK(f.nvg_sights_in_scene && !f.nvg_lens_active && f.nvg_mask_visible);
+    v.nvg_active = false;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.sighted_selector && !f.nvg_sights_in_scene);
+}
+
 // The camera's airborne skip is independent of the ongoing scope interp.
 // [orig: Player_UpdateFirstPersonCamera @0x4dd40d/0x4dd414 and @0x4dd49f/0x4dd4a6]
 void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
@@ -2369,6 +2421,8 @@ int main() {
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
     test_frame_carries_the_framefx_dispatch_facts();
+    test_frame_carries_the_nvg_lens_arm();
+    test_frame_carries_the_nvg_sighted_arm();
     test_authored_rotation_bias_continues_through_air_reload_and_rebake();
     test_airborne_view_bias_keeps_interp_and_resumes_on_landing();
     test_airborne_bias_is_separate_from_reload_and_force_scope_admission();

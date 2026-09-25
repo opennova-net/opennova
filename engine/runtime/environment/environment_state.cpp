@@ -459,6 +459,10 @@ Rgb EnvironmentState::frame_clear_color_for(bool eye_above_water) const {
 	if (thermal_view_) {
 		return kThermalGrey;
 	}
+	return nvg_scene_clear_color(eye_above_water);
+}
+
+Rgb EnvironmentState::nvg_scene_clear_color(bool eye_above_water) const {
 	if (eye_above_water) {
 		return frame_clear_color();
 	}

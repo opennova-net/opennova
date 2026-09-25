@@ -339,6 +339,13 @@ struct LocalPlayerViewFrame {
     bool nvg_active = false;
     bool nvg_visible = false;
     int32_t nvg_gain = 0;
+    // The NVG composite's HUD half (renderer/frame_fx_effects.h): NVG.tga and
+    // its gain scale draw only under the full-screen composite, and the Scoped
+    // arm's lens takes the circle mask's place with its unit-scale reticle.
+    bool nvg_mask_visible = false;
+    bool nvg_lens_active = false;
+    // The Sighted arm: the SIGHTS card draws into the NVG scene, not over it.
+    bool nvg_sights_in_scene = false;
     // The thermal-imaging view of a Thermal-flagged weapon def (flags2 & 4;
     // the IDB's Player_IsVehicleSeatHasFlag4 @0x4dcd70 reads EquippedSlot
     // (+0x118)->Def(+0x20)->flags2(+0x0C) & 4). `thermal_view` is the frame's

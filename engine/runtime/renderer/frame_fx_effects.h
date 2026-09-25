@@ -160,6 +160,13 @@ struct FrameFxViewInputs {
 	bool monitor_view = false;        // the frame's latch: CanFire && flags2 & 8
 	bool nvg_active = false;          // g_NVGActive
 	bool death_screen_active = false; // g_death_screen_active
+	bool binoculars_view_active = false; // g_binocularsViewActive
+	// The frame's Scoped selector byte: CanFire, a Scoped non-Inset def, not a
+	// vehicle-attack seat, never on the death screen. [orig: @0x5ca2be..0x5ca304]
+	bool scoped_selector = false;
+	// The frame's Sighted selector byte under the same gates.
+	// [orig: @0x5ca2cc..0x5ca2d5, cleared @0x5ca2ff..0x5ca304]
+	bool sighted_selector = false;
 };
 
 struct FrameFxFrameInputs {
@@ -176,16 +183,39 @@ struct FrameFxFrameInputs {
 
 // The first-person NVG view. `scene` renders the 512-square NVG scene and
 // accumulates its glow; `composite` replaces the frame with the tint + glow
-// composite and skips every other FrameFX row; `clear_glow` clears the
-// persistent glow target to green on the frame g_NVGActive changed.
-// [orig: Render_ProcessMainSceneFrame @0x5ca516..0x5ca5cd (the scene and the
-//  dword_29D6BA4 latch), @0x5ca6ab..0x5ca73a (the composite and the jump past
-//  every FrameFX dispatch to @0x5cab1d)]
+// composite and skips every other FrameFX row; `lens` (the Scoped arm, off
+// the death screen and the binoculars) draws that composite through the
+// scoped lens instead (renderer/nvg_scope_lens.h) over a scene rendered with
+// the square scoped frustum; `sighted` (the Sighted arm, after the Scoped
+// one) renders the scene at 80 / zoom without the viewmodel and draws the
+// SIGHTS card INTO it, laid out over the 512 square, so the card is tinted
+// and glows with the scene and no card draws over the composite;
+// `clear_glow` clears the persistent glow target to green on the frame
+// g_NVGActive changed.
+// [orig: Render_ProcessMainSceneFrame @0x5ca516..0x5ca5cd (the scene arms --
+//  the Scoped one sub_5D2990 @0x5ca575, the Sighted one
+//  Math_BuildScaledFixedPointToFloatMatrix @0x5ca591 -- and the dword_29D6BA4
+//  latch), @0x5ca6ab..0x5ca73a (the composite, the Scoped arm's sub_5D2B10
+//  @0x5ca71a, the Sighted arm's j_render_fullscreen_overlay @0x5ca72b, and the
+//  jump past every FrameFX dispatch to @0x5cab1d); the card into the scene
+//  terrain_scene_render @0x5d08cb..0x5d0952]
 struct FrameFxNvgPlan {
 	bool scene = false;
 	bool composite = false;
+	bool lens = false;
+	bool sighted = false;
 	bool clear_glow = false;
 };
+
+// The frame's NVG arms without the toggle latch (plan_frame_fx adds
+// `clear_glow`).
+FrameFxNvgPlan frame_fx_nvg_view(const FrameFxViewInputs &view);
+
+// NVG.tga and its gain scale draw at the end of the full-screen composite,
+// never on the death screen, and never under the lens (whose arm skips that
+// composite). [orig: render_fullscreen_overlay @0x5d1077..0x5d1080
+//  (sub_5CFF70 unless g_death_screen_active)]
+bool frame_fx_nvg_mask_visible(const FrameFxViewInputs &view);
 
 struct FrameFxFramePlan {
 	FrameFxNvgPlan nvg;

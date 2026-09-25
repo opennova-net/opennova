@@ -830,6 +830,16 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     const bool scoped = out.scope_card_active &&
                         (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0 &&
                         (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) == 0;
+    // The NVG arms read the binocular byte and the frame's Scoped byte, which
+    // the vehicle-attack context clears [orig: @0x5ca2ff..0x5ca304]; the HUD
+    // takes the mask gate and the lens arm from the same planner.
+    out.frame_fx.binoculars_view_active = v.binoculars_view_active;
+    out.frame_fx.scoped_selector = scoped && !out.vehicle_attack_context;
+    out.frame_fx.sighted_selector = sighted && !out.vehicle_attack_context;
+    const renderer::FrameFxNvgPlan nvg = renderer::frame_fx_nvg_view(out.frame_fx);
+    out.nvg_mask_visible = renderer::frame_fx_nvg_mask_visible(out.frame_fx);
+    out.nvg_lens_active = nvg.lens;
+    out.nvg_sights_in_scene = nvg.sighted;
     // The modern main-scene branches: Sighted requires a nonzero max-zero
     // definition; Scoped always applies its slot offsets. Binoculars bypass
     // both. [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0,

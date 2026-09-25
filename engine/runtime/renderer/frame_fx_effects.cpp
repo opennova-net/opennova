@@ -209,16 +209,35 @@ int frame_fx_capture_side(int backbuffer_side) {
 	return static_cast<int>(last);
 }
 
+FrameFxNvgPlan frame_fx_nvg_view(const FrameFxViewInputs &view) {
+	FrameFxNvgPlan nvg;
+	// The NVG scene runs on g_NVGActive under the death screen, else only in
+	// camera mode 0; the composite (and the jump past every FrameFX dispatch)
+	// needs camera mode 0 either way. [orig: @0x5ca516..0x5ca554, @0x5ca6ab..0x5ca6bf]
+	nvg.scene = view.nvg_active && (view.death_screen_active || view.camera_mode == 0);
+	nvg.composite = view.nvg_active && view.camera_mode == 0;
+	// Off the death screen the binoculars arm comes first, then the Scoped
+	// byte's. [orig: @0x5ca549..0x5ca575 (the scene); @0x5ca6f5..0x5ca71a (the
+	// composite)]
+	nvg.lens = nvg.composite && !view.death_screen_active &&
+			!view.binoculars_view_active && view.scoped_selector;
+	// [orig: @0x5ca57f..0x5ca591 (the scene); @0x5ca724..0x5ca72b (the
+	// composite)]
+	nvg.sighted = nvg.composite && !view.death_screen_active &&
+			!view.binoculars_view_active && !view.scoped_selector && view.sighted_selector;
+	return nvg;
+}
+
+bool frame_fx_nvg_mask_visible(const FrameFxViewInputs &view) {
+	const FrameFxNvgPlan nvg = frame_fx_nvg_view(view);
+	return nvg.composite && !nvg.lens && !view.death_screen_active;
+}
+
 FrameFxFramePlan plan_frame_fx(const FrameFxFrameInputs &in, FrameFxPlannerState &state,
 		const FrameFxRand &rand) {
 	FrameFxFramePlan plan;
 	const FrameFxViewInputs &view = in.view;
-	// The NVG scene runs on g_NVGActive under the death screen, else only in
-	// camera mode 0; the composite (and the jump past every FrameFX dispatch)
-	// needs camera mode 0 either way. [orig: @0x5ca516..0x5ca554, @0x5ca6ab..0x5ca6bf]
-	plan.nvg.scene = view.nvg_active &&
-			(view.death_screen_active || view.camera_mode == 0);
-	plan.nvg.composite = view.nvg_active && view.camera_mode == 0;
+	plan.nvg = frame_fx_nvg_view(view);
 	plan.nvg.clear_glow = plan.nvg.scene && view.nvg_active != state.nvg_active_last;
 	state.nvg_active_last = view.nvg_active; // dword_29D6BA4 @0x5ca5cd
 	if (plan.nvg.composite)

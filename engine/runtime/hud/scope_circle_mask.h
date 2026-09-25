@@ -171,4 +171,14 @@ ScopeCircleMask build_scope_circle_mask(int32_t x0, int32_t y0, int32_t x1,
 		int32_t y1, int32_t screen_width, bool draw_crosshair,
 		int aspect_mode = -1);
 
+// The NVG view's scoped lens (renderer/nvg_scope_lens.h) draws its own ring;
+// when the SIGHTS card drew no authored row it chains only the cross and the
+// grid, about the same centre and ring size but at UNIT scale -- no aspect
+// stretch, no annulus. The result's ring is empty.
+// [orig: draw_minimap_compass_border @0x5d2798..0x5d27bc:
+//  `if (!draw_weapon_sight_overlays()) draw_minimap_crosshair_and_grid(ring,
+//  cx, cy, 1.0, 1.0)`]
+ScopeCircleMask build_nvg_lens_reticle(int32_t x0, int32_t y0, int32_t x1,
+		int32_t y1, int32_t screen_width);
+
 } // namespace opennova::hud

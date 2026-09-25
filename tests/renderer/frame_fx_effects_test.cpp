@@ -304,6 +304,73 @@ void nvg_replaces_the_chain_and_clears_its_glow_on_the_toggle_frame() {
 	CHECK(plan_frame_fx(in, state, rand.fn()).nvg.clear_glow);
 }
 
+// The Scoped arm's lens and the NVG.tga mask gate [orig: @0x5ca549..0x5ca575;
+// @0x5ca6f5..0x5ca71a; render_fullscreen_overlay @0x5d1077..0x5d1080]
+void nvg_scoped_arm_draws_the_lens_and_drops_the_mask() {
+	FrameFxViewInputs view;
+	view.nvg_active = true;
+	view.scoped_selector = true;
+	FrameFxNvgPlan nvg = frame_fx_nvg_view(view);
+	CHECK(nvg.scene && nvg.composite && nvg.lens);
+	CHECK(!frame_fx_nvg_mask_visible(view));
+	// The planner carries the arm with its latch.
+	FrameFxPlannerState state;
+	ScriptedRand rand;
+	FrameFxFrameInputs in;
+	in.view = view;
+	const FrameFxFramePlan plan = plan_frame_fx(in, state, rand.fn());
+	CHECK(plan.nvg.lens && plan.nvg.clear_glow && !plan.bloom);
+	// The binocular arm comes first: the full-screen composite and its mask.
+	view.binoculars_view_active = true;
+	nvg = frame_fx_nvg_view(view);
+	CHECK(nvg.composite && !nvg.lens);
+	CHECK(frame_fx_nvg_mask_visible(view));
+	view.binoculars_view_active = false;
+	// The death screen composites without the lens and without the mask.
+	view.death_screen_active = true;
+	nvg = frame_fx_nvg_view(view);
+	CHECK(nvg.composite && !nvg.lens);
+	CHECK(!frame_fx_nvg_mask_visible(view));
+	view.death_screen_active = false;
+	// Unscoped first person: the composite and the mask.
+	view.scoped_selector = false;
+	CHECK(!frame_fx_nvg_view(view).lens && frame_fx_nvg_mask_visible(view));
+	// Out of first person there is no composite, so neither.
+	view.scoped_selector = true;
+	view.camera_mode = 1;
+	CHECK(!frame_fx_nvg_view(view).lens && !frame_fx_nvg_mask_visible(view));
+	// NVG off: nothing.
+	view.camera_mode = 0;
+	view.nvg_active = false;
+	nvg = frame_fx_nvg_view(view);
+	CHECK(!nvg.scene && !nvg.composite && !nvg.lens && !frame_fx_nvg_mask_visible(view));
+}
+
+// The Sighted arm: after the Scoped byte, the card goes into the scene and the
+// full-screen composite (with its mask) draws. [orig: @0x5ca57f..0x5ca591;
+// @0x5ca724..0x5ca72b]
+void nvg_sighted_arm_takes_the_card_into_the_scene() {
+	FrameFxViewInputs view;
+	view.nvg_active = true;
+	view.sighted_selector = true;
+	FrameFxNvgPlan nvg = frame_fx_nvg_view(view);
+	CHECK(nvg.composite && nvg.sighted && !nvg.lens);
+	CHECK(frame_fx_nvg_mask_visible(view));
+	// A def with both bytes takes the Scoped arm.
+	view.scoped_selector = true;
+	nvg = frame_fx_nvg_view(view);
+	CHECK(nvg.lens && !nvg.sighted);
+	view.scoped_selector = false;
+	view.binoculars_view_active = true;
+	CHECK(!frame_fx_nvg_view(view).sighted);
+	view.binoculars_view_active = false;
+	view.death_screen_active = true;
+	CHECK(!frame_fx_nvg_view(view).sighted);
+	view.death_screen_active = false;
+	view.camera_mode = 1;
+	CHECK(!frame_fx_nvg_view(view).sighted);
+}
+
 // [orig: ps @0x7D7C48]
 void thermal_stage_inverts_the_luma_into_green() {
 	const FrameFxRgb grey = frame_fx_thermal_color({0.5f, 0.5f, 0.5f});
@@ -376,6 +443,8 @@ int main() {
 	distortion_row_jitters_and_binds_both_work_targets();
 	thermal_and_monitor_follow_the_bloom();
 	nvg_replaces_the_chain_and_clears_its_glow_on_the_toggle_frame();
+	nvg_scoped_arm_draws_the_lens_and_drops_the_mask();
+	nvg_sighted_arm_takes_the_card_into_the_scene();
 	thermal_stage_inverts_the_luma_into_green();
 	fan_keeps_the_centre_and_blurs_toward_the_border();
 	scanline_texture_alternates_a_dim_row_and_a_noisy_row();

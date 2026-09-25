@@ -711,6 +711,11 @@ Color MissionEnvironment::frame_clear_color_for(bool p_eye_above_water) const {
 	return Color(rgb.r, rgb.g, rgb.b);
 }
 
+Color MissionEnvironment::nvg_scene_clear_color(bool p_eye_above_water) const {
+	const opennova::env::Rgb rgb = state_.nvg_scene_clear_color(p_eye_above_water);
+	return Color(rgb.r, rgb.g, rgb.b);
+}
+
 Vector3 MissionEnvironment::get_ceiling_color() const {
 	return to_vector3(state_.ceiling_color());
 }

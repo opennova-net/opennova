@@ -627,6 +627,35 @@ void test_view_projection_retail_stretch() {
     CHECK(viewmodel_focal_ratio(80.0f, 0.0f) == 1.0f);
 }
 
+// The NVG scene's pass [orig: sub_5D28D0 @0x5d2954..0x5d296d; sub_5D2990
+// @0x5d29e4..0x5d2a2a]: the frame's frustum in 512 rows at its own aspect, or
+// the Scoped arm's square frustum in the 512 square.
+void test_nvg_view_projection() {
+    opennova::renderer::FrameFxNvgPlan frame_arm;
+    frame_arm.scene = frame_arm.composite = true;
+    opennova::renderer::FrameFxNvgPlan lens_arm = frame_arm;
+    lens_arm.lens = true;
+    opennova::renderer::FrameFxNvgPlan sighted_arm = frame_arm;
+    sighted_arm.sighted = true;
+    const ViewProjection wide = view_projection(80.0f, 0, 1920, 1080);
+    const ViewProjection nvg = nvg_view_projection(wide, frame_arm, 0.75f, 1);
+    CHECK(nvg.fov_h_deg == wide.fov_h_deg && nvg.fov_v_deg == wide.fov_v_deg);
+    CHECK(nvg.aspect == wide.aspect);
+    CHECK(nvg.target_h == 512 && nvg.target_w == 683); // lround(512 x 4/3)
+    const ViewProjection native = view_projection(80.0f, -1, 1920, 1080);
+    const ViewProjection native_nvg = nvg_view_projection(native, frame_arm, 0.5625f, 1);
+    CHECK(native_nvg.target_h == 512 && native_nvg.target_w == 910);
+    const ViewProjection lens = nvg_view_projection(wide, lens_arm, 0.75f, 4);
+    CHECK(lens.fov_h_deg == 15.0f && lens.fov_v_deg == 15.0f && lens.aspect == 1.0f);
+    CHECK(lens.target_w == 512 && lens.target_h == 512);
+    // The Sighted arm keeps the frame's shape at 80 / zoom
+    // [orig: Math_BuildScaledFixedPointToFloatMatrix @0x5d2aa9..0x5d2ada].
+    const ViewProjection sighted = nvg_view_projection(wide, sighted_arm, 0.75f, 4);
+    CHECK(sighted.fov_h_deg == 20.0f && sighted.aspect == wide.aspect);
+    CHECK(std::fabs(sighted.fov_v_deg - fov_vertical_from_horizontal_deg(20.0f, wide.aspect)) < 1e-5f);
+    CHECK(sighted.target_w == 683 && sighted.target_h == 512);
+}
+
 // [orig: Game_RunVideoTestDialog @0x53ed3e..0x53ed6b] The first launch's video
 // test seeds the cfg's display_16x9 word from the primary desktop: 1 (the
 // widescreen row) when width / height exceeds the single-precision 1.34, else 0,
@@ -1588,6 +1617,7 @@ int main() {
     test_nvg_toggle_gain_and_first_person_visibility();
     test_fov_vertical_conversion();
     test_view_projection_retail_stretch();
+    test_nvg_view_projection();
     test_fresh_profile_aspect_seed();
     test_view_bias_blend();
     test_input_dispatch_gates();

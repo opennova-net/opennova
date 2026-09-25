@@ -5,6 +5,8 @@ extends GameProbe
 ## cadence A/B, the runtime's PRESENT/SIM legs for the native-row-walk A/B)
 ## with vsync off, and report avg/p95/max per counter plus the frame wall
 ## time. Runs on a loaded mission; headless is fine for the tick counters.
+## `nvg` samples with the local player's NVG view up (the NVG composite's
+## 512-row world raster) and restores the toggle afterwards.
 
 const COUNTER_SOURCES := {
 	# world tick legs (GameWorld.get_runtime_perf_counters)
@@ -44,6 +46,16 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	if ctx.world() == null or ctx.runtime() == null:
 		return ProbeVerdict.failed("no loaded world/runtime")
 	ProbePerfSetup.uncap_frame_rate(ctx)
+	if bool(ctx.args.get("nvg", false)):
+		var sim := ctx.sim()
+		if sim == null:
+			return ProbeVerdict.failed("no simulation to raise the NVG view on")
+		if not sim.get_local_player_view().nvg_active:
+			sim.request_local_player_nvg_toggle()
+			ctx.defer_restore(func() -> void:
+				var restore := ctx.sim()
+				if restore != null and restore.get_local_player_view().nvg_active:
+					restore.request_local_player_nvg_toggle())
 	var tree := ctx.tree
 	tree.process_frame.connect(_on_frame)
 	ctx.defer_restore(func() -> void:
@@ -64,6 +76,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var data := {
 		"frames": _frame_us.size(),
 		"window_ms": sample_ms,
+		"nvg": bool(ctx.args.get("nvg", false)),
 		"counters": {},
 	}
 	for key in _samples:

@@ -28,6 +28,8 @@
 
 #include <cmath>
 
+#include <runtime/renderer/aspect_ratio.h>
+#include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/renderer/render_order.h>
 #include <runtime/world/player_present.h>
 
@@ -886,7 +888,24 @@ void LocalPlayerPresenter::update_scope_camera() {
 	// (engine witness: renderer::kScenePassNearZ, the
 	// Render_ProcessMainSceneFrame per-frame depth pins)
 	cam->set_near(opennova::renderer::kScenePassNearZ);
-	update_view_projection(projection);
+	// While the NVG composite is up the world pass IS the NVG scene: retail
+	// renders it into the 512-square target instead of the backbuffer (retail
+	// Render_ProcessMainSceneFrame @0x5ca516..0x5ca5b0 -> terrain_scene_render,
+	// whose clear is GameWorld's fog-colour clear), so the target carries the
+	// scene's raster and the gameplay camera keeps the frame's frustum as the
+	// culling superset (the Scoped arm's square frustum lies inside it).
+	const opennova::renderer::FrameFxNvgPlan nvg =
+			opennova::renderer::frame_fx_nvg_view(view_->native_frame().frame_fx);
+	if (nvg.composite) {
+		const float selected = opennova::renderer::aspect_height_over_width(
+				projection_sim.is_valid() ? projection_sim->get_local_player_aspect_mode() : -1,
+				size.x, size.y);
+		update_view_projection(opennova::world::nvg_view_projection(projection, nvg, selected,
+									   view_->get_scope_magnification()),
+				true);
+		return;
+	}
+	update_view_projection(projection, false);
 }
 
 // The stretched-mode target (view_projection): a SubViewport of the selected
@@ -896,11 +915,12 @@ void LocalPlayerPresenter::update_scope_camera() {
 // surface (whose own 3D draw is switched off meanwhile). Built on the first
 // stretched frame, sized and mirrored every frame, released when the mode
 // returns to the surface's ratio or the player goes away.
-void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection) {
+void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection,
+		bool p_nvg_raster) {
 	Camera3D *cam = camera();
 	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
 	if (surface == nullptr || !is_inside_tree() ||
-			Math::abs(p_projection.scale_y - 1.0f) < kViewProjectionUnstretched) {
+			(!p_nvg_raster && Math::abs(p_projection.scale_y - 1.0f) < kViewProjectionUnstretched)) {
 		release_view_projection();
 		return;
 	}
@@ -963,6 +983,7 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 		projection_surface_id_ = ObjectID(surface->get_instance_id());
 	}
 	projection_scale_y_ = p_projection.scale_y;
+	nvg_raster_active_ = p_nvg_raster;
 }
 
 // Leaving the tree without a teardown (the shell freeing the presenter, a
@@ -989,6 +1010,7 @@ void LocalPlayerPresenter::release_view_projection() {
 	projection_viewport_id_ = ObjectID();
 	projection_camera_id_ = ObjectID();
 	projection_scale_y_ = 1.0f;
+	nvg_raster_active_ = false;
 }
 
 void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
@@ -1142,6 +1164,7 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("projection_camera"), &LocalPlayerPresenter::projection_camera);
 	ClassDB::bind_method(D_METHOD("projection_viewport"), &LocalPlayerPresenter::projection_viewport);
 	ClassDB::bind_method(D_METHOD("projection_scale_y"), &LocalPlayerPresenter::projection_scale_y);
+	ClassDB::bind_method(D_METHOD("is_nvg_raster_active"), &LocalPlayerPresenter::is_nvg_raster_active);
 	ClassDB::bind_method(D_METHOD("viewmodel_rig"), &LocalPlayerPresenter::viewmodel_rig);
 	ClassDB::bind_method(D_METHOD("set_viewmodel_capture_hidden", "hidden"),
 			&LocalPlayerPresenter::set_viewmodel_capture_hidden);

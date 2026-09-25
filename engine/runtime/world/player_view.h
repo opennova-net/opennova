@@ -18,6 +18,7 @@
 
 #include <cstdint>
 
+#include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/world/death_camera.h>
 
 namespace opennova::terrain {
@@ -727,6 +728,23 @@ struct ViewProjection {
 };
 ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
                                int surface_h);
+
+// The NVG scene's pass over the 512-square target [orig: sub_5D28D0
+// @0x5d2954..0x5d296d (scaleY = flt_8409EC x 512 / 512: the frame's own
+// frustum); Math_BuildScaledFixedPointToFloatMatrix @0x5d2aa9..0x5d2ada (the
+// same shape at the Sighted arm's fov, nvg_sighted_scene_fov_q16); sub_5D2990
+// @0x5d29e4..0x5d2a2a (scaleY 1.0: the square Scoped frustum,
+// renderer/nvg_scope_lens.h nvg_scoped_scene_fov_q16)]. Retail rasterises
+// each into 512 x 512 and stretches it over the surface. A shell whose camera
+// couples the two fovs through its target's aspect renders the frame-shaped
+// frusta into 512 rows at the frustum's own aspect (retail's rows; the
+// columns supersample its 512) and the square one into the 512 square
+// itself. `frame` is the frame's view_projection, `nvg` the frame's NVG arms,
+// `selected_h_over_w` the selected ratio (flt_8409EC), `zoom` the slot's
+// clamped magnification.
+ViewProjection nvg_view_projection(const ViewProjection &frame,
+                                   const renderer::FrameFxNvgPlan &nvg,
+                                   float selected_h_over_w, int32_t zoom);
 
 // The first-person viewmodel pass differs from the world pass only in its
 // horizontal fov (the weapon renderfov): both push scaleX = 1 and the same

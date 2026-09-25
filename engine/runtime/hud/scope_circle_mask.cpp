@@ -3,7 +3,6 @@
 #include <cmath>
 
 #include <base/io/bam.h>
-#include <base/io/fixed.h>
 #include <formats/def/def.h>
 #include <runtime/renderer/aspect_ratio.h>
 
@@ -14,17 +13,14 @@ namespace {
 // g_bam_sin_table_q22 @0x31bfbc0 and the cosine view of it, off_849934 =
 // &g_bam_sin_table_q22[256]: 1024 Q22 entries per revolution plus the 257-entry
 // tail the cosine view needs, read as `table[index] * (1 / 4194304)`
+// (io::bam_table_sin / io::bam_table_cos)
 // [orig: the `* 0.00000023841858` pairs @0x5d18cd / @0x5d18e7].
 inline double sin_q22_unit(int index) {
-	const double v = std::sin(static_cast<double>(index & (kScopeRingTableEntries - 1)) *
-			(2.0 * io::kPi / static_cast<double>(kScopeRingTableEntries)));
-	return static_cast<double>(static_cast<int32_t>(v * io::kQ22One)) / io::kQ22One;
+	return io::bam_table_sin(index);
 }
 
 inline double cos_q22_unit(int index) {
-	const double v = std::cos(static_cast<double>(index & (kScopeRingTableEntries - 1)) *
-			(2.0 * io::kPi / static_cast<double>(kScopeRingTableEntries)));
-	return static_cast<double>(static_cast<int32_t>(v * io::kQ22One)) / io::kQ22One;
+	return io::bam_table_cos(index);
 }
 
 // The x87 `_ftol2_sse` the drawer runs every cross endpoint through: truncate
@@ -98,6 +94,82 @@ bool sighted_selector_from_def(uint32_t weapon_flags, bool slot_switching_from) 
 	//  the byte set @0x5ca2d5]
 	return (weapon_flags & def::DEF_WEAPON_FLAG_SIGHTED) != 0 && !slot_switching_from;
 }
+
+namespace {
+
+// The reticle cross and the cardinal grid about the geometry's centre, at its
+// scales. [orig: draw_minimap_crosshair_and_grid @0x5d1160]
+void append_crosshair_and_grid(const ScopeCircleMaskGeometry &g, ScopeCircleMask &out) {
+	// --- the reticle cross ------------------------------------------------
+	// A = scale_x * ring_size, B = scale_y * ring_size; every endpoint is
+	// truncated to an integer pixel before it is submitted.
+	// [orig: @0x5d11bd (A) / @0x5d1235 (B); the eight ftol'd endpoints
+	//  @0x5d121f..0x5d1298]
+	const double a = static_cast<double>(g.scale_x) * static_cast<double>(g.ring_size);
+	const double b = static_cast<double>(g.scale_y) * static_cast<double>(g.ring_size);
+	const double cx = static_cast<double>(g.center_x);
+	const double cy = static_cast<double>(g.center_y);
+	const double inner_a = a * static_cast<double>(kScopeCrosshairInnerFraction);
+	const double outer_a = a * static_cast<double>(kScopeCrosshairOuterFraction);
+	const double inner_b = b * static_cast<double>(kScopeCrosshairInnerFraction);
+	const double outer_b = b * static_cast<double>(kScopeCrosshairOuterFraction);
+	out.crosshair.resize(static_cast<size_t>(kScopeCrosshairArms) * kScopeCrosshairArmVertices);
+	// Retail's submit order: left, up, right, down.
+	build_arm(g, true, ftol_back(cx - inner_a), ftol_back(cx - outer_a),
+			out.crosshair.data());
+	build_arm(g, false, ftol_back(cy - inner_b), ftol_back(cy - outer_b),
+			out.crosshair.data() + kScopeCrosshairArmVertices);
+	build_arm(g, true, ftol_back(cx + inner_a), ftol_back(cx + outer_a),
+			out.crosshair.data() + 2 * kScopeCrosshairArmVertices);
+	build_arm(g, false, ftol_back(cy + inner_b), ftol_back(cy + outer_b),
+			out.crosshair.data() + 3 * kScopeCrosshairArmVertices);
+	out.crosshair_indices.reserve(
+			static_cast<size_t>(kScopeCrosshairArms) * kScopeCrosshairArmIndices);
+	for (int arm = 0; arm < kScopeCrosshairArms; ++arm) {
+		for (int i = 0; i < kScopeCrosshairArmIndices; ++i) {
+			out.crosshair_indices.push_back(static_cast<uint16_t>(
+					kArmIndices[i] + arm * kScopeCrosshairArmVertices));
+		}
+	}
+
+	// --- the cardinal grid ------------------------------------------------
+	// Four directions x four ticks, each a diamond of half-size
+	// arm_half_thickness around (centre + step * tick_spacing). The offsets are
+	// plain screen pixels: neither scale_x nor scale_y touches them.
+	// [orig: @0x5d1653..0x5d171d; the switch arms @0x5d167c — 0 = +X, 1 = -X,
+	//  2 = +Y, 3 = -Y]
+	const float t = g.arm_half_thickness;
+	out.grid.reserve(static_cast<size_t>(kScopeGridDirections) *
+			kScopeGridTicksPerDirection * kScopeGridTickVertices);
+	for (int dir = 0; dir < kScopeGridDirections; ++dir) {
+		for (int step = 1; step <= kScopeGridTicksPerDirection; ++step) {
+			const float offset = g.tick_spacing * static_cast<float>(step);
+			float x = g.center_x;
+			float y = g.center_y;
+			switch (dir) {
+				case 0: x = g.center_x + offset; break;
+				case 1: x = g.center_x - offset; break;
+				case 2: y = g.center_y + offset; break;
+				default: y = g.center_y - offset; break;
+			}
+			out.grid.push_back({x, y, kScopeGridTickCenterColor});
+			out.grid.push_back({x + t, y, kScopeGridTickEdgeColor});
+			out.grid.push_back({x, y + t, kScopeGridTickEdgeColor});
+			out.grid.push_back({x - t, y, kScopeGridTickEdgeColor});
+			out.grid.push_back({x, y - t, kScopeGridTickEdgeColor});
+		}
+	}
+	const int tick_count = kScopeGridDirections * kScopeGridTicksPerDirection;
+	out.grid_indices.reserve(static_cast<size_t>(tick_count) * kScopeGridTickIndices);
+	for (int tick = 0; tick < tick_count; ++tick) {
+		for (int i = 0; i < kScopeGridTickIndices; ++i) {
+			out.grid_indices.push_back(static_cast<uint16_t>(
+					kTickIndices[i] + tick * kScopeGridTickVertices));
+		}
+	}
+}
+
+} // namespace
 
 ScopeCircleMaskGeometry scope_circle_mask_geometry(int32_t x0, int32_t y0,
 		int32_t x1, int32_t y1, int32_t screen_width, int aspect_mode) {
@@ -173,75 +245,21 @@ ScopeCircleMask build_scope_circle_mask(int32_t x0, int32_t y0, int32_t x1,
 		out.ring_indices.push_back(static_cast<uint16_t>(i + 2));
 	}
 
-	if (!draw_crosshair) return out;
+	if (draw_crosshair)
+		append_crosshair_and_grid(g, out);
+	return out;
+}
 
-	// --- the reticle cross ------------------------------------------------
-	// A = scale_x * ring_size, B = scale_y * ring_size; every endpoint is
-	// truncated to an integer pixel before it is submitted.
-	// [orig: @0x5d11bd (A) / @0x5d1235 (B); the eight ftol'd endpoints
-	//  @0x5d121f..0x5d1298]
-	const double a = static_cast<double>(g.scale_x) * static_cast<double>(g.ring_size);
-	const double b = static_cast<double>(g.scale_y) * static_cast<double>(g.ring_size);
-	const double cx = static_cast<double>(g.center_x);
-	const double cy = static_cast<double>(g.center_y);
-	const double inner_a = a * static_cast<double>(kScopeCrosshairInnerFraction);
-	const double outer_a = a * static_cast<double>(kScopeCrosshairOuterFraction);
-	const double inner_b = b * static_cast<double>(kScopeCrosshairInnerFraction);
-	const double outer_b = b * static_cast<double>(kScopeCrosshairOuterFraction);
-	out.crosshair.resize(static_cast<size_t>(kScopeCrosshairArms) * kScopeCrosshairArmVertices);
-	// Retail's submit order: left, up, right, down.
-	build_arm(g, true, ftol_back(cx - inner_a), ftol_back(cx - outer_a),
-			out.crosshair.data());
-	build_arm(g, false, ftol_back(cy - inner_b), ftol_back(cy - outer_b),
-			out.crosshair.data() + kScopeCrosshairArmVertices);
-	build_arm(g, true, ftol_back(cx + inner_a), ftol_back(cx + outer_a),
-			out.crosshair.data() + 2 * kScopeCrosshairArmVertices);
-	build_arm(g, false, ftol_back(cy + inner_b), ftol_back(cy + outer_b),
-			out.crosshair.data() + 3 * kScopeCrosshairArmVertices);
-	out.crosshair_indices.reserve(
-			static_cast<size_t>(kScopeCrosshairArms) * kScopeCrosshairArmIndices);
-	for (int arm = 0; arm < kScopeCrosshairArms; ++arm) {
-		for (int i = 0; i < kScopeCrosshairArmIndices; ++i) {
-			out.crosshair_indices.push_back(static_cast<uint16_t>(
-					kArmIndices[i] + arm * kScopeCrosshairArmVertices));
-		}
-	}
-
-	// --- the cardinal grid ------------------------------------------------
-	// Four directions x four ticks, each a diamond of half-size
-	// arm_half_thickness around (centre + step * tick_spacing). The offsets are
-	// plain screen pixels: neither scale_x nor scale_y touches them.
-	// [orig: @0x5d1653..0x5d171d; the switch arms @0x5d167c — 0 = +X, 1 = -X,
-	//  2 = +Y, 3 = -Y]
-	const float t = g.arm_half_thickness;
-	out.grid.reserve(static_cast<size_t>(kScopeGridDirections) *
-			kScopeGridTicksPerDirection * kScopeGridTickVertices);
-	for (int dir = 0; dir < kScopeGridDirections; ++dir) {
-		for (int step = 1; step <= kScopeGridTicksPerDirection; ++step) {
-			const float offset = g.tick_spacing * static_cast<float>(step);
-			float x = g.center_x;
-			float y = g.center_y;
-			switch (dir) {
-				case 0: x = g.center_x + offset; break;
-				case 1: x = g.center_x - offset; break;
-				case 2: y = g.center_y + offset; break;
-				default: y = g.center_y - offset; break;
-			}
-			out.grid.push_back({x, y, kScopeGridTickCenterColor});
-			out.grid.push_back({x + t, y, kScopeGridTickEdgeColor});
-			out.grid.push_back({x, y + t, kScopeGridTickEdgeColor});
-			out.grid.push_back({x - t, y, kScopeGridTickEdgeColor});
-			out.grid.push_back({x, y - t, kScopeGridTickEdgeColor});
-		}
-	}
-	const int tick_count = kScopeGridDirections * kScopeGridTicksPerDirection;
-	out.grid_indices.reserve(static_cast<size_t>(tick_count) * kScopeGridTickIndices);
-	for (int tick = 0; tick < tick_count; ++tick) {
-		for (int i = 0; i < kScopeGridTickIndices; ++i) {
-			out.grid_indices.push_back(static_cast<uint16_t>(
-					kTickIndices[i] + tick * kScopeGridTickVertices));
-		}
-	}
+ScopeCircleMask build_nvg_lens_reticle(int32_t x0, int32_t y0, int32_t x1,
+		int32_t y1, int32_t screen_width) {
+	ScopeCircleMask out;
+	out.geometry = scope_circle_mask_geometry(x0, y0, x1, y1, screen_width);
+	// The lens passes its own ring size and centre -- the same shift pair and
+	// sums as the mask's -- and unit scales. [orig: draw_minimap_compass_border
+	//  `fld1; fst [scaleY]; fstp [scaleX]` @0x5d27a1..0x5d27b6]
+	out.geometry.scale_x = 1.0f;
+	out.geometry.scale_y = 1.0f;
+	append_crosshair_and_grid(out.geometry, out);
 	return out;
 }
 

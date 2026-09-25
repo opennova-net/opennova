@@ -69,6 +69,9 @@ public:
 	bool get_nvg_active() const { return value_.nvg_active; }
 	bool get_nvg_visible() const { return value_.nvg_visible; }
 	int get_nvg_gain() const { return value_.nvg_gain; }
+	bool get_nvg_mask_visible() const { return value_.nvg_mask_visible; }
+	bool get_nvg_lens_active() const { return value_.nvg_lens_active; }
+	bool get_nvg_sights_in_scene() const { return value_.nvg_sights_in_scene; }
 	// The thermal-imaging view's two gates (the engine struct carries the
 	// witnesses): the world block / fog / clear latch, and the terrain-ramp gate.
 	bool get_thermal_view() const { return value_.thermal_view; }

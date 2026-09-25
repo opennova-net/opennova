@@ -130,6 +130,8 @@ public:
 	// citations): thermal grey, skyfog strictly above water, lit water at or
 	// below it.
 	Color frame_clear_color_for(bool p_eye_above_water) const;
+	// The NVG scene's clear (environment_state.h): skyfog / lit water alone.
+	Color nvg_scene_clear_color(bool p_eye_above_water) const;
 	Vector3 get_ceiling_color() const;
 	Vector3 get_cloud_tint() const;
 	Vector3 get_floor_color() const;

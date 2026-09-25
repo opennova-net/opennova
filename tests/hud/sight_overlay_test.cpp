@@ -323,6 +323,38 @@ int main() {
 				"authored SIGHTS rows never suppress the circle mask");
 		expect(carded.crosshair.empty() && carded.grid.empty(),
 				"they suppress the inner cross and grid only");
+
+		// The NVG Sighted arm lays the card over the 512 square with the
+		// frame's own selected ratio: a 16:9 native frame corrects Y by
+		// 3 / (4 x 0.5625) about 256. [orig: terrain_scene_render
+		// @0x5d08d8..0x5d0927]
+		const hud::SightViewportRect nvg_card = hud::sight_rect_to_viewport_at_ratio(
+				hud::SightRect{256, 288, 768, 480}, 512.0f, 512.0f, 0.5625f);
+		expect(nvg_card.x1 == 128.0f && nvg_card.x2 == 384.0f, "x scales to the 512 square");
+		expect(std::abs(nvg_card.y1 - (256.0f + (192.0f - 256.0f) * (4.0f / 3.0f))) < .01f &&
+						std::abs(nvg_card.y2 - (256.0f + (320.0f - 256.0f) * (4.0f / 3.0f))) < .01f,
+				"y scales to the 512 square, then corrects about 256 by the frame's ratio");
+
+		// The NVG lens's reticle: no annulus, the cross at UNIT scale about
+		// the same centre and ring size -- on a forced 4:3 ratio over a 16:9
+		// surface the spokes stay round where the mask's would stretch.
+		// [orig: draw_minimap_compass_border @0x5d2798..0x5d27bc]
+		const hud::ScopeCircleMask lens =
+				hud::build_nvg_lens_reticle(0, 0, 1919, 1079, 1920);
+		expect(lens.ring.empty() && lens.ring_indices.empty(), "the lens draws its own ring");
+		expect(lens.geometry.scale_x == 1.0f && lens.geometry.scale_y == 1.0f,
+				"unit scales");
+		expect(lens.geometry.center_x == 959.0f && lens.geometry.center_y == 539.0f &&
+						lens.geometry.ring_size == 673.0f,
+				"the lens's centre and (1079 >> 3) + (1079 >> 1) ring");
+		expect(lens.crosshair.size() == 28u && lens.grid.size() == 80u,
+				"the four spokes and sixteen ticks");
+		// trunc(959 - 0.4 x 673) = 689 and trunc(959 - 0.71 x 673) = 481 on
+		// the left spoke; the up spoke uses the SAME ring at unit scale.
+		expect(lens.crosshair[2].x == 689.0f && lens.crosshair[5].x == 481.0f,
+				"the left spoke at unit scale");
+		expect(lens.crosshair[7 + 2].y == 269.0f && lens.crosshair[7 + 5].y == 61.0f,
+				"the up spoke at unit scale");
 	}
 
 	if (failures != 0) {

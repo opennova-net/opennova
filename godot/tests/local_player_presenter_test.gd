@@ -510,6 +510,48 @@ func test_wheel_factor_accumulates_whole_notches() -> void:
 	assert_eq(int(sim.get_local_player_stance()), 0, "the reverse deltas complete one stand notch")
 
 
+# While the NVG composite is up the world pass is the NVG scene: the world
+# renders once, into a target of the NVG raster (512 rows at the frame's own
+# frustum; engine world::nvg_view_projection), the surface's own 3D pass off,
+# and the target goes away with NVG. [orig: Render_ProcessMainSceneFrame
+# @0x5ca516..0x5ca5b0; sub_5D28D0 @0x5d2954..0x5d296d]
+func test_nvg_composite_renders_the_world_into_the_nvg_raster() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no raster can be pinned")
+		return
+	var sim := world.get_sim()
+	sim.set_local_player_aspect_mode(-1)
+	_frame(world, presenter, camera, 2)
+	assert_null(presenter.projection_viewport(), "a native mode draws the surface directly")
+	assert_false(presenter.is_nvg_raster_active())
+	assert_true(sim.request_local_player_nvg_toggle())
+	_frame(world, presenter, camera, 2)
+	assert_true(presenter.is_nvg_raster_active(), "the NVG composite takes the world pass")
+	var target: SubViewport = presenter.projection_viewport()
+	var through: Camera3D = presenter.projection_camera()
+	assert_not_null(target)
+	assert_not_null(through)
+	if target == null or through == null:
+		return
+	assert_eq(target.size, Vector2i(roundi(512.0 * size.x / size.y), 512),
+			"512 rows at the frame's aspect")
+	assert_almost_eq(through.fov, 80.0, 0.001, "the frame's horizontal fov")
+	assert_eq(through.keep_aspect, Camera3D.KEEP_WIDTH)
+	assert_true(camera.get_viewport().disable_3d,
+			"one world render a frame: the surface's own 3D pass is off")
+	assert_false(sim.request_local_player_nvg_toggle())
+	_frame(world, presenter, camera, 2)
+	assert_false(presenter.is_nvg_raster_active())
+	assert_null(presenter.projection_viewport(), "NVG off releases the raster")
+	assert_false(camera.get_viewport().disable_3d)
+
+
 func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()
