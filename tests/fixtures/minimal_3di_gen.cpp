@@ -907,13 +907,12 @@ int main(int argc, char **argv) {
 		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
 	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth";
 	std::filesystem::create_directories(dir);
-	const std::string scratch = std::string(test_paths_temp_dir()) + "/minimal_3di_gen_scratch.3di";
 
 	for (const Recipe &recipe : recipes()) {
 		const std::string path = dir + "/" + recipe.file + ".3di";
 		const Model model = build_recipe(recipe);
 		std::vector<uint8_t> bytes;
-		if (!expect(mint(model, scratch, bytes), std::string(recipe.file) + ": the writer accepts the model")) continue;
+		if (!expect(mint(model, bytes), std::string(recipe.file) + ": the writer accepts the model")) continue;
 		if (write_mode) {
 			std::ofstream o(path, std::ios::binary);
 			o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
