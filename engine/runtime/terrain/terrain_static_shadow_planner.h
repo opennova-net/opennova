@@ -85,6 +85,9 @@ struct TerrainStaticShadowPlannerDiagnostics {
 	uint64_t frame_projection_draws = 0;
 	uint64_t frame_raster_count = 0;
 	uint64_t frame_triangles = 0;
+	// Wall time spent projecting the plan's triangles for the raster (the
+	// serial setup ahead of rasterize_terrain_static_shadow_alpha).
+	uint64_t frame_triangle_build_us = 0;
 	uint64_t frame_alpha_test_triangles = 0;
 	std::array<uint64_t, 4> frame_blend_triangles{};
 	uint64_t frame_unsupported_draw_count = 0;

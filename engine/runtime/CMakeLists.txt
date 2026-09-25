@@ -149,7 +149,7 @@ add_library(opennova_runtime STATIC
 	${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_scorch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_worker.cpp # the page-composition thread pool (demand / completion queues)
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_worker.cpp # the page-composition thread pool (demand / completion queues) and the rasters' shared lane pool
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     # terrain_query — the world->terrain seam leaf (ADR 0020): height query +
     # the retail segment raycast (format-free), plus the placed-tile surface

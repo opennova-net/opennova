@@ -10,30 +10,44 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <thread>
-#include <vector>
+#include <memory>
 
 namespace opennova::terrain {
 
 inline constexpr int kRowStripeRows = 8;
 
-// Calls lane(index) for every index in [0, lanes), on up to `lanes` threads
-// including the caller. A lane whose thread cannot start runs on the caller.
+// Keeps the shared lane pool's threads alive while held (null when the pool
+// could not start; lanes then run on their caller). An owner that rasters
+// repeatedly holds one so each call reuses the same threads. The pool lives
+// beside its one owner, the page workers (terrain_tile_composition_worker.cpp).
+using RowStripePoolLease = std::shared_ptr<void>;
+RowStripePoolLease retain_row_stripe_pool();
+
+namespace detail {
+// Runs lane(index) for every index in [0, lanes) on the shared lane pool: a
+// fixed set of threads the whole process's page rasters share, so the page
+// workers composing several pages at once never spawn threads of their own
+// (the frame waits on the slowest page, and per-call threads oversubscribed
+// the cores). The caller claims lanes too and returns once all have run; a
+// lane may run on any thread. Lanes must not call back into the pool.
+void run_lanes_on_pool(std::size_t lanes, void (*invoke)(const void *, std::size_t),
+		const void *context) noexcept;
+} // namespace detail
+
+// Calls lane(index) for every index in [0, lanes) and returns when all have
+// run, on up to `lanes` threads including the caller.
 template <typename Lane>
 void run_row_stripe_lanes(std::size_t lanes, const Lane &lane) noexcept {
 	lanes = std::max<std::size_t>(lanes, 1);
-	std::vector<std::thread> helpers;
-	std::size_t started = 1;
-	try {
-		helpers.reserve(lanes - 1);
-		for (; started < lanes; ++started) {
-			helpers.emplace_back([&lane, started]() { lane(started); });
-		}
-	} catch (...) {
+	if (lanes == 1) {
+		lane(0);
+		return;
 	}
-	lane(0);
-	for (std::size_t index = started; index < lanes; ++index) lane(index);
-	for (std::thread &helper : helpers) helper.join();
+	detail::run_lanes_on_pool(lanes,
+			[](const void *context, std::size_t index) {
+				(*static_cast<const Lane *>(context))(index);
+			},
+			&lane);
 }
 
 // Visits, as [begin, end) row ranges, the part of rows [row_begin, row_end)

@@ -16,6 +16,8 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <base/io/hash.h>
+
+#include <chrono>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -252,6 +254,9 @@ void TerrainTileCacheDevice::clear() {
 	frame_compose_us_ = 0;
 	frame_compose_page_us_ = 0;
 	frame_compose_shadow_plan_us_ = 0;
+	frame_compose_shadow_build_us_ = 0;
+	frame_compose_wait_us_ = 0;
+	frame_upload_us_ = 0;
 	frame_uploads_ = 0;
 	frame_capacity_fallbacks_ = 0;
 	frame_shadow_alpha_changed_bytes_ = 0;
@@ -274,6 +279,9 @@ void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id, uint32_t p_tod_epo
 	frame_compose_us_ = 0;
 	frame_compose_page_us_ = 0;
 	frame_compose_shadow_plan_us_ = 0;
+	frame_compose_shadow_build_us_ = 0;
+	frame_compose_wait_us_ = 0;
+	frame_upload_us_ = 0;
 	frame_uploads_ = 0;
 	frame_capacity_fallbacks_ = 0;
 	frame_shadow_alpha_changed_bytes_ = 0;
@@ -383,6 +391,8 @@ void TerrainTileCacheDevice::_upload_completed() {
 		frame_compose_us_ += completion.compose_us;
 		frame_compose_page_us_ += completion.page_us;
 		frame_compose_shadow_plan_us_ += completion.shadow_plan_us;
+		frame_compose_shadow_build_us_ +=
+				completion.shadow_diagnostics.frame_triangle_build_us;
 		const opennova::TerrainTileCompositionJob &job = completion.job;
 		// Validate the claim before touching its Texture2DArray layer. The cache
 		// is render-thread-owned, so it cannot become stale between this check
@@ -529,8 +539,14 @@ TerrainTileCacheDevice::compose_frame(
 	}
 	// Retail composes every missing visible page inside the sweep, before the
 	// batch draws bind them. (retail PolyTrn_RenderFrame @ 0x60F080..0x60F0E3)
+	const auto wait_started = std::chrono::steady_clock::now();
 	async_->wait_idle();
+	const auto wait_done = std::chrono::steady_clock::now();
 	_upload_completed();
+	frame_compose_wait_us_ += static_cast<uint64_t>(
+			std::chrono::duration_cast<std::chrono::microseconds>(wait_done - wait_started).count());
+	frame_upload_us_ += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now() - wait_done).count());
 
 	std::array<bool, opennova::TerrainTileCompositionCache::kCapacity> selected{};
 	for (std::size_t index = 0; index < frame_visible_.size(); ++index) {
@@ -662,6 +678,11 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 			static_cast<int64_t>(frame_compose_page_us_);
 	diagnostics["frame_compose_shadow_plan_us"] =
 			static_cast<int64_t>(frame_compose_shadow_plan_us_);
+	diagnostics["frame_compose_shadow_build_us"] =
+			static_cast<int64_t>(frame_compose_shadow_build_us_);
+	diagnostics["frame_compose_wait_us"] =
+			static_cast<int64_t>(frame_compose_wait_us_);
+	diagnostics["frame_upload_us"] = static_cast<int64_t>(frame_upload_us_);
 	diagnostics["frame_uploads"] = static_cast<int64_t>(frame_uploads_);
 	diagnostics["pending_jobs"] = static_cast<int64_t>(
 			async_->pending_jobs());
