@@ -5244,10 +5244,25 @@ builds the 19×9 ring geometry; `render_water_surface_decal @0x5DE0F0` owns the
 draw state — the 0.4 ambient material `@0x5DE202..0x5DE217`, `SetMaterial`
 `@0x5DE232`, `D3DRS_AMBIENT` (139) white `@0x5DE1EC`, `GfxShader_ApplyPassChecked`
 pass 0x100000 `@0x5DE245`, and the first-UV scroll `(g_entity_update_counter & 0x1FF) / 512`
-and `(g_entity_update_counter & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`; `sub_5DDC90
-@0x5DDC90` only loads wake5.tga / wakegrad.tga and sets sampler addressing. The
-Godot shader implements that two-texture, unshaded draw through the compiled
-mesh (`provenance.json` cites `render_water_surface_decal` / `sub_5DDC90`).
+and `(g_entity_update_counter & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`. `sub_5DDC90
+@0x5DDC90` loads wake5.tga / wakegrad.tga, and its `CGfxTexture_SetSamplerAddressing`
+(`@0x680720`) call also turns on FFP lighting with DIFFUSEMATERIALSOURCE =
+AMBIENTMATERIALSOURCE = MATERIAL (it writes +0x58..+0x5B, committed as RS 0x89 / 0x91 /
+0x93 by `CGfxShader_ApplyPassRenderStates @0x6808CA..0x68091F`): the ring alpha is the
+material diffuse alpha (the slot alpha) and its colour the 0.4 ambient (corrected
+2026-09-24; this read "only loads the textures and sets sampler addressing"). The pass
+flags (`@0x5DE23A`, 0x100000) carry no cull-none bit, so the rings are one-sided, front
+faces up. The ring mesh is built in the render frame as (sin r, 0, cos r)
+(`create_water_surface_mesh @0x5DE01D..0x5DE03E`) and placed through
+`Math_FixedPointToFloat3_YNegated` (`@0x5DE181`), so in the presentation frame (the render
+x/z swap) its offsets are (cos r, 0, sin r). FIXED 2026-09-24 ("Place the water wake rings
+in the presentation frame and cull their backs"): the port had carried the render-frame
+components over unswapped, mirroring every ring and its angular texture sense, and drew
+both sides; `compile_water_wakes` now writes the swapped offsets and
+`water_wake.gdshader` culls back faces, so an eye below the water sees no ring (pinned by
+ctest `vehicle_part_anim` and GUT `water_test.gd`). The Godot shader implements the
+two-texture draw through the compiled mesh (`provenance.json` cites
+`render_water_surface_decal` / `sub_5DDC90`).
 The UV scroll counter `g_entity_update_counter` is the ENTITY-UPDATE counter, not a render
 frame counter: its one writer is `add g_entity_update_counter,esi` (`@0x4C2639`) at the tail
 of a non-epilog `Entity_UpdateAllEntities @0x4C2100`, and nothing resets it, so it
