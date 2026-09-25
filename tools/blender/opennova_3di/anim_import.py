@@ -202,8 +202,9 @@ class Loader:
 
     @contextlib.contextmanager
     def editing(self, arm):
-        """The rig in edit mode for the block."""
-        vl = self.scene.view_layers[0]
+        """The rig in edit mode for the block, in the view layer the import
+        runs in (the rig may be in no other)."""
+        vl = self.context.view_layer
         held = vl.objects.active
         with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm,
                                         object=arm, selected_objects=[arm]):

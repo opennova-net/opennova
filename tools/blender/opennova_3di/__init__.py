@@ -254,7 +254,7 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                 description="The parent's user point (the addeweap row's name, e.g. ewep01); none or "
                                             "not found: the parent's root")
     # On a model root: its animations (the clip set its rig carries).
-    adm_path: StringProperty(name="Output .adm", subtype="FILE_PATH", default="",
+    adm_path: StringProperty(name="Output .adm", subtype="FILE_PATH", default="", options=PATH_OPTIONS,
                              description="Where Export Animations writes the clip table; every clip "
                                          "it names is written beside it as <clip>.bad. Empty: "
                                          "//<model name>.adm")
