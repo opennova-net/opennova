@@ -70,6 +70,9 @@ jobs:
 
   package-blender-windows:
     uses: ./.github/workflows/package-blender-windows.yml
+    with:
+      # Blender reports the zipped manifest's version: stamp the tag into it.
+      version: ${{ github.ref_name }}
 
   release:
     runs-on: ubuntu-latest

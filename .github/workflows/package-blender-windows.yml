@@ -2,6 +2,12 @@ name: Package Blender add-on
 
 on:
   workflow_call:
+    inputs:
+      version:
+        description: Version stamped into the zipped manifest (a release tag); empty keeps the tracked one
+        type: string
+        required: false
+        default: ""
     outputs:
       artifact_id:
         description: ID of the installable Blender add-on zip
@@ -25,10 +31,11 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
+      # The CLI builds from the root CMake project without godot-cpp or GUT,
+      # so the submodules stay uninitialized.
       - uses: actions/checkout@v4
         with:
           lfs: false
-          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
@@ -44,7 +51,9 @@ jobs:
 
       - name: Package Blender add-on with Release CLI
         shell: bash
-        run: scripts/package_blender_addon.sh dist/opennova-blender-addon-windows.zip
+        env:
+          ADDON_VERSION: ${{ inputs.version }}
+        run: scripts/package_blender_addon.sh dist/opennova-blender-addon-windows.zip "$ADDON_VERSION"
 
       - name: Smoke-test the packaged CLI
         shell: pwsh
