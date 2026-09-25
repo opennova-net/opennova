@@ -28,8 +28,10 @@ from . import export
 DRIVE = "O3D drive"
 MOUNT = "O3D mount"
 SOCKET = "!drive"  # export ignores "!" names
-# ArmsG's bone heads sit within 0.5 mm of 357_1st's part pivots.
-PIVOT_TOLERANCE = 0.01
+# ArmsG's bone heads sit within 0.5 mm of 357_1st's part pivots, but each weapon
+# places the hands itself: against REVVY's AKM_1st the same arms are 1.2 cm out
+# on a finger joint, and that is still the pair retail draws.
+PIVOT_TOLERANCE = 0.025
 
 
 def lod_root(model, index=0):
