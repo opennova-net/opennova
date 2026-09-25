@@ -7,27 +7,76 @@
 //   2. quaternion helper correctness, and
 //   3. world<->local self-consistency on the shipped BINOC.bad (the reference fixture
 //      set, OPENNOVA_JO_ASSETS; a SKIP-LEG retail leg -- catches sign / multiply-order
-//      bugs; space-independent).
+//      bugs; space-independent), and
+//   4. the bind a rig loads with (which clip of the .adm binds, and the translation
+//      gate that bind decides), over synthetic clips minted into a temp root.
 
 #include <runtime/anim/anim_sample.h>
 
+#include <base/resource_index/resource_index.h>
 #include <formats/bad/bad.h>
+#include <formats/bad/bad_write.h>
+#include <runtime/anim/skeletal_clips.h>
+#include <runtime/assets/asset_store.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
-
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
+#include <vector>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 
 using namespace opennova::bad;
 
 using opennova::anim::Quat;
+using opennova::anim::SkeletalClips;
 using opennova::anim::Vec3;
 
 static bool approx(float a, float b, float eps = 1e-4f) {
     return std::fabs(a - b) <= eps;
+}
+
+// A synthetic clip for the rig-loader legs, minted through the .bad writer: `bones`
+// bones (bone 0 the root, every other bone one unit up from it), identity keys over two
+// frames; with flags & 2, bone 0's translation row f is (0, step * f, 0).
+static bool write_clip(const std::filesystem::path &path, uint32_t bones, uint32_t flags,
+                       float step) {
+    std::vector<BadBone> bone(bones);
+    std::vector<BadChannel> channel(bones);
+    uint16_t lengths[3] = {1, 1, 1};
+    BadQuaternion keys[3] = {{0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}};
+    for (uint32_t b = 0; b < bones; ++b) {
+        std::snprintf(bone[b].name, sizeof(bone[b].name), "B%u", b);
+        bone[b].parent_index = b == 0 ? -1 : 0;
+        bone[b].position[1] = b == 0 ? 0.0f : 1.0f;
+        bone[b].rotation[0] = bone[b].rotation[4] = bone[b].rotation[8] = 1.0f;
+        channel[b].frame_count = 3;
+        channel[b].frame_lengths = lengths;
+        channel[b].rotations = keys;
+    }
+    std::vector<float> rows(static_cast<size_t>(bones) * 3 * 3, 0.0f);
+    for (uint32_t f = 0; f < 3; ++f) rows[f * bones * 3 + 1] = step * static_cast<float>(f);
+    BadFile bf = {};
+    bf.version = 1;
+    bf.fps = 30;
+    bf.frame_count = 2;
+    bf.flags = flags;
+    bf.bone_count = bones;
+    bf.bones = bone.data();
+    bf.num_bones = bones;
+    bf.channels = channel.data();
+    bf.num_channels = bones;
+    if ((flags & 2u) != 0) {
+        bf.translations = reinterpret_cast<float(*)[3]>(rows.data());
+        bf.num_translations = static_cast<size_t>(bones) * 3;
+    }
+    return bad_write(path.string().c_str(), &bf) == 0;
 }
 
 static bool quat_approx(const Quat &a, const Quat &b, float eps = 1e-4f) {
@@ -281,6 +330,120 @@ int main() {
         tfile.num_translations = 2;
         Clip short_clip = sample_clip(tfile);
         TEST_EXPECT(approx(short_clip.frames[2][0].world_position.y, 0.5f));
+        tfile.num_translations = 3;
+
+        // The gate is the BIND's flag as well as the clip's: the original copies the
+        // translation scratch into the bone matrices only when the bind (channel+44)
+        // carries flags & 2, and an untranslated playing clip fills that scratch with
+        // zeros. [orig: AnimChannel_ComputeBoneMatrices @0x410da0, the test @0x410de7;
+        // BoneAnim_TransformBones @0x410360, the zeros @0x4103f6]
+        BadBone gbone[1] = {};
+        gbone[0].parent_index = -1;
+        gbone[0].rotation[0] = gbone[0].rotation[4] = gbone[0].rotation[8] = 1.0f;
+        BadFile bind_plain = {};
+        bind_plain.fps = 30; bind_plain.frame_count = 2; bind_plain.flags = 1;
+        bind_plain.bones = gbone; bind_plain.num_bones = 1;
+        BadFile bind_moved = bind_plain;
+        bind_moved.flags = 3;
+        // A translated clip over an untranslated bind moves nothing, in both modes.
+        const Clip over_plain = sample_clip(tfile, {}, /*model_bind=*/false, &bind_plain);
+        TEST_EXPECT(approx(over_plain.frames[1][0].world_position.y, 0.0f));
+        TEST_EXPECT(approx(over_plain.frames[2][0].world_position.y, 0.0f));
+        const Clip model_over_plain =
+                sample_clip(tfile, {{0.0f, 0.0f, 0.0f}}, /*model_bind=*/true, &bind_plain);
+        TEST_EXPECT(approx(model_over_plain.frames[2][0].world_position.y, 0.0f));
+        // Over a translated bind it moves by its own rows...
+        const Clip over_moved = sample_clip(tfile, {}, /*model_bind=*/false, &bind_moved);
+        TEST_EXPECT(approx(over_moved.frames[1][0].world_position.y, 0.5f));
+        TEST_EXPECT(approx(over_moved.frames[2][0].world_position.y, 1.0f));
+        // ...and an untranslated clip over a translated bind moves nothing.
+        BadFile tplain = tfile;
+        tplain.flags = 0;
+        const Clip plain_over_moved = sample_clip(tplain, {}, /*model_bind=*/false, &bind_moved);
+        TEST_EXPECT(approx(plain_over_moved.frames[2][0].world_position.y, 0.0f));
+    }
+
+    // --- the rig loader: which clip binds the rig, and that bind's translation gate. ---
+    // Synthetic clips minted through the .bad writer into a temp root, one table each.
+    {
+        namespace fs = std::filesystem;
+        const fs::path dir = fs::path(test_paths_temp_dir()) /
+                ("opennova_anim_bind_" +
+                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        TEST_EXPECT(fs::create_directory(dir));
+        // Removed on every exit, a failed expectation's early return included (and
+        // after the index and store below, which it outlives).
+        struct TempRoot {
+            fs::path path;
+            ~TempRoot() {
+                std::error_code ignored;
+                fs::remove_all(path, ignored);
+            }
+        } const root{dir};
+        TEST_EXPECT(write_clip(dir / "rest.bad", 1, 1, 0.0f));         // untranslated reset
+        TEST_EXPECT(write_clip(dir / "rest_moved.bad", 1, 3, 0.25f));  // translated reset
+        TEST_EXPECT(write_clip(dir / "walk.bad", 1, 3, 0.5f));         // translated clip
+        TEST_EXPECT(write_clip(dir / "stand.bad", 1, 1, 0.0f));        // untranslated clip
+        TEST_EXPECT(write_clip(dir / "two.bad", 2, 1, 0.0f));          // a 2-bone skeleton
+        TEST_EXPECT(write_clip(dir / "three.bad", 3, 1, 0.0f));        // a 3-bone skeleton
+        const auto table = [&](const char *name, const char *rows) {
+            std::ofstream f(dir / name, std::ios::binary);
+            f << rows;
+            return static_cast<bool>(f);
+        };
+        TEST_EXPECT(table("gate_plain.adm",
+                "anim_reset \"rest\"\r\nanim_walk_forward \"walk\"\r\n"));
+        TEST_EXPECT(table("gate_moved.adm",
+                "anim_reset \"rest_moved\"\r\nanim_walk_forward \"walk\"\r\n"
+                "anim_idle \"stand\"\r\n"));
+        TEST_EXPECT(table("two_variants.adm", "anim_reset \"two\" \"three\"\r\n"));
+        TEST_EXPECT(table("two_rows.adm", "anim_reset \"three\"\r\nanim_reset \"two\"\r\n"));
+        TEST_EXPECT(table("resetx.adm", "anim_resetx \"two\"\r\nanim_RESET \"three\"\r\n"));
+        TEST_EXPECT(table("absent_last.adm", "anim_reset \"two\" \"absent\"\r\n"));
+        TEST_EXPECT(table("no_reset.adm", "anim_idle \"two\"\r\nanim_walk_forward \"walk\"\r\n"));
+
+        opennova::ResourceIndex index;
+        TEST_EXPECT(index.scan(dir.string()));
+        opennova::assets::AssetStore assets{&index};
+        const auto root_y = [](const SkeletalClips &rig, const char *key, uint32_t frame) {
+            const SkeletalClips::LoadedClip *clip = rig.find_clip(key);
+            return clip != nullptr && frame < clip->clip.frames.size()
+                    ? clip->clip.frames[frame][0].world_position.y
+                    : -1.0f;
+        };
+
+        // The translation gate through the loader: the reset .bad is the bind.
+        // [orig: AnimChannel_ComputeBoneMatrices @0x410da0, the test @0x410de7 on
+        //  channel+44, which AnimMap_RegisterEntity @0x40bb60 pins to slot 0 @0x40bbe3]
+        SkeletalClips plain;
+        TEST_EXPECT(plain.load_from_adm(&assets, "gate_plain", {}, {}));
+        TEST_EXPECT(approx(root_y(plain, "anim_walk_forward", 1), 0.0f));
+        TEST_EXPECT(approx(root_y(plain, "anim_walk_forward", 2), 0.0f));
+        SkeletalClips moved;
+        TEST_EXPECT(moved.load_from_adm(&assets, "gate_moved", {}, {}));
+        TEST_EXPECT(approx(root_y(moved, "anim_walk_forward", 2), 1.0f));
+        TEST_EXPECT(approx(root_y(moved, "anim_idle", 2), 0.0f));
+
+        // Which clip binds: slot 0 is the key past its first five characters, "reset"
+        // in any case, and every variant registered there replaces the head, so the
+        // bind is the last variant that loads of the last such row (the skeletons here
+        // differ in bone count). [orig: AnimMap_FindSlotByName @0x40cfa0;
+        // AnimMap_RegisterBoneNode @0x40c2d0, @0x40c38b; AnimMap_ParseConfigLine
+        // @0x40cb60, @0x40cbe7]
+        SkeletalClips rig;
+        TEST_EXPECT(rig.load_from_adm(&assets, "two_variants", {}, {}));
+        TEST_EXPECT(rig.bone_count() == 3);
+        TEST_EXPECT(rig.load_from_adm(&assets, "two_rows", {}, {}));
+        TEST_EXPECT(rig.bone_count() == 2);
+        TEST_EXPECT(rig.load_from_adm(&assets, "resetx", {}, {}));
+        TEST_EXPECT(rig.bone_count() == 3);
+        TEST_EXPECT(rig.load_from_adm(&assets, "absent_last", {}, {}));
+        TEST_EXPECT(rig.bone_count() == 2);
+        // A table with no reset row never binds, so the rig does not load.
+        // [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16;
+        //  AnimMap_RegisterEntity @0x40bb60, @0x40bbc4]
+        TEST_EXPECT(!rig.load_from_adm(&assets, "no_reset", {}, {}));
+        TEST_EXPECT(!rig.loaded());
     }
 
     // --- model_bind: the witnessed faithful channel semantics (the FP viewmodel fix). ---

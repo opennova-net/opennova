@@ -181,7 +181,19 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
     clip.frame_count = bad.frame_count;
 
     const size_t bad_bone_count = bad.num_bones;
-    const bool translated = (bad.flags & 0x02u) != 0;
+    // A bone moves by its translation rows only when the playing clip AND the bind carry
+    // flags & 2. The original fills a translation scratch from the PLAYING clip (its rows
+    // under its own flag, zeros without it), then copies that scratch into the bone
+    // matrices only under the BIND's flag (the channel+44 .bad, else the playing clip);
+    // the other branch leaves every translation row zero. A translated clip over an
+    // untranslated reset therefore moves nothing; with no bind source the clip's own flag
+    // decides. [orig: BoneAnim_TransformBones @0x410360 -- the test @0x41038d, the zeros
+    // @0x4103f6; AnimChannel_ComputeBoneMatrices @0x410da0 -- test [bind+0x10], 2
+    // @0x410de7 on channel+44 @0x410dd8, else the playing clip @0x410de5, the copy
+    // @0x410ea0..0x410eb7; Math_TransposeMatrix3x3ToMatrix4x4 @0x616740 zeroes the row
+    // @0x61675a..0x616784.]
+    const BadFile &gate_source = (bind_source != nullptr) ? *bind_source : bad;
+    const bool translated = (bad.flags & 0x02u) != 0 && (gate_source.flags & 0x02u) != 0;
     // Model-table mode: the MODEL's bone table defines the rig -- row count, hierarchy, and
     // pivots; the .bad's own bone count/parents/positions are never read (BadBone.position is
     // a lossy DCC export -- 12 of 43 JO viewmodel rigs ship zeroed/stale values and retail

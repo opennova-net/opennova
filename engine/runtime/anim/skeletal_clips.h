@@ -5,7 +5,9 @@
 // world collision poses and Godot skeletons (ADR 0044).
 //
 // [orig: the rig-wide skeleton is the .adm slot-0 .bad, pinned once at entity
-//  registration — AnimMap_RegisterEntity @0x40bb60; clip switches never
+//  registration — AnimMap_RegisterEntity @0x40bb60; it is also the bind whose
+//  flags & 2 gates every clip's translations, AnimChannel_ComputeBoneMatrices
+//  @0x410da0 @0x410de7; clip switches never
 //  rebuild it, AnimMap_PlayAnimBySlot @0x40bda0; clip lookup is
 //  AnimMap_FindSlotByName @0x40cfa0 (stricmp); every quoted token on a row is
 //  a VARIANT of the same slot in file order — AnimMap_ParseConfigLine
@@ -36,12 +38,14 @@ public:
 		anim::Vec3 origin;
 	};
 
-	// Load the whole rig through the shared native asset store: resolve the
-	// reset/skeleton .bad (a key containing "reset" wins, else the first
-	// non-empty value), sample every clip variant in file order
-	// (continue-on-failure on missing .bads), and build the skeleton from the
-	// model bone table (origins = parent-relative pivots, parents paired)
-	// with one loader for simulation and presentation. Returns loaded().
+	// Load the whole rig through the shared native asset store: bind it to the
+	// table's reset clip, retail's slot-0 head (the last variant that loads of
+	// the last row whose key past its first five characters is "reset", any
+	// case; a table with none does not load), sample every clip variant in file
+	// order (continue-on-failure on missing .bads) against that bind, and build
+	// the skeleton from the model bone table (origins = parent-relative pivots,
+	// parents paired) with one loader for simulation and presentation. Returns
+	// loaded().
 	bool load_from_adm(const assets::AssetStore *assets, const std::string &adm_name,
 	                   const std::vector<anim::Vec3> &model_bone_origins,
 	                   const std::vector<int> &model_bone_parents);

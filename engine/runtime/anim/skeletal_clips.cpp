@@ -10,6 +10,7 @@
 #include <runtime/world/body_anim.h>
 
 #include <algorithm>
+#include <string_view>
 #include <utility>
 
 using namespace opennova::adm;
@@ -101,18 +102,31 @@ bool SkeletalClips::load_from_adm(
 	if (!assets || adm_name.empty()) return false;
 	const auto map = assets->animation_map(adm_name);
 	if (!map) return false;
+	// The rig's bind is slot 0's head once the table is read. A row names slot 0
+	// when its key past the first five characters is "reset", in any case (slot
+	// name 0 @0x7c3264). Each clip registered there REPLACES the head instead of
+	// joining a ring, and a variant whose .bad does not load registers nothing, so
+	// the bind is the last variant that loads of the last such row: the head
+	// AnimMap_RegisterEntity pins into channel+44.
+	// [orig: AnimMap_FindSlotByName @0x40cfa0 (stricmp on key + 5);
+	//  AnimMap_ParseConfigLine @0x40cb60, the null test @0x40cbe7;
+	//  AnimMap_RegisterBoneNode @0x40c2d0, slot 0 @0x40c365 -> the head store
+	//  @0x40c38b; AnimMap_RegisterEntity @0x40bb60, the pin @0x40bbe3]
 	std::string reset_value;
-	std::vector<std::pair<std::string, std::string>> clips;
 	for (size_t i = 0; i < map->count; ++i) {
 		const auto &entry = map->entries[i];
-		if (entry.variant_count && entry.variants[0] && entry.variants[0][0]) {
-			if (reset_value.empty()) reset_value = entry.variants[0];
-			if (strutil::to_lower(entry.key).find("reset") != std::string::npos) {
-				reset_value = entry.variants[0];
-				break;
-			}
-		}
+		const std::string_view key(entry.key);
+		if (key.size() <= 5 || !strutil::iequals(key.substr(5), "reset")) continue;
+		for (size_t v = 0; v < entry.variant_count; ++v)
+			if (entry.variants[v][0] != '\0' && assets->bone_animation(entry.variants[v]))
+				reset_value = entry.variants[v];
 	}
+	// A table with no slot-0 clip never binds: its load reads slot 0's null head
+	// unchecked, and registration frees the channel it allocated, so no entity
+	// animates through it. [orig: AnimMap_LoadAdmFile @0x40cc40, the read
+	// @0x40ce11..0x40ce16; AnimMap_RegisterEntity @0x40bb60, the free @0x40bbc4]
+	if (reset_value.empty()) return false;
+	std::vector<std::pair<std::string, std::string>> clips;
 	// Every authored token registers a variant, including repeated files.
 	// [orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode @0x40c2d0]
 	for (size_t i = 0; i < map->count; ++i) {
@@ -224,14 +238,16 @@ bool SkeletalClips::load_from_files(
 
 	// Pass 2: sample every clip against the SHARED skeleton rest origins (not
 	// each clip's own) [orig: AnimMap_RegisterEntity @0x40bb60 pins the rig
-	// skeleton once; AnimMap_PlayAnimBySlot @0x40bda0 never rebuilds it].
+	// skeleton once; AnimMap_PlayAnimBySlot @0x40bda0 never rebuilds it]. The
+	// skeleton .bad is also the bind whose flag gates each clip's translations
+	// [orig: AnimChannel_ComputeBoneMatrices @0x410da0, @0x410de7].
 	for (const auto &kv : clip_bads) {
 		if (kv.first.empty() || kv.second.empty()) continue;
 		const auto file = assets->bone_animation(kv.second);
 		if (!file) continue;
 		LoadedClip lc;
 		lc.key = kv.first;
-		lc.clip = anim::sample_clip(*file, shared_rest, false, nullptr, rig_parents);
+		lc.clip = anim::sample_clip(*file, shared_rest, false, &skeleton_bf, rig_parents);
 		clips_.push_back(std::move(lc));
 	}
 
