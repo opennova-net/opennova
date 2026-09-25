@@ -431,19 +431,18 @@ void Celestial::advance_frame(double p_delta) {
 	// enters and the placement leaves through the util/axes.h swap.
 	const opennova::env::Vec3 cam_rf = godot_to_render_float(cam_pos);
 	const opennova::env::CelestialDiscsFrame discs =
-			opennova::env::build_celestial_discs_frame(state, cam_rf,
-					bodies_.has("moon"));
+			opennova::env::build_celestial_discs_frame(state, cam_rf);
 	if (Body *sun = bodies_.getptr("sun")) {
 		// camera + direction * 64, FULL camera height, identity rotation;
 		// the far pin puts every world surface in front (celestial_frame.h).
 		sun->model->set_global_position(render_float_to_godot(discs.sun_position));
 		_set_body_parameter(*sun, "u_sky_anchor_camera", cam_pos);
-		_set_body_upl(*sun, discs.upl, discs.q3_upl);
+		_set_body_upl(*sun, discs.sun_upl, discs.sun_q3_upl);
 	}
 	if (Body *moon = bodies_.getptr("moon")) {
 		moon->model->set_global_position(render_float_to_godot(discs.moon_position));
 		_set_body_parameter(*moon, "u_sky_anchor_camera", cam_pos);
-		_set_body_upl(*moon, discs.upl, discs.q3_upl);
+		_set_body_upl(*moon, discs.moon_upl, discs.moon_q3_upl);
 	}
 	if (Body *glare = bodies_.getptr("glare")) {
 		// env #14 (closed): ONE coarse unjittered gate ray with the

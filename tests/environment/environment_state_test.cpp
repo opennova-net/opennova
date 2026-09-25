@@ -992,23 +992,23 @@ int main() {
 		env.set_config(&cfg, true);
 		env.set_time_of_day(1200.0f);
 		const opennova::env::Vec3 cam{10.0f, 20.0f, 30.0f};
-		// Both discs flush together after the moon's write: with a moon model
-		// the sun evaluates the MOON alpha [orig: render_celestial_bodies
-		// @ 0x5acbfa sun write, @ 0x5accc1 moon write, one flush @ 0x5acce9].
-		const opennova::env::CelestialDiscsFrame with_moon =
-				opennova::env::build_celestial_discs_frame(env, cam, true);
+		// The discs share one flush but not one value: each batch entry
+		// snapshots its material's registers at submit and the flush restores
+		// them before its RgbGen [orig: collect_render_objects_for_batch
+		// @ 0x5d91c0..0x5d91de; CRenderBatchQueue_FlushBatches
+		// @ 0x5da1d6..0x5da1fd], so the sun keeps its own alpha beside a moon.
+		const opennova::env::CelestialDiscsFrame discs =
+				opennova::env::build_celestial_discs_frame(env, cam);
 		const int moon_alpha = opennova::env::celestial_moon_alpha_fixed(700.0f, 0, false);
-		ok &= expect(with_moon.upl == moon_alpha && moon_alpha == 0x8000,
-				"with a moon model both discs take the moon alpha, (700-400)/600");
-		ok &= expect(with_moon.q3_upl ==
+		ok &= expect(discs.sun_upl == 0x10000 && discs.sun_q3_upl == 0x10000,
+				"the sun keeps its own alpha in both passes");
+		ok &= expect(discs.moon_upl == moon_alpha && moon_alpha == 0x8000,
+				"the moon takes its ramp, (700-400)/600");
+		ok &= expect(discs.moon_q3_upl ==
 						opennova::env::celestial_moon_alpha_fixed(700.0f, 0, true),
-				"the bloom redraw takes the fog-shader moon leg");
-		const opennova::env::CelestialDiscsFrame sun_only =
-				opennova::env::build_celestial_discs_frame(env, cam, false);
-		ok &= expect(sun_only.upl == 0x10000 && sun_only.q3_upl == 0x10000,
-				"without a moon model the sun keeps its own alpha");
-		ok &= expect(near(sun_only.sun_position.x, cam.x + env.sun_direction().x * 64.0f) &&
-						near(sun_only.moon_position.y,
+				"the moon's bloom redraw takes the fog-shader leg");
+		ok &= expect(near(discs.sun_position.x, cam.x + env.sun_direction().x * 64.0f) &&
+						near(discs.moon_position.y,
 								cam.y + env.moon_direction().y * 64.0f),
 				"the discs place at camera + direction * 64");
 		// The glow folds the MAIN camera's view dot and skips its submit at a

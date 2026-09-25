@@ -100,42 +100,43 @@ inline Vec3 celestial_body_position(const Vec3 &cam_pos, const Vec3 &dir) {
 }
 
 // The sun and moon discs: placed at camera + direction * 64 (full camera
-// height, identity rotation), then submitted into ONE flush
-// [orig: render_celestial_bodies @ 0x5acaa0: the sun alpha into the register
-// @ 0x5acbfa and its submit @ 0x5acc1c, the moon alpha @ 0x5accc1 and its
-// submit @ 0x5accdd, one CRenderBatchQueue_SortAndFlush @ 0x5acce9]. The
-// flush evaluates both materials' RgbGen from the register AFTER both
-// writes, so both discs take the LAST value written: the moon's when a moon
-// model exists, else the sun's. Overcast and SunDim are live end-to-end
-// (env #27 — spring-smoothed in the weather core; target 0 in stock data).
+// height, identity rotation), each submitted with its own alpha in the
+// UPL_INTENSITY register [orig: render_celestial_bodies @ 0x5acaa0: the sun
+// alpha @ 0x5acbfa and its submit @ 0x5acc1c, the moon alpha @ 0x5accc1 and
+// its submit @ 0x5accdd, one CRenderBatchQueue_SortAndFlush @ 0x5acce9].
+// Sharing the flush does not share the value: the submit snapshots the
+// registers each strip's material lists into its batch entry
+// [orig: collect_render_objects_for_batch @ 0x5d91c0..0x5d91de] and the
+// flush writes them back into the register table before that batch's
+// RgbGen reads it [orig: CRenderBatchQueue_FlushBatches @ 0x5da1d6..0x5da1fd;
+// RgbGen_EvaluateColor @ 0x5b2453]. Overcast and SunDim are live end-to-end
+// (env #27; spring-smoothed in the weather core, target 0 in stock data).
 struct CelestialDiscsFrame {
 	Vec3 sun_position{};
 	Vec3 moon_position{};
-	// The register value both discs evaluate in the beauty (and mirror)
-	// pass, 16.16.
-	int32_t upl = 0;
+	// Each disc's register value in the beauty (and mirror) pass, 16.16.
+	int32_t sun_upl = 0;
+	int32_t moon_upl = 0;
 	// The same for the bloom pass's redraw render_celestial_bodies(1), the
-	// fog-shader path [orig: FrameFX_RenderBloomPass @ 0x582a77]: its moon
+	// fog-shader path [orig: FrameFX_RenderBloomPass @ 0x582a77]: the moon
 	// alpha leg is fogDistInt x 0.0002 x (1 - overcast) instead of the
 	// (fogDistInt - 400) / 600 ramp [orig: render_celestial_bodies
 	// @ 0x5acc37..0x5acc61]; the sun has no fog-shader variant.
-	int32_t q3_upl = 0;
+	int32_t sun_q3_upl = 0;
+	int32_t moon_q3_upl = 0;
 };
 
 inline CelestialDiscsFrame build_celestial_discs_frame(const EnvironmentState &env,
-		const Vec3 &cam_pos, bool has_moon) {
+		const Vec3 &cam_pos) {
 	CelestialDiscsFrame frame;
 	frame.sun_position = celestial_body_position(cam_pos, env.sun_direction());
 	frame.moon_position = celestial_body_position(cam_pos, env.moon_direction());
 	const int overcast = io::float_to_fp16_16(env.overcast_blend());
-	if (has_moon) {
-		frame.upl = celestial_moon_alpha_fixed(env.fog_level(), overcast, false);
-		frame.q3_upl = celestial_moon_alpha_fixed(env.fog_level(), overcast, true);
-	} else {
-		frame.upl = celestial_sun_alpha_fixed(overcast,
-				io::float_to_fp16_16(env.sun_dim_pct()));
-		frame.q3_upl = frame.upl;
-	}
+	frame.sun_upl = celestial_sun_alpha_fixed(overcast,
+			io::float_to_fp16_16(env.sun_dim_pct()));
+	frame.sun_q3_upl = frame.sun_upl;
+	frame.moon_upl = celestial_moon_alpha_fixed(env.fog_level(), overcast, false);
+	frame.moon_q3_upl = celestial_moon_alpha_fixed(env.fog_level(), overcast, true);
 	return frame;
 }
 

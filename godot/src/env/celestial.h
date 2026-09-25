@@ -37,8 +37,9 @@ class ObjectModel;
 // loads the star 3DI but never draws it (env_celestial.h carries the
 // witness). This node keeps only device work: the ObjectModel children with
 // per-surface material installs, per-frame shader-parameter pushes, and the
-// two terrain line-of-sight rays the glare occlusion window consumes. The 3DI diffuse
-// stays; bodies are tinted and dimmed by the TOD sun/moon color. Ported from
+// two terrain line-of-sight rays the glare occlusion window consumes. Each
+// body renders its authored SELFLUM material at its own UPL_INTENSITY
+// submit value (celestial_frame.h). Ported from
 // celestial.gd (2026-08-10 de-scripting); RE record:
 // docs/env/env-tod-re.md "Celestial bodies".
 class Celestial : public Node3D {

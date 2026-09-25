@@ -150,12 +150,15 @@ func test_upl_intensity_drives_the_authored_self_lum() -> void:
 				Vector3.ONE, Vector3(0.01, 0.01, 0.01), "full sun alpha = white SelfLumColor")
 
 
-func test_the_discs_share_the_moon_alpha_of_their_one_flush() -> void:
+func test_each_disc_keeps_its_own_alpha_through_the_shared_flush() -> void:
 	# render_celestial_bodies writes the sun alpha, submits the sun, writes the
 	# moon alpha, submits the moon and flushes ONCE [orig: @ 0x5acbfa,
-	# @ 0x5acc1c, @ 0x5accc1, @ 0x5accdd, @ 0x5acce9]: the flush evaluates
-	# both RgbGens after the moon's write, so the sun takes the moon alpha.
-	# Fog 700 -> the moon alpha (700 - 400) / 600 = 0.5.
+	# @ 0x5acc1c, @ 0x5accc1, @ 0x5accdd, @ 0x5acce9], but each submit
+	# snapshots its material's registers and the flush restores them before
+	# that batch's RgbGen [orig: collect_render_objects_for_batch
+	# @ 0x5d91c0..0x5d91de; CRenderBatchQueue_FlushBatches
+	# @ 0x5da1d6..0x5da1fd]: the sun stays at its own 1.0 beside a moon at
+	# (700 - 400) / 600 = 0.5.
 	var fixture := _make_fixture(SKY_BODY_NAME, SKY_BODY_NAME, 700.0)
 	var celestial: Celestial = fixture.celestial
 	var sun := celestial.get_node_or_null("Celestial_sun") as ObjectModel
@@ -164,21 +167,25 @@ func test_the_discs_share_the_moon_alpha_of_their_one_flush() -> void:
 	assert_not_null(moon)
 	if sun == null or moon == null:
 		return
-	assert_eq(int(sun.get_ctrl_values().get("UPL_INTENSITY", -1)), 0x8000,
-			"the sun evaluates the moon's (700 - 400) / 600")
-	assert_eq(int(moon.get_ctrl_values().get("UPL_INTENSITY", -1)), 0x8000)
+	assert_eq(int(sun.get_ctrl_values().get("UPL_INTENSITY", -1)), 0x10000,
+			"the sun keeps its own alpha beside a moon")
+	assert_eq(int(moon.get_ctrl_values().get("UPL_INTENSITY", -1)), 0x8000,
+			"the moon takes (700 - 400) / 600")
 	for material in _body_materials(sun):
+		assert_almost_eq(Vector3(material.get_shader_parameter("u_rgb_mod")),
+				Vector3.ONE, Vector3(0.01, 0.01, 0.01), "RgbGen 113 at 1.0: white")
+	for material in _body_materials(moon):
 		assert_almost_eq(Vector3(material.get_shader_parameter("u_rgb_mod")),
 				Vector3.ONE * (127.0 / 255.0), Vector3(0.01, 0.01, 0.01),
 				"RgbGen 113: 0 + (255 * 0x8000) >> 16 = 127")
-	# The bloom pass's redraw takes the fog-shader moon leg, 700 x 0.0002.
+	# The bloom pass's redraw: the sun has no fog-shader leg, the moon takes
+	# 700 x 0.0002.
 	var bodies: Dictionary = celestial.get_diagnostics().get("bodies", {})
 	var expected_q3 := int(700.0 * 0.0002 * 65536.0)
 	assert_almost_eq(int((bodies.get("moon", {}) as Dictionary).get("q3_upl", -1)),
 			expected_q3, 1, "the bloom redraw's moon leg")
-	assert_eq((bodies.get("sun", {}) as Dictionary).get("q3_upl"),
-			(bodies.get("moon", {}) as Dictionary).get("q3_upl"),
-			"the bloom redraw flushes both discs together too")
+	assert_eq(int((bodies.get("sun", {}) as Dictionary).get("q3_upl", -1)), 0x10000,
+			"the bloom redraw's sun keeps its own alpha")
 
 
 func test_sky_pass_gates_reach_the_disc_materials() -> void:
