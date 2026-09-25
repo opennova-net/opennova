@@ -603,9 +603,20 @@ particle blend modes** (the FVF never changes per mode):
 
 Per-mode visual differentiation comes from how the renderer writes those colors (LitColor branch
 vs standard branch in `BuildBillboardQuads`) plus the texture-stage combiner state below.
-`D3DRS_SPECULARENABLE` (=29) is never set on the particle render path (no immediate-29 hits in
-the `0x5e*`/`0x5f*` range), so the SPECULAR slot is dead fixed-function state — it is purely a
-second color carrier for the combiner.
+
+**The intrinsic pass word (corrected 2026-09-24; the earlier "SPECULARENABLE is never set,
+the SPECULAR slot is dead state" was wrong).** `CParticleTexture_InitTextureAndChannels`
+starts every type's intrinsic pass word at 0x20000 (FOGENABLE, `@ 0x5e8324`); case 3 (bump)
+and case 6 (bumpadd) overwrite it with 0x10000 (SPECULARENABLE, `@ 0x5e8424` /
+`@ 0x5e850a`), case 7 (distort) with 0 (`@ 0x5e8567`). `CGfxShader_SetRenderStateDesc`
+stores the word at +0x3C (`@ 0x683664`) and `CGfxShader_ApplyPass` ORs it into the draw's
+pass flags (`@ 0x683221`), committing 0x20000 as FOGENABLE (`@ 0x683243..0x68324f`) and
+0x10000 as SPECULARENABLE (`@ 0x68325f..0x683271`); the flush's own pass flags are 0x500000
+(`CParticleBatch_FlushAndBindMaterial @ 0x5e42d6 / @ 0x5e42dc`: z-write off, cull none). So
+Bump and Bumpadd add the SPECULAR vertex colour after their DOT3 stages with fog OFF, Distort
+draws with fog OFF, and every other type fogs with SPECULARENABLE off. PORTED 2026-09-24
+("Add the bump particle specular and drop fog from bump and distort"; GUT
+`particle_renderer_backend_test`).
 
 ### 5.2 Per-blend-mode render-state binding
 
@@ -681,6 +692,24 @@ by `CParticleTexture_InitTextureAndChannels @ 0x5e8210` are the state
 | bumpadd (6) | `SRCALPHA / ONE` (`@ 0x5e84dc/0x5e84d8`) | DOT3 |
 | distort (7) | dual channel, `EffectWorld_WaterReflectVS/PS` pair (`@ 0x5e8527/0x5e856b`) | §5.4 |
 
+**The secondary (thermal) channels (witnessed 2026-09-24).** The same builder makes a second
+0xF4 descriptor per type (the sample's +8 "secondary" pointer): case 0 Blend
+`SRCALPHA/INVSRCALPHA`, COLOROP `MODULATE(TEXTURE|COMPLEMENT, DIFFUSE|COMPLEMENT)`, ALPHAOP
+`MODULATE(TEXTURE, DIFFUSE)` (`@ 0x5e833d` with the shared tail `@ 0x5e8584..0x5e85dd`);
+cases 1/2 `ZERO/INVSRCCOLOR` over `MODULATE(TEXTURE, DIFFUSE)` (`@ 0x5e8376..0x5e83ac`);
+cases 3..6 `rep movsd` copies of the primary (`@ 0x5e8422` / `@ 0x5e847c` / `@ 0x5e8508`);
+case 7 one shared channel (`@ 0x5e860b`). The flush binds sample+8 instead of sample+4 while
+world+0x450 is set (`CParticleBatch_FlushAndBindMaterial @ 0x5e42bf..0x5e42db`), stored by
+`EffectWorld_RenderParticlePass @ 0x5f7274` from the scene's thermal byte
+(`Render_ProcessMainSceneFrame @ 0x5ca8e3` pushes the latched byte; every other caller 0),
+so both world passes of the main scene (pass A included) take the secondaries in a thermal
+frame, the mirror and the second scene views never. PORTED 2026-09-24 ("Bind the thermal
+secondary particle materials in thermal frames"; "Bind the thermal secondary materials in
+particle pass A too"): `renderer::particle_thermal_material`, the compositor's darkening
+pipelines and the `PARTICLE_FAR_THERMAL` far-pass shaders
+(`godot/shaders/particle/world_far/particle_far_{blend,additive}_thermal`); ctest
+`renderer_particle_frame_compiler_contract`, GUT `particle_renderer_backend_test`.
+
 Additive is NOT the classic `SRCALPHA/ONE`: it shares premult's `ONE/INVSRCALPHA`, and the
 type-1 atlas alpha clear (§4 atlas row, `@ 0x5e9116`) zeroes the fragment alpha
 (`TEXTURE.a × DIFFUSE.a = 0`), which turns that pair into a pure add — **an additive
@@ -719,9 +748,11 @@ negates the first two and keeps the third, so the vector entering the transform 
 6. Secondary vertex color = `modulated_RGB | 0xFF000000` — raw modulated RGB, full alpha.
 
 Bump/Bumpadd then run `DOT3(texture.rgb, DIFFUSE.rgb)` and restore alpha as
-`texture.a × DIFFUSE.a`; the secondary/SPECULAR color is carried by the universal FVF but
-is not consumed by these stage programs. Mode 3 source-over blends, while mode 6 uses
-`SRCALPHA/ONE`.
+`texture.a × DIFFUSE.a`; the SPECULAR dword (the modulated RGB,
+`BuildBillboardQuads @ 0x5e7489..0x5e74a3`) is then added after the DOT3 stages (the
+fixed-function specular add, saturating), because their intrinsic pass word enables
+SPECULARENABLE (§5.1; corrected 2026-09-24 from "not consumed"). Mode 3 source-over
+blends, while mode 6 uses `SRCALPHA/ONE`; neither fogs.
 
 The shared draw list renderer carries the same DIFFUSE/SPECULAR ordering and evaluates this
 literal matrix operation before packing each quad. Our simulator already stores radians, so
@@ -740,14 +771,25 @@ u = n.x*(a*w.x) + n.y*(a*w.y) + n.z*p.x
 v = n.x*(a*w.y) + n.y*(a*w.z) + n.z*p.y
 ```
 
-The RD backend finishes preceding particle draws and copies scene color immediately before
-each contiguous Distort run, then samples that immutable copy for the run. A later color draw
-requires a fresh copy before the next Distort run. Capturing before all particles caused muzzle
-haze to erase impacts and smoke behind it; a GPU regression now covers both overlap cases.
-Draw order, depth testing, atlas preprocessing, and the decoded equation are unchanged.
-Godot's render-buffer UV and this capture boundary are reimpl compositing choices. The exact
-retail scene-capture boundary remains unwitnessed; the former pre-particle-copy parity claim
-was not supported by the shader/texture-binding witnesses.
+**Where Distort draws (witnessed and PORTED 2026-09-24, "Draw the distortion particles and
+tracer ribbons in FrameFX's type-0 row").** A class-7 child (`def+0x1E0 == 7`, i.e. the def's
+first graphic is Distort) never draws in the two water-split scene passes; it draws only in
+the flag-4 pass, which FrameFX's type-0 row issues after its capture, the 256A downsample and
+the jittered 256A -> 256B pass, with texture slot 2 = 256A (`render_projected_shadow
+@ 0x5838f8` -> `CNapiSession_SetViewMatrix`, whose tail `@ 0x5f72f7..0x5f72ff` is
+`EffectWorld_DrawParticles(4)`; the class arm `CParticleGroup_RenderChildren @ 0x5e58d2`, the
+`& 4` test `@ 0x5e58db..0x5e58ee`). The row runs only while something distorts:
+`CEffectEmitterPool_HasDistortionChannels @ 0x5db7f0` or the misnamed
+`CNapiSession_HasActiveDataTransfer @ 0x5f6640`, which walks the visible groups (the +0x6C
+test `@ 0x5e9848`, the class test `@ 0x5e986b`; body at the tail chunk `0x5e9820`). The
+port compiles that subset (`ParticleWaterSubset::Distortion`,
+`particle_def_is_distortion_class`) and `EffectDistortionDrawer`
+(`godot/src/particle/effect_distortion_drawer.*`) draws it inside FrameFX's row with slot 2
+bound, depth-tested against the frame (ctest `renderer_particle_frame_compiler_contract`, GUT
+`particle_renderer_backend_test::test_distortion_particles_draw_in_the_framefx_row`). The
+RD backend's per-run scene snapshot (copy scene colour before each contiguous Distort run)
+now serves only a Distort layer that is NOT a def's first graphic, which no shipped def has;
+the shipped haze defs sample 256A.
 
 ### 5.5 Kong-rename corrections (durable warnings)
 
@@ -798,8 +840,11 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
   pipeline state rather than approximated in a Godot material. A blank or unresolved runtime
   graphic stays invisible-but-simulating like retail. The former ONED soft-circle fallback
   was preview-only and is no longer product behavior `[orig: ParseBlendMode @ 0x5e29f0]`.
-- **Per-material retail fog** - Blend/Bump/Distort converge on the live scene fog color;
-  Additive/Premult/Bumpadd converge on black, Mod on white, and Mod2x on gray 127.
+- **Per-material retail fog** (corrected 2026-09-24) - Blend fogs to the live scene fog
+  colour, Additive/Premult to black, Mod to white and Mod2x to gray 127 (the colour select
+  `CParticleBatch_FlushAndBindMaterial @ 0x5e429e..0x5e42aa`); Bump, Bumpadd and Distort do
+  not fog (no FOGENABLE in their intrinsic pass word, §5.1). The earlier "Bump/Distort on
+  the scene colour, Bumpadd on black" was wrong.
   Type 0 uses eye depth with `exp(-depth * ln(64) / end)`; types 1-3 use radial
   distance and the authored start/end linear curve. The compositor snapshots
   `MissionEnvironment` on the main thread, fogs RGB before fixed-function blending, and
@@ -870,16 +915,23 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
 - **Curve-ref modifier syntax** (D-PTL-20): the reimpl composes both trailing modifiers; retail
   consumes one. Shipped content uses no combined modifier.
 - **Distort scene coordinates** (§5.4): the decoded normal/wave/projective equation
-  matches. Godot's render-buffer UV supplies the projective-coordinate mapping, and the RD
-  backend snapshots preceding particles before each Distort run so muzzle haze preserves
-  impacts behind it. Exact retail capture timing remains unwitnessed.
-- **Global-pass placement**: the shared compositor submits far particles at
-  PRE_TRANSPARENT (before every transparent, water included); water, far- and camera-side
-  object alpha follow in Godot's transparent pass, and camera-side particles submit at
-  POST_TRANSPARENT. The mirror retains its consecutive camera-correct pair. The live
-  RenderingDevice water-intersection contract proves that water attenuates the far packet
-  but not the later camera-side packet. Retail draws far-side object ALPHA strips before
-  pass A; here they draw after it — the bounded D-RORD-7 residual.
+  matches, and the shipped (first-graphic) Distort children draw in FrameFX's type-0 row over
+  the 256A capture as retail does (2026-09-24). Godot's render-buffer UV supplies the
+  projective-coordinate mapping.
+- **The water split, not distance** (corrected 2026-09-24): the `& 1` / `& 2` arms of
+  `CParticleGroup_RenderChildren` compare the emitter origin (+0x1C) with the split plane read
+  through the manager pointer (0.0 when null: guards `@ 0x5e5925` / `@ 0x5e5962`, compares
+  `@ 0x5e5934` / `@ 0x5e5971`); they are not near/far distance thresholds. Flag 0 draws
+  every non-class-7 child (`@ 0x5e58f3`, call `@ 0x5e58ff`); neither water bit skips
+  (`@ 0x5e5943`). Ported as `particle_frame.cpp` `water_subset_selects`; the staged
+  `group_render_gate.h` that read the arms as distance is deleted.
+- **Global-pass placement** (D-RORD-7 closed 2026-09-24, "Draw particle pass A inside the
+  transparent list"): pass A (`EffectWorld_RenderParticlePass(0) @ 0x5c95b5`) draws inside
+  the transparent list at `kRungParticleFarSide`, after the far-side object ALPHA strips and
+  tracers and before the far foliage and the water, as `ParticleFarPass` render-list runs
+  (one shared sort origin, sorting offsets keep the compiler's order); only its distortion
+  commands stay on the compositor path. Camera-side particles submit at POST_TRANSPARENT; the
+  mirror retains its consecutive camera-correct pair.
 
 ## 7. Corpus
 
@@ -1111,7 +1163,7 @@ witnessed behavior gap stay in §8.
 | D-PTL-2 | The former reimpl path created one independently sorted/uploaded mesh surface per draw list command, allowing material/surface limits and reimpl transparent sorting to violate the engine-wide particle order under transient churn | **FIXED 2026-07-14** — one immutable four-vertex quad draw list, renderer-side `0/1/2/1/3/2` triangle expansion, one persistent growable RD vertex buffer, and sequential command draws preserve the compiler's deterministic order without per-emitter Nodes. [orig: CParticleManager_RenderBatch @ 0x5e9890] |
 | D-PTL-3 | `mod2x` formerly approximated `DESTCOLOR`/`SRCCOLOR` with a doubled `blend_mul` shader | **FIXED 2026-07-14** — the RD pipeline uses the witnessed `SRC=DESTCOLOR, DST=SRCCOLOR` factors directly; the reimpl render target owns only the platform color-space convention |
 | D-PTL-4 | `bump`/`bumpadd` formerly rotated the light around view-Z and saturated its byte encoding | **FIXED 2026-07-14** — the Godot scene-to-quad adapter evaluates `transpose(Rx(roll) × view)`, transforms `bump_scale × (+k,+k,+k)`, and retains the original truncating conversion's low byte before the DOT3 pipelines; the portable compiler owns ordering and batching of the authored quads (§5.3) |
-| D-PTL-5 | `distort` formerly used an arbitrary fixed-strength `SCREEN_UV` offset | **FIXED 2026-07-14** — the exact decoded normal/wave/projective equation is ported. **2026-09-17:** RD snapshots now include preceding particles before each Distort run, preventing muzzle haze from erasing impacts; Godot UV/capture boundaries remain reimpl mappings, with retail capture timing unwitnessed (§5.4) |
+| D-PTL-5 | `distort` formerly used an arbitrary fixed-strength `SCREEN_UV` offset | **FIXED 2026-07-14** — the exact decoded normal/wave/projective equation is ported. **2026-09-17:** RD snapshots included preceding particles before each Distort run. **2026-09-24:** the retail capture boundary is witnessed: a def whose first graphic is Distort (class 7) draws only in FrameFX's type-0 row over the 256A capture (`render_projected_shadow @ 0x5838f8`, `CParticleGroup_RenderChildren @ 0x5e58d2`), now ported through `EffectDistortionDrawer`; the per-run snapshot serves only a non-first Distort layer, which no shipped def has (§5.4) |
 | D-PTL-6 | Atlas registration, page allocation, preprocessing, and inset were formerly approximated by a per-emitter horizontal shelf | **FIXED 2026-07-14** — the portable shared builder implements the witnessed name identity, 1024/256 type families, type-1/2 sharing, stable width sort, skyline allocator quirks, exact rect, 2.5-pixel inset, alpha clear, and type-3/6/7 conversions [orig: BuildTextureAtlases @ 0x5e8db0] |
 | D-PTL-7 | Scripted-spawn initial orientation (§4 runtime chain) | **FIXED 2026-08-12, premise corrected 2026-09-09** — fx2ssn/fx2tgt derive direction from the entity yaw and pitch through the Q22 trigonometric tables. The earlier terrain-normal interpretation was incorrect. Typed native descriptors and the loaded GameWorld regression now verify the entity direction; see the script particle follow-up below. Native entity+460 lifetime sharing remains D-PTL-26. [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0; WacScript_SpawnEffectAtTargetMarker @0x4F7FD0 (ex WacCmd_FxToTarget)] |
 | D-PTL-8 | Unknown effect name at intern (§4 runtime chain): the engine clones `stockeffect` under the requested name | **CLOSED 2026-07-12** — `EffectWorld.intern_effect` clones the mounted `stockeffect` entry under the requested name (0 only when no stockeffect is mounted). [orig: CEffectWorld_InternEffectHandle @ 0x5f7310] |
@@ -1495,3 +1547,59 @@ The native geometry/UV contract and the asymmetric-texture GPU test
 `test_dirt_splash_keeps_its_dense_base_below_its_fading_top` both fail with the old
 mapping and pass with the corrected one. Captures of the shipped expansion
 effect confirm the fading upper plume on open ground and against a wall.
+
+### Rendering parity pass (2026-09-24)
+
+The 2026-09-24 rendering parity pass (PR #678) corrected §5.1 (the intrinsic pass word),
+§5.2 (the thermal secondary channels), §5.3 (the bump specular add), §5.4 (where Distort
+draws) and §6 (per-type fog, the water split, pass A placement), and ported the effect
+groups' building-section gate below.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Bump/Bumpadd SPECULAR add, no fog on Bump/Bumpadd/Distort | MATCHING (2026-09-24) | §5.1, §5.3; GUT `particle_renderer_backend_test` |
+| Thermal secondary materials (both world passes) | MATCHING (2026-09-24) | §5.2; `renderer::particle_thermal_material`; ctest `renderer_particle_frame_compiler_contract` |
+| Distort children in FrameFX's type-0 row | MATCHING (2026-09-24) | §5.4; `EffectDistortionDrawer`; D-PTL-5 |
+| Pass A in the transparent list | MATCHING (2026-09-24, D-RORD-7 closed) | §6; `ParticleFarPass` |
+| Effect-group section gate | MATCHING (2026-09-24) for the gated callers below | ctest `particle_effect_scene_contract` (`section_gate_contract`), `renderer_particle_frame_compiler_contract` (`section_hidden_group_contract`) |
+
+**The section gate** ("Gate effect groups by the building sections their spawn point lies
+in"). `CEffectWorld_SpawnEmitterAtPosition @ 0x5f6df0` stores the descriptor's owner tag
+(+0x0C) at group+0 (`@ 0x5f6efb`) and stamps the blink volumes containing the descriptor
+position at group+0x1C..0x28 (`Entity_QueryBlinkBoxesAtPoint`, the call `@ 0x5f6f5a`; hits
+packed `((section & 0x1F) | (pool-2 index << 8)) << 12`). The group allocator sets +0x6C = 1
+(`allocate_effect_emitter_slot @ 0x5e4779`); every `CEffectGroup_AdvanceChildrenAndReap`
+(`@ 0x5e59cf..0x5e59d8`) rewrites it with `sub_5F6D10 @ 0x5f6d10`: visible when the tag is
+0 (`@ 0x5f6d14`) or slot 0 is empty (`@ 0x5f6d1f`), else when any hit's section bit is set
+in the RAW `g_BuildingSectionVisMask[hit >> 20]` (`@ 0x5f6d5e`; no forced bits). Readers:
+`CParticleGroup_RenderChildren` skips a hidden group on every pass (`@ 0x5e5893..0x5e5897`);
+`CParticleEmitter_AdvanceFrame` sends a NOVISNOUPDATE child of a hidden group down the
+off-screen (no update) path before any frustum test (`@ 0x5e65c9..0x5e65d0 ->
+@ 0x5e65e5..0x5e65ec`; the IDB comment calling this "the manager clip state" is wrong:
+`[esi+10h]+0x6C` is the owning group's word); the distortion content test counts only
+visible groups (`@ 0x5e9848`). Port: `particle::EffectSectionGate` /
+`EffectSectionMasks` / `effect_section_gate_visible` (`engine/runtime/particle/effect_scene.h`),
+the scene's `section_visible` (group+0x6C), the frame compiler's `section_hidden_emitters`
+skip, and `godot/src/simulation/effect_section_source.*` answering the spawn point's blink
+hits (`CollisionWorld::query_blink_boxes_at_point`) and the raw per-building masks
+(`OcclusionWorld::section_mask`).
+
+Tag survey (descriptor +0x0C at each caller; the ported producer in brackets):
+- Tagged (entity or round): WAC `fx2ssn` / `fx2tgt` / `fxrain` and the BMS marker action
+  [script effects], `ActionSlot_SpawnEffect` [player weapon action effects],
+  `WeaponSlot_FireAndSpawnEffects @ 0x53f582` (the shooter) [AI fire effect], the vehicle
+  physics spawns (`@ 0x47757b` and siblings) [vehicle movement effects],
+  `Projectile_UpdatePhysics` (the round) [throwable/round move effects],
+  `Entity_SpawnBoneEffectsAtMask @ 0x458750` [item particlefx], and
+  `AmmoDef_ProcessImpactEffect @ 0x40a240` (tag = the hit record's entity, +4) [projectile
+  entity impacts].
+- Untagged (0): `Weapon_RaycastAndSpawnImpact @ 0x4e8950` [knife impacts], terrain/water
+  projectile impacts, `WeatherParticle_UpdateAllEmitters` [rotor-wash zone groups],
+  `Entity_SpawnExplosionEffects @ 0x4399e3`, `Entity_SpawnDebrisParticles @ 0x43a823`,
+  `Entity_HandleDeathEvent @ 0x40716f / @ 0x4072dd` [destruction effects].
+
+**Open after the 2026-09-24 pass:**
+1. Tagged in retail but not yet stamped in the port (left ungated):
+   `Entity_SpawnBoneTrailEffect @ 0x43c0a4` (edi), `Entity_SpawnSectionDebris @ 0x43f84d`,
+   the detonation/fuze object rows, squibs, the motor effects and the death-piece trail.
+   Each needs its row to carry the tag.
