@@ -81,8 +81,8 @@ double vector_gap(const float *a, const float *b, int n) {
 	return worst;
 }
 
-// The bone table's bind 3x3 as a rotation: the runtime composes against it
-// when the clip is the rig's reset, or plays with no reset pinned.
+// The bone table's bind 3x3 as a rotation: the runtime composes every clip of
+// a rig against the reset clip's, and a lone clip against its own.
 BadQuaternion bind_quat(const BadBone &bone) {
 	const BadBuildQuat q = bad_rows_to_quat(bone.rotation);
 	return BadQuaternion{static_cast<float>(q.x), static_cast<float>(q.y), static_cast<float>(q.z),

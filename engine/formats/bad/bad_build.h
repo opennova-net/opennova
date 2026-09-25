@@ -14,9 +14,10 @@
 //   * `BadBone.rotation[9]` is the transpose of the bone's first key as a
 //     matrix, in 13517 of 13517 bones (worst deviation 5.0e-7). The runtime
 //     reads it as the bind of the rig's RESET clip, which every clip of the rig
-//     composes against, and of a clip that plays with no reset pinned
-//     [orig: AnimChannel_ComputeBoneMatrices @0x410da0, the bind from
-//     channel+44 @0x410dd8 else the playing clip @0x410de3].
+//     composes against [orig: AnimChannel_ComputeBoneMatrices @0x410da0, the
+//     bind from channel+44 @0x410dd8]. Its fallback to the playing clip's own
+//     table when nothing is pinned (@0x410de3) is reached by no table: one
+//     without a reset clip does not load (AnimMap_LoadAdmFile @0x40cc40).
 //   * `BadBone.position[3]` follows the paired model's pivots through the
 //     parent's bind in the SET's reset clip, the bind the runtime composes the
 //     clip against: `position[i] = bind[parent(i)] . clip(pivot[i] -
@@ -69,7 +70,8 @@ struct BadBuildQuat {
 // Mission axes (x forward, y left, z up) <-> the clip frame (x side, y up,
 // z forward). This is threedi_build's mission -> presentation permutation: a
 // clip's rotations apply to the skeleton the model's pivots build, and that
-// skeleton is the model frame mirrored on x (threedi_model_to_presentation).
+// skeleton is the model frame mirrored on x, (-x, y, z) of model axes (which
+// are (-y, z, x) of mission).
 BadBuildVec3 bad_clip_from_mission(const BadBuildVec3 &m);
 BadBuildVec3 bad_mission_from_clip(const BadBuildVec3 &c);
 BadBuildQuat bad_clip_from_mission(const BadBuildQuat &m);
@@ -180,13 +182,17 @@ bool bad_build_bare_stem(const std::string &name);
 // joining a ring [orig: AnimMap_FindSlotByName @0x40cfa0, stricmp on the key
 // + 5; AnimMap_RegisterBoneNode @0x40C2D0, slot 0 self-rings @0x40c38b;
 // AnimMap_RegisterEntity @0x40bb60 pins its clip @0x40bbe3]. The stem is empty
-// for a table with no reset row; the clip is null when the set lacks it too.
+// for a table with no reset row, which bad_build_mint_table refuses; the clip
+// is null when the set lacks it too.
 std::string bad_build_reset_stem(const std::vector<BadBuildRow> &rows);
 const BadBuildClip *bad_build_reset_clip(const BadBuildSet &set);
 
 // The rotation rows a bone's children turn through: the transpose of the
-// bone's stored first key in `reset`, or in `clip` for a null `reset` or a
-// bone past its bones (the runtime's own fallback when no reset is pinned).
+// bone's stored first key in `reset`, the set's reset clip, or in `clip` for a
+// null `reset` (a lone clip, which no table binds: it turns through its own
+// first key) and, by our rule, for a bone past `reset`'s bones (what retail
+// reads there is unwitnessed; G17_1st's g17_1f and g17_1d carry one bone more
+// than their reset).
 void bad_derive_bind_rows(const BadBuildClip &clip, const BadBuildClip *reset, size_t bone,
                           float rows[9]);
 
@@ -202,10 +208,10 @@ void bad_derive_bone_table(const BadBuildClip &clip, const BadBuildClip *reset,
 // The per-frame capsule extents an event carries when the author gives none:
 // the drop below bone 0 and the total height of the bone origins, over the
 // pose the runtime draws, each bone's key composed against `reset`'s bind as
-// `key * bind^-1` (the clip's own first key for a null `reset` or a bone past
-// its bones). The rule is OURS, not retail's: what retail's exporter measured
-// is unwitnessed (docs/anim/adm-bad-format-re.md). Both vectors come back with
-// frame_count + 1 entries.
+// `key * bind^-1` (a lone clip's own first key for a null `reset`, and a bone
+// past `reset`'s bones its own). The rule is OURS, not retail's: what retail's
+// exporter measured is unwitnessed (docs/anim/adm-bad-format-re.md). Both
+// vectors come back with frame_count + 1 entries.
 void bad_clip_extents(const BadBuildClip &clip, const BadBuildClip *reset,
                       std::vector<double> &bottom, std::vector<double> &top);
 
@@ -225,7 +231,10 @@ bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, std::ve
                     std::string *error);
 
 // Serialize the set's table through the canonical-form `.adm` writer. False
-// with `error` set for a row the parser could not read back.
+// with `error` set for a row the parser could not read back, and for a table
+// with no reset row (bad_build_reset_stem): every clip of a table binds to that
+// row's clip, and retail cannot load a table without one, reading slot 0's null
+// head unchecked [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16].
 bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string *error);
 
 } // namespace opennova::bad

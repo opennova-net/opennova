@@ -297,7 +297,7 @@ void bad_clip_extents(const BadBuildClip &clip, const BadBuildClip *reset,
     // is pinned [orig: AnimChannel_ComputeBoneMatrices @0x410da0, the bind from
     // channel+44 @0x410dd8 else the playing clip @0x410de3; AnimMap_RegisterEntity
     // @0x40bb60 pins slot 0's clip @0x40bbe3]. A bone past the reset clip's
-    // own bones takes its own first key.
+    // own bones takes its own first key, our rule.
     std::vector<BadBuildQuat> bind_inverse(bones);
     for (size_t i = 0; i < bones; ++i) {
         const BadBuildBone *source = &clip.bones[i];
@@ -544,6 +544,13 @@ const BadBuildClip *bad_build_reset_clip(const BadBuildSet &set) {
 
 bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string *error) {
     out.clear();
+    // A table binds every clip to its reset row's clip; with none the game
+    // faults loading it [orig: AnimMap_LoadAdmFile @0x40cc40, the read of slot
+    // 0's head @0x40ce11..0x40ce16].
+    if (bad_build_reset_stem(set.rows).empty())
+        return fail(error, "the table has no reset row (a key naming slot 0, as `anim_reset` "
+                           "does): every clip of a table binds to its clip, and the game "
+                           "cannot load a table without one");
     std::vector<adm::AdmEntry> entries(set.rows.size());
     for (size_t i = 0; i < set.rows.size(); ++i) {
         const BadBuildRow &row = set.rows[i];

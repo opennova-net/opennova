@@ -231,7 +231,9 @@ registered, the load fails (`@0x40CE03..0x40CE07`); and
 `AnimMap_RegisterEntity` frees the channel it allocated when slot 0 is empty
 (`@0x40BBC4`, `@0x40BD8B`). No retail entity animates through such a table, so
 `load_from_adm` declines it (the rig does not load) instead of borrowing the
-first row's clip. `AnimChannel_ComputeBoneMatrices` does fall back to the
+first row's clip, and the authoring seam refuses to write one
+(`bad_build_mint_table`, so `opennova-3di anim build`).
+`AnimChannel_ComputeBoneMatrices` does fall back to the
 playing clip's own bone table when `channel+44` is null (`@0x410DE5`), but no
 table reaches that path: every initializer witnessed pins `channel+44` (the
 three above, and the menu preview's `Dt1rst.bad`,

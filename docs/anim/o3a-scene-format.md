@@ -46,8 +46,9 @@ it was authored on and to any rig that matches it.
 - A key is the bone's rotation in the model's frame (a world rotation, not a
   parent-relative one). The runtime deforms a bone by `key * bind^-1`, and the
   bind is the first key of the set's RESET clip (the `anim_reset` row's last
-  variant), pinned once per entity; only a clip that plays with no reset pinned
-  composes against its own first key
+  variant), pinned once per entity; a lone clip, with no table, composes
+  against its own first key. A table with no reset row does not load in the
+  game (`build` refuses one)
   [orig: `AnimChannel_ComputeBoneMatrices @ 0x410da0`;
   `AnimMap_RegisterEntity @ 0x40bb60`]. The reset clip's first key is the pose
   the rig's rest stands in, and every key of every clip turns from there.
@@ -105,8 +106,10 @@ The build fails, naming the line (a clip the seam refuses is named by the line
 it opens on), on an unknown record, a malformed or trailing field, a quote
 that never closes or runs into the next field, a `"` inside a bare field, an
 empty row variant, an event capsule with one value, a
-set with no clip, a row key of five characters or fewer (it names no slot) or
-a row naming a clip the set lacks, two clips under one name, a clip name or
+set with no clip, a table with no reset row (a key naming slot 0: retail
+cannot load one [orig: `AnimMap_LoadAdmFile @ 0x40cc40`, the unchecked read of
+slot 0's head `@0x40CE11..0x40CE16`]), a row key of five characters or fewer
+(it names no slot) or a row naming a clip the set lacks, two clips under one name, a clip name or
 row variant that is not a bare file name (`/ \ : | * ? < > "`, a control character, `.` or `..`: `build`
 writes each clip beside the table), a bone whose parent is not a lower index, a
 key list that is neither `frames + 1` long nor accompanied by durations (a
@@ -127,7 +130,8 @@ path.
 
 `scene` comments these (`# note: ...`) and lists them on stderr: a variant
 whose clip is absent or does not parse, which is dropped from its rows (a row
-left with none is dropped whole), and a clip `build` could not mint again from
+left with none is dropped whole, and a table left with no reset row is noted,
+since `build` refuses it), and a clip `build` could not mint again from
 its text (an event count other than `frames + 1`, a `version` other than 0 or
 1, a bone name filling all 32 bytes or holding a quote, a parent that is not a
 lower index, a key that is not a unit quaternion, a zero duration, a sparse

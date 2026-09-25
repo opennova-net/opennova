@@ -331,6 +331,12 @@ int main() {
         BadBuildSet bare = set;
         bare.rows[1].variants.clear();
         TEST_EXPECT(!bad_build_mint_table(bare, text, &error));
+        // A table with no reset row binds nothing: retail faults loading one
+        // [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16].
+        BadBuildSet unbound = set;
+        unbound.rows[0].key = "anim_idle";
+        TEST_EXPECT(!bad_build_mint_table(unbound, text, &error) &&
+                    error.find("no reset row") != std::string::npos);
         BadBuildSet quoted = set;
         quoted.rows[1].variants[0] = "walk\"f";
         TEST_EXPECT(!bad_build_mint_table(quoted, text, &error));

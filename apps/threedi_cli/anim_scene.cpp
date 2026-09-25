@@ -235,27 +235,36 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 			if (opennova::strutil::iequals(clip.name, stem)) return true;
 		return false;
 	};
+	std::vector<BadBuildRow> kept; // the rows as written
 	for (const BadBuildRow &row : set.rows) {
+		BadBuildRow held{row.key, {}};
 		std::string line = "row " + name_field(w, row.key);
-		size_t held = 0;
 		for (const std::string &variant : row.variants) {
 			// A variant whose clip did not load, or is left out, is dropped
 			// from its row: build refuses a row naming a clip the set lacks.
 			if (!written(bad_build_clip_stem(variant))) continue;
 			line += " \"" + variant + "\"";
-			++held;
+			held.variants.push_back(variant);
 		}
-		if (held == 0) {
+		if (held.variants.empty()) {
 			w.note("dropped row '" + row.key + "': it names no clip the scene holds");
 			continue;
 		}
 		w.line(line);
+		kept.push_back(held);
 	}
 	for (const AnimMissingClip &absent : set.missing)
 		w.note("dropped '" + absent.variant + "' from its rows: " + absent.reason);
-	// The set's reset clip, whose bind every clip's positions turn through; a
-	// lone clip, or a table whose reset clip is absent, turns through its own.
-	const std::string reset_stem = bad_build_reset_stem(set.rows);
+	// The set's reset clip, whose bind every clip's positions turn through: the
+	// last variant of the last reset row the scene writes, the one build binds
+	// to (a reset variant that did not load registers nothing in retail
+	// either). A lone clip turns through its own first key. A table left with
+	// no reset row binds nothing: retail cannot load it and build refuses it,
+	// so it is noted, and its clips are written through their own first keys.
+	if (!set.table_name.empty() && bad_build_reset_stem(kept).empty())
+		w.note("the table has no reset row naming a clip the scene holds: `anim build` refuses "
+			   "it, as the game cannot load it");
+	const std::string reset_stem = bad_build_reset_stem(kept);
 	BadBuildClip reset_shape;
 	const BadBuildClip *reset = nullptr;
 	for (const AnimLoadedClip &clip : set.clips) {

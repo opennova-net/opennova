@@ -149,6 +149,9 @@ int main(int argc, char **argv) {
 	build("row-without-clip", replace(text, "row anim_reset \"walk\"", "row anim_reset \"stand\""),
 			false);
 	build("key-outside-namespace", replace(text, "row anim_reset", "row reset"), false);
+	// A table binds every clip to its reset row's clip, and the game cannot load
+	// one without it.
+	build("no-reset-row", replace(text, "row anim_reset \"walk\"\n", ""), false);
 	build("short-translations", replace(text, " tr 0 0 0.02\n", ""), false);
 	build("forward-parent", replace(text, "bone 0 0 0 1 0.4", "bone 2 0 0 1 0.4"), false);
 	build("root-with-parent", replace(text, "bone -1 0 0 0 0.5", "bone 0 0 0 0 0.5"), false);
@@ -354,6 +357,23 @@ int main(int argc, char **argv) {
 		check(threedi_cli::cmd_anim_compare((home / "a" / "T.adm").string().c_str(),
 					  (home / "b" / "T.adm").string().c_str()) == 1,
 				"a variant with no clip differs");
+	}
+
+	// A table with no reset row is noted: build refuses it.
+	{
+		const std::filesystem::path home = dir / "no-reset-scene";
+		std::filesystem::remove_all(home);
+		std::filesystem::create_directories(home);
+		std::filesystem::copy_file(std::filesystem::path(original).parent_path() / "walk.bad", home / "walk.bad");
+		std::ofstream(home / "IDLE.adm", std::ios::binary) << "\r\nanim_idle\t\t\t\t\"walk\"\r\n";
+		const std::string scene = (home / "set.o3a").string();
+		check(threedi_cli::cmd_anim_scene((home / "IDLE.adm").string().c_str(), scene.c_str()) == 0,
+				"scene of a table with no reset row");
+		std::vector<char> text_out;
+		check(read_file(scene, text_out) &&
+						std::string(text_out.begin(), text_out.end()).find("# note: the table has no reset row") !=
+								std::string::npos,
+				"a table with no reset row is noted");
 	}
 
 	// A clip the text cannot express is noted and left out, not written for
