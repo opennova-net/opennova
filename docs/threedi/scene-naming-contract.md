@@ -44,7 +44,9 @@ of one type on one part: 2nd `a`, 3rd `b`, ..., `z`, then `aa` (the Blackhawk's
 code first. The volume is the solid its faces bound, by the OED rule
 (docs/threedi/o3d-scene-format.md): each face's plane, so the mesh must be
 convex (export names one that is not). A ladder (`CL`) faces the plane of its
-last face (Blender's Sort Mesh Elements can put a chosen face last).
+last face (Blender's Sort Mesh Elements can put a chosen face last). A flat
+ladder is one polygon facing the way the ladder faces: 94 of the 102 retail
+ladders have no thickness, and import lays each out that way.
 
 | Code | Type | Code | Type | Code | Type |
 | --- | --- | --- | --- | --- | --- |
@@ -100,7 +102,11 @@ by the OED `.3dp` `poly_collision_lod` setting (default 0, the most detailed;
 Armry01's are LOD 1's), and that LOD's parts are the collision sections (one
 each). Each face's surface type and flags come from its material: "both
 sides" (1) follows Two sided; "bullets pass" (0x100, retail's rotor blades)
-and "hit from behind" (0x800) are material settings. A skinned model with a
+and "front only" (0x800: without flag 1 a bullet stops only when it crosses
+the face from the front [orig: Physics_RaycastAgainstBoneCollision @
+0x4e4cb0, the test @ 0x4e5139]) are material settings. Import gives each
+material the surface and flags most of its faces carry and names how many
+faces lose that vote. A skinned model with a
 mesh part carries its bullet faces on that part's section (the retail person
 layout). One without a mesh part carries them on each part's section, from the
 geometry authored on each bone (dM1A1: LOD 1, 875 hull faces and 40 per

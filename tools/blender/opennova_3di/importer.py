@@ -6,7 +6,8 @@
 # imported model exports again. Each file becomes its own Blender scene named
 # after the model (the exporter reads a whole scene), with LOD 1 and up hidden.
 # Textures load from the file `opennova-3di` resolved beside the .3di by the
-# runtime's candidate order (`texfile` records).
+# runtime's candidate order (`texfile` records). What the scene cannot carry is
+# reported as a note; a file that fails leaves nothing of itself behind.
 
 import math
 import os
@@ -65,6 +66,26 @@ def tokens(line):
     return out
 
 
+def num(text):
+    """A number the CLI printed. Retail models carry NaNs (J_bsh1's vertex
+    normals, ChmLFP1's occlusion planes), which a C runtime spells `nan` or
+    `-nan` and MSVC's `-nan(ind)`, `1.#QNAN` or `-1.#IND`; infinities `inf` or
+    `1.#INF`."""
+    try:
+        return float(text)
+    except ValueError:
+        t = text.lower()
+        if "nan" in t or "#ind" in t:
+            return math.nan
+        if "inf" in t:
+            return -math.inf if t.startswith("-") else math.inf
+        raise
+
+
+def finite(values):
+    return all(math.isfinite(x) for x in values)
+
+
 def strip_comment(line):
     quoted = False
     for i, c in enumerate(line):
@@ -77,7 +98,7 @@ def strip_comment(line):
 
 def read_o3d(path):
     sc = {"name": "MODEL", "skinned": False, "uv1": False, "registers": [], "frames": [], "materials": [],
-          "texfiles": {}, "lods": [], "points": [], "lights": [], "occ": [], "cobjs": []}
+          "texfiles": {}, "lods": [], "points": [], "lights": [], "occ": [], "cobjs": [], "cxlt": []}
     lod = part = strip = panm = mat = cobj = volume = occ = None
     with open(path, encoding="utf-8", errors="replace") as f:
         for raw in f:
@@ -101,7 +122,7 @@ def read_o3d(path):
             elif k == "register":
                 sc["registers"].append(a[0] if a else "")
             elif k == "mtrx":
-                sc["frames"].append([float(x) for x in a[:9]])
+                sc["frames"].append([num(x) for x in a[:9]])
             elif k == "material":
                 mat = {"shader": a[0], "textures": [], "texanim": None, "reflect": None, "matflags": 0,
                        "alphatest": 0, "glass": 0, "emissive": 0, "rgbgen": None, "alphagen": None, "ugen": None,
@@ -116,16 +137,16 @@ def read_o3d(path):
             elif k in ("matflags", "alphatest", "glass", "emissive"):
                 mat[k] = int(a[0])
             elif k == "rgbgen":
-                mat["rgbgen"] = (int(a[0]), int(a[1]), float(a[2]), [int(x) for x in a[3:6]], [int(x) for x in a[6:9]],
-                                 float(a[9]) if len(a) > 9 else 0.0)
+                mat["rgbgen"] = (int(a[0]), int(a[1]), num(a[2]), [int(x) for x in a[3:6]], [int(x) for x in a[6:9]],
+                                 num(a[9]) if len(a) > 9 else 0.0)
             elif k in ("alphagen", "ugen", "vgen"):
-                mat[k] = (int(a[0]), int(a[1]), float(a[2]), float(a[3]), float(a[4]), float(a[5]) if len(a) > 5 else 0.0)
+                mat[k] = (int(a[0]), int(a[1]), num(a[2]), num(a[3]), num(a[4]), num(a[5]) if len(a) > 5 else 0.0)
             elif k == "lod":
                 lod = {"threshold": int(a[0]) if a else 0, "type": a[1] if len(a) > 1 else "gnrc", "parts": [],
                        "panm": []}
                 sc["lods"].append(lod)
             elif k == "part":
-                part = {"parent": int(a[0]), "pivot": tuple(float(x) for x in a[1:4]), "strips": []}
+                part = {"parent": int(a[0]), "pivot": tuple(num(x) for x in a[1:4]), "strips": []}
                 lod["parts"].append(part)
             elif k == "strip":
                 strip = {"material": int(a[0]), "alpha": len(a) > 1 and a[1] != "0", "bones": [], "verts": [],
@@ -134,7 +155,7 @@ def read_o3d(path):
             elif k == "bones":
                 strip["bones"] = [int(x) for x in a]
             elif k == "v":
-                f = [float(x) for x in a]
+                f = [num(x) for x in a]
                 vert = {"p": tuple(f[0:3]), "n": tuple(f[3:6]), "uv": (f[6], f[7])}
                 rest = f[8:]
                 if sc["uv1"]:
@@ -155,45 +176,47 @@ def read_o3d(path):
                 panm["tracks"].append((a[0], int(a[1]), a[2], int(a[3]), int(a[4]), int(a[5]),
                                        int(a[6]) if len(a) > 6 else 0))
             elif k == "userpoint":
-                sc["points"].append({"name": a[0], "p": tuple(float(x) for x in a[1:4]),
-                                     "d": tuple(float(x) for x in a[4:7]), "part": int(a[7]),
+                sc["points"].append({"name": a[0], "p": tuple(num(x) for x in a[1:4]),
+                                     "d": tuple(num(x) for x in a[4:7]), "part": int(a[7]),
                                      "type": int(a[8]) if len(a) > 8 else 71})
             elif k == "light":
-                light = {"part": int(a[0]), "p": tuple(float(x) for x in a[1:4]), "atten": (float(a[4]), float(a[5])),
-                         "style": int(a[6]), "rate": float(a[7]), "phase": float(a[8]),
+                light = {"part": int(a[0]), "p": tuple(num(x) for x in a[1:4]), "atten": (num(a[4]), num(a[5])),
+                         "style": int(a[6]), "rate": num(a[7]), "phase": num(a[8]),
                          "rgb0": [int(x) for x in a[9:12]], "rgb1": [int(x) for x in a[12:15]], "flags": int(a[15], 0),
                          "dir": None, "falloff": 0.0}
                 if len(a) >= 20:
-                    light["dir"] = tuple(float(x) for x in a[16:19])
-                    light["falloff"] = float(a[19])
+                    light["dir"] = tuple(num(x) for x in a[16:19])
+                    light["falloff"] = num(a[19])
                 sc["lights"].append(light)
             elif k == "occ":
                 occ = {"type": int(a[0]), "a": int(a[1]), "b": int(a[2]), "verts": [], "faces": []}
                 sc["occ"].append(occ)
             elif k == "ov":
-                occ["verts"].append(tuple(float(x) for x in a[:3]))
+                occ["verts"].append(tuple(num(x) for x in a[:3]))
             elif k == "of":
                 occ["faces"].append(tuple(int(x) for x in a[:3]))
             elif k == "cobj":
-                cobj = {"parent": int(a[0]), "offset": tuple(float(x) for x in a[1:4]) if len(a) >= 4 else (0, 0, 0),
+                cobj = {"parent": int(a[0]), "offset": tuple(num(x) for x in a[1:4]) if len(a) >= 4 else (0, 0, 0),
                         "sphere": None, "verts": [], "faces": [], "volumes": []}
                 sc["cobjs"].append(cobj)
             elif k == "csphere":
-                cobj["sphere"] = tuple(float(x) for x in a[:4])
+                cobj["sphere"] = tuple(num(x) for x in a[:4])
             elif k == "cv":
-                cobj["verts"].append(tuple(float(x) for x in a[:3]))
+                cobj["verts"].append(tuple(num(x) for x in a[:3]))
             elif k == "cf":
                 cobj["faces"].append((int(a[0]), int(a[1]), int(a[2]), int(a[3]) if len(a) > 3 else 1,
                                       int(a[4]) if len(a) > 4 else 0))
             elif k in ("cvolume", "cvol"):
-                box = [float(x) for x in a[2:8]]
+                box = [num(x) for x in a[2:8]]
                 volume = {"type": int(a[0]), "flags": int(a[1]), "planes": []}
                 if k == "cvol":
                     volume["planes"] = [((1, 0, 0), -box[3]), ((-1, 0, 0), box[0]), ((0, 1, 0), -box[4]),
                                         ((0, -1, 0), box[1]), ((0, 0, 1), -box[5]), ((0, 0, -1), box[2])]
                 cobj["volumes"].append(volume)
             elif k == "cp":
-                volume["planes"].append((tuple(float(x) for x in a[:3]), float(a[3])))
+                volume["planes"].append((tuple(num(x) for x in a[:3]), num(a[3])))
+            elif k == "cxlt":
+                sc["cxlt"].append(tuple(num(x) for x in a[:3]))
     return sc
 
 
@@ -204,13 +227,28 @@ class Builder:
         self.context = context
         self.sc = sc
         self.dir = os.path.dirname(os.path.abspath(source_path))
+        self.stem = os.path.splitext(os.path.basename(source_path))[0]
         self.op = op
         self.notes = []
         self.images = {}
+        self.collection = None
+        self.made_materials = []
+        self.part_objects = {}  # LOD -> {part: its PN## empty}
+        self.skinned_parts = {}  # LOD -> (armature, {mesh part: its mesh})
+        self.attach_helpers = {}  # (LOD, part) -> its `~PPx attach` helper
 
     def note(self, text):
         if text not in self.notes:
             self.notes.append(text)
+
+    def discard(self):
+        """Remove what a failed build made."""
+        if self.collection is not None:
+            for ob in list(self.collection.objects):
+                bpy.data.objects.remove(ob)
+            bpy.data.collections.remove(self.collection)
+        for mat in self.made_materials:
+            bpy.data.materials.remove(mat)
 
     # mission -> Blender, the inverse of export.axis_map
     def blender(self, m):
@@ -246,6 +284,10 @@ class Builder:
             try:
                 img = bpy.data.images.load(path, check_existing=True)
                 img.name = name
+                # Blender loads what it cannot decode (PCX, archive-compressed
+                # files) as an image without pixels.
+                if img.size[0] == 0:
+                    self.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
             except RuntimeError:
                 self.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
         self.images[name] = img
@@ -268,6 +310,7 @@ class Builder:
         for i, m in enumerate(self.sc["materials"]):
             # The name carries the export index and the shader tag.
             mat = bpy.data.materials.new(f"Material_{i}_{m['shader']}")
+            self.made_materials.append(mat)
             p = mat.o3d
             flags = m["matflags"]
             p.alpha_test = bool(flags & 1)
@@ -381,15 +424,23 @@ class Builder:
         (and weights), loops carrying UVMap/UV1 and the stored normals."""
         index, verts, loops, faces, face_mat, slots = {}, [], [], [], [], []
         weights = []
+
+        def normal(v):
+            # Zero-length and not-finite (J_bsh1's NaN) normals alike: Blender
+            # calculates the corner's own.
+            n = v["n"]
+            if not finite(n) or sum(x * x for x in n) < 1e-12:
+                self.note("zero-length or not-finite vertex normals are replaced by Blender's calculated normals")
+                return (0.0, 0.0, 0.0)
+            return n
+
         for s in strips:
             mi = s["material"]
             if mi not in slots:
                 slots.append(mi)
             ids = []
             for v in s["verts"]:
-                if sum(x * x for x in v["n"]) < 1e-12:
-                    self.note("zero-length vertex normals are replaced by Blender's calculated normals")
-                key = (tuple(round(x, 6) for x in v["p"]), tuple(round(x, 4) for x in v["n"]))
+                key = (tuple(round(x, 6) for x in v["p"]), tuple(round(x, 4) for x in normal(v)))
                 infl = ()
                 if skinned:
                     infl = tuple(sorted((s["bones"][b], round(w, 5)) for b, w in zip(v["bi"], v["bw"])
@@ -431,7 +482,7 @@ class Builder:
             uv0.data[li].uv = (v["uv"][0], 1.0 - v["uv"][1])
             if uv1 is not None:
                 uv1.data[li].uv = (v["uv1"][0], 1.0 - v["uv1"][1])
-        me.normals_split_custom_set([tuple(self.blender(v["n"]).normalized()) for v in loops])
+        me.normals_split_custom_set([tuple(self.blender(normal(v)).normalized()) for v in loops])
         me.update()
         return me, weights
 
@@ -441,6 +492,15 @@ class Builder:
         self.scene = scene
         self.forward = scene.o3d.forward
         self.world = {}
+        # The output path follows the imported file (Excavatr.3di's GHDR name
+        # is OrngFlag), one per model root: a second import of one file writes
+        # beside the first, not over it.
+        taken = {m.o3d.output_path.lower() for m in export.model_roots(scene)}
+        output = f"//{self.stem}.3di"
+        n = 2
+        while output.lower() in taken:
+            output = f"//{self.stem}_{n}.3di"
+            n += 1
         self.collection = bpy.data.collections.new(sc["name"])
         scene.collection.children.link(self.collection)
         mats = self.materials()
@@ -448,7 +508,7 @@ class Builder:
         # model's own settings, so several models share a scene.
         self.model = self.empty(sc["name"], size=1.0, display="CUBE")
         self.model.o3d.model_name = sc["name"]
-        self.model.o3d.output_path = f"//{sc['name']}.3di"
+        self.model.o3d.output_path = output
         lod_objects = []
         self.lod0_parts = {}
         self.split = self.skinned_split() if sc["skinned"] else None
@@ -475,7 +535,7 @@ class Builder:
         self.bullet_lod(mats)
         if sc["skinned"] and sc["cobjs"]:
             self.note("skin weights are normalized on export and skinned hit spheres are regenerated from them")
-        vl = scene.view_layers[0]
+        vl = self.context.view_layer
         for li, objs in enumerate(lod_objects):
             if li > 0:
                 for ob in objs:
@@ -574,7 +634,7 @@ class Builder:
         arm_ob = bpy.data.objects.new(f"{self.sc['name']}_Rig{li}", arm)
         self.link(arm_ob, root, Matrix.Identity(4), self.world[root.name])
         objs.append(arm_ob)
-        vl = self.scene.view_layers[0]
+        vl = self.context.view_layer
         with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm_ob, object=arm_ob,
                                         selected_objects=[arm_ob]):
             vl.objects.active = arm_ob
@@ -597,6 +657,10 @@ class Builder:
                 parent = lod["parts"][pi]["parent"]
                 if parent != pi and parent in bones:
                     b.parent = bones[parent]
+                elif pi > 0:
+                    # DT801's LOD 3 names -1: a bone without a parent bone
+                    # exports parent 0.
+                    self.note(f"LOD {li} bone BN{pi + 1:02d} names parent {parent}; it exports under the root (0)")
             bpy.ops.object.mode_set(mode="OBJECT")
         # Each bone's part animation: its tracks, flags and track frame.
         rows = {p["part"]: p for p in lod["panm"]}
@@ -754,6 +818,9 @@ class Builder:
                 name += f"-{o['b'] + 1:02d}"
             elif o["type"] == 2 and o["b"] != 0:
                 self.note(f"occlusion record {i}: a window into section {o['b']} (windows open to the exterior)")
+            if not o["verts"]:
+                self.note(f"occlusion record {i} holds no polygon (ChmLFP1's stored planes are not finite); it "
+                          "exports with none")
             me = bpy.data.meshes.new(name + "-occonly")
             me.from_pydata([tuple(self.blender(v)) for v in o["verts"]], [], o["faces"])
             me.update()
@@ -782,12 +849,20 @@ class Builder:
                     self.note(f"collision section {si}: a {code} volume with flags {v['flags']} (only BB takes flags)")
                 facets, missing = volume_facets(v["planes"], ladder=v["type"] == 4)
                 if len(facets) < 4:
-                    self.note(f"collision section {si}: a {code} volume bounds no solid")
-                    continue
+                    # A ladder without thickness (94 of the 102 retail ones)
+                    # is the one polygon on plane 0, its facing, which the OED
+                    # rule reads back as the same planes (all 94). No polygon
+                    # of a flat CB or CP volume (38 retail) rebuilds its
+                    # planes, so it stays out.
+                    flat = [f for pi, f in facets if pi == 0] if v["type"] == 4 else []
+                    if not flat:
+                        self.note(f"collision section {si}: a {code} volume bounds no solid")
+                        continue
+                    facets = [(0, flat[0])]
                 unbuilt += missing
                 name = f"{code}{letters}{si + 1:02d}" + dup_suffix(dups, (code + letters, si)) + "-colonly"
                 verts, index, polys = [], {}, []
-                for facet in facets:
+                for _, facet in facets:
                     poly = []
                     for p in facet:
                         key = tuple(round(x, 5) for x in p)
@@ -851,10 +926,12 @@ class Builder:
                 if key in by_centre:
                     votes.setdefault(material, {}).setdefault(by_centre[key], 0)
                     votes[material][by_centre[key]] += 1
+        outvoted = 0
         for mi, v in votes.items():
             if not 0 <= mi < len(mats):
                 continue
-            (surface, flags), _ = max(v.items(), key=lambda kv: kv[1])
+            (surface, flags), won = max(v.items(), key=lambda kv: kv[1])
+            outvoted += sum(v.values()) - won
             p = mats[mi].o3d
             p.surface = surface
             p.face_never_hit = bool(flags & 0x100)
@@ -863,6 +940,9 @@ class Builder:
             if bool(flags & 1) != p.two_sided:
                 self.note(f"material {mi}: its bullet faces' both-sides flag differs from its two-sided flag; "
                           "export takes it from Two sided")
+        if outvoted:
+            self.note(f"{outvoted} bullet faces take their material's most common surface and flags, not their own "
+                      "(a material carries one set)")
 
 
 def centroid(points):
@@ -896,7 +976,7 @@ def solve_planes(a, b, c):
 
 def volume_facets(planes, ladder=False):
     """The convex solid a volume's planes bound (n . p + d <= 0 inside), as
-    one polygon per plane it has a face on, the polygon's corners computed ON
+    (plane index, polygon), one per plane it has a face on, the corners ON
     that plane and wound counter-clockwise about its outward normal, in plane
     order. The OED rule export applies (formats/threedi/threedi_build.h
     add_volume_mesh) then reads each plane back from its polygon's triangles.
@@ -964,28 +1044,41 @@ def volume_facets(planes, ladder=False):
         facets.append((pi, polygon))
     if ladder:
         facets.sort(key=lambda f: f[0] == 0)
-    return [f for _, f in facets], missing
+    return facets, missing
 
 
 def run_scene(context, path):
+    """The model's scene text, read (the .o3d lives in a directory of its own
+    that goes away with the read, whatever happens), and the CLI's notes."""
     from . import cli_path
     cli = cli_path(context)
     if not os.path.isfile(cli):
         raise ImportFailed(f"opennova-3di not found at {cli}")
-    tmp = tempfile.mkdtemp(prefix="opennova3di_")
-    o3d = os.path.join(tmp, "scene.o3d")
-    result = subprocess.run([cli, "scene", path, "-o", o3d], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise ImportFailed((result.stderr or result.stdout).strip()[:2000])
+    with tempfile.TemporaryDirectory(prefix="opennova3di_") as tmp:
+        o3d = os.path.join(tmp, "scene.o3d")
+        # The CLI prints paths, which may hold any character: read its output
+        # as UTF-8 whatever this Python's locale is.
+        result = subprocess.run([cli, "scene", path, "-o", o3d], capture_output=True, text=True, encoding="utf-8",
+                                errors="replace")
+        if result.returncode != 0:
+            raise ImportFailed((result.stderr + result.stdout).strip()[:2000] or
+                               f"opennova-3di scene failed (exit {result.returncode})")
+        sc = read_o3d(o3d)
     notes = [line.split("scene drops ", 1)[1] for line in result.stderr.splitlines() if "scene drops " in line]
-    return o3d, notes
+    return sc, notes
 
 
 def import_file(context, path, op=None):
     """Import one .3di into the current scene under a model root of its own;
-    returns the model root and the notes."""
-    o3d, notes = run_scene(context, path)
-    sc = read_o3d(o3d)
+    returns the model root and the notes. A file that fails leaves nothing of
+    itself in the scene."""
+    sc, notes = run_scene(context, path)
     builder = Builder(context, sc, path, op)
-    builder.build(context.scene)
+    try:
+        builder.build(context.scene)
+    except Exception as e:
+        builder.discard()
+        if isinstance(e, export.ExportError):
+            raise ImportFailed(str(e)) from e
+        raise
     return builder.model, ["not carried: " + n for n in notes] + builder.notes

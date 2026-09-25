@@ -569,14 +569,19 @@ class O3D_OT_import(bpy.types.Operator, ImportHelper):
         paths = [os.path.join(self.directory, f.name) for f in self.files if f.name] or [self.filepath]
         models = []
         for path in paths:
+            # One file that fails leaves nothing of itself behind and does not
+            # stop the others.
             try:
                 model, notes = importer.import_file(context, path, self)
-            except importer.ImportFailed as e:
-                self.report({"ERROR"}, f"{os.path.basename(path)}: {e}")
-                return {"CANCELLED"}
+            except Exception as e:  # noqa: BLE001 (reported per file)
+                kind = "" if isinstance(e, importer.ImportFailed) else f"{type(e).__name__}: "
+                self.report({"ERROR"}, f"{os.path.basename(path)}: {kind}{e}")
+                continue
             for note in notes:
                 self.report({"WARNING"}, f"{os.path.basename(path)}: {note}")
             models.append(model)
+        if not models:
+            return {"CANCELLED"}
         # Models imported together that the game draws together: a skinned
         # model whose bones are another's parts (arms on a first-person gun).
         pairs = assembly.pair_imported(context, models)

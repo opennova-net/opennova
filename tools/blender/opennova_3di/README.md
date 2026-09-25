@@ -33,11 +33,12 @@ them the way the game does (the stored name first, then the same name with
 `.tga`, `.dds`, `.mdt`, `.pcx`, `.png`, `.jpg` or `.bmp`, any case, so a
 `.tga` reference finds the `.dds` retail ships). Each model comes into the
 current scene under a model root of its own, laid out by the naming
-convention below, with LOD 1 and up hidden. Each model exports again as it
-stands. Blender cannot open PCX or
-archive-compressed textures; those references stay on the material with a
-warning. Imported texture entries have Write TGA off, so an export never
-writes a `.tga` over the texture the game already uses.
+convention below, with LOD 1 and up hidden, and its output path named after
+the imported file. Each model exports again as it stands. A file that cannot
+be read is reported and skipped; the others still import. Blender cannot
+open PCX or archive-compressed textures; those references stay on the
+material with a warning. Imported texture entries have Write TGA off, so an
+export never writes a `.tga` over the texture the game already uses.
 
 Import creates an editable authoring scene, and export never relies on
 anything import set up: collision volume planes, seam flags, tangents,
@@ -45,10 +46,12 @@ bounds, glass, emissive and the alpha pass are recomputed from the scene on
 every export, by the rules the retired OED exporter used. Export rebuilds
 bullet faces from the selected render LOD (face surfaces and flags come from
 the materials, voted on import), regenerates skinned hit spheres and
-normalizes skin weights, so retail face normals, zero-length vertex normals
-and seam flags can change. Each collision volume imports as one polygon per
-retail plane, so export reads the same planes back. Use
-`opennova-3di compare` to inspect a rebuilt model before using it in game.
+normalizes skin weights, so retail face normals, zero-length or broken (NaN)
+vertex normals and seam flags can change. Each collision volume imports as
+one polygon per retail plane, so export reads the same planes back; a flat
+ladder imports as the one polygon it is. The warnings list what the scene
+cannot carry. Use `opennova-3di compare` to inspect a rebuilt model before
+using it in game.
 
 ## Laying out a scene
 
@@ -252,7 +255,8 @@ animation.
 A `-colonly` mesh is a convex volume: the game keeps the solid all its face
 planes bound, so a concave or twisted mesh loses whatever sticks out. Export
 warns with the volume's name and how far it reaches outside; split such a
-mesh into convex pieces. A ladder (`CL`) faces the plane of its last face.
+mesh into convex pieces. A ladder (`CL`) faces the plane of its last face; a
+flat ladder is a single polygon facing the way the ladder does.
 
 Inspect any `.3di` (retail ones too) with `opennova-3di info <file> --verbose`;
 `opennova-3di compare <a.3di> <b.3di>` tells whether two files hold the same
