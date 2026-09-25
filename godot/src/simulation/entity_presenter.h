@@ -325,6 +325,13 @@ public:
 	void draw_tracer_rows(const PackedFloat32Array &p_rows);
 	void present_destruction_drained(const Ref<DestructionDrain> &p_events,
 			const TypedArray<DeathPieceRow> &p_pieces);
+	// The frame's death-piece draws (the occlusion frame's collect,
+	// Simulation::death_piece_draws); the typed form is the tests' data leg.
+	void present_death_piece_draws_native(
+			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	void present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws);
+	// A death-piece slot's model (null when none) — the draw leg's read seam.
+	ObjectModel *death_piece_model(int p_slot) const;
 	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
 	void present_vehicle_trail_visuals(const TypedArray<VehicleTrailVisualRow> &p_visuals);
 	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);

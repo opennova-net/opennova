@@ -197,6 +197,10 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::draw_tracer_rows);
 	ClassDB::bind_method(D_METHOD("present_destruction_drained", "events", "pieces"),
 			&EntityPresenter::present_destruction_drained);
+	ClassDB::bind_method(D_METHOD("present_death_piece_draws", "draws"),
+			&EntityPresenter::present_death_piece_draws);
+	ClassDB::bind_method(D_METHOD("death_piece_model", "slot"),
+			&EntityPresenter::death_piece_model);
 	ClassDB::bind_method(D_METHOD("present_throwable_visuals", "visuals"),
 			&EntityPresenter::present_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("present_vehicle_trail_visuals", "visuals"),
@@ -461,6 +465,20 @@ void EntityPresenter::present_destruction_drained(const Ref<DestructionDrain> &p
 	const opennova::world::DestructionEvents none;
 	destruction_->present_drained(p_events.is_valid() ? p_events->value() : none,
 			unwrap_rows<opennova::world::DeathPieceRow, DeathPieceRow>(p_pieces));
+}
+
+void EntityPresenter::present_death_piece_draws_native(
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	destruction_->apply_piece_draws(p_draws);
+}
+
+void EntityPresenter::present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws) {
+	destruction_->apply_piece_draws(
+			unwrap_rows<opennova::world::DeathPieceDraw, DeathPieceDraw>(p_draws));
+}
+
+ObjectModel *EntityPresenter::death_piece_model(int p_slot) const {
+	return destruction_->piece_model(p_slot);
 }
 
 void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals) {

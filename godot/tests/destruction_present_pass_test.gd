@@ -210,6 +210,65 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 	presenter.teardown()
 
 
+# The death-piece draw: a piece row builds its own model of the wreck's piece
+# graphic (huskfinal first, the fixture buggy authors only its husk), hidden
+# until the frame draws it; the draw shows ONE section with every other section
+# collapsed, placed so that section's COBJ centre lands on the piece position,
+# at the drawn level; a frame that does not draw the piece hides it again
+# (retail Entity_BuildBoneTransformMatrices_0 @ 0x57b690, the matrix
+# EulerScale(pose) * T(-centre) @ 0x57b6f6..0x57b759, the collapse
+# @ 0x57b7d4..0x57b7e7).
+func test_piece_draw_shows_one_section_at_the_piece_position() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
+			_item_db, anchors, fx)
+	var pos := Vector3(12, 3, -7)
+	presenter.present_destruction_drained(null, [DeathPieceRow.make(9, 40, 1, pos, false,
+			BUGGY_ITEM_ID, 1)])
+	var model := presenter.death_piece_model(9) as ObjectModel
+	assert_not_null(model, 'the piece row builds its piece model')
+	if model == null:
+		presenter.teardown()
+		return
+	assert_false(model.visible, 'an undrawn piece is hidden')
+	var parts: Dictionary = model.get_render_part_nodes()
+	assert_gt(parts.size(), 1, 'the fixture piece model has several sections')
+	var hidden_mask := 0
+	for section in parts:
+		if int(section) != 1:
+			hidden_mask |= 1 << int(section)
+	# Section 1's COBJ centre in the model's own axes (x, y, z).
+	var pivot := Vector3(1.5, -0.75, 2.0)
+	presenter.present_death_piece_draws([DeathPieceDraw.make(9, 40, 0, hidden_mask, 1,
+			pivot, pos, 30.0, -10.0, 5.0)])
+	assert_true(model.visible, 'the drawn piece shows')
+	assert_true((parts[1] as Node3D).visible, 'its own section draws')
+	for section in parts:
+		if int(section) != 1:
+			assert_false((parts[section] as Node3D).visible,
+					'every other section collapses (%d)' % int(section))
+	# The model node's local axes are the model's (y, z, x).
+	assert_almost_eq(model.global_transform * Vector3(pivot.y, pivot.z, pivot.x), pos,
+			POSITION_EPS, 'the section centre lands on the piece position')
+	assert_eq(model.get_active_lod(), 0)
+	# A stale generation never drives the slot, and a frame without a draw hides it.
+	presenter.present_death_piece_draws([DeathPieceDraw.make(9, 39, 0, hidden_mask, 1,
+			pivot, pos)])
+	assert_false(model.visible, 'a stale-generation row is not this piece')
+	presenter.present_death_piece_draws([DeathPieceDraw.make(9, 40, 0, hidden_mask, 1,
+			pivot, pos)])
+	assert_true(model.visible)
+	presenter.present_death_piece_draws([])
+	assert_false(model.visible, 'a frame that does not draw the piece hides it')
+	# The slot retiring frees its model.
+	presenter.present_destruction_drained(null, [])
+	assert_null(presenter.death_piece_model(9), 'a retired slot drops its model')
+	presenter.teardown()
+
+
 func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() -> void:
 	var anchors := ItemEffectDirector.new()
 	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))

@@ -75,6 +75,11 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// The entity collectors' render gates over the non-building entities the
 	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
 	// collect_visible_entities_for_terrain @ 0x5c8c60]
+	// The death pieces ride the same collect, after the scar caches (retail
+	// collect_visible_minimap_slots @ 0x57b560, called from
+	// Terrain_CollectVisibleEntities @ 0x5c91bc).
+	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam,
+			present_.death_piece_draws);
 	present_.occlusion_culled_bms.clear();
 	// The BySide walks update the MODEL foliage tiles around the collected
 	// person entities whose MoveOrder carries a stance bit (0x100 prone /

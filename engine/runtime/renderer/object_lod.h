@@ -153,6 +153,28 @@ inline bool held_weapon_projection_culled(int32_t projected_radius_q16) {
 //  Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c90f1]
 float object_lod_frame_scale(int detail_level, float viewport_width);
 
+// The death-piece draw's own radius multiplier: the detail profile's quality
+// term alone (detail * 0.33 + 0.34, no width normalization and no detail-3
+// substitution), stored as a float.
+// [orig: update_terrain_lod_levels @ 0x57b831..0x57b84a — fild dword_24D2048,
+//  fmul flt_7C59B4, fadd flt_7D76CC, fstp]
+float death_piece_lod_scale(int detail_level);
+
+// The death-piece draw's level chain over its model's RLOD table: the scaled
+// radius (truncated) at or under 0.75 px draws nothing (-1); otherwise level 0
+// above the first threshold or for a one-level model, level 1 above the
+// second while the model has two levels, level 2 above the third while it
+// has three, else level 3; a level past the LOD count clamps to the last
+// level (to 0 for a model without levels). The returned level can equal the
+// LOD count (a three-level model under its third threshold): that level's
+// mesh slot is empty and the section draw returns without drawing.
+// [orig: update_terrain_lod_levels @ 0x57b86f..0x57b8ca — the floor
+//  `cmp eax,0C000h; jle` @ 0x57b87b, the chain @ 0x57b882..0x57b8b8, the clamp
+//  @ 0x57b8ba..0x57b8ca; the empty slot `test ebx,ebx; jz` in
+//  Entity_BuildBoneTransformMatrices_0 @ 0x57b6bc]
+int death_piece_lod_level(int32_t projected_radius_q16, float lod_scale,
+                          const std::vector<int32_t> &thresholds_q16);
+
 // The viewport's focal length in pixels: half the viewport WIDTH over the
 // tangent of half the HORIZONTAL field of view, rounded half up.
 // [orig: Viewport_BuildProjectionMatrix @ 0x410fb0 — (fov >> 1) * dbl_7C3620

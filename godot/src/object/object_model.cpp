@@ -785,6 +785,15 @@ void ObjectModel::set_authored_lod_enabled(bool p_enabled) {
 	authored_lod_models_.erase(this);
 }
 
+void ObjectModel::set_presenter_driven_lod(bool p_enabled) {
+	presenter_driven_lod_ = p_enabled;
+	if (p_enabled) {
+		authored_lod_models_.erase(this);
+	} else if (authored_lod_enabled_ && !authored_lod_thresholds_q16_.empty()) {
+		authored_lod_models_.insert(this);
+	}
+}
+
 void ObjectModel::set_authored_occluders_enabled(bool p_enabled) {
 	if (authored_occluders_enabled_ == p_enabled) {
 		return;

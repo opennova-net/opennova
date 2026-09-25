@@ -35,7 +35,7 @@ int visual_item_id_for_runtime_type(int item_id, const opennova::def::DefItemsFi
 // count, per-section centers, section 0's z extents).
 struct CollisionHuskPieceInfo {
 	int32_t sections = 0;
-	std::vector<world::Vec3> centers;
+	world::DeathPieceModel model;
 	float rest_min_z = 0.0f;
 	float rest_max_z = 0.0f;
 };

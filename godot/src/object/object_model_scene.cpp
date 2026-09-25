@@ -204,7 +204,8 @@ void ObjectModel::rebuild_scene() {
 	apply_level_surfaces();
 
 	refresh_active_lod_rest_transforms();
-	if (authored_lod_enabled_ && !authored_lod_thresholds_q16_.empty()) {
+	if (authored_lod_enabled_ && !presenter_driven_lod_ &&
+			!authored_lod_thresholds_q16_.empty()) {
 		authored_lod_models_.insert(this);
 	}
 

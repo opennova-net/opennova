@@ -108,6 +108,33 @@ enum class ItemDeathClass : uint8_t {
 // (whole-string, case-insensitive; a miss and the empty tag are the null row).
 ItemDeathClass item_death_class_from_tag(const char *ai_function);
 
+// The render facts of a death piece's model, host-fed from the loaded .3di
+// (the ItemDeathTraits carrier precedent): the per-LOD RLOD thresholds and
+// section counts the piece draw walks, the COBJ section centres every piece
+// pivots on, and the model's GHDR bound radius.
+struct DeathPieceModel {
+    // Level i's RLOD pixel threshold in Q16.16 (model+0x40+4*i,
+    // renderer::rlod_threshold_q16_from_rmdl); one entry per LOD, so the size
+    // is the model's LOD count (model+0x10).
+    std::vector<int32_t> lod_threshold_q16;
+    // Level i's section count (the LOD mesh's +0x34, its render-object
+    // count): the bone-matrix count of that level's draw.
+    std::vector<int32_t> lod_section_count;
+    // Section i's centre: the 108-B runtime COBJ row's +0x38..+0x40 (the
+    // model+0xB0 collision block's +0x6C array, Q16.16 model axes) — the
+    // spawn offset and the draw pivot [orig: Entity_SpawnDeathPieces
+    // @ 0x4938b2..0x4938cc; Entity_BuildBoneTransformMatrices_0
+    // @ 0x57b6f6..0x57b70b].
+    std::vector<std::array<int32_t, 3>> section_origin_q16;
+    // The model's bound radius (model+0x14, GHDR's Q16.16 max radius): the
+    // death flash spawns at twice it and every piece projects with it
+    // [orig: Entity_SpawnDeathPieces @ 0x4934f4..0x493506 and
+    // @ 0x4936a7..0x4936ae (piece+0x84)].
+    int32_t radius_q16 = 0;
+
+    bool loaded() const { return !lod_threshold_q16.empty(); }
+};
+
 struct RegionalItemSound {
     std::string name; // empty when the loaded banks do not resolve this slot
     int32_t base_ticks = 0;
@@ -167,15 +194,10 @@ struct ItemDeathTraits {
     // The piece model is huskFINAL first [orig: @ 0x4934af huskFinalModel ?:
     // huskModel], unlike the collision husk pick (@ 0x538720 husk first).
     int32_t husk_section_count = 0;
-    // The piece model's bound radius (units) — the death-flash light spawns
-    // at 2x this [orig: Entity_SpawnDeathPieces @ 0x49351a reads
-    // renderObj[5] off the huskFinal ?: husk pick]. 0 = model not loaded.
-    float husk_piece_bound_radius = 0.0f;
-    // Per-section centers of the piece model (model-local, mission axes) —
-    // baked into the piece spawn position through the complete authored pose
-    // Rz(90-yaw) * Ry(-pitch) * Rx(roll)
-    // [orig: the section-row center @ 0x4938bf-0x493900].
-    std::vector<Vec3> husk_section_centers;
+    // The piece model (the LOADED huskFinal model, else the husk model) as the
+    // piece spawn and the piece draw read it [orig: Entity_SpawnDeathPieces
+    // @ 0x4934af..0x4934c3 huskFinalModel ?: huskModel]. Empty = no model.
+    DeathPieceModel piece_model;
     // Section 0's z extents (units) — the dead-wreck ground rest offset
     // [orig: ground -= |sec0 z min| upright / += |sec0 z max| inverted
     // @ 0x461e23-0x461e4b / @ 0x494034-0x49405e].
@@ -460,8 +482,20 @@ struct DeathPiece {
     float spin_a = 0.0f;       // [piece+40] spin rates, degrees per tick
     float spin_b = 0.0f;       // [piece+44] (max*(rand%100)/100 clamped >= min
                                // [orig: sub @ 0x57b940])
-    float heading = 0.0f;      // integrated orientation (degrees; += spin/tick
-    float pitch = 0.0f;        //  [orig: Yaw/Pitch += spin @ 0x492db9/0x492dc2])
+    // The piece orientation, degrees: the wrecked entity's live heading
+    // (entity+0x10, the BAM heading), pitch and roll at the spawn, then heading
+    // and pitch spin per tick; roll keeps its spawn value
+    // [orig: the pose copy @ 0x4936be..0x4936de; Yaw/Pitch += spin
+    // @ 0x492db9/0x492dc2].
+    float heading = 0.0f;      // [piece+16]
+    float pitch = 0.0f;        // [piece+20]
+    float roll = 0.0f;         // [piece+24]
+    // Every piece-model section except this piece's own: the sections its
+    // draw collapses [piece+124, orig: @ 0x493897..0x4938b0].
+    uint32_t hidden_mask = 0;
+    // The piece model's bound radius, the projection radius of its draw
+    // [piece+132, orig: @ 0x4936a7..0x4936ae].
+    int32_t radius_q16 = 0;
     int32_t bounces_left = 0;  // [piece+117] — decremented per ground contact
     uint32_t flags = 0;        // debris-type flags byte [piece+119]
     bool settled = false;      // exhausted with flags bit0: persistent ground debris

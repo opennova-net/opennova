@@ -29,6 +29,7 @@
 namespace opennova::world {
 
 class World;
+struct DeathPieceDraw;
 
 // ----------------------------------------------------------------------------
 // Occlusion model (per graphic) — the "GPM Occ" arena records.
@@ -270,6 +271,15 @@ public:
     // @ 0x5c6a3b..0x5c6ac2, scale @ 0x5c6ac8..0x5c6b52]
     static void bound_sphere_fixed(const CollisionModel &m, int32_t center_local[3],
                                    int32_t &radius, int32_t scale_q16);
+    // The frame's death-piece draws (world/death_piece_draw.h): the pool's
+    // live pieces through the collect's box, depth and viewport gates, each
+    // projecting its piece-model radius, then the level walk and the section
+    // draw. `out` is cleared first; rows keep pool order.
+    // [orig: collect_visible_minimap_slots @ 0x57b560 from
+    //  Terrain_CollectVisibleEntities @ 0x5c91bc; update_terrain_lod_levels
+    //  @ 0x57b830]
+    void collect_death_piece_draws(const World &world, const OcclusionFrameCamera &cam,
+                                   std::vector<DeathPieceDraw> &out) const;
 
     // --- frame results ---
     // Whether the building entered the visible batch this frame (distance +

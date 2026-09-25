@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
+#include <runtime/world/death_piece_draw.h> // DeathPieceDraw
 #include <runtime/world/entity.h>         // EntityHandle
 
 #include <cstdint>
@@ -92,6 +93,8 @@ struct SimulationPresentState {
 	// The MODEL foliage tier's anchors this frame: the collected (visible)
 	// person entities with a stance bit and no groundEntity, Godot space.
 	PackedVector3Array foliage_mask_anchors;
+	// The death pieces this frame draws (OcclusionWorld::collect_death_piece_draws).
+	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
 	// Reused probe scratch (cleared per frame, capacity retained).
 	std::vector<opennova::world::EntityHandle> occlusion_probe_handles;
 	// Delta baselines for the render-occlusion apply path: what the shell last

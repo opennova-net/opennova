@@ -107,6 +107,7 @@ struct DeathPieceRow {
     Vec3 pos;
     float heading = 0.0f;
     float pitch = 0.0f;
+    float roll = 0.0f;
     bool settled = false;
 };
 

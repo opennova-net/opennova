@@ -245,6 +245,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_view.cpp  # the per-tick equipped-weapon snapshot
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/death_piece_draw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_squib.cpp

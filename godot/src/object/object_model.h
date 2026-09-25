@@ -359,6 +359,7 @@ private:
 	Ref<PanmClock> panm_clock_;
 	int active_lod_ = 0;
 	bool authored_lod_enabled_ = false;
+	bool presenter_driven_lod_ = false;
     bool exact_owner_lod_ = false;
 	bool attachment_pixel_cull_ = false;
 	int32_t attachment_pixel_cull_radius_q16_ = 0;
@@ -901,6 +902,10 @@ public:
 	void set_active_lod(int p_lod_index);
 	int get_active_lod() const { return active_lod_; }
 	void set_authored_lod_enabled(bool p_enabled);
+	// A model whose level its presenter selects every frame through
+	// set_active_lod (the death pieces' own level walk): it keeps every
+	// retained level but never joins the shared RLOD walk.
+	void set_presenter_driven_lod(bool p_enabled);
 	// Attachment RLOD: an attached model (the third-person held weapon, the
 	// NVG/binocular items, a mounted child) never runs its own threshold
 	// walk; it draws at its owner's selected level clamped to its own LOD

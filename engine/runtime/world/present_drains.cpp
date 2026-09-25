@@ -244,6 +244,7 @@ void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces)
 		d.pos = p.pos;
 		d.heading = p.heading;
 		d.pitch = p.pitch;
+		d.roll = p.roll;
 		d.settled = p.settled;
 		r_pieces.push_back(std::move(d));
 	}

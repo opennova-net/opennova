@@ -1145,9 +1145,10 @@ void test_death_piece_rng_is_world_local() {
     }
 }
 
-// Retail transforms each section center through the complete authored Euler
-// pose [orig: @0x4938bf-0x493900].  As above, the three +90 degree rotations
-// make (x,y,z) -> (z,-y,x), witnessing both signs and multiplication order.
+// Retail transforms each section's COBJ centre (the 108-B runtime row's
+// +0x38..+0x40) through the wreck's orientation matrix [orig: @0x4938b2..
+// 0x493900]. As above, the three +90 degree rotations make (x,y,z) ->
+// (z,-y,x), witnessing both signs and multiplication order.
 void test_death_piece_section_center() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
@@ -1165,7 +1166,8 @@ void test_death_piece_section_center() {
     const EntityHandle h = w.registry.spawn(1, seed);
     ItemDeathTraits t = barrel_traits();
     t.husk_section_count = 2; // sections 0..1 -> one piece from section 1
-    t.husk_section_centers = {Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.5f, -0.5f, 0.75f}};
+    t.piece_model.section_origin_q16 = {{0, 0, 0},
+            {fixed16(1.5), fixed16(-0.5), fixed16(0.75)}};
     w.tables.item_death_traits.set(700, t);
     Entity *e = w.registry.get(h);
     spawn_death_pieces(w, *e);
@@ -1178,6 +1180,70 @@ void test_death_piece_section_center() {
         CHECK(std::abs(p->pos.y - 6.5f) < 1.0e-4f);
         CHECK(std::abs(p->pos.z - 11.5f) < 1.0e-4f);
     }
+}
+
+// The piece row's render contract: the ONE section it shows and the mask of
+// every other LOD-0 section it collapses, the wreck's own live pose as its
+// start orientation, the piece model's bound radius as its projection radius
+// (and twice it as the flash radius), and def+0x1BC as its scale unless that
+// is zero.
+// [orig: Entity_SpawnDeathPieces @0x4934f4..0x493506 (flash), @0x4936a3..
+//  0x4936de (model, radius, pose), @0x4936f1..0x493708 (scale),
+//  @0x493889..0x4938b0 (the mask)]
+void test_death_piece_render_contract() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 701;
+    seed.health = 0;
+    seed.position = Vec3{1.0f, 2.0f, 3.0f};
+    seed.bound_radius = 2.0f;
+    seed.yaw = 30;   // mission yaw -> BAM heading 90 - 30 = 60 degrees
+    seed.pitch = -20;
+    seed.roll = 15;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    ItemDeathTraits t = barrel_traits();
+    t.husk_section_count = 4;
+    for (int s = 1; s < 4; ++s) t.husk_sub_part_types[s] = 3; // CHUNK_M: always spawns
+    t.piece_model.lod_threshold_q16 = {200 << 16, 0};
+    t.piece_model.lod_section_count = {4, 4};
+    t.piece_model.radius_q16 = fixed16(2.25);
+    t.debris_scale = 0.0f;
+    w.tables.item_death_traits.set(701, t);
+    spawn_death_pieces(w, *w.registry.get(h));
+    int seen = 0;
+    for (const DeathPiece &q : w.death_pieces.pieces) {
+        if (!q.active) continue;
+        ++seen;
+        CHECK(q.section >= 1 && q.section <= 3);
+        CHECK(q.hidden_mask == (0xFu & ~(1u << q.section)));
+        CHECK(std::abs(q.heading - 60.0f) < 1.0e-3f);
+        CHECK(std::abs(q.pitch + 20.0f) < 1.0e-3f);
+        CHECK(std::abs(q.roll - 15.0f) < 1.0e-3f);
+        CHECK(q.radius_q16 == fixed16(2.25));
+        CHECK(q.render_scale == 1.0f);
+    }
+    CHECK(seen == 3);
+    bool flashed = false;
+    for (const DeathLightEvent &light : w.out.destruction.death_lights)
+        flashed = flashed || std::abs(light.radius - 4.5f) < 1.0e-5f;
+    CHECK(flashed);
+    // A nonzero def scale rides the piece, a negative one included.
+    t.debris_scale = -0.5f;
+    w.tables.item_death_traits.set(701, t);
+    w.registry.get(h)->engine_flags &= ~kEntityFlagHusk;
+    w.death_pieces.reset();
+    spawn_death_pieces(w, *w.registry.get(h));
+    int scaled = 0;
+    for (const DeathPiece &q : w.death_pieces.pieces) {
+        if (!q.active) continue;
+        ++scaled;
+        CHECK(q.render_scale == -0.5f);
+    }
+    CHECK(scaled == 3);
 }
 
 // Underwater pieces: the horizontal halves per tick and the fall pins at
@@ -4057,6 +4123,7 @@ int main() {
     test_death_piece_launch_and_spin();
     test_death_piece_rng_is_world_local();
     test_death_piece_section_center();
+    test_death_piece_render_contract();
     test_death_piece_water();
     test_death_piece_ground_scorch_routing();
     test_bullet_gates();

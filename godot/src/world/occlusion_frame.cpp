@@ -242,6 +242,11 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 			}
 		}
 	}
+	// The frame's death-piece draws land on the destruction pass's piece
+	// models (the collect rides the same native frame).
+	if (EntityPresenter *presenter_for_pieces = entities()) {
+		presenter_for_pieces->present_death_piece_draws_native(s->death_piece_draws());
+	}
 	if (timing) {
 		cull_apply_us = ticks_usec() - cull_apply_start;
 	}

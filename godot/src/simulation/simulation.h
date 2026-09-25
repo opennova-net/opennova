@@ -1954,6 +1954,9 @@ public:
 	// The live death-piece pool — each piece renders as its single husk-model
 	// section. NOT ClassDB-bound. (engine: runtime/world/destruction.cpp)
 	void fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const;
+	// The last occlusion frame's death-piece draws (run_occlusion_frame's
+	// collect; world/death_piece_draw.h).
+	const std::vector<opennova::world::DeathPieceDraw> &death_piece_draws() const;
 	// Whether the collision world holds an instance for the placed entity
 	// `bms_id` — the one destruction-gate fact the GUT collision cases read
 	// (the item-trait banks themselves are pinned by the

@@ -21,6 +21,14 @@ namespace opennova::world {
 // the two differ on purpose.
 std::string husk_render_graphic(const std::string &husk, const std::string &huskfinal);
 
+// The death-piece MODEL graphic: the def's `huskfinal` first, `husk` when no
+// `huskfinal` is authored, "" when neither is — the piece spawn's pick
+// [orig: Entity_SpawnDeathPieces @ 0x4934af..0x4934c3 huskFinalModel ?:
+// huskModel, the same pick @ 0x493695..0x4936a3 stored at piece+0]. The
+// presenter falls back to `husk` when the `huskfinal` model does not load,
+// as the pointer pick does.
+std::string death_piece_graphic(const std::string &husk, const std::string &huskfinal);
+
 // Authored destruction rows retain the mission-present value identity: file
 // BMS id plus packed (kind, index), with the origin as the zero-id leg.
 // Synthetic runtime entities instead use their packed wire handle because

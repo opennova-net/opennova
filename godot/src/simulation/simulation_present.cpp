@@ -367,6 +367,10 @@ void Simulation::fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &
 	opennova::world::fill_death_pieces(kernel_->world, r_pieces);
 }
 
+const std::vector<opennova::world::DeathPieceDraw> &Simulation::death_piece_draws() const {
+	return present_.death_piece_draws;
+}
+
 // Whether the collision world holds an instance for the placed entity: the
 // one destruction-gate fact the GUT collision cases read by bms_id.
 bool Simulation::has_collision_instance(int p_bms_id) const {

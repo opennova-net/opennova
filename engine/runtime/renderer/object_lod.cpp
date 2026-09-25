@@ -162,6 +162,45 @@ float object_lod_frame_scale(int detail_level, float viewport_width) {
                             static_cast<double>(kObjectLodReferenceWidth));
 }
 
+// [orig: update_terrain_lod_levels @ 0x57b831..0x57b84a: the same two .rdata
+//  floats as the frame scale's quality term, one float store into var_4]
+float death_piece_lod_scale(int detail_level) {
+  return static_cast<float>(static_cast<double>(detail_level) *
+                                static_cast<double>(kObjectLodDetailQualitySlope) +
+                            static_cast<double>(kObjectLodDetailQualityBias));
+}
+
+// [orig: update_terrain_lod_levels @ 0x57b86f..0x57b8ca: fild the recorded
+//  radius, fmul the float scale, _ftol2_sse; model+0x10 is the level count,
+//  model+0x40/+0x44/+0x48 the first three thresholds]
+int death_piece_lod_level(int32_t projected_radius_q16, float lod_scale,
+                          const std::vector<int32_t> &thresholds_q16) {
+  const double scaled = static_cast<double>(projected_radius_q16) *
+                        static_cast<double>(lod_scale);
+  const int32_t radius = static_cast<int32_t>(std::clamp(
+      scaled, static_cast<double>(std::numeric_limits<int32_t>::min()),
+      static_cast<double>(std::numeric_limits<int32_t>::max())));
+  if (radius <= kObjectLodSubPixelCullQ16) {
+    return -1;
+  }
+  const int count = static_cast<int>(thresholds_q16.size());
+  const auto threshold = [&](int level) {
+    return level < count ? thresholds_q16[static_cast<std::size_t>(level)] : 0;
+  };
+  int level = 3;
+  if (radius > threshold(0) || count == 1) {
+    level = 0;
+  } else if (radius > threshold(1) && count >= 2) {
+    level = 1;
+  } else if (radius > threshold(2) && count >= 3) {
+    level = 2;
+  }
+  if (level > count) {
+    level = count > 0 ? count - 1 : 0;
+  }
+  return level;
+}
+
 // [orig: Viewport_BuildProjectionMatrix @ 0x410fe1..0x410ff7 — x87 keeps the
 //  quotient wide; _ftol2_sse truncates the +0.5 sum]
 int32_t object_lod_focal_pixels(float viewport_width, double tan_half_horizontal) {
