@@ -4,8 +4,9 @@
 # line, whitespace-separated tokens, a name field bare or "quoted", and `#` a
 # comment at the start of a line or after whitespace, never inside quotes
 # (retail shader tags such as VS_PHONGT#UV hold one). Both carry MISSION axes
-# (x forward, y left, z up); the frame helpers here map them to Blender's and
-# read a model's objects in its root's frame, for every export and import.
+# (x forward, y left, z up); the axis helpers here map them to Blender's and
+# back, and ModelSpace reads a model's objects in its root's frame for the
+# model and animation exports.
 
 import math
 import os
