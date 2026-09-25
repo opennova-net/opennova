@@ -209,9 +209,10 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 			owned[p].push_back({cursor, s >= ro.num_strips});
 	}
 	if (cursor != lod.strip_count) w.note("lod " + std::to_string(li) + " strips no ROBJ owns");
-	if (skinned) {
+	if (skinned && lod.render_object_count > 0) {
 		// The retail skinned layout keeps every strip on the root ROBJ; the
 		// scene authors them on the mesh part(s), which the builder moves back.
+		// A LOD with no part owns no strip (retail ships empty LODs).
 		std::vector<int> mesh = skinned_mesh_parts(lod);
 		std::vector<std::pair<size_t, bool>> all;
 		for (auto &o : owned) {

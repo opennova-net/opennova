@@ -104,6 +104,10 @@ set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+# build -> scene -> build over small scenes, and the records build refuses.
+add_executable(threedi_o3d_build_test threedi/o3d_build_test.cpp)
+target_link_libraries(threedi_o3d_build_test PRIVATE opennova_3di_commands)
+add_test(NAME threedi_o3d_build COMMAND threedi_o3d_build_test ${CMAKE_CURRENT_BINARY_DIR})
 
 # Retail clip sets through anim scene -> anim build -> anim compare (OPENNOVA_JO_ASSETS).
 add_executable(anim_o3a_retail_roundtrip_test anim/o3a_retail_roundtrip_test.cpp)
