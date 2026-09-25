@@ -223,10 +223,10 @@ the same text transport, the same add-on.
   a section follows the names (OED kept its scene order, which a Blender
   scene lacks); retail bullet faces whose corners collapse on the 8.8 grid
   are dropped (a mesh cannot hold them).
-- `formats/threedi/threedi_build.cpp` and
-  `base/resource_index/texture_candidates.cpp` join `citation_allowlist_engine`
-  (construction code with no retail counterpart; our loose-folder resolver
-  policy).
+- `base/resource_index/texture_candidates.cpp` joins `citation_allowlist_engine`
+  (our loose-folder resolver policy, moved down from the Godot resolver so the
+  CLI shares it). `threedi_build.cpp` and `bad_build.cpp` carry the `[orig:]`
+  cites of the rules they port, so they need no entry.
 
 ## Verification
 
