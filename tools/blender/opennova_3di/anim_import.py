@@ -1,9 +1,10 @@
 # opennova-3di anim scene -> .o3a -> Blender Actions on a model's rig.
 #
 # The inverse of animation.py: every clip becomes one Action on its own NLA
-# track, keyed on the rig's BN## bones, and the table becomes the model root's
-# rows. Nothing is stashed so that a re-export reproduces the source: the bind,
-# the bone positions, the capsule extents and the terminal duplicate key are the
+# track, keyed on the rig's BN## bones (replacing a clip the rig already holds
+# under its name), and the table becomes the model root's rows. Nothing is
+# stashed so that a re-export reproduces the source: the bind, the bone
+# positions, the capsule extents and the terminal duplicate key are the
 # engine's derivations, and what the scene form cannot carry is reported.
 #
 # The rig's rest pose is the bind. The runtime binds every clip of a table to
@@ -652,16 +653,30 @@ class Loader:
 
         self.ensure_rm(arm)
         data = arm.animation_data or arm.animation_data_create()
+        # A clip the rig already holds under a clip's name (the set imported
+        # again) is replaced in its place: two clips of one name would write
+        # one .bad, and the export refuses them. The old one steps aside until
+        # the import has succeeded.
+        held = {}
+        for track in data.nla_tracks:
+            for strip in track.strips:
+                if strip.action is not None:
+                    held.setdefault(clean_name(strip.action.name).lower(), []).append((strip.action, track, strip))
+        replaced = []
         made = {}
         for clip in clips:
+            olds = held.get(clip["name"].lower(), [])
+            for old in {a for a, _, _ in olds}:
+                self.set_aside(old)
             action, slot = self.action_for(clip, arm, bones, rest)
             made[clip["name"].lower()] = action
-            track = data.nla_tracks.new()
+            track = data.nla_tracks.new(prev=olds[0][1] if olds else None)
             self.undo.append(lambda track=track: data.nla_tracks.remove(track))
             track.name = clip["name"]
             strip = track.strips.new(clip["name"], 0, action)
             if slot is not None and strip.action_slot is None:
                 strip.action_slot = slot
+            replaced += [(old, old_track, old_strip, action) for old, old_track, old_strip in olds]
 
         # The table: its rows in file order, each variant an Action. A set with
         # no table (a lone .bad) leaves the model's rows as they are.
@@ -669,20 +684,46 @@ class Loader:
         if not self.set["rows"]:
             self.note("the set carries no table, so the model's rows stay; add the clip to a row "
                       "for the game to play it")
-            return f"{len(clips)} clips on {arm.name}", self.notes
-        props.rows.clear()
-        if self.set["adm"]:
-            props.adm_path = f"//{self.set['adm']}"
-        for key, variants in self.set["rows"]:
-            row = props.rows.add()
-            row.key = key
-            for variant in variants:
-                action = made.get(clip_stem(variant).lower())
-                if action is None:
-                    self.note(f"the row '{key}' names '{variant}', which the set does not hold")
-                    continue
-                row.variants.add().action = action
+        else:
+            props.rows.clear()
+            if self.set["adm"]:
+                props.adm_path = f"//{self.set['adm']}"
+            for key, variants in self.set["rows"]:
+                row = props.rows.add()
+                row.key = key
+                for variant in variants:
+                    action = made.get(clip_stem(variant).lower())
+                    if action is None:
+                        self.note(f"the row '{key}' names '{variant}', which the set does not hold")
+                        continue
+                    row.variants.add().action = action
+        self.retire(data, replaced)
         return f"{len(clips)} clips on {arm.name}", self.notes
+
+    def set_aside(self, action):
+        """A clip the set replaces, renamed out of the way while its successor
+        takes the name (put back if the import fails)."""
+        name = action.name
+        action.name = f"{name} (replaced)"
+        self.undo.append(lambda: setattr(action, "name", name))
+
+    def retire(self, data, replaced):
+        """The replaced clips gone, once the import has succeeded: their strips
+        (and a track left empty), then every use of each (a row of another
+        model's table, a lone .bad's row here) moved to its successor."""
+        for _, track, strip, _ in replaced:
+            track.strips.remove(strip)
+            if len(track.strips) == 0:
+                data.nla_tracks.remove(track)
+        gone = {}
+        for old, _, _, new in replaced:
+            gone.setdefault(old, new)
+        for old, new in gone.items():
+            old.user_remap(new)
+            bpy.data.actions.remove(old)
+        if gone:
+            names = ", ".join(sorted({new.name for new in gone.values()}))
+            self.note(f"the rig held clips of this set's names ({names}); the set's replace them")
 
 
 def drop_follow(ob, follow):

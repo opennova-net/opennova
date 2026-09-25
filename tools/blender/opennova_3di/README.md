@@ -241,7 +241,9 @@ beside a first-person gun). **File > Import > NovaLogic Animations** reads a
   `stgr_RST` come back with more keys and the same poses), and keys past the
   clip's own length (`M60_1i`), which the game never plays, are left out. The
   import lists these in its warnings, and a failed import leaves the scene as
-  it found it.
+  it found it. A clip the rig already holds under the name of one being
+  imported (a set imported again) is replaced in its place in the set, and the
+  table's rows follow the new one.
 
 **A first-person weapon** animates its own parts rather than bones, so its clips
 get an armature named `!Rig` whose bones mirror them; import builds it. Each

@@ -125,10 +125,11 @@ A rig's clips are a set of their own (`docs/anim/o3a-scene-format.md`), laid out
 on the model the rig belongs to:
 
 - **A clip is an Action** on the rig armature's NLA tracks, one strip per track,
-  in track order. Its name is the `.bad` file stem. Its own properties carry the
-  clip's rate, its loop and translation flags, the unwitnessed flag bit 3, and a
-  length longer than the Action's own when it has one, whose extra frames hold
-  the Action's last pose.
+  in track order. Its name is the `.bad` file stem, one clip to a name (import
+  replaces a clip the rig already holds under an imported clip's name). Its own
+  properties carry the clip's rate, its loop and translation flags, the
+  unwitnessed flag bit 3, and a length longer than the Action's own when it has
+  one, whose extra frames hold the Action's last pose.
 - **The table** is the rows on the model root: an `anim_<name>` slot and its clip
   ring, in the order the `.adm` stores. The engine serves a row from its LAST
   variant back [orig: AnimMap_RegisterBoneNode @ 0x40C2D0], and the reset row
