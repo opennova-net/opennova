@@ -15,7 +15,9 @@
 # rest bone onto that bind. The heads, the lengths and the weights do not move,
 # so the model still exports the same model, and a clip then shows in Blender
 # the pose the game draws. A rig that already holds clips keeps its rest (their
-# Actions are keyed against it), and a lone `.bad` names no bind at all.
+# Actions are keyed against it), and a lone `.bad`, or a table with no reset
+# row, names no bind at all (the game then binds each clip to its own first
+# key).
 #
 # A clip is sampled the way the runtime evaluates it: one pose per frame of the
 # header's length, frames 0..frame_count, each bone's key found by walking its
@@ -155,6 +157,12 @@ def key_at(keys, durations, frame):
     return keys[-1]
 
 
+def clip_stem(variant):
+    """The clip a row variant names: the variant without a `.bad` ending (any
+    case), as formats/bad/bad_build.cpp bad_build_clip_stem reads it."""
+    return variant[:-4] if len(variant) > 4 and variant.lower().endswith(".bad") else variant
+
+
 def bone_name(index, name):
     """The rig bone for part `index`, named from the clip's own bone name: kept
     when it already reads BN## with that index, otherwise BN## and the label (a
@@ -219,22 +227,22 @@ class Loader:
 
     # --- the rig ------------------------------------------------------------
     def bind_clip(self):
-        """The clip every other is bound to: the reset row's first variant, else
-        the first row's, as the runtime's loader picks it
-        (runtime/anim/skeletal_clips.cpp load_from_adm); None for a set with no
-        table (a lone .bad)."""
-        pick = None
+        """The clip every clip of the table composes against: the reset row's
+        (a key naming slot 0, `reset`, past its first five characters; the last
+        such row) LAST variant, because each reset variant replaces the slot's
+        head instead of joining a ring [orig: AnimMap_FindSlotByName @0x40cfa0,
+        stricmp on the key + 5; AnimMap_RegisterBoneNode @0x40C2D0, slot 0
+        self-rings @0x40c38b; AnimMap_RegisterEntity @0x40bb60 pins its clip
+        @0x40bbe3], as formats/bad/bad_build.cpp bad_build_reset_stem ports it.
+        None for a table with no reset row, a reset clip the set lacks, or a set
+        with no table (a lone .bad)."""
+        reset = None
         for key, variants in self.set["rows"]:
-            if not variants:
-                continue
-            if pick is None:
-                pick = variants[0]
-            if "reset" in key.lower():
-                pick = variants[0]
-                break
-        if pick is None:
+            if len(key) > 5 and variants and key[5:].lower() == "reset":
+                reset = variants
+        if reset is None:
             return None
-        stem = os.path.splitext(pick)[0].lower()
+        stem = clip_stem(reset[-1]).lower()
         return next((c for c in self.set["clips"] if c["name"].lower() == stem), None)
 
     def name_bones(self, arm, bones, clip):
@@ -598,6 +606,9 @@ class Loader:
         if not clips:
             raise ImportFailed("the clip set holds no clip")
         bind = self.bind_clip()
+        if bind is None and self.set["rows"]:
+            self.note("the table binds no clip (no anim_reset row naming a clip of the set): the game binds "
+                      "each clip to its own first key, and the rig's rest pose stays as it is")
         self.pending = None
         arm = rig_of(self.model)
         if arm is not None:
@@ -662,8 +673,7 @@ class Loader:
             row = props.rows.add()
             row.key = key
             for variant in variants:
-                stem = os.path.splitext(variant)[0]
-                action = made.get(stem.lower())
+                action = made.get(clip_stem(variant).lower())
                 if action is None:
                     self.note(f"the row '{key}' names '{variant}', which the set does not hold")
                     continue
