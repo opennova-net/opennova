@@ -131,5 +131,15 @@ on the model the rig belongs to:
   imported from a `.3di` alone names its bones `BN##`; a clip labels them
   (`BN16 L Hand`), and their vertex groups follow.
 
-A rigid model's parts (a first-person weapon's own clips, which pair with its
-`PN##` parts by the same index rule) are not authorable in Blender yet.
+**A rigid model's clips** (a first-person weapon's own: they pair with its
+`PN##` parts by the same index rule) ride an armature named `!Rig` under the
+LOD 0 root, whose `BN##` bones mirror the parts. Each part follows its bone's
+step away from rest, and a `~PPx attach` helper carries the model's own part
+hierarchy, because the part's Blender parent is now its bone. The model export
+ignores a `!`-named armature and reads every rig at rest, so the model is the
+authored layout whatever a clip is doing.
+
+A clip set is as wide as the rig it was authored on. A first-person set belongs
+to the weapon's rig and the arms follow it by index (`mp5_1st.adm` carries 40
+channels; `ArmsG` is 37 bones and a mesh part), so exporting that set from the
+arms alone writes only the channels the arms have parts for.

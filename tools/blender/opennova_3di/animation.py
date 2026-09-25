@@ -155,7 +155,7 @@ class AnimExporter:
             key = row.key.strip()
             if not SLOT_RE.match(key):
                 raise ExportError(f"'{key}' is not an anim slot key (anim_<name>)")
-            variants = [v.action.name for v in row.variants if v.action is not None]
+            variants = [clean_name(v.action.name) for v in row.variants if v.action is not None]
             if not variants:
                 raise ExportError(f"the row '{key}' names no clip")
             out.append((key, variants))
@@ -253,7 +253,8 @@ class AnimExporter:
         # of translations one fewer. A clip may state a longer length, whose
         # extra frames hold its last key.
         frames = max(samples - 1, int(props.frames))
-        lines = [f"clip {quoted(action.name)}", f"fps {max(1, int(round(props.fps)))}",
+        lines = [f"clip {quoted(clean_name(action.name))}",
+                 f"fps {max(1, int(round(props.fps)))}",
                  f"flags 0x{flags:x}", f"frames {frames}"]
         rows = translations if props.translation else None
         if rows is not None:
@@ -295,10 +296,10 @@ class AnimExporter:
                               "track)")
         named = {v for _, variants in rows for v in variants}
         for name in sorted(named):
-            if not any(a.name == name for a in actions):
+            if not any(clean_name(a.name) == name for a in actions):
                 raise ExportError(f"{model}: the table names '{name}', which is not a clip on the rig")
         for action in actions:
-            if action.name not in named:
+            if clean_name(action.name) not in named:
                 self.note(f"the clip '{action.name}' is on no table row, so nothing plays it")
 
         # The rest pose is the bind every key is measured against.

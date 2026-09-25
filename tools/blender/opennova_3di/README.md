@@ -196,10 +196,18 @@ reads a `.adm` (or a single `.bad`) back onto the active model's rig.
   same model. Bone names come from the clips (a `.3di` carries none), and their
   vertex groups are renamed with them.
 
+**A first-person weapon** animates its own parts rather than bones, so its clips
+get an armature named `!Rig` whose bones mirror them; import builds it and each
+part follows its bone. The gun's parts then move in the viewport, and the model
+still exports as the authored layout (one collision vertex can land 4 mm away on
+the bullet-face grid). The arms follow the weapon's parts by index -- pick the
+arms model's **Bones follow** -- so a first-person set belongs to the weapon, and
+exporting it from the arms alone writes only the channels the arms have bones
+for.
+
 To reuse retail's own clips, match the retail rig: JO's people are 19 bones plus
-a mesh part, and a clip's channels pair with the model's parts by index. A rigid
-model's parts -- a first-person weapon's own clips -- cannot be animated here
-yet; `opennova-3di anim` reads and writes those sets from the command line.
+a mesh part, a first-person weapon 40 parts, and a clip's channels pair with the
+model's parts by index.
 
 `opennova-3di anim info <file> --verbose` prints a table or a clip, and
 `opennova-3di anim compare <a> <b>` tells whether two sets hold the same

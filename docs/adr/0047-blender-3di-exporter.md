@@ -246,11 +246,16 @@ the same text transport, the same add-on.
   round trip byte-identical, what compare calls the same animation, and the
   scenes build refuses) and the gated `anim_o3a_retail_roundtrip` (US01.ADM,
   mp5_1st.adm, 357_1st.adm, DT1RST.bad, DVFLEE1E.BAD).
+- The gated `anim_o3a_runtime_playback` loads a shipped set and its rebuild
+  through the RUNTIME's own loader (`runtime/anim/skeletal_clips`) and compares
+  the pose it evaluates, every key and variant of US01.ADM, mp5_1st.adm and
+  357_1st.adm across each clip's length: 1,827 poses, worst 2.4e-6 degrees.
 - Over the corpus, `build(scene(x))` is the same animation as `x` for all 477
   `.bad` clips and 81 of the 82 `.adm` tables (the exception names a clip the
   corpus does not ship). Through Blender, US01 with US01.ADM (185 rows, 128
-  clips) and CIndo01 with Cindo01.adm (134 rows, 80 clips) import, export and
-  compare the same, worst rotation 0.00013 degrees.
+  clips), CIndo01 with Cindo01.adm (134 rows, 80 clips) and the first-person
+  Mp5b_1st with mp5_1st.adm (9 rows, 5 clips on the rigid rig) import, export
+  and compare the same, worst rotation 0.00013 degrees.
 - Over the 958 JO models, `build(scene(x))` is the same model as `x`
   (`compare`) for 956; the other two draw with a material id they lack.
 - Through Blender 5.1: retail Armry01 imports and exports as the same model

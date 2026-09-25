@@ -22,7 +22,8 @@ from mathutils import Matrix, Quaternion, Vector
 
 from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, RM_NAME, bone_rows,
                         rig_of, rm_of)
-from .export import axis_basis, axis_map, clean_name
+from .export import (ATTACH_RE, PART_RE, axis_basis, axis_map, clean_name, descendants,
+                     is_lod_root)
 
 
 class ImportFailed(Exception):
@@ -353,27 +354,112 @@ class Loader:
             bpy.ops.object.mode_set(mode="OBJECT")
 
     # --- the run ------------------------------------------------------------
+    def rigid_rig(self, clip):
+        """A rigid model's animation rig: an Armature named `!Rig` whose BN##
+        bones mirror the model's parts, one per channel the clip carries. The
+        model export ignores it (its name starts with `!`) and still reads the
+        PN## empties, which follow their bones, so a first-person weapon's own
+        clips are authored the same way a body's are."""
+        roots = sorted((c for c in self.model.children if is_lod_root(c)),
+                       key=lambda o: o.get("_lod_index", 0))
+        if not roots:
+            raise ImportFailed(f"{self.model.name}: the model has no LOD root")
+        root = roots[0]
+        parts = {}
+        for ob in descendants(root):
+            m = PART_RE.match(clean_name(ob.name))
+            if m is not None:
+                parts[int(m.group(1)) - 1] = ob
+        if not parts:
+            raise ImportFailed(f"{self.model.name}: the model has neither a rig nor PN## parts")
+        rows = clip["bones"]
+        if len(rows) > len(parts):
+            self.note(f"the clip carries {len(rows)} channels, the model {len(parts)} parts; the "
+                      "extra channels are dropped")
+        count = min(len(rows), len(parts))
+        held = {i: parts[i].matrix_world.copy() for i in parts}
+        index_of = {ob.name: i for i, ob in parts.items()}
+        above = {}
+        for i, ob in parts.items():
+            walk = ob.parent
+            while walk is not None and walk.name not in index_of:
+                walk = walk.parent
+            above[i] = index_of.get(walk.name, 0) if walk is not None else 0
+        arm = bpy.data.objects.new("!Rig", bpy.data.armatures.new("!Rig"))
+        self.model.users_collection[0].objects.link(arm)
+        arm.parent = root
+        arm.matrix_parent_inverse = Matrix.Identity(4)
+        arm.matrix_world = root.matrix_world
+        vl = self.scene.view_layers[0]
+        with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm,
+                                        object=arm, selected_objects=[arm]):
+            vl.objects.active = arm
+            bpy.ops.object.mode_set(mode="EDIT")
+            bones = {}
+            for i in range(count):
+                eb = arm.data.edit_bones.new(f"BN{i + 1:02d} {rows[i]['name']}".strip())
+                eb.head = (arm.matrix_world.inverted() @ held[i]).translation
+                eb.tail = eb.head + Vector((0.0, 0.05, 0.0))
+                eb.use_connect = False
+                bones[i] = eb
+            for i in range(count):
+                parent = rows[i]["parent"]
+                if 0 <= parent < i:
+                    bones[i].parent = bones[parent]
+            bpy.ops.object.mode_set(mode="OBJECT")
+        self.pending = (arm, rows, parts, count, held, above)
+        return arm
+
+    def attach_parts(self):
+        """Each part follows its bone's step away from rest, and keeps the model
+        hierarchy in a `~PPx attach` helper, because its Blender parent is now
+        the bone."""
+        arm, rows, parts, count, held, above = self.pending
+        self.pending = None
+        for i in range(count):
+            ob = parts[i]
+            ob.parent = arm
+            ob.parent_type = "BONE"
+            ob.parent_bone = arm.pose.bones[i].name
+            ob.matrix_parent_inverse = Matrix.Identity(4)
+            ob.matrix_world = held[i]
+            if i > 0:
+                helper = bpy.data.objects.new(f"~{above[i] + 1:02d} attach", None)
+                helper.empty_display_size = 0.02
+                self.model.users_collection[0].objects.link(helper)
+                helper.parent = ob
+                helper.matrix_parent_inverse = Matrix.Identity(4)
+                helper.matrix_world = held[i]
+
     def run(self):
-        arm = rig_of(self.model)
-        if arm is None:
-            raise ImportFailed(f"{self.model.name}: animations need a rig (an Armature of BN## bones "
-                               "under its LOD 0 root)")
-        bones = bone_rows(arm)
         clips = self.set["clips"]
         if not clips:
             raise ImportFailed("the clip set holds no clip")
         reset = self.reset_clip()
+        self.pending = None
+        arm = rig_of(self.model)
+        if arm is None:
+            # A rigid model (a first-person weapon): its clips get an animation
+            # rig whose bones mirror its parts, built from the reset clip.
+            arm = self.rigid_rig(reset if reset is not None else clips[0])
+            self.context.view_layer.update()
+        bones = bone_rows(arm)
         if reset is not None:
             bones = self.name_bones(arm, bones, reset)
         if reset is not None and (self.op is None or self.op.align_rest):
             self.align_rest(arm, bones, reset)
             self.context.view_layer.update()
+        if self.pending is not None:
+            self.attach_parts()
+            self.context.view_layer.update()
         rest = [pb.bone.matrix_local.copy() for pb in bones]
 
         self.ensure_rm(arm)
         data = arm.animation_data or arm.animation_data_create()
+        made = {}
         for clip in clips:
             action = self.action_for(clip, arm, bones, rest)
+            made[clip["name"].lower()] = action
             track = data.nla_tracks.new()
             track.name = clip["name"]
             track.strips.new(clip["name"], 0, action)
@@ -388,7 +474,7 @@ class Loader:
             row.key = key
             for variant in variants:
                 stem = os.path.splitext(variant)[0]
-                action = next((a for a in bpy.data.actions if a.name.lower() == stem.lower()), None)
+                action = made.get(stem.lower())
                 if action is None:
                     self.note(f"the row '{key}' names '{variant}', which the set does not hold")
                     continue

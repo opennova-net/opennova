@@ -362,6 +362,12 @@ class Exporter:
             if raw.startswith("!"):
                 continue
             if ob.type == "ARMATURE":
+                # An armature named `!...` is not the model's mesh rig: it is a
+                # rigid model's animation rig, whose BN## bones mirror its parts
+                # so its clips can be authored (animation.py). The model reads
+                # its parts from the PN## empties as always.
+                if raw.startswith("!"):
+                    continue
                 if lod.armature is not None:
                     raise ExportError(f"{root.name}: two armatures ({lod.armature.name}, {ob.name})")
                 lod.armature = ob
@@ -992,7 +998,10 @@ class Exporter:
         self.uv1 = any(len(ob.data.uv_layers) > 1 for l in lods for meshes in l.meshes.values() for _, ob in meshes)
         # Skinned meshes are read in the armature's rest pose (the bind pose
         # the vertices are stored in); the scene's pose is restored after.
-        rest = [(l.armature.data, l.armature.data.pose_position) for l in lods if l.armature is not None]
+        # Every rig reads at rest, the mesh rig and a rigid model's animation
+        # rig alike: a model is its authored layout, not a clip's pose.
+        rigs = [ob for r in roots for ob in descendants(r) if ob.type == "ARMATURE"]
+        rest = [(ob.data, ob.data.pose_position) for ob in rigs]
         for data, _ in rest:
             data.pose_position = "REST"
         if rest:
