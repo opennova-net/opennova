@@ -264,6 +264,12 @@ void LightScene::clear_render_output() {
 				Image::FORMAT_RGBAF, static_light_rows_bytes_);
 		static_light_rows_texture_->update(static_light_rows_image_);
 	}
+	// The zeroed payload no longer mirrors the cached row set, so the next
+	// static frame rewrites every active row (its lights and its entity
+	// lighting lane) instead of maintaining the zeros in place. The cache key
+	// alone cannot catch this: a camera-loss frame keeps the rows, and a
+	// reload of the same mission rebuilds them at the same revision and count.
+	static_bytes_resident_ = false;
 }
 
 int LightScene::render_frame(const Vector3 &p_camera_world,

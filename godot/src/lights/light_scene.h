@@ -296,7 +296,8 @@ private:
 	uint64_t static_cached_color_revision_ = 0;
 	std::array<float, 3> static_cached_ambient_{};
 	// static_light_rows_bytes_ holds the resident texture payload for the
-	// cached row set (the in-place steady path's precondition).
+	// cached row set (the in-place steady path's precondition); the output
+	// clear zeroes that payload and drops the claim.
 	bool static_bytes_resident_ = false;
 	int64_t static_cached_rows_revision_ = -1;
 	int static_cached_row_count_ = -1;

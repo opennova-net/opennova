@@ -549,6 +549,55 @@ func test_director_reset_retires_pool_and_published_output() -> void:
 			"reset synchronously clears shader output")
 
 
+## The static atlas's entity lighting lane (texel 9) outlives the director's
+## output clears. Reloading the same mission runs the persistent director
+## through reset() and reattach() against rows whose draw-source revision and
+## row count equal the departed mission's, and a camera-loss frame clears the
+## output with the rows untouched: both zero the published atlas while the
+## static selection cache still matches, and a lightless mission leaves the
+## pool's selection revision where it was. The next frame must rewrite every
+## active row's lane; a lane left zero is effectScale 0, which drew every
+## static model of a reloaded CP01 without its sun. Retail derives the factor
+## per draw, every frame: 1.0 for an entity with no proximity slice
+## [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
+## Entity_ComputeSunVisibility @ 0x5c6800].
+func test_static_row_lanes_republish_after_the_director_clears_its_output() -> void:
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	var placer := StaticSourceFixture.place(self, world,
+			[_fixture_object_data("house.3di")], [Vector3(5.0, 1.0, 0.0)])
+	var director := EffectLightDirector.new()
+	director.setup(world, placer)
+	director.reattach()
+	assert_eq(director.get_report().live, 0, "the house carries no light record")
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	camera.position = Vector3(5.0, 2.0, 8.0)
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
+	assert_almost_eq(_static_row_effect_scale(director), 1.0, 0.001,
+			"an outdoor static row publishes effectScale 1")
+	director.reset()
+	assert_almost_eq(_static_row_effect_scale(director), 0.0, 0.001,
+			"reset zeroes the published atlas")
+	director.reattach()
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
+	assert_almost_eq(_static_row_effect_scale(director), 1.0, 0.001,
+			"a same-revision reattach republishes the row's lane")
+	director.render_frame(null, GameWorld.current_frame_clock_ms())
+	director.render_frame(camera, GameWorld.current_frame_clock_ms())
+	assert_almost_eq(_static_row_effect_scale(director), 1.0, 0.001,
+			"the frame after a camera loss republishes the row's lane")
+
+
+func _static_row_effect_scale(director: EffectLightDirector) -> float:
+	var atlas := director.scene().get_static_light_rows_image()
+	assert_not_null(atlas)
+	if atlas == null:
+		return -1.0
+	return atlas.get_pixel(9, 0).r
+
+
 func test_wire_node_exit_retires_its_cached_light_without_duplicate_registration() -> void:
 	var director := EffectLightDirector.new()
 	var node := ObjectModel.new()
