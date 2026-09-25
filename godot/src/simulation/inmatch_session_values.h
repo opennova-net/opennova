@@ -38,6 +38,8 @@ protected:
 public:
 	void set_delta_seconds(double p_delta);
 	double get_delta_seconds() const;
+	// Seconds since the previous frame's render finished (negative: unsampled).
+	void set_since_render_seconds(double p_seconds);
 	void set_camera_sample(const Vector3 &p_position,
 			const Vector3 &p_forward, bool p_listener_valid = true);
 	// The camera sample as stamped: the driver pushes it to the present

@@ -117,6 +117,10 @@ opennova::bms::File make_demo_mission() {
 
 Simulation::Simulation() {
 	session_.set_tick_observer(this);
+	// Retail's frame-time bank (world::TickBankPolicy::RetailMainLoop carries
+	// the witness): a long frame's backlog is low-passed over the next frames
+	// instead of run as a burst of catch-up ticks in one.
+	session_.set_tick_bank_policy(opennova::world::TickBankPolicy::RetailMainLoop);
 	// The bare local role from construction; the shell's session choices
 	// (enable_listen_server / enable_host_listen / enable_join) replace it.
 	(void)install_role(std::make_unique<opennova::inmatch::LocalRole>());

@@ -17,9 +17,15 @@ outer frame
   Render_ProcessMainSceneFrame           one variable-rate render
 ```
 
-OpenNova keeps that shape. Catch-up is capped at 31 ticks, render reads the
-latest state without interpolation, and WAC/BMS dividers remain inside their
-own systems.
+OpenNova keeps that shape with retail's own bank (`world::TickAccumulator`'s
+`RetailMainLoop` policy, selected by the game and the dedicated host): a long
+frame's backlog is low-passed over the following frames by the 7/8 frame-time
+smoother instead of run as one burst of catch-up ticks, a bank over 500 ms
+clamps, and the mission start banks neither the load nor the render time of
+the first three frames drawn after it (`inmatch::Session::advance`, fed the
+time since the last render by the shell's `frame_post_draw` stamp). Render
+reads the latest state without interpolation, and WAC/BMS dividers remain
+inside their own systems.
 
 ### One logic tick
 

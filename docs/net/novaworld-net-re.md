@@ -7078,11 +7078,12 @@ units with the previous frame's sub-4 ms residual (`@0x52b7b2`), clamps a bank o
 (`@0x52ba21`/`@0x52ba47`, the phase free-running across frames) — so a stall is followed by the
 EMA's geometric fast-forward, never a dropped backlog; `world::TickAccumulator` carries that
 bank as its `RetailMainLoop` policy, and `apps/nw_server` selects it and feeds the measured
-delta instead of a constant one-tick frame. The Godot shell stays on the accumulator's
-default `WallClock` policy (bank seconds, drain 16 ms quanta, clamp a hitch's backlog to 31
-ticks and drop the rest): switching it to the retail bank makes every load or shader hitch
-over 500 ms fast-forward the sim by several seconds, a player-visible pacing change that is
-a maintainer decision, not a default.
+delta instead of a constant one-tick frame. The game selects it too (2026-09-25; the
+`WallClock` bank it replaced ran a hitch's whole backlog as a burst of catch-up ticks in the
+next frame), together with retail's mission-start re-base: the load is never banked, and the
+three frames drawn after the start re-read the clock after their render (`Game_StartMission`
+@0x525e1f, `Render_ProcessMainSceneFrame` @0x5caeff..0x5caf0e, `Game_MainLoop` @0x52b75c and
+@0x52bac8..0x52bad2), which the session ports over the shell's `frame_post_draw` stamp.
 The 4 ms quantum and the free-running phase are part of the port, not an optional refinement:
 the EMA is applied to the bank INCLUDING the undrained residual, so without the quantum drain
 the smoother cannot conserve time. Worked values (pinned by `tick_accumulator_test` and the
