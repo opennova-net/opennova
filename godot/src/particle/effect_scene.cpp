@@ -390,13 +390,13 @@ void EffectScene::set_view_frustum(const TypedArray<Plane> &p_planes,
 		return;
 	}
 	// Godot planes answer `normal . p - d`; the simulator wants
-	// `a x + b y + c z + d >= 0` inside. Camera3D::get_frustum orients its
-	// normals so the probe reads "over" (outside), which the flip below undoes;
-	// a plane set that already reads inside is kept as is.
+	// `a x + b y + c z + d >= 0` inside. Camera3D::get_frustum points its
+	// normals outward, so the inside probe reads negative ("under") and the
+	// set is flipped; a plane set that already reads the probe inside is kept.
 	float sign = 1.0f;
 	{
 		const Plane first = p_planes[0];
-		if (first.normal.dot(p_inside_probe) - first.d > 0.0f) {
+		if (first.normal.dot(p_inside_probe) - first.d < 0.0f) {
 			sign = -1.0f;
 		}
 	}
