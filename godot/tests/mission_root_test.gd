@@ -458,11 +458,12 @@ func test_session_frame_accumulates_fixed_quanta() -> void:
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
-	# 0.1 s of wall-clock at 62.5 Hz = floor(0.1 / 0.016) = 6 ticks.
-	assert_eq(_advance_ticks(rt, 0.1), 6, "0.1 s banks 6 fixed-step ticks")
-	# Sub-quantum deltas accumulate ACROSS calls instead of each firing a tick.
-	assert_eq(_advance_ticks(rt, 0.008), 0, "half a quantum (plus the 0.004 remainder) fires nothing yet")
-	assert_eq(_advance_ticks(rt, 0.008), 1, "the banked remainder crosses one quantum and fires once")
+	# The retail bank drains 4 ms quanta and ticks on every fourth: half-tick
+	# (8 ms) frames accumulate ACROSS calls, one tick every other frame.
+	var ticks: Array = []
+	for _i in range(4):
+		ticks.append(_advance_ticks(rt, 0.008))
+	assert_eq(ticks, [1, 0, 1, 0], "8 ms frames tick every other frame")
 
 
 func test_session_frame_clamps_catchup() -> void:
@@ -471,11 +472,12 @@ func test_session_frame_clamps_catchup() -> void:
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
-	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's
-	# catch-up at the native world::TickAccumulator::kMaxCatchupTicks (S14).
-	assert_eq(_advance_ticks(rt, 1.0), 31, "a long stall is clamped to the catch-up cap")
-	# The clamp DROPS the backlog (no banked spiral): a tiny delta afterward fires nothing.
-	assert_eq(_advance_ticks(rt, 0.001), 0, "the backlog was dropped, not carried into the next frames")
+	# 1.0 s would be ~62 ticks; the retail bank clamps at 500 ms (125 quanta
+	# from phase 0 = 32 ticks, world::TickAccumulator::kRetailMaxCatchupTicks).
+	assert_eq(_advance_ticks(rt, 1.0), 32, "a long stall is clamped to 500 ms of bank")
+	# The clamp keeps the smoothed history: the next frame fast-forwards,
+	# (7 * 8000 + 16 + 4) >> 3 = 7002 units = 27 ticks from phase 125.
+	assert_eq(_advance_ticks(rt, 0.001), 27, "the frame after a stall fast-forwards")
 
 
 func test_session_frame_ignored_when_not_playing() -> void:
@@ -494,9 +496,9 @@ func test_session_frame_still_presents_a_zero_tick_render_frame() -> void:
 	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
+	assert_true(rt.step_once(), "seed one decoded presentation snapshot")
+	# play() resets the bank, so a zero-length frame drains nothing.
 	rt.play()
-	assert_eq(_advance_ticks(rt, Simulation.tick_dt()), 1,
-			"seed one decoded presentation snapshot")
 	(w.model as Node3D).visible = false
 	assert_eq(_advance_ticks(rt, 0.0), 0, "no fixed simulation tick advances")
 	assert_true((w.model as Node3D).visible,
@@ -629,13 +631,14 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 		assert_false((active_poses[1] as Vector3).is_equal_approx(active_poses[2]),
 				"catch-up does not emit repeatedly from the frame-start pose")
 
-	# max_age 4 parses to 248 fixed ticks. Stop at age 240, then expire eight
+	# max_age 4 parses to 248 fixed ticks. Step to age 240, then expire eight
 	# ticks into a twelve-tick catch-up batch: advances 248..252 must observe no
 	# live group, rather than emitting five stale ticks until final presentation.
-	for _batch in range(7):
-		assert_eq(_advance_ticks(rt, 31.0 * Simulation.tick_dt()), 31)
-	assert_eq(_advance_ticks(rt, 20.0 * Simulation.tick_dt()), 20)
+	for _step in range(237):
+		assert_true(rt.step_once())
 	assert_eq(int(probe["advances"]), 240)
+	# play() resets the bank: one 192 ms frame drains 48 quanta = 12 ticks.
+	rt.play()
 	assert_eq(_advance_ticks(rt, 12.0 * Simulation.tick_dt()), 12)
 	assert_eq(int(probe["advances"]), 252)
 	var active_tick_numbers: Array = probe["active_tick_numbers"]
@@ -662,8 +665,9 @@ func test_session_frame_drains_effects_per_tick() -> void:
 	rt.play()
 	var drained: Array = []
 	rt.effects_drained.connect(func(effects): drained.append_array(effects))
-	# 20.5 quanta of wall-clock in ONE frame -> 20 ticks; crosses the 16th-tick quarter-pass boundary.
-	assert_eq(_advance_ticks(rt, 0.328), 20, "20+ quanta of wall-clock run 20 logic ticks in one frame")
+	# 328 ms in ONE frame on the reset bank: 16 + 5248 units = 82 quanta from
+	# phase 0 -> 21 ticks; crosses the 16th-tick quarter-pass boundary.
+	assert_eq(_advance_ticks(rt, 0.328), 21, "328 ms of wall-clock run 21 logic ticks in one frame")
 	assert_eq(drained.size(), 1, "the per-tick one-shot effect surfaced from inside the batch")
 	assert_eq((drained[0] as MissionEffect).kind, "text")
 
@@ -675,10 +679,13 @@ func test_distance_per_real_second_is_frame_rate_independent() -> void:
 	# integrates a fixed displacement, equal tick count over equal wall-clock = equal distance =
 	# locomotion speed decoupled from frame rate. The old "one tick per frame" path would have run 100
 	# vs 10 ticks here (10x speed difference) — exactly the symptom this fixes.
+	# Retail's bank low-passes the banked time, so each run settles its
+	# smoothed backlog with zero-length frames before the count.
 	var hi := _run_realtime(0.01, 100)  # ~100 FPS for 1.0 s
 	var lo := _run_realtime(0.1, 10)    #  ~10 FPS for 1.0 s
 	assert_eq(hi.ticks, lo.ticks, "same wall-clock runs the same tick count regardless of frame rate")
-	assert_eq(hi.ticks, 62, "~62.5 Hz over one real second")
+	assert_between(int(hi.ticks), 62, 72,
+			"~62.5 Hz over one real second (plus the unsmoothed first frame's history)")
 	assert_true(hi.pos.is_equal_approx(lo.pos), "the deterministic sim lands the entity at one position")
 
 
@@ -690,9 +697,13 @@ func _run_realtime(step: float, count: int) -> Dictionary:
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
-	var ticks := 0
+	# One ordinary frame first (the same bank history for every run), then the
+	# second of frames, then zero-length frames until the smoother has drained.
+	var ticks := _advance_ticks(rt, Simulation.tick_dt())
 	for _i in range(count):
 		ticks += _advance_ticks(rt, step)
+	for _i in range(100):
+		ticks += _advance_ticks(rt, 0.0)
 	return { "ticks": ticks, "pos": rt.get_sim().get_entity_position(0) }
 
 
@@ -707,8 +718,9 @@ func test_native_present_snapshot_survives_a_nested_script_snapshot_read() -> vo
 	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
+	assert_true(rt.step_once())
+	# play() resets the bank: the zero-length frames below drain nothing.
 	rt.play()
-	assert_eq(_advance_ticks(rt, Simulation.tick_dt()), 1)
 	var sim := rt.get_sim()
 	var expected := second.position
 	var reads := [0]

@@ -1197,6 +1197,9 @@ func _process(delta: float) -> void:
 	else:
 		frame_input = MissionFrameInput.new()
 		frame_input.delta_seconds = delta
+	# The frame loop feeds the session the time since the last render: the
+	# mission-start frames bank only that (Session::advance).
+	frame_input.since_render_seconds = _world.get_seconds_since_render()
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	var skip_world := probe_enabled and _perf_probe.skip_world
 	if not skip_world:

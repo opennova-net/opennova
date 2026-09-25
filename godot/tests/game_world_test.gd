@@ -461,16 +461,17 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	var sim := world.get_sim()
 	assert_not_null(sim)
 
+	# One 16 ms frame on the freshly reset bank drains one tick's quanta.
 	runtime.pause()
 	var baseline := int(sim.get_logic_tick())
-	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+	world.tick(Vector3.ZERO, Transform3D(), Simulation.tick_dt())
 	assert_eq(int(sim.get_logic_tick()), baseline, "a paused runtime never ticks")
 	runtime.play()
-	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+	world.tick(Vector3.ZERO, Transform3D(), Simulation.tick_dt())
 	assert_eq(int(sim.get_logic_tick()), baseline + 1,
-			"a playing runtime ticks once per render frame")
+			"a playing runtime ticks once per 16 ms render frame")
 	runtime.pause()
-	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+	world.tick(Vector3.ZERO, Transform3D(), Simulation.tick_dt())
 	assert_eq(int(sim.get_logic_tick()), baseline + 1, "pausing stops it again")
 
 
@@ -1503,11 +1504,17 @@ func test_world_driven_weather_is_invariant_to_render_batching() -> void:
 	assert_almost_eq(float(slow[1]), expected_eight.time_of_day, 0.000001,
 			"0.128 seconds contains eight weather/TOD ticks")
 
+	# A near-zero frame after it still drains the retail bank's smoothed
+	# backlog (Game_MainLoop's 7/8 low-pass); whatever ticks run, the weather
+	# and TOD advance by exactly those ticks and no separate weather credit.
 	var boundary: Array = await _world_driven_weather_state_after([0.128, 0.000001])
-	assert_eq(int(boundary[0]), 8,
-			"a sub-tick residual delta runs no extra weather quantum")
-	assert_almost_eq(float(boundary[1]), expected_eight.time_of_day, 0.000001,
-			"no separate weather credit exists to consume a ninth TOD tick")
+	var expected_boundary := MissionEnvironment.new()
+	expected_boundary.configure_mission_clock(0x0540, 60)
+	expected_boundary.advance_mission_clock(
+			Weather.MISSION_START_PREWARM_TICKS + int(boundary[0]))
+	assert_almost_eq(float(boundary[1]), expected_boundary.time_of_day, 0.000001,
+			"the TOD clock advances once per simulation tick and never on its own")
+	expected_boundary.free()
 	expected_eight.free()
 
 
