@@ -179,6 +179,30 @@ def derived_panm_flags(tracks):
     return (2 if scale else 0) | ((2 if rot else 0) << 8) | (axis << 24)
 
 
+def shared_vertex(strip, key, vert, corners):
+    """A triangle corner's vertex in its strip: the one it shares with every
+    corner of the same key, but never one another corner of its triangle
+    already took. Two corners of a Blender triangle are always two vertices,
+    and a sliver whose corners coincide (retail ships them) keeps all three,
+    as the CLI takes a triangle only on three vertices."""
+    at = strip["index"].get(key)
+    if at is None or at in corners:
+        at = len(strip["verts"])
+        strip["verts"].append(vert)
+        strip["index"].setdefault(key, at)
+    return at
+
+
+def fixed(value, scale, lo, hi, what):
+    """`value` in the word the text carries it into (`value * scale` rounded,
+    lo..hi); an ExportError naming `what` when it does not fit, which the CLI
+    would refuse or the writer wrap or clamp."""
+    raw = round(value * scale) if math.isfinite(value) else None
+    if raw is None or not lo <= raw <= hi:
+        raise ExportError(f"{what} is {value:g}; the file holds {lo / scale:g} to {hi / scale:g}")
+    return raw
+
+
 def write_tga(image, path):
     """Uncompressed 32-bit truecolor TGA, rows bottom-up (the retail shape)."""
     w, h = image.size
@@ -341,6 +365,8 @@ class Exporter:
         if not name:
             self.note(f"{what}: a register-driven style (above 112) with no register name reads the unnamed "
                       "register")
+        if len(name) > 24:
+            raise ExportError(f"{what}: the register name '{name}' exceeds 24 characters (its CTRL field)")
         if name not in self.registers:
             self.registers.append(name)
         return self.registers.index(name)
@@ -394,6 +420,8 @@ class Exporter:
             return 0
         r = tuple(round(q[j][i], 6) for i in range(3) for j in range(3))
         if r not in self.frames:
+            if len(self.frames) == 255:
+                raise ExportError(f"{what}: a 256th part frame; a PANM row selects one by a byte")
             self.frames.append(r)
         return self.frames.index(r) + 1
 
@@ -511,6 +539,8 @@ class Exporter:
                     raise ExportError(f"{ob.name}: occlusion meshes are OB##, OS##, OP##[-MM] or OH##, then "
                                       "-occonly")
                 prefix, nn, dup, mm = m.groups()
+                if nn == "00" or mm == "00":
+                    raise ExportError(f"{ob.name}: occlusion sections start at 01")
                 claim(("occlusion", prefix, nn, dup, mm), ob)
                 if primary:
                     kind = 3 if prefix == "OP" and mm else OCC_TYPES[prefix]
@@ -594,6 +624,9 @@ class Exporter:
                 continue
             lod.anchors[child] = ob
             if lod.armature is None:
+                if parent >= count:
+                    raise ExportError(f"{ob.name}: names PN{parent + 1:02d} its part's parent, which {root.name} "
+                                      f"lacks ({count} parts)")
                 lod.attach[child] = parent
             elif parent != self.part_parent(lod, child):
                 self.note(f"{ob.name}: part {child + 1:02d}'s parent is its bone's parent "
@@ -703,19 +736,16 @@ class Exporter:
                 corners = []
                 for li in reversed(tri.loops) if mirrored else tri.loops:
                     vert = self.corner(mesh, mesh.loops[li], mw, nmat, normals, uv0, uv1)
-                    key = tuple(round(x, 5) for x in vert)
-                    if key not in s["index"]:
-                        s["index"][key] = len(s["verts"])
-                        s["verts"].append(vert)
-                    corners.append(s["index"][key])
+                    corners.append(shared_vertex(s, tuple(round(x, 5) for x in vert), vert, corners))
                 s["tris"].append(corners)
         finally:
             ev.to_mesh_clear()
 
-    def skinned_strips(self, ob, strips, collect_bones):
+    def skinned_strips(self, ob, strips, collect_bones, count):
         """A skinned mesh's triangles grouped per material into strips whose
         bone tables stay within 16 parts. Each corner carries its rest-pose
-        position and up to three (part, weight) influences from BN## groups."""
+        position and up to three (part, weight) influences from BN## groups,
+        each naming one of the LOD's `count` parts."""
         groups = {}
         for g in ob.vertex_groups:
             m = BONE_RE.match(clean_name(g.name))
@@ -750,6 +780,10 @@ class Exporter:
                     # section (WriteCOBJ's skinned rule).
                     for _, b in w:
                         self.bone_points.setdefault(b, []).append(self.space.mission(mw @ v.co))
+            missing = sorted({b for inf in influences for b, _ in inf if b >= count})
+            if missing:
+                raise ExportError(f"{ob.name}: its vertex group BN{missing[0] + 1:02d} names no part (the LOD has "
+                                  f"{count}), so no strip's bone table can hold it")
             per_material = {}
             for tri in mesh.loop_triangles:
                 slot = tri.material_index
@@ -775,11 +809,7 @@ class Exporter:
                     for vert, inf in corners:
                         inf3 = (inf + [(inf[0][0], 0.0)] * 3)[:3]
                         full = vert + tuple(local[b] for b, _ in inf3) + tuple(w for _, w in inf3)
-                        key = tuple(round(x, 5) for x in full)
-                        if key not in current["index"]:
-                            current["index"][key] = len(current["verts"])
-                            current["verts"].append(full)
-                        ids.append(current["index"][key])
+                        ids.append(shared_vertex(current, tuple(round(x, 5) for x in full), full, ids))
                     current["tris"].append(ids)
         finally:
             ev.to_mesh_clear()
@@ -808,6 +838,9 @@ class Exporter:
             for mi, s in sorted(strips.items()):
                 if len(s["verts"]) > 65535:
                     raise ExportError(f"PN{i + 1:02d}: one material has more than 65535 vertices")
+                if len(s["tris"]) > 65535 // 3:
+                    raise ExportError(f"PN{i + 1:02d}: one material has more than {65535 // 3} triangles (a strip "
+                                      "holds 65535 indices)")
                 lines.append(f"strip {mi} {self.strip_alpha(self.materials[mi])}")
                 for v in s["verts"]:
                     lines.append("v " + fmt(*v))
@@ -844,11 +877,14 @@ class Exporter:
             lines.append(f"part {self.part_parent(lod, i)} {fmt(*self.part_pivot(lod, i))}  # {label}")
             strips = {}
             for _, ob in sorted(lod.meshes.get(i, []), key=lambda e: e[0]):
-                self.skinned_strips(ob, strips, primary)
+                self.skinned_strips(ob, strips, primary, count)
             for mi in sorted(strips):
                 for s in strips[mi]:
                     if len(s["verts"]) > 65535:
-                        raise ExportError(f"BN{i + 1:02d}: one strip has more than 65535 vertices")
+                        raise ExportError(f"{label}: one strip has more than 65535 vertices")
+                    if len(s["tris"]) > 65535 // 3:
+                        raise ExportError(f"{label}: one strip has more than {65535 // 3} triangles (a strip "
+                                          "holds 65535 indices)")
                     lines.append(f"strip {mi} {self.strip_alpha(self.materials[mi])}")
                     lines.append("bones " + " ".join(str(b) for b in s["order"]))
                     uv_end = 10 if self.uv1 else 8
@@ -878,7 +914,10 @@ class Exporter:
             field = quoted(t.register)
         else:
             field = str(t.param) if t.param else "-"
-        line = f"track {t.target} {style} {field} {round(t.rate * 256)} {round(t.start * scale)} {round(t.end * scale)}"
+        # Rotations in 1/16384 turn, the others and every rate 8.8, int16.
+        words = [fixed(value, s, -0x8000, 0x7FFF, f"{what} track {t.target} {name}")
+                 for value, s, name in ((t.rate, 256.0, "rate"), (t.start, scale, "start"), (t.end, scale, "end"))]
+        line = f"track {t.target} {style} {field} {words[0]} {words[1]} {words[2]}"
         if t.target == "trans":
             line += f" {t.axis}"
         return line
@@ -906,6 +945,8 @@ class Exporter:
             # A mesh without a material draws with the shader a material
             # without textures takes (shader_of), its strips' pass included.
             shader = self.shader_of(mat)
+            if len(shader) > 32:
+                raise ExportError(f"{mat.name}: the shader tag '{shader}' exceeds 32 characters")
             caps = shader_flags(shader)
             lines.append(f"material {quoted(shader)}  # {mat.name if mat is not None else '(no material)'}")
             p = mat.o3d if mat is not None else None
@@ -952,30 +993,62 @@ class Exporter:
                     lines.append(f"texture {quoted(name)}")
                     self.claim_texture(name, image, mat)
             if p.anim_frames or p.anim_type or p.anim_time:
-                time_or_register = self.register(p.anim_register, f"{mat.name} texture flipbook") \
-                    if p.anim_type == 1 else p.anim_time
+                if p.anim_type not in (0, 1):
+                    raise ExportError(f"{mat.name}: the flipbook's anim type is {p.anim_type}; it is 0 (time) or 1 "
+                                      "(register)")
+                if p.anim_type == 1:
+                    time_or_register = self.register(p.anim_register, f"{mat.name} texture flipbook")
+                else:
+                    time_or_register = fixed(p.anim_time, 1, -0x8000, 0x7FFF, f"{mat.name}: the flipbook frame time")
                 lines.append(f"texanim {p.anim_frames} {p.anim_type} {time_or_register}")
+            # A generator's words: an RGB rate a u16 of 1/256 steps, the other
+            # rates and the U/V start and end int16 8.8, an alpha start and end
+            # int16, a phase (styles up to 112) a byte of 1/256 turns.
             if p.rgb_style:
-                reg = self.generator_register(p.rgb_style, p.rgb_register, f"{mat.name} RGB gen")
+                what = f"{mat.name}: the RGB gen"
+                reg = self.generator_register(p.rgb_style, p.rgb_register, what)
+                fixed(p.rgb_rate, 256.0, 0, 0xFFFF, what + " rate")
+                self.generator_phase(p.rgb_style, p.rgb_phase, what)
                 s = [round(c * 255) for c in p.rgb_start]
                 e = [round(c * 255) for c in p.rgb_end]
                 lines.append(f"rgbgen {p.rgb_style} {reg} {fmt(float(p.rgb_rate))} {s[0]} {s[1]} {s[2]} "
                              f"{e[0]} {e[1]} {e[2]} {fmt(float(p.rgb_phase))}")
             if p.alpha_style:
-                reg = self.generator_register(p.alpha_style, p.alpha_register, f"{mat.name} alpha gen")
-                lines.append(f"alphagen {p.alpha_style} {reg} {fmt(float(p.alpha_rate))} {p.alpha_start} {p.alpha_end} "
+                what = f"{mat.name}: the alpha gen"
+                reg = self.generator_register(p.alpha_style, p.alpha_register, what)
+                fixed(p.alpha_rate, 256.0, -0x8000, 0x7FFF, what + " rate")
+                start = fixed(p.alpha_start, 1, -0x8000, 0x7FFF, what + " start")
+                end = fixed(p.alpha_end, 1, -0x8000, 0x7FFF, what + " end")
+                self.generator_phase(p.alpha_style, p.alpha_phase, what)
+                lines.append(f"alphagen {p.alpha_style} {reg} {fmt(float(p.alpha_rate))} {start} {end} "
                              f"{fmt(float(p.alpha_phase))}")
             for axis in ("u", "v"):
                 style = getattr(p, axis + "_style")
                 if style:
-                    reg = self.generator_register(style, getattr(p, axis + "_register"), f"{mat.name} {axis} gen")
-                    lines.append(f"{axis}gen {style} {reg} {fmt(float(getattr(p, axis + '_rate')))} "
-                                 f"{fmt(float(getattr(p, axis + '_start')))} {fmt(float(getattr(p, axis + '_end')))} "
-                                 f"{fmt(float(getattr(p, axis + '_phase')))}")
+                    what = f"{mat.name}: the {axis.upper()} gen"
+                    reg = self.generator_register(style, getattr(p, axis + "_register"), what)
+                    values = [float(getattr(p, f"{axis}_{field}")) for field in ("rate", "start", "end")]
+                    for value, field in zip(values, ("rate", "start", "end")):
+                        fixed(value, 256.0, -0x8000, 0x7FFF, f"{what} {field}")
+                    phase = float(getattr(p, axis + "_phase"))
+                    self.generator_phase(style, phase, what)
+                    lines.append(f"{axis}gen {style} {reg} {fmt(*values)} {fmt(phase)}")
+
+    @staticmethod
+    def generator_phase(style, phase, what):
+        """A generator's phase byte (styles up to 112; above, that byte is the
+        register index): the writer would clamp one outside it."""
+        if style <= CTRL_REFERENCE_THRESHOLD:
+            fixed(phase, 256.0, 0, 0xFF, what + " phase")
 
     # --- user points, lights, occlusion -------------------------------------
     def emit_points(self, lod, lines):
         # USRP order: each helper's `order` (the imported index), then label.
+        # The seat scan reads `sitex` without case and stops at 8 [orig:
+        # Entity_GetBoneSlotType @ 0x434ED0; the scan end @ 0x43A5AF].
+        seats = [ob.name for _, _, label, ob in lod.points if label.lower().startswith("sitex")]
+        if len(seats) > 8:
+            raise ExportError(f"{len(seats)} sitex seats ({', '.join(sorted(seats))}); the game reads 8")
         for letter, part, label, ob in sorted(lod.points, key=lambda e: point_key(e[2], e[3])):
             pos = self.space.mission(self.space.world(ob).translation)
             d = self.space.mission((self.space.world(ob).to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
@@ -992,7 +1065,11 @@ class Exporter:
             pos = self.space.mission(self.space.world(ob).translation)
             phase = str(self.register(p.register, f"{ob.name} colour")) if p.style > CTRL_REFERENCE_THRESHOLD \
                 else fmt(float(p.phase))
-            s = [round(c * 255) for c in data.color]
+            # WriteLGHT packs the rate times 256, truncated, into a u16 and each
+            # colour channel into a byte (threedi_build_light_rate).
+            if not 0.0 <= p.rate < 256.0:
+                raise ExportError(f"{ob.name}: its rate is {p.rate:g}; the file holds 0 up to 256")
+            s = [fixed(c, 255.0, 0, 255, f"{ob.name}: its colour") for c in data.color]
             e = [round(c * 255) for c in p.color_end]
             flags = (1 if p.disable_corona else 0) | (2 if p.disable_terrain else 0) | \
                 (4 if p.disable_objects else 0) | (8 if spot else 0) | (p.other_flags & ~0x0F & 0xFF)
@@ -1080,6 +1157,10 @@ class Exporter:
                             p = self.space.mission(mw @ mesh.vertices[vi].co)
                             key = tuple(round(x, 4) for x in p)
                             if key not in s["index"]:
+                                if not all(abs(x) < 128.0 for x in p):
+                                    raise ExportError(f"{ob.name}: a vertex of the collision LOD lies at "
+                                                      f"({fmt(*p)}); a collision vertex stays under 128 from the "
+                                                      "model origin on each axis (CVRT stores 8.8 in an int16)")
                                 s["index"][key] = len(s["verts"])
                                 s["verts"].append(p)
                             corners.append(s["index"][key])
