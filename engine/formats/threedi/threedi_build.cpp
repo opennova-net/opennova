@@ -4,11 +4,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <map>
 
 namespace opennova::threedi {
+
+// Degrees to radians as the exporter converts a light's cone, the D3DX
+// constant (the retired port's deg_to_rad: 5fc5b4f6a^:engine/formats/oed/
+// export_3di.cpp), for both the cosine and the view_proj field of view.
+static constexpr float kDegreeToRadian = 0.017453289f;
 
 void threedi_build_light_view_proj(ThreediLight &light, float falloff) {
 	// The retired OED exporter's build_light_view_proj
@@ -41,7 +48,7 @@ void threedi_build_light_view_proj(ThreediLight &light, float falloff) {
 	view[12] = -(pos[0] * view[0] + pos[1] * view[4] + pos[2] * view[8]);
 	view[13] = -(pos[0] * view[1] + pos[1] * view[5] + pos[2] * view[9]);
 	view[14] = -(pos[0] * view[2] + pos[1] * view[6] + pos[2] * view[10]);
-	const float fov = (falloff + falloff) * 0.017453289f;
+	const float fov = (falloff + falloff) * kDegreeToRadian;
 	const float zn = 0.1f;
 	const float zf = light.atten_end;
 	const float y_scale = 1.0f / std::tan(fov * 0.5f);
@@ -237,22 +244,98 @@ ThreediBuildVolumeSource volume_source(const ThreediBuildBox &box) {
 	return s;
 }
 
+// The OED plane table a volume or an occlusion mesh takes its planes from
+// [orig: ConvertToInternal @ 0x4268B3; 5fc5b4f6a^:engine/formats/oed/
+// convert_internal.cpp]: the vertex box's six planes (+x -x +y -y +z -z),
+// then each triangle's own plane unless one already matches it (normal
+// within 0.005 per axis, distance within 0.03; the last match wins). A
+// triangle whose edge cross product is at most 0.0001 long takes plane 0.
+// Float arithmetic over float vertices, as OED's.
+struct OedPlaneTable {
+	struct Plane {
+		float n[3];
+		float d;
+	};
+	std::vector<Plane> planes;
+	float mn[3] = {0, 0, 0}, mx[3] = {0, 0, 0};
+	size_t last = 0; // the plane the last triangle took (a ladder's facing)
+
+	explicit OedPlaneTable(const std::vector<std::array<float, 3>> &p) {
+		for (size_t i = 0; i < p.size(); ++i)
+			for (int k = 0; k < 3; ++k) {
+				mn[k] = i == 0 ? p[i][k] : std::min(mn[k], p[i][k]);
+				mx[k] = i == 0 ? p[i][k] : std::max(mx[k], p[i][k]);
+			}
+		planes = {{{1.f, 0.f, 0.f}, -mx[0]}, {{-1.f, 0.f, 0.f}, mn[0]}, {{0.f, 1.f, 0.f}, -mx[1]},
+				{{0.f, -1.f, 0.f}, mn[1]}, {{0.f, 0.f, 1.f}, -mx[2]}, {{0.f, 0.f, -1.f}, mn[2]}};
+	}
+
+	// The plane triangle (a, b, c) takes; -1 when it needs a new one and the
+	// table already holds `cap`.
+	int take(const std::array<float, 3> &a, const std::array<float, 3> &b, const std::array<float, 3> &c, size_t cap) {
+		const float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+		const float e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+		float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+		const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		if (!(len > 0.0001f)) return 0;
+		const float inv = 1.0f / len;
+		for (float &x : n) x *= inv;
+		const float d = -(n[0] * a[0] + n[1] * a[1] + n[2] * a[2]);
+		int index = -1;
+		for (size_t k = 0; k < planes.size(); ++k)
+			if (std::fabs(planes[k].n[0] - n[0]) <= 0.005f && std::fabs(planes[k].n[1] - n[1]) <= 0.005f &&
+					std::fabs(planes[k].n[2] - n[2]) <= 0.005f && std::fabs(planes[k].d - d) <= 0.03f)
+				index = static_cast<int>(k);
+		if (index < 0) {
+			if (planes.size() >= cap) return -1;
+			index = static_cast<int>(planes.size());
+			planes.push_back({{n[0], n[1], n[2]}, d});
+		}
+		last = static_cast<size_t>(index);
+		return index;
+	}
+};
+
+std::vector<std::array<float, 3>> float_points(const std::vector<ThreediBuildVec3> &verts) {
+	std::vector<std::array<float, 3>> p;
+	for (const ThreediBuildVec3 &v : verts) p.push_back({static_cast<float>(v.x), static_cast<float>(v.y), static_cast<float>(v.z)});
+	return p;
+}
+
 void finish_occlusion_record(std::vector<ThreediBuildOcclusionRecord> &occlusion, ThreediBuildOcclusionRecord &rec,
 		uint8_t type, int section_a, int section_b) {
 	rec.object.type = type;
 	rec.object.parent_subobject_index = static_cast<uint8_t>(section_a);
 	rec.object.connecting_subobject = static_cast<uint8_t>(section_b);
-	float center[3] = {0, 0, 0};
-	for (const ThreediOcclusionVertex &v : rec.vertices)
-		for (int k = 0; k < 3; ++k) center[k] += v.position[k] / static_cast<float>(rec.vertices.size());
-	float radius = 0.0f;
+	// The record's centre and radius as the OED exporter takes a mesh's, in
+	// mission axes: the vertex sum in double over the count, stored as a
+	// float, and the farthest vertex from it in float [5fc5b4f6a^:engine/
+	// formats/oed/convert_internal.cpp, the collision/occlusion centre].
+	// With no vertex the division is 0/0, the x86 default NaN (sign set):
+	// retail ChmLFP1's vertexless window stores (+nan, -nan, -nan) in model
+	// axes, that NaN through the mission -> model map.
+	double sum[3] = {0.0, 0.0, 0.0};
+	std::vector<std::array<float, 3>> mission;
 	for (const ThreediOcclusionVertex &v : rec.vertices) {
-		const float dx = v.position[0] - center[0], dy = v.position[1] - center[1], dz = v.position[2] - center[2];
+		const ThreediBuildVec3 p = threedi_build_to_mission(ThreediBuildVec3{v.position[0], v.position[1], v.position[2]});
+		mission.push_back({static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)});
+		sum[0] += p.x;
+		sum[1] += p.y;
+		sum[2] += p.z;
+	}
+	float center[3];
+	for (int k = 0; k < 3; ++k)
+		center[k] = mission.empty() ? -std::numeric_limits<float>::quiet_NaN()
+				: static_cast<float>(sum[k] / static_cast<double>(mission.size()));
+	float radius = 0.0f;
+	for (const std::array<float, 3> &p : mission) {
+		const float dx = p[0] - center[0], dy = p[1] - center[1], dz = p[2] - center[2];
 		radius = std::max(radius, std::sqrt(dx * dx + dy * dy + dz * dz));
 	}
-	rec.object.position[0] = center[0];
-	rec.object.position[1] = center[1];
-	rec.object.position[2] = center[2];
+	const ThreediBuildVec3 c = threedi_build_to_model(ThreediBuildVec3{center[0], center[1], center[2]});
+	rec.object.position[0] = static_cast<float>(c.x);
+	rec.object.position[1] = static_cast<float>(c.y);
+	rec.object.position[2] = static_cast<float>(c.z);
 	rec.object.radius = radius;
 	rec.object.num_vertices = static_cast<int32_t>(rec.vertices.size());
 	rec.object.num_planes = static_cast<int32_t>(rec.planes.size());
@@ -310,7 +393,15 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 	out.lod_strips.resize(lod_count);
 	out.lod_parts.resize(lod_count);
 	out.lod_panm.resize(lod_count);
-	double max_radius = 0.0;
+	// GHDR's radius: every render vertex's distance from the model origin,
+	// taken wide and stored as a float (the exporter's lod.maxRadius), the
+	// largest times 65536, truncated [orig: WriteGHDR @ 0x452B40]. That shape
+	// reproduces 932 of the 958 JO models; rounding reproduces 486.
+	float max_radius = 0.0f;
+	const auto reach = [&max_radius](const ThreediVertex &v) {
+		const double x = v.position[2], y = v.position[0], z = v.position[1]; // mission x y z
+		max_radius = std::max(max_radius, static_cast<float>(std::sqrt(x * x + y * y + z * z)));
+	};
 	float tangent_carry[6] = {};
 	for (size_t li = 0; li < lod_count; ++li) {
 		const ThreediBuildLod &src = m.lods[li];
@@ -328,28 +419,32 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 			const ThreediBuildPart &part = src.parts[pi];
 			ThreediRenderObject ro{};
 			ro.parent_index = static_cast<int32_t>(part.parent);
-			const ThreediBuildVec3 abs = threedi_build_to_model(part.pivot);
-			// The root names itself; retail also ships parts whose parent is -1.
-			const bool rooted = part.parent == static_cast<int>(pi) || part.parent < 0 ||
-					part.parent >= static_cast<int>(src.parts.size());
-			const ThreediBuildVec3 parent_pivot = rooted ? ThreediBuildVec3{} : threedi_build_to_model(src.parts[part.parent].pivot);
-			ro.abs[0] = static_cast<float>(abs.x);
-			ro.abs[1] = static_cast<float>(abs.y);
-			ro.abs[2] = static_cast<float>(abs.z);
-			// The derived form keeps the writer's signed-zero convention; the
-			// caller's own value (a scene node's exact local origin) wins only
-			// where the two differ as floats.
-			ThreediBuildVec3 rel{abs.x - parent_pivot.x, abs.y - parent_pivot.y, abs.z - parent_pivot.z};
-			if (part.has_rel) {
-				const ThreediBuildVec3 given = threedi_build_to_model(part.rel);
-				if (static_cast<float>(given.x) != static_cast<float>(rel.x)) rel.x = given.x;
-				if (static_cast<float>(given.y) != static_cast<float>(rel.y)) rel.y = given.y;
-				if (static_cast<float>(given.z) != static_cast<float>(rel.z)) rel.z = given.z;
+			const auto pivot = [](const ThreediBuildPart &p, float out[3]) {
+				const ThreediBuildVec3 d = threedi_build_to_model(p.pivot);
+				out[0] = static_cast<float>(d.x);
+				out[1] = static_cast<float>(d.y);
+				out[2] = static_cast<float>(d.z);
+			};
+			pivot(part, ro.abs);
+			// rel: the pivot less its parent's, in float from the float centre
+			// points, the model x term negated after the subtraction as the
+			// mission -> model map meets it (-(y - parent y)), so equal pivots
+			// store -0: the root (its own parent) stores (-0, 0, 0) whatever its
+			// pivot, and a part whose parent is -1 its own pivot [5fc5b4f6a^:
+			// engine/formats/oed/rdta.cpp, the ROBJ rel/abs block]. That rule
+			// reproduces all 3,299 self-parented JO parts and 40,863 of 40,935
+			// rel words.
+			if (part.parent < 0 || part.parent >= static_cast<int>(src.parts.size())) {
+				for (int k = 0; k < 3; ++k) ro.rel[k] = ro.abs[k];
+			} else {
+				float parent_abs[3];
+				pivot(src.parts[part.parent], parent_abs);
+				ro.rel[0] = -((-ro.abs[0]) - (-parent_abs[0]));
+				ro.rel[1] = ro.abs[1] - parent_abs[1];
+				ro.rel[2] = ro.abs[2] - parent_abs[2];
 			}
-			ro.rel[0] = static_cast<float>(rel.x);
-			ro.rel[1] = static_cast<float>(rel.y);
-			ro.rel[2] = static_cast<float>(rel.z);
 			double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
+			std::vector<const ThreediVertex *> authored; // the vertices the part's bounds cover
 			bool any = false;
 			// Opaque strips first, then alpha strips (the renderer's walk).
 			// A skinned model's strips are all owned by the root ROBJ while
@@ -366,8 +461,8 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 								mn[k] = std::min<double>(mn[k], v.position[k]);
 								mx[k] = std::max<double>(mx[k], v.position[k]);
 							}
-							max_radius = std::max(max_radius, std::sqrt(static_cast<double>(v.position[0]) * v.position[0] +
-									static_cast<double>(v.position[1]) * v.position[1] + static_cast<double>(v.position[2]) * v.position[2]));
+							reach(v);
+							authored.push_back(&v);
 						}
 						any = any || !strip.vertices.empty();
 						continue;
@@ -386,8 +481,8 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 							smn[k] = std::min<double>(smn[k], v.position[k]);
 							smx[k] = std::max<double>(smx[k], v.position[k]);
 						}
-						max_radius = std::max(max_radius, std::sqrt(static_cast<double>(v.position[0]) * v.position[0] +
-								static_cast<double>(v.position[1]) * v.position[1] + static_cast<double>(v.position[2]) * v.position[2]));
+						reach(v);
+						authored.push_back(&v);
 					}
 					for (int k = 0; k < 3; ++k) {
 						rec.min[k] = static_cast<float>(smn[k]);
@@ -406,11 +501,24 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 					else ++ro.num_strips;
 				}
 			}
+			// The part's sphere: its vertex box's centre and the farthest vertex
+			// from it, the distance taken wide and stored as a float (the retired
+			// port's WriteRDTA takes the farthest vertex too; 5fc5b4f6a^:
+			// engine/formats/oed/rdta.cpp). That reproduces 5,168 of the 5,932
+			// rigid JO parts and 244 of the 256 skinned mesh parts the corpus can
+			// attribute; the box's half-diagonal reproduces 704 and none.
 			if (any) {
 				for (int k = 0; k < 3; ++k) ro.bounding_center[k] = static_cast<float>((mn[k] + mx[k]) * 0.5);
-				double r = 0.0;
-				for (int k = 0; k < 3; ++k) r += (mx[k] - mn[k]) * (mx[k] - mn[k]) * 0.25;
-				ro.bounding_radius = static_cast<float>(std::sqrt(r));
+				double far2 = 0.0;
+				for (const ThreediVertex *v : authored) {
+					double d2 = 0.0;
+					for (int k = 0; k < 3; ++k) {
+						const double d = static_cast<double>(v->position[k]) - ro.bounding_center[k];
+						d2 += d * d;
+					}
+					far2 = std::max(far2, d2);
+				}
+				ro.bounding_radius = static_cast<float>(std::sqrt(far2));
 			}
 			parts.push_back(ro);
 		}
@@ -471,7 +579,7 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 	}
 	model.lods = out.lods.data();
 	model.lod_count = lod_count;
-	model.header.max_radius_fp16 = threedi_q16(max_radius);
+	model.header.max_radius_fp16 = threedi_q16_trunc(max_radius);
 
 	// --- materials, lights, points, registers, matrices ---
 	out.materials = m.materials;
@@ -504,17 +612,24 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 	// Every model carries a CDTA; one with no section still bounds LOD 0 in
 	// its CMDL (CNet01: no COBJ, a CMDL box over its render geometry).
 	{
-		// CMDL: the box and radii of the collision LOD's faces and LOD 0's
-		// render triangles, radii[2] the height (WriteCDTA runs ComputeLodBounds
-		// over both [orig: WriteCDTA @ 0x456050; 5fc5b4f6a^:engine/formats/oed/
-		// export_3di.cpp]). The bullet faces stand for the collision LOD, and
-		// every value here comes from the stored (quantized) positions so
-		// build(scene(x)) re-mints x byte for byte.
-		// The box envelops both LODs; the radii and height are the collision
-		// LOD's alone (retail: CNet01, no face, stores radii 0 and a height of
-		// -20000, the empty sentinels' span; Dblkhwk1's radii leave LOD 0 out).
+		// CMDL (WriteCDTA runs ComputeLodBounds over the collision LOD and
+		// LOD 0 [orig: WriteCDTA @ 0x456050; 5fc5b4f6a^:engine/formats/oed/
+		// export_3di.cpp]): the box envelops the collision LOD's faces (the
+		// bullet faces stand for it) and LOD 0's render triangles; the radii
+		// and the height (radii[2]) are the collision LOD's alone (retail
+		// CNet01, no face, stores radii 0 and a height of -20000, the empty
+		// sentinels' span; Dblkhwk1's radii leave LOD 0 out), each taken wide
+		// and stored as a float, as the exporter's LodBounds holds them.
+		// Every collision word derived here (CMDL, the section bounds and
+		// radius, a face's plane distance and box) comes from the STORED
+		// corners and normals, our rule: retail took them from the authored
+		// ones (97.7% of the JO CFAC box words and 97.5% of the COBJ bound
+		// words lie off the 8.8 grid the stored corners sit on), which the
+		// file does not keep, so no scene can carry them; deriving from what is
+		// stored lets build(scene(x)) re-mint a built model byte for byte.
 		double bmn[3] = {10000.0, 10000.0, 10000.0}, bmx[3] = {-10000.0, -10000.0, -10000.0};
-		double cmn_z = 10000.0, cmx_z = -10000.0, max_r = 0.0, max_rxy = 0.0;
+		double cmn_z = 10000.0, cmx_z = -10000.0;
+		float max_r = 0.0f, max_rxy = 0.0f;
 		auto expand = [&](double x, double y, double z) {
 			const double p[3] = {x, y, z};
 			for (int k = 0; k < 3; ++k) {
@@ -530,8 +645,8 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 					expand(x, y, z);
 					cmn_z = std::min(cmn_z, z);
 					cmx_z = std::max(cmx_z, z);
-					max_r = std::max(max_r, std::sqrt(x * x + y * y + z * z));
-					max_rxy = std::max(max_rxy, std::sqrt(x * x + y * y));
+					max_r = std::max(max_r, static_cast<float>(std::sqrt(x * x + y * y + z * z)));
+					max_rxy = std::max(max_rxy, static_cast<float>(std::sqrt(x * x + y * y)));
 				}
 		if (!m.lods.empty())
 			for (const ThreediBuildPart &part : m.lods[0].parts)
@@ -550,16 +665,22 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 			o.num_normals = static_cast<int32_t>(src.normals.size());
 			o.num_bounding_volumes = static_cast<int32_t>(src.volumes.size());
 			o.parent_subobject_index = src.parent_part;
-			o.offset[0] = threedi_q16(src.offset.x);
-			o.offset[1] = threedi_q16(src.offset.y);
-			o.offset[2] = threedi_q16(src.offset.z);
-			// The section's bounds cover its vertices and its volumes' boxes;
-			// its radius is the farthest VERTEX from their midpoint, so a
-			// volume-only section's is 0 (retail ships 52), and the stored
-			// midpoint is that of the truncated bounds [orig: WriteCOBJ @
-			// 0x454E70; 5fc5b4f6a^:engine/formats/oed/export_3di.cpp]. An empty
-			// section keeps the +-10000 sentinels. A bone section is bounded
-			// by the vertices the bone moves when the scene gives them.
+			// The offset truncates to 16.16 as WriteCOBJ stores it: truncating
+			// the part's float pivot gives all 15,837 JO section offset words,
+			// rounding 10,182.
+			o.offset[0] = threedi_q16_trunc(src.offset.x);
+			o.offset[1] = threedi_q16_trunc(src.offset.y);
+			o.offset[2] = threedi_q16_trunc(src.offset.z);
+			// The section's bounds cover its (stored) vertices and its volumes'
+			// boxes; its radius is the farthest VERTEX from their midpoint,
+			// taken wide and stored as a float, so a volume-only section's is 0
+			// (retail ships 52); the stored midpoint is the floor of the
+			// truncated bounds' mean (an arithmetic shift: all 5,046 odd-sum
+			// axes of the JO corpus round down, negative ones included)
+			// [orig: WriteCOBJ @ 0x454E70; 5fc5b4f6a^:engine/formats/oed/
+			// export_3di.cpp, whose `/ 2` truncates toward zero instead]. An
+			// empty section keeps the +-10000 sentinels. A bone section is
+			// bounded by the vertices the bone moves when the scene gives them.
 			double mn[3] = {kSentinel, kSentinel, kSentinel}, mx[3] = {-kSentinel, -kSentinel, -kSentinel};
 			double radius = 0.0;
 			if (src.sphere) {
@@ -590,13 +711,14 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 				const double mid[3] = {(mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5};
 				for (const ThreediCollisionVertex &v : src.vertices) {
 					const double d[3] = {v.position[0] - mid[0], v.position[1] - mid[1], v.position[2] - mid[2]};
-					radius = std::max(radius, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+					const float r = static_cast<float>(std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+					radius = std::max(radius, static_cast<double>(r));
 				}
 			}
 			for (int k = 0; k < 3; ++k) {
 				o.min[k] = threedi_q16_trunc(mn[k]);
 				o.max[k] = threedi_q16_trunc(mx[k]);
-				o.med[k] = (o.min[k] + o.max[k]) / 2;
+				o.med[k] = static_cast<int32_t>((static_cast<int64_t>(o.min[k]) + o.max[k]) >> 1);
 			}
 			if (src.sphere) {
 				// A bone section's stored midpoint is the sphere centre given.
@@ -678,7 +800,7 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 		}
 		col.model_data.radii[0] = fp(max_r);
 		col.model_data.radii[1] = fp(max_rxy);
-		col.model_data.radii[2] = fp(cmx_z - cmn_z);
+		col.model_data.radii[2] = fp(static_cast<float>(cmx_z - cmn_z));
 		col.model_data.num_vertices = static_cast<int32_t>(out.vertices.size());
 		col.model_data.num_normals = static_cast<int32_t>(out.normals.size());
 		col.model_data.num_faces = static_cast<int32_t>(out.faces.size());
@@ -734,14 +856,10 @@ int ThreediBuildModel::add_lod(int32_t threshold, const char *type) {
 	return static_cast<int>(lods.size()) - 1;
 }
 
-int ThreediBuildModel::add_part(int lod, int parent, ThreediBuildVec3 pivot, const ThreediBuildVec3 *rel) {
+int ThreediBuildModel::add_part(int lod, int parent, ThreediBuildVec3 pivot) {
 	ThreediBuildPart part;
 	part.parent = parent;
 	part.pivot = pivot;
-	if (rel != nullptr) {
-		part.has_rel = true;
-		part.rel = *rel;
-	}
 	lods[lod].parts.push_back(part);
 	return static_cast<int>(lods[lod].parts.size()) - 1;
 }
@@ -789,13 +907,15 @@ ThreediPartAnimation &ThreediBuildModel::add_panm(int lod, int part, int parent,
 
 int ThreediBuildModel::add_user_point(const char *point_name, ThreediBuildVec3 pos, ThreediBuildVec3 dir, int subobject,
 		int32_t type) {
+	// 16.16, truncated as the exporter stores a point (to_fixed_16_16 in the
+	// retired port; 5fc5b4f6a^:engine/formats/oed/export_3di.cpp).
 	ThreediUserPoint p{};
-	p.x = threedi_q16(pos.x);
-	p.y = threedi_q16(pos.y);
-	p.z = threedi_q16(pos.z);
-	p.rot_x = threedi_q16(dir.x);
-	p.rot_y = threedi_q16(dir.y);
-	p.rot_z = threedi_q16(dir.z);
+	p.x = threedi_q16_trunc(pos.x);
+	p.y = threedi_q16_trunc(pos.y);
+	p.z = threedi_q16_trunc(pos.z);
+	p.rot_x = threedi_q16_trunc(dir.x);
+	p.rot_y = threedi_q16_trunc(dir.y);
+	p.rot_z = threedi_q16_trunc(dir.z);
 	p.subobject_index = subobject;
 	p.userpoint_type = type;
 	std::snprintf(p.name, sizeof(p.name), "%s", point_name);
@@ -830,7 +950,7 @@ int ThreediBuildModel::add_light(ThreediBuildVec3 pos, double atten_start, doubl
 	l.rotation[0] = static_cast<float>(d.x) + 0.0f;
 	l.rotation[1] = static_cast<float>(d.y) + 0.0f;
 	l.rotation[2] = static_cast<float>(d.z) + 0.0f;
-	l.rotation[3] = std::cos(static_cast<float>(falloff) * 0.017453292f);
+	l.rotation[3] = std::cos(static_cast<float>(falloff) * kDegreeToRadian);
 	threedi_build_light_view_proj(l, static_cast<float>(falloff));
 	lights.push_back(l);
 	return static_cast<int>(lights.size()) - 1;
@@ -898,51 +1018,17 @@ double ThreediBuildModel::add_volume_mesh(int cobj, int32_t type, int32_t flags,
 	ThreediBuildCollisionObject &o = collision[cobj];
 	ThreediBuildVolumeSource src;
 	src.meshed = true;
-	float mn[3] = {0, 0, 0}, mx[3] = {0, 0, 0};
-	std::vector<std::array<float, 3>> p;
-	for (const ThreediBuildVec3 &v : verts) p.push_back({static_cast<float>(v.x), static_cast<float>(v.y), static_cast<float>(v.z)});
-	for (size_t i = 0; i < p.size(); ++i)
-		for (int k = 0; k < 3; ++k) {
-			mn[k] = i == 0 ? p[i][k] : std::min(mn[k], p[i][k]);
-			mx[k] = i == 0 ? p[i][k] : std::max(mx[k], p[i][k]);
-		}
-	struct Plane {
-		float n[3];
-		float d;
-	};
-	std::vector<Plane> planes = {{{1.f, 0.f, 0.f}, -mx[0]}, {{-1.f, 0.f, 0.f}, mn[0]}, {{0.f, 1.f, 0.f}, -mx[1]},
-			{{0.f, -1.f, 0.f}, mn[1]}, {{0.f, 0.f, 1.f}, -mx[2]}, {{0.f, 0.f, -1.f}, mn[2]}};
-	size_t last = 0;
+	const std::vector<std::array<float, 3>> p = float_points(verts);
+	OedPlaneTable table(p);
 	for (const std::array<int, 3> &t : tris) {
 		const std::array<float, 3> &a = p[t[0]], &b = p[t[1]], &c = p[t[2]];
-		const float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
-		const float e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
-		float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
-		const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-		int index = 0;
-		if (len > 0.0001f) {
-			const float inv = 1.0f / len;
-			for (float &x : n) x *= inv;
-			const float d = -(n[0] * a[0] + n[1] * a[1] + n[2] * a[2]);
-			bool matched = false;
-			for (size_t k = 0; k < planes.size(); ++k)
-				if (std::fabs(planes[k].n[0] - n[0]) <= 0.005f && std::fabs(planes[k].n[1] - n[1]) <= 0.005f &&
-						std::fabs(planes[k].n[2] - n[2]) <= 0.005f && std::fabs(planes[k].d - d) <= 0.03f) {
-					index = static_cast<int>(k);
-					last = k;
-					matched = true;
-				}
-			if (!matched) {
-				index = static_cast<int>(planes.size());
-				last = planes.size();
-				planes.push_back({{n[0], n[1], n[2]}, d});
-			}
-		}
-		src.face_planes.push_back(index);
+		src.face_planes.push_back(table.take(a, b, c, SIZE_MAX));
 		src.face_boxes.push_back({std::min({a[0], b[0], c[0]}), std::min({a[1], b[1], c[1]}), std::min({a[2], b[2], c[2]}),
 				std::max({a[0], b[0], c[0]}), std::max({a[1], b[1], c[1]}), std::max({a[2], b[2], c[2]})});
 	}
-	if (type == 4) std::swap(planes[0], planes[last]);
+	std::vector<OedPlaneTable::Plane> &planes = table.planes;
+	const float *mn = table.mn, *mx = table.mx;
+	if (type == 4) std::swap(planes[0], planes[table.last]);
 	ThreediBoundingVolume v{};
 	v.collidable_type = type;
 	v.flags = flags;
@@ -959,7 +1045,7 @@ double ThreediBuildModel::add_volume_mesh(int cobj, int32_t type, int32_t flags,
 		src.box[k + 3] = mx[k];
 	}
 	o.volume_sources.push_back(std::move(src));
-	for (const Plane &q : planes) {
+	for (const OedPlaneTable::Plane &q : planes) {
 		ThreediBoundingPlane plane{};
 		for (int k = 0; k < 3; ++k) plane.normal[k] = threedi_q14f_trunc(q.n[k]);
 		plane.radius = static_cast<float>(threedi_q16_trunc(q.d)) / io::kFp16One;
@@ -969,7 +1055,7 @@ double ThreediBuildModel::add_volume_mesh(int cobj, int32_t type, int32_t flags,
 	// bound: the volume is that solid, so a non-convex mesh loses the rest.
 	double outside = 0.0;
 	for (const std::array<float, 3> &v : p)
-		for (const Plane &q : planes)
+		for (const OedPlaneTable::Plane &q : planes)
 			outside = std::max(outside, static_cast<double>(q.n[0]) * v[0] + static_cast<double>(q.n[1]) * v[1] +
 					static_cast<double>(q.n[2]) * v[2] + q.d);
 	return outside;
@@ -978,9 +1064,6 @@ double ThreediBuildModel::add_volume_mesh(int cobj, int32_t type, int32_t flags,
 bool ThreediBuildModel::add_face(int cobj, uint16_t a, uint16_t b, uint16_t c, uint8_t poly_type,
 		uint32_t material_flags, const ThreediBuildVec3 *given) {
 	ThreediBuildCollisionObject &o = collision[cobj];
-	const ThreediCollisionVertex &va = o.vertices[a];
-	const ThreediCollisionVertex &vb = o.vertices[b];
-	const ThreediCollisionVertex &vc = o.vertices[c];
 	const ThreediBuildVec3 &pa = o.exact[a], &pb = o.exact[b], &pc = o.exact[c];
 	const double ex = pb.x - pa.x, ey = pb.y - pa.y, ez = pb.z - pa.z;
 	const double fx = pc.x - pa.x, fy = pc.y - pa.y, fz = pc.z - pa.z;
@@ -1024,12 +1107,12 @@ bool ThreediBuildModel::add_face(int cobj, uint16_t a, uint16_t b, uint16_t c, u
 	face.vert_index[2] = static_cast<int16_t>(c);
 	face.normal_index = normal_index;
 	// The face's plane as the runtime tests it (n . p + plane_dist, zero on
-	// the plane; collision_query.cpp): -(n . v0), and the corners' box,
-	// both truncated as WriteCFAC stores them [orig: WriteCFAC @ 0x454830;
-	// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp]. OED took them from the
-	// unquantized corner and normal; these come from the stored (CVRT,
-	// CNRM) ones, under 1/256 unit away, so build(scene(x)) re-mints x
-	// byte for byte.
+	// the plane; collision_query.cpp): -(n . v0), and the corners' box, both
+	// truncated as WriteCFAC stores them [orig: WriteCFAC @ 0x454830;
+	// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp], from the stored (CVRT,
+	// CNRM) corner and normal: our rule, as for every derived collision word
+	// (the assembly's CMDL note says why).
+	const ThreediCollisionVertex &va = o.vertices[a], &vb = o.vertices[b], &vc = o.vertices[c];
 	face.plane_dist_fp16 = threedi_q16_trunc(-(static_cast<double>(normal.normal[0]) * va.position[0] +
 			static_cast<double>(normal.normal[1]) * va.position[1] + static_cast<double>(normal.normal[2]) * va.position[2]));
 	double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
@@ -1057,7 +1140,9 @@ uint16_t ThreediBuildModel::add_collision_vertex(int cobj, ThreediBuildVec3 p) {
 	v.position[1] = threedi_q8f_trunc(p.y);
 	v.position[2] = threedi_q8f_trunc(p.z);
 	collision[cobj].vertices.push_back(v);
-	collision[cobj].exact.push_back(p);
+	// The authored corner as the exporter holds it, a float (a scene's %.9g
+	// text reads back to the float it printed, not to that float's value).
+	collision[cobj].exact.push_back(ThreediBuildVec3{static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)});
 	return static_cast<uint16_t>(collision[cobj].vertices.size() - 1);
 }
 
@@ -1066,55 +1151,28 @@ bool ThreediBuildModel::add_occ_record(uint8_t type, int section_a, int section_
 		const std::vector<std::array<double, 4>> &explicit_planes) {
 	ThreediBuildOcclusionRecord rec;
 	for (const ThreediBuildVec3 &v : verts) rec.vertices.push_back(occ_vertex(v));
-	std::vector<std::array<double, 4>> planes = explicit_planes;
 	std::vector<int> face_plane(faces.size(), 0);
 	for (size_t f = 0; f < faces.size(); ++f) face_plane[f] = faces[f][3];
-	if (explicit_planes.empty() && !verts.empty()) {
-		double mn[3] = {verts[0].x, verts[0].y, verts[0].z}, mx[3] = {verts[0].x, verts[0].y, verts[0].z};
-		for (const ThreediBuildVec3 &v : verts) {
-			const double p[3] = {v.x, v.y, v.z};
-			for (int k = 0; k < 3; ++k) {
-				mn[k] = std::min(mn[k], p[k]);
-				mx[k] = std::max(mx[k], p[k]);
-			}
-		}
-		planes = {{1, 0, 0, -mx[0]}, {-1, 0, 0, mn[0]}, {0, 1, 0, -mx[1]}, {0, -1, 0, mn[1]}, {0, 0, 1, -mx[2]},
-				{0, 0, -1, mn[2]}};
+	const auto plane = [&rec](double nx, double ny, double nz, double d) {
+		const ThreediBuildVec3 n = threedi_build_to_model(ThreediBuildVec3{nx, ny, nz});
+		ThreediOcclusionPlane q{};
+		q.normal[0] = static_cast<float>(n.x);
+		q.normal[1] = static_cast<float>(n.y);
+		q.normal[2] = static_cast<float>(n.z);
+		q.radius = static_cast<float>(d);
+		rec.planes.push_back(q);
+	};
+	if (!explicit_planes.empty() || verts.empty()) {
+		for (const std::array<double, 4> &q : explicit_planes) plane(q[0], q[1], q[2], q[3]);
+	} else {
+		const std::vector<std::array<float, 3>> p = float_points(verts);
+		OedPlaneTable table(p);
 		for (size_t f = 0; f < faces.size(); ++f) {
 			if (face_plane[f] >= 0) continue;
-			const ThreediBuildVec3 &p0 = verts[faces[f][0]], &p1 = verts[faces[f][1]], &p2 = verts[faces[f][2]];
-			const float e1[3] = {static_cast<float>(p1.x - p0.x), static_cast<float>(p1.y - p0.y),
-					static_cast<float>(p1.z - p0.z)};
-			const float e2[3] = {static_cast<float>(p2.x - p0.x), static_cast<float>(p2.y - p0.y),
-					static_cast<float>(p2.z - p0.z)};
-			float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
-			const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-			int index = 0;
-			if (len > 0.0001f) {
-				for (float &c : n) c /= len;
-				const double d = -(n[0] * p0.x + n[1] * p0.y + n[2] * p0.z);
-				index = -1;
-				for (size_t k = 0; k < planes.size(); ++k)
-					if (std::fabs(planes[k][0] - n[0]) <= 0.005 && std::fabs(planes[k][1] - n[1]) <= 0.005 &&
-							std::fabs(planes[k][2] - n[2]) <= 0.005 && std::fabs(planes[k][3] - d) <= 0.03)
-						index = static_cast<int>(k);
-				if (index < 0) {
-					if (planes.size() >= 32) return false;
-					index = static_cast<int>(planes.size());
-					planes.push_back({n[0], n[1], n[2], d});
-				}
-			}
-			face_plane[f] = index;
+			face_plane[f] = table.take(p[faces[f][0]], p[faces[f][1]], p[faces[f][2]], 32);
+			if (face_plane[f] < 0) return false;
 		}
-	}
-	for (const std::array<double, 4> &p : planes) {
-		const ThreediBuildVec3 n = threedi_build_to_model(ThreediBuildVec3{p[0], p[1], p[2]});
-		ThreediOcclusionPlane plane{};
-		plane.normal[0] = static_cast<float>(n.x);
-		plane.normal[1] = static_cast<float>(n.y);
-		plane.normal[2] = static_cast<float>(n.z);
-		plane.radius = static_cast<float>(p[3]);
-		rec.planes.push_back(plane);
+		for (const OedPlaneTable::Plane &q : table.planes) plane(q.n[0], q.n[1], q.n[2], q.d);
 	}
 	for (size_t f = 0; f < faces.size(); ++f)
 		rec.faces.push_back(occ_face(faces[f][0], faces[f][1], faces[f][2], face_plane[f]));

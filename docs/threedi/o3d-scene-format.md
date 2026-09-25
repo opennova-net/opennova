@@ -96,18 +96,32 @@ by 0.01 lies inside another type-1 volume's box in any section; the last
 triangle on a plane decides ([orig: ConvertToInternal @ 0x4268B3]).
 
 The derived collision values follow OED's writer (5fc5b4f6a^
-`engine/formats/oed/export_3di.cpp`), truncated as it truncates them and taken
-from the stored positions, so `build(scene(x))` stays exact: CVRT on the 8.8
-grid; CNRM Q14 with the dominant axis chosen on those integers (z, then y,
-only when strictly largest); a section's bounds over its vertices and volume
-boxes, its radius the farthest vertex from their midpoint (a volume-only
-section's is 0); the CMDL box over every bullet face and LOD 0's triangles,
-its radii and height (`radii[2]`) over the bullet faces alone (retail CNet01,
-with none, stores 0, 0 and -20000; OED's port folded LOD 0 into the radii
-too, which the corpus does not). Tangents: each triangle's dP/du and dP/dv
-from its UVs, summed over the triangles sharing a vertex of the same part,
-position and normal, normalized (a triangle with degenerate UVs reuses the
-previous one's).
+`engine/formats/oed/export_3di.cpp`), truncated as it truncates them: CVRT on
+the 8.8 grid; CNRM Q14 with the dominant axis chosen on those integers (z,
+then y, only when strictly largest); a section's offset (the part pivot) and
+bounds over its vertices and volume boxes, its midpoint the floor of the
+bounds' mean (all 5,046 odd-sum axes of the JO corpus round down), its radius
+the farthest vertex from that midpoint (a volume-only section's is 0); the
+CMDL box over every bullet face and LOD 0's triangles, its radii and height
+(`radii[2]`) over the bullet faces alone (retail CNet01, with none, stores 0,
+0 and -20000; OED's port folded LOD 0 into the radii too, which the corpus
+does not); a bullet face's plane distance and box. Those last words come from
+the stored corners and normals, our rule: retail took them from the authored
+corners (97.7% of the JO CFAC box words lie off the 8.8 grid the stored
+corners sit on), which the file does not keep, so no scene could carry them,
+and deriving from what is stored lets `build(scene(x))` re-mint a built model
+byte for byte.
+
+The render words: GHDR's radius is the farthest render vertex from the origin,
+truncated (932 of the 958 JO models; rounding gives 486); a part's sphere is
+its vertex box's centre and the farthest vertex from it (5,168 of 5,932 rigid
+parts and 244 of 256 attributable skinned ones; the box's half-diagonal gives
+704 and none); a part's `rel` is its pivot less its parent's in float, the
+root's (-0, 0, 0) and a parentless part's its own pivot (40,863 of 40,935
+words); user points and section offsets truncate to 16.16. Tangents: each
+triangle's dP/du and dP/dv from its UVs, summed over the triangles sharing a
+vertex of the same part, position and normal, normalized (a triangle with
+degenerate UVs reuses the previous one's).
 
 ## Validation
 

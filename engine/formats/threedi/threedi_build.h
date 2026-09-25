@@ -112,14 +112,7 @@ struct ThreediBuildStrip {
 
 struct ThreediBuildPart {
 	int parent = 0; // the root references itself
-	ThreediBuildVec3 pivot;     // mission axes (ROBJ abs)
-	// The parent-relative pivot (ROBJ rel) when the caller carries it as an
-	// exact value of its own (a scene node's local origin). Assembly derives
-	// abs - parent abs and takes this value only where the two differ as
-	// floats (a recipe's double pivots leave a rel the float abs cannot
-	// re-derive), so the derived signed-zero convention survives.
-	bool has_rel = false;
-	ThreediBuildVec3 rel;
+	ThreediBuildVec3 pivot;     // mission axes (ROBJ abs; rel is derived from it)
 	std::vector<ThreediBuildStrip> strips;
 };
 
@@ -144,7 +137,9 @@ struct ThreediBuildCollisionObject {
 	int parent_part = 0;
 	ThreediBuildVec3 offset; // mission axes
 	std::vector<ThreediCollisionVertex> vertices;
-	std::vector<ThreediBuildVec3> exact; // the unquantized positions face normals are taken from
+	// The authored positions (floats, before the 8.8 grid) face normals are
+	// taken from, so a face the grid collapses keeps its normal.
+	std::vector<ThreediBuildVec3> exact;
 	std::vector<ThreediCollisionNormal> normals;
 	std::vector<ThreediCollisionFace> faces;
 	std::vector<ThreediBoundingVolume> volumes;
@@ -205,7 +200,7 @@ struct ThreediBuildModel {
 
 	// --- render ------------------------------------------------------------
 	int add_lod(int32_t threshold = 0, const char *type = "gnrc");
-	int add_part(int lod, int parent, ThreediBuildVec3 pivot, const ThreediBuildVec3 *rel = nullptr);
+	int add_part(int lod, int parent, ThreediBuildVec3 pivot);
 	int add_material(const char *shader, const char *texture, uint8_t slot = THREEDI_TEX_SLOT_DIFFUSE);
 	// The RGB generator on a material (styles > 112 read CTRL register `reg`).
 	void set_rgb_gen(int material, uint8_t style, int reg, double rate, const int start_rgb[3], const int end_rgb[3]);

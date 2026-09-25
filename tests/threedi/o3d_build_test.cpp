@@ -146,6 +146,58 @@ int main(int argc, char **argv) {
 		refuses("cxlt-malformed", rigid + "cxlt 1 2\n");
 	}
 
+	// The derived words follow the exporter's quantization
+	// (docs/threedi/o3d-scene-format.md, "derived collision values").
+	{
+		const std::string text =
+				"o3d 1\nmodel RULES\nmaterial FF_ST_OP\nlod 0\npart 0 1 2 3\n"
+				// A diamond: its farthest vertex (1) is not its box's corner (1.414).
+				"strip 0\nv 1 0 0 0 0 1 0 0\nv 0 1 0 0 0 1 0 0\nv -1 0 0 0 0 1 0 0\nv 0 -1 0 0 0 1 0 0\n"
+				"t 0 1 2\nt 0 2 3\n"
+				// 1 + 3/262144 (a float): 65536.75 in 16.16, truncated to 65536.
+				"part 0 1.00001144 2 3\nstrip 0\nv 1.00001144 0 0 0 0 1 0 0\nv 0 0.5 0 0 0 1 0 0\nv 0 0 0.5 0 0 0 0 0\nt 0 1 2\n"
+				"userpoint p 0.1 0 0 0 0 1 0\n"
+				"cobj 0 0.1 0 0\ncv 0 0 1\ncv 1 0 1\ncv 0 1 1\ncf 0 1 2\n"
+				// x spans -2 .. 1 in 16.16: a midpoint of -0.5, which floors to -1.
+				"cobj 0 0 0 0\ncvol 1 0 -0.000030517578125 0 0 0.0000152587890625 1 1\n";
+		round_trip("rules", text);
+		Threedi3di3 m{};
+		if (threedi_3di3_read(path_of("rules", ".3di").c_str(), &m) == 0 && m.collision != nullptr &&
+				m.collision->object_count == 2 && m.lod_count == 1 && m.lods[0].render_object_count == 2) {
+			const ThreediRenderObject *ro = m.lods[0].render_objects;
+			const ThreediCollisionObject *o = m.collision->objects;
+			check(m.header.max_radius_fp16 == 65536, "rules: GHDR radius truncates [orig: WriteGHDR]");
+			check(m.user_points[0].x == 6553, "rules: user points truncate");
+			check(o[0].offset[0] == 6553, "rules: section offsets truncate");
+			check(ro[0].bounding_radius == 1.0f, "rules: a part's radius is its farthest vertex");
+			// The root stores rel (-0, 0, 0) whatever its pivot; a part whose
+			// pivot shares its parent's y stores -0 in model x.
+			uint32_t rel0[3], rel1;
+			std::memcpy(rel0, ro[0].rel, sizeof(rel0));
+			std::memcpy(&rel1, &ro[1].rel[0], sizeof(rel1));
+			check(rel0[0] == 0x80000000u && rel0[1] == 0 && rel0[2] == 0, "rules: the root's rel is (-0, 0, 0)");
+			check(rel1 == 0x80000000u, "rules: an equal pivot y stores -0");
+			check(o[1].min[0] == -2 && o[1].max[0] == 1 && o[1].med[0] == -1,
+					"rules: the section midpoint floors (-1 / 2 -> -1, not 0)");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "rules: read back");
+		}
+		// The vertexless occlusion record's centre is the 0/0 NaN retail ChmLFP1
+		// stores: (+nan, -nan, -nan) in model axes.
+		round_trip("occ-empty", "o3d 1\nmodel OCC\nlod 0\npart 0 0 0 0\nocc 2 0 0\nop 1 0 0 0\nop -1 0 0 0\n"
+				"op 0 1 0 0\nop 0 -1 0 0\nop 0 0 1 0\nop 0 0 -1 0\n");
+		if (threedi_3di3_read(path_of("occ-empty", ".3di").c_str(), &m) == 0 && m.occlusion_object_count == 1) {
+			uint32_t c[3];
+			std::memcpy(c, m.occlusion_objects[0].position, sizeof(c));
+			check(c[0] == 0x7FC00000u && c[1] == 0xFFC00000u && c[2] == 0xFFC00000u,
+					"occ-empty: a vertexless record's centre is retail's NaN");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "occ-empty: read back");
+		}
+	}
+
 	// A light's rate and phase pack as WriteLGHT packs them: times 256 in
 	// float, truncated (0.1 -> 25, 0.3 -> 76; rounding gave 26 and 77).
 	{
