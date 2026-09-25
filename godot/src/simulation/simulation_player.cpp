@@ -8,6 +8,7 @@
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/music_vars.h>
 #include <runtime/world/player_view.h>
+#include <runtime/renderer/render_slot_shadow.h>
 
 
 using namespace sim_internal;
@@ -92,7 +93,8 @@ bool Simulation::slot_march_facts(int p_wire_handle, int p_bms_id,
 		entity = kernel_->world.registry.get(handle_for_bms_id(p_bms_id));
 	}
 	if (entity == nullptr) return false;
-	r_flags_zero = (entity->flags | entity->engine_flags) == 0;
+	r_flags_zero = opennova::renderer::slot_entity_flags_zero(entity->flags,
+			entity->engine_flags, entity->item_type);
 	r_bbox_center = Vector3(entity->bbox_center.x, entity->bbox_center.y,
 			entity->bbox_center.z);
 	return true;

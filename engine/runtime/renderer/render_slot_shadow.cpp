@@ -300,6 +300,13 @@ std::array<float, 3> slot_march_start(const std::array<float, 3> &position,
 	return out;
 }
 
+bool slot_entity_flags_zero(uint32_t flags, uint32_t engine_flags, int item_type) {
+	// `or dword [esi+24h], 400h` for ItemDefType 1
+	// [orig: Entity_InitFromModel @ 0x40e208..0x40e20a].
+	const uint32_t vehicle_reflectable = item_type == 1 ? 0x400u : 0u;
+	return (flags | engine_flags | vehicle_reflectable) == 0;
+}
+
 std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		const std::array<float, 3> &direction,
 		const std::function<float(float, float)> &terrain_height,

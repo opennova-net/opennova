@@ -229,6 +229,12 @@ int main() {
 		const auto flagged = slot_march_start(pos, false, identity, {1.0f, 2.0f, 1.5f});
 		CHECK(near_f(flagged[0], 10.0f) && near_f(flagged[1], 2.0f) &&
 				near_f(flagged[2], -5.0f));
+		// The Flags dword read: a vehicle carries the REFLECTABLE bit even
+		// with both sim words clear [orig: Entity_InitFromModel @ 0x40e20a].
+		CHECK(slot_entity_flags_zero(0u, 0u, 3));
+		CHECK(!slot_entity_flags_zero(0u, 0u, 1));
+		CHECK(!slot_entity_flags_zero(0x100u, 0u, 3));
+		CHECK(!slot_entity_flags_zero(0u, 0x4000000u, 0));
 		// Yawed 90 degrees about up (x -> -z, z -> x): the local offset rotates.
 		const std::array<std::array<float, 3>, 3> yaw90{{
 				{0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}};

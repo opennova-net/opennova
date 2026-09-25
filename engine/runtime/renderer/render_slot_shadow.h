@@ -304,6 +304,14 @@ std::array<float, 3> slot_march_start(const std::array<float, 3> &position,
 		bool flags_zero, const std::array<std::array<float, 3>, 3> &basis_columns,
 		const std::array<float, 3> &bbox_center_mission);
 
+// Whether that Flags dword is zero, from the sim's split view of it: the
+// runtime mirror `flags`, the spawn-composed `engine_flags`, and the
+// REFLECTABLE bit 0x400 Entity_InitFromModel sets on every vehicle
+// [orig: @ 0x40e208..0x40e20a, ItemDefType(+0x5C) == 1], which the sim keeps
+// as the item-type trait (mission::item_is_mirror_reflected) instead of a
+// flag bit. Every vehicle therefore marches from its position.
+bool slot_entity_flags_zero(uint32_t flags, uint32_t engine_flags, int item_type);
+
 // Marches from the start (slot_march_start) along the (downward) slot
 // direction in unit-planar steps until the terrain height reaches the ray;
 // the vertical step keeps the direction's own rate and is SUBSTITUTED by
