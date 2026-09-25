@@ -529,7 +529,7 @@ class Loader:
                 parent = rows[i]["parent"]
                 if 0 <= parent < i:
                     bones[i].parent = bones[parent]
-        self.pending = (arm, root, parts, count, pivots, above)
+        self.pending = (arm, root, parts, centers, count, pivots, above)
         return arm
 
     def attach_parts(self):
@@ -542,9 +542,11 @@ class Loader:
         (Mp5b_1st's scales run 0.9995 to 1.0005). A following part hangs from
         the LOD root, so it moves once, not again through a part above it, and
         keeps the model hierarchy in a `~PPx attach` helper: its own when it
-        has one (the helper's position is the part's CXLT row), else a new one
-        at its pivot."""
-        arm, root, parts, count, pivots, above = self.pending
+        has one, else a new one at its pivot. In the collision LOD a helper is
+        also the part's attach point (export.py), and a new one on the part's
+        origin reads back as the very pivot, the row the builder would derive,
+        so the model still exports the same bytes."""
+        arm, root, parts, centers, count, pivots, above = self.pending
         self.pending = None
         # By NAME through the part order: Blender keeps its bones sorted by name,
         # so the collection's order is not the part order once the clip has
@@ -586,7 +588,9 @@ class Loader:
             self.undo.append(lambda helper=helper: bpy.data.objects.remove(helper))
             helper.parent = ob
             helper.matrix_parent_inverse = Matrix.Identity(4)
-            helper.matrix_world = Matrix.Translation(pivots[i])
+            if i in centers:
+                # A `_## center` pivot: the helper sits there.
+                helper.matrix_world = Matrix.Translation(pivots[i])
 
     # --- the run ------------------------------------------------------------
     def run(self):

@@ -24,9 +24,12 @@
 #   ## Mesh<n>    Mesh: render geometry of part ##.
 #   _## center    helper: part ##'s pivot.
 #   ~PPx attach   helper under a child part: that child's parent is part PP
-#                 (00 = -1, a part's own number = itself). The collision LOD's
-#                 helpers are also its CXLT attach points, one row each, in
-#                 part then x order; without any, the builder derives them.
+#                 (00 = -1, a part's own number = itself); the first in x
+#                 order counts. In the collision LOD it is also the part's
+#                 CXLT attach point: with any helper there, every section the
+#                 count rule gives a row (a rigid model's after the root, a
+#                 skinned model's all) takes its helper's, else its pivot;
+#                 without any, the builder derives the rows at the pivots.
 #                 A skinned model's helper sits under its part's bone (or its
 #                 mesh part's mesh); the bone hierarchy stays its parent.
 #   UP<c>## <lbl> helper: user point, type letter c (G gameplay, S effect),
@@ -289,6 +292,7 @@ class Lod:
         self.centers = {}   # part index -> helper
         self.attach = {}    # child part index -> parent part index
         self.attach_points = []  # (part index, x rank, name, parent, helper)
+        self.anchors = {}   # part index -> its first attach helper
         self.points = []    # (type letter, part index or -1, label, object)
         self.lights = []    # (part index, object)
         self.occluders = []  # (type, section, connecting, object)
@@ -568,19 +572,17 @@ class Exporter:
             for index, ob in lod.centers.items():
                 if index not in lod.parts:
                     self.note(f"{ob.name}: there is no PN{index + 1:02d}; not exported")
-        # The attach helpers: each part's first (in x order) names its parent;
-        # a skinned part's parent stays its bone's.
-        first = {}
+        # The attach helpers: each part's first (in x order) names its parent
+        # and is its attach point; a skinned part's parent stays its bone's.
         lod.attach_points.sort(key=lambda e: (e[0], e[1], e[2], e[4].name))
         for child, _, name, parent, ob in lod.attach_points:
             if child not in lod.parts:
                 raise ExportError(f"{ob.name}: its part {child + 1:02d} does not exist")
-            if child in first:
-                if parent != first[child][0]:
-                    self.note(f"{ob.name}: part {child + 1:02d} takes its parent from '{first[child][1]}'; this "
-                              "helper is an attach point only")
+            if child in lod.anchors:
+                self.note(f"{ob.name}: part {child + 1:02d} takes its parent and attach point from "
+                          f"'{lod.anchors[child].name}'; this helper is not exported")
                 continue
-            first[child] = (parent, ob.name)
+            lod.anchors[child] = ob
             if lod.armature is None:
                 lod.attach[child] = parent
             elif parent != self.part_parent(lod, child):
@@ -1068,10 +1070,11 @@ class Exporter:
                 raise ExportError(f"{ob.name}: its section {part + 1:02d} is not a part of the collision LOD "
                                   f"(LOD {self.props.poly_collision_lod} has {count})")
             sections[part]["volumes"].append((key, vtype, flags, ob))
+        # Every section sits at its part's pivot (the COBJ offset retail
+        # carries: Dtruck2's wheels, Dblkhwk1's rotors).
+        pivots = [self.part_pivot(bullet, i) for i in range(count)]
         for i, s in enumerate(sections):
-            # Every section sits at its part's pivot (the COBJ offset / CXLT
-            # translation retail carries: Dtruck2's wheels, Dblkhwk1's rotors).
-            lines.append(f"cobj {self.part_parent(bullet, i)} " + fmt(*self.part_pivot(bullet, i)))
+            lines.append(f"cobj {self.part_parent(bullet, i)} " + fmt(*pivots[i]))
             if self.skinned and not s["verts"]:
                 # The retail person layout: a bone's section is bounded by
                 # every LOD 0 vertex the bone moves, its radius the farthest of
@@ -1098,12 +1101,29 @@ class Exporter:
                     lines.append("vv " + fmt(*v))
                 for t in tris:
                     lines.append(f"vf {t[0]} {t[1]} {t[2]}")
-        # CXLT: the collision LOD's attach points, as OED's WriteCXLT wrote
-        # them (5fc5b4f6a^ export_3di.cpp, "CXLT: attach points"), one row per
-        # `~PPx attach` helper in part then x order; with none, the builder
-        # derives the rows retail's count rule gives.
-        for child, _, _, _, ob in bullet.attach_points:
-            lines.append("cxlt " + fmt(*self.space.mission(self.space.world(ob).translation)) + f"  # {ob.name}")
+        # CXLT: the collision LOD's attach points, which OED's WriteCXLT wrote
+        # (5fc5b4f6a^ export_3di.cpp, "CXLT: attach points"). A scene holds
+        # them for only some parts (the importer gives one to a part that
+        # names itself or none, a rigid rig's parts get one each), so with
+        # any helper in the LOD every row the retail count gives is written
+        # (one per section after the root on a rigid model, one per section
+        # on a skinned one, as the corpus stores them and the builder derives
+        # them), each at its part's first helper, else at its pivot through
+        # the very values its cobj line carries, so the CLI reads a row the
+        # builder would derive as that row (our rule: OED wrote a row per
+        # helper). With no helper the builder derives every row.
+        if not bullet.anchors:
+            return
+        first = 0 if self.skinned else 1
+        if first and 0 in bullet.anchors:
+            self.note(f"{bullet.anchors[0].name}: a rigid model stores no attach point for its root section; "
+                      "this one is not exported")
+        for i in range(first, count):
+            ob = bullet.anchors.get(i)
+            if ob is None:
+                lines.append("cxlt " + fmt(*pivots[i]) + f"  # section {i}: its pivot")
+            else:
+                lines.append("cxlt " + fmt(*self.space.mission(self.space.world(ob).translation)) + f"  # {ob.name}")
 
     # --- driver -------------------------------------------------------------
     def run(self):

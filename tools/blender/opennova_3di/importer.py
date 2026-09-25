@@ -523,7 +523,7 @@ class Builder:
                 # A part that is its own parent (Eturret, APLFP1) or names -1
                 # (Excavatr): the Blender hierarchy cannot say it, an attach
                 # helper can (`~PP attach`, PP its own number or 00).
-                objs.append(self.attach_helper(li, pi, ob, parent, world))
+                objs.append(self.attach_helper(li, pi, ob, parent))
             if row is not None:
                 self.tracks(ob.o3d, row, lod)
             if part["strips"]:
@@ -544,14 +544,22 @@ class Builder:
             self.lod0_parts = {i: ob for i, ob in enumerate(parts)}
         return objs
 
-    def attach_helper(self, li, pi, parent_ob, parent, world, bone=None):
+    def attach_helper(self, li, pi, parent_ob, parent, world=None, bone=None):
         """Part pi's `~PP attach` helper in LOD li, naming its parent part
         (PP 1-based; 00 for -1), at `world`: under its PN## empty, or on a
-        skinned model under its bone (or its mesh part's mesh)."""
+        skinned model under its bone (or its mesh part's mesh). Without a
+        `world` it sits on its PN## empty's origin, the part's pivot, with no
+        offset of its own, so it reads back as the very pivot (its attach
+        point is then the row the builder would derive)."""
         ob = bpy.data.objects.new(f"~{parent + 1 if parent >= 0 else 0:02d} attach", None)
         ob.empty_display_type = "PLAIN_AXES"
         ob.empty_display_size = 0.05
-        if bone is None:
+        if world is None:
+            self.collection.objects.link(ob)
+            ob.parent = parent_ob
+            ob.matrix_parent_inverse = Matrix.Identity(4)
+            self.world[ob.name] = self.world[parent_ob.name]
+        elif bone is None:
             self.link(ob, parent_ob, world, self.world[parent_ob.name])
         else:
             # A bone child hangs off the bone's tail, at rest here.
@@ -581,7 +589,7 @@ class Builder:
         first = 0 if self.sc["skinned"] else 1
         if len(rows) != len(parts) - first:
             self.note(f"{len(rows)} CXLT attach points do not fit the collision LOD's {len(parts)} parts (one per "
-                      f"part{'' if first == 0 else ' after the root'}); export derives them")
+                      f"part{'' if first == 0 else ' after the root'}); export puts each at its part's pivot")
             return
         for i, row in enumerate(rows):
             pi = i + first

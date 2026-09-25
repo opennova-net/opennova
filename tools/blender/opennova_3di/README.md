@@ -80,9 +80,12 @@ F16_LOD1              Empty, _lod_index = 1 (same names; Blender's .001 is ignor
 
 A part's `~PPx attach` helper names its parent part `PP` (`00` for none, the
 part's own number for itself, both of which retail ships). In the collision LOD
-the helpers are also the attach points the game stores for its sections, one
-per helper; without any, export derives them from the part pivots. Export
-warns about any object whose name it does not use.
+a part's helper is also the attach point the game stores for its section: when
+that LOD holds any helper, export writes an attach point for every section
+after the root (every section on a skinned model), at the section's helper or,
+where it has none, at its pivot. Without any helper, export leaves them to the
+builder, which puts each at its section's pivot. Export warns about any object
+whose name it does not use.
 
 Add Model (in the sidebar) makes a model root and its `_LOD0` root to start
 from.
