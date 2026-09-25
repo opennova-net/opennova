@@ -109,6 +109,32 @@ func test_bodies_draw_their_authored_material_through_the_sky_hook() -> void:
 				"the overlay stage draws the glow; its mesh keeps the default rung")
 
 
+func test_a_rebuilt_body_scene_rebinds_the_sky_hook() -> void:
+	# A model scene rebuild mints fresh surface materials; the next frame must
+	# bind them to the sky hook again, or the disc would draw as a plain
+	# object 64 u ahead of the eye, over the world.
+	var fixture := _make_fixture("", SKY_BODY_NAME)
+	var celestial: Celestial = fixture.celestial
+	var sun := celestial.get_node_or_null("Celestial_sun") as ObjectModel
+	assert_not_null(sun)
+	if sun == null:
+		return
+	var serial_before := sun.get_scene_build_serial()
+	sun.rebuild()
+	assert_ne(sun.get_scene_build_serial(), serial_before, "the rebuild minted a new scene")
+	celestial.advance_frame(TICK)
+	var materials := _body_materials(sun)
+	assert_gt(materials.size(), 0)
+	for material in materials:
+		assert_eq(material.get_shader_parameter("u_sky_body"), true)
+		assert_eq(material.get_shader_parameter("u_sky_far_pin"), true)
+		assert_eq(material.render_priority, ObjectShaderCache.RENDER_RUNG_SKY_BODY)
+	var body: Dictionary = (celestial.get_diagnostics().get("bodies", {})
+			as Dictionary).get("sun", {})
+	assert_eq(int(body.get("sky_hooked_surfaces", -1)), int(body.get("surfaces", -2)),
+			"every live sun surface carries the sky hook")
+
+
 func test_upl_intensity_drives_the_authored_self_lum() -> void:
 	# The submit alpha lands in CTRL register 32 (UPL_INTENSITY), which the
 	# material's RgbGen style 113 reads into SelfLumColor. Without a moon model

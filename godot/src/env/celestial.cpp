@@ -250,55 +250,81 @@ void Celestial::_rebuild_if_needed() {
 		Body body;
 		body.model = model;
 		body.disc = spec.key == "sun" || spec.key == "moon";
-		_collect_meshes(model, body.meshes);
-		const Array surface_materials = model->get_surface_materials();
-		const PackedInt32Array surface_indices = model->get_surface_material_indices();
-		for (MeshInstance3D *mesh_instance : body.meshes) {
-			// The vertex stage relocates the body for the active render-pass
-			// camera. Keep the source-camera AABB/occlusion result from
-			// rejecting the mirror pass before that relocation reaches the GPU.
-			mesh_instance->set_extra_cull_margin(1.0e6);
-			mesh_instance->set_ignore_occlusion_culling(true);
-			mesh_instance->set_cast_shadows_setting(
-					GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-			const Ref<ShaderMaterial> material = mesh_instance->get_material_override();
-			int material_index = -1;
-			for (int64_t i = 0; i < surface_materials.size(); ++i) {
-				if (Ref<ShaderMaterial>(surface_materials[i]) == material) {
-					material_index = surface_indices[i];
-					break;
-				}
-			}
-			body.materials.push_back(material);
-			body.material_indices.push_back(material_index);
-			// The Q3 redraw: the discs and the glow are the bloom pass's own
-			// submits, drawn only for a glow-capable (LUM) material, blended
-			// as that material is classified (the registry reads the
-			// classification); the glint is never redrawn.
-			opennova::renderer::ObjectMaterialClassification classification;
-			const bool glow = spec.q3_drawn && material.is_valid() &&
-					FrameFx::q3_object_material_classification(material,
-							classification) &&
-					classification.is_glow_capable;
-			if (glow) {
-				FrameFx::register_q3_source(mesh_instance, spec.q3_source);
-			} else {
-				FrameFx::unregister_q3_source(mesh_instance);
-			}
-		}
-		_set_body_parameter(body, "u_sky_body", true);
-		_set_body_parameter(body, "u_sky_far_pin", body.disc);
-		if (body.disc) {
-			_stamp_environment_capture_layer(model);
-		} else {
-			// The glow and the glint are main-frame draws: the water mirror's
-			// scene never submits them in its base pass.
-			_set_body_parameter(body, "u_sky_mirror_drawn", false);
-			_set_body_parameter(body, "u_sky_beauty_drawn", false);
-		}
+		body.q3_source = spec.q3_source;
+		body.q3_drawn = spec.q3_drawn;
+		_bind_body_surfaces(body);
 		bodies_[spec.key] = body;
 	}
 	_apply_sky_pass_gates();
+}
+
+void Celestial::_bind_body_surfaces(Body &p_body) {
+	ObjectModel *model = p_body.model;
+	p_body.meshes.clear();
+	p_body.materials.clear();
+	p_body.material_indices.clear();
+	p_body.build_serial = model->get_scene_build_serial();
+	_collect_meshes(model, p_body.meshes);
+	const Array surface_materials = model->get_surface_materials();
+	const PackedInt32Array surface_indices = model->get_surface_material_indices();
+	for (MeshInstance3D *mesh_instance : p_body.meshes) {
+		// The vertex stage relocates the body for the active render-pass
+		// camera. Keep the source-camera AABB/occlusion result from
+		// rejecting the mirror pass before that relocation reaches the GPU.
+		mesh_instance->set_extra_cull_margin(1.0e6);
+		mesh_instance->set_ignore_occlusion_culling(true);
+		mesh_instance->set_cast_shadows_setting(
+				GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+		const Ref<ShaderMaterial> material = mesh_instance->get_material_override();
+		int material_index = -1;
+		for (int64_t i = 0; i < surface_materials.size(); ++i) {
+			if (Ref<ShaderMaterial>(surface_materials[i]) == material) {
+				material_index = surface_indices[i];
+				break;
+			}
+		}
+		p_body.materials.push_back(material);
+		p_body.material_indices.push_back(material_index);
+		// The Q3 redraw: the discs and the glow are the bloom pass's own
+		// submits, drawn only for a glow-capable (LUM) material, blended as
+		// that material is classified (the registry reads the
+		// classification); the glint is never redrawn.
+		opennova::renderer::ObjectMaterialClassification classification;
+		const bool glow = p_body.q3_drawn && material.is_valid() &&
+				FrameFx::q3_object_material_classification(material,
+						classification) &&
+				classification.is_glow_capable;
+		if (glow) {
+			FrameFx::register_q3_source(mesh_instance, p_body.q3_source);
+		} else {
+			FrameFx::unregister_q3_source(mesh_instance);
+		}
+	}
+	_set_body_parameter(p_body, "u_sky_body", true);
+	_set_body_parameter(p_body, "u_sky_far_pin", p_body.disc);
+	if (p_body.disc) {
+		_stamp_environment_capture_layer(model);
+		_set_body_parameter(p_body, "u_sky_beauty_drawn", sky_beauty_pass_drawn_);
+		_set_body_parameter(p_body, "u_sky_mirror_drawn", sky_mirror_pass_drawn_);
+	} else {
+		// The glow and the glint are main-frame draws: the water mirror's
+		// scene never submits them in its base pass; the frame advance
+		// opens the beauty pass when retail submits them.
+		_set_body_parameter(p_body, "u_sky_mirror_drawn", false);
+		_set_body_parameter(p_body, "u_sky_beauty_drawn", false);
+	}
+}
+
+void Celestial::_rebind_rebuilt_bodies() {
+	// A model scene rebuild (or a non-retained LOD swap) mints fresh surface
+	// materials: bind them to the sky hook and the Q3 redraw again.
+	for (KeyValue<String, Body> &kv : bodies_) {
+		Body &body = kv.value;
+		if (body.model != nullptr &&
+				body.model->get_scene_build_serial() != body.build_serial) {
+			_bind_body_surfaces(body);
+		}
+	}
 }
 
 Ref<ObjectData> Celestial::_load_object_data(const String &p_graphic) {
@@ -377,6 +403,7 @@ void Celestial::advance_frame(double p_delta) {
 			return;
 		}
 	}
+	_rebind_rebuilt_bodies();
 	MissionEnvironment *env = _env_node();
 	if (env == nullptr || !env->is_loaded()) {
 		_publish_idle_veil();
@@ -660,6 +687,26 @@ Dictionary Celestial::get_diagnostics() const {
 		body["drawn"] = kv.value.drawn;
 		body["visible"] = kv.value.model != nullptr &&
 				kv.value.model->is_visible();
+		// How many of the model's live surface instances draw a material
+		// that carries the sky hook (u_sky_body), of how many.
+		int hooked = 0;
+		int surfaces = 0;
+		if (kv.value.model != nullptr) {
+			Vector<MeshInstance3D *> meshes;
+			_collect_meshes(kv.value.model, meshes);
+			for (MeshInstance3D *mesh : meshes) {
+				const Ref<ShaderMaterial> material = mesh->get_material_override();
+				if (material.is_null() || !mesh->is_visible()) {
+					continue;
+				}
+				++surfaces;
+				if (bool(material->get_shader_parameter("u_sky_body"))) {
+					++hooked;
+				}
+			}
+		}
+		body["sky_hooked_surfaces"] = hooked;
+		body["surfaces"] = surfaces;
 		bodies[kv.key] = body;
 	}
 	diag["bodies"] = bodies;

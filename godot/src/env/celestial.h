@@ -14,6 +14,7 @@
 #include <memory>
 
 #include <runtime/environment/celestial_frame.h>
+#include <runtime/renderer/q3_frame.h>
 
 #include "env/env_file.h"
 #include "env/glare_occlusion.h"
@@ -130,6 +131,11 @@ private:
 		Vector<int> material_indices;
 		// The sun/moon discs ride the sky bracket (far pin + pass gates).
 		bool disc = false;
+		// The bloom-pass redraw this body registers (none for the glint).
+		opennova::renderer::Q3Source q3_source = opennova::renderer::Q3Source::CelestialBody;
+		bool q3_drawn = false;
+		// The model scene build the surfaces above were bound from.
+		uint32_t build_serial = 0;
 		// The last advanced frame's UPL_INTENSITY submit value (16.16) and
 		// whether retail submitted the draw.
 		int32_t last_upl = 0;
@@ -149,6 +155,10 @@ private:
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
 	static void _collect_meshes(Node *p_node, Vector<MeshInstance3D *> &r_out);
 	void _stamp_environment_capture_layer(Node3D *p_model);
+	// Bind a body's live surfaces: collect them, register the Q3 redraw and
+	// stamp the static sky-hook parameters.
+	void _bind_body_surfaces(Body &p_body);
+	void _rebind_rebuilt_bodies();
 	void _set_body_parameter(const Body &p_body, const StringName &p_parameter,
 			const Variant &p_value);
 	void _set_body_upl(Body &p_body, int32_t p_upl, int32_t p_q3_upl);
