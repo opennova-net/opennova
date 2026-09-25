@@ -98,9 +98,7 @@ inline constexpr float kQ3WaterNvBrightBias = 0.15f;
 // Render_SetViewportFarDepth: a D3DVIEWPORT9 with MinZ 0.98 / MaxZ
 // 0.99996948 remaps their clip depth into that far band before the ordinary
 // z-tested flush, so both survive only where the beauty depth is at (or
-// within the band of) the far plane, i.e. cleared sky. Every nearer surface
-// occludes them in the bloom source. In Godot's reverse-Z [0, 1] clip depth
-// the band is [1 - MaxZ, 1 - MinZ]: z' = (1 - MaxZ) + z * (MaxZ - MinZ).
+// within the band of) the far plane: cleared sky and the farthest terrain.
 // [orig: FrameFX_RenderBloomPass @ 0x582940 (Render_SetViewportFarDepth
 // @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77 ->
 // render_skybox_sun_glow(0, 0) @ 0x582a80); Render_SetViewportFarDepth
@@ -108,6 +106,31 @@ inline constexpr float kQ3WaterNvBrightBias = 0.15f;
 // z-tested flushes CRenderBatchQueue_SortAndFlush(0) @ 0x5acce9 / 0x5ad118].
 inline constexpr float kQ3FarBandMinZ = 0.98000002f;
 inline constexpr float kQ3FarBandMaxZ = 0.99996948f;
+// The beauty depth those flushes test against was written through the scene
+// viewport, MinZ 0 / MaxZ 0.99996948, not [0, 1] [orig: Render_SetViewport
+// @ 0x58a720 (MinZ 0 @ 0x58a72f, MaxZ @ 0x58a739), set for the main frame
+// by Render_ProcessMainSceneFrame @ 0x5ca5fc and again by
+// FrameFX_RenderBloomPass @ 0x582a45 before the far band].
+inline constexpr float kQ3SceneViewportMaxZ = 0.99996948f;
+static_assert(kQ3SceneViewportMaxZ == kQ3FarBandMaxZ,
+		"q3_far_band_reverse_z folds the band MaxZ into the scene viewport MaxZ");
+
+// The far band in the beauty camera's reverse-Z depth. Retail keeps a disc
+// or glow fragment at view depth w over a beauty pixel at view depth D when
+//   MinZ + (MaxZ - MinZ) z(w) <= SceneMaxZ z(D)   (LESSEQUAL),
+// z(x) = f / (f - n) (1 - n / x) the scene projection's depth. Both sides
+// are affine in 1/x with the same far plane f, so with MaxZ == SceneMaxZ
+// the test is 1/D <= (MinZ / f + (MaxZ - MinZ) / w) / SceneMaxZ, whatever
+// the near plane n. In a reverse-Z projection with that same far plane,
+// r(x) = n' (f - x) / (x (f - n')) for any near n', that is exactly
+//   r(D) <= r(w) (MaxZ - MinZ) / SceneMaxZ,
+// so the draw scales its own reverse-Z depth and keeps GREATER_OR_EQUAL.
+// At a 700 u fog a disc 60 u deep survives only over beauty depth past
+// ~577 u; the earlier [1 - MaxZ, 1 - MinZ] remap of a [0, 1] depth let it
+// through from ~427 u, over far terrain that hides it in retail.
+inline float q3_far_band_reverse_z(float reverse_z) {
+	return reverse_z * ((kQ3FarBandMaxZ - kQ3FarBandMinZ) / kQ3SceneViewportMaxZ);
+}
 
 // An opaque portable identity, not a GPU handle. The adapter resolves the
 // resource by its id. A geometry lease names the adapter's cache entry and

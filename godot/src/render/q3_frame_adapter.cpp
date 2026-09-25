@@ -118,8 +118,8 @@ struct Q3Push {
 
 static_assert(sizeof(Q3Push) == kPushConstantBytes);
 
-// The far-band remap constants come from runtime/renderer/q3_frame.h
-// (kQ3FarBandMinZ/MaxZ); q3_vertex_shader_source() splices them in.
+// The far-band depth scale comes from runtime/renderer/q3_frame.h
+// (q3_far_band_reverse_z); q3_vertex_shader_source() splices it in.
 const char *kQ3VertexShaderTemplate = R"GLSL(#version 450
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec3 in_normal;
@@ -183,14 +183,15 @@ void main() {
 				(camera_far - camera_near), 0.0) * gl_Position.w;
 	}
 	if (uint(pc.params.x + 0.5) >= 3u && gl_Position.w > 0.0) {
-		// Render_SetViewportFarDepth's D3DVIEWPORT9 MinZ/MaxZ band for the
-		// celestial discs and the sun glow, expressed in reverse-Z clip depth
-		// (kQ3FarBandMinZ/MaxZ): z' = (1 - MaxZ) + z * (MaxZ - MinZ). The
-		// ordinary GREATER_OR_EQUAL test then keeps them only over beauty
-		// depth at or near the far plane.
-		float z_rev = gl_Position.z / gl_Position.w;
-		gl_Position.z = (@FAR_BAND_REV_MIN@ + z_rev * @FAR_BAND_REV_SPAN@) *
-				gl_Position.w;
+		// Render_SetViewportFarDepth's MinZ/MaxZ band for the celestial discs
+		// and the sun glow, tested against beauty depth written through the
+		// scene viewport's MaxZ: in this camera's reverse-Z depth (the same
+		// far plane as the retail scene projection) the band is the draw's
+		// own depth scaled by (MaxZ - MinZ) / SceneMaxZ
+		// (runtime/renderer/q3_frame.h q3_far_band_reverse_z).
+		// GREATER_OR_EQUAL then keeps them only over beauty depth at or
+		// near the far plane.
+		gl_Position.z *= @FAR_BAND_DEPTH_SCALE@;
 	}
 	uv = in_uv;
 	color = in_color;
@@ -391,9 +392,8 @@ void splice_token(std::string &p_text, const char *p_token,
 
 std::string q3_vertex_shader_source() {
 	std::string source(kQ3VertexShaderTemplate);
-	splice_token(source, "@FAR_BAND_REV_MIN@", glsl_float(1.0f - kQ3FarBandMaxZ));
-	splice_token(source, "@FAR_BAND_REV_SPAN@",
-			glsl_float(kQ3FarBandMaxZ - kQ3FarBandMinZ));
+	splice_token(source, "@FAR_BAND_DEPTH_SCALE@",
+			glsl_float(q3_far_band_reverse_z(1.0f)));
 	splice_token(source, "@WATER_VIEWPORT_MAX_Z@",
 			glsl_float(opennova::env::kWaterStripDepthMax));
 	return source;

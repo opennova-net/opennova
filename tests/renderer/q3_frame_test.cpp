@@ -360,6 +360,55 @@ void check_emissive_copies_saturate_colour_times_gain() {
 	CHECK(dim[2] == 0.0f);
 }
 
+// The bloom pass's disc and glow keep a fragment where retail's LESSEQUAL
+// holds between the far band and the beauty depth written through the scene
+// viewport [orig: Render_SetViewportFarDepth @ 0x58a840; Render_SetViewport
+// @ 0x58a720]. The reverse-Z scale must reproduce that test for any beauty
+// camera near plane sharing the scene far plane.
+void check_far_band_matches_the_retail_depth_test() {
+	CHECK(kQ3SceneViewportMaxZ == 0.99996948f);
+	const double far_plane = 701.0; // scene_far_plane(700 u fog)
+	const double retail_near = 0.2;  // g_ProjectionNearZ
+	const auto retail_depth = [&](double x) {
+		return far_plane / (far_plane - retail_near) * (1.0 - retail_near / x);
+	};
+	const auto retail_keeps = [&](double w, double d) {
+		return kQ3FarBandMinZ + (double(kQ3FarBandMaxZ) - kQ3FarBandMinZ) *
+						retail_depth(w) <=
+				double(kQ3SceneViewportMaxZ) * retail_depth(d);
+	};
+	for (const double camera_near : {0.05, 0.2, 1.0}) {
+		const auto reverse = [&](double x) {
+			return camera_near * (far_plane - x) / (x * (far_plane - camera_near));
+		};
+		int disagreements = 0;
+		for (double w = 30.0; w <= 64.0; w += 2.0) {
+			for (double d = 1.0; d < far_plane; d += 1.5) {
+				const double band = q3_far_band_reverse_z(float(reverse(w)));
+				const bool kept = band >= reverse(d);
+				// float rounding of the band may flip the pixel sitting on the
+				// threshold itself; nothing else may differ.
+				const double threshold = double(kQ3SceneViewportMaxZ) /
+						(kQ3FarBandMinZ / far_plane +
+								(double(kQ3FarBandMaxZ) - kQ3FarBandMinZ) / w);
+				if (kept != retail_keeps(w, d) && std::fabs(d - threshold) > 1.0)
+					++disagreements;
+			}
+		}
+		CHECK(disagreements == 0);
+	}
+	// The 03TR 06:30 pose: a disc 60 u deep behind terrain 490 u out stays
+	// hidden (retail's threshold is ~577 u), and shows over 650 u terrain and
+	// cleared sky. The former [1 - MaxZ, 1 - MinZ] remap kept it from ~427 u.
+	const auto reverse_godot = [&](double x) {
+		return 0.05 * (far_plane - x) / (x * (far_plane - 0.05));
+	};
+	const double disc = q3_far_band_reverse_z(float(reverse_godot(60.0)));
+	CHECK(!retail_keeps(60.0, 490.0) && disc < reverse_godot(490.0));
+	CHECK(retail_keeps(60.0, 650.0) && disc >= reverse_godot(650.0));
+	CHECK(disc >= 0.0);
+}
+
 int main() {
 	check_shading_constants_are_engine_homed();
 	check_technique_derivation_and_ordering();
@@ -370,6 +419,7 @@ int main() {
 	check_stale_geometry_leases_are_rejected();
 	check_emissive_copies_saturate_colour_times_gain();
 	check_mip_ceilings_pack_both_stages();
+	check_far_band_matches_the_retail_depth_test();
 
 	if (failures != 0) {
 		std::printf("renderer_q3_frame: %d failure(s)\n", failures);
