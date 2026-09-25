@@ -29,19 +29,27 @@ struct AnimLoadedClip {
 	opennova::bad::BadFile file{};
 };
 
+// A variant a table names whose clip did not load: absent beside the table,
+// unreadable, or not a `.bad` the reader accepts.
+struct AnimMissingClip {
+	std::string variant;
+	std::string reason;
+};
+
 struct AnimLoadedSet {
 	std::string table_name;  // the `.adm` file name, empty for a lone clip
 	std::string table_path;  // as given
 	std::vector<opennova::bad::BadBuildRow> rows;
 	std::vector<AnimLoadedClip> clips; // in the order the rows first name them
-	std::vector<std::string> missing;  // variants whose `.bad` is absent
+	std::vector<AnimMissingClip> missing; // in table order, each variant once
 };
 
 // Read a `.adm` table and every `.bad` beside it, or a lone `.bad`. The lookup
 // is case-insensitive over the directory, because a retail table names
 // `Dt1RunF.bad` where the file on disk is `DT1RUNF.BAD`. False with `error`
-// set when the input itself cannot be read; a missing variant is recorded in
-// `missing` and does not fail the load.
+// set when the input itself cannot be read, or when a variant names a path; a
+// clip that does not load is recorded in `missing`, with why, and does not
+// fail the load.
 bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error);
 void anim_free(AnimLoadedSet &set);
 

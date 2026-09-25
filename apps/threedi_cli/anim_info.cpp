@@ -113,8 +113,8 @@ int cmd_anim_info(const char *in_path, int verbose) {
 				std::printf(" %s", row.variants[v].c_str());
 			std::printf("%s\n", row.variants.size() > 1 ? "   (ring order)" : "");
 		}
-		for (const std::string &variant : set.missing)
-			std::printf("  missing: %s\n", variant.c_str());
+		for (const AnimMissingClip &absent : set.missing)
+			std::printf("  missing: %s (%s)\n", absent.variant.c_str(), absent.reason.c_str());
 	}
 	for (const AnimLoadedClip &clip : set.clips) print_clip(clip, verbose);
 	anim_free(set);

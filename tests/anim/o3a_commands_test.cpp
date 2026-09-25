@@ -1,7 +1,10 @@
 // Exercise the same anim command handlers the CLI dispatches: the clip set
 // round trip (build -> scene -> build is byte-identical), what `compare` calls
 // the same animation and what it does not, and the scenes `build` refuses.
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -296,6 +299,56 @@ int main(int argc, char **argv) {
 						clip.events[0].top < 1e-4f,
 				"the capsule is measured against the reset clip");
 		opennova::bad::bad_free(&clip);
+	}
+
+	// What compare must not call the same: a value that is not a number, a
+	// variant whose clip is absent, a bind that turns differently; and what it
+	// must: two lone clips that are one animation under two names.
+	{
+		const std::filesystem::path home = dir / "compare-cases";
+		std::filesystem::remove_all(home);
+		std::filesystem::create_directories(home / "a");
+		std::filesystem::create_directories(home / "b");
+		std::vector<char> walk;
+		check(read_file((std::filesystem::path(original).parent_path() / "walk.bad").string(), walk),
+				"read the built clip");
+		const auto word = [&](const std::vector<char> &bytes, size_t at) {
+			uint32_t v = 0;
+			std::memcpy(&v, bytes.data() + at, sizeof(v));
+			return v;
+		};
+		const auto put = [&](std::vector<char> bytes, size_t at, float v) {
+			std::memcpy(bytes.data() + at, &v, sizeof(v));
+			return bytes;
+		};
+		const auto write = [&](const std::filesystem::path &path, const std::vector<char> &bytes) {
+			std::ofstream(path, std::ios::binary).write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+			return path.string();
+		};
+		// The first event's forward step, NaN in both clips.
+		const size_t event_at = word(walk, 0x40);
+		const std::vector<char> nan_walk = put(walk, event_at, std::nanf(""));
+		check(threedi_cli::cmd_anim_compare(write(home / "a" / "walk.bad", nan_walk).c_str(),
+					  write(home / "b" / "walk.bad", nan_walk).c_str()) == 1,
+				"a NaN is never the same");
+		// Bone 0's bind rotation turned a quarter turn about y.
+		const size_t bind_at = word(walk, 0x18) + 64;
+		std::vector<char> turned = put(put(walk, bind_at, 0.0f), bind_at + 8, 1.0f);
+		turned = put(put(turned, bind_at + 24, -1.0f), bind_at + 32, 0.0f);
+		check(threedi_cli::cmd_anim_compare(write(home / "a" / "walk.bad", walk).c_str(),
+					  write(home / "b" / "walk.bad", turned).c_str()) == 1,
+				"a bind that turns differently differs");
+		// Two lone clips under two names.
+		check(threedi_cli::cmd_anim_compare(write(home / "a" / "one.bad", walk).c_str(),
+					  write(home / "b" / "two.bad", walk).c_str()) == 0,
+				"two lone clips compare with each other");
+		// Two tables that name a clip neither directory holds.
+		const std::string absent = "\r\nanim_reset\t\t\t\t\"walk\"\r\nanim_idle\t\t\t\t\"absent\"\r\n";
+		std::ofstream(home / "a" / "T.adm", std::ios::binary) << absent;
+		std::ofstream(home / "b" / "T.adm", std::ios::binary) << absent;
+		check(threedi_cli::cmd_anim_compare((home / "a" / "T.adm").string().c_str(),
+					  (home / "b" / "T.adm").string().c_str()) == 1,
+				"a variant with no clip differs");
 	}
 
 	// `info` reads a table and a lone clip.

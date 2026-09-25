@@ -113,20 +113,27 @@ bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error) 
 				return false;
 			}
 			const bool seen = std::any_of(out.clips.begin(), out.clips.end(),
-					[&](const AnimLoadedClip &c) { return same_name(c.name, stem); });
+					[&](const AnimLoadedClip &c) { return same_name(c.name, stem); }) ||
+					std::any_of(out.missing.begin(), out.missing.end(),
+							[&](const AnimMissingClip &m) {
+								return same_name(bad_build_clip_stem(m.variant), stem);
+							});
 			if (seen) continue;
 			const std::string file = resolve(dir, stem + ".bad");
 			if (file.empty()) {
-				out.missing.push_back(variant);
+				out.missing.push_back(AnimMissingClip{variant, "no " + stem + ".bad beside the table"});
 				continue;
 			}
 			AnimLoadedClip clip;
 			clip.name = stem;
 			clip.path = file;
-			if (!read_file(file, clip.bytes) ||
-					bad_parse_buffer(clip.bytes.data(), clip.bytes.size(), &clip.file) != 0) {
+			if (!read_file(file, clip.bytes)) {
+				out.missing.push_back(AnimMissingClip{variant, "cannot read " + file});
+				continue;
+			}
+			if (bad_parse_buffer(clip.bytes.data(), clip.bytes.size(), &clip.file) != 0) {
 				bad_free(&clip.file);
-				out.missing.push_back(variant);
+				out.missing.push_back(AnimMissingClip{variant, file + " does not parse as a .bad clip"});
 				continue;
 			}
 			out.clips.push_back(std::move(clip));

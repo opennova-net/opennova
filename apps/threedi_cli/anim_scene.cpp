@@ -210,22 +210,24 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 		std::string line = "row " + name_field(row.key);
 		size_t held = 0;
 		for (const std::string &variant : row.variants) {
-			// A row names a clip the set does not hold when its .bad is not
-			// beside the table; build would refuse the row, so it is dropped.
-			bool missing = false;
-			for (const std::string &absent : set.missing) missing = missing || absent == variant;
-			if (missing) continue;
+			// A variant whose clip did not load is dropped from its row: build
+			// refuses a row naming a clip the set does not hold.
+			const std::string stem = bad_build_clip_stem(variant);
+			bool loaded = false;
+			for (const AnimLoadedClip &clip : set.clips)
+				loaded = loaded || opennova::strutil::iequals(clip.name, stem);
+			if (!loaded) continue;
 			line += " \"" + variant + "\"";
 			++held;
 		}
 		if (held == 0) {
-			w.note("row '" + row.key + "' names no clip that is beside the table");
+			w.note("row '" + row.key + "' names no clip that loaded");
 			continue;
 		}
 		w.line(line);
 	}
-	for (const std::string &variant : set.missing)
-		w.note("the table names '" + variant + "', whose .bad is not beside it");
+	for (const AnimMissingClip &absent : set.missing)
+		w.note("the table names '" + absent.variant + "' (" + absent.reason + ")");
 	// The set's reset clip, whose bind every clip's positions turn through; a
 	// lone clip, or a table whose reset clip is absent, turns through its own.
 	const std::string reset_stem = bad_build_reset_stem(set.rows);

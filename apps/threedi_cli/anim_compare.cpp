@@ -1,10 +1,13 @@
 // opennova-3di anim compare: whether two clip sets hold the same animation.
-// It compares what the runtime reads — the table's rows and rings, each clip's
-// header, its bones' names and parents, every channel key as a ROTATION (q and
-// -q are one rotation, and retail stores both), the key durations, the
-// translations and the events — and ignores what it does not: the bone table's
-// dead `position` and `length`, the relocation bookkeeping, name padding, and
-// float noise.
+// It compares what the runtime reads — the table's rows and rings (a variant
+// whose clip does not load is a difference), each clip's header, its bones'
+// names and parents, the bone table's bind rotation and every channel key as a
+// ROTATION (q and -q are one rotation, and retail stores both), the key
+// durations, the translations and the events — and ignores what it does not:
+// the bone table's dead `position` and `length`, the relocation bookkeeping,
+// name padding, and float noise. A value that is not a number is never the
+// same as anything. Two lone clips compare with each other whatever their
+// names.
 //
 // Exit 0 when the sets are the same animation, 1 when they differ.
 
@@ -41,6 +44,17 @@ struct Report {
 	}
 };
 
+// A gap past a tolerance, NaN included: `gap > tol` is false for NaN, which
+// would call two NaNs, or a NaN and anything, the same.
+bool beyond(double gap, double tolerance) { return !(gap <= tolerance); }
+
+// Keep the worst gap, a NaN counting as the worst there is.
+bool note_worst(double &worst, double gap) {
+	if (!beyond(gap, worst)) return false;
+	worst = std::isnan(gap) ? HUGE_VAL : gap;
+	return true;
+}
+
 // The angle between two stored keys, taking the short arc: a negated
 // quaternion is the same rotation.
 double key_angle(const BadQuaternion &a, const BadQuaternion &b) {
@@ -61,11 +75,17 @@ double key_angle(const BadQuaternion &a, const BadQuaternion &b) {
 
 double vector_gap(const float *a, const float *b, int n) {
 	double worst = 0.0;
-	for (int i = 0; i < n; ++i) {
-		const double d = std::fabs(static_cast<double>(a[i]) - static_cast<double>(b[i]));
-		if (d > worst) worst = d;
-	}
+	for (int i = 0; i < n; ++i)
+		note_worst(worst, std::fabs(static_cast<double>(a[i]) - static_cast<double>(b[i])));
 	return worst;
+}
+
+// The bone table's bind 3x3 as a rotation: the runtime composes against it
+// when the clip is the rig's reset, or plays with no reset pinned.
+BadQuaternion bind_quat(const BadBone &bone) {
+	const BadBuildQuat q = bad_rows_to_quat(bone.rotation);
+	return BadQuaternion{static_cast<float>(q.x), static_cast<float>(q.y), static_cast<float>(q.z),
+			static_cast<float>(q.w)};
 }
 
 void compare_clip(const AnimLoadedClip &ea, const AnimLoadedClip &eb, Report &r) {
@@ -98,6 +118,11 @@ void compare_clip(const AnimLoadedClip &ea, const AnimLoadedClip &eb, Report &r)
 		if (a.bones[i].parent_index != b.bones[i].parent_index)
 			r.differ(bone_at + ": parent " + std::to_string(a.bones[i].parent_index) + " vs " +
 					std::to_string(b.bones[i].parent_index));
+		const double bind = key_angle(bind_quat(a.bones[i]), bind_quat(b.bones[i]));
+		if (note_worst(r.worst_angle, bind)) r.worst_angle_at = bone_at + " bind";
+		if (beyond(bind, kAngleTolerance))
+			r.differ(bone_at + ": the bind is " + std::to_string(bind * 180.0 / 3.14159265358979323846) +
+					" degrees apart");
 		const BadChannel &ca = a.channels[i];
 		const BadChannel &cb = b.channels[i];
 		if (ca.frame_count != cb.frame_count) {
@@ -107,11 +132,8 @@ void compare_clip(const AnimLoadedClip &ea, const AnimLoadedClip &eb, Report &r)
 		}
 		for (uint32_t k = 0; k < ca.frame_count; ++k) {
 			const double angle = key_angle(ca.rotations[k], cb.rotations[k]);
-			if (angle > r.worst_angle) {
-				r.worst_angle = angle;
-				r.worst_angle_at = bone_at + " key " + std::to_string(k);
-			}
-			if (angle > kAngleTolerance)
+			if (note_worst(r.worst_angle, angle)) r.worst_angle_at = bone_at + " key " + std::to_string(k);
+			if (beyond(angle, kAngleTolerance))
 				r.differ(bone_at + " key " + std::to_string(k) + ": " +
 						std::to_string(angle * 180.0 / 3.14159265358979323846) + " degrees apart");
 			const uint16_t da = ca.frame_lengths != nullptr ? ca.frame_lengths[k] : 1;
@@ -128,8 +150,8 @@ void compare_clip(const AnimLoadedClip &ea, const AnimLoadedClip &eb, Report &r)
 	} else {
 		for (size_t t = 0; t < a.num_translations; ++t) {
 			const double gap = vector_gap(a.translations[t], b.translations[t], 3);
-			if (gap > r.worst_vector) r.worst_vector = gap;
-			if (gap > kVectorTolerance)
+			note_worst(r.worst_vector, gap);
+			if (beyond(gap, kVectorTolerance))
 				r.differ(at + ": translation " + std::to_string(t) + " is " +
 						std::to_string(gap) + " m apart");
 		}
@@ -143,14 +165,14 @@ void compare_clip(const AnimLoadedClip &ea, const AnimLoadedClip &eb, Report &r)
 	for (size_t e = 0; e < a.num_events; ++e) {
 		const std::string event_at = at + " event " + std::to_string(e);
 		const double gap = vector_gap(a.events[e].velocity, b.events[e].velocity, 3);
-		if (gap > r.worst_vector) r.worst_vector = gap;
-		if (gap > kVectorTolerance)
+		note_worst(r.worst_vector, gap);
+		if (beyond(gap, kVectorTolerance))
 			r.differ(event_at + ": velocity is " + std::to_string(gap) + " m apart");
 		const float extents_a[2] = {a.events[e].bottom, a.events[e].top};
 		const float extents_b[2] = {b.events[e].bottom, b.events[e].top};
 		const double extents = vector_gap(extents_a, extents_b, 2);
-		if (extents > r.worst_vector) r.worst_vector = extents;
-		if (extents > kVectorTolerance)
+		note_worst(r.worst_vector, extents);
+		if (beyond(extents, kVectorTolerance))
 			r.differ(event_at + ": the capsule is " + std::to_string(extents) + " m apart");
 		if (a.events[e].trigger != b.events[e].trigger) {
 			char words[96];
@@ -216,16 +238,27 @@ int cmd_anim_compare(const char *expected_path, const char *actual_path) {
 
 	Report r;
 	compare_rows(a, b, r);
-	for (const AnimLoadedClip &clip : a.clips) {
-		const AnimLoadedClip *other = find_clip(b, clip.name);
-		if (other == nullptr) {
-			r.differ("clip '" + clip.name + "' is missing");
-			continue;
+	// A variant whose clip did not load is no animation to compare: it
+	// differs, on either side.
+	for (const AnimMissingClip &absent : a.missing)
+		r.differ("expected table names '" + absent.variant + "': " + absent.reason);
+	for (const AnimMissingClip &absent : b.missing)
+		r.differ("actual table names '" + absent.variant + "': " + absent.reason);
+	if (a.table_name.empty() && b.table_name.empty() && a.clips.size() == 1 && b.clips.size() == 1) {
+		// Two lone clips are one clip each, whatever their files are called.
+		compare_clip(a.clips[0], b.clips[0], r);
+	} else {
+		for (const AnimLoadedClip &clip : a.clips) {
+			const AnimLoadedClip *other = find_clip(b, clip.name);
+			if (other == nullptr) {
+				r.differ("clip '" + clip.name + "' is missing");
+				continue;
+			}
+			compare_clip(clip, *other, r);
 		}
-		compare_clip(clip, *other, r);
-	}
-	for (const AnimLoadedClip &clip : b.clips) {
-		if (find_clip(a, clip.name) == nullptr) r.differ("clip '" + clip.name + "' is unexpected");
+		for (const AnimLoadedClip &clip : b.clips) {
+			if (find_clip(a, clip.name) == nullptr) r.differ("clip '" + clip.name + "' is unexpected");
+		}
 	}
 
 	std::printf("%zu rows, %zu clips: worst rotation %g degrees%s, worst vector %g m\n",
