@@ -50,12 +50,6 @@ std::string resolve(const std::filesystem::path &dir, const std::string &file) {
 
 } // namespace
 
-std::string anim_clip_stem(const std::string &variant) {
-	if (variant.size() > 4 && opennova::strutil::ends_with_icase(variant, ".bad"))
-		return variant.substr(0, variant.size() - 4);
-	return variant;
-}
-
 void anim_free(AnimLoadedSet &set) {
 	for (AnimLoadedClip &clip : set.clips) bad_free(&clip.file);
 	set.clips.clear();
@@ -110,7 +104,7 @@ bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error) 
 
 	for (const BadBuildRow &row : out.rows) {
 		for (const std::string &variant : row.variants) {
-			const std::string stem = anim_clip_stem(variant);
+			const std::string stem = bad_build_clip_stem(variant);
 			const bool seen = std::any_of(out.clips.begin(), out.clips.end(),
 					[&](const AnimLoadedClip &c) { return same_name(c.name, stem); });
 			if (seen) continue;

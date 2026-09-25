@@ -45,10 +45,6 @@ struct AnimLoadedSet {
 bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error);
 void anim_free(AnimLoadedSet &set);
 
-// A row variant as a clip stem: the trailing `.bad` a table may or may not
-// carry (4706 of 5146 retail variants do) is dropped.
-std::string anim_clip_stem(const std::string &variant);
-
 int cmd_anim_build(const char *scene_path, const char *out_path);
 int cmd_anim_scene(const char *in_path, const char *out_path);
 int cmd_anim_info(const char *in_path, int verbose);

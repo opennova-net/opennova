@@ -12,17 +12,23 @@
 // What the builder derives, never the author (witnessed over the 477 retail
 // `.bad` clips under OPENNOVA_JO_ASSETS, 2026-09-24):
 //   * `BadBone.rotation[9]` is the transpose of the bone's first key as a
-//     matrix, in 13517 of 13517 bones (worst deviation 5.0e-7). It is the bind
-//     the runtime composes every clip against
-//     [orig: AnimChannel_ComputeBoneMatrices @0x410da0].
-//   * `BadBone.position[3]` follows the paired model's pivots:
-//     `position[i] = rotation[parent(i)] . clip(pivot[i] - pivot[parent(i)])`.
-//     The runtime never reads it (6720 of 13517 retail bones triplicate X,
-//     477 are zero) [orig: BoneAnim_BuildWorldMatrices @0x40c400].
+//     matrix, in 13517 of 13517 bones (worst deviation 5.0e-7). The runtime
+//     reads it as the bind of the rig's RESET clip, which every clip of the rig
+//     composes against, and of a clip that plays with no reset pinned
+//     [orig: AnimChannel_ComputeBoneMatrices @0x410da0, the bind from
+//     channel+44 @0x410dd8 else the playing clip @0x410de3].
+//   * `BadBone.position[3]` follows the paired model's pivots through the
+//     parent's bind in the SET's reset clip, the bind the runtime composes the
+//     clip against: `position[i] = bind[parent(i)] . clip(pivot[i] -
+//     pivot[parent(i)])`, in 30358 of the 32011 non-junk bones of the retail
+//     tables' other clips (365 fit the clip's own rotation instead). The
+//     runtime never reads it (6720 of 13517 retail bones triplicate X, 477 are
+//     zero) [orig: BoneAnim_BuildWorldMatrices @0x40c400].
 //   * `num_children`, `child_offset` and `parent_offset` from `parent`, and the
 //     translation block's pad row past row frame_count (bad_write.cpp).
 //   * A capsule `bottom`/`top` pair per event when the author gives neither an
-//     explicit pair nor a constant one.
+//     explicit pair nor a constant one, by OUR rule (bad_clip_extents): what
+//     retail measured them with is unwitnessed.
 // What the author supplies and the seam only counts: frame_count + 1 keys per
 // bone (or a duration table), events and translation rows, the fence-post
 // count every retail clip carries (`event_count == frame_count + 1`).
@@ -154,20 +160,57 @@ struct BadAssembled {
     std::vector<std::array<float, 3>> translations;
 };
 
-// The per-frame capsule extents an event carries when the author gives none:
-// the drop below bone 0 and the total height, over the clip's forward
-// kinematics. Both vectors come back with frame_count + 1 entries.
-void bad_clip_extents(const BadBuildClip &clip, std::vector<double> &bottom,
-                      std::vector<double> &top);
+// A row variant as a clip stem: the trailing `.bad` a table may or may not
+// carry (4706 of 5146 retail variants do) is dropped.
+std::string bad_build_clip_stem(const std::string &variant);
 
-// Assemble `clip` into the document the writer serializes. False with `error`
-// set for a clip the format cannot hold (no bones, a parent that is not a lower
-// index, a key list that is not frame_count + 1 long, a translation block a
-// flag promises and the clip lacks, a name over 31 characters).
-bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string *error);
+// The clip every clip of a table composes against: the reset row's (a key
+// naming slot 0, `reset`, past its first five characters; the last such row)
+// LAST variant, because each reset variant replaces the slot's head instead of
+// joining a ring [orig: AnimMap_FindSlotByName @0x40cfa0, stricmp on the key
+// + 5; AnimMap_RegisterBoneNode @0x40C2D0, slot 0 self-rings @0x40c38b;
+// AnimMap_RegisterEntity @0x40bb60 pins its clip @0x40bbe3]. The stem is empty
+// for a table with no reset row; the clip is null when the set lacks it too.
+std::string bad_build_reset_stem(const std::vector<BadBuildRow> &rows);
+const BadBuildClip *bad_build_reset_clip(const BadBuildSet &set);
+
+// The rotation rows a bone's children turn through: the transpose of the
+// bone's stored first key in `reset`, or in `clip` for a null `reset` or a
+// bone past its bones (the runtime's own fallback when no reset is pinned).
+void bad_derive_bind_rows(const BadBuildClip &clip, const BadBuildClip *reset, size_t bone,
+                          float rows[9]);
+
+// The bone table the seam derives for `clip`, exactly as bad_build_assemble
+// writes it: name, parent and length; `rotation[9]`, the transpose of the
+// bone's own stored first key; `position[3]` through the parent's bind rows
+// (bad_derive_bind_rows), or `position_stored` where the bone gives it. A
+// parent that is not a lower index derives as a root. `anim scene` calls it to
+// find the bones whose stored position the pivots cannot re-derive.
+void bad_derive_bone_table(const BadBuildClip &clip, const BadBuildClip *reset,
+                           std::vector<BadBone> &rows);
+
+// The per-frame capsule extents an event carries when the author gives none:
+// the drop below bone 0 and the total height of the bone origins, over the
+// pose the runtime draws, each bone's key composed against `reset`'s bind as
+// `key * bind^-1` (the clip's own first key for a null `reset` or a bone past
+// its bones). The rule is OURS, not retail's: what retail's exporter measured
+// is unwitnessed (docs/anim/adm-bad-format-re.md). Both vectors come back with
+// frame_count + 1 entries.
+void bad_clip_extents(const BadBuildClip &clip, const BadBuildClip *reset,
+                      std::vector<double> &bottom, std::vector<double> &top);
+
+// Assemble `clip` into the document the writer serializes; `reset` is the
+// set's reset clip (bad_build_reset_clip), null for a lone clip. False with
+// `error` set for a clip the format cannot hold (no bones, a parent that is
+// not a lower index, a key list that is not frame_count + 1 long, a
+// translation block a flag promises and the clip lacks, a name over 31
+// characters).
+bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, BadAssembled &out,
+                        std::string *error);
 
 // Assemble and serialize in one step.
-bool bad_build_mint(const BadBuildClip &clip, std::vector<uint8_t> &out, std::string *error);
+bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, std::vector<uint8_t> &out,
+                    std::string *error);
 
 // Serialize the set's table through the canonical-form `.adm` writer. False
 // with `error` set for a row the parser could not read back.

@@ -211,6 +211,30 @@ int main(int argc, char **argv) {
 				"sparse differs from the dense clip");
 	}
 
+	// A table's clips measure their capsule against its reset clip, the bind
+	// the runtime composes them against: a clip that holds its root pitched a
+	// quarter turn lays the tip (a metre up in the reset) flat, so it derives
+	// no height, where measured against its own first key it would stand a
+	// metre tall.
+	{
+		const std::string rig = "bone -1 0 0 0 0.5 Root\n K0\n K0\nbone 0 0 0 1 0.5 Tip\n k 0 0 0 1\n"
+								" k 0 0 0 1\n";
+		const std::string pitched = "0 0.707106781 0 0.707106781";
+		const std::string set = "o3a 1\nrow anim_reset rest\nrow anim_walk_forward pitch\n"
+								"clip rest\nframes 1\n" +
+				replace(replace(rig, "K0", "k 0 0 0 1"), "K0", "k 0 0 0 1") +
+				"event 0 0 0 0\nevent 0 0 0 0\nclip pitch\nframes 1\n" +
+				replace(replace(rig, "K0", "k " + pitched), "K0", "k " + pitched) +
+				"event 0 0 0 0\nevent 0 0 0 0\n";
+		const std::string table = build("reset-bind", set);
+		opennova::bad::BadFile clip{};
+		const std::string path = (std::filesystem::path(table).parent_path() / "pitch.bad").string();
+		check(opennova::bad::bad_parse(path.c_str(), &clip) == 0 && clip.num_events == 2 &&
+						clip.events[0].top < 1e-4f,
+				"the capsule is measured against the reset clip");
+		opennova::bad::bad_free(&clip);
+	}
+
 	// `info` reads a table and a lone clip.
 	check(threedi_cli::cmd_anim_info(original.c_str(), 2) == 0, "info");
 

@@ -247,7 +247,7 @@ void validate(Parser &ps, const BadBuildSet &set) {
 	}
 	for (const BadBuildRow &row : set.rows) {
 		for (const std::string &variant : row.variants) {
-			const std::string stem = anim_clip_stem(variant);
+			const std::string stem = bad_build_clip_stem(variant);
 			bool found = false;
 			for (const BadBuildClip &clip : set.clips)
 				found = found || opennova::strutil::iequals(clip.name, stem);
@@ -300,12 +300,15 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 		return 1;
 	}
 
+	// Every clip of a table composes against its reset clip; a lone clip
+	// against its own first key.
+	const BadBuildClip *reset = lone ? nullptr : bad_build_reset_clip(set);
 	size_t written = 0;
 	size_t total = 0;
 	for (const BadBuildClip &clip : set.clips) {
 		std::vector<uint8_t> bytes;
 		std::string error;
-		if (!bad_build_mint(clip, bytes, &error)) {
+		if (!bad_build_mint(clip, reset, bytes, &error)) {
 			std::fprintf(stderr, "opennova-3di: clip '%s': %s\n", clip.name.c_str(), error.c_str());
 			return 1;
 		}

@@ -191,7 +191,7 @@ void compare_rows(const AnimLoadedSet &a, const AnimLoadedSet &b, Report &r) {
 		for (size_t v = 0; v < va.size(); ++v) {
 			// A row names its clip with or without the .bad the file carries
 			// (440 of 5146 retail variants omit it); the clip is the same.
-			if (!opennova::strutil::iequals(anim_clip_stem(va[v]), anim_clip_stem(vb[v])))
+			if (!opennova::strutil::iequals(bad_build_clip_stem(va[v]), bad_build_clip_stem(vb[v])))
 				r.differ("row '" + a.rows[i].key + "' variant " + std::to_string(v) + ": '" +
 						va[v] + "' vs '" + vb[v] + "'");
 		}

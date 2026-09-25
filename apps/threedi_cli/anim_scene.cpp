@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <formats/bad/bad_build.h>
 
 using namespace opennova::bad;
@@ -60,7 +61,28 @@ struct Writer {
 
 bool same_float(float a, float b) { return std::memcmp(&a, &b, sizeof(float)) == 0; }
 
-void write_clip(Writer &w, const AnimLoadedClip &clip) {
+// A loaded clip as the seam sees what it derives from: each bone's name,
+// parent, length and first key (mission axes), pivots left for the caller.
+BadBuildClip clip_shape(const AnimLoadedClip &clip) {
+	BadBuildClip shape;
+	shape.name = clip.name;
+	shape.frame_count = clip.file.frame_count;
+	shape.bones.resize(clip.file.num_bones);
+	for (size_t i = 0; i < clip.file.num_bones; ++i) {
+		BadBuildBone &bone = shape.bones[i];
+		bone.name = clip.file.bones[i].name;
+		bone.parent = clip.file.bones[i].parent_index;
+		bone.length = clip.file.bones[i].length;
+		const BadChannel &ch = clip.file.channels[i];
+		if (ch.frame_count > 0 && ch.rotations != nullptr) {
+			const BadQuaternion &q = ch.rotations[0];
+			bone.keys.push_back(bad_mission_from_clip(BadBuildQuat{q.x, q.y, q.z, q.w}));
+		}
+	}
+	return shape;
+}
+
+void write_clip(Writer &w, const AnimLoadedClip &clip, const BadBuildClip *reset) {
 	const BadFile &file = clip.file;
 	w.line("");
 	w.line("clip " + name_field(clip.name));
@@ -75,54 +97,41 @@ void write_clip(Writer &w, const AnimLoadedClip &clip) {
 	const size_t keys = static_cast<size_t>(file.frame_count) + 1;
 	const bool translated = (file.flags & BAD_FLAG_TRANSLATION) != 0 && file.translations != nullptr;
 
-	// The bind the seam derives from each bone's first key: the pivots are
-	// recovered against it, so a set the builder made carries no `bonepos`.
-	std::vector<std::vector<float>> bind(bones, std::vector<float>(9, 0.0f));
+	// The pivots are recovered through the bind the seam derives positions
+	// with, the set's reset clip's (the runtime composes every clip of a rig
+	// against it), so every clip of a table recovers the rig's one set of
+	// pivots and a set the builder made carries no `bonepos`.
+	BadBuildClip shaped = clip_shape(clip);
 	std::vector<BadBuildVec3> pivot(bones);
-	for (size_t i = 0; i < bones; ++i) {
-		const BadChannel &ch = file.channels[i];
-		BadBuildQuat k0{};
-		if (ch.frame_count > 0 && ch.rotations != nullptr)
-			k0 = BadBuildQuat{ch.rotations[0].x, ch.rotations[0].y, ch.rotations[0].z,
-					ch.rotations[0].w};
-		float rows[9];
-		bad_quat_to_rows(k0, rows);
-		bad_rows_transpose(rows, bind[i].data());
-	}
 	for (size_t i = 0; i < bones; ++i) {
 		const BadBone &bone = file.bones[i];
 		const int parent = bone.parent_index;
 		if (parent < 0 || static_cast<size_t>(parent) >= i) {
 			pivot[i] = bad_mission_from_clip(BadBuildVec3{bone.position[0], bone.position[1],
 					bone.position[2]});
-			continue;
+		} else {
+			float bind[9];
+			bad_derive_bind_rows(shaped, reset, static_cast<size_t>(parent), bind);
+			const BadBuildVec3 rel = bad_bone_rel(bind, bone.position);
+			pivot[i] = BadBuildVec3{pivot[static_cast<size_t>(parent)].x + rel.x,
+					pivot[static_cast<size_t>(parent)].y + rel.y,
+					pivot[static_cast<size_t>(parent)].z + rel.z};
 		}
-		const BadBuildVec3 rel = bad_bone_rel(bind[static_cast<size_t>(parent)].data(), bone.position);
-		pivot[i] = BadBuildVec3{pivot[static_cast<size_t>(parent)].x + rel.x,
-				pivot[static_cast<size_t>(parent)].y + rel.y,
-				pivot[static_cast<size_t>(parent)].z + rel.z};
+		shaped.bones[i].pivot = pivot[i];
 	}
+	// Does the pivot re-derive the stored position? Only then is the `bonepos`
+	// override unnecessary.
+	std::vector<BadBone> derived;
+	bad_derive_bone_table(shaped, reset, derived);
 
 	for (size_t i = 0; i < bones; ++i) {
 		const BadBone &bone = file.bones[i];
 		const int parent = bone.parent_index;
 		w.line("bone " + std::to_string(parent) + " " + f17(pivot[i].x) + " " + f17(pivot[i].y) +
 				" " + f17(pivot[i].z) + " " + f9(bone.length) + " " + name_field(bone.name));
-
-		// Does the pivot re-derive the stored position? Only then is the
-		// `bonepos` override unnecessary.
-		BadBuildVec3 derived;
-		if (parent < 0 || static_cast<size_t>(parent) >= i) {
-			derived = bad_clip_from_mission(pivot[i]);
-		} else {
-			const BadBuildVec3 rel{pivot[i].x - pivot[static_cast<size_t>(parent)].x,
-					pivot[i].y - pivot[static_cast<size_t>(parent)].y,
-					pivot[i].z - pivot[static_cast<size_t>(parent)].z};
-			derived = bad_bone_position(bind[static_cast<size_t>(parent)].data(), rel);
-		}
-		if (!same_float(static_cast<float>(derived.x), bone.position[0]) ||
-				!same_float(static_cast<float>(derived.y), bone.position[1]) ||
-				!same_float(static_cast<float>(derived.z), bone.position[2])) {
+		if (!same_float(derived[i].position[0], bone.position[0]) ||
+				!same_float(derived[i].position[1], bone.position[1]) ||
+				!same_float(derived[i].position[2], bone.position[2])) {
 			w.line("bonepos " + f9(bone.position[0]) + " " + f9(bone.position[1]) + " " +
 					f9(bone.position[2]));
 		}
@@ -214,7 +223,18 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 	}
 	for (const std::string &variant : set.missing)
 		w.note("the table names '" + variant + "', whose .bad is not beside it");
-	for (const AnimLoadedClip &clip : set.clips) write_clip(w, clip);
+	// The set's reset clip, whose bind every clip's positions turn through; a
+	// lone clip, or a table whose reset clip is absent, turns through its own.
+	const std::string reset_stem = bad_build_reset_stem(set.rows);
+	BadBuildClip reset_shape;
+	const BadBuildClip *reset = nullptr;
+	for (const AnimLoadedClip &clip : set.clips) {
+		if (!reset_stem.empty() && opennova::strutil::iequals(clip.name, reset_stem)) {
+			reset_shape = clip_shape(clip);
+			reset = &reset_shape;
+		}
+	}
+	for (const AnimLoadedClip &clip : set.clips) write_clip(w, clip, reset);
 	std::fclose(w.f);
 	for (const std::string &n : w.notes)
 		std::fprintf(stderr, "opennova-3di: note: scene drops %s\n", n.c_str());

@@ -198,12 +198,28 @@ asking an author for it:
 - **The bone table's `rotation[9]` is the TRANSPOSE of the bone's first
   channel key as a matrix**, in 13,517 of 13,517 bones (worst deviation
   5.0e-7). This is the same relation the runtime reads from the other side —
-  `mat3(stored) x channel-at-reset == identity` — so the bind a clip is
-  measured against is its own first key [orig: `AnimChannel_ComputeBoneMatrices
-  @ 0x410da0`]. Nothing authors a bind. The production loaders carry that bind
-  as the SKELETON's rest and pose it with the channel, so what a bone deforms
-  by is `key * bind^-1`; an authoring front end that poses a rig with the key
-  over a rest set to the bind shows exactly what the game draws.
+  `mat3(stored) x channel-at-reset == identity` — but the runtime reads it
+  from the rig's RESET clip: every clip of a rig composes against the bind of
+  the `.adm`'s slot-0 clip (the bind rule above), and a clip's own bone table
+  is read only when no reset is pinned [orig: `AnimChannel_ComputeBoneMatrices
+  @ 0x410da0`, the bind from `channel+44` `@0x410dd8`, else the playing clip
+  `@0x410de3`]. Nothing authors a bind. The production loaders carry the reset
+  clip's bind as the SKELETON's rest and pose it with the channel, so what a
+  bone deforms by is `key * bind_reset^-1`; an authoring front end that poses a
+  rig with the key over a rest set to that bind shows exactly what the game
+  draws. The seam picks the set's reset clip the way the table registers it:
+  the row whose key names slot 0 (`reset`) past its first five characters, and
+  of its variants the LAST, since each reset variant replaces the slot's head
+  rather than joining a ring [orig: `AnimMap_FindSlotByName @ 0x40cfa0`;
+  `AnimMap_RegisterBoneNode @ 0x40C2D0` `@0x40c38b`].
+- **`position[3]` follows the paired model's pivots through the SET's reset
+  bind**: `position[i] = rotation_reset[parent(i)] . clip(pivot[i] -
+  pivot[parent(i)])`, the relation `positions_from_model` rebuilds a rig's
+  table with. Over the retail tables' other clips it holds in 30,358 of 32,011
+  non-junk bones, and through the clip's OWN rotation in only 365: every clip of
+  a set stores the reset clip's positions. The seam derives it that way, and
+  `anim scene` recovers the pivots through the same bind, so every clip of a
+  table recovers the rig's one set of pivots.
 - **`fps` is 30 in every clip.** `version` is 1 in 474 and 0 in 3 (a 20-byte
   event record with no trigger word).
 - **The header words the reader never names are constant**: word 8 = 0,
@@ -270,12 +286,15 @@ derived from).
 drop below the rig's root and the height above it, which the runtime reads as
 the capsule and the footstep dip (`engine/runtime/anim/adm_root_motion`). What
 measured them is retail's own exporter, not the engine, and no tool is
-witnessed. The seam derives them from the clip's composed pose (the lowest and
-highest bone origin about bone 0), which lands within a few centimetres of the
-shipped numbers but does not reproduce them: `EMOTE01` ships a constant bottom
-of 0.8688 where the pose gives 0.8914 to 0.8926, and its top differs by up to
-0.08. A clip may therefore carry its own pair, which is how a retail clip
-survives an authoring round trip.
+witnessed. The seam's rule is therefore OURS, not a port: the lowest and
+highest bone origin about bone 0 over the pose the runtime draws, every key
+composed against the set's reset bind (`key * bind_reset^-1`; a lone clip
+against its own first key). It does not reproduce retail's numbers: over the
+3,014 clip builds of the 82 tables with every stated pair stripped
+(2026-09-25), a clip's worst frame is a median 0.6 m off and 36 clips land
+within 5 cm (DT1PRONE within 3.1 cm; the death clip Dt1DeaGF 3.2 m off). A clip
+may therefore carry its own pair, and `anim scene` always writes it, which is
+how a retail clip survives an authoring round trip.
 
 ## Divergences
 

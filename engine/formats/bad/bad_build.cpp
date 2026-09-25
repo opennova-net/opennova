@@ -7,6 +7,9 @@
 #include <formats/bad/bad_write.h>
 #include <formats/threedi/threedi_build.h>
 
+#include <base/io/strutil.h>
+
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -173,8 +176,112 @@ BadBuildVec3 bad_bone_rel(const float parent_bind_rows[9], const float position[
     return bad_mission_from_clip(apply(transpose(rows_from_floats(parent_bind_rows)), stored));
 }
 
-void bad_clip_extents(const BadBuildClip &clip, std::vector<double> &bottom,
-                      std::vector<double> &top) {
+namespace {
+
+BadBuildQuat quat_product(const BadBuildQuat &a, const BadBuildQuat &b) {
+    return BadBuildQuat{a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+                        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+                        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+                        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+}
+
+// A unit short-arc slerp: the capsule measure below is ours, so this is a
+// plain one rather than the runtime's port of Math_QuaternionSlerp.
+BadBuildQuat quat_blend(const BadBuildQuat &a, BadBuildQuat b, double t) {
+    double dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    if (dot < 0.0) {
+        b = BadBuildQuat{-b.x, -b.y, -b.z, -b.w};
+        dot = -dot;
+    }
+    double wa = 1.0 - t;
+    double wb = t;
+    if (dot < 0.9999) {
+        const double omega = std::acos(dot > 1.0 ? 1.0 : dot);
+        const double inv = 1.0 / std::sin(omega);
+        wa = std::sin((1.0 - t) * omega) * inv;
+        wb = std::sin(t * omega) * inv;
+    }
+    BadBuildQuat q{a.x * wa + b.x * wb, a.y * wa + b.y * wb, a.z * wa + b.z * wb,
+                   a.w * wa + b.w * wb};
+    const double len = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    if (len > 0.0) q = BadBuildQuat{q.x / len, q.y / len, q.z / len, q.w / len};
+    return q;
+}
+
+// The rotation a bone's channel holds at frame f, in the clip frame, as the
+// file will store it: the key whose window holds f, walking the bone's own
+// duration table, turned toward the next key by the fraction
+// [orig: BoneAnim_FindKeyframeAtTime @0x410220]. Past the summed durations the
+// last key holds, as runtime/anim's pose table does (the original returns key
+// 0 there, @0x410290).
+BadBuildQuat key_at(const BadBuildBone &bone, size_t f) {
+    const size_t count = bone.keys.size();
+    if (count == 0) return BadBuildQuat{};
+    const auto stored = [&](size_t k) { return quat_from_stored(stored_key(bone.keys[k])); };
+    size_t acc = 0;
+    for (size_t k = 0; k < count; ++k) {
+        const size_t dur = bone.durations.empty() ? 1 : bone.durations[k];
+        if (acc + dur > f) {
+            if (k + 1 >= count || f == acc) return stored(k);
+            return quat_blend(stored(k), stored(k + 1),
+                              static_cast<double>(f - acc) / static_cast<double>(dur));
+        }
+        acc += dur;
+    }
+    return stored(count - 1);
+}
+
+} // namespace
+
+void bad_derive_bind_rows(const BadBuildClip &clip, const BadBuildClip *reset, size_t bone,
+                          float rows[9]) {
+    const BadBuildBone *source = bone < clip.bones.size() ? &clip.bones[bone] : nullptr;
+    if (reset != nullptr && bone < reset->bones.size() && !reset->bones[bone].keys.empty())
+        source = &reset->bones[bone];
+    float first[9];
+    bad_quat_to_rows(source != nullptr && !source->keys.empty()
+                             ? quat_from_stored(stored_key(source->keys.front()))
+                             : BadBuildQuat{},
+                     first);
+    bad_rows_transpose(first, rows);
+}
+
+void bad_derive_bone_table(const BadBuildClip &clip, const BadBuildClip *reset,
+                           std::vector<BadBone> &rows) {
+    const size_t bones = clip.bones.size();
+    rows.assign(bones, BadBone{});
+    for (size_t i = 0; i < bones; ++i) {
+        const BadBuildBone &bone = clip.bones[i];
+        BadBone &row = rows[i];
+        std::memset(&row, 0, sizeof(row));
+        std::memcpy(row.name, bone.name.c_str(), std::min(bone.name.size(), sizeof(row.name) - 1));
+        row.parent_index = bone.parent;
+        row.length = static_cast<float>(bone.length);
+        bad_derive_bind_rows(clip, nullptr, i, row.rotation);
+
+        const bool root = bone.parent < 0 || static_cast<size_t>(bone.parent) >= i;
+        BadBuildVec3 p;
+        if (bone.position_given) {
+            p = bone.position_stored;
+        } else if (root) {
+            p = bad_clip_from_mission(bone.pivot);
+        } else {
+            const size_t up = static_cast<size_t>(bone.parent);
+            const BadBuildVec3 rel{bone.pivot.x - clip.bones[up].pivot.x,
+                                   bone.pivot.y - clip.bones[up].pivot.y,
+                                   bone.pivot.z - clip.bones[up].pivot.z};
+            float bind[9];
+            bad_derive_bind_rows(clip, reset, up, bind);
+            p = bad_bone_position(bind, rel);
+        }
+        row.position[0] = static_cast<float>(p.x);
+        row.position[1] = static_cast<float>(p.y);
+        row.position[2] = static_cast<float>(p.z);
+    }
+}
+
+void bad_clip_extents(const BadBuildClip &clip, const BadBuildClip *reset,
+                      std::vector<double> &bottom, std::vector<double> &top) {
     const size_t bones = clip.bones.size();
     const size_t keys = static_cast<size_t>(clip.frame_count) + 1;
     bottom.assign(keys, 0.0);
@@ -182,42 +289,50 @@ void bad_clip_extents(const BadBuildClip &clip, std::vector<double> &bottom,
     if (bones == 0) return;
     const bool translated = (clip.flags & BAD_FLAG_TRANSLATION) != 0;
 
-    // The pose the capsule measures is the clip's own, which is every bone's
-    // key composed against the bind: the bind is the bone's first key, so the
-    // rig stands in its authored pose at frame 0 [orig:
-    // AnimChannel_ComputeBoneMatrices @0x410da0 Transpose(bind) x channel].
-    std::vector<BadBuildQuat> bind(bones);
+    // The pose the capsule measures is the one the runtime draws: each bone's
+    // key composed against the rig's bind, `key * bind^-1`. The bind is the
+    // set's reset clip, which the runtime pins once per entity and every clip
+    // of the rig composes against; a clip with no reset to name (a lone clip)
+    // composes against its own first key, the runtime's fallback when no bind
+    // is pinned [orig: AnimChannel_ComputeBoneMatrices @0x410da0, the bind from
+    // channel+44 @0x410dd8 else the playing clip @0x410de3; AnimMap_RegisterEntity
+    // @0x40bb60 pins slot 0's clip @0x40bbe3]. A bone past the reset clip's
+    // own bones takes its own first key.
+    std::vector<BadBuildQuat> bind_inverse(bones);
     for (size_t i = 0; i < bones; ++i) {
-        const BadBuildBone &bone = clip.bones[i];
-        if (!bone.keys.empty()) bind[i] = bad_clip_from_mission(bone.keys.front());
+        const BadBuildBone *source = &clip.bones[i];
+        if (reset != nullptr && i < reset->bones.size() && !reset->bones[i].keys.empty())
+            source = &reset->bones[i];
+        if (!source->keys.empty())
+            bind_inverse[i] = conjugate(quat_from_stored(stored_key(source->keys.front())));
     }
+
+    // The extents RULE below is ours: retail's exporter measured them, and no
+    // tool is witnessed (docs/anim/adm-bad-format-re.md). It is the lowest and
+    // highest bone origin about bone 0 over that pose.
     std::vector<BadBuildVec3> posed(bones);
+    std::vector<BadBuildQuat> turn(bones);
     for (size_t f = 0; f < keys; ++f) {
         double low = 0.0;
         double high = 0.0;
         for (size_t i = 0; i < bones; ++i) {
             const BadBuildBone &bone = clip.bones[i];
+            turn[i] = quat_product(key_at(bone, f), bind_inverse[i]);
             const int parent = bone.parent;
             if (parent < 0 || static_cast<size_t>(parent) >= i) {
                 posed[i] = BadBuildVec3{};
             } else {
-                const BadBuildBone &up = clip.bones[static_cast<size_t>(parent)];
+                const size_t up = static_cast<size_t>(parent);
+                const BadBuildBone &above = clip.bones[up];
                 const BadBuildVec3 rel = bad_clip_from_mission(BadBuildVec3{
-                        bone.pivot.x - up.pivot.x, bone.pivot.y - up.pivot.y,
-                        bone.pivot.z - up.pivot.z});
-                const size_t at = f < up.keys.size() ? f : up.keys.size() - 1;
-                const BadBuildQuat key = up.keys.empty() ? BadBuildQuat{}
-                                                         : bad_clip_from_mission(up.keys[at]);
-                const Mat3 composed = multiply(rows_of(conjugate(bind[static_cast<size_t>(parent)])),
-                        rows_of(key));
-                const BadBuildVec3 turned = apply(composed, rel);
-                posed[i] = BadBuildVec3{posed[static_cast<size_t>(parent)].x + turned.x,
-                                        posed[static_cast<size_t>(parent)].y + turned.y,
-                                        posed[static_cast<size_t>(parent)].z + turned.z};
+                        bone.pivot.x - above.pivot.x, bone.pivot.y - above.pivot.y,
+                        bone.pivot.z - above.pivot.z});
+                const BadBuildVec3 turned = apply(rows_of(turn[up]), rel);
+                posed[i] = BadBuildVec3{posed[up].x + turned.x, posed[up].y + turned.y,
+                                        posed[up].z + turned.z};
             }
-            if (translated && !bone.translations.empty()) {
-                const size_t row = f < bone.translations.size() ? f : bone.translations.size() - 1;
-                const BadBuildVec3 t = bad_clip_from_mission(bone.translations[row]);
+            if (translated && f < bone.translations.size()) {
+                const BadBuildVec3 t = bad_clip_from_mission(bone.translations[f]);
                 posed[i].x += t.x;
                 posed[i].y += t.y;
                 posed[i].z += t.z;
@@ -231,7 +346,8 @@ void bad_clip_extents(const BadBuildClip &clip, std::vector<double> &bottom,
     }
 }
 
-bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string *error) {
+bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, BadAssembled &out,
+                        std::string *error) {
     out = BadAssembled{};
     const size_t bones = clip.bones.size();
     if (bones == 0) return fail(error, "a clip holds no bones");
@@ -295,39 +411,7 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
         }
     }
 
-    out.bones.resize(bones);
-    for (size_t i = 0; i < bones; ++i) {
-        const BadBuildBone &bone = clip.bones[i];
-        BadBone &row = out.bones[i];
-        std::memset(&row, 0, sizeof(row));
-        std::memcpy(row.name, bone.name.c_str(), bone.name.size());
-        row.parent_index = bone.parent;
-        row.length = static_cast<float>(bone.length);
-
-        float first[9];
-        bad_quat_to_rows(quat_from_stored(out.rotations[i][0]), first);
-        bad_rows_transpose(first, row.rotation);
-
-        if (bone.position_given) {
-            row.position[0] = static_cast<float>(bone.position_stored.x);
-            row.position[1] = static_cast<float>(bone.position_stored.y);
-            row.position[2] = static_cast<float>(bone.position_stored.z);
-        } else if (bone.parent < 0) {
-            const BadBuildVec3 rel = bad_clip_from_mission(bone.pivot);
-            row.position[0] = static_cast<float>(rel.x);
-            row.position[1] = static_cast<float>(rel.y);
-            row.position[2] = static_cast<float>(rel.z);
-        } else {
-            const BadBuildBone &up = clip.bones[static_cast<size_t>(bone.parent)];
-            const BadBuildVec3 rel{bone.pivot.x - up.pivot.x, bone.pivot.y - up.pivot.y,
-                                   bone.pivot.z - up.pivot.z};
-            const BadBuildVec3 p =
-                    bad_bone_position(out.bones[static_cast<size_t>(bone.parent)].rotation, rel);
-            row.position[0] = static_cast<float>(p.x);
-            row.position[1] = static_cast<float>(p.y);
-            row.position[2] = static_cast<float>(p.z);
-        }
-    }
+    bad_derive_bone_table(clip, reset, out.bones);
 
     out.channels.resize(bones);
     for (size_t i = 0; i < bones; ++i) {
@@ -346,7 +430,7 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
         for (const BadBuildEvent &ev : clip.events) {
             if (!ev.extents_given && !clip.capsule_given) derive = true;
         }
-        if (derive) bad_clip_extents(clip, bottom, top);
+        if (derive) bad_clip_extents(clip, reset, bottom, top);
         out.events.resize(clip.events.size());
         for (size_t f = 0; f < clip.events.size(); ++f) {
             const BadBuildEvent &ev = clip.events[f];
@@ -402,12 +486,38 @@ bool bad_build_assemble(const BadBuildClip &clip, BadAssembled &out, std::string
     return true;
 }
 
-bool bad_build_mint(const BadBuildClip &clip, std::vector<uint8_t> &out, std::string *error) {
+bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, std::vector<uint8_t> &out,
+                    std::string *error) {
     BadAssembled assembled;
-    if (!bad_build_assemble(clip, assembled, error)) return false;
+    if (!bad_build_assemble(clip, reset, assembled, error)) return false;
     if (bad_write_buffer(&assembled.file, out) != 0)
         return fail(error, "the writer refused the clip");
     return true;
+}
+
+std::string bad_build_clip_stem(const std::string &variant) {
+    if (variant.size() > 4 && strutil::ends_with_icase(variant, ".bad"))
+        return variant.substr(0, variant.size() - 4);
+    return variant;
+}
+
+std::string bad_build_reset_stem(const std::vector<BadBuildRow> &rows) {
+    const BadBuildRow *reset = nullptr;
+    for (const BadBuildRow &row : rows) {
+        if (row.key.size() > 5 && !row.variants.empty() &&
+            strutil::iequals(std::string_view(row.key).substr(5), "reset"))
+            reset = &row;
+    }
+    return reset != nullptr ? bad_build_clip_stem(reset->variants.back()) : std::string();
+}
+
+const BadBuildClip *bad_build_reset_clip(const BadBuildSet &set) {
+    const std::string stem = bad_build_reset_stem(set.rows);
+    if (stem.empty()) return nullptr;
+    for (const BadBuildClip &clip : set.clips) {
+        if (strutil::iequals(clip.name, stem)) return &clip;
+    }
+    return nullptr;
 }
 
 bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string *error) {

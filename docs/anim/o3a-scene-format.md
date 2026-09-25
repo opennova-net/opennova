@@ -32,10 +32,14 @@ it was authored on and to any rig that matches it.
   last interval of every cycle reaches row `frames`
   [orig: `sub_4102D0 @ 0x4102d0` via `BoneAnim_TransformBones @ 0x410360`];
   the pad row retail's files carry past it is the writer's, never authored.
-- A key is the bone's rotation composed against the bind, and the bind is the
-  bone's own FIRST key: the runtime reads `bind^-1 * key`
-  [orig: `AnimChannel_ComputeBoneMatrices @ 0x410da0`], so a clip's first key is
-  the pose the rig rests in and every later key turns from there.
+- A key is the bone's rotation in the model's frame (a world rotation, not a
+  parent-relative one). The runtime deforms a bone by `key * bind^-1`, and the
+  bind is the first key of the set's RESET clip (the `anim_reset` row's last
+  variant), pinned once per entity; only a clip that plays with no reset pinned
+  composes against its own first key
+  [orig: `AnimChannel_ComputeBoneMatrices @ 0x410da0`;
+  `AnimMap_RegisterEntity @ 0x40bb60`]. The reset clip's first key is the pose
+  the rig's rest stands in, and every key of every clip turns from there.
 
 ## Records
 
@@ -62,18 +66,21 @@ the values the text carries, so `build(scene(x))` stays exact:
 
 - the bone table's `rotation[9]`, the transpose of the bone's first key as a
   matrix (13,517 of 13,517 retail bones);
-- `position[3]` from the pivots:
-  `position[i] = rotation[parent(i)] . clip(pivot[i] - pivot[parent(i)])`,
+- `position[3]` from the pivots, through the parent's bind in the set's reset
+  clip (a lone clip: its own):
+  `position[i] = rotation_reset[parent(i)] . clip(pivot[i] - pivot[parent(i)])`,
   unless a `bonepos` overrides it;
 - `num_children`, the child and parent addresses, and the bone's own index byte;
 - the translation block's pad row after row `frames` (a repeat of it: retail's
   pad holds exporter memory that no read weights);
 - the header words no field names (0, 0, 8, 1, 1, 0, 0 in every retail clip);
 - an event's capsule pair, when neither the event nor a `capsule` record gives
-  one: the lowest and highest bone origin about bone 0 over the clip's composed
-  pose. Retail measured these by a rule nothing has witnessed, and this one
-  lands within a few centimetres of the shipped numbers rather than on them
-  (`docs/anim/adm-bad-format-re.md`), so a clip that must keep retail's values
+  one, by OUR rule: the lowest and highest bone origin about bone 0 over the
+  pose the runtime draws, each key composed against the set's reset clip (a
+  lone clip: its own first key). Retail measured these by a rule nothing has
+  witnessed, and this one does not reproduce the shipped numbers (a clip's
+  worst frame is a median 0.6 m off over the retail tables;
+  `docs/anim/adm-bad-format-re.md`), so a clip that must keep retail's values
   states them.
 
 The keys themselves are kept verbatim: retail stores neighbouring keys in
