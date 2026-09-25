@@ -22,31 +22,13 @@
 #include <base/io/strutil.h>
 #include <formats/bad/bad_build.h>
 
+#include "scene_text.h"
+
 using namespace opennova::bad;
 
 namespace threedi_cli {
 
 namespace {
-
-// Floats print with 9 significant digits (a float32 round-trips exactly);
-// a pivot is a double the builder turns back into floats, so it takes 17.
-std::string f9(double v) {
-	char buf[40];
-	std::snprintf(buf, sizeof(buf), "%.9g", v);
-	return std::strcmp(buf, "-0") == 0 ? std::string("0") : std::string(buf);
-}
-
-std::string f17(double v) {
-	char buf[40];
-	std::snprintf(buf, sizeof(buf), "%.17g", v);
-	return std::strcmp(buf, "-0") == 0 ? std::string("0") : std::string(buf);
-}
-
-std::string name_field(const std::string &name) {
-	bool plain = !name.empty();
-	for (const char c : name) plain = plain && c != ' ' && c != '\t' && c != '"' && c != '#';
-	return plain ? name : "\"" + name + "\"";
-}
 
 struct Writer {
 	FILE *f = nullptr;
@@ -121,7 +103,7 @@ std::string inexpressible(const AnimLoadedClip &clip) {
 void write_clip(Writer &w, const AnimLoadedClip &clip, const BadBuildClip *reset) {
 	const BadFile &file = clip.file;
 	w.line("");
-	w.line("clip " + name_field(clip.name));
+	w.line("clip " + name_field(w, clip.name));
 	if (file.version != 1) w.line("version " + std::to_string(file.version));
 	w.line("fps " + std::to_string(file.fps));
 	char flags[24];
@@ -164,7 +146,7 @@ void write_clip(Writer &w, const AnimLoadedClip &clip, const BadBuildClip *reset
 		const BadBone &bone = file.bones[i];
 		const int parent = bone.parent_index;
 		w.line("bone " + std::to_string(parent) + " " + f17(pivot[i].x) + " " + f17(pivot[i].y) +
-				" " + f17(pivot[i].z) + " " + f9(bone.length) + " " + name_field(bone.name));
+				" " + f17(pivot[i].z) + " " + f9(bone.length) + " " + name_field(w, bone.name));
 		if (!same_float(derived[i].position[0], bone.position[0]) ||
 				!same_float(derived[i].position[1], bone.position[1]) ||
 				!same_float(derived[i].position[2], bone.position[2])) {
@@ -237,7 +219,7 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 	}
 	w.line("o3a 1");
 	w.line(std::string("# clip set of ") + in_path + " (opennova-3di anim scene)");
-	if (!set.table_name.empty()) w.line("adm " + name_field(set.table_name));
+	if (!set.table_name.empty()) w.line("adm " + name_field(w, set.table_name));
 	// A clip the text cannot express is left out, and its variants with it.
 	std::vector<std::string> left_out;
 	for (const AnimLoadedClip &clip : set.clips) {
@@ -254,7 +236,7 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 		return false;
 	};
 	for (const BadBuildRow &row : set.rows) {
-		std::string line = "row " + name_field(row.key);
+		std::string line = "row " + name_field(w, row.key);
 		size_t held = 0;
 		for (const std::string &variant : row.variants) {
 			// A variant whose clip did not load, or is left out, is dropped

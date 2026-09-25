@@ -18,7 +18,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -31,6 +30,7 @@
 // Header-only (the shader table): opennova-3di links opennova_base alone.
 #include <runtime/renderer/material_descriptor.h>
 
+#include "scene_text.h"
 #include "threedi_cli.h"
 
 using namespace opennova::threedi;
@@ -58,109 +58,6 @@ struct Parser {
 // 15 keeps the NUL the loader's C strings end on (no JO name is longer than 9,
 // so nothing witnesses how an unterminated one reads).
 constexpr size_t kNameChars = 15;
-
-// One record's fields: whitespace-separated tokens (space, tab, \r, \v, \f);
-// a token that opens with '"' runs to the next '"' and may hold spaces or be
-// empty (retail user points `FLARE 01` and `ground `, an empty CTRL name).
-struct Line {
-	std::vector<std::string> tokens;
-	size_t next = 1; // after the record key
-	std::string bad; // why the line does not split into tokens
-
-	explicit Line(const std::string &text) {
-		const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\v' || c == '\f'; };
-		size_t i = 0;
-		while (i < text.size()) {
-			if (space(text[i])) {
-				++i;
-				continue;
-			}
-			std::string token;
-			if (text[i] == '"') {
-				const size_t close = text.find('"', i + 1);
-				if (close == std::string::npos) {
-					bad = "a quoted name has no closing '\"'";
-					return;
-				}
-				token = text.substr(i + 1, close - i - 1);
-				i = close + 1;
-				if (i < text.size() && !space(text[i])) {
-					bad = "a quoted name runs into the next field";
-					return;
-				}
-			} else {
-				while (i < text.size() && !space(text[i])) {
-					if (text[i] == '"') {
-						bad = "a '\"' inside a bare field (quote the whole name; a name cannot hold '\"')";
-						return;
-					}
-					token += text[i++];
-				}
-			}
-			tokens.push_back(token);
-		}
-	}
-
-	const std::string &key() const { return tokens[0]; }
-	bool more() const { return next < tokens.size(); }
-	const std::string &peek() const { return tokens[next]; }
-
-	// A number: what strtod reads, and `nan` / `-nan` as the quiet NaN retail
-	// stores (0x7FC00000 and its negation: J_bsh1, ChmLFP1), whatever payload
-	// the C library's strtod gives the word (MSVC's sets every mantissa bit).
-	bool number(double &out) {
-		if (!more()) return false;
-		const std::string &t = tokens[next];
-		if (t == "nan" || t == "-nan") {
-			out = t[0] == '-' ? -std::numeric_limits<double>::quiet_NaN() : std::numeric_limits<double>::quiet_NaN();
-			++next;
-			return true;
-		}
-		char *end = nullptr;
-		out = std::strtod(t.c_str(), &end);
-		if (t.empty() || end == nullptr || *end != '\0') return false;
-		++next;
-		return true;
-	}
-	bool numbers(double *out, int n) {
-		for (int i = 0; i < n; ++i)
-			if (!number(out[i])) return false;
-		return true;
-	}
-	// A whole number in decimal, or in hex after 0x (flag words); a leading 0
-	// is not octal.
-	bool integer(long long &out) {
-		if (!more()) return false;
-		const std::string &t = tokens[next];
-		const size_t sign = !t.empty() && (t[0] == '-' || t[0] == '+') ? 1 : 0;
-		const bool hex = t.size() > sign + 2 && t[sign] == '0' && (t[sign + 1] == 'x' || t[sign + 1] == 'X');
-		char *end = nullptr;
-		out = std::strtoll(t.c_str(), &end, hex ? 16 : 10);
-		if (t.size() == sign || end == nullptr || *end != '\0') return false;
-		++next;
-		return true;
-	}
-	// A whole number in [lo, hi].
-	bool integer(long long &out, long long lo, long long hi) { return integer(out) && out >= lo && out <= hi; }
-	bool name(std::string &out) {
-		if (!more()) return false;
-		out = tokens[next++];
-		return true;
-	}
-};
-
-// The line without its comment: `#` at the start of a line or after
-// whitespace (retail shader tags such as `VS_PHONGT#UV` hold a '#'), never
-// inside quotes.
-std::string strip_comment(const std::string &line) {
-	bool quoted = false;
-	for (size_t i = 0; i < line.size(); ++i) {
-		if (line[i] == '"') quoted = !quoted;
-		if (!quoted && line[i] == '#' && (i == 0 || line[i - 1] == ' ' || line[i - 1] == '\t'))
-			return line.substr(0, i);
-	}
-	return line;
-}
 
 bool fits_s16(long long v) { return v >= SHRT_MIN && v <= SHRT_MAX; }
 
@@ -268,7 +165,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 		// A UTF-8 byte order mark ahead of the header is no field.
 		if (ps.line == 1 && raw.compare(0, 3, "\xEF\xBB\xBF") == 0) raw.erase(0, 3);
 		const std::string text = strip_comment(raw);
-		Line in(text);
+		SceneLine in(text, SceneNumbers::any);
 		if (!in.bad.empty()) {
 			ps.error(in.bad);
 			continue;
@@ -839,9 +736,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			}
 			check_register(style, param, "track");
 			ThreediPartAnimation &pa = model.lods[lod].panm.back();
-			ThreediTransform *tracks[] = {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y,
-					&pa.scale_z, &pa.translation};
-			*tracks[t] = threedi_build_track(static_cast<uint8_t>(style), static_cast<uint8_t>(param),
+			*panm_tracks(pa)[t] = threedi_build_track(static_cast<uint8_t>(style), static_cast<uint8_t>(param),
 					static_cast<int16_t>(rate), static_cast<int16_t>(start), static_cast<int16_t>(end));
 			const int row = static_cast<int>(model.lods[lod].panm.size()) - 1;
 			if (t == 6) trans_axis[{lod, row}] = static_cast<int>(axis);

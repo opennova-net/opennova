@@ -10,7 +10,7 @@
 # The CLI links opennova_base alone, so the runtime headers it reads its tables
 # from (runtime/renderer/material_descriptor.h, runtime/world/body_anim.h,
 # runtime/anim/anim_event_bits.h) must stay header-only.
-add_library(opennova_3di_commands STATIC build.cpp scene.cpp info.cpp compare.cpp
+add_library(opennova_3di_commands STATIC scene_text.cpp build.cpp scene.cpp info.cpp compare.cpp
     anim_load.cpp anim_build.cpp anim_scene.cpp anim_info.cpp anim_compare.cpp)
 target_link_libraries(opennova_3di_commands PUBLIC opennova_base)
 target_include_directories(opennova_3di_commands PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

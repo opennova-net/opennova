@@ -198,8 +198,6 @@ std::string reg_name(const Threedi3di3 &m, int style, int reg) {
 	return "#" + std::to_string(reg);
 }
 
-int byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
-
 // Everything a material means, as one comparable string (generator rates and
 // phases to five significant digits; colours as the bytes they are authored).
 std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
@@ -873,10 +871,7 @@ void compare_panm(Diff &d, const std::string &where, const Threedi3di3 &a, const
 			std::snprintf(buf, sizeof(buf), ": flags 0x%08x vs 0x%08x", x.flags, y.flags);
 			d.add(w + buf);
 		}
-		const ThreediTransform *tx[] = {&x.rotation_x, &x.rotation_y, &x.rotation_z, &x.scale_x, &x.scale_y, &x.scale_z,
-				&x.translation};
-		const ThreediTransform *ty[] = {&y.rotation_x, &y.rotation_y, &y.rotation_z, &y.scale_x, &y.scale_y, &y.scale_z,
-				&y.translation};
+		const auto tx = panm_tracks(x), ty = panm_tracks(y);
 		for (int t = 0; t < kTrackCount; ++t) {
 			const std::string kx = track_key(a, *tx[t]), ky = track_key(b, *ty[t]);
 			if (kx != ky) d.add(w + " " + track_label(t) + ": " + kx + " vs " + ky);

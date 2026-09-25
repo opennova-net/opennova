@@ -8,20 +8,17 @@
 
 #include "anim_cli.h"
 
-#include <cerrno>
-#include <cmath>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <base/io/strutil.h>
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_build.h>
+
+#include "scene_text.h"
 
 using namespace opennova::bad;
 
@@ -42,75 +39,7 @@ struct Parser {
 	}
 };
 
-// A finite number, the whole token: a clip holds no nan or inf anywhere.
-bool read_double(std::istringstream &in, double &out) {
-	std::string token;
-	if (!(in >> token)) return false;
-	char *end = nullptr;
-	const double value = std::strtod(token.c_str(), &end);
-	if (end == token.c_str() || *end != '\0' || !std::isfinite(value)) return false;
-	out = value;
-	return true;
-}
-
-bool read_doubles(std::istringstream &in, double *out, int n) {
-	for (int i = 0; i < n; ++i)
-		if (!read_double(in, out[i])) return false;
-	return true;
-}
-
-// An integer field in decimal or 0x hex (the flag and trigger words), the
-// whole token, within [lo, hi]: nothing wraps into a narrower field.
-bool read_word(std::istringstream &in, long long &out, long long lo, long long hi) {
-	std::string token;
-	if (!(in >> token)) return false;
-	const bool hex = token.size() > 2 && token[0] == '0' && (token[1] == 'x' || token[1] == 'X');
-	char *end = nullptr;
-	errno = 0;
-	const long long value = std::strtoll(token.c_str(), &end, hex ? 16 : 10);
-	if (end == token.c_str() || *end != '\0' || errno == ERANGE || value < lo || value > hi)
-		return false;
-	out = value;
-	return true;
-}
-
 constexpr long long kWordMax = 0xFFFFFFFFll;
-
-// A name field: a bare token, or "a quoted one" that may hold spaces (a bone
-// name is `BN01 Pelvis`). A quote that never closes is refused.
-bool read_name(std::istringstream &in, std::string &out) {
-	out.clear();
-	in >> std::ws;
-	if (in.peek() != '"') return static_cast<bool>(in >> out);
-	in.get();
-	std::getline(in, out, '"');
-	return !in.fail() && !in.eof();
-}
-
-// Whether the record ends here: every record refuses a trailing token.
-bool at_end(std::istringstream &in) {
-	std::string extra;
-	return !(in >> extra);
-}
-
-// Whether no token is left, without taking one: an optional field follows.
-bool at_end_peek(std::istringstream &in) {
-	in >> std::ws;
-	return in.peek() == std::char_traits<char>::eof();
-}
-
-// Strip a comment: `#` at the start of a line or after whitespace, never
-// inside quotes.
-void strip_comment(std::string &line) {
-	bool quoted = false;
-	for (size_t i = 0; i < line.size(); ++i) {
-		if (line[i] == '"') quoted = !quoted;
-		if (!quoted && line[i] == '#' && (i == 0 || line[i - 1] == ' ' || line[i - 1] == '\t')) {
-			line.erase(i);
-			return;
-		}
-	}
-}
 
 // Per bone, which of its keys stated a duration: a bone gives one on every
 // key or on none.
@@ -130,15 +59,19 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 	std::vector<BoneKeys> bone_keys;
 	while (std::getline(file, raw)) {
 		++ps.line;
-		if (!raw.empty() && raw.back() == '\r') raw.pop_back();
-		strip_comment(raw);
-		std::istringstream in(raw);
-		std::string key;
-		if (!(in >> key)) continue;
+		// The text's shared grammar (scene_text.h), finite numbers only: a clip
+		// holds no nan or inf anywhere.
+		SceneLine in(strip_comment(raw), SceneNumbers::finite);
+		if (!in.bad.empty()) {
+			ps.error(in.bad);
+			continue;
+		}
+		if (in.tokens.empty()) continue;
+		const std::string key = in.key();
 
 		if (!header) {
 			long long version = 0;
-			if (key != "o3a" || !read_word(in, version, 1, 1) || !at_end(in)) {
+			if (key != "o3a" || !in.integer(version, 1, 1) || in.more()) {
 				ps.error("a clip set starts with `o3a 1`");
 				return;
 			}
@@ -147,22 +80,22 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 		}
 
 		if (key == "adm") {
-			if (!read_name(in, set.adm_name) || set.adm_name.empty() || !at_end(in))
+			if (!in.name(set.adm_name) || set.adm_name.empty() || in.more())
 				ps.error("adm needs one name");
 		} else if (key == "row") {
 			BadBuildRow row;
-			if (!read_name(in, row.key) || row.key.empty()) {
+			if (!in.name(row.key) || row.key.empty()) {
 				ps.error("row needs a slot key");
 				continue;
 			}
 			std::string variant;
 			bool whole = true;
-			while (whole && !at_end_peek(in)) {
-				whole = read_name(in, variant) && !variant.empty();
+			while (whole && in.more()) {
+				whole = in.name(variant) && !variant.empty();
 				if (whole) row.variants.push_back(variant);
 			}
 			if (!whole) {
-				ps.error("row '" + row.key + "' names an empty or unterminated clip");
+				ps.error("row '" + row.key + "' names an empty clip");
 				continue;
 			}
 			if (row.variants.empty()) ps.error("row '" + row.key + "' names no clip");
@@ -172,13 +105,13 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			ps.clip_lines.push_back(ps.line);
 			clip = &set.clips.back();
 			bone = nullptr;
-			if (!read_name(in, clip->name) || clip->name.empty() || !at_end(in))
+			if (!in.name(clip->name) || clip->name.empty() || in.more())
 				ps.error("clip needs one name");
 		} else if (clip == nullptr) {
 			ps.error("`" + key + "` before any clip");
 		} else if (key == "fps" || key == "frames" || key == "version" || key == "flags") {
 			long long value = 0;
-			if (!read_word(in, value, 0, kWordMax) || !at_end(in)) {
+			if (!in.integer(value, 0, kWordMax) || in.more()) {
 				ps.error(key + " needs one whole number from 0 to 0xffffffff");
 				continue;
 			}
@@ -188,7 +121,7 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			if (key == "flags") clip->flags = static_cast<uint32_t>(value);
 		} else if (key == "capsule") {
 			double pair[2];
-			if (!read_doubles(in, pair, 2) || !at_end(in)) {
+			if (!in.numbers(pair, 2) || in.more()) {
 				ps.error("capsule needs a bottom and a top");
 				continue;
 			}
@@ -200,8 +133,8 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			double pivot[3];
 			double length = 0.0;
 			std::string name;
-			if (!read_word(in, parent, -1, 0x7FFFFFFFll) || !read_doubles(in, pivot, 3) ||
-					!read_double(in, length) || !read_name(in, name) || !at_end(in)) {
+			if (!in.integer(parent, -1, 0x7FFFFFFFll) || !in.numbers(pivot, 3) || !in.number(length) ||
+					!in.name(name) || in.more()) {
 				ps.error("bone needs a parent, a pivot, a length and a name");
 				continue;
 			}
@@ -220,15 +153,15 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			}
 			if (key == "k") {
 				double q[4];
-				if (!read_doubles(in, q, 4)) {
+				if (!in.numbers(q, 4)) {
 					ps.error("k needs four quaternion components");
 					continue;
 				}
 				// A duration states how long the key holds; a bone that gives
 				// one gives it on every key, and keeps a table only then.
 				long long duration = 0;
-				const bool stated = !at_end_peek(in);
-				if (stated && (!read_word(in, duration, 1, 0xFFFF) || !at_end(in))) {
+				const bool stated = in.more();
+				if (stated && (!in.integer(duration, 1, 0xFFFF) || in.more())) {
 					ps.error("a key duration is one whole number from 1 to 65535");
 					continue;
 				}
@@ -241,14 +174,14 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 				}
 			} else if (key == "tr") {
 				double t[3];
-				if (!read_doubles(in, t, 3) || !at_end(in)) {
+				if (!in.numbers(t, 3) || in.more()) {
 					ps.error("tr needs three components");
 					continue;
 				}
 				bone->translations.push_back(BadBuildVec3{t[0], t[1], t[2]});
 			} else {
 				double p[3];
-				if (!read_doubles(in, p, 3) || !at_end(in)) {
+				if (!in.numbers(p, 3) || in.more()) {
 					ps.error("bonepos needs three components");
 					continue;
 				}
@@ -258,16 +191,16 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 		} else if (key == "event") {
 			double v[3];
 			long long trigger = 0;
-			if (!read_doubles(in, v, 3) || !read_word(in, trigger, 0, kWordMax)) {
+			if (!in.numbers(v, 3) || !in.integer(trigger, 0, kWordMax)) {
 				ps.error("event needs a velocity and a trigger word");
 				continue;
 			}
 			BadBuildEvent ev;
 			ev.velocity = BadBuildVec3{v[0], v[1], v[2]};
 			ev.trigger = static_cast<int32_t>(static_cast<uint32_t>(trigger));
-			if (!at_end_peek(in)) {
+			if (in.more()) {
 				double pair[2];
-				if (!read_doubles(in, pair, 2) || !at_end(in)) {
+				if (!in.numbers(pair, 2) || in.more()) {
 					ps.error("an event's capsule needs a bottom and a top");
 					continue;
 				}

@@ -6,11 +6,15 @@
 // register and generator-style tables for a front end.
 #pragma once
 
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
 #include <string>
 #include <system_error>
+
+#include <formats/threedi/threedi_3di3.h>
 
 namespace threedi_cli {
 
@@ -25,6 +29,19 @@ inline int track_index(const std::string &name) {
 		if (name == track_label(i)) return i;
 	return -1;
 }
+// A PANM row's tracks in that order.
+inline std::array<opennova::threedi::ThreediTransform *, kTrackCount> panm_tracks(
+		opennova::threedi::ThreediPartAnimation &pa) {
+	return {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y, &pa.scale_z, &pa.translation};
+}
+inline std::array<const opennova::threedi::ThreediTransform *, kTrackCount> panm_tracks(
+		const opennova::threedi::ThreediPartAnimation &pa) {
+	return {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y, &pa.scale_z, &pa.translation};
+}
+
+// A colour channel (0..1) as the byte it was authored as: the inverse of the
+// builder's threedi_byte_unit.
+inline int byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
 
 // Write `size` bytes to `path` whole or not at all: into `path`.part, checked
 // through fclose, then renamed over `path`. A full disk, a crash or a refused

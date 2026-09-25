@@ -184,9 +184,8 @@ int cmd_info(const char *path, int verbose) {
 			const ThreediPartAnimation &pa = lod.part_animations[a];
 			std::printf("    panm part %u parent %u flags 0x%08x  matrix %u offset %u bind %d\n", pa.subobject_index,
 					pa.parent_subobject, pa.flags, pa.matrix_index, pa.matrix_offset, pa.bind_matrix_index);
-			const ThreediTransform *tracks[] = {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x,
-					&pa.scale_y, &pa.scale_z, &pa.translation};
-			for (int t = 0; t < 7; ++t) print_track(m, t, *tracks[t]);
+			const auto tracks = panm_tracks(pa);
+			for (int t = 0; t < kTrackCount; ++t) print_track(m, t, *tracks[t]);
 		}
 	}
 	for (uint32_t i = 0; i < m.material_count; ++i) {

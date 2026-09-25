@@ -18,10 +18,17 @@ it was authored on and to any rig that matches it.
 
 ## Conventions
 
-- One record per line, whitespace-separated. `#` starts a comment at the start
-  of a line or after whitespace. The first record is `o3a 1`.
+- One record per line, its fields separated by whitespace (space, tab, `\r`,
+  `\v`, `\f`). `#` starts a comment at the start of a line or after
+  whitespace. The first record is `o3a 1`. The tokenizer, the name fields and
+  the number spelling are the `.o3d` scene text's
+  ([o3d-scene-format.md](../threedi/o3d-scene-format.md); one implementation,
+  `apps/threedi_cli/scene_text.h`), except that no number here may be `nan` or
+  `inf`.
 - A name field (the table, a slot key, a clip, a bone) is a bare token, or
-  `"quoted"` when it holds spaces (a bone is named `BN01 Pelvis`).
+  `"quoted"` when it holds whitespace (a bone is named `BN01 Pelvis`). A quoted
+  field runs to the next `"` and ends at whitespace, so a name cannot hold `"`:
+  `scene` writes such a name without it and says so.
 - A number is the whole token and finite (no `nan` or `inf`); a whole-number
   field (`fps`, `frames`, `version`, `flags`, a parent, a trigger word, a
   duration) is decimal or `0x` hex and within its field's range, so nothing
@@ -96,7 +103,8 @@ channel.
 
 The build fails, naming the line (a clip the seam refuses is named by the line
 it opens on), on an unknown record, a malformed or trailing field, a quote
-that never closes, an empty row variant, an event capsule with one value, a
+that never closes or runs into the next field, a `"` inside a bare field, an
+empty row variant, an event capsule with one value, a
 set with no clip, a row outside the `anim_` namespace or naming a clip the set
 lacks, two clips under one name, a clip name or row variant that is not a
 bare file name (`/ \ : | * ? < > "`, a control character, `.` or `..`: `build`

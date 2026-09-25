@@ -29,6 +29,7 @@
 #include <formats/threedi/threedi_panm.h>
 #include <formats/threedi/threedi_strip_decode.h>
 
+#include "scene_text.h"
 #include "threedi_cli.h"
 
 using namespace opennova::threedi;
@@ -37,29 +38,10 @@ namespace threedi_cli {
 
 namespace {
 
-// A number as `build` and Python's float() both read it. NaN and infinity are
-// spelled nan, -nan, inf and -inf: MSVC's printf writes "-nan(ind)", which
-// Python refuses (retail J_bsh1's vertex normals and ChmLFP1's occlusion
-// planes carry NaNs of both signs).
-std::string number(double v, const char *format) {
-	if (std::isnan(v)) return std::signbit(v) ? "-nan" : "nan";
-	if (std::isinf(v)) return v < 0.0 ? "-inf" : "inf";
-	char buf[40];
-	std::snprintf(buf, sizeof(buf), format, v);
-	return std::strcmp(buf, "-0") == 0 ? std::string("0") : std::string(buf);
-}
-
-// Floats print with 9 significant digits (a float32 round-trips exactly);
-// values that come from fixed-point words print with 17 (exact re-quantization).
-std::string f9(double v) { return number(v, "%.9g"); }
-std::string f17(double v) { return number(v, "%.17g"); }
-
 std::string vec9(const float *model) {
 	const ThreediBuildVec3 m = threedi_build_to_mission(ThreediBuildVec3{model[0], model[1], model[2]});
 	return f9(m.x) + " " + f9(m.y) + " " + f9(m.z);
 }
-
-int byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
 
 // A generator's register field: the CTRL index for styles above 0x70, else -1.
 int register_field(uint8_t style, int reg) { return style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? reg : -1; }
@@ -84,19 +66,6 @@ struct Writer {
 		line("# note: " + s);
 	}
 };
-
-// A name field: bare when it is one plain token, else "quoted" (build reads
-// both; any whitespace, \v and \r included, is quoted). A name cannot hold
-// '"' or a line break: those characters are left out and reported.
-std::string name_field(Writer &w, const std::string &name) {
-	std::string kept;
-	for (char c : name)
-		if (c != '"' && c != '\n') kept += c;
-	if (kept.size() != name.size()) w.note("the name '" + kept + "' held a '\"' or a line break (written without it)");
-	const bool plain = !kept.empty() && kept[0] != '#' &&
-			std::none_of(kept.begin(), kept.end(), [](unsigned char c) { return std::isspace(c) != 0; });
-	return plain ? kept : "\"" + kept + "\"";
-}
 
 std::string lower(std::string s) {
 	std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -311,8 +280,7 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 	}
 	for (size_t a = 0; a < lod.part_animation_count; ++a) {
 		const ThreediPartAnimation &pa = lod.part_animations[a];
-		const ThreediTransform *tracks[] = {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y,
-				&pa.scale_z, &pa.translation};
+		const auto tracks = panm_tracks(pa);
 		// The flags word build derives from the tracks; any other is written.
 		const uint8_t axis = threedi_panm_translate_type(pa.flags);
 		const uint32_t derived =
