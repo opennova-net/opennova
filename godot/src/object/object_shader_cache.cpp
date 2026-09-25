@@ -226,12 +226,14 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_CLOUDS", opennova::renderer::kRungSkyClouds);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_VIEWMODEL", opennova::renderer::kRungViewmodel);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_OBJECT_POST_MULTIPLY", opennova::renderer::kRungObjectPostMultiply);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_FOLIAGE_MASK_FAR_SIDE", opennova::renderer::kRungFoliageMaskFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_FAR_SIDE", opennova::renderer::kRungAlphaFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_TRACER_FAR_SIDE", opennova::renderer::kRungTracerFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_PARTICLE_FAR_SIDE", opennova::renderer::kRungParticleFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_FOLIAGE_FAR_SIDE", opennova::renderer::kRungFoliageFarSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_WATER", opennova::renderer::kRungWater);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_WATER_DECALS", opennova::renderer::kRungWaterDecals);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_FOLIAGE_MASK_CAMERA_SIDE", opennova::renderer::kRungFoliageMaskCameraSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SCARS", opennova::renderer::kRungScars);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_FOLIAGE_CAMERA_SIDE", opennova::renderer::kRungFoliageCameraSide);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_CAMERA_SIDE", opennova::renderer::kRungAlphaCameraSide);

@@ -87,7 +87,11 @@ int main() {
 	// The viewmodel draws after the whole sky pass and before every world draw.
 	CHECK(kRungSkyClouds < kRungViewmodel);
 	CHECK(kRungViewmodel < kRungObjectPostMultiply);
-	CHECK(kRungObjectPostMultiply < kRungAlphaFarSide);
+	// The non-person wave's flush @ 0x5c9506 (the post-multiply passes) ->
+	// the far person wave's foliage MODEL masks @ 0x5c955f -> the far-side
+	// alpha flush @ 0x5c9596.
+	CHECK(kRungObjectPostMultiply < kRungFoliageMaskFarSide);
+	CHECK(kRungFoliageMaskFarSide < kRungAlphaFarSide);
 	// Far-side alpha flush @ 0x5c9596 -> tracer pass 0 @ 0x5c95ac -> particle
 	// pass A @ 0x5c95b5 -> foliage pass 0 @ 0x5c95c5 -> the water pass
 	// @ 0x5c95dc.
@@ -98,9 +102,11 @@ int main() {
 	// The wake decals inside the water pass, after the surface strip
 	// [orig: render_water_surface @ 0x5c3426 then sub_5DE340 @ 0x5c3432].
 	CHECK(kRungWater < kRungWaterDecals);
-	// Scar_DrawBatches @ 0x5c9658 -> foliage pass 1 @ 0x5c9665 -> camera-side
-	// alpha flush @ 0x5c967a -> tracer pass 1 @ 0x5c9687.
-	CHECK(kRungWaterDecals < kRungScars);
+	// The camera person wave's masks @ 0x5c9638 -> Scar_DrawBatches @ 0x5c9658
+	// -> foliage pass 1 @ 0x5c9665 -> camera-side alpha flush @ 0x5c967a ->
+	// tracer pass 1 @ 0x5c9687.
+	CHECK(kRungWaterDecals < kRungFoliageMaskCameraSide);
+	CHECK(kRungFoliageMaskCameraSide < kRungScars);
 	CHECK(kRungScars < kRungFoliageCameraSide);
 	CHECK(kRungFoliageCameraSide < kRungAlphaCameraSide);
 	CHECK(kRungAlphaCameraSide < kRungTracerCameraSide);

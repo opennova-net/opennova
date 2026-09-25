@@ -119,11 +119,14 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // frame [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0]: the sky pass
 // (dome -> bodies -> clouds, sub_579CB0 @ 0x5ca81a), then the first-person
 // viewmodel (@ 0x5ca829), then the scene core [orig:
-// Terrain_RenderSceneWithReflection @ 0x5c93a0]: far-water-side alpha
-// (flush @ 0x5c9596) -> tracer pass 0 (@ 0x5c95ac) -> particle pass A
-// (@ 0x5c95b5) -> detail foliage pass 0 (@ 0x5c95c5) -> the water surface
-// with its decals (@ 0x5c95dc) -> the camera-side opaque wave -> the scars
-// (@ 0x5c9658) -> detail foliage pass 1 (@ 0x5c9665) -> camera-side alpha
+// Terrain_RenderSceneWithReflection @ 0x5c93a0]: the non-person sector wave
+// (its opaque flush @ 0x5c9506 carries the post-multiply passes) -> the
+// far-side person waves with their foliage MODEL masks (@ 0x5c9548,
+// @ 0x5c955f) -> far-water-side alpha (flush @ 0x5c9596) -> tracer pass 0
+// (@ 0x5c95ac) -> particle pass A (@ 0x5c95b5) -> detail foliage pass 0
+// (@ 0x5c95c5) -> the water surface with its decals (@ 0x5c95dc) -> the
+// camera-side person waves with their masks (@ 0x5c9621, @ 0x5c9638) -> the
+// scars (@ 0x5c9658) -> detail foliage pass 1 (@ 0x5c9665) -> camera-side alpha
 // (flush @ 0x5c967a) -> tracer pass 1 (@ 0x5c9687) -> particle pass B
 // (@ 0x5c9690) -> the post-particle overlay tail (@ 0x5c9695..0x5c9714).
 // Particle pass B and the overlay tail are compositor passes, not rungs.
@@ -132,15 +135,15 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // so unclassified transparents land there naturally.
 // The sun/moon bodies inside the dome pass [orig: render_skybox @ 0x579080 ->
 // render_celestial_bodies @ 0x5acaa0].
-constexpr int kRungSkyBody = -12;
+constexpr int kRungSkyBody = -14;
 // The dome's cloud layers, drawn after the bodies inside the same pass
 // [orig: render_skybox cloud pass @ 0x5798f1..0x579b15].
-constexpr int kRungSkyClouds = -11;
+constexpr int kRungSkyClouds = -13;
 // The first-person viewmodel flushes whole (its alpha strips included) after
 // the sky pass and before every world draw [orig: sub_579CB0 @ 0x5ca81a then
 // Player_RenderViewModelIfAlive @ 0x4e0140, called @ 0x5ca829]; its depth
 // band keeps later world alpha off it.
-constexpr int kRungViewmodel = -10;
+constexpr int kRungViewmodel = -12;
 // BmTxMirrT's P3 post-multiply is a PASS of the strip's own technique, not a
 // second submit: FlushBatches runs every pass of one entry back to back
 // (the pass loop @ 0x5da20b..0x5da23d over technique+4 passes, fog/blend per
@@ -154,24 +157,35 @@ constexpr int kRungViewmodel = -10;
 // wave's flushes (@ 0x5c9557, @ 0x5c956e, @ 0x5c9581) precede the water pass
 // (@ 0x5c95dc); the flushes after it (@ 0x5c9630, @ 0x5c9647) carry the
 // camera-side wave, whose strips lie in front of the water surface, so the
-// one rung orders both the way retail does.
-constexpr int kRungObjectPostMultiply = -9;
-constexpr int kRungAlphaFarSide = -8;    // world alpha on the water side AWAY from the camera
+// one rung orders both the way retail does. The non-person entities (every
+// building and vehicle) flush in the first sector wave (@ 0x5c9506), ahead of
+// both person waves and so ahead of the foliage MODEL masks drawn inside them.
+constexpr int kRungObjectPostMultiply = -11;
+// The foliage MODEL depth masks of the far-side person wave: immediate draws
+// inside Terrain_RenderSectorEntitiesBySide (Foliage_UpdateModelTiles) during
+// the far wave @ 0x5c955f, before the far-side alpha flush @ 0x5c9596
+// [orig: Terrain_RenderSceneWithReflection].
+constexpr int kRungFoliageMaskFarSide = -10;
+constexpr int kRungAlphaFarSide = -9;    // world alpha on the water side AWAY from the camera
 // The tracer pool's far-side pass, after the far-side alpha flush
 // [orig: CEffectEmitterPool_RenderMainPass(0, side) @ 0x5c95ac].
-constexpr int kRungTracerFarSide = -7;
+constexpr int kRungTracerFarSide = -8;
 // Particle pass A: the far-side particle subset, after the far-side tracers
 // and before the far-side foliage [orig: EffectWorld_RenderParticlePass(0)
 // @ 0x5c95b5].
-constexpr int kRungParticleFarSide = -6;
+constexpr int kRungParticleFarSide = -7;
 // Detail foliage on the far side of the water, before the water surface
 // [orig: Foliage_RenderFarPatchesPass(0) @ 0x5c95c5].
-constexpr int kRungFoliageFarSide = -5;
-constexpr int kRungWater = -4;           // the water surface (drawn between the side brackets)
+constexpr int kRungFoliageFarSide = -6;
+constexpr int kRungWater = -5;           // the water surface (drawn between the side brackets)
 // The water decals (the vehicle wake rings) inside the water pass, right
 // after the surface strip [orig: render_water_surface @ 0x5c3426 strip then
 // the wake bank scanner sub_5DE340 @ 0x5c3432].
-constexpr int kRungWaterDecals = -3;
+constexpr int kRungWaterDecals = -4;
+// The foliage MODEL depth masks of the camera-side person wave, drawn inside
+// the camera wave @ 0x5c9638 after the water pass and before
+// Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderSceneWithReflection].
+constexpr int kRungFoliageMaskCameraSide = -3;
 // The impact scars, after the camera-side opaque wave and before foliage
 // pass 1 and the camera-side alpha [orig: Scar_DrawBatches @ 0x5c9658].
 constexpr int kRungScars = -2;
