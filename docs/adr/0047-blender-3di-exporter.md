@@ -88,8 +88,14 @@ the same text transport, the same add-on.
    the alpha pass) is recomputed from the authored scene on every export by the
    rules below. Import never stashes source data to make a round trip
    reproduce it: what the scene form cannot express is reported and dropped.
-   The add-on writes 32-bit uncompressed TGA textures itself (an industry
-   format, not a 3DI concern).
+   A part that draws nothing takes its sphere's centre from its `_## center`
+   helper's first mesh vertex (OED's placeholder, which in the collision LOD is
+   also that section's lone collision vertex); a volume whose code the OED
+   names do not list is type 0 (import names it `CX`), as 1,333 volumes of the
+   first-person weapons are; the export writes only what the strict reader
+   takes, naming the object otherwise, and prints every number as the exact
+   double it holds. The add-on writes 32-bit uncompressed TGA textures itself
+   (an industry format, not a 3DI concern).
 4. **Collision follows the OED rules** (ModSuperOed, as the retired
    `engine/formats/oed` port carried them, 5fc5b4f6a^). A volume is the solid
    its authored faces bound [orig: ConvertToInternal @ 0x4268B3]: its vertex
@@ -222,7 +228,11 @@ the same text transport, the same add-on.
    prints a set; `anim compare` says whether two sets are the same animation,
    reading keys and the bind as rotations and reporting NaN and absent clips as
    differences. `catalog` also prints the engine's anim slot keys and event
-   trigger bits.
+   trigger bits. A row's slot is its key past any first five characters,
+   without case, as retail reads it [orig: AnimMap_ParseConfigLine @ 0x40cb60;
+   AnimMap_FindSlotByName @ 0x40cfa0], and a table must hold an `anim_reset`
+   row: retail faults loading one without it [orig: AnimMap_LoadAdmFile, the
+   unchecked slot-0 read @ 0x40ce11], so `anim build` refuses it.
 
 13. **A rig's rest pose is its bind.** A channel key IS the bone's rotation in
    the model's frame, and the bind it is measured against is the reset clip's
@@ -271,6 +281,12 @@ the same text transport, the same add-on.
 - Known model gaps, each reported rather than carried: retail's own tool is not
   witnessed, so its seam flags and tangent values match the OED rules only
   where that tool agreed with ModSuperOed; CTRL registers nothing references;
+  an empty CXLT table (11 retail models: no attach helper can say "none");
+  the centres of skinned bones that draw nothing (dM1A1, DT801); MTRX frames
+  that are not rotations (Frag_1st and Stch_1st rows 37 to 39 come back
+  orthonormal); the first-person weapons' collision meshes, which the file
+  does not keep; placements that land one 16.16 step off through Blender's
+  float composition (drift);
   non-`BB` volume flags (Armry02's `CB` volumes with flag 1); zero-length
   vertex normals (Blender cannot hold them); a retail volume plane that bounds
   no face of 0.5 cm2 or more, and a stored box looser than the solid its
@@ -295,68 +311,58 @@ the same text transport, the same add-on.
 
 ## Verification
 
-- ctests `threedi_cli_build`/`threedi_o3d_cli`, `threedi_cli_build_skinned`/
-  `threedi_o3d_skinned` and `threedi_cli_build_building`/`threedi_o3d_building`
-  mint the three fixture scenes and check the axis conversion, both windings,
-  the register-driven PANM row and its MTRX frame, materials and the UV1
-  detail stage, user points, lights, occlusion planes by the OED rule,
-  collision faces, volumes and section offsets, and the skinned layout.
-  `threedi_cli_roundtrip_{spinner,skinned,building}` require
-  build -> scene -> build to re-mint each fixture byte for byte.
-  `threedi_o3d_retail_roundtrip` (OPENNOVA_JO_ASSETS) runs Armry01, Dblkhwk1,
-  US01, ArmsG and Mp5b_1st through scene -> build -> compare.
-- For animations: ctests `bad_roundtrip` (our fixtures byte-exact, a
-  from-scratch clip field-equal and re-write-stable, the shipped BINOC.bad as
-  the gated leg), `bad_build` (the frame maps, the derived bind and position,
-  the capsule extents, the refusals and the canonical table, with BINOC.bad
-  through both derivations), `adm_write`, `anim_o3a_commands` (the clip-set
-  round trip byte-identical, what compare calls the same animation, and the
-  scenes build refuses) and the gated `anim_o3a_retail_roundtrip` (US01.ADM,
-  mp5_1st.adm, 357_1st.adm, DT1RST.bad, DVFLEE1E.BAD).
-- The gated `anim_o3a_runtime_playback` loads a shipped set and its rebuild
-  through the RUNTIME's own loader (`runtime/anim/skeletal_clips`) and compares
-  the pose it evaluates, every key and variant of US01.ADM, mp5_1st.adm and
-  357_1st.adm across each clip's length: 1,827 poses, worst 2.4e-6 degrees.
-- Over the corpus, `build(scene(x))` is the same animation as `x` for all 477
-  `.bad` clips and 81 of the 82 `.adm` tables (the exception names a clip the
-  corpus does not ship). Through Blender, US01 with US01.ADM (185 rows, 128
-  clips), CIndo01 with Cindo01.adm (134 rows, 80 clips) and the first-person
-  Mp5b_1st with mp5_1st.adm (9 rows, 5 clips on the rigid rig) import, export
-  and compare the same, worst rotation 0.00013 degrees.
-- Over the 958 JO models, `build(scene(x))` is the same model as `x`
-  (`compare`) for 956; the other two draw with a material id they lack.
-- Through Blender 5.1: retail Armry01 imports and exports as the same model
-  under the original aggregate comparator (bldg LODs, detail textures, three
-  lights, eight occlusion records, blink boxes, the FLICKER generator, bullet
-  faces from LOD 1). The 2026-09-24 review adds per-corner render, skin,
-  collision and occlusion comparisons. Armry01 retains zero-normal and
-  collision differences; US01 and ArmsG retain normalized-weight and collision
-  differences because their bullet faces and hit spheres are rebuilt.
-- The 2026-09-24 validation ported the OED collision, material and tangent
-  rules above. `threedi_o3d_commands` pins the bullet-face plane distance,
-  a ladder's facing, box volumes' six planes, the seam rule, a volume-only
-  section's zero radius, the CMDL of a model without sections and derived
-  tangents. `compare` now also checks plane distances, dominant axes, ladder
-  facing and the CMDL; `build(scene(x))` stays the same model for 956 of 958.
-  Through Blender, Dtruck2's and Armry01's collision and every Dblkhwk1 volume
-  come back the same (the hull rule left 8 Dblkhwk1 volumes off); Armry02
-  keeps its seven flag-1 `CB` volumes and one loose box as reported gaps.
-  The F-16 tested in retail carried every bullet face wound backwards and
-  mirrored through the origin; its re-export fixes both and names five
-  non-convex volumes.
-- Review regressions in `threedi_o3d_commands` reject changed UV mappings,
-  weights, bone assignments, collision and occlusion faces, undeclared track
-  and flipbook registers, and overflowing PANM and collision indices. Reordered
-  bone tables, register tables and triangle corners remain equivalent.
-- Assemblies (2026-09-24, headless Blender 5.1): 357_1st, ArmsG, dM1A1 and
-  m1trret imported as one batch share a scene, and ArmsG pairs with 357_1st.
-  Posing the gun's parts keeps each arm bone on its part, and posed arms
-  still export their rest pose. m1trret mounted on dM1A1's `ewep01` sits on
-  the point, follows the moved hull and exports the same model. Every model
-  at its root exports byte for byte as before. dM1A1 exports (it had failed
-  with a missing `PN01`), with its PANM tracks, per-wheel bullet faces and
-  zero weights; like Armry01, it retains zero-normal and bullet-face normal
-  differences.
+- Model ctests: `threedi_o3d_cli`, `threedi_o3d_skinned` and `threedi_o3d_building`
+  mint the three fixture scenes (`fixtures/threedi/o3d`) and check the axis
+  conversion, both windings, the register-driven PANM row and its MTRX frame,
+  materials and the UV1 detail stage, user points, lights, occlusion planes by
+  the OED rule, collision faces, volumes, section offsets and the skinned
+  layout; `threedi_cli_roundtrip_{spinner,skinned,building}` require
+  build -> scene -> build to re-mint each byte for byte. `threedi_o3d_build`
+  pins the builder's derived rules and `threedi_o3d_unicode` runs the CLI in
+  folders with accented and Japanese names. `threedi_o3d_commands` changes one
+  field at a time and requires `compare` to call it different (or drift, for
+  derived values within storage noise), and requires `build` to refuse every
+  scene the strict reader rejects. The gated `threedi_o3d_retail_roundtrip`
+  (OPENNOVA_JO_ASSETS) requires Armry01, Dblkhwk1, US01, ArmsG and Mp5b_1st
+  to come back the same model, with drift only in the builder-derived
+  categories. The synthetic model set (`fixtures/threedi/synth`) is minted
+  through `threedi_build`, and `minimal_3di_gen` reproduces every file.
+- Over the 958 JO models (scene -> build -> compare): `build(scene(x))` is
+  byte for byte `build(scene(build(scene(x))))` for all of them, their CXLT
+  tables come back exactly, and `compare` calls 903 the same model (888 with
+  drift notes). The 55 that differ carry words retail derived from data the
+  file does not keep (Consequences): part spheres the rule does not give over
+  a part's own vertices (41), GHDR radii (25), the three skinned vehicles
+  authored on bones, NaN `rel` words, and two models that draw with a
+  material id they lack.
+- Animation ctests: `bad_roundtrip`, `bad_parse` (a translated retail clip's
+  rows), `bad_build` (the frame maps, the bind and positions through the reset
+  bind, the capsule extents against it, the refusals, the canonical table),
+  `adm_write`, `adm_variants`, `anim_sample` (the translation row lerp, the
+  bind's translation gate, retail's reset-clip choice), `anim_o3a_commands`
+  (the clip-set round trip byte-identical, what `anim compare` calls the same
+  animation, the sets `anim build` refuses) and the gated
+  `anim_o3a_retail_roundtrip`. Over the corpus, `build(scene(x))` is the same
+  animation as `x` for all 477 `.bad` clips and 81 of the 82 `.adm` tables
+  (ESTAND02 names a clip the corpus does not ship; `anim compare` reports it).
+- The gated `anim_o3a_runtime_playback` loads US01.ADM, mp5_1st.adm and
+  357_1st.adm and their rebuilds through the runtime's own loader over the
+  models' bone tables (US01.3di, Mp5b_1st.3di, 357_1st.3di), as the game does,
+  and compares every evaluated pose: 1,665, 81 and 81 poses, worst 2.41e-6
+  degrees.
+- Through Blender 5.1 (headless, the integrated CLI): of 91 retail models,
+  import then export gives 23 the same model and none that fails to export;
+  the differences left are the gaps above (Armry01 2 lines, Dtruck2 7,
+  dM1A1 49 among them; 357_1st now 0). US01 with US01.ADM, CIndo01 with
+  Cindo01.adm, Mp5b_1st with mp5_1st.adm, 357_1st with 357_1st.adm and M60_1st
+  with m60_1st.adm export the model byte for byte as before their clips were
+  imported, and their clip sets compare the same animation as the shipped ones
+  (worst 2.3e-4 degrees, at the bind); a model and its clips round-trip
+  through a folder named with accented and Japanese characters.
+- Assemblies: 357_1st, ArmsG, dM1A1 and m1trret imported as one batch share a
+  scene; ArmsG pairs with 357_1st (and with Mp5b_1st after its clips are
+  imported), posed arms still export their rest pose, and m1trret mounted on
+  dM1A1's `ewep01` follows the moved hull and exports the same model.
 - A model exported by the packaged add-on loaded, rendered and flew in retail
   Joint Operations (2026-09-23, an F-16 on `cpln`); a skinned soldier on the
   retail person rig rendered and animated in retail with `anim_def US01`, and
