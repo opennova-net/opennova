@@ -358,6 +358,55 @@ int main(int argc, char **argv) {
 				"write-safety: no partial file is left behind");
 	}
 
+	// The reader is strict (docs/threedi/o3d-scene-format.md "Validation"):
+	// each case below changes one field of a scene build accepts.
+	{
+		const std::string head = "o3d 1\nmodel STRICT\nmaterial FF_ST_OP\ntexture skin.tga\nlod 0\npart 0 0 0 0\nstrip 0\n"
+				"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\npanm 0 0\n";
+		const std::string face = "cobj 0\ncv 0 0 0\ncv 1 0 0\ncv 0 1 0\ncf 0 1 2 1 0x100\n";
+		check(build("strict-base", head + face), "strict-base: built");
+		Threedi3di3 m{};
+		if (threedi_3di3_read(path_of("strict-base", ".3di").c_str(), &m) == 0 && m.collision != nullptr &&
+				m.collision->face_count == 1) {
+			check(m.collision->faces[0].material_flags == 0x100, "strict-base: cf flags read 0x hex");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "strict-base: read back");
+		}
+		const auto swap = [](std::string s, const std::string &from, const std::string &to) {
+			s.replace(s.find(from), from.size(), to);
+			return s;
+		};
+		const std::string base = head + face;
+		refuses("strict-cf-flags", swap(base, "cf 0 1 2 1 0x100", "cf 0 1 2 1 x100"));
+		refuses("strict-cf-poly", swap(base, "cf 0 1 2 1 0x100", "cf 0 1 2 abc"));
+		refuses("strict-texture-slot", swap(base, "texture skin.tga", "texture skin.tga x"));
+		refuses("strict-lod", swap(base, "lod 0", "lod abc"));
+		refuses("strict-matflags", swap(base, "texture skin.tga", "texture skin.tga\nmatflags 300"));
+		refuses("strict-alphagen", swap(base, "texture skin.tga", "texture skin.tga\nalphagen 50 -1 200 120 70000"));
+		refuses("strict-light-rate", base + "light 0 1 0 1.5 0 6 24 -1 0 255 255 255 0 0 0 0x40\n");
+		refuses("strict-trailing", swap(base, "t 0 1 2", "t 0 1 2 9"));
+		refuses("strict-unclosed", base + "userpoint \"abc 0 0 0 0 0 1 0\n");
+		refuses("strict-quote-in-name", base + "userpoint ab\"c 0 0 0 0 0 1 0\n");
+		refuses("strict-track-axis", base + "track trans 50 - 0 0 256 9\n");
+		refuses("strict-cv-range", swap(base, "cv 1 0 0", "cv 128 0 0"));
+		refuses("strict-texture-name", swap(base, "texture skin.tga", "texture seventeen_chars.tga"));
+		std::string planes = base + "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
+		for (int i = 0; i < 33; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n";
+		refuses("strict-occ-planes", planes);
+		std::string verts = base + "occ 0 0 0\n";
+		for (int i = 0; i < 129; ++i) verts += "ov " + std::to_string(i) + " 0 0\n";
+		refuses("strict-occ-verts", verts);
+		std::string seats = base;
+		for (int i = 0; i < 9; ++i) seats += "userpoint SiteX0" + std::to_string(i) + " 0 0 0 1 0 0 0\n";
+		refuses("strict-seats", seats);
+		refuses("strict-volume-planes", base + "cvolume 1 0 0 0 0 1 1 1\ncp 1 0 0 -1\ncp -1 0 0 0\ncp 0 1 0 -1\n");
+		// Accepted: a UTF-8 byte order mark, and a name holding a vertical tab
+		// (the scene quotes it, so it comes back).
+		check(build("strict-bom", "\xEF\xBB\xBF" + base), "strict-bom: a byte order mark builds");
+		round_trip("strict-vt-name", base + "userpoint \"a\vb\" 0 0 0 0 0 1 0\n");
+	}
+
 	std::printf("o3d_build_test: %d failures\n", failures);
 	return failures == 0 ? 0 : 1;
 }

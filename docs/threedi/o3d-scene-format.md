@@ -11,13 +11,23 @@ import; any other front end may.
 
 ## Conventions
 
-- One record per line, whitespace-separated. `#` starts a comment at the start
-  of a line or after whitespace (retail shader tags such as `VS_PHONGT#UV`
-  hold a `#`). The first record is `o3d 1`.
+- One record per line, its fields separated by whitespace (space, tab, `\r`,
+  `\v`, `\f`). `#` starts a comment at the start of a line or after
+  whitespace (retail shader tags such as `VS_PHONGT#UV` hold a `#`). The first
+  record is `o3d 1`; a UTF-8 byte order mark ahead of it is ignored.
 - A name field (model, shader, texture, register, user point) is a bare token,
-  or `"quoted"` when it holds spaces or is empty (retail ships `"FLARE 01"`,
-  `"ground "`, an empty CTRL name). Numbers read `nan` and `inf` (retail ships
-  them in occlusion planes and light matrices).
+  or `"quoted"` when it holds whitespace or is empty (retail ships `"FLARE
+  01"`, `"ground "`, an empty CTRL name). A quoted field runs to the next `"`,
+  so a name cannot hold `"` or a line break: build refuses one, and `scene`
+  writes such a retail name without those characters and says so. Model and
+  user point names are at most 15 characters: GHDR and USRP give them a
+  16-byte field, and 15 keeps the NUL the loader's C strings end on (no JO
+  name is longer than 9).
+- Numbers are what `strtod` reads, plus `nan`, `-nan`, `inf` and `-inf`, which
+  `scene` writes for the NaNs and infinities retail ships (J_bsh1's vertex
+  normals, ChmLFP1's occlusion planes); `nan` builds the quiet NaN retail
+  stores (0x7FC00000, with the sign for `-nan`). Integer fields are whole
+  numbers in decimal; flag words also take `0x` hex.
 - Positions, normals and directions are **mission axes**: x forward, y left,
   z up, metres (game units). The CLI converts to model axes `(-y, z, x)`.
 - Render triangles (`t`) wind **counter-clockwise about the outward normal**
@@ -36,7 +46,7 @@ import; any other front end may.
 | Record | Fields | Meaning |
 | --- | --- | --- |
 | `model` | name | GHDR name, at most 15 characters |
-| `tangents` | 0/1 | vertices carry tangent/bitangent. Optional: a material whose shader reads the TANGENT semantic (VS_DOT3DIFF, VS_PHONGT, VS_SKBUMPDIFFT, ...) turns the layout on itself. The values are never carried: the builder derives them from the UVs by the OED rule (below) |
+| `tangents` | 0 or 1 | vertices carry tangent/bitangent. Optional: a material whose shader reads the TANGENT semantic (VS_DOT3DIFF, VS_PHONGT, VS_SKBUMPDIFFT, ...) turns the layout on itself. The values are never carried: the builder derives them from the UVs by the OED rule (below) |
 | `skinned` | 0/1 | GHDR mesh type 2 (before the first `lod`): parts are bones, strips carry bone tables, vertices weights |
 | `uv1` | 0/1 | every `v` carries a second UV set (the detail stage of FF_MT shaders) after its first (before the first `lod`) |
 | `register` | NAME | a CTRL register, declared in order; a name outside `threedi_ctrl_catalog.h` is a note (the loader reads LOD_FRAC for it) |
@@ -51,19 +61,19 @@ import; any other front end may.
 | `lod` | threshold [type] | opens a render LOD (projected-radius threshold, 0 = coarsest; type `gnrc`, `bldg`, `door`, `veh0`). A LOD may hold no parts |
 | `part` | parent x y z [cx cy cz] | opens a part in the LOD: its parent (itself for the root, -1 for none, any part of the LOD) and pivot. A part that draws nothing may give the point its sphere sits on (radius 0): the exporter seeds such a part with one placeholder vertex, in the retail corpus its `_## center` helper's first mesh vertex, near the pivot (1,779 of the 2,411 such JO parts also carry it, on the 8.8 grid, as their section's only collision vertex); without it the sphere is at the origin (658 retail parts) |
 | `strip` | material [alpha] | opens a triangle-list strip on the open part |
-| `bones` | p0 p1 ... | a skinned strip's bone table (1 to 16 part indices; before its vertices) |
+| `bones` | p0 p1 ... | a skinned strip's bone table (1 to 16 part indices, bytes; before its vertices) |
 | `v` | x y z nx ny nz u v [u1 v1] [i0 i1 i2 w0 w1 w2] | a strip vertex (at most 65535 per strip); `u1 v1` with `uv1 1`; skinned: three bone-table slots and weights |
 | `t` | a b c | a strip triangle, three distinct vertices (the loader drops one that repeats a corner) |
 | `panm` | part parent [flags [matrix]] | a part-animation row in the open LOD, in part order: row i transforms part i, as all 3,250 JO tables do (the runtime reads the table by row); `flags` (a word, `0x` allowed) replaces the flags the tracks imply, `matrix` selects an `mtrx` frame |
-| `track` | target style REG\|-\|param rate start end [axis] | a track on the last `panm`: target `rotx roty rotz scalex scaley scalez trans`. Styles above 0x70 name a declared register; the others may carry an integer phase param. Rotations in 1/16384 turn, others 8.8, all int16; `axis` 1/2/3 for `trans` |
+| `track` | target style REG\|-\|param rate start end [axis] | a track on the last `panm`: target `rotx roty rotz scalex scaley scalez trans`. Styles above 0x70 name a declared register; the others may carry an integer phase param. Rotations in 1/16384 turn, others 8.8, all int16; only a `trans` track takes `axis`, 1 (x), 2 (y) or 3 (z; the default) |
 | `userpoint` | name x y z dx dy dz part [type] | a USRP point (15 characters; part -1 = none; type 71 G / 83 S) |
-| `light` | part x y z atten_start atten_end style rate phase\|reg r g b r g b flags [dx dy dz falloff] | a LGHT light owned by `part`: style and rate (units per second) of its colour generator, `phase` (styles up to 0x70) or a declared register index (above), start and end colours 0..255, the flag byte (1 no corona, 2 no terrain light, 4 no object light, 8 spot). An omni light omits the axis: it keeps retail's default (straight down, no cone); a spot light gives its local +Z axis and cone half-angle in degrees |
+| `light` | part x y z atten_start atten_end style rate phase\|reg r g b r g b flags [dx dy dz falloff] | a LGHT light owned by `part`: style and rate (units per second, 0 up to 256: WriteLGHT packs it times 256 into a u16, truncated) of its colour generator, `phase` (styles up to 0x70) or a declared register index (above), start and end colours 0..255, the flag byte (1 no corona, 2 no terrain light, 4 no object light, 8 spot). An omni light omits the axis: it keeps retail's default (straight down, no cone); a spot light gives its local +Z axis and cone half-angle in degrees (0 up to 256: its byte) |
 | `occ` | type section connecting | opens an occlusion record: type 0 occluder, 1 open, 2 window, 3 portal, 4 (OH); `section` its parent section, `connecting` the section a window or portal leads to |
 | `ov` | x y z | a vertex of the open `occ` (at most 128: 7-bit edge words) |
-| `op` | nx ny nz d | a plane of the open `occ`; without any, the OED rule picks them (below) |
+| `op` | nx ny nz d | a plane of the open `occ` (at most 32: the runtime's occlusion clip mask is a 32-bit word per record); without any, the OED rule picks them (below) |
 | `of` | a b c [plane] | a face of the open `occ`; its plane index with explicit `op` planes, none without |
 | `cobj` | parent [ox oy oz] | opens collision section i (pairs with part i of the collision LOD: one section per part, as WriteCOBJ walks it): its parent part and offset (the part pivot, as retail stores it) |
-| `cv` | x y z | a collision vertex |
+| `cv` | x y z | a collision vertex (\|x\|, \|y\|, \|z\| under 128: CVRT stores 8.8 in an int16) |
 | `cf` | a b c [poly_type flags [nx ny nz]] | a bullet face (poly_type = impact material; the effect row is material + 4; flags 1 both sides, 0x100 bullets pass, 0x800 hit from behind). The normal comes from the given (unquantized) corners; an explicit one is stored as given, for a face the 8.8 grid collapses or whose normal disagrees with its winding (`scene` writes retail's for both). The plane distance is `-(n . v0)` |
 | `csphere` | cx cy cz r [minx miny minz maxx maxy maxz] | the open section's hit sphere (a skinned model's bone sections) and the bounds of the vertices the bone moves (without them, the sphere's cube) |
 | `cvol` | type flags minx miny minz maxx maxy maxz | an axis-box volume (six planes) |
@@ -134,13 +144,21 @@ degenerate UVs reuses the previous one's).
 
 ## Validation
 
-The build fails, naming the line, on an unknown record, a malformed field, an
-index outside its strip, collision object or occlusion record, a strip over
-65535 vertices or indices, more than 255 parts, a part parent the LOD lacks, a
-skinned strip without a bone table or naming a missing part, a track value
-outside int16, a generator or light register that is not declared, more than 8
-`sitex` seats, a volume with fewer than 4 planes, an occlusion record over 128
-vertices or 32 planes, or a model the writer refuses. Notes (not errors): a
+The build fails, naming the line, on an unknown record, a field that does
+not parse (an optional one included: `cf 0 1 2 abc`, `lod abc`), a value its
+word cannot hold (a byte field over 255, an int16 field, a negative light
+rate), a token past the record's fields, an unclosed quote or a `"` inside a
+name, an index outside its strip, collision object or occlusion record, a
+triangle that repeats a vertex, a strip over 65535 vertices or indices, more
+than 255 parts, a part parent the LOD lacks, a PANM row out of part order, a
+skinned strip without a bone table or naming a missing part, a track `axis`
+other than 1..3 or on a track other than `trans`, a generator or light
+register that is not declared, more than 8 `sitex` seats in any case (the
+seat scan reads the prefix without case and stops at 8 [orig:
+Entity_GetBoneSlotType @ 0x434ED0; the scan end @ 0x43A5AF]), a volume with
+fewer than 4 planes, an occlusion record over 128 vertices or 32 planes, a
+collision vertex 128 or more from the origin, or a model the writer refuses; a
+whole-model error names the file alone. Notes (not errors): a
 register outside the catalog, a shader outside the engine's table, a volume
 mesh that is not convex, more than 16 user points (the item-effect scan
 reads 16), weighted bone slots past their strip's table (retail FSldr03 ships

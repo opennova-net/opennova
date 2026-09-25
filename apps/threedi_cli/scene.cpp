@@ -12,6 +12,7 @@
 // (base/resource_index/texture_candidates.h); `build` ignores them.
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -63,13 +64,6 @@ int byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
 // A generator's register field: the CTRL index for styles above 0x70, else -1.
 int register_field(uint8_t style, int reg) { return style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? reg : -1; }
 
-// A name field: bare when it is one plain token, else "quoted" (build reads
-// both). A name that holds '"' itself cannot be written and is reported.
-std::string name_field(const std::string &name) {
-	if (!name.empty() && name.find_first_of(" \t\"") == std::string::npos && name[0] != '#') return name;
-	return "\"" + name + "\"";
-}
-
 // The scene text, written out whole once the model has been walked. `note`
 // reports what the text cannot carry (`# dropped: ...`); `remark` what it
 // carries in a form worth knowing about (`# note: ...`).
@@ -90,6 +84,19 @@ struct Writer {
 		line("# note: " + s);
 	}
 };
+
+// A name field: bare when it is one plain token, else "quoted" (build reads
+// both; any whitespace, \v and \r included, is quoted). A name cannot hold
+// '"' or a line break: those characters are left out and reported.
+std::string name_field(Writer &w, const std::string &name) {
+	std::string kept;
+	for (char c : name)
+		if (c != '"' && c != '\n') kept += c;
+	if (kept.size() != name.size()) w.note("the name '" + kept + "' held a '\"' or a line break (written without it)");
+	const bool plain = !kept.empty() && kept[0] != '#' &&
+			std::none_of(kept.begin(), kept.end(), [](unsigned char c) { return std::isspace(c) != 0; });
+	return plain ? kept : "\"" + kept + "\"";
+}
 
 std::string lower(std::string s) {
 	std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -128,16 +135,16 @@ void write_materials(Writer &w, const Threedi3di3 &m, const FolderListing &folde
 	std::set<std::string> resolved;
 	for (uint32_t i = 0; i < m.material_count; ++i) {
 		const ThreediMaterial &mt = m.materials[i];
-		w.line("material " + name_field(mt.shader_name[0] != '\0' ? mt.shader_name : "FF_ST_OP") + "  # " +
+		w.line("material " + name_field(w, mt.shader_name[0] != '\0' ? mt.shader_name : "FF_ST_OP") + "  # " +
 				std::to_string(i));
 		if (mt.shader_name[0] == '\0') w.note("material " + std::to_string(i) + " has no shader tag");
 		for (uint32_t t = 0; t < mt.texture_count && t < 24; ++t) {
 			const ThreediMaterialTexture &tx = mt.textures[t];
-			w.line("texture " + name_field(tx.name) + " " + std::to_string(tx.slot) + " " + std::to_string(tx.type) + " " +
+			w.line("texture " + name_field(w, tx.name) + " " + std::to_string(tx.slot) + " " + std::to_string(tx.type) + " " +
 					std::to_string(tx.flags) + " " + std::to_string(tx.frame));
 			if (resolved.insert(tx.name).second) {
 				const std::string path = resolve_texture(folder, tx.name);
-				w.line("texfile " + name_field(tx.name) + " " + (path.empty() ? "-" : path));
+				w.line("texfile " + name_field(w, tx.name) + " " + (path.empty() ? "-" : path));
 			}
 		}
 		const ThreediTexAnim &a = mt.animation;
@@ -325,7 +332,7 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 			if (tr.control == 0 && tr.control_param == 0 && tr.rate == 0 && tr.start == 0 && tr.end == 0) continue;
 			std::string reg = tr.control_param != 0 ? std::to_string(tr.control_param) : "-";
 			if (threedi_panm_parameter_is_ctrl_reference(tr.control)) {
-				if (tr.control_param < m.ctrl.count) reg = name_field(m.ctrl.registers[tr.control_param].name);
+				if (tr.control_param < m.ctrl.count) reg = name_field(w, m.ctrl.registers[tr.control_param].name);
 				else w.note("a track names CTRL " + std::to_string(tr.control_param) + " the model lacks");
 			}
 			std::string line = std::string("track ") + track_label(t) + " " + std::to_string(tr.control) + " " + reg + " " +
@@ -489,7 +496,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	const FolderListing folder = list_folder(std::filesystem::absolute(std::filesystem::path(model_path), ec).parent_path());
 	w.line("o3d 1");
 	w.line(std::string("# scene of ") + model_path + " (opennova-3di scene)");
-	w.line("model " + name_field(m.header.name[0] != '\0' ? m.header.name : "MODEL"));
+	w.line("model " + name_field(w, m.header.name[0] != '\0' ? m.header.name : "MODEL"));
 	if (m.header.name[0] == '\0') w.note("the model has no name (written as MODEL)");
 	const bool skinned = m.header.mesh_type == THREEDI_MESH_SKINNED;
 	if (skinned) w.line("skinned 1");
@@ -506,7 +513,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 		w.note("tangent and bitangent values (the scene keeps only the vertex layout)");
 	}
 	if (uv1) w.line("uv1 1");
-	for (uint32_t i = 0; i < m.ctrl.count; ++i) w.line("register " + name_field(m.ctrl.registers[i].name));
+	for (uint32_t i = 0; i < m.ctrl.count; ++i) w.line("register " + name_field(w, m.ctrl.registers[i].name));
 	// MTRX row 0 is the identity build always writes; rows 1.. are frames.
 	for (uint32_t i = 1; i < m.mtrx.count; ++i) {
 		const float *r = m.mtrx.matrices[i].m;
@@ -536,7 +543,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	for (size_t li = 0; li < m.lod_count; ++li) write_lod(w, m, li, uv1);
 	for (size_t i = 0; i < m.user_point_count; ++i) {
 		const ThreediUserPoint &u = m.user_points[i];
-		w.line("userpoint " + name_field(u.name) + " " + f17(u.x / 65536.0) + " " + f17(u.y / 65536.0) + " " + f17(u.z / 65536.0) + " " +
+		w.line("userpoint " + name_field(w, u.name) + " " + f17(u.x / 65536.0) + " " + f17(u.y / 65536.0) + " " + f17(u.z / 65536.0) + " " +
 				f17(u.rot_x / 65536.0) + " " + f17(u.rot_y / 65536.0) + " " + f17(u.rot_z / 65536.0) + " " +
 				std::to_string(u.subobject_index) + " " + std::to_string(u.userpoint_type));
 	}
