@@ -41,16 +41,23 @@ int usage(const char *why) {
 			"       opennova-3di scene   <model.3di> -o <scene.o3d>\n"
 			"       opennova-3di info    <model.3di> [--verbose | --planes | --verts]\n"
 			"       opennova-3di compare <expected.3di> <actual.3di>\n"
+			"       opennova-3di anim build   <set.o3a> -o <out.adm|out.bad>\n"
+			"       opennova-3di anim scene   <in.adm|in.bad> -o <set.o3a>\n"
+			"       opennova-3di anim info    <in.adm|in.bad> [--verbose | --keys]\n"
+			"       opennova-3di anim compare <expected.adm|.bad> <actual.adm|.bad>\n"
 			"       opennova-3di catalog\n");
 	return 2;
 }
 
 // The engine's CTRL register catalog, generator-style names and shader tags
-// with their capability words, one per line (`register NAME`, `style CODE
-// NAME`, `shader TAG 0xFLAGS`), so a front end offers exactly what the builder
-// and the renderer know without keeping its own copy. The flag bits are
+// with their capability words, the anim slot keys the runtime names and the
+// event trigger bits it consumes, one per line (`register NAME`, `style CODE
+// NAME`, `shader TAG 0xFLAGS`, `animslot KEY`, `trigger 0xMASK NAME`), so a
+// front end offers exactly what the builder and the runtime know without
+// keeping its own copy. The shader flag bits are
 // runtime/renderer/material_descriptor.h's (BLENDING 0x1000 puts a strip in
-// the alpha pass, GLASS 0x2000, TANGENT 0x8000).
+// the alpha pass, GLASS 0x2000, TANGENT 0x8000), the slot keys
+// runtime/world/body_anim.h's, the trigger bits runtime/anim/anim_event_bits.h's.
 int cmd_catalog() {
 	for (size_t i = 0; i < static_cast<size_t>(THREEDI_CTRL_REGISTER_COUNT); ++i) {
 		const char *name = threedi_ctrl_register_name(i);
@@ -62,6 +69,10 @@ int cmd_catalog() {
 	}
 	for (const opennova::renderer::MaterialDescriptorRecord &d : opennova::renderer::kMaterialDescriptorTable)
 		std::printf("shader %s 0x%x\n", d.name, static_cast<unsigned>(d.shader_flags));
+	for (int32_t slot = 0; slot < opennova::world::kBodyAnimCount; ++slot)
+		std::printf("animslot %s\n", opennova::world::body_anim_adm_key(slot));
+	for (const opennova::anim::AnimEventBit &bit : opennova::anim::kAnimEventBits)
+		std::printf("trigger 0x%x %s\n", static_cast<unsigned>(bit.mask), bit.name);
 	return 0;
 }
 
@@ -74,6 +85,8 @@ int main(int argc, char **argv) {
 	if (argc < 3) return usage(nullptr);
 	if (cmd == "info") {
 		const std::string flag = argc > 3 ? argv[3] : "";
+		if (argc > 4 || (!flag.empty() && flag != "--verbose" && flag != "--planes" && flag != "--verts"))
+			return usage("info takes --verbose, --planes or --verts");
 		const int verbose = flag == "--verts" ? 3 : flag == "--planes" ? 2 : flag == "--verbose" ? 1 : 0;
 		return threedi_cli::cmd_info(argv[2], verbose);
 	}
@@ -94,6 +107,8 @@ int main(int argc, char **argv) {
 		if (sub == "info") {
 			if (argc < 4) return usage("anim info needs <in.adm|in.bad>");
 			const std::string flag = argc > 4 ? argv[4] : "";
+			if (argc > 5 || (!flag.empty() && flag != "--verbose" && flag != "--keys"))
+				return usage("anim info takes --verbose or --keys");
 			const int verbose = flag == "--keys" ? 2 : flag == "--verbose" ? 1 : 0;
 			return threedi_cli::cmd_anim_info(argv[3], verbose);
 		}

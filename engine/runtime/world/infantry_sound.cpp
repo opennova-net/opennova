@@ -9,6 +9,7 @@
 
 #include <cstdio>
 
+#include <runtime/anim/anim_event_bits.h>
 #include <runtime/audio/footstep_slot.h>
 #include <base/io/bam.h>
 #include <runtime/terrain_query/height_field.h>
@@ -93,8 +94,8 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
     // The six anim-driven foley sounds, bit order 0x20..0x400 -> SSAudio1..6
     // (JO persons author prone rolls, swim strokes, gear rustle here), at the
     // entity origin [orig: org1 @0x4bf169-0x4bf23e; org2 @0x4b76f1-0x4b77c6].
-    for (int i = 0; i < 6; ++i) {
-        if ((ev & (0x20u << i)) != 0)
+    for (int i = 0; i < anim::kAnimEventFoleyCount; ++i) {
+        if ((ev & (anim::kAnimEventFoley1 << i)) != 0)
             emit_slot_sound(world, e, audio::kSlotAudio1 + i, e.pos);
     }
 
@@ -107,7 +108,8 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
     // the AnimMap out[3] stack cell both bodies pass to the anim update]
     const Entity *went = world.registry.get(e.handle);
     for (int foot = 0; foot < 2; ++foot) {
-        if ((ev & (foot == 0 ? 0x1u : 0x2u)) == 0) continue;
+        const uint32_t foot_bit = foot == 0 ? anim::kAnimEventFootLeft : anim::kAnimEventFootRight;
+        if ((ev & foot_bit) == 0) continue;
         const int32_t pos[3] = {e.pos[0], e.pos[1], e.pos[2] - capsule_bottom};
         // The witnessed test order lives in audio::footstep_slot, shared with
         // the wire-fed remote body channel so both consume one implementation.

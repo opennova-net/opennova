@@ -91,6 +91,18 @@ add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp
     ../apps/threedi_cli/anim_compare.cpp)
 target_link_libraries(anim_o3a_commands_test PRIVATE opennova_base)
 add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+# `catalog` prints the anim slot keys and the event trigger bits a front end
+# offers (the Blender add-on parses both), and `info` refuses a flag it does
+# not take.
+add_test(NAME threedi_cli_catalog_anim COMMAND opennova_3di catalog)
+set_tests_properties(threedi_cli_catalog_anim PROPERTIES PASS_REGULAR_EXPRESSION
+    "animslot anim_reset.*animslot anim_guard.*trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
+add_test(NAME threedi_cli_anim_info_flag COMMAND opennova_3di anim info unread.adm --bogus)
+set_tests_properties(threedi_cli_anim_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
+    "anim info takes --verbose or --keys")
+add_test(NAME threedi_cli_info_flag COMMAND opennova_3di info unread.3di --bogus)
+set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
+    "info takes --verbose, --planes or --verts")
 
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp
     ../apps/threedi_cli/build.cpp ../apps/threedi_cli/compare.cpp ../apps/threedi_cli/scene.cpp)

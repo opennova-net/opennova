@@ -7,6 +7,7 @@
 
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <runtime/anim/anim_event_bits.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -855,14 +856,15 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     // latch below is consumed every tick. [orig: @0x4BF15C..0x4BF406;
     // primary ammo load @0x4BF326, secondary call @0x4BF425]
     if ((logic_tick & 1u) != 0) {
-        if ((inf.last_events & 0x4u) != 0) {
+        if ((inf.last_events & anim::kAnimEventFirePrimary) != 0) {
             int32_t pose[6];
             organic_fire_pose(world, e, 0, pose);
             shoot(ammo[0], pose);
             inf.aim_ref0 = inf.combat_target;
         }
-        if ((inf.last_events & 0x8u) != 0) inf.fire_secondary_latch = true;
-        if ((inf.last_events & 0x10u) != 0) {
+        if ((inf.last_events & anim::kAnimEventFireSecondary) != 0)
+            inf.fire_secondary_latch = true;
+        if ((inf.last_events & anim::kAnimEventFireMarker3) != 0) {
             int32_t pose[6];
             organic_fire_pose(world, e, 2, pose);
             shoot(ammo[3], pose);

@@ -4,15 +4,36 @@
 // keyframe by runtime/anim/adm_root_motion) and consumes these bits on the
 // body's own tick half.
 //
-// The table exists so an authoring front end offers the bits the engine
-// actually consumes (`opennova-3di catalog` prints it) instead of keeping its
-// own copy of them. Nothing in the runtime dispatches through the table: each
-// consumer tests its own witnessed mask, which is what the citations name.
+// The named masks are what each consumer tests (runtime/world infantry_sound,
+// wire_body_sound, infantry_combat), and the table is what an authoring front
+// end offers (`opennova-3di catalog` prints it as `trigger 0xMASK NAME`)
+// instead of keeping its own copy of the bits.
 #pragma once
 
 #include <cstdint>
 
 namespace opennova::anim {
+
+// [orig: the footstep and foley block Entity_UpdateInfantryAI
+//  @0x4bf169-0x4bf2b0 (the player body's twin @0x4b76f1-0x4b78a8): bits
+//  0x20 << i are SSAudio1..6, 0x1 and 0x2 the left and right foot, the sound
+//  dipped to foot level by the frame's capsule bottom.]
+inline constexpr uint32_t kAnimEventFootLeft = 0x1u;
+inline constexpr uint32_t kAnimEventFootRight = 0x2u;
+// The first of the six foley bits; foley slot i (0..5) is kAnimEventFoley1 << i.
+inline constexpr uint32_t kAnimEventFoley1 = 0x20u;
+inline constexpr int kAnimEventFoleyCount = 6;
+// [orig: the fire block Entity_UpdateInfantryAI @0x4bf31d-0x4bf4ad over the
+//  body's four ammo bytes +0x358..+0x35B (closeattack/easyrocket/
+//  advancedrocket/marker3, runtime/world/ai.h) and its launch points
+//  +0x365/+0x366/+0x367: 0x4 fires +0x358 from +0x365 (@0x4bf322-0x4bf35c);
+//  0x8 sets the local fire-secondary flag (@0x4bf39b) that the SAME pass
+//  consumes (@0x4bf406), firing +0x359 and then +0x35A when it differs, both
+//  from +0x366 (@0x4bf414-0x4bf498); 0x10 fires +0x35B from +0x367
+//  (@0x4bf3a6-0x4bf3e0).]
+inline constexpr uint32_t kAnimEventFirePrimary = 0x4u;
+inline constexpr uint32_t kAnimEventFireSecondary = 0x8u;
+inline constexpr uint32_t kAnimEventFireMarker3 = 0x10u;
 
 struct AnimEventBit {
 	uint32_t mask;
@@ -20,24 +41,22 @@ struct AnimEventBit {
 	const char *what;
 };
 
-// [orig: the footstep and foley block Entity_UpdateInfantryAI
-//  @0x4bf169-0x4bf2b0 (the player body's twin @0x4b76f1-0x4b78a8): bits
-//  0x20 << i are SSAudio1..6, 0x1 and 0x2 the left and right foot, the sound
-//  dipped to foot level by the frame's capsule bottom; the fire block
-//  @0x4BF15C..0x4BF425: 0x4 the primary round, 0x8 the secondary latch,
-//  0x10 the third ammo row.]
 inline constexpr AnimEventBit kAnimEventBits[] = {
-		{0x1u, "FOOT_LEFT", "a left footstep at foot level, the slot picked by surface"},
-		{0x2u, "FOOT_RIGHT", "a right footstep"},
-		{0x4u, "FIRE_PRIMARY", "fire the body's primary ammo row"},
-		{0x8u, "FIRE_SECONDARY", "latch the secondary row, fired on the next tick"},
-		{0x10u, "FIRE_THIRD", "fire the third ammo row"},
-		{0x20u, "FOLEY_1", "sound profile slot SSAudio1"},
-		{0x40u, "FOLEY_2", "sound profile slot SSAudio2"},
-		{0x80u, "FOLEY_3", "sound profile slot SSAudio3"},
-		{0x100u, "FOLEY_4", "sound profile slot SSAudio4"},
-		{0x200u, "FOLEY_5", "sound profile slot SSAudio5"},
-		{0x400u, "FOLEY_6", "sound profile slot SSAudio6"},
+		{kAnimEventFootLeft, "FOOT_LEFT", "a left footstep at foot level, the slot picked by surface"},
+		{kAnimEventFootRight, "FOOT_RIGHT", "a right footstep"},
+		{kAnimEventFirePrimary, "FIRE_PRIMARY",
+				"fire the first ammo byte (closeattack) from the first launch point"},
+		{kAnimEventFireSecondary, "FIRE_SECONDARY",
+				"fire the second ammo byte (easyrocket), then the third (advancedrocket) when it "
+				"differs, from the second launch point, in the same pass"},
+		{kAnimEventFireMarker3, "FIRE_MARKER3",
+				"fire the fourth ammo byte (marker3) from the third launch point"},
+		{kAnimEventFoley1 << 0, "FOLEY_1", "sound profile slot SSAudio1"},
+		{kAnimEventFoley1 << 1, "FOLEY_2", "sound profile slot SSAudio2"},
+		{kAnimEventFoley1 << 2, "FOLEY_3", "sound profile slot SSAudio3"},
+		{kAnimEventFoley1 << 3, "FOLEY_4", "sound profile slot SSAudio4"},
+		{kAnimEventFoley1 << 4, "FOLEY_5", "sound profile slot SSAudio5"},
+		{kAnimEventFoley1 << 5, "FOLEY_6", "sound profile slot SSAudio6"},
 };
 
 inline constexpr int kAnimEventBitCount = static_cast<int>(sizeof(kAnimEventBits) /
