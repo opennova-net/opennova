@@ -533,6 +533,7 @@ class Builder:
         if self.op is None or self.op.import_collision:
             self.collision(lod_objects)
         self.bullet_lod(mats)
+        self.attach_points(lod_objects)
         if sc["skinned"] and sc["cobjs"]:
             self.note("skin weights are normalized on export and skinned hit spheres are regenerated from them")
         vl = self.context.view_layer
@@ -557,15 +558,16 @@ class Builder:
         objs = []
         parts = []
         rows = {p["part"]: p for p in lod["panm"]}
+        count = len(lod["parts"])
         for pi, part in enumerate(lod["parts"]):
             pivot = self.blender(part["pivot"])
             row = rows.get(pi)
             rot = self.frame_rotation(row["matrix"]) if row else Matrix.Identity(3)
             world = Matrix.Translation(pivot) @ rot.to_4x4()
             parent = part["parent"]
-            if pi == 0 or parent == pi or parent < 0:
+            if pi == 0 or parent == pi or parent < 0 or parent >= count:
                 parent_ob = root
-                if parent not in (pi, 0):
+                if pi == 0 and parent != 0 or parent >= count:
                     self.note(f"LOD {li} part {pi} names parent {parent}; it exports under the root")
             elif parent < len(parts):
                 parent_ob = parts[parent]
@@ -574,6 +576,11 @@ class Builder:
             ob = self.empty(f"PN{pi + 1:02d}", parent_ob, world)
             parts.append(ob)
             objs.append(ob)
+            if pi > 0 and (parent == pi or parent < 0):
+                # A part that is its own parent (Eturret, APLFP1) or names -1
+                # (Excavatr): the Blender hierarchy cannot say it, an attach
+                # helper can (`~PP attach`, PP its own number or 00).
+                objs.append(self.attach_helper(li, pi, ob, parent, world))
             if row is not None:
                 self.tracks(ob.o3d, row, lod)
             if part["strips"]:
@@ -589,9 +596,68 @@ class Builder:
                 ob.parent = parts[parent]
                 ob.matrix_parent_inverse = Matrix.Identity(4)
                 ob.matrix_basis = self.world[parts[parent].name].inverted() @ world
+        self.part_objects[li] = dict(enumerate(parts))
         if li == 0:
             self.lod0_parts = {i: ob for i, ob in enumerate(parts)}
         return objs
+
+    def attach_helper(self, li, pi, parent_ob, parent, world, bone=None):
+        """Part pi's `~PP attach` helper in LOD li, naming its parent part
+        (PP 1-based; 00 for -1), at `world`: under its PN## empty, or on a
+        skinned model under its bone (or its mesh part's mesh)."""
+        ob = bpy.data.objects.new(f"~{parent + 1 if parent >= 0 else 0:02d} attach", None)
+        ob.empty_display_type = "PLAIN_AXES"
+        ob.empty_display_size = 0.05
+        if bone is None:
+            self.link(ob, parent_ob, world, self.world[parent_ob.name])
+        else:
+            # A bone child hangs off the bone's tail, at rest here.
+            self.collection.objects.link(ob)
+            ob.parent = parent_ob
+            ob.parent_type = "BONE"
+            ob.parent_bone = bone.name
+            ob.matrix_parent_inverse = Matrix.Identity(4)
+            tail = self.world[parent_ob.name] @ bone.matrix_local @ Matrix.Translation((0.0, bone.length, 0.0))
+            ob.matrix_basis = tail.inverted() @ world
+            self.world[ob.name] = world
+        self.attach_helpers[(li, pi)] = ob
+        return ob
+
+    def attach_points(self, lod_objects):
+        """The CXLT attach points: retail stores one per part after the root
+        on a rigid model and one per part on a skinned one (the builder's
+        derivation, formats/threedi/threedi_build.cpp), each at its part's
+        `~PPx attach` helper in the collision LOD, OED's WriteCXLT source
+        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row count that does
+        not fit places none."""
+        rows = self.sc["cxlt"]
+        if not rows:
+            return
+        li = self.model.o3d.poly_collision_lod
+        parts = self.sc["lods"][li]["parts"] if li < len(self.sc["lods"]) else []
+        first = 0 if self.sc["skinned"] else 1
+        if len(rows) != len(parts) - first:
+            self.note(f"{len(rows)} CXLT attach points do not fit the collision LOD's {len(parts)} parts (one per "
+                      f"part{'' if first == 0 else ' after the root'}); export derives them")
+            return
+        for i, row in enumerate(rows):
+            pi = i + first
+            world = Matrix.Translation(self.blender(row))
+            helper = self.attach_helpers.get((li, pi))
+            if helper is not None:
+                helper.matrix_basis = self.world[helper.parent.name].inverted() @ world
+                self.world[helper.name] = world
+                continue
+            parent = parts[pi]["parent"]
+            if self.sc["skinned"]:
+                arm, meshes = self.skinned_parts[li]
+                if pi in meshes:
+                    helper = self.attach_helper(li, pi, meshes[pi], parent, world)
+                else:
+                    helper = self.attach_helper(li, pi, arm, parent, world, arm.data.bones[f"BN{pi + 1:02d}"])
+            else:
+                helper = self.attach_helper(li, pi, self.part_objects[li][pi], parent, world)
+            lod_objects[li].append(helper)
 
     def tracks(self, p, row, lod):
         """A PANM row's flags and tracks onto a part's animation (an empty's
@@ -684,12 +750,15 @@ class Builder:
                         authored.setdefault(owner, []).append(sub_strip(s, tris))
                 else:
                     authored.setdefault(pi, []).append(s)
+        meshes = {}
         for pi, strips in sorted(authored.items()):
             part = lod["parts"][pi]
             pivot = self.blender(part["pivot"])
             me, weights = self.mesh(f"{pi + 1:02d} Mesh0", strips, pivot, mats, True)
             mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
             self.link(mob, arm_ob, Matrix.Translation(pivot), self.world[arm_ob.name])
+            if pi in mesh_parts:
+                meshes[pi] = mob
             groups = {}
             for vi, infl in enumerate(weights):
                 for bone, w in infl:
@@ -700,6 +769,7 @@ class Builder:
             mod = mob.modifiers.new("Armature", "ARMATURE")
             mod.object = arm_ob
             objs.append(mob)
+        self.skinned_parts[li] = (arm_ob, meshes)
         if li == 0:
             self.lod0_parts = {pi: arm_ob for pi in range(len(lod["parts"]))}
         return objs

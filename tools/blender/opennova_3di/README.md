@@ -78,6 +78,12 @@ F16_LOD0              Empty under the model root, custom property _lod_index = 0
 F16_LOD1              Empty, _lod_index = 1 (same names; Blender's .001 is ignored)
 ```
 
+A part's `~PPx attach` helper names its parent part `PP` (`00` for none, the
+part's own number for itself, both of which retail ships). In the collision LOD
+the helpers are also the attach points the game stores for its sections, one
+per helper; without any, export derives them from the part pivots. Export
+warns about any object whose name it does not use.
+
 Add Model (in the sidebar) makes a model root and its `_LOD0` root to start
 from.
 

@@ -23,7 +23,12 @@
 #                 the empty's axes, like Dblkhwk1's canted tail rotor).
 #   ## Mesh<n>    Mesh: render geometry of part ##.
 #   _## center    helper: part ##'s pivot.
-#   ~PPx attach   helper under a child part: that child's parent is part PP.
+#   ~PPx attach   helper under a child part: that child's parent is part PP
+#                 (00 = -1, a part's own number = itself). The collision LOD's
+#                 helpers are also its CXLT attach points, one row each, in
+#                 part then x order; without any, the builder derives them.
+#                 A skinned model's helper sits under its part's bone (or its
+#                 mesh part's mesh); the bone hierarchy stays its parent.
 #   UP<c>## <lbl> helper: user point, type letter c (G gameplay, S effect),
 #                 part ## (00 = no part, -1), label = the USRP name; it faces
 #                 along its local +Z. Its `order` property keeps the USRP order.
@@ -511,10 +516,11 @@ class Exporter:
                 continue
             m = ATTACH_RE.match(raw)
             if m:
-                child = self.owning_part(ob)
+                child = self.helper_part(ob)
                 if child is None:
-                    raise ExportError(f"{ob.name}: an attach helper must sit under its child part's PN##")
-                lod.attach[child] = int(m.group(1)) - 1
+                    raise ExportError(f"{ob.name}: an attach helper sits under its part (a PN## empty, or a skinned "
+                                      "model's BN## bone or mesh part)")
+                lod.attach_points.append((child, dup_rank(m.group(2)), raw, int(m.group(1)) - 1, ob))
                 continue
             m = POINT_RE.match(raw)
             if m:
@@ -630,6 +636,28 @@ class Exporter:
             if m and p.type == "EMPTY":
                 return int(m.group(1)) - 1
             p = p.parent
+        return None
+
+    @staticmethod
+    def helper_part(ob):
+        """The part an attach helper sits under: the nearest PN## empty above
+        it, or on a skinned model the BN## bone it is parented to or the
+        `## Mesh<n>` mesh part it sits under."""
+        p = ob
+        while p.parent is not None:
+            above = p.parent
+            if above.type == "ARMATURE" and p.parent_type == "BONE":
+                m = BONE_RE.match(clean_name(p.parent_bone))
+                return int(m.group(1)) - 1 if m else None
+            if above.type == "EMPTY":
+                m = PART_RE.match(clean_name(above.name))
+                if m:
+                    return int(m.group(1)) - 1
+            if above.type == "MESH" and above.parent is not None and above.parent.type == "ARMATURE":
+                m = MESH_RE.match(clean_name(above.name))
+                if m:
+                    return int(m.group(1)) - 1
+            p = above
         return None
 
     def part_parent(self, lod, index):
@@ -1110,6 +1138,12 @@ class Exporter:
                     lines.append("vv " + fmt(*v))
                 for t in tris:
                     lines.append(f"vf {t[0]} {t[1]} {t[2]}")
+        # CXLT: the collision LOD's attach points, as OED's WriteCXLT wrote
+        # them (5fc5b4f6a^ export_3di.cpp, "CXLT: attach points"), one row per
+        # `~PPx attach` helper in part then x order; with none, the builder
+        # derives the rows retail's count rule gives.
+        for child, _, _, _, ob in bullet.attach_points:
+            lines.append("cxlt " + fmt(*self.mission(self.world(ob).translation)) + f"  # {ob.name}")
 
     # --- driver -------------------------------------------------------------
     def run(self):
