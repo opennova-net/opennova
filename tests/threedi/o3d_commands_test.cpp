@@ -252,6 +252,16 @@ int main(int argc, char **argv) {
 			"cp 0 0 -1 0\n";
 	rich_case("volume order", replace(replace(rich, ladder, ""), "cvol 1 0 -1", ladder + "cvol 1 0 -1"), true);
 	rich_case("volume plane order", replace(rich, "cp 1 0 0 -5\ncp -1 0 0 4\n", "cp -1 0 0 4\ncp 1 0 0 -5\n"), true);
+	// A volume box one 8.8 step plus a Blender placement's noise off (APLFP1's
+	// two CB boxes after an import and export: 3.9978e-3 m) is drift; two
+	// steps off is a different box.
+	{
+		const auto path = build("volume box within storage",
+				replace(rich, "cvolume 1 0 4 4 0 5 5 1\n", "cvolume 1 0 4 4 0 5.00395625 5 1\n"));
+		check(threedi_cli::cmd_compare(rich_a.c_str(), path.c_str()) == 0, "volume box within storage");
+		check(threedi_cli::cmd_compare(rich_a.c_str(), path.c_str(), true) == 1, "volume box within storage (--strict)");
+	}
+	rich_case("volume box", replace(rich, "cvolume 1 0 4 4 0 5 5 1\n", "cvolume 1 0 4 4 0 5.0078125 5 1\n"), false);
 
 	// Hand edits of derived values, one stored field each.
 	const auto edited = [&](const char *name, const char *tag, const std::function<void(uint8_t *)> &edit, int expect,

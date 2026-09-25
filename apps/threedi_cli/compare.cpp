@@ -127,6 +127,11 @@ constexpr double kQuantumDistTol = 2.0 * kQ8 + kQ16;
 // A volume's solid: each corner of one lies inside the other's planes within
 // one step (the round trip measures 3.3e-3 at most).
 constexpr double kVolumeTol = kQ8;
+// A volume's box: its corners are placements (the importer rebuilds them from
+// the stored planes, and Blender composes them through the part's matrix), so
+// one truncation step can flip on top of a placement's noise (APLFP1's two CB
+// boxes after an import and export: 3.9978e-3 m).
+constexpr double kVolumeBoxTol = kQuantumTol + kPlaceTol;
 
 // ---------------------------------------------------------------------------
 // The two tiers.
@@ -1185,7 +1190,7 @@ void compare_collision(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 			double best = std::numeric_limits<double>::infinity();
 			for (size_t j = 0; j < y.volumes.size(); ++j) {
 				const Section::Volume &vy = y.volumes[j];
-				if (used[j] || vx.type != vy.type || vx.flags != vy.flags || !(gap(vx.box, vy.box) <= kQuantumTol)) continue;
+				if (used[j] || vx.type != vy.type || vx.flags != vy.flags || !(gap(vx.box, vy.box) <= kVolumeBoxTol)) continue;
 				const double g = std::max(outside(vx.corners, vx.planes, vy.planes), outside(vy.corners, vy.planes, vx.planes));
 				if (g <= kVolumeTol && g < best) {
 					best = g;
@@ -1209,7 +1214,7 @@ void compare_collision(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 			}
 			used[match] = true;
 			const Section::Volume &vy = y.volumes[match];
-			within(d, "volume boxes (m)", w, gap(vx.box, vy.box), kQuantumTol, kQuantumNoise);
+			within(d, "volume boxes (m)", w, gap(vx.box, vy.box), kVolumeBoxTol, kQuantumNoise);
 			within(d, "volume solids (m outside the other's planes)", w, best, kVolumeTol, kQuantumNoise);
 			// The runtime reads a ladder's plane 0 as its facing.
 			if (vx.type == 4 && !within(d, "ladder facings (degrees)", w, normal_gap(vx.facing, vy.facing), kFaceNormalTolDeg, 1e-6))
