@@ -9,6 +9,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <set>
 
 namespace opennova::threedi {
 
@@ -402,6 +403,88 @@ struct ThreediAssembled {
 	std::vector<ThreediOcclusionObject> occ_objects;
 };
 
+// The points each collision section's bounds and radius are taken over,
+// mission axes. WriteCOBJ bounds a section by its subobject's vertices, the
+// authored floats [orig: WriteCOBJ @ 0x454E70; 5fc5b4f6a^:engine/formats/oed/
+// export_3di.cpp]:
+//   - rigid: the render vertices of that part in the collision LOD, which
+//     are those floats. Which LOD that is the file does not say; ours is the
+//     first LOD whose parts match the sections one for one in triangle and
+//     bullet-face counts (the bullet faces are that LOD's triangles). With
+//     such a LOD, 2,028 of 3,505 JO section boxes come back exactly (from the
+//     stored 8.8 corners, 892 of 3,765 do). A section whose part draws
+//     nothing there, or a model with no such LOD, uses its stored corners.
+//   - skinned, a section with collision geometry: every LOD 0 vertex a
+//     weight binds to that part (the retired port's skinned branch), so a
+//     mesh part's section, which no weight names, keeps the empty sentinels
+//     and radius 0 (US01 19, ArmsG 37): 77 of the 105 JO skinned sections
+//     with geometry come back exactly (from the stored corners, none).
+std::vector<std::vector<ThreediBuildVec3>> collision_section_points(const ThreediBuildModel &m) {
+	std::vector<std::vector<ThreediBuildVec3>> points(m.collision.size());
+	const auto mission = [](const ThreediVertex &v) {
+		return threedi_build_to_mission(ThreediBuildVec3{v.position[0], v.position[1], v.position[2]});
+	};
+	if (m.skinned) {
+		if (m.lods.empty()) return points;
+		for (size_t pi = 0; pi < m.lods[0].parts.size(); ++pi)
+			for (const ThreediBuildStrip &strip : m.lods[0].parts[pi].strips)
+				for (const ThreediVertex &v : strip.vertices)
+					for (int k = 0; k < 3; ++k) {
+						if (!(v.bone_weights[k] > 0.0f)) continue;
+						int bone = -1;
+						if (!strip.bone_table.empty()) {
+							if (v.bone_indices[k] < strip.bone_table.size()) bone = strip.bone_table[v.bone_indices[k]];
+						} else if (v.bone_indices[k] == 0) {
+							bone = strip.bone < 0 ? static_cast<int>(pi) : strip.bone;
+						}
+						if (bone >= 0 && static_cast<size_t>(bone) < points.size()) points[bone].push_back(mission(v));
+					}
+		// A section with no collision geometry of its own is a bone: its
+		// bounds are the hit sphere the scene gives it (csphere), else the
+		// sentinels, as 487 of the JO skinned bone sections without a sphere
+		// store them (51 of them although weights name the bone).
+		for (size_t oi = 0; oi < points.size(); ++oi)
+			if (m.collision[oi].vertices.empty() && m.collision[oi].faces.empty()) points[oi].clear();
+		return points;
+	}
+	const ThreediBuildLod *collision_lod = nullptr;
+	for (const ThreediBuildLod &lod : m.lods) {
+		if (lod.parts.size() != m.collision.size()) continue;
+		bool counts = true;
+		for (size_t pi = 0; pi < lod.parts.size() && counts; ++pi) {
+			size_t triangles = 0;
+			for (const ThreediBuildStrip &strip : lod.parts[pi].strips) triangles += strip.indices.size() / 3;
+			counts = triangles == m.collision[pi].faces.size();
+		}
+		if (counts) {
+			collision_lod = &lod;
+			break;
+		}
+	}
+	for (size_t oi = 0; oi < m.collision.size(); ++oi) {
+		if (collision_lod != nullptr) {
+			std::set<std::array<float, 3>> corners; // the part's vertices on the CVRT grid
+			for (const ThreediBuildStrip &strip : collision_lod->parts[oi].strips)
+				for (const ThreediVertex &v : strip.vertices) {
+					const ThreediBuildVec3 p = mission(v);
+					points[oi].push_back(p);
+					corners.insert({threedi_q8f_trunc(p.x), threedi_q8f_trunc(p.y), threedi_q8f_trunc(p.z)});
+				}
+			// The part is the section's source only if its vertices on the grid
+			// are the stored corners, no more and no fewer (Armry01's LOD 1
+			// part 3 draws more than its section holds).
+			std::set<std::array<float, 3>> stored;
+			for (const ThreediCollisionVertex &v : m.collision[oi].vertices)
+				stored.insert({v.position[0], v.position[1], v.position[2]});
+			if (stored != corners) points[oi].clear();
+		}
+		if (points[oi].empty())
+			for (const ThreediCollisionVertex &v : m.collision[oi].vertices)
+				points[oi].push_back(ThreediBuildVec3{v.position[0], v.position[1], v.position[2]});
+	}
+	return points;
+}
+
 void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 	Threedi3di3 &model = out.model;
 	model.version = 0;
@@ -515,6 +598,12 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 				}
 			}
 			threedi_build_part_sphere(authored, ro.bounding_center, ro.bounding_radius);
+			if (authored.empty() && part.has_center) {
+				const ThreediBuildVec3 c = threedi_build_to_model(part.center);
+				ro.bounding_center[0] = static_cast<float>(c.x);
+				ro.bounding_center[1] = static_cast<float>(c.y);
+				ro.bounding_center[2] = static_cast<float>(c.z);
+			}
 			parts.push_back(ro);
 		}
 		if (m.skinned && !parts.empty()) {
@@ -652,6 +741,7 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 						expand(p.x, p.y, p.z);
 					}
 		const double kSentinel = 10000.0;
+		const std::vector<std::vector<ThreediBuildVec3>> section_points = collision_section_points(m);
 		for (size_t oi = 0; oi < m.collision.size(); ++oi) {
 			const ThreediBuildCollisionObject &src = m.collision[oi];
 			ThreediCollisionObject o{};
@@ -666,16 +756,18 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 			o.offset[0] = threedi_q16_trunc(src.offset.x);
 			o.offset[1] = threedi_q16_trunc(src.offset.y);
 			o.offset[2] = threedi_q16_trunc(src.offset.z);
-			// The section's bounds cover its (stored) vertices and its volumes'
-			// boxes; its radius is the farthest VERTEX from their midpoint,
-			// taken wide and stored as a float, so a volume-only section's is 0
-			// (retail ships 52); the stored midpoint is the floor of the
-			// truncated bounds' mean (an arithmetic shift: all 5,046 odd-sum
-			// axes of the JO corpus round down, negative ones included)
-			// [orig: WriteCOBJ @ 0x454E70; 5fc5b4f6a^:engine/formats/oed/
-			// export_3di.cpp, whose `/ 2` truncates toward zero instead]. An
-			// empty section keeps the +-10000 sentinels. A bone section is
-			// bounded by the vertices the bone moves when the scene gives them.
+			// The section's bounds cover its points (collision_section_points)
+			// and, on a rigid model, its volumes' boxes; its radius is the
+			// farthest POINT from their midpoint, taken wide and stored as a
+			// float, so a volume-only section's is 0 (retail ships 52); the
+			// stored midpoint is the floor of the truncated bounds' mean (an
+			// arithmetic shift: all 5,046 odd-sum axes of the JO corpus round
+			// down, negative ones included) [orig: WriteCOBJ @ 0x454E70;
+			// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp, whose `/ 2`
+			// truncates toward zero instead]. An empty section keeps the
+			// +-10000 sentinels and radius 0 (a skinned model's mesh section:
+			// US01 19, ArmsG 37). A bone section is bounded by the vertices the
+			// bone moves when the scene gives them.
 			double mn[3] = {kSentinel, kSentinel, kSentinel}, mx[3] = {-kSentinel, -kSentinel, -kSentinel};
 			double radius = 0.0;
 			if (src.sphere) {
@@ -690,12 +782,16 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 				}
 				radius = r;
 			} else {
-				for (const ThreediCollisionVertex &v : src.vertices)
+				const std::vector<ThreediBuildVec3> &points = section_points[oi];
+				for (const ThreediBuildVec3 &v : points) {
+					const double q[3] = {v.x, v.y, v.z};
 					for (int k = 0; k < 3; ++k) {
-						mn[k] = std::min<double>(mn[k], v.position[k]);
-						mx[k] = std::max<double>(mx[k], v.position[k]);
+						mn[k] = std::min(mn[k], q[k]);
+						mx[k] = std::max(mx[k], q[k]);
 					}
+				}
 				for (const ThreediBoundingVolume &v : src.volumes) {
+					if (m.skinned) break;
 					const int32_t vmn[3] = {v.min_x_fp16, v.min_y_fp16, v.min_z_fp16};
 					const int32_t vmx[3] = {v.max_x_fp16, v.max_y_fp16, v.max_z_fp16};
 					for (int k = 0; k < 3; ++k) {
@@ -703,9 +799,26 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 						mx[k] = std::max(mx[k], vmx[k] / io::kFp16OneD);
 					}
 				}
+				// The occlusion records the section parents are volumes to the
+				// exporter too (OED keeps them in the same collision list), so
+				// their vertex boxes widen the bounds: Armry01's window (record
+				// 5) sets section 1's min z, its middle portal (record 7) section
+				// 3's min x.
+				for (const ThreediBuildOcclusionRecord &rec : m.occlusion) {
+					if (m.skinned || rec.object.parent_subobject_index != oi) continue;
+					for (const ThreediOcclusionVertex &v : rec.vertices) {
+						const ThreediBuildVec3 p =
+								threedi_build_to_mission(ThreediBuildVec3{v.position[0], v.position[1], v.position[2]});
+						const double q[3] = {p.x, p.y, p.z};
+						for (int k = 0; k < 3; ++k) {
+							mn[k] = std::min(mn[k], q[k]);
+							mx[k] = std::max(mx[k], q[k]);
+						}
+					}
+				}
 				const double mid[3] = {(mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5};
-				for (const ThreediCollisionVertex &v : src.vertices) {
-					const double d[3] = {v.position[0] - mid[0], v.position[1] - mid[1], v.position[2] - mid[2]};
+				for (const ThreediBuildVec3 &v : points) {
+					const double d[3] = {v.x - mid[0], v.y - mid[1], v.z - mid[2]};
 					const float r = static_cast<float>(std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
 					radius = std::max(radius, static_cast<double>(r));
 				}

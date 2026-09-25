@@ -49,12 +49,12 @@ import; any other front end may.
 | `rgbgen` | style reg rate r g b r g b [phase] | RGB generator (styles above 112 read the declared register `reg`; colours 0..255) |
 | `alphagen` / `ugen` / `vgen` | style reg rate start end [phase] | alpha / U / V generators |
 | `lod` | threshold [type] | opens a render LOD (projected-radius threshold, 0 = coarsest; type `gnrc`, `bldg`, `door`, `veh0`). A LOD may hold no parts |
-| `part` | parent x y z | opens a part in the LOD: its parent (itself for the root, -1 for none, any part of the LOD) and pivot |
+| `part` | parent x y z [cx cy cz] | opens a part in the LOD: its parent (itself for the root, -1 for none, any part of the LOD) and pivot. A part that draws nothing may give the point its sphere sits on (radius 0): the exporter seeds such a part with one placeholder vertex, in the retail corpus its `_## center` helper's first mesh vertex, near the pivot (1,779 of the 2,411 such JO parts also carry it, on the 8.8 grid, as their section's only collision vertex); without it the sphere is at the origin (658 retail parts) |
 | `strip` | material [alpha] | opens a triangle-list strip on the open part |
 | `bones` | p0 p1 ... | a skinned strip's bone table (1 to 16 part indices; before its vertices) |
 | `v` | x y z nx ny nz u v [u1 v1] [i0 i1 i2 w0 w1 w2] | a strip vertex (at most 65535 per strip); `u1 v1` with `uv1 1`; skinned: three bone-table slots and weights |
 | `t` | a b c | a strip triangle, three distinct vertices (the loader drops one that repeats a corner) |
-| `panm` | part parent [flags [matrix]] | a part-animation row in the open LOD; `flags` (a word, `0x` allowed) replaces the flags the tracks imply, `matrix` selects an `mtrx` frame |
+| `panm` | part parent [flags [matrix]] | a part-animation row in the open LOD, in part order: row i transforms part i, as all 3,250 JO tables do (the runtime reads the table by row); `flags` (a word, `0x` allowed) replaces the flags the tracks imply, `matrix` selects an `mtrx` frame |
 | `track` | target style REG\|-\|param rate start end [axis] | a track on the last `panm`: target `rotx roty rotz scalex scaley scalez trans`. Styles above 0x70 name a declared register; the others may carry an integer phase param. Rotations in 1/16384 turn, others 8.8, all int16; `axis` 1/2/3 for `trans` |
 | `userpoint` | name x y z dx dy dz part [type] | a USRP point (15 characters; part -1 = none; type 71 G / 83 S) |
 | `light` | part x y z atten_start atten_end style rate phase\|reg r g b r g b flags [dx dy dz falloff] | a LGHT light owned by `part`: style and rate (units per second) of its colour generator, `phase` (styles up to 0x70) or a declared register index (above), start and end colours 0..255, the flag byte (1 no corona, 2 no terrain light, 4 no object light, 8 spot). An omni light omits the axis: it keeps retail's default (straight down, no cone); a spot light gives its local +Z axis and cone half-angle in degrees |
@@ -98,19 +98,28 @@ triangle on a plane decides ([orig: ConvertToInternal @ 0x4268B3]).
 The derived collision values follow OED's writer (5fc5b4f6a^
 `engine/formats/oed/export_3di.cpp`), truncated as it truncates them: CVRT on
 the 8.8 grid; CNRM Q14 with the dominant axis chosen on those integers (z,
-then y, only when strictly largest); a section's offset (the part pivot) and
-bounds over its vertices and volume boxes, its midpoint the floor of the
-bounds' mean (all 5,046 odd-sum axes of the JO corpus round down), its radius
-the farthest vertex from that midpoint (a volume-only section's is 0); the
+then y, only when strictly largest); a section's offset (the part pivot);
+its bounds over its points and, on a rigid model, its volume boxes and the
+occlusion records it parents (OED keeps them in the same list: Armry01's
+window sets section 1's min z), its midpoint the floor of the bounds' mean
+(all 5,046 odd-sum axes of the JO corpus round down), its radius the farthest
+point from that midpoint (a volume-only section's is 0). A section's points
+are its source mesh: on a rigid model the render floats of its part in the
+collision LOD (which the file does not name: the first LOD whose parts match
+the sections in triangle and bullet-face counts, when the part's vertices on
+the 8.8 grid are exactly the section's corners), else its stored corners; on
+a skinned model with collision geometry, every LOD 0 vertex a weight binds to
+it (a mesh part's section keeps the empty sentinels, US01 19 and ArmsG 37),
+while a bone section is its `csphere` or the sentinels. The
 CMDL box over every bullet face and LOD 0's triangles, its radii and height
 (`radii[2]`) over the bullet faces alone (retail CNet01, with none, stores 0,
 0 and -20000; OED's port folded LOD 0 into the radii too, which the corpus
-does not); a bullet face's plane distance and box. Those last words come from
-the stored corners and normals, our rule: retail took them from the authored
-corners (97.7% of the JO CFAC box words lie off the 8.8 grid the stored
-corners sit on), which the file does not keep, so no scene could carry them,
-and deriving from what is stored lets `build(scene(x))` re-mint a built model
-byte for byte.
+does not); a bullet face's plane distance and box. The CMDL and the face
+words come from the stored corners and normals, our rule: retail took them
+from the authored corners (97.7% of the JO CFAC box words lie off the 8.8
+grid the stored corners sit on), which the file keeps only for a rigid
+section's own part, so deriving from what is stored lets `build(scene(x))`
+re-mint a built model byte for byte.
 
 The render words: GHDR's radius is the farthest render vertex from the origin,
 truncated (932 of the 958 JO models; rounding gives 486); a part's sphere is

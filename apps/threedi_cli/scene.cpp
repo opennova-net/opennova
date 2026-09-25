@@ -295,7 +295,11 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 	}
 	for (size_t p = 0; p < lod.render_object_count; ++p) {
 		const ThreediRenderObject &ro = lod.render_objects[p];
-		w.line("part " + std::to_string(ro.parent_index) + " " + vec9(ro.abs) + "  # part " + std::to_string(p));
+		// A part that draws nothing keeps the point its sphere sits on.
+		const bool seeded = owned[p].empty() && ro.bounding_radius == 0.0f &&
+				(ro.bounding_center[0] != 0.0f || ro.bounding_center[1] != 0.0f || ro.bounding_center[2] != 0.0f);
+		w.line("part " + std::to_string(ro.parent_index) + " " + vec9(ro.abs) + (seeded ? " " + vec9(ro.bounding_center) : "") +
+				"  # part " + std::to_string(p));
 		for (const auto &entry : owned[p]) write_strip(w, m, lod, lod.strips[entry.first], entry.second, uv1, skinned);
 	}
 	for (size_t a = 0; a < lod.part_animation_count; ++a) {

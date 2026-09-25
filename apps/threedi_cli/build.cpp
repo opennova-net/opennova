@@ -591,6 +591,14 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				continue;
 			}
 			part = model.add_part(lod, parent, ThreediBuildVec3{p[0], p[1], p[2]});
+			// A part that draws nothing may give the point its sphere sits on
+			// (radius 0): the exporter seeds such a part with a placeholder
+			// vertex (the retail parts' `_## center` helper mesh, near the pivot).
+			double c[3];
+			if (read_doubles(in, c, 3)) {
+				model.lods[lod].parts[part].has_center = true;
+				model.lods[lod].parts[part].center = ThreediBuildVec3{c[0], c[1], c[2]};
+			}
 		} else if (key == "strip") {
 			int mat = 0, alpha = 0;
 			if (part < 0 || !(in >> mat)) {
@@ -619,6 +627,14 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			}
 			if (p < 0 || p > 255 || parent < -1 || parent > 255) {
 				ps.error("panm part is a byte and parent is -1 or a byte");
+				continue;
+			}
+			// The runtime reads the table by row and poses a part by its last
+			// row (threedi_panm_pose.cpp); every retail table is canonical,
+			// row i transforming part i (all 3,250 JO tables).
+			if (p != static_cast<int>(model.lods[lod].panm.size())) {
+				ps.error("panm rows go in part order, one per part: this row must transform part " +
+						std::to_string(model.lods[lod].panm.size()));
 				continue;
 			}
 			ThreediPartAnimation &pa = model.add_panm(lod, p, parent);
@@ -851,9 +867,12 @@ void validate(Parser &ps, const ThreediBuildModel &m) {
 				for (uint8_t b : s.bone_table)
 					if (b >= lod.parts.size()) ps.error("a strip's bone table names a part the LOD lacks");
 			}
-		for (const ThreediBuildPart &p : lod.parts)
+		for (const ThreediBuildPart &p : lod.parts) {
 			if (p.parent >= static_cast<int>(lod.parts.size()))
 				ps.error("lod " + std::to_string(li) + " has a part whose parent it lacks");
+			if (p.has_center && !p.strips.empty())
+				ps.error("lod " + std::to_string(li) + ": a part that draws takes its sphere from its vertices (no centre)");
+		}
 		for (const ThreediPartAnimation &pa : lod.panm) {
 			if (pa.subobject_index >= lod.parts.size())
 				ps.error("panm in lod " + std::to_string(li) + " names a missing part");

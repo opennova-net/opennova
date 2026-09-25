@@ -113,6 +113,15 @@ struct ThreediBuildStrip {
 struct ThreediBuildPart {
 	int parent = 0; // the root references itself
 	ThreediBuildVec3 pivot;     // mission axes (ROBJ abs; rel is derived from it)
+	// A part without strips: the point its sphere sits on, radius 0. The
+	// exporter seeds such a part with one placeholder vertex, its `_## center`
+	// helper's first mesh vertex in the retail corpus (near the pivot; 1,779
+	// of 2,411 such JO parts also carry it, on the 8.8 grid, as their
+	// section's only collision vertex) [5fc5b4f6a^:engine/formats/oed/
+	// convert_internal.cpp, the placeholder injection]. Without it the
+	// sphere is (0, 0, 0), as the retail parts no helper mesh seeded (658).
+	bool has_center = false;
+	ThreediBuildVec3 center;
 	std::vector<ThreediBuildStrip> strips;
 };
 

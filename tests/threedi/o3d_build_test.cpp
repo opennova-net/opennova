@@ -247,6 +247,79 @@ int main(int argc, char **argv) {
 				"nameless: the empty name and LOD type are reported");
 	}
 
+	// Section bounds come from the section's source geometry, as WriteCOBJ
+	// takes them: a rigid section from its part's render floats in the
+	// collision LOD (0.1, not the 8.8 corner 0.09765625) and the occlusion
+	// records it parents; a skinned mesh section, which no weight names,
+	// keeps the empty sentinels.
+	{
+		const std::string rigid = "o3d 1\nmodel SRC\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+				"v 0 0 0.1 0 0 1 0 0\nv 1 0 0.1 0 0 1 1 0\nv 0 1 0.1 0 0 1 0 1\nt 0 1 2\npanm 0 0\n"
+				"occ 2 0 0\nov 0 0 -2\nov 1 0 -2\nov 0 1 -2\nop 0 0 -1 -2\nof 0 1 2 0\n"
+				"cobj 0 0 0 0\ncv 0 0 0.1\ncv 1 0 0.1\ncv 0 1 0.1\ncf 0 1 2\n";
+		round_trip("section-source", rigid);
+		Threedi3di3 m{};
+		if (threedi_3di3_read(path_of("section-source", ".3di").c_str(), &m) == 0 && m.collision != nullptr &&
+				m.collision->object_count == 1) {
+			const ThreediCollisionObject &o = m.collision->objects[0];
+			check(o.max[2] == 6553, "section-source: bounds from the collision LOD's render floats");
+			check(o.min[2] == -2 * 65536, "section-source: bounds cover the occlusion records the section parents");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "section-source: read back");
+		}
+		round_trip("skinned-mesh-section", kSkinned);
+		if (threedi_3di3_read(path_of("skinned-mesh-section", ".3di").c_str(), &m) == 0 && m.collision != nullptr &&
+				m.collision->object_count == 3) {
+			const ThreediCollisionObject &o = m.collision->objects[2];
+			check(o.min[0] == 10000 * 65536 && o.max[0] == -10000 * 65536 && o.radius == 0,
+					"skinned-mesh-section: the mesh section keeps the sentinels (no weight names its part)");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "skinned-mesh-section: read back");
+		}
+	}
+
+	// A part that draws nothing keeps the point its sphere sits on.
+	{
+		round_trip("seeded-part", "o3d 1\nmodel SEED\nlod 0\npart 0 0 0 0\npart 0 1 2 3 1.5 2.5 3.5\npanm 0 0\npanm 1 0\n");
+		Threedi3di3 m{};
+		if (threedi_3di3_read(path_of("seeded-part", ".3di").c_str(), &m) == 0 && m.lod_count == 1 &&
+				m.lods[0].render_object_count == 2) {
+			const ThreediRenderObject &ro = m.lods[0].render_objects[1];
+			// Mission (1.5, 2.5, 3.5) in model axes (-y, z, x).
+			check(ro.bounding_center[0] == -2.5f && ro.bounding_center[1] == 3.5f && ro.bounding_center[2] == 1.5f &&
+							ro.bounding_radius == 0.0f,
+					"seeded-part: the given centre, radius 0");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "seeded-part: read back");
+		}
+		refuses("seeded-drawing-part", "o3d 1\nmodel SEED\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0 1 1 1\nstrip 0\n"
+				"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n");
+	}
+
+	// PANM tables are canonical: row i transforms part i (every retail one).
+	{
+		const std::string head = "o3d 1\nmodel PANM\nlod 0\npart 0 0 0 0\npart 0 0 0 1\n";
+		check(build("panm-canonical", head + "panm 0 0\npanm 1 0\n"), "panm-canonical: built");
+		refuses("panm-order", head + "panm 1 0\npanm 0 0\n");
+		refuses("panm-duplicate", head + "panm 0 0\npanm 0 0\n");
+	}
+
+	// What the Blender exporter writes: a `cxlt` row may carry its helper's
+	// name as a comment, a row at a section's offset quantizes as the derived
+	// one does, and an empty register name (IBlock02) builds.
+	{
+		const std::string two = "o3d 1\nmodel ROWS\nlod 0\npart 0 0 0 0\npart 0 0.1 0.2 0.3\n"
+				"cobj 0 0 0 0\ncobj 0 0.1 0.2 0.3\n";
+		check(build("cxlt-derived-two", two) && build("cxlt-helper", two + "cxlt 0.1 0.2 0.3  # ~PP02 attach\n"),
+				"cxlt-helper: built");
+		check(slurp(path_of("cxlt-derived-two", ".3di")) == slurp(path_of("cxlt-helper", ".3di")),
+				"cxlt-helper: a row at the section's offset gives the derived bytes");
+		round_trip("empty-register", "o3d 1\nmodel REG\nregister \"\"\nlod 0\npart 0 0 0 0\n");
+	}
+
 	// A light's rate and phase pack as WriteLGHT packs them: times 256 in
 	// float, truncated (0.1 -> 25, 0.3 -> 76; rounding gave 26 and 77).
 	{
