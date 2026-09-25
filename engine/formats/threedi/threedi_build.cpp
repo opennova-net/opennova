@@ -59,6 +59,40 @@ void threedi_build_light_view_proj(ThreediLight &light, float falloff) {
 		}
 }
 
+// Rows of C: mission x -> model z, mission y -> -model x, mission z -> model y.
+static const double kMissionToModel[3][3] = {{0, 0, 1}, {-1, 0, 0}, {0, 1, 0}};
+
+ThreediMatrix4x4 threedi_build_frame_to_model(const double mission[9]) {
+	ThreediMatrix4x4 m;
+	threedi_mat4_identity(&m);
+	for (int a = 0; a < 3; ++a)
+		for (int b = 0; b < 3; ++b) {
+			double sum = 0.0;
+			for (int i = 0; i < 3; ++i)
+				for (int j = 0; j < 3; ++j) sum += kMissionToModel[i][a] * mission[i * 3 + j] * kMissionToModel[j][b];
+			m.m[a * 4 + b] = static_cast<float>(sum);
+		}
+	return m;
+}
+
+void threedi_build_frame_to_mission(const ThreediMatrix4x4 &frame, double mission[9]) {
+	const float *r = frame.m;
+	for (int a = 0; a < 3; ++a)
+		for (int b = 0; b < 3; ++b) {
+			double sum = 0.0;
+			for (int i = 0; i < 3; ++i)
+				for (int j = 0; j < 3; ++j) sum += kMissionToModel[a][i] * r[i * 4 + j] * kMissionToModel[b][j];
+			mission[a * 3 + b] = sum;
+		}
+}
+
+uint32_t threedi_build_panm_flags(const ThreediPartAnimation &row, uint8_t trans_axis) {
+	const auto live = [](const ThreediTransform &t) { return t.control != 0; };
+	const bool rot = live(row.rotation_x) || live(row.rotation_y) || live(row.rotation_z);
+	const bool scale = live(row.scale_x) || live(row.scale_y) || live(row.scale_z);
+	return threedi_panm_pack_flags(scale ? 2 : 0, rot ? 2 : 0, 0, live(row.translation) ? trans_axis : 0);
+}
+
 ThreediPartAnimation threedi_build_inert_panm(int part, int parent) {
 	ThreediPartAnimation row{};
 	row.parent_subobject = static_cast<uint8_t>(parent);
@@ -735,7 +769,7 @@ void ThreediBuildModel::set_rgb_gen(int material, uint8_t style, int reg, double
 		const int end_rgb[3]) {
 	ThreediRgbGen &g = materials[material].rgb_gen;
 	g.style = style;
-	g.reg = style > 112 ? reg : -1;
+	g.reg = style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? reg : -1;
 	g.phase = 0.0f;
 	g.rate = threedi_q8f(rate);
 	for (int k = 0; k < 3; ++k) {

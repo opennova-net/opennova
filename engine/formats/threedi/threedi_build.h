@@ -53,6 +53,31 @@ inline ThreediBuildVec3 threedi_build_to_mission(const ThreediBuildVec3 &d) { re
 // mission <-> presentation
 inline ThreediBuildVec3 threedi_mission_to_presentation(const ThreediBuildVec3 &m) { return ThreediBuildVec3{m.y, m.z, m.x}; }
 inline ThreediBuildVec3 threedi_presentation_to_mission(const ThreediBuildVec3 &p) { return ThreediBuildVec3{p.z, p.x, p.y}; }
+// A PANM rotation frame between mission axes (3x3, row-major, p' = p R) and
+// the model-axes MTRX row: M = C^T R C, C the mission -> model map, and back
+// R = C M C^T.
+ThreediMatrix4x4 threedi_build_frame_to_model(const double mission[9]);
+void threedi_build_frame_to_mission(const ThreediMatrix4x4 &frame, double mission[9]);
+
+// The PANM flags word a row's tracks imply (the form `build` writes when no
+// word is given): rotation type 2 when any rotation track animates, scale
+// type 2 for any scale track, and `trans_axis` when the translation track does.
+uint32_t threedi_build_panm_flags(const ThreediPartAnimation &row, uint8_t trans_axis);
+
+// A LGHT colour generator's rate (per second) and phase as WriteLGHT packs
+// them: times 256 in float, truncated, the phase wrapped to its byte (styles
+// up to 0x70; above, the phase byte is a CTRL register index)
+// [orig: WriteLGHT @ 0x456DF0; 5fc5b4f6a^:engine/formats/oed/export_3di.cpp
+// pack_rate, pack_phase]; and the values those words hold.
+inline uint16_t threedi_build_light_rate(double rate) {
+	return static_cast<uint16_t>(static_cast<int32_t>(static_cast<float>(rate) * 256.0f));
+}
+inline uint8_t threedi_build_light_phase(double phase) {
+	return static_cast<uint8_t>(static_cast<int32_t>(static_cast<float>(phase) * 256.0f) & 0xFF);
+}
+inline double threedi_build_light_rate_value(uint16_t rate) { return rate / 256.0; }
+inline double threedi_build_light_phase_value(uint8_t phase) { return phase / 256.0; }
+
 inline int32_t threedi_q16(double v) { return static_cast<int32_t>(std::lround(v * io::kFp16OneD)); }
 inline float threedi_q16f(double v) { return static_cast<float>(threedi_q16(v)) / io::kFp16One; }
 inline float threedi_q14f(double v) { return static_cast<float>(std::lround(v * io::kFp14One)) / io::kFp14One; }

@@ -146,6 +146,21 @@ int main(int argc, char **argv) {
 		refuses("cxlt-malformed", rigid + "cxlt 1 2\n");
 	}
 
+	// A light's rate and phase pack as WriteLGHT packs them: times 256 in
+	// float, truncated (0.1 -> 25, 0.3 -> 76; rounding gave 26 and 77).
+	{
+		const std::string text = "o3d 1\nmodel LIGHT\nlod 0\npart 0 0 0 0\n"
+				"light 0 1 0 1.5 0 6 24 0.1 0.3 255 255 255 0 0 0 0x40\n";
+		round_trip("light-pack", text);
+		Threedi3di3 m{};
+		if (threedi_3di3_read(path_of("light-pack", ".3di").c_str(), &m) == 0) {
+			check(m.light_count == 1 && m.lights[0].rate == 25 && m.lights[0].phase == 76, "light-pack: rate and phase truncate");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "light-pack: read back");
+		}
+	}
+
 	// Output is written whole or not at all: a refused build or an unwritable
 	// target leaves the last good file and no partial one.
 	{

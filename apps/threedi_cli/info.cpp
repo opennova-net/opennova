@@ -9,6 +9,7 @@
 #include <string>
 
 #include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_panm.h>
 
 #include "threedi_cli.h"
@@ -32,9 +33,10 @@ void print_track(const Threedi3di3 &m, int t, const ThreediTransform &tr) {
 
 // Model axes (the OCCL and LGHT frame) -> mission axes (x forward, y left, z up).
 void mission_of(const float *model, double out[3]) {
-	out[0] = model[2];
-	out[1] = -model[0];
-	out[2] = model[1];
+	const ThreediBuildVec3 m = threedi_build_to_mission(ThreediBuildVec3{model[0], model[1], model[2]});
+	out[0] = m.x;
+	out[1] = m.y;
+	out[2] = m.z;
 }
 
 void print_lights(const Threedi3di3 &m, int verbose) {
@@ -155,8 +157,10 @@ int cmd_info(const char *path, int verbose) {
 						const ThreediVertex &v = lod.vertices.items[st.start_vertex + i];
 						const int bone = st.bone_table_length > 0 && v.bone_indices[0] < st.bone_table_length
 								? st.bone_table[v.bone_indices[0]] : static_cast<int>(p);
-						std::printf("vert lod %zu part %zu strip %zu bone %d  %.5f %.5f %.5f\n", li, p, cursor, bone,
-								v.position[2], -v.position[0], v.position[1]);
+						double q[3];
+						mission_of(v.position, q);
+						std::printf("vert lod %zu part %zu strip %zu bone %d  %.5f %.5f %.5f\n", li, p, cursor, bone, q[0],
+								q[1], q[2]);
 					}
 				}
 			}

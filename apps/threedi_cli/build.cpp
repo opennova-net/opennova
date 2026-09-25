@@ -104,16 +104,6 @@ bool read_word(std::istringstream &in, long long &out) {
 
 bool fits_s16(long long v) { return v >= SHRT_MIN && v <= SHRT_MAX; }
 
-// The PANM flags word the tracks imply: a rotation type 2 when any rotation
-// track animates, scale type 2 for any scale track, and the translate axis.
-uint32_t panm_flags_for(const ThreediPartAnimation &pa, int trans_axis) {
-	const auto live = [](const ThreediTransform &t) { return t.control != 0; };
-	const bool rot = live(pa.rotation_x) || live(pa.rotation_y) || live(pa.rotation_z);
-	const bool scale = live(pa.scale_x) || live(pa.scale_y) || live(pa.scale_z);
-	return threedi_panm_pack_flags(scale ? 2 : 0, rot ? 2 : 0, 0,
-			live(pa.translation) ? static_cast<uint8_t>(trans_axis) : 0);
-}
-
 ThreediVertex render_vertex(const double *p, const double *n, const double *uv, const double *uv1) {
 	const ThreediBuildVec3 pm = threedi_build_to_model(ThreediBuildVec3{p[0], p[1], p[2]});
 	const ThreediBuildVec3 nm = threedi_build_to_model(ThreediBuildVec3{n[0], n[1], n[2]});
@@ -129,23 +119,6 @@ ThreediVertex render_vertex(const double *p, const double *n, const double *uv, 
 	v.uv1[0] = static_cast<float>(uv1[0]);
 	v.uv1[1] = static_cast<float>(uv1[1]);
 	return v;
-}
-
-// A rotation frame given in mission axes (row-major, p' = p * R) as the model
-// axes frame the MTRX table stores: M = C^T R C, C the mission -> model map.
-ThreediMatrix4x4 frame_to_model(const double r[9]) {
-	// Rows of C: mission x -> model z, mission y -> -model x, mission z -> model y.
-	static const double kC[3][3] = {{0, 0, 1}, {-1, 0, 0}, {0, 1, 0}};
-	ThreediMatrix4x4 m;
-	threedi_mat4_identity(&m);
-	for (int a = 0; a < 3; ++a)
-		for (int b = 0; b < 3; ++b) {
-			double sum = 0.0;
-			for (int i = 0; i < 3; ++i)
-				for (int j = 0; j < 3; ++j) sum += kC[i][a] * r[i * 3 + j] * kC[j][b];
-			m.m[a * 4 + b] = static_cast<float>(sum);
-		}
-	return m;
 }
 
 // An occlusion record being read: `occ` opens it, `ov`/`op`/`of` fill it.
@@ -496,7 +469,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("mtrx needs nine values (a 3x3 rotation, row-major)");
 				continue;
 			}
-			model.frames.push_back(frame_to_model(r));
+			model.frames.push_back(threedi_build_frame_to_model(r));
 		} else if (key == "material") {
 			std::string shader;
 			if (!read_name(in, shader) || shader.size() > 32) {
@@ -581,7 +554,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			ThreediMaterial &m = model.materials[material];
 			if (key == "alphagen") {
 				m.alpha_gen.style = static_cast<uint8_t>(style);
-				m.alpha_gen.reg = style > 112 ? reg : -1;
+				m.alpha_gen.reg = style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? reg : -1;
 				m.alpha_gen.rate = threedi_q8f(rate);
 				m.alpha_gen.phase = threedi_q8f(phase);
 				m.alpha_gen.start = static_cast<int16_t>(start);
@@ -589,7 +562,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			} else {
 				ThreediUvParams &g = key == "ugen" ? m.u_params : m.v_params;
 				g.style = static_cast<uint8_t>(style);
-				g.reg = style > 112 ? reg : -1;
+				g.reg = style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? reg : -1;
 				g.gen_rate = threedi_q8f(rate);
 				g.phase = threedi_q8f(phase);
 				g.start = threedi_q8f(start);
@@ -706,7 +679,8 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				trans_axis[{lod, row}] = axis;
 			}
 			if (!raw_flags.count({lod, row}))
-				pa.flags = panm_flags_for(pa, trans_axis.count({lod, row}) ? trans_axis[{lod, row}] : 0);
+				pa.flags = threedi_build_panm_flags(pa,
+						trans_axis.count({lod, row}) ? static_cast<uint8_t>(trans_axis[{lod, row}]) : 0);
 		} else if (key == "userpoint") {
 			std::string name;
 			double p[3], d[3];
@@ -745,17 +719,17 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("light part, style and flags are bytes");
 				continue;
 			}
-			// Retail stores phase * 256 for styles up to 0x70, else the CTRL
-			// index (the retired OED writer's packing).
+			// The phase byte: phase * 256 for styles up to 0x70, else the CTRL
+			// index (threedi_build_light_phase).
 			uint8_t phase_byte;
 			if (style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD) {
 				check_register(style, static_cast<int>(phase), "light");
 				phase_byte = static_cast<uint8_t>(static_cast<int>(phase));
 			} else {
-				phase_byte = static_cast<uint8_t>(std::lround(phase * 256.0) & 0xFF);
+				phase_byte = threedi_build_light_phase(phase);
 			}
 			model.add_light(ThreediBuildVec3{p[0], p[1], p[2]}, atten[0], atten[1], static_cast<uint8_t>(style), sub, s, e,
-					static_cast<uint8_t>(flags), phase_byte, static_cast<uint16_t>(std::lround(rate * 256.0)),
+					static_cast<uint8_t>(flags), phase_byte, threedi_build_light_rate(rate),
 					ThreediBuildVec3{dir[0], dir[1], dir[2]}, falloff);
 		} else if (key == "occ") {
 			if (!(in >> occ.type >> occ.section_a >> occ.section_b) || occ.type < 0 || occ.type > 255 ||

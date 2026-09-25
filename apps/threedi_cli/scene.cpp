@@ -60,6 +60,9 @@ std::string vec9(const float *model) {
 
 int byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
 
+// A generator's register field: the CTRL index for styles above 0x70, else -1.
+int register_field(uint8_t style, int reg) { return style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? reg : -1; }
+
 // A name field: bare when it is one plain token, else "quoted" (build reads
 // both). A name that holds '"' itself cannot be written and is reported.
 std::string name_field(const std::string &name) {
@@ -145,7 +148,7 @@ void write_materials(Writer &w, const Threedi3di3 &m, const FolderListing &folde
 		if (mt.emissive_type != 0) w.line("emissive " + std::to_string(mt.emissive_type));
 		const ThreediRgbGen &g = mt.rgb_gen;
 		if (g.style != 0) {
-			std::string s = "rgbgen " + std::to_string(g.style) + " " + std::to_string(g.style > 112 ? g.reg : -1) + " " +
+			std::string s = "rgbgen " + std::to_string(g.style) + " " + std::to_string(register_field(g.style, g.reg)) + " " +
 					f9(g.rate);
 			for (int k = 0; k < 3; ++k) s += " " + std::to_string(byte_of(g.start_color[k]));
 			for (int k = 0; k < 3; ++k) s += " " + std::to_string(byte_of(g.end_color[k]));
@@ -155,13 +158,13 @@ void write_materials(Writer &w, const Threedi3di3 &m, const FolderListing &folde
 		}
 		const ThreediAlphaGen &ag = mt.alpha_gen;
 		if (ag.style != 0)
-			w.line("alphagen " + std::to_string(ag.style) + " " + std::to_string(ag.style > 112 ? ag.reg : -1) + " " +
+			w.line("alphagen " + std::to_string(ag.style) + " " + std::to_string(register_field(ag.style, ag.reg)) + " " +
 					f9(ag.rate) + " " + std::to_string(ag.start) + " " + std::to_string(ag.end) + " " + f9(ag.phase));
 		const ThreediUvParams *uv[2] = {&mt.u_params, &mt.v_params};
 		for (int k = 0; k < 2; ++k)
 			if (uv[k]->style != 0)
 				w.line(std::string(k == 0 ? "ugen " : "vgen ") + std::to_string(uv[k]->style) + " " +
-						std::to_string(uv[k]->style > 112 ? uv[k]->reg : -1) + " " + f9(uv[k]->gen_rate) + " " +
+						std::to_string(register_field(uv[k]->style, uv[k]->reg)) + " " + f9(uv[k]->gen_rate) + " " +
 						f9(uv[k]->start) + " " + f9(uv[k]->end) + " " + f9(uv[k]->phase));
 		if (mt.rgb_gen2.style != 0 || mt.emissive_type2 != 0 || mt.glass_type2 != 0 || mt.reflect_color2[0] != 0.0f ||
 				mt.reflect_color2[1] != 0.0f || mt.reflect_color2[2] != 0.0f || mt.reflect_color2[3] != 0.0f)
@@ -277,12 +280,9 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 		const ThreediTransform *tracks[] = {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y,
 				&pa.scale_z, &pa.translation};
 		// The flags word build derives from the tracks; any other is written.
-		const auto live = [](const ThreediTransform &t) { return t.control != 0; };
 		const uint8_t axis = threedi_panm_translate_type(pa.flags);
-		const uint32_t derived = threedi_panm_pack_flags(
-				live(pa.scale_x) || live(pa.scale_y) || live(pa.scale_z) ? 2 : 0,
-				live(pa.rotation_x) || live(pa.rotation_y) || live(pa.rotation_z) ? 2 : 0, 0,
-				live(pa.translation) ? (axis != 0 ? axis : static_cast<uint8_t>(THREEDI_TRANS_Z)) : 0);
+		const uint32_t derived =
+				threedi_build_panm_flags(pa, axis != 0 ? axis : static_cast<uint8_t>(THREEDI_TRANS_Z));
 		std::string s = "panm " + std::to_string(pa.subobject_index) + " " + std::to_string(pa.parent_subobject);
 		if (pa.flags != derived || pa.matrix_index != 0) {
 			char buf[16];
@@ -399,11 +399,11 @@ void write_lights(Writer &w, const Threedi3di3 &m) {
 	for (size_t i = 0; i < m.light_count; ++i) {
 		const ThreediLight &l = m.lights[i];
 		const std::string phase = l.style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? std::to_string(l.phase)
-																						: f9(l.phase / 256.0);
+																						: f9(threedi_build_light_phase_value(l.phase));
 		char flags[8];
 		std::snprintf(flags, sizeof(flags), "0x%02x", l.flags);
 		std::string s = "light " + std::to_string(l.subobj_index) + " " + vec9(l.offset) + " " + f9(l.atten_start) + " " +
-				f9(l.atten_end) + " " + std::to_string(l.style) + " " + f9(l.rate / 256.0) + " " + phase;
+				f9(l.atten_end) + " " + std::to_string(l.style) + " " + f9(threedi_build_light_rate_value(l.rate)) + " " + phase;
 		for (int k = 2; k >= 0; --k) s += " " + std::to_string(l.color_start[k]);
 		for (int k = 2; k >= 0; --k) s += " " + std::to_string(l.color_end[k]);
 		s += std::string(" ") + flags;
@@ -457,8 +457,6 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	// MTRX row 0 is the identity build always writes; rows 1.. are frames.
 	for (uint32_t i = 1; i < m.mtrx.count; ++i) {
 		const float *r = m.mtrx.matrices[i].m;
-		// The model-axes frame back in mission axes: R = C M C^T.
-		static const double kC[3][3] = {{0, 0, 1}, {-1, 0, 0}, {0, 1, 0}};
 		bool finite = true;
 		for (int k = 0; k < 16; ++k) finite = finite && std::isfinite(r[k]);
 		if (!finite) {
@@ -467,14 +465,10 @@ int cmd_scene(const char *model_path, const char *out_path) {
 			w.note("mtrx " + std::to_string(i) + " is not finite (written as the identity)");
 			continue;
 		}
+		double rotation[9];
+		threedi_build_frame_to_mission(m.mtrx.matrices[i], rotation);
 		std::string s = "mtrx";
-		for (int a = 0; a < 3; ++a)
-			for (int b = 0; b < 3; ++b) {
-				double sum = 0.0;
-				for (int i2 = 0; i2 < 3; ++i2)
-					for (int j = 0; j < 3; ++j) sum += kC[a][i2] * r[i2 * 4 + j] * kC[b][j];
-				s += " " + f9(sum);
-			}
+		for (double v : rotation) s += " " + f9(v);
 		w.line(s + "  # frame " + std::to_string(i));
 		if (r[12] != 0.0f || r[13] != 0.0f || r[14] != 0.0f) w.note("mtrx " + std::to_string(i) + " translation");
 	}
