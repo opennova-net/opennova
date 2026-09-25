@@ -175,10 +175,11 @@ ThreediPartAnimation threedi_build_inert_panm(int part, int parent);
 // A part's ROBJ sphere over the render vertices authored on it: the vertex
 // box's centre and the farthest vertex from it, the distance taken wide and
 // stored as a float (the retired port's WriteRDTA takes the farthest vertex
-// too; 5fc5b4f6a^:engine/formats/oed/rdta.cpp). That reproduces 5,168 of the
-// 5,932 rigid JO parts and 244 of the 256 skinned mesh parts the corpus can
-// attribute; the box's half-diagonal reproduces 704 and none. No vertex: a
-// zero sphere at the origin.
+// too; 5fc5b4f6a^:engine/formats/oed/rdta.cpp). Over the vertices each part's
+// triangles use (retail pools one vertex window across strips in 70 models),
+// that reproduces 5,239 of the 5,933 rigid JO parts and 244 of the 256
+// skinned mesh parts the corpus can attribute; the box's half-diagonal
+// reproduces 704 and none. No vertex: a zero sphere at the origin.
 void threedi_build_part_sphere(const std::vector<const ThreediVertex *> &vertices, float center[3], float &radius);
 
 // A LGHT record's view_proj from its offset, rotation (the light's Z axis in
