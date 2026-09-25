@@ -19,6 +19,7 @@
 #include <formats/bad/bad_build.h>
 
 #include "scene_text.h"
+#include "threedi_cli.h"
 
 using namespace opennova::bad;
 
@@ -269,14 +270,6 @@ void validate(Parser &ps, const BadBuildSet &set) {
 	}
 }
 
-bool write_bytes(const std::string &path, const std::vector<uint8_t> &bytes) {
-	FILE *f = std::fopen(path.c_str(), "wb");
-	if (f == nullptr) return false;
-	const bool ok = bytes.empty() || std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
-	std::fclose(f);
-	return ok;
-}
-
 } // namespace
 
 int cmd_anim_build(const char *scene_path, const char *out_path) {
@@ -358,12 +351,10 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 		files.push_back(Minted{out.string(), std::vector<uint8_t>(text.begin(), text.end())});
 	}
 
-	for (const Minted &minted : files) {
-		if (!write_bytes(minted.path, minted.bytes)) {
-			std::fprintf(stderr, "opennova-3di: cannot write %s\n", minted.path.c_str());
-			return 1;
-		}
-	}
+	// Each file lands whole or not at all (write_output): a full disk never
+	// leaves a truncated clip where the last good one was.
+	for (const Minted &minted : files)
+		if (!write_output(minted.path.c_str(), minted.bytes.data(), minted.bytes.size())) return 1;
 	if (!lone) {
 		std::printf("wrote %s (%zu rows) and %zu clips (%zu bytes)\n", out_path, set.rows.size(),
 				set.clips.size(), total);

@@ -1,6 +1,7 @@
 // Exercise the same anim command handlers the CLI dispatches: the clip set
 // round trip (build -> scene -> build is byte-identical), what `compare` calls
 // the same animation and what it does not, and the scenes `build` refuses.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -408,6 +409,26 @@ int main(int argc, char **argv) {
 	check(threedi_cli::anim_info_row(opennova::bad::BadBuildRow{"anim_reset", {"a", "b"}})
 							.find(" a b   (no ring: the last is the rig's bind)") != std::string::npos,
 			"info prints a reset row as no ring");
+
+	// `scene` writes its text whole or not at all, LF on every platform: it
+	// replaces an existing file, fails onto a folder, and leaves no part file.
+	{
+		const std::filesystem::path home = dir / "write-safety";
+		std::filesystem::remove_all(home);
+		std::filesystem::create_directories(home / "a-folder.o3a");
+		const std::string scene = (home / "set.o3a").string();
+		std::ofstream(scene, std::ios::binary) << "stale";
+		std::vector<char> written;
+		check(threedi_cli::cmd_anim_scene(original.c_str(), scene.c_str()) == 0 && read_file(scene, written) &&
+						std::string(written.begin(), written.end()).rfind("o3a 1\n", 0) == 0 &&
+						std::find(written.begin(), written.end(), '\r') == written.end(),
+				"scene replaces a file with LF text");
+		check(threedi_cli::cmd_anim_scene(original.c_str(), (home / "a-folder.o3a").string().c_str()) != 0,
+				"scene onto a folder fails");
+		check(!std::filesystem::exists(scene + ".part") &&
+						!std::filesystem::exists(home / "a-folder.o3a.part"),
+				"scene leaves no part file");
+	}
 
 	// `info` reads a table and a lone clip.
 	check(threedi_cli::cmd_anim_info(original.c_str(), 2) == 0, "info");

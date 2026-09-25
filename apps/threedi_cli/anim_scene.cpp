@@ -23,6 +23,7 @@
 #include <formats/bad/bad_build.h>
 
 #include "scene_text.h"
+#include "threedi_cli.h"
 
 using namespace opennova::bad;
 
@@ -30,11 +31,15 @@ namespace threedi_cli {
 
 namespace {
 
+// The scene text, written out whole once the set has been walked.
 struct Writer {
-	FILE *f = nullptr;
+	std::string text;
 	std::vector<std::string> notes;
 
-	void line(const std::string &s) { std::fprintf(f, "%s\n", s.c_str()); }
+	void line(const std::string &s) {
+		text += s;
+		text += '\n';
+	}
 	// What the text cannot carry, as a comment in the scene and on stderr.
 	void note(const std::string &s) {
 		notes.push_back(s);
@@ -211,12 +216,6 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 		return 1;
 	}
 	Writer w;
-	w.f = std::fopen(out_path, "w");
-	if (w.f == nullptr) {
-		std::fprintf(stderr, "opennova-3di: cannot write %s\n", out_path);
-		anim_free(set);
-		return 1;
-	}
 	w.line("o3a 1");
 	w.line(std::string("# clip set of ") + in_path + " (opennova-3di anim scene)");
 	if (!set.table_name.empty()) w.line("adm " + name_field(w, set.table_name));
@@ -276,11 +275,13 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 	for (const AnimLoadedClip &clip : set.clips) {
 		if (inexpressible(clip).empty()) write_clip(w, clip, reset);
 	}
-	std::fclose(w.f);
+	const size_t rows = set.rows.size(), clips = set.clips.size();
+	anim_free(set);
+	// Whole or not at all, and LF on every platform (write_output).
+	if (!write_output(out_path, w.text.data(), w.text.size())) return 1;
 	for (const std::string &n : w.notes)
 		std::fprintf(stderr, "opennova-3di: note: %s\n", n.c_str());
-	std::printf("wrote %s (%zu rows, %zu clips)\n", out_path, set.rows.size(), set.clips.size());
-	anim_free(set);
+	std::printf("wrote %s (%zu rows, %zu clips)\n", out_path, rows, clips);
 	return 0;
 }
 
