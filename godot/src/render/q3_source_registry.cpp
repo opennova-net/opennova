@@ -518,9 +518,6 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 		const Vector3 water_color = vector3_parameter(material, "u_water_color",
 				Vector3(0.408f, 0.314f, 0.224f));
 		water.water_color = {water_color.x, water_color.y, water_color.z};
-		const Vector2 scale = vector2_parameter(material, "u_reflection_uv_scale",
-				Vector2(1, 1));
-		water.reflection_uv_scale = {scale.x, scale.y};
 		const Vector2 depth_range = vector2_parameter(material, "u_scene_depth_range",
 				Vector2(0.2f, 1025.0f));
 		water.scene_depth_range = {depth_range.x, depth_range.y};

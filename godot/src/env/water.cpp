@@ -500,8 +500,8 @@ void Water::build() {
 		// The mirror renders the LIVE world, not a copy.
 		reflection_viewport_->set_use_own_world_3d(false);
 		reflection_viewport_->set_handle_input_locally(false);
-		// Retail renders through this square RTT, independent of display
-		// size.
+		// Sized per frame from the source view (env::reflection_rtt_size):
+		// retail's 512 rows across the main vertical field.
 		reflection_viewport_->set_size(
 				Vector2i(opennova::env::kReflectionRttSize,
 						opennova::env::kReflectionRttSize));
@@ -729,11 +729,11 @@ Camera3D *Water::_view_camera(Camera3D *p_surface_cam) const {
 
 // Installs the reflected-scene camera into the reflection SubViewport: the
 // drawing camera mirrored about the water plane at or above it, unchanged
-// below it. The witnessed form, side-dependent collection filter, and
-// horizontal-preserving square projection live in
+// below it, under the source's own projection. The witnessed form,
+// side-dependent collection filter and target size live in
 // environment/water_mirror.h; this leg extracts the source camera (its
 // viewport is the one it draws: the surface, or the live aspect-mode
-// target), installs the typed record, and pushes the UV registration scale.
+// target), installs the typed record and sizes the mirror target.
 void Water::_update_reflection_camera(Camera3D *p_cam) {
 	if (reflection_viewport_ == nullptr || reflection_camera_ == nullptr) {
 		return;
@@ -802,29 +802,37 @@ void Water::_update_reflection_camera(Camera3D *p_cam) {
 	reflection_camera_->set_cull_mask(view.below_water
 					? (REFLECTION_CULL_MASK | VISUAL_LAYER_WORLD_NO_MIRROR)
 					: REFLECTION_CULL_MASK);
-	reflection_camera_->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
-	switch (source.projection) {
+	reflection_camera_->set_keep_aspect_mode(view.keep_aspect_height ?
+					Camera3D::KEEP_HEIGHT : Camera3D::KEEP_WIDTH);
+	switch (view.projection) {
 		case opennova::env::MirrorProjection::kOrthogonal:
-			reflection_camera_->set_orthogonal(view.horizontal_size,
+			reflection_camera_->set_orthogonal(view.size,
 					p_cam->get_near(), p_cam->get_far());
 			break;
 		case opennova::env::MirrorProjection::kFrustum:
-			reflection_camera_->set_frustum(view.horizontal_size,
+			reflection_camera_->set_frustum(view.size,
 					Vector2(view.frustum_offset_x, view.frustum_offset_y),
 					p_cam->get_near(), p_cam->get_far());
 			break;
 		case opennova::env::MirrorProjection::kPerspective:
 		default:
-			reflection_camera_->set_perspective(view.horizontal_fov_deg,
+			reflection_camera_->set_perspective(view.fov_deg,
 					p_cam->get_near(), p_cam->get_far());
 			break;
+	}
+	const Vector2i rtt_size(view.rtt.width, view.rtt.height);
+	if (reflection_viewport_->get_size() != rtt_size) {
+		reflection_viewport_->set_size(rtt_size);
+		if (ColorRect *dim = Object::cast_to<ColorRect>(
+					reflection_viewport_->get_node_or_null(
+							NodePath("ReflectionDimLayer/ReflectionDim")))) {
+			dim->set_size(Vector2(rtt_size));
+		}
 	}
 	// These offsets are independent of the projection mode and are otherwise
 	// lost when the reflection camera is rebuilt from the source transform.
 	reflection_camera_->set_h_offset(p_cam->get_h_offset());
 	reflection_camera_->set_v_offset(view.v_offset);
-	water_material_->set_shader_parameter("u_reflection_uv_scale",
-			Vector2(view.uv_scale_x, view.uv_scale_y));
 }
 
 // One screen march (env #29; row layout notes ride env_water_render.h) for the

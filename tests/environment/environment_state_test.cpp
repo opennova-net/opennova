@@ -448,6 +448,27 @@ int main() {
 					near(live.basis_z.y, 0.6f) && near(live.v_offset, 0.5f),
 				"below the plane the reflected camera is the live camera unchanged");
 
+		// The reflected pass projects with the main view's field on both axes
+		// [orig: render_main_scene @ 0x5c1255, its
+		// Render_SetViewAndProjectionMatrices call @ 0x5c163e]: the mirror keeps
+		// the source projection and a target of 512 rows at the source aspect.
+		source.origin.y = 12.0f;
+		source.fov_deg = 60.0f;
+		source.keep_aspect_height = true;
+		const opennova::env::WaterMirrorView field =
+				opennova::env::build_water_mirror_view(source, 7.0f);
+		ok &= expect(field.projection == opennova::env::MirrorProjection::kPerspective &&
+					near(field.fov_deg, 60.0f) && field.keep_aspect_height &&
+					field.rtt.width == 874 && field.rtt.height == 512,
+				"the mirror takes the source field over a 512-row target at its aspect");
+		const opennova::env::ReflectionRttSize thin =
+				opennova::env::reflection_rtt_size(1024.0f, 2.0f);
+		const opennova::env::ReflectionRttSize tall =
+				opennova::env::reflection_rtt_size(600.0f, 1024.0f);
+		ok &= expect(thin.width == 16384 && thin.height == 32 && tall.width == 300 &&
+					tall.height == 512,
+				"a degenerate aspect keeps its ratio inside the device width");
+
 		// render_water_surface's side gate [orig: @ 0x5c32f6 jge / @ 0x5c3304
 		// jle]: strictly above draws the view-0 side (and the bloom pass's
 		// nightvision redraw), strictly below the underwater side, and an eye

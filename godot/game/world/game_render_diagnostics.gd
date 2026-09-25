@@ -313,7 +313,7 @@ static func _water_state(water: Water, camera: Camera3D) -> Dictionary:
 				mesh.mesh.get_surface_count()
 				if mesh != null and mesh.mesh != null else 0),
 		"shader": _shader_parameters(material, [
-			"u_water_color", "u_has_reflection", "u_reflection_uv_scale",
+			"u_water_color", "u_has_reflection",
 			"u_fog_color", "u_water_murk",
 			"u_underwater_view", "u_reflection", "u_noise_color",
 			"u_noise_normal",

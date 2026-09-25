@@ -349,7 +349,6 @@ void main() {
 			vec3 dudv = texture(secondary_texture, uv).rgb * 2.0 - 1.0;
 			vec2 refl_uv = vec2(dot(vec3(custom2.xy, custom0.z), dudv),
 					dot(vec3(custom2.zw, custom0.w), dudv));
-			refl_uv = vec2(0.5) + (refl_uv - vec2(0.5)) * pc.params.zw;
 			reflection = texture(tertiary_texture,
 					clamp(refl_uv, vec2(0.0), vec2(1.0))).rgb;
 		}
@@ -1097,8 +1096,6 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 				push.draw_color = {draw.water.water_color.x, draw.water.water_color.y,
 						draw.water.water_color.z, 1.0f};
 				push.params[1] = draw.water.has_reflection ? 1.0f : 0.0f;
-				push.params[2] = draw.water.reflection_uv_scale.x;
-				push.params[3] = draw.water.reflection_uv_scale.y;
 				push.light_local_gain = {draw.water.scene_depth_range.x,
 						draw.water.scene_depth_range.y, frame->camera_near,
 						frame->camera_far};

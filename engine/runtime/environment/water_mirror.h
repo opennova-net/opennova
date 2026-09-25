@@ -14,9 +14,8 @@
 // satisfies. Below the plane the block is copied UNCHANGED [orig:
 // @ 0x5c13f6..0x5c1414]: the RTT is the scene from the live eye (clipped to
 // the part above the water, see the clip note below) and the underwater
-// rows sample it upside down. Retail rebuilds projection for the square RTT
-// while preserving the source's horizontal field
-// [orig: Viewport_BuildProjectionMatrix @ 0x410fb0; bounds @ 0x5c1476].
+// rows sample it upside down. The reflected pass projects with the MAIN
+// view's field on both axes (see kReflectionRttSize).
 // The witnessed collection filter follows the LIVE view side per frame:
 // above water only the flag-0x400 population enters the mirror — vehicles by
 // item type [orig: Entity_InitFromModel @ 0x40e208..0x40e20a] plus records
@@ -61,7 +60,44 @@ namespace opennova::env {
 // detail-1 downgrade never fires [orig: Game_StartMission @ 0x524662..0x524668;
 // downgrade @ 0x5c19da], so the live retail witness is a populated 512x512
 // target. The reimpl carries no detail selector; it fixes the max-quality size.
+// That square target renders with the MAIN view's projection: render_main_scene
+// hands the main target's h/w as the projection's vertical scale
+// [orig: render_main_scene @ 0x5c1255 (sub_58A920 returns flt_8409EC), its
+// Render_SetViewAndProjectionMatrices call @ 0x5c163e], so the 512 x 512
+// texels cover exactly the main view's field (non-square texels, 512 rows
+// across the vertical field) and the strip rows sample it at (screen U,
+// 1 - screen V). A
+// Godot camera renders square pixels only, so the port keeps the source
+// projection and sizes the target round(512 x aspect) x 512
+// (reflection_rtt_size): the same field and the same 512 rows across it, with
+// round(512 x aspect) columns where retail has 512.
 inline constexpr int kReflectionRttSize = 512;
+// A degenerate layout (a collapsed or very thin view) would ask for more
+// columns than a device texture holds; past this width the target keeps the
+// source aspect with fewer rows.
+inline constexpr int kReflectionRttMaxWidth = 16384;
+
+struct ReflectionRttSize {
+	int width = kReflectionRttSize;
+	int height = kReflectionRttSize;
+};
+
+inline ReflectionRttSize reflection_rtt_size(float source_width, float source_height) {
+	ReflectionRttSize size;
+	if (!(source_width > 0.0f) || !(source_height > 0.0f)) {
+		return size;
+	}
+	const double aspect = static_cast<double>(source_width) / source_height;
+	const double columns = std::round(kReflectionRttSize * aspect);
+	if (columns > kReflectionRttMaxWidth) {
+		size.width = kReflectionRttMaxWidth;
+		size.height = std::max(1, static_cast<int>(
+				std::round(kReflectionRttMaxWidth / aspect)));
+	} else {
+		size.width = std::max(1, static_cast<int>(columns));
+	}
+	return size;
+}
 
 // The witnessed reflected-scene dim (env #37's mechanism): after the mirrored
 // sky/terrain/world render into the RTT, detail >= 2 multiplies the WHOLE
@@ -114,20 +150,19 @@ struct WaterMirrorView {
 	Vec3 basis_z{};
 	Vec3 origin{};
 	bool below_water = false;
-	// The square pass receives the source's HORIZONTAL extent (fov for
-	// perspective, size for ortho/frustum) with the frustum offset's Y
-	// negated for the vertical mirror.
-	float horizontal_fov_deg = 75.0f;
-	float horizontal_size = 1.0f;
+	// The source's own projection (the main view's field on both axes, the
+	// same axis convention), with the frustum offset's Y negated for the
+	// vertical mirror above the plane.
+	MirrorProjection projection = MirrorProjection::kPerspective;
+	float fov_deg = 75.0f;
+	float size = 1.0f;
+	bool keep_aspect_height = true;
 	float frustum_offset_x = 0.0f;
 	float frustum_offset_y = 0.0f;
-	// Preserving horizontal FOV makes the square mirror's X focal scale
-	// match; its Y focal scale is source_height/source_width of the main
-	// camera's — the strip rows' texm3x2 result converts through this scale
-	// so a fixed reflected world point stays registered while the view
-	// rotates.
-	float uv_scale_x = 1.0f;
-	float uv_scale_y = 1.0f;
+	// The mirror target (reflection_rtt_size of the source viewport): its
+	// aspect is the source's, so the strip rows' (screen U, 1 - screen V)
+	// lookup lands on the reflected point without a rescale.
+	ReflectionRttSize rtt{};
 	// The proper mirror negates the reflected UP column; the local vertical
 	// offset negates too so the effective camera origin is the geometric
 	// reflection of the source rather than shifted oppositely. The unmirrored
@@ -161,45 +196,15 @@ inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 		view.v_offset = -source.v_offset;
 	}
 
-	const float aspect = source.viewport_height > 0.0f
-			? source.viewport_width / source.viewport_height
-			: 1.0f;
-	view.uv_scale_x = 1.0f;
-	view.uv_scale_y = aspect != 0.0f ? 1.0f / aspect : 1.0f;
-
-	switch (source.projection) {
-		case MirrorProjection::kOrthogonal: {
-			float horizontal_size = source.ortho_size;
-			if (source.keep_aspect_height) {
-				horizontal_size *= aspect;
-			}
-			view.horizontal_size = horizontal_size;
-		} break;
-		case MirrorProjection::kFrustum: {
-			// The shell's frustum size is always the vertical span (its
-			// projection builder does not reinterpret the axis), so the
-			// square pass always receives vertical * aspect, with the
-			// offset's Y negated for the vertical mirror (kept below water).
-			view.horizontal_size = source.frustum_size * aspect;
-			view.frustum_offset_x = source.frustum_offset_x;
-			view.frustum_offset_y = view.below_water ? source.frustum_offset_y
-													 : -source.frustum_offset_y;
-		} break;
-		case MirrorProjection::kPerspective:
-		default: {
-			float horizontal_fov = source.fov_deg;
-			if (source.keep_aspect_height) {
-				constexpr float kDegToRad = 0.01745329251994329577f;
-				constexpr float kRadToDeg = 57.29577951308232088f;
-				horizontal_fov = kRadToDeg * 2.0f *
-						std::atan(std::tan(source.fov_deg * kDegToRad * 0.5f) *
-								aspect);
-			}
-			// The camera device accepts [1, 179] degrees; very thin but still
-			// drawable viewports asymptotically approach 180.
-			view.horizontal_fov_deg = std::clamp(horizontal_fov, 1.0f, 179.0f);
-		} break;
-	}
+	view.projection = source.projection;
+	view.keep_aspect_height = source.keep_aspect_height;
+	view.fov_deg = source.fov_deg;
+	view.size = source.projection == MirrorProjection::kFrustum ? source.frustum_size
+																 : source.ortho_size;
+	view.frustum_offset_x = source.frustum_offset_x;
+	view.frustum_offset_y = view.below_water ? source.frustum_offset_y
+											 : -source.frustum_offset_y;
+	view.rtt = reflection_rtt_size(source.viewport_width, source.viewport_height);
 	return view;
 }
 

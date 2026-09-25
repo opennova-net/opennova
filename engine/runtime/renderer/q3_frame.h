@@ -228,7 +228,6 @@ struct Q3WaterMaterialParameters {
 	Q3ResourceLease noise_color_texture{};
 	Q3ResourceLease noise_normal_texture{};
 	Q3Vec3 water_color{0.408f, 0.314f, 0.224f};
-	Q3Vec2 reflection_uv_scale{1.0f, 1.0f};
 	// The retail scene projection's near/far the strip depth is tested
 	// against (the beauty water's u_scene_depth_range): the copy maps its
 	// strip depth through the same curve.

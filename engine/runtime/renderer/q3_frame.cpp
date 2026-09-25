@@ -56,7 +56,6 @@ bool parameters_finite(const Q3SubmissionSnapshot &submission) {
 					finite(submission.object.uv_transform);
 		case Q3Source::Water:
 			return finite(submission.water.water_color) &&
-					finite(submission.water.reflection_uv_scale) &&
 					finite(submission.water.scene_depth_range);
 		case Q3Source::CelestialBody:
 		case Q3Source::SunGlow:

@@ -143,37 +143,37 @@ func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:
 	water.terrain_data = terrain
 	assert_eq(water.water_height, 6.0, "ENV is the final fallback")
 
-func test_reflection_rtt_is_retail_square_and_preserves_horizontal_fov() -> void:
+func test_reflection_rtt_covers_the_main_field_at_512_rows() -> void:
+	# Retail's 512 x 512 RTT renders with the main view's projection (the
+	# target's h/w as the vertical scale, retail render_main_scene
+	# @ 0x5c1255..0x5c163e): 512 rows across the main vertical field. Godot
+	# renders square pixels, so the mirror keeps the source projection over a
+	# round(512 x aspect) x 512 target.
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
 	var strip_vp: SubViewport = fixture["viewport"]
 	var cam: Camera3D = fixture["camera"]
 
-	cam.fov = Simulation.fov_vertical_from_horizontal(
-			72.0, float(strip_vp.size.x) / float(strip_vp.size.y))
+	cam.fov = 60.0
 	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().size, Vector2i(512, 512),
-			"retail water detail 3 (the shipped max-quality path) allocates a fixed 512 square RTT [orig: Water_CreateReflectionRenderTarget @ 0x5c08d1]")
-	assert_almost_eq(water.get_reflection_camera().fov, 72.0, 0.001,
-			"square projection preserves the source horizontal FOV")
-	var uv_scale: Vector2 = water.get_water_material().get_shader_parameter(
-			"u_reflection_uv_scale")
-	assert_almost_eq(uv_scale.x, 1.0, 0.000001,
-			"preserved horizontal FOV needs no reflection-U correction")
-	assert_almost_eq(uv_scale.y, 600.0 / 1024.0, 0.000001,
-			"reflection V converts from the source projection to the square RTT")
+	assert_eq(water.get_reflection_viewport().size, Vector2i(874, 512),
+			"512 rows, round(512 x 1024 / 600) columns")
+	assert_almost_eq(water.get_reflection_camera().fov, 60.0, 0.001,
+			"the mirror takes the source's own field")
+	assert_eq(water.get_reflection_camera().keep_aspect, cam.keep_aspect)
+	_assert_reflection_projection_registered(
+			water, cam, strip_vp, Vector3(100.3, 12.0, -133.7))
 
 	strip_vp.size = Vector2i(1600, 900)
 	cam.keep_aspect = Camera3D.KEEP_WIDTH
 	cam.fov = 72.0
 	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().size, Vector2i(512, 512),
-			"display resizing must not resize Water_ReflectionTexture")
-	assert_almost_eq(water.get_reflection_camera().fov, 72.0, 0.001,
-			"the new source aspect still projects the same horizontal field")
-	uv_scale = water.get_water_material().get_shader_parameter("u_reflection_uv_scale")
-	assert_almost_eq(uv_scale.y, 900.0 / 1600.0, 0.000001,
-			"display resizing refreshes the source-to-square V correction")
+	assert_eq(water.get_reflection_viewport().size, Vector2i(910, 512),
+			"a display resize keeps the 512 rows at the new aspect")
+	assert_almost_eq(water.get_reflection_camera().fov, 72.0, 0.001)
+	assert_eq(water.get_reflection_camera().keep_aspect, Camera3D.KEEP_WIDTH)
+	_assert_reflection_projection_registered(
+			water, cam, strip_vp, Vector3(100.3, 12.0, -133.7))
 
 
 func test_reflection_rtt_carries_the_witnessed_post_scene_dim() -> void:
@@ -295,9 +295,9 @@ func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
 	cam.v_offset = -1.25
 	water.advance_frame(TICK)
 	assert_eq(water.get_reflection_camera().projection, Camera3D.PROJECTION_ORTHOGONAL)
-	assert_eq(water.get_reflection_camera().keep_aspect, Camera3D.KEEP_WIDTH)
-	assert_almost_eq(water.get_reflection_camera().size, 90.0 * 1024.0 / 600.0,
-			0.0001, "square mirror preserves the orthographic horizontal span")
+	assert_eq(water.get_reflection_camera().keep_aspect, Camera3D.KEEP_HEIGHT)
+	assert_almost_eq(water.get_reflection_camera().size, 90.0, 0.0001,
+			"the mirror takes the source's orthographic span")
 	assert_almost_eq(water.get_reflection_camera().near, 0.25, 0.000001)
 	assert_almost_eq(water.get_reflection_camera().far, 500.0, 0.000001)
 	assert_almost_eq(water.get_reflection_camera().h_offset, 2.5, 0.000001)
@@ -309,9 +309,9 @@ func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
 	cam.set_frustum(45.0, Vector2(3.0, -4.0), 0.5, 800.0)
 	water.advance_frame(TICK)
 	assert_eq(water.get_reflection_camera().projection, Camera3D.PROJECTION_FRUSTUM)
-	assert_eq(water.get_reflection_camera().keep_aspect, Camera3D.KEEP_WIDTH)
-	assert_almost_eq(water.get_reflection_camera().size, 45.0 * 1024.0 / 600.0,
-			0.0001, "square mirror preserves the frustum horizontal span")
+	assert_eq(water.get_reflection_camera().keep_aspect, Camera3D.KEEP_HEIGHT)
+	assert_almost_eq(water.get_reflection_camera().size, 45.0, 0.0001,
+			"the mirror takes the source's frustum span")
 	assert_eq(water.get_reflection_camera().frustum_offset, Vector2(3.0, 4.0),
 			"the off-axis frustum follows the mirror's vertical flip")
 	assert_almost_eq(water.get_reflection_camera().near, 0.5, 0.000001)
@@ -324,15 +324,11 @@ func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
 	cam.keep_aspect = Camera3D.KEEP_WIDTH
 	cam.set_frustum(30.0, Vector2(-2.0, 1.5), 0.75, 900.0)
 	water.advance_frame(TICK)
-	assert_almost_eq(water.get_reflection_camera().size, 30.0 * 1024.0 / 600.0,
-			0.0001, "frustum size remains vertical even with KEEP_WIDTH")
+	assert_almost_eq(water.get_reflection_camera().size, 30.0, 0.0001)
+	assert_eq(water.get_reflection_camera().keep_aspect, Camera3D.KEEP_WIDTH)
 	assert_eq(water.get_reflection_camera().frustum_offset, Vector2(-2.0, -1.5))
 	_assert_reflection_projection_registered(
 			water, cam, fixture["viewport"], Vector3(100.3, 12.0, -133.7))
-	var uv_scale: Vector2 = water.get_water_material().get_shader_parameter(
-			"u_reflection_uv_scale")
-	assert_almost_eq(uv_scale.y, 600.0 / 1024.0, 0.000001,
-			"all projection modes share the source-to-square V correction")
 
 
 func test_collapsed_source_viewport_never_builds_an_invalid_mirror_projection() -> void:
@@ -345,8 +341,10 @@ func test_collapsed_source_viewport_never_builds_an_invalid_mirror_projection() 
 	# range, even though the source camera itself remains ordinary.
 	strip_vp.size = Vector2i(1024, 2)
 	water.advance_frame(TICK)
-	assert_almost_eq(water.get_reflection_camera().fov, 179.0, 0.001,
-			"a drawable extreme aspect is bounded to Camera3D's legal FOV")
+	assert_eq(water.get_reflection_viewport().size, Vector2i(16384, 32),
+			"a drawable extreme aspect keeps its ratio inside the device width")
+	assert_almost_eq(water.get_reflection_camera().fov,
+			(fixture["camera"] as Camera3D).fov, 0.001)
 
 	strip_vp.size = Vector2i(1024, 1)
 	water.advance_frame(TICK)
@@ -399,13 +397,6 @@ func test_reflection_lookup_stays_registered_while_view_rotates() -> void:
 			water, cam, strip_vp, real_world_point)
 
 
-func test_reflection_shader_applies_square_projection_scale() -> void:
-	var shader := load(WATER_SHADER) as Shader
-	assert_true(shader.code.contains(
-			"refl_uv = vec2(0.5) + (refl_uv - vec2(0.5)) * u_reflection_uv_scale;"),
-			"the witnessed row result must enter the square mirror's projection before sampling")
-
-
 func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 		source_viewport: SubViewport, world_point: Vector3) -> void:
 	# A planar reflection projects a real point through the mirror camera at
@@ -423,11 +414,7 @@ func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 	var mirror_size := Vector2(float(water.get_reflection_viewport().size.x),
 			float(water.get_reflection_viewport().size.y))
 	var main_uv := cam.unproject_position(virtual_point) / source_size
-	var raw_row_uv := Vector2(main_uv.x, 1.0 - main_uv.y)
-	var uv_scale: Vector2 = water.get_water_material().get_shader_parameter(
-			"u_reflection_uv_scale")
-	var sampled_uv := Vector2(0.5, 0.5) + (
-			raw_row_uv - Vector2(0.5, 0.5)) * uv_scale
+	var sampled_uv := Vector2(main_uv.x, 1.0 - main_uv.y)
 	var mirror_uv: Vector2 = (
 			water.get_reflection_camera().unproject_position(world_point) / mirror_size)
 	var one_rtt_texel := 1.0 / float(water.get_reflection_viewport().size.x)
@@ -458,17 +445,15 @@ func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 		var base := vertex_index * 4
 		var q := minf(300.0 * custom0[base + 1] + 0.15, 2.0)
 		var vbase_bias := q / 256.0
-		var raw_strip_uv := Vector2(custom0[base + 2], custom0[base + 3])
-		var sampled_strip_uv := Vector2(0.5, 0.5) + (
-				raw_strip_uv - Vector2(0.5, 0.5)) * uv_scale
+		var sampled_strip_uv := Vector2(custom0[base + 2], custom0[base + 3])
 		var mirror_strip_uv: Vector2 = (
 				water.get_reflection_camera().unproject_position(positions[vertex_index])
 				/ mirror_size)
 		assert_almost_eq(sampled_strip_uv.x, mirror_strip_uv.x, one_rtt_texel,
 				"strip reflection U stays registered to its mirrored water point")
 		assert_almost_eq(sampled_strip_uv.y,
-				mirror_strip_uv.y - vbase_bias * uv_scale.y, one_rtt_texel,
-				"strip reflection V keeps its witnessed vbase bias after remapping")
+				mirror_strip_uv.y - vbase_bias, one_rtt_texel,
+				"strip reflection V keeps its witnessed vbase bias")
 
 
 func test_above_water_renders_blend_side() -> void:
@@ -563,19 +548,16 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 	water.set_visible_terrain_bounds(false, 0.0, 0.0)
 	water.advance_frame(TICK)
 	assert_almost_eq(water.get_reflection_camera().fov, 80.0, 0.001,
-			"the mirror preserves the TARGET camera's horizontal fov (the frame's "
-			+ "policy 80), never the surface camera's culling superset")
-	var uv_scale: Vector2 = water.get_water_material().get_shader_parameter(
-			"u_reflection_uv_scale")
-	# The target is sized to whole pixels (lround(h / selected)), so the ratio
-	# carries one rounding of the target WIDTH: on a tiny headless surface that
-	# is a few thousandths, on a real one well under the fixed floor.
+			"the mirror takes the TARGET camera's field (the frame's policy 80), "
+			+ "never the surface camera's culling superset")
 	var target_vp := through.get_viewport()
-	var one_pixel := 1.0 / float(target_vp.size.x) if target_vp != null \
-			and target_vp.size.x > 0 else 0.0
-	assert_almost_eq(uv_scale.y, selected, maxf(0.002, 2.0 * one_pixel),
-			"reflection V converts from the TARGET's projection (the selected ratio) "
-			+ "to the square RTT")
+	var target_size := Vector2(target_vp.get_visible_rect().size)
+	assert_eq(water.get_reflection_viewport().size,
+			Vector2i(roundi(512.0 * target_size.x / target_size.y), 512),
+			"the mirror target takes the TARGET's ratio (the selected mode)")
+	assert_almost_eq(float(water.get_reflection_viewport().size.x), 512.0 / selected,
+			maxf(2.0, 0.01 * 512.0 / selected),
+			"whole-pixel targets round the selected ratio")
 
 	# Back to the surface's own ratio: the target goes away and the surface
 	# camera draws the water again.
@@ -586,9 +568,9 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 	assert_null(presenter.projection_viewport(), "a native mode releases the target")
 	water.set_visible_terrain_bounds(false, 0.0, 0.0)
 	water.advance_frame(TICK)
-	uv_scale = water.get_water_material().get_shader_parameter("u_reflection_uv_scale")
-	assert_almost_eq(uv_scale.y, surface_ratio, 0.0001,
-			"a native mode registers the reflection to the surface's own ratio again")
+	assert_eq(water.get_reflection_viewport().size,
+			Vector2i(roundi(512.0 / surface_ratio), 512),
+			"a native mode sizes the mirror to the surface's own ratio again")
 	presenter.teardown()
 
 

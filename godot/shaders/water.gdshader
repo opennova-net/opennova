@@ -69,11 +69,6 @@ uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
 // the display-encoded scene, consumed raw exactly like retail's t2 texels.
 uniform sampler2D u_reflection : filter_linear;
 uniform bool u_has_reflection = false;
-// The witnessed texm3x2 rows are normalized against the MAIN viewport, while
-// Godot derives the mirror camera's vertical projection from its square RTT.
-// Water preserves horizontal FOV, so X is already registered and Y needs
-// the source-to-square focal-scale ratio (source height / source width).
-uniform vec2 u_reflection_uv_scale = vec2(1.0);
 // water_murk [orig: SetWaterMurk @ 0x57d4f0] no longer has a uniform: the
 // witnessed angle-weighted murk x distance chain arrives per vertex in
 // COLOR.a now that the strip march is live (env #29) — the former flat
@@ -190,18 +185,16 @@ void fragment() {
 	// the mirror scene RTT render_main_scene @ 0x5c1240]. The DuDv map's
 	// blue byte is the constant 0xFF (engine/formats/env water_noise_normal_pixels),
 	// so _bx2 passes the rows' screen component through at weight 1 while
-	// R/G perturb it. The dots remain the witnessed lookup verbatim. Their
-	// result is then mapped from the main viewport's normalized projection to
-	// Godot's square mirror projection; without that sim/present-boundary conversion,
-	// the reflected image swims vertically as the view rotates on a widescreen
-	// display. The clamp is the RTT edge address mode.
+	// R/G perturb it. The dots remain the witnessed lookup verbatim: the mirror
+	// target covers the main view's field (environment/water_mirror.h
+	// kReflectionRttSize), so the result addresses it directly. The clamp is
+	// the RTT edge address mode.
 	// Reflection-less owners (headless/tests) keep u_water_color as the
 	// tracked t2 stand-in.
 	vec3 t2_sample = u_water_color;
 	if (u_has_reflection) {
 		vec3 dudv_bx2 = texture(u_noise_normal, uv).rgb * 2.0 - 1.0;
 		vec2 refl_uv = vec2(dot(v_refl_row_u, dudv_bx2), dot(v_refl_row_v, dudv_bx2));
-		refl_uv = vec2(0.5) + (refl_uv - vec2(0.5)) * u_reflection_uv_scale;
 		t2_sample = texture(u_reflection, clamp(refl_uv, vec2(0.0), vec2(1.0))).rgb;
 	}
 
