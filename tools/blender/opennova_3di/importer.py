@@ -974,7 +974,10 @@ class Builder:
     def bullet_lod(self, mats):
         """The render LOD whose parts are the collision sections and whose
         part triangles are the bullet faces (the OED poly_collision_lod), and
-        each material's bullet-face surface and flags voted from them."""
+        each material's bullet-face surface and flags voted from them. When no
+        LOD holds them one for one (a first-person weapon's bullet faces come
+        from a collision mesh of its own, which the file does not keep), the
+        LOD whose triangles meet most of them, at least half, still votes."""
         counts = [len(c["faces"]) for c in self.sc["cobjs"]]
         if not any(counts):
             return
@@ -987,29 +990,19 @@ class Builder:
             if [sum(len(s["tris"]) for s in p["strips"]) for p in lod["parts"]] == counts:
                 chosen = li
                 break
-        if chosen is None:
-            self.note("the bullet faces match no render LOD; export derives them from LOD "
-                      f"{self.model.o3d.poly_collision_lod}")
-            return
+        if chosen is not None:
+            votes, _ = self.face_votes(chosen)
+        else:
+            best = max(((self.face_votes(li), li) for li, lod in enumerate(self.sc["lods"])
+                        if len(lod["parts"]) == len(counts)), key=lambda e: e[0][1], default=None)
+            if best is None or 2 * best[0][1] < sum(counts):
+                self.note("the bullet faces match no render LOD; export derives them from LOD "
+                          f"{self.model.o3d.poly_collision_lod}")
+                return
+            (votes, met), chosen = best
+            self.note(f"the bullet faces match no render LOD one for one; export derives them from LOD {chosen}, "
+                      f"whose triangles meet {met} of the {sum(counts)} (its materials' surfaces are voted from those)")
         self.model.o3d.poly_collision_lod = chosen
-        votes = {}
-        lod = self.sc["lods"][chosen]
-        section_tris = {}
-        for pi, part in enumerate(lod["parts"]):
-            for s in part["strips"]:
-                for ti, tri in enumerate(s["tris"]):
-                    si = self.split[1][(id(s), ti)] if self.split is not None else pi
-                    section_tris.setdefault(si, []).append((s["material"], [s["verts"][x]["p"] for x in tri]))
-        for si, c in enumerate(self.sc["cobjs"]):
-            by_centre = {}
-            for a, b, cc, poly, flags in c["faces"]:
-                p = [c["verts"][x] for x in (a, b, cc)]
-                by_centre[tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))] = (poly, flags)
-            for material, p in section_tris.get(si, []):
-                key = tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))
-                if key in by_centre:
-                    votes.setdefault(material, {}).setdefault(by_centre[key], 0)
-                    votes[material][by_centre[key]] += 1
         outvoted = 0
         for mi, v in votes.items():
             if not 0 <= mi < len(mats):
@@ -1027,6 +1020,32 @@ class Builder:
         if outvoted:
             self.note(f"{outvoted} bullet faces take their material's most common surface and flags, not their own "
                       "(a material carries one set)")
+
+    def face_votes(self, li):
+        """Each material's votes for the (surface, flags) of the bullet faces
+        LOD li's triangles meet (by centroid, within its section), and how many
+        they meet."""
+        votes = {}
+        met = 0
+        lod = self.sc["lods"][li]
+        section_tris = {}
+        for pi, part in enumerate(lod["parts"]):
+            for s in part["strips"]:
+                for ti, tri in enumerate(s["tris"]):
+                    si = self.split[1][(id(s), ti)] if self.split is not None and self.split[0] == li else pi
+                    section_tris.setdefault(si, []).append((s["material"], [s["verts"][x]["p"] for x in tri]))
+        for si, c in enumerate(self.sc["cobjs"]):
+            by_centre = {}
+            for a, b, cc, poly, flags in c["faces"]:
+                p = [c["verts"][x] for x in (a, b, cc)]
+                by_centre[tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))] = (poly, flags)
+            for material, p in section_tris.get(si, []):
+                key = tuple(round(sum(q[k] for q in p) / 3.0, 1) for k in range(3))
+                if key in by_centre:
+                    votes.setdefault(material, {}).setdefault(by_centre[key], 0)
+                    votes[material][by_centre[key]] += 1
+                    met += 1
+        return votes, met
 
 
 def centroid(points):
