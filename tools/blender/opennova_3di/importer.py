@@ -21,6 +21,7 @@ from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, axis_
 
 
 VOLUME_NAMES = {v: k for k, v in export.VOLUME_CODES.items()}
+VOLUME_NAMES[0] = export.UNLISTED_TYPE_CODE
 OCC_PREFIX = {0: "OB", 1: "OS", 2: "OP", 3: "OP", 4: "OH"}
 DUP_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 

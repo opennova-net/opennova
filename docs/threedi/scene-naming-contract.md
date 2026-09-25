@@ -58,6 +58,11 @@ ladders have no thickness, and import lays each out that way.
 | `CA` | 6 | `CF` | 13 | | |
 | `VC` | 7 | | | | |
 
+Any other code whose first letter is `C`, `D`, `L` or `V` is type 0:
+`classify_name` leaves the type of a code it does not list at 0. 36 of the 48
+retail first-person weapons (and IJava03) carry a type 0 box per section;
+import names them `CX`.
+
 `BB` takes flag letters before `##`; each clears a bit of `0x3E`: `V` 0x2,
 `S` 0x4, `W` 0x8, `L` 0x10, `O` 0x20 (for example `BBVSO03`; Armry01's light
 fixtures carry `BBL02`, `BBVSL03`). Type 14 shares the `LP` prefix with

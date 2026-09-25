@@ -41,7 +41,8 @@
 #                 a spot light is a cone about its local -Z, the way Blender
 #                 draws one.
 #   <code>##[a..]-colonly  mesh on LOD0: a collision volume of type <code>
-#                 (CB CS CC CL CV CA VC BB CD CT CM VK CF LP DH DM DL CP) in
+#                 (CB CS CC CL CV CA VC BB CD CT CM VK CF LP DH DM DL CP;
+#                 any other C, D, L or V code is type 0, import's CX) in
 #                 section ##; the builder takes its planes from its faces by
 #                 the OED rule (a ladder, CL, faces its last face's plane).
 #   OB##/OS##/OP##[-MM]/OH## (+ [a..], -occonly)  mesh on LOD0: an occlusion
@@ -107,6 +108,12 @@ OCC_TYPES = {"OB": 0, "OS": 1, "OP": 2, "OH": 4}  # OP with -MM is a portal, typ
 # docs/world/world-wac-ai-re.md §15).
 VOLUME_CODES = {"CB": 1, "CS": 2, "CC": 3, "CL": 4, "CV": 5, "CA": 6, "VC": 7, "BB": 8, "CD": 9, "CT": 10,
                 "CM": 11, "VK": 12, "CF": 13, "LP": 14, "DH": 16, "DM": 17, "DL": 18, "CP": 19}
+# classify_name leaves any other pair it reads as a volume at type 0; of the
+# collision letters, a C, D, L or V pair is one here (B and O pairs are blink
+# boxes and occlusion). 36 of the 48 retail first-person weapons carry a type
+# 0 box per section, which import names CX.
+UNLISTED_TYPE_LETTERS = "CDLV"
+UNLISTED_TYPE_CODE = "CX"
 VOLUME_RE = re.compile(r"^([A-Z]{2})([VSWLO]*)(\d{2})([a-z]*)-colonly$")
 BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
 
@@ -514,7 +521,7 @@ class Exporter:
             m = VOLUME_RE.match(raw)
             if m and ob.type == "MESH":
                 code, letters, nn, dup = m.groups()
-                if code not in VOLUME_CODES:
+                if code not in VOLUME_CODES and code[0] not in UNLISTED_TYPE_LETTERS:
                     raise ExportError(f"{ob.name}: unknown collision code '{code}'")
                 if letters and code != "BB":
                     raise ExportError(f"{ob.name}: only blink boxes (BB) take flag letters")
@@ -525,7 +532,8 @@ class Exporter:
                         flags &= ~BLINK_LETTER_BITS[letter]
                 claim(("volume", code + letters, nn, dup), ob)
                 if primary:
-                    lod.volumes.append((VOLUME_CODES[code], flags, int(nn) - 1, ob, (code + letters, dup_rank(dup))))
+                    lod.volumes.append((VOLUME_CODES.get(code, 0), flags, int(nn) - 1, ob,
+                                        (code + letters, dup_rank(dup))))
                 else:
                     lod0_only(ob, "collision volumes")
                 continue

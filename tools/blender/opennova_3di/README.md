@@ -70,6 +70,7 @@ F16_LOD0              Empty under the model root, custom property _lod_index = 0
     CB01-colonly      collision volume on part 01 (a convex mesh)
     CB01a-colonly     the next CB volume on part 01
     VC01-colonly      a vehicle-contact volume
+    CX01-colonly      a type 0 volume (any other C, D, L or V code)
     OB01-occonly      an occluder in section 01 (OS open, OP window, OP02-04 portal)
     PN02              Empty: part 2, a child of part 1
       02 Mesh0
