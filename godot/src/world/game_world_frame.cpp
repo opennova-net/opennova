@@ -1326,6 +1326,8 @@ void GameWorld::sample_auxiliary_render_stats(bool p_stats_on) {
 				int64_t(slot_report.get("slot_packed_vertices", 0)));
 		frame_stats_->add(FrameStats::RENDER_SLOT_SKINNED,
 				int64_t(slot_report.get("slot_skinned_commands", 0)));
+		frame_stats_->add(FrameStats::RENDER_SLOT_READBACKS,
+				int64_t(slot_report.get("slot_readbacks", 0)));
 		if (bool(slot_report.get("slot_gpu_valid", false))) {
 			frame_stats_->add(FrameStats::RENDER_SLOT_GPU, int64_t(slot_report.get("slot_gpu_us", 0)));
 		}

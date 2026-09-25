@@ -7,6 +7,8 @@
 #include <runtime/world/model_geometry.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
 #include <runtime/renderer/model_mesh_prepare.h>
 
+#include "render/retained_array_mesh.h"
+
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/plane.hpp>
@@ -268,9 +270,11 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 	const auto surfaces = opennova::renderer::prepare_model_mesh(
 			native_model(), p_lod_index, {p_skeletal, p_bone_count, p_native_frame});
 	for (const auto &surface : surfaces) {
-		Ref<ArrayMesh> mesh;
+		// Every instance of this data shares the mesh; the slot-capture and Q3
+		// packers read its retained arrays instead of reading the surface back.
+		Ref<RetainedArrayMesh> mesh;
 		mesh.instantiate();
-		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, pack_mesh_arrays(surface));
+		mesh->add_retained_surface(Mesh::PRIMITIVE_TRIANGLES, pack_mesh_arrays(surface));
 		mesh->surface_set_name(0, vformat("material_%d", surface.material_array_index));
 
 		Dictionary entry;

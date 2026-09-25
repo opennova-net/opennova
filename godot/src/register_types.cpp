@@ -50,6 +50,7 @@
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
+#include "render/retained_array_mesh.h"
 #include "render/scene_overlay_compositor.h"
 #include "world/item_effect_director.h"
 #include "world/occlusion_frame.h"
@@ -314,6 +315,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	// The present passes EntityPresenter owns (ADR 0043 d9): two are
 	// RefCounted only so their anchor Callables have an Object target;
 	// registered internally, never script-visible.
+	GDREGISTER_INTERNAL_CLASS(RetainedArrayMesh);
 	GDREGISTER_INTERNAL_CLASS(DestructionPresenter);
 	GDREGISTER_INTERNAL_CLASS(ThrowablePresenter);
 	GDREGISTER_INTERNAL_CLASS(VehicleTrailPresenter);

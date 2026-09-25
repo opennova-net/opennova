@@ -169,7 +169,7 @@ void Q3GeometryCache::begin_frame(std::uint64_t p_frame_id) {
 }
 
 std::shared_ptr<const Q3PackedStream> Q3GeometryCache::acquire(
-		const Request &p_request, const std::function<Array()> &p_read_arrays) {
+		const Request &p_request, const std::function<Array(bool &)> &p_read_arrays) {
 	Entry &entry = entries_[p_request.key];
 	if (entry.entry_id == 0)
 		entry.entry_id = next_entry_id_++;
@@ -191,9 +191,11 @@ std::shared_ptr<const Q3PackedStream> Q3GeometryCache::acquire(
 		entry.arrays_read = true;
 		dirty = true;
 	} else if (!entry.arrays_read) {
-		entry.arrays = Q3SurfaceArrays::from_mesh_arrays(p_read_arrays());
+		bool read_back = false;
+		entry.arrays = Q3SurfaceArrays::from_mesh_arrays(p_read_arrays(read_back));
 		entry.arrays_read = true;
-		++counters_.readbacks;
+		if (read_back)
+			++counters_.readbacks;
 		dirty = true;
 	}
 	if (entry.arrays.empty())

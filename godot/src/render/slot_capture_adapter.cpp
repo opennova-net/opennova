@@ -2,6 +2,7 @@
 #include "object/object_model.h"
 #include "object/post_multiply_draw.h"
 #include "render/q3_geometry_cache.h"
+#include "render/retained_array_mesh.h"
 #include "render/material_params.h"
 #include "render/q3_source_registry.h"
 #include "render/q3_vertex_format.h"
@@ -911,6 +912,7 @@ Dictionary SlotCaptureAdapter::Impl::report() const {
 	result["slot_skinned_commands"] = counters.skinned_commands;
 	result["slot_blended_commands"] = counters.blended_commands;
 	result["slot_packed_vertices"] = counters.packed_vertices;
+	result["slot_readbacks"] = counters.readbacks;
 	result["slot_unclassified_surfaces"] = counters.unclassified_surfaces;
 	result["slot_no_pass_surfaces"] = counters.no_pass_surfaces;
 	result["slot_captures_drawn"] = counters.captures_drawn;
@@ -1048,8 +1050,8 @@ void SlotCaptureAdapter::compile_frame(
 						"u_uv_transform_v", Vector3(0, 1, 0));
 				cache_request.pack.skin_channels = !palette.empty();
 				std::shared_ptr<const Q3PackedStream> stream = cache.acquire(
-						cache_request, [&]() {
-							return array_mesh->surface_get_arrays(surface);
+						cache_request, [&](bool &r_read_back) {
+							return surface_arrays(array_mesh.ptr(), surface, r_read_back);
 						});
 				if (!stream)
 					continue;
@@ -1115,6 +1117,7 @@ void SlotCaptureAdapter::compile_frame(
 			impl_->consumed_frame_id.load(std::memory_order_acquire));
 	const Q3GeometryCache::FrameCounters &cache_counters = cache.frame_counters();
 	counters.packed_vertices = static_cast<int>(cache_counters.packed_vertices);
+	counters.readbacks = static_cast<int>(cache_counters.readbacks);
 	impl_->publish(frame);
 	std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
 	impl_->status = frame->captures.empty() ? "compiled_empty" : "compiled";

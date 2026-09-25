@@ -1,0 +1,35 @@
+#include "render/retained_array_mesh.h"
+
+#include <godot_cpp/classes/mesh.hpp>
+
+namespace godot {
+
+void RetainedArrayMesh::add_retained_surface(Mesh::PrimitiveType p_primitive,
+		const Array &p_arrays) {
+	add_surface_from_arrays(p_primitive, p_arrays);
+	Array retained = p_arrays.duplicate(false);
+	if (retained.size() > Mesh::ARRAY_TANGENT)
+		retained[Mesh::ARRAY_TANGENT] = Variant();
+	surfaces_.push_back(retained);
+}
+
+Array RetainedArrayMesh::retained_surface_arrays(int p_surface) const {
+	if (p_surface < 0 || static_cast<std::size_t>(p_surface) >= surfaces_.size())
+		return Array();
+	return surfaces_[static_cast<std::size_t>(p_surface)];
+}
+
+Array surface_arrays(Mesh *p_mesh, int p_surface, bool &r_read_back) {
+	r_read_back = false;
+	if (p_mesh == nullptr)
+		return Array();
+	if (const RetainedArrayMesh *retained = Object::cast_to<RetainedArrayMesh>(p_mesh)) {
+		const Array arrays = retained->retained_surface_arrays(p_surface);
+		if (!arrays.is_empty())
+			return arrays;
+	}
+	r_read_back = true;
+	return p_mesh->surface_get_arrays(p_surface);
+}
+
+} // namespace godot

@@ -31,7 +31,8 @@ class MultiMesh;
 inline constexpr std::uint32_t kQ3VertexStride = 104u;
 
 // Bind-space surface arrays: what a producer published, or what the cache
-// read once through the server at first sight. Packed arrays are
+// read once at first sight (a RetainedArrayMesh's copy, or through the
+// server). Packed arrays are
 // copy-on-write, so holding them beside the producer's own copy costs nothing.
 struct Q3SurfaceArrays {
 	PackedVector3Array positions;
@@ -127,6 +128,8 @@ public:
 	};
 
 	struct FrameCounters {
+		// First-sight surfaces whose arrays came back through the server
+		// (no retained copy): each one a GPU readback.
 		std::size_t readbacks = 0;
 		// MultiMesh sources whose instance rows were (re-)read this frame.
 		std::size_t instance_row_reads = 0;
@@ -140,9 +143,10 @@ public:
 	void begin_frame(std::uint64_t p_frame_id);
 	// The current stream for one source surface, or null when the surface has
 	// no drawable arrays. `p_read_arrays` runs only when the entry holds no
-	// arrays (its one server readback) and is counted in the frame counters.
+	// arrays (its one first-sight read) and sets its flag when that read went
+	// through the server, which the frame counters count.
 	std::shared_ptr<const Q3PackedStream> acquire(const Request &p_request,
-			const std::function<Array()> &p_read_arrays);
+			const std::function<Array(bool &)> &p_read_arrays);
 	// Cached local instance rows of a MultiMesh source, re-read through the
 	// server only after an instance invalidation (invalidate_q3_instances) or
 	// an instance-count change; the packed surfaces are untouched by either.
