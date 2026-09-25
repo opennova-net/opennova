@@ -137,6 +137,7 @@ opennova_add_gated_test(anim_o3a_runtime_playback
 # Retail models through scene -> build -> compare (OPENNOVA_JO_ASSETS).
 add_executable(threedi_o3d_retail_roundtrip_test threedi/o3d_retail_roundtrip_test.cpp)
 target_include_directories(threedi_o3d_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(threedi_o3d_retail_roundtrip_test PRIVATE opennova_formats)
 target_compile_features(threedi_o3d_retail_roundtrip_test PRIVATE cxx_std_17)
 opennova_add_gated_test(threedi_o3d_retail_roundtrip
     COMMAND threedi_o3d_retail_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})

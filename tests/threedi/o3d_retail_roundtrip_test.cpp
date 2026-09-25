@@ -5,12 +5,16 @@
 // boxes, a register-driven rgbgen), Dblkhwk1 (register-driven rotors in MTRX
 // frames, an empty LOD, tangents), US01 (the skinned person layout), ArmsG
 // and Mp5b_1st (the first-person rig; collision faces the 8.8 grid collapses).
+// The CXLT table the scene carries must also come back row for row (US01,
+// ArmsG and Mp5b_1st ship rows that are not their sections' offsets).
 // Gated on OPENNOVA_JO_ASSETS (docs/asset-gated-tests.md).
 //
 //   o3d_retail_roundtrip_test <opennova-3di> <scratch dir>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+
+#include <formats/threedi/threedi_3di3.h>
 
 #include "common/retail_paths.h"
 
@@ -28,6 +32,23 @@ int run(const std::string &cmd) {
 }
 
 std::string quoted(const std::string &s) { return "\"" + s + "\""; }
+
+// The two models' CXLT tables, row for row.
+bool same_cxlt(const std::string &a_path, const std::string &b_path) {
+	using namespace opennova::threedi;
+	Threedi3di3 a{}, b{};
+	const bool read = threedi_3di3_read(a_path.c_str(), &a) == 0 && threedi_3di3_read(b_path.c_str(), &b) == 0;
+	bool same = read && (a.collision == nullptr) == (b.collision == nullptr);
+	if (same && a.collision != nullptr) {
+		same = a.collision->translation_count == b.collision->translation_count;
+		for (size_t i = 0; same && i < a.collision->translation_count; ++i)
+			for (int k = 0; k < 3; ++k)
+				same = same && a.collision->translations[i].translation[k] == b.collision->translations[i].translation[k];
+	}
+	threedi_3di3_free(&a);
+	threedi_3di3_free(&b);
+	return same;
+}
 
 } // namespace
 
@@ -52,6 +73,9 @@ int main(int argc, char **argv) {
 				run(cli + " build " + quoted(o3d) + " -o " + quoted(rebuilt)) != 0 ||
 				run(cli + " compare " + quoted(model) + " " + quoted(rebuilt)) != 0) {
 			std::fprintf(stderr, "%s: the scene round trip is not the same model\n", name);
+			++failures;
+		} else if (!same_cxlt(model, rebuilt)) {
+			std::fprintf(stderr, "%s: the rebuilt CXLT table is not the shipped one\n", name);
 			++failures;
 		}
 	}

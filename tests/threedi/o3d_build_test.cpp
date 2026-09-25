@@ -4,6 +4,7 @@
 // Drives the command handlers the CLI dispatches (opennova_3di_commands).
 //
 //   o3d_build_test <scratch dir>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -114,6 +115,35 @@ int main(int argc, char **argv) {
 		} else {
 			check(false, "nan: read the model back");
 		}
+	}
+
+	// CXLT: `cxlt` records are the table, in order, whatever the sections say
+	// (retail Oiltnk2X's 15 rows sit near the origin while its sections reach
+	// 24 m out); a bare `cxlt` is an empty table (Chair03X: 7 sections, no
+	// row); without either, one row per non-root section at its offset.
+	{
+		const std::string rigid = "o3d 1\nmodel CXLT\nlod 0\npart 0 0 0 0\npart 0 1 0 0\npart 0 0 2 0\n"
+				"cobj 0 0 0 0\ncobj 0 1 0 0\ncobj 0 0 2 0\n";
+		const auto rows = [&](const std::string &name, std::vector<std::array<int32_t, 3>> want) {
+			Threedi3di3 m{};
+			if (threedi_3di3_read(path_of(name, ".3di").c_str(), &m) != 0) {
+				check(false, name + ": read back");
+				return;
+			}
+			bool same = m.collision != nullptr && m.collision->translation_count == want.size();
+			for (size_t i = 0; same && i < want.size(); ++i)
+				for (int k = 0; k < 3; ++k) same = same && m.collision->translations[i].translation[k] == want[i][k];
+			check(same, name + ": CXLT rows");
+			threedi_3di3_free(&m);
+		};
+		round_trip("cxlt-given", rigid + "cxlt 0.5 -0.25 0.125\ncxlt 0.1 0 -0.1\ncxlt 3 4 5\n");
+		// 0.1 * 65536 = 6553.6: WriteCXLT truncates [5fc5b4f6a^ export_3di.cpp].
+		rows("cxlt-given", {{32768, -16384, 8192}, {6553, 0, -6553}, {196608, 262144, 327680}});
+		round_trip("cxlt-empty", rigid + "cxlt\n");
+		rows("cxlt-empty", {});
+		round_trip("cxlt-derived", rigid);
+		rows("cxlt-derived", {{65536, 0, 0}, {0, 131072, 0}});
+		refuses("cxlt-malformed", rigid + "cxlt 1 2\n");
 	}
 
 	// Output is written whole or not at all: a refused build or an unwritable

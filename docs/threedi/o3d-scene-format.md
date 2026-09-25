@@ -72,6 +72,7 @@ import; any other front end may.
 | `cvmesh` | type flags [label] | a volume authored as triangles (the exporter's form): `vv` vertices and `vf` faces follow, and the builder derives its box, planes and seam flags by the OED rule (below). `label` names it in notes |
 | `vv` | x y z | a vertex of the open `cvmesh` |
 | `vf` | a b c | a triangle of the open `cvmesh`, counter-clockwise about its outward normal |
+| `cxlt` | [x y z] | a CXLT row (mission axes, the frame of the `cobj` offsets), in order; `scene` writes them after the collision records. The table is WriteCXLT's, the collision LOD's attach points, truncated to 16.16 (retail rows are the author's helpers, not the section offsets: Oiltnk2X's 15 sit near the origin while its sections reach 24 m out). A bare `cxlt` declares an empty table. Without any `cxlt`, build derives one row per non-root section (every section on a skinned model) at its offset: our rule, the retail row count in 917 of the 958 JO models |
 | `texfile` | name path\|- | written by `scene`: the file a texture name resolves to beside the model, by the runtime's candidate order (`engine/base/resource_index/texture_candidates.h`); `build` ignores it |
 
 Volume `type` is the collidable type (1 `CB` solid, 4 `CL` ladder, 7 `VC`
@@ -138,7 +139,7 @@ models' NaN rows, written as the identity); MTRX translations; PANM
 (`rgb_gen2`, `emissive_type2`, `glass_type2`, `reflect_color2`, always zero in
 the corpus) and generator alpha bytes; a strip naming a material id the model
 lacks; light pad bytes; occlusion `glow_scale`. Values build derives are not
-carried: part `rel`, bounds, CXLT, CMDL, face normal runs and plane
+carried: part `rel`, bounds, CMDL, face normal runs and plane
 distances, tangents. Over the 958 JO models, `build(scene(x))` is the same model as `x`
 (`opennova-3di compare`) for 956; the other two draw with a material id they
 lack.

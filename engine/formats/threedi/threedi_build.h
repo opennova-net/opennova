@@ -162,6 +162,16 @@ struct ThreediBuildModel {
 	std::vector<ThreediUserPoint> user_points;
 	std::vector<std::string> control_registers;
 	std::vector<ThreediBuildCollisionObject> collision;
+	// CXLT (mission axes): the rows WriteCXLT writes, the collision LOD's
+	// attach points in order, truncated to 16.16 [orig: WriteCXLT @ 0x455920;
+	// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp]. The runtime reads them
+	// by row (a palm item's broken pieces pivot on rows 0 and 1). When
+	// `translations_given` is false the builder derives the table by our own
+	// rule, not retail's: one row per non-root section on a rigid model and one
+	// per section on a skinned one, at the section's offset (the retail count
+	// in 917 of 958 JO models; the rows themselves are the author's helpers).
+	bool translations_given = false;
+	std::vector<ThreediBuildVec3> translations;
 	std::vector<ThreediBuildOcclusionRecord> occlusion;
 	// MTRX rows after the identity row 0: the rotation frames a PANM row
 	// selects with matrix_index > 0 (model axes, row-major, p' = p * M; a

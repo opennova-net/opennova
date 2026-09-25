@@ -765,6 +765,19 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				continue;
 			}
 			occ.open = true;
+		} else if (key == "cxlt") {
+			// A CXLT row (mission axes, the frame of the section offsets), in
+			// order; a bare `cxlt` declares the table empty. Any cxlt record
+			// replaces the rows build would derive from the sections.
+			model.translations_given = true;
+			in >> std::ws;
+			if (in.eof()) continue;
+			double p[3];
+			if (!read_doubles(in, p, 3)) {
+				ps.error("cxlt needs x y z (or nothing: an empty table)");
+				continue;
+			}
+			model.translations.push_back(ThreediBuildVec3{p[0], p[1], p[2]});
 		} else if (key == "cobj") {
 			int parent = 0;
 			double o[3] = {0, 0, 0};

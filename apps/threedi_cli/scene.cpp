@@ -359,6 +359,21 @@ void write_collision(Writer &w, const Threedi3di3 &m) {
 	}
 }
 
+// CXLT after the collision records: every row, in order, or a bare `cxlt`
+// when the table is empty but build's derived rule would fill it (retail
+// Chair03X: seven sections, no row).
+void write_translations(Writer &w, const Threedi3di3 &m) {
+	if (m.collision == nullptr) return;
+	const ThreediCollisionModel &c = *m.collision;
+	for (size_t i = 0; i < c.translation_count; ++i) {
+		const int32_t *t = c.translations[i].translation;
+		w.line("cxlt " + f17(t[0] / 65536.0) + " " + f17(t[1] / 65536.0) + " " + f17(t[2] / 65536.0));
+	}
+	const bool skinned = m.header.mesh_type == THREEDI_MESH_SKINNED;
+	const size_t derived = c.object_count == 0 ? 0 : c.object_count - (skinned ? 0 : 1);
+	if (c.translation_count == 0 && derived > 0) w.line("cxlt  # an empty table");
+}
+
 void write_occlusion(Writer &w, const Threedi3di3 &m) {
 	size_t v = 0, p = 0, f = 0;
 	for (size_t o = 0; o < m.occlusion_object_count; ++o) {
@@ -481,6 +496,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	write_lights(w, m);
 	write_occlusion(w, m);
 	write_collision(w, m);
+	write_translations(w, m);
 	threedi_3di3_free(&m);
 	if (!write_output(out_path, w.text.data(), w.text.size())) return 1;
 	for (const std::string &n : w.notes) std::fprintf(stderr, "opennova-3di: note: scene drops %s\n", n.c_str());

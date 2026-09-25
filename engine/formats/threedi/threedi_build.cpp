@@ -577,9 +577,10 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 			out.faces.insert(out.faces.end(), src.faces.begin(), src.faces.end());
 			out.volumes.insert(out.volumes.end(), src.volumes.begin(), src.volumes.end());
 			out.planes.insert(out.planes.end(), src.planes.begin(), src.planes.end());
-			// CXLT: the retail corpus carries one translation per non-root
-			// section on rigid models and one per section on skinned ones.
-			if (oi > 0 || m.skinned) {
+			// CXLT without a given table (threedi_build.h): one row per
+			// non-root section on a rigid model, one per section on a skinned
+			// one, at the section offset.
+			if (!m.translations_given && (oi > 0 || m.skinned)) {
 				ThreediCollisionTranslation t{};
 				t.translation[0] = o.offset[0];
 				t.translation[1] = o.offset[1];
@@ -587,6 +588,14 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 				out.translations.push_back(t);
 			}
 		}
+		if (m.translations_given)
+			for (const ThreediBuildVec3 &p : m.translations) {
+				ThreediCollisionTranslation t{};
+				t.translation[0] = threedi_q16_trunc(p.x);
+				t.translation[1] = threedi_q16_trunc(p.y);
+				t.translation[2] = threedi_q16_trunc(p.z);
+				out.translations.push_back(t);
+			}
 		// Seam flags on the planes of volumes built from triangles: for each
 		// triangle, in section then volume order, its plane's flag is cleared,
 		// then set when the triangle's box shrunk by 0.01 lies inside the box
