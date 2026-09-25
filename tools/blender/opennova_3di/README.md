@@ -63,7 +63,7 @@ F16_LOD0              Empty under the model root, custom property _lod_index = 0
     01 Mesh0          the part's render mesh
     _01 center        helper: the part pivot
     UPG01 ctrlx05     user point: type G, part 01, label ctrlx05 (+Z = facing)
-    LP01              light owned by part 01 (a point or spot light)
+    LP01              light owned by part 01 (a point or spot light, aimed down its -Z)
     CB01-colonly      collision volume on part 01 (a convex mesh)
     CB01a-colonly     the next CB volume on part 01
     VC01-colonly      a vehicle-contact volume
@@ -133,14 +133,17 @@ Materials are `Material_<index>_<SHADER>` (`Material_0_FF_ST_OP`,
 `Material_1_FFP_GLASS`): the name carries the shader, and the material
 panel's Shader field (any tag the engine knows, searchable) renames the
 material. A material with no tag in its name gets the default for its
-textures (`FF_ST_OP` one, `FF_MT_OP` two, `FFP_GLASS` none). Glass shaders
-are glass, `*_LUM` shaders emissive, blending shaders (glass among them) draw
-in the alpha pass, and a bump shader (`VS_PHONGT`, `VS_DOT3DIFF`, ...) gets
-tangents derived from its UVs. With no texture entries, the first image texture node
-is exported as a 32-bit TGA (file names at most 16 characters). A material's
-texture list names every slot instead: slot 1 diffuse, slot 2 the detail
-texture of an `FF_MT` shader (drawn on the mesh's second UV map), 3 and 4
-normal maps.
+textures (`FF_ST_OP` one, `FF_MT_OP` two, `FFP_GLASS` none, which a mesh
+without a material takes too). Glass shaders are glass, `*_LUM` shaders
+emissive, blending shaders (glass among them) draw in the alpha pass, and a
+bump shader (`VS_PHONGT`, `VS_DOT3DIFF`, ...) gets tangents derived from its
+UVs. With no texture entries, the image texture wired to the Principled
+BSDF's Base Color (else the first image texture node) is exported as a
+32-bit TGA named after the image (its first 12 characters, then `.tga`; two
+images may not share a file name). A material's texture list names every
+slot instead: slot 1 diffuse, slot 2 the detail texture of an `FF_MT` shader
+(drawn on the mesh's second UV map; the first is the one Blender renders
+with), 3 and 4 normal maps. Write TGA writes `.tga` entries only.
 
 ## Panels
 
@@ -158,12 +161,13 @@ normal maps.
   part, plus the track frame.
 - **Light properties** on an `LP##` light: the colour generator (style, rate,
   phase or register, end colour), attenuation and the corona / terrain /
-  object light switches.
+  object light switches. A spot light's cone points down the light's -Z, as
+  Blender draws it, and an unrotated light points straight down.
 - **Material properties**: shader (with what it implies), the bullet faces'
-  surface type (metal 14, glass 15, ...) and flags (bullets pass, hit from
-  behind), alpha test, two-sided, the reflection colour, the texture list,
-  and the RGB / alpha / UV generators and texture flipbook. A register-driven
-  flipbook selects its register by name.
+  surface type (metal 14, glass 15, ...) and flags (bullets pass, front only:
+  a bullet from behind passes), alpha test, two-sided, the reflection colour,
+  the texture list, and the RGB / alpha / UV generators and texture flipbook.
+  A register-driven flipbook selects its register by name.
 
 ## Animations
 

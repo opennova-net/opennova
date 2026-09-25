@@ -724,10 +724,13 @@ class Builder:
             p.disable_terrain = bool(l["flags"] & 2)
             p.disable_objects = bool(l["flags"] & 4)
             p.other_flags = l["flags"] & ~0x0F & 0xFF
-            # The light's local Z is its stored axis (straight down for omni
-            # lights), as the ASE light matrix row the retired exporter read.
+            # The light's local -Z is its stored axis (straight down for omni
+            # lights), the way Blender draws a spot light's cone.
             d = self.blender(l["dir"] if l["dir"] else (0.0, 0.0, -1.0))
-            rot = d.to_track_quat("Z", "Y").to_matrix()
+            if abs(d.length - 1.0) > 1e-3:
+                self.note(f"light {i}: its stored axis is {d.length:.4g} long (CmpFire1, the FireBrl barrels); export "
+                          "writes the light's unit axis")
+            rot = d.to_track_quat("-Z", "Y").to_matrix()
             if spot:
                 data.spot_size = math.radians(max(1.0, 2.0 * l["falloff"]))
             name = f"LP{l['part'] + 1:02d}" + dup_suffix(dups, l["part"])
@@ -855,7 +858,7 @@ class Builder:
             p = mats[mi].o3d
             p.surface = surface
             p.face_never_hit = bool(flags & 0x100)
-            p.face_double_sided = bool(flags & 0x800)
+            p.face_front_only = bool(flags & 0x800)
             p.face_other_flags = flags & ~0x901
             if bool(flags & 1) != p.two_sided:
                 self.note(f"material {mi}: its bullet faces' both-sides flag differs from its two-sided flag; "

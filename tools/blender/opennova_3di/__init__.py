@@ -53,7 +53,14 @@ TRACK_TARGETS = [
 # threedi_panm_parameter_is_ctrl_reference); the others carry a phase.
 CTRL_REFERENCE_THRESHOLD = 0x70
 
-_catalog = None
+# The catalog of the executable it was read from: (path, modified time) ->
+# (tables, the reason they are empty or None).
+_catalog = {}
+
+# Blender 4.5 lets a path property take a blend-relative `//` path without
+# warning on every assignment; 4.2 to 4.4 have no such option.
+PATH_OPTIONS = {"ANIMATABLE", "PATH_SUPPORTS_BLEND_RELATIVE"} \
+    if "is_path_supports_blend_relative" in bpy.types.Property.bl_rna.properties else {"ANIMATABLE"}
 
 
 def bundled_cli_path():
@@ -68,18 +75,26 @@ def cli_path(context=None):
     return bundled_cli_path()
 
 
-def catalog():
-    """The CTRL register names, generator style names, shader tags (with their
-    capability words, in the engine's table order), anim slot keys and animation
-    event bits, read once from `opennova-3di catalog` (the engine's own tables;
-    no Python copy)."""
-    global _catalog
-    if _catalog is None:
+def read_catalog():
+    """The catalog entry of the current executable, run once per executable
+    (a new path or a rebuilt file reads again; a missing file is looked for
+    again next time without running anything)."""
+    path = cli_path()
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return ([], {}, [], [], []), f"opennova-3di not found at {path}"
+    if key not in _catalog:
         registers, styles, shaders, slots, triggers = [], {}, [], [], []
+        problem = None
         try:
-            out = subprocess.run([cli_path(), "catalog"], capture_output=True, text=True, timeout=10).stdout
-        except (OSError, subprocess.SubprocessError):
-            out = ""
+            result = subprocess.run([path, "catalog"], capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=10)
+            out = result.stdout
+            if result.returncode != 0:
+                problem = f"opennova-3di catalog failed: {(result.stderr or result.stdout).strip()[:500]}"
+        except (OSError, subprocess.SubprocessError) as e:
+            out, problem = "", f"opennova-3di catalog failed: {e}"
         for line in out.splitlines():
             parts = line.split()
             if len(parts) == 2 and parts[0] == "register":
@@ -92,11 +107,24 @@ def catalog():
                 slots.append(parts[1])
             elif len(parts) == 3 and parts[0] == "trigger":
                 triggers.append((int(parts[1], 16), parts[2]))
-        if not shaders:
-            # no CLI yet: read it again next time
-            return registers, styles, shaders, slots, triggers
-        _catalog = (registers, styles, shaders, slots, triggers)
-    return _catalog
+        if not shaders and problem is None:
+            problem = f"opennova-3di catalog ({path}) printed no shader table"
+        _catalog.clear()
+        _catalog[key] = ((registers, styles, shaders, slots, triggers), problem)
+    return _catalog[key]
+
+
+def catalog():
+    """The CTRL register names, generator style names, shader tags (with their
+    capability words, in the engine's table order), anim slot keys and animation
+    event bits, read from `opennova-3di catalog` (the engine's own tables; no
+    Python copy). Empty tables when it failed: catalog_error() says why."""
+    return read_catalog()[0]
+
+
+def catalog_error():
+    """Why catalog() is empty, or None."""
+    return read_catalog()[1]
 
 
 def search_registers(self, context, edit_text):
@@ -239,7 +267,7 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     # On a model root (the Empty above a model's LOD roots): one .3di.
     model_name: StringProperty(name="Model name", default="",
                                description="GHDR name, 15 chars max; empty: the output file's name")
-    output_path: StringProperty(name="Output .3di", subtype="FILE_PATH", default="//model.3di")
+    output_path: StringProperty(name="Output .3di", subtype="FILE_PATH", default="//model.3di", options=PATH_OPTIONS)
     poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
                                     description="The render LOD whose part meshes also become the bullet faces (the OED "
                                                 ".3dp poly_collision_lod); 0 = the most detailed")
@@ -322,11 +350,15 @@ class O3DMaterialProps(bpy.types.PropertyGroup):
                          description="Bullet-face poly type: 14 metal, 15 glass, 18 heavy metal, 13 wood, "
                                      "12 stone, 16 cloth, 17 foliage, 1 object")
     # The bullet faces' CFAC flags besides "both sides" (1), which follows Two
-    # sided: OED derived both from one render attribute.
+    # sided: OED derived both from one render attribute. A projectile's face
+    # test skips a 0x100 face, and one with 0x800 but not 1 stops only a
+    # bullet crossing it from the front [orig: Physics_RaycastAgainstBoneCollision
+    # @ 0x4e4cb0, the 0x800 test @ 0x4e5139; runtime/world/collision_query.cpp].
     face_never_hit: BoolProperty(name="Bullets pass", default=False,
                                  description="Bullets never hit these faces (CFAC flag 0x100; retail rotor blades)")
-    face_double_sided: BoolProperty(name="Hit from behind", default=False,
-                                    description="Bullets hit these faces from either side (CFAC flag 0x800)")
+    face_front_only: BoolProperty(name="Front only", default=False,
+                                  description="Bullets hit these faces only from the front; one coming from behind "
+                                              "passes through (CFAC flag 0x800; Two sided overrides it)")
     face_other_flags: IntProperty(name="Other face flags", default=0, min=0,
                                   description="CFAC flag bits besides 1, 0x100 and 0x800 (OED wrote 2 and 0x400)")
     alpha_test: BoolProperty(name="Alpha test", default=False)
@@ -393,6 +425,7 @@ class O3DSceneProps(bpy.types.PropertyGroup):
         ("X", "+X", "The model faces +X"),
     ], default="-Y")
     cli_path: StringProperty(name="3DI executable", subtype="FILE_PATH", default=bundled_cli_path(),
+                             options=PATH_OPTIONS,
                              description="Uses the bundled opennova-3di automatically. Choose a different executable "
                                          "to override it; clearing this field also uses the bundled executable")
     write_textures: BoolProperty(name="Write textures", default=True)
@@ -427,6 +460,10 @@ class O3D_OT_add_texture(bpy.types.Operator):
     bl_idname = "opennova_3di.add_texture"
     bl_label = "Add Texture"
 
+    @classmethod
+    def poll(cls, context):
+        return getattr(context, "material", None) is not None
+
     def execute(self, context):
         t = context.material.o3d.textures.add()
         t.slot = 1 if len(context.material.o3d.textures) == 1 else 2
@@ -437,6 +474,10 @@ class O3D_OT_remove_texture(bpy.types.Operator):
     bl_idname = "opennova_3di.remove_texture"
     bl_label = "Remove Texture"
     index: IntProperty()
+
+    @classmethod
+    def poll(cls, context):
+        return getattr(context, "material", None) is not None
 
     def execute(self, context):
         context.material.o3d.textures.remove(self.index)
@@ -914,14 +955,16 @@ class O3D_PT_material(bpy.types.Panel):
         layout = self.layout
         layout.prop(p, "shader")
         tag = p.shader
-        if tag:
-            caps = export.shader_flags(tag)
-            known = any(name.lower() == tag.lower() for name, _ in catalog()[2])
+        table = catalog()[2]
+        if not table:
+            layout.label(text=catalog_error() or "No shader table", icon="ERROR")
+        elif tag:
+            known = next((flags for name, flags in table if name.lower() == tag.lower()), None)
             traits = [label for bit, label in ((export.FLAG_BLENDING, "alpha pass"), (export.FLAG_GLASS, "glass"),
-                                               (export.FLAG_EMISSIVE, "emissive"), (0x8000, "tangents"),
-                                               (export.FLAG_SKINNED, "skinned")) if caps & bit]
-            layout.label(text=(", ".join(traits) if traits else "opaque") if known else
-                         "Not in the engine's shader table", icon="NONE" if known else "ERROR")
+                                               (export.FLAG_EMISSIVE, "emissive"), (export.FLAG_TANGENT, "tangents"),
+                                               (export.FLAG_SKINNED, "skinned")) if (known or 0) & bit]
+            layout.label(text=(", ".join(traits) if traits else "opaque") if known is not None else
+                         "Not in the engine's shader table", icon="NONE" if known is not None else "ERROR")
         else:
             layout.label(text="No shader in the name: export picks one by texture count")
         box = layout.box()
@@ -930,7 +973,7 @@ class O3D_PT_material(bpy.types.Panel):
         row.prop(p, "surface")
         row = box.row()
         row.prop(p, "face_never_hit")
-        row.prop(p, "face_double_sided")
+        row.prop(p, "face_front_only")
         box.prop(p, "face_other_flags")
         row = layout.row()
         row.prop(p, "alpha_test")
@@ -942,7 +985,7 @@ class O3D_PT_material(bpy.types.Panel):
         row.prop(p, "other_flags")
         layout.prop(p, "reflect")
         box = layout.box()
-        box.label(text="Textures (empty: the first image node, slot 1)")
+        box.label(text="Textures (none: the image wired to Base Color, slot 1)")
         for i, t in enumerate(p.textures):
             row = box.row()
             row.prop(t, "name", text="")

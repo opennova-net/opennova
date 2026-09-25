@@ -13,21 +13,26 @@ Names are ASCII. Numeric identities are two digits and 1-based in the name
 part). A leading `!` makes an object ignored. Blender's own `.001`
 duplicate suffixes are stripped before classification (object names are
 unique per `.blend`, so LOD1's `PN01` is `PN01.001`); two objects that
-classify to the same identity inside one LOD are an error.
+classify to the same identity inside one LOD are an error. Export names every
+other object it leaves out (an Empty that only groups objects is left alone),
+and user points, lights, collision volumes and occlusion meshes outside the
+primary LOD. A mesh Blender does not evaluate (it or its collection is disabled
+in viewports, or its collection is excluded) exports as its base mesh, so
+export refuses one that carries modifiers or shape keys.
 
 | Scene element | Name form | Meaning |
 | --- | --- | --- |
 | Model root | any name (the Empty above the LOD roots) | one model, one `.3di`: its model name, output path and collision LOD are properties. A scene holds any number of models (a first-person gun and its arms, a hull and its turret); each exports in its root's own frame, so placing or mounting a model does not change it |
 | LOD root | any name, custom property `_lod_index` | render LOD `_lod_index` (0 = primary); its threshold and RMDL type (`gnrc`, `bldg`, `door`, `veh0`) are properties. A root with no parts is an empty LOD (retail ships them) |
-| Part | `PN##` (Empty) | 3DI subobject `##`; its origin is the pivot. A rotated `PN##` is a PANM rotation frame (an MTRX row): its tracks turn about the empty's axes (Dblkhwk1's canted tail rotor) |
-| Part mesh | `## Mesh<n>` | mesh `<n>` of part `##` (sits under its `PN##`); a second UV map is the detail stage's UV1 |
+| Part | `PN##` (Empty) | 3DI subobject `##`; its origin is the pivot. A rotated `PN##` is a PANM rotation frame (an MTRX row): its tracks turn about the empty's axes (Dblkhwk1's canted tail rotor). A mirrored one (a negative scale) is a reflection frame, whose tracks turn the other way; retail stores five (dtaxi1, PKM_1st, ...) |
+| Part mesh | `## Mesh<n>` | mesh `<n>` of part `##` (sits under its `PN##`); the UV map Blender renders with is the base UV0, the first other one the detail stage's UV1 |
 | Part center | `_## center` | part `##`'s transform center (pivot) |
 | Attachment | `~PPx attach` | sits under a child part: its parent is part `PP`; `x` (a, b, ...) tells siblings apart |
 | User point | `UP<c>## <label>` | USRP point: type letter `c` (`G` 71 gameplay, `S` 83 effect), part `##` (`00` = none), label = the USRP name (no label: `Noname`); faces along its local +Z. Its export-order property keeps the USRP order (seats and effect points are scanned in it) |
 | Light | `LP##[a..]` (a light object) | a LGHT light owned by part `##` (`01` the root, as `classify_name` parsed it); a point light is omni, a spot light a cone about its local +Z. Its colour is the start colour; the generator, attenuation and flags are properties |
 | Bone | `BN##` (Armature bone) | part `##` of a skinned model: the head is the pivot, the parent bone the part parent; `BN##` vertex groups carry the weights (a weight-0 membership keeps a vertex whose weights are all zero, as dM1A1's LOD 3 stores them). Its PANM tracks, flags and track frame (the MTRX row: a rotation of the model's axes) are bone properties |
 | Skinned mesh | `## Mesh<n>` (under the Armature) | geometry authored on part `##`. Every skinned strip is stored on the root, and each part keeps the bounds of what is authored on it. `##` is a bone (dM1A1's hull: `01 Mesh0` on `BN01`, with each wheel's own geometry on its bone in the collision LOD) or a mesh part numbered after the bones: parent 0, pivot = the mesh origin (ArmsG: 37 bones, then `38 Mesh0`) |
-| Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` (any tag in the engine's shader table; the add-on's shader field renames the material). Without a tag, OED's default for the material's texture maps: `FF_ST_OP` for one, `FF_MT_OP` for two, `FFP_GLASS` for none (`VS_SKBASIC`, `VS_SKGLASS` on a skinned model). Glass, emissive and the alpha pass follow the shader |
+| Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` (any tag in the engine's shader table; the add-on's shader field renames the material). Without a tag, OED's default for the material's texture maps: `FF_ST_OP` for one, `FF_MT_OP` for two, `FFP_GLASS` for none (`VS_SKBASIC`, `VS_SKGLASS` on a skinned model); a mesh without a material takes the no-map default too. Glass, emissive and the alpha pass follow the shader |
 
 ## Collision volumes
 
