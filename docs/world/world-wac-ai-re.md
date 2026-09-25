@@ -7323,10 +7323,24 @@ WHEEL, CHUNK_S/M/L, ROCK_S/M/L, CHUNKNP_S/M/L, CACTUS_, CHUNKSF_M — the
 `DeathPieceType` mirror in engine/runtime/world carries the full decoded constants and
 resolved effect/sound names), rolls the row probability, allocates from the
 256x180-B ring `g_death_piece_pool @ 0x26BAC58`
-(`DeathPiece_AllocSlot @ 0x57b4f0`, ex `SoundEmitter_AllocSlot`), renders ONLY
-its own section (mask piece[31] excludes every other), spawns AT the section's
-center (the render section-row dwords 14..16 through the entity orientation
-matrix `@ 0x4938bf-0x493900`), budgets `rand % lifetime + 1` bounces (floor
+(`DeathPiece_AllocSlot @ 0x57b4f0`, ex `SoundEmitter_AllocSlot`), starts in the
+wreck's live pose (corrected 2026-09-25): entity+4..+0x18 (position, BAM heading,
+pitch, roll) are copied into piece+4..+0x18 `@ 0x4936be..0x4936de` (heading and
+pitch then spin, roll stays); it stores the piece MODEL's bound radius (model+0x14;
+the stack slot read `@ 0x4936a7..0x4936ae` holds the model pointer since
+`@ 0x4934b6` / `@ 0x4934bf`, not the entity) at piece+0x84 and def+0x1BC at
+piece+0x88 unless zero (else 1.0, `@ 0x4936f1..0x493708`), collapses every other
+LOD-0 section of the piece model (piece+0x7C, `@ 0x493889..0x4938b0`), and spawns
+AT its section's COBJ centre: the model+0xB0 collision block's +0x6C array, the
+108-B runtime row's +0x38..+0x40 (`@ 0x4938b2..0x4938da`, the array read
+`@ 0x4938bf`), through the entity orientation matrix entity+0xB4 (rebuilt at entry
+from the live Euler triple and the entity scale +0x158, else def+0x1B8 unless the
+entity is a building, `@ 0x493455..0x4934ac`) and added to the piece position
+(`@ 0x4938eb..0x493900`). The COBJ centre is the section's render-object `abs` in
+the model's own axes: COBJ (x, y, z) = (abs.z, -abs.x, abs.y) (witnessed on
+`Cboat01X.3di`'s nine sections). (Until 2026-09-25 this read "spawns AT the
+section's center, the render section-row dwords 14..16", and the port used the
+render-object centres in the render axes.) It budgets `rand % lifetime + 1` bounces (floor
 lifetime/8), attaches the row trail effect + looped sound, and stamps the
 spawned-section mask into entity+0x138 (`1 << section`, an x86 `shl` that
 wraps the count mod 32).
@@ -7364,6 +7378,39 @@ scorch router with id 7 (`@ 0x492fdf..0x492fec`) before the final effect/sound.
 `DeathPieceSim::tick` now preserves that gate and call order; the focused
 `destruction` ctest pins scorch bounds/CRT texture selection, cactus
 suppression, bounce silence, and underwater-free silence.
+
+**The piece draw (witnessed and PORTED 2026-09-25, "Draw every death piece as its
+husk section, spun, at its own level").** The pieces draw with the frame's
+entities: `Terrain_CollectVisibleEntities @ 0x5c91bc` -> `collect_visible_minimap_slots
+@ 0x57b560` (misnamed: the death-piece collect), then `Terrain_RenderSceneWithReflection
+@ 0x5c9575` -> `update_terrain_lod_levels @ 0x57b830` (misnamed: the piece render walk)
+-> `Entity_BuildBoneTransformMatrices_0 @ 0x57b690` (misnamed: the section draw); the
+reflection pass runs the same pair `@ 0x5c85b7` / `@ 0x5c85c1` at water detail >= 2.
+The collect keeps a live slot (piece+0 nonzero) whose |dx| and |dy| to the eye are
+within radius + `Env_FogDistCurrent` (`jg` skips, `@ 0x57b5b4..0x57b5de`), whose view
+depth is under radius + fog (`jge` skips, `@ 0x57b607`) and that the viewport clip
+admits (`@ 0x57b614`), recording the projected radius (`dword_A784F0`). The render walk
+scales it by the detail term alone, `detail * 0.33 + 0.34` (no width normalization, no
+detail-3 substitution; 1.33 on the shipped profile, `@ 0x57b831..0x57b84a`), draws
+nothing at or under 0.75 px (`@ 0x57b87b`) and picks the level from the model's
+thresholds: level 0 above model+0x40 or for a one-level model, 1 above +0x44 with two
+levels, 2 above +0x48 with three, else 3, a level past the count clamped to the last
+(`@ 0x57b882..0x57b8ca`); a three-level model under its third threshold keeps level 3,
+and its empty mesh slot draws nothing (`@ 0x57b6bc`). The section draw takes the first
+section whose piece+0x7C bit is clear below the LEVEL's section count
+(`@ 0x57b6c5..0x57b6f4`), builds `EulerScale(piece pose, ftol(scale * 65536)) *
+T(-that section's COBJ centre)` (`@ 0x57b6f6..0x57b759`; the plain EulerScale when
+piece+0x7C is zero), gives every section that matrix and collapses each masked one
+(matrix[15] = 0, `@ 0x57b7d4..0x57b7e7`), and submits the level mesh with 0x20 unless the
+piece is strictly above the water plane (`@ 0x57b7fb..0x57b80e`). `sub_57B2E0 @ 0x57b2e0`,
+the LOD_FRAC name-table zeroing the render walk calls first, returns at once (its first
+entry's name is nonempty): a dead call, not reproduced. Port:
+`engine/runtime/world/death_piece_draw` (`OcclusionWorld::collect_death_piece_draws`,
+`death_piece_draw`), `renderer::death_piece_lod_scale` / `death_piece_lod_level`, and the
+Godot `DestructionPresenter` (one piece model per slot, the frame's draws applied from
+the occlusion leg, undrawn pieces hidden); ctest `death_piece_draw`, `destruction`,
+`present_passes`; GUT `destruction_present_pass_test`
+(`test_piece_draw_shows_one_section_at_the_piece_position`).
 
 ### 24.5 Death sounds + the wreck effect banks
 
@@ -7536,7 +7583,7 @@ the FFI structs.
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
 | D-ITEM-3 | FIXED 2026-09-23: blast/shot section marking plus material-energy continuation; the prior lawr/fgrenade-only interpretation was incorrect (§15.8) | @0x4E6C5E..0x4E6E6B; @0x4E9070; @0x4E9390 | destruction covers blast flags and repeated sounds; projectile_combat covers glass survival, energy exhaustion and the next obstruction. |
-| D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector. The retail piece draw (collector, level pick, hidden-section matrix) and the port plan are witnessed in §39.3 (2026-09-24) |
+| D-ITEM-4 | Presentation FIXED 2026-09-25: every death piece draws its piece model (the loaded huskFinal model, else the husk model) showing only its own section at its own level, spun from the wreck's pose, with the explosion glow (§24.4). Open: one world-local PRNG stream stands in for the three retail streams | `Entity_SpawnDeathPieces @ 0x493400`; `collect_visible_minimap_slots @ 0x57b560`; `update_terrain_lod_levels @ 0x57b830`; `Entity_BuildBoneTransformMatrices_0 @ 0x57b690`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | ctest `death_piece_draw` + `destruction`; GUT `destruction_present_pass_test`. The PRNG stream leg stays OPEN |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), and the S2C 0x26/0x2F/0x21 wire emits. Narrowed 2026-09-22: the type-1 leg is the knife kill zone (ported, §24.1), the occupant damage scale is ported in the blast leg, and `g_destroy_buildings` was already ported (`destruction::test_multiplayer_destroy_buildings_rule`). Narrowed 2026-09-23: the medic (type 3) queue leg's heal is ported (`Server_RouteMedicInteractions`, `GameEvent_HealPlayer @ 0x50de30`, §38.10). Carried 2026-09-23: `Entity_UpdateVehicleWreck @ 0x445500`'s hit-record write (the call @ 0x445936) and `Entity_KillBySlotId @ 0x42BCE0`'s section store (@ 0x42BD47) have no port; the hit record's class-callback legs lack the ammo +72 burn emitter and the 173 clip (the live round-hit path lacks them too); the item class-callback dispatch keys on `Entity::is_ai_capable` as the stand-in for a brain-class row, so gnrc 104652, stng 101906, rokt 104502 and the flags 104091/104093/104095 get no item callback; and the vehicle dying enter still kills the addeweap emplacement children, a list retail's child loop (@ 0x467B90..0x467BCC) does not walk, and clears their attacker (`destruction_test::test_vehicle_death_kills_authored_children`) | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eaddd`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | FIXED: all #645 deferred item classes, cohort clocks, shared fade/ambient/scoring and ordered 0x21/0x26/0x12 effects are ported (§24.3a/b) | The class table selects event and motor; gnl2/barrel retain requested explosion counts and SP PRNG history | Invalid target/model/section data is bounded as documented in §24.3b; the uninitialized SP shrapnel pointer is refuted |
@@ -14031,42 +14078,18 @@ radius (`@ 0x5c8eca`), so riders walking their own RLOD thresholds is retail
   materials, fog and frame slot, and the distortion pass (§25.3): D-AI-12 (a), (b), (c),
   (g) FIXED.
 - The impact scars fog toward the scene fog colour (§24.9).
+- The death-piece meshes (D-ITEM-4's presentation legs) are ported on 2026-09-25, after
+  this section's first landing (§24.4, "Draw every death piece as its husk section, spun,
+  at its own level"). The open question the first landing carried is settled:
+  piece+0x84 is the piece MODEL's bound radius, not the entity's pitch, so a flat or
+  nose-down wreck's pieces are not culled. D-ITEM-4 keeps only its PRNG-stream leg.
 - The effect groups' building-section gate (the descriptor's owner tag and blink hits at
   spawn) is recorded with the particle system:
   [ptl-format-re.md](../particles/ptl-format-re.md#rendering-parity-pass-2026-09-24).
 
 ### 39.3 Open after the 2026-09-24 pass
 
-1. **Death-piece meshes (D-ITEM-4).** Retail's draw, witnessed for the slice:
-   `collect_visible_minimap_slots @ 0x57B560` (misnamed; the death-piece visible collector)
-   walks the 256 piece slots (180 B, pool `@ 0x26BAC58`): active = piece+0 (the render
-   object: entity huskFinal +0x38, else husk +0x34, `@ 0x493695..0x4936A3`; huskFinal
-   first, unlike the husk swap), fog box `|dx|, |dy| <= r + Env_FogDistCurrent`
-   (`@ 0x57B5B6..0x57B5DE`), view depth < r + fog, `Viewport_TransformAndClipPoint(r) != 1`;
-   it records the projected radius (viewport+0x190 = `dword_A784F0`).
-   `update_terrain_lod_levels @ 0x57B830` (misnamed; the piece draw) scales it by the
-   detail factor (`dword_24D2048 * flt_7C59B4 + flt_7D76CC`), skips `<= 0xC000` (the
-   0.75 px floor, `renderer::kObjectLodSubPixelCullQ16`), picks the level from the model's
-   RLOD pixel thresholds (+0x40/+0x44/+0x48, count +0x10) and calls
-   `Entity_BuildBoneTransformMatrices_0 @ 0x57B690` (misnamed; the section draw): the
-   first section NOT in piece+0x7C (the spawn ORs every other section's bit `@ 0x4938A4`)
-   draws with `M = EulerScale(piece yaw/pitch/roll, piece+0x88 scale, piece pos) *
-   T(-section centre +0x38..0x40 of the 108-B section row)`; every other section's matrix
-   gets w = 0 (`@ 0x57B7E7`); `Render_SubmitEntity` with `kSubmitBoneAlphaBelow` (0x20)
-   when piece z <= `Env_WaterHeightFixed`. The spawn (`Entity_SpawnDeathPieces @ 0x493400`)
-   copies the entity's position AND yaw/pitch/roll BAMs into piece+4..+0x18
-   (`@ 0x4936BE..0x4936DE`); the port starts heading and pitch at 0 and has no roll
-   (`engine/runtime/world/destruction.cpp`). **Open question for a grill:** the projection
-   and cull radius piece+0x84 is stored from entity+0x14 (`@ 0x4936A7..0x4936AE`), which the
-   IDB types as the entity's Pitch BAM; read literally, a flat or nose-down wreck projects
-   radius <= 0 and its pieces never pass the 0.75 px floor. Confirm against a retail
-   capture before porting the radius. Port plan: the engine rows carry roll, the
-   huskFinal-first model choice, the hidden-section mask and the radius; the occlusion frame
-   (which already ports `Viewport_TransformAndClipPoint`) collects the pieces and picks the
-   level; `DestructionPresenter` keeps one `ObjectModel` per slot (the placer's
-   `build_model_from_graphic`, `set_destroyed_section_mask`, a forced level, transform =
-   `bms_to_godot_basis(pitch, 90 - heading, roll) * scale` about the (c.y, c.z, c.x) pivot).
-2. **The NVG IR laser (D-AI-12f).** `Entity_RenderNVGLaserBeam @ 0x5C6090` over the
+1. **The NVG IR laser (D-AI-12f).** `Entity_RenderNVGLaserBeam @ 0x5C6090` over the
    visible-person list (`sub_5C63B0 @ 0x5C63B0`, 20-B rows `@ 0x2984890`): gates
    `@ 0x5C609A..0x5C60E6` (entity+0x157 == 0, the equipped ADM def (+0x298) flag
    0x40000000, `g_NVGActive`, `g_camera_mode == 0`, not the local player); origin and
@@ -14085,10 +14108,10 @@ radius (`@ 0x5c8eca`), so riders walking their own RLOD thresholds is retail
    non-local entities (only the local player's action pose is ported), the visible-person
    list feed, and the NVG laser material as a scene-overlay shading (the tracer vertex with
    two coordinate sets; SRCALPHA/ONE, alpha `D.a (1 - T0.a)(1 - T1.a)`).
-3. **The org1 mounted rider's held weapon (D-WPN-32).** The org1 mounted fire-request window
+2. **The org1 mounted rider's held weapon (D-WPN-32).** The org1 mounted fire-request window
    copies the parent vehicle's +0x2B0 into the rider `@ 0x4bf4f4..0x4bf4fa`, so a seat-1
    rider would draw it; unported.
-4. **The vehicle REFLECTABLE bit.** `Entity_InitFromModel @ 0x40E208..0x40E20A` sets Flags
+3. **The vehicle REFLECTABLE bit.** `Entity_InitFromModel @ 0x40E208..0x40E20A` sets Flags
    0x400 on every vehicle (ItemDefType 1); the sim keeps it as an item-type trait, not in
    `Entity::engine_flags`. The slot march reads it (`world::PF_SLOT_MARCH_OFFSET_*`, joiner
    rows through `inmatch::replica_entity_flags_dword`); any other consumer that streams or
