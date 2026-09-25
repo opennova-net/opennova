@@ -1992,7 +1992,7 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 						return impl_->far_material_for(command);
 					});
 			impl_->publish_world_draw_list(effect, impl_->far_distortion_only(draw_list),
-					view_camera.position, view_camera.forward, p_time_ms);
+					view_camera.position, view_camera.forward, p_time_ms, view_thermal);
 			return;
 		}
 		impl_->publish_world_draw_list(effect, draw_list, view_camera.position,
