@@ -215,10 +215,8 @@ the same text transport, the same add-on.
   retail's own exporter measured follow a rule nothing has witnessed, so the
   derivation lands within a few centimetres of the shipped numbers and a clip
   that must keep them carries them; `flags` bit 3 (73 retail clips) is carried
-  and unread; a bone that keys sparsely imports as a dense Blender channel, so
-  a re-export densifies it (`DVFLEE1E.BAD` alone); and a RIGID model's parts --
-  a first-person weapon's own clips -- are not authorable in Blender yet,
-  though the CLI reads and writes those sets.
+  and unread; and a bone that keys sparsely imports as a dense Blender channel,
+  so a re-export densifies it (`DVFLEE1E.BAD` alone).
 - Known model gaps, each reported rather than carried: retail's own tool is not
   witnessed, so its seam flags and tangent values match the OED rules only
   where that tool agreed with ModSuperOed; CTRL registers nothing references;
