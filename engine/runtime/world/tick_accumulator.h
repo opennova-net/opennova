@@ -18,17 +18,14 @@ constexpr int32_t ticks_from_ms(int64_t ms) {
 
 // How banked wall-clock becomes logic ticks.
 //
-// WallClock is the SHELL's bank and the default: bank seconds, drain them in
-// kTickDt quanta, and clamp a hitch's backlog to kMaxCatchupTicks — dropping
-// the remainder so a load stall cannot spiral catch-up into the following
-// frames. It is frame-rate independent and drops a > 500 ms backlog.
-//
 // RetailMainLoop is the witnessed retail bank [orig: Game_MainLoop @0x52B630]:
-// its 7/8 EMA low-pass filters the banked time, so a stall is followed by a
-// geometric fast-forward over the next frames instead of a dropped backlog.
-// The dedicated host (apps/nw_server) selects it. Flipping the shell to it
-// changes player-visible pacing after every load or shader hitch, so that is
-// a maintainer decision, not a default.
+// its 7/8 EMA low-pass filters the banked time, so a long frame's backlog is
+// paid back over the next frames instead of as one burst of catch-up ticks.
+// The game (Simulation) and the dedicated host (apps/nw_server) select it.
+//
+// WallClock is the accumulator's default, kept for the focused tests: bank
+// seconds, drain them in kTickDt quanta, and clamp a hitch's backlog to
+// kMaxCatchupTicks, dropping the remainder.
 enum class TickBankPolicy : uint8_t {
 	WallClock,
 	RetailMainLoop,

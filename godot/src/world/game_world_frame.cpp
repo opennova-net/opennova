@@ -297,6 +297,9 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 		input.instantiate();
 	}
 	input->set_delta_seconds(p_delta);
+	input->set_since_render_seconds(last_post_draw_usec_ != 0
+			? static_cast<double>(Time::get_singleton()->get_ticks_usec() - last_post_draw_usec_) / 1e6
+			: -1.0);
 	input->set_camera_sample(p_camera_pos, -p_camera_xform.basis.get_column(2), true);
 	frame_camera_pos_ = p_camera_pos;
 	frame_camera_xform_ = p_camera_xform;
@@ -305,6 +308,10 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 	ctx.input = input;
 	run_leg_table(kFrameLegs, kFrameLegCount, ctx, true);
 	return ctx.outcome;
+}
+
+void GameWorld::on_frame_post_draw() {
+	last_post_draw_usec_ = Time::get_singleton()->get_ticks_usec();
 }
 
 Error GameWorld::debug_refresh_render_pose(Camera3D *p_camera) {

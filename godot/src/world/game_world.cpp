@@ -58,6 +58,11 @@ void GameWorld::_ready() {
 	// preload wait the session drive steps (switched on by load_as_joiner,
 	// off when the preload ends).
 	set_process(drive_.is_preload_pending());
+	RenderingServer *rs = RenderingServer::get_singleton();
+	const Callable post_draw = callable_mp(this, &GameWorld::on_frame_post_draw);
+	if (rs != nullptr && !rs->is_connected("frame_post_draw", post_draw)) {
+		rs->connect("frame_post_draw", post_draw);
+	}
 	terrain_ = Object::cast_to<Terrain>(get_node_or_null(NodePath("Terrain")));
 	env_ = Object::cast_to<MissionEnvironment>(get_node_or_null(NodePath("MissionEnvironment")));
 	water_ = Object::cast_to<Water>(get_node_or_null(NodePath("Water")));

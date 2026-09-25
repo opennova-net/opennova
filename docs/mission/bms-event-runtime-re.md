@@ -254,8 +254,16 @@ RENDER callback once per outer iteration (`Render_ProcessMainSceneFrame @0x5ca0f
 descriptor's +0x28 slot @0x52bac6) at the **variable render rate**. So the simulation is
 **decoupled from rendering**: a long frame runs **multiple** sim ticks (catch-up), a short frame
 runs **zero**; the accumulator is clamped at **500 ms / ~31 ticks** (`0x1F40` units @0x52b83e)
-against the spiral of death (plus a 7/8 frame-time EMA @0x52b85b and an optional vsync `Sleep`
-cap @0x52b8b2 that gate only render). There is **no inter-tick render interpolation** — the
+against the spiral of death. Below the clamp the bank itself is low-passed in place,
+`(7*g_frameTimeSmoothedFp4 + bank + 4) >> 3` (@0x52b85b), before the drain, so a long frame's
+backlog is paid back over the following frames rather than in one burst; the optional
+`lock_framerate` `Sleep(1)` cap (@0x52b8a6..0x52b8b2) is the only wait. The mission start never
+banks the load (the "Game Loop" mode @0x82f340 runs `Game_StartMission` as its initialize and
+the clock is read after it, @0x52b75c), and `Game_StartMission` arms `dword_24C1174 = 3`
+(@0x525e1f): each of the next three rendered frames decrements it and raises `dword_24E1F30`
+(`Render_ProcessMainSceneFrame` @0x5caeff..0x5caf0e), and `Game_MainLoop` then re-reads the
+clock after that frame's render (@0x52bac8..0x52bad2), so their render time is never banked
+either. There is **no inter-tick render interpolation** — the
 render callback reads current entity state. (The integer `62` in `Game_ProcessMainFrame`'s
 per-second counters is the engine's rounding of the 16 ms / 62.5 Hz quantum.)
 
@@ -359,8 +367,10 @@ gameplay speed to the render frame rate (the shared per-tick infantry motor, `ti
 integrates a fixed displacement per tick, so locomotion/animation ran fast at high FPS and slow
 at low FPS).
 
-`inmatch::Session::advance(FrameInput)` now owns the original's accumulator: it banks `delta`,
-runs `floor(accum / (1/62.5))` single ticks (clamped to 31, the 500 ms cap), and
+`inmatch::Session::advance(FrameInput)` now owns the original's accumulator: it banks `delta`
+through the retail bank (`world::TickAccumulator`'s `RetailMainLoop` policy: the 7/8 smoother,
+the 500 ms clamp, the 4 ms quanta; the mission-start re-base banks the time since the last
+render instead, from the shell's `frame_post_draw` stamp), runs the due single ticks, and
 the Godot presentation owner presents **once** after the batch — sim at a
 constant 62.5 Hz, render decoupled at the render frame rate, no inter-tick
 interpolation (faithful to §1.6). `MissionRoot.tick()` survives as the

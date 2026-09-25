@@ -91,6 +91,10 @@ struct CameraSample {
 
 struct FrameInput {
 	double delta_seconds = 0.0;
+	// Wall-clock since the previous frame finished rendering (its present),
+	// or negative when the shell has not sampled one. Banked instead of
+	// delta_seconds on a frame after a mission-start frame (Session::advance).
+	double since_render_seconds = -1.0;
 	CameraSample camera;
 	InputPacket player;
 	int32_t viewport_height = 0;
@@ -246,9 +250,10 @@ public:
 	RoleKind kind() const { return kind_; }
 	Role *role() const { return role_; }
 	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
-	// How advance() banks wall-clock into ticks. The shell keeps the default
-	// WallClock bank; the dedicated host selects the retail main-loop bank
-	// (world::TickBankPolicy). Selecting a policy drops the banked time.
+	// How advance() banks wall-clock into ticks. The game and the dedicated
+	// host both select the retail main-loop bank (world::TickBankPolicy);
+	// WallClock stays the accumulator default. Selecting a policy drops the
+	// banked time.
 	void set_tick_bank_policy(world::TickBankPolicy policy) { accumulator_.set_policy(policy); }
 	world::TickBankPolicy tick_bank_policy() const { return accumulator_.policy(); }
 	const SessionError &last_error() const { return last_error_; }
@@ -289,6 +294,11 @@ private:
 	TickObserver *observer_ = nullptr;
 	State state_ = State::Unloaded;
 	world::TickAccumulator accumulator_;
+	// The mission-start frames still to draw (dword_24C1174) and whether the
+	// last one re-based the clock after its render (dword_24E1F30).
+	static constexpr int32_t kStartRebaseFrames = 3;
+	int32_t start_rebase_frames_ = 0;
+	bool rebase_clock_ = false;
 	InputPacket pending_input_;
 	CameraSample latest_camera_;
 	SessionError last_error_;

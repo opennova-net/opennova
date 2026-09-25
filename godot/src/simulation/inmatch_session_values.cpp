@@ -39,6 +39,10 @@ double MissionFrameInput::get_delta_seconds() const {
 	return value_.delta_seconds;
 }
 
+void MissionFrameInput::set_since_render_seconds(double p_seconds) {
+	value_.since_render_seconds = p_seconds;
+}
+
 void MissionFrameInput::set_camera_sample(const Vector3 &p_position,
 		const Vector3 &p_forward, bool p_listener_valid) {
 	value_.camera.position[0] = p_position.x;

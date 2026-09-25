@@ -502,6 +502,9 @@ public:
 	// The bound signal targets.
 	void on_runtime_effects(const Array &p_effects);
 	void on_runtime_fixed_tick(int p_logic_tick);
+	// RenderingServer frame_post_draw: stamps when the frame finished
+	// rendering, the clock a mission-start frame re-bases to.
+	void on_frame_post_draw();
 	void on_runtime_simulation_restarted();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
 	void on_frame_stats_capture_changed(bool p_active);
@@ -769,6 +772,8 @@ private:
 	Vector3 frame_camera_pos_;
 	Transform3D frame_camera_xform_;
 	double frame_delta_ = 0.0;
+	// Time::get_ticks_usec() at the last frame_post_draw (0: none yet).
+	uint64_t last_post_draw_usec_ = 0;
 	bool frame_probe_enabled_ = false;
 	bool frame_stats_on_ = false;
 	bool frame_timing_ = false;

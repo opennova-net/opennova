@@ -180,6 +180,34 @@ int main() {
 				"retail bank: the frame after a stall fast-forwards")) return 1;
 	}
 
+	// The mission start never banks the load, and the three frames drawn
+	// after it never bank their own render: each following frame banks only
+	// the time since the previous render [orig: Game Loop mode @0x82F340 ->
+	// Game_StartMission @0x525e1f; Render_ProcessMainSceneFrame
+	// @0x5caeff..0x5caf0e; Game_MainLoop @0x52B75C, @0x52bac8..0x52bad2].
+	{
+		TickProbe target;
+		Session session(target);
+		if (!load(session)) return 1;
+		FrameInput slow;
+		slow.delta_seconds = TickAccumulator::kTickDt * 10.0;
+		slow.since_render_seconds = 0.0;
+		for (int frame = 0; frame < 4; ++frame) {
+			if (!expect(session.advance(slow).ticks_run() == 0,
+					"a re-based frame banks only the time since the last render")) return 1;
+		}
+		if (!expect(session.advance(slow).ticks_run() == 10,
+				"after the start frames the full frame time banks again")) return 1;
+
+		// An unsampled render clock falls back to the frame delta.
+		if (!expect(session.reset_to_baseline().applied() &&
+				session.resume().applied(), "restart runs again")) return 1;
+		FrameInput unsampled;
+		unsampled.delta_seconds = TickAccumulator::kTickDt * 3.0;
+		if (!expect(session.advance(unsampled).ticks_run() == 3,
+				"no render sample: the frame delta banks")) return 1;
+	}
+
 	// Pause clears banked time; manual step and reset stay local-only.
 	{
 		TickProbe target;

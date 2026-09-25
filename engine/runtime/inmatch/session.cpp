@@ -174,6 +174,13 @@ TransitionResult Session::complete_load() {
 	}
 	last_error_ = {};
 	reset_bank();
+	// The mission starts inside the Game Loop mode's initialize, and the loop
+	// reads its clock only after that returns, so the load is never banked
+	// [orig: Game Loop mode @0x82F340 -> Game_StartMission; Game_MainLoop
+	// clock read @0x52B75C]. The start also arms three frames whose render
+	// time is never banked [orig: Game_StartMission @0x525e1f].
+	start_rebase_frames_ = kStartRebaseFrames;
+	rebase_clock_ = true;
 	return transition(State::Running);
 }
 
@@ -292,7 +299,20 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		return out;
 	}
 	latch_input(input);
-	out = run_ticks(accumulator_.bank(input.delta_seconds), input);
+	// A mission-start frame re-based the clock once it had rendered, so this
+	// frame banks only the time since that render [orig: Game_MainLoop
+	// @0x52bac8..0x52bad2].
+	const double elapsed = rebase_clock_ && input.since_render_seconds >= 0.0
+			? input.since_render_seconds : input.delta_seconds;
+	rebase_clock_ = false;
+	out = run_ticks(accumulator_.bank(elapsed), input);
+	// Each of the first frames drawn after the mission start counts down and
+	// raises the re-base flag [orig: Render_ProcessMainSceneFrame
+	// @0x5caeff..0x5caf0e].
+	if (start_rebase_frames_ > 0) {
+		--start_rebase_frames_;
+		rebase_clock_ = true;
+	}
 	last_perf_ = out.perf;
 	return out;
 }
@@ -374,6 +394,10 @@ TransitionResult Session::reset_to_baseline() {
 		return fail(error);
 	}
 	reset_bank();
+	// A restart is a mission start [orig: Game_RestartRoundSP @0x5263a0 ->
+	// Game_StartMission @0x525e1f].
+	start_rebase_frames_ = kStartRebaseFrames;
+	rebase_clock_ = true;
 	state_ = State::Paused;
 	return {TransitionCode::Applied, from,
 			State::Paused, {}};
@@ -386,6 +410,8 @@ TransitionResult Session::close() {
 	state_ = State::Stopping;
 	if (role_ != nullptr) role_->close();
 	reset_bank();
+	start_rebase_frames_ = 0;
+	rebase_clock_ = false;
 	last_error_ = {};
 	state_ = State::Unloaded;
 	return {TransitionCode::Applied, from, state_, {}};
