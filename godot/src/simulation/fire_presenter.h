@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -14,7 +15,9 @@
 #include <cstdint>
 #include <vector>
 
+#include <runtime/renderer/scene_overlay.h>
 #include <runtime/renderer/tracer_frame.h>
+#include <runtime/world/nvg_laser.h>
 
 #include "resource_index/resource_root.h"
 #include "simulation/present_event_records.h"
@@ -28,6 +31,29 @@ class EntityPresenter;
 class MissionAudio;
 class MissionEnvironment;
 class Simulation;
+struct SceneOverlaySubmission;
+
+// One NVG laser candidate (Simulation::nvg_laser_sources): a decoded person
+// row, its seat attach bone, its held weapon definition (entity+0x298) and
+// whether it is the local player, plus that definition's action point (its
+// +0x2D4 userpoint, 1-based on its third-person model).
+struct NvgLaserSource {
+	int handle = -1;
+	opennova::world::NvgLaserGate gate;
+	int launch_userpoint = 0;
+};
+
+// The frame the beams draw for: the eye (Godot space), the projection's _11,
+// the millisecond clock, the scene fog the beams fold, and the local view's
+// g_NVGActive and g_camera_mode.
+struct NvgLaserView {
+	Transform3D eye;
+	float projection_x_scale = 1.0f;
+	std::uint32_t tick_ms = 0;
+	opennova::renderer::SceneOverlayFog fog;
+	bool nvg_active = false;
+	int camera_mode = 0;
+};
 
 // THE viewing-client fire-presentation pass (the former fire_present_pass.gd,
 // ADR 0043 d9), an owned member of EntityPresenter: presents the sim's
@@ -118,6 +144,16 @@ public:
 	void present_fire_sounds(const std::vector<opennova::world::ReadyFireSound> &p_sounds);
 	void draw_tracer_rows(const PackedFloat32Array &p_rows);
 
+	// The NVG laser beams into the overlay tail's NvgLaserBeams slot: every
+	// source through the engine gate, its action point read off the owner's
+	// drawn third-person weapon (the gun draw 5 places with the same matrix
+	// the beam's transform builds), the ray clip from the sim (unclipped
+	// without one), the tracer NVG style's ribbon and the pool+0x3008 combine
+	// (world/nvg_laser.h and renderer/scene_overlay.h carry the witnesses).
+	// Returns the beams drawn.
+	int append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_sources,
+			const NvgLaserView &p_view, SceneOverlaySubmission &r_submission);
+
 	// Load-time pipeline warm: emit one zero-area surface on each ribbon
 	// material at `position` (must be in frustum so the surfaces actually draw)
 	// so their pipelines compile behind the loading screen instead of as a
@@ -161,6 +197,7 @@ private:
 	bool smoke_texture_loaded_ = false;
 	opennova::renderer::TracerRibbonFrame frame_;
 	opennova::renderer::TracerRibbonFrame distortion_frame_;
+	opennova::renderer::TracerRibbonFrame laser_frame_; // one beam's ribbon, reused
 	std::vector<opennova::renderer::TracerChannelInput> channels_;
 	int64_t stat_fires_ = 0;
 	int64_t stat_sounds_ = 0;

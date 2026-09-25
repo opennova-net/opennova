@@ -5,7 +5,9 @@
 //  Water_RenderReflectedWorldScene @ 0x5c85fd]
 
 #include <runtime/renderer/scene_overlay.h>
+#include <runtime/renderer/tracer_frame.h>
 
+#include <cmath>
 #include <cstdio>
 
 using namespace opennova::renderer;
@@ -198,6 +200,71 @@ void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
 	CHECK(list.size() == 1);
 }
 
+// The NVG laser beams: the ribbon build's draw as the NvgLaserBeams slot's
+// world-space triangles, the pool+0x3008 combine, depth-tested without
+// writes, both coordinate sets kept (uv1 rides `corner`), each vertex's
+// diffuse fogged to black at its own distance, its alpha untouched.
+// [orig: Entity_RenderNVGLaserBeam @ 0x5c6399 -> Render_DrawTrailOrBeamSegments
+//  @ 0x5dcb80; create_effect_channel_render_textures @ 0x5dc8f0]
+void test_the_nvg_laser_beam_overlay() {
+	const float points[12] = {
+		0.0f, 1.0f, 0.0f, 1.0f,
+		0.0f, 1.0f, -0.25f, 1.0f,
+		0.0f, 1.0f, -0.5f, 1.0f,
+	};
+	TracerView view;
+	view.camera = {0.0f, 1.0f, 2.0f};
+	view.forward = {0.0f, 0.0f, -1.0f};
+	view.projection_x_scale = 1.0f;
+	view.tick_ms = 1000;
+	TracerRibbonFrame ribbons;
+	append_tracer_beam(points, 3, 8, view, ribbons);
+	CHECK(ribbons.draws.size() == 1);
+	SceneOverlayFog fog;
+	fog.eye[0] = 0.0f;
+	fog.eye[1] = 1.0f;
+	fog.eye[2] = 2.0f;
+	fog.forward[0] = 0.0f;
+	fog.forward[1] = 0.0f;
+	fog.forward[2] = -1.0f;
+	fog.start = 0.0f;
+	fog.end = 4.0f;
+	fog.type = 1; // linear, by the radial distance
+	fog.enabled = true;
+	SceneOverlayFrame frame;
+	append_nvg_laser_overlay(ribbons, 9, fog, frame);
+	CHECK(frame.batches.size() == 1);
+	if (frame.batches.size() != 1 || ribbons.draws.empty()) {
+		return;
+	}
+	const SceneOverlayBatch &beam = frame.batches[0];
+	CHECK(beam.slot == SceneOverlaySlot::NvgLaserBeams);
+	CHECK(beam.shading == SceneOverlayShading::NvgLaser);
+	CHECK(beam.depth == SceneOverlayDepth::TestNoWrite);
+	CHECK(beam.geometry == SceneOverlayGeometry::World);
+	CHECK(beam.texture == 9);
+	CHECK(beam.vertex_count == ribbons.draws[0].index_count);
+	for (uint32_t k = 0; k < beam.vertex_count; ++k) {
+		const TracerVertex &src = ribbons.vertices[ribbons.indices[ribbons.draws[0].first_index + k]];
+		const SceneOverlayVertex &v = frame.vertices[beam.first_vertex + k];
+		CHECK(v.position[0] == src.x && v.position[1] == src.y && v.position[2] == src.z);
+		CHECK(v.uv[0] == src.u0 && v.uv[1] == src.v0);
+		CHECK(v.corner[0] == src.u1 && v.corner[1] == src.v1);
+		const float dx = src.x, dy = src.y - 1.0f, dz = src.z - 2.0f;
+		const float visibility = (4.0f - std::sqrt(dx * dx + dy * dy + dz * dz)) / 4.0f;
+		const float red = static_cast<float>((src.argb >> 16) & 0xFFu) / 255.0f;
+		CHECK(std::abs(v.color[0] - red * visibility) < 1.0e-5f);
+		CHECK(v.color[3] == static_cast<float>(src.argb >> 24) / 255.0f);
+	}
+	// Compiled in the main scene's first slot.
+	std::vector<SceneOverlayBatch> list;
+	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
+	CHECK(list.size() == 1 && list[0].slot == SceneOverlaySlot::NvgLaserBeams);
+	// The mirror never draws it.
+	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
+	CHECK(list.empty());
+}
+
 } // namespace
 
 int main() {
@@ -205,6 +272,7 @@ int main() {
 	test_the_mirror_closes_with_the_dim_and_the_far_band_redraw();
 	test_the_murk_gate_includes_the_waterline();
 	test_the_builders_carry_the_pass_states();
+	test_the_nvg_laser_beam_overlay();
 	if (failures != 0) {
 		std::printf("renderer_scene_overlay: %d failure(s)\n", failures);
 		return 1;

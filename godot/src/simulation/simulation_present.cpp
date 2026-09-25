@@ -2,6 +2,10 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
+
+#include <runtime/world/nvg_laser.h>
+
+#include "simulation/fire_presenter.h" // NvgLaserSource
 #include "simulation/hud_view_records.h"
 #include "simulation/destruction_events.h"
 
@@ -369,6 +373,41 @@ void Simulation::fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &
 
 const std::vector<opennova::world::DeathPieceDraw> &Simulation::death_piece_draws() const {
 	return present_.death_piece_draws;
+}
+
+// The visible-person list retail walks holds every collected person; the rows
+// here are every decoded person, and the beam leg keeps the drawn bodies. A
+// row's entity+0x298 is its equipped AdmDef entry (the client's player-record
+// store; 0xFF names none) [retail NetPacket_SerializePlayerState @ 0x4c11f2 /
+// @ 0x4c120d].
+void Simulation::nvg_laser_sources(std::vector<NvgLaserSource> &r_sources) const {
+	r_sources.clear();
+	if (!world_installed_ || runtime_ == nullptr) return;
+	const uint16_t self_handle = runtime_->has_self_handle()
+			? runtime_->self_handle()
+			: opennova::world::EntityHandle::kInvalid;
+	for (const opennova::replication::ClientEntityState &es : runtime_->state().entities) {
+		if (es.cls != opennova::EntityClass::Player && es.cls != opennova::EntityClass::Infantry)
+			continue;
+		const opennova::world::WeaponTableEntry *def =
+				kernel_->world.tables.weapons.by_index(es.equipped_adm_index);
+		NvgLaserSource source;
+		source.handle = es.handle;
+		source.gate.attach_bone = es.mount_bone;
+		source.gate.has_weapon_def = def != nullptr;
+		source.gate.weapon_flags = def != nullptr ? def->flags : 0;
+		source.gate.local_player = es.handle == self_handle;
+		source.launch_userpoint = def != nullptr ? def->launch_userpoint : 0;
+		r_sources.push_back(source);
+	}
+}
+
+// A beam's ray clip through the static then pool-1 walks, Q16 (world/nvg_laser.h).
+int32_t Simulation::nvg_laser_clip_distance(int p_handle, const int32_t p_origin[3],
+		const int32_t p_dir[3]) const {
+	if (!world_installed_) return opennova::world::kNvgLaserRangeQ16;
+	return opennova::world::nvg_laser_clip_distance(kernel_->collision, kernel_->world,
+			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)}, p_origin, p_dir);
 }
 
 // Whether the collision world holds an instance for the placed entity: the

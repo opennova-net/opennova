@@ -692,6 +692,7 @@ void GameWorld::render_scene_overlay_frame() {
 	std::shared_ptr<SceneOverlaySubmission> submission = std::make_shared<SceneOverlaySubmission>();
 	submission->frame_id = ++scene_overlay_frame_id_;
 	if (world_ready_) {
+		append_nvg_laser_overlays(*submission);
 		if (precipitation_ != nullptr) {
 			precipitation_->append_overlay(*submission);
 		}
@@ -710,6 +711,60 @@ void GameWorld::render_scene_overlay_frame() {
 		append_water_mirror_overlays(*submission);
 	}
 	effect_world->publish_scene_overlay(submission);
+}
+
+// The NVG laser beams, the tail's first slot (retail sub_5C63B0 @ 0x5c63b0,
+// called @ 0x5c9695): the local view's g_NVGActive and g_camera_mode gate
+// every beam (the defaults with no local player or for a spectator), the
+// frame's render camera builds the ribbons and the frame's scene fog folds
+// into them; the entity presenter's third-person guns carry the action
+// points (FirePresenter::append_nvg_laser_beams).
+void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) {
+	MissionRoot *runtime = get_runtime();
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	const Ref<Simulation> sim = get_sim();
+	Viewport *viewport = get_viewport();
+	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+	if (entities == nullptr || sim.is_null() || camera == nullptr || env_ == nullptr) {
+		return;
+	}
+	opennova::renderer::FrameFxViewInputs local;
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	if (presenter != nullptr && !presenter->is_local_spectator()) {
+		const Ref<PlayerLocalView> view = presenter->presented_view();
+		if (view.is_valid()) {
+			local = view->native_frame().frame_fx;
+		}
+	}
+	if (!local.nvg_active) {
+		return;
+	}
+	NvgLaserView view;
+	view.eye = camera->get_camera_transform();
+	view.projection_x_scale = static_cast<float>(camera->get_camera_projection()[0][0]);
+	view.tick_ms = static_cast<std::uint32_t>(current_frame_clock_ms());
+	view.nvg_active = local.nvg_active;
+	view.camera_mode = local.camera_mode;
+	const opennova::env::SceneFogValues fog =
+			env_->state().build_scene_fog(env_->is_underwater_view());
+	const Ref<EnvLightState> light_state = env_->get_light_state();
+	const Ref<EnvLightValues> light = light_state.is_valid() ? light_state->get_values()
+															: Ref<EnvLightValues>();
+	const Vector3 forward = -view.eye.basis.get_column(2).normalized();
+	view.fog.eye[0] = static_cast<float>(view.eye.origin.x);
+	view.fog.eye[1] = static_cast<float>(view.eye.origin.y);
+	view.fog.eye[2] = static_cast<float>(view.eye.origin.z);
+	view.fog.forward[0] = static_cast<float>(forward.x);
+	view.fog.forward[1] = static_cast<float>(forward.y);
+	view.fog.forward[2] = static_cast<float>(forward.z);
+	view.fog.start = fog.start;
+	view.fog.end = fog.end;
+	view.fog.type = fog.type;
+	view.fog.enabled = light.is_valid() && light->fog_enabled;
+	view.fog.color[0] = fog.color.r;
+	view.fog.color[1] = fog.color.g;
+	view.fog.color[2] = fog.color.b;
+	entities->append_nvg_laser_beams(sim.ptr(), view, r_submission);
 }
 
 // The water glint and the sun glare: Celestial places both models and

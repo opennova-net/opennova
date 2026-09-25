@@ -82,6 +82,7 @@ class CharacterJoinProfile; // the two-side character selection (object/characte
 class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
 class HostSessionOptions;   // the hosted-session request (network/host_session_options.h)
 class PlayerLocalView;      // the local view-state snapshot (simulation/player_local_view.h)
+struct NvgLaserSource;      // one NVG laser candidate (simulation/fire_presenter.h)
 class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/player_aim_overlay.h)
 class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weapon_view.h)
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
@@ -1951,12 +1952,11 @@ public:
 	// events; the tests author a DestructionDrain through its data leg.
 	void drain_vehicle_effects(std::vector<opennova::world::VehicleEffectEvent> &r_events);
 	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
-	// The live death-piece pool — each piece renders as its single husk-model
-	// section. NOT ClassDB-bound. (engine: runtime/world/destruction.cpp)
+	// NOT ClassDB-bound: the piece pool + frame draws; the NVG laser persons + ray clip.
 	void fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const;
-	// The last occlusion frame's death-piece draws (run_occlusion_frame's
-	// collect; world/death_piece_draw.h).
 	const std::vector<opennova::world::DeathPieceDraw> &death_piece_draws() const;
+	void nvg_laser_sources(std::vector<NvgLaserSource> &r_sources) const;
+	int32_t nvg_laser_clip_distance(int p_handle, const int32_t p_origin[3], const int32_t p_dir[3]) const;
 	// Whether the collision world holds an instance for the placed entity
 	// `bms_id` — the one destruction-gate fact the GUT collision cases read
 	// (the item-trait banks themselves are pinned by the

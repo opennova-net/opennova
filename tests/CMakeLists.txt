@@ -1646,6 +1646,11 @@ target_link_libraries(death_piece_draw_test PRIVATE opennova_runtime)
 target_compile_features(death_piece_draw_test PRIVATE cxx_std_17)
 add_test(NAME death_piece_draw COMMAND death_piece_draw_test)
 
+add_executable(nvg_laser_test world/nvg_laser_test.cpp)
+target_link_libraries(nvg_laser_test PRIVATE opennova_runtime)
+target_compile_features(nvg_laser_test PRIVATE cxx_std_17)
+add_test(NAME nvg_laser COMMAND nvg_laser_test)
+
 add_executable(item_events_test world/item_events_test.cpp)
 target_link_libraries(item_events_test PRIVATE opennova_runtime)
 add_test(NAME item_events COMMAND item_events_test)

@@ -1,6 +1,9 @@
 #include <runtime/renderer/scene_overlay.h>
 
+#include <runtime/renderer/device_fog.h>
+
 #include <algorithm>
+#include <cmath>
 
 namespace opennova::renderer {
 
@@ -177,6 +180,53 @@ void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, cons
 		out.vertices.push_back(v);
 	}
 	out.batches.push_back(batch);
+}
+
+void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture,
+		const SceneOverlayFog &fog, SceneOverlayFrame &out) {
+	for (const TracerDraw &draw : ribbons.draws) {
+		if (draw.index_count < 3) {
+			continue;
+		}
+		SceneOverlayBatch batch;
+		batch.slot = SceneOverlaySlot::NvgLaserBeams;
+		batch.shading = SceneOverlayShading::NvgLaser;
+		batch.depth = SceneOverlayDepth::TestNoWrite;
+		batch.geometry = SceneOverlayGeometry::World;
+		batch.texture = texture;
+		batch.first_vertex = vertex_index(out);
+		const uint32_t count = draw.index_count - draw.index_count % 3;
+		for (uint32_t k = 0; k < count; ++k) {
+			const TracerVertex &src = ribbons.vertices[ribbons.indices[draw.first_index + k]];
+			SceneOverlayVertex v;
+			v.position[0] = src.x;
+			v.position[1] = src.y;
+			v.position[2] = src.z;
+			v.uv[0] = src.u0;
+			v.uv[1] = src.v0;
+			v.corner[0] = src.u1;
+			v.corner[1] = src.v1;
+			const float dx = src.x - fog.eye[0];
+			const float dy = src.y - fog.eye[1];
+			const float dz = src.z - fog.eye[2];
+			const float depth = dx * fog.forward[0] + dy * fog.forward[1] + dz * fog.forward[2];
+			const float radial = std::sqrt(dx * dx + dy * dy + dz * dz);
+			const float visibility = device_fog_visibility(
+					fog.type == 0 ? depth : radial, fog.start, fog.end, fog.type, fog.enabled);
+			float rgb[3] = {static_cast<float>((src.argb >> 16) & 0xFFu) / 255.0f,
+					static_cast<float>((src.argb >> 8) & 0xFFu) / 255.0f,
+					static_cast<float>(src.argb & 0xFFu) / 255.0f};
+			for (int c = 0; c < 3; ++c) {
+				rgb[c] = draw.fog_black ? rgb[c] * visibility
+										: fog.color[c] + (rgb[c] - fog.color[c]) * visibility;
+			}
+			set_color(v, rgb[0], rgb[1], rgb[2],
+					static_cast<float>((src.argb >> 24) & 0xFFu) / 255.0f);
+			out.vertices.push_back(v);
+		}
+		batch.vertex_count = count;
+		out.batches.push_back(batch);
+	}
 }
 
 void append_mirror_dim_overlay(float factor, SceneOverlayFrame &out) {

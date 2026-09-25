@@ -19,6 +19,7 @@
 #include <runtime/environment/precipitation.h>
 #include <runtime/renderer/light_scene.h>
 #include <runtime/renderer/precipitation_frame.h>
+#include <runtime/renderer/tracer_frame.h>
 
 #include <array>
 #include <cstddef>
@@ -87,6 +88,14 @@ enum class SceneOverlayShading : uint8_t {
 	// The untextured diffuse multiplied into the target, DESTCOLOR / ZERO
 	// (the mirror dim).
 	DimMultiply = 4,
+	// The tracer pool's NVG laser material (pool+0x3008): one texture on both
+	// stages, the second stage on the second coordinate set; colour = DIFFUSE,
+	// alpha = DIFFUSE.a x (1 - T0.a) x (1 - T1.a), SRCALPHA / ONE; the
+	// texture wraps. The diffuse carries the fog fold already.
+	// [orig: create_effect_channel_render_textures @ 0x5dc8f0 (the pool's
+	//  0x3008 shader); the render-state layout RenderState_ApplyToDevice
+	//  @ 0x681920]
+	NvgLaser = 5,
 };
 
 enum class SceneOverlayDepth : uint8_t {
@@ -106,7 +115,9 @@ enum class SceneOverlayGeometry : uint8_t {
 inline constexpr uint32_t kSceneOverlayNoTexture = 0xFFFFFFFFu;
 
 // One vertex; positions are in the RENDER (Godot) frame: mission (x, y, z)
-// maps to (x, z, -y). Colours are gamma-domain.
+// maps to (x, z, -y). Colours are gamma-domain. `corner` is the billboard
+// corner offset for Billboard geometry and the second texture coordinate set
+// for World geometry (the ribbon's TEX2 vertex).
 struct SceneOverlayVertex {
 	float position[3] = {0.0f, 0.0f, 0.0f};
 	float uv[2] = {0.0f, 0.0f};
@@ -188,6 +199,32 @@ void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, cons
 		std::size_t vertex_count, const float self_lum_rgb[3], const float light_scale_rgb[3],
 		float fog_visibility, uint32_t texture, SceneOverlayFrame &out,
 		SceneOverlayDepth depth = SceneOverlayDepth::Always);
+
+// The device fog one overlay draw folds into its diffuse: the eye and look
+// direction (Godot frame), the pass's resolved start/end/type
+// (renderer/device_fog.h), and the colour a non-black fog mode fogs toward.
+struct SceneOverlayFog {
+	float eye[3] = {0.0f, 0.0f, 0.0f};
+	float forward[3] = {0.0f, 0.0f, -1.0f};
+	float start = 0.0f;
+	float end = 0.0f;
+	int type = 0;
+	bool enabled = false;
+	float color[3] = {0.0f, 0.0f, 0.0f};
+};
+
+// The NVG laser beams: every ribbon draw of `ribbons` (built by
+// append_tracer_beam in the Godot frame) as one world-space triangle list in
+// the NvgLaserBeams slot, the NvgLaser combine, depth-tested without writes;
+// each vertex's diffuse is fogged at its own distance (exponential fog by the
+// eye depth, the linear modes by the radial distance) toward black for the
+// style's black-fog word, else toward the scene colour.
+// [orig: sub_5C63B0 @ 0x5c63b0 from Terrain_RenderSceneWithReflection
+//  @ 0x5c9695 -> Entity_RenderNVGLaserBeam @ 0x5c6090 ->
+//  Render_DrawTrailOrBeamSegments @ 0x5dcb80 (the ribbon pass flags
+//  0x10520000: fog on, z-write off, z-test on)]
+void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture,
+		const SceneOverlayFog &fog, SceneOverlayFrame &out);
 
 // The mirror's dim: one viewport quad whose flat diffuse (`factor` on every
 // channel, the 0xFF404040 vertex colour) multiplies the finished mirror

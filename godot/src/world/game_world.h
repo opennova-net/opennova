@@ -396,6 +396,7 @@ public:
 	void plan_screen_effects_frame();
 	void render_scene_overlay_frame();
 	void append_celestial_overlays(SceneOverlaySubmission &r_submission);
+	void append_nvg_laser_overlays(SceneOverlaySubmission &r_submission);
 	void mix_audio_frame(int p_ticks_run);
 	void update_clear_frame();
 	void render_environment_cube_frame();

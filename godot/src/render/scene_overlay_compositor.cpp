@@ -69,6 +69,7 @@ layout(location = 3) in vec2 a_corner;
 
 layout(location = 0) out vec2 v_uv;
 layout(location = 1) out vec4 v_color;
+layout(location = 2) out vec2 v_uv1;
 
 layout(push_constant, std430) uniform OverlayPush {
 	mat4 view_projection;
@@ -80,6 +81,8 @@ layout(push_constant, std430) uniform OverlayPush {
 void main() {
 	v_uv = a_uv;
 	v_color = a_color;
+	// World geometry carries its second texture coordinate set in the corner.
+	v_uv1 = a_corner;
 	if (pc.mode.y == 2u) {
 		// A viewport quad: the positions are normalized device xy already.
 		gl_Position = vec4(a_position.xy, 0.0, 1.0);
@@ -127,6 +130,7 @@ std::string vertex_shader_source() {
 const char *kFragmentShader = R"GLSL(#version 450
 layout(location = 0) in vec2 v_uv;
 layout(location = 1) in vec4 v_color;
+layout(location = 2) in vec2 v_uv1;
 
 layout(set = 0, binding = 0) uniform sampler2D overlay_texture;
 
@@ -158,6 +162,12 @@ void main() {
 	} else if (shading == 4u) {
 		// The flat diffuse the DESTCOLOR / ZERO blend multiplies in.
 		frag_color = vec4(v_color.rgb, 1.0);
+	} else if (shading == 5u) {
+		// The NVG laser (the tracer pool's 0x3008 material): COLOR = DIFFUSE,
+		// ALPHA = DIFFUSE.a x (1 - T0.a) x (1 - T1.a), T1 on the second set;
+		// SRCALPHA / ONE blends it.
+		float t1 = texture(overlay_texture, v_uv1).a;
+		frag_color = vec4(v_color.rgb, v_color.a * (1.0 - texel.a) * (1.0 - t1));
 	} else {
 		frag_color = v_color;
 	}
@@ -349,6 +359,7 @@ public:
 	RenderingDevice *rd = nullptr;
 	RID shader;
 	RID sampler;
+	RID wrap_sampler; // the NVG laser's wrapping texture stages
 	RID white_texture;
 	RID vertex_buffer;
 	std::uint32_t vertex_capacity = 0;
@@ -408,6 +419,7 @@ public:
 		vertex_capacity = 0;
 		uploaded_frame_id = std::numeric_limits<std::uint64_t>::max();
 		free_rid(white_texture);
+		free_rid(wrap_sampler);
 		free_rid(sampler);
 		free_rid(shader);
 		vertex_format = RenderingDevice::INVALID_FORMAT_ID;
@@ -419,13 +431,13 @@ public:
 			const Vector2i &p_size);
 	bool upload(const SceneOverlaySubmission &p_submission);
 	RID pipeline_for(int64_t p_framebuffer_format, const SceneOverlayBatch &p_batch);
-	RID uniform_set_for(const RID &p_server_texture);
+	RID uniform_set_for(const RID &p_server_texture, bool p_wrap);
 	void draw(const SceneOverlaySubmission &p_submission, RenderData *p_render_data);
 };
 
 bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 	if (rd != nullptr && shader.is_valid() && sampler.is_valid() &&
-			white_texture.is_valid() &&
+			wrap_sampler.is_valid() && white_texture.is_valid() &&
 			vertex_format != RenderingDevice::INVALID_FORMAT_ID)
 		return true;
 	release_all();
@@ -469,6 +481,12 @@ bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 	sampler_state->set_repeat_v(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
 	sampler_state->set_repeat_w(RenderingDevice::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE);
 	sampler = rd->sampler_create(sampler_state);
+	// The ribbon's texture coordinates run past 1 (the NVG laser's two
+	// stages): the device default WRAP address mode.
+	sampler_state->set_repeat_u(RenderingDevice::SAMPLER_REPEAT_MODE_REPEAT);
+	sampler_state->set_repeat_v(RenderingDevice::SAMPLER_REPEAT_MODE_REPEAT);
+	sampler_state->set_repeat_w(RenderingDevice::SAMPLER_REPEAT_MODE_REPEAT);
+	wrap_sampler = rd->sampler_create(sampler_state);
 	// The untextured batches (the murk quad) and an unresolved texture sample
 	// white, so the combine reduces to the diffuse.
 	Ref<RDTextureFormat> format;
@@ -486,7 +504,7 @@ bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 	TypedArray<PackedByteArray> data;
 	data.push_back(white);
 	white_texture = rd->texture_create(format, view, data);
-	if (!sampler.is_valid() || !white_texture.is_valid()) {
+	if (!sampler.is_valid() || !wrap_sampler.is_valid() || !white_texture.is_valid()) {
 		set_status("device_resource_failed", "the overlay sampler or fallback texture failed");
 		release_all();
 		return false;
@@ -625,6 +643,12 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
 		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
 		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
+	} else if (p_batch.shading == SceneOverlayShading::NvgLaser) {
+		// SRCALPHA / ONE (retail's 0x3008 descriptor words 1/2).
+		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
+		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
+		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
+		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
 	} else {
 		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
 		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
@@ -648,13 +672,15 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 	return pipeline;
 }
 
-RID SceneOverlayCompositorEffect::Impl::uniform_set_for(const RID &p_server_texture) {
+RID SceneOverlayCompositorEffect::Impl::uniform_set_for(const RID &p_server_texture,
+		bool p_wrap) {
 	RenderingServer *server = RenderingServer::get_singleton();
 	RID texture = server != nullptr && p_server_texture.is_valid() ?
 			server->texture_get_rd_texture(p_server_texture, false) : RID();
 	if (!texture.is_valid())
 		texture = white_texture;
-	const std::uint64_t key = texture.get_id();
+	// One set per (texture, address mode): the low bit carries the wrap.
+	const std::uint64_t key = (texture.get_id() << 1) | (p_wrap ? 1u : 0u);
 	const auto found = texture_uniform_sets.find(key);
 	if (found != texture_uniform_sets.end()) {
 		if (rd->uniform_set_is_valid(found->second))
@@ -662,7 +688,7 @@ RID SceneOverlayCompositorEffect::Impl::uniform_set_for(const RID &p_server_text
 		texture_uniform_sets.erase(found);
 	}
 	TypedArray<Ref<RDUniform>> uniforms;
-	uniforms.push_back(sampled_texture_uniform(0, sampler, texture));
+	uniforms.push_back(sampled_texture_uniform(0, p_wrap ? wrap_sampler : sampler, texture));
 	const RID uniform_set = rd->uniform_set_create(uniforms, shader, 0);
 	if (uniform_set.is_valid())
 		texture_uniform_sets.emplace(key, uniform_set);
@@ -738,7 +764,8 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 			const RID pipeline = pipeline_for(format, batch);
 			const RID texture = batch.texture < p_submission.textures.size() ?
 					p_submission.textures[batch.texture] : RID();
-			const RID uniform_set = uniform_set_for(texture);
+			const RID uniform_set = uniform_set_for(texture,
+					batch.shading == SceneOverlayShading::NvgLaser);
 			if (!pipeline.is_valid() || !uniform_set.is_valid())
 				continue;
 			write_u32(push_constants, 96, static_cast<std::uint32_t>(batch.shading));

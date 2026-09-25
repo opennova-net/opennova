@@ -332,6 +332,15 @@ public:
 	void present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws);
 	// A death-piece slot's model (null when none) — the draw leg's read seam.
 	ObjectModel *death_piece_model(int p_slot) const;
+	// The frame's NVG laser beams into the overlay tail (FirePresenter::
+	// append_nvg_laser_beams over Simulation::nvg_laser_sources).
+	int append_nvg_laser_beams(Simulation *p_sim, const NvgLaserView &p_view,
+			SceneOverlaySubmission &r_submission);
+	// The data leg: one candidate row through the same beam path into a
+	// throwaway frame; returns the NvgLaserBeams batches it drew.
+	int nvg_laser_beam_batches(int p_handle, int p_attach_bone, int p_weapon_flags,
+			int p_launch_userpoint, bool p_local_player, bool p_nvg_active, int p_camera_mode,
+			const Transform3D &p_eye);
 	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
 	void present_vehicle_trail_visuals(const TypedArray<VehicleTrailVisualRow> &p_visuals);
 	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);

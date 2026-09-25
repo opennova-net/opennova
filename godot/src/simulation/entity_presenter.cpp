@@ -1,4 +1,6 @@
 #include "simulation/entity_presenter.h"
+
+#include "render/scene_overlay_compositor.h"
 #include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
@@ -201,6 +203,10 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::present_death_piece_draws);
 	ClassDB::bind_method(D_METHOD("death_piece_model", "slot"),
 			&EntityPresenter::death_piece_model);
+	ClassDB::bind_method(D_METHOD("nvg_laser_beam_batches", "handle", "attach_bone",
+			"weapon_flags", "launch_userpoint", "local_player", "nvg_active", "camera_mode",
+			"eye"),
+			&EntityPresenter::nvg_laser_beam_batches);
 	ClassDB::bind_method(D_METHOD("present_throwable_visuals", "visuals"),
 			&EntityPresenter::present_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("present_vehicle_trail_visuals", "visuals"),
@@ -479,6 +485,39 @@ void EntityPresenter::present_death_piece_draws(const TypedArray<DeathPieceDraw>
 
 ObjectModel *EntityPresenter::death_piece_model(int p_slot) const {
 	return destruction_->piece_model(p_slot);
+}
+
+int EntityPresenter::append_nvg_laser_beams(Simulation *p_sim, const NvgLaserView &p_view,
+		SceneOverlaySubmission &r_submission) {
+	if (p_sim == nullptr) {
+		return 0;
+	}
+	std::vector<NvgLaserSource> sources;
+	p_sim->nvg_laser_sources(sources);
+	return fire_->append_nvg_laser_beams(sources, p_view, r_submission);
+}
+
+int EntityPresenter::nvg_laser_beam_batches(int p_handle, int p_attach_bone,
+		int p_weapon_flags, int p_launch_userpoint, bool p_local_player, bool p_nvg_active,
+		int p_camera_mode, const Transform3D &p_eye) {
+	NvgLaserSource source;
+	source.handle = p_handle;
+	source.gate.attach_bone = static_cast<uint8_t>(p_attach_bone);
+	source.gate.has_weapon_def = true;
+	source.gate.weapon_flags = p_weapon_flags;
+	source.gate.local_player = p_local_player;
+	source.launch_userpoint = p_launch_userpoint;
+	NvgLaserView view;
+	view.eye = p_eye;
+	view.nvg_active = p_nvg_active;
+	view.camera_mode = p_camera_mode;
+	SceneOverlaySubmission submission;
+	fire_->append_nvg_laser_beams({source}, view, submission);
+	int batches = 0;
+	for (const opennova::renderer::SceneOverlayBatch &batch : submission.frame.batches) {
+		batches += batch.slot == opennova::renderer::SceneOverlaySlot::NvgLaserBeams ? 1 : 0;
+	}
+	return batches;
 }
 
 void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals) {

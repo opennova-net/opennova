@@ -24,7 +24,11 @@
 #include "env/mission_environment.h"
 #include "lights/effect_light_director.h"
 #include "particle/effect_distortion_drawer.h"
+#include "object/model_user_point.h"
+#include "object/object_data.h"
+#include "object/object_model.h"
 #include "particle/effect_world.h"
+#include "render/scene_overlay_compositor.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
@@ -439,6 +443,87 @@ void FirePresenter::emit_surface(const opennova::renderer::TracerRibbonFrame &p_
 	arrays[Mesh::ARRAY_INDEX] = indices;
 	mesh_->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
 	mesh_->surface_set_material(mesh_->get_surface_count() - 1, material);
+}
+
+// retail sub_5C63B0 @ 0x5c63b0 walks the frame's visible persons (the drawn
+// bodies) into Entity_RenderNVGLaserBeam @ 0x5c6090. The action point is
+// Entity_ComputeBoneTransform @ 0x401890 for a person on foot:
+// Entity_GetCameraTransform @ 0x4b8c00 poses the weapon matrix with
+// Entity_BuildBoneTransformMatrices @ 0x4b1290 (the held-weapon anchor draw 5
+// also places its gun with), and Userpoint_ComputeWorldTransform @ 0x56c420
+// takes the held definition's +0x2D4 userpoint of its +0x170 model through
+// it, position and authored direction. The drawn gun is that model at that
+// matrix, so its posed userpoint IS the action point; no drawn gun, no pose.
+// The beam is drawn when its run holds more than one point (@ 0x5c6381..0x5c6387).
+int FirePresenter::append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_sources,
+		const NvgLaserView &p_view, SceneOverlaySubmission &r_submission) {
+	if (owner_ == nullptr || p_sources.empty()) {
+		return 0;
+	}
+	Simulation *s = sim();
+	const Vector3 forward = -p_view.eye.basis.get_column(2).normalized();
+	opennova::renderer::TracerView view;
+	view.camera = {static_cast<float>(p_view.eye.origin.x),
+			static_cast<float>(p_view.eye.origin.y), static_cast<float>(p_view.eye.origin.z)};
+	view.forward = {static_cast<float>(forward.x), static_cast<float>(forward.y),
+			static_cast<float>(forward.z)};
+	view.projection_x_scale = p_view.projection_x_scale;
+	view.tick_ms = p_view.tick_ms;
+	int drawn = 0;
+	for (const NvgLaserSource &source : p_sources) {
+		opennova::world::NvgLaserGate gate = source.gate;
+		gate.nvg_active = p_view.nvg_active;
+		gate.camera_mode = p_view.camera_mode;
+		if (!opennova::world::nvg_laser_beam_drawn(gate)) {
+			continue;
+		}
+		ObjectModel *body = owner_->resolve_wire_handle(source.handle);
+		ObjectModel *weapon = owner_->held_weapon_node(source.handle);
+		if (body == nullptr || !body->is_visible_in_tree() || weapon == nullptr ||
+				!weapon->is_visible_in_tree()) {
+			continue;
+		}
+		const Ref<ObjectData> data = weapon->get_object_data();
+		const Ref<ModelUserPoint> point = data.is_valid()
+				? data->get_user_point_info(source.launch_userpoint - 1)
+				: Ref<ModelUserPoint>();
+		if (point.is_null()) {
+			continue;
+		}
+		const Transform3D part = weapon->subobject_model_to_world(point->get_subobject());
+		const opennova::world::Vec3 origin = godot_to_mission<opennova::world::Vec3>(
+				part.xform(point->get_position()));
+		const opennova::world::Vec3 direction = godot_to_mission<opennova::world::Vec3>(
+				part.basis.xform(point->get_rotation()));
+		const int32_t origin_q16[3] = {opennova::world::to_fixed(origin.x),
+				opennova::world::to_fixed(origin.y), opennova::world::to_fixed(origin.z)};
+		const int32_t direction_q16[3] = {opennova::world::to_fixed(direction.x),
+				opennova::world::to_fixed(direction.y), opennova::world::to_fixed(direction.z)};
+		const int32_t clip = s != nullptr
+				? s->nvg_laser_clip_distance(source.handle, origin_q16, direction_q16)
+				: opennova::world::kNvgLaserRangeQ16;
+		float points[opennova::world::kNvgLaserMaxPoints * 4];
+		const int count =
+				opennova::world::nvg_laser_beam_points(origin_q16, direction_q16, clip, points);
+		if (count <= 1) {
+			continue;
+		}
+		for (int i = 0; i < count; ++i) {
+			float *at = points + i * 4;
+			const Vector3 godot_at =
+					mission_to_godot(opennova::world::Vec3{at[0], at[1], at[2]});
+			at[0] = static_cast<float>(godot_at.x);
+			at[1] = static_cast<float>(godot_at.y);
+			at[2] = static_cast<float>(godot_at.z);
+		}
+		laser_frame_.clear();
+		opennova::renderer::append_tracer_beam(points, count,
+				opennova::world::kNvgLaserTracerStyle, view, laser_frame_);
+		opennova::renderer::append_nvg_laser_overlay(laser_frame_,
+				r_submission.texture_index(smoke_texture()), p_view.fog, r_submission.frame);
+		++drawn;
+	}
+	return drawn;
 }
 
 void FirePresenter::warm_pipelines(const Vector3 &p_position) {
