@@ -1,6 +1,7 @@
 void vertex() {
 	v_water_mirror_pass = obj_water_mirror_pass_flag(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS);
 	v_static_point_light_row = INSTANCE_CUSTOM.x;
+	v_water_mirror_pass *= 1.0 + obj_water_clip_armed_flag(MODEL_MATRIX[3].xyz);
 	v_uv = obj_transform_uv(UV);
 	v_uv2 = obj_transform_uv(UV2);
 	vec3 local_pos = VERTEX;

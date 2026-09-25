@@ -26,6 +26,9 @@ struct StaticEffectSource {
 	int item_id = 0;
 	int source_index = -1;
 	int32_t entity_bound_radius_q16 = 0;
+	// The graphic's bound-block floor (world::model_bound_floor_q16): a
+	// building row's mirror clip extent.
+	int32_t model_floor_q16 = 0;
 	std::string graphic;
 	StaticSourceTransform world_transform = kStaticSourceIdentity;
 	uint64_t asset_id = 0;

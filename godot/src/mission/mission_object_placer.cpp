@@ -1064,6 +1064,11 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 		model->set_authored_lod_enabled(true);
 		model->set_authored_occluders_enabled(kind == MissionData::KIND_BUILDING &&
 				_has_occlusion_records(item_id));
+		// A building draws in the mirror's building pass, every other placed
+		// entity in its first entity wave (runtime/environment/water_mirror.h).
+		model->set_water_mirror_clip_wave(kind == MissionData::KIND_BUILDING ?
+						opennova::env::MirrorClipWave::kSectorModel :
+						opennova::env::MirrorClipWave::kEntity);
 		// Drive the build explicitly (not via _ready) so it is independent
 		// of when place() runs relative to the main loop.
 		model->set_object_data(data);

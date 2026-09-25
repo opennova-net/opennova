@@ -86,6 +86,7 @@ int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 	source.world_transform = to_static_source_transform(p_xform);
 	source.asset_id = _retain_static_source_asset(data);
 	source.entity_bound_radius_q16 = _item_entity_bound_radius_q16(p_item_id, data);
+	source.model_floor_q16 = opennova::world::model_bound_floor_q16(data->native_model());
 	return static_sources_.append_effect(std::move(source));
 }
 

@@ -17,6 +17,8 @@
 #include "util/color_convert.h"
 #include "simulation/simulation.h"
 
+#include <runtime/environment/water_mirror.h>
+
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -483,8 +485,17 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 		const opennova::renderer::EntityLightingState lane =
 				opennova::renderer::static_row_entity_lighting(inputs.is_building,
 						descriptor.robj_index, descriptor.light_transfer, inputs.blink_hit);
+		// w: the water mirror's CLIP arming as an offset from the instance
+		// origin (a static row is never a person; the building pass tests a
+		// building's floor, the first entity wave the bound radius).
+		const opennova::env::MirrorClipWave clip_wave = inputs.is_building ?
+				opennova::env::MirrorClipWave::kSectorModel :
+				opennova::env::MirrorClipWave::kEntity;
 		entity_lights[atlas_row] = Vector4(lane.effect_scale, lane.interior_lerp ? 1.0f : 0.0f,
-				lane.interior_daylight, 0.0f);
+				lane.interior_daylight,
+				opennova::env::water_mirror_clip_origin_offset(clip_wave,
+						inputs.is_building ? source.model_floor_q16 :
+											 source.entity_bound_radius_q16));
 		const opennova::renderer::LightActiveGroups groups =
 				opennova::renderer::static_light_row_groups(inputs);
 		owner_entities[atlas_row] = static_cast<int64_t>(groups.owner_group_entity);

@@ -308,11 +308,15 @@ void ObjectShaderCache::set_water_plane(float height, bool camera_above) {
 			water_camera_above == camera_above) {
 		return;
 	}
+	const bool height_changed = !water_split_set || water_split_height != height;
 	water_split_height = height;
 	water_camera_above = camera_above;
 	water_split_set = true;
 	++water_plane_generation;
 	ObjectModel::mark_render_order_dirty_all();
+	if (height_changed) {
+		ObjectModel::refresh_water_mirror_clip_all();
+	}
 }
 
 void ObjectShaderCache::clear_water_plane() {
@@ -322,6 +326,7 @@ void ObjectShaderCache::clear_water_plane() {
 	water_split_set = false;
 	++water_plane_generation;
 	ObjectModel::mark_render_order_dirty_all();
+	ObjectModel::refresh_water_mirror_clip_all();
 }
 
 bool ObjectShaderCache::has_water_plane() const {

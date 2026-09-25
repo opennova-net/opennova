@@ -182,9 +182,18 @@ varying vec4 v_pixel_point_attenuation;
 // Identical for every vertex of a MultiMesh instance, so ordinary varying
 // interpolation remains constant across each primitive.
 varying float v_static_point_light_row;
-// 1.0 in the water mirror pass: the one non-shadow camera whose mask omits the
-// water layer (render/visual_layers.h). Every object vertex() writes it
-// through obj_water_mirror_pass_flag; built-ins stay out of helpers.
+// The water mirror pass: 0 in every other view, 1 in the mirror (the one
+// non-shadow camera whose mask omits the water layer, render/visual_layers.h),
+// 2 in the mirror for a draw whose CLIP technique the reflected pass arms
+// (retail's per-draw test, runtime/environment/water_mirror.h
+// water_mirror_clip_armed: a sector model whose bottom sits below wh - 0.25,
+// a first-wave entity whose z - boundRadius sits below wh, never a BySide
+// person). A static row carries the arming test as an origin offset in its
+// lighting lane's w; every other model the armed bit (2) its ObjectModel
+// stamps into u_entity_light.w. Every object vertex() writes it through
+// obj_water_mirror_pass_flag and obj_water_clip_armed_flag (one varying: the
+// object stages sit at the device's varying limit); built-ins stay out of
+// helpers.
 varying flat float v_water_mirror_pass;
 
 float obj_water_mirror_pass_flag(uint camera_layers, bool in_shadow_pass) {
@@ -196,10 +205,11 @@ float obj_water_mirror_pass_flag(uint camera_layers, bool in_shadow_pass) {
 // explicit-CLIP wrapper keeps this discard; the mirror-pass flag keeps every
 // other camera unclipped. Nothing samples a texture before this runs.
 // Whether this draw is the armed reflection view: the view whose explicit
-// CLIP blocks replace NORMAL. Retail arms it for the reflected pass on both
-// sides of the plane whenever the water is live.
+// CLIP blocks replace NORMAL. Retail arms it in the reflected pass on both
+// sides of the plane whenever the water is live, for the draws its per-draw
+// test selects (v_water_mirror_pass 2).
 bool obj_water_reflection_clip_view(vec3 camera_position_world) {
-	return v_water_mirror_pass > 0.5 && opennova_water_active;
+	return v_water_mirror_pass > 1.5 && opennova_water_active;
 }
 
 bool obj_water_reflection_clips(vec3 camera_position_world) {
@@ -281,8 +291,19 @@ bool obj_entity_interior() {
 	return obj_entity_light().y > 0.5;
 }
 
+// The BySide person wave: bit 1 of u_entity_light.w (bit 2 is the mirror CLIP
+// arming, v_water_mirror_pass 2). A static row is never a person; its lane's w is
+// the mirror clip offset instead.
 bool obj_thermal_wave() {
-	return opennova_thermal_view && obj_entity_light().w > 0.5 && u_thermal_wave_draw;
+	return opennova_thermal_view && !obj_uses_static_point_light_row() &&
+			mod(u_entity_light.w, 2.0) > 0.5 && u_thermal_wave_draw;
+}
+
+float obj_water_clip_armed_flag(vec3 model_origin) {
+	if (obj_uses_static_point_light_row()) {
+		return model_origin.y + obj_entity_light().w < opennova_water_height ? 1.0 : 0.0;
+	}
+	return u_entity_light.w >= 1.5 ? 1.0 : 0.0;
 }
 
 vec3 obj_dir_light_color() {

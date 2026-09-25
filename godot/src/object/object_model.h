@@ -1,6 +1,7 @@
 #pragma once
 
 #include <runtime/anim/remote_body_state.h>
+#include <runtime/environment/water_mirror.h>
 #include <runtime/renderer/model_controls.h>
 
 // ObjectModel — the retained visual for one NovaLogic object graphic,
@@ -392,6 +393,16 @@ private:
 	AABB model_bounds_;
 	float lighting_effect_scale_ = 1.0f;
 	bool thermal_entity_wave_ = false;
+	// The water mirror's per-draw CLIP arming (runtime/environment/
+	// water_mirror.h water_mirror_clip_armed): the pass this model's draws
+	// take, its floor for the building pass, the verdict for the current
+	// water plane, and whether an owning entity decides it (a linked part
+	// draws inside its owner's submission).
+	opennova::env::MirrorClipWave water_mirror_clip_wave_ =
+			opennova::env::MirrorClipWave::kEntity;
+	int32_t water_mirror_clip_floor_q16_ = 0;
+	bool water_mirror_clip_armed_ = false;
+	bool water_mirror_clip_inherited_ = false;
 	bool interior_lerp_ = false;
 	float interior_daylight_ = 0.0f;
 	// The containing building (BMS id, 0 = none) and blink volume section this
@@ -462,6 +473,11 @@ private:
 	// Every built model that owns at least one blended strip: the water-plane
 	// owner marks them all dirty when the ladder's inputs change.
 	static HashSet<ObjectModel *> alpha_strip_models_;
+	// Every model deciding its own mirror CLIP arming: a water plane height
+	// change re-tests them all.
+	static HashSet<ObjectModel *> water_mirror_clip_models_;
+	bool tracks_water_mirror_clip() const;
+	void apply_water_mirror_clip_armed(bool p_armed);
 	// Strip classification runs only when something the ladder reads moved:
 	// the model transform, a part/robj transform, a rebuild, or the water
 	// plane generation (retail recomputes every strip every frame because its
@@ -704,6 +720,19 @@ public:
 	void set_entity_ref(const Ref<EntityRef> &p_ref) { entity_ref_ = p_ref; }
 	void set_thermal_entity_wave(bool p_enabled);
 	bool get_thermal_entity_wave() const { return thermal_entity_wave_; }
+	// The water mirror pass this model's draws take for the CLIP arming: the
+	// first entity wave (the default), the building pass, or none (a draw
+	// outside those walks: the sky bodies). The BySide person wave
+	// (set_thermal_entity_wave) never arms. Re-tested when the model moves or
+	// the water plane height changes; the verdict rides u_entity_light.w's
+	// bit 2.
+	void set_water_mirror_clip_wave(opennova::env::MirrorClipWave p_wave);
+	// The script form (the MirrorClipWave values: 0 none, 1 the building
+	// pass, 2 the first entity wave).
+	void set_water_mirror_clip_wave_id(int p_wave);
+	bool is_water_mirror_clip_armed() const { return water_mirror_clip_armed_; }
+	void refresh_water_mirror_clip();
+	static void refresh_water_mirror_clip_all();
 	Ref<EntityRef> get_entity_ref() const { return entity_ref_; }
 	void set_presentation_layer(PresentationLayer p_layer);
 	void set_shadow_caster_enabled(bool p_enabled);

@@ -18,10 +18,88 @@
 #include <runtime/renderer/object_shader_template.h>
 #include <runtime/renderer/render_order.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/model_geometry.h>
+#include <base/io/fixed.h>
 
 using namespace opennova::threedi;
 
 namespace godot {
+
+// A model decides its own mirror CLIP arming unless an owning entity does
+// (a linked part), it draws in no arming pass, or it is a BySide person.
+bool ObjectModel::tracks_water_mirror_clip() const {
+	return !water_mirror_clip_inherited_ && !thermal_entity_wave_ &&
+			water_mirror_clip_wave_ != opennova::env::MirrorClipWave::kNone;
+}
+
+void ObjectModel::set_water_mirror_clip_wave_id(int p_wave) {
+	set_water_mirror_clip_wave(
+			p_wave == static_cast<int>(opennova::env::MirrorClipWave::kSectorModel) ?
+					opennova::env::MirrorClipWave::kSectorModel :
+			p_wave == static_cast<int>(opennova::env::MirrorClipWave::kEntity) ?
+					opennova::env::MirrorClipWave::kEntity :
+					opennova::env::MirrorClipWave::kNone);
+}
+
+void ObjectModel::set_water_mirror_clip_wave(opennova::env::MirrorClipWave p_wave) {
+	if (water_mirror_clip_wave_ == p_wave) {
+		return;
+	}
+	water_mirror_clip_wave_ = p_wave;
+	if (tracks_water_mirror_clip()) {
+		water_mirror_clip_models_.insert(this);
+		set_notify_transform(true);
+	} else {
+		water_mirror_clip_models_.erase(this);
+	}
+	refresh_water_mirror_clip();
+}
+
+// The per-draw test against the live water plane (the building pass reads
+// the graphic's bound-block floor, the first entity wave the entity+0 bound
+// radius; runtime/environment/water_mirror.h carries the witnesses). No plane
+// means no mirror pass, so nothing is armed.
+void ObjectModel::refresh_water_mirror_clip() {
+	if (water_mirror_clip_inherited_) {
+		return;
+	}
+	bool armed = false;
+	const ObjectShaderCache *cache = ObjectShaderCache::get_singleton();
+	if (tracks_water_mirror_clip() && cache != nullptr && cache->has_water_plane() &&
+			is_inside_tree()) {
+		if (water_mirror_clip_wave_ == opennova::env::MirrorClipWave::kSectorModel &&
+				object_data_.is_valid() && object_data_->has_document()) {
+			water_mirror_clip_floor_q16_ = opennova::world::model_bound_floor_q16(
+					object_data_->native_model());
+		}
+		const int32_t extent =
+				water_mirror_clip_wave_ == opennova::env::MirrorClipWave::kSectorModel ?
+				water_mirror_clip_floor_q16_ : entity_bound_radius_q16_;
+		armed = opennova::env::water_mirror_clip_armed(water_mirror_clip_wave_,
+				opennova::io::float_to_fp16_16_round_sat(
+						static_cast<float>(get_global_position().y)),
+				extent,
+				opennova::io::float_to_fp16_16_round_sat(cache->get_water_plane_height()));
+	}
+	apply_water_mirror_clip_armed(armed);
+}
+
+void ObjectModel::apply_water_mirror_clip_armed(bool p_armed) {
+	if (water_mirror_clip_armed_ == p_armed) {
+		return;
+	}
+	water_mirror_clip_armed_ = p_armed;
+	stamp_entity_lighting_instances();
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->apply_water_mirror_clip_armed(p_armed);
+	}
+}
+
+void ObjectModel::refresh_water_mirror_clip_all() {
+	for (ObjectModel *model : water_mirror_clip_models_) {
+		model->refresh_water_mirror_clip();
+	}
+}
 
 
 void ObjectModel::set_material_and_auxiliary_parameter(

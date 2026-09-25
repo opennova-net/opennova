@@ -41,6 +41,11 @@ struct EntityBoundRadiusInputs {
 };
 int32_t entity_bound_radius_q16(const EntityBoundRadiusInputs &inputs);
 
+// The graphic's bound-block floor, graphicModel +0xB0 -> +0x28: the CMDL
+// header bbox z-lo in 16.16 (the pad plane the probe boxes and the building
+// pass's mirror clip read); 0 without a collision block.
+int32_t model_bound_floor_q16(const opennova::threedi::Threedi3di3 &model);
+
 // Entity init zeroes the bbox center (entity+0x1FC) for eweap powerups
 // (type 6 with attrib 0x20) before it measures the sphere, so their halves
 // are the clamped CMDL maxima. The collision center and the render

@@ -469,6 +469,35 @@ int main() {
 					tall.height == 512,
 				"a degenerate aspect keeps its ratio inside the device width");
 
+		// The mirror's per-draw CLIP arming [orig: Terrain_RenderSectorModels
+		// @ 0x5c5e57..0x5c5e75, Terrain_RenderSectorEntities @ 0x5c7c1a..0x5c7c2e]:
+		// a building below wh - 0.25, an entity whose z - radius sits below wh,
+		// never a draw outside the sector walks, in 16.16.
+		{
+			using opennova::env::MirrorClipWave;
+			using opennova::env::water_mirror_clip_armed;
+			using opennova::env::water_mirror_clip_origin_offset;
+			const int32_t wh = 10 << 16;
+			const int32_t floor_q16 = -(1 << 16);
+			ok &= expect(water_mirror_clip_armed(MirrorClipWave::kSectorModel,
+								(10 << 16) + (3 << 14) - 1, floor_q16, wh) &&
+						!water_mirror_clip_armed(MirrorClipWave::kSectorModel,
+								(10 << 16) + (3 << 14), floor_q16, wh),
+					"a building arms while its floor sits below wh - 0.25");
+			const int32_t radius = 2 << 16;
+			ok &= expect(water_mirror_clip_armed(MirrorClipWave::kEntity, (12 << 16) - 1,
+								radius, wh) &&
+						!water_mirror_clip_armed(MirrorClipWave::kEntity, 12 << 16, radius, wh),
+					"an entity arms while z - boundRadius sits below wh");
+			ok &= expect(!water_mirror_clip_armed(MirrorClipWave::kNone, -(100 << 16), 0, wh),
+					"a draw outside the sector walks never arms");
+			ok &= expect(near(water_mirror_clip_origin_offset(MirrorClipWave::kSectorModel,
+								floor_q16), -0.75f) &&
+						near(water_mirror_clip_origin_offset(MirrorClipWave::kEntity, radius),
+								-2.0f),
+					"the static rows' offset form is the same test");
+		}
+
 		// render_water_surface's side gate [orig: @ 0x5c32f6 jge / @ 0x5c3304
 		// jle]: strictly above draws the view-0 side (and the bloom pass's
 		// nightvision redraw), strictly below the underwater side, and an eye

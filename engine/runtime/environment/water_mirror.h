@@ -43,6 +43,8 @@
 
 #include <formats/env/env.h>
 
+#include <cstdint>
+
 #include <algorithm>
 #include <cmath>
 
@@ -169,6 +171,51 @@ struct WaterMirrorView {
 	// below-water view keeps the source's.
 	float v_offset = 0.0f;
 };
+
+// The reflected pass arms an object's CLIP technique per DRAW while it renders
+// the mirror (g_WaterMirrorActive): the building pass arms a sector model whose
+// bottom, z + the graphic's bound-block floor (graphicModel +0xB0 -> +0x28, the
+// CMDL header bbox z-lo), lies below wh - 0.25 [orig: Terrain_RenderSectorModels
+// @ 0x5c5e57..0x5c5e75], and the first entity wave an entity whose
+// z - boundRadius (entity+0) lies below wh [orig: Terrain_RenderSectorEntities
+// @ 0x5c7c1a..0x5c7c2e]. The BySide waves (the person entities) never arm it,
+// nor does any draw outside those walks (the sky bracket's celestial bodies):
+// an unarmed draw keeps its NORMAL technique in the mirror. All 16.16, signed.
+enum class MirrorClipWave : uint8_t {
+	kNone = 0,
+	kSectorModel = 1,
+	kEntity = 2,
+};
+
+inline bool water_mirror_clip_armed(MirrorClipWave wave, int32_t z_q16,
+		int32_t extent_q16, int32_t water_height_q16) {
+	switch (wave) {
+		case MirrorClipWave::kSectorModel:
+			return static_cast<int64_t>(z_q16) + extent_q16 <
+					static_cast<int64_t>(water_height_q16) - 0x4000;
+		case MirrorClipWave::kEntity:
+			return static_cast<int64_t>(z_q16) - extent_q16 < water_height_q16;
+		case MirrorClipWave::kNone:
+		default:
+			return false;
+	}
+}
+
+// The same test as an offset from the draw's origin height in world units
+// (armed <=> origin + offset < wh): the form a static MultiMesh row carries,
+// since its instance origin is only known on the device. kNone never arms.
+inline float water_mirror_clip_origin_offset(MirrorClipWave wave, int32_t extent_q16) {
+	switch (wave) {
+		case MirrorClipWave::kSectorModel:
+			return static_cast<float>(static_cast<int64_t>(extent_q16) + 0x4000) /
+					65536.0f;
+		case MirrorClipWave::kEntity:
+			return -static_cast<float>(extent_q16) / 65536.0f;
+		case MirrorClipWave::kNone:
+		default:
+			return 3.0e38f;
+	}
+}
 
 inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 		float water_height) {

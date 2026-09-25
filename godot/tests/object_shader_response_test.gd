@@ -23,6 +23,9 @@ const EYE := Vector3(0.0, 0.0, 5.0)
 var _saved := {}
 # The reflected pass is the camera whose mask omits the water layer.
 var _reflection_view := false
+# The per-draw CLIP arming the reflected pass tests (u_entity_light.w bit 2,
+# stamped by ObjectModel; runtime/environment/water_mirror.h).
+var _clip_armed := true
 
 
 func before_each() -> void:
@@ -36,6 +39,7 @@ func before_each() -> void:
 	_global("opennova_fog_enabled", false)
 	_global("opennova_water_active", false)
 	_reflection_view = false
+	_clip_armed = true
 	_global("opennova_environment_cube_ready", false)
 	_global("opennova_light_block_gain", Vector3.ONE)
 	_global("opennova_light_block_dir", Vector3(0.0, 0.0, -1.0))
@@ -115,6 +119,8 @@ func _quad(material: ShaderMaterial, left_normal := Vector3.BACK,
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
 	instance.material_override = material
+	instance.set_instance_shader_parameter("u_entity_light",
+			Vector4(1.0, 0.0, 1.0, 2.0 if _clip_armed else 0.0))
 	return instance
 
 
@@ -206,6 +212,32 @@ func test_reflection_view_lights_selflum_materials_like_any_ffp_material() -> vo
 			_solid(Color.WHITE), black_selflum)
 	assert_almost_eq(clip.r, 1.0, 0.02,
 			"CLIP: white Diffuse1 x hemisphere 0.5 x 2: %s" % clip)
+
+
+func test_reflection_view_keeps_normal_for_an_unarmed_draw() -> void:
+	# Retail arms the CLIP technique per draw (Terrain_RenderSectorModels
+	# @ 0x5c5e57..0x5c5e75, Terrain_RenderSectorEntities @ 0x5c7c1a..0x5c7c2e);
+	# a draw it leaves unarmed keeps NORMAL in the reflected pass: the
+	# black-SelfLum card stays black and nothing is clipped at the plane.
+	if not _rd_available():
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var black_selflum := func(material: ShaderMaterial) -> void:
+		material.set_shader_parameter("u_rgb_mod", Vector3.ZERO)
+	_arm_reflection_view()
+	_clip_armed = false
+	var unarmed: Color = await _render("self_lit/opaque_double_sided",
+			_solid(Color.WHITE), black_selflum)
+	assert_lt(unarmed.r, 0.02, "an unarmed draw keeps its NORMAL SELFLUM: %s" % unarmed)
+	_global("opennova_water_height", 0.0)
+	var viewport := _view()
+	var card := _quad(_material("fixed/opaque_double_sided", _solid(Color.WHITE)))
+	# The person bit alone (a BySide wave draw) never arms.
+	card.set_instance_shader_parameter("u_entity_light", Vector4(1.0, 0.0, 1.0, 1.0))
+	viewport.add_child(card)
+	var image: Image = await _frame(viewport)
+	assert_almost_eq(image.get_pixel(32, 40).r, 1.0, 0.02,
+			"an unarmed draw is not clipped below the plane")
 
 
 func test_reflection_view_alpha_tests_every_ffp_material_at_128() -> void:

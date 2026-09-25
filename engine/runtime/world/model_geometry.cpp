@@ -262,6 +262,12 @@ float model_bound_radius_from_3di(const Threedi3di3 &model) {
 	return static_cast<float>(model_bound_radius_q16_from_3di(model)) / io::kFp16One;
 }
 
+int32_t model_bound_floor_q16(const opennova::threedi::Threedi3di3 &model) {
+	if (model.collision == nullptr) return 0;
+	return static_cast<int32_t>(
+			std::lround(static_cast<double>(model.collision->model_data.bbox[2]) * 65536.0));
+}
+
 int32_t entity_bound_radius_q16(const EntityBoundRadiusInputs &inputs) {
 	// [orig: Entity_InitFromModel @0x40dc30: CDTA gate @0x40de8f,
 	// scaled base @0x40e052, signed first-husk max @0x40e062..0x40e06f,

@@ -227,6 +227,9 @@ void Celestial::_rebuild_if_needed() {
 		// the water mirror record); the glow and glint gate the mirror pass
 		// out in their shader.
 		model->set_mirror_reflected(true);
+		// The sky bracket and the mirror's redraw submit outside the sector
+		// walks, so no body ever takes the CLIP technique.
+		model->set_water_mirror_clip_wave(opennova::env::MirrorClipWave::kNone);
 		model->set_object_data(data);
 		// Every celestial submit uses the IDENTITY world rotation in RENDER
 		// axes (render_celestial_bodies @ 0x5acaa0 sun/moon,

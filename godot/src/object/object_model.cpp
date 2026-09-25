@@ -220,6 +220,11 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 	presentation_links_.push_back(link);
 	p_model->set_match_terrain_enabled(match_terrain_enabled_);
 	p_model->set_thermal_entity_wave(thermal_entity_wave_);
+	// A linked part draws inside its owner's submission: its CLIP arming is
+	// the owner's.
+	p_model->water_mirror_clip_inherited_ = true;
+	water_mirror_clip_models_.erase(p_model);
+	p_model->apply_water_mirror_clip_armed(water_mirror_clip_armed_);
 }
 
 
@@ -443,6 +448,7 @@ void ObjectModel::set_thermal_entity_wave(bool p_enabled) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->set_thermal_entity_wave(p_enabled);
 	}
+	refresh_water_mirror_clip();
 }
 
 void ObjectModel::set_entity_lighting_context(float p_effect_scale,
@@ -491,11 +497,13 @@ void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
 // opennova::renderer::compute_entity_lighting].
 void ObjectModel::stamp_entity_lighting_instances() {
 	const StringName name("u_entity_light");
+	// w: bit 1 the BySide person wave, bit 2 the mirror CLIP arming.
+	const float clip_bit = water_mirror_clip_armed_ ? 2.0f : 0.0f;
 	const Vector4 entity = interior_section_lighting_
-			? Vector4(1.0f, 0.0f, 1.0f, 0.0f)
+			? Vector4(1.0f, 0.0f, 1.0f, clip_bit)
 			: Vector4(lighting_effect_scale_, interior_lerp_ ? 1.0f : 0.0f,
-					interior_daylight_, thermal_entity_wave_ ? 1.0f : 0.0f);
-	const Vector4 section(1.0f, 1.0f, interior_section_daylight_, 0.0f);
+					interior_daylight_, (thermal_entity_wave_ ? 1.0f : 0.0f) + clip_bit);
+	const Vector4 section(1.0f, 1.0f, interior_section_daylight_, clip_bit);
 	const auto apply_to = [&](Node *p_parent, const Vector4 &p_value) {
 		if (p_parent == nullptr) {
 			return;
@@ -962,6 +970,7 @@ void ObjectModel::mark_render_order_dirty_all() {
 // off Godot's frame outside that one driver.
 HashSet<ObjectModel *> ObjectModel::awake_models_;
 HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
+HashSet<ObjectModel *> ObjectModel::water_mirror_clip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
 HashSet<ObjectModel *> ObjectModel::foliage_mask_models_;
 HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
@@ -1524,11 +1533,15 @@ void ObjectModel::_notification(int p_what) {
 		point_light_draw_parts_dirty_ = true;
 		wake_runtime_frame();
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
-		// Only models with blended strips enable this notification: a moved
-		// model re-classifies its strips against the water plane in place,
-		// without waking the full runtime walk.
-		render_order_dirty_ = true;
-		refresh_render_order();
+		// Models with blended strips or their own mirror CLIP arming enable
+		// this notification: a moved model re-classifies its strips against
+		// the water plane in place, without waking the full runtime walk, and
+		// re-tests its arming.
+		if (alpha_strip_models_.has(this)) {
+			render_order_dirty_ = true;
+			refresh_render_order();
+		}
+		refresh_water_mirror_clip();
 	} else if (p_what == NOTIFICATION_PREDELETE) {
 		// Only a model an EntityPresenter row plan retains by pointer moves the
 		// stamp: a throwable, viewmodel, wire-body, or preview model freeing
@@ -1541,6 +1554,7 @@ void ObjectModel::_notification(int p_what) {
 			awake_models_.erase(this);
 		}
 		alpha_strip_models_.erase(this);
+		water_mirror_clip_models_.erase(this);
 		retire_geometry_instances();
 	}
 }
@@ -2146,6 +2160,18 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_entity_uniform_scale_q16);
 	ClassDB::bind_method(D_METHOD("set_shadow_bound_radii", "model_sphere", "entity_bound"),
 			&ObjectModel::set_shadow_bound_radii);
+	ClassDB::bind_method(D_METHOD("set_thermal_entity_wave", "enabled"),
+			&ObjectModel::set_thermal_entity_wave);
+	ClassDB::bind_method(D_METHOD("set_water_mirror_clip_wave_id", "wave"),
+			&ObjectModel::set_water_mirror_clip_wave_id);
+	ClassDB::bind_method(D_METHOD("is_water_mirror_clip_armed"),
+			&ObjectModel::is_water_mirror_clip_armed);
+	ClassDB::bind_integer_constant(get_class_static(), "", "WATER_MIRROR_CLIP_NONE",
+			static_cast<int>(opennova::env::MirrorClipWave::kNone));
+	ClassDB::bind_integer_constant(get_class_static(), "", "WATER_MIRROR_CLIP_SECTOR_MODEL",
+			static_cast<int>(opennova::env::MirrorClipWave::kSectorModel));
+	ClassDB::bind_integer_constant(get_class_static(), "", "WATER_MIRROR_CLIP_ENTITY",
+			static_cast<int>(opennova::env::MirrorClipWave::kEntity));
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_person", "person"),
 			&ObjectModel::set_slot_shadow_person);
 	ClassDB::bind_method(D_METHOD("is_slot_shadow_person"),

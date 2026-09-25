@@ -262,6 +262,11 @@ void ObjectModel::rebuild_scene() {
 		alpha_strip_models_.insert(this);
 		set_notify_transform(true);
 	}
+	if (tracks_water_mirror_clip()) {
+		water_mirror_clip_models_.insert(this);
+		set_notify_transform(true);
+	}
+	refresh_water_mirror_clip();
 	refresh_render_order();
 }
 
