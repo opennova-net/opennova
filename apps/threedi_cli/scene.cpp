@@ -167,8 +167,45 @@ std::vector<int> skinned_mesh_parts(const ThreediLod &lod) {
 	return mesh;
 }
 
+// Which strips of a LOD share their vertex window with another strip.
+// Retail's exporter pools one window between strips, across parts too
+// (Dblkhwk1's rotor strips of parts 3 and 4, Armry01's part 3 and its
+// neighbours; 70 JO models).
+std::vector<bool> shared_windows(const ThreediLod &lod) {
+	std::vector<bool> shared(lod.strip_count, false);
+	for (size_t a = 0; a < lod.strip_count; ++a)
+		for (size_t b = a + 1; b < lod.strip_count; ++b) {
+			const ThreediTriangleStrip &x = lod.strips[a], &y = lod.strips[b];
+			if (x.num_vertices > 0 && y.num_vertices > 0 && x.start_vertex < y.start_vertex + y.num_vertices &&
+					y.start_vertex < x.start_vertex + x.num_vertices)
+				shared[a] = shared[b] = true;
+		}
+	return shared;
+}
+
+// The window vertices a strip is written with, in window order: all of them,
+// unless the window is shared, when only those its own triangles use. The rest
+// belong to the strips it shares with, and a part's sphere spans the vertices
+// its triangles use (Armry01's part 3 and Dblkhwk1's part 4 match retail's
+// sphere exactly over those, and match no sphere over the whole window). A
+// vertex of an unshared window that no triangle uses is the author's: build
+// writes it again.
+std::vector<int> strip_vertices(const ThreediLod &lod, const ThreediTriangleStrip &st, bool shared) {
+	std::vector<int> out;
+	std::vector<uint16_t> tris;
+	if (shared && st.num_indices > 0 && threedi_decode_strip_indices(lod, st, tris)) {
+		std::vector<bool> used(static_cast<size_t>(st.num_vertices), false);
+		for (const uint16_t i : tris) used[i] = true;
+		for (int i = 0; i < st.num_vertices; ++i)
+			if (used[static_cast<size_t>(i)]) out.push_back(i);
+		return out;
+	}
+	for (int i = 0; i < st.num_vertices; ++i) out.push_back(i);
+	return out;
+}
+
 void write_strip(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const ThreediTriangleStrip &st, bool alpha,
-		bool uv1, bool skinned) {
+		bool uv1, bool skinned, bool shared) {
 	const int material = threedi_material_array_index_for_id(m, st.material_index);
 	w.line("strip " + std::to_string(material < 0 ? 0 : material) + " " + (alpha ? "1" : "0"));
 	if (material < 0) w.note("a strip names material id " + std::to_string(st.material_index) + " the model lacks");
@@ -177,7 +214,11 @@ void write_strip(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const T
 		for (int b = 0; b < st.bone_table_length && b < 16; ++b) s += " " + std::to_string(st.bone_table[b]);
 		w.line(s);
 	}
-	for (int i = 0; i < st.num_vertices; ++i) {
+	// Each written vertex's number in the scene's strip.
+	const std::vector<int> vertices = strip_vertices(lod, st, shared);
+	std::vector<int> number(static_cast<size_t>(std::max(0, st.num_vertices)), -1);
+	for (size_t k = 0; k < vertices.size(); ++k) number[static_cast<size_t>(vertices[k])] = static_cast<int>(k);
+	for (const int i : vertices) {
 		const ThreediVertex &v = lod.vertices.items[st.start_vertex + i];
 		std::string s = "v " + vec9(v.position) + " " + vec9(v.normal) + " " + f9(v.uv0[0]) + " " + f9(v.uv0[1]);
 		if (uv1) s += " " + f9(v.uv1[0]) + " " + f9(v.uv1[1]);
@@ -201,7 +242,8 @@ void write_strip(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const T
 	// counter-clockwise in mission axes, the mirror of model: swap the second
 	// and third corners (the inverse of build's swap).
 	for (size_t t = 0; t + 2 < tris.size(); t += 3)
-		w.line("t " + std::to_string(tris[t]) + " " + std::to_string(tris[t + 2]) + " " + std::to_string(tris[t + 1]));
+		w.line("t " + std::to_string(number[tris[t]]) + " " + std::to_string(number[tris[t + 2]]) + " " +
+				std::to_string(number[tris[t + 1]]));
 }
 
 void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
@@ -220,6 +262,7 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 			owned[p].push_back({cursor, s >= ro.num_strips});
 	}
 	if (cursor != lod.strip_count) w.note("lod " + std::to_string(li) + " strips no ROBJ owns");
+	const std::vector<bool> shared = shared_windows(lod);
 	if (skinned && lod.render_object_count > 0) {
 		// The retail skinned layout keeps every strip on the root ROBJ; the
 		// scene authors them on the mesh part(s), which the builder moves back.
@@ -245,13 +288,14 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 			int homeless = 0;
 			for (const auto &entry : all) {
 				const ThreediTriangleStrip &st = lod.strips[entry.first];
+				const std::vector<int> vertices = strip_vertices(lod, st, shared[entry.first]);
 				int best = mesh.front();
 				float best_radius = -1.0f;
 				for (int p : mesh) {
 					const ThreediRenderObject &ro = lod.render_objects[p];
 					bool inside = true;
-					for (int i = 0; i < st.num_vertices && inside; ++i) {
-						const float *v = lod.vertices.items[st.start_vertex + i].position;
+					for (size_t j = 0; j < vertices.size() && inside; ++j) {
+						const float *v = lod.vertices.items[st.start_vertex + vertices[j]].position;
 						double d = 0;
 						for (int k = 0; k < 3; ++k) d += (v[k] - ro.bounding_center[k]) * (v[k] - ro.bounding_center[k]);
 						inside = std::sqrt(d) <= ro.bounding_radius * 1.0001 + 1e-5;
@@ -276,7 +320,8 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 				(ro.bounding_center[0] != 0.0f || ro.bounding_center[1] != 0.0f || ro.bounding_center[2] != 0.0f);
 		w.line("part " + std::to_string(ro.parent_index) + " " + vec9(ro.abs) + (seeded ? " " + vec9(ro.bounding_center) : "") +
 				"  # part " + std::to_string(p));
-		for (const auto &entry : owned[p]) write_strip(w, m, lod, lod.strips[entry.first], entry.second, uv1, skinned);
+		for (const auto &entry : owned[p])
+			write_strip(w, m, lod, lod.strips[entry.first], entry.second, uv1, skinned, shared[entry.first]);
 	}
 	for (size_t a = 0; a < lod.part_animation_count; ++a) {
 		const ThreediPartAnimation &pa = lod.part_animations[a];

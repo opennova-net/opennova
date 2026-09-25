@@ -135,11 +135,12 @@ re-mint a built model byte for byte.
 
 The render words: GHDR's radius is the farthest render vertex from the origin,
 truncated (932 of the 958 JO models; rounding gives 486); a part's sphere is
-its vertex box's centre and the farthest vertex from it (5,168 of 5,932 rigid
+its vertex box's centre and the farthest vertex from it (5,239 of 5,933 rigid
 parts and 244 of 256 attributable skinned ones; the box's half-diagonal gives
-704 and none); a part's `rel` is its pivot less its parent's in float, the
-root's (-0, 0, 0) and a parentless part's its own pivot (40,863 of 40,935
-words); user points and section offsets truncate to 16.16. Tangents: each
+704 and none), over the vertices the part's triangles use (a strip `scene`
+writes from a shared window carries only those: below); a part's `rel` is its
+pivot less its parent's in float, the root's (-0, 0, 0) and a parentless
+part's its own pivot (40,863 of 40,935 words); user points and section offsets truncate to 16.16. Tangents: each
 triangle's dP/du and dP/dv from its UVs, summed over the triangles sharing a
 vertex of the same part, position and normal, normalized (a triangle with
 degenerate UVs reuses the previous one's).
@@ -175,6 +176,16 @@ holds all its vertices, among the skinned mesh parts (the parts no bone table
 names that carry bounds: FSldr03 part 19, ArmsG part 37), or, for a model
 authored on its bones (dM1A1's hull), among every part that carries bounds.
 
+Retail's exporter lets strips share one vertex window, across parts too (70
+of the 958 JO models: Dblkhwk1's rotor strips of parts 3 and 4, Armry01's part
+3 strip over the windows of parts 1 and 2). `scene` writes a strip whose window
+another strip overlaps with only the vertices its own triangles use,
+renumbered: the others belong to the strips it shares with, and the part
+sphere retail stores spans the part's own triangles (Armry01's part 3 and
+Dblkhwk1's part 4 match it exactly that way, and no sphere over the whole
+window). A strip with a window of its own is written whole: a vertex no
+triangle uses is the author's, and build writes it again.
+
 A spot light's cone is written as the float half-angle that gives back the
 stored byte, cosine and `view_proj` (a small cone leaves thousands of floats
 with one cosine); `acos` of the cosine alone does not.
@@ -191,10 +202,10 @@ lacks; light pad bytes; occlusion `slot_priority_scale` (the portal-slot priorit
 carried: part `rel`, bounds and spheres (but a part that draws nothing keeps
 its centre), section bounds, CMDL, face normal runs and plane distances,
 tangents. Over the 958 JO models, `build(scene(x))` is byte for byte what
-`build(scene(build(scene(x))))` is, and `opennova-3di compare` calls 881 of
-them the same model as `x` (866 with drift notes). The rest differ in words
-retail derived from what the file does not keep: part spheres no subset of the
-stored geometry gives (61 models, Armry01's part 3 among them), GHDR radii over
+`build(scene(build(scene(x))))` is, and `opennova-3di compare` calls 903 of
+them the same model as `x` (888 with drift notes). The rest differ in part
+spheres the rule above does not give over a part's own vertices (41 models),
+and in words retail derived from what the file does not keep: GHDR radii over
 geometry the file does not carry (25: the `fxflsh` family, the first-person
 weapons' own collision LOD), three skinned vehicles authored on bones whose
 strips mix bones (dM1A1, DT801, Ftruck1X), NaN `rel` words (Dmil261x,

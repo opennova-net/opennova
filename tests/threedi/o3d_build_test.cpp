@@ -407,6 +407,55 @@ int main(int argc, char **argv) {
 		round_trip("strict-vt-name", base + "userpoint \"a\vb\" 0 0 0 0 0 1 0\n");
 	}
 
+	// Retail lets strips share one vertex window, across parts too (Dblkhwk1's
+	// rotor strips of parts 3 and 4, Armry01's part 3): `scene` writes such a
+	// strip with the vertices its own triangles use, so each part's sphere
+	// comes back over its own geometry rather than over its neighbour's too.
+	{
+		const std::string text = "o3d 1\nmodel SHARE\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+				"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
+				"part 0 10 0 0\nstrip 0\nv 10 0 0 0 0 1 0 0\nv 13 0 0 0 0 1 1 0\nv 10 3 0 0 0 1 0 1\nt 0 1 2\n";
+		check(build("shared-window", text), "shared-window: build");
+		Threedi3di3 m{};
+		const bool loaded = threedi_3di3_read(path_of("shared-window", ".3di").c_str(), &m) == 0;
+		const bool read = loaded && m.lod_count == 1 && m.lods[0].strip_count == 2 && m.lods[0].render_object_count == 2;
+		check(read, "shared-window: read the built model");
+		if (loaded && !read) threedi_3di3_free(&m);
+		if (read) {
+			// Pool the two strips' windows into one, as retail's exporter does.
+			ThreediLod &lod = m.lods[0];
+			ThreediTriangleStrip &a = lod.strips[0], &b = lod.strips[1];
+			const int32_t shift = b.start_vertex - a.start_vertex;
+			for (int i = 0; i < b.num_indices; ++i)
+				lod.indices.indices[b.index_offset + i] = static_cast<uint16_t>(lod.indices.indices[b.index_offset + i] + shift);
+			a.num_vertices = b.num_vertices = a.num_vertices + b.num_vertices;
+			b.start_vertex = a.start_vertex;
+			float centre[2][3], radius[2];
+			for (int p = 0; p < 2; ++p) {
+				std::memcpy(centre[p], lod.render_objects[p].bounding_center, sizeof(centre[p]));
+				radius[p] = lod.render_objects[p].bounding_radius;
+			}
+			check(threedi_3di3_write(path_of("shared-window", ".pooled.3di").c_str(), &m) == 0,
+					"shared-window: write the pooled model");
+			threedi_3di3_free(&m);
+			check(threedi_cli::cmd_scene(path_of("shared-window", ".pooled.3di").c_str(),
+								  path_of("shared-window", ".pooled.o3d").c_str()) == 0 &&
+							threedi_cli::cmd_build(path_of("shared-window", ".pooled.o3d").c_str(),
+									path_of("shared-window", ".rt.3di").c_str()) == 0,
+					"shared-window: scene and build the pooled model");
+			Threedi3di3 back{};
+			if (threedi_3di3_read(path_of("shared-window", ".rt.3di").c_str(), &back) == 0) {
+				for (int p = 0; p < 2; ++p)
+					check(std::memcmp(back.lods[0].render_objects[p].bounding_center, centre[p], sizeof(centre[p])) == 0 &&
+									back.lods[0].render_objects[p].bounding_radius == radius[p],
+							"shared-window: part " + std::to_string(p) + " keeps the sphere of its own vertices");
+				threedi_3di3_free(&back);
+			} else {
+				check(false, "shared-window: read the rebuilt model");
+			}
+		}
+	}
+
 	std::printf("o3d_build_test: %d failures\n", failures);
 	return failures == 0 ? 0 : 1;
 }
