@@ -1,23 +1,56 @@
-// opennova-3di compare: tell whether two .3di files hold the same model,
-// ignoring what an authoring round trip legitimately changes (strip layout,
-// vertex order and sharing, material order, register order, float noise,
-// derived bounds) and reporting everything else: LOD types and thresholds,
-// part hierarchy and pivots, per-part geometry per material (oriented triangle
-// corners, normals, UVs and resolved skin weights, with aggregate diagnostics),
-// materials, PANM tracks and frames, user points, lights, occlusion
-// records and collision (sections, bullet faces, volumes as the polytopes
-// their planes bound). Seam-flag differences are reported as info only.
-// Exit 0 when the models match, 1 with a difference list.
+// opennova-3di compare: tell whether two .3di files hold the same model.
+//
+// The acceptance question (ADR 0047) is the one a modder asks of a retail
+// model imported into Blender and exported again: strip layout and precision
+// aside, does it mean the same thing to the game? So every check lands in one
+// of two tiers, chosen per check below with the reason:
+//
+//   DIFFERENT (a plain line, exit 1): anything that changes what the model
+//   means or how the runtime reads it beyond float and quantization noise.
+//   LOD types and thresholds; parts (parent, pivot, rel offset, bound
+//   sphere) and the GHDR radius; per part and material, the triangles as
+//   oriented corners (position, normal, UVs, resolved skin weights) and the
+//   vertex layout; materials; registers; PANM rows in row order (the part,
+//   parent, flags, tracks and rotation frame of each); user points; lights;
+//   occlusion records (sphere, vertices, faces with their plane, planes);
+//   collision: the CMDL, the CXLT rows, and per section its parent, offset,
+//   box, midpoint and radius, its bullet faces (corners, stored normal,
+//   plane distance, dominant axis, face box, surface, flags) and its volumes
+//   (the solid their planes bound, box, type and flags, a ladder's facing).
+//
+//   DRIFT (a `drift:` line per category with the count and the worst value,
+//   exit 0; exit 1 under --strict): a value our builder derives by a
+//   heuristic of ours where retail's tool is unwitnessed (tangent and
+//   bitangent values, volume seam flags); a zero-length vertex normal (it has
+//   no direction to keep) given one; the dominant axis of a diagonal bullet
+//   face (either axis projects it); and any value above that moved by more
+//   than float noise but by no more than its DIFFERENT tolerance (the storage
+//   noise of a Blender round trip; one 8.8, Q14 or 16.16 step after
+//   truncation).
+//
+// Not compared, because an authoring round trip legitimately changes it and
+// the runtime reads it through something compared above: strip layout and
+// bounds, vertex order and sharing, material, register, bone-table and volume
+// order, a triangle's starting corner, the occlusion edge words (indices into
+// the record's vertex order), the order of a volume's planes (but a ladder's
+// plane 0), and materials no strip draws. Not compared because the JO runtime
+// never reads it: LGHT view_proj, PANM matrix_offset and bind_matrix_index.
+//
+// Exit 0 same model (drift notes allowed unless --strict), 1 different, or a
+// file that cannot be read or is malformed (an index outside its table).
 
 #include <algorithm>
 #include <array>
+#include <climits>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <formats/threedi/threedi_3di3.h>
@@ -33,19 +66,95 @@ namespace threedi_cli {
 
 namespace {
 
-constexpr double kPosTol = 2e-3;   // metres
-constexpr double kDirTol = 2e-3;   // unit vectors
-constexpr double kRelTol = 2e-3;   // relative (areas)
+// Tolerances, calibrated on scene -> build over the 958 JO models (exact for
+// everything `scene` carries: it prints floats %.9g and 16.16 values exactly)
+// and on Blender 5.1 round trips (import, then export) of 46 retail models
+// (Armry01, Dblkhwk1, Dtruck2, US01, ArmsG, Mp5b_1st and 40 more across the
+// size range). The DIFFERENT tolerances sit above what that round trip moves
+// and below anything a player could see; the noise floors keep plain float
+// noise out of DRIFT.
+//
+// Render and occlusion vertices and UVs are float32 on disk: the round trip
+// moves them by at most 1e-5 m and 2e-6.
+constexpr double kPosTol = 1e-4, kPosNoise = 1e-5;  // metres
+constexpr double kUvTol = 1e-4, kUvNoise = 1e-6;
+constexpr double kWeightTol = 1e-4, kWeightNoise = 1e-6;
+// Placements Blender composes through object and bone matrices (part pivots
+// and rel offsets, user points, lights) and the part spheres derived from
+// vertices: the round trip moves them by up to 1.3e-4 m (Mp5b_1st's rig).
+constexpr double kPlaceTol = 1e-3, kPlaceNoise = 1e-5;
+// Directions and rotation frames (user points, light axes, MTRX rows,
+// occlusion planes): up to 5.5e-4 per component.
+constexpr double kDirTol = 2e-3, kDirNoise = 1e-5;
+// Vertex normals, by angle. Blender's custom-normal storage moves 99.65% of
+// 188,000 retail vertex normals by at most 0.05 degrees and the rest by at
+// most 1.8, with none between 2 and 5 degrees: past 5 (72 corners) a normal
+// was clamped or replaced, which lighting shows. 2 degrees changes diffuse
+// light by under 3.5%.
+constexpr double kNormalTolDeg = 2.0, kNormalNoiseDeg = 1e-3;
+constexpr double kNormalLengthTol = 1e-3;
+// A face normal the builder derives from corners (bullet faces, volume and
+// occlusion planes) is only as exact as they define it: at least 0.05
+// degrees (a few Q14 steps), and for a bullet face one 8.8 step per corner
+// across its smallest altitude (Section::faces).
+constexpr double kFaceNormalTolDeg = 0.05;
+// Tangents and bitangents are rebuilt from positions and UVs by the OED rule
+// (docs/threedi/o3d-scene-format.md); retail's tool is unwitnessed, so their
+// values are DRIFT only, above what renormalizing float noise moves.
+constexpr double kTangentNoise = 1e-4;
+// Quantized data: the collision block (8.8 CVRT corners, Q14 CNRM and BPLN
+// normals, 16.16 planes, boxes, offsets and radii), the CXLT rows and the
+// GHDR radius. One step of the grid a value is derived on is storage noise (a
+// round trip lands a corner a hair under its grid line and truncation moves
+// it a whole step); more is DIFFERENT. Any nonzero difference within that is
+// DRIFT.
+constexpr double kQ8 = 1.0 / 256.0;
+constexpr double kQ14 = 1.0 / 16384.0;
+constexpr double kQ16 = 1.0 / 65536.0;
+constexpr double kQuantumTol = kQ8 + kQ16;  // one 8.8 step plus the 16.16 truncation
+constexpr double kQuantumNoise = 0.5 * kQ16;
+// A distance over 8.8 corners (a section radius, the CMDL radii, a face box
+// taken from the unquantized corners): each corner may sit one step off.
+constexpr double kQuantumDistTol = 2.0 * kQ8 + kQ16;
+// A bullet face's plane is compared as the runtime's side test reads it,
+// n . p + plane_dist at the face's own corners (collision_query.cpp), within
+// the precision of its storage, per face (Section::faces): each side took its
+// distance at a corner up to one 8.8 step off the stored one (2 |n|1 / 256
+// between them: 7.8e-3 m for an axis-aligned face, 1.35e-2 at a diagonal)
+// and with a normal up to one Q14 step per axis off over the corner's lever
+// arm (retail took it with the unquantized normal: 8.6e-3 m at 75 m, Odock3).
+//
+// A volume's solid: each corner of one lies inside the other's planes within
+// one step (the round trip measures 3.3e-3 at most).
+constexpr double kVolumeTol = kQ8;
+
+// ---------------------------------------------------------------------------
+// The two tiers.
+
+struct Drift {
+	long count = 0;
+	double worst = 0.0;
+	std::string where;  // the owner of the worst value
+};
 
 struct Diff {
-	std::vector<std::string> lines;
-	std::vector<std::string> info;
+	std::vector<std::string> lines;      // DIFFERENT
+	std::map<std::string, Drift> drift;  // DRIFT, by category
+	std::vector<std::string> malformed;  // an index outside its table
 	void add(const std::string &s) { lines.push_back(s); }
+	void note(const std::string &category, double delta, const std::string &where, long count = 1) {
+		Drift &x = drift[category];
+		if (x.count == 0 || delta > x.worst) {
+			x.worst = delta;
+			x.where = where;
+		}
+		x.count += count;
+	}
 };
 
 std::string num(double v) {
 	char buf[32];
-	std::snprintf(buf, sizeof(buf), "%.5g", v);
+	std::snprintf(buf, sizeof(buf), "%.5g", v == 0.0 ? 0.0 : v);
 	return buf;
 }
 
@@ -56,19 +165,32 @@ Vec mission(const float *model) {
 	return {m.x, m.y, m.z};
 }
 
-// Equal within `tol`; a NaN matches a NaN (retail ships them in normals,
-// planes and frames).
-bool close(double a, double b, double tol) {
-	return (std::isnan(a) && std::isnan(b)) || std::fabs(a - b) <= tol;
+// |a - b|, where a NaN matches a NaN (retail ships them in normals, planes and
+// frames) and nothing else.
+double gap(double a, double b) {
+	const bool na = std::isnan(a), nb = std::isnan(b);
+	if (na || nb) return na && nb ? 0.0 : std::numeric_limits<double>::infinity();
+	return std::fabs(a - b);
 }
 
-bool near(const Vec &a, const Vec &b, double tol) {
-	for (int k = 0; k < 3; ++k)
-		if (!close(a[k], b[k], tol)) return false;
+template <size_t N>
+double gap(const std::array<double, N> &a, const std::array<double, N> &b) {
+	double worst = 0.0;
+	for (size_t k = 0; k < N; ++k) worst = std::max(worst, gap(a[k], b[k]));
+	return worst;
+}
+
+// One value in two tiers: false (DIFFERENT) beyond `tol`, a DRIFT note under
+// `category` when it moved by more than `noise`.
+bool within(Diff &d, const std::string &category, const std::string &where, double delta, double tol, double noise) {
+	if (!(delta <= tol)) return false;
+	if (delta > noise) d.note(category, delta, where);
 	return true;
 }
 
 std::string vs(const Vec &v) { return "(" + num(v[0]) + " " + num(v[1]) + " " + num(v[2]) + ")"; }
+
+Vec q16v(const int32_t *v) { return {v[0] * kQ16, v[1] * kQ16, v[2] * kQ16}; }
 
 std::string reg_name(const Threedi3di3 &m, int style, int reg) {
 	if (style <= THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD) return "-";
@@ -78,7 +200,8 @@ std::string reg_name(const Threedi3di3 &m, int style, int reg) {
 
 int byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
 
-// Everything a material means, as one comparable string.
+// Everything a material means, as one comparable string (generator rates and
+// phases to five significant digits; colours as the bytes they are authored).
 std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 	std::string k = std::string(mt.shader_name) + " flags " + std::to_string(mt.material_flags);
 	if (mt.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) k += " at " + std::to_string(mt.alpha_test_value_byte);
@@ -114,78 +237,403 @@ std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 	return k;
 }
 
+// ---------------------------------------------------------------------------
+// Faces: render triangles, bullet faces and occlusion faces share one record
+// and one matcher.
+
 struct Corner {
 	Vec position{}, normal{};
 	std::array<double, 4> uv{};
-	std::map<int, double> weights; // resolved part -> weight, independent of strip bone-table order
+	// Resolved skin, part -> weight summed per part and sorted by part, so the
+	// strip bone-table order does not matter (INT_MAX marks an unused slot).
+	std::array<int, 3> bone{{INT_MAX, INT_MAX, INT_MAX}};
+	std::array<double, 3> weight{};
+	std::array<double, 6> tangent{};  // tangent then bitangent (DRIFT only)
+	bool tangents = false;
 };
-using Triangle = std::array<Corner, 3>;
 
-bool same_corner(const Corner &a, const Corner &b) {
-	if (!near(a.position, b.position, kPosTol) || !near(a.normal, b.normal, 1e-2)) return false;
-	for (int k = 0; k < 4; ++k)
-		if (!close(a.uv[k], b.uv[k], 1e-3)) return false;
-	if (a.weights.size() != b.weights.size()) return false;
-	for (const auto &weight : a.weights) {
-		const auto it = b.weights.find(weight.first);
-		if (it == b.weights.end() || !close(weight.second, it->second, 1e-4)) return false;
-	}
-	return true;
+struct Face {
+	std::array<Corner, 3> corner;
+	double plane = 0.0;           // bullet face: the stored plane distance; occlusion face: its plane's d
+	int axis = 0;                 // bullet face: the stored normal's dominant axis
+	std::array<double, 6> box{};  // bullet face: the stored box (min, max)
+	// Bullet face: how far its stored normal (beyond the normal tolerance) and
+	// its plane may sit, from the precision its corners give them.
+	double normal_slack = 0.0, plane_slack = 0.0;
+};
+
+struct Tolerance {
+	double pos, normal_deg, uv, weight;
+	double plane;           // < 0: the faces carry no plane
+	bool zero_normal_free;  // an expected zero-length normal matches any normal
+};
+
+void add_weight(Corner &c, int bone, double w) {
+	for (int k = 0; k < 3; ++k)
+		if (c.bone[k] == bone || c.bone[k] == INT_MAX) {
+			c.bone[k] = bone;
+			c.weight[k] += w;
+			break;
+		}
+	for (int i = 1; i < 3; ++i)
+		for (int k = i; k > 0 && c.bone[k] < c.bone[k - 1]; --k) {
+			std::swap(c.bone[k], c.bone[k - 1]);
+			std::swap(c.weight[k], c.weight[k - 1]);
+		}
 }
 
-bool same_triangle(const Triangle &a, const Triangle &b) {
-	// Cyclic rotations keep the winding; swapping two corners does not.
+double weight_gap(const Corner &a, const Corner &b) {
+	if (a.bone != b.bone) return std::numeric_limits<double>::infinity();
+	return gap(a.weight, b.weight);
+}
+
+double length(const Vec &v) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
+
+bool has_nan(const Vec &v) { return std::isnan(v[0]) || std::isnan(v[1]) || std::isnan(v[2]); }
+
+bool zero_length(const Vec &v) { return !has_nan(v) && length(v) < 1e-6; }
+
+constexpr double kPi = 3.14159265358979323846;
+
+// The angle between two stored normals in degrees (atan2 keeps small angles
+// exact). A NaN matches the same NaN (retail ships them), two zero-length
+// normals match, and a zero-length normal is infinitely far from a real one.
+double normal_gap(const Vec &a, const Vec &b) {
+	const double inf = std::numeric_limits<double>::infinity();
+	if (has_nan(a) || has_nan(b)) return gap(a, b) == 0.0 ? 0.0 : inf;
+	const double la = length(a), lb = length(b);
+	if (la < 1e-6 || lb < 1e-6) return la < 1e-6 && lb < 1e-6 ? 0.0 : inf;
+	const Vec c{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+	return std::atan2(length(c), a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) * 180.0 / kPi;
+}
+
+// Direction within the angle and length within kNormalLengthTol (the
+// renderer lights with the stored vector as it is).
+bool same_normal(const Vec &a, const Vec &b, const Tolerance &t) {
+	if (t.zero_normal_free && zero_length(a) && !has_nan(b)) return true;
+	if (!(normal_gap(a, b) <= t.normal_deg)) return false;
+	return has_nan(a) || gap(length(a), length(b)) <= kNormalLengthTol;
+}
+
+bool same_corner(const Corner &a, const Corner &b, const Tolerance &t) {
+	return gap(a.position, b.position) <= t.pos && same_normal(a.normal, b.normal, t) && gap(a.uv, b.uv) <= t.uv &&
+			weight_gap(a, b) <= t.weight;
+}
+
+// How far apart two faces' planes lie at `a`'s corners, n . p + d with each
+// face's own normal and distance: the stored distances' difference when the
+// normals agree, and what the runtime's side test sees when a re-derived
+// normal tilts by a hair.
+double plane_gap(const Face &a, const Face &b) {
+	const Vec &na = a.corner[0].normal, &nb = b.corner[0].normal;
+	double worst = 0.0;
+	for (int k = 0; k < 3; ++k) {
+		const Vec &p = a.corner[k].position;
+		const double sa = na[0] * p[0] + na[1] * p[1] + na[2] * p[2] + a.plane;
+		const double sb = nb[0] * p[0] + nb[1] * p[1] + nb[2] * p[2] + b.plane;
+		worst = std::max(worst, gap(sa, sb));
+	}
+	return worst;
+}
+
+// CNRM's dominant-axis codes (the builder's WriteCNRM port): 1 z, 2 y, 4 x.
+int axis_component(int code) { return code == 1 ? 2 : code == 2 ? 1 : code == 4 ? 0 : -1; }
+
+// The runtime projects a bullet face on its dominant axis for the inside
+// test (collision_query.cpp); any axis the face does not stand edge-on to
+// gives the same answer, so two codes agree when each normal is diagonal
+// between their axes (within the normal tolerance).
+bool same_axis(const Face &a, const Face &b, double normal_deg) {
+	if (a.axis == b.axis) return true;
+	const int ia = axis_component(a.axis), ib = axis_component(b.axis);
+	if (ia < 0 || ib < 0) return false;
+	const double tie = 2.0 * std::sin(std::min(90.0, normal_deg) * kPi / 180.0);
+	const Vec &na = a.corner[0].normal, &nb = b.corner[0].normal;
+	return std::fabs(std::fabs(na[ia]) - std::fabs(na[ib])) <= tie && std::fabs(std::fabs(nb[ia]) - std::fabs(nb[ib])) <= tie;
+}
+
+// The tolerances for matching expected face `a`: a bullet face's own slack
+// on top.
+Tolerance face_tolerance(const Tolerance &t, const Face &a) {
+	Tolerance u = t;
+	u.normal_deg = std::max(t.normal_deg, a.normal_slack);
+	if (t.plane >= 0.0) u.plane = t.plane + a.plane_slack;
+	return u;
+}
+
+// The corner rotation under which `b` matches `a`, or -1. Cyclic rotations
+// keep the winding; swapping two corners does not.
+int face_shift(const Face &a, const Face &b, const Tolerance &t) {
+	const Tolerance u = face_tolerance(t, a);
+	if (u.plane >= 0.0 && (!same_axis(a, b, u.normal_deg) || !(plane_gap(a, b) <= u.plane))) return -1;
 	for (int shift = 0; shift < 3; ++shift) {
 		bool same = true;
-		for (int k = 0; k < 3 && same; ++k) same = same_corner(a[k], b[(k + shift) % 3]);
-		if (same) return true;
+		for (int k = 0; k < 3 && same; ++k) same = same_corner(a.corner[k], b.corner[(k + shift) % 3], u);
+		if (same) return shift;
 	}
-	return false;
+	return -1;
 }
 
-bool same_triangles(const std::vector<Triangle> &a, const std::vector<Triangle> &b) {
-	if (a.size() != b.size()) return false;
-	const auto centre_x = [](const Triangle &t) {
-		return (t[0].position[0] + t[1].position[0] + t[2].position[0]) / 3.0;
-	};
-	// Index candidates by centroid, then match every corner's attributes.
-	// Consuming each match preserves duplicate-face multiplicity while allowing
-	// strip, triangle, vertex and bone-table reordering.
-	std::multimap<double, size_t> candidates;
-	for (size_t i = 0; i < b.size(); ++i) candidates.emplace(centre_x(b[i]), i);
-	std::vector<std::vector<size_t>> matches(a.size());
-	for (size_t i = 0; i < a.size(); ++i) {
-		const double x = centre_x(a[i]);
-		const auto end = candidates.upper_bound(x + kPosTol);
-		for (auto it = candidates.lower_bound(x - kPosTol); it != end; ++it)
-			if (same_triangle(a[i], b[it->second])) matches[i].push_back(it->second);
-		if (matches[i].empty()) return false;
+// How far apart two matching faces are (the corners paired by `shift`): the
+// matcher pairs the closest first, so a face finds its exact copy.
+double face_cost(const Face &a, const Face &b, int shift, const Tolerance &t) {
+	double cost = t.plane >= 0.0 ? plane_gap(a, b) : 0.0;
+	for (int k = 0; k < 3; ++k) {
+		const Corner &x = a.corner[k], &y = b.corner[(k + shift) % 3];
+		cost = std::max(cost, gap(x.position, y.position));
+		const double angle = normal_gap(x.normal, y.normal);
+		cost += 1e-6 * (std::isinf(angle) ? 180.0 : angle) + gap(x.uv, y.uv) + (std::isinf(weight_gap(x, y)) ? 0.0 : weight_gap(x, y));
 	}
-	// Nearly coincident faces can match more than one candidate. An augmenting
-	// match avoids a greedy choice stealing the only candidate for a later face
-	// (retail fx_med1 otherwise fails even when compared with itself).
-	std::vector<size_t> owner(b.size(), a.size()), visited(b.size(), a.size());
-	size_t attempt = 0;
-	std::function<bool(size_t)> assign = [&](size_t i) {
-		for (size_t j : matches[i]) {
-			if (visited[j] == attempt) continue;
-			visited[j] = attempt;
-			if (owner[j] == a.size() || assign(owner[j])) {
-				owner[j] = i;
-				return true;
+	return cost;
+}
+
+Vec centre(const Face &f) {
+	Vec c{};
+	for (int k = 0; k < 3; ++k) c[k] = (f.corner[0].position[k] + f.corner[1].position[k] + f.corner[2].position[k]) / 3.0;
+	return c;
+}
+
+void put(std::string &s, double v) { s.append(reinterpret_cast<const char *>(&v), sizeof(v)); }
+
+std::string corner_bytes(const Corner &c) {
+	std::string s;
+	for (double v : c.position) put(s, v);
+	for (double v : c.normal) put(s, v);
+	for (double v : c.uv) put(s, v);
+	for (int k = 0; k < 3; ++k) {
+		put(s, c.bone[k]);
+		put(s, c.weight[k]);
+	}
+	for (double v : c.tangent) put(s, v);
+	return s;
+}
+
+// Exactly equal faces (any starting corner) share a key.
+std::string face_key(const Face &f) {
+	const std::string c[3] = {corner_bytes(f.corner[0]), corner_bytes(f.corner[1]), corner_bytes(f.corner[2])};
+	int first = 0;
+	for (int k = 1; k < 3; ++k)
+		if (c[k] < c[first]) first = k;
+	std::string key = c[first] + c[(first + 1) % 3] + c[(first + 2) % 3];
+	put(key, f.plane);
+	put(key, f.axis);
+	for (double v : f.box) put(key, v);
+	return key;
+}
+
+// Faces that are exactly equal collapse into one class with a multiplicity.
+struct Classes {
+	std::vector<size_t> rep;
+	std::vector<long> size;
+};
+
+Classes classes_of(const std::vector<Face> &faces) {
+	Classes c;
+	std::unordered_map<std::string, size_t> index;
+	for (size_t i = 0; i < faces.size(); ++i) {
+		const auto it = index.emplace(face_key(faces[i]), c.rep.size());
+		if (it.second) {
+			c.rep.push_back(i);
+			c.size.push_back(0);
+		}
+		++c.size[it.first->second];
+	}
+	return c;
+}
+
+using Cell = std::array<int64_t, 3>;
+
+struct CellHash {
+	size_t operator()(const Cell &c) const {
+		return static_cast<size_t>(static_cast<uint64_t>(c[0]) * 73856093u ^ static_cast<uint64_t>(c[1]) * 19349663u ^
+				static_cast<uint64_t>(c[2]) * 83492791u);
+	}
+};
+
+Cell cell_of(const Vec &p, double size) {
+	Cell c{};
+	for (int k = 0; k < 3; ++k) {
+		const double x = p[k] / size;
+		// A NaN centre (a NaN corner) gets a cell of its own kind.
+		c[k] = std::isnan(x) ? INT64_MIN / 2 : static_cast<int64_t>(std::floor(std::max(-1e15, std::min(1e15, x))));
+	}
+	return c;
+}
+
+struct Pairing {
+	size_t a, b;  // face indices
+	int shift;    // b's corner (k + shift) % 3 pairs with a's corner k
+	long count;   // exact copies paired this way
+};
+
+// Why the nearest face of `b` to `f` is not its match: the attributes past
+// their tolerance.
+std::string explain(const Face &f, const std::vector<Face> &b, const Tolerance &face_t) {
+	const Tolerance t = face_tolerance(face_t, f);
+	const Vec c = centre(f);
+	size_t best = b.size();
+	double best_d = std::numeric_limits<double>::infinity();
+	for (size_t j = 0; j < b.size(); ++j) {
+		const double d = gap(c, centre(b[j]));
+		if (d < best_d) {
+			best_d = d;
+			best = j;
+		}
+	}
+	std::string s = "e.g. the one centred at " + vs(c);
+	if (best == b.size()) return s;
+	double worst[5] = {std::numeric_limits<double>::infinity(), 0, 0, 0, 0};
+	for (int shift = 0; shift < 3; ++shift) {
+		double g[5] = {0, 0, 0, 0, 0};
+		for (int k = 0; k < 3; ++k) {
+			const Corner &x = f.corner[k], &y = b[best].corner[(k + shift) % 3];
+			g[0] = std::max(g[0], gap(x.position, y.position));
+			g[1] = std::max(g[1], same_normal(x.normal, y.normal, t) ? 0.0 : normal_gap(x.normal, y.normal));
+			g[2] = std::max(g[2], gap(x.uv, y.uv));
+			g[3] = std::max(g[3], weight_gap(x, y));
+		}
+		if (g[0] < worst[0]) std::copy(g, g + 5, worst);
+	}
+	worst[4] = t.plane >= 0.0 ? plane_gap(f, b[best]) : 0.0;
+	const char *names[5] = {"corner position (m)", "normal (degrees)", "UV", "skin weight", "plane (m)"};
+	const double tols[5] = {t.pos, t.normal_deg, t.uv, t.weight, std::max(0.0, t.plane)};
+	std::string why;
+	for (int k = 0; k < 5; ++k)
+		if (!(worst[k] <= tols[k])) why += std::string(why.empty() ? "" : ", ") + names[k] + " by " + num(worst[k]);
+	if (t.plane >= 0.0 && !same_axis(f, b[best], t.normal_deg)) why += std::string(why.empty() ? "" : ", ") + "dominant axis";
+	return s + (why.empty() ? std::string(": its nearest counterpart is taken") : ": the nearest one differs in " + why);
+}
+
+// Pair every face of `a` with its own face of `b` under `t`: a perfect
+// matching, since nearly coincident faces can match more than one candidate
+// and a greedy choice could steal the only candidate of a later face (retail
+// fx_med1 otherwise fails even against itself). Exact copies collapse into a
+// class with a multiplicity first and candidates come from a grid on the face
+// centre, so a flat grid of 20,000 faces or 2,000 stacked copies stay fast;
+// the augmenting search is an explicit stack. False with the reason in `why`
+// when no perfect matching exists.
+bool match_faces(const std::vector<Face> &a, const std::vector<Face> &b, const Tolerance &t,
+		std::vector<Pairing> &pairs, std::string &why) {
+	pairs.clear();
+	if (a.size() != b.size()) {
+		why = std::to_string(a.size()) + " vs " + std::to_string(b.size()) + " faces";
+		return false;
+	}
+	const Classes ca = classes_of(a), cb = classes_of(b);
+	// A matching centre lies within t.pos per axis: the neighbouring cells hold it.
+	const double size = std::max(2.0 * t.pos, 1e-6);
+	std::unordered_map<Cell, std::vector<size_t>, CellHash> grid;
+	for (size_t j = 0; j < cb.rep.size(); ++j) grid[cell_of(centre(b[cb.rep[j]]), size)].push_back(j);
+	struct Edge {
+		size_t from, to;
+		int shift;
+		long flow;
+		double cost;
+	};
+	std::vector<Edge> edges;
+	std::vector<std::vector<size_t>> out(ca.rep.size()), in(cb.rep.size());
+	long lonely = 0;
+	size_t first_lonely = a.size();
+	for (size_t i = 0; i < ca.rep.size(); ++i) {
+		const Face &f = a[ca.rep[i]];
+		const Cell c = cell_of(centre(f), size);
+		for (int dx = -1; dx <= 1; ++dx)
+			for (int dy = -1; dy <= 1; ++dy)
+				for (int dz = -1; dz <= 1; ++dz) {
+					const auto it = grid.find(Cell{c[0] + dx, c[1] + dy, c[2] + dz});
+					if (it == grid.end()) continue;
+					for (size_t j : it->second) {
+						const int shift = face_shift(f, b[cb.rep[j]], t);
+						if (shift < 0) continue;
+						out[i].push_back(edges.size());
+						in[j].push_back(edges.size());
+						edges.push_back(Edge{i, j, shift, 0, face_cost(f, b[cb.rep[j]], shift, t)});
+					}
+				}
+		if (out[i].empty()) {
+			lonely += ca.size[i];
+			if (first_lonely == a.size()) first_lonely = ca.rep[i];
+		}
+	}
+	if (lonely > 0) {
+		why = std::to_string(lonely) + " of " + std::to_string(a.size()) + " faces have no counterpart, " +
+				explain(a[first_lonely], b, t);
+		return false;
+	}
+	// Push one unit per face through class -> class edges (capacity: the
+	// target class's size): the closest pairs first, then augmenting along
+	// alternating paths (closest candidates first) for what is left.
+	std::vector<long> used(cb.rep.size(), 0), left(ca.size);
+	std::vector<size_t> order(edges.size());
+	for (size_t e = 0; e < edges.size(); ++e) order[e] = e;
+	std::stable_sort(order.begin(), order.end(), [&](size_t x, size_t y) { return edges[x].cost < edges[y].cost; });
+	for (size_t e : order) {
+		Edge &edge = edges[e];
+		const long units = std::min(left[edge.from], cb.size[edge.to] - used[edge.to]);
+		edge.flow += units;
+		left[edge.from] -= units;
+		used[edge.to] += units;
+	}
+	for (auto &list : out)
+		std::stable_sort(list.begin(), list.end(), [&](size_t x, size_t y) { return edges[x].cost < edges[y].cost; });
+	std::vector<size_t> seen_a(ca.rep.size(), 0), seen_b(cb.rep.size(), 0);
+	std::vector<size_t> reached_by(cb.rep.size(), 0), cancelled(ca.rep.size(), 0), stack;
+	size_t stamp = 0;
+	for (size_t i = 0; i < ca.rep.size(); ++i)
+		for (; left[i] > 0; --left[i]) {
+			++stamp;
+			seen_a[i] = stamp;
+			stack.assign(1, i);
+			size_t found = cb.rep.size();
+			while (!stack.empty() && found == cb.rep.size()) {
+				const size_t u = stack.back();
+				stack.pop_back();
+				for (size_t e : out[u]) {
+					const size_t v = edges[e].to;
+					if (seen_b[v] == stamp) continue;
+					seen_b[v] = stamp;
+					reached_by[v] = e;
+					if (used[v] < cb.size[v]) {
+						found = v;
+						break;
+					}
+					for (size_t r : in[v]) {
+						const size_t w = edges[r].from;
+						if (edges[r].flow > 0 && seen_a[w] != stamp) {
+							seen_a[w] = stamp;
+							cancelled[w] = r;
+							stack.push_back(w);
+						}
+					}
+				}
+			}
+			if (found == cb.rep.size()) {
+				why = "the faces pair up, but not one to one (copies of a face differ in number)";
+				return false;
+			}
+			++used[found];
+			for (size_t v = found;;) {
+				const size_t e = reached_by[v];
+				++edges[e].flow;
+				if (edges[e].from == i) break;
+				const size_t r = cancelled[edges[e].from];
+				--edges[r].flow;
+				v = edges[r].to;
 			}
 		}
-		return false;
-	};
-	for (; attempt < a.size(); ++attempt)
-		if (!assign(attempt)) return false;
+	for (const Edge &e : edges)
+		if (e.flow > 0) pairs.push_back(Pairing{ca.rep[e.from], cb.rep[e.to], e.shift, e.flow});
 	return true;
 }
 
-// A part's geometry under one material. Aggregate measurements explain a
-// difference; the corner records establish equivalence (means alone cannot).
+// ---------------------------------------------------------------------------
+// Render geometry.
+
+// A part's geometry under one material. The corner records establish
+// equivalence; the aggregates only explain a difference (means alone cannot
+// establish one).
 struct Geometry {
-	std::vector<Triangle> faces;
+	std::vector<Face> faces;
 	int triangles = 0;
 	double area = 0.0;
 	Vec centroid{0, 0, 0};  // area-weighted
@@ -197,7 +645,8 @@ struct Geometry {
 };
 
 // (part, material key, alpha) -> geometry, for one LOD.
-std::map<std::string, Geometry> lod_geometry(const Threedi3di3 &m, const ThreediLod &lod) {
+std::map<std::string, Geometry> lod_geometry(Diff &d, const std::string &where, const Threedi3di3 &m,
+		const ThreediLod &lod) {
 	std::map<std::string, Geometry> out;
 	size_t cursor = 0;
 	for (size_t p = 0; p < lod.render_object_count; ++p) {
@@ -209,26 +658,41 @@ std::map<std::string, Geometry> lod_geometry(const Threedi3di3 &m, const Threedi
 					(mi >= 0 ? material_key(m, m.materials[mi]) : std::string("?")) + (s >= ro.num_strips ? " alpha" : "");
 			Geometry &g = out[key];
 			std::vector<uint16_t> tris;
-			if (!threedi_decode_strip_indices(lod, st, tris)) continue;
+			if (!threedi_decode_strip_indices(lod, st, tris)) {
+				d.malformed.push_back(where + " strip " + std::to_string(cursor) + ": indices outside its vertex window");
+				continue;
+			}
 			for (size_t t = 0; t + 2 < tris.size(); t += 3) {
 				const ThreediVertex *v[3];
 				Vec p3[3];
-				Triangle face;
+				Face face;
 				for (int k = 0; k < 3; ++k) {
 					v[k] = &lod.vertices.items[st.start_vertex + tris[t + k]];
 					p3[k] = mission(v[k]->position);
-					Corner &c = face[k];
+					Corner &c = face.corner[k];
 					c.position = p3[k];
 					c.normal = mission(v[k]->normal);
 					c.uv = {v[k]->uv0[0], v[k]->uv0[1], v[k]->uv1[0], v[k]->uv1[1]};
-					if (m.header.mesh_type == THREEDI_MESH_SKINNED)
-						for (int w = 0; w < 3; ++w) {
-							if (v[k]->bone_weights[w] == 0.0f) continue;
-							const int slot = v[k]->bone_indices[w];
-							// Keep retail's out-of-table slots distinguishable too.
-							const int bone = slot < st.bone_table_length && slot < 16 ? st.bone_table[slot] : 256 + slot;
-							c.weights[bone] += v[k]->bone_weights[w];
+					c.tangents = v[k]->has_tangents != 0;
+					if (c.tangents) {
+						const Vec tn = mission(v[k]->tangent), bn = mission(v[k]->bitangent);
+						c.tangent = {tn[0], tn[1], tn[2], bn[0], bn[1], bn[2]};
+					}
+					if (m.header.mesh_type == THREEDI_MESH_SKINNED) {
+						// Out-of-table slots stay distinguishable (retail FSldr03 ships them).
+						const auto resolve = [&](int slot) {
+							return slot < st.bone_table_length && slot < 16 ? static_cast<int>(st.bone_table[slot]) : 256 + slot;
+						};
+						const float *w = v[k]->bone_weights;
+						if (w[0] == 0.0f && w[1] == 0.0f && w[2] == 0.0f) {
+							// The runtime binds a vertex without weight rigidly to its
+							// first slot (model_mesh_prepare.cpp: w0 = 1).
+							add_weight(c, resolve(v[k]->bone_indices[0]), 1.0);
+						} else {
+							for (int s3 = 0; s3 < 3; ++s3)
+								if (w[s3] != 0.0f) add_weight(c, resolve(v[k]->bone_indices[s3]), w[s3]);
 						}
+					}
 				}
 				g.faces.push_back(std::move(face));
 				Vec e{p3[1][0] - p3[0][0], p3[1][1] - p3[0][1], p3[1][2] - p3[0][2]};
@@ -280,8 +744,35 @@ std::map<std::string, Geometry> lod_geometry(const Threedi3di3 &m, const Threedi
 	return out;
 }
 
+// The DRIFT of matched render corners: whatever moved within tolerance, and
+// the tangent frames, which the builder derives by a heuristic.
+void render_drift(Diff &d, const std::string &label, const Geometry &x, const Geometry &y,
+		const std::vector<Pairing> &pairs) {
+	for (const Pairing &p : pairs)
+		for (int k = 0; k < 3; ++k) {
+			const Corner &a = x.faces[p.a].corner[k], &b = y.faces[p.b].corner[(k + p.shift) % 3];
+			within(d, "render corner positions (m)", label, gap(a.position, b.position), kPosTol, kPosNoise);
+			// A zero-length stored normal (retail ships them) has no direction
+			// to keep; an importer gives it one (Blender cannot store it).
+			if (zero_length(a.normal) && !zero_length(b.normal))
+				d.note("zero-length vertex normals given a direction", 1.0, label, p.count);
+			else
+				within(d, "render vertex normals (degrees)", label, normal_gap(a.normal, b.normal), kNormalTolDeg,
+						kNormalNoiseDeg);
+			within(d, "render UVs", label, gap(a.uv, b.uv), kUvTol, kUvNoise);
+			within(d, "skin weights", label, weight_gap(a, b), kWeightTol, kWeightNoise);
+			if (a.tangents && b.tangents) {
+				const double g = gap(a.tangent, b.tangent);
+				if (g > kTangentNoise)
+					d.note("tangent/bitangent values (the builder derives them by the OED rule; retail's tool is unwitnessed)", g,
+							label, p.count);
+			}
+		}
+}
+
 void compare_geometry(Diff &d, const std::string &where, const std::map<std::string, Geometry> &a,
 		const std::map<std::string, Geometry> &b) {
+	const Tolerance t{kPosTol, kNormalTolDeg, kUvTol, kWeightTol, -1.0, true};
 	for (const auto &kv : a) {
 		const auto it = b.find(kv.first);
 		const std::string label = where + " " + kv.first.substr(0, kv.first.find(' ', 5)) + " [" +
@@ -291,34 +782,64 @@ void compare_geometry(Diff &d, const std::string &where, const std::map<std::str
 			continue;
 		}
 		const Geometry &x = kv.second, &y = it->second;
-		if (!same_triangles(x.faces, y.faces))
-			d.add(label + ": triangle corners differ (positions, winding, normals, UVs or skin weights)");
-		if (x.triangles != y.triangles)
-			d.add(label + ": " + std::to_string(x.triangles) + " vs " + std::to_string(y.triangles) + " triangles");
+		std::vector<Pairing> pairs;
+		std::string why;
+		if (match_faces(x.faces, y.faces, t, pairs, why)) {
+			render_drift(d, label, x, y, pairs);
+			continue;
+		}
+		d.add(label + ": triangle corners differ: " + why);
+		// What moved, in aggregate.
 		const double scale = std::max(1.0, x.area);
-		if (std::fabs(x.area - y.area) > kRelTol * scale)
-			d.add(label + ": area " + num(x.area) + " vs " + num(y.area));
-		if (!near(x.centroid, y.centroid, kPosTol)) d.add(label + ": centroid " + vs(x.centroid) + " vs " + vs(y.centroid));
-		if (!near(x.normal, y.normal, kRelTol * scale))
+		if (std::fabs(x.area - y.area) > kPosTol * scale) d.add(label + ": area " + num(x.area) + " vs " + num(y.area));
+		if (gap(x.centroid, y.centroid) > kPosTol) d.add(label + ": centroid " + vs(x.centroid) + " vs " + vs(y.centroid));
+		if (gap(x.normal, y.normal) > kPosTol * scale)
 			d.add(label + ": face normal sum " + vs(x.normal) + " vs " + vs(y.normal));
 		if (x.agree != y.agree)
 			d.add(label + ": " + std::to_string(x.agree) + " vs " + std::to_string(y.agree) +
 					" triangles wound with their vertex normals (winding)");
-		if (!near(x.vnormal, y.vnormal, 1e-2))
-			d.add(label + ": vertex normals " + vs(x.vnormal) + " vs " + vs(y.vnormal));
-		if (std::fabs(x.uv0[0] - y.uv0[0]) > 1e-3 || std::fabs(x.uv0[1] - y.uv0[1]) > 1e-3)
+		if (gap(x.vnormal, y.vnormal) > kDirTol) d.add(label + ": vertex normals " + vs(x.vnormal) + " vs " + vs(y.vnormal));
+		if (gap(x.uv0[0], y.uv0[0]) > kUvTol || gap(x.uv0[1], y.uv0[1]) > kUvTol)
 			d.add(label + ": uv0 mean (" + num(x.uv0[0]) + " " + num(x.uv0[1]) + ") vs (" + num(y.uv0[0]) + " " +
 					num(y.uv0[1]) + ")");
-		if (std::fabs(x.uv1[0] - y.uv1[0]) > 1e-3 || std::fabs(x.uv1[1] - y.uv1[1]) > 1e-3)
+		if (gap(x.uv1[0], y.uv1[0]) > kUvTol || gap(x.uv1[1], y.uv1[1]) > kUvTol)
 			d.add(label + ": uv1 mean (" + num(x.uv1[0]) + " " + num(x.uv1[1]) + ") vs (" + num(y.uv1[0]) + " " +
 					num(y.uv1[1]) + ")");
-		if (x.triangles > 0 && (!near(x.mn, y.mn, kPosTol) || !near(x.mx, y.mx, kPosTol)))
+		if (x.triangles > 0 && y.triangles > 0 && (gap(x.mn, y.mn) > kPosTol || gap(x.mx, y.mx) > kPosTol))
 			d.add(label + ": bounds " + vs(x.mn) + ".." + vs(x.mx) + " vs " + vs(y.mn) + ".." + vs(y.mx));
 	}
 	for (const auto &kv : b)
 		if (!a.count(kv.first))
 			d.add(where + " " + kv.first.substr(0, 60) + ": extra (" + std::to_string(kv.second.triangles) + " triangles)");
 }
+
+// Parts: hierarchy, pivot, the rel offset the pose builder reads
+// (entity_pose.cpp) and the bound sphere the husk pieces and a headerless
+// model's radius read (collision_resolve.cpp, model_geometry.cpp). The
+// builder derives rel and the sphere; retail's rule for the sphere is the
+// farthest vertex from the box centre.
+void compare_parts(Diff &d, const std::string &where, const ThreediLod &x, const ThreediLod &y) {
+	for (size_t p = 0; p < x.render_object_count; ++p) {
+		const ThreediRenderObject &px = x.render_objects[p], &py = y.render_objects[p];
+		const std::string w = where + " part " + std::to_string(p);
+		if (px.parent_index != py.parent_index)
+			d.add(w + ": parent " + std::to_string(px.parent_index) + " vs " + std::to_string(py.parent_index));
+		if (!within(d, "part pivots (m)", w, gap(mission(px.abs), mission(py.abs)), kPlaceTol, kPlaceNoise))
+			d.add(w + ": pivot " + vs(mission(px.abs)) + " vs " + vs(mission(py.abs)));
+		if (!within(d, "part rel offsets (m)", w, gap(mission(px.rel), mission(py.rel)), kPlaceTol, kPlaceNoise))
+			d.add(w + ": rel offset " + vs(mission(px.rel)) + " vs " + vs(mission(py.rel)));
+		const bool centre_same = within(d, "part bound spheres (m)", w,
+				gap(mission(px.bounding_center), mission(py.bounding_center)), kPlaceTol, kPlaceNoise);
+		const bool radius_same =
+				within(d, "part bound spheres (m)", w, gap(px.bounding_radius, py.bounding_radius), kPlaceTol, kPlaceNoise);
+		if (!centre_same || !radius_same)
+			d.add(w + ": bound sphere " + vs(mission(px.bounding_center)) + " r " + num(px.bounding_radius) + " vs " +
+					vs(mission(py.bounding_center)) + " r " + num(py.bounding_radius));
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PANM.
 
 std::string track_key(const Threedi3di3 &m, const ThreediTransform &t) {
 	if (t.control == 0 && t.control_param == 0 && t.rate == 0 && t.start == 0 && t.end == 0) return "-";
@@ -329,19 +850,22 @@ std::string track_key(const Threedi3di3 &m, const ThreediTransform &t) {
 			std::to_string(t.end);
 }
 
+// Rows in row order, never keyed by part: the runtime computes row i's matrix
+// for part subobject_index from row i's basis and the row its parent names
+// (threedi_panm_matrices.cpp) and poses a part by its LAST row
+// (threedi_panm_pose.cpp), so row order, count and duplicates all change
+// the pose. Every retail table is canonical (row i transforms part i: all
+// 1,916 in the JO corpus).
 void compare_panm(Diff &d, const std::string &where, const Threedi3di3 &a, const ThreediLod &la, const Threedi3di3 &b,
 		const ThreediLod &lb) {
-	std::map<int, const ThreediPartAnimation *> ra, rb;
-	for (size_t i = 0; i < la.part_animation_count; ++i) ra[la.part_animations[i].subobject_index] = &la.part_animations[i];
-	for (size_t i = 0; i < lb.part_animation_count; ++i) rb[lb.part_animations[i].subobject_index] = &lb.part_animations[i];
-	for (const auto &kv : ra) {
-		const auto it = rb.find(kv.first);
-		const std::string w = where + " panm part " + std::to_string(kv.first);
-		if (it == rb.end()) {
-			d.add(w + ": missing");
-			continue;
-		}
-		const ThreediPartAnimation &x = *kv.second, &y = *it->second;
+	if (la.part_animation_count != lb.part_animation_count)
+		d.add(where + ": " + std::to_string(la.part_animation_count) + " vs " + std::to_string(lb.part_animation_count) +
+				" panm rows");
+	for (size_t i = 0; i < std::min(la.part_animation_count, lb.part_animation_count); ++i) {
+		const ThreediPartAnimation &x = la.part_animations[i], &y = lb.part_animations[i];
+		const std::string w = where + " panm row " + std::to_string(i);
+		if (x.subobject_index != y.subobject_index)
+			d.add(w + ": transforms part " + std::to_string(x.subobject_index) + " vs " + std::to_string(y.subobject_index));
 		if (x.parent_subobject != y.parent_subobject)
 			d.add(w + ": parent " + std::to_string(x.parent_subobject) + " vs " + std::to_string(y.parent_subobject));
 		if (x.flags != y.flags) {
@@ -366,16 +890,13 @@ void compare_panm(Diff &d, const std::string &where, const Threedi3di3 &a, const
 					for (int j = 0; j < 3; ++j) f[i * 3 + j] = m.mtrx.matrices[sel].m[i * 4 + j];
 			return f;
 		};
-		const std::array<double, 9> fx = frame(a, x), fy = frame(b, y);
-		for (int i = 0; i < 9; ++i)
-			if (!close(fx[i], fy[i], 2e-3)) {
-				d.add(w + ": rotation frame differs");
-				break;
-			}
+		if (!within(d, "panm rotation frames", w, gap(frame(a, x), frame(b, y)), kDirTol, kDirNoise))
+			d.add(w + ": rotation frame differs");
 	}
-	for (const auto &kv : rb)
-		if (!ra.count(kv.first)) d.add(where + " panm part " + std::to_string(kv.first) + ": extra");
 }
+
+// ---------------------------------------------------------------------------
+// Collision.
 
 // The corners of the convex polytope a plane list bounds (n . p + d <= 0 inside).
 std::vector<Vec> polytope(const ThreediBoundingPlane *planes, int count) {
@@ -397,52 +918,49 @@ std::vector<Vec> polytope(const ThreediBoundingPlane *planes, int count) {
 					inside = n[0] * p[0] + n[1] * p[1] + n[2] * p[2] + planes[q].radius <= 1e-3;
 				}
 				bool dup = false;
-				for (const Vec &o : out) dup = dup || near(o, p, 1e-4);
+				for (const Vec &o : out) dup = dup || gap(o, p) <= 1e-4;
 				if (inside && !dup) out.push_back(p);
 			}
 	return out;
 }
 
-// Every corner lies inside (or within `tol` of) the plane list: two convex
-// solids are the same when each one's corners lie inside the other.
-bool inside_all(const std::vector<Vec> &corners, const std::vector<ThreediBoundingPlane> &planes, double tol) {
-	for (const Vec &p : corners)
-		for (const ThreediBoundingPlane &q : planes)
-			if (q.normal[0] * p[0] + q.normal[1] * p[1] + q.normal[2] * p[2] + q.radius > tol) return false;
-	return true;
+// The largest signed distance of `p` outside a plane list.
+double outside(const Vec &p, const std::vector<ThreediBoundingPlane> &planes) {
+	double worst = -std::numeric_limits<double>::infinity();
+	for (const ThreediBoundingPlane &q : planes) {
+		const double s = q.normal[0] * p[0] + q.normal[1] * p[1] + q.normal[2] * p[2] + q.radius;
+		if (std::isnan(s)) return std::numeric_limits<double>::infinity();
+		worst = std::max(worst, s);
+	}
+	return worst;
 }
 
-bool same_points(const std::vector<Vec> &a, const std::vector<Vec> &b, double tol) {
-	for (const Vec &p : a) {
-		bool found = false;
-		for (const Vec &q : b) found = found || near(p, q, tol);
-		if (!found) return false;
-	}
-	for (const Vec &p : b) {
-		bool found = false;
-		for (const Vec &q : a) found = found || near(p, q, tol);
-		if (!found) return false;
-	}
-	return true;
+// How much further the worst corner of solid `x` lies outside `y`'s planes
+// than outside its own (polytope keeps corners up to 1e-3 out): two convex
+// solids are the same when each one's corners lie inside the other.
+double outside(const std::vector<Vec> &corners, const std::vector<ThreediBoundingPlane> &own,
+		const std::vector<ThreediBoundingPlane> &other) {
+	double worst = 0.0;
+	for (const Vec &p : corners) worst = std::max(worst, outside(p, other) - std::max(0.0, outside(p, own)));
+	return worst;
 }
 
 struct Section {
-	std::map<std::pair<int, uint32_t>, std::vector<Triangle>> geometry;
+	std::map<std::pair<int, uint32_t>, std::vector<Face>> faces;  // (surface, flags) -> bullet faces
 	int parent = 0;
 	Vec offset{0, 0, 0};
 	bool sphere = false;
+	std::array<double, 6> box{};  // min, max
 	Vec med{0, 0, 0};
 	double radius = 0;
+	int count = 0;
 	std::map<int, int> poly;
-	int faces = 0;
 	int ccw = 0;  // faces wound counter-clockwise about their stored normal
-	int on_plane = 0;  // faces whose plane distance puts their first corner on their plane
-	std::map<int, int> dominant;  // face count per stored normal's dominant axis
 	double area = 0;
 	Vec normal{0, 0, 0};
 	struct Volume {
 		int type, flags;
-		Vec mn, mx;
+		std::array<double, 6> box;
 		Vec facing;  // plane 0's normal: a ladder's facing
 		std::vector<Vec> corners;
 		std::vector<ThreediBoundingPlane> planes;
@@ -455,60 +973,80 @@ std::vector<Section> sections(const Threedi3di3 &m) {
 	std::vector<Section> out;
 	if (m.collision == nullptr) return out;
 	const ThreediCollisionModel &c = *m.collision;
+	// The caller checked threedi_3di3_collision_is_runtime_safe: every run
+	// and local index below stays inside its pool.
 	size_t v = 0, f = 0, vol = 0, pl = 0, nrm = 0;
 	for (size_t o = 0; o < c.object_count; ++o) {
 		const ThreediCollisionObject &co = c.objects[o];
 		Section s;
 		s.parent = co.parent_subobject_index;
-		for (int k = 0; k < 3; ++k) s.offset[k] = co.offset[k] / 65536.0;
+		s.offset = q16v(co.offset);
 		s.sphere = co.num_vertices == 0 && co.num_bounding_volumes == 0 && co.min[0] <= co.max[0];
-		for (int k = 0; k < 3; ++k) s.med[k] = co.med[k] / 65536.0;
-		s.radius = co.radius / 65536.0;
-		s.faces = co.num_faces;
-		for (int k = 0; k < co.num_faces && f < c.face_count; ++k, ++f) {
+		const Vec mn = q16v(co.min), mx = q16v(co.max);
+		s.box = {mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]};
+		s.med = q16v(co.med);
+		s.radius = co.radius * kQ16;
+		s.count = co.num_faces;
+		for (int k = 0; k < co.num_faces; ++k, ++f) {
 			const ThreediCollisionFace &fc = c.faces[f];
 			++s.poly[fc.poly_type];
 			const float *p[3];
 			for (int i = 0; i < 3; ++i) p[i] = c.vertices[v + fc.vert_index[i]].position;
-			Triangle face;
+			const ThreediCollisionNormal *sn = fc.normal_index >= 0 ? &c.normals[nrm + fc.normal_index] : nullptr;
+			Face face;
 			for (int i = 0; i < 3; ++i) {
-				face[i].position = {p[i][0], p[i][1], p[i][2]};
-				if (fc.normal_index >= 0 && nrm + fc.normal_index < c.normal_count) {
-					const float *sn = c.normals[nrm + fc.normal_index].normal;
-					face[i].normal = {sn[0], sn[1], sn[2]};
-				}
+				face.corner[i].position = {p[i][0], p[i][1], p[i][2]};
+				if (sn != nullptr) face.corner[i].normal = {sn->normal[0], sn->normal[1], sn->normal[2]};
 			}
-			s.geometry[{fc.poly_type, fc.material_flags}].push_back(std::move(face));
+			face.plane = fc.plane_dist_fp16 * kQ16;
+			face.axis = sn != nullptr ? sn->dominate_axis : -1;
+			// A face normal is only as exact as the corners it was taken from
+			// define it: one 8.8 step across the face's smallest altitude (a
+			// 2 cm sliver's normal is uncertain by 11 degrees, a metre-wide
+			// face's by 0.4), capped so a flipped face never matches.
+			double longest = 0.0, lever = 0.0;
+			for (int i = 0; i < 3; ++i) {
+				const float *q = p[(i + 1) % 3];
+				longest = std::max(longest, std::sqrt(double(q[0] - p[i][0]) * (q[0] - p[i][0]) +
+													 double(q[1] - p[i][1]) * (q[1] - p[i][1]) +
+													 double(q[2] - p[i][2]) * (q[2] - p[i][2])));
+				lever = std::max(lever, double(std::fabs(p[i][0])) + std::fabs(p[i][1]) + std::fabs(p[i][2]));
+			}
+			const Vec e0{p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]};
+			const Vec e1{p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]};
+			const double twice_area =
+					length(Vec{e0[1] * e1[2] - e0[2] * e1[1], e0[2] * e1[0] - e0[0] * e1[2], e0[0] * e1[1] - e0[1] * e1[0]});
+			const double altitude = longest > 0.0 ? twice_area / longest : 0.0;
+			face.normal_slack = std::min(90.0, std::atan2(2.0 * kQ8, altitude) * 180.0 / kPi);
+			const Vec &stored = face.corner[0].normal;
+			const double n1 = has_nan(stored) ? 0.0 : std::fabs(stored[0]) + std::fabs(stored[1]) + std::fabs(stored[2]);
+			face.plane_slack = 2.0 * kQ8 * n1 + kQ14 * lever + kQ16;
+			face.box = {fc.min_x_fp16 * kQ16, fc.min_y_fp16 * kQ16, fc.min_z_fp16 * kQ16,
+					fc.max_x_fp16 * kQ16, fc.max_y_fp16 * kQ16, fc.max_z_fp16 * kQ16};
+			s.faces[{fc.poly_type, fc.material_flags}].push_back(std::move(face));
 			const Vec e{p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]};
 			const Vec g{p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]};
 			const Vec n{e[1] * g[2] - e[2] * g[1], e[2] * g[0] - e[0] * g[2], e[0] * g[1] - e[1] * g[0]};
 			s.area += 0.5 * std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-			for (int k = 0; k < 3; ++k) s.normal[k] += 0.5 * n[k];
-			if (nrm + fc.normal_index < c.normal_count) {
-				const float *sn = c.normals[nrm + fc.normal_index].normal;
-				if (n[0] * sn[0] + n[1] * sn[1] + n[2] * sn[2] > 0) ++s.ccw;
-				++s.dominant[c.normals[nrm + fc.normal_index].dominate_axis];
-				// The runtime tests n . p + plane_dist (collision_query.cpp).
-				const double dist = sn[0] * p[0][0] + sn[1] * p[0][1] + sn[2] * p[0][2] + fc.plane_dist_fp16 / 65536.0;
-				if (std::fabs(dist) <= 2e-2) ++s.on_plane;
-			}
+			for (int k2 = 0; k2 < 3; ++k2) s.normal[k2] += 0.5 * n[k2];
+			if (sn != nullptr && n[0] * sn->normal[0] + n[1] * sn->normal[1] + n[2] * sn->normal[2] > 0) ++s.ccw;
 		}
 		v += static_cast<size_t>(co.num_vertices);
-		nrm += static_cast<size_t>(std::max(0, co.num_normals));
-		for (int k = 0; k < co.num_bounding_volumes && vol < c.volume_count; ++k, ++vol) {
+		nrm += static_cast<size_t>(co.num_normals);
+		for (int k = 0; k < co.num_bounding_volumes; ++k, ++vol) {
 			const ThreediBoundingVolume &bv = c.volumes[vol];
 			Section::Volume x;
 			x.type = bv.collidable_type;
 			x.flags = bv.flags;
-			x.mn = {bv.min_x_fp16 / 65536.0, bv.min_y_fp16 / 65536.0, bv.min_z_fp16 / 65536.0};
-			x.mx = {bv.max_x_fp16 / 65536.0, bv.max_y_fp16 / 65536.0, bv.max_z_fp16 / 65536.0};
-			const int count = static_cast<int>(std::min<size_t>(bv.plane_count, c.plane_count - pl));
+			x.box = {bv.min_x_fp16 * kQ16, bv.min_y_fp16 * kQ16, bv.min_z_fp16 * kQ16,
+					bv.max_x_fp16 * kQ16, bv.max_y_fp16 * kQ16, bv.max_z_fp16 * kQ16};
+			const int count = bv.plane_count;
 			x.corners = polytope(c.planes + pl, count);
-			if (count > 0) x.facing = {c.planes[pl].normal[0], c.planes[pl].normal[1], c.planes[pl].normal[2]};
+			x.facing = {c.planes[pl].normal[0], c.planes[pl].normal[1], c.planes[pl].normal[2]};
 			x.planes.assign(c.planes + pl, c.planes + pl + count);
 			x.seams = 0;
 			for (int q = 0; q < count; ++q) x.seams += c.planes[pl + q].flags != 0;
-			pl += static_cast<size_t>(std::max(0, bv.plane_count));
+			pl += static_cast<size_t>(count);
 			s.volumes.push_back(x);
 		}
 		out.push_back(s);
@@ -516,100 +1054,216 @@ std::vector<Section> sections(const Threedi3di3 &m) {
 	return out;
 }
 
+// The DRIFT of matched bullet faces: corners, normals and plane distances
+// within a quantum or two, and face boxes (DIFFERENT only past two steps: the
+// box comes from the unquantized corners the 8.8 ones were truncated from).
+// Returns the faces whose box moved further, and the worst move.
+std::pair<long, double> bullet_drift(Diff &d, const std::string &w, const std::vector<Face> &x,
+		const std::vector<Face> &y, const std::vector<Pairing> &pairs) {
+	std::pair<long, double> boxes{0, 0.0};
+	for (const Pairing &p : pairs) {
+		const Face &a = x[p.a], &b = y[p.b];
+		for (int k = 0; k < 3; ++k) {
+			const Corner &ca = a.corner[k], &cb = b.corner[(k + p.shift) % 3];
+			within(d, "bullet-face corners (m, 8.8)", w, gap(ca.position, cb.position), kQuantumTol, kQuantumNoise);
+		}
+		within(d, "bullet-face normals (degrees)", w, normal_gap(a.corner[0].normal, b.corner[0].normal),
+				std::max(kFaceNormalTolDeg, a.normal_slack), 1e-6);
+		within(d, "bullet-face planes at the face (m)", w, plane_gap(a, b), a.plane_slack, kQuantumNoise);
+		if (a.axis != b.axis) d.note("dominant axes of diagonal bullet faces (either projects the face)", 1.0, w, p.count);
+		const double g = gap(a.box, b.box);
+		if (!within(d, "bullet-face boxes (m)", w, g, kQuantumDistTol, kQuantumNoise)) {
+			boxes.first += p.count;
+			boxes.second = std::max(boxes.second, g);
+		}
+	}
+	return boxes;
+}
+
 void compare_collision(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
-	// CMDL: the box and radii the entity bound reads.
-	if (a.collision != nullptr && b.collision != nullptr) {
-		const ThreediCollisionModelData &x = a.collision->model_data, &y = b.collision->model_data;
-		bool same = true;
-		for (int k = 0; k < 6; ++k) same = same && std::fabs(x.bbox[k] - y.bbox[k]) <= 1e-2;
-		for (int k = 0; k < 3; ++k) same = same && std::fabs(x.radii[k] - y.radii[k]) <= 1e-2;
-		if (!same)
-			d.add("collision bounds (CMDL) " + vs({x.bbox[0], x.bbox[1], x.bbox[2]}) + ".." + vs({x.bbox[3], x.bbox[4], x.bbox[5]}) +
-					" r " + vs({x.radii[0], x.radii[1], x.radii[2]}) + " vs " + vs({y.bbox[0], y.bbox[1], y.bbox[2]}) + ".." +
-					vs({y.bbox[3], y.bbox[4], y.bbox[5]}) + " r " + vs({y.radii[0], y.radii[1], y.radii[2]}));
-	} else if ((a.collision == nullptr) != (b.collision == nullptr)) {
+	if ((a.collision == nullptr) != (b.collision == nullptr)) {
 		d.add("collision block: one model has none");
+		return;
+	}
+	if (a.collision == nullptr) return;
+	// CMDL: the box and radii the entity bound reads. The builder derives
+	// them from the bullet faces and LOD 0's triangles.
+	{
+		const ThreediCollisionModelData &x = a.collision->model_data, &y = b.collision->model_data;
+		std::array<double, 6> bx{}, by{};
+		for (int k = 0; k < 6; ++k) {
+			bx[k] = x.bbox[k];
+			by[k] = y.bbox[k];
+		}
+		const Vec rx{x.radii[0], x.radii[1], x.radii[2]}, ry{y.radii[0], y.radii[1], y.radii[2]};
+		const bool box_same = within(d, "CMDL box (m)", "CMDL", gap(bx, by), kQuantumTol, kQuantumNoise);
+		const bool radii_same = within(d, "CMDL radii (m)", "CMDL", gap(rx, ry), kQuantumDistTol, kQuantumNoise);
+		if (!box_same || !radii_same)
+			d.add("collision bounds (CMDL) " + vs({bx[0], bx[1], bx[2]}) + ".." + vs({bx[3], bx[4], bx[5]}) + " r " + vs(rx) +
+					" vs " + vs({by[0], by[1], by[2]}) + ".." + vs({by[3], by[4], by[5]}) + " r " + vs(ry));
+	}
+	// CXLT: the section pivots the entity reads (model_pivots_q16,
+	// collision_resolve.cpp).
+	{
+		const ThreediCollisionModel &x = *a.collision, &y = *b.collision;
+		if (x.translation_count != y.translation_count)
+			d.add("collision translations (CXLT): " + std::to_string(x.translation_count) + " vs " +
+					std::to_string(y.translation_count) + " rows");
+		for (size_t i = 0; i < std::min(x.translation_count, y.translation_count); ++i) {
+			const Vec px = q16v(x.translations[i].translation), py = q16v(y.translations[i].translation);
+			const std::string w = "collision translation (CXLT) " + std::to_string(i);
+			if (!within(d, "CXLT rows (m)", w, gap(px, py), kQuantumTol, kQuantumNoise))
+				d.add(w + ": " + vs(px) + " vs " + vs(py));
+		}
 	}
 	const std::vector<Section> sa = sections(a), sb = sections(b);
 	if (sa.size() != sb.size()) {
 		d.add("collision: " + std::to_string(sa.size()) + " vs " + std::to_string(sb.size()) + " sections");
 		return;
 	}
+	const Tolerance t{kQuantumTol, kFaceNormalTolDeg, 0.0, 0.0, 0.0, false};
 	for (size_t i = 0; i < sa.size(); ++i) {
 		const Section &x = sa[i], &y = sb[i];
 		const std::string w = "collision section " + std::to_string(i);
-		bool same_faces = x.geometry.size() == y.geometry.size();
-		for (const auto &entry : x.geometry) {
-			const auto it = y.geometry.find(entry.first);
-			if (it == y.geometry.end() || !same_triangles(entry.second, it->second)) same_faces = false;
+		// Bullet faces per (surface, flags), each with its stored normal,
+		// plane distance and dominant axis: the runtime tests n . p +
+		// plane_dist and projects on the dominant axis (collision_query.cpp).
+		bool faces_same = x.faces.size() == y.faces.size();
+		std::string why;
+		std::pair<long, double> boxes{0, 0.0};
+		for (const auto &entry : x.faces) {
+			const auto it = y.faces.find(entry.first);
+			std::vector<Pairing> pairs;
+			std::string reason;
+			if (it == y.faces.end()) {
+				faces_same = false;
+				continue;
+			}
+			if (match_faces(entry.second, it->second, t, pairs, reason)) {
+				const std::pair<long, double> moved = bullet_drift(d, w, entry.second, it->second, pairs);
+				boxes.first += moved.first;
+				boxes.second = std::max(boxes.second, moved.second);
+			} else {
+				faces_same = false;
+				if (why.empty())
+					why = " (surface " + std::to_string(entry.first.first) + " flags " + std::to_string(entry.first.second) + ": " +
+							reason + ")";
+			}
 		}
-		if (!same_faces) d.add(w + ": bullet-face corners, normals, surfaces or flags differ");
+		// The runtime culls a face by its box (collision_query.cpp).
+		if (boxes.first > 0)
+			d.add(w + ": " + std::to_string(boxes.first) + " bullet-face boxes moved, up to " + num(boxes.second) + " m");
+		if (!faces_same) {
+			d.add(w + ": bullet faces differ (corners, stored normals, plane distances, dominant axes, surfaces or flags)" + why);
+			if (x.count != y.count)
+				d.add(w + ": " + std::to_string(x.count) + " vs " + std::to_string(y.count) + " bullet faces");
+			if (x.poly != y.poly) {
+				std::string px, py;
+				for (const auto &kv : x.poly) px += " " + std::to_string(kv.first) + "x" + std::to_string(kv.second);
+				for (const auto &kv : y.poly) py += " " + std::to_string(kv.first) + "x" + std::to_string(kv.second);
+				d.add(w + ": face surfaces" + px + " vs" + py);
+			}
+			const double scale = std::max(1.0, x.area);
+			if (std::fabs(x.area - y.area) > 1e-2 * scale) d.add(w + ": bullet-face area " + num(x.area) + " vs " + num(y.area));
+			if (x.ccw != y.ccw)
+				d.add(w + ": " + std::to_string(x.ccw) + " vs " + std::to_string(y.ccw) +
+						" bullet faces wound counter-clockwise about their normal (winding)");
+		}
 		if (x.parent != y.parent) d.add(w + ": parent " + std::to_string(x.parent) + " vs " + std::to_string(y.parent));
-		if (!near(x.offset, y.offset, kPosTol)) d.add(w + ": offset " + vs(x.offset) + " vs " + vs(y.offset));
-		if (x.sphere != y.sphere || (x.sphere && (!near(x.med, y.med, 1e-2) || std::fabs(x.radius - y.radius) > 1e-2)))
-			d.add(w + ": hit sphere " + (x.sphere ? vs(x.med) + " r " + num(x.radius) : "none") + " vs " +
-					(y.sphere ? vs(y.med) + " r " + num(y.radius) : "none"));
-		if (x.faces != y.faces) d.add(w + ": " + std::to_string(x.faces) + " vs " + std::to_string(y.faces) + " bullet faces");
-		if (x.poly != y.poly) {
-			std::string px, py;
-			for (const auto &kv : x.poly) px += " " + std::to_string(kv.first) + "x" + std::to_string(kv.second);
-			for (const auto &kv : y.poly) py += " " + std::to_string(kv.first) + "x" + std::to_string(kv.second);
-			d.add(w + ": face surfaces" + px + " vs" + py);
-		}
-		const double scale = std::max(1.0, x.area);
-		if (std::fabs(x.area - y.area) > 1e-2 * scale) d.add(w + ": bullet-face area " + num(x.area) + " vs " + num(y.area));
-		if (!near(x.normal, y.normal, 1e-2 * scale))
-			d.add(w + ": bullet-face normal sum " + vs(x.normal) + " vs " + vs(y.normal));
-		if (x.ccw != y.ccw)
-			d.add(w + ": " + std::to_string(x.ccw) + " vs " + std::to_string(y.ccw) +
-					" bullet faces wound counter-clockwise about their normal (winding)");
-		if (x.on_plane != y.on_plane)
-			d.add(w + ": " + std::to_string(x.on_plane) + " vs " + std::to_string(y.on_plane) +
-					" bullet faces lie on the plane their distance gives");
-		if (x.dominant != y.dominant) d.add(w + ": bullet-face normals' dominant axes differ");
-		if (!x.sphere && std::fabs(x.radius - y.radius) > 1e-2)
-			d.info.push_back(w + ": radius " + num(x.radius) + " vs " + num(y.radius));
+		if (!within(d, "section offsets (m)", w, gap(x.offset, y.offset), kQuantumTol, kQuantumNoise))
+			d.add(w + ": offset " + vs(x.offset) + " vs " + vs(y.offset));
+		// The section box, midpoint and radius: the runtime's section cull
+		// box and hit sphere (model_geometry.cpp, collision_query.cpp),
+		// authored by `csphere` on a bone section.
+		if (x.sphere != y.sphere) d.add(w + ": hit sphere " + (x.sphere ? "present" : "none") + " vs " + (y.sphere ? "present" : "none"));
+		const bool box_same = within(d, "section boxes and midpoints (m)", w, gap(x.box, y.box), kQuantumTol, kQuantumNoise);
+		const bool med_same = within(d, "section boxes and midpoints (m)", w, gap(x.med, y.med), kQuantumTol, kQuantumNoise);
+		const bool radius_same = within(d, "section radii (m)", w, gap(x.radius, y.radius), kQuantumDistTol, kQuantumNoise);
+		if (!box_same || !med_same || !radius_same)
+			d.add(w + ": bounds " + vs({x.box[0], x.box[1], x.box[2]}) + ".." + vs({x.box[3], x.box[4], x.box[5]}) + " mid " +
+					vs(x.med) + " r " + num(x.radius) + " vs " + vs({y.box[0], y.box[1], y.box[2]}) + ".." +
+					vs({y.box[3], y.box[4], y.box[5]}) + " mid " + vs(y.med) + " r " + num(y.radius));
+		// Volumes in any order: the same type and flags, box and solid.
 		std::vector<bool> used(y.volumes.size(), false);
 		for (const Section::Volume &vx : x.volumes) {
 			int match = -1;
-			for (size_t j = 0; j < y.volumes.size() && match < 0; ++j) {
+			double best = std::numeric_limits<double>::infinity();
+			for (size_t j = 0; j < y.volumes.size(); ++j) {
 				const Section::Volume &vy = y.volumes[j];
-				if (used[j] || vx.type != vy.type || vx.flags != vy.flags) continue;
-				if (near(vx.mn, vy.mn, 1e-2) && near(vx.mx, vy.mx, 1e-2) && inside_all(vx.corners, vy.planes, 2e-2) &&
-						inside_all(vy.corners, vx.planes, 2e-2))
+				if (used[j] || vx.type != vy.type || vx.flags != vy.flags || !(gap(vx.box, vy.box) <= kQuantumTol)) continue;
+				const double g = std::max(outside(vx.corners, vx.planes, vy.planes), outside(vy.corners, vy.planes, vx.planes));
+				if (g <= kVolumeTol && g < best) {
+					best = g;
 					match = static_cast<int>(j);
+				}
 			}
 			if (match < 0) {
+				// The nearest volume of the same type and flags, for the reason.
+				double box = std::numeric_limits<double>::infinity(), solid = 0.0;
+				for (size_t j = 0; j < y.volumes.size(); ++j) {
+					const Section::Volume &vy = y.volumes[j];
+					if (used[j] || vx.type != vy.type || vx.flags != vy.flags || !(gap(vx.box, vy.box) < box)) continue;
+					box = gap(vx.box, vy.box);
+					solid = std::max(outside(vx.corners, vx.planes, vy.planes), outside(vy.corners, vy.planes, vx.planes));
+				}
 				d.add(w + ": volume type " + std::to_string(vx.type) + " flags " + std::to_string(vx.flags) + " box " +
-						vs(vx.mn) + ".." + vs(vx.mx) + " has no match");
+						vs({vx.box[0], vx.box[1], vx.box[2]}) + ".." + vs({vx.box[3], vx.box[4], vx.box[5]}) + " has no match" +
+						(std::isinf(box) ? std::string(" (none of that type and flags left)")
+										 : " (the nearest one's box is off by " + num(box) + " m, its solid by " + num(solid) + " m)"));
 				continue;
 			}
 			used[match] = true;
-			if (vx.type == 4 && !near(vx.facing, y.volumes[match].facing, 1e-2))
-				d.add(w + ": ladder facing (plane 0) " + vs(vx.facing) + " vs " + vs(y.volumes[match].facing));
-			if (vx.seams != y.volumes[match].seams)
-				d.info.push_back(w + ": volume type " + std::to_string(vx.type) + " seam planes " + std::to_string(vx.seams) +
-						" vs " + std::to_string(y.volumes[match].seams));
+			const Section::Volume &vy = y.volumes[match];
+			within(d, "volume boxes (m)", w, gap(vx.box, vy.box), kQuantumTol, kQuantumNoise);
+			within(d, "volume solids (m outside the other's planes)", w, best, kVolumeTol, kQuantumNoise);
+			// The runtime reads a ladder's plane 0 as its facing.
+			if (vx.type == 4 && !within(d, "ladder facings (degrees)", w, normal_gap(vx.facing, vy.facing), kFaceNormalTolDeg, 1e-6))
+				d.add(w + ": ladder facing (plane 0) " + vs(vx.facing) + " vs " + vs(vy.facing));
+			// Seam flags: our builder derives them by ModSuperOed's rule;
+			// retail's tool is unwitnessed (3di-gp-format-re.md), so DRIFT.
+			if (vx.seams != vy.seams)
+				d.note("volume seam planes (the builder derives them by ModSuperOed's rule; retail's tool is unwitnessed)",
+						std::abs(vx.seams - vy.seams), w);
 		}
 		for (size_t j = 0; j < y.volumes.size(); ++j)
 			if (!used[j]) d.add(w + ": extra volume type " + std::to_string(y.volumes[j].type));
 	}
 }
 
-std::vector<Triangle> occlusion_faces(const Threedi3di3 &m, size_t vertex, size_t plane, size_t face, int count) {
-	std::vector<Triangle> out;
+// ---------------------------------------------------------------------------
+// Occlusion.
+
+std::vector<Face> occlusion_faces(const Threedi3di3 &m, size_t vertex, size_t plane, size_t face, int count) {
+	std::vector<Face> out;
 	for (int i = 0; i < count && face + i < m.occlusion_face_count; ++i) {
 		const uint32_t raw = m.occlusion_faces[face + i].raw_indices;
-		Triangle tri;
+		Face tri;
+		const size_t p = plane + (raw >> 24);
 		for (int k = 0; k < 3; ++k) {
 			const size_t v = vertex + ((raw >> (k * 8)) & 0xFF);
-			if (v < m.occlusion_vertex_count) tri[k].position = mission(m.occlusion_vertices[v].position);
-			const size_t p = plane + (raw >> 24);
-			if (p < m.occlusion_plane_count) tri[k].normal = mission(m.occlusion_planes[p].normal);
+			if (v < m.occlusion_vertex_count) tri.corner[k].position = mission(m.occlusion_vertices[v].position);
+			if (p < m.occlusion_plane_count) tri.corner[k].normal = mission(m.occlusion_planes[p].normal);
 		}
+		// The plane a face takes is its normal and its d: faces on parallel
+		// planes must not swap.
+		if (p < m.occlusion_plane_count) tri.plane = m.occlusion_planes[p].radius;
 		out.push_back(std::move(tri));
 	}
 	return out;
+}
+
+bool same_points(const std::vector<Vec> &a, const std::vector<Vec> &b, double tol) {
+	for (const Vec &p : a) {
+		bool found = false;
+		for (const Vec &q : b) found = found || gap(p, q) <= tol;
+		if (!found) return false;
+	}
+	for (const Vec &p : b) {
+		bool found = false;
+		for (const Vec &q : a) found = found || gap(p, q) <= tol;
+		if (!found) return false;
+	}
+	return true;
 }
 
 void compare_occlusion(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
@@ -618,6 +1272,7 @@ void compare_occlusion(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 				" records");
 		return;
 	}
+	const Tolerance t{kPosTol, kFaceNormalTolDeg, 0.0, 0.0, kPosTol, false};
 	size_t va = 0, vb = 0, pa = 0, pb = 0, fa = 0, fb = 0;
 	for (size_t o = 0; o < a.occlusion_object_count; ++o) {
 		const ThreediOcclusionObject &x = a.occlusion_objects[o], &y = b.occlusion_objects[o];
@@ -629,6 +1284,16 @@ void compare_occlusion(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 			d.add(w + ": type/sections " + std::to_string(x.type) + " " + std::to_string(x.parent_subobject_index) + "->" +
 					std::to_string(x.connecting_subobject) + " vs " + std::to_string(y.type) + " " +
 					std::to_string(y.parent_subobject_index) + "->" + std::to_string(y.connecting_subobject));
+		// The record's sphere, which the portal walk reads (model_geometry.cpp);
+		// a record without vertices bounds nothing (retail leaves it NaN).
+		const bool empty = x.num_vertices <= 0 && y.num_vertices <= 0;
+		const bool pos_same = empty || within(d, "occlusion record spheres (m)", w,
+				gap(mission(x.position), mission(y.position)), kPosTol, kPosNoise);
+		const bool radius_same =
+				empty || within(d, "occlusion record spheres (m)", w, gap(x.radius, y.radius), kPosTol, kPosNoise);
+		if (!pos_same || !radius_same)
+			d.add(w + ": sphere " + vs(mission(x.position)) + " r " + num(x.radius) + " vs " + vs(mission(y.position)) + " r " +
+					num(y.radius));
 		if (x.face_count != y.face_count || x.num_vertices != y.num_vertices)
 			d.add(w + ": " + std::to_string(x.num_vertices) + "/" + std::to_string(x.face_count) + " vs " +
 					std::to_string(y.num_vertices) + "/" + std::to_string(y.face_count) + " vertices/faces");
@@ -638,8 +1303,11 @@ void compare_occlusion(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 		for (int k = 0; k < y.num_vertices && vb + k < b.occlusion_vertex_count; ++k)
 			py.push_back(mission(b.occlusion_vertices[vb + k].position));
 		if (!same_points(px, py, kPosTol)) d.add(w + ": vertices differ");
-		if (!same_triangles(occlusion_faces(a, va, pa, fa, x.face_count), occlusion_faces(b, vb, pb, fb, y.face_count)))
-			d.add(w + ": face corners, winding or plane assignments differ");
+		std::vector<Pairing> pairs;
+		std::string why;
+		if (!match_faces(occlusion_faces(a, va, pa, fa, x.face_count), occlusion_faces(b, vb, pb, fb, y.face_count), t, pairs,
+					why))
+			d.add(w + ": face corners, winding or planes differ: " + why);
 		// Planes as a set: (normal, d) within tolerance, order-insensitive.
 		std::vector<std::array<double, 4>> nx, ny;
 		for (int k = 0; k < x.num_planes && pa + k < a.occlusion_plane_count; ++k) {
@@ -654,8 +1322,8 @@ void compare_occlusion(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 			for (const auto &p : from) {
 				bool found = false;
 				for (const auto &q : in)
-					found = found || (close(p[0], q[0], kDirTol) && close(p[1], q[1], kDirTol) &&
-											 close(p[2], q[2], kDirTol) && close(p[3], q[3], kPosTol));
+					found = found || (gap(p[0], q[0]) <= kDirTol && gap(p[1], q[1]) <= kDirTol && gap(p[2], q[2]) <= kDirTol &&
+											 gap(p[3], q[3]) <= kPosTol);
 				if (!found) return false;
 			}
 			return true;
@@ -683,30 +1351,67 @@ void compare_lights(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
 				x.flags != y.flags || x.falloff_byte != y.falloff_byte ||
 				std::memcmp(x.color_start, y.color_start, 3) != 0 || std::memcmp(x.color_end, y.color_end, 3) != 0)
 			d.add(w + ": part/style/phase/rate/colours/flags differ");
-		if (std::fabs(x.atten_start - y.atten_start) > 1e-3 || std::fabs(x.atten_end - y.atten_end) > 1e-3)
+		if (!within(d, "light attenuation (m)", w, std::max(gap(x.atten_start, y.atten_start), gap(x.atten_end, y.atten_end)),
+					kPlaceTol, kPlaceNoise))
 			d.add(w + ": attenuation " + num(x.atten_start) + ".." + num(x.atten_end) + " vs " + num(y.atten_start) + ".." +
 					num(y.atten_end));
-		if (!near(mission(x.offset), mission(y.offset), kPosTol))
+		if (!within(d, "light positions (m)", w, gap(mission(x.offset), mission(y.offset)), kPlaceTol, kPlaceNoise))
 			d.add(w + ": position " + vs(mission(x.offset)) + " vs " + vs(mission(y.offset)));
-		if (!near(mission(x.rotation), mission(y.rotation), kDirTol) || std::fabs(x.rotation[3] - y.rotation[3]) > kDirTol)
+		if (!within(d, "light axes and cones", w,
+					std::max(gap(mission(x.rotation), mission(y.rotation)), gap(x.rotation[3], y.rotation[3])), kDirTol, kDirNoise))
 			d.add(w + ": axis/cone differ");
+	}
+}
+
+void compare_user_points(Diff &d, const Threedi3di3 &a, const Threedi3di3 &b) {
+	// In order: the attach scan masks a model's first 16 points by index.
+	if (a.user_point_count != b.user_point_count)
+		d.add("user points " + std::to_string(a.user_point_count) + " vs " + std::to_string(b.user_point_count));
+	for (size_t i = 0; i < std::min(a.user_point_count, b.user_point_count); ++i) {
+		const ThreediUserPoint &x = a.user_points[i], &y = b.user_points[i];
+		const Vec px{x.x * kQ16, x.y * kQ16, x.z * kQ16}, py{y.x * kQ16, y.y * kQ16, y.z * kQ16};
+		const Vec dx{x.rot_x * kQ16, x.rot_y * kQ16, x.rot_z * kQ16}, dy{y.rot_x * kQ16, y.rot_y * kQ16, y.rot_z * kQ16};
+		const std::string w = "user point " + std::to_string(i);
+		const bool at = within(d, "user point positions (m)", w, gap(px, py), kPlaceTol, kQuantumNoise);
+		const bool facing = within(d, "user point directions", w, gap(dx, dy), kDirTol, kQuantumNoise);
+		if (std::strcmp(x.name, y.name) != 0 || x.userpoint_type != y.userpoint_type ||
+				x.subobject_index != y.subobject_index || !at || !facing)
+			d.add(w + ": " + x.name + " " + std::to_string(x.userpoint_type) + " part " + std::to_string(x.subobject_index) +
+					" " + vs(px) + " " + vs(dx) + " vs " + y.name + " " + std::to_string(y.userpoint_type) + " part " +
+					std::to_string(y.subobject_index) + " " + vs(py) + " " + vs(dy));
 	}
 }
 
 } // namespace
 
-int cmd_compare(const char *expected_path, const char *actual_path) {
+int cmd_compare(const char *expected_path, const char *actual_path, bool strict) {
 	Threedi3di3 a{}, b{};
-	if (threedi_3di3_read(expected_path, &a) != 0 || threedi_3di3_read(actual_path, &b) != 0) {
-		std::fprintf(stderr, "opennova-3di: cannot read %s or %s\n", expected_path, actual_path);
+	if (threedi_3di3_read(expected_path, &a) != 0) {
+		std::fprintf(stderr, "opennova-3di: cannot read %s\n", expected_path);
+		return 1;
+	}
+	if (threedi_3di3_read(actual_path, &b) != 0) {
+		std::fprintf(stderr, "opennova-3di: cannot read %s\n", actual_path);
 		threedi_3di3_free(&a);
-		return 2;
+		return 1;
 	}
 	Diff d;
+	// Collision runs and local indices are read unchecked below: refuse a
+	// file whose collision block the runtime would refuse too.
+	if (a.collision != nullptr && !threedi_3di3_collision_is_runtime_safe(a.collision))
+		d.malformed.push_back(std::string(expected_path) + ": collision block indices outside their tables");
+	if (b.collision != nullptr && !threedi_3di3_collision_is_runtime_safe(b.collision))
+		d.malformed.push_back(std::string(actual_path) + ": collision block indices outside their tables");
 	if (std::strcmp(a.header.name, b.header.name) != 0)
 		d.add(std::string("model name ") + a.header.name + " vs " + b.header.name);
 	if (a.header.mesh_type != b.header.mesh_type)
 		d.add("mesh type " + std::to_string(a.header.mesh_type) + " vs " + std::to_string(b.header.mesh_type));
+	// GHDR's radius is the entity bound sphere (Entity_InitFromModel reads it;
+	// model_geometry.cpp), derived by the builder from every LOD's vertices.
+	const double ra_q = static_cast<uint32_t>(a.header.max_radius_fp16) * kQ16;
+	const double rb_q = static_cast<uint32_t>(b.header.max_radius_fp16) * kQ16;
+	if (!within(d, "GHDR radius (m)", "GHDR", gap(ra_q, rb_q), kQuantumTol, kQuantumNoise))
+		d.add("model radius (GHDR) " + num(ra_q) + " vs " + num(rb_q));
 	std::set<std::string> ra, rb;
 	for (uint32_t i = 0; i < a.ctrl.count; ++i) ra.insert(a.ctrl.registers[i].name);
 	for (uint32_t i = 0; i < b.ctrl.count; ++i) rb.insert(b.ctrl.registers[i].name);
@@ -721,45 +1426,51 @@ int cmd_compare(const char *expected_path, const char *actual_path) {
 		if (std::strcmp(x.model_type, y.model_type) != 0 || x.lod_threshold != y.lod_threshold)
 			d.add(w + ": " + x.model_type + " " + std::to_string(x.lod_threshold) + " vs " + y.model_type + " " +
 					std::to_string(y.lod_threshold));
+		// The vertex layout (tangent frames, skin) the renderer binds.
+		if (x.vertices.flags != y.vertices.flags || x.vertices.stride != y.vertices.stride) {
+			char buf[96];
+			std::snprintf(buf, sizeof(buf), ": vertex layout flags 0x%x stride %u vs flags 0x%x stride %u", x.vertices.flags,
+					x.vertices.stride, y.vertices.flags, y.vertices.stride);
+			d.add(w + buf);
+		}
+		compare_panm(d, w, a, x, b, y);
 		if (x.render_object_count != y.render_object_count) {
 			d.add(w + ": " + std::to_string(x.render_object_count) + " vs " + std::to_string(y.render_object_count) + " parts");
 			continue;
 		}
-		for (size_t p = 0; p < x.render_object_count; ++p) {
-			const ThreediRenderObject &px = x.render_objects[p], &py = y.render_objects[p];
-			if (px.parent_index != py.parent_index)
-				d.add(w + " part " + std::to_string(p) + ": parent " + std::to_string(px.parent_index) + " vs " +
-						std::to_string(py.parent_index));
-			if (!near(mission(px.abs), mission(py.abs), kPosTol))
-				d.add(w + " part " + std::to_string(p) + ": pivot " + vs(mission(px.abs)) + " vs " + vs(mission(py.abs)));
-		}
-		compare_geometry(d, w, lod_geometry(a, x), lod_geometry(b, y));
-		compare_panm(d, w, a, x, b, y);
+		compare_parts(d, w, x, y);
+		compare_geometry(d, w, lod_geometry(d, w, a, x), lod_geometry(d, w, b, y));
 	}
 	// Materials are compared through the geometry that draws with them;
 	// materials no strip draws (the exporter drops them) are not compared.
-	if (a.user_point_count != b.user_point_count)
-		d.add("user points " + std::to_string(a.user_point_count) + " vs " + std::to_string(b.user_point_count));
-	for (size_t i = 0; i < std::min(a.user_point_count, b.user_point_count); ++i) {
-		const ThreediUserPoint &x = a.user_points[i], &y = b.user_points[i];
-		const Vec px{x.x / 65536.0, x.y / 65536.0, x.z / 65536.0}, py{y.x / 65536.0, y.y / 65536.0, y.z / 65536.0};
-		const Vec dx{x.rot_x / 65536.0, x.rot_y / 65536.0, x.rot_z / 65536.0};
-		const Vec dy{y.rot_x / 65536.0, y.rot_y / 65536.0, y.rot_z / 65536.0};
-		if (std::strcmp(x.name, y.name) != 0 || x.userpoint_type != y.userpoint_type ||
-				x.subobject_index != y.subobject_index || !near(px, py, kPosTol) || !near(dx, dy, kDirTol))
-			d.add("user point " + std::to_string(i) + ": " + x.name + " " + std::to_string(x.userpoint_type) + " part " +
-					std::to_string(x.subobject_index) + " " + vs(px) + " vs " + y.name + " " +
-					std::to_string(y.userpoint_type) + " part " + std::to_string(y.subobject_index) + " " + vs(py));
-	}
+	compare_user_points(d, a, b);
 	compare_lights(d, a, b);
 	compare_occlusion(d, a, b);
-	compare_collision(d, a, b);
-	for (const std::string &s : d.info) std::printf("info: %s\n", s.c_str());
-	for (const std::string &s : d.lines) std::printf("%s\n", s.c_str());
-	std::printf("%s: %s\n", d.lines.empty() ? "same model" : "different", actual_path);
+	if (d.malformed.empty()) compare_collision(d, a, b);
 	threedi_3di3_free(&a);
 	threedi_3di3_free(&b);
-	return d.lines.empty() ? 0 : 1;
+	if (!d.malformed.empty()) {
+		for (const std::string &s : d.malformed) std::fprintf(stderr, "opennova-3di: malformed: %s\n", s.c_str());
+		return 1;
+	}
+	for (const auto &kv : d.drift)
+		std::printf("drift: %s: %ld values, worst %s (%s)\n", kv.first.c_str(), kv.second.count, num(kv.second.worst).c_str(),
+				kv.second.where.c_str());
+	for (const std::string &s : d.lines) std::printf("%s\n", s.c_str());
+	const bool same = d.lines.empty() && (!strict || d.drift.empty());
+	if (!d.lines.empty())
+		std::printf("different: %s\n", actual_path);
+	else if (!same)
+		std::printf("different (--strict: drift): %s\n", actual_path);
+	else if (!d.drift.empty())
+		std::printf("same model, with drift: %s\n", actual_path);
+	else
+		std::printf("same model: %s\n", actual_path);
+	return same ? 0 : 1;
+}
+
+int cmd_compare(const char *expected_path, const char *actual_path) {
+	return cmd_compare(expected_path, actual_path, false);
 }
 
 } // namespace threedi_cli
