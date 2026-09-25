@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -43,7 +44,9 @@ namespace godot {
 	X(float, spring_const, 0.0f)                                                                   \
 	X(int, lod_divisor, 1)                                                                         \
 	X(int, kill_plane, 0)                                                                          \
-	X(float, kill_plane_y, 0.0f)
+	X(float, kill_plane_y, 0.0f)                                                                   \
+	X(bool, section_tagged, false)                                                                 \
+	X(PackedInt64Array, blink_hits, PackedInt64Array())
 
 class EffectSpawnRequest : public RefCounted {
 	GDCLASS(EffectSpawnRequest, RefCounted)
@@ -109,7 +112,8 @@ private:
 	X(int, force_zone, 0)                                                                          \
 	X(int, initial_age_ticks, 0)                                                                   \
 	X(int64_t, source_tick, 0)                                                                     \
-	X(int64_t, source_order, 0)
+	X(int64_t, source_order, 0)                                                                    \
+	X(bool, section_tagged, false)
 
 class EffectSpawnOptions : public RefCounted {
 	GDCLASS(EffectSpawnOptions, RefCounted)

@@ -276,7 +276,10 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 			}
 		}
 		if (fx_world != nullptr && plan.spawn) {
-			fx_world->spawn_effect(String::utf8(plan.effect.c_str()), origin, mission_to_godot(ev.forward));
+			// The shooter is the descriptor tag (retail
+			// WeaponSlot_FireAndSpawnEffects @ 0x53F582): the section gate applies.
+			fx_world->spawn_effect(String::utf8(plan.effect.c_str()), origin,
+					mission_to_godot(ev.forward), true);
 			++stat_effects_;
 		}
 	}

@@ -309,9 +309,11 @@ std::int32_t emitter_initial_budget(const Emitter &e) noexcept;
 
 // Advance the simulation by `dt` seconds in retail's AdvanceFrame order: child
 // spawns into `child` (when the def names a child and one is bound), expiry,
-// integration, self-emission, clock. `child` may be null.
+// integration, self-emission, clock. `child` may be null. `group_visible` is
+// the owning group's section gate (EffectSectionGate): a NOVISNOUPDATE emitter
+// of a hidden group freezes exactly as an off-screen one does.
 void emitter_advance(Emitter &e, float dt, const EmitterEnvironment &env = {},
-		Emitter *child = nullptr);
+		Emitter *child = nullptr, bool group_visible = true);
 
 // The retail aliveness leaf: emitting (budget left and the window open, or a
 // non-self-emitting child) or still carrying live particles

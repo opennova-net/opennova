@@ -382,6 +382,8 @@ Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_lis
 	result["input_particles"] = static_cast<int64_t>(debug.input_particles);
 	result["domain_filtered_particles"] =
 			static_cast<int64_t>(debug.domain_filtered_particles);
+	result["section_hidden_emitters"] =
+			static_cast<int64_t>(debug.section_hidden_emitters);
 	result["water_filtered_emitters"] =
 			static_cast<int64_t>(debug.water_filtered_emitters);
 	result["water_filtered_particles"] =
@@ -1279,6 +1281,8 @@ public:
 			}
 			emitter.distortion_class =
 					opennova::particle::particle_def_is_distortion_class(definition);
+			emitter.group_visible = source_emitter.group_index >= frame.groups.size() ||
+					frame.groups[source_emitter.group_index].section_visible;
 
 			int fallback_layer = 0;
 			for (int layer = 0; layer < kGraphicLayerCount; ++layer) {

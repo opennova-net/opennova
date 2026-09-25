@@ -451,6 +451,12 @@ const ParticleDrawList &ParticleFrameCompiler::compile(
 			debug.domain_filtered_particles += particle_count;
 			continue;
 		}
+		// A group the section gate hides draws none of its children on any
+		// pass [orig: CParticleGroup_RenderChildren @ 0x5E5893..0x5E5897].
+		if (!emitter.group_visible) {
+			++debug.section_hidden_emitters;
+			continue;
+		}
 		if (!water_subset_selects(emitter, view)) {
 			++debug.water_filtered_emitters;
 			debug.water_filtered_particles += particle_count;

@@ -83,7 +83,7 @@ void GameWorld::route_round_impacts() {
 			effect_world->spawn_effect_transient(opennova::to_gd(row.effect), pos,
 					mission_to_godot(row.direction), static_cast<int64_t>(row.age_ticks),
 					EffectScene::RENDER_DOMAIN_WORLD, static_cast<int64_t>(row.source_tick),
-					static_cast<int64_t>(row.source_order));
+					static_cast<int64_t>(row.source_order), row.section_tagged);
 		}
 		if (audio != nullptr && !row.sound.empty()) {
 			audio->fire_soundset(opennova::to_gd(row.sound), pos);
@@ -153,6 +153,11 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	const bool skip_fixed_handlers = probe_enabled && perf_probe_skip_fixed_handlers_;
 	if (skip_fixed_handlers) {
 		return;
+	}
+	// The effect groups' section gate reads this simulation's blink volumes
+	// and building masks (particle::EffectSectionGate).
+	if (EffectWorld *gate_world = get_effect_world()) {
+		gate_world->set_section_source(get_sim().ptr());
 	}
 	// Retail executes local weapon actions and physical impacts before the same
 	// frame's global particle update. Consume each source tick synchronously so

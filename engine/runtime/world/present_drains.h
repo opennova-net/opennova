@@ -51,6 +51,7 @@ struct RoundImpactPresentation {
     uint32_t age_ticks = 0;
     uint32_t source_tick = 0;
     uint64_t source_order = 0;
+    bool section_tagged = false; // RoundImpact::section_tagged
     bool has_light = false;
     float light_radius = 0.0f;
     uint32_t light_color_rgb24 = 0xFFFFFFu;

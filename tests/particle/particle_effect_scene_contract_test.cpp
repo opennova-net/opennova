@@ -853,8 +853,101 @@ bool initial_age_uses_scene_wind_contract() {
 	return true;
 }
 
+// The building-section gate [orig: sub_5F6D10 @ 0x5F6D10]: masks indexed by
+// the blink hit's pool-2 entity index, the hits packed as the blink query
+// packs them.
+struct SectionMasks final : p::EffectSectionMasks {
+	std::uint32_t words[8]{};
+	std::uint32_t section_mask(std::int32_t index) const override {
+		return index >= 0 && index < 8 ? words[index] : 0u;
+	}
+};
+
+std::uint32_t blink_hit(std::int32_t section, std::int32_t owner) {
+	return static_cast<std::uint32_t>(((section & 0x1F) + (owner << 8)) << 12);
+}
+
+p::ParticleFrameSnapshot advance_frame_with_masks(p::EffectScene &scene, float dt,
+		const p::EffectSectionMasks *masks) {
+	p::EffectAdvanceRequest request;
+	request.delta_seconds = dt;
+	request.section_masks = masks;
+	scene.advance_simulation(request);
+	p::ParticleFrameSnapshot snapshot;
+	scene.write_snapshot(snapshot);
+	return snapshot;
+}
+
+std::size_t group_particles(const p::ParticleFrameSnapshot &frame,
+		const p::EffectGroupFrameSnapshot &group) {
+	std::size_t count = 0;
+	for (std::size_t i = 0; i < group.emitter_count; ++i)
+		count += frame.emitters[group.first_emitter + i].particle_count;
+	return count;
+}
+
+bool section_gate_contract() {
+	SectionMasks masks;
+	p::EffectSectionGate gate;
+	gate.blink_hits[0] = blink_hit(3, 5);
+	if (!check(p::effect_section_gate_visible(gate, masks),
+			"an untagged group is never gated")) return false;
+	gate.tagged = true;
+	if (!check(!p::effect_section_gate_visible(gate, masks),
+			"a tagged group in a building section nobody sees is hidden")) return false;
+	masks.words[5] = 1u << 2;
+	if (!check(!p::effect_section_gate_visible(gate, masks),
+			"another section's bit does not show it")) return false;
+	masks.words[5] |= 1u << 3;
+	if (!check(p::effect_section_gate_visible(gate, masks),
+			"its own section's bit shows it")) return false;
+	masks.words[5] = 0;
+	gate.blink_hits[1] = blink_hit(7, 2);
+	masks.words[2] = 1u << 7;
+	if (!check(p::effect_section_gate_visible(gate, masks),
+			"any hit's visible section shows the group")) return false;
+	p::EffectSectionGate outside;
+	outside.tagged = true;
+	outside.blink_hits[1] = blink_hit(1, 1);
+	if (!check(p::effect_section_gate_visible(outside, masks),
+			"an empty first hit slot means no blink volume: never gated")) return false;
+
+	// The scene: the gate is the group's +0x6C, recomputed every advance; a
+	// hidden group freezes its NOVISNOUPDATE children and reports hidden.
+	auto config = one_effect("room fire", "flame");
+	config.documents[0].file.particles[0].flags |= p::particle_flag::NoVisNoUpdate;
+	p::EffectScene scene;
+	scene.open(config);
+	auto request = spawn_request(scene.intern("room fire"));
+	request.section_gate.tagged = true;
+	request.section_gate.blink_hits[0] = blink_hit(4, 6);
+	const auto receipt = scene.spawn(request);
+	if (!check(receipt.spawned(), "the gated effect spawns")) return false;
+	SectionMasks hidden;
+	auto frame = advance_frame_with_masks(scene, 0.3f, &hidden);
+	const auto *group = frame_group(frame, receipt.group);
+	if (!check(group && !group->section_visible,
+			"the advance hides a group whose section is not visible")) return false;
+	if (!check(group_particles(frame, *group) == 0,
+			"a hidden group's NOVISNOUPDATE child does not advance")) return false;
+	const auto *debug = debug_group(scene.inspect(false), receipt.group);
+	if (!check(debug && debug->section_gate.tagged && !debug->section_visible,
+			"the debug view carries the gate")) return false;
+	SectionMasks shown;
+	shown.words[6] = 1u << 4;
+	frame = advance_frame_with_masks(scene, 0.3f, &shown);
+	group = frame_group(frame, receipt.group);
+	if (!check(group && group->section_visible && group_particles(frame, *group) > 0,
+			"the section coming into view shows and advances the group")) return false;
+	frame = advance_frame_with_masks(scene, 0.3f, nullptr);
+	group = frame_group(frame, receipt.group);
+	return check(group && group->section_visible,
+			"without occlusion state every group is visible");
+}
+
 int main() {
 	if (!initial_age_uses_scene_wind_contract()) return 1;
+	if (!section_gate_contract()) return 1;
 	if (!child_id_chain_contract()) return 1;
 	if (!catalog_and_stock_alias_contract()) return 1;
 	if (!pdef_reference_resolution_is_case_insensitive_contract()) return 1;

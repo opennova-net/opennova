@@ -188,6 +188,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_end_round.cpp
     simulation/simulation_player_view.cpp
     simulation/simulation_player_weapon.cpp
+    simulation/effect_section_source.cpp
     simulation/simulation_present.cpp
     simulation/simulation_script_voice.cpp
     simulation/simulation_scars.cpp

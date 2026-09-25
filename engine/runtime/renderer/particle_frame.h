@@ -171,6 +171,9 @@ struct ParticleEmitterSnapshot {
 	// The def's first graphic is Distort (the child's class id +0x1E0 == 7):
 	// the emitter draws only in the distortion pass.
 	bool distortion_class = false;
+	// The owning group's building-section gate (EffectSectionGate, the group's
+	// +0x6C): a hidden group draws in no pass.
+	bool group_visible = true;
 	ParticleAabb bounds{};
 	// This emitter's run inside ParticleFrameSnapshot::particles. A run that
 	// overruns the flat array is clamped by the compiler.
@@ -237,6 +240,8 @@ struct ParticleFrameDebugCounters {
 	std::size_t selected_emitters = 0;
 	std::size_t input_particles = 0;
 	std::size_t domain_filtered_particles = 0;
+	// Emitters of groups the building-section gate hides this frame.
+	std::size_t section_hidden_emitters = 0;
 	std::size_t water_filtered_emitters = 0;
 	std::size_t water_filtered_particles = 0;
 	std::size_t invisible_particles = 0;

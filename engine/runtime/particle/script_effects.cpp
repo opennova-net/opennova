@@ -28,7 +28,8 @@ EffectPose pose(const world::ScriptEffectEvent &event) {
 } // namespace
 
 EffectSpawnReceipt spawn_script_effect(EffectScene &scene, const world::ScriptEffectEvent &event,
-        EffectSlotToken slot, EffectOwnerToken owner, uint32_t age_ticks, float water_height) {
+        EffectSlotToken slot, EffectOwnerToken owner, uint32_t age_ticks, float water_height,
+        const EffectSectionGate &gate) {
     // SSN releases even when the new effect cannot allocate. Target effects
     // merely overwrite +460, so older groups may continue to emit.
     // [orig: @0x4F2406 -> @0x5F75D0; @0x4F80D8; @0x45418C]
@@ -45,6 +46,7 @@ EffectSpawnReceipt spawn_script_effect(EffectScene &scene, const world::ScriptEf
     request.source_tick = event.source_tick;
     request.source_order = event.source_order;
     request.kill_plane_y = water_height;
+    request.section_gate = gate;
     return scene.spawn(request);
 }
 

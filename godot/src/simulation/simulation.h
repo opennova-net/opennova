@@ -548,6 +548,7 @@ private:
 	// the local-player frame state all live inside. Recreated per load
 	// (reset_world) and NEVER null after construction; this binding converts
 	// Godot Refs into the kernel's sources and orders device work around it.
+	friend class EffectSectionSource; // the effect section gate's kernel reads
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
 	// The private state by owner, each plain data in its own header (ADR 0043
 	// d9; the class-body fragments are gone): the net-session shell inputs and

@@ -201,8 +201,10 @@ void ThrowablePresenter::present_move_effect(int64_t p_key, const String &p_effe
 	const String owner_key = throwable_move_owner_key(p_key);
 	anchors_->register_effect_anchor(owner_key,
 			callable_mp(this, &ThrowablePresenter::resolve_move_effect_anchor).bind(p_key));
+	// The round is the descriptor tag (retail Projectile_UpdatePhysics
+	// @ 0x4EA953): the section gate applies.
 	const Ref<EffectSpawnReceipt> receipt = fx_world->spawn_effect_owned_request(
-			owner_key, p_effect, p_transform.origin, p_transform.basis.get_column(2));
+			owner_key, p_effect, p_transform.origin, p_transform.basis.get_column(2), true);
 	if (receipt.is_null() || !receipt->get_spawned()) {
 		anchors_->unregister_effect_anchor(owner_key);
 		move_effect_transforms_.erase(p_key);

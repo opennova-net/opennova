@@ -226,6 +226,38 @@ bool distortion_class_pass_contract() {
 			"the distortion pass takes both class-7 emitters, either water side, depth sorted");
 }
 
+bool section_hidden_group_contract() {
+	// A group the building-section gate hides draws none of its children on
+	// any pass [orig: CParticleGroup_RenderChildren @ 0x5E5893..0x5E5897].
+	const auto blend = state(r::ParticlePipeline::Blend, 1, 0, 0);
+	const auto haze = state(r::ParticlePipeline::Distort, 2, 7, 0,
+			r::ParticleRenderPass::Distortion);
+	r::ParticleFrameSnapshot snapshot;
+	add_emitter(snapshot, 1, r::ParticleRenderDomain::World, 30.0f,
+			{quad(30.0f, 0x11u, blend)}, 12.0f);
+	const std::size_t hidden = add_emitter(snapshot, 2, r::ParticleRenderDomain::World, 20.0f,
+			{quad(20.0f, 0x22u, blend)}, 12.0f);
+	const std::size_t hidden_haze = add_emitter(snapshot, 3, r::ParticleRenderDomain::World,
+			10.0f, {quad(10.0f, 0x33u, haze)}, 12.0f);
+	snapshot.emitters[hidden].group_visible = false;
+	snapshot.emitters[hidden_haze].group_visible = false;
+	snapshot.emitters[hidden_haze].distortion_class = true;
+
+	r::ParticleFrameCompiler compiler;
+	r::ParticleViewInput view;
+	view.water_height = 10.0f;
+	view.water_subset = r::particle_water_subset_for_side(true, true);
+	const auto &scene_pass = compiler.compile(snapshot, view);
+	if (!check(scene_pass.emitter_bounds.size() == 1 &&
+			scene_pass.emitter_bounds[0].emitter_id == 1 &&
+			scene_pass.debug.section_hidden_emitters == 2,
+			"the scene pass skips the hidden group's emitters")) return false;
+	view.water_subset = r::ParticleWaterSubset::Distortion;
+	const auto &distortion = compiler.compile(snapshot, view);
+	return check(distortion.emitter_bounds.empty() && distortion.commands.empty(),
+			"a hidden class-7 child leaves the distortion pass empty");
+}
+
 bool domain_sort_and_material_run_contract() {
 	const auto shared = state(r::ParticlePipeline::Additive, 3, 1, 7);
 	const auto split = state(r::ParticlePipeline::Distort, 4, 7, 8,
@@ -689,5 +721,6 @@ int main() {
 	if (!empty_batch_leaves_emitters_unstamped_contract()) return 1;
 	if (!thermal_material_contract()) return 1;
 	if (!distortion_class_pass_contract()) return 1;
+	if (!section_hidden_group_contract()) return 1;
 	return 0;
 }

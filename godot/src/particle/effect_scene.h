@@ -95,6 +95,7 @@ private:
 	mutable opennova::particle::ParticleFrameSnapshot last_frame_;
 	mutable bool snapshot_dirty_ = true;
 	opennova::particle::ParticleViewFrustum frustum_{};
+	const opennova::particle::EffectSectionMasks *section_masks_ = nullptr;
 
 	void _materialize_snapshot() const;
 
@@ -113,7 +114,8 @@ public:
 	int64_t intern(const String &p_effect_name);
     // Native-only script descriptor bridge; no Variant round trip.
     void spawn_script_effect(const opennova::world::ScriptEffectEvent &event,
-            int64_t slot, int64_t owner, uint32_t age_ticks, float water_height);
+            int64_t slot, int64_t owner, uint32_t age_ticks, float water_height,
+            const opennova::particle::EffectSectionGate &gate);
 	String effect_name(int64_t p_effect_handle) const;
 
 	// One spawn (particle/effect_spawn_records.h): a null or invalid request
@@ -148,6 +150,11 @@ public:
 	// clearing the frustum advances every emitter.
 	void set_global_wind(const Vector3 &p_wind);
 	void set_view_frustum(const TypedArray<Plane> &p_planes, const Vector3 &p_inside_probe);
+	// The building section masks the group gate reads on the next advances
+	// (particle::EffectSectionMasks, borrowed); null leaves every group visible.
+	void set_section_masks(const opennova::particle::EffectSectionMasks *p_masks) {
+		section_masks_ = p_masks;
+	}
 	void clear_view_frustum();
 
 	// Native renderer adapters use the same immutable frame without a

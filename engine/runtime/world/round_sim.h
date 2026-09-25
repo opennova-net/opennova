@@ -412,6 +412,12 @@ struct RoundImpact {
                             //  @ 0x813420; world/ammo_table.h kImpactEffectTagNames]
     bool present_effect = true; // submit the row's particle-effect leg
     bool present_sound = true;  // play the row's impact-sound leg
+    // The descriptor's owner tag is the struck entity (0 on terrain and water),
+    // so an entity impact's group takes the building-section gate
+    // [orig: AmmoDef_ProcessImpactEffect @ 0x40A240 passes the hit record's
+    //  entity (+4) as submit_effect_descriptor's tag]; the knife leaf spawns
+    // with a zero tag [orig: Weapon_RaycastAndSpawnImpact @ 0x4E8950].
+    bool section_tagged = false;
     uint32_t tick = 0;      // authoritative presentation tick for catch-up aging
     uint64_t source_order = 0; // stable order across impacts resolved on the same tick
 };
