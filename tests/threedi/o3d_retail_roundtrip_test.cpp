@@ -2,16 +2,27 @@
 // `build` mints it again, and `compare` must call the two the same model
 // (strip layout and float noise aside). The models cover what the scene text
 // carries: Armry01 (bldg LODs, detail textures, lights, occlusion, blink
-// boxes, a register-driven rgbgen), Dblkhwk1 (register-driven rotors in MTRX
-// frames, an empty LOD, tangents), US01 (the skinned person layout), ArmsG
+// boxes, a register-driven rgbgen, strips sharing a vertex window), Dblkhwk1
+// (register-driven rotors in MTRX frames, an empty LOD, tangents, rotor strips
+// of two parts sharing one window), US01 (the skinned person layout), ArmsG
 // and Mp5b_1st (the first-person rig; collision faces the 8.8 grid collapses).
 // The CXLT table the scene carries must also come back row for row (US01,
 // ArmsG and Mp5b_1st ship rows that are not their sections' offsets).
+//
+// Nothing is excused. Any line `compare` calls a difference fails the model,
+// and so does DRIFT (a value within its tolerance) outside the categories
+// below: the words the builder derives by a rule of ours where retail's tool is
+// unwitnessed (docs/threedi/o3d-scene-format.md): the tangent frames, and the
+// collision words it derives from the stored 8.8 corners where retail took
+// them from the authored floats the file does not keep. Everything else the
+// scene carries exactly, so drift there (a part pivot, a render corner, a part
+// sphere) is a regression, not noise.
 // Gated on OPENNOVA_JO_ASSETS (docs/asset-gated-tests.md).
 //
 //   o3d_retail_roundtrip_test <opennova-3di> <scratch dir>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
 
 #include <formats/threedi/threedi_3di3.h>
@@ -32,6 +43,48 @@ int run(const std::string &cmd) {
 }
 
 std::string quoted(const std::string &s) { return "\"" + s + "\""; }
+
+// The DRIFT categories a retail round trip may show (compare.cpp's names).
+const char *const kDerivedDrift[] = {
+		"tangent/bitangent values",
+		"bullet-face corners (m, 8.8)",
+		"bullet-face normals (degrees)",
+		"bullet-face planes at the face (m)",
+		"bullet-face boxes (m)",
+		"dominant axes of diagonal bullet faces",
+		"section boxes and midpoints (m)",
+		"section radii (m)",
+		"CMDL box (m)",
+		"CMDL radii (m)",
+};
+
+bool derived_drift(const std::string &category) {
+	for (const char *allowed : kDerivedDrift)
+		if (category.compare(0, std::string(allowed).size(), allowed) == 0) return true;
+	return false;
+}
+
+// Whether `compare`'s report (its stdout) holds only derived drift: prints
+// every line that is a difference or drift in another category.
+bool only_derived_drift(const std::string &name, const std::string &report_path) {
+	std::ifstream in(report_path);
+	if (!in) {
+		std::fprintf(stderr, "%s: no compare report\n", name.c_str());
+		return false;
+	}
+	bool ok = true;
+	std::string line;
+	while (std::getline(in, line)) {
+		if (line.empty() || line.rfind("same model", 0) == 0 || line.rfind("different", 0) == 0) continue;
+		if (line.rfind("drift: ", 0) == 0) {
+			const size_t end = line.find(": ", 7);
+			if (derived_drift(line.substr(7, end == std::string::npos ? std::string::npos : end - 7))) continue;
+		}
+		std::fprintf(stderr, "%s: %s\n", name.c_str(), line.c_str());
+		ok = false;
+	}
+	return ok;
+}
 
 // The two models' CXLT tables, row for row.
 bool same_cxlt(const std::string &a_path, const std::string &b_path) {
@@ -69,9 +122,16 @@ int main(int argc, char **argv) {
 		++ran;
 		const std::string o3d = dir + "/" + name + ".rt.o3d";
 		const std::string rebuilt = dir + "/" + name + ".rt.3di";
+		const std::string report = dir + "/" + name + ".rt.compare.txt";
 		if (run(cli + " scene " + quoted(model) + " -o " + quoted(o3d)) != 0 ||
-				run(cli + " build " + quoted(o3d) + " -o " + quoted(rebuilt)) != 0 ||
-				run(cli + " compare " + quoted(model) + " " + quoted(rebuilt)) != 0) {
+				run(cli + " build " + quoted(o3d) + " -o " + quoted(rebuilt)) != 0) {
+			std::fprintf(stderr, "%s: the scene does not build\n", name);
+			++failures;
+			continue;
+		}
+		const int compared = run(cli + " compare " + quoted(model) + " " + quoted(rebuilt) + " > " + quoted(report));
+		const bool derived = only_derived_drift(name, report);
+		if (compared != 0 || !derived) {
 			std::fprintf(stderr, "%s: the scene round trip is not the same model\n", name);
 			++failures;
 		} else if (!same_cxlt(model, rebuilt)) {
