@@ -235,10 +235,8 @@ func _fill_table(sim: Simulation, list_id: int, tab: int) -> void:
 
 func close() -> void:
 	set_process(false)
-	if not is_open():
-		return
-	_frame.visible = false
-	closed.emit()
+	if MenuFrameSurface.hide_frame(_frame):
+		closed.emit()
 
 
 func teardown() -> void:
@@ -285,22 +283,16 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
-	var root: ResourceRoot = _view.resource_root()
-	if root == null:
+	var surface := MenuFrameSurface.open_surface(_view.resource_root(), _ui_parent,
+			_layout_control, MENU_FILE, MENU_SCREEN, "EndRoundMenu", "EndRoundPresenter",
+			_on_frame_gui_input,
+			func(driver: MenuDriver) -> void:
+				driver.widget_activated.connect(_on_widget_activated))
+	if surface == null:
 		return false
-	var doc := MenuFrameSurface.load_document(root, MENU_FILE, "EndRoundPresenter")
-	if doc == null:
-		return false
-	var surface := MenuFrameSurface.build(root, _ui_parent, _layout_control,
-			"EndRoundMenu", _on_frame_gui_input)
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
-	_driver.widget_activated.connect(_on_widget_activated)
-	if not MenuFrameSurface.open_document(_driver, doc, root, MENU_FILE, MENU_SCREEN,
-			"EndRoundPresenter"):
-		teardown()
-		return false
 	return true
 
 

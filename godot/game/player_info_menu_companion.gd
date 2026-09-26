@@ -244,7 +244,7 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 # Load weapon.def into the loadout table (best-effort; absent -> empty slot lists).
 func _ensure_weapons() -> void:
 	if _weapons == null and _root != null:
-		_weapons = LoadoutLabels.load_weapon_database(_root, "PlayerInfoMenuCompanion",
+		_weapons = LoadoutWeaponTable.load_weapon_database(_root, "PlayerInfoMenuCompanion",
 				"loadout combos stay empty")
 
 

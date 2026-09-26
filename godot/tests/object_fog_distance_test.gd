@@ -15,20 +15,12 @@ extends GutTest
 const WALL_DEPTH := 100.0
 const FOG_START := 0.5
 const FOG_END := 120.0
-
-var _saved_globals := {}
-
-
-func before_each() -> void:
-	_saved_globals.clear()
-	for global_name in ["opennova_fog_enabled", "opennova_fog_start",
-			"opennova_fog_end", "opennova_fog_type"]:
-		_saved_globals[global_name] = RenderingServer.global_shader_parameter_get(global_name)
+const FOG_GLOBALS := ["opennova_fog_enabled", "opennova_fog_start",
+		"opennova_fog_end", "opennova_fog_type"]
 
 
 func after_each() -> void:
-	for global_name in _saved_globals:
-		RenderingServer.global_shader_parameter_set(global_name, _saved_globals[global_name])
+	ShaderGlobals.restore_defaults(FOG_GLOBALS)
 
 
 func _harness_code(define: String) -> String:

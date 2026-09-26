@@ -142,10 +142,8 @@ func open() -> bool:
 
 func close() -> void:
 	set_process(false)
-	if not is_open():
-		return
-	_frame.visible = false
-	closed.emit()
+	if MenuFrameSurface.hide_frame(_frame):
+		closed.emit()
 
 
 # Retail's initial deploy-screen keys X and SPACE select the default spawn.
@@ -379,23 +377,18 @@ func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
 	var root: ResourceRoot = _view.resource_root()
-	if root == null:
-		return false
-	var doc := MenuFrameSurface.load_document(root, MENU_FILE, "DeployScreenPresenter")
-	if doc == null:
-		return false
-	_register_text_tables(root)
 	# death.mnu authors <MUSICVAR>3</MUSICVAR>; the surface wires the slot.
-	var surface := MenuFrameSurface.build(root, _ui_parent, _layout_control,
-			"DeployScreenMenu", _on_frame_gui_input)
+	var surface := MenuFrameSurface.open_surface(root, _ui_parent, _layout_control,
+			MENU_FILE, MENU_SCREEN, "DeployScreenMenu", "DeployScreenPresenter",
+			_on_frame_gui_input,
+			func(driver: MenuDriver) -> void:
+				_register_text_tables(root)
+				driver.widget_value_changed.connect(_on_widget_value_changed))
+	if surface == null:
+		return false
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
-	_driver.widget_value_changed.connect(_on_widget_value_changed)
-	if not MenuFrameSurface.open_document(_driver, doc, root, MENU_FILE, MENU_SCREEN,
-			"DeployScreenPresenter"):
-		teardown()
-		return false
 	return true
 
 

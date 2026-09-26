@@ -2595,7 +2595,7 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	# this player exists.
 	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 
 	var weapon_root := ResourceRoot.new()
 	assert_eq(weapon_root.set_root_dir(RetailData.def_root()), OK)
@@ -2662,7 +2662,7 @@ VEHICLE_END
 	sim.resolve_item_traits(item_db)
 	# Two units off the carrier, facing it: its seats sit inside the scan cone.
 	assert_true(sim.spawn_local_player(Vector3(-2, 0, 0), 90.0, 1))
-	MountLook.face(sim, Vector3.ZERO)
+	MountLook.face(self, sim, Vector3.ZERO)
 	assert_true(sim.local_player_toggle_mount())
 	# Pick a different seat first so key 1 exercises the driver's request.
 	sim.local_player_select_seat(1)
@@ -2946,7 +2946,7 @@ end
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
 	# Facing the +x gun: the nearest scan wants one candidate inside its cone;
 	# the label list itself has no cone, only its 4.0 u radius.
-	MountLook.face(sim, Vector3(14, 0, 0))
+	MountLook.face(self, sim, Vector3(14, 0, 0))
 	var def_6 := WeaponDef.new()
 	def_6.name = "WPN_LABEL_SCOPE"
 	def_6.set_actions([
@@ -3163,7 +3163,7 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded the one-truck mission")
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	var def_7 := WeaponDef.new()
 	def_7.name = "WPN_GATE"
 	def_7.animadm = "gate.adm"
@@ -3227,7 +3227,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3326,7 +3326,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	# Listen-host player creation rebuilds the authoritative registry. Bind the
 	# collision instance to that final registry identity, as GameWorld does.
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
@@ -3557,7 +3557,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3682,7 +3682,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			break
 	# A dismount leaves the player standing on the seat point (retail never
 	# displaces the rider); step a unit back and look at the gun to remount.
-	MountLook.face(sim, Vector3(2, 0, 0), Vector3(1, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0), Vector3(1, 0, 0))
 	assert_true(sim.local_player_toggle_mount())
 	var remount_event: PlayerWeaponEvent = null
 	for _tick in range(120):
@@ -3749,7 +3749,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3798,7 +3798,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 
 	# Look down the row at the second gun's seat point (the same seat offset,
 	# 3.5 u further along +y from this seat).
-	MountLook.face(sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
+	MountLook.face(self, sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
 	assert_true(sim.local_player_toggle_mount(),
 			"a second gun inside the seated 5 deg cone is a direct mounted-seat swap")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
@@ -3837,7 +3837,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	# so let it refresh before looking down the row.
 	for _tick in range(17):
 		sim.step()
-	MountLook.face(sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
+	MountLook.face(self, sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
 	assert_true(sim.local_player_toggle_mount(),
 			"a third gun down the row drives a second direct mounted-seat swap")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
@@ -3888,7 +3888,7 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	sim.set_local_player_weapon(personal_def, {})
 	sim.drain_local_player_weapon_events()
 
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
 	var mount_event: PlayerWeaponEvent = null
@@ -3930,7 +3930,7 @@ func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	sim.clear_local_player_weapon()
 	assert_false(sim.local_player_toggle_mount(),
 			"retail rejects offline player UseGun attach without EquippedSlot")
@@ -3957,7 +3957,7 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	sim.clear_local_player_weapon()
 	assert_true(sim.local_player_toggle_mount(),
 			"the null EquippedSlot gate is UseGun-only, not a generic seat gate")

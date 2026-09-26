@@ -146,7 +146,7 @@ func test_gameplay_keeps_the_editor_local_lght_uniforms_disabled() -> void:
 	model.set_object_data(data)
 	var materials: Array = model.get_surface_materials()
 	if materials.is_empty():
-		pass_test("fixture built no surface materials under this renderer")
+		pending("fixture built no surface materials under this renderer")
 		return
 	var material := materials[0] as ShaderMaterial
 	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
@@ -482,7 +482,7 @@ func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -
 		# Entity ground shadows drape TERRAIN ONLY: retail's render-slot
 		# patches are terrain-following meshes, so a live silhouette never
 		# lands on another model (RenderSlot_DrawAllDrapes @0x5d6e20 /
-		# render_sector_model @0x5d5ca0 — docs/render/render-lighting-re.md).
+		# RenderSlot_DrawSilhouetteDrape @0x5d5ca0 — docs/render/render-lighting-re.md).
 		# The drape next pass lives on the terrain material (SlotShadow).
 		assert_null((material as ShaderMaterial).next_pass,
 				"world-model materials carry no shadow-receiver next pass")

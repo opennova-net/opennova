@@ -27,11 +27,15 @@ const SHADER_SCORCH := "res://shaders/scar_quad.gdshader"
 const SHADER_HOLE := "res://shaders/scar_quad_hole.gdshader"
 const OWNER_A := 0x1004  # pool 1, slot 4
 const OWNER_B := 0x1005
+# The pass fog globals the raster legs drive (restored to the project defaults).
+const FOG_GLOBALS := ["opennova_fog_enabled", "opennova_fog_color", "opennova_fog_start",
+		"opennova_fog_end", "opennova_fog_type"]
 
 var _temp_dirs: Array[String] = []
 
 
 func after_each() -> void:
+	ShaderGlobals.restore_defaults(FOG_GLOBALS)
 	for dir_path in _temp_dirs:
 		for file_name in DirAccess.get_files_at(dir_path):
 			DirAccess.remove_absolute(dir_path.path_join(file_name))
@@ -251,42 +255,6 @@ func test_every_strip_draws_on_the_scar_rung() -> void:
 	entities.teardown()
 
 
-func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
-	# The scorch TGAs are black RGB under an alpha falloff: the mark IS the
-	# SRCALPHA/INVSRCALPHA blend [orig: mode word 0x120651 — blend nibble 1,
-	# no ALPHATESTENABLE bit; the drawer's SetAlphaTestRef(128) @0x5CCDAE is an
-	# inert latch there]. Godot's ALPHA_SCISSOR_THRESHOLD moves a material to the
-	# opaque pass and drops the blend — the regression that painted every scar
-	# as an opaque black blob — so neither drawer state may use it.
-	var scorch := load(SHADER_SCORCH) as Shader
-	var hole := load(SHADER_HOLE) as Shader
-	assert_not_null(scorch)
-	assert_not_null(hole)
-	if scorch == null or hole == null:
-		return
-	for shader in [scorch, hole]:
-		var code: String = shader.code
-		assert_false(code.contains("ALPHA_SCISSOR_THRESHOLD"),
-				"%s: no alpha scissor (it would drop the blend)" % shader.resource_path)
-		assert_true(code.contains("blend_mix"), "%s: the SRCALPHA/INVSRCALPHA blend" % shader.resource_path)
-		assert_true(code.contains("unshaded"), "%s: LIGHTING off" % shader.resource_path)
-		assert_false(code.contains("fog_disabled"), "%s: FOGENABLE" % shader.resource_path)
-		assert_false(code.contains("source_color"),
-				"%s: raw texel sampling (D-RMAT-7)" % shader.resource_path)
-	assert_true(scorch.code.contains("depth_draw_never"), "scorch: z-write off (0x100000)")
-	assert_true(scorch.code.contains("cull_back"), "scorch: the CCW back-face cull")
-	# Focused Q3 is a typed draw list, so the beauty scar shader needs no pass
-	# gate and has no alpha test on its texel.
-	assert_eq(scorch.code.count("discard"), 0, "scorch: no camera-pass gate")
-	assert_false(scorch.code.contains("is_q3_pass"))
-	assert_false(scorch.code.contains("tex.a <") or scorch.code.contains("alpha <"),
-			"scorch: no alpha test")
-	assert_true(hole.code.contains("depth_draw_always"), "bhole: z-write on")
-	assert_true(hole.code.contains("cull_disabled"), "bhole: cull none (0x400000)")
-	assert_true(hole.code.contains("discard"), "bhole: the GREATER/128 alpha test")
-	assert_true(hole.code.contains("128.0"), "bhole: ref 128")
-
-
 func test_a_strip_whose_tga_arrives_later_binds_it_on_the_next_present() -> void:
 	# The material is created on the first present even when the TGA is not
 	# resolvable yet (no root); the texture must not stay missing forever once
@@ -478,14 +446,8 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 			"an unbooted simulation lists no scars, never crashes")
 
 
-# Both drawer states carry FOGENABLE (the 0x20000 bit of 0x120651 and
-# 0x460651) and the drawer selects the scene fog colour
-# [orig: Scar_DrawBatches @0x5CCD33 -> CD3DDevice_SetFogAndBlendMode(dev, 0)]:
-# a scar at full pass fog renders the fog colour, not its own texel.
-func test_scar_quads_fog_toward_the_scene_fog_colour() -> void:
-	if RenderingServer.get_rendering_device() == null:
-		pending("RenderingDevice unavailable under this Godot renderer")
-		return
+# A 64x64 own-world view over a flat clear, its camera 5 units off the quad.
+func _raster_view(clear: Color) -> SubViewport:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 64)
 	viewport.own_world_3d = true
@@ -498,36 +460,79 @@ func test_scar_quads_fog_toward_the_scene_fog_colour() -> void:
 	var background := WorldEnvironment.new()
 	background.environment = Environment.new()
 	background.environment.background_mode = Environment.BG_COLOR
-	background.environment.background_color = Color.BLACK
+	background.environment.background_color = clear
 	viewport.add_child(background)
+	return viewport
+
+
+# The centre pixel of one drawer-state quad (4x4, facing the camera) textured
+# with a flat texel.
+func _render_quad_centre(viewport: SubViewport, shader_path: String, texel: Color) -> Color:
 	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.5, 0.5, 0.5, 1.0))
+	image.fill(texel)
+	var material := ShaderMaterial.new()
+	material.shader = load(shader_path)
+	material.set_shader_parameter("albedo_tex", ImageTexture.create_from_image(image))
 	var quad := QuadMesh.new()
 	quad.size = Vector2(4.0, 4.0)
-	for shader_path in [SHADER_SCORCH, SHADER_HOLE]:
-		var material := ShaderMaterial.new()
-		material.shader = load(shader_path)
-		material.set_shader_parameter("albedo_tex", ImageTexture.create_from_image(image))
-		var instance := MeshInstance3D.new()
-		instance.mesh = quad
-		instance.material_override = material
-		viewport.add_child(instance)
-		# Full linear fog at 5 units: visibility (end - d) / (end - start) = 0.
-		RenderingServer.global_shader_parameter_set("opennova_fog_enabled", true)
-		RenderingServer.global_shader_parameter_set("opennova_fog_color", Vector3(1.0, 0.0, 0.0))
-		RenderingServer.global_shader_parameter_set("opennova_fog_start", 0.0)
-		RenderingServer.global_shader_parameter_set("opennova_fog_end", 1.0)
-		RenderingServer.global_shader_parameter_set("opennova_fog_type", 1)
-		for _frame in 4:
-			await get_tree().process_frame
-		RenderingServer.force_draw(true)
-		RenderingServer.force_sync()
-		var pixel := viewport.get_texture().get_image().get_pixel(32, 32)
-		RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
-		RenderingServer.global_shader_parameter_set("opennova_fog_color", Vector3(0.5, 0.6, 0.8))
-		RenderingServer.global_shader_parameter_set("opennova_fog_start", 30000.0)
-		RenderingServer.global_shader_parameter_set("opennova_fog_end", 100000.0)
-		instance.queue_free()
+	var instance := MeshInstance3D.new()
+	instance.mesh = quad
+	instance.material_override = material
+	viewport.add_child(instance)
+	for _frame in 4:
 		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	var pixel := viewport.get_texture().get_image().get_pixel(32, 32)
+	instance.queue_free()
+	await get_tree().process_frame
+	return pixel
+
+
+# Both drawer states carry FOGENABLE (the 0x20000 bit of 0x120651 and
+# 0x460651) and the drawer selects the scene fog colour
+# [orig: Scar_DrawBatches @0x5CCD33 -> CD3DDevice_SetFogAndBlendMode(dev, 0)]:
+# a scar at full pass fog renders the fog colour, not its own texel.
+func test_scar_quads_fog_toward_the_scene_fog_colour() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var viewport := _raster_view(Color.BLACK)
+	# Full linear fog at 5 units: visibility (end - d) / (end - start) = 0.
+	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", true)
+	RenderingServer.global_shader_parameter_set("opennova_fog_color", Vector3(1.0, 0.0, 0.0))
+	RenderingServer.global_shader_parameter_set("opennova_fog_start", 0.0)
+	RenderingServer.global_shader_parameter_set("opennova_fog_end", 1.0)
+	RenderingServer.global_shader_parameter_set("opennova_fog_type", 1)
+	for shader_path in [SHADER_SCORCH, SHADER_HOLE]:
+		var pixel: Color = await _render_quad_centre(
+				viewport, shader_path, Color(0.5, 0.5, 0.5, 1.0))
 		assert_gt(pixel.r, 0.9, "%s fogs to the red scene fog colour: %s" % [shader_path, pixel])
 		assert_lt(pixel.g, 0.1, "%s: no texel grey survives full fog: %s" % [shader_path, pixel])
+
+
+# The two drawer states by pixels, black texels over a white clear. The scorch
+# TGAs are black RGB under an alpha falloff, so the mark IS the
+# SRCALPHA/INVSRCALPHA blend (0x120651: blend nibble 1, no ALPHATESTENABLE, so
+# the drawer's SetAlphaTestRef(128) latch is inert); the bhole state
+# (0x460651) adds the live GREATER/128 alpha test. An alpha scissor (the
+# 2026-08-21 first cut) drew every scorch as an opaque black blob.
+func test_scar_quads_blend_and_only_the_hole_state_alpha_tests() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
+	var viewport := _raster_view(Color.WHITE)
+	for shader_path in [SHADER_SCORCH, SHADER_HOLE]:
+		var dense: Color = await _render_quad_centre(
+				viewport, shader_path, Color(0.0, 0.0, 0.0, 0.75))
+		assert_between(dense.r, 0.05, 0.95,
+				"%s blends a 0.75-alpha texel over the clear: %s" % [shader_path, dense])
+	var faint_scorch: Color = await _render_quad_centre(
+			viewport, SHADER_SCORCH, Color(0.0, 0.0, 0.0, 0.25))
+	assert_between(faint_scorch.r, 0.05, 0.98,
+			"scorch has no alpha test: a 0.25-alpha texel still blends: %s" % faint_scorch)
+	var faint_hole: Color = await _render_quad_centre(
+			viewport, SHADER_HOLE, Color(0.0, 0.0, 0.0, 0.25))
+	assert_gt(faint_hole.r, 0.99,
+			"bhole's GREATER/128 test discards a 0.25-alpha texel: %s" % faint_hole)

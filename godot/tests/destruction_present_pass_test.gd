@@ -43,7 +43,7 @@ func before_all() -> void:
 # one effect per name, so the real EffectWorld interns and spawns them without
 # a resource root and an owned group stays live until its owner is retired.
 func _catalog_file(effect_names: PackedStringArray) -> ParticleFile:
-	return ParticleFixture.catalog("wreck dots",
+	return ParticleFixture.catalog(self, "wreck dots",
 			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", effect_names)
 
 

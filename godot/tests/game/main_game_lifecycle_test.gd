@@ -58,9 +58,6 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 			["Master", DebugControlTable.AUDIO_BUS_VOLUME_MAX_DB + 0.5]).error),
 			ERR_INVALID_PARAMETER)
 	var bus := AudioServer.get_bus_index("SFX")
-	if bus < 0:
-		pass_test("no SFX bus in this layout")
-		return
 	var previous := {
 		"volume": AudioServer.get_bus_volume_db(bus),
 		"mute": AudioServer.is_bus_mute(bus),

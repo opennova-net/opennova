@@ -9,7 +9,7 @@ const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
 
 
 func _catalog_file() -> ParticleFile:
-	return ParticleFixture.catalog("wake dots",
+	return ParticleFixture.catalog(self, "wake dots",
 			"emit_dur = 0.1;\nemit_rate = 30;\nemit_rate_adj = 30;\nemit_burst = 1;\ny_offset = 2;\nz_offset = 4;\nage = 1;\nflags = FOREVEREMIT;\n", [W3_EFFECT, W4_EFFECT])
 
 

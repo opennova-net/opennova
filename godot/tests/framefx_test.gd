@@ -184,7 +184,7 @@ func _water_order_particle_scene() -> EffectScene:
 			properties += "color%d = %s;\n" % [corner, color]
 		properties += "graphic1 = water_order_fallback.tga, blend;\ng1_alpha = 0.5;\ng1_scale = 2;"
 		text += ParticleFixture.definition(name, properties) + ParticleFixture.effect(name, [name])
-	var file := ParticleFixture.parse(text)
+	var file := ParticleFixture.parse(self, text)
 
 	var scene := EffectScene.new()
 	scene.open([file])

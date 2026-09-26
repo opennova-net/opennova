@@ -2,13 +2,14 @@ class_name MenuFrameSurface
 extends RefCounted
 
 ## The compiled-menu surface plumbing the in-world presenters share
-## (ArmoryPresenter, DeployScreenPresenter, EndRoundPresenter): parsing the
-## .mnu, building the MenuFrame + MenuAudio + MenuDriver stack over a foreign
-## HUD parent, opening the document, fitting the MenuFrame to its layout
-## source, forwarding the frame's gui input to the MenuDriver, wiring the
-## resize source, and loading the .mns style. Pure static helpers over the
-## presenter's own typed members; each presenter keeps its 1-line
-## _recompute_fit so the resize signals have a bound Callable.
+## (ArmoryPresenter, DeployScreenPresenter, EndRoundPresenter): the one
+## open_surface prologue (parse the .mnu, build the MenuFrame + MenuAudio +
+## MenuDriver stack over a foreign HUD parent, open the document), hiding the
+## frame on close, fitting the MenuFrame to its layout source, forwarding the
+## frame's gui input to the MenuDriver, wiring the resize source, and loading
+## the .mns style. Pure static helpers over the presenter's own typed members;
+## each presenter keeps its 1-line _recompute_fit so the resize signals have a
+## bound Callable.
 
 ## The canonical menu stylesheet name the original engine looks for
 ## (MenuShell's default).
@@ -21,6 +22,44 @@ class Surface extends RefCounted:
 	var frame: MenuFrame = null
 	var audio: MenuAudio = null
 	var driver: MenuDriver = null
+
+
+## The presenters' shared menu prologue: parse `menu_file` from the root, build
+## the stack (`node_name` names the frame), hand the built driver to
+## `before_open` (the presenter's text-table registration and signal wiring,
+## both due before the screen shows), then open `screen`. Null when there is no
+## root, and null with a warning under `owner_name` when the file is missing,
+## does not parse or has no screens (the stack built for it is freed again);
+## the presenter adopts the returned members.
+static func open_surface(root: ResourceRoot, ui_parent: Node, layout_control: Control,
+		menu_file: String, screen: String, node_name: String, owner_name: String,
+		on_gui_input: Callable, before_open: Callable) -> Surface:
+	if root == null:
+		return null
+	var doc := load_document(root, menu_file, owner_name)
+	if doc == null:
+		return null
+	var surface := build(root, ui_parent, layout_control, node_name, on_gui_input)
+	if before_open.is_valid():
+		before_open.call(surface.driver)
+	if open_document(surface.driver, doc, root, menu_file, screen, owner_name):
+		return surface
+	surface.frame.queue_free()
+	surface.audio.queue_free()
+	return null
+
+
+## Hide the frame if it is showing; true when it was, so the presenter reports
+## its close. Untyped on purpose: a frame freed with its HUD parent arrives as a
+## freed instance, which a typed parameter would reject before the validity test.
+static func hide_frame(frame: Variant) -> bool:
+	if not is_instance_valid(frame):
+		return false
+	var menu_frame := frame as MenuFrame
+	if menu_frame == null or not menu_frame.visible:
+		return false
+	menu_frame.visible = false
+	return true
 
 
 ## Read and parse one .mnu from the resource root, else null with a warning
@@ -74,7 +113,7 @@ static func build(root: ResourceRoot, ui_parent: Node, layout_control: Control,
 
 ## Open the parsed document on a built driver with the canonical stylesheet
 ## and the registered menutxt table. False (with a warning) when the document
-## has no screens; the caller tears its surface down.
+## has no screens.
 static func open_document(driver: MenuDriver, doc: MnuDocument, root: ResourceRoot,
 		menu_file: String, screen: String, owner_name: String) -> bool:
 	var style := load_style(root, STYLESHEET_FILE)

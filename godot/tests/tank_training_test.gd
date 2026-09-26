@@ -26,23 +26,6 @@ func _advance(sim: Simulation, ticks := 125) -> void:
 		_presenter.after_world_tick()
 
 
-func _right_click(sim: Simulation) -> void:
-	# Headless Godot cannot capture the mouse. A windowed run exercises the
-	# default binding and router; headless starts at the router's request seam.
-	if DisplayServer.get_name() == "headless":
-		assert_true(sim.request_local_player_scope_toggle())
-		return
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_CAPTURED)
-	for pressed: bool in [true, false]:
-		var event := InputEventMouseButton.new()
-		event.button_index = MOUSE_BUTTON_RIGHT
-		event.pressed = pressed
-		Input.parse_input_event(event)
-		Input.flush_buffered_events()
-		_presenter.before_world_tick(Simulation.tick_dt(), false, true)
-
-
 func _sights() -> PackedStringArray:
 	var textures := PackedStringArray()
 	for row: WeaponSightRow in _world.local_player_hud_weapon_def().sights:
@@ -183,20 +166,10 @@ func _boot_training() -> ResourceRoot:
 	if RetailData.install().is_empty():
 		pending("OPENNOVA_JO_DIR with 07TR.bms is required")
 		return null
-	var root: ResourceRoot
-	# Preserve the configured JOTAC course when present. Other installs may
-	# pack 07TR only in an expansion (stock Combined Arms uses jox01).
-	if "revx02" in RetailData.expansions():
-		root = ResourceRoot.new()
-		var mount_error := root.mount_runtime(RetailData.install(), "revx02")
-		assert_eq(mount_error, OK)
-		if mount_error != OK:
-			return null
-	else:
-		root = RetailData.mount_install_with("07TR.bms")
-		assert_not_null(root, "the installed base or an expansion must serve 07TR.bms")
-		if root == null:
-			return null
+	var root := RetailData.mount_tank_training()
+	assert_not_null(root, "the installed base or an expansion must serve 07TR.bms")
+	if root == null:
+		return null
 	var expansion := root.get_expansion()
 	gut.p("07TR course mount: base" if expansion.is_empty() else "07TR course mount: " + expansion)
 	var mission := MissionData.new()
@@ -241,10 +214,10 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 	var seat: EntityCardSeat = cannon.get_seats()[0]
 	var target := _seat_target(cannon.get_wire_handle(), seat.get_bone_index())
 	_cannon_handle = cannon.get_wire_handle()
-	MountLook.face(sim, target, target + Vector3(1.5, 0, 0))
+	MountLook.face(self, sim, target, target + Vector3(1.5, 0, 0))
 	_advance(sim, 18) # refresh USE's proximity list after positioning
 	target = _seat_target(cannon.get_wire_handle(), seat.get_bone_index())
-	MountLook.face(sim, target, target + Vector3(1.5, 0, 0))
+	MountLook.face(self, sim, target, target + Vector3(1.5, 0, 0))
 	var boarded := sim.local_player_toggle_mount()
 	assert_true(boarded, "USE boards the live cannon seat on the authored tank")
 	if not boarded:
@@ -259,7 +232,7 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 	_advance(sim)
 	var cannon_sights := _sights()
 	# Fire clear of the instructor and landing craft after the turret settles.
-	MountLook.face(sim, sim.entity_card_by_net_id(33).get_mission_position() + Vector3(0, -150, 45))
+	MountLook.face(self, sim, sim.entity_card_by_net_id(33).get_mission_position() + Vector3(0, -150, 45))
 	_advance(sim)
 	var cannon_ammo := _fire_gun(sim)
 	# Stock mounts and mods differ: only an authored G attachment switches
@@ -269,14 +242,14 @@ func test_07tr_tank_course_from_boarding_to_victory() -> void:
 	for attachment: Dictionary in definitions[100164]["attachments"]:
 		has_alternate = has_alternate or attachment["kind"] == "addeweapg"
 	if has_alternate:
-		_right_click(sim)
+		MountLook.right_click(self, sim, _presenter)
 		_advance(sim)
 		assert_eq(sim.get_local_player_weapon_name(), definitions[100164]["weapon"])
 		assert_eq(_world.local_player_hud_weapon_def().weapon_name, definitions[100164]["weapon"],
 				"right-click selects the alternate gun HUD definition")
 		assert_false(_sights().is_empty(), "the alternate gun has its authored sight")
 		assert_ne(_fire_gun(sim), cannon_ammo, "the alternate gun fires its own ammunition")
-		_right_click(sim)
+		MountLook.right_click(self, sim, _presenter)
 		_advance(sim)
 		assert_eq(sim.get_local_player_weapon_name(), "WPN_M1TURRET")
 		assert_eq(_sights(), cannon_sights, "switching back restores the cannon sight")
@@ -372,7 +345,7 @@ func test_07tr_cannon_prompt_from_landing_craft_deck() -> void:
 	# Approach at the player's walkable craft-deck height and let normal
 	# collision settle the position.
 	approach.z = MountLook.local_player_mission_position(sim).z
-	MountLook.face(sim, target, approach)
+	MountLook.face(self, sim, target, approach)
 	_advance(sim, 32)
 	target = _seat_target(cannon.get_wire_handle(), seat.get_bone_index())
 	var gametext := RtxtStringFile.new()
@@ -383,7 +356,7 @@ func test_07tr_cannon_prompt_from_landing_craft_deck() -> void:
 	var yaw := rad_to_deg(atan2(target.x - here.x, target.y - here.y))
 	# Stock and mod models place the cannon seat at different heights. Start
 	# just above its view-frustum edge, keeping the higher roof gun in view.
-	MountLook.face(sim, target)
+	MountLook.face(self, sim, target)
 	var half_fov := rad_to_deg(atan(1.0 / _presenter.view_projection().y.y))
 	var upper_pitch := sim.get_local_player_pitch_deg() + half_fov + 5.0
 	assert_eq(sim.debug_teleport_local_player(here, yaw, upper_pitch), OK)
@@ -394,7 +367,7 @@ func test_07tr_cannon_prompt_from_landing_craft_deck() -> void:
 	assert_does_not_have(texts, "120 MM Cannon", "the lower cannon anchor is below this view")
 	# Re-aim at the cannon from the SAME standing position. This catches an
 	# empty/missing HUD label as well as a label/USE selection disagreement.
-	MountLook.face(sim, target)
+	MountLook.face(self, sim, target)
 	_advance(sim, 1)
 	texts = _visible_attach_texts(hud, gametext)
 	gut.p("Cannon view attachment labels: " + str(texts))

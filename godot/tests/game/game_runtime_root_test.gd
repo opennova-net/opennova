@@ -14,13 +14,12 @@ func test_startup_uses_the_runtime_root() -> void:
 	assert_not_null(packed)
 	if packed == null:
 		return
-	var runtime_root := packed.instantiate()
-	assert_true(runtime_root.has_method("get_main_game"),
-			"launch automation has one stable way through the added nesting")
-	assert_true(runtime_root.has_method("sync_game_viewport_to_window"),
-			"blocking loading presents can synchronize the optional game viewport")
-	assert_null(runtime_root.get_main_game(), "the game is created only after tree entry")
-	runtime_root.free()
+	var node := packed.instantiate()
+	var runtime_root := node as GameRuntimeRoot
+	assert_not_null(runtime_root, "the main scene's root is the GameRuntimeRoot")
+	if runtime_root != null:
+		assert_null(runtime_root.get_main_game(), "the game is created only after tree entry")
+	node.free()
 
 
 func test_embedding_decision_preserves_direct_runtime_fallbacks() -> void:

@@ -266,9 +266,13 @@ func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 	camera.make_current()
 	var sky := SkyDome.new()
 	sky.environment_path = NodePath("../SkyTestEnv")
-	sky.frame_clear_environment = clear.environment
 	viewport.add_child(sky)
 	sky.advance_frame(0.0)
+	# GameWorld.update_frame_clear_color is the one frame-clear writer: above
+	# water outside thermal it writes the env's frame clear, pre-encoded to sRGB
+	# (game_world_test pins that writer). Stage the same device write here.
+	var skyfog: Vector3 = env_node.get_frame_clear_color()
+	clear.environment.background_color = Color(skyfog.x, skyfog.y, skyfog.z).linear_to_srgb()
 	# Fully fogged dome pixels and the open area beneath it must be the same
 	# color. Comparing rendered pixels catches Godot's background sRGB decode;
 	# comparing uniforms alone cannot detect that device conversion.

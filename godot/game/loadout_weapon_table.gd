@@ -1,4 +1,4 @@
-class_name LoadoutLabels
+class_name LoadoutWeaponTable
 extends RefCounted
 
 # The weapon.def load the two loadout screens share: the in-game armory

@@ -123,7 +123,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		if personal_index >= 0:
 			sim.set_local_player_weapon(weapons.get_weapon(personal_index), {})
 		sim.drain_local_player_weapon_events()
-		MountLook.face(sim, Vector3(2, 0, 0))
+		MountLook.face(self, sim, Vector3(2, 0, 0))
 		assert_true(sim.local_player_toggle_mount(),
 				"the listen-server player mounts the config-%d gun" % config_value)
 		sim.set_local_player_mouse(511, false)

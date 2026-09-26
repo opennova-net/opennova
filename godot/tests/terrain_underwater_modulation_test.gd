@@ -5,8 +5,7 @@ extends GutTest
 # water height (the bare retail strict < with no zero guard), and the Terrain
 # node pushes the flag plus the water module's live noise texture onto the
 # shared surface material [orig: cameraY < Env_WaterHeightFixed @ 0x60FEE0 ->
-# dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2]. The shader-side
-# math contract lives in terrain_shader_contract_test.gd.
+# dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2].
 
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
 # assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
@@ -213,17 +212,11 @@ func test_reflected_pass_clips_terrain_below_the_plane_less_0_05() -> void:
 	if RenderingServer.get_rendering_device() == null:
 		pending("RenderingDevice unavailable under this Godot renderer")
 		return
-	var saved := {}
-	for name in ["opennova_water_active", "opennova_water_height"]:
-		var setting = ProjectSettings.get_setting("shader_globals/" + name, {})
-		saved[name] = (setting as Dictionary).get("value") if setting is Dictionary else null
 	RenderingServer.global_shader_parameter_set("opennova_water_active", true)
 	RenderingServer.global_shader_parameter_set("opennova_water_height", 0.0)
 	var reflected: Image = await _render_terrain_card(Water.REFLECTION_CULL_MASK)
 	var beauty: Image = await _render_terrain_card(0xFFFFF)
-	for name in saved:
-		if saved[name] != null:
-			RenderingServer.global_shader_parameter_set(name, saved[name])
+	ShaderGlobals.restore_defaults(["opennova_water_active", "opennova_water_height"])
 	assert_gt(reflected.get_pixel(32, 32).g, 0.5, "0.016 below the plane is kept")
 	assert_gt(reflected.get_pixel(32, 33).g, 0.5, "0.047 below the plane is kept")
 	assert_lt(reflected.get_pixel(32, 34).g, 0.05, "0.078 below the plane is clipped")

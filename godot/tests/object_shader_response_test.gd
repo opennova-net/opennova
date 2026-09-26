@@ -20,7 +20,6 @@ const GLOBALS := [
 ]
 const EYE := Vector3(0.0, 0.0, 5.0)
 
-var _saved := {}
 # The reflected pass is the camera whose mask omits the water layer.
 var _reflection_view := false
 # The per-draw CLIP arming the reflected pass tests (u_entity_light.w bit 2,
@@ -29,12 +28,6 @@ var _clip_armed := true
 
 
 func before_each() -> void:
-	_saved.clear()
-	# Restore to the project's registered defaults; reading the live value
-	# back (global_shader_parameter_get) is an editor-only call.
-	for name in GLOBALS:
-		var setting = ProjectSettings.get_setting("shader_globals/" + name, {})
-		_saved[name] = (setting as Dictionary).get("value") if setting is Dictionary else null
 	_global("opennova_thermal_view", false)
 	_global("opennova_fog_enabled", false)
 	_global("opennova_water_active", false)
@@ -48,9 +41,7 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	for name in _saved:
-		if _saved[name] != null:
-			RenderingServer.global_shader_parameter_set(name, _saved[name])
+	ShaderGlobals.restore_defaults(GLOBALS)
 
 
 func _global(name: String, value: Variant) -> void:

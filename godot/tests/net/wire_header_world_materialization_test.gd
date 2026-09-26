@@ -135,39 +135,16 @@ func _designated_g_mission_fixture() -> Dictionary:
 # carrierswap (the dense-reorder refresh); "ambiguous" authors a second addeweap
 # row of the same child type on the parent (stored slot 2, missing anchor).
 func _item_db(variant := "") -> ItemDatabase:
-	var base_path := ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")
-	var base_file := FileAccess.open(base_path, FileAccess.READ)
-	assert_not_null(base_file)
-	if base_file == null:
+	var text := ItemDbFixture.fixture_text(self)
+	if text.is_empty():
 		return null
-	var text := base_file.get_as_text().replace("\r\n", "\n")
-	base_file.close()
 	# Native seat extraction walks the graphic's .3di userpoints; the Dune
 	# Buggy row rides the committed tank model (one ctrlx control seat).
 	assert_true(text.contains("  graphic Dbuggy1\n"))
 	text = text.replace("  graphic Dbuggy1\n",
 			"  graphic carrierswap\n" if variant == "refresh"
 			else "  graphic tank\n")
-	var path := ProjectSettings.globalize_path(
-			"res://.godot/wire_header_world_items%s.def" % (
-			"" if variant.is_empty() else "_" + variant))
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return null
-	file.store_string(text)
-	if not text.ends_with("\n"):
-		file.store_string("\n")
-	file.store_string("""begin "Wire Header Spawn Zone"
-  id 101359
-  type object
-  graphic MrkAlpha
-  sid wire_header_zone
-  hp 100
-  attrib: SpawnPoint
-end
-
+	var rows := ItemDbFixture.SPAWN_ZONE_ROW + """
 begin "Wire Header Designated-G Parent"
   id 105005
   type vehicle
@@ -180,14 +157,12 @@ begin "Wire Header Designated-G Parent"
   move_function null
   primary_weapon WPN_EMPLCD50NA
   addeweapG ewep01 101419
-""")
+"""
 	if variant == "ambiguous":
-		file.store_string("  addeweap missing 101419\n")
-	file.store_string("end\n")
-	file.close()
-	var db := ItemDatabase.new()
-	assert_eq(db.load(path), OK)
-	return db
+		rows += "  addeweap missing 101419\n"
+	rows += "end\n"
+	return ItemDbFixture.load_with(self, "wire_header_world_items%s.def" % (
+			"" if variant.is_empty() else "_" + variant), text, rows)
 
 
 func _install_combat_tables(sim: Simulation, db: ItemDatabase) -> void:

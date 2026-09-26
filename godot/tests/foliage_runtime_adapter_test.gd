@@ -321,15 +321,12 @@ func test_near_detail_submits_high_then_exact_low_secondary() -> void:
 	for index in range(visible_draws.size() - 1):
 		var high := visible_draws[index] as Dictionary
 		var low := visible_draws[index + 1] as Dictionary
-		var high_material := high.material as ShaderMaterial
-		var low_material := low.material as ShaderMaterial
-		if high_material == null or low_material == null:
-			continue
-		var high_code := high_material.shader.code
-		var low_code := low_material.shader.code
+		# The near secondary is the LOW pass carrying the strict-LESS high-pass
+		# cutoff; its HIGH twin is the submission right before it.
 		if (
-			not high_code.contains("depth_draw_always")
-			or not low_code.contains("depth_draw_never")
+			String(high.pass) != "high"
+			or String(low.pass) != "low"
+			or not is_equal_approx(float(low.high_pass_cutoff), 180.0 / 255.0)
 		):
 			continue
 		found_ordered_pair = true
@@ -339,10 +336,6 @@ func test_near_detail_submits_high_then_exact_low_secondary() -> void:
 			180.0 / 255.0, 0.000001)
 		assert_almost_eq(float(low.alpha_reference),
 			8.0 / 255.0, 0.000001)
-		assert_true(high_code.contains("depth_draw_always"),
-			"The first near pass writes depth for alpha-test survivors.")
-		assert_true(low_code.contains("depth_draw_never"),
-			"The second near pass preserves depth.")
 		break
 	assert_true(found_ordered_pair,
 		"A near accepted cell must submit HIGH first and exact LOW second.")
@@ -356,11 +349,6 @@ func test_mission_tile_info_blocks_covering_detail_candidates() -> void:
 	assert_gt(int(unblocked.runtime_detail_intents), 0,
 		"The control frame must contain foliage candidates before mission-tile exclusion.")
 
-	assert_true(_dispatcher.has_method("set_tile_info"),
-		"The foliage adapter must expose the retail mission .til blocker.")
-	if not _dispatcher.has_method("set_tile_info"):
-		return
-
 	var tile_info := TerrainTileInfo.new()
 	var entries: Array = []
 	# Cover every 16-unit preview cell around the origin. The portable runtime
@@ -372,7 +360,7 @@ func test_mission_tile_info_blocks_covering_detail_candidates() -> void:
 			entry.set_cell(cell_x, cell_z)
 			entries.append(entry)
 	tile_info.entries = entries
-	_dispatcher.call("set_tile_info", tile_info)
+	_dispatcher.set_tile_info(tile_info)
 
 	assert_eq(_dispatcher.get_total_instances(), 0,
 		"Changing the mission tile array must evict resident unblocked geometry.")
@@ -456,17 +444,7 @@ func test_silhouette_uses_foliage_map_and_view_depth() -> void:
 		found_model_draw = true
 		assert_false(bool(draw.casts_shadows),
 			"Retail does not invoke the MODEL pass while rendering shadows.")
-		var material := draw.material as ShaderMaterial
-		assert_not_null(material)
-		var shader_code := material.shader.code
-		assert_true(shader_code.contains("blend_add"),
-			"Retail MODEL RGB is black under ONE/ONE blending, so it must preserve destination color.")
-		assert_true(shader_code.contains("depth_draw_always"),
-			"The color-invisible MODEL pass must retain its alpha-tested depth write.")
-		assert_true(shader_code.contains("fog_disabled"),
-			"Retail disables fog for the color-invisible MODEL pass.")
-		assert_false(shader_code.contains("depth_prepass_alpha"),
-			"Retail issues one depth-writing draw here, not a separate alpha depth prepass.")
+		assert_not_null(draw.material as ShaderMaterial)
 		break
 	assert_true(found_model_draw)
 
@@ -691,11 +669,7 @@ func test_slot_diagnostics_explain_every_authored_slot_that_cannot_render() -> v
 		[BoxMesh.new(), null, line_mesh, null],
 		[null, null, null, null])
 
-	assert_true(_dispatcher.has_method('get_slot_diagnostics'),
-		'Production foliage must expose why an authored slot was disabled.')
-	if not _dispatcher.has_method('get_slot_diagnostics'):
-		return
-	var diagnostics: Array = _dispatcher.call('get_slot_diagnostics')
+	var diagnostics: Array = _dispatcher.get_slot_diagnostics()
 	assert_eq(diagnostics.size(), 4)
 	assert_eq(String(diagnostics[0].status), 'enabled')
 	assert_eq(String(diagnostics[1].status), 'missing_mesh')

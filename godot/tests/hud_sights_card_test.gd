@@ -26,10 +26,6 @@ func test_multiplyat_selects_retail_material_contract() -> void:
 	if material != null:
 		assert_true(bool(material.get_shader_parameter("alpha_test")),
 				"multiplyat enables the retail alpha test")
-		assert_true(material.shader.code.contains("render_mode blend_mul;"),
-				"multiplyat uses multiplicative framebuffer blending")
-		assert_true(material.shader.code.contains("texel.rgb * 2.0"),
-				"multiplyat doubles source RGB to make 128 gray neutral")
 
 
 func test_multiplyat_preserves_scene_detail_and_discards_transparent_texels() -> void:

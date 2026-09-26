@@ -68,13 +68,7 @@ func test_synth_gamemus_slot_1_resolves_to_tone01():
 	script.load_from_path(SCRIPT_FIXTURE)
 	var bank := SbfBank.new()
 	bank.load_from_path(BANK_FIXTURE)
-	if script == null or bank == null:
-		pass_test("fixture missing; skipped")
-		return
 	var entry_1_name: String = bank.get_entry_name(1)
-	if entry_1_name.is_empty():
-		pass_test("bank slot 1 unnamed; skipped")
-		return
 	var name := StringName(script.get_default_script_name())
 	var text: String = script.get_decompiled_text_with_bank(name, bank)
 	# bind line carries the real name in quotes

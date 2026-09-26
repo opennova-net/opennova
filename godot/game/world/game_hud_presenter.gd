@@ -494,6 +494,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 
 	var probe_t1 := Time.get_ticks_usec() if stats_on else 0
 	_apply_attach_labels()
+	# The breath bar, from the same sim and gametext table (HudOverlay.set_breath_bar
+	# carries the witness).
+	_game_hud.set_breath_bar(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_apply_friendly_tags()
 	var probe_t2 := Time.get_ticks_usec() if stats_on else 0
 	var waypoint := _build_waypoint_entry()
@@ -1080,12 +1083,6 @@ func apply_death_screen_hud_detail() -> void:
 	_push_hud_detail_level()
 
 
-## The showhud edge poll (the seam the tests drive); every other row idle.
-func poll_showhud_edge(showhud_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, false, false, showhud_down, false, false,
-			false, false, false, false, false, false, chorded, active, false))
-
-
 ## The showhud cycle (the engine's flags rule): bit 1 feeds the overlay's
 ## corner spinmap block, bit 0 the FP viewmodel rig through the player presenter.
 func cycle_showhud() -> void:
@@ -1097,12 +1094,6 @@ func _push_showhud_flags() -> void:
 	if _game_hud != null:
 		_game_hud.set_showhud_flags(_toggles.get_showhud_flags())
 	_apply_fp_gun_visible()
-
-
-## The dotsize edge poll (the seam the tests drive); every other row idle.
-func poll_dotsize_edge(dotsize_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, false, false, false, dotsize_down, false,
-			false, false, false, false, false, false, chorded, active, false))
 
 
 ## The dotsize cycle: the overlay advances its per-player sight-scale index
@@ -1135,21 +1126,6 @@ func _push_sight_state() -> void:
 		return
 	_sights_card.set_sight_state(_game_hud.get_sight_scale_index(),
 			_sight_slide_multiplier)
-
-
-## The Goals edge poll (the seam the tests drive); every other row idle.
-func poll_goals_edge(goals_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, false, false, false, false, goals_down,
-			false, false, false, false, false, false, chorded, active, false))
-
-
-## The view-action rows (view1st / viewwithgun / viewchase) poll over
-## pre-sampled state (the seam the tests drive); every other row idle.
-func poll_view_action_edges(view1st_down: bool, viewwithgun_down: bool,
-		viewchase_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, false, false, false, false, false,
-			view1st_down, viewwithgun_down, viewchase_down, false, false, false, chorded,
-			active, false))
 
 
 func _apply_view_action(action: int) -> void:

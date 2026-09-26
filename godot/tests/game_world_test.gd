@@ -963,7 +963,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 
 
 func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
-	# _update_frame_clear_color() writes the witnessed frame clear into the
+	# GameWorld::update_frame_clear_color writes the witnessed frame clear into the
 	# ClearColor Environment's background_color every frame - but the scene
 	# resource decides whether that color ever renders. The Wave-1 scene shipped
 	# background_mode = 2 (BG_SKY) with no Sky resource, which renders BLACK and
@@ -1316,7 +1316,7 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	assert_not_null(effect_world)
 	if effect_world == null:
 		return
-	var file := ParticleFixture.catalog("puff dots",
+	var file := ParticleFixture.catalog(self, "puff dots",
 			"emit_dur = 0.5;\nemit_rate = 50;\nemit_burst = 4;\nage = 2;\nalpha = 1;\nscale = 1;\ngraphic1 = bink.tga, blend;\ng1_alpha = 1;\ng1_scale = 1;",
 			["puff"])
 	file.source_path = ProjectSettings.globalize_path(

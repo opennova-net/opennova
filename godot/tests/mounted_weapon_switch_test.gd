@@ -109,28 +109,6 @@ func _advance(sim: Simulation, ticks: int = 90) -> void:
 		_presenter.after_world_tick()
 
 
-# Action 6 is the configurable scope row (RMB by default). Headless Godot
-# cannot capture the mouse, and PlayerInputRouter::sample_weapon_input samples
-# the weapon actions only while it is captured, so a headless run calls
-# Simulation.request_local_player_scope_toggle() itself: the router's one-line
-# forward, everything after it (the loopback request, the host handler, the
-# presenter's event) being the same. A windowed run drives the actual default
-# RMB binding through the input router.
-func _right_click(sim: Simulation) -> void:
-	if DisplayServer.get_name() == "headless":
-		assert_true(sim.request_local_player_scope_toggle())
-		return
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_CAPTURED)
-	for pressed: bool in [true, false]:
-		var event := InputEventMouseButton.new()
-		event.button_index = MOUSE_BUTTON_RIGHT
-		event.pressed = pressed
-		Input.parse_input_event(event)
-		Input.flush_buffered_events()
-		_presenter.before_world_tick(Simulation.tick_dt(), false, true)
-
-
 # The whole scenario on one carrier: board it, take the seat that borrows the
 # G child, then switch back and forth. False when a fatal step failed (the
 # asserts name it).
@@ -188,12 +166,12 @@ func _check_carrier(carrier: Carrier) -> bool:
 	var seat: EntityCardSeat = hull.get_seats()[0]
 	var target := hull.get_mission_position() + seat.get_local().rotated(
 			Vector3(0, 0, 1), deg_to_rad(-hull.get_yaw_deg()))
-	MountLook.face(sim, target, target + Vector3(1, 0, 0))
+	MountLook.face(self, sim, target, target + Vector3(1, 0, 0))
 	_advance(sim, 18)
 	hull = sim.entity_card_by_net_id(carrier_bms_id)
 	target = hull.get_mission_position() + seat.get_local().rotated(
 			Vector3(0, 0, 1), deg_to_rad(-hull.get_yaw_deg()))
-	MountLook.face(sim, target, target + Vector3(1, 0, 0))
+	MountLook.face(self, sim, target, target + Vector3(1, 0, 0))
 	var boarded := sim.local_player_toggle_mount()
 	assert_true(boarded, "%s: board the carrier" % who)
 	if not boarded:
@@ -228,7 +206,7 @@ func _check_carrier(carrier: Carrier) -> bool:
 
 	# The request must survive the host loopback, and the REAL presenter
 	# consumes the weapon event.
-	_right_click(sim)
+	MountLook.right_click(self, sim, _presenter)
 	_advance(sim)
 	assert_eq(sim.get_local_player_weapon_name(), alternate,
 			"%s: right-click selects the carrier's own weapon" % who)
@@ -244,14 +222,14 @@ func _check_carrier(carrier: Carrier) -> bool:
 	assert_eq(card.row_count(), world.local_player_hud_weapon_def().sights.size(), who)
 	assert_gt(hud_presenter.get_game_hud().get_draw_list_stats().glyphs, 0, who)
 
-	_right_click(sim)
+	MountLook.right_click(self, sim, _presenter)
 	_advance(sim)
 	assert_eq(sim.get_local_player_weapon_name(), first, "%s: right-click returns" % who)
 	assert_eq(world.local_player_hud_weapon_def().weapon_name, first, who)
 	assert_eq(world.local_player_weapon_view().clip, first_clip,
 			"%s: the child's slot kept its own clip" % who)
 	assert_eq(world.local_player_weapon_view().reserve, first_reserve, who)
-	_right_click(sim)
+	MountLook.right_click(self, sim, _presenter)
 	_advance(sim)
 	assert_eq(sim.get_local_player_weapon_name(), alternate, who)
 	assert_eq(world.local_player_weapon_view().clip, 7,

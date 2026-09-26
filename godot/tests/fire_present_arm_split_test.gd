@@ -53,7 +53,7 @@ var _muzzle := Vector3.INF  # the held weapon's MFlash01 world point
 # effect per name, so the real EffectWorld interns and spawns them without a
 # resource root.
 func _catalog_file(effect_names: PackedStringArray) -> ParticleFile:
-	return ParticleFixture.catalog("flash dots",
+	return ParticleFixture.catalog(self, "flash dots",
 			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\n", effect_names)
 
 

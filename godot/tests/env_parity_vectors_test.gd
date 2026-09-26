@@ -110,8 +110,9 @@ extends GutTest
 #   and per-tick writeback. Fog and skyfog chase the undoubled authored bytes;
 #   the horizon blend precedes the saturating render-space double
 #   [orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f1b1], and SkyDome
-#   consumes that same final skyfog as the frame clear [orig: SkyDome_RenderWithSkyfog
-#   @ 0x579cb0]. The 12 listed weather rows moved only in their fog tokens;
+#   fogs toward that same final skyfog, the above-water frame clear
+#   [orig: SkyDome_RenderWithSkyfog @ 0x579cb0]. The 12 listed weather rows
+#   moved only in their fog tokens;
 #   ten low-fog grid rows moved only the skyfog token to the already-pinned
 #   horizon-blended frame-clear value. D-RLIT-1 records the same witness.
 #   docs/render/render-lighting-re.md.
@@ -129,6 +130,12 @@ extends GutTest
 #   Exactly the nine c*/t*/water rows (Env_WaterColorLit = water x combined
 #   >> 7) moved, each by one step in one or two channels; every other key
 #   UNCHANGED.
+#   2026-09-26: the c*/t*/water rows lost their trailing murk byte with the
+#   retired u_water_murk feed. The murk rides the strip's per-vertex COLOR.a
+#   (the angle-weighted murk x distance chain [orig: render_water_strip_detailed
+#   @ 0x5c2d3f..0x5c2ef6], pinned by the env_render_unit ctest's
+#   water_strip_row_colors cases); the env murk itself stays in c*/consts. No
+#   value was re-dumped: every lit-colour token is UNCHANGED.
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -182,59 +189,59 @@ const GLARE_BRIGHTNESS: Array[int] = [0, 32, 64, 128, 192, 255]
 
 const EXPECTED_BYTES := {
 	"c0/t0000": "2F4256 0E1D2D 23243B 02040C 000000 2F4256 23243B 23243B 000000 23243B 0E1D2D 0E1D2D 02040C 02040C 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t0000/water": "1D2524 CC",
+	"c0/t0000/water": "1D2524",
 	"c0/t0550": "18222C 1F2A2D 3B3D4A 4C5A8C 535351 18222C 3B3D4A 3B3D4A 535351 3B3D4A 1F2A2D 1F2A2D 4C5A8C 4C5A8C 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t0550/water": "21271F CC",
+	"c0/t0550/water": "21271F",
 	"c0/t0600": "555554 202A2E 3C3E4A 4E5E90 555554 18212B 3C3E4A 3C3E4A 555554 3C3E4A 202A2E 202A2E 4E5E90 4E5E90 383B27 FFFFFF FFFFFF 808080 00 02",
-	"c0/t0600/water": "343828 CC",
+	"c0/t0600/water": "343828",
 	"c0/t0615": "595957 202B2E 3D3F4B 526096 595957 172029 3D3F4B 3D3F4B 595957 3D3F4B 202B2E 202B2E 526096 526096 383B27 FFFFFF FFFFFF 808080 00 02",
-	"c0/t0615/water": "363A29 CC",
+	"c0/t0615/water": "363A29",
 	"c0/t1200": "AAAAA7 31372E 545859 9AB6FF AAAAA7 000000 545859 545859 AAAAA7 545859 31372E 31372E 9AB6FF 9AB6FF 383B27 FFFFFF FFFFFF 808080 00 02",
-	"c0/t1200/water": "595F3F CC",
+	"c0/t1200/water": "595F3F",
 	"c0/t1830": "4E4E4C 1E292D 393C49 485684 4E4E4C 19242F 393C49 393C49 4E4E4C 393C49 1E292D 1E292D 485684 485684 383B27 FFFFFF FFFFFF 808080 00 02",
-	"c0/t1830/water": "313526 CC",
+	"c0/t1830/water": "313526",
 	"c0/t1845": "1A2530 1D282D 383B48 445280 4A4A49 1A2530 383B48 383B48 4A4A49 383B48 1D282D 1D282D 445280 445280 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t1845/water": "202720 CC",
+	"c0/t1845/water": "202720",
 	"c0/t1900": "1B2732 1D282D 373A47 424E7A 474745 1B2732 373A47 373A47 474745 373A47 1D282D 1D282D 424E7A 424E7A 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t1900/water": "202720 CC",
+	"c0/t1900/water": "202720",
 	"c0/t2200": "273748 14212C 2B2D40 1C2238 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C 1C2238 1C2238 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t2200/water": "1E2623 CC",
+	"c0/t2200/water": "1E2623",
 	"c1/t0000": "17212B 070E16 11121D 000206 000000 17212B 11121D 11121D 000000 11121D 070E16 070E16 000006 000006 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t0000/water": "020C1B 80",
+	"c1/t0000/water": "020C1B",
 	"c1/t0550": "0C1116 0F1416 1D1F24 242C46 292928 0C1116 1D1F24 1D1F24 292928 1D1F24 0F1416 0F1416 242C46 242C46 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t0550/water": "020D17 80",
+	"c1/t0550/water": "020D17",
 	"c1/t0600": "2B2B2A 101517 1E1F25 262E48 2B2B2A 0C1116 1E1F25 1E1F25 2B2B2A 1E1F25 101517 101517 262E48 262E48 0A283C C89664 FFFFFF 2D3C4B 00 03",
-	"c1/t0600/water": "04131E 80",
+	"c1/t0600/water": "04131E",
 	"c1/t0615": "2C2C2B 101517 1E2025 28304A 2C2C2B 0B1015 1E2025 1E2025 2C2C2B 1E2025 101517 101517 28304A 28304A 0A283C C89664 FFFFFF 2D3C4B 00 03",
-	"c1/t0615/water": "04131F 80",
+	"c1/t0615/water": "04131F",
 	"c1/t1200": "555553 181B17 2A2C2C 4C5A8A 555553 000000 2A2C2C 2A2C2C 555553 2A2C2C 181B17 181B17 4C5A8A 4C5A8A 0A283C C89664 FFFFFF 2D3C4B 00 03",
-	"c1/t1200/water": "07202F 80",
+	"c1/t1200/water": "07202F",
 	"c1/t1830": "272726 0F1416 1C1E24 222A42 272726 0C1217 1C1E24 1C1E24 272726 1C1E24 0F1416 0F1416 222A42 222A42 0A283C C89664 FFFFFF 2D3C4B 00 03",
-	"c1/t1830/water": "04111D 80",
+	"c1/t1830/water": "04111D",
 	"c1/t1845": "0D1318 0E1416 1C1D24 222840 252524 0D1318 1C1D24 1C1D24 252524 1C1D24 0E1416 0E1416 222840 222840 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t1845/water": "020D18 80",
+	"c1/t1845/water": "020D18",
 	"c1/t1900": "0D1319 0E1316 1B1D23 20263C 232323 0D1319 1B1D23 1B1D23 232323 1B1D23 0E1316 0E1316 20263C 20263C 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t1900/water": "020D18 80",
+	"c1/t1900/water": "020D18",
 	"c1/t2200": "131C24 0A1016 15161F 0C101C 0E0E0E 131C24 15161F 15161F 0E0E0E 15161F 0A1016 0A1016 0C101C 0C101C 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t2200/water": "020C1A 80",
+	"c1/t2200/water": "020C1A",
 	"c2/t0000": "2F4256 0E1D2D 23243B FFFFFF 000000 2F4256 23243B 23243B 000000 23243B 0E1D2D 0E1D2D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t0000/water": "0F2654 59",
+	"c2/t0000/water": "0F2654",
 	"c2/t0550": "18222C 1F2A2D 3B3D4A FFFFFF 535351 18222C 3B3D4A 3B3D4A 535351 3B3D4A 1F2A2D 1F2A2D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t0550/water": "112749 59",
+	"c2/t0550/water": "112749",
 	"c2/t0600": "555554 202A2E 3C3E4A FFFFFF 555554 18212B 3C3E4A 3C3E4A 555554 3C3E4A 202A2E 202A2E FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
-	"c2/t0600/water": "1C395D 59",
+	"c2/t0600/water": "1C395D",
 	"c2/t0615": "595957 202B2E 3D3F4B FFFFFF 595957 172029 3D3F4B 3D3F4B 595957 3D3F4B 202B2E 202B2E FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
-	"c2/t0615/water": "1D3B5F 59",
+	"c2/t0615/water": "1D3B5F",
 	"c2/t1200": "AAAAA7 31372E 545859 FFFFFF AAAAA7 000000 545859 545859 AAAAA7 545859 31372E 31372E FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
-	"c2/t1200/water": "2F6191 59",
+	"c2/t1200/water": "2F6191",
 	"c2/t1830": "4E4E4C 1E292D 393C49 FFFFFF 4E4E4C 19242F 393C49 393C49 4E4E4C 393C49 1E292D 1E292D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
-	"c2/t1830/water": "1A3559 59",
+	"c2/t1830/water": "1A3559",
 	"c2/t1845": "1A2530 1D282D 383B48 FFFFFF 4A4A49 1A2530 383B48 383B48 4A4A49 383B48 1D282D 1D282D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t1845/water": "11274A 59",
+	"c2/t1845/water": "11274A",
 	"c2/t1900": "1B2732 1D282D 373A47 FFFFFF 474745 1B2732 373A47 373A47 474745 373A47 1D282D 1D282D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t1900/water": "11274A 59",
+	"c2/t1900/water": "11274A",
 	"c2/t2200": "273748 14212C 2B2D40 FFFFFF 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t2200/water": "102750 59",
+	"c2/t2200/water": "102750",
 	"celestial/glare_occlusion": "0000 1805 300A 6014 901E C028",
 	"celestial/glare_sweep": "0000 0000 0000 0000 0000 0000 0600 2500 5501 8B0B C028",
 	"envfile/derived": "9AFFFF 9A9A9A 7A5F43",
@@ -514,10 +521,7 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			# statics; pinned at the Water output).
 			water.advance_frame(TICK)
 			var lit: Vector3 = water.get_water_material().get_shader_parameter("u_water_color")
-			# u_water_murk (REN-4 rename from u_water_alpha; the same env murk
-			# value flows through, so the pinned byte is unchanged).
-			var alpha: float = water.get_water_material().get_shader_parameter("u_water_murk")
-			bytes[cell + "/water"] = "%s %s" % [_hex_color(lit), _hex_byte(_byte_of(alpha))]
+			bytes[cell + "/water"] = _hex_color(lit)
 
 		# Restore the environment-resolved height before recording that
 		# separate precedence vector (cfg0 returns to the zero sentinel).

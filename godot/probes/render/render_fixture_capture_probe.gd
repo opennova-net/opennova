@@ -485,8 +485,9 @@ func _prepare_pose(
 		_fail("mission runtime is unavailable while preparing an exact fixture pose")
 		return false
 	# Let render presentation settle while the mission clock is pinned. A paused
-	# runtime keeps GameWorld's environment/material publication live but prevents
-	# Weather.advance_world_driven() from advancing the selected fixed24 value.
+	# runtime keeps GameWorld's environment/material publication live but stops
+	# the session tick, whose weather tick (the world-driven Weather's only clock)
+	# would advance the selected fixed24 value.
 	runtime.pause()
 	if runtime.is_playing():
 		_fail("mission runtime could not pause for an exact fixture pose")

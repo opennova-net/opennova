@@ -2,7 +2,7 @@ extends GutTest
 
 # EffectWorld — the runtime .ptl effect world (load + intern + spawn +
 # expiry). Mirrors the witnessed chain: CEffectSystem_Init @ 0x5f6070 loads
-# every mounted .ptl; CEffect_FindOrCreateMaterial @ 0x5f7310 interns effect
+# every mounted .ptl; CEffectWorld_InternEffectHandle @ 0x5f7310 interns effect
 # names to stable 1-based handles (case-insensitive); SpawnEmitterAtPosition
 # @ 0x5f6df0 spawns by handle or name.
 
@@ -68,7 +68,7 @@ func _make_root() -> ResourceRoot:
 # One synthetic short-lived effect document (deterministic expiry, no fixture
 # dependence): one burst, sub-second lifetime.
 func _make_short_effect_file(properties: String = "") -> ParticleFile:
-	return ParticleFixture.catalog("puff dots",
+	return ParticleFixture.catalog(self, "puff dots",
 			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\n" + properties, ["puff"])
 
 
@@ -195,7 +195,7 @@ func test_novisnoupdate_gate_advances_on_screen_and_freezes_off_screen() -> void
 	camera.current = true
 	camera.global_transform = Transform3D(Basis(), Vector3.ZERO)
 	var world := _make_world()
-	world.load_particle_file(ParticleFixture.catalog("fire dots",
+	world.load_particle_file(ParticleFixture.catalog(self, "fire dots",
 			"emit_dur = 1;\nemit_rate = 50;\nage = 2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT NOVISNOUPDATE;\n",
 			["fire"]))
 	world.spawn_effect("fire", Vector3(0, 0, -10))
@@ -215,7 +215,7 @@ func test_novisnoupdate_gate_advances_on_screen_and_freezes_off_screen() -> void
 
 
 func test_live_group_parameters_drive_rate_and_offset_without_clamping() -> void:
-	var file := ParticleFixture.catalog("wake dots",
+	var file := ParticleFixture.catalog(self, "wake dots",
 			"emit_dur = 0.1;\nemit_rate = 30;\nemit_rate_adj = 30;\nemit_burst = 1;\ny_offset = 2;\nz_offset = 4;\nage = 1;\nflags = FOREVEREMIT;\n", ["wake"])
 	var world := _make_world()
 	world.load_particle_file(file)

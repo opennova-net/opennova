@@ -38,6 +38,7 @@ const LOCALRES_FILES := ["main.mnu", "menu_style.mns", "items.def"]
 
 const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)
 const SPAWN_ZONE_TYPE := 1359  # pool-1 fixture; ItemDef supplies SpawnPoint
+const ZONE_ITEMS_FILE := "host_punt_spawn_zone_items.def"
 
 # The retail death.mnu and the string tables it resolves come from the
 # reference fixture set (docs/asset-gated-tests.md); the whole script skips
@@ -96,43 +97,11 @@ func after_each() -> void:
 
 func after_all() -> void:
 	PresenterFixture.unstage(TMP_DIR, STAGED_FIXTURES)
-	var zone_def := ProjectSettings.globalize_path(
-			"res://.godot/host_punt_spawn_zone_items.def")
-	if FileAccess.file_exists(zone_def):
-		DirAccess.remove_absolute(zone_def)
+	ItemDbFixture.release(ZONE_ITEMS_FILE)
 
 
 func _spawn_zone_item_db() -> ItemDatabase:
-	var base_path := ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")
-	var base_file := FileAccess.open(base_path, FileAccess.READ)
-	assert_not_null(base_file)
-	if base_file == null:
-		return null
-	var base_items := base_file.get_as_text().replace("\r\n", "\n")
-	base_file.close()
-	var path := ProjectSettings.globalize_path(
-			"res://.godot/host_punt_spawn_zone_items.def")
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return null
-	file.store_string(base_items)
-	if not base_items.ends_with("\n"):
-		file.store_string("\n")
-	file.store_string("""begin "Punt Spawn Zone Fixture"
-  id 101359
-  type object
-  graphic MrkAlpha
-  sid punt_spawn_zone
-  hp 100
-  attrib: SpawnPoint
-end
-""")
-	file.close()
-	var result := ItemDatabase.new()
-	assert_eq(result.load(path), OK)
-	return result
+	return ItemDbFixture.with_rows(self, ZONE_ITEMS_FILE, ItemDbFixture.SPAWN_ZONE_ROW)
 
 
 # A REAL loopback join held at the DEATH deploy pick (the

@@ -312,7 +312,7 @@ func test_item_combo_top_level_items_with_empty_list_box() -> void:
 	assert_eq(doc.get_item_text(combo, 1), "Team", "second top-level row")
 
 
-func test_widget_sounds_read_edit_roundtrip() -> void:
+func test_widget_sounds_read_the_authored_row() -> void:
 	# StartBtn carries <SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>.
 	var doc := _load_doc()
 	var start := _find_widget(doc, "StartBtn")
@@ -325,10 +325,8 @@ func test_widget_sounds_read_edit_roundtrip() -> void:
 
 
 
-func test_widget_actions_read_edit_roundtrip() -> void:
-	# StartBtn carries <ACTION type="screen" target="OPTIONS">. Action rows are the
-	# menu editor's visual scripting surface: navigation/window behavior should be
-	# editable as structured data and round-trip through the MNU serializer.
+func test_widget_actions_read_the_authored_row() -> void:
+	# StartBtn carries <ACTION type="screen" target="OPTIONS">.
 	var doc := _load_doc()
 	var start := _find_widget(doc, "StartBtn")
 	var actions := doc.get_widget_actions(start)
@@ -341,54 +339,17 @@ func test_widget_actions_read_edit_roundtrip() -> void:
 
 
 
-func test_authoring_state_apply_preserves_presence_and_nested_data() -> void:
+func test_explicit_zero_musicvar_reads_as_present() -> void:
 	var src := """
 <SCREEN><NAME>S</NAME><MUSICVAR>0</MUSICVAR>
-<WINDOW type="window" name="ROOT">
-  <WINDOW type="vendor_widget" name="Opaque">
-    <GROUP>0</GROUP><TEXT_RSRC>widget.bin</TEXT_RSRC>
-    <FRAME><STENCIL size="0" insetx="0" insety="0">border.tga</STENCIL></FRAME>
-    <APPEARANCE type="image" state="default" map_state="0" height="0">art.tga</APPEARANCE>
-    <STRING edge="0"></STRING>
-    <ITEMS MULTISELECT justify="LEFT" vjustify="TOP">
-      <APPEARANCE type="color" state="selected" map_state="0" height="0">102030</APPEARANCE>
-      <ITEM type="id" value="0">ROW_ZERO</ITEM>
-    </ITEMS>
-    <HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
-    <ACTION type="form_post" source="profile" field="callsign" target_form="0" TOGGLE test="EQ">Submit</ACTION>
-  </WINDOW>
-  <WINDOW type="combo" name="Combo">
-    <ITEMS><ITEM value="legacy">Top</ITEM></ITEMS>
-    <LIST_BOX>
-      <STRING type="id" justify="CENTER" vjustify="BOTTOM" edge="0"></STRING>
-      <ITEMS MULTISELECT justify="RIGHT" vjustify="CENTER">
-        <APPEARANCE type="outline" state="default">ABCDEF</APPEARANCE>
-        <ITEM value="popup">Popup</ITEM>
-      </ITEMS>
-      <SCROLLBAR><SOUND state="mouseout" trigger="CLICK_VALUE">menu.lwf</SOUND></SCROLLBAR>
-    </LIST_BOX>
-  </WINDOW>
-  <WINDOW type="table" name="Grid">
-    <COLUMN count="0" spacing="0">
-      <HEADER column="0" width="0" type="id">HEAD</HEADER>
-      <BODY column="0" CUSTOM_DRAW></BODY>
-      <SUBST column="0" value="x" FILE>cell.tga</SUBST>
-    </COLUMN>
-    <ITEMS MULTISELECT justify="CENTER">
-      <APPEARANCE type="outline" state="default">010203</APPEARANCE>
-      <APPEARANCE type="color" state="selected">040506</APPEARANCE>
-    </ITEMS>
-    <SCROLLBAR><SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND></SCROLLBAR>
-  </WINDOW>
-</WINDOW></SCREEN>
+<WINDOW type="window" name="ROOT"/>
+</SCREEN>
 """
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var screen := int(doc.get_screen_ids()[0])
 	assert_true(doc.get_screen_has_music_var(screen), "explicit MUSICVAR=0 presence is exposed")
 	assert_eq(doc.get_screen_music_var(screen), 0)
-
-	var opaque := _find_widget(doc, "Opaque")
 
 
 func _ascii_utf16(text: String, big_endian: bool) -> PackedByteArray:
@@ -416,98 +377,6 @@ func test_document_bridge_preserves_bom_and_utf16_source_encoding() -> void:
 		assert_eq(saved[1], encoded[1], "second encoding marker byte survives")
 		var reparsed := MnuDocument.new()
 		assert_eq(reparsed.load_from_bytes(saved), OK, "preserved encoding remains parseable")
-
-
-func test_combo_closed_and_dropdown_items_edit_independently() -> void:
-	var src := """
-<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
-  <WINDOW type="combo" name="Mode">
-    <ITEMS justify="LEFT"><ITEM value="closed">Closed</ITEM></ITEMS>
-    <LIST_BOX>
-      <ITEMS justify="RIGHT"><ITEM value="popup">Popup</ITEM></ITEMS>
-    </LIST_BOX>
-  </WINDOW>
-</WINDOW></SCREEN>
-"""
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
-	var combo := _find_widget(doc, "Mode")
-
-
-func test_presence_false_retains_latent_values_but_omits_authored_fields() -> void:
-	var src := """
-<SCREEN><NAME>S</NAME><MUSICVAR>9</MUSICVAR><WINDOW type="window" name="ROOT">
-  <WINDOW type="combo" name="Deep">
-    <GROUP>7</GROUP>
-    <STRING edge="5">latent</STRING>
-    <FRAME><STENCIL size="9" insetx="4" insety="3">edge.tga</STENCIL></FRAME>
-    <APPEARANCE state="default" type="image" map_state="2" height="8">art.tga</APPEARANCE>
-    <ITEMS><ITEM value="1">closed</ITEM></ITEMS>
-    <LIST_BOX><STRING edge="6">popup</STRING><ITEMS><ITEM>drop</ITEM></ITEMS>
-      <SCROLLBAR><APPEARANCE state="default" type="color">112233</APPEARANCE></SCROLLBAR>
-    </LIST_BOX>
-  </WINDOW>
-  <WINDOW type="table" name="Grid">
-    <COLUMN count="3" spacing="5">
-      <HEADER column="2" width="70">Head</HEADER>
-      <BODY column="1"></BODY><SUBST column="1" value="x"/>
-    </COLUMN>
-    <MIN_ITEM_HEIGHT>11</MIN_ITEM_HEIGHT>
-  </WINDOW>
-</WINDOW></SCREEN>
-"""
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
-	var screen := int(doc.get_screen_ids()[0])
-	var deep := _find_widget(doc, "Deep")
-
-
-func test_table_color_aliases_update_only_last_matching_ordered_row() -> void:
-	var src := """
-<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
-  <WINDOW type="table" name="Grid"><ITEMS>
-    <APPEARANCE state="default" type="outline">111111</APPEARANCE>
-    <APPEARANCE state="default" type="outline">222222</APPEARANCE>
-    <APPEARANCE state="selected" type="color">333333</APPEARANCE>
-    <APPEARANCE state="selected" type="color">444444</APPEARANCE>
-  </ITEMS></WINDOW>
-</WINDOW></SCREEN>
-"""
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
-	var grid := _find_widget(doc, "Grid")
-
-
-func test_items_selection_alias_reconciles_duplicates_deletion_and_clear() -> void:
-	var src := """
-<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
-  <WINDOW type="list" name="Rows"><ITEMS>
-    <APPEARANCE state="selected" type="color">111111</APPEARANCE>
-    <APPEARANCE state="selected" type="color">222222</APPEARANCE>
-  </ITEMS></WINDOW>
-  <WINDOW type="combo" name="Mode"><LIST_BOX><ITEMS>
-    <APPEARANCE state="selected" type="color">AAAAAA</APPEARANCE>
-    <APPEARANCE state="selected" type="color">BBBBBB</APPEARANCE>
-  </ITEMS></LIST_BOX></WINDOW>
-</WINDOW></SCREEN>
-"""
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
-	var list := _find_widget(doc, "Rows")
-
-
-func test_combo_generic_items_ignore_latent_list_box_parent() -> void:
-	var src := """
-<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
-  <WINDOW type="combo" name="Mode">
-    <ITEMS><ITEM value="top">Top</ITEM></ITEMS>
-    <LIST_BOX><ITEMS><ITEM value="nested">Nested</ITEM></ITEMS></LIST_BOX>
-  </WINDOW>
-</WINDOW></SCREEN>
-"""
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
-	var combo := _find_widget(doc, "Mode")
 
 
 func test_is_widget_multiselect_reads_the_items_flag() -> void:

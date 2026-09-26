@@ -173,7 +173,7 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 
 func _ensure_weapons() -> void:
 	if _weapons == null and _root != null:
-		_weapons = LoadoutLabels.load_weapon_database(_root, "ArmoryMenuCompanion",
+		_weapons = LoadoutWeaponTable.load_weapon_database(_root, "ArmoryMenuCompanion",
 				"armory lists stay empty")
 
 
