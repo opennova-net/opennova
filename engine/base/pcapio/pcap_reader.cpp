@@ -1,6 +1,5 @@
 #include <base/pcapio/pcap_reader.h>
 
-#include <base/pcapio/pcap_writer.h>
 #include <base/io/le.h>
 
 #include <fstream>
@@ -320,22 +319,6 @@ bool stream_pcap_udp_file(const std::string &path,
 
 	if (frags_dropped) *frags_dropped = fragments_dropped;
 	return true;
-}
-
-std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams) {
-	// Whole-session-in-memory form of the streaming writer, for the tiny inline
-	// captures tests craft. Both share one framing implementation
-	// (pcap_writer.cpp) so a change to the record layout cannot drift between
-	// what we write live and what tests assert against.
-	std::vector<uint8_t> buf;
-	append_pcap_global_header(buf);
-	constexpr uint32_t kLoopback = 0x7F000001u; // 127.0.0.1, both ends
-	for (const auto &d : dgrams) {
-		append_pcap_udp_record(buf, kLoopback, uint16_t(d.srcport), kLoopback,
-				uint16_t(d.dstport), d.payload.data(), d.payload.size(),
-				d.ts_nanos);
-	}
-	return buf;
 }
 
 } // namespace opennova::net

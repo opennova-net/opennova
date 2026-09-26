@@ -368,6 +368,11 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// Render_ProcessMainSceneFrame, not this pass [orig: @ 0x5cac50 ->
 	// HUD_BuildMapOverlayView @ 0x5a7e10] — element_spinmap's own gates
 	// suppress the corner map at this level.
+	// The breath bar and the service prompts are HUD_DrawGameplayOverlays'
+	// legs, outside that early-out; the bar is called first
+	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 — the bar @0x5BDED3, the
+	//  prompts @0x5BDF1B..0x5BE10E].
+	element_breath_bar(state, surface_w, surface_h);
 	element_service_prompt(state, surface_w, surface_h);
 	element_inset_cues(state, surface_w, surface_h);
 	if (state.hud_detail_level >= 3) {
@@ -1018,6 +1023,79 @@ void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 	++draw_list_.elements_drawn;
 }
 
+void HudFrameCompiler::emit_progress_bar(int xl, int yt, int xr, int yb, uint32_t fill,
+		uint32_t border, float fraction, bool centered) {
+	// [orig: draw_progress_bar @0x59B340 — three untextured quads in one
+	//  12-vertex draw (CEffect_GetPassDesc_Validated(..., 0x700000) @0x59B5EB):
+	//  the border, the inner rect in opaque black (the float -1.7014118e38 =
+	//  0xFF000000 store @0x59B4DB), then the fill; centred, the fill spans
+	//  mid +- (xr - xl - 4) * fraction * 0.5 about mid = (xl + xr) / 2
+	//  @0x59B520..0x59B56B, else xl + 2 .. xl + 2 + (xr - xl - 4) * fraction]
+	emit_rect(static_cast<float>(xl), static_cast<float>(yt), static_cast<float>(xr),
+			static_cast<float>(yb), border, true);
+	emit_rect(static_cast<float>(xl + 1), static_cast<float>(yt + 1), static_cast<float>(xr - 1),
+			static_cast<float>(yb - 1), 0xFF000000u, true);
+	const float span = static_cast<float>(xr - xl - 4) * fraction;
+	float x0 = static_cast<float>(xl + 2);
+	float x1 = x0 + span;
+	if (centered) {
+		const float mid = static_cast<float>((xl + xr) / 2);
+		x0 = mid - span * 0.5f;
+		x1 = mid + span * 0.5f;
+	}
+	emit_rect(x0, static_cast<float>(yt + 2), x1, static_cast<float>(yb - 2), fill, true);
+}
+
+void HudFrameCompiler::element_breath_bar(const HudFrameState &state, float w, float h) {
+	// [orig: HUD_DrawBreathBar @0x59D6F0..0x59D9C9, whose only caller is
+	//  HUD_DrawGameplayOverlays @0x5BDED3, behind g_spawn_success_gate == 0
+	//  @0x5BDECA..0x5BDED1]
+	if (state.spawn_success_gate) {
+		return;
+	}
+	// The BREATHTIME declutter slot, then a positive breathtime
+	// [orig: @0x59D6F3, @0x59D70F]. The count forced to 1 under
+	// dword_24C1930 & 0x8000000 is a dead arm: nothing sets that bit.
+	if (!state.declutter_visible[kDeclutterBreathTime] || state.breath_time <= 0) {
+		return;
+	}
+	const int count = state.breath_samples;
+	if (count == 0) {
+		return; // [orig: @0x59D742]
+	}
+	// Four samples a second of breathtime; red over the last 40 (10 s).
+	const int limit = 4 * state.breath_time;
+	const uint32_t color = count > limit - 40 ? 0xFFFF0000u : 0xFF00FF00u;
+	const HudPosRecord &pos = layout_.breath_time;
+	// The bar is skipped once the integer `100 - 100 * count / limit` is not
+	// positive; the label still draws [orig: @0x59D763]. It is 200 x 10
+	// design px from the anchor, left (align 0), right (1) or centred (2),
+	// each corner scaled on its own [orig: @0x59D794..0x59D817,
+	// @0x59D90E..0x59D991, @0x59D851..0x59D8D4 through
+	// Viewport_ScaleToVirtualCoords], filled by 1 - count / limit in double
+	// [orig: @0x59D80A / @0x59D8C7 / @0x59D984].
+	if (100 - 100 * count / limit > 0) {
+		const int left = pos.align == 1 ? pos.x - 200 : (pos.align == 2 ? pos.x - 100 : pos.x);
+		const double fraction = 1.0 - static_cast<double>(count) / static_cast<double>(limit);
+		emit_progress_bar(static_cast<int>(sx(static_cast<float>(left), w)),
+				static_cast<int>(sy(static_cast<float>(pos.y), h)),
+				static_cast<int>(sx(static_cast<float>(left + 200), w)),
+				static_cast<int>(sy(static_cast<float>(pos.y + 10), h)), color, color,
+				static_cast<float>(fraction), true);
+	}
+	// The label (Overlays/STROVER91) 15 design px below the anchor in the BOLD
+	// slot, aligned like the bar, half-bright [orig: the slot push @0x59D8F7;
+	// HUD_DrawTextLeftScaled @0x59D83F / RightAlignedScaled @0x59D9B9 /
+	// CenteredScaled @0x59D8FC, all drawing through HUD_DrawTextLeft_HalfBright
+	// @0x5804C0's (color >> 1) & 0x7F7F7F | 0xFF000000].
+	const uint32_t flags =
+			pos.align == 1 ? kFontAlignRight : (pos.align == 2 ? kFontAlignCenter : 0u);
+	emit_slot_text(label_font_bold_, label_scale_, state.breath_label.c_str(),
+			sx(static_cast<float>(pos.x), w), sy(static_cast<float>(pos.y + 15), h),
+			half_bright_argb(color), flags);
+	++draw_list_.elements_drawn;
+}
+
 uint32_t HudFrameCompiler::active_color(const HudFrameState &state) const {
 	// The hud_color_index scheme table + the derived master overlay color.
 	// [orig: HUD_InitTeamColorTable @0x51f240 — the 16-dword g_hudColorTable
@@ -1256,8 +1334,9 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state) {
 	// D-HUD-20 [orig: HUD_DrawEntityLabel @ 0x5a39b0]. Screen-pixel anchors
 	// like the attach labels — the presenter projects, the compiler draws.
 	// Friendly tags draw with the NORMAL Arial label font at the slot scale
-	// [orig: g_hudLabelFont @ 0x5a3a0c; the spectated g_hudLabelFontLarge
-	// Impac22b leg @ 0x5a3a29 rides the unported death screen].
+	// [orig: @0x5a3a0c loads g_hudLabelFont @0xB4C388 (slot +0); the spectated
+	// leg @0x5a3a29 loads g_hudLabelFontLarge @0xB4C3A0 (slot +0x18, Impac22b)
+	// and rides the unported death screen].
 	const bool have_label = label_font_.font() != nullptr;
 	const GameFont &lf = have_label ? label_font_ : font_;
 	const float ls = have_label ? label_scale_ : 1.0f;
@@ -1503,7 +1582,7 @@ void HudFrameCompiler::element_end_round_overlay(const HudFrameState &state,
 
 void HudFrameCompiler::element_objective_line(const HudFrameState &state,
 		float w, float h) {
-	// [orig: draw_objective_status_text @ 0x59aa30 — the game_info anchor]
+	// [orig: HUD_DrawTeamIdLine @ 0x59aa30 — the game_info anchor]
 	if (state.objective_text.empty() || font_.font() == nullptr) {
 		return;
 	}

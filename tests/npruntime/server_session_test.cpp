@@ -48,12 +48,13 @@ bool expect(bool cond, const char *msg) {
 }
 
 // A host that has been up for five CNetQuality sample periods: the healthy-LAN
-// steady state the captures witness (frame-pressure floor 1 in all five send
-// samples, so S2C 0x79 carries 1). A host younger than that reports 0 — five
-// zeroed samples average below the floor.
-// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — sums / 5 @0x4C5555..0x4C557B]
+// steady state the captures witness (a measured frame rate at or above 16, so
+// frame-pressure floor 1 in all five send samples and S2C 0x79 carries 1).
+// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — sums / 5 @0x4C5555..0x4C557B;
+//  the frame-rate read of g_statsAvgFps @0x4C531B]
 void prime_steady_host_quality(opennova::inmatch::NapiNPServerCtx &ctx) {
 	for (int32_t &sample : ctx.host_quality_window.bandwidth) sample = 1;
+	ctx.stats_avg_fps = 62;
 }
 
 bool check_scoreboard_message_is_transient() {

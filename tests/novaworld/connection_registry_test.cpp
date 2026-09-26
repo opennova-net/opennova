@@ -39,20 +39,17 @@ int test_add_find() {
 	return 0;
 }
 
-int test_touch_updates_last_seen() {
+int test_touch_addr_updates_last_seen() {
 	ConnectionRegistry r;
 	r.add(make(0x1, 0x7F000001u, 7000, 1000));
 
-	r.touch(0x1, 5000);
+	r.touch_addr(PeerAddr{0x7F000001u, 7000}, 8000);
 	auto found = r.find(0x1);
 	TEST_EXPECT(found.has_value());
-	TEST_EXPECT(found->last_seen_ms == 5000);
-
-	r.touch_addr(PeerAddr{0x7F000001u, 7000}, 8000);
-	found = r.find(0x1);
 	TEST_EXPECT(found->last_seen_ms == 8000);
 
-	r.touch(0xDEAD, 9000); // missing id is a no-op
+	r.touch_addr(PeerAddr{0x7F000001u, 7001}, 9000); // an unknown address is a no-op
+	TEST_EXPECT(r.find(0x1)->last_seen_ms == 8000);
 	TEST_EXPECT(r.size() == 1);
 	return 0;
 }
@@ -74,25 +71,23 @@ int test_drop_removes_both_indices() {
 	return 0;
 }
 
-int test_mark_active_promotes() {
+int test_mark_active_by_addr_promotes() {
 	ConnectionRegistry r;
 	r.add(make(0x99, 0x7F000001u, 7000));
+	const PeerAddr addr{0x7F000001u, 7000};
 
-	bool first = r.mark_active(0x99, "Taylor", "client_scrk_aaa", "server_scrk_bbb");
-	TEST_EXPECT(first);
+	TEST_EXPECT(r.mark_active_by_addr(addr, "Taylor", "client_scrk_aaa", "server_scrk_bbb"));
 	auto a = r.find(0x99);
 	TEST_EXPECT(a->state == ConnectionState::Active);
 	TEST_EXPECT(a->identity == "Taylor");
 	TEST_EXPECT(a->client_scrk == "client_scrk_aaa");
 	TEST_EXPECT(a->server_scrk == "server_scrk_bbb");
 
-	bool second = r.mark_active(0x99, "Other", "x", "y");
-	TEST_EXPECT(!second); // already Active
-	auto a2 = r.find(0x99);
-	TEST_EXPECT(a2->identity == "Taylor"); // unchanged
+	// A fresh AUTH on an Active connection refreshes the SCRKs.
+	TEST_EXPECT(r.mark_active_by_addr(addr, "Taylor", "client_scrk_ccc", "server_scrk_ddd"));
+	TEST_EXPECT(r.find(0x99)->client_scrk == "client_scrk_ccc");
 
-	bool missing = r.mark_active(0xDEAD, "x", "y", "z");
-	TEST_EXPECT(!missing);
+	TEST_EXPECT(!r.mark_active_by_addr(PeerAddr{0x7F000001u, 7001}, "x", "y", "z"));
 	return 0;
 }
 
@@ -152,12 +147,12 @@ int test_snapshot() {
 
 int main() {
 	if (test_add_find() != 0) return 1;
-	if (test_touch_updates_last_seen() != 0) return 1;
+	if (test_touch_addr_updates_last_seen() != 0) return 1;
 	if (test_drop_removes_both_indices() != 0) return 1;
-	if (test_mark_active_promotes() != 0) return 1;
+	if (test_mark_active_by_addr_promotes() != 0) return 1;
 	if (test_addr_collision_evicts_old_id() != 0) return 1;
 	if (test_iter_expired() != 0) return 1;
 	if (test_snapshot() != 0) return 1;
-	std::printf("OK: ConnectionRegistry add/touch/drop/mark_active/iter_expired\n");
+	std::printf("OK: ConnectionRegistry add/touch_addr/drop/mark_active_by_addr/iter_expired\n");
 	return 0;
 }

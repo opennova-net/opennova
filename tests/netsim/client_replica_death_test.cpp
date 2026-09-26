@@ -43,10 +43,15 @@ FrameUpdate phase0_frame(uint8_t penalty, uint8_t revive, uint8_t hold) {
 void test_sub_block_0_timers_fold_and_retain() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
-	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(phase0_frame(7, 120, 3)));
+	FrameUpdate first = phase0_frame(7, 120, 3);
+	// The breath samples ride the same sub-block
+	// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C].
+	first.weapon.slot_state460 = 40;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(first));
 	CHECK(view.state().respawn_penalty_seconds == 7);
 	CHECK(view.state().local_revive_seconds == 120);
 	CHECK(view.state().spawn_hold_seconds == 3);
+	CHECK(view.state().breath_samples == 40);
 	// A phase-1 frame (the timer sub-block) leaves the phase-0 landings alone.
 	FrameUpdate timer;
 	timer.mount_handle = 0xFFFF;
@@ -58,11 +63,13 @@ void test_sub_block_0_timers_fold_and_retain() {
 	CHECK(view.state().respawn_penalty_seconds == 7);
 	CHECK(view.state().local_revive_seconds == 120);
 	CHECK(view.state().spawn_hold_seconds == 3);
+	CHECK(view.state().breath_samples == 40);
 	// The next phase-0 frame replaces them.
 	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(phase0_frame(0, 119, 0)));
 	CHECK(view.state().respawn_penalty_seconds == 0);
 	CHECK(view.state().local_revive_seconds == 119);
 	CHECK(view.state().spawn_hold_seconds == 0);
+	CHECK(view.state().breath_samples == 0);
 }
 
 // [u8 groupCount] then { u16 zone, u16 index, u8 count, u16 countdown, u16 × count }.

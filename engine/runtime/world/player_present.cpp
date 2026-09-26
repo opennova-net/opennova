@@ -61,8 +61,8 @@ bool action_particle_uses_third_person_gun(bool third_person) {
 }
 
 bool action_particle_uses_mounted_gun(bool borrowed_usegun_slot,
-                                     bool third_person, bool has_first_person_gun) {
-    return borrowed_usegun_slot && (third_person || !has_first_person_gun);
+                                     bool third_person, bool first_person_action_model) {
+    return borrowed_usegun_slot && (third_person || !first_person_action_model);
 }
 
 // [orig: ActionSlot_BeginActivePhase @0x53f830; the gate

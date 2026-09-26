@@ -165,18 +165,6 @@ void EntityRegistry::by_group(uint8_t group, std::vector<EntityHandle> &out) con
     }
 }
 
-void EntityRegistry::in_area(const Aabb &zone, std::vector<EntityHandle> &out) const {
-    out.clear();
-    for (int pool = 0; pool < kPoolCount; ++pool) {
-        const Pool &p = pools_[pool];
-        for (size_t s = 0; s < p.slots.size(); ++s) {
-            if (p.used[s] && zone.contains(p.slots[s].position)) {
-                out.push_back(EntityHandle::make(pool, static_cast<int>(s)));
-            }
-        }
-    }
-}
-
 int EntityRegistry::register_area(std::string name, const Aabb &bounds, bool active,
                                   int32_t zone_id, std::optional<Aabb> script_bounds) {
     areas_.push_back(Area{std::move(name), bounds, active, zone_id,

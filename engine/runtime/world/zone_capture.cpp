@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 
+#include <base/io/crt_ftol.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
@@ -37,14 +38,6 @@ bool is_playing_player(const Entity &e) {
 }
 
 uint32_t entity_flags(const Entity &e) { return e.flags | e.engine_flags; }
-
-// The x87 float-to-int conversion: truncation, with the integer indefinite
-// for an infinity, a NaN or an out-of-range value. [orig: _ftol2_sse @0x76BC00]
-int32_t ftol_indefinite(double value) {
-    if (value != value || value >= 2147483648.0 || value < -2147483648.0)
-        return static_cast<int32_t>(0x80000000u);
-    return static_cast<int32_t>(value);
-}
 
 // CaptureZone_CheckProximityScoring's gates: in-session team games only, a
 // registered capturer, and an owned zone. [orig: CaptureZone_CheckProximityScoring
@@ -95,7 +88,7 @@ int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input) {
                     x = ratio * clock;
                 }
                 x = std::clamp(x, 0.0, 1.0); // [orig: @0x501400..0x501439]
-                const int32_t reduction = ftol_indefinite(x * speed * 0.5);
+                const int32_t reduction = io::retail_ftol_sse2(x * speed * 0.5);
                 speed -= reduction; // [orig: `fisub` @0x501426]
             }
         }
@@ -104,7 +97,7 @@ int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input) {
     }
     // [orig: `fidiv presence; fdivr 65536.0` @0x501452..0x501456, _ftol2_sse
     //  @0x50145C; the minimum magnitude @0x50146B..0x501478]
-    const int32_t delta = ftol_indefinite(65536.0 / (speed / input.presence));
+    const int32_t delta = io::retail_ftol_sse2(65536.0 / (speed / input.presence));
     if (delta != 0) return delta;
     return input.presence > 0 ? 1 : -1;
 }

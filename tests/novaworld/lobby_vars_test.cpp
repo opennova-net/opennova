@@ -185,6 +185,12 @@ int main() {
 		alt.region_index = 5;
 		expect(value_of(nw::make_host_var_list(alt, text, true), "Region") == "?",
 		       "unknown region index -> ?");
+
+		// A stock registration advertises AllowPing 'y': game.cfg `ping`
+		// defaults to 1 [orig: Config_SetDefaults @0x54D324 -> dword_24D2184
+		// @0x551D4F; read @0x4FEF72].
+		expect(value_of(nw::make_host_var_list(nw::HostRegistration{}, text, true), "AllowPing") == "y",
+		       "a default registration advertises AllowPing y");
 	}
 
 	// 4. PlayerList: five VarFNum-keyed vars per slot.

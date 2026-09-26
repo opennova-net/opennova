@@ -13,8 +13,7 @@
 // as CPU references.
 // [orig: Render_ProcessMainSceneFrame @0x5ca8f6..0x5caad5 (the dispatch);
 //  FrameFX_ApplyScreenEffect @0x584440 (types 0-5) and FrameFX_ApplyWeaponViewEffect
-//  @0x5845b0 (types 8/9) -- both are the FrameFX dispatchers despite their
-//  names; FrameFX_DrawPass @0x582ab0 (DrawPass);
+//  @0x5845b0 (types 8/9), the two FrameFX dispatchers; FrameFX_DrawPass @0x582ab0 (DrawPass);
 //  CFrameFX_CreatePixelShaders @0x5821d0 (the pixel stages and blends)]
 
 #include <array>

@@ -1,10 +1,11 @@
 #pragma once
 
-// Internal to engine/runtime/world's collision TUs — not part of world/collision.h.
+// Internal to engine/runtime/world — not part of world/collision.h.
 //
 // The fixed-point math every collision TU shares: the retail sqrt/ftol chain, the
 // BAM conversion constants, and the two lookups the queries and the resolvers both
-// need. Header-inline because each is a handful of lines on a hot path.
+// need (the motors and the userpoint pose reuse its flt_7C19E0 clamp).
+// Header-inline because each is a handful of lines on a hot path.
 
 #include <runtime/world/collision.h>
 

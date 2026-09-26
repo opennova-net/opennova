@@ -142,8 +142,8 @@ int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     vm->last_error[0] = 0;
     vm->current_section_name[0] = 0;
 
-    /* Witnessed: Jointops.exe!AudioVM_ScriptInstanceInit @ 0x00672D20
-       initial_pc = section_table[entry_section_index]. */
+    /* Witnessed: Jointops.exe!ScriptInstance_Init @ 0x00672EF0
+       initial_pc = section_table[entry_section_index] (@0x672FB5..0x672FC3). */
     vm->pc = 0;
     if (s->section_count > 0 && s->entry_section_index < s->section_count) {
         const MusSection *entry = &s->sections[s->entry_section_index];
@@ -913,8 +913,9 @@ static void intrinsic_fisset(MusVM *vm) {
 
 /* Jointops.exe!AudioVM_Intrinsic_FIsClear @ 0x6723C0: pops 2 (NOS=mask, TOS=&var),
    returns -1 when NONE of the mask bits are set (`(mask & *var) == 0`), else 0.
-   This is a real bound handler in Jointops (idx 8), the inverse of FIsSet. */
-static void intrinsic_fisclear(MusVM *vm) {
+   The inverse of FIsSet. The handler exists in the image but its name never
+   resolves (see init_intrinsics), so it is kept only as the reference body. */
+[[maybe_unused]] static void intrinsic_fisclear(MusVM *vm) {
     int32_t var_addr = vm_pop(vm);
     int32_t mask     = vm_pop(vm);
     int32_t cur = read_tagged(vm, var_addr);
@@ -952,7 +953,6 @@ static void init_intrinsics(void) {
        bound @0x84F20C = 8; the table @0x84F0C8; AudioVM_Op_Method @0x672CF0
        NULL path] (jo-c cross-check 2026-09-10; intrinsic_fisclear stays as the
        reference body). */
-    (void)intrinsic_fisclear;
     kIntrinsics[8]  = intrinsic_unbound;
     kIntrinsics[9]  = intrinsic_unbound;   /* TStart: absent in this build */
     kIntrinsics[10] = intrinsic_unbound;   /* TStop:  absent in this build */

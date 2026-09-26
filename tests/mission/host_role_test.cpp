@@ -23,6 +23,7 @@
 #include <runtime/inmatch/null_datagram_socket.h>
 
 #include "../common/boot_file_source.h"
+#include "../common/synthetic_mission.h"
 
 #include <cstdio>
 #include <map>
@@ -46,27 +47,8 @@ static int failures = 0;
 
 namespace {
 
-bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Organic;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	e.yaw = 90;
-	e.team = team;
-	return e;
-}
-
-bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Item;
-	e.type_id = type_id;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	return e;
-}
-
+using test_mission::item;
+using test_mission::organic;
 using test_boot::source_over;
 
 // The synthetic mission mission_kernel_test boots: two placed entities and
@@ -75,7 +57,7 @@ bms::File synthetic_mission() {
 	bms::File m{};
 	m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
 	m.items[0].id = 21;
-	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 	m.organics[0].id = 31;
 	m.events.push_back(bms::Event{});
 	return m;

@@ -50,6 +50,7 @@
 #include <runtime/world/world.h>
 
 #include <base/pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_writer.h> // build_pcap_udp
 
 #include <algorithm>
 #include <cstdint>

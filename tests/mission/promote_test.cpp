@@ -12,6 +12,8 @@
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/world.h>
 
+#include "../common/synthetic_mission.h"
+
 using namespace opennova;
 using namespace opennova::world;
 
@@ -80,13 +82,7 @@ static bms::Entity marker(int32_t x, int32_t y, int32_t z) {
     return e;
 }
 
-static bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
-    bms::Entity e{};
-    e.type = bms::ItemType::Item;
-    e.type_id = type_id;
-    e.x = x; e.y = y; e.z = z;
-    return e;
-}
+using test_mission::item;
 
 #if defined(_MSC_VER)
 __declspec(noinline)

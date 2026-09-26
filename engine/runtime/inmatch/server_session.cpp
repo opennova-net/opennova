@@ -84,8 +84,7 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 					: GameSessionChannel::Lan;
 	ctx.config.send_holdoff_ticks =
 			config.effective_send_holdoff_ticks(transport_fallback);
-	ctx.mission_metadata_blob = build_mission_metadata_blob(
-			ctx.config, ctx.is_mp_session_peer != 0);
+	ctx.mission_metadata_blob = build_mission_metadata_blob(ctx.config);
 	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
 	ctx.np_protocol.max_players = config.max_players;
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)

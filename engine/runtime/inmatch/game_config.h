@@ -198,6 +198,15 @@ struct GameConfig {
 	// [orig: g_GameConfigState.multiplayerReset_344; the SetMPReset arm of the
 	//  ServerCommand handler @0x4D2E28 -> Game_SaveConfig @0x4D2E2D]
 	int32_t multiplayer_reset = 0;
+	// game.cfg `mpmaxpacketsize`: the datagram ceiling this host advertises as
+	// CS field 13 of both connection templates in its 0x82 (the SIGNED ladder
+	// of cs_max_packet_bytes: 0 -> 1300, below 100 -> 100, above 0x4000 ->
+	// 0x4000). The host's own packet builder keeps the fixed
+	// kGameSessionMaxPacketBytes above; nothing configures a non-stock value.
+	// [orig: g_GameConfigState.maxPacketSize_338, cfg var "mpmaxpacketsize" row
+	//  @0x833380, default "1300" @0x7D268C; Config_SetDefaults clamp
+	//  @0x54D060..0x54D090; read by CNapiNetwork_Init @0x4CAA53]
+	int32_t max_packet_size = 1300;
 	int32_t capture_duration_seconds = 15; // [orig g_capture_duration @0x24D2248] `TakeoverTime`
 	int32_t capture_speed_setting = 1;     // [orig g_capture_speed_setting @0x24D2254]
 	int32_t spawn_wave_time_base = 0;      // [orig g_spawn_wave_time_base @0x24D224C]

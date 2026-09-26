@@ -2,14 +2,14 @@
 #include <runtime/world/vehicle_motor.h>
 #include <base/io/fixed.h>
 
-// Split out of vehicle_motor.cpp (the oversize-TU ratchet). Motion only — every
-// body is unchanged, and each original-code citation moved with the code it
-// annotates.
-//
-// The air + ground contact/suspension solves — the client-executed subsets of
-// Entity_ProcessAircraftContactPhysics [orig: @0x47EF10] and
-// Entity_ProcessTrackedVehiclePhysics [orig: @0x47C1C0] — consumed by the
-// air/ground movers in vehicle_motor.cpp at their witnessed call sites.
+// The per-family contact/suspension solves, the client-executed subsets of the
+// originals, that the movers in vehicle_motor.cpp call at their witnessed call
+// sites: the aircraft solve (Entity_ProcessAircraftContactPhysics
+// [orig: @0x47EF10]), the tracked ground solve (Entity_ProcessTrackedVehiclePhysics
+// [orig: @0x47C1C0]), the tank/wheeled solve with its second pass, wall stop and
+// crash arms, and the bike/light solve with its fall-over arm. Each solve's
+// witness block sits above it. Split out of vehicle_motor.cpp (the oversize-TU
+// ratchet).
 
 #include <algorithm>
 #include <cmath>
@@ -107,18 +107,10 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	const int32_t sev =
 			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
-	if (sev == 1) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x47F905..]
-	} else if (sev == 2) {
-		m.speed -= m.speed >> ((traits.torque + 1) & 31);
-	} else if (sev == 3) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31);
-		// The shared impact fold applies authority damage, sound and momentum. A terrain-only
-		// severe hit cuts speed to one quarter when its strongest planar probe lies beyond the
-		// hull.
-		if (!hit_entity.valid() && strongest_probe_beyond_hull(forces, probes, 7, px, py))
-			m.speed = int32_t(m.speed * 0.25); // [orig: @0x47FDF8 region]
-	}
+	// The shared impact fold applies authority damage, sound and momentum. A terrain-only
+	// severe hit cuts speed to one quarter when its strongest planar probe lies beyond the
+	// hull. [orig: the decay @0x47F905..; the quarter cut @0x47FDF8 region]
+	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 7, px, py);
 	int32_t d[7];
     for (int i = 0; i < 7; ++i) d[i] = forces[i].fz;
     if (sev >= 1) {
@@ -347,18 +339,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	const int32_t sev =
 			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
-	if (sev == 1) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x47CC31]
-	} else if (sev == 2) {
-		m.speed -= m.speed >> ((traits.torque + 1) & 31); // [orig: @0x47CC71]
-	} else if (sev == 3) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x47CCA1]
-		// The shared impact fold owns damage, scrape sound and momentum. The terrain-only quarter-
-		// speed cut keeps its strongest-probe distance gate.
-		// Witness sites: [orig: @0x47CF5E, @0x47D038, @0x47D0DE, @0x47D0EF]
-		if (!hit_entity.valid() && strongest_probe_beyond_hull(forces, probes, 7, px, py))
-			m.speed = int32_t(m.speed * 0.25); // [orig: flt_7C333C @0x47D0DE]
-	}
+	// The decay per severity [orig: @0x47CC31 (1), @0x47CC71 (2), @0x47CCA1 (3)]. The shared
+	// impact fold owns damage, scrape sound and momentum. The terrain-only quarter-speed cut
+	// keeps its strongest-probe distance gate [orig: flt_7C333C @0x47D0DE].
+	// Witness sites: [orig: @0x47CF5E, @0x47D038, @0x47D0DE, @0x47D0EF]
+	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 7, px, py);
 	int32_t d[7];
     for (int i = 0; i < 7; ++i) d[i] = forces[i].fz;
     if (sev >= 1) {
@@ -714,16 +699,8 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	const int32_t sev =
 			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
-	if (sev == 1) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31);
-	} else if (sev == 2) {
-		m.speed -= m.speed >> ((traits.torque + 1) & 31);
-	} else if (sev == 3) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31);
-        // strongest_probe_beyond_hull over the first SEVEN probes only.
-		if (!hit_entity.valid() && strongest_probe_beyond_hull(forces, probes, 7, px, py))
-			m.speed = int32_t(m.speed * 0.25);
-	}
+	// The quarter-speed cut scans the first SEVEN probes only.
+	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 7, px, py);
 	// Two depth views leave the passes. The probe records hold the last pass
 	// and drive the supports, spring loop, lifts and Z maxes; the copy is
 	// averaged and mass-shared and feeds only the landing, crush and wreck
@@ -1326,13 +1303,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 
 	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	int32_t probes[6][3];
-	for (int i = 0; i < 6; ++i) {
-        int32_t rotated[3];
-        basis.q22.rotate_point(probes_model[i], rotated);
-        probes[i][0] = px + rotated[0];
-        probes[i][1] = py + rotated[1];
-        probes[i][2] = pz + rotated[2];
-    }
+	place_probes(basis, probes_model, px, py, pz, probes);
 
 	// The two contact passes retain the six-probe layout. Shared response applies sound and
 	// momentum; the terrain-only quarter-speed cut scans probes 0 through 4, excluding the mid-
@@ -1347,24 +1318,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	const int32_t sev =
 			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
-	if (sev == 1) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31);
-	} else if (sev == 2) {
-		m.speed -= m.speed >> ((traits.torque + 1) & 31);
-	} else if (sev == 3) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31);
-        int strongest = 0;
-        int64_t best = -1;
-        for (int i = 0; i < 5; ++i) {
-            const int64_t sfx = forces[i].fx, sfy = forces[i].fy;
-            const int64_t mag2 = sfx * sfx + sfy * sfy;
-            if (mag2 > best) { best = mag2; strongest = i; }
-        }
-        const int64_t ddx = int64_t(probes[strongest][0]) - px;
-        const int64_t ddy = int64_t(probes[strongest][1]) - py;
-		if (!hit_entity.valid() && ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000)
-			m.speed = int32_t(m.speed * 0.25);
-	}
+	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 5, px, py);
 	int32_t d[6];
     for (int i = 0; i < 6; ++i) d[i] = forces[i].fz;
     if (sev >= 1) {

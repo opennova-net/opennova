@@ -391,7 +391,8 @@ EndRoundColumnLayout end_round_column_layout(
 }
 
 void EndRoundTransition::reset() {
-	// [orig: Game_InitMissionRoundState @0x525903 clears byte_28E561C/D]
+	// [orig: Game_InitMissionRoundState @0x5b71b0 clears byte_28E561C/D, called
+	//  from Game_StartMission @0x524360 (the call @0x525903)]
 	header_seen = false;
 	header_edge_ms = 0;
 	stat_opened = false;

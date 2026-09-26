@@ -78,23 +78,14 @@ public:
 	ImGuiPass &pass() { return pass_; }
 	const ImGuiPass &pass() const { return pass_; }
 	StatsWindow &stats_window() { return *stats_window_; }
-	const StatsWindow &stats_window() const { return *stats_window_; }
 	EntitiesWindow &entities_window() { return *entities_window_; }
-	const EntitiesWindow &entities_window() const { return *entities_window_; }
 	EntityPropertiesWindow &entity_properties_window() { return *entity_properties_window_; }
-	const EntityPropertiesWindow &entity_properties_window() const { return *entity_properties_window_; }
 	WeaponWindow &weapon_window() { return *weapon_window_; }
-	const WeaponWindow &weapon_window() const { return *weapon_window_; }
 	EnvironmentWindow &environment_window() { return *environment_window_; }
-	const EnvironmentWindow &environment_window() const { return *environment_window_; }
 	AiWindow &ai_window() { return *ai_window_; }
-	const AiWindow &ai_window() const { return *ai_window_; }
 	RaysWindow &rays_window() { return *rays_window_; }
-	const RaysWindow &rays_window() const { return *rays_window_; }
 	PhysicsWindow &physics_window() { return *physics_window_; }
-	const PhysicsWindow &physics_window() const { return *physics_window_; }
 	LogWindow &log_window() { return *log_window_; }
-	const LogWindow &log_window() const { return *log_window_; }
 	ScriptWindow &script_window() { return *script_window_; }
 	PlayerWindow &player_window() { return *player_window_; }
 	RenderWindow &render_window() { return *render_window_; }
@@ -120,7 +111,6 @@ public:
 	// pushed on kControlStateSeconds while needs_control_states.
 	static constexpr double kControlStateSeconds = 0.25;
 	ControlBoard &control_board() { return control_board_; }
-	const ControlBoard &control_board() const { return control_board_; }
 	void set_control_catalog(std::vector<ControlSpec> catalog);
 	void set_control_states(const std::vector<ControlState> &states);
 	bool needs_control_states() const;
@@ -161,7 +151,6 @@ public:
 	// The Game window's status readout, pushed while the tools are open.
 	void set_game_status(const GameStatusSnapshot &status);
 	bool needs_game_status() const { return pass_.is_open(); }
-	const GameWindow &game_window() const { return *game_window_; }
 	GameWindow &game_window() { return *game_window_; }
 
 	// The Entities window's record channel (ADR 0042 d6). The embedder pushes

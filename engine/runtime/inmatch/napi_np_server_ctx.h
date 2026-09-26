@@ -182,6 +182,13 @@ struct NapiNPServerCtx {
 	//  the dword_24D1DDC 62-frame countdown; CNetQuality_UpdateMetrics @0x4C52C0].
 	replication::NetQualityWindow host_quality_window;
 	uint32_t net_quality_sample_countdown = 0;
+	// The main loop's FR counter (world::TickAccumulator::average_fps), handed
+	// over by the session once per banked frame (HostRole::observe_frame_rate):
+	// the send window's frame-pressure input and, copied at the head of every
+	// Server_TickUpdate, the 0x0A server-status fps byte. 0 = retail's
+	// mode-init value, until the first 2 s window closes.
+	// [orig: g_statsAvgFps; Server_TickUpdate @0x51D7E0..0x51D7E5 -> g_serverFps]
+	int32_t stats_avg_fps = 0;
 	// The persistent slot cursor of the 1 Hz S2C 0x46 quality resend walk.
 	// [orig: g_weapon_broadcast_slot_cursor, Server_TickUpdate @0x51DE79]
 	int32_t quality_broadcast_slot_cursor = 0;
@@ -191,6 +198,14 @@ struct NapiNPServerCtx {
 	// 0x136. This state must not be derived from World::logic_tick: round reset
 	// intentionally makes the next server boundary due immediately.
 	uint32_t network_quality_broadcast_countdown = 0;
+
+	// The team-change list a late joiner's C2S 0x29 walk reads back as S2C
+	// 0x51: every entity Server_ChangeEntityTeam retargeted (a player at an
+	// admin ChangeTeam, a capture zone at its flip), each once, cleared at the
+	// new-round init. [orig: g_team_change_entity_list — CBufferList_AddOrFind
+	//  @0x518EEC; the clear in Server_InitNewRoundState @0x51C911; the read
+	//  NapiNPServerMsg_0x029 @0x514F7C]
+	std::vector<world::EntityHandle> team_change_entities;
 
 	// The authoritative end-round transaction. The domain Match freezes the
 	// result; these are only the once-only wire announcement and retail MP linger

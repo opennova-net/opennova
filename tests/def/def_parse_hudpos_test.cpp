@@ -250,6 +250,34 @@ int main(void) {
         }
         def_free_hudpos(&pf);
     }
+
+    /* BREATHTIME is the three-field form: x, y, then the alignment word as
+       the THIRD token (no hidden dword), so JO's "512,70,center" centres the
+       breath bar. [orig: HUD_ParseHudposToken @0x59FB3B..0x59FB84 ->
+       dword_2723810/14/18 via atof, atof, HUD_ParseTextAlignment] */
+    {
+        static const char breath_center[] = "BREATHTIME\t\t512,70,center\n";
+        static const char breath_right[] = "BREATHTIME 10,20,RIGHT\n";
+        static const char breath_short[] = "BREATHTIME 30,40\n";
+        const char *texts[] = {breath_center, breath_right, breath_short};
+        const size_t lens[] = {sizeof(breath_center) - 1, sizeof(breath_right) - 1,
+                               sizeof(breath_short) - 1};
+        const int want[3][3] = {{512, 70, 2}, {10, 20, 1}, {30, 40, 0}};
+        for (int c = 0; c < 3; ++c) {
+            DefHudPosFile bf;
+            memset(&bf, 0, sizeof(bf));
+            if (def_parse_hudpos_memory((const unsigned char *)texts[c], lens[c], &bf) != 0 ||
+                bf.hud.breath_time[0] != want[c][0] || bf.hud.breath_time[1] != want[c][1] ||
+                bf.hud.breath_time[2] != want[c][2]) {
+                fprintf(stderr, "FAIL: BREATHTIME case %d parsed %d,%d,%d\n", c,
+                        bf.hud.breath_time[0], bf.hud.breath_time[1], bf.hud.breath_time[2]);
+                def_free_hudpos(&bf);
+                def_free_hudpos(&hudpos);
+                return 1;
+            }
+            def_free_hudpos(&bf);
+        }
+    }
     printf("Positioned text fields OK\n");
 
     /* Test declutter — MSNTITLE should exist */

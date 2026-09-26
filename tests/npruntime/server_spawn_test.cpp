@@ -262,7 +262,7 @@ int main() {
 		                    slot_ctx.np_protocol.connection_list[2].reply.player_slot == 2,
 		            "first three players occupy roster slots 0, 1, 2")) return 1;
 
-		if (!expect(inmatch::drop_connection(slot_ctx, peers[1]),
+		if (!expect(inmatch::destroy_connection(slot_ctx, peers[1], nullptr),
 		            "non-tail player disconnects")) return 1;
 		inmatch::NapiNPConnection replacement;
 		replacement.peer = peers[3];

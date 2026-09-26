@@ -176,6 +176,22 @@ void test_effect_anchor_tracks_the_committed_usegun_slot() {
 	CHECK(rig.view().usegun_mount_handle == EntityHandle::kInvalid);
 }
 
+// The def half of the pump's FP bit: a loaded gfx1 model AND its animadm; an
+// arms-only viewmodel (no gun model) or a gun without an anim map is not an
+// FP action model. [orig: WeaponAction_ProcessFrame @0x540EA5 (Def+0x16C),
+// @0x540EC3 (Def+0x174)]
+void test_first_person_action_model_needs_gfx1_and_animadm() {
+	Rig rig;
+	rig.weapon.first_person_model_adm = 0xFF;
+	rig.weapon.anim_map = "m4.adm";
+	CHECK(!rig.view().first_person_action_model);
+	rig.weapon.first_person_model_adm = 1;
+	rig.weapon.anim_map.clear();
+	CHECK(!rig.view().first_person_action_model);
+	rig.weapon.anim_map = "m4.adm";
+	CHECK(rig.view().first_person_action_model);
+}
+
 void test_power_throw_windup() {
 	Rig rig;
 	rig.w.logic_tick = 25;
@@ -290,6 +306,7 @@ int main() {
 	test_inactive_reads_as_defaults();
 	test_slot_serials_and_action_legs();
 	test_effect_anchor_tracks_the_committed_usegun_slot();
+	test_first_person_action_model_needs_gfx1_and_animadm();
 	test_power_throw_windup();
 	test_crosshair_spread_rows();
 	test_heat_clamps();

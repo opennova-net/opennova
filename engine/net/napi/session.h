@@ -53,7 +53,8 @@ constexpr uint32_t SESSION_MESSAGE_CHUNK_BYTES = 1300u;
 // function): its only readers are the two var-list builders, the server status screen, the
 // join validator and the session creator. [orig: CNapiNetwork_RandomizeTimeout @0x4c4d80
 //  (`% 0x2328` @0x4c4d9a, `+ 1000` @0x4c4da3); sole caller
-//  CNapiGameSession_BuildHostVarLists @0x4d0b6e; the getter sub_4C4DB0 @0x4d0c6a]
+//  CNapiGameSession_BuildHostVarLists @0x4D0B50 (the call @0x4d0b6e), which
+//  reads it back through the getter sub_4C4DB0 @0x4C4DB0 (the call @0x4d0c6a)]
 constexpr uint32_t SESSION_APPID_RANDOM_MIN = 1000u;
 constexpr uint32_t SESSION_APPID_RANDOM_MAX = 9999u;  // 0x2328 == 9000; +1000 -> [1000,9999]
 inline uint32_t make_session_app_id(uint32_t tick_count, int rand_value) {

@@ -146,7 +146,7 @@ ThreediTransform threedi_build_track(uint8_t control, uint8_t param, int16_t rat
 namespace {
 
 // NormalizeVec3's x87 shape: the sum of squares in double, the length and its
-// reciprocal stored as float [orig: NormalizeVec3 @ 0x4215E0 (ModSuperOed)].
+// reciprocal stored as float [orig: NormalizeVec3 @ 0x4215E0 (ModSuperOed.exe)].
 void normalize_x87(float v[3]) {
 	const double x = v[0], y = v[1], z = v[2];
 	const float len = static_cast<float>(std::sqrt(x * x + y * y + z * z));
@@ -165,10 +165,11 @@ void normalize_x87(float v[3]) {
 // good one's, as the static carry in BuildTransformMatrix does), summed over
 // the triangles that share a vertex of the same part, position and normal
 // (OED's shared ASE vertex within one smoothing group), then normalized
-// [orig: BuildTransformMatrix @ 0x421B80, the smoothed-vector walk sub_457360
-// (ModSuperOed); 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp
-// compute_face_plane and rdta.cpp smooth_vertex_basis]. The map is linear, so
-// working in model axes yields the model-axis vectors OED writes.
+// [orig: BuildTransformMatrix @ 0x421B80 (ModSuperOed.exe), the
+// smoothed-vector walk sub_457360 (ModSuperOed.exe)] (the retired port's
+// compute_face_plane, 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp, and
+// smooth_vertex_basis, rdta.cpp). The map is linear, so working in model axes
+// yields the model-axis vectors OED writes.
 void derive_tangents(std::vector<ThreediVertex> &verts, const std::vector<uint16_t> &indices,
 		const std::vector<ThreediTriangleStrip> &strips, const std::vector<int> &strip_part, float carry[6]) {
 	struct Key {
@@ -271,11 +272,12 @@ ThreediBuildVolumeSource volume_source(const ThreediBuildBox &box) {
 }
 
 // The OED plane table a volume or an occlusion mesh takes its planes from
-// [orig: ConvertToInternal @ 0x4268B3; 5fc5b4f6a^:engine/formats/oed/
-// convert_internal.cpp]: the vertex box's six planes (+x -x +y -y +z -z),
-// then each triangle's own plane unless one already matches it (normal
-// within 0.005 per axis, distance within 0.03; the last match wins). A
-// triangle whose edge cross product is at most 0.0001 long takes plane 0.
+// [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)] (the retired port:
+// 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp): the vertex box's six
+// planes (+x -x +y -y +z -z), then each triangle's own plane unless one
+// already matches it (normal within 0.005 per axis, distance within 0.03; the
+// last match wins). A triangle whose edge cross product is at most 0.0001
+// long takes plane 0.
 // Float arithmetic over float vertices, as OED's.
 struct OedPlaneTable {
 	struct Plane {
@@ -405,8 +407,8 @@ struct ThreediAssembled {
 
 // The points each collision section's bounds and radius are taken over,
 // mission axes. WriteCOBJ bounds a section by its subobject's vertices, the
-// authored floats [orig: WriteCOBJ @ 0x454E70; 5fc5b4f6a^:engine/formats/oed/
-// export_3di.cpp]:
+// authored floats [orig: WriteCOBJ @ 0x454E70 (ModSuperOed.exe)] (the retired
+// port: 5fc5b4f6a^:engine/formats/oed/export_3di.cpp):
 //   - rigid: the render vertices of that part in the collision LOD, which
 //     are those floats. Which LOD that is the file does not say; ours is the
 //     first LOD whose parts match the sections one for one in triangle and
@@ -503,7 +505,7 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 	out.lod_panm.resize(lod_count);
 	// GHDR's radius: every render vertex's distance from the model origin,
 	// taken wide and stored as a float (the exporter's lod.maxRadius), the
-	// largest times 65536, truncated [orig: WriteGHDR @ 0x452B40]. That shape
+	// largest times 65536, truncated [orig: WriteGHDR @ 0x452B40 (ModSuperOed.exe)]. That shape
 	// reproduces 932 of the 958 JO models; rounding reproduces 486.
 	float max_radius = 0.0f;
 	const auto reach = [&max_radius](const ThreediVertex &v) {
@@ -697,10 +699,11 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 	// its CMDL (CNet01: no COBJ, a CMDL box over its render geometry).
 	{
 		// CMDL (WriteCDTA runs ComputeLodBounds over the collision LOD and
-		// LOD 0 [orig: WriteCDTA @ 0x456050; 5fc5b4f6a^:engine/formats/oed/
-		// export_3di.cpp]): the box envelops the collision LOD's faces (the
-		// bullet faces stand for it) and LOD 0's render triangles; the radii
-		// and the height (radii[2]) are the collision LOD's alone (retail
+		// LOD 0 [orig: WriteCDTA @ 0x456050 (ModSuperOed.exe)]; the retired port:
+		// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp): the box envelops the
+		// collision LOD's faces (the bullet faces stand for it) and LOD 0's
+		// render triangles; the radii and the height (radii[2]) are the
+		// collision LOD's alone (retail
 		// CNet01, no face, stores radii 0 and a height of -20000, the empty
 		// sentinels' span; Dblkhwk1's radii leave LOD 0 out), each taken wide
 		// and stored as a float, as the exporter's LodBounds holds them.
@@ -762,9 +765,10 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 			// float, so a volume-only section's is 0 (retail ships 52); the
 			// stored midpoint is the floor of the truncated bounds' mean (an
 			// arithmetic shift: all 5,046 odd-sum axes of the JO corpus round
-			// down, negative ones included) [orig: WriteCOBJ @ 0x454E70;
+			// down, negative ones included) [orig: WriteCOBJ @ 0x454E70
+			// (ModSuperOed.exe)] (the retired port,
 			// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp, whose `/ 2`
-			// truncates toward zero instead]. An empty section keeps the
+			// truncates toward zero instead). An empty section keeps the
 			// +-10000 sentinels and radius 0 (a skinned model's mesh section:
 			// US01 19, ArmsG 37). A bone section is bounded by the vertices the
 			// bone moves when the scene gives them.
@@ -866,8 +870,8 @@ void assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 		// of another solid (CB, type 1) volume in any section; the last
 		// triangle on a plane decides. A ladder's triangles keep the plane
 		// indices they took before the plane 0 swap, as OED's do [orig:
-		// ConvertToInternal @ 0x4268B3, the collision-overlap pass;
-		// 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp].
+		// ConvertToInternal @ 0x4268B3 (ModSuperOed.exe), the collision-overlap
+		// pass] (the retired port: 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp).
 		struct VolumeRef {
 			const ThreediBuildVolumeSource *src;
 			int32_t type;
@@ -1189,7 +1193,8 @@ bool ThreediBuildModel::add_face(int cobj, uint16_t a, uint16_t b, uint16_t c, u
 		nz /= len;
 	}
 	// Q14, truncated, and the dominant axis compared on those integers (z
-	// wins only strictly, then y; a tie goes to x) [orig: WriteCNRM @ 0x454600].
+	// wins only strictly, then y; a tie goes to x) [orig: WriteCNRM @ 0x454600
+	// (ModSuperOed.exe)].
 	ThreediCollisionNormal normal{};
 	normal.normal[0] = threedi_q14f_trunc(static_cast<float>(nx));
 	normal.normal[1] = threedi_q14f_trunc(static_cast<float>(ny));
@@ -1216,8 +1221,9 @@ bool ThreediBuildModel::add_face(int cobj, uint16_t a, uint16_t b, uint16_t c, u
 	face.normal_index = normal_index;
 	// The face's plane as the runtime tests it (n . p + plane_dist, zero on
 	// the plane; collision_query.cpp): -(n . v0), and the corners' box, both
-	// truncated as WriteCFAC stores them [orig: WriteCFAC @ 0x454830;
-	// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp], from the stored (CVRT,
+	// truncated as WriteCFAC stores them [orig: WriteCFAC @ 0x454830
+	// (ModSuperOed.exe)] (the retired port:
+	// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp), from the stored (CVRT,
 	// CNRM) corner and normal: our rule, as for every derived collision word
 	// (the assembly's CMDL note says why).
 	const ThreediCollisionVertex &va = o.vertices[a], &vb = o.vertices[b], &vc = o.vertices[c];

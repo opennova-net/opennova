@@ -482,6 +482,9 @@ struct LocalPlayerWeaponView {
     int32_t heat_glow = 0;
     bool borrowed_usegun_slot = false;
     int32_t usegun_mount_handle = EntityHandle::kInvalid;
+    // The def half of the pump's FP bit: the gfx1 model loaded and its
+    // animadm installed (player_weapon_view.cpp carries the witness).
+    bool first_person_action_model = false;
     bool emplaced_controls_valid = false;
     int32_t emplaced_gun_yaw = 0;
     int32_t emplaced_gun_pitch = 0;

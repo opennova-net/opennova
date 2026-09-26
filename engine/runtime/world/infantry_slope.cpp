@@ -78,9 +78,41 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         e.roll = roll;
         return;
     }
-    // The player body's own dead in-air tumble (bodyPitch/roll/yaw spin ramps) is
-    // not ported; the death-fall mover owns its drop. [orig: org2 @0x4b6ccb-0x4b6d90]
-    if (org2 && dead && inf.airborne) return;
+    // The player body's dead in-air tumble: on every 4th raw tick two tick-phase
+    // ramps pull body pitch and roll an eighth of the way to a and b, spin the
+    // heading (and the local look yaw) by b >> 3 and aim the pitch at a + b; every
+    // tick the pitch then chases that aim a quarter step, floored at -0x2800000
+    // (retail's upper clamp compares against 0x28000000, which no step reaches).
+    // The conform selector does not run. The corpse's fall itself is the org2
+    // vertical block; the tumble only rotates. [orig: Entity_UpdateInfantryPlayerBody
+    // gate @0x4B6CCB..0x4B6CDE, tick & 3 @0x4B6CE8, ramps @0x4B6CEC..0x4B6D12,
+    // chases @0x4B6D18..0x4B6D41, heading @0x4B6D3B..0x4B6D52, aim @0x4B6D44,
+    // pitch chase @0x4B6D58..0x4B6D90]
+    if (org2 && dead && in_air) {
+        if ((logic_tick & 3u) == 0) {
+            const int32_t a = (32 - static_cast<int32_t>(logic_tick & 63u)) * 0xFFFFFF;
+            const int32_t b =
+                    (32 - static_cast<int32_t>(((logic_tick >> 6) - logic_tick) & 63u)) *
+                    0xFFFFFF;
+            e.body_pitch = io::bam_add(
+                    e.body_pitch, io::bam_sar(io::bam_add(io::bam_sub(a, e.body_pitch), 4), 3));
+            e.roll = io::bam_add(e.roll, io::bam_sar(io::bam_add(io::bam_sub(b, e.roll), 4), 3));
+            e.heading = io::bam_add(e.heading, io::bam_sar(b, 3));
+            // g_LocalPlayerLookYaw takes the same spin.
+            inf.target_heading = io::bam_add(inf.target_heading, io::bam_sar(b, 3));
+            inf.aim_pitch = io::bam_add(a, b);
+        }
+        int32_t step = io::bam_sar(io::bam_add(io::bam_sub(inf.aim_pitch, e.pitch), 2), 2);
+        if (step > 0x28000000)
+            step = 0x2800000;
+        else if (step < -0x2800000)
+            step = -0x2800000;
+        e.pitch = io::bam_add(e.pitch, step);
+        // The local mouse accumulates into +0x14: the look mirror carries the
+        // tumble past the post-pass republish (e.pitch = look_pitch).
+        inf.look_pitch = e.pitch;
+        return;
+    }
 
     // The conform selector [orig: @0x4ba10f / @0x4b6d95]: entity-def attrib 0x200,
     // an anim state with flag bit 2 (prone crawls 19-26, rolls 41/42, prone idle 48,
@@ -108,18 +140,19 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         if (collision != nullptr)
             return collision->raycast_ground(world, e.handle, e.pos, dx, dy,
                                              0x4000, 0x20000, nullptr);
-        // The bare terrain-only embedder has no collision world: the terrain
-        // column stands in for the ray, and a miss (off the field, or a floor
-        // below the ray's reach) returns the ray's end, as the probe does.
-        // [orig: Entity_RaycastGroundHeight @0x4142C0 returns the clipped end
-        //  @0x41430D]
-        int32_t p[3] = {io::bam_add(e.pos[0], dx), io::bam_add(e.pos[1], dy), e.pos[2]};
-        GroundClearance clearance = ground_clearance;
-        clearance.has_occupant = e.has_occupant;
-        clearance.use_dead = dead;
-        const int32_t h = calc_average_ground_height(*terrain, p, 0, clearance);
-        const int32_t ray_end = io::bam_sub(io::bam_add(e.pos[2], 0x4000), 0x20000);
-        return h == INT32_MIN || h < ray_end ? ray_end : h;
+        // The bare terrain-only embedder has no collision world: the same ray
+        // over an empty candidate set, clipped by the terrain alone (an indoors
+        // body skips the heightfield, the clip's own gate). The vertical column
+        // writes the terrain height whether or not the ray reaches it; with no
+        // terrain the ray's end comes back.
+        // [orig: Entity_RaycastGroundHeight @0x4142C0 -> raycast_entity_collision
+        //  terrain leg @0x413760; the clipped end returned @0x41430D]
+        const int32_t start[3] = {io::bam_add(e.pos[0], dx), io::bam_add(e.pos[1], dy),
+                                  io::bam_add(e.pos[2], 0x4000)};
+        int32_t end[3] = {start[0], start[1], io::bam_sub(start[2], 0x20000)};
+        if (terrain->valid() && (slope_flags & kEntityFlagIndoors) == 0)
+            (void)terrain_clip_segment(*terrain, start, end, end);
+        return end[2];
     };
 
     int32_t c, s;
@@ -190,11 +223,17 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         inf.aim_valid = false;
     }
     // The conform chase. org1: eighth-step on both fields. org2: quarter-step;
-    // a corpse additionally tips its LOOK pitch eighth-step, and the roll write is
-    // skipped while a combat roll 41/42 plays (the torso-roll ramp owns those ticks).
-    // [orig: @0x4ba320-0x4ba34c / @0x4b6fa9-0x4b6ff4]
+    // a corpse additionally tips its LOOK pitch eighth-step (mirrored into the
+    // look accumulator, which the post-pass republish copies back to +0x14), and
+    // the roll write is skipped while a combat roll 41/42 plays (the torso-roll
+    // ramp owns those ticks).
+    // [orig: @0x4ba320-0x4ba34c / @0x4b6fa9-0x4b6ff4; the corpse tip
+    //  @0x4B6FA9..0x4B6FBE]
     if (org2) {
-        if (dead) e.pitch += (pitch_slope - e.pitch + 4) >> 3;
+        if (dead) {
+            e.pitch += (pitch_slope - e.pitch + 4) >> 3;
+            inf.look_pitch = e.pitch;
+        }
         e.body_pitch += (pitch_slope - e.body_pitch + 2) >> 2;
         if (inf.anim_state != anim_state::kRollLeft &&
             inf.anim_state != anim_state::kRollRight)

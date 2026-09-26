@@ -17,7 +17,12 @@
 #include <iterator>
 #include <string>
 
+#include "../common/run_command.h"
+
 namespace {
+
+using test_cmd::quoted;
+using test_cmd::run;
 
 int failures = 0;
 
@@ -27,19 +32,6 @@ void check(bool ok, const std::string &what) {
 		++failures;
 	}
 }
-
-int run(const std::string &cmd) {
-	std::fflush(stdout);
-#ifdef _WIN32
-	// cmd.exe strips one pair of outer quotes: wrap the whole command.
-	const std::string line = "\"" + cmd + "\"";
-	return std::system(line.c_str());
-#else
-	return std::system(cmd.c_str());
-#endif
-}
-
-std::string quoted(const std::string &s) { return "\"" + s + "\""; }
 
 const char kScene[] =
 		"o3d 1\nmodel UNICODE\nmaterial FF_ST_OP\ntexture skin.tga\nlod 0\npart 0 0 0 0\nstrip 0\n"

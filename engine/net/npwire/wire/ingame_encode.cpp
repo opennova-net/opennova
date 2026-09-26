@@ -1137,6 +1137,37 @@ std::vector<uint8_t> encode_team_assign(const TeamAssign &assign) {
 	return out;
 }
 
+// [orig: write_entity_packet @0x506BB0 — the list index first @0x506BCE, then the
+//  0x50 record's own fields in its order]
+std::vector<uint8_t> encode_team_change_confirm(uint16_t index, const TeamAssign &assign) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(index);
+	const std::vector<uint8_t> record = encode_team_assign(assign);
+	out.insert(out.end(), record.begin(), record.end());
+	return out;
+}
+
+// [orig: write_player_chain_link @0x5106D0 — the link byte @0x510797, the member
+//  slot @0x5107A4]
+std::vector<uint8_t> encode_squad_join(const SquadJoin &join) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(join.leader);
+	w.u8(join.member);
+	return out;
+}
+
+// [orig: NetPacket_WriteByteAndCString @0x5107B0 — the byte @0x5107CD, then the
+//  string with its terminator]
+std::vector<uint8_t> encode_team_name(const TeamName &name) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(name.index);
+	w.cstr(name.name);
+	return out;
+}
+
 // [orig: serialize_entity_event_to_buffer @0x5055A0]
 std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event) {
     std::vector<uint8_t> out;

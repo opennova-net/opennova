@@ -54,10 +54,17 @@ struct HostRegistration {
 	int mi1 = 0, mi2 = 0, mi3 = 0;            // MI1..MI3 (dword_82BEEC..F4)
 	bool locked = false;                      // Locked (g_server_join_locked)
 	bool skins = false;                       // Skins (dword_24D218C)
-	int round_time_remaining_ticks = -1;      // TimeLeft: ticks / 3720 (minutes); < 0 -> STRNOVA10
+	// TimeLeft: the LIVE round clock, re-read at every refresh, / 3720 (whole
+	// minutes); < 0 -> STRNOVA10. The embedder feeds world::Match's clock.
+	// [orig: Lobby_UpdateServerInfo `mov ecx, g_round_time_remaining` @0x4FED57]
+	int round_time_remaining_ticks = -1;
 	bool tracers = true;                      // Tracers: (g_rules_flags & 1) == 0
 	std::string country = "XX";               // Country (str1; "XX" while locked; "XX"/empty -> " ")
-	bool allow_ping = false;                  // AllowPing 'y'/'n' (dword_24D2184)
+	// AllowPing 'y'/'n': game.cfg `ping`, default 1, copied to dword_24D2184.
+	// OpenNova has no game.cfg surface, so the stock default holds.
+	// [orig: Config_SetDefaults @0x54D324 (ping = 1); apply_session_settings_to_globals
+	//  @0x551D4F -> dword_24D2184; Lobby_UpdateServerInfo read @0x4FEF72]
+	bool allow_ping = true;
 	uint32_t uptime_ms = 0;                   // Age: GetTickCount() - dword_C8FC74
 	int time_of_day = 0;                      // TimeOfDay (Env_TimeOfDayEnum 0..4)
 	uint32_t pcid_key = 0;                    // PCIDKey (the SessionIdRing's current key)

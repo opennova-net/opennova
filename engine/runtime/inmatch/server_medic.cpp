@@ -53,15 +53,35 @@ void send_medic_event(NapiNPServerCtx &ctx, uint8_t event, world::EntityHandle v
 
 void revive_player(NapiNPServerCtx &ctx, world::World &world,
 		const world::MedicInteraction &r) {
-	world::Entity *victim = world.registry.get(r.victim);   // Entity_ValidatePtr @0x517CD9
-	world::Entity *healer = world.registry.get(r.healer);   // @0x517CF3
+	world::Entity *victim = world.registry.get(r.victim);
+	world::Entity *healer = world.registry.get(r.healer);
 	if (victim == nullptr || healer == nullptr) return;
-	if (healer->player_class != kMedicClass) return;        // @0x517D07
-	if ((victim->flags & world::kEntityFlagDead) == 0u) return;
+	// Both need a player slot: an AI or other slotless healer never revives
+	// [orig: GameEvent_RevivePlayer @0x517CD0 — Entity_ValidatePtr(victim)
+	//  @0x517CD9..0x517CE7, Entity_ValidatePtr(healer) @0x517CF3..0x517D01].
 	NapiNPConnection *victim_connection = connection_for(ctx, r.victim);
 	NapiNPConnection *healer_connection = connection_for(ctx, r.healer);
+	if (victim_connection == nullptr || healer_connection == nullptr) return;
+	if (healer->player_class != kMedicClass) return;        // @0x517D07
+	// The victim's revive window is open (slot+368: 120 at the death, 0 for a
+	// death no medic may revive or a window that ran out) @0x517D14..0x517D1A.
+	if (victim_connection->link.downed_revive_seconds == 0u) return;
+	// The auto-medic opt-out: a victim who turned automedic off needs a live
+	// medic request (slot+372 / +89856) @0x517D20..0x517D2E.
+	if (!victim_connection->link.auto_medic_enabled &&
+			!victim_connection->link.medic_request_active)
+		return;
+	// The last attacker is neither the healer nor the victim: a medic never
+	// revives a teammate he killed, nobody revives a suicide @0x517D34..0x517D44.
+	if (victim->last_attacker == r.healer || victim->last_attacker == r.victim) return;
 
 	victim->medic_reviving = true;                            // +0x1E0 = 1 @0x517D4F
+	// The victim slot: the revive pose armed, the revive window and the
+	// respawn penalty closed [orig: +89932 = 1 @0x517D5B, +368 = 0 @0x517D61,
+	// +360 = 0 @0x517D67].
+	victim_connection->reply.revive_pose_valid = true;
+	victim_connection->link.downed_revive_seconds = 0;
+	victim_connection->link.respawn_delay_seconds = 0;
 	world.zones.spawn_waves.remove_player(r.victim);          // @0x517D6D
 
 	// 0x54 [handle][0], mask 0x580 = the Medic set of the victim's team.
@@ -81,9 +101,8 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 	world.match.record_revive(world, r.healer);
 
 	// The revive pose the following deploy consumes [orig: @0x517DCD..0x517E09].
-	if (victim_connection != nullptr) {
+	{
 		SessionReplyState &st = victim_connection->reply;
-		st.revive_pose_valid = true;
 		st.revive_pos[0] = world::to_fixed(victim->position.x);
 		st.revive_pos[1] = world::to_fixed(victim->position.y);
 		st.revive_pos[2] = world::to_fixed(victim->position.z) + kRevivePoseRaise;
@@ -91,17 +110,22 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 		st.revive_pitch = victim->pitch;
 		st.revive_roll = victim->roll;
 	}
+	// The window again and the medic request cleared
+	// [orig: +368 = 0 @0x517E14, byte +89856 = 0 @0x517E1A].
+	victim_connection->link.downed_revive_seconds = 0;
+	victim_connection->link.medic_request_active = false;
 	// 0x3A (empty, mask 160 -> the victim's active slot, class 1 reliable)
 	// then the seed reroll [orig: @0x517E29..0x517E47].
-	if (victim_connection != nullptr && is_in_match(*victim_connection) &&
-			victim_connection->link.transport != nullptr) {
+	if (is_in_match(*victim_connection) && victim_connection->link.transport != nullptr) {
 		victim_connection->link.transport->host_send(s2c::MEDIC_REVIVING, {});
 		victim_connection->link.transport->host_send(
 				s2c::TICK_SEED, Server_RerollPlayerTickSeed(*victim_connection));
 	}
-	// 0x1E event 38, gated on the healer's two unwitnessed bytes (clear
-	// here) [orig: @0x517E5B..0x517EB6].
-	(void)healer_connection;
+	// 0x1E event 38 only when the healer slot's hide bytes +97536/+97537 are
+	// clear (+97536 tracks the spectator latch +100567, +97537 is never set)
+	// [orig: @0x517E4C..0x517E61, the byte tests @0x517E53 / @0x517E5B; the
+	//  heal's twin @0x50DE86..0x50DE96; the send @0x517E63..0x517EB6].
+	if (healer_connection->link.spectator) return;
 	send_medic_event(ctx, kReviveEvent, r.victim, r.healer, *victim);
 }
 

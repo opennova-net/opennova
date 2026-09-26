@@ -1050,7 +1050,12 @@ typedef struct DefHudPosDef {
     int weapon_name_pos[4];
     int map_coords[4];
     int time_clock[4];
-    int breath_time[4];
+    /* BREATHTIME is the one positioned token with THREE fields: x, y, then
+       the alignment word (left=0/right=1/center=2) as the third; there is no
+       hidden dword (JO authors `BREATHTIME 512,70,center`). [orig:
+       HUD_ParseHudposToken @0x59FB3B..0x59FB84 -> dword_2723810/14/18 via
+       atof, atof, HUD_ParseTextAlignment] */
+    int breath_time[3];
 
     int title_x, title_y;
     int ping_x, ping_y;

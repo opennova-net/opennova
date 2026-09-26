@@ -226,7 +226,8 @@ struct WacNamedValues {
 	// drown limit is four samples per second of it (Server_UpdatePlayerBreathTimers
 	// @0x50d7e6, GameEvent_PlayerDeath @0x5172f6), the 0x0A player-state wire
 	// carries it to the joiners (@0x4ff9db / @0x4301a1), and HUD_DrawBreathBar
-	// @0x59d70f reads it (that bar is not ported). autogain is the iris
+	// @0x59d70f reads it (the port's bar is hud::HudFrameCompiler::
+	// element_breath_bar). autogain is the iris
 	// re-target switch (Environment_ApplyFogAndAmbient @0x57E514, sampled into
 	// WeatherState::iris_retarget_enabled). Both seeded by WacScript_FreeAll
 	// [orig: @0x4f6381 = 20; @0x4f6371 = 1].
@@ -973,8 +974,8 @@ public:
     // per frame after their weather and view legs, whatever the phase; a
     // joiner walks its replica slots instead. It reads the frame's own tick,
     // one behind logic_tick once the entity pass's tail has run.
-    // [orig: Game_ProcessMainFrame -- Environment_UpdateWeatherTick @0x526774,
-    //  Camera_ComputeThirdPersonView @0x526781, then the
+    // [orig: Game_ProcessMainFrame @0x5263F0 -- the Environment_UpdateWeatherTick
+    //  call @0x526774, the Camera_ComputeThirdPersonView call @0x526781, then the
     //  WeaponAction_ProcessAllEntities call @0x526786;
     //  WeaponAction_ProcessAllEntities @0x542690..0x542724]
     void pump_weapon_actions();

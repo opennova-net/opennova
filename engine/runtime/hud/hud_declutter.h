@@ -55,13 +55,6 @@ enum HudDeclutterSlot : int {
 	kDeclutterSlotCount = 24,
 };
 
-// The AUTHORED declutter level range: 0..3, one visibility bit per level in
-// each mask, and the wrap point of the huddetail cycle. It is NOT a clamp on
-// the stored level: retail's rebuild shifts an 8-bit bit selector, so a level
-// outside 0..3 simply matches no authored mask bit and hides every gated
-// element (see HudDeclutter::set_level / rebuild).
-inline constexpr int kDeclutterLevelMax = 3;
-
 // The authored token suffix for a slot ("MSNTITLE".."CHAT"; nullptr out of
 // range) and the reverse lookup (-1 for an unknown token — retail simply has
 // no parse arm for it, e.g. the dead JOX HUDDECLUT_CTAPE row).
@@ -105,14 +98,12 @@ public:
 	void set_mask(int slot, uint8_t mask);
 	uint8_t mask(int slot) const;
 
-	// The persisted hud_detail level, stored VERBATIM (retail has no clamp),
-	// and the huddetail action cycle: level + 1, wrapping past 3 to 0;
-	// returns the new level.
-	// [orig: level @ 0x24D20BC; Input_HandleActionBinding_0
-	//  @ 0x4E0601..0x4E0624]
+	// The persisted hud_detail level, stored VERBATIM (retail has no clamp):
+	// a level outside the authored 0..3 matches no mask bit and hides every
+	// gated element (see rebuild). The huddetail action cycle that moves it is
+	// next_hud_detail_level (hud_config_tokens.h). [orig: level @ 0x24D20BC]
 	void set_level(int level);
 	int level() const { return level_; }
-	int cycle_level();
 
 	// visible[slot] = ((uint8_t)(1 << (level & 31)) & mask[slot]) != 0, rebuilt
 	// on every mask or level change — retail's 32-bit `shl` narrowed to the

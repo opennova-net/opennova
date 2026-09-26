@@ -20,34 +20,6 @@ namespace opennova {
 constexpr float kTraversalNearZoneUnit = 16.0f;
 
 // ---------------------------------------------------------------------------
-// Frustum extraction — Gribb/Hartmann method
-// ---------------------------------------------------------------------------
-
-Frustum extract_frustum(const float mvp[16]) {
-	Frustum wf;
-	// Column-major: element (row, col) = mvp[4*col + row]
-	for (int i = 0; i < 4; i++) {
-		float r0 = mvp[4 * i], r1 = mvp[4 * i + 1], r2 = mvp[4 * i + 2], r3 = mvp[4 * i + 3];
-		wf.planes[Frustum::P_LEFT][i]   = r3 + r0;
-		wf.planes[Frustum::P_RIGHT][i]  = r3 - r0;
-		wf.planes[Frustum::P_BOTTOM][i] = r3 + r1;
-		wf.planes[Frustum::P_TOP][i]    = r3 - r1;
-		wf.planes[Frustum::P_NEAR][i]   = r3 + r2;
-		wf.planes[Frustum::P_FAR][i]    = r3 - r2;
-	}
-	for (int p = 0; p < 6; p++) {
-		float len = std::sqrt(wf.planes[p][0] * wf.planes[p][0] +
-		                      wf.planes[p][1] * wf.planes[p][1] +
-		                      wf.planes[p][2] * wf.planes[p][2]);
-		if (len > 0.0f) {
-			float inv = 1.0f / len;
-			for (int i = 0; i < 4; i++) wf.planes[p][i] *= inv;
-		}
-	}
-	return wf;
-}
-
-// ---------------------------------------------------------------------------
 // The retail terrain view/cull contract
 // ---------------------------------------------------------------------------
 

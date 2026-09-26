@@ -462,6 +462,19 @@ void parse_pos_aligned(Token *vals, int n, int *out) {
     }
 }
 
+/* [orig: HUD_ParseHudposToken's BREATHTIME arm @0x59FB3B..0x59FB84 -- atof x,
+   atof y, then HUD_ParseTextAlignment on the THIRD token] */
+void parse_pos_align3(Token *vals, int n, int *out) {
+    if (n >= 1) out[0] = parse_int_n(vals[0].s, vals[0].len);
+    if (n >= 2) out[1] = parse_int_n(vals[1].s, vals[1].len);
+    if (n >= 3) {
+        char low[16];
+        size_t ll = vals[2].len < 15 ? vals[2].len : 15;
+        to_lower_buf(low, vals[2].s, ll);
+        out[2] = parse_alignment(low, ll);
+    }
+}
+
 
 int parse_fixed16_digits_n(const char *s, size_t len) {
     size_t i = 0;

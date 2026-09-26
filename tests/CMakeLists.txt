@@ -82,7 +82,6 @@ foreach(fixture spinner skinned building)
                          FIXTURES_REQUIRED threedi_scene_${fixture} FIXTURES_SETUP threedi_rebuild_${fixture})
     set_tests_properties(threedi_cli_roundtrip_${fixture} PROPERTIES FIXTURES_REQUIRED threedi_rebuild_${fixture})
 endforeach()
-# Command regressions, including invalid inputs and semantic differences.
 # The anim commands over the same handlers the CLI dispatches: the clip-set
 # round trip, what compare calls the same animation, and the scenes build refuses.
 add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp)
@@ -101,6 +100,7 @@ add_test(NAME threedi_cli_info_flag COMMAND opennova_3di info unread.3di --bogus
 set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "info takes --verbose, --planes or --verts")
 
+# Command regressions, including invalid inputs and semantic differences.
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
@@ -841,12 +841,15 @@ target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
-# native world: the sim-side .3di derivations (ADR 0028)
+# The presented-model lookup (world/entity_index.h): the BMS-id and origin
+# candidates, groups and area-trigger zones an embedder resolves its presented
+# models by.
 add_executable(world_entity_index_test world/entity_index_test.cpp)
 target_link_libraries(world_entity_index_test PRIVATE opennova_runtime)
 target_include_directories(world_entity_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME world_entity_index COMMAND world_entity_index_test)
 
+# native world: the sim-side .3di derivations (ADR 0028)
 add_executable(world_model_geometry_test world/model_geometry_test.cpp)
 target_link_libraries(world_model_geometry_test PRIVATE opennova_runtime)
 target_include_directories(world_model_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1058,6 +1061,13 @@ target_link_libraries(precipitation_test PRIVATE opennova_runtime)
 target_include_directories(precipitation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME precipitation COMMAND precipitation_test)
 
+# The sun glare's occlusion ray sequence (runtime/environment/glare_occlusion.h):
+# one coarse unjittered ray gating two jittered fine rays, then the window tick.
+add_executable(glare_occlusion_test environment/glare_occlusion_test.cpp)
+target_link_libraries(glare_occlusion_test PRIVATE opennova_runtime)
+target_include_directories(glare_occlusion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME glare_occlusion COMMAND glare_occlusion_test)
+
 # The HUD view-helper math cluster (engine/runtime/hud, S15): design-space
 # scaling, ALPHAFADE decay + quirk, stance Q16 scale/centering, health bands,
 # message tick policy, half-bright, ammo fold + nudge, round icons, crosshair
@@ -1082,13 +1092,15 @@ add_executable(hud_config_tokens_test hud/hud_config_tokens_test.cpp)
 target_link_libraries(hud_config_tokens_test PRIVATE opennova_runtime)
 add_test(NAME hud_config_tokens COMMAND hud_config_tokens_test)
 
-# The loading screen spec (hud/loading_screen.h): the sidecar name rule, the
-# present-due rule and the composited resource names.
+# The HUD's key-driven toggles (hud/hud_toggles.h): the gated down-edge latch,
+# the shared-key cycles, the view actions, the overlay windows and the resets.
 add_executable(hud_toggles_test hud/hud_toggles_test.cpp)
 target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
 target_compile_features(hud_toggles_test PRIVATE cxx_std_17)
 add_test(NAME hud_toggles COMMAND hud_toggles_test)
 
+# The loading screen spec (hud/loading_screen.h): the sidecar name rule, the
+# present-due rule and the composited resource names.
 add_executable(hud_loading_screen_test hud/loading_screen_test.cpp)
 target_link_libraries(hud_loading_screen_test PRIVATE opennova_runtime)
 add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
@@ -1328,10 +1340,6 @@ target_link_libraries(script_remote_command_test PRIVATE opennova_net opennova_r
 target_include_directories(script_remote_command_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME script_remote_command COMMAND script_remote_command_test)
 
-# The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
-# witnessed .mnu widget draw walk — order, state-driven appearance/color
-# selection, text placement/truncation, the edit caret, frame pieces, and the
-# per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
 # The compiled-menu interaction runtime (menu/menu_runtime.h) over a fake frame seam
 # and a synthetic document: the id tree, navigation, the state store and its replay,
 # ACTION dispatch, radio groups, the spin wrap, the combo popup, the input machine.
@@ -1360,6 +1368,10 @@ add_executable(player_info_avatars_test menu/player_info_avatars_test.cpp)
 target_link_libraries(player_info_avatars_test PRIVATE opennova_runtime)
 add_test(NAME player_info_avatars COMMAND player_info_avatars_test)
 
+# The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
+# witnessed .mnu widget draw walk — order, state-driven appearance/color
+# selection, text placement/truncation, the edit caret, frame pieces, and the
+# per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2072,7 +2084,7 @@ target_compile_features(special_weapon_parity_test PRIVATE cxx_std_17)
 add_test(NAME special_weapon_parity COMMAND special_weapon_parity_test)
 
 # The attach-command seat-selection mirror (world/vehicle_attach.h
-# predict_seat_selection) and the shared weight table.
+# seat_selection_mode_for_command) and the shared weight table.
 add_executable(seat_prediction_test world/seat_prediction_test.cpp)
 target_link_libraries(seat_prediction_test PRIVATE opennova_runtime)
 target_include_directories(seat_prediction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2284,7 +2296,7 @@ opennova_add_gated_test(root_motion COMMAND root_motion_test)
 # binary) exercises only the format half (engine/formats/wac); VM behavior (var
 # math, entity mutation, temporal/edge firing, env, authority) and the shipped
 # .wac corpus, compiled to the original compiler's listings, run against the
-# world (dirs via argv, else the dev defaults; absent dirs skip).
+# world (dirs via argv, else OPENNOVA_JO_ASSETS; Skipped without it).
 add_executable(wac_registry_oracle_test wac/wac_registry_oracle_test.cpp)
 target_link_libraries(wac_registry_oracle_test PRIVATE opennova_formats)
 target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

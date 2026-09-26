@@ -41,8 +41,7 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // nonzero session id are minted once by create_session; callers then retain the
 // returned block for every chunk request. [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
-MissionMetadataBlob build_mission_metadata_blob(
-		const GameConfig &config, bool is_mp_session_peer);
+MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config);
 
 // Build the second, pending-player-spawn boundary of a retail join. The C2S
 // 0x02 handler deliberately does not return these records: retail processes an

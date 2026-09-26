@@ -50,9 +50,10 @@ struct SkyFrameState {
 	// Witnessed defaults when no environment backs the dome.
 	float sky_speed = 15.0f;
 	float sky_height = 175.0f;
-	// The faithful dome is open below its rim; retail clears that region to
-	// the horizon-blended skyfog block.
-	Rgb frame_clear;
+	// No clear colour: the sky pass swaps only the device fog colour. The
+	// whole frame is cleared BEFORE it (EnvironmentState::frame_clear_color_for)
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca7bf, then
+	//  SkyDome_RenderWithSkyfog @ 0x5ca81a].
 };
 
 SkyFrameState build_sky_frame(const EnvironmentState &env);

@@ -799,6 +799,13 @@ struct ClientState {
 	//  wac_var_fallmps,eax` @0x4301BC; seeds @0x4F6381 / @0x4F638B]
 	std::int32_t breathtime = 20;
 	std::int32_t fallmps = 13;
+	// The local player's underwater breath samples (four per submerged second;
+	// the drown limit is 4 * breathtime): the host's playerSlot+460 crossing
+	// as the phase-0 sub-block byte, the breath bar's counter. Retained
+	// between phase cycles like the client global.
+	// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C; the host's write
+	//  NetPacket_WritePlayerState @0x4FF8D5; reader HUD_DrawBreathBar @0x59D6F0]
+	std::uint16_t breath_samples = 0;
 	// The other three phase-0 0x0A sub-block-0 whole-second timers the DEATH
 	// screen reads [orig: NapiNPClientMsg_0x00A stores @0x430084 dword_A85B5C
 	// (slot+360, the respawn penalty — STROVER_PENALTYTIMER), @0x43009f

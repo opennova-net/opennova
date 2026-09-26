@@ -663,10 +663,11 @@ struct ModelLightOwnerInputs {
 	bool spawner_is_building = false;
 	// The blink query at the SPAWNING ENTITY's position, run once before the
 	// record walk: whether it hit any blink volume, and slot 0's decoded
-	// owner/section [orig: Entity_QueryBlinkBoxesAtPoint @ 0x56c7fc, the
-	// count test @ 0x56c8bd, Pool_GetEntryUnchecked(2, hit >> 20) @ 0x56c8c9
-	// and (hit >> 12) & 0x1F @ 0x56c8db]. The packed-hit decode itself lives
-	// with the packing (world::BlinkAccum).
+	// owner/section [orig: Entity_SpawnGlowEffects @ 0x56c7fc (the call to
+	// Entity_QueryBlinkBoxesAtPoint @ 0x4af350), the count test @ 0x56c8bd,
+	// Pool_GetEntryUnchecked(2, hit >> 20) @ 0x56c8c9 and (hit >> 12) & 0x1F
+	// @ 0x56c8ce..0x56c8d5 (fed to LightInstance_SetOwnerGroup @ 0x56c8db)].
+	// The packed-hit decode itself lives with the packing (world::BlinkAccum).
 	bool blink_hit = false;
 	uint64_t blink_owner_entity = 0;
 	int32_t blink_section = 0;

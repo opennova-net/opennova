@@ -81,8 +81,8 @@ bool carrier_weapon_world_pose(World &world, const Entity &carrier, const Weapon
 
 // The fire tick reaches either helper with currentAction FIRE and nextAction
 // 0, so the column select yields the FIRE field (0).
-// [orig: select @0x545D17..0x545D3F; WeaponAction_Fire calls
-//  Entity_CalcWeaponFirePosition @0x542BF7 before next = RECOIL @0x542C9E]
+// [orig: select @0x545D17..0x545D3F; WeaponAction_Fire @0x542B10 makes the
+//  Entity_CalcWeaponFirePosition call @0x542BF7 before next = RECOIL @0x542C9E]
 void usegun_fire_pose(World &world, const Entity &gun, const WeaponTableEntry *fired,
                       int32_t clip_before_consume, int32_t out[6]) {
     // A G-attached gun routed to its parent slot fires from the HULL's

@@ -4286,6 +4286,9 @@ bool run_client_quality_level_folds_the_ping_ring() {
 	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
 	                    0, 0x00100000u, /*replay_mode=*/false);
+	// A healthy measured frame rate (the session's FR counter): the
+	// frame-pressure term scores its floor 1, so the ping term decides.
+	client.set_observed_frame_rate(62);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	std::vector<ProtocolMessage> pongs;
 	for (int i = 0; i < 10; ++i) {
@@ -4310,6 +4313,28 @@ bool run_client_quality_level_folds_the_ping_ring() {
 	return expect(client.net_quality_level() == 2 && client.state().net.level == 2 &&
 					client.state().net.ping_ms == 400,
 			"five samples of 102 fold to level 2 on the state as well");
+}
+
+// The client window's frame-pressure term reads the main loop's FR counter
+// [orig: CNetQuality_UpdateMetrics @0x4C5643 g_statsAvgFps]: with no ping
+// samples (term 1) an 8 fps rate scores 256 - 128 = 128 per sample (five
+// samples: level 2), and the unmeasured 0 of the first 2 s window (retail's
+// mode-init value, the default) scores the ceiling 255 (level 3).
+bool run_client_quality_frame_pressure_follows_the_frame_rate() {
+	const auto fold = [](int32_t fps, bool set_rate) {
+		inmatch::ClientRuntime client("QualityFps", [] { return uint64_t{100000}; });
+		client.seed_session(0x10203040u, 1u, "CLIENT-QUALITY-FPS-SCRK", "SERVER-QUALITY-FPS-SCRK",
+		                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+		                    0, 0x00100000u, /*replay_mode=*/false);
+		if (set_rate) client.set_observed_frame_rate(fps);
+		for (uint32_t tick = 1; tick <= 62 * 5; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+		return client.net_quality_level();
+	};
+	if (!expect(fold(8, true) == 2, "an 8 fps rate samples frame pressure 128 -> level 2"))
+		return false;
+	if (!expect(fold(62, true) == 1, "a healthy rate leaves every term at the floor -> level 1"))
+		return false;
+	return expect(fold(0, false) == 3, "an unmeasured rate samples the ceiling 255 -> level 3");
 }
 
 bool run_direct_uplink_framing_is_transient() {
@@ -6135,6 +6160,7 @@ int main() {
 	                run_world_state_load_bursts_on_every_0x0f() &&
 	                run_chat_uplink_api() &&
 	                run_client_quality_level_folds_the_ping_ring() &&
+	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
 	                run_joiner_goodbye_tears_down_host();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

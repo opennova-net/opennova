@@ -1014,8 +1014,8 @@ void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
         break;
     }
     default:
-        // kNade never places; kLandmine (mission minefield items) stays
-        // unported — D-THROW-6.
+        // kNade never places; kLandmine (mission minefield items) thinks in
+        // world/minefield.cpp (MinefieldSystem), not here.
         if (dead) remove_device(world, d);
         break;
     }
@@ -1065,7 +1065,7 @@ void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
 // unconditional decrement, wrapping like x86 -- the ever-falling negative
 // value is the oldest-armed ordering key the device cap reads.
 // [orig: Entity_UpdatePool1Slot @0x4B8DD0 -- the gate @0x4B8E1B (cmp/jg
-//  before the decrement), Entity_BuildProximityList @0x4B8E25, the +0x1C8
+//  before the decrement), the Entity_BuildProximityList call @0x4B8E25, the +0x1C8
 //  think @0x4B8E3C, the +0x1C4 motor @0x4B8E53, `add [esi+2ACh],-1`
 //  @0x4B8EA0]
 void ThrowableSim::update_device(World &world, PlacedDevice &d,

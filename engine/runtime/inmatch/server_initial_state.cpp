@@ -23,6 +23,7 @@
 #include <runtime/world/geom.h>                   // world::to_fixed (0x0F spawn pose)
 #include <runtime/world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
 #include <runtime/world/world.h>
+#include <base/io/le.h>
 #include <base/io/log.h>
 
 namespace opennova::inmatch {
@@ -37,14 +38,10 @@ namespace {
 // ---------------------------------------------------------------------------
 
 void put_u16(std::vector<uint8_t> &b, uint16_t v) {
-	b.push_back(uint8_t(v & 0xFFu));
-	b.push_back(uint8_t((v >> 8) & 0xFFu));
+	opennova::io::append_u16_le(b, v);
 }
 void put_u32(std::vector<uint8_t> &b, uint32_t v) {
-	b.push_back(uint8_t(v & 0xFFu));
-	b.push_back(uint8_t((v >> 8) & 0xFFu));
-	b.push_back(uint8_t((v >> 16) & 0xFFu));
-	b.push_back(uint8_t((v >> 24) & 0xFFu));
+	opennova::io::append_u32_le(b, v);
 }
 void put_cstr(std::vector<uint8_t> &b, const std::string &s) {
 	b.insert(b.end(), s.begin(), s.end());
@@ -536,7 +533,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			step.messages.push_back(InitialStateMessage{
 					0x42, {0x00, 0x00}, /*reliable=*/false}); // [Server_OnPlayerJoin send @0x51A81F userParam=1]
 			step.messages.push_back(InitialStateMessage{0x0F, std::move(wsl)}); // world-state-load (§5.29)
-			step.messages.push_back(InitialStateMessage{0x4D, {static_cast<uint8_t>(conn.reply.player_slot)}}); // player-index [NapiNPClientMsg_0x04D @0x4317B0]
+			step.messages.push_back(InitialStateMessage{0x4D, {static_cast<uint8_t>(conn.reply.player_slot)}}); // player-index [NapiNPClientMsg_HandleSpawnSlot @0x4317B0]
 			// The join tick seed is PER PLAYER, re-rolled per connection — the client
 			// anchors currentTick (and its fire freshness) to it, and the host stamps the
 			// same value as that player's freshness floor. Never the session constant.

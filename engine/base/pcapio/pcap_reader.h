@@ -50,11 +50,4 @@ bool stream_pcap_udp_file(const std::string &path,
                           const std::function<bool(const PcapDatagram &)> &on_datagram,
                           int *frags_dropped = nullptr);
 
-// Build a minimal legacy pcap (DLT_RAW: one synthetic IPv4+UDP frame per
-// datagram) in memory — for crafting tiny inline captures in tests. Only
-// srcport/dstport/ts_nanos/payload are used; src/dst IPs are 127.0.0.1. The
-// timestamp is written at microsecond resolution (ts_nanos truncated), so the
-// result round-trips through read_pcap_udp() at that resolution.
-std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams);
-
 } // namespace opennova::net

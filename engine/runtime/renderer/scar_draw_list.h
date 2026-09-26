@@ -8,9 +8,8 @@
 // [orig: Scar_RenderAllCaches @0x5CDF70 (from Terrain_CollectVisibleEntities
 //  @0x5c91b7: the shared ring first, then every live entity ring) ->
 //  Scar_RenderCache @0x5CD830; the 32 per-texture CDynList24 batches at
-//  0x2BDF848; the drawer Scar_DrawBatches (ex Terrain_RenderFoliageBatches) @0x5CCD10 (the kong
-//  IDB name, a misnomer; proposed Scar_DrawBatches) after the lit sector
-//  entities]
+//  0x2BDF848; the drawer Scar_DrawBatches @0x5CCD10 (ex
+//  Terrain_RenderFoliageBatches), called after the lit sector entities]
 
 #include <cstdint>
 #include <functional>

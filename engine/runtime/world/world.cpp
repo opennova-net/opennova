@@ -320,7 +320,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // The think visit: the row's own blink/indoors refresh, then the class
     // callback cb(entity, 0, 0) -- on the PRE-decrement clock.
     // [orig: Entity_UpdatePool1Slot `cmp [esi+2ACh],0; jg` @0x4B8E1B..0x4B8E22,
-    //  Entity_BuildProximityList @0x4B8E25 (CollisionWorld::refresh_blink),
+    //  the Entity_BuildProximityList call @0x4B8E25 (CollisionWorld::refresh_blink),
     //  `call eax` @0x4B8E3C]
     if (clock != nullptr && *clock <= 0) {
         if (ai.collision != nullptr) ai.collision->refresh_blink(*this, row);

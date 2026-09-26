@@ -297,6 +297,11 @@ void HostRole::run_tick(const TickInput &input) {
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);
 }
 
+void HostRole::observe_frame_rate(int32_t fps) {
+	Role::observe_frame_rate(fps);
+	state.host_owner.ctx.stats_avg_fps = fps;
+}
+
 bool HostRole::session_lost(SessionError &error) const {
 	const NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (ctx.connection_mode != ConnectionMode::HostOnly) return false;

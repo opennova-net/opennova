@@ -62,7 +62,8 @@ enum class ThrowClass : uint8_t {
     kSatchel,  // thrown charge: stick + convert to placed [orig @ 0x4482A0]
     kClaymore, // placed upright: stick + convert to placed [orig @ 0x4472F0]
     kAVMine,   // think only — no motor row in retail [orig fn1 @ 0x443BB0]
-    kLandmine, // mission minefield item think [orig fn1 @ 0x441A40; unported]
+    kLandmine, // mission minefield item: its think is world/minefield.cpp's
+               // [orig: Entity_LandmineThink @ 0x441A40]
 };
 
 ThrowClass throw_class_from_tag(const char *tag);

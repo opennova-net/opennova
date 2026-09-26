@@ -104,6 +104,9 @@ public:
 	void close() override;
 	ClientRuntime *client_runtime() override { return state.client_runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
+	// The FR counter also reaches the server context: the send window's
+	// frame-pressure term and the 0x0A server-fps byte read it.
+	void observe_frame_rate(int32_t fps) override;
 
 private:
 	void reset_state(const inmatch::GameConfig &config, bool serve_and_play);

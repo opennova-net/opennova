@@ -84,6 +84,18 @@ void append_pcap_udp_record(std::vector<uint8_t> &out, uint32_t src_ip,
 	out.insert(out.end(), payload, payload + len);
 }
 
+std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams) {
+	std::vector<uint8_t> buf;
+	append_pcap_global_header(buf);
+	constexpr uint32_t kLoopback = 0x7F000001u; // 127.0.0.1, both ends
+	for (const auto &d : dgrams) {
+		append_pcap_udp_record(buf, kLoopback, uint16_t(d.srcport), kLoopback,
+				uint16_t(d.dstport), d.payload.data(), d.payload.size(),
+				d.ts_nanos);
+	}
+	return buf;
+}
+
 PcapUdpWriter::~PcapUdpWriter() { close(); }
 
 bool PcapUdpWriter::open(const std::string &path) {

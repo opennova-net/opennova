@@ -9,12 +9,15 @@
 #include <runtime/world/pose_inputs.h>
 
 #include <runtime/anim/aim_overlay.h>
+#include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm_pose.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/collision_detail.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/mounted_pose.h>
@@ -247,19 +250,20 @@ bool EntityPoseProvider::resolve_userpoint_frame(world::World &world,
 	if (out_direction != nullptr) {
 		const int32_t direction_q16[3] = {point.rot_x, point.rot_y, point.rot_z};
 		bone_world.rotate_point(direction_q16, out_direction);
-		constexpr double kBamPerRadian = 683565275.5764316; // dbl_7C19D8
-		constexpr double kHorizontalCap = 2147418112.0;     // flt_7C19E0
-		const auto chop = [](double value) {
-			return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
-		};
+		// dbl_7C19D8 is io::kBamPerRadian; flt_7C19E0 is detail::kFtolClamp. The
+		// yaw and pitch take the inline chop, not the CRT call
+		// [orig: Userpoint_ComputeWorldTransform @0x56C420: RC=chop fistp qword
+		// @0x56C5AE/@0x56C5E1, low dword @0x56C5B2/@0x56C5E5].
 		const double x = static_cast<double>(point.rot_x);
 		const double y = static_cast<double>(point.rot_y);
 		double horizontal = std::sqrt(x * x + y * y);
-		if (kHorizontalCap < horizontal) horizontal = kHorizontalCap;
-		const int32_t horizontal_int = static_cast<int32_t>(horizontal);
-		const int32_t pitch = chop(std::atan2(static_cast<double>(point.rot_z),
-				static_cast<double>(horizontal_int)) * kBamPerRadian);
-		const int32_t yaw = chop(std::atan2(y, x) * kBamPerRadian);
+		if (detail::kFtolClamp < horizontal) horizontal = detail::kFtolClamp;
+		const int32_t horizontal_int = io::retail_ftol_sse2(horizontal);
+		const int32_t pitch = io::retail_fistp_truncate_low_dword(
+				std::atan2(static_cast<double>(point.rot_z),
+						static_cast<double>(horizontal_int)) * io::kBamPerRadian);
+		const int32_t yaw =
+				io::retail_fistp_truncate_low_dword(std::atan2(y, x) * io::kBamPerRadian);
 		const int32_t zero[3] = {};
 		const world::CollisionMatrix turn =
 				world::collision_matrix_from_euler(yaw, pitch, 0, zero);

@@ -11,6 +11,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
+#include <net/npwire/ingame_encode.h>     // encode_team_assign / encode_squad_join / encode_team_name
 #include <net/npwire/ingame_message_id.h> // s2c::FORMATTED_GAME_TEXT (the 0x51 convert notice)
 
 #include <algorithm>
@@ -205,6 +206,9 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 
 // [orig: Server_InitNewRoundState @0x51c8e0] — local-player/round context for an authority host.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
+	// The team-change list starts every round empty
+	// [orig: CBufferList_Free(g_team_change_entity_list) @0x51C911..0x51C92A].
+	ctx.team_change_entities.clear();
 	if (!ctx.is_authority) return;
 	// reset_round_counters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority
@@ -656,6 +660,97 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		world::infantry_respawn_snap(*ai, pos, heading, health);
 	}
 	return true;
+}
+
+namespace {
+
+// The changed player's squad break-up: its link cleared, S2C 0x71 [0xFF][slot]
+// (mask 0x180: the in-match slots on its new team), then 0x72 [0][""] and
+// [1][""] (mask 0xA0: its own slot). The member loop that re-links every slot
+// naming this player as its leader never matches here: squads are unported,
+// so every link keeps the 0xFF Server_PlayerAdd seeds (@0x51CF0A).
+// [orig: Server_SendPlayerStateAndSquad @0x518B40 — the link @0x518B48..0x518B4F,
+//  0x71 @0x518B56..0x518BA7, 0x72 @0x518BAC..0x518C2C, the member loop
+//  @0x518C31..0x518D65]
+void send_player_state_and_squad(NapiNPServerCtx &ctx, NapiNPConnection &player) {
+	SquadJoin link;
+	link.leader = 0xFF;
+	link.member = player.reply.player_slot;
+	const std::vector<uint8_t> join = encode_squad_join(link);
+	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (!is_in_match(c) || c.link.transport == nullptr) continue;
+		if (!c.assigned_team_valid || c.assigned_team != player.assigned_team) continue;
+		c.link.transport->host_send(s2c::SQUAD_JOIN, join);
+	}
+	if (!is_in_match(player) || player.link.transport == nullptr) return;
+	for (uint8_t index = 0; index < 2; ++index) {
+		TeamName name;
+		name.index = index;
+		player.link.transport->host_send(s2c::TEAM_NAME, encode_team_name(name));
+	}
+}
+
+} // namespace
+
+// See header.
+void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
+		world::EntityHandle handle, uint8_t team) {
+	world::Entity *entity = world.registry.get(handle);
+	if (entity == nullptr || ctx.is_authority == 0) return;  // @0x518D84
+	if (entity->team == team) return;                          // @0x518D99..0x518DAA
+	entity->team = team;                                       // @0x518DB7
+	if (world::AiEntity *ai = world.ai.for_handle(handle)) ai->team = team;
+	NapiNPConnection *conn = nullptr;
+	if ((entity->flags & world::kEntityFlagPlayer) != 0) {     // @0x518DB0
+		for (NapiNPConnection &c : ctx.np_protocol.connection_list)
+			if (c.link.owned_entity == handle) conn = &c;      // Entity_ValidatePtr @0x518DC5
+	}
+	if (conn != nullptr) {
+		// The stats record starts over with field 35 = 1, and the script var
+		// at +408 clears with the dword [orig: CPlayerStats_ResetAllArrays
+		// @0x518DD6 (@0x52C4C0); +408 = 0 @0x518DE5].
+		if (world::MatchPlayer *row = world.match.player(handle)) {
+			row->stats = world::MatchStats{};
+			row->stats[world::MatchStats::kRoundMarker] = 1;
+			row->script_vars[16] = 0;
+		}
+		conn->reply.score_delta_sound_value = 0;               // +332 @0x518DDB
+		conn->assigned_team = team;                            // +416 @0x518DEF
+		conn->assigned_team_valid = true;
+		// The "PlayerTeam" NovaWorld var @0x518E07..0x518E22 follows the slot
+		// team through the embedder's roster sync.
+		// Side A for teams 1/3 or a non-team game, else side B; its character
+		// id and avatar become the entity's NetId and animSlot.
+		// [orig: @0x518E27..0x518E71, stores @0x518E7E / @0x518E8C]
+		const int side = (team == 1 || team == 3 || (ctx.config.game_type & 0x10000u) == 0)
+				? 0
+				: 1;
+		entity->minimap_net_id = conn->char_vars.char_id[side];
+		entity->anim_slot = conn->char_vars.avatar[side];
+		send_player_state_and_squad(ctx, *conn);               // @0x518E92
+		conn->link.armory_reuse_seconds = 0;                   // +356 @0x518E9A
+	}
+	if (ctx.is_in_session != 0) {
+		// S2C 0x50 to every in-match slot (mask 0x80), the identity pair zero
+		// for a non-player [orig: @0x518EA5..0x518EE1; write_entity_handle_packet
+		// @0x506AD0, the Flags & 0x100 gate @0x506B3D].
+		TeamAssign assign;
+		assign.entity_handle = handle.packed;
+		assign.team = team;
+		if ((entity->flags & world::kEntityFlagPlayer) != 0) {
+			assign.net_id = entity->minimap_net_id;
+			assign.anim_slot = entity->anim_slot;
+		}
+		const std::vector<uint8_t> body = encode_team_assign(assign);
+		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+			if (!is_in_match(c) || c.link.transport == nullptr) continue;
+			c.link.transport->host_send(s2c::TEAM_ASSIGN, body);
+		}
+	}
+	// [orig: CBufferList_AddOrFind(g_team_change_entity_list, entity) @0x518EEC]
+	if (std::find(ctx.team_change_entities.begin(), ctx.team_change_entities.end(), handle) ==
+			ctx.team_change_entities.end())
+		ctx.team_change_entities.push_back(handle);
 }
 
 // See header. Synthetic in-process peer admit (no handshake) — the owner/test hook.

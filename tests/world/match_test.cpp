@@ -15,27 +15,12 @@
 #include <memory>
 #include <vector>
 
+#include "item_pool_step.h"
+
 using namespace opennova::world;
+using test_world::step_item_pool;
 
 static int failures = 0;
-
-// One entity-update step of an item row's pool: every pool-1 row's own visit
-// (World::update_pool1_slot), or the pool-2/3 cohort walk.
-// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
-//  @0x4C230C]
-static void step_item_pool(World &w, int pool) {
-    if (pool != 1) {
-        tick_item_event_pool(w, pool);
-        return;
-    }
-    TickContext ctx;
-    ctx.world = &w;
-    ctx.is_authority = true;
-    ctx.logic_tick = w.logic_tick;
-    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
-        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
-            w.update_pool1_slot(*row, ctx);
-}
 
 #define CHECK(c)                                                                                   \
     do {                                                                                           \
@@ -1088,8 +1073,9 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
 // ahead of the next server tick. The handler returns at once off the
 // authority, so a peer without it picks nothing up.
 // [orig: Entity_ProcessWaypointInteraction @0x4AD820 (the is_authority test
-//  @0x4AD823), its caller @0x4B2FF5; Game_ProcessMainFrame runs
-//  Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6]
+//  @0x4AD823), its caller @0x4B2FF5; Game_ProcessMainFrame @0x5263F0 runs
+//  the Entity_UpdateAllEntities call @0x52674B after the Server_TickUpdate
+//  call @0x5266B6]
 void test_entity_update_consumes_its_movement_contacts() {
     for (const bool authority : {false, true}) {
         auto world = std::make_unique<World>();

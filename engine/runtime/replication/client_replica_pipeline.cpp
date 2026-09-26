@@ -1757,6 +1757,9 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.respawn_penalty_seconds = fu.weapon.slot_state360;
 		state_.local_revive_seconds = fu.weapon.slot_state368;
 		state_.spawn_hold_seconds = fu.weapon.slot_state364;
+		// The underwater breath samples, the breath bar's counter
+		// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C].
+		state_.breath_samples = fu.weapon.slot_state460;
 	}
 	if (authority_recipient_) {
 		// The listen host's own frame carries nothing past the phase-0 block

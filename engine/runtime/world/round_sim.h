@@ -579,9 +579,11 @@ public:
     // present layer each tick; see FireEvent for the witness map.
     std::vector<FireEvent> fired;
 
-    // The F3 Rounds debug ring: the last kDebugTrailCap resolved outcomes
-    // (hits, terrain stops, expiries, AND face-miss fly-ons), newest replacing
-    // oldest. Read-only snapshots; reset() clears it.
+    // The rounds debug ring: the last kDebugTrailCap resolved outcomes (hits,
+    // terrain stops, expiries, AND face-miss fly-ons), newest replacing oldest.
+    // Read-only snapshots; reset() clears it. Its readers today are the round
+    // tests; the F3 Rounds window that will read it is still open (TODO.md,
+    // the dev-tools windows row).
     static constexpr int kDebugTrailCap = 48;
     std::array<RoundDebugEvent, kDebugTrailCap> debug_trail{};
     int debug_trail_next = 0;  // ring cursor (next write slot)

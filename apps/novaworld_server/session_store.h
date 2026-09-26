@@ -24,8 +24,8 @@ struct LoginSession {
 	std::string nwh;             // players.nwh       (e.g. "1")
 	std::string nwhandle;        // players.nwhandle  (e.g. "TestPlayer")
 	std::string exp_bits = "3";  // game access / expansion ownership bits
-	// Form-supplied template names (echoed by the relay GET).
-	std::string relay;           // e.g. "jop_2_relay.htm"
+	// Form-supplied template names read back by the relay GET (the relay
+	// template itself renders the POST response only and is not stored).
 	std::string msgbase;         // e.g. "jop_2_msg.htm"
 	std::string success;         // e.g. "jop_2_main.htm"
 	std::string failure;         // e.g. "jop_2_main.htm"
@@ -35,7 +35,6 @@ struct JoinSession {
 	std::string session_tag;
 	std::string success;
 	std::string failure;
-	std::string relay;
 	std::string msgbase;
 	std::string needexpkey;
 	std::string pfid;
@@ -46,7 +45,6 @@ struct HostSession {
 	std::string session_tag;
 	std::string host_key;        // 48-char A-P alphabet (24 random bytes nibble-encoded)
 	std::string success;         // e.g. jop_2_host2.htm
-	std::string relay;
 	std::string pfid;
 };
 

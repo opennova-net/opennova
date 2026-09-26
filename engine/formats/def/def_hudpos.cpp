@@ -336,7 +336,7 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             parse_pos_aligned(vals, nvals, hud->time_clock);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "breathtime", 10)) {
-            parse_pos_aligned(vals, nvals, hud->breath_time);
+            parse_pos_align3(vals, nvals, hud->breath_time);
             parsed = 1;
         }
         /* XY positions */

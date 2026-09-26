@@ -7,6 +7,8 @@
 
 #include <runtime/world/world.h>
 
+#include <base/io/le.h>
+
 #include <algorithm>
 #include <cstring>
 #include <utility>
@@ -44,11 +46,12 @@ int32_t timer_add(int32_t value, int32_t delta) {
 			static_cast<uint32_t>(value) + static_cast<uint32_t>(delta));
 }
 
-// Little-endian u32 body (the 0x34 currentTick body and the 0x2C timestamp prefix). Mirrors the inline
-// LE write the 0x48 ack uses (joiner_connection.cpp); there is no NetPacket_Write* helper in libs.
+// Little-endian u32 body (the 0x34 currentTick body and the 0x2C timestamp prefix).
 std::vector<uint8_t> le32(uint32_t v) {
-	return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
-	        static_cast<uint8_t>(v >> 24)};
+	std::vector<uint8_t> body;
+	body.reserve(4);
+	opennova::io::append_u32_le(body, v);
+	return body;
 }
 
 const std::string &empty_runtime_string() {

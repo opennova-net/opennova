@@ -172,7 +172,7 @@ void test_tick_advances_the_clock_and_fires_thunder() {
 	const uint32_t tod = ws.tod_fixed24;
 	ws.tick_sim(nullptr, events);
 	CHECK(ws.tod_fixed24 == tod + 0x1234u);
-	CHECK(ws.tod_minute_tickdown == w::WeatherState::kTodMinuteTicks - 1);
+	CHECK(ws.tod_epoch_tickdown == w::WeatherState::kTodEpochTicks - 1);
 	CHECK(!events.thunder_a && !events.thunder_b && !events.quake_shake_local);
 	// 310 ticks later the minute counter wraps and counts one elapsed minute.
 	for (int i = 0; i < 310; ++i) ws.tick_sim(nullptr, events);

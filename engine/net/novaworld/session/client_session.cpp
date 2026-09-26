@@ -1,11 +1,13 @@
 #include <net/novaworld/client_session.h>
 
+#include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h> // decode_cs_config_update
 #include <net/npwire/session_keys.h>
 
 #include <array>
@@ -59,11 +61,6 @@ std::string copy_capped(const std::string &s, size_t n) {
 	return s.size() < n ? s : s.substr(0, n - 1);
 }
 
-uint32_t read_u32_le(const uint8_t *p) {
-	return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-	       (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
-}
-
 // The retail atol over a param value: strtol base 10.
 int atol_field(const NapiField &f) {
 	return static_cast<int>(std::strtol(field_to_string(f).c_str(), nullptr, 10));
@@ -86,7 +83,7 @@ std::vector<ClientSession::Config::CuVar> make_novaworld_join_cu(const NovaWorld
 	    CuVar{"MetTag", in.met_tag, 2},
 	    CuVar{"UdpCode1", in.udp_code1, 2},
 	    CuVar{"UdpCode2", in.udp_code2, 2},
-	    CuVar{"MaxPacketSize", in.max_packet_size, 2},
+	    CuVar{"MaxPacketSize", std::to_string(in.max_packet_size), 2},
 	};
 }
 
@@ -407,7 +404,7 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 //  184-byte description when none is set and calls CNapiNPConnection_RequestDisconnect
 //  @0x6240c4]
 void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body) {
-	if (body.size() < 4 || read_u32_le(body.data()) != cfg_.client_key) return;
+	if (body.size() < 4 || opennova::io::read_u32_le(body.data()) != cfg_.client_key) return;
 	DisconnectEvent event;
 	if (!parse_disconnect_event(body.data() + 4, body.size() - 4, event)) return;
 	last_receive_ms_ = clock_ms_;
@@ -489,23 +486,20 @@ void ClientSession::pump_send_intervals(std::vector<std::vector<uint8_t>> &out) 
 	out.push_back(build_heartbeat());
 }
 
-// [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940 — H:0x00 [dir:u8][mask:u32][values]]
+// The lobby keeps the cs_dir0 slots it runs on: CS field 0 (the reap timeout) and
+// fields 4/5/6 (the send-interval legs), each only when the update stored it.
+// [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940 — a nonzero direction
+//  byte stores into cs_dir0 @0x6219C8]
 void ClientSession::apply_cs_config_update(const ProtocolMessage &pm) {
-	if (pm.payload.size() < 5 || pm.payload[0] != 1) return; // client direction only
-	const uint32_t mask = read_u32_le(pm.payload.data() + 1);
-	size_t pos = 5;
-	for (uint8_t field = 0; field < 32 && pos + 4 <= pm.payload.size(); ++field) {
-		if (((mask >> field) & 1u) == 0) continue;
-		const int32_t value = static_cast<int32_t>(read_u32_le(pm.payload.data() + pos));
-		pos += 4;
-		switch (field) {
-		case 0: cs_.timeout_ms = value; break;
-		case 4: cs_.idle_send_interval_ms = value; break;
-		case 5: cs_.active_send_interval_ms = value; break;
-		case 6: cs_.packet_queue_interval_ms = value; break;
-		default: break;
-		}
-	}
+	const CsConfigUpdate update = decode_cs_config_update(pm.payload.data(), pm.payload.size());
+	if (!update.to_dir0) return;
+	const auto apply = [&](int slot, int32_t &field) {
+		if ((update.written & (1u << slot)) != 0) field = update.value[static_cast<size_t>(slot)];
+	};
+	apply(0, cs_.timeout_ms);
+	apply(4, cs_.idle_send_interval_ms);
+	apply(5, cs_.active_send_interval_ms);
+	apply(6, cs_.packet_queue_interval_ms);
 }
 
 void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
@@ -575,10 +569,16 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 }
 
 // The client msginfo dispatch table [orig: the 14-entry {name, handler} table @0x82c0c8]:
-// ServerStartVerify @0x4d57e0, ServerVerifyResult @0x4d5800, ServerHostResult @0x4d59d0,
-// ServerPlayerEnterResult @0x4d1940, ServerStopHosting @0x4d1c50, ServerPlayResult @0x4d1e00,
-// ServerStopPlaying @0x4d1fa0, ServerLeaveNovaWorld @0x4d20b0, ServerCommand loc_4D22F0,
-// ServerGLSVSSResults @0x4d3380; the four ServerNWUStat* entries are empty in retail.
+// "ServerStartVerify" -> CNapiGameSession_SendLocaleAndVerify @0x4d57e0,
+// "ServerVerifyResult" -> CNapiGameSession_HandleConnectVerifyResponse @0x4d5800,
+// "ServerHostResult" -> CNapiGameSession_HandleHostVerifyResponse @0x4d59d0,
+// "ServerPlayerEnterResult" -> CNapiGameSession_HandlePlayEnterResponse @0x4d1940,
+// "ServerStopHosting" -> CNapiGameSession_HandleServerMessage @0x4d1c50,
+// "ServerPlayResult" -> CNapiGameSession_HandleVerifyResponse @0x4d1e00,
+// "ServerStopPlaying" -> CNapiGameSession_HandleServerDisconnectMsg @0x4d1fa0,
+// "ServerLeaveNovaWorld" -> CNapiGameSession_HandlePuntNotification @0x4d20b0,
+// "ServerCommand" -> loc_4D22F0, "ServerGLSVSSResults" -> CNapiGameSession_HandleGLSVSSResults
+// @0x4d3380; the four ServerNWUStat* entries are empty in retail.
 void ClientSession::dispatch_server_container(const NapiMessage &container,
                                               std::vector<std::vector<uint8_t>> &out) {
 	const std::string &name = container.name;
@@ -813,9 +813,13 @@ std::vector<uint8_t> ClientSession::build_heartbeat() {
 std::vector<uint8_t> ClientSession::build_goodbye() {
 	// The leading dword is the receiver's local session key (ServerAuth.SK),
 	// followed by the latched disconnect record (a peer punt / the reap) or, for a
-	// user leave whose lobby record is unwitnessed, retail's zeroed disconnect-stat
-	// TLVs. CI is not part of this packet and using it makes a keyed receiver
-	// reject the leave.
+	// user leave, the un-latched zero record retail sends
+	// [orig: CNapiGameSession_ResetToDisconnected @0x4D0890 ->
+	//  CNapiNPConnection_RequestDisconnect @0x61E0F0 (no latch) ->
+	//  CNapiNPConnection_Destroy @0x62A4B0 -> TeardownActiveConnection @0x6253C0 ->
+	//  SendDisconnectPacket @0x61F2A0 (writes disconnect_event unconditionally)].
+	// CI is not part of this packet and using it makes a keyed receiver reject
+	// the leave.
 	std::vector<uint8_t> body = disconnect_latched_
 			? client_goodbye_to_bytes(server_sk_, disconnect_event_)
 			: client_goodbye_to_bytes(server_sk_);

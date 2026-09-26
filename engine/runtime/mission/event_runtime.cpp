@@ -609,9 +609,9 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // Dialog param1 plays only on a client, and once the round-over
             // latch holds only when param2 == 1 forces it; a skipped play never
             // reaches the dialog registry the PLYRDIALOG subs read.
-            // [orig: EventAction_Dispatch case 7 — is_mp_session_peer @0x45443d,
-            //  param2 == 1 @0x45444a, g_spawn_success_gate @0x454450,
-            //  Dialog_PlayByIndex @0x454461]
+            // [orig: EventAction_Dispatch @0x4542E0 case 7 — the is_mp_session_peer
+            //  test @0x45443d, param2 == 1 @0x45444a, the g_spawn_success_gate test
+            //  @0x454450, the Dialog_PlayByIndex call @0x454461]
             if (w.rules.mp_session_peer && (a.param2 == 1 || !w.match.outcome().ended))
                 w.out.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
             break;

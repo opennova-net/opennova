@@ -81,7 +81,6 @@ public:
     Entity *by_bms_id(int32_t bms_id);
 
     void by_group(uint8_t group, std::vector<EntityHandle> &out) const;
-    void in_area(const Aabb &zone, std::vector<EntityHandle> &out) const;
 
     // Named, first-class non-entity addressables.
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the

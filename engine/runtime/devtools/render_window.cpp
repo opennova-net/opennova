@@ -71,10 +71,12 @@ void RenderWindow::format() {
 		std::snprintf(frame, sizeof(frame), " (world frame %dx%d, stretched)", d.frame_width, d.frame_height);
 	}
 	std::snprintf(buf, sizeof(buf),
-			"%dx%d%s | visible %lld draws, %lld objects, %lld prims | shadows %lld draws, %lld objects",
+			"%dx%d%s | visible %lld draws, %lld objects, %lld prims | shadows %lld draws, %lld objects, "
+			"%lld prims",
 			d.viewport_width, d.viewport_height, frame, static_cast<long long>(d.visible_draw_calls),
 			static_cast<long long>(d.visible_objects), static_cast<long long>(d.visible_primitives),
-			static_cast<long long>(d.shadow_draw_calls), static_cast<long long>(d.shadow_objects));
+			static_cast<long long>(d.shadow_draw_calls), static_cast<long long>(d.shadow_objects),
+			static_cast<long long>(d.shadow_primitives));
 	device_text_ = buf;
 	if (snapshot_.terrain_valid) {
 		const TerrainFrameDebugCounters &t = snapshot_.terrain;

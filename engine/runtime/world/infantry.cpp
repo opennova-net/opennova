@@ -934,7 +934,6 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.pitch_restore_active = false;
     inf.pitch_restore_target = 0;
     inf.pitch_restore_prev = 0;
-    inf.ground_cache_valid = false;
 }
 
 // See the infantry.h contract. [orig: Entity_HandleDamageAndTriggerZones
@@ -1768,29 +1767,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         return;
     }
 
-    // 4. The port's ground sample (every 8 ticks). Neither organic motor samples
-    // the ground this way: the movement resolver owns the clearance, and
-    // Entity_CalcAverageGroundHeight is the vehicle/aircraft brains' helper
-    // (entity+0x2A4 is a HUD field). This stand-in gates the vertical block on
-    // having ground at all and is the clearance source when no collision world
-    // is wired (headless embedders); with one, it is a single model-aware
-    // column: a ray from pos + 1.0u, 48u down, clipped by terrain AND candidate
-    // models, so a soldier on a building floor grounds on the FLOOR.
-    // [orig: the ray shape of Entity_RaycastGroundHeightAndObject @0x414320 ->
-    //  raycast_entity_collision @0x413760; the motors' clearance comes from
-    //  Entity_MovementCollisionResolver @0x4B2BD0]
-    if (terrain != nullptr && ((key & 7u) == 0 || !inf.ground_cache_valid)) {
-        if (collision != nullptr && collision->instance_count() != 0) {
-            inf.ground_cache = collision->raycast_ground(
-                world, e.handle, e.pos, 0, 0, 0x10000, 0x300000, nullptr);
-        } else {
-            GroundClearance clearance = ground_clearance;
-            clearance.has_occupant = e.has_occupant;
-            clearance.use_dead = (e.health <= 0);
-            inf.ground_cache = calc_average_ground_height(*terrain, e.pos, 0, clearance);
-        }
-        inf.ground_cache_valid = true;
-    }
+    // (No ground sample here: neither organic motor samples the ground ahead of
+    // its vertical block. The clearance is the movement resolver's ground-settle
+    // tail at every resolve, below.)
 
     // 5. The org2 heading/leg chase (org1 chased above, before its fire pass).
     if (inf.is_local_player) {
@@ -1964,9 +1943,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // 9. Vertical resolve. The original caller passes entityRadius = AnimMap bottom
     // (out[3]) and receives foot clearance from the collision resolver.
     // It lifts only on return <= 0; return > 0xF000 marks airborne; small positive
-    // clearance is left as-is. [orig: Entity_UpdateInfantryAI @0x4b9910 and
+    // clearance is left as-is. There is no ground gate: retail always has
+    // terrain, so the null test is a rig precondition only.
+    // [orig: Entity_UpdateInfantryAI @0x4b9910 and
     // Entity_UpdateInfantryPlayerBody @0x4b40e0 callers; resolver @0x4b2bd0]
-    if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
+    if (terrain != nullptr) {
         // Gravity, per tick, asymmetric by motor (D-INF-10 CLOSED for both legs).
         // NPC org1: vel_z -= 416 then pos.z += 2*vel [orig: 0x108000 gate
         // @0x4bf7b8 (modeled below), step @0x4bf7bf, clamp @0x4bf7c9, pos
@@ -2036,8 +2017,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // candidate contact forces (CB wall push-out plus hurt/CL/CA/BB triggers)
         // + person repulsion + the ground probe THROUGH candidate models
         // (standing on buildings) [orig: collision resolver
-        // @0x4b2bd0; burns down D-INF-3's terrain-only stand-in]. Without one, the
-        // terrain-cache clearance stands (headless tests, no placed objects).
+        // @0x4b2bd0; burns down D-INF-3's terrain-only stand-in]. Without one
+        // (headless tests, no placed objects) it is that resolver's ground-settle
+        // tail over an empty candidate set.
         const int32_t pre_resolve_x = e.pos[0]; // debug-card tap
         const int32_t pre_resolve_y = e.pos[1];
         int32_t foot_clearance;
@@ -2066,12 +2048,28 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 e.pitch = inf.look_pitch;
             }
         } else {
-            foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
-            // No probe ran this tick; the probe's +0x28 store is unconditional
-            // (null on a miss), and this fallback IS the probe over an empty
-            // candidate set — clear the link so the footstep pick cannot read
-            // a stale platform. [orig: the unconditional store in
-            // Entity_RaycastGroundHeightAndObject @ 0x414370]
+            // Z raised to the 6144 grid, a 2.0 u column clipped by the terrain
+            // alone (an indoors body skips the heightfield, the clip's own
+            // gate), then clearance = feet - ground.
+            // [orig: Entity_MovementCollisionResolver ground-settle tail
+            //  @0x4B3D6E..0x4B3DA9 -> Entity_RaycastGroundHeightAndObject(e, 0, 0,
+            //  0, 0x20000) @0x4B3D95 -> raycast_entity_collision terrain leg
+            //  @0x413760 (no candidates)]
+            const uint32_t settle_flags = tick_entity != nullptr
+                    ? (tick_entity->flags | tick_entity->engine_flags)
+                    : 0u;
+            const bool indoors = (settle_flags & kEntityFlagIndoors) != 0;
+            const int32_t feet_z = e.pos[2] - frame.capsule_bottom;
+            const int32_t start[3] = {e.pos[0], e.pos[1], (e.pos[2] + 6143) & ~0x17FF};
+            int32_t end[3] = {start[0], start[1], start[2] - 0x20000};
+            if (terrain->valid() && !indoors)
+                (void)terrain_clip_segment(*terrain, start, end, end);
+            foot_clearance = feet_z - end[2];
+            // The probe's +0x28 store is unconditional (null on a miss), and
+            // this IS the probe over an empty candidate set — clear the link so
+            // the footstep pick cannot read a stale platform. [orig: the
+            // unconditional store in Entity_RaycastGroundHeightAndObject
+            // @ 0x414370]
             if (Entity *self = world.registry.get(e.handle)) self->ground_target = EntityHandle{};
         }
         inf.dbg_res_dx = e.pos[0] - pre_resolve_x; // debug-card tap

@@ -103,6 +103,28 @@ int main() {
 		CHECK(end_round_session_state(joiner).local_team == 0); // the joiner's latch, unset here
 	}
 
+	// The breath bar's facts: the replica's 0x0A breath samples and the 0x1D
+	// latch on every role; the breath seconds from a joiner's sub-block-1 copy
+	// or the authority's own WAC named value.
+	// [orig: HUD_DrawBreathBar @0x59D6F0; NapiNPClientMsg_0x00A @0x430104]
+	{
+		cs.breath_samples = 40;
+		cs.breathtime = 25;
+		const BreathBarFacts j = breath_bar_facts(joiner);
+		CHECK(j.samples == 40 && j.breath_time == 25 && j.spawn_success_gate);
+		ClientRuntime host_runtime("host-breath");
+		host_runtime.state().breath_samples = 12;
+		mission::MissionKernel kernel;
+		kernel.world.script.wac_values.breathtime = 30;
+		RoleView host;
+		host.runtime = &host_runtime;
+		host.kernel = &kernel;
+		const BreathBarFacts h = breath_bar_facts(host);
+		CHECK(h.samples == 12 && h.breath_time == 30 && !h.spawn_success_gate);
+		const BreathBarFacts none = breath_bar_facts(RoleView{});
+		CHECK(none.samples == 0 && none.breath_time == 20 && !none.spawn_success_gate);
+	}
+
 	// The DEATH screen facts: the sub-block-0 timers and the being-revived latch.
 	cs.respawn_penalty_seconds = 4;
 	cs.local_revive_seconds = 30;

@@ -1572,8 +1572,9 @@ int main() {
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
 	// The 0x0A is a PRE-motor snapshot, so the death-family animation the motor
 	// selected on the last tick above rides the NEXT tick's frame.
-	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate's 0x0A
-	//  @0x51E3D6..0x51E450 precedes Entity_UpdateAllEntities @0x52674B]
+	// [orig: Game_ProcessMainFrame @0x5263F0 — the 0x0A of Server_TickUpdate
+	//  @0x51D7E0 (@0x51E3D6..0x51E450) precedes the Entity_UpdateAllEntities call
+	//  @0x52674B]
 	inmatch::Server_TickUpdate(ctx);
 	const Drained after_kill_b = drain_all(udp_b);
 	const Drained after_kill_c = drain_all(udp_c);

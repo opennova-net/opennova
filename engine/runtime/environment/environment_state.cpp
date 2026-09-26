@@ -174,7 +174,7 @@ void EnvironmentState::configure_mission_clock(int start_time_q8_8,
 			world::WeatherState::kTodDayFixed24;
 	standalone_weather_.tod_advance_per_tick =
 			static_cast<uint32_t>(tod_advance_per_tick(minutes_per_day));
-	standalone_weather_.tod_minute_tickdown = world::WeatherState::kTodMinuteTicks;
+	standalone_weather_.tod_epoch_tickdown = world::WeatherState::kTodEpochTicks;
 	if (weather_is_standalone()) {
 		sync_clock_from_weather();
 	}
@@ -727,7 +727,6 @@ TerrainEnvUniforms EnvironmentState::build_terrain_uniforms(
 		uniforms.sun_light = sun_light();
 		uniforms.sky_ambient = sky_ambient();
 	}
-	uniforms.sun_direction = light_direction();
 	const SceneFogValues fog = build_scene_fog(underwater_view);
 	uniforms.fog_color = fog.color;
 	uniforms.fog_end = fog.end;

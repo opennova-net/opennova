@@ -138,13 +138,18 @@ FireEffectPlan fire_effect_plan(const FirePresentationRow &row);
 // against the third-person world gun (gfx3); false = the FP viewmodel (gfx1).
 bool action_particle_uses_third_person_gun(bool third_person);
 
-// A committed UseGun slot anchors to its carrier unless first-person view
-// has a resolved gun model. The carrier's live part pose supplies both the
-// action point and its direction, including while a prior flash is alive.
-// [orig: Entity_ComputeActionTransform @0x4014a7..0x4014e6,
+// A committed UseGun borrow (parentSlot 2 or 3 while firing) anchors to its
+// carrier unless the FP bit is set: camera first person, and the weapon's
+// gfx1 model loaded with its animadm (`first_person_action_model`). The
+// carrier's live part pose supplies both the action point and its direction,
+// including while a prior flash is alive.
+// [orig: ActionSlot_SpawnEffect @0x401F73..0x401FA8 (parentSlot 3 @0x401F81,
+//  parentSlot 2 @0x401FA3); FP bit WeaponAction_ProcessFrame
+//  @0x540E8C..0x540ECF; live tracker @0x540F31..0x540F56; the swapped
+//  entity's own test in Entity_ComputeActionTransform @0x4014a7..0x4014e6,
 //  repeated for the final position/direction @0x40159a..0x4015ed]
 bool action_particle_uses_mounted_gun(bool borrowed_usegun_slot,
-                                     bool third_person, bool has_first_person_gun);
+                                     bool third_person, bool first_person_action_model);
 
 // The owner-bound action effect's binding policy. Weapon particles always
 // enter the global effect world and render in the later world particle

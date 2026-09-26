@@ -921,7 +921,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 	flush_volume();
 	// The vertex layout carries tangents when any material's shader reads the
 	// TANGENT semantic (ComputeVertexFormatFlags [orig: @ 0x457a10
-	// (ModSuperOed)]; docs/threedi/3di-gp-format-re.md); the builder derives
+	// (ModSuperOed.exe)]; docs/threedi/3di-gp-format-re.md); the builder derives
 	// their values. Retail's object-space bump shaders (VS_PHONGO,
 	// VS_SKBUMPDIFFOBJ) carry none: Colt_1st, Boonie.
 	for (const ThreediMaterial &mat : model.materials) {

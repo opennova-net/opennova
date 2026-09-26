@@ -18,29 +18,14 @@
 #include <runtime/world/vehicle_collision_damage.h>
 #include <runtime/world/world.h>
 
+#include "item_pool_step.h"
+
 using namespace opennova::world;
 using namespace opennova::crt;
 using opennova::terrain::TerrainHeightField;
+using test_world::step_item_pool;
 
 static int failures = 0;
-
-// One entity-update step of an item row's pool: every pool-1 row's own visit
-// (World::update_pool1_slot), or the pool-2/3 cohort walk.
-// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
-//  @0x4C230C]
-static void step_item_pool(World &w, int pool) {
-    if (pool != 1) {
-        tick_item_event_pool(w, pool);
-        return;
-    }
-    TickContext ctx;
-    ctx.world = &w;
-    ctx.is_authority = true;
-    ctx.logic_tick = w.logic_tick;
-    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
-        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
-            w.update_pool1_slot(*row, ctx);
-}
 
 #define CHECK(c)                                                              \
     do {                                                                      \
@@ -3704,9 +3689,9 @@ void test_person_blast_quadrant_faces_the_blast() {
 
 // A kill zone that deals no damage still reaches the organic burn: the
 // drain's damage read sits after it, per victim, not ahead of the entry.
-// [orig: Projectile_ProcessExplosionQueue — the burn
-//  Entity_ApplyCollisionForce @0x4EB1D2 ahead of the damage read
-//  Entity_GetNetIdIfAuthority @0x4EB2A0]
+// [orig: Projectile_ProcessExplosionQueue @0x4EAD80 — the burn (the
+//  Entity_ApplyCollisionForce call @0x4EB1D2) ahead of the damage read (the
+//  Entity_GetNetIdIfAuthority call @0x4EB2A0)]
 void test_zero_damage_kill_zone_still_burns() {
     auto storage = std::make_unique<World>();
     World &w = *storage;

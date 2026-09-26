@@ -23,10 +23,14 @@
 #include <runtime/world/entity_pose.h>
 
 #include "common/retail_paths.h"
+#include "common/run_command.h"
 
 using namespace opennova;
 
 namespace {
+
+using test_cmd::quoted;
+using test_cmd::run;
 
 int failures = 0;
 void expect(bool ok, const std::string &what) {
@@ -34,18 +38,6 @@ void expect(bool ok, const std::string &what) {
 	std::fprintf(stderr, "FAIL: %s\n", what.c_str());
 	++failures;
 }
-
-int run(const std::string &cmd) {
-	std::fflush(stdout);
-#ifdef _WIN32
-	const std::string line = "\"" + cmd + "\"";
-	return std::system(line.c_str());
-#else
-	return std::system(cmd.c_str());
-#endif
-}
-
-std::string quoted(const std::string &s) { return "\"" + s + "\""; }
 
 double rotation_degrees(const anim::Quat &a, const anim::Quat &b) {
 	// Normalized: a pose quaternion is not unit length -- the slerp's linear

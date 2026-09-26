@@ -86,7 +86,9 @@ struct ServerConfig;
 // Handles the four session-layer opcodes:
 //   0x41 ClientHello   -> 0x81 ServerHello
 //   0x42 ClientAuth    -> 0x82 ServerAuth      ("ClientJoin"/"ServerJoin" in onnet)
-//   0x43 SESSION       -> 0x83 SESSION (heartbeat ack only for now)
+//   0x43 SESSION       -> 0x83 SESSION (a NOVAWORLDUDP peer's reassembled lobby
+//                         containers go through LobbySession::dispatch and each
+//                         reply container rides back as one layer-4 message)
 //   0x46 ClientGoodBye -> 0x86 ServerGoodBye + drop the connection
 //
 // PN dispatch happens at HELLO time. "NOVAWORLDUDP" peers use the lobby

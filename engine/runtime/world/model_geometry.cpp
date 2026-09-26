@@ -177,8 +177,6 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 		sec.face_vertex_count = object.num_vertices;
 		sec.volume_start = volume_cursor;
 		sec.volume_count = object.num_bounding_volumes;
-		sec.parent_part_index = object.parent_subobject_index;
-		sec.part_index = object.parent_subobject_index;
 		for (int k = 0; k < 3; ++k) {
 			sec.offset[k] = object.offset[k];
 			sec.center[k] = object.med[k];

@@ -125,9 +125,14 @@ struct CollisionFace {
 };
 
 // [orig: runtime COBJ record, 108 B — volume count @+28, volume ptr @+36,
-// type-7/12 vehicle-pass start @+32, local AABB minX,maxX,minY,maxY,minZ,maxZ
+// first type-7 vehicle-pass start @+32, local AABB minX,maxX,minY,maxY,minZ,maxZ
 // @+68..+88, bound-sphere
 // center @+92..+100 + radius @+104.]
+// The COBJ parent is not carried: section matrix i pairs with COBJ i strictly
+// by ordinal, even when several rows share one parent. [orig: runtime COBJ +40
+// = disk parent @0x5B3FCD; read only by build_world_bone_matrices @0x40C770
+// behind the 'bfst' bone callback (@0x4E33D0, table row @0x82CF90), which no
+// JO/revx02 RMDL selects]
 struct CollisionSection {
     uint32_t flags = 0; // COBJ+0, bit 1 selects blast breakage [orig: @0x4E6CD0]
     int32_t vertex_start = 0;
@@ -140,7 +145,7 @@ struct CollisionSection {
     int32_t volume_count = 0;
     int32_t face_vertex_start = 0;  // run into CollisionModel::face_vertices [orig: COBJ+8]
     int32_t face_vertex_count = 0;  // [orig: COBJ+4]
-    int32_t vehicle_volume_start = -1; // first type-7/12 vehicle-pass volume (-1 = none)
+    int32_t vehicle_volume_start = -1; // first type-7 volume (-1 = none)
                                        // [orig: COBJ+32]
     int32_t min_x = 0, max_x = 0;   // section-local 16.16 AABB
     int32_t min_y = 0, max_y = 0;
@@ -148,11 +153,6 @@ struct CollisionSection {
     int32_t offset[3] = {};         // exact COBJ section offset (16.16)
     int32_t center[3] = {};         // bound-sphere center (section-local 16.16)
     int32_t radius = 0;             // bound-sphere radius (16.16); negative = absent synthetic row
-    // Hierarchy metadata copied from COBJ::parent_subobject_index. This is NOT
-    // the section-matrix selector: retail pairs callback matrix i with COBJ i
-    // strictly by ordinal, even when several COBJ rows share one parent.
-    int32_t parent_part_index = -1;
-    int32_t part_index = -1;        // source render part
     bool authored_bounds = false;   // exact COBJ bounds/radius were retained
 };
 

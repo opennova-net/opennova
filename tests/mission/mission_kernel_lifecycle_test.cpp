@@ -12,6 +12,7 @@
 #include <formats/def/def.h>
 
 #include "common/boot_file_source.h"
+#include "common/synthetic_mission.h"
 
 #include <array>
 #include <cmath>
@@ -37,34 +38,15 @@ static int failures = 0;
 
 namespace {
 
-bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Organic;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	e.yaw = 90;
-	e.team = team;
-	return e;
-}
-
-bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Item;
-	e.type_id = type_id;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	return e;
-}
-
+using test_mission::item;
+using test_mission::organic;
 using test_boot::source_over;
 
 bms::File synthetic_mission() {
 	bms::File m{};
 	m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
 	m.items[0].id = 21;
-	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 	m.organics[0].id = 31;
 	m.events.push_back(bms::Event{});
 	return m;
@@ -382,8 +364,8 @@ int main() {
 	// sweeps them while the mission runs. So a SingleAlive trigger naming the
 	// pool-1 item reads it gone, and one naming the resident pool-3 marker
 	// fails too, because that row walk never covers pool 3.
-	// [orig: Game_TeardownMission — Entity_Destroy over pools 0..2
-	//  @0x522365..0x5223C8, EventTrigger_UpdateAllWithFlag4 @0x52266C]
+	// [orig: Game_TeardownMission @0x522350 — Entity_Destroy over pools 0..2
+	//  @0x522365..0x5223C8, the EventTrigger_UpdateAllWithFlag4 call @0x52266C]
 	{
 		bms::File m = synthetic_mission();
 		bms::Entity marker{};

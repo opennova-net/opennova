@@ -483,7 +483,6 @@ void test_parser_roundtrip() {
 	       "parse_server_hello succeeds");
 	expect(sh_parsed.hk == 0xABAD1DEAu, "parse_server_hello recovers hk");
 	expect(sh_parsed.ci == 0x11223344u, "parse_server_hello recovers ci");
-	expect(sh_parsed.pl.empty(), "parse_server_hello leaves absent PL empty");
 
 	ClientAuth ca;
 	ca.ci = 0x11223344u;

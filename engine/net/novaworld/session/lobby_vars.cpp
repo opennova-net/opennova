@@ -96,7 +96,7 @@ std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const Hos
 	else country = " ";
 	set_or_create(host, "Country", country);
 	set_or_create(host, "Msg", cfg.server_message);
-	set_or_create(host, "Port", "-1");                       // word_7C3328 @0x4fef6d
+	set_or_create(host, "Port", "-1");                       // the literal word_7C3328, read @0x4fef6d
 	set_or_create(host, "AllowPing", cfg.allow_ping ? "y" : "n"); // 121 / 110 @0x4fef8b
 	{
 		// "%ld %2.2ld:%2.2ld:%2.2ld" over the uptime in ms @0x4ff033.

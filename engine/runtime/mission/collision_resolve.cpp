@@ -9,6 +9,7 @@
 #include <base/io/strutil.h>
 #include <formats/mission/mission.h> // kItemIdOffset
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
+#include <runtime/world/person_overlays.h> // kParachuteItemTypeId
 
 #include <algorithm>
 #include <cmath>
@@ -905,7 +906,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 	// @ 0x5c8e10]
 	if (deps.models.has_source()) {
 		const DefItemDef *chute = find_item_def(
-				items, mission::kItemIdOffset + renderer::kParachuteProjectionTypeId);
+				items, mission::kItemIdOffset + world::kParachuteItemTypeId);
 		const Threedi3di3 *chute_model = chute != nullptr && chute->graphic[0] != '\0'
 				? deps.models.model(std::string(chute->graphic)).get()
 				: nullptr;

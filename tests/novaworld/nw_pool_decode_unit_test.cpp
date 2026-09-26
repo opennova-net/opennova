@@ -1,6 +1,6 @@
 // Self-contained, CI-runnable decoder regression — no capture fixtures.
 //
-// Each case crafts a tiny in-memory pcap (apps/common build_pcap_udp), encodes
+// Each case crafts a tiny in-memory pcap (base/pcapio build_pcap_udp), encodes
 // a known pool batch through the FULL S2C stack (inner encoder -> 0x83 protocol
 // frame -> SCRK -> outer NWU -> NAPI envelope -> UDP datagram), then reads that
 // pcap back through the shared reader and the exact decode pipeline nw_pp and
@@ -18,6 +18,7 @@
 #include <net/npwire/wire_capture.h>
 
 #include <base/pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_writer.h> // build_pcap_udp
 
 #include <cmath>
 #include <cstdint>

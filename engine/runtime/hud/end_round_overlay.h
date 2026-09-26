@@ -141,7 +141,8 @@ inline constexpr int kEndRoundStatScreenDelayMsec = 6000;
 //  teardown on the open pass @0x5b862a); once that byte is set the transition
 //  returns immediately each frame (the locret @0x5b864a) — no teardown, no
 //  overlay — and nothing from this path redraws until the host's round cycle
-//  exits the mission; both bytes clear at Game_InitMissionRoundState @0x525903]
+//  exits the mission; both bytes clear in Game_InitMissionRoundState @0x5b71b0,
+//  called from Game_StartMission @0x524360 (the call @0x525903)]
 struct EndRoundTransitionStep {
 	bool announced = false; // the header edge: t0 stamps this frame
 	bool reset = false;     // the announcement went away: the latches cleared
@@ -152,7 +153,8 @@ struct EndRoundTransition {
 	bool header_seen = false;
 	uint32_t header_edge_ms = 0;
 	bool stat_opened = false;
-	// Game_InitMissionRoundState @0x525903: both once-only bytes clear.
+	// Game_InitMissionRoundState @0x5b71b0 (the Game_StartMission call
+	// @0x525903): both once-only bytes clear.
 	void reset();
 	// One HUD frame over the S2C 0x1D header / 0x56 board knowledge and the
 	// wall clock (milliseconds).

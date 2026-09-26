@@ -85,20 +85,26 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type = 0,
-                         std::size_t max_frame_body_bytes = 0);
+                         std::size_t max_frame_body_bytes = 0,
+                         int32_t server_fps = 0);
 
 // The same frame, built but NOT sent: every per-recipient state advance (phase,
 // age, cache, watermark) happens here and the 0x0A body lands in `frame_out`.
 // The host tick builds and sends each recipient's frame after its script pass
 // and maintenance legs and before the entity motor, as retail's
 // Server_TickUpdate ends with the per-slot 0x0A.
-// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate @0x5266B4, whose
-//  last leg is the per-slot 0x0A @0x51E3D6..0x51E450, then
-//  Entity_UpdateAllEntities @0x52674B]
+// [orig: Game_ProcessMainFrame @0x5263F0 (the Server_TickUpdate call @0x5266B4,
+//  whose last leg is the per-slot 0x0A @0x51E3D6..0x51E450, then the
+//  Entity_UpdateAllEntities call @0x52674B)]
+// `server_fps` is the host's measured frame rate, whose low byte the
+// server-status sub-block carries; 0 = none measured yet (retail's mode-init
+// value) [orig: Server_TickUpdate @0x51D7E0..0x51D7E5 copies g_statsAvgFps to
+// g_serverFps; NetPacket_WritePlayerState @0x4FFA5C..0x4FFA62 writes its byte].
 bool build_connection_s2c(const world::World &w, Connection &conn,
                           const std::vector<GameEntitySnapshot> &ents,
                           std::vector<uint8_t> &frame_out,
                           uint32_t game_type = 0,
-                          std::size_t max_frame_body_bytes = 0);
+                          std::size_t max_frame_body_bytes = 0,
+                          int32_t server_fps = 0);
 
 } // namespace opennova::replication

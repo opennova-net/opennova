@@ -8,8 +8,11 @@
 
 namespace opennova::inmatch {
 
-// The session banks real time and dispatches one target call per 16 ms quantum,
-// matching the original outer/logic-loop split [orig: Game_MainLoop @ 0x52b630
+// The session banks real time through the retail frame-time bank
+// (world::TickAccumulator: the 500 ms clamp, the 7/8 EMA, 4 ms drain quanta
+// with a logic tick on every fourth, the mission-start re-base below) and
+// dispatches one role tick per logic tick, matching the original
+// outer/logic-loop split [orig: Game_MainLoop @ 0x52b630
 // -> Game_ProcessMainFrame @ 0x5263f0].
 
 namespace {
@@ -42,6 +45,10 @@ void Role::apply_input(const TickInput &input) {
 	// cooldown live in request_medic).
 	if (!spectating && (input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
 		request_medic();
+}
+
+void Role::observe_frame_rate(int32_t fps) {
+	if (ClientRuntime *runtime = client_runtime()) runtime->set_observed_frame_rate(fps);
 }
 
 bool Role::request_medic() {
@@ -305,7 +312,11 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	const double elapsed = rebase_clock_ && input.since_render_seconds >= 0.0
 			? input.since_render_seconds : input.delta_seconds;
 	rebase_clock_ = false;
-	out = run_ticks(accumulator_.bank(elapsed), input);
+	const int32_t due = accumulator_.bank(elapsed);
+	// The FR counter is published before the drain runs this frame's ticks
+	// [orig: Game_MainLoop g_statsAvgFps store @0x52B98F, drain @0x52BA08].
+	if (role_ != nullptr) role_->observe_frame_rate(accumulator_.average_fps());
+	out = run_ticks(due, input);
 	// Each of the first frames drawn after the mission start counts down and
 	// raises the re-base flag [orig: Render_ProcessMainSceneFrame
 	// @0x5caeff..0x5caf0e].

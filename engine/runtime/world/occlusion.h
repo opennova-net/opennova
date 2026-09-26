@@ -296,10 +296,6 @@ public:
     // -1 << byte for each nonzero byte (x86 shl masks the count & 31).
     // [orig: Terrain_RenderSectorModels @ 0x5c5d7c..0x5c5da8]
     uint32_t forced_section_mask(EntityHandle h) const;
-    // The mask the building's parts draw with: raw | forced.
-    uint32_t section_draw_mask(EntityHandle h) const {
-        return section_mask(h) | forced_section_mask(h);
-    }
     // The building carries an open (type-1) portal record in a live slot — the
     // two-pass draw marker. [orig: batch +16 flag consumption @ 0x5c5e17]
     bool building_open_flagged(EntityHandle h) const;

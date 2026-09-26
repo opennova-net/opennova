@@ -204,9 +204,10 @@ struct MatchPlayer {
     //  WacCmd_OnPlayerTick @0x4F0E65]
     uint32_t play_ticks = 0;
     // WAC pisvar/psetvar address player-slot bytes +392..+408. A new
-    // player-add clears them; team changes and death do not.
+    // player-add clears them, a team change clears the last one (the dword
+    // at +408), death clears none.
     // [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0;
-    // Server_PlayerAdd @0x51D51C]
+    // Server_PlayerAdd @0x51D51C; Server_ChangeEntityTeam @0x518DE5]
     std::array<uint8_t, 17> script_vars{};
     // Player-slot +100567, the live spectator latch. The scorer refuses
     // every event for a spectator-flagged slot, so the round winner awards

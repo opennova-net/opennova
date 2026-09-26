@@ -4,7 +4,9 @@
 // light solve must clear BYTE2(aiRef0) (m.grounded) as it sets Flags 0x2000,
 // otherwise the mover rebuilds slide_z from the grounded forward row every
 // tick and the occupied bike floats instead of accumulating gravity.
-// Gated on OPENNOVA_JO_DIR (a retail install carrying 06TR.bms).
+// Gated on OPENNOVA_JO_DIR (a retail install whose base mount carries
+// 06TR.bms), else OPENNOVA_JO_ASSETS (the extracted tree, 06TR.bms loose at its
+// root): JO:CA ships the mission in its jox01 archive, not the base set.
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
@@ -37,11 +39,17 @@ bool expect(bool cond, const char *msg) {
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(
-			install, retail::install(), "OPENNOVA_JO_DIR (a retail JO install carrying 06TR.bms)");
+	const std::string install = retail::install();
+	const std::string assets = retail::assets();
+	if (install.empty() && assets.empty())
+		return retail::skip("OPENNOVA_JO_DIR or OPENNOVA_JO_ASSETS (a retail JO install or extracted tree "
+				"carrying 06TR.bms)");
 	testrig::RetailMissionRig rig;
 	std::string error;
-	if (!rig.open(install, "06TR.bms", error))
+	bool opened = !install.empty() && rig.open(install, "06TR.bms", error);
+	if (!opened && !assets.empty())
+		opened = rig.open(assets, "06TR.bms", error);
+	if (!opened)
 		return retail::skip(error.c_str());
 	testrig::BootOptions options;
 	if (!expect(rig.boot(options, error), "06TR boots")) {

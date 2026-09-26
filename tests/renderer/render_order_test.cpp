@@ -104,8 +104,8 @@ int main() {
 	// The wake decals inside the water pass, after the surface strip
 	// [orig: render_water_surface @ 0x5c3426 then WaterRing_DrawAll @ 0x5c3432].
 	CHECK(kRungWater < kRungWaterDecals);
-	// The camera person wave's masks @ 0x5c9638 -> Scar_DrawBatches @ 0x5c9658
-	// -> foliage pass 1 @ 0x5c9665 -> camera-side alpha flush @ 0x5c967a ->
+	// The camera person wave's masks @ 0x5c9638 -> the Scar_DrawBatches call
+	// @ 0x5c9658 -> foliage pass 1 @ 0x5c9665 -> camera-side alpha flush @ 0x5c967a ->
 	// tracer pass 1 @ 0x5c9687.
 	CHECK(kRungWaterDecals < kRungFoliageMaskCameraSide);
 	CHECK(kRungFoliageMaskCameraSide < kRungScars);

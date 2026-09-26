@@ -92,6 +92,11 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// wraps. chat_box_present stays false for the same result; a hud.def-equipped
 	// title needs a formats/def reader (the file is SCR-encoded, key 0x2A5A8EAD).
 	out.sys_text = pos_record2(hud.sys_text[0], hud.sys_text[1]);
+	// BREATHTIME x, y, align: three fields, no hidden dword; an unauthored
+	// line leaves the zero record (0, 0, left) the bar still draws at
+	// [orig: HUD_ParseHudposToken @0x59FB3B..0x59FB84 -> dword_2723810/14/18].
+	out.breath_time = pos_record2(hud.breath_time[0], hud.breath_time[1]);
+	out.breath_time.align = hud.breath_time[2];
 	// LFP_FLAGS — the AAS zone status panel's anchor (retail g_hudZonePanelX/Y,
 	// written by the hudpos parse @0x5a0563/@0x5a057b).
 	out.lfp_anchor_x = hud.lfp_flags[0];

@@ -12,8 +12,12 @@
 #include <vector>
 
 #include "../../apps/threedi_cli/anim_cli.h"
+#include "../common/file_io.h"
 
 namespace {
+using test_io::read_file;
+using test_io::read_file_text;
+
 int failures = 0;
 void check(bool ok, const char *what) {
 	if (!ok) {
@@ -47,13 +51,6 @@ std::string replace(std::string s, const std::string &from, const std::string &t
 	if (at == std::string::npos) return s;
 	s.replace(at, from.size(), to);
 	return s;
-}
-
-bool read_file(const std::string &path, std::vector<char> &out) {
-	std::ifstream in(path, std::ios::binary);
-	if (!in) return false;
-	out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-	return true;
 }
 } // namespace
 
@@ -90,8 +87,8 @@ int main(int argc, char **argv) {
 		const std::string table = (home / "CHECK.adm").string();
 		check(threedi_cli::cmd_anim_scene(original.c_str(), scene.c_str()) == 0, "scene");
 		check(threedi_cli::cmd_anim_build(scene.c_str(), table.c_str()) == 0, "rebuild");
-		std::vector<char> a;
-		std::vector<char> b;
+		std::vector<uint8_t> a;
+		std::vector<uint8_t> b;
 		check(read_file(original, a) && read_file(table, b) && a == b, "table byte-identical");
 		check(read_file((std::filesystem::path(original).parent_path() / "walk.bad").string(), a) &&
 						read_file((home / "walk.bad").string(), b) && a == b,
@@ -254,8 +251,8 @@ int main(int argc, char **argv) {
 		const std::string rebuilt = (home / "again.bad").string();
 		check(threedi_cli::cmd_anim_scene(clip.c_str(), again.c_str()) == 0, "lone scene");
 		check(threedi_cli::cmd_anim_build(again.c_str(), rebuilt.c_str()) == 0, "lone rebuild");
-		std::vector<char> a;
-		std::vector<char> b;
+		std::vector<uint8_t> a;
+		std::vector<uint8_t> b;
 		check(read_file(clip, a) && read_file(rebuilt, b) && a == b, "lone byte-identical");
 		// A table row with no table, and a table with no row, are both refused.
 		const std::string rows = (home / "rows.o3a").string();
@@ -283,8 +280,8 @@ int main(int argc, char **argv) {
 		const std::string rebuilt = (home / "CHECK.adm").string();
 		check(threedi_cli::cmd_anim_scene(table.c_str(), scene.c_str()) == 0, "sparse scene");
 		check(threedi_cli::cmd_anim_build(scene.c_str(), rebuilt.c_str()) == 0, "sparse rebuild");
-		std::vector<char> a;
-		std::vector<char> b;
+		std::vector<uint8_t> a;
+		std::vector<uint8_t> b;
 		check(read_file((std::filesystem::path(table).parent_path() / "walk.bad").string(), a) &&
 						read_file((home / "walk.bad").string(), b) && a == b,
 				"sparse clip byte-identical");
@@ -302,31 +299,31 @@ int main(int argc, char **argv) {
 		std::filesystem::remove_all(home);
 		std::filesystem::create_directories(home / "a");
 		std::filesystem::create_directories(home / "b");
-		std::vector<char> walk;
+		std::vector<uint8_t> walk;
 		check(read_file((std::filesystem::path(original).parent_path() / "walk.bad").string(), walk),
 				"read the built clip");
-		const auto word = [&](const std::vector<char> &bytes, size_t at) {
+		const auto word = [&](const std::vector<uint8_t> &bytes, size_t at) {
 			uint32_t v = 0;
 			std::memcpy(&v, bytes.data() + at, sizeof(v));
 			return v;
 		};
-		const auto put = [&](std::vector<char> bytes, size_t at, float v) {
+		const auto put = [&](std::vector<uint8_t> bytes, size_t at, float v) {
 			std::memcpy(bytes.data() + at, &v, sizeof(v));
 			return bytes;
 		};
-		const auto write = [&](const std::filesystem::path &path, const std::vector<char> &bytes) {
-			std::ofstream(path, std::ios::binary).write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+		const auto write = [&](const std::filesystem::path &path, const std::vector<uint8_t> &bytes) {
+			test_io::write_file(path.string(), bytes);
 			return path.string();
 		};
 		// The first event's forward step, NaN in both clips.
 		const size_t event_at = word(walk, 0x40);
-		const std::vector<char> nan_walk = put(walk, event_at, std::nanf(""));
+		const std::vector<uint8_t> nan_walk = put(walk, event_at, std::nanf(""));
 		check(threedi_cli::cmd_anim_compare(write(home / "a" / "walk.bad", nan_walk).c_str(),
 					  write(home / "b" / "walk.bad", nan_walk).c_str()) == 1,
 				"a NaN is never the same");
 		// Bone 0's bind rotation turned a quarter turn about y.
 		const size_t bind_at = word(walk, 0x18) + 64;
-		std::vector<char> turned = put(put(walk, bind_at, 0.0f), bind_at + 8, 1.0f);
+		std::vector<uint8_t> turned = put(put(walk, bind_at, 0.0f), bind_at + 8, 1.0f);
 		turned = put(put(turned, bind_at + 24, -1.0f), bind_at + 32, 0.0f);
 		check(threedi_cli::cmd_anim_compare(write(home / "a" / "walk.bad", walk).c_str(),
 					  write(home / "b" / "walk.bad", turned).c_str()) == 1,
@@ -354,10 +351,9 @@ int main(int argc, char **argv) {
 		const std::string scene = (home / "set.o3a").string();
 		check(threedi_cli::cmd_anim_scene((home / "IDLE.adm").string().c_str(), scene.c_str()) == 0,
 				"scene of a table with no reset row");
-		std::vector<char> text_out;
-		check(read_file(scene, text_out) &&
-						std::string(text_out.begin(), text_out.end()).find("# note: the table has no reset row") !=
-								std::string::npos,
+		std::string text_out;
+		check(read_file_text(scene, text_out) &&
+						text_out.find("# note: the table has no reset row") != std::string::npos,
 				"a table with no reset row is noted");
 	}
 
@@ -367,19 +363,17 @@ int main(int argc, char **argv) {
 		const std::filesystem::path home = dir / "inexpressible";
 		std::filesystem::remove_all(home);
 		std::filesystem::create_directories(home);
-		std::vector<char> walk;
+		std::vector<uint8_t> walk;
 		check(read_file((std::filesystem::path(original).parent_path() / "walk.bad").string(), walk),
 				"read the built clip");
 		const uint32_t short_events = 3;
 		std::memcpy(walk.data() + 0x3C, &short_events, sizeof(short_events));
-		std::ofstream((home / "walk.bad").string(), std::ios::binary)
-				.write(walk.data(), static_cast<std::streamsize>(walk.size()));
+		test_io::write_file((home / "walk.bad").string(), walk);
 		const std::string scene = (home / "set.o3a").string();
 		check(threedi_cli::cmd_anim_scene((home / "walk.bad").string().c_str(), scene.c_str()) == 0,
 				"scene of a clip it cannot express");
-		std::vector<char> text_out;
-		check(read_file(scene, text_out), "read the scene");
-		const std::string written(text_out.begin(), text_out.end());
+		std::string written;
+		check(read_file_text(scene, written), "read the scene");
 		check(written.find("# note: left out clip 'walk'") != std::string::npos &&
 						written.find("\nclip ") == std::string::npos,
 				"the clip is noted and left out");
@@ -402,9 +396,9 @@ int main(int argc, char **argv) {
 		std::filesystem::create_directories(home / "a-folder.o3a");
 		const std::string scene = (home / "set.o3a").string();
 		std::ofstream(scene, std::ios::binary) << "stale";
-		std::vector<char> written;
-		check(threedi_cli::cmd_anim_scene(original.c_str(), scene.c_str()) == 0 && read_file(scene, written) &&
-						std::string(written.begin(), written.end()).rfind("o3a 1\n", 0) == 0 &&
+		std::string written;
+		check(threedi_cli::cmd_anim_scene(original.c_str(), scene.c_str()) == 0 && read_file_text(scene, written) &&
+						written.rfind("o3a 1\n", 0) == 0 &&
 						std::find(written.begin(), written.end(), '\r') == written.end(),
 				"scene replaces a file with LF text");
 		check(threedi_cli::cmd_anim_scene(original.c_str(), (home / "a-folder.o3a").string().c_str()) != 0,

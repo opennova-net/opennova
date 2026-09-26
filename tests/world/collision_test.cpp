@@ -1235,7 +1235,7 @@ void test_vehicle_collision_volume_selection() {
     CHECK(contact_x(vc_only, 0x8, vc_force));
     CHECK(vc_force < 0);
 
-    // Retail falls back to CB/default solids when the section has no VC/VK run.
+    // Retail falls back to CB/default solids when the section has no VC run.
     CollisionModel cb_only = box_model(1, 0, 3.0, 10.0, 10.0);
     int32_t cb_force = 0;
     CHECK(contact_x(cb_only, 0x8, cb_force));
@@ -1259,6 +1259,24 @@ void test_vehicle_collision_volume_selection() {
     int32_t mixed_actor_force = 0;
     CHECK(contact_x(mixed, 0, mixed_actor_force));
     CHECK(mixed_actor_force == cb_force);
+
+    // Only a TYPE-7 volume starts the scoped walk: a section whose one vehicle
+    // volume is a VK (12) keeps the unscoped walk from volume 0, so its CB still
+    // pushes a 0x18 pass while the VK sits away from the point.
+    // [orig: first type-7 volume @0x5B4431; the scoped walk @0x4AE527..0x4AE52F]
+    CollisionModel cb_then_vk = box_model(1, 0, 3.0, 10.0, 10.0);
+    CollisionModel vk_part = box_model(12, 0, 0.5, 0.5, 1.0);
+    CollisionVolume vk = vk_part.volumes.front();
+    vk.plane_start = static_cast<int32_t>(cb_then_vk.planes.size());
+    cb_then_vk.planes.insert(cb_then_vk.planes.end(), vk_part.planes.begin(),
+                             vk_part.planes.end());
+    cb_then_vk.volumes.push_back(vk);
+    cb_then_vk.sections.front().volume_count = 2;
+
+    int32_t cb_then_vk_force = 0;
+    CHECK(contact_x(cb_then_vk, 0x18, cb_then_vk_force));
+    CHECK(cb_then_vk.sections.front().vehicle_volume_start == -1);
+    CHECK(cb_then_vk_force == cb_force);
 }
 
 // ---------------------------------------------------------------------------
@@ -4118,14 +4136,6 @@ void test_face_raycast_uses_callback_matrix_per_section() {
     // target_view hits x=13 and misses x=17; the callback-correct path reverses
     // those verdicts without moving the root section.
     Rig rig(two_section_face_model(5, 6));
-    // JetSki's two retail COBJ rows both name parent 0. Pin that hierarchy
-    // metadata cannot collapse the ordinal matrix pairing onto slot 0.
-    CollisionModel *model = const_cast<CollisionModel *>(rig.cw.model(0));
-    CHECK(model != nullptr && model->sections.size() == 2);
-    if (model != nullptr && model->sections.size() == 2) {
-        model->sections[0].parent_part_index = 0;
-        model->sections[1].parent_part_index = 0;
-    }
     rig.world.registry.get(rig.building)->bound_radius = 12.0f;
     TwoSectionMatrixProvider provider;
     rig.cw.set_pose_provider(&provider);

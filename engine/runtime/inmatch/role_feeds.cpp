@@ -104,6 +104,21 @@ hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view) {
 	return in;
 }
 
+BreathBarFacts breath_bar_facts(const RoleView &view) {
+	BreathBarFacts out;
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		out.samples = cs.breath_samples;             // word_A85B7C
+		out.spawn_success_gate = cs.end_round.header_known;
+		if (view.joiner) out.breath_time = cs.breathtime;
+	}
+	// The authority's frame carries no sub-block 1 to its own loopback, and
+	// its HUD reads the host's own named value [orig: wac_var_breathtime].
+	if (!view.joiner && view.kernel != nullptr)
+		out.breath_time = view.kernel->world.script.wac_values.breathtime;
+	return out;
+}
+
 std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
 	// The PLAYER SLOT table retail walks is the roster every role's view folds
 	// from 0x46 (name / clan / team). The local row comes from the 0x1D

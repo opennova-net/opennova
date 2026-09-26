@@ -23,6 +23,7 @@
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_net_quality.h>
 #include <runtime/inmatch/server_session.h>
+#include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/server_vehicle_spawn.h>
 
@@ -171,8 +172,23 @@ bool check_ping_ring_and_strikes() {
 	// The local slot measures zero and is exempt.
 	other.link.mode = ns::TransportMode::Loopback;
 	inmatch::Server_RecordPingSample(config, other, 1000, 9000, true);
-	return expect(other.reply.rtt_ms == 0 && other.reply.max_ping_strikes == 0,
-			"the listen host's own slot samples zero and takes no strikes");
+	if (!expect(other.reply.rtt_ms == 0 && other.reply.max_ping_strikes == 0,
+			"the listen host's own slot samples zero and takes no strikes"))
+		return false;
+	// A joiner advertising the DB (debug build) join tag is exempt too: 21
+	// under-min samples take no strike and never punt [orig: @0x515171 —
+	// NetPlayer+0xD8 = NapiNetConfig::db].
+	HostFixture d(1);
+	inmatch::NapiNPConnection &debug = d.conn(0);
+	debug.join_environment.db = 1;
+	config = inmatch::GameConfig{};
+	config.do_min_ping_check = true;
+	config.min_ping = 500;
+	for (int i = 0; i < 21; ++i)
+		inmatch::Server_RecordPingSample(config, debug, 1000, 1010, true);
+	return expect(!debug.host_disconnect_sent && debug.reply.min_ping_strikes == 0 &&
+					debug.reply.rtt_ms == 10,
+			"a DB joiner still samples its round trip but takes no ping strikes");
 }
 
 bool check_ping_dispatch_return_leg() {
@@ -247,6 +263,9 @@ bool check_client_quality_store_and_resend() {
 
 bool check_host_quality_window() {
 	HostFixture f(2);
+	// A healthy measured frame rate (the session's FR counter): the
+	// frame-pressure term scores its floor 1.
+	f.ctx.stats_avg_fps = 62;
 	// The sample fires on the first frame, then every 62.
 	f.ctx.host_quality_window = ns::NetQualityWindow{};
 	inmatch::Server_SampleHostNetQuality(f.ctx);
@@ -261,8 +280,25 @@ bool check_host_quality_window() {
 	// the first (idle, no eligible slot) sample stored 0, so the five-slot
 	// average is 65 / 5 = 13,
 	// which the max-fold selects over the floor-1 bandwidth/loss terms.
-	return expect(f.ctx.host_network_quality == 13,
-			"0x79 carries the send window's folded quality");
+	if (!expect(f.ctx.host_network_quality == 13,
+			"0x79 carries the send window's folded quality"))
+		return false;
+	// Frame pressure reads the FR counter [orig: @0x4C531B g_statsAvgFps]:
+	// 8 fps scores 256 - 128 = 128, 0 (before the first 2 s window) the
+	// ceiling 255. One sample each into a fresh window averages /5.
+	HostFixture slow(2);
+	slow.ctx.stats_avg_fps = 8;
+	slow.ctx.host_quality_window = ns::NetQualityWindow{};
+	inmatch::Server_SampleHostNetQuality(slow.ctx);
+	if (!expect(slow.ctx.host_quality_window.avg_bandwidth == 128 / 5 &&
+					slow.ctx.host_network_quality == 128 / 5,
+			"an 8 fps host samples frame pressure 128"))
+		return false;
+	HostFixture cold(2);
+	cold.ctx.host_quality_window = ns::NetQualityWindow{};
+	inmatch::Server_SampleHostNetQuality(cold.ctx);
+	return expect(cold.ctx.host_network_quality == 255 / 5,
+			"an unmeasured frame rate samples the ceiling 255");
 }
 
 // --------------------------------------------------------------------------
@@ -441,11 +477,23 @@ bool check_medic_revive_transaction() {
 	(*medic_rules.score_values)[7] = 4; // MEDICSAVE
 	f.world.match.configure(medic_rules);
 	f.world.match.upsert_player({f.players[1], 2, "P2"});
+	// A normal other-player kill: the 120-second revive window is open, the
+	// respawn penalty runs and the victim has called for a medic.
+	f.conn(0).link.downed_revive_seconds = 120;
+	f.conn(0).link.respawn_delay_seconds = 5;
+	f.conn(0).link.medic_request_active = true;
 	for (auto &t : f.transports) (void)drain(t);
 	f.world.round_sim.medic_interactions.push_back(
 			w::MedicInteraction{f.players[0], f.players[1], /*revive=*/true});
 	inmatch::Server_TickUpdate(f.ctx);
 	if (!expect(victim->medic_reviving, "the victim's +0x1E0 latch is set")) return false;
+	// The revive closes the victim slot's window, penalty and request at its
+	// retail points [orig: @0x517D61, @0x517D67, @0x517E14, @0x517E1A].
+	if (!expect(f.conn(0).link.downed_revive_seconds == 0 &&
+					f.conn(0).link.respawn_delay_seconds == 0 &&
+					!f.conn(0).link.medic_request_active,
+			"the revive closes the window, the respawn penalty and the medic request"))
+		return false;
 	// The revive scores the medic's MEDICSAVE [orig: GameEvent_RevivePlayer
 	// @0x517CD0 (the event-6 call @0x517DC5)].
 	const w::MatchPlayer *medic = f.world.match.player(f.players[1]);
@@ -476,6 +524,104 @@ bool check_medic_revive_transaction() {
 	// The other player sees the event too (mask 128).
 	return expect(count_tag(drain(f.transports[1]), s2c::GAME_EVENT) >= 1,
 			"event 38 reaches every active player");
+}
+
+// The revive's head gates and the healer's hide bytes: both entities need a
+// player slot, the victim's revive window must be open, a victim who turned
+// automedic off needs a live medic request, and the victim's last attacker is
+// neither the healer nor the victim; a hidden (spectator) medic still revives
+// but neither scores nor sends event 38.
+// [orig: GameEvent_RevivePlayer @0x517CD0 — the slots @0x517CD9..0x517D01, the
+//  window @0x517D14..0x517D1A, the opt-out @0x517D20..0x517D2E, the last
+//  attacker @0x517D34..0x517D44, the hide bytes @0x517E4C..0x517E61]
+bool check_medic_revive_gates() {
+	auto setup = [](HostFixture &f) {
+		f.conn(1).link.owned_entity = f.players[1];
+		w::Entity *victim = f.world.registry.get(f.players[0]);
+		w::Entity *healer = f.world.registry.get(f.players[1]);
+		healer->team = 1;
+		healer->player_class = 5;
+		victim->flags |= w::kEntityFlagDead;
+		victim->health = 0;
+		victim->alive = false;
+		f.conn(0).link.downed_revive_seconds = 120;
+		w::MatchRules rules;
+		rules.game_type = 0x10000u; // TDM
+		rules.score_values.emplace();
+		(*rules.score_values)[7] = 4; // MEDICSAVE
+		f.world.match.configure(rules);
+		f.world.match.upsert_player({f.players[1], 2, "P2"});
+		for (auto &t : f.transports) (void)drain(t);
+	};
+	auto revive = [](HostFixture &f, w::EntityHandle healer) {
+		f.world.round_sim.medic_interactions.push_back(
+				w::MedicInteraction{f.players[0], healer, /*revive=*/true});
+		inmatch::Server_RouteMedicInteractions(f.ctx, f.world);
+	};
+	auto reviving = [](HostFixture &f) {
+		return f.world.registry.get(f.players[0])->medic_reviving;
+	};
+	bool ok = true;
+	{
+		HostFixture f(2, 1);
+		setup(f);
+		f.conn(1).link.spectator = true;
+		f.world.match.set_player_spectator(f.players[1], true);
+		revive(f, f.players[1]);
+		const std::vector<ns::Datagram> to_victim = drain(f.transports[0]);
+		const std::vector<ns::Datagram> to_healer = drain(f.transports[1]);
+		size_t event38 = 0;
+		for (const std::vector<ns::Datagram> *list : {&to_victim, &to_healer})
+			for (const ns::Datagram &d : *list)
+				if (d.tag == s2c::GAME_EVENT && !d.body.empty() && d.body[0] == 38) ++event38;
+		const w::MatchPlayer *medic = f.world.match.player(f.players[1]);
+		ok = expect(reviving(f) && count_tag(to_victim, s2c::MEDIC_REVIVING) == 1 &&
+		                    count_tag(to_victim, s2c::TICK_SEED) == 1 && event38 == 0 &&
+		                    medic != nullptr && medic->stats[w::MatchStats::kMedicSaves] == 0,
+		            "a hidden medic revives without event 38 or a MEDICSAVE") && ok;
+	}
+	{
+		HostFixture f(2, 1);
+		setup(f);
+		f.conn(0).link.downed_revive_seconds = 0;
+		revive(f, f.players[1]);
+		ok = expect(!reviving(f) && count_tag(drain(f.transports[0]), s2c::MEDIC_REVIVING) == 0,
+		            "a closed revive window refuses the revive") && ok;
+	}
+	{
+		HostFixture f(2, 1);
+		setup(f);
+		f.conn(0).link.auto_medic_enabled = false;
+		revive(f, f.players[1]);
+		ok = expect(!reviving(f), "automedic off without a medic request refuses the revive") && ok;
+		f.conn(0).link.medic_request_active = true;
+		revive(f, f.players[1]);
+		ok = expect(reviving(f) && !f.conn(0).link.medic_request_active,
+		            "automedic off with a live request revives and clears the request") && ok;
+	}
+	{
+		HostFixture f(2, 1);
+		setup(f);
+		f.world.registry.get(f.players[0])->last_attacker = f.players[1];
+		revive(f, f.players[1]);
+		ok = expect(!reviving(f), "a medic never revives the teammate he killed") && ok;
+		f.world.registry.get(f.players[0])->last_attacker = f.players[0];
+		revive(f, f.players[1]);
+		ok = expect(!reviving(f), "nobody revives a suicide") && ok;
+	}
+	{
+		HostFixture f(2, 1);
+		setup(f);
+		w::Entity bot;
+		bot.kind = w::EntityKind::Organic;
+		bot.team = 1;
+		bot.player_class = 5;
+		bot.alive = true;
+		const w::EntityHandle bot_handle = f.world.registry.spawn(0, bot);
+		revive(f, bot_handle);
+		ok = expect(!reviving(f), "a healer without a player slot never revives") && ok;
+	}
+	return ok;
 }
 
 // The heal transaction: a live, hurt teammate's health goes back to its def
@@ -696,12 +842,128 @@ bool check_server_commands() {
 	if (!expect(out.handled && out.stop_hosting && !g.conn(0).host_disconnect_sent,
 			"PuntPlayer on the host's own slot asks the shell to stop hosting"))
 		return false;
-	// ChangeTeam / ReloadPlayer are not modeled; a verb outside a session is refused.
-	out = inmatch::Server_ExecuteServerCommand(g.ctx, &g.world, "ChangeTeam", "ByName", {"P1"});
-	if (!expect(!out.handled, "ChangeTeam is not modeled")) return false;
+	// ReloadPlayer is not modeled; a verb outside a session is refused.
+	out = inmatch::Server_ExecuteServerCommand(g.ctx, &g.world, "ReloadPlayer", "ByName", {"P1"});
+	if (!expect(!out.handled, "ReloadPlayer is not modeled")) return false;
 	g.ctx.is_in_session = 0;
 	out = inmatch::Server_ExecuteServerCommand(g.ctx, &g.world, "TextChatServer", "", {"x"});
 	return expect(!out.handled, "no verb runs outside a session");
+}
+
+// --------------------------------------------------------------------------
+// The admin ChangeTeam / SwapTeam verbs, Server_ChangeEntityTeam and the
+// team-change list a late joiner's C2S 0x29 walk reads back as S2C 0x51.
+// [orig: loc_4D31EA; Server_ChangeEntityTeam @0x518D70;
+//  Server_SendPlayerStateAndSquad @0x518B40; NapiNPServerMsg_0x029 @0x514F10]
+// --------------------------------------------------------------------------
+
+bool check_change_team() {
+	HostFixture f(2, 1);
+	f.ctx.config.game_type = 0x10000u; // TDM: team 2 takes side B
+	for (size_t i = 0; i < 2; ++i) {
+		f.conn(i).assigned_team = static_cast<uint8_t>(1 + i);
+		f.conn(i).assigned_team_valid = true;
+	}
+	inmatch::NapiNPConnection &p1 = f.conn(0);
+	p1.char_vars.char_id[0] = 0x0201;
+	p1.char_vars.char_id[1] = 0x0302;
+	p1.char_vars.avatar[0] = 3;
+	p1.char_vars.avatar[1] = 4;
+	p1.reply.score_delta_sound_value = 9;
+	p1.link.armory_reuse_seconds = 5;
+	w::MatchRules rules;
+	rules.game_type = 0x10000u;
+	f.world.match.configure(rules);
+	f.world.match.upsert_player({f.players[0], 1, "P1"});
+	w::MatchPlayer *row = f.world.match.player(f.players[0]);
+	if (!expect(row != nullptr, "P1 has a roster row")) return false;
+	row->stats[w::MatchStats::kDeaths] = 3;
+	row->script_vars[0] = 5;
+	row->script_vars[16] = 7;
+	for (auto &t : f.transports) (void)drain(t);
+
+	inmatch::ServerCommandOutcome out =
+			inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "ChangeTeam", "ByName", {"P1"});
+	const w::Entity *e = f.world.registry.get(f.players[0]);
+	bool ok = expect(out.handled && e->team == 2 && p1.assigned_team == 2,
+			"ChangeTeamByName swaps team 1 to 2 on the entity and the slot");
+	ok = expect(e->minimap_net_id == 0x0302 && e->anim_slot == 4,
+			"the NetId and animSlot come from side B's character vars") && ok;
+	ok = expect(row->stats[w::MatchStats::kDeaths] == 0 &&
+					row->stats[w::MatchStats::kRoundMarker] == 1 &&
+					row->script_vars[16] == 0 && row->script_vars[0] == 5,
+			"the stats restart with field 35 = 1 and only script var 16 clears") && ok;
+	ok = expect(p1.reply.score_delta_sound_value == 0 && p1.link.armory_reuse_seconds == 0,
+			"the score-sound cache and the armory cooldown clear") && ok;
+	TeamAssign assigned;
+	assigned.entity_handle = f.players[0].packed;
+	assigned.team = 2;
+	assigned.net_id = 0x0302;
+	assigned.anim_slot = 4;
+	const std::vector<uint8_t> team_assign = encode_team_assign(assigned);
+	const std::string text = "Changing team....";
+	std::vector<uint8_t> chat = {10, 0xFF};
+	chat.insert(chat.end(), text.begin(), text.end());
+	chat.push_back(0);
+	const std::vector<ns::Datagram> to_p1 = drain(f.transports[0]);
+	std::vector<uint8_t> tags;
+	for (const ns::Datagram &d : to_p1) tags.push_back(d.tag);
+	ok = expect(tags == std::vector<uint8_t>({s2c::SQUAD_JOIN, s2c::TEAM_NAME, s2c::TEAM_NAME,
+					s2c::TEAM_ASSIGN, s2c::CHAT_BROADCAST}),
+			"the changed player gets 0x71, the 0x72 pair, 0x50, then the chat") && ok;
+	if (tags.size() == 5) {
+		ok = expect(to_p1[0].body == std::vector<uint8_t>({0xFF, 1}) &&
+						to_p1[1].body == std::vector<uint8_t>({0, 0}) &&
+						to_p1[2].body == std::vector<uint8_t>({1, 0}) &&
+						to_p1[3].body == team_assign && to_p1[4].body == chat,
+				"0x71 [0xFF][slot], 0x72 [0][\"\"] / [1][\"\"], the 0x50 record, channel 10 chat") && ok;
+	}
+	const std::vector<ns::Datagram> to_p2 = drain(f.transports[1]);
+	ok = expect(to_p2.size() == 2 && to_p2[0].tag == s2c::SQUAD_JOIN &&
+					to_p2[1].tag == s2c::TEAM_ASSIGN && to_p2[1].body == team_assign,
+			"the new teammate gets 0x71 and 0x50 only") && ok;
+	ok = expect(f.ctx.team_change_entities.size() == 1 &&
+					f.ctx.team_change_entities[0] == f.players[0],
+			"the player joins the team-change list") && ok;
+
+	// SwapTeam swaps back to side A; the list keeps one entry.
+	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "SwapTeam", "ByIndex", {"1"});
+	ok = expect(out.handled && e->team == 1 && p1.assigned_team == 1 &&
+					e->minimap_net_id == 0x0201 && e->anim_slot == 3 &&
+					f.ctx.team_change_entities.size() == 1,
+			"SwapTeamByIndex swaps back to side A") && ok;
+
+	// A team-3 player keeps its team but still gets the chat.
+	f.world.registry.get(f.players[1])->team = 3;
+	for (auto &t : f.transports) (void)drain(t);
+	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "ChangeTeam", "ByName", {"P2"});
+	const std::vector<ns::Datagram> to_p3 = drain(f.transports[1]);
+	ok = expect(out.handled && f.world.registry.get(f.players[1])->team == 3 &&
+					to_p3.size() == 1 && to_p3[0].tag == s2c::CHAT_BROADCAST,
+			"a team-3 player keeps its team and still gets the chat") && ok;
+	// A target that is not in the game is a no-op.
+	f.conn(1).phase = inmatch::ConnectionPhase::Joined;
+	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "ChangeTeam", "ByName", {"P2"});
+	ok = expect(!out.handled, "a target outside the game is a no-op") && ok;
+	f.conn(1).phase = inmatch::ConnectionPhase::InMatch;
+
+	// C2S 0x29 [0] reads the list back as S2C 0x51 [0][the 0x50 record] to
+	// the sender; an index past the list draws nothing; a new round clears it.
+	TeamAssign now;
+	now.entity_handle = f.players[0].packed;
+	now.team = 1;
+	now.net_id = 0x0201;
+	now.anim_slot = 3;
+	std::vector<ProtocolMessage> replies = f.dispatch(1, c2s::TEAM_SPAWN_ACK, {0, 0});
+	ok = expect(replies.size() == 1 && replies[0].tag == s2c::TEAM_CHANGE_CONFIRM &&
+					replies[0].payload == encode_team_change_confirm(0, now),
+			"C2S 0x29 [0] draws the 0x51 record to the sender") && ok;
+	replies = f.dispatch(1, c2s::TEAM_SPAWN_ACK, {1, 0});
+	ok = expect(replies.empty(), "an index past the list draws nothing") && ok;
+	inmatch::Server_InitNewRoundState(f.ctx);
+	replies = f.dispatch(1, c2s::TEAM_SPAWN_ACK, {0, 0});
+	return expect(f.ctx.team_change_entities.empty() && replies.empty(),
+			"a new round empties the team-change list") && ok;
 }
 
 // --------------------------------------------------------------------------
@@ -793,9 +1055,11 @@ int main() {
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_spectator_respawn_request() && ok;
 	ok = check_medic_revive_transaction() && ok;
+	ok = check_medic_revive_gates() && ok;
 	ok = check_medic_heal_transaction() && ok;
 	ok = check_session_ping_codec() && ok;
 	ok = check_server_commands() && ok;
+	ok = check_change_team() && ok;
 	ok = check_player_enter_hook() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;

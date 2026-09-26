@@ -14,6 +14,8 @@
 
 #include <runtime/inmatch/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
+#include <base/io/strutil.h> // iequals (Napi_StrCaseEqual)
+
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h> // spawn_angle_bam
 #include <runtime/world/entity.h>
@@ -44,18 +46,6 @@ namespace {
 // CNapiNPConnection_PumpSendIntervals @0x628FD0 -> BuildOutgoingPackets @0x628430]
 constexpr uint32_t kActiveSendIntervalMilliseconds = 10000;
 
-// ASCII case-insensitive tag-name compare [orig: Napi_StrCaseEqual @0x616e70 — the
-// NapiNetConfig_LoadFromConnTags match].
-bool str_case_equal(const std::string &a, const char *b) {
-	size_t i = 0;
-	for (; i < a.size() && b[i] != '\0'; ++i) {
-		if (std::tolower(static_cast<unsigned char>(a[i])) !=
-		    std::tolower(static_cast<unsigned char>(b[i])))
-			return false;
-	}
-	return i == a.size() && b[i] == '\0';
-}
-
 struct ParsedClientJoinRequest {
 	bool spectator = false;
 	std::string spectator_password;
@@ -75,16 +65,18 @@ ParsedClientJoinRequest parse_client_join_request(const ClientAuth &auth) {
 		}
 		// The connection tag-list loader is ordered and uses atol semantics;
 		// therefore the last duplicate wins for both JSR and JSPP. JSR is
-		// stored through a uint8 truncation before the nonzero test.
+		// stored through a uint8 truncation before the nonzero test. Tag
+		// names compare case-insensitively.
 		// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 — JSR ->
-		// (unsigned __int8)atol @0x4c7607, JSPP -> NapiNetConfig_SetJspp]
-		if (str_case_equal(cu_name, "JSR")) {
+		// (unsigned __int8)atol @0x4c7607, JSPP -> NapiNetConfig_SetJspp;
+		// Napi_StrCaseEqual @0x616e70]
+		if (strutil::iequals(cu_name, "JSR")) {
 			parsed.spectator = static_cast<uint8_t>(
 					std::strtol(cu_value.c_str(), nullptr, 10)) != 0;
-		} else if (str_case_equal(cu_name, "JSP")) {
+		} else if (strutil::iequals(cu_name, "JSP")) {
 			// [orig: NapiNetConfig_SetJsp @0x4C26BE, Napi_CopyString(..., 64)]
 			parsed.join_password = cu_value.substr(0, 63);
-		} else if (str_case_equal(cu_name, "JSPP")) {
+		} else if (strutil::iequals(cu_name, "JSPP")) {
 			parsed.spectator_password = std::move(cu_value);
 		}
 	}
@@ -104,17 +96,21 @@ ClientGameEnvironment parse_client_game_environment(const ClientAuth &auth) {
 		}
 
 		// NapiNetConfig_LoadFromConnTags applies the tag list in order with atol semantics, so a
-		// later duplicate overwrites an earlier value.
+		// later duplicate overwrites an earlier value; the tags compare case-insensitively
+		// [orig: Napi_StrCaseEqual @0x616e70].
 		const long value = std::strtol(cu_value.c_str(), nullptr, 10);
-		if (str_case_equal(cu_name, "BT")) {
+		if (strutil::iequals(cu_name, "BT")) {
 			parsed.bt = value;
-		} else if (str_case_equal(cu_name, "VN")) {
+		} else if (strutil::iequals(cu_name, "VN")) {
 			parsed.vn = value;
-		} else if (str_case_equal(cu_name, "BN")) {
+		} else if (strutil::iequals(cu_name, "BN")) {
 			parsed.bn = value;
-		} else if (str_case_equal(cu_name, "MBN")) {
+		} else if (strutil::iequals(cu_name, "DB")) {
+			// [orig: NapiNetConfig_LoadFromConnTags @0x4C7260, the DB leg @0x4C733E]
+			parsed.db = value;
+		} else if (strutil::iequals(cu_name, "MBN")) {
 			parsed.mbn = value;
-		} else if (str_case_equal(cu_name, "SOPD")) {
+		} else if (strutil::iequals(cu_name, "SOPD")) {
 			parsed.sopd = value;
 		}
 	}
@@ -159,6 +155,35 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	node.seq = make_jo_game_session_sequencing(1, 0, node.timeouts.msg_out_max);
 	ctx.np_protocol.connection_list.push_back(std::move(node));
 	return ctx.np_protocol.connection_list.back();
+}
+
+// The S2C 0x86 SERVER_GOODBYE burst for `conn`: up to cs_dir0.recv_max_per_tick (4, clamped
+// 0..32) identical datagrams carrying [le32 client CK][the connection's latched disconnect
+// record, zeros when none is latched], NWU-encrypted like every session opcode. Empty for a
+// node that never completed the 0x42 (no CK), a client-side node, or a host that is no longer
+// running — SendDisconnectPacket's own gates. The unwitnessed proto+0x1F4 no-op gate (zero at
+// NapiNPProtocol_Create @0x625840; its setter was not located) is not modeled.
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 — count clamp @0x6253ef..0x625403,
+//  send loop @0x625406..0x625424; CNapiNPConnection_SendDisconnectPacket @0x61F2A0 — conn_flag0
+//  gate @0x61f30b, `!is_server || host_running` @0x61f329, opcode 0x86 @0x61f367, the peer key
+//  (CK) @0x61f3af, the record TLVs @0x61f3d0..0x61f4aa; recv_max_per_tick = 4 @0x4cab60]
+std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
+		const NapiNPConnection &conn) {
+	// SendDisconnectPacket's gates: an ACTIVE server-side node (conn_flag0, i.e. the 0x42 was
+	// accepted and the CK is known) on a host that is still running; a client-side node would
+	// select 0x46 instead and is never torn down through this host path.
+	// [orig: @0x61f30b conn_flag0; @0x61f329 `!is_server || host_running`; @0x61f367 opcode 0x86]
+	if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined ||
+	    conn.client_ck == 0 || ctx.np_protocol.host_running == 0) {
+		return {};
+	}
+	const DisconnectEvent record =
+			conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{};
+	std::vector<uint8_t> datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(conn.client_ck, record));
+	// `n = clamp(recv_max_per_tick, 0, 32)` sends while each SendTo succeeds
+	// [orig: TeardownActiveConnection @0x6253ef..0x625424].
+	return std::vector<std::vector<uint8_t>>(disconnect_burst_count(), std::move(datagram));
 }
 
 // The one player/session teardown path shared by keyed goodbye, receive timeout, pending
@@ -305,10 +330,11 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	// A GAME host advertises the JOINTOPERATIONS session template (120 s reap,
 	// 30 s idle keepalive, 10 s active probe, 512/256 pools, 1200 msg cap), not
 	// the NOVAWORLDUDP service block build_server_auth defaults to for the
-	// service [orig: CNapiNetwork_Init @0x4ca4a0 -> CNapiNPConnection_Create
-	// @0x62acb0 -> SendSessionInit @0x620ef0].
-	reply.client_cs = jointoperations_client_cs_fields();
-	reply.server_cs = jointoperations_server_cs_fields();
+	// service, with CS field 13 from the host's configured `mpmaxpacketsize`
+	// [orig: CNapiNetwork_Init @0x4ca4a0 (field 13 @0x4CAA53) ->
+	// CNapiNPConnection_Create @0x62acb0 -> SendSessionInit @0x620ef0].
+	reply.client_cs = jointoperations_cs_fields(ctx.config.max_packet_size);
+	reply.server_cs = jointoperations_cs_fields(ctx.config.max_packet_size);
 	// SendSessionInit emits the host's LIVE cs_dir blocks verbatim, so a `_NSTMOUT.TXT`
 	// override of timeout_ms (field 0) / msg_out_max (field 11) reaches the joiner here —
 	// its HandleServerJoinResponse overlays these onto its own template. -1 rides as
@@ -584,11 +610,13 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750, gates @0x62bdf2]
 	if (!matches_jointoperations_identity(auth)) return;
+	// The PW and PV2 compares are case-insensitive C-string compares
+	// [orig: Napi_StrCaseEqual @0x616e70].
 	uint32_t reject = 0;
 	if (auth.hk != ctx.np_protocol.host_key) reject = 3;
 	else if (!ctx.config.server_password.empty() &&
-	         !str_case_equal(auth.pw, ctx.config.server_password.c_str())) reject = 4;
-	else if (!str_case_equal(auth.pv2, "16")) reject = 7;
+	         !strutil::iequals(auth.pw, std::string_view(ctx.config.server_password.c_str()))) reject = 4;
+	else if (!strutil::iequals(auth.pv2, "16")) reject = 7;
 	else if (auth.na.empty()) reject = 5;
 	else if (ctx.np_protocol.reject_new_connections) reject = 6;
 	if (reject != 0) {
@@ -723,26 +751,27 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		if (!parse_client_cu_chunk(blob.data(), blob.size(), cu_type, cu_name, cu_value)) continue;
 		if (cu_type != 2) continue;
 		const long v = std::strtol(cu_value.c_str(), nullptr, 10); // retail atol
-		if (str_case_equal(cu_name, "CI0")) {
+		if (strutil::iequals(cu_name, "CI0")) {
 			conn.char_vars.char_id[0] = static_cast<uint16_t>(v);
-		} else if (str_case_equal(cu_name, "CI1")) {
+		} else if (strutil::iequals(cu_name, "CI1")) {
 			conn.char_vars.char_id[1] = static_cast<uint16_t>(v);
-		} else if (str_case_equal(cu_name, "TR")) {
+		} else if (strutil::iequals(cu_name, "TR")) {
 			// [@0x4c752f] tr != -1 && (u8)tr >= 2 -> -1: only 0 (side A) and 1 (side B) pass.
 			uint8_t tr = static_cast<uint8_t>(v);
 			if (tr != 0xFF && tr >= 2) tr = 0xFF;
 			conn.char_vars.team_request = tr;
-		} else if (str_case_equal(cu_name, "CTA")) {
+		} else if (strutil::iequals(cu_name, "CTA")) {
 			conn.char_vars.char_class[0] = static_cast<uint8_t>(v);
-		} else if (str_case_equal(cu_name, "CTB")) {
+		} else if (strutil::iequals(cu_name, "CTB")) {
 			conn.char_vars.char_class[1] = static_cast<uint8_t>(v);
-		} else if (str_case_equal(cu_name, "VCA")) {
+		} else if (strutil::iequals(cu_name, "VCA")) {
 			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
-		} else if (str_case_equal(cu_name, "VCB")) {
+		} else if (strutil::iequals(cu_name, "VCB")) {
 			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
 		}
-		// The environment tags were parsed and validated before allocation. Stored/display-only
-		// fields (VERSIONSTRING/DB/COUNTRYCODE/TZB...) have no retained runtime consumer yet.
+		// The environment tags (DB included) were parsed and validated before allocation.
+		// Stored/display-only fields (VERSIONSTRING/COUNTRYCODE/TZB...) have no retained
+		// runtime consumer yet.
 	}
 	// [orig: CNapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
 	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
@@ -1416,32 +1445,9 @@ bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t 
 	return bind_session_reply_player(*conn, player_name, player_slot, entity_handle);
 }
 
-std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
-		const NapiNPConnection &conn) {
-	// SendDisconnectPacket's gates: an ACTIVE server-side node (conn_flag0, i.e. the 0x42 was
-	// accepted and the CK is known) on a host that is still running; a client-side node would
-	// select 0x46 instead and is never torn down through this host path.
-	// [orig: @0x61f30b conn_flag0; @0x61f329 `!is_server || host_running`; @0x61f367 opcode 0x86]
-	if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined ||
-	    conn.client_ck == 0 || ctx.np_protocol.host_running == 0) {
-		return {};
-	}
-	const DisconnectEvent record =
-			conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{};
-	std::vector<uint8_t> datagram = nw_encode_outbound(
-			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(conn.client_ck, record));
-	// `n = clamp(recv_max_per_tick, 0, 32)` sends while each SendTo succeeds
-	// [orig: TeardownActiveConnection @0x6253ef..0x625424].
-	return std::vector<std::vector<uint8_t>>(disconnect_burst_count(), std::move(datagram));
-}
-
 bool destroy_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		std::vector<std::vector<uint8_t>> *goodbye_out) {
 	return teardown_connection(ctx, peer, goodbye_out);
-}
-
-bool drop_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
-	return teardown_connection(ctx, peer, nullptr);
 }
 
 std::size_t connection_count(const NapiNPServerCtx &ctx) {

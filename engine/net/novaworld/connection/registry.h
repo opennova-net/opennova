@@ -72,11 +72,9 @@ public:
 	// pick up the new id.
 	void add(Connection conn);
 
-	// Refresh `last_seen_ms` for an existing connection. No-op if missing.
-	void touch(uint32_t id, uint64_t now_ms);
-
-	// Refresh `last_seen_ms` for a connection found by remote addr (used by
-	// pre-JOIN traffic where the session id isn't stable yet).
+	// Refresh `last_seen_ms` for a connection found by remote addr. No-op if
+	// missing. (There is no id-keyed form: a client-supplied id can alias two
+	// peers, G.7.)
 	void touch_addr(const PeerAddr &addr, uint64_t now_ms);
 
 	// Remove a connection. Returns the removed entry if it existed.
@@ -86,15 +84,11 @@ public:
 	// inbound UDP datagram. Avoids the CI-collision pitfall (G.7).
 	std::optional<Connection> drop_by_addr(const PeerAddr &addr);
 
-	// Promote a Handshaking connection to Active once JOIN succeeds.
-	// No-op if missing or already Active. Returns true on transition.
-	// Stores both SCRKs (client- and server-generated) needed for SESSION
-	// inner-NWU decrypt/encrypt respectively.
-	bool mark_active(uint32_t id, std::string identity,
-	                 std::string client_scrk, std::string server_scrk);
-
-	// Address-keyed variant — preferred when the inbound packet identifies
-	// the peer via PeerAddr rather than a server-assigned id.
+	// Promote the connection at `addr` to Active once JOIN succeeds, storing
+	// both SCRKs (client- and server-generated) needed for SESSION inner-NWU
+	// decrypt/encrypt respectively. Returns false if missing. Address-keyed
+	// only: an id-keyed promote aliased two retail clients that both send
+	// ci=1 (G.7).
 	bool mark_active_by_addr(const PeerAddr &addr, std::string identity,
 	                         std::string client_scrk, std::string server_scrk);
 

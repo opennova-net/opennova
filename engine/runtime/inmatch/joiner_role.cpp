@@ -18,7 +18,7 @@
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 
-#include <base/io/fixed.h>               // kFp16OneD
+#include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
 
 #include <runtime/mission/collision_resolve.h> // find_item_def (a rider's authored hp)
@@ -140,9 +140,11 @@ void JoinerRole::set_join_proxy(const JoinProxyOptions &options) {
 // enumerator stops once a session answered, so a later phase sends nothing.
 // [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 — the interval
 //  @0x6290ed (3000 for a dialing host), the `!last_send || elapsed > interval`
-//  arm @0x629119, the all-six gate + SendPingPacket @0x62914f..0x629159, then
-//  NapiNPSession_SendAnnouncePacket @0x629170; the enumerator's active flag
-//  enum_info+44 is read as "the hello is still being announced" here]
+//  arm @0x629119, the all-six gate ending @0x62914f, then
+//  CNapiNPConnection_SendPingPacket @0x61F8C0 (the call @0x629159), then
+//  NapiNPSession_SendAnnouncePacket @0x61FA00 (the call @0x629170); the
+//  enumerator's active flag enum_info+44 is read as "the hello is still being
+//  announced" here]
 void JoinerRole::pump_proxy_rendezvous() {
 	if (socket_ == nullptr || !runtime || !proxy_.enabled()) return;
 	if (started_ && runtime->phase() != JoinerConnection::Phase::Hello) return;
@@ -299,8 +301,8 @@ bool JoinerRole::remote_claimant(const world::Entity &carrier, world::Entity &ou
 	out = world::Entity{};
 	out.handle = world::EntityHandle{rider->handle};
 	out.item_id = rider->type_id;
-	out.position = {static_cast<float>(rider->x) / 65536.0f,
-			static_cast<float>(rider->y) / 65536.0f, static_cast<float>(rider->z) / 65536.0f};
+	out.position = {opennova::io::fp16_16_to_float(rider->x),
+			opennova::io::fp16_16_to_float(rider->y), opennova::io::fp16_16_to_float(rider->z)};
 	out.team = rider->team_known ? rider->team : 0;
 	out.flags = rider->state_flags;
 	if (rider->cls == EntityClass::Player) {
@@ -1733,9 +1735,9 @@ void JoinerRole::mirror_mission_entities() {
 					if ((es.state_flags & world::kEntityFlagDead) != 0u &&
 							((local->flags | local->engine_flags) &
 									world::kEntityFlagDead) == 0u) {
-						local->position.x = static_cast<float>(es.x) / 65536.0f;
-						local->position.y = static_cast<float>(es.y) / 65536.0f;
-						local->position.z = static_cast<float>(es.z) / 65536.0f;
+						local->position.x = opennova::io::fp16_16_to_float(es.x);
+						local->position.y = opennova::io::fp16_16_to_float(es.y);
+						local->position.z = opennova::io::fp16_16_to_float(es.z);
 						if (m.yaw_seeded) m.yaw_bam = es.heading_bam;
 						local->yaw = static_cast<int16_t>(std::lround(
 								world::mission_yaw_deg_from_bam_heading(es.heading_bam)));
@@ -1806,9 +1808,9 @@ void JoinerRole::mirror_mission_entities() {
 					m.plat_porpoise = false;
 					m.plat_planing = false;
 					m.plat_bob_phase = 0.0f;
-					local->position.x = static_cast<float>(es.x) / 65536.0f;
-					local->position.y = static_cast<float>(es.y) / 65536.0f;
-					local->position.z = static_cast<float>(es.z) / 65536.0f;
+					local->position.x = opennova::io::fp16_16_to_float(es.x);
+					local->position.y = opennova::io::fp16_16_to_float(es.y);
+					local->position.z = opennova::io::fp16_16_to_float(es.z);
 					continue;
 				}
 				if (es.compact_revision != m.net_seen_revision) {
@@ -1860,9 +1862,9 @@ void JoinerRole::mirror_mission_entities() {
 				continue; // the world mover owns the registry position now
 			}
 		}
-		local->position.x = static_cast<float>(es.x) / 65536.0f;
-		local->position.y = static_cast<float>(es.y) / 65536.0f;
-		local->position.z = static_cast<float>(es.z) / 65536.0f;
+		local->position.x = opennova::io::fp16_16_to_float(es.x);
+		local->position.y = opennova::io::fp16_16_to_float(es.y);
+		local->position.z = opennova::io::fp16_16_to_float(es.z);
 	}
 }
 

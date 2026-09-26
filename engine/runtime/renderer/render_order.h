@@ -198,11 +198,13 @@ constexpr int kRungWater = -5;           // the water surface (drawn between the
 // the wake bank scanner WaterRing_DrawAll @ 0x5c3432].
 constexpr int kRungWaterDecals = -4;
 // The foliage MODEL depth masks of the camera-side person wave, drawn inside
-// the camera wave @ 0x5c9638 after the water pass and before
-// Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderWorldScene].
+// the camera wave @ 0x5c9638 after the water pass and before the scars
+// [orig: Terrain_RenderWorldScene @ 0x5c93a0 (the Scar_DrawBatches call
+// @ 0x5c9658)].
 constexpr int kRungFoliageMaskCameraSide = -3;
 // The impact scars, after the camera-side opaque wave and before foliage
-// pass 1 and the camera-side alpha [orig: Scar_DrawBatches @ 0x5c9658].
+// pass 1 and the camera-side alpha [orig: Scar_DrawBatches @ 0x5ccd10, from
+// Terrain_RenderWorldScene @ 0x5c93a0 (the call @ 0x5c9658)].
 constexpr int kRungScars = -2;
 // Detail foliage on the camera's side of the water, before the camera-side
 // alpha flush [orig: Foliage_RenderDetailPatchesPass(1) @ 0x5c9665].

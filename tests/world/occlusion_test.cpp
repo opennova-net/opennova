@@ -979,13 +979,15 @@ void test_forced_visible_bits() {
     rig.ow.build_frame(rig.world, rig.cw, cam);
     CHECK(rig.ow.section_mask(building) == 0u);
     CHECK(rig.ow.forced_section_mask(building) == (0xFFFFFFFFu << 5));
-    CHECK(rig.ow.section_draw_mask(building) == (0xFFFFFFFFu << 5));
+    CHECK((rig.ow.section_mask(building) | rig.ow.forced_section_mask(building)) ==
+          (0xFFFFFFFFu << 5));
 
     const OcclusionFrameCamera near_cam = rig.camera(5.0, 30.0, 1.5);
     rig.ow.build_frame(rig.world, rig.cw, near_cam);
     CHECK(rig.ow.building_visible(windowless));
     CHECK(rig.ow.section_mask(windowless) == 1u);
-    CHECK(rig.ow.section_draw_mask(windowless) == 0xFFFFFFFFu);
+    CHECK((rig.ow.section_mask(windowless) | rig.ow.forced_section_mask(windowless)) ==
+          0xFFFFFFFFu);
     // Both bytes merge; a zero byte forces nothing; the pair clears.
     rig.ow.assign_forced_sections(windowless, 0, 4);
     CHECK(rig.ow.forced_section_mask(windowless) == (0xFFFFFFFFu << 4));

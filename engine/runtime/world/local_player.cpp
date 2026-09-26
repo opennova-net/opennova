@@ -543,8 +543,8 @@ void LocalPlayer::tick_view() {
 	w::local_player_view_tick(&world, view, view_tracker, view_session_inputs);
 	// Retail acquires the aim inside the entity update, BEFORE the quantum's
 	// camera compose, so its camera leg reads the view the previous compose
-	// left [orig: Game_ProcessMainFrame -- Entity_UpdateAllEntities @0x52674B
-	//  precedes Camera_ComputeThirdPersonView @0x526781].
+	// left [orig: Game_ProcessMainFrame @0x5263F0 -- the Entity_UpdateAllEntities
+	//  call @0x52674B precedes the Camera_ComputeThirdPersonView call @0x526781].
 	update_aim_target();
 	// The quantum's own compose: it advances the shake filters and the chase
 	// look-ahead once per logic tick and leaves g_view_pos / g_view_rot for

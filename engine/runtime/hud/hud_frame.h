@@ -239,6 +239,12 @@ struct HudLayout {
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
+	// BREATHTIME — the breath bar's anchor: x, y and the alignment word, three
+	// fields with no hidden dword. Unauthored it keeps the BSS zero (0, 0,
+	// left): the bar has no presence gate [orig: HUD_ParseHudposToken
+	// @0x59FB3B..0x59FB84 -> dword_2723810/14/18 (atof, atof,
+	// HUD_ParseTextAlignment)].
+	HudPosRecord breath_time;
 	// The Tab board's atlases (hud_scoreboard.h). The stdbox piece size is
 	// derived from the border atlas's own width (a 4x4 cell grid, so one cell
 	// is a quarter of it), the same texture-derived rule the icon strips use.
@@ -699,6 +705,18 @@ struct HudFrameState {
 	// Default 3 = gun + spinmap (the cfg gun-visible option writes 3/2
 	// [orig: @ 0x5521CB/@ 0x5521D7]).
 	uint32_t showhud_flags = 3;
+	// THE BREATH BAR (element_breath_bar): the underwater breath samples the
+	// host counts four a second and ships in the S2C 0x0A player state
+	// [orig: word_A85B7C, written only by NapiNPClientMsg_0x00A @0x430104], the
+	// drown limit's seconds [orig: wac_var_breathtime, from the same message
+	// @0x4301A1; 20 from WacScript_FreeAll @0x4f6381], the round-over latch the
+	// caller skips the bar under [orig: g_spawn_success_gate, tested
+	// @0x5BDECA..0x5BDED1], and the label the embedder resolves from gametext
+	// (Overlays/STROVER91).
+	int breath_samples = 0;
+	int breath_time = 20;
+	bool spawn_success_gate = false;
+	std::string breath_label;
 	HudMinimapInput minimap;
 	// The mission's static footprint polygons (baked once per feed); the
 	// spinmap element lends them to the compile input by pointer — the
@@ -853,6 +871,12 @@ private:
 			int row, bool crop_bottom, uint32_t color);
 	void emit_net_icon(float x0, float y0, float x1, float y1, int quality);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
+	// The three-quad progress bar in surface pixels: the border rect, the
+	// opaque black rect one pixel in, then the fill two pixels in, `fraction`
+	// of the inner width, centred on the bar's integer midpoint or anchored at
+	// its left [orig: draw_progress_bar @0x59B340].
+	void emit_progress_bar(int xl, int yt, int xr, int yb, uint32_t fill, uint32_t border,
+			float fraction, bool centered);
 	void emit_text(const char *text, float design_x, float design_y,
 			float surface_w, float surface_h, uint32_t argb, uint32_t flags);
 	// One run in an overlay font SLOT at a surface anchor: the slot's scale
@@ -872,6 +896,7 @@ private:
 	void element_weapon_cluster(const HudFrameState &state, float w, float h);
 	void element_heat(const HudFrameState &state, float w, float h);
 	void element_power(const HudFrameState &state, float w, float h);
+	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
 	void element_objectives(const HudFrameState &state, float w, float h);

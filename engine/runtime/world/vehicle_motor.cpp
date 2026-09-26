@@ -12,6 +12,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/collision_detail.h>
 #include <runtime/world/dir_table.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_part_anim.h>
@@ -858,7 +859,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 			const int32_t *dir = m.chassis_impulse_direction;
 			const double length = std::sqrt(double(dir[0]) * dir[0] + double(dir[1]) * dir[1] +
 					double(dir[2]) * dir[2]);
-			if (static_cast<int32_t>(std::min(length, 2147418112.0)) > 0) {
+			if (static_cast<int32_t>(std::min(length, detail::kFtolClamp)) > 0) {
 				const int32_t scale = static_cast<int32_t>(
 						double(m.chassis_impulse_amplitude) * double(28.16f)); // flt_7C6FA0
 				m.vel_x = io::bam_add(m.vel_x, q16_mul_rhu(dir[0], scale));
@@ -1381,19 +1382,12 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
 	const int32_t sev =
 			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
-	if (sev == 1) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4821E7]
-	} else if (sev == 2) {
-		m.speed -= m.speed >> ((traits.torque + 1) & 31); // [orig: @0x4822A4]
-	} else if (sev == 3) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4822C9]
-		// The shared contact fold applies authority damage, sound and momentum. The quarter-speed
-		// cut requires a terrain-only hit beyond the hull. The original yaw-kick arm is
-		// unreachable.
-		// Witness sites: [orig: @0x482546, @0x4825DD, @0x4825E3, @0x48262D, @0x4826EB]
-		if (!hit_entity.valid() && strongest_probe_beyond_hull(forces, probes, 7, px, py))
-			m.speed = int32_t(m.speed * 0.25); // [orig: flt_7C333C @0x4826EB]
-	}
+	// The decay per severity [orig: @0x4821E7 (1), @0x4822A4 (2), @0x4822C9 (3)]. The shared
+	// contact fold applies authority damage, sound and momentum. The quarter-speed cut requires
+	// a terrain-only hit beyond the hull [orig: flt_7C333C @0x4826EB]. The original yaw-kick arm
+	// is unreachable.
+	// Witness sites: [orig: @0x482546, @0x4825DD, @0x4825E3, @0x48262D, @0x4826EB]
+	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 7, px, py);
 
 	// ---- §7 position push + second pass (severity >= 1 only). zc[] mirrors
 	// the SHARED force buffer the grounded leg reads [orig: §10-A

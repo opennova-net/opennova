@@ -138,9 +138,11 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mounted = true;
     occ.mounted_config_valid = veh.emplaced_config_valid;
     occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;
-    // Armed ctrlx seats borrow the persistent carrier slot too. Retail mounts
-    // it immediately and saves the personal slot for detach.
-    // [orig: Entity_AttachToVehicleSlot @0x49480F..0x494883]
+    // Armed ctrlx seats borrow the carrier slot too: a non-local body (or one
+    // with no slot) stores it at once, the local player queues the switch
+    // through Player_MountWeaponSlot; both save the personal slot for detach.
+    // [orig: Entity_AttachToVehicleSlot @0x49480B..0x494883; UseGun:
+    //  Entity_AttachToUseGunSlot @0x546C27..0x546C4E]
     if (occ.mount_type == SeatType::Gunner ||
             (occ.mount_type == SeatType::Controller &&
              (veh.item_attrib & kItemAttribEweap) != 0))
@@ -214,32 +216,6 @@ int32_t seat_priority_weight(SeatType type, bool root_seat) {
         default:
             return 0x20000;
     }
-}
-
-int predict_seat_selection(const std::vector<SeatCandidate> &seats,
-                           const SeatSelectionMode *mode,
-                           std::vector<SeatVerdict> &verdicts) {
-    verdicts.assign(seats.size(), SeatVerdict::kSkippedCommand);
-    int best = -1;
-    int32_t best_weight = 0x7fffffff;
-    for (size_t i = 0; i < seats.size(); ++i) {
-        const SeatCandidate &s = seats[i];
-        if (s.occupied) {
-            verdicts[i] = SeatVerdict::kSkippedOccupied;
-            continue;
-        }
-        const bool allowed = mode != nullptr && s.type != SeatType::None &&
-                             seat_allowed_for_selection(s.type, *mode);
-        if (!allowed) continue; // kSkippedCommand
-        verdicts[i] = SeatVerdict::kEligible;
-        const int32_t weight = seat_priority_weight(s.type, true);
-        if (weight < best_weight) {
-            best_weight = weight;
-            best = static_cast<int>(i);
-        }
-    }
-    if (best >= 0) verdicts[static_cast<size_t>(best)] = SeatVerdict::kSelected;
-    return best;
 }
 
 VehicleSeatOccupancy vehicle_seat_occupancy(

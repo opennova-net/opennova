@@ -123,20 +123,6 @@ void HudDeclutter::set_level(int level) {
 	rebuild();
 }
 
-int HudDeclutter::cycle_level() {
-	// level + 1, wrapping past 3 to 0 — the compare is signed and runs on the
-	// SUM, so a level the cfg parked above 3 wraps to 0 on the first press.
-	// [orig: Input_HandleActionBinding_0 @ 0x4E0601..0x4E0624:
-	//  `mov eax,layerIndex; add eax,ebx; cmp eax,3; mov layerIndex,eax;
-	//   jle short; xor eax,eax; mov layerIndex,eax`]
-	int next = level_ + 1;
-	if (next > kDeclutterLevelMax) {
-		next = 0;
-	}
-	set_level(next);
-	return level_;
-}
-
 void HudDeclutter::apply_level(int level) {
 	rebuild_at(level);
 }

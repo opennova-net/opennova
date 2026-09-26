@@ -1,4 +1,5 @@
 #include <runtime/world/ai.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 
 // P2 ground combat: target acquisition and the perception gates, engagement
@@ -1010,10 +1011,7 @@ bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &
         double value = static_cast<double>(ev.f[3]);
         if (value < 0.0) value += 4294967296.0;
         const double scaled = value * 1000.0 * 4.444444584805751e-06 * io::kFp16OneD;
-        const int32_t fixed =
-                (scaled >= 2147483648.0 || scaled < -2147483648.0)
-                        ? static_cast<int32_t>(0x80000000u)
-                        : static_cast<int32_t>(scaled);
+        const int32_t fixed = io::retail_ftol_sse2(scaled);
         e.brain.f[t == 10 ? AiBrain::kSpeedA : AiBrain::kSpeedB] = fixed;
         return true;
     }

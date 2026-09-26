@@ -1869,18 +1869,7 @@ bool EntityCommands::mount(EntityTarget occupant_ssn, EntityTarget target_ssn, S
 bool EntityCommands::mount_boarding_command(EntityTarget occupant_ssn, EntityTarget target_ssn,
                                             uint8_t command_id) {
     SeatSelectionMode mode = SeatSelectionMode::Any;
-    switch (command_id) {
-        case 123:
-            mode = SeatSelectionMode::PassengerOnly;
-            break;
-        case 124:
-            mode = SeatSelectionMode::RejectController;
-            break;
-        case 125:
-            break;
-        default:
-            return false;
-    }
+    if (!seat_selection_mode_for_command(command_id, mode)) return false;
     return mount(occupant_ssn, target_ssn, mode);
 }
 
@@ -1928,9 +1917,8 @@ bool EntityCommands::use_boarding_target(EntityTarget occupant) {
     if (entity == nullptr || entity->item_type_index == 0 || ai == nullptr ||
             ai->slot.f[36] == 0 || entity->mount_target.valid()) return false;
     const EntityHandle target{uint16_t(ai->slot.f[36] - 1)};
-    SeatSelectionMode mode = SeatSelectionMode::Any;
-    if (ai->slot.f[37] == 123) mode = SeatSelectionMode::PassengerOnly;
-    else if (ai->slot.f[37] == 124) mode = SeatSelectionMode::RejectController;
+    SeatSelectionMode mode = SeatSelectionMode::Any; // a non-attach command keeps Any
+    seat_selection_mode_for_command(ai->slot.f[37], mode);
     VehicleSeatSelection selected;
     const bool available = find_best_vehicle_seat(world_, target, handle, selected, mode);
     ai->slot.f[36] = available ? int32_t(selected.vehicle.packed) + 1 : 0;

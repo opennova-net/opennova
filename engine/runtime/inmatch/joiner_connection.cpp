@@ -3,11 +3,14 @@
 #include <cstring>
 #include <formats/mission/bms.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/npwire/flat_tlv.h>         // append_flat_tlv (the C2S 0x00 JOIN body)
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h> // decode_cs_config_update
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
+#include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/vfs/vfs.h>
 
@@ -82,11 +85,7 @@ std::vector<uint8_t> build_join_padding_echo(
 
 	std::vector<uint8_t> echo(body_len, 0);
 	auto write_i32 = [&](std::size_t off, int32_t value) {
-		const uint32_t v = static_cast<uint32_t>(value);
-		echo[off + 0] = static_cast<uint8_t>(v);
-		echo[off + 1] = static_cast<uint8_t>(v >> 8);
-		echo[off + 2] = static_cast<uint8_t>(v >> 16);
-		echo[off + 3] = static_cast<uint8_t>(v >> 24);
+		opennova::io::write_u32_le(echo.data() + off, static_cast<uint32_t>(value));
 	};
 	write_i32(0, probe.pos_x);
 	write_i32(4, probe.pos_y);
@@ -110,11 +109,7 @@ std::vector<uint8_t> build_join_request(
 	// its NUL inside the size; a binary value is emitted as-is.
 	auto append_binary_tlv = [&](std::string_view name, const uint8_t *data,
 	                             size_t size) {
-		body.insert(body.end(), name.begin(), name.end());
-		body.push_back(0);
-		body.push_back(static_cast<uint8_t>(size));
-		body.push_back(static_cast<uint8_t>(size >> 8));
-		body.insert(body.end(), data, data + size);
+		append_flat_tlv(body, name, data, static_cast<uint16_t>(size));
 	};
 	auto append_string_tlv = [&](std::string_view name, std::string_view value) {
 		std::string with_nul(value);
@@ -197,21 +192,17 @@ const char *join_fail_reason(const JoinFailReason (&table)[N], unsigned code) {
 }
 
 std::vector<uint8_t> le32_pair(uint32_t first, uint32_t second) {
-	return {
-			static_cast<uint8_t>(first),
-			static_cast<uint8_t>(first >> 8),
-			static_cast<uint8_t>(first >> 16),
-			static_cast<uint8_t>(first >> 24),
-			static_cast<uint8_t>(second),
-			static_cast<uint8_t>(second >> 8),
-			static_cast<uint8_t>(second >> 16),
-			static_cast<uint8_t>(second >> 24),
-	};
+	std::vector<uint8_t> body;
+	body.reserve(8);
+	opennova::io::append_u32_le(body, first);
+	opennova::io::append_u32_le(body, second);
+	return body;
 }
 
 std::vector<uint8_t> le32_value(uint32_t value) {
-	std::vector<uint8_t> body = le32_pair(value, 0);
-	body.resize(4);
+	std::vector<uint8_t> body;
+	body.reserve(4);
+	opennova::io::append_u32_le(body, value);
 	return body;
 }
 
@@ -245,62 +236,27 @@ std::vector<uint8_t> build_retail_mission_status() {
 	return body;
 }
 
-bool is_structural_cs_config_update(
-		const ProtocolMessage &message, uint8_t &direction_out) {
-	if (!message.flags.settings_update ||
-	    message.full_tag != (PROTOCOL_FULL_TAG_HIGH_BASE | hightag::CS_CONFIG_UPDATE) ||
-	    message.payload.size() < 5 || message.payload[0] > 1) {
-		return false;
-	}
-	const uint32_t field_mask =
-			static_cast<uint32_t>(message.payload[1]) |
-			(static_cast<uint32_t>(message.payload[2]) << 8) |
-			(static_cast<uint32_t>(message.payload[3]) << 16) |
-			(static_cast<uint32_t>(message.payload[4]) << 24);
-	if (field_mask == 0) return false;
-	std::size_t value_count = 0;
-	for (uint32_t remaining = field_mask; remaining != 0; remaining >>= 1)
-		value_count += remaining & 1u;
-	if (message.payload.size() != 5 + value_count * sizeof(uint32_t))
-		return false;
-	direction_out = message.payload[0];
-	return true;
-}
-
-bool read_cs_config_field(const ProtocolMessage &message, uint8_t wanted_field,
-		uint8_t &direction_out, uint32_t &value_out) {
-	if (!is_structural_cs_config_update(message, direction_out) || wanted_field >= 32)
-		return false;
-	const uint32_t field_mask =
-			static_cast<uint32_t>(message.payload[1]) |
-			(static_cast<uint32_t>(message.payload[2]) << 8) |
-			(static_cast<uint32_t>(message.payload[3]) << 16) |
-			(static_cast<uint32_t>(message.payload[4]) << 24);
-	if ((field_mask & (uint32_t{1} << wanted_field)) == 0) return false;
-	std::size_t value_offset = 5;
-	for (uint8_t field = 0; field < wanted_field; ++field) {
-		if ((field_mask & (uint32_t{1} << field)) != 0)
-			value_offset += sizeof(uint32_t);
-	}
-	value_out =
-			static_cast<uint32_t>(message.payload[value_offset]) |
-			(static_cast<uint32_t>(message.payload[value_offset + 1]) << 8) |
-			(static_cast<uint32_t>(message.payload[value_offset + 2]) << 16) |
-			(static_cast<uint32_t>(message.payload[value_offset + 3]) << 24);
-	return true;
+// The settings-flagged H:0x00 record, decoded by the shared receiver port
+// (npwire decode_cs_config_update, CNapiNPConnection_HandleCSConfigUpdate).
+bool is_cs_config_update(const ProtocolMessage &message) {
+	return message.flags.settings_update &&
+	       message.full_tag == (PROTOCOL_FULL_TAG_HIGH_BASE | hightag::CS_CONFIG_UPDATE);
 }
 
 // ACCEPTED single-packet assumption: both directions must arrive in ONE deframed packet.
 // Retail groups them into a single sequence (§5.0d frame 6), our host frames them the same
 // way on the fresh, 0x42-retry, and 0x44/0x84 paths, and reconstruction always re-frames a
 // sequence whole — so a split pair is out-of-contract for a JO host, not a loss mode this
-// per-packet detector must survive.
+// per-packet detector must survive. The direction comes from the decoder (any nonzero byte
+// is cs_dir0) and a mask-0 update is a no-op; the receiver has no length rule, so none is
+// applied here.
 bool has_initial_cs_config_pair(const std::vector<ProtocolMessage> &messages) {
 	bool saw_direction[2] = {false, false};
 	for (const ProtocolMessage &message : messages) {
-		uint8_t direction = 0;
-		if (is_structural_cs_config_update(message, direction))
-			saw_direction[direction] = true;
+		if (!is_cs_config_update(message)) continue;
+		const CsConfigUpdate update =
+				decode_cs_config_update(message.payload.data(), message.payload.size());
+		if (update.mask != 0) saw_direction[update.to_dir0 ? 1 : 0] = true;
 	}
 	return saw_direction[0] && saw_direction[1];
 }
@@ -1123,12 +1079,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	// explicit unknown state because OpenNova and retail may send the initial
 	// 0x5A grants before 0x0F, either in this packet or an earlier packet.
 	for (const ProtocolMessage &m : messages) {
-		uint8_t settings_direction = 0;
-		uint32_t holdoff = 0;
-		if (read_cs_config_field(m, 3, settings_direction, holdoff) &&
-		    settings_direction == 1) {
-			out.send_holdoff_set = true;
-			out.send_holdoff = holdoff;
+		// CS field 3 (the send holdoff) of a cs_dir0 update.
+		if (is_cs_config_update(m)) {
+			const CsConfigUpdate settings =
+					decode_cs_config_update(m.payload.data(), m.payload.size());
+			if (settings.to_dir0 && (settings.written & (1u << 3)) != 0) {
+				out.send_holdoff_set = true;
+				out.send_holdoff = static_cast<uint32_t>(settings.value[3]);
+			}
 		}
 		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE && m.tag == s2c::WEAPON_LOADOUT) {
 			WeaponLoadout loadout;

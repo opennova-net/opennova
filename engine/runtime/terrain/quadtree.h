@@ -9,20 +9,6 @@
 namespace opennova {
 
 // ---------------------------------------------------------------------------
-// Frustum
-// ---------------------------------------------------------------------------
-
-struct Frustum {
-	float planes[6][4]; // left, right, bottom, top, near, far
-	enum { P_LEFT = 0, P_RIGHT, P_BOTTOM, P_TOP, P_NEAR, P_FAR };
-};
-
-// Extract frustum planes from a column-major 4x4 MVP matrix (Gribb/Hartmann
-// method). The terrain walk no longer uses this (see TerrainViewCull); the
-// renderer's foliage silhouette anchor gate still does.
-Frustum extract_frustum(const float mvp[16]);
-
-// ---------------------------------------------------------------------------
 // The retail terrain view/cull contract
 // ---------------------------------------------------------------------------
 

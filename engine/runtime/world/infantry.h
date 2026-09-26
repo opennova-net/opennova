@@ -555,7 +555,6 @@ struct InfantryState {
         pitch_restore_active = false;
         pitch_restore_target = 0;
         pitch_restore_prev = 0;
-        ground_cache_valid = false;
     }
     // The SECONDARY (upper-body weapon) AnimMap channel's state pair + playhead:
     // target state, clip-end-deferred state, and its own playhead — the entity
@@ -807,8 +806,6 @@ struct InfantryState {
     int32_t wait_cooldown = 0;            // entity[74]
     int32_t alert_timer = 0;              // entity[190]
     bool combat_reaction = false;         // entity+875
-    int32_t ground_cache = 0;             // entity+676
-    bool ground_cache_valid = false;
     int16_t max_health = 100;
 
     // ---- The infantry combat pass (org1 riflemen; world-wac-ai-re §17) ----

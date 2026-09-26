@@ -115,7 +115,7 @@ void WeatherState::seed(const WeatherSeed &seed) {
     night_phase = 0;
     compute_night_phase();
     tod_advance_per_tick = seed.tod_advance_per_tick;
-    tod_minute_tickdown = kTodMinuteTicks;
+    tod_epoch_tickdown = kTodEpochTicks;
     tod_epoch = 0;
     quake_ticks = 0;
     precipitation_kind = static_cast<uint32_t>(PrecipitationKind::Rain);
@@ -378,8 +378,8 @@ void WeatherState::tick_sim(World *world, WeatherTickEvents &events) {
     // store; the 310-tick minute counter [orig: @ 0x57e9da..0x57e9ef].
     tod_fixed24 = wrap_tod_day(tod_fixed24 + tod_advance_per_tick);
     compute_night_phase();
-    if (--tod_minute_tickdown < 0) {
-        tod_minute_tickdown = kTodMinuteTicks;
+    if (--tod_epoch_tickdown < 0) {
+        tod_epoch_tickdown = kTodEpochTicks;
         if (tod_advance_per_tick != 0) ++tod_epoch;
     }
     // The TOD compute reads the overcast blend before the spring steps it.

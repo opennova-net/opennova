@@ -50,7 +50,6 @@ public:
 	// Filters: bit i shows level i; the text filter is a case-insensitive
 	// substring (empty = everything).
 	void set_level_mask(uint32_t mask);
-	uint32_t level_mask() const { return level_mask_; }
 	void set_text_filter(const std::string &filter);
 
 	// The rows passing the filters, oldest first ("[level] text"), for tests.

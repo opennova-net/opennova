@@ -104,7 +104,6 @@ bool collision_from_3di(const ThreediCollisionModel *col, CollisionModel &out) {
         CollisionSection &sec = out.sections[s];
         sec.volume_start = volume_cursor;
         sec.volume_count = col->objects[s].num_bounding_volumes;
-        sec.parent_part_index = col->objects[s].parent_subobject_index;
         volume_cursor += sec.volume_count;
     }
     return true;

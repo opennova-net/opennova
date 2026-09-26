@@ -1,12 +1,12 @@
 // The control board (ADR 0043 d12): the read side of the ONE debug-control
 // table F3 and MCP share. ControlRequest is how a window writes a row; the
 // board is how it reads one — the row's definition (label, tooltip, kind,
-// range, enum choices, confirm/authority policy) from the table's catalog,
-// pushed once, and its live state (value, available, writable, the reason
-// when not) for the rows the visible windows declare, pushed on a short
-// cadence. A window draws a row through draw_control and never hand-copies
-// a row's range, choices or refusal text, so F3 shows exactly what MCP's
-// `game_debug op=list` reports, joiner authority gate included.
+// range, enum choices) from the table's catalog, pushed once, and its live
+// state (value, writable, the reason when not) for the rows the visible
+// windows declare, pushed on a short cadence. A window draws a row through
+// draw_control and never hand-copies a row's range, choices or refusal text,
+// so F3 shows exactly what MCP's `game_debug op=list` reports, joiner
+// authority gate included.
 //
 // Plain values only: the embedder converts the table's rows and states; the
 // board never reaches into Godot or a live World.
@@ -33,7 +33,6 @@ enum class ControlKind : uint8_t {
 // One row's definition, as the table's catalog lists it.
 struct ControlSpec {
 	std::string id;
-	std::string page;
 	std::string label;
 	std::string tooltip;
 	ControlKind kind = ControlKind::Check;
@@ -41,8 +40,6 @@ struct ControlSpec {
 	double maximum = 1.0;
 	double step = 0.0;
 	std::vector<std::string> choices; // Enum rows: the value is an index
-	bool requires_confirm = false;    // F3 is the local operator: it confirms
-	bool authoritative = false;       // mutates the world; a joiner is refused
 };
 
 // One row's live state for the F3 caller. `value` is Bool for a Check,
@@ -50,7 +47,6 @@ struct ControlSpec {
 // false while the row's owner is away (between missions).
 struct ControlState {
 	std::string id;
-	bool available = false;
 	bool writable = false;
 	bool has_value = false;
 	ControlArg value;

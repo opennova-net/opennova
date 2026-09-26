@@ -66,6 +66,22 @@ EndRoundSessionState end_round_session_state(const RoleView &view);
 // The overlay ladder's input off the folded 0x1D header and the round clock.
 hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view);
 
+// The breath bar's facts for THIS client (hud::HudFrameState breath_samples /
+// breath_time / spawn_success_gate; the label is the embedder's gametext).
+// The samples ride every role's replica (the listen host's loopback included);
+// the breath seconds are the authority's own WAC named value on a host and the
+// 0x0A sub-block-1 copy on a joiner; the round-over latch is the folded 0x1D
+// header. [orig: HUD_DrawBreathBar @0x59D6F0 reads word_A85B7C and
+// wac_var_breathtime; HUD_DrawGameplayOverlays skips it while
+// g_spawn_success_gate @0x5BDECA..0x5BDED1; the 0x1D latch
+// NapiNPClientMsg_0x01D @0x430840]
+struct BreathBarFacts {
+	int samples = 0;
+	int breath_time = 20;
+	bool spawn_success_gate = false;
+};
+BreathBarFacts breath_bar_facts(const RoleView &view);
+
 // The stat.mnu RESULTLIST rows the tab filter admits (0 all, 1 team 2, 2 team
 // 1): the roster joined to the frozen board, the local row resolved from the
 // header's board index [orig: populate_stat_results_list @0x562240 — row slot

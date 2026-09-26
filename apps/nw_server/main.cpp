@@ -474,9 +474,6 @@ int main(int argc, char **argv) {
 	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
 	role.set_socket(&dgram);
 	inmatch::Session session(role);
-	// The dedicated host runs the witnessed retail bank; the shell keeps the
-	// wall-clock one (world::TickBankPolicy).
-	session.set_tick_bank_policy(opennova::world::TickBankPolicy::RetailMainLoop);
 	if (!session.begin_load().applied() || !session.complete_load().applied()) {
 		std::fprintf(stderr, "nw-server: failed to start mission session\n");
 		net::shutdown();

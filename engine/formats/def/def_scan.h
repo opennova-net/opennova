@@ -100,6 +100,10 @@ opennova::def::DefHudColor parse_hud_color_argb(Token *vals, int n);
 
 void parse_pos_aligned(Token *vals, int n, int *out);
 
+// The three-field positioned form (x, y, then the alignment word; no hidden
+// dword) into out[0..2]: BREATHTIME's.
+void parse_pos_align3(Token *vals, int n, int *out);
+
 int parse_fixed16_digits_n(const char *s, size_t len);
 
 }  // namespace opennova::defscan

@@ -12,7 +12,6 @@
 // (base/resource_index/texture_candidates.h); `build` ignores them.
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -23,6 +22,7 @@
 #include <system_error>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <base/resource_index/texture_candidates.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
@@ -67,11 +67,6 @@ struct Writer {
 	}
 };
 
-std::string lower(std::string s) {
-	std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	return s;
-}
-
 // The regular files beside the model, keyed by lower-case name, with their
 // paths in UTF-8 (the importer reads the scene text as UTF-8). Listed once per
 // scene: a retail asset folder holds some 10,000 files. A name UTF-8 cannot
@@ -84,7 +79,7 @@ FolderListing list_folder(const std::filesystem::path &dir) {
 	for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
 		try {
 			if (!it->is_regular_file(ec)) continue;
-			listing.emplace(lower(it->path().filename().u8string()), it->path().u8string());
+			listing.emplace(opennova::strutil::to_lower(it->path().filename().u8string()), it->path().u8string());
 		} catch (const std::exception &) {
 		}
 	}
@@ -94,7 +89,7 @@ FolderListing list_folder(const std::filesystem::path &dir) {
 // Case-insensitive lookup of a texture's candidate names beside the model.
 std::string resolve_texture(const FolderListing &listing, const std::string &name) {
 	for (const std::string &candidate : opennova::texture_candidate_filenames(name)) {
-		const auto it = listing.find(lower(candidate));
+		const auto it = listing.find(opennova::strutil::to_lower(candidate));
 		if (it != listing.end()) return it->second;
 	}
 	return std::string();

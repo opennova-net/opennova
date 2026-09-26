@@ -57,8 +57,8 @@ void NetWindow::format() {
 	char buf[256];
 	// The retail page's line: the frame rate and the quantum (the joiner's
 	// send holdoff; the server's per-peer holdoff is in the peers table).
-	std::snprintf(buf, sizeof(buf), "%s, %s | %.0f fps | bank %s | last frame %d tick(s) in %.2f ms",
-			status_role_label(s.role), status_state_label(s.state), s.fps, s.bank_policy.c_str(),
+	std::snprintf(buf, sizeof(buf), "%s, %s | %.0f fps | last frame %d tick(s) in %.2f ms",
+			status_role_label(s.role), status_state_label(s.state), s.fps,
 			s.frame_ticks, static_cast<double>(s.frame_tick_us) / 1000.0);
 	session_ = buf;
 	if (!s.traffic_valid) {

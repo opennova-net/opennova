@@ -22,6 +22,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <net/npwire/ingame_decode.h>
@@ -280,12 +281,34 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx,
 // Sent for empty roster slots the client's ack-walk requests, so the walk terminates cleanly at max_players.
 std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack = true);
 
-// (tag=0x51 TEAM-CHANGE CONFIRM has no encoder: the original emits it ONLY for a pending
-// g_team_change_entity_list entry [orig: NapiNPServerMsg_0x029 @0x514F10], with a real
-// write_entity_packet @0x506bb0 record. The client FIELD-PARSES it — @0x431BB0 stamps team/NetId
-// and REBINDS CharacterEntity — so an invented zero-id 0x51 re-binds the joiner's player to a
-// vehicle archetype (the DBuggy1 shadow, D-NET-148). Add the faithful encoder with the
-// team-change flow.)
+// tag=0x51 TEAM-CHANGE CONFIRM — `[u16 index]` + the 0x50 body (8 B): the host's team-change
+// list entry a C2S 0x29 asked for. The original emits it ONLY for a live g_team_change_entity_list
+// entry [orig: NapiNPServerMsg_0x029 @0x514F10]; the client FIELD-PARSES it — @0x431BB0 stamps
+// team/NetId and REBINDS CharacterEntity — so an invented zero-id 0x51 re-binds the joiner's
+// player to a vehicle archetype (the DBuggy1 shadow, D-NET-148). The identity pair is zero for a
+// non-player, the caller's Flags & 0x100 gate as for 0x50.
+// [orig: write_entity_packet @0x506BB0 — the index @0x506BCE, the handle @0x506C10, the team
+//  @0x506C24, the identity pair @0x506C26..0x506C5C (zero @0x506C7C..0x506C9D)]
+std::vector<uint8_t> encode_team_change_confirm(uint16_t index, const TeamAssign &assign);
+
+// tag=0x71 SQUAD JOIN — `[u8 leader][u8 member]` (2 B): the member slot's squad link, 0xFF =
+// no squad. A team change clears the changed player's link and sends [0xFF][its slot] to its new
+// team. [orig: write_player_chain_link @0x5106D0 — the stores @0x510797 / @0x5107A4; client
+// NapiNPClientMsg_HandleSquadJoin @0x425600]
+struct SquadJoin {
+	uint8_t leader = 0xFF;
+	uint8_t member = 0;
+};
+std::vector<uint8_t> encode_squad_join(const SquadJoin &join);
+
+// tag=0x72 TEAM NAME — `[u8 index][cstr name]`; a team change sends [0][""] and [1][""] to the
+// changed player. [orig: NetPacket_WriteByteAndCString @0x5107B0; client NapiNPClientMsg_0x072
+// @0x425710]
+struct TeamName {
+	uint8_t index = 0;
+	std::string name;
+};
+std::vector<uint8_t> encode_team_name(const TeamName &name);
 
 // One 0x16 PLAYER-LIST entry (the host roster row the dispatcher extracts from the live connection list).
 struct PlayerListEntry {

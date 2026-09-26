@@ -267,8 +267,8 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
         // The local attach resets before its mount; a detach does not take this
         // leg. The reset includes the binocular clears, so a wire-echoed attach
         // drops a raised toggle too. [orig: Entity_AttachToUseGunSlot @0x546B80
-        // -> Player_ResetCameraAndMovementState @0x546ba4; the ctrlx attach's
-        // local reset @0x4947AE]
+        // (the Player_ResetCameraAndMovementState call @0x546ba4); the ctrlx
+        // attach's local reset @0x4947AE]
 		local_player_camera_reset(&world, w, view);
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;

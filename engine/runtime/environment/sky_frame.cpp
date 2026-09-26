@@ -82,7 +82,6 @@ SkyFrameState build_sky_frame(const EnvironmentState &env) {
 	frame.fog_end = env.fog_level();
 	frame.sky_speed = env.sky_speed();
 	frame.sky_height = env.sky_height();
-	frame.frame_clear = env.frame_clear_color();
 	return frame;
 }
 

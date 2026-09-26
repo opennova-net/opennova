@@ -31,9 +31,6 @@ inline constexpr int32_t kObjectLodBehindEyeRadiusQ16 = 0x10000000;
 // The highest shipped object-detail profile (the frame scale's fixed-quality
 // leg). [orig: Terrain_RenderWorldScene @ 0x5c944c]
 inline constexpr int kObjectLodDetailLevelMax = 3;
-// The special item preloaded for the person flag-0x20 radius substitution.
-// [orig: Entity_PreloadSpecialItems @ 0x43C220]
-inline constexpr int kParachuteProjectionTypeId = 185;
 
 // Entity-local sphere consumed by the visibility projector, in the source
 // model's fixed-point axes. It is distinct from GHDR's origin-centered radius.

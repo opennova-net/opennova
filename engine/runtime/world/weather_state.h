@@ -119,13 +119,13 @@ struct WeatherState {
     // Env_TodAdvancePerTick @ 0x26c644c, Env_TodEpochTickdown @ 0x26c6064,
     // Env_TodEpoch @ 0x26c6450].
     static constexpr uint32_t kTodDayFixed24 = 24u << 24;
-    static constexpr int32_t kTodMinuteTicks = 310;
+    static constexpr int32_t kTodEpochTicks = 310;
     // The 62 ticks-per-second scale every WAC seconds argument multiplies by
     // [orig: WacCmd_Rain @ 0x4edf60 `imul 62`; WacCmd_ColorFade @ 0x4edcb0].
     static constexpr int32_t kWacTicksPerSecond = 62;
     uint32_t tod_fixed24 = 12u << 24;
     uint32_t tod_advance_per_tick = 0;
-    int32_t tod_minute_tickdown = kTodMinuteTicks;
+    int32_t tod_epoch_tickdown = kTodEpochTicks;
     uint32_t tod_epoch = 0;
     // Script lvalue, preserved until a keyframed TOD computation writes 0/1.
     // [orig: WacCmd_Set @ 0x4ED520; Environment_ComputeTimeOfDayColors @ 0x57DE40]

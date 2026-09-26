@@ -7,6 +7,7 @@
 #include <runtime/terrain_query/height_field.h>  // TerrainHeightField::valid
 #include <runtime/world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <runtime/world/angle.h>       // spawn_angle_bam (the placement angle)
+#include <runtime/world/collision.h>   // terrain_clip_segment (the org2 ground-settle tail)
 #include <runtime/world/entity.h>      // EntityHandle (pinned below)
 #include <runtime/world/geom.h>        // to_fixed / from_fixed
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
@@ -784,22 +785,23 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 		// This makes a held jump from a falling peer fail the retail gate and
 		// makes the next grounded sample produce the real landing edge. Water
 		// transitions remain authority-world state (D-INF-3), not C2S flags.
+		// The ground is the org2 resolver's ground-settle tail over the terrain
+		// alone: Z raised to the 6144 grid, a 2.0 u column clipped by the
+		// heightfield (the vertical column writes the terrain height whether or
+		// not it reaches). [orig: Entity_UpdateInfantryPlayerBody resolver call
+		// @0x4B7CE0..0x4B7CF4 -> Entity_MovementCollisionResolver tail
+		// @0x4B3D6E..0x4B3DA9]
 		bool clear_airborne = grounded || ent->mounted;
 		bool set_airborne = false;
 		if (!clear_airborne && world.tables.terrain != nullptr && world.tables.terrain->valid()) {
-			world::GroundClearance clearance = world.ai.ground_clearance;
-			clearance.has_occupant = ae->has_occupant;
-			clearance.use_dead = ent->health <= 0;
-			const int32_t ground = world::calc_average_ground_height(
-					*world.tables.terrain, ae->pos, 0, clearance);
-			if (ground != INT32_MIN) {
-				ae->inf.ground_cache = ground;
-				ae->inf.ground_cache_valid = true;
-				const int64_t foot_clearance = static_cast<int64_t>(wire_z) -
-						static_cast<int64_t>(ae->inf.prev_capsule_bottom) - ground;
-				set_airborne = foot_clearance > world::kInfantryAirborneGap;
-				clear_airborne = foot_clearance <= 0;
-			}
+			const int32_t start[3] = {ae->pos[0], ae->pos[1], (ae->pos[2] + 6143) & ~0x17FF};
+			int32_t end[3] = {start[0], start[1], start[2] - 0x20000};
+			(void)world::terrain_clip_segment(*world.tables.terrain, start, end, end);
+			const int32_t ground = end[2];
+			const int64_t foot_clearance = static_cast<int64_t>(wire_z) -
+					static_cast<int64_t>(ae->inf.prev_capsule_bottom) - ground;
+			set_airborne = foot_clearance > world::kInfantryAirborneGap;
+			clear_airborne = foot_clearance <= 0;
 		}
 		if (set_airborne) {
 			ae->inf.airborne = true;

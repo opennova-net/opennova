@@ -195,8 +195,9 @@ void weapon_pool_add(const WeaponTable &table, WeaponInventory &inv, int class_i
 // collision (the original logs "overloading" and keeps the incumbent), gather the
 // carry bits. Unresolved names append a warning ("couldn't find wpn %s" shape).
 // Each landed slot takes the zoom seed with the local player as its owner
-// (owner_class, the sniper permission) [orig: entityPtr @ 0x5414FC passed to
-// WeaponSlot_InitFromDef @ 0x5415E4].
+// (owner_class, the sniper permission) [orig: WeaponSlotTable_LoadAllFromDefs
+// @ 0x5414E0, entityPtr @ 0x5414FC passed to the WeaponSlot_InitFromDef call
+// @ 0x5415E4].
 struct WeaponFillResult {
     std::vector<std::string> warnings;
 };

@@ -735,6 +735,19 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	return true;
 }
 
+// --- the cross-mission carry --------------------------------------------------
+
+void MissionKernel::carry_across_load_from(MissionKernel &previous) {
+	seat_specs = std::move(previous.seat_specs);
+	mounted_graphics = std::move(previous.mounted_graphics);
+	local.look_settings = previous.local.look_settings;
+	local.carry_scoped_aim_drift_from(previous.local);
+	world.script.vars.carry_declared_from(previous.world.script.vars);
+	// [orig: g_entity_update_counter, whose one writer is
+	// Entity_UpdateAllEntities @0x4C2639]
+	world.entity_update_counter = previous.world.entity_update_counter;
+}
+
 // --- the tick ---------------------------------------------------------------
 
 void MissionKernel::tick_weather() {

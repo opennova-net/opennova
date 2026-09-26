@@ -2,6 +2,7 @@
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/ai.h>
 #include <runtime/devtools/tick_profile.h>
+#include <base/io/crt_ftol.h>
 
 // The AI event queue and the AiSystem core: registration, per-entity rows, and the
 // tick that drives every handler above.
@@ -924,12 +925,7 @@ bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate) {
 // [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9, `fdivr ds:flt_7C3B40` @0x43B1D8]
 int32_t part_anim_rate_from_seconds(double seconds) {
     const double rate_f = (static_cast<double>(0.016f) / seconds) * 65536.0; // +inf when seconds==0
-    int32_t rate;
-    if (rate_f != rate_f || rate_f >= 2147483648.0 || rate_f < -2147483648.0) {
-        rate = static_cast<int32_t>(0x80000000); // ftol integer-indefinite
-    } else {
-        rate = static_cast<int32_t>(rate_f);     // truncate toward zero
-    }
+    int32_t rate = io::retail_ftol_sse2(rate_f); // [orig: _ftol2_sse @0x76BC00]
     if (rate == 0) rate = 1; // min-1 guard (does NOT fire for INT_MIN)
     return rate;
 }

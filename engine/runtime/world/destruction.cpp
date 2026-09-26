@@ -164,7 +164,6 @@ int32_t piece_physics_ground_probe_q16(
 
 struct PiecePhysicsSlope {
     int32_t forward_bam = 0;
-    int32_t lateral_bam = 0;
     int32_t ground_q16 = 0;
 };
 
@@ -188,10 +187,12 @@ int32_t piece_physics_rest_floor_q16(const World &world, const Entity &entity) {
     return vehicle != nullptr ? vehicle->box_z_lo : 0;
 }
 
-// Entity_CalcSlopeForces @0x4B0B00: four table-quantized probes around the
-// wreck, two independent slope clamps, then the picked model's Z-low rest
-// correction. Only the forward result is retained by DeathPiece_PhysicsUpdate,
-// but both lateral probes participate in the returned ground average.
+// Four table-quantized probes around the wreck, the clamped forward slope, then
+// the picked model's Z-low rest correction. [orig: Entity_CalcSlopeForces
+// @0x4B0B00 writes a clamped <<12 lateral slope @0x4B0BE0..0x4B0C0B that neither
+// caller reads (DeathPiece_PhysicsUpdate @0x48F640, AI_UpdateFallingPhysics
+// @0x457FEE take only its address); the lateral probes still feed the ground
+// average @0x4B0C38..0x4B0C44]
 PiecePhysicsSlope piece_physics_slope(
         const World &world, const Entity &entity,
         const terrain::TerrainHeightField *terrain, int32_t x_q16,
@@ -217,12 +218,8 @@ PiecePhysicsSlope piece_physics_slope(
     PiecePhysicsSlope out;
     const int32_t forward_delta = std::clamp(
             io::bam_sub(height_forward, height_backward), -655360, 655360);
-    const int32_t lateral_delta = std::clamp(
-            io::bam_sub(height_left, height_right), -163840, 163840);
     out.forward_bam = static_cast<int32_t>(
             static_cast<uint32_t>(forward_delta) << 10);
-    out.lateral_bam = static_cast<int32_t>(
-            static_cast<uint32_t>(lateral_delta) << 12);
 
     int32_t sum = io::bam_add(height_backward, height_left);
     sum = io::bam_add(sum, height_right);

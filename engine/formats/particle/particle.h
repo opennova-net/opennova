@@ -196,9 +196,9 @@ struct ParticleDef {
 	std::string id;             // +0
 	std::string child_id;       // +132
 	std::string flags_raw;      // +136 — preserved verbatim from source for round-trip
-	std::uint32_t flags = 0;    // +136 — FlagTable_ParseFromString @ 0x846A18 (see particle_flag::*)
+	std::uint32_t flags = 0;    // +136 — FlagTable_ParseFromString @ 0x5df970 over the flag table @ 0x846A18 (see particle_flag::*)
 	std::string move_raw;       // +140 — preserved verbatim
-	std::uint32_t move = 0;     // +140 — FlagTable_ParseFromString @ 0x848800 (see move_flag::*)
+	std::uint32_t move = 0;     // +140 — FlagTable_ParseFromString @ 0x5df970 over the move table @ 0x848800 (see move_flag::*)
 	float lod = 0.0f;           // observed in corpus; CParticleDef_ParseProperties has no `lod` case — value is silently ignored on parse but written by CParticleDef_SaveToFile @ 0x5e4d70
 
 	// Emission

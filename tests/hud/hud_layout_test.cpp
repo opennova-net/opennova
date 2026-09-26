@@ -74,7 +74,8 @@ static void synthetic() {
 			"StaticFrame\tH_BlkHLin.tga  512,720\n"
 			"StaticFrame\tCompMark.tga  508,685\n"
 			"PARACHUTEICON\tchute.tga 400,401\n"
-			"ARMORICON\tarmor.tga 402,403\n";
+			"ARMORICON\tarmor.tga 402,403\n"
+			"BREATHTIME\t\t512,70,center\n";
 	DefHudPosFile file;
 	if (!parse(text, file)) {
 		std::printf("FAIL: synthetic parse\n");
@@ -107,6 +108,9 @@ static void synthetic() {
 	CHECK(layout.veh_stance_pos.present && layout.veh_stance_pos.x == 0 &&
 			layout.veh_stance_pos.y == 272);
 	CHECK(layout.clip_pos.x == 900 && layout.stance_pos.y == 760);
+	// BREATHTIME is x, y, align: the third field is the alignment word.
+	CHECK(layout.breath_time.x == 512 && layout.breath_time.y == 70 &&
+			layout.breath_time.align == 2);
 	CHECK(layout.scope_range.x == 100 && layout.scope_zero.y == 103 && layout.scope_mag.x == 104);
 	// The combat anchors and the AGL colour.
 	CHECK(layout.combat.impact_x == 200 && layout.combat.impact_y == 201);
@@ -171,6 +175,9 @@ static void synthetic() {
 	CHECK(layout.chat_lines == 12);
 	CHECK(assets.font == "fonthi");
 	CHECK(layout.spinmap_wp_dist_off == 0 && layout.map_coords_off == 0);
+	// An unauthored BREATHTIME keeps the zero anchor (0, 0, left): the bar has
+	// no presence gate.
+	CHECK(layout.breath_time.x == 0 && layout.breath_time.y == 0 && layout.breath_time.align == 0);
 	// The device-owned fields are untouched by the fill.
 	CHECK(!layout.frame_texture_valid && layout.stance_frame0_w == 0 && !layout.box_texture_valid);
 	def_free_hudpos(&file);

@@ -44,8 +44,8 @@ inline constexpr int kNvgScaleW = 48;
 inline constexpr int kNvgScaleH = 32;
 inline constexpr int kNvgScaleModulate = 127;
 
-// Retail's persistent rangefinder easing [orig: the misnamed
-// Binoculars_DrawRangefinder @ 0x590810]: the target clamps to 1..1000; a
+// Retail's persistent rangefinder easing
+// [orig: Binoculars_DrawRangefinder @ 0x590810]: the target clamps to 1..1000; a
 // correction beyond 1000 snaps; otherwise the displayed value steps toward
 // the target on the 111/33/11/3/1 magnitude ladder, so large corrections
 // move quickly while the final digits settle one unit at a time. The value

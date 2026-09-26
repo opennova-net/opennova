@@ -8,7 +8,6 @@
 #include <runtime/inmatch/session_transport.h>        // ISessionTransport
 
 #include <net/npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
-#include <base/io/tick_rate.h>            // kTicksPerSecondInt (the default frame-rate sample)
 
 #include <cstddef>
 #include <cstdint>
@@ -237,9 +236,12 @@ public:
 	//  Chat_SendSquadMessage @0x49AA50, sub_49ABA0 @0x49ABA0,
 	//  Chat_SendAllMessage @0x49AC70 -> CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
 	bool queue_chat_message(uint8_t channel, const std::string &text);
-	// The embedder's measured frame rate for the quality metric's frame-pressure
-	// term [orig: dword_24E1F10]; the default is the logic rate (no pressure —
-	// any rate at or above 16 scores the floor). Joiner only.
+	// The main loop's measured frame rate for the quality metric's
+	// frame-pressure term [orig: g_statsAvgFps (dword_24E1F10), read by
+	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its
+	// FR counter once per banked frame (Role::observe_frame_rate). 0 is
+	// retail's mode-init value (the ceiling metric 255) until the first 2 s
+	// window closes; any rate at or above 16 scores the floor. Joiner only.
 	void set_observed_frame_rate(int32_t fps) { observed_frame_rate_ = fps; }
 	// The bucketed 0..4 quality level the C2S 0x4C report carries and the
 	// client's own ping readings (0 before the first completed round trip).
@@ -658,7 +660,7 @@ private:
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0, the `is_mp_session_peer &&
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.
 	replication::NetQualityWindow client_quality_window_;
-	int32_t observed_frame_rate_ = io::kTicksPerSecondInt; // [orig: dword_24E1F10]
+	int32_t observed_frame_rate_ = 0;                    // [orig: dword_24E1F10, 0 @0x52B727]
 	int32_t quality_update_countdown_ = 62;              // [orig: dword_24D1DDC]
 	std::array<ChatFloodEntry, 16> chat_flood_{};       // [orig: @0xB3B788]
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)

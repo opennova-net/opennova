@@ -210,6 +210,21 @@ public:
 	bool boot(const KernelBootOptions &options, std::string &error);
 	std::vector<std::string> boot_trace;
 
+	// --- the cross-mission carry ---------------------------------------------
+	// A load swaps in a fresh kernel (ADR 0042 d3); the embedder hands this
+	// fresh kernel the one it retires, and the pieces that survive the swap
+	// come across: the seat/mount table (moved out: it installs before mission
+	// promotion — the wire-header join prewarms it pre-load) and its graphic
+	// sources, the player's mouse settings and scoped aim oscillators, the
+	// declared half of the script's mission-variable bank (the retail bank is
+	// process-global and no load path zeroes the compiler-declared slots, so a
+	// restart or the next mission reads slot n at the previous run's value;
+	// V# and G# start at zero per load, ScriptVarStore::carry_declared_from),
+	// and the entity-update counter (process-global and never reset: the next
+	// mission's staggers continue its phase [orig: g_entity_update_counter,
+	// whose one writer is Entity_UpdateAllEntities @0x4C2639]).
+	void carry_across_load_from(MissionKernel &previous);
+
 
 	// --- the weather tick (ADR 0042 d2: ONE engine function) ------------------
 	// The retail weather tick after the logic tick [orig:

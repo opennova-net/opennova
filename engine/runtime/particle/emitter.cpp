@@ -288,7 +288,8 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 	// accel and the GRAVITATE force scalar; CEffectEmitter_Initialize
 	// @ 0x5e6020 seeds it. WANDER/BUBBLE are engine-vestigial (zero xrefs).
 	// The COLLIDE* response inside both updaters is unreachable: its probe
-	// sub_5F78F0 @ 0x5f78f0 is `xor eax, eax; ret` (D-PTL-30).
+	// CParticleEmitter_CollisionProbe_Stub @ 0x5f78f0 is `xor eax, eax; ret`
+	// (D-PTL-30).
 	p.position = vec3_add(p.position, vec3_scale(p.velocity, dt));
 
 	const bool gravitate = (def.move & move_flag::Gravitate) != 0;
@@ -1047,7 +1048,7 @@ void emitter_advance(Emitter &e, float dt, const EmitterEnvironment &env, Emitte
 }
 
 Vec3 mission_wind_vector(int wind_speed, int wind_direction_degrees) noexcept {
-	// [orig: sub_5DE970 @ 0x5de970]: the per-tick fixed-point magnitude is
+	// [orig: Weather_SetMissionWind @ 0x5de970]: the per-tick fixed-point magnitude is
 	// `65536000 * speed / 60 / 60 / 65` (integer steps), pointed along the
 	// compass heading `90 - direction` degrees in the game's horizontal plane
 	// (x = cos, y = sin, up = 0); render_emitter_effect @ 0x5f70c0 converts

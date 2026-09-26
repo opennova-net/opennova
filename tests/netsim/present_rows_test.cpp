@@ -533,9 +533,11 @@ bool test_joiner_palm_source_and_local_fragment() {
 // A joiner runs no brains: the tank turret child's class update publishes its
 // gun yaw word on the hull's replica row, and the hull row carries it as the
 // tank render callback's VEHICLE_GUNYAW, held once the turret stops moving.
-// A child that is no ewep class publishes nothing.
-// [orig: Entity_UpdateTransformAndTurret GROUND @0x440F70..0x440F8A;
-//  HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
+// The hull is the turret's 0x0D TARGET (groundEntity); its 0x0D parent is the
+// seated gunner's occupant back-reference, a pool-0 handle. A child that is
+// no ewep class publishes nothing.
+// [orig: Entity_UpdateTransformAndTurret groundEntity @0x440CBF, GROUND
+//  @0x440F70..0x440F8A; HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
 bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	opennova::mission::MissionKernel kernel;
 	kernel.world.registry.configure_pool(1, 4);
@@ -570,7 +572,9 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	turret_row.handle = turret->handle.packed;
 	turret_row.type_id = 701;
 	turret_row.cls = opennova::EntityClass::NoNetworkCallback;
-	turret_row.parent_handle = hull_row.handle;
+	turret_row.target_handle = hull_row.handle;
+	// The retail manned form: the parent is the pool-0 slot-0 gunner.
+	turret_row.parent_handle = 0x0000;
 	turret_row.emplaced_gun_yaw_word = 0x1234;
 	runtime.state().upsert(turret_row.handle) = turret_row;
 	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF);
@@ -586,7 +590,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 							w::VC_VEHICLE_GUN) != 0 &&
 					hull_present[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
 			"the turret's yaw word drives the joiner hull's VEHICLE_GUNYAW");
-	runtime.state().find(turret_row.handle)->parent_handle = w::EntityHandle::kInvalid;
+	runtime.state().find(turret_row.handle)->target_handle = w::EntityHandle::kInvalid;
 	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF);
 	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
 	ok = expect(row_at(rows, 0)[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
@@ -603,7 +607,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	plain.seat_specs.push_back(spec);
 	hull_row.handle = plain_hull->handle.packed;
 	turret_row.handle = plain_child->handle.packed;
-	turret_row.parent_handle = hull_row.handle;
+	turret_row.target_handle = hull_row.handle;
 	plain_runtime.state().upsert(hull_row.handle) = hull_row;
 	plain_runtime.state().upsert(turret_row.handle) = turret_row;
 	im::tick_replica_emplaced_channels(plain_runtime.state(), plain.seat_specs, plain.world, 0xFFFF);

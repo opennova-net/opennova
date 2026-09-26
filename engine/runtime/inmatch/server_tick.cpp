@@ -8,11 +8,13 @@
 #include <runtime/inmatch/server_entity_routes.h>    // the item events, crossings and guidance
 #include <runtime/inmatch/server_spawn.h>            // the admitted 0x51 spectator converts
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <vector>
 
 #include <base/gameprofile/game_type.h>        // the CTF / FlagBall / Flag Me carry-limit modes
+#include <base/io/le.h>                        // append_u16_le / append_u32_le (put_u16le / put_u32le)
 #include <base/io/strutil.h>                   // iequals (the JOINTICKET key lookup)
 #include <net/npwire/ingame_decode.h>          // kPlayerSyncHasDownedState (the 0x46 resend form)
 #include <net/npwire/ingame_encode.h>
@@ -172,15 +174,11 @@ PlayerDeathFeed classify_player_death(
 }
 
 void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
-	v.push_back(static_cast<uint8_t>(x & 0xFF));
-	v.push_back(static_cast<uint8_t>(x >> 8));
+	opennova::io::append_u16_le(v, x);
 }
 
 void put_u32le(std::vector<uint8_t> &v, uint32_t x) {
-	v.push_back(static_cast<uint8_t>(x & 0xFF));
-	v.push_back(static_cast<uint8_t>((x >> 8) & 0xFF));
-	v.push_back(static_cast<uint8_t>((x >> 16) & 0xFF));
-	v.push_back(static_cast<uint8_t>((x >> 24) & 0xFF));
+	opennova::io::append_u32_le(v, x);
 }
 
 constexpr uint32_t kPuntCharattrSilence = 16;
@@ -2155,6 +2153,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				assign.net_id = change->net_id;
 				assign.anim_slot = change->anim_slot;
 				send_all(s2c::TEAM_ASSIGN, encode_team_assign(assign));
+				// A zone flip runs the same Server_ChangeEntityTeam, so the zone
+				// joins the late-joiner team-change list too
+				// [orig: CBufferList_AddOrFind @0x518EEC].
+				std::vector<world::EntityHandle> &changed = ctx.team_change_entities;
+				if (std::find(changed.begin(), changed.end(), change->entity) == changed.end())
+					changed.push_back(change->entity);
 				continue;
 			}
 			if (const auto *window =
@@ -2358,9 +2362,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			conn.link.receive_silence_ms = conn.receive_inactive_ms;
 			// Built here and queued just below: the frame's CONTENT is the world
 			// after the script pass and the maintenance, before the motor step.
+			// The server-fps byte is this tick's copy of the main loop's FR
+			// counter [orig: Server_TickUpdate @0x51D7E0..0x51D7E5].
 			conn.frame_update_staged = replication::build_connection_s2c(
 					world, conn.link, ents, conn.staged_frame_update, ctx.config.game_type,
-					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0);
+					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0,
+					ctx.stats_avg_fps);
 		}
 	}
 	// Queue the frames just built, retail's per-slot send.

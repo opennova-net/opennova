@@ -272,7 +272,6 @@ void test_control_board_catalog_states_and_wants() {
 
 	ControlState paused;
 	paused.id = control_id::kRuntimeWacPaused;
-	paused.available = true;
 	paused.writable = true;
 	paused.has_value = true;
 	paused.value = ControlArg::boolean(false);
@@ -313,7 +312,7 @@ void test_control_slider_recovers_after_hidden_drag() {
 	board.set_catalog({spec});
 	opennova::devtools::ControlState state;
 	state.id = spec.id;
-	state.available = state.writable = state.has_value = true;
+	state.writable = state.has_value = true;
 	state.value = ControlArg::number(0.25);
 	board.set_states({state});
 	std::deque<ControlRequest> requests;

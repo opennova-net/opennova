@@ -120,7 +120,8 @@ bool foliage_entity_far_side(float entity_y, float camera_y, float water_height)
 // inside the BySide entity waves: the far wave's inside BySide(far, 0)
 // @ 0x5c955f, before the far-side alpha flush @ 0x5c9596; the camera wave's
 // inside BySide(camera, 0) @ 0x5c9638, after the water pass @ 0x5c95dc and
-// before Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderWorldScene].
+// before the scars [orig: Terrain_RenderWorldScene @ 0x5c93a0 (the
+// Scar_DrawBatches call @ 0x5c9658)].
 // They lead the first rung drawn after them, sorted ahead of everything in
 // it by a sorting offset beyond any view depth.
 inline constexpr int kFoliageMaskFarSideRung = kRungAlphaFarSide;
