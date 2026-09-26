@@ -51,6 +51,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <base/io/strutil.h>
 #include <runtime/particle/emitter.h>
 #include <runtime/renderer/particle_atlas.h>
 #include <runtime/renderer/particle_color.h>
@@ -99,14 +100,6 @@ using opennova::particle::BlendMode;
 using opennova::particle::CurveRef;
 using opennova::particle::GraphicLayer;
 using opennova::particle::Particle;
-
-std::string lower_ascii(std::string value) {
-	for (char &c : value) {
-		if (c >= 'A' && c <= 'Z')
-			c = static_cast<char>(c - 'A' + 'a');
-	}
-	return value;
-}
 
 Ref<Image> load_particle_image(const Callable &provider,
 		const String &texture_dir, const std::string &name) {
@@ -989,7 +982,7 @@ public:
 		auto mark_unresolved = [&](const std::string &name) {
 			if (name.empty())
 				return;
-			const std::string key = lower_ascii(name);
+			const std::string key = opennova::strutil::to_lower(name);
 			if (unresolved_lookup.insert(key).second)
 				unresolved_names.push_back(name);
 		};
@@ -997,7 +990,7 @@ public:
 		auto register_frame = [&](const std::string &name,
 				std::uint8_t type) -> std::size_t {
 			const std::string key = std::to_string(static_cast<int>(type)) +
-					"|" + lower_ascii(name);
+					"|" + opennova::strutil::to_lower(name);
 			const auto found = entry_lookup.find(key);
 			if (found != entry_lookup.end())
 				return found->second;

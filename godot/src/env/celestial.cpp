@@ -445,23 +445,11 @@ void Celestial::advance_frame(double p_delta) {
 		_set_body_upl(*moon, discs.moon_upl, discs.moon_q3_upl);
 	}
 	if (Body *glare = bodies_.getptr("glare")) {
-		// env #14 (closed): ONE coarse unjittered gate ray with the
-		// witnessed start-height lift, then two jittered fine rays from the
-		// exact camera height, feed the 8-sample window + dead-band
-		// hysteresis [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f
-		// — the fine rays' entity leg keeps the documented sun-occlusion
-		// statics posture (render-lighting-re.md D-RLIT-2/D-RLIT-3), see docs/env/env-tod-re.md].
-		const float ray_length = glare_occlusion_->get_ray_length();
-		const Vector3 lift(0.0f, opennova::env::glare_coarse_start_lift(
-				glare_occlusion_->get_frame_index()), 0.0f);
-		const bool coarse_clear = _glare_ray_clear(cam_pos + lift,
-				sun_dir, ray_length, Vector3());
-		const bool visible_a = coarse_clear && _glare_ray_clear(cam_pos,
-				sun_dir, ray_length, glare_occlusion_->get_ray_jitter_a());
-		const bool visible_b = coarse_clear && _glare_ray_clear(cam_pos,
-				sun_dir, ray_length, glare_occlusion_->get_ray_jitter_b());
-		glare_occlusion_->tick(visible_a, visible_b, state.fog_level());
-		const int view_dot_fixed = static_cast<int>(forward.dot(sun_dir) * 65536.0f);
+		// env #14 (closed): the engine's glare ray sequence (coarse gate ray,
+		// two jittered fine rays, the window tick) over this terrain's line
+		// of sight (runtime/environment/glare_occlusion.h).
+		_advance_glare_occlusion(state, cam_pos, sun_dir);
+		const int view_dot_fixed = opennova::io::float_to_fp16_16(forward.dot(sun_dir));
 		const opennova::env::GlareFrame frame = opennova::env::build_glare_frame(
 				state, cam_rf, view_dot_fixed, glare_occlusion_->get_brightness());
 		glare->model->set_global_position(render_float_to_godot(frame.position));
@@ -497,8 +485,7 @@ void Celestial::advance_frame(double p_delta) {
 				opennova::io::float_to_fp16_16(state.sun_dim_pct());
 		const int overcast_fixed =
 				opennova::io::float_to_fp16_16(state.overcast_blend());
-		const int view_dot_fixed = static_cast<int>(
-				forward.dot(sun_dir) * 65536.0f);
+		const int view_dot_fixed = opennova::io::float_to_fp16_16(forward.dot(sun_dir));
 		opennova::env::SunVeil veil = opennova::env::sun_veil_from_dot(
 				view_dot_fixed, glare_occlusion_->get_brightness(),
 				sun_dim_fixed, overcast_fixed);
@@ -513,8 +500,7 @@ void Celestial::advance_frame(double p_delta) {
 					state.water_height(), 0.0f, point_m)) {
 				const Vector3 point_g = mission_to_godot(point_m);
 				const Vector3 to_glint = (point_g - cam_pos).normalized();
-				const int dot2 = static_cast<int>(
-						forward.dot(to_glint) * 65536.0f);
+				const int dot2 = opennova::io::float_to_fp16_16(forward.dot(to_glint));
 				const opennova::env::SunVeil secondary =
 						opennova::env::sun_veil_from_dot(dot2,
 								water_glint_.brightness >> 2, sun_dim_fixed,
@@ -619,8 +605,8 @@ Celestial::MirrorRedraw Celestial::get_mirror_redraw(const Vector3 &p_mirror_for
 	}
 	const opennova::env::EnvironmentState &state = env->state();
 	const Vector3 sun_dir = render_float_to_godot(state.sun_direction());
-	const int view_dot_fixed = static_cast<int>(
-			p_mirror_forward.normalized().dot(sun_dir) * 65536.0f);
+	const int view_dot_fixed =
+			opennova::io::float_to_fp16_16(p_mirror_forward.normalized().dot(sun_dir));
 	const int32_t upl = opennova::env::mirror_glare_upl(state, view_dot_fixed);
 	const Ref<ObjectData> data = glare->model->get_object_data();
 	if (upl <= 0 || data.is_null()) {
@@ -669,7 +655,6 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 	const Vector3 forward = cam != nullptr
 			? -cam->get_global_transform().basis.get_column(2).normalized()
 			: Vector3(0.0f, 0.0f, -1.0f);
-	const float ray_length = glare_occlusion_->get_ray_length();
 	// The dead-band step never snaps onto the target, so a settled
 	// accumulator HOLDS: stop once the brightness has been unchanged across
 	// eight consecutive frames (a full window turnover at any jitter phase)
@@ -680,15 +665,7 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 	int held = 0;
 	int last = glare_occlusion_->get_brightness();
 	for (int frame = 0; frame < p_max_frames; ++frame) {
-		const Vector3 lift(0.0f, opennova::env::glare_coarse_start_lift(
-				glare_occlusion_->get_frame_index()), 0.0f);
-		const bool coarse_clear = _glare_ray_clear(cam_pos + lift, sun_dir,
-				ray_length, Vector3());
-		const bool visible_a = coarse_clear && _glare_ray_clear(cam_pos,
-				sun_dir, ray_length, glare_occlusion_->get_ray_jitter_a());
-		const bool visible_b = coarse_clear && _glare_ray_clear(cam_pos,
-				sun_dir, ray_length, glare_occlusion_->get_ray_jitter_b());
-		glare_occlusion_->tick(visible_a, visible_b, state.fog_level());
+		_advance_glare_occlusion(state, cam_pos, sun_dir);
 		if (glint_body != nullptr) {
 			_advance_water_glint(state, cam_pos, sun_dir, forward,
 					*glint_body);
@@ -756,12 +733,27 @@ Dictionary Celestial::get_diagnostics() const {
 	return diag;
 }
 
+// Terrain line of sight between two Godot points, the glare and glint rays'
+// shared form: the ported boolean raycast; TerrainData.raycast_terrain reports
+// the miss as all-NAN, so clear = the hit is NAN. No terrain loaded = clear
+// (nothing occludes) — the editor-guard divergence from retail's null-atlas
+// return-HIT, kept deliberately: an unloaded world has nothing to block the
+// sun (docs/terrain/terrain-re.md §Runtime terrain queries).
 bool Celestial::_segment_clear(const Vector3 &p_from, const Vector3 &p_to) {
 	if (terrain_data_.is_null() || !terrain_data_->is_loaded()) {
 		return true;
 	}
 	const Vector3 hit = terrain_data_->raycast_terrain(p_from, p_to);
 	return std::isnan(hit.x);
+}
+
+void Celestial::_advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
+		const Vector3 &p_cam_pos, const Vector3 &p_sun_dir) {
+	glare_occlusion_->advance(godot_to_mission(p_cam_pos), godot_to_mission(p_sun_dir),
+			p_state.fog_level(),
+			[this](const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) {
+				return _segment_clear(mission_to_godot(p_from), mission_to_godot(p_to));
+			});
 }
 
 void Celestial::_advance_water_glint(
@@ -791,23 +783,6 @@ void Celestial::_advance_water_glint(
 	p_body.drawn = frame.drawn;
 	_set_body_parameter(p_body, "u_sky_beauty_drawn", frame.drawn);
 	p_body.model->set_visible(frame.drawn);
-}
-
-// Terrain line-of-sight for the glare: the ported boolean raycast form over
-// the jittered segment (camera -> camera + sun_dir * ray_length + jitter).
-// TerrainData.raycast_terrain reports the miss as all-NAN, so clear = the
-// hit is NAN. No terrain loaded = clear (nothing occludes) — the
-// editor-guard divergence from retail's null-atlas return-HIT, kept
-// deliberately: an unloaded world has nothing to block the sun
-// (docs/terrain/terrain-re.md §Runtime terrain queries).
-bool Celestial::_glare_ray_clear(const Vector3 &p_from,
-		const Vector3 &p_sun_dir, float p_ray_length, const Vector3 &p_jitter) {
-	if (terrain_data_.is_null() || !terrain_data_->is_loaded()) {
-		return true;
-	}
-	const Vector3 hit = terrain_data_->raycast_terrain(p_from,
-			p_from + p_sun_dir * p_ray_length + p_jitter);
-	return std::isnan(hit.x);
 }
 
 } // namespace godot

@@ -496,7 +496,7 @@ private:
 		// construction (rows rebuild with invalid caches). The CTRL field list
 		// lives beside its leg in entity_presenter_wire.cpp; the aim cache is
 		// the same contiguous payload the placed walk compares.
-		static constexpr int kCtrlCacheCount = 42;
+		static constexpr int kCtrlCacheCount = 55;
 		float ctrl_cache[kCtrlCacheCount];
 		std::array<float, kAimPayloadFloats> aim_cache = {};
 		bool ctrl_cache_valid = false;

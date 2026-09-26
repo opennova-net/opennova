@@ -563,9 +563,6 @@ void Water::advance_frame(double) {
 	if (env != nullptr && env->is_loaded()) {
 		_apply_environment_water_height();
 	}
-	// The murk uniform feed stays for world/probe compatibility even though
-	// the shader's murk role moved to the per-vertex COLOR.a (env #29).
-	water_material_->set_shader_parameter("u_water_murk", water_alpha_);
 
 	Camera3D *cam = Object::cast_to<Camera3D>(
 			ObjectDB::get_instance(cached_cam_id_));
@@ -657,7 +654,6 @@ void Water::advance_frame(double) {
 				Vector3(inputs.lit.r, inputs.lit.g, inputs.lit.b));
 		water_material_->set_shader_parameter("u_fog_color",
 				env->get_scene_fog_color());
-		water_material_->set_shader_parameter("u_water_murk", murk);
 	}
 
 	if (beauty_active) {

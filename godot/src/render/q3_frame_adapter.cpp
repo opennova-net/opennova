@@ -3,6 +3,7 @@
 #include "render/retained_array_mesh.h"
 #include "render/q3_source_registry.h"
 #include "render/q3_vertex_format.h"
+#include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
 
 #include <algorithm>
@@ -251,23 +252,8 @@ float q3_fog_visibility(float dist, float fog_start, float fog_end,
 	return clamp((safe_end - dist) / max(safe_end - fog_start, 1.0), 0.0, 1.0);
 }
 
-// The object stages' sampLinearWrap2D at retail's highest filter tier: the
-// 2x anisotropic footprint of the beauty wrappers (shared.gdshaderinc
-// obj_sample_aniso2), clamped at the stage texture's last retail mip level.
-vec4 q3_sample_aniso2(sampler2D tex, vec2 tex_uv, float max_lod) {
-	vec2 size = vec2(textureSize(tex, 0));
-	vec2 du = dFdx(tex_uv);
-	vec2 dv = dFdy(tex_uv);
-	float length_x = length(du * size);
-	float length_y = length(dv * size);
-	float major = max(length_x, length_y);
-	float minor = min(length_x, length_y);
-	float ratio = clamp(major / max(minor, 1.0e-8), 1.0, 2.0);
-	float lod = min(log2(max(major / ratio, 1.0e-8)), max_lod);
-	vec2 offset = (length_x >= length_y ? du : dv) * (0.5 - 0.5 / ratio);
-	return 0.5 * (textureLod(tex, tex_uv - offset, lod) +
-			textureLod(tex, tex_uv + offset, lod));
-}
+// The object stages' sampLinearWrap2D (rd_glsl.h kGlslSampleAniso2).
+@SAMPLE_ANISO2@
 
 // runtime/renderer/q3_frame.h q3_unpack_mip_ceiling: two 4-bit level codes,
 // 15 = no ceiling.
@@ -298,7 +284,7 @@ void main() {
 		// Diffuse1's alpha only for the cutout variants. Neither consumes
 		// alpha_mod (OBJ_ALPHA_MOD_NONE), so params.w carries the ceilings.
 		float coverage = mode == 1u ?
-				q3_sample_aniso2(primary_texture, uv, primary_max_lod).a : 0.0;
+				rd_sample_aniso2(primary_texture, uv, primary_max_lod).a : 0.0;
 		if ((coverage_flags & 1u) != 0u) {
 			bool passes = coverage > pc.params.z;
 			if (pc.light_local_gain.w < 0.0) passes = !passes;
@@ -317,9 +303,9 @@ void main() {
 			// the wrapper's fog policy, and alpha 0 (SELFLUM MaterialDiffuse.a):
 			// an AlphaBlend LUM contributes nothing, an Additive LUM adds its
 			// colour, an opaque LUM replaces.
-			vec3 base = q3_sample_aniso2(primary_texture, uv, primary_max_lod).rgb;
+			vec3 base = rd_sample_aniso2(primary_texture, uv, primary_max_lod).rgb;
 			if ((coverage_flags & 2u) != 0u) {
-				base *= q3_sample_aniso2(secondary_texture, detail_uv,
+				base *= rd_sample_aniso2(secondary_texture, detail_uv,
 						q3_mip_ceiling(pc.params.w, 1u)).rgb * 2.0;
 			}
 			vec3 lit = base * pc.draw_color.rgb;
@@ -372,25 +358,6 @@ void main() {
 }
 )GLSL";
 
-// A GLSL float literal for an engine constant: %.9g round-trips every float,
-// and a trailing ".0" keeps integral values typed as floats.
-std::string glsl_float(float p_value) {
-	char buffer[32];
-	std::snprintf(buffer, sizeof(buffer), "%.9g", static_cast<double>(p_value));
-	std::string text(buffer);
-	if (text.find_first_of(".eE") == std::string::npos)
-		text += ".0";
-	return text;
-}
-
-void splice_token(std::string &p_text, const char *p_token,
-		const std::string &p_value) {
-	const std::string token(p_token);
-	for (std::size_t at = p_text.find(token); at != std::string::npos;
-			at = p_text.find(token, at + p_value.size()))
-		p_text.replace(at, token.size(), p_value);
-}
-
 std::string q3_vertex_shader_source() {
 	std::string source(kQ3VertexShaderTemplate);
 	splice_token(source, "@FAR_BAND_DEPTH_SCALE@",
@@ -402,6 +369,7 @@ std::string q3_vertex_shader_source() {
 
 std::string q3_fragment_shader_source() {
 	std::string source(kQ3FragmentShaderTemplate);
+	splice_token(source, "@SAMPLE_ANISO2@", kGlslSampleAniso2);
 	splice_token(source, "@GLASS_WHITE_GAIN@", glsl_float(kQ3GlassWhiteLobeGain));
 	splice_token(source, "@GLASS_WHITE_POWER@",
 			glsl_float(kQ3GlassWhiteLobePower));
@@ -785,19 +753,11 @@ bool Q3FrameAdapter::Impl::initialize(RenderingDevice *p_rd) {
 		set_failure("RenderingDevice does not support the Q3 128-byte push block");
 		return false;
 	}
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			opennova::to_gd(q3_vertex_shader_source()));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			opennova::to_gd(q3_fragment_shader_source()));
-	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
-	if (spirv.is_null() || !spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-			!spirv->get_stage_compile_error(
-					RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
-		set_failure("Focused Q3 shader compilation failed");
+	Ref<RDShaderSPIRV> spirv;
+	const std::string compile_errors = compile_rd_spirv(rd, q3_vertex_shader_source(),
+			q3_fragment_shader_source(), spirv);
+	if (!compile_errors.empty()) {
+		set_failure("Focused Q3 shader compilation failed: " + compile_errors);
 		return false;
 	}
 	shader = rd->shader_create_from_spirv(spirv, "OpenNova focused Q3");

@@ -205,10 +205,8 @@ public:
 	int widget_id(const String &p_name) const;
 	String widget_name_of(int p_id) const;
 	int widget_kind_of(int p_id) const;
-	String widget_screen_of(int p_id) const;
 	bool has_widget(const String &p_name) const;
 	int frame_index(int p_id) const;
-	int id_at_index(int p_index) const;
 	// The widget's rect in the frame Control's local coordinates (the design
 	// rect scaled by the frame's current size); zero when off-screen.
 	Rect2 widget_frame_rect(int p_id) const;
@@ -222,7 +220,6 @@ public:
 	bool is_widget_checked(int p_id) const;
 	void set_widget_text(int p_id, const String &p_text);
 	String get_widget_text(int p_id) const;
-	void remember_widget_text(int p_id, const String &p_text);
 	void set_widget_items(int p_id, const PackedStringArray &p_items);
 	PackedStringArray get_widget_items(int p_id) const;
 	int item_count(int p_id) const;
@@ -232,32 +229,22 @@ public:
 	void select_row_by_value(int p_id, const String &p_value, bool p_emit);
 	void select_row(int p_id, int p_row, bool p_emit);
 	int selected_row(int p_id) const;
-	PackedInt32Array selected_rows(int p_id) const;
-	PackedInt32Array selected_set(int p_id) const;
-	void set_selected_set(int p_id, const PackedInt32Array &p_rows);
-	void set_scroll_row(int p_id, int p_row);
 	void set_widget_scroll_range(int p_id, int p_minimum, int p_maximum, int p_page,
 			int p_value);
 	// Current standalone scroll state, or null until seeded.
 	Ref<MenuScrollRange> get_widget_scroll_range(int p_id) const;
 
 	void table_add_row(int p_id, const PackedStringArray &p_cells);
-	void table_remove_row(int p_id, int p_row);
 	void table_clear_rows(int p_id);
 	int table_row_count(int p_id) const;
 	String table_cell_text(int p_id, int p_row, int p_col) const;
-	PackedInt32Array table_selected_rows(int p_id) const;
 	void table_select_row(int p_id, int p_row, bool p_additive);
 
 	// --- activation / actions ---
 	void activate(int p_id);
-	void select_radio(int p_id);
-	void emit_edit_changed(int p_id);
 	void spin_cycle(int p_id, int p_delta);
 	String spin_value_attr(int p_id) const;
 	bool dispatch_action_row(const Ref<MnuActionRow> &p_action);
-	bool handle_window_action(const String &p_target, const String &p_state, bool p_toggle);
-	void play_widget_state_sound(int p_id, const String &p_state_token);
 	// Direct play seam (voice preview etc.); emits sound_requested always.
 	void play_widget_sound(const String &p_trigger, const String &p_file);
 

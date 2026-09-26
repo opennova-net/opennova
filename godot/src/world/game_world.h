@@ -700,6 +700,12 @@ private:
 	uint64_t scene_overlay_frame_id_ = 0;
 	SceneOverlayModelSurfaces scene_overlay_bodies_;
 	void append_water_mirror_overlays(SceneOverlaySubmission &r_submission);
+	// The frame's light values (null with no environment or light state),
+	// shared by the overlay legs.
+	Ref<EnvLightValues> frame_light_values() const;
+	// The local player's FrameFX view facts: the defaults with no local
+	// player or for a spectator.
+	opennova::renderer::FrameFxViewInputs local_frame_fx_view() const;
 	bool clear_above_water_ = true;
 	bool clear_nvg_scene_ = false;
 	// The render-occlusion frame (OcclusionFrame): the blink letter gates, the

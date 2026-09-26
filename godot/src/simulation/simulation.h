@@ -897,7 +897,6 @@ private:
 
 	void reset_world();
 
-
 public:
 	// --- the weather home (world::WeatherState, ADR 0042 d2/d5) --------------
 	// The World's weather, the ONE home the WAC handlers write, the kernel's
@@ -1058,6 +1057,7 @@ public:
 		String team;                // "%ld" of the assigned team; empty until assigned
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
+	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
 	// A NovaWorld ServerCommand (the NovaWorldHost `server_command` signal's verb,
 	// target selector and argument tokens) run against the in-match host through
 	// inmatch::Server_ExecuteServerCommand. The caller owns the two shell legs:
@@ -1354,7 +1354,6 @@ public:
 	// The rows, filtered by stat.mnu's tab (0 all, 1 team 2, 2 team 1 — the
 	// engine's stat_screen_row_visible).
 	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
-	// hud::kEndRoundStatScreenDelayMsec — the 6 s stat.mnu delay.
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
 	// The SP Show Score statistics counters (hud/end_round_statistics.h):
@@ -2139,9 +2138,9 @@ public:
 	// A subsequent build/reset cannot overwrite a frame still being consumed.
 	std::shared_ptr<const SimulationPresentSnapshot> build_present_snapshot() const;
 	PackedFloat32Array get_present_snapshot() const;
-	// The door side table the most recent get_present_snapshot() built beside
-	// its rows: (row index, count, phase[count]) int32 entries in row order,
-	// only for rows whose PF_DOOR_COUNT is nonzero (runtime/inmatch/present_rows.h).
+	// The door side table the last build_present_snapshot() built beside its rows,
+	// empty after a world reset until the next build: (row index, count, phase[count])
+	// int32 entries in row order for rows with a nonzero PF_DOOR_COUNT (present_rows.h).
 	PackedInt32Array get_present_door_phases() const;
 	// Revision for the exact ordered identity layout of the most recently
 	// returned snapshot. Pose-only changes keep this stable.
@@ -2465,6 +2464,7 @@ public:
 	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
 	// False without a kernel or a local player.
 	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
+	opennova::inmatch::BreathBarFacts breath_bar_facts() const; // role_feeds.h; NOT bound
 	// The radio-request icon's viewer gate over the local player (world::
 	// friendly_tag_radio_request_viewer): a driver/controller seat or an own latch.
 	bool local_player_radio_request_icon_viewer() const;

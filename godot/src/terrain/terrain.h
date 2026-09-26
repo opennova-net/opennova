@@ -211,7 +211,6 @@ public:
 
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;
-	void rebuild_tile_overlay();
 
 	void set_environment_path(const NodePath& p_path);
 	NodePath get_environment_path() const;

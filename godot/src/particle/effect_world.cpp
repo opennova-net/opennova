@@ -6,7 +6,10 @@
 #include "resource_index/resource_root.h"
 #include "simulation/effect_section_source.h"
 #include "simulation/simulation.h"
+#include "util/axes.h"
 #include "util/string_convert.h"
+
+#include <base/io/fixed.h>
 
 #include <array>
 #include <vector>
@@ -385,9 +388,12 @@ void EffectWorld::spawn_script_effect(const opennova::world::ScriptEffectEvent &
     opennova::particle::EffectSectionGate gate;
     gate.tagged = true;
     if (Simulation *source = _section_source()) {
-        const Vector3 position(float(event.position[0]) / 65536.0f,
-                float(event.position[2]) / 65536.0f, -float(event.position[1]) / 65536.0f);
-        EffectSectionSource(source).blink_hits(position, gate.blink_hits);
+        const std::array<float, 3> mission_position = {
+                opennova::io::fp16_16_to_float(event.position[0]),
+                opennova::io::fp16_16_to_float(event.position[1]),
+                opennova::io::fp16_16_to_float(event.position[2])};
+        EffectSectionSource(source).blink_hits(mission_to_godot(mission_position),
+                gate.blink_hits);
     }
     scene_->spawn_script_effect(event, slot, owner, age_ticks, water_height_, gate);
 }

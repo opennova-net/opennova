@@ -53,7 +53,6 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_tile_info_override", "tile_info"), &Terrain::set_tile_info_override);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"), &Terrain::get_tile_info_override);
-	ClassDB::bind_method(D_METHOD("rebuild_tile_overlay"), &Terrain::rebuild_tile_overlay);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override", PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
 		"set_tile_info_override", "get_tile_info_override");
 
@@ -324,10 +323,6 @@ void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
 
 Ref<TerrainTileInfo> Terrain::get_tile_info_override() const {
 	return tile_info_override;
-}
-
-void Terrain::rebuild_tile_overlay() {
-	_rebuild_tile_overlay_pages();
 }
 
 void Terrain::set_environment_path(const NodePath& p_path) {

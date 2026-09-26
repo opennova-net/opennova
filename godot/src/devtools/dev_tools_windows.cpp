@@ -281,9 +281,6 @@ void DevTools::push_net_snapshot() {
 	// static_asserts the pairing).
 	snapshot.role = static_cast<opennova::devtools::StatusRole>(report.role);
 	snapshot.state = static_cast<opennova::devtools::StatusState>(report.state);
-	snapshot.bank_policy = report.bank_policy == opennova::world::TickBankPolicy::RetailMainLoop
-			? "retail main loop"
-			: "wall clock";
 	snapshot.frame_tick_us = report.last_perf.tick_us;
 	snapshot.frame_ticks = report.last_perf.ticks;
 	snapshot.fps = Engine::get_singleton()->get_frames_per_second();

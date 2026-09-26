@@ -72,8 +72,7 @@ uniform bool u_has_reflection = false;
 // water_murk [orig: SetWaterMurk @ 0x57d4f0] no longer has a uniform: the
 // witnessed angle-weighted murk x distance chain arrives per vertex in
 // COLOR.a now that the strip march is live (env #29) — the former flat
-// (1 - u_water_murk) knob is retired (Water still sets the parameter for
-// probe compatibility; a ShaderMaterial ignores unknown names).
+// (1 - u_water_murk) knob is retired.
 uniform sampler2D u_noise_color : filter_linear, repeat_enable;
 uniform sampler2D u_noise_normal : filter_linear, repeat_enable;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);

@@ -146,11 +146,11 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_inde
 	TranslationServer *translations = TranslationServer::get_singleton();
 	if (translations) {
 		if (!codes.language.empty()) {
-			const std::string name = to_std(translations->get_language_name(String(codes.language.c_str())));
+			const std::string name = to_std(translations->get_language_name(opennova::to_gd(codes.language)));
 			if (!name.empty()) out.language = name;
 		}
 		if (!codes.country.empty()) {
-			const std::string name = to_std(translations->get_country_name(String(codes.country.c_str())));
+			const std::string name = to_std(translations->get_country_name(opennova::to_gd(codes.country)));
 			if (!name.empty()) out.country = name;
 		}
 	}

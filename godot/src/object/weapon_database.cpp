@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 
 #include "rtxt/rtxt_string_file.h" // the string-table document + the game_text_lookup factory
+#include "util/string_convert.h"
 
 #include <formats/def/def.h>
 #include <runtime/menu/loadout_labels.h> // the loadout screens' labels, row order and weight line
@@ -204,13 +205,13 @@ int WeaponDatabase::player_info_class_mask(int p_playerclass_value) {
 String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const {
 	const opennova::def::DefWeaponDef *w = row(p_index);
 	if (w == nullptr) return String();
-	return String::utf8(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)).c_str());
+	return opennova::to_gd(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)));
 }
 
 PackedInt32Array WeaponDatabase::armory_slot_order(const PackedStringArray &p_labels) {
 	std::vector<std::string> labels;
 	labels.reserve(static_cast<size_t>(p_labels.size()));
-	for (int i = 0; i < p_labels.size(); ++i) labels.push_back(p_labels[i].utf8().get_data());
+	for (int i = 0; i < p_labels.size(); ++i) labels.push_back(opennova::to_std(p_labels[i]));
 	PackedInt32Array out;
 	for (int index : opennova::menu::armory_slot_order(labels)) out.push_back(index);
 	return out;
@@ -218,8 +219,8 @@ PackedInt32Array WeaponDatabase::armory_slot_order(const PackedStringArray &p_la
 
 String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 		const Ref<RtxtStringFile> &p_gameui) {
-	return String::utf8(opennova::menu::loadout_weight_line(p_total,
-			game_text_lookup(p_menutxt), game_text_lookup(p_gameui)).c_str());
+	return opennova::to_gd(opennova::menu::loadout_weight_line(p_total,
+			game_text_lookup(p_menutxt), game_text_lookup(p_gameui)));
 }
 
 static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,
@@ -257,7 +258,7 @@ Array WeaponDatabase::player_info_kit_entries(int p_team, int p_player_class,
 	Array out;
 	for (const opennova::playersav::KitEntry &e : opennova::menu::player_info_kit_entries(sel, name)) {
 		Dictionary d;
-		d["name"] = String::utf8(e.name.c_str());
+		d["name"] = opennova::to_gd(e.name);
 		d["ammo_primary"] = e.ammo_primary;
 		d["ammo_secondary"] = e.ammo_secondary;
 		d["flags"] = e.flags;

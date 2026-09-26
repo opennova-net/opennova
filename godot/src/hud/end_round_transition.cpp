@@ -17,8 +17,6 @@ void EndRoundTransition::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("step", "header_known", "board_known", "now_ms"),
 			&EndRoundTransition::step);
 	ClassDB::bind_method(D_METHOD("reset"), &EndRoundTransition::reset);
-	ClassDB::bind_method(D_METHOD("is_header_seen"), &EndRoundTransition::is_header_seen);
-	ClassDB::bind_method(D_METHOD("is_stat_opened"), &EndRoundTransition::is_stat_opened);
 	BIND_CONSTANT(STEP_ANNOUNCED);
 	BIND_CONSTANT(STEP_RESET);
 	BIND_CONSTANT(STEP_PRE_STAT);

@@ -52,8 +52,6 @@ public:
 	// This frame's streaks into the post-particle overlay tail. Not bound to
 	// Godot.
 	void append_overlay(SceneOverlaySubmission &r_submission);
-	// The streak count of the last compiled frame (0 below the rain gate).
-	int get_drop_count() const { return frame_.drops; }
 
 protected:
 	static void _bind_methods();

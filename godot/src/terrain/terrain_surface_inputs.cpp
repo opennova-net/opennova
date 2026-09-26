@@ -290,7 +290,7 @@ bool TerrainSurfaceInputs::rebuild_blend() {
 		// Retail creates the DBlendmap quadrants with flags 0x100001: no
 		// mip-suppression bit, so they carry the full box-filtered auto chain.
 		// [orig: PolyTrn_InitTextures @ 0x60b2c9..0x60b2dd;
-		// GTexture_CreateFromPixelData @ 0x6877c7..0x6878be, see docs/terrain/terrain-re.md]
+		// GTexture_CreateFromPixelData_0 @ 0x6877c7..0x6878be, see docs/terrain/terrain-re.md]
 		normalized_blend_texture = texture_from_rgba8(
 			opennova::terrain::normalize_detail_blend_map(source), true);
 	}

@@ -26,12 +26,6 @@
 
 using namespace godot;
 
-namespace {
-
-const Vector3 kNoPoint(INFINITY, INFINITY, INFINITY);
-
-} // namespace
-
 void PlayerWeaponEffects::setup(Node *p_world, LocalPlayerPresenter *p_presenter) {
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
 	presenter_id_ = p_presenter != nullptr ? ObjectID(p_presenter->get_instance_id()) : ObjectID();
@@ -363,7 +357,7 @@ PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::mounted_action_particle(
 	if (owner == nullptr || weapon_view_.is_null() || p_userpoint.is_empty() ||
 			!opennova::world::action_particle_uses_mounted_gun(
 					weapon_view_->get_borrowed_usegun_slot(), owner->is_third_person(),
-					!owner->vm_parts().is_empty())) {
+					weapon_view_->value().first_person_action_model)) {
 		return out;
 	}
 	GameWorld *game_world = Object::cast_to<GameWorld>(world());
@@ -393,8 +387,8 @@ PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::mounted_action_particle(
 
 // World-space spawn point for an ACTION particle: the named user point on a
 // viewmodel part (the gun carries the muzzle points), composed through its
-// live subobject/bone pose. Falls back to the first part's origin, then the
-// player eye. The THIRD-PERSON action-particle anchor: the same authored
+// live subobject/bone pose. Falls back to the entity origin. The
+// THIRD-PERSON action-particle anchor: the same authored
 // userpoint name resolved against the gfx3 world gun instead of the
 // first-person viewmodel -- the gfx1/gfx3 pick by the FP bit is the engine's
 // action_particle_uses_third_person_gun (world/player_present.h carries the
@@ -450,18 +444,11 @@ Vector3 PlayerWeaponEffects::action_particle_world_position(const String &p_user
 		return tp.pos;
 	}
 	LocalPlayerPresenter *owner = presenter();
-	Vector3 fallback = kNoPoint;
-	if (owner != nullptr) {
+	if (owner != nullptr && !p_userpoint.is_empty()) {
 		const TypedArray<ObjectModel> parts = owner->vm_parts();
 		for (int64_t i = 0; i < parts.size(); ++i) {
 			ObjectModel *part = Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i]));
 			if (part == nullptr) {
-				continue;
-			}
-			if (fallback == kNoPoint) {
-				fallback = part->get_global_transform().origin;
-			}
-			if (p_userpoint.is_empty()) {
 				continue;
 			}
 			const Ref<ObjectData> data = part->get_object_data();
@@ -478,13 +465,11 @@ Vector3 PlayerWeaponEffects::action_particle_world_position(const String &p_user
 			}
 		}
 	}
-	if (fallback != kNoPoint) {
-		return fallback;
-	}
-	// Retail's deepest fallback is the ENTITY ORIGIN [orig:
-	// Entity_ComputeActionTransform @0x401310, fallback site @0x401867..0x401887
-	// copies entity+4/+8/+0xC]. The eye was our own invention and put the
-	// flash on the player's face whenever a userpoint failed to resolve.
+	// An unresolved userpoint has no model-origin leg: past the parent
+	// userpoint and the vehicle occupant legs, retail takes the ENTITY ORIGIN
+	// [orig: Entity_ComputeActionTransform @0x401310, the unresolved path
+	// @0x4016C0..0x401887, whose fallback site @0x401867..0x401887 copies
+	// entity+4/+8/+0xC]. Neither a viewmodel part's origin nor the eye stands in.
 	const Ref<Simulation> origin_sim = sim();
 	return origin_sim.is_valid() ? origin_sim->get_local_player_position() : Vector3();
 }

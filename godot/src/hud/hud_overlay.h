@@ -201,6 +201,11 @@ public:
 	// seat or the player's own S2C 0x6D latch); the compiler ANDs it with
 	// each tag's own fold before drawing the icon cell.
 	void set_radio_request_icon_viewer(bool p_viewer);
+	// The breath bar (the compiler's element_breath_bar): this frame's samples,
+	// breath seconds and round-over latch from the sim's role view
+	// (Simulation::breath_bar_facts) plus the Overlays/STROVER91 label; no sim
+	// leaves the bar empty.
+	void set_breath_bar(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
 	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
 	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
 	enum FriendlyTagMode {

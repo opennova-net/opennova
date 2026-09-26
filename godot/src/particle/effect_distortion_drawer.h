@@ -37,8 +37,8 @@ public:
 	// The compositor effect carrying the distortion particle subset.
 	void set_particle_effect(const Ref<ParticleCompositorEffect> &p_effect);
 	Ref<ParticleCompositorEffect> get_particle_effect() const;
-	// This frame's content gate halves: a live class-7 emitter (the misnamed
-	// EffectWorld_HasDistortionParticles @ 0x5F6640) and an active channel of a
+	// This frame's content gate halves: a live class-7 emitter
+	// (EffectWorld_HasDistortionParticles @ 0x5F6640) and an active channel of a
 	// distortion style (CEffectEmitterPool_HasDistortionChannels @ 0x5DB7F0).
 	void set_particles_present(bool p_present);
 	void set_ribbon_channels_present(bool p_present);

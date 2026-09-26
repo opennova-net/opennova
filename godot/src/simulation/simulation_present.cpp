@@ -713,7 +713,7 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	// wire-direct from the state its ClientReplicaPipeline decoded (ClientState).
 	// Empty when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the
 	// AI pool for tooling.
-	if (!present_.snapshot || !present_.snapshot.unique())
+	if (!present_.snapshot || present_.snapshot.use_count() != 1)
 		present_.snapshot = std::make_shared<SimulationPresentSnapshot>();
 	auto &frame = *present_.snapshot;
 	frame.rows.clear();

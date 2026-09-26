@@ -2,6 +2,7 @@
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/player_local_view.h"
 #include "util/axes.h"
+#include "util/string_convert.h"
 #include <algorithm>
 #include <cmath>
 #include <godot_cpp/variant/plane.hpp>
@@ -26,8 +27,8 @@ void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets)
 	combat_texture_(kHudTexDriverCrosshair, "dirguide.tga", l.driver_crosshair);
 	combat_texture_(kHudTexTarget, "comalck2.tga", l.target);
 	combat_texture_(kHudTexTargetFriendly, "comlck2x.tga", l.target_friendly);
-	combat_texture_(kHudTexParachute, String::utf8(assets.parachute_icon.c_str()), l.parachute);
-	combat_texture_(kHudTexArmor, String::utf8(assets.armor_icon.c_str()), l.armor);
+	combat_texture_(kHudTexParachute, opennova::to_gd(assets.parachute_icon), l.parachute);
+	combat_texture_(kHudTexArmor, opennova::to_gd(assets.armor_icon), l.armor);
 }
 void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
 		const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,

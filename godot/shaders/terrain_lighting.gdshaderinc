@@ -71,7 +71,6 @@ uniform sampler2D u_detailmap : filter_nearest_mipmap, repeat_disable;
 // object-model/global defaults.
 uniform vec3 u_sun_light = vec3(0.666667, 0.666667, 0.654902);
 uniform vec3 u_sky_ambient = vec3(0.329412, 0.345098, 0.349020);
-uniform vec3 u_sun_direction = vec3(0.0, 0.70710678, 0.70710678);
 uniform float u_detail_density = 128.0;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 uniform float u_fog_start = 0.0;

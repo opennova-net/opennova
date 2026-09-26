@@ -10,6 +10,7 @@
 #include "network/novaworld_host.h"
 #include "object/avatar_database.h"
 #include "resource_index/launch_flags.h"
+#include "util/string_convert.h"
 #include "world/game_world.h"
 #include "world/loading_screen_info.h"
 
@@ -513,6 +514,8 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 		Ref<Simulation> sim = p_runtime->get_sim();
 		if (sim.is_valid()) {
 			sync_nw_host_roster(host, sim);
+			// The TimeLeft column reads the live round clock at every refresh.
+			host->set_round_time_remaining_ticks(sim->round_time_remaining_ticks());
 		}
 	}
 }
@@ -529,9 +532,8 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 void SessionDrive::sync_nw_host_roster(NovaWorldHost *p_host, const Ref<Simulation> &p_sim) {
 	std::map<int, std::string> live;
 	for (const Simulation::HostPeerSlot &slot : p_sim->host_peer_slots()) {
-		const std::string signature = std::string(slot.player_name.utf8().get_data()) + "|" +
-				std::string(slot.ip_and_port.utf8().get_data()) + "|" +
-				std::string(slot.team.utf8().get_data());
+		const std::string signature = opennova::to_std(slot.player_name) + "|" +
+				opennova::to_std(slot.ip_and_port) + "|" + opennova::to_std(slot.team);
 		live[slot.slot] = signature;
 		auto sent = nw_roster_sent_.find(slot.slot);
 		if (sent != nw_roster_sent_.end() && sent->second == signature) {

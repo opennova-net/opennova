@@ -22,7 +22,6 @@ void Precipitation::_bind_methods() {
 			"set_weather_path", "get_weather_path");
 	ClassDB::bind_method(D_METHOD("render_frame", "sim", "camera"),
 			&Precipitation::render_frame);
-	ClassDB::bind_method(D_METHOD("get_drop_count"), &Precipitation::get_drop_count);
 }
 
 void Precipitation::set_resource_root(const Ref<ResourceRoot> &p_root) {

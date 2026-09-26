@@ -258,7 +258,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 			Vector3 glow_pos = mission_to_godot(ev.origin);
 			if (plan.glow_at_muzzle) {
 				const Vector3 glow_anchor = owner_->muzzle_world_for(
-						ev.shooter_handle, String::utf8(plan.userpoint.c_str()));
+						ev.shooter_handle, opennova::to_gd(plan.userpoint));
 				if (glow_anchor.is_finite()) {
 					glow_pos = glow_anchor;
 				}
@@ -274,7 +274,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 			// The rendered gun's own userpoint is the anchor (the muzzle-authority
 			// decision); an unresolvable anchor keeps the row's origin.
 			const Vector3 anchored = owner_->muzzle_world_for(
-					ev.shooter_handle, String::utf8(plan.userpoint.c_str()));
+					ev.shooter_handle, opennova::to_gd(plan.userpoint));
 			if (anchored.is_finite()) {
 				origin = anchored;
 			}
@@ -282,7 +282,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 		if (fx_world != nullptr && plan.spawn) {
 			// The shooter is the descriptor tag (retail
 			// WeaponSlot_FireAndSpawnEffects @ 0x53F582): the section gate applies.
-			fx_world->spawn_effect(String::utf8(plan.effect.c_str()), origin,
+			fx_world->spawn_effect(opennova::to_gd(plan.effect), origin,
 					mission_to_godot(ev.forward), true);
 			++stat_effects_;
 		}

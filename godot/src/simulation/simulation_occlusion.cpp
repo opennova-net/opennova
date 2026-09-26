@@ -291,7 +291,7 @@ PackedInt64Array Simulation::get_building_visibility_changes() {
 	// with an OCCLUSION instance or a collision model (every retail building
 	// batch member): the raw g_BuildingSectionVisMask word the other readers
 	// share, and the def's forced sections the part draw ORs over it
-	// (OcclusionWorld::section_draw_mask).
+	// (ObjectModel::section_part_visible).
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
 		if (!kernel_->occlusion.has_instance(e.handle) &&

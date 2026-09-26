@@ -98,8 +98,6 @@ public:
 	bool get_listen_host() const;
 	void set_locked(bool locked);
 	bool get_locked() const;
-	void set_allow_ping(bool allow_ping);
-	bool get_allow_ping() const;
 	void set_country(const String &country);
 	String get_country() const;
 	void set_expansion(const String &expansion);
@@ -108,8 +106,10 @@ public:
 	String get_version() const;
 	void set_time_of_day(int time_of_day);
 	int get_time_of_day() const;
+	// The live round clock the TimeLeft column reads at every refresh
+	// (Simulation::round_time_remaining_ticks, fed per tick by SessionDrive;
+	// -1 = untimed). A C++ seam, not a script property.
 	void set_round_time_remaining_ticks(int ticks);
-	int get_round_time_remaining_ticks() const;
 	// The gametext table the Host list's STRNOVA/TimeOfDay tokens resolve through.
 	void set_gametext(const Ref<RtxtStringFile> &gametext);
 	Ref<RtxtStringFile> get_gametext() const;
@@ -161,11 +161,10 @@ public:
 	// ConnectionId (dcb), its game endpoint (the inet_addr dword + port) and the
 	// JOINTICKET its join carried (empty when the KV had none). The service answers
 	// with ServerPlayerEnterResult (the player_enter_result signal). Only while
-	// hosting is established (enforced by ClientSession).
+	// hosting is established (enforced by ClientSession). A C++ seam (the
+	// SessionDrive join-ticket hook), not bound to script.
 	void request_player_enter(int64_t connection_id, int64_t ip_address, int port,
 	                          const String &join_ticket);
-	// The retail error tag (NWECnn) of the last failure, or empty.
-	String get_last_error_tag() const { return last_error_tag_; }
 
 	// Engine hooks.
 	void _ready() override;
@@ -204,7 +203,6 @@ private:
 	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
 	// endpoint, the gate auth-code stash, and the connect deadlines.
 	NwuLobbySession lobby_;
-	String last_error_tag_;
 	std::map<int, opennova::HostPlayerSlot> players_;
 	int player_count_override_ = -1;      // set_player_count; -1 = the roster size
 	opennova::SessionIdRing pcid_ring_;

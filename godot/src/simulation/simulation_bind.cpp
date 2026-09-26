@@ -90,7 +90,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_host_listening"), &Simulation::is_host_listening);
 	ClassDB::bind_method(D_METHOD("get_host_listen_port"), &Simulation::get_host_listen_port);
 	ClassDB::bind_method(D_METHOD("get_host_peer_count"), &Simulation::get_host_peer_count);
-	ClassDB::bind_method(D_METHOD("set_novaworld_gsid", "gsid"), &Simulation::set_novaworld_gsid);
 	ClassDB::bind_method(D_METHOD("configure_host_session", "options"), &Simulation::configure_host_session);
 	ClassDB::bind_method(D_METHOD("get_host_session_config"), &Simulation::get_host_session_config);
 	ClassDB::bind_method(D_METHOD("get_mission_header_size"), &Simulation::get_mission_header_size);

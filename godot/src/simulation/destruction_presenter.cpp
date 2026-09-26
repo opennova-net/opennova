@@ -18,6 +18,7 @@
 #include "lights/effect_light_director.h"
 #include "mission/mission_data.h"
 #include "particle/effect_world.h"
+#include "render/object_lod_frame.h"
 #include "render/visual_layers.h"
 #include "simulation/effect_owner_keys.h"
 #include "simulation/entity_presenter.h"
@@ -684,9 +685,9 @@ ObjectModel *DestructionPresenter::build_piece_model(int p_slot, int p_item_id) 
 		return nullptr;
 	}
 	const int def_id = p_item_id + MissionData::ITEM_ID_OFFSET; // wire type id -> items.def id
-	const std::string husk = item_db_->get_husk(def_id).utf8().get_data();
-	const std::string huskfinal = item_db_->get_huskfinal(def_id).utf8().get_data();
-	const String graphic(opennova::world::death_piece_graphic(husk, huskfinal).c_str());
+	const std::string husk = opennova::to_std(item_db_->get_husk(def_id));
+	const std::string huskfinal = opennova::to_std(item_db_->get_huskfinal(def_id));
+	const String graphic = opennova::to_gd(opennova::world::death_piece_graphic(husk, huskfinal));
 	if (graphic.is_empty()) {
 		return nullptr;
 	}
@@ -694,7 +695,7 @@ ObjectModel *DestructionPresenter::build_piece_model(int p_slot, int p_item_id) 
 			graphic, String(), parent, String(), String(), true);
 	if (model == nullptr && !huskfinal.empty() && !husk.empty()) {
 		model = placer_->build_model_from_graphic(
-				String(husk.c_str()), String(), parent, String(), String(), true);
+				opennova::to_gd(husk), String(), parent, String(), String(), true);
 	}
 	if (model == nullptr) {
 		return nullptr;
@@ -724,7 +725,7 @@ ObjectModel *DestructionPresenter::piece_model(int p_slot) const {
 // ftol(scale * 65536)) * T(-centre of the drawn section's COBJ row), every
 // bone matrix the same. The pose converts like every entity's (the BAM heading
 // is 90 - the mission yaw); the COBJ centre is in the model's own axes, (x, y,
-// z) -> the model node's (y, z, x) (render/object_lod_frame projection_center).
+// z) -> the model node's (y, z, x) (ObjectLodFrame::cobj_center_local).
 Transform3D DestructionPresenter::piece_draw_transform(
 		const opennova::world::DeathPieceDraw &p_draw) {
 	const Basis basis = bms_to_godot_basis(
@@ -732,8 +733,7 @@ Transform3D DestructionPresenter::piece_draw_transform(
 								.scaled(Vector3(p_draw.scale, p_draw.scale, p_draw.scale));
 	Transform3D transform(basis, mission_to_godot(p_draw.pos));
 	if (p_draw.pivoted) {
-		const Vector3 centre(p_draw.pivot_q16[1] / 65536.0f, p_draw.pivot_q16[2] / 65536.0f,
-				p_draw.pivot_q16[0] / 65536.0f);
+		const Vector3 centre = ObjectLodFrame::cobj_center_local(p_draw.pivot_q16);
 		transform = transform * Transform3D(Basis(), -centre);
 	}
 	return transform;

@@ -21,6 +21,7 @@
 
 #include "util/pcx_texture_bridge.h"
 #include "util/data_format.h"
+#include "util/string_convert.h"
 #include "util/texture_path_resolver.h"
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -445,7 +446,7 @@ Error TerrainData::_import_pcx_slot_bytes(const String &slot_id, const String &f
 
 void TerrainData::set_trn_path(const String &p_path) { trn_path = p_path; }
 void TerrainData::set_mission_tile_set(const String &p_tile_set) {
-	mission_tile_set = p_tile_set.utf8().get_data();
+	mission_tile_set = opennova::to_std(p_tile_set);
 }
 
 void TerrainData::set_terrain_name(const String &p_name) { terrain_name = p_name; _notify_terrain_changed(); }

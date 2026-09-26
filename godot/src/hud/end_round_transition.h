@@ -30,8 +30,6 @@ public:
 
 	int step(bool p_header_known, bool p_board_known, int p_now_ms);
 	void reset() { state_.reset(); }
-	bool is_header_seen() const { return state_.header_seen; }
-	bool is_stat_opened() const { return state_.stat_opened; }
 };
 
 } // namespace godot

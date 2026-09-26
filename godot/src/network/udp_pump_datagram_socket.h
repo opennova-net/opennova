@@ -1,6 +1,7 @@
 #pragma once
 
 #include "network/udp_pump.h"
+#include "util/string_convert.h"
 
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
@@ -42,7 +43,7 @@ public:
 		PackedByteArray bytes;
 		bytes.resize(static_cast<int64_t>(len));
 		std::memcpy(bytes.ptrw(), data, len);
-		pump_->send_to(String(ip.c_str()), to.port, bytes);
+		pump_->send_to(opennova::to_gd(ip), to.port, bytes);
 	}
 
 private:

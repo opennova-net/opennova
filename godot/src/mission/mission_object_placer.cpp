@@ -20,6 +20,7 @@
 #include <base/io/fixed.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/person_overlays.h> // kParachuteItemTypeId
 
 #include "env/water.h"
 #include "mission/mission_data.h"
@@ -1514,7 +1515,7 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 			int32_t parachute_radius = 0;
 			if (person) {
 				const String chute_graphic = _graphic_for(opennova::mission::kItemIdOffset +
-						opennova::renderer::kParachuteProjectionTypeId);
+						opennova::world::kParachuteItemTypeId);
 				if (!chute_graphic.is_empty()) {
 					const Ref<ObjectData> chute = _load_object_data(chute_graphic);
 					if (chute.is_valid()) parachute_radius =

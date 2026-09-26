@@ -39,13 +39,6 @@ void SkyDome::_bind_methods() {
 			PROPERTY_HINT_LAYERS_3D_RENDER),
 			"set_environment_capture_layer_mask",
 			"get_environment_capture_layer_mask");
-	ClassDB::bind_method(D_METHOD("set_frame_clear_environment", "environment"),
-			&SkyDome::set_frame_clear_environment);
-	ClassDB::bind_method(D_METHOD("get_frame_clear_environment"),
-			&SkyDome::get_frame_clear_environment);
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "frame_clear_environment",
-						 PROPERTY_HINT_RESOURCE_TYPE, "Environment"),
-			"set_frame_clear_environment", "get_frame_clear_environment");
 	ClassDB::bind_method(D_METHOD("build"), &SkyDome::build);
 	ClassDB::bind_method(D_METHOD("is_built"), &SkyDome::is_built);
 	ClassDB::bind_method(D_METHOD("get_sky_material"),
@@ -82,10 +75,6 @@ void SkyDome::set_environment_capture_layer_mask(uint32_t p_mask) {
 		mesh_instance_->set_layer_mask(
 				mesh_instance_->get_layer_mask() | p_mask);
 	}
-}
-
-void SkyDome::set_frame_clear_environment(const Ref<Environment> &p_environment) {
-	frame_clear_environment_ = p_environment;
 }
 
 MissionEnvironment *SkyDome::_env_node() {
@@ -210,7 +199,6 @@ void SkyDome::advance_frame(double p_delta) {
 		mesh_instance_->set_global_position(to_vector3(anchor));
 	}
 
-	sync_frame_clear_color();
 	MissionEnvironment *env = _env_node();
 	const opennova::env::SkyFrameState frame = env != nullptr
 			? opennova::env::build_sky_frame(env->state())
@@ -336,23 +324,6 @@ void SkyDome::_update_cloud_textures(MissionEnvironment *p_env) {
 		cloud_material_->set_shader_parameter("u_cloud_tex2",
 				tex2.is_valid() ? tex2 : tex1);
 	}
-}
-
-// The faithful sky dome is open below its rim. Retail clears that region to
-// the horizon-blended skyfog block; the shell provides the BG_COLOR resource.
-void SkyDome::sync_frame_clear_color() {
-	if (frame_clear_environment_.is_null()) {
-		return;
-	}
-	MissionEnvironment *env = _env_node();
-	if (env == nullptr || !env->is_loaded()) {
-		return;
-	}
-	const opennova::env::Rgb rgb = env->state().frame_clear_color();
-	// Environment decodes its sRGB color before clearing the scene target.
-	// Our spatial passes write retail gamma-domain values (D-RMAT-7), so
-	// pre-encode this device input to preserve those same values in the clear.
-	frame_clear_environment_->set_bg_color(Color(rgb.r, rgb.g, rgb.b).linear_to_srgb());
 }
 
 } // namespace godot

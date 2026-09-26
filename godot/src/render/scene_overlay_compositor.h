@@ -104,7 +104,6 @@ public:
 	~SceneOverlayCompositorEffect() override;
 
 	void set_view_kind(ViewKind p_kind);
-	ViewKind get_view_kind() const;
 	void publish(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
 	void clear_submission();
 	// Release RenderingDevice objects only while the owner knows the server

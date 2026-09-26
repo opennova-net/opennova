@@ -46,7 +46,7 @@ public:
 	virtual ~FrameFxDistortionDrawer() = default;
 	// Main thread, after this frame's particle and tracer publication: the
 	// row's content gate (CEffectEmitterPool_HasDistortionChannels @0x5db7f0
-	// || the effect world's distortion-particle test, the misnamed
+	// || the effect world's distortion-particle test,
 	// EffectWorld_HasDistortionParticles @0x5f6640).
 	virtual bool frame_has_distortion() const = 0;
 	// Render thread, inside the terminal FrameFX effect. Returns false on a

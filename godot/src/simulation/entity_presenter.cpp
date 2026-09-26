@@ -172,8 +172,6 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup_passes", "container", "item_db",
 			"resource_root", "audio", "fx", "lights", "environment", "anchors"),
 			&EntityPresenter::setup_passes);
-	ClassDB::bind_method(D_METHOD("set_listener_position", "position"),
-			&EntityPresenter::set_listener_position);
 	ClassDB::bind_method(D_METHOD("present_passes"), &EntityPresenter::present_passes);
 	ClassDB::bind_method(D_METHOD("get_fire_present_stats"),
 			&EntityPresenter::get_fire_present_stats);

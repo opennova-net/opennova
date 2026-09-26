@@ -660,6 +660,23 @@ void GameWorld::render_precipitation_frame() {
 	}
 }
 
+Ref<EnvLightValues> GameWorld::frame_light_values() const {
+	const Ref<EnvLightState> light_state =
+			env_ != nullptr ? env_->get_light_state() : Ref<EnvLightState>();
+	return light_state.is_valid() ? light_state->get_values() : Ref<EnvLightValues>();
+}
+
+opennova::renderer::FrameFxViewInputs GameWorld::local_frame_fx_view() const {
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	if (presenter != nullptr && !presenter->is_local_spectator()) {
+		const Ref<PlayerLocalView> local = presenter->presented_view();
+		if (local.is_valid()) {
+			return local->native_frame().frame_fx;
+		}
+	}
+	return opennova::renderer::FrameFxViewInputs();
+}
+
 // The FrameFX screen-effect plan: the local player's frame facts (defaults
 // with no local player or for a spectator) through the engine planner
 // (runtime/renderer/frame_fx_effects.h, retail Render_ProcessMainSceneFrame
@@ -668,15 +685,7 @@ void GameWorld::plan_screen_effects_frame() {
 	if (framefx_ == nullptr) {
 		return;
 	}
-	opennova::renderer::FrameFxViewInputs view;
-	LocalPlayerPresenter *presenter = local_view_presenter();
-	if (presenter != nullptr && !presenter->is_local_spectator()) {
-		const Ref<PlayerLocalView> local = presenter->presented_view();
-		if (local.is_valid()) {
-			view = local->native_frame().frame_fx;
-		}
-	}
-	framefx_->set_view_effects(view);
+	framefx_->set_view_effects(local_frame_fx_view());
 	// The effects device draws the row's distortion sets (the class-7
 	// particles and the tracer distortion ribbons).
 	EffectWorld *effect_world = get_effect_world();
@@ -737,14 +746,7 @@ void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) 
 	if (entities == nullptr || sim.is_null() || camera == nullptr || env_ == nullptr) {
 		return;
 	}
-	opennova::renderer::FrameFxViewInputs local;
-	LocalPlayerPresenter *presenter = local_view_presenter();
-	if (presenter != nullptr && !presenter->is_local_spectator()) {
-		const Ref<PlayerLocalView> view = presenter->presented_view();
-		if (view.is_valid()) {
-			local = view->native_frame().frame_fx;
-		}
-	}
+	const opennova::renderer::FrameFxViewInputs local = local_frame_fx_view();
 	if (!local.nvg_active) {
 		return;
 	}
@@ -756,9 +758,7 @@ void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) 
 	view.camera_mode = local.camera_mode;
 	const opennova::env::SceneFogValues fog =
 			env_->state().build_scene_fog(env_->is_underwater_view());
-	const Ref<EnvLightState> light_state = env_->get_light_state();
-	const Ref<EnvLightValues> light = light_state.is_valid() ? light_state->get_values()
-															: Ref<EnvLightValues>();
+	const Ref<EnvLightValues> light = frame_light_values();
 	const Vector3 forward = -view.eye.basis.get_column(2).normalized();
 	view.fog.eye[0] = static_cast<float>(view.eye.origin.x);
 	view.fog.eye[1] = static_cast<float>(view.eye.origin.y);
@@ -794,9 +794,7 @@ void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) 
 	}
 	Viewport *viewport = get_viewport();
 	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
-	const Ref<EnvLightState> light_state = env_->get_light_state();
-	const Ref<EnvLightValues> light = light_state.is_valid() ? light_state->get_values()
-															: Ref<EnvLightValues>();
+	const Ref<EnvLightValues> light = frame_light_values();
 	if (camera == nullptr || light.is_null()) {
 		return;
 	}
@@ -859,9 +857,7 @@ void GameWorld::append_water_mirror_overlays(SceneOverlaySubmission &r_submissio
 	if (celestial_ == nullptr || env_ == nullptr) {
 		return;
 	}
-	const Ref<EnvLightState> light_state = env_->get_light_state();
-	const Ref<EnvLightValues> light = light_state.is_valid() ? light_state->get_values()
-															: Ref<EnvLightValues>();
+	const Ref<EnvLightValues> light = frame_light_values();
 	if (light.is_null()) {
 		return;
 	}

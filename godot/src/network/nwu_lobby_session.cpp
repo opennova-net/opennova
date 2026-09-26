@@ -1,6 +1,7 @@
 #include "network/nwu_lobby_session.h"
 #include "network/random_id.h"
 #include "util/data_format.h"
+#include "util/string_convert.h"
 
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>
@@ -106,7 +107,7 @@ void NwuLobbySession::process(double delta) {
 		if (clock_ms_ - gate_started_ms_ > opennova::SESSION_GATE_PROBE_TIMEOUT_MS) {
 			gate_probe_datagram_.clear(); // report once
 			if (hooks_.on_fatal) {
-				hooks_.on_fatal(String(opennova::novaworld_gate_error_tag(0, false).c_str()));
+				hooks_.on_fatal(opennova::to_gd(opennova::novaworld_gate_error_tag(0, false)));
 			}
 			return;
 		}
@@ -180,7 +181,7 @@ void NwuLobbySession::poll_gate() {
 			if (hooks_.on_fatal) hooks_.on_fatal(String("UDPNOVAWORLD malformed"));
 			return;
 		}
-		nw_udp_host_ = String(udp_host.c_str());
+		nw_udp_host_ = opennova::cp1252_to_gd(udp_host); // the gate's wire bytes
 		nw_udp_port_ = udp_port;
 
 		begin_session();
@@ -262,7 +263,7 @@ void NwuLobbySession::poll_session() {
 			send(dg);
 		}
 		if (!rx.ok) {
-			if (hooks_.on_fatal) hooks_.on_fatal(String(session_->last_error().c_str()));
+			if (hooks_.on_fatal) hooks_.on_fatal(opennova::to_gd(session_->last_error()));
 			return;
 		}
 		if (hooks_.on_session_state) hooks_.on_session_state();

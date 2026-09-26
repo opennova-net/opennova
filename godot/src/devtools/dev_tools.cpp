@@ -587,7 +587,6 @@ void DevTools::push_control_catalog() {
 			if (row.is_null()) continue;
 			opennova::devtools::ControlSpec spec;
 			spec.id = opennova::to_std(String(row->get_id()));
-			spec.page = opennova::to_std(String(row->get_page()));
 			spec.label = opennova::to_std(row->get_label());
 			spec.tooltip = opennova::to_std(row->get_tooltip());
 			spec.kind = static_cast<opennova::devtools::ControlKind>(row->get_kind());
@@ -598,8 +597,6 @@ void DevTools::push_control_catalog() {
 			for (int64_t c = 0; c < choices.size(); ++c) {
 				spec.choices.push_back(opennova::to_std(choices[c]));
 			}
-			spec.requires_confirm = row->get_requires_confirm();
-			spec.authoritative = row->get_authority() == DebugControlRow::HOST_ONLY;
 			catalog.push_back(std::move(spec));
 		}
 	}
@@ -633,7 +630,6 @@ void DevTools::push_control_states() {
 		opennova::devtools::ControlState out;
 		out.id = id;
 		if (state.is_valid()) {
-			out.available = state->is_available();
 			out.writable = state->is_writable();
 			out.has_value = control_value_from_variant(state->get_value(), out.value);
 			out.reason = opennova::to_std(state->get_reason());

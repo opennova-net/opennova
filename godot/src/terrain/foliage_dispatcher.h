@@ -164,7 +164,6 @@ public:
   // The local player's thermal view, fed per frame by the GameWorld leg from
   // the environment's world gate (the engine compiler carries the witness).
   void set_thermal_view(bool p_thermal);
-  bool is_thermal_view() const { return thermal_view_; }
   // Env_WaterHeightFixed in world units (0 = no water), fed per frame by the
   // GameWorld leg: the detail passes and the MODEL masks split by it (the
   // engine compiler carries the witness).

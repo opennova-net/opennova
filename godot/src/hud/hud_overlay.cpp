@@ -200,6 +200,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_friendly_tags);
 	ClassDB::bind_method(D_METHOD("set_radio_request_icon_viewer", "viewer"),
 			&HudOverlay::set_radio_request_icon_viewer);
+	ClassDB::bind_method(D_METHOD("set_breath_bar", "sim", "gametext"),
+			&HudOverlay::set_breath_bar);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
 								  "texts", "ys"),
 			&HudOverlay::set_end_round_overlay);
@@ -496,7 +498,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// The static HUD frame background the engine picked (the last authored
 	// StaticFrame line, hud_static_frame_index); absent, nothing is loaded.
 	if (layout_.frame_pos.present) {
-		const Ref<Texture2D> tex = load_hud_texture_(String::utf8(assets.static_frame.c_str()));
+		const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.static_frame));
 		textures_[opennova::hud::kHudTexFrame] = tex;
 		layout_.frame_texture_valid = tex.is_valid();
 		layout_.frame_tex_w = tex.is_valid() ? tex->get_width() : 0;
@@ -552,7 +554,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// HUDSTANCE ids and offsets).
 	for (int i = 0; i < 6; ++i) {
 		const Ref<Texture2D> tex =
-				load_hud_texture_(String::utf8(assets.stance_textures[static_cast<size_t>(i)].c_str()));
+				load_hud_texture_(opennova::to_gd(assets.stance_textures[static_cast<size_t>(i)]));
 		textures_[opennova::hud::kHudTexStance0 + i] = tex;
 		layout_.stance_texture_valid[static_cast<size_t>(i)] = tex.is_valid();
 	}
@@ -594,7 +596,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 
 	// The HUD font hudpos names (the engine's hi-first pick), parsed by the
 	// engine fnt lib; page bitmaps become one texture each for glyph quads.
-	font_valid_ = load_fnt_(String::utf8(assets.font.c_str()), font_,
+	font_valid_ = load_fnt_(opennova::to_gd(assets.font), font_,
 			opennova::hud::kHudFontSlotHud);
 
 	configured_ = true;
@@ -1234,6 +1236,21 @@ void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
 
 void HudOverlay::set_radio_request_icon_viewer(bool p_viewer) {
 	state_.radio_request_icon_viewer = p_viewer;
+	queue_redraw();
+}
+
+// The breath bar's facts off the sim's role view (inmatch::breath_bar_facts)
+// and its label: HUD_DrawBreathBar fetches Overlays/STROVER91 through
+// GameText_GetString at every draw, whose miss is "".
+void HudOverlay::set_breath_bar(const Ref<Simulation> &p_sim,
+		const Ref<RtxtStringFile> &p_gametext) {
+	const opennova::inmatch::BreathBarFacts facts = p_sim.is_valid()
+			? p_sim->breath_bar_facts()
+			: opennova::inmatch::BreathBarFacts();
+	state_.breath_samples = facts.samples;
+	state_.breath_time = facts.breath_time;
+	state_.spawn_success_gate = facts.spawn_success_gate;
+	state_.breath_label = opennova::to_std(overlay_text(p_gametext, "STROVER91", ""));
 	queue_redraw();
 }
 

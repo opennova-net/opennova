@@ -152,7 +152,7 @@ godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &pat
 std::vector<godot::String> texture_candidate_filenames(const godot::String &filename) {
 	std::vector<godot::String> candidates;
 	for (const std::string &name : opennova::texture_candidate_filenames(to_std(filename)))
-		candidates.push_back(godot::String::utf8(name.c_str()));
+		candidates.push_back(opennova::to_gd(name));
 	return candidates;
 }
 

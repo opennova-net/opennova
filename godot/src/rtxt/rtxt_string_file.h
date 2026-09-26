@@ -13,6 +13,8 @@
 #include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h> // the engine's ONE game-text seam
 
+#include "util/string_convert.h"
+
 namespace godot {
 
 class ResourceRoot;
@@ -124,7 +126,7 @@ public:
 inline opennova::hud::GameTextLookup game_text_lookup(const Ref<RtxtStringFile> &table) {
 	return [table](const char *section, const char *key, const char *fallback) {
 		if (table.is_valid() && table->has_string_in_section(section, key))
-			return std::string(table->get_string_in_section(section, key).utf8().get_data());
+			return opennova::to_std(table->get_string_in_section(section, key));
 		return std::string(fallback);
 	};
 }

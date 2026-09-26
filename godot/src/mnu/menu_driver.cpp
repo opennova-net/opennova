@@ -83,13 +83,6 @@ PackedStringArray to_gd_strings(const std::vector<std::string> &p_values) {
 	return out;
 }
 
-std::vector<int> to_std_ints(const PackedInt32Array &p_values) {
-	std::vector<int> out;
-	out.reserve(static_cast<size_t>(p_values.size()));
-	for (int i = 0; i < p_values.size(); ++i) out.push_back(p_values[i]);
-	return out;
-}
-
 PackedInt32Array to_gd_ints(const std::vector<int> &p_values) {
 	PackedInt32Array out;
 	for (int value : p_values) out.push_back(value);
@@ -488,12 +481,8 @@ void MenuDriver::sync_credits_() {
 int MenuDriver::widget_id(const String &p_name) const { return runtime_.widget_id(to_std(p_name)); }
 String MenuDriver::widget_name_of(int p_id) const { return to_gd(runtime_.widget_name_of(p_id)); }
 int MenuDriver::widget_kind_of(int p_id) const { return runtime_.widget_kind_of(p_id); }
-String MenuDriver::widget_screen_of(int p_id) const {
-	return to_gd(runtime_.widget_screen_of(p_id));
-}
 bool MenuDriver::has_widget(const String &p_name) const { return widget_id(p_name) >= 0; }
 int MenuDriver::frame_index(int p_id) const { return runtime_.frame_index(p_id); }
-int MenuDriver::id_at_index(int p_index) const { return runtime_.id_at_index(p_index); }
 
 Rect2 MenuDriver::widget_frame_rect(int p_id) const {
 	const int index = frame_index(p_id);
@@ -530,9 +519,6 @@ void MenuDriver::set_widget_text(int p_id, const String &p_text) {
 	runtime_.set_widget_text(p_id, to_std(p_text));
 }
 String MenuDriver::get_widget_text(int p_id) const { return to_gd(runtime_.get_widget_text(p_id)); }
-void MenuDriver::remember_widget_text(int p_id, const String &p_text) {
-	runtime_.remember_widget_text(p_id, to_std(p_text));
-}
 void MenuDriver::set_widget_items(int p_id, const PackedStringArray &p_items) {
 	runtime_.set_widget_items(p_id, to_std_strings(p_items));
 }
@@ -556,16 +542,6 @@ void MenuDriver::select_row(int p_id, int p_row, bool p_emit) {
 	runtime_.select_row(p_id, p_row, p_emit);
 }
 int MenuDriver::selected_row(int p_id) const { return runtime_.selected_row(p_id); }
-PackedInt32Array MenuDriver::selected_rows(int p_id) const {
-	return to_gd_ints(runtime_.selected_rows(p_id));
-}
-PackedInt32Array MenuDriver::selected_set(int p_id) const {
-	return to_gd_ints(runtime_.selected_set(p_id));
-}
-void MenuDriver::set_selected_set(int p_id, const PackedInt32Array &p_rows) {
-	runtime_.set_selected_set(p_id, to_std_ints(p_rows));
-}
-void MenuDriver::set_scroll_row(int p_id, int p_row) { runtime_.set_scroll_row(p_id, p_row); }
 void MenuDriver::set_widget_scroll_range(int p_id, int p_minimum, int p_maximum, int p_page,
 		int p_value) {
 	runtime_.set_widget_scroll_range(p_id, p_minimum, p_maximum, p_page, p_value);
@@ -582,14 +558,10 @@ Ref<MenuScrollRange> MenuDriver::get_widget_scroll_range(int p_id) const {
 void MenuDriver::table_add_row(int p_id, const PackedStringArray &p_cells) {
 	runtime_.table_add_row(p_id, to_std_strings(p_cells));
 }
-void MenuDriver::table_remove_row(int p_id, int p_row) { runtime_.table_remove_row(p_id, p_row); }
 void MenuDriver::table_clear_rows(int p_id) { runtime_.table_clear_rows(p_id); }
 int MenuDriver::table_row_count(int p_id) const { return runtime_.table_row_count(p_id); }
 String MenuDriver::table_cell_text(int p_id, int p_row, int p_col) const {
 	return to_gd(runtime_.table_cell_text(p_id, p_row, p_col));
-}
-PackedInt32Array MenuDriver::table_selected_rows(int p_id) const {
-	return to_gd_ints(runtime_.table_selected_rows(p_id));
 }
 void MenuDriver::table_select_row(int p_id, int p_row, bool p_additive) {
 	runtime_.table_select_row(p_id, p_row, p_additive);
@@ -598,22 +570,11 @@ void MenuDriver::table_select_row(int p_id, int p_row, bool p_additive) {
 // ---- activation / actions --------------------------------------------------------
 
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
-void MenuDriver::select_radio(int p_id) { runtime_.select_radio(p_id); }
-void MenuDriver::emit_edit_changed(int p_id) { runtime_.emit_edit_changed(p_id); }
 void MenuDriver::spin_cycle(int p_id, int p_delta) { runtime_.spin_cycle(p_id, p_delta); }
 String MenuDriver::spin_value_attr(int p_id) const { return item_value(p_id, selected_row(p_id)); }
 
 bool MenuDriver::dispatch_action_row(const Ref<MnuActionRow> &p_action) {
 	return p_action.is_valid() && runtime_.dispatch_action(p_action->native());
-}
-
-bool MenuDriver::handle_window_action(const String &p_target, const String &p_state,
-		bool p_toggle) {
-	return runtime_.handle_window_action(to_std(p_target), to_std(p_state.to_lower()), p_toggle);
-}
-
-void MenuDriver::play_widget_state_sound(int p_id, const String &p_state_token) {
-	runtime_.play_widget_state_sound(p_id, to_std(p_state_token));
 }
 
 void MenuDriver::play_widget_sound(const String &p_trigger, const String &p_file) {
@@ -913,12 +874,9 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("widget_id", "name"), &MenuDriver::widget_id);
 	ClassDB::bind_method(D_METHOD("widget_name_of", "id"), &MenuDriver::widget_name_of);
 	ClassDB::bind_method(D_METHOD("widget_kind_of", "id"), &MenuDriver::widget_kind_of);
-	ClassDB::bind_method(D_METHOD("widget_screen_of", "id"), &MenuDriver::widget_screen_of);
 	ClassDB::bind_method(D_METHOD("has_widget", "name"), &MenuDriver::has_widget);
 	ClassDB::bind_method(D_METHOD("frame_index", "id"), &MenuDriver::frame_index);
-	ClassDB::bind_method(D_METHOD("id_at_index", "index"), &MenuDriver::id_at_index);
 	ClassDB::bind_method(D_METHOD("widget_frame_rect", "id"), &MenuDriver::widget_frame_rect);
-	ClassDB::bind_method(D_METHOD("design_scale"), &MenuDriver::design_scale);
 
 	ClassDB::bind_method(D_METHOD("set_widget_shown", "id", "shown"), &MenuDriver::set_widget_shown);
 	ClassDB::bind_method(D_METHOD("is_widget_shown", "id"), &MenuDriver::is_widget_shown);
@@ -930,8 +888,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_widget_checked", "id"), &MenuDriver::is_widget_checked);
 	ClassDB::bind_method(D_METHOD("set_widget_text", "id", "text"), &MenuDriver::set_widget_text);
 	ClassDB::bind_method(D_METHOD("get_widget_text", "id"), &MenuDriver::get_widget_text);
-	ClassDB::bind_method(D_METHOD("remember_widget_text", "id", "text"),
-			&MenuDriver::remember_widget_text);
 	ClassDB::bind_method(D_METHOD("set_widget_items", "id", "items"), &MenuDriver::set_widget_items);
 	ClassDB::bind_method(D_METHOD("get_widget_items", "id"), &MenuDriver::get_widget_items);
 	ClassDB::bind_method(D_METHOD("item_count", "id"), &MenuDriver::item_count);
@@ -943,10 +899,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_row", "id", "row", "emit"), &MenuDriver::select_row,
 			DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("selected_row", "id"), &MenuDriver::selected_row);
-	ClassDB::bind_method(D_METHOD("selected_rows", "id"), &MenuDriver::selected_rows);
-	ClassDB::bind_method(D_METHOD("selected_set", "id"), &MenuDriver::selected_set);
-	ClassDB::bind_method(D_METHOD("set_selected_set", "id", "rows"), &MenuDriver::set_selected_set);
-	ClassDB::bind_method(D_METHOD("set_scroll_row", "id", "row"), &MenuDriver::set_scroll_row);
 	ClassDB::bind_method(D_METHOD("set_widget_scroll_range", "id", "minimum", "maximum", "page",
 								 "value"),
 			&MenuDriver::set_widget_scroll_range);
@@ -954,26 +906,18 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::get_widget_scroll_range);
 
 	ClassDB::bind_method(D_METHOD("table_add_row", "id", "cells"), &MenuDriver::table_add_row);
-	ClassDB::bind_method(D_METHOD("table_remove_row", "id", "row"), &MenuDriver::table_remove_row);
 	ClassDB::bind_method(D_METHOD("table_clear_rows", "id"), &MenuDriver::table_clear_rows);
 	ClassDB::bind_method(D_METHOD("table_row_count", "id"), &MenuDriver::table_row_count);
 	ClassDB::bind_method(D_METHOD("table_cell_text", "id", "row", "col"),
 			&MenuDriver::table_cell_text);
-	ClassDB::bind_method(D_METHOD("table_selected_rows", "id"), &MenuDriver::table_selected_rows);
 	ClassDB::bind_method(D_METHOD("table_select_row", "id", "row", "additive"),
 			&MenuDriver::table_select_row, DEFVAL(false));
 
 	ClassDB::bind_method(D_METHOD("activate", "id"), &MenuDriver::activate);
-	ClassDB::bind_method(D_METHOD("select_radio", "id"), &MenuDriver::select_radio);
-	ClassDB::bind_method(D_METHOD("emit_edit_changed", "id"), &MenuDriver::emit_edit_changed);
 	ClassDB::bind_method(D_METHOD("spin_cycle", "id", "delta"), &MenuDriver::spin_cycle);
 	ClassDB::bind_method(D_METHOD("spin_value_attr", "id"), &MenuDriver::spin_value_attr);
 	ClassDB::bind_method(D_METHOD("dispatch_action_row", "action"),
 			&MenuDriver::dispatch_action_row);
-	ClassDB::bind_method(D_METHOD("handle_window_action", "target", "state", "toggle"),
-			&MenuDriver::handle_window_action, DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("play_widget_state_sound", "id", "state_token"),
-			&MenuDriver::play_widget_state_sound);
 	ClassDB::bind_method(D_METHOD("play_widget_sound", "trigger", "file"),
 			&MenuDriver::play_widget_sound);
 

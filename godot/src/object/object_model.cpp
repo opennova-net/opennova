@@ -901,10 +901,6 @@ void ObjectModel::clear_ctrl_override_native(const std::string &p_owner, int p_o
 	if (changed) finish_ctrl_change(true);
 }
 
-void ObjectModel::clear_ctrl_overrides_owned(const String &p_owner) {
-	clear_ctrl_overrides_owned_native(p_owner.utf8().get_data());
-}
-
 void ObjectModel::clear_ctrl_overrides_owned_native(const std::string &p_owner) {
 	const auto owned = controls_.owned_registers(p_owner);
 	for (int ordinal : owned) {
@@ -2197,12 +2193,8 @@ void ObjectModel::_bind_methods() {
 			static_cast<int>(opennova::env::MirrorClipWave::kEntity));
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_person", "person"),
 			&ObjectModel::set_slot_shadow_person);
-	ClassDB::bind_method(D_METHOD("is_slot_shadow_person"),
-			&ObjectModel::is_slot_shadow_person);
 	ClassDB::bind_method(D_METHOD("is_active_level_skinned"),
 			&ObjectModel::is_active_level_skinned);
-	ClassDB::bind_method(D_METHOD("set_interior_light_group", "building_bms", "section"),
-			&ObjectModel::set_interior_light_group);
 	ClassDB::bind_method(D_METHOD("get_interior_light_group_bms"),
 			&ObjectModel::get_interior_light_group_bms);
 	ClassDB::bind_method(D_METHOD("get_interior_light_group_section"),
@@ -2236,8 +2228,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_occlusion_section_mask);
 	ClassDB::bind_method(D_METHOD("set_destroyed_section_mask", "hidden_mask"),
 			&ObjectModel::set_destroyed_section_mask);
-	ClassDB::bind_method(D_METHOD("get_destroyed_section_mask"),
-			&ObjectModel::get_destroyed_section_mask);
 	ClassDB::bind_method(D_METHOD("get_surface_material_indices"),
 			&ObjectModel::get_surface_material_indices);
 	ClassDB::bind_method(D_METHOD("get_surface_materials"),

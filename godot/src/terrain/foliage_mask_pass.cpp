@@ -1,5 +1,6 @@
 #include "terrain/foliage_mask_pass.h"
 
+#include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
 #include "render/world_environment_lookup.h"
 
@@ -246,21 +247,11 @@ public:
 					"RenderingDevice is unavailable");
 			return false;
 		}
-		Ref<RDShaderSource> source;
-		source.instantiate();
-		source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-		source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-				String::utf8(kVertexShader));
-		source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-				String::utf8(kFragmentShader));
-		Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
-		if (spirv.is_null() ||
-				!spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-				!spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
-			set_failure("shader_compile_failed", spirv.is_null() ? "no SPIR-V" :
-					(spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_VERTEX) +
-							spirv->get_stage_compile_error(
-									RenderingDevice::SHADER_STAGE_FRAGMENT)).utf8().get_data());
+		Ref<RDShaderSPIRV> spirv;
+		const std::string compile_errors =
+				compile_rd_spirv(rd, kVertexShader, kFragmentShader, spirv);
+		if (!compile_errors.empty()) {
+			set_failure("shader_compile_failed", compile_errors);
 			return false;
 		}
 		shader = rd->shader_create_from_spirv(spirv, "OpenNova foliage depth masks");

@@ -646,8 +646,6 @@ private:
 	double clip_phase_seconds(const String &p_key, int p_phase_ticks, int p_variant = 0) const;
 	void clear_body_blend();
 	void reset_body_pose();
-	String resolve_anim_channel_register(int p_slot) const;
-	String resolve_anim_channel_owner(int p_slot) const;
 	bool advance_part_anims(double p_delta);
 
 	// --- materials/environment (object_model_materials.cpp) ---
@@ -746,7 +744,8 @@ public:
 	bool is_static_shadow_caster_enabled() const;
 	// Render-slot ground-shadow profile (SlotShadow consumes): person-type
 	// casters are the depth-clip stage's steepened class (that stage owns the
-	// 4x, not the drape — render_slot_shadow.h) [orig: itemdef type 3, see
+	// 4x, not the drape — render_slot_shadow.h) [orig: RenderSlot_DrawSilhouetteDrape
+	// @ 0x5d5ca0 (the itemdef +0x5C == 3 test @ 0x5d5d81); see
 	// docs/render/render-lighting-re.md]. The items.def `shadow` decal line is
 	// parsed but draws nothing in JO (render_slot_shadow.h, the blob leg).
 	void set_slot_shadow_person(bool p_person);
@@ -893,7 +892,6 @@ public:
 	// The entity's destroyed sections (the sim's hidden-section mask, 0 =
 	// none): hidden whatever the occlusion verdict says.
 	void set_destroyed_section_mask(int64_t p_hidden_mask);
-	int64_t get_destroyed_section_mask() const { return destroyed_section_mask_; }
 	PackedInt32Array get_surface_material_indices() const { return surface_material_indices_; }
 	Array get_surface_materials() const;
 	bool is_playing() const { return is_playing_; }
@@ -1014,12 +1012,11 @@ public:
 	// at script/config ingress; preserve the same ordered store and sample path.
 	void set_ctrl_override_native(const std::string &p_owner, int p_ordinal, int64_t p_value);
 	void clear_ctrl_override_native(const std::string &p_owner, int p_ordinal);
-	void clear_ctrl_overrides_owned_native(const std::string &p_owner);
-	void clear_ctrl_override(const String &p_owner, const String &p_name);
 	// Release every register `p_owner` holds here (and on the linked parts that
 	// share them): the cold/teardown release of a writer whose register set is
 	// not enumerable up front (the ordinal DOOR_xx bus), at O(owned) cost.
-	void clear_ctrl_overrides_owned(const String &p_owner);
+	void clear_ctrl_overrides_owned_native(const std::string &p_owner);
+	void clear_ctrl_override(const String &p_owner, const String &p_name);
 	Dictionary get_ctrl_values() const;
 
 	// --- main-body skeletal + part channels ---

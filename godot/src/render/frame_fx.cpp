@@ -76,7 +76,8 @@ using opennova::renderer::FrameFxTaps;
 // 18, which the water mirror excludes: docs/terrain/terrain-re.md, "Empty-sector
 // flat fallback"). Q3 omits the plumbing bit and the viewmodel; leaving the
 // gun out is observably equivalent: retail flushes Q3 under the world
-// projection and the full viewport (retail Render_SetViewport @ 0x582a45)
+// projection and the full viewport (retail Render_SetViewport from
+// FrameFX_RenderGlowSource @ 0x582940 (the call @ 0x582a45))
 // against the beauty depth, where the gun's own band depth hides its copies
 // (D-RORD-10). That gives shaders a collision-free exact-mask signature
 // without admitting caster or slot-capture geometry anywhere.
@@ -718,31 +719,11 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 		return false;
 	}
 
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kRdFullscreenVertexShader));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(frame_fragment_shader_source().c_str()));
-	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
-	if (spirv.is_null()) {
-		set_failure("RenderingDevice returned no SPIR-V for FrameFX",
-				"shader_compile_failed");
-		return false;
-	}
-	const String vertex_error = spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_VERTEX);
-	const String fragment_error = spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_FRAGMENT);
-	if (!vertex_error.is_empty() || !fragment_error.is_empty() ||
-			spirv->get_stage_bytecode(
-					RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-			spirv->get_stage_bytecode(
-					RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
-		set_failure("FrameFX shader compilation failed: vertex=" +
-				opennova::to_std(vertex_error) + "; fragment=" +
-				opennova::to_std(fragment_error),
+	Ref<RDShaderSPIRV> spirv;
+	const std::string compile_errors = compile_rd_spirv(rd, kRdFullscreenVertexShader,
+			frame_fragment_shader_source(), spirv);
+	if (!compile_errors.empty()) {
+		set_failure("FrameFX shader compilation failed: " + compile_errors,
 				"shader_compile_failed");
 		return false;
 	}

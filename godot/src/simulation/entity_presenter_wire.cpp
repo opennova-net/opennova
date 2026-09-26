@@ -9,7 +9,6 @@
 
 #include <runtime/inmatch/wire_present.h>
 #include <runtime/world/present_rows.h>
-#include <runtime/world/tick_accumulator.h>
 
 #include "simulation/simulation.h"
 #include "object/object_data.h"
@@ -58,7 +57,7 @@ inline int32_t wfield_i(const float *p, int base, int field) {
 // over 876 mostly-static rows). Mirrors WireRow::kCtrlCacheCount (the struct
 // is class-private); the static_assert in present_one_wire_row pins the
 // mirror.
-constexpr int kCtrlLegFieldCount = 42;
+constexpr int kCtrlLegFieldCount = 55;
 
 constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_EMPLACED_CONTROLS_VALID,
@@ -106,6 +105,21 @@ constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_VEHICLE_TIRE12,
 	Simulation::PF_VEHICLE_TIRE13,
 	Simulation::PF_VEHICLE_GEAR,
+	// The focal sway the leg's wire_controls_apply also writes (a sway item
+	// under rotor wash moves every tick while its CTRL words hold still).
+	Simulation::PF_FOCAL_SWAY_VALID,
+	Simulation::PF_FOCAL_SWAY_BASIS_0,
+	Simulation::PF_FOCAL_SWAY_BASIS_1,
+	Simulation::PF_FOCAL_SWAY_BASIS_2,
+	Simulation::PF_FOCAL_SWAY_BASIS_3,
+	Simulation::PF_FOCAL_SWAY_BASIS_4,
+	Simulation::PF_FOCAL_SWAY_BASIS_5,
+	Simulation::PF_FOCAL_SWAY_BASIS_6,
+	Simulation::PF_FOCAL_SWAY_BASIS_7,
+	Simulation::PF_FOCAL_SWAY_BASIS_8,
+	Simulation::PF_FOCAL_SWAY_X,
+	Simulation::PF_FOCAL_SWAY_Y,
+	Simulation::PF_FOCAL_SWAY_Z,
 };
 
 // Compare-and-refresh one leg's input cache. Returns true when every field is
@@ -558,8 +572,10 @@ int EntityPresenter::consume_present_logic_tick_delta() {
 	}
 	const int64_t delta = now - last_present_logic_tick_;
 	last_present_logic_tick_ = now;
-	return int(MIN(delta,
-			int64_t(opennova::world::TickAccumulator::kMaxCatchupTicks)));
+	// Every logic tick the sim ran is one blend step: the remote body blend
+	// advances once per tick, like the engine's per-entity anim update
+	// (replication::ClientEntityState::rm_blend_weight), so no batch is clamped.
+	return int(delta);
 }
 
 bool EntityPresenter::wire_node_matches_row(ObjectModel *p_node,
@@ -863,8 +879,8 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		row.aim_valid = aim_valid;
 	}
 	// The CTRL/PART block is input-gated as one unit: every field all four
-	// semantic writers and both procedural part channels consume sits in
-	// kCtrlLegFields, so an unchanged set means the node's presenter-owned
+	// semantic writers, the focal sway and both procedural part channels
+	// consume sits in kCtrlLegFields, so an unchanged set means the node's presenter-owned
 	// controls and part phases are already exactly this state (the release
 	// legs included — one release is as absent as a re-released one).
 	if (!leg_inputs_unchanged(p, base, kCtrlLegFields,

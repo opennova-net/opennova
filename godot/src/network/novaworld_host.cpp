@@ -17,6 +17,7 @@
 
 namespace godot {
 
+using opennova::to_gd;
 using opennova::to_std;
 
 NovaWorldHost::NovaWorldHost() :
@@ -37,7 +38,6 @@ NwuLobbySession::Hooks NovaWorldHost::make_lobby_hooks() {
 	};
 	hooks.on_session_state = [this]() { sync_session_state(); };
 	hooks.on_fatal = [this](const String &message) {
-		last_error_tag_ = message;
 		enter_state(STATE_ERROR, message);
 	};
 	hooks.on_soft_error = [this](const String &message) {
@@ -71,8 +71,6 @@ void NovaWorldHost::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_listen_host"), &NovaWorldHost::get_listen_host);
 	ClassDB::bind_method(D_METHOD("set_locked", "locked"), &NovaWorldHost::set_locked);
 	ClassDB::bind_method(D_METHOD("get_locked"), &NovaWorldHost::get_locked);
-	ClassDB::bind_method(D_METHOD("set_allow_ping", "allow_ping"), &NovaWorldHost::set_allow_ping);
-	ClassDB::bind_method(D_METHOD("get_allow_ping"), &NovaWorldHost::get_allow_ping);
 	ClassDB::bind_method(D_METHOD("set_country", "country"), &NovaWorldHost::set_country);
 	ClassDB::bind_method(D_METHOD("get_country"), &NovaWorldHost::get_country);
 	ClassDB::bind_method(D_METHOD("set_expansion", "expansion"), &NovaWorldHost::set_expansion);
@@ -81,10 +79,6 @@ void NovaWorldHost::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_version"), &NovaWorldHost::get_version);
 	ClassDB::bind_method(D_METHOD("set_time_of_day", "time_of_day"), &NovaWorldHost::set_time_of_day);
 	ClassDB::bind_method(D_METHOD("get_time_of_day"), &NovaWorldHost::get_time_of_day);
-	ClassDB::bind_method(D_METHOD("set_round_time_remaining_ticks", "ticks"),
-	                     &NovaWorldHost::set_round_time_remaining_ticks);
-	ClassDB::bind_method(D_METHOD("get_round_time_remaining_ticks"),
-	                     &NovaWorldHost::get_round_time_remaining_ticks);
 	ClassDB::bind_method(D_METHOD("set_gametext", "gametext"), &NovaWorldHost::set_gametext);
 	ClassDB::bind_method(D_METHOD("get_gametext"), &NovaWorldHost::get_gametext);
 	ClassDB::bind_method(D_METHOD("set_game_port", "port"), &NovaWorldHost::set_game_port);
@@ -107,9 +101,6 @@ void NovaWorldHost::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_gsid"), &NovaWorldHost::get_gsid);
 	ClassDB::bind_method(D_METHOD("get_host_requires_join_ticket"),
 	                     &NovaWorldHost::get_host_requires_join_ticket);
-	ClassDB::bind_method(D_METHOD("request_player_enter", "connection_id", "ip_address", "port",
-	                              "join_ticket"), &NovaWorldHost::request_player_enter);
-	ClassDB::bind_method(D_METHOD("get_last_error_tag"), &NovaWorldHost::get_last_error_tag);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "host"), "set_host", "get_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "gate_port"), "set_gate_port", "get_gate_port");
@@ -123,13 +114,10 @@ void NovaWorldHost::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "password"), "set_password", "get_password");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "listen_host"), "set_listen_host", "get_listen_host");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "locked"), "set_locked", "get_locked");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "allow_ping"), "set_allow_ping", "get_allow_ping");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "country"), "set_country", "get_country");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "expansion"), "set_expansion", "get_expansion");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "version"), "set_version", "get_version");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "time_of_day"), "set_time_of_day", "get_time_of_day");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "round_time_remaining_ticks"),
-	             "set_round_time_remaining_ticks", "get_round_time_remaining_ticks");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "gametext", PROPERTY_HINT_RESOURCE_TYPE, "RtxtStringFile"),
 	             "set_gametext", "get_gametext");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "game_port"), "set_game_port", "get_game_port");
@@ -177,13 +165,13 @@ String NovaWorldHost::get_host() const { return host_; }
 void NovaWorldHost::set_gate_port(int port) { gate_port_ = port; }
 int NovaWorldHost::get_gate_port() const { return gate_port_; }
 void NovaWorldHost::set_server_name(const String &name) { cfg_.server_name = to_std(name); }
-String NovaWorldHost::get_server_name() const { return String(cfg_.server_name.c_str()); }
+String NovaWorldHost::get_server_name() const { return to_gd(cfg_.server_name); }
 void NovaWorldHost::set_server_message(const String &message) { cfg_.server_message = to_std(message); }
-String NovaWorldHost::get_server_message() const { return String(cfg_.server_message.c_str()); }
+String NovaWorldHost::get_server_message() const { return to_gd(cfg_.server_message); }
 void NovaWorldHost::set_mission_name(const String &name) { cfg_.mission_name = to_std(name); }
-String NovaWorldHost::get_mission_name() const { return String(cfg_.mission_name.c_str()); }
+String NovaWorldHost::get_mission_name() const { return to_gd(cfg_.mission_name); }
 void NovaWorldHost::set_game_type(const String &abbreviation) { cfg_.game_type = to_std(abbreviation); }
-String NovaWorldHost::get_game_type() const { return String(cfg_.game_type.c_str()); }
+String NovaWorldHost::get_game_type() const { return to_gd(cfg_.game_type); }
 void NovaWorldHost::set_max_players(int n) { cfg_.max_players = n; }
 int NovaWorldHost::get_max_players() const { return cfg_.max_players; }
 void NovaWorldHost::set_region_index(int index) { cfg_.region_index = index; }
@@ -196,18 +184,15 @@ void NovaWorldHost::set_listen_host(bool listen_host) { cfg_.listen_host = liste
 bool NovaWorldHost::get_listen_host() const { return cfg_.listen_host; }
 void NovaWorldHost::set_locked(bool locked) { cfg_.locked = locked; }
 bool NovaWorldHost::get_locked() const { return cfg_.locked; }
-void NovaWorldHost::set_allow_ping(bool allow_ping) { cfg_.allow_ping = allow_ping; }
-bool NovaWorldHost::get_allow_ping() const { return cfg_.allow_ping; }
 void NovaWorldHost::set_country(const String &country) { cfg_.country = to_std(country); }
-String NovaWorldHost::get_country() const { return String(cfg_.country.c_str()); }
+String NovaWorldHost::get_country() const { return to_gd(cfg_.country); }
 void NovaWorldHost::set_expansion(const String &expansion) { cfg_.expansion = to_std(expansion); }
-String NovaWorldHost::get_expansion() const { return String(cfg_.expansion.c_str()); }
+String NovaWorldHost::get_expansion() const { return to_gd(cfg_.expansion); }
 void NovaWorldHost::set_version(const String &version) { cfg_.version = to_std(version); }
-String NovaWorldHost::get_version() const { return String(cfg_.version.c_str()); }
+String NovaWorldHost::get_version() const { return to_gd(cfg_.version); }
 void NovaWorldHost::set_time_of_day(int time_of_day) { cfg_.time_of_day = time_of_day; }
 int NovaWorldHost::get_time_of_day() const { return cfg_.time_of_day; }
 void NovaWorldHost::set_round_time_remaining_ticks(int ticks) { cfg_.round_time_remaining_ticks = ticks; }
-int NovaWorldHost::get_round_time_remaining_ticks() const { return cfg_.round_time_remaining_ticks; }
 void NovaWorldHost::set_gametext(const Ref<RtxtStringFile> &gametext) { gametext_ = gametext; }
 Ref<RtxtStringFile> NovaWorldHost::get_gametext() const { return gametext_; }
 void NovaWorldHost::set_game_port(int port) { game_port_ = port; }
@@ -215,11 +200,12 @@ int NovaWorldHost::get_game_port() const { return game_port_; }
 void NovaWorldHost::set_advertise_ip(const String &ip) { advertise_ip_ = ip; }
 String NovaWorldHost::get_advertise_ip() const { return advertise_ip_; }
 void NovaWorldHost::set_lobby_name(const String &lobby_name) { cfg_.lobby_name = to_std(lobby_name); }
-String NovaWorldHost::get_lobby_name() const { return String(cfg_.lobby_name.c_str()); }
+String NovaWorldHost::get_lobby_name() const { return to_gd(cfg_.lobby_name); }
 
+// The GSID is the service's wire bytes (ServerHostResult HostCommands).
 String NovaWorldHost::get_gsid() const {
 	const opennova::ClientSession *session = lobby_.session();
-	return session ? String(session->host_gsid().c_str()) : String();
+	return session ? opennova::cp1252_to_gd(session->host_gsid()) : String();
 }
 
 bool NovaWorldHost::get_host_requires_join_ticket() const {
@@ -286,7 +272,6 @@ void NovaWorldHost::start() {
 	uptime_s_ = 0.0;
 	last_sent_host_.clear();
 	last_sent_players_.clear();
-	last_error_tag_ = String();
 	players_.clear();
 	pcid_ring_ = opennova::SessionIdRing{};
 	// The per-registration AppId: the engine's make_session_app_id (tick + rand
@@ -330,8 +315,7 @@ void NovaWorldHost::_process(double delta) {
 		// ClientStopHosting + NWEC52.
 		if (lobby_.clock_ms() - register_started_ms_ > opennova::SESSION_CONNECT_TIMEOUT_MS) {
 			lobby_.send(lobby_.session()->build_stop_hosting());
-			last_error_tag_ = String(opennova::NWEC_HOST_TIMEOUT);
-			enter_state(STATE_ERROR, last_error_tag_);
+			enter_state(STATE_ERROR, String(opennova::NWEC_HOST_TIMEOUT));
 			return;
 		}
 	}
@@ -386,13 +370,11 @@ void NovaWorldHost::sync_session_state() {
 		break;
 	case S::Closed:
 		if (session->disconnected_by_peer() && state_ != STATE_DISCONNECTED) {
-			last_error_tag_ = String(session->last_error().c_str());
-			enter_state(STATE_DISCONNECTED, last_error_tag_);
+			enter_state(STATE_DISCONNECTED, to_gd(session->last_error()));
 		}
 		break;
 	case S::Error:
-		last_error_tag_ = String(session->last_error().c_str());
-		enter_state(STATE_ERROR, last_error_tag_);
+		enter_state(STATE_ERROR, to_gd(session->last_error()));
 		break;
 	default:
 		break;
@@ -430,24 +412,23 @@ void NovaWorldHost::drain_session_notices() {
 				                        String::num_int64(static_cast<int64_t>(lobby_.nw_udp_port())));
 			} else {
 				// Rejected: the MsgCode maps through the host switch (NWEC53..60).
-				last_error_tag_ = String(opennova::novaworld_host_error_tag(notice.fields.msg_code).c_str());
-				enter_state(STATE_ERROR, last_error_tag_);
+				enter_state(STATE_ERROR,
+						to_gd(opennova::novaworld_host_error_tag(notice.fields.msg_code)));
 			}
 			break;
 		case Notice::Kind::StopHosting:
-			emit_signal("hosting_stopped", notice.fields.msg_code, String(notice.msg_key.c_str()));
+			emit_signal("hosting_stopped", notice.fields.msg_code, to_gd(notice.msg_key));
 			if (state_ == STATE_HOSTING || state_ == STATE_REGISTERING) {
-				last_error_tag_ = String(notice.msg_key.c_str());
-				enter_state(STATE_DISCONNECTED, last_error_tag_);
+				enter_state(STATE_DISCONNECTED, to_gd(notice.msg_key));
 			}
 			break;
 		case Notice::Kind::LeaveNovaWorld:
-			last_error_tag_ = String(opennova::MENUTXT_PUNTED_FROM_NOVAWORLD);
 			emit_signal("punted", notice.fields.msg_code);
 			break;
 		case Notice::Kind::Command: {
+			// The verb's arguments are the service's wire bytes.
 			PackedStringArray args;
-			for (const std::string &arg : notice.command.args) args.push_back(String(arg.c_str()));
+			for (const std::string &arg : notice.command.args) args.push_back(opennova::cp1252_to_gd(arg));
 			const char *target = "";
 			switch (notice.command.target) {
 			case opennova::ServerCommandTarget::ByIndex: target = "ByIndex"; break;
@@ -465,8 +446,8 @@ void NovaWorldHost::drain_session_notices() {
 			emit_signal("player_enter_result",
 			            static_cast<int64_t>(notice.player_enter.connection_id),
 			            notice.player_enter.success, notice.player_enter.msg_code,
-			            String(notice.player_enter.player_ticket.c_str()),
-			            String(notice.player_enter.access_code_list.c_str()));
+			            opennova::cp1252_to_gd(notice.player_enter.player_ticket),
+			            opennova::cp1252_to_gd(notice.player_enter.access_code_list));
 			break;
 		default:
 			break;

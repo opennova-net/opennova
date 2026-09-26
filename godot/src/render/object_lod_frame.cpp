@@ -94,13 +94,16 @@ float ObjectLodFrame::uniform_scale(const Basis &p_basis) {
 			p_basis.get_column(1).length(), p_basis.get_column(2).length() });
 }
 
+Vector3 ObjectLodFrame::cobj_center_local(const std::array<int32_t, 3> &p_center_q16) {
+	return Vector3(opennova::io::fp16_16_to_float(p_center_q16[1]),
+			opennova::io::fp16_16_to_float(p_center_q16[2]),
+			opennova::io::fp16_16_to_float(p_center_q16[0]));
+}
+
 Vector3 ObjectLodFrame::projection_center(const Transform3D &p_transform,
 		const opennova::renderer::ObjectProjectionSphere &p_sphere,
 		int32_t p_entity_scale_q16) {
-	const auto &center = p_sphere.center_q16;
-	const Vector3 local(static_cast<float>(center[1]) / 65536.0f,
-			static_cast<float>(center[2]) / 65536.0f,
-			static_cast<float>(center[0]) / 65536.0f);
+	const Vector3 local = cobj_center_local(p_sphere.center_q16);
 	Basis pose = p_transform.basis;
 	if (p_entity_scale_q16 != 0) {
 		const float inverse_scale = 65536.0f / static_cast<float>(p_entity_scale_q16);

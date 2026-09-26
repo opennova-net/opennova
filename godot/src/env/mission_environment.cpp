@@ -64,8 +64,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::set_nvg_view);
 	ClassDB::bind_method(D_METHOD("set_thermal_view", "world", "terrain"),
 			&MissionEnvironment::set_thermal_view);
-	ClassDB::bind_method(D_METHOD("is_thermal_view"),
-			&MissionEnvironment::is_thermal_view);
 	ClassDB::bind_method(D_METHOD("set_underwater_view", "underwater"),
 			&MissionEnvironment::set_underwater_view);
 	ClassDB::bind_method(D_METHOD("is_underwater_view"),
@@ -78,8 +76,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_underwater_overlay_color);
 	ClassDB::bind_method(D_METHOD("get_underwater_overlay_alpha_byte"),
 			&MissionEnvironment::get_underwater_overlay_alpha_byte);
-	ClassDB::bind_method(D_METHOD("set_sky_dome_drawn", "drawn"),
-			&MissionEnvironment::set_sky_dome_drawn);
 	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_color"),
 			&MissionEnvironment::get_viewmodel_fog_color);
 	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_range"),
@@ -830,8 +826,6 @@ void MissionEnvironment::apply_terrain_uniforms(
 			to_vector3(uniforms.sun_light));
 	material->set_shader_parameter("u_sky_ambient",
 			to_vector3(uniforms.sky_ambient));
-	material->set_shader_parameter("u_sun_direction",
-			to_vector3(uniforms.sun_direction));
 	material->set_shader_parameter("u_fog_color",
 			to_vector3(uniforms.fog_color));
 	material->set_shader_parameter("u_fog_end", uniforms.fog_end);
@@ -853,9 +847,9 @@ float MissionEnvironment::get_water_height() const {
 
 // The engine state serves the render-float tuple; these Godot-facing getters
 // serve the GODOT-world direction through the util/axes.h swap (2026-08-20).
-// Raw-tuple consumers (the opennova_sun_direction global and the terrain
-// u_sun_direction uniform, whose shaders re-swizzle into the engine texture
-// basis) read state_ directly and never route here.
+// The raw-tuple consumer (the opennova_sun_direction global, which the
+// foliage shader re-swizzles into the engine texture basis) reads state_
+// directly and never routes here.
 Vector3 MissionEnvironment::get_sun_direction() const {
 	return render_float_to_godot(state_.sun_direction());
 }

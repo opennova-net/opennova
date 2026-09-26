@@ -182,11 +182,13 @@ private:
 	void _set_body_parameter(const Body &p_body, const StringName &p_parameter,
 			const Variant &p_value);
 	void _set_body_upl(Body &p_body, int32_t p_upl, int32_t p_q3_upl);
-	bool _glare_ray_clear(const Vector3 &p_from, const Vector3 &p_sun_dir,
-			float p_ray_length, const Vector3 &p_jitter);
-	// Terrain line-of-sight between two points (the water-glint visibility
-	// rays) — the same clear-when-miss form as _glare_ray_clear.
+	// Terrain line-of-sight between two points (the glare and water-glint
+	// visibility rays): clear when the raycast misses.
 	bool _segment_clear(const Vector3 &p_from, const Vector3 &p_to);
+	// One frame of the glare occlusion at this camera: the engine's ray
+	// sequence (GlareOcclusion::advance) over _segment_clear.
+	void _advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
+			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir);
 	// One frame of the water-glint leg [orig: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md]:
 	// tick the accumulator at this camera, place the mirrored glint body and
 	// write its submit value.

@@ -546,18 +546,6 @@ double ObjectModel::get_animation_time() const {
 
 // --- Part-animation channel device application ----------------------------
 
-String ObjectModel::resolve_anim_channel_register(int p_slot) const {
-	if (p_slot < 0 || p_slot > 1) return String();
-	const int ordinal = opennova::renderer::ModelControls::part_register(p_slot + 1);
-	return ordinal < 0 ? String() : String(opennova::threedi::threedi_ctrl_register_name(
-			static_cast<size_t>(ordinal)));
-}
-
-String ObjectModel::resolve_anim_channel_owner(int p_slot) const {
-	if (p_slot < 0 || p_slot > 1) return String();
-	return String(opennova::renderer::ModelControls::part_owner(p_slot + 1));
-}
-
 void ObjectModel::play_part_anim(int p_channel, int p_play_type, double p_time_s) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->play_part_anim(p_channel, p_play_type, p_time_s);

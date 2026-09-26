@@ -11,6 +11,7 @@
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
 #include "terrain/terrain_foliage_def.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -176,8 +177,6 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::set_wind_clock_override_ms);
   ClassDB::bind_method(D_METHOD("set_thermal_view", "thermal"),
                        &FoliageDispatcher::set_thermal_view);
-  ClassDB::bind_method(D_METHOD("is_thermal_view"),
-                       &FoliageDispatcher::is_thermal_view);
   ClassDB::bind_method(D_METHOD("set_water_height", "height"),
                        &FoliageDispatcher::set_water_height);
   ClassDB::bind_method(D_METHOD("get_water_height"),
@@ -1468,8 +1467,8 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   const FoliageMaskReport mask = mask_pass_.get_report();
   Dictionary mask_row;
   mask_row["callback_seen"] = mask.callback_seen;
-  mask_row["status"] = String::utf8(mask.status.c_str());
-  mask_row["failure"] = String::utf8(mask.failure.c_str());
+  mask_row["status"] = opennova::to_gd(mask.status);
+  mask_row["failure"] = opennova::to_gd(mask.failure);
   mask_row["drawn_frame_id"] = static_cast<int64_t>(mask.drawn_frame_id);
   mask_row["drawn_draws"] = mask.drawn_draws;
   mask_row["views"] = mask.views;
@@ -1986,9 +1985,9 @@ void FoliageDispatcher::_apply_draw_list(
     // finds for it; a patch with no resident page is not drawn at all (the
     // lookup's null result skips the patch's slot draw), so under a Terrain
     // there is no cold fallback. Only a terrain-less preview draws through
-    // the analytic colormap. Retail Foliage_RenderDetailPatches: the lookup
-    // Terrain_FindSectorPatchRT @ 0x60a1de, the null skip @ 0x60a1e6..0x60a1e8
-    // to the slot loop's next iteration @ 0x60a6a2.
+    // the analytic colormap. Retail Foliage_RenderDetailPatches @ 0x609de0:
+    // the Terrain_FindSectorPatchRT lookup (the call @ 0x60a1de), the null
+    // skip @ 0x60a1e6..0x60a1e8 to the slot loop's next iteration @ 0x60a6a2.
     bool page_ready = false;
     float page_layer = 0.0f;
     Vector4 page_projection;
