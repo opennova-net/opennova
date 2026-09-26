@@ -2266,8 +2266,9 @@ target_compile_features(route_parity_test PRIVATE cxx_std_17)
 add_test(NAME route_parity COMMAND route_parity_test)
 
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
-# events array is the per-frame root record; rec[3] = cumulative forward distance whose
-# 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).
+# events array is the per-frame root record; rec[3] = bottom, the hips' height above the
+# ground, whose 16.16 change is the vertical root motion. Asset-gated: absent files skip
+# (CI-safe).
 add_executable(root_motion_test anim/root_motion_test.cpp)
 target_link_libraries(root_motion_test PRIVATE opennova_formats)
 target_include_directories(root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

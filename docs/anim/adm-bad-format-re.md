@@ -26,9 +26,10 @@ in place.
 | `.adm` grammar (rows, comments, variant rings) | MATCHING | ctests `adm_parse`, `adm_comment`, `adm_trim_value`, `adm_variants`; 3 `[orig]` cites in `adm/adm.h` |
 | `.adm` writer | MATCHING (canonical form, not byte identity with hand-edited files) | ctests `adm_write`, `adm_parse`, `adm_variants`; the 82-table corpus sweep below |
 | `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `anim_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`) |
-| `.bad` writer and the construction seam | MATCHING (field-equal over the 477-clip corpus; byte-exact for our own files; the runtime poses a rebuilt set identically); the capsule-extent RULE is ours and unwitnessed (below) | ctests `bad_parse` (357_RST.bad's rows 0..frame_count), `bad_roundtrip` (the fixtures byte-exact, BINOC.bad field-equal, the pad row), `bad_build` (the derivations: BINOC.bad's bind, DT1PRONE's positions through DT1RST's bind), `anim_o3a_commands`, the gated `anim_o3a_retail_roundtrip` and `anim_o3a_runtime_playback` (US01.ADM and both first-person sets through `runtime/anim/skeletal_clips` over US01.3di, Mp5b_1st.3di and 357_1st.3di's bone tables, 1,827 poses, worst 2.4e-6 degrees); the corpus sweep below |
+| `.bad` writer and the construction seam | MATCHING (field-equal over the 477-clip corpus; byte-exact for our own files; the runtime poses a rebuilt set identically); every event states its `bottom` and `top`, which the seam carries and never derives (the event record section below) | ctests `bad_parse` (357_RST.bad's rows 0..frame_count), `bad_roundtrip` (the fixtures byte-exact, BINOC.bad field-equal, the pad row), `bad_build` (the derivations: BINOC.bad's bind, DT1PRONE's positions through DT1RST's bind), `anim_o3a_commands`, the gated `anim_o3a_retail_roundtrip` and `anim_o3a_runtime_playback` (US01.ADM and both first-person sets through `runtime/anim/skeletal_clips` over US01.3di, Mp5b_1st.3di and 357_1st.3di's bone tables, 1,827 poses, worst 2.4e-6 degrees); the corpus sweep below |
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
 | `.bad` runtime consumption — which clip binds the rig, and the translation gate | MATCHING (witnessed 2026-09-25, below); translation under a cross-fade is not ported | ctest `anim_sample` (the gate in the sampler, and the rig loader over synthetic tables); the 82-table scan below; the gated `anim_o3a_runtime_playback` |
+| `.bad` event record — the runtime's read, and what `bottom`, `top` and `velocity` measure | MATCHING (read-only grill of the read, 2026-09-25); the measure WITNESSED on the corpus (below) | ctests `anim_adm_root_motion`, `root_motion`; the 30 person tables and 477 clips below |
 | `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
 | `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; ctest `anim_sample` (synthetic) + the asset-gated ctest `anim_positions_from_model_corpus` (retail rigs) |
 
@@ -376,19 +377,147 @@ its exporter left after each name's NUL, the stale child addresses, and the
 bind's low mantissa bits (the stored 3x3 carries more than the float key it is
 derived from).
 
-**Unwitnessed: the capsule extents.** An event's `bottom` and `top` are the
-drop below the rig's root and the height above it, which the runtime reads as
-the capsule and the footstep dip (`engine/runtime/anim/adm_root_motion`). What
-measured them is retail's own exporter, not the engine, and no tool is
-witnessed. The seam's rule is therefore OURS, not a port: the lowest and
-highest bone origin about bone 0 over the pose the runtime draws, every key
-composed against the set's reset bind (`key * bind_reset^-1`; a lone clip
-against its own first key). It does not reproduce retail's numbers: over the
-3,014 clip builds of the 82 tables with every stated pair stripped
-(2026-09-25), a clip's worst frame is a median 0.6 m off and 36 clips land
-within 5 cm (DT1PRONE within 3.1 cm; the death clip Dt1DeaGF 3.2 m off). A clip
-may therefore carry its own pair, and `anim scene` always writes it, which is
-how a retail clip survives an authoring round trip.
+## The event record: ground, hips and head (witnessed 2026-09-25)
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| The runtime's read of an event (root motion, the body's settle, the capsule top, the trigger) | MATCHING (read-only grill) | the cites below; ported in `engine/runtime/anim/adm_root_motion` (ctests `anim_adm_root_motion`, the gated `root_motion`) |
+| What `bottom`, `top` and `velocity` measure | WITNESSED on the corpus (retail's exporter does not survive; the relation is measured, not read) | the 30 person tables below |
+| The terminal events | WITNESSED on the corpus | 477 of 477 clips |
+| The construction seam's events | MATCHING (every event states its `bottom` and `top`; the seam carries them and derives neither) | ctests `bad_build`, `anim_o3a_commands`; the gated `anim_o3a_retail_roundtrip` |
+
+**The read.** `AnimChannel_InterpolateKeyframe @ 0x40B230` lerps event record
+`trunc(frame_count * t)` with the next one (the record address `@0x40B2AA`,
+the five floats `@0x40B2F0..0x40B329`) and takes the trigger word unlerped
+from the lower record (`@0x40B32F`); a stopped channel (flag 0x10000) zeroes
+the velocity and the trigger and still lerps `bottom` and `top`
+(`@0x40B2B6..0x40B2DE`). `AnimMap_UpdateEntity @ 0x40B5F0` turns that sample
+into the entity's root frame (the out-transform `@0x40B82F..0x40B8A3`, with
+`flt_7C32B4` = 32768, `flt_7C32B8` = -65536 and `flt_7C32BC` = 65536):
+
+- `out[3] = bottom * 65536` (`@0x40B836`, stored `@0x40B84D`): the body's
+  settle, the entity origin's height above the ground it stands on;
+- `out[4] = 0x2000 + top * 65536` (`@0x40B845`, `@0x40B85F..0x40B86A`): the
+  capsule top;
+- `out[0] = vel.z * 32768`, forward (`@0x40B855..0x40B878`), and
+  `out[1] = vel.x * 32768`, lateral (`@0x40B872..0x40B883`): half a clip
+  frame's step per 62 Hz tick, a 30 fps frame lasting about two ticks, so a
+  velocity is metres per clip frame;
+- `out[2] = vel.y * 32768` (`@0x40B87F..0x40B88B`), OVERWRITTEN with the
+  change in `out[3]` since the channel's previous update whenever one is held
+  (slot+0x4C, the test `@0x40B88E..0x40B899`, the new value kept `@0x40B8A0`;
+  the pending climb and death states 32..35 and 176..179 clear it `@0x40B637`).
+  The vertical root motion is the change in `bottom`; `vel.y` is read only on
+  a channel's first update after that reset;
+- the trigger word goes to `g_animEventTriggerBits @ 0xA2ED08` (`@0x40B8A3`).
+
+**How the port consumes it.** `anim::AdmRootMotion`
+(`engine/runtime/anim/adm_root_motion.{h,cpp}`) emits the out-transform as the
+`RootMotionFrame` of `engine/runtime/world/infantry.h` (`capsule_bottom` =
+`out[3]`, `capsule_top` = `out[4]`; the witness is
+[world/world-wac-ai-re.md](../world/world-wac-ai-re.md) §3.4), and every
+consumer reads the pair as heights over the ground under the model origin,
+which is the hips:
+
+- the ground settle puts the origin `capsule_bottom` above the ground, so the
+  feet rest on it (D-INF-6 in the world record §5: the movement resolver
+  `@0x4b2bd0` resettles `entity[3] = entityRadius + groundHeight` `@0x4b3da3`,
+  fed `out[3]` by both on-foot callers; ported in
+  `engine/runtime/world/collision_resolve.cpp`'s ground-settle tail, `feet_z =
+  pos[2] - capsule_bottom`, and `infantry.cpp`'s foot clearance);
+- the vertical root motion is `capsule_bottom` minus the previous tick's
+  (`infantry.cpp`, `prev_capsule_bottom` = anim_slot[19], cleared by the same
+  climb and death states);
+- `capsule_top - capsule_bottom`, the head's height above the hips plus the
+  0x2000, is the eye: the org1 CameraOffset `max(top - bottom, 0x9000)`, the
+  player's `min(top - bottom, 0xD000)` (`infantry.cpp`, `[orig]`-cited there),
+  and the resolver's capsule, `halfRadius = bottom >> 4`, `collisionRadius =
+  halfRadius + |top - bottom| / 2`, `outerRadius = bottom >> 1` (world record
+  §15.3, D-COL-4; `collision_resolve.cpp`);
+- a footstep sounds at `pos.z - out[3]`, the ground under the body (world
+  record §17.4b; `engine/runtime/world/infantry_sound.cpp`), and the float and
+  carrier legs fold the same bottom (§29.1 `infantry_water.cpp`, §29.2
+  `infantry_carrier.cpp`).
+
+The measure below agrees: `bottom` is the hips' height above the ground and
+`top` the head's, so `top - bottom` is the head over the hips.
+
+**What the fields measure.** Nothing of retail's exporter survives, so the
+relation is read off the corpus: every clip of every person table posed the
+way the runtime draws it (each key composed as `key * bind_reset^T` about the
+reset clip's rest offsets, translation rows added, the clip frame's y up). The
+rig's rest positions are the MODEL's, never the `.bad` table's:
+`BoneAnim_BuildWorldMatrices @ 0x40C400` reads the bone count at
+`modelDef+52`, the bone table at `+56`, and per row the parent at `+20` and
+the rest position at `+36..+44` (`@0x40C5EF..0x40C619`).
+
+- **`top` is the head bone's height above the ground**, `top = bottom +
+  y(head)`. Over the 30 person tables (every one binds US01's reset clip
+  DT1RST.BAD; DEFAULT.ADM's `default.bad`, whose top 0.1201 sits below its
+  bottom 0.8688, is left out) and 184,515 posed frames, the median error is
+  0.2 mm: 65.7% of frames within 1 mm, 91.3% within 1 cm, 97.3% within 3 cm,
+  the worst 16 cm (DT1DEATR.BAD's fall, frame 30). By US01's clip families
+  (medians): idle and held poses 0.1 mm, the run 4.6 mm, the prone crawl
+  1.6 cm, the crouch-move 2.4 cm.
+- **`bottom` is the hips' height above the ground**: bone 0, the model's
+  origin, over the planted foot's sole. On US01's three idle clips the lower
+  foot sits 0.1251 above the ground on every frame (the reset pose's ankle,
+  0.1259); the run's and the crouch-move's lowest tenth of frames reach 0.131
+  and 0.125. The hip bob lives in `bottom` (0.90 to 1.01 over DT1runF).
+- **`velocity` is the hips' ground step per frame**, x lateral and z forward in
+  the clip frame: event `f` is the step from frame `f` to `f + 1`. A planted
+  foot slides by `-velocity` in the hips-origin frame: `|slide| / |velocity|`
+  is a median 1.000 over US01's 8 run clips and 0.951 over its 8 crouch-moves.
+- **The hips never translate.** 0 of the 202 translated clips carry a nonzero
+  bone-0 row: the body animates in place about its hips, and the ground travel
+  is the events'.
+- **The ground is in the model.** US01's skinned mesh part (part 19, the mesh
+  object's pivot) sits at z -1.0185 in the model frame, which is the reset
+  pose's `bottom` (DT1RST.BAD, 1.0185 on every event).
+
+**First person.** Over the 44 `_1st` tables' 204 clip registrations the
+velocity is zero on every event, and `bottom` is the viewmodel rig's origin
+height, 1.0692 or 1.0699, on every event of 201 (the Vmne mine's three clips
+stand 0.107). The rig has no head, and `top = bottom` in 137 registrations
+(every clip of `ak47_1st` and `357_1st`, three of `mp5_1st`'s five). The
+other 64 carry a `top` above it that no pose of the head-less rig reproduces
+(1.6578 in 21 reset-clip registrations, `bottom` + 0.5886, near the
+shoulders' height; 1.036 to 1.972 in 43 draw, fire and reload clips): that
+rule of the exporter's is unwitnessed. The viewmodel rig overlays
+the third-person body in the same hips-origin space: ArmsG's shoulders sit
+0.587 and 0.585 above its origin where US01's upper arms sit 0.593, and the
+elbows sit 0.445 to either side against US01's 0.438.
+
+**The terminal events are the exporter's, not samples of the last poses.**
+Every one of the 477 clips carries `frame_count + 1` events, and:
+
+- event `frame_count` repeats event `frame_count - 1` (velocity, `bottom` and
+  `top`) in 477 of 477;
+- in the 273 loops (`flags & 1`) both equal event 0 in 273 of 273, though key
+  `frame_count - 1` equals key 0 in only 30 of the 269 densely keyed loops
+  (key `frame_count` in 127): DT1runF's events 37 and 38 copy event 0, where
+  frame 38 is frame 0's pose again and frame 37 a real in-between one;
+- in the 204 one-shots both carry zero velocity in 204 of 204, though 32 of
+  the 43 moving one-shots still step at event `frame_count - 2` (CLIMTOP.BAD:
+  0.083, 0.070 and 0.033 m, then 0 and 0); their `bottom` and `top` are frame
+  `frame_count - 1`'s own (over US01's 28 one-shots, event `frame_count - 1`'s
+  `top` fits that frame's head to a median 0.5 mm, frame `frame_count - 2`'s
+  to 2.7 mm);
+- the trigger word is not copied: event `frame_count`'s equals event
+  `frame_count - 1`'s in 246 of the 273 loops and 176 of the 201 version-1
+  one-shots, and is zero in 257 and 195 of them.
+
+The channel never reaches `t == 1.0` (above), so event `frame_count` is read
+only as the lerp partner of the last interval, which it holds constant.
+
+**The seam carries the events as given.** The ground is not in a clip: a clip
+poses the body about its hips, so nothing in its keys says how high the hips
+stand. `bad_build` therefore takes every event's `bottom` and `top` as the
+author states them, and the `.o3a` event record requires both
+(`docs/anim/o3a-scene-format.md`). An authoring front end that places the
+ground (the Blender rig's `Root`, ADR 0047) measures them the way the corpus
+shows; `anim scene` writes every clip's stored pair, which is how a retail
+clip survives an authoring round trip.
 
 ## Divergences
 
@@ -407,9 +536,9 @@ All existing ledger IDs — this record mints none:
 - `.adm` write parity is canonical-form by design; if a byte-exact need ever
   appears (none known — no tool round-trips hand-edited `.adm`s), it becomes
   a writer-policy ADR, not a parser change.
-- `flags` bit 3 and the capsule-extent rule are the two unwitnessed corners
-  above: both want a look at what writes them, the first in the loader, the
-  second in whatever retail's exporter was.
+- `flags` bit 3 and the `top` of the head-less viewmodel clips that stand above
+  their `bottom` are the two unwitnessed corners above: the first wants a look
+  at the loader, the second at whatever retail's exporter was.
 - Translation under a cross-fade (witnessed 2026-09-25, not ported).
   `AnimChannel_BlendTwoChannels @ 0x410740` always blends the rotations, but
   fills the translation scratch by the two clips' flags: both translated, their
