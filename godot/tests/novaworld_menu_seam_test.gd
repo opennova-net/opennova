@@ -4,7 +4,7 @@ extends GutTest
 # when pressed, makes the menu host emit novaworld_requested. This is the same
 # Command-by-name convention the start/exit/return controls use. The live
 # server flow (browse, host, a second client seeing the row) is the manual
-# two-client smoke recorded in plan/status.md; this pins the wiring.
+# two-client smoke; this pins the wiring.
 
 const MenuShell := preload("res://game/menu_shell.gd")
 const PANEL_SCENE := preload("res://game/novaworld_panel.tscn")

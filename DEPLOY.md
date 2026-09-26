@@ -6,10 +6,6 @@ can stand up their own instance with the same commands the project maintainers
 use. The original games keep working against your server through the launcher's
 hosts-file redirection.
 
-The one-time production cutover sequence (operator-executed: AWS + 1Password +
-Cloudflare + a docker host) is `plan/pr21-cutover-runbook.md`; it remains
-un-executed and is tracked in TODO.md § Project health follow-ups.
-
 ## What you need
 
 - **Docker** on the machine you deploy from. That is the only dependency. The
