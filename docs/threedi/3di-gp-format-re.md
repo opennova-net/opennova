@@ -537,6 +537,45 @@ with the resolver/store sites, destruction interpretation and reimplementation
 cross-links. No curated names or types were changed; the IDB was saved.
 [03TR frame costs](../perf/03tr-frame-costs.md) owns the measured effect.
 
+### Retail JO corpus layout (2026-09-23)
+
+Measured on the shipped JO models (an extracted tree of 958 `.3di`) while
+validating the `opennova-3di` builder and its `scene` inverse (ADR 0047); data
+witnesses, no IDA session. Frames: collision and occlusion values are given in
+mission axes (x forward, y left, z up), the frame the CLI prints; OCCL and LGHT
+store model axes on disk.
+
+| Chunk | Fact | Witness |
+|---|---|---|
+| OCCL | A record's plane table is its six bounding-box planes (+x -x +y -y +z -z), then each face's own plane unless one already matches it (normal within 0.005 per axis, distance within 0.03; the last match wins), at most 32 `[orig: ConvertToInternal @ 0x4268B3]` | Armry01, all 8 records (types 1, 0 x4, 2, 3 x2); `threedi_build` `add_occ_record` reproduces them plane for plane, ctest `threedi_o3d_building` pins the layout |
+| OCCL | Faces wind counter-clockwise about their outward normal in mission axes; edge words are `lo \| hi << 8`, plus `0x8000` when the edge runs from the higher vertex to the lower | Armry01; `occ_edge` reproduces every edge word |
+| OCCL | Occluder (0) and open (1) records carry a connecting byte the runtime never reads (Armry01's occluders say 2), the leftover the retired exporter's `classify_name` carried across objects | Armry01 |
+| CFAC | Bullet faces wind counter-clockwise about their CNRM normal in mission axes; the rare exception stores a normal against its own winding | Dtruck2 905/906, Armry01 250/250, Dblkhwk1 1594/1597 |
+| CVRT/CFAC | Collision vertices sit on the 8.8 grid, and faces the grid collapses keep valid normals: the normals were taken before quantization | Mp5b_1st 276 such faces, Dblkhwk1 13 |
+| COBJ | A rigid model's section offset is its part's pivot | Dblkhwk1 (rotors), DAH62, Dtruck2 (wheels) |
+| CXLT | The rows are the collision LOD's attach points (`~PPx attach` helpers) in order, truncated to 16.16 `[orig: WriteCXLT @ 0x455920]`, not the section offsets; the runtime reads them by row (a palm item's broken pieces pivot on rows 0 and 1, `engine/runtime/world/item_sections.cpp`) | 917 of 958 models carry one row per non-root section (per section when skinned) and 723 of those rows equal the section offsets; Oiltnk2X's 15 rows sit near the origin while its sections reach 24 m out; Chair03X has 7 sections and no row; rlpad1ax 16 sections and 1 row |
+| COBJ | One section per part of the collision LOD (WriteCOBJ walks that LOD's subobjects), whatever LOD 0 holds; a model with no section still carries a CDTA | Dtruck2 LOD 0 8 parts, collision LOD 7 / 7 sections; APLFP1 1 / 1; CNet01 0 / 0 with a CMDL |
+| COBJ | A section's bounds cover its vertices (a rigid model's: its part's render floats in the collision LOD; a skinned model's: the LOD 0 vertices weighted to it, so the mesh section, which no weight names, keeps the sentinels: US01 19, ArmsG 37), its volume boxes and the occlusion records it parents (Armry01's window sets section 1's min z, its portal section 3's min x); its midpoint is the floor of their truncated mean; its radius is the farthest vertex from the midpoint, so a volume-only section's is 0; its offset is its part's pivot truncated to 16.16 | 3,224 of 3,255 sections; all 52 volume-only sections radius 0 (2026-09-24 sweep); all 5,046 odd-sum midpoint axes round down; truncating the collision LOD's float pivots gives all 15,837 offset words (rounding 10,182). 97.5% of the bound words lie off the 8.8 grid: the retail tool bounded the authored corners |
+| CFAC | The plane distance is `-(n . v0)`: the runtime tests `n . p + plane_dist` (`collision_query.cpp`) | 600,378 of 600,378 unambiguous faces (2026-09-24 sweep) |
+| CMDL | The box envelops the collision LOD's faces and LOD 0's triangles; the radii and height (`radii[2]`) are the collision LOD's alone | Derived from the stored corners the box comes back for 679 of 958 models (Dblkhwk1, Armry01, CNet01; not Dtruck2 or ArmsG) and the radii for 24: the retail tool read the authored corners, which the file does not keep. CNet01 (no face) stores radii 0, 0, -20000 |
+| MTRL | A GLASS shader is glass with reflection 128 grey; an EMISSIVE (`*_LUM`) shader is emissive 2; no other material is either | every material of the 958 JO models |
+| BPLN | The plane flag word marks a seam. ModSuperOed's rule (the retired port): each volume triangle's box, shrunk by 0.01, inside another `CB` volume's box flags its plane; retail's own tool is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: raycast_against_entity_pool @ 0x538720, flag test @ 0x538d00]`) | 19,695 of 132,856 planes flagged; the OED rule over rebuilt faces agrees on 89.2% of 116,716 |
+| BPLN | A ladder (`CL`) volume's plane 0 is its facing, OED's swap of plane 0 with the last triangle's plane | 82 of 102 retail ladders lead with a non-`+x` plane |
+| LGHT | An omni light stores rotation `{+0, -1, 0, 1}` (straight down, no cone), falloff 0, and a `view_proj` whose first two columns are NaN (the perspective of a zero cone); the retired OED exporter's `build_light_view_proj` reproduces the record to within one ulp in two entries | Armry01's three lights (styles 55 and 24) |
+| LGHT | The flag byte carries `0x40`, a bit the retired exporter never set (meaning unknown, §2.14) | Armry01 (`0x40`, `0x41`) |
+| STRP | Every strip is a triangle list | 11,264 strips, none `is_strip` |
+| RMDL | Model types `gnrc` 2917, `bldg` 310, `door` 12, `veh0` 1 | all LODs |
+| CTRL | Tables name registers outside the 96-entry catalog (`VEHICLE_TIRE14`, `VEHICLE_WHEELS04`, an empty name); the loader aliases them to LOD_FRAC `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` | DT801, Dbtr801, IBlock02 |
+| MTRL/USRP/VERT | Shader tags hold `#` (`VS_PHONGT#UV`, `VS_SKBASIC#UV`); user point names hold spaces (`FLARE 01`, `ground `); some vertex normals are zero-length | CSlide01, dM1A1; DCHNK1, JoLFP1; Dblkhwk1's rotor |
+| PANM/MTRX | Skinned models carry non-finite MTRX rows that no PANM row selects (selectors 0 or 255); 258 models carry a non-identity row 0, which a zero selector bypasses | US01, ArmsG; corpus |
+
+`opennova-3di scene` then `build` gives back the same model (`opennova-3di
+compare`, which checks everything the runtime reads) for 881 of the 958
+models; the rest differ in words retail derived from data the file does not
+keep (docs/threedi/o3d-scene-format.md lists them), and two draw with a
+material id they lack. Ctest `threedi_o3d_retail_roundtrip` runs
+Armry01, Dblkhwk1, US01, ArmsG and Mp5b_1st.
+
 ### Retail RMDL thresholds, OOBJ priority and texture-row flags (2026-09-24)
 
 Three field meanings corrected by the 2026-09-24 rendering parity pass,
@@ -836,8 +875,12 @@ fixture with extra_polys surfaces.
 
 - 3DI3: `WriteINFO` was never located in OED (likely nonexistent; the chunk is
   begun empty). Revisit if a fixture with a non-empty INFO surfaces.
-- 3DI3: all OCCL leaves in Wcrate5 are count-zero; per-record encodings are
-  unvalidated against a fixture with real occlusion geometry.
+- 3DI3: the BPLN seam flag as retail's own tool set it. The builder applies
+  ModSuperOed's overlap rule (ADR 0047), which agrees on 89.2% of the corpus's
+  planes when run over faces rebuilt from the planes (the authored faces are
+  lost); whether retail's tool differed is unwitnessed.
+- 3DI3: the LGHT flag bit `0x40` (Armry01's lights carry it); the retired
+  exporter set only bits 0-3.
 - 3DI3: `[orig: LoadRenderVertexBuffer @ 0x474380]` was catalogued but not
   decompiled; the loader side of the VERT stride/flag mapping is unverified.
   The WRITER-variant selection is witnessed (2026-08-19): one flag word drives

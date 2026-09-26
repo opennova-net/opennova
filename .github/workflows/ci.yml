@@ -450,13 +450,16 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  # Surface the Windows build on the PR as a single comment that updates in
-  # place. Depends on the Windows package job (not the test jobs), so the link
-  # only ever advances to a build that succeeded; a failed build skips this job
-  # and the previous comment is left untouched.
+  # The same installable Blender package is built for PRs and tagged releases.
+  package-blender-windows:
+    uses: ./.github/workflows/package-blender-windows.yml
+
+  # Surface both Windows packages on the PR as a single comment that updates
+  # in place after both packages succeed. A failed package leaves the previous
+  # comment untouched.
   pr-build-links:
     runs-on: ubuntu-latest
-    needs: [package-godot-windows]
+    needs: [package-godot-windows, package-blender-windows]
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -466,6 +469,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
+          BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
         with:
           script: |
             // A hidden marker lets us find our own comment across runs, so there
@@ -479,11 +483,12 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows debug-mode build for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})): debug export template plus the template_debug GDExtension. Release-mode builds come from the release workflow.`,
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension. The Blender add-on includes the Release CLI. Tagged releases publish both packages, with the game in release mode.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
               `| Runtime: opennova.exe; supply game data with --resource-dir | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
+              `| Blender 4.2+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');

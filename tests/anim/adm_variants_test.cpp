@@ -96,6 +96,29 @@ int main(void) {
     if (adm.count == 1) CHECK(strcmp(adm.entries[0].variants[0], "x.bad") == 0);
     adm_free(&adm);
 
+    // A row names its slot by its key past the first five characters, whatever
+    // they are and in any case: `ANIM_RESET` and `xxxx_idle` are rows, kept as
+    // authored, and name slots 0 and idle. A key of five characters or fewer
+    // names none (BIRD1.ADM's `(if` comment line). [orig: AnimMap_ParseConfigLine
+    // @0x40CB60 -> AnimMap_FindSlotByName @0x40CFA0, stricmp on key + 5]
+    const char *slots =
+        "ANIM_RESET \"rst.bad\"\r\n"
+        "xxxx_idle \"idle.bad\"\r\n"
+        "reset \"five.bad\"\r\n"
+        "(if anim is not availble\r\n";
+    CHECK(adm_parse_buffer(slots, strlen(slots), &adm) == 0);
+    CHECK(adm.count == 2);
+    if (adm.count == 2) {
+        CHECK(strcmp(adm.entries[0].key, "ANIM_RESET") == 0);
+        CHECK(adm_key_names_slot(adm.entries[0].key, "reset"));
+        CHECK(adm_slot_key(adm.entries[0].key) == "anim_reset");
+        CHECK(strcmp(adm.entries[1].key, "xxxx_idle") == 0);
+        CHECK(adm_slot_key(adm.entries[1].key) == "anim_idle");
+        CHECK(!adm_key_names_slot(adm.entries[1].key, "reset"));
+    }
+    CHECK(adm_slot_key("reset").empty() && adm_slot_key("anim_").empty());
+    adm_free(&adm);
+
     if (failures == 0) printf("adm_variants_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

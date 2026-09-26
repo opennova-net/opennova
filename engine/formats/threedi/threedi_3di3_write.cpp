@@ -1679,6 +1679,20 @@ static int threedi_3di3_serialize(const Threedi3di3 *model, BufferBuilder *out)
     return 0;
 }
 
+int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &out)
+{
+    if (!model) {
+        return -1;
+    }
+    BufferBuilder buf = {0};
+    if (threedi_3di3_serialize(model, &buf) != 0) {
+        return -1;
+    }
+    out.assign(buf.data, buf.data + buf.len);
+    buffer_builder_free(&buf);
+    return 0;
+}
+
 int threedi_3di3_write(const char *path, const Threedi3di3 *model)
 {
     if (!path || !model) {

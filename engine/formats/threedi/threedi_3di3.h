@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <vector>
 #include <formats/threedi/threedi.h>
 
 #pragma pack(push, 1)
@@ -834,6 +835,11 @@ int threedi_3di3_read_memory(const uint8_t *data, size_t size,
 // Convenience: write a previously-read model back to disk (round-trip).
 int threedi_3di3_write(const char *path, const Threedi3di3 *model);
 
+// The same parity writer into memory: `out` receives exactly the bytes
+// threedi_3di3_write puts on disk. Returns 0 on success, -1 when the writer
+// refuses the model.
+int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &out);
+
 // Free allocations inside a Threedi3di3.
 void threedi_3di3_free(Threedi3di3 *model);
 
@@ -847,6 +853,11 @@ void threedi_3di3_free(Threedi3di3 *model);
 // axis order, NOT render-swizzled): callers apply their own axis convention
 // (e.g. godot_vec3). Returns 1 unless model/out is NULL (out untouched then).
 int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]);
+
+// User point kinds as the retail corpus spells them: 71 ('G') for gameplay
+// points (seats, ground, cameras), 83 ('S') for effect/particle points.
+inline constexpr int32_t THREEDI_USER_POINT_GAMEPLAY = 71;
+inline constexpr int32_t THREEDI_USER_POINT_EFFECT = 83;
 
 // The attach scan reads only a model's FIRST 16 userpoints — the result is a
 // 16-bit mask. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]

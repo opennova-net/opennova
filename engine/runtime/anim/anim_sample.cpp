@@ -181,7 +181,19 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
     clip.frame_count = bad.frame_count;
 
     const size_t bad_bone_count = bad.num_bones;
-    const bool translated = (bad.flags & 0x02u) != 0;
+    // A bone moves by its translation rows only when the playing clip AND the bind carry
+    // flags & 2. The original fills a translation scratch from the PLAYING clip (its rows
+    // under its own flag, zeros without it), then copies that scratch into the bone
+    // matrices only under the BIND's flag (the channel+44 .bad, else the playing clip);
+    // the other branch leaves every translation row zero. A translated clip over an
+    // untranslated reset therefore moves nothing; with no bind source the clip's own flag
+    // decides. [orig: BoneAnim_TransformBones @0x410360 -- the test @0x41038d, the zeros
+    // @0x4103f6; AnimChannel_ComputeBoneMatrices @0x410da0 -- test [bind+0x10], 2
+    // @0x410de7 on channel+44 @0x410dd8, else the playing clip @0x410de5, the copy
+    // @0x410ea0..0x410eb7; Math_TransposeMatrix3x3ToMatrix4x4 @0x616740 zeroes the row
+    // @0x61675a..0x616784.]
+    const BadFile &gate_source = (bind_source != nullptr) ? *bind_source : bad;
+    const bool translated = (bad.flags & 0x02u) != 0 && (gate_source.flags & 0x02u) != 0;
     // Model-table mode: the MODEL's bone table defines the rig -- row count, hierarchy, and
     // pivots; the .bad's own bone count/parents/positions are never read (BadBone.position is
     // a lossy DCC export -- 12 of 43 JO viewmodel rigs ship zeroed/stale values and retail
@@ -328,16 +340,23 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             Vec3 translation = kZeroVec;
             if (translated && bad.translations != nullptr && b < bad_bone_count) {
                 // The translation block is laid out by the FILE's own bone count (its stride),
-                // regardless of the rig's row count in model-table mode. It carries exactly
-                // frame_count rows (no fence-post key): the final key's pose HOLDS the last
-                // row — a zero fallback would pop translated clips' last key to the origin.
-                // (The original's translation read at the final key window is unwalked; the
-                // hold mirrors the rotation walk's hold-last shape.)
-                const uint32_t tf = (bad.frame_count > 0 && f >= bad.frame_count)
-                        ? bad.frame_count - 1 : f;
-                const size_t idx = static_cast<size_t>(tf) * bad_bone_count + b;
-                if (idx < bad.num_translations) {
-                    const float *t = bad.translations[idx];
+                // regardless of the rig's row count in model-table mode. The original reads
+                // row trunc(frame_count * t) and lerps it with the NEXT row by the fraction:
+                // at frame f that is row f at weight 0 against row f + 1, so the final frame
+                // reads row frame_count, the fence-post row the block carries like the keys.
+                // [orig: sub_4102D0 @0x4102d0 via BoneAnim_TransformBones @0x410360 --
+                //  row = trunc(frame_count * t) under the 0xC00 control word @0x410317,
+                //  weight = the remainder @0x41034f, (1 - w) * row + w * next row with the
+                //  next row at +12 * bone_count @0x410497..0x4104cd.]
+                // A frame_count * t of exactly 0 is read as 1.0 (@0x4102f7..0x410304), so
+                // the one sample at t == 0 takes row 1; the pose table cannot carry that
+                // instant, because frame 0 is also the left end of the first window
+                // eval_clip_pose interpolates, where the original reads the lerp of rows 0
+                // and 1. A file shorter than its frame count holds the last row it has.
+                const size_t rows = bad.num_translations / bad_bone_count;
+                if (rows > 0) {
+                    const size_t row = f < rows ? static_cast<size_t>(f) : rows - 1;
+                    const float *t = bad.translations[row * bad_bone_count + b];
                     translation = {t[0], t[1], t[2]};
                 }
             }

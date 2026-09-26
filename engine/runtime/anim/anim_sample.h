@@ -99,7 +99,11 @@ struct Clip {
 };
 
 // Sample a parsed .bad into engine-native (Y-up) space. Per-frame orientation comes from
-// the rotation channels; per-frame translation is applied when (flags & 2). Bone rest
+// the rotation channels; per-frame translation is applied when this clip AND the bind
+// (bind_source, else this clip) carry (flags & 2) -- a translated clip over an
+// untranslated bind moves no bone [orig: AnimChannel_ComputeBoneMatrices @0x410da0 tests
+// the bind's flag @0x410de7; BoneAnim_TransformBones @0x410360 the clip's @0x41038d]. In
+// the default mode bind_source is read for that gate alone. Bone rest
 // ORIGINS (the skeleton offsets used in the FK accumulation) come from shared_rest_origins
 // when its size matches the bone count, else from this clip's own BadBone positions. The
 // shared origins MUST be passed for non-bind clips: a model's clips share ONE skeleton, but

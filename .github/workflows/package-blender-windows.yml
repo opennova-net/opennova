@@ -1,0 +1,92 @@
+name: Package Blender add-on
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version stamped into the zipped manifest (a release tag); empty keeps the tracked one
+        type: string
+        required: false
+        default: ""
+    outputs:
+      artifact_id:
+        description: ID of the installable Blender add-on zip
+        value: ${{ jobs.package.outputs.artifact_id }}
+      artifact_url:
+        description: Download URL of the installable Blender add-on zip
+        value: ${{ jobs.package.outputs.artifact_url }}
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      # The CLI builds from the root CMake project without godot-cpp or GUT,
+      # so the submodules stay uninitialized.
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Package Blender add-on with Release CLI
+        shell: bash
+        env:
+          ADDON_VERSION: ${{ inputs.version }}
+        run: scripts/package_blender_addon.sh dist/opennova-blender-addon-windows.zip "$ADDON_VERSION"
+
+      - name: Smoke-test the packaged CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $unpacked = "build/blender-package-smoke"
+          Expand-Archive -LiteralPath dist/opennova-blender-addon-windows.zip -DestinationPath $unpacked -Force
+          $cli = "$unpacked/opennova_3di/bin/opennova-3di.exe"
+          $dependencies = & dumpbin /DEPENDENTS $cli | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect packaged CLI dependencies" }
+          Write-Host $dependencies
+          if ($dependencies -match '(?i)\b(?:MSVCP|VCRUNTIME)\w*\.dll\b') {
+            throw "Packaged CLI requires an unbundled Visual C++ runtime DLL"
+          }
+          & $cli build fixtures/threedi/o3d/spinner.o3d -o "$unpacked/spinner.3di"
+          if ($LASTEXITCODE -ne 0) { throw "Packaged CLI failed to build a model" }
+          & $cli scene "$unpacked/spinner.3di" -o "$unpacked/spinner.o3d"
+          if ($LASTEXITCODE -ne 0) { throw "Packaged CLI failed to read a model" }
+          & $cli build "$unpacked/spinner.o3d" -o "$unpacked/spinner-roundtrip.3di"
+          if ($LASTEXITCODE -ne 0) { throw "Packaged CLI failed to rebuild a model" }
+          & $cli compare "$unpacked/spinner.3di" "$unpacked/spinner-roundtrip.3di"
+          if ($LASTEXITCODE -ne 0) { throw "Packaged CLI round trip changed the model" }
+
+      # Upload the installable zip directly, without a second archive wrapper.
+      - name: Upload Blender add-on zip
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-blender-addon-windows.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats

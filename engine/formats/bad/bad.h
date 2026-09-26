@@ -1,4 +1,5 @@
-// BAD skeletal-animation parser. Runtime reads only.
+// BAD skeletal-animation parser. The writer is bad_write.h, the construction
+// seam bad_build.h.
 #pragma once
 
 #include <stddef.h>

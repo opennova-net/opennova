@@ -1,70 +1,205 @@
 # Scene naming contract
 
-This document preserves the format-neutral names a future GLB/GLTF editor can
-use when converting ordinary scene data to and from 3DI. It is a naming
-contract, not an importer, exporter, Blender schema, or license to depend on
-custom properties.
+The NovaLogic ASE/OED object-naming convention: the scene-object names that
+carry a model's 3DI roles. OED classified them by `classify_name`
+([orig: ConvertToInternal @ 0x4268B3], ported in the retired
+`engine/formats/oed/convert_internal.cpp`); the Blender add-on
+(`tools/blender/opennova_3di`, [ADR 0047](../adr/0047-blender-3di-exporter.md))
+reads them to export and lays a model out by them to import, and a future
+GLB/GLTF <-> 3DI seam keeps them.
 
-Names are ASCII and case-stable. Numeric identities are zero-padded to two
-digits. A converter must reject ambiguous DCC deduplication suffixes such as
-`.001`; it must not silently reinterpret them as part identities.
+Names are ASCII. Numeric identities are two digits and 1-based in the name
+(`01` is the first), 0-based inside; `00` parses to -1 (a user point with no
+part). A leading `!` makes an object ignored. Blender's own `.001`
+duplicate suffixes are stripped before classification (object names are
+unique per `.blend`, so LOD1's `PN01` is `PN01.001`); two objects that
+classify to the same identity inside one LOD are an error. Export names every
+other object it leaves out (an Empty that only groups objects is left alone),
+and user points, lights, collision volumes and occlusion meshes outside the
+primary LOD. A mesh Blender does not evaluate (it or its collection is disabled
+in viewports, or its collection is excluded) exports as its base mesh, so
+export refuses one that carries modifiers or shape keys.
 
 | Scene element | Name form | Meaning |
 | --- | --- | --- |
-| Part | `PN##` | Stable 1-based 3DI subobject identity |
-| Part mesh | `## Mesh<n>` | Mesh `<n>` belonging to part `##` |
-| Part center | `_NN center` | Transform center for part `NN` |
-| Attachment | `~NNx attach` | Named attachment `x` on part `NN` |
-| User point | `UPcNN <label>` | User-point type `c`, part `NN`, optional label |
-| Light | `LP##` | Stable light identity |
-| Bone | `BN##` | Stable bone identity used by joints and weights |
+| Model root | any name (the Empty above the LOD roots) | one model, one `.3di`: its model name, output path and collision LOD are properties. A scene holds any number of models (a first-person gun and its arms, a hull and its turret); each exports in its root's own frame, so placing or mounting a model does not change it |
+| LOD root | any name, custom property `_lod_index` | render LOD `_lod_index` (0 = primary); its threshold (the projected radius in pixels above which it draws; 0 the coarsest) and RMDL type (`gnrc`, `bldg`, `door`, `veh0`) are properties. A root with no parts is an empty LOD (retail ships them) |
+| Part | `PN##` (Empty) | 3DI subobject `##`; its origin is the pivot. A rotated `PN##` is a PANM rotation frame (an MTRX row): its tracks turn about the empty's axes (Dblkhwk1's canted tail rotor). A mirrored one (a negative scale) is a reflection frame, whose tracks turn the other way; retail stores five (dtaxi1, PKM_1st, ...) |
+| Part mesh | `## Mesh<n>` | mesh `<n>` of part `##` (sits under its `PN##`); the UV map Blender renders with is the base UV0, the first other one the detail stage's UV1 |
+| Part center | `_## center` | part `##`'s transform center (pivot): its origin. When it is a mesh and its rigid part draws nothing, its first vertex is the point the part's bounds sit on (radius 0) and, in the collision LOD, its section's one collision vertex: OED seeded such a part with that vertex (5fc5b4f6a^ `engine/formats/oed/convert_internal.cpp`, the placeholder injection), and 1,779 of the 2,411 such retail parts carry it as their section's only collision vertex. Import makes one for every such part of a rigid model; a skinned model's (dM1A1, DT801) are not carried |
+| Attachment | `~PPx attach` | a helper under a part (the part it sits under), naming that part's parent `PP` (`00` = -1, as Excavatr's part 2 stores it; the part's own number = itself, as Eturret's turret stores it); `x` (a, b, ...) tells a part's helpers apart, and the first in `x` order names the parent and is the part's attach point (a later one is not exported). In the collision LOD the attach points are the CXLT rows [OED's WriteCXLT wrote the collision LOD's attach points, 5fc5b4f6a^ `engine/formats/oed/export_3di.cpp`]: when that LOD holds any helper, export writes one row per section the retail corpus gives one (every section after the root on a rigid model, every section on a skinned one), at the part's attach point, or at its pivot where the part has none (our rule, so a scene that holds helpers for some parts only, as import and a rigid clip rig make them, still writes a whole table; a helper on its part's pivot writes the very row the builder would derive). An empty table (Chair03X and ten more retail models store none where the count rule gives rows) has no scene form: import says so, and export leaves the rows to the builder. A collision LOD without any helper leaves the rows to the builder, which puts each at its section's pivot. On a skinned model a helper sits on its part's bone (an Empty with the bone as its parent) or under its mesh part's `## Mesh<n>`, and the bone hierarchy stays the part's parent: the root bone's helper is `~01 attach` (retail stores a root's parent as 0, itself) |
+| User point | `UP<c>## <label>` | USRP point: type letter `c` (`G` 71 gameplay, `S` 83 effect), part `##` (`00` = none), label = the USRP name (no label: `Noname`); faces along its local +Z. Its export-order property keeps the USRP order (seats and effect points are scanned in it); points without one follow in label order (our own rule: retail's exporter kept its scene order), so `sitex01`, `sitex02` keep seat order whatever part they sit on |
+| Light | `LP##[a..]` (a light object) | a LGHT light owned by part `##` (`01` the root, as `classify_name` parsed it); a point light is omni, a spot light a cone about its local -Z, the way Blender draws it. An unrotated light points straight down, retail's omni default. Its colour is the start colour; the generator, attenuation and flags are properties |
+| Bone | `BN##` (Armature bone) | part `##` of a skinned model: the head is the pivot, the nearest `BN##` bone above it the part parent (past `Root` and any `!` control bone; none: the root); `BN##` vertex groups carry the weights (a weight-0 membership keeps a vertex whose weights are all zero, as dM1A1's LOD 3 stores them). Its PANM tracks, flags and track frame (the MTRX row: a rotation of the model's axes) are bone properties; a part has one track per target |
+| Root bone | `Root`, any case (Armature bone) | no part: the ground under the character, the rig's top bone with the hips (`BN01`, the model origin) below it (see Animations) |
+| Skinned mesh | `## Mesh<n>` (under the Armature) | geometry authored on part `##`. Every skinned strip is stored on the root, and each part keeps the bounds of what is authored on it. `##` is a bone (dM1A1's hull: `01 Mesh0` on `BN01`, with each wheel's own geometry on its bone in the collision LOD) or a mesh part numbered after the bones: parent 0, pivot = the mesh origin (ArmsG: 37 bones, then `38 Mesh0`) |
+| Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` (any tag in the engine's shader table; the add-on's shader field renames the material). Without a tag, OED's default for the material's texture maps: `FF_ST_OP` for one, `FF_MT_OP` for two, `FFP_GLASS` for none (`VS_SKBASIC`, `VS_SKGLASS` on a skinned model); a mesh without a material takes the no-map default too. Glass, emissive and the alpha pass follow the shader |
 
-Collision and occlusion nodes retain their established two-letter type prefix,
-numeric identity, and the `-colonly` or `-oconly` role suffix (the tables
-below, from the retired `pyopennova/scene_naming.py`). Their complete field
-mapping is intentionally deferred until the GLB editor is designed; names alone
-must not be treated as a lossless encoding for flags, planes, or connected-part
-data.
+## Collision volumes
 
-### Collision volumes
-
-`<TYPE><NN>[<dup>]-colonly`. `NN` is the 1-based zero-padded volume index (a
-negative source index displays as `01`). `<dup>` is a base-26 lowercase suffix
-for the 2nd and later occurrences of an otherwise identical name: 2nd `a`,
-3rd `b`, 27th `z`, 28th `aa`. Unknown numeric types fall back to `CX`.
+`<TYPE>##[<dup>]-colonly`, on the primary LOD. `##` is the **owning part**
+(`classify_name` stores it as the object index; the volume joins that part's
+collision section). `<dup>` is a lowercase suffix for the 2nd and later volumes
+of one type on one part: 2nd `a`, 3rd `b`, ..., `z`, then `aa` (the Blackhawk's
+35 hull volumes are all `CB01...`); a section's volumes export in that order,
+code first. The volume is the solid its faces bound, by the OED rule
+(docs/threedi/o3d-scene-format.md): each face's plane, so the mesh must be
+convex (export names one that is not). A ladder (`CL`) faces the plane of its
+last face (Blender's Sort Mesh Elements can put a chosen face last). A flat
+ladder is one polygon facing the way the ladder faces: 94 of the 102 retail
+ladders have no thickness, and import lays each out that way.
 
 | Code | Type | Code | Type | Code | Type |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `CB` | 8 | `BB` (blink box) | 14 | `LP` |
-| 2 | `CS` | 9 | `CD` | 15 | (unassigned: `CX`) |
-| 3 | `CC` | 10 | `CT` | 16 | `DH` |
-| 4 | `CL` | 11 | `CM` | 17 | `DM` |
-| 5 | `CV` | 12 | `VK` | 18 | `DL` |
-| 6 | `CA` | 13 | `CF` | 19 | `CP` |
-| 7 | `VC` | | | | |
+| `CB` | 1 | `BB` | 8 (blink box) | `LP` | 14 |
+| `CS` | 2 | `CD` | 9 | `DH` | 16 |
+| `CC` | 3 | `CT` | 10 | `DM` | 17 |
+| `CL` | 4 | `CM` | 11 | `DL` | 18 |
+| `CV` | 5 | `VK` | 12 | `CP` | 19 |
+| `CA` | 6 | `CF` | 13 | | |
+| `VC` | 7 | | | | |
 
-`BB` appends the enabled-flag letters before `NN`, taken from `~flags & 0x3E`
-(a cleared bit means enabled): bit 1 `V`, bit 2 `S`, bit 3 `W`, bit 4 `L`,
-bit 5 `O`, in that order (for example `BBVSO03`; no letters when every bit is
-set). Type 14 shares the `LP` prefix with lights; the `-colonly` suffix is what
-distinguishes the two.
+Any other code whose first letter is `C`, `D`, `L` or `V` is type 0:
+`classify_name` leaves the type of a code it does not list at 0. 36 of the 48
+retail first-person weapons (and IJava03) carry a type 0 box per section;
+import names them `CX`.
 
-### Occlusion volumes
+`BB` takes flag letters before `##`; each clears a bit of `0x3E`: `V` 0x2,
+`S` 0x4, `W` 0x8, `L` 0x10, `O` 0x20 (for example `BBVSO03`; Armry01's light
+fixtures carry `BBL02`, `BBVSL03`). Type 14 shares the `LP` prefix with
+lights; the `-colonly` suffix tells them apart. Runtime meanings:
+docs/world/world-wac-ai-re.md §15. No name carries the flags of a non-`BB`
+volume (Armry02 ships `CB` volumes with flags 1).
 
-`<PFX><NN>[-<MM>]-oconly`: type 0 `OB`, 1 `OS`, 2 `OP`, 3 `OP` (type 3 shares
-the `OP` prefix); unknown types fall back to `OX`. `NN` is the parent
-subobject + 1 (negative displays as `01`). Types 2 and 3 with a connecting
-subobject of 0 or more append `-MM` (that subobject + 1). Occlusion names take
-no duplicate suffix.
+## Occlusion
 
-Material names may remain descriptive, but a future converter may not assume a
-name alone losslessly carries shader codes, texture casing, control registers,
-or animated-texture state. UV sets use `UVMap` for the primary channel and
-`UVMap_Lightmap` for the lightmap channel where those names are available.
+`<PFX>##[<dup>][-<MM>]-occonly` meshes on the primary LOD, `##` the record's
+parent section (1-based); the OCCL record type follows the prefix as the
+retired exporter mapped it: `OB` 0 (occluder), `OS` 1 (open), `OP##` 2 (a
+window to the exterior), `OP##-MM` 3 (a portal to section `MM`), `OH` 4 (no
+witnessed runtime meaning). Faces wind counter-clockwise about the outward
+normal; the planes follow the OED rule (docs/threedi/o3d-scene-format.md).
+Armry01 lays out as `OS01`, `OB01`..`OB01c`, `OP02`, `OP02-04`, `OP04-03`.
+An export-order property keeps the record order.
 
-Hierarchy, transforms, meshes, materials, skinning, weights, UVs, lights, and
-animation travel as standard scene/GLTF data. Coordinate conversion has one
-owner per direction and happens exactly once. Nova-specific semantics that
-standard GLTF cannot represent require a future, explicit editor decision;
-they must never be recovered from importer-private metadata or custom
-properties.
+## Assemblies
+
+Models the game draws together can share a scene. The add-on shows how the
+game combines them, but the assembly settings never reach a `.3di`:
+
+- **Bones follow** (on a skinned model): its `BN##` bones follow another
+  model's `PN##` parts of the same index. Retail draws a first-person gun and
+  the player's skinned arms with one array of bone matrices built from the
+  gun's parts [orig: Player_RenderFirstPersonViewModel @ 0x4ded60, its
+  Entity_BuildBoneWorldMatrices call @ 0x4df028]. Importing a gun and its arms
+  together pairs them; a gun whose clips ride a `!Rig` armature is still the
+  rigid model they pair with, its hierarchy in its `~PPx attach` helpers.
+- **Mount on** + **user point** (on any model): the model sits on another
+  model's user point, as an ITEMS.DEF `addeweap`/`addeweapC <userpoint>` child
+  (the M1A1's turret on the hull's `ewep01`) sits on its parent. The names are
+  matched whole and trimmed (retail labels carry trailing blanks), without
+  regard to case, and the first match wins. A missing name leaves the child
+  on the parent's root. The child takes the point's look-at frame as retail
+  builds it: the direction read mirrored against the position, and the
+  look-at matrix's rows as the child's axes, so a level point faces the child
+  along it and a pitched one tips it the other way [orig:
+  build_bone_attachment_matrix @ 0x56C630; build_direction_look_at_matrix @
+  0x612C90].
+- Both settings bind with every rig of the two models at rest, so the pose a
+  clip holds when they are set is not baked in.
+
+## Bullet faces
+
+The collision faces bullets hit come from one render LOD's part meshes, chosen
+by the OED `.3dp` `poly_collision_lod` setting (default 0, the most detailed;
+Armry01's are LOD 1's), and that LOD's parts are the collision sections (one
+each). Each face's surface type and flags come from its material: "both
+sides" (1) follows Two sided; "bullets pass" (0x100, retail's rotor blades)
+and "front only" (0x800: without flag 1 a bullet stops only when it crosses
+the face from the front [orig: Physics_RaycastAgainstBoneCollision @
+0x4e4cb0, the test @ 0x4e5139]) are material settings. Import gives each
+material the surface and flags most of its faces carry and names how many
+faces lose that vote. A skinned model with a
+mesh part carries its bullet faces on that part's section (the retail person
+layout). One without a mesh part carries them on each part's section, from the
+geometry authored on each bone (dM1A1: LOD 1, 875 hull faces and 40 per
+wheel).
+
+## Animations
+
+A rig's clips are a set of their own (`docs/anim/o3a-scene-format.md`), laid out
+on the model the rig belongs to:
+
+- **A clip is an Action** on the rig armature's NLA tracks, one strip per track,
+  in track order. Its name is the `.bad` file stem, one clip to a name (import
+  replaces a clip the rig already holds under an imported clip's name). Its own
+  properties carry the clip's rate, its loop and translation flags, the
+  unwitnessed flag bit 3, and a length longer than the Action's own when it has
+  one, whose extra frames hold the Action's last pose.
+- **The table** is the rows on the model root: an `anim_<name>` key and its clip
+  ring, in the order the `.adm` stores. The engine serves a row from its LAST
+  variant back [orig: AnimMap_RegisterBoneNode @ 0x40C2D0], and the reset row
+  (`anim_reset`, the last one) names in its last variant the clip whose bind
+  the rest pose is, each reset variant replacing the one before [orig:
+  AnimMap_FindSlotByName @ 0x40cfa0; AnimMap_RegisterEntity @ 0x40bb60]. A
+  row names its slot by its key past the first five characters, without case
+  (`ANIM_RESET` and `xxxx_reset` are the reset row too). The game cannot load a
+  table without a reset row [orig: AnimMap_LoadAdmFile @ 0x40cc40, the read of
+  slot 0's head @ 0x40ce11], so export refuses one.
+- **The rig** is a humanoid's: `Root` (any case) on the ground as the top
+  bone, the hips `BN01` (the model origin) below it, and the head, the bone the
+  model root's `head_bone` names or, unnamed, the one bone whose name ends in
+  `head` (`BN15 Head`). Each frame's event is measured from the pose, never
+  keyed: the bottom is the hips' height above Root, the top the head's (the
+  bottom when the rig has no head), and the velocity the hips' step to the next
+  frame across the ground, up by the change in bottom, in the clip frame (x
+  lateral, z forward). The runtime moves the entity by that step, stands its
+  origin `bottom` above the ground and reads the top as the capsule's [orig:
+  AnimMap_UpdateEntity @ 0x40b5f0]; that retail's exporter measured the hips
+  and the head this way is read off the corpus (the top within 1 cm of the
+  head's height in 91% of 185,661 person frames). The last two events repeat
+  one, as in all 477 retail clips: a loop's are its event 0, a one-shot's stand
+  still at frame_count - 1's bottom and top. A rig without Root stands on
+  Blender's ground plane, world Z = 0 (our convention; the ground is in no
+  clip), as a first-person rig does with its model placed at the hips' height
+  (1.07). The hips never carry a translation row (0 of the 202 translated
+  retail clips moves bone 0). Any bone named `!...` is no part either, so a rig
+  may also hold the control bones an author rigs with.
+- **Import stands the rig on the ground:** the hips keyed at each frame's
+  bottom and, when the set moves the body, a `Root` made at the ground under
+  the hips and keyed along the summed steps, so a planted foot stays put; a set
+  that never moves (every first-person set) makes none. A model root at the
+  world origin rises so the ground is Z = 0, with the models whose bones follow
+  it (display only: every export reads a model as if its root stood at the
+  origin). A stored top more than 3 cm from the head's height (from the bottom
+  on a rig without a head: 64 of the 204 retail first-person clip
+  registrations carry a higher top by an unwitnessed rule) is reported.
+- **The event bits** are the rig's keyed `Trigger` word: 1 and 2 the left and
+  right footstep, 4, 8 and 16 the ammo rows, 0x20 to 0x400 the six foley sounds
+  (`opennova-3di catalog` prints them).
+- **The rest pose is the bind.** A channel is the bone's own rotation in the
+  model's frame, and the runtime carries the reset clip's first key as the
+  skeleton's rest, so a bone deforms by `key * bind^-1`: with the rest pose set
+  to that key, a clip poses the rig exactly as the game draws it. The first
+  table imported onto a rig that holds no clip turns each rest bone onto that
+  key; heads, lengths and weights stay put, so the model is unchanged. A lone
+  `.bad` and a table without a reset row name no bind, and a rig that already
+  holds clips keeps its rest, since their Actions are keyed against it.
+- **Bone names live in the clip.** A model's part table carries none, so a rig
+  imported from a `.3di` alone names its bones `BN##`; a clip labels them
+  (`BN16 L Hand`), and their vertex groups follow.
+
+**A rigid model's clips** (a first-person weapon's own: they pair with its
+`PN##` parts by the same index rule) ride an armature named `!Rig` under the
+LOD 0 root, whose `BN##` bones mirror the parts. Each part hangs from the LOD
+root and follows its bone's step away from rest through an `O3D follow` Child
+Of constraint, which the rig's Rest Position mutes. A `~PPx attach` helper
+carries the model's own part hierarchy, because the part's Blender parent is
+now the LOD root: a part that already has one keeps it, and a new one sits at
+the part's pivot. The model export ignores a `!`-named armature and reads every
+rig at rest, so the model is the authored layout whatever a clip is doing.
+
+A clip set is as wide as the rig it was authored on. A first-person set belongs
+to the weapon's rig and the arms follow it by index (`mp5_1st.adm` carries 40
+channels; `ArmsG` is 37 bones and a mesh part), so exporting that set from the
+arms alone writes only the channels the arms have parts for.

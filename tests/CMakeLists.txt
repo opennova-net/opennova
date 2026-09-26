@@ -42,6 +42,106 @@ target_link_libraries(threedi_ctrl_catalog_test PRIVATE opennova_formats)
 target_include_directories(threedi_ctrl_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_ctrl_catalog COMMAND threedi_ctrl_catalog_test)
 
+# opennova-3di (the Blender add-on's CLI): build the fixture scenes, read the
+# minted models back and check the conversions the CLI owns.
+add_test(NAME threedi_cli_build
+         COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/spinner.o3d
+                 -o ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
+set_tests_properties(threedi_cli_build PROPERTIES FIXTURES_SETUP threedi_cli_spinner)
+add_executable(threedi_o3d_cli_test threedi/o3d_cli_test.cpp)
+target_link_libraries(threedi_o3d_cli_test PRIVATE opennova_formats)
+add_test(NAME threedi_o3d_cli COMMAND threedi_o3d_cli_test ${CMAKE_CURRENT_BINARY_DIR}/spinner.3di)
+set_tests_properties(threedi_o3d_cli PROPERTIES FIXTURES_REQUIRED threedi_cli_spinner)
+add_test(NAME threedi_cli_build_skinned
+         COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/skinned.o3d
+                 -o ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
+set_tests_properties(threedi_cli_build_skinned PROPERTIES FIXTURES_SETUP threedi_cli_skinned)
+add_test(NAME threedi_o3d_skinned COMMAND threedi_o3d_cli_test --skinned ${CMAKE_CURRENT_BINARY_DIR}/skinned.3di)
+set_tests_properties(threedi_o3d_skinned PROPERTIES FIXTURES_REQUIRED threedi_cli_skinned)
+add_test(NAME threedi_cli_build_building
+         COMMAND opennova_3di build ${CMAKE_SOURCE_DIR}/fixtures/threedi/o3d/building.o3d
+                 -o ${CMAKE_CURRENT_BINARY_DIR}/building.3di)
+set_tests_properties(threedi_cli_build_building PROPERTIES FIXTURES_SETUP threedi_cli_building)
+add_test(NAME threedi_o3d_building COMMAND threedi_o3d_cli_test --building ${CMAKE_CURRENT_BINARY_DIR}/building.3di)
+set_tests_properties(threedi_o3d_building PROPERTIES FIXTURES_REQUIRED threedi_cli_building)
+# `scene` is build's inverse: build -> scene -> build re-mints each fixture
+# byte for byte.
+foreach(fixture spinner skinned building)
+    add_test(NAME threedi_cli_scene_${fixture}
+             COMMAND opennova_3di scene ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.3di
+                     -o ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.o3d)
+    add_test(NAME threedi_cli_rebuild_${fixture}
+             COMMAND opennova_3di build ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.o3d
+                     -o ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.3di)
+    add_test(NAME threedi_cli_roundtrip_${fixture}
+             COMMAND ${CMAKE_COMMAND} -E compare_files ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.3di
+                     ${CMAKE_CURRENT_BINARY_DIR}/${fixture}.rt.3di)
+    set_tests_properties(threedi_cli_scene_${fixture} PROPERTIES
+                         FIXTURES_REQUIRED threedi_cli_${fixture} FIXTURES_SETUP threedi_scene_${fixture})
+    set_tests_properties(threedi_cli_rebuild_${fixture} PROPERTIES
+                         FIXTURES_REQUIRED threedi_scene_${fixture} FIXTURES_SETUP threedi_rebuild_${fixture})
+    set_tests_properties(threedi_cli_roundtrip_${fixture} PROPERTIES FIXTURES_REQUIRED threedi_rebuild_${fixture})
+endforeach()
+# Command regressions, including invalid inputs and semantic differences.
+# The anim commands over the same handlers the CLI dispatches: the clip-set
+# round trip, what compare calls the same animation, and the scenes build refuses.
+add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp)
+target_link_libraries(anim_o3a_commands_test PRIVATE opennova_3di_commands)
+add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+# `catalog` prints the anim slot keys and the event trigger bits a front end
+# offers (the Blender add-on parses both), and `info` refuses a flag it does
+# not take.
+add_test(NAME threedi_cli_catalog_anim COMMAND opennova_3di catalog)
+set_tests_properties(threedi_cli_catalog_anim PROPERTIES PASS_REGULAR_EXPRESSION
+    "animslot anim_reset.*animslot anim_guard.*trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
+add_test(NAME threedi_cli_anim_info_flag COMMAND opennova_3di anim info unread.adm --bogus)
+set_tests_properties(threedi_cli_anim_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
+    "anim info takes --verbose or --keys")
+add_test(NAME threedi_cli_info_flag COMMAND opennova_3di info unread.3di --bogus)
+set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
+    "info takes --verbose, --planes or --verts")
+
+add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
+target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
+add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+# build -> scene -> build over small scenes, and the records build refuses.
+add_executable(threedi_o3d_build_test threedi/o3d_build_test.cpp)
+target_link_libraries(threedi_o3d_build_test PRIVATE opennova_3di_commands)
+add_test(NAME threedi_o3d_build COMMAND threedi_o3d_build_test ${CMAKE_CURRENT_BINARY_DIR})
+# opennova-3di over paths the ANSI code page cannot hold (the exe's UTF-8
+# manifest); the test embeds the manifest so its own command line is UTF-8.
+add_executable(threedi_o3d_unicode_test threedi/o3d_unicode_test.cpp)
+target_compile_features(threedi_o3d_unicode_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_sources(threedi_o3d_unicode_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/threedi_cli/utf8.manifest)
+endif()
+add_test(NAME threedi_o3d_unicode
+         COMMAND threedi_o3d_unicode_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+
+# Retail clip sets through anim scene -> anim build -> anim compare (OPENNOVA_JO_ASSETS).
+add_executable(anim_o3a_retail_roundtrip_test anim/o3a_retail_roundtrip_test.cpp)
+target_include_directories(anim_o3a_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_o3a_retail_roundtrip_test PRIVATE cxx_std_17)
+opennova_add_gated_test(anim_o3a_retail_roundtrip
+    COMMAND anim_o3a_retail_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+
+# The runtime plays a rebuilt clip set the way it plays the shipped one
+# (OPENNOVA_JO_ASSETS).
+add_executable(anim_o3a_runtime_playback_test anim/o3a_runtime_playback_test.cpp)
+target_link_libraries(anim_o3a_runtime_playback_test PRIVATE opennova_runtime)
+target_include_directories(anim_o3a_runtime_playback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_o3a_runtime_playback_test PRIVATE cxx_std_17)
+opennova_add_gated_test(anim_o3a_runtime_playback
+    COMMAND anim_o3a_runtime_playback_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+
+# Retail models through scene -> build -> compare (OPENNOVA_JO_ASSETS).
+add_executable(threedi_o3d_retail_roundtrip_test threedi/o3d_retail_roundtrip_test.cpp)
+target_include_directories(threedi_o3d_retail_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(threedi_o3d_retail_roundtrip_test PRIVATE opennova_formats)
+target_compile_features(threedi_o3d_retail_roundtrip_test PRIVATE cxx_std_17)
+opennova_add_gated_test(threedi_o3d_retail_roundtrip
+    COMMAND threedi_o3d_retail_roundtrip_test $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR})
+
 # PANM unit tests
 foreach(test ctrl decode pose runtime wave)
     add_executable(threedi_panm_${test}_test threedi/panm_${test}_test.cpp)
@@ -87,22 +187,38 @@ add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
 
 # ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
 # set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
-foreach(test comment trim_value parse variants)
+foreach(test comment trim_value parse variants write)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_formats)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test comment trim_value variants)
+foreach(test comment trim_value variants write)
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()
 opennova_add_gated_test(adm_parse COMMAND adm_parse_test)
 
 # BAD tests: the null guard unconditionally, the shipped BINOC.bad pins as the
-# reference-set SKIP-LEG leg.
+# reference-set SKIP-LEG leg, and 357_RST.bad's translation rows 0..frame_count
+# (OPENNOVA_JO_ASSETS, SKIP-LEG).
 add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_formats)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_parse COMMAND bad_parse_test)
+# bad_roundtrip: the writer and the construction seam against the reader -- our
+# fixtures byte-exact, a from-scratch clip field-equal and re-write-stable, the
+# builder's derived bone table pinned, BINOC.bad as the SKIP-LEG leg.
+add_executable(bad_roundtrip_test bad/bad_roundtrip_test.cpp)
+target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
+# bad_build: the construction seam -- the frame maps, the derived bind and
+# position, the events' bottom and top written as stated, the refusals, and the
+# canonical table, with SKIP-LEG retail legs over both derivations (BINOC.bad's
+# bind; DT1PRONE.BAD's positions through DT1RST.BAD's bind).
+add_executable(bad_build_test bad/bad_build_test.cpp)
+target_link_libraries(bad_build_test PRIVATE opennova_formats)
+target_include_directories(bad_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bad_build COMMAND bad_build_test)
 
 # Native BIKi menu-video decoder: a deterministic generated bitstream plus an
 # OPENNOVA_JO_DIR-gated retail smoke test.
@@ -711,6 +827,14 @@ target_link_libraries(boot_policy_test PRIVATE opennova_base)
 target_include_directories(boot_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(boot_policy_test PRIVATE cxx_std_17)
 add_test(NAME boot_policy COMMAND boot_policy_test)
+
+# The texture candidate order the Godot resolvers and opennova-3di share
+# (base/resource_index/texture_candidates.h).
+add_executable(texture_candidates_test resource_index/texture_candidates_test.cpp)
+target_link_libraries(texture_candidates_test PRIVATE opennova_base)
+target_include_directories(texture_candidates_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(texture_candidates_test PRIVATE cxx_std_17)
+add_test(NAME texture_candidates COMMAND texture_candidates_test)
 
 add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)
 target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
@@ -2147,8 +2271,9 @@ target_compile_features(route_parity_test PRIVATE cxx_std_17)
 add_test(NAME route_parity COMMAND route_parity_test)
 
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
-# events array is the per-frame root record; rec[3] = cumulative forward distance whose
-# 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).
+# events array is the per-frame root record; rec[3] = bottom, the hips' height above the
+# ground, whose 16.16 change is the vertical root motion. Asset-gated: absent files skip
+# (CI-safe).
 add_executable(root_motion_test anim/root_motion_test.cpp)
 target_link_libraries(root_motion_test PRIVATE opennova_formats)
 target_include_directories(root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -1,0 +1,60 @@
+o3d 1
+# A hull with one register-driven spinning child: the opennova-3di ctest
+# fixture (tests/threedi/o3d_cli_test.cpp). Mission axes: x forward, y left,
+# z up; triangles counter-clockwise about the outward normal.
+model SPINNER
+register HELO_ROTOR
+material FF_ST_OP
+texture spinner.tga
+material FF_ST_AD_LUM
+texture glow.tga
+matflags 4
+alphagen 50 -1 2 120 255
+lod 160 gnrc
+part 0 0 0 0
+strip 0 0
+# the hull's top face: a 2 x 2 quad at z = 1, normal +z
+v 1 1 1 0 0 1 0 0
+v -1 1 1 0 0 1 0 1
+v -1 -1 1 0 0 1 1 1
+v 1 -1 1 0 0 1 1 0
+t 0 1 2
+t 0 2 3
+part 0 0 0 2
+strip 1 1
+# the rotor disc at z = 2, normal +z
+v 3 0 2 0 0 1 0 0
+v 0 3 2 0 0 1 0 1
+v -3 0 2 0 0 1 1 1
+v 0 -3 2 0 0 1 1 0
+t 0 1 2
+t 0 2 3
+panm 0 0
+panm 1 0
+track rotx 113 HELO_ROTOR 0 0 16338
+lod 0 gnrc
+part 0 0 0 0
+strip 0 0
+v 1 1 1 0 0 1 0 0
+v -1 1 1 0 0 1 0 1
+v -1 -1 1 0 0 1 1 1
+t 0 1 2
+panm 0 0
+userpoint ground 0 0 -1 0 0 1 0
+userpoint FX00 -1 0 0 -1 0 0 -1 83
+cobj 0
+cv 1 1 1
+cv -1 1 1
+cv -1 -1 1
+cf 0 1 2 14
+cvol 1 0 -1 -1 -1 1 1 1
+# a convex vehicle-contact volume over an explicit plane list (a seam plane flagged 1)
+cvolume 7 0 -1 -1 0 1 1 1
+cp 1 0 0 -1 1
+cp -1 0 0 -1
+cp 0 1 0 -1
+cp 0 -1 0 -1
+cp 0 0 1 -1
+cp 0 0 -1 0
+cp 0.7071 0 0.7071 -1.2
+cobj 0

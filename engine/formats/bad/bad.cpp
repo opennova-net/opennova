@@ -11,9 +11,12 @@
 
 namespace opennova::bad {
 
-// [orig: BoneFile_Load @0x40fff0 — header dword table: [5] bone count, [6] bone table (100-byte
-//  rows, names strupr'd), [7] channel table (12-byte rows), [8]/[9] events, [16]/[19] translation
-//  block; every stored offset is file-relative and relocated on load]
+// [orig: BoneFile_Load @0x40fff0 — a file over 500,000 bytes (0x7A120) is refused; header
+//  dword table: [5] bone count, [6] bone table (100-byte rows, names strupr'd, child/parent
+//  addresses at +40/+44), [7] channel table (12-byte rows), [8]/[9] a table of 8-byte rows
+//  (empty in every retail clip), [16] the event table, [19] relocated but 0 in every retail
+//  clip; every stored offset is file-relative and relocated on load. No header word names the
+//  translation block: its rows follow the bone table (sub_4102D0 @0x4102d0)]
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -237,9 +240,17 @@ int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out) {
         }
 
         // ----- Translations (optional, when flags & 2) -----
+        // Rows of bone_count x f32 x,y,z, frame-major, right after the bone table. The runtime
+        // reads row trunc(frame_count * t) and lerps it with the NEXT row, so every row from 0
+        // to frame_count carries weight: frame_count + 1 rows, the fence-post count the key
+        // lists and the events carry too [orig: sub_4102D0 @0x4102d0, the row base
+        // [6] + [5] * (100 + 12 * row) @0x410327..0x41033b; BoneAnim_TransformBones @0x410360,
+        // the next row at +12 * bone_count @0x4104a0..0x4104a5]. Retail files carry one row
+        // more (201 of 202 translated clips), which only a zero-weight read reaches; the
+        // parser stops at row frame_count.
         if ((out->flags & 2u) != 0) {
             size_t trans_off = bones_offset + (size_t)out->bone_count * bone_stride;
-            size_t sample_count = (size_t)out->bone_count * out->frame_count;
+            size_t sample_count = (size_t)out->bone_count * ((size_t)out->frame_count + 1);
             size_t expected = sample_count * trans_stride;
 
             if (!in_range(trans_off, expected, data_size)) {

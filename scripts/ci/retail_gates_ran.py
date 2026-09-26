@@ -49,6 +49,11 @@ MUST_RUN = {
         "npruntime_authored_payload_00trg",
         # The shipped .bms missions loose at the tree's root.
         "mission_corpus",
+        # The shipped models through `opennova-3di` scene -> build -> compare.
+        "threedi_o3d_retail_roundtrip",
+        # The clip sets through `opennova-3di anim` and back, and the same sets
+        # played back through the runtime's own loader.
+        "anim_o3a_retail_roundtrip", "anim_o3a_runtime_playback",
         # The reference fixture set (<assets>/fixtures/**): the fifteen revx02 menus,
         # the shipped MP5 rig map, the BINOC rig and its twist.
         "mnu_compat", "mnu_coverage", "adm_parse", "anim_skeletal_clips_weapon_channel",
@@ -66,12 +71,15 @@ MIXED = {
     ],
     "jo_assets": [
         "occlusion_armry", "particle_smoke_all_fixtures", "sound_profile",
+        # Every named model and clip set must run (each prints a SKIP-LEG per
+        # missing file and passes once any one ran).
+        "threedi_o3d_retail_roundtrip", "anim_o3a_retail_roundtrip", "anim_o3a_runtime_playback",
         "def_parse_items", "infantry", "minimap_overlay",
         # The reference fixture set (<assets>/fixtures/**) legs.
         "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",
         "avatars_roundtrip", "mus_parse", "mus_compat", "mus_decompile", "mus_roundtrip",
         "mus_names_roundtrip", "mus_entry_roundtrip", "mus_encode_idempotence", "mus_vm",
-        "mns_document", "bad_parse", "anim_sample",
+        "mns_document", "bad_parse", "anim_sample", "bad_roundtrip", "bad_build",
         # The shipped weapon.def / ammo.def pins.
         "def_parse_weapons", "def_parse_ammo", "npruntime_weapon_table", "npruntime_handshake_server",
     ],

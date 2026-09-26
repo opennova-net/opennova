@@ -1,6 +1,11 @@
 # ADR 0038: Native runtime assets now; GLB at the future editor seam
 
-- **Status**: accepted (2026-08-26; hard cut)
+- **Status**: accepted (2026-08-26; hard cut). **Superseded by
+  [ADR 0047](0047-blender-3di-exporter.md) (2026-09-23)**, which restates the
+  decisions that stand (its decision 10) and lifts decisions 1, 3 and 5 in part
+  for its one authoring route, as marked inline below. This file stays as the
+  record of the hard cut: the retired Python, Qt and DCC surfaces, the flat C
+  ABI with `opennova_shared`, and the `abi_exports_check.py` gate.
 - **Owners**: native formats, future editor
 - **Supersedes/updates**: retires the Python importer, Qt application, Blender
   add-ons, ASE/OED/TDP authoring pipeline, and the flat shared-library model in
@@ -28,18 +33,24 @@ current game runtime.
    `scripts/net/diff_0a.py`; `tools/net/pcap_to_hexcap.py`; since ADR 0041 also
    `scripts/mcp/game_mcp.py` and `scripts/ci/retail_gates_ran.py`) and run on a stock
    `actions/setup-python` interpreter. For product code the cut is literal: no
-   compatibility modules or deprecated entry points remain.
+   compatibility modules or deprecated entry points remain. *(Lifted in part by
+   ADR 0047: its Blender add-on, `tools/blender/opennova_3di`, is the one Python
+   product module.)*
 2. Native ASE, TDP/3DP, and OED authoring modules are removed. Godot
    `ObjectData` loads and evaluates immutable 3DI runtime documents only.
 3. ADM and BAD remain runtime input formats. Their readers remain; repository
    writer/export interfaces are removed. Native 3DI reading and writing remain
    format capabilities, but Godot exposes no object-export command yet.
+   *(Lifted by ADR 0047 decisions 11 to 13: the `.bad`/`.adm` writers return,
+   from scratch, under the `formats/bad/bad_build` construction seam.)*
 4. A future editor will accept GLB/GLTF scenes and produce 3DI, and will read
    3DI and produce GLB. Neither direction is implemented by this decision.
 5. The future exchange seam is the ordinary scene plus the stable naming
    convention in `docs/threedi/scene-naming-contract.md`. Conversion must not
    depend on another converter, importer-private state, Blender custom
    properties, application metadata, or an import having happened first.
+   *(Lifted in part by ADR 0047: its add-on reads visible Blender add-on
+   properties; the rest of the rule stands.)*
 6. Exact GLTF representation for LODs, collision data, animation events, and
    other Nova-specific fields is future editor design work. This decision does
    not reserve private extras or carry the deleted Blender schema forward.
@@ -63,6 +74,8 @@ current game runtime.
 - The `.bad`/`.adm` writers (`bad_write.cpp`, `adm_write`) and their byte-exact
   round-trip proofs (`bad_roundtrip`, `adm_write`, `tests/test_bad_write_ffi.py`)
   retire; the read side stays pinned by `bad_parse` and the `adm_*` ctests.
+  *(Reversed by ADR 0047: the writers and the `bad_roundtrip` and `adm_write`
+  ctests return.)*
 - Re-expressed natively: `tests/test_bad_pos_derivation.py` becomes the synthetic
   `anim_sample` pin plus the `OPENNOVA_JO_ASSETS`-gated `anim_positions_from_model_corpus`
   ctest; `anim_skeletal_clips_weapon_channel` returns on a committed twist

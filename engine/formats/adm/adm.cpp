@@ -43,9 +43,13 @@ static void copy_trimmed(char *dst, size_t dst_size,
 // variant on that one slot's ring until a token starting with '/' ends the
 // row; an empty token is skipped [orig: AnimMap_ParseConfigLine @0x40CB60 —
 // the slot lookup @0x40CB97, the '/' break @0x40CBD0..0x40CBD2, the empty
-// skip @0x40CBD4..0x40CBD6]. The slot table lookup is the runtime's
-// (AnimMap_FindSlotByName @0x40CFA0); this parser keeps `anim_` keys. A row
-// with no clip registers nothing and never fails the file.
+// skip @0x40CBD4..0x40CBD6]. The slot is the key past its first five
+// characters, whatever they are (adm_slot_name): `ANIM_RESET` and `xxxx_reset`
+// name slot 0 as `anim_reset` does. Which of the 252 slot names a key's tail
+// matches is the runtime's lookup (its table lives in runtime/world), and a
+// row that names none registers nothing there; this parser keeps every key
+// longer than five characters. A row with no clip registers nothing and never
+// fails the file.
 int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
     if (!bytes || !out) return -1;
     memset(out, 0, sizeof(AdmFile));
@@ -53,10 +57,10 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
     std::vector<AdmEntry> entries;
     io::for_each_config_line(bytes, size, [&](const io::ConfigTokens &row) {
         const char *key = row.token(0);
-        if (strncmp(key, "anim_", 5) != 0) return;
         AdmEntry entry;
         memset(&entry, 0, sizeof(entry));
         copy_trimmed(entry.key, sizeof(entry.key), key, key + strlen(key));
+        if (adm_slot_name(entry.key).empty()) return;
         for (int i = 1; i < row.count; ++i) {
             const char *clip = row.token(i);
             if (clip[0] == '/') break;
