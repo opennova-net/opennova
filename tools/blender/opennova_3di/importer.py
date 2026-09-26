@@ -248,6 +248,12 @@ class Builder:
             try:
                 img = bpy.data.images.load(path, check_existing=True)
                 img.name = name
+                # The game samples colour and alpha independently: a texture's
+                # alpha is often a mask a shader reads (specular, bump), not
+                # opacity (the arms' camo averages 0.001). Blender's default
+                # straight alpha premultiplies on load and loses the colour
+                # wherever alpha is near zero; channel-packed keeps both.
+                img.alpha_mode = "CHANNEL_PACKED"
                 # Blender loads what it cannot decode (PCX, archive-compressed
                 # files) as an image without pixels.
                 if img.size[0] == 0:
