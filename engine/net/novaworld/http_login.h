@@ -14,7 +14,7 @@
 // and the cookie jar the engine carries across every subsequent request. The
 // transport (the actual HTTP GET/POST) lives in the host: the Godot binding
 // drives it with HTTPRequest, the server answers it with Crow. This keeps the
-// protocol/crypto in one place (plan/README.md principle 3).
+// protocol/crypto in one place.
 //
 // Witnessed against retail Jointops.exe (grill NW-S5/B, 2026-06-12):
 //   * POST builder GopherWebWidget_SendHttpPost @ 0x658b30 sends

@@ -5,7 +5,7 @@ extends GutTest
 # No live server: this pins registration, defaults, property round-trips,
 # and that start()/stop() drive the state machine without crashing. The
 # wire behavior itself is covered by the C++ net ctests and, end to end,
-# by the live smokes recorded in plan/status.md.
+# by the live two-client smokes.
 
 
 func test_class_is_registered() -> void:

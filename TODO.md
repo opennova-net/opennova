@@ -81,11 +81,6 @@ hardening, and project health. Divergences from the original engine belong in
       are the Render and Particles windows' now).
 ## Project health follow-ups
 
-- [ ] NovaWorld production deploy + cutover (operator-executed, one-time): the
-      stack (gate + NovaWorld server + legacy HTTP services + web portal) has
-      never been deployed to production — steps in [DEPLOY.md](DEPLOY.md), the
-      operator sequence in `plan/pr21-cutover-runbook.md` (its "#136 open"
-      premise is historical; commands remain current)
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, and Godot gates.
 - [ ] Full Linux core tests on PRs: `test-linux` (`.github/workflows/ci.yml`) already runs the whole ctest suite on ubuntu for master pushes and manual runs; extend it to pull requests once its cost is acceptable, after triaging any platform-only failures. Acceptance: the full CTest suite runs on Linux for every PR without relying on the net-only or packaging jobs.
 - [ ] Incremental conventional linting (vocabulary conventions already ride `scripts/lint/conventions_lint.py` as a CI gate; this row is formatting + per-language linters): establish project-owned formatting settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.

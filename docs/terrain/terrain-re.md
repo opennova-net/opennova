@@ -431,7 +431,7 @@ power of two (`((n - 1) & n) != 0`; n = 0 passes), and when
 text legs; the heightmap-rows leg runs over the loaded .cpt, not the text, and
 is NOT ported. ctest `trn_admission_gate` (replacing `trn_optional_polydata`)
 pins every leg. The former "empty polydata = editor project mode" early-out in
-`TerrainData::_load_from_trn_text` rode a `plan/` note no tracked decision ever
+`TerrainData::_load_from_trn_text` rode an untracked planning note no tracked decision ever
 carried (ONED is run-only, ADR 0037), so the polydata leg is ported and that
 early-out removed. Foliage `match` lines carry up to four consumed codes per
 definition (the parser stores seven), see

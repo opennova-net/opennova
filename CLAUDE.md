@@ -150,7 +150,7 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   "production-ready"; no em dashes.
 - Completed TODO/checklist entries are DELETED, not checked off — the history lives in
   git, not the tracked file. (Exception: docs that self-identify as historical records,
-  e.g. `plan/status.md`, keep their completed rows.)
+  e.g. `docs/maturity-program.md`'s historical body, keep their completed rows.)
 
 ## Git, PRs, CI
 
