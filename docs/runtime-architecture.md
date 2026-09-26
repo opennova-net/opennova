@@ -17,8 +17,8 @@ outer frame
   Render_ProcessMainSceneFrame           one variable-rate render
 ```
 
-OpenNova keeps that shape with retail's own bank (`world::TickAccumulator`'s
-`RetailMainLoop` policy, selected by the game and the dedicated host): a long
+OpenNova keeps that shape with retail's own bank (`world::TickAccumulator`,
+the one bank the game and the dedicated host both drive): a long
 frame's backlog is low-passed over the following frames by the 7/8 frame-time
 smoother instead of run as one burst of catch-up ticks, a bank over 500 ms
 clamps, and the mission start banks neither the load nor the render time of
@@ -290,10 +290,14 @@ revision travel together. `Simulation` reuses its storage only when no reader
 holds the previous snapshot. A nested callback that requests another snapshot
 gets fresh storage, so the outer walk remains valid; reset also leaves an
 outstanding lease valid. Row identity comparison reuses storage and compares
-fields, not a hash. Only the bound `get_present_snapshot()` /
+fields, not a hash. The bound `get_present_snapshot()` /
 `get_present_door_phases()` script/tooling boundary copies into Godot packed
-arrays. Both paths share the same native builders and consume-once joiner
-animation pulses.
+arrays, and two native cold paths also take that full build-and-copy route:
+`MissionRoot::for_each_present_node` and
+`LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions`. Each such
+call is an extra build, and on a joiner it also consumes that frame's
+animation pulses: every path shares the same native builders and the
+consume-once joiner animation pulses.
 
 This lease is host implementation, not a reconstructed retail object. Retail
 walks its native pool base, used count and stride directly

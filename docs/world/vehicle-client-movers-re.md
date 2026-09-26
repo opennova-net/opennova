@@ -4510,13 +4510,14 @@ uses this operation before its stopped/still test.
 `Game_StartMission @0x525F80..0x526071` grounds player-control vehicles,
 executes their update once, then records the resulting six-word pose, support
 and team. Attached spawn positions use the support-local transform from
-`Entity_TransformWorldToParent @0x43BB50`; respawn resolves it with the live
-support via `Entity_TransformParentToWorld @0x43BD00`. These helpers rotate
+`Entity_TransformWorldToLocal @0x43BB50` (ex `Entity_TransformWorldToParent`);
+respawn resolves it with the live support via `Entity_TransformLocalToWorld
+@0x43BD00` (ex `Entity_TransformParentToWorld`). These helpers rotate
 position through yaw/pitch/roll, but only subtract/add the parent's yaw from
 the stored angles. A missing or dead support blocks respawn. The stuck check
 uses the same live anchor instead of a fixed mission-world position.
 
-`AI_TickVehicleDead @0x467EA0` advances the wreck timer and calls falling
+`AI_TickState_VehicleDead @0x467EA0` (ex `AI_TickVehicleDead`) advances the wreck timer and calls falling
 physics before authority-only removal/respawn decisions. A player-controlled
 wreck is removed when flag 0x1000 is set or vehicle respawn is disabled. After
 15 ticks, a nonzero cooldown decrements; a transition from one to zero restores
@@ -5261,8 +5262,8 @@ components over unswapped, mirroring every ring and its angular texture sense, a
 both sides; `compile_water_wakes` now writes the swapped offsets and
 `water_wake.gdshader` culls back faces, so an eye below the water sees no ring (pinned by
 ctest `vehicle_part_anim` and GUT `water_test.gd`). The Godot shader implements the
-two-texture draw through the compiled mesh (`provenance.json` cites
-`WaterRing_Draw` / `WaterRing_LoadResources`).
+two-texture draw through the compiled mesh (`water_wake.gdshader` cites
+`WaterRing_Draw @ 0x5DE0F0` / `WaterRing_LoadResources @ 0x5DDC90`).
 The UV scroll counter `g_entity_update_counter` is the ENTITY-UPDATE counter, not a render
 frame counter: its one writer is `add g_entity_update_counter,esi` (`@0x4C2639`) at the tail
 of a non-epilog `Entity_UpdateAllEntities @0x4C2100`, and nothing resets it, so it

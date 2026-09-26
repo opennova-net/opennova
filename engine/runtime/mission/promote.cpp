@@ -549,7 +549,7 @@ ItemAttachmentSpawns spawn_item_attachments(World &world, const std::vector<Enti
     // Every stored items.def addeweap* slot creates a pool-1 child. The public
     // metadata already normalized the authored full item id to the raw type id;
     // G/C flags and angle fallback presence remain separate. Children use a
-    // non-BMS origin sentinel so the listen-server WirePresentPass cannot defer
+    // non-BMS origin sentinel so the listen-server EntityPresenter wire walk cannot defer
     // them to an unrelated placed node with the same (kind,index).
     struct AttachmentWork {
         EntityHandle carrier;

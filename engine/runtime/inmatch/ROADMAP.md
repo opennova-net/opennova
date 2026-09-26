@@ -320,7 +320,9 @@ popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43
   captured `0x0C` (`npruntime_golden_client` byte-parity preserved). HostClient emits no housekeeping
   (recv-only loopback) — deferred-and-logged.
 - **`inmatch::drop_connection(ctx, peer)`** added — owner-initiated eviction for the recv-timeout / dead-peer
-  path (no `0x46`); mirrors the goodbye teardown without surfacing an event.
+  path (no `0x46`); mirrors the goodbye teardown without surfacing an event. It is gone since: the
+  owner's dead-endpoint eviction is `inmatch::destroy_connection(ctx, peer, nullptr)`, the same
+  complete teardown with no goodbye burst (`napi_np_protocol.h`).
 
 Bar met: **`npruntime_two_endpoint_socket`** (always-on) — a `ClientRuntime` joiner and the
 `apps/nw_server` owner loop, each on its own bound loopback UDP socket, run a full join → spawn → play
@@ -463,7 +465,7 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
 ## Test harness (built up across phases)
 
 - **GoldenSession loader** (`tests/npruntime/`): load a golden via
-  `apps/common/pcap_reader::stream_pcap_udp_file` → `engine/net/npwire/wire_capture`
+  `stream_pcap_udp_file` (then `apps/common/pcap_reader`, today `engine/base/pcapio/pcap_reader`) → `engine/net/npwire/wire_capture`
   (`CaptureDecoder::push`) → ordered `(direction, tag, decoded-fields, raw-payload, ts, port)`
   events, partitioned host vs joiner by port. Env-gate on the golden path with a `DEFAULT_*_PCAP`
   fallback; skip if absent. New env vars: `NW_GOLDEN_LAN_JOIN`, `NW_GOLDEN_LAN_JOIN_SESSION`,

@@ -309,7 +309,12 @@ rows, `frame_count + 1` of each) it counts and refuses when short:
   non-junk bones, and through the clip's OWN rotation in only 365: every clip of
   a set stores the reset clip's positions. The seam derives it that way, and
   `anim scene` recovers the pivots through the same bind, so every clip of a
-  table recovers the rig's one set of pivots.
+  table recovers the rig's one set of pivots. A bone past the reset clip's
+  bones (G17_1st's `g17_1f` and `g17_1d` carry one bone more than their reset)
+  turns its children through the clip's OWN first key, transposed: that is the
+  seam's rule, not a witness, since what retail reads for such a bone is
+  unwitnessed (`bad_derive_bind_rows`, `engine/formats/bad/bad_build.h`; a lone
+  clip, which no table binds, turns through its own first key the same way).
 - **`fps` is 30 in every clip.** `version` is 1 in 474 and 0 in 3 (a 20-byte
   event record with no trigger word), so the seam refuses any other version and
   a trigger on a version 0 event.
@@ -538,7 +543,10 @@ All existing ledger IDs — this record mints none:
   a writer-policy ADR, not a parser change.
 - `flags` bit 3 and the `top` of the head-less viewmodel clips that stand above
   their `bottom` are the two unwitnessed corners above: the first wants a look
-  at the loader, the second at whatever retail's exporter was.
+  at the loader, the second at whatever retail's exporter was. A third is the
+  bind a clip's bone past its reset clip's bones turns through (the writers
+  section): the seam uses the clip's own first key until the runtime's read
+  for such a bone is witnessed.
 - Translation under a cross-fade (witnessed 2026-09-25, not ported).
   `AnimChannel_BlendTwoChannels @ 0x410740` always blends the rotations, but
   fills the translation scratch by the two clips' flags: both translated, their

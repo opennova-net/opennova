@@ -41,7 +41,7 @@ appear in tracked docs:
 | Binary | What it is | Where it is used |
 |---|---|---|
 | `Jointops.exe` | the shipped JO: Combined Arms executable ("retail", as distinct from the demo) | the default for every citation — [correspondence.md](correspondence.md) |
-| `dfx2med.exe` | the DFX2 Mission EDitor; same engine lineage as JO, shared `.bms` format | editor-side cross-checks: [bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world-wac-ai-re.md](world/world-wac-ai-re.md); 2026-09-21 scar owner-visibility re-grill and native predicate: world record section 24.9; PR #663 [mounted-pose precision](world/world-wac-ai-re.md#37-mounted-pose-precision-2026-09-21) closes D-INF-27 |
+| `dfx2med.exe` | the DFX2 Mission EDitor; same engine lineage as JO, shared `.bms` format | editor-side cross-checks: [bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world-wac-ai-re.md](world/world-wac-ai-re.md) |
 | `ModSuperOed.exe` | NovaLogic's original mod-tools OED, the 3DI exporter (32-bit PE) | the 3DI3 wire format and its writers: [3di-gp-format-re.md](threedi/3di-gp-format-re.md); also the ground-truth comparator (§5 below) |
 | `dfvas.exe` | Delta Force: Black Hawk Down affiliate build | GP-era runtime `.3di` loaders: [3di-gp-format-re.md](threedi/3di-gp-format-re.md) |
 | `jodemo.exe` | the JO demo | historical citations only — the env grill re-anchored every jodemo-era address to retail ([env-tod-re.md](env/env-tod-re.md), atmosphere-parity appendix) |
@@ -125,6 +125,14 @@ appear only where a record says so. Known scales, each owned by its record:
   and the per-slot 0x0A is sent between them. How OpenNova's hosts drive that
   loop is [runtime-architecture.md](runtime-architecture.md) ("One logic
   tick").
+- Ticks come from retail's main-loop bank `[orig: Game_MainLoop @0x52B630]`:
+  each frame banks its elapsed time in 1/16 ms units, a 7/8 EMA smooths the
+  bank (over 500 ms it is clamped instead), and the bank drains in 4 ms quanta
+  with a logic tick on every fourth, so a hitch is repaid over the following
+  frames; the mission start re-bases the clock so the load is never banked.
+  The port is `world::TickAccumulator` (`engine/runtime/world/tick_accumulator.h`),
+  the one bank every host drives ([runtime-architecture.md](runtime-architecture.md),
+  "Target loop").
 
 The active [NPC AI and mission scripting completion work](world/npc-mission-completion.md)
 uses this shared tick and entity model. Script dispatch coverage and focused
@@ -180,7 +188,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Subsystem | Our code | Record | Verdict |
 |---|---|---|---|
 | Menus (MNU/MNS UI) | `engine/formats/mnu` (incl. the mnu_xml reader), `engine/formats/mns`, `godot/src/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | record complete (D-MNU-1..12; open rows tabled in the ledger); host dialog readback and explicit aspect selection verified 2026-09-11 |
-| Sound banks + dialog | `engine/formats/lwf`, `engine/formats/dbf`, `engine/runtime/audio` | [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) | record scoped to ported sound behavior (D-SND-1..19; one-shot listener-view gate verified; reverb selector/DSP remains OPEN + NEEDS-RE) |
+| Sound banks + dialog | `engine/formats/lwf`, `engine/formats/dbf`, `engine/runtime/audio` | [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) | record scoped to ported sound behavior (D-SND-1..19; one-shot listener-view gate verified; the reverb selector and preset boundary FIXED 2026-09-18 as D-SND-18, full audible mixer equivalence outside it) |
 | Music (MUS/SBF/SCR) | `engine/formats/mus`, `engine/formats/sbf`, `engine/formats/scr` | [audio/mus-sbf-re.md](audio/mus-sbf-re.md) | matching per component |
 | Environment / time-of-day / weather | `engine/formats/env` (the parse, TOD and weather math), `engine/runtime/world/weather_state` (the ONE weather home the WAC handlers, the sim tick, the wire and the F3 window share), `engine/runtime/environment` (the render owner, the seed, the precipitation pool), `engine/runtime/renderer/precipitation_frame`, the `MissionEnvironment`/`Weather`/`Precipitation` nodes | [env/env-tod-re.md](env/env-tod-re.md) | matching (the weather port closed the deferred rows 2026-08-30; residuals per subsystem in the record) 2026-09-16: the Godot background color bridge restores clear/dome fog equality on 00TRa/00TRg; windowed pixel regression. |
 | String tables (RTXT) | `engine/formats/rtxt`, Strings | [interface/rtxt-strings-re.md](interface/rtxt-strings-re.md) | matching at byte level (98/98) |
@@ -204,9 +212,9 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | NovaWorld networking | `engine/net/npwire`, `engine/net/novaworld`, `engine/net/napi`, `engine/net/novacrypto`, `engine/runtime/replication`, `apps/novaworld_server`, `godot/src/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match replication exercised in both directions against captures and live retail sessions (retail clients join and play on our hosts); remaining gaps ledgered; §5.10 records the 2026-09-04/05 joiner vehicle/seat-query pass); 2026-09-13: numeric self-identity and side-password admission ported; squad challenge remains D-NET-167; [2026-09-19 tank training switch fix](world/special-weapons-parity.md#tank-training-right-click-follow-up) in PR #655; 2026-09-21: [remote-body arbitration re-grill](net/novaworld-net-re.md#remote-body-arbitration-re-grill-2026-09-21) fixes the model-side same-state pending cancellation through a shared native rule |
 | Boot-required resources | `engine/base/gameprofile` `required_resources` manifest (ENG-6), consumed via `ResourceRoot.list_missing_boot_resources` | [required-resources.md](required-resources.md) | witnessed (R8) + manifest landed: the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
 | VFS / PFF mount stack | `engine/base/vfs`, `engine/formats/pff`, `ResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..11 |
-| Terrain (TRN + runtime queries) | `engine/runtime/terrain`, `engine/runtime/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245; D-TERRAIN-12, the empty-sector flat fallback, FIXED 2026-09-13) |
-| Foliage | `engine/formats/foliage`, `FoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-7/9/10 open; D-FOLIAGE-14, collection independent of the main list, minted and closed 2026-09-13) |
-| Tiles (`.til` overlay) | `engine/formats/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1..4 all FIXED, the last 2026-08-20) |
+| Terrain (TRN + runtime queries) | `engine/runtime/terrain`, `engine/runtime/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245; D-TERRAIN-12, the empty-sector flat fallback, FIXED 2026-09-13; the 2026-09-24 rendering parity pass ported the page record cache, the D3D9 page raster, the DXT codec and the lit-batch pool composite, and narrowed D-TERRAIN-7 to the page address mode at the draw) |
+| Foliage | `engine/formats/foliage`, `FoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-9/-10 FIXED 2026-09-24; D-FOLIAGE-7 open, narrowed to the detail page-edge addressing; D-FOLIAGE-14, collection independent of the main list, minted and closed 2026-09-13) |
+| Tiles (`.til` overlay) | `engine/formats/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1/-2/-4 FIXED, D-TIL-3 FIXED for the ordered RGB with its alpha facet refuted 2026-09-24; atlas point sampling, the DXT5 atlas and the mission BMS tile-set override ported 2026-09-24) |
 | Fonts (`.fnt`) | `engine/formats/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..4); retail page-buffer batching witnessed and Godot HUD submission batched (2026-09-21) |
 | Credits (CBIN) | `engine/formats/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |
 

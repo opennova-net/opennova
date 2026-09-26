@@ -11,9 +11,12 @@ All commands are Git Bash, from the repo root.
 
 ## Preconditions (fresh worktree especially)
 
-1. `GODOT_BIN`: in a worktree the wrapper's fallback fails (it only checks the
-   worktree's own `.godot-bin/`, which exists only in the main checkout). Set it
-   from the main checkout:
+1. `GODOT_BIN`: the wrapper resolves it itself (`scripts/godot_bin.sh`: an
+   exported `GODOT_BIN` wins, else the first binary under `.godot-bin/` in the
+   repo root or any parent directory, so a worktree under `.claude/worktrees/`
+   borrows the main checkout's copy). The direct GUT runs below read
+   `$GODOT_BIN` from your shell, so export it for them (or to override the
+   resolver):
 
        main="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
        export GODOT_BIN="$main/.godot-bin/Godot_v4.6.1-stable_win64_console.exe"
@@ -43,7 +46,9 @@ error or an unregistered GDExtension class (stale/missing DLL).
 
 ## Single file / single test (isolation runs)
 
-The wrapper takes no arguments; invoke GUT directly:
+The wrapper takes no test-selection arguments (its one flag,
+`--keep-user-dir`, keeps the run's isolated `user://` for inspection); invoke
+GUT directly:
 
     "$GODOT_BIN" --headless --path godot -s addons/gut/gut_cmdln.gd \
       -gtest=res://tests/<file>_test.gd -gexit
@@ -59,9 +64,10 @@ The wrapper takes no arguments; invoke GUT directly:
 
 ## Flaky-failure protocol (mandatory)
 
-Full-suite failures can come from shared `user://` state (tests can encounter
-the same persisted product config as a local run, including
-`user://opennova.cfg`). On any reported failure:
+Full-suite failures can come from shared `user://` state: every test in a run
+shares that run's `user://` (the wrapper isolates it per run under
+`.godot-test-user/`; a direct GUT run uses your real Godot user directory,
+including `user://opennova.cfg`). On any reported failure:
 
 1. Re-run that test FILE alone with `-gtest=` as above.
 2. Fails alone → real failure; debug it.

@@ -2,7 +2,7 @@
 
 The NovaLogic ASE/OED object-naming convention: the scene-object names that
 carry a model's 3DI roles. OED classified them by `classify_name`
-([orig: ConvertToInternal @ 0x4268B3], ported in the retired
+([orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)], ported in the retired
 `engine/formats/oed/convert_internal.cpp`); the Blender add-on
 (`tools/blender/opennova_3di`, [ADR 0047](../adr/0047-blender-3di-exporter.md))
 reads them to export and lays a model out by them to import, and a future

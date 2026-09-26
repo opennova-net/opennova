@@ -112,8 +112,9 @@ catalog `ProbeDef.definitions()`, and the typed-argument validation
 `validate_args`), `ProbeRunner` (the runner and its `Run` records), `ProbeContext`,
 `GameProbe`, and the `ProbeVerdict` value. The catalog is the single list: each
 `ProbeDef` carries the name, description, script path, JSON-schema input,
-`needs_window`, `needs_mission` and the timeout. `godot/probes/` is source-only
-— both export presets exclude it, so a shipped build lists every probe as
+`needs_window`, `needs_mission` and the timeout. `godot/probes/` is source-only:
+the one export preset excludes it (`godot/export_presets.cfg`, pinned by
+`export_presets_test`), so a shipped build lists every probe as
 `available: false`.
 
 `game_probe`:
@@ -143,9 +144,13 @@ viewport() camera() resource_root() effect_world() adapter()`; the waits
 into a capture.
 
 The probe contract test (`godot/tests/probes/probe_catalog_test.gd`) pins: unique
-names, script paths under `res://probes/`, every script loads as a `GameProbe`,
-every schema validates its own defaults, and no probe source contains
-`print(`, `OS.get_environment(` / `OS.has_environment(` or `res://tests/`. A
+names with a description, script paths under `res://probes/`, every available
+script loads as a `GameProbe`, every schema validates its own defaults, and the
+runner lists the whole catalog. The source rules are lints, not this test: a
+`print(` in a probe counts against the `gd_prints_outside_debug` ratchet
+(`scripts/lint/ratchet_counts.py`, which scans `godot/probes`), and an
+environment read fails `scripts/lint/env_lint.py`; nothing checks a probe for a
+`res://tests/` path. A
 probe whose assertion is engine behaviour (world, sim, collision, anim, WAC,
 mission runtime, net codecs) is not a probe: it is a ctest under `tests/<domain>/`
 (gated on the retail roots when it needs retail data, `docs/asset-gated-tests.md`).
@@ -161,6 +166,7 @@ mission runtime, net codecs) is not a probe: it is a ctest under `tests/<domain>
 | perf | `frame_stats` | one settled frame-stats window (`settle_ms`, `window_ms`) |
 | render | `render_fixture_capture` | the exact-pose render fixture publication (`id`, `catalog`, `mode`, `profile`, `output_dir`, `mission_resource_dir`, `source_commit`, `gdextension_binary`) |
 | render | `render_swatch` | the material swatch A/B driver on its own stage (`mode`: capture, composite, lighting, channels, clip, projshadow, matchterrain, glow, calibrate, compare) |
+| render | `player_motion_capture` | 18 frames of the same view at rest, during a local-player strafe and after stopping (`position`, `yaw_deg`, `move`; `move` off with `interval_ms` for a stationary ride capture) |
 | render | `foliage_spawn_capture` | the frozen-spawn retail comparison capture (`mission`, `mission_path`, `expansion`, `flicker`, `model_lighting_trace`) |
 | render | `environment_cube_capture` | the environment-cube proof on Forward+ D3D12 |
 | render | `loading_screen_render` | the loading screen for one mission |

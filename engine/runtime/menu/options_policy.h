@@ -90,7 +90,7 @@ inline constexpr const char *kVideoPresetButtons[] = {
 // [orig: ingame_options_dialog_event_handler @0x554e40]). The shell shows
 // them read-only until each device leg lands — a tracked stand-in
 // (D-MNU-21), never an invention. The JOYSTICK device radio is NOT here:
-// it is served (the table shows the D-CTRL-1 blank column).
+// it is served (the table shows the seeded joystick defaults, D-CTRL-1).
 inline constexpr const char *kOptionsUnsupportedControls[] = {
     "DIFFICULTY", "UPDATE",
     "WDM_AUDIO_2", "WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",

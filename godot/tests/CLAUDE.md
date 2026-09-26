@@ -32,8 +32,10 @@
   `game_world.tscn` over generated runtime fixtures, `boot_mission_data`, `boot_shell`,
   `stage_minimal_root` + `stage_effects` + `stage_sound_bank`) or `support/hud_fixture.gd`
   (a real `HudOverlay`), and assert through public read seams (`get_debug_group_report`,
-  `get_stats`, `recent_fired_soundsets`, ...). Fake only a GDScript INTERFACE class by
-  overriding its public verbs (`GameShell`, `WorldView`/`ArmoryWorldView`). `ratchet_counts.py gd_test_production_subclasses` holds the residue.
+  `get_stats`, `recent_fired_soundsets`, ...). Fake only an interface: the GDScript
+  `GameShell` by overriding its public verbs, and the C++ `WorldView`/`ArmoryWorldView`
+  (godot/src/world/world_view.h) by overriding their `_` GDVIRTUAL hooks (`_sim`,
+  `_resource_root`, `_weapon_database`, ...). `ratchet_counts.py gd_test_production_subclasses` holds the residue.
 - Always `autofree`/`add_child_autofree` what you create. A loaded `GameWorld` must be
   unloaded before it is freed (`WorldFixture.make_world` does it on tree exit): a world
   freed loaded, or a leaked instance carrying a `Transform3D`-typed member, segfaults the

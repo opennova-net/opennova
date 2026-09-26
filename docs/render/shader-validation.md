@@ -1,31 +1,32 @@
 # Shader validation contract
 
-The checked-in shader set is a closed inventory: 166 `.gdshader` entry points
-and 43 `.gdshaderinc` implementation files (209 resources total; pinned by
-`shader_resource_validation_test.gd`, repinned 2026-09-24 after the rendering
-parity pass: the celestial, light-corona, precipitation and CanvasItem NVG
-post shaders were deleted; the far-side particle wrappers and their include,
-the thermal particle wrappers, the three tracer ribbon wrappers,
-`sky_clouds.gdshader`, and the `effect_fog`, `foliage_mask` and `sky`
-includes were added).
-The executable
-contract is `godot/shaders/provenance.json`, validated by
-`godot/tests/shader_resource_validation_test.gd` (every resource loaded through
-Godot). The textual pins over the shader and C++ sources (the former
-`shader_resource_contract_test.gd`, `shader_provenance_pins_test.gd`,
+The checked-in shader set under `godot/shaders/` is a closed inventory of
+`.gdshader` entry points and `.gdshaderinc` implementation files: a shader
+lands or leaves with the change that owns its consumer. The rendering parity
+pass (2026-09-24) deleted the celestial, light-corona, precipitation and
+CanvasItem NVG post shaders and added the far-side particle wrappers and
+their include, the thermal particle wrappers, the three tracer ribbon
+wrappers, `sky_clouds.gdshader`, and the `effect_fog`, `foliage_mask` and
+`sky` includes. `godot/tests/shader_resource_validation_test.gd` loads every
+resource through Godot, which catches the parser, import and include failures
+a textual walk cannot. Nothing else validates the set and no machine-readable
+twin of this page exists: the family citations are the table under "Live
+citation audit" below. The textual pins over the shader and C++ sources (the
+former `shader_resource_contract_test.gd`, `shader_provenance_pins_test.gd`,
 `foliage_shader_contract_test.gd`, `terrain_shader_contract_test.gd` and the
 transitive-source hash golden) were retired on 2026-09-21: a test asserts
 behavior through a public seam, never the text of the code.
 
-Every resource must match exactly one provenance family, every include must
-resolve inside `res://shaders` without a cycle, every include must be reachable
-from a wrapper, and every source must have exactly one Godot UID sidecar.
-Wrappers inherit citations through their include closure and through their
-family contract; this is intentional for the 128 generated object wrappers
-and four declared auxiliary EnvironmentMirrorTextured P3 postmultiply passes
-(132 object shaders total),
-whose behavior is selected by `object/pipeline_manifest.json` rather than
-copied into every file.
+The 132 object shaders (the 128 object wrappers under `object/` and four
+declared auxiliary EnvironmentMirrorTextured P3 postmultiply passes) are
+hand-maintained: each wrapper states its own selection defines (pass, fog,
+blend, clip and coverage axes) ahead of its shared includes and inherits its
+citations through its include closure. `object/pipeline_manifest.json`
+describes the reachable techniques and their static render policies for the
+`render_swatch` probes and the shader-cache tests; it neither generates nor
+selects a wrapper, and it has no field for the newer per-wrapper axes (the
+vertex-shader fog, the fixed-function vertex diffuse, the blended pass and the
+two CLIP variants), so it is not a complete description of one.
 
 The validation target is deliberately singular: the retail fixture catalog's
 `retail_reference_highest_retail_selectable_v2` profile, including
@@ -60,8 +61,8 @@ corpus).
 
 ## What “parity” means here
 
-The manifest distinguishes matching behavior from matching behavior with
-named, bounded residuals. It never converts an open divergence into a pass.
+A shader family either matches or matches with named, bounded residuals; an
+open divergence is never converted into a pass.
 The retained ledger exceptions are D-TERRAIN-7 and D-FOLIAGE-7 (D-TERRAIN-9
 retired with the ONED terrain preview on 2026-08-24; D-FOLIAGE-9/-10 and
 D-RORD-7 closed 2026-09-24), plus the water surface's named mirror residuals.
@@ -120,9 +121,9 @@ Lighting validation is layered:
 
 ## Live citation audit (2026-08-22)
 
-The provenance anchors were resolved in the active `Jointops.exe` IDA database
-(image base `0x400000`). These are containing-function checks; the detailed
-semantic derivations stay in the cited RE documents.
+Each shader family's retail anchors were resolved in the active `Jointops.exe`
+IDA database (image base `0x400000`). These are containing-function checks;
+the detailed semantic derivations stay in the cited RE documents.
 
 | Family | Address | IDA containing function |
 | --- | ---: | --- |
@@ -148,15 +149,13 @@ semantic derivations stay in the cited RE documents.
 The audit is dated. Since the 2026-09-24 rendering parity pass the "Light
 coronas" row names no resource (the corona billboards draw through the
 post-particle overlay stage, `renderer::append_corona_overlay`; the
-`precipitation-streaks` family and the `light_corona` pattern with its
-`0x5aaf40` citation left `provenance.json` with their files), the celestial
+precipitation streak and light-corona shaders were deleted), the celestial
 bodies draw through their authored object materials rather than
 `celestial*.gdshader`, and the NVG post is FrameFx's render-to-texture chain
 rather than `nvg_view.gdshader` ([render-order-re.md](render-order-re.md)
-§2026-09-24 rendering parity pass). On 2026-09-25 the `nvg-post` family and
-the `terrain-editor-preview` family (its `terrain_editor.gdshader` left with the
-ONED terrain preview) left `provenance.json` with their files, and the
-`particles` family names the far-side wrappers and `particle_far_pass.gdshaderinc`.
+§2026-09-24 rendering parity pass). The ONED terrain preview's
+`terrain_editor.gdshader` left with that preview, and the particle family
+includes the far-side wrappers and `particle_far_pass.gdshaderinc`.
 
 Re-run the GUT contract tests, focused native renderer tests, full GUT suite, and
 windowed probe whenever a shader, shader owner, lighting producer, renderer,

@@ -174,3 +174,64 @@ four anchored entry comments (`0x5B4640`, `0x5C3F40`, `0x5C8C60`, `0x6752C0`) an
 saved; no curated names/types or retail bytes were changed. This slice covers
 presentation overhead. Further worst-frame work needs a longer capture with
 representative movement/combat and reliable GPU attribution.
+
+## Frame hitches after the rendering parity pass (PR #679)
+
+After the 2026-09-24 rendering parity pass the 03TR route still hitched:
+~30 ms `WORLD_SLOT_SHADOW` spikes, 3 to 5 catch-up ticks after a long frame,
+and 15 to 25 ms terrain page composes. Three fixes remove them without
+changing what is drawn. The route numbers below come from a local route probe
+(spawn to the Mk 19), not a tracked instrument.
+
+**The shared terrain lane pool.** The CPU page rasters (the tile composer and
+the static-shadow alpha pass) cut their rows into 8-row stripes dealt
+round-robin to lanes (`engine/runtime/terrain/row_stripes.h`); each pixel sees
+its writes in serial order, so the bytes are identical for any thread count.
+The page workers used to spawn eight threads per raster call, up to 64 on the
+cores when several pages composed at once. Every lane now runs on one shared
+pool (hardware threads minus one) that the page workers lease and the caller
+also claims lanes from; the pool lives beside its one owner,
+`terrain_tile_composition_worker.cpp`. The static-shadow planner lays a page's
+triangles out in serial draw order, then projects runs of that order on the
+pool (a single page's triangle build 12.1 -> 4.0 ms). The tile cache device
+reports the main thread's compose wait, upload and shadow-build time per frame.
+Route: frames over 50 ms 18 -> 3, the worst frame 67.9 -> 53.5 ms, p99
+36.6 -> 30.8 ms (with the two fixes below). Tests: `row_stripes`,
+`terrain_static_shadow_planner` (a 40k-triangle page pinned to the serial bytes
+under eight lanes).
+
+**RetainedArrayMesh.** The render-slot ground shadows and the FrameFX Q3 pass
+pack each caster surface on the CPU the first time they see it. They read the
+arrays through `Mesh::surface_get_arrays`, which under the RenderingDevice
+drivers reads the vertex, attribute, skin and index buffers back from the GPU
+and stalls on every in-flight frame, once per node of a shared model.
+`ObjectData` now builds its shared LOD meshes as `RetainedArrayMesh`
+(`godot/src/render/retained_array_mesh.h`), an `ArrayMesh` that keeps each
+surface's CPU arrays (tangents dropped), and both packers read those; only a
+mesh from another producer still reads back. The Stats window's
+`RENDER_SLOT_READBACKS` value counts those, and a stable frame reads 0.
+Route: slot read-backs 5 frames -> 0, `WORLD_SLOT_SHADOW` max 11.0 -> under
+4.5 ms.
+
+**The retail tick bank.** The game banked wall-clock whole, so a 40 to 60 ms
+frame's backlog ran as 3 to 5 catch-up ticks in the next frame and doubled the
+hitch. It now banks through `world::TickAccumulator`, the port of retail's
+bank (`[orig: Game_MainLoop @0x52B630]`: 1/16 ms units, a 7/8 EMA before the
+4 ms drain, a 500 ms clamp; see `runtime-architecture.md`), which repays a
+backlog over the following frames; it is the only bank. The bank needs retail's
+mission-start re-base, ported into `inmatch::Session`: the Game Loop mode runs
+`Game_StartMission` as its initialize and reads its clock afterwards, so the
+load is never banked, and the start arms three frames whose render time is not
+banked either, the loop re-reading its clock after each one's render
+`[orig: Game Loop mode @0x82F340; Game_MainLoop clock read @0x52B75C;
+Game_StartMission @0x525e1f; Render_ProcessMainSceneFrame @0x5caeff..0x5caf0e;
+Game_MainLoop @0x52bac8..0x52bad2]`. `GameWorld` stamps each render from
+`RenderingServer.frame_post_draw` and the game shell feeds the time since it
+into the frame input. Route: frames running 3 or more ticks 51 -> 0 (at most
+2). Test: `inmatch_session` pins the re-base (the load and three render frames
+unbanked, then the full frame time).
+
+Still open after #679: frames that compose several LOD pages wait 13 to 35 ms
+on CPU raster work retail did on the GPU (the next step is a GPU page raster or
+a byte-exact prefetch), and one-off 20 to 28 ms `FRAME_DRAW` frames, likely
+pipeline compiles.

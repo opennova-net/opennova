@@ -1586,6 +1586,22 @@ Accepted/divergent (each a documented decision, not a defect):
   jump, and it guards the dispatch against a document swap during the emit
   (`MenuRuntime::activate`). The full story is the
   "Activation vs scripted ACTION order" paragraph in the popup section above.
+- **D-MNU-20 (front-end OPTIONS BACK revert, OPEN):** the front-end OPTIONS
+  scene's BACK arm restores only the saved gamma, the saved music volume and a
+  menu byte (`sub_55A710 @ 0x55a710`, the BACK leg `@ 0x55adcf`); the reimpl
+  re-seeds the whole front surface per document open instead of that narrower
+  revert. Witness: "The in-game options dialog" section below.
+- **D-MNU-21 (unserviced Options controls shown read-only, OPEN):** the
+  authored Options controls the reimpl does not service yet are locked
+  read-only (`engine/runtime/menu/options_policy.h`
+  `kOptionsUnsupportedControls`: UPDATE → `UI_LaunchUpdateProcess @ 0x55b0b0`,
+  the WDM channel/rate radios, the joystick fields, Mr-Clippy, PunkBuster,
+  auto-reload / auto-medic) where retail services each; a stand-in until every
+  device leg lands, with the checked states pinned to what the ported paths do
+  (`kOptionsForcedChecks`). The JOYSTICK device page itself is served (its
+  column shows the seeded catalog defaults since 2026-09-11; joystick capture
+  stays unwired per D-CTRL-1 / D-CTRL-3). Witness: "The in-game options
+  dialog" section below.
 
 **IDB changes (2026-08-10, the D-MNU-17 host-dialog walk; saved):** repaired
 the function boundaries at `0x557c10..0x557f6a` (an unowned tail chunk shared
@@ -1767,8 +1783,9 @@ shell to lock, the checked states from `kOptionsForcedChecks`)
 force-disables the authored controls retail services (UPDATE →
 `UI_LaunchUpdateProcess @ 0x55b0b0`, ENABLE_JOYSTICK, the WDM family,
 Mr-Clippy, PunkBuster) — a deliberate stand-in until each device leg lands
-(D-MNU-21); the JOYSTICK device page itself is served (its column blank per
-D-CTRL-1). The select-by-value seed and the slider ranges are the engine's
+(D-MNU-21); the JOYSTICK device page itself is served (its column shows the
+seeded catalog defaults since 2026-09-11, PR #646; joystick capture stays
+unwired, D-CTRL-1 / D-CTRL-3). The select-by-value seed and the slider ranges are the engine's
 too (`spinlist_row_for_value`, `kOptionsScrollRanges`; the options model
 clamps by control name through `MenuFrame.options_scroll_ranges`). The
 XHAIR_COLOR /

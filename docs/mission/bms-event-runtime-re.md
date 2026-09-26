@@ -253,7 +253,8 @@ fires UPDATE only on `(phase & 3) == 0` (@0x52ba47), i.e. every 4×4 ms. It then
 RENDER callback once per outer iteration (`Render_ProcessMainSceneFrame @0x5ca0f0`, the scene
 descriptor's +0x28 slot @0x52bac6) at the **variable render rate**. So the simulation is
 **decoupled from rendering**: a long frame runs **multiple** sim ticks (catch-up), a short frame
-runs **zero**; the accumulator is clamped at **500 ms / ~31 ticks** (`0x1F40` units @0x52b83e)
+runs **zero**; the accumulator is clamped at **500 ms** (`0x1F40` units @0x52b83e: 125 quanta
+of 4 ms, so at most **32 ticks** from a tick-aligned phase)
 against the spiral of death. Below the clamp the bank itself is low-passed in place,
 `(7*g_frameTimeSmoothedFp4 + bank + 4) >> 3` (@0x52b85b), before the drain, so a long frame's
 backlog is paid back over the following frames rather than in one burst; the optional
@@ -368,7 +369,7 @@ integrates a fixed displacement per tick, so locomotion/animation ran fast at hi
 at low FPS).
 
 `inmatch::Session::advance(FrameInput)` now owns the original's accumulator: it banks `delta`
-through the retail bank (`world::TickAccumulator`'s `RetailMainLoop` policy: the 7/8 smoother,
+through the retail bank (`world::TickAccumulator`, the one bank: the 7/8 smoother,
 the 500 ms clamp, the 4 ms quanta; the mission-start re-base banks the time since the last
 render instead, from the shell's `frame_post_draw` stamp), runs the due single ticks, and
 the Godot presentation owner presents **once** after the batch — sim at a

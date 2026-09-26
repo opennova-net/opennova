@@ -92,7 +92,7 @@ The OED occlusion plane rule, used when an `occ` record gives no `op`: the
 record's six bounding-box planes first (+x -x +y -y +z -z), then each face's
 own plane unless one already matches it (normal within 0.005 per axis,
 distance within 0.03; the last match wins), at most 32
-([orig: ConvertToInternal @ 0x4268B3]; it reproduces Armry01's OCCL records).
+([orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]; it reproduces Armry01's OCCL records).
 
 The OED volume rule, for a `cvmesh`, is the same plane rule over its triangles
 (a triangle whose edge cross product is at most 0.0001 long takes plane 0),
@@ -105,7 +105,7 @@ swaps plane 0 with the plane its last triangle took: the runtime reads plane
 0 as the ladder's facing. Seam flags: in section then volume order, each
 triangle clears its plane's flag, then sets it when the triangle's box shrunk
 by 0.01 lies inside another type-1 volume's box in any section; the last
-triangle on a plane decides ([orig: ConvertToInternal @ 0x4268B3]).
+triangle on a plane decides ([orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]).
 
 The derived collision values follow OED's writer (5fc5b4f6a^
 `engine/formats/oed/export_3di.cpp`), truncated as it truncates them: CVRT on

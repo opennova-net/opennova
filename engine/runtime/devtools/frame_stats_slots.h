@@ -177,8 +177,8 @@
     X(PRESENT_MISSION_ROWS, "VALUE: rows visited by the mission presenter") \
     X(PRESENT_MISSION_SUBMITTED_ROWS, "VALUE: camera-submitted rows") \
     X(PRESENT_MISSION_BODY_ROWS, "VALUE: rows eligible for a body pose") \
-    X(PRESENT_WIRE, "WirePresentPass.present_snapshot") \
-    X(PRESENT_WIRE_LIVE, "VALUE: wire-direct nodes alive (WirePresentPass)") \
+    X(PRESENT_WIRE, "EntityPresenter wire walk (present_snapshot)") \
+    X(PRESENT_WIRE_LIVE, "VALUE: wire-direct nodes alive (EntityPresenter wire walk)") \
     X(PRESENT_WIRE_PENDING, "VALUE: wire rows still owed a cold spawn") \
     X(PRESENT_FIRE, "") \
     X(PRESENT_DESTRUCTION, "") \

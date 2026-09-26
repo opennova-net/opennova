@@ -51,7 +51,7 @@ remain parsed-but-deferred — is tracked per field in
 | `Environment_SetCurrentTime @ 0x57c4b0` / `Environment_SetTodRate @ 0x57c4f0` | runtime TOD state setters |
 | `terrain_sector_compute_lighting @ 0x5c7550` | iris sampler (`env::iris_gain` + the live `ModulatorChain`, REN-5 #17); the entity-lighting writer side is [render/render-lighting-re.md](../render/render-lighting-re.md) |
 | `EffectWorld_TickInstancesAndLightScale @ 0x5aa170` | terrain_rgb reciprocal consumer (documented, deferred) |
-| `Environment_MissionStartInit @ 0x57f1e0` (ex `sub_57F1E0`) | `world::WeatherState::mission_start_init` + `env::EnvScalarChannels::mission_start_init`; the 255-tick settle = `MissionKernel::settle_weather_mission_start` |
+| `Environment_MissionStartInit @ 0x57f1e0` (ex `sub_57F1E0`) | `world::WeatherState::mission_start_init` + `env::EnvScalarChannels::mission_start_init`; the 255-tick settle = `MissionKernel::complete_mission_start`, reached through `env::WeatherRuntime::run_mission_start_boundary` |
 | `WacCmd_Rain @ 0x4edf60` / `Snow @ 0x4edfd0` / `Overcast @ 0x4ee040` / `FogDist @ 0x4ee100` / `MoveFog @ 0x4ee0a0` / `SkySpeed @ 0x4edeb0` / `SkyHeight @ 0x4edec0` / `Quake @ 0x4ed4c0` / `Tod @ 0x4edc70` / `FogType @ 0x4eded0` / `SunFade @ 0x4edf10` / `ColorFade @ 0x4edcb0` / `Sun.. @ 0x4edcd0..` / `Script_SetLightningColor @ 0x4ede20` / `Env_TriggerLightningFlashA/B @ 0x4ed500/0x4ed510` | `world::WeatherState::command_*` through `world::EntityCommands` (the VM, the F3 window and the MCP rows share the one path) — §The WAC weather handlers |
 | `NetPacket_WritePlayerState @ 0x4ff6b0` (the 0x0A phase-2 ENV block) / `NapiNPClientMsg_0x00A @ 0x430244..0x43034c` | `replication::connection_fan` narrows the weather home once; `inmatch::JoinerRole::apply_weather_sample` -> `WeatherState::apply_wire_sample` |
 | `Precipitation_Reset @ 0x5df3a0` / `Precipitation_SeedPool @ 0x5debb0` / `Precipitation_FallTick @ 0x5de8f0` / `update_weather_particle_positions @ 0x5dec40` / `render_weather_trail_particles @ 0x5dee10` / `WeatherParticle_LoadTextures @ 0x5de840` | `env::PrecipitationField` (`engine/runtime/environment/precipitation.h`), `MissionKernel::update_precipitation`, `renderer::compile_precipitation_frame` (`engine/runtime/renderer/precipitation_frame.h`), the `Precipitation` node (`godot/src/env/precipitation.cpp`) copying that frame into the scene overlay stage (`renderer::append_precipitation_overlay`, `engine/runtime/renderer/scene_overlay.h`) — §Precipitation |
@@ -417,13 +417,17 @@ the weather keeps advancing while the entities are held (the reimpl's
   @ 0x5d065a-0x5d0699; device Clear @ 0x677100 (IDB-misnamed CGfxTextOverlay_Draw)]`,
   the Clear halving the color `(c>>1)&0x7F7F7F7F` on non-modulate2x devices
   `[@ 0x67715d; cap dword_32656AC, cf. decode_mode_color_stage @ 0x681080]`; the
-  sky-dome pass additionally sets the device FOG color to skyfog while drawing the dome
-  and restores fog for the world `[orig: SkyDome_RenderWithSkyfog @ 0x579cb0]`. Reimpl: tick and
-  horizon-blend in undoubled block space using the smoothed (pre-overcast) fog
-  distance, then double with saturation at the render tail. `MissionEnvironment`
-  writes that one final skyfog value through `get_frame_clear_color()` to the
-  GameWorld `ClearColor` and through `get_skyfog_color()` to `SkyDome`'s dome fog,
-  preserving the invisible dome-rim/clear seam of the modulate2x path.
+  sky-dome pass sets only the device FOG color, to skyfog while drawing the dome,
+  and restores fog for the world `[orig: SkyDome_RenderWithSkyfog @ 0x579cb0]`; the
+  clear itself is the scene entry's `[orig: Render_ProcessMainSceneFrame
+  @ 0x5CA771..0x5CA7BF]`. Reimpl: tick and horizon-blend in undoubled block space
+  using the smoothed (pre-overcast) fog distance, then double with saturation at the
+  render tail. `GameWorld::update_frame_clear_color` writes the selected clear
+  (thermal grey, skyfog above water, the lit water at or below it; the NVG scene
+  clears to the fog colour alone) to the GameWorld `ClearColor`, and
+  `get_skyfog_color()` feeds `SkyDome`'s dome fog; the dome no longer mirrors the
+  clear. One final skyfog value on both paths preserves the invisible
+  dome-rim/clear seam of the modulate2x path.
 - Cloud scroll: four accumulators advance by the smoothed rate × (1, 1, 2/3, 4/3).
 
 `Environment_SnapStateToTargets @ 0x57d1e0` (mission start) copies every parsed target [10]

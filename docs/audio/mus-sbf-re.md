@@ -15,7 +15,7 @@ catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
 | SBF bank codec (`engine/formats/sbf`) | **MATCHING** | 12 citations: `Sbf_OpenFile_Gamemus @0x4ED6C0`, `Sbf_StartEntry @0x4ED910`, `Audio_StreamNextChunk @0x4ED7D0`, mix coefficients `@0x7BD4B0`; `sbf_roundtrip` et al. |
 | SCR container codec (`engine/formats/scr`) | **MATCHING** (grilled 2026-06-09) | keystream + reverse pass byte-exact vs `Scr_DecryptBuffer @0x53D090`; two documented policy divergences (D-SCR-1/2 below) |
 | PFF entry encryption | **MATCHING** (pre-existing) | flag bit 0 + rol-7 XOR keystream vs `PFF_LoadFileToMemory @0x768920`, cited in `engine/formats/pff` |
-| `godot/src/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
+| `godot/src/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `AudioVM_Op_Play @0x672CB0` (ex `VmOp_Play`), `AudioVM_Op_SetState @0x672C70` (ex `VmOp_SetState`), `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
 
 ## AudioVM playback pacing — the VM advances on track completion (grilled 2026-06-15; re-verified 2026-07-11)
 
@@ -34,7 +34,7 @@ if (g_audiovm_context_active) {
 
 `remaining_bytes` is seeded from the entry's `total_size` in `sub_671BC0` (the context
 selector, which `SetFilePointer`s back to the entry's `data_offset` — so a fresh
-`VmOp_Play`/`AudioVM_StartSound @0x671ff0` **restarts** the stream from the start; it is not
+`AudioVM_Op_Play`/`AudioVM_StartSound @0x671ff0` **restarts** the stream from the start; it is not
 idempotent). A `play` op halts the dispatch loop (STC), so each step runs to exactly one
 `play`. Net: **one `play` per track completion** — the script plays a track, waits for it
 to finish, then steps to the next `play`/`setstate`. Section transitions therefore land on
@@ -201,8 +201,8 @@ win/lose stings" reading was wrong.
   outlives the call. Its only callers are `Server_ProcessRoundEnd @ 0x5164f0`'s
   `!is_in_session` tail: value 1 after `Cine_InitPlayback` (win) `@ 0x51696b`,
   value 2 after `Cine_StartPlayback` (lose) `@ 0x51698f`.
-- **The shipped handler** (gamemus chunk+0x91, decoded with the `mus_decode.h`
-  widths): `enter 2` (locals msgtype @0x20, source @0x24); `method 4` (GFB,
+- **The shipped handler** (gamemus chunk+0x91, decoded with the operand widths
+  of the decoder's opcode table in `engine/formats/mus/mus_decompile.cpp`): `enter 2` (locals msgtype @0x20, source @0x24); `method 4` (GFB,
   pushes 0); `empty`; `push_l 0x20`; `tablexec 3` (inner 0x3b, 2-byte entries)
   = `[setstate 1 | setstate 2 | setstate 4]`. Section 2 `Missionwin`: `setstate
   3`; section 3: `play 2,3,4,5,6,7; setstate 1`; section 4 `Missionlose`:
