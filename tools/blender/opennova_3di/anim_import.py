@@ -4,8 +4,9 @@
 # track, keyed on the rig's BN## bones (replacing a clip the rig already holds
 # under its name), and the table becomes the model root's rows. Nothing is
 # stashed so that a re-export reproduces the source: the bind, the bone
-# positions, the capsule extents and the terminal duplicate key are the
-# engine's derivations, and what the scene form cannot carry is reported.
+# positions and the terminal duplicate key are the engine's derivations, the
+# events are the pose's own (animation.py), and what the scene form cannot
+# carry is reported.
 #
 # The rig's rest pose is the bind. The runtime binds every clip of a table to
 # the reset clip and composes each key as `key * bind^-1`, the bind being that
@@ -23,6 +24,19 @@
 # A clip is sampled the way the runtime evaluates it: one pose per frame of the
 # header's length, frames 0..frame_count, each bone's key found by walking its
 # key durations and blending inside the window, the last key held past them.
+#
+# The events stand the body on the ground. Each frame keys the hips (BN01) at
+# the frame's bottom above the ground and, when the set travels (an event
+# steps across the ground), keys a `Root` bone at the ground along the summed
+# steps, so a planted foot stays put. A rig without Root gets one under the
+# hips, the bind clip's first bottom below them, as its top-level bone. A set
+# that never steps (every first-person set) needs none: its ground is
+# Blender's Z = 0. A model root still at the world origin rises so the ground
+# is Z = 0, and so do the models whose bones follow it (arms on a gun): display
+# only, since export reads a model standing at the origin. A stored top and a
+# stored vertical step are not carried: export measures the head bone's height
+# and the bottom's change, and a clip whose top stands more than 3 cm from the
+# head's (from the bottom on a rig without a head) is noted.
 
 import contextlib
 import math
@@ -33,10 +47,10 @@ import bpy
 from mathutils import Matrix, Quaternion, Vector
 
 from . import assembly
-from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, RM_NAME, bone_rows,
-                        clip_actions, part_bone, rig_of, rm_of, slot_of, trigger_value)
+from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, bone_rows, clip_actions,
+                        ground_under, head_of, part_bone, rig_of, root_of, slot_of, trigger_value)
 from .export import (ATTACH_RE, BONE_RE, CENTER_RE, PART_RE, Exporter, active_model, clean_name, descendants,
-                     is_lod_root)
+                     is_lod_root, model_roots)
 from .o3dtext import (ImportFailed, axis_basis, blender_axes, cli_notes, num, run_cli, scratch, strip_comment,
                       tokens)
 
@@ -45,11 +59,17 @@ FOLLOW = "O3D follow"
 # A clip's own bone name that is a part's label with its BN## in lower case
 # (22 of the 82 retail tables name a weapon's own bones `bn38 bone`).
 LOWER_BONE_RE = re.compile(r"^bn(\d{2})(?: (.*))?$", re.IGNORECASE)
+# The Root bone import makes, and how far a stored top may stand from the head
+# bone's height before a clip is noted (the corpus holds 97% of person frames
+# within it).
+ROOT_NAME = "Root"
+TOP_TOLERANCE = 0.03
 
 
 def read_o3a(path):
     """The .o3a clip set: its table rows and every clip's header, bones, keys
-    with their durations, translations and events."""
+    with their durations, translations and events (a step, the trigger word,
+    the bottom and top)."""
     set_ = {"adm": "", "rows": [], "clips": []}
     clip = None
     bone = None
@@ -67,15 +87,13 @@ def read_o3a(path):
                 set_["rows"].append((parts[1], parts[2:]))
             elif key == "clip":
                 clip = {"name": parts[1], "fps": 30, "flags": 0, "frames": 0, "version": 1,
-                        "capsule": None, "bones": [], "events": []}
+                        "bones": [], "events": []}
                 set_["clips"].append(clip)
                 bone = None
             elif clip is None:
                 continue
             elif key in ("fps", "frames", "version", "flags"):
                 clip[key] = int(parts[1], 0)
-            elif key == "capsule":
-                clip["capsule"] = (num(parts[1]), num(parts[2]))
             elif key == "bone":
                 bone = {"parent": int(parts[1]), "name": parts[6] if len(parts) > 6 else "",
                         "keys": [], "durations": [], "tr": []}
@@ -91,13 +109,9 @@ def read_o3a(path):
                 clip["events"].append({
                     "velocity": tuple(num(x) for x in parts[1:4]),
                     "trigger": int(parts[4], 0),
-                    "extents": (num(parts[5]), num(parts[6])) if len(parts) > 6 else None,
+                    "bottom": num(parts[5]),
+                    "top": num(parts[6]),
                 })
-    # A clip's `capsule` record is the pair every event carries.
-    for clip in set_["clips"]:
-        for ev in clip["events"]:
-            if ev["extents"] is None:
-                ev["extents"] = clip["capsule"]
     return set_
 
 
@@ -163,6 +177,10 @@ def clip_stem(variant):
     """The clip a row variant names: the variant without a `.bad` ending (any
     case), as formats/bad/bad_build.cpp bad_build_clip_stem reads it."""
     return variant[:-4] if len(variant) > 4 and variant.lower().endswith(".bad") else variant
+
+
+def at_origin(ob):
+    return ob.matrix_world == Matrix.Identity(4)
 
 
 def bone_name(index, name):
@@ -277,12 +295,7 @@ class Loader:
         attach` helper, whose place is a CXLT row): the model is unchanged."""
         rows = clip["bones"]
         to_arm = self.arm_space(arm).inverted()
-        turned = {pb.name for pb in bones[:len(rows)]}
-        position = arm.data.pose_position
-        arm.data.pose_position = "REST"
-        self.context.view_layer.update()
-        hung = [(ob, ob.matrix_world.copy(), ob.matrix_basis.copy()) for ob in arm.children
-                if ob.parent_type == "BONE" and ob.parent_bone in turned]
+        position, hung = self.hung_from(arm, {pb.name for pb in bones[:len(rows)]})
         held = {}
         with self.editing(arm) as edit_bones:
             for i, pb in enumerate(bones[:len(rows)]):
@@ -296,23 +309,7 @@ class Loader:
                 length = eb.length if eb.length > 1e-6 else 0.05
                 eb.tail = eb.head + m @ Vector((0.0, length, 0.0))
                 eb.align_roll(m @ Vector((0.0, 0.0, 1.0)))
-        self.context.view_layer.update()
-        for ob, world, _ in hung:
-            ob.matrix_world = world
-        # Through the turned bone's matrix the place comes back a float step
-        # or so off, which moves a CXLT row a 16.16 step: its own offset takes
-        # up the difference, one step at a time, until the place is the bits
-        # it was.
-        for _ in range(8):
-            self.context.view_layer.update()
-            off = [(ob, world.translation - ob.matrix_world.translation) for ob, world, _ in hung]
-            off = [(ob, d) for ob, d in off if d.length > 0.0]
-            if not off:
-                break
-            for ob, d in off:
-                ob.location += (ob.matrix_world @ ob.matrix_basis.inverted()).to_3x3().inverted() @ d
-        arm.data.pose_position = position
-        self.context.view_layer.update()
+        self.keep_places(arm, position, hung)
 
         def restore():
             with self.editing(arm) as edit_bones:
@@ -324,6 +321,37 @@ class Loader:
             for ob, _, basis in hung:
                 ob.matrix_basis = basis
         self.undo.append(restore)
+
+    def hung_from(self, arm, names):
+        """The objects hung from the named bones, each with its place at rest
+        and its own transform, before an edit of the rig's rest; the rig stays
+        at rest until keep_places, which takes the pose position back."""
+        position = arm.data.pose_position
+        arm.data.pose_position = "REST"
+        self.context.view_layer.update()
+        return position, [(ob, ob.matrix_world.copy(), ob.matrix_basis.copy()) for ob in arm.children
+                          if ob.parent_type == "BONE" and ob.parent_bone in names]
+
+    def keep_places(self, arm, position, hung):
+        """Each hung object back at its place after an edit of the rig's rest
+        (a skinned part's `~PPx attach` helper, whose place is a CXLT row).
+        Through an edited bone's matrix the place comes back a float step or
+        so off, which moves a CXLT row a 16.16 step: its own offset takes up
+        the difference, one step at a time, until the place is the bits it
+        was."""
+        self.context.view_layer.update()
+        for ob, world, _ in hung:
+            ob.matrix_world = world
+        for _ in range(8):
+            self.context.view_layer.update()
+            off = [(ob, world.translation - ob.matrix_world.translation) for ob, world, _ in hung]
+            off = [(ob, d) for ob, d in off if d.length > 0.0]
+            if not off:
+                break
+            for ob, d in off:
+                ob.location += (ob.matrix_world @ ob.matrix_basis.inverted()).to_3x3().inverted() @ d
+        arm.data.pose_position = position
+        self.context.view_layer.update()
 
     def redrive(self):
         """A skinned model whose bones follow another model's parts (arms on a
@@ -365,7 +393,7 @@ class Loader:
             self.note(f"{name}: a version 0 clip, whose events carry no trigger word (the reader "
                       "gives each 0xffffffff); it re-exports as version 1 with that word")
 
-    def action_for(self, clip, arm, bones, rest):
+    def action_for(self, clip, arm, bones, rest, stand):
         name = clip["name"]
         action = bpy.data.actions.new(name)
         self.undo.append(lambda: bpy.data.actions.remove(action))
@@ -379,10 +407,15 @@ class Loader:
                       "channels are dropped")
         self.shape_notes(clip)
         frames = clip["frames"]
+        events = clip["events"]
         translated = bool(clip["flags"] & ANIM_FLAG_TRANSLATION)
         to_arm = self.arm_space(arm).inverted()
         order = {pb.name: i for i, pb in enumerate(bones)}
         above = [order[p.name] if p is not None else None for p in (part_bone(pb) for pb in bones)]
+        root, head = stand["root"], stand["head"]
+        disp, arm_model = stand["disp"], stand["arm_model"]
+        travel = Vector((0.0, 0.0, 0.0))
+        worst = (0.0, 0)
         data = arm.animation_data or arm.animation_data_create()
         slotted = hasattr(data, "action_slot")
         held = (data.action, data.use_nla, data.action_slot if slotted else None)
@@ -392,8 +425,14 @@ class Loader:
             # The pose that shows what the game draws: a key IS the bone's
             # rotation in the model's frame, and the rig's rest pose is the bind
             # the runtime measures it against, so the key poses the bone
-            # directly. The head follows its part parent's rest offset.
+            # directly. The head follows its part parent's rest offset, and
+            # the hips stand the frame's bottom above the ground, the summed
+            # steps along it.
             for f in range(frames + 1):
+                ev = events[f] if f < len(events) else None
+                lift = travel.copy()
+                if ev is not None:
+                    lift.z += ev["bottom"] - stand["height"]
                 posed = []
                 for i, pb in enumerate(bones):
                     if i >= len(rows):
@@ -402,102 +441,200 @@ class Loader:
                     key = key_at(rows[i]["keys"], rows[i]["durations"], f)
                     rot = to_arm @ self.blender_rot(key)
                     j = above[i]
-                    head = rest[i].translation if j is None else \
+                    at = rest[i].translation if j is None else \
                         (posed[j] @ rest[j].inverted() @ rest[i]).translation
+                    if i == 0:
+                        at = at + disp @ lift
                     tr = rows[i]["tr"]
                     if translated and tr:
-                        head = head + to_arm @ self.to_blender(tr[min(f, len(tr) - 1)])
-                    posed.append(Matrix.Translation(head) @ rot.to_4x4())
-                self.write_frame(bones, rest, above, posed, f, translated)
-            action.o3d.capsule_keys = self.write_events(arm, clip, frames)
+                        at = at + to_arm @ self.to_blender(tr[min(f, len(tr) - 1)])
+                    posed.append(Matrix.Translation(at) @ rot.to_4x4())
+                anchors = {pb.name: (rest[i], posed[i]) for i, pb in enumerate(bones)}
+                if root is not None:
+                    anchors[root.name] = (stand["root_rest"],
+                                          Matrix.Translation(disp @ travel) @ stand["root_rest"])
+                self.write_frame(bones, root, anchors, f, translated)
+                if ev is not None:
+                    hips = arm_model @ posed[0].translation
+                    top = ev["bottom"] + ((arm_model @ posed[head].translation) - hips).z \
+                        if head is not None else ev["bottom"]
+                    if abs(ev["top"] - top) > worst[0]:
+                        worst = (abs(ev["top"] - top), f)
+                    step = self.to_blender(ev["velocity"])
+                    travel += Vector((step.x, step.y, 0.0))
+            self.write_triggers(arm, clip, frames)
             linear(action)
             slot = data.action_slot if slotted else None
         finally:
             data.action, data.use_nla = held[0], held[1]
             if slotted and held[0] is not None and held[2] is not None:
                 data.action_slot = held[2]
+        # A known gap, not a fault: retail's exporter measured most tops at the
+        # head, but not all (a death fall, a crawl; 64 of the 204 first-person
+        # registrations carry a top above the bottom by a rule nothing has
+        # witnessed), and export writes the rig's own measure.
+        if worst[0] > TOP_TOLERANCE and head is not None:
+            self.note(f"{name}: its top stands up to {worst[0] * 100:.1f} cm from the head bone's height "
+                      f"({bones[head].name}, frame {worst[1]}), which a re-export writes")
+        elif worst[0] > TOP_TOLERANCE:
+            self.note(f"{name}: its top stands up to {worst[0] * 100:.1f} cm above its bottom (frame {worst[1]}) "
+                      "by a rule nothing has witnessed; a rig without a head bone re-exports the bottom")
         return action, slot
 
-    def write_frame(self, bones, rest, above, posed, frame, translated):
+    @staticmethod
+    def carried(bone, anchors):
+        """A bone's pose where the frame keys it, else its rest carried by the
+        nearest keyed bone above it (its rest when there is none): a control
+        bone the clip does not key rides the bone it hangs from."""
+        walk = bone
+        while walk is not None and walk.name not in anchors:
+            walk = walk.parent
+        if walk is None:
+            return bone.bone.matrix_local
+        rest, pose = anchors[walk.name]
+        return pose @ rest.inverted() @ bone.bone.matrix_local
+
+    def write_frame(self, bones, root, anchors, frame, translated):
         """One frame's pose, keyed on the rig's bone channels: each bone's basis
-        against its Blender parent's pose, a `!` control bone's being its rest
-        under the nearest part bone (the clip keys no control bone)."""
-        order = {pb.name: i for i, pb in enumerate(bones)}
-        for i, pb in enumerate(bones):
+        against its Blender parent's pose. Every bone keys its rotation; the
+        hips and Root their place, which carries the events; the others their
+        place only under the translation flag."""
+        for pb in bones + ([root] if root is not None else []):
+            rest, pose = anchors[pb.name]
             parent = pb.parent
             if parent is None:
-                basis = rest[i].inverted() @ posed[i]
+                basis = rest.inverted() @ pose
             else:
-                j = order.get(parent.name)
-                parent_rest = parent.bone.matrix_local
-                if j is not None:
-                    parent_pose = posed[j]
-                elif above[i] is None:
-                    parent_pose = parent_rest
-                else:
-                    a = above[i]
-                    parent_pose = posed[a] @ rest[a].inverted() @ parent_rest
-                basis = (parent_pose @ parent_rest.inverted() @ rest[i]).inverted() @ posed[i]
-            pb.rotation_mode = "QUATERNION"
-            pb.rotation_quaternion = basis.to_quaternion()
-            pb.keyframe_insert("rotation_quaternion", frame=frame)
-            if translated:
+                parent_pose = self.carried(parent, anchors)
+                basis = (parent_pose @ parent.bone.matrix_local.inverted() @ rest).inverted() @ pose
+            if pb is not root:
+                pb.rotation_mode = "QUATERNION"
+                pb.rotation_quaternion = basis.to_quaternion()
+                pb.keyframe_insert("rotation_quaternion", frame=frame)
+            if pb is root or pb is bones[0] or translated:
                 pb.location = basis.translation
                 pb.keyframe_insert("location", frame=frame)
 
-    def write_events(self, arm, clip, frames):
-        """The root track and the trigger word, on the clip's own Action: the
-        `!RM` bone walks the summed event steps, and the rig carries the keyed
-        trigger word. Returns whether the clip carries its capsule extents."""
+    def write_triggers(self, arm, clip, frames):
+        """The clip's trigger words, keyed on the rig on the clip's own
+        Action."""
         events = clip["events"]
         if not events:
-            self.note(f"{clip['name']}: the clip carries no event record (no root motion, no capsule)")
-            return False
-        rm = rm_of(arm)
-        # A step is a displacement in the model's frame; the bone's location is
-        # in its own rest frame, under the rig's.
-        to_rm = (self.arm_space(arm) @ rm.bone.matrix_local.to_3x3().normalized()).inverted() \
-            if rm is not None else None
-        at = Vector((0.0, 0.0, 0.0))
-        # The extents the clip carries are keyed beside the trigger: the rule
-        # retail's own tool measured them by is not witnessed, and the engine's
-        # derivation from the pose lands within centimetres of it.
-        carry = any(ev["extents"] is not None for ev in events)
+            self.note(f"{clip['name']}: the clip carries no event record (no step, bottom or trigger word)")
+            return
         for f in range(frames + 1):
             ev = events[min(f, len(events) - 1)]
-            if f < len(events):
-                at = at + self.to_blender(ev["velocity"])
-            if rm is not None:
-                rm.location = to_rm @ at
-                rm.keyframe_insert("location", frame=f)
             # A version 0 event has no trigger word (the text states 0) and the
             # reader gives it 0xffffffff, the word the game plays.
             arm.o3d.anim_trigger = trigger_value(0xFFFFFFFF if clip["version"] == 0 else ev["trigger"])
             arm.keyframe_insert("o3d.anim_trigger", frame=f)
-            if carry:
-                bottom, top = ev["extents"] or (0.0, 0.0)
-                arm.o3d.capsule_bottom = bottom
-                arm.o3d.capsule_top = top
-                arm.keyframe_insert("o3d.capsule_bottom", frame=f)
-                arm.keyframe_insert("o3d.capsule_top", frame=f)
-        return carry
 
-    def ensure_rm(self, arm):
-        """The rig's root-track bone, made on first need: a bone at the model
-        origin, outside the BN## parts."""
-        if rm_of(arm) is not None:
+    # --- the ground ---------------------------------------------------------
+    def place(self, arm, bones, bottom):
+        """Stand the model on Blender's ground plane, display only: a model
+        root at the world origin rises until the ground its set stands on (its
+        Root's head, else the bind clip's first bottom below the hips) is Z = 0,
+        and so does each model whose bones follow it (arms on a gun), so a
+        first-person gun and its arms overlay a body at the hips. It rises once
+        its rig is set up at the origin, where every export reads it
+        (o3dtext.at_world_origin), and what binds to where things stand (a
+        part's `O3D follow`, the arms' sockets) binds again. A model whose own
+        bones follow another stays where it is."""
+        if bottom is None or self.model.o3d.drive_rig is not None or not at_origin(self.model):
             return
+        root = root_of(arm, ImportFailed)
+        ground = (arm.matrix_world @ root.bone.head_local).z if root is not None else \
+            (arm.matrix_world @ bones[0].bone.head_local).z - bottom
+        if ground == 0.0:
+            return
+        movers = [self.model] + [m for m in model_roots(self.scene)
+                                 if m.o3d.drive_rig == self.model and at_origin(m)]
+
+        def move(at):
+            for m in movers:
+                m.matrix_world = at
+            self.context.view_layer.update()
+            self.rebind(arm)
+            for m in movers[1:]:
+                assembly.drive(m, self.model)
+        self.undo.append(lambda: move(Matrix.Identity(4)))
+        move(Matrix.Translation((0.0, 0.0, -ground)))
+
+    def rebind(self, arm):
+        """Each part's `O3D follow` measured again from its bone's rest where
+        the rig now stands (a Child Of also carries what moves its part's own
+        parent, so a bind from elsewhere would move the part twice)."""
+        for ob in descendants(self.model):
+            for con in ob.constraints:
+                if con.name == FOLLOW and con.target == arm:
+                    con.inverse_matrix = (arm.matrix_world @ arm.data.bones[con.subtarget].matrix_local).inverted()
+
+    def ensure_root(self, arm, bones, bottom):
+        """The rig's Root, made on first need: a bone on the ground, `bottom`
+        below the hips, lying along the model's forward, and the rig's top
+        bone, the hips' top ancestor now below it."""
+        root = root_of(arm, ImportFailed)
+        if root is not None:
+            return root
+        disp = (self.model.matrix_world.inverted_safe() @ arm.matrix_world).to_3x3().inverted_safe()
+        up = disp @ Vector((0.0, 0.0, 1.0))
+        forward = disp @ self.to_blender((1.0, 0.0, 0.0))
+        top = bones[0].bone
+        while top.parent is not None:
+            top = top.parent
+        top_name = top.name
+        # A bone below a new parent has its rest rebuilt through the parent's,
+        # a float step off: what hangs from any bone keeps its place.
+        position, hung = self.hung_from(arm, {b.name for b in arm.data.bones})
         with self.editing(arm) as edit_bones:
-            eb = edit_bones.new(RM_NAME)
-            eb.head = Vector((0.0, 0.0, 0.0))
-            eb.tail = Vector((0.0, 0.2, 0.0))
+            eb = edit_bones.new(ROOT_NAME)
+            eb.head = edit_bones[bones[0].name].head - up * bottom
+            eb.tail = eb.head + forward.normalized() * 0.2
+            eb.align_roll(up)
+            below = edit_bones[top_name]
+            below.use_connect = False
+            below.parent = eb
+            made = eb.name
+        self.keep_places(arm, position, hung)
 
         def remove():
             with self.editing(arm) as edit_bones:
-                eb = edit_bones.get(RM_NAME)
+                below = edit_bones.get(top_name)
+                if below is not None:
+                    below.parent = None
+                eb = edit_bones.get(made)
                 if eb is not None:
                     edit_bones.remove(eb)
+            for ob, _, basis in hung:
+                ob.matrix_basis = basis
         self.undo.append(remove)
+        return root_of(arm, ImportFailed)
+
+    def stand(self, arm, bones, rest, root, bottom):
+        """How the clips stand the rig on the ground: the Root and its rest,
+        the hips' rest height above the ground, the model root's frame against
+        the rig's, and the head bone's place among the bones."""
+        arm_model = self.model.matrix_world.inverted_safe() @ arm.matrix_world
+        root_rest = root.bone.matrix_local.copy() if root is not None else None
+        hips = arm_model @ rest[0].translation
+        ground = ground_under(self.model.matrix_world, (arm_model @ root_rest.translation) if root is not None else None,
+                              hips)
+        height = (hips - ground).z
+        if root is None and bottom is not None and abs(height - bottom) > 0.001:
+            # Measured from the bind rather than the ground, so the bind clip's
+            # first frame is the rest pose wherever the model stands.
+            self.note(f"the hips stand {height:.3f} above Blender's ground (Z = 0), the set {bottom:.3f}: "
+                      "a rig without a Root bone stands on Z = 0, so a re-export measures its bottoms from "
+                      "there (place the model so its hips stand the set's height, or give the rig a Root)")
+            height = bottom
+        try:
+            head = head_of(self.model, arm, ImportFailed)
+        except ImportFailed as e:
+            self.note(f"{e}; each top is checked against the bottom")
+            head = None
+        index = next((i for i, pb in enumerate(bones) if head is not None and pb.name == head.name), None)
+        return {"root": root, "root_rest": root_rest, "height": height, "arm_model": arm_model,
+                "disp": arm_model.to_3x3().inverted_safe(), "head": index}
 
     # --- a rigid model ------------------------------------------------------
     def rigid_rig(self, clip):
@@ -651,6 +788,9 @@ class Loader:
             self.note("the table has no reset row naming a clip of the set, which the game cannot load: the "
                       "rig's rest pose stays as it is, and export refuses the table until a row names one")
         self.pending = None
+        first = bind if bind is not None else clips[0]
+        bottom = first["events"][0]["bottom"] if first["events"] else None
+        travels = any(ev["velocity"][0] != 0.0 or ev["velocity"][1] != 0.0 for c in clips for ev in c["events"])
         arm = rig_of(self.model)
         if arm is not None:
             data = arm.animation_data
@@ -663,7 +803,7 @@ class Loader:
                 above = part_bone(pb)
                 if above is not None and order[above.name] >= i:
                     raise ImportFailed(f"{pb.name}: its parent is not a lower part")
-        else:
+        if arm is None:
             # A rigid model (a first-person weapon): its clips get an animation
             # rig whose bones mirror its parts, built from the bind clip.
             arm = self.rigid_rig(bind if bind is not None else clips[0])
@@ -685,9 +825,12 @@ class Loader:
         if self.pending is not None:
             self.attach_parts()
             self.context.view_layer.update()
+        root = self.ensure_root(arm, bones, bottom) if travels and bottom is not None else \
+            root_of(arm, ImportFailed)
+        bones = bone_rows(arm)
+        self.place(arm, bones, bottom)
         rest = [pb.bone.matrix_local.copy() for pb in bones]
-
-        self.ensure_rm(arm)
+        stand = self.stand(arm, bones, rest, root, bottom)
         data = arm.animation_data or arm.animation_data_create()
         # A clip the rig already holds under a clip's name (the set imported
         # again) is replaced in its place: two clips of one name would write
@@ -704,7 +847,7 @@ class Loader:
             olds = held.get(clip["name"].lower(), [])
             for old in {a for a, _, _ in olds}:
                 self.set_aside(old)
-            action, slot = self.action_for(clip, arm, bones, rest)
+            action, slot = self.action_for(clip, arm, bones, rest, stand)
             made[clip["name"].lower()] = action
             track = data.nla_tracks.new(prev=olds[0][1] if olds else None)
             self.undo.append(lambda track=track: data.nla_tracks.remove(track))

@@ -30,7 +30,8 @@ export refuses one that carries modifiers or shape keys.
 | Attachment | `~PPx attach` | a helper under a part (the part it sits under), naming that part's parent `PP` (`00` = -1, as Excavatr's part 2 stores it; the part's own number = itself, as Eturret's turret stores it); `x` (a, b, ...) tells a part's helpers apart, and the first in `x` order names the parent and is the part's attach point (a later one is not exported). In the collision LOD the attach points are the CXLT rows [OED's WriteCXLT wrote the collision LOD's attach points, 5fc5b4f6a^ `engine/formats/oed/export_3di.cpp`]: when that LOD holds any helper, export writes one row per section the retail corpus gives one (every section after the root on a rigid model, every section on a skinned one), at the part's attach point, or at its pivot where the part has none (our rule, so a scene that holds helpers for some parts only, as import and a rigid clip rig make them, still writes a whole table; a helper on its part's pivot writes the very row the builder would derive). An empty table (Chair03X and ten more retail models store none where the count rule gives rows) has no scene form: import says so, and export leaves the rows to the builder. A collision LOD without any helper leaves the rows to the builder, which puts each at its section's pivot. On a skinned model a helper sits on its part's bone (an Empty with the bone as its parent) or under its mesh part's `## Mesh<n>`, and the bone hierarchy stays the part's parent: the root bone's helper is `~01 attach` (retail stores a root's parent as 0, itself) |
 | User point | `UP<c>## <label>` | USRP point: type letter `c` (`G` 71 gameplay, `S` 83 effect), part `##` (`00` = none), label = the USRP name (no label: `Noname`); faces along its local +Z. Its export-order property keeps the USRP order (seats and effect points are scanned in it); points without one follow in label order (our own rule: retail's exporter kept its scene order), so `sitex01`, `sitex02` keep seat order whatever part they sit on |
 | Light | `LP##[a..]` (a light object) | a LGHT light owned by part `##` (`01` the root, as `classify_name` parsed it); a point light is omni, a spot light a cone about its local -Z, the way Blender draws it. An unrotated light points straight down, retail's omni default. Its colour is the start colour; the generator, attenuation and flags are properties |
-| Bone | `BN##` (Armature bone) | part `##` of a skinned model: the head is the pivot, the nearest `BN##` bone above it the part parent (past any `!` control bone; none: the root); `BN##` vertex groups carry the weights (a weight-0 membership keeps a vertex whose weights are all zero, as dM1A1's LOD 3 stores them). Its PANM tracks, flags and track frame (the MTRX row: a rotation of the model's axes) are bone properties; a part has one track per target |
+| Bone | `BN##` (Armature bone) | part `##` of a skinned model: the head is the pivot, the nearest `BN##` bone above it the part parent (past `Root` and any `!` control bone; none: the root); `BN##` vertex groups carry the weights (a weight-0 membership keeps a vertex whose weights are all zero, as dM1A1's LOD 3 stores them). Its PANM tracks, flags and track frame (the MTRX row: a rotation of the model's axes) are bone properties; a part has one track per target |
+| Root bone | `Root`, any case (Armature bone) | no part: the ground under the character, the rig's top bone with the hips (`BN01`, the model origin) below it (see Animations) |
 | Skinned mesh | `## Mesh<n>` (under the Armature) | geometry authored on part `##`. Every skinned strip is stored on the root, and each part keeps the bounds of what is authored on it. `##` is a bone (dM1A1's hull: `01 Mesh0` on `BN01`, with each wheel's own geometry on its bone in the collision LOD) or a mesh part numbered after the bones: parent 0, pivot = the mesh origin (ArmsG: 37 bones, then `38 Mesh0`) |
 | Material | `Material_<i>_<SHADER>` | export order `i`, shader tag `SHADER` (any tag in the engine's shader table; the add-on's shader field renames the material). Without a tag, OED's default for the material's texture maps: `FF_ST_OP` for one, `FF_MT_OP` for two, `FFP_GLASS` for none (`VS_SKBASIC`, `VS_SKGLASS` on a skinned model); a mesh without a material takes the no-map default too. Glass, emissive and the alpha pass follow the shader |
 
@@ -145,14 +146,37 @@ on the model the rig belongs to:
   (`ANIM_RESET` and `xxxx_reset` are the reset row too). The game cannot load a
   table without a reset row [orig: AnimMap_LoadAdmFile @ 0x40cc40, the read of
   slot 0's head @ 0x40ce11], so export refuses one.
-- **`!RM`** is a bone of the rig outside its `BN##` parts, keyed per frame: its
-  step between two frames is that frame's event velocity (the body animates in
-  place and the engine moves the entity by these). Any bone named `!...` is no
-  part, so a rig may also hold the control bones an author rigs with.
+- **The rig** is a humanoid's: `Root` (any case) on the ground as the top
+  bone, the hips `BN01` (the model origin) below it, and the head, the bone the
+  model root's `head_bone` names or, unnamed, the one bone whose name ends in
+  `head` (`BN15 Head`). Each frame's event is measured from the pose, never
+  keyed: the bottom is the hips' height above Root, the top the head's (the
+  bottom when the rig has no head), and the velocity the hips' step to the next
+  frame across the ground, up by the change in bottom, in the clip frame (x
+  lateral, z forward). The runtime moves the entity by that step, stands its
+  origin `bottom` above the ground and reads the top as the capsule's [orig:
+  AnimMap_UpdateEntity @ 0x40b5f0]; that retail's exporter measured the hips
+  and the head this way is read off the corpus (the top within 1 cm of the
+  head's height in 91% of 185,661 person frames). The last two events repeat
+  one, as in all 477 retail clips: a loop's are its event 0, a one-shot's stand
+  still at frame_count - 1's bottom and top. A rig without Root stands on
+  Blender's ground plane, world Z = 0 (our convention; the ground is in no
+  clip), as a first-person rig does with its model placed at the hips' height
+  (1.07). The hips never carry a translation row (0 of the 202 translated
+  retail clips moves bone 0). Any bone named `!...` is no part either, so a rig
+  may also hold the control bones an author rigs with.
+- **Import stands the rig on the ground:** the hips keyed at each frame's
+  bottom and, when the set moves the body, a `Root` made at the ground under
+  the hips and keyed along the summed steps, so a planted foot stays put; a set
+  that never moves (every first-person set) makes none. A model root at the
+  world origin rises so the ground is Z = 0, with the models whose bones follow
+  it (display only: every export reads a model as if its root stood at the
+  origin). A stored top more than 3 cm from the head's height (from the bottom
+  on a rig without a head: 64 of the 204 retail first-person clip
+  registrations carry a higher top by an unwitnessed rule) is reported.
 - **The event bits** are the rig's keyed `Trigger` word: 1 and 2 the left and
   right footstep, 4, 8 and 16 the ammo rows, 0x20 to 0x400 the six foley sounds
-  (`opennova-3di catalog` prints them). A clip that carries its own capsule
-  extents keys them beside it.
+  (`opennova-3di catalog` prints them).
 - **The rest pose is the bind.** A channel is the bone's own rotation in the
   model's frame, and the runtime carries the reset clip's first key as the
   skeleton's rest, so a bone deforms by `key * bind^-1`: with the rest pose set

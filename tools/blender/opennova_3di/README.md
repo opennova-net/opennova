@@ -209,10 +209,9 @@ beside a first-person gun). **File > Import > NovaLogic Animations** reads a
   slides), the unwitnessed flag bit 3, and a frame count longer than the
   Action, whose extra frames hold its last pose.
 - **Each clip exports on its own.** A channel a clip does not key is at rest:
-  a bone it leaves alone keeps its rest pose, `!RM` stays at the origin and the
-  trigger and capsule are 0, whatever the clip before it did. A bone that
-  follows another model's parts (**Bones follow**) follows its own clip while
-  the set exports.
+  a bone it leaves alone keeps its rest pose (`Root` and the hips too) and the
+  trigger is 0, whatever the clip before it did. A bone that follows another
+  model's parts (**Bones follow**) follows its own clip while the set exports.
 - **The table** is the row list on the model root: a slot (`anim_reset`,
   `anim_walk_forward`, ...) and the clips that answer it. Several clips on one
   row are a ring the game rotates through, and it serves a row from its LAST
@@ -221,11 +220,20 @@ beside a first-person gun). **File > Import > NovaLogic Animations** reads a
   before it (every retail table holds one, and the game cannot load a table
   without one, so export refuses it). A row names its slot by what follows the
   key's first five characters, so `ANIM_RESET` is the reset row too.
-- **Root motion** is the bone `!RM`: key it along the path the body travels and
-  the clip carries the step between each pair of frames. The body itself
-  animates in place; the game moves the entity by those steps. Any bone named
-  `!something` is not a part, so control bones live there too; a `BN##` bone
-  under one takes the nearest `BN##` above it as its part parent.
+- **The rig** is the usual humanoid one: a `Root` bone (any case) on the
+  ground as the top bone, the hips (`BN01`, the model origin) below it, and a
+  head. Move the body over the ground with Root and bob it with the hips.
+  Export measures every frame from the pose: the bottom is the hips' height
+  above Root, the top the head's, and the step is how far the hips move to the
+  next frame, which is how far the game moves the body. The head is the
+  **Head** field in the Animations panel, or else the one bone whose name ends
+  in `head` (`BN15 Head`); with no head, the top is the bottom. A rig without
+  Root (a first-person rig) stands on Blender's ground, Z = 0, so its model
+  sits with the hips at the game's height (1.07 m). As in every retail clip, a
+  loop's last two events repeat its first and a one-shot's stand still. Root
+  is no part, and neither is a bone named `!something`, where control bones
+  go; a `BN##` bone under either takes the nearest `BN##` above it as its part
+  parent.
 - **Events** are the rig's keyed **Trigger** word: 1 and 2 place the left and
   right footstep, 4, 8 and 16 fire the ammo rows, and 0x20 upwards play the six
   foley sounds of the body's sound profile. `opennova-3di catalog` lists them.
@@ -253,6 +261,16 @@ beside a first-person gun). **File > Import > NovaLogic Animations** reads a
   it found it. A clip the rig already holds under the name of one being
   imported (a set imported again) is replaced in its place in the set, and the
   table's rows follow the new one.
+- **Import stands the rig on the ground.** Each frame keys the hips at its
+  bottom and, when the set moves the body, a `Root` bone (made at the ground
+  under the hips when the rig has none) along the steps, so a planted foot
+  stays put. A model at the world origin is raised so the ground is Blender's
+  Z = 0, and the arms following a first-person gun rise with it, so the gun
+  and its arms overlay a body at the hips. This is display only: every export
+  reads a model as if its root stood at the origin. A clip whose stored top is
+  more than 3 cm from the head's height is named in the warnings, and so is a
+  first-person clip whose top stands above its bottom (a third of retail's do,
+  by a rule nothing has shown); a re-export writes the rig's own measure.
 
 **A first-person weapon** animates its own parts rather than bones, so its clips
 get an armature named `!Rig` whose bones mirror them; import builds it. Each

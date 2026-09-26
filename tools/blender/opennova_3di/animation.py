@@ -13,14 +13,38 @@
 #              the order the file stores (the engine serves a row from its LAST
 #              variant back). The reset row names the clip whose bind every
 #              other clip is measured against.
-#   !RM        a bone of the rig outside its BN## parts, keyed per frame: its
-#              per-frame step is the clip's event velocity (the body animates in
-#              place and the engine moves the entity by these).
+#   Root       a bone named `Root` (any case), outside the BN## parts: the
+#              ground under the character, the rig's top-level bone with the
+#              hips below it. Its travel over the ground is the body's. A rig
+#              without one (a first-person rig) stands on Blender's ground
+#              plane, world Z = 0 (our convention: the ground is not in a clip).
+#   the hips   BN01, the model origin (part 0).
+#   the head   the bone the model root's `head_bone` names; unnamed, the one
+#              bone whose name ends in `head` (BN15 Head), and none when no
+#              bone or several do (a first-person rig has none).
 #   trigger    the armature's keyed `o3d.anim_trigger` word: the footstep,
 #              fire and foley bits the body consumes (opennova-3di catalog
-#              prints them). A clip that carries its own capsule extents keys
-#              `o3d.capsule_bottom` and `o3d.capsule_top` beside it; otherwise
-#              the engine derives them from the pose.
+#              prints them).
+#
+# A frame's event is measured from the pose, never keyed:
+#   bottom     the hips' height above the ground,
+#   top        the head's height above the ground (the bottom without a head),
+#   velocity   the hips' step to the next frame: across the ground in the
+#              model root's frame, and up by the change in bottom,
+# and the last two events are the exporter's, not samples of the last two
+# poses: a loop repeats event 0 in both, a one-shot stands still in both at
+# frame_count - 1's bottom and top (every one of the 477 retail clips: 273
+# loops, 204 one-shots). The runtime moves the entity by the step (forward
+# vel.z, lateral vel.x of a frame), stands its origin `bottom` above the
+# ground, takes the vertical from the change in bottom and reads top as the
+# capsule's top [orig: AnimMap_UpdateEntity @0x40b5f0]. What retail's own
+# exporter measured is read off the corpus under OPENNOVA_JO_ASSETS, not
+# witnessed in code: over the 30 person tables (185,661 frames) top is the
+# head bone's height within 1 cm in 91% of frames (median 0.2 mm), a planted
+# foot slides back by the step (|slide| / |step| median 1.000 over the run
+# clips), bone 0 never carries a translation row (0 of the 202 translated
+# clips), and 118 of the 178 clips whose bottom moves store its change as the
+# vertical step (60 store 0, which the runtime replaces).
 #
 # A channel key is the bone's rotation in the model's own frame. The runtime
 # binds every clip of a table to the reset clip: that clip's first key is the
@@ -28,20 +52,21 @@
 # AnimChannel_ComputeBoneMatrices @0x410da0 over the bind AnimMap_RegisterEntity
 # @0x40bb60 pins]. A rig's rest pose IS that bind, so the pose a clip shows here
 # is the pose the game draws. Each clip is sampled on its own: every channel it
-# does not key sits at rest, the root at the origin, the trigger and capsule at
-# zero, and a bone that follows another model's parts (the drive) follows its
-# own clip instead. Nothing else is stored: the bind, the bone positions, the
-# capsule extents and the terminal duplicate key are the engine's own
-# derivations (formats/bad/bad_build.h), recomputed on every export.
+# does not key sits at rest (Root and the hips too), the trigger at zero, and a
+# bone that follows another model's parts (the drive) follows its own clip
+# instead. Nothing else is stored: the bind, the bone positions and the
+# terminal duplicate key are the engine's own derivations
+# (formats/bad/bad_build.h), recomputed on every export.
 
 import os
 import re
 
 import bpy
+from mathutils import Vector
 
 from . import assembly
-from .export import BONE_RE, clean_name, is_lod_root, model_roots
-from .o3dtext import ExportError, ModelSpace, cli_notes, fmt, quoted, run_cli, scratch
+from .export import BONE_RE, clean_name, is_lod_root, is_root_bone, model_roots
+from .o3dtext import ExportError, ModelSpace, at_world_origin, cli_notes, fmt, quoted, run_cli, scratch
 
 ANIM_FLAG_LOOP = 0x1
 ANIM_FLAG_TRANSLATION = 0x2
@@ -59,16 +84,10 @@ def slot_of(key):
     return key[5:].lower() if len(key) > 5 else ""
 
 
-# The root track: a bone of the rig, outside the BN## parts, whose per-frame
-# step is the clip's event velocity. It rides the clip's own Action, so one
-# Action holds a clip whole.
-RM_NAME = "!RM"
 # A pose bone's own channels: what a clip keys, and what sits at rest where it
 # does not.
 POSE_CHANNELS = ("location", "rotation_quaternion", "rotation_euler", "rotation_axis_angle", "scale")
 POSE_REST = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0), (1.0, 1.0, 1.0))
-# The rig's keyed event channels, zero where a clip does not key them.
-EVENT_PROPS = ("anim_trigger", "capsule_bottom", "capsule_top")
 
 
 def trigger_word(value):
@@ -93,9 +112,41 @@ def rig_of(model):
     return None
 
 
-def rm_of(arm):
-    """The rig's root-track bone, if it has one."""
-    return arm.pose.bones.get(RM_NAME) if arm is not None else None
+def root_of(arm, failure=ExportError):
+    """The rig's Root bone (a pose bone), if it has one."""
+    roots = [pb for pb in arm.pose.bones if is_root_bone(pb.name)]
+    if len(roots) > 1:
+        raise failure(f"{arm.name}: two bones are Root ({', '.join(pb.name for pb in roots)})")
+    return roots[0] if roots else None
+
+
+def head_candidates(arm):
+    """The rig's bones whose name ends in `head`, without case."""
+    return [pb for pb in arm.pose.bones if clean_name(pb.name).lower().endswith("head")]
+
+
+def head_of(model, arm, failure=ExportError):
+    """The rig's head bone (a pose bone): the one the model root's `head_bone`
+    names, else the one bone whose name ends in `head`; None when no bone or
+    several do."""
+    name = model.o3d.head_bone
+    if name:
+        pb = arm.pose.bones.get(name)
+        if pb is None:
+            raise failure(f"{model.name}: the head bone '{name}' is not a bone of {arm.name}")
+        return pb
+    heads = head_candidates(arm)
+    return heads[0] if len(heads) == 1 else None
+
+
+def ground_under(placed, root_head, point):
+    """The ground under `point` (the model root's frame), in that frame: the
+    Root bone's head, or on a rig without one the point of Blender's ground
+    plane (world Z = 0) straight below it, for a root standing at `placed`."""
+    if root_head is not None:
+        return root_head
+    w = placed @ point
+    return placed.inverted_safe() @ Vector((w.x, w.y, 0.0))
 
 
 def bone_rows(arm):
@@ -117,9 +168,9 @@ def bone_rows(arm):
 
 
 def part_bone(pb):
-    """A bone's part parent: its nearest BN## ancestor, past any `!` control
-    bone between them, as the model export reads a part's parent; None for a
-    root part."""
+    """A bone's part parent: its nearest BN## ancestor, past Root and any `!`
+    control bone between them, as the model export reads a part's parent; None
+    for a root part."""
     p = pb.parent
     while p is not None and BONE_RE.match(clean_name(p.name)) is None:
         p = p.parent
@@ -160,6 +211,9 @@ class AnimExporter:
         self.props = model.o3d
         self.settings = self.scene.o3d
         self.space = None  # set in run(): the model root's frame, as the model export reads it
+        self.root = None  # set in run(): the rig's Root and head bones, where it has them
+        self.head = None
+        self.placed = None  # set in run(): where the model root stands (a rig without Root stands on Z = 0)
         self.notes = []
 
     def note(self, text):
@@ -209,21 +263,17 @@ class AnimExporter:
         for pb in self.arm.pose.bones:
             for channel, value in zip(POSE_CHANNELS, POSE_REST):
                 setattr(pb, channel, value)
-        for name in EVENT_PROPS:
-            setattr(self.arm.o3d, name, 0)
+        self.arm.o3d.anim_trigger = 0
 
-    def sample(self, action, strip, bones, rest, start, frames):
+    def sample(self, action, strip, bones, rest, start, frames, loop):
         """Walk the clip, frames + 1 samples from its first frame: every bone's
         key per frame, its translation from the rest kinematics, and the frame's
-        root step, trigger word and capsule extents."""
+        event, measured from the pose (the hips' step, bottom and top) with its
+        keyed trigger word."""
         keys = [[] for _ in bones]
         translations = [[] for _ in bones]
-        steps = []
-        triggers = []
-        extents = []
+        hips, grounds, heads, triggers = [], [], [], []
         arm = self.arm
-        rm = rm_of(arm)
-        rm_rest = (self.space.world(arm) @ rm.bone.matrix_local).translation if rm is not None else None
         order = {pb.name: i for i, pb in enumerate(bones)}
         above = [order[p.name] if p is not None else None for p in (part_bone(pb) for pb in bones)]
         data = arm.animation_data
@@ -253,29 +303,45 @@ class AnimExporter:
                                    .to_quaternion())
                     # The bone's own displacement: where its head sits, less
                     # where the rest offset from its part parent would put it.
+                    # The hips' own is the event (the step and the bottom),
+                    # never a row.
+                    if i == 0:
+                        translations[i].append((0.0, 0.0, 0.0))
+                        continue
                     j = above[i]
                     if j is None:
                         base = (arm_world @ rest[i]).translation
                     else:
                         base = (posed[j] @ rest[j].inverted() @ rest[i]).translation
                     translations[i].append(self.space.mission(posed[i].translation - base))
-                if rm is not None:
-                    steps.append(self.space.mission((arm_world @ rm.matrix).translation - rm_rest))
-                else:
-                    steps.append((0.0, 0.0, 0.0))
+                at = posed[0].translation.copy()
+                hips.append(at)
+                grounds.append(ground_under(self.placed, (arm_world @ self.root.head) if self.root else None, at))
+                heads.append((arm_world @ self.head.head) if self.head is not None else None)
                 triggers.append(trigger_word(arm.o3d.anim_trigger))
-                extents.append((arm.o3d.capsule_bottom, arm.o3d.capsule_top))
         finally:
             data.action, data.use_nla = held[0], held[1]
             if slotted and held[0] is not None and held[2] is not None:
                 data.action_slot = held[2]
-        # The event velocity is the frame's step, the first measured from the
-        # model origin (a clip's root track starts there, and the importer sums
-        # the steps back into it).
+        bottoms = [(hips[f] - grounds[f]).z for f in range(frames + 1)]
+        tops = [(heads[f] - grounds[f]).z if heads[f] is not None else bottoms[f] for f in range(frames + 1)]
+        measured = []
+        for f in range(frames):
+            step = hips[f + 1] - hips[f]
+            step = Vector((step.x, step.y, bottoms[f + 1] - bottoms[f]))
+            measured.append((self.space.mission(step), bottoms[f], tops[f]))
+        # The last two events are the exporter's, not samples of the last two
+        # poses (every one of the 477 retail clips): a loop repeats event 0 in
+        # both, a one-shot stands still in both at frame_count - 1's bottom
+        # and top; each keeps its own frame's trigger word. The runtime lerps
+        # event trunc(frame_count * t) with the next [orig:
+        # AnimChannel_InterpolateKeyframe @0x40b230], so the last interval
+        # reads that one event throughout.
+        tail = measured[0] if loop else ((0.0, 0.0, 0.0), bottoms[frames - 1], tops[frames - 1])
         events = []
         for f in range(frames + 1):
-            before = steps[f - 1] if f > 0 else (0.0, 0.0, 0.0)
-            events.append((tuple(steps[f][k] - before[k] for k in range(3)), triggers[f], extents[f]))
+            step, bottom, top = measured[f] if f < frames - 1 else tail
+            events.append((step, triggers[f], bottom, top))
         return keys, translations, events
 
     def clip_lines(self, action, strip, bones, rest):
@@ -295,7 +361,7 @@ class AnimExporter:
         if frames < 1:
             raise ExportError(f"the clip '{action.name}' holds one frame; a clip needs two (its "
                               "frame count is the interval count, so it stores one key more)")
-        keys, translations, events = self.sample(action, strip, bones, rest, start, frames)
+        keys, translations, events = self.sample(action, strip, bones, rest, start, frames, props.loop)
         lines = [f"clip {quoted(clean_name(action.name))}",
                  f"fps {max(1, int(round(props.fps)))}",
                  f"flags 0x{flags:x}", f"frames {frames}"]
@@ -306,33 +372,21 @@ class AnimExporter:
         rows = translations if props.translation else None
         for i, pb in enumerate(bones):
             lines += self.bone_lines(pb, i, rest, keys, rows)
-        for step, trigger, extent in events:
-            line = "event " + fmt(*step) + f" 0x{trigger:x}"
-            if props.capsule_keys:
-                line += " " + fmt(*extent)
-            lines.append(line)
+        for step, trigger, bottom, top in events:
+            lines.append("event " + fmt(*step) + f" 0x{trigger:x} " + fmt(bottom, top))
         return lines
 
-    # --- the run ------------------------------------------------------------
-    def run(self):
+    def read(self, out_path):
+        """The clip-set text, read from the scene; the rig's bones and clips."""
         model = self.model.name
-        out_path = bpy.path.abspath(self.props.adm_path or adm_default(self.model))
-        if not out_path.lower().endswith(".adm"):
-            raise ExportError(f"{model}: the animation output path must end in .adm")
-        if not os.path.isabs(out_path):
-            raise ExportError(f"{model}: save the .blend first or give an absolute output path (a "
-                              "'//' path is relative to the saved file)")
-        self.arm = rig_of(self.model)
-        if self.arm is None:
-            raise ExportError(f"{model}: animations need a rig (an Armature of BN## bones under "
-                              "its LOD 0 root)")
-        data = self.arm.animation_data
-        if data is not None and data.use_tweak_mode:
-            raise ExportError(f"{model}: {self.arm.name} is in NLA tweak mode; leave it (Tab in the "
-                              "NLA editor) before exporting its clips")
-        self.context.view_layer.update()
         self.space = ModelSpace(self.model, self.settings.forward)
         bones = bone_rows(self.arm)
+        self.root = root_of(self.arm)
+        self.head = head_of(self.model, self.arm)
+        heads = head_candidates(self.arm)
+        if not self.props.head_bone and len(heads) > 1:
+            self.note("several bones end in 'head' (" + ", ".join(pb.name for pb in heads) + "), so none is "
+                      "the head and each clip's top is its bottom: choose one as the model's head bone")
         rows = self.rows()
         strips = clip_strips(self.arm)
         if not strips:
@@ -355,7 +409,7 @@ class AnimExporter:
         # display only, so the drive is muted while the clips are read.
         held_position = self.arm.data.pose_position
         held_pose = [(pb, [tuple(getattr(pb, c)) for c in POSE_CHANNELS]) for pb in self.arm.pose.bones]
-        held_events = [(name, getattr(self.arm.o3d, name)) for name in EVENT_PROPS]
+        held_trigger = self.arm.o3d.anim_trigger
         drives = [con for pb in self.arm.pose.bones for con in pb.constraints
                   if con.name == assembly.DRIVE and not con.mute]
         held_frame = self.scene.frame_current
@@ -376,11 +430,35 @@ class AnimExporter:
             for pb, values in held_pose:
                 for channel, value in zip(POSE_CHANNELS, values):
                     setattr(pb, channel, value)
-            for name, value in held_events:
-                setattr(self.arm.o3d, name, value)
+            self.arm.o3d.anim_trigger = held_trigger
             self.arm.data.pose_position = held_position
             self.scene.frame_set(held_frame)
+        return text, bones, strips
 
+    # --- the run ------------------------------------------------------------
+    def run(self):
+        model = self.model.name
+        out_path = bpy.path.abspath(self.props.adm_path or adm_default(self.model))
+        if not out_path.lower().endswith(".adm"):
+            raise ExportError(f"{model}: the animation output path must end in .adm")
+        if not os.path.isabs(out_path):
+            raise ExportError(f"{model}: save the .blend first or give an absolute output path (a "
+                              "'//' path is relative to the saved file)")
+        self.arm = rig_of(self.model)
+        if self.arm is None:
+            raise ExportError(f"{model}: animations need a rig (an Armature of BN## bones under "
+                              "its LOD 0 root)")
+        data = self.arm.animation_data
+        if data is not None and data.use_tweak_mode:
+            raise ExportError(f"{model}: {self.arm.name} is in NLA tweak mode; leave it (Tab in the "
+                              "NLA editor) before exporting its clips")
+        self.context.view_layer.update()
+        self.placed = self.model.matrix_world.copy()
+        # Read at the world origin, the model's own frame exactly
+        # (at_world_origin); the ground of a rig without Root is where the
+        # model stands in the scene.
+        with at_world_origin(self.context, self.model):
+            text, bones, strips = self.read(out_path)
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         # The clip-set text is the CLI's input only, as the model export's
         # scene text is: nothing lands beside the table but its clips.

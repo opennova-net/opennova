@@ -64,11 +64,13 @@
 #                 then mesh objects (ArmsG: 37 bones, then "38 Mesh0").
 #                 Collision: each bone's section carries a hit sphere around
 #                 every vertex it moves, a meshed part's section the bullet
-#                 faces (the retail person layout). A bone named `!...` is no
-#                 part: `!RM` carries a clip's root track (animation.py), and a
-#                 control bone an author rigs with is ignored the same way (a
-#                 BN## bone below one takes the nearest BN## above it as its
-#                 parent, the root when there is none).
+#                 faces (the retail person layout). A bone named `Root` (any
+#                 case) is no part: it is the ground under the character, the
+#                 rig's top-level bone with the hips (BN01) below it
+#                 (animation.py). Nor is a bone named `!...`, where the control
+#                 bones an author rigs with live (a BN## bone below either takes
+#                 the nearest BN## above it as its parent, the root when there is
+#                 none).
 #   !name         ignored.
 # Blender's own `.001` duplicate suffixes are stripped before classification
 # (object names are unique per .blend, so LOD1's PN01 is "PN01.001"); two
@@ -120,6 +122,12 @@ BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
 
 def clean_name(name):
     return BLENDER_SUFFIX.sub("", name)
+
+
+def is_root_bone(name):
+    """A rig's `Root` bone, in any case: the ground under the character, no
+    part (animation.py)."""
+    return clean_name(name).lower() == "root"
 
 
 def shader_table():
@@ -253,7 +261,7 @@ def slot_material(ev, slot):
 
 def bone_parent_part(bone):
     """The part a BN## bone's parent is: the nearest BN## bone above it, past
-    any `!` control bones; None at the root."""
+    `Root` and any `!` control bones; None at the root."""
     above = bone.parent
     while above is not None:
         m = BONE_RE.match(clean_name(above.name))
@@ -469,10 +477,10 @@ class Exporter:
                     raise ExportError(f"{root.name}: two armatures ({lod.armature.name}, {ob.name})")
                 lod.armature = ob
                 for bone in ob.data.bones:
-                    # A bone whose name starts with `!` is not a part: the
-                    # animation root track (`!RM`) and any control bone an
-                    # author rigs with live there.
-                    if clean_name(bone.name).startswith("!"):
+                    # `Root` (the ground the clips stand on) and a bone whose
+                    # name starts with `!` (a control bone an author rigs
+                    # with) are not parts.
+                    if clean_name(bone.name).startswith("!") or is_root_bone(bone.name):
                         continue
                     bm = BONE_RE.match(clean_name(bone.name))
                     if not bm:

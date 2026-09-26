@@ -222,11 +222,6 @@ class O3DActionProps(bpy.types.PropertyGroup):
                         description="The clip's length in frames; 0 takes the Action's own keyed "
                                     "range. A longer one holds the Action's last pose over the "
                                     "extra frames")
-    capsule_keys: BoolProperty(name="Own capsule", default=False,
-                               description="The clip carries the capsule extents keyed on the rig; "
-                                           "clear it and the engine derives them from the pose, "
-                                           "which retail's own tool did by a rule nothing has "
-                                           "witnessed (a re-export lands within centimetres)")
     loop: BoolProperty(name="Loop", default=True, description="The clip repeats (flag 1)")
     translation: BoolProperty(name="Translations", default=False,
                               description="Carry each bone's per-frame displacement as well as its "
@@ -261,16 +256,13 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                          "it names is written beside it as <clip>.bad. Empty: "
                                          "//<model name>.adm")
     rows: CollectionProperty(type=O3DAdmRow)
+    head_bone: StringProperty(name="Head bone", default="",
+                              description="The rig bone whose height above the ground is each frame's "
+                                          "top (the body's capsule top). Empty: the one bone whose name "
+                                          "ends in 'head'; with none, the top is the bottom (the hips' "
+                                          "height), as a first-person rig's is")
     # On a skinned model's Armature: the clip's per-frame event word. Key it to
     # place footsteps, fire and foley (opennova-3di catalog lists the bits).
-    capsule_bottom: FloatProperty(name="Capsule bottom", default=0.0,
-                                  description="How far this frame's pose reaches below the rig's "
-                                              "root, which is where a footstep sounds and where the "
-                                              "body's capsule starts; keyed with the clip when it "
-                                              "carries its own")
-    capsule_top: FloatProperty(name="Capsule top", default=0.0,
-                               description="How tall this frame's pose stands, measured from the "
-                                           "capsule bottom")
     anim_trigger: IntProperty(name="Trigger", default=0,
                               description="The animation event bits this frame fires: 1 and 2 the "
                                           "left and right footstep, 4 8 and 16 the ammo rows, "
@@ -718,6 +710,12 @@ def draw_animations(layout, model):
         box.label(text=f"Writes {animation.adm_default(model)}")
     clips = animation.clip_actions(rig)
     box.label(text=f"{len(clips)} clips on {rig.name} (its NLA tracks)")
+    box.prop_search(p, "head_bone", rig.data, "bones", text="Head")
+    if not p.head_bone:
+        heads = animation.head_candidates(rig)
+        box.label(text=f"Head: {heads[0].name} (its name ends in 'head')" if len(heads) == 1 else
+                  "No head: each top is the bottom" if not heads else "Several bones end in 'head': choose one")
+    box.label(text="Root bone: the ground; hips BN01; top: the head's height")
     for i, row in enumerate(p.rows):
         line = box.box()
         head = line.row()
@@ -755,11 +753,7 @@ class O3D_PT_action(bpy.types.Panel):
         col.prop(action.o3d, "loop")
         col.prop(action.o3d, "translation")
         col.prop(action.o3d, "raw_flag_8")
-        col.prop(action.o3d, "capsule_keys")
         col.prop(context.object.o3d, "anim_trigger")
-        if action.o3d.capsule_keys:
-            col.prop(context.object.o3d, "capsule_bottom")
-            col.prop(context.object.o3d, "capsule_top")
         col.label(text="Key the trigger per frame: 1/2 footsteps, 4/8/16 fire, 0x20+ foley")
 
 

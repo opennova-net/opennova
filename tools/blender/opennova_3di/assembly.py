@@ -118,7 +118,7 @@ def rig_fit(skin, rig):
         return None
     worst = 0.0
     for bone in arms[0].data.bones:
-        if export.clean_name(bone.name).startswith("!"):
+        if export.clean_name(bone.name).startswith("!") or export.is_root_bone(bone.name):
             continue
         i = bone_index(bone)
         if i is None or i not in parts:
