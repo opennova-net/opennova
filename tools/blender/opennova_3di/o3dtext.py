@@ -7,7 +7,10 @@
 # (x forward, y left, z up); the axis helpers here map them to Blender's and
 # back, and ModelSpace reads a model's objects in its root's frame for the
 # model and animation exports, which read a model standing at the world origin
-# (at_world_origin).
+# (at_world_origin). The two imports and the two exports share the rest of
+# their plumbing here: a run's notes (Notes), an Action played on its own
+# (playing), and the text's round trip through a scratch file (import_text,
+# export_text).
 
 import contextlib
 import math
@@ -25,6 +28,15 @@ class ExportError(Exception):
 
 class ImportFailed(Exception):
     """What stops an import, reported to the author."""
+
+
+class Notes:
+    """What a run reports to the author beside its result: `self.notes`,
+    which the run starts empty, each note said once."""
+
+    def note(self, text):
+        if text not in self.notes:
+            self.notes.append(text)
 
 
 # Styles above 0x70 carry a CTRL register (the loader's structural rule,
@@ -204,6 +216,28 @@ class ModelSpace:
         return self.basis.transposed() @ rotation @ self.basis
 
 
+# --- a clip -----------------------------------------------------------------
+
+@contextlib.contextmanager
+def playing(data, action, slot=None):
+    """`action` played on its own through `data` (a rig's animation data)
+    while the block runs: the NLA off and, on Blender 4.4 and up, through
+    `slot` when one is given (else the slot assigning the Action picks). The
+    rig's own Action, slot and NLA come back after."""
+    slotted = hasattr(data, "action_slot")
+    held = (data.action, data.use_nla, data.action_slot if slotted else None)
+    try:
+        data.use_nla = False
+        data.action = action
+        if slotted and slot is not None:
+            data.action_slot = slot
+        yield
+    finally:
+        data.action, data.use_nla = held[0], held[1]
+        if slotted and held[0] is not None and held[2] is not None:
+            data.action_slot = held[2]
+
+
 # --- the CLI ----------------------------------------------------------------
 
 def bundled_cli_path():
@@ -252,3 +286,26 @@ def cli_notes(result, marker):
     """The CLI's notes after `marker` (`note: `, `scene drops `), one per
     line of its error stream."""
     return [line.split(marker, 1)[1] for line in result.stderr.splitlines() if marker in line]
+
+
+def import_text(context, command, path, name, reader):
+    """`opennova-3di <command> <path>` written as scene text into a scratch
+    file called `name` and read back with `reader`; returns what it read and
+    the CLI's notes of what the text drops."""
+    with scratch() as tmp:
+        out = os.path.join(tmp, name)
+        result = run_cli(context, [*command, path, "-o", out], ImportFailed)
+        read = reader(out)
+    return read, cli_notes(result, "scene drops ")
+
+
+def export_text(context, command, text, name, shown, out_path):
+    """The text's lines written into a scratch file called `name` (the CLI's
+    input only: nothing lands beside the output but what the CLI writes) and
+    built by `opennova-3di <command> <file> -o <out_path>`; returns what the
+    CLI printed. Its messages call the scratch file `shown`."""
+    with scratch() as tmp:
+        path = os.path.join(tmp, name)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(text) + "\n")
+        return run_cli(context, [*command, path, "-o", out_path], ExportError, hide=((path, shown),))

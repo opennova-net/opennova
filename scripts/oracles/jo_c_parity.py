@@ -33,6 +33,9 @@ def fixture(path, content):
 U=65536
 roots={'pursuit':0,'steer':1,'stinger':2,'hellfire':3,'javelin':4,'stinger_init':5,'javelin_init':6}
 def signed(v): return (v+2**31)%2**32-2**31
+# INT32_MIN as C++ source: 2147483648 fits no int, so `-2147483648` negates a
+# wider constant (MSVC: unsigned long) that narrows into the int32_t table.
+def c_int(v): return '(-2147483647 - 1)' if v==-2**31 else str(v)
 cases=[]
 for root,category,v in oracle.cases():
  if root not in roots or v.get('fpcw',0x027f)!=0x027f:continue
@@ -53,7 +56,7 @@ for root,category,v in oracle.cases():
 # Signed dwords, except target/flags/phase and booleans (all below INT_MAX).
 fixture('tests/world/fixtures/guided_missile_vectors.inc',
     '// Original x86 PC53 vectors; regenerate with scripts/oracles/jo_c_parity.py.\n' +
-    ''.join('{'+','.join(str(signed(int(x))) for x in row[3]+row[4])+'}, // '+row[0]+' '+row[1]+'\n' for row in cases))
+    ''.join('{'+','.join(c_int(signed(int(x))) for x in row[3]+row[4])+'}, // '+row[0]+' '+row[1]+'\n' for row in cases))
 
 from material_producers_runtime_oracle import Machine, OBJ, NODE
 m=Machine(retail)

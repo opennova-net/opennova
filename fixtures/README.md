@@ -59,8 +59,10 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 `anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`),
 `particle/gorehit.ptu` (the gore-set half of the effect catalog, written in the
 retail `.ptu` grammar with our own effect), `grm/person.grm` (an authored facial
-rig; `grm_roundtrip` pins it byte-for-byte through the writer), the `novaworld/*_manifest.txt`
-records, and this README.
+rig; `grm_roundtrip` pins it byte-for-byte through the writer),
+`threedi/o3d/*.o3d` (the authored `.o3d` scenes the `opennova-3di` ctests and
+the Blender add-on's package smoke test build), the
+`novaworld/run_*/manifest.txt` records, and this README.
 
 ## threedi/synth — the synthetic 3DI model set (minted)
 

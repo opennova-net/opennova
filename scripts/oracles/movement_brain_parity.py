@@ -32,6 +32,13 @@ def signed(n):
     return (int(n) + 2**31) % 2**32 - 2**31
 
 
+def c_int(n):
+    """A signed dword as C++ source. INT32_MIN is (-2147483647 - 1):
+    2147483648 fits no int, so `-2147483648` negates a wider constant (MSVC:
+    unsigned long) that narrows into the int32_t tables."""
+    return '(-2147483647 - 1)' if n == -2**31 else str(n)
+
+
 class Machine:
     def __init__(self, path):
         raw = path.read_bytes()
@@ -163,7 +170,7 @@ def main():
 
     def fixture(name, rows):
         text = '// Original JO x86; regenerate with scripts/oracles/movement_brain_parity.py.\n'
-        text += ''.join('{' + ','.join(str(signed(x)) for x in row) + '},\n' for row in rows)
+        text += ''.join('{' + ','.join(c_int(signed(x)) for x in row) + '},\n' for row in rows)
         path = root / name
         if args.write:
             path.write_text(text, encoding='utf-8')

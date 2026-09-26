@@ -66,7 +66,8 @@ from mathutils import Vector
 
 from . import assembly
 from .export import BONE_RE, clean_name, is_lod_root, is_root_bone, model_roots
-from .o3dtext import ExportError, ModelSpace, at_world_origin, cli_notes, fmt, quoted, run_cli, scratch
+from .o3dtext import (ExportError, ModelSpace, Notes, at_world_origin, cli_notes, export_text, fmt, playing,
+                      quoted)
 
 ANIM_FLAG_LOOP = 0x1
 ANIM_FLAG_TRANSLATION = 0x2
@@ -203,7 +204,7 @@ def clip_range(action):
     return int(round(start)), int(round(end))
 
 
-class AnimExporter:
+class AnimExporter(Notes):
     def __init__(self, context, model):
         self.context = context
         self.scene = context.scene
@@ -215,10 +216,6 @@ class AnimExporter:
         self.head = None
         self.placed = None  # set in run(): where the model root stands (a rig without Root stands on Z = 0)
         self.notes = []
-
-    def note(self, text):
-        if text not in self.notes:
-            self.notes.append(text)
 
     # --- the set ------------------------------------------------------------
     def rows(self):
@@ -276,17 +273,10 @@ class AnimExporter:
         arm = self.arm
         order = {pb.name: i for i, pb in enumerate(bones)}
         above = [order[p.name] if p is not None else None for p in (part_bone(pb) for pb in bones)]
-        data = arm.animation_data
-        slotted = hasattr(data, "action_slot")
-        held = (data.action, data.use_nla, data.action_slot if slotted else None)
-        try:
-            data.use_nla = False
-            data.action = action
-            if slotted:
-                # The strip's slot, not the one assigning the Action picks: an
-                # Action authored on another rig names its channels under that
-                # rig's slot, and without it nothing here would move.
-                data.action_slot = strip.action_slot
+        # The strip's slot, not the one assigning the Action picks: an Action
+        # authored on another rig names its channels under that rig's slot,
+        # and without it nothing here would move.
+        with playing(arm.animation_data, action, getattr(strip, "action_slot", None)):
             self.reset_pose()
             for frame in range(start, start + frames + 1):
                 self.scene.frame_set(frame)
@@ -319,10 +309,6 @@ class AnimExporter:
                 grounds.append(ground_under(self.placed, (arm_world @ self.root.head) if self.root else None, at))
                 heads.append((arm_world @ self.head.head) if self.head is not None else None)
                 triggers.append(trigger_word(arm.o3d.anim_trigger))
-        finally:
-            data.action, data.use_nla = held[0], held[1]
-            if slotted and held[0] is not None and held[2] is not None:
-                data.action_slot = held[2]
         bottoms = [(hips[f] - grounds[f]).z for f in range(frames + 1)]
         tops = [(heads[f] - grounds[f]).z if heads[f] is not None else bottoms[f] for f in range(frames + 1)]
         measured = []
@@ -462,12 +448,7 @@ class AnimExporter:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         # The clip-set text is the CLI's input only, as the model export's
         # scene text is: nothing lands beside the table but its clips.
-        with scratch() as tmp:
-            o3a_path = os.path.join(tmp, "set.o3a")
-            with open(o3a_path, "w", newline="\n", encoding="utf-8") as f:
-                f.write("\n".join(text) + "\n")
-            result = run_cli(self.context, ["anim", "build", o3a_path, "-o", out_path], ExportError,
-                             hide=((o3a_path, "clip set text"),))
+        result = export_text(self.context, ["anim", "build"], text, "set.o3a", "clip set text", out_path)
         for note in cli_notes(result, "note: "):
             self.note(note)
         return f"{result.stdout.strip()} ({len(strips)} clips, {len(bones)} bones)", self.notes

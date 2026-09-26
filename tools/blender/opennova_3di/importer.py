@@ -3,11 +3,12 @@
 # The engine decodes the model (`opennova-3di scene`, the inverse of the
 # exporter's `build`); this module only lays the .o3d out by the naming
 # contract export.py reads (docs/threedi/scene-naming-contract.md), so an
-# imported model exports again. Each file becomes its own Blender scene named
-# after the model (the exporter reads a whole scene), with LOD 1 and up hidden.
-# Textures load from the file `opennova-3di` resolved beside the .3di by the
-# runtime's candidate order (`texfile` records). What the scene cannot carry is
-# reported as a note; a file that fails leaves nothing of itself behind.
+# imported model exports again. Each file comes into the current scene under a
+# model root of its own (in a collection named after the model; export reads
+# one model root), with LOD 1 and up hidden. Textures load from the file
+# `opennova-3di` resolved beside the .3di by the runtime's candidate order
+# (`texfile` records). What the scene cannot carry is reported as a note; a
+# file that fails leaves nothing of itself behind.
 
 import math
 import os
@@ -16,8 +17,8 @@ import bpy
 from mathutils import Matrix, Vector
 
 from . import export
-from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, axis_basis, blender_axes, cli_notes, num,
-                      run_cli, scratch, strip_comment, tokens)
+from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, Notes, axis_basis, blender_axes,
+                      import_text, num, strip_comment, tokens)
 
 
 VOLUME_NAMES = {v: k for k, v in export.VOLUME_CODES.items()}
@@ -179,11 +180,10 @@ def read_o3d(path):
 
 # --- scene building ------------------------------------------------------------
 
-class Builder:
+class Builder(Notes):
     def __init__(self, context, sc, source_path, op):
         self.context = context
         self.sc = sc
-        self.dir = os.path.dirname(os.path.abspath(source_path))
         self.stem = os.path.splitext(os.path.basename(source_path))[0]
         self.op = op
         self.notes = []
@@ -193,10 +193,6 @@ class Builder:
         self.part_objects = {}  # LOD -> {part: its PN## empty}
         self.skinned_parts = {}  # LOD -> (armature, {mesh part: its mesh})
         self.attach_helpers = {}  # (LOD, part) -> its `~PPx attach` helper
-
-    def note(self, text):
-        if text not in self.notes:
-            self.notes.append(text)
 
     def discard(self):
         """Remove what a failed build made."""
@@ -552,7 +548,7 @@ class Builder:
                 # helper can (`~PP attach`, PP its own number or 00).
                 objs.append(self.attach_helper(li, pi, ob, parent))
             if row is not None:
-                self.tracks(ob.o3d, row, lod)
+                self.tracks(ob.o3d, row)
             if part["strips"]:
                 me, _ = self.mesh(f"{pi + 1:02d} Mesh0", part["strips"], pivot, mats, False)
                 mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
@@ -673,7 +669,7 @@ class Builder:
                 helper = self.attach_helper(li, pi, self.part_objects[li][pi], parent, world)
             lod_objects[li].append(helper)
 
-    def tracks(self, p, row, lod):
+    def tracks(self, p, row):
         """A PANM row's flags and tracks onto a part's animation (an empty's
         or a bone's o3d)."""
         axis_default = (row["flags"] or 0) >> 24 & 0xFF
@@ -750,7 +746,7 @@ class Builder:
                 continue
             p = arm.bones[f"BN{pi + 1:02d}"].o3d
             p.frame = self.frame_rotation(row["matrix"]).to_euler()
-            self.tracks(p, row, lod)
+            self.tracks(p, row)
         authored = {}
         for pi, part in enumerate(lod["parts"]):
             for s in part["strips"]:
@@ -1156,20 +1152,11 @@ def volume_facets(planes, ladder=False):
     return facets, missing
 
 
-def run_scene(context, path):
-    """The model's scene text, read, and the CLI's notes."""
-    with scratch() as tmp:
-        o3d = os.path.join(tmp, "scene.o3d")
-        result = run_cli(context, ["scene", path, "-o", o3d], ImportFailed)
-        sc = read_o3d(o3d)
-    return sc, cli_notes(result, "scene drops ")
-
-
 def import_file(context, path, op=None):
     """Import one .3di into the current scene under a model root of its own;
     returns the model root and the notes. A file that fails leaves nothing of
     itself in the scene."""
-    sc, notes = run_scene(context, path)
+    sc, notes = import_text(context, ["scene"], path, "scene.o3d", read_o3d)
     builder = Builder(context, sc, path, op)
     try:
         builder.build(context.scene)
