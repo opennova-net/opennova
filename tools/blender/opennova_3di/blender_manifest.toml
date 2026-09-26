@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "opennova_3di"
-version = "0.1.0"
+version = "0.1.1"
 name = "OpenNova 3DI"
 tagline = "Import and export NovaLogic .3di models and their animations"
 maintainer = "OpenNova contributors"
