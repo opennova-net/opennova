@@ -6,8 +6,10 @@
 # (retail shader tags such as VS_PHONGT#UV hold one). Both carry MISSION axes
 # (x forward, y left, z up); the axis helpers here map them to Blender's and
 # back, and ModelSpace reads a model's objects in its root's frame for the
-# model and animation exports.
+# model and animation exports, which read a model standing at the world origin
+# (at_world_origin).
 
+import contextlib
 import math
 import os
 import subprocess
@@ -137,13 +139,52 @@ def blender_axes(forward):
     return lambda m: Vector((m[0], m[1], m[2]))
 
 
+# A root's own transform channels and what they hold at the origin.
+ORIGIN_CHANNELS = (("location", (0.0, 0.0, 0.0)), ("rotation_euler", (0.0, 0.0, 0.0)),
+                   ("rotation_quaternion", (1.0, 0.0, 0.0, 0.0)), ("rotation_axis_angle", (0.0, 0.0, 1.0, 0.0)),
+                   ("scale", (1.0, 1.0, 1.0)), ("delta_location", (0.0, 0.0, 0.0)),
+                   ("delta_rotation_euler", (0.0, 0.0, 0.0)), ("delta_rotation_quaternion", (1.0, 0.0, 0.0, 0.0)),
+                   ("delta_scale", (1.0, 1.0, 1.0)))
+
+
+@contextlib.contextmanager
+def at_world_origin(context, model):
+    """The model root at the world origin while an export reads it, then back
+    where it stood. Blender holds matrices in single precision, so an object
+    read back through a placed root comes back a float step off, and a step
+    below a 16.16 word (a retail CXLT row sits on that grid) truncates a whole
+    step down: at the origin every export reads the very matrices of a model
+    that was never moved. An unparented root stands there with its own
+    constraints (a mount) muted; a parented one is read through its root's
+    frame (ModelSpace)."""
+    if model.parent is not None or model.matrix_world == Matrix.Identity(4):
+        yield
+        return
+    held = [(name, tuple(getattr(model, name))) for name, _ in ORIGIN_CHANNELS]
+    muted = [(c, c.mute) for c in model.constraints]
+    for c, _ in muted:
+        c.mute = True
+    for name, value in ORIGIN_CHANNELS:
+        setattr(model, name, value)
+    context.view_layer.update()
+    try:
+        yield
+    finally:
+        for name, value in held:
+            setattr(model, name, value)
+        for c, mute in muted:
+            c.mute = mute
+        context.view_layer.update()
+
+
 class ModelSpace:
     """A model root's frame, the one every export reads the scene in: an
     object's matrix relative to the root, so a model placed, parented or
-    mounted anywhere in the scene exports the same model (a root at the origin
-    reads Blender's world matrices untouched), and Blender's axes as the
-    mission axes the text carries. Made after the view layer is updated, so
-    the root's matrix is current."""
+    mounted anywhere in the scene exports the same model (a root at the origin,
+    where at_world_origin stands an unparented one, reads Blender's world
+    matrices untouched), and Blender's axes as the mission axes the text
+    carries. Made after the view layer is updated, so the root's matrix is
+    current."""
 
     def __init__(self, model, forward):
         self.basis = axis_basis(forward)

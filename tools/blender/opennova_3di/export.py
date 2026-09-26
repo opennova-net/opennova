@@ -83,8 +83,8 @@ import struct
 import bpy
 from mathutils import Euler, Vector
 
-from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, cli_notes, fmt, quoted, run_cli,
-                      scratch)
+from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, at_world_origin, cli_notes, fmt, quoted,
+                      run_cli, scratch)
 
 
 # Shader capability bits (runtime/renderer/material_descriptor.h), read per
@@ -1268,7 +1268,8 @@ class Exporter:
             except RuntimeError as e:
                 raise ExportError(f"{model}: leave {mode.lower().replace('_', ' ')} mode first ({e})")
         try:
-            return self.run_in_object_mode(model, name, out_path, out_dir)
+            with at_world_origin(self.context, self.model):
+                return self.run_in_object_mode(model, name, out_path, out_dir)
         finally:
             if mode != "OBJECT":
                 try:
