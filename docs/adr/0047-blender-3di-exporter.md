@@ -247,17 +247,27 @@ the same text transport, the same add-on.
    the first table imported onto a rig without clips turns each rest bone onto
    the reset clip's key; a later table replaces the rows (and any clip of the
    same name) but keeps the rest, a lone `.bad` leaves both alone, and a table
-   without an `anim_reset` row aligns nothing (retail then binds each clip to
-   its own first key). Heads, lengths and weights do not move, so the model still
+   without an `anim_reset` row aligns nothing (retail cannot load one, so
+   `anim build` refuses it). Heads, lengths and weights do not move, so the model still
    exports the same model, and a clip shows the pose the game draws. Import
    keys frames 0..frame_count as the runtime evaluates them (its duration walk
    and slerp). A clip is an Action on the rig's NLA tracks, exported through its
    own strip and action slot over the rig's rest, with any drive muted, so a
    clip keys only what it animates; the table is the rows on the model root;
-   the root track is the bone `!RM`, outside the BN## parts, whose per-frame
-   step is the event velocity; the event bits and, for a clip that carries its
-   own, the capsule extents are keyed on the rig. A bone named `!...` is no
-   part, which also lets a rig hold control bones. A rigid model's parts hang
+   the rig stands on a `Root` bone (any case, no part) at the ground, the hips
+   `BN01` below it and a head (the model root's `head_bone`, else the one bone
+   whose name ends in `head`), the shape of a Godot humanoid. Each event is
+   measured from the pose: `bottom` the hips' height above Root, `top` the
+   head's (the bottom when the rig has no head), the step the hips' move to
+   the next frame with the change in bottom as its vertical; a loop's last two
+   events repeat event 0 and a one-shot's stand still, as every retail clip's
+   do. A rig without Root stands on Blender's Z = 0 (our convention: the
+   first-person sets never step). Import keys the hips and, for a set that
+   travels, Root, so a clip plays with its feet planted, and raises a model at
+   the world origin so the ground is Z = 0; every export reads a model with
+   its root at the origin, so where it stands does not change its bytes. The
+   event bits are keyed on the rig. A bone named `!...` is no part either,
+   which lets a rig hold control bones. A rigid model's parts hang
    from its LOD root and follow their animation bone through an `O3D follow`
    Child Of constraint that is muted at Rest Position, so the model exports
    byte for byte as before its clips were imported.
