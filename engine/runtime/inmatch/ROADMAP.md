@@ -475,7 +475,7 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
 - **Determinism:** seed-inject session id / SCRK / `host_start_tick`; normalization mask only for
   genuinely volatile witnessed fields (seq, timestamps). Byte-parity is the bar on the wire.
 
-Goldens (local, gitignored): the 2026-06-26 trio `.scratch/golden/retail-lan-host-join.pcapng`
+Goldens (local, gitignored): the 2026-06-26 trio `retail-lan-host-join.pcapng`
 (handshake + world-load), `retail-lan-host-join-session.pcapng` (session-only handshake),
 `retail-gameplay-session.pcapng` (~8 min in-match `0x0a`/`0x0c` loop) — re-banked 2026-08-05
 with the 01TR parity-round set (`retail-lan-01tr-join*`, `retail-gameplay-01tr`,

@@ -287,9 +287,9 @@ what confuses.
     (uncommitted, IDA-cited); fast-forward onto master when that work lands.
   - shared nw-merge worktree + `web-nw-for-real-master` — **retired**: branch
     fully merged and deleted (remote already pruned); worktree removed. Its
-    untracked `.scratch` (retail_join_v2–v15, `ov-*`, host logs) was destroyed
+    untracked local captures (retail_join_v2–v15, `ov-*`, host logs) was destroyed
     with the removal; the three NW goldens survive in the main checkout's
-    `.scratch/golden/` and the v16–v35 series in game-server's `.scratch`
+    local goldens and the v16–v35 series in game-server's local captures
     (see docs/asset-gated-tests.md), and the lost captures are re-derivable
     from the `start_v*_capture.ps1` recipes.
 - **NET-2** (L) extract the wire + replay legs out of `libs/novaworld` into
@@ -552,7 +552,7 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
   a forced one-bit sensitivity proof; *T2* the swatch A/B probe
   (generalizing `env_visual_baseline_probe.gd`): a deterministic synthetic
   swatch grid + asset-gated world composites, baselines captured pre-change
-  to `.scratch/golden/render/` (never committed), re-captured and attested
+  to a gitignored local directory (never committed), re-captured and attested
   per slice; *T3* the named retail side-by-side scene list (water horizon ×
   TOD grid, alpha-test foliage, glass/env-map, transparents composite, night
   lightmap terrain, first-person viewmodel) — the headline gate at REN-7.

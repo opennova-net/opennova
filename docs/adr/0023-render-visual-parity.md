@@ -93,7 +93,7 @@ dedicated instrument BEFORE any behavior change:
   `env_visual_baseline_probe.gd`) renders a deterministic swatch grid per material
   configuration plus asset-gated world composites; baselines are captured before
   the first behavior change and re-captured per slice, attested in the PR. Visual
-  bytes are machine-local: baselines live under `.scratch/golden/render/`, never
+  bytes are machine-local: baselines live in a gitignored local directory, never
   committed; CI hard-gating stays on T1.
 - **T3 — retail side-by-side (the headline gate).** A named scene list (water
   horizon across the TOD grid, alpha-test foliage, glass/env-map, transparents

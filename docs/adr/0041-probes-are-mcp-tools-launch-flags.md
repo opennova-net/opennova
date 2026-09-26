@@ -18,7 +18,7 @@
 Three sprawls had grown around the test and probe surface. About 215
 environment variables with 380 reader sites configured the runtime, the tools
 and the tests: seven names for "the resource root", nine for the mission, a
-17-variable env console in shipped code, and compile-time `.scratch` defaults
+17-variable env console in shipped code, and compile-time scratch-directory defaults
 for capture paths — while the asset-gated ctests skipped as PASS, so a green
 run proved nothing. `fixtures/` held 223 files (109 MB of LFS), most of them
 retail-extracted bytes that our own writers could mint. And 82 manual

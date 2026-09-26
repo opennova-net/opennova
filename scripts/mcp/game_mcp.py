@@ -10,7 +10,7 @@ scripts/mcp/game_mcp.ps1 instead; both talk to the same endpoint.
     python scripts/mcp/game_mcp.py tools
     python scripts/mcp/game_mcp.py call game_state
     python scripts/mcp/game_mcp.py probe run perf_sample '{"sample_ms": 5000}' --wait
-    python scripts/mcp/game_mcp.py stop --pid-file .scratch/game.pid
+    python scripts/mcp/game_mcp.py stop --pid-file build/game.pid
 
 Exit codes: 0 ok; 1 usage or transport failure; 2 the tool reported
 isError; 3 a JSON-RPC error; 4 the probe was cancelled; 5 the probe
