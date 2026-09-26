@@ -67,7 +67,7 @@ extract. A test that needs one of those files reads
 A packed install without an expansion the test needs (revx02 for the 00TRg
 payload oracle) skips that leg; the extracted tree carries the same pair and
 serves it. No test reads a machine-local capture: the wire coverage that used
-to ride gitignored `.scratch/` pcaps is the in-tree `fixtures/novaworld/` set
+to ride gitignored local pcaps is the in-tree `fixtures/novaworld/` set
 (`nw_self_capture`, `nw204_lobby_decode`, the `.nwmsg` replays) plus the
 inline-pcap unit tests.
 
@@ -124,7 +124,7 @@ account identity and machine paths. Treat every capture as credential-bearing
 until proven otherwise. The tracked-fixture line is drawn in `.agents/interop.md`:
 promote only small *sanitized* artifacts (`.nwmsg`, focused `.hexcap`, `.gsb`,
 manifest rows) — `fixtures/novaworld/` shows the shape. Raw `.pcapng`/`.sph` stay
-in gitignored `.scratch/`, full stop.
+machine-local and gitignored, full stop.
 
 ## The two-tier wire-compat gate (maturity program NET-0)
 

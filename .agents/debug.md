@@ -54,7 +54,7 @@ dotnet test launcher/OpenNovaLauncher.sln -c Release
 Packet tools:
 
 ```bash
-nw_pp .scratch/capture.pcapng --stream --items /path/to/items.def
+nw_pp capture.pcapng --stream --items /path/to/items.def
 ```
 
 ## Env-Gated Witnesses

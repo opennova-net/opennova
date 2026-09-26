@@ -2,7 +2,7 @@
 
 These PowerShell scripts support local LAN, capture, and retail-interoperability
 work. They are operator tools, not release inputs or CI gates. Captures and
-retail data stay under the gitignored `.scratch/` tree and must never be
+retail data stay machine-local and gitignored and must never be
 committed without the sanitization review described in
 [`docs/asset-gated-tests.md`](../../docs/asset-gated-tests.md).
 
@@ -93,8 +93,8 @@ should match between any two hosts on the same map rather than raw bytes:
 
 ```bash
 python scripts/net/diff_0a.py \
-    --ours   .scratch/ov-<stamp>.pcapng \
-    --golden .scratch/retail-ashi5a-<stamp>.pcapng \
+    --ours   ov-<stamp>.pcapng \
+    --golden retail-ashi5a-<stamp>.pcapng \
     --items ~/Desktop/JOX/ITEMS.DEF
 ```
 

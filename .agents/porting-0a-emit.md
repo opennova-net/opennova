@@ -178,7 +178,7 @@ target) in net-re D-NET-146.
   writes it). (4) Body anims (the tracked body-motor off-14 states / off-15 channel ratio
   echo) — promote into the pass: witness the C2S 0x0C extended-uplink anim fields → entity
   → 0x0A compact echo chain and port the echo. Artifacts:
-  `.scratch/retail_join_v31_game.pcapng` (8.1 MB, udp.port==32768 filter of the 664 MB
+  `retail_join_v31_game.pcapng` (8.1 MB, udp.port==32768 filter of the 664 MB
   dual raw), host logs `host_std{out,err}_v31.log`, capture script `start_v31_capture.ps1`;
   histogram: 11046×0x0A / 921×0x0C / 45×0x06 / 6×0x16 / 0×0x0E / 2×0x26 / 4×0x13.
 
@@ -262,7 +262,7 @@ target) in net-re D-NET-146.
   (M4=10 clips etc.; jox01 126-weapon indices consistent with what the clients fired) and
   identical at join AND deploy — needs the CLIENT-side 0x5A apply witness (@0x4290E0: where
   ammoPrimary lands vs what the HUD mag counter reads) before touching anything.
-  Artifacts: `.scratch/retail_join_v33{,_game}.pcapng` (28 MB filtered), host logs
+  Artifacts: `retail_join_v33{,_game}.pcapng` (28 MB filtered), host logs
   host_std{out,err}_v33.log.
 
 - **Round 15 (2026-07-04): the VEHICLE DRIVE round — the task's assumed chain REFUTED, the
@@ -345,7 +345,7 @@ numbering").
   compares sub-block distribution + record-class mix + per-field population vs the retail-host golden. The
   golden profile caches to `<golden>.0a.json` (instant re-runs; `--refresh` after a decoder change). This
   is the machine-readable "are we sending what retail sends" check.
-- **Golden:** `.scratch/retail-ashi5a-*.pcapng` = retail host + retail joiner on ASH_I5A (the spec; C 0x0f
+- **Golden:** `retail-ashi5a-*.pcapng` = retail host + retail joiner on ASH_I5A (the spec; C 0x0f
   = 0). Live re-capture runbook: `[[reference_retail_join_test_stack]]` / the memory
   `project_0x0f_flood_root_cause`.
 

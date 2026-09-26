@@ -50,7 +50,7 @@ the `nw_message_coverage` CI gate so a tag cannot be handled in one place and fo
 in the other. `nw_pp --histogram` emits a stable per-`(dir,tag)` machine-readable line;
 `nw_pp --coverage` ranks the undecoded backlog by wire volume.
 
-Capturing traffic and validating it against the goldens in `.scratch/golden/` is a
+Capturing traffic and validating it against the machine-local retail goldens is a
 one-command loop: `scripts/net/diff_vs_golden.ps1` classifies every `(dir,tag)` as
 OK / GAP / SPURIOUS + counts decode failures, and the env-gated `nw_golden_diff` ctest
 pins the result in CI (skips clean when unset). GAP rows are the prioritized worklist for
