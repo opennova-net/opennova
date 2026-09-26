@@ -12,7 +12,7 @@ land here as the grill slices convert the three `UNAUDITED` render systems
 | [`render-lighting-re.md`](render-lighting-re.md) | **landed at REN-5** | D-RLIT | the iris/modulator chain (env #17), the world lighting block + per-entity uniforms and hemisphere D3D lights, dynamic point lights + group culling, terrain/foliage c0/c1, lighting textures, the cubemap sources (CubeRotSpecular = D-RORD-5's answer), the render-slot shadow lighting |
 | [`render-occlusion-re.md`](render-occlusion-re.md) | **landed 2026-07-16** (outside the original three REN slices) | D-OCC | blink-box visibility: section masks, portal traversal, occluder culling, indoor frame gates, the GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` occlusion chunks, and the sound-occlusion witness (which closed D-SND-7). Sound occlusion (2026-07-16, `CollisionWorld` + `engine/runtime/terrain_query`), the indoor frame gates (2026-07-16, `OcclusionFramePass`), and the section-mask/portal engine (init, mask build, traversal, occluder culling — 2026-07-17, `engine/runtime/world/occlusion.cpp`) are all ported; residuals ride the D-OCC rows |
 | [`shader-validation.md`](shader-validation.md) | **landed with the FrameFx slice (2026-08-23)** | shader provenance | the checked-in shader inventory, its citation coverage, the bounded parity statuses, and the light-response validation procedure; machine-readable twin `godot/shaders/provenance.json` |
-| [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; settled max-quality publication refreshed 2026-08-22** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [18 current comparisons](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
+| [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; settled max-quality publication refreshed 2026-08-22** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [18 current comparisons](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
 
 Terrain TSS findings grow [terrain/terrain-re.md](../terrain/terrain-re.md);
 sky/water shader gaps grow [env/env-tod-re.md](../env/env-tod-re.md) — in
@@ -60,14 +60,14 @@ sky ladder; [render-order-re.md](render-order-re.md)).
 ```
 # capture (windowed, never --headless):
 python scripts/mcp/game_mcp.py launch --windowed --resource-dir "$OPENNOVA_JO_DIR"
-python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"capture","output_dir":".scratch/golden/render/<label>"}' --wait
-python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"composite","output_dir":".scratch/golden/render/<label>"}' --wait
+python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"capture","output_dir":"<baseline-dir>/<label>"}' --wait
+python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"composite","output_dir":"<baseline-dir>/<label>"}' --wait
 # world baselines: per minute, game_debug set environment_time_of_day then game_capture_bundle world_only
 # compare two captures (swatch or composite):
 python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"compare","a":"a_grid.png","b":"b_grid.png"}' --wait
 ```
 
-Baselines live under `.scratch/golden/render/` (machine-local, never
+Baselines live in a gitignored local directory (machine-local, never
 committed — [asset-gated-tests.md](../asset-gated-tests.md) policy). The
 pre-change baseline set is captured before the first REN behavior change and
 each slice's PR attests its A/B.
@@ -118,8 +118,11 @@ CP01/CP12 anchors are `cp01-water-oblique-retail`,
 `cp12-yard-road-retail`, and `cp12-yard-tanks-retail`; rejected unregistered
 context frames are not substitutes for these fixtures.
 
+The `screenshots/` tree was removed on 2026-09-26; its links here point at commit
+`8881f61d7`, the last that carried it.
+
 The current 2026-08-22 settled max-quality publication contains
-[all 18 registered pairs and 90 OpenNova diagnostic variants](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md),
+[all 18 registered pairs and 90 OpenNova diagnostic variants](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md),
 captured from frozen source
 `269c1c8e727a16074f13e7b2dfdc4ba9ff3af42c` (the viewmodel-alignment PR #562
 branch commit — the counter-gated first-person clip advance and the bone-exact
@@ -218,7 +221,7 @@ work, in pipeline order:
 - [`build_model_lighting_comparison.ps1`](../../scripts/render/build_model_lighting_comparison.ps1)
   and [`test_model_lighting_parity.ps1`](../../scripts/render/test_model_lighting_parity.ps1)
   are the model-lighting sheet's own pair
-  ([screenshots/parity/model-lighting](../../screenshots/parity/model-lighting/README.md)).
+  ([screenshots/parity/model-lighting](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/model-lighting/README.md)).
 
 The exact-pose harness both tiers drive is
 the `render_fixture_capture` probe
@@ -263,8 +266,7 @@ diagnostic workflow is never a substitute for a registered HUD-hidden retail
 comparison, and the legacy `retail-parity` comparison mode is not sanctioned
 for cross-engine evidence.
 
-Raw capture bundles, retail tool transcripts, and full baseline sets stay under
-`.scratch` per the
+Raw capture bundles, retail tool transcripts, and full baseline sets stay machine-local per the
 [asset-gated evidence policy](../asset-gated-tests.md). The capture probe never
 writes directly to a tracked or external evidence root; publication happens
 only after the scratch bundle passes the registered validation workflow.
