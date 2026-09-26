@@ -16,8 +16,11 @@ refactor, and the evidence plumbing used to compare them across three missions:
 - replacement of runtime-composed object shader source with typed pipeline
   descriptors and finite checked-in technique resources; and
 - frame-correlated diagnostics, capture bundles, exact post-spawn fixtures,
-  and the [current 18-pair settled max-quality registered review set](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md),
+  and the [current 18-pair settled max-quality registered review set](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md),
   refreshed 2026-08-22.
+
+The `screenshots/` tree was removed on 2026-09-26; its links here point at commit
+`8881f61d7`, the last that carried it.
 
 It does **not** claim that glass/environment cubemaps, sky-dome rendering,
 EffectWorld point lights, or every material technique now match retail. Those
@@ -190,7 +193,7 @@ All six manifests carry catalog SHA-256
 `b16a00b8b1f998c43dcdf28438a8c58d31fc2e77f461d29c221812e159e4b458`.
 
 The shadow counter tuple below is `objects / draw calls / primitives` for the
-root pass. Raw bundles and manifests remain machine-local under `.scratch/` capture
+root pass. Raw bundles and manifests remain in machine-local capture
 roots; the listed hashes make their provenance explicit. The
 `00tra-courtyard`, `00tra-fire-barrel`, `cp01-suv-glass`, and
 `cp01-water-wide` rows were RECAPTURED 2026-08-16 on the corrected
@@ -216,11 +219,11 @@ pixel-identical despite the nonzero submission counters.
 
 | Selected evidence | Result | Committed artifacts |
 |---|---|---|
-| `00TRa.bms` / `00tra-courtyard` m1125 | mean 1.398601, max 60, 137,924 changed pixels | [sheet](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/00tra-courtyard-m1125.png), [heatmap](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/00tra-courtyard-m1125-heatmap.png), [metrics](evidence/render-lighting-2026-08/00tra-courtyard-m1125.json) |
-| `00TRa.bms` / `00tra-fire-barrel` m1320 | mean 1.128846, max 104, 107,363 changed pixels | [sheet](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/00tra-fire-barrel-m1320.png), [heatmap](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/00tra-fire-barrel-m1320-heatmap.png), [metrics](evidence/render-lighting-2026-08/00tra-fire-barrel-m1320.json) |
-| `CP01.bms` / `cp01-suv-glass` m0720 | mean 2.405642, max 82, 160,037 changed pixels | [sheet](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/cp01-suv-glass-m0720.png), [heatmap](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/cp01-suv-glass-m0720-heatmap.png), [metrics](evidence/render-lighting-2026-08/cp01-suv-glass-m0720.json) |
-| `CP12.bms` / `cp12-truck-material` m1260 | mean 1.118113, max 58, 196,288 changed pixels | [sheet](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/cp12-truck-material-m1260.png), [heatmap](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/cp12-truck-material-m1260-heatmap.png), [metrics](evidence/render-lighting-2026-08/cp12-truck-material-m1260.json) |
-| `CP01.bms` / `cp01-water-wide` m0720 | **non-gating cross-run** pre-fix/corrected localization: mean 31.276250, max 241, 362,458 changed pixels | [sheet](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/cp01-water-wide-m0720.png), [heatmap](../../screenshots/parity/render-lighting-2026-08/subsystem-ab/cp01-water-wide-m0720-heatmap.png), [metrics](evidence/render-lighting-2026-08/cp01-water-wide-m0720.json) |
+| `00TRa.bms` / `00tra-courtyard` m1125 | mean 1.398601, max 60, 137,924 changed pixels | [sheet](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/00tra-courtyard-m1125.png), [heatmap](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/00tra-courtyard-m1125-heatmap.png), [metrics](evidence/render-lighting-2026-08/00tra-courtyard-m1125.json) |
+| `00TRa.bms` / `00tra-fire-barrel` m1320 | mean 1.128846, max 104, 107,363 changed pixels | [sheet](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/00tra-fire-barrel-m1320.png), [heatmap](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/00tra-fire-barrel-m1320-heatmap.png), [metrics](evidence/render-lighting-2026-08/00tra-fire-barrel-m1320.json) |
+| `CP01.bms` / `cp01-suv-glass` m0720 | mean 2.405642, max 82, 160,037 changed pixels | [sheet](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/cp01-suv-glass-m0720.png), [heatmap](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/cp01-suv-glass-m0720-heatmap.png), [metrics](evidence/render-lighting-2026-08/cp01-suv-glass-m0720.json) |
+| `CP12.bms` / `cp12-truck-material` m1260 | mean 1.118113, max 58, 196,288 changed pixels | [sheet](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/cp12-truck-material-m1260.png), [heatmap](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/cp12-truck-material-m1260-heatmap.png), [metrics](evidence/render-lighting-2026-08/cp12-truck-material-m1260.json) |
+| `CP01.bms` / `cp01-water-wide` m0720 | **non-gating cross-run** pre-fix/corrected localization: mean 31.276250, max 241, 362,458 changed pixels | [sheet](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/cp01-water-wide-m0720.png), [heatmap](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/subsystem-ab/cp01-water-wide-m0720-heatmap.png), [metrics](evidence/render-lighting-2026-08/cp01-water-wide-m0720.json) |
 
 Exact source/output SHA-256 values (reference / diagnostic / final, then sheet /
 heatmap / metrics JSON) are:
@@ -291,7 +294,7 @@ clock as evidence for the next one.
 ### Current 2026-08-22 settled max-quality registered publication
 
 The current publication is indexed at
-[`screenshots/parity/render-lighting-2026-08/registered-2026-08-22/`](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md).
+[`screenshots/parity/render-lighting-2026-08/registered-2026-08-22/`](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md).
 It contains all 18 registered pairs, 18 overlays, 18 absolute-difference
 images, 18 normalized OpenNova images, and 90 raw OpenNova diagnostic images
 with portable evidence records. Three pairs are snapshot-derived growth:
@@ -460,7 +463,7 @@ Every registered pair must satisfy all of the following:
 The exact capture, registration, and comparison commands are recorded in the
 retired runbook (`docs/render/render-parity-runbook.md` section 3a at 5820432c1);
 the tooling is gone, the published records carry their own provenance.
-Raw bundles remain machine-local under `.scratch/` per the asset-gated policy;
+Raw bundles remain machine-local per the asset-gated policy;
 selected registered derivatives may be published only with their comparison
 manifest and captions intact.
 
@@ -605,15 +608,15 @@ animated effects, EffectWorld point lights, presentation blend space, and water
 ## PR evidence contract
 
 Unselected raw bundles, retail tool transcripts, and full baseline sets remain
-machine-local under `.scratch` according to the
+machine-local according to the
 [asset-gated evidence policy](../asset-gated-tests.md); the selected published
 captures and derivatives do not. The current
-[2026-08-22 settled max-quality registered set](../../screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md)
+[2026-08-22 settled max-quality registered set](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md)
 supplies the following catalog-v5/stage-v3/raw-v4/registered-v5/comparison-v6
 inventory:
 
 1. selected within-run OpenNova `subsystem-ab` sheets and heatmaps committed
-   under `screenshots/parity/` (for example, the same frozen pose's `beauty`,
+   under `screenshots/parity/` (removed 2026-09-26; see commit `8881f61d7`) (for example, the same frozen pose's `beauty`,
    `shadows_off`, and `lighting_only` variants);
 2. selected registered retail/OpenNova side-by-side, 50/50 overlay, and
    absolute-difference images with their create-new comparison manifest;

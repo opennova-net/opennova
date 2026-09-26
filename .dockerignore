@@ -17,7 +17,6 @@ __pycache__/
 *.pyc
 .scratch/
 fixtures/
-screenshots/
 infra/aws/.terraform/
 infra/github/.terraform/
 # Terraform state + operator var-files hold real secrets — never into any build
