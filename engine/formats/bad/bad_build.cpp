@@ -22,20 +22,6 @@ struct Mat3 {
     double m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 };
 
-Mat3 multiply(const Mat3 &a, const Mat3 &b) {
-    Mat3 o{};
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            double s = 0.0;
-            for (int k = 0; k < 3; ++k) s += a.m[r * 3 + k] * b.m[k * 3 + c];
-            o.m[r * 3 + c] = s;
-        }
-    }
-    return o;
-}
-
-BadBuildQuat conjugate(const BadBuildQuat &q) { return BadBuildQuat{-q.x, -q.y, -q.z, q.w}; }
-
 Mat3 transpose(const Mat3 &a) {
     Mat3 t{};
     for (int r = 0; r < 3; ++r)
@@ -176,63 +162,6 @@ BadBuildVec3 bad_bone_rel(const float parent_bind_rows[9], const float position[
     return bad_mission_from_clip(apply(transpose(rows_from_floats(parent_bind_rows)), stored));
 }
 
-namespace {
-
-BadBuildQuat quat_product(const BadBuildQuat &a, const BadBuildQuat &b) {
-    return BadBuildQuat{a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-                        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-                        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-                        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
-}
-
-// A unit short-arc slerp: the capsule measure below is ours, so this is a
-// plain one rather than the runtime's port of Math_QuaternionSlerp.
-BadBuildQuat quat_blend(const BadBuildQuat &a, BadBuildQuat b, double t) {
-    double dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
-    if (dot < 0.0) {
-        b = BadBuildQuat{-b.x, -b.y, -b.z, -b.w};
-        dot = -dot;
-    }
-    double wa = 1.0 - t;
-    double wb = t;
-    if (dot < 0.9999) {
-        const double omega = std::acos(dot > 1.0 ? 1.0 : dot);
-        const double inv = 1.0 / std::sin(omega);
-        wa = std::sin((1.0 - t) * omega) * inv;
-        wb = std::sin(t * omega) * inv;
-    }
-    BadBuildQuat q{a.x * wa + b.x * wb, a.y * wa + b.y * wb, a.z * wa + b.z * wb,
-                   a.w * wa + b.w * wb};
-    const double len = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-    if (len > 0.0) q = BadBuildQuat{q.x / len, q.y / len, q.z / len, q.w / len};
-    return q;
-}
-
-// The rotation a bone's channel holds at frame f, in the clip frame, as the
-// file will store it: the key whose window holds f, walking the bone's own
-// duration table, turned toward the next key by the fraction
-// [orig: BoneAnim_FindKeyframeAtTime @0x410220]. Past the summed durations the
-// last key holds, as runtime/anim's pose table does (the original returns key
-// 0 there, @0x410290).
-BadBuildQuat key_at(const BadBuildBone &bone, size_t f) {
-    const size_t count = bone.keys.size();
-    if (count == 0) return BadBuildQuat{};
-    const auto stored = [&](size_t k) { return quat_from_stored(stored_key(bone.keys[k])); };
-    size_t acc = 0;
-    for (size_t k = 0; k < count; ++k) {
-        const size_t dur = bone.durations.empty() ? 1 : bone.durations[k];
-        if (acc + dur > f) {
-            if (k + 1 >= count || f == acc) return stored(k);
-            return quat_blend(stored(k), stored(k + 1),
-                              static_cast<double>(f - acc) / static_cast<double>(dur));
-        }
-        acc += dur;
-    }
-    return stored(count - 1);
-}
-
-} // namespace
-
 void bad_derive_bind_rows(const BadBuildClip &clip, const BadBuildClip *reset, size_t bone,
                           float rows[9]) {
     const BadBuildBone *source = bone < clip.bones.size() ? &clip.bones[bone] : nullptr;
@@ -277,72 +206,6 @@ void bad_derive_bone_table(const BadBuildClip &clip, const BadBuildClip *reset,
         row.position[0] = static_cast<float>(p.x);
         row.position[1] = static_cast<float>(p.y);
         row.position[2] = static_cast<float>(p.z);
-    }
-}
-
-void bad_clip_extents(const BadBuildClip &clip, const BadBuildClip *reset,
-                      std::vector<double> &bottom, std::vector<double> &top) {
-    const size_t bones = clip.bones.size();
-    const size_t keys = static_cast<size_t>(clip.frame_count) + 1;
-    bottom.assign(keys, 0.0);
-    top.assign(keys, 0.0);
-    if (bones == 0) return;
-    const bool translated = (clip.flags & BAD_FLAG_TRANSLATION) != 0;
-
-    // The pose the capsule measures is the one the runtime draws: each bone's
-    // key composed against the rig's bind, `key * bind^-1`. The bind is the
-    // set's reset clip, which the runtime pins once per entity and every clip
-    // of the rig composes against; a clip with no reset to name (a lone clip)
-    // composes against its own first key, the runtime's fallback when no bind
-    // is pinned [orig: AnimChannel_ComputeBoneMatrices @0x410da0, the bind from
-    // channel+44 @0x410dd8 else the playing clip @0x410de3; AnimMap_RegisterEntity
-    // @0x40bb60 pins slot 0's clip @0x40bbe3]. A bone past the reset clip's
-    // own bones takes its own first key, our rule.
-    std::vector<BadBuildQuat> bind_inverse(bones);
-    for (size_t i = 0; i < bones; ++i) {
-        const BadBuildBone *source = &clip.bones[i];
-        if (reset != nullptr && i < reset->bones.size() && !reset->bones[i].keys.empty())
-            source = &reset->bones[i];
-        if (!source->keys.empty())
-            bind_inverse[i] = conjugate(quat_from_stored(stored_key(source->keys.front())));
-    }
-
-    // The extents RULE below is ours: retail's exporter measured them, and no
-    // tool is witnessed (docs/anim/adm-bad-format-re.md). It is the lowest and
-    // highest bone origin about bone 0 over that pose.
-    std::vector<BadBuildVec3> posed(bones);
-    std::vector<BadBuildQuat> turn(bones);
-    for (size_t f = 0; f < keys; ++f) {
-        double low = 0.0;
-        double high = 0.0;
-        for (size_t i = 0; i < bones; ++i) {
-            const BadBuildBone &bone = clip.bones[i];
-            turn[i] = quat_product(key_at(bone, f), bind_inverse[i]);
-            const int parent = bone.parent;
-            if (parent < 0 || static_cast<size_t>(parent) >= i) {
-                posed[i] = BadBuildVec3{};
-            } else {
-                const size_t up = static_cast<size_t>(parent);
-                const BadBuildBone &above = clip.bones[up];
-                const BadBuildVec3 rel = bad_clip_from_mission(BadBuildVec3{
-                        bone.pivot.x - above.pivot.x, bone.pivot.y - above.pivot.y,
-                        bone.pivot.z - above.pivot.z});
-                const BadBuildVec3 turned = apply(rows_of(turn[up]), rel);
-                posed[i] = BadBuildVec3{posed[up].x + turned.x, posed[up].y + turned.y,
-                                        posed[up].z + turned.z};
-            }
-            if (translated && f < bone.translations.size()) {
-                const BadBuildVec3 t = bad_clip_from_mission(bone.translations[f]);
-                posed[i].x += t.x;
-                posed[i].y += t.y;
-                posed[i].z += t.z;
-            }
-            // The clip frame's y is up; the extents measure from bone 0.
-            if (posed[i].y < low) low = posed[i].y;
-            if (posed[i].y > high) high = posed[i].y;
-        }
-        bottom[f] = low < 0.0 ? -low : 0.0;
-        top[f] = high - low;
     }
 }
 
@@ -433,34 +296,19 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
         ch.rotations = out.rotations[i].data();
     }
 
-    if (!clip.events.empty()) {
-        std::vector<double> bottom;
-        std::vector<double> top;
-        bool derive = false;
-        for (const BadBuildEvent &ev : clip.events) {
-            if (!ev.extents_given && !clip.capsule_given) derive = true;
-        }
-        if (derive) bad_clip_extents(clip, reset, bottom, top);
-        out.events.resize(clip.events.size());
-        for (size_t f = 0; f < clip.events.size(); ++f) {
-            const BadBuildEvent &ev = clip.events[f];
-            const BadBuildVec3 v = bad_clip_from_mission(ev.velocity);
-            BadEvent &row = out.events[f];
-            row.velocity[0] = static_cast<float>(v.x);
-            row.velocity[1] = static_cast<float>(v.y);
-            row.velocity[2] = static_cast<float>(v.z);
-            if (ev.extents_given) {
-                row.bottom = static_cast<float>(ev.bottom);
-                row.top = static_cast<float>(ev.top);
-            } else if (clip.capsule_given) {
-                row.bottom = static_cast<float>(clip.capsule_bottom);
-                row.top = static_cast<float>(clip.capsule_top);
-            } else {
-                row.bottom = static_cast<float>(bottom[f]);
-                row.top = static_cast<float>(top[f]);
-            }
-            row.trigger = ev.trigger;
-        }
+    // Every event as the author states it: its heights are measured from the
+    // ground, which the clip does not hold.
+    out.events.resize(clip.events.size());
+    for (size_t f = 0; f < clip.events.size(); ++f) {
+        const BadBuildEvent &ev = clip.events[f];
+        const BadBuildVec3 v = bad_clip_from_mission(ev.velocity);
+        BadEvent &row = out.events[f];
+        row.velocity[0] = static_cast<float>(v.x);
+        row.velocity[1] = static_cast<float>(v.y);
+        row.velocity[2] = static_cast<float>(v.z);
+        row.bottom = static_cast<float>(ev.bottom);
+        row.top = static_cast<float>(ev.top);
+        row.trigger = ev.trigger;
     }
 
     if (translated) {

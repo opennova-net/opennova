@@ -3,10 +3,11 @@
 // same animation (the dead bone fields and float noise aside). The sets cover
 // what the clip text carries: US01.ADM (the person rig's table, translated body
 // clips with footstep and foley triggers), mp5_1st.adm (the first-person rig's
-// nine keys), 357_1st.adm (a 40-bone viewmodel rig with constant capsule
-// extents), plus the lone clips DT1RST (a channel that keys fewer times than
-// its frame count) and DVFLEE1E (the one retail clip that keys its bones
-// sparsely, with a duration table per bone).
+// nine keys), 357_1st.adm (a 40-bone viewmodel rig whose every event stands
+// still at bottom = top = 1.07), plus the lone clips DT1RST (a channel that
+// keys fewer times than its frame count) and DVFLEE1E (the one retail clip that
+// keys its bones sparsely, with a duration table per bone). Every event's
+// bottom and top ride the text as stored.
 // Gated on OPENNOVA_JO_ASSETS (docs/asset-gated-tests.md).
 //
 //   o3a_retail_roundtrip_test <opennova-3di> <scratch dir>

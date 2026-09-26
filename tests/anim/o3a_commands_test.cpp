@@ -23,7 +23,8 @@ void check(bool ok, const char *what) {
 }
 
 // A three-bone rig: the root, a spine one metre up and a hand out to its left,
-// four keys over three frames, translations and one event per key.
+// four keys over three frames, translations and one event per key, each with
+// the hips' and the head's height above the ground.
 const std::string head = "o3a 1\nadm CHECK.adm\nrow anim_reset \"walk\"\n"
 						 "row anim_walk_forward \"walk.bad\" \"walk\"\n"
 						 "clip walk\nfps 30\nflags 0x3\nframes 3\n";
@@ -38,8 +39,8 @@ const std::string hand = "bone 1 0 0.25 1 0.1 \"BN03 L Hand\"\n"
 						 " k 0.258819045 0 0 0.965925826\n k 0.258819045 0 0 0.965925826\n"
 						 " k 0.258819045 0 0 0.965925826\n k 0.258819045 0 0 0.965925826\n"
 						 " tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n";
-const std::string events = "event 0 0 0 0x0\nevent 0.06 0 0 0x1\nevent 0.06 0 0 0x0\n"
-						   "event 0.06 0 0 0x2\n";
+const std::string events = "event 0 0 0 0x0 0.9 1.7\nevent 0.06 0 0 0x1 0.92 1.71\n"
+						   "event 0.06 0 0 0x0 0.95 1.73\nevent 0.06 0 0 0x2 0.93 1.72\n";
 
 std::string replace(std::string s, const std::string &from, const std::string &to) {
 	const size_t at = s.find(from);
@@ -136,8 +137,9 @@ int main(int argc, char **argv) {
 	compare("ring-order", replace(text, "row anim_walk_forward \"walk.bad\" \"walk\"",
 								  "row anim_walk_forward \"walk\" \"walk.bad\""),
 			true); // both variants name one clip, so the ring is the same
-	// A capsule the author states, against the one the rig derives.
-	compare("capsule", replace(text, "frames 3\n", "frames 3\ncapsule 0 0.6\n"), false);
+	// The hips' and the head's height above the ground.
+	compare("bottom", replace(text, "0x1 0.92 1.71", "0x1 0.8 1.71"), false);
+	compare("top", replace(text, "0x1 0.92 1.71", "0x1 0.92 1.5"), false);
 	// A row key names its slot past its first five characters, whatever they
 	// are: the table keeps the keys as written and they are the same slots.
 	compare("slot-prefix", replace(replace(text, "row anim_reset", "row ANIM_RESET"), "row anim_walk_forward",
@@ -158,7 +160,7 @@ int main(int argc, char **argv) {
 	build("root-with-parent", replace(text, "bone -1 0 0 0 0.5", "bone 0 0 0 0 0.5"), false);
 	build("bad-unit-key", replace(text, " k 0 0 0 1\n k 0 0 0.0871557427", " k 0 0 0 0\n k 0 0 0.0871557427"),
 			false);
-	build("short-event-list", replace(text, "event 0.06 0 0 0x2\n", ""), false);
+	build("short-event-list", replace(text, "event 0.06 0 0 0x2 0.93 1.72\n", ""), false);
 	build("no-frames", replace(text, "frames 3", "frames 0"), false);
 	build("long-bone-name", replace(text, "BN02 Spine", "BN02 SpineWithAVeryLongNameIndeedYes"),
 			false);
@@ -186,7 +188,13 @@ int main(int argc, char **argv) {
 	build("wrapping-parent", replace(text, "bone 0 0 0 1 0.4", "bone 4294967296 0 0 1 0.4"), false);
 	build("wrapping-trigger", replace(text, "event 0.06 0 0 0x1", "event 0.06 0 0 0x100000001"),
 			false);
-	build("lone-capsule-value", replace(text, "event 0.06 0 0 0x1", "event 0.06 0 0 0x1 0.5"), false);
+	// Every event states the hips' and the head's height above the ground: the
+	// clip does not hold the ground, so nothing derives them, and no record
+	// states one pair for a whole clip.
+	build("event-without-heights", replace(text, "0x1 0.92 1.71", "0x1"), false);
+	build("event-without-top", replace(text, "0x1 0.92 1.71", "0x1 0.92"), false);
+	build("event-trailing-token", replace(text, "0x1 0.92 1.71", "0x1 0.92 1.71 2"), false);
+	build("capsule-record", replace(text, "frames 3\n", "frames 3\ncapsule 0 0.6\n"), false);
 	build("unterminated-quote", replace(text, "\"BN02 Spine\"", "\"BN02 Spine"), false);
 	// What the writer would drop: translations the flags do not carry, and a
 	// trigger on a version 0 event; a version the loader does not know.
@@ -284,30 +292,6 @@ int main(int argc, char **argv) {
 				"sparse compares the same");
 		check(threedi_cli::cmd_anim_compare(original.c_str(), table.c_str()) == 1,
 				"sparse differs from the dense clip");
-	}
-
-	// A table's clips measure their capsule against its reset clip, the bind
-	// the runtime composes them against: a clip that holds its root pitched a
-	// quarter turn lays the tip (a metre up in the reset) flat, so it derives
-	// no height, where measured against its own first key it would stand a
-	// metre tall.
-	{
-		const std::string rig = "bone -1 0 0 0 0.5 Root\n K0\n K0\nbone 0 0 0 1 0.5 Tip\n k 0 0 0 1\n"
-								" k 0 0 0 1\n";
-		const std::string pitched = "0 0.707106781 0 0.707106781";
-		const std::string set = "o3a 1\nrow anim_reset rest\nrow anim_walk_forward pitch\n"
-								"clip rest\nframes 1\n" +
-				replace(replace(rig, "K0", "k 0 0 0 1"), "K0", "k 0 0 0 1") +
-				"event 0 0 0 0\nevent 0 0 0 0\nclip pitch\nframes 1\n" +
-				replace(replace(rig, "K0", "k " + pitched), "K0", "k " + pitched) +
-				"event 0 0 0 0\nevent 0 0 0 0\n";
-		const std::string table = build("reset-bind", set);
-		opennova::bad::BadFile clip{};
-		const std::string path = (std::filesystem::path(table).parent_path() / "pitch.bad").string();
-		check(opennova::bad::bad_parse(path.c_str(), &clip) == 0 && clip.num_events == 2 &&
-						clip.events[0].top < 1e-4f,
-				"the capsule is measured against the reset clip");
-		opennova::bad::bad_free(&clip);
 	}
 
 	// What compare must not call the same: a value that is not a number, a

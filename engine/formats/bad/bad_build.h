@@ -27,12 +27,13 @@
 //     zero) [orig: BoneAnim_BuildWorldMatrices @0x40c400].
 //   * `num_children`, `child_offset` and `parent_offset` from `parent`, and the
 //     translation block's pad row past row frame_count (bad_write.cpp).
-//   * A capsule `bottom`/`top` pair per event when the author gives neither an
-//     explicit pair nor a constant one, by OUR rule (bad_clip_extents): what
-//     retail measured them with is unwitnessed.
 // What the author supplies and the seam only counts: frame_count + 1 keys per
 // bone (or a duration table), events and translation rows, the fence-post
-// count every retail clip carries (`event_count == frame_count + 1`).
+// count every retail clip carries (`event_count == frame_count + 1`). An
+// event's `bottom` and `top` are among them: the hips' and the head's height
+// above the ground, which a clip posed about its hips does not hold, so the
+// seam carries them as given and derives neither
+// (docs/anim/adm-bad-format-re.md, the event record).
 // What the builder keeps verbatim: the key quaternions. Retail stores
 // opposite-hemisphere neighbours (4573 of 657788 key pairs, 218 of 477 files)
 // and the slerp short-arcs anyway [orig: Math_QuaternionSlerp @0x615e20], so
@@ -118,10 +119,16 @@ struct BadBuildBone {
     BadBuildVec3 position_stored; // clip frame, as the file holds it
 };
 
+// One frame's event, as the runtime reads it [orig: AnimMap_UpdateEntity
+// @0x40b5f0, the out-transform @0x40b82f..0x40b8a3].
 struct BadBuildEvent {
-    BadBuildVec3 velocity; // mission axes, metres per frame
-    int32_t trigger = 0;   // the event bit word (footsteps, fire, foley)
-    bool extents_given = false;
+    // The hips' ground step from this frame to the next, mission axes, metres
+    // per frame: the engine moves the entity by it (forward and lateral).
+    BadBuildVec3 velocity;
+    int32_t trigger = 0; // the event bit word (footsteps, fire, foley)
+    // The hips' height above the ground (the engine settles the body on it and
+    // takes the vertical root motion from its change) and the head's (the
+    // capsule top), in metres.
     double bottom = 0.0, top = 0.0;
 };
 
@@ -131,10 +138,6 @@ struct BadBuildClip {
     uint32_t fps = 30; // 30 in every retail clip
     uint32_t flags = 0;
     uint32_t frame_count = 0; // intervals: every key list holds one more
-    // A constant capsule pair for every event, the shape retail's viewmodel
-    // clips carry (0.0/0.6 or 1.07/1.07 across the JO `_1st` sets).
-    bool capsule_given = false;
-    double capsule_bottom = 0.0, capsule_top = 0.0;
     std::vector<BadBuildBone> bones;
     std::vector<BadBuildEvent> events; // empty, or frame_count + 1
 };
@@ -204,16 +207,6 @@ void bad_derive_bind_rows(const BadBuildClip &clip, const BadBuildClip *reset, s
 // find the bones whose stored position the pivots cannot re-derive.
 void bad_derive_bone_table(const BadBuildClip &clip, const BadBuildClip *reset,
                            std::vector<BadBone> &rows);
-
-// The per-frame capsule extents an event carries when the author gives none:
-// the drop below bone 0 and the total height of the bone origins, over the
-// pose the runtime draws, each bone's key composed against `reset`'s bind as
-// `key * bind^-1` (a lone clip's own first key for a null `reset`, and a bone
-// past `reset`'s bones its own). The rule is OURS, not retail's: what retail's
-// exporter measured is unwitnessed (docs/anim/adm-bad-format-re.md). Both
-// vectors come back with frame_count + 1 entries.
-void bad_clip_extents(const BadBuildClip &clip, const BadBuildClip *reset,
-                      std::vector<double> &bottom, std::vector<double> &top);
 
 // Assemble `clip` into the document the writer serializes; `reset` is the
 // set's reset clip (bad_build_reset_clip), null for a lone clip. False with

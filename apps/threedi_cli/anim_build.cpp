@@ -120,15 +120,6 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 			if (key == "frames") clip->frame_count = static_cast<uint32_t>(value);
 			if (key == "version") clip->version = static_cast<uint32_t>(value);
 			if (key == "flags") clip->flags = static_cast<uint32_t>(value);
-		} else if (key == "capsule") {
-			double pair[2];
-			if (!in.numbers(pair, 2) || in.more()) {
-				ps.error("capsule needs a bottom and a top");
-				continue;
-			}
-			clip->capsule_given = true;
-			clip->capsule_bottom = pair[0];
-			clip->capsule_top = pair[1];
 		} else if (key == "bone") {
 			long long parent = 0;
 			double pivot[3];
@@ -190,25 +181,21 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 				bone->position_stored = BadBuildVec3{p[0], p[1], p[2]};
 			}
 		} else if (key == "event") {
+			// The heights are the hips' and the head's above the ground, which
+			// the clip does not hold: every event states both.
 			double v[3];
 			long long trigger = 0;
-			if (!in.numbers(v, 3) || !in.integer(trigger, 0, kWordMax)) {
-				ps.error("event needs a velocity and a trigger word");
+			double heights[2];
+			if (!in.numbers(v, 3) || !in.integer(trigger, 0, kWordMax) || !in.numbers(heights, 2) ||
+					in.more()) {
+				ps.error("event needs a velocity, a trigger word, a bottom and a top");
 				continue;
 			}
 			BadBuildEvent ev;
 			ev.velocity = BadBuildVec3{v[0], v[1], v[2]};
 			ev.trigger = static_cast<int32_t>(static_cast<uint32_t>(trigger));
-			if (in.more()) {
-				double pair[2];
-				if (!in.numbers(pair, 2) || in.more()) {
-					ps.error("an event's capsule needs a bottom and a top");
-					continue;
-				}
-				ev.extents_given = true;
-				ev.bottom = pair[0];
-				ev.top = pair[1];
-			}
+			ev.bottom = heights[0];
+			ev.top = heights[1];
 			clip->events.push_back(ev);
 		} else {
 			ps.error("unknown record `" + key + "`");

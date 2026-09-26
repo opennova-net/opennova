@@ -212,7 +212,7 @@ target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 # bad_build: the construction seam -- the frame maps, the derived bind and
-# position, the capsule extents against the reset bind, the refusals, and the
+# position, the events' bottom and top written as stated, the refusals, and the
 # canonical table, with SKIP-LEG retail legs over both derivations (BINOC.bad's
 # bind; DT1PRONE.BAD's positions through DT1RST.BAD's bind).
 add_executable(bad_build_test bad/bad_build_test.cpp)

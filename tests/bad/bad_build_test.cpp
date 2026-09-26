@@ -1,9 +1,10 @@
 // The .bad construction seam (formats/bad/bad_build.h): the mission <-> clip
-// frame maps, the derived bone table, the capsule extents, the validation, and
-// the canonical .adm table. The retail legs (OPENNOVA_JO_ASSETS, SKIP-LEG) pin
-// the two derivations: every bone's rotation is the transpose of its first key
-// (the shipped 19-bone BINOC.bad), and a clip's positions are the rig's pivots
-// through its set's reset bind (US01's DT1RUNF against DT1RST).
+// frame maps, the derived bone table, the events as the author states them,
+// the validation, and the canonical .adm table. The retail legs
+// (OPENNOVA_JO_ASSETS, SKIP-LEG) pin the two derivations: every bone's rotation
+// is the transpose of its first key (the shipped 19-bone BINOC.bad), and a
+// clip's positions are the rig's pivots through its set's reset bind (US01's
+// DT1RUNF against DT1RST).
 #include <formats/adm/adm.h>
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_build.h>
@@ -138,61 +139,46 @@ int main() {
         std::printf("two-bone clip: %zu bytes, derived bind and position\n", bytes.size());
     }
 
-    // The capsule extents: bone 0 is the reference, so the tip one metre up
-    // gives no drop and a metre of height; its translation lifts it further.
+    // An event's bottom and top are the hips' and the head's height above the
+    // ground, which a clip posed about its hips does not hold: the seam writes
+    // every event's pair as the author states it, derives none, and never
+    // measures one from the pose (docs/anim/adm-bad-format-re.md).
     {
-        const BadBuildClip clip = two_bone_clip(BAD_FLAG_TRANSLATION);
-        std::vector<double> bottom;
-        std::vector<double> top;
-        bad_clip_extents(clip, nullptr, bottom, top);
-        TEST_EXPECT(bottom.size() == 4 && top.size() == 4);
-        TEST_EXPECT(near(bottom[0], 0.0) && near(top[0], 1.0, 1e-5));
-        TEST_EXPECT(near(top[3], 1.75, 1e-5));
-
-        // With no author-given pair, the events take the derived one.
+        BadBuildClip clip = two_bone_clip(BAD_FLAG_TRANSLATION);
+        for (size_t f = 0; f < clip.events.size(); ++f) {
+            clip.events[f].bottom = 0.9 + 0.01 * static_cast<double>(f);
+            clip.events[f].top = 1.6 + 0.02 * static_cast<double>(f);
+        }
+        // One event stands at the ground: zeros are values, not a request.
+        clip.events[2].bottom = 0.0;
+        clip.events[2].top = 0.0;
         BadAssembled built;
         std::string error;
         TEST_EXPECT(bad_build_assemble(clip, nullptr, built, &error));
-        TEST_EXPECT(near(built.events[3].top, 1.75, 1e-5));
+        TEST_EXPECT(built.events.size() == 4);
+        for (size_t f = 0; f < built.events.size(); ++f) {
+            TEST_EXPECT(built.events[f].bottom == static_cast<float>(clip.events[f].bottom));
+            TEST_EXPECT(built.events[f].top == static_cast<float>(clip.events[f].top));
+        }
 
-        // A constant pair wins over the derivation, the shape retail's
-        // viewmodel clips carry.
-        BadBuildClip constant = clip;
-        constant.capsule_given = true;
-        constant.capsule_bottom = 0.0;
-        constant.capsule_top = 0.6;
-        TEST_EXPECT(bad_build_assemble(constant, nullptr, built, &error));
-        for (size_t f = 0; f < 4; ++f) TEST_EXPECT(near(built.events[f].top, 0.6, 1e-6));
-
-        // An explicit pair wins over both.
-        BadBuildClip explicit_pair = constant;
-        explicit_pair.events[2].extents_given = true;
-        explicit_pair.events[2].bottom = 0.25;
-        explicit_pair.events[2].top = 1.5;
-        TEST_EXPECT(bad_build_assemble(explicit_pair, nullptr, built, &error));
-        TEST_EXPECT(near(built.events[2].bottom, 0.25, 1e-6) && near(built.events[2].top, 1.5, 1e-6));
-        std::printf("capsule extents: derived %g/%g, constant and explicit override\n", bottom[3], top[3]);
+        // The set's reset clip binds the pose, never the heights: the same
+        // events through a reset that pitches the rig write the same pair.
+        BadBuildClip pitched = two_bone_clip(0);
+        for (BadBuildQuat &key : pitched.bones[0].keys) key = axis_quat(0.0, 1.0, 0.0, 90.0);
+        BadBuildClip plain = two_bone_clip(0);
+        plain.events = clip.events;
+        TEST_EXPECT(bad_build_assemble(plain, &pitched, built, &error));
+        TEST_EXPECT(built.events[3].bottom == static_cast<float>(clip.events[3].bottom) &&
+                    built.events[3].top == static_cast<float>(clip.events[3].top));
+        std::printf("events: every bottom and top written as stated (tops %g..%g)\n",
+                    built.events[0].top, built.events[3].top);
     }
 
-    // The pose the extents measure is the runtime's: every key composed
-    // against the SET's reset clip, not against the clip's own first key. A
-    // clip that holds its root pitched a quarter turn from its first frame
-    // lays the tip (a metre up in the reset) flat, so it stands no height; a
-    // clip measured against itself would stand its first frame in the rest
-    // pose and read a metre.
+    // The set names its reset clip by the slot-0 row's LAST variant.
     {
         const BadBuildClip reset = two_bone_clip(0);
         BadBuildClip pitched = two_bone_clip(0);
         pitched.name = "pitched";
-        for (BadBuildQuat &key : pitched.bones[0].keys) key = axis_quat(0.0, 1.0, 0.0, 90.0);
-        std::vector<double> bottom;
-        std::vector<double> top;
-        bad_clip_extents(pitched, &reset, bottom, top);
-        TEST_EXPECT(near(top[0], 0.0, 1e-5) && near(top[3], 0.0, 1e-5));
-        bad_clip_extents(pitched, nullptr, bottom, top);
-        TEST_EXPECT(near(top[0], 1.0, 1e-5));
-
-        // The set names its reset clip by the slot-0 row's LAST variant.
         BadBuildSet set;
         set.rows.push_back(BadBuildRow{"anim_walk_forward", {"pitched"}});
         set.rows.push_back(BadBuildRow{"ANIM_RESET", {"pitched", "authored.bad"}});
@@ -201,28 +187,7 @@ int main() {
         TEST_EXPECT(found != nullptr && found->name == "authored");
         set.rows.pop_back();
         TEST_EXPECT(bad_build_reset_clip(set) == nullptr);
-
-        // Events take the reset-measured pair.
-        BadAssembled built;
-        std::string error;
-        TEST_EXPECT(bad_build_assemble(pitched, &reset, built, &error));
-        TEST_EXPECT(near(built.events[0].top, 0.0, 1e-5));
-
-        // A bone keyed sparsely holds each key for its duration and turns
-        // toward the next across it: halfway through a two-frame key the root
-        // is pitched an eighth of a turn, which stands the tip at cos 45.
-        BadBuildClip sparse = two_bone_clip(0);
-        sparse.frame_count = 2;
-        sparse.events.resize(3);
-        sparse.bones[0].keys = {BadBuildQuat{}, axis_quat(0.0, 1.0, 0.0, 90.0)};
-        sparse.bones[0].durations = {2, 1};
-        sparse.bones[1].keys.resize(3);
-        bad_clip_extents(sparse, &reset, bottom, top);
-        TEST_EXPECT(bottom.size() == 3);
-        TEST_EXPECT(near(top[0], 1.0, 1e-5));
-        TEST_EXPECT(near(top[1], std::sqrt(0.5), 1e-5));
-        TEST_EXPECT(near(top[2], 0.0, 1e-5));
-        std::printf("capsule extents: measured against the reset bind, %g over a sparse key\n", top[1]);
+        std::printf("reset clip: the slot-0 row's last variant\n");
     }
 
     // What the format cannot hold.

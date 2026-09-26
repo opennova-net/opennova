@@ -64,12 +64,11 @@ it was authored on and to any rig that matches it.
 | `flags` | word | 1 loop, 2 translations, 8 unwitnessed (73 retail clips carry it) |
 | `frames` | n | the clip's length in intervals |
 | `version` | n | the record version; 1 (a 24-byte event) unless stated, and 3 retail clips ship 0 (20 bytes, no trigger) |
-| `capsule` | bottom top | one capsule pair for every event, the shape retail's viewmodel clips carry (0.0/0.6 or 1.07/1.07 across the JO `_1st` sets) |
 | `bone` | parent x y z length name | opens a bone: its parent (a lower index, -1 for the root), its pivot (the paired model part's, absolute), its length and its name. The name is the clip's own: a model's part table carries none |
 | `k` | qx qy qz qw [duration] | a key of the open bone, `frames + 1` of them. A `duration` (in frames, 1 to 65535) states how long the key holds; a bone that gives one gives it on every key, and may then key any number of times, which is how `DT1RST`, `stgr_RST`, `M60_1i` and the sparsely keyed `DVFLEE1E` are shaped |
 | `tr` | x y z | a frame's displacement of the open bone, `frames + 1` of them (rows 0 to `frames`), under `flags & 2` |
 | `bonepos` | x y z | the open bone's stored `position[3]`, verbatim and in the clip's own frame. `build` derives that field from the pivots, and the field is dead at runtime; `scene` writes this only where the derivation cannot reproduce the bytes (retail's exporter left junk in 6720 of 13517 bones) |
-| `event` | vx vy vz trigger [bottom top] | a frame's event, `frames + 1` of them: the root's step for that frame (the body animates in place and the engine moves the entity by these), the event bit word (`opennova-3di catalog` prints the bits), and the capsule pair when the clip carries its own |
+| `event` | vx vy vz trigger bottom top | a frame's event, `frames + 1` of them: the hips' ground step from this frame to the next (the body animates in place about its hips, and the engine moves the entity by these), the event bit word (`opennova-3di catalog` prints the bits), the hips' height above the ground (`bottom`: the engine settles the body on it, and its change is the vertical root motion) and the head's (`top`: the capsule top), in metres. Both heights are required: a clip poses the body about its hips, so the ground is not in it and `build` derives neither [orig: `AnimMap_UpdateEntity @ 0x40b5f0`, the out-transform `@0x40B82F..0x40B8A3`]. Retail's last two events are its exporter's: event `frames` repeats event `frames - 1`, a loop's both copy event 0 and a one-shot's both stand still (`docs/anim/adm-bad-format-re.md`) |
 
 ## What `build` derives
 
@@ -85,15 +84,7 @@ the values the text carries, so `build(scene(x))` stays exact:
 - `num_children`, the child and parent addresses, and the bone's own index byte;
 - the translation block's pad row after row `frames` (a repeat of it: retail's
   pad holds exporter memory that no read weights);
-- the header words no field names (0, 0, 8, 1, 1, 0, 0 in every retail clip);
-- an event's capsule pair, when neither the event nor a `capsule` record gives
-  one, by OUR rule: the lowest and highest bone origin about bone 0 over the
-  pose the runtime draws, each key composed against the set's reset clip (a
-  lone clip: its own first key). Retail measured these by a rule nothing has
-  witnessed, and this one does not reproduce the shipped numbers (a clip's
-  worst frame is a median 0.6 m off over the retail tables;
-  `docs/anim/adm-bad-format-re.md`), so a clip that must keep retail's values
-  states them.
+- the header words no field names (0, 0, 8, 1, 1, 0, 0 in every retail clip).
 
 The keys themselves are kept verbatim: retail stores neighbouring keys in
 opposite hemispheres (4,573 of 657,788 pairs) and unit only to 2.5e-7, and the
@@ -105,7 +96,7 @@ channel.
 The build fails, naming the line (a clip the seam refuses is named by the line
 it opens on), on an unknown record, a malformed or trailing field, a quote
 that never closes or runs into the next field, a `"` inside a bare field, an
-empty row variant, an event capsule with one value, a
+empty row variant, an event without its `bottom` and `top`, a
 set with no clip, a table with no reset row (a key naming slot 0: retail
 cannot load one [orig: `AnimMap_LoadAdmFile @ 0x40cc40`, the unchecked read of
 slot 0's head `@0x40CE11..0x40CE16`]), a row key of five characters or fewer
