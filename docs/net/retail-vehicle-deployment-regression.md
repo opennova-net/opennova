@@ -51,7 +51,7 @@ this result from the separate analog correction below.
 
 Both retail captures closed normally with zero dropped, truncated, or
 write-error packets. Private observations remain in the ignored task workspace:
-`.scratch/baseline3-compare.json`, `.scratch/patched4-compare.json`, and the
+`baseline3-compare.json`, `patched4-compare.json`, and the
 corresponding `retail-capture-baseline3` / `retail-capture-patched4` directories.
 Temporary runtime instrumentation was removed. No public NovaWorld endpoint
 was exercised in this matched comparison.

@@ -1914,8 +1914,9 @@ gates all overlays `@0x5a81ce`; set only by the command-line switch
 authors `HUDDECLUT_SPINMAP 1 1 0 0`, so the spinmap hides at
 `hud_detail >= 2` — the HUD declutter section carries the full system;
 the earlier "compiled-in `-1` master switch / codes 14/19/28 are no-op"
-story is refuted there). The committed comparison evidence for this section
-is `screenshots/pr-492/` (the synchronized 00TRa spinmap pair).
+story is refuted there). The comparison evidence for this section is
+[`screenshots/pr-492/`](https://github.com/opennova-net/opennova/tree/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/pr-492)
+(the synchronized 00TRa spinmap pair), removed from the tree on 2026-09-26.
 
 - **The mask is a content selector, not a gate.** Witnessed bits: 0 backing
   disc, 1 marker banks, 2 objective tether lines (`source & 0xC0` markers,

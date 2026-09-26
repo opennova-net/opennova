@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$CurrentImage,
+    [Parameter(Mandatory = $true)]
     [string]$RetailImage,
     [string]$OutputImage
 )
@@ -17,21 +18,15 @@ function ConvertTo-RepoAbsolutePath([string]$Path) {
     return [System.IO.Path]::GetFullPath((Join-Path $repoRoot $Path))
 }
 
-if ([string]::IsNullOrWhiteSpace($RetailImage)) {
-    $RetailImage = Join-Path $repoRoot `
-        "screenshots\parity\model-lighting\courtyard-retail-revx02.png"
-}
-else {
-    $RetailImage = ConvertTo-RepoAbsolutePath $RetailImage
-}
+$RetailImage = ConvertTo-RepoAbsolutePath $RetailImage
+$CurrentImage = ConvertTo-RepoAbsolutePath $CurrentImage
 if ([string]::IsNullOrWhiteSpace($OutputImage)) {
-    $OutputImage = Join-Path $repoRoot `
-        "screenshots\parity\model-lighting\courtyard-retail-vs-opennova.png"
+    $OutputImage = Join-Path (Split-Path -Parent $CurrentImage) `
+        "courtyard-retail-vs-opennova.png"
 }
 else {
     $OutputImage = ConvertTo-RepoAbsolutePath $OutputImage
 }
-$CurrentImage = ConvertTo-RepoAbsolutePath $CurrentImage
 
 function Resolve-InputFile([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {

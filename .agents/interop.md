@@ -68,7 +68,7 @@ and version-gated; it is separate from the public launcher.
 
 ## Capture Policy
 
-- Prefer `.pcapng` in `.scratch/`.
+- Prefer `.pcapng`, kept machine-local (never committed).
 - Capture from process start through the behavior under study. Mid-stream
   captures usually miss the handshake and cannot recover SCRK/session keys.
 - Keep raw retail captures, `.sph` logs, account names, local paths, and machine
@@ -173,7 +173,7 @@ stop: it is not a bug in OpenNova.
   share one `Def` pointer **inside the host's process** — the joiner's process is
   not involved at all; a script emitting valid C2S `0x06` reproduces it.
   **Confirmed retail-native 2026-07-26** with two stock clients
-  (`.scratch/golden/retail-retail-same-weapon-viewmodel-ab.pcapng`).
+  (`retail-retail-same-weapon-viewmodel-ab.pcapng`).
   Two of our own wire bugs were found and fixed while chasing this and NEITHER
   was the cause — do not re-open them as suspects: the `hit_part` packing
   (D-WPN-8) and C2S `0x06` off32 (D-WPN-8). Both are real divergences, both are

@@ -115,12 +115,12 @@ From the checkout being measured, with `OPENNOVA_JO_DIR` and `GODOT_BIN`
 configured, launch through the existing game MCP:
 
 ```powershell
-python scripts/mcp/game_mcp.py launch --project godot --windowed --resolution 1600x900 --exp revx02 --mission 03TR.bms --port 8976 --pid-file .scratch/perf-03tr/game.pid
-python scripts/mcp/game_mcp.py probe --port 8976 run perf_mission_rows --args-file .scratch/perf-03tr/probe.json --wait
-python scripts/mcp/game_mcp.py stop --port 8976 --pid-file .scratch/perf-03tr/game.pid
+python scripts/mcp/game_mcp.py launch --project godot --windowed --resolution 1600x900 --exp revx02 --mission 03TR.bms --port 8976 --pid-file build/perf-03tr/game.pid
+python scripts/mcp/game_mcp.py probe --port 8976 run perf_mission_rows --args-file build/perf-03tr/probe.json --wait
+python scripts/mcp/game_mcp.py stop --port 8976 --pid-file build/perf-03tr/game.pid
 ```
 
-The probe argument file (create the scratch directory first):
+The probe argument file (create `build/perf-03tr/` first):
 
 ```json
 {
@@ -128,7 +128,7 @@ The probe argument file (create the scratch directory first):
   "window_seconds": 5,
   "windows": 2,
   "label": "comparison",
-  "output": "res://../.scratch/perf-03tr/capture.json"
+  "output": "res://../build/perf-03tr/capture.json"
 }
 ```
 

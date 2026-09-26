@@ -10,7 +10,7 @@
     <AssemblyName>OpenNovaLauncher</AssemblyName>
     <ApplicationIcon>Assets\onlauncher.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <FileVersion>0.2.0.0</FileVersion>
     <AssemblyVersion>0.2.0.0</AssemblyVersion>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

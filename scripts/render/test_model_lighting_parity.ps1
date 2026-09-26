@@ -5,6 +5,7 @@ param(
     [string]$RuntimeResourceDir = "",
     [string]$Expansion = "revx02",
     [string]$Mission = "00TRa.bms",
+    [Parameter(Mandatory = $true)]
     [string]$RetailImage,
     [string]$OutputDir,
     [string]$CurrentImage,
@@ -26,13 +27,7 @@ function ConvertTo-RepoAbsolutePath([string]$Path) {
     return [System.IO.Path]::GetFullPath((Join-Path $repoRoot $Path))
 }
 
-if ([string]::IsNullOrWhiteSpace($RetailImage)) {
-    $RetailImage = Join-Path $repoRoot `
-        "screenshots\parity\model-lighting\courtyard-retail-revx02.png"
-}
-else {
-    $RetailImage = ConvertTo-RepoAbsolutePath $RetailImage
-}
+$RetailImage = ConvertTo-RepoAbsolutePath $RetailImage
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $repoRoot ".scratch\model-lighting-parity"
 }
@@ -207,7 +202,7 @@ if (-not $SkipCapture) {
     }
 }
 
-Assert-FileExists $RetailImage "Committed retail revx02 capture"
+Assert-FileExists $RetailImage "Retail revx02 capture"
 Assert-FileExists $CurrentImage "OpenNova capture"
 Add-Type -AssemblyName System.Drawing
 

@@ -78,8 +78,8 @@ Each domain's next step is named in its own record, not centrally:
 
 Work that is **not** a parity divergence — OpenNova Launcher UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
-the ONE non-parity backlog. Completed-effort records are not plans: `plan/`
-(the NovaWorld-integration era), `engine/runtime/inmatch/ROADMAP.md`,
+the ONE non-parity backlog. Completed-effort records are not plans:
+`engine/runtime/inmatch/ROADMAP.md`,
 [oned/editor-layer-program.md](oned/editor-layer-program.md),
 [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md),
 [oned/workspace-maturity-program.md](oned/workspace-maturity-program.md), and

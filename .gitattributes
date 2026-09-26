@@ -3,7 +3,6 @@
 
 # Git LFS tracking for binary fixtures and assets
 fixtures/** filter=lfs diff=lfs merge=lfs -text -eol
-screenshots/** filter=lfs diff=lfs merge=lfs -text -eol
 
 # Binary game assets.
 apps/novaworld_server/static/** -text -eol
@@ -32,11 +31,3 @@ fixtures/**/*.ptl -text -eol filter= diff= merge=
 fixtures/**/*.ptu -text -eol filter= diff= merge=
 fixtures/**/*.trn -text -eol filter= diff= merge=
 fixtures/**/*.txt -text -eol filter= diff= merge=
-
-# The render-evidence manifests and READMEs under screenshots/ are plain text
-# the docs link into — same exception as fixtures/ above, or GitHub renders
-# three-line LFS pointer stubs where the evidence should be. NO eol
-# conversion: the evidence records hash each other byte-exactly, and two
-# CRLF-written manifests must keep their bytes (-text, not eol=lf).
-screenshots/**/*.md -text filter= diff= merge=
-screenshots/**/*.json -text filter= diff= merge=

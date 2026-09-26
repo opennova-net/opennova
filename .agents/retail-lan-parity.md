@@ -35,7 +35,7 @@ recorded with it.
   access violation before any client connected. Record the effective hook
   configuration with the run; optional transport patches are separate switches.
 - Keep retail files, captures, hook logs, screenshots, account data, machine
-  paths, adapter addresses, and DLLs beneath the ignored `.scratch/` tree.
+  paths, adapter addresses, and DLLs machine-local and gitignored.
 - Record the repository commit, onHook commit, deployed proxy SHA-256, Godot
   binary, mission, numeric game type, and topology with every result.
 - Use a unique `RunId`; probe output is create-new and must not overwrite an
@@ -122,4 +122,4 @@ artifact layout to each cell.
 - Mismatches are recorded in `docs/net/novaworld-net-re.md`; absence of a
   decoder warning is not itself a parity verdict.
 - Only sanitized conclusions and structural fixtures enter Git. Raw local
-  evidence remains under `.scratch/`.
+  evidence stays machine-local.

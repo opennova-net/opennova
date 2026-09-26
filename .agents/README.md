@@ -47,8 +47,7 @@ divergences in its §8 catalog):
   process, sockets, UI, and presentation.
 - Do not use raw passthrough blobs to make a writer or encoder pass parity.
   Model the fields structurally unless a tracked ADR explicitly says otherwise.
-- Treat the source and `docs/net/novaworld-net-re.md` as live truth; `plan/` holds
-  completed-effort records (the NovaWorld-integration status tables), not current state.
+- Treat the source and `docs/net/novaworld-net-re.md` as live truth.
 
 ## Consolidated net core (ADR 0013)
 

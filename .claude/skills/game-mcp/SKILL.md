@@ -15,7 +15,7 @@ tool call. The retail game is driven separately through `onhook-mcp`
 ```bash
 python scripts/mcp/game_mcp.py launch --windowed --resolution 1280x720 \
     --resource-dir "$OPENNOVA_JO_DIR" [--exp revx02] [--mission 00TRa.bms] \
-    --pid-file .scratch/game.pid
+    --pid-file build/game.pid
 ```
 
 - `--headless` when no window is needed (window probes then report
@@ -39,8 +39,8 @@ python scripts/mcp/game_mcp.py launch --windowed --resolution 1280x720 \
 python scripts/mcp/game_mcp.py tools                       # the catalog
 python scripts/mcp/game_mcp.py state                       # game_state
 python scripts/mcp/game_mcp.py call game_debug '{"op":"invoke","action":"teleport_local_player","args":{"position":[x,y,z],"yaw_deg":90}}'
-python scripts/mcp/game_mcp.py screenshot --out .scratch/shot.png
-python scripts/mcp/game_mcp.py entities --watch --interval 1 --out .scratch/entities.jsonl
+python scripts/mcp/game_mcp.py screenshot --out build/shot.png
+python scripts/mcp/game_mcp.py entities --watch --interval 1 --out build/entities.jsonl
 python scripts/mcp/game_mcp.py logs
 ```
 
@@ -66,7 +66,7 @@ not a probe (`tests/<domain>/`, gated on the roots).
 ## 4. Stop
 
 ```bash
-python scripts/mcp/game_mcp.py stop --pid-file .scratch/game.pid
+python scripts/mcp/game_mcp.py stop --pid-file build/game.pid
 ```
 
 `stop` cancels an active probe, asks `game_control quit`, waits up to 20 s and

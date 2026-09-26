@@ -26,7 +26,7 @@ Reproduce one client/server path without inventing protocol behavior.
 
 - Dated run log.
 - Commands and topology, without secrets or local absolute paths.
-- Capture names in `.scratch`.
+- Capture file names (the captures stay machine-local).
 - Pass/fail signature.
 - Next action: code fix, packet diff, IDA witness, or test gap.
 
