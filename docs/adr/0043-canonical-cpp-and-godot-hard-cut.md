@@ -1,5 +1,10 @@
 # ADR 0043: canonical C++ and canonical Godot — one session with roles, the world is C++ Nodes, tests drive real fixtures
 
+> **Updated by [ADR 0048](0048-authoring-in-the-godot-editor.md).** The runtime still never
+> hands a NovaLogic file to `ResourceLoader` (the `ResourceRoot` bypass below stands). The
+> editor-only authoring layer, `godot/src/authoring`, registers loaders and savers for
+> NovaLogic formats at the EDITOR init level; no export carries it.
+
 - **Status**: accepted (2026-09-02; maintainer directive — the hard-cut architecture refactor)
 - **Owners**: runtime architecture, the Godot layer, tooling, CI governance
 - **Supersedes/updates**: this is THE ONE current-architecture record. It supersedes

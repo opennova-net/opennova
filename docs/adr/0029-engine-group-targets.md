@@ -1,5 +1,10 @@
 # ADR 0029: engine target topology — five group archives, per-lib targets retired
 
+> **Updated by [ADR 0048](0048-authoring-in-the-godot-editor.md).** A further group,
+> `engine/editor` (STATIC `opennova_editor`, the portable authoring core), links
+> `opennova_runtime`; no other group includes or links it, and only `godot/src/authoring`,
+> tests and apps include `<editor/...>`.
+
 - **Status**: accepted (2026-08-08; the 2026-08-07 flattening assessment's
   "Shape A", maintainer-approved)
 - **Owners**: build/link topology

@@ -1,5 +1,8 @@
 # ADR 0033: the engine owns the loops; shells are devices
 
+> **Decision 3's resource-system rule is superseded for the authoring layer by
+> [ADR 0048](0048-authoring-in-the-godot-editor.md)**; it stands for the runtime.
+
 - **Status**: accepted (2026-08-09; the rearchitecture plan, maintainer-approved).
   **Superseded in full by [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md)
   (2026-09-02)**: the engine-owns-the-loops rule, the R2 draw-list

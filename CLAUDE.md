@@ -124,8 +124,10 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   work once per display frame through ONE static frame-leg table
   (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9). A `godot/` line earns its place only as that device
   work (node writes, GPU dispatch, input sampling, audio players) or a thin typed seam.
-  NovaLogic formats never touch Godot's resource system:
-  documents read/write themselves (`load_from_path`/`save_to_path`).
+  The runtime never loads NovaLogic formats through Godot's resource system:
+  documents read/write themselves (`load_from_path`/`save_to_path`) and the game reads
+  through `ResourceRoot`. Only the editor-only authoring layer (`godot/src/authoring`,
+  EDITOR init level) registers loaders/savers for them (ADR 0048).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Pre-1.0, no internal backwards compatibility: refactors update every caller of our own

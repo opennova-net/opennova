@@ -1,5 +1,11 @@
 # ADR 0032: direct document I/O — godot/ adds nothing but Godot
 
+> **Decision 1 superseded for the authoring layer by
+> [ADR 0048](0048-authoring-in-the-godot-editor.md).** The editor-only `godot/src/authoring`
+> registers loaders and savers for NovaLogic formats, which now have consumers (the editor,
+> F5 and export); the runtime rule (documents read and write themselves, the game reads
+> through `ResourceRoot`) stands.
+
 - **Status**: accepted (2026-08-08; the adapter-shape round,
   maintainer-directed). **Replaced by
   [ADR 0033](0033-engine-owned-loops-device-shells.md) (2026-08-09)**, which

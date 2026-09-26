@@ -32,15 +32,16 @@ engine core is C++; Godot is the shell that renders it and powers the game.
 
 ## A source-first game-data loop
 
-The game's canonical files live in an ordinary source tree. Native format tools and,
-eventually, the GLB/GLTF editor may produce those files; OpenNova consumes and validates
-them without requiring a proprietary project database.
+The game's canonical files live in an ordinary source tree. Native format tools, the
+Blender add-on and the Godot editor itself produce those files; OpenNova consumes and
+validates them without requiring a proprietary project database.
 That keeps source ownership visible and makes retail compatibility the acceptance test.
 
-Users supply their own game-data directory on the command line. OpenNova ships
-the runtime and format libraries; it does not distribute a game-data set or an
-integrated run/packaging utility. Test-only synthetic fixtures remain separate
-from the product (ADR 0045).
+Authoring happens in the stock Godot editor (ADR 0048): the Godot project's content
+root holds NovaLogic files that the editor opens, edits and saves natively, F5 plays
+them, and Godot's own export packs them. Users of the runtime still supply their own
+game-data directory on the command line. OpenNova does not distribute a game-data set.
+Test-only synthetic fixtures remain separate from the product (ADR 0045).
 
 ## Target games
 

@@ -1,5 +1,11 @@
 # ADR 0045: CLI game data and a runtime-only distribution
 
+> **Updated by [ADR 0048](0048-authoring-in-the-godot-editor.md).** `--resource-dir` also
+> accepts a `res://` or `user://` directory, mounted as a file tree (the authoring content
+> root, D-VFS-12), and an export built with `opennova/pack_content` carries its content and
+> boots it with no arguments. The retail runtime export keeps this record's contract: no
+> arguments print usage and exit 2, and an operating-system path mounts exactly as before.
+
 - **Status**: Accepted, 2026-09-19
 - **Supersedes**: ADR 0037; the bundled-data and picker contracts in ADR 0025;
   ONED product and distribution provisions of ADRs 0015 and 0039.

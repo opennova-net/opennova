@@ -85,6 +85,8 @@ godot/exports/
 .godot-bin/
 godot/addons/gut/
 godot/addons/imgui-godot/
+# The authoring content root (ADR 0048): local game data, never committed.
+godot/data/
 
 CLAUDE.local.md
 .superpowers/

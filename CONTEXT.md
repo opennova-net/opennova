@@ -309,6 +309,19 @@ are outside this taxonomy (ADR 0015).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
 
+**Authoring layer**:
+The editor-only C++ in `godot/src/authoring` that makes NovaLogic files Godot resources
+inside the stock Godot editor (ADR 0048): loaders and savers, menu scenes, the OpenNova
+dock, F5 and export hooks. Registered at the EDITOR init level; no export carries it. Its
+portable half is the `engine/editor` group.
+_Avoid_: OpenNova Editor, ONED (retired standalone editors), editor app
+
+**Content root**:
+The one folder of the Godot project that holds game content, `opennova/content/root`
+(default `res://data`, git-ignored). F5 and content exports mount it as a file tree
+(D-VFS-12); files are found by flat name at any depth.
+_Avoid_: mod folder, project data, assets folder
+
 **OpenNova Launcher**:
 The separately distributed Windows tray product that directs a stock NovaLogic
 installation to OpenNova's NovaWorld service. It is the only product called

@@ -1,5 +1,11 @@
 # Where the project is, and what is next
 
+Authoring: [ADR 0048](adr/0048-authoring-in-the-godot-editor.md) (proposed) makes the
+stock Godot editor the data editor, the alternative to #665's standalone app. It lands as
+slices on one branch: the ADR, the parity core shared with #665, the runtime's content-root
+mount, the editor plugin, then strings, catalogs, menus as scenes, references, views and
+content export.
+
 The [03TR frame-cost fixes](perf/03tr-frame-costs.md) remove repeated CTRL name
 conversion, the native-to-packed snapshot round trip, and per-glyph HUD draw
 submission. The record contains clean measurements, the jo-c/live-IDA witnesses,

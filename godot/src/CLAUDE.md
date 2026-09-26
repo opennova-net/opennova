@@ -6,9 +6,13 @@ GDExtension classes binding `engine/` to Godot. Register new classes in
 line here earns its place only as a device leg (marshalling, nodes, servers,
 input, audio, draw-list appliers), the typed bridge from `inmatch::Session` to
 the `GameWorld` frame-leg table, or a documented seam bridge — format/runtime logic
-and every witnessed behavior belong in `engine/`. The engine's formats never touch
-Godot's resource system
-(documents self-read/write via `load_from_path`/`save_to_path`).
+and every witnessed behavior belong in `engine/`. The runtime never loads the
+engine's formats through Godot's resource system (documents self-read/write via
+`load_from_path`/`save_to_path`; the game reads through `ResourceRoot`). The one
+exception is `authoring/` (ADR 0048): editor-only loaders, savers, scene nodes and
+the OpenNova plugin, registered at the EDITOR init level and compiled only with
+`OPENNOVA_AUTHORING` (never in `template_release`); nothing outside `authoring/`
+includes it.
 Names and includes (ADR 0040): there is no "Nova layer" — a file is named after the
 type it declares, no `nova_`/`Nova` prefix anywhere (`NovaWorld*` is the service's
 proper noun and stays); a binding may share its class name and directory with the

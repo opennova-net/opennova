@@ -1,5 +1,9 @@
 # 0028 — engine/ is the engine; godot/src/ is the shell adapter
 
+> **Updated by [ADR 0048](0048-authoring-in-the-godot-editor.md).** `engine/` gains a fifth
+> group, `engine/editor` (the portable authoring core), above `runtime`; decision 1's four
+> groups stand below it unchanged.
+
 Status: accepted 2026-08-06. §3's target-name clause (per-lib
 `opennova_<domain>` targets, families as the only link conveniences) was
 superseded by [ADR 0029](0029-engine-group-targets.md) on 2026-08-08: the

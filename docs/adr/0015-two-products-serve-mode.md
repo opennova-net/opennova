@@ -1,5 +1,10 @@
 # Two Godot products; the server is a mode of the game, not a product
 
+> **Updated by [ADR 0048](0048-authoring-in-the-godot-editor.md).** Authoring happens in the
+> stock Godot editor on the source project, not in an exported product; an export of the
+> game may carry the authoring content root in its pack (`opennova/pack_content`).
+>
+
 > **Updated by [ADR 0037](0037-oned-runs-game-data.md).** The two-Godot-product
 > decision and serve-mode rule remain. ONED now runs game data and no longer
 > produces or edits it.

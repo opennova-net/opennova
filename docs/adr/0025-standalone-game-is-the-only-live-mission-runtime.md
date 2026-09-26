@@ -1,5 +1,9 @@
 # ADR 0025: the standalone game is ONED's only live mission runtime
 
+> **Updated by [ADR 0048](0048-authoring-in-the-godot-editor.md).** F5 in the Godot editor
+> runs this same runtime, in its own game process, on the project's content root. There is
+> still one runtime and no play mode inside the editor process.
+
 - **Status**: accepted (2026-07-29)
 - **Partially superseded**: [ADR 0045](0045-cli-game-data-runtime-only.md) removes
   ONED and the bundled-data/folder-picker startup behavior.
