@@ -122,8 +122,8 @@ private:
 		std::vector<float> fwd;      // velocity[2]: forward distance per clip frame
 		std::vector<float> lat;      // velocity[0]: lateral
 		std::vector<float> vert;     // velocity[1]: vertical fallback lane
-		std::vector<float> bottom;   // capsule_bottom: origin->feet (the ground-settle floor)
-		std::vector<float> top;      // capsule_top: origin->head (capsule extent)
+		std::vector<float> bottom;   // capsule_bottom: the origin's (hips') height above the ground (the settle floor)
+		std::vector<float> top;      // capsule_top: the head's height above the ground (top - bottom is origin->head)
 		std::vector<uint32_t> trigger;
 		int32_t frame_count = 0;
 		anim::ClipTimeline clock;

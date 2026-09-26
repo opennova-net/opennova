@@ -208,10 +208,13 @@ the same text transport, the same add-on.
    map reads `threedi_build`'s own permutation rather than minting a second
    owner of it. The seam derives the bone table's bind, the bone positions
    (through the set's reset bind, as 30,358 of 32,011 retail bones store them),
-   the child and parent addresses, the translation pad row and, when a clip
-   carries none, the capsule extents (our rule, measured against the reset
-   bind); none of these is asked of an author. The author supplies
-   frame_count + 1 keys (or a duration per key), events and, for a translated
+   the child and parent addresses and the translation pad row; none of these
+   is asked of an author. The author supplies frame_count + 1 keys (or a
+   duration per key), events (each with its velocity, trigger word, and
+   `bottom` and `top`, the hips' and the head's height above the ground,
+   which the seam carries as given: a clip poses the body about its hips, so
+   the ground is not in it [orig: AnimMap_UpdateEntity @ 0x40b5f0, the
+   out-transform @ 0x40b82f..0x40b8a3]) and, for a translated
    bone, translation rows, and the seam counts them: retail's reader lerps
    translation row trunc(frame_count * t) with the next one [orig: sub_4102D0
    @ 0x4102d0 via BoneAnim_TransformBones @ 0x410360], so row frame_count is
@@ -269,11 +272,10 @@ the same text transport, the same add-on.
 - The animation formats' record (`docs/anim/adm-bad-format-re.md`) carries the
   corpus witnesses the seam derives from, and the `.o3a` grammar is
   `docs/anim/o3a-scene-format.md`.
-- Known animation gaps, each reported rather than carried: the capsule extents
-  retail's own exporter measured follow a rule nothing has witnessed; ours,
-  measured against the reset bind, is a median 0.6 m off at a clip's worst
-  frame over the 82 tables (DT1PRONE: 3.1 cm), so a clip that must keep
-  retail's numbers carries them as keyed channels; `flags` bit 3 (73 retail
+- Known animation gaps, each reported rather than carried: a first-person
+  set's `top` is its `bottom` in 137 of 201 registrations, but 64 carry a
+  higher top by a rule nothing has witnessed (1.6578 in 21 reset clips), and
+  an FP rig has no head bone to give it; `flags` bit 3 (73 retail
   clips) is carried and unread; import keys every frame, so a bone that keys
   sparsely or with durations (DVFLEE1E, DT1RST, stgr_RST) re-exports with a key
   per frame and the same poses, keys past a clip's length (M60_1i) are dropped,
@@ -337,11 +339,13 @@ the same text transport, the same add-on.
   material id they lack.
 - Animation ctests: `bad_roundtrip`, `bad_parse` (a translated retail clip's
   rows), `bad_build` (the frame maps, the bind and positions through the reset
-  bind, the capsule extents against it, the refusals, the canonical table),
+  bind, the events' bottom and top written as stated, the refusals, the
+  canonical table),
   `adm_write`, `adm_variants`, `anim_sample` (the translation row lerp, the
   bind's translation gate, retail's reset-clip choice), `anim_o3a_commands`
   (the clip-set round trip byte-identical, what `anim compare` calls the same
-  animation, the sets `anim build` refuses) and the gated
+  animation, the sets `anim build` refuses, among them an event without its
+  bottom and top and a `capsule` record) and the gated
   `anim_o3a_retail_roundtrip`. Over the corpus, `build(scene(x))` is the same
   animation as `x` for all 477 `.bad` clips and 81 of the 82 `.adm` tables
   (ESTAND02 names a clip the corpus does not ship; `anim compare` reports it).
