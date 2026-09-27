@@ -262,65 +262,124 @@ the same text transport, the same add-on.
    (`build(scene(x))` re-mints a builder-made set byte for byte); `anim info`
    prints a set; `anim compare` says whether two sets are the same animation,
    reading keys and the bind as rotations and reporting NaN and absent clips as
-   differences. `catalog` also prints the engine's anim slot keys and event
-   trigger bits. A row's slot is its key past any first five characters,
-   without case, as retail reads it [orig: AnimMap_ParseConfigLine @ 0x40cb60;
+   differences. `catalog` also prints the engine's 252 anim slots by index,
+   the weapon actions that have a slot of their own, and the event trigger
+   bits. A row's slot is its key past any first five characters, without case,
+   as retail reads it [orig: AnimMap_ParseConfigLine @ 0x40cb60;
    AnimMap_FindSlotByName @ 0x40cfa0], and a table must hold an `anim_reset`
    row: retail faults loading one without it [orig: AnimMap_LoadAdmFile, the
-   unchecked slot-0 read @ 0x40ce11], so `anim build` refuses it.
+   unchecked slot-0 read @ 0x40ce11], so `anim build` refuses it. It also
+   refuses what retail cannot load or play: a row naming none of the 252 slots
+   (the game drops it [orig: AnimMap_ParseConfigLine, the -1 test @
+   0x40cba4]), a file name over the 15 characters an archive entry holds
+   [orig: PFF_FindEntry @ 0x7685d0], a loop at 62 x its frames fps or more (the
+   channel passes its end within a tick and wraps by one length only [orig:
+   AnimChannel_InitFromData @ 0x410560; AnimChannel_AdvancePlayback @
+   0x40b199]), a translated clip over an untranslated reset, which moves
+   nothing [orig: AnimChannel_ComputeBoneMatrices, the bind's flag test @
+   0x410de7], and a clip over 64 bones, the size of retail's bone scratch
+   [orig: BoneSystem_Init @ 0x410170].
 
-13. **A rig's rest pose is its bind.** A channel key IS the bone's rotation in
-   the model's frame, and the bind it is measured against is the reset clip's
-   first key (the `anim_reset` row's last variant), which the runtime carries
-   as the SKELETON's rest and poses with the key, so what a bone deforms by is
-   `key * bind^-1` [orig: AnimMap_RegisterEntity @0x40bb60 pins the bind;
+13. **A rig's rest pose is its bind, and a clip is an Action.** A channel key
+   IS the bone's rotation in the model's frame, and the bind it is measured
+   against is the reset clip's first key (the reset row's last variant, since
+   each reset clip replaces the one before [orig: AnimMap_RegisterBoneNode @
+   0x40c38b]), which the runtime carries as the SKELETON's rest and poses with
+   the key, so what a bone deforms by is `key * bind^-1` [orig:
+   AnimMap_RegisterEntity @0x40bb60 pins the bind;
    AnimChannel_ComputeBoneMatrices @0x410da0 reads it; the loaders build the
    rest from it]. The add-on therefore poses a bone with the key itself, and
-   the first table imported onto a rig without clips turns each rest bone onto
-   the reset clip's key; a later table replaces the rows (and any clip of the
-   same name) but keeps the rest, a lone `.bad` leaves both alone, and a table
-   without an `anim_reset` row aligns nothing (retail cannot load one, so
-   `anim build` refuses it). Heads, lengths and weights do not move, so the model still
-   exports the same model, and a clip shows the pose the game draws. Import
-   keys frames 0..frame_count as the runtime evaluates them (its duration walk
-   and slerp). A clip is an Action on the rig's NLA tracks, exported through its
-   own strip and action slot over the rig's rest, so a clip keys only what it
-   animates; the table is the rows on the model root;
-   the rig stands on a `Root` bone (any case, no part) at the ground, the hips
-   `BN01` below it and a head (the model root's `head_bone`, else the one bone
-   whose name ends in `head`), the shape of a Godot humanoid. Each event is
-   measured from the pose: `bottom` the hips' height above Root, `top` the
-   head's (the bottom when the rig has no head), the step the hips' move to
-   the next frame with the change in bottom as its vertical; a loop's last two
-   events repeat event 0 and a one-shot's stand still, as every retail clip's
-   do. A rig without Root stands on Blender's Z = 0 (our convention: the
-   first-person sets never step). Import keys the hips and, for a set that
-   travels, Root, so a clip plays with its feet planted, and raises a model at
-   the world origin so the ground is Z = 0; every export reads a model with
-   its root at the origin, so where it stands does not change its bytes. The
-   event bits are keyed on the rig. A bone that is not `BN##` is no part
-   either, which lets a rig hold control bones. A rigid model's clips animate
-   the rig its parts are (decision 15).
+   the rig's rest pose must be the bind: export refuses a reset clip whose
+   first frame turns a bone more than 0.01 degree off rest, naming the bone,
+   and a table whose reset row names no Action, or that has none, writes
+   `<table>_rst`, one looping interval of the rest pose at 30 fps (the shape
+   of retail's resets), translated when any clip is. The first table
+   imported onto a rig without clips turns each rest bone onto the reset
+   clip's key; a later table keeps the rest, and a lone `.bad` names no bind.
+   Heads, lengths, weights and everything hung from a bone keep their places,
+   so the model still exports the same model, and a clip shows the pose the
+   game draws. Import keys frames 0..frame_count as the runtime evaluates
+   them (its duration walk and slerp).
 
-14. **Weapon timing is authored, then evaluated by the runtime FSM.** An
-   animation-table row may explicitly name a weapon action role. Action-local
-   Shot, Eject, Active End and Ready markers supply its phase timing; firing
-   cadence has one selected source, a Ready marker or target RPM. Neither
-   imported provenance nor an existing weapon definition is an input.
-   `opennova-3di weapon timing` converts this authoring input to explicit
-   ACTION delay fields and measures the result with the engine's existing
-   `weapon_fsm_bake` / `weapon_fsm_tick`; no Python FSM or alternate gameplay
-   behavior is introduced. The command library consequently links the runtime
-   group. Its text output is an ACTION-block snippet for the existing
-   `weapon.def` parser, written beside the BAD/ADM set as
-   `<table>_weapon_actions.txt`. It does not invent ammunition, damage or other
-   weapon settings. A preview is disposable; export recompiles from current
-   Actions and markers. Invalid timing is rejected before animation files are
-   written. Frame-to-tick authoring policy, marker semantics and the runtime's
-   reload/switch limitations are documented in the add-on README. Native tests
-   check actual cadence and parser acceptance; a Blender test authors the
-   geometry, skin, Actions and markers from scratch and exports them without
-   importing any assets.
+   A model's clips animate its rig, the one Armature under its LOD 0 root
+   whose `BN##` bones are its parts (decision 15; a static model's `PN##`
+   parts become one, on import or through Add Animation Rig); arms that
+   deform with a first-person gun's rig carry no set, the gun's poses both.
+   The clip set is
+   the Actions the model root's rows name: each is exported once, through its
+   slot for the rig, over the rig's rest (a channel it does not key sits at
+   rest), and an Action no row names is not exported; no NLA track is
+   involved. A clip's length is its Action's manual frame range (else its
+   keyed range), its loop the Action's Cyclic setting and its rate a property
+   of the Action; its translation flag is set when a bone moves off its rest
+   offset, and the reset carries it whenever a clip does, since a bone moves
+   only when the playing clip and the bind are translated (decision 12);
+   flag bit 3 is carried as set. A clip's file is named after the table and
+   the slot it answers, `<table>_<code>[n].bad`: `rst` for the reset; `i`,
+   `ei`, `f`, `rc`, `r`, `e`, `swt`, `swf`, `swr`, `su` and `sd` for the eleven
+   weapon slots (idle, empty idle, fire, recoil, reload, empty, draw, holster,
+   fire mode, aim in, aim out); `s<slot index>` for any other; a row's n-th
+   clip from the second adds n, after an underscore when the code ends in a
+   digit (`s1_2`, never slot 12's `s12`). Every such name, and the table's,
+   fits the 15 characters an archive entry holds, and one slot takes one row,
+   so a name is never written twice. Export refuses a scaled bone, which the
+   game would read as a turn, and everything `anim build` refuses (decision
+   12), naming the Action or row.
+
+   A body's rig stands on a `Root` bone (any case, no part) at the ground,
+   the hips `BN01` below it and a head (the model root's `head_bone`, else the
+   one bone whose name ends in `head`), the shape of a Godot humanoid. Each
+   event is measured from the pose: `bottom` the hips' height above Root,
+   `top` the head's (the bottom when the rig has no head), the step the hips'
+   move to the next frame with the change in bottom as its vertical; a loop's
+   last two events repeat event 0 and a one-shot's stand still, as every
+   retail clip's do. A rig without Root is a first-person rig: its clips pose
+   the model where it stands, `BN01` moves by its own translation row, and
+   every event stands still at the hips' rest height above Blender's Z = 0,
+   which is what retail's first-person clips carry (zero velocity on all 204
+   registrations); the viewmodel never reads them [orig:
+   AnimMap_UpdateEntity @ 0x40b5f0, the one event reader, runs on a body's
+   channels only, from AnimMap_UpdateDualChannels @ 0x40b8c0]. The event
+   trigger bits are Action markers named after the catalog's bits. Import
+   keys the hips and, for a set that moves or bobs the body, Root, so a clip
+   plays with its feet planted, and raises a model at the world origin so the
+   ground is Z = 0; every export reads a model with its root at the origin,
+   so where it stands does not change its bytes. It merges the table's rows
+   into the model's by slot, and the scene takes the reset clip's rate. A
+   bone that is not `BN##` is no part (decision 15), which lets a rig hold
+   control bones.
+
+14. **Weapon timing is authored, then evaluated by the runtime FSM.** A table
+   row's weapon action is its slot's, the catalog's `weaponaction` rows
+   (`anim_wpn_<action>`, `anim_wpn_empty_idle` for emptyidle); overheated has
+   no slot and nothing ever queues it, so it is not offered. The model root
+   lists the `weapon.def` entries that play its clips, each with its fire mode
+   and target rate, and may name Hip and Aim cameras whose places are the
+   entries' `POS` and `TPOS`. Action-local Shot, Eject, Active End and Ready
+   markers time each action; fire's recovery is each entry's rate; every clip
+   of one action must time alike, since the game serves a ring's clips in
+   turn, from the last, one step at every play and loop wrap [orig:
+   AnimMap_RegisterBoneNode @ 0x40c385; AnimMap_AdvanceToNextAnim @
+   0x40bdf0]. Assigning a clip never changes its loop: retail's long idles
+   loop by the clip's own flag. Neither imported provenance nor an existing
+   weapon definition is an input. `opennova-3di weapon timing` turns this into
+   the keys each entry's ACTION blocks need (ANIM, DELAYSTART, DELAYEND, and
+   `POS`/`TPOS`; never FUNCTION, sounds, effects or flags) and measures every
+   entry with the engine's own `weapon_fsm_bake` / `weapon_fsm_tick`; no
+   Python FSM or alternate gameplay behavior is introduced, and the command
+   library consequently links the runtime group. Export writes those keys
+   beside the table as `<table>_weapon_edits.txt`, and a table without a fire
+   row still writes its clips; `opennova-3di weapon merge` sets them in a copy
+   of a `weapon.def` and leaves every other byte
+   ([weapon-timing-format.md](../anim/weapon-timing-format.md) describes the
+   request, the edits and the merge). It does not invent ammunition, damage or
+   other weapon settings. A preview lives in memory, never in the scene;
+   export compiles again from the current Actions and markers, and timing the
+   author must fix writes nothing. Frame-to-tick authoring policy, marker
+   semantics and the runtime's reload and switch limits are in the add-on
+   README. Native tests check the cadence and the merge; Blender tests
+   (`tests/blender`) author rigs, Actions and markers from scratch and export
+   them without importing any asset.
 
 15. **The scene shape: one armature for what moves** (2026-09-27, from the PR
    #685 review; it supersedes the `!Rig` animation armature, the `O3D follow`

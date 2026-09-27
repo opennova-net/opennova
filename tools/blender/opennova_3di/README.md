@@ -287,6 +287,10 @@ Culling, the Math node, the render method and Emission.
   Number Parts and Deform with Rig of (a model with its own rig), Export Model,
   and its Animations box. Export All Models writes every model, and Export All
   Animations every rig's clip set.
+- **Dope Sheet sidebar > Action > OpenNova** on a rig playing an Action: its
+  rows, Manual Frame Range, Cyclic and Clip rate, its event trigger markers
+  and Add Event Trigger, Assign Weapon Action and the timing markers of the
+  actions it answers, and a closed Raw section with flag bit 3.
 - **Object properties** on a model root: the same model settings. On a LOD
   root: its index, the LOD threshold (projected radius in pixels; the last
   LOD's 0) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##` part: part
@@ -312,175 +316,187 @@ Culling, the Math node, the render method and Emission.
 
 ## Animations
 
-A model's clips live on its rig, and the whole set writes at once:
-**Export Animations** makes the `.adm` table the model root names (empty: one
-named after the model, beside the `.blend`) and one `<clip>.bad` beside it for
-every clip. **Export All Animations** does that for every model with a rig,
-and skips, with a warning, a rig that carries no clip set of its own (the arms
-beside a first-person gun). **File > Import > NovaLogic Animations** reads a
-`.adm` (or a single `.bad`) back onto the active model's rig.
+A model's clips pose its rig: the `BN##` bones of the one Armature under its
+LOD 0 root. **Add Animation Rig** turns a static model's `PN##` parts into
+one (a bone at each pivot, everything on a part hung from its bone). A
+first-person gun and its arms share the gun's rig, so the gun's clips pose
+both and the arms have none of their own. **Export Animations** writes the
+`.adm` table the model root names (empty: one named after the model, beside
+the `.blend`) and every clip beside it; **Export All Animations** does that
+for every model with a rig of its own. **File > Import > NovaLogic
+Animations** reads a `.adm` (or a single `.bad`) onto the active model's rig.
 
-- **A clip is an Action.** Push each one onto its own NLA track; the track order
-  is the set's order and the Action's name is the `.bad` file name. Set the
-  model's **Clip file prefix** (for example `rifle_`) to keep standard Action
-  names while giving its exported clips unique filenames. ADM references use
-  that prefix too; engine row names stay unchanged. Export plays
-  each Action through its strip's action slot (Blender 4.4 and newer), so an
-  Action keyed on another rig exports its own motion, and it refuses a rig in
-  NLA tweak mode. The clip's own settings live in the Dope Sheet sidebar's
-  OpenNova panel: its rate (retail ships 30 everywhere), whether it loops,
-  whether it carries per-bone translations (a bolt, a magazine, a rig that
-  slides), the unwitnessed flag bit 3, and a frame count longer than the
-  Action, whose extra frames hold its last pose.
-- **Each clip exports on its own.** A channel a clip does not key is at rest:
-  a bone it leaves alone keeps its rest pose (`Root` and the hips too) and the
-  trigger is 0, whatever the clip before it did. A bone that follows another
-  model's parts (**Bones follow**) follows its own clip while the set exports.
-- **The table** is the row list on the model root: a slot (`anim_reset`,
-  `anim_walk_forward`, ...) and the clips that answer it. Several clips on one
-  row are a ring the game rotates through, and it serves a row from its LAST
-  entry back. The reset row (`anim_reset`) names the bind every clip is
-  measured against: its last clip, since each clip on that row replaces the one
-  before it (every retail table holds one, and the game cannot load a table
-  without one, so export refuses it). A row names its slot by what follows the
-  key's first five characters, so `ANIM_RESET` is the reset row too.
-- **The rig** is the usual humanoid one: a `Root` bone (any case) on the
-  ground as the top bone, the hips (`BN01`, the model origin) below it, and a
-  head. Move the body over the ground with Root and bob it with the hips.
-  Export measures every frame from the pose: the bottom is the hips' height
-  above Root, the top the head's, and the step is how far the hips move to the
-  next frame, which is how far the game moves the body. The head is the
-  **Head** field in the Animations panel, or else the one bone whose name ends
-  in `head` (`BN15 Head`); with no head, the top is the bottom. A rig without
-  Root (a first-person rig) stands on Blender's ground, Z = 0, so its model
-  sits with the hips at the game's height (1.07 m). As in every retail clip, a
-  loop's last two events repeat its first and a one-shot's stand still. Root
-  is no part, and neither is a bone named `!something`, where control bones
-  go; a `BN##` bone under either takes the nearest `BN##` above it as its part
-  parent.
-- **Events** are the rig's keyed **Trigger** word: 1 and 2 place the left and
-  right footstep, 4, 8 and 16 fire the ammo rows, and 0x20 upwards play the six
-  foley sounds of the body's sound profile. `opennova-3di catalog` lists them.
-  The word is 32 bits, so a word with the top bit set shows as a negative
-  number (a version 0 clip's 0xffffffff is -1).
-- **The rest pose is the bind.** A clip's channel is the bone's own rotation in
-  the model's frame. The game binds every clip of a table to the reset clip: a
-  bone deforms by `key * bind^-1`, the bind being the reset clip's first key.
-  So the first table imported onto a rig that holds no clip turns each rest
-  bone onto that key, and a clip then poses the rig exactly as the game draws
-  it. The bone heads, lengths and weights do not move, so the model still
-  exports the same model. A rig that already holds clips keeps its rest, since
-  their Actions are keyed against it; a table without a reset row names no bind
-  (and does not export) and leaves the rest as it is; and a single `.bad` carries no table, so it
-  leaves the rest and the model's rows as they are. Bone names come from the
-  clips (a `.3di` carries none), and their vertex groups are renamed with them;
-  a lower-case `bn38 bone` becomes `BN38 bone`.
-- **Import keys what the game plays.** Every clip is keyed on each frame of its
-  length: a bone that holds a key over several frames gets the pose the game
-  blends between its keys there, and a bone that stops keying early holds its
-  last key. A re-export therefore keys every frame (`DVFLEE1E`, `DT1RST` and
-  `stgr_RST` come back with more keys and the same poses), and keys past the
-  clip's own length (`M60_1i`), which the game never plays, are left out. The
-  import lists these in its warnings, and a failed import leaves the scene as
-  it found it. A clip the rig already holds under the name of one being
-  imported (a set imported again) is replaced in its place in the set, and the
-  table's rows follow the new one.
-- **Import stands the rig on the ground.** Each frame keys the hips at its
-  bottom and, when the set moves the body, a `Root` bone (made at the ground
+- **The table is the model root's rows.** A row is an anim slot and the
+  clips that answer it: `anim_reset`, `anim_wpn_fire`, `anim_walk_forward`,
+  one of the engine's 252 slots (the Slot field searches them). The game
+  drops a row naming any other slot, so export refuses it, and one slot takes
+  one row. Several clips on a row are a ring the game plays from its last
+  clip back, one step at every play and every loop. A row names its slot by
+  what follows its key's first five characters, so `ANIM_RESET` is the reset
+  row too.
+- **A clip is an Action.** The Actions the rows name are the clip set, with
+  no NLA track needed; an Action on no row is not exported (export lists
+  them). Each plays through its slot for the rig, the one it was keyed on,
+  so one Action keyed on two rigs exports each rig's own motion. A clip's
+  file is named after the table and its slot: `<table>_<code>.bad`, the code
+  `rst` for the reset, `i`, `ei`, `f`, `rc`, `r`, `e`, `swt`, `swf`, `swr`,
+  `su` and `sd` for the weapon slots (idle, empty idle, fire, recoil, reload,
+  empty, draw, holster, fire mode, aim in, aim out) and `s<slot number>` for
+  the others. A row's second clip adds `2` (`tfa_akm_i2`), after an
+  underscore when the code ends in a digit (`tfa_s1_2`). A retail archive
+  holds a name of at most 15 characters, so keep the table's name short: the
+  table `tfa_akm.adm` leaves room for `tfa_akm_swt.bad`, and export refuses a
+  longer name, saying which.
+- **A clip's settings are its Action's.** Its frames are the Action's Manual
+  Frame Range (without one, its keyed range), and it loops when the Action
+  is Cyclic; the Dope Sheet sidebar's OpenNova panel shows both, and its Clip
+  rate (retail ships 30 everywhere). Blender plays every clip at the scene's
+  rate, so export notes a clip whose rate differs. A loop needs a rate under
+  62 times its frames, or the game steps past its end within a tick. A bone
+  may turn and move, but not scale (a scaled bone is refused). A clip carries
+  translations when a bone moves off its rest offset from its parent (a
+  bolt, a magazine), and the reset clip then carries them too, since the
+  game moves a bone only when both do. The panel's closed Raw section holds
+  the unwitnessed flag bit 3.
+- **The rest pose is the bind.** The reset row's last clip is the bind every
+  clip is measured against: a bone deforms by `key * bind^-1`, the bind being
+  that clip's first key. The rig's rest pose must therefore be that bind, and
+  a clip then poses the rig in Blender exactly as the game draws it. A reset
+  clip must start at rest (export names a bone more than 0.01 degree off),
+  and a table whose reset row names no clip, or that has none, gets
+  `<table>_rst`, one looping interval of the rest pose at 30 fps.
+- **Each clip exports on its own.** A channel a clip does not key is at
+  rest, whatever the clip before it did. **Edit Clip** (the button beside
+  each clip in the rows) plays a clip the same way, through its slot, with
+  the timeline's preview range on its frames; the scene's rate and the NLA
+  stay as they are.
+- **A body stands on Root.** A person's rig has a `Root` bone (any case) on
+  the ground as its top bone, the hips (`BN01`, the model origin) below it,
+  and a head. Move the body over the ground with Root and bob it with the
+  hips. Export measures every frame from the pose: the bottom is the hips'
+  height above Root, the top the head's, and the step is how far the hips
+  move to the next frame, which is how far the game moves the body. The head
+  is the **Head** field in the Animations panel, or else the one bone whose
+  name ends in `head` (`BN15 Head`); with no head, the top is the bottom. As
+  in every retail clip, a loop's last two events repeat its first and a
+  one-shot's stand still. Root is no part, and neither is a bone named
+  `!something`, where control bones go.
+- **A first-person rig has no Root.** Its clips pose the model where it
+  stands: `BN01` moves by its own translation, and every event stands still
+  at the hips' rest height above Blender's ground (Z = 0), which is what
+  retail's first-person clips carry. The game never reads a first-person
+  clip's events.
+- **Event triggers are markers.** A marker on the Action named after an
+  event bit sets that bit on its frame: `FOOT_LEFT` and `FOOT_RIGHT` place
+  the footsteps, `FIRE_PRIMARY`, `FIRE_SECONDARY` and `FIRE_MARKER3` fire the
+  ammo rows, and `FOLEY_1` to `FOLEY_6` play the six foley sounds of the
+  body's sound profile (`opennova-3di catalog` lists them). **Add Event
+  Trigger** places one at the playhead. Export notes a marker it does not
+  know and refuses one past the clip's frames. First-person clips need none.
+- **Import keys what the game plays.** Every clip becomes an Action keyed for
+  the rig on each frame of its length, with its Manual Frame Range, Cyclic
+  for a loop, its rate, and a marker per trigger bit. A bone that holds a key
+  over several frames gets the pose the game blends between its keys there,
+  and a bone that stops keying early holds its last key, so a re-export keys
+  every frame (`DVFLEE1E`, `DT1RST` and `stgr_RST` come back with more keys
+  and the same poses); keys past the clip's own length (`M60_1i`), which the
+  game never plays, are left out. The table's rows merge into the model's by
+  slot, and the model's other rows stay. A clip a row already names under the
+  name of one being imported (a set imported again) is replaced everywhere it
+  is used. The scene takes the reset clip's rate. The warnings list what the
+  scene cannot carry, and a failed import leaves the scene as it found it (a
+  static model it turned into a rig keeps its rig).
+- **Import onto a static model** turns its `PN##` parts into the rig first,
+  as Add Animation Rig does. On a rig that holds no clip yet, it turns each
+  rest bone onto the reset clip's bind, so a clip poses the rig as the game
+  draws it; bone heads, lengths, weights and everything hung from a bone keep
+  their places, so the model still exports the same model. Bone names come
+  from the clips (a `.3di` carries none), and their vertex groups are renamed
+  with them; a lower-case `bn38 bone` becomes `BN38 bone`. A rig that already
+  holds clips keeps its rest, since their Actions are keyed against it.
+- **Import stands the rig on the ground.** When a set moves or bobs the body,
+  each frame keys the hips at its bottom and a `Root` bone (made at the ground
   under the hips when the rig has none) along the steps, so a planted foot
-  stays put. A model at the world origin is raised so the ground is Blender's
-  Z = 0, and the arms following a first-person gun rise with it, so the gun
-  and its arms overlay a body at the hips. This is display only: every export
-  reads a model as if its root stood at the origin. A clip whose stored top is
-  more than 3 cm from the head's height is named in the warnings, and so is a
-  first-person clip whose top stands above its bottom (a third of retail's do,
-  by a rule nothing has shown); a re-export writes the rig's own measure.
+  stays put. A set that stands still, as every first-person set does, needs
+  no Root. A model at the world origin is raised so the ground is Blender's
+  Z = 0, and arms on its rig rise with it, so a gun and its arms overlay a
+  body at the hips. This is display only: every export reads a model as if it
+  stood at the origin. A clip whose stored top is more than 3 cm from the
+  head's height is named in the warnings, and so is a first-person clip whose
+  top stands above its bottom (a third of retail's do, by a rule nothing has
+  shown); a re-export writes the rig's own measure.
 
-**A first-person gun** is animated by its own rig, the bones its parts are
-(Add Animation Rig makes one from `PN##` parts), and the arms deforming with
-that rig move with it, so a first-person set belongs to the gun.
-
-To reuse retail's own clips, match the retail rig: JO's people are 19 bones plus
-a mesh part, a first-person weapon 40 parts, and a clip's channels pair with the
-model's parts by index.
+To reuse retail's own clips, match the retail rig: JO's people are 19 bones
+plus a mesh part, a first-person weapon 40 parts, and a clip's channels pair
+with the model's parts by index.
 
 `opennova-3di anim info <file> --verbose` prints a table or a clip, and
 `opennova-3di anim compare <a> <b>` tells whether two sets hold the same
 animation.
 
-## Weapon action timing
+## Weapon timing
 
-Weapon timing works on a new rig and newly keyed Actions. Imported models,
-clips, source frame metadata and existing weapon definitions are not required.
+A first-person gun's clips are played by one or more `weapon.def` entries
+(the AKM's `WPN_AK47AUTO` and `WPN_AK47` share one clip set), and each entry's
+ACTION blocks time them. The add-on writes the keys those blocks need from the
+clips' markers, measured by the engine's own weapon state machine; nothing
+reads an existing weapon definition or imported timing.
 
-1. Create the model root, LOD 0 and BN## armature as above. Key a bind-pose
-   Action spanning at least two frames. In the Action Editor sidebar, choose
-   **Assign Weapon Action > Bind / Reset**.
-2. Key the other Actions and assign **Fire**, **Idle**, **Reload**, etc.
-   Overheated is not offered: it runs the idle handler, has no `wpn_` anim
-   state of its own, and no shipped weapon.def authors it.
-   Assignment keeps the Action on an NLA track, binds its animation-table row,
-   and adds local timing markers. It clears the clip's **Loop** flag: retail's
-   weapon clips are one-shots, its idle holds too, and the idle action replays
-   its clip on each Ready window.
-   Existing rows can instead be assigned a **Weapon action** role on the model.
-3. Edit the named markers in the Action Editor with **Show Pose Markers** on,
-   or use their frame fields and **At Playhead** buttons. These are Action-local
-   markers; scene timeline markers and NLA placement do not define timing.
-4. Choose the weapon's **Fire mode**, then **Ready marker** or **Target RPM**
-   as the single cadence source. **Preview Game Timing** displays requested
-   and achievable RPM and the generated delays. The Text Editor's
-   `<model> - Weapon Timing` text contains the full native FSM event trace.
-5. **Export Animations** writes the BAD/ADM set and, when **Export weapon
-   actions** is enabled, `<table>_weapon_actions.txt` alongside it. Merge those
-   ACTION blocks into the weapon definition and apply the stated Auto/Burst
-   flags while preserving its other flags. Sound/effect references can be
-   authored on each weapon row. Ammo, damage and inventory settings remain
-   part of the weapon definition.
+1. In the model root's **Weapon** box, add an entry per `weapon.def` entry
+   that plays these clips: its name, its fire mode (as its FLAGS say) and the
+   rate it should fire at. A model with no entry exports its clips and no
+   weapon edits.
+2. Put each action's clip on its row: idle on `anim_wpn_idle`, fire on
+   `anim_wpn_fire`, and so on (empty idle's row is `anim_wpn_empty_idle`).
+   **Assign Weapon Action** (Dope Sheet sidebar) makes the Action the rig
+   plays the clip of an action's row, adding the row and the action's timing
+   markers. It leaves the clip's loop as it is: retail's long idles loop by
+   the clip's own flag. Overheated is not offered: it has no clip of its own
+   and nothing in the game ever enters it.
+3. Place the timing markers in the Action Editor with **Show Pose Markers**
+   on, or with the panel's frame fields and **At Playhead** buttons. They are
+   the Action's own markers, counted from its first frame at its Clip rate;
+   scene markers do not time anything.
+4. Optionally point **Hip view** and **Aim view** at cameras placed at the
+   eye: the entries' `POS` and `TPOS`. The game looks along the model's
+   forward from the eye, so only a camera's place is used.
+5. **Preview Game Timing** shows, per entry, the rate the game's whole ticks
+   give against its target, and per action its DELAYSTART and DELAYEND and
+   how much of its clip the view shows before the next action replaces it,
+   warning where a one-shot clip shows less than half. The preview is kept
+   until Blender closes, never in the scene, and says when the timing has
+   changed since.
+6. **Export Animations** writes `<table>_weapon_edits.txt` beside the table:
+   per entry only the keys to set (ANIM, DELAYSTART, DELAYEND, POS, TPOS),
+   never FUNCTION, sounds, effects or flags. A table without a fire row still
+   writes its clips, and no edits. **Merge into weapon.def** sets those keys
+   in a copy of a `weapon.def` you pick (`opennova-3di weapon merge`), written
+   beside it as `<name>_merged.def` unless you name another file; every other
+   byte stays as it was. `docs/anim/weapon-timing-format.md` describes both
+   files.
 
-| Marker | Authoring meaning |
+| Marker | Times |
 | --- | --- |
-| `ON:Shot` | Fire clip's shot pose; absent means the first frame/immediate shot. |
-| `ON:Eject` | Recoil clip's casing/decision pose; absent means immediate. |
-| `ON:Active End` | Other actions' active-phase boundary; absent uses Ready or clip end. |
-| `ON:Ready` | On Fire, Shot-to-Ready requests the full firing cycle, including recoil and transition ticks. On other actions, the gap after the active boundary authors recovery. Idle uses it as its repeat window. |
+| `ON:Shot` | Fire: the shot pose; none means the first frame. Fire's recovery is each entry's target rate, so fire takes no Ready. |
+| `ON:Eject` | Recoil: the casing and refire decision; none means the first frame. |
+| `ON:Active End` | Reload, empty, fire mode, aim in and aim out: the end of the action's active phase; none means Ready, else the clip's end. |
+| `ON:Ready` | The end of the recovery after that boundary, and an idle's window before the game plays it again; none means the clip's end. |
 
-Target RPM ignores Fire's Ready marker; it never fights a second timing
-source. A Ready marker may lie past the keyed clip to author a held recovery;
-Shot, Eject and Active End must identify a pose inside the exported clip.
-Timing uses the clip's exported integer rate and its own first frame, including
-negative or nonzero starts. Moving an NLA strip changes neither. Non-idle
-variants of one weapon row must agree on phase times in seconds: the runtime
-has only one delay pair per ACTION. Idle variants use the first served clip's
-length for their repeat window.
+Draw and holster take no marker: the game paces them on its switch timer.
+Every clip on one action's row must time alike, in seconds: the game plays a
+ring's clips in turn, so any of them may be the one playing. A Ready marker
+may lie past the clip's last frame to hold a recovery; the other markers name
+a pose the clip holds. Reload refills the magazine when it starts; its markers
+time the animation and the action, not the magazine.
 
-The CLI's `weapon timing` command compiles current markers and measures the
-result with `weapon_fsm_tick`. Active pose boundaries account for the clip's
-62-step playback clock and the counter-zero tick that does not advance it.
-Recovery and requested firing periods use 62.5 logic ticks per second. The
-solver adjusts Fire's recovery delay to the nearest whole-tick requested
-period and includes the runtime's extra transitions: for immediate automatic
-fire with zero recoil, delayend 3 gives a five-tick cycle (750 RPM), not a
-three-tick cycle. Semi-auto measures fresh presses at the first eligible Idle
-tick; burst reports the within-burst rate. The preview assumes ammo is
-available and no environmental/heat gate blocks fire. A changed timing input
-marks the preview stale; export always compiles again from the authored scene.
+## Tests
 
-The engine's existing constraints remain visible: reload refills ammo on
-entry; its markers control animation/action windows, not a new magazine-in
-gameplay event. Draw/holster use the fixed switch timer and do not accept timing
-markers. Export uses a zero start delay and a two-tick refreshed end counter
-to enter that timer and keep the animation advancing; inspect the native trace
-for its actual length. A draw/holster clip may therefore be cut short by the
-runtime. BAD trigger bits
-are body events and do not replace first-person weapon action timing. A recoil
-window that cannot sustain the requested firing mode is rejected by the native
-preview rather than exported with an invented behavior.
-
-To run the asset-free authoring regression:
+`tests/blender/*_test.py` author their scenes from scratch and run headless,
+against a given `opennova-3di` or against the installed extension:
 
 ```text
-blender --background --factory-startup --python-exit-code 1 --python tests/anim/blender_weapon_authoring.py -- <opennova-3di.exe> <output-directory>
+blender -b --factory-startup --python-exit-code 1 --python tests/blender/anim_test.py -- <opennova-3di.exe>
+blender -b --factory-startup --python-exit-code 1 --python tests/blender/weapon_test.py -- --installed
 ```
 
 ## Collision volumes
