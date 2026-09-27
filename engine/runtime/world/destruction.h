@@ -14,7 +14,7 @@
 // @ 0x4939b0 (death sound + effect families + the KZ blasts via
 // Entity_QueueKzBlastAtUserPoints @ 0x4eabf0), Entity_ProcessDeathPiecePhysics
 // @ 0x492dd0 + DeathPiece_TickAll @ 0x57b900 (piece physics), the debris-type
-// table g_death_piece_types @ 0x8404f0.]
+// table g_DeathPieceTypes @ 0x8404f0.]
 //
 // The host presents; this module simulates and RECORDS. Every visual/audible
 // leg lands in DestructionEvents for the present pass to drain (the RoundSim
@@ -219,7 +219,7 @@ struct ItemDeathTraits {
     std::string particleh2odeath;   // +0x44A name — the submerged family
     std::string particlefire;       // +0x47E name — the Fire-bone family
 	// Final husk preferred, then the first husk. Dead is shared by water/air.
-	// [orig: resolve_item_materials_and_spawn_bone_trails @0x522EE0]
+	// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0]
 	std::array<DeathEffectBank, 3> effect_banks;
 	std::string particleother; // +0x4B2 name — the Other-bone family
 	// +0x4E4 name — the ground-impact effect the settle transition plays once
@@ -266,7 +266,7 @@ struct ItemDeathTraitsTable {
 };
 
 // ----------------------------------------------------------------------------
-// The engine debris-type table [orig: g_death_piece_types @ 0x8404f0 — 13 named
+// The engine debris-type table [orig: g_DeathPieceTypes @ 0x8404f0 — 13 named
 // 80-B rows; sub_57B350/DeathPieceType_FindByName index it by the items.def
 // husk_sub_part_types byte]. Effect/sound slot pointers resolved to their
 // interning-table names (the {name, slot} pair tables @ 0x849150 / @ 0x82F640).
@@ -409,9 +409,9 @@ struct DestructionEvents {
 };
 
 inline constexpr const char *kSectionDebrisFoliageEffect =
-        "Effect_TreeFoliageExp"; // [orig: g_fx_TreeFoliageExp @0x2C25BF0]
+        "Effect_TreeFoliageExp"; // [orig: g_FxTreeFoliageExp @0x2C25BF0]
 inline constexpr const char *kSectionDebrisWoodEffect =
-        "Effect_TreeWoodExp"; // [orig: g_fx_TreeWoodExp @0x2C25BF4]
+        "Effect_TreeWoodExp"; // [orig: g_FxTreeWoodExp @0x2C25BF4]
 
 inline constexpr const char *kGlassShatterEffects[4] = {
         "Effect_BldGlassExp", "Effect_BldPaperExp",
@@ -440,21 +440,21 @@ static_assert(static_cast<int>(kGlassShatterAltProbability[0] * 100.0f) == 33,
 // [orig: Entity_UpdateDeadWreckEffects @ 0x493140 (renamed ex
 //  Entity_UpdateMuzzleFlashAndEffects 2026-08-07) — per fire bone i:
 //  (fire mask & (1<<i)) && PRNG_Next16_C() < 16 && bone Z >= water ->
-//  submit g_fx_BoatExpSec @ 0x4932d1 +
-//  Sound_PlayWithDistanceAttenuation(g_snd_EXPLO_SHIP_SM_b, &entity->Position)
+//  submit g_FxBoatExpSec @ 0x4932d1 +
+//  Sound_PlayWithDistanceAttenuation(g_SndExploShipSmB, &entity->Position)
 //  @ 0x4932e2]
 inline constexpr const char *kFireCrackleEffect =
-        "Effect_BoatExpSec"; // [orig: g_fx_BoatExpSec @ 0x2C25CB8]
+        "Effect_BoatExpSec"; // [orig: g_FxBoatExpSec @ 0x2C25CB8]
 inline constexpr const char *kFireCrackleSound =
-        "EXPLO_SHIP_SM"; // [orig: g_snd_EXPLO_SHIP_SM_b @ 0x24E08F4]
+        "EXPLO_SHIP_SM"; // [orig: g_SndExploShipSmB @ 0x24E08F4]
 inline constexpr uint16_t kFireCrackleThreshold = 16; // [orig: @ 0x4932bf]
 
 // The debris-type trail-effect column, by DeathPiece::type_index
-// [orig: g_death_piece_types @ 0x8404f0 +0x2C; "" = the type authors no trail
+// [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C; "" = the type authors no trail
 // (NP rows); out-of-range indexes take no trail]. Every death-piece submit
 // carries tag 0, the trail included, so it takes no section gate
 // [orig: Entity_ProcessDeathPiecePhysics `xor edi, edi` @ 0x492FC2 ahead of
-// the submit @ 0x493014; update_projectile_physics `xor ebx, ebx` @ 0x57BA0F
+// the submit @ 0x493014; DeathPiece_UpdateProjectilePhysics `xor ebx, ebx` @ 0x57BA0F
 // ahead of the submits @ 0x57BA2A..0x57BB8A; DeathPiece_PhysicsUpdate's
 // submits @ 0x48F547 / 0x48F692 push 0].
 const char *death_piece_trail_effect(uint8_t type_index);
@@ -480,7 +480,7 @@ struct DestructionRng {
 };
 
 // ----------------------------------------------------------------------------
-// The death-piece pool. [orig: g_death_piece_pool @ 0x26BAC58 — 256 x 180-B ring
+// The death-piece pool. [orig: g_DeathPiecePool @ 0x26BAC58 — 256 x 180-B ring
 // (DeathPiece_AllocSlot @ 0x57b4f0), ticked by DeathPiece_TickAll @ 0x57b900 ->
 // Entity_ProcessDeathPiecePhysics @ 0x492dd0.] A piece renders ONLY its own
 // husk-model section (the render mask excludes every other section).
@@ -523,7 +523,7 @@ class DeathPieceSim {
 public:
     static constexpr int kCapacity = 256;
     std::array<DeathPiece, kCapacity> pieces{};
-    int cursor = 0;            // ring cursor [orig: g_death_piece_pool_cursor]
+    int cursor = 0;            // ring cursor [orig: g_DeathPiecePoolCursor]
 
     DeathPiece &alloc();       // [orig: DeathPiece_AllocSlot @ 0x57b4f0]
     // One 62 Hz step for every live piece [orig: Entity_ProcessDeathPiecePhysics
@@ -595,7 +595,9 @@ struct ItemHitContext {
     int32_t damage = 0; // hitRecord[12], tower reads its low byte
     int32_t heading = 0, pitch = 0, roll = 0; // hitRecord[3..5]
 };
-// The 0x26 route's health clear and Dead guard before callback phase four.
+// The client's slot kill (the 0x26 route and the vehicle record's destroyed
+// bit): the health clear and Dead guard, then the section into the hit record
+// and the class callback with phase four, a brain row's state machine included.
 // [orig: Entity_KillBySlotId @ 0x42BCE0]
 void apply_item_state_event(World &world, Entity &target, int16_t section);
 

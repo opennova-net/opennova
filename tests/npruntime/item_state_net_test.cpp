@@ -24,6 +24,103 @@ std::vector<std::vector<uint8_t>> take(ns::LoopbackChannel &channel, uint8_t tag
     return bodies;
 }
 
+// A joiner's kill of a brain row runs the row's state machine, as retail's
+// Entity_KillBySlotId runs the row's class callback: Health 0 and the section
+// into the hit record, then the machine's client arm zeroes Health, ticks the
+// current state (GROUND_PRETTY queues the destroy event at Health 0) and queues
+// the type-20 event, committing nothing itself. The next timed-event pass
+// commits GROUND_DEAD, whose enter runs the death transforms with the refNum
+// group's EWeap release in place first. Without a brain the machine returns at
+// once, and a dead row takes neither the store nor the callback.
+// [orig: NapiNPClientMsg_0x026 @0x42EC30 -> Entity_KillBySlotId @0x42BCE0
+//  (Health 0 @0x42BD33, the Flags & 2 test @0x42BD3C, hitRecord[14]
+//  @0x42BD47, the callback @0x42BD6A) -> EntityAI_ProcessGroundStateMachine
+//  @0x4583C0 (the null brain @0x4583D1, the client arm @0x458485..0x4584DF,
+//  the commit gate @0x458576..0x458586); AI_CheckAliveOrDead @0x4580C0 (event
+//  5 @0x458141); AIEvent_ProcessTimedEntries @0x455DF0 (the commit
+//  @0x455E51..0x455E87); AI_TransitionToDestroyed_Vehicle @0x467DE0 ->
+//  Entity_UpdateDeathTransforms @0x494660 (@0x494673) ->
+//  Vehicle_ReleaseEWeapGroupOnDestruction @0x547040 (the gun words
+//  @0x5470F9..0x547100)]
+int joiner_kill_runs_the_brain_client_arm() {
+    inmatch::ClientRuntime joiner("brain-kill");
+    auto world_heap = std::make_unique<w::World>();
+    w::World &world = *world_heap;
+    world.rules.logic_authority = false;
+    world.rules.mp_session = true;
+    // What the joiner's entity update stamps before any machine runs.
+    world.ai.is_authority = false;
+    world.ai.is_in_session = true;
+    world.registry.configure_pool(1, 8);
+    w::VehicleTraits ground;
+    ground.brain_class = w::VehicleBrainClass::Ground;
+    world.vehicles.traits.set(21, ground);
+    w::Entity hull;
+    hull.kind = w::EntityKind::Item;
+    hull.item_id = 21;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.item_type_index = 3;
+    hull.item_attrib = w::kItemAttribPlayerControl;
+    hull.is_ai_capable = true;
+    hull.ref_num = 7;
+    hull.health = 400;
+    hull.team = 1;
+    const auto hull_h = world.registry.spawn(1, hull);
+    w::Entity gun;
+    gun.kind = w::EntityKind::Item;
+    gun.item_id = 22;
+    gun.has_item_def = true;
+    gun.item_type = 6;
+    gun.item_type_index = 4;
+    gun.item_attrib = w::kItemAttribEweap;
+    gun.ref_num = 7;
+    gun.ref_group_member = true;
+    gun.health = 100;
+    gun.emplaced_gun_yaw_word = 0x1234;
+    gun.emplaced_gun_pitch_word = -0x234;
+    const auto gun_h = world.registry.spawn(1, gun);
+    const auto kill = [&](w::EntityHandle h, int16_t section) {
+        const uint16_t word = static_cast<uint16_t>(section);
+        joiner.view().apply(s2c::KILL_SYNC, {uint8_t(h.packed), uint8_t(h.packed >> 8),
+                uint8_t(word), uint8_t(word >> 8)});
+        joiner.apply_received_effects(world);
+    };
+
+    kill(hull_h, 5);
+    CHECK(world.registry.get(hull_h)->health == 0);
+    CHECK(world.round_sim.hit_record.section == 5);
+    CHECK(world.ai.events.count() == 0);
+    CHECK((world.registry.get(hull_h)->engine_flags & w::kEntityFlagHusk) == 0);
+
+    world.registry.get(hull_h)->health = 400;
+    w::AiEntity &ai = *world.ai.at(world.ai.attach(hull_h));
+    ai.brain.f[w::AiBrain::kCurState] = 22; // GROUND_PRETTY, the movers' head stamp
+    kill(hull_h, 3);
+    CHECK(world.registry.get(hull_h)->health == 0);
+    CHECK(world.round_sim.hit_record.section == 3);
+    CHECK(world.ai.events.count() == 2);
+    CHECK(world.ai.events.at(0).type() == 5 && world.ai.events.at(1).type() == 20);
+    CHECK(ai.brain.f[w::AiBrain::kCurState] == 22);
+    CHECK(world.out.destruction.husk_swaps.empty());
+
+    world.ai.events.process_timed(world.ai, world);
+    CHECK(ai.brain.f[w::AiBrain::kCurState] == 23);
+    const w::Entity *wreck = world.registry.get(hull_h);
+    CHECK((wreck->engine_flags & 6u) == 6u && !wreck->alive && wreck->team == 0);
+    CHECK(world.out.destruction.husk_swaps.size() == 1 &&
+          world.out.destruction.husk_swaps[0].wire_handle == hull_h.packed);
+    const w::Entity *released = world.registry.get(gun_h);
+    CHECK(released != nullptr && released->emplaced_gun_yaw_word == 0 &&
+          released->emplaced_gun_pitch_word == 0);
+    CHECK(world.out.entity_events.empty());
+
+    kill(hull_h, 9);
+    CHECK(world.round_sim.hit_record.section == 3);
+    CHECK(world.ai.events.count() == 0);
+    return 0;
+}
+
 int main() {
     auto heap = std::make_unique<w::World>();
     auto &world = *heap;
@@ -134,5 +231,5 @@ int main() {
     CHECK(take(local_wire, s2c::ENTITY_REMOVE).empty());
     CHECK(take(waiting_wire, s2c::ENTITY_REMOVE).empty());
     CHECK(world.out.entity_events.empty());
-    return 0;
+    return joiner_kill_runs_the_brain_client_arm();
 }

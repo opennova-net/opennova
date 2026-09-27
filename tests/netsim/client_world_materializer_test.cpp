@@ -297,7 +297,7 @@ bool wire_target_authors_ground_separately_from_parent() {
 	// must never let the parent author the structural carrier. [orig:
 	// NapiNPClientMsg_0x00D @0x432C40 — parent → occupantEntity (+368) store
 	// @0x433289; target → groundEntity resolve @0x4332bc, store @0x4332d7;
-	// serialize_entity_pool_to_packet_0 +0x170 @0x503BC9, +0x28 @0x503C22]
+	// NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9, +0x28 @0x503C22]
 	gun.parent_handle = occupant_ref.slot_id;
 	gun.target_handle = hull.slot_id;
 	nw::PoolSpawnBatch batch;
@@ -351,7 +351,7 @@ bool wire_target_authors_ground_separately_from_parent() {
 // orphan sweep removes it when the joiner dies. Only materialized pool-1..3
 // lifetimes resolve, and a vehicle takes no 0x0D carrier at all.
 // [orig: NapiNPClientMsg_0x00D occupantEntity store @0x433289;
-//  serialize_entity_pool_to_packet_0 +0x170 @0x503BC9]
+//  NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9]
 bool pool0_parent_never_aliases_the_native_body() {
 	ns::ClientReplicaPipeline pipeline;
 	static constexpr uint16_t kVehicleType = 5011;
@@ -922,7 +922,7 @@ bool entity_remove_detaches_children_in_place() {
 // walks nothing, and without the embedder's items.def catalog no row has a def
 // and nothing walks.
 // [orig: NapiNPClientMsg_0x012 @0x425F8F -> Entity_Destroy @0x43E810 (the
-//  gates @0x43E9B6..0x43E9CA, the call @0x43E9CD) -> CStreamingMem_Destroy
+//  gates @0x43E9B6..0x43E9CA, the call @0x43E9CD) -> EntityReference_DestroyEWeapGroup
 //  @0x546F30 (member tests @0x546F8A..0x546FA0, Entity_Destroy @0x546FA3)]
 bool entity_remove_takes_the_eweap_refnum_group() {
 	const auto definition = [](uint16_t wire_type, int32_t item_type, uint32_t attrib) {
@@ -982,6 +982,72 @@ bool entity_remove_takes_the_eweap_refnum_group() {
 	pipeline.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
 	return expect(s.find(0x1007) == nullptr && s.find(0x1008) != nullptr,
 			"a person's destroy walks no refNum group");
+}
+
+// A joiner's twin joins its refNum's group list the way the client's 0x0D
+// handler joins the row: once its def resolves, a row whose def is not a
+// person's and whose refNum is nonzero. A person, a row without a refNum and a
+// row whose def never resolved stay off the list, the join is taken once per
+// lifetime, and a carrier's death then releases its gun on the joiner's twins.
+// [orig: NapiNPClientMsg_0x00D @0x433381..0x4333AD (NapiNPClientMsg_0x010
+//  @0x433684..0x4336B0 and NapiNPClientMsg_FullEntitySpawn @0x433E27..0x433E52
+//  join the same way); Vehicle_ReleaseEWeapGroupOnDestruction @0x547040 (the
+//  member tests @0x5470B9..0x5470D3, the gun words @0x5470F9..0x547100)]
+bool materialized_rows_join_their_refnum_group() {
+	const auto record = [](uint16_t slot, uint16_t type, uint8_t ref) {
+		nw::PoolSpawnRecord r;
+		r.slot_id = slot;
+		r.item_type_id = type;
+		r.alert_byte = ref; // entity+533, the refNum
+		return r;
+	};
+	nw::PoolSpawnBatch batch;
+	batch.records = {record(0x1002, 5010, 9), record(0x1003, 5011, 9),
+			record(0x1004, 5013, 9), record(0x1005, 5011, 0), record(0x1006, 5014, 9)};
+	ns::ClientReplicaPipeline pipeline;
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
+	auto world_heap = std::make_unique<w::World>();
+	w::World &world = *world_heap;
+	world.registry.configure_pool(1, 16);
+	ns::ClientWorldMaterializer materializer;
+	materializer.sync(pipeline.state(), world);
+	const auto twin = [&](uint16_t packed) {
+		return world.registry.get(w::EntityHandle{packed});
+	};
+	if (!expect(twin(0x1002) != nullptr && twin(0x1003) != nullptr &&
+			twin(0x1006) != nullptr && twin(0x1003)->ref_num == 9 &&
+			!twin(0x1002)->ref_group_member && !twin(0x1003)->ref_group_member,
+			"a twin whose def has not resolved is on no list"))
+		return false;
+	// The joiner's item-traits resweep resolves the defs, then the fold runs
+	// again (JoinerRole::on_replica_world_changed).
+	const auto stamp_def = [&](uint16_t packed, uint8_t item_type, uint32_t attrib) {
+		w::Entity *e = twin(packed);
+		e->has_item_def = true;
+		e->item_type = item_type;
+		e->item_attrib = attrib;
+	};
+	stamp_def(0x1002, 1, w::kItemAttribPlayerControl); // the carrier
+	stamp_def(0x1003, 6, w::kItemAttribEweap);         // its gun
+	stamp_def(0x1004, 3, 0);                           // a person
+	stamp_def(0x1005, 6, w::kItemAttribEweap);         // a gun without a refNum
+	materializer.sync(pipeline.state(), world);         // 0x1006 has no def row
+	if (!expect(twin(0x1002)->ref_group_member && twin(0x1003)->ref_group_member &&
+			!twin(0x1004)->ref_group_member && !twin(0x1005)->ref_group_member &&
+			!twin(0x1006)->ref_group_member,
+			"a resolved non-person twin with a refNum joins; a person, a zero refNum and an unresolved def do not"))
+		return false;
+	twin(0x1004)->item_type = 6;
+	materializer.sync(pipeline.state(), world);
+	if (!expect(!twin(0x1004)->ref_group_member,
+			"the join is taken once per lifetime: a later fold does not take it again"))
+		return false;
+	twin(0x1003)->emplaced_gun_yaw_word = 0x1234;
+	twin(0x1003)->emplaced_gun_pitch_word = -0x234;
+	w::entity_update_death_transforms(world, *twin(0x1002), /*silent=*/true);
+	return expect(twin(0x1003) != nullptr && twin(0x1003)->emplaced_gun_yaw_word == 0 &&
+			twin(0x1003)->emplaced_gun_pitch_word == 0,
+			"the carrier's death releases its gun in place on the joiner's twin");
 }
 
 // S2C 0x2F updates the flag itself, its occupantEntity pointer, the carrier's
@@ -1297,7 +1363,7 @@ bool objective_state_drop_runs_on_the_client() {
 // The world-stream fence hands every materialized static a placed identity so
 // the shell presents it through the same batched placer path as the host's
 // own statics (retail draws the client-built pools through the one sector
-// renderer [orig: collect_visible_entities_for_terrain @0x5c8c60]). Kind
+// renderer [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5c8c60]). Kind
 // follows the row's item def as the host's BMS list does (a building def is a
 // Building, an object or a vehicle an Item), never the streamed Flags bit
 // 0x20000, which a live retail vehicle carries from its mover [orig:
@@ -1474,6 +1540,7 @@ int main() {
 	if (!deployed_item_spawn_update_and_remove_materialize()) return 1;
 	if (!entity_remove_detaches_children_in_place()) return 1;
 	if (!entity_remove_takes_the_eweap_refnum_group()) return 1;
+	if (!materialized_rows_join_their_refnum_group()) return 1;
 	if (!objective_state_attaches_and_detaches_flag()) return 1;
 	if (!objective_state_drop_runs_on_the_client()) return 1;
 	if (!objective_drop_off_the_local_player_reads_its_own_pose()) return 1;

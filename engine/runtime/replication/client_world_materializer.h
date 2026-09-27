@@ -89,9 +89,12 @@ private:
 		uint64_t objective_lifetime = 0;
 		uint32_t objective_state_serial = 0;
 		uint16_t objective_parent = 0xFFFF;
+		// The native lifetime whose refNum group join was taken (0 = none yet).
+		uint64_t ref_join_lifetime = 0;
 	};
 	void apply_objective_state(const ClientState &state, world::World &world,
 			uint16_t packed, const ClientEntityState &row, world::Entity &child);
+	void join_reference_group(uint16_t packed, world::Entity &child);
 	world::Entity *resolve_carrier(world::World &world, uint16_t packed) const;
 	uint16_t local_wire_handle_ = 0xFFFF;
 	world::EntityHandle local_player_;

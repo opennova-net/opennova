@@ -161,7 +161,7 @@ void land_class_husk(World &world, Entity &target) {
 // effect (the interned def+0x412 handle, unattached, undirected) — not the
 // Entity_InitDeathSounds bank/KZ chain, which only the tree and gnrc rows
 // reach. [orig: Sound_PlayWithDistanceAttenuation(def+0x860, &Position,
-//  entity) + submit_effect_descriptor(0, 0, &Position, word def+0x412): gnrl
+//  entity) + Effect_SubmitDescriptor(0, 0, &Position, word def+0x412): gnrl
 //  @0x408044/@0x40806b, gnl2 @0x40714c/@0x40716f and @0x4072ba/@0x4072dd,
 //  ewep @0x440c64/@0x440c87]
 void emit_class_death_sound_and_effect(World &world, const Entity &target) {
@@ -671,19 +671,34 @@ void update_item_ambient_sound(World &world, const Entity &entity) {
     world.out.sound_emitters.publish(std::move(sound));
 }
 
+// The client's kill of one slot, run by the S2C 0x26 kill-sync (its section
+// word) and by the vehicle compact record's destroyed-bit edge (section 0).
+// Past the +0x1C gate Health is zeroed whether or not the row is already dead;
+// a live row then takes the section into the global hit record's +0x38 word
+// and runs its class event callback with phase 4, which reads that record: an
+// item row's callback takes the section from it, and a brain row's callback is
+// its state machine, whose client arm AiSystem::process_*_state_machine runs.
+// Both routes pass flags 0, so the def-type-1 flags clear (@0x42BD5B..0x42BD5D)
+// has nothing to clear.
+// [orig: Entity_KillBySlotId @0x42BCE0 — the +0x1C gate @0x42BD29, Health = 0
+//  @0x42BD33, the Flags & 2 test @0x42BD3C, hitRecord[14] = section @0x42BD47
+//  (Projectile_GetHitRecord @0x4E7000), entity+0x1C8(entity, 4, flags)
+//  @0x42BD6A; its callers NapiNPClientMsg_0x026 @0x42EC78 and
+//  Entity_SerializeVehicleState @0x460AD9]
 void apply_item_state_event(World &world, Entity &target, int16_t section) {
-    // [orig: Entity_KillBySlotId `cmp dword ptr [esi+1Ch],0; jz` x42BD29]
     if (target.item_type_index == 0) return;
     target.health = 0;
-    if ((target.engine_flags & kEntityFlagDead) == 0)
-        destruction_notify_item_damage(world, target, 4, {section, 0});
+    if ((target.engine_flags & kEntityFlagDead) != 0) return;
+    world.round_sim.hit_record.section = section;
+    hit_record_class_event(world, target, 4);
 }
 
 void destruction_notify_item_damage(World &world, Entity &target, int phase, ItemHitContext hit) {
 	// The entity+0x1C8 event callback, keyed by the def's ai_function class
 	// row and invoked as cb(entity, phase, 0): 1 from the round damage, 2
 	// from the blast damage [orig: @0x4e6f93], 4 from the S2C 0x13 net kill
-	// [orig: @0x42ebf5]. Organics run the person callbacks and AI-driven
+	// [orig: @0x42ebf5] and from the 0x26 kill through hit_record_class_event
+	// (apply_item_state_event). Organics run the person callbacks and AI-driven
 	// vehicles die through their state machine (rows 21/23), not here.
 	if (target.kind == EntityKind::Organic || target.is_ai_capable) return;
     if (target.item_section_piece && !target.palm_sections) {
@@ -860,7 +875,7 @@ void tick_item_event_pool(World &world, int pool) {
         if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
         // The renderer recomputes the fade timers every frame it draws a
         // husked entity, independent of the update cohort; the presenter
-        // reads the sim's copy [orig: render_sector_entity @0x5C4200].
+        // reads the sim's copy [orig: Render_SectorEntity @0x5C4200].
         update_item_destroy_fade(world, *entity);
         // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
         if (!cohort) continue;

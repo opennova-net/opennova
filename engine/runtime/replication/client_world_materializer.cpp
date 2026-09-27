@@ -148,7 +148,7 @@ bool drop_carrier_pose_for(const ClientState &state, const world::World &world,
 
 // The retail client renders the pools it built from the 0x10/0x0D/0x20 load
 // batches through the same sector collectors the host uses [orig:
-// collect_visible_entities_for_terrain @0x5c8c60; Terrain_RenderSectorModels
+// Terrain_CollectVisibleEntitiesForTerrain @0x5c8c60; Terrain_RenderSectorModels
 // @0x5c5d30] — there is no per-role render path. The placed identity stamped
 // here is the shell's key into its one placed/batched presenter, so a joiner's
 // statics draw exactly as the host's do. Kind follows the row's item def the
@@ -345,6 +345,26 @@ void ClientWorldMaterializer::apply_objective_state(const ClientState &state,
 		world.collision->refresh_blink(world, child);
 }
 
+// The client's 0x0D / 0x10 / 0x18 handlers put a row on its refNum's group
+// list when its def is not a person's and its refNum is nonzero: the list the
+// 0x12 destroy walks (ClientReplicaPipeline::erase_entity_tree) and the
+// vehicle death's EWeap release reads (VehicleSystem::cleanup_destroyed_ref_group).
+// The twin carries that membership. Its def resolves after the row lands (the
+// item-traits sweep), so the join is taken once per lifetime, on the first
+// fold that finds the def; a row whose def never resolves joins nothing, as in
+// the 0x12 walk.
+// [orig: the def type != 3 and refNum != 0 tests and the DynArray_AddOrFind
+//  join in NapiNPClientMsg_0x00D @0x433381..0x4333AD, NapiNPClientMsg_0x010
+//  @0x433684..0x4336B0 and NapiNPClientMsg_FullEntitySpawn @0x433E27..0x433E52]
+void ClientWorldMaterializer::join_reference_group(uint16_t packed, world::Entity &child) {
+	const auto tracked = materialized_rows_.find(packed);
+	if (tracked == materialized_rows_.end() || !child.has_item_def ||
+			tracked->second.ref_join_lifetime == child.registry_spawn_id)
+		return;
+	tracked->second.ref_join_lifetime = child.registry_spawn_id;
+	child.ref_group_member = child.ref_num != 0 && child.item_type != 3;
+}
+
 ClientWorldSyncResult ClientWorldMaterializer::sync(
 		const ClientState &state, world::World &world) {
 	ClientWorldSyncResult result;
@@ -457,6 +477,7 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 	for (const auto &[packed, row] : current) {
 		world::Entity *child = owned(world, world::EntityHandle{packed});
 		if (child == nullptr) continue;
+		join_reference_group(packed, *child);
 		if (is_carry_objective(row->type_id)) {
 			apply_objective_state(state, world, packed, *row, *child);
 			continue;
