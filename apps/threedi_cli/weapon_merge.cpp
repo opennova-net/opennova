@@ -336,6 +336,23 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 					                (parsed.sights_count ? " (" + std::string(parsed.sights[0].texture) + ")" : "") +
 					                " in place of the model once aiming settles, so the tpos view shows only "
 					                "while the view eases in");
+				// The timing ran each action's own handler; a FUNCTION the merge
+				// keeps may bind another one to the slot.
+				// [orig: Anim_InitActions @ 0x541fa0, the rewrite @ 0x542117..0x542139]
+				std::set<int> noted;
+				for (const auto &k : edit.keys) {
+					if (!noted.insert(k.action).second) continue;
+					for (size_t r = 0; r < parsed.actions_count; ++r) {
+						const auto &row = parsed.actions[r];
+						if (!strutil::iequals(row.name, kWeaponActionSuffixes[k.action])) continue;
+						const int8_t bound = weapon_handler_named(row.function);
+						if (bound != weapon_handler::kPlaceholder && bound != weapon_action_default_handler(k.action))
+							notes.push_back(edit.name + ": its " + strutil::to_upper(kWeaponActionSuffixes[k.action]) +
+							                " block keeps FUNCTION " + kWeaponHandlerNames[bound] +
+							                ", so that slot runs that handler, not the " +
+							                kWeaponActionSuffixes[k.action] + " one the timing measured");
+					}
+				}
 			}
 			if (!ok) break;
 			const std::string key_indent = entry_indent(def, lines, entry);

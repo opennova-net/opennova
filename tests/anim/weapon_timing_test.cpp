@@ -439,11 +439,15 @@ int main(int argc, char **argv) {
 		                         "action fire delaystart 1\n", twice_edits, error));
 		const std::string twice = "weapon \"WPN_TWICE\"\n\tFLAGS\tAUTO\n"
 		                          "\tACTION\t\"FIRE\"\n\tDELAYEND\t5\n\tEND\n"
-		                          "\tACTION\t\"FIRE\"\n\tDELAYEND\t7\n\tANIM\tANIM_WPN_FIRE\n\tEND\nend\n";
+		                          "\tACTION\t\"FIRE\"\n\tDELAYEND\t7\n\tANIM\tANIM_WPN_FIRE\n"
+		                          "\tFUNCTION\tWPN_STD_EMPTY\n\tEND\nend\n";
 		CHECK(merge_weapon_def(twice, twice_edits, merged, notes, error));
 		CHECK(merged == "weapon \"WPN_TWICE\"\n\tFLAGS\tAUTO\n"
 		                "\tACTION\t\"FIRE\"\n\tDELAYEND\t5\n\tEND\n"
-		                "\tACTION\t\"FIRE\"\n\tDELAYEND\t3\n\tANIM\tANIM_WPN_FIRE\n\tDELAYSTART\t1\n\tEND\nend\n");
+		                "\tACTION\t\"FIRE\"\n\tDELAYEND\t3\n\tANIM\tANIM_WPN_FIRE\n"
+		                "\tFUNCTION\tWPN_STD_EMPTY\n\tDELAYSTART\t1\n\tEND\nend\n");
+		// The kept FUNCTION binds another handler than the timing ran.
+		CHECK(notes.size() == 1 && contains(notes[0], "FIRE block keeps FUNCTION wpn_std_empty"));
 	}
 	// Refusals: an entry the def lacks, a mode its FLAGS contradict, an
 	// encrypted def, and edits that do not read.
