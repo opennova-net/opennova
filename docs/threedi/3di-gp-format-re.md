@@ -642,18 +642,55 @@ Witnessed in retail `Jointops.exe` and in the install's decrypted `_BaseInc.fx`
 - **Normal.** Only `vsSkinBasic` (VS_SKBASIC), `vsSkinGlass`, `vsSkinDepth` and
   `vsSkinFlatSpotDepth` blend the normal with the same four weights and
   normalize it (`skinnormal = true`). The lit techniques (`vsObjSkinDot3*`,
-  `vsTanSkinDot3*`, `vsTanSkinPhong*`, `vsSkinPost*`) pass `skinnormal =
-  false`: the normal takes the vertex's first bone alone (`IndexArray[0]`, not
-  normalized), and the tangent-space ones take the light and hemisphere
-  vectors into that bone's frame (`SkinModelLightArray[indexvector.x]`,
-  `transpose(SkinWorldMatrixArray[indexvector.x])`) against the undeformed
-  tangent, binormal and normal.
+  `vsTanSkinDot3*`, `vsTanSkinPhong*`, `vsObjSkinPhong*`, `vsSkinPost*`) pass
+  `skinnormal = false`: the normal takes the vertex's first bone alone
+  (`IndexArray[0]`, not normalized; SkBDiffT2/SkBDiffO2 and SkBPhongT read its
+  y for their Gouraud hemisphere, `HemicolorFromVectorY(norm.y)`), and they
+  light the undeformed `In.Tangent`, `In.Binormal` and `In.Norm` in that
+  bone's frame: the directional light through `SkinModelLightArray
+  [indexvector.x]` (SkBDiffT/O, SkBDiffT2/O2) or through the in-shader
+  `transpose((float3x3)SkinWorldMatrixArray[indexvector.x])` (SkBPhongT/O,
+  normalized), the bumped hemisphere and the eye vector through that
+  transpose, and each point light as `SkinModelLightArray[indexvector.x] -
+  In.Pos`, its attenuation and `CalcSelfShadowTerm` measured in that space
+  (`_vsSkDfT.fx`, `_vsSkDfO.fx`, `_vsSkPhT.fx`, `_vsSkPhO.fx`).
+- **Light entries.** `SkinModelLightArray` is filled per pass inside
+  `CRenderBatchQueue_FlushBatches @ 0x5D9F50`, not in the palette block
+  (`@ 0x5DA1B2` uploads `SkinWorldMatrixArray` only), one entry per palette
+  entry k below the strip's table length (the fill and the `SetVectorArray`
+  count, `@ 0x5DA5AD`, `@ 0x5DA9A3`, `@ 0x5DAC43`), w always 1. The pass flags
+  word comes from `HLSLEffect_ParsePassData @ 0x5AE120` (bit 0 = passsetup
+  `PASSSETUP_SET_OBJSPACELIGHT_DIR`, `@ 0x5AE4DD`; bits 1..5 = passrules,
+  `@ 0x5AE4AC`), and the handle from `GetParameterByName("SkinModelLightArray")`
+  (`@ 0x5AF615`). A bit-0 pass on a skinned model gets DirLightVector (the unit
+  vector toward the light) through the upper 3x3 of the true inverse of M_k
+  (`@ 0x5DA4F6..0x5DA5CE`, the inverse `@ 0x5DA54B`); a ONCE_PER_POINTLIGHT
+  pass (bit 2, `@ 0x5DA84F`) gets, per selected light, the `PointLightCoord`
+  it just uploaded through the full affine inverse (`@ 0x5DA950..0x5DA9A1`, the
+  inverse `@ 0x5DA967`, the upload `@ 0x5DA9C4`) before that light's draw
+  (`@ 0x5DAA07`); a ONCE_PER_SPOTLIGHT pass (bit 3, `@ 0x5DAA2F`) does the same
+  with the projector position (`@ 0x5DABF0..0x5DAC41`, upload `@ 0x5DAC64`).
+  The inverse is D3DXMatrixInverse (a full 4x4 cofactor inverse; the IDB's
+  `j_D3DXTex_WriteRow_G16R16_Dither`, `jmp [0x85075C]`, is its PSGP thunk, and
+  `j_psgp_init_and_dispatch_850728` / `_850714` are D3DXVec3TransformNormal /
+  D3DXVec3Transform, names left as the IDB has them). So the light entries use
+  the true inverse where the shaders' own vectors use the transpose: the two
+  agree for the rigid matrices the rigs pose, and a scaled entry would give
+  the light a length of 1/s that nothing renormalizes. D3DXMatrixInverse
+  writes nothing when the determinant is zero or its reciprocal is not
+  finite, and the fill runs k in table order through one inverse buffer, so a
+  singular entry (the right hand's zero-scale row, world-wac-ai-re §14.1.5)
+  keeps the last inverse made: the nearest earlier table entry that inverted.
+  For k = 0 the buffer holds stale stack from an earlier fill.
 
 Corpus (the JOTAC archives with the revx02 expansion, 607,473 skinned vertices
 in 623 LODs): the weights are four-decimal values, none negative, above 1 or
 not finite, and no vertex stores three zeros; 12,398 sum past 1 in float (at
 most 1.0001, ArmGlovD), leaving byte 3 at most -1e-4, and 9,501 vertices in 118
-models give byte 3 a real share (over 1e-4; JntOpsB3 202, IndoArms 187). Port:
+models give byte 3 a real share (over 1e-4; JntOpsB3 202, IndoArms 187). Of
+the 640 skinned strip tables holding part 16 (BN17, the right hand, on the
+person rigs), 153 hold it as entry 0: on a person, a collapsed hand's vertices
+there read stale stack. Port:
 `threedi_skin_influences` (engine/formats/threedi/threedi_3di3.h) resolves a
 vertex's four influences; `opennova-3di` carries byte 3 through the `.o3d`
 text (docs/threedi/o3d-scene-format.md), `compare` compares the resolved blend,
@@ -661,6 +698,33 @@ the builder bounds a skinned section over it, and the renderer draws it
 (engine/runtime/renderer/model_mesh_prepare.cpp lays the four weights out as
 they are for the skeleton, and the projected-shadow slot capture blends them
 unnormalized).
+
+The lighting is ported as of 2026-09-27. The object shaders run the vertex
+program over a per-model bone palette (`godot/shaders/object/skin.gdshaderinc`):
+`ObjectModel` publishes the skeleton's pose x bind per bone into an RGBA32F
+texture on every settled pose (`godot/src/object/object_model_skin_palette.cpp`)
+and binds it on the materials of the strips whose technique names a
+skinnormal rule (`renderer::ObjectSkinNormal`,
+engine/runtime/renderer/object_shader_template.h); those strips leave Godot's
+skinning, which blends one matrix for position, normal and tangent alike.
+SkBasic and SkGlass light the blended, normalized normal; the lit effects
+light the undeformed frame through the vertex's light entry (the palette
+entry whose inverse its `SkinModelLightArray` entry carries) and measure
+point lights from the vertex that entry carries rigidly, the world-space form
+of the entry-space vectors (exact for rigid entries). A singular first entry
+lights through the nearest earlier table entry that inverts
+(`prepare_model_mesh` records up to four earlier entries per vertex, carried
+on the mesh's CUSTOM0 channel) and reads a level Gouraud hemisphere from its
+own zero normal; where retail reads stale stack (k = 0) the port reads the
+identity, as it does past four collapsed entries, and where retail normalizes
+a zeroed transpose vector to no defined value (the phong light and eye, the
+bumped hemisphere) the port lights in the light entry's frame. The palette strips cull by their per-bone
+bind boxes carried through the posed palette, and the render-slot capture
+skins its silhouettes with the same matrices. Pinned by GUT
+`skinned_first_bone_lighting_test` (D3D12 raster: every skinned tag's frame
+rule, the collapsed first entry), `object_model_skin_palette_test` and
+`render_shader_cache_handoff_test`, and ctests `renderer_model_mesh_prepare`,
+`renderer_material_classify` and `renderer_state_vectors`.
 
 ## 2. GP runtime format — corpus probe findings
 

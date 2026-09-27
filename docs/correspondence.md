@@ -15,6 +15,17 @@ into them.
 > real producer is the `hudcolor` action row (code 10, default F6,
 > retail-shadowed by `huddetail` — D-CTRL-4).
 
+## Skinned first-bone lighting (2026-09-27)
+
+The lit skinned effects' vertex programs, ported into the object shaders. The witness detail
+lives in [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) ("Retail skinned vertex
+blend").
+
+| Reimplementation surface | Original | Address | Witnessed behavior | Evidence | Verdict |
+|---|---|---|---|---|---|
+| `godot/shaders/object/skin.gdshaderinc` `obj_skin_vertex` + the `ObjectModel` bone palette (`godot/src/object/object_model_skin_palette.cpp`) | `_BaseInc.fx` `CalcSkinWorldPosAndNormal` / `CRenderBatchQueue_FlushBatches` (the palette) | `@0x5DA170` / `@0x5DA1B2` | NumBones 4 with lastweight on byte 3; only SkBasic, SkGlass and the depth programs blend and normalize the normal, the lit effects take the first entry's alone and light the undeformed tangent frame in that entry's space | GUT `skinned_first_bone_lighting_test`, `object_model_skin_palette_test` | matching |
+| the light entry in `obj_skin_vertex` + `renderer::prepare_model_mesh` `light_fallback_bones` | `CRenderBatchQueue_FlushBatches` (the `SkinModelLightArray` fills) | `0x5D9F50` (directional `@0x5DA4F6..0x5DA5CE`, point `@0x5DA950..0x5DA9A1`, spot `@0x5DABF0..0x5DAC41`) | entry k is the light through the true inverse of palette entry k, filled in table order through one buffer, so a singular entry keeps the last inverse made (the nearest earlier invertible entry) and entry 0 reads stale stack | ctest `renderer_model_mesh_prepare`; GUT `skinned_first_bone_lighting_test` | matching (the stale-stack inverse is read as the identity) |
+
 ## Port wave after the rendering parity pass (2026-09-26/27)
 
 The open tails PR #678 left, and the CP03 indoor-visibility report, ported or settled against the

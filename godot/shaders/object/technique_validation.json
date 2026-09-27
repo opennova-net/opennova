@@ -61,7 +61,7 @@
       "channels": "Diffuse1.rgb is modulated by saturated vertex diffuse at 2x. MaterialDiffuse.a (AlphaGenValue) multiplies Diffuse1.a only on this _FFP path; the resulting alpha supplies blend/cutout coverage.",
       "light_response": "Geometric vertex normal; hemisphere plus directional plus selected D3D-style point lights, summed and saturated per vertex and Gouraud-interpolated into MODULATE2X.",
       "state": "NORMAL pass; static policy table selects opaque/alpha/additive, cutout compare, culling, depth write, and regular/additive fog.",
-      "shader_tokens": ["obj_ff_lighting", "obj_ff_vertex_diffuse", "v_point_light_diffuse"],
+      "shader_tokens": ["obj_ff_lighting", "obj_ff_vertex_diffuse", "obj_point_light_sum"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -77,9 +77,9 @@
         ]
       },
       "channels": "Diffuse1 supplies RGB and coverage directly. Unlike _FFP, SkBasic never consumes MaterialDiffuse/AlphaGenValue and has no SELFLUM specialization.",
-      "light_response": "Skinned geometric vertex normal; hemisphere plus directional plus selected D3D-style point lights.",
+      "light_response": "The four-weight blended, renormalized normal (skinnormal, vsSkinBasic) posed through the model's bone palette; hemisphere plus directional plus selected D3D-style point lights measured from the blended position.",
       "state": "SkBasic NORMAL pass; opaque with optional alpha-test cutout, back-face culling, depth write, and regular fog.",
-      "shader_tokens": ["obj_ff_lighting", "obj_ff_vertex_diffuse", "v_point_light_diffuse"],
+      "shader_tokens": ["obj_skin_vertex", "obj_ff_lighting", "obj_ff_vertex_diffuse", "obj_point_light_sum"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -95,7 +95,7 @@
       "channels": "Diffuse2.rgb multiplies the lit Diffuse1 result at 2x and Diffuse2.a multiplies alpha. MaterialDiffuse.a (AlphaGenValue) also multiplies alpha on this _FFP path; a missing secondary texture drops the detail stage.",
       "light_response": "Same geometric vertex-light response as Fixed; the detail stage changes material channels, not lighting.",
       "state": "NORMAL pass with the same six static policies as Fixed.",
-      "shader_tokens": ["obj_ff_lighting", "v_point_light_diffuse", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
+      "shader_tokens": ["obj_ff_lighting", "obj_point_light_sum", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -202,9 +202,9 @@
         ]
       },
       "channels": "Tangent-space normal map drives per-pixel N.L; Diffuse1.rgb is the albedo and alpha is optional cutout coverage.",
-      "light_response": "Skinned hemisphere plus mapped-normal directional and point diffuse, with the retail geometric-normal self-shadow multiplier on each lit pass.",
+      "light_response": "Lit in the first palette entry's frame (skinnormal false; the nearest earlier invertible table entry when that matrix collapses): hemisphere plus mapped-normal directional and point diffuse on the undeformed tangent frame, point lights measured from the vertex that entry carries, with the retail geometric-normal self-shadow multiplier on each lit pass.",
       "state": "Opaque NORMAL pass, optional cutout, regular fog; no CLIP technique (the bone path skips CLIP), the skinned MATCHTERRAIN pre-pass.",
-      "shader_tokens": ["obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
+      "shader_tokens": ["obj_skin_vertex", "obj_point_light_origin", "obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -242,9 +242,9 @@
         ]
       },
       "channels": "Diffuse1.rgb is albedo; Diffuse1.a is coverage and pow-8 specular brightness.",
-      "light_response": "Skinned tangent-space mapped-normal Phong; pow-8 directional/point specular and retail point-pass self-shadow, with no directional self-shadow in the shipped skinned vertex program.",
+      "light_response": "Lit in the first palette entry's frame (skinnormal false; the nearest earlier invertible table entry when that matrix collapses): tangent-space mapped-normal Phong on the undeformed tangent frame, the first entry's own normal feeding the Gouraud hemisphere; pow-8 directional/point specular, point lights measured from the vertex that entry carries, and retail point-pass self-shadow, with no directional self-shadow in the shipped skinned vertex program.",
       "state": "Opaque NORMAL pass, optional cutout, regular base fog plus additive point-pass fog semantics.",
-      "shader_tokens": ["obj_phong_lighting", "base.a", "view_dir, 0.0", "obj_pow8"],
+      "shader_tokens": ["obj_skin_vertex", "obj_point_light_origin", "obj_phong_lighting", "base.a", "view_dir, 0.0", "obj_pow8"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -281,9 +281,9 @@
         ]
       },
       "channels": "Object-space normal map drives per-pixel N.L; Diffuse1.rgb is albedo and alpha is optional cutout coverage.",
-      "light_response": "Skinned hemisphere plus mapped-normal directional and point diffuse with geometric-normal self-shadow.",
+      "light_response": "Lit in the first palette entry's frame (skinnormal false; the nearest earlier invertible table entry when that matrix collapses): hemisphere plus object-space mapped-normal directional and point diffuse, the bind-space map resolved against that entry's axes, point lights measured from the vertex it carries, with geometric-normal self-shadow.",
       "state": "Opaque NORMAL pass, optional cutout, regular fog; no CLIP technique (the bone path skips CLIP), the skinned MATCHTERRAIN pre-pass.",
-      "shader_tokens": ["obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
+      "shader_tokens": ["obj_skin_vertex", "obj_point_light_origin", "OBJ_NORMAL_FIRST_BONE_AXES", "obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -328,9 +328,9 @@
         ]
       },
       "channels": "Diffuse1.rgb is albedo; raw Diffuse1.a is PhongMap gloss/brightness data alpha*mix(sampled pow4,sampled pow64,alpha). The lookup's sampled alpha supplies N.L. NORMAL cutout coverage comes from the vertex diffuse alpha/self-shadow channel, not Diffuse1.a; AlphaGenValue is ignored.",
-      "light_response": "Flat AmbientColor plus skinned object-space mapped-normal PhongMap for directional/point lights, including the geometric self-shadow multiplier; it does not consume the oriented hemisphere gradient.",
+      "light_response": "Lit in the first palette entry's frame (skinnormal false; the nearest earlier invertible table entry when that matrix collapses): flat AmbientColor plus object-space mapped-normal PhongMap for directional/point lights, the bind-space map resolved against that entry's axes and point lights measured from the vertex it carries, including the geometric self-shadow multiplier; it does not consume the oriented hemisphere gradient.",
       "state": "Opaque NORMAL pass; optional object cutout tests vertex diffuse alpha while the combined shader output alpha remains fixed because Diffuse1.a is gloss data.",
-      "shader_tokens": ["uniform sampler2D u_phong_map : filter_linear, repeat_disable", "obj_phong_map_lookup", "obj_phong_map_specular", "obj_phong_map_points", "mix(lookup.r, lookup.b, alpha)", "base.rgb * lookup.a", "OBJ_COVERAGE_VERTEX_DIFFUSE_ALPHA", "output_alpha = 1.0"],
+      "shader_tokens": ["obj_skin_vertex", "OBJ_NORMAL_FIRST_BONE_AXES", "uniform sampler2D u_phong_map : filter_linear, repeat_disable", "obj_phong_map_lookup", "obj_phong_map_specular", "obj_phong_map_points", "mix(lookup.r, lookup.b, alpha)", "base.rgb * lookup.a", "OBJ_COVERAGE_VERTEX_DIFFUSE_ALPHA", "output_alpha = 1.0"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -383,9 +383,9 @@
         ]
       },
       "channels": "Diffuse1 supplies albedo and coverage. The tangent normal map supplies the encoded DOT3 vector; AlphaGenValue is ignored.",
-      "light_response": "Skinned fixed-function DOT3: geometric-normal Gouraud hemisphere plus mapped directional/point N.L with attenuation and no CalcSelfShadowTerm multiplier.",
+      "light_response": "Lit in the first palette entry's frame (skinnormal false; the nearest earlier invertible table entry when that matrix collapses): fixed-function DOT3 with the first entry's own geometric normal feeding the Gouraud hemisphere, plus mapped directional/point N.L on the undeformed tangent frame, point lights measured from the vertex that entry carries, with attenuation and no CalcSelfShadowTerm multiplier.",
       "state": "Opaque NORMAL pass, optional cutout, regular fog.",
-      "shader_tokens": ["obj_dot3_skinned_lighting", "obj_dot3_points"],
+      "shader_tokens": ["obj_skin_vertex", "obj_point_light_origin", "obj_dot3_skinned_lighting", "obj_dot3_points"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -403,7 +403,7 @@
       "channels": "Diffuse1 supplies albedo and primary coverage, then Diffuse2 post-multiplies RGB at 2x and alpha at 1x. AlphaGenValue is ignored.",
       "light_response": "Same skinned fixed-function DOT3 light topology as Dot3TangentSkinned.",
       "state": "Opaque NORMAL pass, optional cutout, regular fog.",
-      "shader_tokens": ["obj_dot3_skinned_lighting", "obj_dot3_points", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
+      "shader_tokens": ["obj_skin_vertex", "obj_dot3_skinned_lighting", "obj_dot3_points", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -419,9 +419,9 @@
         ]
       },
       "channels": "Diffuse1 supplies albedo and coverage; the object-space normal map supplies the encoded DOT3 vector. A missing Diffuse2 drops the optional detail stage; AlphaGenValue is ignored.",
-      "light_response": "Skinned fixed-function DOT3: geometric-normal Gouraud hemisphere plus mapped directional/point N.L with attenuation and no CalcSelfShadowTerm multiplier.",
+      "light_response": "Lit in the first palette entry's frame (skinnormal false; the nearest earlier invertible table entry when that matrix collapses): fixed-function DOT3 with the first entry's own geometric normal feeding the Gouraud hemisphere, plus object-space mapped directional/point N.L, the bind-space map resolved against that entry's axes, point lights measured from the vertex it carries, with attenuation and no CalcSelfShadowTerm multiplier.",
       "state": "Opaque NORMAL pass, optional cutout, regular fog.",
-      "shader_tokens": ["obj_dot3_skinned_lighting", "obj_dot3_points"],
+      "shader_tokens": ["obj_skin_vertex", "obj_point_light_origin", "OBJ_NORMAL_FIRST_BONE_AXES", "obj_dot3_skinned_lighting", "obj_dot3_points"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -437,7 +437,7 @@
       "channels": "Diffuse1 supplies primary coverage; object-space mapped RGB is post-multiplied by Diffuse2.rgb at 2x and Diffuse2.a multiplies coverage. AlphaGenValue is ignored.",
       "light_response": "Same object-space mapped-normal diffuse response as Dot3Object.",
       "state": "Opaque NORMAL pass, optional cutout, regular fog.",
-      "shader_tokens": ["obj_dot3_skinned_lighting", "obj_dot3_points", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
+      "shader_tokens": ["obj_skin_vertex", "OBJ_NORMAL_FIRST_BONE_AXES", "obj_dot3_skinned_lighting", "obj_dot3_points", "base.rgb *= detail.rgb * 2.0", "base.a *= detail.a"],
       "parity_status": "matching",
       "exceptions": []
     },
@@ -534,9 +534,9 @@
         "sources": [{"file": "SkGlass.fx", "symbols": ["technique TSkGlass", "vsSkinGlass", "TexCubeEnvironment", "ZMODE_NOWRITE", "RSAlphaMode(TRUE, ONE, ONE)"]}]
       },
       "channels": "Skinned reflected environment is tinted by ReflectColor under MODULATE2X; it intentionally omits Diffuse1 and ColorSrcGlobalGain. Coverage is ReflectColor.a times sampled cube alpha.",
-      "light_response": "No direct diffuse/specular light response; appearance changes only with the hosted environment cube.",
+      "light_response": "No direct diffuse/specular light response; appearance changes only with the hosted environment cube, sampled along the reflection off the four-weight blended, renormalized normal (skinnormal, vsSkinGlass).",
       "state": "Additive ONE/ONE, no depth write, additive shader fog; optional alpha cutout remains no-write.",
-      "shader_tokens": ["obj_environment_cube_approx", "u_reflect_color.rgb", "* 2.0"],
+      "shader_tokens": ["obj_skin_vertex", "obj_environment_cube_approx", "u_reflect_color.rgb", "* 2.0"],
       "forbidden_shader_tokens": ["opennova_light_block_gain"],
       "parity_status": "matching",
       "exceptions": []

@@ -17,7 +17,7 @@ former `shader_resource_contract_test.gd`, `shader_provenance_pins_test.gd`,
 transitive-source hash golden) were retired on 2026-09-21: a test asserts
 behavior through a public seam, never the text of the code.
 
-The 132 object shaders (the 128 object wrappers under `object/` and four
+The 140 object shaders (the 136 object wrappers under `object/` and four
 declared auxiliary EnvironmentMirrorTextured P3 postmultiply passes) are
 hand-maintained: each wrapper states its own selection defines (pass, fog,
 blend, clip and coverage axes) ahead of its shared includes and inherits its
@@ -42,9 +42,11 @@ dispositions, the decode is not re-run. For `TECHNIQUE_NORMAL`, 19 declarations
 are selected by the highest-quality profile, ten are lower-quality fallbacks,
 and `leaves.FX` is explicitly excluded because its tag is absent from the
 shipped OED/runtime registry. Those 19 declarations plus the runtime-only
-`VS_TRACER` witness project exactly onto the 24 checked-in runtime techniques.
+`VS_TRACER` witness project exactly onto the 26 checked-in runtime techniques
+(SkBDiffT and SkBDiffO share their pixel shaders with Dot3DiffT and Dot3DiffO
+but run techniques of their own for their skinned vertex programs).
 
-`object/technique_validation.json` then audits those 24 NORMAL techniques
+`object/technique_validation.json` then audits those 26 NORMAL techniques
 individually: RGB/alpha/coverage channel ownership (including specular or
 PhongMap data in Diffuse1 alpha), mapped/geometric normal space, directional,
 hemisphere, ambient, and point-light response, state/fog policy, and decoded
@@ -91,7 +93,7 @@ Lighting validation is layered:
    `INSTANCE_CUSTOM.x`, and requires byte-identical RGBA8 output against the
    live per-instance-uniform route. Native and GUT layers separately pin atlas
    selection, immutable row identity, owner/interior isolation, and clearing.
-4. `render_swatch` mode `channels` rasterizes the same 24
+4. `render_swatch` mode `channels` rasterizes the same 26
    techniques through eight paired states. It proves that `RgbGen` affects
    only `_FFP` self-lit RGB, `AlphaGenValue` affects only `_FFP` fixed alpha,
    each technique cuts out from its declared diffuse/normal/vertex/reflect/
