@@ -155,22 +155,7 @@ void Celestial::_apply_sky_pass_gates() {
 }
 
 MissionEnvironment *Celestial::_env_node() {
-	if (env_node_id_.is_valid()) {
-		MissionEnvironment *env = Object::cast_to<MissionEnvironment>(
-				ObjectDB::get_instance(env_node_id_));
-		if (env != nullptr && env->is_inside_tree()) {
-			return env;
-		}
-	}
-	if (environment_path_.is_empty() ||
-			(!is_inside_tree() && environment_path_.is_absolute())) {
-		return nullptr;
-	}
-	MissionEnvironment *env = Object::cast_to<MissionEnvironment>(
-			get_node_or_null(environment_path_));
-	env_node_id_ = env != nullptr ? ObjectID(env->get_instance_id())
-								  : ObjectID();
-	return env;
+	return resolve_cached_node<MissionEnvironment>(*this, environment_path_, env_node_id_);
 }
 
 Ref<EnvFile> Celestial::_env_data() {

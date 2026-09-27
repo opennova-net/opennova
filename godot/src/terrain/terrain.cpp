@@ -46,11 +46,6 @@ void Terrain::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_quality", PROPERTY_HINT_RANGE, "0.1,4.0,0.1"),
 		"set_lod_quality", "get_lod_quality");
 
-	ClassDB::bind_method(D_METHOD("set_tile_overlay_enabled", "enabled"), &Terrain::set_tile_overlay_enabled);
-	ClassDB::bind_method(D_METHOD("get_tile_overlay_enabled"), &Terrain::get_tile_overlay_enabled);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "tile_overlay_enabled"),
-		"set_tile_overlay_enabled", "get_tile_overlay_enabled");
-
 	ClassDB::bind_method(D_METHOD("set_tile_info_override", "tile_info"), &Terrain::set_tile_info_override);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"), &Terrain::get_tile_info_override);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override", PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
@@ -308,20 +303,6 @@ void Terrain::set_lod_quality(float p_quality) {
 
 float Terrain::get_lod_quality() const {
 	return lod_quality;
-}
-
-void Terrain::set_tile_overlay_enabled(bool p_enabled) {
-	if (tile_overlay_enabled == p_enabled) {
-		return;
-	}
-	tile_overlay_enabled = p_enabled;
-	if (built) {
-		_rebuild_tile_overlay_pages();
-	}
-}
-
-bool Terrain::get_tile_overlay_enabled() const {
-	return tile_overlay_enabled;
 }
 
 void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
@@ -1059,8 +1040,7 @@ void Terrain::_load_textures() {
 	}
 	surface_inputs->rebuild(terrain_data, tile_info_override);
 	surface_inputs->apply_to_material(terrain_material);
-	tile_cache_device.rebuild(terrain_data, surface_inputs,
-			tile_info_override, tile_overlay_enabled);
+	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
 	terrain_material->set_shader_parameter(
 			"u_tile_cache", tile_cache_device.get_texture());
 	terrain_material->set_shader_parameter(
@@ -1073,8 +1053,7 @@ void Terrain::_rebuild_tile_overlay_pages() {
 	}
 	surface_inputs->set_terrain_data(terrain_data);
 	surface_inputs->set_tile_info_override(tile_info_override);
-	tile_cache_device.rebuild(terrain_data, surface_inputs,
-			tile_info_override, tile_overlay_enabled);
+	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
 	terrain_material->set_shader_parameter(
 			"u_tile_cache", tile_cache_device.get_texture());
 	terrain_material->set_shader_parameter(

@@ -42,7 +42,7 @@ void Simulation::set_server_text(const String &p_medic_request_format) {
 	// broadcast prints the caller's name into (Server_BroadcastMedicRequest
 	// @0x515390, Lane 1's handler reads NapiNPServerCtx::medic_request_format).
 	opennova::inmatch::ServerTextTable text;
-	text.medic_request_format = p_medic_request_format.utf8().get_data();
+	text.medic_request_format = opennova::to_std(p_medic_request_format);
 	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx())
 		opennova::inmatch::set_server_text(*ctx, std::move(text));
 }
@@ -69,8 +69,8 @@ TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_defau
 	opennova::world::DeployListInput in;
 	// [orig: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553b1e..0x553b38]
 	in.team_color_tag = runtime_->assigned_team() == 2 ? "<cFF2020>" : "<c4040FF>";
-	in.default_key = p_default_key.utf8().get_data();
-	in.default_home = p_default_home.utf8().get_data();
+	in.default_key = opennova::to_std(p_default_key);
+	in.default_home = opennova::to_std(p_default_home);
 	in.zones = deploy_zone_rows();
 	in.zone_name = [&p_zone_names](const std::string &key) {
 		const String k = opennova::to_gd(key);

@@ -20,7 +20,7 @@ Ref<PlayerInventory> PlayerInventory::make(const String &p_equipped_name, bool p
 	opennova::world::LocalInventoryView v;
 	v.valid = p_valid;
 	v.equipped_combo = p_equipped_combo;
-	v.equipped_name = p_equipped_name.utf8().get_data();
+	v.equipped_name = opennova::to_std(p_equipped_name);
 	v.carry_flags = static_cast<uint32_t>(p_carry_flags);
 	Ref<PlayerInventory> out;
 	out.instantiate();

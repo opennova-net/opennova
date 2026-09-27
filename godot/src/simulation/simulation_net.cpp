@@ -1068,18 +1068,16 @@ int64_t Simulation::get_kill_announcement_tick(int64_t now) {
 String Simulation::format_feed_line(const String &p_template, const String &p_attacker,
 		const String &p_victim, const String &p_extra,
 		const String &p_bonus_template) const {
-	return String::utf8(opennova::hud::feed_format_line(
+	return opennova::to_gd(opennova::hud::feed_format_line(
 			p_template.utf8().get_data(), p_attacker.utf8().get_data(),
 			p_victim.utf8().get_data(), p_extra.utf8().get_data(),
-			p_bonus_template.utf8().get_data())
-			                    .c_str());
+			p_bonus_template.utf8().get_data()));
 }
 
 String Simulation::format_feed_camp_line(const String &p_template,
 		const String &p_wpname) const {
-	return String::utf8(opennova::hud::feed_format_camp_line(
-			p_template.utf8().get_data(), p_wpname.utf8().get_data())
-			                    .c_str());
+	return opennova::to_gd(opennova::hud::feed_format_camp_line(
+			p_template.utf8().get_data(), p_wpname.utf8().get_data()));
 }
 
 

@@ -283,8 +283,8 @@ void LwfData::build_file_from_tree(opennova::lwf::File &r_file) const {
 	std::map<SingleKey, uint32_t> key_to_single;
 
 	auto intern_single = [&](const Dictionary &member) -> uint32_t {
-		const std::string name = String(member.get("name", String())).utf8().get_data();
-		const std::string path = String(member.get("wav_path", String())).utf8().get_data();
+		const std::string name = opennova::to_std(String(member.get("name", String())));
+		const std::string path = opennova::to_std(String(member.get("wav_path", String())));
 		SingleKey key{ name, path };
 		auto it = key_to_single.find(key);
 		if (it != key_to_single.end()) {
@@ -319,7 +319,7 @@ void LwfData::build_file_from_tree(opennova::lwf::File &r_file) const {
 	for (int si = 0; si < sets_.size(); ++si) {
 		Dictionary set = sets_[si];
 		opennova::lwf::Multi multi;
-		multi.name = String(set.get("name", String())).utf8().get_data();
+		multi.name = opennova::to_std(String(set.get("name", String())));
 		multi.pitch_base = static_cast<uint32_t>(static_cast<int64_t>(
 				set.get("pitch_base", static_cast<int64_t>(opennova::lwf::kAuthoredSetPitchBase))));
 		multi.pitch_random_range = static_cast<uint32_t>(static_cast<int64_t>(set.get("pitch_random_range", 0)));

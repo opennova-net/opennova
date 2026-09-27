@@ -95,18 +95,10 @@ void fragment() {
 
 int HudOverlay::hud_color_index_default() { return opennova::hud::kHudColorIndexDefault; }
 int HudOverlay::clamp_hud_color_index(int p_index) { return opennova::hud::clamp_hud_color_index(p_index); }
-int HudOverlay::next_hud_color_index(int p_index) { return opennova::hud::next_hud_color_index(p_index); }
 int HudOverlay::hud_detail_level_default() { return opennova::hud::kHudDetailLevelDefault; }
 int HudOverlay::hud_detail_level_blank() { return opennova::hud::kHudDetailLevelBlank; }
 int HudOverlay::next_hud_detail_level(int p_level) { return opennova::hud::next_hud_detail_level(p_level); }
-int HudOverlay::showhud_flags_default() { return static_cast<int>(opennova::hud::kShowHudFlagsDefault); }
-int HudOverlay::next_showhud_flags(int p_flags) {
-	return static_cast<int>(opennova::hud::next_showhud_flags(static_cast<uint32_t>(p_flags)));
-}
 int HudOverlay::sight_scale_index_default() { return opennova::hud::kSightScaleIndexDefault; }
-HudOverlay::FriendlyTagMode HudOverlay::friendly_tag_mode_default() {
-	return static_cast<FriendlyTagMode>(opennova::hud::kFriendlyTagModeDefault);
-}
 HudOverlay::FriendlyTagMode HudOverlay::next_friendly_tag_mode(FriendlyTagMode p_mode) {
 	return static_cast<FriendlyTagMode>(opennova::hud::next_friendly_tag_mode(
 			static_cast<opennova::hud::FriendlyTagMode>(p_mode)));
@@ -125,14 +117,10 @@ void HudOverlay::_bind_methods() {
 	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_BRIEF);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_color_index_default"), &HudOverlay::hud_color_index_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("clamp_hud_color_index", "index"), &HudOverlay::clamp_hud_color_index);
-	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_color_index", "index"), &HudOverlay::next_hud_color_index);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_detail_level_default"), &HudOverlay::hud_detail_level_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_detail_level_blank"), &HudOverlay::hud_detail_level_blank);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_detail_level", "level"), &HudOverlay::next_hud_detail_level);
-	ClassDB::bind_static_method("HudOverlay", D_METHOD("showhud_flags_default"), &HudOverlay::showhud_flags_default);
-	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_showhud_flags", "flags"), &HudOverlay::next_showhud_flags);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("sight_scale_index_default"), &HudOverlay::sight_scale_index_default);
-	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_mode_default"), &HudOverlay::friendly_tag_mode_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_friendly_tag_mode", "mode"), &HudOverlay::next_friendly_tag_mode);
 	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root"), &HudOverlay::configure);
 	ClassDB::bind_method(D_METHOD("is_configured"), &HudOverlay::is_configured);
@@ -668,8 +656,8 @@ void HudOverlay::set_weapon(const String &p_weapon_name, const String &p_display
 	const bool was_active = wep.active;
 	wep = opennova::hud::HudWeaponState{};
 	wep.active = was_active;
-	wep.display_name = p_display_name.utf8().get_data();
-	wep.round_type = p_round_type.utf8().get_data();
+	wep.display_name = opennova::to_std(p_display_name);
+	wep.round_type = opennova::to_std(p_round_type);
 	wep.capacity = p_clipsize;
 	wep.rounds_per_icon = p_rounds_per_icon;
 	wep.clipgfx_offset_x = p_clipgfx_offset.x;
@@ -706,20 +694,20 @@ void HudOverlay::reset_overlay_buffers() {
 }
 
 void HudOverlay::set_kill_announcement(const String &text, int64_t tick) {
-	state_.kill_announcement.text = text.utf8().get_data();
+	state_.kill_announcement.text = opennova::to_std(text);
 	state_.kill_announcement.tick = static_cast<uint32_t>(tick);
 	queue_redraw();
 }
 
 void HudOverlay::push_message(const String &p_text) {
-	compiler_.push_message(p_text.utf8().get_data(), state_.ticks);
+	compiler_.push_message(opennova::to_std(p_text), state_.ticks);
 	queue_redraw();
 }
 
 void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
 	// stored raw and drawn as stored [orig: the stored-color read @0x59ae97].
-	compiler_.push_feed_line(p_text.utf8().get_data(),
+	compiler_.push_feed_line(opennova::to_std(p_text),
 			static_cast<uint32_t>(p_argb), state_.ticks);
 	queue_redraw();
 }
@@ -776,7 +764,7 @@ void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<R
     }
     if (scope.active && p_gametext.is_valid()) {
         const auto text = [&](const char *section, const char *key) -> std::string {
-            return p_gametext->get_string_in_section(section, key).utf8().get_data();
+            return opennova::to_std(p_gametext->get_string_in_section(section, key));
         };
         scope.range_format = text("Overlays", "STROVER_DIST");
         scope.range_over_1km = text("Overlays", "STROVER_DIST1KM");
@@ -797,7 +785,7 @@ void HudOverlay::set_view_state(bool p_binoculars_view_active, const Vector2 &p_
 }
 
 void HudOverlay::set_objectives_header(const String &p_text) {
-	state_.objectives_header = p_text.utf8().get_data();
+	state_.objectives_header = opennova::to_std(p_text);
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
@@ -808,13 +796,13 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_c
 	// The 4-team page clock: the shell's 62 Hz HUD tick, the same fold (and the
 	// same frame-rate caveat) as the LFP panel's blink counter below.
 	sb.frame_counter = p_frame_counter;
-	sb.title = String(p_strings.get("title", "")).utf8().get_data();
-	sb.server_name = String(p_strings.get("server", "")).utf8().get_data();
-	sb.mission_title = String(p_strings.get("mission", "")).utf8().get_data();
-	sb.game_type_label = String(p_strings.get("game_type", "")).utf8().get_data();
-	sb.players_line = String(p_strings.get("players", "")).utf8().get_data();
-	sb.spectators_line = String(p_strings.get("spectators", "")).utf8().get_data();
-	sb.footer = String(p_strings.get("footer", "")).utf8().get_data();
+	sb.title = opennova::to_std(String(p_strings.get("title", "")));
+	sb.server_name = opennova::to_std(String(p_strings.get("server", "")));
+	sb.mission_title = opennova::to_std(String(p_strings.get("mission", "")));
+	sb.game_type_label = opennova::to_std(String(p_strings.get("game_type", "")));
+	sb.players_line = opennova::to_std(String(p_strings.get("players", "")));
+	sb.spectators_line = opennova::to_std(String(p_strings.get("spectators", "")));
+	sb.footer = opennova::to_std(String(p_strings.get("footer", "")));
 	// Rows come straight from the replication projection — no script-side
 	// Dictionary round-trip to drop fields or lose the score sign.
 	if (p_shown && p_sim.is_valid()) {
@@ -837,7 +825,7 @@ void HudOverlay::set_end_round_overlay(bool p_shown, int p_top, int p_bottom,
 	const int64_t count = std::min(p_texts.size(), p_ys.size());
 	for (int64_t i = 0; i < count; ++i) {
 		opennova::hud::HudEndRoundLine line;
-		line.text = p_texts[i].utf8().get_data();
+		line.text = opennova::to_std(p_texts[i]);
 		line.y = p_ys[i];
 		er.lines.push_back(line);
 	}
@@ -852,7 +840,7 @@ void HudOverlay::set_end_round_statistics(bool p_shown, bool p_raised,
 	opennova::hud::HudEndRoundStatisticsState &st = state_.end_round_statistics;
 	st.shown = p_shown;
 	st.raised = p_raised;
-	st.title = p_title.utf8().get_data();
+	st.title = opennova::to_std(p_title);
 	for (int64_t i = 0; i < 4; ++i) {
 		st.labels[i] = i < p_labels.size()
 				? opennova::to_std(p_labels[i]) : std::string();
@@ -913,7 +901,7 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 }
 
 void HudOverlay::push_chat_line(const String &p_text, int64_t p_argb) {
-	compiler_.push_chat_line(p_text.utf8().get_data(),
+	compiler_.push_chat_line(opennova::to_std(p_text),
 			static_cast<uint32_t>(p_argb), state_.ticks);
 	queue_redraw();
 }
@@ -924,7 +912,7 @@ void HudOverlay::set_message_log_shown(bool p_shown) {
 }
 
 void HudOverlay::set_message_log_title(const String &p_title) {
-	state_.message_log_title = p_title.utf8().get_data();
+	state_.message_log_title = opennova::to_std(p_title);
 	queue_redraw();
 }
 
@@ -943,8 +931,8 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 	lp.conquest_mode = static_cast<uint32_t>(p_game_type) ==
 			opennova::game_type::kConquerAndControl;
 	lp.under_attack_text =
-			String(p_strings.get("under_attack", "")).utf8().get_data();
-	lp.ready_text = String(p_strings.get("ready", "")).utf8().get_data();
+			opennova::to_std(String(p_strings.get("under_attack", "")));
+	lp.ready_text = opennova::to_std(String(p_strings.get("ready", "")));
 	if (p_shown && p_sim.is_valid()) {
 		lp.shown = p_sim->fill_lfp_zones(p_local_team, lp.zones);
 	} else {
@@ -957,7 +945,7 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 void HudOverlay::set_waypoint(const String &p_name, int p_distance_m,
 		const Vector2 &p_mission_position, float p_altitude_wu) {
 	state_.waypoint.present = true;
-	state_.waypoint.name = p_name.utf8().get_data();
+	state_.waypoint.name = opennova::to_std(p_name);
 	state_.waypoint.distance_m = p_distance_m;
 	state_.waypoint.world_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
 	state_.waypoint.world_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
@@ -1068,7 +1056,7 @@ void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
 			opennova::hud::HudAttachLabel label;
 			label.screen_x = screen.x;
 			label.screen_y = screen.y;
-			label.text = attach_label_text(p_gametext, l.type, l.attach_text_key).utf8().get_data();
+			label.text = opennova::to_std(attach_label_text(p_gametext, l.type, l.attach_text_key));
 			label.nearest = l.nearest;
 			state_.attach_labels.push_back(label);
 		}

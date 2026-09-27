@@ -13,7 +13,6 @@ void MissionSetupOptions::set_music_director(MusicDirector *director) {
 }
 
 void MissionSetupOptions::_bind_methods() {
-    ClassDB::bind_method(D_METHOD("get_music_director"), &MissionSetupOptions::get_music_director);
     ClassDB::bind_method(D_METHOD("set_music_director", "director"), &MissionSetupOptions::set_music_director);
 #define SETUP_OPTION(m_variant, m_name)                                                          \
 	ClassDB::bind_method(D_METHOD("get_" #m_name), &MissionSetupOptions::get_##m_name);         \

@@ -12,6 +12,7 @@
 #include "util/axes.h"
 #include "util/data_format.h"
 #include "util/pcx_texture_bridge.h"
+#include "util/string_convert.h"
 #include "util/texture_path_resolver.h"
 
 #include <formats/env/env_celestial.h>
@@ -212,8 +213,8 @@ void EnvFile::_connect_keyframes() {
 }
 
 void EnvFile::_sync_env_from_properties() {
-	env.name = env_name.utf8().get_data();
-	env.timeofday = timeofday.utf8().get_data();
+	env.name = opennova::to_std(env_name);
+	env.timeofday = opennova::to_std(timeofday);
 	env.envscale = envscale;
 	env.curtime = curtime;
 	env.fog_level = fog_level;
@@ -232,12 +233,12 @@ void EnvFile::_sync_env_from_properties() {
 	env.iris_center = iris_center;
 	env.sky_speed = sky_speed;
 	env.sky_height = sky_height;
-	env.sky_map1 = sky_map1.utf8().get_data();
-	env.sky_map2 = sky_map2.utf8().get_data();
-	env.sun_3di = sun_3di.utf8().get_data();
-	env.moon_3di = moon_3di.utf8().get_data();
-	env.glare_3di = glare_3di.utf8().get_data();
-	env.star_3di = star_3di.utf8().get_data();
+	env.sky_map1 = opennova::to_std(sky_map1);
+	env.sky_map2 = opennova::to_std(sky_map2);
+	env.sun_3di = opennova::to_std(sun_3di);
+	env.moon_3di = opennova::to_std(moon_3di);
+	env.glare_3di = opennova::to_std(glare_3di);
+	env.star_3di = opennova::to_std(star_3di);
 	env.advanced_clouds = advanced_clouds;
 	env.keyframes.clear();
 	for (int i = 0; i < tod_keyframes.size(); ++i) {
@@ -433,7 +434,7 @@ Error EnvFile::save_to_path(const String &p_path) {
 		return ERR_FILE_CANT_WRITE;
 	}
 	const std::string content = output.str();
-	file->store_string(String::utf8(content.c_str(), content.size()));
+	file->store_string(opennova::to_gd(content));
 	file->close();
 	return OK;
 }

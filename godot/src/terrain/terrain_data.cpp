@@ -432,7 +432,7 @@ Error TerrainData::_import_pcx_slot_bytes(const String &slot_id, const String &f
 	*refs.width = w;
 	*refs.height = h;
 	*refs.tex = opennova::build_indexed_texture(*refs.indices, refs.palette, w, h);
-	*refs.trn_filename = filename.get_file().utf8().get_data();
+	*refs.trn_filename = opennova::to_std(filename.get_file());
 	if (slot_id == "foliagemap") {
 		_sync_foliage_map_resource_from_slot();
 	}
@@ -520,7 +520,7 @@ static void _sync_texture_filename(const Ref<Texture2D> &texture, std::string &t
 	}
 	const String filename = path.get_file();
 	if (!filename.is_empty()) {
-		target_field = filename.utf8().get_data();
+		target_field = opennova::to_std(filename);
 	}
 }
 
@@ -529,7 +529,7 @@ static void _sync_texture_filename(const Ref<Texture2D> &texture, std::string &t
 // filename fields, which are owned by the Ref<Texture2D> setters (covered by
 // _sync_trn_texture_filenames_from_refs below) and the import/reset paths.
 void TerrainData::_sync_trn_scalars_from_properties() {
-	trn.name = terrain_name.utf8().get_data();
+	trn.name = opennova::to_std(terrain_name);
 	trn.detail_density = detail_density;
 	trn.detail_density2 = detail_density2;
 	trn.sector_count = sector_count;
@@ -794,7 +794,7 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 		}
 	}
 	tilestrip_tex = load_tex("tilestrip", tilestrip_filename);
-	trn.tilestrip = tilestrip_filename.utf8().get_data();
+	trn.tilestrip = opennova::to_std(tilestrip_filename);
 
 	// load_trn's admission gate already rejected an empty polydata name (the
 	// retail loader refuses such a config), so the .cpt is always named here.
@@ -1140,7 +1140,7 @@ Array TerrainData::get_foliage_defs() const {
 }
 
 void TerrainData::set_tileinfo_filename(const String &filename) {
-	trn.tileinfo = filename.utf8().get_data();
+	trn.tileinfo = opennova::to_std(filename);
 	tileinfo_resource_cache.unref();
 	tileinfo_resource_cache_path = String();
 	_notify_terrain_changed();
@@ -1215,7 +1215,7 @@ Error TerrainData::save_to_path(const String &p_path) const {
 	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::WRITE);
 	if (f.is_null()) return ERR_FILE_CANT_WRITE;
 	std::string content = oss.str();
-	f->store_string(String::utf8(content.c_str(), content.size()));
+	f->store_string(opennova::to_gd(content));
 	f->close();
 	return OK;
 }

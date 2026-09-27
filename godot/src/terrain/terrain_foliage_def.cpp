@@ -1,6 +1,7 @@
 #include "terrain/terrain_foliage_def.h"
 
 #include "terrain/terrain_clamp.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 
@@ -82,7 +83,7 @@ void TerrainFoliageDef::copy_from_native(const opennova::FoliageDef &def) {
 
 opennova::FoliageDef TerrainFoliageDef::to_native() const {
 	opennova::FoliageDef def;
-	def.graphic = graphic.utf8().get_data();
+	def.graphic = opennova::to_std(graphic);
 	def.color_lower = color_lower;
 	def.color_upper = color_upper;
 	def.match = match;

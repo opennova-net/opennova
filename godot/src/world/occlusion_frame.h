@@ -192,8 +192,8 @@ public:
 	// no extra work here.
 	void release_overrides(bool p_reset_semantics);
 
-	// The local player's latched indoors letter (accum bit 0x2). Read-only
-	// from script.
+	// The local player's latched indoors letter (accum bit 0x2); the frame
+	// legs read it natively.
 	bool is_blink_indoors() const { return blink_indoors_; }
 	// Re-derive the scene pass gates from the latched letters and the eye's
 	// CURRENT waterline side: the letters change per sim tick

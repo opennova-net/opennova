@@ -27,7 +27,7 @@ Ref<ThrowableVisualRow> ThrowableVisualRow::make(int64_t p_key, int p_item_id, c
 	v.pitch_deg = p_rotation_deg.x;
 	v.yaw_deg = p_rotation_deg.y;
 	v.roll_deg = p_rotation_deg.z;
-	v.move_effect = p_move_effect.utf8().get_data();
+	v.move_effect = opennova::to_std(p_move_effect);
 	v.move_effect_live = p_move_effect_live;
 	Ref<ThrowableVisualRow> out;
 	out.instantiate();
@@ -63,7 +63,7 @@ Ref<VehicleTrailVisualRow> VehicleTrailVisualRow::make(int p_handle, int64_t p_g
 	v.handle_packed = p_handle;
 	v.registry_spawn_id = uint64_t(p_generation);
 	v.point = uint8_t(p_point);
-	v.effect = p_effect.utf8().get_data();
+	v.effect = opennova::to_std(p_effect);
 	v.pos = { p_pos.x, -p_pos.z, p_pos.y };
 	v.dir = { p_dir.x, -p_dir.z, p_dir.y };
 	v.magnitude_q16 = uint32_t(std::llround(double(p_magnitude) * 65536.0));
@@ -115,10 +115,10 @@ Ref<FirePresentationEvent> FirePresentationEvent::make(const Vector3 &p_origin, 
 	v.source_bms_id = p_source_bms_id;
 	v.is_local_player = p_is_local_player;
 	v.ammo_index = p_ammo_index;
-	v.effect = p_effect.utf8().get_data();
+	v.effect = opennova::to_std(p_effect);
 	v.mf_light = p_mf_light;
-	v.action_effect = p_action_effect.utf8().get_data();
-	v.action_userpoint = p_action_userpoint.utf8().get_data();
+	v.action_effect = opennova::to_std(p_action_effect);
+	v.action_userpoint = opennova::to_std(p_action_userpoint);
 	Ref<FirePresentationEvent> out;
 	out.instantiate();
 	out->assign(v);
@@ -158,7 +158,7 @@ void FirePresentationEvent::_bind_methods() {
 Ref<FireSoundRow> FireSoundRow::make(const String &p_soundset, const Vector3 &p_pos,
 		int p_source_bms_id) {
 	opennova::world::ReadyFireSound v;
-	v.set_name = p_soundset.utf8().get_data();
+	v.set_name = opennova::to_std(p_soundset);
 	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
 	v.source_bms_id = p_source_bms_id;
 	Ref<FireSoundRow> out;
@@ -231,7 +231,7 @@ Ref<SoundEmitterRow> SoundEmitterRow::make(int64_t p_source_spawn_id, int p_hand
 	v.pitch_q16 = p_pitch_q16;
 	v.volume_q8_8 = static_cast<uint16_t>(p_volume_q8_8);
 	v.source_only = p_source_only;
-	v.set_name = p_soundset.utf8().get_data();
+	v.set_name = opennova::to_std(p_soundset);
 	Ref<SoundEmitterRow> out;
 	out.instantiate();
 	out->assign(v);
@@ -430,12 +430,12 @@ void RoundGlowRow::_bind_methods() {
 Ref<MissionEffect> MissionEffect::make(const String &p_kind, int p_a, int p_b, int p_c,
 		const String &p_text, int p_d, int p_wire_handle) {
 	opennova::world::Effect v;
-	v.kind = p_kind.utf8().get_data();
+	v.kind = opennova::to_std(p_kind);
 	v.a = p_a;
 	v.b = p_b;
 	v.c = p_c;
 	v.d = p_d;
-	v.str = p_text.utf8().get_data();
+	v.str = opennova::to_std(p_text);
 	Ref<MissionEffect> out;
 	out.instantiate();
 	out->assign(v, p_wire_handle);

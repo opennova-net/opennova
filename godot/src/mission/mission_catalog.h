@@ -55,8 +55,6 @@ protected:
 
 public:
 	static TypedArray<MissionCatalogRow> rows(const Ref<ResourceRoot> &p_root);
-	// The SP screen's row filter (game_type::is_waypoint_family).
-	static bool sp_visible(int64_t p_game_type);
 	// The flat filename views the session/browser surfaces consume.
 	static PackedStringArray mission_names(const Ref<ResourceRoot> &p_root);
 	static String first_mission_name(const Ref<ResourceRoot> &p_root);

@@ -1,4 +1,5 @@
 #include "particle/particle_file.h"
+#include "util/string_convert.h"
 
 #include <formats/particle/parser.h>
 
@@ -64,7 +65,7 @@ Error ParticleFile::load_from_buffer(const PackedByteArray &bytes, const String 
 	opennova::particle::ParseError err;
 	if (!opennova::particle::load_particles_from_buffer(
 			reinterpret_cast<const char *>(bytes.ptr()), static_cast<std::size_t>(bytes.size()), parsed, err)) {
-		UtilityFunctions::push_warning(String::utf8(("ptl load failed at line " + std::to_string(err.line) + ": " + err.message).c_str()));
+		UtilityFunctions::push_warning(opennova::to_gd("ptl load failed at line " + std::to_string(err.line) + ": " + err.message));
 		return ERR_FILE_CANT_READ;
 	}
 	file_ = std::move(parsed);

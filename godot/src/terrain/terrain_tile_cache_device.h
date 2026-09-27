@@ -58,8 +58,7 @@ public:
 
 	bool rebuild(const Ref<TerrainData> &p_data,
 			const Ref<TerrainSurfaceInputs> &p_surface_inputs,
-			const Ref<TerrainTileInfo> &p_tile_info_override,
-			bool p_tile_overlay_enabled);
+			const Ref<TerrainTileInfo> &p_tile_info_override);
 	void clear();
 	// One PolyTrn_RenderFrame: the cache frame advances and this frame's
 	// claims stamp the given TOD epoch (g_EnvTodEpoch).

@@ -76,8 +76,7 @@ int ControlsModel::action_index_for_row(int p_row) const {
 }
 
 String ControlsModel::control_text(int p_action, int p_device) const {
-	return String::utf8(
-			bindings_.control_text(p_action, device_of(p_device)).c_str());
+	return opennova::to_gd(bindings_.control_text(p_action, device_of(p_device)));
 }
 
 bool ControlsModel::assign_godot_key(int p_action, int p_godot_key, bool p_ctrl,

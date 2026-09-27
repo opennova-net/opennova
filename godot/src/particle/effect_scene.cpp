@@ -199,7 +199,7 @@ Ref<EffectLoadReport> EffectScene::open(
 			continue;
 		}
 		opennova::particle::EffectCatalogDocument document;
-		document.source = file->get_source_path().utf8().get_data();
+		document.source = opennova::to_std(file->get_source_path());
 		document.file = file->native_file();
 		config.documents.push_back(std::move(document));
 	}
