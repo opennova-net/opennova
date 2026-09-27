@@ -217,8 +217,10 @@ void write_strip(Writer &w, const Threedi3di3 &m, const ThreediLod &lod, const T
 		const ThreediVertex &v = lod.vertices.items[st.start_vertex + i];
 		std::string s = "v " + vec9(v.position) + " " + vec9(v.normal) + " " + f9(v.uv0[0]) + " " + f9(v.uv0[1]);
 		if (uv1) s += " " + f9(v.uv1[0]) + " " + f9(v.uv1[1]);
+		// Skinned: the four slots, then the three weights (slot i3 takes the
+		// rest, threedi_skin_influences).
 		if (skinned) {
-			for (int k = 0; k < 3; ++k) s += " " + std::to_string(v.bone_indices[k]);
+			for (int k = 0; k < 4; ++k) s += " " + std::to_string(v.bone_indices[k]);
 			for (int k = 0; k < 3; ++k) s += " " + f9(v.bone_weights[k]);
 		}
 		w.line(s);

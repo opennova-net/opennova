@@ -300,23 +300,44 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				}
 				ThreediVertex vert = render_vertex(p, n, uv, second);
 				if (model.skinned) {
-					// Three influences: local indices into the strip's bone
-					// table and their weights (the fourth index stays 0).
-					long long bi[3];
+					// Four local indices into the strip's bone table and three
+					// weights: slot i3 takes the rest, 1 - (w0 + w1 + w2), as
+					// retail's vertex shader blends (threedi_skin_influences).
+					long long bi[4];
 					double w[3];
 					if (!in.integer(bi[0], 0, 255) || !in.integer(bi[1], 0, 255) || !in.integer(bi[2], 0, 255) ||
-							!in.numbers(w, 3)) {
-						ps.error("a skinned v needs bone slots i0 i1 i2 (bytes) and weights w0 w1 w2 after the uv");
+							!in.integer(bi[3], 0, 255) || !in.numbers(w, 3)) {
+						ps.error("a skinned v needs bone slots i0 i1 i2 i3 (bytes) and weights w0 w1 w2 after the uv");
 						continue;
 					}
-					for (int k = 0; k < 3; ++k) {
-						// Retail ships weighted slots past the strip's table
-						// (FSldr03: slot 255 at weight 0.21), so only a scene
-						// that authors one is told.
-						if (w[k] != 0.0 && bi[k] >= static_cast<long long>(strip->bone_table.size())) ++ps.stray_bones;
-						vert.bone_indices[k] = static_cast<uint8_t>(bi[k]);
-						vert.bone_weights[k] = static_cast<float>(w[k]);
+					for (int k = 0; k < 3 && ok; ++k)
+						if (!(w[k] >= 0.0 && w[k] <= 1.0)) {
+							ps.error("skinned v weight w" + std::to_string(k) + " is " + f9(w[k]) +
+									": a weight is a finite number from 0 to 1");
+							ok = false;
+						}
+					if (!ok) continue;
+					for (int k = 0; k < 4; ++k) vert.bone_indices[k] = static_cast<uint8_t>(bi[k]);
+					for (int k = 0; k < 3; ++k) vert.bone_weights[k] = static_cast<float>(w[k]);
+					// The sum as the shader adds it, in float: retail's
+					// four-decimal weights reach 1.0001 (ArmGlovD), giving slot
+					// i3 a hair of negative weight; past that, the vertex is
+					// not what its author weighted.
+					float sum = 0.0f;
+					for (const float weight : vert.bone_weights) sum += weight;
+					if (sum > 1.0001f) {
+						ps.error("skinned v weights w0 + w1 + w2 sum to " + f9(sum) +
+								": they sum to at most 1 (slot i3 takes the rest, 1 - (w0 + w1 + w2))");
+						continue;
 					}
+					// Retail ships weighted slots past the strip's table
+					// (FSldr03: slot 255 at weight 0.21), so only a scene that
+					// authors one is told.
+					ThreediSkinInfluence influences[4];
+					threedi_skin_influences(&vert, strip->bone_table.data(), static_cast<int32_t>(strip->bone_table.size()),
+							influences);
+					for (const ThreediSkinInfluence &influence : influences)
+						if (influence.weight != 0.0f && influence.part < 0) ++ps.stray_bones;
 					vert.is_skinned = 1;
 				}
 				strip->vertices.push_back(vert);

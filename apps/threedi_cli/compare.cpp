@@ -9,8 +9,9 @@
 //   means or how the runtime reads it beyond float and quantization noise.
 //   LOD types and thresholds; parts (parent, pivot, rel offset, bound
 //   sphere) and the GHDR radius; per part and material, the triangles as
-//   oriented corners (position, normal, UVs, resolved skin weights) and the
-//   vertex layout; materials; registers; PANM rows in row order (the part,
+//   oriented corners (position, normal, UVs, the skin blend: retail's four
+//   influences per part, normalized) and the vertex layout; materials;
+//   registers; PANM rows in row order (the part,
 //   parent, flags, tracks and rotation frame of each); user points; lights;
 //   occlusion records (sphere, vertices, faces with their plane, planes);
 //   collision: the CMDL, the CXLT rows, and per section its parent, offset,
@@ -247,10 +248,11 @@ std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 struct Corner {
 	Vec position{}, normal{};
 	std::array<double, 4> uv{};
-	// Resolved skin, part -> weight summed per part and sorted by part, so the
-	// strip bone-table order does not matter (INT_MAX marks an unused slot).
-	std::array<int, 3> bone{{INT_MAX, INT_MAX, INT_MAX}};
-	std::array<double, 3> weight{};
+	// The resolved skin blend (skin_blend): part -> weight, sorted by part so
+	// the strip bone-table order does not matter (INT_MAX marks an unused
+	// entry).
+	std::array<int, 4> bone{{INT_MAX, INT_MAX, INT_MAX, INT_MAX}};
+	std::array<double, 4> weight{};
 	std::array<double, 6> tangent{};  // tangent then bitangent (DRIFT only)
 	bool tangents = false;
 };
@@ -271,23 +273,61 @@ struct Tolerance {
 	bool zero_normal_free;  // an expected zero-length normal matches any normal
 };
 
-void add_weight(Corner &c, int bone, double w) {
-	for (int k = 0; k < 3; ++k)
-		if (c.bone[k] == bone || c.bone[k] == INT_MAX) {
-			c.bone[k] = bone;
-			c.weight[k] += w;
-			break;
+// A skinned vertex's blend as the renderer draws it, normalized for
+// comparison: its four influences as retail's shader blends them
+// (threedi_skin_influences: slot 3 takes 1 - (w0 + w1 + w2)), summed per
+// part, a slot past its strip's bone table kept apart as 256 + slot (retail
+// FSldr03 weights one), zero weights and the hair of negative remainder
+// retail's four-decimal weights leave (they sum to 1.0001 in ArmGlovD) left
+// out, and divided by the total so the blend sums to 1. Slot order,
+// bone-table order and one part's weight split over several slots then no
+// longer matter, only each part's share of the vertex.
+void skin_blend(Corner &c, const ThreediVertex &v, const ThreediTriangleStrip &st) {
+	ThreediSkinInfluence influences[4];
+	threedi_skin_influences(&v, st.bone_table, st.bone_table_length, influences);
+	double total = 0.0;
+	for (const ThreediSkinInfluence &x : influences) {
+		if (std::isnan(x.weight)) {
+			// A weight that is no number matches only the same.
+			c.bone = {{-1, INT_MAX, INT_MAX, INT_MAX}};
+			c.weight = {{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0, 0.0}};
+			return;
 		}
-	for (int i = 1; i < 3; ++i)
+		if (!(x.weight > 0.0f)) continue;
+		const int part = x.part >= 0 ? x.part : 256 + x.slot;
+		for (int k = 0; k < 4; ++k)
+			if (c.bone[k] == part || c.bone[k] == INT_MAX) {
+				c.bone[k] = part;
+				c.weight[k] += x.weight;
+				break;
+			}
+		total += x.weight;
+	}
+	for (int k = 0; k < 4 && c.bone[k] != INT_MAX; ++k) c.weight[k] /= total;
+	for (int i = 1; i < 4; ++i)
 		for (int k = i; k > 0 && c.bone[k] < c.bone[k - 1]; --k) {
 			std::swap(c.bone[k], c.bone[k - 1]);
 			std::swap(c.weight[k], c.weight[k - 1]);
 		}
 }
 
+// The largest share of the vertex a part takes in one blend and not the
+// other, a part a blend lacks weighing 0 there: a sliver of weight an
+// importer dropped is a sliver, not another bone set.
 double weight_gap(const Corner &a, const Corner &b) {
-	if (a.bone != b.bone) return std::numeric_limits<double>::infinity();
-	return gap(a.weight, b.weight);
+	double worst = 0.0;
+	size_t i = 0, j = 0;
+	while (i < 4 || j < 4) {
+		const int pa = i < 4 ? a.bone[i] : INT_MAX, pb = j < 4 ? b.bone[j] : INT_MAX;
+		if (pa == INT_MAX && pb == INT_MAX) break;
+		if (pa == pb)
+			worst = std::max(worst, gap(a.weight[i++], b.weight[j++]));
+		else if (pa < pb)
+			worst = std::max(worst, gap(a.weight[i++], 0.0));
+		else
+			worst = std::max(worst, gap(0.0, b.weight[j++]));
+	}
+	return worst;
 }
 
 double length(const Vec &v) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
@@ -403,7 +443,7 @@ std::string corner_bytes(const Corner &c) {
 	for (double v : c.position) put(s, v);
 	for (double v : c.normal) put(s, v);
 	for (double v : c.uv) put(s, v);
-	for (int k = 0; k < 3; ++k) {
+	for (int k = 0; k < 4; ++k) {
 		put(s, c.bone[k]);
 		put(s, c.weight[k]);
 	}
@@ -681,21 +721,7 @@ std::map<std::string, Geometry> lod_geometry(Diff &d, const std::string &where, 
 						const Vec tn = mission(v[k]->tangent), bn = mission(v[k]->bitangent);
 						c.tangent = {tn[0], tn[1], tn[2], bn[0], bn[1], bn[2]};
 					}
-					if (m.header.mesh_type == THREEDI_MESH_SKINNED) {
-						// Out-of-table slots stay distinguishable (retail FSldr03 ships them).
-						const auto resolve = [&](int slot) {
-							return slot < st.bone_table_length && slot < 16 ? static_cast<int>(st.bone_table[slot]) : 256 + slot;
-						};
-						const float *w = v[k]->bone_weights;
-						if (w[0] == 0.0f && w[1] == 0.0f && w[2] == 0.0f) {
-							// The runtime binds a vertex without weight rigidly to its
-							// first slot (model_mesh_prepare.cpp: w0 = 1).
-							add_weight(c, resolve(v[k]->bone_indices[0]), 1.0);
-						} else {
-							for (int s3 = 0; s3 < 3; ++s3)
-								if (w[s3] != 0.0f) add_weight(c, resolve(v[k]->bone_indices[s3]), w[s3]);
-						}
-					}
+					if (m.header.mesh_type == THREEDI_MESH_SKINNED) skin_blend(c, *v[k], st);
 				}
 				g.faces.push_back(std::move(face));
 				Vec e{p3[1][0] - p3[0][0], p3[1][1] - p3[0][1], p3[1][2] - p3[0][2]};

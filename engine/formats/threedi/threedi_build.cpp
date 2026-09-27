@@ -416,11 +416,14 @@ struct ThreediAssembled {
 //     such a LOD, 2,028 of 3,505 JO section boxes come back exactly (from the
 //     stored 8.8 corners, 892 of 3,765 do). A section whose part draws
 //     nothing there, or a model with no such LOD, uses its stored corners.
-//   - skinned, a section with collision geometry: every LOD 0 vertex a
-//     weight binds to that part (the retired port's skinned branch), so a
-//     mesh part's section, which no weight names, keeps the empty sentinels
-//     and radius 0 (US01 19, ArmsG 37): 77 of the 105 JO skinned sections
-//     with geometry come back exactly (from the stored corners, none).
+//   - skinned, a section with collision geometry: every LOD 0 vertex whose
+//     blend gives that part weight (the retired port's skinned branch, over
+//     the four influences threedi_skin_influences resolves), so a mesh
+//     part's section, which no weight names, keeps the empty sentinels and
+//     radius 0 (US01 19, ArmsG 37): 77 of the 105 JO skinned sections with
+//     geometry come back exactly (from the stored corners, none). The fourth
+//     influence changes none: over the 207 skinned models of the JOTAC
+//     archives, 188 of 257 such sections come back exactly with or without it.
 std::vector<std::vector<ThreediBuildVec3>> collision_section_points(const ThreediBuildModel &m) {
 	std::vector<std::vector<ThreediBuildVec3>> points(m.collision.size());
 	const auto mission = [](const ThreediVertex &v) {
@@ -429,18 +432,22 @@ std::vector<std::vector<ThreediBuildVec3>> collision_section_points(const Threed
 	if (m.skinned) {
 		if (m.lods.empty()) return points;
 		for (size_t pi = 0; pi < m.lods[0].parts.size(); ++pi)
-			for (const ThreediBuildStrip &strip : m.lods[0].parts[pi].strips)
-				for (const ThreediVertex &v : strip.vertices)
-					for (int k = 0; k < 3; ++k) {
-						if (!(v.bone_weights[k] > 0.0f)) continue;
-						int bone = -1;
-						if (!strip.bone_table.empty()) {
-							if (v.bone_indices[k] < strip.bone_table.size()) bone = strip.bone_table[v.bone_indices[k]];
-						} else if (v.bone_indices[k] == 0) {
-							bone = strip.bone < 0 ? static_cast<int>(pi) : strip.bone;
-						}
-						if (bone >= 0 && static_cast<size_t>(bone) < points.size()) points[bone].push_back(mission(v));
-					}
+			for (const ThreediBuildStrip &strip : m.lods[0].parts[pi].strips) {
+				// The table the assembly writes: a single-bone strip's is its
+				// one bone.
+				const uint8_t single = static_cast<uint8_t>(strip.bone < 0 ? static_cast<int>(pi) : strip.bone);
+				const uint8_t *table = strip.bone_table.empty() ? &single : strip.bone_table.data();
+				const int32_t length = strip.bone_table.empty() ? 1 : static_cast<int32_t>(strip.bone_table.size());
+				for (const ThreediVertex &v : strip.vertices) {
+					// Each part the vertex's blend gives weight, the fourth
+					// influence included (threedi_skin_influences).
+					ThreediSkinInfluence influences[4];
+					threedi_skin_influences(&v, table, length, influences);
+					for (const ThreediSkinInfluence &x : influences)
+						if (x.weight > 0.0f && x.part >= 0 && static_cast<size_t>(x.part) < points.size())
+							points[x.part].push_back(mission(v));
+				}
+			}
 		// A section with no collision geometry of its own is a bone: its
 		// bounds are the hit sphere the scene gives it (csphere), else the
 		// sentinels, as 487 of the JO skinned bone sections without a sphere

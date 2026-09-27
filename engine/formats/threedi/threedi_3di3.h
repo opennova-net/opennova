@@ -119,6 +119,45 @@ typedef struct ThreediTriangleStrip {
     int32_t bone_table_length; // 0 if absent.
 } ThreediTriangleStrip;
 
+// One influence of a skinned vertex: the bone-table slot its index byte
+// names, the part that slot of the strip's table holds (-1 for a slot past
+// the table: the palette uploaded for the strip holds no matrix there, so
+// retail reads whatever that constant last held), and its weight.
+typedef struct ThreediSkinInfluence {
+    int32_t slot;
+    int32_t part;
+    float weight;
+} ThreediSkinInfluence;
+
+// A skinned vertex's four influences as the retail vertex shader blends
+// them: the three stored weights on slots bone_indices[0..2], and the
+// remainder 1 - (w0 + w1 + w2) on slot bone_indices[3], the sum added in
+// float in slot order and never renormalized. A vertex with no stored
+// weight rides slot 3 wholly; one whose weights sum past 1 gives slot 3 a
+// small negative weight (retail's four-decimal weights reach 1.0001,
+// ArmGlovD). `bone_table` is the strip's table (STRP), at most 16 slots.
+// The loader copies the three weights and the four index bytes verbatim;
+// the declaration feeds them as BLENDWEIGHT FLOAT3 and BLENDINDICES
+// D3DCOLOR, which D3DCOLORtoUBYTE4 turns back into index byte k =
+// IndexArray[k]; the strip's palette entry k is its bone-table entry k's
+// matrix; every skinned vertex shader compiles NumBones 4.
+// [orig: ThreediGp_ConvertVerticesToGPUFormat @ 0x5B4C90 (the weights
+// @ 0x5B4E2C); D3DDevice_CreateVertexDeclarations @ 0x5B0A00;
+// CRenderBatchQueue_FlushBatches @ 0x5DA170; _BaseInc.fx
+// CalcSkinWorldPosAndNormal: lastweight = 1 - (w0 + w1 + w2) on
+// IndexArray[NumBones - 1]]
+static inline void threedi_skin_influences(const ThreediVertex *v, const uint8_t *bone_table,
+                                           int32_t bone_table_length, ThreediSkinInfluence out[4]) {
+    float sum = 0.0f;
+    for (int k = 0; k < 3; ++k) sum += v->bone_weights[k];
+    for (int k = 0; k < 4; ++k) {
+        const int32_t slot = v->bone_indices[k];
+        out[k].slot = slot;
+        out[k].part = slot < bone_table_length && slot < 16 ? bone_table[slot] : -1;
+        out[k].weight = k < 3 ? v->bone_weights[k] : 1.0f - sum;
+    }
+}
+
 typedef struct ThreediRenderObject {
     int32_t num_strips;
     int32_t num_alpha_strips;

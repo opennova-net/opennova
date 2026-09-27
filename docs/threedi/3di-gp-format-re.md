@@ -608,6 +608,56 @@ witnessed in retail `Jointops.exe`:
   (JntOpsB1/B2/B4, RebelB1/B4, slot 1 flags 3), IJava05, Imdec07
   (render-material-re.md §2026-09-24 rendering parity pass).
 
+### Retail skinned vertex blend (2026-09-27)
+
+Witnessed in retail `Jointops.exe` and in the install's decrypted `_BaseInc.fx`
+(`CalcSkinWorldPosAndNormal`, with the skinned techniques that call it):
+
+- **Loader.** `GPM_LoadRenderModel @ 0x5B5000` finds VERT (`@ 0x5B5041`) and
+  converts it in `[orig: ThreediGp_ConvertVerticesToGPUFormat @ 0x5B4C90]`,
+  which copies a skinned record field for field: the three weights verbatim
+  (`@ 0x5B4E2C`, `@ 0x5B4E38`, `@ 0x5B4E3E`) and the four index bytes as one
+  dword (`@ 0x5B4E45..0x5B4E5A`) in the 56 B layout (flags 0x41), the same in
+  the 80 B one (0x55, `@ 0x5B4D0D..0x5B4D98`). No weight is normalized at load
+  and no fourth weight is stored.
+- **Declarations.** `[orig: D3DDevice_CreateVertexDeclarations @ 0x5B0A00]`
+  builds both skinned layouts with BLENDWEIGHT FLOAT3 at +12 and BLENDINDICES
+  D3DCOLOR at +24 (56 B: POSITION, BLENDWEIGHT, BLENDINDICES, NORMAL,
+  TEXCOORD0, TEXCOORD1; the 80 B one adds TANGENT at +56 and BINORMAL at +68),
+  chosen per model by `RenderModel_GetVertexStrideAndDecl @ 0x5B1480` (56
+  `@ 0x5B14B8`, 80 `@ 0x5B14A1`). The shader's `D3DCOLORtoUBYTE4` undoes the
+  D3DCOLOR swizzle, so index byte k is its `IndexArray[k]`.
+- **Palette.** Per skinned strip, `CRenderBatchQueue_FlushBatches @ 0x5D9F50`
+  uploads palette entry k = the matrix of the strip's bone-table entry k (the
+  table byte read `movsx`, `[orig: CRenderBatchQueue_FlushBatches @ 0x5DA170]`)
+  for k below the table's length, then `SetMatrixArray` (`@ 0x5DA1B2`); the
+  shader holds at most 16 (`MAX_SKIN_MATRICES`). An index byte past the table
+  reads whatever that constant last held.
+- **Blend.** Every skinned vertex shader compiles `NumBones = 4`: the loop adds
+  w0, w1 and w2 on `IndexArray[0..2]` and `lastweight = 1 - (w0 + w1 + w2)` on
+  `IndexArray[3]`, never renormalized. A vertex with no stored weight rides
+  byte 3's bone wholly; stored weights summing past 1 give byte 3 a negative
+  weight.
+- **Normal.** Only `vsSkinBasic` (VS_SKBASIC), `vsSkinGlass`, `vsSkinDepth` and
+  `vsSkinFlatSpotDepth` blend the normal with the same four weights and
+  normalize it (`skinnormal = true`). The lit techniques (`vsObjSkinDot3*`,
+  `vsTanSkinDot3*`, `vsTanSkinPhong*`, `vsSkinPost*`) pass `skinnormal =
+  false`: the normal takes the vertex's first bone alone (`IndexArray[0]`, not
+  normalized), and the tangent-space ones take the light and hemisphere
+  vectors into that bone's frame (`SkinModelLightArray[indexvector.x]`,
+  `transpose(SkinWorldMatrixArray[indexvector.x])`) against the undeformed
+  tangent, binormal and normal.
+
+Corpus (the JOTAC archives with the revx02 expansion, 607,473 skinned vertices
+in 623 LODs): the weights are four-decimal values, none negative, above 1 or
+not finite, and no vertex stores three zeros; 12,398 sum past 1 in float (at
+most 1.0001, ArmGlovD), leaving byte 3 at most -1e-4, and 9,501 vertices in 118
+models give byte 3 a real share (over 1e-4; JntOpsB3 202, IndoArms 187). Port:
+`threedi_skin_influences` (engine/formats/threedi/threedi_3di3.h) resolves a
+vertex's four influences; `opennova-3di` carries byte 3 through the `.o3d`
+text (docs/threedi/o3d-scene-format.md), `compare` compares the resolved blend,
+and the builder bounds a skinned section over it.
+
 ## 2. GP runtime format — corpus probe findings
 
 Corpus: 639 `.3di` files (GPM/GPS/GPP) from the `AS_ASSETS` BHD affiliate build

@@ -62,7 +62,7 @@ import; any other front end may.
 | `part` | parent x y z [cx cy cz] | opens a part in the LOD: its parent (itself for the root, -1 for none, any part of the LOD) and pivot. A part that draws nothing may give the point its sphere sits on (radius 0): the exporter seeds such a part with one placeholder vertex, in the retail corpus its `_## center` helper's first mesh vertex, near the pivot (1,779 of the 2,411 such JO parts also carry it, on the 8.8 grid, as their section's only collision vertex); without it the sphere is at the origin (658 retail parts) |
 | `strip` | material [alpha] | opens a triangle-list strip on the open part |
 | `bones` | p0 p1 ... | a skinned strip's bone table (1 to 16 part indices, bytes; before its vertices) |
-| `v` | x y z nx ny nz u v [u1 v1] [i0 i1 i2 w0 w1 w2] | a strip vertex (at most 65535 per strip); `u1 v1` with `uv1 1`; skinned: three bone-table slots and weights |
+| `v` | x y z nx ny nz u v [u1 v1] [i0 i1 i2 i3 w0 w1 w2] | a strip vertex (at most 65535 per strip); `u1 v1` with `uv1 1`; skinned: four bone-table slots (bytes) and three weights, each a finite number from 0 to 1, together at most 1 (added in float, as the shader adds them: retail's four-decimal weights reach 1.0001, ArmGlovD, which builds). Slot `i3` takes the rest, 1 - (w0 + w1 + w2), as retail's vertex shader blends the fourth influence ([orig: _BaseInc.fx CalcSkinWorldPosAndNormal]), so a vertex with no weight rides `i3`'s bone wholly |
 | `t` | a b c | a strip triangle, three distinct vertices (the loader drops one that repeats a corner) |
 | `panm` | part parent [flags [matrix]] | a part-animation row in the open LOD, in part order: row i transforms part i, as all 3,250 JO tables do (the runtime reads the table by row); `flags` (a word, `0x` allowed) replaces the flags the tracks imply, `matrix` selects an `mtrx` frame |
 | `track` | target style REG\|-\|param rate start end [axis] | a track on the last `panm`: target `rotx roty rotz scalex scaley scalez trans`. Styles above 0x70 name a declared register; the others may carry an integer phase param. Rotations in 1/16384 turn, others 8.8, all int16; only a `trans` track takes `axis`, 1 (x), 2 (y) or 3 (z; the default) |
@@ -152,11 +152,13 @@ not parse (an optional one included: `cf 0 1 2 abc`, `lod abc`), a value its
 word cannot hold (a byte field over 255, an int16 field, a negative light
 rate), a token past the record's fields, an unclosed quote or a `"` inside a
 name, an index outside its strip, collision object or occlusion record, a
-triangle that repeats a vertex, a strip over 65535 vertices or indices, more
-than 255 parts, a part parent the LOD lacks, a PANM row out of part order, a
-skinned strip without a bone table or naming a missing part, a track `axis`
-other than 1..3 or on a track other than `trans`, a generator or light
-register that is not declared, more than 8 `sitex` seats in any case (the
+triangle that repeats a vertex, a strip over 65535 vertices or indices, a
+skinned weight that is no finite number from 0 to 1 or weights summing past 1
+(within 1e-4), more than 255 parts, a part parent the LOD lacks, a PANM row
+out of part order, a skinned strip without a bone table or naming a missing
+part, a track `axis` other than 1..3 or on a track other than `trans`, a
+generator or light register that is not declared, more than 8 `sitex` seats
+in any case (the
 seat scan reads the prefix without case and stops at 8 [orig:
 Entity_GetBoneSlotType @ 0x434ED0; the scan end @ 0x43A5AF]), a volume with
 fewer than 4 planes, an occlusion record over 128 vertices or 32 planes, a

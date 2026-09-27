@@ -84,8 +84,8 @@ void refuses_saying(const std::string &name, const std::string &text, const std:
 const std::string kSkinned =
 		"o3d 1\nmodel SKIN\nskinned 1\nmaterial VS_SKBASIC\ntexture skin.tga\nlod 128 gnrc\n"
 		"part 0 0 0 0\npart 0 0 0 1\npart 0 0 0 -1\nstrip 0 0\nbones 0 1\n"
-		"v 1 1 0 0 0 1 0 0 0 1 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 1 0 0.5 0.5 0\n"
-		"v -1 -1 1 0 0 1 1 1 1 0 0 1 0 0\nv 1 -1 1 0 0 1 1 0 1 0 0 0.75 0.25 0\nt 0 1 2\nt 0 2 3\n"
+		"v 1 1 0 0 0 1 0 0 0 1 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 1 0 0 0.5 0.5 0\n"
+		"v -1 -1 1 0 0 1 1 1 1 0 0 0 1 0 0\nv 1 -1 1 0 0 1 1 0 1 0 0 0 0.75 0.25 0\nt 0 1 2\nt 0 2 3\n"
 		"panm 0 0\npanm 1 0\npanm 2 0\n"
 		"cobj 0 0 0 0\ncsphere 0 0 0 0.5\ncobj 0 0 0 1\ncsphere 0 0 1 0.25\n"
 		"cobj 0 0 0 -1\ncv 1 1 0\ncv -1 1 0\ncv -1 -1 1\ncf 0 1 2 1\n";
@@ -231,10 +231,51 @@ int main(int argc, char **argv) {
 	// comes back on that bone, so the bone keeps its bounds.
 	round_trip("skinned-on-bones",
 			"o3d 1\nmodel BONES\nskinned 1\nmaterial VS_SKBASIC\nlod 0\npart 0 0 0 0\n"
-			"strip 0\nbones 0\nv 1 1 0 0 0 1 0 0 0 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 0 0 1 0 0\nv -1 -1 1 0 0 1 1 1 0 0 0 1 0 0\nt 0 1 2\n"
+			"strip 0\nbones 0\nv 1 1 0 0 0 1 0 0 0 0 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 0 0 0 1 0 0\n"
+			"v -1 -1 1 0 0 1 1 1 0 0 0 0 1 0 0\nt 0 1 2\n"
 			"part 0 3 0 0\n"
-			"strip 0\nbones 1\nv 4 0 0 0 0 1 0 0 0 0 0 1 0 0\nv 3 1 0 0 0 1 0 1 0 0 0 1 0 0\nv 3 0 2 0 0 1 1 1 0 0 0 1 0 0\nt 0 1 2\n"
+			"strip 0\nbones 1\nv 4 0 0 0 0 1 0 0 0 0 0 0 1 0 0\nv 3 1 0 0 0 1 0 1 0 0 0 0 1 0 0\n"
+			"v 3 0 2 0 0 1 1 1 0 0 0 0 1 0 0\nt 0 1 2\n"
 			"panm 0 0\npanm 1 0\n");
+
+	// A skinned vertex carries four bone-table slots and three weights; slot 3
+	// takes the rest, 1 - (w0 + w1 + w2), as retail's vertex shader blends.
+	// The fourth slot comes back from `scene`, and build refuses a weight that
+	// is no finite number from 0 to 1 and weights summing past 1 (retail's
+	// four-decimal weights reach 1.0001 in float, ArmGlovD, which builds).
+	{
+		const std::string head = "o3d 1\nmodel FOUR\nskinned 1\nmaterial VS_SKBASIC\nlod 0 gnrc\n"
+				"part 0 0 0 0\npart 0 0 0 1\npart 1 0 0 2\nstrip 0\nbones 0 1 2\n";
+		const std::string tail = "v 1 0 0 0 0 1 1 0 0 1 2 2 0.25 0.25 0.25\nv 0 1 0 0 0 1 0 1 0 1 1 2 0.5 0.5 0\n"
+				"t 0 1 2\npanm 0 0\npanm 1 0\npanm 2 1\n";
+		round_trip("fourth-slot", head + "v 0 0 0 0 0 1 0 0 2 1 0 1 0.5 0.25 0\n" + tail);
+		Threedi3di3 m{};
+		if (threedi_3di3_read(path_of("fourth-slot", ".3di").c_str(), &m) == 0) {
+			const ThreediVertex &v = m.lods[0].vertices.items[0];
+			const ThreediTriangleStrip &st = m.lods[0].strips[0];
+			check(v.bone_indices[0] == 2 && v.bone_indices[1] == 1 && v.bone_indices[2] == 0 && v.bone_indices[3] == 1 &&
+							v.bone_weights[0] == 0.5f && v.bone_weights[1] == 0.25f && v.bone_weights[2] == 0.0f,
+					"fourth-slot: the four slots and three weights are stored as given");
+			ThreediSkinInfluence influences[4];
+			threedi_skin_influences(&v, st.bone_table, st.bone_table_length, influences);
+			check(influences[0].part == 2 && influences[3].slot == 1 && influences[3].part == 1 &&
+							influences[3].weight == 0.25f,
+					"fourth-slot: slot 3's part takes the rest");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "fourth-slot: read back");
+		}
+		check(slurp(path_of("fourth-slot", ".rt.o3d")).find(" 2 1 0 1 0.5 0.25 0\n") != std::string::npos,
+				"fourth-slot: scene writes the four slots");
+		check(build("weights-retail-sum", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 0.4487 0.3871 0.1643\n" + tail),
+				"weights-retail-sum: retail's 1.0001 builds");
+		refuses("weights-sum", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 0.5 0.5 0.01\n" + tail);
+		refuses("weights-negative", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 1.25 -0.25 0\n" + tail);
+		refuses("weights-above-one", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 1.5 0 0\n" + tail);
+		refuses("weights-nan", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 nan 0 0\n" + tail);
+		refuses("weights-infinite", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 inf 0 0\n" + tail);
+		refuses("weights-three-slots", head + "v 0 0 0 0 0 1 0 0 0 1 2 0.5 0.25 0.25\n" + tail);
+	}
 
 	// A strip with vertices and no triangle is carried as it is.
 	round_trip("empty-strip", "o3d 1\nmodel E\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0 0\nv 0 0 0 0 0 1 0 0\n");
