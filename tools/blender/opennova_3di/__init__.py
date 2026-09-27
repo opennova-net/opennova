@@ -250,6 +250,11 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
                                     description="The render LOD whose part meshes also become the bullet faces (the OED "
                                                 ".3dp poly_collision_lod); 0 = the most detailed")
+    mesh_part: BoolProperty(name="Mesh part", default=False,
+                            description="A skinned model keeps its skinned geometry on a part of its own after the "
+                                        "bones, at its mesh's origin, whose collision section holds the bullet faces "
+                                        "(the retail layout of US01 and ArmsG); off, on the root part, whose section "
+                                        "holds them (Delta04, ArmGlovD)")
     # Display-only assembly (assembly.py); export never reads these.
     drive_rig: PointerProperty(name="Bones follow", type=bpy.types.Object, poll=is_rig_model, update=update_drive,
                                description="A skinned model's bones follow this model's parts of the same index, as "
