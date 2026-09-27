@@ -12,9 +12,9 @@ extension install-file` puts it in the user_default repository) and runs the
 opennova-3di bundled in it, so the packaged zip is what is tested.
 
 A test does `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))`,
-`import addon_under_test`, then `addon, cli = addon_under_test.load()`: the
-add-on package (its modules as attributes: addon.export, addon.materials, ...)
-registered, the scene emptied, and the path of the CLI it runs. The file name
+`import addon_harness`, then `addon, cli = addon_harness.load()`: the add-on
+package (its modules as attributes: addon.export, addon.materials, ...)
+registered, the scene emptied, and the path of the CLI it runs. Its name
 keeps it out of the *_test.py set that runs as tests.
 """
 import importlib

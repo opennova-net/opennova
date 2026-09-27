@@ -13,12 +13,12 @@ import tempfile
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import addon_under_test  # noqa: E402
+import addon_harness  # noqa: E402
 
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
 
-addon, CLI = addon_under_test.load()
+addon, CLI = addon_harness.load()
 materials, export, importer, o3dtext = addon.materials, addon.export, addon.importer, addon.o3dtext
 OUT = tempfile.mkdtemp(prefix="opennova_materials_test_")
 FAILURES = []
