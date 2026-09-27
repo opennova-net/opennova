@@ -471,10 +471,20 @@ class O3D_OT_remove_texture(bpy.types.Operator):
 
 
 def export_models(op, context, models):
+    """Export the models as one run: two models that would write one file
+    are refused before any is written."""
     wrote = []
+    run = export.ExportRun()
+    try:
+        for model in models:
+            run.claim(export.output_path(model), model)
+    except ExportError as e:
+        op.report({"ERROR"}, str(e))
+        return {"CANCELLED"}
+    run.paths.clear()
     for model in models:
         try:
-            message, notes = export.export_model(context, model)
+            message, notes = export.export_model(context, model, run)
         except ExportError as e:
             op.report({"ERROR"}, str(e))
             return {"CANCELLED"}

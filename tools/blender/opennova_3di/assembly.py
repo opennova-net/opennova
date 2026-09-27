@@ -23,6 +23,66 @@ from .o3dtext import axis_basis
 
 MOUNT = "O3D mount"
 
+# The first-person arms every stock character draws (its Avatars.def `arms`:
+# ArmsG, ArmsGb, ArmsR, ArmGlove, ArmGlovD/J/S, ArmsD/S, IndoArms) share one
+# 37-bone rig: each bone's parent and pivot (mission axes), ArmsG.3di's parts
+# 0-36 in JOTAC's base archive (the others' are the same to the bit). The game
+# draws a character's arms with the first-person gun's part matrices, paired
+# by index [orig: Player_RenderFirstPersonViewModel @ 0x4DED60, the arms
+# submit @ 0x4DF088], so a gun's parts 01-37 are this rig.
+STOCK_ARMS = (
+    (0, (0, 0, 0)), (0, (-0.00510000018, -0.15640001, 0.587199926)),
+    (0, (-0.000300000014, 0.15609999, 0.584999919)), (1, (-0.00579999993, -0.445299983, 0.599499941)),
+    (2, (-0.00609999988, 0.445199996, 0.582700014)), (3, (-0.00650000013, -0.71509999, 0.61500001)),
+    (4, (-0.0114000002, 0.715399981, 0.584299922)), (5, (-0.0335999988, -0.732200027, 0.620099902)),
+    (6, (-0.0373999998, 0.732800007, 0.588199973)), (7, (-0.0742999986, -0.765300035, 0.634899974)),
+    (8, (-0.0754000023, 0.763799965, 0.601499915)), (5, (0.0288999993, -0.828999996, 0.617900014)),
+    (6, (-0.0494000018, 0.827899992, 0.58799994)), (11, (0.0287999995, -0.857800007, 0.619699955)),
+    (12, (-0.0502999984, 0.869099975, 0.58859992)), (13, (0.0286999997, -0.881900012, 0.621099949)),
+    (14, (-0.050999999, 0.900699973, 0.58889997)), (5, (0.00520000001, -0.835600019, 0.618699908)),
+    (6, (-0.0259000007, 0.834699988, 0.587499976)), (17, (0.00510000018, -0.869599998, 0.620700002)),
+    (18, (-0.0284000002, 0.879399955, 0.588099957)), (19, (0.00499999989, -0.903400004, 0.622699976)),
+    (20, (-0.0306000002, 0.917599976, 0.58859992)), (5, (-0.0184000004, -0.845600009, 0.619799972)),
+    (6, (-0.00209999993, 0.83099997, 0.586799979)), (23, (-0.0185000002, -0.882300019, 0.621999979)),
+    (24, (-0.00499999989, 0.870799959, 0.587000012)), (25, (-0.0186000001, -0.91930002, 0.624199986)),
+    (26, (-0.00749999983, 0.903899968, 0.58709991)), (5, (-0.0421999991, -0.835400045, 0.618999958)),
+    (6, (0.0218000002, 0.823300004, 0.586099982)), (29, (-0.0417000018, -0.871200025, 0.621099949)),
+    (30, (0.0186000001, 0.857800007, 0.586300015)), (31, (-0.0412999988, -0.901800036, 0.622900009)),
+    (32, (0.0163000003, 0.88349998, 0.586199999)), (9, (-0.0983999968, -0.78490001, 0.643599987)),
+    (10, (-0.108999997, 0.791099966, 0.613299966)),
+)
+# ArmsG's bone heads sit within 0.5 mm of 357_1st's part pivots, but each weapon
+# places the hands itself: against REVVY's AKM_1st the same arms are 1.2 cm out
+# on a finger joint, and that is still the pair retail draws.
+PIVOT_TOLERANCE = 0.025
+
+
+def stock_arms_fit(exporter, lod):
+    """A note when a first-person gun's parts 01-37 are not the stock arms' rig
+    (their parents, and pivots within PIVOT_TOLERANCE), else None: the
+    character's own arms then draw wrong on the gun, and arms made for it draw
+    wrong on every stock gun."""
+    parts = lod.parts
+    why = None
+    if len(parts) < len(STOCK_ARMS):
+        why = f"it has {len(parts)} parts"
+    else:
+        worst, at = 0.0, 0
+        for i, (parent, pivot) in enumerate(STOCK_ARMS):
+            if parts[i].parent != parent:
+                why = f"part {i + 1:02d}'s parent is {parts[i].parent + 1:02d}, the arms' {parent + 1:02d}"
+                break
+            d = (Vector(exporter.pivot(parts[i])) - Vector(pivot)).length
+            if d > worst:
+                worst, at = d, i
+        if why is None and worst > PIVOT_TOLERANCE:
+            why = f"part {at + 1:02d} is {worst * 100:.1f} cm from the arms' joint"
+    if why is None:
+        return None
+    return (f"{exporter.model.name}: its parts 01-37 are not the stock first-person arms' rig ({why}): the game "
+            "draws the character's arms (Avatars.def) with a gun's first 37 part matrices, so stock arms draw wrong "
+            "on this gun, and arms made for it draw wrong on every stock gun")
+
 
 @contextmanager
 def at_rest(*models):

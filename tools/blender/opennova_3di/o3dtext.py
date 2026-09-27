@@ -159,33 +159,45 @@ ORIGIN_CHANNELS = (("location", (0.0, 0.0, 0.0)), ("rotation_euler", (0.0, 0.0, 
 
 
 @contextlib.contextmanager
-def at_world_origin(context, model):
-    """The model root at the world origin while an export reads it, then back
-    where it stood. Blender holds matrices in single precision, so an object
+def at_world_origin(context, *models):
+    """The models at the world origin while an export reads them, then back
+    where they stood. Blender holds matrices in single precision, so an object
     read back through a placed root comes back a float step off, and a step
     below a 16.16 word (a retail CXLT row sits on that grid) truncates a whole
     step down: at the origin every export reads the very matrices of a model
-    that was never moved. An unparented root stands there with its own
-    constraints (a mount) muted; a parented one is read through its root's
-    frame (ModelSpace)."""
-    if model.parent is not None or model.matrix_world == Matrix.Identity(4):
-        yield
-        return
-    held = [(name, tuple(getattr(model, name))) for name, _ in ORIGIN_CHANNELS]
-    muted = [(c, c.mute) for c in model.constraints]
-    for c, _ in muted:
-        c.mute = True
-    for name, value in ORIGIN_CHANNELS:
-        setattr(model, name, value)
-    context.view_layer.update()
+    that was never moved. Each model stands there through its outermost
+    ancestor (itself when unparented; the gun's root for arms parented to it),
+    with that ancestor's own constraints (a mount) muted; a model offset from
+    that ancestor is read through its root's frame (ModelSpace). A None model
+    is skipped."""
+    tops = []
+    for model in models:
+        if model is None:
+            continue
+        top = model
+        while top.parent is not None:
+            top = top.parent
+        if top not in tops and top.matrix_world != Matrix.Identity(4):
+            tops.append(top)
+    held = [(top, [(name, tuple(getattr(top, name))) for name, _ in ORIGIN_CHANNELS],
+             [(c, c.mute) for c in top.constraints]) for top in tops]
+    for top, _, muted in held:
+        for c, _ in muted:
+            c.mute = True
+        for name, value in ORIGIN_CHANNELS:
+            setattr(top, name, value)
+    if held:
+        context.view_layer.update()
     try:
         yield
     finally:
-        for name, value in held:
-            setattr(model, name, value)
-        for c, mute in muted:
-            c.mute = mute
-        context.view_layer.update()
+        for top, channels, muted in held:
+            for name, value in channels:
+                setattr(top, name, value)
+            for c, mute in muted:
+                c.mute = mute
+        if held:
+            context.view_layer.update()
 
 
 class ModelSpace:
@@ -204,7 +216,11 @@ class ModelSpace:
         self.into_root = None if root == Matrix.Identity(4) else root.inverted_safe()
 
     def world(self, ob):
-        return ob.matrix_world if self.into_root is None else self.into_root @ ob.matrix_world
+        return self.local(ob.matrix_world)
+
+    def local(self, matrix):
+        """A world matrix in the model root's frame."""
+        return matrix if self.into_root is None else self.into_root @ matrix
 
     def mission(self, v):
         return self.to_mission(v)
