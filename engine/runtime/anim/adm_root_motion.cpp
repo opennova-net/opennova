@@ -352,6 +352,14 @@ int32_t AdmRootMotion::clip_boundary_after(int adm_id, int state_id,
 	return track ? track->clock.boundary_after(phase_ticks) : -1;
 }
 
+bool AdmRootMotion::clip_wraps_at(int adm_id, int state_id, int variant,
+								  int32_t phase_ticks) const {
+	// [orig: AnimChannel_AdvancePlayback @0x40B165 (t >= 1), the loop bit
+	// @0x40B167, t -= 1 @0x40B199]
+	const Track *track = resolve_track(adm_id, state_id, variant);
+	return track != nullptr && track->clock.wrapped_at(phase_ticks);
+}
+
 bool AdmRootMotion::clip_loops(int adm_id, int state_id) const {
 	// The clip data's own loop bit, the same flag word the retail channel wraps
 	// on [orig: AnimChannel_InitFromData @0x410577 -> AnimChannel_AdvancePlayback

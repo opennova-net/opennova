@@ -935,6 +935,14 @@ target_link_libraries(anim_adm_clip_index_test PRIVATE opennova_runtime)
 target_include_directories(anim_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME anim_adm_clip_index COMMAND anim_adm_clip_index_test)
 
+# The first-person weapon rings: one table per .adm shared by every weapon
+# naming it, last token first; the weapon table's load sequence; the FP
+# channel's loop-wrap fade.
+add_executable(anim_adm_ring_table_test anim/adm_ring_table_test.cpp)
+target_link_libraries(anim_adm_ring_table_test PRIVATE opennova_runtime)
+target_include_directories(anim_adm_ring_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_adm_ring_table COMMAND anim_adm_ring_table_test)
+
 # The SECONDARY (weapon) channel composition over the shipped BINOC.bad rig
 # plus its BINOC_twist.bad (the two-bone twist minted once from the retired
 # writer; the test asserts that provenance before probing). Both come from the

@@ -114,6 +114,7 @@ private:
 	void fire_action_end_sound(const Ref<PlayerWeaponEvent> &p_event);
 	void play_switch_deny_sound();
 	void play_viewmodel_clip(const String &p_key, int p_variant, int p_advance_ticks);
+	void pose_viewmodel_channel(const Ref<PlayerWeaponView> &p_view);
 
 	ObjectID world_id_;
 	ObjectID presenter_id_;

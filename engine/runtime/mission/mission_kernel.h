@@ -28,7 +28,6 @@
 #include <runtime/mission/event_runtime.h>
 #include <runtime/mission/promote.h>
 #include <runtime/mission/runtime_boot.h>
-#include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/item_traits.h>
@@ -392,7 +391,6 @@ public:
 	opennova::def::DefWeaponsFile weapon_defs{};
 	bool weapon_defs_ok = false;
 	bool ammo_ok = false;
-	anim::AdmClipIndex clip_index;
 	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD for the PANM pose clock; -1 = deterministic logic time
 	// (world::mounted_pose_time_ms consumes it).

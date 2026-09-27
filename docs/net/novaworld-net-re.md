@@ -9807,30 +9807,40 @@ adm (`@ 0x542180`) / no anim key (`@ 0x542152`) → −1 collapses to 0 (existen
 `FindSlotByName` LOOKUP `@ 0x5421ae`, never a read). Ends by playing global slot 241
 (`wpn_idle`) on the weapon's adm.
 
-**Multi-clip variant rings** (2026-07-11). A .adm row may list several quoted clips —
+**Multi-clip variant rings** (2026-07-11; serve order, sharing and the loop wrap
+corrected 2026-09-27). A .adm row may list several quoted clips —
 `anim_wpn_reload	"m4_1r" "m4_1r" "m4_1r2"` — and `AnimMap_ParseConfigLine @ 0x40cb60`
 registers EVERY token on the same anim slot: `AnimMap_RegisterBoneNode @ 0x40c2d0`
-links each into a per-slot CIRCULAR list (node+36 = next), so the slot is a variant
-ring in authored order, and the duplication is the rotation weighting (r plays twice
-per r2 cycle). Both consumers serve-then-advance the ring head (the per-entity
-animState's slot array +72): `Anim_GetDurationTicks @ 0x53ee10` (the bake reads
-above) and `AnimMap_PlayAnimBySlot @ 0x40bda0`, which also LATCHES the served entry
-into the animState (+68 entry / +64 data / +60 slot) — playback samples the latch
-while the head moves on. Corpus: 792 multi-clip rows across the REVX02 .adm set
-(max 6 variants on one row), 72 in JOX. Worked REVVY M4 example: RELOAD authors
-`delaystart 200 / delayend auto` → ONE bake read (serves entry 0, head → 1), so the
-first reload PLAY serves entry 1 and the next served play is entry 2 — live-verified
-in the weapon_round probe (a refused reload request advances nothing). Port mapping:
-`engine/formats/adm` keeps every token (`AdmEntry.values[]`, `value` = first);
-`SkeletalAnim` registers one clip per token under the same key (peek-only —
-`get_clip_variant_count/lengths`, variant-arg getters/eval); the ring CURSORS live on
-`Simulation` (the animState+72 analog — `weapon_fsm_bake`’s per-auto-field reads
-and the FSM play events consume them, and the play latch rides the weapon view as
-`anim_variant`, the +68 analog, so both viewmodel parts follow one serve). Riders:
-the sim re-seeds the rings per equip, riding the existing per-equip re-bake shape
-(retail bakes a def once globally, so its rings persist across re-equips — D-WPN-6
-family); the 3P body weapon channel and AI body clips still play variant 0 (the
-per-entity body-adm rings are an open tail of §14.8).
+allocates a node per token and inserts it ahead of the head, pointing the slot at it
+(`@ 0x40C385`), so the ring serves the row's LAST token first and walks back through
+the file order (m4_1r2, m4_1r, m4_1r, ...), and a repeated token is its own node, the
+rotation weighting (r plays twice per r2 cycle). The head table is one per loaded
+.adm (the record's +0x48 points at it): the first weapon naming an ANIMADM loads it
+and every later weapon naming the same file shares it (`AnimMap_LoadAdmFile
+@ 0x40cc40`, the cached entry `@ 0x40CD45..0x40CD5C`). Three reads serve-then-advance
+the head: `Anim_GetDurationTicks @ 0x53ee10` (the bake reads above),
+`AnimMap_PlayAnimBySlot @ 0x40bda0`, which also LATCHES the served entry into the
+record (+0x44 node / +0x40 clip / +0x3C slot) so playback samples the latch while the
+head moves on, and every loop wrap of the playing clip (`AnimMap_AdvanceToNextAnim
+@ 0x40BDF0`, which cross-fades a different served entry in over eight advances;
+adm-bad-format-re.md carries the witness). The load serves before the match: each
+def's bake reads in action order, its END plays 241 (`@ 0x54225A`), and after the
+whole file `WeaponDefs_PlayIdleAnimAll @ 0x53FC10` plays 241 once more per def with a
+table (`@ 0x53FC2C`). Corpus: 792 multi-clip rows across the REVX02 .adm set (max 6
+variants on one row), 72 in JOX. Worked REVVY M4 example: `M4_1ST.adm` is shared by
+twelve defs (WPN_M4AUTO through WPN_M16_ET), each RELOAD `delaystart 200 / delayend
+auto` (one read), so the load reads the reload ring twelve times (2, 1, 0, four
+times over) and the first reload played in the match serves entry 2 (`m4_1r2`), then
+1, then 0; its idle ring (`"m4_1i" "m4_1i2"`) takes 48 serves at load (IDLE and
+EMPTYIDLE `delayend auto` and the END play per def, then the twelve mission-start
+plays), so the first idle in the match serves entry 1 (`m4_1i2`). Port mapping:
+`engine/formats/adm` keeps every token (`AdmEntry.variants[]`); `anim::AdmRingTable`
+holds the heads, one table per ANIMADM, in the weapon table (`WeaponTable::rings`);
+`build_weapon_table` bakes each def once in weapon.def order and runs the END and
+mission-start plays, a mount runs the descriptors that load baked, and
+`fp_channel_play` / `fp_channel_advance` serve the plays and the wraps, the latch
+riding the weapon view as `anim_key` / `anim_variant` so both viewmodel parts follow
+one serve (ctest `anim_adm_ring_table`).
 
 **The slot + the pump** [orig: `WeaponAction_ProcessFrame @ 0x540e60`, driven per
 pooled entity by `WeaponAction_ProcessAllEntities @ 0x542690`]. MountSlot (100 B):
@@ -9943,9 +9953,10 @@ recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund ma
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
 D-WPN-26 is closed (2026-08-15): the production table builder now resolves each
-weapon's ADM through the mounted `ResourceIndex`, gives `weapon_fsm_bake`
-definition-local consuming clip rings, and converts authored automatic start/end fields
-to the retail 62.5 Hz clip duration. `npruntime_weapon_table_test` pins the committed
+weapon's ADM through the mounted `ResourceIndex`, bakes each def once in weapon.def
+order against the table's shared ANIMADM rings (one per file, the multi-clip paragraph
+above), and converts authored automatic start/end fields to the retail 62.5 Hz clip
+duration. `npruntime_weapon_table_test` pins the committed
 `soldier` `anim_idle` clip at 18 ticks plus the intentional assetless zero fallback.
 
 **Divergences** (ledger D-WPN-1..15): the FUNCTION registry binding (D-WPN-1, FIXED

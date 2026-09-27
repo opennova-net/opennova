@@ -93,6 +93,10 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
     // End notification promotes the REQUEST only. The old channel advances
     // once more here; the next update initializes the promoted channel.
     // [orig: shared AnimMap_UpdateEntity @0x40B77B..0x40B7FE]
+    // A deferred state arms the channel, and the arm outlives its promotion
+    // until the next re-init clears the channel's flags [orig: the arm
+    // @0x40B780..0x40B7E1; AnimChannel_InitFromData @0x410580].
+    bool armed = inf.wpn_deferred != 0;
     if (inf.wpn_deferred != 0 && root_motion != nullptr) {
         const int32_t length = root_motion->clip_length_ticks(
                 inf.adm_id, inf.weapon_clip_state(), inf.wpn_variant);
@@ -124,8 +128,20 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
             root_motion->advance_variant(inf.adm_id, inf.wpn_prev, inf.wpn_prev_variant,
                                          inf.wpn_prev_clip_phase, discard_prev);
         } else {
-            root_motion->advance_variant(inf.adm_id, inf.weapon_clip_state(), inf.wpn_variant,
-                                         inf.wpn_clip_phase, discard);
+            const int state = inf.weapon_clip_state();
+            const int32_t variant = inf.wpn_variant;
+            const bool have = root_motion->advance_variant(inf.adm_id, state, variant,
+                                                           inf.wpn_clip_phase, discard);
+            // The secondary's unarmed loop wrap serves its playing state's ring
+            // from the heads it shares with the primary, exactly as the primary
+            // does; only its pose changes. [orig: AnimMap_UpdateEntity(0, S, entity)
+            //  @0x40B908 -> AnimChannel_AdvancePlayback @0x40B7FE -> the callback
+            //  @0x40B1C8, AnimMap_AdvanceToNextAnim @0x40BDF0]
+            if (have && !armed &&
+                root_motion->clip_wraps_at(inf.adm_id, state, variant, inf.wpn_clip_phase)) {
+                const int32_t served = anim_rings.serve(root_motion, inf.adm_id, state);
+                if (served != variant) inf.begin_weapon_wrap_fade(served, inf.wpn_clip_phase);
+            }
         }
     }
 }

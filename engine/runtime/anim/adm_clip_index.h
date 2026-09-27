@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -17,6 +18,17 @@ namespace opennova::anim {
 // [orig: AnimMap_FindSlotByName @0x40cfa0 (the -1 miss @0x40cfce);
 //  AnimMap_ParseConfigLine @0x40cb60 registers only a found slot @0x40cba4]
 int adm_slot_index(std::string_view key);
+
+// One registered clip variant as its channel clocks it: the header's fps and
+// frame count, and its loop flag, which is what a channel steps and wraps by
+// [orig: AnimChannel_InitFromData @0x410560; AnimChannel_AdvancePlayback
+// @0x40B140, the loop bit @0x40B167].
+struct AdmClipFacts {
+	float seconds = 0.0f; // frame_count / fps, 0 for a degenerate clip
+	uint32_t fps = 0;
+	uint32_t frames = 0;
+	bool loop = false;
+};
 
 // Per-key clip VARIANT lengths for one .adm rig, in seconds — the native
 // source the weapon action FSM bakes its 'auto' delays and variant rings
@@ -49,11 +61,18 @@ public:
 	// names its slot as a row does, past its first five characters without
 	// case (`ANIM_WPN_FIRE` and `xxxx_wpn_fire` are anim_wpn_fire).
 	const std::vector<float> *lengths_for(const std::string &key) const;
+	// The same variants with their clocks (fps, frames, loop), in the same order.
+	const std::vector<AdmClipFacts> *clips_for(const std::string &key) const;
+	// Every registered slot key (lowercased) with its variants' clocks.
+	const std::unordered_map<std::string, std::vector<AdmClipFacts>> &all_clips() const {
+		return clips_;
+	}
 
 private:
 	std::string adm_name_;
-	// Lowercased key -> per-variant seconds.
+	// Lowercased key -> per-variant seconds, and the same variants' clocks.
 	std::unordered_map<std::string, std::vector<float>> lengths_;
+	std::unordered_map<std::string, std::vector<AdmClipFacts>> clips_;
 };
 
 } // namespace opennova::anim

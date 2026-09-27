@@ -182,8 +182,7 @@ void PlayerWeaponEffects::consume(const Ref<PlayerWeaponView> &p_view,
 															 : Ref<PlayerWeaponEvent>();
 		switch (step.op) {
 			case opennova::world::WeaponPresentOp::kPoseChannel:
-				play_viewmodel_clip(p_view->get_anim_key(), p_view->get_anim_variant(),
-						p_view->get_anim_advance_ticks());
+				pose_viewmodel_channel(p_view);
 				break;
 			case opennova::world::WeaponPresentOp::kPlayClip:
 				play_viewmodel_clip(event->get_anim_key(), event->get_anim_variant(),
@@ -565,6 +564,30 @@ void PlayerWeaponEffects::play_viewmodel_clip(const String &p_key, int p_variant
 	for (int64_t i = 0; i < parts.size(); ++i) {
 		if (ObjectModel *visual = Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i]))) {
 			visual->play_body_clip_variant_at_tick(p_key, p_variant, p_advance_ticks);
+		}
+	}
+}
+
+// The FP channel as the sim holds it: the primary clip alone, or, while a
+// loop wrap fades the slot's next ring entry in, the primary slerped toward it
+// by the weight (world/player_weapon.h carries the witnesses).
+void PlayerWeaponEffects::pose_viewmodel_channel(const Ref<PlayerWeaponView> &p_view) {
+	if (!p_view->get_anim_blending()) {
+		play_viewmodel_clip(p_view->get_anim_key(), p_view->get_anim_variant(),
+				p_view->get_anim_advance_ticks());
+		return;
+	}
+	LocalPlayerPresenter *owner = presenter();
+	if (owner == nullptr) {
+		return;
+	}
+	const TypedArray<ObjectModel> parts = owner->vm_parts();
+	for (int64_t i = 0; i < parts.size(); ++i) {
+		if (ObjectModel *visual = Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i]))) {
+			visual->play_body_blend_at(p_view->get_anim_key(), p_view->get_anim_advance_ticks(),
+					p_view->get_anim_blend_key(), p_view->get_anim_blend_ticks(),
+					p_view->get_anim_blend_weight(), p_view->get_anim_variant(),
+					p_view->get_anim_blend_variant());
 		}
 	}
 }
