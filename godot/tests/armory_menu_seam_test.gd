@@ -11,18 +11,8 @@ extends GutTest
 # useitem key, action 177, on entity Flags 0x400000 @0x4e0b4d) lives in main_game +
 # the collision resolver (ctest collision_test) — here the screen itself is the unit.
 
-# The retail weapon.def, weapon.mnu and gametext.bin come from the reference
-# fixture set (docs/asset-gated-tests.md); the whole script skips without it.
-const WEAPON_FIXTURE_REL := "def/weapon.def"
-const WEAPON_MNU_REL := "mnu/jo_weapon.mnu"
-const GAMETEXT_REL := "rtxt/gametext.bin"
-
-
-func should_skip_script():
-	for rel in [WEAPON_FIXTURE_REL, WEAPON_MNU_REL, GAMETEXT_REL]:
-		if RetailData.fixture(rel).is_empty():
-			return RetailData.fixture_pending_text(rel)
-	return false
+# ArmoryFixture authors the catalog and strings. Shipped menu/layout/string
+# checks remain in tests/retail/armory_menu_seam_test.gd.
 
 
 func before_each() -> void:
@@ -35,8 +25,8 @@ func after_all() -> void:
 
 func _load_weapons() -> WeaponDatabase:
 	var wdb := WeaponDatabase.new()
-	var path := RetailData.fixture(WEAPON_FIXTURE_REL)
-	assert_eq(wdb.load(path), OK, "the reference weapon.def loads")
+	var path := ArmoryFixture.directory().path_join("weapon.def")
+	assert_eq(wdb.load(path), OK, "the authored weapon.def loads")
 	return wdb
 
 
@@ -44,8 +34,8 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> WeaponData
 	# Exercise the public parser/database seam with an authored sentinel instead of
 	# reaching into ArmoryMenuCompanion's private row cache. Restrict the substitution to
 	# the named weapon's top-level block so identically named properties elsewhere
-	# in the production-sized fixture remain untouched.
-	var source := FileAccess.get_file_as_string(RetailData.fixture(WEAPON_FIXTURE_REL))
+	# in the fixture remain untouched.
+	var source := FileAccess.get_file_as_string(ArmoryFixture.directory().path_join("weapon.def"))
 	var block_start := source.find('weapon "%s"' % weapon_name)
 	assert_gte(block_start, 0, "%s exists in the weapon.def fixture" % weapon_name)
 	var block_end := source.find("\nend", block_start)
@@ -138,7 +128,7 @@ func _items(driver: MenuDriver, name: String) -> Array:
 func test_weapon_labels_resolve_from_gametext_wepdes() -> void:
 	var t := RtxtStringFile.new()
 	assert_eq(t.load_from_byte_array(
-			FileAccess.get_file_as_bytes(RetailData.fixture(GAMETEXT_REL))), OK,
+			FileAccess.get_file_as_bytes(ArmoryFixture.directory().path_join("gametext.bin"))), OK,
 			"gametext.bin fixture loads")
 	Strings.register_table("gametext", t)
 	var expected := t.get_string_in_section("WepDes", "WEAP_SHORT_M4")
@@ -264,28 +254,6 @@ func test_selected_primary_mounts_and_clears_its_weapon_icon() -> void:
 
 	DirAccess.remove_absolute(temp_dir.path_join("M_4.tga"))
 	DirAccess.remove_absolute(temp_dir)
-
-
-func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:
-	var gametext := RtxtStringFile.new()
-	assert_eq(gametext.load_from_byte_array(
-			FileAccess.get_file_as_bytes(RetailData.fixture(GAMETEXT_REL))), OK,
-			"the shipped GameText fixture loads")
-	Strings.register_table("gametext", gametext)
-
-	var companion := ArmoryMenuCompanion.new()
-	companion.set_weapon_database(_load_weapons())
-	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO")
-	var driver := _make_weapon_driver()
-	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
-
-	assert_eq(driver.item_text(driver.widget_id("PRIMARY_AMMO1"), 0), "30 - 5.56x45",
-			"parent ammo rows use the shipped WepDes round label")
-	assert_eq(driver.item_text(driver.widget_id("GRENADE_AMMO1"), 0), "0 - Flashbang",
-			"grenade zero rows use the shipped WepDes round label")
-	assert_eq(driver.item_text(driver.widget_id("GRENADE_AMMO1"), 1), "1 - Flashbang",
-			"grenade count rows keep the localized label")
 
 
 func test_class_change_refilters_slots() -> void:
@@ -491,50 +459,3 @@ func test_degrades_without_weapon_def() -> void:
 # End-to-end against the REAL weapon.mnu (authored widget tree), so population runs
 # through the same document the runtime opens [orig: the WEAPON screen of
 # weapon.mnu, a boot resource @0x49b3b1 family].
-func test_real_weapon_mnu_populates() -> void:
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(
-			FileAccess.get_file_as_bytes(RetailData.fixture(WEAPON_MNU_REL))), OK,
-			"the shipped jo_weapon.mnu fixture loads")
-	var driver := MenuDriverFixture.driver_over(self, doc, "weapon.mnu", "WEAPON")
-
-	var companion := ArmoryMenuCompanion.new()
-	assert_true(companion.owns_menu(driver), "the real weapon.mnu is claimed by the armory companion")
-	companion.set_weapon_database(_load_weapons())
-	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
-
-	var primary := driver.widget_id("PRIMARY")
-	assert_gte(primary, 0, "the real weapon.mnu authors a PRIMARY combobox")
-	assert_gt(driver.item_count(primary), 1, "PRIMARY populates (NONE + weapons)")
-	var spin := driver.widget_id("PLAYER_CLASS")
-	assert_gte(spin, 0, "the real weapon.mnu authors the PLAYER_CLASS spinlist")
-	assert_eq(driver.item_count(spin), 5, "the companion fills the authored-empty class spinlist")
-
-
-# First-show regression against the real authored WEAPON screen and weapon.def:
-# M4 (5.5 + 10 * 1.5) plus two satchels (2 * 17.6) is 55.7 lbs / Normal.
-# Selecting row zero means one satchel and must re-render 38.1 lbs / Normal.
-func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> void:
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(
-			FileAccess.get_file_as_bytes(RetailData.fixture(WEAPON_MNU_REL))), OK)
-	var driver := MenuDriverFixture.driver_over(self, doc, "weapon.mnu", "WEAPON")
-
-	var companion := ArmoryMenuCompanion.new()
-	companion.set_weapon_database(_load_weapons())
-	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO", "", "WPN_SATCHEL_CHARGE")
-	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
-
-	assert_gte(driver.widget_id("STATIC_TOTAL_WEIGHT"), 0,
-			"the real weapon.mnu authors the weight readout")
-	assert_eq(companion.weight_line(), "Total Weight 55.7 lbs (Normal)",
-			"first open weighs the selected M4 plus two satchels")
-
-	var satchel_ammo := driver.widget_id("ACCESSORY_AMMO1")
-	assert_gte(satchel_ammo, 0, "the real weapon.mnu authors the satchel ammo combo")
-	assert_eq(driver.selected_row(satchel_ammo), 1,
-			"two satchels preselect the last zero-based row")
-	driver.select_row(satchel_ammo, 0)
-	assert_eq(companion.weight_line(), "Total Weight 38.1 lbs (Normal)",
-			"row zero means one satchel and updates both weight and encumbrance")

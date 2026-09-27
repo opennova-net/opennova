@@ -106,7 +106,8 @@ static int test_entry_roundtrip_menumus(void) {
     return entry_roundtrip(g_retail_menumus.c_str());
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     RUN_TEST(test_entry_roundtrip_synth_gamemus);
     RUN_TEST(test_entry_roundtrip_synth_menumus);
 

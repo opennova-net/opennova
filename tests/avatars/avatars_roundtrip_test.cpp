@@ -65,7 +65,8 @@ int check_roundtrip(const std::string &path) {
     return 0;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     const std::string root = test_paths_repo_root(__FILE__);
     if (check_roundtrip(root + "/fixtures/avatars/synth_avatars.def") != 0) return 1;
 

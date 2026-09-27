@@ -42,7 +42,8 @@ static int check(const char *path, const char *script_name) {
     return 1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     int fail = 0;
     if (!check(MUS_FIXTURE_DIR "/synth_gamemus.bin", "gamescript")) ++fail;
     if (!check(MUS_FIXTURE_DIR "/synth_menumus.bin", "menuscript")) ++fail;

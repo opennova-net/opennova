@@ -149,7 +149,8 @@ static int test_bind_resolves_play_by_name(void) {
     return 1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     RUN_TEST(test_names_roundtrip_synth_gamemus);
     RUN_TEST(test_bind_resolves_play_by_name);
 

@@ -437,7 +437,8 @@ int test_retail_tank_sets_select_view_layers() {
     return 0;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	int failed = test_radio_selection_keeps_unity_pitch_and_gates_view_layers();
     failed |= test_view_gate_precedes_selection_and_pitch();
     failed |= test_set_view_bit_gate_and_rejected_pitch_rng();

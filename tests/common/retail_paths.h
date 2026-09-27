@@ -34,6 +34,29 @@ namespace retail {
 
 constexpr int kSkipExitCode = 77;
 
+// Mixed binaries have two separately registered CTest entries. The ordinary
+// entry selects synthetic cases; --retail selects the compatibility cases as
+// well. Root resolution is disabled for the ordinary entry, even on a machine
+// with an installed game. Fully gated binaries retain their normal behavior.
+inline bool &selected() {
+    static bool enabled = true;
+    return enabled;
+}
+
+inline void configure_mixed(int &argc, char **argv) {
+    selected() = false;
+    for (int i = 1; i < argc;) {
+        if (std::string(argv[i]) == "--retail") {
+            selected() = true;
+            for (int j = i; j < argc; ++j) argv[j] = argv[j + 1];
+            --argc;
+        } else {
+            ++i;
+        }
+    }
+    std::printf("Selected test cases: %s\n", selected() ? "synthetic + retail compatibility" : "synthetic");
+}
+
 inline std::string env_or_empty(const char *name) {
     const char *value = std::getenv(name);
     return (value != nullptr && value[0] != '\0') ? std::string(value) : std::string();
@@ -60,9 +83,9 @@ inline bool dir_exists(const std::string &path) {
 }
 
 // The packed retail install, or "".
-inline std::string install() { return strip_trailing_separators(env_or_empty("OPENNOVA_JO_DIR")); }
+inline std::string install() { return selected() ? strip_trailing_separators(env_or_empty("OPENNOVA_JO_DIR")) : std::string(); }
 // The extracted retail asset tree, or "".
-inline std::string assets() { return strip_trailing_separators(env_or_empty("OPENNOVA_JO_ASSETS")); }
+inline std::string assets() { return selected() ? strip_trailing_separators(env_or_empty("OPENNOVA_JO_ASSETS")) : std::string(); }
 inline std::string lower_ascii(std::string s) {
     for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
@@ -134,6 +157,9 @@ inline int skip(const char *needs) {
 
 // One retail leg inside a test whose synthetic legs ran: note it and pass.
 inline int skip_leg(const char *needs) {
+    // A nonselected compatibility case is not a missing-data skip. Its
+    // separately named CTest entry is responsible for exercising this case.
+    if (!selected()) return 0;
     std::printf("SKIP-LEG: needs %s\n", needs);
     std::fflush(stdout);
     return 0;

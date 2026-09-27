@@ -11,7 +11,9 @@ fails on any other read, and a new hook lands here in the same PR that adds it.
 Read only by the three resolvers — `tests/common/retail_paths.h` (ctests),
 `godot/tests/support/retail_data.gd` (GUT), `scripts/net/lib.ps1` (the
 PowerShell getters) — plus the `--resource-dir` default of
-`scripts/mcp/game_mcp.py launch`. Machine paths go in
+`scripts/mcp/game_mcp.py launch`. The test-runner preflight in
+`scripts/ci/test_suites.py` checks that both roots name existing directories.
+Machine paths go in
 `.claude/settings.local.json` `env`, never in tracked files.
 
 | Var | Points at | Who consumes it |
@@ -19,10 +21,11 @@ PowerShell getters) — plus the `--resource-dir` default of
 | `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set, expansions under `expansion/`) | the `JO_DIR`-gated ctests and GUT tests ([asset-gated-tests.md](asset-gated-tests.md)), the `game_mcp.py launch` default, the render/net scripts' defaults |
 | `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, models, `.adm`, the shipped `.bms` missions loose at its root, the reference fixture set under `fixtures/`) | the `JO_ASSETS`-gated ctests and GUT tests (including `mission_corpus` and the GUT corpus binding), the render fixture capture's loose mission |
 
-A gated ctest reports **Skipped** (exit 77, `opennova_add_gated_test`) without
-its root and prints `SKIP: needs ...`; a mixed test runs its synthetic legs and
-prints `SKIP-LEG:` for the retail leg. A green run therefore never hides an
-unexercised gate.
+`--suite core` unsets both roots. `--suite retail` requires both and fails on
+any skipped compatibility test or leg. The default `--suite all` permits
+explicit missing-data skips: exit 77 for a wholly gated ctest, or `SKIP-LEG:`
+inside a mixed test's separately registered retail invocation. See the
+[suite commands and coverage rules](asset-gated-tests.md).
 
 ## The scripts
 
@@ -94,7 +97,6 @@ the normal map spawn selection.
 
 | Tool | Option |
 |---|---|
-| `nw-server` | `--mission --env --resource-root --port --game-type --num-teams --capture-duration-seconds --capture-speed-setting --spawn-wave-time-base --spawn-wave-time-zone --default-spawn-requires-no-team-zone --log-debug` (`apps/nw_server/README.md`) |
 | `nw_pp` | `--hexcap-max <n>` |
 | `opennova-extract` | `--game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...` |
 | `renderer_state_vectors_test`, `nw_codec_identity_test` | `--dump` (print the replacement vector table) |
@@ -103,7 +105,7 @@ the normal map spawn selection.
 | `ai_path_conformance_test` | `--report`, `--ticks`, `--bms` |
 | `mnu_compat_test` | extra loose menus as positional arguments |
 | `wac_corpus_test` | extra corpus directories as positional arguments |
-| `scripts/build.sh` | `--no-godot`, `--jobs N`; `scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N]`; `scripts/test_godot.sh --keep-user-dir` |
+| `scripts/build.sh` | `--no-godot`, `--jobs N`, `--suite core\|retail\|all`; `scripts/build_godot.sh [Dev\|DebugFull\|Release] [--jobs N]`; `scripts/test_godot.sh --keep-user-dir --suite core\|retail\|all [--windowed]` |
 | `scripts/ida/cite_sweep.py` | `--url` |
 
 GUT-side regeneration is an uncollected script run alone:

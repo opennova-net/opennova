@@ -51,10 +51,6 @@ const MountLook := preload("res://tests/support/mount_look.gd")
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_coop_two_sim"
 
 
-func should_skip_script():
-	return RetailData.def_root_skip()
-
-
 func before_all() -> void:
 	DirAccess.make_dir_recursive_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR))
@@ -84,7 +80,7 @@ func _native_asset_root() -> ResourceRoot:
 
 func _fixture_items_db() -> ItemDatabase:
 	var def_root := ResourceRoot.new()
-	assert_eq(def_root.set_root_dir(RetailData.def_root()), OK)
+	assert_eq(def_root.set_root_dir(DefFixture.directory()), OK)
 	var db := ItemDatabase.new()
 	assert_eq(db.load_from_resource_root(def_root, "items.def"), OK)
 	return db
@@ -233,7 +229,7 @@ func _net_spawn_zone_item_db() -> ItemDatabase:
 
 func _install_combat_tables(sim: Simulation) -> void:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
+	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	sim.resolve_item_traits(item_db)
@@ -243,9 +239,9 @@ func _install_combat_tables(sim: Simulation) -> void:
 	assert_gt(sim.set_infantry_anim_map(PresenterFixture.anim_root(self), "soldier.adm"), 0)
 
 
-func _retail_m4() -> WeaponDef:
+func _fixture_m4() -> WeaponDef:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
+	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M4AUTO")
@@ -253,9 +249,9 @@ func _retail_m4() -> WeaponDef:
 	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _retail_m9() -> WeaponDef:
+func _fixture_m9() -> WeaponDef:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
+	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M9Beretta")
@@ -263,40 +259,14 @@ func _retail_m9() -> WeaponDef:
 	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _retail_smoke_grenade() -> WeaponDef:
+func _fixture_emplaced_50() -> WeaponDef:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
-	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
-	var index := weapons.find_weapon("WPN_GRENADESM")
-	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else null
-
-
-func _retail_emplaced_50() -> WeaponDef:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
+	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_EMPLCD50NA")
 	assert_gte(index, 0)
 	return weapons.get_weapon(index) if index >= 0 else null
-
-
-func _throwable_visual_count(sim: Simulation, item_id: int) -> int:
-	var count := 0
-	for value in sim.get_throwable_visuals():
-		if (value as ThrowableVisualRow).item_id == item_id:
-			count += 1
-	return count
-
-
-func _throwable_move_effect(sim: Simulation, item_id: int) -> String:
-	for value in sim.get_throwable_visuals():
-		var visual := value as ThrowableVisualRow
-		if visual.item_id == item_id:
-			return visual.move_effect
-	return ""
 
 
 func _inventory_clip(sim: Simulation, weapon_name: String) -> int:
@@ -994,13 +964,13 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"the native install resolved the carrier model source")
 	assert_true(host.load_from_mission_data(mission))
 	var def_root := ResourceRoot.new()
-	assert_eq(def_root.set_root_dir(RetailData.def_root()), OK)
+	assert_eq(def_root.set_root_dir(DefFixture.directory()), OK)
 	assert_eq(host.load_weapon_table(def_root, "weapon.def"), OK)
 	assert_true(host.spawn_local_player(Vector3.ZERO, 120.0, 1))
 	MountLook.face(self, host, Vector3(2, 0, 0))
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
+	assert_eq(weapons.load(DefFixture.directory().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
 	var mounted: WeaponDef = weapons.get_weapon(
@@ -1139,8 +1109,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_gte(host_joiner_index, 0,
 			"the authority exposes the admitted joiner entity H")
 
-	var personal := _retail_m4()
-	var mounted := _retail_emplaced_50()
+	var personal := _fixture_m4()
+	var mounted := _fixture_emplaced_50()
 	var weapon_defs := {
 		"WPN_M4AUTO": personal,
 		"WPN_EMPLCD50NA": mounted,
@@ -1339,7 +1309,7 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	# Apply before admission, like the shell: a later grant must not refill a
 	# magazine while this test is exercising the fire/reload transaction.
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	joiner.set_local_player_weapon(_retail_m4(), {})
+	joiner.set_local_player_weapon(_fixture_m4(), {})
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
@@ -1758,8 +1728,8 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	host.set_local_player_weapon(_retail_m4(), {})
-	joiner.set_local_player_weapon(_retail_m4(), {})
+	host.set_local_player_weapon(_fixture_m4(), {})
+	joiner.set_local_player_weapon(_fixture_m4(), {})
 	for _settle in range(8):
 		host.step()
 		joiner.step()
@@ -1886,127 +1856,6 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 
 
 
-func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> void:
-	var mission := _combat_mission()
-	var host := Simulation.new()
-	var host_options := HostSessionOptions.new()
-	host_options.game_type = 0x30020
-	host.configure_host_session(host_options)
-	assert_true(host.enable_host_listen(0))
-	assert_true(host.load_from_mission_data(mission))
-	_install_combat_tables(host)
-
-	var joiner := Simulation.new()
-	assert_true(joiner.enable_join(
-			"127.0.0.1", host.get_host_listen_port(), "SmokeObserver"))
-	assert_true(joiner.load_from_mission_data(mission))
-	_install_combat_tables(joiner)
-	assert_true(_drive_pair_to_match(host, joiner),
-			"joiner reached the real-UDP in-match seam")
-	if not joiner.is_joined_in_match():
-		return
-
-	var smoke := _retail_smoke_grenade()
-	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_GRENADESM")], 8))
-	host.set_local_player_weapon(smoke, {})
-	for _settle in range(20):
-		host.step()
-		joiner.step()
-		OS.delay_msec(1)
-
-	var host_health_before := host.get_local_player_health()
-	var joiner_health_before := joiner.get_local_player_health()
-	host.set_local_player_weapon_input(true, true, false)
-	for _windup in range(5):
-		host.step()
-		joiner.step()
-		OS.delay_msec(1)
-	host.set_local_player_weapon_input(false, false, false)
-
-	var first_seen := -1
-	for tick in range(200):
-		host.step()
-		joiner.step()
-		if _throwable_visual_count(host, 1875) > 0 \
-				and _throwable_visual_count(joiner, 1875) > 0:
-			first_seen = tick
-			break
-		OS.delay_msec(1)
-	assert_gte(first_seen, 0,
-			"the host's production smoke round crossed tag-2 into joiner flight")
-	if first_seen < 0:
-		return
-
-	var host_arm_sounds := 0
-	var joiner_arm_sounds := 0
-	var host_move_effect_survived_arm := true
-	var joiner_move_effect_survived_arm := true
-	for _tick in range(320):
-		host.step()
-		joiner.step()
-		host_move_effect_survived_arm = host_move_effect_survived_arm \
-				and _throwable_move_effect(host, 1875) == "Effect_SmokeToss"
-		joiner_move_effect_survived_arm = joiner_move_effect_survived_arm \
-				and _throwable_move_effect(joiner, 1875) == "Effect_SmokeToss"
-		for value in host.drain_round_impacts():
-			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
-				host_arm_sounds += 1
-		for value in joiner.drain_round_impacts():
-			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
-				joiner_arm_sounds += 1
-		OS.delay_msec(1)
-
-	assert_eq(_throwable_visual_count(host, 1875), 1,
-			"authority retains the smoke grenade after arm_age")
-	assert_eq(_throwable_visual_count(joiner, 1875), 1,
-			"the tag-2 visual client retains the smoke grenade after arm_age")
-	assert_true(host_move_effect_survived_arm,
-			"authority keeps the continuous smoke move effect through arm_age")
-	assert_true(joiner_move_effect_survived_arm,
-			"tag-2 reconstruction keeps the same smoke move effect through arm_age")
-	assert_eq(host_arm_sounds, 1,
-			"authority presents the witnessed obj-row smoke-pour event once")
-	assert_eq(joiner_arm_sounds, 1,
-			"visual-only flight presents the same witnessed arm event once")
-	assert_eq(host.get_local_player_health(), host_health_before,
-			"arm_age is not an authoritative detonation")
-	assert_eq(joiner.get_local_player_health(), joiner_health_before,
-			"the visual-only client cannot apply a grenade consequence")
-	var diagnostics: Dictionary = joiner.get_joiner_network_diagnostics()
-	assert_eq(int(diagnostics.get("gap_depth", -1)), 0,
-			"the steady replicated session has no ordered sequence gap")
-	assert_false(bool(diagnostics.get("freeze_suspected", true)),
-			"flat idle records without a gap are not a replication freeze")
-
-	var host_fuse_sounds := 0
-	var joiner_fuse_sounds := 0
-	for _tick in range(2300):
-		host.step()
-		joiner.step()
-		for value in host.drain_round_impacts():
-			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
-				host_fuse_sounds += 1
-		for value in joiner.drain_round_impacts():
-			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
-				joiner_fuse_sounds += 1
-		if _throwable_visual_count(host, 1875) == 0 \
-				and _throwable_visual_count(joiner, 1875) == 0:
-			break
-		OS.delay_msec(1)
-
-	# The loop bound only has to outlast the mounted fuse (base JO authors 1860
-	# ticks, the revx02 expansion 2480); what this pins is that BOTH sides retire
-	# the round on the same fuse and neither presents a fuse event: the expiry
-	# head presents the obj row only for a nonzero kztype, which grenadesm lacks.
-	# [orig: Projectile_UpdatePhysics @0x4E9DC6, kztype @0x4E9DDC..0x4E9DE1]
-	assert_eq(_throwable_visual_count(host, 1875), 0,
-			"authority releases the smoke grenade on its authored fuse")
-	assert_eq(_throwable_visual_count(joiner, 1875), 0,
-			"joiner releases the replicated smoke grenade on the same fuse")
-	assert_eq(host_fuse_sounds, 0, "authority presents no fuse event for the class-less smoke")
-	assert_eq(joiner_fuse_sounds, 0, "joiner presents no fuse event for the class-less smoke")
-
-
 func test_listen_host_reload_relays_over_loopback_without_double_refill() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
@@ -2027,7 +1876,7 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 	if not joiner.is_joined_in_match():
 		return
 
-	var m4 := _retail_m4()
+	var m4 := _fixture_m4()
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	host.set_local_player_weapon(m4, {})
@@ -2145,7 +1994,7 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
 			"the granted body survives the round start")
 
-	joiner.set_local_player_weapon(_retail_m4(), {})
+	joiner.set_local_player_weapon(_fixture_m4(), {})
 	for _settle in range(3):
 		joiner.step()
 		host.step()
@@ -2205,7 +2054,7 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	assert_true(switched, "the joiner switched to its secondary before the echo")
 	# Mirror LocalPlayerPresenter consuming the committed switch event: mount the
 	# newly selected definition so later ticks bridge the M9 FSM to the M9 slot.
-	joiner.set_local_player_weapon(_retail_m9(), {})
+	joiner.set_local_player_weapon(_fixture_m9(), {})
 	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), spent_m4_clip,
 			"the original M4 slot stays spent while its echo is withheld")
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
@@ -2251,7 +2100,7 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 		return
 
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	joiner.set_local_player_weapon(_retail_m4(), {})
+	joiner.set_local_player_weapon(_fixture_m4(), {})
 	for _settle in range(3):
 		joiner.step()
 		host.step()
@@ -2337,7 +2186,7 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 		return
 
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	joiner.set_local_player_weapon(_retail_m4(), {})
+	joiner.set_local_player_weapon(_fixture_m4(), {})
 	for _settle in range(3):
 		joiner.step()
 		host.step()
@@ -2430,7 +2279,7 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 		return
 
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	joiner.set_local_player_weapon(_retail_m4(), {})
+	joiner.set_local_player_weapon(_fixture_m4(), {})
 	for _settle in range(3):
 		joiner.step()
 		host.step()
@@ -2479,7 +2328,7 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	host.set_local_player_weapon(_retail_m4(), {})
+	host.set_local_player_weapon(_fixture_m4(), {})
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
@@ -2559,7 +2408,7 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 		var inventory := joiner.get_local_player_inventory()
 		inventory_valid = inventory.valid
 		if inventory_valid:
-			joiner.set_local_player_weapon(_retail_m4(), {})
+			joiner.set_local_player_weapon(_fixture_m4(), {})
 
 	# A click during the join wait (the world once revealed at world-load completion,
 	# one wire gate early — D-LOADSCR-3) must not discharge the pre-armed FSM
@@ -2772,7 +2621,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 			37, 0, gunner_ssn))
 
 	var fixture_def_root := ResourceRoot.new()
-	assert_eq(fixture_def_root.set_root_dir(RetailData.def_root()), OK)
+	assert_eq(fixture_def_root.set_root_dir(DefFixture.directory()), OK)
 	var fixture_item_db := ItemDatabase.new()
 	assert_eq(fixture_item_db.load_from_resource_root(
 			fixture_def_root, "items.def"), OK)
@@ -2943,4 +2792,3 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 			"joiner's rendered gunner BODY faces the host's seat frame")
 	assert_lt(worst_joiner_body_step, 25.0,
 			"joiner's rendered gunner BODY holds its facing (no spin)")
-

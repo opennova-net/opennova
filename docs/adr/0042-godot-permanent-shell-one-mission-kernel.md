@@ -9,6 +9,16 @@
   `godot/src/devtools`), d7 (`godot_orig_cites` is one gauge over the whole
   Godot side) and takes d8 (netsim/npruntime/inmatch move under `runtime/`).
   d1, d4, d6 stand.
+- **d8 option taken** (2026-09-27): `apps/nw_server` is retired. Retail's only
+  dedicated path is the host screen's Serve Only server type (`SERVERTYPE` = 1),
+  which the game already runs as `RoleKind::DedicatedHost`; retail has no
+  command-line auto-host (`/HOST` feeds the unreachable
+  `Game_HostMultiplayerSession @0x4a65a0`; `/SERVEONLY` @0x4a79be only forces
+  windowed mode, allows a second instance and skips the video test,
+  `Game_InitSubsystems @0x4a710c`). The seams only it called (strict WAC
+  diagnostics, `bring_up_dedicated`, `seed_weather_from_env`,
+  `apply_fresh_host_rule_defaults`, `is_retail_code_word`, the kernel's
+  `terrain_til_bytes` option) are deleted with it.
 - **Owners**: runtime architecture, the Godot layer, tooling (MCP/F3)
 - **Supersedes/updates**: closes ADR 0033's R4 rung and supersedes its d1 device triad; updates
   ADR 0016 (fully historical), ADR 0020 d4 (the terrain-field provider), ADR 0035 (d5 made

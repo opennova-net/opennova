@@ -330,7 +330,7 @@ the 62-tick channel-rate stand-in on anim-data-less hosts); the D-NET-157 seat g
 seatType byte via carrier +0x326/+0x312, the weapon-busy gate, ctrl-seat def attribs);
 the armory-enable restriction table (`unused6 @ 0x24D5600` / player+89688 —
 4th 0x5A byte, observed 0); a weapon.def feed
-for table-less hosts (headless `nw_server`). NOTE the armory truth is the HOST'S RESOLVED
+for table-less hosts. NOTE the armory truth is the HOST'S RESOLVED
 weapon.def (VFS view — a live JO:CA root resolves 126 weapons; the committed fixture is a
 94-weapon extract), so live index anchors belong to wire gates, not unit tests (§5.57 "Index
 numbering").

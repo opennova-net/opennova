@@ -1,11 +1,11 @@
 // The engine's mission-start weather seed (runtime/environment/weather_seed):
-// every serving embedder must seed the same weather home from the
-// mission-selected resources — the ENV parse + BMS header overrides and
-// retail's 255-tick weather settle — before a client can receive phase 2,
-// through the same real wire projection.
+// the host seeds the weather home from the mission-selected resources (the
+// ENV parse + BMS header overrides) and runs retail's 255-tick weather settle
+// before a client can receive phase 2, through the same real wire projection.
 
 #include "netsim/conn_fan_test_util.h"
 
+#include <formats/env/env.h>
 #include <net/npwire/ingame_decode.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/world/world.h>
@@ -31,6 +31,22 @@ int failures = 0;
 		}                                                                           \
 	} while (0)
 
+// The shell's order: parse the ENV, fold the mission header's override layer
+// onto it, then seed from that config and the header clock
+// [orig: Game_LoadTerrainDuringConnect @0x520710 mutates the parsed ENV before
+// the Game_StartMission snapshot @0x525383/0x525393].
+bool seed_from_env(const char *text, const opennova::bms::Header &header, w::World &world) {
+	std::istringstream input(text);
+	env::Config config;
+	std::string error;
+	if (!env::load_env(input, config, error)) return false;
+	const int no_rgb[3] = {0, 0, 0};
+	env::apply_bms_overrides(config, env::bms_env_overrides_from_header(
+			static_cast<uint32_t>(header.attrib_flags), 0, header.fog_override, no_rgb, no_rgb, 0));
+	world.weather.seed(env::weather_seed_from_config(config, header));
+	return true;
+}
+
 void test_resource_values_reach_the_real_wire_projection() {
 	w::World world;
     // A mission only advances while a human is in the world - retail holds the
@@ -41,14 +57,11 @@ void test_resource_values_reach_the_real_wire_projection() {
 	opennova::bms::Header header{};
 	header.start_time = 0x0A80; // 10.5 hours in the BMS Q8.8 clock
 	header.minutes_per_day = 123;
-	std::istringstream input(
+	CHECK(seed_from_env(
 			"enviro_name \"Parity\"\n"
 			"fog_level 733\n"
-			"sky_speed 37\n");
-	std::string error;
-	CHECK(env::seed_weather_from_env(
-			input, header, world.weather, error));
-	CHECK(error.empty());
+			"sky_speed 37\n",
+			header, world));
 	CHECK(world.weather.valid);
 
 	nw::FrameUpdate frame;
@@ -76,10 +89,7 @@ void test_bms_fog_override_precedes_the_environment_resource() {
 	header.attrib_flags = opennova::bms::AttribFlags::FogDistanceOverrideEnable;
 	header.fog_override = 811;
 	header.minutes_per_day = 60;
-	std::istringstream input("fog_level 733\nsky_speed 19\n");
-	std::string error;
-	CHECK(env::seed_weather_from_env(
-			input, header, world.weather, error));
+	CHECK(seed_from_env("fog_level 733\nsky_speed 19\n", header, world));
 	nw::FrameUpdate frame;
 	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.fog_dist == 811);
@@ -91,10 +101,7 @@ void test_mission_start_prewarms_255_environment_ticks() {
 	opennova::bms::Header header{};
 	header.start_time = 0x0540;
 	header.minutes_per_day = 60;
-	std::istringstream input("fog_level 733\nsky_speed 19\n");
-	std::string error;
-	CHECK(env::seed_weather_from_env(
-			input, header, world.weather, error));
+	CHECK(seed_from_env("fog_level 733\nsky_speed 19\n", header, world));
 	const uint32_t start = world.weather.tod_fixed24;
 	const uint32_t rate = (24u << 24) / (3720u * 60u);
 	w::WeatherTickEvents events;

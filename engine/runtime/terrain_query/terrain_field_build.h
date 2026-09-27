@@ -48,16 +48,14 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 		int32_t charmap_width = 0, int32_t charmap_height = 0);
 
 // The whole embedder-side load for an embedder that holds no parsed terrain
-// documents of its own (apps/nw_server, the ctests): read
+// documents of its own (the ctests): read
 // `<terrain_name>.cpt/.trn` through `index`, decode the .trn-named charmap
 // PCX when present (absent or undecodable = no surface map, the sampler's
 // "no charmap -> surface 1" leg, logged at kWarn), and build the store.
-// `til_bytes` (optional) receives the raw .til for the S2C 0x45 terrain-tile
-// stream a wire joiner streams (net-re 5.37). False with `error` when the
+// False with `error` when the
 // documents are missing or malformed. The shell keeps its parsed TerrainData
 // and calls terrain_field_store_build directly.
 bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
-		const std::string &terrain_name, std::string &error,
-		std::vector<uint8_t> *til_bytes = nullptr);
+		const std::string &terrain_name, std::string &error);
 
 } // namespace opennova::terrain

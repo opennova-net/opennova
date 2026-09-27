@@ -293,8 +293,10 @@ int main() {
 			cfg.config.game_type = options.game_type;
 			cfg.config.unlimited_vehicles = false; // game.cfg unlimited_vehicles = 0
 			cfg.socket_mode = inmatch::SocketMode::Lan;
-			cfg.serve_and_play = true; // the dedicated bring-up forces this OFF
-			role.bring_up_dedicated(cfg);
+			cfg.serve_and_play = false; // SERVERTYPE serve-only: no local player
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
 		};
 		std::string error;
 		CHECK(kernel.boot(options, error));
@@ -304,7 +306,8 @@ int main() {
 		CHECK(!host.host_owner.ctx.config.unlimited_vehicles);
 		CHECK(!kernel.world.rules.vehicle_respawns);
 		CHECK(!host.host_owner.serve_and_play);
-		CHECK(host.host_owner.host_loopback == nullptr);
+		// The loopback channel exists but no local client registers on it.
+		CHECK(host.host_owner.host_loopback == &host.host_loop);
 		CHECK(host.client_runtime == nullptr);
 		CHECK(host.host_owner.ctx.world == &kernel.world);
 		CHECK(host.host_owner.ctx.mission == &kernel.mission);
@@ -434,7 +437,9 @@ int main() {
 				cfg.config.max_players = 4;
 				cfg.config.game_type = options.game_type;
 				cfg.socket_mode = inmatch::SocketMode::Lan;
-				host_storage->bring_up_dedicated(cfg);
+				inmatch::HostBringup bringup;
+				bringup.host_cfg = cfg;
+				host_storage->bring_up(bringup);
 			};
 		}
 		std::string error;

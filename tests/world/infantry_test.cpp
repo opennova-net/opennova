@@ -5106,7 +5106,8 @@ void test_slope_probes_include_candidate_models() {
  CHECK(e->body_pitch == 0); // the flat height field alone has no slope
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     test_parachute_deployment_and_descent();
     test_slope_probes_include_candidate_models();
     test_downwash_query_and_body_selection();

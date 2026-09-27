@@ -601,7 +601,8 @@ static int test_retail_evaluation_result() {
 	return 0;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	int failures = 0;
 	g_real_fixture = retail::reference_fixture("mns/menu_style.mns");
 	kRealFixture = g_real_fixture.c_str();

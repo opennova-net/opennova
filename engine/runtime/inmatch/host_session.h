@@ -1,13 +1,13 @@
 #pragma once
 
-// The in-match HOST owner loop: exactly ONE implementation, which apps/nw_server and
-// godot/src/simulation both delegate to. The faithful reimpl of the original engine's per-frame host
+// The in-match HOST owner loop: exactly ONE implementation, which godot/src/simulation
+// delegates to. The faithful reimpl of the original engine's per-frame host
 // pump [orig: CNapiNetwork_PumpManagerReceive @0x4c4d10 (recv, mgr flag 4, 250ms) +
 // CNapiNetwork_SendUDPPacket @0x4c4d30 (CNapiNPManager_SendTo) wrapped around Server_TickUpdate].
 //
 // Socket-free: the loop holds NO socket — the owner supplies a opennova::IDatagramSocket and this
-// pumps it (apps/nw_server wraps net::Socket via apps/common/net_datagram_socket.h; godot/src
-// wraps UdpPump). ALL protocol/crypto/framing stay in the libs (.agents/network.md). The loop
+// pumps it (godot/src wraps UdpPump; apps/ wrap net::Socket via
+// apps/common/net_datagram_socket.h). ALL protocol/crypto/framing stay in the libs (.agents/network.md). The loop
 // speaks PeerAddr; the recv timeout (0 = non-blocking busy loop; ~30 ms for a single-threaded
 // poll-pump test) is a property of the embedder, not this loop.
 
@@ -137,8 +137,7 @@ struct HostConfig {
 	CharacterJoinVars local_character_vars = retail_fresh_profile_character_vars();
 };
 
-// Stand `owner` up through the shared in-match host bring-up used by apps/nw_server and the Godot
-// host. `serve_and_play` selects HostClient and registers the type-2 loopback; otherwise it selects
+// Stand `owner` up through the shared in-match host bring-up the Godot host uses. `serve_and_play` selects HostClient and registers the type-2 loopback; otherwise it selects
 // HostOnly and creates no local player. When serve-and-play also has a World, spawn the host player
 // and queue its initial-state burst before the first per-frame 0x0A.
 void start_host_session(HostOwner &owner, const HostConfig &cfg);

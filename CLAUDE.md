@@ -18,10 +18,10 @@ easier to relay than to rediscover.
   `probes/` (the registered `game_probe` runtime probes, source-only and
   excluded from the runtime export preset, ADR 0041; see `docs/mcp.md`),
   `tests/` (GUT suite).
-- `apps/` — `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
-  in-match host; never shipped), `nw_lan_probe/`, `nw_pp/`, `extract/` (`opennova-extract`,
-  ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047), `common/` (shared socket helpers,
-  deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
+- `apps/` — `novaworld_server/` (the NovaWorld service), `nw_lan_probe/`, `nw_pp/`,
+  `extract/` (`opennova-extract`, ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047),
+  `common/` (shared socket helpers, deliberately app-layer; pcap I/O lives in
+  `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
@@ -50,9 +50,9 @@ processes in the main checkout outside the worktree, so sandboxed runs can fail 
 processes.
 
 ```bash
-scripts/build.sh          # C++ build + full ctest (Release); --no-godot skips the GDExtension, --jobs N
+scripts/build.sh          # C++ build + ctest (Release); --suite core|retail|all (default all), --no-godot, --jobs N
 scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after
-scripts/test_godot.sh     # GUT GDScript suite, headless
+scripts/test_godot.sh     # GUT headless; --suite core|retail|all (default all)
 python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv; ledger_check takes --check)
 ```
 
@@ -70,10 +70,10 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 - Full ctest is ~90 s. Scope during focused work:
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.
-- Asset-gated tests report Skipped (ctest exit 77, or a `SKIP-LEG:` line inside a
-  mixed test) unless the two roots — `OPENNOVA_JO_DIR` and `OPENNOVA_JO_ASSETS` —
-  point at local data; a green run
-  never proves they exercised it. The root→test→data matrix, local setup, and the
+- `--suite core` runs with both retail roots unset. `--suite retail` requires
+  `OPENNOVA_JO_DIR` and `OPENNOVA_JO_ASSETS` and fails on missing or skipped coverage.
+  The default `--suite all` permits explicit missing-data skips; its green result
+  never proves those cases exercised retail data. Suite selection, migration records, local setup, and the
   never-commit-captures policy live in [docs/asset-gated-tests.md](docs/asset-gated-tests.md);
   every other env hook is gone ([docs/dev-env-vars.md](docs/dev-env-vars.md),
   `scripts/lint/env_lint.py`). Machine paths go in `.claude/settings.local.json` `env`

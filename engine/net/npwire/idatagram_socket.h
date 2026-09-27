@@ -9,10 +9,9 @@ namespace opennova {
 
 // The real-socket seam. A minimal datagram-socket abstraction the in-match owner loop (the
 // engine/runtime/inmatch host/client per-frame loops) pumps, so the loop itself holds NO socket — libs
-// stay socket-free (engine/CLAUDE.md). The socket owners provide the adapter: apps/nw_server wraps
+// stay socket-free (engine/CLAUDE.md). The socket owners provide the adapter: apps/ wraps
 // net::Socket (apps/common/net_datagram_socket.h), godot/src wraps UdpPump. This is the
-// ONE owner-loop implementation's only door to the wire — promoting the loop over this
-// interface is what keeps the headless server and the Godot layer from drifting apart.
+// ONE owner-loop implementation's only door to the wire.
 //
 // Distinct from the in-process transports (Loopback/UdpSessionTransport): those move INNER
 // identity {tag,body} frames between endpoints; this moves WHOLE datagrams (NWU/CRC envelope

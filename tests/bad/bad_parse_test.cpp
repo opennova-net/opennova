@@ -13,7 +13,8 @@ using namespace opennova::bad;
 // The null guard runs unconditionally; the shipped BINOC.bad (the reference
 // fixture set, OPENNOVA_JO_ASSETS) is the SKIP-LEG retail leg that pins the
 // rig's layout.
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     BadFile invalid = {};
     TEST_EXPECT(bad_parse(nullptr, &invalid) == -1);
 

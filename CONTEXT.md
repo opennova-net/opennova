@@ -356,8 +356,8 @@ OpenNova game is coming and offers **PLAY RETAIL**. The game mounts it when no
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:
-`opennova.exe` hosting a match without being a player: the server-options menu path,
-runnable windowed or `--headless`. A mode of the game product, never a separate binary,
+`opennova.exe` hosting a match without being a player: the host screen's retail Serve Only
+server type (`SERVERTYPE` = 1), runnable windowed or `--headless`. A mode of the game product, never a separate binary,
 riding the one in-match seam (ADR 0015).
 _Avoid_: dedicated server product, server exe, opennova-server
 
@@ -377,8 +377,7 @@ _Avoid_: core assets, base game files
 
 **Promote**:
 Reserved for `mission::promote_mission` — spawning a parsed mission into the live world
-(entities, AI brains, nav), the IDA-cited spawn path used by the standalone game
-and dedicated dev hosts. Other historical uses of the word (old-title format upliftment, 3DI→IR
+(entities, AI brains, nav), the IDA-cited spawn path the game uses. Other historical uses of the word (old-title format upliftment, 3DI→IR
 normalization, fixture curation, code relocation) should be phrased as *migrate*,
 *normalize*, *whitelist*, and *move* respectively.
 _Avoid_: promote (for anything but the mission→world spawn)

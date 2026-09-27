@@ -63,11 +63,7 @@ func before_each() -> void:
 	# A shell booted here must see no launch flags: the GUT process carries none,
 	# and the override guards against a sibling test leaving one behind.
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	PresenterFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
-
-
-func should_skip_script():
-	return RetailData.fixtures_skip(STAGED_FIXTURES.keys())
+	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
 
 
 func after_each() -> void:

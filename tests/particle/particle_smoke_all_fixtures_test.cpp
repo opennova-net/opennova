@@ -86,7 +86,8 @@ int sweep(const std::string &dir, const char *label, int &parsed) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	int parsed = 0;
 	int failures = sweep(fixtures_dir(), "fixtures/particle", parsed);
 	if (parsed == 0) {

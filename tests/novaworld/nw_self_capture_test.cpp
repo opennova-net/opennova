@@ -2,7 +2,7 @@
 // tier-1 gate next to nw_codec_identity (docs/maturity-program.md).
 //
 // Runs a deterministic in-process opennova host + opennova joiner session — the
-// SAME host owner loop apps/nw_server runs (npruntime/host_session.h) driving the
+// SAME host owner loop the game's host runs (npruntime/host_session.h) driving the
 // SAME headless joiner npruntime_two_endpoint_socket drives (inmatch::ClientRuntime),
 // composed over the public IDatagramSocket seam with an in-memory adapter instead
 // of a bound socket (no timing, no ephemeral ports) — tees every datagram BOTH
@@ -33,7 +33,7 @@
 // regenerate to make an unexplained diff pass.
 
 #include <runtime/inmatch/client_runtime.h>
-#include <runtime/inmatch/host_session.h> // the host owner loop (SAME loop apps/nw_server runs)
+#include <runtime/inmatch/host_session.h> // the host owner loop (SAME loop the game's host runs)
 
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -153,7 +153,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 
 	// Host bring-up — fixed identity end to end (GameConfig defaults are fixed
 	// strings/values; the host key is pinned) so the coverage never depends on
-	// anything minted at run time. Headless Listen host, same as apps/nw_server.
+	// anything minted at run time. Headless Listen host.
 	inmatch::HostOwner owner;
 	ns::LoopbackChannel host_loop;
 	owner.host_loopback = &host_loop;
