@@ -14,7 +14,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/blender"))
 import opennova_3di as addon
-from opennova_3di import animation, export, weapon, importer
+from opennova_3di import animation, export, materials, weapon, importer
 from opennova_3di.o3dtext import ExportError
 
 cli, destination = sys.argv[sys.argv.index("--") + 1:]
@@ -28,7 +28,7 @@ addon.register()
 pixel_image = bpy.data.images.new("authored_pixels", width=3, height=1, float_buffer=True)
 pixel_image.pixels[:] = [-0.1, 0.5, 1.1, 1, 0.5/255, 1.5/255, 2.5/255, 0.25, 0.125, 0.875, 0.375, 0]
 pixels = list(pixel_image.pixels[:])
-export.write_tga(pixel_image, str(out / "pixels.tga"))
+materials.write_tga(pixel_image, str(out / "pixels.tga"))
 expected_pixels = bytes(max(0, min(255, round(pixels[i+c]*255))) for i in range(0,12,4) for c in [2,1,0,3])
 assert (out / "pixels.tga").read_bytes()[18:] == expected_pixels
 bpy.ops.object.select_all(action="SELECT")

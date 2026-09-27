@@ -30,10 +30,10 @@ from bpy_extras.io_utils import ImportHelper
 # Blender re-runs this file when the extension is updated or scripts are
 # reloaded, but keeps the submodules it imported before: reload them first so
 # the property groups registered here and the code that reads them agree.
-for _name in ("o3dtext", "export", "importer", "assembly", "animation", "anim_import", "weapon"):
+for _name in ("o3dtext", "materials", "export", "importer", "assembly", "animation", "anim_import", "weapon"):
     if f"{__name__}.{_name}" in sys.modules:
         importlib.reload(sys.modules[f"{__name__}.{_name}"])
-from . import anim_import, animation, assembly, export, importer, weapon
+from . import anim_import, animation, assembly, export, importer, materials, weapon
 from .export import active_model
 from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, bundled_cli_path, cli_path, run_cli
 
@@ -134,8 +134,8 @@ def style_label(style):
 def get_shader(self):
     """A material's shader tag is its name's, Material_<i>_<SHADER> (the
     ASE/OED convention); empty when the name carries none, and export then
-    takes the default for its texture count (export.default_shader)."""
-    m = export.MATERIAL_RE.match(export.clean_name(self.id_data.name))
+    takes the default for its texture count (materials.default_shader)."""
+    m = materials.MATERIAL_RE.match(export.clean_name(self.id_data.name))
     return m.group(2) if m else ""
 
 
@@ -146,11 +146,11 @@ def set_shader(self, value):
     value = value.strip()
     if any(c.isspace() for c in value):
         return
-    m = export.MATERIAL_RE.match(export.clean_name(mat.name))
+    m = materials.MATERIAL_RE.match(export.clean_name(mat.name))
     if m:
         index = int(m.group(1))
     else:
-        used = [int(x.group(1)) for x in (export.MATERIAL_RE.match(export.clean_name(o.name))
+        used = [int(x.group(1)) for x in (materials.MATERIAL_RE.match(export.clean_name(o.name))
                                           for o in bpy.data.materials) if x]
         index = max(used) + 1 if used else 0
     mat.name = f"Material_{index}_{value}" if value else f"Material_{index}"
@@ -1151,9 +1151,10 @@ class O3D_PT_material(bpy.types.Panel):
             layout.label(text=catalog_error() or "No shader table", icon="ERROR")
         elif tag:
             known = next((flags for name, flags in table if name.lower() == tag.lower()), None)
-            traits = [label for bit, label in ((export.FLAG_BLENDING, "alpha pass"), (export.FLAG_GLASS, "glass"),
-                                               (export.FLAG_EMISSIVE, "emissive"), (export.FLAG_TANGENT, "tangents"),
-                                               (export.FLAG_SKINNED, "skinned")) if (known or 0) & bit]
+            traits = [label for bit, label in ((materials.FLAG_BLENDING, "alpha pass"), (materials.FLAG_GLASS, "glass"),
+                                               (materials.FLAG_EMISSIVE, "emissive"),
+                                               (materials.FLAG_TANGENT, "tangents"),
+                                               (materials.FLAG_SKINNED, "skinned")) if (known or 0) & bit]
             layout.label(text=(", ".join(traits) if traits else "opaque") if known is not None else
                          "Not in the engine's shader table", icon="NONE" if known is not None else "ERROR")
         else:

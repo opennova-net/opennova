@@ -16,7 +16,7 @@ import os
 import bpy
 from mathutils import Matrix, Vector
 
-from . import export
+from . import export, materials
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, Notes, axis_basis, blender_axes,
                       import_text, num, strip_comment, tokens)
 
@@ -232,158 +232,6 @@ class Builder(Notes):
         ob.empty_display_size = size
         return self.link(ob, parent, world, part)
 
-    # --- materials ---------------------------------------------------------
-    def image(self, name):
-        if name in self.images:
-            return self.images[name]
-        path = self.sc["texfiles"].get(name)
-        img = None
-        if not path:
-            self.note(f"texture {name} not found beside the model")
-        else:
-            try:
-                img = bpy.data.images.load(path, check_existing=True)
-                img.name = name
-                # The game samples colour and alpha independently: a texture's
-                # alpha is often a mask a shader reads (specular, bump), not
-                # opacity (the arms' camo averages 0.001). Blender's default
-                # straight alpha premultiplies on load and loses the colour
-                # wherever alpha is near zero; channel-packed keeps both.
-                img.alpha_mode = "CHANNEL_PACKED"
-                # Blender loads what it cannot decode (PCX, archive-compressed
-                # files) as an image without pixels.
-                if img.size[0] == 0:
-                    self.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
-            except RuntimeError:
-                self.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
-        self.images[name] = img
-        return img
-
-    def materials(self):
-        out = []
-        reg = self.sc["registers"]
-        alpha_by_material = {}
-        for lod in self.sc["lods"]:
-            for part in lod["parts"]:
-                for s in part["strips"]:
-                    alpha_by_material[s["material"]] = alpha_by_material.get(s["material"], False) or s["alpha"]
-
-        def regname(style, index):
-            if style > CTRL_REFERENCE_THRESHOLD and 0 <= index < len(reg):
-                return reg[index]
-            return ""
-
-        for i, m in enumerate(self.sc["materials"]):
-            # The name carries the export index and the shader tag.
-            mat = bpy.data.materials.new(f"Material_{i}_{m['shader']}")
-            self.made_materials.append(mat)
-            p = mat.o3d
-            flags = m["matflags"]
-            p.alpha_test = bool(flags & 1)
-            p.two_sided = bool(flags & 4)
-            p.other_flags = flags & ~5 & 0xFF
-            p.alpha_test_value = m["alphatest"]
-            if m["alphatest"] and not p.alpha_test:
-                self.note(f"material {i}: an alpha-test value without the alpha-test flag")
-            # Glass and emissive follow the shader on export (OED's rule).
-            caps = export.shader_flags(m["shader"])
-            if bool(m["glass"]) != bool(caps & export.FLAG_GLASS and m["reflect"] and any(m["reflect"][:3])):
-                self.note(f"material {i}: glass {m['glass']} is not what its shader {m['shader']} gives")
-            if m["emissive"] != (2 if caps & export.FLAG_EMISSIVE else 0):
-                self.note(f"material {i}: emissive {m['emissive']} is not what its shader {m['shader']} gives")
-            if m["reflect"]:
-                p.reflect = [c / 255.0 for c in m["reflect"]]
-            blended = bool(export.shader_flags(m["shader"]) & export.FLAG_BLENDING)
-            p.alpha_strips = alpha_by_material.get(i, False) and not blended
-            for name, slot, typ, tflags, frame in m["textures"]:
-                t = p.textures.add()
-                t.name = name
-                t.slot, t.type, t.flags, t.frame = slot, typ, tflags, frame
-                t.image = self.image(name)
-                t.write = False  # the file beside the model already serves it
-            if m["texanim"]:
-                frames, typ, time_or_register = m["texanim"]
-                p.anim_frames, p.anim_type = frames, typ
-                if typ == 1:
-                    p.anim_register = reg[time_or_register] if 0 <= time_or_register < len(reg) else ""
-                else:
-                    p.anim_time = time_or_register
-            if m["rgbgen"]:
-                style, r, rate, s0, s1, phase = m["rgbgen"]
-                p.rgb_style, p.rgb_register, p.rgb_rate, p.rgb_phase = style, regname(style, r), rate, phase
-                p.rgb_start = [c / 255.0 for c in s0]
-                p.rgb_end = [c / 255.0 for c in s1]
-            if m["alphagen"]:
-                style, r, rate, start, end, phase = m["alphagen"]
-                p.alpha_style, p.alpha_register, p.alpha_rate, p.alpha_phase = style, regname(style, r), rate, phase
-                p.alpha_start, p.alpha_end = int(start), int(end)
-            for axis in ("u", "v"):
-                g = m[axis + "gen"]
-                if g:
-                    style, r, rate, start, end, phase = g
-                    setattr(p, axis + "_style", style)
-                    setattr(p, axis + "_register", regname(style, r))
-                    setattr(p, axis + "_rate", rate)
-                    setattr(p, axis + "_start", start)
-                    setattr(p, axis + "_end", end)
-                    setattr(p, axis + "_phase", phase)
-            self.shade(mat, m, blended)
-            out.append(mat)
-        return out
-
-    def shade(self, mat, m, blended):
-        """A preview node tree: slot 1 as the base colour (times a slot-2 detail
-        texture on UV1, Modulate2x, for FF_MT shaders), alpha for blended and
-        alpha-tested shaders, emission for *_LUM, a tint for glass."""
-        mat.use_nodes = True
-        nodes, links = mat.node_tree.nodes, mat.node_tree.links
-        bsdf = next(n for n in nodes if n.type == "BSDF_PRINCIPLED")
-        mat.use_backface_culling = not mat.o3d.two_sided
-        by_slot = {}
-        for name, slot, *_ in m["textures"]:
-            by_slot.setdefault(slot, name)
-        color = None
-        if 1 in by_slot and self.images.get(by_slot[1]) is not None:
-            tex = nodes.new("ShaderNodeTexImage")
-            tex.image = self.images[by_slot[1]]
-            tex.location = (-600, 300)
-            color = tex.outputs["Color"]
-            if blended or mat.o3d.alpha_test:
-                links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
-                if hasattr(mat, "surface_render_method"):
-                    mat.surface_render_method = "BLENDED" if blended else "DITHERED"
-        if 2 in by_slot and self.images.get(by_slot[2]) is not None and color is not None:
-            uv = nodes.new("ShaderNodeUVMap")
-            uv.uv_map = "UV1"
-            uv.location = (-900, -100)
-            detail = nodes.new("ShaderNodeTexImage")
-            detail.image = self.images[by_slot[2]]
-            detail.location = (-600, -100)
-            links.new(uv.outputs["UV"], detail.inputs["Vector"])
-            mix = nodes.new("ShaderNodeMix")
-            mix.data_type = "RGBA"
-            mix.blend_type = "MULTIPLY"
-            mix.inputs[0].default_value = 1.0
-            mix.location = (-300, 200)
-            links.new(color, mix.inputs[6])
-            links.new(detail.outputs["Color"], mix.inputs[7])
-            scale = nodes.new("ShaderNodeVectorMath")
-            scale.operation = "SCALE"
-            scale.inputs[3].default_value = 2.0
-            scale.location = (-120, 200)
-            links.new(mix.outputs[2], scale.inputs[0])
-            color = scale.outputs[0]
-        if color is not None:
-            links.new(color, bsdf.inputs["Base Color"])
-            if m["emissive"] or export.shader_flags(m["shader"]) & export.FLAG_EMISSIVE:
-                links.new(color, bsdf.inputs["Emission Color"])
-                bsdf.inputs["Emission Strength"].default_value = 1.0
-        if m["glass"] or export.shader_flags(m["shader"]) & export.FLAG_GLASS:
-            bsdf.inputs["Base Color"].default_value = (0.6, 0.75, 0.85, 1.0)
-            bsdf.inputs["Alpha"].default_value = 0.35
-            if hasattr(mat, "surface_render_method"):
-                mat.surface_render_method = "BLENDED"
-
     # --- meshes ---------------------------------------------------------------
     def mesh(self, name, strips, pivot, materials, skinned):
         """One mesh from a part's strips: vertices merged by position, normal
@@ -471,7 +319,7 @@ class Builder(Notes):
             n += 1
         self.collection = bpy.data.collections.new(sc["name"])
         scene.collection.children.link(self.collection)
-        mats = self.materials()
+        mats = materials.import_materials(self)
         # The model root: one .3di, its LOD roots below it. It holds the
         # model's own settings, so several models share a scene.
         self.model = self.empty(sc["name"], size=1.0, display="CUBE")

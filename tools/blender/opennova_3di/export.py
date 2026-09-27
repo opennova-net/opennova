@@ -80,21 +80,16 @@
 import math
 import os
 import re
-import struct
 from array import array
 
 import bpy
-import numpy as np
 from mathutils import Euler, Vector
 
+from . import materials
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
                       export_text, fmt, quoted)
 
 
-# Shader capability bits (runtime/renderer/material_descriptor.h), read per
-# tag from `opennova-3di catalog`.
-FLAG_EMISSIVE, FLAG_DIFFUSE, FLAG_SECONDARY = 0x1, 0x4, 0x8
-FLAG_BLENDING, FLAG_GLASS, FLAG_SKINNED, FLAG_TANGENT = 0x1000, 0x2000, 0x4000, 0x8000
 BLENDER_SUFFIX = re.compile(r"\.\d{3,}$")
 PART_RE = re.compile(r"^PN(\d{2})$")
 BONE_RE = re.compile(r"^BN(\d{2})(?: .*)?$")
@@ -104,7 +99,6 @@ CENTER_RE = re.compile(r"^_(\d{2}) center$")
 ATTACH_RE = re.compile(r"^~(\d{2})([a-z]*) attach$")
 POINT_RE = re.compile(r"^UP([A-Za-z])(\d{2})(?: (.*))?$")
 LIGHT_RE = re.compile(r"^LP(\d{2})([a-z]*)$")
-MATERIAL_RE = re.compile(r"^Material_(\d+)_(\S+)$")
 OCCLUSION_RE = re.compile(r"-occ?only$", re.IGNORECASE)
 OCC_RE = re.compile(r"^(OB|OS|OP|OH)(\d{2})([a-z]*)(?:-(\d{2}))?-occonly$")
 OCC_TYPES = {"OB": 0, "OS": 1, "OP": 2, "OH": 4}  # OP with -MM is a portal, type 3
@@ -131,45 +125,6 @@ def is_root_bone(name):
     """A rig's `Root` bone, in any case: the ground under the character, no
     part (animation.py)."""
     return clean_name(name).lower() == "root"
-
-
-def shader_table():
-    """The engine's shader tags and capability words, in table order; an
-    ExportError when `opennova-3di catalog` gave none (every shader flag export
-    writes depends on it)."""
-    from . import catalog, catalog_error
-    table = catalog()[2]
-    if not table:
-        raise ExportError(f"no shader table: {catalog_error()}")
-    return table
-
-
-def shader_flags(tag):
-    """A tag's capability word, matched without case as the runtime's effect
-    lookup does; a tag outside the table reads row 0's, as OED's lookup did
-    (lookup_material_info_flags, 5fc5b4f6a^ engine/formats/oed/
-    material_utils.cpp)."""
-    table = shader_table()
-    for name, flags in table:
-        if name.lower() == tag.lower():
-            return flags
-    return table[0][1]
-
-
-def default_shader(map_count, skinned):
-    """The shader of a material whose name carries none: the first table row
-    of the model's kind (skinned or not) drawing that many texture maps
-    (diffuse, detail), OED's find_material_index_by_flags (5fc5b4f6a^
-    engine/formats/oed/convert_internal.cpp): FF_ST_OP for one map, FF_MT_OP
-    for two, FFP_GLASS for none; VS_SKBASIC / VS_SKGLASS on a skinned model."""
-    wanted = max(0, min(2, map_count))
-    table = shader_table()
-    for name, flags in table:
-        if bool(flags & FLAG_SKINNED) != skinned:
-            continue
-        if (1 if flags & FLAG_DIFFUSE else 0) + (1 if flags & FLAG_SECONDARY else 0) == wanted:
-            return name
-    return table[0][0]
 
 
 def dup_rank(letters):
@@ -213,49 +168,6 @@ def fixed(value, scale, lo, hi, what):
     if raw is None or not lo <= raw <= hi:
         raise ExportError(f"{what} is {value:g}; the file holds {lo / scale:g} to {hi / scale:g}")
     return raw
-
-
-def write_tga(image, path):
-    """Uncompressed 32-bit truecolor TGA, rows bottom-up (the retail shape)."""
-    w, h = image.size
-    if w == 0 or h == 0:
-        raise ExportError(f"image {image.name} has no pixels")
-    # Blender bundles NumPy. Bulk access avoids expanding a 4K image into
-    # millions of Python floats; bounded chunks keep conversion memory small.
-    px = np.empty(w * h * 4, dtype=np.float32)
-    image.pixels.foreach_get(px)
-    px = px.reshape(-1, 4)
-    if not np.isfinite(px).all():
-        raise ExportError(f"image {image.name} has non-finite pixels")
-    header = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, w, h, 32, 8)
-    with open(path, "wb") as f:
-        f.write(header)
-        for start in range(0, len(px), 262144):
-            values = px[start:start + 262144].astype(np.float64)
-            # float64 and rint preserve Python round's ties-to-even result.
-            values = np.clip(np.rint(values * 255.0), 0, 255).astype(np.uint8)
-            f.write(values[:, [2, 1, 0, 3]].tobytes())
-
-
-def material_image(mat):
-    """The image a material without texture entries exports: the image
-    texture wired (through any nodes) into its Principled BSDF's Base Color,
-    else its first image texture node."""
-    if mat is None or not mat.use_nodes or mat.node_tree is None:
-        return None
-    nodes = mat.node_tree.nodes
-    bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
-    if bsdf is not None:
-        seen, queue = set(), [bsdf.inputs["Base Color"]]
-        while queue:
-            for link in queue.pop(0).links:
-                node = link.from_node
-                if node.type == "TEX_IMAGE" and node.image is not None:
-                    return node.image
-                if node.name not in seen:
-                    seen.add(node.name)
-                    queue.extend(s for s in node.inputs if s.is_linked)
-    return next((n.image for n in nodes if n.type == "TEX_IMAGE" and n.image is not None), None)
 
 
 def slot_material(ev, slot):
@@ -359,9 +271,7 @@ class Exporter(Notes):
         self.space = None  # set in run(): the model root's frame
         self.depsgraph = None  # set in run(), with every rig at rest
         self.registers = []
-        self.materials = []
-        self.material_index = {}
-        self.textures = {}  # file name (lower case) -> (file name, image)
+        self.materials = materials.ModelMaterials(self)  # its materials and the texture files they name
         self.frames = []
         self.skinned = False
         self.uv1 = False
@@ -395,23 +305,6 @@ class Exporter(Notes):
                                   "viewports, or its collection is excluded), so its modifiers or shape keys "
                                   "would be lost: enable it in viewports, or apply them")
         return ev
-
-    def claim_texture(self, name, image, mat):
-        """A texture file export writes: one image per file name (Windows
-        names match without case)."""
-        have = self.textures.get(name.lower())
-        if have is not None and have[1] != image:
-            raise ExportError(f"{mat.name}: the images '{have[1].name}' and '{image.name}' would both be written "
-                              f"as {name}: give each its own file name (one derived from an image's name keeps "
-                              "its first 12 characters)")
-        self.textures[name.lower()] = (name, image)
-
-    def material_for(self, mat):
-        key = mat.name if mat is not None else None
-        if key not in self.material_index:
-            self.material_index[key] = len(self.materials)
-            self.materials.append(mat)
-        return self.material_index[key]
 
     def frame_index(self, ob):
         """The MTRX row a rotated PN## selects: its rotation in the model."""
@@ -754,7 +647,7 @@ class Exporter(Notes):
             for tri in mesh.loop_triangles:
                 slot = tri.material_index
                 mat = slot_material(ev, slot)
-                s = strips.setdefault(self.material_for(mat), {"verts": [], "index": {}, "tris": []})
+                s = strips.setdefault(self.materials.index_of(mat), {"verts": [], "index": {}, "tris": []})
                 corners = []
                 for li in reversed(tri.loops) if mirrored else tri.loops:
                     vert = self.corner(mesh, mesh.loops[li], mw, nmat, normals, uv0, uv1)
@@ -815,7 +708,7 @@ class Exporter(Notes):
                     loop = mesh.loops[li]
                     corners.append((self.corner(mesh, loop, mw, nmat, normals, uv0, uv1),
                                     influences[loop.vertex_index]))
-                per_material.setdefault(self.material_for(mat), []).append(corners)
+                per_material.setdefault(self.materials.index_of(mat), []).append(corners)
             for mi, tris in per_material.items():
                 current = None
                 for corners in tris:
@@ -836,12 +729,6 @@ class Exporter(Notes):
                     current["tris"].append(ids)
         finally:
             ev.to_mesh_clear()
-
-    def strip_alpha(self, mat):
-        """Strips of a blending shader draw in the alpha pass (OED's
-        material_alpha: the BLENDING capability bit; FFP_GLASS is one)."""
-        blending = shader_flags(self.shader_of(mat)) & FLAG_BLENDING
-        return 1 if blending or (mat is not None and mat.o3d.alpha_strips) else 0
 
     def emit_lod(self, lod, lines):
         if lod.armature is not None:
@@ -864,7 +751,7 @@ class Exporter(Notes):
                 if len(s["tris"]) > 65535 // 3:
                     raise ExportError(f"PN{i + 1:02d}: one material has more than {65535 // 3} triangles (a strip "
                                       "holds 65535 indices)")
-                lines.append(f"strip {mi} {self.strip_alpha(self.materials[mi])}")
+                lines.append(f"strip {mi} {self.materials.strip_alpha(mi)}")
                 for v in s["verts"]:
                     lines.append("v " + fmt(*v))
                 for t in s["tris"]:
@@ -908,7 +795,7 @@ class Exporter(Notes):
                     if len(s["tris"]) > 65535 // 3:
                         raise ExportError(f"{label}: one strip has more than {65535 // 3} triangles (a strip "
                                           "holds 65535 indices)")
-                    lines.append(f"strip {mi} {self.strip_alpha(self.materials[mi])}")
+                    lines.append(f"strip {mi} {self.materials.strip_alpha(mi)}")
                     lines.append("bones " + " ".join(str(b) for b in s["order"]))
                     uv_end = 10 if self.uv1 else 8
                     for v in s["verts"]:
@@ -944,125 +831,6 @@ class Exporter(Notes):
         if t.target == "trans":
             line += f" {t.axis}"
         return line
-
-    # --- materials ------------------------------------------------------------
-    def shader_of(self, mat):
-        """The name's tag (Material_<i>_<SHADER>), else the default for the
-        material's texture maps (default_shader)."""
-        m = MATERIAL_RE.match(clean_name(mat.name)) if mat is not None else None
-        if m:
-            return m.group(2)
-        if mat is None:
-            maps = 0
-        elif len(mat.o3d.textures) > 0:
-            maps = len({t.slot for t in mat.o3d.textures if t.slot in (1, 2)})
-        else:
-            maps = 1 if material_image(mat) is not None else 0
-        return default_shader(maps, self.skinned)
-
-    def generator_register(self, style, name, what):
-        return self.register(name, what) if style > CTRL_REFERENCE_THRESHOLD else -1
-
-    def emit_materials(self, lines):
-        for mat in self.materials:
-            # A mesh without a material draws with the shader a material
-            # without textures takes (shader_of), its strips' pass included.
-            shader = self.shader_of(mat)
-            if len(shader) > 32:
-                raise ExportError(f"{mat.name}: the shader tag '{shader}' exceeds 32 characters")
-            caps = shader_flags(shader)
-            lines.append(f"material {quoted(shader)}  # {mat.name if mat is not None else '(no material)'}")
-            p = mat.o3d if mat is not None else None
-            if p is not None:
-                flags = (1 if p.alpha_test else 0) | (4 if p.two_sided else 0) | (p.other_flags & ~5 & 0xFF)
-                if flags:
-                    lines.append(f"matflags {flags}")
-                if p.alpha_test:
-                    lines.append(f"alphatest {p.alpha_test_value}")
-            # The OED material rule (5fc5b4f6a^ export_3di.cpp, WriteMTRL): a
-            # GLASS shader reflects 0x80 grey unless another colour is set, and
-            # is glass while it reflects; an EMISSIVE one (*_LUM) is emissive
-            # type 2. It holds for every material of the 958 JO models.
-            reflect = [round(c * 255) for c in p.reflect] if p is not None else [0, 0, 0, 0]
-            if caps & FLAG_GLASS and not any(reflect):
-                reflect = [128, 128, 128, 0]
-            if caps & FLAG_GLASS and any(reflect[:3]):
-                lines.append("glass 1")
-            if caps & FLAG_EMISSIVE:
-                lines.append("emissive 2")
-            if any(reflect):
-                lines.append("reflect " + " ".join(str(c) for c in reflect))
-            if p is None:
-                continue
-            if len(p.textures) > 0:
-                for t in p.textures:
-                    name = t.name.strip()
-                    if not name and t.image is not None:
-                        name = os.path.splitext(clean_name(t.image.name))[0][:12] + ".tga"
-                    if not name:
-                        raise ExportError(f"{mat.name}: a texture entry has neither a file name nor an image")
-                    if len(name) > 16:
-                        raise ExportError(f"{mat.name}: texture name '{name}' exceeds 16 characters")
-                    lines.append(f"texture {quoted(name)} {t.slot} {t.type} {t.flags} {t.frame}")
-                    if t.image is not None and t.write:
-                        if name.lower().endswith(".tga"):
-                            self.claim_texture(name, t.image, mat)
-                        else:
-                            self.note(f"{mat.name}: Write TGA writes .tga files only; {name} is not written")
-            elif caps & FLAG_DIFFUSE:
-                image = material_image(mat)
-                if image is not None:
-                    name = os.path.splitext(clean_name(image.name))[0][:12] + ".tga"
-                    lines.append(f"texture {quoted(name)}")
-                    self.claim_texture(name, image, mat)
-            if p.anim_frames or p.anim_type or p.anim_time:
-                if p.anim_type not in (0, 1):
-                    raise ExportError(f"{mat.name}: the flipbook's anim type is {p.anim_type}; it is 0 (time) or 1 "
-                                      "(register)")
-                if p.anim_type == 1:
-                    time_or_register = self.register(p.anim_register, f"{mat.name} texture flipbook")
-                else:
-                    time_or_register = fixed(p.anim_time, 1, -0x8000, 0x7FFF, f"{mat.name}: the flipbook frame time")
-                lines.append(f"texanim {p.anim_frames} {p.anim_type} {time_or_register}")
-            # A generator's words: an RGB rate a u16 of 1/256 steps, the other
-            # rates and the U/V start and end int16 8.8, an alpha start and end
-            # int16, a phase (styles up to 112) a byte of 1/256 turns.
-            if p.rgb_style:
-                what = f"{mat.name}: the RGB gen"
-                reg = self.generator_register(p.rgb_style, p.rgb_register, what)
-                fixed(p.rgb_rate, 256.0, 0, 0xFFFF, what + " rate")
-                self.generator_phase(p.rgb_style, p.rgb_phase, what)
-                s = [round(c * 255) for c in p.rgb_start]
-                e = [round(c * 255) for c in p.rgb_end]
-                lines.append(f"rgbgen {p.rgb_style} {reg} {fmt(float(p.rgb_rate))} {s[0]} {s[1]} {s[2]} "
-                             f"{e[0]} {e[1]} {e[2]} {fmt(float(p.rgb_phase))}")
-            if p.alpha_style:
-                what = f"{mat.name}: the alpha gen"
-                reg = self.generator_register(p.alpha_style, p.alpha_register, what)
-                fixed(p.alpha_rate, 256.0, -0x8000, 0x7FFF, what + " rate")
-                start = fixed(p.alpha_start, 1, -0x8000, 0x7FFF, what + " start")
-                end = fixed(p.alpha_end, 1, -0x8000, 0x7FFF, what + " end")
-                self.generator_phase(p.alpha_style, p.alpha_phase, what)
-                lines.append(f"alphagen {p.alpha_style} {reg} {fmt(float(p.alpha_rate))} {start} {end} "
-                             f"{fmt(float(p.alpha_phase))}")
-            for axis in ("u", "v"):
-                style = getattr(p, axis + "_style")
-                if style:
-                    what = f"{mat.name}: the {axis.upper()} gen"
-                    reg = self.generator_register(style, getattr(p, axis + "_register"), what)
-                    values = [float(getattr(p, f"{axis}_{field}")) for field in ("rate", "start", "end")]
-                    for value, field in zip(values, ("rate", "start", "end")):
-                        fixed(value, 256.0, -0x8000, 0x7FFF, f"{what} {field}")
-                    phase = float(getattr(p, axis + "_phase"))
-                    self.generator_phase(style, phase, what)
-                    lines.append(f"{axis}gen {style} {reg} {fmt(*values)} {fmt(phase)}")
-
-    @staticmethod
-    def generator_phase(style, phase, what):
-        """A generator's phase byte (styles up to 112; above, that byte is the
-        register index): the writer would clamp one outside it."""
-        if style <= CTRL_REFERENCE_THRESHOLD:
-            fixed(phase, 256.0, 0, 0xFF, what + " phase")
 
     # --- user points, lights, occlusion -------------------------------------
     def emit_points(self, lod, lines):
@@ -1147,16 +915,6 @@ class Exporter(Notes):
             raise ExportError(f"collision volume {ob.name} needs at least 4 vertices and a face")
         return verts, tris
 
-    def face_flags(self, mat):
-        """A material's bullet-face flags: 1 (both sides) follows Two sided,
-        as OED took both from one render attribute (export_3di.cpp
-        material_flags); the others are the material's face settings."""
-        if mat is None:
-            return 0
-        p = mat.o3d
-        return ((1 if p.two_sided else 0) | (0x100 if p.face_never_hit else 0) |
-                (0x800 if p.face_front_only else 0) | (p.face_other_flags & ~0x901))
-
     def emit_collision(self, lod0, bullet, lines):
         # One section per part of the collision LOD (WriteCOBJ walks that
         # LOD's subobjects: Dtruck2's collision LOD has 7 parts to LOD 0's 8,
@@ -1192,7 +950,7 @@ class Exporter(Notes):
                             continue
                         slot = tri.material_index
                         mat = slot_material(ev, slot)
-                        s["faces"].append((corners, mat.o3d.surface if mat is not None else 14, self.face_flags(mat)))
+                        s["faces"].append((corners, mat.o3d.surface if mat is not None else 14, materials.face_flags(mat)))
                 finally:
                     ev.to_mesh_clear()
         # A part that draws nothing keeps the vertex OED seeded it with (its
@@ -1358,31 +1116,24 @@ class Exporter(Notes):
         self.emit_lights(lods[0], len(lods[0].parts), tail_lines)
         self.emit_occlusion(lods[0], tail_lines)
         self.emit_collision(lods[0], lods[bullet_index], tail_lines)
-        # Material order: the Material_<i> index, then first use.
-        self.materials.sort(key=lambda m: (int(MATERIAL_RE.match(clean_name(m.name)).group(1))
-                                           if m is not None and MATERIAL_RE.match(clean_name(m.name)) else 1 << 30))
-        remap = {}
-        for new, mat in enumerate(self.materials):
-            remap[self.material_index[mat.name if mat is not None else None]] = new
+        remap = self.materials.order()
         lod_lines = [f"strip {remap[int(l.split()[1])]} {l.split()[2]}" if l.startswith("strip ") else l
                      for l in lod_lines]
-        self.emit_materials(material_lines)
+        self.materials.emit(material_lines)
 
         frame_lines = ["mtrx " + fmt(*(float(x) for x in r)) for r in self.frames]
         text = ["o3d 1", f"model {quoted(name)}"] + (["skinned 1"] if self.skinned else []) + \
             (["uv1 1"] if self.uv1 else []) + [f"register {quoted(r)}" for r in self.registers] + frame_lines + \
             material_lines + lod_lines + tail_lines
 
-        if self.settings.write_textures:
-            for tex_name, image in self.textures.values():
-                write_tga(image, os.path.join(out_dir, tex_name))
+        self.materials.write_textures(out_dir)
         # The scene text is the CLI's input only.
         result = export_text(self.context, ["build"], text, "scene.o3d", "scene text", out_path)
         tris = sum(1 for line in lod_lines if line.startswith("t "))
         # The builder's notes (a non-convex volume, collinear faces, ...),
         # without the scene-file prefix.
         notes = cli_notes(result, "note: ")
-        message = f"{result.stdout.strip()} ({len(lods)} LODs, {tris} triangles total, {len(self.textures)} textures)"
+        message = f"{result.stdout.strip()} ({len(lods)} LODs, {tris} triangles total, {len(self.materials.textures)} textures)"
         return message, self.notes + notes
 
 
