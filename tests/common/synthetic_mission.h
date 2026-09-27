@@ -1,8 +1,9 @@
-// The synthetic in-memory mission the tick digest chains and the tick-profile
-// row test ticks: two opposing squads of six organics, two items and one BMS
-// event, with no retail data. Boot it through MissionKernel::open_document
-// with a source_over(...) that supplies "synth.wac" when the caller wants a
-// WAC layer.
+// The synthetic in-memory missions, with no retail data: the one the tick
+// digest chains and the tick-profile row test ticks (two opposing squads of
+// six organics, two items and one BMS event), and the two-entity one the
+// mission kernel, kernel lifecycle and host-role tests boot. Boot either
+// through MissionKernel::open_document with a source_over(...) that supplies
+// "synth.wac" when the caller wants a WAC layer.
 #pragma once
 
 #include <formats/mission/bms.h>
@@ -50,6 +51,18 @@ inline opennova::bms::File synthetic_mission() {
 	m.items.back().id = next_id++;
 	m.items.push_back(item(/*type_id=*/164, 40 << 16, 35 << 16, 3 << 16));
 	m.items.back().id = next_id++;
+	m.events.push_back(opennova::bms::Event{});
+	return m;
+}
+
+// Two placed entities (item 164 net id 21, a team-1 organic net id 31) and
+// one (empty) BMS event.
+inline opennova::bms::File two_entity_mission() {
+	opennova::bms::File m{};
+	m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
+	m.items[0].id = 21;
+	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
+	m.organics[0].id = 31;
 	m.events.push_back(opennova::bms::Event{});
 	return m;
 }

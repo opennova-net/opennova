@@ -11,12 +11,9 @@ services:
     pull_policy: always
     build: !reset null
     network_mode: host
-    env_file:
-      - ../env/app.prod.env
-    environment:
-      # app.prod.env supplies ONNET_PUBLIC_HOST; the vault-injected file
-      # (mounted by the toolbox) supplies ADMIN_API_TOKEN.
-      DATABASE_PATH: /data/novaworld.db
+    # The base compose's `environment:` block takes ONNET_PUBLIC_HOST and
+    # ADMIN_API_TOKEN from the toolbox's --env-file pair: the committed
+    # app.prod.env and the vault-injected secrets.
 
   web:
     image: ${WEB_IMAGE:?set WEB_IMAGE to the ghcr.io/...:tag to deploy}
@@ -29,8 +26,6 @@ services:
     # the name to the loopback so nginx reaches it.
     extra_hosts:
       - "host.docker.internal:127.0.0.1"
-    env_file:
-      - ../env/app.prod.env
 
   # Nightly SQLite snapshot -> S3, plus the on-demand backup/list/restore the
   # deploy toolbox runs. AWS creds come from the instance IAM role (IMDSv2);

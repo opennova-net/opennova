@@ -72,7 +72,7 @@ func test_begin_raises_over_the_held_background() -> void:
 
 func test_fallback_background_reports_no_custom_flag() -> void:
 	var dir := _make_temp_dir("splash_fallback")
-	_write_test_pcx(dir.path_join("loadscrn.pcx"))
+	TestFs.write_bytes(self, dir.path_join("loadscrn.pcx"), TestPcx.ramp_2x2())
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
@@ -87,7 +87,7 @@ func test_missing_arrow_and_text_degrade_to_skipped_elements() -> void:
 	# dismisses — the original's loads are unguarded and a miss just draws
 	# nothing [orig: @ 0x520871/0x520975].
 	var dir := _make_temp_dir("splash_bare")
-	_write_test_pcx(dir.path_join("00trg.pcx"))
+	TestFs.write_bytes(self, dir.path_join("00trg.pcx"), TestPcx.ramp_2x2())
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
@@ -362,8 +362,8 @@ func _mounted_splash() -> LoadingScreen:
 
 func _art_root() -> ResourceRoot:
 	var dir := _make_temp_dir("splash_art")
-	_write_test_pcx(dir.path_join("00trg.pcx"))
-	_write_test_pcx(dir.path_join("loadscrn.pcx"))
+	TestFs.write_bytes(self, dir.path_join("00trg.pcx"), TestPcx.ramp_2x2())
+	TestFs.write_bytes(self, dir.path_join("loadscrn.pcx"), TestPcx.ramp_2x2())
 	var arrow := FileAccess.get_file_as_bytes(ARROW_FIXTURE)
 	if not arrow.is_empty():
 		var f := FileAccess.open(dir.path_join("newarow1.tga"), FileAccess.WRITE)
@@ -392,28 +392,3 @@ func _make_temp_dir(name: String) -> String:
 	DirAccess.make_dir_recursive_absolute(dir)
 	_temp_dirs.append(dir)
 	return dir
-
-
-# A minimal valid 8-bit palettized PCX (2x2), mirrored from
-# loading_screen_test.gd so this file stays runnable in isolation.
-func _write_test_pcx(path: String) -> void:
-	var bytes := PackedByteArray()
-	bytes.resize(128)
-	bytes[0] = 0x0A
-	bytes[1] = 5
-	bytes[2] = 1
-	bytes[3] = 8
-	bytes[8] = 1
-	bytes[10] = 1
-	bytes[65] = 1
-	bytes[66] = 2
-	for p in [0, 1, 2, 3]:
-		bytes.append(p)
-	bytes.append(0x0C)
-	for i in range(256):
-		bytes.append(i)
-		bytes.append(i)
-		bytes.append(i)
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_buffer(bytes)
-	f.close()

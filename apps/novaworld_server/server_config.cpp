@@ -73,12 +73,6 @@ ServerConfig ServerConfig::from_env() {
 
 	if (auto v = getenv_safe("ADMIN_API_TOKEN"))     c.admin_api_token = v;
 
-	// Expansion-publish pipeline (onnet admin.py / admin_internal.py). The
-	// slug -> repo mapping is no longer configured here; it's read per-release
-	// from the expansions.github_repo column (Terraform-managed catalogue).
-	if (auto v = getenv_safe("EXPANSION_GITHUB_TOKEN"))  c.expansion_github_token = v;
-	if (auto v = getenv_safe("EXPANSION_PUBLISH_TOKEN")) c.expansion_publish_token = v;
-
 	if (auto v = getenv_safe("ONNET_MET_IP"))    c.met_ip = v;
 	c.met_port = getenv_u16("ONNET_MET_PORT", c.met_port);
 	if (auto v = getenv_safe("ONNET_MET_LABEL")) c.met_label = v;

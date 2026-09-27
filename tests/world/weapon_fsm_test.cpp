@@ -310,6 +310,27 @@ void test_null_handler_never_finishes() {
 	CHECK(s.clip == 10);
 }
 
+// A def built in code and never baked (an emplacement's, a test rig's) holds
+// the placeholder in every slot, and each slot runs its suffix's default
+// handler, as the bind would have bound it: the fire request fires.
+// [orig: Anim_InitActions, the rewrite @ 0x542117..0x542139]
+void test_unbaked_def_runs_the_default_handlers() {
+	WeaponFsmDef def;
+	for (int a = 0; a < wa::kCount; ++a) def.actions[a].id = a;
+	def.actions[wa::kRecoil].delay_end = 1;
+	def.clip_capacity = -1;
+	WeaponSlotState s;
+	WeaponFsmInputs in;
+	in.fire_pressed = true;
+	in.fire_held = true;
+	WeaponFsmEvents ev;
+	weapon_fsm_tick(def, s, in, ev);
+	CHECK(def.actions[wa::kFire].handler == weapon_handler::kPlaceholder);
+	CHECK(s.current == wa::kFire);
+	CHECK(ev.fired);
+	CHECK(s.next == wa::kRecoil);
+}
+
 void test_fire_chains_recoil() {
     WeaponFsmDef def = make_ak_def();
     WeaponSlotState s = make_ak_slot();
@@ -701,6 +722,58 @@ void test_channel_advance_is_counter_gated() {
         if (ev.advance_anim) ++advances;
     }
     CHECK(advances == 0);
+}
+
+// The two holds whose clip never steps. An idle window of one tick or none
+// (DELAYSTART + DELAYEND <= 1) reseeds a counter the same tick drains, so the
+// idle clip plays once and stays on its first frame; EMPTYIDLE has no reseed,
+// so its hold keeps the counter at 0 and never steps either.
+// [orig: WeaponAction_ProcessFrame — the idle reseed @0x54134C..0x54135D, for
+//  action 0 only, the decrement @0x541424; ActionSlot_ExecuteActionNoEffect
+//  @0x541A4D; WeaponAction_EmptyIdle, the hold @0x542AB2]
+void test_short_idle_and_emptyidle_hold_never_step() {
+	for (const int32_t window : {0, 1}) {
+		WeaponFsmActionRow row;
+		set_row(row, "idle", "anim_wpn_idle", 0, window);
+		WeaponFsmDef def;
+		weapon_fsm_bake(&row, 1, clip_resolves, clip_seconds, nullptr, def);
+		def.clip_capacity = 30;
+		WeaponSlotState s = make_ak_slot();
+		WeaponFsmInputs in;
+		WeaponFsmEvents ev;
+		int advances = 0;
+		int plays = 0;
+		for (int t = 0; t < 120; ++t) {
+			weapon_fsm_tick(def, s, in, ev);
+			advances += ev.advance_anim ? 1 : 0;
+			plays += ev.play_anim ? 1 : 0;
+		}
+		CHECK(s.current == wa::kIdle);
+		CHECK(plays == 1);
+		CHECK(advances == 0);
+	}
+	WeaponFsmActionRow rows[2];
+	set_row(rows[0], "idle", "anim_wpn_idle", 0, 8);
+	set_row(rows[1], "emptyidle", "anim_wpn_empty_idle", 0, 8);
+	WeaponFsmDef def;
+	weapon_fsm_bake(rows, 2, clip_resolves, clip_seconds, nullptr, def);
+	def.clip_capacity = 30;
+	WeaponSlotState s = make_ak_slot();
+	s.clip = 0;
+	s.reserve = 0;
+	s.next = wa::kEmptyIdle;
+	WeaponFsmInputs in;
+	WeaponFsmEvents ev;
+	weapon_fsm_tick(def, s, in, ev);
+	CHECK(s.current == wa::kEmptyIdle && ev.play_anim);
+	int advances = 0;
+	for (int t = 0; t < 120; ++t) {
+		weapon_fsm_tick(def, s, in, ev);
+		advances += ev.advance_anim ? 1 : 0;
+		CHECK(!ev.play_anim);
+	}
+	CHECK(s.current == wa::kEmptyIdle && s.counter == 0);
+	CHECK(advances == 0);
 }
 
 void test_action_sound_legs() {
@@ -1454,6 +1527,7 @@ int main() {
     test_emptyidle_bound_to_idle_or_empty();
     test_null_handler_never_finishes();
     test_bake_ring_read_multiplicity();
+    test_unbaked_def_runs_the_default_handlers();
     test_fire_chains_recoil();
     test_auto_refire_cadence();
     test_revx_m4_zero_recoil_auto_cadence();
@@ -1468,6 +1542,7 @@ int main() {
     test_scope_queue();
     test_idle_plays_once_per_entry();
     test_channel_advance_is_counter_gated();
+    test_short_idle_and_emptyidle_hold_never_step();
     test_action_sound_legs();
     test_held_replay_skips_the_begin_sound_leg();
     test_fire_abort_finishes_silently();

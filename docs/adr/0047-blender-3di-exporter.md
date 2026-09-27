@@ -138,9 +138,12 @@ the same text transport, the same add-on.
    (in the add-on, any helper in that LOD writes a whole table, a part without
    one contributing its pivot); with none, build derives one row per non-root
    section at its offset, our rule and the retail row count in 917 of the 958
-   JO models. The CMDL box envelops the collision faces and LOD 0's triangles,
-   its radii and height (`radii[2]`) the collision faces' alone, as the retail
-   corpus stores them. A skinned model follows the retail person layout: one
+   JO models. A table that is not one per part (156 JOTAC models: none, a row
+   for the root too, another count) imports with the model's Attach points
+   set to the attach helpers, a row per `_attach` in export order, as OED
+   wrote a row per attach helper. The CMDL box envelops the collision faces
+   and LOD 0's triangles, its radii and height (`radii[2]`) the collision
+   faces' alone, as the retail corpus stores them. A skinned model follows the retail person layout: one
    section per bone at its pivot, carrying a hit sphere and bounds box, what
    the runtime's person raycast reads [orig: Physics_RaycastAgainstBoneSections
    @ 0x4e4670]: the box around the LOD 0 vertices the bone moves and the
@@ -200,6 +203,9 @@ the same text transport, the same add-on.
    follow the OED rule (the six bounding planes, then deduplicated face planes,
    at most 32), which reproduces Armry01's OCCL records plane for plane; a
    record's centre sums its vertices in double and divides once, as OED did.
+   206 JOTAC models store each centre mirrored across y instead, which the
+   runtime reads as stored: the scene text gives such a record its sphere, and
+   the add-on keeps it as a `_sphere` Empty on the occlusion mesh.
 7. **Materials and vertices follow the OED rules too.** A blending shader's
    strips draw in the alpha pass (FFP_GLASS among them); a glass shader
    reflects 128 grey unless another colour is set and is glass; a `*_LUM`
@@ -228,7 +234,7 @@ the same text transport, the same add-on.
    with their Armature modifiers off, and every model in its own root's frame.
 10. **Standing from ADR 0038.** No other Python product code, Qt importer, or
    Python test suite (the stdlib `scripts/lint`, `scripts/ida`, `scripts/net`,
-   `scripts/mcp`, `scripts/ci`, `scripts/parity` and `tools/net` scripts and
+   `scripts/mcp`, `scripts/ci` and `scripts/parity` scripts and
    the `scripts/oracles` witness regenerators, which drive the pinned retail
    executable under Unicorn, and the add-on's own headless tests,
    `tests/blender/*_test.py`, remain); no native
@@ -441,7 +447,6 @@ the same text transport, the same add-on.
 - Known model gaps, each reported rather than carried: retail's own tool is not
   witnessed, so its seam flags and tangent values match the OED rules only
   where that tool agreed with ModSuperOed; CTRL registers nothing references;
-  an empty CXLT table (11 retail models: no attach helper can say "none");
   the centres of skinned bones that draw nothing (dM1A1, DT801); MTRX frames
   that are not rotations on a `PN##` part (Frag_1st and Stch_1st rows 37 to 39
   come back orthonormal; a bone keeps them whole); a user point naming a part
@@ -464,10 +469,9 @@ the same text transport, the same add-on.
   no subset of the stored geometry gives (61 models, Armry01's part 3 among
   them), GHDR radii over geometry the file lacks (25: the `fxflsh` family and
   the first-person weapons' own collision LOD), three skinned vehicles
-  authored on their bones (dM1A1, DT801, Ftruck1X), NaN `rel` words (Dmil261x,
-  Excavatr), and occlusion centres taken before LOD recentering (Armry01, 7
-  of 8); the CMDL and bullet-face words, derived from the stored corners (our
-  rule), sit up to a few millimetres from retail's.
+  authored on their bones (dM1A1, DT801, Ftruck1X), and NaN `rel` words
+  (Dmil261x, Excavatr); the CMDL and bullet-face words, derived from the
+  stored corners (our rule), sit up to a few millimetres from retail's.
 - `base/resource_index/texture_candidates.cpp` joins `citation_allowlist_engine`
   (our loose-folder resolver policy, moved down from the Godot resolver so the
   CLI shares it; the `texture_candidates` ctest pins its order). `threedi_build.cpp` and `bad_build.cpp` carry the `[orig:]`

@@ -77,7 +77,8 @@ void test_00trg_persistent_overlay_set() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	CHECK(world::minimap_team_color(1) == 0x0A &&
 			world::minimap_team_color(2) == 0x09 &&
 			world::minimap_team_color(0) == 0x0C,

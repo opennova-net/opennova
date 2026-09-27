@@ -1,6 +1,8 @@
-# Build and export the Windows runtime. Game data is supplied with --resource-dir.
-# Produces dist/opennova-game-windows-v<version>.zip with opennova.exe and its
-# matching native dependencies. Debug exports include the game's ImGui tools.
+# Build and export the Windows runtime. Produces
+# dist/opennova-game-windows-v<version>.zip with opennova.exe, its matching
+# native dependencies and the bundled assets/ placeholder game (ADR 0048).
+# Retail game data is supplied by the player. Debug exports include the game's
+# ImGui tools.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
 
 param(
@@ -210,22 +212,14 @@ function Invoke-GodotExport {
     }
 }
 
-# Boot the exported exe headless for a few frames. This is the guard the
+# Boot the staged exe headless for a few frames. This is the guard the
 # packaging pipeline was missing: the export step only validates export-time
 # logs, so a package whose main scene cannot load (e.g. a missing per-product
 # run/main_scene feature override in project.godot) still shipped, crashing on
-# first launch. Requires the GDExtension DLL beside the exe, exactly like the
-# shipped zip layout.
-function Test-GodotAppBoot {
-    param([string]$PackageName, [string]$ExePath)
-
-    Write-Host "=== Boot smoke: $PackageName ==="
-    $exeDir = Split-Path $ExePath -Parent
-    $dllBeside = Join-Path $exeDir (Split-Path $SHIPPED_DLL -Leaf)
-    # The export directory survives repeated -SkipBuild validation runs. Always
-    # refresh the side-by-side extension so the smoke cannot execute a DLL from
-    # an earlier build while claiming to validate the current source tree.
-    Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
+# first launch. Runs against the staged zip layout (exe, GDExtension DLL and
+# assets/ side by side). Returns the combined output.
+function Invoke-GodotAppBoot {
+    param([string]$ExePath, [string]$ExtraArgs, [int]$ExpectedExit)
 
     $stdoutLog = [System.IO.Path]::GetTempFileName()
     $stderrLog = [System.IO.Path]::GetTempFileName()
@@ -233,9 +227,8 @@ function Test-GodotAppBoot {
     $bootProfile = Join-Path $smokeTempRoot ("opennova-package-smoke-" + [Guid]::NewGuid().ToString("N"))
     $previousAppData = [Environment]::GetEnvironmentVariable("APPDATA", "Process")
     try {
-        # This startup smoke must not discover the packager's saved retail mount,
-        # credentials, or editor state. Music with retail data is validated through
-        # the runtime's orderly quit; --quit-after bypasses its playback drain.
+        # This startup smoke must not discover the packager's saved retail folder,
+        # credentials, or editor state.
         New-Item -ItemType Directory -Path $bootProfile | Out-Null
         [Environment]::SetEnvironmentVariable("APPDATA", $bootProfile, "Process")
         # Headless uses Godot's Dummy renderer, so a render loop cannot validate
@@ -244,7 +237,7 @@ function Test-GodotAppBoot {
         # shaders, and GDExtension.
         $proc = Start-Process `
             -FilePath $ExePath `
-            -ArgumentList "--headless --disable-render-loop --disable-crash-handler --quit-after 120 --verbose" `
+            -ArgumentList "--headless --disable-render-loop --disable-crash-handler --quit-after 120 --verbose $ExtraArgs" `
             -WindowStyle Hidden `
             -Wait `
             -PassThru `
@@ -252,15 +245,15 @@ function Test-GodotAppBoot {
             -RedirectStandardError $stderrLog
 
         $combinedOutput = "$(Get-Content $stdoutLog -Raw)`n$(Get-Content $stderrLog -Raw)"
-
-        if ($proc.ExitCode -ne 2 -or $combinedOutput -notmatch "OpenNova requires game data.*--resource-dir") {
+        if ($proc.ExitCode -ne $ExpectedExit) {
             Write-Host $combinedOutput.TrimEnd()
-            throw "Boot smoke for '$PackageName' exited with code $($proc.ExitCode)"
+            throw "Boot smoke ($ExtraArgs) exited with code $($proc.ExitCode), expected $ExpectedExit"
         }
         if ($combinedOutput -match "Failed loading scene|Cannot open file 'res://|SCRIPT ERROR|GDExtension dynamic library not found|Failed to load script") {
             Write-Host $combinedOutput.TrimEnd()
-            throw "Boot smoke for '$PackageName' logged load errors"
+            throw "Boot smoke ($ExtraArgs) logged load errors"
         }
+        return $combinedOutput
     }
     finally {
         [Environment]::SetEnvironmentVariable("APPDATA", $previousAppData, "Process")
@@ -277,11 +270,50 @@ function Test-GodotAppBoot {
     }
 }
 
+function Test-GodotAppBoot {
+    param([string]$ExePath)
+
+    Write-Host "=== Boot smoke: opennova-runtime ==="
+    # No arguments: the bundled assets/ placeholder menu (ADR 0048).
+    $bundled = Invoke-GodotAppBoot -ExePath $ExePath -ExtraArgs "" -ExpectedExit 0
+    if ($bundled -match "bundled assets not found|no menu found in resource dir") {
+        Write-Host $bundled.TrimEnd()
+        throw "Boot smoke did not reach the bundled placeholder menu"
+    }
+    # --resource-dir without a value stays a usage error.
+    $usage = Invoke-GodotAppBoot -ExePath $ExePath -ExtraArgs "-- --resource-dir" -ExpectedExit 2
+    if ($usage -notmatch "--resource-dir needs a path") {
+        Write-Host $usage.TrimEnd()
+        throw "Boot smoke did not report the --resource-dir usage error"
+    }
+}
+
+# Stage the TRACKED files of assets/ (never a wildcard copy: a working checkout
+# may hold untracked local data there that must never ship).
+function Copy-BundledAssets {
+    param([string]$AssetsStageDir)
+
+    New-Item -ItemType Directory -Force -Path $AssetsStageDir | Out-Null
+    $tracked = & git -C $ROOT ls-files -z assets
+    if ($LASTEXITCODE -ne 0) { throw "git ls-files assets failed (exit $LASTEXITCODE)" }
+    $names = @($tracked -split "`0" | Where-Object { $_ })
+    if ($names.Count -eq 0) { throw "No tracked files found under assets/" }
+
+    foreach ($name in $names) {
+        $src = Join-Path $ROOT ($name -replace "/", "\")
+        if (-not (Test-Path -LiteralPath $src)) { throw "Tracked asset missing from the working tree: $name" }
+        $rel = $name -replace "^assets/", "" -replace "/", "\"
+        $dst = Join-Path $AssetsStageDir $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path $dst -Parent) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $dst -Force
+    }
+    Write-Host "    staged $($names.Count) tracked asset files"
+}
+
 Write-Host "=== Exporting opennova.exe ==="
 Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
-Test-GodotAppBoot -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE
 
-# Stage only this export's runtime dependencies. Never copy a data directory.
+# Stage this export's runtime dependencies plus the bundled assets/.
 $gameStage = Join-Path $DIST ".stage-opennova-game-windows"
 $stagePath = [IO.Path]::GetFullPath($gameStage)
 $distPrefix = [IO.Path]::GetFullPath($DIST).TrimEnd('\') + '\'
@@ -296,17 +328,23 @@ if (Test-Path -LiteralPath $stagePath) {
 }
 New-Item -ItemType Directory -Path $stagePath | Out-Null
 try {
-    Copy-Item -LiteralPath $RUNTIME_EXE -Destination (Join-Path $stagePath "opennova.exe")
+    $stagedExe = Join-Path $stagePath "opennova.exe"
+    Copy-Item -LiteralPath $RUNTIME_EXE -Destination $stagedExe
     Copy-Item -LiteralPath $SHIPPED_DLL -Destination $stagePath
     if ($ExportMode -eq "debug") {
         $imguiLibs = @(Get-ChildItem -LiteralPath $DIST -Filter "libimgui-godot-native.*" -File)
         if ($imguiLibs.Count -eq 0) { throw "Debug export is missing the ImGui addon library" }
         foreach ($lib in $imguiLibs) { Copy-Item -LiteralPath $lib.FullName -Destination $stagePath }
     }
+    Copy-BundledAssets -AssetsStageDir (Join-Path $stagePath "assets")
     $launchHelp = @"
-OpenNova requires your own game data.
+OpenNova
 
-Packed install:
+Run opennova.exe. OpenNova's own game is coming soon; until then, press
+PLAY RETAIL and choose your Joint Operations folder to play the retail game.
+The folder is remembered; CHANGE FOLDER picks another.
+
+Command line (advanced):
   opennova.exe -- --resource-dir "C:\Games\Joint Operations"
 Loose data:
   opennova.exe -- --resource-dir "C:\MyGameData" --loose-root /d
@@ -314,6 +352,7 @@ Loose data:
 Use /game <code> and /exp <name> to select a game or expansion.
 "@
     Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $launchHelp -Encoding UTF8
+    Test-GodotAppBoot -ExePath $stagedExe
     Compress-Archive -Path (Join-Path $stagePath "*") -DestinationPath $GAME_ZIP -Force
     if (-not (Test-Path -LiteralPath $GAME_ZIP)) { throw "Packaging produced no zip" }
 }

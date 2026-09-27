@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: scripts/build.sh --no-godot
 
-  # Tagged releases ship the runtime and Blender authoring add-on, without game data.
+  # Tagged releases ship the runtime, the Blender authoring add-on and the apps, without game data.
   package-godot-windows:
     runs-on: windows-latest
     outputs:
@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # Runtime export contains no game data.
+          lfs: false   # The bundled assets/ are plain git blobs; nothing here needs LFS.
           submodules: recursive
 
       - name: Cache Godot binary
@@ -74,19 +74,22 @@ jobs:
       # Blender reports the zipped manifest's version: stamp the tag into it.
       version: ${{ github.ref_name }}
 
+  package-apps-windows:
+    uses: ./.github/workflows/package-apps-windows.yml
+
   release:
     runs-on: ubuntu-latest
-    needs: [test, package-godot-windows, package-blender-windows]
+    needs: [test, package-godot-windows, package-blender-windows, package-apps-windows]
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download game and Blender artifacts
+      - name: Download game, Blender and apps artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
-          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }}
+          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -108,6 +111,7 @@ jobs:
             mv -- "${game_zips[0]}" "$release_zip"
           fi
           mv -- dist/opennova-blender-addon-windows.zip "dist/opennova-blender-addon-windows-${GITHUB_REF_NAME}.zip"
+          mv -- dist/opennova-apps-windows.zip "dist/opennova-apps-windows-${GITHUB_REF_NAME}.zip"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -115,5 +119,6 @@ jobs:
           files: |
             dist/opennova-game-windows-${{ github.ref_name }}.zip
             dist/opennova-blender-addon-windows-${{ github.ref_name }}.zip
+            dist/opennova-apps-windows-${{ github.ref_name }}.zip
           fail_on_unmatched_files: true
           generate_release_notes: true

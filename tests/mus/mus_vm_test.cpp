@@ -1380,7 +1380,8 @@ static int test_vm_load_null_script(void) {
     return 1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     /* E1 */
     RUN_TEST(test_vm_lifecycle);
     RUN_TEST(test_vm_hooks_registered);

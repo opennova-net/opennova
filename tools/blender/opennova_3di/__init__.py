@@ -255,6 +255,13 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
                                     description="The render LOD whose part meshes also become the bullet faces (the OED "
                                                 ".3dp poly_collision_lod); 0 = the most detailed")
+    attach_points: EnumProperty(name="Attach points", default="PARTS", items=[
+        ("PARTS", "One per part", "A CXLT row for every collision section after the root (every section on a "
+                                  "skinned model), at its part's _attach Empty or its pivot: the table nearly every "
+                                  "retail model stores"),
+        ("HELPERS", "The attach helpers", "Exactly the collision LOD's _attach Empties, a row each in export order, "
+                                          "none an empty table: a table one per part cannot say (M24_1st's rows in "
+                                          "parent order, Chair03X's none), which import sets")])
     mesh_part: BoolProperty(name="Mesh part", default=False,
                             description="A skinned model keeps its skinned geometry on a part of its own after the "
                                         "bones, at its mesh's origin, whose collision section holds the bullet faces "
@@ -325,9 +332,10 @@ class O3DTexture(bpy.types.PropertyGroup):
     # flipbook frame, row flags, a normal map file, a file Blender cannot
     # open. A slot the list gives is taken from the list, not the nodes.
     name: StringProperty(name="File", default="",
-                         description="The texture's file name: printable ASCII, at most 16 characters, no folder. "
-                                     "A file export writes (Write) is <name>.tga or <name>.mdt, one dot and at most "
-                                     "15 characters")
+                         description="The texture's file name: printable ASCII, at most 16 characters, no folder; "
+                                     "empty, a row that names no file (retail keeps some as placeholders). A file "
+                                     "export writes (Write) is <name>.tga or <name>.mdt, one dot and at most 15 "
+                                     "characters")
     slot: IntProperty(name="Slot", default=1, min=0, max=255,
                       description="1 the diffuse texture, 2 the detail texture (on the second UV map), 3 the "
                                   "normal map (4 a second normal map, which no retail model uses)")
@@ -354,23 +362,31 @@ class O3DMaterialProps(bpy.types.PropertyGroup):
                                        "its Emission, a U or V generator and a normal map")
     order: IntProperty(name="Export order", default=-1, min=-1,
                        description="The material's index in the model; -1 sorts it after the ordered ones, in the "
-                                   "order meshes first use it")
+                                   "order meshes first use it. A material in a mesh's slots that no face draws "
+                                   "with exports only with an order (retail models keep such materials)")
     # The bullet-mesh face material on COLLISION meshes: the impact effect is
     # the ammo effects-table row material + 4 (metal = 14 -> "metal").
     surface: IntProperty(name="Collision surface", default=14, min=0, max=255,
                          description="Bullet-face poly type: 14 metal, 15 glass, 18 heavy metal, 13 wood, "
                                      "12 stone, 16 cloth, 17 foliage, 1 object")
-    # The bullet faces' CFAC flags besides "both sides" (1), which follows Two
-    # sided: OED derived both from one render attribute. A projectile's face
-    # test skips a 0x100 face, and one with 0x800 but not 1 stops only a
-    # bullet crossing it from the front [orig: Physics_RaycastAgainstBoneCollision
-    # @ 0x4e4cb0, the 0x800 test @ 0x4e5139; runtime/world/collision_query.cpp].
+    # The bullet faces' CFAC flags. "Both sides" (1) follows Two sided unless
+    # set: OED derived both from one render attribute (the retired port's
+    # material_flags), but 154 JOTAC models store faces whose flag disagrees
+    # with their material's. A projectile's face test skips a 0x100 face, and
+    # one with 0x800 but not 1 stops only a bullet crossing it from the front
+    # [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0, the 0x800 test @
+    # 0x4e5139; runtime/world/collision_query.cpp].
+    face_both_sides: EnumProperty(name="Both sides", default="DRAWN", items=[
+        ("DRAWN", "As drawn", "CFAC flag 1 (a face stops a bullet from either side) when the material draws both "
+                              "sides (Backface Culling off), as OED derived both from one setting"),
+        ("YES", "Yes", "CFAC flag 1 whatever the material draws (41 retail models' culled materials)"),
+        ("NO", "No", "No CFAC flag 1 whatever the material draws (113 retail models' two-sided materials: Baricd02's "
+                     "wire, drawn both ways, stores each face in both windings instead)")])
     face_never_hit: BoolProperty(name="Bullets pass", default=False,
                                  description="Bullets never hit these faces (CFAC flag 0x100; retail rotor blades)")
     face_front_only: BoolProperty(name="Front only", default=False,
                                   description="Bullets hit these faces only from the front; one coming from behind "
-                                              "passes through (CFAC flag 0x800; a two-sided material, Backface "
-                                              "Culling off, overrides it)")
+                                              "passes through (CFAC flag 0x800; Both sides overrides it)")
     face_other_flags: IntProperty(name="Other face flags", default=0, min=0,
                                   description="CFAC flag bits besides 1, 0x100 and 0x800 (OED wrote 2 and 0x400)")
     other_flags: IntProperty(name="Other flag bits", default=0, min=0, max=255,
@@ -1465,6 +1481,8 @@ def draw_model(layout, model):
         layout.label(text=f"Writes //{rig.clean_name(model.name)}.3di")
     layout.prop(p, "poly_collision_lod")
     layout.prop(p, "export_bullet_faces")
+    if p.attach_points != "PARTS":
+        layout.prop(p, "attach_points")
     arm = rig.rig_of(model)
     own = arm is not None and rig.model_of(arm) is model
     root = next((c for c in model.children if rig.is_lod_root(c) and rig.lod_index(c) == 0), None)
@@ -1526,8 +1544,9 @@ class O3D_PT_object(bpy.types.Panel):
             return
         part = rig.part_of(ob)
         layout.label(text=f"On part {part + 1:02d}" if part is not None else "On no part", icon="EMPTY_AXIS")
-        if (ob.type == "EMPTY" and export.POINT_RE.match(name)) or ob.type == "LIGHT" or \
-                export.OCCLUSION_RE.search(name):
+        helper = export.HELPER_RE.match(name)
+        if (ob.type == "EMPTY" and (export.POINT_RE.match(name) or (helper and helper.group(2) == "attach"))) or \
+                ob.type == "LIGHT" or export.OCCLUSION_RE.search(name):
             layout.prop(p, "order")
 
 
@@ -1660,6 +1679,7 @@ class O3D_PT_material(bpy.types.Panel):
         box.label(text="Bullet faces")
         row = box.row()
         row.prop(p, "surface")
+        box.prop(p, "face_both_sides")
         row = box.row()
         row.prop(p, "face_never_hit")
         row.prop(p, "face_front_only")

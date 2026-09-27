@@ -48,9 +48,6 @@ void position_control_horizontal(Control *node, float node_width, HorizontalAlig
 }  // namespace
 
 void CreditsPlayer::_bind_methods() {
-	// Resource property.
-	ClassDB::bind_method(D_METHOD("set_credits_resource", "resource"), &CreditsPlayer::set_credits_resource);
-
 	// Playback control.
 	ClassDB::bind_method(D_METHOD("play"), &CreditsPlayer::play);
 	ClassDB::bind_method(D_METHOD("stop"), &CreditsPlayer::stop);
@@ -58,18 +55,9 @@ void CreditsPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resume"), &CreditsPlayer::resume);
 	ClassDB::bind_method(D_METHOD("is_playing"), &CreditsPlayer::is_playing);
 
-	// Scroll offset.
-
 	// Rebuild.
 	ClassDB::bind_method(D_METHOD("rebuild"), &CreditsPlayer::rebuild);
 	ClassDB::bind_method(D_METHOD("_rebuild_content_if_needed"), &CreditsPlayer::_rebuild_content_if_needed);
-
-	// Highlight.
-
-	// Autoplay.
-	ClassDB::bind_method(D_METHOD("set_autoplay", "autoplay"), &CreditsPlayer::set_autoplay);
-
-	// Entry-lookup helpers (for editor scroll sync).
 
 	// Signals.
 	ADD_SIGNAL(MethodInfo("finished"));

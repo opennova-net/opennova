@@ -76,8 +76,7 @@ Each domain's next step is named in its own record, not centrally:
 | Mission savegames | ledger § Mission savegames | [mission/savegame-re.md](mission/savegame-re.md): the schema, runtime state restoration and slot lifecycle (D-SAVE-1) |
 | Performance | not a divergence (the [`TODO.md`](../TODO.md) perf rows) | [perf/03tr-frame-costs.md](perf/03tr-frame-costs.md), [perf/mission-load-baseline.md](perf/mission-load-baseline.md), [perf/reground-baseline.md](perf/reground-baseline.md) |
 
-Work that is **not** a parity divergence — OpenNova Launcher UX, project health, code
-hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
+Work that is **not** a parity divergence — project health, code hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
 the ONE non-parity backlog. Completed-effort records are not plans:
 `engine/runtime/inmatch/ROADMAP.md`,
 [oned/editor-layer-program.md](oned/editor-layer-program.md),

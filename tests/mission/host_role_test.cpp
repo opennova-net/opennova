@@ -47,21 +47,8 @@ static int failures = 0;
 
 namespace {
 
-using test_mission::item;
-using test_mission::organic;
+using test_mission::two_entity_mission;
 using test_boot::source_over;
-
-// The synthetic mission mission_kernel_test boots: two placed entities and
-// one (empty) BMS event.
-bms::File synthetic_mission() {
-	bms::File m{};
-	m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
-	m.items[0].id = 21;
-	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
-	m.organics[0].id = 31;
-	m.events.push_back(bms::Event{});
-	return m;
-}
 
 uint32_t mission_game_type(const bms::File &mission) {
 	return game_type::for_mission_mode(bms::selected_game_mode(
@@ -94,7 +81,7 @@ int main() {
 		inmatch::HostRole role;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
@@ -216,7 +203,7 @@ int main() {
 		auto role_storage = std::make_unique<inmatch::HostRole>();
 		auto &role = *role_storage;
 		role.bind(kernel);
-		kernel.open_document(synthetic_mission(), "tank_slots", source_over(&files));
+		kernel.open_document(two_entity_mission(), "tank_slots", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
@@ -294,7 +281,7 @@ int main() {
 		inmatch::HostRole role;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.playable = false;
         options.mp_session = true; // a dedicated host has no player of its own
@@ -306,8 +293,10 @@ int main() {
 			cfg.config.game_type = options.game_type;
 			cfg.config.unlimited_vehicles = false; // game.cfg unlimited_vehicles = 0
 			cfg.socket_mode = inmatch::SocketMode::Lan;
-			cfg.serve_and_play = true; // the dedicated bring-up forces this OFF
-			role.bring_up_dedicated(cfg);
+			cfg.serve_and_play = false; // SERVERTYPE serve-only: no local player
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
 		};
 		std::string error;
 		CHECK(kernel.boot(options, error));
@@ -317,7 +306,8 @@ int main() {
 		CHECK(!host.host_owner.ctx.config.unlimited_vehicles);
 		CHECK(!kernel.world.rules.vehicle_respawns);
 		CHECK(!host.host_owner.serve_and_play);
-		CHECK(host.host_owner.host_loopback == nullptr);
+		// The loopback channel exists but no local client registers on it.
+		CHECK(host.host_owner.host_loopback == &host.host_loop);
 		CHECK(host.client_runtime == nullptr);
 		CHECK(host.host_owner.ctx.world == &kernel.world);
 		CHECK(host.host_owner.ctx.mission == &kernel.mission);
@@ -348,7 +338,7 @@ int main() {
         ms::MissionKernel kernel;
         inmatch::HostRole role;
         role.bind(kernel);
-        kernel.open_document(synthetic_mission(), "respawn", source_over(&files));
+        kernel.open_document(two_entity_mission(), "respawn", source_over(&files));
         ms::KernelBootOptions options;
         options.game_type = mission_game_type(kernel.mission);
         options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
@@ -433,7 +423,7 @@ int main() {
 				? static_cast<inmatch::Role &>(*local_storage)
 				: static_cast<inmatch::Role &>(*host_storage);
 		role.bind(kernel);
-		kernel.open_document(synthetic_mission(), "gunner_walk", source_over(&files));
+		kernel.open_document(two_entity_mission(), "gunner_walk", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
 		if (frame_kind == 0) {
@@ -447,7 +437,9 @@ int main() {
 				cfg.config.max_players = 4;
 				cfg.config.game_type = options.game_type;
 				cfg.socket_mode = inmatch::SocketMode::Lan;
-				host_storage->bring_up_dedicated(cfg);
+				inmatch::HostBringup bringup;
+				bringup.host_cfg = cfg;
+				host_storage->bring_up(bringup);
 			};
 		}
 		std::string error;

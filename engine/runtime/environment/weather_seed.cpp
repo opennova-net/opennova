@@ -59,22 +59,4 @@ world::WeatherSeed weather_seed_from_config(const Config &config, const bms::Hea
 	return seed;
 }
 
-bool seed_weather_from_env(std::istream &input, const bms::Header &header,
-		world::WeatherState &weather, std::string &error) {
-	Config config;
-	if (!load_env(input, config, error)) return false;
-	// Game_LoadTerrainDuringConnect mutates the parsed ENV with BMS overrides
-	// before Game_StartMission snapshots its network-visible targets.
-	// [orig: Game_LoadTerrainDuringConnect @0x520710; Game_StartMission
-	// snapshot sites @0x525383/0x525393]
-	BmsEnvOverrides overrides;
-	overrides.has_fog_level = bms::has_flag(
-			header.attrib_flags, bms::AttribFlags::FogDistanceOverrideEnable);
-	overrides.fog_level = static_cast<float>(header.fog_override);
-	apply_bms_overrides(config, overrides);
-	weather.seed(weather_seed_from_config(config, header));
-	error.clear();
-	return true;
-}
-
 } // namespace opennova::env

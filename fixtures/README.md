@@ -136,10 +136,10 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   written by `save_env`) and the two sky maps it names (the bright square-rooted
   cloud field and the modulation layer centered at 128), 64x64 indexed PCX by our
   writer. The shipped `.env` set is the gated `env_jo_install` sweep.
-- `rtxt/synth_*.bin` — `tests/fixtures/minimal_rtxt_gen.cpp` (beside the `assets/`
-  boot tables it also mints): the parity set `rtxt_synth_parity` grills — a
-  multi-section game table with position hints, a menu table, a mission sidecar
-  with cp1252 text and odd-length padding, and the one-entry case. The shipped
+- `rtxt/synth_*.bin` — `tests/fixtures/minimal_rtxt_gen.cpp`: the parity set
+  `rtxt_synth_parity` grills — a multi-section game table with position hints, a
+  menu table, a mission sidecar with cp1252 text and odd-length padding, and the
+  one-entry case. The shipped
   string tables are read from the reference tree by the gated
   `rtxt_jo_install_sweep` and the menu-driven GUT tests.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.

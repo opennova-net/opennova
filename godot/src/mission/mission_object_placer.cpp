@@ -126,9 +126,6 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("update_static_lods_for_views", "main_camera", "main_width",
 								 "inset_camera", "inset_width"),
 			&MissionObjectPlacer::update_static_lods_for_views);
-	ClassDB::bind_method(D_METHOD("set_static_instance_inset_occlusion_hidden", "bms_id",
-								 "hidden"),
-			&MissionObjectPlacer::set_static_instance_inset_occlusion_hidden);
 	ClassDB::bind_method(D_METHOD("get_static_instance_inset_lod", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_inset_lod);
 	ClassDB::bind_method(
@@ -186,17 +183,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::hide_static_instance);
 	ClassDB::bind_method(D_METHOD("show_static_instance", "bms_id"),
 			&MissionObjectPlacer::show_static_instance);
-	ClassDB::bind_method(
-			D_METHOD("update_static_terrain_shadow_source_transform", "kind",
-					"index", "xform"),
-			&MissionObjectPlacer::update_static_terrain_shadow_source_transform);
-	ClassDB::bind_method(
-			D_METHOD("set_static_terrain_shadow_replacement", "bms_id",
-					"graphic", "xform", "active"),
-			&MissionObjectPlacer::set_static_terrain_shadow_replacement);
-	ClassDB::bind_method(
-			D_METHOD("clear_static_terrain_shadow_replacement", "bms_id"),
-			&MissionObjectPlacer::clear_static_terrain_shadow_replacement);
 	ClassDB::bind_method(
 			D_METHOD("register_resolved_static_graphic", "graphic", "data",
 					"batches", "lod_profile"),
@@ -1580,10 +1566,9 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	// FileSystem_FileExists miss -> "default.adm" substitution ahead of
 	// AnimMap_FindByName; engine anim/adm_fallback.h). A present-but-broken
 	// file still fails below, as retail's parse error path does.
-	const String adm_name = String::utf8(
+	const String adm_name = opennova::to_gd(
 			opennova::anim::adm_name_or_default(p_adm_name.utf8().get_data(),
-					resource_root_.is_valid() && resource_root_->has_file(p_adm_name))
-					.c_str());
+					resource_root_.is_valid() && resource_root_->has_file(p_adm_name)));
 	const String cache_key = adm_name + String("#") +
 			String::num_int64(Variant(p_bone_origins).hash()) + String("#") +
 			String::num_int64(Variant(p_bone_parents).hash());

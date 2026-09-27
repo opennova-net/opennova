@@ -59,9 +59,6 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
 	return state;
 }
 
-// radians -> 32-bit binary angle. [orig: dbl_7C19D8 = 0x41C45F306DC9C883.]
-constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / (2*pi)
-
 // Whole degrees -> 32-bit binary angle by the original's multiplier, used for the commanded
 // elevation (brain+0x314) only. [orig: AI_HandleCommand @0x4659F2 (imul 0B60B60h)]
 constexpr int64_t kBamPerDegreeInt = 11930464; // trunc(2^32/360) — the original multiplier
@@ -108,8 +105,8 @@ inline int32_t iabs32(int32_t v) {
 
 // Shared distance + bearing math for both waypoint types. [orig: AIWaypoint_UpdateTarget
 // @0x457380.] Approx 3D distance = larger-axis + ((5*(other-axis + |dy|)) >> 16), all in
-// wrapping 32-bit; bearing = trunc(atan2(dz, dx) * 2^32/2pi). dx/dz/dy follow the decomp
-// naming (dx<-pos+4, dz<-pos+8, dy<-pos+12).
+// wrapping 32-bit; bearing = trunc(atan2(dz, dx) * 2^32/2pi) [orig: dbl_7C19D8 =
+// 0x41C45F306DC9C883]. dx/dz/dy follow the decomp naming (dx<-pos+4, dz<-pos+8, dy<-pos+12).
 inline void wp_dist_bearing(int32_t dx, int32_t dz, int32_t dy, int32_t &dist, int32_t &bearing) {
     int32_t adx = iabs32(dx), adz = iabs32(dz), ady = iabs32(dy);
     int32_t base, cross;
@@ -118,7 +115,7 @@ inline void wp_dist_bearing(int32_t dx, int32_t dz, int32_t dy, int32_t &dist, i
     int32_t term = static_cast<int32_t>(static_cast<uint32_t>(cross) * 5u) >> 16; // x5 wrap, arithmetic >>16
     dist = static_cast<int32_t>(static_cast<uint32_t>(base) + static_cast<uint32_t>(term));
     bearing = static_cast<int32_t>(static_cast<int64_t>(
-        std::atan2(static_cast<double>(dz), static_cast<double>(dx)) * kBamPerRadian)); // chop toward zero
+        std::atan2(static_cast<double>(dz), static_cast<double>(dx)) * io::kBamPerRadian)); // chop toward zero
 }
 
 // 32-bit rotate-left. [orig: __ROL4__.]
@@ -135,11 +132,11 @@ inline uint32_t prng_step(uint32_t &s) {
 }
 
 // Bearing to a point in 32-bit binary angle. [orig: AI_FindBestTargetB @0x46719D fpatan path —
-// atan2(candidate.Y - self.Y, candidate.X - self.X), x87 chop toward zero.] dY/dX follow the
-// mover's convention (atan2(dz, dx)).
+// atan2(candidate.Y - self.Y, candidate.X - self.X) * dbl_7C19D8, x87 chop toward zero.]
+// dY/dX follow the mover's convention (atan2(dz, dx)).
 inline int32_t bearing_bam(int32_t dY, int32_t dX) {
     return static_cast<int32_t>(static_cast<int64_t>(
-        std::atan2(static_cast<double>(dY), static_cast<double>(dX)) * kBamPerRadian));
+        std::atan2(static_cast<double>(dY), static_cast<double>(dX)) * io::kBamPerRadian));
 }
 
 // 3D distance in world units. [orig: AI_FindBestTargetB @0x4671e8 sqrt of dx^2+dy^2+dz^2,

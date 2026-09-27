@@ -1,15 +1,10 @@
 #include "network/lan_server_row.h"
-#include "util/variant_type_of.h"
+#include "util/record_bind.h"
 
 using namespace godot;
 
 void LanServerRow::_bind_methods() {
-#define LAN_SERVER_ROW_BIND(m_type, m_name, m_default)                                              \
-	ClassDB::bind_method(D_METHOD("get_" #m_name), &LanServerRow::get_##m_name);                    \
-	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &LanServerRow::set_##m_name);           \
-	ADD_PROPERTY(PropertyInfo(variant_type_of<m_type>(), #m_name), "set_" #m_name, "get_" #m_name);
-	LAN_SERVER_ROW_FIELDS(LAN_SERVER_ROW_BIND)
-#undef LAN_SERVER_ROW_BIND
+	LAN_SERVER_ROW_FIELDS(OPENNOVA_RECORD_FIELD)
 	ClassDB::bind_static_method("LanServerRow", D_METHOD("make", "server_name", "host_ip", "port"),
 			&LanServerRow::make);
 }

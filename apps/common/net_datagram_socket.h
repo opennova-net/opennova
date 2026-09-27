@@ -10,8 +10,8 @@
 
 namespace opennova::net {
 
-// net::Socket-backed opennova::IDatagramSocket — the real-UDP adapter the headless host
-// (apps/nw_server) and the two-endpoint socket test plug into the engine/runtime/inmatch owner loop.
+// net::Socket-backed opennova::IDatagramSocket — the real-UDP adapter the NovaWorld service's
+// JO listener and the two-endpoint socket test plug into the engine/runtime/inmatch owner loop.
 //
 // net::Endpoint.ip is MSO-first (ip[0] = a in a.b.c.d); PeerAddr.ip is LE octet packing (a in the
 // low byte). The conversion is a straight pack/unpack, NOT a byte swap — verified: 127.0.0.1 ->

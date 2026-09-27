@@ -237,6 +237,10 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 		return false;
 	};
 	std::vector<BadBuildRow> kept; // the rows as written
+	// A key naming no anim slot registers nothing in the game, and build
+	// refuses it (anim_load keeps such rows apart).
+	for (const BadBuildRow &row : set.dropped_rows)
+		w.note("row '" + row.key + "' (its key names no anim slot, so the game drops it)");
 	for (const BadBuildRow &row : set.rows) {
 		BadBuildRow held{row.key, {}};
 		std::string line = "row " + name_field(w, row.key);

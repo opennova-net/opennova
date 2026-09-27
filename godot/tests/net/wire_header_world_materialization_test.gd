@@ -31,10 +31,6 @@ const DESIGNATED_G_CHILD_TYPE := 1419
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_wire_header"
 
 
-func should_skip_script():
-	return RetailData.def_root_skip()
-
-
 func before_all() -> void:
 	DirAccess.make_dir_recursive_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR))
@@ -167,7 +163,7 @@ begin "Wire Header Designated-G Parent"
 
 func _install_combat_tables(sim: Simulation, db: ItemDatabase) -> void:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
+	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
 	sim.resolve_item_traits(db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
@@ -175,7 +171,7 @@ func _install_combat_tables(sim: Simulation, db: ItemDatabase) -> void:
 
 func _weapon(name: String) -> WeaponDef:
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
+	assert_eq(weapons.load(DefFixture.directory().path_join("weapon.def")), OK)
 	var index := weapons.find_weapon(name)
 	assert_gte(index, 0)
 	return weapons.get_weapon(index) if index >= 0 else null

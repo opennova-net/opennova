@@ -14,9 +14,7 @@ var _root_dirs: Array[String] = []
 
 func after_each() -> void:
 	for dir in _root_dirs:
-		for entry in DirAccess.get_files_at(dir):
-			DirAccess.remove_absolute(dir.path_join(entry))
-		DirAccess.remove_absolute(dir)
+		TestFs.remove_dir_recursive(dir)
 	_root_dirs.clear()
 
 

@@ -867,7 +867,7 @@ void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) 
 		const float visibility = opennova::renderer::device_fog_visibility(view_depth,
 				fog.start, fog.end, fog.type, light->fog_enabled);
 		scene_overlay_bodies_.append(leg.slot, leg.body.model, leg.light_scale, visibility,
-				r_submission);
+				r_submission, {});
 	}
 	// The weapon Inset pass's glint: the leg's second call at the Inset camera
 	// (Celestial::get_inset_glint), the body drawn from that eye at the

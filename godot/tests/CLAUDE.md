@@ -7,6 +7,12 @@
   Headless runs never attach an ImGui context: `DevTools.is_available()` is false
   there while its open state (F3, capture, input policy) still works and is tested.
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
+- `--suite core` unsets the retail roots; `--suite retail` requires both roots
+  and rejects skipped compatibility tests. The default `--suite all` allows
+  explicit missing-data skips. Retail scripts live under `tests/retail/`;
+  its `windowed/` scripts run only with `--suite retail --windowed`.
+  The runner snapshots selected scripts/methods and checks the JUnit report
+  for missing coverage. See `docs/asset-gated-tests.md` for migration records.
 - No probes live here. Runtime probes are `game_probe` tools under `godot/probes/`
   (`docs/mcp.md`, ADR 0041): registered in `ProbeDef.definitions()`
   (`godot/game/probe/`), driven through the game's MCP endpoint with typed

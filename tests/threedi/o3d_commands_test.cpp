@@ -5,13 +5,13 @@
 // while the CMDL and section bounds stay put, so only the check under test
 // can catch it.
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -20,6 +20,7 @@
 #include <formats/threedi/threedi_3di3.h>
 
 #include "../../apps/threedi_cli/threedi_cli.h"
+#include "../common/file_io.h"
 
 using namespace opennova::threedi;
 
@@ -80,11 +81,6 @@ const std::string rich =
 		"cvolume 1 0 4 4 0 5 5 1\ncp 1 0 0 -5\ncp -1 0 0 4\ncp 0 1 0 -5\ncp 0 -1 0 4\ncp 0 0 1 -1\ncp 0 0 -1 0\n"
 		"cobj 0 1 0 1\ncv 1 0 1\ncv 2 0 1\ncv 1 1 1\ncf 0 1 2\n";
 
-std::vector<uint8_t> slurp(const std::string &path) {
-	std::ifstream in(path, std::ios::binary);
-	return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-}
-
 const ThreediChunk *find_chunk(const ThreediChunk *c, const char *tag) {
 	if (c == nullptr) return nullptr;
 	if (std::string(c->id) == tag && !c->is_parent) return c;
@@ -98,7 +94,7 @@ const ThreediChunk *find_chunk(const ThreediChunk *c, const char *tag) {
 // records): a hand edit of stored bytes the scene text does not carry.
 bool patch(const std::string &from, const std::string &to, const char *tag,
 		const std::function<void(uint8_t *payload)> &edit) {
-	std::vector<uint8_t> bytes = slurp(from);
+	std::vector<uint8_t> bytes = test_io::read_file(from);
 	ThreediFile file{};
 	if (bytes.empty() || threedi_read_memory(bytes.data(), bytes.size(), &file) != 0) return false;
 	const ThreediChunk *chunk = find_chunk(file.root, tag);
@@ -189,6 +185,53 @@ int main(int argc, char **argv) {
 	const auto occ_a = build("occlusion", plain + occlusion);
 	const auto occ_b = build("occlusion-reversed", plain + replace(occlusion, "of 0 1 2", "of 0 2 1"));
 	check(threedi_cli::cmd_compare(occ_a.c_str(), occ_b.c_str()) == 1, "reversed occlusion faces");
+	// A record's sphere as a retail file stores it, its centre mirrored
+	// across y from the vertices' (1/3, 1/3, 0): scene writes it back only
+	// then, and build keeps it, so the model rebuilds byte for byte.
+	{
+		const auto mirrored = build("occlusion-mirrored",
+				plain + replace(occlusion, "occ 0 0 0\n", "occ 0 0 0 0.333333343 -0.333333343 0 0.745355988\n"));
+		check(threedi_cli::cmd_compare(occ_a.c_str(), mirrored.c_str()) == 1, "a mirrored occlusion centre differs");
+		Threedi3di3 x{}, y{};
+		if (threedi_3di3_read(occ_a.c_str(), &x) == 0 && threedi_3di3_read(mirrored.c_str(), &y) == 0 &&
+				x.occlusion_object_count == 1 && y.occlusion_object_count == 1) {
+			// Model axes (-y, z, x): the derived centre (-1/3, 0, 1/3), the
+			// stored one (1/3, 0, 1/3); the radius the same.
+			check(std::fabs(x.occlusion_objects[0].position[0] + 1.0f / 3.0f) < 1e-6f &&
+							std::fabs(y.occlusion_objects[0].position[0] - 1.0f / 3.0f) < 1e-6f &&
+							x.occlusion_objects[0].radius == y.occlusion_objects[0].radius,
+					"an occ sphere is stored as given");
+		} else {
+			check(false, "read back the occlusion spheres");
+		}
+		threedi_3di3_free(&x);
+		threedi_3di3_free(&y);
+		for (const auto &path : {occ_a, mirrored}) {
+			const auto text = path + ".rt.o3d", again = path + ".rt.3di";
+			check(threedi_cli::cmd_scene(path.c_str(), text.c_str()) == 0 &&
+							threedi_cli::cmd_build(text.c_str(), again.c_str()) == 0 &&
+							test_io::read_file(path) == test_io::read_file(again),
+					"an occlusion sphere rebuilds byte for byte");
+			const std::string rt = test_io::read_file_text(text);
+			check((rt.find("occ 0 0 0  #") != std::string::npos) == (path == occ_a),
+					"scene writes an occ sphere only where it is not the derived one");
+		}
+	}
+
+	// A PANM table no row of which animates is never read (the loader keeps
+	// no table), so its row count does not matter; with a track it does.
+	{
+		const std::string two = plain + "part 0 0 0 1\npanm 0 0\n";
+		const auto one_row = build("panm-one-row", two);
+		const auto two_rows = build("panm-two-rows", two + "panm 1 0\n");
+		check(threedi_cli::cmd_compare(one_row.c_str(), two_rows.c_str()) == 0, "static PANM tables of any length");
+		const std::string turning = "register DOOR_00\n";
+		const auto animated_one = build("panm-animated-one-row",
+				replace(two, "model FACES\n", "model FACES\n" + turning) + "track roty 113 DOOR_00 0 0 90\n");
+		const auto animated_two = build("panm-animated-two-rows",
+				replace(two, "model FACES\n", "model FACES\n" + turning) + "track roty 113 DOOR_00 0 0 90\npanm 1 0\n");
+		check(threedi_cli::cmd_compare(animated_one.c_str(), animated_two.c_str()) == 1, "an animated PANM table's rows");
+	}
 
 	// Every check of compare, one field at a time against the rich model.
 	const auto rich_a = build("rich", rich);

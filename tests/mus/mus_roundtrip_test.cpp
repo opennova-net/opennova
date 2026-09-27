@@ -105,7 +105,8 @@ static int test_roundtrip_jo_gamemus(void) {
     return roundtrip(g_retail_gamemus.c_str());
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     RUN_TEST(test_roundtrip_synth_gamemus);
     RUN_TEST(test_roundtrip_synth_menumus);
 

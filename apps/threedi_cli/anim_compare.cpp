@@ -1,6 +1,7 @@
 // opennova-3di anim compare: whether two clip sets hold the same animation.
 // It compares what the runtime reads — the table's rows and rings (a variant
-// whose clip does not load is a difference), each clip's header, its bones'
+// whose clip does not load is a difference; a row whose key names no anim slot
+// registers nothing, so it is not compared), each clip's header, its bones'
 // names and parents, the bone table's bind rotation and every channel key as a
 // ROTATION (q and -q are one rotation, and retail stores both), the key
 // durations, the translations and the events — and ignores what it does not:
@@ -106,13 +107,17 @@ void compare_clip(const AnimLoadedClip &ea, const AnimLoadedClip &eb, Report &r)
 				static_cast<unsigned>(b.flags));
 		r.differ(at + words);
 	}
-	if (a.bone_count != b.bone_count) {
+	// A bone count that differs is one difference, and the bones both clips
+	// hold still compare: retail sets carry dead extra channels (16 of 54
+	// shipped pairs a scene can round trip hold one more bone than their
+	// reset), and stopping there would hide every other difference.
+	const size_t common = std::min(a.num_bones, b.num_bones);
+	if (a.bone_count != b.bone_count)
 		r.differ(at + ": " + std::to_string(a.bone_count) + " bones vs " +
-				std::to_string(b.bone_count));
-		return;
-	}
+				std::to_string(b.bone_count) + " (the first " + std::to_string(common) +
+				" compare)");
 
-	for (size_t i = 0; i < a.num_bones; ++i) {
+	for (size_t i = 0; i < common; ++i) {
 		const std::string bone_at = at + " bone " + std::to_string(i);
 		if (!opennova::strutil::iequals(a.bones[i].name, b.bones[i].name))
 			r.differ(bone_at + ": named '" + a.bones[i].name + "' vs '" + b.bones[i].name + "'");
@@ -145,25 +150,31 @@ void compare_clip(const AnimLoadedClip &ea, const AnimLoadedClip &eb, Report &r)
 		}
 	}
 
-	if (a.num_translations != b.num_translations) {
-		r.differ(at + ": " + std::to_string(a.num_translations) + " translations vs " +
-				std::to_string(b.num_translations));
+	// The translation block holds a row per frame of every bone, so the common
+	// bones compare row by row.
+	const size_t rows_a = a.num_bones != 0 ? a.num_translations / a.num_bones : 0;
+	const size_t rows_b = b.num_bones != 0 ? b.num_translations / b.num_bones : 0;
+	if (rows_a != rows_b) {
+		r.differ(at + ": " + std::to_string(rows_a) + " translation rows vs " +
+				std::to_string(rows_b));
 	} else {
-		for (size_t t = 0; t < a.num_translations; ++t) {
-			const double gap = vector_gap(a.translations[t], b.translations[t], 3);
-			note_worst(r.worst_vector, gap);
-			if (beyond(gap, kVectorTolerance))
-				r.differ(at + ": translation " + std::to_string(t) + " is " +
-						std::to_string(gap) + " m apart");
+		for (size_t row = 0; row < rows_a; ++row) {
+			for (size_t i = 0; i < common; ++i) {
+				const double gap = vector_gap(a.translations[row * a.num_bones + i],
+						b.translations[row * b.num_bones + i], 3);
+				note_worst(r.worst_vector, gap);
+				if (beyond(gap, kVectorTolerance))
+					r.differ(at + " bone " + std::to_string(i) + ": translation row " +
+							std::to_string(row) + " is " + std::to_string(gap) + " m apart");
+			}
 		}
 	}
 
-	if (a.num_events != b.num_events) {
+	if (a.num_events != b.num_events)
 		r.differ(at + ": " + std::to_string(a.num_events) + " events vs " +
-				std::to_string(b.num_events));
-		return;
-	}
-	for (size_t e = 0; e < a.num_events; ++e) {
+				std::to_string(b.num_events) + " (the first " +
+				std::to_string(std::min(a.num_events, b.num_events)) + " compare)");
+	for (size_t e = 0; e < std::min(a.num_events, b.num_events); ++e) {
 		const std::string event_at = at + " event " + std::to_string(e);
 		const double gap = vector_gap(a.events[e].velocity, b.events[e].velocity, 3);
 		note_worst(r.worst_vector, gap);
@@ -184,6 +195,17 @@ void compare_clip(const AnimLoadedClip &ea, const AnimLoadedClip &eb, Report &r)
 		}
 	}
 }
+
+} // namespace
+
+std::vector<std::string> anim_compare_clips(const AnimLoadedClip &expected,
+		const AnimLoadedClip &actual) {
+	Report r;
+	compare_clip(expected, actual, r);
+	return r.differences;
+}
+
+namespace {
 
 const AnimLoadedClip *find_clip(const AnimLoadedSet &set, const std::string &name) {
 	for (const AnimLoadedClip &clip : set.clips)

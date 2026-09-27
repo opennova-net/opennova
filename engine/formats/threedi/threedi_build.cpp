@@ -124,6 +124,40 @@ void threedi_build_part_sphere(const std::vector<const ThreediVertex *> &vertice
 	radius = static_cast<float>(std::sqrt(far2));
 }
 
+void threedi_build_occ_sphere(const ThreediOcclusionVertex *vertices, size_t count, float center[3], float &radius) {
+	// The record's centre and radius as the OED exporter takes a mesh's, in
+	// mission axes: the vertex sum in double over the count, stored as a
+	// float, and the farthest vertex from it in float [5fc5b4f6a^:engine/
+	// formats/oed/convert_internal.cpp, the collision/occlusion centre;
+	// export_3di.cpp append_occlusion writes it through the vertices' axis
+	// map]. With no vertex the division is 0/0, the x86 default NaN (sign
+	// set): retail ChmLFP1's vertexless window stores (+nan, -nan, -nan) in
+	// model axes, that NaN through the mission -> model map.
+	double sum[3] = {0.0, 0.0, 0.0};
+	std::vector<std::array<float, 3>> mission;
+	for (size_t i = 0; i < count; ++i) {
+		const float *q = vertices[i].position;
+		const ThreediBuildVec3 p = threedi_build_to_mission(ThreediBuildVec3{q[0], q[1], q[2]});
+		mission.push_back({static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)});
+		sum[0] += p.x;
+		sum[1] += p.y;
+		sum[2] += p.z;
+	}
+	float mid[3];
+	for (int k = 0; k < 3; ++k)
+		mid[k] = mission.empty() ? -std::numeric_limits<float>::quiet_NaN()
+				: static_cast<float>(sum[k] / static_cast<double>(mission.size()));
+	radius = 0.0f;
+	for (const std::array<float, 3> &p : mission) {
+		const float dx = p[0] - mid[0], dy = p[1] - mid[1], dz = p[2] - mid[2];
+		radius = std::max(radius, std::sqrt(dx * dx + dy * dy + dz * dz));
+	}
+	const ThreediBuildVec3 c = threedi_build_to_model(ThreediBuildVec3{mid[0], mid[1], mid[2]});
+	center[0] = static_cast<float>(c.x);
+	center[1] = static_cast<float>(c.y);
+	center[2] = static_cast<float>(c.z);
+}
+
 float threedi_build_light_cone_cos(float falloff) { return std::cos(falloff * kDegreeToRadian); }
 
 ThreediPartAnimation threedi_build_inert_panm(int part, int parent) {
@@ -331,40 +365,18 @@ std::vector<std::array<float, 3>> float_points(const std::vector<ThreediBuildVec
 }
 
 void finish_occlusion_record(std::vector<ThreediBuildOcclusionRecord> &occlusion, ThreediBuildOcclusionRecord &rec,
-		uint8_t type, int section_a, int section_b) {
+		uint8_t type, int section_a, int section_b, const ThreediBuildOccSphere *sphere) {
 	rec.object.type = type;
 	rec.object.parent_subobject_index = static_cast<uint8_t>(section_a);
 	rec.object.connecting_subobject = static_cast<uint8_t>(section_b);
-	// The record's centre and radius as the OED exporter takes a mesh's, in
-	// mission axes: the vertex sum in double over the count, stored as a
-	// float, and the farthest vertex from it in float [5fc5b4f6a^:engine/
-	// formats/oed/convert_internal.cpp, the collision/occlusion centre].
-	// With no vertex the division is 0/0, the x86 default NaN (sign set):
-	// retail ChmLFP1's vertexless window stores (+nan, -nan, -nan) in model
-	// axes, that NaN through the mission -> model map.
-	double sum[3] = {0.0, 0.0, 0.0};
-	std::vector<std::array<float, 3>> mission;
-	for (const ThreediOcclusionVertex &v : rec.vertices) {
-		const ThreediBuildVec3 p = threedi_build_to_mission(ThreediBuildVec3{v.position[0], v.position[1], v.position[2]});
-		mission.push_back({static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)});
-		sum[0] += p.x;
-		sum[1] += p.y;
-		sum[2] += p.z;
+	threedi_build_occ_sphere(rec.vertices.data(), rec.vertices.size(), rec.object.position, rec.object.radius);
+	if (sphere != nullptr) {
+		const ThreediBuildVec3 c = threedi_build_to_model(sphere->centre);
+		rec.object.position[0] = static_cast<float>(c.x);
+		rec.object.position[1] = static_cast<float>(c.y);
+		rec.object.position[2] = static_cast<float>(c.z);
+		rec.object.radius = static_cast<float>(sphere->radius);
 	}
-	float center[3];
-	for (int k = 0; k < 3; ++k)
-		center[k] = mission.empty() ? -std::numeric_limits<float>::quiet_NaN()
-				: static_cast<float>(sum[k] / static_cast<double>(mission.size()));
-	float radius = 0.0f;
-	for (const std::array<float, 3> &p : mission) {
-		const float dx = p[0] - center[0], dy = p[1] - center[1], dz = p[2] - center[2];
-		radius = std::max(radius, std::sqrt(dx * dx + dy * dy + dz * dz));
-	}
-	const ThreediBuildVec3 c = threedi_build_to_model(ThreediBuildVec3{center[0], center[1], center[2]});
-	rec.object.position[0] = static_cast<float>(c.x);
-	rec.object.position[1] = static_cast<float>(c.y);
-	rec.object.position[2] = static_cast<float>(c.z);
-	rec.object.radius = radius;
 	rec.object.num_vertices = static_cast<int32_t>(rec.vertices.size());
 	rec.object.num_planes = static_cast<int32_t>(rec.planes.size());
 	rec.object.face_count = static_cast<int32_t>(rec.faces.size());
@@ -1269,7 +1281,7 @@ uint16_t ThreediBuildModel::add_collision_vertex(int cobj, ThreediBuildVec3 p) {
 
 bool ThreediBuildModel::add_occ_record(uint8_t type, int section_a, int section_b,
 		const std::vector<ThreediBuildVec3> &verts, const std::vector<std::array<int, 4>> &faces,
-		const std::vector<std::array<double, 4>> &explicit_planes) {
+		const std::vector<std::array<double, 4>> &explicit_planes, const ThreediBuildOccSphere *sphere) {
 	ThreediBuildOcclusionRecord rec;
 	for (const ThreediBuildVec3 &v : verts) rec.vertices.push_back(occ_vertex(v));
 	std::vector<int> face_plane(faces.size(), 0);
@@ -1297,7 +1309,7 @@ bool ThreediBuildModel::add_occ_record(uint8_t type, int section_a, int section_
 	}
 	for (size_t f = 0; f < faces.size(); ++f)
 		rec.faces.push_back(occ_face(faces[f][0], faces[f][1], faces[f][2], face_plane[f]));
-	finish_occlusion_record(occlusion, rec, type, section_a, section_b);
+	finish_occlusion_record(occlusion, rec, type, section_a, section_b, sphere);
 	return true;
 }
 

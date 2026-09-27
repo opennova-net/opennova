@@ -894,7 +894,8 @@ bool test_tile_set_levels_are_the_dxt5_decode() {
 			"the composer no longer samples the raw TGA texels");
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	if (!test_tile_set_levels_are_the_dxt5_decode()) return 1;
 	if (!test_level_density()) return 1;
 	if (!test_flat_page_source_and_overlay_gate()) return 1;

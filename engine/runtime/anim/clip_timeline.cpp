@@ -53,6 +53,12 @@ float ClipTimeline::normalized_at(int32_t ticks, int32_t armed_boundary) const {
 	return normalized_at(ticks);
 }
 
+bool ClipTimeline::wrapped_at(int32_t ticks) const {
+	if (!loop_ || delta_ <= 0.0f || ticks <= 0) return false;
+	float time = normalized_at(ticks - 1);
+	return step(time);
+}
+
 double ClipTimeline::frame_at(int32_t ticks) const {
 	return double(normalized_at(ticks)) * frames_;
 }

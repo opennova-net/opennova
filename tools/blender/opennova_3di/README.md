@@ -152,13 +152,19 @@ root and its name must give its part (`_05 hit`). Other helpers:
   parts often do), its first vertex is the point the part's bounds sit on,
   and in the collision LOD the section's one collision vertex, as the retail
   tool seeded such parts. Import makes one for every such part.
-- `_attach` (an Empty): in the collision LOD, the attach point the game stores
-  for its part's section (CXLT; a palm's broken pieces pivot on them). With
-  any in that LOD, export writes an attach point for every section after the
-  root (every section on a skinned model), at the section's `_attach` or, where
-  it has none, at its pivot; without any, the builder puts each at its
-  section's pivot, so the few retail models that store none (Chair03X) come
-  back with them, and import says so.
+- `_attach` (an Empty): in the collision LOD, an attach point the game stores
+  (CXLT; a palm's broken pieces pivot on them). With any in that LOD, export
+  writes an attach point for every section after the root (every section on
+  a skinned model), at the section's `_attach` or, where it has none, at its
+  pivot; without any, the builder puts each at its section's pivot. A retail
+  table that is not one per part (none at all in Chair03X, a row for the root
+  too in the first-person guns) imports with the model's **Attach points** set
+  to the attach helpers: then each `_attach` is a row, in export order.
+- `_sphere` (an Empty, drawn as a sphere): on an occlusion mesh, the record's
+  sphere when it is not the one the mesh's vertices give (its origin the
+  centre, its display size times its scale the radius). Import makes one only
+  for the 206 retail models that store each occlusion centre mirrored across
+  the model's y.
 
 The root part's pivot is the model origin. A part numbered before its parent
 exports with a note (the game reads that parent before posing it; Number
@@ -231,7 +237,8 @@ Principled BSDF:
   flip (Separate Color, 1 minus Green, Combine Color) it is a green-down file,
   written as it is. The node's strength, a Bump node and object or world space
   do not reach the game.
-- **Backface Culling** off is two-sided, for drawing and for the bullet faces.
+- **Backface Culling** off is two-sided, for drawing and, unless the material's
+  Both sides setting says otherwise, for the bullet faces.
 - **Alpha**: a Math node, Greater Than (Less Than for the inverted test)
   against a constant threshold, on the Principled Alpha is the alpha test at
   that threshold, Blender's own alpha clip.
@@ -250,7 +257,9 @@ shaders are glass, `*_LUM` shaders emissive, blending shaders draw in the alpha
 pass, and a bump shader gets tangents derived from the render UV map, so its
 meshes need one with area. **Export order** is the material's index in the
 model (import sets it; -1 sorts a material after the ordered ones, by first
-use). The name is free.
+use). A material in a mesh's slots that no face draws with exports only with
+an Export order: 208 JO models keep such materials, and import puts them in
+the slots of the model's first mesh. The name is free.
 
 An image loaded unchanged from a texture file the game reads (`.tga`, `.dds`,
 `.mdt`, `.pcx`) is that file: its row names it the way the game finds it
@@ -273,7 +282,9 @@ height-map normal texture, a file Blender cannot open. A slot it lists is taken
 from it, not from the nodes. A row's file name is printable ASCII, at most 16
 characters, without a folder; **Write** writes its image under that name,
 which must then be `<stem>.tga` or `<stem>.mdt` in at most 15 characters. A
-material holds at most 24 rows.
+row may also name no file, as 63 rows of the JO models do (`M24_1st`'s lens
+keeps an empty slot 2 row): it exports as it is, with a warning when its
+shader samples that slot. A material holds at most 24 rows.
 
 Import lays a material out the same way: a slot's lone plain row becomes its
 image node (a tangent-space shader's `.mdt` behind a green flip into a Normal
@@ -301,7 +312,7 @@ Culling, the Math node, the render method and Emission.
   or translation, driven by an engine register such as `HELO_ROTOR` or by a
   spin or wave), and in a closed "Stored as" panel its raw PANM flags word and
   stored Parent. On any other object of a model: the part it sits on, and on a
-  user point, light or occlusion mesh its export order.
+  user point, light, occlusion mesh or attach helper its export order.
 - **Bone properties** on a `BN##` bone: its part number, Hit sphere (a skinned
   model's) and part animation, as on a `PN##` part, plus the track frame.
 - **Light properties** on an `LP` light: the colour generator (style, rate,
@@ -312,10 +323,10 @@ Culling, the Math node, the render method and Emission.
 - **Material properties**: the shader (with what it implies) and export
   order, what Blender's settings give (two-sided, the alpha test, the alpha
   pass, the glow), the bullet faces' surface type (metal 14, glass 15, ...)
-  and flags (bullets pass, front only: a bullet from behind passes), the other
-  flag bits, the reflection colour, the texture rows the nodes cannot give, and
-  the RGB / alpha / UV generators and texture flipbook. A register-driven
-  flipbook selects its register by name.
+  and flags (both sides, bullets pass, front only: a bullet from behind
+  passes), the other flag bits, the reflection colour, the texture rows the
+  nodes cannot give, and the RGB / alpha / UV generators and texture
+  flipbook. A register-driven flipbook selects its register by name.
 
 ## Animations
 

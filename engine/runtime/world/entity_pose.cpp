@@ -42,7 +42,6 @@ namespace {
 //  world-wac-ai-re.md §14.1.5]
 constexpr int kRightHandBoneIndex = 16;
 
-constexpr double kBamToRadians = 6.28318530717958647692 / 4294967296.0;
 constexpr double kHalfPi = 1.57079632679489661923;
 
 anim::Quat quat_axis_x(double angle) {
@@ -70,11 +69,11 @@ anim::Quat quat_axis_z(double angle) {
 // node frame apply_aim_overlay expects.
 anim::Quat overlay_model_quat(const anim::AimOverlayAngles &angles) {
 	const anim::Quat yaw =
-			quat_axis_y(static_cast<double>(angles.yaw) * kBamToRadians);
+			quat_axis_y(static_cast<double>(angles.yaw) * io::kRadiansPerBam);
 	const anim::Quat pitch =
-			quat_axis_z(static_cast<double>(angles.pitch) * kBamToRadians);
+			quat_axis_z(static_cast<double>(angles.pitch) * io::kRadiansPerBam);
 	const anim::Quat roll =
-			quat_axis_x(static_cast<double>(angles.roll) * kBamToRadians);
+			quat_axis_x(static_cast<double>(angles.roll) * io::kRadiansPerBam);
 	const anim::Quat fwd = quat_axis_y(kHalfPi);
 	return anim::quat_mul(anim::quat_mul(anim::quat_mul(yaw, pitch), roll), fwd);
 }

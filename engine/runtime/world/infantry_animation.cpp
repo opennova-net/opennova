@@ -40,8 +40,12 @@ void blend_root_frame(const RootMotionFrame &previous, const RootMotionFrame &cu
 
 // Reconcile the requested id before checking the OLD channel's end flag.
 // Promoting a pending request does not re-enter initialization in this call.
-// [orig: AnimMap_UpdateEntity @0x40B630..0x40B7C9]
-static void prepare_primary_channel(InfantryState &inf, const IRootMotionSource *source,
+// Returns whether the channel is still armed for this tick's advance: a
+// pending request arms it, and the arm outlives the promotion until the next
+// re-init clears the channel's flags. [orig: AnimMap_UpdateEntity
+// @0x40B630..0x40B7C9, the arm @0x40B780..0x40B7E1; AnimChannel_InitFromData
+// keeps only the clip's own flag word @0x410580]
+static bool prepare_primary_channel(InfantryState &inf, const IRootMotionSource *source,
                                     AnimVariantRings *rings) {
     if (inf.anim_playing_state < 0) inf.anim_playing_state = inf.anim_state;
     if (inf.anim_state != inf.body_clip_state())
@@ -52,8 +56,10 @@ static void prepare_primary_channel(InfantryState &inf, const IRootMotionSource 
         if (length >= 0 && inf.clip_phase >= length) {
             inf.anim_state = inf.anim_pending;
             inf.anim_pending = 0;
+            return true;
         }
     }
+    return inf.anim_pending != 0;
 }
 
 bool reset_capsule_bottom_state(int state) {
@@ -62,7 +68,7 @@ bool reset_capsule_bottom_state(int state) {
 
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
                              AnimVariantRings &rings, RootMotionFrame &out) {
-    prepare_primary_channel(inf, &source, &rings);
+    const bool armed = prepare_primary_channel(inf, &source, &rings);
     out = RootMotionFrame{};
 
     if (!primary_blend_active(inf)) {
@@ -70,11 +76,37 @@ bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
         // clip's first end, clip_length_ticks -- the step-3b clock) samples the
         // parked clip end, not the wrapped start
         // [orig: AnimChannel_AdvancePlayback @0x40B193..0x40B1B1].
+        const int state = inf.body_clip_state();
+        const int32_t variant = inf.anim_variant;
         const int32_t armed_boundary = inf.anim_pending != 0
-                ? source.clip_length_ticks(inf.adm_id, inf.body_clip_state(), inf.anim_variant)
+                ? source.clip_length_ticks(inf.adm_id, state, variant)
                 : -1;
-        return source.advance_armed(inf.adm_id, inf.body_clip_state(), inf.anim_variant,
-                                    inf.clip_phase, armed_boundary, out);
+        const bool have = source.advance_armed(inf.adm_id, state, variant,
+                                               inf.clip_phase, armed_boundary, out);
+        // An unarmed loop that wraps serves its playing state's ring: another
+        // entry fades in from its first frame over eight ticks, the same entry
+        // plays on. An armed channel parks instead and never serves.
+        // [orig: AnimChannel_AdvancePlayback @0x40B140 — the park @0x40B19E, the
+        //  gate @0x40B1B5..0x40B1C1, the callback @0x40B1C8 ->
+        //  AnimMap_AdvanceToNextAnim @0x40BDF0: the serve @0x40BE02..0x40BE07,
+        //  the latch compare @0x40BE09..0x40BE0C, the fade @0x40BE24]
+        if (have && !armed && source.clip_wraps_at(inf.adm_id, state, variant, inf.clip_phase)) {
+            const int32_t served = rings.serve(&source, inf.adm_id, state);
+            if (served != variant) {
+                inf.begin_body_wrap_fade(served, inf.clip_phase);
+                // The wrap tick already reads both halves at weight 0: the
+                // wrapped entry's motion and extents, the incoming entry's
+                // trigger word at t = 0. Re-read them from copies of the two
+                // playheads one step back. [orig: AnimMap_UpdateEntity
+                //  @0x40B812..0x40B81D -> AnimChannel_BlendKeyframes @0x40B340,
+                //  the trigger from the incoming half @0x40B38D]
+                int32_t outgoing_phase = inf.anim_prev_clip_phase - 1;
+                int32_t incoming_phase = -1;
+                source.advance_blended(inf.adm_id, state, variant, outgoing_phase,
+                                       state, served, incoming_phase, inf.anim_blend_weight, out);
+            }
+        }
+        return have;
     }
 
     inf.anim_blend_weight += inf.anim_blend_step;

@@ -609,12 +609,6 @@ float obj_pow16(float value) {
 	return p8 * p8;
 }
 
-float obj_pow64(float value) {
-	float p16 = obj_pow16(value);
-	float p32 = p16 * p16;
-	return p32 * p32;
-}
-
 vec3 obj_phong_point_one(vec3 base_rgb, float specular_brightness,
 		vec3 normal_ws, vec3 view_dir, vec4 posr, vec4 col, float vertex_factor) {
 	if (vertex_factor <= 0.0) {

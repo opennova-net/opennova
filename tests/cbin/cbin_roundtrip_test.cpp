@@ -104,7 +104,8 @@ int check_list(const char *label, const std::string &path, const Expect &expect)
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     int failures = 0;
     const std::string synth = std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/cbin/";
     failures += check_list("synthetic JO nlist", synth + "synth_nlist.kda", {true, 0.5f, 14, 400, false, 0, 0});

@@ -93,7 +93,7 @@ void squib_event(World &world, Entity &entity, int phase) {
                 int32_t(int64_t(direction.y)*65536/distance),
                 int32_t(int64_t(direction.z)*65536/distance)};
         heading = int32_t(std::atan2(double(direction.y), double(direction.x)) *
-                detail::kBamPerRadian);
+                io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
         if (direction.x > 0) first = rotation(0,-1073741760);
         else {
             heading = io::bam_add(heading,2147483520);

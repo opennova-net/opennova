@@ -68,11 +68,11 @@ void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
     const int32_t lx = static_cast<int32_t>((ny * s + nx * c + 0x200000) >> 22);
     const int32_t ly = static_cast<int32_t>((ny * c + nx * -s + 0x200000) >> 22);
     const int32_t lz = normal_q16[2];
-    constexpr double kNegBamPerRad = -683565275.5764316; // dbl_7C57B8
+    // Both legs scale by dbl_7C57B8 = -kBamPerRad.
     const int32_t roll_leg = static_cast<int32_t>(
-            std::atan2(static_cast<double>(lz), static_cast<double>(lx)) * kNegBamPerRad);
+            std::atan2(static_cast<double>(lz), static_cast<double>(lx)) * -kBamPerRad);
     const int32_t pitch_leg = static_cast<int32_t>(
-            std::atan2(static_cast<double>(lz), static_cast<double>(ly)) * kNegBamPerRad);
+            std::atan2(static_cast<double>(lz), static_cast<double>(ly)) * -kBamPerRad);
     roll_bam = static_cast<int32_t>(static_cast<uint32_t>(roll_bias_bam) -
                                     static_cast<uint32_t>(roll_leg) - 0x40000000u);
     pitch_bam = static_cast<int32_t>(static_cast<uint32_t>(pitch_bias_bam) -

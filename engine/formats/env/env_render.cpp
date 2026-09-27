@@ -241,21 +241,6 @@ int lightning_flash_level(const LightningStep *sequence, int count, int tick) {
 	return -1;
 }
 
-LightningAdditives lightning_additives(const Rgb &lightning_rgb, int level) {
-	// [orig: Environment_SetLightningFlash @ 0x57d320] — lightning * level,
-	// shifted per block: sky >> 8, fog/skyfog >> 9, ground >> 10.
-	LightningAdditives out;
-	const auto scaled = [&](float channel, int shift) {
-		const int product = rgb_byte(channel) * clamp_int(level, 0, 255);
-		return byte_to_float(product >> shift);
-	};
-	out.sky = {scaled(lightning_rgb.r, 8), scaled(lightning_rgb.g, 8), scaled(lightning_rgb.b, 8)};
-	out.fog = {scaled(lightning_rgb.r, 9), scaled(lightning_rgb.g, 9), scaled(lightning_rgb.b, 9)};
-	out.skyfog = out.fog;
-	out.ground = {scaled(lightning_rgb.r, 10), scaled(lightning_rgb.g, 10), scaled(lightning_rgb.b, 10)};
-	return out;
-}
-
 LightningAdditivesPacked lightning_additives_packed(uint32_t lightning_packed, int level) {
 	// [orig: Environment_SetLightningFlash @ 0x57d320] — pmullw(bytes, level)
 	// then psrlw per slot; exact byte truncation (no rounding).
@@ -1898,19 +1883,6 @@ uint32_t terrain_color_recip_packed(int r_byte, int g_byte, int b_byte) {
 uint32_t terrain_color_recip_from_rgb(const Rgb &terrain_rgb) {
 	return terrain_color_recip_packed(rgb_byte(terrain_rgb.r),
 			rgb_byte(terrain_rgb.g), rgb_byte(terrain_rgb.b));
-}
-
-uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint) {
-	// [orig: Terrain_SampleColorMapTinted @ 0x606030] per channel
-	// min((texel * FULL) >> 7, 255); alpha passthrough.
-	uint32_t out = texel_argb & 0xFF000000u;
-	for (int shift = 0; shift <= 16; shift += 8) {
-		const uint32_t texel_c = (texel_argb >> shift) & 0xFFu;
-		const uint32_t tint_c = (full_tint >> shift) & 0xFFu;
-		const uint32_t tinted = std::min<uint32_t>((texel_c * tint_c) >> 7, 255u);
-		out |= tinted << shift;
-	}
-	return out;
 }
 
 Rgb tile_overlay_tint_factor(const TerrainTint &tint) {

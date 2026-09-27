@@ -10,7 +10,9 @@
 //   /game <code>  which game the data is from (e.g. "jo", "jodemo"); selects
 //                 the SCR decode key. Defaults to "jo" when absent.
 //   --resource-dir <absolute path>
-//                 required game-data directory for this process.
+//                 the game-data directory for this process. Without the flag
+//                 the shell boots its bundled assets/ (ADR 0048); the flag
+//                 with no value is a usage error.
 //   --loose-mission <name.bms>
 //                 boot the exact top-level loose BMS from --resource-dir.
 //   --loose-root  Loose-data runs: when the directory holds none of the packed
@@ -54,6 +56,7 @@ struct LaunchFlags {
     std::string expansion;         // /exp <name>
     std::string game;              // /game <code>, lowercased
     std::string resource_dir;      // --resource-dir <path>
+    bool resource_dir_given = false; // --resource-dir present, even without a value
     std::string loose_mission;     // --loose-mission <name.bms>
     bool loose_root = false;       // --loose-root
     std::string mission;           // --mission <name.bms>

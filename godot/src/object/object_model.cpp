@@ -1972,7 +1972,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_inset_occlusion_hidden);
 	ClassDB::bind_method(D_METHOD("set_inset_occlusion_section_mask", "raw_mask", "forced_mask"),
 			&ObjectModel::set_inset_occlusion_section_mask);
-	ClassDB::bind_method(D_METHOD("clear_inset_occlusion"), &ObjectModel::clear_inset_occlusion);
 	ClassDB::bind_method(D_METHOD("get_inset_view_lod"), &ObjectModel::get_inset_view_lod);
 	ClassDB::bind_method(D_METHOD("is_inset_view_subpixel_hidden"),
 			&ObjectModel::is_inset_view_subpixel_hidden);

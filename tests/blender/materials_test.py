@@ -340,7 +340,7 @@ def texture_entry_names_follow_the_cli():
         t.name, t.write, t.image = name, write, img
         return mat
     for name, fragment in (("ствол.tga", "not printable ASCII"), ("a_seventeen_c.tga", "exceeds 16"),
-                           ("tex/foo.tga", "holds a path"), ("", "no file name")):
+                           ("tex/foo.tga", "names a folder"), ("tex\\foo.tga", "names a folder")):
         root, _ = model("entry", entry(name))
         refused(root, fragment)
         for ob in list(bpy.data.objects):
@@ -404,6 +404,80 @@ def a_material_holds_24_rows():
     refused(root, "25 texture rows", "24")
 
 
+@case
+def a_row_that_names_no_file_round_trips():
+    # The format holds texture rows that name no file: 63 rows of the JO
+    # models are empty (M24_1st's VS_BMTXMIRRT keeps one in slot 2). Such a
+    # row exports, and imports back, as the same empty row, beside the node's
+    # image.
+    mat = textured("Lens", image("lens", (1, 1, 1, 1)))
+    mat.o3d.shader = "FF_ST_OP"
+    t = mat.o3d.textures.add()
+    t.name, t.slot, t.write = "", 2, False
+    root, _ = model("emptyrow", mat)
+    notes, sc = export_model(root)
+    assert textures(sc) == [("emptyrow_0.tga", 1, 0, 0, 0), ("", 2, 0, 0, 0)], textures(sc)
+    assert not any("names no file" in n for n in notes), notes  # FF_ST_OP samples no slot 2
+    imported, import_notes = importer.import_file(bpy.context, root.o3d.output_path)
+    assert not any("not found" in n for n in import_notes), import_notes
+    back = next(m for ob in imported.children_recursive if ob.type == "MESH" for m in ob.data.materials)
+    assert [(t.name, t.slot, t.type, t.flags, t.frame, t.image) for t in back.o3d.textures] == \
+        [("", 2, 0, 0, 0, None)], [(t.name, t.slot) for t in back.o3d.textures]
+    imported.o3d.output_path = os.path.join(OUT, "emptyrow2", "emptyrow2.3di").replace("\\", "/")
+    _, again = export_model(imported)
+    assert textures(again) == textures(sc), textures(again)
+
+
+@case
+def a_row_that_names_no_file_is_said_where_it_matters():
+    # In a slot its shader samples, an empty row loads nothing: noted. A row
+    # whose image export writes needs a name.
+    sampled = textured("Sampled", image("sampled", (1, 1, 1, 1)))
+    sampled.o3d.shader = "FF_MT_OP"
+    t = sampled.o3d.textures.add()
+    t.name, t.slot, t.write = "", 2, False
+    root, _ = model("sampledrow", sampled)
+    notes, sc = export_model(root)
+    assert ("", 2, 0, 0, 0) in textures(sc), textures(sc)
+    assert any("Sampled" in n and "slot 2" in n and "names no file" in n for n in notes), notes
+    for ob in list(bpy.data.objects):
+        bpy.data.objects.remove(ob)
+    unnamed = bpy.data.materials.new("Unnamed")
+    t = unnamed.o3d.textures.add()
+    t.name, t.image, t.write = "", image("unnamed", (1, 1, 1, 1)), True
+    root, _ = model("unnamedrow", unnamed)
+    refused(root, "Unnamed", "needs a file name")
+
+
+@case
+def a_material_no_face_draws_with_keeps_its_place():
+    # Retail models keep materials no strip draws with (OPMP01's first two):
+    # a material in a mesh's slots that no face uses exports with an Export
+    # order, which keeps the table's indices, and comes back from an import
+    # in the first mesh's slots. Without an order it is left out, as before.
+    kept = textured("Kept", image("kept", (1, 0, 0, 1)))
+    kept.o3d.shader, kept.o3d.order = "FF_ST_OP", 0
+    drawn = textured("Drawn", image("drawn", (0, 1, 0, 1)))
+    drawn.o3d.shader, drawn.o3d.order = "FF_ST_OP", 1
+    spare = textured("Spare", image("spare", (0, 0, 1, 1)))
+    root, obs = model("unused", drawn)
+    me = obs[0].data
+    me.materials.append(spare)
+    me.materials.append(kept)
+    _, sc = export_model(root)
+    assert [textures(sc, i)[0][0] for i in range(len(sc["materials"]))] == ["unused_0.tga", "unused_1.tga"], \
+        [m["textures"] for m in sc["materials"]]
+    assert {s["material"] for part in sc["lods"][0]["parts"] for s in part["strips"]} == {1}
+    assert first_pixel(root, "unused_0.tga") == (0, 0, 255, 255)  # Kept: red
+    imported, _ = importer.import_file(bpy.context, root.o3d.output_path)
+    slots = [m.o3d.order for ob in imported.children_recursive if ob.type == "MESH" for m in ob.data.materials]
+    assert sorted(slots) == [0, 1], slots
+    imported.o3d.output_path = os.path.join(OUT, "unused2", "unused2.3di").replace("\\", "/")
+    _, again = export_model(imported)
+    assert [m["textures"] for m in again["materials"]] == [m["textures"] for m in sc["materials"]]
+    assert {s["material"] for part in again["lods"][0]["parts"] for s in part["strips"]} == {1}
+
+
 # --- geom-14, geom-5: the shader and flags from Blender's settings --------------
 
 def material_record(sc, index=0):
@@ -462,7 +536,18 @@ def flags_from_blender_settings():
     assert got == [(0, 0), (4, 0), (1, 64), (3, 64)], got
     # The bullet faces' both-sides flag follows two-sided too.
     faces = [f for c in sc["cobjs"] for f in c["faces"]]
-    assert sorted(f[4] & 1 for f in faces) == [0, 0, 0, 1], faces
+    assert [f[4] & 1 for f in faces] == [0, 1, 0, 0], faces
+    # Unless Both sides says otherwise (154 retail models store faces whose
+    # flag is not their material's drawing): import sets it from the faces.
+    culled.o3d.face_both_sides, both.o3d.face_both_sides = "YES", "NO"
+    _, sc = export_model(root)
+    faces = [f for c in sc["cobjs"] for f in c["faces"]]
+    assert [f[4] & 1 for f in faces] == [1, 0, 0, 0], faces
+    assert [m["matflags"] for m in sc["materials"]][:2] == [0, 4], sc["materials"]
+    imported, _ = importer.import_file(bpy.context, root.o3d.output_path)
+    sides = {m.name.split(".")[0]: m.o3d.face_both_sides for m in {s.material for ob in imported.children_recursive
+                                                                   if ob.type == "MESH" for s in ob.material_slots}}
+    assert sorted(sides.values()) == ["DRAWN", "DRAWN", "NO", "YES"], sides
 
 
 @case

@@ -503,6 +503,27 @@ def mesh_part_holds_the_skinned_geometry():
 
 
 @case
+def skinned_strips_split_by_the_oed_palette_rule():
+    # Fifteen triangles, each wholly on a bone of its own: a table counts a
+    # triangle's missing bones corner by corner (OED's rule), so the 14-bone
+    # table takes no triangle bringing a 15th on three corners (14 + 3 > 16),
+    # though the bones alone would fit.
+    root, lod = model("palette")
+    bones = {"BN01": ((0.0, 0.0, 0.0), None)}
+    bones.update({f"BN{i:02d}": ((0.1 * i, 0.0, 0.0), "BN01") for i in range(2, 16)})
+    arm = armature("palette Rig", lod, bones)
+    me = bpy.data.meshes.new("Fifteen")
+    me.from_pydata([(0.1 * k + dx, dy, 0.0) for k in range(15) for dx, dy in ((0, 0), (0.05, 0), (0, 0.05))], [],
+                   [(3 * k, 3 * k + 1, 3 * k + 2) for k in range(15)])
+    me.uv_layers.new(name="UVMap")
+    body = link(bpy.data.objects.new("Fifteen", me), arm)
+    skin(body, arm, {3 * k + c: {f"BN{k + 1:02d}": 1.0} for k in range(15) for c in range(3)})
+    _, lines = export_model(root)
+    tables = [[int(b) for b in t] for t in records(lines, "bones")]
+    assert tables == [list(range(14)), [14]], tables
+
+
+@case
 def derived_hit_spheres_import_without_helpers():
     root, arm, body = person("derived")
     skin(body, arm, {v: {"BN02 Leg" if v < 4 else "BN03 Arm": 1.0} for v in range(8)})
@@ -560,6 +581,154 @@ def an_authored_hit_sphere_keeps_its_helpers():
     _, lines = export_model(again)
     same_spheres(one, spheres(lines))
     compare(first, export.output_path(again))
+
+
+@case
+def a_sheet_stored_in_both_windings_keeps_its_normals():
+    # A strip whose triangles come in both windings over the same vertices
+    # (retail's two-sided wire, Baricd02), their normals leaning off the
+    # faces: import puts each side on vertices of its own, so Blender holds
+    # every corner's normal and export writes the strip back.
+    folder_path = os.path.join(OUT, "twins")
+    os.makedirs(folder_path, exist_ok=True)
+    scene = os.path.join(folder_path, "twins.o3d")
+    with open(scene, "w", encoding="utf-8") as f:
+        f.write("o3d 1\nmodel TWINS\nmaterial FF_ST_OP\ntexture wire.tga\nmatflags 4\nlod 0 gnrc\npart 0 0 0 0\nstrip 0\n"
+                "v 0 0 0 0.6 0 0.8 0 0\nv 1 0 0 0 0.6 0.8 1 0\nv 0 1 0 0 0 1 0 1\nv 1 1 0.2 0.28 0.96 0 1 1\n"
+                "t 0 1 2\nt 2 1 0\nt 1 3 2\nt 2 3 1\npanm 0 0\n"
+                "cobj 0\ncv 0 0 0\ncv 1 0 0\ncv 0 1 0\ncv 1 1 0.2\ncf 0 1 2 1 1\ncf 2 1 0 1 1\ncf 1 3 2 1 1\ncf 2 3 1 1 1\n")
+    first = os.path.join(folder_path, "twins.3di")
+    subprocess.run([CLI, "build", scene, "-o", first], check=True, capture_output=True)
+    again = import_again([first])[0]
+    again.o3d.output_path = os.path.join(OUT, "twins2", "twins.3di").replace("\\", "/")
+    _, lines = export_model(again)
+    assert len(records(lines, "t")) == 4, lines
+    compare(first, export.output_path(again))
+
+
+@case
+def registers_are_declared_in_oed_order():
+    # OED collected the materials' registers, then the tracks', then the
+    # lights' (every JOTAC model that declares registers keeps that order),
+    # whatever order the records name them in.
+    root, lod = model("regs")
+    pn1 = empty("PN01", lod)
+    body = box("Body", pn1)
+    lamp_mat = bpy.data.materials.new("Lamp")
+    lamp_mat.o3d.rgb_style, lamp_mat.o3d.rgb_register = 113, "LIGHTSWITCH0"
+    body.data.materials.append(lamp_mat)
+    pn2 = empty("PN02", pn1, (0.0, 0.1, 0.0))
+    box("Door", pn2, (0.0, 0.1, 0.0), 0.03)
+    track = pn2.o3d.tracks.add()
+    track.target, track.style, track.register = "roty", 113, "DOOR_00"
+    light = link(bpy.data.objects.new("LP", bpy.data.lights.new("LP", "POINT")), pn2)
+    light.data.o3d.style, light.data.o3d.register = 113, "FLICKER"
+    _, lines = export_model(root)
+    assert records(lines, "register") == [["LIGHTSWITCH0"], ["DOOR_00"], ["FLICKER"]], records(lines, "register")
+    # light: part x y z atten_start atten_end style rate register ...
+    assert records(lines, "rgbgen")[0][1] == "0" and records(lines, "light")[0][8] == "2", lines
+
+
+@case
+def attach_helpers_make_the_tables_one_per_part_cannot():
+    root, lod = model("attach")
+    pn1 = empty("PN01", lod)
+    box("Body", pn1)
+    pn2 = empty("PN02", pn1, (0.0, 0.1, 0.0))
+    box("Lid", pn2, (0.0, 0.1, 0.0), 0.03)
+    pn3 = empty("PN03", pn1, (0.0, -0.1, 0.0))
+    box("Door", pn3, (0.0, -0.1, 0.0), 0.03)
+    # The attach helpers, in export order: two on the root (one per part
+    # stores none there) and one on part 03.
+    root.o3d.attach_points = "HELPERS"
+    for name, parent, at, order in (("_attach", pn3, (0.0, 0.0, 0.05), 0), ("_01 attach", pn1, (0.0, 0.0, 0.0), 1),
+                                    ("_attach", pn1, (0.0, 0.0, 0.2), 2)):
+        empty(name, parent, at).o3d.order = order
+    _, lines = export_model(root)
+    # Mission axes: x forward (Blender -Y), z up; CXLT truncates to 16.16.
+    rows = [[float(x) for x in r] for r in records(lines, "cxlt")]
+    step = 1.0 / 65536.0
+    assert len(rows) == 3 and abs(rows[0][0] - 0.1) < step and abs(rows[0][2] - 0.05) < step and \
+        rows[1] == [0.0, 0.0, 0.0] and abs(rows[2][2] - 0.2) < step, rows
+    first = export.output_path(root)
+    again = import_again([first])[0]
+    assert again.o3d.attach_points == "HELPERS"
+    again.o3d.output_path = os.path.join(OUT, "attach2", "attach.3di").replace("\\", "/")
+    export_model(again)
+    compare(first, export.output_path(again))
+    # No helper: an empty table, which also comes back.
+    for ob in [o for o in again.children_recursive if export.HELPER_RE.match(rig.clean_name(o.name))]:
+        bpy.data.objects.remove(ob)
+    _, lines = export_model(again)
+    assert records(lines, "cxlt") == [[]], records(lines, "cxlt")
+    empty_table = export.output_path(again)
+    back = import_again([empty_table])[0]
+    assert back.o3d.attach_points == "HELPERS"
+    back.o3d.output_path = os.path.join(OUT, "attach3", "attach.3di").replace("\\", "/")
+    export_model(back)
+    compare(empty_table, export.output_path(back))
+    # One per part takes one attach point a part.
+    back.o3d.attach_points = "PARTS"
+    pn = next(o for o in back.children_recursive if rig.clean_name(o.name) == "PN02")
+    empty("_attach", pn)
+    empty("_02 attach", pn, (0.0, 0.0, 0.1))
+    refused(back, "both the attach point of")
+    # A retail table at section offsets that are not the parts' pivots
+    # (MWalA2X pivots every part on the origin): import gives each row an
+    # Empty, since export writes a part without one at its pivot.
+    folder_path = os.path.join(OUT, "offsets")
+    os.makedirs(folder_path, exist_ok=True)
+    scene = os.path.join(folder_path, "offsets.o3d")
+    with open(scene, "w", encoding="utf-8") as f:
+        f.write("o3d 1\nmodel OFFSETS\nmaterial FF_ST_OP\ntexture wall.tga\nlod 0 bldg\n"
+                "part 0 0 0 0\nstrip 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
+                "part 0 0 0 0\nstrip 0\nv 2 0 0 0 0 1 0 0\nv 3 0 0 0 0 1 1 0\nv 2 1 0 0 0 1 0 1\nt 0 1 2\n"
+                "panm 0 0\npanm 1 0\ncobj 0\ncobj 0 2.5 0.25 0\ncxlt 2.5 0.25 0\n")
+    first = os.path.join(folder_path, "offsets.3di")
+    subprocess.run([CLI, "build", scene, "-o", first], check=True, capture_output=True)
+    offsets = import_again([first])[0]
+    offsets.o3d.output_path = os.path.join(OUT, "offsets2", "offsets.3di").replace("\\", "/")
+    _, lines = export_model(offsets)
+    assert records(lines, "cxlt") == [["2.5", "0.25", "0"]], records(lines, "cxlt")
+
+
+@case
+def an_occlusion_sphere_keeps_what_the_file_stores():
+    root, lod = model("occsphere")
+    pn1 = empty("PN01", lod)
+    box("Body", pn1)
+    box("OB-occonly", pn1, (0.5, 0.0, 0.0), 0.2)
+    _, lines = export_model(root)
+    # Without a `_sphere` the builder derives the record's sphere: none written.
+    assert records(lines, "occ") == [["0", "0", "0"]], records(lines, "occ")
+    again = import_again([export.output_path(root)])[0]
+    assert not [o for o in again.children_recursive if rig.clean_name(o.name) == "_sphere"]
+    # A retail-style record: its centre mirrored across the model's y (Blender
+    # X), the radius the box's own.
+    for ob in list(bpy.data.objects):
+        bpy.data.objects.remove(ob)
+    root, lod = model("occmirror")
+    pn1 = empty("PN01", lod)
+    box("Body", pn1)
+    occ = box("OB-occonly", pn1, (0.5, 0.0, 0.0), 0.2)
+    sphere = empty("_sphere", occ, (-1.0, 0.0, 0.0))  # world (-0.5, 0, 0)
+    sphere.empty_display_type = "SPHERE"
+    sphere.empty_display_size = 0.2 * math.sqrt(3.0)
+    _, lines = export_model(root)
+    (occ_line,) = records(lines, "occ")
+    # Mission axes: y left (Blender X).
+    assert len(occ_line) == 7 and abs(float(occ_line[4]) + 0.5) < 1e-6, occ_line
+    first = export.output_path(root)
+    again = import_again([first])[0]
+    helpers = [o for o in again.children_recursive if rig.clean_name(o.name) == "_sphere"]
+    assert len(helpers) == 1 and helpers[0].parent.name.startswith("OB"), helpers
+    again.o3d.output_path = os.path.join(OUT, "occmirror2", "occmirror.3di").replace("\\", "/")
+    export_model(again)
+    compare(first, export.output_path(again))
+    # A sphere sits on an occlusion mesh.
+    stray = empty("_sphere", helpers[0].parent.parent)
+    refused(again, "_sphere", "occlusion mesh")
+    bpy.data.objects.remove(stray)
 
 
 @case

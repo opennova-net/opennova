@@ -51,8 +51,9 @@ rebuilds the *runtime* on top of those codecs as one faithful, maintainable core
 
 ## Locked decisions
 
-1. **Home:** new portable lib `engine/runtime/inmatch` (`opennova::inmatch`) + a new headless app
-   `apps/nw_server` (in-match host, separate from the matchmaking `apps/novaworld_server`).
+1. **Home:** new portable lib `engine/runtime/inmatch` (`opennova::inmatch`). The headless
+   `apps/nw_server` host it was first driven by is retired (2026-09-27): dedicated hosting is the
+   game's retail Serve Only server type (ADR 0015 serve mode).
 2. **Fidelity:** mirror function names 1:1 and field names/order with `// [orig: Name @ 0xADDR]`
    / `// [orig +0xNN]` comments, idiomatic C++ types. **Wire bytes stay byte-exact**; in-memory
    layouts do NOT reproduce padding.
@@ -291,17 +292,14 @@ world-stream spawn positions (0.87 world units, non-circular). `npruntime|netsim
 ### ✅ P6 — Real UDP transport (MP) (DONE)
 A real-UDP **owner loop** drives the runtime over sockets — "real transport" is NOT a new socket/
 protocol layer (the runtime already emits/parses fully-framed NWU/CRC/SCRK datagrams via
-`handle_server_datagram` / `frame_in_match_s2c` / `tick_connections`); it is `apps/nw_server` driving
-`apps/common/net_sockets` against those entry points at a fixed 62 Hz cadence. `UdpSessionTransport`
+`handle_server_datagram` / `frame_in_match_s2c` / `tick_connections`); it was first `apps/nw_server`
+(since retired) driving `apps/common/net_sockets` against those entry points at a fixed 62 Hz cadence. `UdpSessionTransport`
 stays an identity byte-conduit; the framing/crypto stays in `engine/net/novaworld` (the owner reframes a
 popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43` through
 `handle_server_datagram`) — the `.agents/network.md` guardrail, satisfied without changing the transport.
 
-- **`engine/runtime/inmatch/{include/npruntime/host_session.h,src/host_session.cpp}`** (shared by `main.cpp`,
-  the NovaWorld listener, and the socket tests — one wire owner loop) +
-  **`apps/nw_server/main.cpp`** (a headless **dedicated host**: `HostOnly`, with no
-  synthetic loopback player; loads a mission via `--mission`, drift-free `sleep_until` 62 Hz loop, SIGINT
-  shutdown). The per-tick body is the §5.44 recv-before-send order: recv-drain → `tick_connections`
+- **`engine/runtime/inmatch/host_session.{h,cpp}`** (shared by the game's host, the NovaWorld
+  listener, and the socket tests — one wire owner loop). The per-tick body is the §5.44 recv-before-send order: recv-drain → `tick_connections`
   (pre-spawn §5.2a bursts) → `Server_TickUpdate` (single C2S drain + logic tick + 0x0A fan) → S2C flush
   (`pop_outbound` → `frame_in_match_s2c` → `sendto`). The joiner spawn is AUTOMATIC (`tick_connections`
   → `Server_ProcessPendingPlayerSpawns` binds `owned_entity`); the owner only attaches the peer's
@@ -324,13 +322,13 @@ popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43
   owner's dead-endpoint eviction is `inmatch::destroy_connection(ctx, peer, nullptr)`, the same
   complete teardown with no goodbye burst (`napi_np_protocol.h`).
 
-Bar met: **`npruntime_two_endpoint_socket`** (always-on) — a `ClientRuntime` joiner and the
-`apps/nw_server` owner loop, each on its own bound loopback UDP socket, run a full join → spawn → play
+Bar met: **`npruntime_two_endpoint_socket`** (always-on) — a `ClientRuntime` joiner and a
+dedicated host's owner loop, each on its own bound loopback UDP socket, run a full join → spawn → play
 loop over real `sendto`/`recvfrom` (single-thread poll-pump): the joiner reaches InMatch+deployed, the
 peer SNAPs to its C2S `0x0C` over the wire, no synthetic host player exists, and the S2C `0x0A` folds
 into `ClientState`. It also asserts the host's emitted §5.2a S2C tag order and (env-gated
 `NW_GOLDEN_LAN_JOIN`, skip-clean) cross-checks it against `retail-lan-host-join.pcapng` — **passes against
-the local golden**. `apps/nw_server` live-hosts a real 1333-entity JO mission at 62 Hz. `npruntime|netsim|
+the local golden**. `npruntime|netsim|
 novaworld` ctest green (the 16 affected + the 41 net scope). The `0x10`/`0x0D`/`0x1A` and the unwitnessed
 §5.2a serializers stayed deferred at P6 (structural P3) — **now closed by D-NET Wave 1 (P8.2 below)**.
 The retail `0x57` RTT pong and field-3 send holdoff are **also now LANDED**: the server bounces C2S

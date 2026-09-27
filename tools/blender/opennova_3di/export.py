@@ -47,6 +47,9 @@
 #   OB##/OS##/OP##[-MM]/OH## (+ [a..], -occonly)  mesh on LOD 0: an occlusion
 #                 record in its part's section (OB occluder, OS open, OP a
 #                 window to the exterior or, with -MM, a portal to section MM).
+#   _sphere       Empty on an occlusion mesh: that record's sphere as a file
+#                 stores it (its origin the centre, its display size times its
+#                 scale the radius); without it the mesh's vertices give it.
 #   Material      any name: its Shader and Export order properties and
 #                 Blender's own settings (materials.py).
 #   !name         ignored.
@@ -72,7 +75,7 @@ from .rig import (PART_RE, WEIGHT_EPS, clean_name, descendants, ignored, is_lod_
 
 POINT_RE = re.compile(r"^UP([A-Za-z])(\d{2})?(?: (.*))?$")
 LIGHT_RE = re.compile(r"^LP(\d{2})?([a-z]*)$")
-HELPER_RE = re.compile(r"^_(?:(\d{2}) )?(center|attach|hit|bounds)$")
+HELPER_RE = re.compile(r"^_(?:(\d{2}) )?(center|attach|hit|bounds|sphere)$")
 OCCLUSION_RE = re.compile(r"-occ?only$", re.IGNORECASE)
 OCC_RE = re.compile(r"^(OB|OS|OP|OH)(\d{2})?([a-z]*)(?:-(\d{2}))?-occonly$")
 OCC_TYPES = {"OB": 0, "OS": 1, "OP": 2, "OH": 4}  # OP with -MM is a portal, type 3
@@ -90,9 +93,14 @@ UNLISTED_TYPE_CODE = "CX"
 VOLUME_RE = re.compile(r"^([A-Z]{2})([VSWLO]*)(\d{2})?([a-z]*)-colonly$")
 BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
 
+# A PANM row's tracks in their record order (rotation x, y, z, scale x, y,
+# z, translation), the order OED collected their registers in.
+TRACK_ORDER = ("rotx", "roty", "rotz", "scalex", "scaley", "scalez", "trans")
+
 # A strip holds at most 65535 indices (u16), so 21,845 triangles; export
-# starts another strip there, and a skinned one whenever its bone table would
-# pass 16 parts (the skinned palette, MAX_SKIN_MATRICES).
+# starts another strip there, and a skinned one's bone table holds at most 16
+# parts (the skinned palette, MAX_SKIN_MATRICES), filled by OED's rule
+# (skinned_strips).
 STRIP_TRIANGLES = 65535 // 3
 SKIN_TABLE = 16
 # Every first-person bone buffer is a 64-entry array: a gun of more parts
@@ -234,12 +242,13 @@ class Lod:
         self.skinned = lp.skinned  # meshes deforming with the rig
         self.meshes = {}     # part index -> [mesh]: geometry on the part
         self.centers = {}    # part index -> `_center` mesh
-        self.anchors = {}    # part index -> `_attach` empty
+        self.anchors = []    # (part index, `_attach` empty)
         self.spheres = {}    # part index -> `_hit` empty
         self.boxes = {}      # part index -> `_bounds` empty
         self.points = []     # (type letter, part index or -1, label, object)
         self.lights = []     # (part index, object)
         self.occluders = []  # (type, section, connecting, object)
+        self.occ_spheres = {}  # occlusion mesh name -> its `_sphere` empty
         self.volumes = []    # (type, flags, section, object, sort key)
 
     @property
@@ -270,6 +279,42 @@ class Exporter(Notes):
         self.notes = []
 
     # --- helpers ------------------------------------------------------------
+    def declare_registers(self, lods):
+        """The CTRL table in OED's collection order (the retired port's
+        collect_control_registers, 5fc5b4f6a^ engine/formats/oed/
+        export_3di.cpp): the materials' registers in export order, each one's
+        U, V, alpha and RGB generators above style 112 and then a register-
+        driven flipbook; then every LOD's tracks above 0x70, part by part,
+        rotations x, y, z, the scales, the translation; then LOD 0's lights.
+        Each name comes once, at its first use. Every JOTAC model whose
+        registers anything references keeps this order (256 models; 30 more
+        declare only names nothing references). Called once the materials are
+        in order; the records then take their indices from it."""
+        self.registers = []
+        for mat in self.materials.used:
+            if mat is None:
+                continue
+            p = mat.o3d
+            for style, name, what in ((p.u_style, p.u_register, "the U gen"), (p.v_style, p.v_register, "the V gen"),
+                                      (p.alpha_style, p.alpha_register, "the alpha gen"),
+                                      (p.rgb_style, p.rgb_register, "the RGB gen")):
+                if style > CTRL_REFERENCE_THRESHOLD:
+                    self.register(name, f"{mat.name}: {what}")
+            if p.anim_type == 1:
+                self.register(p.anim_register, f"{mat.name} texture flipbook")
+        for lod in lods:
+            for part in lod.parts:
+                holder = part.empty if part.empty is not None else part.bone
+                if holder is None:
+                    continue
+                what = part.name if part.empty is not None else f"{part.rig.name} bone {part.name}"
+                for t in sorted(holder.o3d.tracks, key=lambda t: TRACK_ORDER.index(t.target)):
+                    if t.style > CTRL_REFERENCE_THRESHOLD:
+                        self.register(t.register, f"{what} track {t.target}")
+        for _, ob in sorted(lods[0].lights, key=lambda e: order_key(e[1])):
+            if ob.data.o3d.style > CTRL_REFERENCE_THRESHOLD:
+                self.register(ob.data.o3d.register, f"{ob.name} colour")
+
     def register(self, name, what):
         """A CTRL register's index, declaring it on first use. An empty name is
         a register too (retail's IBlock02 declares one and drives a door by
@@ -429,7 +474,19 @@ class Exporter(Notes):
                     continue
                 m = HELPER_RE.match(raw)
                 if m and m.group(2) == "attach":
-                    once(lod.anchors, self.on_part(ob, part, m.group(1), lod), ob, "attach point")
+                    lod.anchors.append((self.on_part(ob, part, m.group(1), lod), ob))
+                    continue
+                if m and m.group(2) == "sphere":
+                    mesh = ob.parent
+                    if mesh is None or mesh.type != "MESH" or not OCCLUSION_RE.search(clean_name(mesh.name)):
+                        raise ExportError(f"{ob.name}: an occlusion sphere sits on its occlusion mesh (a -occonly "
+                                          "mesh)")
+                    if primary:
+                        self.on_part(ob, part, m.group(1), lod)
+                        if mesh.name in lod.occ_spheres:
+                            raise ExportError(f"'{lod.occ_spheres[mesh.name].name}' and '{ob.name}' are both the "
+                                              f"sphere of {mesh.name}")
+                        lod.occ_spheres[mesh.name] = ob
                     continue
                 if m and m.group(2) in ("hit", "bounds"):
                     if not lp.skinned:
@@ -547,7 +604,7 @@ class Exporter(Notes):
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals
             uv0, uv1 = self.uv_layers(mesh)
-            self.materials.record_uvs(ob, ev, mesh, uv0)
+            self.materials.record_mesh(ob, ev, mesh, uv0)
             for tri in mesh.loop_triangles:
                 mi = self.materials.index_of(slot_material(ev, tri.material_index))
                 runs = strips.setdefault(mi, [])
@@ -613,9 +670,17 @@ class Exporter(Notes):
     def skinned_strips(self, ob, strips, lod, bone=None):
         """A mesh's triangles on a skinned model, grouped per material into
         strips whose bone tables stay within SKIN_TABLE parts and whose
-        triangles within STRIP_TRIANGLES. A corner carries its rest position
-        and its influences (weights), or wholly `bone` for a mesh hung from
-        it. LOD 0's vertices bound the bones that move them (bone_points)."""
+        triangles within STRIP_TRIANGLES, by OED's palette rule (the retired
+        port's rdta.cpp, WriteRDTA_Skinned's grouping): a triangle joins the
+        first strip of its material whose table, counting each corner's
+        bones anew where the table lacks them, stays within SKIN_TABLE, and
+        else starts one; a table lists its bones in the order they come. So a
+        table of 15 bones takes no triangle bringing a 16th on more than one
+        corner: 56 retail splits (JNTOPSB2's 15 and 2 bones, CIndo01's 15 and
+        1) keep a union a plain count would have fitted in one strip. A
+        corner carries its rest position and its influences (weights), or
+        wholly `bone` for a mesh hung from it. LOD 0's vertices bound the
+        bones that move them (bone_points)."""
         ev = self.evaluated(ob)
         mesh = ev.to_mesh()
         try:
@@ -625,7 +690,7 @@ class Exporter(Notes):
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals
             uv0, uv1 = self.uv_layers(mesh)
-            self.materials.record_uvs(ob, ev, mesh, uv0)
+            self.materials.record_mesh(ob, ev, mesh, uv0)
             if bone is None:
                 influences = self.weights(ob, ev, mesh, lod)
             else:
@@ -644,17 +709,19 @@ class Exporter(Notes):
                     loop = mesh.loops[li]
                     corners.append((self.corner(mesh, loop, mw, nmat, normals, uv0, uv1),
                                     influences[loop.vertex_index]))
-                need = {b for _, infl in corners for b, _ in infl}
+                bones = [b for _, infl in corners for b, _ in infl]
                 runs = strips.setdefault(mi, [])
-                s = runs[-1] if runs else None
-                if s is None or len(set(s["table"]) | need) > SKIN_TABLE or len(s["tris"]) >= STRIP_TRIANGLES:
+                s = next((run for run in runs if len(run["tris"]) < STRIP_TRIANGLES and
+                          len(run["table"]) + sum(1 for b in bones if b not in run["slots"]) <= SKIN_TABLE), None)
+                if s is None:
                     s = new_strip(ob)
                     runs.append(s)
                 if s["meshes"][-1] != ob.name:
                     s["meshes"].append(ob.name)
-                for b in sorted(need - set(s["table"])):
-                    s["slots"][b] = len(s["table"])
-                    s["table"].append(b)
+                for b in bones:
+                    if b not in s["slots"]:
+                        s["slots"][b] = len(s["table"])
+                        s["table"].append(b)
                 ids = []
                 for vert, infl in corners:
                     slots = [s["slots"][b] for b, _ in infl]
@@ -813,7 +880,14 @@ class Exporter(Notes):
             try:
                 if len(mesh.vertices) > 128:
                     raise ExportError(f"{ob.name}: an occlusion mesh holds at most 128 vertices")
-                lines.append(f"occ {kind} {section} {connecting}  # {ob.name}")
+                # The record's sphere: its `_sphere` empty's, else the builder
+                # derives it from the vertices (docs/threedi/o3d-scene-format.md).
+                sphere = lod.occ_spheres.get(ob.name)
+                given = ""
+                if sphere is not None:
+                    centre, radius = self.hit_sphere(sphere)
+                    given = " " + fmt(*centre, radius)
+                lines.append(f"occ {kind} {section} {connecting}{given}  # {ob.name}")
                 mw = self.world(ob)
                 mirrored = mw.to_3x3().determinant() < 0
                 for v in mesh.vertices:
@@ -998,24 +1072,44 @@ class Exporter(Notes):
                     lines.append("vv " + fmt(*v))
                 for t in tris:
                     lines.append(f"vf {t[0]} {t[1]} {t[2]}")
-        # CXLT: the collision LOD's attach points, which OED's WriteCXLT wrote
-        # (5fc5b4f6a^ export_3di.cpp, "CXLT: attach points"). A scene holds
-        # them for only some parts (import makes one where the row is not the
-        # section's own offset), so with any `_attach` in the LOD every row the
-        # retail count gives is written (one per section after the root on a
-        # rigid model, one per section on a skinned one, as the corpus stores
-        # them and the builder derives them), each at its part's attach point,
-        # else at its pivot through the very values its cobj line carries, so
-        # the CLI reads a row the builder would derive as that row (our rule:
-        # OED wrote a row per helper). With none the builder derives every row.
-        if not bullet.anchors:
+        # CXLT: the collision LOD's attach points, which OED's WriteCXLT wrote,
+        # a row per `~` attach helper sorted by name (5fc5b4f6a^
+        # engine/formats/oed/convert_internal.cpp and export_3di.cpp, "CXLT:
+        # attach points"). Attach points "The attach helpers" is that rule:
+        # a row per `_attach`, in export order, none an empty table (import
+        # sets it for the 156 JOTAC tables one per part cannot say: M24_1st's
+        # 42 rows in the name order of its helpers, the parent order; dM1A1's
+        # 33 for 25 sections; Chair03X's none).
+        if self.props.attach_points == "HELPERS":
+            for _, ob in sorted(bullet.anchors, key=lambda e: order_key(e[1])):
+                lines.append("cxlt " + fmt(*self.space.mission(self.world(ob).translation)) + f"  # {ob.name}")
+            if not bullet.anchors:
+                lines.append("cxlt  # no attach helper: an empty table")
+            return
+        # "One per part": a scene holds attach points for only some parts
+        # (import makes one where the row is not its part's pivot), so with
+        # any `_attach` in the LOD every row the retail count gives is
+        # written (one per section after the root on a rigid model, one per
+        # section on a skinned one, as the corpus stores them and the builder
+        # derives them), each at its part's attach point, else at its pivot
+        # through the very values its cobj line carries, so the CLI reads a
+        # row the builder would derive as that row. With none the builder
+        # derives every row.
+        by_part = {}
+        for part, ob in bullet.anchors:
+            if part in by_part:
+                raise ExportError(f"{bullet.root.name}: '{by_part[part].name}' and '{ob.name}' are both the attach "
+                                  f"point of {self.part_name(bullet, part)} (a part carries one while the model's "
+                                  "Attach points are One per part)")
+            by_part[part] = ob
+        if not by_part:
             return
         first = 0 if self.skinned else 1
-        if first and 0 in bullet.anchors:
-            self.note(f"{bullet.anchors[0].name}: a rigid model stores no attach point for its root section; "
-                      "this one is not exported")
+        if first and 0 in by_part:
+            self.note(f"{by_part[0].name}: a rigid model stores no attach point for its root section while its "
+                      "Attach points are One per part; this one is not exported")
         for i in range(first, count):
-            ob = bullet.anchors.get(i)
+            ob = by_part.get(i)
             if ob is None:
                 lines.append("cxlt " + fmt(*pivots[i]) + f"  # {bullet.parts[i].name}'s pivot")
             else:
@@ -1159,7 +1253,7 @@ class Exporter(Notes):
             raise ExportError(f"poly_collision_lod {bullet_index} names no LOD (there are {len(lods)})")
         for lod in lods:
             if lod.anchors and lod is not lods[bullet_index]:
-                self.note(f"{next(iter(lod.anchors.values())).name}: attach points are read from the collision LOD "
+                self.note(f"{lod.anchors[0][1].name}: attach points are read from the collision LOD "
                           f"(LOD {bullet_index}) only; not exported from {lod.root.name}")
         thresholds = [lod.root.o3d.lod_threshold for lod in lods]
         if any(t == 0 for t in thresholds[:-1]) or any(a < b for a, b in zip(thresholds, thresholds[1:])):
@@ -1169,11 +1263,15 @@ class Exporter(Notes):
         lod_lines, tail_lines, material_lines = [], [], []
         for lod in lods:
             self.emit_lod(lod, lod_lines)
+        # The materials take their export order once the geometry has named
+        # them all; the register table follows it, and the records written
+        # after this take their register indices from it.
+        remap = self.materials.order()
+        self.declare_registers(lods)
         self.emit_points(lods[0], tail_lines)
         self.emit_lights(lods[0], tail_lines)
         self.emit_occlusion(lods[0], tail_lines)
         self.emit_collision(lods[0], lods[bullet_index], tail_lines)
-        remap = self.materials.order()
         for i, line in enumerate(lod_lines):
             if line.startswith("strip "):
                 record, _, comment = line.partition("  #")

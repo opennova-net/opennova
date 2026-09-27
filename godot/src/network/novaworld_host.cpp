@@ -128,10 +128,6 @@ void NovaWorldHost::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("disconnected", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("error_occurred", PropertyInfo(Variant::STRING, "message")));
 	ADD_SIGNAL(MethodInfo("state_changed", PropertyInfo(Variant::INT, "state")));
-	// The service ended our hosting (ServerStopHosting): the MsgCode and its
-	// NWUSERVERMSGCODE_* key.
-	ADD_SIGNAL(MethodInfo("hosting_stopped", PropertyInfo(Variant::INT, "msg_code"),
-	                      PropertyInfo(Variant::STRING, "msg_key")));
 	// The service punted us (ServerLeaveNovaWorld): the MsgCode the menutxt
 	// ERR_PUNTEDFROMNOVAWORLD text substitutes for its [[$]].
 	ADD_SIGNAL(MethodInfo("punted", PropertyInfo(Variant::INT, "msg_code")));
@@ -417,7 +413,6 @@ void NovaWorldHost::drain_session_notices() {
 			}
 			break;
 		case Notice::Kind::StopHosting:
-			emit_signal("hosting_stopped", notice.fields.msg_code, to_gd(notice.msg_key));
 			if (state_ == STATE_HOSTING || state_ == STATE_REGISTERING) {
 				enter_state(STATE_DISCONNECTED, to_gd(notice.msg_key));
 			}

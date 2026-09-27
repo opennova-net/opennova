@@ -1,15 +1,10 @@
 #include "lights/light_spawn.h"
-#include "util/variant_type_of.h"
+#include "util/record_bind.h"
 
 using namespace godot;
 
-#define LIGHT_SPAWN_BIND_FIELD(m_type, m_name, m_default)                                           \
-	ClassDB::bind_method(D_METHOD("get_" #m_name), &self_type::get_##m_name);                       \
-	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &self_type::set_##m_name);              \
-	ADD_PROPERTY(PropertyInfo(variant_type_of<m_type>(), #m_name), "set_" #m_name, "get_" #m_name);
-
 void GlowSpawn::_bind_methods() {
-	GLOW_SPAWN_FIELDS(LIGHT_SPAWN_BIND_FIELD)
+	GLOW_SPAWN_FIELDS(OPENNOVA_RECORD_FIELD)
 	ClassDB::bind_static_method("GlowSpawn", D_METHOD("make", "position", "radius", "color"),
 			&GlowSpawn::make);
 	ClassDB::bind_method(D_METHOD("owned_by", "owner_entity", "owner_section"),
@@ -49,7 +44,7 @@ Ref<GlowSpawn> GlowSpawn::masking(bool p_disable_corona, bool p_disable_terrain,
 }
 
 void ModelLightSpawn::_bind_methods() {
-	MODEL_LIGHT_SPAWN_FIELDS(LIGHT_SPAWN_BIND_FIELD)
+	MODEL_LIGHT_SPAWN_FIELDS(OPENNOVA_RECORD_FIELD)
 	ClassDB::bind_static_method("ModelLightSpawn", D_METHOD("make", "position", "atten_end"),
 			&ModelLightSpawn::make);
 	ClassDB::bind_method(
@@ -90,5 +85,3 @@ Ref<ModelLightSpawn> ModelLightSpawn::in_blink_box(int64_t p_owner_entity, int p
 	blink_section_ = p_section;
 	return Ref<ModelLightSpawn>(this);
 }
-
-#undef LIGHT_SPAWN_BIND_FIELD

@@ -281,8 +281,6 @@ struct SelectedLight {
 	std::array<float, 3> color{};
 	std::array<float, 4> attenuation{};
 	float range = 0.0f;  // radius_fixed * 1.25 / 65536
-	bool lights_terrain = true;
-	bool lights_objects = true;
 	LightHandle handle{};
 };
 

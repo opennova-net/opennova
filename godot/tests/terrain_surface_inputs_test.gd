@@ -96,7 +96,7 @@ func test_null_terrain_reapply_clears_every_material_input() -> void:
 	assert_true(inputs.apply_to_material(material),
 		"Applying an empty input set must clear a retained material, not leave stale terrain state.")
 	for uniform_name in [
-		"u_detailmap", "u_blendmap",
+		"u_blendmap",
 		"u_detail_c1", "u_detail_c2", "u_detail_c3", "u_detail2",
 	]:
 		assert_null(material.get_shader_parameter(uniform_name),
@@ -168,7 +168,6 @@ func _surface_shader() -> Shader:
 	var shader := Shader.new()
 	shader.code = """
 shader_type spatial;
-uniform sampler2D u_detailmap;
 uniform sampler2D u_blendmap;
 uniform sampler2D u_detail_c1;
 uniform sampler2D u_detail_c2;

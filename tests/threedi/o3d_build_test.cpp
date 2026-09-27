@@ -11,7 +11,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -20,10 +19,13 @@
 
 #include "common/run_command.h"
 #include "threedi_cli.h"
+#include "../common/file_io.h"
 
 using namespace opennova::threedi;
 
 namespace {
+
+using test_io::read_file_text;
 
 int failures = 0;
 
@@ -35,11 +37,6 @@ void check(bool ok, const std::string &what) {
 }
 
 std::filesystem::path dir;
-
-std::string slurp(const std::filesystem::path &path) {
-	std::ifstream in(path, std::ios::binary);
-	return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-}
 
 std::string path_of(const std::string &name, const char *ext) { return (dir / (name + ext)).string(); }
 
@@ -61,7 +58,7 @@ void round_trip(const std::string &name, const std::string &text) {
 	const bool rebuilt =
 			threedi_cli::cmd_build(path_of(name, ".rt.o3d").c_str(), path_of(name, ".rt.3di").c_str()) == 0;
 	check(rebuilt, name + ": rebuild the scene");
-	if (rebuilt) check(slurp(path_of(name, ".3di")) == slurp(path_of(name, ".rt.3di")), name + ": byte-exact round trip");
+	if (rebuilt) check(read_file_text(path_of(name, ".3di")) == read_file_text(path_of(name, ".rt.3di")), name + ": byte-exact round trip");
 }
 
 // Build must refuse `text` (one field changed from an accepted scene).
@@ -76,7 +73,7 @@ int build_with_cli(const std::string &name, const std::string &text, std::string
 	const std::string said_path = path_of(name, ".err");
 	const int status = test_cmd::run(test_cmd::quoted(cli) + " build " + test_cmd::quoted(path_of(name, ".o3d")) + " -o " +
 			test_cmd::quoted(path_of(name, ".3di")) + " 2> " + test_cmd::quoted(said_path));
-	said = slurp(said_path);
+	said = read_file_text(said_path);
 	return status;
 }
 
@@ -129,7 +126,7 @@ int main(int argc, char **argv) {
 				"v 0 0 0 nan -nan inf 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 -inf 0 1 0 1\nt 0 1 2\n"
 				"occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\nop 0 0 1 nan\nop 0 0 -1 -nan\nof 0 1 2 0\n";
 		round_trip("nan", text);
-		const std::string scene = slurp(path_of("nan", ".rt.o3d"));
+		const std::string scene = read_file_text(path_of("nan", ".rt.o3d"));
 		check(scene.find("nan(") == std::string::npos, "nan: no printf-specific NaN spelling");
 		check(scene.find(" -nan") != std::string::npos && scene.find(" nan") != std::string::npos &&
 						scene.find(" inf") != std::string::npos && scene.find(" -inf") != std::string::npos,
@@ -281,7 +278,7 @@ int main(int argc, char **argv) {
 		} else {
 			check(false, "fourth-slot: read back");
 		}
-		check(slurp(path_of("fourth-slot", ".rt.o3d")).find(" 2 1 0 1 0.5 0.25 0\n") != std::string::npos,
+		check(read_file_text(path_of("fourth-slot", ".rt.o3d")).find(" 2 1 0 1 0.5 0.25 0\n") != std::string::npos,
 				"fourth-slot: scene writes the four slots");
 		check(build("weights-retail-sum", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 0.4487 0.3871 0.1643\n" + tail),
 				"weights-retail-sum: retail's 1.0001 builds");
@@ -295,7 +292,7 @@ int main(int argc, char **argv) {
 
 	// A strip with vertices and no triangle is carried as it is.
 	round_trip("empty-strip", "o3d 1\nmodel E\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0 0\nv 0 0 0 0 0 1 0 0\n");
-	check(slurp(path_of("empty-strip", ".rt.o3d")).find("# dropped") == std::string::npos,
+	check(read_file_text(path_of("empty-strip", ".rt.o3d")).find("# dropped") == std::string::npos,
 			"empty-strip: nothing is reported dropped");
 
 	// A triangle that repeats a corner is refused: the scene of the model
@@ -315,7 +312,7 @@ int main(int argc, char **argv) {
 				.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 		check(threedi_cli::cmd_scene(path_of("nameless", ".3di").c_str(), path_of("nameless", ".rt.o3d").c_str()) == 0,
 				"nameless: scene");
-		const std::string text = slurp(path_of("nameless", ".rt.o3d"));
+		const std::string text = read_file_text(path_of("nameless", ".rt.o3d"));
 		check(text.find("# dropped: the model has no name") != std::string::npos &&
 						text.find("# dropped: lod 0 has no type") != std::string::npos,
 				"nameless: the empty name and LOD type are reported");
@@ -389,7 +386,7 @@ int main(int argc, char **argv) {
 				"cobj 0 0 0 0\ncobj 0 0.1 0.2 0.3\n";
 		check(build("cxlt-derived-two", two) && build("cxlt-helper", two + "cxlt 0.1 0.2 0.3  # ~PP02 attach\n"),
 				"cxlt-helper: built");
-		check(slurp(path_of("cxlt-derived-two", ".3di")) == slurp(path_of("cxlt-helper", ".3di")),
+		check(read_file_text(path_of("cxlt-derived-two", ".3di")) == read_file_text(path_of("cxlt-helper", ".3di")),
 				"cxlt-helper: a row at the section's offset gives the derived bytes");
 		round_trip("empty-register", "o3d 1\nmodel REG\nregister \"\"\nlod 0\npart 0 0 0 0\n");
 	}
@@ -414,15 +411,15 @@ int main(int argc, char **argv) {
 	{
 		const std::string good = kSkinned;
 		check(build("write-safety", good), "write-safety: build");
-		const std::string before = slurp(path_of("write-safety", ".3di"));
+		const std::string before = read_file_text(path_of("write-safety", ".3di"));
 		std::ofstream(path_of("write-safety-bad", ".o3d"), std::ios::binary) << good << "bogus 1\n";
 		check(threedi_cli::cmd_build(path_of("write-safety-bad", ".o3d").c_str(), path_of("write-safety", ".3di").c_str()) != 0,
 				"write-safety: the bad scene is refused");
-		check(slurp(path_of("write-safety", ".3di")) == before, "write-safety: a refused build keeps the last model");
+		check(read_file_text(path_of("write-safety", ".3di")) == before, "write-safety: a refused build keeps the last model");
 		const std::string scene_out = path_of("write-safety", ".rt.o3d");
 		std::ofstream(scene_out, std::ios::binary) << "stale";
 		check(threedi_cli::cmd_scene(path_of("write-safety", ".3di").c_str(), scene_out.c_str()) == 0 &&
-						slurp(scene_out).rfind("o3d 1", 0) == 0,
+						read_file_text(scene_out).rfind("o3d 1", 0) == 0,
 				"write-safety: scene replaces an existing file");
 		std::filesystem::create_directories(dir / "a-folder.o3d");
 		check(threedi_cli::cmd_scene(path_of("write-safety", ".3di").c_str(), (dir / "a-folder.o3d").string().c_str()) != 0,
@@ -471,14 +468,14 @@ int main(int argc, char **argv) {
 		for (int i = 0; i < 32770; ++i) full += "cv 0 0 0\n";
 		refuses_saying("strict-cv-count", full,
 				"collision section 0 exceeds 32,768 vertices: retail reads a bullet face's corners as signed 16-bit indices");
-		const std::string said = slurp(path_of("strict-cv-count", ".err"));
+		const std::string said = read_file_text(path_of("strict-cv-count", ".err"));
 		check(said.find("exceeds 32,768") == said.rfind("exceeds 32,768"), "strict-cv-count: said once");
 		// A strip's triangles index its vertices with u16 words, said once too.
 		std::string long_strip = "o3d 1\nmodel STRIP\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n";
 		long_strip.reserve(long_strip.size() + 65537 * 18);
 		for (int i = 0; i < 65537; ++i) long_strip += "v 0 0 0 0 0 1 0 0\n";
 		refuses_saying("strict-strip-count", long_strip, "strip exceeds 65,535 vertices: its triangles index them with u16 words");
-		const std::string strip_said = slurp(path_of("strict-strip-count", ".err"));
+		const std::string strip_said = read_file_text(path_of("strict-strip-count", ".err"));
 		check(strip_said.find("exceeds 65,535") == strip_said.rfind("exceeds 65,535"), "strict-strip-count: said once");
 		// A texture name is the MTRL row's 16-byte field, counted in bytes,
 		// printable ASCII and a file name alone; retail fills all 16 bytes

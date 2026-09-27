@@ -62,10 +62,6 @@ uniform float u_detail2_density = 8.0;
 //  texcoord @ 0x609786..0x6097D6]
 uniform sampler2D u_water_noise : filter_linear, repeat_enable;
 uniform bool u_below_water = false;
-// Declared for the ONED authored-slot binding only; the top-tier chain does
-// not consume it (the generated coefficient map belongs to the unported
-// ps.1.1 tiers at stage 7).
-uniform sampler2D u_detailmap : filter_nearest_mipmap, repeat_disable;
 // Un-enved defaults = the retail noon register (full_00.env tod 1200:
 // sun_rgb 170,170,167; sky_rgb 84,88,89 — bytes /255), one register with the
 // object-model/global defaults.

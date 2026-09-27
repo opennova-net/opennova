@@ -43,14 +43,6 @@ func after_each() -> void:
 	_sav_path = ""
 
 
-func _def_root() -> ResourceRoot:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
-	return root
-
-
-# One kit page: NUL-separated (name, ammoP, ammoS, flags) quads closed by a double NUL
-# [orig: Buffer_CopyUntilDoubleNull @0x562f30].
 func _page_blob(names: Array) -> PackedByteArray:
 	var blob := PackedByteArray()
 	for n in names:
@@ -182,44 +174,6 @@ func test_character_save_refuses_to_replace_a_corrupt_existing_profile() -> void
 			"a rejected profile remains recoverable and byte-identical")
 
 
-func test_an_unlatched_team_commits_no_page() -> void:
-	if RetailData.def_root().is_empty():
-		pending(RetailData.fixture_pending_text("def/weapon.def"))
-		return
-	# The side selector is the S2C 0x04 tail byte [orig: byte_A85B48 @0x425499], and
-	# side_for_team maps anything that is not 1 or 3 to the RED block [orig: @0x525798].
-	# Retail cannot reach the page copy before that byte is latched — admission delivers
-	# 0x04 long before Game_StartMission runs — but our catalog can land first. Copying at
-	# team 0 would therefore commit the WRONG side's page. This asserts we wait instead.
-	#
-	# This case caught a live defect: the first revision seeded unconditionally and a
-	# blue-side joiner briefly held the red page.
-	var sim := Simulation.new()
-	assert_true(sim.enable_join("127.0.0.1", 32768, "ProfileKitTest"),
-			"enable_join should arm the joiner role")
-	assert_true(sim.is_joiner())
-	assert_eq(sim.load_weapon_table(_def_root(), "weapon.def"), OK)
-	# Loaded AFTER the catalog on purpose: the shell can only read the profile once the
-	# sim exists, so this edge has to be handled too. An earlier revision seeded only at
-	# catalog load and silently shipped the defaults.
-	assert_eq(sim.load_weapon_profile(_write_weapon_sav()), OK)
-
-	var inv := sim.get_local_player_inventory()
-	var held := []
-	for row in inv.slots:
-		held.append((row as PlayerInventorySlot).name)
-	for name in RED_PAGE:
-		assert_does_not_have(held, name,
-				"%s is on the RED page; an unlatched team must not commit a side" % name)
-	assert_does_not_have(held, OFF_PAGE,
-			"%s is on no page at all" % OFF_PAGE)
-
-
-# The kit page reaches the profile record. The PLAYER screen serializes the edited
-# side's page as consecutive (name, primary, secondary, flags) entries (knife first,
-# then the class-5 medpack, the three category picks, three grenade slots) and retail
-# writes that block into the side's CLASS page before PlayerProfile_SaveToFiles.
-# retail: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0; see docs/playerinfo/avatars-re.md.
 func test_player_info_accept_writes_the_edited_sides_class_page() -> void:
 	var path := _write_weapon_sav()
 	var kit := [

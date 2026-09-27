@@ -726,14 +726,15 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 						sz * terrain::COORDS_SECTOR_SIZE);
 				const float wy1 = -static_cast<float>(
 						(sz + 1) * terrain::COORDS_SECTOR_SIZE);
-				const auto q16 = [](float wu) {
-					return static_cast<int32_t>(wu * io::kFp16One);
-				};
 				float x[4], y[4];
-				view_project(view, input, q16(wx0), q16(wy0), x[0], y[0]);
-				view_project(view, input, q16(wx1), q16(wy0), x[1], y[1]);
-				view_project(view, input, q16(wx1), q16(wy1), x[2], y[2]);
-				view_project(view, input, q16(wx0), q16(wy1), x[3], y[3]);
+				view_project(view, input, io::float_to_fp16_16(wx0),
+						io::float_to_fp16_16(wy0), x[0], y[0]);
+				view_project(view, input, io::float_to_fp16_16(wx1),
+						io::float_to_fp16_16(wy0), x[1], y[1]);
+				view_project(view, input, io::float_to_fp16_16(wx1),
+						io::float_to_fp16_16(wy1), x[2], y[2]);
+				view_project(view, input, io::float_to_fp16_16(wx0),
+						io::float_to_fp16_16(wy1), x[3], y[3]);
 				// Retail binds Colormap0..3 as independent clamp textures. The
 				// device stores them in one atlas, so a half-texel inset reproduces
 				// the independent edge clamp without sampling the next quadrant.

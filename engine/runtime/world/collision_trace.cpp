@@ -1,5 +1,6 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/pose_provider.h>
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 
 // The projectile trace: target views, the broad phase, trace_projectile itself, and
@@ -169,8 +170,6 @@ std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
             to_fixed(blast_center.z)};
     const bool has_blast_center =
             blast_fixed[0] != 0 || blast_fixed[1] != 0 || blast_fixed[2] != 0;
-    constexpr double kBamPerRad = kBamFullTurn /
-            6.283185307179586476925286766559;
     constexpr int32_t kRadialFallbackPitchBam = 754974675;
     auto direction_from_angles = [](double heading, double pitch) {
         const double cp = std::cos(pitch);
@@ -237,7 +236,7 @@ std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
                     dx = static_cast<int64_t>(world_point[0]) - target->pos[0];
                     dy = static_cast<int64_t>(world_point[1]) - target->pos[1];
                     pitch = static_cast<double>(kRadialFallbackPitchBam) /
-                            kBamPerRad;
+                            io::kBamPerRadian;
                 }
                 const double heading = std::atan2(
                         static_cast<double>(dy), static_cast<double>(dx));

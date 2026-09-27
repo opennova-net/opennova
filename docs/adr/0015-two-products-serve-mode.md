@@ -6,6 +6,13 @@
 >
 > **Updated by [ADR 0045](0045-cli-game-data-runtime-only.md).** ONED is removed, so one
 > Godot product remains (the runtime game); the serve-mode rule stands.
+>
+> **Updated by [ADR 0048](0048-bundled-placeholder-menu-and-retail-picker.md).** The
+> OpenNova Launcher is retired.
+>
+> **Updated 2026-09-27 ([ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md) d8).**
+> `apps/nw_server` is deleted. Serve mode is the host screen's retail Serve Only server type
+> (`SERVERTYPE` = 1); retail has no command-line auto-host to port.
 
 OpenNova's shared Godot project exports exactly two applications per platform:
 

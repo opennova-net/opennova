@@ -80,8 +80,6 @@ constexpr uint32_t kPlayerJumpBlockedFlags = 0x1A002u;
 // [orig: turn-in-place gates; dump 2940-2952]
 constexpr int32_t kTurnStopGate = 536870880;  // > 45 deg -> state 147 (stop)
 constexpr int32_t kTurnWalkGate = 357913920;  // > 30 deg -> state 1 (walk turn)
-// [orig: BAM bearing scale 683565275.5764316 = 2^31/pi (dbl_7C19D8)]
-constexpr double kBamPerRadian = 683565275.5764316;
 // [orig: degrees -> BAM32 = 2^32/360 = 11930464; same const as ai.cpp/promote.cpp.
 // Used only to mirror the local player's engine heading back to the registry Entity's
 // mission yaw — the precise (90 - deg) Q1 reconciliation lives with the present path.]
@@ -104,9 +102,10 @@ int player_directional_state(int base, int move_dir_index) {
 } // namespace
 
 // Shared with infantry_combat.cpp (declared in infantry_internal.h).
+// [orig: BAM bearing scale 683565275.5764316 = 2^31/pi (dbl_7C19D8)]
 int32_t bearing_to(int32_t dx, int32_t dy) {
     return static_cast<int32_t>(std::atan2(static_cast<double>(dy), static_cast<double>(dx)) *
-                                kBamPerRadian);
+                                io::kBamPerRadian);
 }
 
 // Shared with infantry_remote_anim.cpp (the size-gate split): these were

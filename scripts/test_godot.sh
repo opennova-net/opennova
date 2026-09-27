@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Runs the GDScript test suite via GUT, headless.
+# Runs the GDScript test suite via GUT, headless unless --windowed is selected.
 #
 # Expects $GODOT_BIN to point at Godot 4.6.1. Falls back to the binary
 # at .godot-bin/ if one isn't set.
 #
-# Usage: scripts/test_godot.sh [--keep-user-dir]
+# Usage: scripts/test_godot.sh [--keep-user-dir] [--suite core|retail|all] [--windowed]
 #   --keep-user-dir  leave the run's isolated user:// (.godot-test-user) in
 #                    place to inspect what the suite wrote
+#   --windowed       run only the retail graphics scripts with Forward+
 #
 # The suite runs against an ISOLATED user:// (see below). Tests that persist
 # settings or drop scratch files therefore cannot reach the developer's real
@@ -15,12 +16,33 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 keep_user_dir=0
-for arg in "$@"; do
-  case "$arg" in
-    --keep-user-dir) keep_user_dir=1 ;;
-    *) echo "usage: scripts/test_godot.sh [--keep-user-dir]" >&2; exit 2 ;;
+suite=all
+windowed=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --keep-user-dir) keep_user_dir=1; shift ;;
+    --windowed) windowed=1; shift ;;
+    --suite) [[ $# -ge 2 ]] || exit 2; suite="$2"; shift 2 ;;
+    --suite=*) suite="${1#--suite=}"; shift ;;
+    *) echo "usage: scripts/test_godot.sh [--keep-user-dir] [--suite core|retail|all] [--windowed]" >&2; exit 2 ;;
   esac
 done
+case "$suite" in
+  core) unset OPENNOVA_JO_DIR OPENNOVA_JO_ASSETS ;;
+  retail) python "$root/scripts/ci/test_suites.py" --suite retail --require-roots ;;
+  all) ;;
+  *) echo "unknown suite: $suite" >&2; exit 2 ;;
+esac
+
+label="$suite"
+display=(--headless)
+selection=()
+if [[ "$windowed" == "1" ]]; then
+  [[ "$suite" == "retail" ]] || { echo "--windowed requires --suite retail" >&2; exit 2; }
+  label=retail-windowed
+  display=(--rendering-method forward_plus)
+  selection=(--windowed)
+fi
 
 "$root/scripts/bootstrap_godot.sh"
 
@@ -58,16 +80,23 @@ if [[ "$keep_user_dir" == "0" ]]; then
   trap 'rm -f "$log"; rm -rf "$user_dir" "$root/.godot-test-fixtures"' EXIT
 fi
 
+reports="$root/build/Testing"
+mkdir -p "$reports"
+config="$reports/gut-$label.json"
+inventory="$reports/gut-$label-inventory.json"
+report="$reports/gut-$label.xml"
+python "$root/scripts/ci/test_suites.py" --suite "$suite" --godot-config "$config" \
+  --inventory "$inventory" --report "$report" "${selection[@]}"
+# Do not let a previous successful run stand in for a failed collector.
+rm -f "$report"
+
 set +e
-"$GODOT_BIN" --headless --path "$root/godot" \
-  -s addons/gut/gut_cmdln.gd \
-  -gdir=res://tests \
-  -ginclude_subdirs \
-  -gprefix= \
-  -gsuffix=_test.gd \
-  -gexit 2>&1 | tee "$log"
+"$GODOT_BIN" "${display[@]}" --path "$root/godot" \
+  -s addons/gut/gut_cmdln.gd -gconfig="$config" -gexit 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 set -e
+
+cp "$log" "$reports/gut-$label.log"
 
 # GUT exits 0 even when scripts fail to parse (e.g. missing GDExtension
 # classes), because unparseable scripts are silently dropped from the
@@ -91,4 +120,6 @@ if grep -qE 'Ignoring script .*does not extend GutTest' "$log"; then
   exit 1
 fi
 
-exit "$status"
+[[ "$status" == "0" ]] || exit "$status"
+python "$root/scripts/ci/test_suites.py" --suite "$suite" --inventory "$inventory" \
+  --report "$report" --gut-log "$log"

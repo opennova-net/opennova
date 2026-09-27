@@ -17,6 +17,7 @@
 #include <runtime/world/vehicle_mount.h>
 
 #include <runtime/replication/entity_wire_bridge.h> // health_classification_byte (the field-17 pack)
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 
 namespace opennova::replication {
@@ -540,11 +541,6 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 //     completes; a selected entity's age resets to 0 [orig: @0x50f168].
 // Round-robin across frames is EMERGENT from aging: starved entities' keys climb and
 // age >= 50 force-admits them past the distance gate.
-// The 32-bit wrapping abs the score's BAM deltas use [orig: cdq/xor/sub].
-inline int32_t prio_iabs32(int32_t v) {
-	return v < 0 ? static_cast<int32_t>(0u - static_cast<uint32_t>(v)) : v;
-}
-
 std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
                                                       Connection &conn,
                                                       const std::vector<GameEntitySnapshot> &entities,
@@ -690,10 +686,10 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 			// retail singularity, kept as-is [orig: the abs32 idiom @0x50e9e2].
 			// Unsigned arithmetic preserves the original mod-2^32 BAM wrap (both
 			// operands span the full circle; a signed difference is UB here).
-			int32_t yaw_term = prio_iabs32(static_cast<int32_t>(
+			int32_t yaw_term = io::bam_abs(static_cast<int32_t>(
 					uint32_t(bearing_bam) - uint32_t(view_yaw))) >> 24;
 			if (yaw_term > 64) yaw_term += 64;
-			const int32_t pitch_term = prio_iabs32(static_cast<int32_t>(
+			const int32_t pitch_term = io::bam_abs(static_cast<int32_t>(
 					uint32_t(elev_bam) - uint32_t(view_pitch))) >> 25;
 			const int32_t angle = 256 - pitch_term - yaw_term;
 
@@ -749,7 +745,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		// Unsigned difference: the cached byte reconstructs to exactly INT_MIN
 		// for heading 0x80, and euler_z spans the circle — signed sub is UB.
 		const int32_t heading_delta =
-				prio_iabs32(static_cast<int32_t>(
+				io::bam_abs(static_cast<int32_t>(
 						uint32_t(cached_heading_bam) - uint32_t(e.euler_z))) >> 24;
 		const int32_t speed_delta =
 				std::abs(int(conn.s2c_entity_speed[idx]) - int(e.tick_speed_q6));

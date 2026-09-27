@@ -1,0 +1,99 @@
+<!-- OpenNova's placeholder main menu (ADR 0048), authored from scratch. The
+     shell opens main.mnu's first screen; PLAY_RETAIL and CHANGE_FOLDER are
+     wired by name (godot/game/bundled_menu_companion.gd), EXIT quits through
+     its own action. Literal strings, hex colors and one named font, so the
+     menu needs no string table or stylesheet. The font is uppercase-only, and
+     its comma reads as a period at menu size, so the text avoids commas. -->
+<SCREEN>
+	<NAME>STARTUP</NAME>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<FONT>
+			<NAME>opennova.fnt</NAME>
+			<DEFAULT_FG>FFD8DEE4</DEFAULT_FG>
+			<MOUSEOVER_FG>FFFFC040</MOUSEOVER_FG>
+			<SELECTED_FG>FFFF8000</SELECTED_FG>
+			<DISABLED_FG>FF545252</DISABLED_FG>
+		</FONT>
+		<WINDOW type="static" name="TITLE">
+			<FONT>
+				<NAME>opennova.fnt</NAME>
+				<DEFAULT_FG>FFFFC040</DEFAULT_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>150</TOP>
+				<RIGHT>800</RIGHT>
+				<BOTTOM>170</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">OPENNOVA</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="COMING_SOON">
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>185</TOP>
+				<RIGHT>800</RIGHT>
+				<BOTTOM>205</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">OUR OWN GAME IS COMING SOON.</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="RETAIL_NOTE_1">
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>250</TOP>
+				<RIGHT>800</RIGHT>
+				<BOTTOM>270</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">YOU CAN PLAY JOINT OPERATIONS FROM YOUR OWN INSTALL NOW:</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="RETAIL_NOTE_2">
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>275</TOP>
+				<RIGHT>800</RIGHT>
+				<BOTTOM>295</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">PRESS PLAY RETAIL AND CHOOSE YOUR GAME FOLDER.</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="PLAY_RETAIL">
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>290</LEFT>
+				<TOP>345</TOP>
+				<RIGHT>510</RIGHT>
+				<BOTTOM>373</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">PLAY RETAIL</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="CHANGE_FOLDER">
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>290</LEFT>
+				<TOP>383</TOP>
+				<RIGHT>510</RIGHT>
+				<BOTTOM>411</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">CHANGE FOLDER</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="EXIT">
+			<ACTION type="quit">EXIT</ACTION>
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>290</LEFT>
+				<TOP>421</TOP>
+				<RIGHT>510</RIGHT>
+				<BOTTOM>449</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">EXIT</STRING>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>

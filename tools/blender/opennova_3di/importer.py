@@ -162,7 +162,8 @@ def read_o3d(path):
                     light["falloff"] = num(a[19])
                 sc["lights"].append(light)
             elif k == "occ":
-                occ = {"type": int(a[0]), "a": int(a[1]), "b": int(a[2]), "verts": [], "faces": []}
+                occ = {"type": int(a[0]), "a": int(a[1]), "b": int(a[2]), "verts": [], "faces": [],
+                       "sphere": tuple(num(x) for x in a[3:7]) if len(a) >= 7 else None}
                 sc["occ"].append(occ)
             elif k == "ov":
                 occ["verts"].append(tuple(num(x) for x in a[:3]))
@@ -242,6 +243,39 @@ def influences(s, v):
         if w > 0.0 and slot < len(table):
             out[table[slot]] = out.get(table[slot], 0.0) + w
     return sorted(out.items())
+
+
+def same_turn(face, ref):
+    """Whether a triangle winds as `ref` does (a cyclic turn of its corners)."""
+    return face in (ref, (ref[1], ref[2], ref[0]), (ref[2], ref[0], ref[1]))
+
+
+def back_sides(tris, normal):
+    """Which of a mesh's triangles, [(strip corners, strip, material slot,
+    merged vertices)], lie on the back of a two-sided sheet: of the triangles
+    over one set of vertices in both windings, those wound against their
+    corners' stored normals (a scene triangle winds counter-clockwise about
+    its outward normal in mission axes); where the normals give no side, the
+    first triangle's winding is the front."""
+    by_corners = {}
+    for i, (_, _, _, merged) in enumerate(tris):
+        if len(set(merged)) == 3:
+            by_corners.setdefault(frozenset(merged), []).append(i)
+    back = set()
+    for group in by_corners.values():
+        ref = tris[group[0]][3]
+        turns = [same_turn(tris[i][3], ref) for i in group]
+        if all(turns):
+            continue
+        corners, s, _, _ = tris[group[0]]
+        p = [s["verts"][x]["p"] for x in corners]
+        n = [normal(s["verts"][x]) for x in corners]
+        e1 = [p[1][k] - p[0][k] for k in range(3)]
+        e2 = [p[2][k] - p[0][k] for k in range(3)]
+        cross = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+        facing = sum(cross[k] * (n[0][k] + n[1][k] + n[2][k]) for k in range(3)) >= 0.0
+        back.update(i for i, same in zip(group, turns) if same != facing)
+    return back
 
 
 # A section's bounds are stored on the 16.16 grid: the builder rounds a hit
@@ -380,8 +414,14 @@ class Builder(Notes):
     def mesh(self, name, strips, origin, mats, skinned):
         """One mesh from strips, its vertices relative to `origin` (Blender
         axes): vertices merged by position, normal (and weights), loops
-        carrying UVMap/UV1 and the stored normals. Returns the mesh and each
-        vertex's (part, weight) influences."""
+        carrying UVMap/UV1 and the stored normals. A triangle whose corners
+        another takes in the opposite winding (a two-sided sheet stored as
+        both windings over one set of vertices: Baricd02's wire) goes on
+        vertices of the side it faces, so that each side is a sheet of its
+        own: Blender holds a custom normal relative to the smooth fan around
+        its corner, and a fan holding two faces back to back has no
+        direction to hold it in. Returns the mesh and each vertex's (part,
+        weight) influences."""
         index, verts, loops, faces, face_mat, slots = {}, [], [], [], [], []
         weights = []
         dropped = 0
@@ -395,6 +435,7 @@ class Builder(Notes):
                 return (0.0, 0.0, 0.0)
             return n
 
+        tris = []  # (the strip's corners, the strip, material slot, the merged vertices)
         for s in strips:
             mi = s["material"]
             if mi not in slots:
@@ -415,17 +456,28 @@ class Builder(Notes):
                     weights.append(infl)
                 ids.append(index[key])
             for a, b, c in s["tris"]:
-                face = [ids[a], ids[b], ids[c]]
-                if len(set(face)) < 3:
-                    # Corners the merge collapsed (a sliver): keep the face
-                    # on vertices of its own so its triangle survives.
-                    for k, x in enumerate((a, b, c)):
-                        face[k] = len(verts)
-                        verts.append(self.blender(s["verts"][x]["p"]) - origin)
-                        weights.append(weights[ids[x]])
-                faces.append(tuple(face))
-                face_mat.append(slots.index(mi))
-                loops.extend((s["verts"][a], s["verts"][b], s["verts"][c]))
+                tris.append(((a, b, c), s, slots.index(mi), (ids[a], ids[b], ids[c])))
+        back = back_sides(tris, normal)
+        second = {}  # a vertex -> its copy on the back side
+        for i, (corners, s, slot, merged) in enumerate(tris):
+            face = list(merged)
+            if len(set(face)) < 3:
+                # Corners the merge collapsed (a sliver): keep the face on
+                # vertices of its own so its triangle survives.
+                for k, x in enumerate(corners):
+                    face[k] = len(verts)
+                    verts.append(self.blender(s["verts"][x]["p"]) - origin)
+                    weights.append(weights[merged[k]])
+            elif i in back:
+                for k, vi in enumerate(face):
+                    if vi not in second:
+                        second[vi] = len(verts)
+                        verts.append(verts[vi].copy())
+                        weights.append(weights[vi])
+                    face[k] = second[vi]
+            faces.append(tuple(face))
+            face_mat.append(slot)
+            loops.extend(s["verts"][x] for x in corners)
         if dropped:
             self.note(f"{dropped} weights on bone-table slots past their strip's table (retail FSldr03 ships them) are "
                       "not kept")
@@ -489,6 +541,7 @@ class Builder(Notes):
                 lod_objects[li] += self.rig_lod(lod, mats)
             else:
                 lod_objects[li] += self.rigid_lod(li, lod, mats)
+        materials.keep_unused(self, mats, lod_objects)
         self.points(lod_objects)
         if self.op is None or self.op.import_lights:
             self.lights(lod_objects)
@@ -792,6 +845,17 @@ class Builder(Notes):
             ob.display_type = "WIRE"
             ob.o3d.order = i
             lod_objects[0].append(self.put(ob, 0, section))
+            if o["sphere"] is not None and not finite(o["sphere"]):
+                self.note(f"occlusion record {i}: its stored sphere is not finite; it exports with the one its mesh "
+                          "gives")
+            elif o["sphere"] is not None:
+                # The record's sphere as the file stores it, which is not the
+                # one export derives from the mesh (206 retail models mirror
+                # its centre across y): a `_sphere` Empty on the mesh keeps it.
+                centre, radius = self.blender(o["sphere"][:3]), o["sphere"][3]
+                sphere = self.empty("_sphere", ob, Matrix.Translation(centre), size=radius, display="SPHERE")
+                sphere.hide_set(True)
+                lod_objects[0].append(sphere)
 
     def collision(self, lod_objects):
         dups = {}
@@ -908,35 +972,45 @@ class Builder(Notes):
         """The CXLT attach points: retail stores one per part after the root
         on a rigid model and one per part on a skinned one (the builder's
         derivation, formats/threedi/threedi_build.cpp), OED's WriteCXLT source
-        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row that is its
-        section's own offset, the row the builder derives, needs no helper;
-        any other is an `_## attach` Empty on its part in the collision LOD. A
-        row count that does not fit places none, and an empty table (Chair03X:
-        seven sections, no row) has no scene form."""
+        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row at its part's
+        pivot, the row export writes for a part without a helper, needs
+        none; any other is an `_## attach` Empty on its part in the
+        collision LOD (a section's stored offset is not always that pivot:
+        MWalA2X's parts all pivot on the origin). A table of another count
+        or none (156 JOTAC models: M24_1st's 42 rows for 42 sections,
+        Chair03X's none for seven) sets the model's Attach points to the
+        attach helpers: an Empty per row, in its order, on the part it is
+        the pivot of (else the root)."""
         rows = self.sc["cxlt"]
-        if not rows:
-            if self.sc["cxlt_given"]:
-                self.note("the model stores no CXLT attach point, which a scene cannot say: export leaves the rows to "
-                          "the builder, which derives one per collision section"
-                          f"{'' if self.sc['skinned'] else ' after the root'} at its pivot")
-            return
         li = self.model.o3d.poly_collision_lod
         parts = self.sc["lods"][li]["parts"] if li < len(self.sc["lods"]) else []
         first = 0 if self.sc["skinned"] else 1
-        if len(rows) != len(parts) - first:
-            self.note(f"{len(rows)} CXLT attach points do not fit the collision LOD's {len(parts)} parts (one per "
-                      f"part{'' if first == 0 else ' after the root'}); export puts each at its part's pivot")
-            return
-        cobjs = self.sc["cobjs"]
-        for i, row in enumerate(rows):
-            pi = i + first
-            if pi < len(cobjs) and all(round(a * 65536.0) == round(b * 65536.0)
-                                       for a, b in zip(row, cobjs[pi]["offset"])):
-                continue  # the same 16.16 row as the section's offset
+
+        def attach(i, pi, row):
             ob = bpy.data.objects.new(f"_{pi + 1:02d} attach", None)
             ob.empty_display_type = "PLAIN_AXES"
             ob.empty_display_size = 0.05
+            ob.o3d.order = i
             lod_objects[li].append(self.put(ob, li, pi, Matrix.Translation(self.blender(row))))
+
+        def at_pivot(row, part):
+            # The row the builder writes for the pivot: truncated to 16.16
+            # (threedi_q16_trunc), as the stored row is.
+            return all(round(a * 65536.0) == int(b * 65536.0) for a, b in zip(row, part["pivot"]))
+
+        if not rows and not self.sc["cxlt_given"]:
+            return
+        if rows and len(rows) == len(parts) - first:
+            off = [i for i, row in enumerate(rows) if not at_pivot(row, parts[i + first])]
+            # A skinned model's mesh part is no bone, so nothing hangs there.
+            if all(i + first != self.mesh_part for i in off):
+                for i in off:
+                    attach(i, i + first, rows[i])
+                return
+        self.model.o3d.attach_points = "HELPERS"
+        for i, row in enumerate(rows):
+            attach(i, next((pi for pi, part in enumerate(parts) if pi != self.mesh_part and at_pivot(row, part)), 0),
+                   row)
 
     def bullet_lod(self, mats):
         """The render LOD whose parts are the collision sections and whose
@@ -981,8 +1055,9 @@ class Builder(Notes):
             p.face_front_only = bool(flags & 0x800)
             p.face_other_flags = flags & ~0x901
             if bool(flags & 1) != materials.two_sided(mats[mi]):
-                self.note(f"material {mi}: its bullet faces' both-sides flag differs from its two-sided flag; "
-                          "export takes it from Backface Culling")
+                # Its faces' "both sides" is not its drawing's (154 JOTAC
+                # models: Baricd02's two-sided wire stores its faces one-sided).
+                p.face_both_sides = "YES" if flags & 1 else "NO"
         if outvoted:
             self.note(f"{outvoted} bullet faces take their material's most common surface and flags, not their own "
                       "(a material carries one set)")

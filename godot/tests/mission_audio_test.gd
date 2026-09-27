@@ -418,7 +418,7 @@ begin "Non-env marker"
   soundloop_4 MISSING_AMB
 end
 """
-	_write_text(fixture_dir.path_join("items.def"), items)
+	TestFs.write_text(self, fixture_dir.path_join("items.def"), items)
 	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
@@ -490,7 +490,7 @@ begin "Good ambient"
   soundloop_4 GOOD_AMB
 end
 """
-	_write_text(fixture_dir.path_join("items.def"), items)
+	TestFs.write_text(self, fixture_dir.path_join("items.def"), items)
 	TestFs.write_bytes(self, fixture_dir.path_join("bad.wav"), PackedByteArray([1, 2, 3, 4]))
 	TestFs.write_bytes(self, fixture_dir.path_join("good.wav"),
 		FileAccess.get_file_as_bytes(
@@ -603,13 +603,6 @@ func test_mission_reverb_does_not_install_an_unwitnessed_bus_effect() -> void:
 	assert_eq(_reverb_count(ambient_bus), 0,
 		"unloading the mission cannot leave its global bus effect in the menu/next world")
 	TestFs.remove_dir_recursive(fixture_dir)
-
-
-func _write_text(path: String, value: String) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file != null:
-		file.store_string(value)
 
 
 func _add_lwf_set(

@@ -19,7 +19,7 @@
 #                     the game's green.
 #   Emission          on: the shader export picks glows (a *_LUM one).
 #   Backface Culling  off: two-sided (material flag 4; bullets hit the faces
-#                     from both sides).
+#                     from both sides unless its Both sides setting says No).
 #   Render Method     Blended: the strips draw in the alpha pass, and the
 #                     shader export picks blends.
 # The Shader property names the engine shader; left empty, export picks one
@@ -48,7 +48,11 @@ from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, fmt, quoted
 # catalog`: TexNormal1 (the slot 3 texture) is FLAG_NORMAL, the TANGENT input
 # semantic FLAG_TANGENT, the #UV twins' UV transform FLAG_UVGEN.
 FLAG_EMISSIVE, FLAG_ALPHA, FLAG_DIFFUSE, FLAG_SECONDARY, FLAG_NORMAL = 0x1, 0x2, 0x4, 0x8, 0x10
+FLAG_NORMAL_B = 0x20
 FLAG_BLENDING, FLAG_GLASS, FLAG_SKINNED, FLAG_TANGENT, FLAG_UVGEN = 0x1000, 0x2000, 0x4000, 0x8000, 0x10000
+# The texture a row's slot binds to, as the capability bit of the shaders
+# that sample it: TexDiffuse1, TexDiffuse2, TexNormal1, TexNormal2.
+SLOT_SAMPLED = {1: FLAG_DIFFUSE, 2: FLAG_SECONDARY, 3: FLAG_NORMAL, 4: FLAG_NORMAL_B}
 
 # The colour Blender draws a mesh without a material in (its default
 # surface), linear.
@@ -322,7 +326,8 @@ def draws_normal_map(mat):
 
 def two_sided(mat):
     """Backface Culling off draws both sides: material flag 4 (no culling)
-    and the bullet faces' flag 1."""
+    and, unless the Both sides setting says otherwise, the bullet faces'
+    flag 1 (face_flags)."""
     return mat is not None and not mat.use_backface_culling
 
 
@@ -365,13 +370,15 @@ def alpha_test(mat):
 
 
 def face_flags(mat):
-    """A material's bullet-face flags: 1 (both sides) follows two-sided, as
-    OED took both from one render attribute (export_3di.cpp material_flags);
-    the others are the material's face settings."""
+    """A material's bullet-face flags: 1 (both sides) as its Both sides
+    setting says, by default following two-sided, as OED took both from one
+    render attribute (export_3di.cpp material_flags); the others are the
+    material's face settings."""
     if mat is None:
         return 0
     p = mat.o3d
-    return ((1 if two_sided(mat) else 0) | (0x100 if p.face_never_hit else 0) |
+    both = two_sided(mat) if p.face_both_sides == "DRAWN" else p.face_both_sides == "YES"
+    return ((1 if both else 0) | (0x100 if p.face_never_hit else 0) |
             (0x800 if p.face_front_only else 0) | (p.face_other_flags & ~0x901))
 
 
@@ -498,16 +505,18 @@ MATERIAL_ROWS = 24
 
 def check_row_name(name, what):
     """An ExportError unless `name` is a texture row name opennova-3di takes:
-    printable ASCII, at most 16 bytes, a file name without a path."""
-    if not name:
-        raise ExportError(f"{what}: a texture has no file name")
+    printable ASCII, at most 16 bytes, a file name without a folder. An empty
+    name is a row that names no file, which the format holds: 63 rows of the
+    JO models are empty (M24_1st's VS_BMTXMIRRT material keeps one in slot 2,
+    Chair3's FF_ST_OP one in slot 1)."""
     if any(not " " <= c <= "~" for c in name):
         raise ExportError(f"{what}: the texture name '{name}' is not printable ASCII")
     if len(name) > ROW_NAME_BYTES:
         raise ExportError(f"{what}: the texture name '{name}' exceeds {ROW_NAME_BYTES} characters (its row's "
                           "field)")
-    if any(c in name for c in "/\\:"):
-        raise ExportError(f"{what}: the texture name '{name}' holds a path; a texture row names a file")
+    if any(c in name for c in "/\\"):
+        raise ExportError(f"{what}: the texture name '{name}' names a folder; the game finds a texture by its "
+                          "file name alone")
 
 
 def file_name_ok(name, extensions):
@@ -522,6 +531,8 @@ def check_file_name(name, what):
     """An ExportError unless `name` can name a texture file export writes:
     <stem>.tga or <stem>.mdt, one dot, at most 15 bytes."""
     check_row_name(name, what)
+    if not name:
+        raise ExportError(f"{what}: a texture row whose image export writes (Write) needs a file name")
     if not file_name_ok(name, WRITTEN_EXTENSIONS):
         raise ExportError(f"{what}: export writes the texture '{name}' as a file, named <stem>.tga or <stem>.mdt "
                           f"with one dot and at most {FILE_NAME_BYTES} characters, as retail packs them")
@@ -708,10 +719,11 @@ class TextureRun:
 
 # --- export -----------------------------------------------------------------
 
-# A mesh a material draws on: its object's name, the names of its render UV
-# map (UV0) and of the first other one (UV1), None where it lacks them, and
-# the area its triangles of that material cover on UV0.
-MeshUse = namedtuple("MeshUse", "name render second area")
+# A mesh a material sits on: its object's name, the names of its render UV
+# map (UV0) and of the first other one (UV1), None where it lacks them, the
+# area its triangles of that material cover on UV0, and whether any triangle
+# draws with it (a material the mesh only holds in a slot draws nothing).
+MeshUse = namedtuple("MeshUse", "name render second area drawn")
 
 
 class ModelMaterials:
@@ -738,11 +750,15 @@ class ModelMaterials:
             self.used.append(mat)
         return self.first_use[key]
 
-    def record_uvs(self, ob, ev, mesh, uv0):
-        """What an exported mesh's UV maps give the materials it draws with:
-        `mesh` is the evaluated object `ev`'s mesh with its loop triangles,
-        `uv0` its render UV map's coordinates (two per loop, None without a UV
-        map). Export checks a material's textures against them."""
+    def record_mesh(self, ob, ev, mesh, uv0):
+        """What an exported mesh gives the model's materials: `mesh` is the
+        evaluated object `ev`'s mesh with its loop triangles, `uv0` its render
+        UV map's coordinates (two per loop, None without a UV map). Its UV maps
+        are what export checks the textures of the materials it draws with
+        against. A material in a slot no face draws with is part of the model
+        when its Export order places it: retail models keep such materials
+        (880 of them in 208 of the 2,413 JO models), and import gives each its
+        order (keep_unused)."""
         layers = mesh.uv_layers
         render = next((l for l in layers if l.active_render), layers[0]).name if len(layers) else None
         second = next((l.name for l in layers if l.name != render), None) if render is not None else None
@@ -756,10 +772,16 @@ class ModelMaterials:
             corners = np.asarray(uv0, dtype=np.float64).reshape(-1, 2)[loops].reshape(-1, 3, 2)
             e1, e2 = corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]
             area = 0.5 * np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0])
-        for slot in np.unique(slots):
-            mat = export.slot_material(ev, int(slot))
+        drawn = [int(slot) for slot in np.unique(slots)]
+        for slot in drawn:
+            mat = export.slot_material(ev, slot)
             self.meshes.setdefault(mat.name if mat is not None else None, []).append(
-                MeshUse(ob.name, render, second, float(area[slots == slot].sum())))
+                MeshUse(ob.name, render, second, float(area[slots == slot].sum()), True))
+        for slot in range(len(ev.material_slots)):
+            mat = export.slot_material(ev, slot)
+            if slot not in drawn and mat is not None and mat.o3d.order >= 0:
+                self.index_of(mat)
+                self.meshes.setdefault(mat.name, []).append(MeshUse(ob.name, render, second, 0.0, False))
 
     def strip_alpha(self, index):
         """Strips draw in the alpha pass under a blending shader (OED's
@@ -847,6 +869,8 @@ class ModelMaterials:
         key = mat.name if mat is not None else None
         caps = shader_flags(shader)
         for use in self.meshes.get(key, []):
+            if not use.drawn:
+                continue
             if textured and use.render is None:
                 raise ExportError(f"{use.name}: it has no UV map, but its material {key} draws a texture: unwrap "
                                   "it")
@@ -897,11 +921,14 @@ class ModelMaterials:
         listed = {}
         if mat is not None:
             for t in mat.o3d.textures:
-                name = t.name.strip()
+                name = t.name
                 check_row_name(name, what)
+                if not name and caps & SLOT_SAMPLED.get(t.slot, 0):
+                    self.exporter.note(f"{what}: its slot {t.slot} texture row names no file, and its shader {shader} "
+                                       "samples that slot: the game has no texture to load there")
                 file = None
                 if t.image is not None and t.write:
-                    if os.path.splitext(name)[1].lower() in WRITTEN_EXTENSIONS:
+                    if not name or os.path.splitext(name)[1].lower() in WRITTEN_EXTENSIONS:
                         check_file_name(name, what)
                         file = ImageFile(t.image)
                     else:
@@ -1154,15 +1181,16 @@ class ModelMaterials:
 def import_image(builder, name):
     """The Blender image of texture reference `name`, loaded once per import
     from the file `opennova-3di scene` resolved beside the model (None, with a
-    note, when it found none). An image this load makes is named after the
-    reference, which export names it by (file_reference)."""
+    note, when it found none; None for an empty name, a row that names no
+    file). An image this load makes is named after the reference, which export
+    names it by (file_reference)."""
     if name in builder.images:
         return builder.images[name]
     path = builder.sc["texfiles"].get(name)
     img = None
-    if not path:
+    if name and not path:
         builder.note(f"texture {name} not found beside the model")
-    else:
+    elif path:
         try:
             img = bpy.data.images.load(path, check_existing=True)
             if img.users == 0:
@@ -1285,6 +1313,25 @@ def import_materials(builder):
         shade(mat, m, shown, blend)
         out.append(mat)
     return out
+
+
+def keep_unused(builder, mats, lod_objects):
+    """Put the model's materials no strip draws with in the slots of its first
+    mesh, where export takes them back by the Export order import gave each
+    (ModelMaterials.record_mesh): retail keeps such materials, and the model's
+    material table keeps its indices. `lod_objects` are the objects each LOD
+    built; a model without a mesh cannot hold them, and says so."""
+    drawn = {s["material"] for lod in builder.sc["lods"] for part in lod["parts"] for s in part["strips"]}
+    unused = [mat for i, mat in enumerate(mats) if i not in drawn]
+    if not unused:
+        return
+    holder = next((ob for objs in lod_objects for ob in objs if ob.type == "MESH" and len(ob.data.polygons)), None)
+    if holder is None:
+        builder.note(f"{len(unused)} materials no strip draws with are not carried: the model has no mesh to hold "
+                     "them")
+        return
+    for mat in unused:
+        holder.data.materials.append(mat)
 
 
 def shade(mat, m, shown, blend):

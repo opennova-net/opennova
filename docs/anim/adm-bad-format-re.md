@@ -24,6 +24,7 @@ in place.
 | Component | Verdict | Evidence |
 |---|---|---|
 | `.adm` grammar (rows, comments, variant rings) | MATCHING | ctests `adm_parse`, `adm_comment`, `adm_trim_value`, `adm_variants`; 3 `[orig]` cites in `adm/adm.h` |
+| `.adm` variant rings at runtime (last token first, one head table per loaded file, the first-person load sequence, the loop-wrap serve and fade) | MATCHING (witnessed 2026-09-27, below); the joiner's replica rows keep entry 0 (D-NET-196) | ctests `anim_adm_ring_table` (the first-person table, load sequence and channel), `infantry` (both body channels' re-init and wrap serves) |
 | `.adm` writer | MATCHING (canonical form, not byte identity with hand-edited files) | ctests `adm_write`, `adm_parse`, `adm_variants`; the 82-table corpus sweep below |
 | `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `anim_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`) |
 | `.bad` writer and the construction seam | MATCHING (field-equal over the 477-clip corpus; byte-exact for our own files; the runtime poses a rebuilt set identically); every event states its `bottom` and `top`, which the seam carries and never derives (the event record section below) | ctests `bad_parse` (357_RST.bad's rows 0..frame_count), `bad_roundtrip` (the fixtures byte-exact, BINOC.bad field-equal, the pad row), `bad_build` (the derivations: BINOC.bad's bind, DT1PRONE's positions through DT1RST's bind), `anim_o3a_commands`, the gated `anim_o3a_retail_roundtrip` and `anim_o3a_runtime_playback` (US01.ADM and both first-person sets through `runtime/anim/skeletal_clips` over US01.3di, Mp5b_1st.3di and 357_1st.3di's bone tables, 1,827 poses, worst 2.4e-6 degrees); the corpus sweep below |
@@ -102,16 +103,66 @@ rows but never a multi-clip `anim_reset`. The port's `AiSystem::anim_rings`
 (`AnimVariantRings`, restored with the spawn baseline) serves both channels
 that way (2026-09-23; it had kept per-entity heads served in file order, which
 the CP01 `ai_threat` and `ai_corpse` regressions caught: an org1 body fires on
-its primary channel's clip events). Residuals: the joiner's replica person rows
-keep entry 0 because the wire carries no variant (D-NET-196), and registration
-starts both channels on entry 0 rather than the reset row's current head
-(identical for every retail `.adm`). Follow-up, not yet witnessed on its own
-path: the first-person weapon clip ring (`player_weapon.cpp`
-`weapon_ring_take_length` / `weapon_ring_take_variant`) and the weapon table's
-`auto` duration ring (`weapon_table_build.cpp` `table_clip_seconds`) still serve
-first to last; the viewmodel `.adm` registers through the same
-`AnimMap_RegisterBoneNode`, so retail most likely serves them last to first
-too.
+its primary channel's clip events). Slot 0 is no ring: each reset token
+replaces its head, so it serves the last reset token that loaded, and the
+first one fills every slot the table does not author; neither moves.
+Residuals: the joiner's replica person rows keep entry 0 because the wire
+carries no variant (D-NET-196), and registration starts both channels on
+entry 0 rather than the reset row's current head (identical for every retail
+`.adm`).
+
+**The first-person rings (witnessed 2026-09-27).** The viewmodel `.adm`
+registers through the same code, so its rows serve last to first too, and its
+heads are one table per loaded file: the first weapon (weapon.def order)
+naming an ANIMADM loads it and every later weapon naming the same file gets
+the same table back (`AnimMap_LoadAdmFile @0x40CC40`, the cached entry
+`@0x40CD45..0x40CD5C`). Three reads serve a slot's head and advance it: an
+`auto` action delay (`Anim_GetDurationTicks @0x53EE10`, `@0x53EE20..0x53EE26`;
+slot 0 reads 0 ticks), a play (`AnimMap_PlayAnimBySlot @0x40BDA0`,
+`@0x40BDB4..0x40BDC1`; a play of slot 0 does nothing, `@0x40BDA7`), and a loop
+wrap (below). The load serves before the match does: each weapon's
+`Anim_InitActions @0x541FA0` reads its `auto` fields in action order,
+DELAYSTART (`@0x5421C5`) before DELAYEND (`@0x5421D8`), and plays slot 241 at
+its END (`@0x54225A`); after the whole file `WeaponDefs_PlayIdleAnimAll
+@0x53FC10` plays 241 once more for every weapon with a table (`@0x53FC2C`, from
+`Game_StartMission @0x5254EB`). So for `anim_wpn_idle "a" "b" "c"` on a table
+one weapon names, whose IDLE row alone reads it (`DELAYEND auto`), the bake
+reads c, the END play serves b, the mission-start play serves a, and the first
+idle in the match serves c; every other read of slot 241 (a second `auto`
+field, another weapon naming the table) shifts each later serve by one. 29 of
+JOTAC's 49 ANIMADM tables are named by more than one weapon. The port keeps
+these heads in the weapon table (`anim::AdmRingTable`, one per ANIMADM;
+`build_weapon_table` runs the load sequence and a mount runs the descriptors
+it baked), and the first-person channel plays from them (`fp_channel_play`,
+`fp_channel_advance`; ctest `anim_adm_ring_table`).
+
+**The loop wrap (witnessed 2026-09-27).** A looping channel that wraps with no
+fade running and no end-notify armed serves its latched slot's ring again
+(`AnimChannel_AdvancePlayback @0x40B140`: t >= 1 `@0x40B165`, the loop bit
+`@0x40B167`, t -= 1 `@0x40B199`, the armed park that skips the rest
+`@0x40B19E`, the gate `@0x40B1B5..0x40B1C1`, the one global wrap callback
+`@0x40B1C8` -> `AnimMap_AdvanceToNextAnim @0x40BDF0`, the serve
+`@0x40BE02..0x40BE07`). The latched node served again (a one-token row, a
+reset-filled slot) plays on; any other node, even a repeated token naming the
+same `.bad`, fades in from its first frame over eight advances
+(`AnimChannel_InitFromParams(ch, clip, 8, 0, 0x1000)` `@0x40BE24`: the blend
+half at t = 0, weight 0, step 1/8) and takes the latch (`@0x40BE29..0x40BE33`).
+`AnimChannel_AdvanceBlendedPlayback @0x40B1E0` steps the incoming half, then
+the outgoing one, which wraps on without a callback, adds 1/8 and promotes the
+incoming half when its countdown ends (`@0x40B20C..0x40B224`). The
+first-person channel reaches the wrap from its action shims
+(`AnimChannel_AdvanceDispatch @0x40B960`), and a play re-inits only its
+primary half (`@0x40BDD1`), so a play inside a wrap fade does not cancel it:
+the pose blends the played clip toward the incoming variant until the
+countdown promotes that variant over it. The body channels reach it from
+`AnimMap_UpdateEntity` (`@0x40B7FE`), the secondary first; their wrap tick
+already reads through `AnimChannel_BlendKeyframes @0x40B340` at weight 0 (the
+wrapped variant's motion, bottom and top, the incoming variant's trigger at
+t = 0, `@0x40B38D`), a state change during the fade replaces the incoming half
+(`@0x40B761`) while the ring read stays consumed, and the secondary's fade
+changes only its pose. The port serves the wrap in `fp_channel_advance` and,
+for both body channels, in `advance_primary_channel` and the secondary's
+advance (ctests `anim_adm_ring_table`, `infantry`).
 
 The writer emits the canonical stock shape — `<key>\t\t\t\t"<clip>" "<clip2>"`
 rows, CRLF line ends, one leading blank line, and a `CRLF×3 + NUL` trailer —
@@ -202,6 +253,7 @@ actually mean:
 | Which clip binds the rig | MATCHING | ctest `anim_sample` (a two-variant reset row, a second reset row, an `anim_resetx` row ahead of the reset row, a reset variant that does not load); the 82-table scan below |
 | A table with no reset row | MATCHING (the rig does not load) | ctest `anim_sample` |
 | The translation gate | MATCHING | ctest `anim_sample` (the sampler over an untranslated bind (both modes) and a translated one, and the rig loader over an untranslated and a translated reset) |
+| A part whose parent is numbered after it | MATCHING (witnessed 2026-09-27, below) | ctest `anim_sample` (a model-table row hung off a later, padded row) |
 | Translation under a cross-fade | NOT PORTED (follow-up below) | |
 
 **Which clip binds.** A row names its slot by its key past the first five
@@ -268,6 +320,26 @@ the playing clip wrote in one more case: a bone of a translated bind past the
 playing clip's own bone count keeps whatever the scratch last held. No retail
 clip has fewer bones than its reset, and the port reads zero there.
 
+**A parent numbered after its child (witnessed 2026-09-27).**
+`BoneAnim_BuildWorldMatrices @ 0x40C400` fills one matrix per model part in a
+first loop (the clip's rotation with the translation zeroed,
+`@0x40C53F..0x40C553`, or matrix 0's copy for a part past the clip's bones,
+`@0x40C5B6`) and then runs the FK over the same array in place, reading each
+part's parent (the model row's +20, `@0x40C5F6`) as `outputMatrices[parent]`
+(`@0x40C674`). A parent with a lower index is finished by then; a parent
+numbered after its child is still that raw entry, so the child turns by the
+parent's rotation as if the parent sat at the model origin, losing its pivot
+carry and its ancestors' motion. Seventeen of the 2,409 models on the JOTAC
+base mount ship such rows, first-person models among them (`mmp5_1st.3di`
+hangs parts 10, 11, 13, 14, 16, 17, 20 and 23 off later-numbered parts;
+`c4_1st`, `hend_1st`, `land_1st`, `mor_1st`, `mwr_1st`, `oicw_1st` and
+`oicw_1stg` as well). `sample_clip` computes every part's
+rotation before any position and places such a child by the parent's raw
+rotation alone; a self-parent (the shipped root) stays the root. The PANM path
+reads a later parent's slot from what the previous model left in the shared
+array (`Model_TransformBoneMatrices @ 0x58E390`, `@0x58E46B`), which no port
+can reproduce.
+
 ## The writers and the construction seam (2026-09-24)
 
 ADR 0038 retired the `.bad` and `.adm` writers; ADR 0047 brings them back for
@@ -321,6 +393,26 @@ rows, `frame_count + 1` of each) it counts and refuses when short:
 - **The loader refuses a file over 500,000 bytes** [orig: `BoneFile_Load
   @ 0x40fff0`, the `0x7A120` gate]; the largest shipped clip is 298,172 bytes
   (`M60_1i`), and the seam refuses to mint a larger one.
+- **Every bone buffer the game samples a clip into holds 64 bones**, and
+  nothing clamps a clip's own count to it [orig: `BoneSystem_Init @ 0x410170`,
+  the 64-bone scratch, from `AnimMap_Init @ 0x40BE52`; `BoneAnim_TransformBones
+  @ 0x410360`; `BoneAnim_BuildWorldMatrices @ 0x40C400`, its 64-matrix locals];
+  the largest shipped clip carries 61 and the seam refuses more than 64
+  (`kBadMaxBones`).
+- **A loop steps `fps / (62 * frame_count)` of its cycle a tick** and takes one
+  away once at the wrap [orig: `AnimChannel_InitFromData @ 0x410560`, the step
+  `@0x4105BA`; `AnimChannel_AdvancePlayback @ 0x40B140`, `@0x40B199`], so a
+  step of a whole cycle or more never plays: at exactly one it holds its first
+  frame, past one its time runs on past the clip's rows. Every shipped clip is
+  30 fps over one frame or more; the seam refuses a loop at 62 times its frame
+  count or more.
+- **Across a table** (`bad_build_check_set`): every clip's file name packs, at
+  most 15 bytes with its `.bad` and ASCII, as every shipped name does (the
+  longest is `avenger_025.bad`) [orig: `PFF_FindEntry @ 0x7685D0`, a strcmp
+  over the entry's 16-byte name field]; and a clip carries translations only
+  when the reset clip does, since a bone moves only when both do (the
+  translation gate above; no shipped table pairs a translated clip with an
+  untranslated reset).
 - **The header words the reader never names are constant**: word 8 = 0,
   9 = 0, 10 = 8, 14 = 1, 17 = 1, 18 = 0, 19 = 0 across all 477.
 - **`event_count == frame_count + 1`** wherever a clip carries events, as the
@@ -557,11 +649,6 @@ All existing ledger IDs — this record mints none:
   `SkeletalClips::eval_pose_blended` lerps the two sampled poses' origins, so a
   translated clip cross-faded with an untranslated one reaches its translation
   over the window instead of at its start.
-- The `.adm` parser keeps only rows whose key starts `anim_`, compared with
-  case; retail reads no prefix (the slot is the key past its first five
-  characters, above), so a row keyed `ANIM_RESET` binds in retail and is
-  dropped by the parser. No shipped table keys a row without `anim_` (the
-  82-table scan).
 
 ## Playback clock follow-up (2026-09-11)
 

@@ -17,6 +17,7 @@
 #include <base/io/strutil.h>
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_build.h>
+#include <runtime/anim/adm_clip_index.h>
 
 #include "scene_text.h"
 #include "threedi_cli.h"
@@ -224,11 +225,26 @@ void parse_set(Parser &ps, std::istream &file, BadBuildSet &set) {
 }
 
 // What no single record can see: a row naming a clip the set lacks, two
-// clips under one name (they would write the same file), and a clip name or a
+// clips under one name (they would write the same file), a clip name or a
 // variant that is not a bare file stem (`build` writes each clip beside the
-// table, so a path there would write outside it).
+// table, so a path there would write outside it), a row whose key names no
+// anim slot, and the set's own checks (bad_build_check_set: every clip file
+// packs, translations only over a translated reset).
 void validate(Parser &ps, const BadBuildSet &set) {
 	ps.line = 0;
+	// The game registers a row only under the slot its key names past the
+	// first five characters and drops any other without a word.
+	// [orig: AnimMap_ParseConfigLine @0x40CB60, AnimMap_FindSlotByName
+	//  @0x40CFA0 returns -1 @0x40CFCE and the row registers nothing @0x40CBA4]
+	for (const BadBuildRow &row : set.rows) {
+		if (opennova::anim::adm_slot_index(row.key) < 0)
+			ps.errors.push_back(ps.path + ": row '" + row.key + "' names no anim slot (past its first "
+					"five characters the key is none of the 252 slot names `opennova-3di catalog` "
+					"lists), and the game drops such a row");
+	}
+	std::vector<std::string> problems;
+	bad_build_check_set(set, problems);
+	for (const std::string &problem : problems) ps.errors.push_back(ps.path + ": " + problem);
 	for (const BadBuildClip &clip : set.clips) {
 		if (!bad_build_bare_stem(clip.name))
 			ps.errors.push_back(ps.path + ": clip '" + clip.name + "' is not a bare file name");
@@ -281,6 +297,15 @@ int cmd_anim_build(const char *scene_path, const char *out_path) {
 
 	const std::filesystem::path out = std::filesystem::path(out_path);
 	const bool lone = opennova::strutil::iequals(out.extension().string(), ".bad");
+	// The file the game packs keeps its name: 15 bytes at most, the
+	// extension included (bad_build_packable_name).
+	const std::string out_name = out.filename().string();
+	if (!bad_build_packable_name(out_name)) {
+		std::fprintf(stderr, "opennova-3di: '%s' is %zu bytes; the game packs a file name of at most %zu "
+							 "ASCII bytes, its extension included\n",
+				out_name.c_str(), out_name.size(), kBadPackedNameMax);
+		return 1;
+	}
 	if (lone && (set.clips.size() != 1 || !set.rows.empty())) {
 		std::fprintf(stderr, "opennova-3di: a .bad output takes one clip and no table row\n");
 		return 1;

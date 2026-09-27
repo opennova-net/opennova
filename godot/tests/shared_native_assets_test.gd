@@ -65,22 +65,27 @@ func test_model_snapshots_share_until_refresh_and_survive_root_clear() -> void:
 func test_rig_snapshots_survive_remount_and_source_destruction() -> void:
 	_stage("idle.bad", "res://../fixtures/anim/idle.bad")
 	_stage("walk.bad", "res://../fixtures/anim/walk.bad")
-	_map('anim_reset "idle"\nanim_walk "walk"\n')
+	# A row registers only under the anim slot its key names (the 252 names of
+	# `opennova-3di catalog`); a key naming none registers nothing, as in the
+	# game [orig: AnimMap_ParseConfigLine @0x40CB60, the slot lookup
+	# AnimMap_FindSlotByName @0x40CFA0, nothing registered @0x40CBA4].
+	_map('anim_reset "idle"\nanim_walk_forward "walk"\nanim_notaslot "walk"\n')
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_root_path), OK)
 	var first := SkeletalAnim.new()
 	assert_true(first.load_from_resource_root(root, "rig.adm"))
-	var expected: Array = first.eval_pose("anim_walk", 0.1)
+	var expected: Array = first.eval_pose("anim_walk_forward", 0.1)
 	assert_false(expected.is_empty())
+	assert_false(first.has_clip("anim_notaslot"), "a key naming no slot registers nothing")
 
-	_map('anim_reset "idle"\nanim_changed "walk"\n')
+	_map('anim_reset "idle"\nanim_run_forward "walk"\n')
 	assert_eq(root.set_root_dir(_root_path), OK)
 	var second := SkeletalAnim.new()
 	assert_true(second.load_from_resource_root(root, "rig.adm"))
-	assert_true(first.has_clip("anim_walk"))
-	assert_false(first.has_clip("anim_changed"))
-	assert_true(second.has_clip("anim_changed"))
-	assert_false(second.has_clip("anim_walk"))
+	assert_true(first.has_clip("anim_walk_forward"))
+	assert_false(first.has_clip("anim_run_forward"))
+	assert_true(second.has_clip("anim_run_forward"))
+	assert_false(second.has_clip("anim_walk_forward"))
 
 	assert_ne(root.set_root_dir(_root_path.path_join("absent")), OK)
 	var missing := SkeletalAnim.new()
@@ -89,5 +94,5 @@ func test_rig_snapshots_survive_remount_and_source_destruction() -> void:
 
 	root.clear()
 	root = null
-	assert_eq(first.eval_pose("anim_walk", 0.1), expected)
-	assert_eq(second.eval_pose("anim_changed", 0.1), expected)
+	assert_eq(first.eval_pose("anim_walk_forward", 0.1), expected)
+	assert_eq(second.eval_pose("anim_run_forward", 0.1), expected)

@@ -47,6 +47,12 @@ public:
 	X(String, anim_key, STRING)                                             \
 	X(int, anim_variant, INT)                                               \
 	X(int, anim_advance_ticks, INT)                                         \
+	/* a loop wrap's fade toward the slot's next ring entry */              \
+	X(bool, anim_blending, BOOL)                                            \
+	X(String, anim_blend_key, STRING)                                       \
+	X(int, anim_blend_variant, INT)                                         \
+	X(int, anim_blend_ticks, INT)                                           \
+	X(float, anim_blend_weight, FLOAT)                                      \
 	X(int, play_serial, INT)                                                \
 	/* the last-started action's legs (ordered delivery is the event drain) */ \
 	X(int, action_serial, INT)                                              \

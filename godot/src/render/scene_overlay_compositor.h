@@ -62,7 +62,7 @@ public:
 	int append(opennova::renderer::SceneOverlaySlot p_slot, Node *p_model,
 			const float p_light_scale_rgb[3], float p_fog_visibility,
 			SceneOverlaySubmission &r_submission,
-			const AppendOptions &p_options = AppendOptions());
+			const AppendOptions &p_options);
 	// Take the model's meshes out of every camera (layer mask 0) so only the
 	// stage draws them; re-applied every frame because a model rebuild
 	// re-stamps its presentation layers.

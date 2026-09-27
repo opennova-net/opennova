@@ -24,6 +24,7 @@ int adm_slot_index(std::string_view key) {
 void AdmClipIndex::clear() {
 	adm_name_.clear();
 	lengths_.clear();
+	clips_.clear();
 }
 
 int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
@@ -57,6 +58,7 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 		// AnimMap_RegisterBoneNode @ 0x40c2d0].
 		const size_t variant_count = adm.entries[i].variant_count;
 		std::vector<float> &lengths = lengths_[key];
+		std::vector<AdmClipFacts> &clips = clips_[key];
 		for (size_t v = 0; v < variant_count; ++v) {
 			const char *value = adm.entries[i].variants[v];
 			if (value == nullptr || value[0] == '\0') {
@@ -65,12 +67,19 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 			const auto file = assets->bone_animation(value);
 			if (!file) continue;
 			const BadFile &bf = *file;
-			lengths.push_back(bf.fps > 0 && bf.frame_count > 0
+			AdmClipFacts facts;
+			facts.seconds = bf.fps > 0 && bf.frame_count > 0
 					? static_cast<float>(bf.frame_count) / static_cast<float>(bf.fps)
-					: 0.0f);
+					: 0.0f;
+			facts.fps = bf.fps;
+			facts.frames = bf.frame_count;
+			facts.loop = (bf.flags & 0x1u) != 0; // [orig: the loop bit @ 0x40B167]
+			lengths.push_back(facts.seconds);
+			clips.push_back(facts);
 		}
 		if (lengths.empty()) {
 			lengths_.erase(key);
+			clips_.erase(key);
 		}
 	}
 	return static_cast<int>(lengths_.size());
@@ -81,6 +90,11 @@ const std::vector<float> *AdmClipIndex::lengths_for(const std::string &key) cons
 	// @ 0x40cfa0, stricmp on key + 5].
 	auto it = lengths_.find(adm_slot_key(key));
 	return it != lengths_.end() ? &it->second : nullptr;
+}
+
+const std::vector<AdmClipFacts> *AdmClipIndex::clips_for(const std::string &key) const {
+	auto it = clips_.find(adm_slot_key(key));
+	return it != clips_.end() ? &it->second : nullptr;
 }
 
 } // namespace opennova::anim

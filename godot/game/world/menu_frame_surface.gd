@@ -8,8 +8,8 @@ extends RefCounted
 ## frame on close, fitting the MenuFrame to its layout source, forwarding the
 ## frame's gui input to the MenuDriver, wiring the resize source, and loading
 ## the .mns style. Pure static helpers over the presenter's own typed members;
-## each presenter keeps its 1-line _recompute_fit so the resize signals have a
-## bound Callable.
+## the armory and deploy presenters keep a 1-line _recompute_fit so their resize
+## signals have a bound Callable.
 
 ## The canonical menu stylesheet name the original engine looks for
 ## (MenuShell's default).

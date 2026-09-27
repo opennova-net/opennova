@@ -50,6 +50,8 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::game, DEFVAL(String("jo")));
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir"),
 			&LaunchFlags::resource_dir);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir_given"),
+			&LaunchFlags::resource_dir_given);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("loose_mission"),
 			&LaunchFlags::loose_mission);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("loose_root_allowed"),
@@ -88,6 +90,10 @@ String LaunchFlags::game(const String &fallback) {
 
 String LaunchFlags::resource_dir() {
 	return to_gd(parse().resource_dir);
+}
+
+bool LaunchFlags::resource_dir_given() {
+	return parse().resource_dir_given;
 }
 
 String LaunchFlags::loose_mission() {

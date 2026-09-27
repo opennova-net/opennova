@@ -1,8 +1,8 @@
 {
-  "_comment": "The closed environment-variable set (docs/dev-env-vars.md) for scripts/lint/env_lint.py: the two machine roots read only by the three resolvers and the scripts/mcp/game_mcp.py launch default, GODOT_BIN in the scripts, the deployed service's own 12-factor config, and the OS variables at their known sites. A new read anywhere else is a launch flag, an argv option or an MCP tool argument, not an env var.",
+  "_comment": "The closed environment-variable set (docs/dev-env-vars.md) for scripts/lint/env_lint.py: the two machine roots read by the three resolvers, the scripts/mcp/game_mcp.py launch default and scripts/ci/test_suites.py preflight, GODOT_BIN in the scripts, the deployed service's own 12-factor config, and the OS variables at their known sites. A new read anywhere else is a launch flag, an argv option or an MCP tool argument, not an env var.",
   "gates": {
-    "OPENNOVA_JO_DIR": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1", "scripts/mcp/game_mcp.py"],
-    "OPENNOVA_JO_ASSETS": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1"]
+    "OPENNOVA_JO_DIR": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1", "scripts/mcp/game_mcp.py", "scripts/ci/test_suites.py"],
+    "OPENNOVA_JO_ASSETS": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1", "scripts/ci/test_suites.py"]
   },
   "files": {
     "scripts/*.sh": ["GODOT_BIN", "HOME", "APPDATA", "XDG_DATA_HOME"],
@@ -14,7 +14,6 @@
     "tests/common/test_paths.h": ["TEMP", "TMP"],
     "apps/novaworld_server/*": ["*"],
     "deploy/*": ["*"],
-    "launcher/*": ["*"],
     "web/src/*": ["*"],
     "backend/*": ["*"],
     "infra/*": ["*"]
@@ -25,7 +24,6 @@
     "scripts/net/lib.ps1",
     "apps/novaworld_server/*",
     "deploy/*",
-    "launcher/*",
     "web/src/*",
     "backend/*",
     "infra/*"

@@ -313,7 +313,6 @@ void DebugArgSpec::_bind_methods() {
 			&DebugArgSpec::marshal);
 	ClassDB::bind_method(D_METHOD("between", "lo", "hi"), &DebugArgSpec::between);
 	ClassDB::bind_method(D_METHOD("optional", "default"), &DebugArgSpec::optional);
-	ClassDB::bind_method(D_METHOD("kind_name"), &DebugArgSpec::kind_name);
 	ClassDB::bind_method(D_METHOD("describe"), &DebugArgSpec::describe);
 	ClassDB::bind_method(D_METHOD("to_json_value"), &DebugArgSpec::to_json_value);
 	ClassDB::bind_method(D_METHOD("coerce", "raw"), &DebugArgSpec::coerce);

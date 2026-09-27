@@ -55,7 +55,6 @@ private:
 	float lod_quality = 1.0f;
 	// The polygon-detail setting 0..3; 3 is the max-quality target.
 	int polygon_detail = 3;
-	bool tile_overlay_enabled = true;
 
 	// Per-tile: one single-surface ArrayMesh per LOD level
 	struct TileInfo {
@@ -256,9 +255,6 @@ public:
 
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;
-
-	void set_tile_overlay_enabled(bool p_enabled);
-	bool get_tile_overlay_enabled() const;
 
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;

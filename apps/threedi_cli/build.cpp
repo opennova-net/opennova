@@ -95,6 +95,8 @@ struct PendingOcc {
 	bool open = false;
 	int line = 0;
 	int type = 0, section_a = 0, section_b = 0;
+	bool sphere_given = false;
+	ThreediBuildOccSphere sphere;
 	std::vector<ThreediBuildVec3> verts;
 	std::vector<std::array<double, 4>> planes;
 	std::vector<std::array<int, 4>> faces;
@@ -148,7 +150,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			}
 		}
 		if (!model.add_occ_record(static_cast<uint8_t>(done.type), done.section_a, done.section_b, done.verts, done.faces,
-					done.planes))
+					done.planes, done.sphere_given ? &done.sphere : nullptr))
 			ps.error_at(done.line, "occ: the record needs more than 32 planes");
 	};
 	const auto flush_volume = [&]() {
@@ -907,11 +909,21 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("occ needs type section connecting (bytes)");
 				continue;
 			}
+			// The record's sphere as stored, when it is not the one build
+			// derives from the vertices (206 retail models mirror its centre).
+			const bool sphere = in.more();
+			double s[4] = {0.0, 0.0, 0.0, 0.0};
+			if (sphere && !in.numbers(s, 4)) {
+				ps.error("occ's sphere is cx cy cz r");
+				continue;
+			}
 			occ.open = true;
 			occ.line = ps.line;
 			occ.type = static_cast<int>(type);
 			occ.section_a = static_cast<int>(a);
 			occ.section_b = static_cast<int>(b);
+			occ.sphere_given = sphere;
+			occ.sphere = ThreediBuildOccSphere{ThreediBuildVec3{s[0], s[1], s[2]}, s[3]};
 		} else if (key == "cxlt") {
 			// A CXLT row (mission axes, the frame of the section offsets), in
 			// order; a bare `cxlt` declares the table empty. Any cxlt record

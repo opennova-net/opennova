@@ -108,7 +108,8 @@ static int test_decompile_two_pass_size(void) {
     return 1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     RUN_TEST(test_decompile_synth_gamemus);
     RUN_TEST(test_decompile_two_pass_size);
 

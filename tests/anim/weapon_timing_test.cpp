@@ -68,6 +68,7 @@ const opennova::def::DefWeaponAction *def_action(const opennova::def::DefWeaponD
 } // namespace
 
 int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	if (argc != 2) return 2;
 	WeaponTimingRequest request;
 	request.actions = {action(wa::kFire), action(wa::kReload, 1.0)};

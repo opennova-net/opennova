@@ -18,7 +18,6 @@ TerrainTileCompositionDemandQueue::enqueue(
 	for (const TerrainTileCompositionDemand &queued : demands_) {
 		if (queued.layer == demand.layer &&
 				queued.generation > demand.generation) {
-			result.rejected_stale = true;
 			return result;
 		}
 	}

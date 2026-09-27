@@ -3,8 +3,8 @@
 This repository deploys a complete NovaWorld stack (the gate, the NovaWorld
 server, the legacy HTTP services, and the web portal) to your own cloud. Anyone
 can stand up their own instance with the same commands the project maintainers
-use. The original games keep working against your server through the launcher's
-hosts-file redirection.
+use. The original games reach your server through a hosts-file line that points
+`gs.novaworld.net` at it (see DEVELOPING.md, "Test with retail Joint Operations").
 
 ## What you need
 
@@ -14,7 +14,7 @@ hosts-file redirection.
 - **A 1Password account** (any paid plan has service accounts) with a vault for
   this deployment.
 - **An AWS account** and **a Cloudflare-managed domain** (optional but
-  recommended for TLS and the launcher's `nw.<domain>` anchor record).
+  recommended for TLS).
 
 No secret is ever committed to the repository or written to your disk outside a
 container's in-memory tmpfs. The only secret you handle directly is a 1Password
@@ -56,11 +56,9 @@ op item create --vault OpenNova-Deploy --title github --category 'API Credential
   owner=opennova-net
 ```
 
-`app-prod` carries two expansion secrets: `expansion_github_token` (a GitHub PAT
-with `contents:write` on the expansion repos — the server pushes a release tag
-with it) and `expansion_publish_token` (the bearer the expansion repo's CI
-presents to the server's `/admin/internal/.../publish` callback; the same value
-is set as an Actions secret on each expansion repo by the `infra/github` stack).
+`app-prod`'s two `expansion_*` fields and the `github` item feed only the
+`infra/github` stack, which is pending retirement (ADR 0048, `TODO.md`); the
+server no longer reads them.
 
 The `op://` reference paths the toolbox reads are listed in
 `deploy/env/terraform.env.tpl` and `deploy/env/app.prod.env.tpl`.
@@ -121,7 +119,7 @@ Set `ONNET_PUBLIC_HOST` in `deploy/env/app.prod.env` to the EIP that
 `infra apply` reports (`terraform output public_ip`).
 
 `infra apply` also creates the `launcher_ci` IAM user (S3 upload to the
-downloads bucket) and outputs its keys. Store them in the vault so the GitHub
+downloads bucket; pending retirement with the launcher, ADR 0048) and outputs its keys. Store them in the vault so the GitHub
 stack (next step) can hand them to the expansion repos:
 
 ```bash
@@ -130,7 +128,12 @@ op item create --vault OpenNova-Deploy --title expansions-ci --category 'API Cre
   secret_access_key="$(./deploy/run.sh infra output -raw ci_user_secret_access_key)"
 ```
 
-## 4. Provision the GitHub stack (expansion repos)
+## 4. Provision the GitHub stack (expansion repos, pending retirement)
+
+ADR 0048 removed the server's expansion publish callback and the web catalogue;
+this stack stays only until the infrastructure retirement in `TODO.md`. Skip it
+on a new deployment, and do not `github apply` on an existing one: it regenerates
+`backend/seed/0002_expansions.generated.sql`, which the server can no longer seed.
 
 The expansion content repos and their Actions secrets are managed by
 `infra/github`. Because the repos already exist, adopt them once with an import,
@@ -173,84 +176,3 @@ from the vault into a tmpfs, and drives the remote docker engine over
 ```
 
 A backup sidecar also runs nightly (see `deploy/backup/`).
-
-## The launcher
-
-Players install the launcher (published from CI to `downloads.<domain>`). It
-redirects `gs.novaworld.net` to your server via a managed hosts-file block and
-resolves your server IP from `GET /api/server-info`, so you do not hardcode it
-into the launcher. See `launcher/README.md`.
-
-### Cutting a launcher release
-
-`.github/workflows/launcher-publish.yml` fires on a `launcher-v*` tag: it builds
-the single-file `OpenNovaLauncher.exe`, attaches it to a GitHub Release, and — if
-the AWS secrets/vars below are set — uploads the exe plus two manifests to
-`downloads.<domain>/launcher/`: `version.json` (the launcher's AutoUpdater feed)
-and `app.json` (the web download box on the landing page reads this).
-
-One-time, wire the CI credentials from the infra output (reuse the launcher_ci
-IAM user) + the bucket variable:
-
-```bash
-gh secret  set LAUNCHER_AWS_ACCESS_KEY_ID     -b "$(./deploy/run.sh infra output -raw ci_user_access_key_id)"
-gh secret  set LAUNCHER_AWS_SECRET_ACCESS_KEY -b "$(./deploy/run.sh infra output -raw ci_user_secret_access_key)"
-gh variable set DOWNLOADS_BUCKET -b downloads.opennova.net   # mandatory; DOWNLOADS_DOMAIN/AWS_REGION default OK
-```
-
-Then cut a release (the tag version must match `<Version>` in
-`launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj` — currently `0.2.0`):
-
-```bash
-git tag launcher-v0.2.0 && git push origin launcher-v0.2.0
-```
-
-Once it runs, the landing page's download button appears automatically (it
-fetches `downloads.<domain>/launcher/app.json`). To bump versions later, edit the
-csproj `<Version>` first, commit, then tag the matching `launcher-v<x>`.
-
-## Adding an expansion
-
-Expansions are defined once in Terraform: `local.expansions` in
-`infra/github/expansions.tf`. Add an entry, then `./deploy/run.sh github apply`
-(`github import` first if the repo already exists). That one apply creates the
-GitHub repo, sets its Actions secrets, and regenerates the catalogue seed
-`backend/seed/0002_expansions.generated.sql` — commit the regenerated file so CI
-bakes it into the server image. No C++/SQL/web edits; the server reads the
-catalogue (and slug→repo mapping) from the DB, the web from `/api/expansions`.
-See `infra/github/README.md` → "Add an expansion".
-
-## Cutting an expansion release
-
-Expansions appear in the web Expansions page and the launcher's Expansion Manager
-as soon as their catalogue row is seeded (the Terraform-generated
-`backend/seed/0002_expansions.generated.sql`) — but that's metadata only. The
-downloadable file is written by **cutting a release**, which is separate. Until
-you do, the launcher shows the expansion as "Not published yet" (Install disabled).
-The web page lists the expansion either way: it never offers a direct download,
-installs go through the launcher.
-
-To publish one (e.g. the `onjo01` demo mod), with the admin token from the vault:
-
-```bash
-ADMIN=$(op read op://OpenNova-Deploy/app-prod/admin_api_token)
-curl -X POST https://nw.<domain>/api/admin/expansions/onjo01/release \
-  -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
-  -d '{"version":"0.0.1"}'
-```
-
-That tags `onjo01-v0.0.1` on `opennova-net/onjo01`; the repo's publish workflow
-packages its LFS content, uploads to `downloads.<domain>/expansion/onjo01/...`, and
-calls back to `/admin/internal/expansions/onjo01/publish` which writes the
-`expansion_files` row. Verify:
-
-```bash
-curl https://nw.<domain>/api/admin/releases -H "Authorization: Bearer $ADMIN"  # status: published
-curl https://nw.<domain>/api/expansions                                         # onjo01 has files[].downloadUrl
-```
-
-Then the launcher (Refresh) shows it as installable. **Prerequisite:** the
-`opennova-net/<slug>` repo must actually contain packageable content (a `.pff` at the
-repo root, LFS-tracked); an empty repo produces an empty zip. The repo's workflow must
-be the reconciled form (see `docs/net/expansion-publish-workflow.yml.example`) and its
-Actions secrets come from `infra/github`.

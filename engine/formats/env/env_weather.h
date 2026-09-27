@@ -177,21 +177,12 @@ inline constexpr LightningStep kLightningSequenceB[] = {
 // epoch in the sequence.
 int lightning_flash_level(const LightningStep *sequence, int count, int tick);
 
-// Flash injection: lightning_rgb scaled by level into per-block additive
-// slots — sky >> 8, fog and skyfog >> 9, ground >> 10
-// [orig: Environment_SetLightningFlash @ 0x57d320].
-struct LightningAdditives {
-	Rgb sky;
-	Rgb fog;
-	Rgb skyfog;
-	Rgb ground;
-};
-LightningAdditives lightning_additives(const Rgb &lightning_rgb, int level);
-
-// Packed-byte form of the same computation, exact to the MMX sequence
-// (pmullw then psrlw per slot; the directional-light slot is explicitly
-// ZEROED — lightning never brightens the sun) [orig: Environment_SetLightningFlash
-// @ 0x57d320]. lightning_packed is 0x00RRGGBB.
+// Flash injection: the lightning color scaled by level into per-block
+// additive slots (sky >> 8, fog and skyfog >> 9, ground >> 10), packed bytes
+// exact to the MMX sequence (pmullw then psrlw per slot; the directional-light
+// slot is explicitly ZEROED — lightning never brightens the sun)
+// [orig: Environment_SetLightningFlash @ 0x57d320]. lightning_packed is
+// 0x00RRGGBB.
 struct LightningAdditivesPacked {
 	uint32_t sky = 0;    // >> 8
 	uint32_t fog = 0;    // >> 9
@@ -576,7 +567,8 @@ int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
 // the .til tile-overlay quad (DIFFUSE = HALF on all four vertices under a
 // TEXTURE x DIFFUSE MODULATE2X combine — caps toggle dword_32656AC defaults
 // true [orig: PolyTrn_RenderTile @ 0x60df0d -> PolyTrn_DrawTileOverlayQuad @ 0x604700])
-// and the foliage lightmap sample below.
+// and the foliage lightmap sample (FULL, ported as runtime/terrain/lighting's
+// terrain_modulate_color_argb).
 
 struct TerrainTint {
 	uint32_t full = 0xFFFFFFFFu; // c | 0xFF000000
@@ -590,11 +582,6 @@ TerrainTint terrain_tint_from_packed(uint32_t terrain_color_packed);
 // color, then splits. The retail default 255,255,255 yields FULL 0xFFFFFFFF /
 // HALF 0xFF7F7F7F.
 TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb);
-
-// Foliage lightmap tint [orig: Terrain_SampleColorMapTinted @ 0x606030]: per
-// channel min((texel_c * FULL_c) >> 7, 255), alpha passthrough. 128 is
-// identity; the default 0xFF tint is a ~2x saturating brighten.
-uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint);
 
 // The tile-overlay combine runs TEXTURE x DIFFUSE(HALF) under MODULATE2X, so
 // a single-multiply reimpl shader consumes 2*HALF/255 per channel — 254/255 at

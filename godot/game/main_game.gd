@@ -3,9 +3,11 @@ extends GameShell
 
 # Runtime shell: boots into the game's menu front-end (MenuShell, driving the
 # .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
-# when the player starts a mission, with pause + return-to-menu on demand. The
-# engine ships no game data; everything (menus, audio, terrain, missions) loads
-# from the required --resource-dir supplied at launch.
+# when the player starts a mission, with pause + return-to-menu on demand.
+# Everything (menus, audio, terrain, missions) loads from the --resource-dir
+# supplied at launch; without one the shell boots OpenNova's own bundled
+# assets/, whose placeholder menu hands over to a picked retail install through
+# PLAY RETAIL (ADR 0048).
 
 const PlayerOptionsScript := preload("res://game/player_options.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
@@ -74,6 +76,8 @@ var _frame_stats := FrameStats.new()
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
 var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
+var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER
+var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
@@ -145,6 +149,7 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 	var load_operation := _world_load.cancel_current()
 	_world_load_pending = false
 	finish_hud_hidden_capture()
+	_close_retail_picker()
 	for presenter in [
 		_player_presenter, _armory_presenter, _deploy_presenter, _hud_presenter,
 	]:
@@ -229,8 +234,8 @@ func current_resource_root() -> ResourceRoot:
 
 func _ready() -> void:
 	var dir := LaunchFlags.resource_dir()
-	if dir.is_empty():
-		push_warning("OpenNova requires game data. Usage: opennova.exe -- --resource-dir <path> [--loose-root] [/d]")
+	if dir.is_empty() and LaunchFlags.resource_dir_given():
+		push_warning("OpenNova: --resource-dir needs a path. Usage: opennova.exe [-- --resource-dir <path> [--loose-root] [/d]]")
 		get_tree().quit(2)
 		return
 	_previous_auto_accept_quit = get_tree().auto_accept_quit
@@ -316,6 +321,12 @@ func _ready() -> void:
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
+	if dir.is_empty():
+		# No --resource-dir: OpenNova's own placeholder menu. The launch
+		# shortcuts below all need game data, so they only follow a real dir.
+		if not _enter_bundled_menu():
+			get_tree().quit(1)
+		return
 	if not _enter_menu(dir):
 		get_tree().quit(1)
 		return
@@ -357,9 +368,6 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-# F9 (re)opens the asset-folder picker from the front-end so the player can point
-# the runtime at a different game folder. Restricted to the menu state so an active
-# mission is never yanked out from under a remount; ignored while a picker is open.
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null:
@@ -615,6 +623,84 @@ func _enter_menu(dir: String) -> bool:
 	return true
 
 
+# --- Bundled menu + retail picker (ADR 0048) ----------------------------------
+
+# No --resource-dir: mount OpenNova's own bundled assets/ and show its
+# placeholder main menu, whose PLAY RETAIL hands over to a retail install.
+func _enter_bundled_menu() -> bool:
+	var root := BootRootMount.mount_bundled(BootRootMount.bundled_assets_dir())
+	if root == null:
+		return false
+	_root = root
+	return _enter_menu(root.get_root_dir())
+
+
+## PLAY RETAIL: the saved retail install when it still mounts, else the picker.
+## Public so lifecycle tests drive the same leg the button does.
+func play_retail() -> bool:
+	var saved := ResourceDirSettings.get_retail_dir()
+	if not saved.is_empty() and enter_retail_dir(saved):
+		return true
+	request_retail_dir()
+	return false
+
+
+func _on_play_retail() -> void:
+	play_retail()
+
+
+## Mount `dir` as the session's retail install and open its menu, saving it for
+## the next PLAY RETAIL. False (nothing saved, the current menu stays) when the
+## directory holds no game archives.
+func enter_retail_dir(dir: String) -> bool:
+	var root := BootRootMount.mount(dir, false)
+	if root == null:
+		return false
+	ResourceDirSettings.set_retail_dir(dir)
+	_root = root
+	return _enter_menu(root.get_root_dir())
+
+
+## CHANGE FOLDER (and PLAY RETAIL with nothing saved): the native folder picker.
+## Headless runs and an already-open picker skip it.
+func request_retail_dir() -> void:
+	if GameRuntimeRoot.is_headless() or _retail_picker != null:
+		return
+	var picker := FileDialog.new()
+	picker.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	picker.access = FileDialog.ACCESS_FILESYSTEM
+	picker.use_native_dialog = true
+	picker.title = "Select your Joint Operations folder"
+	var saved := ResourceDirSettings.get_retail_dir()
+	if not saved.is_empty():
+		picker.current_dir = saved
+	picker.dir_selected.connect(_on_retail_dir_selected)
+	picker.canceled.connect(_close_retail_picker)
+	_retail_picker = picker
+	add_child(picker)
+	picker.popup_centered_ratio(0.6)
+
+
+func _on_retail_dir_selected(dir: String) -> void:
+	_close_retail_picker()
+	if enter_retail_dir(dir):
+		return
+	var notice := AcceptDialog.new()
+	notice.title = "OpenNova"
+	notice.dialog_text = ("No Joint Operations game data was found in\n%s\n\n"
+			+ "Choose the folder that holds resource.pff, localres.pff and language.pff.") % dir
+	notice.confirmed.connect(notice.queue_free)
+	notice.canceled.connect(notice.queue_free)
+	add_child(notice)
+	notice.popup_centered()
+
+
+func _close_retail_picker() -> void:
+	if _retail_picker != null:
+		_retail_picker.queue_free()
+		_retail_picker = null
+
+
 # The one-shot MenuShell wiring (every return to the menu re-enters _enter_menu):
 # the five menu intents in this order, then the mp.mnu / player.mnu companions
 # and the LAN browser they drive.
@@ -627,6 +713,10 @@ func _wire_shell() -> void:
 	_menu_shell.return_to_menu_requested.connect(_on_return_to_menu)
 	_menu_shell.resume_requested.connect(resume)
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
+	_bundled_companion = BundledMenuCompanion.new()
+	_bundled_companion.play_retail_requested.connect(_on_play_retail)
+	_bundled_companion.change_folder_requested.connect(request_retail_dir)
+	_menu_shell.add_companion(_bundled_companion)
 	# Delegate mp.mnu and player.mnu to their respective companions.
 	_mp_companion = MpMenuCompanion.new()
 	_player_info_companion = PlayerInfoMenuCompanion.new()

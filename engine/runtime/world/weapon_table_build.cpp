@@ -2,7 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <formats/threedi/threedi_3di3.h>
-#include <runtime/anim/adm_clip_index.h>
+#include <runtime/anim/adm_ring_table.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
@@ -55,69 +55,28 @@ static_assert(world::kItemAttribNoDie == DEF_ITEM_ATTRIB_NODIE);
 
 namespace {
 
-// One definition-local copy of the AnimMap slot heads. The action bake probes
-// without advancing, then each automatic field serves and advances the named
-// ring [orig: AnimMap_FindSlotByName @0x40cfa0; Anim_GetDurationTicks
-// @0x53ee10]. Keeping this context inside one weapon iteration prevents an
-// earlier definition's reads from rotating a later definition's slots.
-struct WeaponTableClipRing {
-	std::string key;
-	std::vector<float> lengths;
-	size_t head = 0;
+// The bake's view of one weapon's ANIMADM rings. The existence probe is the
+// slot lookup and never advances; each automatic field serves and advances the
+// SHARED ring, so an earlier weapon's reads move a later one's heads. A read
+// of slot 0 is zero ticks. [orig: AnimMap_FindSlotByName @0x40cfa0, checked
+// by Anim_InitActions @0x5421ae; Anim_GetDurationTicks @0x53ee10, the serve
+// @0x53EE20..0x53EE26 and its zero for slot 0]
+struct WeaponTableRingContext {
+	anim::AdmRingTable *rings = nullptr;
+	std::string adm;
 };
-
-struct WeaponTableClipContext {
-	std::vector<WeaponTableClipRing> rings;
-};
-
-WeaponTableClipRing *find_clip_ring(
-		WeaponTableClipContext &ctx, const char *key) {
-	const std::string lower = strutil::to_lower(key != nullptr ? key : "");
-	for (WeaponTableClipRing &ring : ctx.rings)
-		if (ring.key == lower) return &ring;
-	return nullptr;
-}
 
 int table_clip_resolves(void *opaque, const char *key) {
-	return find_clip_ring(*static_cast<WeaponTableClipContext *>(opaque), key) != nullptr;
+	const WeaponTableRingContext &ctx = *static_cast<WeaponTableRingContext *>(opaque);
+	return ctx.rings->resolves(ctx.adm, key != nullptr ? key : "") ? 1 : 0;
 }
 
 float table_clip_seconds(void *opaque, const char *key) {
-	WeaponTableClipRing *ring = find_clip_ring(
-			*static_cast<WeaponTableClipContext *>(opaque), key);
-	if (ring == nullptr || ring->lengths.empty()) return -1.0f;
-	const float seconds = ring->lengths[ring->head];
-	ring->head = (ring->head + 1u) % ring->lengths.size();
-	return seconds;
-}
-
-void build_clip_context(const DefWeaponDef &def, const assets::AssetStore *resources,
-		WeaponTableClipContext &out) {
-	if (resources == nullptr) return;
-	// No authored animadm = no anim object at Def+372, so every 'auto' field
-	// collapses to zero through the empty-context lookup below ("Error, need
-	// to define a anim adm") [orig: Anim_InitActions @0x542180..0x542198;
-	// the per-block animadm buffer is consumed then cleared at each weapon
-	// `end` by WeaponDefs_ResetParseState @0x53ff90].
-	if (def.animadm[0] == '\0') return;
-	anim::AdmClipIndex clips;
-	clips.load(resources, def.animadm);
-	for (size_t i = 0; i < def.actions_count; ++i) {
-		const char *key = def.actions[i].anim;
-		if (key[0] == '\0') continue;
-		const std::string lower = strutil::to_lower(key);
-		bool duplicate = false;
-		for (const WeaponTableClipRing &ring : out.rings) {
-			if (ring.key == lower) {
-				duplicate = true;
-				break;
-			}
-		}
-		if (duplicate) continue;
-		const std::vector<float> *lengths = clips.lengths_for(key);
-		if (lengths == nullptr || lengths->empty()) continue;
-		out.rings.push_back(WeaponTableClipRing{lower, *lengths, 0});
-	}
+	WeaponTableRingContext &ctx = *static_cast<WeaponTableRingContext *>(opaque);
+	const std::string slot_key = key != nullptr ? key : "";
+	const anim::AdmServed served = ctx.rings->serve(ctx.adm, slot_key);
+	if (!served.valid() || anim::adm_slot_index(slot_key) == 0) return -1.0f;
+	return served.clip->seconds;
 }
 
 // The slot's TOTAL AMMO IN CLIPS [orig: WeaponSlot_GetTotalClips @0x5425F0]. The pool a fresh
@@ -350,13 +309,25 @@ world::WeaponTable build_weapon_table(
 			std::memcpy(dst.particleuserpoint, src.particleuserpoint,
 			            sizeof(dst.particleuserpoint));
 		}
-		WeaponTableClipContext clip_ctx;
-		build_clip_context(d, resources, clip_ctx);
+		// The first weapon naming an ANIMADM loads it and every later one gets
+		// the same rings back; no animadm, or one that does not load, leaves no
+		// anim object and every 'auto' field collapses to zero ("Error, need to
+		// define a anim adm"). The name is the block's own: the parse buffer is
+		// cleared at each weapon's END. [orig: AnimMap_LoadAdmFile @0x40CC40, the
+		// cached entry @0x40CD45..0x40CD5C; Anim_InitActions @0x542180..0x542198;
+		// WeaponDefs_ResetParseState @0x53ff90]
+		const bool has_adm = resources != nullptr && d.animadm[0] != '\0' &&
+				table.rings.load(resources, d.animadm);
+		WeaponTableRingContext ring_ctx{&table.rings, d.animadm};
 		world::weapon_fsm_bake(
 				action_rows.data(), action_rows.size(),
-				resources != nullptr ? table_clip_resolves : nullptr,
-				resources != nullptr ? table_clip_seconds : nullptr,
-				resources != nullptr ? &clip_ctx : nullptr, e.action_fsm);
+				has_adm ? table_clip_resolves : nullptr,
+				has_adm ? table_clip_seconds : nullptr,
+				has_adm ? &ring_ctx : nullptr, e.action_fsm);
+		// The bind ends by playing the idle slot on the weapon's table.
+		// [orig: Anim_InitActions, AnimMap_PlayAnimBySlot(adm, 241) @0x54225A]
+		if (has_adm) table.rings.serve(d.animadm, "anim_wpn_idle");
+		e.animadm = d.animadm;
 		e.action_fsm.auto_fire = (d.flags & DEF_WEAPON_FLAG_AUTO) != 0;
 		e.action_fsm.burst3 = (d.flags & DEF_WEAPON_FLAG_BURST) != 0;
 		e.action_fsm.clip_capacity = e.clipsize;
@@ -394,6 +365,12 @@ world::WeaponTable build_weapon_table(
 			table.entries.push_back(std::move(e));
 		}
 	}
+	// After the whole file every entry with a table plays its idle slot once
+	// more, in table order. [orig: WeaponDefs_PlayIdleAnimAll @0x53FC10, the play
+	// @0x53FC2C, run by Game_StartMission @0x5254EB]
+	for (const world::WeaponTableEntry &entry : table.entries)
+		if (entry.valid && table.rings.loaded(entry.animadm))
+			table.rings.serve(entry.animadm, "anim_wpn_idle");
 	return table;
 }
 

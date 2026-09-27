@@ -164,8 +164,6 @@ public:
                           int32_t lifetime_ticks, int32_t pitch_q16,
                           int32_t volume_q8_8, std::vector<LayerDesc> layers);
 
-    int marker_count() const { return static_cast<int>(markers_.size()); }
-
     // Embedder clock pump (HHMM already converted to hours by the embedder).
     void set_time_of_day_hours(float hours) { tod_hours_ = hours; }
 

@@ -16,16 +16,9 @@ namespace opennova::world::inspect {
 
 namespace {
 
-constexpr float kFixed16 = io::kFp16One;
-
 Vec3 mission_from_fixed3(const int32_t pos[3]) {
-	return Vec3{static_cast<float>(pos[0]) / kFixed16,
-			static_cast<float>(pos[1]) / kFixed16,
-			static_cast<float>(pos[2]) / kFixed16};
-}
-
-int32_t fixed_from_mission(float v) {
-	return static_cast<int32_t>(v * kFixed16);
+	return Vec3{io::fp16_16_to_float(pos[0]), io::fp16_16_to_float(pos[1]),
+			io::fp16_16_to_float(pos[2])};
 }
 
 // The AI half of the card — the old get_entity_debug body. A scripted remove
@@ -554,9 +547,9 @@ AiDebugReport ai_debug_report(World &world) {
 			if (const AiEntity *te = ai.for_handle(target)) {
 				for (int c = 0; c < 3; ++c) row.target_pos[c] = te->pos[c];
 			} else if (const Entity *tw = world.registry.get(target)) {
-				row.target_pos[0] = fixed_from_mission(tw->position.x);
-				row.target_pos[1] = fixed_from_mission(tw->position.y);
-				row.target_pos[2] = fixed_from_mission(tw->position.z);
+				row.target_pos[0] = io::float_to_fp16_16(tw->position.x);
+				row.target_pos[1] = io::float_to_fp16_16(tw->position.y);
+				row.target_pos[2] = io::float_to_fp16_16(tw->position.z);
 			}
 			if (const Entity *tw = world.registry.get(target))
 				row.target_name = tw->name;

@@ -9,9 +9,11 @@
 #include <cstddef>
 #include <vector>
 
+#include <net/npwire/ingame_decode.h>               // decode_frame_update / FrameUpdate
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/connection.h>
 #include <runtime/replication/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
-#include <runtime/replication/entity_wire_bridge.h> // snapshot_world
+#include <runtime/replication/entity_wire_bridge.h> // snapshot_world / class_for_type_id
 #include <runtime/world/player_spawn.h>        // spawn_remote_player
 #include <runtime/world/world.h>
 
@@ -46,6 +48,32 @@ inline world::EntityHandle admit_peer(world::World &w, std::vector<Connection> &
 		conns[idx].owned_entity_spawn_id = w.registry.get(h)->registry_spawn_id;
 	}
 	return h;
+}
+
+// Emit one S2C 0x0A to a freshly deployed pool-0 organic over a loopback, the
+// connection one phase short of the environment sub-block, and decode it into
+// `frame`. True when the datagram arrived, decoded, and is the phase-2 frame
+// carrying the environment sub-block; `frame` holds the decode either way. The
+// environment projection rides a real deployed player's 0x0A.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate]
+inline bool emit_phase2(world::World &w, FrameUpdate &frame) {
+	w.registry.configure_pool(0, 1);
+	world::Entity recipient;
+	recipient.kind = world::EntityKind::Organic;
+	recipient.health = 150;
+	const world::EntityHandle recipient_h = w.registry.spawn(0, recipient);
+	LoopbackChannel channel;
+	std::vector<Connection> connections;
+	connections.push_back(Connection{
+			&channel, TransportMode::Loopback, recipient_h, 0});
+	connections.back().s2c_phase = 1;
+	emit_all(w, connections);
+
+	Datagram datagram;
+	const bool received = channel.client_recv(datagram);
+	const bool decoded = decode_frame_update(datagram.body.data(), datagram.body.size(),
+			class_for_type_id, frame);
+	return received && decoded && frame.flags2 == 2 && frame.env.present;
 }
 
 } // namespace opennova::replication::test

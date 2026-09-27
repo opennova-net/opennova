@@ -8,8 +8,6 @@ extends GutTest
 # the displayed pixels back. Beauty values are gamma-domain numbers, so a
 # readback pixel is the FrameFX output value.
 
-const BEAUTY_MASK := 14126081
-
 
 func _beauty_material(color: Color) -> ShaderMaterial:
 	var shader := Shader.new()

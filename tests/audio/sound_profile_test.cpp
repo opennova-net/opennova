@@ -42,7 +42,8 @@ static const char kFixture[] =
     "end \n"
     "orphan_line_outside_begin  ALSO_IGNORED\n";
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     // Inline fixture: shapes and stores.
     {
         SoundProfileTable t;

@@ -507,13 +507,13 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 
 	// The mission's .cpt/.trn(+charmap) height field: the shell hands its
 	// parsed documents over before the boot (terrain_field_store_build, the
-	// parsed-document entry); an embedder that holds none (the dedicated host,
-	// the ctests) has the kernel load through its own index here (the file
-	// entry) — one builder, two entries, both through height_field_apply_trn.
+	// parsed-document entry); an embedder that holds none (the ctests) has the
+	// kernel load through its own index here (the file entry) — one builder,
+	// two entries, both through height_field_apply_trn.
 	if (options.terrain && !terrain_store.valid() && asset_index() != nullptr) {
 		std::string terrain_error;
 		if (!terrain::terrain_field_store_load(terrain_store, *asset_index(),
-					mission.get_terrain(), terrain_error, options.terrain_til_bytes))
+					mission.get_terrain(), terrain_error))
 			io::logf(io::LogLevel::kWarn,
 					"mission kernel: terrain not loaded (%s) - the ground solve will not run",
 					terrain_error.c_str());
@@ -617,11 +617,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// numbered-variable reset belongs after PreMission, immediately before
 	// initial execution in complete_mission_start.
 	// [orig: WacScript_InitAndLoad @0x4F91F0, reset @0x4F95EE]
-	std::string wac_blocked_error; // strict mode's fatal diagnostic, if any
 	if (options.wac) {
 		step("wac");
-		wac_loaded = false;
-		std::string wac_error;
 		// A non-authoritative load compiles no layer: it installs only the
 		// terminator. [orig: WacScript_InitAndLoad @0x4F9437 (the authority
 		// test), @0x4F944E (jz past the three compiles), @0x4F95A9 ('zzzz')]
@@ -629,12 +626,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac,
 				world.rules.projectile_authority ? files_ : no_layers,
 				options.wac_basename.empty() ? mission_basename : options.wac_basename,
-				&world, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog, options.music_globals);
-		// Only strict mode refuses a program; the game's policy always installs.
-		if (status == wac::WacLayeredLoadStatus::kBlocked)
-			wac_blocked_error = std::move(wac_error);
-		else
-			wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
+				&world, &script_effect_catalog, &script_sound_catalog, options.music_globals);
+		wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
 	}
 	// The host's own player as an authoritative pool-0 entity (ADR 0012 /
 	// net-re §5.2b) — after load (the spawn needs the AI system wired). A
@@ -693,10 +686,6 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	if (has_item_db) {
 		step("ai_weapons");
 		mission::resolve_ai_weapons(world, *items_table(), {}, &assets());
-	}
-	if (!wac_blocked_error.empty()) {
-		error = wac_blocked_error;
-		return false;
 	}
 	// The vehicle spawn-marker list is built from the mission as loaded, once
 	// the definitions are attached and ahead of the class inits, the
@@ -964,19 +953,13 @@ bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve
 		}
 	}
 	if (row == nullptr) return false;
-	clip_index.load(&assets(), row->animadm);
+	// The mount runs the descriptors the weapon table baked as it loaded, and
+	// its channel plays from the table's shared ANIMADM rings. A same-weapon
+	// re-bake (the dev tools' live ACTION edits) bakes the retained row as
+	// edited instead. [orig: Player_MountWeaponSlot @ 0x4dfa40; Anim_InitActions
+	// @ 0x541fa0 at the def's END]
 	w::WeaponInstallData data = w::weapon_install_data_from_def(*row);
-	const auto add_key = [&](const char *key) {
-		if (key == nullptr || key[0] == '\0') return;
-		const std::string lowered = strutil::to_lower(key);
-		for (const auto &kv : data.clip_rings)
-			if (kv.first == lowered) return;
-		if (const std::vector<float> *lengths = clip_index.lengths_for(key))
-			data.clip_rings.emplace_back(lowered, *lengths);
-	};
-	add_key("anim_wpn_idle");
-	add_key("anim_wpn_empty_idle");
-	for (size_t a = 0; a < row->actions_count; ++a) add_key(row->actions[a].anim);
+	data.table_baked = !allow_same_weapon_rebake;
 	w::local_weapon_install(world, local.weapon, data, preserve_slot_state,
 			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view);
 	return true;

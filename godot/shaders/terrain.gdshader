@@ -10,7 +10,7 @@ render_mode unshaded;
 stencil_mode write, compare_always, 1;
 
 // Shared terrain surface shading + fog (uniforms u_detail*/u_blendmap/
-// u_detailmap*/lighting/fog all live here): terrain_surface_color_from_colormap(), apply_terrain_fog().
+// lighting/fog all live here): terrain_surface_color_from_colormap(), apply_terrain_fog().
 #include "res://shaders/terrain_lighting.gdshaderinc"
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"
