@@ -5,9 +5,11 @@
 # `opennova-3di catalog`; the OED rules decide what a shader implies
 # (docs/adr/0047-blender-3di-exporter.md, decision 7).
 
+import itertools
 import os
 import re
 import struct
+from collections import namedtuple
 
 import bpy
 import numpy as np
@@ -64,21 +66,6 @@ def default_shader(map_count, skinned):
     return table[0][0]
 
 
-def shader_of(mat, skinned):
-    """The name's tag (Material_<i>_<SHADER>), else the default for the
-    material's texture maps (default_shader)."""
-    m = MATERIAL_RE.match(export.clean_name(mat.name)) if mat is not None else None
-    if m:
-        return m.group(2)
-    if mat is None:
-        maps = 0
-    elif len(mat.o3d.textures) > 0:
-        maps = len({t.slot for t in mat.o3d.textures if t.slot in (1, 2)})
-    else:
-        maps = 1 if material_image(mat) is not None else 0
-    return default_shader(maps, skinned)
-
-
 def face_flags(mat):
     """A material's bullet-face flags: 1 (both sides) follows Two sided, as
     OED took both from one render attribute (export_3di.cpp material_flags);
@@ -90,52 +77,201 @@ def face_flags(mat):
             (0x800 if p.face_front_only else 0) | (p.face_other_flags & ~0x901))
 
 
+# --- the node tree -----------------------------------------------------------
+
+def socket(sockets, identifier):
+    """A node's socket by its identifier (a Mix node has several inputs named A)."""
+    return next(s for s in sockets if s.identifier == identifier)
+
+
+def links_into(sock, groups=()):
+    """The (node, output socket, groups) at the far end of each live link into
+    the input `sock`, seen past reroutes, muted nodes and node groups: a group
+    node's output continues inside the group at its Group Output's input, a
+    Group Input's output outside it at the group node's input. `groups` is the
+    stack of group nodes the socket sits in."""
+    for link in sock.links:
+        if link.is_muted or not link.is_valid:
+            continue
+        node, out = link.from_node, link.from_socket
+        if node.type == "REROUTE":
+            yield from links_into(node.inputs[0], groups)
+        elif node.mute:
+            for internal in node.internal_links:
+                if internal.to_socket == out:
+                    yield from links_into(internal.from_socket, groups)
+        elif node.type == "GROUP":
+            tree = node.node_tree
+            inner = next((n for n in tree.nodes if n.type == "GROUP_OUTPUT" and n.is_active_output),
+                         None) if tree is not None else None
+            if inner is not None:
+                yield from links_into(socket(inner.inputs, out.identifier), groups + (node,))
+        elif node.type == "GROUP_INPUT":
+            if groups:
+                yield from links_into(socket(groups[-1].inputs, out.identifier), groups[:-1])
+        else:
+            yield node, out, groups
+
+
+def principled(mat):
+    """The Principled BSDF that draws a material: the one its active Material
+    Output's Surface takes, else the tree's first; None without one."""
+    tree = mat.node_tree if mat is not None else None
+    if tree is None:
+        return None
+    output = next((n for n in tree.nodes if n.type == "OUTPUT_MATERIAL" and n.is_active_output), None)
+    if output is not None:
+        for node, _, groups in links_into(output.inputs["Surface"]):
+            if node.type == "BSDF_PRINCIPLED" and not groups:
+                return node
+    return next((n for n in tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+
+
+def base_color(mat):
+    """What draws a material's Base Color: (images, others), the image nodes
+    whose Color feeds its Principled BSDF's Base Color, through reroutes,
+    groups, Mix nodes and any other colour node, each as (node, groups); and
+    the other nodes on the way (colour adjustments, procedural textures,
+    attributes), which the game does not draw. Only a Mix node's colours are
+    followed, not its factor, and not the colour a Mix's constant factor
+    leaves out (0 takes A, 1 takes B)."""
+    bsdf = principled(mat)
+    images, others = [], []
+    if bsdf is None:
+        return images, others
+    stack = list(links_into(bsdf.inputs["Base Color"]))
+    seen = set()
+    while stack:
+        node, out, groups = stack.pop()
+        key = (node.as_pointer(), tuple(g.as_pointer() for g in groups))
+        if key in seen:
+            continue
+        seen.add(key)
+        if node.type == "TEX_IMAGE":
+            if out.identifier == "Color" and node.image is not None:
+                images.append((node, groups))
+            else:
+                others.append(node)
+            continue
+        if node.type == "MIX" and node.data_type == "RGBA":
+            factor = socket(node.inputs, "Factor_Float")
+            follow = [socket(node.inputs, "A_Color"), socket(node.inputs, "B_Color")]
+            if node.blend_type == "MIX" and not factor.is_linked and factor.default_value in (0.0, 1.0):
+                follow = [follow[int(factor.default_value)]]
+        elif node.type == "MIX_RGB":
+            follow = [node.inputs["Color1"], node.inputs["Color2"]]
+        elif node.type == "VECT_MATH" and node.operation == "SCALE":
+            follow = [node.inputs[0]]  # the imported detail stage doubles the product
+        else:
+            follow = [i for i in node.inputs if i.enabled and i.type in ("RGBA", "VECTOR")]
+            others.append(node)
+        for i in follow:
+            stack.extend(links_into(i, groups))
+    return images, others
+
+
+def image_uv(node, groups):
+    """The UV map an image node samples: ("render", None) for the one Blender
+    renders with (its Vector unlinked, a UV Map node naming none, a Texture
+    Coordinate node's UV), ("named", name) for a UV Map node's map, or
+    ("other", node) for any other coordinates, which the game cannot draw."""
+    for src, out, _ in links_into(node.inputs["Vector"], groups):
+        if src.type == "UVMAP":
+            return ("named", src.uv_map) if src.uv_map else ("render", None)
+        if src.type == "TEX_COORD" and out.identifier == "UV":
+            return ("render", None)
+        return ("other", src)
+    return ("render", None)
+
+
+def node_label(node):
+    return node.label or node.name
+
+
 # --- images -----------------------------------------------------------------
 
-def material_image(mat):
-    """The image a material without texture entries exports: the image
-    texture wired (through any nodes) into its Principled BSDF's Base Color,
-    else its first image texture node."""
-    if mat is None or not mat.use_nodes or mat.node_tree is None:
-        return None
-    nodes = mat.node_tree.nodes
-    bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
-    if bsdf is not None:
-        seen, queue = set(), [bsdf.inputs["Base Color"]]
-        while queue:
-            for link in queue.pop(0).links:
-                node = link.from_node
-                if node.type == "TEX_IMAGE" and node.image is not None:
-                    return node.image
-                if node.name not in seen:
-                    seen.add(node.name)
-                    queue.extend(s for s in node.inputs if s.is_linked)
-    return next((n.image for n in nodes if n.type == "TEX_IMAGE" and n.image is not None), None)
+def check_image(image, what):
+    """An ExportError when the game cannot draw the image as one texture: a
+    UDIM (tiled) image, an image sequence, a movie; only a still image loaded
+    from a file or made in Blender (a bake, a painting) can be written."""
+    if image.source == "TILED":
+        raise ExportError(f"{what}: the image {image.name} is a UDIM (tiled) image; the game draws one image per "
+                          "texture: bake its tiles into one image")
+    if image.source not in ("FILE", "GENERATED"):
+        raise ExportError(f"{what}: the image {image.name} is a {image.source.lower()} image; the game draws one "
+                          "still image per texture")
 
 
-def write_tga(image, path):
-    """Uncompressed 32-bit truecolor TGA, rows bottom-up (the retail shape)."""
+def srgb_encode(linear):
+    """The sRGB transfer (IEC 61966-2-1): linear light to the encoded value."""
+    linear = np.clip(linear, 0.0, None)
+    return np.where(linear <= 0.0031308, linear * 12.92, 1.055 * np.power(linear, 1.0 / 2.4) - 0.055)
+
+
+def image_rows(image):
+    """The image's RGBA pixels as the game's texture holds them, rows
+    bottom-up, in chunks of float64 values 0..1 (clipped when quantized). A
+    byte image (an 8-bit PNG, TGA, JPEG) holds its file's values, straight: as
+    they are. A float image (a 16-bit PNG or TIFF, an EXR, a float bake)
+    holds scene-linear light, premultiplied unless its alpha is channel
+    packed or unused (Blender's imb_handle_alpha): its colour is made straight
+    and sRGB-encoded, as an 8-bit file holds it, unless it is non-colour data
+    (a normal map, a mask), whose values are what they are."""
     w, h = image.size
     if w == 0 or h == 0:
         raise ExportError(f"image {image.name} has no pixels")
+    channels = image.channels
+    if channels not in (1, 3, 4):
+        raise ExportError(f"image {image.name} has {channels} channels")
+    colour = image.is_float and not image.colorspace_settings.is_data
+    if colour and bpy.data.colorspace.working_space != "Linear Rec.709":
+        raise ExportError(f"image {image.name}: the blend file's working colour space is "
+                          f"{bpy.data.colorspace.working_space}; export encodes float images as sRGB from Linear "
+                          "Rec.709 only (Color Management > Working Space)")
+    premultiplied = colour and image.alpha_mode in ("STRAIGHT", "PREMUL")
     # Blender bundles NumPy. Bulk access avoids expanding a 4K image into
     # millions of Python floats; bounded chunks keep conversion memory small.
-    px = np.empty(w * h * 4, dtype=np.float32)
+    px = np.empty(w * h * channels, dtype=np.float32)
     image.pixels.foreach_get(px)
-    px = px.reshape(-1, 4)
+    px = px.reshape(-1, channels)
     if not np.isfinite(px).all():
         raise ExportError(f"image {image.name} has non-finite pixels")
+    for start in range(0, len(px), 262144):
+        values = px[start:start + 262144].astype(np.float64)
+        if channels == 1:
+            values = np.repeat(values, 3, axis=1)
+        if values.shape[1] == 3:
+            values = np.concatenate([values, np.ones((len(values), 1))], axis=1)
+        if premultiplied:
+            alpha = values[:, 3:4]
+            values[:, :3] = np.divide(values[:, :3], alpha, out=np.zeros_like(values[:, :3]), where=alpha > 0.0)
+        if colour:
+            values[:, :3] = srgb_encode(values[:, :3])
+        yield values
+
+
+def write_tga(image, path):
+    """Uncompressed 32-bit truecolor TGA, rows bottom-up (the retail shape),
+    of the image as the game draws it (image_rows)."""
+    w, h = image.size
+    rows = image_rows(image)
+    first = next(rows)  # the checks above run before the file is opened
     header = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, w, h, 32, 8)
     with open(path, "wb") as f:
         f.write(header)
-        for start in range(0, len(px), 262144):
-            values = px[start:start + 262144].astype(np.float64)
+        for values in itertools.chain([first], rows):
             # float64 and rint preserve Python round's ties-to-even result.
             values = np.clip(np.rint(values * 255.0), 0, 255).astype(np.uint8)
             f.write(values[:, [2, 1, 0, 3]].tobytes())
 
 
 # --- export -----------------------------------------------------------------
+
+# A mesh a material draws on: its object's name, the names of its render UV
+# map (UV0) and of the first other one (UV1), None where it lacks them, and
+# the area its triangles of that material cover on UV0.
+MeshUse = namedtuple("MeshUse", "name render second area")
+
 
 class ModelMaterials:
     """One model's materials: in the order its strips first use them, then in
@@ -147,6 +283,7 @@ class ModelMaterials:
         self.exporter = exporter
         self.used = []       # Blender materials (None: a mesh without one)
         self.first_use = {}  # material name (None) -> its index in first-use order
+        self.meshes = {}     # material name (None) -> [MeshUse]
         self.textures = {}   # file name (lower case) -> (file name, image)
 
     def index_of(self, mat):
@@ -158,12 +295,111 @@ class ModelMaterials:
             self.used.append(mat)
         return self.first_use[key]
 
+    def record_uvs(self, ob, ev, mesh, uv0):
+        """What an exported mesh's UV maps give the materials it draws with:
+        `mesh` is the evaluated object `ev`'s mesh with its loop triangles,
+        `uv0` its render UV map's coordinates (two per loop, None without a UV
+        map). Export checks a material's textures against them."""
+        layers = mesh.uv_layers
+        render = next((l for l in layers if l.active_render), layers[0]).name if len(layers) else None
+        second = next((l.name for l in layers if l.name != render), None) if render is not None else None
+        tris = mesh.loop_triangles
+        slots = np.empty(len(tris), dtype=np.int32)
+        tris.foreach_get("material_index", slots)
+        area = np.zeros(len(tris))
+        if uv0 is not None and len(tris):
+            loops = np.empty(len(tris) * 3, dtype=np.int32)
+            tris.foreach_get("loops", loops)
+            corners = np.asarray(uv0, dtype=np.float64).reshape(-1, 2)[loops].reshape(-1, 3, 2)
+            e1, e2 = corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]
+            area = 0.5 * np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0])
+        for slot in np.unique(slots):
+            mat = export.slot_material(ev, int(slot))
+            self.meshes.setdefault(mat.name if mat is not None else None, []).append(
+                MeshUse(ob.name, render, second, float(area[slots == slot].sum())))
+
+    def shader(self, mat):
+        """The name's tag (Material_<i>_<SHADER>), else the default for the
+        material's texture maps (default_shader): its texture entries' diffuse
+        and detail slots, else the images its Base Color draws."""
+        m = MATERIAL_RE.match(export.clean_name(mat.name)) if mat is not None else None
+        if m:
+            return m.group(2)
+        if mat is None:
+            maps = 0
+        elif len(mat.o3d.textures) > 0:
+            maps = len({t.slot for t in mat.o3d.textures if t.slot in (1, 2)})
+        else:
+            maps = len({node.image.name for node, _ in base_color(mat)[0]})
+        return default_shader(maps, self.exporter.skinned)
+
     def strip_alpha(self, index):
         """Strips of a blending shader draw in the alpha pass (OED's
         material_alpha: the BLENDING capability bit; FFP_GLASS is one)."""
         mat = self.used[index]
-        blending = shader_flags(shader_of(mat, self.exporter.skinned)) & FLAG_BLENDING
+        blending = shader_flags(self.shader(mat)) & FLAG_BLENDING
         return 1 if blending or (mat is not None and mat.o3d.alpha_strips) else 0
+
+    def node_images(self, mat):
+        """{slot: image}: the images a material's Base Color draws. The one on
+        the render UV map is the diffuse texture (slot 1); one on the second UV
+        map is the detail texture (slot 2), which the game multiplies in at
+        twice its value on UV1 (FF_MT's Modulate2x). Every other node on the
+        way (a colour adjustment, a procedural texture) is noted: the game
+        draws the images as they are."""
+        images, others = base_color(mat)
+        found = {}
+        for node, groups in images:
+            slot = self.image_slot(mat, node, groups)
+            if found.get(slot, node.image) != node.image:
+                raise ExportError(f"{mat.name}: the images {found[slot].name} and {node.image.name} both feed its "
+                                  f"Base Color on the {('render', 'second')[slot - 1]} UV map; the game draws one "
+                                  "diffuse texture (and one detail texture on the second UV map): bake them into one")
+            found[slot] = node.image
+        if 2 in found and 1 not in found:
+            raise ExportError(f"{mat.name}: its Base Color image {found[2].name} reads the second UV map; the game "
+                              "draws the diffuse texture on the render UV map (a detail texture on the second "
+                              "multiplies it)")
+        for node in others:
+            self.exporter.note(f"{mat.name}: its Base Color takes '{node_label(node)}', which the game does not draw" +
+                               (": bake it into the image" if found else ""))
+        return found
+
+    def image_slot(self, mat, node, groups):
+        """1 when an image node samples the render UV map of every mesh the
+        material draws on, 2 when it samples the second UV map (the exported
+        UV1); an ExportError for any other coordinates."""
+        kind, value = image_uv(node, groups)
+        if kind == "other":
+            raise ExportError(f"{mat.name}: the image {node.image.name} reads its coordinates from "
+                              f"'{node_label(value)}'; the game samples a UV map as it is: apply any mapping to the "
+                              "UV map and read it with a UV Map node or none")
+        if kind == "render":
+            return 1
+        slots = set()
+        for use in self.meshes.get(mat.name, []):
+            if value not in (use.render, use.second):
+                raise ExportError(f"{mat.name}: the image {node.image.name} reads the UV map '{value}', which "
+                                  f"{use.name} does not export (the game samples its render UV map and the first "
+                                  "other one)")
+            slots.add(1 if value == use.render else 2)
+        if len(slots) > 1:
+            raise ExportError(f"{mat.name}: the UV map '{value}' of the image {node.image.name} is the render UV "
+                              "map of some of its meshes and the second of others")
+        return slots.pop() if slots else 1
+
+    def check_uvs(self, mat, shader, textured):
+        """A mesh drawing a texture needs a UV map; a shader that derives its
+        tangents from UV0 (the TANGENT capability) needs one with area."""
+        key = mat.name if mat is not None else None
+        caps = shader_flags(shader)
+        for use in self.meshes.get(key, []):
+            if textured and use.render is None:
+                raise ExportError(f"{use.name}: it has no UV map, but its material {mat.name} draws a texture: "
+                                  "unwrap it")
+            if caps & FLAG_TANGENT and use.area <= 1e-12:
+                self.exporter.note(f"{use.name}: its UV map has no area under {key or '(no material)'}, whose shader "
+                                   f"{shader} derives its tangents from it, so its lighting comes out wrong")
 
     def order(self):
         """Put the materials in export order, the Material_<i> index, then
@@ -197,8 +433,8 @@ class ModelMaterials:
         fixed = export.fixed
         for mat in self.used:
             # A mesh without a material draws with the shader a material
-            # without textures takes (shader_of), its strips' pass included.
-            shader = shader_of(mat, self.exporter.skinned)
+            # without textures takes (shader()), its strips' pass included.
+            shader = self.shader(mat)
             if len(shader) > 32:
                 raise ExportError(f"{mat.name}: the shader tag '{shader}' exceeds 32 characters")
             caps = shader_flags(shader)
@@ -224,7 +460,9 @@ class ModelMaterials:
             if any(reflect):
                 lines.append("reflect " + " ".join(str(c) for c in reflect))
             if p is None:
+                self.check_uvs(mat, shader, False)
                 continue
+            self.check_uvs(mat, shader, len(p.textures) > 0 or bool(base_color(mat)[0]))
             if len(p.textures) > 0:
                 for t in p.textures:
                     name = t.name.strip()
@@ -237,14 +475,25 @@ class ModelMaterials:
                     lines.append(f"texture {quoted(name)} {t.slot} {t.type} {t.flags} {t.frame}")
                     if t.image is not None and t.write:
                         if name.lower().endswith(".tga"):
+                            check_image(t.image, mat.name)
                             self.claim_texture(name, t.image, mat)
                         else:
                             self.exporter.note(f"{mat.name}: Write TGA writes .tga files only; {name} is not written")
-            elif caps & FLAG_DIFFUSE:
-                image = material_image(mat)
-                if image is not None:
+            else:
+                found = self.node_images(mat)
+                named = MATERIAL_RE.match(export.clean_name(mat.name))
+                if not found and (caps & FLAG_DIFFUSE or not named):
+                    self.exporter.note(f"{mat.name}: no image feeds its Base Color, so it exports without a texture" +
+                                       ("" if named else f", as {shader} (OED's shader for none)"))
+                for slot, image in sorted(found.items()):
+                    if not caps & (FLAG_DIFFUSE if slot == 1 else FLAG_SECONDARY):
+                        self.exporter.note(f"{mat.name}: its shader {shader} draws no "
+                                           f"{('diffuse', 'detail')[slot - 1]} texture; the image {image.name} is "
+                                           "not exported")
+                        continue
+                    check_image(image, mat.name)
                     name = os.path.splitext(export.clean_name(image.name))[0][:12] + ".tga"
-                    lines.append(f"texture {quoted(name)}")
+                    lines.append(f"texture {quoted(name)} {slot} 0 0 0")
                     self.claim_texture(name, image, mat)
             if p.anim_frames or p.anim_type or p.anim_time:
                 if p.anim_type not in (0, 1):

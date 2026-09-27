@@ -582,6 +582,7 @@ class Exporter(Notes):
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals
             uv0, uv1 = self.uv_layers(mesh)
+            self.materials.record_uvs(ob, ev, mesh, uv0)
             for tri in mesh.loop_triangles:
                 slot = tri.material_index
                 mat = slot_material(ev, slot)
@@ -613,6 +614,7 @@ class Exporter(Notes):
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals
             uv0, uv1 = self.uv_layers(mesh)
+            self.materials.record_uvs(ob, ev, mesh, uv0)
             influences = []
             for v in mesh.vertices:
                 w = sorted(((g.weight, groups[g.group]) for g in v.groups if g.group in groups and g.weight > 1e-4),
