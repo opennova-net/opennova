@@ -388,7 +388,6 @@ bool TerrainSurfaceInputs::apply_to_material(
 	if (p_material.is_null()) {
 		return false;
 	}
-	p_material->set_shader_parameter("u_detailmap", get_detailmap_texture());
 	p_material->set_shader_parameter("u_blendmap", get_blend_texture());
 	p_material->set_shader_parameter("u_detail_c1", get_detail_c1_texture());
 	p_material->set_shader_parameter("u_detail_c2", get_detail_c2_texture());
