@@ -26,7 +26,8 @@
 #include <formats/threedi/threedi_panm.h>
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/renderer/material_descriptor.h>
-#include <runtime/world/body_anim.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/weapon_fsm.h>
 
 #include "anim_cli.h"
 #include "threedi_cli.h"
@@ -53,14 +54,19 @@ int usage(const char *why) {
 }
 
 // The engine's CTRL register catalog, generator-style names and shader tags
-// with their capability words, the anim slot keys the runtime names and the
-// event trigger bits it consumes, one per line (`register NAME`, `style CODE
-// NAME`, `shader TAG 0xFLAGS`, `animslot KEY`, `trigger 0xMASK NAME`), so a
-// front end offers exactly what the builder and the runtime know without
+// with their capability words, the anim slot keys a table row can name, the
+// weapon actions an author times and the event trigger bits the runtime
+// consumes, one per line (`register NAME`, `style CODE NAME`, `shader TAG
+// 0xFLAGS`, `animslot KEY`, `weaponaction SUFFIX KEY`, `trigger 0xMASK NAME`),
+// so a front end offers exactly what the builder and the runtime know without
 // keeping its own copy. The shader flag bits are
 // runtime/renderer/material_descriptor.h's (BLENDING 0x1000 puts a strip in
-// the alpha pass, GLASS 0x2000, TANGENT 0x8000), the slot keys
-// runtime/world/body_anim.h's, the trigger bits runtime/anim/anim_event_bits.h's.
+// the alpha pass, GLASS 0x2000, TANGENT 0x8000); the slot keys are all 252 of
+// the slot table a row's key is looked up in (a row naming none registers
+// nothing) [orig: AnimMap_FindSlotByName @0x40cfa0 over g_AnimStateNameTable
+// @0x8135F0]; the weapon actions are the ones with a slot of their own, each
+// with its slot's key (runtime/world/weapon_fsm.h); the trigger bits are
+// runtime/anim/anim_event_bits.h's.
 int cmd_catalog() {
 	for (size_t i = 0; i < static_cast<size_t>(THREEDI_CTRL_REGISTER_COUNT); ++i) {
 		const char *name = threedi_ctrl_register_name(i);
@@ -72,8 +78,14 @@ int cmd_catalog() {
 	}
 	for (const opennova::renderer::MaterialDescriptorRecord &d : opennova::renderer::kMaterialDescriptorTable)
 		std::printf("shader %s 0x%x\n", d.name, static_cast<unsigned>(d.shader_flags));
-	for (int32_t slot = 0; slot < opennova::world::kBodyAnimCount; ++slot)
-		std::printf("animslot %s\n", opennova::world::body_anim_adm_key(slot));
+	for (int slot = 0; slot < opennova::world::kInfantryAnimStateCount; ++slot)
+		std::printf("animslot %s\n", opennova::world::infantry_anim_key(slot).c_str());
+	for (int32_t action = 0; action < opennova::world::weapon_action::kCount; ++action) {
+		const int32_t slot = opennova::world::weapon_action_anim_slot(action);
+		if (slot >= 0)
+			std::printf("weaponaction %s %s\n", opennova::world::kWeaponActionSuffixes[action],
+					opennova::world::infantry_anim_key(slot).c_str());
+	}
 	for (const opennova::anim::AnimEventBit &bit : opennova::anim::kAnimEventBits)
 		std::printf("trigger 0x%x %s\n", static_cast<unsigned>(bit.mask), bit.name);
 	return 0;

@@ -107,12 +107,12 @@ if(BLENDER_EXECUTABLE)
         --python ${CMAKE_CURRENT_SOURCE_DIR}/anim/blender_weapon_authoring.py --
         $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR}/blender-weapon-authoring)
 endif()
-# `catalog` prints the anim slot keys and the event trigger bits a front end
-# offers (the Blender add-on parses both), and `info` refuses a flag it does
-# not take.
+# `catalog` prints the 252 anim slot keys, the weapon actions an author times
+# with their slot keys, and the event trigger bits a front end offers (the
+# Blender add-on parses them), and `info` refuses a flag it does not take.
 add_test(NAME threedi_cli_catalog_anim COMMAND opennova_3di catalog)
 set_tests_properties(threedi_cli_catalog_anim PROPERTIES PASS_REGULAR_EXPRESSION
-    "animslot anim_reset.*animslot anim_guard.*trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
+    "animslot anim_reset[\r\n]+.*animslot anim_guard[\r\n]+.*animslot anim_death_bullet_leftfoot_left[\r\n]+.*animslot anim_wpn_scopedown[\r\n]+weaponaction idle anim_wpn_idle[\r\n]+weaponaction emptyidle anim_wpn_empty_idle[\r\n]+.*weaponaction scopedown anim_wpn_scopedown[\r\n]+trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
 add_test(NAME threedi_cli_anim_info_flag COMMAND opennova_3di anim info unread.adm --bogus)
 set_tests_properties(threedi_cli_anim_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "anim info takes --verbose or --keys")
