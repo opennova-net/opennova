@@ -165,10 +165,12 @@ struct WeaponFsmActionRow {
 // @ 0x401f20 — carried here as the authored names; the host seams resolve them]
 struct WeaponFsmAction {
 	// The handler the row binds: its FUNCTION's, else the suffix's default;
-	// the pump runs it whatever slot it is bound to.
+	// the pump runs it whatever slot it is bound to. A descriptor no bake bound
+	// holds the placeholder every row starts from, which the pump runs as the
+	// suffix's default, the bind's one rewrite.
 	// [orig: ActionDef+0, called by WeaponAction_ProcessFrame @ 0x54142A /
-	//  @ 0x5413FF / @ 0x541482 / @ 0x5414A2]
-	int8_t handler = weapon_handler::kIdle;
+	//  @ 0x5413FF / @ 0x541482 / @ 0x5414A2; ActionDef_InitDefaults @ 0x4022C5]
+	int8_t handler = weapon_handler::kPlaceholder;
 	int8_t map_command =
 			0; // +1 open if closed, -1 close mode 2 [orig: @0x5432D0/@0x543360/@0x5434E0]
     int32_t id = -1;         // the action slot id (weapon_action::*), stamped by the bake

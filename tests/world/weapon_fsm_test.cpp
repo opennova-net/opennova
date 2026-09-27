@@ -310,6 +310,27 @@ void test_null_handler_never_finishes() {
 	CHECK(s.clip == 10);
 }
 
+// A def built in code and never baked (an emplacement's, a test rig's) holds
+// the placeholder in every slot, and each slot runs its suffix's default
+// handler, as the bind would have bound it: the fire request fires.
+// [orig: Anim_InitActions, the rewrite @ 0x542117..0x542139]
+void test_unbaked_def_runs_the_default_handlers() {
+	WeaponFsmDef def;
+	for (int a = 0; a < wa::kCount; ++a) def.actions[a].id = a;
+	def.actions[wa::kRecoil].delay_end = 1;
+	def.clip_capacity = -1;
+	WeaponSlotState s;
+	WeaponFsmInputs in;
+	in.fire_pressed = true;
+	in.fire_held = true;
+	WeaponFsmEvents ev;
+	weapon_fsm_tick(def, s, in, ev);
+	CHECK(def.actions[wa::kFire].handler == weapon_handler::kPlaceholder);
+	CHECK(s.current == wa::kFire);
+	CHECK(ev.fired);
+	CHECK(s.next == wa::kRecoil);
+}
+
 void test_fire_chains_recoil() {
     WeaponFsmDef def = make_ak_def();
     WeaponSlotState s = make_ak_slot();
@@ -1454,6 +1475,7 @@ int main() {
     test_emptyidle_bound_to_idle_or_empty();
     test_null_handler_never_finishes();
     test_bake_ring_read_multiplicity();
+    test_unbaked_def_runs_the_default_handlers();
     test_fire_chains_recoil();
     test_auto_refire_cadence();
     test_revx_m4_zero_recoil_auto_cadence();

@@ -491,7 +491,13 @@ void handler_scope(const WeaponFsmDef &, const WeaponFsmAction &desc,
 void run_handler(const WeaponFsmDef &def, WeaponSlotState &slot,
                  const WeaponFsmInputs &in, WeaponFsmEvents &out) {
     const WeaponFsmAction &desc = def.actions[slot.current];
-    switch (desc.handler) {
+    // A descriptor built outside the bake still holds the placeholder; the
+    // bind would have given it the suffix's default, so it runs that one.
+    // [orig: Anim_InitActions, the rewrite @ 0x542117..0x542139]
+    const int8_t handler = desc.handler == weapon_handler::kPlaceholder
+            ? weapon_action_default_handler(slot.current)
+            : desc.handler;
+    switch (handler) {
         case weapon_handler::kIdle:
             handler_idle(def, desc, slot, in, out);
             break;
