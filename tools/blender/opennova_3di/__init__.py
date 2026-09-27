@@ -260,6 +260,9 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                          "it names is written beside it as <clip>.bad. Empty: "
                                          "//<model name>.adm")
     rows: CollectionProperty(type=O3DAdmRow)
+    clip_prefix: StringProperty(name="Clip file prefix", default="",
+                                 description="Prefix exported BAD filenames and ADM references while keeping "
+                                             "Action names and engine row names unchanged (e.g. rifle_)")
     head_bone: StringProperty(name="Head bone", default="",
                               description="The rig bone whose height above the ground is each frame's "
                                           "top (the body's capsule top). Empty: the one bone whose name "
@@ -710,6 +713,7 @@ def draw_animations(layout, model):
         box.label(text="No rig: a skinned model's LOD 0 carries its BN## armature")
         return
     box.prop(p, "adm_path")
+    box.prop(p, "clip_prefix")
     if not p.adm_path:
         box.label(text=f"Writes {animation.adm_default(model)}")
     clips = animation.clip_actions(rig)

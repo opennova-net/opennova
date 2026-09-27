@@ -218,6 +218,9 @@ class AnimExporter(Notes):
         self.notes = []
 
     # --- the set ------------------------------------------------------------
+    def clip_name(self, action):
+        return self.props.clip_prefix + clean_name(action.name)
+
     def rows(self):
         out = []
         for row in self.props.rows:
@@ -225,7 +228,7 @@ class AnimExporter(Notes):
             if not SLOT_KEY_RE.match(key):
                 raise ExportError(f"'{key}' is not an anim slot key: a row names its slot by what follows the "
                                   "key's first five characters (anim_reset, anim_idle_5), with no blank or quote")
-            variants = [clean_name(v.action.name) for v in row.variants if v.action is not None]
+            variants = [self.clip_name(v.action) for v in row.variants if v.action is not None]
             if not variants:
                 raise ExportError(f"the row '{key}' names no clip")
             out.append((key, variants))
@@ -348,7 +351,7 @@ class AnimExporter(Notes):
             raise ExportError(f"the clip '{action.name}' holds one frame; a clip needs two (its "
                               "frame count is the interval count, so it stores one key more)")
         keys, translations, events = self.sample(action, strip, bones, rest, start, frames, props.loop)
-        lines = [f"clip {quoted(clean_name(action.name))}",
+        lines = [f"clip {quoted(self.clip_name(action))}",
                  f"fps {max(1, int(round(props.fps)))}",
                  f"flags 0x{flags:x}", f"frames {frames}"]
         # Every channel carries frames + 1 rows: a key, and under the
@@ -384,10 +387,10 @@ class AnimExporter(Notes):
                                   "(choose one in the strip's properties)")
         named = {v for _, variants in rows for v in variants}
         for name in sorted(named):
-            if not any(clean_name(a.name) == name for a, _ in strips):
+            if not any(self.clip_name(a) == name for a, _ in strips):
                 raise ExportError(f"{model}: the table names '{name}', which is not a clip on the rig")
         for action, _ in strips:
-            if clean_name(action.name) not in named:
+            if self.clip_name(action) not in named:
                 self.note(f"the clip '{action.name}' is on no table row, so nothing plays it")
 
         # The rest pose is the bind every key is measured against. A bone that

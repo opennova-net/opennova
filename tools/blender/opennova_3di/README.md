@@ -214,7 +214,10 @@ beside a first-person gun). **File > Import > NovaLogic Animations** reads a
 `.adm` (or a single `.bad`) back onto the active model's rig.
 
 - **A clip is an Action.** Push each one onto its own NLA track; the track order
-  is the set's order and the Action's name is the `.bad` file name. Export plays
+  is the set's order and the Action's name is the `.bad` file name. Set the
+  model's **Clip file prefix** (for example `rifle_`) to keep standard Action
+  names while giving its exported clips unique filenames. ADM references use
+  that prefix too; engine row names stay unchanged. Export plays
   each Action through its strip's action slot (Blender 4.4 and newer), so an
   Action keyed on another rig exports its own motion, and it refuses a rig in
   NLA tweak mode. The clip's own settings live in the Dope Sheet sidebar's
