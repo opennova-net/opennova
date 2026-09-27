@@ -2149,6 +2149,7 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_skeletal_anim);
 	ClassDB::bind_method(D_METHOD("get_skeletal_anim"), &ObjectModel::get_skeletal_anim);
 	ClassDB::bind_method(D_METHOD("get_skeleton"), &ObjectModel::get_skeleton);
+	ClassDB::bind_method(D_METHOD("get_skin_palette"), &ObjectModel::get_skin_palette);
 	ClassDB::bind_method(D_METHOD("has_skeleton"), &ObjectModel::has_skeleton);
 	ClassDB::bind_method(D_METHOD("has_muzzle"), &ObjectModel::has_muzzle);
 	ClassDB::bind_method(D_METHOD("set_muzzle_point_name", "name"),

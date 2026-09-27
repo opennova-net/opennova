@@ -6,11 +6,13 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_back;
 #define OBJ_COVERAGE_DIFFUSE_ALPHA
 #define OBJ_CLIP_SKINNED_SUBMIT_SKIP
 #define OBJ_VERTEX_POINT_LIGHTS_FFP_DIFFUSE
+#define OBJ_SKIN_NORMAL_BLEND
 #define OBJ_VERTEX_FF_DIFFUSE
 #define OBJ_MATCHTERRAIN_SKINNED_STANCE
 #define OBJ_FOG_VERTEX_SHADER_DEVICE
 
 #include "res://shaders/object/shared.gdshaderinc"
+#include "res://shaders/object/skin.gdshaderinc"
 #include "res://shaders/object/sampling/single.gdshaderinc"
 #include "res://shaders/object/coverage/full.gdshaderinc"
 #include "res://shaders/object/normal/none.gdshaderinc"

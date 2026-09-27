@@ -19,6 +19,7 @@
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -275,6 +276,13 @@ private:
 		Vector3 local_center;
 		bool is_alpha = false;
 		bool is_skinned = false;
+		// A skinned strip whose material runs a skinned effect's vertex
+		// program: the object shaders pose it from the model's bone palette
+		// (object_model_skin_palette.cpp), Godot's skinning never touches it.
+		bool skin_palette = false;
+		// Its bind-space box per bone (bone -> AABB), the posed culling box's
+		// source.
+		Dictionary bone_bounds;
 		// The level's collector admits a Q3 copy (never a per-vertex skinned
 		// level: renderer::q3_object_source_admitted).
 		bool q3_admitted = false;
@@ -737,9 +745,14 @@ private:
 	Ref<ShaderMaterial> material_for_index(int p_material_array_index);
 	Ref<ShaderMaterial> postmultiply_material_for_index(int p_material_array_index) const;
 	// Builds the surface material for the MTRL row at `p_array_index` (-1 = no
-	// row: the FF_ST_OP defaults).
+	// row: the FF_ST_OP defaults); r_skin_program reports whether its
+	// technique runs a skinned effect's vertex program.
 	Ref<ShaderMaterial> create_material(int p_array_index,
-			Ref<ShaderMaterial> &r_postmultiply);
+			Ref<ShaderMaterial> &r_postmultiply, bool &r_skin_program);
+	// Whether the cached material of a surface material index runs a skinned
+	// effect's vertex program (renderer::ObjectSkinNormal other than None).
+	bool material_runs_skin_program(int p_material_index) const;
+	HashMap<int64_t, bool> material_skin_programs_;
 	void collect_anim_frames(int p_material_index);
 	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
 	// One shader parameter written to a material and, when the material
@@ -750,6 +763,26 @@ private:
 			const Variant &p_value);
 	bool material_runtime_is_dynamic(int p_material_index) const;
 	void classify_materials();
+
+	// --- the skinned effects' bone palette (object_model_skin_palette.cpp) ---
+	// One texture row per skeleton bone (the settled global pose times the
+	// skin bind, three RGBA32F texels of the 3x4 matrix), bound on every
+	// palette surface's material, republished on each settled skeleton pose
+	// together with the palette surfaces' posed culling box.
+	Ref<Image> skin_palette_image_;
+	Ref<ImageTexture> skin_palette_texture_;
+	PackedByteArray skin_palette_bytes_;
+	std::vector<Transform3D> skin_bind_poses_;
+	// Per bone: the bind-space box of the palette surfaces' vertices it moves.
+	std::vector<AABB> skin_bone_bounds_;
+	std::vector<bool> skin_bone_has_bounds_;
+	AABB skin_posed_bounds_;
+	void clear_skin_palette();
+	void build_skin_palette();
+	void publish_skin_palette();
+	void apply_skin_palette_bounds();
+	// The current palette (pose x bind per bone), empty without a rig.
+	void compute_skin_palette(std::vector<Transform3D> &r_palette) const;
 
 	// --- retained-scene construction (object_model_scene.cpp) ---
 	void rebuild_scene();
@@ -1158,6 +1191,16 @@ public:
 	Ref<SkeletalAnim> get_skeletal_anim() const { return skeletal_; }
 	Skeleton3D *get_skeleton() const { return skeleton_; }
 	bool has_skeleton() const { return skeleton_ != nullptr; }
+	// The bone palette the object shaders pose the skinned effects' strips
+	// with (the skeleton's pose x the skin bind per bone, the rows the
+	// settled pose publishes); empty when no strip of the model runs a
+	// skinned effect's vertex program.
+	Array get_skin_palette() const;
+	// The current palette of the model whose palette strip `p_instance` is
+	// (the render-slot capture skins its silhouette with it); false for any
+	// other instance.
+	static bool skin_palette_of(const MeshInstance3D *p_instance,
+			std::vector<Transform3D> &r_palette);
 	bool has_muzzle() const;
 	// The def-authored launch userpoint name; rebuild resolves it against the
 	// model's userpoint table (case-insensitive, retail's by-name lookup).

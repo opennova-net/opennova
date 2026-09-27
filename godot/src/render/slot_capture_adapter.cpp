@@ -246,11 +246,18 @@ struct DeviceFrame {
 };
 
 // The skeleton-space bone x bind palette of a skinned instance (the same
-// palette the Q3 adapter CPU-skins with); empty for an unskinned instance.
+// palette the Q3 adapter CPU-skins with, and the one a skinned effect's strip
+// is posed with in the object shaders); empty for an unskinned instance.
 std::vector<Transform3D> skin_palette(MeshInstance3D *p_instance) {
 	std::vector<Transform3D> result;
-	if (p_instance == nullptr || p_instance->get_skeleton_path().is_empty())
+	if (p_instance == nullptr)
 		return result;
+	if (p_instance->get_skeleton_path().is_empty()) {
+		// A skinned effect's strip rides its model's bone palette, not a skin
+		// binding (object_model_skin_palette.cpp).
+		ObjectModel::skin_palette_of(p_instance, result);
+		return result;
+	}
 	Skeleton3D *skeleton = Object::cast_to<Skeleton3D>(
 			p_instance->get_node_or_null(p_instance->get_skeleton_path()));
 	const Ref<Skin> skin = p_instance->get_skin();

@@ -5,8 +5,8 @@
 namespace godot {
 
 void RetainedArrayMesh::add_retained_surface(Mesh::PrimitiveType p_primitive,
-		const Array &p_arrays) {
-	add_surface_from_arrays(p_primitive, p_arrays);
+		const Array &p_arrays, BitField<Mesh::ArrayFormat> p_format) {
+	add_surface_from_arrays(p_primitive, p_arrays, TypedArray<Array>(), Dictionary(), p_format);
 	Array retained = p_arrays.duplicate(false);
 	if (retained.size() > Mesh::ARRAY_TANGENT)
 		retained[Mesh::ARRAY_TANGENT] = Variant();

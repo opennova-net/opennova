@@ -14,12 +14,17 @@
 #include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <algorithm>
+#include <map>
 #include <vector>
 
 using namespace novaobj;
 using namespace opennova::threedi;
 
 namespace {
+
+// A skinned vertex's light fallback byte naming no part.
+constexpr int32_t kLightFallbackNone = 255;
 
 Array pack_mesh_arrays(const opennova::renderer::PreparedMeshSurface &surface) {
 	PackedVector3Array vertices, normals;
@@ -48,8 +53,62 @@ Array pack_mesh_arrays(const opennova::renderer::PreparedMeshSurface &surface) {
 		arrays[Mesh::ARRAY_BONES] = bones;
 		arrays[Mesh::ARRAY_WEIGHTS] = weights;
 	}
+	if (!surface.light_fallback_bones.empty()) {
+		// The parts a vertex's lit skinned effects fall back to when its first
+		// palette entry has no inverse (skin.gdshaderinc), four bytes per
+		// vertex, 255 for none.
+		PackedByteArray fallbacks;
+		fallbacks.resize(static_cast<int64_t>(surface.light_fallback_bones.size()) * 4);
+		uint8_t *bytes = fallbacks.ptrw();
+		for (const auto &chain : surface.light_fallback_bones)
+			for (const auto part : chain)
+				*bytes++ = part < 0 || part > kLightFallbackNone
+						? static_cast<uint8_t>(kLightFallbackNone)
+						: static_cast<uint8_t>(part);
+		arrays[Mesh::ARRAY_CUSTOM0] = fallbacks;
+	}
 	arrays[Mesh::ARRAY_INDEX] = indices;
 	return arrays;
+}
+
+// The array format flags pack_mesh_arrays' arrays need beside the defaults.
+BitField<Mesh::ArrayFormat> mesh_array_format(
+		const opennova::renderer::PreparedMeshSurface &surface) {
+	return surface.light_fallback_bones.empty()
+			? BitField<Mesh::ArrayFormat>(0)
+			: BitField<Mesh::ArrayFormat>(static_cast<int64_t>(Mesh::ARRAY_CUSTOM_RGBA8_UNORM)
+					<< Mesh::ARRAY_FORMAT_CUSTOM0_SHIFT);
+}
+
+// The bind-space box of the vertices each bone moves (a nonzero weight in any
+// of its four slots). A strip the object shaders pose from the model's bone
+// palette takes its culling box from these boxes carried through the posed
+// palette (ObjectModel::publish_skin_palette), the bounds Godot keeps per bone
+// for the meshes it skins itself.
+Dictionary pack_bone_bounds(const opennova::renderer::PreparedMeshSurface &surface) {
+	std::map<int32_t, AABB> boxes;
+	const size_t count = std::min(surface.vertices.size(),
+			std::min(surface.bones.size(), surface.weights.size()));
+	for (size_t i = 0; i < count; ++i) {
+		const auto &v = surface.vertices[i];
+		const Vector3 point(v[0], v[1], v[2]);
+		for (size_t k = 0; k < 4; ++k) {
+			if (surface.weights[i][k] == 0.0f) {
+				continue;
+			}
+			const auto found = boxes.find(surface.bones[i][k]);
+			if (found == boxes.end()) {
+				boxes.emplace(surface.bones[i][k], AABB(point, Vector3()));
+			} else {
+				found->second.expand_to(point);
+			}
+		}
+	}
+	Dictionary out;
+	for (const auto &box : boxes) {
+		out[box.first] = box.second;
+	}
+	return out;
 }
 
 } // namespace
@@ -274,7 +333,8 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		// packers read its retained arrays instead of reading the surface back.
 		Ref<RetainedArrayMesh> mesh;
 		mesh.instantiate();
-		mesh->add_retained_surface(Mesh::PRIMITIVE_TRIANGLES, pack_mesh_arrays(surface));
+		mesh->add_retained_surface(Mesh::PRIMITIVE_TRIANGLES, pack_mesh_arrays(surface),
+				mesh_array_format(surface));
 		mesh->surface_set_name(0, vformat("material_%d", surface.material_array_index));
 
 		Dictionary entry;
@@ -288,6 +348,9 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		entry["parent_index"] = surface.parent_index;
 		entry["primitive_index"] = static_cast<int64_t>(surface.primitive_index);
 		entry["is_skinned"] = !surface.bones.empty();
+		if (!surface.bones.empty()) {
+			entry["bone_bounds"] = pack_bone_bounds(surface);
+		}
 		result.push_back(entry);
 	}
 	// Keep the pristine copy; the caller gets its own entry dictionaries. The

@@ -159,18 +159,17 @@ varying vec3 v_world_normal;
 varying vec3 v_geom_normal;
 varying vec3 v_world_tangent;
 varying vec3 v_world_binormal;
-// Fixed-function EffectWorld point-light diffuse, evaluated at VERTEX rate:
-// the entry's <= 3 re-enabled pool lights join the D3D vertex diffuse and
-// Gouraud-interpolate across the triangle. Pixel-shader DOT3/Phong effects
-// instead consume the same pool below in their authored mapped-normal point
-// passes.
-// [orig: the per-frame SetLight upload @ 0x5ca6a1 -> Light_FillD3DPointLight
-// @ 0x5aa450; the flush's disable-all @ 0x5da5de and Light_ApplyAsD3DLight
-// @ 0x5da61a; Dot3DiffT/PhongT NORMAL P1 PASSRULE_ONCE_PER_POINTLIGHT].
-varying vec3 v_point_light_diffuse;
 // The saturated fixed-function vertex diffuse (hemisphere + directional +
 // the enabled point lights) Gouraud-interpolated into MODULATE2X, and the
 // same sum without point lights for the CLIP technique, which enables none.
+// The point lights are EffectWorld's, evaluated at VERTEX rate: the entry's
+// <= 3 re-enabled pool lights join the D3D vertex diffuse (summed in the
+// vertex stage, vertex_standard.gdshaderinc) and Gouraud-interpolate across
+// the triangle. Pixel-shader DOT3/Phong effects instead consume the same pool
+// below in their authored mapped-normal point passes.
+// [orig: the per-frame SetLight upload @ 0x5ca6a1 -> Light_FillD3DPointLight
+// @ 0x5aa450; the flush's disable-all @ 0x5da5de and Light_ApplyAsD3DLight
+// @ 0x5da61a; Dot3DiffT/PhongT NORMAL P1 PASSRULE_ONCE_PER_POINTLIGHT].
 varying vec3 v_ff_diffuse;
 varying vec3 v_ff_clip_diffuse;
 // Pixel-shader effect programs put their geometric self-shadow and point
@@ -195,6 +194,39 @@ varying float v_static_point_light_row;
 // object stages sit at the device's varying limit); built-ins stay out of
 // helpers.
 varying flat float v_water_mirror_pass;
+
+// A direction at unit length, or zero where it has none. A lit skinned
+// effect's vertex whose first palette entry collapsed (the right hand's
+// zero-scale row, world §14.1.5) keeps a zero geometric normal, which the
+// Gouraud hemisphere reads as level (skin.gdshaderinc); normalize would
+// hand the lighting a NaN instead.
+vec3 obj_unit_or_zero(vec3 v) {
+	float length_squared = dot(v, v);
+	return length_squared > 0.0 ? v * inversesqrt(length_squared) : v;
+}
+
+// Where the point-light vectors start. The vertex, for every unskinned effect
+// and for SkBasic, whose vsSkinBasic measures PointLightCoordArray from the
+// blended position; the lit skinned effects measure theirs from the vertex
+// their light entry (skin.gdshaderinc: the first palette entry, or the one
+// whose inverse the fill kept) carries rigidly: SkinModelLightArray
+// [indexvector.x] is the light in that entry's model space (the inverse of
+// its matrix applied to PointLightCoord), and the vertex programs subtract
+// the undeformed In.Pos.
+// [orig: CRenderBatchQueue_FlushBatches @ 0x5DA950..0x5DA9A1 (the entry
+// fill), _vsSkDfT.fx vsTanSkinDot3PointPS, _vsSkPhT.fx vsTanSkinPhongPoint,
+// _vsSkDfO.fx vsObjSkinDot3PointPS, _vsSkPhO.fx vsObjSkinPhongPoint]
+#ifdef OBJ_SKIN_NORMAL_FIRST_BONE
+varying vec3 v_skin_light_origin;
+
+vec3 obj_point_light_origin() {
+	return v_skin_light_origin;
+}
+#else
+vec3 obj_point_light_origin() {
+	return v_world_pos;
+}
+#endif
 
 float obj_water_mirror_pass_flag(uint camera_layers, bool in_shadow_pass) {
 	return (!in_shadow_pass && (camera_layers & 1024u) == 0u) ? 1.0 : 0.0;
@@ -378,9 +410,9 @@ vec4 obj_point_light_color(int light_index) {
 // diffuse (the delivered colour x 1.5, the fill's boost) * ndotl /
 // (1 + atten2 * d^2) inside the range cutoff. Only this D3D-light path takes
 // the boost; every shader pass reads the unboosted colour.
-// vertex_*.gdshaderinc fills v_point_light_diffuse for Fixed/Flag; the
-// pixel-shader helpers below bypass it and evaluate their NORMAL-pass mapped
-// N.L/N.H explicitly.
+// vertex_standard.gdshaderinc sums it into v_ff_diffuse for the Fixed
+// families; the pixel-shader helpers below bypass it and evaluate their
+// NORMAL-pass mapped N.L/N.H explicitly.
 // [orig: re-enable @ Light_ApplyAsD3DLight 0x5da61a; params @
 // Light_GetPointLightParams 0x5a9180 / Light_FillD3DPointLight 0x5aa4b2
 // (flt_7D4B80 = 1.5)]
@@ -422,7 +454,7 @@ vec3 obj_point_light_sum(vec3 world_pos, vec3 normal_ws) {
 // SelfShadowAdd=.5 are literal retail constants. [orig: _BaseInc.fx
 // CalcSelfShadowTerm; _vsDiffT/O, _vsPhongT/O, _vsSkDfT/O, _vsSkPhT/O].
 float obj_self_shadow(vec3 geom_normal_ws, vec3 to_light_ws) {
-	return clamp(dot(normalize(geom_normal_ws), normalize(to_light_ws)) * 10.0 + 0.5,
+	return clamp(dot(obj_unit_or_zero(geom_normal_ws), normalize(to_light_ws)) * 10.0 + 0.5,
 			0.0, 1.0);
 }
 
@@ -490,7 +522,7 @@ vec3 obj_bump_diffuse_point_one(vec3 base_rgb, vec3 normal_ws,
 	if (vertex_factor <= 0.0) {
 		return vec3(0.0);
 	}
-	vec3 to_light = posr.xyz - v_world_pos;
+	vec3 to_light = posr.xyz - obj_point_light_origin();
 	float dist = length(to_light);
 	vec3 light_dir = to_light / max(dist, 0.001);
 	float ndotl = max(dot(normalize(normal_ws), light_dir), 0.0);
@@ -561,7 +593,7 @@ vec3 obj_dot3_skinned_lighting(vec3 base_rgb, vec3 normal_ws,
 	vec3 normal = normalize(normal_ws);
 	vec3 to_light = normalize(-opennova_light_block_dir);
 	float ndotl = max(dot(normal, to_light), 0.0);
-	vec3 lit = base_rgb * (obj_hemi(normalize(geom_normal_ws)) +
+	vec3 lit = base_rgb * (obj_hemi(obj_unit_or_zero(geom_normal_ws)) +
 			obj_dir_light_color() * ndotl) * 2.0;
 	return lit + obj_dot3_points(base_rgb, normal);
 }
@@ -588,7 +620,7 @@ vec3 obj_phong_point_one(vec3 base_rgb, float specular_brightness,
 	if (vertex_factor <= 0.0) {
 		return vec3(0.0);
 	}
-	vec3 to_light = posr.xyz - v_world_pos;
+	vec3 to_light = posr.xyz - obj_point_light_origin();
 	float dist = length(to_light);
 	vec3 light_dir = to_light / max(dist, 0.001);
 	float ndotl = max(dot(normal_ws, light_dir), 0.0);
@@ -663,7 +695,7 @@ vec3 obj_phong_map_point_one(vec3 base_rgb, float control, vec3 normal_ws,
 	if (vertex_factor <= 0.0) {
 		return vec3(0.0);
 	}
-	vec3 to_light = posr.xyz - v_world_pos;
+	vec3 to_light = posr.xyz - obj_point_light_origin();
 	float dist = length(to_light);
 	vec3 light_dir = to_light / max(dist, 0.001);
 	float ndotl = max(dot(normal_ws, light_dir), 0.0);
@@ -735,7 +767,7 @@ vec3 obj_mirror_point_one(vec3 normal_ws, vec3 view_dir,
 	if (vertex_factor <= 0.0) {
 		return vec3(0.0);
 	}
-	vec3 to_light = posr.xyz - v_world_pos;
+	vec3 to_light = posr.xyz - obj_point_light_origin();
 	float dist = length(to_light);
 	vec3 light_dir = to_light / max(dist, 0.001);
 	float ndoth = max(dot(normal_ws, normalize(light_dir + view_dir)), 0.0);

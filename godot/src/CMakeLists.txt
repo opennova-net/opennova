@@ -108,6 +108,7 @@ add_library(${TARGET_NAME} SHARED
     object/object_model_anim.cpp
     object/object_model_materials.cpp
     object/object_model_scene.cpp
+    object/object_model_skin_palette.cpp
     object/object_model_views.cpp
     object/object_data.cpp
     object/object_data_bind.cpp

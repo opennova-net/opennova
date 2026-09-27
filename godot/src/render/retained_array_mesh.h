@@ -22,8 +22,10 @@ protected:
 	static void _bind_methods() {}
 
 public:
-	// add_surface_from_arrays, keeping the arrays for surface_arrays().
-	void add_retained_surface(Mesh::PrimitiveType p_primitive, const Array &p_arrays);
+	// add_surface_from_arrays, keeping the arrays for surface_arrays();
+	// p_format carries the flags a custom channel's layout needs.
+	void add_retained_surface(Mesh::PrimitiveType p_primitive, const Array &p_arrays,
+			BitField<Mesh::ArrayFormat> p_format = 0);
 	// The retained arrays of one surface (empty when none were retained).
 	Array retained_surface_arrays(int p_surface) const;
 
