@@ -503,6 +503,27 @@ def mesh_part_holds_the_skinned_geometry():
 
 
 @case
+def skinned_strips_split_by_the_oed_palette_rule():
+    # Fifteen triangles, each wholly on a bone of its own: a table counts a
+    # triangle's missing bones corner by corner (OED's rule), so the 14-bone
+    # table takes no triangle bringing a 15th on three corners (14 + 3 > 16),
+    # though the bones alone would fit.
+    root, lod = model("palette")
+    bones = {"BN01": ((0.0, 0.0, 0.0), None)}
+    bones.update({f"BN{i:02d}": ((0.1 * i, 0.0, 0.0), "BN01") for i in range(2, 16)})
+    arm = armature("palette Rig", lod, bones)
+    me = bpy.data.meshes.new("Fifteen")
+    me.from_pydata([(0.1 * k + dx, dy, 0.0) for k in range(15) for dx, dy in ((0, 0), (0.05, 0), (0, 0.05))], [],
+                   [(3 * k, 3 * k + 1, 3 * k + 2) for k in range(15)])
+    me.uv_layers.new(name="UVMap")
+    body = link(bpy.data.objects.new("Fifteen", me), arm)
+    skin(body, arm, {3 * k + c: {f"BN{k + 1:02d}": 1.0} for k in range(15) for c in range(3)})
+    _, lines = export_model(root)
+    tables = [[int(b) for b in t] for t in records(lines, "bones")]
+    assert tables == [list(range(14)), [14]], tables
+
+
+@case
 def derived_hit_spheres_import_without_helpers():
     root, arm, body = person("derived")
     skin(body, arm, {v: {"BN02 Leg" if v < 4 else "BN03 Arm": 1.0} for v in range(8)})

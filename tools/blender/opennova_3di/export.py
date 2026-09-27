@@ -98,8 +98,9 @@ BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
 TRACK_ORDER = ("rotx", "roty", "rotz", "scalex", "scaley", "scalez", "trans")
 
 # A strip holds at most 65535 indices (u16), so 21,845 triangles; export
-# starts another strip there, and a skinned one whenever its bone table would
-# pass 16 parts (the skinned palette, MAX_SKIN_MATRICES).
+# starts another strip there, and a skinned one's bone table holds at most 16
+# parts (the skinned palette, MAX_SKIN_MATRICES), filled by OED's rule
+# (skinned_strips).
 STRIP_TRIANGLES = 65535 // 3
 SKIN_TABLE = 16
 # Every first-person bone buffer is a 64-entry array: a gun of more parts
@@ -669,9 +670,17 @@ class Exporter(Notes):
     def skinned_strips(self, ob, strips, lod, bone=None):
         """A mesh's triangles on a skinned model, grouped per material into
         strips whose bone tables stay within SKIN_TABLE parts and whose
-        triangles within STRIP_TRIANGLES. A corner carries its rest position
-        and its influences (weights), or wholly `bone` for a mesh hung from
-        it. LOD 0's vertices bound the bones that move them (bone_points)."""
+        triangles within STRIP_TRIANGLES, by OED's palette rule (the retired
+        port's rdta.cpp, WriteRDTA_Skinned's grouping): a triangle joins the
+        first strip of its material whose table, counting each corner's
+        bones anew where the table lacks them, stays within SKIN_TABLE, and
+        else starts one; a table lists its bones in the order they come. So a
+        table of 15 bones takes no triangle bringing a 16th on more than one
+        corner: 56 retail splits (JNTOPSB2's 15 and 2 bones, CIndo01's 15 and
+        1) keep a union a plain count would have fitted in one strip. A
+        corner carries its rest position and its influences (weights), or
+        wholly `bone` for a mesh hung from it. LOD 0's vertices bound the
+        bones that move them (bone_points)."""
         ev = self.evaluated(ob)
         mesh = ev.to_mesh()
         try:
@@ -700,17 +709,19 @@ class Exporter(Notes):
                     loop = mesh.loops[li]
                     corners.append((self.corner(mesh, loop, mw, nmat, normals, uv0, uv1),
                                     influences[loop.vertex_index]))
-                need = {b for _, infl in corners for b, _ in infl}
+                bones = [b for _, infl in corners for b, _ in infl]
                 runs = strips.setdefault(mi, [])
-                s = runs[-1] if runs else None
-                if s is None or len(set(s["table"]) | need) > SKIN_TABLE or len(s["tris"]) >= STRIP_TRIANGLES:
+                s = next((run for run in runs if len(run["tris"]) < STRIP_TRIANGLES and
+                          len(run["table"]) + sum(1 for b in bones if b not in run["slots"]) <= SKIN_TABLE), None)
+                if s is None:
                     s = new_strip(ob)
                     runs.append(s)
                 if s["meshes"][-1] != ob.name:
                     s["meshes"].append(ob.name)
-                for b in sorted(need - set(s["table"])):
-                    s["slots"][b] = len(s["table"])
-                    s["table"].append(b)
+                for b in bones:
+                    if b not in s["slots"]:
+                        s["slots"][b] = len(s["table"])
+                        s["table"].append(b)
                 ids = []
                 for vert, infl in corners:
                     slots = [s["slots"][b] for b, _ in infl]
