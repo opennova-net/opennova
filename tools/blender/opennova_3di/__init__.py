@@ -301,7 +301,13 @@ class O3DObjectProps(bpy.types.PropertyGroup):
 
 
 class O3DBoneProps(bpy.types.PropertyGroup):
-    # A rig's part, on its BN## bone: its part animation and stored parent.
+    # A rig's part, on its BN## bone: its part animation, stored parent and,
+    # on a skinned model, whether its section takes hits.
+    hit_sphere: BoolProperty(name="Hit sphere", default=True,
+                             description="On a skinned model, this bone's collision section has a hit sphere and "
+                                         "box: its `_## hit` and `_## bounds` empties, else the ones the LOD 0 "
+                                         "vertices it moves give. Off, the section stores none and no shot finds "
+                                         "it, as some retail bones")
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
                             description="The part's raw PANM flags word; -1 derives it from the tracks")
@@ -1569,7 +1575,9 @@ class O3D_PT_bone(bpy.types.Panel):
 
     def draw(self, context):
         index = rig.bone_part(context.bone)
-        self.layout.label(text=f"Part {index + 1:02d}", icon="BONE_DATA")
+        row = self.layout.row()
+        row.label(text=f"Part {index + 1:02d}", icon="BONE_DATA")
+        row.prop(context.bone.o3d, "hit_sphere")
         draw_part_animation(self.layout, context.bone, True)
 
 

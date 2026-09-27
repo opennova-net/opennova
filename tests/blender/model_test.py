@@ -133,6 +133,33 @@ def records(lines, key):
     return [line.split()[1:] for line in lines if line.split()[:1] == [key]]
 
 
+def spheres(lines):
+    """{collision section: its csphere values}."""
+    out, at = {}, -1
+    for line in lines:
+        key = line.split()[:1]
+        if key == ["cobj"]:
+            at += 1
+        elif key == ["csphere"]:
+            out[at] = [float(x) for x in line.split()[1:]]
+    return out
+
+
+def same_spheres(a, b):
+    """The same sections carry the same spheres and boxes, on the file's 16.16
+    grid (one step of float noise)."""
+    assert a.keys() == b.keys(), (a, b)
+    for k in a:
+        assert len(a[k]) == len(b[k]) and all(abs(x - y) <= 1.0 / 65536.0 for x, y in zip(a[k], b[k])), \
+            (k, a[k], b[k])
+
+
+def hit_helpers():
+    """The `_## hit` and `_## bounds` empties in the scene, by name."""
+    names = (rig.clean_name(ob.name) for ob in bpy.data.objects)
+    return sorted(n for n in names if (m := export.HELPER_RE.match(n)) and m.group(2) in ("hit", "bounds"))
+
+
 def refused(root, *fragments):
     """The ExportError the export raises, which must name every fragment."""
     bpy.context.view_layer.update()
@@ -344,8 +371,10 @@ def first_person_gun_and_arms_round_trip():
     again = import_again(first)
     names = {m.name: m for m in again}
     g, a = names["rtgun"], names["rtarms"]
-    # Imported together, the arms deform with the gun's rig again.
+    # Imported together, the arms deform with the gun's rig again; their bone
+    # sections' spheres are the derived ones, so no helper stands for them.
     assert rig.rig_of(a) == rig.rig_of(g) and rig.model_of(rig.rig_of(g)) is g
+    assert not hit_helpers(), hit_helpers()
     for m in (g, a):
         m.o3d.output_path = os.path.join(OUT, "again", m.name + ".3di").replace("\\", "/")
         export_model(m)
@@ -462,21 +491,48 @@ def mesh_part_holds_the_skinned_geometry():
     assert abs(float(parts[3][3]) + 1.0) < 1e-6, parts[3]
     # The bullet faces sit in the mesh part's section; each bone that moves
     # vertices carries a derived hit sphere.
-    faces, spheres, at = {}, set(), -1
+    faces, at = {}, -1
     for line in lines:
         key = line.split()[:1]
         if key == ["cobj"]:
             at += 1
         elif key == ["cf"]:
             faces[at] = faces.get(at, 0) + 1
-        elif key == ["csphere"]:
-            spheres.add(at)
     assert list(faces) == [3], faces
-    assert spheres == {1, 2}, spheres
+    assert set(spheres(lines)) == {1, 2}, spheres(lines)
 
 
 @case
-def hit_spheres_have_a_scene_form():
+def derived_hit_spheres_import_without_helpers():
+    root, arm, body = person("derived")
+    skin(body, arm, {v: {"BN02 Leg" if v < 4 else "BN03 Arm": 1.0} for v in range(8)})
+    arm.data.bones["BN03 Arm"].o3d.hit_sphere = False
+    stray = empty("_03 hit", None, (0.3, 0.0, 0.4))
+    hang(stray, arm, "BN03 Arm")
+    refused(root, "_03 hit", "Hit sphere is off")
+    bpy.data.objects.remove(stray)
+    _, lines = export_model(root)
+    # The leg's sphere is the one its vertices give (the body's bottom face,
+    # a 0.6 m square: its middle, reaching the corners); the arm's Hit sphere
+    # is off and the hips move no vertex, so those sections store none.
+    one = spheres(lines)
+    assert set(one) == {1}, one
+    assert abs(one[1][2] + 0.3) < 1e-4 and abs(one[1][3] - 0.3 * math.sqrt(2.0)) < 1e-4, one
+    first = export.output_path(root)
+    again = import_again([first])[0]
+    # An own export imports with no helper: its spheres are the derived ones,
+    # and the arm's section, which stores none, turns its Hit sphere off.
+    assert not hit_helpers(), hit_helpers()
+    bones = rig.rig_of(again).data.bones
+    assert [bones[f"BN0{i}"].o3d.hit_sphere for i in (1, 2, 3)] == [True, True, False]
+    again.o3d.output_path = os.path.join(OUT, "derived2", "derived.3di").replace("\\", "/")
+    _, lines = export_model(again)
+    same_spheres(one, spheres(lines))
+    compare(first, export.output_path(again))
+
+
+@case
+def an_authored_hit_sphere_keeps_its_helpers():
     root, arm, body = person("hits")
     skin(body, arm, {v: {"BN02 Leg" if v < 4 else "BN03 Arm": 1.0} for v in range(8)})
     hit = empty("_hit", None, (0.0, 0.0, -0.4))
@@ -488,17 +544,21 @@ def hit_spheres_have_a_scene_form():
     bounds.scale = (0.1, 0.2, 0.3)
     hang(bounds, arm, "BN02 Leg")
     _, lines = export_model(root)
-    spheres = records(lines, "csphere")
-    # With a hit sphere in the scene, only the bones that have one carry one.
-    assert len(spheres) == 1, spheres
-    c = [float(x) for x in spheres[0]]
+    # The leg's sphere and box are its helpers'; the arm's, which has none,
+    # the ones its vertices give.
+    one = spheres(lines)
+    assert set(one) == {1, 2}, one
+    c = one[1]
     assert abs(c[2] + 0.4) < 1e-4 and abs(c[3] - 0.25) < 1e-4, c
     # Mission axes: x forward (Blender -Y), y left (Blender X).
     assert abs(c[4] + 0.2) < 1e-4 and abs(c[5] + 0.1) < 1e-4 and abs(c[6] + 0.7) < 1e-4, c
     first = export.output_path(root)
     again = import_again([first])[0]
+    # Only the leg's sphere and box are not the derived ones.
+    assert hit_helpers() == ["_02 bounds", "_02 hit"], hit_helpers()
     again.o3d.output_path = os.path.join(OUT, "hits2", "hits.3di").replace("\\", "/")
-    export_model(again)
+    _, lines = export_model(again)
+    same_spheres(one, spheres(lines))
     compare(first, export.output_path(again))
 
 

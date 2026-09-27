@@ -141,14 +141,20 @@ the same text transport, the same add-on.
    JO models. The CMDL box envelops the collision faces and LOD 0's triangles,
    its radii and height (`radii[2]`) the collision faces' alone, as the retail
    corpus stores them. A skinned model follows the retail person layout: one
-   section per bone at its pivot, carrying the hit sphere and bounds box its
-   `_## hit` and `_## bounds` helpers give (retail's rule for them is not in
-   the file; they are what the runtime's person raycast reads [orig:
-   Physics_RaycastAgainstBoneSections @ 0x4e4670]), or, in a model with no hit
-   sphere, a sphere around every LOD 0 vertex the bone moves; the bullet faces
-   sit on the section of the part the skinned geometry is authored on, its
-   mesh part, whose own bounds stay at the empty sentinels (a derived sphere
-   there would be a phantom shootable bone), or its root.
+   section per bone at its pivot, carrying a hit sphere and bounds box, what
+   the runtime's person raycast reads [orig: Physics_RaycastAgainstBoneSections
+   @ 0x4e4670]: the box around the LOD 0 vertices the bone moves and the
+   sphere about its middle reaching the farthest (OED's WriteCOBJ rule; 1,344
+   of the 3,107 retail JO bone sections that store a sphere are exactly that),
+   unless its `_## hit` and `_## bounds` helpers give others (retail's rule for
+   the other 1,763 is not in the file). A bone whose Hit sphere setting is off
+   keeps the empty sentinels, as 97 retail bone sections do although vertices
+   are weighted to their bone. Import makes the helpers, and turns Hit sphere
+   off, only where the file is not that rule on its 16.16 grid, so a model the
+   add-on wrote comes back without them. The bullet faces sit on the section
+   of the part the skinned geometry is authored on, its mesh part, whose own
+   bounds stay at the empty sentinels (a derived sphere there would be a
+   phantom shootable bone), or its root.
    The derived values are truncated as OED's writer truncated them (GHDR,
    user points and section offsets included). The CMDL and the bullet-face
    words come from the stored corners and normals, our rule: retail took them

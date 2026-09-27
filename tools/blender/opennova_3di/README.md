@@ -134,10 +134,13 @@ model is skinned wholly on that bone. A skinned model keeps its skinned
 geometry on its root part, or with **Mesh part** on (the retail layout of
 US01 and ArmsG) on a part of its own after the bones, whose pivot is the
 mesh's origin (on the ground under the hips) and whose collision section
-holds the bullet faces. Each bone's collision section is its hit sphere: a
-`_## hit` Empty drawn as a sphere on the bone (its size the radius) and a
-`_## bounds` box Empty beside it give the sphere and its box; without any,
-export makes a sphere for every bone around the vertices it moves.
+holds the bullet faces. Each bone's collision section is its hit sphere,
+which export makes around the vertices the bone moves; a `_## hit` Empty
+drawn as a sphere on the bone (its size the radius) or a `_## bounds` box
+Empty sets the sphere or its box instead, and a bone whose **Hit sphere** is
+off (Bone properties) has none. Import makes these Empties only where the
+file's sphere or box is not the one export would make, so a model exported
+from Blender comes back without them.
 
 Helpers take their part from where they sit, and the `##` in their names is
 optional: `UPG05 grip` on part 05 is fine, `UPG04 grip` there is refused.
@@ -299,8 +302,8 @@ Culling, the Math node, the render method and Emission.
   spin or wave), and in a closed "Stored as" panel its raw PANM flags word and
   stored Parent. On any other object of a model: the part it sits on, and on a
   user point, light or occlusion mesh its export order.
-- **Bone properties** on a `BN##` bone: its part number and part animation, as
-  on a `PN##` part, plus the track frame.
+- **Bone properties** on a `BN##` bone: its part number, Hit sphere (a skinned
+  model's) and part animation, as on a `PN##` part, plus the track frame.
 - **Light properties** on an `LP` light: the colour generator (style, rate,
   phase or register, end colour), attenuation and the corona / terrain /
   object light switches, the other flag bits in a closed panel. A spot light's

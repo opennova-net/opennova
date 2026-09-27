@@ -31,8 +31,9 @@
 #                 attach point.
 #   _## hit       Empty on a bone of a skinned model: that bone's hit sphere
 #                 (its origin the centre, its display size times its scale the
-#                 radius); `_## bounds`, a box Empty beside it, the section's
-#                 bounds box (else the vertices the bone moves bound it).
+#                 radius); `_## bounds`, a box Empty, the section's bounds box.
+#                 Without them the LOD 0 vertices the bone moves give both
+#                 (bone_bounds); a bone whose Hit sphere is off stores none.
 #   UP<c>## <lbl> Empty: user point, type letter c (G gameplay, S effect), on
 #                 its part (00: on none, -1), label = the USRP name; it faces
 #                 along its local +Z. Its `order` property keeps the USRP order.
@@ -123,6 +124,21 @@ def derived_panm_flags(tracks):
     scale = any(t.startswith("scale") for t, _ in live)
     axis = next((a for t, a in live if t == "trans"), 0)
     return (2 if scale else 0) | ((2 if rot else 0) << 8) | (axis << 24)
+
+
+def bone_bounds(points):
+    """A bone section's hit sphere and box from the LOD 0 vertices the bone
+    moves (mission axes): the box around them, and the sphere about its
+    middle reaching the farthest of them, (centre, radius, [min x y z, max x
+    y z]) (OED's WriteCOBJ skinned rule, 5fc5b4f6a^
+    engine/formats/oed/export_3di.cpp). Export writes it for a bone without
+    `_hit` / `_bounds` empties, and import makes them only where the file's
+    sphere or box is not this."""
+    mn = [min(p[k] for p in points) for k in range(3)]
+    mx = [max(p[k] for p in points) for k in range(3)]
+    centre = [(mn[k] + mx[k]) * 0.5 for k in range(3)]
+    radius = max(math.dist(p, centre) for p in points)
+    return centre, radius, mn + mx
 
 
 def shared_vertex(strip, key, vert, corners):
@@ -885,6 +901,39 @@ class Exporter(Notes):
         h = [abs(x) for x in h]
         return [c[k] - h[k] for k in range(3)] + [c[k] + h[k] for k in range(3)]
 
+    def bone_sphere(self, lod0, part, section):
+        """A skinned model's section `csphere`: [centre x y z, radius, and the
+        box's min x y z, max x y z unless the sphere's cube bounds it] in
+        mission axes, or None for the empty section's sentinels. A bone
+        section (one without collision geometry of its own) takes its bone's
+        `_hit` sphere and `_bounds` box, and what the empty lacks from the
+        LOD 0 vertices the bone moves (bone_bounds); a bone that moves none
+        and has no `_hit`, or whose Hit sphere is off, keeps the sentinels."""
+        i = part.index
+        hit, bounds = lod0.spheres.get(i), lod0.boxes.get(i)
+        helper = hit if hit is not None else bounds
+        if helper is not None and section["verts"]:
+            raise ExportError(f"{helper.name}: section {i + 1:02d} holds bullet faces, which bound it; a hit sphere "
+                              "and its box are a bone section's")
+        if part.bone is not None and not part.bone.o3d.hit_sphere:
+            if helper is not None:
+                raise ExportError(f"{helper.name}: bone {part.bone.name}'s Hit sphere is off (its section stores "
+                                  "none)")
+            return None
+        points = None if section["verts"] else self.bone_points.get(i)
+        derived = bone_bounds(points) if points else None
+        if hit is not None:
+            centre, radius = self.hit_sphere(hit)
+        elif derived is not None:
+            centre, radius = derived[0], derived[1]
+        elif bounds is not None:
+            raise ExportError(f"{bounds.name}: a bounds box goes with a hit sphere, and bone {i + 1:02d} moves no "
+                              f"vertex to derive one from: add its `_{i + 1:02d} hit`")
+        else:
+            return None
+        box = self.hit_box(bounds) if bounds is not None else (derived[2] if derived is not None else [])
+        return [*centre, radius, *box]
+
     def emit_collision(self, lod0, bullet, lines):
         # One section per part of the collision LOD (WriteCOBJ walks that
         # LOD's subobjects: Dtruck2's collision LOD has 7 parts to LOD 0's 8,
@@ -922,40 +971,19 @@ class Exporter(Notes):
                 raise ExportError(f"{ob.name}: its section {part + 1:02d} is not a part of the collision LOD "
                                   f"(LOD {self.props.poly_collision_lod} has {count})")
             sections[part]["volumes"].append((key, vtype, flags, ob))
-        # A skinned model's bone sections: the hit spheres its `_hit` empties
-        # give (every retail person's bones carry one, a rule nothing in the
-        # file keeps), or, in a model with none, a sphere around every LOD 0
-        # vertex the bone moves (WriteCOBJ's skinned rule); a section with
-        # bullet faces is bounded by its weighted vertices (the builder).
-        spheres = {}
-        for part, ob in lod0.spheres.items():
-            if part < count:
-                spheres[part] = self.hit_sphere(ob)
-        for part, ob in lod0.boxes.items():
-            if part not in lod0.spheres:
-                raise ExportError(f"{ob.name}: a bounds box goes with its part's hit sphere (`_hit`)")
+        for part, ob in list(lod0.spheres.items()) + list(lod0.boxes.items()):
+            if part >= count:
+                raise ExportError(f"{ob.name}: its section {part + 1:02d} is not a part of the collision LOD "
+                                  f"(LOD {self.props.poly_collision_lod} has {count})")
         # Every section sits at its part's pivot (the COBJ offset retail
         # carries: Dtruck2's wheels, Dblkhwk1's rotors).
         pivots = [self.pivot(p) for p in bullet.parts]
         for i, s in enumerate(sections):
             lines.append(f"cobj {bullet.parts[i].parent} " + fmt(*pivots[i]) + f"  # {bullet.parts[i].name}")
             if self.skinned:
-                pts = self.bone_points.get(i, [])
-                box = None
-                if pts:
-                    mn = [min(p[k] for p in pts) for k in range(3)]
-                    mx = [max(p[k] for p in pts) for k in range(3)]
-                    box = mn + mx
-                if i in lod0.boxes:
-                    box = self.hit_box(lod0.boxes[i])
-                if i in spheres:
-                    c, r = spheres[i]
-                    lines.append("csphere " + fmt(*(float(x) for x in c), float(r)) +
-                                 ("" if box is None else " " + fmt(*(float(x) for x in box))))
-                elif not lod0.spheres and not s["verts"] and pts:
-                    c = [(box[k] + box[k + 3]) * 0.5 for k in range(3)]
-                    r = max(sum((p[k] - c[k]) ** 2 for k in range(3)) ** 0.5 for p in pts)
-                    lines.append("csphere " + fmt(*(float(x) for x in c), float(r), *(float(x) for x in box)))
+                sphere = self.bone_sphere(lod0, bullet.parts[i], s)
+                if sphere is not None:
+                    lines.append("csphere " + fmt(*(float(x) for x in sphere)))
             for v in s["verts"]:
                 lines.append("cv " + fmt(*v))
             for (a, b, c), poly, face_flags in s["faces"]:

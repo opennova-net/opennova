@@ -622,13 +622,14 @@ def share_rig(context, arms, gun):
     instead, its vertex groups renamed after the gun's bones of the same BN##
     number; a mesh hung from an arms bone is skinned wholly on that bone, and a
     helper there moves under its LOD root, its name carrying its part; the
-    arms' own rig goes, and their root stands under the gun's root with no
-    offset. Returns notes. An ExportError, with nothing changed, when either
-    model lacks a rig of its own, when the arms' bones are not the gun's first
-    K bones (the same parents, heads within PAIR_TOLERANCE in each model's
-    frame), when their weights do not reach their last bone (a shared rig
-    gives the arms the bones their weights reach), or when the arms would have
-    more parts than the gun (every first-person bone buffer is the gun's)."""
+    gun's bones take the arms' bones' Hit sphere settings, the arms' own rig
+    goes, and their root stands under the gun's root with no offset. Returns
+    notes. An ExportError, with nothing changed, when either model lacks a
+    rig of its own, when the arms' bones are not the gun's first K bones (the
+    same parents, heads within PAIR_TOLERANCE in each model's frame), when
+    their weights do not reach their last bone (a shared rig gives the arms
+    the bones their weights reach), or when the arms would have more parts
+    than the gun (every first-person bone buffer is the gun's)."""
     # Every matrix below is read as the scene now holds it.
     context.view_layer.update()
     own, theirs = rig_of(arms), rig_of(gun)
@@ -678,7 +679,10 @@ def share_rig(context, arms, gun):
                               f"{gun.name}'s rig stands for")
         if ob.type != "MESH" and numbered(ob.name, index) is None:
             raise ExportError(f"{ob.name}: it hangs from {bone.name}; move it off the arms' rig first")
-    # Nothing refused: now change the scene.
+    # Nothing refused: now change the scene. The bone sections are the arms'
+    # (a rigid gun has none), so the gun's bones take their Hit sphere.
+    for i in range(count):
+        gun_bones[i].o3d.hit_sphere = bones[i].o3d.hit_sphere
     names = {bones[i].name: gun_bones[i].name for i in range(count)}
     for ob in meshes:
         renames = [(g, names[g.name]) for g in ob.vertex_groups if g.name in names and g.name != names[g.name]]

@@ -244,6 +244,21 @@ def influences(s, v):
     return sorted(out.items())
 
 
+# A section's bounds are stored on the 16.16 grid: the builder rounds a hit
+# sphere's centre to it and truncates its radius and box
+# (formats/threedi/threedi_build.cpp).
+Q16 = 65536.0
+
+
+def on_grid(stored, derived, rounded=False):
+    """Whether stored 16.16 values (read back exactly) are the ones the
+    builder writes for `derived` values (rounded, else truncated), within one
+    step: the float noise of the vertices they come from can move a
+    truncation a whole step."""
+    q = round if rounded else int
+    return all(abs(round(a * Q16) - q(b * Q16)) <= 1 for a, b in zip(stored, derived))
+
+
 def pair(read):
     """Which skinned model of an import deforms with which rigid model's rig:
     {skinned index: (gun index, worst pivot distance)}. A skinned model pairs
@@ -833,27 +848,53 @@ class Builder(Notes):
             self.note(f"{unbuilt} collision volume planes touch their volume in no face of 1 cm2 or more (or not at "
                       "all); export derives planes from faces, so it does not rebuild them")
 
+    def moved_points(self):
+        """The LOD 0 vertices each part's bone moves (mission axes), as export
+        gathers them from the mesh import makes of them: every part a
+        vertex's weights give rig.WEIGHT_EPS or more."""
+        points = {}
+        for p in self.sc["lods"][0]["parts"] if self.sc["lods"] else ():
+            for s in p["strips"]:
+                for v in s["verts"]:
+                    for part, w in influences(s, v):
+                        if round(w, 6) >= rig.WEIGHT_EPS:
+                            points.setdefault(part, []).append(v["p"])
+        return points
+
     def hit_spheres(self, lod_objects):
-        """A skinned model's bone sections that carry a sphere (every retail
-        person's and arms' bones, by a rule the file does not keep): a `_## hit`
-        Empty on the bone, drawn as that sphere (its origin the centre, its
-        scale the radius), and a `_## bounds` box Empty beside it, the
-        section's bounds box (its origin the middle, its scale the half
-        extents). Both are hidden: collision helpers."""
+        """A skinned model's bone sections (those without collision geometry)
+        as export writes them back: a section whose stored sphere is not the
+        one export derives from the LOD 0 vertices its bone moves
+        (export.bone_bounds, compared on the file's 16.16 grid) gets a
+        `_## hit` sphere Empty on the bone (its origin the centre, its scale
+        the radius), and one whose box is not the derived one (with no
+        vertices, the sphere's cube) a `_## bounds` box Empty (its origin the
+        middle, its scale the half extents), both hidden; a section that
+        stores none although its bone moves vertices turns the bone's Hit
+        sphere off. A model this export wrote imports with none of them."""
         if not self.sc["skinned"]:
             return
+        points = self.moved_points()
         for si, c in enumerate(self.sc["cobjs"]):
+            if c["verts"]:
+                continue
+            derived = export.bone_bounds(points[si]) if si in points else None
             if c["sphere"] is None:
+                bone = self.rig.data.bones.get(f"BN{si + 1:02d}") if self.rig is not None else None
+                if derived is not None and bone is not None:
+                    bone.o3d.hit_sphere = False
                 continue
             part = self.section_part(si)
             centre, radius = c["sphere"][:3], c["sphere"][3]
-            ob = bpy.data.objects.new(f"_{si + 1:02d} hit", None)
-            ob.empty_display_type = "SPHERE"
-            ob.empty_display_size = 1.0
-            world = Matrix.Translation(self.blender(centre)) @ Matrix.Scale(radius, 4)
-            lod_objects[0].append(self.put(ob, 0, part, world))
-            ob.hide_set(True)
-            if c["box"] is not None:
+            if derived is None or not on_grid(centre, derived[0], True) or not on_grid([radius], [derived[1]]):
+                ob = bpy.data.objects.new(f"_{si + 1:02d} hit", None)
+                ob.empty_display_type = "SPHERE"
+                ob.empty_display_size = 1.0
+                world = Matrix.Translation(self.blender(centre)) @ Matrix.Scale(radius, 4)
+                lod_objects[0].append(self.put(ob, 0, part, world))
+                ob.hide_set(True)
+            cube = [x - radius for x in centre] + [x + radius for x in centre]
+            if c["box"] is not None and not on_grid(c["box"], derived[2] if derived is not None else cube):
                 lo, hi = self.blender(c["box"][:3]), self.blender(c["box"][3:6])
                 box = bpy.data.objects.new(f"_{si + 1:02d} bounds", None)
                 box.empty_display_type = "CUBE"
