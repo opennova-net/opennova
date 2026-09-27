@@ -152,7 +152,7 @@ def first_pixel(root, name):
 @case
 def base_color_only_from_its_feed():
     # A normal map and a roughness image are not the diffuse texture: with no
-    # image on Base Color the material exports none, and says so.
+    # image on Base Color the material draws its colour, and says so.
     mat, tree, bsdf = principled_material("Rifle Paint")
     bsdf.inputs["Base Color"].default_value = (0.2, 0.3, 0.1, 1.0)
     rough = image_node(tree, image("rifle_rough", (0.8, 0.8, 0.8, 1.0), colour_space="Non-Color"))
@@ -163,8 +163,8 @@ def base_color_only_from_its_feed():
     tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
     root, _ = model("paint", mat)
     notes, sc = export_model(root)
-    assert textures(sc) == [], textures(sc)
-    assert any("no image feeds its Base Color" in n for n in notes), notes
+    assert textures(sc) == [("paint_0.tga", 1, 0, 0, 0)], textures(sc)
+    assert any("no image feeds its Base Color" in n and "paint_0.tga" in n for n in notes), notes
 
 
 @case
@@ -401,6 +401,157 @@ def a_material_holds_24_rows():
     refused(root, "25 texture rows", "24")
 
 
+# --- geom-14, geom-5: the shader and flags from Blender's settings --------------
+
+def material_record(sc, index=0):
+    return sc["materials"][index]
+
+
+@case
+def shader_property_and_automatic_choice():
+    def settings(name, blend=False, glow=False, uvgen=False, shader=""):
+        mat = textured(name, image(name.lower(), (1, 1, 1, 1)))
+        mat.surface_render_method = "BLENDED" if blend else "DITHERED"
+        if glow:
+            materials.principled(mat).inputs["Emission Strength"].default_value = 1.0
+        mat.o3d.u_style = 32 if uvgen else 0
+        mat.o3d.shader = shader
+        return mat
+    cases = (("Plain", {}, "FF_ST_OP", 0), ("Blend", {"blend": True}, "FF_ST_AB", 1),
+             ("Glow", {"glow": True}, "FF_ST_OP_LUM", 0),
+             ("BlendGlow", {"blend": True, "glow": True}, "FF_ST_AB_LUM", 1),
+             ("Moving", {"uvgen": True}, "FF_ST_OP#UV", 0), ("Named", {"shader": "VS_PHONGT"}, "VS_PHONGT", 0),
+             ("NamedBlend", {"shader": "FF_ST_OP", "blend": True}, "FF_ST_OP", 1))
+    mats = [settings(name, **kw) for name, kw, _, _ in cases]
+    root, _ = model("shaders", *mats)
+    notes, sc = export_model(root)
+    for i, (name, _, shader, alpha) in enumerate(cases):
+        assert material_record(sc, i)["shader"] == shader, (name, material_record(sc, i)["shader"])
+        strips = [s for part in sc["lods"][0]["parts"] for s in part["strips"] if s["material"] == i]
+        assert strips and all(s["alpha"] == bool(alpha) for s in strips), (name, strips)
+    assert material_record(sc, 2)["emissive"] == 2 and material_record(sc, 0)["emissive"] == 0
+    # No skinned shader blends one texture: the automatic choice says so.
+    assert materials.automatic_shader(1, True, (False,) * 4) == ("VS_SKBASIC", [])
+    assert materials.automatic_shader(1, True, (True, False, False, False)) == \
+        ("VS_SKBASIC", ["with alpha blending"])
+
+
+@case
+def flags_from_blender_settings():
+    culled = textured("Culled", image("culled", (1, 1, 1, 1)))
+    culled.use_backface_culling = True
+    both = textured("BothSides", image("both", (1, 1, 1, 1)))
+    both.use_backface_culling = False
+    clipped = textured("Clipped", image("clipped", (1, 1, 1, 0.5)))
+    inverted = textured("Inverted", image("inverted", (1, 1, 1, 0.5)))
+    for mat, op in ((clipped, "GREATER_THAN"), (inverted, "LESS_THAN")):
+        mat.use_backface_culling = True
+        tree, bsdf = mat.node_tree, materials.principled(mat)
+        test = tree.nodes.new("ShaderNodeMath")
+        test.operation = op
+        test.inputs[1].default_value = 0.25
+        tex = next(n for n in tree.nodes if n.type == "TEX_IMAGE")
+        tree.links.new(tex.outputs["Alpha"], test.inputs[0])
+        tree.links.new(test.outputs[0], bsdf.inputs["Alpha"])
+    root, _ = model("flags", culled, both, clipped, inverted)
+    _, sc = export_model(root)
+    got = [(m["matflags"], m["alphatest"]) for m in sc["materials"]]
+    assert got == [(0, 0), (4, 0), (1, 64), (3, 64)], got
+    # The bullet faces' both-sides flag follows two-sided too.
+    faces = [f for c in sc["cobjs"] for f in c["faces"]]
+    assert sorted(f[4] & 1 for f in faces) == [0, 0, 0, 1], faces
+
+
+@case
+def colour_only_materials_draw_a_swatch():
+    # geom-5: no image is no longer additive glass: its Base Color is written
+    # as a swatch with a textured shader, and a mesh without a material draws
+    # in Blender's default grey; a shader the author names keeps OED's rule.
+    colour, _, bsdf = principled_material("Paint")
+    bsdf.inputs["Base Color"].default_value = (0.5, 0.0, 1.0, 1.0)
+    glass = bpy.data.materials.new("Glass")
+    glass.o3d.shader = "FFP_GLASS"
+    root, _ = model("swatch", colour, None, glass)
+    notes, sc = export_model(root)
+    shaders = [m["shader"] for m in sc["materials"]]
+    assert shaders == ["FF_ST_OP", "FF_ST_OP", "FFP_GLASS"], shaders
+    rows = [textures(sc, i) for i in range(len(sc["materials"]))]
+    assert rows == [[("swatch_0.tga", 1, 0, 0, 0)], [("swatch_1.tga", 1, 0, 0, 0)], []], rows
+    assert first_pixel(root, "swatch_0.tga") == (255, 0, 188, 255)  # BGRA of linear (0.5, 0, 1) as sRGB
+    assert first_pixel(root, "swatch_1.tga") == (231, 231, 231, 255)  # Blender's default 0.8 grey
+    assert len(tga_pixels(os.path.join(folder(root), "swatch_0.tga"))) == 8 * 8 * 4
+    assert any("swatch_0.tga" in n for n in notes) and any("without a material" in n for n in notes), notes
+
+
+# --- addon-7: nodes own slots 1 and 2 after import; references and copies -------
+
+def textured_file(name, rgba, where):
+    """An image loaded from a TGA file written at `where`."""
+    img = image(name + "_src", rgba)
+    path = os.path.join(where, name + ".tga")
+    img.filepath_raw = path
+    img.file_format = "TARGA_RAW"
+    img.save()
+    bpy.data.images.remove(img)
+    return bpy.data.images.load(path)
+
+
+@case
+def imported_images_live_in_the_nodes():
+    art = os.path.join(OUT, "art")
+    os.makedirs(art, exist_ok=True)
+    mat, tree, bsdf = principled_material("Rifle")
+    tree.links.new(image_node(tree, textured_file("rifle_d", (1, 0, 0, 1), art)).outputs["Color"],
+                   bsdf.inputs["Base Color"])
+    flip = bpy.data.materials.new("Flipbook")
+    for frame in range(2):
+        t = flip.o3d.textures.add()
+        t.name, t.flags, t.frame, t.write = f"flip{frame}.tga", 1, frame, False
+    flip.o3d.anim_frames = 2
+    root, _ = model("imported", mat, flip)
+    _, sc = export_model(root)
+    # An unchanged .tga file is the texture as it stands: named, and copied.
+    assert textures(sc, 0) == [("rifle_d.tga", 1, 0, 0, 0)], textures(sc, 0)
+    assert os.path.isfile(os.path.join(folder(root), "rifle_d.tga"))
+    # Import it again: the image is its Base Color node, the list keeps only
+    # the flipbook's frames.
+    imported, _ = importer.import_file(bpy.context, root.o3d.output_path)
+    mats = {m.o3d.order: m for ob in imported.children_recursive if ob.type == "MESH" for m in ob.data.materials}
+    assert len(mats[0].o3d.textures) == 0, [t.name for t in mats[0].o3d.textures]
+    assert [export.clean_name(n.image.name) for n, _ in materials.base_color(mats[0])[0]] == ["rifle_d.tga"]
+    assert [(t.name, t.frame) for t in mats[1].o3d.textures] == [("flip0.tga", 0), ("flip1.tga", 1)]
+    # A new image in the node is what exports: no list overrides it.
+    node = next(n for n in mats[0].node_tree.nodes if n.type == "TEX_IMAGE")
+    node.image = image("repainted", (0, 1, 0, 1))
+    imported.o3d.output_path = os.path.join(OUT, "reimported", "reimported.3di").replace("\\", "/")
+    _, sc = export_model(imported)
+    # (named after the model, whose name the import kept)
+    assert textures(sc, 0) == [("imported_0.tga", 1, 0, 0, 0)], textures(sc, 0)
+    assert first_pixel(imported, "imported_0.tga") == (0, 255, 0, 255)
+    assert [t[0] for t in textures(sc, 1)] == ["flip0.tga", "flip1.tga"]
+
+
+@case
+def a_copy_never_replaces_another_file():
+    art = os.path.join(OUT, "art2")
+    os.makedirs(art, exist_ok=True)
+    root, _ = model("copies", textured("Copied", textured_file("copied", (0, 0, 1, 1), art)))
+    os.makedirs(folder(root), exist_ok=True)
+    with open(os.path.join(folder(root), "copied.tga"), "wb") as f:
+        f.write(b"another file")
+    notes, _ = export_model(root)
+    with open(os.path.join(folder(root), "copied.tga"), "rb") as f:
+        assert f.read() == b"another file"
+    assert any("not replaced" in n for n in notes), notes
+
+
+@case
+def texture_row_tooltips():
+    props = addon.O3DTexture.bl_rna.properties
+    assert "override" in props["flags"].description and "flipbook" in props["flags"].description
+    assert "clamp" not in props["flags"].description.lower()
+
+
 # --- geom-6: UV maps -------------------------------------------------------------
 
 @case
@@ -411,8 +562,9 @@ def textured_mesh_without_uv_map_refused():
 
 @case
 def tangent_shader_without_uv_area_noted():
-    root, obs = model("flatuv", textured("Material_0_VS_DOT3DIFF", image("flat", (1, 1, 1, 1))),
-                      uv_maps=(("UVMap", [(0.5, 0.5)] * 3),))
+    mat = textured("Flat", image("flat", (1, 1, 1, 1)))
+    mat.o3d.shader = "VS_DOT3DIFF"
+    root, obs = model("flatuv", mat, uv_maps=(("UVMap", [(0.5, 0.5)] * 3),))
     notes, _ = export_model(root)
     assert any(obs[0].name in n and "no area" in n for n in notes), notes
 

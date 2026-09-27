@@ -939,9 +939,9 @@ class Builder(Notes):
             p.face_never_hit = bool(flags & 0x100)
             p.face_front_only = bool(flags & 0x800)
             p.face_other_flags = flags & ~0x901
-            if bool(flags & 1) != p.two_sided:
+            if bool(flags & 1) != materials.two_sided(mats[mi]):
                 self.note(f"material {mi}: its bullet faces' both-sides flag differs from its two-sided flag; "
-                          "export takes it from Two sided")
+                          "export takes it from Backface Culling")
         if outvoted:
             self.note(f"{outvoted} bullet faces take their material's most common surface and flags, not their own "
                       "(a material carries one set)")

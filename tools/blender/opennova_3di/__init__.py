@@ -130,31 +130,6 @@ def style_label(style):
     return catalog()[1].get(style, "?")
 
 
-def get_shader(self):
-    """A material's shader tag is its name's, Material_<i>_<SHADER> (the
-    ASE/OED convention); empty when the name carries none, and export then
-    takes the default for its texture count (materials.default_shader)."""
-    m = materials.MATERIAL_RE.match(export.clean_name(self.id_data.name))
-    return m.group(2) if m else ""
-
-
-def set_shader(self, value):
-    """Choosing a shader renames the material Material_<i>_<SHADER>, keeping
-    its export index i (or taking the next free one)."""
-    mat = self.id_data
-    value = value.strip()
-    if any(c.isspace() for c in value):
-        return
-    m = materials.MATERIAL_RE.match(export.clean_name(mat.name))
-    if m:
-        index = int(m.group(1))
-    else:
-        used = [int(x.group(1)) for x in (materials.MATERIAL_RE.match(export.clean_name(o.name))
-                                          for o in bpy.data.materials) if x]
-        index = max(used) + 1 if used else 0
-    mat.name = f"Material_{index}_{value}" if value else f"Material_{index}"
-
-
 def register_prop(name="Register"):
     return StringProperty(name=name, default="", search=search_registers,
                           description="CTRL register (styles above 112), checked by opennova-3di")
@@ -336,14 +311,24 @@ class O3DBoneProps(bpy.types.PropertyGroup):
 
 
 class O3DTexture(bpy.types.PropertyGroup):
+    # A texture row the material's nodes cannot say (materials.py): a
+    # flipbook frame, row flags, a normal map file, a file Blender cannot
+    # open. A slot the list gives is taken from the list, not the nodes.
     name: StringProperty(name="File", default="",
                          description="The texture's file name: printable ASCII, at most 16 characters, no folder. "
                                      "A file export writes (Write) is <name>.tga or <name>.mdt, one dot and at most "
                                      "15 characters")
-    slot: IntProperty(name="Slot", default=1, min=0, max=255, description="1 diffuse, 2 detail, 3/4 normal")
-    type: IntProperty(name="Type", default=0, min=0, max=255, description="0 diffuse, 4 MDT normal, 5 TGA-alpha normal")
-    flags: IntProperty(name="Flags", default=0, min=0, max=255, description="1 animated, 2 clamped")
-    frame: IntProperty(name="Frame", default=0, min=0, max=255)
+    slot: IntProperty(name="Slot", default=1, min=0, max=255,
+                      description="1 the diffuse texture, 2 the detail texture (on the second UV map), 3 the "
+                                  "normal map (4 a second normal map, which no retail model uses)")
+    type: IntProperty(name="Type", default=0, min=0, max=255,
+                      description="0 an image. 4 or 5 a normal map: an .mdt file holds the normals, a .tga file "
+                                  "a height in its alpha that the game turns into normals")
+    flags: IntProperty(name="Flags", default=0, min=0, max=255,
+                       description="1: a flipbook frame (animated). 2: the render-state override: bind the batch's "
+                                   "override texture in place of this row when one is pushed, which only the "
+                                   "player preview does")
+    frame: IntProperty(name="Frame", default=0, min=0, max=255, description="The row's flipbook frame")
     image: PointerProperty(name="Image", type=bpy.types.Image)
     write: BoolProperty(name="Write", default=True,
                         description="Write the image as a 32-bit TGA file under this name beside the .3di once it "
@@ -351,10 +336,15 @@ class O3DTexture(bpy.types.PropertyGroup):
 
 
 class O3DMaterialProps(bpy.types.PropertyGroup):
-    shader: StringProperty(name="Shader", get=get_shader, set=set_shader, search=search_shaders,
-                           search_options={"SUGGESTION", "SORT"},
-                           description="The shader tag, any in the engine's table. The material's name carries it "
-                                       "(Material_<i>_<SHADER>), so choosing one renames the material")
+    # What Blender's material settings cannot say. Two-sided, the alpha test,
+    # the alpha pass and the glow are Blender's own settings (materials.py).
+    shader: StringProperty(name="Shader", default="", search=search_shaders, search_options={"SUGGESTION", "SORT"},
+                           description="The engine shader, any in its table. Empty: export picks one by OED's rule "
+                                       "for the material's textures, the one that draws its Blended render method, "
+                                       "its Emission, a U or V generator and a normal map")
+    order: IntProperty(name="Export order", default=-1, min=-1,
+                       description="The material's index in the model; -1 sorts it after the ordered ones, in the "
+                                   "order meshes first use it")
     # The bullet-mesh face material on COLLISION meshes: the impact effect is
     # the ammo effects-table row material + 4 (metal = 14 -> "metal").
     surface: IntProperty(name="Collision surface", default=14, min=0, max=255,
@@ -369,20 +359,17 @@ class O3DMaterialProps(bpy.types.PropertyGroup):
                                  description="Bullets never hit these faces (CFAC flag 0x100; retail rotor blades)")
     face_front_only: BoolProperty(name="Front only", default=False,
                                   description="Bullets hit these faces only from the front; one coming from behind "
-                                              "passes through (CFAC flag 0x800; Two sided overrides it)")
+                                              "passes through (CFAC flag 0x800; a two-sided material, Backface "
+                                              "Culling off, overrides it)")
     face_other_flags: IntProperty(name="Other face flags", default=0, min=0,
                                   description="CFAC flag bits besides 1, 0x100 and 0x800 (OED wrote 2 and 0x400)")
-    alpha_test: BoolProperty(name="Alpha test", default=False)
-    alpha_test_value: IntProperty(name="Threshold", default=128, min=0, max=255)
-    two_sided: BoolProperty(name="Two sided", default=False)
     other_flags: IntProperty(name="Other flag bits", default=0, min=0, max=255,
-                             description="Material flag bits besides alpha test (1) and two sided (4)")
+                             description="Material flag bits besides the alpha test (1), its inversion (2) and "
+                                         "two-sided (4), which Blender's settings give")
     # Glass and emissive follow the shader (every retail glass shader is glass,
     # every *_LUM one emissive 2); only the reflection colour is authored.
     reflect: FloatVectorProperty(name="Reflect", subtype="COLOR", size=4, default=(0, 0, 0, 0), min=0, max=1,
                                  description="Glass reflection colour (black: a glass shader's 128 grey)")
-    alpha_strips: BoolProperty(name="Alpha strips", default=False,
-                               description="Draw in the alpha pass even when the shader is not a blended one")
     textures: CollectionProperty(type=O3DTexture)
     rgb_style: IntProperty(name="RGB gen", default=0, min=0, max=255)
     rgb_register: register_prop()
@@ -483,21 +470,27 @@ class O3D_OT_remove_track(bpy.types.Operator):
 
 class O3D_OT_add_texture(bpy.types.Operator):
     bl_idname = "opennova_3di.add_texture"
-    bl_label = "Add Texture"
+    bl_label = "Add Texture Row"
+    bl_description = ("Add a texture row the material's nodes cannot give: a flipbook frame, a row with flags, a "
+                      "normal map file, a file Blender cannot open")
+    bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
         return getattr(context, "material", None) is not None
 
     def execute(self, context):
-        t = context.material.o3d.textures.add()
-        t.slot = 1 if len(context.material.o3d.textures) == 1 else 2
+        rows = context.material.o3d.textures
+        t = rows.add()
+        if len(rows) > 1:
+            t.slot, t.flags, t.frame = rows[-2].slot, rows[-2].flags, rows[-2].frame + 1
         return {"FINISHED"}
 
 
 class O3D_OT_remove_texture(bpy.types.Operator):
     bl_idname = "opennova_3di.remove_texture"
-    bl_label = "Remove Texture"
+    bl_label = "Remove Texture Row"
+    bl_options = {"REGISTER", "UNDO"}
     index: IntProperty()
 
     @classmethod
@@ -1421,23 +1414,37 @@ class O3D_PT_material(bpy.types.Panel):
         return context.material is not None
 
     def draw(self, context):
-        p = context.material.o3d
+        mat = context.material
+        p = mat.o3d
         layout = self.layout
         layout.prop(p, "shader")
-        tag = p.shader
+        tag = p.shader.strip()
         table = catalog()[2]
         if not table:
             layout.label(text=catalog_error() or "No shader table", icon="ERROR")
         elif tag:
             known = next((flags for name, flags in table if name.lower() == tag.lower()), None)
-            traits = [label for bit, label in ((materials.FLAG_BLENDING, "alpha pass"), (materials.FLAG_GLASS, "glass"),
-                                               (materials.FLAG_EMISSIVE, "emissive"),
+            traits = [label for bit, label in ((materials.FLAG_BLENDING, "blends"), (materials.FLAG_GLASS, "glass"),
+                                               (materials.FLAG_EMISSIVE, "glows"),
+                                               (materials.FLAG_NORMAL, "normal map"),
                                                (materials.FLAG_TANGENT, "tangents"),
+                                               (materials.FLAG_UVGEN, "moving UVs"),
                                                (materials.FLAG_SKINNED, "skinned")) if (known or 0) & bit]
             layout.label(text=(", ".join(traits) if traits else "opaque") if known is not None else
                          "Not in the engine's shader table", icon="NONE" if known is not None else "ERROR")
         else:
-            layout.label(text="No shader in the name: export picks one by texture count")
+            layout.label(text="Automatic: picked by the textures and the settings below")
+        layout.prop(p, "order")
+        box = layout.box()
+        box.label(text="From Blender's material settings")
+        box.label(text="Two-sided (Backface Culling off)" if materials.two_sided(mat) else
+                  "One-sided (Backface Culling on)")
+        test = materials.alpha_test(mat)
+        box.label(text=("No alpha test (a Greater Than node on Alpha sets one)" if test is None else
+                        f"Alpha test {'at most' if test[1] else 'above'} {test[0]} (the Math node on Alpha)"))
+        box.label(text="Alpha pass (Render Method Blended)" if materials.blended(mat) else
+                  "Opaque pass (Render Method Dithered)")
+        box.label(text="Glows (Emission)" if materials.emission(mat) else "No glow (Emission off)")
         box = layout.box()
         box.label(text="Bullet faces")
         row = box.row()
@@ -1447,16 +1454,11 @@ class O3D_PT_material(bpy.types.Panel):
         row.prop(p, "face_front_only")
         box.prop(p, "face_other_flags")
         row = layout.row()
-        row.prop(p, "alpha_test")
-        if p.alpha_test:
-            row.prop(p, "alpha_test_value")
-        row.prop(p, "two_sided")
-        row = layout.row()
-        row.prop(p, "alpha_strips")
         row.prop(p, "other_flags")
         layout.prop(p, "reflect")
         box = layout.box()
-        box.label(text="Textures (none: the image wired to Base Color, slot 1)")
+        box.label(text="Texture rows the nodes cannot give")
+        box.label(text="(flipbook frames, row flags, a normal map file, a file Blender cannot open)")
         for i, t in enumerate(p.textures):
             row = box.row()
             row.prop(t, "name", text="")
@@ -1469,6 +1471,8 @@ class O3D_PT_material(bpy.types.Panel):
             row.prop(t, "type")
             row.prop(t, "flags")
             row.prop(t, "frame")
+        if {t.slot for t in p.textures} & {1, 2}:
+            box.label(text="The slots listed here are taken from the list, not the nodes", icon="INFO")
         box.operator("opennova_3di.add_texture", icon="ADD")
         row = layout.row()
         row.prop(p, "anim_frames")
