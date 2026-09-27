@@ -6,6 +6,7 @@
 //   opennova-3di info    <model.3di> [--verbose | --planes | --verts]
 //   opennova-3di compare [--strict] <expected.3di> <actual.3di>
 //   opennova-3di anim    build|scene|info|compare  (the .bad/.adm clip set)
+//   opennova-3di weapon  timing|merge  (the weapon.def keys the clips need)
 //   opennova-3di catalog
 //
 // The DCC front ends (the Blender add-on under tools/blender/opennova_3di is
@@ -48,7 +49,8 @@ int usage(const char *why) {
 			"       opennova-3di anim scene   <in.adm|in.bad> -o <set.o3a>\n"
 			"       opennova-3di anim info    <in.adm|in.bad> [--verbose | --keys]\n"
 			"       opennova-3di anim compare <expected.adm|.bad> <actual.adm|.bad>\n"
-			"       opennova-3di weapon timing <timing.txt> -o <actions.txt>\n"
+			"       opennova-3di weapon timing <timing.txt> -o <edits.txt>\n"
+			"       opennova-3di weapon merge  <weapon.def> <edits.txt> -o <out.def>\n"
 			"       opennova-3di catalog\n");
 	return 2;
 }
@@ -99,9 +101,18 @@ int main(int argc, char **argv) {
 	if (cmd == "catalog") return argc == 2 ? cmd_catalog() : usage("catalog takes no arguments");
 	if (argc < 3) return usage(nullptr);
 	if (cmd == "weapon") {
-		if (argc != 6 || std::strcmp(argv[2], "timing") != 0 || std::strcmp(argv[4], "-o") != 0)
-			return usage("weapon timing needs <timing.txt> -o <actions.txt>");
-		return threedi_cli::cmd_weapon_timing(argv[3], argv[5]);
+		const std::string sub = argv[2];
+		if (sub == "timing") {
+			if (argc != 6 || std::strcmp(argv[4], "-o") != 0)
+				return usage("weapon timing needs <timing.txt> -o <edits.txt>");
+			return threedi_cli::cmd_weapon_timing(argv[3], argv[5]);
+		}
+		if (sub == "merge") {
+			if (argc != 7 || std::strcmp(argv[5], "-o") != 0)
+				return usage("weapon merge needs <weapon.def> <edits.txt> -o <out.def>");
+			return threedi_cli::cmd_weapon_merge(argv[3], argv[4], argv[6]);
+		}
+		return usage("weapon takes timing or merge");
 	}
 	if (cmd == "info") {
 		const std::string flag = argc > 3 ? argv[3] : "";
