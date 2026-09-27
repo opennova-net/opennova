@@ -73,7 +73,7 @@ int build_with_cli(const std::string &name, const std::string &text, std::string
 	const std::string said_path = path_of(name, ".err");
 	const int status = test_cmd::run(test_cmd::quoted(cli) + " build " + test_cmd::quoted(path_of(name, ".o3d")) + " -o " +
 			test_cmd::quoted(path_of(name, ".3di")) + " 2> " + test_cmd::quoted(said_path));
-	said = slurp(said_path);
+	said = read_file_text(said_path);
 	return status;
 }
 
@@ -278,7 +278,7 @@ int main(int argc, char **argv) {
 		} else {
 			check(false, "fourth-slot: read back");
 		}
-		check(slurp(path_of("fourth-slot", ".rt.o3d")).find(" 2 1 0 1 0.5 0.25 0\n") != std::string::npos,
+		check(read_file_text(path_of("fourth-slot", ".rt.o3d")).find(" 2 1 0 1 0.5 0.25 0\n") != std::string::npos,
 				"fourth-slot: scene writes the four slots");
 		check(build("weights-retail-sum", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 0.4487 0.3871 0.1643\n" + tail),
 				"weights-retail-sum: retail's 1.0001 builds");
@@ -468,14 +468,14 @@ int main(int argc, char **argv) {
 		for (int i = 0; i < 32770; ++i) full += "cv 0 0 0\n";
 		refuses_saying("strict-cv-count", full,
 				"collision section 0 exceeds 32,768 vertices: retail reads a bullet face's corners as signed 16-bit indices");
-		const std::string said = slurp(path_of("strict-cv-count", ".err"));
+		const std::string said = read_file_text(path_of("strict-cv-count", ".err"));
 		check(said.find("exceeds 32,768") == said.rfind("exceeds 32,768"), "strict-cv-count: said once");
 		// A strip's triangles index its vertices with u16 words, said once too.
 		std::string long_strip = "o3d 1\nmodel STRIP\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n";
 		long_strip.reserve(long_strip.size() + 65537 * 18);
 		for (int i = 0; i < 65537; ++i) long_strip += "v 0 0 0 0 0 1 0 0\n";
 		refuses_saying("strict-strip-count", long_strip, "strip exceeds 65,535 vertices: its triangles index them with u16 words");
-		const std::string strip_said = slurp(path_of("strict-strip-count", ".err"));
+		const std::string strip_said = read_file_text(path_of("strict-strip-count", ".err"));
 		check(strip_said.find("exceeds 65,535") == strip_said.rfind("exceeds 65,535"), "strict-strip-count: said once");
 		// A texture name is the MTRL row's 16-byte field, counted in bytes,
 		// printable ASCII and a file name alone; retail fills all 16 bytes
