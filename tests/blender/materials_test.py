@@ -340,7 +340,7 @@ def texture_entry_names_follow_the_cli():
         t.name, t.write, t.image = name, write, img
         return mat
     for name, fragment in (("ствол.tga", "not printable ASCII"), ("a_seventeen_c.tga", "exceeds 16"),
-                           ("tex/foo.tga", "holds a path"), ("", "no file name")):
+                           ("tex/foo.tga", "names a folder"), ("tex\\foo.tga", "names a folder")):
         root, _ = model("entry", entry(name))
         refused(root, fragment)
         for ob in list(bpy.data.objects):
@@ -402,6 +402,51 @@ def a_material_holds_24_rows():
         t.name, t.frame = f"frame{i}.tga", i
     root, _ = model("rows", mat)
     refused(root, "25 texture rows", "24")
+
+
+@case
+def a_row_that_names_no_file_round_trips():
+    # The format holds texture rows that name no file: 63 rows of the JO
+    # models are empty (M24_1st's VS_BMTXMIRRT keeps one in slot 2). Such a
+    # row exports, and imports back, as the same empty row, beside the node's
+    # image.
+    mat = textured("Lens", image("lens", (1, 1, 1, 1)))
+    mat.o3d.shader = "FF_ST_OP"
+    t = mat.o3d.textures.add()
+    t.name, t.slot, t.write = "", 2, False
+    root, _ = model("emptyrow", mat)
+    notes, sc = export_model(root)
+    assert textures(sc) == [("emptyrow_0.tga", 1, 0, 0, 0), ("", 2, 0, 0, 0)], textures(sc)
+    assert not any("names no file" in n for n in notes), notes  # FF_ST_OP samples no slot 2
+    imported, import_notes = importer.import_file(bpy.context, root.o3d.output_path)
+    assert not any("not found" in n for n in import_notes), import_notes
+    back = next(m for ob in imported.children_recursive if ob.type == "MESH" for m in ob.data.materials)
+    assert [(t.name, t.slot, t.type, t.flags, t.frame, t.image) for t in back.o3d.textures] == \
+        [("", 2, 0, 0, 0, None)], [(t.name, t.slot) for t in back.o3d.textures]
+    imported.o3d.output_path = os.path.join(OUT, "emptyrow2", "emptyrow2.3di").replace("\\", "/")
+    _, again = export_model(imported)
+    assert textures(again) == textures(sc), textures(again)
+
+
+@case
+def a_row_that_names_no_file_is_said_where_it_matters():
+    # In a slot its shader samples, an empty row loads nothing: noted. A row
+    # whose image export writes needs a name.
+    sampled = textured("Sampled", image("sampled", (1, 1, 1, 1)))
+    sampled.o3d.shader = "FF_MT_OP"
+    t = sampled.o3d.textures.add()
+    t.name, t.slot, t.write = "", 2, False
+    root, _ = model("sampledrow", sampled)
+    notes, sc = export_model(root)
+    assert ("", 2, 0, 0, 0) in textures(sc), textures(sc)
+    assert any("Sampled" in n and "slot 2" in n and "names no file" in n for n in notes), notes
+    for ob in list(bpy.data.objects):
+        bpy.data.objects.remove(ob)
+    unnamed = bpy.data.materials.new("Unnamed")
+    t = unnamed.o3d.textures.add()
+    t.name, t.image, t.write = "", image("unnamed", (1, 1, 1, 1)), True
+    root, _ = model("unnamedrow", unnamed)
+    refused(root, "Unnamed", "needs a file name")
 
 
 # --- geom-14, geom-5: the shader and flags from Blender's settings --------------

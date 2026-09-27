@@ -48,7 +48,11 @@ from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, fmt, quoted
 # catalog`: TexNormal1 (the slot 3 texture) is FLAG_NORMAL, the TANGENT input
 # semantic FLAG_TANGENT, the #UV twins' UV transform FLAG_UVGEN.
 FLAG_EMISSIVE, FLAG_ALPHA, FLAG_DIFFUSE, FLAG_SECONDARY, FLAG_NORMAL = 0x1, 0x2, 0x4, 0x8, 0x10
+FLAG_NORMAL_B = 0x20
 FLAG_BLENDING, FLAG_GLASS, FLAG_SKINNED, FLAG_TANGENT, FLAG_UVGEN = 0x1000, 0x2000, 0x4000, 0x8000, 0x10000
+# The texture a row's slot binds to, as the capability bit of the shaders
+# that sample it: TexDiffuse1, TexDiffuse2, TexNormal1, TexNormal2.
+SLOT_SAMPLED = {1: FLAG_DIFFUSE, 2: FLAG_SECONDARY, 3: FLAG_NORMAL, 4: FLAG_NORMAL_B}
 
 # The colour Blender draws a mesh without a material in (its default
 # surface), linear.
@@ -498,16 +502,18 @@ MATERIAL_ROWS = 24
 
 def check_row_name(name, what):
     """An ExportError unless `name` is a texture row name opennova-3di takes:
-    printable ASCII, at most 16 bytes, a file name without a path."""
-    if not name:
-        raise ExportError(f"{what}: a texture has no file name")
+    printable ASCII, at most 16 bytes, a file name without a folder. An empty
+    name is a row that names no file, which the format holds: 63 rows of the
+    JO models are empty (M24_1st's VS_BMTXMIRRT material keeps one in slot 2,
+    Chair3's FF_ST_OP one in slot 1)."""
     if any(not " " <= c <= "~" for c in name):
         raise ExportError(f"{what}: the texture name '{name}' is not printable ASCII")
     if len(name) > ROW_NAME_BYTES:
         raise ExportError(f"{what}: the texture name '{name}' exceeds {ROW_NAME_BYTES} characters (its row's "
                           "field)")
-    if any(c in name for c in "/\\:"):
-        raise ExportError(f"{what}: the texture name '{name}' holds a path; a texture row names a file")
+    if any(c in name for c in "/\\"):
+        raise ExportError(f"{what}: the texture name '{name}' names a folder; the game finds a texture by its "
+                          "file name alone")
 
 
 def file_name_ok(name, extensions):
@@ -522,6 +528,8 @@ def check_file_name(name, what):
     """An ExportError unless `name` can name a texture file export writes:
     <stem>.tga or <stem>.mdt, one dot, at most 15 bytes."""
     check_row_name(name, what)
+    if not name:
+        raise ExportError(f"{what}: a texture row whose image export writes (Write) needs a file name")
     if not file_name_ok(name, WRITTEN_EXTENSIONS):
         raise ExportError(f"{what}: export writes the texture '{name}' as a file, named <stem>.tga or <stem>.mdt "
                           f"with one dot and at most {FILE_NAME_BYTES} characters, as retail packs them")
@@ -897,11 +905,14 @@ class ModelMaterials:
         listed = {}
         if mat is not None:
             for t in mat.o3d.textures:
-                name = t.name.strip()
+                name = t.name
                 check_row_name(name, what)
+                if not name and caps & SLOT_SAMPLED.get(t.slot, 0):
+                    self.exporter.note(f"{what}: its slot {t.slot} texture row names no file, and its shader {shader} "
+                                       "samples that slot: the game has no texture to load there")
                 file = None
                 if t.image is not None and t.write:
-                    if os.path.splitext(name)[1].lower() in WRITTEN_EXTENSIONS:
+                    if not name or os.path.splitext(name)[1].lower() in WRITTEN_EXTENSIONS:
                         check_file_name(name, what)
                         file = ImageFile(t.image)
                     else:
@@ -1154,15 +1165,16 @@ class ModelMaterials:
 def import_image(builder, name):
     """The Blender image of texture reference `name`, loaded once per import
     from the file `opennova-3di scene` resolved beside the model (None, with a
-    note, when it found none). An image this load makes is named after the
-    reference, which export names it by (file_reference)."""
+    note, when it found none; None for an empty name, a row that names no
+    file). An image this load makes is named after the reference, which export
+    names it by (file_reference)."""
     if name in builder.images:
         return builder.images[name]
     path = builder.sc["texfiles"].get(name)
     img = None
-    if not path:
+    if name and not path:
         builder.note(f"texture {name} not found beside the model")
-    else:
+    elif path:
         try:
             img = bpy.data.images.load(path, check_existing=True)
             if img.users == 0:

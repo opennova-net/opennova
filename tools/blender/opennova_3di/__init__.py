@@ -325,9 +325,10 @@ class O3DTexture(bpy.types.PropertyGroup):
     # flipbook frame, row flags, a normal map file, a file Blender cannot
     # open. A slot the list gives is taken from the list, not the nodes.
     name: StringProperty(name="File", default="",
-                         description="The texture's file name: printable ASCII, at most 16 characters, no folder. "
-                                     "A file export writes (Write) is <name>.tga or <name>.mdt, one dot and at most "
-                                     "15 characters")
+                         description="The texture's file name: printable ASCII, at most 16 characters, no folder; "
+                                     "empty, a row that names no file (retail keeps some as placeholders). A file "
+                                     "export writes (Write) is <name>.tga or <name>.mdt, one dot and at most 15 "
+                                     "characters")
     slot: IntProperty(name="Slot", default=1, min=0, max=255,
                       description="1 the diffuse texture, 2 the detail texture (on the second UV map), 3 the "
                                   "normal map (4 a second normal map, which no retail model uses)")

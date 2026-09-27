@@ -273,7 +273,9 @@ height-map normal texture, a file Blender cannot open. A slot it lists is taken
 from it, not from the nodes. A row's file name is printable ASCII, at most 16
 characters, without a folder; **Write** writes its image under that name,
 which must then be `<stem>.tga` or `<stem>.mdt` in at most 15 characters. A
-material holds at most 24 rows.
+row may also name no file, as 63 rows of the JO models do (`M24_1st`'s lens
+keeps an empty slot 2 row): it exports as it is, with a warning when its
+shader samples that slot. A material holds at most 24 rows.
 
 Import lays a material out the same way: a slot's lone plain row becomes its
 image node (a tangent-space shader's `.mdt` behind a green flip into a Normal
