@@ -143,6 +143,13 @@ normal; the planes follow the OED rule (docs/threedi/o3d-scene-format.md).
 Armry01 lays out as `OS01`, `OB01`..`OB01c`, `OP02`, `OP02-04`, `OP04-03`.
 An export-order property keeps the record order.
 
+A record's sphere, which the runtime tests before building the record's
+occluder planes, is its mesh's vertex centre and farthest vertex. A `_sphere`
+Empty on the mesh (drawn as a sphere: its origin the centre, its display size
+times its scale the radius) stores another: import makes one, hidden, only
+where the file's sphere is not the derived one, for the 206 retail models that
+store each centre mirrored across the model's y (Crdrblk2, DRGVLA).
+
 ## Assemblies
 
 Models the game draws together can share a scene. The add-on shows how the

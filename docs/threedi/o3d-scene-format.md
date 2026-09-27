@@ -68,7 +68,7 @@ import; any other front end may.
 | `track` | target style REG\|-\|param rate start end [axis] | a track on the last `panm`: target `rotx roty rotz scalex scaley scalez trans`. Styles above 0x70 name a declared register; the others may carry an integer phase param. Rotations in 1/16384 turn, others 8.8, all int16; only a `trans` track takes `axis`, 1 (x), 2 (y) or 3 (z; the default) |
 | `userpoint` | name x y z dx dy dz part [type] | a USRP point (15 characters; part -1 = none; type 71 G / 83 S) |
 | `light` | part x y z atten_start atten_end style rate phase\|reg r g b r g b flags [dx dy dz falloff] | a LGHT light owned by `part`: style and rate (units per second, 0 up to 256: WriteLGHT packs it times 256 into a u16, truncated) of its colour generator, `phase` (styles up to 0x70) or a declared register index (above), start and end colours 0..255, the flag byte (1 no corona, 2 no terrain light, 4 no object light, 8 spot). An omni light omits the axis: it keeps retail's default (straight down, no cone); a spot light gives its axis, the direction the light points in mission axes, and its cone half-angle in degrees (0 up to 256: its byte) |
-| `occ` | type section connecting | opens an occlusion record: type 0 occluder, 1 open, 2 window, 3 portal, 4 (OH); `section` its parent section, `connecting` the section a window or portal leads to |
+| `occ` | type section connecting [cx cy cz r] | opens an occlusion record: type 0 occluder, 1 open, 2 window, 3 portal, 4 (OH); `section` its parent section, `connecting` the section a window or portal leads to. Its sphere is the one build derives from its vertices (below) unless given: 206 retail models store each centre mirrored across y from their vertices' centre (Crdrblk2, DRGVLA; the radius still the farthest vertex from the true centre), and `scene` writes a sphere only where it is not the derived one within 1e-4 m |
 | `ov` | x y z | a vertex of the open `occ` (at most 128: 7-bit edge words) |
 | `op` | nx ny nz d | a plane of the open `occ` (at most 32: the runtime's occlusion clip mask is a 32-bit word per record); without any, the OED rule picks them (below) |
 | `of` | a b c [plane] | a face of the open `occ`; its plane index with explicit `op` planes, none without |
@@ -93,6 +93,20 @@ record's six bounding-box planes first (+x -x +y -y +z -z), then each face's
 own plane unless one already matches it (normal within 0.005 per axis,
 distance within 0.03; the last match wins), at most 32
 ([orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]; it reproduces Armry01's OCCL records).
+
+An occlusion record's derived sphere is its vertices' mean (summed in double,
+stored as a float) and the farthest vertex from it, as OED took them (5fc5b4f6a^
+`engine/formats/oed/convert_internal.cpp`; its `export_3di.cpp` writes the
+centre through the vertices' axis map). That is the sphere the runtime needs:
+the portal-slot collector carries the stored centre through the entity pose
+exactly as the occluder build carries the vertices, then tests the sphere
+against the view and its angular size ([orig:
+Terrain_CollectVisibleSectorUserpoints @ 0x5c6df8, the clip @ 0x5c6e42, the
+radius^2 / distance^2 > 0.01 gate @ 0x5c6e48..0x5c6e88];
+[orig: build_clip_planes_from_collision @ 0x5b3595]). A retail record whose
+centre is mirrored is read as it is stored, so its sphere misses its occluder
+in retail, and in our engine, which reads it the same way
+(`engine/runtime/world/occlusion.cpp`).
 
 The OED volume rule, for a `cvmesh`, is the same plane rule over its triangles
 (a triangle whose edge cross product is at most 0.0001 long takes plane 0),

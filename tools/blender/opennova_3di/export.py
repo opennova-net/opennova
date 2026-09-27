@@ -47,6 +47,9 @@
 #   OB##/OS##/OP##[-MM]/OH## (+ [a..], -occonly)  mesh on LOD 0: an occlusion
 #                 record in its part's section (OB occluder, OS open, OP a
 #                 window to the exterior or, with -MM, a portal to section MM).
+#   _sphere       Empty on an occlusion mesh: that record's sphere as a file
+#                 stores it (its origin the centre, its display size times its
+#                 scale the radius); without it the mesh's vertices give it.
 #   Material      any name: its Shader and Export order properties and
 #                 Blender's own settings (materials.py).
 #   !name         ignored.
@@ -72,7 +75,7 @@ from .rig import (PART_RE, WEIGHT_EPS, clean_name, descendants, ignored, is_lod_
 
 POINT_RE = re.compile(r"^UP([A-Za-z])(\d{2})?(?: (.*))?$")
 LIGHT_RE = re.compile(r"^LP(\d{2})?([a-z]*)$")
-HELPER_RE = re.compile(r"^_(?:(\d{2}) )?(center|attach|hit|bounds)$")
+HELPER_RE = re.compile(r"^_(?:(\d{2}) )?(center|attach|hit|bounds|sphere)$")
 OCCLUSION_RE = re.compile(r"-occ?only$", re.IGNORECASE)
 OCC_RE = re.compile(r"^(OB|OS|OP|OH)(\d{2})?([a-z]*)(?:-(\d{2}))?-occonly$")
 OCC_TYPES = {"OB": 0, "OS": 1, "OP": 2, "OH": 4}  # OP with -MM is a portal, type 3
@@ -240,6 +243,7 @@ class Lod:
         self.points = []     # (type letter, part index or -1, label, object)
         self.lights = []     # (part index, object)
         self.occluders = []  # (type, section, connecting, object)
+        self.occ_spheres = {}  # occlusion mesh name -> its `_sphere` empty
         self.volumes = []    # (type, flags, section, object, sort key)
 
     @property
@@ -430,6 +434,18 @@ class Exporter(Notes):
                 m = HELPER_RE.match(raw)
                 if m and m.group(2) == "attach":
                     once(lod.anchors, self.on_part(ob, part, m.group(1), lod), ob, "attach point")
+                    continue
+                if m and m.group(2) == "sphere":
+                    mesh = ob.parent
+                    if mesh is None or mesh.type != "MESH" or not OCCLUSION_RE.search(clean_name(mesh.name)):
+                        raise ExportError(f"{ob.name}: an occlusion sphere sits on its occlusion mesh (a -occonly "
+                                          "mesh)")
+                    if primary:
+                        self.on_part(ob, part, m.group(1), lod)
+                        if mesh.name in lod.occ_spheres:
+                            raise ExportError(f"'{lod.occ_spheres[mesh.name].name}' and '{ob.name}' are both the "
+                                              f"sphere of {mesh.name}")
+                        lod.occ_spheres[mesh.name] = ob
                     continue
                 if m and m.group(2) in ("hit", "bounds"):
                     if not lp.skinned:
@@ -813,7 +829,14 @@ class Exporter(Notes):
             try:
                 if len(mesh.vertices) > 128:
                     raise ExportError(f"{ob.name}: an occlusion mesh holds at most 128 vertices")
-                lines.append(f"occ {kind} {section} {connecting}  # {ob.name}")
+                # The record's sphere: its `_sphere` empty's, else the builder
+                # derives it from the vertices (docs/threedi/o3d-scene-format.md).
+                sphere = lod.occ_spheres.get(ob.name)
+                given = ""
+                if sphere is not None:
+                    centre, radius = self.hit_sphere(sphere)
+                    given = " " + fmt(*centre, radius)
+                lines.append(f"occ {kind} {section} {connecting}{given}  # {ob.name}")
                 mw = self.world(ob)
                 mirrored = mw.to_3x3().determinant() < 0
                 for v in mesh.vertices:

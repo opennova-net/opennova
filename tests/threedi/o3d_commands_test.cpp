@@ -5,6 +5,7 @@
 // while the CMDL and section bounds stay put, so only the check under test
 // can catch it.
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -184,6 +185,39 @@ int main(int argc, char **argv) {
 	const auto occ_a = build("occlusion", plain + occlusion);
 	const auto occ_b = build("occlusion-reversed", plain + replace(occlusion, "of 0 1 2", "of 0 2 1"));
 	check(threedi_cli::cmd_compare(occ_a.c_str(), occ_b.c_str()) == 1, "reversed occlusion faces");
+	// A record's sphere as a retail file stores it, its centre mirrored
+	// across y from the vertices' (1/3, 1/3, 0): scene writes it back only
+	// then, and build keeps it, so the model rebuilds byte for byte.
+	{
+		const auto mirrored = build("occlusion-mirrored",
+				plain + replace(occlusion, "occ 0 0 0\n", "occ 0 0 0 0.333333343 -0.333333343 0 0.745355988\n"));
+		check(threedi_cli::cmd_compare(occ_a.c_str(), mirrored.c_str()) == 1, "a mirrored occlusion centre differs");
+		Threedi3di3 x{}, y{};
+		if (threedi_3di3_read(occ_a.c_str(), &x) == 0 && threedi_3di3_read(mirrored.c_str(), &y) == 0 &&
+				x.occlusion_object_count == 1 && y.occlusion_object_count == 1) {
+			// Model axes (-y, z, x): the derived centre (-1/3, 0, 1/3), the
+			// stored one (1/3, 0, 1/3); the radius the same.
+			check(std::fabs(x.occlusion_objects[0].position[0] + 1.0f / 3.0f) < 1e-6f &&
+							std::fabs(y.occlusion_objects[0].position[0] - 1.0f / 3.0f) < 1e-6f &&
+							x.occlusion_objects[0].radius == y.occlusion_objects[0].radius,
+					"an occ sphere is stored as given");
+		} else {
+			check(false, "read back the occlusion spheres");
+		}
+		threedi_3di3_free(&x);
+		threedi_3di3_free(&y);
+		for (const auto &path : {occ_a, mirrored}) {
+			const auto text = path + ".rt.o3d", again = path + ".rt.3di";
+			check(threedi_cli::cmd_scene(path.c_str(), text.c_str()) == 0 &&
+							threedi_cli::cmd_build(text.c_str(), again.c_str()) == 0 &&
+							test_io::read_file(path) == test_io::read_file(again),
+					"an occlusion sphere rebuilds byte for byte");
+			const std::string rt = test_io::read_file_text(text);
+			check((rt.find("occ 0 0 0  #") != std::string::npos) == (path == occ_a),
+					"scene writes an occ sphere only where it is not the derived one");
+		}
+	}
+
 	// A PANM table no row of which animates is never read (the loader keeps
 	// no table), so its row count does not matter; with a track it does.
 	{

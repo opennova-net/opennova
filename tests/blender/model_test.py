@@ -563,6 +563,45 @@ def an_authored_hit_sphere_keeps_its_helpers():
 
 
 @case
+def an_occlusion_sphere_keeps_what_the_file_stores():
+    root, lod = model("occsphere")
+    pn1 = empty("PN01", lod)
+    box("Body", pn1)
+    box("OB-occonly", pn1, (0.5, 0.0, 0.0), 0.2)
+    _, lines = export_model(root)
+    # Without a `_sphere` the builder derives the record's sphere: none written.
+    assert records(lines, "occ") == [["0", "0", "0"]], records(lines, "occ")
+    again = import_again([export.output_path(root)])[0]
+    assert not [o for o in again.children_recursive if rig.clean_name(o.name) == "_sphere"]
+    # A retail-style record: its centre mirrored across the model's y (Blender
+    # X), the radius the box's own.
+    for ob in list(bpy.data.objects):
+        bpy.data.objects.remove(ob)
+    root, lod = model("occmirror")
+    pn1 = empty("PN01", lod)
+    box("Body", pn1)
+    occ = box("OB-occonly", pn1, (0.5, 0.0, 0.0), 0.2)
+    sphere = empty("_sphere", occ, (-1.0, 0.0, 0.0))  # world (-0.5, 0, 0)
+    sphere.empty_display_type = "SPHERE"
+    sphere.empty_display_size = 0.2 * math.sqrt(3.0)
+    _, lines = export_model(root)
+    (occ_line,) = records(lines, "occ")
+    # Mission axes: y left (Blender X).
+    assert len(occ_line) == 7 and abs(float(occ_line[4]) + 0.5) < 1e-6, occ_line
+    first = export.output_path(root)
+    again = import_again([first])[0]
+    helpers = [o for o in again.children_recursive if rig.clean_name(o.name) == "_sphere"]
+    assert len(helpers) == 1 and helpers[0].parent.name.startswith("OB"), helpers
+    again.o3d.output_path = os.path.join(OUT, "occmirror2", "occmirror.3di").replace("\\", "/")
+    export_model(again)
+    compare(first, export.output_path(again))
+    # A sphere sits on an occlusion mesh.
+    stray = empty("_sphere", helpers[0].parent.parent)
+    refused(again, "_sphere", "occlusion mesh")
+    bpy.data.objects.remove(stray)
+
+
+@case
 def first_person_gun_over_64_parts_refused():
     gun, glod = model("biggun")
     bones = {"BN01": ((0, 0, 0), None)}

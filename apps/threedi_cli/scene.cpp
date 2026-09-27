@@ -422,8 +422,27 @@ void write_occlusion(Writer &w, const Threedi3di3 &m) {
 	size_t v = 0, p = 0, f = 0;
 	for (size_t o = 0; o < m.occlusion_object_count; ++o) {
 		const ThreediOcclusionObject &ob = m.occlusion_objects[o];
+		// The record's sphere, only when it is not the one build derives from
+		// the vertices: 206 retail models store the centre mirrored across y
+		// (Crdrblk2, DRGVLA), which the portal walk reads as it is. Retail's
+		// own centres sit within float noise of the derived ones (Armry01's
+		// up to 5e-7 m off: OED summed in another precision), so a sphere
+		// within the 1e-4 m compare holds a stored position to is the
+		// derived one.
+		const size_t count = std::min(static_cast<size_t>(std::max(0, ob.num_vertices)), m.occlusion_vertex_count - v);
+		float centre[3], radius = 0.0f;
+		threedi_build_occ_sphere(count > 0 ? m.occlusion_vertices + v : nullptr, count, centre, radius);
+		bool derived = std::memcmp(centre, ob.position, sizeof(centre)) == 0 &&
+				std::memcmp(&radius, &ob.radius, sizeof(radius)) == 0;
+		if (!derived && std::isfinite(radius) && std::isfinite(ob.radius)) {
+			derived = std::fabs(radius - ob.radius) <= 1e-4;
+			for (int k = 0; k < 3; ++k)
+				derived = derived && std::isfinite(centre[k]) && std::isfinite(ob.position[k]) &&
+						std::fabs(centre[k] - ob.position[k]) <= 1e-4;
+		}
+		const std::string sphere = derived ? "" : " " + vec9(ob.position) + " " + f9(ob.radius);
 		w.line("occ " + std::to_string(ob.type) + " " + std::to_string(ob.parent_subobject_index) + " " +
-				std::to_string(ob.connecting_subobject) + "  # record " + std::to_string(o));
+				std::to_string(ob.connecting_subobject) + sphere + "  # record " + std::to_string(o));
 		if (ob.slot_priority_scale != 0.0f) w.note("occ record " + std::to_string(o) + " slot_priority_scale");
 		for (int k = 0; k < ob.num_vertices && v < m.occlusion_vertex_count; ++k, ++v)
 			w.line("ov " + vec9(m.occlusion_vertices[v].position));

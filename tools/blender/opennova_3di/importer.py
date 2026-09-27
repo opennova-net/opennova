@@ -162,7 +162,8 @@ def read_o3d(path):
                     light["falloff"] = num(a[19])
                 sc["lights"].append(light)
             elif k == "occ":
-                occ = {"type": int(a[0]), "a": int(a[1]), "b": int(a[2]), "verts": [], "faces": []}
+                occ = {"type": int(a[0]), "a": int(a[1]), "b": int(a[2]), "verts": [], "faces": [],
+                       "sphere": tuple(num(x) for x in a[3:7]) if len(a) >= 7 else None}
                 sc["occ"].append(occ)
             elif k == "ov":
                 occ["verts"].append(tuple(num(x) for x in a[:3]))
@@ -793,6 +794,17 @@ class Builder(Notes):
             ob.display_type = "WIRE"
             ob.o3d.order = i
             lod_objects[0].append(self.put(ob, 0, section))
+            if o["sphere"] is not None and not finite(o["sphere"]):
+                self.note(f"occlusion record {i}: its stored sphere is not finite; it exports with the one its mesh "
+                          "gives")
+            elif o["sphere"] is not None:
+                # The record's sphere as the file stores it, which is not the
+                # one export derives from the mesh (206 retail models mirror
+                # its centre across y): a `_sphere` Empty on the mesh keeps it.
+                centre, radius = self.blender(o["sphere"][:3]), o["sphere"][3]
+                sphere = self.empty("_sphere", ob, Matrix.Translation(centre), size=radius, display="SPHERE")
+                sphere.hide_set(True)
+                lod_objects[0].append(sphere)
 
     def collision(self, lod_objects):
         dups = {}

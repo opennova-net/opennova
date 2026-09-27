@@ -159,6 +159,11 @@ root and its name must give its part (`_05 hit`). Other helpers:
   it has none, at its pivot; without any, the builder puts each at its
   section's pivot, so the few retail models that store none (Chair03X) come
   back with them, and import says so.
+- `_sphere` (an Empty, drawn as a sphere): on an occlusion mesh, the record's
+  sphere when it is not the one the mesh's vertices give (its origin the
+  centre, its display size times its scale the radius). Import makes one only
+  for the 206 retail models that store each occlusion centre mirrored across
+  the model's y.
 
 The root part's pivot is the model origin. A part numbered before its parent
 exports with a note (the game reads that parent before posing it; Number

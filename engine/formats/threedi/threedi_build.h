@@ -173,6 +173,29 @@ struct ThreediBuildOcclusionRecord {
 	std::vector<ThreediOcclusionFace> faces;
 };
 
+// An occlusion record's sphere given as stored (mission axes), for a record
+// whose sphere is not the one threedi_build_occ_sphere derives: 206 JOTAC
+// models store each record's centre mirrored across y from its vertices'
+// centre, the radius still the farthest vertex from the true one (Crdrblk2,
+// DRGVLA; 182 others store the centre itself).
+struct ThreediBuildOccSphere {
+	ThreediBuildVec3 centre;
+	double radius = 0.0;
+};
+
+// The sphere the builder gives an occlusion record over its vertices (model
+// axes, as OOBJ stores them): the vertex mean and the farthest vertex from
+// it, as OED took them. It is the sphere the runtime needs: the portal-slot
+// collector carries the stored centre through the entity pose into render
+// space exactly as the occluder build carries the record's vertices, and
+// tests that sphere against the view and its angular size [orig:
+// Terrain_CollectVisibleSectorUserpoints @ 0x5c6df8, the centre through
+// Math_TransformPointByMatrix4x4; the clip at radius x 65536 @ 0x5c6e42; the
+// radius^2 / distance^2 > 0.01 gate @ 0x5c6e48..0x5c6e88;
+// build_clip_planes_from_collision @ 0x5b3595, the vertices through the same
+// pose]. No vertex: a NaN centre and radius 0.
+void threedi_build_occ_sphere(const ThreediOcclusionVertex *vertices, size_t count, float center[3], float &radius);
+
 ThreediPartAnimation threedi_build_inert_panm(int part, int parent);
 
 // A part's ROBJ sphere over the render vertices authored on it: the vertex
@@ -296,10 +319,12 @@ struct ThreediBuildModel {
 	// 0.005 per axis and distance within 0.03; the LAST match wins), at most 32
 	// planes [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe), the
 	// collision/occlusion plane table; witnessed on Armry01's OCCL]. `planes`
-	// given explicitly (mission axes, n . p + d == 0) replace the rule. False
-	// when the rule overflows 32.
+	// given explicitly (mission axes, n . p + d == 0) replace the rule. The
+	// record's sphere is threedi_build_occ_sphere's unless `sphere` gives the
+	// one it stores. False when the rule overflows 32.
 	bool add_occ_record(uint8_t type, int section_a, int section_b, const std::vector<ThreediBuildVec3> &verts,
-			const std::vector<std::array<int, 4>> &faces, const std::vector<std::array<double, 4>> &explicit_planes = {});
+			const std::vector<std::array<int, 4>> &faces, const std::vector<std::array<double, 4>> &explicit_planes = {},
+			const ThreediBuildOccSphere *sphere = nullptr);
 };
 
 // Assemble the contiguous Threedi3di3 and serialize it through the parity
