@@ -341,6 +341,39 @@ int main(int argc, char **argv) {
 				"a variant with no clip differs");
 	}
 
+	// A bone count that differs is one difference and the rest still compares:
+	// a clip with a dead fourth bone and its root turned twice as far at key 1
+	// reports both.
+	{
+		const std::string extra = head +
+				replace(root, " k 0 0 0.0871557427 0.996194698\n", " k 0 0 0.173648178 0.984807753\n") +
+				spine + hand +
+				"bone 2 0 0.5 1 0.1 \"BN04 Dead\"\n k 0 0 0 1\n k 0 0 0 1\n k 0 0 0 1\n k 0 0 0 1\n"
+				" tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n" +
+				events;
+		const std::string table = build("extra-bone", extra);
+		threedi_cli::AnimLoadedSet a;
+		threedi_cli::AnimLoadedSet b;
+		std::string error;
+		const bool loaded =
+				threedi_cli::anim_load((std::filesystem::path(original).parent_path() / "walk.bad").string(), a,
+						error) &&
+				threedi_cli::anim_load((std::filesystem::path(table).parent_path() / "walk.bad").string(), b,
+						error);
+		check(loaded && a.clips.size() == 1 && b.clips.size() == 1, "load the two clips");
+		if (loaded && a.clips.size() == 1 && b.clips.size() == 1) {
+			const std::vector<std::string> found = threedi_cli::anim_compare_clips(a.clips[0], b.clips[0]);
+			const auto has = [&](const char *what) {
+				return std::any_of(found.begin(), found.end(),
+						[&](const std::string &d) { return d.find(what) != std::string::npos; });
+			};
+			check(has("3 bones vs 4"), "compare names the bone count");
+			check(has("bone 0 key 1"), "compare goes on over the bones both clips hold");
+		}
+		threedi_cli::anim_free(a);
+		threedi_cli::anim_free(b);
+	}
+
 	// A table with no reset row is noted: build refuses it.
 	{
 		const std::filesystem::path home = dir / "no-reset-scene";

@@ -57,6 +57,12 @@ void anim_free(AnimLoadedSet &set);
 // the engine serves them (a ring from the last back; a reset row is no ring).
 std::string anim_info_row(const opennova::bad::BadBuildRow &row);
 
+// What `compare` reports for one pair of clips, in order (the first 40): a
+// bone or event count that differs is one difference, and what both clips
+// hold still compares.
+std::vector<std::string> anim_compare_clips(const AnimLoadedClip &expected,
+		const AnimLoadedClip &actual);
+
 int cmd_anim_build(const char *scene_path, const char *out_path);
 int cmd_anim_scene(const char *in_path, const char *out_path);
 int cmd_anim_info(const char *in_path, int verbose);
