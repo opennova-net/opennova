@@ -80,7 +80,10 @@ constexpr std::uint32_t kBoneMatrixBytes = 64u;
 // vertices) with the bind-space positions and, for skinned surfaces, the bone
 // indices in CUSTOM0 and weights in CUSTOM1 (Q3PackParameters::skin_channels),
 // skinned here from the frame's bone palette (a storage buffer of
-// skeleton-space bone x bind matrices, exactly the CPU palette Q3 blends).
+// skeleton-space bone x bind matrices, exactly the CPU palette Q3 blends) by
+// retail's blend as the mesh carries it: the four weights as they are, the
+// fourth being 1 - (w0 + w1 + w2), never renormalized (the witness is cited
+// where the engine lays the weights out, renderer::prepare_model_mesh).
 // The witness (vscPostBlackT1 / vscSkinPostBlackT1's black diffuse inside
 // RenderSlot_RenderEntityAndChildren) is cited on the engine's
 // render_slot_shadow.h; this shader only carries the device layout.
@@ -113,20 +116,19 @@ void main() {
 	if ((flags & 16u) != 0u) {
 		uint base = uint(pc.params.w + 0.5);
 		vec4 bind = vec4(in_position, 1.0);
+		// The four weights exactly as the mesh carries them (the fourth,
+		// possibly a hair negative, is 1 - (w0 + w1 + w2)), never renormalized.
+		// A zero weight adds nothing, so its bone is not read.
 		vec3 skinned = vec3(0.0);
-		float total = 0.0;
 		for (int influence = 0; influence < 4; influence++) {
 			float weight = in_custom1[influence];
-			if (weight <= 0.0) {
+			if (weight == 0.0) {
 				continue;
 			}
 			uint bone = base + uint(in_custom0[influence] + 0.5);
 			skinned += (palette.bones[bone] * bind).xyz * weight;
-			total += weight;
 		}
-		if (total > 0.0) {
-			position = skinned / total;
-		}
+		position = skinned;
 	}
 	gl_Position = pc.mvp * vec4(position, 1.0);
 	uv = in_uv;

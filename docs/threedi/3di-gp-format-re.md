@@ -656,7 +656,10 @@ models give byte 3 a real share (over 1e-4; JntOpsB3 202, IndoArms 187). Port:
 `threedi_skin_influences` (engine/formats/threedi/threedi_3di3.h) resolves a
 vertex's four influences; `opennova-3di` carries byte 3 through the `.o3d`
 text (docs/threedi/o3d-scene-format.md), `compare` compares the resolved blend,
-and the builder bounds a skinned section over it.
+the builder bounds a skinned section over it, and the renderer draws it
+(engine/runtime/renderer/model_mesh_prepare.cpp lays the four weights out as
+they are for the skeleton, and the projected-shadow slot capture blends them
+unnormalized).
 
 ## 2. GP runtime format — corpus probe findings
 

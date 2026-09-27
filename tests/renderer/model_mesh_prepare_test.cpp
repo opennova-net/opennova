@@ -21,12 +21,16 @@ int main() {
         v.bone_indices[0] = 1;
         v.bone_indices[1] = 0;
         v.bone_indices[2] = 2; // Outside the two-entry local bone table.
-        v.bone_indices[3] = 255;
-        v.bone_weights[0] = 2.0f;
-        v.bone_weights[1] = 1.0f;
-        v.bone_weights[2] = 1.0f;
+        v.bone_indices[3] = 1;
+        v.bone_weights[0] = 0.5f;
+        v.bone_weights[1] = 0.25f;
+        v.bone_weights[2] = 0.125f;
     }
     vertices[1].bone_weights[0] = vertices[1].bone_weights[1] = vertices[1].bone_weights[2] = 0;
+    // Retail's four-decimal weights sum past 1 in float (ArmGlovD).
+    vertices[3].bone_weights[0] = 0.4487f;
+    vertices[3].bone_weights[1] = 0.3871f;
+    vertices[3].bone_weights[2] = 0.1643f;
     vertices[4].normal[2] = 0; // Zero dot still follows the mirrored handedness rule.
     uint16_t indices[]{0, 1, 2, 3, 2, 3, 4};
     ThreediTriangleStrip strips[3]{};
@@ -80,9 +84,15 @@ int main() {
     TEST_EXPECT((first.normals[0] == std::array<float, 3>{0, 0, 1}));
     TEST_EXPECT((first.tangents[0] == std::array<float, 4>{-1, 0, 0, -1}));
     TEST_EXPECT(first.uvs[0][0] == 0.25f && first.uvs2[0][1] == 0.75f);
-    TEST_EXPECT((first.bones[0] == std::array<int32_t, 4>{9, 7, 0, 0}));
-    TEST_EXPECT((first.weights[0] == std::array<float, 4>{0.5f, 0.25f, 0.25f, 0}));
-    TEST_EXPECT((first.weights[1] == std::array<float, 4>{1, 0, 0, 0}));
+    // Retail's blend: the stored weights as they are and 1 - (w0 + w1 + w2)
+    // on byte 3, never renormalized; a byte past the table rides bone 0.
+    TEST_EXPECT((first.bones[0] == std::array<int32_t, 4>{9, 7, 0, 9}));
+    TEST_EXPECT((first.weights[0] == std::array<float, 4>{0.5f, 0.25f, 0.125f, 0.125f}));
+    // No stored weight: byte 3's bone takes the whole vertex.
+    TEST_EXPECT((first.weights[1] == std::array<float, 4>{0, 0, 0, 1}));
+    // A sum past 1 leaves byte 3 a negative weight, kept as the shader keeps it.
+    const float rest = 1.0f - ((0.4487f + 0.3871f) + 0.1643f);
+    TEST_EXPECT(rest < 0.0f && (first.weights[4] == std::array<float, 4>{0.4487f, 0.3871f, 0.1643f, rest}));
     TEST_EXPECT(first.material_array_index == 1 && first.material_index == 42);
     TEST_EXPECT(first.parent_index == -1 && first.abs[0] == -3);
     TEST_EXPECT(!first.is_alpha && ordinary[1].is_alpha && !ordinary[2].is_alpha);
