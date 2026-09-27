@@ -1042,9 +1042,28 @@ renderer among them):
   `celestial.gdshader` / `celestial_additive.gdshader` are deleted; render diagnostics
   report `sky_hooked_surfaces`; the first port had the sun take the moon's alpha. At the
   03tr-sun-sky fixture (revx02, 06:30) the saturated sun area (all channels 255, raw x0.96)
-  reads 4318 against retail's 4725 with the centroid on retail's (520.5, 381.7), remeasured
-  2026-09-27; the earlier 1747/1823 reading is not reproducible. The remaining gap is the
-  sun glow ("Open after the 2026-09-24 pass").
+  reads 4671 against retail's 4725 (retail's 2026-08-22 capture reads 4758),
+  centroid (520.2, 380.9) vs (520.5, 381.7), and the glow the disc and glare add sits within
+  0.25 level of the settled retail frame at every radius 20-300 px (2026-09-27, once the
+  bloom copy of the glow took its own part pose; env #14 closure below).
+
+  **Every stock part faces the pass camera (2026-09-27).** The identity rotation only places
+  the model. The parts of msun.3di (PANM 0x300), Fmoon4.3di and both parts of mglare.3di
+  (0x301) are PANM rotation type 3, and the submit's collect poses each such part with the
+  current inverse view rotation times its scale: `Model_TransformBoneMatrices` tests flag
+  0x100 `@ 0x58eb48`, copies `flt_27219C0` `@ 0x58ec09` (the inverse view
+  `Render_SetViewAndProjectionMatrices` stores `@ 0x58d947`) and multiplies by diag(scale)
+  `@ 0x58ec82`. Model +X/+Y/+Z land on the camera's right/up/forward, so the quads, authored
+  in the model's XY plane, face the camera at any view, and every pass that sets its own
+  view turns them again (the water mirror, `Render_SceneWithWaterReflection @ 0x5d8124`;
+  the weapon Inset, `Render_WeaponInsetScene @ 0x5c997f`); the bloom pass draws under the
+  main view restored after the Inset (`Render_ProcessMainSceneFrame @ 0x5ca99c`). The port
+  had kept the east-facing identity turn, right only for a level camera looking east (the
+  03tr camera) and an oval sun at any other view; `Celestial` now composes the camera's
+  rotation onto that turn every frame for a body whose every part is type 3
+  (`celestial_frame.h`), one turn for the beauty, bloom and Inset passes. The water
+  mirror's redraw keeps the main camera's turn, and other models' type 3/4 parts take none
+  (D-COL-10, world-wac-ai-re.md §15.5).
 - `Render_SkyboxSunGlow @ 0x5acd00` (live: `Render_MainScene @ 0x5c1904` +
   `Terrain_RenderWorldScene @ 0x5c9714`): the glare pass — see the env #14
   closure below.
@@ -1133,7 +1152,17 @@ never override it. The Q3 colour is the NormalCopy emissive
 `sat(SelfLumColor × gain) × 2` (`renderer::q3_celestial_emissive`; 2026-09-24, "Saturate
 the celestial bloom emissive like the SELFLUM copy"; the first port's
 `SelfLum × min(gain, 1) × 2` left the glow's bloom source 16% short at the 06:30 gain of
-19/16). The beauty-only shader keeps the far-plane disc pin while the focused draw scales
+19/16). The copy also poses the glow's parts at its own register value: the PANM runs
+inside the submit's collect (`Render_SubmitEntity @ 0x5dad80` →
+`Render_CollectRenderObjectsForBatch @ 0x5d8f3b` → `Model_TransformBoneMatrices @ 0x58e390`
+→ `PANM_SampleTrack @ 0x5b2270`, style 113) after the register store (`@ 0x5ad09d` /
+`@ 0x5ad0a9`), and the stock glare's part scales follow UPL_INTENSITY (mglare.3di part 0
+5.0..6.0, part 1 0.5..2.5), so a bloom copy whose alpha exceeds the beauty draw's is larger
+too. The Q3 registry had drawn the glow's records at the beauty node's pose: at 03tr (glow
+occluded, beauty UPL 0, bloom UPL 5245) part 1 drew at 0.5 instead of 0.66 and the glow
+read 0.6-1.0 level short at every radius 20-150 px. Since 2026-09-27 `Celestial` hands the
+registry each surface's transform at the bloom UPL (`FrameFx.set_q3_celestial_pose`). The
+beauty-only shader keeps the far-plane disc pin while the focused draw scales
 its own reverse-Z depth by (MaxZ − MinZ)/SceneMaxZ (`q3_far_band_reverse_z`,
 `engine/runtime/renderer/q3_frame.h`; exact for the beauty camera sharing the scene far
 plane) and z-tests it against resolved beauty depth. The earlier
@@ -1858,18 +1887,6 @@ witnesses. By system:
 - **Precipitation and murk**: both draw in the post-particle overlay stage; the
   precipitation and corona shaders are deleted.
 
-### Open after the 2026-09-24 pass
-
-- The 03tr-sun-sky sun glow. The fixture's dome share closed 2026-09-27 (§Sky dome, "Cloud
-  texture axes and dome fog saturation"): the open-sky band means sit within 0.4 level of the
-  settled retail frame, and the mean absolute difference (0.59, 0.90, 0.72) is inside
-  retail's own run-to-run spread (0.64, 0.96, 0.79). The saturated sun area (all channels
-  255, raw x0.96) reads 4318 against retail's 4725, centroid (520.5, 381.5) vs (520.5,
-  381.7). Over the modelled dome, the glow the disc and glare add is 0.6-1.0 level weaker in
-  the port at every radius 20-150 px, identical before and after the dome fix. That glow is
-  the remaining area gap: a celestial-glow measurement (`Render_SkyboxSunGlow @ 0x5acd00`,
-  the disc's UPL), not the dome's.
-
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 
 `tests/env/jo_env_sweep_test.cpp` (gated on `OPENNOVA_JO_DIR`): 10 `.env` files, all parse
@@ -1886,6 +1903,21 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
   only, no gradient impact.
 - `dword_B763E8`, the debug page's `Loc: %i` row — unidentified; the F3 Environment window omits it.
 - `Precipitation_FallTick`'s wind-origin writes (`0x2c059f8..0x2c05a00` from the view matrix) have no readers — not ported.
+- The sun-facing glow at 00TRa (09:00; camera BMS (319.17, −375.60, 28.66), yaw −62.76°,
+  pitch 33°, the sun 8.7° off the view axis), measured 2026-09-27 against retail at
+  FBEFFECTS 3 and 2. The disc and the glare at the unquartered alpha, under a white veil,
+  reproduce retail's FBEFFECTS 2 frame within 4 levels at every radius past 40 px (at the
+  core's edge the model's blue runs up to 11 levels high). Two gaps remain in
+  the FBEFFECTS 3 frame: past the saturated core the port's bloom adds about 1.9 times
+  retail's at r 125-200 px, its profile about 25 px wider (the two agree within 0.25 level at
+  03tr, where the glow's beauty draw is occluded and no veil draws), and far from the sun the
+  port's sky reads 8-12 levels above retail's. The port's occlusion window sees all eight
+  rays (brightness 128, veil 66); retail's veil fits 54-64 by channel over a scene about
+  6.5% darker. Ruled out: the veil against the bloom order (both draw the veil after the
+  composite, `Render_ProcessMainSceneFrame @ 0x5caa97` then `@ 0x5cac4b`), the bloom pass's
+  view (the main view, `@ 0x5ca99c`), and the glow's bloom part scales and colour formula. Open:
+  retail's object and player rays in the occlusion window (the port tests terrain), the
+  iris sample, and what scales retail's bloom at this pose.
 - **Closed at REN-4** — the pass-1 sky-gradient stage table: the effect is built
   by `GfxShader_Create1TexModeId(0, 0x20200)` (`[orig: Terrain_InitRenderingResources
   @ 0x578aa8]`) — no texture, mode word 0x200 + fog bit — and the mode decoder

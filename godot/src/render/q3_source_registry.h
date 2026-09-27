@@ -84,6 +84,13 @@ struct Q3SourceRecord {
 	// Celestial sources: the producer's bloom-pass SelfLumColor (the
 	// material's RgbGen at the bloom pass's UPL_INTENSITY value).
 	opennova::renderer::Q3Vec3 celestial_self_lum{1.0f, 1.0f, 1.0f};
+	// Celestial sources: the surface's world transform with the model's
+	// parts posed at the bloom pass's own UPL_INTENSITY value (the redraw
+	// poses its parts at the register it writes, which the beauty node pose
+	// does not carry; runtime/environment/celestial_frame.h GlareFrame).
+	// Unset = the node's global transform.
+	bool celestial_pose_valid = false;
+	Transform3D celestial_pose;
 	// An object strip bound whole to one bone of a skeleton (an ObjectModel's
 	// fake-skinned rigid part: the first-person gun, every vertex weighted 1
 	// to that bone): its copies draw at the node's transform times the bone's
@@ -178,6 +185,8 @@ public:
 	static void unregister_source(GeometryInstance3D *p_source);
 	static void set_celestial_self_lum(GeometryInstance3D *p_source,
 			const opennova::renderer::Q3Vec3 &p_self_lum);
+	static void set_celestial_pose(GeometryInstance3D *p_source,
+			const Transform3D &p_global_transform);
 	static void register_source(GeometryInstance3D *p_source,
 			opennova::renderer::Q3Source p_kind);
 	static void publish_geometry(GeometryInstance3D *p_source, int p_surface,
@@ -200,7 +209,8 @@ public:
 	static std::size_t record_count();
 	// The transform a record's copies draw at: the node's global transform,
 	// times the bone's skinning matrix (global pose x inverse global rest,
-	// the bind the node's skin was built from) for a bone-bound rigid strip.
+	// the bind the node's skin was built from) for a bone-bound rigid strip,
+	// or the producer's bloom-pass pose for a celestial source that set one.
 	// False when that skeleton is gone or lacks the bone: the record draws
 	// nothing that frame.
 	static bool source_transform(const Q3SourceRecord &p_record,

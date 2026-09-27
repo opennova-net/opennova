@@ -735,8 +735,8 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	}
 
 	// The FrameFX render targets sample LINEAR and CLAMP (GTexture flags 1,
-	// retail create_frame_effect_render_targets @0x583cf2, read by
-	// apply_texture_stages); the "ffscan" texture keeps the default WRAP.
+	// retail FrameFX_CreateRenderTargets @0x583cf2, read by
+	// CGfxShader_ApplyTextureStages); the "ffscan" texture keeps the default WRAP.
 	auto make_sampler = [&](RenderingDevice::SamplerRepeatMode p_repeat) {
 		Ref<RDSamplerState> sampler_state;
 		sampler_state.instantiate();
@@ -1725,6 +1725,11 @@ void FrameFx::set_q3_celestial_self_lum(GeometryInstance3D *p_source,
 		const Vector3 &p_self_lum) {
 	Q3SourceRegistry::set_celestial_self_lum(p_source,
 			{p_self_lum.x, p_self_lum.y, p_self_lum.z});
+}
+
+void FrameFx::set_q3_celestial_pose(GeometryInstance3D *p_source,
+		const Transform3D &p_global_transform) {
+	Q3SourceRegistry::set_celestial_pose(p_source, p_global_transform);
 }
 
 bool FrameFx::q3_object_material_classification(const Ref<Material> &p_material,

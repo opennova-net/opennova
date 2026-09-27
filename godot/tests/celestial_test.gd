@@ -109,6 +109,53 @@ func test_bodies_draw_their_authored_material_through_the_sky_hook() -> void:
 				"the overlay stage draws the glow; its mesh keeps the default rung")
 
 
+func test_view_aligned_bodies_turn_with_the_camera() -> void:
+	# Every stock body's parts pose view-aligned (PANM rotation type 3): retail
+	# copies the pass camera's inverse view rotation into each part, so the
+	# quads face the camera at any view (celestial_frame.h). The body turns
+	# with the camera: render +X/+Y/+Z (imported as -X/+Y/+Z) land on the
+	# camera's right/up/forward. A model with a static part keeps the identity
+	# render rotation, the +90 degree yaw, whatever the view.
+	var identity_render := Basis(Vector3.UP, PI * 0.5)
+	var eps := Vector3.ONE * 1.0e-4
+	var fixture := _make_fixture("", "panm_live_02_view3.3di")
+	var celestial: Celestial = fixture.celestial
+	var camera: Camera3D = fixture.camera
+	var sun := celestial.get_node_or_null("Celestial_sun") as ObjectModel
+	assert_not_null(sun, "the one-part view-aligned shed loads as the sun")
+	if sun == null:
+		return
+	camera.look_at(camera.global_position + Vector3.RIGHT, Vector3.UP)
+	celestial.advance_frame(TICK)
+	assert_almost_eq(sun.global_basis.x, identity_render.x, eps,
+			"a level camera looking east is the build's reference turn")
+	assert_almost_eq(sun.global_basis.z, identity_render.z, eps)
+	camera.look_at(camera.global_position + Vector3(-0.6, 0.5, -0.62), Vector3.UP)
+	celestial.advance_frame(TICK)
+	var body := sun.global_basis
+	var view := camera.global_basis
+	assert_almost_eq(body * Vector3.LEFT, view.x, eps, "render +X lands on the camera's right")
+	assert_almost_eq(body * Vector3.UP, view.y, eps, "render +Y lands on the camera's up")
+	assert_almost_eq(body * Vector3.BACK, -view.z, eps, "render +Z looks along the view")
+
+
+func test_a_static_part_body_keeps_the_identity_render_rotation() -> void:
+	# The crate's one PANM row is inert (rotation type 0): no camera turn.
+	var identity_render := Basis(Vector3.UP, PI * 0.5)
+	var eps := Vector3.ONE * 1.0e-4
+	var fixture := _make_fixture("", MODEL_NAME)
+	var camera: Camera3D = fixture.camera
+	var crate := (fixture.celestial as Celestial).get_node_or_null("Celestial_sun") as ObjectModel
+	assert_not_null(crate)
+	if crate == null:
+		return
+	camera.look_at(camera.global_position + Vector3(-0.6, 0.5, -0.62), Vector3.UP)
+	(fixture.celestial as Celestial).advance_frame(TICK)
+	assert_almost_eq(crate.global_basis.x, identity_render.x, eps,
+			"a static-part body keeps the identity render rotation")
+	assert_almost_eq(crate.global_basis.z, identity_render.z, eps)
+
+
 func test_a_rebuilt_body_scene_rebinds_the_sky_hook() -> void:
 	# A model scene rebuild mints fresh surface materials; the next frame must
 	# bind them to the sky hook again, or the disc would draw as a plain

@@ -277,6 +277,17 @@ void Q3SourceRegistry::set_celestial_self_lum(GeometryInstance3D *p_source,
 		record->celestial_self_lum = p_self_lum;
 }
 
+void Q3SourceRegistry::set_celestial_pose(GeometryInstance3D *p_source,
+		const Transform3D &p_global_transform) {
+	if (p_source == nullptr)
+		return;
+	std::lock_guard<std::recursive_mutex> lock(g_mutex);
+	if (Q3SourceRecord *record = find_record(p_source)) {
+		record->celestial_pose = p_global_transform;
+		record->celestial_pose_valid = true;
+	}
+}
+
 void Q3SourceRegistry::register_source(GeometryInstance3D *p_source,
 		Q3Source p_kind) {
 	if (p_source == nullptr || p_kind == Q3Source::Object ||
@@ -380,6 +391,11 @@ std::size_t Q3SourceRegistry::record_count() {
 
 bool Q3SourceRegistry::source_transform(const Q3SourceRecord &p_record,
 		Transform3D &r_transform) {
+	if ((p_record.source == Q3Source::CelestialBody || p_record.source == Q3Source::SunGlow) &&
+			p_record.celestial_pose_valid) {
+		r_transform = p_record.celestial_pose;
+		return true;
+	}
 	r_transform = p_record.node->get_global_transform();
 	if (p_record.rigid_bone < 0)
 		return true;

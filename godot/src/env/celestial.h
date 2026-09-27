@@ -103,8 +103,8 @@ public:
 	};
 	const InsetGlint &get_inset_glint() const { return inset_glint_; }
 
-	// The water mirror's post-dim redraw (retail render_main_scene after the
-	// dim: render_celestial_bodies(0) @ 0x5c18fb, render_skybox_sun_glow(0, 0)
+	// The water mirror's post-dim redraw (retail Render_MainScene after the
+	// dim: Render_CelestialBodies(0) @ 0x5c18fb, Render_SkyboxSunGlow(0, 0)
 	// @ 0x5c1904): the discs at their beauty submit value (their live
 	// materials), the glow at the no-occlusion value of the MIRROR camera's
 	// view dot (env::mirror_glare_upl) with each surface's SelfLumColor
@@ -134,7 +134,7 @@ public:
 	// The frozen-fixture glare settle (GameWorld's capture-refresh seam):
 	// the occlusion brightness needs ~4 frames to fill the 8-sample window
 	// and up to 16 more to step +-16 onto the dead-band target
-	// [orig: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f, see docs/env/env-tod-re.md], so a single
+	// [orig: Render_SkyboxSunGlow @ 0x5acdfb..0x5acf7f, see docs/env/env-tod-re.md], so a single
 	// zero-delta advance leaves a fresh accumulator dark at any pose. Runs
 	// ONLY the witnessed per-frame occlusion leg (two jittered rays + tick)
 	// until the dead-band holds across a full window turnover (frame cap
@@ -171,6 +171,9 @@ private:
 		Vector<int> material_indices;
 		// The sun/moon discs ride the sky bracket (far pin + pass gates).
 		bool disc = false;
+		// Every part of the model poses view-aligned (PANM rotation type 3,
+		// celestial_frame.h): the body turns with the camera each frame.
+		bool view_aligned = false;
 		// The bloom-pass redraw this body registers (none for the glint).
 		opennova::renderer::Q3Source q3_source = opennova::renderer::Q3Source::CelestialBody;
 		bool q3_drawn = false;
@@ -202,6 +205,10 @@ private:
 	void _set_body_parameter(const Body &p_body, const StringName &p_parameter,
 			const Variant &p_value);
 	void _set_body_upl(Body &p_body, int32_t p_upl, int32_t p_q3_upl);
+	// The bloom-pass redraw's surface transforms: the model's parts posed at
+	// the redraw's own register value (celestial_frame.h GlareFrame), pushed
+	// to the Q3 registry per surface.
+	void _set_body_q3_pose(Body &p_body, const Ref<ObjectData> &p_data, int32_t p_q3_upl);
 	// Terrain line-of-sight between two points (the glare and water-glint
 	// visibility rays): clear when the raycast misses.
 	bool _segment_clear(const Vector3 &p_from, const Vector3 &p_to);
@@ -209,7 +216,7 @@ private:
 	// sequence (GlareOcclusion::advance) over _segment_clear.
 	void _advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
 			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir);
-	// One frame of the water-glint leg [orig: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md]:
+	// One frame of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md]:
 	// tick the accumulator at this camera, place the mirrored glint body and
 	// write its submit value.
 	void _advance_water_glint(const opennova::env::EnvironmentState &p_state,
@@ -242,7 +249,7 @@ private:
 	int sun_veil_glare_ = 0;
 	int sun_veil_stopdown_ = 0;
 	// The water-reflected sun glint accumulator
-	// [orig: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md].
+	// [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md].
 	opennova::env::WaterGlintState water_glint_;
 	// The weapon Inset pass's camera this frame and its glint draw.
 	ObjectID inset_camera_id_;
