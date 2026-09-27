@@ -8,8 +8,8 @@ or NovaWorld redirection work.
 Pick and record one topology before launching anything:
 
 - Same-machine retail and native/local server:
-  `ONNET_PUBLIC_HOST=127.0.0.1`, launcher Developer mode on, managed hosts entry
-  maps `gs.novaworld.net` to `127.0.0.1`.
+  `ONNET_PUBLIC_HOST=127.0.0.1`, and a hosts-file line maps `gs.novaworld.net` to
+  `127.0.0.1` (DEVELOPING.md "Test with retail Joint Operations").
 - Second-machine retail:
   `ONNET_PUBLIC_HOST=<server LAN IP or EIP>`, and the retail machine must resolve
   `gs.novaworld.net` to that reachable address. Do not use `127.0.0.1` on a
@@ -28,12 +28,6 @@ Ports to check:
   `ONNET_CLIENT_REFLECT_GATE_PORT=49152` and
   `ONNET_CLIENT_REFLECT_NOVAWORLD_PORT=32768`
 
-Launcher variables:
-
-- `ONLAUNCHER_API_BASE_URL`
-- `ONLAUNCHER_NW_ANCHOR_HOST`
-- `ONLAUNCHER_UPDATE_MANIFEST_URL`
-
 Godot direct-launch flags, passed after `--` (the full table is
 [docs/dev-env-vars.md](../docs/dev-env-vars.md); `scripts/net/host_opennova.ps1`,
 `join_opennova.ps1` and `run_lan_pair.ps1` emit them):
@@ -51,11 +45,11 @@ Godot direct-launch flags, passed after `--` (the full table is
 - Godot/OpenNova listen host and joiner through launch flags, driven through
   their MCP endpoints (`game_state`, the `parity_joiner_*` probes).
 - NovaWorld host registration for a Godot listen host.
-- Retail launch with stock files through the launcher after hosts redirection.
+- Retail launch with stock files after the hosts-file redirection.
 - Debug-only, version-gated retail LAN hosting and joining from colocated
   `onhook.cfg` role files, including owned process-local PCAPs. See
   `.agents/retail-lan-parity.md`.
-- API polling through `/api/server-info`, `/api/hosts`, `/api/lobbies`, and
+- API polling through `/api/health`, `/api/hosts`, `/api/lobbies`, and
   `/api/unknowns`.
 - Packet decode with `nw_pp`.
 
@@ -64,7 +58,7 @@ cfg-driven driver uses the witnessed stock transitions and fails closed to a
 visible MainMenu when discovery cannot complete. NovaWorld credentials and
 deterministic in-match control still require a human operator or a future
 external UI driver. Hook automation remains opt-in, research-only, debug-only,
-and version-gated; it is separate from the public launcher.
+and version-gated.
 
 ## Capture Policy
 

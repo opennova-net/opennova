@@ -373,7 +373,8 @@ int run_leg(const char *label, const std::string &path, const VolumeShape &expec
     return failures - failures_before;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     // The synthetic armory: five CB walls/roof, one CA trigger, one VC hull,
     // one CL ladder, three BB rooms (tests/fixtures/minimal_3di_gen.cpp).
     const std::string synthetic = OPENNOVA_ARMRY_FIXTURE;

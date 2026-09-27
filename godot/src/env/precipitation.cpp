@@ -12,21 +12,12 @@
 namespace godot {
 
 void Precipitation::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_resource_root", "root"),
-			&Precipitation::set_resource_root);
 	ClassDB::bind_method(D_METHOD("set_weather_path", "path"),
 			&Precipitation::set_weather_path);
 	ClassDB::bind_method(D_METHOD("get_weather_path"),
 			&Precipitation::get_weather_path);
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "weather_path"),
 			"set_weather_path", "get_weather_path");
-	ClassDB::bind_method(D_METHOD("render_frame", "sim", "camera", "camera_mode"),
-			&Precipitation::render_frame);
-	ClassDB::bind_method(D_METHOD("render_inset_frame", "sim", "camera", "camera_mode"),
-			&Precipitation::render_inset_frame);
-	ClassDB::bind_method(D_METHOD("release_inset_frame"), &Precipitation::release_inset_frame);
-	ClassDB::bind_method(D_METHOD("get_drop_count"), &Precipitation::get_drop_count);
-	ClassDB::bind_method(D_METHOD("get_inset_drop_count"), &Precipitation::get_inset_drop_count);
 }
 
 void Precipitation::set_resource_root(const Ref<ResourceRoot> &p_root) {

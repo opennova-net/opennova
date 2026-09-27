@@ -11,7 +11,6 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -20,6 +19,7 @@
 #include <formats/threedi/threedi_3di3.h>
 
 #include "../../apps/threedi_cli/threedi_cli.h"
+#include "../common/file_io.h"
 
 using namespace opennova::threedi;
 
@@ -80,11 +80,6 @@ const std::string rich =
 		"cvolume 1 0 4 4 0 5 5 1\ncp 1 0 0 -5\ncp -1 0 0 4\ncp 0 1 0 -5\ncp 0 -1 0 4\ncp 0 0 1 -1\ncp 0 0 -1 0\n"
 		"cobj 0 1 0 1\ncv 1 0 1\ncv 2 0 1\ncv 1 1 1\ncf 0 1 2\n";
 
-std::vector<uint8_t> slurp(const std::string &path) {
-	std::ifstream in(path, std::ios::binary);
-	return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-}
-
 const ThreediChunk *find_chunk(const ThreediChunk *c, const char *tag) {
 	if (c == nullptr) return nullptr;
 	if (std::string(c->id) == tag && !c->is_parent) return c;
@@ -98,7 +93,7 @@ const ThreediChunk *find_chunk(const ThreediChunk *c, const char *tag) {
 // records): a hand edit of stored bytes the scene text does not carry.
 bool patch(const std::string &from, const std::string &to, const char *tag,
 		const std::function<void(uint8_t *payload)> &edit) {
-	std::vector<uint8_t> bytes = slurp(from);
+	std::vector<uint8_t> bytes = test_io::read_file(from);
 	ThreediFile file{};
 	if (bytes.empty() || threedi_read_memory(bytes.data(), bytes.size(), &file) != 0) return false;
 	const ThreediChunk *chunk = find_chunk(file.root, tag);

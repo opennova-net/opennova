@@ -10,9 +10,9 @@ namespace opennova::world {
 namespace {
 using io::bam_add;
 using io::bam_sub;
-// Retail dbl_7C3608 and dbl_7C19D8, including their original scale error.
+// Retail dbl_7C3608, including its original scale error (30.5 ppm above the
+// exact 2*pi/2^32).
 constexpr double radians_per_bam = 1.4629627251502471e-9;
-constexpr double bam_per_radian = 683565275.5764316;
 int32_t q16(int64_t value) { return int32_t(uint64_t(value + 0x8000) >> 16); }
 int32_t q22(int64_t value) { return int32_t(uint64_t(value) >> 22); }
 void copy3(int32_t *to, const int32_t *from) { std::copy_n(from, 3, to); }
@@ -31,8 +31,9 @@ void rotation(int32_t yaw, int32_t pitch, int32_t roll, int32_t m[9]) {
     m[5] = bam_add(q22(int64_t(p2) * sy), q22(int64_t(-sr) * cy));
     m[6] = sp; m[7] = q22(int64_t(sr) * cp); m[8] = q22(int64_t(cr) * cp);
 }
+// Retail dbl_7C19D8, bit-identical to io::kBamPerRadian (no scale error).
 int32_t angle(int32_t y, int32_t x) {
-    return int32_t(int64_t(std::atan2(double(y), double(x)) * bam_per_radian));
+    return int32_t(int64_t(std::atan2(double(y), double(x)) * io::kBamPerRadian));
 }
 // Booster gate @0x446538/@0x44663D, divisor @0x446543/@0x446644,
 // lower clamp @0x446548, /62 @0x446572/@0x446677.

@@ -159,7 +159,8 @@ static int test_menumus_fixed_point(void) {
     return assert_fixed_point(g_retail_menumus.c_str());
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     RUN_TEST(test_synth_gamemus_fixed_point);
     RUN_TEST(test_synth_menumus_fixed_point);
 

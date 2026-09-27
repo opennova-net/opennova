@@ -17,8 +17,7 @@ constexpr int32_t ticks_from_ms(int64_t ms) {
 }
 
 // The fixed-62.5 Hz real-time accumulator: retail's frame-time bank, the one
-// the game (Simulation) and the dedicated host (apps/nw_server) both bank
-// through. Its 7/8 EMA low-pass filters the banked time, so a long frame's
+// the game (Simulation) banks through. Its 7/8 EMA low-pass filters the banked time, so a long frame's
 // backlog is paid back over the next frames instead of as one burst of
 // catch-up ticks. The embedder runs the returned number of logic ticks and
 // presents once after the batch; a zero return still presents render-only

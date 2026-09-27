@@ -16,7 +16,6 @@
 #include <runtime/world/round_sim.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -58,11 +57,6 @@ float length(const V &a) { return std::sqrt(dot(a, a)); }
 V normalized(const V &a) {
 	const float l = length(a);
 	return l > 0.0f ? scale(a, 1.0f / l) : a;
-}
-
-std::string lower(std::string s) {
-	for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-	return s;
 }
 
 const bms::Entity *find_record(const bms::File &mission, int id) {
@@ -194,7 +188,7 @@ int main() {
 		return 1;
 	const int target_item = static_cast<int>(target_record->type_id) + static_cast<int>(mission::kItemIdOffset);
 	const DefItemDef *target_def = mission::find_item_def(rig.items, target_item);
-	if (!expect(target_item == kTargetItemId && target_def != nullptr && lower(target_def->graphic) == lower(kTargetGraphic),
+	if (!expect(target_item == kTargetItemId && target_def != nullptr && retail::lower_ascii(target_def->graphic) == retail::lower_ascii(kTargetGraphic),
 				"entity 650 keeps its identity (item 101471, graphic RckS05)"))
 		return 1;
 

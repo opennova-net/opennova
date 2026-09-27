@@ -41,7 +41,6 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
 		"active_hosts", "active_user_sessions",
-		"expansion_files", "expansion_releases", "expansions",
 		"games", "host_players", "host_roster", "hosts", "player_game_access",
 		"players", "server_status", "unknown_messages"
 	};
@@ -49,10 +48,14 @@ int test_migrations_create_expected_tables() {
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
 	}
+	// 0007 retired the launcher's executable_name column.
+	auto launcher_column = db.query(
+		"SELECT name FROM pragma_table_info('games') WHERE name = 'executable_name';");
+	TEST_EXPECT(launcher_column.empty());
 	return 0;
 }
 
-int test_seed_populates_games_and_expansions() {
+int test_seed_populates_games() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
 	const auto seed_dir = source_dir / "backend" / "seed";
@@ -82,15 +85,6 @@ int test_seed_populates_games_and_expansions() {
 	TEST_EXPECT(games[1].as_text(0).value() == "jop_2_consumer");
 	TEST_EXPECT(games[1].as_text(1).value() == "jop:cus2");
 
-	auto expansions = db.query(
-		"SELECT slug, display_name, featured FROM expansions ORDER BY slug;"
-	);
-	TEST_EXPECT(expansions.size() == 3);
-	TEST_EXPECT(expansions[0].as_text(0).value() == "ondx01");
-	TEST_EXPECT(expansions[1].as_text(0).value() == "onjo01");
-	TEST_EXPECT(expansions[2].as_text(0).value() == "revx02");
-	TEST_EXPECT(expansions[2].as_int(2).value() == 1); // featured
-
 	auto players = db.query(
 		"SELECT username, pcid, nwh, nwhandle FROM players ORDER BY username;"
 	);
@@ -109,18 +103,6 @@ int test_seed_populates_games_and_expansions() {
 	TEST_EXPECT(players[3].as_text(3).value() == "TestPlayer2");
 	TEST_EXPECT(players[4].as_text(0).value() == "test3");
 	TEST_EXPECT(players[4].as_text(3).value() == "TestPlayer3");
-
-	auto files = db.query(
-		"SELECT e.slug, COUNT(f.id) "
-		"FROM expansions e LEFT JOIN expansion_files f ON f.expansion_id = e.id "
-		"GROUP BY e.slug ORDER BY e.slug;"
-	);
-	TEST_EXPECT(files.size() == 3);
-	for (const auto &row : files) {
-		// No expansion_files are seeded for any expansion — downloadable files are
-		// written only by cutting a release (the publish callback), not the seed.
-		TEST_EXPECT(row.as_int(1).value() == 0);
-	}
 
 	auto access = db.query(
 		"SELECT p.username, a.game_slug, a.status, a.exp_bits "
@@ -180,10 +162,6 @@ int test_seed_is_idempotent() {
 
 	auto games = db.query("SELECT COUNT(*) FROM games;");
 	TEST_EXPECT(games[0].as_int(0).value() == 2);
-	auto expansions = db.query("SELECT COUNT(*) FROM expansions;");
-	TEST_EXPECT(expansions[0].as_int(0).value() == 3);
-	auto files = db.query("SELECT COUNT(*) FROM expansion_files;");
-	TEST_EXPECT(files[0].as_int(0).value() == 0);
 	auto foo = db.query(
 		"SELECT pcid, nwh, nwhandle, account_status FROM players "
 		"WHERE username='foo';"
@@ -211,13 +189,12 @@ int test_foreign_keys_enforced() {
 	Database db(":memory:");
 	run_migrations(db, migrations);
 
-	// Inserting an expansion against a non-existent game_id should fail.
+	// Inserting a host against a non-existent game_id should fail.
 	bool caught = false;
 	try {
 		db.exec(
-			"INSERT INTO expansions "
-			"(game_id, slug, display_name, version, install_subdir) "
-			"VALUES (9999, 'orphan', 'Orphan', '0.0.0', 'expansions/orphan');"
+			"INSERT INTO hosts (rid, gsid, game_id) "
+			"VALUES (1, 'orphan', 9999);"
 		);
 	} catch (const opennova::db::SqliteError &) {
 		caught = true;
@@ -230,7 +207,7 @@ int test_foreign_keys_enforced() {
 
 int main() {
 	if (test_migrations_create_expected_tables() != 0) return 1;
-	if (test_seed_populates_games_and_expansions() != 0) return 1;
+	if (test_seed_populates_games() != 0) return 1;
 	if (test_seed_is_idempotent() != 0) return 1;
 	if (test_foreign_keys_enforced() != 0) return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs)\n");

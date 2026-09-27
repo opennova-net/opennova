@@ -1,10 +1,9 @@
-// Guard for the minimal set's generated bitmap font (minimal_fnt_builder.h):
-// the font the packaging step emits under every hardcoded boot font name
-// [orig: HUD_InitAllFonts @ 0x51ee20] and the menu_style.mns DEF_FONTNAME_*
-// names. Always-on: build -> validate -> write -> parse -> re-write must be
-// byte-stable, and the label glyphs the authored menus use must have pixels.
+// Guard for the generated bitmap font (minimal_fnt_builder.h). Always-on:
+// build -> validate -> write -> parse -> re-write must be byte-stable, and the
+// label glyphs the authored menus use must have pixels.
 //
-// The same builder mints the committed FNT test fixtures fixtures/fnt/
+// The same builder mints the bundled assets/opennova.fnt (the placeholder main
+// menu's one font, ADR 0048) and the committed FNT test fixtures fixtures/fnt/
 // synth_1page.fnt and synth_3page.fnt (one and three pages; the three-page
 // form spreads the glyph slots over its pages). They are byte-compared every
 // run; `--write` (re)writes them. No retail font is carried.
@@ -90,7 +89,7 @@ int main(int argc, char **argv) {
 	failures += !expect(font.num_pages == 1, "one 256x256 page");
 
 	// Every character the authored menu labels use must actually draw.
-	for (const char ch : std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.")) {
+	for (const char ch : std::string("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:")) {
 		char msg[64];
 		std::snprintf(msg, sizeof(msg), "glyph '%c' has pixels", ch);
 		failures += !expect(glyph_has_pixels(font, ch), msg);
@@ -119,10 +118,11 @@ int main(int argc, char **argv) {
 	failures += !expect(glyph_has_pixels(three, 'B') && glyph_has_pixels(three, 'C'), "art lands on every page");
 	fnt_free(&three);
 
-	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/fnt";
-	failures += guard_fixture(dir + "/synth_1page.fnt", 1, write_mode);
-	failures += guard_fixture(dir + "/synth_3page.fnt", 3, write_mode);
+	const std::string repo = test_paths_repo_root(__FILE__);
+	failures += guard_fixture(repo + "/assets/opennova.fnt", 1, write_mode);
+	failures += guard_fixture(repo + "/fixtures/fnt/synth_1page.fnt", 1, write_mode);
+	failures += guard_fixture(repo + "/fixtures/fnt/synth_3page.fnt", 3, write_mode);
 
-	if (failures == 0) std::printf("OK: minimal generated font valid + byte-reproducible; FNT fixtures match\n");
+	if (failures == 0) std::printf("OK: generated font valid + byte-reproducible; assets and FNT fixtures match\n");
 	return failures == 0 ? 0 : 1;
 }

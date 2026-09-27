@@ -643,7 +643,7 @@ int main() {
         LightSpawnParams no_objects = barrel_params(0, 0, 0);
         no_objects.has_gen = false;
         no_objects.disable_objects = true;
-        scene.spawn(no_objects);
+        const LightHandle no_objects_handle = scene.spawn(no_objects);
         // Five world lights at increasing distance from the draw center; the
         // two farthest must lose the 3-cap.
         std::array<LightHandle, 5> world{};
@@ -667,7 +667,7 @@ int main() {
         for (size_t i = 0; i < out.count; ++i) {
             expect(out.lights[i].handle != hidden_handle,
                    "hidden slots never collect");
-            expect(out.lights[i].lights_objects,
+            expect(out.lights[i].handle != no_objects_handle,
                    "object-disabled lights never pass the object select");
             expect(out.lights[i].handle != world[3] &&
                            out.lights[i].handle != world[4],

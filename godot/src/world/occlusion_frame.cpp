@@ -56,8 +56,6 @@ void OcclusionFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("apply_frame", "camera", "viewport_width", "camera_xform",
 			"forces_indoors"), &OcclusionFrame::apply_frame);
 	ClassDB::bind_method(D_METHOD("reset"), &OcclusionFrame::reset);
-	ClassDB::bind_method(D_METHOD("is_blink_indoors"), &OcclusionFrame::is_blink_indoors);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "blink_indoors"), "", "is_blink_indoors");
 }
 
 void OcclusionFrame::setup(Terrain *p_terrain, FoliageDispatcher *p_foliage, SkyDome *p_sky,

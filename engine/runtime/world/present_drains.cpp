@@ -4,6 +4,7 @@
 // and the drains clear the ring they consumed.
 #include <runtime/world/present_drains.h>
 
+#include <base/io/bam.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>
@@ -165,7 +166,6 @@ void drain_round_impact_rows(World &world, std::vector<RoundImpactPresentation> 
 // and the consumer axis-maps mission -> its device frame.
 void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow> &r_rows) {
 	r_rows.clear();
-	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
 	const bool have_local = world.cached.local_player.valid();
 	for (const FireEvent &fe : world.round_sim.fired) {
 		FirePresentationRow d;
@@ -179,8 +179,8 @@ void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow>
 		d.adm_arm = (fe.wire_round_flags & round_event_flag::kAltFire) == 0 &&
 				(fe.wire_round_flags & round_event_flag::kAdmIndexed) != 0;
 		d.adm_index = fe.adm_index;
-		const double bearing = static_cast<double>(fe.yaw_bam) * kRadPerBam;
-		const double pitch = static_cast<double>(fe.pitch_bam) * kRadPerBam;
+		const double bearing = static_cast<double>(fe.yaw_bam) * io::kRadiansPerBam;
+		const double pitch = static_cast<double>(fe.pitch_bam) * io::kRadiansPerBam;
 		const double cp = std::cos(pitch);
 		d.forward = Vec3{static_cast<float>(std::cos(bearing) * cp),
 				static_cast<float>(std::sin(bearing) * cp), static_cast<float>(std::sin(pitch))};

@@ -3,7 +3,7 @@
 # then builds the Godot GDExtension so the editor never loads a stale DLL
 # missing classes that engine/ has since added.
 #
-# Usage: scripts/build.sh [--no-godot] [--jobs N]
+# Usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all]
 #   --no-godot  skip the Godot addon bootstrap and the GDExtension build
 #               (library-only iteration; what CI's engine test job runs)
 #   --jobs N    build/test parallelism (default: the machine's CPU count)
@@ -12,10 +12,15 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 build_godot=1
-usage="usage: scripts/build.sh [--no-godot] [--jobs N]"
+suite=all
+usage="usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all]"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --suite)
+            [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
+            suite="$2"; shift 2 ;;
+        --suite=*) suite="${1#--suite=}"; shift ;;
         --no-godot) build_godot=0; shift ;;
         --jobs)
             [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
@@ -24,6 +29,13 @@ while [[ $# -gt 0 ]]; do
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
+
+case "$suite" in
+    core) unset OPENNOVA_JO_DIR OPENNOVA_JO_ASSETS ;;
+    retail) python "$root/scripts/ci/test_suites.py" --suite retail --require-roots ;;
+    all) ;;
+    *) echo "$usage" >&2; exit 2 ;;
+esac
 
 # The Godot addons (GUT, imgui-godot) are project assets for the GDExtension
 # flavour, not a dependency of the C++ targets: the Godot-free path skips the
@@ -36,14 +48,22 @@ echo "Building opennova libraries and tests..."
 cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$root/build" --config Release -j "$jobs"
 
-echo "Running tests..."
-# The JUnit report is what scripts/ci/retail_gates_ran.py reads to prove the
-# asset-gated tests ran (rather than skipped) once the reference data is mounted.
-# ctest keeps only the first 1 KiB of a passing test's output by default, which
-# would hide a SKIP-LEG line printed late by a mixed test; keep it all.
+echo "Running $suite tests..."
+mkdir -p "$root/build/Testing"
+inventory="$root/build/Testing/$suite-inventory.json"
+report="$root/build/Testing/ctest-$suite.xml"
+python "$root/scripts/ci/test_suites.py" --suite "$suite" --build "$root/build" --inventory "$inventory"
+selection=()
+case "$suite" in
+    core) selection=(-LE '^retail$') ;;
+    retail) selection=(-L '^retail$') ;;
+esac
+# Preserve full passing output so missing compatibility legs cannot hide
+# beyond CTest's default truncation limit.
 ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" \
   --test-output-size-passed 1048576 --test-output-size-failed 1048576 \
-  --output-junit "$root/build/Testing/ctest.xml"
+  --output-junit "$report" "${selection[@]}"
+python "$root/scripts/ci/test_suites.py" --suite "$suite" --inventory "$inventory" --report "$report"
 
 if [[ "$build_godot" == "1" ]]; then
     "$root/scripts/build_godot.sh" --jobs "$jobs"

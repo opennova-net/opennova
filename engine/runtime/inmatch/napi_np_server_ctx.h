@@ -383,7 +383,7 @@ struct NapiNPServerCtx {
 };
 
 // Install the embedder's "Server" strings (the Godot shell reads its gametext
-// table; nw_server reads a loose gametext.bin beside the mission).
+// table).
 inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 	ctx.server_text = std::move(text);
 }

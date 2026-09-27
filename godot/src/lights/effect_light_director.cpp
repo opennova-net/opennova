@@ -945,8 +945,6 @@ void EffectLightDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_inset_frame", "camera", "time_ms"),
 			&EffectLightDirector::render_inset_frame);
 	ClassDB::bind_method(D_METHOD("release_inset_frame"), &EffectLightDirector::release_inset_frame);
-	ClassDB::bind_method(D_METHOD("get_inset_corona_count"),
-			&EffectLightDirector::get_inset_corona_count);
 	ClassDB::bind_method(D_METHOD("advance_fixed_tick"), &EffectLightDirector::advance_fixed_tick);
 	ClassDB::bind_method(D_METHOD("on_muzzle_fire", "shooter_handle", "world_pos"),
 			&EffectLightDirector::on_muzzle_fire);

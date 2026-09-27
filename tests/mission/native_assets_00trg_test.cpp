@@ -37,18 +37,13 @@ bool expect(bool cond, const char *msg) {
 
 constexpr int kExpectAttach = 859;
 
-std::string lower(std::string s) {
-	for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-	return s;
-}
-
 // The pre-S9 shell resolution of the .aip speed table, the independent
 // reference for the engine's resolve_ai_profiles.
 std::map<std::string, std::pair<int, int>> oracle_aip_speeds(const bms::File &mission, const ResourceIndex &index) {
 	std::map<std::string, std::pair<int, int>> out;
 	const auto visit = [&](const std::vector<bms::Entity> &entities) {
 		for (const bms::Entity &e : entities) {
-			std::string profile = lower(std::string(e.name2, strnlen(e.name2, sizeof(e.name2))));
+			std::string profile = retail::lower_ascii(std::string(e.name2, strnlen(e.name2, sizeof(e.name2))));
 			while (!profile.empty() && std::isspace(static_cast<unsigned char>(profile.back()))) profile.pop_back();
 			if (profile.empty() || out.count(profile)) continue;
 			std::vector<uint8_t> bytes;
@@ -61,7 +56,7 @@ std::map<std::string, std::pair<int, int>> oracle_aip_speeds(const bms::File &mi
 				std::istringstream tokens(line);
 				std::string key, value;
 				if (!(tokens >> key >> value)) continue;
-				key = lower(key);
+				key = retail::lower_ascii(key);
 				if (key == "patrol_speed") patrol = std::atoi(value.c_str());
 				else if (key == "combat_speed") combat = std::atoi(value.c_str());
 			}
@@ -186,7 +181,7 @@ int main() {
 		const std::map<std::string, std::pair<int, int>> oracle = oracle_aip_speeds(rig.mission, rig.index);
 		std::map<std::string, std::pair<int, int>> native;
 		for (const mission::PromoteOptions::AiProfileRow &row : rig.ai_profiles)
-			native[lower(row.profile)] = {row.data.patrol_speed, row.data.combat_speed};
+			native[retail::lower_ascii(row.profile)] = {row.data.patrol_speed, row.data.combat_speed};
 		std::printf("native-assets: s9 aip rows native=%zu oracle=%zu\n", native.size(), oracle.size());
 		expect(native.size() == oracle.size(), "the S9 .aip row count matches the independent walk");
 		for (const auto &kv : oracle) {

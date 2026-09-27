@@ -31,3 +31,10 @@ fixtures/**/*.ptl -text -eol filter= diff= merge=
 fixtures/**/*.ptu -text -eol filter= diff= merge=
 fixtures/**/*.trn -text -eol filter= diff= merge=
 fixtures/**/*.txt -text -eol filter= diff= merge=
+
+# assets/ is the game's own bundled data (ADR 0048), shipped beside
+# opennova.exe. It stays small, so every file is a plain git blob (no LFS pull
+# to build, test or package it), stored byte-for-byte; the README is ordinary
+# LF text. Last-match precedence: the README rule follows assets/**.
+assets/** -text -eol
+assets/**/*.md text eol=lf

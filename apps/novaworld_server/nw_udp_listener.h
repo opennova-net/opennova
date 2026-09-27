@@ -167,7 +167,7 @@ private:
 	// comment above for why CI was the wrong key).
 	LobbySession lobby_session_;
 	// JointOperations peers run through the same HostOwner/start_host_session/
-	// host_session_pump lifecycle as apps/nw_server. This listener contributes
+	// host_session_pump lifecycle as the game's host. This listener contributes
 	// only UDP protocol demultiplexing; the minimal authoritative World makes
 	// the complete named-spawn stream reachable.
 	std::unique_ptr<world::World> jo_world_;

@@ -83,7 +83,8 @@ static int live_weapon_oracle(const std::string &install, const std::string &exp
 	return 0;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     // Authored/default stability survives DEF -> runtime-table promotion.
     {
         static const char kStability[] =

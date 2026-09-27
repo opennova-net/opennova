@@ -218,7 +218,8 @@ static void retail_leg() {
 	def_free_hudpos(&file);
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	synthetic();
 	retail_leg();
 	if (failures != 0) {

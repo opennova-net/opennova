@@ -1,8 +1,8 @@
-# Dev overlay: publish the game ports to the host, load the committed dev
-# env, and serve the web UI via Vite with hot-reload (no image rebuild on
+# Dev overlay: publish the game ports to the host, set the dev environment,
+# and serve the web UI via Vite with hot-reload (no image rebuild on
 # web changes). On a Windows + WSL2 docker host the published ports reach
 # the Windows host, so a retail JO process on the same machine (with the
-# launcher in dev mode pointing hosts at 127.0.0.1) connects straight through.
+# hosts file pointing gs.novaworld.net at 127.0.0.1) connects straight through.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 #   # then open the web UI at http://localhost:5173 (Vite, hot-reload)
@@ -18,23 +18,17 @@
 
 services:
   novaworld:
-    env_file:
-      - ../env/app.dev.env
     # Local host/join (peer-to-peer) config — MACHINE-SPECIFIC. Set these to your
-    # adapter's LAN IPv4 (ipconfig) and point the launcher at the same IP, so
+    # adapter's LAN IPv4 (ipconfig) and point the hosts line at the same IP, so
     # retail binds its host game socket where the server advertises it; a
-    # loopback/LAN mismatch leaves joiners stuck on "Enumerating". They live here
-    # (not app.dev.env) because the base compose sets ONNET_PUBLIC_HOST in its
-    # `environment:` block, which overrides env_file. Override per machine via
-    # shell env, e.g.:
+    # loopback/LAN mismatch leaves joiners stuck on "Enumerating". Override per
+    # machine via shell env, e.g.:
     #   ONNET_PUBLIC_HOST=192.168.1.50 ONNET_CLIENT_REFLECT_IP=192.168.1.50 \
     #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
     environment:
       ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-192.168.10.120}
-      # Re-set here for the same reason as ONNET_PUBLIC_HOST: the base compose's
-      # `environment:` block overrides app.dev.env, so the dev token set there
-      # never reaches the container. Without this the admin API stays CLOSED and
-      # the web /admin gate 401s. Override per shell via ADMIN_API_TOKEN=...
+      # The dev admin token: without it the admin API stays CLOSED and the web
+      # /admin gate 401s. Override per shell via ADMIN_API_TOKEN=...
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-dev-admin-token}
       # Seed the local test accounts (test/foo) for dev only; prod leaves this
       # unset so 0002_dev_users.sql is skipped. This is test DATA only — the

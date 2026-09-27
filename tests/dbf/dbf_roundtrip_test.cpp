@@ -56,7 +56,8 @@ int check_bank(const std::string &path, size_t groups, const char *first_set) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	const std::string root = test_paths_repo_root(__FILE__);
 	if (check_bank(root + "/fixtures/dbf/synth_bank.dbf", 11, "SynR100") != 0) return 1;
 

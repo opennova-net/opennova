@@ -220,11 +220,11 @@ Animation loading and evaluation live in `runtime/anim`, entity setup in
 - reset, close, terminal error propagation, and frame timing;
 - typed `FrameInput`, `TickInput`, `TickOutcome`, and `FrameOutcome` values.
 
-Its one internal seam is the `inmatch::Role` the session binds (ADR 0043 d3: `LocalRole`, `HostRole`, `JoinerRole`). Both embedders — the Godot
-`Simulation` binding and `apps/nw_server`'s dedicated host — embed the engine's
-`mission::MissionKernel` and run `inmatch::HostRole::run_tick` (ADR 0042 d3,
-PR #587), so boot, state and the no-net tick have one implementation and the
-session interface provably does not depend on Godot. The target adds only
+Its one internal seam is the `inmatch::Role` the session binds (ADR 0043 d3: `LocalRole`, `HostRole`, `JoinerRole`). The Godot
+`Simulation` binding embeds the engine's `mission::MissionKernel` and runs
+`inmatch::HostRole::run_tick` (ADR 0042 d3, PR #587), so boot, state and the
+no-net tick have one implementation and the session interface does not depend
+on Godot (the kernel and role ctests drive it with no Godot linked). The target adds only
 resource resolution, Godot value conversion and the device pipeline; none of
 that leaks into the portable session state machine. The kernel also carries the
 session facts the tooling and the shell flow used to re-derive: retail's
@@ -474,7 +474,6 @@ Focused local coverage pins:
 - lifecycle transitions, role restrictions, cadence, one-shot input retention,
   catch-up cancellation, reset, and idempotent close in
   `tests/frame/inmatch_session_test.cpp`;
-- the same session interface in `apps/nw_server`;
 - every retail game type, co-op, scoring, objectives, clocks, frozen results,
   and end-round wire flow in
   `tests/world/match_test.cpp`, `tests/npruntime/round_end_test.cpp`, and
@@ -490,4 +489,4 @@ Focused local coverage pins:
   frames.
 
 The PR CI matrix owns the exhaustive native, Godot, architecture-lint, web,
-launcher, and packaging run.
+and packaging run.

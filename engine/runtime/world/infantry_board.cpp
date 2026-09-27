@@ -3,6 +3,7 @@
 // [orig: Entity_UpdateInfantryAI @0x4B9910, Entity_FindBestSeatSlot @0x4351F0,
 // Entity_GetBoneTransformAndOrientation @0x4B0C50, Entity_CanEnterVehicle @0x435480]
 #include <base/io/bam.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
@@ -23,7 +24,6 @@ namespace {
 int32_t board_bearing_to(int32_t dx, int32_t dy) {
 	return static_cast<int32_t>(std::atan2(double(dy), double(dx)) * io::kBamPerRadian);
 }
-int32_t board_to_fixed(float v) { return static_cast<int32_t>(v * 65536.0f); }
 int32_t board_dist(const int32_t pos[3], const int32_t tgt[3]) {
 	const double dx = double(tgt[0]) - pos[0], dy = double(tgt[1]) - pos[1];
 	const double dz = std::max(0.0, std::abs(double(tgt[2]) - pos[2]) - 65536.0);
@@ -36,9 +36,9 @@ void seat_world_position(World &world, const Entity &carrier, const Seat &seat, 
 					world.pose_provider->resolve_mounted_pose(world, carrier, seat, pose)
 			? pose.position
 			: entity_local_point_world(carrier, seat.seat_local);
-	out[0] = board_to_fixed(p.x);
-	out[1] = board_to_fixed(p.y);
-	out[2] = board_to_fixed(p.z);
+	out[0] = io::float_to_fp16_16(p.x);
+	out[1] = io::float_to_fp16_16(p.y);
+	out[2] = io::float_to_fp16_16(p.z);
 }
 bool named_point(World &world, const Entity &carrier, const char *name, int32_t out[6]) {
 	if (world.pose_provider &&
@@ -188,7 +188,7 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 		inf.board_anim = anim_state::kStop;
 		const double dx = target.position.x * 65536.0 - e.pos[0];
 		const double dy = target.position.y * 65536.0 - e.pos[1];
-		const int32_t bound = board_to_fixed(target.bound_radius) + 0x10000;
+		const int32_t bound = io::float_to_fp16_16(target.bound_radius) + 0x10000;
 		if (std::hypot(dx, dy) < bound && world.collision &&
 				!world.collision->entity_los_clear(
 						world, self.handle, self.handle, e.pos, goal, 0x4000, true)) {
@@ -199,11 +199,11 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 			const double angle = yaw / io::kBamPerRadian;
 			const int64_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);
 			const int64_t sn = static_cast<int32_t>(std::sin(angle) * 4194304.0);
-			goal[0] = board_to_fixed(target.position.x) + int32_t((bound * c) >> 22) +
+			goal[0] = io::float_to_fp16_16(target.position.x) + int32_t((bound * c) >> 22) +
 					int32_t(((bound >> 1) * sn) >> 22);
-			goal[1] = board_to_fixed(target.position.y) + int32_t((bound * sn) >> 22) -
+			goal[1] = io::float_to_fp16_16(target.position.y) + int32_t((bound * sn) >> 22) -
 					int32_t(((bound >> 1) * c) >> 22);
-			goal[2] = board_to_fixed(target.position.z);
+			goal[2] = io::float_to_fp16_16(target.position.z);
 			radius = 0;
 		}
 	}
@@ -247,8 +247,9 @@ InfantryAttachmentPose infantry_attachment_pose(AiEntity &e, World &world) {
     const Entity *parent = world.registry.get(self->attach_parent);
     if (parent == nullptr || parent->item_id == 0) return result;
     result.parent = parent->handle;
-    int32_t point[6] = {board_to_fixed(parent->position.x),
-                       board_to_fixed(parent->position.y), board_to_fixed(parent->position.z)};
+    int32_t point[6] = {io::float_to_fp16_16(parent->position.x),
+                       io::float_to_fp16_16(parent->position.y),
+                       io::float_to_fp16_16(parent->position.z)};
     // The stored LAST-match index is a gate; the reader resolves the FIRST
     // named point, exactly as Entity_GetBoneTransformAndOrientation does.
     named_point(world, *parent, "attach", point);
@@ -358,9 +359,9 @@ void AiSystem::infantry_command_think(AiEntity &e, World &world, int32_t &entry_
         // max(aiComp[16], 0x40000) @0x4bab77..0x4bab83]
         const Entity *player = world.registry.get(world.cached.local_player);
         if (player == nullptr) return;
-        int32_t tgt[3] = {board_to_fixed(player->position.x),
-                          board_to_fixed(player->position.y),
-                          board_to_fixed(player->position.z)};
+        int32_t tgt[3] = {io::float_to_fp16_16(player->position.x),
+                          io::float_to_fp16_16(player->position.y),
+                          io::float_to_fp16_16(player->position.z)};
         const int32_t dist = board_dist(e.pos, tgt);
         int32_t radius = 0x40000;
         if (inf.combat_target.valid() &&
@@ -404,10 +405,10 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 		return;
 	const bool pc = (target->item_attrib & kItemAttribPlayerControl) != 0;
 	const bool entry_type = target->item_type == 1 || target->item_type == 6;
-	int32_t goal[3] = { board_to_fixed(target->position.x), board_to_fixed(target->position.y),
-		board_to_fixed(target->position.z) };
+	int32_t goal[3] = { io::float_to_fp16_16(target->position.x),
+		io::float_to_fp16_16(target->position.y), io::float_to_fp16_16(target->position.z) };
 	// Arrival radius [orig: @0x4BB325..0x4BB34A, 2-unit arm @0x4BB32E].
-	int32_t radius = board_to_fixed(target->bound_radius) + 0x10000;
+	int32_t radius = io::float_to_fp16_16(target->bound_radius) + 0x10000;
 	if (entry_type && pc && vehicle_can_enter(world, self, *target)) {
 		VehicleSeatSelection best;
 		SeatSelectionMode mode = SeatSelectionMode::Any; // a non-attach command keeps Any
@@ -431,9 +432,10 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 		//  0x7D0000 @0x4BB2D7]
 		bool killed = false;
 		if ((target->flags & kEntityFlagDead) != 0 || !target->alive || target->health <= 0) {
-			const double dx = board_to_fixed(self->spawn_position.x) - int64_t(e.pos[0]);
-			const double dy = board_to_fixed(self->spawn_position.y) - int64_t(e.pos[1]);
-			const double dz = (board_to_fixed(self->spawn_position.z) - int64_t(e.pos[2])) >> 1;
+			const double dx = io::float_to_fp16_16(self->spawn_position.x) - int64_t(e.pos[0]);
+			const double dy = io::float_to_fp16_16(self->spawn_position.y) - int64_t(e.pos[1]);
+			const double dz =
+					(io::float_to_fp16_16(self->spawn_position.z) - int64_t(e.pos[2])) >> 1;
 			if (std::trunc(std::sqrt(dx * dx + dy * dy + dz * dz)) > 0x80000) {
 				self->health = e.health = 0;
 				self->last_attacker = target->last_attacker;

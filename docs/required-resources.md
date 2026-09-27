@@ -11,9 +11,9 @@ text + citation; the `required_resources` ctest pins the fatal set and
 completeness). `ResourceRoot.list_missing_boot_resources()` /
 `boot_resource_failure_text()` probe the individually-fatal file rows against
 the mounted root (the archive-table trio stays `mount_runtime`'s own gate), and
-the game shell raises honest missing-resource errors at mount (`main_game.gd`,
-reported-not-enforced — the picker flow keeps a partial dir inspectable where
-retail MessageBox-exits). Edits to this record and the table land in the same
+the game shell raises honest missing-resource errors at mount (`boot_root_mount.gd`,
+reported-not-enforced — the shell keeps running so a partial dir stays inspectable
+where retail MessageBox-exits). Edits to this record and the table land in the same
 change; ADR 0037 retired the former ONED diagnostics/new-game-scaffold plan.
 
 Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`, imagebase

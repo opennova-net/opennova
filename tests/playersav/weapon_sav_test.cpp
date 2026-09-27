@@ -489,8 +489,8 @@ int test_retail_file()
 
 }  // namespace
 
-int main()
-{
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     struct Case {
         const char *name;
         int (*fn)();

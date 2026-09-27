@@ -65,6 +65,7 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -77,14 +78,6 @@ w::PlayerSpawn player_spawn(float x, float y, float z, uint8_t team = 1) {
 	s.position = {x, y, z};
 	s.team = team;
 	return s;
-}
-
-inmatch::NapiNPConnection make_conn(uint32_t id, int type,
-		ns::ISessionTransport *transport, ns::TransportMode mode,
-		w::EntityHandle owned, bool spawned) {
-	auto connection = conn_fixture::make_conn(id, type, transport, mode, owned, spawned);
-	if (spawned) (void)inmatch::Server_RerollPlayerTickSeed(connection);
-	return connection;
 }
 
 // Advance the host until the shared one-second service fires (inclusive).
@@ -246,7 +239,7 @@ bool check_spawn_protection_countdown_and_gates() {
 	if (!expect(player.valid(), "countdown fixture spawned its player")) return false;
 	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
 	ctx.np_protocol.connection_list.push_back(
-			make_conn(3, 1, &transport, ns::TransportMode::Client, player, true));
+			make_seeded_conn(3, 1, &transport, ns::TransportMode::Client, player, true));
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
 	w::Entity *entity = world.registry.get(player);
 	entity->damage_state = 620;
@@ -295,8 +288,8 @@ bool check_spawn_protection_cleared_by_validated_fire() {
 	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0, 0, 0));
 	const w::EntityHandle other = w::spawn_remote_player(world, player_spawn(1, 0, 0));
 	std::vector<inmatch::NapiNPConnection> roster;
-	roster.push_back(make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
-	roster.push_back(make_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
+	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	roster.push_back(make_seeded_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
 	inmatch::NapiNPConnection &conn = roster[0];
 	w::Entity *entity = world.registry.get(shooter);
 	entity->damage_state = 500;
@@ -330,7 +323,7 @@ bool check_deploy_seeds_protection_and_armory_state() {
 	world.registry.configure_pool(3, 8);
 	const w::EntityHandle player = w::spawn_remote_player(world, player_spawn(0, 0, 0));
 	inmatch::NapiNPConnection conn =
-			make_conn(3, 1, nullptr, ns::TransportMode::Client, player, true);
+			make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, player, true);
 	w::Entity *entity = world.registry.get(player);
 	entity->alive = false;
 	entity->health = 0;
@@ -539,10 +532,10 @@ bool check_flag_refresh_round_robin() {
 	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
 	ns::LoopbackChannel host_wire;
 	ctx.np_protocol.connection_list.push_back(
-			make_conn(3, 1, &remote, ns::TransportMode::Client, player, true));
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, player, true));
 	const w::EntityHandle host = w::spawn_player(world, player_spawn(0, 0, 0));
 	ctx.np_protocol.connection_list.push_back(
-			make_conn(1, 2, &host_wire, ns::TransportMode::Loopback, host, true));
+			make_seeded_conn(1, 2, &host_wire, ns::TransportMode::Loopback, host, true));
 
 	auto refresh_this_second = [&](const char *label, w::EntityHandle expected,
 			uint16_t expected_attach) {
@@ -626,7 +619,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 	ctx.config.permanent_death = true; // keep the dead slot past the t7 punt
 	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
 	ctx.np_protocol.connection_list.push_back(
-			make_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
 
 	tick_to_periodic_second(ctx);
@@ -710,9 +703,9 @@ bool check_team_downed_resend() {
 	ns::UdpSessionTransport killer_wire(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport mate_wire(ns::UdpSessionTransport::Role::Host);
 	auto &roster = ctx.np_protocol.connection_list;
-	roster.push_back(make_conn(3, 1, &victim_wire, ns::TransportMode::Client, victim, true));
-	roster.push_back(make_conn(4, 1, &killer_wire, ns::TransportMode::Client, killer, true));
-	roster.push_back(make_conn(5, 1, &mate_wire, ns::TransportMode::Client, teammate, true));
+	roster.push_back(make_seeded_conn(3, 1, &victim_wire, ns::TransportMode::Client, victim, true));
+	roster.push_back(make_seeded_conn(4, 1, &killer_wire, ns::TransportMode::Client, killer, true));
+	roster.push_back(make_seeded_conn(5, 1, &mate_wire, ns::TransportMode::Client, teammate, true));
 	roster[0].reply.player_slot = 1;
 	roster[1].reply.player_slot = 2;
 	roster[2].reply.player_slot = 3;
@@ -838,10 +831,10 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 	ns::UdpSessionTransport self_wire(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport killer_wire(ns::UdpSessionTransport::Role::Host);
 	auto &roster = ctx.np_protocol.connection_list;
-	roster.push_back(make_conn(3, 1, &head_wire, ns::TransportMode::Client, head, true));
-	roster.push_back(make_conn(4, 1, &multi_wire, ns::TransportMode::Client, multi, true));
-	roster.push_back(make_conn(5, 1, &self_wire, ns::TransportMode::Client, self, true));
-	roster.push_back(make_conn(6, 1, &killer_wire, ns::TransportMode::Client, killer, true));
+	roster.push_back(make_seeded_conn(3, 1, &head_wire, ns::TransportMode::Client, head, true));
+	roster.push_back(make_seeded_conn(4, 1, &multi_wire, ns::TransportMode::Client, multi, true));
+	roster.push_back(make_seeded_conn(5, 1, &self_wire, ns::TransportMode::Client, self, true));
+	roster.push_back(make_seeded_conn(6, 1, &killer_wire, ns::TransportMode::Client, killer, true));
 	roster[0].reply.player_slot = 1;
 	roster[1].reply.player_slot = 2;
 	roster[2].reply.player_slot = 3;
@@ -919,7 +912,7 @@ bool check_spectator_latch_mirrors_onto_the_roster_row() {
 	ctx.config.game_type = rules.game_type;
 	ns::UdpSessionTransport wire(ns::UdpSessionTransport::Role::Host);
 	auto &roster = ctx.np_protocol.connection_list;
-	roster.push_back(make_conn(3, 1, &wire, ns::TransportMode::Client, player, true));
+	roster.push_back(make_seeded_conn(3, 1, &wire, ns::TransportMode::Client, player, true));
 	roster[0].phase = inmatch::ConnectionPhase::InMatch;
 	roster[0].reply.player_slot = 1;
 
@@ -946,7 +939,7 @@ bool check_armory_reuse_cooldown() {
 	world.registry.configure_pool(0, 4);
 	const w::EntityHandle player = w::spawn_remote_player(world, player_spawn(0, 0, 0));
 	std::vector<inmatch::NapiNPConnection> roster;
-	roster.push_back(make_conn(3, 1, nullptr, ns::TransportMode::Client, player, true));
+	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, player, true));
 	inmatch::NapiNPConnection &conn = roster.front();
 	w::Entity *entity = world.registry.get(player);
 	inmatch::GameConfig config;
@@ -1136,8 +1129,8 @@ bool check_kit_weight_recompute() {
 	ns::LoopbackChannel host_wire;
 	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
 	auto &roster = ctx.np_protocol.connection_list;
-	roster.push_back(make_conn(1, 2, &host_wire, ns::TransportMode::Loopback, host, true));
-	roster.push_back(make_conn(3, 1, &remote_wire, ns::TransportMode::Client, remote, true));
+	roster.push_back(make_seeded_conn(1, 2, &host_wire, ns::TransportMode::Loopback, host, true));
+	roster.push_back(make_seeded_conn(3, 1, &remote_wire, ns::TransportMode::Client, remote, true));
 	inmatch::NapiNPConnection &remote_conn = roster[1];
 	w::Entity *remote_entity = world.registry.get(remote);
 	remote_entity->flags |= w::kEntityFlagDead; // the armory-window gate admits a dead player
@@ -1393,7 +1386,7 @@ bool check_shared_loaded_ammo_fire_and_reload() {
     table.entries.push_back(variant);
     const auto shooter = w::spawn_remote_player(world, player_spawn(0,0,0));
     std::vector<inmatch::NapiNPConnection> roster;
-    roster.push_back(make_conn(3,1,nullptr,ns::TransportMode::Client,shooter,true));
+    roster.push_back(make_seeded_conn(3,1,nullptr,ns::TransportMode::Client,shooter,true));
     auto &conn = roster.front();
     conn.reply.shared_clips[1] = 2;
     conn.reply.ammo_pools[0] = 5;
@@ -1439,8 +1432,8 @@ bool check_validated_fire_scores_one_shot() {
 	const w::EntityHandle other = w::spawn_remote_player(world, player_spawn(1, 0, 0));
 	world.match.upsert_player({shooter, 3, "Shooter"});
 	std::vector<inmatch::NapiNPConnection> roster;
-	roster.push_back(make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
-	roster.push_back(make_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
+	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	roster.push_back(make_seeded_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
 	inmatch::NapiNPConnection &conn = roster[0];
 	uint32_t client_tick = conn.tick_seed;
 	auto dispatch_fire = [&](std::vector<uint8_t> body) {
@@ -1490,7 +1483,7 @@ bool check_host_tracks_the_remote_equipped_slot() {
 	world.tables.weapons.ammo_class_caps.push_back(1000);
 	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0, 0, 0));
 	std::vector<inmatch::NapiNPConnection> roster;
-	roster.push_back(make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
 	inmatch::NapiNPConnection &conn = roster.front();
 	const uint16_t rifle_combo = 3 * 65 + 2;
 	const uint16_t chute_combo = 3 * 65 + 1;
@@ -1538,7 +1531,7 @@ bool check_guidance_waits_for_spawn_frame() {
     ctx.world=&world;
     const auto player=w::spawn_remote_player(world,player_spawn(0,0,0));
     ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
-    ctx.np_protocol.connection_list.push_back(make_conn(3,1,&transport,ns::TransportMode::Client,player,true));
+    ctx.np_protocol.connection_list.push_back(make_seeded_conn(3,1,&transport,ns::TransportMode::Client,player,true));
     auto &conn=ctx.np_protocol.connection_list.front();
     conn.s2c_send_boundary_open=false;
     w::RoundSim::GuidedUpdate update{};

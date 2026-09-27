@@ -126,7 +126,6 @@ std::vector<uint8_t> ClientSession::start() {
 	play_result_ = ServerResultFields{};
 	host_gsid_.clear();
 	host_requires_join_ticket_ = 0;
-	host_commands_.clear();
 	notices_.clear();
 	mission_exit_reason_ = 0;
 	disconnect_event_ = DisconnectEvent{};
@@ -613,13 +612,13 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		notice.kind = Notice::Kind::HostResult;
 		notice.fields = host_result_;
 		if (host_result_.success) {
-			host_commands_ = parse_host_commands(container);
+			const auto host_commands = parse_host_commands(container);
 			host_requires_join_ticket_ = 0;
-			const auto ticket = host_commands_.find("HostRequiresJoinTicket");
-			if (ticket != host_commands_.end())
+			const auto ticket = host_commands.find("HostRequiresJoinTicket");
+			if (ticket != host_commands.end())
 				host_requires_join_ticket_ = static_cast<int>(std::strtol(ticket->second.c_str(), nullptr, 10));
-			const auto gsid = host_commands_.find("GSID");
-			host_gsid_ = gsid != host_commands_.end() ? copy_capped(gsid->second, 128) : std::string();
+			const auto gsid = host_commands.find("GSID");
+			host_gsid_ = gsid != host_commands.end() ? copy_capped(gsid->second, 128) : std::string();
 			host_state_ = HostState::Established;
 			set_lobby_state(6);
 		} else {

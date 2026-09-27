@@ -19,13 +19,7 @@ namespace {
 constexpr const char *NL = "\r\n";
 
 using opennova::strutil::trim;
-
-std::string unquote(const std::string &value) {
-	if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-		return value.substr(1, value.size() - 2);
-	}
-	return value;
-}
+using opennova::strutil::unquote;
 
 int clamp_int(int value, int min_value, int max_value) {
 	return std::max(min_value, std::min(max_value, value));

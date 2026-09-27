@@ -46,10 +46,6 @@ const WALK_BAD_FIXTURE := "res://../fixtures/anim/walk.bad"
 var _shared_root := ""
 
 
-func should_skip_script():
-	return RetailData.def_root_skip()
-
-
 func before_all() -> void:
 	_shared_root = _stage_root()
 
@@ -77,9 +73,8 @@ func _hold(keycode: Key, pressed: bool) -> void:
 
 # --- real-world staging -------------------------------------------------------
 # The minimal fixture plus the committed model/anim fixtures arranged under the
-# names the production resolvers ask for: the shipped weapon.def from the
-# reference fixture set (should_skip_script without it; WPN_M4AUTO with
-# its gfx/animadm/pos rows), a person items.def row for the player visual item
+# names the production resolvers ask for: a small authored weapon table
+# (WPN_M4AUTO with gfx/animadm/pos rows), a person items.def row for the player visual item
 # (105310 -> person + soldier.adm), the infantry clip set (E_STAND.adm) so
 # the motor's body selection runs, and the 19-bone person staged as the M4's
 # FP gun/arms rig with a wpn-key clip set over the committed .bads.
@@ -99,10 +94,10 @@ func _stage_root() -> String:
 				assert_eq(DirAccess.remove_absolute(target), OK)
 			assert_eq(DirAccess.copy_absolute(
 					source_dir.path_join(file_name), target), OK)
-	# The full weapon.def: WPN_M4AUTO / WPN_SATCHEL_CHARGE with real action rows.
+	# The authored weapon table: WPN_M4AUTO / WPN_SATCHEL_CHARGE with real action rows.
 	assert_eq(DirAccess.remove_absolute(root_dir.path_join("weapon.def")), OK)
 	assert_eq(DirAccess.copy_absolute(
-			RetailData.fixture("def/weapon.def"),
+			DefFixture.directory().path_join("weapon.def"),
 			root_dir.path_join("weapon.def")), OK)
 	# The player's third-person avatar: items.def person row 105310 (the placer's
 	# PLAYER_VISUAL_ITEM_ID) over the committed 19-bone person + soldier.adm.

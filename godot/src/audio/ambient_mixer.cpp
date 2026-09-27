@@ -25,7 +25,6 @@ void AmbientMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_to_tick", "tick"),
 			&AmbientMixer::advance_to_tick);
 	ClassDB::bind_method(D_METHOD("mix", "listener"), &AmbientMixer::mix);
-	ClassDB::bind_method(D_METHOD("marker_count"), &AmbientMixer::marker_count);
 	ClassDB::bind_static_method("AmbientMixer",
 			D_METHOD("calc_distance_volume", "dist_q16", "radius_q16", "vol255",
 					"clamp_vol"),
@@ -168,10 +167,6 @@ PackedFloat32Array AmbientMixer::mix(const Vector3 &listener) {
 
 int64_t AmbientMixer::clock_tick() const {
 	return mixer_.clock_tick();
-}
-
-int AmbientMixer::marker_count() const {
-	return mixer_.marker_count();
 }
 
 int AmbientMixer::calc_distance_volume(int64_t dist_q16, int64_t radius_q16,

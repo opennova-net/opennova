@@ -20,10 +20,6 @@ const TYPE_UNRESOLVED := 555
 static var _flat_dir := ""
 
 
-func should_skip_script():
-	return RetailData.def_root_skip()
-
-
 func before_all() -> void:
 	# One flat resource root per run: ResourceRoot indexes flat filenames
 	# only (and refuses user://), so committed fixtures are copied into the OS
@@ -41,14 +37,21 @@ func before_all() -> void:
 		"res://../fixtures/anim/idle.bad": "idle.bad",
 		"res://../fixtures/anim/walk.bad": "walk.bad",
 	}
-	# The shipped weapon.def (its first row's gfx3 is the held-weapon witness)
-	# and ammo.def come from the reference fixture set (should_skip_script).
-	copies[RetailData.fixture("def/weapon.def")] = "weapon.def"
-	copies[RetailData.fixture("def/ammo.def")] = "ammo.def"
 	for src in copies.keys():
 		var err := DirAccess.copy_absolute(
 				ProjectSettings.globalize_path(src), _flat_dir + "/" + copies[src])
 		assert(err == OK)
+	# These tests transport an ADM index and attach its graphic; no shipped
+	# weapon properties participate. One authored row makes index 1 explicit.
+	var weapons := FileAccess.open(_flat_dir.path_join("weapon.def"), FileAccess.WRITE)
+	assert(weapons != null)
+	weapons.store_string("""weapon "WIRE_TEST_PISTOL"
+category 0
+rank 0
+gfx3 M9K_3rd
+end
+""")
+	weapons.close()
 
 
 # Builds the wire PF-layout snapshot present_snapshot_from_client_replicas

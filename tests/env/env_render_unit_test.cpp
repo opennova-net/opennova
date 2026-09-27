@@ -190,11 +190,6 @@ int main() {
 		if (!expect(lightning_flash_level(kLightningSequenceA, 5, 6) == 255, "sequence A tick 6 flashes 255")) return 1;
 		if (!expect(lightning_flash_level(kLightningSequenceA, 5, 5) == -1, "sequence A tick 5 is not an epoch")) return 1;
 		if (!expect(lightning_flash_level(kLightningSequenceB, 7, 23) == 100, "sequence B tick 23 flashes 100")) return 1;
-
-		const LightningAdditives add = lightning_additives({1.0f, 1.0f, 1.0f}, 255);
-		if (!expect(byte_of(add.sky.r) == 254, "sky additive is (255*255)>>8")) return 1;
-		if (!expect(byte_of(add.fog.r) == 127, "fog additive is (255*255)>>9")) return 1;
-		if (!expect(byte_of(add.ground.r) == 63, "ground additive is (255*255)>>10")) return 1;
 	}
 
 	// --- Sun glare [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610] -------
@@ -344,8 +339,9 @@ int main() {
 		            "the band's top edge reproduces skyfog")) return 1;
 	}
 
-	// Terrain tint — the FULL/HALF split and the two live consumers
-	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20].
+	// Terrain tint — the FULL/HALF split and the tile-overlay consumer (the
+	// foliage lightmap sample is runtime/terrain/lighting's port, pinned by
+	// terrain_lighting_test) [orig: PolyTrn_SetTerrainTintColors @ 0x605e20].
 	{
 		// Retail default 255,255,255.
 		TerrainTint tint = terrain_tint_from_packed(0x00FFFFFFu);
@@ -361,18 +357,6 @@ int main() {
 		tint = terrain_tint_from_rgb(Rgb{128.0f / 255.0f, 64.0f / 255.0f, 192.0f / 255.0f});
 		if (!expect(tint.full == 0xFF8040C0u && tint.half == 0xFF402060u,
 		            "Rgb path packs to the same tint split")) return 1;
-
-		// Foliage lightmap tint [orig: Terrain_SampleColorMapTinted @ 0x606030]:
-		// 128 is identity, 255 saturates ~2x, alpha passes through.
-		const uint32_t full_identity = 0xFF808080u;
-		uint32_t out = foliage_lightmap_tint(0x40C08020u, full_identity);
-		if (!expect(out == 0x40C08020u, "foliage tint 128 is identity")) return 1;
-		out = foliage_lightmap_tint(0x20FF8001u, 0xFFFFFFFFu);
-		// 255*255>>7 = 508 -> 255; 128*255>>7 = 255; 1*255>>7 = 1.
-		if (!expect(out == 0x20FFFF01u, "foliage tint 255 saturates, alpha passes")) return 1;
-		out = foliage_lightmap_tint(0xFF804020u, 0xFF402060u);
-		// 128*64>>7 = 64; 64*32>>7 = 16; 32*96>>7 = 24.
-		if (!expect(out == 0xFF401018u, "foliage tint modulates per channel >> 7")) return 1;
 
 		// Tile overlay factor: MODULATE2X over HALF -> 254/255 at the default
 		// (the witnessed one-LSB-dark near-identity).

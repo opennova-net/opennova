@@ -1,5 +1,7 @@
 #include <runtime/mission/placement_traits.h>
 
+#include <base/io/bam.h>
+
 #include <cmath>
 
 namespace opennova::mission {
@@ -40,8 +42,6 @@ Mat3 rot_z(double a) {
 	return Mat3{ { { c, s, 0 }, { -s, c, 0 }, { 0, 0, 1 } } };
 }
 
-constexpr double kDegToRad = 0.017453292519943295;
-
 } // namespace
 
 // The engine builds Rz(90-yaw) * Ry(-pitch) * Rx(roll) in its Z-up world
@@ -51,12 +51,12 @@ constexpr double kDegToRad = 0.017453292519943295;
 // RotY(90-yaw) * RotZ(pitch) * RotX(roll) * RotY(90).
 PlacementBasis bms_to_presentation_basis(float pitch_deg, float yaw_deg,
 		float roll_deg) {
-	const double pitch = pitch_deg * kDegToRad;
-	const double yaw = yaw_deg * kDegToRad;
-	const double roll = roll_deg * kDegToRad;
-	const Mat3 m = mul(mul(mul(rot_y(90.0 * kDegToRad - yaw), rot_z(pitch)),
+	const double pitch = pitch_deg * io::kRadiansPerDegree;
+	const double yaw = yaw_deg * io::kRadiansPerDegree;
+	const double roll = roll_deg * io::kRadiansPerDegree;
+	const Mat3 m = mul(mul(mul(rot_y(90.0 * io::kRadiansPerDegree - yaw), rot_z(pitch)),
 								   rot_x(roll)),
-			rot_y(90.0 * kDegToRad));
+			rot_y(90.0 * io::kRadiansPerDegree));
 	PlacementBasis out;
 	out.x = PlacementVec3{ float(m.m[0][0]), float(m.m[0][1]),
 		float(m.m[0][2]) };

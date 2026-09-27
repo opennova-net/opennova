@@ -11,7 +11,6 @@
 #include <formats/def/def.h>
 #include <formats/wac/bytecode.h>
 #include <runtime/assets/asset_store.h>
-#include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include "common/boot_file_source.h"
@@ -46,6 +45,7 @@ namespace {
 using test_mission::item;
 using test_mission::organic;
 using test_boot::source_over;
+using test_boot::tick_no_net;
 
 bool near_equal(float a, float b, float tolerance) { return std::fabs(a - b) <= tolerance; }
 
@@ -168,14 +168,6 @@ static void test_first_frame_tick_matches_on_host_and_joiner() {
 		CHECK(kernel.boot(options, error));
 		CHECK(kernel.world.logic_tick == 1u);
 	}
-}
-
-// The bare no-net tick: the local role over the kernel (ADR 0043 d3; the
-// kernel itself owns no tick).
-static void tick_no_net(opennova::mission::MissionKernel &kernel) {
-	opennova::inmatch::LocalRole role;
-	role.bind(kernel);
-	role.run_tick(opennova::inmatch::TickInput{});
 }
 
 // PreMission has one shared variable bank, but its numbered writes are not
@@ -553,15 +545,8 @@ int main() {
 	std::map<std::string, std::string> files;
 	files["synth.wac"] = "if never() then set(v1,1) endif\n";
 
-	bms::File m{};
-	m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
-	m.items[0].id = 21;
-	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
-	m.organics[0].id = 31;
-	m.events.push_back(bms::Event{});
-
 	ms::MissionKernel kernel;
-	kernel.open_document(std::move(m), "synth", source_over(&files));
+	kernel.open_document(test_mission::two_entity_mission(), "synth", source_over(&files));
 
 	ms::KernelBootOptions options; // playable, wac, collision, seat_specs on; game_type 0 (SP)
 	std::string error;

@@ -36,9 +36,7 @@ func before_each() -> void:
 func after_each() -> void:
 	if _root_dir.is_empty():
 		return
-	for file in DirAccess.get_files_at(_root_dir):
-		DirAccess.remove_absolute(_root_dir.path_join(file))
-	DirAccess.remove_absolute(_root_dir)
+	TestFs.remove_dir_recursive(_root_dir)
 
 
 func _make_world() -> EffectWorld:

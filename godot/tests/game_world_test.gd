@@ -769,7 +769,7 @@ func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	DirAccess.make_dir_recursive_absolute(root)
 	# Pass the runtime archive gate so this fixture reaches the missing-environment contract.
 	WorldFixture.write_pff(self, root.path_join("resource.pff"), [])
-	_write_fixture_file(root.path_join("Tmap.trn"), "terrain_name \"Tmap\"\n")
+	TestFs.write_text(self, root.path_join("Tmap.trn"), "terrain_name \"Tmap\"\n")
 
 	var world := WorldFixture.make_world(self)
 	await get_tree().process_frame
@@ -892,78 +892,6 @@ func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> v
 	assert_false(wire_mission.is_loaded(),
 			"an inexact wire header cannot leave the previous host metadata live")
 	assert_false(wire_mission.is_wire_header_only())
-
-func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
-	Strings.clear()
-	# The retail weapon.mnu, weapon.def and string tables come from the
-	# reference fixture set (docs/asset-gated-tests.md).
-	var staged := {
-		"mnu/jo_weapon.mnu": "weapon.mnu",
-		"def/weapon.def": "weapon.def",
-		"rtxt/menutxt.bin": "menutxt.BIN",
-		"rtxt/gametext.bin": "gametext.bin",
-	}
-	for rel in staged:
-		if RetailData.fixture(rel).is_empty():
-			pending(RetailData.fixture_pending_text(rel))
-			return
-	var root_dir := _staged(WorldFixture.stage_minimal_root("first_armory_open"))
-	for rel in staged:
-		var target := root_dir.path_join(staged[rel])
-		if FileAccess.file_exists(target):
-			assert_eq(DirAccess.remove_absolute(target), OK)
-		assert_eq(DirAccess.copy_absolute(RetailData.fixture(rel), target), OK)
-
-	var world := WorldFixture.make_world(self)
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(root_dir), OK)
-	world.set_resource_root(root)
-	var loadout := PlayerSpawnLoadout.new()
-	loadout.primary = "WPN_M4AUTO"
-	loadout.accessory = "WPN_SATCHEL_CHARGE"
-	loadout.player_class = 8
-	world.set_local_player_spawn_loadout(loadout)
-	assert_eq(world.load_mission("mnml.bms"), OK)
-
-	var weapons: WeaponDatabase = world.get_weapon_database()
-	assert_not_null(weapons, "first armory open lazily resolves weapon.def")
-	if weapons == null:
-		return
-	assert_true(weapons.is_loaded())
-	assert_gte(weapons.find_weapon("WPN_M4AUTO"), 0)
-	assert_gte(weapons.find_weapon("WPN_SATCHEL_CHARGE"), 0)
-	var sim := world.get_sim()
-	var expected_names := ["WPN_M4AUTO", "WPN_SATCHEL_CHARGE"]
-	var before_names: Array[String] = []
-	for value in sim.get_local_player_loadout():
-		before_names.append((value as WeaponKitEntry).name)
-	assert_eq(before_names, expected_names,
-		"the production world promoted the PLAYER_INFO-style canonical profile")
-
-	var overlay := Control.new()
-	add_child_autofree(overlay)
-	overlay.size = Vector2(800, 600)
-	var presenter := ArmoryPresenter.new()
-	add_child_autofree(presenter)
-	presenter.setup(world.armory_view(), null, overlay)
-	assert_true(presenter.open(), "the production world catalog reaches first armory open")
-	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))
-	var driver: MenuDriver = presenter.get_menu_driver()
-	assert_not_null(driver)
-	assert_gt(driver.selected_row(driver.widget_id("PRIMARY")), 0,
-		"the current primary is not NONE on first visit")
-	assert_gt(driver.selected_row(driver.widget_id("ACCESSORY")), 0,
-		"the current satchel is not NONE on first visit")
-
-	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
-	var after_names: Array[String] = []
-	for value in sim.get_local_player_loadout():
-		after_names.append((value as WeaponKitEntry).name)
-	assert_eq(after_names, expected_names,
-		"accepting the untouched first-open rows preserves the exact canonical kit")
-	world.unload()
-	Strings.clear()
-
 
 func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 	# GameWorld::update_frame_clear_color writes the witnessed frame clear into the
@@ -1827,8 +1755,8 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 	assert_eq(DirAccess.copy_absolute(
 		ProjectSettings.globalize_path(RuntimeFixture.file("mnml.bms")),
 		root_dir.path_join(bms_name)), OK)
-	_write_fixture_file(root_dir.path_join("mnml.env"), "")
-	_write_fixture_file(root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
+	TestFs.write_text(self, root_dir.path_join("mnml.env"), "")
+	TestFs.write_text(self, root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 
@@ -1866,7 +1794,7 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	assert_eq(DirAccess.copy_absolute(
 		ProjectSettings.globalize_path(RuntimeFixture.file("mnml.env")),
 		root_dir.path_join("mnml.env")), OK)
-	_write_fixture_file(root_dir.path_join("mnml.trn"), "")
+	TestFs.write_text(self, root_dir.path_join("mnml.trn"), "")
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 
@@ -3220,14 +3148,6 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	world.set_frame_stats(null)
 	assert_false(world.is_water_render_stats_measured(),
 			"detaching the board also releases measurement immediately")
-
-
-func _write_fixture_file(path: String, text: String) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "Fixture file should be writable: %s" % path)
-	if file != null:
-		file.store_string(text)
-		file.close()
 
 
 func _make_fixture_root(name: String) -> String:

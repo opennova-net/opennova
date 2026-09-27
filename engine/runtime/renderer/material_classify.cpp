@@ -57,19 +57,6 @@ ObjectNormalSpace map_normal_space(MaterialDescriptorNormalSpace normal_space) {
 
 } // namespace
 
-const char *object_shader_family_name(ObjectShaderFamily family) {
-	switch (family) {
-		case ObjectShaderFamily::Unknown: return "unknown";
-		case ObjectShaderFamily::FixedFunction: return "fixed_function";
-		case ObjectShaderFamily::Phong: return "phong";
-		case ObjectShaderFamily::Flag: return "flag";
-		case ObjectShaderFamily::Dot3: return "dot3";
-		case ObjectShaderFamily::Environment: return "environment";
-		case ObjectShaderFamily::Glass: return "glass";
-	}
-	return "unknown";
-}
-
 ObjectMaterialClassification classify_object_material(const std::string &shader_name,
                                                        uint8_t material_flags,
                                                        uint8_t emissive_type,

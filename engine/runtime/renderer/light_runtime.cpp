@@ -26,16 +26,6 @@ std::array<float, 3> lerp3(const std::array<float, 3> &a, const std::array<float
 
 }  // namespace
 
-std::array<float, 4> build_point_light_attenuation(float light_range) {
-    // Retail emits {1, 0, 15 / range^2, 1} with range = the light record's
-    // 16.16 range x 1.25/65536 (the 0.000019073486 multiplier folds the 1.25
-    // scale into the fixed->float step) [orig: Light_GetPointLightParams
-    // @ 0x5a9251..0x5a9272]. The ModSuperOed.exe preview computes the same
-    // set (PrepareLightParams @ 0x46A500 in that image).
-    const float range = std::max(light_range * 1.25f, 0.001f);
-    return {1.0f, 0.0f, 15.0f / (range * range), 1.0f};
-}
-
 std::array<float, 3> unpack_modulator_scale(uint32_t packed_rgb) {
 	// byte * 0.015625 (= 1/64); 64 = identity gain
 	// [orig: Render_UnpackModulatorToLightScale @ 0x58db30;

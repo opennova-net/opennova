@@ -14,7 +14,7 @@ Ref<DestructionEffectEvent> DestructionEffectEvent::make(const String &p_effect,
 		bool p_release, int p_bank_slot, const Vector3 &p_local_pos, bool p_section_tagged,
 		bool p_positioned) {
 	opennova::world::DestructionEffectEvent v;
-	v.effect = p_effect.utf8().get_data();
+	v.effect = opennova::to_std(p_effect);
 	v.release = p_release;
 	v.section_tagged = p_section_tagged;
 	v.positioned = p_positioned;

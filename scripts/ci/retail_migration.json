@@ -1,0 +1,635 @@
+[
+  {
+    "original_script": "godot/tests/armory_menu_seam_test.gd",
+    "core_script": "godot/tests/armory_menu_seam_test.gd",
+    "core_methods": [
+      "test_accept_emits_loadout_and_cancel_closes",
+      "test_armory_accept_hotkey_debounces_until_release",
+      "test_banned_grenade_keeps_its_table_order_control_as_zero_only",
+      "test_class_change_refilters_slots",
+      "test_degrades_without_weapon_def",
+      "test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg",
+      "test_owns_menu_detects_weapon_screen",
+      "test_populates_classes_slots_and_ammo",
+      "test_selected_primary_mounts_and_clears_its_weapon_icon",
+      "test_unclassed_default_shows_all_weapons",
+      "test_weapon_labels_resolve_from_gametext_wepdes",
+      "test_weight_updates_from_selection"
+    ],
+    "retail_script": "godot/tests/retail/armory_menu_seam_test.gd",
+    "retail_methods": [
+      "test_ammo_rows_resolve_the_shipped_wepdes_labels",
+      "test_real_weapon_mnu_populates",
+      "test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open"
+    ]
+  },
+  {
+    "original_script": "godot/tests/armory_presenter_test.gd",
+    "core_script": "godot/tests/armory_presenter_test.gd",
+    "core_methods": [
+      "test_multiplayer_open_is_live",
+      "test_multiplayer_open_uses_retail_server_class_allow_mask",
+      "test_open_populates_the_authored_grenade_combo_from_weapon_def",
+      "test_open_preselects_the_authoritative_satchel_loadout",
+      "test_out_of_zone_try_open_is_the_silent_gate",
+      "test_sp_open_uses_authoritative_context_and_full_menu_protocol"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/avatar/avatar_preview_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/avatar/avatar_preview_test.gd",
+    "retail_methods": [
+      "test_retail_combo_preview_excludes_incompatible_arm_rig",
+      "test_runtime_portrait_binds_idle_on_skinned_parts_with_real_assets"
+    ]
+  },
+  {
+    "original_script": "godot/tests/blink_reopen_edge_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/blink_reopen_edge_test.gd",
+    "retail_methods": [
+      "test_indoors_letter_clear_draws_the_terrain_in_its_own_frame"
+    ]
+  },
+  {
+    "original_script": "godot/tests/deploy_screen_presenter_test.gd",
+    "core_script": "godot/tests/deploy_screen_presenter_test.gd",
+    "core_methods": [
+      "test_a_reopened_death_screen_repicks_and_the_release_closes_it",
+      "test_initial_overlay_row_selection_releases_authority_deployment",
+      "test_initial_overlay_space_sends_default_spawn_selection",
+      "test_instruction_widgets_follow_retained_death_text",
+      "test_live_session_frames_do_not_close_a_still_pending_deploy_screen",
+      "test_occupant_rows_carry_node_minus_one_and_never_pick",
+      "test_open_and_close_emit_the_shell_state_signals",
+      "test_open_refuses_when_no_pick_is_owed",
+      "test_refresh_preserves_selected_spawn_identity_by_param"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/e50trib_mount_alignment_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/e50trib_mount_alignment_test.gd",
+    "retail_methods": [
+      "test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame"
+    ]
+  },
+  {
+    "original_script": "godot/tests/foliage_dispatcher_assets_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/foliage_dispatcher_assets_test.gd",
+    "retail_methods": [
+      "test_installed_dvxi5_foliage_assets_enable_every_authored_slot"
+    ]
+  },
+  {
+    "original_script": "godot/tests/game/loading_screen_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/game/loading_screen_test.gd",
+    "retail_methods": [
+      "test_mp_setup_carries_the_session_variables"
+    ]
+  },
+  {
+    "original_script": "godot/tests/game/main_game_lifecycle_test.gd",
+    "core_script": "godot/tests/game/main_game_lifecycle_test.gd",
+    "core_methods": [
+      "test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/game/menu_shell_test.gd",
+    "core_script": "godot/tests/game/menu_shell_test.gd",
+    "core_methods": [
+      "test_boots_into_main_menu_startup",
+      "test_companion_released_when_document_changes_hands",
+      "test_cross_mnu_jump_and_back_stack",
+      "test_failed_cross_mnu_jump_does_not_change_back_stack",
+      "test_hidden_menu_suspends_shell_frame_processing",
+      "test_in_game_back_requests_resume",
+      "test_ingame_hidden_back_button_resumes",
+      "test_missing_assets_degrade_without_crashing",
+      "test_multiple_companions_first_owner_drives_menu",
+      "test_start_emits_selected_mission",
+      "test_start_without_selection_is_a_no_op",
+      "test_startup_drives_music_var",
+      "test_top_level_quit_requests_exit"
+    ],
+    "retail_script": "godot/tests/retail/game/menu_shell_test.gd",
+    "retail_methods": [
+      "test_aspect_spinlist_restores_and_persists_the_selected_mode",
+      "test_control_mapping_capture_dies_on_screen_change",
+      "test_control_mapping_remap_flow",
+      "test_crosshair_color_and_spread_use_shared_options_and_persist",
+      "test_crosshair_spinlist_uses_shared_options_and_persists_immediately",
+      "test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio",
+      "test_front_options_accept_keeps_immediate_changes_and_returns_to_main",
+      "test_ingame_abort_raises_confirm_and_only_yes_returns",
+      "test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount",
+      "test_mods_ok_applies_expansion_without_launching",
+      "test_mods_tab_lists_mounts_and_persists_expansion",
+      "test_music_contexts_load_pff_archived_by_hardcoded_names",
+      "test_music_incomplete_expansion_bank_only_stays_expansion",
+      "test_music_resolution_keeps_incomplete_expansion_pair",
+      "test_musicless_expansion_does_not_reselect_base_pair",
+      "test_options_controls_inert_without_control_table",
+      "test_options_scrolls_seed_original_ranges_and_persisted_values",
+      "test_pause_options_share_state_apply_accept_and_retain_cancel_changes",
+      "test_play_screen_accept_still_launches",
+      "test_runtime_loads_pff_archived_stylesheet_by_canonical_name",
+      "test_sp_mission_list_titles_briefing_and_accept_gate",
+      "test_video_options_are_highest_quality_and_read_only"
+    ]
+  },
+  {
+    "original_script": "godot/tests/game_world_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/game_world_test.gd",
+    "retail_methods": [
+      "test_armory_can_reuse_game_world_weapon_database_on_first_open"
+    ]
+  },
+  {
+    "original_script": "godot/tests/hud_helpers_test.gd",
+    "core_script": "godot/tests/hud_helpers_test.gd",
+    "core_methods": [
+      "test_hud_weapon_def_decode"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/hud_installed_assets_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/hud_installed_assets_test.gd",
+    "retail_methods": [
+      "test_installed_launcher_and_mortar_hud_transitions",
+      "test_installed_tank_and_pilot_hud_entry_exit"
+    ]
+  },
+  {
+    "original_script": "godot/tests/hud_overlay_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/hud_overlay_test.gd",
+    "retail_methods": [
+      "test_overlay_draws_health_from_fixture_layout",
+      "test_sighted_m4_builds_all_authored_sight_card_rows",
+      "test_weapon_cluster_artless_safe"
+    ]
+  },
+  {
+    "original_script": "godot/tests/hud_pos_test.gd",
+    "core_script": "godot/tests/hud_pos_test.gd",
+    "core_methods": [
+      "test_design_space_constants",
+      "test_loads_and_reports_state",
+      "test_not_loaded_is_safe",
+      "test_vehicle_hud_block"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/listen_server_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/listen_server_test.gd",
+    "retail_methods": [
+      "test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six"
+    ]
+  },
+  {
+    "original_script": "godot/tests/local_player_presenter_test.gd",
+    "core_script": "godot/tests/local_player_presenter_test.gd",
+    "core_methods": [
+      "test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection",
+      "test_aspect_mode_draws_through_a_target_of_the_selected_ratio",
+      "test_binoculars_nvg_and_gain_keys_route_retail_actions",
+      "test_camera_direction_keeps_precision_far_from_origin",
+      "test_camera_keeps_its_heading_looking_straight_up_or_down",
+      "test_camera_stamps_the_sim_composed_pose_and_policy_fov",
+      "test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts",
+      "test_fire_mode_change_keeps_one_posed_viewmodel_per_frame",
+      "test_fire_mode_change_keeps_the_pose_during_catch_up",
+      "test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_models",
+      "test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive",
+      "test_local_avatar_body_channel_follows_the_sim_tuple",
+      "test_local_avatar_overlays_follow_the_first_person_rule",
+      "test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline",
+      "test_nvg_composite_renders_the_world_into_the_nvg_raster",
+      "test_overlay_key_latch_and_remapped_wheel_reach_the_sim",
+      "test_shared_presenter_teardown_releases_captured_mouse",
+      "test_stance_keys_are_three_key_select_requests",
+      "test_the_world_only_capture_latch_hides_the_viewmodel_without_a_frame",
+      "test_use_hold_swallows_digit_rows_and_ctrl_digit_claims_them",
+      "test_viewmodel_ctrl_registers_follow_visibility_and_team",
+      "test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown",
+      "test_wheel_factor_accumulates_whole_notches"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/mission_corpus_binding_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/mission_corpus_binding_test.gd",
+    "retail_methods": [
+      "test_real_mission_round_trips_through_the_binding_save_path",
+      "test_real_missions_open_and_are_sane_through_the_binding"
+    ]
+  },
+  {
+    "original_script": "godot/tests/mission_present_pass_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/mission_present_pass_test.gd",
+    "retail_methods": [
+      "test_retail_door_visible_part_uses_the_presented_phase"
+    ]
+  },
+  {
+    "original_script": "godot/tests/mission_root_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/mission_root_test.gd",
+    "retail_methods": [
+      "test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_expiry",
+      "test_joiner_runtime_owns_fire_and_throwable_presenters",
+      "test_mission_loadout_chunk_promotes_through_the_native_gate"
+    ]
+  },
+  {
+    "original_script": "godot/tests/mnu/mnu_corpus_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/mnu/mnu_corpus_test.gd",
+    "retail_methods": [
+      "test_all_shipped_menu_screens_compile"
+    ]
+  },
+  {
+    "original_script": "godot/tests/mnu/mnu_document_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/mnu/mnu_document_test.gd",
+    "retail_methods": [
+      "test_mns_entries_expose_document_order",
+      "test_mns_set_variable_preserves_layout_and_emits_changed",
+      "test_mns_source_text_round_trip_byte_faithful"
+    ]
+  },
+  {
+    "original_script": "godot/tests/mounted_view_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/mounted_view_test.gd",
+    "retail_methods": [
+      "test_03tr_blackhawk_passengers_and_miniguns_stay_fixed_to_the_cabin",
+      "test_03tr_little_bird_pilot_fires_the_carrier_weapon",
+      "test_03tr_minigun_barrel_rotates_while_firing",
+      "test_03tr_minigun_flash_follows_the_mounted_muzzle",
+      "test_03tr_npc_minigunner_remains_attached_during_takeoff",
+      "test_03tr_truck_50cal_mouse_up_raises_the_camera"
+    ]
+  },
+  {
+    "original_script": "godot/tests/mounted_weapon_switch_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/mounted_weapon_switch_test.gd",
+    "retail_methods": [
+      "test_installed_g_carriers_right_click_switches_gun_and_hud"
+    ]
+  },
+  {
+    "original_script": "godot/tests/net/coop_two_sim_test.gd",
+    "core_script": "godot/tests/net/coop_two_sim_test.gd",
+    "core_methods": [
+      "test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it",
+      "test_joiner_fire_and_reload_round_trip_over_real_udp",
+      "test_joiner_folds_the_phase2_environment_into_its_weather_home",
+      "test_joiner_handshakes_and_sees_host_bidirectional",
+      "test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload",
+      "test_joiner_learns_mission_before_wire_world_load_on_same_session",
+      "test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown",
+      "test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp",
+      "test_joiner_off_by_default",
+      "test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp",
+      "test_joiner_receives_the_host_hud_relays_over_real_udp",
+      "test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner",
+      "test_joiner_remote_player_glides_across_subrate_records_over_real_udp",
+      "test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon",
+      "test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost",
+      "test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact",
+      "test_joiner_view_of_ai_emplacement_gunner_tracks_host",
+      "test_late_reload_echo_refills_payload_weapon_after_joiner_switches",
+      "test_listen_host_reload_relays_over_loopback_without_double_refill",
+      "test_reload_echo_at_done_prevents_same_slot_reload_loop",
+      "test_remote_host_round_event_resimulates_visually_on_joiner"
+    ],
+    "retail_script": "godot/tests/retail/net/coop_two_sim_test.gd",
+    "retail_methods": [
+      "test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse"
+    ]
+  },
+  {
+    "original_script": "godot/tests/net/host_punt_surfacing_test.gd",
+    "core_script": "godot/tests/net/host_punt_surfacing_test.gd",
+    "core_methods": [
+      "test_shell_returns_a_punted_deploy_screen_to_the_menu"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/net/weapon_profile_kit_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/net/weapon_profile_kit_test.gd",
+    "retail_methods": [
+      "test_an_unlatched_team_commits_no_page"
+    ]
+  },
+  {
+    "original_script": "godot/tests/net/wire_header_world_materialization_test.gd",
+    "core_script": "godot/tests/net/wire_header_world_materialization_test.gd",
+    "core_methods": [
+      "test_complete_bms_joiner_keeps_authored_promotion_identity",
+      "test_true_wire_header_materializes_exact_deploy_and_vehicle_rows",
+      "test_true_wire_header_recovers_designated_g_parent_ammo_route"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/npc_attention_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/npc_attention_test.gd",
+    "retail_methods": [
+      "test_idle_spotting_drives_bms_and_the_presented_head_on_retry"
+    ]
+  },
+  {
+    "original_script": "godot/tests/player_info_menu_seam_test.gd",
+    "core_script": "godot/tests/player_info_menu_seam_test.gd",
+    "core_methods": [
+      "test_type_combo_locks_for_noammotypes_weapons"
+    ],
+    "retail_script": "godot/tests/retail/player_info_menu_seam_test.gd",
+    "retail_methods": [
+      "test_ammo_selection_recomputes_weight_and_snapshot",
+      "test_grenade_combos_fill_in_table_order_with_zero_row",
+      "test_grenade_zero_pick_stays_zero_in_the_weight",
+      "test_kit_page_carries_knife_medpack_slots_and_three_grenades",
+      "test_kit_page_medpack_is_class_five_only",
+      "test_loadout_class_filter_includes_and_excludes",
+      "test_m203_subweapon_fills_ammo2_from_the_differing_round_entry",
+      "test_none_selection_hides_ammo_and_clears_icon",
+      "test_populates_loadout_slots_filtered_by_class_and_team",
+      "test_primary_ammo_rows_follow_selected_weapon",
+      "test_real_player_mnu_loadout_populates",
+      "test_snapshot_carries_the_selected_loadout_weapon_ids",
+      "test_voice_preview_requests_selected_avatar_voice",
+      "test_weapon_dict_carries_loadout_subclasses",
+      "test_weight_label_renders_witnessed_format_and_band"
+    ]
+  },
+  {
+    "original_script": "godot/tests/player_weapon_view_test.gd",
+    "core_script": "godot/tests/player_weapon_view_test.gd",
+    "core_methods": [
+      "test_viewmodel_def_carries_fsm_fields"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  },
+  {
+    "original_script": "godot/tests/probes/render_fixture_capture_probe_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/probes/render_fixture_capture_probe_test.gd",
+    "retail_methods": [
+      "test_comparison_contract_uses_production_spawn_profile_and_presentation_witness"
+    ]
+  },
+  {
+    "original_script": "godot/tests/simulation_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/simulation_test.gd",
+    "retail_methods": [
+      "test_armory_reads_and_clears_authoritative_local_loadout",
+      "test_death_during_usegun_draw_restores_personal_weapon",
+      "test_f3_hides_local_player_and_omits_distant_posed_organic",
+      "test_hud_spread_row_tracks_stance_and_settled_aim_state",
+      "test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose",
+      "test_late_spawned_player_resolves_posed_collision_on_demand",
+      "test_loadout_weapon_category_switch_changes_equipped_weapon",
+      "test_local_fire_exports_recoil_camera_and_hud_spread",
+      "test_local_fire_spawns_the_authoritative_round_and_impact",
+      "test_local_first_person_usegun_parent_cull_follows_live_mount_slot",
+      "test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun",
+      "test_local_usegun_aim_articulates_emplaced_weapon_model",
+      "test_local_usegun_direct_swap_targets_latest_parent_without_switchto",
+      "test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot",
+      "test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot",
+      "test_organic_collision_samples_current_skeletal_pose_headlessly",
+      "test_restart_re_resolves_the_restored_collision_identity",
+      "test_reused_player_slot_invalidates_old_collision_attempt_identity",
+      "test_same_name_armory_accept_refills_the_live_weapon_slot",
+      "test_weapon_switch_requested_during_draw_commits_without_a_second_press",
+      "test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp"
+    ]
+  },
+  {
+    "original_script": "godot/tests/skeletal_anim_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/skeletal_anim_test.gd",
+    "retail_methods": [
+      "test_pose_skeleton_matches_script_bone_loop"
+    ]
+  },
+  {
+    "original_script": "godot/tests/sound_dialog_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/sound_dialog_test.gd",
+    "retail_methods": [
+      "test_00trg_mission_dialog_resolves"
+    ]
+  },
+  {
+    "original_script": "godot/tests/sound_integration_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/sound_integration_test.gd",
+    "retail_methods": [
+      "test_jo_00tra_sound_marker_resolution"
+    ]
+  },
+  {
+    "original_script": "godot/tests/sound_pff_install_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/sound_pff_install_test.gd",
+    "retail_methods": [
+      "test_pff_install_mission_audio"
+    ]
+  },
+  {
+    "original_script": "godot/tests/static_decoration_lighting_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/windowed/static_decoration_lighting_test.gd",
+    "retail_methods": [
+      "test_a_decoration_inside_a_building_draws_with_the_interior_lane"
+    ]
+  },
+  {
+    "original_script": "godot/tests/tank_parity_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/tank_parity_test.gd",
+    "retail_methods": [
+      "test_installed_tanks_seats_optics_and_hud"
+    ]
+  },
+  {
+    "original_script": "godot/tests/tank_training_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/tank_training_test.gd",
+    "retail_methods": [
+      "test_07tr_cannon_prompt_from_landing_craft_deck",
+      "test_07tr_tank_course_from_boarding_to_victory"
+    ]
+  },
+  {
+    "original_script": "godot/tests/teammate_spawn_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/teammate_spawn_test.gd",
+    "retail_methods": [
+      "test_bms_helpers_receive_native_animation_and_presentation_on_retry"
+    ]
+  },
+  {
+    "original_script": "godot/tests/terrain_static_shadow_runtime_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/terrain_static_shadow_runtime_test.gd",
+    "retail_methods": [
+      "test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad"
+    ]
+  },
+  {
+    "original_script": "godot/tests/throwable_repro_test.gd",
+    "core_script": "godot/tests/throwable_repro_test.gd",
+    "core_methods": [
+      "test_binocular_toggle_refuses_during_powerthrow_windup",
+      "test_claymore_throw_then_m4_fires_bullets",
+      "test_grenade_ground_bounces_are_sound_only_until_the_fuse",
+      "test_grenade_throw_then_m4_fires_bullets",
+      "test_reinstall_during_holster_preserves_the_switch",
+      "test_satchel_loadout_can_switch_to_detonator",
+      "test_windup_during_draw_leaves_no_stale_charge",
+      "test_windup_state_feeds_the_charge_bar"
+    ],
+    "retail_script": "godot/tests/retail/throwable_repro_test.gd",
+    "retail_methods": [
+      "test_production_smoke_grenade_survives_arm_event_until_fuse"
+    ]
+  },
+  {
+    "original_script": "godot/tests/vehicle_emplacement_alignment_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/vehicle_emplacement_alignment_test.gd",
+    "retail_methods": [
+      "test_03tr_blackhawk_miniguns_follow_authored_ewep_forward",
+      "test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame",
+      "test_real_blackhawk_rotor_register_spins_while_crewed",
+      "test_real_dbuggy_attachment_nodes_follow_when_driven",
+      "test_real_dbuggy_attachment_stays_collected_when_driven_away"
+    ]
+  },
+  {
+    "original_script": "godot/tests/virtual_display_present_test.gd",
+    "core_script": null,
+    "core_methods": [],
+    "retail_script": "godot/tests/retail/virtual_display_present_test.gd",
+    "retail_methods": [
+      "test_installed_m1a1_display_ends_when_the_driver_gives_up_the_claim",
+      "test_installed_m1a1_driver_view_swaps_the_hull_for_its_cockpit"
+    ]
+  },
+  {
+    "original_script": "godot/tests/wire_present_pass_test.gd",
+    "core_script": "godot/tests/wire_present_pass_test.gd",
+    "core_methods": [
+      "test_a_wire_held_weapon_takes_its_bodys_mirror_clip_arming",
+      "test_admitted_player_row_with_synthetic_origin_builds_on_the_host",
+      "test_cold_materialization_is_bounded_and_converges_while_live_rows_update",
+      "test_composed_avatar_head_shares_the_body_thermal_wave_lane",
+      "test_host_current_body_state_is_posed_without_remote_rearbitration",
+      "test_host_current_body_state_uses_authoritative_blend_tuple",
+      "test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacements",
+      "test_live_player_character_id_change_rebuilds_the_visual",
+      "test_live_slot_type_change_rebuilds_the_visual",
+      "test_local_player_handle_is_filtered_from_the_wire_walk",
+      "test_native_hand_frame_basis_matches_the_gdscript_origin",
+      "test_native_held_weapon_attach_matches_the_gdscript_origin",
+      "test_person_body_and_late_held_weapon_share_the_thermal_wave_lane",
+      "test_placed_identity_rows_defer_even_without_a_resolvable_node",
+      "test_placed_person_row_draws_its_held_weapon",
+      "test_present_snapshot_rejects_a_short_stride",
+      "test_remote_blend_uses_logic_tick_delta_not_present_call_count",
+      "test_render_culled_row_hides_and_skips_legs_until_released",
+      "test_runtime_reset_rematerializes_the_restored_same_type_slot",
+      "test_sp_synthetic_filter_materializes_only_attachment_origin_rows",
+      "test_stable_host_layout_keeps_placed_rows_deferred",
+      "test_state_edge_latch_survives_a_revision_bumped_plan_rebuild",
+      "test_synthetic_attachment_uses_panm_and_hidden_visibility_contract",
+      "test_unresolved_attempt_consumes_budget_without_stranding_later_rows",
+      "test_unresolved_slot_retries_after_disappearance_and_reuse",
+      "test_unresolved_slot_retries_immediately_when_type_changes",
+      "test_wire_direct_carrier_applies_and_releases_scoped_world_heat",
+      "test_wire_direct_numbered_zone_applies_and_releases_callback_controls",
+      "test_wire_handle_resolver_keeps_synthetic_siblings_distinct",
+      "test_wire_model_applies_and_clears_named_emplaced_controls",
+      "test_wire_model_applies_and_clears_the_remote_weapon_channel",
+      "test_wire_model_applies_and_restores_mounted_right_hand_collapse",
+      "test_wire_model_applies_the_same_packed_overlay_result",
+      "test_wire_model_clears_overlay_when_snapshot_selector_is_invalid",
+      "test_wire_model_free_runs_compact_infantry_when_phase_is_absent",
+      "test_wire_model_honors_local_first_person_parent_cull",
+      "test_wire_model_receives_the_transition_pulse_before_the_current_state",
+      "test_wire_model_resets_remote_body_channel_on_respawn_revision_change",
+      "test_wire_model_spawn_registers_after_identity_and_transform_are_ready",
+      "test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type",
+      "test_wire_pose_preserves_authored_model_scale",
+      "test_wire_row_builds_a_held_weapon_only_when_it_is_armed",
+      "test_zero_wire_handle_is_a_valid_remote_pool_slot"
+    ],
+    "retail_script": null,
+    "retail_methods": []
+  }
+]

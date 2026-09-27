@@ -44,7 +44,7 @@ using namespace sim_internal;
 
 
 // P7: the per-load host bring-up record — the faithful §5.0 mode-3 in-process listen server
-// [orig: SinglePlayer_StartMission @0x561af0], mirroring apps/nw_server/main.cpp. The host's own
+// [orig: SinglePlayer_StartMission @0x561af0]. The host's own
 // player AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
 // resolve_player_spawn_pose marker chain), and its own loopback client renders the per-frame 0x0A.
 // Staged on the host role right before the kernel boots; its boot-hook bring_up consumes it.
@@ -92,13 +92,11 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 
 
 // P7/A5: the per-frame host owner loop is now a THIN delegation to the shared core host_session_pump
-// (engine/runtime/inmatch) — the SAME loop apps/nw_server runs, so the headless server and the Godot binding can no
-// longer drift. Simulation supplies the socket (a UdpPump adapter; SP passes a null pump and the
+// (engine/runtime/inmatch). Simulation supplies the socket (a UdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
 // The host frame's dispatch_event + admit_peer were promoted into engine/runtime/inmatch (inmatch::dispatch_event /
-// inmatch::admit_peer over host_owner, driven by host_session_pump) — the SAME code apps/nw_server runs, so
-// the Godot binding and the headless server can no longer drift.
+// inmatch::admit_peer over host_owner, driven by host_session_pump).
 
 Array Simulation::get_streamed_placement_records() const {
 	Array out;
@@ -1068,18 +1066,16 @@ int64_t Simulation::get_kill_announcement_tick(int64_t now) {
 String Simulation::format_feed_line(const String &p_template, const String &p_attacker,
 		const String &p_victim, const String &p_extra,
 		const String &p_bonus_template) const {
-	return String::utf8(opennova::hud::feed_format_line(
+	return opennova::to_gd(opennova::hud::feed_format_line(
 			p_template.utf8().get_data(), p_attacker.utf8().get_data(),
 			p_victim.utf8().get_data(), p_extra.utf8().get_data(),
-			p_bonus_template.utf8().get_data())
-			                    .c_str());
+			p_bonus_template.utf8().get_data()));
 }
 
 String Simulation::format_feed_camp_line(const String &p_template,
 		const String &p_wpname) const {
-	return String::utf8(opennova::hud::feed_format_camp_line(
-			p_template.utf8().get_data(), p_wpname.utf8().get_data())
-			                    .c_str());
+	return opennova::to_gd(opennova::hud::feed_format_camp_line(
+			p_template.utf8().get_data(), p_wpname.utf8().get_data()));
 }
 
 

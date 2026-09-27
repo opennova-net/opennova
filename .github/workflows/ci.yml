@@ -38,7 +38,8 @@ jobs:
       CMAKE_GENERATOR: Ninja
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
-      HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
+      OPENNOVA_JO_DIR: ''
+      OPENNOVA_JO_ASSETS: ''
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,16 +54,6 @@ jobs:
         run: |
           git lfs install --local
           git lfs pull --include="fixtures/**"
-
-      # The retail data the asset gates need (docs/asset-gated-tests.md): the
-      # composite action restores or checks out the two private reference
-      # repositories and exports the two roots; without the
-      # REFERENCE_ASSETS_TOKEN secret it does nothing and the gates stay closed.
-      - name: Mount the reference data
-        uses: ./.github/actions/mount-reference-data
-        with:
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
 
       - uses: actions/setup-python@v5
         with:
@@ -105,9 +96,9 @@ jobs:
           python scripts/lint/env_lint.py --enforce
           # Vocabulary conventions (CLAUDE.md): no Nova/nova_ prefix (ADR 0040).
           python scripts/lint/conventions_lint.py --enforce
-          # The asset-gate attestation tables (scripts/ci/retail_gates_ran.py)
-          # and the docs/asset-gated-tests.md matrix name the same ctests.
-          python scripts/ci/retail_gates_ran.py --check-docs
+          # Suite isolation, migration coverage and report-completeness checks.
+          python scripts/ci/test_suites.py --suite core --check-layout
+          python -B -m unittest discover -s scripts/ci -p test_test_suites.py
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
@@ -130,32 +121,31 @@ jobs:
 
       - name: Build and test
         shell: bash
-        run: scripts/build.sh --no-godot
-
-      # A green ctest run never proves the asset-gated tests saw their data
-      # (a gate reports Skipped or SKIP-LEG). With the reference data mounted,
-      # every test the two roots gate must have run.
-      - name: Asset-gated tests ran
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        shell: bash
-        run: |
-          python scripts/ci/retail_gates_ran.py --junit build/Testing/ctest.xml \
-            --roots jo_dir,jo_assets
-          python scripts/ci/retail_gates_ran.py --check-docs --junit build/Testing/ctest.xml
+        run: scripts/build.sh --no-godot --suite core
 
       - name: sccache stats
         if: always()
         shell: bash
         run: sccache --show-stats
 
-  # The full engine build + ctest suite on Linux. PRs get the Windows `test`
-  # job and the target-scoped Linux net leg below; a master push or a manual
-  # run also builds and tests the whole lib corpus on ubuntu, so a Linux-only
-  # compile or test failure surfaces here instead of at the tagged release
-  # (release.yml runs the same leg at tag time).
+
+      - name: Upload native core test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-core-reports
+          if-no-files-found: warn
+          path: build/Testing/
+
   test-linux:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      OPENNOVA_JO_DIR: ''
+      OPENNOVA_JO_ASSETS: ''
     steps:
       - uses: actions/checkout@v4
         with:
@@ -168,9 +158,138 @@ jobs:
           git lfs install --local
           git lfs pull --include="fixtures/**"
 
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
       - name: Build and test
         shell: bash
-        run: scripts/build.sh --no-godot
+        run: scripts/build.sh --no-godot --suite core
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+      - name: Upload Linux native core test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-core-linux-reports
+          if-no-files-found: warn
+          path: build/Testing/
+
+  # Match the Windows flavours: PRs exercise the editor/debug extension;
+  # master pushes and manual runs also compile the release extension.
+  build-gdextension-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ github.event_name == 'pull_request' && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Build Linux GDExtension (${{ matrix.target }})
+        env:
+          GODOTCPP_TARGET: ${{ matrix.target }}
+        run: |
+          case "$GODOTCPP_TARGET" in
+            template_debug) config=RelWithDebInfo; build_dir=build-godot-debug ;;
+            template_release) config=Release; build_dir=build-godot-release ;;
+            *) echo "unknown GODOTCPP_TARGET: $GODOTCPP_TARGET" >&2; exit 2 ;;
+          esac
+          cmake -S godot/src -B "$build_dir" -G Ninja \
+            -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE="$config"
+          cmake --build "$build_dir" --target opennova --parallel "$(nproc)"
+          test -f "godot/bin/libopennova.linux.$GODOTCPP_TARGET.x86_64.so"
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+      - name: Upload Linux GDExtension
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdext_linux_${{ matrix.target }}
+          if-no-files-found: error
+          path: godot/bin/libopennova.linux.${{ matrix.target }}.x86_64.so
+
+  godot-tests-linux:
+    runs-on: ubuntu-latest
+    needs: [build-gdextension-linux]
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      OPENNOVA_JO_DIR: ''
+      OPENNOVA_JO_ASSETS: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          submodules: recursive
+
+      - name: Pull Git LFS assets (fixtures/ only)
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/**"
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Install Godot (Linux)
+        run: |
+          bin=".godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
+          if [[ ! -f "$bin" ]]; then
+            mkdir -p .godot-bin
+            curl -fsSL --retry 3 -o .godot-bin/godot-linux.zip \
+              "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+            unzip -o .godot-bin/godot-linux.zip -d .godot-bin
+          fi
+          chmod +x "$bin"
+
+      - name: Download Linux GDExtension
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_linux_template_debug
+          path: godot/bin
+
+      - name: Prime Godot import cache
+        run: |
+          GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
+          bash scripts/bootstrap_godot.sh
+          ok=0
+          for attempt in 1 2 3; do
+            if "$GODOT_BIN" --headless --path godot --import; then ok=1; break; fi
+            echo "::warning::Godot import attempt ${attempt} failed; retrying"
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo "::error::Godot import did not complete after 3 attempts"
+            exit 1
+          fi
+
+      - name: Run Linux Godot core tests
+        run: |
+          export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
+          bash scripts/test_godot.sh --suite core
+
+      - name: Upload Linux Godot core test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-core-linux-reports
+          if-no-files-found: warn
+          path: build/Testing/
 
   # Linux build of the standalone novaworld server with the Crow HTTP layer ON,
   # plus the net-scoped ctests, on the deploy target's OS and flag set. One
@@ -314,7 +433,8 @@ jobs:
     needs: [build-gdextension-windows]
     env:
       GODOT_VERSION: 4.6.1-stable
-      HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
+      OPENNOVA_JO_DIR: ''
+      OPENNOVA_JO_ASSETS: ''
     steps:
       - uses: actions/checkout@v4
         with:
@@ -327,14 +447,6 @@ jobs:
           git lfs install --local
           git lfs pull --include="fixtures/**"
 
-      # The retail data the asset gates need (docs/asset-gated-tests.md); the
-      # same composite action as the engine test job.
-      - name: Mount the reference data
-        uses: ./.github/actions/mount-reference-data
-        with:
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
-
       # runner.os, like the package and release jobs: one cache entry serves
       # every job that installs this binary.
       - name: Cache Godot binary
@@ -343,8 +455,7 @@ jobs:
           path: .godot-bin
           key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
-      # The suite runs on the Windows console binary (the GDExtension is built
-      # for Windows only); GODOT_BIN below is that path.
+      # This job uses the Windows console binary and matching GDExtension.
       - name: Install Godot (Windows)
         shell: pwsh
         run: |
@@ -388,19 +499,19 @@ jobs:
         shell: bash
         run: |
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          bash scripts/test_godot.sh 2>&1 | tee gut.log
+          bash scripts/test_godot.sh --suite core 2>&1 | tee gut.log
           exit "${PIPESTATUS[0]}"
 
-      # The GUT gates report pending without their data; with the reference
-      # data mounted none of them may still name a mounted root.
-      - name: Asset-gated GUT tests ran
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        shell: bash
-        run: |
-          python scripts/ci/retail_gates_ran.py --gut-log gut.log \
-            --roots jo_dir,jo_assets
 
-  # One runtime archive; users provide game data with --resource-dir.
+
+      - name: Upload godot core test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-core-reports
+          if-no-files-found: warn
+          path: build/Testing/
+
   package-godot-windows:
     runs-on: windows-latest
     needs: [build-gdextension-windows]
@@ -412,7 +523,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # Runtime export contains no game data.
+          lfs: false   # The bundled assets/ are plain git blobs; nothing here needs LFS.
           submodules: recursive
 
       - name: Cache Godot binary
@@ -487,7 +598,7 @@ jobs:
               '',
               '| Build | Download |',
               '| --- | --- |',
-              `| Runtime: opennova.exe; supply game data with --resource-dir | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
+              `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
@@ -508,30 +619,190 @@ jobs:
               core.warning(`Could not post build-links comment (forked PR or token lacks pull-requests:write?): ${err.message}`);
             }
 
-  # Build + test the OpenNova launcher (launcher/, C# WinForms, hosts-file
-  # redirection model). Publishes the single-file exe as an artifact; the
-  # release flow (launcher-publish workflow) handles distribution.
-  launcher:
-    runs-on: windows-latest
+  # Secrets are unavailable on fork PRs. Record that explicitly and skip only
+  # compatibility jobs; ordinary engine and Godot checks always run.
+  retail-availability:
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.reference.outputs.available }}
+    steps:
+      - name: Check reference-data access
+        id: reference
+        shell: bash
+        env:
+          HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
+        run: |
+          echo "available=$HAVE_REFERENCE_ASSETS" >> "$GITHUB_OUTPUT"
+          if [[ "$HAVE_REFERENCE_ASSETS" != "true" ]]; then
+            echo "::notice::Retail compatibility tests skipped: REFERENCE_ASSETS_TOKEN is unavailable."
+            echo "Retail compatibility tests skipped: reference-data credentials are unavailable." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  test-retail:
+    needs: [retail-availability]
+    if: needs.retail-availability.outputs.available == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false
-          submodules: false
+          lfs: false   # scoped below: the tests read fixtures/ only
+          submodules: recursive
+          # Full history so the diff-scoped maturity lint can resolve
+          # origin/master...HEAD on PR builds (it self-skips without a base).
+          fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      - name: Pull Git LFS assets (fixtures/ only)
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/**"
+
+      # The retail data the asset gates need (docs/asset-gated-tests.md): the
+      # composite action restores or checks out the two private reference
+      # repositories and exports the two roots; without the
+      # REFERENCE_ASSETS_TOKEN secret it does nothing and the gates stay closed.
+      - name: Mount the reference data
+        uses: ./.github/actions/mount-reference-data
         with:
-          dotnet-version: 8.0.x
+          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+          enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
 
-      - name: Test
-        run: dotnet test launcher/OpenNovaLauncher.sln -c Release --nologo
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Publish single-file exe
-        run: dotnet publish launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj -c Release -r win-x64
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
-      - name: Upload launcher artifact
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Toolchain sanity (Ninja + cl on PATH)
+        shell: bash
+        run: |
+          cmake --version
+          ninja --version
+          command -v cl
+
+      - name: Build and test
+        shell: bash
+        run: scripts/build.sh --no-godot --suite retail
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats
+
+      - name: Upload native retail test reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: OpenNovaLauncher-win-x64
-          if-no-files-found: error
-          path: launcher/src/OpenNovaLauncher/bin/Release/net8.0-windows/win-x64/publish/OpenNovaLauncher.exe
+          name: native-retail-reports
+          if-no-files-found: warn
+          path: build/Testing/
+
+  godot-tests-retail:
+    if: needs.retail-availability.outputs.available == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
+    needs: [build-gdextension-windows, retail-availability]
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false   # scoped below: the tests read fixtures/ only
+          submodules: recursive
+
+      - name: Pull Git LFS assets (fixtures/ only)
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/**"
+
+      # The retail data the asset gates need (docs/asset-gated-tests.md); the
+      # same composite action as the engine test job.
+      - name: Mount the reference data
+        uses: ./.github/actions/mount-reference-data
+        with:
+          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+          enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
+
+      # runner.os, like the package and release jobs: one cache entry serves
+      # every job that installs this binary.
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      # This job uses the Windows console binary and matching GDExtension.
+      - name: Install Godot (Windows)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${env:GODOT_VERSION}"
+          $bin = ".godot-bin/Godot_v${version}_win64_console.exe"
+          if (-not (Test-Path $bin)) {
+            New-Item -ItemType Directory -Force -Path .godot-bin | Out-Null
+            $url = "https://github.com/godotengine/godot/releases/download/${version}/Godot_v${version}_win64.exe.zip"
+            Invoke-WebRequest -Uri $url -OutFile .godot-bin/godot.zip
+            Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
+          }
+
+      # The editor binary that runs GUT loads the template_debug flavour only.
+      - name: Download GDExtension (Windows)
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_windows_template_debug
+          path: godot/bin
+
+      - name: Prime Godot import cache
+        shell: bash
+        run: |
+          GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
+          bash scripts/bootstrap_godot.sh
+          # The editor importer can still crash on a cold import; a half-baked
+          # cache makes the test run fail with confusing "missing resource"
+          # errors instead of a clear signal. Retry, and fail loudly if the
+          # import never completes (was previously masked by continue-on-error).
+          ok=0
+          for attempt in 1 2 3; do
+            if "$GODOT_BIN" --headless --path godot --import; then ok=1; break; fi
+            echo "::warning::Godot import attempt ${attempt} failed; retrying"
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo "::error::Godot import did not complete after 3 attempts"
+            exit 1
+          fi
+
+      - name: Run Godot tests
+        shell: bash
+        run: |
+          export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
+          bash scripts/test_godot.sh --suite retail 2>&1 | tee gut.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload godot retail test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-retail-reports
+          if-no-files-found: warn
+          path: build/Testing/

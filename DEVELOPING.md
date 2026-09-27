@@ -12,7 +12,6 @@ deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
 - **CMake 3.16+** and a **C++17** compiler (MSVC, Clang, or GCC).
 - **Godot 4.6.1** (only for Godot work). Set `GODOT_BIN` to the binary, or drop it in `.godot-bin/`.
 - **Docker** (Docker Desktop on Windows/macOS) to run the NovaWorld servers locally.
-- **.NET 8 SDK** to build the launcher (Windows).
 - **Git LFS** (binary test fixtures are LFS objects).
 
 ## First-time setup
@@ -113,18 +112,17 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 |---|---|---|
 | gate | `7597/udp` | client bootstrap probe (answers with the server address) |
 | NovaWorld UDP | `64206/udp` | NAPI session + in-match traffic (HELLO/JOIN/SESSION/GOODBYE) |
-| HTTP / API | `8080/tcp` | `/api/*`, `/api/server-info`, the legacy `NW*.dll` routes |
+| HTTP / API | `8080/tcp` | `/api/*`, the legacy `NW*.dll` routes |
 | web UI (Vite) | `http://localhost:5173` | the Vue site with **hot-reload**; Vite proxies `/api` to the server |
 
-Most dev values come from `deploy/env/app.dev.env` (committed, non-secret): `admin`/`admin`
-basic auth, `ADMIN_API_TOKEN=dev-admin-token`. The Docker dev override has
-machine-specific defaults for `ONNET_PUBLIC_HOST` and `ONNET_CLIENT_REFLECT_IP`; set them
-explicitly before retail host/join tests. Use `127.0.0.1` only when the retail client and
+The Docker dev override sets the dev values: `ADMIN_API_TOKEN=dev-admin-token`, the seeded
+test accounts, and machine-specific defaults for `ONNET_PUBLIC_HOST` and
+`ONNET_CLIENT_REFLECT_IP`; set those two explicitly before retail host/join tests. Use `127.0.0.1` only when the retail client and
 server run on the same Windows host, and use the reachable LAN IP for second-machine tests.
 Sanity check and DB reset:
 
 ```bash
-curl http://127.0.0.1:8080/api/server-info
+curl http://127.0.0.1:8080/api/health
 docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v   # wipe the SQLite volume
 ```
 
@@ -162,43 +160,31 @@ Overridable env vars (defaults in parentheses): `ONNET_PUBLIC_HOST` (`127.0.0.1`
 
 ## Test with retail Joint Operations
 
-Build and run the launcher locally (.NET 8, Windows). It requests administrator rights
-(editing the hosts file is its whole job), so run it from an elevated terminal or accept the
-UAC prompt at startup:
+Point the retail client's gate host at the dev stack with one hosts-file line in
+`C:\Windows\System32\drivers\etc\hosts` (edit it from an elevated editor):
 
-```bash
-dotnet build launcher/OpenNovaLauncher.sln -c Debug    # or -c Release
-dotnet test  launcher/OpenNovaLauncher.sln             # the xunit suite (optional)
-dotnet run --project launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj
+```text
+127.0.0.1 gs.novaworld.net
 ```
 
-`dotnet run` builds and launches `OpenNovaLauncher.exe` from the build output under
-`launcher/src/OpenNovaLauncher/bin/`; you can also run that exe directly. The single-file
-distributable (`dotnet publish ... -r win-x64`) is a packaging step you do not need for local
-dev (see [`launcher/README.md`](launcher/README.md)).
-
-Then, in the launcher:
-
-1. **Preferences**: enable **"Developer mode (redirect to 127.0.0.1)"**.
-2. Register your Joint Operations install directory.
-3. Turn on **"Manage NovaWorld redirection"**.
-4. Launch the game from the launcher.
-
-The launcher points `gs.novaworld.net` at `127.0.0.1` through a managed hosts-file block;
-your game files stay completely stock (no patched exe, no injected DLL). With the dev
-stack up, retail JO connects straight to the local gate.
+`gs.novaworld.net` is the one hostname the retail JO matchmaking flow needs redirected
+(NW-L2 in [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md)). Use the server's
+reachable LAN IP instead of `127.0.0.1` when the game runs on another machine, and delete
+the line to go back to NovaLogic's service. The game files stay stock; launch `Jointops.exe`
+as usual.
 
 Notes:
 - **Windows + WSL2**: the published container ports reach the Windows host at `127.0.0.1`,
   so retail JO on the same machine connects through.
 - UDP `7597` and `64206` must be allowed through the Windows firewall.
-- Windows Defender may flag the hosts edit (`SettingsModifier:Win32/HostsFileHijack`); see
-  [`launcher/README.md`](launcher/README.md).
+- Windows Defender may flag the hosts edit (`SettingsModifier:Win32/HostsFileHijack`);
+  allow that one line.
 
 ## Test with our Godot game
 
 1. Build the GDExtension (above) and run the project:
-   `$GODOT_BIN --path godot -- --resource-dir <game dir>` (every launch needs the game data).
+   `$GODOT_BIN --path godot -- --resource-dir <game dir>`, or run it with no arguments and
+   press **PLAY RETAIL** on the placeholder menu.
 2. From the menu, open **NovaWorld**. The panel (`godot/game/novaworld_panel.gd`) creates a
    `NovaWorldClient` that probes the local gate at `127.0.0.1:7597` (its `server_host` /
    `gate_port` exports), runs the session handshake against the dev server, fills the
@@ -224,8 +210,9 @@ red, re-run that single test file in isolation to confirm before treating it as 
 - **`error: set GODOT_BIN ...`**: point `GODOT_BIN` at a Godot 4.6.1 binary, or drop one in `.godot-bin/`.
 - **Missing classes or parse errors on a fresh clone**: `git submodule update --init --recursive`,
   build the GDExtension, then re-import (`--headless --import`). Test fixtures need `git lfs pull`.
-- **Retail JO will not connect**: confirm the dev stack is up (`curl /api/server-info`),
-  the launcher shows redirection active, and UDP `7597`/`64206` are not firewalled.
+- **Retail JO will not connect**: confirm the dev stack is up (`curl /api/health`),
+  `gs.novaworld.net` resolves to the dev server (the hosts line above), and UDP
+  `7597`/`64206` are not firewalled.
 - **The first import crashes**: re-run `--headless --import` (cold-cache flake).
 
 ## Where to go next

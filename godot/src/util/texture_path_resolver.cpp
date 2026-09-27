@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/image_texture3d.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>

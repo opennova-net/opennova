@@ -131,8 +131,6 @@ void NovaWorldClient::_bind_methods() {
 	// The service punted us (ServerLeaveNovaWorld): the MsgCode the menutxt
 	// ERR_PUNTEDFROMNOVAWORLD text substitutes for its [[$]].
 	ADD_SIGNAL(MethodInfo("punted", PropertyInfo(Variant::INT, "msg_code")));
-	// The service ended our play (ServerStopPlaying); mission exit reason 12.
-	ADD_SIGNAL(MethodInfo("play_stopped", PropertyInfo(Variant::INT, "msg_code")));
 
 	BIND_ENUM_CONSTANT(STATE_IDLE);
 	BIND_ENUM_CONSTANT(STATE_GATE_PROBING);
@@ -496,7 +494,6 @@ void NovaWorldClient::drain_session_notices() {
 			play_in_flight_ = false;
 			trace(String("ServerStopPlaying msgcode=")
 			    + String::num_int64(notice.fields.msg_code));
-			emit_signal("play_stopped", notice.fields.msg_code);
 			break;
 		case Notice::Kind::LeaveNovaWorld:
 			play_in_flight_ = false;

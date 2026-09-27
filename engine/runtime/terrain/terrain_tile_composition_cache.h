@@ -105,7 +105,6 @@ struct TerrainTileCompositionDemand {
 
 struct TerrainTileCompositionDemandEnqueueResult {
 	bool accepted = false;
-	bool rejected_stale = false;
 	std::vector<uint64_t> removed_sequences;
 };
 

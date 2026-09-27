@@ -263,12 +263,17 @@ func add_companion(companion: MenuCompanion) -> void:
 
 # Build the shell against a resource root and open the main menu. Idempotent on
 # the asset/driver wiring (only assembled once); show_menu() returns to
-# the main menu on later entries. Returns false when the main menu
-# cannot be resolved/loaded (an empty/incomplete resource dir).
+# the main menu on later entries. A different root (the bundled placeholder
+# menu handing over to a picked retail install, ADR 0048) reloads everything
+# read from the root. Returns false when the main menu cannot be
+# resolved/loaded (an empty/incomplete resource dir).
 func setup(root: ResourceRoot) -> bool:
+	var root_changed := root != _root
 	_root = root
 	if _driver == null:
 		_assemble_assets()
+	elif root_changed:
+		_load_root_assets()
 	_enter_menu_music()
 	_in_game = false
 	_menu_stack.clear()
@@ -282,24 +287,6 @@ func setup(root: ResourceRoot) -> bool:
 # --- Asset assembly -----------------------------------------------------------
 
 func _assemble_assets() -> void:
-	_text = _load_text(menu_text_file)
-	# Register the engine text tables into the shared Strings registry, the way the
-	# original loads its TextResource globals: menutxt (UI/voice labels), gametext =
-	# gametext.bin (g_TextGameText — the "WepDes" weapon names + in-game strings
-	# [orig: Game_InitSubsystems @0x4a6cd0]), and gameui = Game.bin (the menu shell's
-	# own resource: options/menu + "Avatars" sections [orig: the menu boot @0x552510
-	# -> the menu resource @0x25510F8]).
-	if _text != null:
-		Strings.register_table(Strings.TABLE_MENUTXT, _text)
-	var gametext := _load_text(game_text_file)
-	if gametext != null:
-		Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
-	var gameui := _load_text(menu_ui_text_file)
-	if gameui != null:
-		Strings.register_table(Strings.TABLE_GAMEUI, gameui)
-	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
-	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
-
 	# The movie backdrop draws UNDER the compiled surface (child order): the
 	# authored custom appearances paint nothing and the movies show through
 	# [orig: Menu_RenderFrame @ 0x54b7c0 — Bink update + draw BEFORE the
@@ -327,10 +314,8 @@ func _assemble_assets() -> void:
 	# director only; it is not the menu's SFX source.
 	_audio = MenuAudio.new()
 	_audio.name = "MenuAudio"
-	_audio.set_resource_root(_root)
-	if _sound_profile != null:
-		_audio.set_sound_profile(_sound_profile)
 	add_child(_audio)
+	_load_root_assets()
 
 	_driver = MenuDriver.new()
 	_driver.attach(_frame, _audio)
@@ -354,6 +339,33 @@ func _assemble_assets() -> void:
 	_options_controller = OptionsMenuController.new()
 	_options_controller.setup(_driver, _player_options)
 	set_process(true)
+
+
+# Everything the shell reads from its resource root: the cached documents and
+# expansion descriptions, the text tables, the stylesheet and the menu SFX
+# profile.
+func _load_root_assets() -> void:
+	_menu_cache.clear()
+	_expansion_descriptions.clear()
+	_text = _load_text(menu_text_file)
+	# Register the engine text tables into the shared Strings registry, the way the
+	# original loads its TextResource globals: menutxt (UI/voice labels), gametext =
+	# gametext.bin (g_TextGameText — the "WepDes" weapon names + in-game strings
+	# [orig: Game_InitSubsystems @0x4a6cd0]), and gameui = Game.bin (the menu shell's
+	# own resource: options/menu + "Avatars" sections [orig: the menu boot @0x552510
+	# -> the menu resource @0x25510F8]).
+	if _text != null:
+		Strings.register_table(Strings.TABLE_MENUTXT, _text)
+	var gametext := _load_text(game_text_file)
+	if gametext != null:
+		Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
+	var gameui := _load_text(menu_ui_text_file)
+	if gameui != null:
+		Strings.register_table(Strings.TABLE_GAMEUI, gameui)
+	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
+	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
+	_audio.set_resource_root(_root)
+	_audio.set_sound_profile(_sound_profile)
 
 
 # --- Input routing (the frame is a passive surface; the shell samples) --------

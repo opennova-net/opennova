@@ -12,6 +12,7 @@
 #include "collision_detail.h"
 
 #include <runtime/world/world.h>
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 
 namespace opennova::world {
@@ -891,7 +892,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                                 target.yaw_bam -
                                 static_cast<int32_t>(std::atan2(-static_cast<double>(p0.ny),
                                                                 -static_cast<double>(p0.nx)) *
-                                                     kNegBamPerRadian);
+                                                     -io::kBamPerRadian);
                             const int32_t lxy_int = sqrt_ftol(
                                 static_cast<double>(p0.nx) * p0.nx +
                                 static_cast<double>(p0.ny) * p0.ny);
@@ -899,7 +900,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                                 target.pitch_bam -
                                 static_cast<int32_t>(std::atan2(static_cast<double>(p0.nz),
                                                                 static_cast<double>(lxy_int)) *
-                                                     kNegBamPerRadian);
+                                                     -io::kBamPerRadian);
                         } else {
                             // The original reads plane[0] unguarded even for a
                             // 0-plane volume (adjacent-memory read); a bounds

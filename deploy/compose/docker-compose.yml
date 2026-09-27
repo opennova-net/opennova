@@ -21,8 +21,6 @@ services:
       ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-127.0.0.1}
       DATABASE_PATH: /data/novaworld.db
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
-      EXPANSION_GITHUB_TOKEN: ${EXPANSION_GITHUB_TOKEN:-}
-      EXPANSION_PUBLISH_TOKEN: ${EXPANSION_PUBLISH_TOKEN:-}
 
   web:
     image: ${WEB_IMAGE:-opennova-web:local}

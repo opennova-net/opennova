@@ -14,7 +14,8 @@ using namespace opennova::def;
 
 #define FEPS 0.01f
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     // The default matters for shipped defs: no stability key still enables
     // drift. Each authored column retains Math_ParseFixedPoint16 precision.
     {

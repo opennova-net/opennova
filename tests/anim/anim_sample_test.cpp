@@ -83,7 +83,8 @@ static bool quat_approx(const Quat &a, const Quat &b, float eps = 1e-4f) {
     return approx(a.w, b.w, eps) && approx(a.x, b.x, eps) && approx(a.y, b.y, eps) && approx(a.z, b.z, eps);
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     using namespace opennova::anim;
 
     // --- native conversion conventions (engine Y-up; reorder only, no axis swap) ---

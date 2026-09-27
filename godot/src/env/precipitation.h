@@ -56,9 +56,6 @@ public:
 	// release_inset_frame drops it while that pass does not render.
 	void render_inset_frame(Object *p_sim, Camera3D *p_camera, int p_camera_mode);
 	void release_inset_frame();
-	// The drops each view's last call compiled (the typed read-back).
-	int get_drop_count() const { return frame_.drops; }
-	int get_inset_drop_count() const { return inset_frame_.drops; }
 	// Below the rain gate the drawer never touches the device (retail
 	// returns @ 0x5dee48): neither view keeps streaks.
 	void hide_frame();
