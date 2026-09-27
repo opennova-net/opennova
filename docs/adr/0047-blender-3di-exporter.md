@@ -203,6 +203,9 @@ the same text transport, the same add-on.
    follow the OED rule (the six bounding planes, then deduplicated face planes,
    at most 32), which reproduces Armry01's OCCL records plane for plane; a
    record's centre sums its vertices in double and divides once, as OED did.
+   206 JOTAC models store each centre mirrored across y instead, which the
+   runtime reads as stored: the scene text gives such a record its sphere, and
+   the add-on keeps it as a `_sphere` Empty on the occlusion mesh.
 7. **Materials and vertices follow the OED rules too.** A blending shader's
    strips draw in the alpha pass (FFP_GLASS among them); a glass shader
    reflects 128 grey unless another colour is set and is glass; a `*_LUM`
@@ -466,10 +469,9 @@ the same text transport, the same add-on.
   no subset of the stored geometry gives (61 models, Armry01's part 3 among
   them), GHDR radii over geometry the file lacks (25: the `fxflsh` family and
   the first-person weapons' own collision LOD), three skinned vehicles
-  authored on their bones (dM1A1, DT801, Ftruck1X), NaN `rel` words (Dmil261x,
-  Excavatr), and occlusion centres taken before LOD recentering (Armry01, 7
-  of 8); the CMDL and bullet-face words, derived from the stored corners (our
-  rule), sit up to a few millimetres from retail's.
+  authored on their bones (dM1A1, DT801, Ftruck1X), and NaN `rel` words
+  (Dmil261x, Excavatr); the CMDL and bullet-face words, derived from the
+  stored corners (our rule), sit up to a few millimetres from retail's.
 - `base/resource_index/texture_candidates.cpp` joins `citation_allowlist_engine`
   (our loose-folder resolver policy, moved down from the Godot resolver so the
   CLI shares it; the `texture_candidates` ctest pins its order). `threedi_build.cpp` and `bad_build.cpp` carry the `[orig:]`
