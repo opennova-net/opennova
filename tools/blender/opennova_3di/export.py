@@ -81,8 +81,10 @@ import math
 import os
 import re
 import struct
+from array import array
 
 import bpy
+import numpy as np
 from mathutils import Euler, Vector
 
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
@@ -96,7 +98,8 @@ FLAG_BLENDING, FLAG_GLASS, FLAG_SKINNED, FLAG_TANGENT = 0x1000, 0x2000, 0x4000, 
 BLENDER_SUFFIX = re.compile(r"\.\d{3,}$")
 PART_RE = re.compile(r"^PN(\d{2})$")
 BONE_RE = re.compile(r"^BN(\d{2})(?: .*)?$")
-MESH_RE = re.compile(r"^(\d{2}) Mesh(\d+)$")
+# A single mesh may omit its ordinal: "01 Mesh" is "01 Mesh0".
+MESH_RE = re.compile(r"^(\d{2}) Mesh(\d*)$")
 CENTER_RE = re.compile(r"^_(\d{2}) center$")
 ATTACH_RE = re.compile(r"^~(\d{2})([a-z]*) attach$")
 POINT_RE = re.compile(r"^UP([A-Za-z])(\d{2})(?: (.*))?$")
@@ -217,18 +220,21 @@ def write_tga(image, path):
     w, h = image.size
     if w == 0 or h == 0:
         raise ExportError(f"image {image.name} has no pixels")
-    px = list(image.pixels[:])
-    data = bytearray(w * h * 4)
-    for i in range(w * h):
-        r, g, b, a = px[i * 4:i * 4 + 4]
-        data[i * 4 + 0] = max(0, min(255, round(b * 255)))
-        data[i * 4 + 1] = max(0, min(255, round(g * 255)))
-        data[i * 4 + 2] = max(0, min(255, round(r * 255)))
-        data[i * 4 + 3] = max(0, min(255, round(a * 255)))
+    # Blender bundles NumPy. Bulk access avoids expanding a 4K image into
+    # millions of Python floats; bounded chunks keep conversion memory small.
+    px = np.empty(w * h * 4, dtype=np.float32)
+    image.pixels.foreach_get(px)
+    px = px.reshape(-1, 4)
+    if not np.isfinite(px).all():
+        raise ExportError(f"image {image.name} has non-finite pixels")
     header = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, w, h, 32, 8)
     with open(path, "wb") as f:
         f.write(header)
-        f.write(data)
+        for start in range(0, len(px), 262144):
+            values = px[start:start + 262144].astype(np.float64)
+            # float64 and rint preserve Python round's ties-to-even result.
+            values = np.clip(np.rint(values * 255.0), 0, 255).astype(np.uint8)
+            f.write(values[:, [2, 1, 0, 3]].tobytes())
 
 
 def material_image(mat):
@@ -508,7 +514,7 @@ class Exporter(Notes):
                 continue
             m = MESH_RE.match(raw)
             if m and ob.type == "MESH":
-                index, ordinal = int(m.group(1)) - 1, int(m.group(2))
+                index, ordinal = int(m.group(1)) - 1, int(m.group(2) or "0")
                 if index < 0:
                     raise ExportError(f"{ob.name}: a mesh names its part, and parts start at 01")
                 claim(("mesh", index, ordinal), ob)
@@ -710,13 +716,24 @@ class Exporter(Notes):
         if len(layers) == 0:
             return None, None
         uv0 = next((l for l in layers if l.active_render), layers[0])
-        return uv0, next((l for l in layers if l.name != uv0.name), uv0)
+        uv1 = next((l for l in layers if l.name != uv0.name), uv0)
+        # Blender's legacy UV .data accessor materializes its compatibility
+        # view. Reading it for every triangle corner becomes quadratic on
+        # large meshes. Snapshot each layer once, including both UV channels.
+        def coordinates(layer):
+            data = layer.data
+            values = array("f", [0.0]) * (len(data) * 2)
+            data.foreach_get("uv", values)
+            return values
+        first = coordinates(uv0)
+        return first, first if uv1 == uv0 else coordinates(uv1)
 
     def corner(self, mesh, loop, mw, nmat, normals, uv0, uv1):
         p = mw @ mesh.vertices[loop.vertex_index].co
         n = (nmat @ normals[loop.index].vector).normalized()
-        a = uv0.data[loop.index].uv if uv0 is not None else (0.0, 0.0)
-        b = uv1.data[loop.index].uv if uv1 is not None else a
+        at = loop.index * 2
+        a = (uv0[at], uv0[at + 1]) if uv0 is not None else (0.0, 0.0)
+        b = (uv1[at], uv1[at + 1]) if uv1 is not None else a
         pm, nm = self.space.mission(p), self.space.mission(n)
         # D3D texture space: v runs down.
         vert = (pm[0], pm[1], pm[2], nm[0], nm[1], nm[2], a[0], 1.0 - a[1])
@@ -803,7 +820,8 @@ class Exporter(Notes):
                 current = None
                 for corners in tris:
                     need = {b for _, inf in corners for b, _ in inf}
-                    if current is None or len(current["table"] | need) > 16:
+                    if (current is None or len(current["table"] | need) > 16 or
+                            len(current["tris"]) >= 65535 // 3):
                         current = {"table": set(), "order": [], "verts": [], "index": {}, "tris": []}
                         strips.setdefault(mi, []).append(current)
                     for b in sorted(need - current["table"]):
@@ -1147,7 +1165,8 @@ class Exporter(Notes):
         sections = [{"verts": [], "index": {}, "faces": [], "volumes": []} for _ in range(count)]
         # Bullet faces: the collision LOD's part meshes, section = part,
         # counter-clockwise about their outward normal (the retail order).
-        for index, meshes in bullet.meshes.items():
+        # Generate bullet faces off (first-person arms) keeps the volumes only.
+        for index, meshes in (bullet.meshes.items() if self.props.export_bullet_faces else ()):
             s = sections[index]
             for _, ob in sorted(meshes, key=lambda e: e[0]):
                 ev = self.evaluated(ob)

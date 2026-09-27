@@ -237,6 +237,10 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     model_name: StringProperty(name="Model name", default="",
                                description="GHDR name, 15 chars max; empty: the output file's name")
     output_path: StringProperty(name="Output .3di", subtype="FILE_PATH", default="//model.3di", options=PATH_OPTIONS)
+    export_bullet_faces: BoolProperty(name="Generate bullet faces", default=True,
+                                      description="The collision LOD's render triangles are also its bullet faces; "
+                                                  "off for a model that needs none (first-person arms). Its "
+                                                  "collision volumes still export")
     poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
                                     description="The render LOD whose part meshes also become the bullet faces (the OED "
                                                 ".3dp poly_collision_lod); 0 = the most detailed")
@@ -798,6 +802,7 @@ def draw_model(layout, model):
     layout.prop(p, "model_name")
     layout.prop(p, "output_path")
     layout.prop(p, "poly_collision_lod")
+    layout.prop(p, "export_bullet_faces")
     if assembly.armatures(model):
         layout.prop(p, "drive_rig")
     layout.prop(p, "mount_parent")

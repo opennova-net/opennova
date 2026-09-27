@@ -103,8 +103,9 @@ from.
 
 A skinned model (a person, first-person arms, the M1A1's hull) replaces the
 `PN##` empties with one Armature under each LOD root whose bones are `BN01`,
-`BN02`, ... (the bone head is the pivot, the bone parent the part parent). A
-skinned mesh `## Mesh0` has an Armature modifier and `BN##` vertex groups (up
+`BN02`, ... (the bone head is the pivot, the bone parent the part parent).
+A single mesh can be named `01 Mesh`; an omitted mesh ordinal means `Mesh0`.
+A skinned mesh `## Mesh0` has an Armature modifier and `BN##` vertex groups (up
 to three weights a vertex; the export reads the rest pose), and `##` names the
 part its geometry belongs to. A person's or the arms' mesh is a mesh part
 numbered after the bones (`ArmsG`: 37 bones, then `38 Mesh0`; parent 0, pivot
@@ -115,6 +116,13 @@ geometry on the bones themselves (`dM1A1`: the hull on `BN01`, each wheel on
 its own bone in the collision LOD), and each bone's section takes its own
 bullet faces. A bone's part animation (tracks, flags and the track frame its
 tracks turn about) is in the Bone properties.
+
+Turn off **Generate bullet faces** on models such as first-person arms that
+do not need triangle collision. Render geometry, skin weights, bone bounds
+and authored collision volumes are still exported.
+
+Skinned triangles split into additional strips when either the 16-bone palette
+or the 65,535-index limit is reached; large meshes need no manual splitting.
 
 To reuse retail animations, match the retail rig, since animations pair with
 parts by index: JO's people share one rig of 19 bones plus the mesh part
