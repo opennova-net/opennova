@@ -207,12 +207,23 @@ the corpus) and generator alpha bytes; a strip naming a material id the model
 lacks; light pad bytes; occlusion `slot_priority_scale` (the portal-slot priority weight). Values build derives are not
 carried: part `rel`, bounds and spheres (but a part that draws nothing keeps
 its centre), section bounds, CMDL, face normal runs and plane distances,
-tangents. Over the 958 JO models, `build(scene(x))` is byte for byte what
-`build(scene(build(scene(x))))` is, and `opennova-3di compare` calls 903 of
-them the same model as `x` (888 with drift notes). The rest differ in part
-spheres the rule above does not give over a part's own vertices (41 models),
-and in words retail derived from what the file does not keep: GHDR radii over
-geometry the file does not carry (25: the `fxflsh` family, the first-person
-weapons' own collision LOD), three skinned vehicles authored on bones whose
-strips mix bones (dM1A1, DT801, Ftruck1X), NaN `rel` words (Dmil261x,
-Excavatr), and the two models that draw with a material id they lack.
+tangents.
+
+Over the 2,413 `.3di` of the JOTAC archives (2026-09-27, test and scratch
+files included), `scene` reads 2,409, and `build` takes 2,396 of those scenes;
+the other thirteen carry what build refuses: Pinegr_L's 40,824-vertex
+collision section, PANM rows out of part order (btr70, mk_1st), a part whose
+parent its LOD lacks (mwr_1st, panc_1st), an occlusion record over 32 planes
+(dmrk51), a track or generator naming no register (Dt801x, kat13), more than
+8 seats (StrgateE), and faces naming vertices outside their section (mLpost02
+to 05). For all 2,396, `build(scene(x))` is byte for byte
+`build(scene(build(scene(x))))`, and `opennova-3di compare` calls 1,883 of
+them the same model as `x` (1,859 with drift notes; a part sphere the rule
+above does not give over a part's own vertices, 525 models, is drift: nothing
+reads it beside the GHDR radius). The rest differ in words retail derived from
+what the file does not keep: occlusion record centres (205 models, each stored
+centre the mirror across y of its vertices' centre), section bounds (194),
+part `rel` words (101, NaN ones included), GHDR radii over geometry the file
+does not carry (56, the 30 of the `fxflsh` family among them), CMDL radii
+(35), bullet faces (CB2048, carrier, kat04, mere), and six models that draw
+with a material id they lack or name no LOD type.

@@ -571,11 +571,12 @@ store model axes on disk.
 | PANM/MTRX | Skinned models carry non-finite MTRX rows that no PANM row selects (selectors 0 or 255); 258 models carry a non-identity row 0, which a zero selector bypasses | US01, ArmsG; corpus |
 
 `opennova-3di scene` then `build` gives back the same model (`opennova-3di
-compare`, which checks everything the runtime reads) for 881 of the 958
-models; the rest differ in words retail derived from data the file does not
-keep (docs/threedi/o3d-scene-format.md lists them), and two draw with a
-material id they lack. Ctest `threedi_o3d_retail_roundtrip` runs
-Armry01, Dblkhwk1, US01, ArmsG and Mp5b_1st.
+compare`, which checks everything the runtime reads) for 1,883 of the 2,396
+JOTAC models whose scene builds (2026-09-27); the rest differ in words retail
+derived from data the file does not keep, or draw with a material id they
+lack (docs/threedi/o3d-scene-format.md lists them). Ctest
+`threedi_o3d_retail_roundtrip` runs Armry01, Dblkhwk1, US01, ArmsG and
+Mp5b_1st.
 
 ### Retail RMDL thresholds, OOBJ priority and texture-row flags (2026-09-24)
 
