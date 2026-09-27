@@ -163,7 +163,9 @@ def base_color_only_from_its_feed():
     tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
     root, _ = model("paint", mat)
     notes, sc = export_model(root)
-    assert textures(sc) == [("paint_0.tga", 1, 0, 0, 0)], textures(sc)
+    # (the normal map is the normal map, geom-11)
+    assert textures(sc) == [("paint_0.tga", 1, 0, 0, 0), ("paint_0n.mdt", 3, 4, 0, 0)], textures(sc)
+    assert first_pixel(root, "paint_0.tga")[:3] != first_pixel(root, "paint_0n.mdt")[:3]
     assert any("no image feeds its Base Color" in n and "paint_0.tga" in n for n in notes), notes
 
 
@@ -550,6 +552,117 @@ def texture_row_tooltips():
     props = addon.O3DTexture.bl_rna.properties
     assert "override" in props["flags"].description and "flipbook" in props["flags"].description
     assert "clamp" not in props["flags"].description.lower()
+
+
+# --- geom-11: normal maps ------------------------------------------------------------
+
+def normal_mapped(name, img, space="TANGENT", flip=False, shader="", strength=1.0, uv_map=""):
+    """A material whose Normal Map node reads `img`, straight or through a
+    green flip (Separate Color, 1 - Green, Combine Color)."""
+    mat, tree, bsdf = principled_material(name)
+    tree.links.new(image_node(tree, image(name.lower() + "_d", (1, 1, 1, 1))).outputs["Color"],
+                   bsdf.inputs["Base Color"])
+    node = tree.nodes.new("ShaderNodeNormalMap")
+    node.space = space
+    node.uv_map = uv_map
+    node.inputs["Strength"].default_value = strength
+    source = image_node(tree, img).outputs["Color"]
+    if flip:
+        split, invert, join = (tree.nodes.new(t) for t in ("ShaderNodeSeparateColor", "ShaderNodeMath",
+                                                             "ShaderNodeCombineColor"))
+        invert.operation = "SUBTRACT"
+        invert.inputs[0].default_value = 1.0
+        tree.links.new(source, split.inputs["Color"])
+        tree.links.new(split.outputs["Red"], join.inputs["Red"])
+        tree.links.new(split.outputs["Green"], invert.inputs[1])
+        tree.links.new(invert.outputs[0], join.inputs["Green"])
+        tree.links.new(split.outputs["Blue"], join.inputs["Blue"])
+        source = join.outputs["Color"]
+    tree.links.new(source, node.inputs["Color"])
+    tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
+    mat.o3d.shader = shader
+    return mat
+
+
+def normal_image(name, rgba=(0.25, 0.75, 1.0, 1.0)):
+    return image(name, rgba, colour_space="Non-Color")
+
+
+@case
+def blender_normal_maps_export_with_the_games_green():
+    # A Normal Map node's OpenGL (green-up) image is written as an .mdt with
+    # its green inverted, and the automatic shader samples tangent-space
+    # normals; one read through a green flip is written as it is.
+    root, _ = model("bumped", normal_mapped("Straight", normal_image("up")),
+                    normal_mapped("Flipped", normal_image("down"), flip=True))
+    notes, sc = export_model(root)
+    assert [m["shader"] for m in sc["materials"]] == ["VS_DOT3DIFF", "VS_DOT3DIFF"], sc["materials"]
+    assert textures(sc, 0)[1] == ("bumped_0n.mdt", 3, 4, 0, 0), textures(sc, 0)
+    assert textures(sc, 1)[1] == ("bumped_1n.mdt", 3, 4, 0, 0), textures(sc, 1)
+    # BGRA: blue 255, green 0.75 -> 191 (straight: 255 - 191 = 64), red 64.
+    assert first_pixel(root, "bumped_0n.mdt") == (255, 64, 64, 255), first_pixel(root, "bumped_0n.mdt")
+    assert first_pixel(root, "bumped_1n.mdt") == (255, 191, 64, 255), first_pixel(root, "bumped_1n.mdt")
+
+
+@case
+def a_game_normal_map_file_is_the_file():
+    # An unchanged .mdt read through the green flip is the game's own file:
+    # named and copied as it stands; import lays it out that way again.
+    art = os.path.join(OUT, "mdt")
+    os.makedirs(art, exist_ok=True)
+    tga = textured_file("ground_n", (0.5, 0.25, 1.0, 1.0), art)
+    path = os.path.join(art, "ground_n.mdt")
+    os.replace(bpy.path.abspath(tga.filepath), path)
+    bpy.data.images.remove(tga)
+    mdt = bpy.data.images.load(path)
+    mdt.colorspace_settings.name = "Non-Color"
+    root, _ = model("mdtfile", normal_mapped("GroundFile", mdt, flip=True))
+    _, sc = export_model(root)
+    assert textures(sc, 0)[1] == ("ground_n.mdt", 3, 4, 0, 0), textures(sc, 0)
+    with open(path, "rb") as a, open(os.path.join(folder(root), "ground_n.mdt"), "rb") as b:
+        assert a.read() == b.read()
+    imported, _ = importer.import_file(bpy.context, root.o3d.output_path)
+    mat = next(m for ob in imported.children_recursive if ob.type == "MESH" for m in ob.data.materials)
+    assert len(mat.o3d.textures) == 0, [t.name for t in mat.o3d.textures]
+    found = materials.normal_map(mat)
+    assert found.node.type == "NORMAL_MAP" and found.green_down and \
+        export.clean_name(found.image.image.name) == "ground_n.mdt", found
+
+
+@case
+def normal_maps_the_game_cannot_draw():
+    img = normal_image("bad_n")
+    for mat, fragments in ((normal_mapped("ObjectSpace", img, space="OBJECT"), ("object space", "tangent-space")),
+                           (normal_mapped("PhongO", img, shader="VS_PHONGO"), ("VS_PHONGO", "object-space")),
+                           (normal_mapped("OtherUV", img, uv_map="Lightmap"), ("Lightmap", "render UV map"))):
+        root, _ = model("badnormal", mat, uv_maps=(("UVMap", UVS), ("Lightmap", UVS)))
+        refused(root, *fragments)
+        for ob in list(bpy.data.objects):
+            bpy.data.objects.remove(ob)
+    between = normal_mapped("Between", img)
+    tree = between.node_tree
+    node = next(n for n in tree.nodes if n.type == "NORMAL_MAP")
+    hue = tree.nodes.new("ShaderNodeHueSaturation")
+    tree.links.new(node.inputs["Color"].links[0].from_socket, hue.inputs["Color"])
+    tree.links.new(hue.outputs["Color"], node.inputs["Color"])
+    root, _ = model("between", between)
+    refused(root, hue.name, "straight", "green flip")
+
+
+@case
+def normal_maps_noted_not_exported():
+    weak = normal_mapped("Weak", image("weak_n", (0.5, 0.5, 1, 1)), strength=0.5)  # also sRGB-tagged
+    plain = normal_mapped("PlainShader", normal_image("plain_n"), shader="FF_ST_OP")
+    bumped, tree, bsdf = principled_material("Bumped")
+    bump = tree.nodes.new("ShaderNodeBump")
+    tree.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    root, _ = model("noted", weak, plain, bumped)
+    notes, sc = export_model(root)
+    assert any("Weak" in n and "full strength" in n for n in notes), notes
+    assert any("Weak" in n and "Non-Color" in n for n in notes), notes
+    assert any("PlainShader" in n and "samples no normal map" in n for n in notes), notes
+    assert any("Bumped" in n and bump.name in n for n in notes), notes
+    assert [t[1] for t in textures(sc, 1)] == [1] and [t[1] for t in textures(sc, 2)] == [1]
 
 
 # --- geom-6: UV maps -------------------------------------------------------------

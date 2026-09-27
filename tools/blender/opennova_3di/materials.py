@@ -14,6 +14,9 @@
 #                     colour is written as a small swatch texture.
 #   Alpha             a Math node Greater Than (Less Than: inverted) with a
 #                     constant threshold is the engine's alpha test.
+#   Normal            a Normal Map node (tangent space) with an image is the
+#                     normal map (slot 3, type 4, an .mdt file), written with
+#                     the game's green.
 #   Emission          on: the shader export picks glows (a *_LUM one).
 #   Backface Culling  off: two-sided (material flag 4; bullets hit the faces
 #                     from both sides).
@@ -237,6 +240,82 @@ def image_uv(node, groups):
 
 def node_label(node):
     return node.label or node.name
+
+
+# The game's tangent frame is each vertex's dP/du and dP/dv on its D3D UVs,
+# whose v runs down the texture [orig: BuildTransformMatrix @ 0x421B80
+# (ModSuperOed.exe); formats/threedi/threedi_build.cpp derive_tangents], and
+# its tangent-space shaders read a normal map's green along that dP/dv (the
+# retail effects rotate the light into Tangent, Binormal, Normal: _vsSkDfT.fx
+# vsTanSkinDot3DirPS; godot/shaders/object/normal/tangent_uv1.gdshaderinc).
+# Blender's Normal Map node reads green along its own v, which runs up the
+# texture, so a Blender (OpenGL) normal map's green is the game's inverted.
+# An .mdt row is already a normal map, which the game samples as it is
+# [orig: Material_LoadStageTexture @ 0x5B16F0; Texture_LoadAsNormalMap @
+# 0x58C480; renderer::material_texture_transform].
+NormalMap = namedtuple("NormalMap", "node image green_down between")
+
+
+def green_flip(node, groups):
+    """The image node a Combine Color node rebuilds with its green inverted
+    (Separate Color's red and blue as they are, 1 - its green), the form
+    Blender reads a green-down (DirectX, the game's) normal map in; None for
+    anything else."""
+    if node.type != "COMBINE_COLOR" or node.mode != "RGB":
+        return None
+
+    def one(sock, at):
+        found = list(links_into(sock, at))
+        return found[0] if len(found) == 1 else None
+    red, green, blue = (one(node.inputs[k], groups) for k in ("Red", "Green", "Blue"))
+    if red is None or green is None or blue is None:
+        return None
+    split = red[0]
+    if split.type != "SEPARATE_COLOR" or split.mode != "RGB" or red[1].identifier != "Red" or \
+            blue[0] != split or blue[1].identifier != "Blue":
+        return None
+    invert = green[0]
+    if invert.type != "MATH" or invert.operation != "SUBTRACT" or invert.inputs[0].is_linked or \
+            invert.inputs[0].default_value != 1.0:
+        return None
+    source = one(invert.inputs[1], green[2])
+    if source is None or source[0] != split or source[1].identifier != "Green":
+        return None
+    image = one(split.inputs["Color"], red[2])
+    if image is None or image[0].type != "TEX_IMAGE" or image[1].identifier != "Color" or image[0].image is None:
+        return None
+    return image[0]
+
+
+def normal_map(mat):
+    """What drives a material's normals: None for nothing; a NormalMap of the
+    node on its Principled BSDF's Normal (through reroutes and groups), with,
+    for a Normal Map node, the image node it reads, straight (green up) or
+    through a green flip (green_flip: green down), or the node between that
+    export cannot read."""
+    bsdf = principled(mat)
+    if bsdf is None:
+        return None
+    for node, _, groups in links_into(bsdf.inputs["Normal"]):
+        if node.type != "NORMAL_MAP":
+            return NormalMap(node, None, False, None)
+        for src, out, inner in links_into(node.inputs["Color"], groups):
+            if src.type == "TEX_IMAGE" and out.identifier == "Color" and src.image is not None:
+                return NormalMap(node, src, False, None)
+            flipped = green_flip(src, inner)
+            if flipped is not None:
+                return NormalMap(node, flipped, True, None)
+            return NormalMap(node, None, False, src)
+        return NormalMap(node, None, False, None)
+    return None
+
+
+def draws_normal_map(mat):
+    """Whether a material's nodes give a normal map: a tangent-space Normal
+    Map node reading an image."""
+    found = normal_map(mat)
+    return found is not None and found.image is not None and found.node.type == "NORMAL_MAP" and \
+        found.node.space == "TANGENT"
 
 
 # --- a material's settings -------------------------------------------------------
@@ -518,6 +597,27 @@ class ImageFile:
         write_tga(self.image, path)
 
 
+class NormalMapFile(ImageFile):
+    """A normal map a Normal Map node reads straight, as Blender's (OpenGL)
+    normals: written with the game's green, inverted."""
+
+    def content(self):
+        return ("normal map", self.image.name_full)
+
+    def describe(self):
+        return f"the normal map {self.image.name}"
+
+    def write(self, path, exporter):
+        rows = image_rows(self.image)
+        first = next(rows)  # its checks run before the file is opened
+
+        def flipped(chunks):
+            for values in chunks:
+                values[:, 1] = 1.0 - values[:, 1]
+                yield values
+        write_rows(path, self.image.size[0], self.image.size[1], flipped(itertools.chain([first], rows)))
+
+
 class CopiedFile:
     """A texture file as it stands (file_reference), copied beside the .3di
     under its own name unless a file of that name is already there."""
@@ -679,8 +779,9 @@ class ModelMaterials:
         """(shader, whether the material names it, what of its settings the
         shader draws otherwise): its Shader, else automatic_shader() for its
         textures (a diffuse one always: an image, a texture entry or a swatch;
-        a detail one from its Base Color's second UV map or its texture list)
-        and settings."""
+        a detail one from its Base Color's second UV map or its texture list;
+        a normal map from a Normal Map node or its texture list) and
+        settings."""
         key = mat.name if mat is not None else None
         if key not in self.choices:
             named = mat.o3d.shader.strip() if mat is not None else ""
@@ -689,7 +790,7 @@ class ModelMaterials:
             else:
                 listed = {t.slot for t in mat.o3d.textures} if mat is not None else set()
                 detail = 2 in listed or (mat is not None and 2 in self.node_images(mat))
-                asks = (blended(mat), emission(mat), moving_uvs(mat), False)
+                asks = (blended(mat), emission(mat), moving_uvs(mat), 3 in listed or draws_normal_map(mat))
                 shader, otherwise = automatic_shader(2 if detail else 1, self.exporter.skinned, asks)
                 self.choices[key] = (shader, False, otherwise)
         return self.choices[key]
@@ -827,6 +928,9 @@ class ModelMaterials:
                     out.append(Row(None, slot, file=ImageFile(image), derive=(index, letter, ".tga")))
             elif slot == 1 and caps & FLAG_DIFFUSE:
                 out.append(Row(None, 1, file=SwatchFile(self.swatch_colour(mat)), derive=(index, "", ".tga")))
+        normal = self.normal_row(mat, shader, listed.get(3), index) if mat is not None else None
+        if normal is not None:
+            out.append(normal)
         if mat is not None and images and not all(slot in listed for slot in images):
             for node in base_color(mat)[1]:
                 self.exporter.note(f"{what}: its Base Color takes '{node_label(node)}', which the game does not draw: "
@@ -835,6 +939,74 @@ class ModelMaterials:
             raise ExportError(f"{what}: {len(out)} texture rows; a material holds {MATERIAL_ROWS}")
         self.check_uvs(mat, shader, any(not isinstance(r.file, SwatchFile) for r in out))
         return out
+
+    def normal_row(self, mat, shader, listed, index):
+        """The normal map row a material's Normal Map node gives (slot 3,
+        type 4, an .mdt): its image as it stands when read through a green
+        flip and loaded unchanged from an .mdt file, else written, its green
+        inverted when read straight. None when its texture list gives slot 3,
+        its shader samples no normal map, or no Normal Map node reads an
+        image, each noted. A shader reading object-space normals, another
+        space, a UV map the game does not derive tangents from and a node
+        between the image and the Normal Map are refused."""
+        found = normal_map(mat)
+        if found is None:
+            return None
+        what = mat.name
+        caps = shader_flags(shader)
+        if listed is not None:
+            image = found.image.image if found.image is not None else None
+            if image is not None and image not in listed:
+                self.exporter.note(f"{what}: its texture list gives slot 3, so the Normal Map node's image "
+                                   f"{image.name} is not exported")
+            return None
+        if found.node.type != "NORMAL_MAP":
+            self.exporter.note(f"{what}: its Normal comes from '{node_label(found.node)}'; the game's normal map is "
+                               "a Normal Map node's image, so it is not exported")
+            return None
+        unsampled = f"{what}: its shader {shader} samples no normal map, so its Normal Map node is not exported "                     "(VS_DOT3DIFF, VS_PHONGT and the other bump shaders sample one)"
+        if self.choice(mat)[1] and not caps & FLAG_NORMAL:
+            self.exporter.note(unsampled)
+            return None
+        if found.node.space != "TANGENT":
+            raise ExportError(f"{what}: its Normal Map node is in {found.node.space.lower().replace('_', ' ')} space; "
+                              "the game reads tangent-space normal maps")
+        if found.between is not None:
+            raise ExportError(f"{what}: its Normal Map node reads '{node_label(found.between)}'; export takes an "
+                              "image wired into it straight (Blender's green-up normals, which it writes with the "
+                              "game's green) or through a green flip (Separate Color, 1 - Green, Combine Color: a "
+                              "green-down file, written as it is)")
+        if found.image is None:
+            self.exporter.note(f"{what}: its Normal Map node reads no image, so it is not exported")
+            return None
+        if not caps & FLAG_NORMAL:
+            self.exporter.note(unsampled)
+            return None
+        if not caps & FLAG_TANGENT:
+            raise ExportError(f"{what}: its shader {shader} reads an object-space normal map, but a Normal Map node "
+                              "gives tangent-space normals: choose a tangent-space shader (VS_DOT3DIFF, VS_PHONGT, "
+                              "VS_SKBUMPDIFFT, ...) or name the object-space file in the texture list")
+        uv = found.node.uv_map
+        for use in self.meshes.get(mat.name, []):
+            if uv and uv != use.render:
+                raise ExportError(f"{what}: its Normal Map node reads the UV map '{uv}'; the game derives its "
+                                  f"tangents from {use.name}'s render UV map")
+        strength = found.node.inputs["Strength"]
+        if strength.is_linked or abs(strength.default_value - 1.0) > 1e-6:
+            self.exporter.note(f"{what}: its Normal Map strength is not exported; the game draws the normal map at "
+                               "full strength")
+        image = found.image.image
+        check_image(image, what)
+        if not image.colorspace_settings.is_data:
+            self.exporter.note(f"{what}: the normal map {image.name} is read as {image.colorspace_settings.name} "
+                               "colour; normals are data: set its Color Space to Non-Color")
+        if found.green_down:
+            reference = file_reference(image)
+            if reference is not None and reference[1].lower().endswith(".mdt"):
+                return Row(reference[0], 3, 4, file=CopiedFile(reference[1]),
+                           file_name=os.path.basename(reference[1]))
+            return Row(None, 3, 4, file=ImageFile(image), derive=(index, "n", ".mdt"))
+        return Row(None, 3, 4, file=NormalMapFile(image), derive=(index, "n", ".mdt"))
 
     def swatch_colour(self, mat):
         """The colour a material without a Base Color image draws in: its Base
@@ -863,8 +1035,9 @@ class ModelMaterials:
 
     def name_rows(self, model, rows):
         """Give each derived row its file name, <stem>_<material index>[letter]
-        with the model's stem (derived_stem): d marks a detail texture. A file
-        the model already derives for one image or colour is named once."""
+        with the model's stem (derived_stem): d marks a detail texture, n a
+        normal map. A file the model already derives for one image or colour
+        is named once."""
         derived = [row for material_rows in rows for row in material_rows if row.derive is not None]
         if not derived:
             return
@@ -873,7 +1046,7 @@ class ModelMaterials:
         given = {}
         for row in derived:
             index, letter, ext = row.derive
-            row.name = given.setdefault(row.file.content(), f"{stem}_{index}{letter}{ext}")
+            row.name = given.setdefault((row.file.content(), ext), f"{stem}_{index}{letter}{ext}")
             row.derive = None
 
     def emit_material(self, lines, mat, rows):
@@ -1013,8 +1186,9 @@ def import_materials(builder):
     """The model's materials as Blender materials in the file's order, laid
     out as export reads them: the shader and the export order as properties,
     the flags as Blender's own settings, a slot's lone plain row as the image
-    node the slot's nodes give when that image names it as the row does, and
-    every other row in the texture list."""
+    node the slot's nodes give when that image names it as the row does (a
+    tangent-space shader's .mdt normal map too), and every other row in the
+    texture list."""
     out = []
     reg = builder.sc["registers"]
     alpha_by_material = {}
@@ -1056,10 +1230,17 @@ def import_materials(builder):
         for row in m["textures"]:
             by_slot.setdefault(row[1], []).append(row)
         shown = {}  # slot -> the image its node shows
+        tangent = caps & FLAG_NORMAL and caps & FLAG_TANGENT
         for slot, rows in by_slot.items():
             images = [import_image(builder, row[0]) for row in rows]
-            if slot in (1, 2) and len(rows) == 1 and rows[0][2:] == (0, 0, 0) and images[0] is not None and \
-                    (file_reference(images[0]) or (None,))[0] == rows[0][0]:
+            # A slot's lone plain row is its node's image when that image
+            # names it as the row does; the normal map's when the shader reads
+            # tangent-space normals from an .mdt file (read through a green
+            # flip, since the file holds the game's green).
+            plain = (0, 0, 0) if slot in (1, 2) else (4, 0, 0) if slot == 3 and tangent else None
+            reference = file_reference(images[0]) if images[0] is not None else None
+            if len(rows) == 1 and rows[0][2:] == plain and reference is not None and reference[0] == rows[0][0] and \
+                    (slot != 3 or reference[1].lower().endswith(".mdt")):
                 shown[slot] = images[0]
                 continue
             for (name, s, typ, tflags, frame), img in zip(rows, images):
@@ -1105,8 +1286,9 @@ def import_materials(builder):
 def shade(mat, m, shown, blend):
     """The node tree export reads the material from: the slot 1 image as the
     Base Color (times the slot 2 detail image on the second UV map, UV1, at
-    twice its value, FF_MT's Modulate2x), a Math node Greater Than (Less Than
-    when inverted) at the alpha-test threshold on Alpha, the image's alpha on
+    twice its value, FF_MT's Modulate2x), the slot 3 .mdt through a green flip
+    into a Normal Map node on Normal, a Math node Greater Than (Less Than when
+    inverted) at the alpha-test threshold on Alpha, the image's alpha on
     Alpha when the material blends, Emission for a *_LUM shader, and a tint
     for glass."""
     tree = mat.node_tree
@@ -1152,6 +1334,28 @@ def shade(mat, m, shown, blend):
         links.new(test.outputs[0], bsdf.inputs["Alpha"])
     elif blend and alpha is not None:
         links.new(alpha, bsdf.inputs["Alpha"])
+    if 3 in shown:
+        shown[3].colorspace_settings.name = "Non-Color"
+        normal = nodes.new("ShaderNodeTexImage")
+        normal.image = shown[3]
+        normal.location = (-1100, -500)
+        split = nodes.new("ShaderNodeSeparateColor")
+        split.location = (-800, -500)
+        invert = nodes.new("ShaderNodeMath")
+        invert.operation = "SUBTRACT"
+        invert.inputs[0].default_value = 1.0
+        invert.location = (-600, -550)
+        join = nodes.new("ShaderNodeCombineColor")
+        join.location = (-400, -500)
+        node = nodes.new("ShaderNodeNormalMap")
+        node.location = (-200, -500)
+        links.new(normal.outputs["Color"], split.inputs["Color"])
+        links.new(split.outputs["Red"], join.inputs["Red"])
+        links.new(split.outputs["Green"], invert.inputs[1])
+        links.new(invert.outputs[0], join.inputs["Green"])
+        links.new(split.outputs["Blue"], join.inputs["Blue"])
+        links.new(join.outputs["Color"], node.inputs["Color"])
+        links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
     if m["emissive"] or caps & FLAG_EMISSIVE:
         if color is not None:
             links.new(color, bsdf.inputs["Emission Color"])
