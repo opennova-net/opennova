@@ -174,6 +174,110 @@ func test_backend_visibility_tracks_dispatcher_without_dropping_bindings() -> vo
 	assert_eq(restored.visible_draws, restored.active_draws)
 
 
+# Indoors retail skips both detail passes while the BySide waves still draw
+# the MODEL masks (renderer::ScenePassGates::detail_foliage carries the
+# witness): closing the gate hides every detail draw at once, the compile
+# commands none while it stays closed, and the MODEL draws and the mask frame
+# keep running.
+func test_detail_pass_gate_hides_only_the_detail_tier() -> void:
+	var camera := Camera3D.new()
+	camera.current = true
+	add_child_autofree(camera)
+	_foliage_index = 1
+	_dispatcher.silhouette_anchors = PackedVector3Array([Vector3(0.0, 0.0, -64.0)])
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	var model_draws := _backend_draws("silhouette").size()
+	assert_gt(_backend_draws("detail").size(), 0)
+	assert_gt(model_draws, 0)
+	assert_true(_dispatcher.is_detail_passes_drawn(), "the gate opens by default")
+
+	_dispatcher.set_detail_passes_drawn(false)
+	assert_eq(_backend_draws("detail").size(), 0,
+		"closing the gate hides every detail draw, both water-side rungs")
+	assert_eq(_backend_draws("silhouette").size(), model_draws, "the MODEL draws stay")
+
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	var gated := _dispatcher.get_frame_stats()
+	assert_gt(int(gated.detail_cells), 0, "the cells still reach the compile")
+	assert_eq(int(gated.detail_high_instances) + int(gated.detail_low_instances), 0,
+		"no detail pass runs while the gate is closed")
+	assert_eq(_backend_draws("detail").size(), 0)
+	assert_gt(_backend_draws("silhouette").size(), 0, "the MODEL masks keep drawing")
+	assert_gt(int(gated.silhouette_instances), 0)
+	if RenderingServer.get_rendering_device() != null:
+		var mask: Dictionary = _dispatcher.get_backend_report().get("mask", {})
+		assert_gt(int(mask.get("draws", 0)), 0, "the mask frame still publishes the MODEL masks")
+
+	_dispatcher.set_detail_passes_drawn(true)
+	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
+	assert_gt(_backend_draws("detail").size(), 0, "reopening draws the resident cells again")
+
+
+# visual_layers::INSET_VIEW (godot/src/render/visual_layers.h): the one bit
+# only the weapon Inset camera admits.
+const INSET_VIEW_LAYER := 1 << 21
+
+
+# The weapon Inset pass compiles its own foliage frame after the main one:
+# its own collector's MODEL anchors on the shared caches, drawn on INSET_VIEW
+# while the main view's draws stay on TERRAIN_FOLIAGE (which the Inset camera
+# excludes); releasing the Inset hides its draws alone.
+func test_inset_frame_draws_its_own_anchors_on_the_inset_layer() -> void:
+	var main_camera := Camera3D.new()
+	add_child_autofree(main_camera)
+	main_camera.make_current()
+	main_camera.global_transform = _camera_xform()
+	var inset_camera := Camera3D.new()
+	add_child_autofree(inset_camera)
+	inset_camera.global_transform = Transform3D(Basis(), Vector3(0.0, 10.5, 0.0))
+	_foliage_index = 1
+	_dispatcher.silhouette_anchors = PackedVector3Array()
+	_dispatcher.render_preview(_camera_xform(), 1000)
+	var main_detail := _backend_draws("detail").size()
+	assert_gt(main_detail, 0, "the main view draws its detail cells")
+	assert_eq(_backend_draws("silhouette").size(), 0, "the main collect admitted no anchor")
+	assert_false(_dispatcher.is_inset_frame_live())
+
+	# The Inset collect admits a far body the main view's collect dropped.
+	_dispatcher.render_inset_frame(inset_camera,
+			PackedVector3Array([Vector3(0.0, 0.0, -64.0)]), 1000)
+	assert_true(_dispatcher.is_inset_frame_live())
+	var report := _dispatcher.get_backend_report()
+	var inset: Dictionary = report.get("inset", {})
+	var inset_models := 0
+	for row_value in inset.get("draws", []):
+		var row := row_value as Dictionary
+		assert_eq(int(row.get("layer_mask", 0)), INSET_VIEW_LAYER, "Inset draws ride INSET_VIEW")
+		if String(row.get("tier", "")) == "silhouette" and bool(row.get("visible", false)):
+			inset_models += 1
+	assert_gt(inset_models, 0, "the Inset draws its own collector's masks")
+	assert_eq(_backend_draws("detail").size(), main_detail, "the main view's set is untouched")
+	assert_eq(_backend_draws("silhouette").size(), 0)
+	for row_value in report.get("draws", []):
+		assert_eq(int((row_value as Dictionary).get("layer_mask", 0)),
+				Water.VISUAL_LAYER_TERRAIN_FOLIAGE)
+	# The Inset's persons test the Inset eye (foliage_mask.gdshaderinc, whose
+	# two-eye logic foliage_mask_consumer_test renders); the Inset frame needs
+	# the main pass's target, so a RenderingDevice.
+	var rendering := RenderingServer.get_rendering_device() != null
+	if rendering:
+		var mask: Dictionary = report.get("mask", {})
+		assert_true(bool(mask.get("inset_active", false)), "the Inset frame raises its flag")
+		assert_true(Vector3(mask.get("inset_eye", Vector3.ZERO)).is_equal_approx(
+				inset_camera.get_camera_transform().origin),
+				"the Inset eye is the Inset camera's rendered eye")
+
+	_dispatcher.release_inset_frame()
+	assert_false(_dispatcher.is_inset_frame_live())
+	if rendering:
+		var released_mask: Dictionary = _dispatcher.get_backend_report().get("mask", {})
+		assert_false(bool(released_mask.get("inset_active", true)), "releasing lowers the Inset flag")
+	var released: Dictionary = _dispatcher.get_backend_report().get("inset", {})
+	assert_eq(int(released.get("visible_draws", -1)), 0, "releasing hides the Inset draws alone")
+	assert_eq(_backend_draws("detail").size(), main_detail)
+
+
 func test_backend_recreates_retained_instances_after_world_exit() -> void:
 	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())
 	_dispatcher.render_preview(_camera_xform(), GameWorld.current_frame_clock_ms())

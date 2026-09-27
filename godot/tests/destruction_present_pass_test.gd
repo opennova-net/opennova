@@ -816,6 +816,87 @@ func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
 	presenter.teardown()
 
 
+# A row's descriptor tag reaches its group: a tagged transient and a tagged
+# wreck family take the building-section gate, untagged rows do not (the
+# engine producers set the tag; runtime/world/destruction.h carries the
+# witness).
+func test_effect_rows_carry_their_section_tag_to_the_group() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var node := ObjectModel.new()
+	container.add_child(node)
+	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
+			_item_db, anchors, fx, {0x1004: node})
+	var tagged_transient := DestructionEffectEvent.make('Effect_TreeFoliageExp', Vector3.ZERO,
+			0, Vector3.RIGHT, 0, 0, 0xFFFF, Simulation.SPAWN_ORIGIN_NONE, false, 0,
+			Vector3.ZERO, true)
+	assert_true(tagged_transient.section_tagged, 'the record carries the tag')
+	presenter.present_destruction_drained(DestructionDrain.make([], [
+			tagged_transient,
+			DestructionEffectEvent.make('Effect_BldGlassExp', Vector3(1, 2, 3), 0, Vector3.UP),
+			DestructionEffectEvent.make('Effect_Family2', Vector3.ZERO, 2, Vector3.UP,
+					0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, false, 0, Vector3.ZERO, true),
+			DestructionEffectEvent.make('Effect_Family3', Vector3.ZERO, 3, Vector3.UP,
+					0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE)]), [])
+	var tags := {}
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as EffectGroupReport
+		tags[row.name] = row.section_tagged
+	assert_eq(tags.size(), 4, 'every row spawned its group')
+	assert_true(bool(tags.get('Effect_TreeFoliageExp', false)), 'tagged transient')
+	assert_false(bool(tags.get('Effect_BldGlassExp', true)), 'untagged transient')
+	assert_true(bool(tags.get('Effect_Family2', false)), 'tagged wreck family')
+	assert_false(bool(tags.get('Effect_Family3', true)), 'untagged wreck family')
+	presenter.teardown()
+
+
+# A positioned slot row (a blast victim's hit emitter) holds its group for the
+# next release only: no anchor follows the victim, so the group stays where it
+# spawned; a later release still stops it (runtime/world/destruction.h
+# spawn_victim_hit_emitter carries the witness).
+func test_positioned_slot_rows_stay_where_they_spawn() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var node := ObjectModel.new()
+	container.add_child(node)
+	node.position = Vector3(4, 5, 6)
+	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
+			_item_db, anchors, fx, {0x1004: node})
+	var spawn_at := Vector3(4, 5, 6)
+	presenter.present_destruction_drained(DestructionDrain.make([], [
+			DestructionEffectEvent.make('Effect_Family1', spawn_at, 1, Vector3.DOWN,
+					0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, false, 0, Vector3.ZERO,
+					true, true)]), [])
+	var key := 'wreck:wire:4100:1'
+	assert_false(anchors.has_effect_anchor(key), 'no anchor follows the victim')
+	assert_false(fx.has_owner_binding(key), 'the group has no owner pose to follow')
+	node.position += Vector3(10, 0, 0)
+	fx.advance_fixed_tick(0.0)
+	var row := _live_row_named(fx, 'Effect_Family1')
+	assert_not_null(row, 'the slot holds a live group')
+	if row != null:
+		assert_true(row.section_tagged, 'the victim tags the group')
+		assert_almost_eq(PresentPassFixture.emitter_position(row), spawn_at, POSITION_EPS,
+				'the group stays at its spawn pose while the victim moves')
+	var release := DestructionEffectEvent.make('', Vector3.ZERO, 1, Vector3.ZERO,
+			0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, true)
+	presenter.present_destruction_drained(DestructionDrain.make([], [release]), [])
+	assert_null(_live_row_named(fx, 'Effect_Family1'), 'the next release stops it')
+	presenter.teardown()
+
+
+func _live_row_named(fx: EffectWorld, effect_name: String) -> EffectGroupReport:
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as EffectGroupReport
+		if row.name == effect_name and not row.detached:
+			return row
+	return null
+
+
 func test_vehicle_respawn_restores_intact_model_and_releases_damage_effects() -> void:
 	var anchors := ItemEffectDirector.new()
 	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))

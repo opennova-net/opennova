@@ -987,8 +987,17 @@ func test_drape_carries_the_terrain_fog_uniforms() -> void:
 	for name in ["u_fog_color", "u_fog_start", "u_fog_end", "u_fog_type"]:
 		assert_eq(drape.get_shader_parameter(name), reference.get_shader_parameter(name),
 				"%s matches the terrain's fog" % name)
-	assert_eq(drape.render_priority, Material.RENDER_PRIORITY_MIN,
-			"the drape draws first among the transparents, right after the terrain")
+	# The drape rung sits right after the viewmodel and before every world
+	# rung (renderer::kRungSlotDrape: the terrain sector pass follows the
+	# viewmodel, and its drapes precede every model and transparent submit).
+	assert_eq(drape.render_priority, ObjectShaderCache.RENDER_RUNG_SLOT_DRAPE,
+			"the drape draws on its own rung")
+	assert_eq(ObjectShaderCache.RENDER_RUNG_SLOT_DRAPE, ObjectShaderCache.RENDER_RUNG_VIEWMODEL + 1,
+			"right after the viewmodel")
+	assert_gt(drape.render_priority, ObjectShaderCache.RENDER_RUNG_SKY_CLOUDS,
+			"the sky pass draws before the drape")
+	assert_lt(drape.render_priority, ObjectShaderCache.RENDER_RUNG_OBJECT_POST_MULTIPLY,
+			"the drape precedes every world rung")
 
 
 func _crate_slot_matrix(shadow: SlotShadow, crate: ObjectModel) -> Projection:
@@ -1220,6 +1229,38 @@ func test_drape_patch_is_a_lifted_one_unit_mesh() -> void:
 	caster.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
 
+
+## Retail draws every drape inside the terrain sector pass, which the indoors
+## letter skips with the terrain, while the slot captures run earlier in the
+## frame (renderer::kRungSlotDrape). OcclusionFrame closes this gate with the
+## terrain's: the patches hide, the slot keeps its order and keeps capturing.
+func test_a_closed_terrain_pass_draws_no_drape_but_keeps_capturing() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	shadow.set_shadow_detail(4)  # mask 0: every slot re-captures every frame
+	var caster := _caster_at(4.0)
+	caster.set_shadow_bound_radii(2.0, 2.0625)
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(caster)
+	assert_true(order >= 0, "the caster owns a capture order")
+	assert_true(shadow.is_terrain_pass_drawn(), "the terrain pass starts open")
+	assert_gt(shadow.get_patch_vertices(order).size(), 0, "the open pass drapes the slot")
+	shadow.set_terrain_pass_drawn(false)
+	assert_eq(shadow.get_patch_vertices(order).size(), 0,
+			"closing the pass hides the drape at once")
+	shadow.advance_frame()
+	assert_eq(shadow.get_patch_vertices(order).size(), 0, "a closed pass draws no drape")
+	assert_eq(shadow.get_capture_order_of(caster), order, "the slot keeps its order")
+	assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0,
+			"the capture keeps running while the drapes are skipped")
+	shadow.set_terrain_pass_drawn(true)
+	shadow.advance_frame()
+	assert_gt(shadow.get_patch_vertices(order).size(), 0, "reopening drapes the slot again")
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
 ## An attached-light slot lights its patch with D3D light 4 (retail:
 ## RenderSlot_DrawSilhouetteDrape @0x5d5e50..0x5d5f4c): D3DRS_AMBIENT white,
 ## a white material, and the Light_FillD3DPointLight fill (@0x5aa450: the
@@ -1269,4 +1310,176 @@ func test_attached_light_slot_publishes_the_d3d_point_light() -> void:
 	assert_lt(term.x, 1.0, "the sun slot darkens through its material term")
 	caster.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
+
+
+## Retail draws the drapes right after the terrain batch with Z-write off, so
+## every later draw in front of the terrain overwrites them and an overhanging
+## patch edge multiplies the sky drawn before it (renderer::kRungSlotDrape).
+## The terrain and the sky dome write a stencil mark in their colour pass; the
+## drape (the shipped shaders, slot 0 armed with a uniform silhouette) reads it.
+## A 64 x 64 view straight down from 6 u (fov 60: 3.46 u to the edge on the
+## ground) over a 4 x 4 terrain card, an opaque red slab 1 x 0.02 x 1 at x = 1
+## whose top lies inside the drape lift, a 6 x 6 drape at 0.05 u and the flat
+## yellow dome around the eye.
+const DRAPE_TERRAIN_PX := Vector2i(22, 32)  # the terrain beside the slab (x = -1)
+const DRAPE_SLAB_PX := Vector2i(41, 32)     # the slab top (x = 1)
+const DRAPE_SKY_PX := Vector2i(55, 32)      # the drape edge past the terrain (x = 2.5)
+const DRAPE_BARE_SKY_PX := Vector2i(62, 32) # the dome past the drape (x = 3.3)
+
+
+func _flat_texture(colour: Color) -> ImageTexture:
+	var image := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+	image.fill(colour)
+	return ImageTexture.create_from_image(image)
+
+
+func _drape_stencil_view(sky_drawn: bool, with_drape: bool) -> Image:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var clear := WorldEnvironment.new()
+	clear.environment = Environment.new()
+	clear.environment.background_mode = Environment.BG_COLOR
+	clear.environment.background_color = Color(0.0, 0.0, 1.0)
+	clear.environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	viewport.add_child(clear)
+	var camera := Camera3D.new()
+	camera.fov = 60.0
+	camera.far = 500.0
+	viewport.add_child(camera)
+	camera.look_at_from_position(Vector3(0.0, 6.0, 0.0), Vector3.ZERO, Vector3.FORWARD)
+	camera.make_current()
+	# The dome pass: flat, unfogged, on its rung; a closed bracket keeps only
+	# the stencil mark over the clear colour.
+	var dome_material := ShaderMaterial.new()
+	dome_material.shader = load("res://shaders/sky.gdshader") as Shader
+	dome_material.render_priority = ObjectShaderCache.RENDER_RUNG_SKY_DOME
+	dome_material.set_shader_parameter("u_flat_pass", true)
+	dome_material.set_shader_parameter("u_flat_color", Vector3(1.0, 1.0, 0.0))
+	dome_material.set_shader_parameter("u_fog_end", 0.0)
+	dome_material.set_shader_parameter("u_beauty_pass_drawn", sky_drawn)
+	var dome := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 100.0
+	sphere.height = 200.0
+	# The real dome faces its inside to the eye (sky.gdshader culls back faces).
+	sphere.flip_faces = true
+	dome.mesh = sphere
+	dome.material_override = dome_material
+	viewport.add_child(dome)
+	# The terrain card, drawn in the normals debug colour (0.5, 1, 0.5).
+	var terrain_material := ShaderMaterial.new()
+	terrain_material.shader = load("res://shaders/terrain.gdshader") as Shader
+	terrain_material.set_shader_parameter("u_debug_mode", 3)
+	var terrain := MeshInstance3D.new()
+	var card := PlaneMesh.new()
+	card.size = Vector2(4.0, 4.0)
+	terrain.mesh = card
+	terrain.material_override = terrain_material
+	viewport.add_child(terrain)
+	# An opaque model in front of the terrain but inside the drape lift.
+	var slab_material := StandardMaterial3D.new()
+	slab_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	slab_material.albedo_color = Color(1.0, 0.0, 0.0)
+	var slab := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(1.0, 0.02, 1.0)
+	slab.mesh = box
+	slab.material_override = slab_material
+	viewport.add_child(slab)
+	slab.position = Vector3(1.0, 0.01, 0.0)
+	if with_drape:
+		# Slot 0 armed with a black silhouette and a 0.25 material term: the
+		# drape multiplies whatever it may touch by 0.25 (unfogged).
+		var drape_material := ShaderMaterial.new()
+		drape_material.shader = SlotShadow.get_drape_material().shader
+		drape_material.render_priority = SlotShadow.get_drape_material().render_priority
+		var terms := PackedVector4Array()
+		terms.resize(12)
+		terms[0] = Vector4(0.25, 0.25, 0.25, 1.0)
+		var zeros := PackedVector4Array()
+		zeros.resize(12)
+		drape_material.set_shader_parameter("u_slot_term", terms)
+		drape_material.set_shader_parameter("u_slot_clip_u", zeros)
+		drape_material.set_shader_parameter("u_slot_clip_v", zeros)
+		drape_material.set_shader_parameter("u_slot_light_pos", zeros)
+		drape_material.set_shader_parameter("u_slot_light_diffuse", zeros)
+		drape_material.set_shader_parameter("u_slot_tex_0", _flat_texture(Color.BLACK))
+		drape_material.set_shader_parameter("u_shadowztex", _flat_texture(Color.BLACK))
+		drape_material.set_shader_parameter("u_slot_mat_0", Projection.IDENTITY)
+		drape_material.set_shader_parameter("u_fog_type", 1)
+		drape_material.set_shader_parameter("u_fog_start", 0.0)
+		drape_material.set_shader_parameter("u_fog_end", 1.0e6)
+		var drape := MeshInstance3D.new()
+		var patch := PlaneMesh.new()
+		patch.size = Vector2(6.0, 6.0)
+		drape.mesh = patch
+		drape.material_override = drape_material
+		viewport.add_child(drape)
+		drape.position = Vector3(0.0, 0.05, 0.0)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	return viewport.get_texture().get_image()
+
+
+func _pixel(image: Image, at: Vector2i) -> Color:
+	return image.get_pixel(at.x, at.y)
+
+
+func test_windowed_drape_stops_at_models_in_front_of_the_terrain() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var bare: Image = await _drape_stencil_view(true, false)
+	var draped: Image = await _drape_stencil_view(true, true)
+	var terrain_bare := _pixel(bare, DRAPE_TERRAIN_PX)
+	var terrain_draped := _pixel(draped, DRAPE_TERRAIN_PX)
+	assert_gt(terrain_bare.g, 0.9, "the terrain card draws its debug green (%s)" % terrain_bare)
+	assert_lt(terrain_draped.g, terrain_bare.g * 0.8,
+			"the drape darkens the terrain where it is the front-most surface (%s -> %s)"
+			% [terrain_bare, terrain_draped])
+	var slab_bare := _pixel(bare, DRAPE_SLAB_PX)
+	var slab_draped := _pixel(draped, DRAPE_SLAB_PX)
+	assert_gt(slab_bare.r, 0.9, "the slab draws red over the terrain (%s)" % slab_bare)
+	assert_almost_eq(slab_draped.r, slab_bare.r, 0.02,
+			"a model in front of the terrain keeps its colour inside the lift (%s)"
+			% slab_draped)
+	assert_almost_eq(slab_draped.g, slab_bare.g, 0.02)
+	assert_almost_eq(slab_draped.b, slab_bare.b, 0.02)
+
+
+func test_windowed_drape_edge_multiplies_the_sky_drawn_before_it() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var bare: Image = await _drape_stencil_view(true, false)
+	var draped: Image = await _drape_stencil_view(true, true)
+	var sky_bare := _pixel(bare, DRAPE_SKY_PX)
+	var sky_draped := _pixel(draped, DRAPE_SKY_PX)
+	assert_gt(sky_bare.r, 0.9, "the flat yellow dome fills the view past the card (%s)" % sky_bare)
+	assert_lt(sky_draped.r, sky_bare.r * 0.8,
+			"an overhanging drape edge multiplies the dome (%s -> %s)" % [sky_bare, sky_draped])
+	var beyond := _pixel(draped, DRAPE_BARE_SKY_PX)
+	assert_almost_eq(beyond.r, _pixel(bare, DRAPE_BARE_SKY_PX).r, 0.02,
+			"the dome past the patch keeps its colour (%s)" % beyond)
+
+
+func test_windowed_closed_sky_bracket_leaves_the_clear_to_the_drape() -> void:
+	# A skipped sky bracket leaves the clear colour, which retail's drape then
+	# multiplies like any other pixel the frame holds there.
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var bare: Image = await _drape_stencil_view(false, false)
+	var draped: Image = await _drape_stencil_view(false, true)
+	var clear_bare := _pixel(bare, DRAPE_SKY_PX)
+	assert_gt(clear_bare.b, 0.9, "a closed bracket shows the blue clear (%s)" % clear_bare)
+	assert_lt(clear_bare.r, 0.05, "no dome colour under a closed bracket (%s)" % clear_bare)
+	var clear_draped := _pixel(draped, DRAPE_SKY_PX)
+	assert_lt(clear_draped.b, clear_bare.b * 0.8,
+			"the drape edge multiplies the clear colour (%s -> %s)" % [clear_bare, clear_draped])
+	assert_almost_eq(_pixel(draped, DRAPE_BARE_SKY_PX).b, 1.0, 0.02,
+			"the clear past the patch is untouched")
 

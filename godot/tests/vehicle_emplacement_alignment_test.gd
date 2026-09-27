@@ -632,7 +632,7 @@ func _culled_wire_after_frames(sim: Simulation, camera: Transform3D, frames: int
 	# into the set of wire handles the collector gate currently culls.
 	var culled := {}
 	for _frame in range(frames):
-		sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+		sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 		var changes: PackedInt32Array = sim.get_wire_render_culled_changes()
 		if changes.size() < 2:
 			continue

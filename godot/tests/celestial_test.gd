@@ -414,6 +414,74 @@ func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
 	assert_gt(int((bodies.get("glint", {}) as Dictionary).get("upl", 0)), 0)
 
 
+func _glint_state(celestial: Celestial) -> Dictionary:
+	return celestial.get_diagnostics().get("water_glint", {}) as Dictionary
+
+
+# The weapon Inset pass calls the glint's leg again at its own camera, after
+# the main scene's call, on the one accumulator (engine
+# renderer/scene_overlay.h kInsetOverlayOrder carries the witness): the
+# counter steps twice a frame while it renders, the Inset's draw sits at its
+# own eye with its own view dot, and the body keeps its main placement.
+func test_the_inset_pass_calls_the_glint_leg_again_at_its_camera() -> void:
+	var fixture := _make_fixture()
+	var celestial: Celestial = fixture.celestial
+	var camera: Camera3D = fixture.camera
+	var env: MissionEnvironment = fixture.environment
+	var glint := celestial.get_node_or_null("Celestial_glint") as Node3D
+	assert_not_null(glint)
+	if glint == null:
+		return
+	env.environment_data.set_water_height(-200.0)
+	var sun_dir: Vector3 = env.get_sun_direction()
+	var mirrored := Vector3(sun_dir.x, -sun_dir.y, sun_dir.z)
+	var up := Vector3.RIGHT if absf(mirrored.y) > 0.9 else Vector3.UP
+	camera.look_at(camera.global_position + mirrored, up)
+	celestial.settle_glare_occlusion()
+	celestial.advance_frame(TICK)
+	var before := int(_glint_state(celestial).get("frame_index", 0))
+	celestial.advance_frame(TICK)
+	var state := _glint_state(celestial)
+	assert_eq(int(state.get("frame_index", 0)) - before, 1, "one scene pass, one call")
+	assert_false(bool(state.get("inset_drawn", true)), "no Inset pass, no Inset draw")
+	# The Inset pass renders from an eye beside the main one, facing away from
+	# the mirrored sun.
+	var inset := Camera3D.new()
+	add_child_autofree(inset)
+	inset.global_position = camera.global_position + Vector3(3.0, 0.0, 0.0)
+	inset.look_at(inset.global_position - mirrored, up)
+	celestial.set_inset_view(inset)
+	before = int(state.get("frame_index", 0))
+	celestial.advance_frame(TICK)
+	state = _glint_state(celestial)
+	assert_eq(int(state.get("frame_index", 0)) - before, 2,
+			"both passes call the leg on the one accumulator")
+	assert_eq(int(state.get("brightness", 0)), 256, "clear rays hold the settled brightness")
+	assert_true(bool(state.get("inset_drawn", false)), "the brightness draws the Inset's glint")
+	assert_true((state.get("inset_eye", Vector3.ZERO) as Vector3).is_equal_approx(
+			inset.global_position), "from the Inset's own eye")
+	assert_eq(int(state.get("inset_upl", -1)), 0,
+			"facing away, the Inset's view dot submits nothing")
+	var bodies: Dictionary = celestial.get_diagnostics().get("bodies", {})
+	assert_gt(int((bodies.get("glint", {}) as Dictionary).get("upl", 0)), 0,
+			"while the main view, facing it, still does")
+	assert_true(glint.global_position.is_equal_approx(camera.global_position + mirrored * 128.0),
+			"the body keeps the main pass's placement")
+	# The capture settle steps the calls the live frame makes, per frame.
+	before = int(_glint_state(celestial).get("frame_index", 0))
+	celestial.settle_glare_occlusion(1)
+	assert_eq(int(_glint_state(celestial).get("frame_index", 0)) - before, 2,
+			"one settled frame steps both passes' calls")
+	celestial.set_inset_view(null)
+	celestial.advance_frame(TICK)
+	assert_false(bool(_glint_state(celestial).get("inset_drawn", true)),
+			"the pass stops: no Inset call")
+	before = int(_glint_state(celestial).get("frame_index", 0))
+	celestial.settle_glare_occlusion(1)
+	assert_eq(int(_glint_state(celestial).get("frame_index", 0)) - before, 1,
+			"and the settle steps the main call alone")
+
+
 static func _collect_meshes(node: Node, out: Array[MeshInstance3D]) -> void:
 	if node is MeshInstance3D:
 		out.append(node)

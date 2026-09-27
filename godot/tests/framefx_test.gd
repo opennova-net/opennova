@@ -15,7 +15,7 @@ render_mode unshaded, depth_draw_opaque, cull_disabled;
 uniform vec3 u_beauty;
 
 void fragment() {
-	if (CAMERA_VISIBLE_LAYERS == 494593u) {
+	if (CAMERA_VISIBLE_LAYERS == 14126081u) {
 		ALBEDO = u_beauty;
 	} else {
 		discard;
@@ -116,7 +116,7 @@ func _q3_lum_view(use_q3: bool) -> Dictionary:
 
 	var camera := Camera3D.new()
 	camera.current = true
-	camera.cull_mask = 494593
+	camera.cull_mask = 14126081
 	camera.position = Vector3(0.0, 0.0, 10.0)
 	viewport.add_child(camera)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
@@ -233,7 +233,7 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 		await get_tree().process_frame
 
 	var report := renderer.get_backend_report()
-	assert_eq(int(report.get("beauty_camera_mask", -1)), 494593,
+	assert_eq(int(report.get("beauty_camera_mask", -1)), 14126081,
 			"the beauty signature admits the first-person viewmodel layer")
 	assert_false(bool(report.get("q3_auxiliary_view", true)))
 	assert_false(bool(report.get("q3_camera_mask", true)))
@@ -256,7 +256,7 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 	assert_eq(int(report.get("q3_submitted_commands", -1)), 0,
 			"unregistered beauty geometry is not a Q3 producer")
 	assert_true(bool(report.get("terminal_compositor_installed", false)))
-	assert_eq(camera.cull_mask, 494593,
+	assert_eq(camera.cull_mask, 14126081,
 			"the module selects the one supported beauty camera signature")
 	assert_false(report.has("far_alpha_stage"),
 			"no auxiliary far-alpha view exists: pass A rides PRE_TRANSPARENT")
@@ -312,7 +312,7 @@ func test_explicit_shutdown_detaches_terminal_effect_and_is_idempotent() -> void
 	var renderer := FrameFx.new()
 	viewport.add_child(renderer)
 	assert_not_null(environment.compositor)
-	assert_eq(camera.cull_mask, 494593)
+	assert_eq(camera.cull_mask, 14126081)
 
 	renderer.shutdown()
 	var report := renderer.get_backend_report()
@@ -466,7 +466,7 @@ func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 			as FrameFxCompositorEffect
 	assert_not_null(first_effect)
 	assert_true(first_effect.enabled)
-	assert_eq(camera.cull_mask, 494593)
+	assert_eq(camera.cull_mask, 14126081)
 
 	viewport.remove_child(renderer)
 	assert_null(environment.compositor,
@@ -489,7 +489,7 @@ func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 			"re-entry uses a fresh effect after the prior device owner shut down")
 	assert_false(bool(renderer.get_backend_report().get("shutdown", true)),
 			"re-entry clears the shutdown latch")
-	assert_eq(camera.cull_mask, 494593,
+	assert_eq(camera.cull_mask, 14126081,
 			"re-entry re-applies the beauty camera signature")
 
 	viewport.remove_child(renderer)
@@ -1696,3 +1696,223 @@ func test_lum_q3_copy_stops_at_the_stage_textures_last_retail_mip_level() -> voi
 	assert_gt(clamped_pixel.r, 0.5, "the ceiling keeps level 0's red: %s" % clamped_pixel)
 	assert_lt(clamped_pixel.g, 0.2, "and never a smaller white level: %s" % clamped_pixel)
 	renderer.shutdown()
+
+
+const VIEWMODEL_RIG_ROOT := "res://../fixtures/anim"
+const VIEWMODEL_PROJECTION_GLOBAL := "opennova_viewmodel_projection"
+# Where the posed bulb's centre lands under the WORLD projection: right of
+# and below the view centre of the 192 x 144 view, 3 u ahead of the eye, so
+# at a 1.61 focal ratio the gun's own footprint clears its copy's.
+const VIEWMODEL_BULB_PIXEL := Vector2(146.0, 100.0)
+const VIEWMODEL_BULB_DEPTH := 3.0
+
+
+# The viewmodel projection feed (x = the renderfov focal ratio, y = the FP
+# near plane, z = far) is process-wide, like the rig's teardown every leg
+# that writes it puts the project default back.
+func _restore_viewmodel_projection() -> void:
+	var shipped: Dictionary = ProjectSettings.get_setting(
+			"shader_globals/" + VIEWMODEL_PROJECTION_GLOBAL, {})
+	RenderingServer.global_shader_parameter_set(VIEWMODEL_PROJECTION_GLOBAL,
+			shipped.get("value", Vector4(1.0, 0.05, 4000.0, 1.0)))
+
+
+# The state the viewmodel rig stamps on every FP part's geometry: the
+# viewmodel layer and the renderfov/depth-band fold.
+func _stamp_viewmodel_surfaces(root: Node) -> void:
+	if root is GeometryInstance3D:
+		var geometry := root as GeometryInstance3D
+		geometry.layers = Water.VISUAL_LAYER_VIEWMODEL
+		geometry.set_instance_shader_parameter("u_viewmodel_pass", true)
+	for child in root.get_children():
+		_stamp_viewmodel_surfaces(child)
+
+
+# The first-person gun as the rig presents it: a rigid model on a one-bone
+# rig (the fake-skinned FP gun: every rigid strip rides the rig's bone), its
+# geometry on the viewmodel layer through the renderfov fold, the bone posed
+# off its rest. Only the armory's opaque LUM bulb stays drawn: a white
+# SELFLUM strip whose beauty depth is the gun's band.
+func _viewmodel_bulb_view(use_q3: bool) -> Dictionary:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(192, 144)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = Color.BLACK
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	environment_resource.glow_enabled = false
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+
+	# The world pass: an 80 degree HORIZONTAL fov at the scene near plane.
+	var camera := Camera3D.new()
+	camera.current = true
+	camera.keep_aspect = Camera3D.KEEP_WIDTH
+	camera.fov = 80.0
+	camera.near = 0.2
+	camera.far = 100.0
+	camera.cull_mask = FrameFx.kBeautyCameraMask
+	viewport.add_child(camera)
+
+	var rig_root := ResourceRoot.new()
+	assert_eq(rig_root.set_root_dir(ProjectSettings.globalize_path(VIEWMODEL_RIG_ROOT)), OK)
+	var skeletal := SkeletalAnim.new()
+	assert_true(skeletal.load_from_resource_root(rig_root, "soldier.adm"),
+			"soldier.adm loads: %s" % skeletal.get_last_error())
+	var model := ObjectModel.new()
+	viewport.add_child(model)
+	model.set_process(false)
+	model.set_object_data(_lum_object_data())
+	model.set_skeletal_anim(skeletal)
+	_hide_non_opaque_lum_surfaces(model)
+	model.advance_runtime_frame(1.0 / 62.0)
+	for row in model.get_surface_materials():
+		var material := row as ShaderMaterial
+		if material != null and material.shader != null \
+				and "/self_lit/" in material.shader.resource_path:
+			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
+			material.set_shader_parameter("u_alpha_mod", 1.0)
+	_stamp_viewmodel_surfaces(model)
+
+	var skeleton := model.get_skeleton()
+	var bulb := _first_visible_mesh(model)
+	assert_not_null(skeleton, "the rig builds the skeleton the rigid strips ride")
+	assert_not_null(bulb, "the armory carries its opaque LUM bulb")
+	if skeleton != null and bulb != null:
+		assert_eq(skeleton.get_bone_count(), 1, "a one-bone rig: every strip rides bone 0")
+		assert_eq(bulb.get_parent(), skeleton, "the rigid bulb is bound to the rig")
+		var rest := skeleton.get_bone_rest(0)
+		skeleton.set_bone_pose_rotation(0,
+				Quaternion(Vector3(0.0, 0.0, 1.0), 0.6) * rest.basis.get_rotation_quaternion())
+		skeleton.set_bone_pose_position(0, rest.origin + Vector3(0.25, -0.15, 0.1))
+		# Where the skin draws the bulb (node x global pose x bind), moved so
+		# its centre projects onto VIEWMODEL_BULB_PIXEL through the world pass.
+		var part := bulb.global_transform * skeleton.get_bone_global_pose(0) \
+				* skeleton.get_bone_global_rest(0).affine_inverse()
+		var bulb_center: Vector3 = part * bulb.get_aabb().get_center()
+		model.position += camera.project_position(VIEWMODEL_BULB_PIXEL,
+				VIEWMODEL_BULB_DEPTH) - bulb_center
+
+	var terminal: Node3D
+	if use_q3:
+		terminal = FrameFx.new()
+	else:
+		terminal = DisplayDecode.new()
+	viewport.add_child(terminal)
+	if terminal is FrameFx:
+		(terminal as FrameFx).advance_frame()
+	return {"viewport": viewport, "terminal": terminal, "bulb": bulb}
+
+
+# Non-black pixels: their count and their centroid in pixel coordinates.
+func _lit_pixels(image: Image) -> Dictionary:
+	var count := 0
+	var sum := Vector2.ZERO
+	for y in image.get_height():
+		for x in image.get_width():
+			var pixel := image.get_pixel(x, y)
+			if pixel.r + pixel.g + pixel.b > 0.05:
+				count += 1
+				sum += Vector2(x + 0.5, y + 0.5)
+	return {"count": count, "centroid": sum / float(maxi(count, 1))}
+
+
+# Q3 texels outside the beauty footprint (its non-black pixels) grown by
+# `grow` pixels, so an edge pixel the two rasterizations split differently
+# never counts.
+func _q3_outside_footprint(beauty: Image, q3: Image, grow: int) -> int:
+	var outside := 0
+	for y in q3.get_height():
+		for x in q3.get_width():
+			var pixel := q3.get_pixel(x, y)
+			if pixel.r + pixel.g + pixel.b <= 0.05:
+				continue
+			var covered := false
+			for dy in range(-grow, grow + 1):
+				for dx in range(-grow, grow + 1):
+					var bx := x + dx
+					var by := y + dy
+					if bx < 0 or by < 0 or bx >= beauty.get_width() \
+							or by >= beauty.get_height():
+						continue
+					var gun := beauty.get_pixel(bx, by)
+					covered = covered or gun.r + gun.g + gun.b > 0.05
+			if not covered:
+				outside += 1
+	return outside
+
+
+func test_viewmodel_lum_copy_draws_under_the_world_projection() -> void:
+	# Retail's first-person pass submits the gun without the 0x100 glow
+	# suppression, so the collector queues its rigid LUM strips to Q3, and
+	# FrameFX flushes them after the scene under the WORLD projection against
+	# the beauty depth (runtime/renderer/q3_frame.h q3_object_source_admitted).
+	# With a renderfov of 55 against the world's 80 the gun draws 1.61x
+	# farther from the view centre than its copy, which glows outside the
+	# gun's footprint at the world-projected position; with equal fovs the
+	# copy covers its own strip and the gun's band depth rejects all of it.
+	var focal_ratio := tan(deg_to_rad(80.0) * 0.5) / tan(deg_to_rad(55.0) * 0.5)
+	RenderingServer.global_shader_parameter_set(VIEWMODEL_PROJECTION_GLOBAL,
+			Vector4(focal_ratio, 0.05, 100.0, 1.0))
+	var focused := _viewmodel_bulb_view(true)
+	var beauty_only := _viewmodel_bulb_view(false)
+	var renderer := focused.terminal as FrameFx
+	if focused.bulb == null or beauty_only.bulb == null:
+		renderer.shutdown()
+		_restore_viewmodel_projection()
+		return
+	var q3_image: Image = await _render_q3_frame(renderer)
+	var report := renderer.get_backend_report()
+	if not bool(report.get("rd_available", false)):
+		renderer.shutdown()
+		_restore_viewmodel_projection()
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_gt(int(report.get("q3_submitted_commands", 0)), 0,
+			"the viewmodel's rigid LUM strip is a Q3 source: %s" % report)
+	assert_not_null(q3_image, "the terminal effect exposes its Q3 target")
+	if q3_image == null:
+		renderer.shutdown()
+		_restore_viewmodel_projection()
+		return
+	var beauty: Image = (beauty_only.viewport as SubViewport).get_texture().get_image()
+	var gun := _lit_pixels(beauty)
+	var copy := _lit_pixels(q3_image)
+	var view_centre := Vector2(beauty.get_size()) * 0.5
+	var world_projected: Vector2 = view_centre + \
+			(gun.centroid - view_centre) / focal_ratio
+	var diagnostic := "gun=%s copy=%s world-projected=%s" % [gun, copy, world_projected]
+	assert_gt(int(gun.count), 20, "the gun's bulb covers a measurable footprint; " + diagnostic)
+	assert_gt(int(copy.count), 20, "the copy reaches the Q3 target; " + diagnostic)
+	assert_gte(_q3_outside_footprint(beauty, q3_image, 1), int(copy.count) - 2,
+			"the copy glows outside the gun's footprint; " + diagnostic)
+	assert_lt((copy.centroid as Vector2).distance_to(world_projected), 1.5,
+			"the copy sits at the posed bulb's world-projected position; " + diagnostic)
+	assert_lt((copy.centroid as Vector2).distance_to(VIEWMODEL_BULB_PIXEL), 1.5,
+			"the world projection of the posed bone's part matrix; " + diagnostic)
+
+	# Equal fovs: the gun now draws where its copy does, and its band depth
+	# rejects the copy over its own strip.
+	RenderingServer.global_shader_parameter_set(VIEWMODEL_PROJECTION_GLOBAL,
+			Vector4(1.0, 0.05, 100.0, 1.0))
+	var equal_q3: Image = await _render_q3_frame(renderer)
+	var equal_beauty: Image = (beauty_only.viewport as SubViewport).get_texture().get_image()
+	var equal_gun := _lit_pixels(equal_beauty)
+	var equal_copy := _lit_pixels(equal_q3)
+	diagnostic = "gun=%s copy=%s" % [equal_gun, equal_copy]
+	assert_lt((equal_gun.centroid as Vector2).distance_to(VIEWMODEL_BULB_PIXEL), 1.5,
+			"with equal fovs the gun draws at its world-projected position; " + diagnostic)
+	assert_eq(_q3_outside_footprint(equal_beauty, equal_q3, 1), 0,
+			"no copy texel leaves the gun's footprint; " + diagnostic)
+	# At most an edge pixel the skinned beauty and the rigid copy rasterize
+	# apart may survive (none on the reference machine).
+	assert_lte(int(equal_copy.count), 2,
+			"the gun's band depth rejects its copy; " + diagnostic)
+	renderer.shutdown()
+	_restore_viewmodel_projection()

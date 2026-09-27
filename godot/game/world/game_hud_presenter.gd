@@ -183,6 +183,8 @@ func teardown() -> void:
 	if _game_hud != null:
 		_game_hud.queue_free()
 		_game_hud = null
+	if _world != null:
+		_world.set_inset_scope(null)
 	_inset_scope = null
 	_sync_second_scene_camera()
 	_sights_card = null
@@ -220,7 +222,10 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 ## while that pass is not rendering (scope down, HUD torn down): the original
 ## renders the aperture through its one scene routine, particle passes
 ## included, so the second view needs the world's particles compiled for its
-## own eye. A world that unloaded has no effect world left to tell.
+## own eye. A world that unloaded has no effect world left to tell. While the
+## world ticks, its local-view leg has already handed over this same camera
+## from this frame's view; this keeps the HUD-only paths (teardown, a frame
+## that skips the world) in step.
 func _sync_second_scene_camera() -> void:
 	var effects: EffectWorld = _world.get_effect_world() if _world != null else null
 	if effects == null:
@@ -296,6 +301,10 @@ func ensure_game_hud() -> void:
 	_inset_scope.visible = false
 	_game_hud.add_child(_inset_scope)
 	_inset_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# The world's local-view leg stamps and hands over the Inset camera from the
+	# view it just composed, before every Inset leg of the frame reads it.
+	if _world != null:
+		_world.set_inset_scope(_inset_scope)
 	_sights_card = HudSightsCardScript.new()
 	_sights_card.name = "SightsCard"
 	_sights_card.show_behind_parent = true

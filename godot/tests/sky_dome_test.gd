@@ -240,6 +240,54 @@ func test_scroll_falls_back_to_a_private_core_without_weather() -> void:
 	assert_ne(second, Vector2.ZERO, "layer 2 advances as well")
 
 
+func test_cloud_texture_axes_follow_the_render_basis() -> void:
+	# The builder's UVs are the render x/z scaled (layer 1 by 1/320, layer 2 by
+	# 3/2048) and retail draws the dome in that basis, so texture u runs along
+	# render x = Godot z and v along render z = Godot x. Drawn identity, u ran
+	# along Godot x: a mirrored cloud field drifting the other way (OT-E6,
+	# 2026-09-27).
+	var ctx := _make()
+	var mesh: ArrayMesh = ctx.sky.get_mesh_instance().mesh
+	var arrays := mesh.surface_get_arrays(0)
+	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var uv1: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+	var uv2: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV2]
+	var worst1 := 0.0
+	var worst2 := 0.0
+	for i in positions.size():
+		var along := Vector2(positions[i].z, positions[i].x)
+		worst1 = maxf(worst1, (uv1[i] - along * 0.003125).length())
+		worst2 = maxf(worst2, (uv2[i] - along * (3.0 / 2048.0)).length())
+	assert_lt(worst1, 1.0e-4, "layer-1 u follows Godot z (render x), v Godot x")
+	assert_lt(worst2, 1.0e-4, "layer-2 u follows Godot z (render x), v Godot x")
+	assert_gt(Vector2(positions[25].x, positions[25].z).length(), 50.0,
+			"the probe vertices sit off the dome axis")
+
+
+func test_cloud_scroll_camera_term_rides_the_render_axes() -> void:
+	# The scroll's camera term is +camera/4096 on layer 1 along the RENDER axes
+	# (the same basis as the dome UVs): an eye moved along Godot z (render x)
+	# scrolls U, one moved along Godot x (render z) scrolls V.
+	var ctx := _make()
+	var weather: Node3D = Weather.new()
+	weather.environment_path = ctx.env_node.get_path()
+	add_child_autofree(weather)
+	ctx.sky.weather_path = weather.get_path()
+	weather.advance_frame(TICK)
+	var cam := Camera3D.new()
+	add_child_autofree(cam)
+	cam.make_current()
+	var offsets: Array[Vector2] = []
+	for eye in [Vector3(0.0, 8.0, 0.0), Vector3(0.0, 8.0, 409.6), Vector3(409.6, 8.0, 0.0)]:
+		cam.global_position = eye
+		ctx.sky.advance_frame(0.0)
+		offsets.append(ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset1"))
+	assert_almost_eq(offsets[1].x - offsets[0].x, 0.1, 1.0e-5, "Godot z (render x) scrolls U")
+	assert_almost_eq(offsets[1].y - offsets[0].y, 0.0, 1.0e-5, "Godot z leaves V")
+	assert_almost_eq(offsets[2].x - offsets[0].x, 0.0, 1.0e-5, "Godot x leaves U")
+	assert_almost_eq(offsets[2].y - offsets[0].y, 0.1, 1.0e-5, "Godot x (render z) scrolls V")
+
+
 func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 	if DisplayServer.get_name() == "headless":
 		pending("sky/background color continuity needs a windowed renderer")

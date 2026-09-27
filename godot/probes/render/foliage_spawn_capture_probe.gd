@@ -121,7 +121,7 @@ func _run_capture(ctx: ProbeContext) -> void:
 	# simulation/presentation input state stays bit-identical.
 	_game.process_mode = Node.PROCESS_MODE_DISABLED
 	world.process_mode = Node.PROCESS_MODE_DISABLED
-	var dispatcher: FoliageDispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
+	var dispatcher: FoliageDispatcher = world.get_node_or_null("FoliageDispatcher")
 	var foliage_error := runtime_foliage_validation_error(
 		mission_name,
 		dispatcher.get_frame_stats() if dispatcher != null else null,
@@ -615,7 +615,7 @@ func _print_runtime_metadata(world: GameWorld, environment: MissionEnvironment) 
 		"cloud_tex2_size": Vector2i(cloud2.get_width(), cloud2.get_height()) if cloud2 != null else Vector2i.ZERO,
 	}])
 
-	var dispatcher: FoliageDispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
+	var dispatcher: FoliageDispatcher = world.get_node_or_null("FoliageDispatcher")
 	_logv(["[spawn-capture] dispatcher: ", {
 		"present": dispatcher != null,
 		"total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
@@ -676,8 +676,7 @@ func _texture_meta(value: Variant) -> Dictionary:
 
 
 func _print_foliage_material_state(world: GameWorld) -> void:
-	var dispatcher := world.get_node_or_null(
-			"Terrain/FoliageDispatcher") as FoliageDispatcher
+	var dispatcher := world.get_node_or_null("FoliageDispatcher") as FoliageDispatcher
 	if dispatcher == null:
 		_logv(["[spawn-capture] detail materials: dispatcher missing"])
 		return

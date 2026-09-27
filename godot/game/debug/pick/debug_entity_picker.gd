@@ -42,7 +42,9 @@ static func view_point(camera: Camera3D, screen_pos: Vector2,
 	var surface_size := surface.get_visible_rect().size
 	if surface_size.x <= 0.0 or surface_size.y <= 0.0:
 		return screen_pos
-	var target_size := Vector2(target.size)
+	# The visible rect, not target.size: under the XR-served NVG projection the
+	# target is the 512 square while its camera projects in the override frame.
+	var target_size := target.get_visible_rect().size
 	return Vector2(screen_pos.x * target_size.x / surface_size.x,
 			screen_pos.y * target_size.y / surface_size.y)
 

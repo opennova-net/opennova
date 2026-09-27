@@ -233,8 +233,9 @@ static func _weather_state(weather: Weather, camera: Camera3D) -> Dictionary:
 		"sway_phase": weather.get_sway_phase(),
 		"lightning_intensity": weather.get_lightning_intensity(),
 		"cloud_uv_rate_per_second": weather.get_cloud_uv_rate_per_second(),
-		"cloud_uv_offset1": weather.get_cloud_uv_offset1(position.x, position.z),
-		"cloud_uv_offset2": weather.get_cloud_uv_offset2(position.x, position.z),
+		# The scroll's camera term is in the render basis (render x = Godot z).
+		"cloud_uv_offset1": weather.get_cloud_uv_offset1(position.z, position.x),
+		"cloud_uv_offset2": weather.get_cloud_uv_offset2(position.z, position.x),
 		"smooth_fill": weather.get_smooth_fill(),
 		"smooth_sun": weather.get_smooth_sun(),
 		"smooth_fog": weather.get_smooth_fog(),

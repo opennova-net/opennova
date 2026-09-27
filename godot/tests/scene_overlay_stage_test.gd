@@ -17,6 +17,9 @@ const SLOT_SUN_GLARE := 5
 const SLOT_MIRROR_DIM := 6
 const SLOT_MIRROR_CELESTIAL_BODIES := 7
 const SLOT_MIRROR_SUN_GLOW := 8
+const SLOT_INSET_LIGHT_CORONAS := 9
+const SLOT_WATER_GLINT := 3
+const SLOT_INSET_WATER_GLINT := 12
 # A stock-style sky body: an FF_ST_AD_LUM surface whose RGB generator style
 # 113 reads CTRL UPL_INTENSITY (the mglare authoring), staged under the name
 # the fixture environment's glare_3di line carries.
@@ -224,6 +227,138 @@ func test_a_live_light_corona_draws_in_the_overlay_pass() -> void:
 	report = _overlay_report(world)
 	assert_true((report.get("drawn_slots", []) as Array).has(SLOT_LIGHT_CORONAS),
 			"the scene view draws the coronas")
+
+
+func _inset_overlay_report(world: GameWorld) -> Dictionary:
+	var renderer := world.get_effect_world().get_node("ParticleRenderer") as ParticleRenderer
+	return renderer.get_debug_draw_list_report().get(
+			"second_scene_overlay_backend", {}) as Dictionary
+
+
+# The weapon Inset pass runs the scene core again over its own camera, so its
+# coronas are its own walk (the Inset eye, the next phase, the Inset collect's
+# section masks) in their own slot, and its tail draws no glare (engine
+# renderer/scene_overlay.h kInsetOverlayOrder carries the witness).
+func test_the_inset_pass_walks_its_own_coronas() -> void:
+	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_inset_corona", true,
+			{"ammo.def": GLOW_AMMO_DEF})
+	_staged_dirs.append(root_dir)
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
+	var camera := Camera3D.new()
+	camera.position = Vector3(16, 300, -16)
+	world.add_child(camera)
+	camera.make_current()
+	var inset_view := SubViewport.new()
+	inset_view.size = Vector2i(256, 256)
+	inset_view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	inset_view.world_3d = camera.get_world_3d()
+	add_child_autofree(inset_view)
+	var inset_camera := Camera3D.new()
+	inset_camera.current = true
+	inset_view.add_child(inset_camera)
+	inset_camera.global_transform = camera.global_transform
+	await get_tree().process_frame
+	assert_gte(int(world.get_sim().debug_spawn_round(
+			camera.position + Vector3(0, 0, -10), Vector3.FORWARD, "AM_556MM")), 0)
+	world.get_effect_world().set_second_scene_camera(inset_camera)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	var submitted: Array = _overlay_report(world).get("submitted_slots", []) as Array
+	assert_true(submitted.has(SLOT_LIGHT_CORONAS), "the main walk")
+	assert_true(submitted.has(SLOT_INSET_LIGHT_CORONAS), "and the Inset's own walk")
+	assert_eq(String(_inset_overlay_report(world).get("view_kind", "")), "inset")
+	# The Inset camera turns away from the glow: its walk drops the corona
+	# while the main view's keeps it.
+	inset_camera.global_transform = Transform3D(Basis(Vector3.UP, PI), camera.position)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	submitted = _overlay_report(world).get("submitted_slots", []) as Array
+	assert_true(submitted.has(SLOT_LIGHT_CORONAS))
+	assert_false(submitted.has(SLOT_INSET_LIGHT_CORONAS),
+			"the light sits behind the Inset eye")
+	# The pass stops: no Inset walk.
+	world.get_effect_world().set_second_scene_camera(null)
+	inset_camera.global_transform = camera.global_transform
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	submitted = _overlay_report(world).get("submitted_slots", []) as Array
+	assert_false(submitted.has(SLOT_INSET_LIGHT_CORONAS))
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	world.get_effect_world().set_second_scene_camera(inset_camera)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	var drawn: Array = _inset_overlay_report(world).get("drawn_slots", []) as Array
+	assert_true(drawn.has(SLOT_INSET_LIGHT_CORONAS), "the Inset view draws its own walk")
+	assert_false(drawn.has(SLOT_LIGHT_CORONAS), "and never the main walk's")
+	assert_false(drawn.has(SLOT_SUN_GLARE), "nor the glare")
+	world.get_effect_world().set_second_scene_camera(null)
+
+
+# The weapon Inset pass calls the glint's leg again at its own camera, on the
+# one accumulator, and its tail draws that glint in its own slot from its own
+# eye; the main view never draws the Inset's, the Inset never the main's
+# (engine renderer/scene_overlay.h kInsetOverlayOrder carries the witness).
+func test_the_inset_pass_draws_its_own_water_glint() -> void:
+	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_inset_glint", true)
+	_staged_dirs.append(root_dir)
+	# The glint draws the environment's glare model.
+	assert_eq(DirAccess.copy_absolute(ProjectSettings.globalize_path(GLARE_FIXTURE),
+			root_dir.path_join("mglare.3di")), OK)
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
+	var camera := Camera3D.new()
+	camera.position = Vector3(16, 300, -16)
+	world.add_child(camera)
+	camera.make_current()
+	# A water plane above the fixture's relief keeps both glint rays clear.
+	var env := world.get_environment_node() as MissionEnvironment
+	env.environment_data.set_water_height(250.0)
+	(world.get_node("Water") as Water).set_mission_water_height_override(250.0)
+	var sun_dir: Vector3 = env.get_sun_direction()
+	var mirrored := Vector3(sun_dir.x, -sun_dir.y, sun_dir.z)
+	var up := Vector3.RIGHT if absf(mirrored.y) > 0.9 else Vector3.UP
+	camera.look_at(camera.global_position + mirrored, up)
+	var inset_view := SubViewport.new()
+	inset_view.size = Vector2i(256, 256)
+	inset_view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	inset_view.world_3d = camera.get_world_3d()
+	add_child_autofree(inset_view)
+	var inset_camera := Camera3D.new()
+	inset_camera.current = true
+	inset_view.add_child(inset_camera)
+	inset_camera.global_transform = camera.global_transform
+	await get_tree().process_frame
+	world.get_effect_world().set_second_scene_camera(inset_camera)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	var glint: Dictionary = (world.get_celestial_node() as Celestial).get_diagnostics().get(
+			"water_glint", {})
+	assert_true(bool(glint.get("inset_drawn", false)), "the Inset's call drew its glint")
+	var submitted: Array = _overlay_report(world).get("submitted_slots", []) as Array
+	assert_true(submitted.has(SLOT_WATER_GLINT), "the main scene's glint")
+	assert_true(submitted.has(SLOT_INSET_WATER_GLINT), "and the Inset's own")
+	world.get_effect_world().set_second_scene_camera(null)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	submitted = _overlay_report(world).get("submitted_slots", []) as Array
+	assert_false(submitted.has(SLOT_INSET_WATER_GLINT), "the pass stops: no Inset glint")
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	world.get_effect_world().set_second_scene_camera(inset_camera)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	var drawn: Array = _inset_overlay_report(world).get("drawn_slots", []) as Array
+	assert_true(drawn.has(SLOT_INSET_WATER_GLINT), "the Inset view draws its own glint")
+	assert_false(drawn.has(SLOT_WATER_GLINT), "and never the main scene's")
+	var main_drawn: Array = _overlay_report(world).get("drawn_slots", []) as Array
+	assert_true(main_drawn.has(SLOT_WATER_GLINT))
+	assert_false(main_drawn.has(SLOT_INSET_WATER_GLINT), "the main view never the Inset's")
+	world.get_effect_world().set_second_scene_camera(null)
 
 
 func _meshes(node: Node, out: Array[MeshInstance3D]) -> void:

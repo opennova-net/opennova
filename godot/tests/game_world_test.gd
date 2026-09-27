@@ -789,7 +789,10 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial",
 			"SunShadow", "SlotShadow"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
-	assert_not_null(world.get_node_or_null("Terrain/FoliageDispatcher"))
+	# The dispatcher sits beside the terrain, so the indoors terrain hide never
+	# reaches the MODEL masks (the occlusion frame gates its detail passes).
+	assert_not_null(world.get_node_or_null("FoliageDispatcher"))
+	assert_null(world.get_node_or_null("Terrain/FoliageDispatcher"))
 	assert_null(world.get_node_or_null("Terrain/TileOverlay"),
 		"the removed editor overlay is not part of the runtime world")
 	var terrain: Terrain = world.get_node("Terrain")
@@ -2030,7 +2033,7 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
 	var terrain := world.get_node("Terrain") as Terrain
-	var dispatcher := world.get_node("Terrain/FoliageDispatcher") as FoliageDispatcher
+	var dispatcher := world.get_node("FoliageDispatcher") as FoliageDispatcher
 	var tile_info := terrain.tile_info_override as TerrainTileInfo
 	assert_not_null(tile_info)
 	if tile_info != null:
@@ -2398,8 +2401,8 @@ func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	terrain.name = "Terrain"
 	var disp := FoliageDispatcher.new()
 	disp.name = "FoliageDispatcher"
-	terrain.add_child(disp)
 	world.add_child(terrain)
+	world.add_child(disp)
 	add_child_autofree(world)
 	await get_tree().process_frame  # _ready wires _dispatcher from the named child
 
@@ -2423,7 +2426,7 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 	# the REAL local player's stance latches [orig: Player_PackInputStateToEntity
 	# @ 0x4df6a7..0x4df6cd].
 	var world := WorldFixture.boot_minimal(self)
-	var disp := world.get_node("Terrain/FoliageDispatcher") as FoliageDispatcher
+	var disp := world.get_node("FoliageDispatcher") as FoliageDispatcher
 	var sim := world.get_sim()
 	assert_true(bool(sim.has_local_player()), "the playable mission spawned its player")
 
@@ -2457,7 +2460,7 @@ func test_tick_clears_stale_silhouette_anchors_when_no_sim_anchors_remain() -> v
 	# the typed _runtime seam always reaches a real Simulation; the
 	# unconditional-assignment contract is observed on the real stack.)
 	var world := WorldFixture.boot_minimal(self)
-	var disp := world.get_node("Terrain/FoliageDispatcher") as FoliageDispatcher
+	var disp := world.get_node("FoliageDispatcher") as FoliageDispatcher
 
 	disp.silhouette_anchors = PackedVector3Array([Vector3(1.0, 2.0, 3.0)])  # stale
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
@@ -2978,8 +2981,10 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 
 func test_blink_frame_gates_toggle_render_passes() -> void:
 	# The blink letter gates (docs/render/render-occlusion-re.md §4): indoors
-	# (accum bit 0x2) hides the terrain render — near detail + far foliage ride
-	# the terrain node — and the WATER MIRROR's sky bracket, while the main
+	# (accum bit 0x2) hides the terrain render, closes the detail-foliage
+	# passes while the foliage dispatcher (beside the terrain) keeps its MODEL
+	# masks [orig: Terrain_RenderWorldScene @ 0x5C93D5..0x5C93E0], and hides
+	# the WATER MIRROR's sky bracket, while the main
 	# frame keeps its sky (gated only by the sky letter 0x4 and the eye's
 	# waterline side) [orig: Render_ProcessMainSceneFrame @ 0x5ca192..0x5ca1bd;
 	# render_main_scene @ 0x5c1342..0x5c1353]. Driven end-to-end through the
@@ -2997,9 +3002,13 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	var celestial := world.get_node("Celestial") as Celestial
 	var water := world.get_node("Water") as Node3D
 	var terrain := world.get_node("Terrain") as Node3D
+	var foliage := world.get_foliage_dispatcher()
 
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_false(terrain.visible, "indoors hides the terrain render")
+	assert_true(foliage.is_visible_in_tree(),
+			"the terrain hide no longer reaches the foliage dispatcher")
+	assert_false(foliage.is_detail_passes_drawn(), "indoors closes the detail passes alone")
 	assert_true(sky.visible, "the dome node stays; its passes are gated")
 	assert_true(sky.is_beauty_pass_drawn(), "indoors alone keeps the main frame's sky")
 	assert_false(sky.is_mirror_pass_drawn(), "indoors skips the mirror's sky bracket")
@@ -3013,6 +3022,7 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_true(terrain.visible, "outdoors restores the terrain")
+	assert_true(foliage.is_detail_passes_drawn(), "outdoors reopens the detail passes")
 	assert_true(sky.is_beauty_pass_drawn() and sky.is_mirror_pass_drawn(),
 			"outdoors draws the sky in both passes")
 	assert_true(water.visible, "outdoors leaves the water on")
@@ -3022,8 +3032,10 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	assert_eq(WorldFixture.load_mission(world, root_dir, WorldFixture.MINIMAL_MISSION, indoors), OK)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_false(sky.is_mirror_pass_drawn(), "back indoors before the unload")
+	assert_false(foliage.is_detail_passes_drawn(), "back indoors before the unload")
 	world.unload()
 	assert_true(terrain.visible, "unload restores the terrain gate")
+	assert_true(foliage.is_detail_passes_drawn(), "unload restores the detail-foliage gate")
 	assert_true(sky.is_mirror_pass_drawn(), "unload restores the mirror sky gate")
 	assert_true(celestial.is_sky_mirror_pass_drawn(), "unload restores the disc gate")
 

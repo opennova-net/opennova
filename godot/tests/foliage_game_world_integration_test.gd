@@ -49,7 +49,7 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	assert_eq(world.load_world(), OK)
 
 	var data := world.get_terrain_data()
-	var dispatcher := world.get_node_or_null("Terrain/FoliageDispatcher") as FoliageDispatcher
+	var dispatcher := world.get_foliage_dispatcher()
 	assert_not_null(data)
 	assert_not_null(dispatcher)
 	if data == null or dispatcher == null:

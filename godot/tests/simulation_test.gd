@@ -587,7 +587,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.occlusion_init_mission()
 	assert_true(sim.step())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
 	# The full verdict set through the delta forms: a baseline reset re-arms
 	# the complete emission (the same walk the occlusion frame consumes).
@@ -605,7 +605,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.set_runtime_profiling_enabled(true)
 	assert_true(sim.is_runtime_profiling_enabled())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	sim.reset_occlusion_apply_baseline()
 	assert_eq(sim.get_building_visibility_changes(), unprofiled_buildings,
 			"profiling does not change building submission")
@@ -664,7 +664,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	_assert_native_runtime_timings_zero(sim.get_runtime_perf_counters())
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	assert_true(sim.step())
 	sim.get_present_snapshot()
 	counters = sim.get_runtime_perf_counters()
@@ -4018,7 +4018,7 @@ const _ANCHOR_CAMERA := Transform3D(Basis(), Vector3(24.0, 2.0, 0.0))
 
 
 func _occlusion_frame(sim: Simulation, camera: Transform3D = Transform3D.IDENTITY) -> void:
-	sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 
 
 func test_foliage_mask_anchors_track_local_player_stance() -> void:
@@ -4356,7 +4356,7 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 3, "collision-backed no-OOBJ building stays in the host batch")
 	if visibility.size() == 3:
@@ -4397,7 +4397,7 @@ end
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 3)
 	if visibility.size() == 3:
@@ -4427,14 +4427,14 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 
 	var first: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(first.size(), 3, "the first delta call emits the building's state")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
 			"no entities to cull in this mission")
 
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	assert_eq(sim.get_building_visibility_changes().size(), 0,
 			"an unchanged frame emits no building deltas")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
@@ -4802,33 +4802,50 @@ func test_listen_snapshot_attachment_holds_its_resting_userpoint() -> void:
 		assert_lt(final_position.distance_to(anchor_info.position), 0.002,
 				"host snapshot uses the authoritative mounted child pose on the resting userpoint")
 
-	# A zero-health vehicle compact legitimately retires the decoded attachment
-	# subtree. Stop restores the authoritative baseline; its fresh decoded view
-	# must replay the load stream because this child has no live compact of its own.
+	# A scripted kill zeroes the carrier's health and its brain's death transition
+	# later sets its dead bit. The attachment is never retired: it stays presented,
+	# and its hide follows the carrier's dead bit, not its health (the ewep class
+	# update's dead-hull exit reads Flags & 2), so it is hidden exactly while the
+	# carrier row is flagged dead. Stop restores the authoritative baseline; its
+	# fresh decoded view must replay the load stream because this child has no
+	# live compact of its own, and the living carrier shows its attachment.
 	sim.set_mission_variable(7, 1)
-	var retired := false
+	var kept := true
+	var hide_follows_carrier := true
 	for _tick in range(80):
 		sim.step()
 		snapshot = sim.get_present_snapshot()
-		retired = true
+		var child_seen := false
+		var child_hidden := false
+		var carrier_dead := false
 		for record in range(snapshot.size() / stride):
-			if int(snapshot[record * stride + Simulation.PF_TYPE_ID]) == 1419:
-				retired = false
-				break
-		if retired:
-			break
-	assert_true(retired,
-			"decoded zero-health carrier retires the synthetic child subtree")
+			var base := record * stride
+			var type_id := int(snapshot[base + Simulation.PF_TYPE_ID])
+			if type_id == 1419:
+				child_seen = true
+				child_hidden = snapshot[base + Simulation.PF_HIDDEN] > 0.5
+			elif type_id == 1291:
+				carrier_dead = snapshot[base + Simulation.PF_ALIVE] < 0.5
+		kept = kept and child_seen
+		hide_follows_carrier = hide_follows_carrier and child_hidden == carrier_dead
+	assert_true(sim.has_event_fired(1), "the scripted kill ran")
+	assert_true(kept, "a killed carrier never retires its attachment")
+	assert_true(hide_follows_carrier,
+			"the attachment is hidden exactly while its carrier is flagged dead")
 
 	sim.reset_session()
 	snapshot = sim.get_present_snapshot()
 	var restored := false
+	var restored_hidden := true
 	for record in range(snapshot.size() / stride):
-		if int(snapshot[record * stride + Simulation.PF_TYPE_ID]) == 1419:
+		var base := record * stride
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1419:
 			restored = true
+			restored_hidden = snapshot[base + Simulation.PF_HIDDEN] > 0.5
 			break
 	assert_true(restored,
 			"restart immediately replays restored NoNetworkCallback attachments")
+	assert_false(restored_hidden, "the living carrier shows its attachment again")
 
 	# The first live 0x0A after replay must use the re-applied authoritative
 	# items.def classes. If restore had reverted the carrier callback width, this

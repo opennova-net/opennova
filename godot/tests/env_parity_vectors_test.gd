@@ -136,6 +136,15 @@ extends GutTest
 #   @ 0x5c2d3f..0x5c2ef6], pinned by the env_render_unit ctest's
 #   water_strip_row_colors cases); the env murk itself stays in c*/consts. No
 #   value was re-dumped: every lit-colour token is UNCHANGED.
+#   OT-E6 re-grill 2026-09-27: retail draws the dome in the render basis the
+#   builder authors it in (world matrix = the anchor translation alone
+#   [orig: render_skybox @ 0x5790e8..0x579146]; UV1/UV2 = render x/z scaled
+#   [orig: build_sky_dome_mesh @ 0x578db0]) and the scroll's camera term runs
+#   on the same render axes [orig: render_skybox @ 0x5791de..0x579260]. The
+#   dome drawn identity into Godot laid texture u along render z: a mirrored
+#   cloud field. sky/verts re-dumped as the x/z swap of the old samples and
+#   sky/k001 + sky/k064 as the render-basis camera term (render x = Godot z,
+#   render z = Godot x) over the same accumulators; every other key UNCHANGED.
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -316,9 +325,9 @@ const EXPECTED_FLOATS := {
 	"envfile/fog_type0": [0.500000000, 0.004158883, 1000.000000000],
 	"sky/anchor": [512.000000000, 32.000000000, -256.000000000, 175.000000000, 64.000000000],
 	"sky/flat": [250.000000000],
-	"sky/k001": [0.124992847, -0.062492847, 0.062495232, -0.031247616],
-	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
-	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
+	"sky/k001": [-0.062507153, 0.125007153, -0.031254768, 0.062502384],
+	"sky/k064": [-0.065762319, 0.128262311, -0.033424839, 0.063587479],
+	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 48.694095612, 175.263931274, 15.821670532, -512.000000000, 132.723480225, -0.000044760, 1024.000000000, -0.000005395, 0.000179042],
 	"water/mission_override": [42.500000000, 7.000000000],
 	"water/strip": [-2521.397949219, 7.000000000, -2033.695800781, 134.420776367, 7.000000000, -59.729457855],
 }

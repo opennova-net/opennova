@@ -8,7 +8,7 @@ extends GutTest
 # the displayed pixels back. Beauty values are gamma-domain numbers, so a
 # readback pixel is the FrameFX output value.
 
-const BEAUTY_MASK := 494593
+const BEAUTY_MASK := 14126081
 
 
 func _beauty_material(color: Color) -> ShaderMaterial:
@@ -19,7 +19,7 @@ render_mode unshaded, depth_draw_opaque, cull_disabled;
 uniform vec3 u_beauty;
 
 void fragment() {
-	if (CAMERA_VISIBLE_LAYERS == 494593u) {
+	if (CAMERA_VISIBLE_LAYERS == 14126081u) {
 		ALBEDO = u_beauty;
 	} else {
 		discard;

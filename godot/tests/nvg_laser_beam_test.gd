@@ -75,3 +75,56 @@ func test_the_beam_needs_the_drawn_body_and_gun() -> void:
 			'a person the frame does not draw is not in the visible list')
 	body.visible = true
 	assert_eq(_batches(presenter, 0, LASER_BEAM, false, true, 0), 1)
+
+
+func _view_camera(size: Vector2i, fov: float) -> Camera3D:
+	var view := SubViewport.new()
+	view.size = size
+	add_child_autofree(view)
+	var camera := Camera3D.new()
+	camera.keep_aspect = Camera3D.KEEP_WIDTH
+	camera.fov = fov
+	view.add_child(camera)
+	camera.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 0, 60))
+	return camera
+
+
+func _view_batches(presenter: EntityPresenter, inset_view: bool) -> int:
+	return presenter.nvg_laser_beam_batches(HANDLE, 0, LASER_BEAM, ACTION_POINT, false, true,
+			0, Transform3D(Basis(), Vector3(0, 1, 6)), inset_view)
+
+
+# The weapon Inset pass walks the persons its own collect drew, into its own
+# slot (engine renderer/scene_overlay.h kInsetOverlayOrder carries the
+# witness): a person the main view culls and the Inset draws (the view split,
+# its twins) beams in the Inset alone; one only the main view draws beams in
+# the main view alone.
+func test_each_view_beams_the_persons_its_collect_drew() -> void:
+	var parts := _armed_presenter()
+	var presenter: EntityPresenter = parts[0]
+	var body: ObjectModel = parts[1]
+	var gun: ObjectModel = parts[2]
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(GUN_3DI)), OK)
+	body.set_object_data(data)
+	var main_camera := _view_camera(Vector2i(640, 480), 90.0)
+	var inset_camera := _view_camera(Vector2i(256, 256), 10.0)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, inset_camera, 256.0)
+	assert_eq(_view_batches(presenter, false), 1, "the main walk over the drawn person")
+	assert_eq(_view_batches(presenter, true), 1, "the views agree: the Inset walk beams it too")
+	for model: ObjectModel in [body, gun]:
+		model.set_occlusion_hidden(true)
+		model.set_inset_occlusion_hidden(false)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, inset_camera, 256.0)
+	assert_true(body.is_view_split() and gun.is_view_split())
+	assert_gt(body.get_view_twin_count(), 0, "the Inset draws the person through its twins")
+	assert_eq(_view_batches(presenter, false), 0, "the main collect culled the person")
+	assert_eq(_view_batches(presenter, true), 1, "the Inset collect drew it: its walk beams it")
+	for model: ObjectModel in [body, gun]:
+		model.set_occlusion_hidden(false)
+		model.set_inset_occlusion_hidden(true)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, inset_camera, 256.0)
+	assert_eq(_view_batches(presenter, false), 1, "the main collect draws the person again")
+	assert_eq(_view_batches(presenter, true), 0, "the Inset collect culled it: no Inset beam")
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	assert_false(body.is_view_split())

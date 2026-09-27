@@ -1480,6 +1480,67 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 			"going unarmed frees the weapon rather than rebuilding one")
 
 
+# The host's and single player's mission NPCs are placed models, so the wire
+# walk defers their rows to the placed walk. A seat-1 org1 rider's row carries
+# the gun it copied from its vehicle (engine present rows), and the placed walk
+# builds and poses that gun at the placed body's hand joint exactly as the wire
+# walk does for a wire body: drawn with the body, freed once the row goes
+# unarmed, and freed when the row leaves the snapshot.
+func test_placed_person_row_draws_its_held_weapon() -> void:
+	var sim := _sim()
+	assert_eq(sim.load_weapon_table(_flat_root(), "weapon.def"), OK,
+			"the fixture weapon table loads (adm 1 -> M9K_3rd)")
+	var container := PresentPassFixture.container(self)
+	var placer := _placer()
+	var body := ObjectModel.new()
+	add_child_autofree(body)
+	body.set_process(false)
+	var skeleton := Skeleton3D.new()
+	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
+		skeleton.add_bone("Bone%d" % bone_index)
+	body.add_child(skeleton)
+	body.entity_ref = EntityRef.make(3, 7, 4242)  # a placed organic, BMS index 7
+	var models: Array[ObjectModel] = [body]
+	var index := EntityIndex.new()
+	index.build(models, null)
+	var p := EntityPresenter.new()
+	add_child_autofree(p)
+	p.setup(sim, index, placer)
+	p.setup_wire(sim, placer, container, index)
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"type_id": TYPE_PUMP,
+		"handle": 0x0010,
+		"kind": 3,
+		"index": 7,
+		"bms_id": 4242,
+		"held_weapon_adm": 1,
+	}]
+	var present_placed := func() -> void:
+		p.present_snapshot(snap.build(), Simulation.PF_STRIDE, 1, PackedInt32Array())
+	present_placed.call()
+	var weapon: ObjectModel = p.held_weapon_node(0x0010)
+	assert_not_null(weapon, "the placed person's gun is built from its row's ADM")
+	assert_true(weapon.visible)
+	assert_eq(weapon.get_authored_lod_owner(), body,
+			"the gun draws at the placed body's RLOD level")
+	snap.entities[0]["hidden"] = 1
+	present_placed.call()
+	assert_false(weapon.visible, "a hidden placed body hides its gun")
+	snap.entities[0]["hidden"] = 0
+	present_placed.call()
+	assert_true(weapon.visible)
+	snap.entities[0]["held_weapon_adm"] = 0
+	present_placed.call()
+	assert_null(p.held_weapon_node(0x0010), "going unarmed frees the placed gun")
+	snap.entities[0]["held_weapon_adm"] = 1
+	present_placed.call()
+	assert_not_null(p.held_weapon_node(0x0010))
+	snap.entities = []
+	present_placed.call()
+	assert_null(p.held_weapon_node(0x0010), "a row gone from the snapshot frees its gun")
+
+
 # --- Native held-weapon parity ---------------------------------------------
 
 # The native applier carries its own port of the hand-frame calibration (the

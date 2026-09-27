@@ -511,9 +511,10 @@ func test_wheel_factor_accumulates_whole_notches() -> void:
 
 
 # While the NVG composite is up the world pass is the NVG scene: the world
-# renders once, into a target of the NVG raster (512 rows at the frame's own
-# frustum; engine world::nvg_view_projection), the surface's own 3D pass off,
-# and the target goes away with NVG. [orig: Render_ProcessMainSceneFrame
+# renders once, into the NVG raster (retail's 512 square at the frame's own
+# frustum, non-square texels; engine world::nvg_view_projection, served
+# through TargetProjectionXrInterface), the surface's own 3D pass off, and the
+# target goes away with NVG. [orig: Render_ProcessMainSceneFrame
 # @0x5ca516..0x5ca5b0; NVG_RenderScene @0x5d2954..0x5d296d]
 func test_nvg_composite_renders_the_world_into_the_nvg_raster() -> void:
 	var world := _load_player_world()
@@ -539,16 +540,37 @@ func test_nvg_composite_renders_the_world_into_the_nvg_raster() -> void:
 	assert_not_null(through)
 	if target == null or through == null:
 		return
-	assert_eq(target.size, Vector2i(roundi(512.0 * size.x / size.y), 512),
-			"512 rows at the frame's aspect")
+	assert_eq(target.size, Vector2i(512, 512), "retail's 512 square, its columns included")
+	assert_true(target.use_xr, "the frame's frustum is served over the square")
+	assert_true(TargetProjectionXrInterface.is_serving(target))
 	assert_almost_eq(through.fov, 80.0, 0.001, "the frame's horizontal fov")
 	assert_eq(through.keep_aspect, Camera3D.KEEP_WIDTH)
+	var aspect := size.x / size.y
+	assert_eq(target.size_2d_override, Vector2i(roundi(512.0 * aspect), 512),
+			"the camera node's own frame keeps the frustum's aspect")
+	# The raster's matrix: the horizontal fov across the 512 columns, the
+	# frame's vertical half-extent across the 512 rows.
+	var projection: Projection = presenter.view_projection()
+	var half_h := tan(deg_to_rad(40.0))
+	assert_eq(projection, TargetProjectionXrInterface.served_projection(target),
+			"the frame projection is the served one")
+	assert_almost_eq(projection.x.x, 1.0 / half_h, 0.0001, "proj[0][0] = cot(fov_h/2)")
+	assert_almost_eq(projection.y.y, aspect / half_h, 0.0001,
+			"proj[1][1] = aspect / tan(fov_h/2): non-square texels on the square")
+	# A vertical edge 20 degrees right of the view axis lands on retail's
+	# column 256 + 256 tan(20) / tan(40) of the 512.
+	var angle := deg_to_rad(20.0)
+	var clip := projection * Vector4(tan(angle), 0.0, -1.0, 1.0)
+	assert_almost_eq((clip.x / clip.w * 0.5 + 0.5) * 512.0,
+			256.0 + 256.0 * tan(angle) / half_h, 0.01, "the edge's raster column")
 	assert_true(camera.get_viewport().disable_3d,
 			"one world render a frame: the surface's own 3D pass is off")
 	assert_false(sim.request_local_player_nvg_toggle())
 	_frame(world, presenter, camera, 2)
 	assert_false(presenter.is_nvg_raster_active())
 	assert_null(presenter.projection_viewport(), "NVG off releases the raster")
+	assert_false(TargetProjectionXrInterface.is_serving(target),
+			"and stops serving it")
 	assert_false(camera.get_viewport().disable_3d)
 
 
