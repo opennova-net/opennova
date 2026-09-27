@@ -409,8 +409,6 @@ void LightScene::fill_selected(const Slot &slot, LightHandle handle,
 			d3d_light_path);
 	light.attenuation = point_light_attenuation(params.radius_fixed);
 	light.range = static_cast<float>(params.radius_fixed) * 1.25f / 65536.0f;
-	light.lights_terrain = !params.disable_terrain;
-	light.lights_objects = !params.disable_objects;
 	light.handle = handle;
 }
 

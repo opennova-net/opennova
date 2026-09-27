@@ -79,7 +79,6 @@ public:
 	const std::vector<opennova::audio::AmbientCandidate> &mix_rows(const Vector3 &listener);
 
 	int64_t clock_tick() const;
-	int marker_count() const;
 
 	// The witnessed curve family (see engine/runtime/audio/ambient_mixer.h for the [orig]
 	// map); statics so the GUT pins over the curve keep a bound home.

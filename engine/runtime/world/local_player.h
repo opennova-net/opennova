@@ -49,11 +49,10 @@ public:
     // end-round, the death-camera target): a live embedder refreshes this
     // before each session frame; the bare kernel keeps the no-session default.
     LocalViewSessionInputs view_session_inputs;
-    // The post-tick pump's wire-facing outcomes, overwritten every pump: a
+    // The post-tick pump's wire-facing outcome, overwritten every pump: a
     // serving embedder relays the reload onto its loopback (the witnessed
-    // local reload producer -> the S2C 0x49 broadcast) and a joiner ships the
-    // fired round; the bare kernel drops both, having already applied them.
-    LocalWeaponFiredWire last_fired;
+    // local reload producer -> the S2C 0x49 broadcast); the bare kernel drops
+    // it, having already applied it.
     LocalWeaponReloadWire last_reload;
 
     bool has_local_player() const;

@@ -56,10 +56,9 @@ enum HudDeclutterSlot : int {
 };
 
 // The authored token suffix for a slot ("MSNTITLE".."CHAT"; nullptr out of
-// range) and the reverse lookup (-1 for an unknown token — retail simply has
-// no parse arm for it, e.g. the dead JOX HUDDECLUT_CTAPE row).
+// range). A token outside the table authors nothing — retail simply has no
+// parse arm for it, e.g. the dead JOX HUDDECLUT_CTAPE row.
 const char *declutter_token_name(int slot);
-int declutter_slot_from_token(const char *token);
 
 // The all-visible per-slot table HudFrameState defaults to (see the
 // declutter_visible note in hud_frame.h).
