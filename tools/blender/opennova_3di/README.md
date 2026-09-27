@@ -237,7 +237,8 @@ Principled BSDF:
   flip (Separate Color, 1 minus Green, Combine Color) it is a green-down file,
   written as it is. The node's strength, a Bump node and object or world space
   do not reach the game.
-- **Backface Culling** off is two-sided, for drawing and for the bullet faces.
+- **Backface Culling** off is two-sided, for drawing and, unless the material's
+  Both sides setting says otherwise, for the bullet faces.
 - **Alpha**: a Math node, Greater Than (Less Than for the inverted test)
   against a constant threshold, on the Principled Alpha is the alpha test at
   that threshold, Blender's own alpha clip.
@@ -322,10 +323,10 @@ Culling, the Math node, the render method and Emission.
 - **Material properties**: the shader (with what it implies) and export
   order, what Blender's settings give (two-sided, the alpha test, the alpha
   pass, the glow), the bullet faces' surface type (metal 14, glass 15, ...)
-  and flags (bullets pass, front only: a bullet from behind passes), the other
-  flag bits, the reflection colour, the texture rows the nodes cannot give, and
-  the RGB / alpha / UV generators and texture flipbook. A register-driven
-  flipbook selects its register by name.
+  and flags (both sides, bullets pass, front only: a bullet from behind
+  passes), the other flag bits, the reflection colour, the texture rows the
+  nodes cannot give, and the RGB / alpha / UV generators and texture
+  flipbook. A register-driven flipbook selects its register by name.
 
 ## Animations
 

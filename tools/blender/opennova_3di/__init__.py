@@ -369,17 +369,24 @@ class O3DMaterialProps(bpy.types.PropertyGroup):
     surface: IntProperty(name="Collision surface", default=14, min=0, max=255,
                          description="Bullet-face poly type: 14 metal, 15 glass, 18 heavy metal, 13 wood, "
                                      "12 stone, 16 cloth, 17 foliage, 1 object")
-    # The bullet faces' CFAC flags besides "both sides" (1), which follows Two
-    # sided: OED derived both from one render attribute. A projectile's face
-    # test skips a 0x100 face, and one with 0x800 but not 1 stops only a
-    # bullet crossing it from the front [orig: Physics_RaycastAgainstBoneCollision
-    # @ 0x4e4cb0, the 0x800 test @ 0x4e5139; runtime/world/collision_query.cpp].
+    # The bullet faces' CFAC flags. "Both sides" (1) follows Two sided unless
+    # set: OED derived both from one render attribute (the retired port's
+    # material_flags), but 154 JOTAC models store faces whose flag disagrees
+    # with their material's. A projectile's face test skips a 0x100 face, and
+    # one with 0x800 but not 1 stops only a bullet crossing it from the front
+    # [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0, the 0x800 test @
+    # 0x4e5139; runtime/world/collision_query.cpp].
+    face_both_sides: EnumProperty(name="Both sides", default="DRAWN", items=[
+        ("DRAWN", "As drawn", "CFAC flag 1 (a face stops a bullet from either side) when the material draws both "
+                              "sides (Backface Culling off), as OED derived both from one setting"),
+        ("YES", "Yes", "CFAC flag 1 whatever the material draws (41 retail models' culled materials)"),
+        ("NO", "No", "No CFAC flag 1 whatever the material draws (113 retail models' two-sided materials: Baricd02's "
+                     "wire, drawn both ways, stores each face in both windings instead)")])
     face_never_hit: BoolProperty(name="Bullets pass", default=False,
                                  description="Bullets never hit these faces (CFAC flag 0x100; retail rotor blades)")
     face_front_only: BoolProperty(name="Front only", default=False,
                                   description="Bullets hit these faces only from the front; one coming from behind "
-                                              "passes through (CFAC flag 0x800; a two-sided material, Backface "
-                                              "Culling off, overrides it)")
+                                              "passes through (CFAC flag 0x800; Both sides overrides it)")
     face_other_flags: IntProperty(name="Other face flags", default=0, min=0,
                                   description="CFAC flag bits besides 1, 0x100 and 0x800 (OED wrote 2 and 0x400)")
     other_flags: IntProperty(name="Other flag bits", default=0, min=0, max=255,
@@ -1672,6 +1679,7 @@ class O3D_PT_material(bpy.types.Panel):
         box.label(text="Bullet faces")
         row = box.row()
         row.prop(p, "surface")
+        box.prop(p, "face_both_sides")
         row = box.row()
         row.prop(p, "face_never_hit")
         row.prop(p, "face_front_only")

@@ -536,7 +536,18 @@ def flags_from_blender_settings():
     assert got == [(0, 0), (4, 0), (1, 64), (3, 64)], got
     # The bullet faces' both-sides flag follows two-sided too.
     faces = [f for c in sc["cobjs"] for f in c["faces"]]
-    assert sorted(f[4] & 1 for f in faces) == [0, 0, 0, 1], faces
+    assert [f[4] & 1 for f in faces] == [0, 1, 0, 0], faces
+    # Unless Both sides says otherwise (154 retail models store faces whose
+    # flag is not their material's drawing): import sets it from the faces.
+    culled.o3d.face_both_sides, both.o3d.face_both_sides = "YES", "NO"
+    _, sc = export_model(root)
+    faces = [f for c in sc["cobjs"] for f in c["faces"]]
+    assert [f[4] & 1 for f in faces] == [1, 0, 0, 0], faces
+    assert [m["matflags"] for m in sc["materials"]][:2] == [0, 4], sc["materials"]
+    imported, _ = importer.import_file(bpy.context, root.o3d.output_path)
+    sides = {m.name.split(".")[0]: m.o3d.face_both_sides for m in {s.material for ob in imported.children_recursive
+                                                                   if ob.type == "MESH" for s in ob.material_slots}}
+    assert sorted(sides.values()) == ["DRAWN", "DRAWN", "NO", "YES"], sides
 
 
 @case

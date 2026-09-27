@@ -19,7 +19,7 @@
 #                     the game's green.
 #   Emission          on: the shader export picks glows (a *_LUM one).
 #   Backface Culling  off: two-sided (material flag 4; bullets hit the faces
-#                     from both sides).
+#                     from both sides unless its Both sides setting says No).
 #   Render Method     Blended: the strips draw in the alpha pass, and the
 #                     shader export picks blends.
 # The Shader property names the engine shader; left empty, export picks one
@@ -326,7 +326,8 @@ def draws_normal_map(mat):
 
 def two_sided(mat):
     """Backface Culling off draws both sides: material flag 4 (no culling)
-    and the bullet faces' flag 1."""
+    and, unless the Both sides setting says otherwise, the bullet faces'
+    flag 1 (face_flags)."""
     return mat is not None and not mat.use_backface_culling
 
 
@@ -369,13 +370,15 @@ def alpha_test(mat):
 
 
 def face_flags(mat):
-    """A material's bullet-face flags: 1 (both sides) follows two-sided, as
-    OED took both from one render attribute (export_3di.cpp material_flags);
-    the others are the material's face settings."""
+    """A material's bullet-face flags: 1 (both sides) as its Both sides
+    setting says, by default following two-sided, as OED took both from one
+    render attribute (export_3di.cpp material_flags); the others are the
+    material's face settings."""
     if mat is None:
         return 0
     p = mat.o3d
-    return ((1 if two_sided(mat) else 0) | (0x100 if p.face_never_hit else 0) |
+    both = two_sided(mat) if p.face_both_sides == "DRAWN" else p.face_both_sides == "YES"
+    return ((1 if both else 0) | (0x100 if p.face_never_hit else 0) |
             (0x800 if p.face_front_only else 0) | (p.face_other_flags & ~0x901))
 
 
