@@ -106,20 +106,21 @@ void PlayerWeaponEffects::on_viewmodel_refresh() {
 // @ 0x4dc9e0]. Redundant reinstalls (the installed def already IS the target
 // and its viewmodel exists) are skipped so the queued SWITCHTO draw-in
 // survives.
-void PlayerWeaponEffects::apply_weapon_switch(const String &p_weapon_name, bool p_preserve_slot_state) {
+bool PlayerWeaponEffects::apply_weapon_switch(const String &p_weapon_name, bool p_preserve_slot_state) {
 	const Ref<LocalPlayerVisuals> world_visuals = visuals();
 	LocalPlayerPresenter *owner = presenter();
 	if (world() == nullptr || world_visuals.is_null() || owner == nullptr) {
-		return;
+		return false;
 	}
 	if (world_visuals->local_player_weapon_name().nocasecmp_to(p_weapon_name) == 0 &&
 			owner->viewmodel() != nullptr) {
-		return;
+		return true;
 	}
 	const bool switched = world_visuals->set_local_player_weapon_by_name(p_weapon_name, p_preserve_slot_state);
 	if (switched) {
 		owner->refresh_viewmodel();
 	}
+	return switched;
 }
 
 void PlayerWeaponEffects::apply_weapon_clear() {
