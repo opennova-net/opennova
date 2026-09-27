@@ -105,7 +105,7 @@ add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_B
 add_executable(weapon_timing_test anim/weapon_timing_test.cpp)
 target_link_libraries(weapon_timing_test PRIVATE opennova_3di_commands)
 target_include_directories(weapon_timing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME weapon_timing COMMAND weapon_timing_test ${CMAKE_CURRENT_BINARY_DIR})
+opennova_add_mixed_test(weapon_timing COMMAND weapon_timing_test ${CMAKE_CURRENT_BINARY_DIR})
 # The Blender add-on's tests, headless, when Blender is found (set
 # BLENDER_EXECUTABLE when it is not on PATH): every tests/blender/*_test.py
 # loads the source tree's add-on through tests/blender/addon_harness.py and
