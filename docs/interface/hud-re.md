@@ -1595,7 +1595,7 @@ the surface width tier, and a copy of the BOLD slot when hudpos names none
 | --- | --- | --- | --- |
 | Control-seat gear label (Low / Med / High) | large (Impac22b) | left-aligned at the scaled design anchor (`gear_x`, `gear_y - 50`), `g_hudColors.active`, flags 1 | `hud_draw_target_entity_overlay @0x59A5D0`: string select `@0x59A694..0x59A6BB` (byte 0 -> Med, 2 -> High, else Low; strings loaded `@0x5A4871..0x5A48CF`), anchor `@0x59A6C1..0x59A6E6`, slot push `@0x59A6F9`, `HUD_DrawTextLeft_HalfBright @0x59A6FE` |
 | Armory / vehicle-bay / FARP prompts | large (Impac22b) | centred on design (512, 280) | the Gameplay prompts section above |
-| Inset friendly name | bold (Arial bold) | centred on the aperture centre in SURFACE pixels, colour `0xFFFF0000` through the half-bright fold | `Render_RadarCompassOverlay`: slot push `@0x5CA0C0`, `HUD_DrawTextAligned_HalfBright @0x5D2F20` mode 2 `@0x5CA0CF` |
+| Inset friendly name | bold (Arial bold) | centred on the aperture centre in SURFACE pixels, colour `0xFFFF0000` through the half-bright fold | `Render_WeaponInsetScene`: slot push `@0x5CA0C0`, `HUD_DrawTextAligned_HalfBright @0x5D2F20` mode 2 `@0x5CA0CF` |
 | Mortar impact distance (`STROVER_DIST`) | drawn in the hudpos slot, MEASURED in the bold slot | design x = `impact_x - (width >> 1)` where width = the bold slot's unscaled extent x its scale, truncated; then the design pair scales to the surface and the line draws LEFT-aligned, flags 1, `g_hudFrameOverlayColor` | `HUD_RenderAllOverlays`: `GameFont_MeasureTextWidth @0x580A50` with slot `0xB4C394` `@0x5A897E..0x5A8984`, `sar 1` `@0x5A8995`, `Viewport_ScaleToVirtualCoords @0x5A89B0`, hudpos slot push `@0x5A89D0`, draw `@0x5A89D5` |
 
 `HUD_DrawTextLeft_HalfBright @0x5804C0` folds the colour to
@@ -1650,8 +1650,9 @@ authors OnlyScoped, so the missing death test is unobservable on stock data;
 the port keeps the structure rather than the accident.
 
 **The Inset scene is the whole world pass, particles included.**
-`Render_RadarCompassOverlay @0x5C9740` recomputes the view
-(`Camera_ComputeThirdPersonView @0x5C9841`, slot offsets `@0x5C98F7..0x5C9903`),
+`Render_WeaponInsetScene @0x5C9740` (ex `Render_RadarCompassOverlay`, called
+`@0x5CA949`) recomputes the view
+(`Camera_ComputeThirdPersonView`, the call `@0x5C9841`, slot offsets `@0x5C98F7..0x5C9903`),
 draws the two depth-mask fans, then renders the scene with the SAME function
 the main view uses: `Terrain_RenderWorldScene(view, 0, 0, 0)
 @0x5C9DE9`. Its arguments switch off only the sun glow (second argument,
@@ -1663,7 +1664,12 @@ particles `@0x5C96A6`, the coronas and the scars all run. The first-person
 viewmodel is not part of that function (the main frame draws it in its own
 viewmodel-first step), so the aperture never shows the gun. Port: the Inset
 camera takes its own particle view group in `godot/src/particle/particle_renderer`
-beside the main and water-mirror groups.
+beside the main and water-mirror groups, and (2026-09-26) every tail draw of that
+scene runs per view (beams, precipitation, coronas, glint; no glare,
+`renderer::kInsetOverlayOrder`), under the Inset's own fog
+(`ApplyFogAndAmbient(0, eye below water)` `@0x5C9D41..0x5C9D4F`, never the thermal
+grey); the Inset also collects, selects its LODs and draws its terrain and foliage per
+view ([render-occlusion-re.md](../render/render-occlusion-re.md) §8a).
 
 ## `hudpos.def` parser token → global map — `HUD_ParseHudposToken @0x59f370`
 

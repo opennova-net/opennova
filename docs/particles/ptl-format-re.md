@@ -1592,14 +1592,31 @@ Tag survey (descriptor +0x0C at each caller; the ported producer in brackets):
   `Projectile_UpdatePhysics` (the round) [throwable/round move effects],
   `Entity_SpawnBoneEffectsAtMask @ 0x458750` [item particlefx], and
   `AmmoDef_ProcessImpactEffect @ 0x40a240` (tag = the hit record's entity, +4) [projectile
-  entity impacts].
+  entity impacts]. Stamped 2026-09-26: the motor effects' damage smoke and fire (every
+  vehicle update's `submit_effect_descriptor` pair, e.g. `@ 0x48B0BC / 0x48B0F1`, with the
+  vehicle pushed as the tag) [`vehicle_effects.cpp`], the trail lanes
+  (`Entity_UpdateBoneTrailEffects`, the tag store `@ 0x458C5F`), section debris on the
+  foliage branch only (`Entity_SpawnSectionDebris`; the wood branch pushes a zeroed eax,
+  `@ 0x43F80A` / `@ 0x43F84C`, untagged) [destruction section debris], the masked death
+  banks (the origin fallback carries tag 0) [death banks], the bridge shocks (the store
+  `@ 0x4945B4`) [destruction shocks], NPC corpse decay (`Entity_UpdateInfantryAI`, the
+  store `@ 0x4B9F0F` ahead of the spawn `@ 0x4B9F36`) [`infantry_spawn.cpp`], and the
+  explosion queue's attached hit emitter (`Projectile_ProcessExplosionQueue`, tag = the
+  queued source entity, the store `@ 0x4EB263`, the spawn `@ 0x4EB28A`) [destruction's
+  pool-0 sweep; world-wac-ai-re.md §24].
 - Untagged (0): `Weapon_RaycastAndSpawnImpact @ 0x4e8950` [knife impacts], terrain/water
   projectile impacts, `WeatherParticle_UpdateAllEmitters` [rotor-wash zone groups],
   `Entity_SpawnExplosionEffects @ 0x4399e3`, `Entity_SpawnDebrisParticles @ 0x43a823`,
-  `Entity_HandleDeathEvent @ 0x40716f / @ 0x4072dd` [destruction effects].
+  `Entity_HandleDeathEvent @ 0x40716f / @ 0x4072dd` [destruction effects], and the
+  death-piece trail: every death-piece spawn carries tag 0 (`xor edi, edi @ 0x492FC2`,
+  `xor ebx, ebx @ 0x57BA0F`) [the destruction presenter's piece trail].
+- Tagged in retail with no port producer (nothing to stamp until one is ported): the bone
+  trails `@ 0x43c05f / 0x43c0a4 / 0x43fb0c / 0x458d55`; infantry
+  `@ 0x4b4e39 / 0x4b825b / 0x4b82db`, `@ 0x4b9f36 / 0x4bfc1c`; floating
+  `@ 0x4a82e7 / 0x4a8325 / 0x4a8880`; `OrganicClass_HandleEvent @ 0x407542`;
+  `Entity_HandleDamageAndTriggerZones @ 0x4078aa`; `Entity_SpawnBoneSoundEmitter
+  @ 0x4427d4 / 0x4427f8`; `Entity_BuildOrientationFromVectors @ 0x459079`;
+  `Entity_ProcessVehicleSuspension @ 0x464b0e`; `NetPacket_DeserializeRoundEvent
+  @ 0x42f6c2`.
 
-**Open after the 2026-09-24 pass:**
-1. Tagged in retail but not yet stamped in the port (left ungated):
-   `Entity_SpawnBoneTrailEffect @ 0x43c0a4` (edi), `Entity_SpawnSectionDebris @ 0x43f84d`,
-   the detonation/fuze object rows, squibs, the motor effects and the death-piece trail.
-   Each needs its row to carry the tag.
+**Open after the 2026-09-24 pass:** none.

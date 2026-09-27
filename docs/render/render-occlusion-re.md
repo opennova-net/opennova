@@ -27,12 +27,12 @@ entry stays [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) D-SND-7).
 | Camera blink query | **PORTED** (2026-07-17, `CollisionWorld::query_blink_boxes_at_point`) | `[orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]` |
 | Per-frame section-mask build | **PORTED** (2026-07-17, `OcclusionWorld::build_section_masks`; masks keyed by pool-2 handle slot like `Pool_GetIndexFromPtr`). 2026-09-24: the RAW word (`section_mask`) and the def's forced bits (`forced_section_mask`) are kept apart; only the part draw ORs them, `ObjectModel::section_part_visible` (§5, D-OCC-9 closed) | `[orig: build_sector_visibility_masks @ 0x5c8610]` |
 | Portal slot sort + clamp | **PORTED** (2026-09-24, `OcclusionWorld::sort_portal_slots`, "Port the retail occlusion collector, mask and sub-pixel rules"; closes D-OCC-10) | `[orig: Terrain_SortPortalSlotsByPriority @ 0x5c4410]`: stable descending sort on the slot priority (`cmp ecx,[eax+1Ch]; jge` `@ 0x5c4443`), then `g_PortalSlotCount = min(count, 14)` `@ 0x5c449f..0x5c44a4`; called `@ 0x5c9188`; ctest `occlusion` (slot clamp) |
-| Portal traversal (section expansion, window/viewthru wedges) | **PORTED** (2026-07-17, `OcclusionWorld::traverse` + seeders, in the render float world — see §1a). 2026-09-24: a welded type-5 link also recurses under the def's recurse-windows bit (§3.2) | `[orig: render_visibility_portal_traversal @ 0x5c4ae0]` + the two seeders `@ 0x5c73d0 / @ 0x5c7330`; recursion args witnessed at `@ 0x5c5619/0x5c57fc` (backface-latch recursion re-uses the CALLER's planes with section 0); ctest `occlusion` (the type-5 recursion) |
+| Portal traversal (section expansion, window/viewthru wedges) | **PORTED** (2026-07-17, `OcclusionWorld::traverse` + seeders, in the render float world — see §1a). 2026-09-24: a welded type-5 link also recurses under the def's recurse-windows bit (§3.2). 2026-09-27: the seed frustum's five planes pass through the eye, as `g_CameraFrustumPlanes5` does (§3.2; the CP03 spawn divergence, §3.3) | `[orig: render_visibility_portal_traversal @ 0x5c4ae0]` + the two seeders `@ 0x5c73d0 / @ 0x5c7330`; recursion args witnessed at `@ 0x5c5619/0x5c57fc` (backface-latch recursion re-uses the CALLER's planes with section 0); ctest `occlusion` (the type-5 recursion) |
 | Occluder culling (render_TOC) | **PORTED** (2026-07-17, `OcclusionWorld::toc_occluded` + `build_occluder_planes`). 2026-09-24: the candidate radius is entity+0, and the render waves run render_TOC on every collected entity in no blink box (`render_wave_toc_occluded`, "Run render_TOC on collected entities outside blink boxes") | `[orig: test_sector_entity_occlusion @ 0x5c4610]`, planes `[orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0 → build_clip_planes_from_collision @ 0x5b34e0]`; the 8-corner refinement's collision-AABB swizzle witnessed @ 0x5c4920; the wave calls `[orig: Terrain_RenderSectorEntities @ 0x5c7b92..0x5c7ba6]`, `[orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d8b..0x5c7da0]`; ctest `occlusion` (`test_render_wave_toc_skips_contained_entities`, TOC radius) |
-| Entity collectors (blink-hits gate, person leg, model leg, sub-pixel floor) | **PORTED** (2026-09-24, `OcclusionWorld::entity_render_visible` / `person_render_visible` / `sphere_render_visible`; §3 step 5) | `[orig: collect_visible_entities_for_terrain @ 0x5c8c60]` person leg `@ 0x5c8df3..0x5c8e10`, floor `@ 0x5c8e5e`; the full-Euler sphere pose `[orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40]`; ctests `occlusion` (person leg, full Euler), `occlusion_camera` (focal) |
+| Entity collectors (blink-hits gate, person leg, model leg, sub-pixel floor) | **PORTED** (2026-09-24, `OcclusionWorld::entity_render_visible` / `person_render_visible` / `sphere_render_visible`; §3 step 5). 2026-09-26: the model leg reads the collision block's CMDL sphere and a model-less entity is never collected; the weapon Inset pass collects per view (`OcclusionWorld::select_view`, §8a). 2026-09-27: pool 2 splits by the items.def type, so decorations and foliage are entity-collected, not batched as buildings (`world::building_def_row`, §3.1) | `[orig: collect_visible_entities_for_terrain @ 0x5c8c60]` person leg `@ 0x5c8df3..0x5c8e10`, floor `@ 0x5c8e5e`; the full-Euler sphere pose `[orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40]`; ctests `occlusion` (person leg, full Euler), `occlusion_camera` (focal) |
 | Native visibility bound-sphere arithmetic | **PORTED** (2026-09-13, closes D-OCC-16) | `OcclusionWorld::bound_sphere_fixed` takes the positive-side half on odd Q16 widths (`max - midpoint`, with the +-0x40000000 unset-bound clamps) and multiplies center and radius by the entity's nonzero Q16 scale with the +0x8000 rule `[orig: Entity_ComputeBoundingSphere @ 0x5C69A0, @ 0x5C6A02..0x5C6B52]`; the static-batch, TOC and per-entity visibility callers pass `Entity::uniform_scale_q16`. `occlusion_test` pins radius 7 for `(-3,-2,10)..(4,7,15)`, the 1.5x scaled form and the sentinel bounds; the render RLOD projection shares the arithmetic (D-RORD-12). |
 | Entity-vs-terrain three-ray occlusion latch | **PORTED** (2026-07-17, `OcclusionWorld::three_rays_clear` + the `Entity.occlusion_latch` byte). 2026-09-24: the rays start 1 u above the eye, and the re-arm jitter draws the world's shared `PRNG_Next16_C` stream (`World::prng16_c_state`, bound by `OcclusionWorld::bind_focal_wind_random`), closing the D-OCC-15 stream facet | `[orig: terrain_occlusion_check_three_rays @ 0x610ed0]` + the three collectors below; ctest `occlusion` (three-ray start) |
-| Frame-level blink gates (terrain / sky bracket / water / foliage) | **PORTED** (2026-07-16, `OcclusionFrame::apply_blink_gates`; 2026-07-17: the `g_BlinkWaterVisible` straddle/window-latch override + the `Bms_AttribFlags & 0x10` force-indoors landed in `OcclusionFrame::apply_frame`). 2026-09-24 ("Split the dome's cloud pass after the bodies and port the sky pass gates"): per-pass sky gates (`renderer::scene_pass_gates` -> `OcclusionFrame::apply_scene_pass_gates`); the beauty frame has no indoor black clear, the black clear is the mirror's (§4; D-OCC-1 closed) | gates at `@ 0x5c1342..0x5c1353 / @ 0x5d0570 / @ 0x5ca197..0x5ca19f / @ 0x5ca1a3..0x5ca1bd / @ 0x5c93cb / @ 0x5c95bf / @ 0x5c9665`; ctest `renderer_render_order` (the gate law), `environment_state`; GUT `game_world_test.gd` blink-gate + occlusion-frame cases |
+| Frame-level blink gates (terrain / sky bracket / water / foliage) | **PORTED** (2026-07-16, `OcclusionFrame::apply_blink_gates`; 2026-07-17: the `g_BlinkWaterVisible` straddle/window-latch override + the `Bms_AttribFlags & 0x10` force-indoors landed in `OcclusionFrame::apply_frame`). 2026-09-24 ("Split the dome's cloud pass after the bodies and port the sky pass gates"): per-pass sky gates (`renderer::scene_pass_gates` -> `OcclusionFrame::apply_scene_pass_gates`); the beauty frame has no indoor black clear, the black clear is the mirror's (§4; D-OCC-1 closed). 2026-09-26: the detail-foliage gate, the slot drapes under the terrain gate and the letter-clear reopen edges (§4) | gates at `@ 0x5c1342..0x5c1353 / @ 0x5d0570 / @ 0x5ca197..0x5ca19f / @ 0x5ca1a3..0x5ca1bd / @ 0x5c93cb / @ 0x5c95bf / @ 0x5c9665`; ctest `renderer_render_order` (the gate law), `environment_state`; GUT `game_world_test.gd` blink-gate + occlusion-frame cases |
 | Draw-side mask consumption (hidden-section mask, two-pass open buildings, per-light section masks) | **PORTED** (2026-07-17, visibility data only: the mask drives `ObjectModel` per-part visibility on de-batched buildings; the two-pass draw order / per-light scoping are renderer-specific legs, D-OCC-13). 2026-09-24: the part draw ORs the def's forced bits over the raw mask (D-OCC-9 closed), a part hides on the destroyed mask OR the occlusion verdict, and the water mirror's per-draw CLIP arming is ported (§5) | `[orig: Terrain_RenderSectorModels @ 0x5c5d30]`; `[orig: BoneCallback_bldg_World @ 0x4e22cf..0x4e22e2]`; ctests `occlusion` (forced bits split), `doors` (retail Iblock01 forced mask); GUT `object_model_section_mask_test` |
 | Conservative device occluders | **PORTED (2026-08-29)** — opted-in mission buildings convert their eligible OOBJ face sets (record type and slice validity are the only gates; the type-0/1 authoring meaning stays unwitnessed, D-OCC-3, so the sets are not proven closed) into section-owned `ArrayOccluder3D`/`OccluderInstance3D` children. Portal, window, open, welded, and malformed record-local slices remain exclusively under the retail section/portal pass; its section mask also gates each generated occluder. Godot occlusion culling is a conservative second layer, not a replacement for the retail visibility owner; the world owns the switch (no model touches the viewport) and keeps it OFF by default: measured 2026-08-30 through the typed `occlusion_culling` debug row (device row, `GameWorld.set_occlusion_culling_enabled`; 1600x900, Ryzen 7735HS iGPU, `perf_mission_rows` medians of p50 over two runs, the missions placing 19 / 26 buildings with authored occluders), the occluder pass cost 0.64 / 0.59 ms of `render_root_cpu` (frame 14.47 -> 13.55 ms on 00TRa, 14.50 -> 13.68 ms on CP01; `draw` 3.92 -> 3.19 / 3.27 -> 2.60 ms) and culled nothing at the spawn poses (root draw calls 487 -> 489 / 416 -> 416, primitives 870797 -> 871141 / 1109933 -> 1109933), because the retail section verdict already hides what the OOBJ faces would. The row switches the pass on live for an RD-backed viewport (`game_render_diagnostics` reports the placed occluder count as `mission_placement.authored_occluder_models`, so a toggle over a mission without occluders is visibly a no-op); a load and an unload re-apply the default. Master had the consumer off, so this closes the 0.6 ms of the PR's `render_root_cpu` gap that was attributed to it. The `render_root_cpu` that remains above master after it (+0.61 / +0.51 / +0.35 ms on 00TRa / CP01 / CP19, 2026-08-30 A/B, n=3) is not the population count: one population per (graphic, policy, level, submesh) instead of the bins (448 vs 835 populations on 00TRa) left it unchanged (1.83 vs 1.79 ms). It is the focused Q3 capture/blur/composite pass that master ran as a separate viewport with its own `render_q3_cpu` slot (1.17 / 0.95 / 0.49 ms) and that now executes as a compositor callback inside the root viewport's measured span; the render server's CPU total over root + Q3 + water + slot is 0.59 / 0.52 / 0.17 ms BELOW master. A lane on that row toggles the FrameFx terminal effect first, not the water viewport | `renderer::build_authored_occluder_sections`; `ObjectModel.set_authored_occluders_enabled` / `get_authored_occluder_count`; `GameWorld._apply_occlusion_culling_policy` (after `place()`, and in `unload()`), `GameWorld.set_occlusion_culling_enabled` / `is_occlusion_culling_enabled` / `get_authored_occluder_model_count`, `DebugControls` row `occlusion_culling` |
 | Sound occlusion (distance inflation + LOS legs) | **PORTED** (2026-07-16, closes D-SND-7; residue D-SND-9) | `[orig: Sound_ApplyOcclusionDistance @ 0x529970]` + callees; ported as `CollisionWorld::sound_occlusion_inflate` + `terrain_raycast_los_clear`; `collision` + `terrain_raycast` ctests; see [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) |
@@ -139,6 +139,11 @@ every pool-1 entity, then every non-building pool-2 entity (the def-type-5
 skip `[orig: @ 0x5240f3]`); ported 2026-09-24 as
 `CollisionWorld::refresh_mission_start_blink`, run by
 `MissionKernel::occlusion_init_mission` before `OcclusionWorld::init_mission`.
+The port's round restart (`MissionKernel::restore_baseline`) keeps the
+kernel's `OcclusionWorld` from the first start and restores rows sealed after
+the portal init, which is `Game_RestartRoundSP`'s outcome (register + weld
+skipped `@ 0x5263d9`, the flag tail over the same welded records); ctest
+`occlusion` (`test_round_restart_keeps_the_first_weld`) pins it.
 
 1. arg ≠ 0 (first start): **register** every building's type-2 faces —
    `[orig: Terrain_RegisterExteriorPortalFaces @ 0x5c5b80]` walks the static
@@ -254,7 +259,12 @@ blink query, then:
   broad phase at `buildingRadius + 0x8000`), runs the §15 point query
   (`Entity_TestCollisionSections @ 0x4aef90`, one point, radius `0x8000`) and
   returns the packed 4-slot hit set + count — the camera-position analog of
-  the entity-side `refresh_blink`.
+  the entity-side `refresh_blink`. The query point `byte_A78364` is the
+  composed first-person eye: `Render_ProcessMainSceneFrame` copies
+  `Camera_ComputeThirdPersonView`'s `g_ViewPos` (the call `@ 0x5ca34d`, the
+  struct `@ 0x5ca352..0x5ca37b`) into viewport+4 through
+  `Viewport_BuildProjectionMatrix` (`@ 0x411136..0x411147`) before the collect
+  (`build_sector_visibility_masks @ 0x5c8674..0x5c8679` pushes it).
 - **Camera inside ≥ 1 blink box**: per containing building,
   `mask |= [orig: Terrain_TraversePortalsFromSection @ 0x5c73d0]`(entity,
   hitSection) — the portal traversal seeded at the camera's section. Matched
@@ -284,13 +294,39 @@ blink query, then:
   sphere form on the link leg (ctest `occlusion`,
   `test_link_water_straddle_uses_bound_sphere`).
 
+The statics table splits pool 2 by the items.def type
+(`Entity_BuildProximityLists_Pool2 @ 0x4b946e / 0x4b9502`). The building
+collector walks the Building-type prefix only; `Terrain_CollectVisibleEntities_0
+@ 0x5c6f48..0x5c721e` walks the rest (decorations, foliage) with the entity
+gates, whose quads come from the mission-start refresh (`@ 0x5240f3`). The
+entity wave draws them with `g_HiddenSectionMask = 0` (`@ 0x5c7b6b`) and
+lights each one (`@ 0x5c7bf1`). Reimpl (2026-09-27): `world::building_def_row`
+keys the statics split, `refresh_blink`, the mission-start refresh, the person
+candidate blink walks, the shell's building and entity verdict walks and the
+lighting feed. Test: ctest `occlusion`
+(`test_decoration_rows_are_entity_collected`), `indoor_visibility_spawn_cp03`.
+
 ### 3.2 The portal traversal
 
 `[orig: render_visibility_portal_traversal @ 0x5c4ae0]` — "render_VPT()" by
 its own debug strings. Takes stack args `(currentSection, frustumPlanes,
 planeCount)` (frameless function; Hex-Rays drops them — witnessed at the
 seeders' call sites `@ 0x5c7448-0x5c745b` pushing
-`(cameraSection, g_CameraFrustumPlanes5 @ 0xA7849C, 5)`). Per 60 B record:
+`(cameraSection, g_CameraFrustumPlanes5 @ 0xA7849C, 5)`;
+`Terrain_TraversePortalsFromExterior` seeds the same planes `@ 0x5c7377`).
+`g_CameraFrustumPlanes5` is viewport+0x13C..+0x188, written by
+`Viewport_BuildProjectionMatrix`: four side planes `@ 0x4113b4..0x411571`,
+then the forward plane `@ 0x411577..0x4115c6`. Every plane passes through the
+eye (d = -(n . eye)); there is no near distance. The projector's own near word
+is viewport+0x78 = 0x800 (1/32 u, `@ 0x411093`), read by
+`Viewport_TransformAndClipPoint` `@ 0x411622`. Reimpl (2026-09-27):
+`occlusion_camera_from_view` builds the five planes through the eye;
+`sphere_in_view` and the slot-record clip take the projector's near leg
+(`kViewportNearQ16`). The earlier near-plane anchor dropped a door less than
+0.2 u ahead of the eye, and the whole exterior with it (the CP03 spawn and
+doorway divergence, §3.3). Tests: ctest `occlusion`
+(`test_eye_in_front_of_a_window_keeps_the_exterior`), `occlusion_camera`,
+`indoor_visibility_spawn_cp03`. Per 60 B record:
 
 - Section match: record must touch `currentSection` via bytes +1/+2
   (`currentSection == 0`: type-2 faces only — the outside-in mode).
@@ -341,6 +377,37 @@ collision-derived bound (ported 2026-09-24). The same test runs from the
 building batch (the mask build) and from both entity render waves for every
 collected entity in no blink box (§3 step 5).
 
+Two retail rules make far-building occlusion depend on where the eye stands
+(witnessed 2026-09-26; the port reproduces both):
+
+- **R1, the open hulls.** The outdoor branch marks bit 31 on the building of
+  every type-1 slot (`@ 0x5c86e9..0x5c871b`), so every type-1 "open" hull
+  occludes (the gate `@ 0x5c4764`) from the tick the eye leaves a blink box;
+  the buildings behind it drop on that tick unless a viewthru wedge rescues
+  them. The inside branch marks only the open buildings it walks.
+- **R2, the zero-weight clamp.** The OOBJ loader copies the disk +20 float
+  into the runtime +0x2C slot weight (`@ 0x5b4c4d`), zero in every JO
+  record, so the 14-slot clamp (`@ 0x5c449f..0x5c44a4`) keeps the first 14
+  records in collection order, and which far buildings are occluded depends on
+  which 14 records the view collects.
+
+**The CP03 spawn (2026-09-27): two port divergences, fixed.** At CP03's spawn
+in HN_Bld1's west door, facing west, the port drew only the terrain and the
+sky, and the outside dropped out for a few frames on every doorway crossing,
+where retail captured at the same poses draws the hangar, the vehicles, the
+trees and the village; facing north, the port hid the armory crate inside the
+room (Armry03, `type decoration`), which retail draws. The pose was not the
+cause: retail's spawn and eye match the port's to 5 mm (the composed eye of
+§3.1). The first divergence was the traversal frustum's forward plane, which
+the port had anchored 0.2 u ahead of the eye (§3.2): with the eye less than
+0.2 u inside a door, the door was clipped whole, no window wedge was banked,
+and render_TOC's camera-inside rule culled every outdoor candidate. The second
+was the pool-2 split: the port batched every pool-2 row as a building, so the
+crate took the camera-inside batch loop's render_TOC, where retail collects a
+decoration as an entity (§3.1). Both are fixed; ctest
+`indoor_visibility_spawn_cp03` (`tests/world/indoor_visibility_walk_test.cpp
+--retail-truth`) asserts retail's drawn set at six captured poses.
+
 ### 3.4 The three-ray terrain occlusion latch
 
 All three entity collectors run, **only while the local player is outdoors**
@@ -364,7 +431,7 @@ camera's terrain rays are meaningless). The reflection pass
 ## 4. Frame-level blink gates
 
 `g_LocalPlayerBlinkFlags @ 0x24C1934` accumulates `bvol.flags ^ 6` from the
-§15 queries; mission start clears the letter bits:
+resolver's first pass and `Entity_BuildProximityList` (§15); mission start clears the letter bits:
 `and g_LocalPlayerBlinkFlags, 0xFFFFFFC1` `[orig: Game_StartMission
 @ 0x525c45]`. A mission attribute forces indoors every frame:
 `Bms_AttribFlags & 0x10 → |= 2` `[orig: Render_ProcessMainSceneFrame
@@ -373,10 +440,10 @@ camera's terrain rays are meaningless). The reflection pass
 | Accum bit | Effect when set | Witness |
 |---|---|---|
 | 0x2 (indoors) | the water mirror's PolyTrn terrain pass and its sky pass skipped, and the mirror RTT cleared black (`@ 0x5c1597` is the reflection target's clear, not the beauty frame's); `NVG_RenderSceneToTarget` skips its own PolyTrn pass on the same letter | `[orig: render_main_scene @ 0x5c1342..0x5c1353 → @ 0x5c166b / @ 0x5c1597]`, `[orig: NVG_RenderSceneToTarget @ 0x5d0570]` |
-| 0x2 | the main terrain sector pass skipped (`Terrain_RenderMainSectorPass @ 0x610ac0`: the plain lit sector batch, `Terrain_RenderSectorBatchLit @ 0x60c670`, then the drapes; it draws no sky) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca197..0x5ca19f → the skip @ 0x5ca84f over the call @ 0x5ca867]` |
-| 0x2 | far-foliage passes skipped | `[orig: Terrain_RenderWorldScene @ 0x5c95bf / @ 0x5c9665 → Foliage_RenderDetailPatchesPass @ 0x60c6d0]` |
+| 0x2 | the main terrain traversal (the near-foliage patch collection with it) and the main terrain sector pass skipped (`Terrain_RenderMainSectorPass @ 0x610ac0`: the plain lit sector batch, `Terrain_RenderSectorBatchLit @ 0x60c670`, then the drapes; it draws no sky). The slot captures run earlier, outside the gate (`Render_TerrainScene` -> `Render_ShadowPass`, the call `@ 0x610cb5`); the port closes the drapes with the terrain gate (`SlotShadow::set_terrain_pass_drawn`, 2026-09-26) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca197..0x5ca19f → the traversal skip @ 0x5ca645..0x5ca64e over the sub_60FF50 call @ 0x5ca654, the sector-pass skip @ 0x5ca84f over the call @ 0x5ca867]` |
+| 0x2 | both detail-foliage passes skipped; the entity collector and the BySide waves, their MODEL masks included, take no letter (ported 2026-09-26 as the `detail_foliage` gate, foliage-re.md) | `[orig: Terrain_RenderWorldScene @ 0x5c93d5..0x5c93e0 → the skips @ 0x5c95bf / @ 0x5c9665 over Foliage_RenderDetailPatchesPass @ 0x60c6d0]` |
 | 0x2 | three-ray entity occlusion disabled (everything passes) | §3.4 |
-| 0x2 | outdoors flag forwarded into `Render_TerrainScene @ 0x610c80` (arg use unwitnessed, D-OCC-6) and `Render_RadarCompassOverlay @ 0x5ca949` | `[orig: @ 0x5ca504 / @ 0x5ca949]` |
+| 0x2 | outdoors flag forwarded into `Render_TerrainScene @ 0x610c80` (arg use unwitnessed, D-OCC-6) and the weapon Inset pass `Render_WeaponInsetScene @ 0x5c9740`, which gates its own traversal and sector pass on the main frame's value | `[orig: @ 0x5ca504; the push @ 0x5ca948 before the call @ 0x5ca949; Render_WeaponInsetScene @ 0x5c9a23..0x5c9a2b over the sub_60FF50 call @ 0x5c9a2f, @ 0x5c9d57..0x5c9d5f]` |
 | 0x4 | the whole main sky bracket skipped: the sky dome (`SkyDome_RenderWithSkyfog` → `render_skybox`, `@ 0x5ca81a`), the sun/moon discs it draws and the `Render_ResetFixedFunctionState` fixed-function reset (D-OCC-1). The bracket also needs the eye strictly above the water: sky drawn = !(accum & 4) && camZ > waterHeight | `[orig: Render_ProcessMainSceneFrame @ 0x5ca1a3..0x5ca1bd → @ 0x5ca7c4..0x5ca81a]` |
 | 0x8 | both water passes skipped unless `g_BlinkWaterVisible` | `[orig: @ 0x5c93cb / @ 0x5c95d2-0x5c95ea]` |
 
@@ -389,12 +456,33 @@ gated here. Reimpl (2026-09-24, "Split the dome's cloud pass after the bodies
 and port the sky pass gates"): `renderer::scene_pass_gates`
 (`engine/runtime/renderer/scene_pass_gates.h`, sky letter
 `world::kBlinkSkyOffBit` = 0x4) → `OcclusionFrame::apply_scene_pass_gates`
-applies the terrain gate, the beauty sky gate (dome + discs,
+applies the terrain gate (with it the slot drapes,
+`SlotShadow::set_terrain_pass_drawn`, 2026-09-26), the detail-foliage gate
+(`detail_foliage` → `FoliageDispatcher::set_detail_passes_drawn`, which hides
+the detail tier alone; the dispatcher is the terrain's sibling, so the MODEL
+masks keep running indoors, 2026-09-26), the beauty sky gate (dome + discs,
 `u_beauty_pass_drawn`) and the mirror sky gate (`u_mirror_pass_drawn`) per
 pass, re-deriving the waterline side every display frame;
 `EnvironmentState::frame_clear_color_for(eye_above_water)` is the beauty
 clear (ctest `renderer_render_order`, `environment_state`; GUT
 `game_world_test.gd`).
+
+The letters gate the frame that reads them. Retail reads
+`g_LocalPlayerBlinkFlags` at the frame top (`@ 0x5ca192`), ahead of the
+traversal (`@ 0x5ca645..0x5ca654`) and the sector pass (`@ 0x5ca84f`). The
+scene core latches its water label from the same word
+(`Terrain_RenderWorldScene @ 0x5c93b8..0x5c93cd`) ahead of the water passes
+(`@ 0x5c95d4..0x5c95ea`). So a tick that clears the indoors or the water
+letter draws that pass in its own frame. Reimpl (2026-09-26):
+`renderer::scene_pass_gate_edges` returns the reopen edges from the previous
+and new letters. `OcclusionFrame::apply_blink_gates` returns them, and
+`GameWorld::apply_blink_frame` re-runs the terrain leg on an indoors clear and
+the water leg on a water clear (the hidden terrain leg already tracked the
+frame's bounds, env-tod-re.md, the water-active predicate). The leg table runs
+terrain and water before the blink leg, which must follow the network leg. A
+letter that sets needs no edge: its hides apply at once. Tests: ctest
+`renderer_render_order`; GUT `blink_reopen_edge_test.gd` (00TRa Armry01,
+section 2 into the section 3 hall).
 
 Debug: `Debug_DrawEnvironmentValues @ 0x4ef1cc` prints the accum (overlay
 only). Bits 0x10/0x20 have no witnessed frame consumer.
@@ -508,14 +596,16 @@ those in the ledger's "Render — occlusion" section and registered the four
 deliberate ones (standing rule 2 — a divergence gets its ledger row at birth).
 The 2026-09-24 rendering parity pass (§8a) closed D-OCC-1, -4 and -5
 (witnessed) and D-OCC-9, -10, -14 and -15 (ported), narrowed D-OCC-12 and
-D-OCC-13, and refuted D-OCC-13's window-glow facet.
+D-OCC-13, and refuted D-OCC-13's window-glow facet. The 2026-09-27 CP03 fixes
+narrowed D-OCC-12 again (the planes' form and the projector's near word are
+retail's, §3.2).
 
 | ID | Status | Summary |
 |---|---|---|
 | D-OCC-1 | CLOSED 2026-09-24 (witnessed; "Split the dome's cloud pass after the bodies and port the sky pass gates") | Blink accum bit 0x4 gates the whole main sky bracket: the dome, the sun/moon discs it draws and the `Render_ResetFixedFunctionState @ 0x58aa80` write (§4). The former "float-1.0 device state" is `Render_ResetFixedFunctionState` → `sub_677700(0, 1, &unk_7D8A70)` `[orig: @ 0x58aa9e]`, whose third argument the IDB types as a D3DMATRIX: the 64 bytes at `0x7D8A70` are the identity matrix. The 2026-09-24 reading saw only that stage-0 write: a stale NORET flag on `set_texture_stage_state` truncated the body at the call. The whole function (re-bounded 2026-09-25, `@ 0x58aa80..0x58abc2`) resets the fixed-function state before the dome: identity transforms on stages 0..1 (2..3 with caps 0x100), DIFFUSE/AMBIENT/EMISSIVEMATERIALSOURCE = MATERIAL, `D3DRS_AMBIENT` 0xFFFFFF, LIGHTING on, `SetMaterial` and the default pass `[orig: @ 0x58aab1..0x58abb9]`. The bracket also needs the eye strictly above the water `[orig: Render_ProcessMainSceneFrame @ 0x5ca1a3..0x5ca1bd → @ 0x5ca7c4..0x5ca81a]`. Ported as the beauty sky gate of `renderer::scene_pass_gates`. |
 | D-OCC-2 | OPEN (witness detail) | Per-building flag bytes `+0x2CC` (has type-1) and `+0x2CE` (has type-5) are stamped at mission start but no reader was found (single-register modrm scan only; SIB-form reads unscanned). `+0x2CD` (has windows) is the witnessed outdoor-mask input. The port stamps all three (`OcclusionWorld::BuildingFlags`). |
 | D-OCC-3 | OPEN (witness detail) | Record type 0 vs 1 distinction beyond witnessed uses: both collect as occluder slots; type 1 flags the building "open" (outside-in traversal + two-pass draw + occludes only when bit-31-marked, with viewthru exceptions); the authoring-side meaning (door vs window vs destroyed state, and what mutates the byte at runtime besides welding) is unwitnessed. The port's test fixtures use the derived side conventions (record normal points a→b; windows author A = interior, B = 0). |
-| D-OCC-4 | CLOSED 2026-09-24 (witnessed) | `Terrain_InitBuildingPortals`'s register+weld half is gated on its arg; the `ebp` pushed at `Game_StartMission @ 0x525e11` is `[esp+eventId]` loaded `@ 0x52540a` = (`Game_StartMission`'s argument == 0) (`setz al` `@ 0x524385`, stored `@ 0x5243a6`). The first start calls `Game_StartMission(0)` (`@ 0x526375`, call `@ 0x526377`), so register + weld run; `Game_RestartRoundSP` passes 1 (`@ 0x5263d9`), so a round restart skips them and keeps the shared retyped type-5 records and the weld list; the flag tail `@ 0x5c5860` always runs (§2). The port's default `do_register_weld = true` is the first-start value; the port has no round-restart re-init of the portal state (see "Open after the 2026-09-24 pass"). |
+| D-OCC-4 | CLOSED 2026-09-24 (witnessed) | `Terrain_InitBuildingPortals`'s register+weld half is gated on its arg; the `ebp` pushed at `Game_StartMission @ 0x525e11` is `[esp+eventId]` loaded `@ 0x52540a` = (`Game_StartMission`'s argument == 0) (`setz al` `@ 0x524385`, stored `@ 0x5243a6`). The first start calls `Game_StartMission(0)` (`@ 0x526375`, call `@ 0x526377`), so register + weld run; `Game_RestartRoundSP` passes 1 (`@ 0x5263d9`), so a round restart skips them and keeps the shared retyped type-5 records and the weld list; the flag tail `@ 0x5c5860` always runs (§2). The port's default `do_register_weld = true` is the first-start value; the port's restart (`MissionKernel::restore_baseline`) keeps the first start's `OcclusionWorld` and restores rows sealed after the portal init, the same outcome (§2; ctest `occlusion`). |
 | D-OCC-5 | CLOSED 2026-09-24 (witnessed) | `g_BuildingSectionVisMask` readers: ~~`terrain_render_sector_userpoints @ 0x5cd830` (window glows)~~ decompiled 2026-08-21 as `Scar_RenderCache @ 0x5cd830`, the bullet-scar ring renderer (the mask gates attached-entity scars by building section; world-wac-ai-re.md §24.9). 2026-09-24: `CEffectGroup_IsSectionVisible @ 0x5f6d10` is the effect-group section gate over the RAW word (§5; ported, "Gate effect groups by the building sections their spawn point lies in"); the render waves' interplay with the collect-time blink-hits gate is witnessed: a contained entity (first blink hit nonzero) skips the waves' render_TOC and draws on the collector gate alone, every other collected entity takes render_TOC (§3 step 5; ported, "Run render_TOC on collected entities outside blink boxes"). |
 | D-OCC-6 | OPEN (witness detail) | `Render_TerrainScene @ 0x610c80` receives the outdoors flag as arg 0; its consumption inside (frameless-callee arg pattern) is unwitnessed. |
 | D-OCC-7 | CLOSED-BY-DECISION (2026-07-17) | Only the GPM-path occlusion loader is witnessed; the 3DI3-path loader in Jointops was never located. The port promotes the 3DI3-parsed OCCL tables (identical disk family) into the witnessed 60 B runtime shape; the GPM/GP runtime path is deliberately unsupported (project decision: no `threedi_gp` runtime or ONED support). |
@@ -523,7 +613,7 @@ D-OCC-13, and refuted D-OCC-13's window-glow facet.
 | D-OCC-9 | FIXED 2026-09-24 ("Port the retail occlusion collector, mask and sub-pixel rules") | The forced-visible def bytes (`itemDef+2193/+2194` = +0x891/+0x892, read `@0x5C5D7C` / `@0x5C5D95` in `Terrain_RenderSectorModels @0x5C5D30`) had been wired through `OcclusionWorld::EntityDefBits` but defaulted 0 (re-scoped 2026-09-23 from the closed D-COL-2). Both writers are now witnessed: +0x891 = `first_door` - 1 (or `rotor_parts`' second argument), +0x892 = `first_subobject` - 1 (or `aux_parts`' third argument) `[orig: ItemDef_ParseProperty @ 0x49F7BA..0x49F7DE, @ 0x49F9B0..0x49F9CC, @ 0x49EF5D..0x49EFB6, @ 0x49EFF3..0x49F04C]`; the "destruction bone map" naming was a misnomer. Ported: the items.def parser writes the retail bytes, every building feeds `OcclusionWorld::assign_forced_sections`, and only the part draw ORs `-1 << byte` over the raw mask (`ObjectModel::section_part_visible`); every other reader keeps the raw word (§5). The building feed carries raw + forced, and a collision-backed building without OOBJ now gets the true retail mask (outdoors: exterior only, `@ 0x5c87d7..0x5c8830`) instead of the all-parts stand-in, so the windowless Iblock01/Iblock02 ("Indonesian town bld. #1/#2", First_Door 2) draw their door part from outside. ctests `def_parse_item_part_bytes`, `occlusion` (forced bits split), `doors`. |
 | D-OCC-10 | CLOSED 2026-09-24 (PORTED; the 2026-08-30 PERMANENT registration was wrong) | `Terrain_SortPortalSlotsByPriority @ 0x5c4410` is a stable descending sort on the slot priority key (`@ 0x5c4443`) followed by `g_PortalSlotCount = min(count, 14)` (`@ 0x5c449f..0x5c44a4`), called `@ 0x5c9188` between the collect and the occluder planes. The registration's claim that it "orders retail draw calls only; results order-independent" is false because of the clamp: slots past 14 drop out of the occluder set. Ported as `OcclusionWorld::sort_portal_slots` (ctest `occlusion`, slot clamp). |
 | D-OCC-11 | PERMANENT (register 2026-08-30, class D — reimpl safety) | Cap semantics: retail's wedge builder writes past 64 planes into adjacent stack after printing "too many planes" (and the viewthru bank writes unguarded, erroring only after 512/2048) — the port clamps the wedge at 64 and guards the viewthru bank like the window bank. Divergence only in the overflow regime where retail corrupts its own memory. Scratch caps (128 edge words / 64 polygon verts / 128 front-face planes) sized above any witnessed record. |
-| D-OCC-12 | OPEN (bounded stand-in; PERMANENT candidate — tabled 2026-08-30; narrowed 2026-09-24) | The host frustum planes stand in for the viewport projector's side planes: the reimpl builds 5 frustum planes (near + 4 sides, inward normals, render float space) from the camera drawing the frame's image and tests bound spheres against them + a Q22 forward-row depth cull vs the fog distance, where retail projects through `Viewport_TransformAndClipPoint @ 0x4115e0`. The projector's cull is the same shape: plane distance < -radius per side plane plus the depth/fog test `[orig: @ 0x411622..0x411763]`; its 1.125 × radius term only sets clip flags. There is no screen-space epsilon (the earlier wording was wrong). The traversal consumes the same reimpl planes where retail passes `g_CameraFrustumPlanes5`. |
+| D-OCC-12 | OPEN (bounded stand-in; PERMANENT candidate — tabled 2026-08-30; narrowed 2026-09-24 and 2026-09-27) | The side planes come from the host camera's fov/aspect (the drawn frustum, from the camera drawing the frame's image; inward normals, render float space) where retail derives them from the viewport (`Viewport_BuildProjectionMatrix @ 0x4113b4..0x411571`). The planes' form, four sides and the forward plane all through the eye (`g_CameraFrustumPlanes5`, §3.2), and the projector's near word (0x800, `@ 0x411093`, read `@ 0x411622`) are retail's (2026-09-27). The reimpl tests bound spheres against the planes plus a Q22 forward-row depth cull vs the fog distance, where retail projects through `Viewport_TransformAndClipPoint @ 0x4115e0`; the projector's cull is the same shape: plane distance < -radius per side plane plus the depth/fog test `[orig: @ 0x411622..0x411763]`; its 1.125 × radius term only sets clip flags. There is no screen-space epsilon (the earlier wording was wrong). |
 | D-OCC-13 | PERMANENT (renderer-replaced legs — register 2026-08-30; narrowed 2026-09-24) / window-glow facet REFUTED 2026-09-24 | Not ported by design: the two-pass open-building draw ORDER (exterior then interiors — Godot's depth buffer replaces the ordering; the visibility UNION is applied), the per-light interior section scoping (`Lighting_SetInteriorLightGroup @ 0x5a90e0` — Godot's light model differs) and the reflection-pass collector variant (def-flag 0x2000000 — Godot water reflections). The water-mirror clip leg (`@ 0x5c5e57..0x5c5e75`) is PORTED 2026-09-24 as per-draw CLIP arming (§5, "Arm the water mirror's CLIP technique per draw, as retail does"). The window-glow facet is refuted: the slot +8 value is a priority key whose only reader is the slot sort compare (xrefs to `0x2983E90`: the writer `@ 0x5c6eb1` and the compare `@ 0x5c4443`), the OOBJ +20 float is the slot priority weight (zero in all 806 JO records), and no window-glow renderer exists (§1, §3 step 2). |
 | D-OCC-14 | CLOSED 2026-09-24 ("Port the retail occlusion collector, mask and sub-pixel rules") | Entity-gate coverage. Batched statics: node-less verdicts (the collector gates `@ 0x5c7022..0x5c708a`, the latch `@ 0x5c7118..0x5c7162`, the building batch/TOC verdicts for non-OOBJ buildings) land on the placer's retained instance (`MissionObjectPlacer::set_static_instance_occlusion_hidden`); a culled instance carries no row at any level. Organics: the 1 u bound-sphere stand-in is replaced by retail's person leg (entity position + entity+0 radius, the item-185 radius under the parachute flag, the 0.75 px floor before the latch, §3 step 5) for placed organics and bare wire rows (the type's entity+0 radius via the shared collision-shape resolve; Player/Infantry rows take the person leg, other bare rows the model leg's bound sphere placed by the row's Euler pose). The "wire avatars ride their own present path ungated" facet was stale since 2026-09-05. 2026-09-05 (kept): the listen host's OWN runtime spawns with no placed identity (an addeweap gun child) take the live registry verdict (`entity_render_visible`) like its placed rows; the sphere-at-the-decoded-row path is for bare wire rows only, because the host's loopback 0x0A is header-only and that row keeps the spawn image — a driven DBuggy's gun was culled the moment the buggy left it (GUT `vehicle_emplacement_alignment_test` driven-away case, red before the fix). |
 | D-OCC-15 | CLOSED 2026-09-24 (both facets) | Static refresh: `tick_item_event_pool` refreshes pool-2 `blink_hits` on the tick & 7 cohort with the 62-tick reload (`engine/runtime/world/item_events.cpp`, `[orig: Entity_UpdateAllEntities @ 0x4C2244..0x4C22C9]`, the `Entity_BuildProximityList` call `@ 0x4C229C`), and the one residual, the mission-start stamp, is ported (`CollisionWorld::refresh_mission_start_blink` run by `MissionKernel::occlusion_init_mission`, `[orig: Entity_BuildProximityListsForPools12 @ 0x5240a0]` from `[orig: Game_StartMission @ 0x525898]`: every pool-1 row, then every non-building pool-2 row, the def-type-5 skip `@ 0x5240F3`, before the portal init; ctest `occlusion`, `test_mission_start_blink_stamp`). PRNG stream: the re-arm jitter draws the world's shared `prng16_c_state` (`occlusion.bind_focal_wind_random(&world.prng16_c_state)` in `engine/runtime/mission/mission_kernel.cpp`), the same stream the other `PRNG_Next16_C` consumers share, so the class-C "owned stream" registration no longer describes a divergence. The TOC candidate radius is entity+0 read directly (`[orig: test_sector_entity_occlusion @ 0x5c4610, @ 0x5c463e..0x5c4640]`, `fmul` `@ 0x5c464f`; the entity+0 bound is the D-COL-3 stamp). |
@@ -563,26 +653,53 @@ the port facts not stated there:
 - **Foliage anchors.** The foliage MODEL anchors are pushed from the same
   post-TOC verdicts, so BySide's render_TOC (`@ 0x5c7d96`) reaches them
   ([foliage-re.md](../foliage/foliage-re.md) D-FOLIAGE-9).
+- **The model leg's sphere (2026-09-26).** The model leg reads the collision
+  block's CMDL sphere for every entity with a model, as the RLOD producer does
+  (`Entity_ComputeBoundingSphere @ 0x5c69a0`); an entity without a render
+  model is never collected (`@ 0x5c6fd8..0x5c6fe1`, `@ 0x5c8cf6..0x5c8cff`).
+  A bare wire row on the model leg takes its type's CMDL render sphere.
+- **The weapon Inset pass, per view (2026-09-26).** The Inset pass
+  (`Render_WeaponInsetScene @ 0x5c9740`, called `@ 0x5ca949` after the main
+  scene `@ 0x5ca8ec`) re-runs `Terrain_RenderWorldScene` (the call `@ 0x5c9de9`)
+  and its collect (`@ 0x5c94f0`), with its own `g_RlodFrameScale` and projections. The
+  port collects per view (`OcclusionWorld::select_view`), and each view selects
+  its own level, sub-pixel and section verdicts; where they differ the Inset
+  draws a twin on its own layer (INSET_VIEW). (`Render_CinematicViewScenePass
+  @ 0x5705e0`, ex `sub_5705E0`, is the cinematic multiview pass, reached only
+  from `render_cinematic_multiview @ 0x570940`, the cinematic playback
+  `sub_575A00` called `@ 0x5ca63b`, and `sub_570B90` called `@ 0x41c0e5` /
+  `@ 0x41ec4b`; it is not the Inset.) A part under a main-hidden body
+  follows the body's Inset verdicts, a main-hidden model with twins keeps
+  animating, and the twins take their own light selection. The scene core
+  `Terrain_RenderWorldScene(view, 0, 0, 0)` drops only the sun glow and the
+  mirror subpasses, so the Inset also draws its own:
+  - death pieces (`@ 0x5c9575`, collected `@ 0x5c91bc`) and wire rows, per
+    view;
+  - water (`@ 0x5c95dc` / `@ 0x5c95ea`, on its own `g_BlinkWaterVisible`;
+    the port's main view's water is `MAIN_VIEW_WATER`, in no mirror mask);
+  - scars (`@ 0x5c9658`, the caches `@ 0x5c91b7`;
+    `Simulation::get_scar_draw_list_inset` under `select_view(kInset)`,
+    `ScarWorld` on MAIN_VIEW and `ScarWorldInset` on INSET_VIEW while the
+    Inset renders, the entity rings twinned through
+    `attach_inset_section_twin`);
+  - person item overlays, per view;
+  - the scene tail (render-order-re.md `kInsetOverlayOrder`): its own light
+    coronas (`@ 0x5c96ad`, at the corona phase the per-scene prologue
+    `sub_5A9F70 @ 0x5a9f70` advances once per pass, called `@ 0x5ca69c` by the
+    main frame and `@ 0x5c9a5d` by the Inset; the Inset collect's masks gate
+    owned coronas through `Terrain_IsBuildingSectionBitSet @ 0x5c6960`), NVG
+    laser beams, precipitation and the water glint, and no glare (the scene's
+    second argument is zero, `@ 0x5c970a..0x5c970e`).
+- **The Inset camera's hand-over (2026-09-26).** Retail composes the Inset
+  camera inside the pass that draws it (the compose `@ 0x5c9841`, the view
+  `@ 0x5c997f`, the scene `@ 0x5c9de9`, all after the main scene
+  `@ 0x5ca8ec`). The port's `GameWorld::present_local_view_frame` refreshes the
+  HUD scope and hands the camera over before any Inset leg reads it (the
+  D-RORD-8 precedent), so every Inset leg reads this frame's pose.
 
 ### Open after the 2026-09-24 pass
 
-- **Round restart.** `Game_RestartRoundSP` re-runs `Game_StartMission` with
-  register + weld skipped (D-OCC-4). The port has no round-restart re-init of
-  the portal state; a future restart path must keep the flag-stamp tail only
-  and never re-run register + weld over the already-welded (shared, retyped)
-  models.
-- **Multi-view LOD and sub-pixel.** Retail runs the collector, the sub-pixel
-  floor and the RLOD walk once per scene pass: the main view and the weapon
-  Inset pass (`sub_5705E0` → `Terrain_RenderWorldScene`) each compute
-  their own `g_RlodFrameScale` and projections. Godot draws both passes from one
-  node per entity, so each model takes the finest level any view selects and
-  drops only when every view that sees it projects it at or below 0.75 px.
-  With the Inset pass inactive the main view is exact.
-- **Model leg without a collision instance.** A non-organic entity with no
-  collision instance still takes a position-centred unit sphere in
-  `OcclusionWorld::entity_render_visible`; retail's collector skips an entity
-  with no render model (`@ 0x5c8cf6..0x5c8cff`) and reads the model bounds of
-  every entity it keeps.
+- None.
 
 ## 9. IDB changes made during the session (2026-07-16, saved)
 

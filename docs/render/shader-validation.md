@@ -63,9 +63,11 @@ corpus).
 
 A shader family either matches or matches with named, bounded residuals; an
 open divergence is never converted into a pass.
-The retained ledger exceptions are D-TERRAIN-7 and D-FOLIAGE-7 (D-TERRAIN-9
-retired with the ONED terrain preview on 2026-08-24; D-FOLIAGE-9/-10 and
-D-RORD-7 closed 2026-09-24), plus the water surface's named mirror residuals.
+No ledger exception is retained for the shader families: D-TERRAIN-7 and
+D-FOLIAGE-7 closed 2026-09-26 (D-TERRAIN-9 retired with the ONED terrain preview
+on 2026-08-24; D-FOLIAGE-9/-10 and D-RORD-7 closed 2026-09-24); the water
+surface's mirror keeps two measurements due (env-tod-re.md, "Open after the
+2026-09-24 pass").
 Their scopes and current evidence remain authoritative in the linked RE records
 and divergence ledger.
 

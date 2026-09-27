@@ -255,7 +255,21 @@ userpoints. The port retains authored order, the retail four-row cap and
 15-character userpoint limit, full child item IDs, the last designated G/C
 slot, and the optional all-or-none down/up/right/left limits in signed BAM
 units. Invalid partial angle tails remain unparsed rather than inventing
-defaults.
+defaults. In the def the arcs sit in four 4-slot tables: down +0x21C, up
++0x22C, right +0x23C, left +0x24C (`@ 0x4A1BDA..0x4A1C49`); `light_transfer`'s
+float sits just before them at +0x218. At subType -1 (an hp-0 child),
+`Entity_GetWeaponTurretLimits` reads the dword before each table
+(`@ 0x540DBB..0x540E15`): down gets `light_transfer`'s bits, up gets slot 4's
+down, right gets slot 4's up, left gets slot 4's right; the all-zero
+weapon-window fallback (`@ 0x540E18`) still applies (2026-09-26).
+
+`Mission_LoadBMSFile` spawns the addeweap children in two walks, pool 1 then
+pool 2, each over the row count it took before starting (`@ 0x40FD49..0x40FD96`);
+a child is walked only if it filled a hole below that count. An hp-0 child's
+subType is 0xFF when the class init reads it, so it rides its carrier's root.
+`Entity_Destroy @ 0x43E810` walks no children: a child keeps pointing at the
+zeroed row and rides the next occupant. The child identity, class init, death
+and destroy legs are world-wac-ai-re.md §26.5c.
 
 Mission promotion recursively creates the child item entities and resolves
 their model userpoints case-insensitively (falling back to the parent root when
@@ -309,8 +323,8 @@ this slice does not claim those behaviors.
 - Residual `gap_*` spans in the original executable layout remain genuinely
   unwitnessed: `+0x1c0…0x218` (the authoring-level `addeweap*` rows are now
   parsed by the port, but their exact retail in-struct representation beyond
-  the observed selector bytes at `0x1c1-0x1c3` is not claimed), `+0x21c…0x25c`,
-  `pad_94C` interior, the still-unmapped fields surrounding the now-named
+  the observed selector bytes at `0x1c1-0x1c3`, `light_transfer` at +0x218 and
+  the four arc tables at +0x21C..0x25B is not claimed), `pad_94C` interior, the still-unmapped fields surrounding the now-named
   `phraseSet @+0x86c`, and parts of `pad_1B0`.
 - `DefItemDef` covers only the net/render-relevant subset; the physics block,
   attrib flags, particle keys, `phrase_set` (with presence), `primary_weapon`,

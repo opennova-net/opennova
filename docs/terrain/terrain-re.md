@@ -18,16 +18,19 @@ audit pinned the static projected-silhouette tile producer and corrected the
 old `PSShadow*` interpretation; the 2026-09-24 rendering parity pass ported the
 page record cache, the D3D9 page raster and source filters, the DXT codec, the
 BMS tile-set override and the lit-batch pool composite
-(§2026-09-24 rendering parity pass).
+(§2026-09-24 rendering parity pass); on 2026-09-26 the page's address mode
+was witnessed CLAMP at every terrain pass (D-TERRAIN-7 closed) and the weapon
+Inset pass's own terrain frame was ported.
 
 **Status: PARTIAL.** Terrain is the largest system and the last of the seven
 `UNAUDITED` systems; this record establishes the tracked surface — the module
 map and the mixed-binary witness basis. The data/build path is byte-identical,
 and the top-tier base-surface texture derivation and shader math are now closed.
-The bounded runtime gap is the composed page's address mode at the terrain
-and foliage draws (D-TERRAIN-7, narrowed 2026-09-24: the page lifecycle,
-ordered contributions and raster are ported), plus CDEP/traversal
-documentation depth. The material-animation leg is closed by the
+The composed page is closed end to end (D-TERRAIN-7 closed 2026-09-26: the
+page lifecycle, ordered contributions and raster ported 2026-09-24, and the
+address mode at the terrain and foliage draws witnessed CLAMP, as the reimpl
+samples it); what remains is CDEP/traversal documentation depth and the
+single-detail binding. The material-animation leg is closed by the
 shared live AlphaGen/UV/flipbook evaluator. The underwater water-noise modulation is FIXED by
 D-TERRAIN-8, including the 2026-08-17 coordinate correction.
 Like [mission/mis-format-re.md](../mission/mis-format-re.md), this remains a
@@ -190,8 +193,9 @@ an all-zero grid produced 121 traversal calls with view `+100=0` and zero
 calls with `+100=1`. The jo-c oracle fixture's `skip_empty` label writes `+96`,
 so these probes explicitly wrote `+100`; its host preview was not used as a
 visual oracle. IDA reads used `Jointops.exe.kong.i64` at image base `0x400000`.
-No IDB changes were made. Full-scene retail pixel equivalence and the broader
-D-TERRAIN-7 composition lifecycle remain separate verification work.
+No IDB changes were made. Full-scene retail pixel equivalence remains
+separate verification work (the composition lifecycle closed with D-TERRAIN-7,
+2026-09-26).
 
 ## The TPM1 tile-mesh format (.tml/.tms — TrnGen.exe witness map)
 
@@ -898,8 +902,10 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   `terrain_scorch`), and the 2026-09-24 pass ported the raster, the record
   cache and its cadence (§2026-09-24 rendering parity pass). The analytic
   cold-page fallback is retired: a patch whose page the cache could not claim
-  draws with t0 unbound, which D3D9 samples as (0,0,0,1). D-TERRAIN-7 keeps
-  only the page address mode at the draw.
+  draws with t0 unbound, which D3D9 samples as (0,0,0,1). D-TERRAIN-7's last
+  facet, the page address mode at the draw, closed 2026-09-26: every terrain
+  pass samples the page CLAMP (§2026-09-24 rendering parity pass, *Page
+  sampling at the draw*).
 
   **Creation-time clear — WITNESSED 2026-09-14 (jo-c cross-check), PORTED.**
   `Terrain_CreateTileCacheTargets @ 0x604DD0` creates the 128 tile render targets (stride 8 dwords,
@@ -911,6 +917,9 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   temp target: `PolyTrn_LoadTerrainConfig @ 0x60E41D..0x60E446` sets page
   `dword_31A00D4` = 0x100 and temp `dword_31A00D0` = 0x200 when config
   `+0x1740` is set, else 0x80 / 0x100, so the temp is always twice the page;
+  the 0x80 / 0x100 tier needs the Terrain Tex Detail rung below 3, which
+  OpenNova's locked video policy never offers (*The page tier*, §2026-09-24
+  rendering parity pass);
   ported as `kTemporaryScale` = 2 with the exact 2×2 box resolve in
   `engine/runtime/terrain/terrain_static_shadow_raster.cpp`, corrected
   2026-09-24). Ported as `TerrainTileCompositionCache::kTileClearColorArgb` and the
@@ -1197,7 +1206,9 @@ fogged ordinary pass (`terrain_setup_lighting_and_shader(2)` →
 `terrain.gdshader`); the shader had added the pool to the lit colour and
 fogged the sum. On the PS path (`caps+0x34 & 0x100 @ 0x609890`) the per-light
 setup is `Light_SetupTerrainProjectedPassPS @ 0x5AAB30` with the
-cube-normalize map bound (`@ 0x5AAEA2..0x5AAEB7`); the light values are
+cube-normalize map bound (`@ 0x5AAEA2..0x5AAEB7`); the port serves that
+`ps.1.1` pass since 2026-09-26, with the detail coefficient map as its t1; the
+light values are
 [render/render-lighting-re.md](../render/render-lighting-re.md)'s.
 
 **DXT textures.** The `.til` atlas (flags 0x100203 `@ 0x604B24`) is created
@@ -1230,15 +1241,45 @@ anisotropy: the render-target resource's flags word (`+0x18`) is zeroed at
 construction (`GTexRT_Construct @ 0x680106`), and `apply_texture_stages`
 (`@ 0x68084C..0x680870`) derives the per-stage words from it (bit 3 clear, so
 no aniso). `terrain.gdshader`'s `filter_linear` is retail; no code change.
+The page's address mode is CLAMP at every terrain pass (witnessed 2026-09-26,
+closing D-TERRAIN-7): the pass states' intrinsic words (0x1020000 ordinary,
+0x1020002 pool light, 0x1000628 page multiply; `PolyTrn_InitTextures
+@ 0x60C3B0 / 0x60C433 / 0x60C499`) carry the stage-0 clamp bit 0x1000000.
+`CGfxShader_ApplyPass` ORs the intrinsic word into the pass flags
+(`@ 0x683221`) and applies the clamp after the page is bound
+(`@ 0x683265..0x683279`), and the device sets ADDRESSU/V/W from it
+(`CGfxDevice_ApplyRenderStates @ 0x67E4A9..0x67E4FE`);
+`terrain_setup_lighting_and_shader @ 0x604420` applies the states with pass
+flags 0, so the intrinsic word decides. `terrain.gdshader`'s clamp-to-edge
+sampling is that mode (D3D9 CLAMP under LINEAR is Godot's CLAMP_TO_EDGE, and
+the texel-centre clamp is the same under bilinear).
+
+**The page tier.** The 128-page / 256-temp tier is selected only when the
+Terrain Tex Detail rung (`0x24D2044`, labelled "Terrain Tex Detail" by
+`Debug_DrawRenderSettings @ 0x44BC76`, IDB `g_TerrainTexDetail`) is below 3
+(`Terrain_LoadEnvironmentConfig @ 0x610981..0x61099F`;
+`PolyTrn_LoadTerrainConfig @ 0x60E41D..0x60E446`). OpenNova's locked video
+policy pins TERRAINTEX = 3 (`engine/runtime/menu/options_policy.h`), so the
+tier is unreachable and only the 256/512 tier is ported.
+
+**The weapon Inset pass's own terrain frame (2026-09-26).** The Inset pass
+runs its own PolyTrn frame over the shared page cache:
+`Render_WeaponInsetScene @ 0x5C9740` (called `@ 0x5CA949`) → `sub_60FF50`
+(the call `@ 0x5C9A2F`, its context `@ 0x60FF6F`) →
+`PolyTrn_ResetFrameStatsAndRender` (the call `@ 0x610009`) → `PolyTrn_RenderFrame`
+(`add dword_319FC04 @ 0x60EAE8`: one page-frame advance per traversal), then
+its own sector pass (`@ 0x5C9D65`), both gated on the main frame's indoors
+value (render-occlusion-re.md §4); the main traversal is `@ 0x5CA654`. Ported
+as `Terrain::render_inset_frame`: the Inset draws its own patch pool (its own
+light rows and `u_below_water`) on INSET_VIEW while the main pool moves to
+MAIN_VIEW, and the Inset's detail foliage cells come from its own traversal
+([foliage/foliage-re.md](../foliage/foliage-re.md)). Its environment and fog
+uniforms follow the main eye, which the Inset's eye coincides with in
+practice. GUT `terrain_inset_frame_test.gd`.
 
 ### Open after the 2026-09-24 pass
 
-- The page's address mode at the terrain and foliage draws (D-TERRAIN-7): the
-  zero flags word selects WRAP unless the draw's pass flags add stage-0 CLAMP
-  (0x1000000); those pass flags are not re-witnessed, and `terrain.gdshader`
-  clamps the page UV to its texel centres.
-- Only the full-quality tier is ported (256 pages, 512 temp); the 128-page /
-  256-temp tier below config `+0x1740` stays a separate policy.
+- None.
 
 ## Runtime terrain queries (ENG-3 B0, retail Jointops.exe — witness map)
 
@@ -1382,18 +1423,18 @@ as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
 | D-TERRAIN-4 | C | **PERMANENT (runtime safety boundary)** | **Safe terrain-query bounds** (ENG-3 B1): beyond-extent = no-terrain/no-hit vs retail's clamp-to-edge `[orig: @ 0x31a0010/0x319fc0c]`; no-data = clear/NAN vs retail's return-HIT `[orig: @ 0x60ccf7]`; contiguous-atlas bilinear vs the per-quadrant seam flags `[orig: @ 0x31a17f0..]`. Game consumers use these guards. Returning no result outside valid data avoids inventing an edge hit; §Runtime terrain queries carries the retail forms for any consumer that specifically requires them. |
 | D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the reimpl incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are ported. **Corrected 2026-07-15**: the fix's own first reading (t3 = the generated authored-detail B-channel coefficient) was also wrong — t3 is the authored second detail pair (`polytrn_detailmap2` ⊕ `dist2`) at density2; the generated coefficient belongs to the ps.1.1 tiers at stage 7 [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap source aPs14TexldR0T0T_0 @ 0x7dece0`]. |
 | D-TERRAIN-6 | A | **FIXED (2026-07-13)** | **LOD/fog/overlay base-pass semantics**: both raw `lod_sub / 2` sites use the exact clamped eight-family selector; exponential fog uses eye-space depth while linear types use radial distance; ordered `.til` color is composed before terrain lighting. The render-target-alpha recurrence the 2026-08-17 D-TIL-3 fix added within that order was refuted 2026-09-24: the overlay loops run under `COLORWRITEENABLE = 7` and never write page alpha (tiles/til-re.md D-TIL-3) [`orig: render_terrain_sector_batch @ 0x6092a0`; `Render_SetFogState @ 0x58a950`; `PolyTrn_RenderTile @ 0x60da70`]. |
-| D-TERRAIN-7 | A | **OPEN (narrowed 2026-09-24)** | **Tile-composition RT/update parity**: the runtime ports retail's 128-record page cache (`TerrainTileCompositionCache`: identity = level, packed source coordinate and routed sector; the age-above-1 LRU claim, first in record order; the TOD-stale eviction and same-frame re-sweep; the record-order point lookup for MATCHTERRAIN and detail foliage; spatial invalidation on destruction and scorch appends; t0 unbound for an unclaimed page) and composes every claimed page before the batch draws with the D3D9 raster: integer pixel positions, the quadrant box levels CLAMP/LINEAR/MIPFILTER POINT, the point-sampled DXT5 `.til` atlas, the WRAP/LINEAR scorch quads, RGB-only overlays, then the DOT3 alpha and the static A-only projections. The 2026-09-24 rendering parity pass closed the refresh cadence and page identity (the content-stamp LRU, stale-while-recompose, the DOT3-byte light epoch and the analytic cold fallback are retired), the raster/filter/mip behavior, the static collector's sphere test and the temp raster's pixel centres; the ordered contributions are the `.til` and scorch loops, both ported (scorch records since #560). Resolved earlier and kept: the max-quality c7/c8 `TerrainTilePageProjection`; DOT3 before silhouettes (`@ 0x60D794..0x60D7C0`, skip gate `@ 0x60E1CE`); the live-probed temp-blue composite state; the PROJSHAD admission/blending/culling/z audit and the skinned rigid collapse; the shared material-animation evaluator (whole-process CTRL/RNG ordering is D-3DI-2). `g_TerrainAdapterCapsStorage.TexOpDisableOrArg2` (0x319FBB8) is the adapter TextureOpCaps & 5 flag (normally set) that picks the scorch stage's `0xFF808080` diffuse, not a sun-angle control, so the 2026-08-23 rejection of a low-sun "density mechanism" stands. Open: the page render target's address mode at the terrain and foliage draws (its flags word is zero, which selects WRAP unless the draw's pass flags add stage-0 CLAMP; not re-witnessed; the reimpl clamps to the page's texel centres). §2026-09-24 rendering parity pass carries the witnesses `[orig: PolyTrn_RenderTile @ 0x60DA70 (hit @ 0x60DAC0..0x60DAD1, claim @ 0x60DAE4..0x60DB45, stamps @ 0x60DB56..0x60DBF0); Terrain_EvictOldestTodStaleTile @ 0x604600; PolyTrn_RenderFrame @ 0x60EAC0 (sweep @ 0x60F080..0x60F0E3); PolyTrn_BindStageTextures @ 0x604330; terrain_tile_cache_lookup @ 0x604140; Terrain_CollectAndRenderTileModels @ 0x60D250; apply_texture_stages @ 0x68084C..0x680870]`. |
+| D-TERRAIN-7 | A | **FIXED (MATCHING, 2026-09-26: the last facet, the page address mode, is the CLAMP the reimpl already sampled)** | **Tile-composition RT/update parity**: the runtime ports retail's 128-record page cache (`TerrainTileCompositionCache`: identity = level, packed source coordinate and routed sector; the age-above-1 LRU claim, first in record order; the TOD-stale eviction and same-frame re-sweep; the record-order point lookup for MATCHTERRAIN and detail foliage; spatial invalidation on destruction and scorch appends; t0 unbound for an unclaimed page) and composes every claimed page before the batch draws with the D3D9 raster: integer pixel positions, the quadrant box levels CLAMP/LINEAR/MIPFILTER POINT, the point-sampled DXT5 `.til` atlas, the WRAP/LINEAR scorch quads, RGB-only overlays, then the DOT3 alpha and the static A-only projections. The 2026-09-24 rendering parity pass closed the refresh cadence and page identity (the content-stamp LRU, stale-while-recompose, the DOT3-byte light epoch and the analytic cold fallback are retired), the raster/filter/mip behavior, the static collector's sphere test and the temp raster's pixel centres; the ordered contributions are the `.til` and scorch loops, both ported (scorch records since #560). Resolved earlier and kept: the max-quality c7/c8 `TerrainTilePageProjection`; DOT3 before silhouettes (`@ 0x60D794..0x60D7C0`, skip gate `@ 0x60E1CE`); the live-probed temp-blue composite state; the PROJSHAD admission/blending/culling/z audit and the skinned rigid collapse; the shared material-animation evaluator (whole-process CTRL/RNG ordering is D-3DI-2). `g_TerrainAdapterCapsStorage.TexOpDisableOrArg2` (0x319FBB8) is the adapter TextureOpCaps & 5 flag (normally set) that picks the scorch stage's `0xFF808080` diffuse, not a sun-angle control, so the 2026-08-23 rejection of a low-sun "density mechanism" stands. The last facet, the page render target's address mode at the terrain and foliage draws, closed 2026-09-26: the zero flags word would select WRAP, but every terrain pass state's intrinsic word carries the stage-0 CLAMP bit (0x1020000 ordinary, 0x1020002 pool light, 0x1000628 page multiply), which `CGfxShader_ApplyPass` ORs into the pass flags and applies after the page is bound, so the page samples CLAMP, the reimpl's clamp-to-edge (the detail foliage pass's stage-1 CLAMP is D-FOLIAGE-7's closure). §2026-09-24 rendering parity pass carries the witnesses `[orig: PolyTrn_RenderTile @ 0x60DA70 (hit @ 0x60DAC0..0x60DAD1, claim @ 0x60DAE4..0x60DB45, stamps @ 0x60DB56..0x60DBF0); Terrain_EvictOldestTodStaleTile @ 0x604600; PolyTrn_RenderFrame @ 0x60EAC0 (sweep @ 0x60F080..0x60F0E3); PolyTrn_BindStageTextures @ 0x604330; terrain_tile_cache_lookup @ 0x604140; Terrain_CollectAndRenderTileModels @ 0x60D250; apply_texture_stages @ 0x68084C..0x680870; PolyTrn_InitTextures @ 0x60C3B0 / 0x60C433 / 0x60C499; CGfxShader_ApplyPass @ 0x683221, @ 0x683265..0x683279; CGfxDevice_ApplyRenderStates @ 0x67E4A9..0x67E4FE]`. |
 | D-TERRAIN-8 | A | **FIXED (2026-08-13; coordinate corrected 2026-08-17)** | **Underwater terrain water-noise modulation**: the engine terrain frame stamps `below_water` from the render eye vs the live water height (the bare unguarded strict `<` `@ 0x60fea5` — NO zero sentinel; the water height is plumbed unconditionally), and the shared surface include swaps the ps.1.4 stage-3 dp3 INPUT to the water module's per-frame regenerated noise texture at the swapped `source × 8/512` (`colormap_uv × 16` for the normalized 1024 atlas) texcoord — the witnessed TOP-TIER behavior (the 2026-08-13 selector decode above): the noise rides the PS14SplatNormalMap dp3 on detail2-authored maps, detail2-less splat maps faithfully render NO underwater modulation, and the `saturate(4·t3²)·t0.a` PSShadow pair belongs to the unported ps.1.1 tiers `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; texcoord @ 0x609786..0x6097D6]`. Tests: ctest `terrain_frame_compiler` (flag pins) + GUT `terrain_underwater_modulation_test` (the Dvxi5 flip drive). |
 | D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old reimpl `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 | D-TERRAIN-11 | A | **FIXED (2026-08-17)** | **Terrain detail coordinate scale**: retail constructs mesh UV1 as `source × polytrn_detaildensity / 512`; OpenNova had multiplied normalized 1024-atlas UV by density, halving every detail frequency. Runtime mesh UVs, authored detail2, and the underwater stage-3 swap now share the exact source-grid conversion. Deterministic 00TRa A/B probes select 2× with the existing axis at high correlation and reject the UV-swap alternative [`orig: parser @ 0x60f993..0x60f9b3; config load @ 0x60e634..0x60e63b; density/512 write @ 0x6029a0..0x6029aa; UV1 @ 0x602db5..0x602dbe; stage-3 transforms @ 0x609786..0x609810`]. |
 
 | D-TERRAIN-12 | A | **FIXED (2026-09-13)** | **Missing empty-sector flat fallback**: zero sector-grid entries now traverse quadrant 1 unless view `+100` skips them (the live draw pass writes 0; the water-mirror prerender and the PCX screenshot scene write `Env_WaterHeightFixed != 0`, so the reimpl's flat draws ride a mirror-excluded visual layer). The draw carries the high-bit mode through flat mesh selection and zero primary/blend UVs while preserving independent detail/noise coordinates and raw tracked source heights. Every flat draw shares the canonical LOD-0 page, whose base/DOT3 source is UV zero and whose `.til` overlay loop is suppressed; the origin sector can borrow it with the ordinary geometric projection. `terrain_frame_compiler`, `terrain_tile_composer`, `terrain_tile_composition_cache`, and the Godot terrain shader contract pin the bounded behavior. [orig: PolyTrn_RenderFrame @ 0x60EAC0; terrain_render_visible_sectors @ 0x6090C0; decode_terrain_tile_vertices @ 0x602AA0; PolyTrn_RenderTile @ 0x60DA70]. |
 
-The completed passes close D-TERRAIN-5/6/8/10/11/12 and bound D-TERRAIN-7,
-which the 2026-09-24 rendering parity pass narrowed to the page address mode
-at the draw. The terrain data path remains the byte-identical TrnGen port; the
-pending grill below is documentation depth around CDEP/traversal plus that
-gap and the single-detail binding.
+The completed passes close D-TERRAIN-5/6/7/8/10/11/12 (D-TERRAIN-7 narrowed
+to the page address mode by the 2026-09-24 rendering parity pass and closed
+2026-09-26). The terrain data path remains the byte-identical TrnGen port; the
+pending grill below is documentation depth around CDEP/traversal and the
+single-detail binding.
 
 ## Pending (the deep grill, to complete R1)
 
@@ -1409,12 +1450,6 @@ remains for a *full* (vs partial) R1 record:
   already pin the header and encode/decode round-trip against the synthetic
   `fixtures/terrain/tmap/Tmap.cpt`, and `cpt_jo_assets_sweep` (behind
   `OPENNOVA_JO_ASSETS`) parses every retail `.cpt` including `Dvxi5.cpt`'s header.
-- **Tile-composition mechanics**: close D-TERRAIN-7 by witnessing the page
-  render target's address mode at the terrain and foliage draws (the pass
-  flags' stage-0 CLAMP bit). The record cache and its TOD cadence, the
-  base/`.til`/scorch RGB order with the DOT3 and static A-only alpha, the D3D9
-  raster and source filters, and the page sampling filter are closed
-  (§2026-09-24 rendering parity pass).
 - **Single-detail (BHD-era) `.trn` binding** — a pre-JO terrain authors only
   `polytrn_detailmap` (no `_c1..c3`, no `detailblendmap`, no `detailmapdist`;
   DPTH depth). The tier table above says the missing blend map selects
@@ -1435,9 +1470,9 @@ remains for a *full* (vs partial) R1 record:
   straight into the game renders the blow-out until the
   PSBasic tier is witnessed and ported.
 
-The CDEP/traversal item is documentation depth; D-TERRAIN-7's page address
-mode is the one bounded open runtime parity surface (D-TERRAIN-8's underwater
-modulation FIXED 2026-08-13). D-TERRAIN-1 and
+The CDEP/traversal item is documentation depth; no terrain divergence row is
+open (D-TERRAIN-7's page address mode closed 2026-09-26; D-TERRAIN-8's
+underwater modulation FIXED 2026-08-13). D-TERRAIN-1 and
 D-TERRAIN-9 were retired with the ONED terrain preview.
 
 ## Cross-references

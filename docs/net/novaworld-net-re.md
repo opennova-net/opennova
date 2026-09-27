@@ -466,7 +466,7 @@ sweep; blank = not yet characterized.
 | 0x2C | 0x427E10 | `_MissionMapNames` | session + mission-file names (NOT chat — that note was wrong): [cstr sessionName → byte_A82378][cstr bmsFile → g_map_file_name]; bumps g_loading_progress ≥ 1. Field map §5.51 (decoded) |
 | 0x2D | 0x427E90 | `_0x02D` | |
 | 0x2E | 0x427F80 | `_0x02E` | |
-| 0x2F | 0x430E10 | `_0x02F` | **objective/entity parent-state update** (decoded + bidirectionally ported 2026-08-22): exact 19-B body `[u16 handle][u8 FlagsLow][i32 x][i32 y][i32 z][u16 occupantOrCarrier][u16 groundOrRider]`; the client applies the record only to the three flag ItemDefs 4091/4093/4095 (`@0x430F06..0x430F19`; any other handle is ignored) and writes the low Flags byte, position, and both topology handles. `Server_SendDestructibleDeathPacket @0x50D900` calls `serialize_entity_with_parent_and_target @0x505810` and sends with mask `0x80` (listen host included). Flag pickup/drop/save/non-CTF capture use this record; CTF capture instead calls `Server_RemoveEntityAndNotify @0x50A270`, whose 0x12 mask is `0x90` (listen host excluded). **Periodic producer (ported 2026-09-12):** `sub_517B20 @0x517B20`, called once per 62-tick periodic second from `Server_TickUpdate @0x51df64` (after `Server_CheckPlayerViolations @0x51df5f`, before `SpawnWaveList_Tick @0x51df6e`; authority-gated only `@0x517b27`, not on is_in_session, the round-over latch or the pre-round timer), walks pool 1 in slot order counting rows with a non-null itemDef `@0x517b55` whose id is 4091/4093/4095 `@0x517b57..0x517b6d`, and when the running index equals the static cursor `dword_24C10D4` `@0x517b71` sends that entity through the same `Server_SendDestructibleDeathPacket` (mask 0x80, states 6/7, host included; alive/dead never tested), increments the cursor `@0x517b81` and returns; a walk that sends nothing resets it `@0x517b90`. With N flags every flag's full state is re-broadcast once per N+1 seconds regardless of events. Reimpl: `refresh_next_flag_state` in `server_tick.cpp` over `World::flag_refresh_cursor`; `npruntime_server_tick_maintenance` pins the A/B/silent/A cadence, the carried attach and the post-round continuation. |
+| 0x2F | 0x430E10 | `_0x02F` | **objective/entity parent-state update** (decoded + bidirectionally ported 2026-08-22): exact 19-B body `[u16 handle][u8 FlagsLow][i32 x][i32 y][i32 z][u16 occupantOrCarrier][u16 groundOrRider]`; the client applies the record only to the three flag ItemDefs 4091/4093/4095 (`@0x430F06..0x430F19`; any other handle is ignored) and writes the low Flags byte, position, and both topology handles. `Server_SendDestructibleDeathPacket @0x50D900` calls `serialize_entity_with_parent_and_target @0x505810` and sends with mask `0x80` (listen host included). Flag pickup/drop/save/non-CTF capture use this record; CTF capture instead calls `Server_RemoveEntityAndNotify @0x50A270`, whose 0x12 mask is `0x90` (listen host excluded). **Periodic producer (ported 2026-09-12):** `sub_517B20 @0x517B20`, called once per 62-tick periodic second from `Server_TickUpdate @0x51df64` (after `Server_CheckPlayerViolations @0x51df5f`, before `SpawnWaveList_Tick @0x51df6e`; authority-gated only `@0x517b27`, not on is_in_session, the round-over latch or the pre-round timer), walks pool 1 in slot order counting rows with a non-null itemDef `@0x517b55` whose id is 4091/4093/4095 `@0x517b57..0x517b6d`, and when the running index equals the static cursor `dword_24C10D4` `@0x517b71` sends that entity through the same `Server_SendDestructibleDeathPacket` (mask 0x80, states 6/7, host included; alive/dead never tested), increments the cursor `@0x517b81` and returns; a walk that sends nothing resets it `@0x517b90`. With N flags every flag's full state is re-broadcast once per N+1 seconds regardless of events. Reimpl: `refresh_next_flag_state` in `server_tick.cpp` over `World::flag_refresh_cursor`; `npruntime_server_tick_maintenance` pins the A/B/silent/A cadence, the carried attach and the post-round continuation. **The client's carry legs (ported 2026-09-26/27):** the non-authority client runs the carry legs itself after the stores (flags/position `@0x430F5F..0x430F74`, groundEntity `@0x430FBD`): a record whose occupant differs from the flag's occupantEntity drops the flag off that occupant with `Entity_DropCarriedObject` (`@0x43105C` / `@0x4310DC`: the drop pose, motion and fall run on the client, world-wac-ai-re §24.3a), then attaches the new one (`Entity_AttachCarriedObject` `@0x43106F` / `@0x4310C7`: Flags \|= 1, the def callback back), and a moved flag re-runs `Entity_BuildProximityList` (`@0x4310EC`). A pool-0 carrier handle resolves to the client's own entity only through its own wire handle (the port's L need not sit at H's slot; any other pool-0 handle is a replica-only person). The client's other destroy paths drop a carried flag too: `Entity_Destroy` drops a person's carried object before wiping it (`@0x43E8AA..0x43E8B8`), so S2C 0x12 (`@0x425EE0`) and the 0x5D sweep (`@0x429730`) of the carrier drop the flag off its last pose. Reimpl: `ClientWorldMaterializer::apply_objective_state` lands each state once (`ClientEntityState::objective_state_serial`) and drops over the lost occupant's words (a materialized carrier's own, else its decoded row's); between states the client's fall and ride own the pose, which `JoinerRole::mirror_mission_entities` publishes to the presented row; `ClientWorldMaterializer::set_local_player` / `resolve_carrier`; `erase_entity_tree` keeps the dying carrier's pose on the flag row (`objective_drop_*`); ctest `netsim_client_world_materializer`. |
 | 0x30 | 0x431170 | `_HandleChecksumRequest` | entity-checksum request `[u8 entityId][u16 checksum]` → reply **C2S 0x20** (NOT 0x21; §5.35), 5 B `[u8 id][u32 challenge ^ source]`; reply builder + literal-42 arm §5.65 (silent by default; exact named-corpus sources only, D-NET-181) |
 | 0x31 | 0x4311E0 | `_0x031` | ammo-definition CRC request `[u8 ammoIndex][u16 xorKey]` (3 B) → reply **C2S 0x21**, 9 B `[u8 index][u32 xorKey^crc][u32 echoed key]`; field map + reply builder §5.65 (silent by default; exact named-corpus sources only, D-NET-181) |
 | 0x32 | 0x428060 | `_0x032` | |
@@ -2145,10 +2145,10 @@ entity:
 | eulerZ / eulerX / eulerY | i32 (32-bit BAM) | `flags & 0x01 / 0x02 / 0x04` | entity+16/+20/+24 |
 | sectionMask | i32 | `flags & 0x08` | entity+308 |
 | team | u8 | `flags & 0x10` | entity+354 |
-| entityFlags | u32 | `flags & 0x20` | entity+36 — the entity FLAGS dword streamed raw (the old "parentSlot" reading was WRONG; witnessed at the serializer source `[orig: serialize_pool2_static_to_buffer @0x5042F0 @0x5044e6]`). Composed at spawn from BMS attributes (Indestructible 1<<21 → 0x4000000, Reflective 1<<23 → 0x400, NoShadow 1<<24 → 0x1000000 `[orig: Entity_SpawnFromBMSRecord @0x40e9f0]`) + def traits (type Building → 0x20000 `[orig: Entity_InitFromModel @0x40e105]`; healthMax 0 → 0x4000000 `[orig: @0x40dc8e]`). Golden ASH_I5A buildings: 0x04020400; bridges add NoShadow → 0x05020400. D-NET-147 |
+| entityFlags | u32 | `flags & 0x20` | entity+36 — the entity FLAGS dword streamed raw (the old "parentSlot" reading was WRONG; witnessed at the serializer source `[orig: serialize_pool2_static_to_buffer @0x5042F0 @0x5044e6]`). Composed at spawn from BMS attributes (Indestructible 1<<21 → 0x4000000, Reflective 1<<23 → 0x400, NoShadow 1<<24 → 0x1000000 `[orig: Entity_SpawnFromBMSRecord @0x40e9f0]`) + def traits (the matrix-built bit 0x20000 for def types 2/5/6 `[orig: Entity_InitFromModel @0x40e0d4..0x40e105]`, the earlier "type Building" reading retired 2026-09-26, world-wac-ai-re §28; healthMax 0 → 0x4000000 `[orig: @0x40dc8e]`). Golden ASH_I5A buildings: 0x04020400; bridges add NoShadow → 0x05020400. Our encoder streams `load_stream_flags_dword` (the runtime word, the spawn word and the vehicle trait) for 0x0D and 0x10 alike. D-NET-147 |
 | ammoCount | u8 | **always** | entity+290 (u16) ← BMS record byte 81 `[orig: @0x40e9f0]` |
 | refNum / subType | u8 | `flags & 0x40 / 0x80` | entity+533 / +532 (D-NET-94; not bones). refNum ← BMS byte 153; subType = 0xFF when the def is indestructible (healthMax 0) `[orig: @0x40dc8e]` |
-| scoreFlag | u8 | `flags & 0x100` | entity+624 (i32) |
+| scoreFlag | u8 | `flags & 0x100` | entity+0x270 (+624, i32): the palm state or the piece type, gated on the def callbacks (the ai_function `palm` row, the move_function `psec` row), not on the value `[orig: @0x504554]`; the same byte as §5.11's 0x4000 field (the port's `has_score_flag`) |
 | weaponByte | u8 | **always** | entity+538 |
 | attachRef | u16 | `weaponByte != 0 \|\| flags & 0x200` | entity+350 |
 
@@ -2826,8 +2826,8 @@ consumed exactly on every payload).
 | 0 | 2 | spawnFlags | always | (gates all conditional fields below) |
 | 2 | 2 | entitySlotId (`pool<<12\|slot`) | always | pool resolve via `g_pool_list`; `0xFFFF` and `(s&0xF000)>=0x5000` end the batch |
 | 4 | 2 | itemTypeId | always | `ItemList_FindIndexByTypeId @ 0x49E100` → entity+28 / `entity+32 = gItemDefs[idx]` |
-| 6 | cstr | entityName | always | cstring read+skip; copied to `entity+244` later if AI-flagged |
-| — | 4 | entityFlags | `spawnFlags & 0x0020` | entity+36 (bit 1 = movement gate; §5.6) |
+| 6 | cstr | entityName | always | cstring; the server writes the entity Name (+0xF4 = +244, the port's `display_name`) only for AIData defs (`@ 0x503A64`), and the client copies it to +244 later if AI-flagged (`@ 0x43333A`) |
+| — | 4 | entityFlags | `spawnFlags & 0x0020` | entity+36, the live Flags dword raw, sent when nonzero (`@ 0x503ae1..0x503aed`); every vehicle emits it, its Flags carrying REFLECTABLE 0x400 (0x20400 per live vehicle, 0x406 per wreck in `fixtures/novaworld/run_20260426_120859`); bit 1 = movement gate (§5.6). Our encoder streams `load_stream_flags_dword` (the runtime word, the spawn word and the vehicle trait; world-wac-ai-re §28) |
 | — | 4 | posX | always | entity+4 (i32 16.16 world) |
 | — | 4 | posY | always | entity+8 |
 | — | 4 | posZ | always | entity+12 |
@@ -2837,22 +2837,37 @@ consumed exactly on every payload).
 | — | 4 | sectionMask | `spawnFlags & 0x0008` | entity+308 |
 | — | 1 | **teamByte** | `spawnFlags & 0x0010` | entity+354 — BMS team (1=Blue/2=Red); D-NET-58 |
 | — | 2 | parentHandle | `spawnFlags & 0x0100` | resolved → entity+368 (`occupantEntity` pool ptr) — a driver/occupant BACK-REFERENCE, not a transform parent (D-NET-195). Resolve nulls only `0xFFFF`/pool ≥ 5/capacity overflow — `0x0000` is a VALID pool-0 slot-0 ref `[orig: read @ 0x432e35..0x432e53, resolve+store @ 0x43326d..0x433289]`. Live AS witness: retail-vehicle-session carries a Dune Buggy (slot 0x1006, flags 0x1d77) with parent `0x0000` = "Player #1 (Multiplayer)"; the entity's client-side motion still rides its §5.13 compacts exclusively. Flag-clear default is `-1` (0xFFFF) |
-| — | 2 | targetHandle | `spawnFlags & 0x0200` | resolved → entity+40 (`groundEntity` pool ptr) `[orig: resolve @ 0x4332bc..0x4332c7, store @ 0x4332d7]` — the STRUCTURAL carrier: for a compact-less `ewep` child this seeds the slot its class MOVE function recomposes from EVERY tick (class-table row @ 0x82abe0 → `Entity_UpdateTransformAndTurret @ 0x440ca0`), so a mounted gun rides a DRIVING hull with no wire records of its own; vehicle compacts re-land the same slot per record `[orig: @ 0x460802]`. Flag-clear default is `-1` (0xFFFF) |
+| — | 2 | targetHandle | `spawnFlags & 0x0200` | resolved → entity+40 (`groundEntity` pool ptr) `[orig: resolve @ 0x4332bc..0x4332c7, store @ 0x4332d7]` — the STRUCTURAL carrier: for a compact-less `ewep` child this seeds the slot its class MOVE function recomposes from EVERY tick (class-table row @ 0x82abe0 → `Entity_UpdateTransformAndTurret @ 0x440ca0`), so a mounted gun rides a DRIVING hull with no wire records of its own; vehicle compacts re-land the same slot per record `[orig: @ 0x460802]`. The server sends groundEntity's pool handle whenever the pointer is set, occupied row or not (`@ 0x503C22..0x503C49`), so a child of a destroyed carrier streams the freed row's handle. Flag-clear default is `-1` (0xFFFF) |
 | — | 1 | seatMask | `spawnFlags & 0x0400` | mount-occupancy slots 0..7; reads one u16 occupant per set bit (0xFFFF still consumes the wire u16 and means empty) |
 | — | 2 ea | mountHandle\[slot\] | `mask & (1<<slot)` (slots 0..7) | entity+400+2·slot (capped at +414); occupant entity handle, 0xFFFF = empty |
 | — | 2 | mountHandle8 | inside `0x0400` block | entity+416; retail mount slot 8 occupant |
 | — | 2 | mountHandle9 | inside `0x0400` block | entity+418; retail mount slot 9 occupant |
-| — | 1 | **boneByte** | always | entity+290 (u16 zero-ext) — bone/other, NOT team; D-NET-58 |
-| — | 4 | aiProfile1 | `spawnFlags & 0x0800` | trailer → aiSlot+16 |
-| — | 4 | aiProfile2 | `spawnFlags & 0x0800` | trailer → aiSlot+20 |
-| — | cstr | aiName | `spawnFlags & 0x0800` | trailer → aiSlot+156 |
+| — | 1 | **boneByte** | always | entity+290 (u16 zero-ext; the server's read `@ 0x503D27`, the port's `e.ammo_count`) — bone/other, NOT team; D-NET-58 |
+| — | 4 | aiProfile1 | `spawnFlags & 0x0800` (set on the AI slot pointer, never on the values) | trailer → aiSlot+0x10: the spawn x `Entity_InitFromModel` copies (`@ 0x40E10C..0x40E11E`); there is no +0x79600000 law |
+| — | 4 | aiProfile2 | `spawnFlags & 0x0800` | trailer → aiSlot+0x14: the spawn y (`@ 0x40E10C..0x40E11E`) |
+| — | cstr | aiName | `spawnFlags & 0x0800` | trailer → aiSlot+156: the BMS name2 (e.g. `d_buggy`) |
 | — | 1 | refNum | `spawnFlags & 0x0040` | entity+533 (D-NET-94; not an alert level) |
 | — | 1 | subType | `spawnFlags & 0x0080` | entity+532 |
-| — | 1 | weaponTypeByte | `spawnFlags & 0x1000` | entity+176 |
-| — | 1 | zoneNumberRank (was "healthByte" — zone-object semantics, 2026-07-03) | `spawnFlags & 0x2000` | entity+538 — the packed **AS zone byte** `zoneNumber + 32·rank`, server source `ZoneSlotChain_GetZoneInfo @ 0x503eeb`; write gate = `entity+538 != 0` @ 0x503ecc. Golden ASH_I5A bunkers (type 0x054F): flags 0x20a1/0x20b1, byte 0x22 = zone 2 rank 1 |
+| — | 1 | soundLatchByte (was `weaponTypeByte`) | `spawnFlags & 0x1000` | the vehicle brain's +0x318 sound-latch byte, gated on the brain pointer (`@ 0x503e7f..0x503ec0`) whatever its value; the client stores it sign-extended at entity+0xB0 (+176, `@ 0x4331B7`); the port's `sound_latch_byte` / `has_sound_latch_byte` |
+| — | 1 | zoneNumberRank (was "healthByte" — zone-object semantics, 2026-07-03) | `spawnFlags & 0x2000` | entity+538 — the packed **AS zone byte** `zoneNumber + 32·rank`, server source `ZoneSlotChain_GetZoneInfo @ 0x503eeb`; write gate = `entity+538 != 0` @ 0x503ecc (the zone number byte, whatever the packed info; the port's `has_zone_number_rank`). Golden ASH_I5A bunkers (type 0x054F): flags 0x20a1/0x20b1, byte 0x22 = zone 2 rank 1 |
 | — | 2 | zoneRadius (was "healthShort") | `spawnFlags & 0x2000` (extra read) | entity+350 — the capture-zone/proximity radius (BMS record word 14; golden bunkers 70 = 0x46) |
-| — | 2 | zoneRadius (alt) | `(spawnFlags & 0x8000) && !(0x2000)` | entity+350 — the un-numbered SpawnPoint-def path: write gate `ItemDef+84 & 0x40000` @ 0x503f29 |
-| — | 1 | difficultyByte | `spawnFlags & 0x4000` | entity+624 — write gate = the def has a physics/damage handler @ 0x503f4c |
+| — | 2 | zoneRadius (alt) | `(spawnFlags & 0x8000) && !(0x2000)` | entity+350 — the un-numbered SpawnPoint-def path: write gate `ItemDef+84 & 0x40000` @ 0x503f1f..0x503f29, the def's SpawnPoint attrib whatever the radius (the port's `has_zone_radius_alt`) |
+| — | 1 | difficultyByte | `spawnFlags & 0x4000` | entity+0x270 (+624): the palm state or the piece type, gated on the def callbacks (the ai_function `palm` row `WeaponOverlay_HandleDamage`, the move_function `psec` row `Entity_UpdatePhysicsStep`; `@ 0x503f4c..0x503f80`), not on the value; the same byte as 0x10's field 0x100 (§5.9); the port's `has_difficulty_byte` |
+
+**Record identity and presence (2026-09-26).** The 0x0C, 0x0D and 0x18 serializers all
+send the entity Name at +0xF4 (0x0C `@ 0x5031FF`, 0x0D `@ 0x503A64`, 0x18 `@ 0x504E24`; the
+client stores it `@ 0x42E860..0x42E8EA` (15 chars), `@ 0x43333A`, `@ 0x433D51`), and
+`Server_PlayerAdd` copies the player's name into +0xF4 (`@ 0x51D06B`). An addeweap child
+takes its identity from `Entity_SpawnWeaponOverlays @ 0x40F300`: its slot index as subType
+(0x0080), the carrier's refNum (0x0040; the lowest free one when the carrier has none), its
+command group and its Flags (world-wac-ai-re §26.5c); the retail load stream
+(`fixtures/novaworld/run_20260426_120859`) shows 28 tank groups with refNums 1..28 and
+sub = 1 on every second child. The port's `PoolSpawnRecord` carries a presence field for
+every gate the server sets on something other than the written value (`has_ai_trailer`,
+`has_sound_latch_byte`, `has_zone_number_rank`, `has_zone_radius_alt`,
+`has_difficulty_byte`), and the fixture's `d_buggy` record (slot 0x101F) and a tank's
+second child (slot 0x1058) rebuild byte for byte from entity state (ctest
+`npruntime_initial_state_burst`).
 
 **Mount-occupancy block precise shape (corrected — D-NET-56):** the `0x400` branch reads the u8 seat mask;
 when the mask is non-zero it walks retail slots 0..7, reading one u16 occupant per set bit (`0xFFFF`
@@ -4004,7 +4019,9 @@ The handler, in-session only (except `event_type==48`), switches `event_type` ov
 each resolves a `"Canned Msg"`/`STRCNDnn` string via `[orig: GameText_GetString @ 0x51EBD0]`,
 formats it with the resolved killer/victim/aux names via `[orig: HUD_FormatKillEventMessage @
 0x422DA0]` (→ `[orig: Chat_FormatMessage @ 0x422C60]`, `$A`/`$B` token substitution; player names
-from the slot table with `<ch>…<co>` clan-tag colouring), and posts it to the kill feed with a
+from the slot table with `<ch>…<co>` clan-tag colouring; the `$A`/`$B` names are the entities'
+Name at +0xF4 (read `@ 0x422B85..0x422C0F`), while the medic request formats the player
+record's name (+0x28, `@ 0x515417`); 2026-09-26), and posts it to the kill feed with a
 colour via `[orig: Chat_AddMessageChannel2 @ 0x4987F0]`. Objective/zone cases additionally drive
 `[orig: Sound_PlayInterfaceTriggerSet @ 0x527BE0]`, `HUD_DrawDefaultProgressBar @ 0x527E60`, and
 effect spawns. Cases that resolve both attacker AND victim (4–15, 24, 32–34, 38–39, 45, 49) are
@@ -5958,19 +5975,18 @@ bump); the deferral list above is unchanged.
   ([render-order-re.md](../render/render-order-re.md), the FrameFX screen effects;
   `renderer::frame_fx_effects`, `FrameFxCompositorEffect`). While the NVG composite is up the
   world renders ONCE per frame, into `LocalPlayerPresenter`'s projection target at
-  `world::nvg_view_projection`'s raster (512 rows at the frame's own frustum aspect; the
-  Scoped arm's square frustum into 512 x 512), the surface's own 3D pass off, and clears to
-  the fog colour (`EnvironmentState::nvg_scene_clear_color`, `NVG_RenderSceneToTarget
-  @ 0x5d064e..0x5d0699`); FrameFX resamples that frame into the 512² NVG scene. The Scoped
+  `world::nvg_view_projection`'s raster (the 512 square at the frame's frustum, served
+  through `TargetProjectionXrInterface` since 2026-09-26; the Scoped arm's square frustum into
+  512 x 512), the surface's own 3D pass off, and clears to the fog colour
+  (`EnvironmentState::nvg_scene_clear_color`, `NVG_RenderSceneToTarget
+  @ 0x5d064e..0x5d0699`); FrameFX's copy of that frame into the 512² NVG scene is 1:1. The Scoped
   arm's polar lens and the Sighted arm's SIGHTS card drawn into the NVG scene are ported too
   (`renderer/nvg_scope_lens.h`, `NvgViewDevice`). The former "four-frame temporal history"
   reading and its CanvasItem post (`nvg_view.gdshader`) are deleted.
   Binocular activation also refuses while the PowerThrow fire-charge tick is live, preserving
   the held windup instead of converting optics input suppression into a release. Bounded
-  residuals: Godot ties a camera's projection aspect to its target, so the frame-shaped NVG
-  arms rasterise 512 rows x lround(512 x aspect) columns and resample horizontally to 512
-  (retail rasterises 512 columns directly), and the composite / lens rasterise at that
-  target's size before the full-surface blit; the raw-active death-screen exception
+  residuals: the composite / lens rasterise at the 512 square before the full-surface blit;
+  the raw-active death-screen exception
   remains unported (the NVG style-8 laser is ported 2026-09-25,
   [world §25.3](../world/world-wac-ai-re.md#253-the-ribbon-renderer--ceffectchannel_renderribbon--0x5db8a0)), and Binoculars still lacks its
   capture-point detail overlay.
@@ -14557,11 +14573,12 @@ the flag-0x20 i32 is **the entity FLAGS dword (entity+36) streamed raw** — the
 `blink_parent` remains parsed-but-unconsumed, see below). Golden values decode as composed
 spawn flags: buildings `0x04020400` = Indestructible-def (healthMax 0 → 0x4000000 `[orig:
 Entity_InitFromModel @0x40dc8e]`, which ALSO sets subType = 0xFF — the flag-0x80 byte) +
-type-Building (0x20000 `[orig: @0x40e105]`) + BMS `Reflective` attribute (1<<23 → 0x400, the
+the matrix-built bit (0x20000 `[orig: @0x40e0d4..0x40e105]`; the former "type-Building" reading
+is retired, world-wac-ai-re §28) + BMS `Reflective` attribute (1<<23 → 0x400, the
 per-placement pier/water bit); bridges add BMS `NoShadow` (1<<24 → 0x1000000 → `0x05020400`);
 `ammo_count` ← BMS record byte 81 and `refNum` ← byte 153 `[orig: Entity_SpawnFromBMSRecord
 @0x40e9f0]`. FIXED: `world::Entity` gains `engine_flags`/`ammo_count`/`sub_type`/`ref_num`;
-`promote_mission` composes the BMS-attribute bits + Building bit and carries bytes 81/153
+`promote_mission` composes the BMS-attribute bits + the matrix-built bit and carries bytes 81/153
 (bms::Entity::gen_reserved1 RENAMED `ref_num`, dropped from the reserved-zero parse assert);
 the def-sourced half (hp==0 → 0x4000000 + subType 0xFF) lands in Simulation::
 resolve_item_traits; `build_pool2_static_batch` streams all four;
@@ -14572,7 +14589,9 @@ here): the sectioned-destructible `sectionMask` rebuild (def attrib sign bit →
 state table `[orig: @0x50443f..0x5044a4]` — ASH_I5A golden has one such record, Power
 Generator Housing flags 0x0A9), the armory `weaponByte`/`attachRef` via
 `ZoneSlotChain_GetZoneInfo @0x4a2750` (ex-`CWeaponSlotManager_GetEntitySlotInfo`; golden ASH_I5A statics all carry weap 0x00),
-and the `scoreFlag` def-callback gate `[orig: @0x504554]`. LIVE RE-VERIFY retail-join v26
+and the `scoreFlag` def-callback gate `[orig: @0x504554]` (ported 2026-09-26: `has_score_flag`,
+entity+0x270, §5.9). Since 2026-09-26 the joiner's world kind comes from the item def
+(`authoring::entity_kind_for_item_type`), not from a Flags bit. LIVE RE-VERIFY retail-join v26
 (2026-07-03) NEGATIVE for the symptom: the 0x10 statics now stream golden-shaped (buildings
 eflags `0x04020400`, ammo/subType 0xFF), yet the stand-on-entity snap (building floors,
 vehicle decks) persisted unchanged — these record fields were not the cause. The real cause

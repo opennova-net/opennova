@@ -656,9 +656,19 @@ bit flip it.
    for marker defs 0xFFB/0xFFD/0xFFF/0x1002/0x1004/0x1006/0x1007), and the
    joiner-side net appliers `NapiNPClientMsg_0x00A @ 0x42fec0` /
    `NapiNPClientMsg_0x02F @ 0x430e10`. Cleared by `Entity_DropCarriedObject
-   @ 0x439df0` (renamed from the misnomer Entity_InitSpawnedChild — nulls the
-   link and back-link, clears child Flags bit0/0x800000, terrain-snaps, tosses
-   with the dropper's yaw, plays the def-name drop sound, authority broadcasts),
+   @ 0x439df0` (renamed from the misnomer Entity_InitSpawnedChild: it nulls the
+   link and back-link; clears child Flags bits 0 and 0x800000 (the carrier's
+   0x800000 copy @0x439e1d and a terrain-height Z @0x439e2e..0x439e51 are both
+   overwritten before any read); zeroes the X/Y velocity and sets the vertical
+   one to ftol(sin(carrier Pitch · dbl_7C3608) · 2^22) >> 12
+   @0x439e54..0x439e88; sets +0x155 = 0x10 (the S2C 0x35 pickup refusal byte,
+   `sub_4E03D0 @0x4e03f0`); installs `Entity_UpdatePositionAndTransform
+   @0x4adef0` as +0x1C4 @0x439e95; poses the child at the carrier's X/Y,
+   Z + 0x4000 and Yaw + 0x40000000 @0x439e9f..0x439ec3; copies the carrier's
+   blink quad @0x439ec6..0x439ef1 and re-runs its proximity query @0x439ef7;
+   plays the def's +0x6F3 sound (`door_open_sound_id`) at the carrier; the
+   authority broadcasts 0x2F; the fall and the ride are world-wac-ai-re.md
+   §24.3a's),
    the capture-zone clear @0x4ada07, and `Entity_Destroy @ 0x43ea03`. The
    savegame restore `SaveFile_ApplyEntityRecord @ 0x4abb00` (renamed from
    sub_4ABB00; caller `SaveFile_ReadOrWriteEntityRecord @ 0x4ac0c0`) resolves

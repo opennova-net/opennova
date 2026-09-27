@@ -169,8 +169,8 @@ they are not placement evidence). The `00tra-tire-marks-retail` fixture (added
 2026-08-20 from a debug snapshot) measures the ordered `.til` overlay
 tire-mark composition; the corrected celestial axis map (#525) now lays the static tree
 silhouettes through this camera's view, so its full-frame MAE (`10.191796`)
-measures the open D-TERRAIN-7 low-sun silhouette-density divergence together
-with the tile-composition items. The
+measured the low-sun silhouette density together with the tile-composition
+items (D-TERRAIN-7, closed 2026-09-26). The
 `00tra-armory-lght-retail` fixture (added 2026-08-20 from a debug snapshot)
 measures model-authored `LGHT` lamp delivery inside the armory - the
 2026-08-20 slice landed vertex-rate point shading, static-source owner
