@@ -913,6 +913,34 @@ int main(void) {
         printf("nested-action refusal + delay alias OK\n");
     }
 
+    /* A block's name is the line's second token, quotes optional: the shipped
+       AT4 and RPG entries open their scopeup rows with a bare `ACTION SCOPEUP`
+       [orig: WeaponDefs_ParseLineCallback @0x543680 over the tokens
+       Terrain_TokenizeConfigLine @0x53CB60 cuts]. */
+    {
+        static const char bare[] =
+            "weapon WPN_BARE // a comment\r\n"
+            "\tACTION\tSCOPEUP\r\n"
+            "\tDELAYSTART\t1\r\n"
+            "\tEND\r\n"
+            "\tACTION\t\"SCOPEDOWN\"\r\n"
+            "\tDELAYSTART\t2\r\n"
+            "\tEND\r\n"
+            "end\r\n";
+        DefWeaponsFile wb;
+        const int ok = def_parse_weapons_memory((const uint8_t *)bare, sizeof(bare) - 1, &wb) == 0 &&
+                wb.count == 1 && strcmp(wb.entries[0].weapon_name, "WPN_BARE") == 0 &&
+                wb.entries[0].actions_count == 2 &&
+                strcmp(wb.entries[0].actions[0].name, "SCOPEUP") == 0 &&
+                wb.entries[0].actions[0].delaystart == 1 &&
+                strcmp(wb.entries[0].actions[1].name, "SCOPEDOWN") == 0;
+        def_free_weapons(&wb);
+        if (!ok) {
+            fprintf(stderr, "FAIL: bare weapon/action names\n");
+            return 1;
+        }
+    }
+
 
     {
         const char text[] =
