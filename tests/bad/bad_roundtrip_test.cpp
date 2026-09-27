@@ -129,6 +129,7 @@ struct Scratch {
 } // namespace
 
 int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     // `--dump <path>` writes the retail leg's rewritten bytes for a byte diff.
     const char *dump_path = (argc >= 3 && std::strcmp(argv[1], "--dump") == 0) ? argv[2] : nullptr;
     std::vector<uint8_t> bytes;

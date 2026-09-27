@@ -10,7 +10,8 @@
 
 using namespace opennova::def;
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     /* The shipped ammo.def from the reference fixture set (OPENNOVA_JO_ASSETS):
        its per-round pins are the SKIP-LEG retail leg; the digit-walker block
        below runs unconditionally. */

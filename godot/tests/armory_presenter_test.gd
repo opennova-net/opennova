@@ -2,17 +2,15 @@ extends GutTest
 
 # ArmoryPresenter on the typed surfaces (ADR 0034): a REAL Simulation owns the
 # player/loadout state (mission boot + spawn + weapon table — the same recipe
-# the satchel/grenade tests always used), the world seam is a GameWorld
-# subclass harness, and the zone gate is exercised through try_open() while the
+# the satchel/grenade tests always used), the world seam is an ArmoryWorldView
+# interface harness, and the zone gate is exercised through try_open() while the
 # staged tests drive the post-gate open() directly (no armory volume is
 # authored in the in-memory mission).
 
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
 
-# The retail weapon.mnu, weapon.def and string tables the screen resolves come
-# from the reference fixture set (docs/asset-gated-tests.md); the whole script
-# skips without it.
+# ArmoryFixture authors the small menu, catalog and string tables used here.
 const STAGED_FIXTURES := {
 	"mnu/jo_weapon.mnu": "weapon.mnu",
 	"def/weapon.def": "weapon.def",
@@ -21,13 +19,6 @@ const STAGED_FIXTURES := {
 }
 
 
-func should_skip_script():
-	return RetailData.fixtures_skip(STAGED_FIXTURES.keys())
-
-
-# The armory's world view, faked over a REAL spawned simulation and the staged
-# retail menu root; the viewmodel verbs record what ACCEPT drove (rule 11: a
-# fake of the ArmoryWorldView interface through its virtual hooks).
 class FakeArmoryView:
 	extends ArmoryWorldView
 	var root: ResourceRoot
@@ -57,7 +48,7 @@ class FakeArmoryView:
 func before_each() -> void:
 	Strings.clear()
 	MusicService.set_var(2, 0)
-	PresenterFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
+	ArmoryFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
 
 
 func after_each() -> void:

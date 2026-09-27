@@ -3545,7 +3545,8 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	bool ok = run_side_password_admission();
 	ok = run_mission_transfers_match_retail_lan_contract() && ok;
 	ok = run_tag60_mission_name_selects_by_game_type() && ok;

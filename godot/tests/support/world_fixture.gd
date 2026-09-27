@@ -280,8 +280,7 @@ static func step_player_frames(presenter: LocalPlayerPresenter, world: GameWorld
 
 ## One archive's rows for `filenames` out of the minimal pack, with the
 ## lifecycle substitutions: the render-capable Tmap.trn under mnml.trn's
-## name, the shipped JO in-world menus (when the reference fixture set is
-## present) under the game.mnu / weapon.mnu archive names, and
+## name, authored in-world menus under the game.mnu / weapon.mnu names, and
 ## SHELL_WEAPON_DEF as weapon.def.
 static func shell_archive_entries(test: GutTest, filenames: Array) -> Array:
 	var entries: Array = []
@@ -291,18 +290,10 @@ static func shell_archive_entries(test: GutTest, filenames: Array) -> Array:
 		# while retaining that logical archive name.
 		if filename == "mnml.trn":
 			source = TMAP_FIXTURE_DIR.path_join("Tmap.trn")
-		# The in-world screens (ESC pause overlay + armory) pack the shipped JO
-		# menus from the reference fixture set under their retail archive names;
-		# without the set the boot packs the minted main menu under those names
-		# (a valid menu; the screen-verb test that opens them pends).
-		elif filename == "game.mnu":
-			source = RetailData.fixture("mnu/jo_game.mnu")
-			if source.is_empty():
-				source = BOOT_FIXTURE_DIR.path_join("main.mnu")
-		elif filename == "weapon.mnu":
-			source = RetailData.fixture("mnu/jo_weapon.mnu")
-			if source.is_empty():
-				source = BOOT_FIXTURE_DIR.path_join("main.mnu")
+		# These lifecycle screens exercise document loading and shell state.
+		# Shipped control names/layouts remain in the retail menu suite.
+		elif filename in ["game.mnu", "weapon.mnu"]:
+			source = BOOT_FIXTURE_DIR.path_join("main.mnu")
 		var bytes := FileAccess.get_file_as_bytes(source)
 		if filename == "weapon.def":
 			bytes = SHELL_WEAPON_DEF.to_utf8_buffer()

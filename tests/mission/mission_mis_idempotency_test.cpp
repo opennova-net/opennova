@@ -154,7 +154,8 @@ int check(const std::string &path) {
 	return 0;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	if (check(fixture_path()) != 0) return 1;
 	// The retail leg: the shipped ash_i5b (87 items, 1088 buildings, 432 markers).
 	const std::string retail = retail::reference_fixture("bms/ash_i5b.reference.bms");

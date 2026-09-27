@@ -200,7 +200,8 @@ static int test_find_section_jo(void) {
     return find_section_over(g_retail_gamemus.c_str(), 3, 0x21);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     RUN_TEST(test_open_synth_gamemus);
     RUN_TEST(test_close_idempotent);
     RUN_TEST(test_open_file);

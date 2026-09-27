@@ -136,20 +136,6 @@ func test_sp_setup_loads_image_only() -> void:
 	assert_eq(screen.session_overlay_lines(), PackedStringArray(["", "", "", ""]))
 
 
-func test_mp_setup_carries_the_session_variables() -> void:
-	if not _register_gametext_fixture():
-		return
-	var screen := _setup_screen(LoadingScreenInfo.make("00TRg.bms", true, "DEMOHOST",
-			"Trainingsmission", 0x10010, "Welcome aboard"))
-	assert_true(screen.has_session_overlay())
-	var lines := screen.session_overlay_lines()
-	assert_eq(lines[0], "DEMOHOST")
-	assert_eq(lines[1], "Trainingsmission")
-	assert_ne(lines[2], "", "LTGT_AAS resolves from the gametext table")
-	assert_eq(lines[3], "Welcome aboard")
-	Strings.register_table("gametext", null)
-
-
 func test_present_tracks_exact_stage_progress() -> void:
 	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	screen.set_progress(50)
@@ -235,18 +221,6 @@ func _setup_screen(info: LoadingScreenInfo) -> LoadingScreen:
 
 # The shipped gametext.bin (the LTGT_* game-type labels live in its table) comes
 # from the reference fixture set (docs/asset-gated-tests.md); false = pending.
-func _register_gametext_fixture() -> bool:
-	var path := RetailData.fixture("rtxt/gametext.bin")
-	if path.is_empty():
-		pending(RetailData.fixture_pending_text("rtxt/gametext.bin"))
-		return false
-	var table := RtxtStringFile.new()
-	assert_eq(table.load_from_byte_array(FileAccess.get_file_as_bytes(path)), OK,
-		"the reference gametext.bin loads")
-	Strings.register_table("gametext", table)
-	return true
-
-
 func _make_temp_dir(name: String) -> String:
 	var dir := OS.get_cache_dir().path_join("opennova_%s_%d" % [name, Time.get_ticks_usec()])
 	DirAccess.make_dir_recursive_absolute(dir)

@@ -32,7 +32,8 @@ using namespace opennova;
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	const std::string fixture =
 			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/score/score_sample.ini";
 	const std::vector<uint8_t> bytes = test_io::read_file(fixture);
