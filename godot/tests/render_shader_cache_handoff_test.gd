@@ -222,3 +222,36 @@ func test_every_canonical_classification_resolves_without_fallback() -> void:
 						tag, flags, emissive_type, glass_flag, 128)
 					assert_not_null(cache.get_shader_for_key(key),
 							"%s key %08x resolves exactly" % [tag, key])
+
+
+func test_manifest_skin_normal_contracts_name_the_engine_rule() -> void:
+	# The skinned effects' vertex programs light the frame retail's skinnormal
+	# names: SkBasic and SkGlass the blended normal, every lit bump effect the
+	# first palette entry's (renderer::ObjectSkinNormal). The manifest's table
+	# must name the same rule for the technique every tag selects.
+	var cache = ObjectShaderCache.get_singleton()
+	var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(
+			"res://shaders/object/pipeline_manifest.json"))
+	var contracts: Dictionary = manifest.get("skin_normal_contracts", {})
+	var technique_by_directory := {}
+	for technique in manifest.get("techniques", []):
+		technique_by_directory[technique["directory"]] = technique["engine_enum"]
+		assert_true(contracts.has(technique["engine_enum"]),
+				"%s names its skinnormal rule" % technique["engine_enum"])
+	var skinned := 0
+	for tag in cache.get_known_shader_tags():
+		var emissive_type := 2 if String(tag).contains("_LUM") else 0
+		var key: int = cache.classify(tag, 0, emissive_type, 0, 128)
+		var material := ShaderMaterial.new()
+		cache.configure_material_for_key(material, key)
+		if material.shader == null:
+			continue
+		var directory: String = material.shader.resource_path.get_base_dir().get_file()
+		assert_true(technique_by_directory.has(directory), "%s selects a manifest technique" % tag)
+		if not technique_by_directory.has(directory):
+			continue
+		var rule: String = cache.skin_normal_for_key(key)
+		assert_eq(rule, contracts[technique_by_directory[directory]],
+				"%s: the manifest names the engine's skinnormal rule" % tag)
+		skinned += 1 if rule != "none" else 0
+	assert_eq(skinned, 9, "every shipped skinned tag runs a skinned vertex program")
