@@ -237,7 +237,7 @@ class Lod:
         self.skinned = lp.skinned  # meshes deforming with the rig
         self.meshes = {}     # part index -> [mesh]: geometry on the part
         self.centers = {}    # part index -> `_center` mesh
-        self.anchors = {}    # part index -> `_attach` empty
+        self.anchors = []    # (part index, `_attach` empty)
         self.spheres = {}    # part index -> `_hit` empty
         self.boxes = {}      # part index -> `_bounds` empty
         self.points = []     # (type letter, part index or -1, label, object)
@@ -433,7 +433,7 @@ class Exporter(Notes):
                     continue
                 m = HELPER_RE.match(raw)
                 if m and m.group(2) == "attach":
-                    once(lod.anchors, self.on_part(ob, part, m.group(1), lod), ob, "attach point")
+                    lod.anchors.append((self.on_part(ob, part, m.group(1), lod), ob))
                     continue
                 if m and m.group(2) == "sphere":
                     mesh = ob.parent
@@ -1021,24 +1021,44 @@ class Exporter(Notes):
                     lines.append("vv " + fmt(*v))
                 for t in tris:
                     lines.append(f"vf {t[0]} {t[1]} {t[2]}")
-        # CXLT: the collision LOD's attach points, which OED's WriteCXLT wrote
-        # (5fc5b4f6a^ export_3di.cpp, "CXLT: attach points"). A scene holds
-        # them for only some parts (import makes one where the row is not the
-        # section's own offset), so with any `_attach` in the LOD every row the
-        # retail count gives is written (one per section after the root on a
-        # rigid model, one per section on a skinned one, as the corpus stores
-        # them and the builder derives them), each at its part's attach point,
-        # else at its pivot through the very values its cobj line carries, so
-        # the CLI reads a row the builder would derive as that row (our rule:
-        # OED wrote a row per helper). With none the builder derives every row.
-        if not bullet.anchors:
+        # CXLT: the collision LOD's attach points, which OED's WriteCXLT wrote,
+        # a row per `~` attach helper sorted by name (5fc5b4f6a^
+        # engine/formats/oed/convert_internal.cpp and export_3di.cpp, "CXLT:
+        # attach points"). Attach points "The attach helpers" is that rule:
+        # a row per `_attach`, in export order, none an empty table (import
+        # sets it for the 156 JOTAC tables one per part cannot say: M24_1st's
+        # 42 rows in the name order of its helpers, the parent order; dM1A1's
+        # 33 for 25 sections; Chair03X's none).
+        if self.props.attach_points == "HELPERS":
+            for _, ob in sorted(bullet.anchors, key=lambda e: order_key(e[1])):
+                lines.append("cxlt " + fmt(*self.space.mission(self.world(ob).translation)) + f"  # {ob.name}")
+            if not bullet.anchors:
+                lines.append("cxlt  # no attach helper: an empty table")
+            return
+        # "One per part": a scene holds attach points for only some parts
+        # (import makes one where the row is not the section's own offset),
+        # so with any `_attach` in the LOD every row the retail count gives is
+        # written (one per section after the root on a rigid model, one per
+        # section on a skinned one, as the corpus stores them and the builder
+        # derives them), each at its part's attach point, else at its pivot
+        # through the very values its cobj line carries, so the CLI reads a
+        # row the builder would derive as that row. With none the builder
+        # derives every row.
+        by_part = {}
+        for part, ob in bullet.anchors:
+            if part in by_part:
+                raise ExportError(f"{bullet.root.name}: '{by_part[part].name}' and '{ob.name}' are both the attach "
+                                  f"point of {self.part_name(bullet, part)} (a part carries one while the model's "
+                                  "Attach points are One per part)")
+            by_part[part] = ob
+        if not by_part:
             return
         first = 0 if self.skinned else 1
-        if first and 0 in bullet.anchors:
-            self.note(f"{bullet.anchors[0].name}: a rigid model stores no attach point for its root section; "
-                      "this one is not exported")
+        if first and 0 in by_part:
+            self.note(f"{by_part[0].name}: a rigid model stores no attach point for its root section while its "
+                      "Attach points are One per part; this one is not exported")
         for i in range(first, count):
-            ob = bullet.anchors.get(i)
+            ob = by_part.get(i)
             if ob is None:
                 lines.append("cxlt " + fmt(*pivots[i]) + f"  # {bullet.parts[i].name}'s pivot")
             else:
@@ -1182,7 +1202,7 @@ class Exporter(Notes):
             raise ExportError(f"poly_collision_lod {bullet_index} names no LOD (there are {len(lods)})")
         for lod in lods:
             if lod.anchors and lod is not lods[bullet_index]:
-                self.note(f"{next(iter(lod.anchors.values())).name}: attach points are read from the collision LOD "
+                self.note(f"{lod.anchors[0][1].name}: attach points are read from the collision LOD "
                           f"(LOD {bullet_index}) only; not exported from {lod.root.name}")
         thresholds = [lod.root.o3d.lod_threshold for lod in lods]
         if any(t == 0 for t in thresholds[:-1]) or any(a < b for a, b in zip(thresholds, thresholds[1:])):

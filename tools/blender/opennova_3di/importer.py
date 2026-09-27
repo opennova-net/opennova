@@ -923,33 +923,40 @@ class Builder(Notes):
         derivation, formats/threedi/threedi_build.cpp), OED's WriteCXLT source
         (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row that is its
         section's own offset, the row the builder derives, needs no helper;
-        any other is an `_## attach` Empty on its part in the collision LOD. A
-        row count that does not fit places none, and an empty table (Chair03X:
-        seven sections, no row) has no scene form."""
+        any other is an `_## attach` Empty on its part in the collision LOD.
+        A table of another count or none (156 JOTAC models: M24_1st's 42 rows
+        for 42 sections, Chair03X's none for seven) sets the model's Attach
+        points to the attach helpers: an Empty per row, in its order, on the
+        part whose section offset it is (else the root)."""
         rows = self.sc["cxlt"]
-        if not rows:
-            if self.sc["cxlt_given"]:
-                self.note("the model stores no CXLT attach point, which a scene cannot say: export leaves the rows to "
-                          "the builder, which derives one per collision section"
-                          f"{'' if self.sc['skinned'] else ' after the root'} at its pivot")
-            return
         li = self.model.o3d.poly_collision_lod
         parts = self.sc["lods"][li]["parts"] if li < len(self.sc["lods"]) else []
         first = 0 if self.sc["skinned"] else 1
-        if len(rows) != len(parts) - first:
-            self.note(f"{len(rows)} CXLT attach points do not fit the collision LOD's {len(parts)} parts (one per "
-                      f"part{'' if first == 0 else ' after the root'}); export puts each at its part's pivot")
-            return
         cobjs = self.sc["cobjs"]
-        for i, row in enumerate(rows):
-            pi = i + first
-            if pi < len(cobjs) and all(round(a * 65536.0) == round(b * 65536.0)
-                                       for a, b in zip(row, cobjs[pi]["offset"])):
-                continue  # the same 16.16 row as the section's offset
+
+        def attach(i, pi, row):
             ob = bpy.data.objects.new(f"_{pi + 1:02d} attach", None)
             ob.empty_display_type = "PLAIN_AXES"
             ob.empty_display_size = 0.05
+            ob.o3d.order = i
             lod_objects[li].append(self.put(ob, li, pi, Matrix.Translation(self.blender(row))))
+
+        def at_offset(row, offset):
+            return all(round(a * 65536.0) == round(b * 65536.0) for a, b in zip(row, offset))
+
+        if not rows and not self.sc["cxlt_given"]:
+            return
+        if rows and len(rows) == len(parts) - first:
+            for i, row in enumerate(rows):
+                pi = i + first
+                if pi < len(cobjs) and at_offset(row, cobjs[pi]["offset"]):
+                    continue  # the same 16.16 row as the section's offset
+                attach(i, pi, row)
+            return
+        self.model.o3d.attach_points = "HELPERS"
+        for i, row in enumerate(rows):
+            pi = next((si for si, c in enumerate(cobjs) if si < len(parts) and at_offset(row, c["offset"])), 0)
+            attach(i, pi, row)
 
     def bullet_lod(self, mats):
         """The render LOD whose parts are the collision sections and whose

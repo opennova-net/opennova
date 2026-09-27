@@ -138,9 +138,12 @@ the same text transport, the same add-on.
    (in the add-on, any helper in that LOD writes a whole table, a part without
    one contributing its pivot); with none, build derives one row per non-root
    section at its offset, our rule and the retail row count in 917 of the 958
-   JO models. The CMDL box envelops the collision faces and LOD 0's triangles,
-   its radii and height (`radii[2]`) the collision faces' alone, as the retail
-   corpus stores them. A skinned model follows the retail person layout: one
+   JO models. A table that is not one per part (156 JOTAC models: none, a row
+   for the root too, another count) imports with the model's Attach points
+   set to the attach helpers, a row per `_attach` in export order, as OED
+   wrote a row per attach helper. The CMDL box envelops the collision faces
+   and LOD 0's triangles, its radii and height (`radii[2]`) the collision
+   faces' alone, as the retail corpus stores them. A skinned model follows the retail person layout: one
    section per bone at its pivot, carrying a hit sphere and bounds box, what
    the runtime's person raycast reads [orig: Physics_RaycastAgainstBoneSections
    @ 0x4e4670]: the box around the LOD 0 vertices the bone moves and the
@@ -441,7 +444,6 @@ the same text transport, the same add-on.
 - Known model gaps, each reported rather than carried: retail's own tool is not
   witnessed, so its seam flags and tangent values match the OED rules only
   where that tool agreed with ModSuperOed; CTRL registers nothing references;
-  an empty CXLT table (11 retail models: no attach helper can say "none");
   the centres of skinned bones that draw nothing (dM1A1, DT801); MTRX frames
   that are not rotations on a `PN##` part (Frag_1st and Stch_1st rows 37 to 39
   come back orthonormal; a bone keeps them whole); a user point naming a part

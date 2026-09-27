@@ -563,6 +563,52 @@ def an_authored_hit_sphere_keeps_its_helpers():
 
 
 @case
+def attach_helpers_make_the_tables_one_per_part_cannot():
+    root, lod = model("attach")
+    pn1 = empty("PN01", lod)
+    box("Body", pn1)
+    pn2 = empty("PN02", pn1, (0.0, 0.1, 0.0))
+    box("Lid", pn2, (0.0, 0.1, 0.0), 0.03)
+    pn3 = empty("PN03", pn1, (0.0, -0.1, 0.0))
+    box("Door", pn3, (0.0, -0.1, 0.0), 0.03)
+    # The attach helpers, in export order: two on the root (one per part
+    # stores none there) and one on part 03.
+    root.o3d.attach_points = "HELPERS"
+    for name, parent, at, order in (("_attach", pn3, (0.0, 0.0, 0.05), 0), ("_01 attach", pn1, (0.0, 0.0, 0.0), 1),
+                                    ("_attach", pn1, (0.0, 0.0, 0.2), 2)):
+        empty(name, parent, at).o3d.order = order
+    _, lines = export_model(root)
+    # Mission axes: x forward (Blender -Y), z up; CXLT truncates to 16.16.
+    rows = [[float(x) for x in r] for r in records(lines, "cxlt")]
+    step = 1.0 / 65536.0
+    assert len(rows) == 3 and abs(rows[0][0] - 0.1) < step and abs(rows[0][2] - 0.05) < step and \
+        rows[1] == [0.0, 0.0, 0.0] and abs(rows[2][2] - 0.2) < step, rows
+    first = export.output_path(root)
+    again = import_again([first])[0]
+    assert again.o3d.attach_points == "HELPERS"
+    again.o3d.output_path = os.path.join(OUT, "attach2", "attach.3di").replace("\\", "/")
+    export_model(again)
+    compare(first, export.output_path(again))
+    # No helper: an empty table, which also comes back.
+    for ob in [o for o in again.children_recursive if export.HELPER_RE.match(rig.clean_name(o.name))]:
+        bpy.data.objects.remove(ob)
+    _, lines = export_model(again)
+    assert records(lines, "cxlt") == [[]], records(lines, "cxlt")
+    empty_table = export.output_path(again)
+    back = import_again([empty_table])[0]
+    assert back.o3d.attach_points == "HELPERS"
+    back.o3d.output_path = os.path.join(OUT, "attach3", "attach.3di").replace("\\", "/")
+    export_model(back)
+    compare(empty_table, export.output_path(back))
+    # One per part takes one attach point a part.
+    back.o3d.attach_points = "PARTS"
+    pn = next(o for o in back.children_recursive if rig.clean_name(o.name) == "PN02")
+    empty("_attach", pn)
+    empty("_02 attach", pn, (0.0, 0.0, 0.1))
+    refused(back, "both the attach point of")
+
+
+@case
 def an_occlusion_sphere_keeps_what_the_file_stores():
     root, lod = model("occsphere")
     pn1 = empty("PN01", lod)

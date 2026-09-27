@@ -255,6 +255,13 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     poly_collision_lod: IntProperty(name="Collision LOD", default=0, min=0,
                                     description="The render LOD whose part meshes also become the bullet faces (the OED "
                                                 ".3dp poly_collision_lod); 0 = the most detailed")
+    attach_points: EnumProperty(name="Attach points", default="PARTS", items=[
+        ("PARTS", "One per part", "A CXLT row for every collision section after the root (every section on a "
+                                  "skinned model), at its part's _attach Empty or its pivot: the table nearly every "
+                                  "retail model stores"),
+        ("HELPERS", "The attach helpers", "Exactly the collision LOD's _attach Empties, a row each in export order, "
+                                          "none an empty table: a table one per part cannot say (M24_1st's rows in "
+                                          "parent order, Chair03X's none), which import sets")])
     mesh_part: BoolProperty(name="Mesh part", default=False,
                             description="A skinned model keeps its skinned geometry on a part of its own after the "
                                         "bones, at its mesh's origin, whose collision section holds the bullet faces "
@@ -1467,6 +1474,8 @@ def draw_model(layout, model):
         layout.label(text=f"Writes //{rig.clean_name(model.name)}.3di")
     layout.prop(p, "poly_collision_lod")
     layout.prop(p, "export_bullet_faces")
+    if p.attach_points != "PARTS":
+        layout.prop(p, "attach_points")
     arm = rig.rig_of(model)
     own = arm is not None and rig.model_of(arm) is model
     root = next((c for c in model.children if rig.is_lod_root(c) and rig.lod_index(c) == 0), None)

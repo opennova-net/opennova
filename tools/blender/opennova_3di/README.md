@@ -152,13 +152,14 @@ root and its name must give its part (`_05 hit`). Other helpers:
   parts often do), its first vertex is the point the part's bounds sit on,
   and in the collision LOD the section's one collision vertex, as the retail
   tool seeded such parts. Import makes one for every such part.
-- `_attach` (an Empty): in the collision LOD, the attach point the game stores
-  for its part's section (CXLT; a palm's broken pieces pivot on them). With
-  any in that LOD, export writes an attach point for every section after the
-  root (every section on a skinned model), at the section's `_attach` or, where
-  it has none, at its pivot; without any, the builder puts each at its
-  section's pivot, so the few retail models that store none (Chair03X) come
-  back with them, and import says so.
+- `_attach` (an Empty): in the collision LOD, an attach point the game stores
+  (CXLT; a palm's broken pieces pivot on them). With any in that LOD, export
+  writes an attach point for every section after the root (every section on
+  a skinned model), at the section's `_attach` or, where it has none, at its
+  pivot; without any, the builder puts each at its section's pivot. A retail
+  table that is not one per part (none at all in Chair03X, a row for the root
+  too in the first-person guns) imports with the model's **Attach points** set
+  to the attach helpers: then each `_attach` is a row, in export order.
 - `_sphere` (an Empty, drawn as a sphere): on an occlusion mesh, the record's
   sphere when it is not the one the mesh's vertices give (its origin the
   centre, its display size times its scale the radius). Import makes one only
