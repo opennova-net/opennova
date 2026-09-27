@@ -320,13 +320,14 @@ def derived_names_fit_retail():
     # <model stem>_<material index>[d].tga, ASCII, one dot, at most 15 bytes;
     # a long model name is cut, and one image in two materials is one file.
     shared = image("shared", (0, 0, 1, 1))
-    root, _ = model("tfa_akm_rifle", textured("A", shared), textured("B", shared),
+    root, _ = model("tfa_akm", textured("A", shared), textured("B", shared),
                     textured("C", image("other", (0, 1, 0, 1))))
+    root.o3d.model_name = "tfa_akm_rifle"  # the stem comes from the model name, cut to fit
     _, sc = export_model(root)
     names = [textures(sc, i)[0][0] for i in range(3)]
     assert names == ["tfa_akm_r_0.tga", "tfa_akm_r_0.tga", "tfa_akm_r_2.tga"], names
     assert all(len(n) <= 15 and n.count(".") == 1 and n.isascii() for n in names)
-    assert sorted(os.listdir(folder(root))) == ["tfa_akm_r_0.tga", "tfa_akm_r_2.tga", "tfa_akm_rifle.3di"]
+    assert sorted(os.listdir(folder(root))) == ["tfa_akm.3di", "tfa_akm_r_0.tga", "tfa_akm_r_2.tga"]
     assert materials.derived_stem("стволы-x", 1, False) == "x"
     assert materials.derived_stem("????", 1, False) == "tex"
 
