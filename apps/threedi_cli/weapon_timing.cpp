@@ -37,6 +37,9 @@ constexpr double kClipTicksPerSecond = io::kTicksPerSecondInt;
 constexpr double kRoundsPerMinutePerTick = 60.0 * io::kTickHz;
 // The longest window an author may give: two minutes of logic ticks.
 constexpr double kMaxSeconds = 120.0;
+// The view position is 16.16 fixed point after the parser's * 256, so an eye
+// reaches at most this far from the model.
+constexpr double kEyeReachMetres = 32768.0;
 
 double rpm(int cycle_ticks) { return cycle_ticks ? kRoundsPerMinutePerTick / cycle_ticks : 0; }
 
@@ -310,9 +313,9 @@ bool plan_weapon_timing(const WeaponTimingRequest &request, WeaponTimingPlan &ou
 	for (const WeaponTimingEye *eye : {&request.pos, &request.tpos}) {
 		if (!eye->given) continue;
 		for (double m : eye->metres)
-			// The view position is 16.16 fixed point after the parser's * 256.
-			if (!std::isfinite(m) || std::fabs(m) >= 32768.0)
-				return fail(error, "an eye position must be finite and within 32768 metres of the model");
+			if (!std::isfinite(m) || std::fabs(m) >= kEyeReachMetres)
+				return fail(error, "an eye position must be finite and within " +
+						std::to_string(int(kEyeReachMetres)) + " metres of the model");
 	}
 	out.pos_given = request.pos.given;
 	out.tpos_given = request.tpos.given;
