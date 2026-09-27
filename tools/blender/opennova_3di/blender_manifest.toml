@@ -7,7 +7,7 @@ tagline = "Import and export NovaLogic .3di models and their animations"
 maintainer = "OpenNova contributors"
 type = "add-on"
 license = ["SPDX:MIT"]
-blender_version_min = "4.2.0"
+blender_version_min = "5.0.0"
 platforms = ["windows-x64"]
 
 [permissions]

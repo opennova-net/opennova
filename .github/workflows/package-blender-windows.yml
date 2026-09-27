@@ -79,8 +79,67 @@ jobs:
           $timing = & $cli weapon timing fixtures/anim/weapon_timing.txt -o "$unpacked/weapon_actions.txt"
           if ($LASTEXITCODE -ne 0) { throw "Packaged CLI failed to compile weapon timing" }
           $preview = $timing | ConvertFrom-Json
-          if ($preview.cycle_ticks -ne 5 -or $preview.rpm -ne 750) {
+          if ($preview.entries[0].cycle_ticks -ne 5 -or $preview.entries[0].rpm -ne 750) {
             throw "Packaged weapon timing disagrees with the native FSM"
+          }
+
+      # The add-on as a user installs it: a portable Blender 5.1 (the add-on
+      # needs 5.0 or newer; cached by version), the zip installed as an
+      # extension into a user folder of the job's own, and every
+      # tests/blender/*_test.py run against it (`-- --installed`, see
+      # tests/blender/addon_harness.py).
+      - name: Cache portable Blender
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: build/blender-download
+          key: blender-5.1.2-windows-x64
+
+      # download.blender.org can answer a runner with a bot challenge, so its
+      # official mirrors follow it; the checksum is the release's own
+      # (blender-5.1.2.sha256).
+      - name: Download portable Blender
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $name = "blender-5.1.2-windows-x64.zip"
+          $sha256 = "345bedea7b0acf7cc9666423d8553f9129622aea34ded65c23e8cb70f83f14ff"
+          New-Item -ItemType Directory -Force build/blender-download | Out-Null
+          $zip = "build/blender-download/$name"
+          foreach ($site in @("https://download.blender.org/release/Blender5.1",
+                              "https://ftp.nluug.nl/pub/graphics/blender/release/Blender5.1",
+                              "https://mirrors.ocf.berkeley.edu/blender/release/Blender5.1")) {
+            try {
+              Invoke-WebRequest -Uri "$site/$name" -OutFile $zip
+              if ((Get-FileHash -Algorithm SHA256 $zip).Hash -eq $sha256) { break }
+              Write-Host "$site/$name does not match the release checksum"
+            } catch {
+              Write-Host "$site/$name could not be downloaded: $_"
+            }
+            Remove-Item -Force -ErrorAction SilentlyContinue $zip
+          }
+          if (-not (Test-Path $zip)) { throw "Could not download $name" }
+
+      - name: Test the installed add-on in Blender
+        shell: pwsh
+        env:
+          BLENDER_USER_RESOURCES: ${{ github.workspace }}/build/blender-user
+        run: |
+          $ErrorActionPreference = "Stop"
+          7z x -y -obuild/blender build/blender-download/blender-5.1.2-windows-x64.zip | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Could not unpack Blender" }
+          $blender = "build/blender/blender-5.1.2-windows-x64/blender.exe"
+          & $blender --background --factory-startup --command extension install-file -r user_default -e `
+            dist/opennova-blender-addon-windows.zip
+          if ($LASTEXITCODE -ne 0) { throw "Blender could not install the add-on zip" }
+          $tests = @(Get-ChildItem tests/blender -Filter *_test.py | Sort-Object Name)
+          if ($tests.Count -eq 0) { throw "No tests/blender/*_test.py to run" }
+          foreach ($test in $tests) {
+            Write-Host "== $($test.Name)"
+            & $blender --background --factory-startup --python-exit-code 1 --python $test.FullName -- --installed
+            if ($LASTEXITCODE -ne 0) { throw "$($test.Name) failed against the installed add-on" }
           }
 
       # Upload the installable zip directly, without a second archive wrapper.
