@@ -57,6 +57,24 @@ void append_vertex(PreparedMeshSurface &out, const ThreediVertex &v,
         }
         out.bones.push_back(bones);
         out.weights.push_back(weights);
+        // SkinModelLightArray entry k is the light taken through the inverse
+        // of palette entry k, filled in table order through one inverse
+        // buffer that a singular matrix leaves as it was (D3DXMatrixInverse
+        // writes nothing when the determinant is zero), so the entry keeps
+        // the last inverse made. The lit effects read the entry of the
+        // vertex's first index byte: a vertex whose first entry collapses is
+        // lit through the nearest earlier entry that inverts, and before the
+        // table's first entry the buffer holds stale stack.
+        // [orig: CRenderBatchQueue_FlushBatches @ 0x5DA4F6..0x5DA5CE (the
+        // directional fill, its inverse @ 0x5DA54B), @ 0x5DA950..0x5DA9A1 (the
+        // point fill, its inverse @ 0x5DA967)]
+        std::array<int32_t, 4> fallbacks{-1, -1, -1, -1};
+        const int32_t first = v.bone_indices[0];
+        if (first < strip.bone_table_length && first < 16) {
+            for (int32_t n = 0; n < 4 && first - 1 - n >= 0; ++n)
+                fallbacks[static_cast<size_t>(n)] = strip.bone_table[first - 1 - n];
+        }
+        out.light_fallback_bones.push_back(fallbacks);
     }
     out.indices.push_back(static_cast<int32_t>(out.vertices.size() - 1));
 }
@@ -79,6 +97,7 @@ void finish_surface(PreparedMeshSurface &surface, MeshPreparationOptions options
                 : std::max(surface.part_index, 0);
         surface.bones.assign(surface.vertices.size(), {bone, 0, 0, 0});
         surface.weights.assign(surface.vertices.size(), {1.0f, 0.0f, 0.0f, 0.0f});
+        surface.light_fallback_bones.assign(surface.vertices.size(), {-1, -1, -1, -1});
     }
 }
 

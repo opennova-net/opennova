@@ -32,6 +32,8 @@ int main() {
     vertices[3].bone_weights[1] = 0.3871f;
     vertices[3].bone_weights[2] = 0.1643f;
     vertices[4].normal[2] = 0; // Zero dot still follows the mirrored handedness rule.
+    vertices[2].bone_indices[0] = 0; // The table's first entry: nothing before it.
+    vertices[3].bone_indices[0] = 5; // Past the table: no entry to walk back from.
     uint16_t indices[]{0, 1, 2, 3, 2, 3, 4};
     ThreediTriangleStrip strips[3]{};
     strips[0].material_index = 42;
@@ -93,6 +95,15 @@ int main() {
     // A sum past 1 leaves byte 3 a negative weight, kept as the shader keeps it.
     const float rest = 1.0f - ((0.4487f + 0.3871f) + 0.1643f);
     TEST_EXPECT(rest < 0.0f && (first.weights[4] == std::array<float, 4>{0.4487f, 0.3871f, 0.1643f, rest}));
+    // A vertex whose first palette entry has no inverse is lit through the
+    // nearest earlier table entry: byte 0 names entry 1 (part 9), before it
+    // entry 0 (part 7); the first entry and a byte past the table have none.
+    TEST_EXPECT(first.light_fallback_bones.size() == first.vertices.size());
+    TEST_EXPECT((first.light_fallback_bones[0] == std::array<int32_t, 4>{7, -1, -1, -1}));
+    TEST_EXPECT((first.bones[2] == std::array<int32_t, 4>{7, 7, 0, 9}));
+    TEST_EXPECT((first.light_fallback_bones[2] == std::array<int32_t, 4>{-1, -1, -1, -1}));
+    TEST_EXPECT(first.bones[4][0] == 0);
+    TEST_EXPECT((first.light_fallback_bones[4] == std::array<int32_t, 4>{-1, -1, -1, -1}));
     TEST_EXPECT(first.material_array_index == 1 && first.material_index == 42);
     TEST_EXPECT(first.parent_index == -1 && first.abs[0] == -3);
     TEST_EXPECT(!first.is_alpha && ordinary[1].is_alpha && !ordinary[2].is_alpha);
@@ -105,9 +116,11 @@ int main() {
     TEST_EXPECT(native[0].indices == std::vector<int32_t>({0, 2, 1, 3, 5, 4}));
     TEST_EXPECT((native[0].tangents[0] == std::array<float, 4>{1, 0, 0, 1}));
     TEST_EXPECT(native[1].tangents[2][3] == -1); // Zero dot: negate the original +1.
-    TEST_EXPECT(native[0].bones == first.bones && native[0].weights == first.weights);
+    TEST_EXPECT(native[0].bones == first.bones && native[0].weights == first.weights &&
+            native[0].light_fallback_bones == first.light_fallback_bones);
     TEST_EXPECT((native[2].bones[0] == std::array<int32_t, 4>{0, 0, 0, 0}));
     TEST_EXPECT((native[2].weights[0] == std::array<float, 4>{1, 0, 0, 0}));
+    TEST_EXPECT((native[2].light_fallback_bones[0] == std::array<int32_t, 4>{-1, -1, -1, -1}));
     TEST_EXPECT(prepare_model_mesh(model, 0, {true, 0, false})[2].bones[0][0] == 1);
 
     // A rejected strip consumes its place in the ROBJ walk.

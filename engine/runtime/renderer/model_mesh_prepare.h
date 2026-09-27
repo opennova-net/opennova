@@ -34,6 +34,12 @@ struct PreparedMeshSurface {
     std::vector<std::array<float, 4>> tangents;
     std::vector<std::array<int32_t, 4>> bones;
     std::vector<std::array<float, 4>> weights;
+    // Per skinned vertex: the parts of the strip's bone-table entries before
+    // the one its first index byte names, nearest first (-1 past the table's
+    // start). The lit skinned effects light a vertex through its first
+    // palette entry's inverse; when that matrix has none, retail's fill keeps
+    // the inverse of the nearest earlier entry that had one.
+    std::vector<std::array<int32_t, 4>> light_fallback_bones;
     std::vector<int32_t> indices;
 };
 
