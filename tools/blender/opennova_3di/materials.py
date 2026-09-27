@@ -649,7 +649,7 @@ class CopiedFile:
 
 class SwatchFile:
     """A texture of one colour (linear RGBA), for a material whose Base Color
-    has no image: 8 by 8 pixels, the smallest texture retail ships."""
+    has no image: 8 by 8 pixels, the size of retail's smallest textures."""
 
     SIDE = 8
 
@@ -676,10 +676,11 @@ class SwatchFile:
 
 class Row:
     """A texture row a material exports (the MTRL row: file name, slot, type,
-    flags, frame) and the file export writes for it: an ImageFile,
-    CopiedFile or SwatchFile under `file_name`, or None when the file is the
-    author's to supply. A row whose name is derived carries its material's
-    export index and its letter until names are given."""
+    flags, frame) and the file export writes for it (an ImageFile,
+    NormalMapFile, CopiedFile or SwatchFile, under `file_name` when that is
+    not the row's name), or None when the file is the author's to supply. A
+    row whose name is derived carries its material's export index and its
+    letter until names are given."""
 
     def __init__(self, name, slot, type=0, flags=0, frame=0, file=None, file_name=None, derive=None):
         self.name, self.slot, self.type, self.flags, self.frame = name, slot, type, flags, frame
@@ -1165,13 +1166,16 @@ def import_image(builder, name):
         try:
             img = bpy.data.images.load(path, check_existing=True)
             if img.users == 0:
+                # An image this load made (one the scene already uses keeps
+                # its own name and settings).
                 img.name = name
-            # The game samples colour and alpha independently: a texture's
-            # alpha is often a mask a shader reads (specular, bump), not
-            # opacity (the arms' camo averages 0.001). Blender's default
-            # straight alpha premultiplies on load and loses the colour
-            # wherever alpha is near zero; channel-packed keeps both.
-            img.alpha_mode = "CHANNEL_PACKED"
+                # The game samples colour and alpha independently: a
+                # texture's alpha is often a mask a shader reads (specular,
+                # bump), not opacity (the arms' camo averages 0.001).
+                # Blender's default straight alpha premultiplies on load and
+                # loses the colour wherever alpha is near zero; channel-packed
+                # keeps both.
+                img.alpha_mode = "CHANNEL_PACKED"
             # Blender loads what it cannot decode (PCX, archive-compressed
             # files) as an image without pixels.
             if img.size[0] == 0:
