@@ -103,6 +103,7 @@ FIRST_PERSON_PARTS = 64
 # PFF entry's name field, contract C3).
 FILE_NAME_BYTES = 15
 SCENE_LINE = re.compile(r"^scene text:(\d+): (.*)$")
+SECTION_WORDS = re.compile(r"collision section (\d+)")
 
 
 def dup_rank(letters):
@@ -249,6 +250,7 @@ class Exporter(Notes):
         self.skinned = False
         self.uv1 = False
         self.bone_points = {}  # skinned LOD 0: part -> rest positions it moves
+        self.sections = {}  # collision section -> its part and the meshes giving its faces
         self.notes = []
 
     # --- helpers ------------------------------------------------------------
@@ -899,6 +901,10 @@ class Exporter(Notes):
                 self.bullet_faces(sections[index], bullet.meshes[index])
             if bullet.skinned:
                 self.bullet_faces(sections[bullet.authored], bullet.skinned)
+        # What each section is, for a refusal that names a section alone.
+        for i, part in enumerate(bullet.parts):
+            meshes = list(bullet.meshes.get(i, [])) + (list(bullet.skinned) if i == bullet.authored else [])
+            self.sections[i] = part.name + (f": {', '.join(ob.name for ob in meshes)}" if meshes else "")
         # A part that draws nothing keeps the vertex OED seeded it with (its
         # `_center` helper's first), and WriteCVRT wrote a section's part
         # vertices, faces or not: 1,779 of the 2,411 such retail parts carry
@@ -1157,7 +1163,7 @@ class Exporter(Notes):
         try:
             result = export_text(self.context, ["build"], text, "scene.o3d", "scene text", out_path)
         except ExportError as e:
-            raise ExportError(name_lines(str(e), text)) from None
+            raise ExportError(name_sections(name_lines(str(e), text), self.sections)) from None
         # The textures only once the model is built: a refused model writes
         # nothing.
         self.materials.write_textures(out_dir)
@@ -1189,6 +1195,13 @@ def name_lines(message, text):
             at -= 1
         out.append(f"{owner}: {m.group(2)} (scene text line {m.group(1)})" if owner else line)
     return "\n".join(out)
+
+
+def name_sections(message, sections):
+    """A CLI message with each `collision section N` told by its part and the
+    meshes giving its bullet faces."""
+    return SECTION_WORDS.sub(lambda m: f"{m.group(0)} ({sections[int(m.group(1))]})"
+                             if int(m.group(1)) in sections else m.group(0), message)
 
 
 def export_model(context, model, run=None):

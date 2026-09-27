@@ -271,6 +271,10 @@ def a_cli_refusal_names_its_object():
                    [(k, (k + 1) % sides, sides + (k + 1) % sides, sides + k) for k in range(sides)])
     link(bpy.data.objects.new("OB-occonly", me), pn1)
     refused(root, "OB-occonly")
+    # A refusal naming a collision section alone is told its part and meshes.
+    said = export.name_sections("occl.3di: collision section 1 (part 1) has 40,000 distinct bullet-face normals",
+                                {1: "PN02: Hull, Turret"})
+    assert "collision section 1 (PN02: Hull, Turret)" in said, said
 
 
 # --- a first-person gun and its arms on one rig -----------------------------------
