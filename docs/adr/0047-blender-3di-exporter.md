@@ -69,8 +69,8 @@ the same text transport, the same add-on.
    (`classify_name`, [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)], as the retired
    importer/exporter used it: `_lod_index` LOD roots, `PN##`, `## Mesh<n>`,
    `_## center`, `~PPx attach`, `UP<c>## <label>`, `LP##` lights,
-   `<code>##[a..]-colonly`, `OB/OS/OP/OH##[-MM]-occonly`,
-   `Material_<i>_<SHADER>`, a `BN##` armature for a skinned model; the table in
+   `<code>##[a..]-colonly`, `OB/OS/OP/OH##[-MM]-occonly`, a `BN##` armature
+   for a skinned model; the table in
    `docs/threedi/scene-naming-contract.md`) and writes `.o3d`. Import runs
    `opennova-3di scene` and lays the `.o3d` out by the same convention, each
    model under a model root Empty in the current scene (its model name, output
@@ -79,12 +79,21 @@ the same text transport, the same add-on.
    exports in its model root's own frame. Blender's `.001` duplicate suffixes are
    stripped before classification; two objects with one identity inside a LOD
    are an error. What a name cannot carry (LOD thresholds and types, PANM
-   tracks, material flags, textures and generators, light generators, export
-   order, the bullet-face surface and flags, the collision LOD) is a visible
-   add-on property; a rotated `PN##` is a PANM rotation frame (an MTRX row).
-   The material name carries the shader tag, any of the engine's shader table
-   (`opennova-3di catalog`); the add-on's shader field edits the name, and a
-   name without one takes OED's default for its texture count. Export never
+   tracks, a material's shader, generators and the texture rows its nodes
+   cannot give, light generators, export order, the bullet-face surface and
+   flags, the collision LOD) is a visible add-on property; a rotated `PN##` is
+   a PANM rotation frame (an MTRX row). A material is read the way Blender
+   draws it: the image feeding its Principled BSDF's Base Color is the diffuse
+   texture (on the second UV map, the detail texture), a tangent-space Normal
+   Map node's image the `.mdt` normal map, written with the game's green (its
+   tangent frame, dP/du and dP/dv on D3D UVs, runs down the texture, Blender's
+   up), Backface Culling off two-sided, a Greater Than (Less Than: inverted)
+   Math node on Alpha the alpha test, Render Method Blended the alpha pass and
+   Emission a glow; an image-less material draws its colour from a swatch
+   texture, never additive glass. Its Shader property names any tag of the
+   engine's shader table (`opennova-3di catalog`); one left empty takes OED's
+   default for its texture count among the rows that draw those settings.
+   Export never
    relies on anything import set up: every value the engine derives (volume
    planes, seam flags, tangents, section and model bounds, glass and emissive,
    the alpha pass) is recomputed from the authored scene on every export by the
@@ -97,7 +106,10 @@ the same text transport, the same add-on.
    first-person weapons are; the export writes only what the strict reader
    takes, naming the object otherwise, and prints every number as the exact
    double it holds. The add-on writes 32-bit uncompressed TGA textures itself
-   (an industry format, not a 3DI concern).
+   (an industry format, not a 3DI concern), float images sRGB-encoded, named
+   from the model in at most 15 bytes as retail packs them, and only once the
+   model is built; an image loaded unchanged from a texture file the game
+   reads is that file, copied as it stands.
 4. **Collision follows the OED rules** (ModSuperOed, as the retired
    `engine/formats/oed` port carried them, 5fc5b4f6a^). A volume is the solid
    its authored faces bound [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: its vertex

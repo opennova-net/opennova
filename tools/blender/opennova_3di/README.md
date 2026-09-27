@@ -160,21 +160,75 @@ export ignores them:
   moving the parent carries the child. An unknown point puts the child on the
   parent's root, as in game.
 
-Materials are `Material_<index>_<SHADER>` (`Material_0_FF_ST_OP`,
-`Material_1_FFP_GLASS`): the name carries the shader, and the material
-panel's Shader field (any tag the engine knows, searchable) renames the
-material. A material with no tag in its name gets the default for its
-textures (`FF_ST_OP` one, `FF_MT_OP` two, `FFP_GLASS` none, which a mesh
-without a material takes too). Glass shaders are glass, `*_LUM` shaders
-emissive, blending shaders (glass among them) draw in the alpha pass, and a
-bump shader (`VS_PHONGT`, `VS_DOT3DIFF`, ...) gets tangents derived from its
-UVs. With no texture entries, the image texture wired to the Principled
-BSDF's Base Color (else the first image texture node) is exported as a
-32-bit TGA named after the image (its first 12 characters, then `.tga`; two
-images may not share a file name). A material's texture list names every
-slot instead: slot 1 diffuse, slot 2 the detail texture of an `FF_MT` shader
-(drawn on the mesh's second UV map; the first is the one Blender renders
-with), 3 and 4 normal maps. Write TGA writes `.tga` entries only.
+## Materials
+
+A material exports the way Blender 5.0 or newer draws it, through its
+Principled BSDF:
+
+- **Base Color**: the image whose colour reaches Base Color is the diffuse
+  texture, through reroutes, node groups, Mix nodes and other colour nodes
+  (export names those, since the game draws the image as it is). An image read
+  on the mesh's second UV map (a UV Map node naming it) is the detail texture,
+  which the game multiplies in at twice its value (the `FF_MT` shaders). A
+  roughness, normal or mask image is never taken for the diffuse texture. With
+  no image, the Base Color (or an RGB node's colour) is written as an 8 by 8
+  swatch texture, and a mesh without a material draws in Blender's default
+  grey.
+- **Normal**: a Normal Map node in tangent space reading an image is the
+  normal map, an `.mdt` in slot 3. Wired straight, the image holds Blender's
+  normals (green up, as Blender bakes them), and export inverts its green for
+  the game, whose tangent frame runs down the texture. Read through a green
+  flip (Separate Color, 1 minus Green, Combine Color) it is a green-down file,
+  written as it is. The node's strength, a Bump node and object or world space
+  do not reach the game.
+- **Backface Culling** off is two-sided, for drawing and for the bullet faces.
+- **Alpha**: a Math node, Greater Than (Less Than for the inverted test)
+  against a constant threshold, on the Principled Alpha is the alpha test at
+  that threshold, Blender's own alpha clip.
+- **Render Method** Blended draws the strips in the alpha pass.
+- **Emission** on asks for a glowing shader.
+
+The material panel's **Shader** names the engine shader (any tag in its
+table, searchable). Left empty, export takes OED's rule, the first shader of
+the model's kind drawing that many textures (`FF_ST_OP`, `FF_MT_OP`,
+`VS_SKBASIC`), among the shaders that draw the settings above: Blended picks a
+blending one (`FF_ST_AB`), Emission a `*_LUM` one, a U or V generator a `#UV`
+one (only those move UVs), a normal map a bump one (`VS_DOT3DIFF`,
+`VS_SKBUMPDIFFT`), and export says what no shader of the kind draws. A shader
+named in the panel keeps OED's rule: `FFP_GLASS` draws no texture. Glass
+shaders are glass, `*_LUM` shaders emissive, blending shaders draw in the alpha
+pass, and a bump shader gets tangents derived from the render UV map, so its
+meshes need one with area. **Export order** is the material's index in the
+model (import sets it; -1 sorts a material after the ordered ones, by first
+use). The name is free.
+
+An image loaded unchanged from a texture file the game reads (`.tga`, `.dds`,
+`.mdt`, `.pcx`) is that file: its row names it the way the game finds it
+(retail's `x.dds.tga` finds `x.dds`), and export copies it beside the `.3di`
+unless another file already has its name there. Any other image (a PNG, a
+painted, packed or generated image, a bake) is written as a 32-bit TGA named
+after the model and the material, `<model>_<material index>.tga`, with `d`
+added for a detail texture and `n.mdt` for a normal map: ASCII, one dot and
+at most 15 characters, the names retail packs. Float images (16-bit PNG and
+TIFF, EXR, float bakes) are sRGB-encoded as their 8-bit files would be;
+non-colour data keeps its values. UDIM, image sequence and movie images are
+refused, and a textured mesh needs a UV map. Every name, image and pixel is
+checked before anything is written, the textures are written only once
+`opennova-3di` has built the model, and the models of one Export All cannot
+write two images under one name. **Write textures** off writes none.
+
+The texture list carries only what the nodes cannot say: flipbook frames, row
+flags (1 a flipbook frame, 2 the render-state override), an object-space or
+height-map normal texture, a file Blender cannot open. A slot it lists is taken
+from it, not from the nodes. A row's file name is printable ASCII, at most 16
+characters, without a folder; **Write** writes its image under that name,
+which must then be `<stem>.tga` or `<stem>.mdt` in at most 15 characters. A
+material holds at most 24 rows.
+
+Import lays a material out the same way: a slot's lone plain row becomes its
+image node (a tangent-space shader's `.mdt` behind a green flip into a Normal
+Map node), the other rows stay in the list, and the flags become Backface
+Culling, the Math node, the render method and Emission.
 
 ## Panels
 
@@ -197,11 +251,13 @@ with), 3 and 4 normal maps. Write TGA writes `.tga` entries only.
   phase or register, end colour), attenuation and the corona / terrain /
   object light switches. A spot light's cone points down the light's -Z, as
   Blender draws it, and an unrotated light points straight down.
-- **Material properties**: shader (with what it implies), the bullet faces'
-  surface type (metal 14, glass 15, ...) and flags (bullets pass, front only:
-  a bullet from behind passes), alpha test, two-sided, the reflection colour,
-  the texture list, and the RGB / alpha / UV generators and texture flipbook.
-  A register-driven flipbook selects its register by name.
+- **Material properties**: the shader (with what it implies) and export
+  order, what Blender's settings give (two-sided, the alpha test, the alpha
+  pass, the glow), the bullet faces' surface type (metal 14, glass 15, ...)
+  and flags (bullets pass, front only: a bullet from behind passes), the other
+  flag bits, the reflection colour, the texture rows the nodes cannot give, and
+  the RGB / alpha / UV generators and texture flipbook. A register-driven
+  flipbook selects its register by name.
 
 ## Animations
 
