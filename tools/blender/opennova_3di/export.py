@@ -1087,8 +1087,8 @@ class Exporter(Notes):
                 lines.append("cxlt  # no attach helper: an empty table")
             return
         # "One per part": a scene holds attach points for only some parts
-        # (import makes one where the row is not the section's own offset),
-        # so with any `_attach` in the LOD every row the retail count gives is
+        # (import makes one where the row is not its part's pivot), so with
+        # any `_attach` in the LOD every row the retail count gives is
         # written (one per section after the root on a rigid model, one per
         # section on a skinned one, as the corpus stores them and the builder
         # derives them), each at its part's attach point, else at its pivot

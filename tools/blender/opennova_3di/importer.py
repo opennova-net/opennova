@@ -972,18 +972,19 @@ class Builder(Notes):
         """The CXLT attach points: retail stores one per part after the root
         on a rigid model and one per part on a skinned one (the builder's
         derivation, formats/threedi/threedi_build.cpp), OED's WriteCXLT source
-        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row that is its
-        section's own offset, the row the builder derives, needs no helper;
-        any other is an `_## attach` Empty on its part in the collision LOD.
-        A table of another count or none (156 JOTAC models: M24_1st's 42 rows
-        for 42 sections, Chair03X's none for seven) sets the model's Attach
-        points to the attach helpers: an Empty per row, in its order, on the
-        part whose section offset it is (else the root)."""
+        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row at its part's
+        pivot, the row export writes for a part without a helper, needs
+        none; any other is an `_## attach` Empty on its part in the
+        collision LOD (a section's stored offset is not always that pivot:
+        MWalA2X's parts all pivot on the origin). A table of another count
+        or none (156 JOTAC models: M24_1st's 42 rows for 42 sections,
+        Chair03X's none for seven) sets the model's Attach points to the
+        attach helpers: an Empty per row, in its order, on the part it is
+        the pivot of (else the root)."""
         rows = self.sc["cxlt"]
         li = self.model.o3d.poly_collision_lod
         parts = self.sc["lods"][li]["parts"] if li < len(self.sc["lods"]) else []
         first = 0 if self.sc["skinned"] else 1
-        cobjs = self.sc["cobjs"]
 
         def attach(i, pi, row):
             ob = bpy.data.objects.new(f"_{pi + 1:02d} attach", None)
@@ -992,22 +993,24 @@ class Builder(Notes):
             ob.o3d.order = i
             lod_objects[li].append(self.put(ob, li, pi, Matrix.Translation(self.blender(row))))
 
-        def at_offset(row, offset):
-            return all(round(a * 65536.0) == round(b * 65536.0) for a, b in zip(row, offset))
+        def at_pivot(row, part):
+            # The row the builder writes for the pivot: truncated to 16.16
+            # (threedi_q16_trunc), as the stored row is.
+            return all(round(a * 65536.0) == int(b * 65536.0) for a, b in zip(row, part["pivot"]))
 
         if not rows and not self.sc["cxlt_given"]:
             return
         if rows and len(rows) == len(parts) - first:
-            for i, row in enumerate(rows):
-                pi = i + first
-                if pi < len(cobjs) and at_offset(row, cobjs[pi]["offset"]):
-                    continue  # the same 16.16 row as the section's offset
-                attach(i, pi, row)
-            return
+            off = [i for i, row in enumerate(rows) if not at_pivot(row, parts[i + first])]
+            # A skinned model's mesh part is no bone, so nothing hangs there.
+            if all(i + first != self.mesh_part for i in off):
+                for i in off:
+                    attach(i, i + first, rows[i])
+                return
         self.model.o3d.attach_points = "HELPERS"
         for i, row in enumerate(rows):
-            pi = next((si for si, c in enumerate(cobjs) if si < len(parts) and at_offset(row, c["offset"])), 0)
-            attach(i, pi, row)
+            attach(i, next((pi for pi, part in enumerate(parts) if pi != self.mesh_part and at_pivot(row, part)), 0),
+                   row)
 
     def bullet_lod(self, mats):
         """The render LOD whose parts are the collision sections and whose

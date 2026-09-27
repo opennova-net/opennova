@@ -673,6 +673,23 @@ def attach_helpers_make_the_tables_one_per_part_cannot():
     empty("_attach", pn)
     empty("_02 attach", pn, (0.0, 0.0, 0.1))
     refused(back, "both the attach point of")
+    # A retail table at section offsets that are not the parts' pivots
+    # (MWalA2X pivots every part on the origin): import gives each row an
+    # Empty, since export writes a part without one at its pivot.
+    folder_path = os.path.join(OUT, "offsets")
+    os.makedirs(folder_path, exist_ok=True)
+    scene = os.path.join(folder_path, "offsets.o3d")
+    with open(scene, "w", encoding="utf-8") as f:
+        f.write("o3d 1\nmodel OFFSETS\nmaterial FF_ST_OP\ntexture wall.tga\nlod 0 bldg\n"
+                "part 0 0 0 0\nstrip 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
+                "part 0 0 0 0\nstrip 0\nv 2 0 0 0 0 1 0 0\nv 3 0 0 0 0 1 1 0\nv 2 1 0 0 0 1 0 1\nt 0 1 2\n"
+                "panm 0 0\npanm 1 0\ncobj 0\ncobj 0 2.5 0.25 0\ncxlt 2.5 0.25 0\n")
+    first = os.path.join(folder_path, "offsets.3di")
+    subprocess.run([CLI, "build", scene, "-o", first], check=True, capture_output=True)
+    offsets = import_again([first])[0]
+    offsets.o3d.output_path = os.path.join(OUT, "offsets2", "offsets.3di").replace("\\", "/")
+    _, lines = export_model(offsets)
+    assert records(lines, "cxlt") == [["2.5", "0.25", "0"]], records(lines, "cxlt")
 
 
 @case
