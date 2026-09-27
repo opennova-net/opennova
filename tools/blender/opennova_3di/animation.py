@@ -64,8 +64,7 @@ import re
 import bpy
 from mathutils import Vector
 
-from . import assembly
-from .export import BONE_RE, clean_name, is_lod_root, is_root_bone, model_roots
+from .rig import BONE_RE, clean_name, is_lod_root, is_root_bone, model_roots
 from .o3dtext import (ExportError, ModelSpace, Notes, at_world_origin, cli_notes, export_text, fmt, playing,
                       quoted)
 
@@ -210,7 +209,6 @@ class AnimExporter(Notes):
         self.scene = context.scene
         self.model = model
         self.props = model.o3d
-        self.settings = self.scene.o3d
         self.space = None  # set in run(): the model root's frame, as the model export reads it
         self.root = None  # set in run(): the rig's Root and head bones, where it has them
         self.head = None
@@ -368,7 +366,7 @@ class AnimExporter(Notes):
     def read(self, out_path):
         """The clip-set text, read from the scene; the rig's bones and clips."""
         model = self.model.name
-        self.space = ModelSpace(self.model, self.settings.forward)
+        self.space = ModelSpace(self.model)
         bones = bone_rows(self.arm)
         self.root = root_of(self.arm)
         self.head = head_of(self.model, self.arm)
@@ -393,20 +391,14 @@ class AnimExporter(Notes):
             if self.clip_name(action) not in named:
                 self.note(f"the clip '{action.name}' is on no table row, so nothing plays it")
 
-        # The rest pose is the bind every key is measured against. A bone that
-        # follows another model's parts (assembly.drive: arms on a gun) is
-        # display only, so the drive is muted while the clips are read.
+        # The rest pose is the bind every key is measured against.
         held_position = self.arm.data.pose_position
         held_pose = [(pb, [tuple(getattr(pb, c)) for c in POSE_CHANNELS]) for pb in self.arm.pose.bones]
         held_trigger = self.arm.o3d.anim_trigger
-        drives = [con for pb in self.arm.pose.bones for con in pb.constraints
-                  if con.name == assembly.DRIVE and not con.mute]
         held_frame = self.scene.frame_current
         rest = [pb.bone.matrix_local.copy() for pb in bones]
         try:
             self.arm.data.pose_position = "POSE"
-            for con in drives:
-                con.mute = True
             self.context.view_layer.update()
             text = ["o3a 1", f"adm {quoted(os.path.basename(out_path))}"]
             for key, variants in rows:
@@ -414,8 +406,6 @@ class AnimExporter(Notes):
             for action, strip in strips:
                 text += self.clip_lines(action, strip, bones, rest)
         finally:
-            for con in drives:
-                con.mute = False
             for pb, values in held_pose:
                 for channel, value in zip(POSE_CHANNELS, values):
                     setattr(pb, channel, value)

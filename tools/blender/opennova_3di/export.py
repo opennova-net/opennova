@@ -88,11 +88,10 @@ from mathutils import Euler, Vector
 from . import materials
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
                       export_text, fmt, quoted)
+from .rig import (BONE_RE, PART_RE, clean_name, descendants, is_lod_root, is_model_root, is_root_bone,
+                  parent_part)
 
 
-BLENDER_SUFFIX = re.compile(r"\.\d{3,}$")
-PART_RE = re.compile(r"^PN(\d{2})$")
-BONE_RE = re.compile(r"^BN(\d{2})(?: .*)?$")
 # A single mesh may omit its ordinal: "01 Mesh" is "01 Mesh0".
 MESH_RE = re.compile(r"^(\d{2}) Mesh(\d*)$")
 CENTER_RE = re.compile(r"^_(\d{2}) center$")
@@ -115,16 +114,6 @@ UNLISTED_TYPE_LETTERS = "CDLV"
 UNLISTED_TYPE_CODE = "CX"
 VOLUME_RE = re.compile(r"^([A-Z]{2})([VSWLO]*)(\d{2})([a-z]*)-colonly$")
 BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
-
-
-def clean_name(name):
-    return BLENDER_SUFFIX.sub("", name)
-
-
-def is_root_bone(name):
-    """A rig's `Root` bone, in any case: the ground under the character, no
-    part (animation.py)."""
-    return clean_name(name).lower() == "root"
 
 
 def dup_rank(letters):
@@ -178,57 +167,6 @@ def slot_material(ev, slot):
     return mat.original if mat is not None else None
 
 
-def bone_parent_part(bone):
-    """The part a BN## bone's parent is: the nearest BN## bone above it, past
-    `Root` and any `!` control bones; None at the root."""
-    above = bone.parent
-    while above is not None:
-        m = BONE_RE.match(clean_name(above.name))
-        if m:
-            return int(m.group(1)) - 1
-        above = above.parent
-    return None
-
-
-def is_lod_root(ob):
-    return ob.type == "EMPTY" and "_lod_index" in ob
-
-
-def is_model_root(ob):
-    """A model root: the Empty whose children are a model's LOD roots."""
-    return ob.type == "EMPTY" and any(is_lod_root(c) for c in ob.children)
-
-
-def model_roots(scene):
-    return sorted((o for o in scene.objects if is_model_root(o)), key=lambda o: o.name)
-
-
-def model_of(ob):
-    """The model an object belongs to: the nearest model root at or above it."""
-    while ob is not None:
-        if is_model_root(ob):
-            return ob
-        ob = ob.parent
-    return None
-
-
-def active_model(context):
-    """The model the active object belongs to, else the scene's only model."""
-    model = model_of(context.object) if context.object is not None else None
-    if model is None:
-        roots = model_roots(context.scene)
-        model = roots[0] if len(roots) == 1 else None
-    return model
-
-
-def descendants(ob):
-    for child in ob.children:
-        if is_model_root(child):
-            continue  # another model parented here is its own .3di
-        yield child
-        yield from descendants(child)
-
-
 def order_key(ob):
     order = ob.o3d.order
     return (order if order >= 0 else 1 << 30, clean_name(ob.name))
@@ -267,7 +205,7 @@ class Exporter(Notes):
         self.scene = context.scene
         self.model = model
         self.props = model.o3d  # the model's name, output path, collision LOD
-        self.settings = self.scene.o3d  # forward axis, textures, executable
+        self.settings = self.scene.o3d  # Write textures
         self.space = None  # set in run(): the model root's frame
         self.depsgraph = None  # set in run(), with every rig at rest
         self.registers = []
@@ -573,7 +511,7 @@ class Exporter(Notes):
         if lod.armature is not None:
             if index >= lod.bone_count:
                 return 0
-            above = bone_parent_part(lod.parts[index])
+            above = parent_part(lod.parts[index])
             return above if above is not None else 0
         if index in lod.attach:
             return lod.attach[index]
@@ -1061,7 +999,7 @@ class Exporter(Notes):
 
     def run_in_object_mode(self, model, name, out_path, out_dir):
         self.context.view_layer.update()
-        self.space = ModelSpace(self.model, self.settings.forward)
+        self.space = ModelSpace(self.model)
         for ob in self.model.children:
             if not (is_lod_root(ob) or is_model_root(ob) or clean_name(ob.name).startswith("!")):
                 self.note(f"{ob.name}: not under a LOD root; not exported")

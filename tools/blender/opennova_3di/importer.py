@@ -16,7 +16,7 @@ import os
 import bpy
 from mathutils import Matrix, Vector
 
-from . import export, materials
+from . import export, materials, rig
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, Notes, axis_basis, blender_axes,
                       import_text, num, strip_comment, tokens)
 
@@ -304,14 +304,13 @@ class Builder(Notes):
     def build(self, scene):
         sc = self.sc
         self.scene = scene
-        self.forward = scene.o3d.forward
         # mission -> Blender, the inverse of the export's axis map
-        self.blender = blender_axes(self.forward)
+        self.blender = blender_axes()
         self.world = {}
         # The output path follows the imported file (Excavatr.3di's GHDR name
         # is OrngFlag), one per model root: a second import of one file writes
         # beside the first, not over it.
-        taken = {m.o3d.output_path.lower() for m in export.model_roots(scene)}
+        taken = {m.o3d.output_path.lower() for m in rig.model_roots(scene)}
         output = f"//{self.stem}.3di"
         n = 2
         while output.lower() in taken:
@@ -365,7 +364,7 @@ class Builder(Notes):
             return Matrix.Identity(3)
         r = self.sc["frames"][index - 1]
         q = Matrix(((r[0], r[3], r[6]), (r[1], r[4], r[7]), (r[2], r[5], r[8])))
-        b = axis_basis(self.forward)
+        b = axis_basis()
         return b @ q @ b.transposed()
 
     def rigid_lod(self, li, lod, root, mats):

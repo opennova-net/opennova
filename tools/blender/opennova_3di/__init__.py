@@ -30,11 +30,12 @@ from bpy_extras.io_utils import ImportHelper
 # Blender re-runs this file when the extension is updated or scripts are
 # reloaded, but keeps the submodules it imported before: reload them first so
 # the property groups registered here and the code that reads them agree.
-for _name in ("o3dtext", "materials", "export", "importer", "assembly", "animation", "anim_import", "weapon"):
+for _name in ("o3dtext", "rig", "materials", "export", "importer", "assembly", "animation", "anim_import",
+              "weapon"):
     if f"{__name__}.{_name}" in sys.modules:
         importlib.reload(sys.modules[f"{__name__}.{_name}"])
-from . import anim_import, animation, assembly, export, importer, materials, weapon
-from .export import active_model
+from . import anim_import, animation, assembly, export, importer, materials, rig, weapon
+from .rig import active_model
 from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, bundled_cli_path, cli_path, run_cli
 
 # The seven PANM tracks, labelled by the axis retail turns them about
@@ -175,15 +176,7 @@ class O3DTrack(bpy.types.PropertyGroup):
 
 
 def is_other_model(self, ob):
-    return export.is_model_root(ob) and ob is not self.id_data
-
-
-def is_rig_model(self, ob):
-    return is_other_model(self, ob) and not assembly.armatures(ob)
-
-
-def update_drive(self, context):
-    assembly.drive(self.id_data, self.drive_rig)
+    return rig.is_model_root(ob) and ob is not self.id_data
 
 
 def update_mount(self, context):
@@ -256,9 +249,6 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                         "(the retail layout of US01 and ArmsG); off, on the root part, whose section "
                                         "holds them (Delta04, ArmGlovD)")
     # Display-only assembly (assembly.py); export never reads these.
-    drive_rig: PointerProperty(name="Bones follow", type=bpy.types.Object, poll=is_rig_model, update=update_drive,
-                               description="A skinned model's bones follow this model's parts of the same index, as "
-                                           "retail draws first-person arms with the gun's part matrices (display only)")
     mount_parent: PointerProperty(name="Mount on", type=bpy.types.Object, poll=is_other_model, update=update_mount,
                                   description="Place this model on another model, as an ITEMS.DEF addeweap child "
                                               "(the M1A1's turret) sits on its parent (display only)")
@@ -416,10 +406,6 @@ class O3DLightProps(bpy.types.PropertyGroup):
 
 
 class O3DSceneProps(bpy.types.PropertyGroup):
-    forward: EnumProperty(name="Forward", items=[
-        ("-Y", "-Y (Blender front)", "The model faces Blender's front view"),
-        ("X", "+X", "The model faces +X"),
-    ], default="-Y")
     cli_path: StringProperty(name="3DI executable", subtype="FILE_PATH", default=bundled_cli_path(),
                              options=PATH_OPTIONS,
                              description="Uses the bundled opennova-3di automatically. Choose a different executable "
@@ -515,7 +501,7 @@ class O3D_OT_export_all(bpy.types.Operator):
     bl_description = "Write every model in the scene to its own .3di"
 
     def execute(self, context):
-        models = export.model_roots(context.scene)
+        models = rig.model_roots(context.scene)
         if not models:
             self.report({"ERROR"}, "the scene holds no model root (the Empty above a model's LOD roots)")
             return {"CANCELLED"}
@@ -578,15 +564,11 @@ class O3D_OT_import(bpy.types.Operator, ImportHelper):
             models.append(model)
         if not models:
             return {"CANCELLED"}
-        # Models imported together that the game draws together: a skinned
-        # model whose bones are another's parts (arms on a first-person gun).
-        pairs = assembly.pair_imported(context, models)
         for ob in context.selected_objects:
             ob.select_set(False)
         models[-1].select_set(True)
         context.view_layer.objects.active = models[-1]
-        self.report({"INFO"}, "imported " + ", ".join(m.name for m in models) +
-                    "".join(f"; {skin.name} follows {rig.name}" for skin, rig in pairs))
+        self.report({"INFO"}, "imported " + ", ".join(m.name for m in models))
         return {"FINISHED"}
 
 
@@ -997,7 +979,6 @@ class O3D_PT_scene(bpy.types.Panel):
         row.operator("opennova_3di.import_anim", icon="IMPORT")
         row.operator("opennova_3di.add_model", icon="ADD")
         col.separator()
-        col.prop(p, "forward")
         col.prop(p, "write_textures")
         col.prop(p, "cli_path")
         if not p.is_property_set("cli_path") or not p.cli_path:
@@ -1021,8 +1002,6 @@ def draw_model(layout, model):
     layout.prop(p, "output_path")
     layout.prop(p, "poly_collision_lod")
     layout.prop(p, "export_bullet_faces")
-    if assembly.armatures(model):
-        layout.prop(p, "drive_rig")
     layout.prop(p, "mount_parent")
     if p.mount_parent is not None:
         layout.prop(p, "mount_point")
@@ -1047,14 +1026,14 @@ class O3D_PT_object(bpy.types.Panel):
         ob = context.object
         p = ob.o3d
         layout = self.layout
-        name = export.clean_name(ob.name)
+        name = rig.clean_name(ob.name)
         if (ob.type == "EMPTY" and export.POINT_RE.match(name)) or ob.type == "LIGHT" or \
                 export.OCCLUSION_RE.search(name):
             layout.prop(p, "order")
             return
         if ob.type != "EMPTY":
             return
-        if export.is_model_root(ob):
+        if rig.is_model_root(ob):
             draw_model(layout, ob)
             draw_animations(layout, ob)
             return
@@ -1062,7 +1041,7 @@ class O3D_PT_object(bpy.types.Panel):
             layout.prop(p, "lod_threshold")
             layout.prop(p, "lod_type")
             return
-        if not export.PART_RE.match(name):
+        if not rig.PART_RE.match(name):
             return
         draw_part_animation(layout, p, False)
 
@@ -1100,7 +1079,7 @@ class O3D_PT_bone(bpy.types.Panel):
     @classmethod
     def poll(cls, context):
         return getattr(context, "bone", None) is not None and \
-            export.BONE_RE.match(export.clean_name(context.bone.name)) is not None
+            rig.bone_part(context.bone) is not None
 
     def draw(self, context):
         draw_part_animation(self.layout, context.bone.o3d, True)

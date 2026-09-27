@@ -128,27 +128,26 @@ def num(text):
 
 
 # --- the axes ---------------------------------------------------------------
+#
+# A model faces its root's -Y, Blender's front view: mission forward (x) is
+# the root's -Y, mission left (y) its +X, up its +Z. Turning the model root
+# turns the whole model with it, so a model built facing another way exports
+# the same once its root is turned to match.
 
-def axis_basis(forward):
+def axis_basis():
     """Mission -> Blender as a column matrix B (b = B m); a proper rotation."""
-    if forward == "-Y":
-        return Matrix(((0, 1, 0), (-1, 0, 0), (0, 0, 1)))
-    return Matrix.Identity(3)
+    return Matrix(((0, 1, 0), (-1, 0, 0), (0, 0, 1)))
 
 
-def axis_map(forward):
+def axis_map():
     """Blender -> mission for a vector, B^T as a swizzle."""
-    if forward == "-Y":
-        return lambda v: (-v.y, v.x, v.z)
-    return lambda v: (v.x, v.y, v.z)
+    return lambda v: (-v.y, v.x, v.z)
 
 
-def blender_axes(forward):
+def blender_axes():
     """Mission -> Blender for a vector, B as a swizzle (a not-finite component
     stays in its own place)."""
-    if forward == "-Y":
-        return lambda m: Vector((m[1], -m[0], m[2]))
-    return lambda m: Vector((m[0], m[1], m[2]))
+    return lambda m: Vector((m[1], -m[0], m[2]))
 
 
 # A root's own transform channels and what they hold at the origin.
@@ -198,9 +197,9 @@ class ModelSpace:
     carries. Made after the view layer is updated, so the root's matrix is
     current."""
 
-    def __init__(self, model, forward):
-        self.basis = axis_basis(forward)
-        self.to_mission = axis_map(forward)
+    def __init__(self, model):
+        self.basis = axis_basis()
+        self.to_mission = axis_map()
         root = model.matrix_world
         self.into_root = None if root == Matrix.Identity(4) else root.inverted_safe()
 
