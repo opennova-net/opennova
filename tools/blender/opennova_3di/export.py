@@ -1059,16 +1059,17 @@ class Exporter(Notes):
         remap = self.materials.order()
         lod_lines = [f"strip {remap[int(l.split()[1])]} {l.split()[2]}" if l.startswith("strip ") else l
                      for l in lod_lines]
-        self.materials.emit(material_lines)
+        self.materials.emit(material_lines, name)
 
         frame_lines = ["mtrx " + fmt(*(float(x) for x in r)) for r in self.frames]
         text = ["o3d 1", f"model {quoted(name)}"] + (["skinned 1"] if self.skinned else []) + \
             (["uv1 1"] if self.uv1 else []) + [f"register {quoted(r)}" for r in self.registers] + frame_lines + \
             material_lines + lod_lines + tail_lines
 
-        self.materials.write_textures(out_dir)
-        # The scene text is the CLI's input only.
+        # The scene text is the CLI's input only. The textures are written
+        # once the model is built, so a model the CLI refuses writes none.
         result = export_text(self.context, ["build"], text, "scene.o3d", "scene text", out_path)
+        self.materials.write_textures(out_dir)
         tris = sum(1 for line in lod_lines if line.startswith("t "))
         # The builder's notes (a non-convex volume, collinear faces, ...),
         # without the scene-file prefix.

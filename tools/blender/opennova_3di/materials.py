@@ -265,6 +265,118 @@ def write_tga(image, path):
             f.write(values[:, [2, 1, 0, 3]].tobytes())
 
 
+def check_pixels(image, what):
+    """An ExportError when the image cannot be written: no pixels, pixels
+    that are not finite, a float image under another working colour space
+    (image_rows' checks, run before anything is written)."""
+    try:
+        for _ in image_rows(image):
+            pass
+    except ExportError as e:
+        raise ExportError(f"{what}: {e}") from e
+
+
+# --- texture names ------------------------------------------------------------
+
+# A texture row's name field holds 16 characters and a NUL (the MTRL row,
+# formats/threedi/threedi_3di3.h ThreediMaterialTexture); a file the export
+# writes is named in at most 15 bytes, as every texture retail packs is (a
+# PFF entry's 16-byte name field, formats/pff/pff.h). The game asks for a
+# row's name cut three characters past its first dot ("x.dds.tga" asks for
+# "x.dds") [orig: Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B4FA;
+# renderer::material_texture_query], so a written file's name has one dot.
+ROW_NAME_BYTES, FILE_NAME_BYTES = 16, 15
+WRITTEN_EXTENSIONS = (".tga", ".mdt")
+# A material holds 24 texture rows (formats/threedi/threedi_3di3.h
+# ThreediMaterial, which opennova-3di fills).
+MATERIAL_ROWS = 24
+
+
+def check_row_name(name, what):
+    """An ExportError unless `name` is a texture row name opennova-3di takes:
+    printable ASCII, at most 16 bytes, a file name without a path."""
+    if not name:
+        raise ExportError(f"{what}: a texture has no file name")
+    if any(not " " <= c <= "~" for c in name):
+        raise ExportError(f"{what}: the texture name '{name}' is not printable ASCII")
+    if len(name) > ROW_NAME_BYTES:
+        raise ExportError(f"{what}: the texture name '{name}' exceeds {ROW_NAME_BYTES} characters (its row's "
+                          "field)")
+    if any(c in name for c in "/\\:"):
+        raise ExportError(f"{what}: the texture name '{name}' holds a path; a texture row names a file")
+
+
+def check_file_name(name, what):
+    """An ExportError unless `name` can name a texture file export writes:
+    <stem>.tga or <stem>.mdt, one dot, at most 15 bytes."""
+    check_row_name(name, what)
+    stem, ext = os.path.splitext(name)
+    if len(name) > FILE_NAME_BYTES or "." in stem or ext.lower() not in WRITTEN_EXTENSIONS:
+        raise ExportError(f"{what}: export writes the texture '{name}' as a file, named <stem>.tga or <stem>.mdt "
+                          f"with one dot and at most {FILE_NAME_BYTES} characters, as retail packs them")
+
+
+def derived_stem(model, index_digits, lettered):
+    """The stem of the texture files a model's materials derive,
+    <stem>_<material index>[letter].<ext>: the model name's ASCII letters,
+    digits, _ and -, cut to fit 15 bytes."""
+    keep = FILE_NAME_BYTES - len(".tga") - len("_") - index_digits - (1 if lettered else 0)
+    stem = "".join(c for c in model if c.isascii() and (c.isalnum() or c in "_-"))
+    return stem[:keep].strip("_-") or "tex"
+
+
+class TextureFile:
+    """A texture file export writes beside the .3di: an image, as the game
+    draws it (image_rows)."""
+
+    def __init__(self, image):
+        self.image = image
+
+    def content(self):
+        """What the file holds, to tell two files under one name apart."""
+        return ("image", self.image.name_full)
+
+    def describe(self):
+        return f"the image {self.image.name}"
+
+    def check(self, what):
+        check_image(self.image, what)
+        check_pixels(self.image, what)
+
+    def write(self, path):
+        write_tga(self.image, path)
+
+
+class Row:
+    """A texture row a material exports (the MTRL row: file name, slot, type,
+    flags, frame) and the file export writes for it: a TextureFile, or None
+    when the file is the author's to supply. A row whose name is derived
+    carries its material's export index and its letter until names are
+    given."""
+
+    def __init__(self, name, slot, type=0, flags=0, frame=0, file=None, derive=None):
+        self.name, self.slot, self.type, self.flags, self.frame = name, slot, type, flags, frame
+        self.file = file
+        self.derive = derive  # (material index, letter, extension) while the name is to be derived
+
+
+class TextureRun:
+    """The texture names one export run gives, over every model it exports
+    (Export Model, Export All Models). The game finds a texture by its name
+    alone, so a name holds one file across them: a second, different file
+    under a name is refused before its model writes anything."""
+
+    def __init__(self):
+        self.names = {}  # name (lower case) -> (model, content, description)
+
+    def claim(self, name, model, content, description, what):
+        have = self.names.setdefault(name.lower(), (model, content, description))
+        if have[1] != content:
+            owner = "this model" if have[0] == model else f"the model {have[0]}"
+            raise ExportError(f"{what}: its texture {name} would be {description}, but {owner} names {name} for "
+                              f"{have[2]} (the game finds a texture by its name alone): give one another name")
+
+
 # --- export -----------------------------------------------------------------
 
 # A mesh a material draws on: its object's name, the names of its render UV
@@ -279,12 +391,13 @@ class ModelMaterials:
     model's export: its registers, its notes, whether it is skinned and the
     scene's Write textures setting."""
 
-    def __init__(self, exporter):
+    def __init__(self, exporter, run):
         self.exporter = exporter
+        self.run = run.textures  # the TextureRun of the export run this model is part of
         self.used = []       # Blender materials (None: a mesh without one)
         self.first_use = {}  # material name (None) -> its index in first-use order
         self.meshes = {}     # material name (None) -> [MeshUse]
-        self.textures = {}   # file name (lower case) -> (file name, image)
+        self.textures = {}   # file name (lower case) -> (file name, TextureFile) to write
 
     def index_of(self, mat):
         """The material's first-use index, which a strip carries until
@@ -408,16 +521,6 @@ class ModelMaterials:
                                       if m is not None and MATERIAL_RE.match(export.clean_name(m.name)) else 1 << 30))
         return {self.first_use[mat.name if mat is not None else None]: new for new, mat in enumerate(self.used)}
 
-    def claim_texture(self, name, image, mat):
-        """A texture file export writes: one image per file name (Windows
-        names match without case)."""
-        have = self.textures.get(name.lower())
-        if have is not None and have[1] != image:
-            raise ExportError(f"{mat.name}: the images '{have[1].name}' and '{image.name}' would both be written "
-                              f"as {name}: give each its own file name (one derived from an image's name keeps "
-                              "its first 12 characters)")
-        self.textures[name.lower()] = (name, image)
-
     def generator_register(self, style, name, what):
         return self.exporter.register(name, what) if style > CTRL_REFERENCE_THRESHOLD else -1
 
@@ -428,121 +531,170 @@ class ModelMaterials:
         if style <= CTRL_REFERENCE_THRESHOLD:
             export.fixed(phase, 256.0, 0, 0xFF, what + " phase")
 
-    def emit(self, lines):
-        """The `material` records, in export order."""
+    def emit(self, lines, model):
+        """The `material` records, in export order, for the model named
+        `model`. Every texture they name is checked first (its name, its
+        image and pixels, and against the other models of the run), so
+        nothing is written for a model that fails; write_textures() writes
+        the files once the model is built."""
+        rows = [self.rows(mat) for mat in self.used]
+        self.name_rows(model, rows)
+        for mat, material_rows in zip(self.used, rows):
+            what = mat.name if mat is not None else "(no material)"
+            for row in (r for r in material_rows if r.file is not None):
+                self.run.claim(row.name, model, row.file.content(), row.file.describe(), what)
+                if row.name.lower() not in self.textures:
+                    row.file.check(what)
+                    self.textures[row.name.lower()] = (row.name, row.file)
+        for mat, material_rows in zip(self.used, rows):
+            self.emit_material(lines, mat, material_rows)
+
+    def rows(self, mat):
+        """A material's texture rows: its texture entries' when it has any,
+        else the images its Base Color draws, for the slots its shader
+        samples; each checked, derived names not yet given."""
+        if mat is None:
+            self.check_uvs(mat, self.shader(mat), False)
+            return []
+        p = mat.o3d
+        shader = self.shader(mat)
+        caps = shader_flags(shader)
+        out = []
+        if len(p.textures) > 0:
+            for t in p.textures:
+                name = t.name.strip()
+                check_row_name(name, mat.name)
+                file = None
+                if t.image is not None and t.write:
+                    if os.path.splitext(name)[1].lower() in WRITTEN_EXTENSIONS:
+                        check_file_name(name, mat.name)
+                        file = TextureFile(t.image)
+                    else:
+                        self.exporter.note(f"{mat.name}: Write writes .tga and .mdt files only; {name} is not "
+                                           "written")
+                out.append(Row(name, t.slot, t.type, t.flags, t.frame, file))
+        else:
+            found = self.node_images(mat)
+            named = MATERIAL_RE.match(export.clean_name(mat.name))
+            if not found and (caps & FLAG_DIFFUSE or not named):
+                self.exporter.note(f"{mat.name}: no image feeds its Base Color, so it exports without a texture" +
+                                   ("" if named else f", as {shader} (OED's shader for none)"))
+            for slot, image in sorted(found.items()):
+                if not caps & (FLAG_DIFFUSE if slot == 1 else FLAG_SECONDARY):
+                    self.exporter.note(f"{mat.name}: its shader {shader} draws no "
+                                       f"{('diffuse', 'detail')[slot - 1]} texture; the image {image.name} is not "
+                                       "exported")
+                    continue
+                out.append(Row(None, slot, file=TextureFile(image),
+                               derive=(self.used.index(mat), ("", "d")[slot - 1], ".tga")))
+        if len(out) > MATERIAL_ROWS:
+            raise ExportError(f"{mat.name}: {len(out)} texture rows; a material holds {MATERIAL_ROWS}")
+        self.check_uvs(mat, shader, bool(out))
+        return out
+
+    def name_rows(self, model, rows):
+        """Give each derived row its file name, <stem>_<material index>[letter]
+        with the model's stem (derived_stem): d marks a detail texture. A file
+        the model already derives for one image is named once."""
+        derived = [row for material_rows in rows for row in material_rows if row.derive is not None]
+        if not derived:
+            return
+        digits = len(str(max(row.derive[0] for row in derived)))
+        stem = derived_stem(model, digits, any(row.derive[1] for row in derived))
+        given = {}
+        for row in derived:
+            index, letter, ext = row.derive
+            row.name = given.setdefault(row.file.content(), f"{stem}_{index}{letter}{ext}")
+            row.derive = None
+
+    def emit_material(self, lines, mat, rows):
+        """One `material` record and what follows it."""
         fixed = export.fixed
-        for mat in self.used:
-            # A mesh without a material draws with the shader a material
-            # without textures takes (shader()), its strips' pass included.
-            shader = self.shader(mat)
-            if len(shader) > 32:
-                raise ExportError(f"{mat.name}: the shader tag '{shader}' exceeds 32 characters")
-            caps = shader_flags(shader)
-            lines.append(f"material {quoted(shader)}  # {mat.name if mat is not None else '(no material)'}")
-            p = mat.o3d if mat is not None else None
-            if p is not None:
-                flags = (1 if p.alpha_test else 0) | (4 if p.two_sided else 0) | (p.other_flags & ~5 & 0xFF)
-                if flags:
-                    lines.append(f"matflags {flags}")
-                if p.alpha_test:
-                    lines.append(f"alphatest {p.alpha_test_value}")
-            # The OED material rule (5fc5b4f6a^ export_3di.cpp, WriteMTRL): a
-            # GLASS shader reflects 0x80 grey unless another colour is set, and
-            # is glass while it reflects; an EMISSIVE one (*_LUM) is emissive
-            # type 2. It holds for every material of the 958 JO models.
-            reflect = [round(c * 255) for c in p.reflect] if p is not None else [0, 0, 0, 0]
-            if caps & FLAG_GLASS and not any(reflect):
-                reflect = [128, 128, 128, 0]
-            if caps & FLAG_GLASS and any(reflect[:3]):
-                lines.append("glass 1")
-            if caps & FLAG_EMISSIVE:
-                lines.append("emissive 2")
-            if any(reflect):
-                lines.append("reflect " + " ".join(str(c) for c in reflect))
-            if p is None:
-                self.check_uvs(mat, shader, False)
-                continue
-            self.check_uvs(mat, shader, len(p.textures) > 0 or bool(base_color(mat)[0]))
-            if len(p.textures) > 0:
-                for t in p.textures:
-                    name = t.name.strip()
-                    if not name and t.image is not None:
-                        name = os.path.splitext(export.clean_name(t.image.name))[0][:12] + ".tga"
-                    if not name:
-                        raise ExportError(f"{mat.name}: a texture entry has neither a file name nor an image")
-                    if len(name) > 16:
-                        raise ExportError(f"{mat.name}: texture name '{name}' exceeds 16 characters")
-                    lines.append(f"texture {quoted(name)} {t.slot} {t.type} {t.flags} {t.frame}")
-                    if t.image is not None and t.write:
-                        if name.lower().endswith(".tga"):
-                            check_image(t.image, mat.name)
-                            self.claim_texture(name, t.image, mat)
-                        else:
-                            self.exporter.note(f"{mat.name}: Write TGA writes .tga files only; {name} is not written")
+        # A mesh without a material draws with the shader a material
+        # without textures takes (shader()), its strips' pass included.
+        shader = self.shader(mat)
+        if len(shader) > 32:
+            raise ExportError(f"{mat.name}: the shader tag '{shader}' exceeds 32 characters")
+        caps = shader_flags(shader)
+        lines.append(f"material {quoted(shader)}  # {mat.name if mat is not None else '(no material)'}")
+        p = mat.o3d if mat is not None else None
+        if p is not None:
+            flags = (1 if p.alpha_test else 0) | (4 if p.two_sided else 0) | (p.other_flags & ~5 & 0xFF)
+            if flags:
+                lines.append(f"matflags {flags}")
+            if p.alpha_test:
+                lines.append(f"alphatest {p.alpha_test_value}")
+        # The OED material rule (5fc5b4f6a^ export_3di.cpp, WriteMTRL): a
+        # GLASS shader reflects 0x80 grey unless another colour is set, and
+        # is glass while it reflects; an EMISSIVE one (*_LUM) is emissive
+        # type 2. It holds for every material of the 958 JO models.
+        reflect = [round(c * 255) for c in p.reflect] if p is not None else [0, 0, 0, 0]
+        if caps & FLAG_GLASS and not any(reflect):
+            reflect = [128, 128, 128, 0]
+        if caps & FLAG_GLASS and any(reflect[:3]):
+            lines.append("glass 1")
+        if caps & FLAG_EMISSIVE:
+            lines.append("emissive 2")
+        if any(reflect):
+            lines.append("reflect " + " ".join(str(c) for c in reflect))
+        if p is None:
+            return
+        for row in sorted(rows, key=lambda r: r.slot):
+            lines.append(f"texture {quoted(row.name)} {row.slot} {row.type} {row.flags} {row.frame}")
+        if p.anim_frames or p.anim_type or p.anim_time:
+            if p.anim_type not in (0, 1):
+                raise ExportError(f"{mat.name}: the flipbook's anim type is {p.anim_type}; it is 0 (time) or 1 "
+                                  "(register)")
+            if p.anim_type == 1:
+                time_or_register = self.exporter.register(p.anim_register, f"{mat.name} texture flipbook")
             else:
-                found = self.node_images(mat)
-                named = MATERIAL_RE.match(export.clean_name(mat.name))
-                if not found and (caps & FLAG_DIFFUSE or not named):
-                    self.exporter.note(f"{mat.name}: no image feeds its Base Color, so it exports without a texture" +
-                                       ("" if named else f", as {shader} (OED's shader for none)"))
-                for slot, image in sorted(found.items()):
-                    if not caps & (FLAG_DIFFUSE if slot == 1 else FLAG_SECONDARY):
-                        self.exporter.note(f"{mat.name}: its shader {shader} draws no "
-                                           f"{('diffuse', 'detail')[slot - 1]} texture; the image {image.name} is "
-                                           "not exported")
-                        continue
-                    check_image(image, mat.name)
-                    name = os.path.splitext(export.clean_name(image.name))[0][:12] + ".tga"
-                    lines.append(f"texture {quoted(name)} {slot} 0 0 0")
-                    self.claim_texture(name, image, mat)
-            if p.anim_frames or p.anim_type or p.anim_time:
-                if p.anim_type not in (0, 1):
-                    raise ExportError(f"{mat.name}: the flipbook's anim type is {p.anim_type}; it is 0 (time) or 1 "
-                                      "(register)")
-                if p.anim_type == 1:
-                    time_or_register = self.exporter.register(p.anim_register, f"{mat.name} texture flipbook")
-                else:
-                    time_or_register = fixed(p.anim_time, 1, -0x8000, 0x7FFF, f"{mat.name}: the flipbook frame time")
-                lines.append(f"texanim {p.anim_frames} {p.anim_type} {time_or_register}")
-            # A generator's words: an RGB rate a u16 of 1/256 steps, the other
-            # rates and the U/V start and end int16 8.8, an alpha start and end
-            # int16, a phase (styles up to 112) a byte of 1/256 turns.
-            if p.rgb_style:
-                what = f"{mat.name}: the RGB gen"
-                reg = self.generator_register(p.rgb_style, p.rgb_register, what)
-                fixed(p.rgb_rate, 256.0, 0, 0xFFFF, what + " rate")
-                self.generator_phase(p.rgb_style, p.rgb_phase, what)
-                s = [round(c * 255) for c in p.rgb_start]
-                e = [round(c * 255) for c in p.rgb_end]
-                lines.append(f"rgbgen {p.rgb_style} {reg} {fmt(float(p.rgb_rate))} {s[0]} {s[1]} {s[2]} "
-                             f"{e[0]} {e[1]} {e[2]} {fmt(float(p.rgb_phase))}")
-            if p.alpha_style:
-                what = f"{mat.name}: the alpha gen"
-                reg = self.generator_register(p.alpha_style, p.alpha_register, what)
-                fixed(p.alpha_rate, 256.0, -0x8000, 0x7FFF, what + " rate")
-                start = fixed(p.alpha_start, 1, -0x8000, 0x7FFF, what + " start")
-                end = fixed(p.alpha_end, 1, -0x8000, 0x7FFF, what + " end")
-                self.generator_phase(p.alpha_style, p.alpha_phase, what)
-                lines.append(f"alphagen {p.alpha_style} {reg} {fmt(float(p.alpha_rate))} {start} {end} "
-                             f"{fmt(float(p.alpha_phase))}")
-            for axis in ("u", "v"):
-                style = getattr(p, axis + "_style")
-                if style:
-                    what = f"{mat.name}: the {axis.upper()} gen"
-                    reg = self.generator_register(style, getattr(p, axis + "_register"), what)
-                    values = [float(getattr(p, f"{axis}_{field}")) for field in ("rate", "start", "end")]
-                    for value, field in zip(values, ("rate", "start", "end")):
-                        fixed(value, 256.0, -0x8000, 0x7FFF, f"{what} {field}")
-                    phase = float(getattr(p, axis + "_phase"))
-                    self.generator_phase(style, phase, what)
-                    lines.append(f"{axis}gen {style} {reg} {fmt(*values)} {fmt(phase)}")
+                time_or_register = fixed(p.anim_time, 1, -0x8000, 0x7FFF, f"{mat.name}: the flipbook frame time")
+            lines.append(f"texanim {p.anim_frames} {p.anim_type} {time_or_register}")
+        # A generator's words: an RGB rate a u16 of 1/256 steps, the other
+        # rates and the U/V start and end int16 8.8, an alpha start and end
+        # int16, a phase (styles up to 112) a byte of 1/256 turns.
+        if p.rgb_style:
+            what = f"{mat.name}: the RGB gen"
+            reg = self.generator_register(p.rgb_style, p.rgb_register, what)
+            fixed(p.rgb_rate, 256.0, 0, 0xFFFF, what + " rate")
+            self.generator_phase(p.rgb_style, p.rgb_phase, what)
+            s = [round(c * 255) for c in p.rgb_start]
+            e = [round(c * 255) for c in p.rgb_end]
+            lines.append(f"rgbgen {p.rgb_style} {reg} {fmt(float(p.rgb_rate))} {s[0]} {s[1]} {s[2]} "
+                         f"{e[0]} {e[1]} {e[2]} {fmt(float(p.rgb_phase))}")
+        if p.alpha_style:
+            what = f"{mat.name}: the alpha gen"
+            reg = self.generator_register(p.alpha_style, p.alpha_register, what)
+            fixed(p.alpha_rate, 256.0, -0x8000, 0x7FFF, what + " rate")
+            start = fixed(p.alpha_start, 1, -0x8000, 0x7FFF, what + " start")
+            end = fixed(p.alpha_end, 1, -0x8000, 0x7FFF, what + " end")
+            self.generator_phase(p.alpha_style, p.alpha_phase, what)
+            lines.append(f"alphagen {p.alpha_style} {reg} {fmt(float(p.alpha_rate))} {start} {end} "
+                         f"{fmt(float(p.alpha_phase))}")
+        for axis in ("u", "v"):
+            style = getattr(p, axis + "_style")
+            if style:
+                what = f"{mat.name}: the {axis.upper()} gen"
+                reg = self.generator_register(style, getattr(p, axis + "_register"), what)
+                values = [float(getattr(p, f"{axis}_{field}")) for field in ("rate", "start", "end")]
+                for value, field in zip(values, ("rate", "start", "end")):
+                    fixed(value, 256.0, -0x8000, 0x7FFF, f"{what} {field}")
+                phase = float(getattr(p, axis + "_phase"))
+                self.generator_phase(style, phase, what)
+                lines.append(f"{axis}gen {style} {reg} {fmt(*values)} {fmt(phase)}")
 
     def write_textures(self, out_dir):
-        """Write every claimed texture beside the .3di, when the scene's Write
-        textures setting is on."""
-        if self.exporter.settings.write_textures:
-            for name, image in self.textures.values():
-                write_tga(image, os.path.join(out_dir, name))
+        """Write the model's texture files beside its .3di, when the scene's
+        Write textures setting is on; the exporter calls it once the model is
+        built, so a model that fails writes none."""
+        if not self.exporter.settings.write_textures:
+            return
+        for name, file in self.textures.values():
+            path = os.path.join(out_dir, name)
+            try:
+                file.write(path)
+            except OSError as e:
+                raise ExportError(f"could not write the texture {path}: {e}") from e
 
 
 # --- import -----------------------------------------------------------------

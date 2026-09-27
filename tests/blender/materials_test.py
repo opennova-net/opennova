@@ -47,42 +47,50 @@ def empty(name, parent=None):
     return ob
 
 
-def model(name, mat=None, uv_maps=(("UVMap", UVS),)):
-    """A model root, its LOD 0, part PN01 and a one-triangle mesh drawing with
-    `mat`; returns (root, mesh object)."""
+def model(name, *mats, uv_maps=(("UVMap", UVS),)):
+    """A model root, its LOD 0 and part PN01, with a one-triangle mesh for
+    each material (None: a mesh without one); returns (root, the meshes)."""
     root = empty(name)
     root.o3d.output_path = os.path.join(OUT, name, name + ".3di").replace("\\", "/")
     lod = empty(name + "_LOD0", root)
     lod["_lod_index"] = 0
     part = empty("PN01", lod)
-    me = bpy.data.meshes.new(name)
-    me.from_pydata(TRIANGLE, [], [(0, 1, 2)])
-    for label, coords in uv_maps:
-        layer = me.uv_layers.new(name=label)
-        for loop, uv in zip(layer.data, coords):
-            loop.uv = uv
-    if mat is not None:
-        me.materials.append(mat)
-    ob = bpy.data.objects.new("01 Mesh0", me)
-    bpy.context.collection.objects.link(ob)
-    ob.parent = part
-    return root, ob
+    obs = []
+    for n, mat in enumerate(mats or (None,)):
+        me = bpy.data.meshes.new(f"{name}{n}")
+        me.from_pydata([(x + 0.2 * n, y, z) for x, y, z in TRIANGLE], [], [(0, 1, 2)])
+        for label, coords in uv_maps:
+            layer = me.uv_layers.new(name=label)
+            for loop, uv in zip(layer.data, coords):
+                loop.uv = uv
+        if mat is not None:
+            me.materials.append(mat)
+        ob = bpy.data.objects.new(f"01 Mesh{n}", me)
+        bpy.context.collection.objects.link(ob)
+        ob.parent = part
+        obs.append(ob)
+    return root, obs
 
 
-def export_model(root):
-    """(notes, the model read back: its materials as importer.read_o3d gives
-    them, the texture files beside it)."""
+def folder(root):
+    return os.path.dirname(root.o3d.output_path)
+
+
+def export_model(root, run=None):
+    """(notes, the model read back as importer.read_o3d gives it)."""
     bpy.context.view_layer.update()
-    os.makedirs(os.path.dirname(root.o3d.output_path), exist_ok=True)
-    _, notes = export.export_model(bpy.context, root)
+    os.makedirs(folder(root), exist_ok=True)
+    _, notes = export.export_model(bpy.context, root, run)
     sc, _ = o3dtext.import_text(bpy.context, ["scene"], root.o3d.output_path, "scene.o3d", importer.read_o3d)
     return notes, sc
 
 
-def refused(root, *fragments):
+def refused(root, *fragments, run=None):
     """The ExportError the export raises, which must name every fragment."""
+    bpy.context.view_layer.update()
+    os.makedirs(folder(root), exist_ok=True)
     try:
-        export.export_model(bpy.context, root)
+        export.export_model(bpy.context, root, run)
     except o3dtext.ExportError as e:
         for fragment in fragments:
             assert fragment in str(e), (fragment, str(e))
@@ -114,6 +122,13 @@ def image_node(tree, img, uv_map=None):
     return node
 
 
+def textured(name, img, uv_map=None):
+    """A Principled material whose Base Color is the image."""
+    mat, tree, bsdf = principled_material(name)
+    tree.links.new(image_node(tree, img, uv_map).outputs["Color"], bsdf.inputs["Base Color"])
+    return mat
+
+
 def textures(sc, index=0):
     """A read-back material's texture rows (name, slot, type, flags, frame)."""
     return sc["materials"][index]["textures"]
@@ -125,6 +140,11 @@ def tga_pixels(path):
         data = f.read()
     assert data[2] == 2 and data[16] == 32, data[:18]
     return data[18:]
+
+
+def first_pixel(root, name):
+    """The BGRA bytes of the first pixel of the texture `name` beside the model."""
+    return tuple(tga_pixels(os.path.join(folder(root), name))[:4])
 
 
 # --- geom-2: the diffuse texture is the image feeding Base Color ---------------
@@ -143,7 +163,7 @@ def base_color_only_from_its_feed():
     tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
     root, _ = model("paint", mat)
     notes, sc = export_model(root)
-    assert not any(name.startswith(("rifle_rough", "rifle_n")) for name, *_ in textures(sc)), textures(sc)
+    assert textures(sc) == [], textures(sc)
     assert any("no image feeds its Base Color" in n for n in notes), notes
 
 
@@ -167,8 +187,8 @@ def base_color_through_groups_and_mixes():
     tree.links.new(call.outputs[0], hue.inputs["Color"])
     tree.links.new(hue.outputs["Color"], bsdf.inputs["Base Color"])
     # The tint the group multiplies in: a Mix whose constant factor 0 takes
-    # only its A, so the image on its B is not drawn, and A a Mix whose
-    # factor is a mask image's alpha, neither of which is a diffuse texture.
+    # only its A, so the image on its B is not drawn, and on A a Mix whose
+    # factor is a mask image's alpha; neither image is a diffuse texture.
     left_out = tree.nodes.new("ShaderNodeMix")
     left_out.data_type = "RGBA"
     materials.socket(left_out.inputs, "Factor_Float").default_value = 0.0
@@ -176,15 +196,15 @@ def base_color_through_groups_and_mixes():
                    materials.socket(left_out.inputs, "B_Color"))
     masked = tree.nodes.new("ShaderNodeMix")
     masked.data_type = "RGBA"
-    tree.links.new(image_node(tree, image("grp_mask", (1, 1, 1, 1))).outputs["Alpha"],
+    tree.links.new(image_node(tree, image("grp_mask", (0, 0, 1, 1))).outputs["Alpha"],
                    materials.socket(masked.inputs, "Factor_Float"))
     tree.links.new(materials.socket(masked.outputs, "Result_Color"), materials.socket(left_out.inputs, "A_Color"))
     tree.links.new(materials.socket(left_out.outputs, "Result_Color"), call.inputs[0])
     root, _ = model("grouped", mat)
     notes, sc = export_model(root)
-    names = [t[0] for t in textures(sc)]
-    assert len(names) == 1 and names[0].lower().startswith("grp_albedo"), names
-    assert any("Hue/Saturation" in n or "Hue Saturation" in n for n in notes), notes
+    assert textures(sc) == [("grouped_0.tga", 1, 0, 0, 0)], textures(sc)
+    assert first_pixel(root, "grouped_0.tga") == (0, 0, 255, 255)  # the group's red image
+    assert any(hue.name in n for n in notes), notes
 
 
 @case
@@ -192,8 +212,10 @@ def two_images_on_one_uv_map_refused():
     mat, tree, bsdf = principled_material("TwoImages")
     mix = tree.nodes.new("ShaderNodeMix")
     mix.data_type = "RGBA"
-    tree.links.new(image_node(tree, image("two_a", (1, 0, 0, 1))).outputs["Color"], materials.socket(mix.inputs, "A_Color"))
-    tree.links.new(image_node(tree, image("two_b", (0, 1, 0, 1))).outputs["Color"], materials.socket(mix.inputs, "B_Color"))
+    tree.links.new(image_node(tree, image("two_a", (1, 0, 0, 1))).outputs["Color"],
+                   materials.socket(mix.inputs, "A_Color"))
+    tree.links.new(image_node(tree, image("two_b", (0, 1, 0, 1))).outputs["Color"],
+                   materials.socket(mix.inputs, "B_Color"))
     tree.links.new(materials.socket(mix.outputs, "Result_Color"), bsdf.inputs["Base Color"])
     root, _ = model("twoimages", mat)
     refused(root, "two_a", "two_b", "bake them into one")
@@ -205,17 +227,17 @@ def detail_texture_on_the_second_uv_map():
     mix = tree.nodes.new("ShaderNodeMix")
     mix.data_type = "RGBA"
     mix.blend_type = "MULTIPLY"
-    tree.links.new(image_node(tree, image("det_base", (0.5, 0.5, 0.5, 1))).outputs["Color"],
+    tree.links.new(image_node(tree, image("det_base", (1, 0, 0, 1))).outputs["Color"],
                    materials.socket(mix.inputs, "A_Color"))
-    tree.links.new(image_node(tree, image("det_grain", (0.5, 0.5, 0.5, 1)), uv_map="Lightmap").outputs["Color"],
+    tree.links.new(image_node(tree, image("det_grain", (0, 1, 0, 1)), uv_map="Lightmap").outputs["Color"],
                    materials.socket(mix.inputs, "B_Color"))
     tree.links.new(materials.socket(mix.outputs, "Result_Color"), bsdf.inputs["Base Color"])
     root, _ = model("detailed", mat, uv_maps=(("UVMap", UVS), ("Lightmap", UVS)))
     notes, sc = export_model(root)
-    rows = sorted((slot, name.lower()) for name, slot, *_ in textures(sc))
-    assert [slot for slot, _ in rows] == [1, 2] and rows[0][1].startswith("det_base") and \
-        rows[1][1].startswith("det_grain"), rows
+    assert textures(sc) == [("detailed_0.tga", 1, 0, 0, 0), ("detailed_0d.tga", 2, 0, 0, 0)], textures(sc)
     assert sc["materials"][0]["shader"] == "FF_MT_OP", sc["materials"][0]["shader"]
+    assert first_pixel(root, "detailed_0.tga") == (0, 0, 255, 255)
+    assert first_pixel(root, "detailed_0d.tga") == (0, 255, 0, 255)
 
 
 @case
@@ -235,11 +257,9 @@ def mapped_coordinates_refused():
 
 @case
 def udim_refused():
-    mat, tree, bsdf = principled_material("Udim")
     udim = bpy.data.images.new("rifle_udim", width=4, height=4, tiled=True)
     udim.tiles.new(tile_number=1002)
-    tree.links.new(image_node(tree, udim).outputs["Color"], bsdf.inputs["Base Color"])
-    root, _ = model("udim", mat)
+    root, _ = model("udim", textured("Udim", udim))
     refused(root, "rifle_udim", "UDIM")
 
 
@@ -291,23 +311,110 @@ def float_images_encode_srgb():
     assert np.abs(a - b).max() <= 1, (a[:8], b[:8])
 
 
+# --- C3, geom-3, geom-4, addon-3: texture names and when files are written ------
+
+@case
+def derived_names_fit_retail():
+    # <model stem>_<material index>[d].tga, ASCII, one dot, at most 15 bytes;
+    # a long model name is cut, and one image in two materials is one file.
+    shared = image("shared", (0, 0, 1, 1))
+    root, _ = model("tfa_akm_rifle", textured("A", shared), textured("B", shared),
+                    textured("C", image("other", (0, 1, 0, 1))))
+    _, sc = export_model(root)
+    names = [textures(sc, i)[0][0] for i in range(3)]
+    assert names == ["tfa_akm_r_0.tga", "tfa_akm_r_0.tga", "tfa_akm_r_2.tga"], names
+    assert all(len(n) <= 15 and n.count(".") == 1 and n.isascii() for n in names)
+    assert sorted(os.listdir(folder(root))) == ["tfa_akm_r_0.tga", "tfa_akm_r_2.tga", "tfa_akm_rifle.3di"]
+    assert materials.derived_stem("стволы-x", 1, False) == "x"
+    assert materials.derived_stem("????", 1, False) == "tex"
+
+
+@case
+def texture_entry_names_follow_the_cli():
+    def entry(name, write=False, img=None):
+        mat = bpy.data.materials.new("Entry")
+        t = mat.o3d.textures.add()
+        t.name, t.write, t.image = name, write, img
+        return mat
+    for name, fragment in (("ствол.tga", "not printable ASCII"), ("a_seventeen_c.tga", "exceeds 16"),
+                           ("tex/foo.tga", "holds a path"), ("", "no file name")):
+        root, _ = model("entry", entry(name))
+        refused(root, fragment)
+        for ob in list(bpy.data.objects):
+            bpy.data.objects.remove(ob)
+    # A retail x.dds.tga row is a name like any other; export writes a file
+    # only under a one-dot name of at most 15 bytes.
+    root, _ = model("retail", entry("EXT_dbtr.dds.tga"))
+    _, sc = export_model(root)
+    assert textures(sc) == [("EXT_dbtr.dds.tga", 1, 0, 0, 0)], textures(sc)
+    for ob in list(bpy.data.objects):
+        bpy.data.objects.remove(ob)
+    root, _ = model("written", entry("EXT_dbtr.dds.tga", True, image("w", (1, 1, 1, 1))))
+    refused(root, "one dot")
+
+
+@case
+def nothing_written_for_a_model_that_fails():
+    # A bad image in the second material stops the export before the first
+    # material's texture or the .3di is written.
+    bad = image("nan", (0.5, 0.5, 0.5, 1.0), size=1, float_buffer=True)
+    bad.pixels[:] = [float("nan"), 0.5, 0.5, 1.0]
+    root, _ = model("failing", textured("Good", image("good", (1, 1, 1, 1))), textured("Bad", bad))
+    refused(root, "nan", "non-finite")
+    assert os.listdir(folder(root)) == [], os.listdir(folder(root))
+    # Nor when the CLI refuses the model after the add-on's checks passed.
+    for ob in list(bpy.data.objects):
+        bpy.data.objects.remove(ob)
+    root, _ = model("clirefuses", textured("Fine", image("fine", (1, 1, 1, 1))))
+    build = export.export_text
+
+    def refuse(*args, **kwargs):
+        raise o3dtext.ExportError("scene text:1: refused")
+    export.export_text = refuse
+    try:
+        refused(root, "refused")
+    finally:
+        export.export_text = build
+    assert os.listdir(folder(root)) == [], os.listdir(folder(root))
+
+
+@case
+def one_name_one_file_across_a_run():
+    # Two models whose stems cut to one name cannot write two images under it
+    # in one run (Export All Models).
+    run = export.ExportRun()
+    a, _ = model("gunmodel_a", textured("GunA", image("gun_a", (1, 0, 0, 1))))
+    b, _ = model("gunmodel_b", textured("GunB", image("gun_b", (0, 1, 0, 1))))
+    b.o3d.output_path = os.path.join(folder(a), "gunmodel_b.3di").replace("\\", "/")
+    export_model(a, run)
+    refused(b, "gunmodel_0.tga", "gunmodel_a", run=run)
+    assert first_pixel(a, "gunmodel_0.tga") == (0, 0, 255, 255)
+
+
+@case
+def a_material_holds_24_rows():
+    mat = bpy.data.materials.new("Rows")
+    for i in range(25):
+        t = mat.o3d.textures.add()
+        t.name, t.frame = f"frame{i}.tga", i
+    root, _ = model("rows", mat)
+    refused(root, "25 texture rows", "24")
+
+
 # --- geom-6: UV maps -------------------------------------------------------------
 
 @case
 def textured_mesh_without_uv_map_refused():
-    mat, tree, bsdf = principled_material("NoUV")
-    tree.links.new(image_node(tree, image("nouv", (1, 1, 1, 1))).outputs["Color"], bsdf.inputs["Base Color"])
-    root, ob = model("nouv", mat, uv_maps=())
-    refused(root, ob.name, "no UV map", "NoUV")
+    root, obs = model("nouv", textured("NoUV", image("nouv", (1, 1, 1, 1))), uv_maps=())
+    refused(root, obs[0].name, "no UV map", "NoUV")
 
 
 @case
 def tangent_shader_without_uv_area_noted():
-    mat, tree, bsdf = principled_material("Material_0_VS_DOT3DIFF")
-    tree.links.new(image_node(tree, image("flat", (1, 1, 1, 1))).outputs["Color"], bsdf.inputs["Base Color"])
-    root, ob = model("flatuv", mat, uv_maps=(("UVMap", [(0.5, 0.5)] * 3),))
+    root, obs = model("flatuv", textured("Material_0_VS_DOT3DIFF", image("flat", (1, 1, 1, 1))),
+                      uv_maps=(("UVMap", [(0.5, 0.5)] * 3),))
     notes, _ = export_model(root)
-    assert any(ob.name in n and "no area" in n for n in notes), notes
+    assert any(obs[0].name in n and "no area" in n for n in notes), notes
 
 
 @case

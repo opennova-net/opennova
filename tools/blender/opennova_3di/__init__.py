@@ -315,14 +315,18 @@ class O3DBoneProps(bpy.types.PropertyGroup):
 
 
 class O3DTexture(bpy.types.PropertyGroup):
-    name: StringProperty(name="File", default="", maxlen=16, description="Texture file name (16 characters max)")
+    name: StringProperty(name="File", default="",
+                         description="The texture's file name: printable ASCII, at most 16 characters, no folder. "
+                                     "A file export writes (Write) is <name>.tga or <name>.mdt, one dot and at most "
+                                     "15 characters")
     slot: IntProperty(name="Slot", default=1, min=0, max=255, description="1 diffuse, 2 detail, 3/4 normal")
     type: IntProperty(name="Type", default=0, min=0, max=255, description="0 diffuse, 4 MDT normal, 5 TGA-alpha normal")
     flags: IntProperty(name="Flags", default=0, min=0, max=255, description="1 animated, 2 clamped")
     frame: IntProperty(name="Frame", default=0, min=0, max=255)
     image: PointerProperty(name="Image", type=bpy.types.Image)
-    write: BoolProperty(name="Write TGA", default=True,
-                        description="Write the image as a 32-bit TGA next to the .3di on export")
+    write: BoolProperty(name="Write", default=True,
+                        description="Write the image as a 32-bit TGA file under this name beside the .3di once it "
+                                    "is built")
 
 
 class O3DMaterialProps(bpy.types.PropertyGroup):
