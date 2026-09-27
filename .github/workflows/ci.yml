@@ -565,12 +565,17 @@ jobs:
   package-blender-windows:
     uses: ./.github/workflows/package-blender-windows.yml
 
-  # Surface both Windows packages on the PR as a single comment that updates
-  # in place after both packages succeed. A failed package leaves the previous
+  # The native apps (opennova-3di, opennova-extract, nw_pp, nw-lan-probe and the
+  # NovaWorld server) in one zip, built for PRs and tagged releases alike.
+  package-apps-windows:
+    uses: ./.github/workflows/package-apps-windows.yml
+
+  # Surface the Windows packages on the PR as a single comment that updates
+  # in place after every package succeeds. A failed package leaves the previous
   # comment untouched.
   pr-build-links:
     runs-on: ubuntu-latest
-    needs: [package-godot-windows, package-blender-windows]
+    needs: [package-godot-windows, package-blender-windows, package-apps-windows]
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -581,6 +586,7 @@ jobs:
         env:
           GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
           BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
+          APPS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
         with:
           script: |
             // A hidden marker lets us find our own comment across runs, so there
@@ -594,12 +600,13 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension. The Blender add-on includes the Release CLI. Tagged releases publish both packages, with the game in release mode.`,
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension. The Blender add-on and the apps are Release builds. Tagged releases publish every package, with the game in release mode.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
               `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               `| Blender 4.2+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
+              `| Apps: opennova-3di, opennova-extract, nw_pp, nw-lan-probe and the NovaWorld server (gate and session listeners) | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');
