@@ -775,7 +775,8 @@ add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 
 # Synthetic fonts: validity, byte-stable round trips and drawable glyphs.
 # The builder mints
-# fixtures/fnt/synth_{1,3}page.fnt, byte-compared every run (--write regenerates).
+# assets/opennova.fnt and fixtures/fnt/synth_{1,3}page.fnt, byte-compared every
+# run (--write regenerates).
 add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
 target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_fnt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -26,8 +26,10 @@ public:
 	static String expansion(const String &fallback);
 	// `/game <code>` lowercased, else the persisted fallback, else "jo".
 	static String game(const String &fallback);
-	// Required `--resource-dir <path>` (process-local, never persisted).
+	// `--resource-dir <path>` (process-local, never persisted), or "".
 	static String resource_dir();
+	// True when `--resource-dir` was passed, even without a value.
+	static bool resource_dir_given();
 	// `--loose-mission <name.bms>`, or "" for the normal menu flow.
 	static String loose_mission();
 	// True when `--loose-root` was passed (ADR 0025).
