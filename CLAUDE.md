@@ -8,41 +8,20 @@ easier to relay than to rediscover.
 ## Map
 
 - `engine/` — the engine: the portable, Godot-free C++ core (ADR 0028; namespace
-  `opennova`, unchanged). Four groups — the directories and, since ADR 0029, the CMake
-  build targets too (five STATIC group targets: `opennova_base`, `opennova_formats`,
-  `opennova_runtime`, `opennova_net`, plus the separate `opennova_novaworld_service`;
-  header-only `opennova_io`; no per-lib targets except the `opennova_crt`
-  STATIC leaf — the shared CRT rand stream both formats and runtime link):
-  `base/` (io, crt, vfs, resource_index, gameprofile, pcapio),
-  `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, ...;
-  ADR 0024 layout; the target also builds mission's format half), `runtime/`(
-  world, wac, mission, anim, audio, particle, renderer, controls, terrain,
-  terrain_query, environment, hud, menu, assets, devtools — the Dear ImGui
-  pass with the game's F3 dev-tool windows (debug builds only) (ADR 0039) — plus `inmatch` (the in-match session, the listen-host
-  frame, the server/client state machines and frame loops, the transports) and
-  `replication` (the world<->wire seam and the client replica state), ADR 0043 d4),
-  `net/` (the wire only: novacrypto, napi, npwire, novaworld; it never includes
-  or links `runtime/`). `engine/` is the one public
-  include root: `#include <runtime/world/x.h>`, `<formats/pff/pff.h>` (ADR 0040).
-  Native consumers link the engine groups directly.
-  See `engine/CLAUDE.md`.
+  `opennova`). Four groups, which since ADR 0029 are also the CMake build targets:
+  `base/`, `formats/`, `runtime/` (including `inmatch` and `replication`, ADR 0043 d4)
+  and `net/` (the wire only; it never includes or links `runtime/`). `engine/` is the
+  one public include root: `#include <runtime/world/x.h>` (ADR 0040). See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
-  `game/` (the game shell plus its game-level GDScript runtime — world,
-  debug, ui, avatar, probe, mcp, resource_index, strings, util),
+  `game/` (the game shell plus its game-level GDScript runtime),
   `probes/` (the registered `game_probe` runtime probes, source-only and
   excluded from the runtime export preset, ADR 0041; see `docs/mcp.md`),
   `tests/` (GUT suite).
 - `apps/` — `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
-  in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
-  `nw_pp/` (NovaWorld in-game packet pretty-printer/decoder), `extract/`
-  (`opennova-extract`: writes named entries out of a mounted game root through
-  the engine's own resource index; replaced the dump probes, ADR 0041), `threedi_cli/`
-  (`opennova-3di`: mints a `.3di` from `.o3d` scene text and writes one back as it, prints and
-  compares models; `anim build|scene|info|compare` does the same for a rig's `.bad` clips and
-  its `.adm` table through the `.o3a` clip-set text; ADR 0047), `common/`
-  (shared socket helpers, deliberately app-layer; pcap I/O lives in
-  `engine/base/pcapio`).
+  in-match host; never shipped), `nw_lan_probe/`, `nw_pp/`, `extract/` (`opennova-extract`,
+  ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047), `common/` (shared socket helpers,
+  deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
@@ -105,9 +84,7 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 
 ## Conventions
 
-- `engine/` libraries: built as the five group targets (ADR 0029 — no per-lib CMake
-  targets), C++ namespace `opennova`; `godot/src/` is the typed Godot binding layer.
-  There is no "Nova layer" (ADR 0040): nothing carries a `Nova`/`nova_` prefix —
+- There is no "Nova layer" (ADR 0040): nothing carries a `Nova`/`nova_` prefix —
   files are named after the type they declare; `NovaWorld*` (the service),
   `NovaLogic` (the vendor) and `opennova*` (the project) are the proper nouns.
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
@@ -197,5 +174,3 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   `game_probe` runtime probes (ADR 0041); drive it with the `game-mcp` skill.
 - Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,
   `godot/tests/CLAUDE.md`.
-- Project skills in `.claude/skills/`: `gut`, `game-mcp`, `new-format-lib`, `re-doc`,
-  `extract-pr`, `grill-ida`, `engine-research`, and `diagnosing-bugs`.
