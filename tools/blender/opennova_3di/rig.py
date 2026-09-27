@@ -226,6 +226,20 @@ def weighted_parts(meshes, bones):
 
 # --- parts ------------------------------------------------------------------
 
+def stored_parent(holder, index, above):
+    """A part's parent: the hierarchy's (`above`), unless its Parent setting
+    (a PN##'s or a bone's) stores what a hierarchy cannot: the part itself, or
+    no part (-1), as retail models store them (Eturret's turret names itself,
+    Excavatr's arm and Chair03X's pieces -1) and the runtime poses them apart
+    from part 0."""
+    mode = holder.o3d.part_parent
+    if mode == "SELF":
+        return index
+    if mode == "NONE":
+        return -1
+    return above
+
+
 class Part:
     """One part of a LOD: `index` and its `parent` part's (0-based), and what
     holds it: a PN## `empty`, a BN## `bone` of `rig`, or a skinned `mesh`
@@ -316,7 +330,7 @@ def lod_parts(root):
                 above = above.parent
             parent = int(PART_RE.match(clean_name(above.name)).group(1)) - 1 \
                 if above is not None and above is not root else 0
-            lod.parts.append(Part(index, parent, empty=empties[index]))
+            lod.parts.append(Part(index, stored_parent(empties[index], index, parent), empty=empties[index]))
         return lod
     if rig is None and lod.skinned:
         rig = skin_rig(lod.skinned[0]) if lod.index == 0 else rig_of(model)
@@ -351,7 +365,8 @@ def lod_parts(root):
         if parent is not None and parent >= count:
             raise ExportError(f"{model.name}: its part {bones[index].name} hangs from {bones[parent].name}, past the "
                               f"{count} parts its weights reach on {rig.name}")
-        lod.parts.append(Part(index, parent if parent is not None else 0, bone=bones[index], rig=rig))
+        lod.parts.append(Part(index, stored_parent(bones[index], index, parent if parent is not None else 0),
+                              bone=bones[index], rig=rig))
     if lod.skinned and model.o3d.mesh_part:
         lod.mesh_part = count
         lod.parts.append(Part(count, 0, mesh=lod.skinned[0]))
@@ -548,15 +563,12 @@ def make_rig(context, model):
     for i, ob in empties.items():
         p, q = ob.o3d, arm.data.bones[names[i]].o3d
         q.panm_flags = p.panm_flags
+        q.part_parent = p.part_parent
         for t in p.tracks:
             u = q.tracks.add()
             for field in ("target", "style", "register", "param", "rate", "start", "end", "axis"):
                 setattr(u, field, getattr(t, field))
-        turn = frames[i].to_3x3()
-        if turn.determinant() < 0:
-            notes.append(f"{ob.name}: its frame is mirrored, which a bone's track frame cannot hold; its tracks turn "
-                         "about the nearest rotation")
-        q.frame = turn.normalized().to_euler()
+        q.frame = frames[i].to_3x3().normalized()
     context.view_layer.update()
     for i, ob in empties.items():
         bone = arm.data.bones[names[i]]
@@ -617,6 +629,8 @@ def share_rig(context, arms, gun):
     frame), when their weights do not reach their last bone (a shared rig
     gives the arms the bones their weights reach), or when the arms would have
     more parts than the gun (every first-person bone buffer is the gun's)."""
+    # Every matrix below is read as the scene now holds it.
+    context.view_layer.update()
     own, theirs = rig_of(arms), rig_of(gun)
     if arms is gun:
         raise ExportError(f"{arms.name}: a model shares another model's rig")
@@ -646,10 +660,11 @@ def share_rig(context, arms, gun):
     for i in range(count):
         if i not in gun_bones:
             raise ExportError(f"{gun.name}: its rig lacks BN{i + 1:02d}")
-        mine, other = parent_part(bones[i]), parent_part(gun_bones[i])
-        if (mine or 0) != (other or 0):
-            raise ExportError(f"{arms.name}: bone {bones[i].name} hangs from part {(mine or 0) + 1:02d}, but "
-                              f"{gun.name}'s {gun_bones[i].name} from part {(other or 0) + 1:02d}")
+        mine = stored_parent(bones[i], i, parent_part(bones[i]) or 0)
+        other = stored_parent(gun_bones[i], i, parent_part(gun_bones[i]) or 0)
+        if mine != other:
+            raise ExportError(f"{arms.name}: bone {bones[i].name}'s parent is part {mine + 1:02d}, but "
+                              f"{gun.name}'s {gun_bones[i].name}'s part {other + 1:02d}")
         d = ((into_arms @ bones[i].head_local) - (into_gun @ gun_bones[i].head_local)).length
         if d > PAIR_TOLERANCE:
             raise ExportError(f"{arms.name}: bone {bones[i].name} sits {d * 100:.1f} cm from {gun.name}'s "
@@ -698,4 +713,5 @@ def share_rig(context, arms, gun):
     arms.matrix_basis = Matrix.Identity(4)
     context.view_layer.update()
     return [f"{arms.name} deforms with {theirs.name}: its bones sat up to {worst * 1000:.2f} mm from "
-            f"{gun.name}'s parts, whose pivots it now exports"]
+            f"{gun.name}'s parts, whose pivots and track frames it now exports (the game draws the arms with the "
+            "gun's part matrices, never their own)"]

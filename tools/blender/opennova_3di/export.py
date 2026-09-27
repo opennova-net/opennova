@@ -30,7 +30,9 @@
 #   _## attach    Empty on a part of the collision LOD: that section's CXLT
 #                 attach point.
 #   _## hit       Empty on a bone of a skinned model: that bone's hit sphere
-#                 (its origin the centre, its display size the radius).
+#                 (its origin the centre, its display size times its scale the
+#                 radius); `_## bounds`, a box Empty beside it, the section's
+#                 bounds box (else the vertices the bone moves bound it).
 #   UP<c>## <lbl> Empty: user point, type letter c (G gameplay, S effect), on
 #                 its part (00: on none, -1), label = the USRP name; it faces
 #                 along its local +Z. Its `order` property keeps the USRP order.
@@ -57,7 +59,7 @@ import re
 from array import array
 
 import bpy
-from mathutils import Euler, Vector
+from mathutils import Matrix, Vector
 
 from . import assembly, materials
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
@@ -68,7 +70,7 @@ from .rig import (PART_RE, WEIGHT_EPS, clean_name, descendants, ignored, is_lod_
 
 POINT_RE = re.compile(r"^UP([A-Za-z])(\d{2})?(?: (.*))?$")
 LIGHT_RE = re.compile(r"^LP(\d{2})?([a-z]*)$")
-HELPER_RE = re.compile(r"^_(?:(\d{2}) )?(center|attach|hit)$")
+HELPER_RE = re.compile(r"^_(?:(\d{2}) )?(center|attach|hit|bounds)$")
 OCCLUSION_RE = re.compile(r"-occ?only$", re.IGNORECASE)
 OCC_RE = re.compile(r"^(OB|OS|OP|OH)(\d{2})?([a-z]*)(?:-(\d{2}))?-occonly$")
 OCC_TYPES = {"OB": 0, "OS": 1, "OP": 2, "OH": 4}  # OP with -MM is a portal, type 3
@@ -225,6 +227,7 @@ class Lod:
         self.centers = {}    # part index -> `_center` mesh
         self.anchors = {}    # part index -> `_attach` empty
         self.spheres = {}    # part index -> `_hit` empty
+        self.boxes = {}      # part index -> `_bounds` empty
         self.points = []     # (type letter, part index or -1, label, object)
         self.lights = []     # (part index, object)
         self.occluders = []  # (type, section, connecting, object)
@@ -314,7 +317,7 @@ class Exporter(Notes):
         if part.bone is not None:
             arm = self.space.local(part.rig.matrix_world).to_3x3().normalized()
             what = f"{part.rig.name} bone {part.name}"
-            return self.frame_of(arm @ Euler(part.bone.o3d.frame).to_matrix(), what)
+            return self.frame_of(arm @ Matrix(part.bone.o3d.frame), what)
         return 0
 
     def pivot(self, part):
@@ -418,13 +421,15 @@ class Exporter(Notes):
                 if m and m.group(2) == "attach":
                     once(lod.anchors, self.on_part(ob, part, m.group(1), lod), ob, "attach point")
                     continue
-                if m and m.group(2) == "hit":
+                if m and m.group(2) in ("hit", "bounds"):
                     if not lp.skinned:
-                        raise ExportError(f"{ob.name}: a hit sphere belongs to a bone of a skinned model")
+                        raise ExportError(f"{ob.name}: a hit sphere and its bounds belong to a bone of a skinned "
+                                          "model")
                     if not primary:
                         lod0_only(ob, "hit spheres")
                         continue
-                    once(lod.spheres, self.on_part(ob, part, m.group(1), lod), ob, "hit sphere")
+                    table, what = (lod.spheres, "hit sphere") if m.group(2) == "hit" else (lod.boxes, "bounds box")
+                    once(table, self.on_part(ob, part, m.group(1), lod), ob, what)
                     continue
                 if not ob.children:
                     # An empty that only groups objects is left alone: its
@@ -872,6 +877,20 @@ class Exporter(Notes):
             raise ExportError(f"{ob.name}: a hit sphere is scaled evenly on its three axes")
         return self.space.mission(m.translation), ob.empty_display_size * scales[0]
 
+    def hit_box(self, ob):
+        """A `_bounds` empty's box, [min x y z, max x y z] in mission axes: its
+        origin the middle, its display size times its scale on each axis the
+        half extents; it stays square with the model's axes."""
+        m = self.world(ob)
+        axes = m.to_3x3()
+        scales = [axes.col[i].length for i in range(3)]
+        if any(abs(axes[i][j]) > 1e-6 * max(max(scales), 1e-9) for i in range(3) for j in range(3) if i != j):
+            raise ExportError(f"{ob.name}: a bounds box is not turned (it stays square with the model's axes)")
+        c = self.space.mission(m.translation)
+        h = self.space.mission(Vector(tuple(ob.empty_display_size * s for s in scales)))
+        h = [abs(x) for x in h]
+        return [c[k] - h[k] for k in range(3)] + [c[k] + h[k] for k in range(3)]
+
     def emit_collision(self, lod0, bullet, lines):
         # One section per part of the collision LOD (WriteCOBJ walks that
         # LOD's subobjects: Dtruck2's collision LOD has 7 parts to LOD 0's 8,
@@ -914,6 +933,9 @@ class Exporter(Notes):
         for part, ob in lod0.spheres.items():
             if part < count:
                 spheres[part] = self.hit_sphere(ob)
+        for part, ob in lod0.boxes.items():
+            if part not in lod0.spheres:
+                raise ExportError(f"{ob.name}: a bounds box goes with its part's hit sphere (`_hit`)")
         # Every section sits at its part's pivot (the COBJ offset retail
         # carries: Dtruck2's wheels, Dblkhwk1's rotors).
         pivots = [self.pivot(p) for p in bullet.parts]
@@ -926,6 +948,8 @@ class Exporter(Notes):
                     mn = [min(p[k] for p in pts) for k in range(3)]
                     mx = [max(p[k] for p in pts) for k in range(3)]
                     box = mn + mx
+                if i in lod0.boxes:
+                    box = self.hit_box(lod0.boxes[i])
                 if i in spheres:
                     c, r = spheres[i]
                     lines.append("csphere " + fmt(*(float(x) for x in c), float(r)) +

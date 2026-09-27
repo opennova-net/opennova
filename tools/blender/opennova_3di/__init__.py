@@ -190,6 +190,22 @@ def search_mount_points(self, context, edit_text):
     return [label for label, _ in assembly.user_points(self.mount_parent) if text in label.lower()]
 
 
+# What a part's parent is when the hierarchy cannot say it (rig.stored_parent):
+# retail stores a part that names itself (Eturret's turret) and parts that name
+# none (Excavatr's arm, Chair03X's pieces). Only an import sets the others.
+PART_PARENTS = [
+    ("HIERARCHY", "Hierarchy", "The PN## or bone above it (none: part 01)"),
+    ("SELF", "Itself", "The part names itself as its parent"),
+    ("NONE", "None", "The part names no parent (-1)"),
+]
+
+
+def part_parent_prop():
+    return EnumProperty(name="Parent", items=PART_PARENTS, default="HIERARCHY",
+                        description="The part's parent as the file stores it: the hierarchy's, or itself or none, "
+                                    "which a hierarchy cannot say (retail Eturret, Excavatr, Chair03X)")
+
+
 class O3DAdmVariant(bpy.types.PropertyGroup):
     action: PointerProperty(name="Clip", type=bpy.types.Action,
                             description="The clip this variant plays (its name is the .bad file stem)")
@@ -292,6 +308,7 @@ class O3DObjectProps(bpy.types.PropertyGroup):
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
                             description="The part's raw PANM flags word; -1 derives it from the tracks")
+    part_parent: part_parent_prop()
     lod_threshold: IntProperty(name="LOD threshold", default=0, min=0,
                                description="On a LOD root: the projected radius in pixels above which this "
                                            "LOD draws (0 = the coarsest; Armry01's run 200, 60, 20, 0)")
@@ -304,14 +321,17 @@ class O3DObjectProps(bpy.types.PropertyGroup):
 
 
 class O3DBoneProps(bpy.types.PropertyGroup):
-    # A skinned model's part animation, on its BN## bone.
+    # A rig's part, on its BN## bone: its part animation and stored parent.
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
                             description="The part's raw PANM flags word; -1 derives it from the tracks")
-    frame: FloatVectorProperty(name="Track frame", subtype="EULER", size=3, default=(0.0, 0.0, 0.0),
+    part_parent: part_parent_prop()
+    frame: FloatVectorProperty(name="Track frame", subtype="MATRIX", size=(3, 3),
+                               default=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
                                description="The axes this part's tracks turn about (its PANM MTRX row), as a "
-                                           "rotation of the model's axes; zero: the model's own (dM1A1's turret "
-                                           "ring and wheels turn 90 degrees)")
+                                           "turn of the rig's axes (a mirror turns them the other way); the "
+                                           "identity: the model's own (dM1A1's turret ring and wheels turn 90 "
+                                           "degrees)")
 
 
 class O3DTexture(bpy.types.PropertyGroup):
@@ -668,14 +688,12 @@ class O3D_OT_import(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         paths = [os.path.join(self.directory, f.name) for f in self.files if f.name] or [self.filepath]
         models = []
-        for path in paths:
-            # One file that fails leaves nothing of itself behind and does not
-            # stop the others.
-            try:
-                model, notes = importer.import_file(context, path, self)
-            except Exception as e:  # noqa: BLE001 (reported per file)
-                kind = "" if isinstance(e, ImportFailed) else f"{type(e).__name__}: "
-                self.report({"ERROR"}, f"{os.path.basename(path)}: {kind}{e}")
+        # One file that fails leaves nothing of itself behind and does not
+        # stop the others; a first-person gun and its arms share one rig.
+        for path, model, notes in importer.import_files(context, paths, self):
+            if model is None:
+                kind = "" if isinstance(notes, ImportFailed) else f"{type(notes).__name__}: "
+                self.report({"ERROR"}, f"{os.path.basename(path)}: {kind}{notes}")
                 continue
             for note in notes:
                 self.report({"WARNING"}, f"{os.path.basename(path)}: {note}")
