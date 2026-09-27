@@ -1301,10 +1301,10 @@ bool ThreediBuildModel::add_occ_record(uint8_t type, int section_a, int section_
 	return true;
 }
 
-bool threedi_build_mint(const ThreediBuildModel &m, std::vector<uint8_t> &out) {
+bool threedi_build_mint(const ThreediBuildModel &m, std::vector<uint8_t> &out, ThreediChunkOverflow *overflow) {
 	ThreediAssembled assembled;
 	assemble(m, assembled);
-	return threedi_3di3_write_memory(&assembled.model, out) == 0;
+	return threedi_3di3_write_memory(&assembled.model, out, overflow) == 0;
 }
 
 } // namespace opennova::threedi

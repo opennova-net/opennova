@@ -303,7 +303,10 @@ struct ThreediBuildModel {
 };
 
 // Assemble the contiguous Threedi3di3 and serialize it through the parity
-// writer into `out`. Returns false when the writer refused the model.
-bool threedi_build_mint(const ThreediBuildModel &m, std::vector<uint8_t> &out);
+// writer into `out`. Returns false when the writer refused the model;
+// `overflow` then names a chunk too large for its length field, when that
+// is why (threedi_3di3_write_memory).
+bool threedi_build_mint(const ThreediBuildModel &m, std::vector<uint8_t> &out,
+		ThreediChunkOverflow *overflow = nullptr);
 
 } // namespace opennova::threedi

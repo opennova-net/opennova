@@ -163,7 +163,9 @@ seat scan reads the prefix without case and stops at 8 [orig:
 Entity_GetBoneSlotType @ 0x434ED0; the scan end @ 0x43A5AF]), a volume with
 fewer than 4 planes, an occlusion record over 128 vertices or 32 planes, a
 collision vertex 128 or more from the origin, a collision section over 32,768
-vertices, or a model the writer refuses; a
+vertices, or a model the writer refuses (named with its chunk and size when a
+chunk outgrows the 16,777,215 bytes a 3DI3 chunk's 24-bit length says: ROOT
+holds the whole model, an RLOD one LOD); a
 whole-model error names the file alone. Notes (not errors): a
 register outside the catalog, a shader outside the engine's table, a volume
 mesh that is not convex, more than 16 user points (the item-effect scan

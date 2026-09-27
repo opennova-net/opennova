@@ -274,6 +274,50 @@ static int chunk_total_length(const ChunkBuilder *chunk, size_t *out_total)
     return 0;
 }
 
+// The first chunk under `chunk`, children before their parent, whose payload
+// outgrows the 24-bit length field, into `out` (ThreediChunkOverflow): a
+// refused write's reason. `path` names `chunk`.
+static int chunk_find_overflow(const ChunkBuilder *chunk, const char *path, ThreediChunkOverflow *out)
+{
+    size_t content_len = chunk->payload.len;
+    if (chunk->child_count > 0) {
+        content_len = 0;
+        for (size_t i = 0; i < chunk->child_count; ++i) {
+            const ChunkBuilder *child = &chunk->children[i];
+            size_t index = 0, repeats = 0;
+            for (size_t j = 0; j < chunk->child_count; ++j) {
+                if (strcmp(chunk->children[j].id, child->id) != 0) {
+                    continue;
+                }
+                if (j < i) {
+                    ++index;
+                }
+                ++repeats;
+            }
+            char child_path[sizeof(out->chunk)];
+            if (repeats > 1) {
+                snprintf(child_path, sizeof(child_path), "%s/%s[%zu]", path, child->id, index);
+            } else {
+                snprintf(child_path, sizeof(child_path), "%s/%s", path, child->id);
+            }
+            if (chunk_find_overflow(child, child_path, out)) {
+                return 1;
+            }
+            size_t child_total = 0;
+            if (chunk_total_length(child, &child_total) != 0) {
+                return 0;
+            }
+            content_len += child_total;
+        }
+    }
+    if (content_len <= THREEDI_3DI3_LENGTH_MASK) {
+        return 0;
+    }
+    snprintf(out->chunk, sizeof(out->chunk), "%s", path);
+    out->bytes = content_len;
+    return 1;
+}
+
 static int chunk_builder_serialize(const ChunkBuilder *chunk, BufferBuilder *out)
 {
     if (!chunk || !out) {
@@ -1571,8 +1615,12 @@ static int build_occl_chunk(const Threedi3di3 *model, ChunkBuilder *out)
     return 0;
 }
 
-static int threedi_3di3_serialize(const Threedi3di3 *model, BufferBuilder *out)
+static int threedi_3di3_serialize(const Threedi3di3 *model, BufferBuilder *out, ThreediChunkOverflow *overflow)
 {
+    if (overflow) {
+        overflow->chunk[0] = '\0';
+        overflow->bytes = 0;
+    }
     if (!model || !out) {
         return -1;
     }
@@ -1670,6 +1718,9 @@ static int threedi_3di3_serialize(const Threedi3di3 *model, BufferBuilder *out)
     }
 
     if (chunk_builder_serialize(&root, &buf) != 0) {
+        if (overflow) {
+            chunk_find_overflow(&root, "ROOT", overflow);
+        }
         chunk_builder_free(&root);
         buffer_builder_free(&buf);
         return -1;
@@ -1679,13 +1730,13 @@ static int threedi_3di3_serialize(const Threedi3di3 *model, BufferBuilder *out)
     return 0;
 }
 
-int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &out)
+int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &out, ThreediChunkOverflow *overflow)
 {
     if (!model) {
         return -1;
     }
     BufferBuilder buf = {0};
-    if (threedi_3di3_serialize(model, &buf) != 0) {
+    if (threedi_3di3_serialize(model, &buf, overflow) != 0) {
         return -1;
     }
     out.assign(buf.data, buf.data + buf.len);
@@ -1699,7 +1750,7 @@ int threedi_3di3_write(const char *path, const Threedi3di3 *model)
         return -1;
     }
     BufferBuilder buf = {0};
-    if (threedi_3di3_serialize(model, &buf) != 0) {
+    if (threedi_3di3_serialize(model, &buf, NULL) != 0) {
         return -1;
     }
     FILE *f = fopen(path, "wb");

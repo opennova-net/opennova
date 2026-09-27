@@ -881,10 +881,23 @@ int threedi_3di3_read_memory(const uint8_t *data, size_t size,
 // Convenience: write a previously-read model back to disk (round-trip).
 int threedi_3di3_write(const char *path, const Threedi3di3 *model);
 
+// A chunk too large for its header: a 3DI3 chunk says its payload length in
+// 24 bits (THREEDI_3DI3_LENGTH_MASK), and a parent's payload is its children,
+// so ROOT holds the whole model and an RLOD one LOD. `chunk` is its path from
+// ROOT, a repeated chunk by its index ("ROOT/RDTA/RLOD[1]/VERT"), and
+// `bytes` its payload.
+typedef struct ThreediChunkOverflow {
+    char chunk[48];
+    size_t bytes;
+} ThreediChunkOverflow;
+
 // The same parity writer into memory: `out` receives exactly the bytes
 // threedi_3di3_write puts on disk. Returns 0 on success, -1 when the writer
-// refuses the model.
-int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &out);
+// refuses the model; when it refuses it because a chunk outgrew its length
+// field, `overflow` (when given) receives the first such chunk, children
+// before their parent, in file order (otherwise its chunk is left empty).
+int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &out,
+                              ThreediChunkOverflow *overflow = nullptr);
 
 // Free allocations inside a Threedi3di3.
 void threedi_3di3_free(Threedi3di3 *model);

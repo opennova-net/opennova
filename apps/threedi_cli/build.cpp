@@ -61,6 +61,16 @@ constexpr size_t kNameChars = 15;
 
 bool fits_s16(long long v) { return v >= SHRT_MIN && v <= SHRT_MAX; }
 
+// A count with thousands separators, for messages: 16,777,215.
+std::string grouped(size_t n) {
+	std::string digits = std::to_string(n), out;
+	for (size_t i = 0; i < digits.size(); ++i) {
+		if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
+		out += digits[i];
+	}
+	return out;
+}
+
 ThreediVertex render_vertex(const double *p, const double *n, const double *uv, const double *uv1) {
 	const ThreediBuildVec3 pm = threedi_build_to_model(ThreediBuildVec3{p[0], p[1], p[2]});
 	const ThreediBuildVec3 nm = threedi_build_to_model(ThreediBuildVec3{n[0], n[1], n[2]});
@@ -102,6 +112,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 	std::string raw;
 	int lod = -1, part = -1, material = -1, cobj = -1, volume_open = -1;
 	int full_section = -1; // the last section told it holds too many vertices
+	bool strip_full = false; // the open strip was told it holds too many vertices
 	bool uv1 = false;
 	ThreediBuildStrip *strip = nullptr;
 	int strip_lod = -1, strip_part = -1;
@@ -295,7 +306,11 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 					second[1] = uv[1];
 				}
 				if (strip->vertices.size() >= 65535) {
-					ps.error("strip exceeds 65535 vertices (u16 indices)");
+					// Said once per strip.
+					if (!strip_full)
+						ps.error("strip exceeds 65,535 vertices: its triangles index them with u16 words (split the "
+								"strip's mesh, or use fewer vertices)");
+					strip_full = true;
 					continue;
 				}
 				ThreediVertex vert = render_vertex(p, n, uv, second);
@@ -680,6 +695,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			pending.alpha = alpha != 0;
 			have_pending = true;
 			strip = &pending;
+			strip_full = false;
 			strip_lod = lod;
 			strip_part = part;
 		} else if (key == "panm") {
@@ -1037,8 +1053,16 @@ int cmd_build(const char *scene_path, const char *out_path) {
 		return 1;
 	}
 	std::vector<uint8_t> bytes;
-	if (!threedi_build_mint(model, bytes)) {
-		std::fprintf(stderr, "opennova-3di: the writer refused the model\n");
+	ThreediChunkOverflow overflow{};
+	if (!threedi_build_mint(model, bytes, &overflow)) {
+		if (overflow.chunk[0] != '\0')
+			std::fprintf(stderr,
+					"opennova-3di: the model is too large to write: its %s chunk holds %s bytes, past the %s a 3DI3 "
+					"chunk's 24-bit length can say (ROOT holds the whole model and each RLOD one LOD: use fewer "
+					"vertices, triangles, LODs or collision faces)\n",
+					overflow.chunk, grouped(overflow.bytes).c_str(), grouped(THREEDI_3DI3_LENGTH_MASK).c_str());
+		else
+			std::fprintf(stderr, "opennova-3di: the writer refused the model\n");
 		return 1;
 	}
 	// Read the bytes back through the retail-shape reader before shipping them.

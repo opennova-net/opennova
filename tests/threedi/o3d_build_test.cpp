@@ -457,6 +457,13 @@ int main(int argc, char **argv) {
 				"collision section 0 exceeds 32,768 vertices: retail reads a bullet face's corners as signed 16-bit indices");
 		const std::string said = slurp(path_of("strict-cv-count", ".err"));
 		check(said.find("exceeds 32,768") == said.rfind("exceeds 32,768"), "strict-cv-count: said once");
+		// A strip's triangles index its vertices with u16 words, said once too.
+		std::string long_strip = "o3d 1\nmodel STRIP\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n";
+		long_strip.reserve(long_strip.size() + 65537 * 18);
+		for (int i = 0; i < 65537; ++i) long_strip += "v 0 0 0 0 0 1 0 0\n";
+		refuses_saying("strict-strip-count", long_strip, "strip exceeds 65,535 vertices: its triangles index them with u16 words");
+		const std::string strip_said = slurp(path_of("strict-strip-count", ".err"));
+		check(strip_said.find("exceeds 65,535") == strip_said.rfind("exceeds 65,535"), "strict-strip-count: said once");
 		refuses("strict-texture-name", swap(base, "texture skin.tga", "texture seventeen_chars.tga"));
 		std::string planes = base + "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
 		for (int i = 0; i < 33; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n";
@@ -521,6 +528,29 @@ int main(int argc, char **argv) {
 				check(false, "shared-window: read the rebuilt model");
 			}
 		}
+	}
+
+	// A 3DI3 chunk says its payload length in 24 bits: the writer refuses a
+	// model one of whose chunks outgrows that and says which chunk, and how
+	// large, so the CLI can tell the author (a 262,200-vertex LOD with
+	// tangents holds 16,780,812 bytes of VERT).
+	{
+		ThreediBuildModel m;
+		m.name = "BIG";
+		m.tangents = true; // 64-byte vertices
+		const int lod = m.add_lod();
+		const int part = m.add_part(lod, 0, ThreediBuildVec3{});
+		m.add_material("FF_ST_OP", "big.tga");
+		ThreediBuildStrip strip;
+		strip.vertices.resize(262200);
+		m.lods[lod].parts[part].strips.push_back(std::move(strip));
+		m.add_panm(lod, part, 0);
+		std::vector<uint8_t> bytes;
+		ThreediChunkOverflow overflow{};
+		check(!threedi_build_mint(m, bytes, &overflow), "overflow: refused");
+		check(std::string(overflow.chunk) == "ROOT/RDTA/RLOD/VERT" && overflow.bytes == 12u + 262200u * 64u,
+				std::string("overflow: names the VERT chunk and its size (") + overflow.chunk + ", " +
+						std::to_string(overflow.bytes) + ")");
 	}
 
 	std::printf("o3d_build_test: %d failures\n", failures);
