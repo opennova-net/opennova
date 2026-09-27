@@ -121,11 +121,16 @@ mount fails the retail suite instead of silently reducing its coverage.
 
 ## CI
 
-The ordinary `test`, `test-linux`, and `godot-tests` jobs use `--suite core` and
-never mount the private repositories. The separate `test-retail` and
+The ordinary `test`, `test-linux`, `godot-tests`, and `godot-tests-linux` jobs use
+`--suite core` on every PR, master push and manual run, and never mount the
+private repositories. Linux builds the native executables and a GDExtension
+`.so`; its headless Godot job consumes the Linux `template_debug` artifact.
+Both platforms also build `template_release` on master pushes and manual runs.
+The separate `test-retail` and
 `godot-tests-retail` jobs run on the same PR, master-push and manual triggers
-when reference-data credentials are available. Both Godot jobs consume the same
-`template_debug` DLL artifact. Windowed retail graphics validation is a separate
+when reference-data credentials are available. Retail compatibility runs on
+Windows; the Windows Godot jobs consume the same `template_debug` DLL artifact.
+Windowed retail graphics validation is a separate
 local run; hosted headless CI does not establish its pixel/instance-row coverage.
 
 `retail-availability` explicitly reports unavailable credentials, such as on a

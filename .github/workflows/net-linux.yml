@@ -12,8 +12,8 @@ name: Net stack (Linux)
 #
 # The Windows `test` job compiles the same net libs and runs the same tests
 # with BUILD_NOVAWORLD_HTTP=OFF (no Crow/asio FetchContent on the hot legs);
-# the wider lib corpus rides the Windows job and the master-only Linux full
-# build in ci.yml (test-linux).
+# the wider lib corpus runs on both platforms for every PR in ci.yml.
+# This separate job also exercises BUILD_NOVAWORLD_HTTP=ON for deployment.
 
 on:
   workflow_call:
