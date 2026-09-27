@@ -542,6 +542,13 @@ const char *const kWeaponActionSuffixes[weapon_action::kCount] = {
     "switchto",   "switchfrom", "switchrank", "scopeup", "scopedown", "overheated",
 };
 
+int32_t weapon_action_anim_slot(int32_t action) {
+	// [orig: g_AnimStateNameTable @ 0x8135F0 — wpn_idle 241 .. wpn_scopedown 251]
+	constexpr int32_t kWpnIdleSlot = 241;
+	return action >= weapon_action::kIdle && action < weapon_action::kOverheated ? kWpnIdleSlot + action
+	                                                                              : -1;
+}
+
 int32_t weapon_anim_ticks_from_ms(int32_t ms) {
     // [orig: Anim_GetDurationTicks @ 0x53ee10 — trunc(ms * 62.5 (flt_7C3B3C)
     // / 1000 + 0.5 (flt_7C3B94)) + 1: ROUND-to-nearest, then +1. The prior

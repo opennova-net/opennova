@@ -71,6 +71,14 @@ enum : int32_t {
 // paired in the default table @ 0x830B90]
 extern const char *const kWeaponActionSuffixes[weapon_action::kCount];
 
+// The anim slot named for an action's own clip: the wpn_* block of the slot
+// table runs in suffix-table order from wpn_idle (241) to wpn_scopedown (251),
+// the two the idle handlers replay by number. OVERHEATED has no slot of its own
+// (-1): its shipped rows name the idle clip. [orig: g_AnimStateNameTable
+// @ 0x8135F0 entries 241..251; WeaponAction_Idle slot 241 @ 0x542955;
+// WeaponAction_EmptyIdle slot 242 @ 0x542a53]
+int32_t weapon_action_anim_slot(int32_t action);
+
 // Phase byte values (MountSlot+0x5A). [orig: transition write @ 0x5413ec; the
 // begin-active shims @ 0x53f830 / 0x541860 / 0x5419e0; finish @ 0x53f7b0]
 namespace weapon_phase {

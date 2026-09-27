@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 
+#include <runtime/world/infantry.h>
 #include <runtime/world/weapon_fire_gate.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
@@ -165,6 +166,22 @@ void test_bake() {
     weapon_fsm_bake(&upper, 1, clip_resolves, clip_seconds, nullptr, def4);
     CHECK(def4.actions[wa::kReload].delay_start == 3);
     CHECK(def4.actions[wa::kReload].delay_end == 4);
+}
+
+// The wpn_* slots run in suffix order from wpn_idle (241), the two the idle
+// handlers replay by number; overheated has none. [orig: g_AnimStateNameTable
+// @ 0x8135F0; WeaponAction_Idle @ 0x542955; WeaponAction_EmptyIdle @ 0x542a53]
+void test_action_anim_slots() {
+	CHECK(weapon_action_anim_slot(wa::kIdle) == 241);
+	CHECK(weapon_action_anim_slot(wa::kEmptyIdle) == 242);
+	CHECK(weapon_action_anim_slot(wa::kScopeDown) == 251);
+	CHECK(weapon_action_anim_slot(wa::kOverheated) == -1);
+	CHECK(weapon_action_anim_slot(-1) == -1 && weapon_action_anim_slot(wa::kCount) == -1);
+	for (int a = wa::kIdle; a < wa::kOverheated; ++a) {
+		const std::string key = infantry_anim_key(weapon_action_anim_slot(a));
+		const std::string suffix = kWeaponActionSuffixes[a];
+		CHECK(key == (a == wa::kEmptyIdle ? std::string("anim_wpn_empty_idle") : "anim_wpn_" + suffix));
+	}
 }
 
 // Drive N ticks with fixed inputs, collecting the last events.
@@ -1314,6 +1331,7 @@ int main() {
     test_weapon_level_sound_and_kick_gate();
     test_sights_card_eligibility();
     test_bake();
+    test_action_anim_slots();
     test_bake_ring_read_multiplicity();
     test_fire_chains_recoil();
     test_auto_refire_cadence();
