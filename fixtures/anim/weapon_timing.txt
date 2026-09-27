@@ -1,0 +1,5 @@
+weapon_timing 1
+mode auto
+cycle 0.08
+action fire anim_wpn_fire 0 0 "" "" "" ""
+action reload anim_wpn_reload 1 0 "" "" "" ""

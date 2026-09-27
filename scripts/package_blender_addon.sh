@@ -20,8 +20,8 @@ build="$root/build/blender-addon"
 
 # Keep the package's static MSVC runtime separate from development builds.
 # The installed add-on must not require a separately installed VC++ runtime.
-# The CLI links only the base and formats groups, so the dev tools (and the
-# Dear ImGui fetch they bring) stay off.
+# Weapon timing links the runtime FSM too; keep the unrelated game dev tools
+# (and the Dear ImGui fetch they bring) off.
 cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF > /dev/null
 cmake --build "$build" --config Release --target opennova_3di

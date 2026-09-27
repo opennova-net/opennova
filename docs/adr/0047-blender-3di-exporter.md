@@ -274,6 +274,26 @@ the same text transport, the same add-on.
    Child Of constraint that is muted at Rest Position, so the model exports
    byte for byte as before its clips were imported.
 
+14. **Weapon timing is authored, then evaluated by the runtime FSM.** An
+   animation-table row may explicitly name a weapon action role. Action-local
+   Shot, Eject, Active End and Ready markers supply its phase timing; firing
+   cadence has one selected source, a Ready marker or target RPM. Neither
+   imported provenance nor an existing weapon definition is an input.
+   `opennova-3di weapon timing` converts this authoring input to explicit
+   ACTION delay fields and measures the result with the engine's existing
+   `weapon_fsm_bake` / `weapon_fsm_tick`; no Python FSM or alternate gameplay
+   behavior is introduced. The command library consequently links the runtime
+   group. Its text output is an ACTION-block snippet for the existing
+   `weapon.def` parser, written beside the BAD/ADM set as
+   `<table>_weapon_actions.txt`. It does not invent ammunition, damage or other
+   weapon settings. A preview is disposable; export recompiles from current
+   Actions and markers. Invalid timing is rejected before animation files are
+   written. Frame-to-tick authoring policy, marker semantics and the runtime's
+   reload/switch limitations are documented in the add-on README. Native tests
+   check actual cadence and parser acceptance; a Blender test authors the
+   geometry, skin, Actions and markers from scratch and exports them without
+   importing any assets.
+
 ## Consequences
 
 - A modder installs one zip; a model reaches retail through the same writer

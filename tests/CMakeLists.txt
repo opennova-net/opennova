@@ -87,6 +87,18 @@ endforeach()
 add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp)
 target_link_libraries(anim_o3a_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+add_executable(weapon_timing_test anim/weapon_timing_test.cpp)
+target_link_libraries(weapon_timing_test PRIVATE opennova_3di_commands)
+add_test(NAME weapon_timing COMMAND weapon_timing_test ${CMAKE_CURRENT_BINARY_DIR})
+# Optional headless DCC test. It authors all geometry, bones, clips and markers
+# from scratch. Set BLENDER_EXECUTABLE when Blender is not on PATH.
+find_program(BLENDER_EXECUTABLE NAMES blender)
+if(BLENDER_EXECUTABLE)
+    add_test(NAME blender_weapon_authoring COMMAND ${BLENDER_EXECUTABLE}
+        --background --factory-startup --python-exit-code 1
+        --python ${CMAKE_CURRENT_SOURCE_DIR}/anim/blender_weapon_authoring.py --
+        $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR}/blender-weapon-authoring)
+endif()
 # `catalog` prints the anim slot keys and the event trigger bits a front end
 # offers (the Blender add-on parses both), and `info` refuses a flag it does
 # not take.

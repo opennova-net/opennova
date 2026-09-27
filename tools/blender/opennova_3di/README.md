@@ -308,6 +308,81 @@ model's parts by index.
 `opennova-3di anim compare <a> <b>` tells whether two sets hold the same
 animation.
 
+## Weapon action timing
+
+Weapon timing works on a new rig and newly keyed Actions. Imported models,
+clips, source frame metadata and existing weapon definitions are not required.
+
+1. Create the model root, LOD 0 and BN## armature as above. Key a bind-pose
+   Action spanning at least two frames. In the Action Editor sidebar, choose
+   **Assign Weapon Action > Bind / Reset**.
+2. Key the other Actions and assign **Fire**, **Idle**, **Reload**, etc.
+   Overheated is not offered: it runs the idle handler, has no `wpn_` anim
+   state of its own, and no shipped weapon.def authors it.
+   Assignment keeps the Action on an NLA track, binds its animation-table row,
+   and adds local timing markers. It clears the clip's **Loop** flag: retail's
+   weapon clips are one-shots, its idle holds too, and the idle action replays
+   its clip on each Ready window.
+   Existing rows can instead be assigned a **Weapon action** role on the model.
+3. Edit the named markers in the Action Editor with **Show Pose Markers** on,
+   or use their frame fields and **At Playhead** buttons. These are Action-local
+   markers; scene timeline markers and NLA placement do not define timing.
+4. Choose the weapon's **Fire mode**, then **Ready marker** or **Target RPM**
+   as the single cadence source. **Preview Game Timing** displays requested
+   and achievable RPM and the generated delays. The Text Editor's
+   `<model> - Weapon Timing` text contains the full native FSM event trace.
+5. **Export Animations** writes the BAD/ADM set and, when **Export weapon
+   actions** is enabled, `<table>_weapon_actions.txt` alongside it. Merge those
+   ACTION blocks into the weapon definition and apply the stated Auto/Burst
+   flags while preserving its other flags. Sound/effect references can be
+   authored on each weapon row. Ammo, damage and inventory settings remain
+   part of the weapon definition.
+
+| Marker | Authoring meaning |
+| --- | --- |
+| `ON:Shot` | Fire clip's shot pose; absent means the first frame/immediate shot. |
+| `ON:Eject` | Recoil clip's casing/decision pose; absent means immediate. |
+| `ON:Active End` | Other actions' active-phase boundary; absent uses Ready or clip end. |
+| `ON:Ready` | On Fire, Shot-to-Ready requests the full firing cycle, including recoil and transition ticks. On other actions, the gap after the active boundary authors recovery. Idle uses it as its repeat window. |
+
+Target RPM ignores Fire's Ready marker; it never fights a second timing
+source. A Ready marker may lie past the keyed clip to author a held recovery;
+Shot, Eject and Active End must identify a pose inside the exported clip.
+Timing uses the clip's exported integer rate and its own first frame, including
+negative or nonzero starts. Moving an NLA strip changes neither. Non-idle
+variants of one weapon row must agree on phase times in seconds: the runtime
+has only one delay pair per ACTION. Idle variants use the first served clip's
+length for their repeat window.
+
+The CLI's `weapon timing` command compiles current markers and measures the
+result with `weapon_fsm_tick`. Active pose boundaries account for the clip's
+62-step playback clock and the counter-zero tick that does not advance it.
+Recovery and requested firing periods use 62.5 logic ticks per second. The
+solver adjusts Fire's recovery delay to the nearest whole-tick requested
+period and includes the runtime's extra transitions: for immediate automatic
+fire with zero recoil, delayend 3 gives a five-tick cycle (750 RPM), not a
+three-tick cycle. Semi-auto measures fresh presses at the first eligible Idle
+tick; burst reports the within-burst rate. The preview assumes ammo is
+available and no environmental/heat gate blocks fire. A changed timing input
+marks the preview stale; export always compiles again from the authored scene.
+
+The engine's existing constraints remain visible: reload refills ammo on
+entry; its markers control animation/action windows, not a new magazine-in
+gameplay event. Draw/holster use the fixed switch timer and do not accept timing
+markers. Export uses a zero start delay and a two-tick refreshed end counter
+to enter that timer and keep the animation advancing; inspect the native trace
+for its actual length. A draw/holster clip may therefore be cut short by the
+runtime. BAD trigger bits
+are body events and do not replace first-person weapon action timing. A recoil
+window that cannot sustain the requested firing mode is rejected by the native
+preview rather than exported with an invented behavior.
+
+To run the asset-free authoring regression:
+
+```text
+blender --background --factory-startup --python-exit-code 1 --python tests/anim/blender_weapon_authoring.py -- <opennova-3di.exe> <output-directory>
+```
+
 ## Collision volumes
 
 A `-colonly` mesh is a convex volume: the game keeps the solid all its face

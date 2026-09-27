@@ -30,6 +30,7 @@
 
 #include "anim_cli.h"
 #include "threedi_cli.h"
+#include "weapon_timing.h"
 
 using namespace opennova::threedi;
 
@@ -46,6 +47,7 @@ int usage(const char *why) {
 			"       opennova-3di anim scene   <in.adm|in.bad> -o <set.o3a>\n"
 			"       opennova-3di anim info    <in.adm|in.bad> [--verbose | --keys]\n"
 			"       opennova-3di anim compare <expected.adm|.bad> <actual.adm|.bad>\n"
+			"       opennova-3di weapon timing <timing.txt> -o <actions.txt>\n"
 			"       opennova-3di catalog\n");
 	return 2;
 }
@@ -84,6 +86,11 @@ int main(int argc, char **argv) {
 	const std::string cmd = argv[1];
 	if (cmd == "catalog") return argc == 2 ? cmd_catalog() : usage("catalog takes no arguments");
 	if (argc < 3) return usage(nullptr);
+	if (cmd == "weapon") {
+		if (argc != 6 || std::strcmp(argv[2], "timing") != 0 || std::strcmp(argv[4], "-o") != 0)
+			return usage("weapon timing needs <timing.txt> -o <actions.txt>");
+		return threedi_cli::cmd_weapon_timing(argv[3], argv[5]);
+	}
 	if (cmd == "info") {
 		const std::string flag = argc > 3 ? argv[3] : "";
 		if (argc > 4 || (!flag.empty() && flag != "--verbose" && flag != "--planes" && flag != "--verts"))

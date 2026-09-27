@@ -443,6 +443,13 @@ class AnimExporter(Notes):
                               "NLA editor) before exporting its clips")
         self.context.view_layer.update()
         self.placed = self.model.matrix_world.copy()
+        # Compile the authored Actions and markers before sampling or writing
+        # the clip set, so invalid timing writes nothing; a stale preview is
+        # never read. (weapon imports this module, hence the local import.)
+        from . import weapon
+        weapon_snippet = None
+        if self.props.weapon_enabled:
+            _, weapon_snippet = weapon.compile_timing(self.context, self.model)
         # Read at the world origin, the model's own frame exactly
         # (at_world_origin); the ground of a rig without Root is where the
         # model stands in the scene.
@@ -454,6 +461,10 @@ class AnimExporter(Notes):
         result = export_text(self.context, ["anim", "build"], text, "set.o3a", "clip set text", out_path)
         for note in cli_notes(result, "note: "):
             self.note(note)
+        if weapon_snippet is not None:
+            path = weapon.output_path(out_path)
+            weapon.write_snippet(path, weapon_snippet)
+            self.note(f"weapon ACTION blocks written to {path}; merge into the weapon definition")
         return f"{result.stdout.strip()} ({len(strips)} clips, {len(bones)} bones)", self.notes
 
 

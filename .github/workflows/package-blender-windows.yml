@@ -76,6 +76,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Packaged CLI failed to rebuild a model" }
           & $cli compare "$unpacked/spinner.3di" "$unpacked/spinner-roundtrip.3di"
           if ($LASTEXITCODE -ne 0) { throw "Packaged CLI round trip changed the model" }
+          $timing = & $cli weapon timing fixtures/anim/weapon_timing.txt -o "$unpacked/weapon_actions.txt"
+          if ($LASTEXITCODE -ne 0) { throw "Packaged CLI failed to compile weapon timing" }
+          $preview = $timing | ConvertFrom-Json
+          if ($preview.cycle_ticks -ne 5 -or $preview.rpm -ne 750) {
+            throw "Packaged weapon timing disagrees with the native FSM"
+          }
 
       # Upload the installable zip directly, without a second archive wrapper.
       - name: Upload Blender add-on zip
