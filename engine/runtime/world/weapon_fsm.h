@@ -71,6 +71,52 @@ enum : int32_t {
 // paired in the default table @ 0x830B90]
 extern const char *const kWeaponActionSuffixes[weapon_action::kCount];
 
+// The handlers a row's FUNCTION names, in registry order: the 18 rows of
+// {name, fn, minParams} looked up case-insensitively by name. Registry row 0,
+// `null`, is the placeholder every row starts from and every unknown name
+// leaves behind; the bind replaces it (or a null handler) with the suffix's
+// default, so it never stays bound to a weapon slot.
+// [orig: g_ActionFuncDefTable @ 0x829E58 (count @ 0x829F30);
+//  ActionFuncDef_FindByName @ 0x401040; ActionDef_InitDefaults @ 0x4022C5;
+//  the unknown-name store @ 0x4028F7; the bind's rewrite @ 0x542117..0x542139]
+namespace weapon_handler {
+enum : int8_t {
+    kPlaceholder = 0,  // `null`: ActionSlot_ExecuteAction @ 0x4020A0
+    kNull,             // wpn_std_null: WeaponAction_Null @ 0x4010B0, does nothing
+    kIdle,             // wpn_std_idle @ 0x542920
+    kEmptyIdle,        // wpn_std_emptyidle @ 0x542A20
+    kFire,             // wpn_std_fire @ 0x542B10
+    kRecoil,           // wpn_std_recoil @ 0x542DD0
+    kReload,           // wpn_std_reload @ 0x5430B0
+    kEmpty,            // wpn_std_empty @ 0x543180
+    kSwitchTo,         // wpn_std_switchto @ 0x5431D0
+    kSwitchFrom,       // wpn_std_switchfrom @ 0x5433B0
+    kSwitchRank,       // wpn_std_switchrank @ 0x543500
+    kScopeUp,          // wpn_std_scopeup @ 0x543290
+    kScopeUpMap,       // wpn_std_scopeup_map: WeaponAction_ScopeUpMap @ 0x5432D0
+    kScopeDown,        // wpn_std_scopedown @ 0x543320
+    kScopeDownMap,     // wpn_std_scopedown_map: WeaponAction_ScopeDownMap @ 0x543360
+    kSwitchFromMap,    // wpn_std_switchfrom_map: WeaponAction_SwitchFromMap @ 0x5434E0
+    kPowerupPickup,    // powerup_pickup: PowerupAction_Pickup @ 0x4428A0
+    kPowerupRespawn,   // powerup_respawn: PowerupAction_Respawn @ 0x442B40
+    kCount,
+};
+} // namespace weapon_handler
+
+// The registry names, index == handler id.
+extern const char *const kWeaponHandlerNames[weapon_handler::kCount];
+
+// The handler a FUNCTION value names: its first token looked up without case;
+// kPlaceholder for `null`, an unknown name or none (extra tokens are the
+// handler's parameters). [orig: ActionFuncDef_FindByName @ 0x401040, the FUNCTION
+// key @ 0x4028D2]
+int8_t weapon_handler_named(const char *function);
+
+// The handler a suffix binds when its row names none it can run: the default
+// table pairs each suffix with its own handler and OVERHEATED with the idle one.
+// [orig: g_WeaponActionTable @ 0x830B90]
+int8_t weapon_action_default_handler(int32_t action);
+
 // The anim slot named for an action's own clip: the wpn_* block of the slot
 // table runs in suffix-table order from wpn_idle (241) to wpn_scopedown (251),
 // the two the idle handlers replay by number. OVERHEATED has no slot of its own
@@ -118,6 +164,11 @@ struct WeaponFsmActionRow {
 // begin leg ActionSlot_ExecuteActionWithEffect @ 0x541860 / ActionSlot_SpawnEffect
 // @ 0x401f20 — carried here as the authored names; the host seams resolve them]
 struct WeaponFsmAction {
+	// The handler the row binds: its FUNCTION's, else the suffix's default;
+	// the pump runs it whatever slot it is bound to.
+	// [orig: ActionDef+0, called by WeaponAction_ProcessFrame @ 0x54142A /
+	//  @ 0x5413FF / @ 0x541482 / @ 0x5414A2]
+	int8_t handler = weapon_handler::kIdle;
 	int8_t map_command =
 			0; // +1 open if closed, -1 close mode 2 [orig: @0x5432D0/@0x543360/@0x5434E0]
     int32_t id = -1;         // the action slot id (weapon_action::*), stamped by the bake
@@ -205,9 +256,11 @@ using WeaponClipResolvesFn = int (*)(void *ctx, const char *anim_key);
 // delaystart when greater; no anim / unresolved clip -> 0.
 // [orig: @ 0x5421b3..0x5421ec (the two Anim_GetDurationTicks calls @ 0x5421c5 /
 //  @ 0x5421d8) / 0x542152..0x542164]
-// FUNCTION rows are not consulted: every shipped row names the standard handler for its
-// own suffix (wpn_std_<suffix>, JOX + REVX corpora), so the per-state behavior is fixed
-// (divergence D-WPN-1).
+// Each slot binds the handler its row's FUNCTION names; no row, no FUNCTION, `null` or
+// an unknown name (the bare `scopeup` rows) take the suffix's default. So the shipped
+// EMPTYIDLE rows naming wpn_std_idle run the idle handler in that slot, and the AT4 and
+// RPG draws the reload handler. [orig: the FUNCTION key @ 0x4028D2 ->
+// ActionFuncDef_FindByName @ 0x401040; Anim_InitActions' rewrite @ 0x542117..0x542139]
 void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
                      WeaponClipResolvesFn clip_resolves, WeaponClipSecondsFn clip_seconds,
                      void *ctx, WeaponFsmDef &out);

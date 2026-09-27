@@ -9,6 +9,7 @@
 #include <base/io/strutil.h>
 
 #include <cstring>
+#include <string>
 
 namespace opennova::world {
 
@@ -297,8 +298,10 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     // extra gate is the FP weapon-view flag (embedder-side; treated always-on) — NOT the
     // scope state — and the spawn never records a live handle (param7=0), so it is
     // never suppressed by a previous casing group still alive.
+    // The gate also asks that RECOIL be the slot's current action: the handler
+    // may be bound to another slot, and then it spawns nothing.
     // [orig: WeaponAction_Recoil gate @ 0x542efa -> ActionSlot_SpawnEffect @ 0x542f64]
-    if (in.is_local && desc.particle[0] != '\0')
+    if (in.is_local && desc.particle[0] != '\0' && slot.current == weapon_action::kRecoil)
         out.action_effect = weapon_action::kRecoil;
     slot.phase = weapon_phase::kDone; // [orig: @ 0x542f74]
     // The per-shot heat stamp. The window is pushed out by however many ticks it
@@ -480,42 +483,53 @@ void handler_scope(const WeaponFsmDef &, const WeaponFsmAction &desc,
     }
 }
 
+// The pump calls the current slot's BOUND handler with that slot's row, never
+// a handler chosen by the slot number: an EMPTYIDLE row naming wpn_std_idle runs
+// the idle handler there. [orig: WeaponAction_ProcessFrame @ 0x540e60 —
+// actionTable[current]->handler(desc, slot, owner) @ 0x54142A / @ 0x5413FF /
+// @ 0x541482 / @ 0x5414A2]
 void run_handler(const WeaponFsmDef &def, WeaponSlotState &slot,
                  const WeaponFsmInputs &in, WeaponFsmEvents &out) {
     const WeaponFsmAction &desc = def.actions[slot.current];
-    switch (slot.current) {
-        case weapon_action::kIdle:
-        case weapon_action::kOverheated: // idle handler on the default table
+    switch (desc.handler) {
+        case weapon_handler::kIdle:
             handler_idle(def, desc, slot, in, out);
             break;
-        case weapon_action::kEmptyIdle:
+        case weapon_handler::kEmptyIdle:
             handler_emptyidle(def, desc, slot, in, out);
             break;
-        case weapon_action::kFire:
+        case weapon_handler::kFire:
             handler_fire(def, desc, slot, in, out);
             break;
-        case weapon_action::kRecoil:
+        case weapon_handler::kRecoil:
             handler_recoil(def, desc, slot, in, out);
             break;
-        case weapon_action::kReload:
+        case weapon_handler::kReload:
             handler_reload(def, desc, slot, in, out);
             break;
-        case weapon_action::kEmpty:
+        case weapon_handler::kEmpty:
             handler_empty(def, desc, slot, in, out);
             break;
-        case weapon_action::kSwitchTo:
+        case weapon_handler::kSwitchTo:
             handler_switchto(def, desc, slot, in, out);
             break;
-        case weapon_action::kSwitchFrom:
+        case weapon_handler::kSwitchFrom:
+        case weapon_handler::kSwitchFromMap: // the map command first (the bake's map_command)
             handler_switchfrom(def, desc, slot, in, out);
             break;
-        case weapon_action::kSwitchRank:
+        case weapon_handler::kSwitchRank:
             handler_switchrank(def, desc, slot, in, out);
             break;
-        case weapon_action::kScopeUp:
-        case weapon_action::kScopeDown:
+        case weapon_handler::kScopeUp:
+        case weapon_handler::kScopeUpMap:
+        case weapon_handler::kScopeDown:
+        case weapon_handler::kScopeDownMap:
             handler_scope(def, desc, slot, in, out);
             break;
+        // wpn_std_null returns without touching the slot: an action bound to it
+        // never finishes [orig: WeaponAction_Null @ 0x4010B0]. The two powerup
+        // handlers act on an item, not a weapon's mount slot; no shipped weapon
+        // row names them and the port runs nothing for them there.
         default:
             break;
     }
@@ -542,6 +556,39 @@ const char *const kWeaponActionSuffixes[weapon_action::kCount] = {
     "switchto",   "switchfrom", "switchrank", "scopeup", "scopedown", "overheated",
 };
 
+const char *const kWeaponHandlerNames[weapon_handler::kCount] = {
+    "null",           "wpn_std_null",        "wpn_std_idle",       "wpn_std_emptyidle",
+    "wpn_std_fire",   "wpn_std_recoil",      "wpn_std_reload",     "wpn_std_empty",
+    "wpn_std_switchto", "wpn_std_switchfrom", "wpn_std_switchrank", "wpn_std_scopeup",
+    "wpn_std_scopeup_map", "wpn_std_scopedown", "wpn_std_scopedown_map",
+    "wpn_std_switchfrom_map", "powerup_pickup", "powerup_respawn",
+};
+
+int8_t weapon_handler_named(const char *function) {
+	if (function == nullptr) return weapon_handler::kPlaceholder;
+	// The name is the value's first token; the rest are the handler's parameters
+	// [orig: the parameter pack @ 0x40296E].
+	size_t length = 0;
+	while (function[length] != '\0' && function[length] != ' ' && function[length] != '\t' &&
+	       function[length] != ',')
+		++length;
+	const std::string name(function, length);
+	for (int8_t i = 0; i < weapon_handler::kCount; ++i)
+		if (strutil::iequals(name, kWeaponHandlerNames[i])) return i;
+	return weapon_handler::kPlaceholder;
+}
+
+int8_t weapon_action_default_handler(int32_t action) {
+	// [orig: g_WeaponActionTable @ 0x830B90 — overheated pairs with the idle handler]
+	static const int8_t kDefaults[weapon_action::kCount] = {
+		weapon_handler::kIdle,      weapon_handler::kEmptyIdle,  weapon_handler::kFire,
+		weapon_handler::kRecoil,    weapon_handler::kReload,     weapon_handler::kEmpty,
+		weapon_handler::kSwitchTo,  weapon_handler::kSwitchFrom, weapon_handler::kSwitchRank,
+		weapon_handler::kScopeUp,   weapon_handler::kScopeDown,  weapon_handler::kIdle,
+	};
+	return action >= 0 && action < weapon_action::kCount ? kDefaults[action] : weapon_handler::kPlaceholder;
+}
+
 int32_t weapon_action_anim_slot(int32_t action) {
 	// [orig: g_AnimStateNameTable @ 0x8135F0 — wpn_idle 241 .. wpn_scopedown 251]
 	constexpr int32_t kWpnIdleSlot = 241;
@@ -563,7 +610,6 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
     for (int i = 0; i < weapon_action::kCount; ++i) {
         WeaponFsmAction &a = out.actions[i];
         a.id = i;
-		a.map_command = 0;
         // Absent rows are generated defaults: zeroed fields, unresolved anim.
         // [orig: ActionDef_InitDefaults @ 0x4022b0 memsets the record]
         int32_t ds = 0;
@@ -576,12 +622,20 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
 		const WeaponFsmActionRow *row = nullptr;
 		for (size_t r = 0; r < row_count; ++r)
 			if (strutil::iequals(rows[r].name, kWeaponActionSuffixes[i])) row = &rows[r];
+		// The row's FUNCTION binds its handler; the placeholder a row starts
+		// from, and an unknown name leaves, becomes the suffix's default.
+		// [orig: the FUNCTION key @ 0x4028D2; Anim_InitActions' rewrite
+		//  @ 0x542117..0x542139]
+		a.handler = row != nullptr ? weapon_handler_named(row->function) : weapon_handler::kPlaceholder;
+		if (a.handler == weapon_handler::kPlaceholder) a.handler = weapon_action_default_handler(i);
+		// The three map wrappers command the map overlay, then run the handler
+		// they wrap. [orig: WeaponAction_ScopeUpMap @ 0x5432D0 / ScopeDownMap
+		//  @ 0x543360 / SwitchFromMap @ 0x5434E0]
+		a.map_command = a.handler == weapon_handler::kScopeUpMap ? 1
+				: (a.handler == weapon_handler::kScopeDownMap || a.handler == weapon_handler::kSwitchFromMap)
+				? -1
+				: 0;
 		if (row != nullptr) {
-			a.map_command = strutil::iequals(row->function, "wpn_std_scopeup_map") ? 1
-					: (strutil::iequals(row->function, "wpn_std_scopedown_map") ||
-							  strutil::iequals(row->function, "wpn_std_switchfrom_map"))
-					? -1
-					: 0;
 			a.action_value = row->action_value;
 			ds = row->delaystart;
 			de = row->delayend;
