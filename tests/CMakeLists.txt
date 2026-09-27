@@ -90,10 +90,18 @@ add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_B
 add_executable(weapon_timing_test anim/weapon_timing_test.cpp)
 target_link_libraries(weapon_timing_test PRIVATE opennova_3di_commands)
 add_test(NAME weapon_timing COMMAND weapon_timing_test ${CMAKE_CURRENT_BINARY_DIR})
-# Optional headless DCC test. It authors all geometry, bones, clips and markers
-# from scratch. Set BLENDER_EXECUTABLE when Blender is not on PATH.
+# The Blender add-on's tests, headless, when Blender is found (set
+# BLENDER_EXECUTABLE when it is not on PATH): every tests/blender/*_test.py
+# loads the source tree's add-on through tests/blender/addon_harness.py and
+# runs the opennova-3di built here, authoring what it exports from scratch.
 find_program(BLENDER_EXECUTABLE NAMES blender)
 if(BLENDER_EXECUTABLE)
+    file(GLOB OPENNOVA_BLENDER_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/blender/*_test.py)
+    foreach(test ${OPENNOVA_BLENDER_TESTS})
+        get_filename_component(name ${test} NAME_WE)
+        add_test(NAME blender_${name} COMMAND ${BLENDER_EXECUTABLE}
+            --background --factory-startup --python-exit-code 1 --python ${test} -- $<TARGET_FILE:opennova_3di>)
+    endforeach()
     add_test(NAME blender_weapon_authoring COMMAND ${BLENDER_EXECUTABLE}
         --background --factory-startup --python-exit-code 1
         --python ${CMAKE_CURRENT_SOURCE_DIR}/anim/blender_weapon_authoring.py --
