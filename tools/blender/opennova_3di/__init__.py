@@ -8,13 +8,15 @@
 # (docs/threedi/o3d-scene-format.md) and hands it to the bundled opennova-3di
 # CLI, which mints the .3di through the engine's own writer. Import runs the
 # same CLI backwards (`opennova-3di scene`) and lays the .o3d out in the same
-# shape (importer.py), so an imported model exports again. Nothing here encodes or decodes 3DI3: frames, quantization and chunk
-# layout belong to the engine (formats/threedi/threedi_build.h). The
-# properties below carry only what a name cannot: LOD thresholds and types,
-# part animation tracks, material flags, textures and generators, light
-# generators, the bullet-face surface and flags, the collision LOD. What the
-# engine derives (collision planes, seam flags, tangents, bounds) is never
-# stored in the scene: export recomputes it from the meshes every time.
+# shape (importer.py), so an imported model exports again. Nothing here
+# encodes or decodes 3DI3: frames, quantization and chunk layout belong to the
+# engine (formats/threedi/threedi_build.h). The properties below carry only
+# what the scene cannot: LOD thresholds and types, part animation tracks and a
+# part's stored parent, a skinned model's mesh part, a material's shader,
+# generators and the texture rows its nodes cannot give, light generators, the
+# bullet-face surface and flags, the collision LOD. What the engine derives
+# (collision planes, seam flags, tangents, bounds) is never stored in the
+# scene: export recomputes it from the meshes every time.
 
 import importlib
 import json

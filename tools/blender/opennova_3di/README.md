@@ -12,12 +12,12 @@ experimental.
 Download `opennova-blender-addon-windows-v<version>.zip` from
 [releases](https://github.com/opennova-net/opennova/releases), or
 `opennova-blender-addon-windows.zip` from a PR's **OpenNova CI builds** comment.
-In Blender 4.2 or newer: Edit > Preferences > Get Extensions > Install from Disk.
+In Blender 5.0 or newer: Edit > Preferences > Get Extensions > Install from Disk.
 Select the downloaded zip without unpacking it. Windows x64 only for now.
 
-The **3DI executable** field automatically shows the bundled converter's path;
-no manual setup is needed. Choosing another executable overrides it for that
-scene. Clearing the field uses the bundled converter again.
+The add-on runs the `opennova-3di` bundled with it; no setup is needed. To run
+another build, name it in the add-on's preferences (Edit > Preferences >
+Add-ons > OpenNova 3DI); clearing the field runs the bundled one again.
 
 To build locally, `scripts/package_blender_addon.sh [out.zip] [version]` builds
 the CLI and the installable zip (default `build/opennova_3di.zip`). A version
@@ -35,130 +35,177 @@ Select one or more loose `.3di` files; their textures are looked up beside
 them the way the game does (the stored name first, then the same name with
 `.tga`, `.dds`, `.mdt`, `.pcx`, `.png`, `.jpg` or `.bmp`, any case, so a
 `.tga` reference finds the `.dds` retail ships). Each model comes into the
-current scene under a model root of its own, laid out by the naming
-convention below, with LOD 1 and up hidden, and its output path named after
-the imported file. Each model exports again as it stands. A file that cannot
-be read is reported and skipped; the others still import. Blender cannot
-open PCX or archive-compressed textures; those references stay on the
-material with a warning. Imported texture entries have Write TGA off, so an
-export never writes a `.tga` over the texture the game already uses.
+current scene under a model root of its own, laid out in the scene shape
+below, with LOD 1 and up hidden, and its output path named after the
+imported file. A static model's parts come in as `PN##` empties, a skinned
+model's as the bones of one armature. A first-person gun imported together
+with its arms (the arms' bones the gun's first parts, as `ArmsG`'s are for
+every stock gun) comes in as a rig, and the arms deform with it. Each model
+exports again as it stands. A file that cannot be read is reported and
+skipped; the others still import. Blender cannot open PCX or
+archive-compressed textures; those references stay on the material with a
+warning. An imported texture is the file it was read from: export names it the
+way the game finds it and copies it beside the `.3di` rather than writing a
+new one, and never replaces a different file of that name.
 
 Import creates an editable authoring scene, and export never relies on
 anything import set up: collision volume planes, seam flags, tangents,
 bounds, glass, emissive and the alpha pass are recomputed from the scene on
 every export, by the rules the retired OED exporter used. Export rebuilds
 bullet faces from the selected render LOD (face surfaces and flags come from
-the materials, voted on import), regenerates skinned hit spheres and
-normalizes skin weights, so retail face normals, zero-length or broken (NaN)
-vertex normals and seam flags can change. Each collision volume imports as
-one polygon per retail plane, so export reads the same planes back; a flat
-ladder imports as the one polygon it is. The warnings list what the scene
-cannot carry. Use `opennova-3di compare` to inspect a rebuilt model before
-using it in game.
+the materials, voted on import), so retail face normals, zero-length or
+broken (NaN) vertex normals and seam flags can change. A skinned model's hit
+spheres and their bounds come back as helpers export writes again. Each
+collision volume imports as one polygon per retail plane, so export reads the
+same planes back; a flat ladder imports as the one polygon it is. The
+warnings list what the scene cannot carry. Use `opennova-3di compare` to
+inspect a rebuilt model before using it in game.
 
 ## Laying out a scene
 
-Objects are named by the NovaLogic ASE/OED convention
+A model is a model root (an Empty) holding one LOD root per level of detail
+(an Empty with the custom property `_lod_index`), and a LOD's parts are
+either `PN##` empties or the bones of the model's one armature
 ([`docs/threedi/scene-naming-contract.md`](../../../docs/threedi/scene-naming-contract.md)).
-The model faces Blender's front view (-Y) by default.
+Everything else belongs to the part it sits on: a mesh of any name under a
+`PN##` or parented to a bone is that part's geometry, and so are the user
+points, lights and helpers there. The model faces its root's -Y (Blender's
+front view); turn the model root to face it another way.
+
+A static model (a prop, a building, a vehicle whose parts turn by their
+tracks):
 
 ```
 F16                   Empty: the model root (model name, output .3di, collision LOD)
 F16_LOD0              Empty under the model root, custom property _lod_index = 0
-  PN01                Empty: part 1 (its origin is the pivot)
-    01 Mesh0          the part's render mesh
-    _01 center        helper: the part pivot (its origin)
-    UPG01 ctrlx05     user point: type G, part 01, label ctrlx05 (+Z = facing)
-    LP01              light owned by part 01 (a point or spot light, aimed down its -Z)
-    CB01-colonly      collision volume on part 01 (a convex mesh)
-    CB01a-colonly     the next CB volume on part 01
-    VC01-colonly      a vehicle-contact volume
-    CX01-colonly      a type 0 volume (any other C, D, L or V code)
-    OB01-occonly      an occluder in section 01 (OS open, OP window, OP02-04 portal)
-    PN02              Empty: part 2, a child of part 1
-      02 Mesh0
-      _02 center
-      ~01a attach     helper: part 2's parent is part 01
-F16_LOD1              Empty, _lod_index = 1 (same names; Blender's .001 is ignored)
+  PN01                Empty: part 01, the root, at the model origin (its origin is the pivot)
+    Fuselage          a mesh of any name: part 01's geometry
+    UPG ctrlx05       user point: type G, label ctrlx05, on part 01 (+Z = facing)
+    LP                light on part 01 (a point or spot light, aimed down its -Z)
+    CB-colonly        collision volume in part 01's section (a convex mesh)
+    CBa-colonly       the next CB volume there
+    CX-colonly        a type 0 volume (any other C, D, L or V code)
+    OB-occonly        an occluder in part 01's section (OS open, OP window, OP-04 portal)
+    PN02              Empty: part 02, a child of part 01
+      Rotor           its geometry
+      _center         (a part that draws nothing: its first vertex seeds its bounds)
+F16_LOD1              Empty, _lod_index = 1 (its own PN## empties; Blender's .001 is ignored)
 ```
 
-A part's `~PPx attach` helper names its parent part `PP` (`00` for none, the
-part's own number for itself, both of which retail ships). In the collision LOD
-a part's helper is also the attach point the game stores for its section: when
-that LOD holds any helper, export writes an attach point for every section
-after the root (every section on a skinned model), at the section's helper or,
-where it has none, at its pivot. Without any helper, export leaves them to the
-builder, which puts each at its section's pivot, so the few retail models
-that store no attach point at all (Chair03X) come back with them; import says
-so. Export warns about any object whose name it does not use.
+An animated or skinned model (a first-person gun, arms, a person) holds one
+armature under its LOD 0 root. Its bones named `BN##` (a label may follow,
+`BN16 L Hand`) are the parts: the bone head is the pivot, the nearest `BN##`
+bone above it the parent. Other bones are no part: a `Root` on the ground
+(see Animations) or the control bones a rigger adds. Build the bones in Edit
+Mode with any names and press **Number Parts**: it numbers the bones that
+deform in hierarchy order, parents first, keeping each name as the label
+(after Symmetrize or a duplicate, press it again). Parent a rigid mesh to its
+bone (Ctrl+P > Bone); give a skinned mesh an Armature modifier on the rig and
+vertex groups (Ctrl+P > With Automatic Weights). A first-person gun and its
+arms share the gun's armature:
 
-A part that draws nothing (a first-person weapon's moving parts often do) can
-still give the game a point its bounds sit on: make its `_## center` helper a
-mesh, and its first vertex is that point, and in the collision LOD the
-section's one collision vertex, as the retail tool seeded such parts. Import
-makes one for every such part of a rigid model.
+```
+AK_1st                model root
+AK_1st_LOD0           LOD root
+  AK_1st Rig          the armature: BN01..BN37 the arm bones, BN38 Body, BN39 Magazine, ...
+    Receiver          a mesh parented to bone BN38 Body: part 38's geometry
+    UPS MFLASH01      a user point parented to BN38 Body
+  Arms                model root, under the gun's root with no offset
+    Arms_LOD0         LOD root
+      Arms Mesh       the arms mesh: an Armature modifier on AK_1st Rig, vertex groups BN01..
+      _05 hit         a helper of the arms: under the LOD root, naming its part
+```
 
-Add Model (in the sidebar) makes a model root and its `_LOD0` root to start
-from.
+The arms model's parts are the rig's bones up to the highest one its weights
+use, since the game draws the arms with the gun's part matrices. Arms built
+with an armature of their own join a gun's rig with **Deform with Rig of**.
+The arms are the player's own (Avatars.def, per character): a gun whose parts
+01 to 37 are not the stock arms' rig draws every character's arms wrong, and
+export says so. A first-person gun has at most 64 parts (the game's bone
+arrays), and its arms no more than the gun. **Add Animation Rig** turns a
+static model's `PN##` parts into such an armature, everything on a part
+parented to its bone, so clips can animate it.
 
-A skinned model (a person, first-person arms, the M1A1's hull) replaces the
-`PN##` empties with one Armature under each LOD root whose bones are `BN01`,
-`BN02`, ... (the bone head is the pivot, the bone parent the part parent).
-A single mesh can be named `01 Mesh`; an omitted mesh ordinal means `Mesh0`.
-A skinned mesh `## Mesh0` has an Armature modifier and `BN##` vertex groups (up
-to three weights a vertex; the export reads the rest pose), and `##` names the
-part its geometry belongs to. A person's or the arms' mesh is a mesh part
-numbered after the bones (`ArmsG`: 37 bones, then `38 Mesh0`; parent 0, pivot
-= the mesh object's origin), as the retail exporter wrote bones first and mesh
-objects after them: that part holds the mesh bounds and bullet faces, and each
-bone's section is bounded by every vertex it moves. A vehicle hull puts its
-geometry on the bones themselves (`dM1A1`: the hull on `BN01`, each wheel on
-its own bone in the collision LOD), and each bone's section takes its own
-bullet faces. A bone's part animation (tracks, flags and the track frame its
-tracks turn about) is in the Bone properties.
+A skinned mesh deforms on up to four bones a vertex (Weights > Limit Total);
+export writes them dominant first, the way the game blends them, and refuses
+a vertex with more, one with no weight, and a weight on a bone that deforms
+but is no part (Root, a control bone). A mesh parented to a bone of a skinned
+model is skinned wholly on that bone. A skinned model keeps its skinned
+geometry on its root part, or with **Mesh part** on (the retail layout of
+US01 and ArmsG) on a part of its own after the bones, whose pivot is the
+mesh's origin (on the ground under the hips) and whose collision section
+holds the bullet faces. Each bone's collision section is its hit sphere: a
+`_## hit` Empty drawn as a sphere on the bone (its size the radius) and a
+`_## bounds` box Empty beside it give the sphere and its box; without any,
+export makes a sphere for every bone around the vertices it moves.
+
+Helpers take their part from where they sit, and the `##` in their names is
+optional: `UPG05 grip` on part 05 is fine, `UPG04 grip` there is refused.
+`UPx00` is a user point on no part. In a LOD whose bones another LOD holds (a
+skinned model's later LODs, arms on a gun's rig) a helper sits under the LOD
+root and its name must give its part (`_05 hit`). Other helpers:
+
+- `_center` (a mesh): on a part that draws nothing (a first-person gun's arm
+  parts often do), its first vertex is the point the part's bounds sit on,
+  and in the collision LOD the section's one collision vertex, as the retail
+  tool seeded such parts. Import makes one for every such part.
+- `_attach` (an Empty): in the collision LOD, the attach point the game stores
+  for its part's section (CXLT; a palm's broken pieces pivot on them). With
+  any in that LOD, export writes an attach point for every section after the
+  root (every section on a skinned model), at the section's `_attach` or, where
+  it has none, at its pivot; without any, the builder puts each at its
+  section's pivot, so the few retail models that store none (Chair03X) come
+  back with them, and import says so.
+
+The root part's pivot is the model origin. A part numbered before its parent
+exports with a note (the game reads that parent before posing it; Number
+Parts avoids it). A part's **Parent** (in its closed "Stored as" panel) keeps
+what a hierarchy cannot say, a part that names itself or no part as its
+parent, as some retail models store; only import sets it. Export warns about
+any object it does not use.
+
+**Add Model** (in the sidebar) makes a model root and its `_LOD0` root at the
+origin. **Add Part from Selection** puts the selected objects on a new `PN##`
+at the active object's origin, under the part it sits on (a LOD's first part
+is `PN01` at the model origin). **Add LOD** adds the model's next LOD root;
+give each LOD but the last a threshold, falling from LOD 0.
 
 Turn off **Generate bullet faces** on models such as first-person arms that
 do not need triangle collision. Render geometry, skin weights, bone bounds
 and authored collision volumes are still exported.
 
-Skinned triangles split into additional strips when either the 16-bone palette
-or the 65,535-index limit is reached; large meshes need no manual splitting.
+Strips split when the 65,535-index limit (and, skinned, the 16-bone palette)
+is reached; large meshes need no manual splitting.
 
 To reuse retail animations, match the retail rig, since animations pair with
-parts by index: JO's people share one rig of 19 bones plus the mesh part
-(`opennova-3di info US01.3di` prints its pivots, or import it); the
-first-person arms (`ArmsG`) are 37 arm bones plus the mesh part.
-
-A first-person weapon (`gfx1` in weapon.def, e.g. `Mp5b_1st`) is a rigid
-model whose part table IS the view-model rig: parts 01-37 (`PN01`-`PN37`,
-empties with no mesh) reproduce the arm bones exactly, and the weapon's own
-parts follow from `PN38` (the gun body under the right hand, `PN06`), as many
-as the weapon needs. The weapon's `.adm` clips drive those parts by index and
-the separate arms model (the player's Avatars.def `arms` graphic) is skinned
-over the shared arm bones. Its points (`UPS38 MFLASH01`, `UPS38 bullet`,
-`UPS38 bcasing`) sit on the gun body.
+parts by index: JO's people share one rig of 19 bones (plus the mesh part);
+the first-person arms (`ArmsG`) are 37 arm bones (plus the mesh part), the
+first 37 parts of every stock first-person gun.
 
 A rotated `PN##` empty is a rotation frame: its animation tracks turn about
-the empty's own axes (Dblkhwk1's tail rotor is canted this way).
+the empty's own axes (Dblkhwk1's tail rotor is canted this way). A bone keeps
+its track frame in its Bone properties.
 
 ## Several models
 
 A scene holds any number of models. Export Model writes the model of the
-active object, and Export All Models writes each to its own output path. Every
-model exports in its root's own frame, so moving, parenting or mounting a
-model does not change what it exports. Two settings on a model root show
-models together the way the game draws them. They are display only, and
-export ignores them:
+active object to its output path (empty: the model root's name beside the
+`.blend`, at most 15 characters, as a game archive holds it), File > Export >
+NovaLogic 3DI asks for the file first, and Export All Models writes each to
+its own output path, refusing two that would write one file. Every model
+exports in its root's own frame, so moving, parenting or mounting a model
+does not change what it exports.
 
-- **Bones follow**: a skinned model's bones follow another model's parts of
-  the same index. The game draws a first-person gun and the player's arms
-  with the gun's part matrices, so posing the gun's `PN##` parts poses the
-  arms. Importing a `_1st` gun together with `ArmsG` pairs them.
-- **Mount on** and **At user point**: the model sits on another model's user
-  point, facing its direction, the way an ITEMS.DEF `addeweap` child does
-  (the M1A1's turret `m1trret` on the hull `dM1A1`'s `ewep01`). Posing or
-  moving the parent carries the child. An unknown point puts the child on the
-  parent's root, as in game.
+Arms deforming with a first-person gun's rig stand where the gun stands:
+their root sits under the gun's root with no offset, so posing the gun poses
+the arms, and export refuses arms that stand elsewhere. Their parts take the
+gun's pivots and track frames.
+
+**Mount on** and **At user point** (display only, export ignores them): the
+model sits on another model's user point, facing its direction, the way an
+ITEMS.DEF `addeweap` child does (the M1A1's turret `m1trret` on the hull
+`dM1A1`'s `ewep01`). Posing or moving the parent carries the child. An unknown
+point puts the child on the parent's root, as in game.
 
 ## Materials
 
@@ -233,24 +280,28 @@ Culling, the Math node, the render method and Emission.
 ## Panels
 
 - **3D viewport sidebar > OpenNova**: Import .3di, Import Animations and Add
-  Model, the forward axis, Write textures and the 3DI executable, then the
-  active object's model: its name, output `.3di`, the collision LOD (whose
-  meshes also become the bullet faces; 0 = the most detailed), Bones follow,
-  Mount on, Export Model, and its Animations box (the output `.adm`, the head
-  bone, the table's rows and Export Animations). Export All Models writes every
-  model, and Export All Animations every rig's clip set.
-- **Object properties** on a model root: the same model settings. On a LOD root: the LOD threshold (projected radius
-  in pixels; 0 = the coarsest) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##`
-  part: part animation tracks (rotation about the part's up, side or forward
-  axis, scale, or translation, driven by an engine register such as
-  `HELO_ROTOR` or by a spin or wave), and an optional raw PANM flags word. On a
-  user point, light or occlusion mesh: its export order.
-- **Bone properties** on a `BN##` bone: its part animation, as on a `PN##`
-  part, plus the track frame.
-- **Light properties** on an `LP##` light: the colour generator (style, rate,
+  Model, Write textures, then the active object's model: its name, output
+  `.3di`, the collision LOD (whose meshes also become the bullet faces; 0 = the
+  most detailed), Generate bullet faces, Mesh part (a skinned model), Mount on,
+  Add LOD, Add Part from Selection or Add Animation Rig (a static model),
+  Number Parts and Deform with Rig of (a model with its own rig), Export Model,
+  and its Animations box. Export All Models writes every model, and Export All
+  Animations every rig's clip set.
+- **Object properties** on a model root: the same model settings. On a LOD
+  root: its index, the LOD threshold (projected radius in pixels; the last
+  LOD's 0) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##` part: part
+  animation tracks (rotation about the part's up, side or forward axis, scale,
+  or translation, driven by an engine register such as `HELO_ROTOR` or by a
+  spin or wave), and in a closed "Stored as" panel its raw PANM flags word and
+  stored Parent. On any other object of a model: the part it sits on, and on a
+  user point, light or occlusion mesh its export order.
+- **Bone properties** on a `BN##` bone: its part number and part animation, as
+  on a `PN##` part, plus the track frame.
+- **Light properties** on an `LP` light: the colour generator (style, rate,
   phase or register, end colour), attenuation and the corona / terrain /
-  object light switches. A spot light's cone points down the light's -Z, as
-  Blender draws it, and an unrotated light points straight down.
+  object light switches, the other flag bits in a closed panel. A spot light's
+  cone points down the light's -Z, as Blender draws it, and an unrotated light
+  points straight down.
 - **Material properties**: the shader (with what it implies) and export
   order, what Blender's settings give (two-sided, the alpha test, the alpha
   pass, the glow), the bullet faces' surface type (metal 14, glass 15, ...)
@@ -345,16 +396,9 @@ beside a first-person gun). **File > Import > NovaLogic Animations** reads a
   first-person clip whose top stands above its bottom (a third of retail's do,
   by a rule nothing has shown); a re-export writes the rig's own measure.
 
-**A first-person weapon** animates its own parts rather than bones, so its clips
-get an armature named `!Rig` whose bones mirror them; import builds it. Each
-part then hangs from the LOD root and follows its bone through an `O3D follow`
-constraint, which the rig's Rest Position turns off, and a `~PPx attach` helper
-keeps the part hierarchy (a part that already has one keeps it; a new one sits
-at the part's pivot). The gun's parts move in the viewport, and the model still
-exports byte for byte as it did before the import. The arms follow the
-weapon's parts by index (pick the arms model's **Bones follow**), so a
-first-person set belongs to the weapon, and exporting it from the arms alone
-writes only the channels the arms have bones for.
+**A first-person gun** is animated by its own rig, the bones its parts are
+(Add Animation Rig makes one from `PN##` parts), and the arms deforming with
+that rig move with it, so a first-person set belongs to the gun.
 
 To reuse retail's own clips, match the retail rig: JO's people are 19 bones plus
 a mesh part, a first-person weapon 40 parts, and a clip's channels pair with the

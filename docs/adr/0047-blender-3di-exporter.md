@@ -1,6 +1,7 @@
 # ADR 0047: A Blender .3di add-on over the engine's reader and writer
 
-- **Status**: accepted (2026-09-23; extended to animations 2026-09-24)
+- **Status**: accepted (2026-09-23; extended to animations 2026-09-24; the scene
+  shape rebuilt around one armature 2026-09-27, decision 15)
 - **Owners**: the 3DI format library (`engine/formats/threedi`), the animation
   formats (`engine/formats/bad`, `engine/formats/adm`), `apps/threedi_cli`,
   `tools/blender/opennova_3di`
@@ -65,24 +66,27 @@ the same text transport, the same add-on.
    the scene's counter-clockwise-about-the-normal order, which is retail's
    (Dtruck2 905 of 906 bullet faces, Armry01 all of them and its OCCL faces).
 3. **The Blender add-on** (`tools/blender/opennova_3di`, a Blender 4.2+
-   extension) reads the scene by the NovaLogic ASE/OED object-naming convention
-   (`classify_name`, [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)], as the retired
-   importer/exporter used it: `_lod_index` LOD roots, `PN##`, `## Mesh<n>`,
-   `_## center`, `~PPx attach`, `UP<c>## <label>`, `LP##` lights,
-   `<code>##[a..]-colonly`, `OB/OS/OP/OH##[-MM]-occonly`, a `BN##` armature
-   for a skinned model; the table in
+   extension) reads a model's parts and what sits on each part (decision 15:
+   `_lod_index` LOD roots, `PN##` empties or a rig's `BN##` bones), naming its
+   helpers by the NovaLogic ASE/OED object-naming convention (`classify_name`,
+   [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)], as the retired
+   importer/exporter used it: `_## center`, `UP<c>## <label>`, `LP##` lights,
+   `<code>##[a..]-colonly`, `OB/OS/OP/OH##[-MM]-occonly`, with `_## attach`,
+   `_## hit` and `_## bounds` added; the table in
    `docs/threedi/scene-naming-contract.md`) and writes `.o3d`. Import runs
-   `opennova-3di scene` and lays the `.o3d` out by the same convention, each
+   `opennova-3di scene` and lays the `.o3d` out in the same shape, each
    model under a model root Empty in the current scene (its model name, output
    path and collision LOD), textures from the files `scene` resolved; an
    imported model exports again. A scene holds any number of models, and each
-   exports in its model root's own frame. Blender's `.001` duplicate suffixes are
-   stripped before classification; two objects with one identity inside a LOD
-   are an error. What a name cannot carry (LOD thresholds and types, PANM
-   tracks, a material's shader, generators and the texture rows its nodes
+   exports in its model root's own frame, facing its -Y. Blender's `.001`
+   duplicate suffixes are stripped before a name is read; two parts of one
+   number inside a LOD are an error. What the scene cannot carry (LOD
+   thresholds and types, PANM tracks, a part's stored parent, a skinned
+   model's mesh part, a material's shader, generators and the texture rows its nodes
    cannot give, light generators, export order, the bullet-face surface and
    flags, the collision LOD) is a visible add-on property; a rotated `PN##` is
-   a PANM rotation frame (an MTRX row). A material is read the way Blender
+   a PANM rotation frame (an MTRX row), and a bone keeps its frame as the 3x3
+   matrix it is. A material is read the way Blender
    draws it: the image feeding its Principled BSDF's Base Color is the diffuse
    texture (on the second UV map, the detail texture), a tangent-space Normal
    Map node's image the `.mdt` normal map, written with the game's green (its
@@ -130,16 +134,21 @@ the same text transport, the same add-on.
    (the part's render floats), its volume boxes and the occlusion records it
    parents, its midpoint is the floor of the bounds' mean and its radius the
    farthest point from it (a volume-only section's is 0). The CXLT table is
-   WriteCXLT's: the collision LOD's attach points, the `~PPx attach` helpers
+   WriteCXLT's: the collision LOD's attach points, the `_## attach` helpers
    (in the add-on, any helper in that LOD writes a whole table, a part without
    one contributing its pivot); with none, build derives one row per non-root
    section at its offset, our rule and the retail row count in 917 of the 958
    JO models. The CMDL box envelops the collision faces and LOD 0's triangles,
    its radii and height (`radii[2]`) the collision faces' alone, as the retail
    corpus stores them. A skinned model follows the retail person layout: one
-   section per bone at its pivot, bounded by every LOD 0 vertex the bone moves,
-   the bullet faces on the mesh part's section, whose own bounds stay at the
-   empty sentinels (a derived sphere there would be a phantom shootable bone).
+   section per bone at its pivot, carrying the hit sphere and bounds box its
+   `_## hit` and `_## bounds` helpers give (retail's rule for them is not in
+   the file; they are what the runtime's person raycast reads [orig:
+   Physics_RaycastAgainstBoneSections @ 0x4e4670]), or, in a model with no hit
+   sphere, a sphere around every LOD 0 vertex the bone moves; the bullet faces
+   sit on the section of the part the skinned geometry is authored on, its
+   mesh part, whose own bounds stay at the empty sentinels (a derived sphere
+   there would be a phantom shootable bone), or its root.
    The derived values are truncated as OED's writer truncated them (GHDR,
    user points and section offsets included). The CMDL and the bullet-face
    words come from the stored corners and normals, our rule: retail took them
@@ -150,18 +159,27 @@ the same text transport, the same add-on.
    farthest vertex from it; a part that draws nothing keeps the centre its
    `_## center` helper gives it, with radius 0. The full rule set is in the
    `.o3d` record.
-5. **Skinned models follow the retail corpus.** The parts are the armature's
+5. **Skinned models follow the retail corpus.** The parts are the rig's
    bones (hierarchy and pivots, which retail animations pair with by index),
-   then any mesh parts, as the retail exporter wrote bones then mesh objects
-   (FSldr03: 19 bones + part 19; ArmsG: 37 bones + part 37). A skinned mesh
-   `## Mesh<n>` names the part its geometry is authored on: a bone, or a mesh
-   part after the bones (parent 0, pivot = the mesh object's origin). A model
-   without a mesh part (dM1A1's hull) authors its geometry on the bones, and
-   import restores that per part for the collision LOD, whose triangles are
-   exactly the sections' bullet faces (dM1A1: LOD 1, 875 hull faces and 40 per
-   wheel). A bone carries its part's PANM tracks, flags and track frame
-   (dM1A1's turret ring and wheels). Vertices store the bind pose with up to
-   three weights; a vertex whose stored weights are all zero keeps them.
+   then, with the model's Mesh part setting, a mesh part after the bones
+   (parent 0, pivot = the skinned mesh's origin), as the retail exporter wrote
+   bones then mesh objects (FSldr03: 19 bones + part 19; ArmsG: 37 bones +
+   part 37; 90 of the 207 skinned models, while the other 116, Delta04 and
+   ArmGlovD among them, keep the skinned geometry on the root). A mesh deforming
+   with the rig through its Armature modifier is authored on that part; a mesh
+   hung from a bone of a skinned model is skinned wholly on its bone. The three
+   vehicles authored on their bones with strips mixing bones (dM1A1, DT801,
+   Ftruck1X) come back authored on one part. A bone carries its part's PANM
+   tracks, flags and track frame (dM1A1's turret ring and wheels). A vertex
+   stores the bind pose and up to four influences (contract C1 of the PR #685
+   fixes): three stored weights, the fourth bone-table slot taking
+   1 - (w0 + w1 + w2), as the game's skinning shader blends them [orig:
+   _BaseInc.fx CalcSkinWorldPosAndNormal; ThreediGp_ConvertVerticesToGPUFormat
+   @ 0x5B4C90], so a vertex whose stored weights are all zero rides slot 3's
+   bone. Export writes a vertex's influences dominant first, normalized as
+   Blender's Armature modifier blends them, and refuses more than four, a
+   vertex with no weight of 1e-4, and a weight on a deforming bone that is no
+   part; import sums each bone's weights, the implicit fourth included.
    Strips split so no bone table exceeds 16 parts, and every strip is owned by
    the root ROBJ while each part keeps the bounds of its own geometry (all 30
    surveyed JO mesh_type-2 models, e.g. FSldr03). The builder applies that
@@ -188,26 +206,26 @@ the same text transport, the same add-on.
    product module; it links nothing native and ships no FFI, and it keeps no
    copy of engine tables (registers, style names and shader tags with their
    capability words come from `catalog`).
-9. **Assemblies are display only.** Models the game draws together share a
-   scene, and the add-on reproduces how the game combines them without
-   writing any of it. The bones of a skinned model follow another model's
-   parts of the same index, as retail draws first-person arms with the gun's
-   part matrices [orig: Player_RenderFirstPersonViewModel @ 0x4ded60, its
-   Entity_BuildBoneWorldMatrices call @ 0x4df028]. Importing both together
+9. **Assemblies are display only, but for a gun's rig.** Models the game
+   draws together share a scene. A first-person gun and its arms share the
+   gun's rig (decision 15), the scene form of retail drawing the arms with the
+   gun's part matrices [orig: Player_RenderFirstPersonViewModel @ 0x4ded60,
+   its Entity_BuildBoneWorldMatrices call @ 0x4df028]; importing both together
    pairs them. A model mounts on another model's user point, as an ITEMS.DEF
    `addeweap` child does: the name is matched whole and trimmed, without case,
    and a missing name places the child at the parent's root. The child takes
    the point's look-at frame as retail builds it, the matrix's rows being the
    child's axes (a level point faces the child along its direction; a pitched
    one tips it the other way) [orig: Bone_BuildAttachmentMatrix @ 0x56C630;
-   Math_BuildDirectionLookAtMatrix @ 0x612C90]. Both the arms' drive and a mount
-   bind with the rigs at rest. Export reads skinned meshes in their rest pose
+   Math_BuildDirectionLookAtMatrix @ 0x612C90], display only; a mount binds
+   with the rigs at rest. Export reads skinned meshes in their rest pose
    with their Armature modifiers off, and every model in its own root's frame.
 10. **Standing from ADR 0038.** No other Python product code, Qt importer, or
    Python test suite (the stdlib `scripts/lint`, `scripts/ida`, `scripts/net`,
    `scripts/mcp`, `scripts/ci`, `scripts/parity` and `tools/net` scripts and
    the `scripts/oracles` witness regenerators, which drive the pinned retail
-   executable under Unicorn, remain); no native
+   executable under Unicorn, and the add-on's own headless tests,
+   `tests/blender/*_test.py`, remain); no native
    ASE/TDP/OED modules; Godot `ObjectData` loads immutable 3DI documents. A
    GLB/GLTF <-> 3DI editor seam remains future work and uses the same naming
    contract. ADM and BAD are no longer read-only: decisions 11 to 13 give them
@@ -266,8 +284,8 @@ the same text transport, the same add-on.
    exports the same model, and a clip shows the pose the game draws. Import
    keys frames 0..frame_count as the runtime evaluates them (its duration walk
    and slerp). A clip is an Action on the rig's NLA tracks, exported through its
-   own strip and action slot over the rig's rest, with any drive muted, so a
-   clip keys only what it animates; the table is the rows on the model root;
+   own strip and action slot over the rig's rest, so a clip keys only what it
+   animates; the table is the rows on the model root;
    the rig stands on a `Root` bone (any case, no part) at the ground, the hips
    `BN01` below it and a head (the model root's `head_bone`, else the one bone
    whose name ends in `head`), the shape of a Godot humanoid. Each event is
@@ -280,11 +298,9 @@ the same text transport, the same add-on.
    travels, Root, so a clip plays with its feet planted, and raises a model at
    the world origin so the ground is Z = 0; every export reads a model with
    its root at the origin, so where it stands does not change its bytes. The
-   event bits are keyed on the rig. A bone named `!...` is no part either,
-   which lets a rig hold control bones. A rigid model's parts hang
-   from its LOD root and follow their animation bone through an `O3D follow`
-   Child Of constraint that is muted at Rest Position, so the model exports
-   byte for byte as before its clips were imported.
+   event bits are keyed on the rig. A bone that is not `BN##` is no part
+   either, which lets a rig hold control bones. A rigid model's clips animate
+   the rig its parts are (decision 15).
 
 14. **Weapon timing is authored, then evaluated by the runtime FSM.** An
    animation-table row may explicitly name a weapon action role. Action-local
@@ -305,6 +321,39 @@ the same text transport, the same add-on.
    check actual cadence and parser acceptance; a Blender test authors the
    geometry, skin, Actions and markers from scratch and exports them without
    importing any assets.
+
+15. **The scene shape: one armature for what moves** (2026-09-27, from the PR
+   #685 review; it supersedes the `!Rig` animation armature, the `O3D follow`
+   Child Of constraints and their mute drivers, the `~PPx attach` parent
+   helpers and the arms' `!drive` sockets of decisions 3, 9 and 13). A LOD's
+   parts come from one place, read by `rig.py` for every module: `PN##`
+   empties for a static model, or the `BN##` bones of ONE armature under LOD
+   0's root for an animated or skinned model (the bone head the pivot, the
+   nearest `BN##` bone above it the parent, any other bone no part; a later
+   LOD deforms with that rig or holds `PN##` empties of its own). Everything
+   else belongs to the part it sits on: a mesh of any name under a `PN##` or
+   hung from a part bone is that part's geometry, a mesh with an Armature
+   modifier on the rig is skinned, and helpers, user points, lights, volumes
+   and occluders take their part from where they sit (a `##` in their names is
+   optional and must agree; a LOD whose bones another LOD holds names them
+   instead). The hierarchy is the only parent: a part that names itself or
+   none keeps that in a Parent setting only import sets (46 retail models).
+   The root part's pivot is the model origin, and a parent numbered after its
+   part is noted (the engine reads it before posing it). A first-person gun
+   and its arms share the gun's rig: the arms' meshes deform with it, their
+   parts are its bones up to the highest one their weights use, their root
+   stands under the gun's, and they take the gun's pivots and track frames. A
+   gun (a rig an arms model shares, or one with a clip table) has at most 64
+   parts and its arms no more than the gun, every first-person bone buffer
+   holding 64 matrices [orig: Player_RenderFirstPersonViewModel @ 0x4DED60,
+   the part-count test @ 0x4DEF8B; the arms submit @ 0x4DF088], and a gun
+   whose parts 01 to 37 are not the stock arms' rig is noted, since every
+   character's own arms draw with them. Clips animate the rig. A new scene
+   holds no constraint or driver; Number Parts, Add Part from Selection, Add
+   Animation Rig and Deform with Rig of make the shape, and the scene keeps
+   the simple form a modeler expects (a gun and its arms: one armature, the
+   meshes and points on its bones). Nothing reads the old shape: an old scene
+   is rebuilt by importing its exported files.
 
 ## Consequences
 
@@ -329,8 +378,12 @@ the same text transport, the same add-on.
   where that tool agreed with ModSuperOed; CTRL registers nothing references;
   an empty CXLT table (11 retail models: no attach helper can say "none");
   the centres of skinned bones that draw nothing (dM1A1, DT801); MTRX frames
-  that are not rotations (Frag_1st and Stch_1st rows 37 to 39 come back
-  orthonormal); the first-person weapons' collision meshes, which the file
+  that are not rotations on a `PN##` part (Frag_1st and Stch_1st rows 37 to 39
+  come back orthonormal; a bone keeps them whole); a user point naming a part
+  its model lacks (Dblkhwk1's Fastrope: the runtime reads past the parts), put
+  on the root; arms paired with a gun take the gun's pivots and track frames
+  (ArmsG with 357_1st moves 0.55 mm, with REVVY's AKM_1st 1.2 cm); the
+  first-person weapons' collision meshes, which the file
   does not keep; placements that land one 16.16 step off through Blender's
   float composition (drift);
   non-`BB` volume flags (Armry02's `CB` volumes with flag 1); zero-length
@@ -408,9 +461,23 @@ the same text transport, the same add-on.
   (worst 2.3e-4 degrees, at the bind); a model and its clips round-trip
   through a folder named with accented and Japanese characters.
 - Assemblies: 357_1st, ArmsG, dM1A1 and m1trret imported as one batch share a
-  scene; ArmsG pairs with 357_1st (and with Mp5b_1st after its clips are
-  imported), posed arms still export their rest pose, and m1trret mounted on
-  dM1A1's `ewep01` follows the moved hull and exports the same model.
+  scene; ArmsG deforms with 357_1st's rig, posed arms still export their rest
+  pose, and m1trret mounted on dM1A1's `ewep01` follows the moved hull and
+  exports the same model.
+- The one-armature shape (decision 15), Blender 5.1 with the C1 CLI: 15 rigid
+  retail models (357_1st, Mp5b_1st, AKM_1st, M21_1st, Mort_1st, Frag_1st,
+  PKM_1st, Armry01, Dblkhwk1, Dtruck2, APLFP1, Excavatr, Eturret, Oiltnk2X,
+  Chair03X) import and export with the differences of the old shape (the
+  first-person ones also as a rig, Frag_1st then the same model); ArmsG,
+  IndoArms and ArmGlovD, imported alone, now come back the same model (22, 29
+  and 22 difference lines before), US01 with 3 lines (22), FSldr03 2 (23),
+  CIndo01 3 (23). The user's first-person rifle and arms (`tfa_akm`,
+  `tfa_arms`), imported together, share one rig and both export the same
+  model. `tests/blender/model_test.py` (the `blender_model_test` ctest when
+  Blender is found) authors a static prop, a first-person gun on its rig with
+  arms sharing it, and skinned models from scratch, and checks the parts, the
+  refusals, the C1 weights, the mesh part, the hit spheres and the gun and
+  arms' import and second export as the same model.
 - A model exported by the packaged add-on loaded, rendered and flew in retail
   Joint Operations (2026-09-23, an F-16 on `cpln`); a skinned soldier on the
   retail person rig rendered and animated in retail with `anim_def US01`, and

@@ -46,7 +46,8 @@
 #   OB##/OS##/OP##[-MM]/OH## (+ [a..], -occonly)  mesh on LOD 0: an occlusion
 #                 record in its part's section (OB occluder, OS open, OP a
 #                 window to the exterior or, with -MM, a portal to section MM).
-#   Material_<i>_<SHADER>  material (materials.py).
+#   Material      any name: its Shader and Export order properties and
+#                 Blender's own settings (materials.py).
 #   !name         ignored.
 # A helper sits on a part like everything else; the `##` in its name is
 # optional, and one that names another part than the one it sits on is an
