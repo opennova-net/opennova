@@ -563,6 +563,29 @@ def an_authored_hit_sphere_keeps_its_helpers():
 
 
 @case
+def a_sheet_stored_in_both_windings_keeps_its_normals():
+    # A strip whose triangles come in both windings over the same vertices
+    # (retail's two-sided wire, Baricd02), their normals leaning off the
+    # faces: import puts each side on vertices of its own, so Blender holds
+    # every corner's normal and export writes the strip back.
+    folder_path = os.path.join(OUT, "twins")
+    os.makedirs(folder_path, exist_ok=True)
+    scene = os.path.join(folder_path, "twins.o3d")
+    with open(scene, "w", encoding="utf-8") as f:
+        f.write("o3d 1\nmodel TWINS\nmaterial FF_ST_OP\ntexture wire.tga\nmatflags 4\nlod 0 gnrc\npart 0 0 0 0\nstrip 0\n"
+                "v 0 0 0 0.6 0 0.8 0 0\nv 1 0 0 0 0.6 0.8 1 0\nv 0 1 0 0 0 1 0 1\nv 1 1 0.2 0.28 0.96 0 1 1\n"
+                "t 0 1 2\nt 2 1 0\nt 1 3 2\nt 2 3 1\npanm 0 0\n"
+                "cobj 0\ncv 0 0 0\ncv 1 0 0\ncv 0 1 0\ncv 1 1 0.2\ncf 0 1 2 1 1\ncf 2 1 0 1 1\ncf 1 3 2 1 1\ncf 2 3 1 1 1\n")
+    first = os.path.join(folder_path, "twins.3di")
+    subprocess.run([CLI, "build", scene, "-o", first], check=True, capture_output=True)
+    again = import_again([first])[0]
+    again.o3d.output_path = os.path.join(OUT, "twins2", "twins.3di").replace("\\", "/")
+    _, lines = export_model(again)
+    assert len(records(lines, "t")) == 4, lines
+    compare(first, export.output_path(again))
+
+
+@case
 def registers_are_declared_in_oed_order():
     # OED collected the materials' registers, then the tracks', then the
     # lights' (every JOTAC model that declares registers keeps that order),

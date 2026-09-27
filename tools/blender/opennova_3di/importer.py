@@ -245,6 +245,39 @@ def influences(s, v):
     return sorted(out.items())
 
 
+def same_turn(face, ref):
+    """Whether a triangle winds as `ref` does (a cyclic turn of its corners)."""
+    return face in (ref, (ref[1], ref[2], ref[0]), (ref[2], ref[0], ref[1]))
+
+
+def back_sides(tris, normal):
+    """Which of a mesh's triangles, [(strip corners, strip, material slot,
+    merged vertices)], lie on the back of a two-sided sheet: of the triangles
+    over one set of vertices in both windings, those wound against their
+    corners' stored normals (a scene triangle winds counter-clockwise about
+    its outward normal in mission axes); where the normals give no side, the
+    first triangle's winding is the front."""
+    by_corners = {}
+    for i, (_, _, _, merged) in enumerate(tris):
+        if len(set(merged)) == 3:
+            by_corners.setdefault(frozenset(merged), []).append(i)
+    back = set()
+    for group in by_corners.values():
+        ref = tris[group[0]][3]
+        turns = [same_turn(tris[i][3], ref) for i in group]
+        if all(turns):
+            continue
+        corners, s, _, _ = tris[group[0]]
+        p = [s["verts"][x]["p"] for x in corners]
+        n = [normal(s["verts"][x]) for x in corners]
+        e1 = [p[1][k] - p[0][k] for k in range(3)]
+        e2 = [p[2][k] - p[0][k] for k in range(3)]
+        cross = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+        facing = sum(cross[k] * (n[0][k] + n[1][k] + n[2][k]) for k in range(3)) >= 0.0
+        back.update(i for i, same in zip(group, turns) if same != facing)
+    return back
+
+
 # A section's bounds are stored on the 16.16 grid: the builder rounds a hit
 # sphere's centre to it and truncates its radius and box
 # (formats/threedi/threedi_build.cpp).
@@ -381,8 +414,14 @@ class Builder(Notes):
     def mesh(self, name, strips, origin, mats, skinned):
         """One mesh from strips, its vertices relative to `origin` (Blender
         axes): vertices merged by position, normal (and weights), loops
-        carrying UVMap/UV1 and the stored normals. Returns the mesh and each
-        vertex's (part, weight) influences."""
+        carrying UVMap/UV1 and the stored normals. A triangle whose corners
+        another takes in the opposite winding (a two-sided sheet stored as
+        both windings over one set of vertices: Baricd02's wire) goes on
+        vertices of the side it faces, so that each side is a sheet of its
+        own: Blender holds a custom normal relative to the smooth fan around
+        its corner, and a fan holding two faces back to back has no
+        direction to hold it in. Returns the mesh and each vertex's (part,
+        weight) influences."""
         index, verts, loops, faces, face_mat, slots = {}, [], [], [], [], []
         weights = []
         dropped = 0
@@ -396,6 +435,7 @@ class Builder(Notes):
                 return (0.0, 0.0, 0.0)
             return n
 
+        tris = []  # (the strip's corners, the strip, material slot, the merged vertices)
         for s in strips:
             mi = s["material"]
             if mi not in slots:
@@ -416,17 +456,28 @@ class Builder(Notes):
                     weights.append(infl)
                 ids.append(index[key])
             for a, b, c in s["tris"]:
-                face = [ids[a], ids[b], ids[c]]
-                if len(set(face)) < 3:
-                    # Corners the merge collapsed (a sliver): keep the face
-                    # on vertices of its own so its triangle survives.
-                    for k, x in enumerate((a, b, c)):
-                        face[k] = len(verts)
-                        verts.append(self.blender(s["verts"][x]["p"]) - origin)
-                        weights.append(weights[ids[x]])
-                faces.append(tuple(face))
-                face_mat.append(slots.index(mi))
-                loops.extend((s["verts"][a], s["verts"][b], s["verts"][c]))
+                tris.append(((a, b, c), s, slots.index(mi), (ids[a], ids[b], ids[c])))
+        back = back_sides(tris, normal)
+        second = {}  # a vertex -> its copy on the back side
+        for i, (corners, s, slot, merged) in enumerate(tris):
+            face = list(merged)
+            if len(set(face)) < 3:
+                # Corners the merge collapsed (a sliver): keep the face on
+                # vertices of its own so its triangle survives.
+                for k, x in enumerate(corners):
+                    face[k] = len(verts)
+                    verts.append(self.blender(s["verts"][x]["p"]) - origin)
+                    weights.append(weights[merged[k]])
+            elif i in back:
+                for k, vi in enumerate(face):
+                    if vi not in second:
+                        second[vi] = len(verts)
+                        verts.append(verts[vi].copy())
+                        weights.append(weights[vi])
+                    face[k] = second[vi]
+            faces.append(tuple(face))
+            face_mat.append(slot)
+            loops.extend(s["verts"][x] for x in corners)
         if dropped:
             self.note(f"{dropped} weights on bone-table slots past their strip's table (retail FSldr03 ships them) are "
                       "not kept")
