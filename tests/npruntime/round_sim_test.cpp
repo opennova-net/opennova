@@ -70,6 +70,7 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -98,14 +99,6 @@ w::PlayerSpawn player_spawn(uint16_t net_id, float x, float y, float z) {
 	s.position = {x, y, z};
 	s.net_id = net_id;
 	return s;
-}
-
-inmatch::NapiNPConnection make_conn(uint32_t id, int type,
-        ns::ISessionTransport *transport, ns::TransportMode mode,
-        w::EntityHandle owned, bool spawned) {
-    auto connection = conn_fixture::make_conn(id, type, transport, mode, owned, spawned);
-    if (spawned) (void)inmatch::Server_RerollPlayerTickSeed(connection);
-    return connection;
 }
 
 void put_u16(std::vector<uint8_t> &b, uint16_t v) {
@@ -247,7 +240,7 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
-	ctx.np_protocol.connection_list.push_back(make_conn(
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
 			2, 1, &remote_wire, ns::TransportMode::Client, shooter, true));
 
 	for (int life = 0; life < 2; ++life) {
@@ -335,9 +328,9 @@ bool run_death_feed_classifier_matrix() {
 	ctx.config.respawn_timeout = 3;
 	ctx.config.death_messages = 1;
 	auto &roster = ctx.np_protocol.connection_list;
-	roster.push_back(make_conn(
+	roster.push_back(make_seeded_conn(
 			1, 2, &host, ns::TransportMode::Loopback, attacker, true));
-	roster.push_back(make_conn(
+	roster.push_back(make_seeded_conn(
 			2, 1, &victim_wire, ns::TransportMode::Client, victim, true));
 
 	auto reset = [&]() {
@@ -1368,9 +1361,9 @@ int main() {
 	// death auto-lose in check_win_conditions) run and hold the respawn queue.
 	world.rules.mp_session = true;
 	auto &roster = ctx.np_protocol.connection_list;
-	roster.push_back(make_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
-	roster.push_back(make_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
-	roster.push_back(make_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
+	roster.push_back(make_seeded_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
+	roster.push_back(make_seeded_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
+	roster.push_back(make_seeded_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
 	// Distinct roster slot indexes (playerSlot+20): the chat sender byte and the
 	// C2S 0x22 slot pull below address players by this index.
 	for (size_t i = 0; i < roster.size(); ++i)
@@ -2010,7 +2003,7 @@ int main() {
 		const w::EntityHandle jb = w::spawn_remote_player(world, player_spawn(0xFFF3, 5, 5, 0));
 		if (!expect(jb.valid(), "deploy-test joiner spawned")) return 1;
 		inmatch::NapiNPConnection conn =
-				make_conn(7, 1, &udp_b, ns::TransportMode::Client, jb, /*spawned=*/true);
+				make_seeded_conn(7, 1, &udp_b, ns::TransportMode::Client, jb, /*spawned=*/true);
 		conn.link.respawn_pending = true;
 		w::Entity *je = world.registry.get(jb);
 		je->flags |= 1u; // the join-time hidden bit rides with pending

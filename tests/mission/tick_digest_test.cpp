@@ -29,7 +29,6 @@
 #include "common/retail_paths.h"
 #include "common/synthetic_mission.h"
 
-#include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/match.h>
@@ -43,14 +42,6 @@
 #include <utility>
 #include <vector>
 
-
-// The bare no-net tick: the local role over the kernel (ADR 0043 d3; the
-// kernel itself owns no tick).
-static void tick_no_net(opennova::mission::MissionKernel &kernel) {
-	opennova::inmatch::LocalRole role;
-	role.bind(kernel);
-	role.run_tick(opennova::inmatch::TickInput{});
-}
 using namespace opennova;
 namespace ms = opennova::mission;
 namespace w = opennova::world;
@@ -168,6 +159,7 @@ void hash_world(Digest &d, const w::World &world) {
 // --- the synthetic mission (tests/common/synthetic_mission.h) ------------------
 
 using test_boot::source_over;
+using test_boot::tick_no_net;
 using test_mission::synthetic_mission;
 
 bool synthetic_chain(int ticks, uint64_t &out, std::string &error) {

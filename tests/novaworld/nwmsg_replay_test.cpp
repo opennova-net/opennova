@@ -18,6 +18,8 @@
 
 #include <net/npwire/protocol_message.h>
 
+#include <base/io/strutil.h>
+
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -32,6 +34,7 @@
 
 using opennova::ProtocolMessage;
 using opennova::make_protocol_message;
+using opennova::strutil::hex_to_bytes;
 
 namespace {
 
@@ -45,25 +48,6 @@ struct FixtureBundle {
 	std::string label;
 	std::vector<FixtureMessage> messages;
 };
-
-bool hex_to_bytes(const std::string &hex, std::vector<uint8_t> &out) {
-	if (hex.size() % 2 != 0) return false;
-	out.clear();
-	out.reserve(hex.size() / 2);
-	for (size_t i = 0; i < hex.size(); i += 2) {
-		auto nib = [](char c) -> int {
-			if (c >= '0' && c <= '9') return c - '0';
-			if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-			if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-			return -1;
-		};
-		const int hi = nib(hex[i]);
-		const int lo = nib(hex[i + 1]);
-		if (hi < 0 || lo < 0) return false;
-		out.push_back(static_cast<uint8_t>((hi << 4) | lo));
-	}
-	return true;
-}
 
 bool load_nwmsg(const std::string &path, std::vector<FixtureBundle> &out,
                 std::string &err) {

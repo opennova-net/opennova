@@ -1,9 +1,11 @@
 // The in-memory mission::BootFileSource the ungated mission-kernel, runtime-boot,
 // host-role, tick-digest and WAC surface tests boot over: a name -> bytes map
-// standing in for the mounted resource root. Header-only, infrastructure only
-// (no retail counterpart to cite).
+// standing in for the mounted resource root, plus the bare no-net tick those
+// tests drive a booted kernel with. Header-only, infrastructure only (no retail
+// counterpart to cite).
 #pragma once
 
+#include <runtime/inmatch/local_role.h>
 #include <runtime/mission/runtime_boot.h>
 
 #include <cstdint>
@@ -29,6 +31,14 @@ inline opennova::mission::BootFileSource source_over(
 		return true;
 	};
 	return s;
+}
+
+// The bare no-net tick: the local role over the kernel (ADR 0043 d3; the
+// kernel itself owns no tick).
+inline void tick_no_net(opennova::mission::MissionKernel &kernel) {
+	opennova::inmatch::LocalRole role;
+	role.bind(kernel);
+	role.run_tick(opennova::inmatch::TickInput{});
 }
 
 } // namespace test_boot

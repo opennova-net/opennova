@@ -16,6 +16,7 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/world.h>
+#include "../fixtures/minimal_fnt_builder.h"
 using namespace opennova;
 using namespace opennova::hud;
 using namespace opennova::world;
@@ -167,28 +168,13 @@ static void mortar_map_and_world_cues() {
 	CHECK(compiler.compile(state, 1024, 768).tris.empty());
 }
 
-// A synthetic 1-page font: every glyph 8x16 px, spacing 2, design width 800.
-static fnt::fnt_font_t make_font() {
-	fnt::fnt_font_t font{};
-	fnt::fnt_init_blank(&font, 1, 2);
-	font.design_width = 800;
-	for (uint32_t i = 0; i < fnt::FNT_GLYPH_COUNT; ++i) {
-		font.glyphs[i].page = 0;
-		font.glyphs[i].uv.u0 = 0.0f;
-		font.glyphs[i].uv.v0 = 0.0f;
-		font.glyphs[i].uv.u1 = 8.0f / 256.0f;
-		font.glyphs[i].uv.v1 = 16.0f / 256.0f;
-	}
-	return font;
-}
-
 // Which overlay font slot each combat text rides.
 // [orig: gear label slot 0xB4C3A0 @0x59A6F9; service prompts slot 0xB4C3A0
 //  @0x5BDFD7 / @0x5BE0AA / @0x5BE0F7; Inset friendly name slot 0xB4C394
 //  @0x5CA0C0; impact distance measured in slot 0xB4C394 @0x5A897E and drawn in
 //  the hudpos slot 0x2723C74 @0x5A89D0]
 static void combat_text_font_slots() {
-	const fnt::fnt_font_t font = make_font();
+	const fnt::fnt_font_t font = minimal_fnt::uniform_test_font();
 	HudLayout layout;
 	layout.alpha_fade_seconds = 1;
 	layout.combat.gear_x = 100;

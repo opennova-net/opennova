@@ -18,7 +18,6 @@
 #include <runtime/particle/effect_scene.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -41,13 +40,8 @@ const char *const kRetailBrokenEffect = "Effect_SGvBody";
 const char *const kControlEffect = "Effect_AmHitDirt";
 const char *const kAbsentEffect = "Effect_NoSuchEffect_ProbeSentinel";
 
-std::string lower(std::string s) {
-	for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-	return s;
-}
-
 bool ends_with(const std::string &s, const std::string &suffix) {
-	return s.size() >= suffix.size() && lower(s).compare(s.size() - suffix.size(), suffix.size(), lower(suffix)) == 0;
+	return s.size() >= suffix.size() && retail::lower_ascii(s).compare(s.size() - suffix.size(), suffix.size(), retail::lower_ascii(suffix)) == 0;
 }
 
 struct Probe {
@@ -97,7 +91,7 @@ int main() {
 		for (const ResourceFileEntry &entry : index.resource_files("*"))
 			if (!entry.logical_name.empty() && ends_with(entry.logical_name, want)) group.push_back(entry);
 		std::sort(group.begin(), group.end(), [](const ResourceFileEntry &a, const ResourceFileEntry &b) {
-			return lower(a.logical_name) < lower(b.logical_name);
+			return retail::lower_ascii(a.logical_name) < retail::lower_ascii(b.logical_name);
 		});
 		for (const ResourceFileEntry &entry : group) {
 			std::vector<uint8_t> bytes;
@@ -158,7 +152,7 @@ int main() {
 	bool declared = false;
 	for (const particle::EffectCatalogDocument &doc : config.documents) {
 		for (const particle::EffectDef &effect : doc.file.effects) {
-			if (lower(effect.id) != lower(kRetailBrokenEffect)) continue;
+			if (retail::lower_ascii(effect.id) != retail::lower_ascii(kRetailBrokenEffect)) continue;
 			declared = true;
 			first_source = doc.source;
 			for (const std::string &pdef : effect.pdefs) {

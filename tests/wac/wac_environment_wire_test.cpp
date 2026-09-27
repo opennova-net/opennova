@@ -7,14 +7,11 @@
 
 #include "netsim/conn_fan_test_util.h"
 
-#include <runtime/replication/entity_wire_bridge.h>
-#include <runtime/inmatch/loopback_channel.h>
 #include <net/npwire/ingame_decode.h>
 #include <runtime/world/world.h>
 #include <runtime/world/player_view.h>
 
 #include <cstdio>
-#include <vector>
 
 namespace {
 
@@ -38,31 +35,6 @@ void run_one_wac_execution(w::World &world, opennova::wac::WacSystem &system) {
 	for (int tick = 0; tick < opennova::wac::WacSystem::kTicksPerExecution; ++tick) {
 		world.run_logic_tick(/*is_authority=*/true);
 	}
-}
-
-nw::FrameUpdate emit_phase2(w::World &world) {
-	world.registry.configure_pool(0, 1);
-	w::Entity recipient;
-	recipient.kind = w::EntityKind::Organic;
-	recipient.health = 150;
-	const w::EntityHandle recipient_h = world.registry.spawn(0, recipient);
-	// The environment sub-block still rides a real deployed player's 0x0A.
-	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate]
-	ns::LoopbackChannel channel;
-	std::vector<ns::Connection> connections;
-	connections.push_back(ns::Connection{
-			&channel, ns::TransportMode::Loopback, recipient_h, 0});
-	connections.back().s2c_phase = 1;
-	ns::test::emit_all(world, connections);
-
-	ns::Datagram datagram;
-	CHECK(channel.client_recv(datagram));
-	nw::FrameUpdate frame;
-	CHECK(nw::decode_frame_update(datagram.body.data(), datagram.body.size(),
-			ns::class_for_type_id, frame));
-	CHECK(frame.flags2 == 2);
-	CHECK(frame.env.present);
-	return frame;
 }
 
 void test_fov_uses_the_shared_weather_current_and_snapshot() {
@@ -125,7 +97,8 @@ void test_scripted_sky_speed_reaches_the_wire() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.cloud_scroll == 47);
 }
 
@@ -146,7 +119,8 @@ void test_movefog_publishes_retail_target_and_duration_step() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.fog_dist == 200);
 	// IDA @0x4EE0A0: seconds*62 ticks; abs(target-current+ticks/2)/ticks,
 	// then the phase-2 (+0xFF)>>8 projection. 800 -> 200 over 2 s = 0x04D7.
@@ -173,7 +147,8 @@ void test_movefog_uses_live_fog_current() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.fog_dist == 200);
 	// Retail derives the two-second transition from 600 -> 200, yielding 0x033A.
 	CHECK(frame.env.fog_accel == 0x033A);
@@ -196,7 +171,8 @@ void test_rain_advances_on_the_explicit_weather_tick() {
 	run_one_wac_execution(world, system);
 
 	world.weather.tick_sim(&world, events);
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	// 100% -> 0x10000; duration 62 ticks gives step 1057. One tick's
 	// current narrows from 1057 Q16 to unsigned 8.8 byte 4.
 	CHECK(frame.env.rain_pct == 4);
@@ -220,7 +196,8 @@ void test_snow_kind_reaches_the_wire() {
 	run_one_wac_execution(world, system);
 
 	world.weather.tick_sim(&world, events);
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.rain_pct == 4);
 	CHECK(frame.env.env_param == 1); // snow precipitation kind
 }
@@ -242,7 +219,8 @@ void test_overcast_advances_on_the_explicit_weather_tick() {
 	run_one_wac_execution(world, system);
 
 	world.weather.tick_sim(&world, events);
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	// 50% -> 0x8000; two seconds gives a 264-Q16 step, narrowed to 1.
 	CHECK(frame.env.overcast == 1);
 }
@@ -264,7 +242,8 @@ void test_quake_uses_retail_six_tick_units_and_countdown() {
 	run_one_wac_execution(world, system);
 
 	world.weather.tick_sim(&world, events);
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.quake_ticks == 41); // 7*6 authored ticks, then one weather tick
 }
 
@@ -285,7 +264,8 @@ void test_tod_uses_retail_minute_to_fixed24_multiply() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	// Handler @0x4EDC70 stores minute-of-day * 0x44444. For 05:30 the
 	// phase-2 (+0x1000)>>13 projection is exactly 0x2C00.
 	CHECK(frame.env.tod_fixed == 0x2C00);
@@ -362,7 +342,8 @@ void test_eager_wac_initializer_and_255_tick_boundary() {
 
 	world.weather.mission_start_init();
 	for (int tick = 0; tick < 255; ++tick) world.weather.tick_sim(&world, events);
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.fog_dist == 200);
 	CHECK(frame.env.fog_accel == 0xFF00);
 	CHECK(frame.env.cloud_scroll == 47);

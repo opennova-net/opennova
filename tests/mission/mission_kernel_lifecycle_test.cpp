@@ -39,30 +39,13 @@ static int failures = 0;
 namespace {
 
 using test_mission::item;
-using test_mission::organic;
+using test_mission::two_entity_mission;
 using test_boot::source_over;
-
-bms::File synthetic_mission() {
-	bms::File m{};
-	m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
-	m.items[0].id = 21;
-	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
-	m.organics[0].id = 31;
-	m.events.push_back(bms::Event{});
-	return m;
-}
+using test_boot::tick_no_net;
 
 bool near_equal(float a, float b, float tolerance) { return std::fabs(a - b) <= tolerance; }
 
 } // namespace
-
-// The bare no-net tick: the local role over the kernel (ADR 0043 d3; the
-// kernel itself owns no tick).
-static void tick_no_net(opennova::mission::MissionKernel &kernel) {
-	opennova::inmatch::LocalRole role;
-	role.bind(kernel);
-	role.run_tick(opennova::inmatch::TickInput{});
-}
 
 // Every kernel below lives on the heap: sizeof(MissionKernel) is ~270 KB (the
 // World inside it alone ~230 KB, with the 512-dword script var bank and the
@@ -155,7 +138,7 @@ int main() {
 		files["synth.wac"] = "if never() then set(v1,1) endif\n";
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		std::string error;
 		CHECK(kernel.boot(options, error));
@@ -215,7 +198,7 @@ int main() {
 		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options; // lenient
 		std::string error;
 		CHECK(kernel.boot(options, error));
@@ -230,7 +213,7 @@ int main() {
 		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.wac_strict_diagnostics = true;
 		std::string error;
@@ -244,7 +227,7 @@ int main() {
 		files["synth.wac"] = "if never() then fx2tgt(nosuch_effect, 1) endif\n";
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.wac_strict_diagnostics = true;
 		std::string error;
@@ -257,7 +240,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.wac_strict_diagnostics = true;
 		std::string error;
@@ -279,7 +262,7 @@ int main() {
 		files["synth.wac"] = "var a\ninc(a)\nv1 = a\n";
 		auto first_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &first = *first_box;
-		first.open_document(synthetic_mission(), "synth", source_over(&files));
+		first.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		std::string error;
 		CHECK(first.boot(options, error));
@@ -292,7 +275,7 @@ int main() {
 		second.world.script.vars.carry_declared_from(first.world.script.vars);
 		CHECK(second.world.script.vars.get_mission(256) == 1);
 		CHECK(second.world.script.vars.get_mission(1) == 0); // V# start at zero
-		second.open_document(synthetic_mission(), "synth", source_over(&files));
+		second.open_document(two_entity_mission(), "synth", source_over(&files));
 		CHECK(second.boot(options, error));
 		CHECK(second.world.script.vars.get_mission(1) == 2);   // inc over the carried slot
 		CHECK(second.world.script.vars.get_mission(256) == 2);
@@ -304,7 +287,7 @@ int main() {
 		auto third_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &third = *third_box;
 		third.world.script.vars.carry_declared_from(second.world.script.vars);
-		third.open_document(synthetic_mission(), "synth", source_over(&other));
+		third.open_document(two_entity_mission(), "synth", source_over(&other));
 		CHECK(third.boot(options, error));
 		CHECK(third.world.script.vars.get_mission(2) == 2);
 	}
@@ -358,7 +341,7 @@ int main() {
 		files["synth.wac"] = "if never() then set(v1,1) endif\n";
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		std::string error;
 		CHECK(kernel.boot(options, error));
@@ -374,7 +357,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.collision = false;
 		std::string error;
@@ -406,7 +389,7 @@ int main() {
 	// [orig: Game_TeardownMission @0x522350 — Entity_Destroy over pools 0..2
 	//  @0x522365..0x5223C8, the EventTrigger_UpdateAllWithFlag4 call @0x52266C]
 	{
-		bms::File m = synthetic_mission();
+		bms::File m = two_entity_mission();
 		bms::Entity marker{};
 		marker.type = bms::ItemType::Marker;
 		marker.type_id = 44;
