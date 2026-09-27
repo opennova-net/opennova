@@ -675,6 +675,29 @@ int main(int argc, char **argv) {
         const Clip mbp = sample_clip(tbad, pivots, /*model_bind=*/true, &tbad, parents);
         TEST_EXPECT(quat_approx(mbp.frames[0][2].world_rotation,
                 mbp.frames[0][0].world_rotation, 1e-3f));
+
+        // A parent numbered AFTER its child is read raw, the way the in-place FK meets it:
+        // its rotation at the model origin, without its own place. Row 1 hangs off the
+        // padded row 2 (Rz90, placed at (0,0,2) under the root): row 1 = Rz90 . (1,0,0) =
+        // (0,1,0), not (0,1,2). Its local transform still re-derives that place under row
+        // 2's finished matrix. [orig: BoneAnim_BuildWorldMatrices @0x40C400 -- the read
+        // @0x40C674 of the raw entry @0x40C53F..0x40C553, matrix 0's copy @0x40C5B6]
+        const std::vector<int> late_parents = {0, 2, 0};
+        const std::vector<Vec3> late_pivots = {
+                {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 2.0f}};
+        const Clip lc = sample_clip(tbad, late_pivots, /*model_bind=*/false, nullptr, late_parents);
+        TEST_EXPECT(lc.bones[1].parent_index == 2);
+        const auto &lf = lc.frames[0];
+        TEST_EXPECT(approx(lf[2].world_position.x, 0.0f, 1e-3f) &&
+                approx(lf[2].world_position.y, 0.0f, 1e-3f) &&
+                approx(lf[2].world_position.z, 2.0f, 1e-3f));
+        TEST_EXPECT(approx(lf[1].world_position.x, 0.0f, 1e-3f) &&
+                approx(lf[1].world_position.y, 1.0f, 1e-3f) &&
+                approx(lf[1].world_position.z, 0.0f, 1e-3f));
+        const Vec3 local = opennova::anim::quat_rotate(lf[2].world_rotation, lf[1].local_position);
+        TEST_EXPECT(approx(lf[2].world_position.x + local.x, 0.0f, 1e-3f) &&
+                approx(lf[2].world_position.y + local.y, 1.0f, 1e-3f) &&
+                approx(lf[2].world_position.z + local.z, 0.0f, 1e-3f));
     }
 
     // --- positions_from_model: reconstruct BadBone.position from the model table + the ---

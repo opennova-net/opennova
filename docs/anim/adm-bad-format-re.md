@@ -253,6 +253,7 @@ actually mean:
 | Which clip binds the rig | MATCHING | ctest `anim_sample` (a two-variant reset row, a second reset row, an `anim_resetx` row ahead of the reset row, a reset variant that does not load); the 82-table scan below |
 | A table with no reset row | MATCHING (the rig does not load) | ctest `anim_sample` |
 | The translation gate | MATCHING | ctest `anim_sample` (the sampler over an untranslated bind (both modes) and a translated one, and the rig loader over an untranslated and a translated reset) |
+| A part whose parent is numbered after it | MATCHING (witnessed 2026-09-27, below) | ctest `anim_sample` (a model-table row hung off a later, padded row) |
 | Translation under a cross-fade | NOT PORTED (follow-up below) | |
 
 **Which clip binds.** A row names its slot by its key past the first five
@@ -318,6 +319,26 @@ which the old and the new rule both pick. Retail reads the scratch past what
 the playing clip wrote in one more case: a bone of a translated bind past the
 playing clip's own bone count keeps whatever the scratch last held. No retail
 clip has fewer bones than its reset, and the port reads zero there.
+
+**A parent numbered after its child (witnessed 2026-09-27).**
+`BoneAnim_BuildWorldMatrices @ 0x40C400` fills one matrix per model part in a
+first loop (the clip's rotation with the translation zeroed,
+`@0x40C53F..0x40C553`, or matrix 0's copy for a part past the clip's bones,
+`@0x40C5B6`) and then runs the FK over the same array in place, reading each
+part's parent (the model row's +20, `@0x40C5F6`) as `outputMatrices[parent]`
+(`@0x40C674`). A parent with a lower index is finished by then; a parent
+numbered after its child is still that raw entry, so the child turns by the
+parent's rotation as if the parent sat at the model origin, losing its pivot
+carry and its ancestors' motion. Seventeen of the 2,409 models on the JOTAC
+base mount ship such rows, first-person models among them (`mmp5_1st.3di`
+hangs parts 10, 11, 13, 14, 16, 17, 20 and 23 off later-numbered parts;
+`c4_1st`, `hend_1st`, `land_1st`, `mor_1st`, `mwr_1st`, `oicw_1st` and
+`oicw_1stg` as well). `sample_clip` computes every part's
+rotation before any position and places such a child by the parent's raw
+rotation alone; a self-parent (the shipped root) stays the root. The PANM path
+reads a later parent's slot from what the previous model left in the shared
+array (`Model_TransformBoneMatrices @ 0x58E390`, `@0x58E46B`), which no port
+can reproduce.
 
 ## The writers and the construction seam (2026-09-24)
 
