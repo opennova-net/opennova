@@ -391,12 +391,27 @@ void VehicleSystem::tick_dead(Entity &e, AiEntity &ai) {
 // This is the refNum attachment group, independent of the team byte.
 // [orig: Vehicle_CleanupTeamEntitiesOnDestruction @0x547040]
 void VehicleSystem::cleanup_destroyed_ref_group(Entity &vehicle) {
-	if (!vehicle.has_item_def || vehicle.item_type != 1 || (vehicle.item_attrib & 0x40) == 0)
+	// A vehicle def only [orig: Vehicle_ReleaseEWeapGroupOnDestruction
+	// @0x54707C].
+	if (!vehicle.has_item_def || vehicle.item_type != 1)
 		return;
+	// Without PlayerControl the death destroys the group's EWeap members and
+	// the vehicle gives up its refNum, so its wreck's later destroy walks
+	// nothing. [orig: the PlayerControl test @0x547086, the
+	//  EntityReference_DestroyEWeapGroup call @0x547143]
+	if ((vehicle.item_attrib & 0x40) == 0) {
+		world_.commands.destroy_eweap_group(vehicle.handle);
+		return;
+	}
+	// With PlayerControl the group stays: the refNum group list's other
+	// members whose def carries EWeap are released in place.
+	// [orig: DynArray_CopyConstruct @0x54709E, the member tests
+	//  @0x5470B9..0x5470D3 (not self, same refNum, def attrib 0x20)]
 	std::vector<EntityHandle> peers;
 	world_.registry.for_each([&](const Entity &other) {
-		if (other.handle != vehicle.handle && other.ref_num == vehicle.ref_num &&
-				other.has_item_def && (other.item_attrib & 0x20) != 0)
+		if (other.handle != vehicle.handle && other.ref_group_member &&
+				other.ref_num == vehicle.ref_num && other.has_item_def &&
+				(other.item_attrib & 0x20) != 0)
 			peers.push_back(other.handle);
 	});
 	for (EntityHandle handle : peers) {

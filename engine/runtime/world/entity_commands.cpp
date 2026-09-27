@@ -327,13 +327,12 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     if (!entity) return false;
     // The shared destroy primitive, including script and teammate removals.
     // [orig: Entity_Destroy @0x43E810; reference walk @0x465670]
-    // The row leaves its refNum group first, so no member's destroy below
-    // walks back to it. The port keeps no group list: a live row whose refNum
-    // byte matches is a member, and the byte is cleared here for the list
-    // removal. [orig: Entity_Destroy @0x43E840..0x43E858 — DynArray_RemoveById
-    //  on the refNum list]
+    // The row leaves its refNum group list first (Entity::ref_group_member),
+    // so no member's destroy below walks back to it; its refNum byte stays.
+    // [orig: Entity_Destroy @0x43E840..0x43E858 — DynArray_RemoveById on the
+    //  refNum list]
     const uint8_t ref = entity->ref_num;
-    entity->ref_num = 0;
+    entity->ref_group_member = false;
     if (entity->item_type == 3) world_.match.drop_carried_object(world_, h);
     world_.facials.release(*entity);
     world_.out.scars.clear_entity(h);
@@ -346,25 +345,12 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     // refNum group whose def carries EWeap with it, each through this same
     // destroy (so without a notify of its own): an addeweap child, which shares
     // its carrier's refNum, never outlives the carrier's row. A member without
-    // EWeap stays. The members are read once and each is tested again when
-    // reached, as retail walks a copy of the group list and skips a row an
-    // earlier member's destroy already cleared.
+    // EWeap stays.
     // [orig: Entity_Destroy @0x43E9B6..0x43E9CD — the def, def type != 3 and
-    //  refNum (+0x215) != 0 gates, the call @0x43E9CD; CStreamingMem_Destroy
-    //  @0x546F30 (an IDB misnomer) — the group list copy @0x546F73, the member
-    //  tests @0x546F8A..0x546FA0 (not self, same refNum, def attrib 0x20),
-    //  Entity_Destroy @0x546FA3]
+    //  refNum (+0x215) != 0 gates, the EntityReference_DestroyEWeapGroup call
+    //  @0x43E9CD]
     if (entity->has_item_def && entity->item_type != 3 && ref != 0) {
-        std::vector<EntityHandle> members;
-        world_.registry.for_each([&](const Entity &other) {
-            if (other.ref_num == ref) members.push_back(other.handle);
-        });
-        for (EntityHandle member : members) {
-            const Entity *row = world_.registry.get(member);
-            if (row != nullptr && row->ref_num == ref && row->has_item_def &&
-                    (row->item_attrib & kItemAttribEweap) != 0)
-                remove_ssn(member);
-        }
+        destroy_eweap_group(h);
         entity = world_.registry.get(h);
         if (entity == nullptr) return true;
     }
@@ -382,6 +368,38 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     if (world_.collision) world_.collision->remove_entity_instance(h);
     world_.registry.despawn(h);
     return true;
+}
+
+void EntityCommands::destroy_eweap_group(EntityHandle h) {
+    Entity *entity = world_.registry.get(h);
+    if (entity == nullptr) return;
+    const uint8_t ref = entity->ref_num;
+    // The group list is copied once and each member is tested again when
+    // reached: not the row itself, still in the list under the same refNum,
+    // and a def carrying EWeap. A member an earlier member's destroy already
+    // took is skipped.
+    // [orig: EntityReference_DestroyEWeapGroup @0x546F30 — the list copy
+    //  (DynArray_CopyConstruct) @0x546F73, the member tests @0x546F8A..0x546FA0,
+    //  Entity_Destroy @0x546FA3]
+    std::vector<EntityHandle> members;
+    world_.registry.for_each([&](const Entity &other) {
+        if (other.ref_group_member && other.ref_num == ref) members.push_back(other.handle);
+    });
+    for (EntityHandle member : members) {
+        if (member == h) continue;
+        const Entity *row = world_.registry.get(member);
+        if (row != nullptr && row->ref_group_member && row->ref_num == ref &&
+                row->has_item_def && (row->item_attrib & kItemAttribEweap) != 0)
+            remove_ssn(member);
+    }
+    // Then the row leaves its list and gives up its refNum. The port reads an
+    // id's occupancy off the live rows, so that store has nothing to clear.
+    // [orig: @0x546FBC..0x547001 (the list removal), occupied[refNum] = 0
+    //  @0x54700A, refNum = 0 @0x547017]
+    if ((entity = world_.registry.get(h)) != nullptr) {
+        entity->ref_group_member = false;
+        entity->ref_num = 0;
+    }
 }
 
 bool EntityCommands::server_remove_and_notify(EntityTarget ssn) {

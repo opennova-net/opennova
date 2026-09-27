@@ -8645,10 +8645,38 @@ secondary weapon channel's missing-key behavior remains separate.
   the ground-vehicle death transition walks no child list but the `Parent`-gated one
   (`AI_TransitionToDeath_GroundVehicle @ 0x467B90..0x467BCC`), so the addeweap child kill
   the port had carried is retired (D-ITEM-6).
-- **Destroy.** `Entity_Destroy @ 0x43E810` walks no children: it zeroes the row's first
-  0x2B4 bytes and sets +0x219 = 1; a child keeps pointing at the zeroed row, sits at the
-  world origin (the root copy `@ 0x4410EA..0x4411BC`) and rides the next occupant; peers
-  run the 128-tick C2S 0x0F request and a local destroy (`@ 0x440D41..0x440E2F`).
+- **Destroy.** `Entity_Destroy @ 0x43E810` first drops the row from its refNum group list
+  (`@ 0x43E840..0x43E858`). For a non-person row with a def and a refNum it then calls
+  `EntityReference_DestroyEWeapGroup @ 0x546F30` (`@ 0x43E9B6..0x43E9CD`), which walks a
+  copy of the list (`DynArray_CopyConstruct`), destroys every other member whose def
+  carries EWeap (`@ 0x546F8A..0x546FA3`) and zeroes the row's refNum (`@ 0x547017`). An
+  addeweap child's record carries its carrier's refNum, so it goes with the carrier's row
+  and gets no 0x12 of its own; only a child outside that group keeps pointing at the
+  zeroed row (the first 0x2B4 bytes cleared, +0x219 = 1), sits at the world origin (the
+  root copy `@ 0x4410EA..0x4411BC`) and rides the next occupant. Rows join a refNum's list
+  only when spawned from a record carrying it (`Entity_SpawnFromBMSRecord
+  @ 0x40EC23..0x40EC45`); a carrier the addeweap spawner hands a refNum is marked occupied
+  but never joins (`@ 0x40F389`, `@ 0x40F4C7`), so a child's destroy never reaches it. The
+  client joins every non-person row with a def and a refNum (0x0D `@ 0x433381..0x4333AD`,
+  0x10 `@ 0x433684..0x4336B0`, 0x18 `@ 0x433E27..0x433E52`), carriers included; the
+  client's 0x12 (`@ 0x425F8F`), DestroyEntityList, FullEntitySpawn and the 128-tick
+  stale-carrier sweep (the C2S 0x0F request and a local destroy, `@ 0x440D41..0x440E2F`)
+  all run the same `Entity_Destroy`. Reimpl (2026-09-27): `Entity::ref_group_member`
+  (set by the promotion), `EntityCommands::destroy_eweap_group` from the host's
+  `remove_ssn`, and the joiner's `erase_entity_tree` over the items.def catalog
+  (`ClientReplicaPipeline::set_item_catalog`). The group recount
+  (`EntityPool_RecountLiveByGroup @ 0x40E8D0`: Flags & 2 clear and Health > 0 over pools
+  2, 0, 1) counts addeweap children, so before the port a destroyed tank's surviving
+  children kept its group alive and 07TR never reached its victory.
+- **Vehicle destruction.** `Vehicle_ReleaseEWeapGroupOnDestruction @ 0x547040` runs from
+  `Entity_ProcessVehicleDestruction @ 0x466AB6`, `Entity_SpawnDeathPieces @ 0x49344D` and
+  `Entity_UpdateDeathTransforms @ 0x494673`, each gated on refNum != 0, and acts only on a
+  type-1 def. With PlayerControl each EWeap list member is released in place: scars
+  cleared, +0x322/+0x324 zeroed, the +0x2D4 weapon's ammo re-split, the +0x170 occupant
+  detached on the server. Without PlayerControl the members are destroyed through
+  `EntityReference_DestroyEWeapGroup` (`@ 0x547143`) and the vehicle gives up its refNum;
+  stock JOX carries no type-1 addeweap vehicle without PlayerControl. Reimpl (2026-09-27):
+  the host's vehicle lifecycle runs both arms over the list members.
 - **The load serializers' entity+0x270 byte.** The ai_function `palm` row (`@ 0x813278`,
   `WeaponOverlay_HandleDamage`) and the move_function `psec` row (`@ 0x82AD5C`,
   `Entity_UpdatePhysicsStep`) gate it (net-re §5.11).

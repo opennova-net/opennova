@@ -703,18 +703,22 @@ static void test_player_removal_sweeps_placed_devices() {
 }
 
 // Destroying a non-person row that holds a refNum destroys every other member
-// of that refNum group whose def carries EWeap, each through the same destroy
-// and without a notify of its own (the joiners' own destroy of the carrier
-// takes them): an addeweap child never outlives its carrier's row, even when
-// the carrier's def is EWeap too. A member without EWeap, a row of another
-// refNum, and every member of a person's or a def-less row's group stay.
+// of that refNum's group list whose def carries EWeap, each through the same
+// destroy and without a notify of its own (the joiners' own destroy of the
+// carrier takes them): an addeweap child never outlives its carrier's row, even
+// when the carrier's def is EWeap too. A member without EWeap, a row of another
+// refNum, and every member of a person's or a def-less row's group stay. A
+// carrier whose refNum the addeweap spawner handed it is not in its own list,
+// so a child's destroy takes the other EWeap children and leaves the carrier.
 // [orig: Entity_Destroy @0x43E810 — the list removal @0x43E840..0x43E858, the
 //  def / def type != 3 / refNum gates @0x43E9B6..0x43E9CA, the call @0x43E9CD;
 //  CStreamingMem_Destroy @0x546F30 — member tests @0x546F8A..0x546FA0,
-//  Entity_Destroy @0x546FA3]
+//  Entity_Destroy @0x546FA3; the list join Entity_SpawnFromBMSRecord
+//  @0x40EC23..0x40EC45; Entity_SpawnWeaponOverlays @0x40F389 / @0x40F4C7]
 static void test_destroy_takes_the_eweap_refnum_group() {
     ScriptWorld w;
-    auto row = [&](int pool, uint8_t ref, uint32_t attrib, uint8_t type, bool def = true) {
+    auto row = [&](int pool, uint8_t ref, uint32_t attrib, uint8_t type, bool def = true,
+                   bool member = true) {
         Entity e;
         e.item_id = 2102;
         e.has_item_def = def;
@@ -722,6 +726,7 @@ static void test_destroy_takes_the_eweap_refnum_group() {
         e.item_type_index = 9;
         e.item_attrib = attrib;
         e.ref_num = ref;
+        e.ref_group_member = member && ref != 0;
         e.health = 10;
         if (type == 3) e.kind = EntityKind::Organic;
         return w.registry.spawn(pool, e);
@@ -765,6 +770,14 @@ static void test_destroy_takes_the_eweap_refnum_group() {
     CHECK(w.commands.remove_ssn(bare));
     CHECK(w.registry.get(person) == nullptr && w.registry.get(bare) == nullptr);
     CHECK(w.registry.get(person_gun) != nullptr && w.registry.get(bare_gun) != nullptr);
+
+    const EntityHandle helo = row(1, 13, kItemAttribPlayerControl | kItemAttribEweap, 1,
+            /*def=*/true, /*member=*/false);
+    const EntityHandle helo_gun = row(1, 13, kItemAttribEweap, 5);
+    const EntityHandle helo_rocket = row(1, 13, kItemAttribEweap, 5);
+    CHECK(w.commands.remove_ssn(helo_gun));
+    CHECK(w.registry.get(helo_gun) == nullptr && w.registry.get(helo_rocket) == nullptr);
+    CHECK(w.registry.get(helo) != nullptr && w.registry.get(helo)->ref_num == 13);
 }
 
 // BMS SingleTeleport's target walk keeps the ItemTypeIndex gate inside: a

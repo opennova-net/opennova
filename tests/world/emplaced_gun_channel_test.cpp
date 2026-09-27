@@ -820,6 +820,7 @@ void test_carrier_destruction_resets_child_words() {
     gun.has_item_def = true;
     gun.item_attrib |= kItemAttribEweap;
     gun.ref_num = 7;
+    gun.ref_group_member = true;
     gun.emplaced_gun_yaw_word = 0x1234;
     gun.emplaced_gun_pitch_word = -0x234;
     gun.primary_weapon_slot.clip = 3;
@@ -846,6 +847,61 @@ void test_carrier_destruction_resets_child_words() {
     CHECK(r.gun().emplaced_gun_pitch_word == 0);
 }
 
+// The dying vehicle's refNum group, by def: a vehicle without PlayerControl
+// destroys the group list's EWeap members and gives up its refNum, so its
+// wreck's destroy later walks nothing; a member without EWeap stays. With
+// PlayerControl a row that carries the refNum outside the group list is left
+// alone, and a non-vehicle def touches nothing.
+// [orig: Vehicle_ReleaseEWeapGroupOnDestruction @0x547040 — the def type test
+//  @0x54707C, the PlayerControl test @0x547086, the member tests
+//  @0x5470B9..0x5470D3, the EntityReference_DestroyEWeapGroup call @0x547143;
+//  EntityReference_DestroyEWeapGroup @0x546F30 (the list removal
+//  @0x546FBC..0x547001, refNum = 0 @0x547017); Entity_UpdateDeathTransforms
+//  @0x494669..0x494673]
+void test_vehicle_death_releases_or_destroys_the_eweap_group() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 12);
+    auto spawn = [&](uint8_t type, uint32_t attrib, uint8_t ref, bool member) {
+        Entity e;
+        e.kind = EntityKind::Item;
+        e.has_item_def = true;
+        e.item_type = type;
+        e.item_attrib = attrib;
+        e.ref_num = ref;
+        e.ref_group_member = member;
+        e.health = 10;
+        e.alive = true;
+        return w.registry.spawn(1, e);
+    };
+    const EntityHandle hull = spawn(1, 0, 7, true);
+    const EntityHandle gun = spawn(6, kItemAttribEweap, 7, true);
+    const EntityHandle crate = spawn(6, 0, 7, true);
+    entity_update_death_transforms(w, *w.registry.get(hull), /*silent=*/true);
+    CHECK(w.registry.get(gun) == nullptr);
+    CHECK(w.registry.get(crate) != nullptr);
+    const Entity *wreck = w.registry.get(hull);
+    CHECK(wreck != nullptr && wreck->ref_num == 0 && !wreck->ref_group_member);
+    w.out.entity_events.clear();
+    CHECK(w.commands.remove_ssn(hull));
+    CHECK(w.registry.get(crate) != nullptr);
+
+    const EntityHandle tank = spawn(1, kItemAttribPlayerControl, 8, false);
+    const EntityHandle turret = spawn(6, kItemAttribEweap, 8, true);
+    const EntityHandle stray = spawn(6, kItemAttribEweap, 8, false);
+    w.registry.get(turret)->emplaced_gun_yaw_word = 0x1234;
+    w.registry.get(stray)->emplaced_gun_yaw_word = 0x1234;
+    w.vehicles.cleanup_destroyed_ref_group(*w.registry.get(tank));
+    CHECK(w.registry.get(turret) != nullptr && w.registry.get(turret)->emplaced_gun_yaw_word == 0);
+    CHECK(w.registry.get(stray) != nullptr && w.registry.get(stray)->emplaced_gun_yaw_word == 0x1234);
+    CHECK(w.registry.get(tank)->ref_num == 8);
+
+    const EntityHandle bunker = spawn(6, 0, 9, true);
+    const EntityHandle bunker_gun = spawn(6, kItemAttribEweap, 9, true);
+    w.vehicles.cleanup_destroyed_ref_group(*w.registry.get(bunker));
+    CHECK(w.registry.get(bunker_gun) != nullptr && w.registry.get(bunker)->ref_num == 9);
+}
+
 } // namespace
 
 int main() {
@@ -856,6 +912,7 @@ int main() {
     test_carrier_death_and_respawn_keep_the_child();
     test_freed_carrier_row_keeps_the_child();
     test_carrier_destruction_resets_child_words();
+    test_vehicle_death_releases_or_destroys_the_eweap_group();
     test_barrel_spin_once_before_weapon_pump();
     test_barrel_spin_tail_and_class_gate();
     test_attached_turret_slews_once_per_world_tick();

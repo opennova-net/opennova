@@ -297,6 +297,9 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     if (attrib & 0x2000000u) s.cause_flags |= 0x80u;
     s.ammo_count = e.map_symbol; // BMS byte 81 -> entity+290 [orig: @0x40e9f0]
     s.ref_num = e.ref_num;       // BMS byte 153 -> entity+533 [orig: @0x40e9f0]
+    // A record refNum joins the row to that refNum's group list [orig:
+    // Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45].
+    s.ref_group_member = e.ref_num != 0;
     // BMS byte 155 (.mis "lfp_group") -> entity+538 — the AS zone number (net-re §5.61).
     // [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
     s.zone_number = e.lfp_group;
@@ -584,6 +587,8 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
                 ref_occupied[static_cast<size_t>(id)] = true;
                 break;
             }
+            // The spawner only marks the id taken: the carrier itself never
+            // joins that refNum's group list [orig: @0x40F389, @0x40F4C7].
             carrier->ref_num = free_id;
         }
         Entity child_seed;
@@ -603,6 +608,10 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         //  @0x40F40E; Entity_InitBoneReferences @0x4415E1..0x4415FF]
         child_seed.group_id = carrier->group_id;
         child_seed.ref_num = carrier->ref_num;
+        // The child spawns from a record carrying that refNum, so it joins
+        // the group list [orig: @0x40F3B1..0x40F3CF -> Entity_SpawnFromBMSRecord
+        //  @0x40F3FF, the join @0x40EC23..0x40EC45].
+        child_seed.ref_group_member = child_seed.ref_num != 0;
         child_seed.engine_flags = carrier->engine_flags;
         child_seed.flags = carrier->flags;
         child_seed.sub_type = attachment.stored_slot != 0

@@ -267,9 +267,10 @@ weapon-window fallback (`@ 0x540E18`) still applies (2026-09-26).
 pool 2, each over the row count it took before starting (`@ 0x40FD49..0x40FD96`);
 a child is walked only if it filled a hole below that count. An hp-0 child's
 subType is 0xFF when the class init reads it, so it rides its carrier's root.
-`Entity_Destroy @ 0x43E810` walks no children: a child keeps pointing at the
-zeroed row and rides the next occupant. The child identity, class init, death
-and destroy legs are world-wac-ai-re.md §26.5c.
+`Entity_Destroy @ 0x43E810` destroys a carrier's EWeap refNum group with it
+(`EntityReference_DestroyEWeapGroup @ 0x546F30`); only a child outside that
+group keeps pointing at the zeroed row and rides the next occupant. The child
+identity, class init, death and destroy legs are world-wac-ai-re.md §26.5c.
 
 Mission promotion recursively creates the child item entities and resolves
 their model userpoints case-insensitively (falling back to the parent root when

@@ -255,7 +255,17 @@ contained too: `Game_StartMission` -> `Entity_BuildProximityListsForPools12
 +0x1D0 `@ 0x4b406b`) for pool 1 and non-building pool 2, and the client runs
 the same list for replicated entities (`NetPacket_HandleEntityCreate
 @ 0x42f227`, `Entity_UpdatePool1Slot @ 0x4b8e25`, `Entity_UpdateAllEntities
-@ 0x4c229c`). **entry[9] = the sun-visibility factor**.
+@ 0x4c229c`). A placed record is a building to the renderer and the light
+spawner by its items.def TYPE (`Entity_BuildProximityLists_Pool2 @ 0x4b946e /
+0x4b9502`; `Entity_SpawnGlowEffects` `cmp [eax+5Ch], 5` `@ 0x56c7e8`), not by
+its BMS record family: a pool-2 decoration or foliage row is an entity, so its
+static-row lane is the entity wave's (the 0x80 lerp over daylight 0 when
+contained, `Terrain_SetupEffectForEntity @ 0x5c74a0`, `@ 0x5c7c05`), its LGHT
+records run the blink query, and its mirror clip is the entity form. Reimpl
+(2026-09-27): `mission::placed_record_is_building`; `EffectLightDirector` and
+the placer's mirror-clip wave use it. GUT `static_decoration_lighting_test.gd`
+(windowed; the CP03 Armry03 crate in HN_Bld1, which drew brighter than retail
+while its BMS family made it a building). **entry[9] = the sun-visibility factor**.
 `Entity_ComputeSunVisibility @ 0x5c6800` returns 1.0 when the entity's
 proximity-source count at +0x1C0 is zero. Otherwise its origin is entity
 position plus the uniformly scaled collision-AABB midpoint stored at

@@ -74,6 +74,12 @@ public:
     bool wac_kill_ssn(EntityTarget ssn);
     // The shared destroy (retail Entity_Destroy): no network notification.
     bool remove_ssn(EntityTarget ssn);
+    // A refNum group's EWeap destroy: every other member of the row's refNum
+    // group list whose def carries EWeap goes through remove_ssn, then the row
+    // leaves the list and its refNum clears. The destroy of a non-person row
+    // with a def and a refNum runs it, and so does the death of a vehicle
+    // without PlayerControl. [orig: EntityReference_DestroyEWeapGroup @0x546F30]
+    void destroy_eweap_group(EntityHandle h);
     // The script removal: S2C 0x12 to the joiners, a removed player's placed
     // devices through the same removal, then the shared destroy.
     // [orig: Server_RemoveEntityAndNotify @0x50a270]

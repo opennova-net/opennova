@@ -213,6 +213,13 @@ static void test_emplacement_attachments() {
     CHECK(parent->ref_num == 1);
     CHECK(plain_child->ref_num == 1 && gun_child->ref_num == 1 &&
           crosshair_child->ref_num == 1);
+    // The children's records carry that refNum, so they join its group list;
+    // the carrier the spawner handed it to does not.
+    // [orig: Entity_SpawnWeaponOverlays @0x40F389 / @0x40F4C7;
+    //  Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45]
+    CHECK(!parent->ref_group_member);
+    CHECK(plain_child->ref_group_member && gun_child->ref_group_member &&
+          crosshair_child->ref_group_member);
     CHECK(plain_child->group_id == parent->group_id);
     CHECK(gun_child->engine_flags == parent->engine_flags &&
           gun_child->flags == parent->flags);

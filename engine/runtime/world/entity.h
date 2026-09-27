@@ -850,6 +850,16 @@ struct Entity {
     uint8_t sub_type = 0;
     // entity+533 refNum <- BMS record byte 153; the 0x10 record's flag-0x40 byte (D-NET-94).
     uint8_t ref_num = 0;
+    // Whether the row is in its refNum's group list, the list the destroy's
+    // EWeap walk reads: a spawn from a record carrying a nonzero refNum joins
+    // it (a BMS row, and an addeweap child, whose record carries its
+    // carrier's refNum); the refNum the addeweap spawner hands a carrier that
+    // had none does not, and the destroy's list removal clears it.
+    // [orig: Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45 (the join);
+    //  Entity_SpawnWeaponOverlays @0x40F389 (the carrier's refNum, occupied
+    //  only @0x40F4C7), the child record's refNum @0x40F3B1..0x40F3CF;
+    //  Entity_Destroy @0x43E840..0x43E858 (the removal)]
+    bool ref_group_member = false;
 	// BMS team_budget byte165 -> entity+356, distinct from spawn team +357.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0]
 	int8_t vehicle_spawn_team = 0;

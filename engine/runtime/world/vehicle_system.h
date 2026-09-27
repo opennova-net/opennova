@@ -49,6 +49,10 @@ public:
 	void tick_dead(Entity &vehicle, AiEntity &brain);
 	void release_flares(Entity &vehicle);
 	void tick_flare_input(Entity &vehicle);
+	// A dying vehicle's refNum group: with PlayerControl its EWeap members are
+	// released in place (gun words, ammo, gunner); without it they are
+	// destroyed and the vehicle gives up its refNum.
+	// [orig: Vehicle_ReleaseEWeapGroupOnDestruction @0x547040]
 	void cleanup_destroyed_ref_group(Entity &vehicle);
 
 	// Validate + apply one C2S 0x26 attach request: `player` mounts `vehicle` at model-bone
