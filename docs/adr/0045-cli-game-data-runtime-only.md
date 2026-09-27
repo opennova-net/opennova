@@ -1,6 +1,9 @@
 # ADR 0045: CLI game data and a runtime-only distribution
 
-- **Status**: Accepted, 2026-09-19
+- **Status**: Accepted, 2026-09-19; partially superseded by
+  [ADR 0048](0048-bundled-placeholder-menu-and-retail-picker.md) (a bundled
+  placeholder menu boots without `--resource-dir`, and its PLAY RETAIL picks
+  and saves a retail install; the CLI semantics below stand)
 - **Supersedes**: ADR 0037; the bundled-data and picker contracts in ADR 0025;
   ONED product and distribution provisions of ADRs 0015 and 0039.
 

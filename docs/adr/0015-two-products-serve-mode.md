@@ -6,6 +6,9 @@
 >
 > **Updated by [ADR 0045](0045-cli-game-data-runtime-only.md).** ONED is removed, so one
 > Godot product remains (the runtime game); the serve-mode rule stands.
+>
+> **Updated by [ADR 0048](0048-bundled-placeholder-menu-and-retail-picker.md).** The
+> OpenNova Launcher is retired.
 
 OpenNova's shared Godot project exports exactly two applications per platform:
 
