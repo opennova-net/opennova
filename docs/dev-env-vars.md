@@ -52,7 +52,7 @@ option.
 
 | Flag | Effect |
 |---|---|
-| `--resource-dir <dir>` | the game data root (a packed install or a loose tree) |
+| `--resource-dir <dir>` | the game data root (a packed install or a loose tree); without it the game boots the bundled `assets/` menu (ADR 0048) |
 | `/exp <name>` | mount that expansion on top of the base set |
 | `/game <code>` | the game profile (SCR policy) |
 | `/d` | loose files override archive entries |

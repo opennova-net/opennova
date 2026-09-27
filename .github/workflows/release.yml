@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # Runtime export contains no game data.
+          lfs: false   # The bundled assets/ are plain git blobs; nothing here needs LFS.
           submodules: recursive
 
       - name: Cache Godot binary
