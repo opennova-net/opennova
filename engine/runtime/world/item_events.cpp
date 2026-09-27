@@ -10,6 +10,7 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
+#include <iterator>
 #include <runtime/audio/ambient_mixer.h>
 
 namespace opennova::world {
@@ -326,16 +327,25 @@ void gnl2_death_event(World &world, Entity &target, int phase, int32_t section) 
 }
 
 // The "ewep" event callback [orig: Entity_UpdateChildAttachment @0x4409A0 —
-// row @0x813090]. Its alive legs (@0x4409c6..0x440b58: the parent-bone pose
-// copy into the weapon slots and the occupant yaw/pitch follow with the
-// local-player clamp) are the attachment and seat systems' per-frame work;
-// this is the death half.
+// row @0x813090]. Its occupant yaw/pitch follow with the local-player clamp
+// (@0x440a1c..0x440b58) is the seat system's per-frame work; this is the
+// carrier blink-quad copy (entity+0x1D0..0x1DC, which the IDB's struct calls
+// weaponSlots) and the death half.
 void ewep_death_event(World &world, Entity &target, int phase, int32_t section) {
 	// A husked emplacement only re-arms [orig: @0x4409ae Flags & 4 ->
 	// +0x2AC = 0x3E0].
 	if ((target.engine_flags & kEntityFlagHusk) != 0) { target.class_think_ticks = 992; return; }
     if (target.class_think_ticks <= 0 && !target.ground_target.valid()) target.class_think_ticks = 992;
-    if (target.ground_target.valid() && !target.primary_occupant.valid()) target.class_think_ticks = 62;
+    // An unoccupied child on a carrier rides the carrier's blink quad, and
+    // re-arms the clock to 62. [orig: groundEntity && !occupantEntity
+    // @0x4409d6..0x4409dd, the quad copy @0x4409e6..0x440a0c, +0x2AC = 0x3E
+    // @0x440a12]
+    if (target.ground_target.valid() && !target.primary_occupant.valid()) {
+        if (const Entity *carrier = world.registry.get(target.ground_target))
+            std::copy(std::begin(carrier->blink_hits), std::end(carrier->blink_hits),
+                      std::begin(target.blink_hits));
+        target.class_think_ticks = 62;
+    }
 	const EntityHandle occupant = target.primary_occupant; // entity+0x170 occupantEntity
 	if (!world.rules.logic_authority) {
 		// The client kill leg performs NO detach — a joiner's gunner is

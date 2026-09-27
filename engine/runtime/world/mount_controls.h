@@ -498,27 +498,127 @@ inline void publish_emplaced_gun_words_to_parent(World &world,
 	}
 }
 
+// The ewep class update's first gate: a carrier (groundEntity +0x28, the
+// emplacement parent here) that is a dead PlayerControl hull. The update then
+// hides the child (Flags bit 0) and ends before every later leg: the vehicle
+// block, the publication, the matrix, the window leg and the spin tail.
+// [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1 — the carrier
+//  @0x440CBF, its def @0x440CCA..0x440CCF, `test byte [def+54h],40h`
+//  @0x440CD1, `test byte [carrier+24h],2` @0x440CD7, `or [child+24h],1`
+//  @0x440CDD, the jump to the epilogue @0x440CE1]
+// A live PlayerControl carrier's block then fills the child's anchor index
+// (+0x319) from the carrier def's slot table when it reads 0xFF. No store ever
+// leaves 0xFF there: the pools start zeroed and the ewep class init always
+// stores the slot's table byte, on every peer, so emplacement_bone (that init's
+// value) is the whole port of it. [orig: @0x440CE6..0x440CFD, the same test in
+// Entity_GetMountSlotBoneIndex @0x546680; Pool_Clear @0x442060;
+// Entity_InitBoneReferences @0x4415E1..0x4415FF]
+inline bool emplaced_carrier_is_dead_hull(const Entity *carrier) {
+	return carrier != nullptr && carrier->has_item_def &&
+			(carrier->item_attrib & kItemAttribPlayerControl) != 0 &&
+			((carrier->flags | carrier->engine_flags) & kEntityFlagDead) != 0;
+}
+
 // One occupied tick of the gun channel in retail order: the ai-fn refresh,
 // then the class update's parent-brain publication and its window clamp +
-// occupant write-back.
+// occupant write-back. The class update's two legs stop at its dead-hull
+// exit; the ai-fn refresh is a call of its own and still runs.
 // [orig: Entity_UpdatePool1Slot @0x4b8dd0 — ai-fn @0x4b8e3c, class update
-//  @0x4b8e53 (publication @0x440f04..0x441020 precedes the window leg
-//  @0x4411d1..0x4412b3 inside it)]
+//  @0x4b8e53 (the exit @0x440CBF..0x440CE1, then the publication
+//  @0x440f04..0x441020 before the window leg @0x4411d1..0x4412b3)]
 inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 		const Entity &occupant, AiEntity &gunner) {
 	tick_emplaced_gun_words(mount, occupant, gunner);
+	if (mount.emplaced_update &&
+			emplaced_carrier_is_dead_hull(world.registry.get(mount.emplacement_parent)))
+		return;
 	publish_emplaced_gun_words_to_parent(world, mount);
 	clamp_emplaced_gun_words_to_window(world, mount, gunner);
 }
 
-// The ewep class update's every-tick legs outside the occupied channel: the
-// parent-brain publication, then the barrel spin tail. An occupied gun
-// publishes again from tick_emplaced_weapon_channel once its producer has
-// refreshed the words, so the brain ends the tick on the fresh words.
+// The ewep class update's every-tick legs outside the occupied channel, in
+// retail order. A dead PlayerControl carrier hides the child and ends the
+// update. With a live carrier the update needs the inline slot Def; on a
+// vehicle carrier (def type 1) it then clears the child's hide and kill bits
+// (Flags & ~7, a clear on both words), copies the carrier's 16-bit Health
+// word and its blink quad. The vehicle block ends by calling the carrier's
+// render-class CTRL writer (def+0x144), which writes only the global CTRL
+// bus; the port composes that bus whenever it poses the carrier's
+// attachments (compose_vehicle_pose_controls), as the matrix build's own
+// def+0x144 call does. Then
+// the parent-brain publication, and the child's matrix rebuilt from its
+// carrier, marked by the matrix bit (Flags 0x20000, homed on engine_flags).
+// The spin tail runs last, behind the slot Def, with or without a carrier.
+// An occupied gun publishes again from tick_emplaced_weapon_channel once its
+// producer has refreshed the words, so the brain ends the tick on the fresh
+// words.
 // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 -> Entity_UpdateTransformAndTurret
-//  @0x440ca0 (publication @0x440f04..0x441020, spin tail @0x44139D..0x441447)]
+//  @0x440ca0: the exit @0x440CBF..0x440CE1; the carrier and slot Def gates
+//  @0x440E8C..0x440EA0; def type 1 @0x440EA6..0x440EB1, `and [child+24h],
+//  0FFFFFFF8h` @0x440EB3, the Health word @0x440EB7..0x440EBE, the quad
+//  @0x440EC5..0x440EEF, the def+0x144 call @0x440EF5..0x440EFF; the
+//  publication @0x440f04..0x441020; the matrix copy @0x4411BC and the OR
+//  @0x4411C2; the spin tail @0x44139D..0x441447]
 inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
-	publish_emplaced_gun_words_to_parent(world, mount);
+	if (!mount.emplaced_update) return;
+	const Entity *carrier = world.registry.get(mount.emplacement_parent);
+	if (emplaced_carrier_is_dead_hull(carrier)) {
+		mount.flags |= kEntityFlagCarried;
+		return;
+	}
+	if (carrier != nullptr) {
+		if (emplaced_slot_def(world, mount) == nullptr) return;
+		if (carrier->has_item_def && carrier->item_type == 1) {
+			constexpr uint32_t kHideAndKillBits =
+					kEntityFlagCarried | kEntityFlagDead | kEntityFlagHusk;
+			const bool was_husk = ((mount.flags | mount.engine_flags) & kEntityFlagHusk) != 0;
+			mount.flags &= ~kHideAndKillBits;
+			mount.engine_flags &= ~kHideAndKillBits;
+			// The port mirrors the Dead bit in `alive`, and the renderer's husk
+			// read of bit 4 in a presenter swap, so the clear revives both.
+			mount.alive = true;
+			if (was_husk) {
+				HuskSwapEvent intact;
+				intact.net_id = mount.net_id;
+				intact.wire_handle = mount.handle.packed;
+				intact.bms_id = mount.bms_id;
+				intact.spawn_origin = mount.spawn_origin;
+				intact.item_id = mount.item_id;
+				intact.pos = mount.position;
+				intact.restore_intact = true;
+				world.out.destruction.husk_swaps.push_back(intact);
+			}
+			const int16_t health = static_cast<int16_t>(carrier->health);
+			mount.health = health;
+			if (AiEntity *brain = world.ai.for_handle(mount.handle)) brain->health = health;
+			for (int i = 0; i < 4; ++i) mount.blink_hits[i] = carrier->blink_hits[i];
+		}
+		publish_emplaced_gun_words_to_parent(world, mount);
+		mount.engine_flags |= kEntityFlagMatrixBuilt;
+	} else if (mount.emplacement_parent.valid()) {
+		// The carrier's row was destroyed under the child, which only a child
+		// outside the carrier's EWeap refNum group survives (the destroy takes
+		// the rest, EntityCommands::remove_ssn). Retail keeps the child's
+		// pointer to that row, which Entity_Destroy zeroed: no def, no Flags,
+		// no model, so no hide and no vehicle block, and the root copy takes
+		// the zeroed pose (the world origin, zero angles) every update. A later
+		// occupant of the row becomes the child's carrier.
+		// [orig: Entity_Destroy memset(entity, 0, 0x2B4) @0x43EA70, Flags +0x24,
+		//  def +0x20, model +0x30 all inside it, its refNum walk @0x43E9CD ->
+		//  CStreamingMem_Destroy @0x546F30; Entity_UpdateTransformAndTurret
+		//  def test @0x440EA6..0x440EAB, root copy @0x4410EA..0x4411BC]
+		if (emplaced_slot_def(world, mount) == nullptr) return;
+		mount.position = Vec3{};
+		mount.yaw = 90; // engine heading 0
+		mount.pitch = 0;
+		mount.roll = 0;
+		if (mount.veh.yaw_seeded) {
+			mount.veh.yaw_bam = 0;
+			mount.veh.air_pitch_bam = 0;
+			mount.veh.air_roll_bam = 0;
+		}
+		mount.engine_flags |= kEntityFlagMatrixBuilt;
+	}
 	tick_emplaced_weapon_animation(world, mount);
 }
 

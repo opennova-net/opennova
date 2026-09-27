@@ -42,16 +42,19 @@ void compile_precipitation_frame(env::PrecipitationField &field,
 	out.vertices.reserve(static_cast<size_t>(env::PrecipitationField::kSlots) * 15u);
 	out.snow = precipitation_kind == 1u;
 	out.color_argb = (terrain_light_combined_rgb & 0x00FFFFFFu) | 0xFF000000u;
-	// The drop gate [orig: @ 0x5dee48].
+	// The drop gate: the drawer returns before the pool update and before its
+	// camera memory or the fall accumulator is touched [orig: the rain test
+	// @ 0x5dee27, `jle` @ 0x5dee48 to the epilogue].
 	if (rain_pct_q16 <= env::PrecipitationField::kRainGateQ16) {
-		state.have_last_camera = true;
-		for (int i = 0; i < 3; ++i) state.last_camera_q16[i] = camera.position_q16[i];
 		return;
 	}
-	// The camera velocity: this frame's delta from the last drawn camera
-	// [orig: @ 0x5dee7a..0x5deed8], zero on the first draw.
+	// The camera velocity: this call's delta from the last call's camera,
+	// measured only while the camera mode is the last call's, else zero
+	// [orig: the mode test @ 0x5dee74..0x5dee7a, the delta
+	// @ 0x5dee7c..0x5deeac]; either way the call records its mode and camera
+	// [orig: @ 0x5deeb4..0x5deed8].
 	float velocity[3] = {0.0f, 0.0f, 0.0f};
-	if (state.have_last_camera) {
+	if (camera.mode == state.last_mode) {
 		const int32_t delta[3] = {
 			camera.position_q16[0] - state.last_camera_q16[0],
 			camera.position_q16[1] - state.last_camera_q16[1],
@@ -59,7 +62,7 @@ void compile_precipitation_frame(env::PrecipitationField &field,
 		};
 		to_render(delta, velocity);
 	}
-	state.have_last_camera = true;
+	state.last_mode = camera.mode;
 	for (int i = 0; i < 3; ++i) state.last_camera_q16[i] = camera.position_q16[i];
 	// The accumulated fall since the last draw, read then zeroed
 	// [orig: dword_2C05A24..2C @ 0x5deede..0x5deef4].

@@ -1,15 +1,20 @@
 #include <runtime/world/match.h>
 #include <base/io/tick_rate.h>
 #include <base/io/bam.h>
+#include <base/io/fixed.h>
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <utility>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/carrier_motion.h>
 #include <runtime/world/collision.h>
 #include <base/gameprofile/game_type.h>
+#include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -43,6 +48,11 @@ constexpr int32_t kTeam4Bay = 4102;       // [orig: @0x4dd216 (0x1006, team 4)]
 constexpr int32_t kTeam3Bay = 4103;       // [orig: @0x4dd208 (0x1007, team 3)]
 constexpr int32_t kHill = 6006;           // [orig: @0x5089e8 (0x1776)]
 
+// The drop's radian-per-BAM word, the verbatim retail double (30.5 ppm off
+// 2pi/2^32, base/io/bam.h); its Q22 partner dbl_7C3600 is io::kQ22One.
+// [orig: Entity_DropCarriedObject `fmul dbl_7C3608` @0x439e58]
+constexpr double kDropRadiansPerBam = 1.4629627251502471e-9;
+
 bool is_flag(int32_t item_id) {
     return item_id == kBlueFlag || item_id == kRedFlag || item_id == kNeutralFlag;
 }
@@ -50,6 +60,15 @@ bool is_flag(int32_t item_id) {
 bool is_flag_bay(int32_t item_id) {
     return item_id == kBlueBay || item_id == kRedBay ||
            item_id == kTeam4Bay || item_id == kTeam3Bay;
+}
+
+// The Yaw word back to the definition pose's, the spawn heading of the
+// whole-degree placement yaw [orig: Entity_SyncPositionFromDefinition
+// @0x43aa96]. A dropped object holds its heading as a live BAM word.
+void restore_authored_heading(Entity &flag, int16_t home_yaw) {
+    flag.yaw = home_yaw;
+    if (flag.veh.yaw_seeded)
+        flag.veh.yaw_bam = spawn_angle_bam(90 - home_yaw);
 }
 
 // [orig: Server_UpdateCaptureZoneProximity @0x5086A0 — the per-id bit OR into
@@ -648,6 +667,10 @@ Match::CarryObjectiveState *Match::carry_state(World &world, EntityHandle object
         carry_objectives_.end());
     carry_objectives_.push_back(
         {objective, entity->registry_spawn_id, entity->spawn_position, 0});
+    // The definition pose's yaw word is the spawn heading [orig:
+    // Entity_InitFromModel @0x40e12a..0x40e130 copies Yaw into aiRuntime
+    // f0_7[7]]; nothing has turned the row before its first carry service.
+    carry_objectives_.back().home_yaw = entity->yaw;
     return &carry_objectives_.back();
 }
 
@@ -666,6 +689,9 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     carrier->mounted_child = flag_handle;
     flag->primary_occupant = player_handle;
     flag->flags |= kEntityFlagCarried;
+    // The attach puts back the def's own update callback, ending a drop's
+    // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
+    flag->drop_motion = DropMotion::None;
     state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
@@ -695,6 +721,12 @@ void Match::return_flag_home(World &world, EntityHandle flag_handle,
     flag->ground_target = EntityHandle{};
     flag->flags &= ~kEntityFlagCarried;
     flag->position = state->home;
+    // The retail returns are the definition-pose sync, whose snap writes the
+    // heading with the position. [orig: Entity_SyncPositionFromDefinition
+    // @0x43aa96, called from
+    //  Entity_UpdateIdleCheck @0x40857d, Entity_ProcessWaypointInteraction
+    //  @0x4ad8c3 / @0x4ad908, Server_ProcessScoringAndBroadcast @0x516a5b]
+    restore_authored_heading(*flag, state->home_yaw);
     flag->alive = true;
     state->return_ticks = 0;
     gameplay_events_.push_back({kind,
@@ -815,6 +847,85 @@ void Match::record_target_destroyed(const World &world, EntityHandle target_hand
         add_team_event(attacker_entity->team, MatchStats::kTargetsDestroyed, bonus);
 }
 
+DropCarrierPose drop_carrier_pose(const World &world, const Entity &carrier) {
+    DropCarrierPose pose;
+    pose.position = carrier.position;
+    pose.flags = carrier.flags;
+    pose.bms_id = carrier.bms_id;
+    pose.handle = carrier.handle.packed;
+    std::copy(std::begin(carrier.blink_hits), std::end(carrier.blink_hits),
+              std::begin(pose.blink_hits));
+    // The carrier's +0x10/+0x14 words: a person keeps its live heading and
+    // pitch on its body record; any other carrier reads its live euler.
+    if (const AiEntity *body = world.ai.for_handle(carrier.handle)) {
+        pose.heading_bam = body->heading;
+        pose.pitch_bam = body->pitch;
+    } else {
+        int32_t carrier_pos[3];
+        int32_t carrier_roll = 0;
+        carrier_pose_fixed(carrier, carrier_pos, pose.heading_bam, pose.pitch_bam, carrier_roll);
+    }
+    return pose;
+}
+
+// [orig: Entity_DropCarriedObject @0x439df0]
+void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPose &carrier) {
+    // The carried and indoors bits clear, and the carrier's indoors bit is
+    // copied [orig: @0x439e0d..0x439e2b]; the proximity refresh below clears
+    // and re-derives it [orig: Entity_BuildProximityList @0x4b3e0c]. A
+    // terrain-height Z (@0x439e2e..0x439e51) is replaced by the pose store
+    // before any read.
+    object.flags &= ~(kEntityFlagCarried | kEntityFlagIndoors);
+    if ((carrier.flags & kEntityFlagIndoors) != 0)
+        object.flags |= kEntityFlagIndoors;
+    // The motion: no horizontal velocity, a vertical one from the sine of the
+    // carrier's pitch in Q22 (`imul 400h; shrd 16h`, an arithmetic >> 12),
+    // and the free fall installed as the object's update callback
+    // (Match::update_dropped_object). The +0x155 byte the drop sets to 0x10 is
+    // read only by the S2C 0x35 pickup refusal [orig: sub_4E03D0 @0x4e03f0],
+    // a message this port leaves unhandled.
+    // [orig: @0x439e54..0x439e88 (the motion), @0x439e95 (+0x1C4 =
+    //  Entity_UpdatePositionAndTransform)]
+    const double lift = std::sin(static_cast<double>(carrier.pitch_bam) * kDropRadiansPerBam) *
+                         io::kQ22One;
+    object.veh.vel_x = 0;
+    object.veh.vel_y = 0;
+    object.veh.slide_z = io::bam_sar(static_cast<int32_t>(lift), 12);
+    object.drop_motion = DropMotion::Fall;
+    // The pose: the carrier's X and Y, its Z plus 0x4000, its heading plus a
+    // quarter turn; the pitch and roll words stay the object's own, now held
+    // as live BAM words like a mover's. [orig: @0x439e9f..0x439ec3]
+    if (!object.veh.yaw_seeded) {
+        object.veh.air_pitch_bam = spawn_angle_bam(object.pitch);
+        object.veh.air_roll_bam = spawn_angle_bam(object.roll);
+        object.veh.yaw_seeded = true;
+    }
+    object.veh.yaw_bam = io::bam_add(carrier.heading_bam, 0x40000000);
+    object.yaw = static_cast<int16_t>(
+        std::lround(mission_yaw_deg_from_bam_heading(object.veh.yaw_bam)));
+    object.position = carrier.position;
+    object.position.z = static_cast<float>(
+        from_fixed(io::bam_add(to_fixed(carrier.position.z), 0x4000)));
+    // The dropped object takes its carrier's blink quad, then re-runs its own
+    // proximity/blink query at the drop point (the quad and the indoors bit
+    // the collector's blink-hits gate and the render waves read).
+    // [orig: @0x439ec6..0x439ef1 (the quad copy), Entity_BuildProximityList
+    //  @0x439ef7]
+    std::copy(std::begin(carrier.blink_hits), std::end(carrier.blink_hits),
+              std::begin(object.blink_hits));
+    if (world.collision != nullptr)
+        world.collision->refresh_blink(world, object);
+    // The object's def sound at the carrier, the carrier as its source: the
+    // def's +0x6F3 name (items.def door_open_sound_id; empty for the stock
+    // flags, whose empty set plays nothing). The authority's 0x2F send rides
+    // the caller's event. [orig: @0x439efc..0x439f1b —
+    // SoundBank_FindSetByNameAnyBank(itemDef + 0x6F3) ->
+    // Sound_PlayWithDistanceAttenuation(set, &carrier->Position, carrier)]
+    if (object.has_item_def && object.door_open_sound[0] != '\0')
+        world.out.fire_sounds.play_with_distance_delay(object.door_open_sound,
+                carrier.position, carrier.bms_id, carrier.handle);
+}
+
 void Match::drop_carried_object(World &world, EntityHandle player_handle) {
     Entity *carrier = world.registry.get(player_handle);
     if (carrier == nullptr || !carrier->mounted_child.valid())
@@ -826,8 +937,7 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
     if (flag == nullptr || state == nullptr)
         return;
     flag->primary_occupant = EntityHandle{};
-    flag->flags &= ~kEntityFlagCarried;
-    flag->position = carrier->position;
+    drop_object_from_carrier(world, *flag, drop_carrier_pose(world, *carrier));
     flag->alive = true;
     // The dropped-flag service re-arms the return window whenever the flag is
     // not idle: 210 when the configured time is below 5, else the configured
@@ -849,9 +959,9 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
 
 bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     // [orig: Entity_SyncPositionFromDefinition @0x43A9B0]. The authored pose is
-    // the carry state's home (aiRuntime f0_7[4..6]); the yaw term of retail's
-    // equality test (f0_7[7]) never differs here because nothing in this sim
-    // rotates a flag, so position alone decides it.
+    // the carry state's home (aiRuntime f0_7[4..6]) and its heading (f0_7[7]);
+    // a drop turns the flag a quarter turn off its carrier, so the heading
+    // takes part in the equality test.
     Entity *flag = world.registry.get(flag_handle);
     CarryObjectiveState *state = carry_state(world, flag_handle);
     if (flag == nullptr || state == nullptr)
@@ -862,7 +972,13 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     const int32_t home_x = to_fixed(state->home.x);
     const int32_t home_y = to_fixed(state->home.y);
     const int32_t home_z = to_fixed(state->home.z);
-    if (x == home_x && y == home_y && z == home_z)
+    int32_t pose[3];
+    int32_t heading = 0;
+    int32_t pitch = 0;
+    int32_t roll = 0;
+    carrier_pose_fixed(*flag, pose, heading, pitch, roll);
+    if (x == home_x && y == home_y && z == home_z &&
+        heading == spawn_angle_bam(90 - state->home_yaw))
         return false; // [orig: @0x43a9f8 — already at the definition pose]
     const int64_t dx = int64_t{x} - home_x;
     const int64_t dy = int64_t{y} - home_y;
@@ -871,10 +987,12 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
         static_cast<int64_t>(std::sqrt(static_cast<long double>(dx * dx + dy * dy))) < 0x20000 &&
         (dz < 0 ? -dz : dz) < 0x20000; // [orig: @0x43aa3b / @0x43aa4d]
     if (!near_home) {
-        // The snap: position back to the definition pose; the ground link is
-        // re-resolved by a downward raycast in retail (@0x43ab22) — this port
-        // clears it like the timeout return does, no raycast seam here.
+        // The snap: position and heading back to the definition pose; the
+        // ground link is re-resolved by a downward raycast in retail
+        // (@0x43ab22) — this port clears it like the timeout return does, no
+        // raycast seam here.
         flag->position = state->home;                 // [orig: @0x43aa7d..0x43aa96]
+        restore_authored_heading(*flag, state->home_yaw);
         flag->ground_target = EntityHandle{};
     }
     // Both paths publish the 19-B 0x2F state and nothing else (no 0x1E, no
@@ -1496,6 +1614,132 @@ void Match::tick_flag_event(World &world, Entity &flag) {
         flag.position.y = occupant->position.y;
     }
     flag.class_think_ticks = 62;
+}
+
+namespace {
+
+bool entity_dead(const Entity &entity) {
+    return ((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0;
+}
+
+// [orig: Entity_UpdatePositionAndTransform @0x4adef0]
+void fall_step(World &world, Entity &object) {
+    // The fall is a client of the clamped ground query; a world without a
+    // collision world never steps it.
+    if (world.collision == nullptr)
+        return;
+    // The step's start pose, then the move: position plus velocity, and the
+    // gravity step off the vertical velocity just read. [orig: the saved pose
+    // @0x4adf0d..0x4adf6d; the step @0x4adf33..0x4adf55]
+    stamp_saved_live_pose(object);
+    Entity::VehicleMotorState &m = object.veh;
+    const int32_t x = to_fixed(object.position.x);
+    const int32_t y = to_fixed(object.position.y);
+    const int32_t z = to_fixed(object.position.z);
+    const int32_t next_x = io::bam_add(x, m.vel_x);
+    const int32_t next_y = io::bam_add(m.vel_y, y);
+    const int32_t next_z = io::bam_add(m.slide_z, z);
+    m.slide_z = io::bam_sub(m.slide_z, 167);
+    // The ground under the start point, queried 0x1000 above it; the indoors
+    // bit drops the terrain floor. [orig: Entity_ComputeClampedDisplacement
+    // @0x4ad6a0, called @0x4adf95 over (x, y, z + 0x1000) with Flags &
+    // 0x800000]
+    EntityHandle ground;
+    const int32_t height = world.collision->minefield_ground(
+        world, object.handle, FixedVec3{x, y, io::bam_add(z, 0x1000)},
+        (object.flags & kEntityFlagIndoors) != 0, &ground);
+    if (next_z > height) {
+        object.position = {static_cast<float>(from_fixed(next_x)),
+                           static_cast<float>(from_fixed(next_y)),
+                           static_cast<float>(from_fixed(next_z))}; // [orig: @0x4ae016..0x4ae01f]
+        return;
+    }
+    // The landing: the ground height, the ground link and no velocity
+    // [orig: @0x4adfa1..0x4adfbe], then the callback's successor by the def:
+    // none without a def; a flag rides a ground entity and stops on none; any
+    // other def follows a dead ground entity plainly and rides otherwise
+    // (a ride with no ground only keeps saving its pose)
+    // [orig: @0x4adfc9..0x4ae00e].
+    object.position.z = static_cast<float>(from_fixed(height));
+    object.ground_target = ground;
+    m.vel_x = 0;
+    m.vel_y = 0;
+    m.slide_z = 0;
+    const Entity *landed_on = world.registry.get(ground);
+    if (!object.has_item_def)
+        object.drop_motion = DropMotion::None;
+    else if (is_flag(object.item_id))
+        object.drop_motion = landed_on != nullptr ? DropMotion::Ride : DropMotion::None;
+    else
+        object.drop_motion = landed_on != nullptr && entity_dead(*landed_on) ? DropMotion::Follow
+                                                                             : DropMotion::Ride;
+}
+
+// The landed object's parent follow: its own pose saved, then the ground
+// entity's per-tick delta applied, the translation and the rotation about the
+// ground entity with the attitude adopted (the one arithmetic both callbacks
+// share, world/carrier_motion.h). The ride alone drops back into the fall
+// when its ground entity dies, 0x4000 a tick downward with no ground link,
+// and feeds its ambient sound emitter. Both skip everything for a def with a
+// physics selector.
+// [orig: Entity_UpdateParentTransform @0x4a88b0 (the physics gate @0x4a88bb,
+//  the pose save @0x4a88c8..0x4a8902, the follow @0x4a890e..0x4a8cb7, the
+//  re-fall @0x4a8cba..0x4a8cdc, the tail @0x4a8ce3..0x4a8d4f);
+//  Entity_InterpolateFromParentDelta @0x4a8d60]
+void follow_ground(World &world, Entity &object, bool ride) {
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(object.item_id);
+    if (traits != nullptr && traits->physics != 0)
+        return;
+    stamp_saved_live_pose(object);
+    if (const Entity *ground = world.registry.get(object.ground_target)) {
+        CarrierMotionPose pose;
+        carrier_pose_fixed(object, pose.pos, pose.yaw_bam, pose.pitch_bam, pose.roll_bam);
+        follow_carrier_motion(*ground, pose);
+        object.position = {static_cast<float>(from_fixed(pose.pos[0])),
+                           static_cast<float>(from_fixed(pose.pos[1])),
+                           static_cast<float>(from_fixed(pose.pos[2]))};
+        object.veh.yaw_seeded = true;
+        object.veh.yaw_bam = pose.yaw_bam;
+        object.veh.air_pitch_bam = pose.pitch_bam;
+        object.veh.air_roll_bam = pose.roll_bam;
+        object.yaw = static_cast<int16_t>(
+            std::lround(mission_yaw_deg_from_bam_heading(pose.yaw_bam)));
+        object.pitch = static_cast<int16_t>(std::lround(double(pose.pitch_bam) * kDegreesPerBam));
+        object.roll = static_cast<int16_t>(std::lround(double(pose.roll_bam) * kDegreesPerBam));
+        if (ride && entity_dead(*ground)) {
+            object.drop_motion = DropMotion::Fall;
+            object.veh.slide_z = -0x4000;
+            object.ground_target = EntityHandle{};
+        }
+    }
+    // The tail, with or without a ground entity. The matrix rebuild over the
+    // moved pose keeps Flags 0x20000 as it finds it, and the port derives an
+    // entity's matrix from its pose wherever one is read
+    // (entity_placement_matrix), so the moved pose is the rebuilt matrix
+    // [orig: @0x4a8ce3..0x4a8d3a]. The ride alone then feeds its ambient
+    // sound emitter, for a live, unhusked object on the batch's last tick
+    // [orig: @0x4a8d3d..0x4a8d4f -> Entity_UpdateEnvSoundEmitter @0x4a8080].
+    if (ride && ((object.flags | object.engine_flags) & (kEntityFlagDead | kEntityFlagHusk)) == 0 &&
+            world.rules.last_tick_of_batch)
+        update_item_ambient_sound(world, object);
+}
+
+} // namespace
+
+void update_dropped_object(World &world, Entity &object) {
+    switch (object.drop_motion) {
+    case DropMotion::Fall:
+        fall_step(world, object);
+        break;
+    case DropMotion::Ride:
+        follow_ground(world, object, true);
+        break;
+    case DropMotion::Follow:
+        follow_ground(world, object, false);
+        break;
+    case DropMotion::None:
+        break;
+    }
 }
 
 void Match::update_flag_objectives(World &world) {

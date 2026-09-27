@@ -203,6 +203,27 @@ void OcclusionWorld::remove_entity_instance(EntityHandle h) {
     if (!h.valid()) return;
     instances_.erase(h.packed);
     forced_sections_.erase(h.packed);
+    render_models_.erase(h.packed);
+}
+
+void OcclusionWorld::assign_render_model(EntityHandle h,
+                                         const renderer::ObjectProjectionSphere &sphere) {
+    if (!h.valid()) return;
+    render_models_[h.packed] = sphere;
+}
+
+void OcclusionWorld::remove_render_model(EntityHandle h) {
+    if (!h.valid()) return;
+    render_models_.erase(h.packed);
+}
+
+bool OcclusionWorld::has_render_model(EntityHandle h) const {
+    return render_models_.count(h.packed) != 0;
+}
+
+const renderer::ObjectProjectionSphere *OcclusionWorld::render_model_sphere(EntityHandle h) const {
+    const auto it = render_models_.find(h.packed);
+    return it == render_models_.end() ? nullptr : &it->second;
 }
 
 void OcclusionWorld::assign_forced_sections(EntityHandle h, uint8_t first_lo,
@@ -434,6 +455,10 @@ bool OcclusionWorld::sphere_in_view(const OcclusionFrameCamera &cam,
          rz * cam.view_rows_q22[0][2] + 0x200000) >> 22);
     if (depth_out != nullptr) *depth_out = depth;
     if (abs32(depth) >= radius_fixed + cam.fog_dist) return false;
+    // The projector's near leg: the depth past its near word must not fall
+    // below -radius (the frustum's forward plane runs through the eye).
+    // [orig: Viewport_TransformAndClipPoint @ 0x41161a..0x411636]
+    if (depth - kViewportNearQ16 < -radius_fixed) return false;
 
     float center[3];
     render_float_from_fixed(center_fixed, center);
@@ -625,13 +650,16 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
             }
             const float *rec_world =
                     memo.record_world[static_cast<size_t>(r)].data();
-            // Sphere-vs-frustum stand-in for the viewport clip (D-OCC-12).
-            // [orig: Viewport_TransformAndClipPoint @ 0x5c6e42, radius * 65536]
+            // Sphere-vs-frustum stand-in for the viewport clip (D-OCC-12);
+            // the forward plane (index 0, through the eye) takes the
+            // projector's near word. [orig: Viewport_TransformAndClipPoint
+            // @ 0x5c6e42, radius * 65536; its near leg @ 0x41161a..0x411636]
             bool in_view = true;
             for (int32_t p = 0; p < cam.frustum_count; ++p) {
-                const float d = rec_world[0] * cam.frustum[p][0] +
-                                rec_world[1] * cam.frustum[p][1] +
-                                rec_world[2] * cam.frustum[p][2] + cam.frustum[p][3];
+                float d = rec_world[0] * cam.frustum[p][0] +
+                          rec_world[1] * cam.frustum[p][1] +
+                          rec_world[2] * cam.frustum[p][2] + cam.frustum[p][3];
+                if (p == 0) d -= static_cast<float>(kViewportNearQ16) * io::kInvFp16One;
                 if (d < -rec.radius) {
                     in_view = false;
                     break;
@@ -1493,6 +1521,38 @@ void OcclusionWorld::build_frame(World &world, CollisionWorld &collision,
     build_section_masks(world, collision, cam);
 }
 
+// [orig: Render_ProcessMainSceneFrame runs the main Terrain_RenderWorldScene
+// @ 0x5ca8ec and then Render_WeaponInsetScene @ 0x5ca949, whose own
+// Terrain_RenderWorldScene @ 0x5c9de9 re-runs Terrain_CollectVisibleEntities
+// @ 0x5c94f0 over the same frame globals with the Inset camera]
+void OcclusionWorld::select_view(OcclusionView view) {
+    if (view == selected_view_) return;
+    selected_view_ = view;
+    ParkedFrame &p = parked_view_;
+    batch_.swap(p.batch);
+    slots_.swap(p.slots);
+    occluder_edge_planes_.swap(p.occluder_edge_planes);
+    occluder_face_planes_.swap(p.occluder_face_planes);
+    occluder_edge_runs_.swap(p.occluder_edge_runs);
+    occluder_face_runs_.swap(p.occluder_face_runs);
+    window_groups_.swap(p.window_groups);
+    viewthru_groups_.swap(p.viewthru_groups);
+    window_group_planes_.swap(p.window_group_planes);
+    viewthru_group_planes_.swap(p.viewthru_group_planes);
+    link_track_.swap(p.link_track);
+    masks_.swap(p.masks);
+    std::swap(exterior_plane_set_, p.exterior_plane_set);
+    for (int i = 0; i < 3; ++i) {
+        std::swap(exterior_plane_point_[i], p.exterior_plane_point[i]);
+        std::swap(exterior_plane_normal_[i], p.exterior_plane_normal[i]);
+    }
+    std::swap(camera_inside_mode_, p.camera_inside_mode);
+    std::swap(bank_viewthru_, p.bank_viewthru);
+    std::swap(exterior_visible_, p.exterior_visible);
+    std::swap(water_visible_, p.water_visible);
+    std::swap(camera_indoors_, p.camera_indoors);
+}
+
 // ----------------------------------------------------------------------------
 // The entity render gates
 // ----------------------------------------------------------------------------
@@ -1522,19 +1582,28 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
             ent.occlusion_latch, world.logic_tick);
     } else {
         // Bound sphere + view cull (also paces the latch like the original —
-        // the latch only ticks for view-collected entities).
-        int32_t center_world[3];
-        int32_t radius = 0x10000;
+        // the latch only ticks for view-collected entities). A collision
+        // instance measures its model bounds; without a usable one the
+        // render model's CMDL sphere stands (the same block bounds, radius 0
+        // for a model without the block), and an entity with no render model
+        // is never collected. [orig: the entity+0x30 model gates
+        // @ 0x5c6fd8..0x5c6fe1 / @ 0x5c8cf6..0x5c8cff; Entity_ComputeBoundingSphere
+        // @ 0x5c69a0 over model+0xB0, the null-block early out @ 0x5c69be]
+        int32_t center_local[3] = {0, 0, 0};
+        int32_t radius = 0;
         if (cm != nullptr && cm->valid()) {
-            int32_t center_local[3];
             bound_sphere_fixed(*cm, center_local, radius, ent.uniform_scale_q16);
-            entity_euler_pose(ent, epos).transform_point(center_local, center_world);
         } else {
-            // No collision instance: a position-centered unit sphere.
-            center_world[0] = epos[0];
-            center_world[1] = epos[1];
-            center_world[2] = epos[2];
+            const auto stamped = render_models_.find(ent.handle.packed);
+            if (stamped == render_models_.end()) return false;
+            const renderer::ObjectProjectionSphere sphere =
+                renderer::scale_object_projection_sphere_q16(stamped->second,
+                                                             ent.uniform_scale_q16);
+            for (int axis = 0; axis < 3; ++axis) center_local[axis] = sphere.center_q16[axis];
+            radius = sphere.radius_q16;
         }
+        int32_t center_world[3];
+        entity_euler_pose(ent, epos).transform_point(center_local, center_world);
         collected = sphere_render_visible(collision, cam, center_world, radius,
                                           ent.occlusion_latch, world.logic_tick);
     }

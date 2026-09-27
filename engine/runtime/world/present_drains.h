@@ -90,6 +90,11 @@ struct VehicleTrailVisualRow {
 	Vec3 dir;
 	std::string effect;
 	uint32_t magnitude_q16 = 0;
+	// Every trail lane spawns with the vehicle as its descriptor tag, so the
+	// group takes the building-section gate [orig: Entity_UpdateBoneTrailEffects
+	// @ 0x4589C0 — the entity in ebp @ 0x4589C8, stored at descriptor +0x0C
+	// @ 0x458C5F, the spawn into the lane's handle @ 0x458D55].
+	bool section_tagged = true;
 };
 
 // One live death piece: the pool slot and its allocation generation (a

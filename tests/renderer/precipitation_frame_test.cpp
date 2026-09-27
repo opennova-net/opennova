@@ -100,12 +100,120 @@ void test_snow_uses_camera_axes_without_distance_scaling() {
 	CHECK(near(v[10], 10.0f) && near(v[11], 2.0f) && near(v[12], 0.025f));
 }
 
+// The weapon Inset pass calls the drawer again at its own camera, after the
+// main scene's call of the same frame, over the one memory
+// (runtime/renderer/scene_overlay.h kInsetOverlayOrder): the Inset's
+// velocity is its eye's offset from the main call's, the main call already
+// zeroed the fall, and the next main call's velocity starts from the Inset
+// eye [orig: Render_WeatherTrailParticles @ 0x5dee74..0x5deed8 (the camera
+// memory), @ 0x5deede..0x5deef4 (the fall read and zeroing)].
+void test_the_inset_pass_call_shares_the_drawer_memory() {
+	env::PrecipitationField field = two_drop_field();
+	r::PrecipitationDrawState state;
+	r::PrecipitationDrawFrame frame;
+	r::PrecipitationCamera main_camera;
+	r::PrecipitationCamera inset_camera;
+	// The Inset eye 1/16 m east of the main eye (mission +x = render +x).
+	inset_camera.position_q16[0] = 0x1000;
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, main_camera, state, frame);
+	// The frame: the main call consumes the fall ...
+	field.fall_accum_z = -2 * env::PrecipitationField::kRainFallPerTick;
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, main_camera, state, frame);
+	CHECK(field.fall_accum_z == 0);
+	// ... then the Inset's: velocity (1/16, 0, 0) from the main eye, no fall.
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, inset_camera, state, frame);
+	const float inset_dist = std::sqrt((10.0f - 0.0625f) * (10.0f - 0.0625f) + 2.0f * 2.0f);
+	const float inset_length = 1.0f + inset_dist * 0.05f;
+	const float *v = frame.vertices.data();
+	CHECK(near(v[0], 10.0f + 0.0625f * inset_length, 0.001f));
+	CHECK(near(v[1], 2.0f + 0.1f * inset_length, 0.001f));
+	CHECK(near(v[2], 0.0f));
+	CHECK(state.last_camera_q16[0] == 0x1000);
+	// The next main call reads the Inset's eye: velocity (-1/16, 0, 0).
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, main_camera, state, frame);
+	const float main_length = 1.0f + std::sqrt(10.0f * 10.0f + 2.0f * 2.0f) * 0.05f;
+	v = frame.vertices.data();
+	CHECK(near(v[0], 10.0f - 0.0625f * main_length, 0.001f));
+	CHECK(near(v[1], 2.0f + 0.1f * main_length, 0.001f));
+}
+
+// Below the rain gate the drawer returns before its memory: the next rainy
+// call measures from the last rainy call's camera, and the fall it did not
+// draw stays accumulated [orig: the `jle` @ 0x5dee48 ahead of
+// @ 0x5dee74..0x5deef4].
+void test_the_rain_gate_leaves_the_drawer_memory() {
+	env::PrecipitationField field = two_drop_field();
+	r::PrecipitationDrawState state;
+	r::PrecipitationDrawFrame frame;
+	r::PrecipitationCamera camera;
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, camera, state, frame);
+	// A dry call at a moved camera: nothing drawn, nothing remembered.
+	camera.position_q16[0] = 0x1000;
+	field.fall_accum_z = -env::PrecipitationField::kRainFallPerTick;
+	camera.mode = 1;
+	r::compile_precipitation_frame(field, 48, 0, 0, camera, state, frame);
+	CHECK(frame.drops == 0);
+	CHECK(state.last_camera_q16[0] == 0 && state.last_mode == 0);
+	CHECK(field.fall_accum_z == -env::PrecipitationField::kRainFallPerTick);
+	// The rain returns at mode 0: the velocity spans both moves (1/16 m east)
+	// and the kept fall (12288 / 65536 m, clamped to 0.1) draws now.
+	camera.mode = 0;
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, camera, state, frame);
+	CHECK(field.fall_accum_z == 0);
+	const float length =
+			1.0f + std::sqrt((10.0f - 0.0625f) * (10.0f - 0.0625f) + 2.0f * 2.0f) * 0.05f;
+	const float *v = frame.vertices.data();
+	CHECK(near(v[0], 10.0f + 0.0625f * length, 0.001f));
+	CHECK(near(v[1], 2.0f + (0.1f + 0.1f) * length, 0.001f));
+}
+
+// The velocity is measured only while the camera mode is the last call's; a
+// mode change draws no camera motion but still records the new mode and
+// camera [orig: the mode test @ 0x5dee74..0x5dee7a, the records
+// @ 0x5deeb4..0x5deed8].
+void test_a_camera_mode_change_drops_the_velocity() {
+	env::PrecipitationField field = two_drop_field();
+	r::PrecipitationDrawState state;
+	r::PrecipitationDrawFrame frame;
+	r::PrecipitationCamera camera;
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, camera, state, frame);
+	// The chase camera (mode 1) 1/16 m east: no velocity this call.
+	camera.mode = 1;
+	camera.position_q16[0] = 0x1000;
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, camera, state, frame);
+	CHECK(state.last_mode == 1 && state.last_camera_q16[0] == 0x1000);
+	float length =
+			1.0f + std::sqrt((10.0f - 0.0625f) * (10.0f - 0.0625f) + 2.0f * 2.0f) * 0.05f;
+	const float *v = frame.vertices.data();
+	CHECK(near(v[0], 10.0f, 0.001f));
+	CHECK(near(v[1], 2.0f + 0.1f * length, 0.001f));
+	// The same mode again, another 1/16 m east: the velocity resumes.
+	camera.position_q16[0] = 0x2000;
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, camera, state, frame);
+	length = 1.0f + std::sqrt((10.0f - 0.125f) * (10.0f - 0.125f) + 2.0f * 2.0f) * 0.05f;
+	v = frame.vertices.data();
+	CHECK(near(v[0], 10.0f + 0.0625f * length, 0.001f));
+	// The retail memory starts zeroed: the first call at mode 0 measures from
+	// the origin (clamped to the 0.2 velocity).
+	r::PrecipitationDrawState fresh;
+	r::PrecipitationCamera far;
+	far.position_q16[1] = 4 << 16;
+	r::compile_precipitation_frame(field, 0x10000, 0, 0, far, fresh, frame);
+	const float far_length =
+			1.0f + std::sqrt(10.0f * 10.0f + 2.0f * 2.0f + 4.0f * 4.0f) * 0.05f;
+	v = frame.vertices.data();
+	CHECK(near(v[2], -0.2f * far_length, 0.001f));
+}
+
 } // namespace
 
 int main() {
 	test_rain_gate_and_first_frame();
 	test_rain_velocity_and_fall_terms();
 	test_snow_uses_camera_axes_without_distance_scaling();
+	test_the_inset_pass_call_shares_the_drawer_memory();
+	test_the_rain_gate_leaves_the_drawer_memory();
+	test_a_camera_mode_change_drops_the_velocity();
 	std::printf(failures ? "PRECIPITATION FRAME TEST FAILED (%d)\n"
 	                     : "precipitation frame test passed\n",
 	            failures);

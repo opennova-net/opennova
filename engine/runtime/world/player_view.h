@@ -735,11 +735,12 @@ ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
 // same shape at the Sighted arm's fov, nvg_sighted_scene_fov_q16); NVG_RenderScopedScene
 // @0x5d29e4..0x5d2a2a (scaleY 1.0: the square Scoped frustum,
 // renderer/nvg_scope_lens.h nvg_scoped_scene_fov_q16)]. Retail rasterises
-// each into 512 x 512 and stretches it over the surface. A shell whose camera
-// couples the two fovs through its target's aspect renders the frame-shaped
-// frusta into 512 rows at the frustum's own aspect (retail's rows; the
-// columns supersample its 512) and the square one into the 512 square
-// itself. `frame` is the frame's view_projection, `nvg` the frame's NVG arms,
+// each into 512 x 512 and stretches it over the surface, so every arm's
+// target is the 512 square: the frame-shaped arms keep the frame's `aspect`
+// (and fov_v), their texels non-square, a projection a shell whose camera
+// couples the two fovs through its target's ratio must supply explicitly;
+// the Scoped arm's frustum is the square itself (aspect 1).
+// `frame` is the frame's view_projection, `nvg` the frame's NVG arms,
 // `selected_h_over_w` the selected ratio (flt_8409EC), `zoom` the slot's
 // clamped magnification.
 ViewProjection nvg_view_projection(const ViewProjection &frame,

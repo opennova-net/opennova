@@ -86,6 +86,14 @@ void add_quadrant_tiles(opennova::CptFile &cpt, int source_x, int count) {
 	}
 }
 
+bool same_bounds(const opennova::VisibleBounds &a, const opennova::VisibleBounds &b) {
+	if (a.valid != b.valid) return false;
+	for (int i = 0; i < 3; ++i) {
+		if (a.min[i] != b.min[i] || a.max[i] != b.max[i]) return false;
+	}
+	return true;
+}
+
 bool same_detail_cells(const std::vector<opennova::FoliageDetailPatch> &a,
 		const std::vector<opennova::FoliageDetailPatch> &b) {
 	if (a.size() != b.size()) return false;
@@ -508,6 +516,20 @@ int main() {
 		if (!expect(toward.visible_bounds.min[1] <= 8.0f &&
 						toward.visible_bounds.max[1] >= 8.0f,
 				"the tracked height range spans the visible tile heights")) return 1;
+		// The bounds walk alone, as a frame whose terrain is hidden under the
+		// indoors letter runs it: the same routing and cull track the same
+		// bounds, with no draw list [orig: Terrain_SetupViewAndLighting
+		// @ 0x610ccd -> terrain_render_visible_sectors @ 0x60fee7].
+		if (!expect(same_bounds(opennova::track_terrain_visible_bounds(scene, fv),
+						toward.visible_bounds),
+				"the bounds walk alone tracks the compile's bounds")) return 1;
+		look_at(fv.view, {32.0f, 40.0f, -20.0f}, {32.0f, 120.0f, -200.0f},
+				{0.0f, 1.0f, 0.0f});
+		if (!expect(!opennova::track_terrain_visible_bounds(scene, fv).valid,
+				"the bounds walk alone tracks nothing facing away")) return 1;
+		if (!expect(!opennova::track_terrain_visible_bounds(
+						opennova::TerrainSceneSnapshot{}, fv).valid,
+				"no scene tracks no bounds")) return 1;
 	}
 
 	// --- Empty sectors: topology reuse, independent geometry/UV/cache mode --
@@ -625,6 +647,9 @@ int main() {
 		if (!expect(underwater.patches.size() == 121 && underwater.below_water &&
 				underwater.visible_bounds.valid && underwater.visible_bounds.min[1] >= 8.0f,
 				"all-empty fallback survives underwater and retains retail's raw tracked bounds")) return 1;
+		if (!expect(same_bounds(opennova::track_terrain_visible_bounds(fallback_scene, fallback_view),
+						underwater.visible_bounds),
+				"the bounds walk alone routes the flat fallback like the compile")) return 1;
 		fallback_view.cam_y = 6.0f;
 		if (!expect(!compiler.compile(fallback_scene, fallback_view).below_water,
 				"flat fallback above water retains ordinary view classification")) return 1;

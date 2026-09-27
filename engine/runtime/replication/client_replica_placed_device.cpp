@@ -181,6 +181,7 @@ void ClientReplicaPipeline::apply_objective_entity_state(
 	row->parent_handle = state.attach_handle;
 	row->target_handle = state.ground_handle;
 	row->parent_pose_valid = false;
+	++row->objective_state_serial;
 	++state_.world_stream_revision;
 	state_.mark_topology_changed();
 }

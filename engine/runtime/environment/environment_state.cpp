@@ -470,6 +470,12 @@ Rgb EnvironmentState::nvg_scene_clear_color(bool eye_above_water) const {
 	return lit_water_color(water_color(), combined);
 }
 
+Rgb EnvironmentState::water_mirror_clear_color(bool mirror_outdoors) const {
+	// [orig: render_main_scene @ 0x5c1474 xor esi, esi; @ 0x5c1597 mov esi,
+	//  Env_SkyfogBlock on the outdoors path]
+	return mirror_outdoors ? frame_clear_color() : Rgb{};
+}
+
 float EnvironmentState::water_height() const {
 	return has_water_height() ? config_->water_height : 0.0f;
 }
@@ -749,6 +755,13 @@ SceneFogValues EnvironmentState::build_water_mirror_fog() const {
 	fog.end = fog_end_distance();
 	fog.type = fog_type();
 	return fog;
+}
+
+SceneFogValues EnvironmentState::build_inset_scene_fog(bool underwater_view) const {
+	// Environment_ApplyFogAndAmbient(0, underwater): the lit water below the
+	// plane, else Env_FogBlock under the dry range and type [orig: @ 0x57e46c
+	// (the underwater branch), @ 0x57e48c..0x57e4a1 (no alternate)].
+	return underwater_view ? build_scene_fog(true) : build_water_mirror_fog();
 }
 
 SceneFogValues EnvironmentState::build_scene_fog(

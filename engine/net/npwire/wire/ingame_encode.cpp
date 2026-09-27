@@ -120,14 +120,17 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (rec.parent_handle != wire_handle::kInvalid) f |= kPoolSpawnHasParentHandle; // entity+368  [orig: 0x503bd1]
 		if (rec.target_handle != wire_handle::kInvalid) f |= kPoolSpawnHasTargetHandle; // entity+40   [orig: 0x503c27]
 		if (rec.seat_mask)                 f |= kPoolSpawnHasMountOccupancy; // itemDef+604 [orig: 0x503c83]
-		if (!rec.ai_name.empty() || rec.ai_profile_1 || rec.ai_profile_2)
-		                                   f |= kPoolSpawnHasAiTrailer; // aiSlot      [orig: 0x503d53]
+		// The two pointer gates ride their presence fields: the AI slot
+		// (entity+0x68) and the vehicle brain (entity+0x64), whatever the values.
+		if (rec.has_ai_trailer)            f |= kPoolSpawnHasAiTrailer; // aiSlot      [orig: 0x503d53]
 		if (rec.alert_byte)                f |= kPoolSpawnHasRefNum; // entity+533  [orig: 0x503e3c]
 		if (rec.action_byte)               f |= kPoolSpawnHasSubType; // entity+532  [orig: 0x503e60]
-		if (rec.weapon_type_byte)          f |= kPoolSpawnHasWeaponTypeByte; // entity+100  [orig: 0x503e7f]
-		if (rec.zone_number_rank)               f |= kPoolSpawnHasZoneNumberRank; // entity+538  [orig: 0x503ecc]
-		else if (rec.zone_radius)         f |= kPoolSpawnHasZoneRadiusAlt; // itemDef+0x40000 path [orig: 0x503f29]
-		if (rec.difficulty_byte)           f |= kPoolSpawnHasDifficultyByte; // entity+624  [orig: 0x503f4c]
+		if (rec.has_sound_latch_byte)      f |= kPoolSpawnHasSoundLatchByte; // entity+100  [orig: 0x503e7f]
+		// The zone block and the 0x4000 byte ride presence too: the zone number byte
+		// and the def's SpawnPoint attrib / callbacks gate them, not the written values.
+		if (rec.has_zone_number_rank)      f |= kPoolSpawnHasZoneNumberRank; // entity+538 != 0 [orig: 0x503ecc]
+		else if (rec.has_zone_radius_alt)  f |= kPoolSpawnHasZoneRadiusAlt; // itemDef+0x40000 path [orig: 0x503f29]
+		if (rec.has_difficulty_byte)       f |= kPoolSpawnHasDifficultyByte; // def callbacks [orig: 0x503f4c]
 
 		w.u16(f);                       // spawn_flags  [orig: *flags_write_pos @ 0x503f90]
 		w.u16(rec.slot_id);             // packed handle [orig: 0x503a3f]
@@ -168,7 +171,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		}
 		if (f & kPoolSpawnHasRefNum) w.u8(rec.alert_byte);        // [orig: 0x503e50]
 		if (f & kPoolSpawnHasSubType) w.u8(rec.action_byte);       // [orig: 0x503e77]
-		if (f & kPoolSpawnHasWeaponTypeByte) w.u8(rec.weapon_type_byte);  // [orig: 0x503ec0]
+		if (f & kPoolSpawnHasSoundLatchByte) w.u8(rec.sound_latch_byte);  // [orig: 0x503ec0]
 
 		if (f & kPoolSpawnHasZoneNumberRank) { // [orig: 0x503ee5 health block]
 			w.u8(rec.zone_number_rank);      // entity+538 (the break-out byte)
@@ -219,7 +222,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (rec.entity_flags) f |= kStaticEntityHasEntityFlags; // entity+36 Flags dword (D-NET-147)
 		if (rec.bone_a)       f |= kStaticEntityHasRefNum; // entity+533 (D-NET-94)
 		if (rec.bone_b)       f |= kStaticEntityHasSubType; // entity+532 (D-NET-94)
-		if (rec.score_flag)   f |= kStaticEntityHasScoreFlag; // entity+624
+		if (rec.has_score_flag) f |= kStaticEntityHasScoreFlag; // entity+624, the def callback gate [orig: 0x504554]
 		// attach_ref is written when `weapon_byte != 0 || flags & 0x200`; force the 0x200
 		// gate only when attach_ref is populated but weapon_byte is zero (else weapon_byte
 		// already triggers the write and 0x200 would be redundant).

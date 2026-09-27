@@ -34,7 +34,7 @@ std::vector<uint8_t> Server_BuildVehicleSpawnAvailability(
 	for (const auto &row : ctx.vehicle_spawn_limits) {
 		VehicleSpawnAvailabilityRow out;
 		out.type_id = row.type_id;
-		if (ctx.vehicle_spawns_unlimited) {                        // @0x5105FF
+		if (ctx.config.unlimited_vehicles) {                        // @0x5105FF
 			out.available = kVehicleSpawnUnlimited;
 			out.max_count = kVehicleSpawnUnlimited;
 		} else if (row.type_cap == -1 && row.per_team_flag == -1) { // @0x510610..0x510615
@@ -102,7 +102,9 @@ bool Server_HandleVehicleSpawnRequest(NapiNPServerCtx &ctx, NapiNPConnection &co
 	if (item_id == 0) return false;                               // @0x51C55E
 	const uint8_t team = player->team;
 	if (source->team != 0 && source->team != team) return false; // @0x51C5C6..0x51C5F6
-	if (!ctx.vehicle_spawns_unlimited &&
+	// The unlimited-vehicles word skips the EntityLimit table [orig:
+	// dword_24D1E38 @0x51C5E2..0x51C5E9].
+	if (!ctx.config.unlimited_vehicles &&
 			!Server_VehicleSpawnAllowed(ctx, world, item_id, team, /*consume=*/true))
 		return false;
 	// The spawn position: the source's "boat" / "helo" userpoint transformed

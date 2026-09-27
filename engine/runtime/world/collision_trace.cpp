@@ -408,7 +408,7 @@ ProjectileHit CollisionWorld::trace_knife_impact(
 
 // [orig: compute_clamped_displacement @ 0x4AD6A0]
 int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source,
-        FixedVec3 position, bool indoors) const {
+        FixedVec3 position, bool indoors, EntityHandle *out_ground) const {
     ProjectileTrace trace;
     trace.start = position;
     trace.end = {position.x, position.y, 0};
@@ -426,6 +426,12 @@ int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source
                 *terrain, position.x * io::kInvFp16One, -position.y * io::kInvFp16One)) : 0;
         if (!object_ground || height < floor) height = floor;
     }
+    // A client's pool-1 movers trace as wire proxies: the hit names the
+    // proxy's registry twin, the row the retail client's own table holds.
+    if (out_ground != nullptr)
+        *out_ground = !object_ground ? EntityHandle{}
+                : hit.geometry_entity.valid() ? hit.geometry_entity
+                                              : hit.wire_registry_twin;
     return height;
 }
 
@@ -939,11 +945,13 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             if (!table_found || model_hit.distance_q16 <= table_hit.distance_q16) {
                 table_found = true;
                 table_hit = model_hit;
+                table_entity = proxy.registry_twin;
             }
         }
         if (table_found) {
             ProjectileHit eh;
             eh.hit_class = ProjectileHitClass::DynamicEntity;
+            eh.wire_registry_twin = table_entity;
             eh.t_q16 = t_for_distance(table_hit.distance_q16);
             eh.position_q16 = FixedVec3{table_hit.position_q16[0],
                                         table_hit.position_q16[1],
@@ -1262,10 +1270,12 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
         // @ 0x4b3e5f-0x4b3f93]
         const int32_t point[3] = {pt.x, pt.y, pt.z};
         query_candidate_blink_boxes_at_point(world, ent.handle, point, accum);
-    } else if (ent.kind != EntityKind::Building) {
+    } else if (!building_def_row(ent)) {
         // Everything else non-building tests the building prefix of the static
-        // table. [orig: the def-null / other-type loops @ 0x4b3e6b / 0x4b3fa0,
-        // reject radius = building radius + the 0.5u query radius]
+        // table — the pool-2 decorations and foliage too: only a Building-type
+        // def takes no query. [orig: the Building arm @ 0x4b3e4d; the
+        // def-null / other-type loops @ 0x4b3e6b / 0x4b3fa0, reject radius =
+        // building radius + the 0.5u query radius]
         for (int32_t i = 0; i < static_building_count_; ++i) {
             const StaticSlot &s = statics_[i];
             if (s.h == ent.handle) continue; // [orig: the self check @ 0x4b3f13]
@@ -1295,7 +1305,10 @@ void CollisionWorld::refresh_mission_start_blink(World &world) {
     std::vector<EntityHandle> rows;
     world.registry.for_each_in_pool(1, [&](const Entity &e) { rows.push_back(e.handle); });
     world.registry.for_each_in_pool(2, [&](const Entity &e) {
-        if (e.kind != EntityKind::Building) rows.push_back(e.handle); // [orig: @ 0x5240f3]
+        // Every pool-2 row but a Building-type def: the decorations and
+        // foliage get their blink quads here. [orig: `cmp dword ptr [ecx+5Ch], 5`
+        // @ 0x5240f3]
+        if (!building_def_row(e)) rows.push_back(e.handle);
     });
     for (const EntityHandle h : rows) {
         if (Entity *e = world.registry.get(h)) refresh_blink(world, *e);
@@ -1351,7 +1364,9 @@ void CollisionWorld::query_candidate_blink_boxes_at_point(
         const EntityHandle candidate = slice[i];
         if (candidate == source) continue;
         const Entity *entity = world.registry.get(candidate);
-        if (entity == nullptr || entity->kind != EntityKind::Building) continue;
+        // Building-type defs only [orig: `childModel->type == ItemType_Building`
+        // @ 0x4b3f73].
+        if (entity == nullptr || !building_def_row(*entity)) continue;
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         if (const CollisionTargetView *target =
@@ -1383,7 +1398,7 @@ void CollisionWorld::query_wire_blink_boxes_at_point(
     for (int32_t i = 0; i < count; ++i) {
         const EntityHandle candidate = slice[i];
         const Entity *entity = world.registry.get(candidate);
-        if (entity == nullptr || entity->kind != EntityKind::Building) continue;
+        if (entity == nullptr || !building_def_row(*entity)) continue; // [orig: @ 0x4b3f73]
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         if (const CollisionTargetView *target =

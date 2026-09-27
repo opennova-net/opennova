@@ -53,12 +53,11 @@ GameConfig singleplayer_game_config(uint32_t game_type);
 class HostRole final : public Role {
 public:
 	HostRole();
-	// The embedder's form: the session kind it runs under and the item-class
-	// resolver every HostClient view it builds takes (empty = none yet; the
-	// embedder installs one through set_item_class_resolver once its catalog
-	// exists).
+	// The embedder's form: the session kind it runs under and the items.def
+	// catalog every HostClient view it builds takes (null = none yet; the
+	// embedder installs one through set_item_catalog once it exists).
 	explicit HostRole(RoleKind kind,
-			replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver = {});
+			std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog = {});
 	RoleKind kind() const override { return kind_; }
 	// The session kind this host runs under: a shell's SP listen server keeps
 	// SinglePlayer (pause/step/reset stay available); a LAN host is ListenHost
@@ -70,9 +69,10 @@ public:
 	// The socket the host pump reads and writes; null = the socketless
 	// (SP / test) host, every datagram dropped.
 	void set_socket(opennova::IDatagramSocket *socket) { socket_ = socket; }
-	// The shell's item-class resolver for the HostClient's view (the wire
-	// class of a type id); re-installed whenever the role rebuilds that runtime.
-	void set_item_class_resolver(replication::ClientReplicaPipeline::ItemClassResolver resolver);
+	// The shell's items.def catalog for the HostClient's view (the wire class
+	// and the def facts of a type id); re-installed whenever the role rebuilds
+	// that runtime.
+	void set_item_catalog(std::shared_ptr<const replication::ItemReplicationCatalog> catalog);
 
 	// The SP listen server: SINGLEPLAYERGAME, one player, the mission's own
 	// game type, socketless [orig: SinglePlayer_StartMission @0x561af0].
@@ -115,7 +115,7 @@ private:
 	RoleKind kind_ = RoleKind::ListenHost;
 	HostBringup staged_bringup_;
 	opennova::IDatagramSocket *socket_ = nullptr;
-	replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver_;
+	std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog_;
 	int64_t last_net_us_ = 0;
     uint64_t local_round_reset_seen_ = 0;
 };

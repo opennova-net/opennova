@@ -976,6 +976,14 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		world.vehicles.update_tread_sound(veh, traits);
     if (traits.family == VehicleFamily::Bike)
         m.wheelie_request = 0; // [orig: Entity_UpdateLightVehiclePhysics @ 0x4869F9]
+	// Every mover ends by rebuilding the entity matrix and setting the matrix bit
+	// (Flags 0x20000, homed on engine_flags); the dead-hull bail jumps to this
+	// same tail. The load stream carries it on
+	// every live vehicle. [orig: cveh Entity_UpdateVehiclePhysics @0x48D449,
+	// OR @0x48D451 (dead bail @0x48B810); ctan Entity_UpdateTankVehiclePhysics
+	// @0x48AEC9 (bail @0x4893E9); cbik Entity_UpdateLightVehiclePhysics
+	// @0x486A17 (bail @0x484936)]
+	veh.engine_flags |= kEntityFlagMatrixBuilt;
 }
 
 namespace {
@@ -2100,9 +2108,12 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
 	// A DEAD hull skips everything to the matrix-build tail — no input, no
 	// integration [orig: `test Flags, 2 -> jnz 0x48EF4B` @0x48DDFA]. Retail has
 	// ONE flags word; our death chain latches the dead bit on engine_flags
-	// (destruction.cpp), so read the established combined view.
-	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0)
+	// (destruction.cpp), so read the established combined view. The tail still
+	// sets Flags 0x20000 [orig: @0x48EF63].
+	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
 		return;
+	}
 
 	// Capsize damage, authority-only: past ~100 deg of roll OR pitch the hull
 	// drains 200 health per tick to zero [orig: @0x48DE84..0x48DECD —
@@ -2167,6 +2178,9 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
     world.vehicles.update_ground_sound(veh, traits, wrecked, /*collided=*/false);
     // The part-animation tick is the core's (@0x48E9F0..0x48E9F9 runs once
     // per mover pass); a second call here would double the wheel phase.
+    // The matrix-build tail sets Flags 0x20000 (kEntityFlagMatrixBuilt, homed on
+    // engine_flags) [orig: Entity_UpdateWatercraftPhysics @0x48EF5B, OR @0x48EF63].
+    veh.engine_flags |= kEntityFlagMatrixBuilt;
 }
 
 // Ground-family prediction runs the shared chase, stages local-driver input or remote commands,

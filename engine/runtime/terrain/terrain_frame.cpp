@@ -39,7 +39,85 @@ int converted_index_count(const CptTileLOD &lod, std::vector<uint32_t> &scratch)
 	return static_cast<int>(lod.indices.size() / 3) * 3;
 }
 
+// The retail cull: the clip cone from the horizontal FOV, the far slab from
+// the frame's view distance when positive, and the settings-derived LOD
+// multiplier folded into the context scale.
+// [orig: PolyTrn_RenderFrame @ 0x60EAC0 — sub_603DA0 @0x60eaff, far
+//  override @0x60eb7e..0x60eb8d, `flt_319FB2C = ctx[5] * flt_8493D8`
+//  @0x60eb4a]
+TerrainViewCull view_cull_for(const TerrainViewInput &view) {
+	return make_terrain_view_cull(view.view, view.fov_deg,
+			view.far_distance > 0.0f ? view.far_distance : kTerrainDefaultFarDistance);
+}
+
+TraversalConfig view_config_for(const TerrainViewInput &view) {
+	TraversalConfig config = view.config;
+	config.quality = terrain_lod_quality_scale(view.config.quality, view.polygon_detail);
+	return config;
+}
+
+// The 512-world-unit sector window around the camera, each sector routed
+// through the .trn sector grid to its L1 quadtree child. The draw traversal
+// and the bounds walk route alike; `visit(child_node, sector_id, sx, sz,
+// zero_height)` runs once per routed sector, in the window's order.
+// [orig: Terrain_CollectVisibleSectors @ 0x5C9120 (jodemo.exe)]
+template <typename Visit>
+void for_each_routed_sector(const TerrainSceneSnapshot &scene,
+		const TerrainViewInput &view, Visit &&visit) {
+	const int cam_sx = static_cast<int>(view.cam_x) >> 9;
+	const int cam_sz = static_cast<int>(view.cam_z) >> 9;
+	const int mask_x = scene.wrap_x ? 0 : -16;
+	const int mask_z = scene.wrap_y ? 0 : -16;
+
+	for (int dz = -5; dz <= 5; ++dz) {
+		for (int dx = 0; dx < 11; ++dx) {
+			const int sx = (cam_sx - 5) + dx;
+			const int sz = dz + cam_sz;
+			int gx = sx - scene.origin_x;
+			int gz = sz - scene.origin_y;
+
+			if ((gx & mask_x) != 0) gx = (gx < 0) ? 0 : 0xFF;
+			if ((gz & mask_z) != 0) gz = (gz < 0) ? 0 : 0xFF;
+
+			const int sector_id = scene.sector_grid[gz & 0xF][gx & 0xF];
+			// The empty-sector branch reuses quadrant 1 topology with the
+			// packed key's high bit; view +100 is its only skip policy.
+			// [orig: PolyTrn_RenderFrame @ 0x60EAC0, routing @ 0x60EC94..0x60ECBD;
+			// terrain_render_visible_sectors @ 0x6090C0, routing @ 0x609238..0x609263]
+			const bool zero_height = sector_id == 0;
+			if (zero_height && view.skip_empty_sectors) continue;
+
+			int child = -1;
+			if (sector_id == 1 || zero_height) child = 0;
+			else if (sector_id == 3) child = 1;
+			else if (sector_id == 2) child = 2;
+			else if (sector_id == 4) child = 3;
+			if (child < 0 || child >= 4 || scene.l1_children[child] < 0) {
+				continue;
+			}
+			visit(scene.l1_children[child], sector_id, sx, sz, zero_height);
+		}
+	}
+}
+
 } // namespace
+
+VisibleBounds track_terrain_visible_bounds(const TerrainSceneSnapshot &scene,
+		const TerrainViewInput &view) {
+	VisibleBounds bounds;
+	if (!scene.valid()) {
+		return bounds;
+	}
+	const TerrainViewCull cull = view_cull_for(view);
+	const TraversalConfig config = view_config_for(view);
+	for_each_routed_sector(scene, view,
+			[&](int child_node, int, int sx, int sz, bool zero_height) {
+				track_visible_bounds(scene.quad_nodes, child_node, cull,
+						static_cast<float>(sx * 512), static_cast<float>(sz * 512), config,
+						bounds, zero_height);
+			});
+	return bounds;
+}
 
 // The unpacked CPT vertices use the same coordinates and locked height taps
 // as the original decoder. Normals are device metadata for the debug normal
@@ -306,68 +384,27 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 		return draw_list_;
 	}
 
-	// The retail cull: the clip cone from the horizontal FOV, the far slab from
-	// the frame's view distance when positive, and the settings-derived LOD
-	// multiplier folded into the context scale.
-	// [orig: PolyTrn_RenderFrame @ 0x60EAC0 — sub_603DA0 @0x60eaff, far
-	//  override @0x60eb7e..0x60eb8d, `flt_319FB2C = ctx[5] * flt_8493D8`
-	//  @0x60eb4a]
-	const TerrainViewCull cull = make_terrain_view_cull(view.view, view.fov_deg,
-			view.far_distance > 0.0f ? view.far_distance : kTerrainDefaultFarDistance);
-	TraversalConfig config = view.config;
-	config.quality = terrain_lod_quality_scale(view.config.quality, view.polygon_detail);
+	const TerrainViewCull cull = view_cull_for(view);
+	const TraversalConfig config = view_config_for(view);
 
 	TraversalStats stats;
 	if (visible_.capacity() < static_cast<size_t>(kPatchBudget)) {
 		visible_.reserve(kPatchBudget);
 	}
 
-	// The 512-world-unit sector window around the camera, routed through the
-	// .trn sector grid before the shared quadtree walk
-	// [orig: Terrain_CollectVisibleSectors @ 0x5C9120 (jodemo.exe)].
-	const int cam_sx = static_cast<int>(view.cam_x) >> 9;
-	const int cam_sz = static_cast<int>(view.cam_z) >> 9;
-	const int mask_x = scene.wrap_x ? 0 : -16;
-	const int mask_z = scene.wrap_y ? 0 : -16;
-
-	for (int dz = -5; dz <= 5; ++dz) {
-		for (int dx = 0; dx < 11; ++dx) {
-			const int sx = (cam_sx - 5) + dx;
-			const int sz = dz + cam_sz;
-			int gx = sx - scene.origin_x;
-			int gz = sz - scene.origin_y;
-
-			if ((gx & mask_x) != 0) gx = (gx < 0) ? 0 : 0xFF;
-			if ((gz & mask_z) != 0) gz = (gz < 0) ? 0 : 0xFF;
-
-			const int sector_id = scene.sector_grid[gz & 0xF][gx & 0xF];
-			// The empty-sector branch reuses quadrant 1 topology with the
-			// packed key's high bit; view +100 is its only skip policy.
-			// [orig: PolyTrn_RenderFrame @ 0x60EAC0, routing @ 0x60EC94..0x60ECBD;
-			// terrain_render_visible_sectors @ 0x6090C0, routing @ 0x609238..0x609263]
-			const bool zero_height = sector_id == 0;
-			if (zero_height && view.skip_empty_sectors) continue;
-
-			int child = -1;
-			if (sector_id == 1 || zero_height) child = 0;
-			else if (sector_id == 3) child = 1;
-			else if (sector_id == 2) child = 2;
-			else if (sector_id == 4) child = 3;
-			if (child < 0 || child >= 4 || scene.l1_children[child] < 0) {
-				continue;
-			}
-
+	for_each_routed_sector(scene, view,
+			[&](int child_node, int sector_id, int sx, int sz, bool zero_height) {
 			const float sector_ox = static_cast<float>(sx * 512);
 			const float sector_oz = static_cast<float>(sz * 512);
 
 			foliage_handoffs_.clear();
 			// Retail walks each routed sector twice per frame: the
 			// bounds-tracking pass at view setup, then the draw pass.
-			track_visible_bounds(scene.quad_nodes, scene.l1_children[child],
+			track_visible_bounds(scene.quad_nodes, child_node,
 					cull, sector_ox, sector_oz, config,
 					draw_list_.visible_bounds, zero_height);
 			traverse_quadtree(scene.quad_nodes, scene.tile_meshes,
-					scene.l1_children[child], cull,
+					child_node, cull,
 					view.cam_x, view.cam_y, view.cam_z,
 					sector_ox, sector_oz, config, visible_, stats, zero_height,
 					&foliage_handoffs_);
@@ -401,8 +438,7 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 						view.cam_x, view.cam_y, view.cam_z,
 						draw_list_.detail_cells);
 			}
-		}
-	}
+			});
 
 	// Retail draws the visible list in emission order: the batch's bubble
 	// sort keys on entry +0x14, which no writer fills (the traversal stores

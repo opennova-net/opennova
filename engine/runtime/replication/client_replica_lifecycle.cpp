@@ -47,7 +47,8 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     ClientEntityState &row = state_.upsert(rec.slot_id);
     row.type_id = rec.item_type_id;
     row.cls = classify(rec.item_type_id);
-    row.name = rec.entity_name;
+    // entity+0xF4 [orig: NapiNPClientMsg_FullEntitySpawn @0x433D37..0x433D61]
+    row.display_name = rec.entity_name;
     row.net_id = rec.net_id;
     row.spawn_tag = s2c::FULL_ENTITY_SPAWN;
     row.spawn_revision = generation;
@@ -114,15 +115,74 @@ uint32_t ClientReplicaPipeline::begin_entity_lifetime(uint16_t handle) {
 
 void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 	discard_entity_notifications(root_handle);
-	// Retail destroys ONE row and DETACHES its dependents: Entity_Destroy
-	// walks the occupant + mount handles through the vehicle detach and then
-	// memsets only the target entity — a child attached to the removed row
-	// survives with its parent link cleared until its own remove arrives.
+	// The client runs the shared Entity_Destroy, refNum walk included. The row
+	// leaves its refNum group first (the streamed refNum byte stands in for the
+	// list the 0x0D / 0x10 / 0x18 handlers joined it to); then a non-person
+	// row with a def and a refNum destroys every member of that group whose
+	// def carries EWeap, each through this same destroy, so a carrier's 0x12
+	// takes its addeweap children with it and they need no 0x12 of their own.
+	// The members are read once and each is tested again when reached. The
+	// client's handlers join only a non-person row with a def and a refNum to
+	// the list, so a member is one of those.
+	// [orig: NapiNPClientMsg_0x012 @0x425F8F -> Entity_Destroy @0x43E810 — the
+	//  list removal @0x43E840..0x43E858, the def / def type != 3 / refNum
+	//  gates @0x43E9B6..0x43E9CA, the call @0x43E9CD; CStreamingMem_Destroy
+	//  @0x546F30 — the list copy @0x546F73, the member tests
+	//  @0x546F8A..0x546FA0, Entity_Destroy @0x546FA3; the list joins (def
+	//  type != 3, refNum != 0, DynArray_AddOrFind) NapiNPClientMsg_0x00D
+	//  @0x433381..0x4333AD, NapiNPClientMsg_0x010 @0x433684..0x4336B0,
+	//  NapiNPClientMsg_FullEntitySpawn @0x433E27..0x433E52]
+	uint8_t ref = 0;
+	bool walk_group = false;
+	if (ClientEntityState *row = state_.find(root_handle)) {
+		ref = row->spawn_ref_num;
+		row->spawn_ref_num = 0;
+		const ItemReplicationProfile *def = item_def(row->type_id);
+		walk_group = def != nullptr && def->allocation.item_type != 3 && ref != 0;
+	}
+	if (walk_group) {
+		std::vector<uint16_t> members;
+		for (const ClientEntityState &entity : state_.entities)
+			if (entity.spawn_ref_num == ref) members.push_back(entity.handle);
+		for (uint16_t member : members) {
+			const ClientEntityState *row = state_.find(member);
+			if (row == nullptr || row->spawn_ref_num != ref) continue;
+			const ItemReplicationProfile *def = item_def(row->type_id);
+			if (def != nullptr && def->allocation.item_type != 3 &&
+					def->allocation.emplaced_weapon)
+				erase_entity_tree(member);
+		}
+	}
+	// Then retail DETACHES the row's other dependents: Entity_Destroy walks the
+	// occupant + mount handles through the vehicle detach and then memsets only
+	// the target entity — a child attached to the removed row survives with its
+	// parent link cleared until its own remove arrives.
 	// [orig: Entity_Destroy @0x43e810 — occupant detach @0x43e9e9, per-mount
 	//  detach loop @0x43ea38..0x43ea59, memset(entity, 0, 0x2B4) @0x43ea70]
 	bool detached = false;
+	// A dying person first drops the flag it carries, off its own last pose:
+	// the flag's row keeps that pose for the drop the client runs
+	// (ClientWorldMaterializer).
+	// [orig: Entity_Destroy @0x43E8AA..0x43E8B8 — def type 3 ->
+	//  Entity_DropCarriedObject]
+	const ClientEntityState *root = state_.find(root_handle);
+	const bool person_root = root != nullptr &&
+			(root->cls == EntityClass::Player || root->cls == EntityClass::Infantry);
+	const int32_t root_x = root != nullptr ? root->x : 0;
+	const int32_t root_y = root != nullptr ? root->y : 0;
+	const int32_t root_z = root != nullptr ? root->z : 0;
+	const int32_t root_heading = root != nullptr ? root->heading_bam : 0;
+	const int32_t root_pitch = root != nullptr ? root->pitch_bam : 0;
 	for (ClientEntityState &entity : state_.entities) {
 		if (entity.parent_handle != root_handle) continue;
+		if (person_root && is_carry_objective(entity.type_id)) {
+			entity.objective_drop_x = root_x;
+			entity.objective_drop_y = root_y;
+			entity.objective_drop_z = root_z;
+			entity.objective_drop_heading_bam = root_heading;
+			entity.objective_drop_pitch_bam = root_pitch;
+			entity.objective_drop_serial = ++entity.objective_state_serial;
+		}
 		entity.parent_handle = wire_handle::kInvalid;
 		entity.parent_pose_valid = false;
 		detached = true;

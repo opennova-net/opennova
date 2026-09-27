@@ -86,6 +86,8 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		}
 		e.ai_launch_set = d.ai_launch;
 		e.ai_launch_effect = d.ai_launcheffect;
+		e.secondary_effect = d.secondary_effect;
+		e.kz_sound = d.kz_sound;
 		e.mf_light = d.mf_light;
 		e.mf_light_value = d.mf_light_value;
 		e.tracer_type_friendly = d.tracer_type_friendly;

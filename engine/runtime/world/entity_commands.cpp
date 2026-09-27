@@ -327,6 +327,13 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     if (!entity) return false;
     // The shared destroy primitive, including script and teammate removals.
     // [orig: Entity_Destroy @0x43E810; reference walk @0x465670]
+    // The row leaves its refNum group first, so no member's destroy below
+    // walks back to it. The port keeps no group list: a live row whose refNum
+    // byte matches is a member, and the byte is cleared here for the list
+    // removal. [orig: Entity_Destroy @0x43E840..0x43E858 — DynArray_RemoveById
+    //  on the refNum list]
+    const uint8_t ref = entity->ref_num;
+    entity->ref_num = 0;
     if (entity->item_type == 3) world_.match.drop_carried_object(world_, h);
     world_.facials.release(*entity);
     world_.out.scars.clear_entity(h);
@@ -335,6 +342,32 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
         if (entity->death_effect_active[family - 1] != 0)
             release_death_effect_bank(*entity, family, world_.out.destruction);
     world_.ai.clear_entity_references(world_, h);
+    // A destroyed non-person row that holds a refNum takes every member of its
+    // refNum group whose def carries EWeap with it, each through this same
+    // destroy (so without a notify of its own): an addeweap child, which shares
+    // its carrier's refNum, never outlives the carrier's row. A member without
+    // EWeap stays. The members are read once and each is tested again when
+    // reached, as retail walks a copy of the group list and skips a row an
+    // earlier member's destroy already cleared.
+    // [orig: Entity_Destroy @0x43E9B6..0x43E9CD — the def, def type != 3 and
+    //  refNum (+0x215) != 0 gates, the call @0x43E9CD; CStreamingMem_Destroy
+    //  @0x546F30 (an IDB misnomer) — the group list copy @0x546F73, the member
+    //  tests @0x546F8A..0x546FA0 (not self, same refNum, def attrib 0x20),
+    //  Entity_Destroy @0x546FA3]
+    if (entity->has_item_def && entity->item_type != 3 && ref != 0) {
+        std::vector<EntityHandle> members;
+        world_.registry.for_each([&](const Entity &other) {
+            if (other.ref_num == ref) members.push_back(other.handle);
+        });
+        for (EntityHandle member : members) {
+            const Entity *row = world_.registry.get(member);
+            if (row != nullptr && row->ref_num == ref && row->has_item_def &&
+                    (row->item_attrib & kItemAttribEweap) != 0)
+                remove_ssn(member);
+        }
+        entity = world_.registry.get(h);
+        if (entity == nullptr) return true;
+    }
     if (Entity *carrier = world_.registry.get(entity->primary_occupant)) {
         if (entity->item_type != 3) world_.vehicles.detach(carrier->handle);
         if (carrier->mounted_child == h) carrier->mounted_child = {};
@@ -1603,8 +1636,8 @@ void sync_teleported_ai(World &world, const Entity &entity) {
 // (pool 0), @0x43e13c/@0x43e1df (pools 1/2)]; the group action clears
 // 0x20000 on pools 1/2 only [orig: @0x43d47f/@0x43d4e3 — the pool-0 arm
 // @0x43d404..0x43d426 goes straight to the spawn reset]. Our split homes the
-// bits: Building (0x20000) lives on engine_flags alone — it is outside the
-// organic low byte `flags` mirrors — while the chute bit is legacy-mirrored,
+// bits: the matrix bit (0x20000) lives on engine_flags alone — it is outside
+// the organic low byte `flags` mirrors — while the chute bit is legacy-mirrored,
 // so that one is written on both views and read merged.
 void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
                       bool single_action) {
@@ -1613,7 +1646,7 @@ void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
     entity.pitch = marker.pitch;
     entity.roll = marker.roll;
     if (single_action || entity.handle.pool() != 0)
-        entity.engine_flags &= ~kEntityFlagBuilding;
+        entity.engine_flags &= ~kEntityFlagMatrixBuilt;
     if (single_action && entity.handle.pool() == 0 &&
         ((marker.flags | marker.engine_flags) & kEntityFlagParachute) != 0) {
         entity.flags |= kEntityFlagParachute;
@@ -1783,8 +1816,8 @@ bool EntityCommands::wac_teleport_ssn(EntityTarget source, int32_t marker_wp_num
     if (marker.item_type == 3) {
         entity_reset_to_spawn_state(world_, marker);
     } else {
-        marker.flags &= ~kEntityFlagBuilding;
-        marker.engine_flags &= ~kEntityFlagBuilding;
+        marker.flags &= ~kEntityFlagMatrixBuilt;
+        marker.engine_flags &= ~kEntityFlagMatrixBuilt;
         if (world_.collision != nullptr)
             world_.collision->refresh_after_registry_change(world_);
     }

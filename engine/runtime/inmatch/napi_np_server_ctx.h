@@ -365,10 +365,10 @@ struct NapiNPServerCtx {
 		int32_t per_team_flag = -1;           // row[2]
 		std::array<int32_t, 8> team_slots{};  // row[3 + team]
 	};
+	// The table is bypassed while the host config's unlimited_vehicles is set
+	// (GameConfig::unlimited_vehicles, stock 1): 0xFF/0xFF rows on the wire and
+	// no limit check. [orig: dword_24D1E38 @0x5105F5..0x5105FF, @0x51C5E2..0x51C5E9]
 	std::vector<VehicleSpawnLimitRow> vehicle_spawn_limits;
-	// dword_24D1E38: the "unlimited vehicle spawns" host global. 0xFF/0xFF rows
-	// on the wire and the limit check bypassed. [orig: @0x5105FF, @0x51C5F6]
-	bool vehicle_spawns_unlimited = false;
 	// The world-side spawner Entity_SpawnDeployable @0x51C2B0 delegates to: the
 	// embedder that owns the items.def traits sweep installs it; the C2S 0x40
 	// handler refuses the spawn when unset. Returns the new pool-1 handle.

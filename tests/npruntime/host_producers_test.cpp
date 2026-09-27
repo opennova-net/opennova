@@ -409,7 +409,16 @@ bool check_vehicle_spawn_availability() {
 	if (!expect(inmatch::Server_CountEntitiesByTypeAndTeam(f.world, 7, 1) == 1,
 			"the live deployable counts"))
 		return false;
+	// The stock host config's unlimited_vehicles reads every row unlimited.
+	// [orig: dword_24D1E38 @0x5105F5..0x5105FF; Config_SetDefaults @0x54D352]
 	std::vector<ProtocolMessage> replies = f.dispatch(0, c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {});
+	const std::vector<uint8_t> unlimited = {3, 7, 0, 0xFF, 0xFF, 9, 0, 0xFF, 0xFF, 0, 0};
+	if (!expect(replies.size() == 1 && replies[0].tag == s2c::VEHICLE_SPAWN_AVAILABILITY &&
+					replies[0].payload == unlimited,
+			"0x70 carries FF/FF for every row under the stock unlimited_vehicles"))
+		return false;
+	f.ctx.config.unlimited_vehicles = false;
+	replies = f.dispatch(0, c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {});
 	const std::vector<uint8_t> want = {3, 7, 0, 2, 2, 9, 0, 0xFF, 0xFF, 0, 0};
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::VEHICLE_SPAWN_AVAILABILITY &&
 					replies[0].payload == want,

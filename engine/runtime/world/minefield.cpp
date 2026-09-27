@@ -52,7 +52,7 @@ void MinefieldSystem::initialize(World &world, Entity &entity, bool think_enable
     const CollisionMatrix matrix = entity_placement_matrix(entity);
     std::copy(std::begin(matrix.m), std::end(matrix.m), state.placement);
     if (!think_enabled) return; // render selection does not install an init callback
-    entity.engine_flags |= kEntityFlagBuilding;
+    entity.engine_flags |= kEntityFlagMatrixBuilt;
     if (!has_graphic) return;
     state.age = (entity.handle.packed & 0x7F) + 7;
     state.ammo_small = small_ammo;

@@ -160,6 +160,14 @@ typedef struct DefAmmoDef {
      * @0x40aeea..0x40af11 atol -> word +0x76; consumer AmmoDef_ProcessImpactEffect
      * @0x40a24e..0x40a264 -> Impact_SpawnGlassEffectsOrScar @0x5cf1b0] */
     int scar_type;                /* word +0x76 */
+    /* The blast's per-victim presentation (appended; layout stability):
+     * 'secondary_effect <name>' and 'kz_sound <set>'. The original resolves
+     * both at parse (the interned effect handle +0x48, the sound-set pointer
+     * +0x4C); we keep the names. [orig: AmmoDef_ParseProperty
+     * @0x40aa15..0x40aa36 / @0x40a92a..0x40a94b; consumer
+     * Projectile_ProcessExplosionQueue @0x4EB1DA..0x4EB292] */
+    char secondary_effect[64];    /* +0x48 */
+    char kz_sound[64];            /* +0x4C */
 } DefAmmoDef;
 
 typedef struct DefAmmoFile {

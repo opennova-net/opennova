@@ -35,6 +35,21 @@ void ClientReplicaPipeline::set_item_class_resolver(ItemClassResolver resolver) 
 	item_resolver_ = std::move(resolver);
 }
 
+void ClientReplicaPipeline::set_item_catalog(std::shared_ptr<const ItemReplicationCatalog> catalog) {
+	item_catalog_ = std::move(catalog);
+	if (!item_catalog_) {
+		item_resolver_ = {};
+		return;
+	}
+	item_resolver_ = [catalog = item_catalog_](uint16_t type_id) {
+		return catalog->resolve_wire_entity_class(type_id);
+	};
+}
+
+const ItemReplicationProfile *ClientReplicaPipeline::item_def(uint16_t type_id) const {
+	return item_catalog_ ? item_catalog_->by_wire_type(type_id) : nullptr;
+}
+
 EntityClass ClientReplicaPipeline::classify(uint16_t type_id) const {
 	// items.def first — the retail client's own dispatch source [orig: itemDef+356
 	// @0x50f2e2]. It must outrank the 0x0D pool blanket: pool-1 holds no-callback
@@ -91,7 +106,9 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		if (type_changed) state_.mark_topology_changed();
 		es.type_id = rec.item_type_id;
 		es.cls = classify(rec.item_type_id);
-		es.name = rec.entity_name;
+		// The Name copy is bounded: at most 15 characters, then the NUL.
+		// [orig: NapiNPClientMsg_0x00C @0x42E860..0x42E8EA]
+		es.display_name = rec.entity_name.substr(0, 15);
 		es.net_id = rec.net_id;
 		es.spawn_tag = s2c::ENTITY_SPAWN_BATCH;
 		es.spawn_owner_connection_id = rec.owner_connection_id;
@@ -1312,7 +1329,10 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.handle = rec.slot_id;
 		es.type_id = rec.item_type_id;
 		es.cls = classify(rec.item_type_id);
-		es.name = rec.entity_name;
+		// entity+0xF4, which only an AIData record names (its serializer writes
+		// the empty string for any other def). [orig: NapiNPClientMsg_0x00D
+		//  @0x433320..0x43334A]
+		es.display_name = rec.entity_name;
 		// The 0x0D handler memsets the full slot and has no entity+124
 		// net-id field. Preserve retail's resulting zero, not ClientState's
 		// unknown/sentinel default.
@@ -1494,23 +1514,23 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			}
 			child.carrier_missing_ticks = 0;
 			// The dead-carrier leg. Retail's client HIDES the child in place —
-			// carrier Flags & 2 -> child Flags |= 1, return, row persists
-			// pending the authority's own destroy transaction [orig:
-			// @0x440cdb..0x440cdd]. Our decoded view RETIRES the subtree
-			// instead (the #403 substitute, kept deliberately): the hide is
-			// presentation-equivalent (bit 0 = invisible), our authority
-			// genuinely despawns the attachment on carrier death, and no
-			// destroy transaction exists on this seam to mirror — an erased
-			// row IS the authority truth here. The death signal stays the
-			// known-zero health word only: the wire flags bit 1 is an
-			// overloaded spawn/movement gate on 0x0D-fed rows, not a death
-			// verdict (the loopback-identity pin).
+			// carrier Flags & 2 -> child Flags |= 1, return, no pose follow — and
+			// the live carrier's vehicle block clears the child's low Flags bits
+			// again (Flags &= ~7) once it respawns; the row persists throughout,
+			// as it does on the authority. The row's state_flags byte is the
+			// entity Flags low byte, which no compact record writes for this
+			// family. The death signal stays the known-zero health word only: the
+			// wire flags bit 1 is an overloaded spawn/movement gate on 0x0D-fed
+			// rows, not a death verdict (the loopback-identity pin).
+			// [orig: Entity_UpdateTransformAndTurret @0x440cdb..0x440ce1 (the
+			//  hide), `and [child+24h],0FFFFFFF8h` @0x440EB3 (the clear)]
 			if (parent->health_known && parent->health_word == 0) {
-				if (std::find(sweep_destroyed.begin(), sweep_destroyed.end(),
-						child.handle) == sweep_destroyed.end())
-					sweep_destroyed.push_back(child.handle);
+				child.state_flags |= static_cast<uint8_t>(world::kEntityFlagCarried);
+				child.state_flags_known = true;
 				continue;
 			}
+			child.state_flags &= static_cast<uint8_t>(~(world::kEntityFlagCarried |
+					world::kEntityFlagDead | world::kEntityFlagHusk));
 
 			const int32_t parent_heading_bam = parent->heading_bam;
 			if (!child.parent_pose_valid) {

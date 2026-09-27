@@ -111,14 +111,18 @@ inline float glare_coarse_start_lift(uint32_t frame_index) {
 
 // ---------------------------------------------------------------------------
 // The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130, once per
-// main scene render from Terrain_RenderWorldScene @ 0x5c96c0]: its
-// own 4-bit visibility window (dword_27E2E2C, >> 1 per frame, bit 3
-// (value 8) = visible) and +-16 brightness chase toward popcount * 64 (no
-// dead-band, no fog scale — dword_27E2E28). The settled brightness draws the glare model
-// mirrored below the eye (camera + sun * 128 with the HEIGHT term negated)
-// and, right-shifted 2, feeds the sun veil's secondary term
+// scene pass from Terrain_RenderWorldScene @ 0x5c96c0 — the main scene's,
+// then, while it renders, the weapon Inset pass's over its own camera, both
+// on this one accumulator (runtime/renderer/scene_overlay.h
+// kInsetOverlayOrder)]: its own 4-bit visibility window (dword_27E2E2C, >> 1
+// per call, bit 3 (value 8) = visible) and +-16 brightness chase toward
+// popcount * 64 (no dead-band, no fog scale — dword_27E2E28). The settled
+// brightness draws the glare model mirrored below the eye (camera + sun * 128
+// with the HEIGHT term negated) and, right-shifted 2, feeds the sun veil's
+// secondary term, which the frame computes after both passes
 // [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8dc..0x5ad916 —
-// both veil sums clamp 192].
+// both veil sums clamp 192; its call @ 0x5cac4b follows the Inset's
+// @ 0x5ca949 in Render_ProcessMainSceneFrame].
 struct WaterGlintState {
 	uint8_t window = 0;        // dword_27E2E2C
 	int brightness = 0;        // dword_27E2E28

@@ -83,28 +83,29 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 // (NO start_index — unlike 0x20), then per record `[u16 spawn_flags][u16 slot_id]
 // [u16 item_type_id][cstr entity_name]` and the flag-gated body (entity_flags,
 // always-pos, vel/section/orient/parent/target, the 0x400 mount-occupancy block, the
-// always bone_byte (+290; team is the 0x0010-gated byte, D-NET-58), the 0x800 AI trailer, alert/action/weapon_type, the health
+// always bone_byte (+290; team is the 0x0010-gated byte, D-NET-58), the 0x800 AI trailer, alert/action/sound_latch, the zone
 // block, difficulty) — see decode_pool_spawn_batch for the exact field order.
 //
-// As with the pool-3 encoder, the spawn_flags word is DERIVED from which record
-// fields are populated (the original sets each bit inside `if (value) { … }`),
-// so `PoolSpawnRecord::spawn_flags` on the input is ignored and recomputed:
+// As with the pool-3 encoder, the spawn_flags word is DERIVED from the record
+// (the original sets each value-gated bit inside `if (value) { … }`), so
+// `PoolSpawnRecord::spawn_flags` on the input is ignored and recomputed:
 //   0x0020 entity_flags!=0 · 0x0001/2/4 vel_{x,y,z}!=0 · 0x0008 section_mask!=0
 //   0x0010 team_byte!=0 (entity+354; D-NET-58) · 0x0100 parent_handle!=0xFFFF · 0x0200 target_handle!=0xFFFF
-//   0x0400 seat_mask!=0 · 0x0800 (ai_name non-empty || ai_profile_* != 0)
-//   0x0040 alert_byte!=0 · 0x0080 action_byte!=0 · 0x1000 weapon_type_byte!=0
-//   0x2000 zone_number_rank!=0 (writes zone_number_rank+zone_radius) ELSE 0x8000 zone_radius!=0
-//   0x4000 difficulty_byte!=0.
+//   0x0400 seat_mask!=0 · 0x0800 has_ai_trailer
+//   0x0040 alert_byte!=0 · 0x0080 action_byte!=0 · 0x1000 has_sound_latch_byte
+//   0x2000 has_zone_number_rank (writes zone_number_rank+zone_radius) ELSE 0x8000
+//   has_zone_radius_alt (zone_radius) · 0x4000 has_difficulty_byte.
 // Mount-occupancy block (D-NET-56): when 0x0400 is set, `mount_handle_8/9` are ALWAYS
 // written after the per-set-bit handles. The original only sets 0x0400 when the
 // mask is non-zero, so this encoder never emits the (0x400, mask==0) record.
 //
-// Boundary note: the original's flag gates for 0x0400/0x0800/0x1000/0x8000 read
-// item-def flags and component pointers off the live engine entity (itemDef+604,
-// itemDef+84 & 0x100000/0x40000, entity+100/+104). The host driver computes the
-// record's fields from a World entity per those gates; this record-level encoder
-// then derives the wire flags from the populated fields — a faithful layout whose
-// round-trip with decode_pool_spawn_batch is field-identical.
+// Boundary note: the original gates 0x0800 and 0x1000 on component pointers off the
+// live engine entity (the AIData def's AI slot entity+104, the vehicle brain
+// entity+100), 0x2000 on the zone number byte (entity+538), 0x8000 on the def's
+// SpawnPoint attrib (itemDef+84 & 0x40000) and 0x4000 on the def's callbacks, not on
+// the written values, so each rides an explicit presence field the host driver sets
+// from those sources; 0x0400 reads itemDef+604 through the seat mask. The round-trip
+// with decode_pool_spawn_batch is field-identical.
 std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch);
 
 // Encode a §5.9 S2C 0x10 pool-2 static-entity batch — the inverse of
@@ -113,7 +114,8 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch);
 // `[u16 start_index][u16 count]`, then per record `[u16 item_type_id]` (0 ⇒ empty-slot
 // sentinel) else the flag-driven body. The field_flags word is DERIVED from populated
 // fields (the original sets each gate bit inside `if (value) { flags |= bit; write }`), so
-// `StaticEntityRecord::field_flags` on the input is ignored and recomputed.
+// `StaticEntityRecord::field_flags` on the input is ignored and recomputed; 0x0100 is the
+// exception, riding `has_score_flag` because the original tests the def's callbacks.
 // [orig: serialize_pool2_static_to_buffer @0x5042f0 (write) / NapiNPClientMsg_0x010 @ 0x433400 (decode).]
 std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch);
 

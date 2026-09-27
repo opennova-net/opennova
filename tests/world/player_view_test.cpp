@@ -628,8 +628,9 @@ void test_view_projection_retail_stretch() {
 }
 
 // The NVG scene's pass [orig: NVG_RenderScene @0x5d2954..0x5d296d; NVG_RenderScopedScene
-// @0x5d29e4..0x5d2a2a]: the frame's frustum in 512 rows at its own aspect, or
-// the Scoped arm's square frustum in the 512 square.
+// @0x5d29e4..0x5d2a2a]: every arm rasterises the 512 square, the frame-shaped
+// arms at the frame's frustum (its aspect kept: non-square texels), the Scoped
+// arm at its square frustum.
 void test_nvg_view_projection() {
     opennova::renderer::FrameFxNvgPlan frame_arm;
     frame_arm.scene = frame_arm.composite = true;
@@ -641,10 +642,11 @@ void test_nvg_view_projection() {
     const ViewProjection nvg = nvg_view_projection(wide, frame_arm, 0.75f, 1);
     CHECK(nvg.fov_h_deg == wide.fov_h_deg && nvg.fov_v_deg == wide.fov_v_deg);
     CHECK(nvg.aspect == wide.aspect);
-    CHECK(nvg.target_h == 512 && nvg.target_w == 683); // lround(512 x 4/3)
+    CHECK(nvg.target_h == 512 && nvg.target_w == 512); // retail's columns, not 512 x 4/3
     const ViewProjection native = view_projection(80.0f, -1, 1920, 1080);
     const ViewProjection native_nvg = nvg_view_projection(native, frame_arm, 0.5625f, 1);
-    CHECK(native_nvg.target_h == 512 && native_nvg.target_w == 910);
+    CHECK(native_nvg.target_h == 512 && native_nvg.target_w == 512);
+    CHECK(native_nvg.aspect == native.aspect && native_nvg.fov_v_deg == native.fov_v_deg);
     const ViewProjection lens = nvg_view_projection(wide, lens_arm, 0.75f, 4);
     CHECK(lens.fov_h_deg == 15.0f && lens.fov_v_deg == 15.0f && lens.aspect == 1.0f);
     CHECK(lens.target_w == 512 && lens.target_h == 512);
@@ -653,7 +655,7 @@ void test_nvg_view_projection() {
     const ViewProjection sighted = nvg_view_projection(wide, sighted_arm, 0.75f, 4);
     CHECK(sighted.fov_h_deg == 20.0f && sighted.aspect == wide.aspect);
     CHECK(std::fabs(sighted.fov_v_deg - fov_vertical_from_horizontal_deg(20.0f, wide.aspect)) < 1e-5f);
-    CHECK(sighted.target_w == 683 && sighted.target_h == 512);
+    CHECK(sighted.target_w == 512 && sighted.target_h == 512);
 }
 
 // [orig: Game_RunVideoTestDialog @0x53ed3e..0x53ed6b] The first launch's video

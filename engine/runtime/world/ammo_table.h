@@ -156,6 +156,12 @@ struct AmmoTableEntry {
     // @0x40a8c8/@0x40a8f6]; we carry the names and the host resolves at play time.
     std::string ai_launch_set;      // +64 `ai_launch` fire sound-set name
     std::string ai_launch_effect;   // +68 `ai_launcheffect` muzzle effect name
+    // The blast's per-victim presentation, names as above (the original
+    // resolves the handle / set pointer at parse) [orig: AmmoDef_ParseProperty
+    // @0x40aa15 / @0x40a92a; consumer Projectile_ProcessExplosionQueue
+    // @0x4EB1A3 / @0x4EB1DD].
+    std::string secondary_effect;   // +72 `secondary_effect`
+    std::string kz_sound;           // +76 `kz_sound`
     int32_t mf_light = 0;           // +36 `MF_Light` presence flag [orig: @0x40a81b]
     int32_t mf_light_value = 0;     // +40 `MF_Light` value
     int32_t tracer_type_friendly = 0; // +232 `tracer_type` first style id

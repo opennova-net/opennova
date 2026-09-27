@@ -420,7 +420,13 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 			!conn.player_name.empty() ? conn.player_name : ctx.config.player_name;
 	if (!resolved_name.empty()) {
 		conn.reply.player_name = resolved_name;
-		if (world::Entity *e = world.registry.get(h)) e->name = resolved_name;
+		// The player's name is also its entity's Name (entity+0xF4), which the
+		// 0x0C record and the friendly tags read.
+		// [orig: Server_PlayerAdd strcpy into +0xF4 @0x51D06B..0x51D082]
+		if (world::Entity *e = world.registry.get(h)) {
+			e->name = resolved_name;
+			e->display_name = resolved_name;
+		}
 	}
 	world::MatchPlayerIdentity match_player;
 	match_player.entity = h;
@@ -812,6 +818,16 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->burst.spawned = true; // in-match (is_in_match): drained + emitted by Server_TickUpdate
 	conn->reply.player_slot = *player_slot;
 	conn->reply.player_slot_reserved = false;
+	// The admitted player's name is its record's and its entity's Name, as on
+	// the handshake path. [orig: Server_PlayerAdd strcpy into +0xF4
+	//  @0x51D06B..0x51D082]
+	if (!conn->player_name.empty()) {
+		conn->reply.player_name = conn->player_name;
+		if (world::Entity *e = world.registry.get(h)) {
+			e->name = conn->player_name;
+			e->display_name = conn->player_name;
+		}
+	}
 	world::MatchPlayerIdentity match_player;
 	match_player.entity = h;
 	match_player.slot = *player_slot;

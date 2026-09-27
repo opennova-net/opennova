@@ -679,6 +679,17 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
     }
 }
 
+// A seated person rides its parent's blink quad every seated tick: groundEntity
+// takes parentEntity, then the parent's entity+0x1D0..0x1DC is copied, or the
+// quad is zeroed once no parent is left (the authority's failed-seat detach).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b662f..0x4b667e;
+//  Entity_UpdateInfantryAI @0x4beee7..0x4bef30 — reached from every seated
+//  path and after Entity_DetachFromVehicleIfServer @0x4b6627 / @0x4beedf]
+static void ride_parent_blink_quad(const World &world, Entity &occ) {
+    const Entity *parent = occ.mounted ? world.registry.get(occ.mount_target) : nullptr;
+    for (int i = 0; i < 4; ++i) occ.blink_hits[i] = parent != nullptr ? parent->blink_hits[i] : 0u;
+}
+
 bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     Entity *occ = world.registry.get(e.handle);
     // A dead occupant cannot enter the live mounted-pose path: it must reach the
@@ -732,6 +743,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
             world.vehicles.detach(e.handle);
             occ->ground_target = {};
         }
+        ride_parent_blink_quad(world, *occ);
         // The seat block's tail still runs for the rider it left unposed: the
         // legs and their targets snap to the body heading and the look takes the
         // mounted chase. A client keeps the rider, so the +-90 degree look clamp
@@ -775,6 +787,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     const int32_t saved_look_pitch = e.pitch;
     const int32_t seat_heading = apply_resolved_mounted_seat_frame(
             e, world, *occ, *veh, seat);
+    ride_parent_blink_quad(world, *occ);
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
         // carry writes bodyHeading/headLook from the seat bone but leaves entity->Yaw

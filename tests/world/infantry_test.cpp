@@ -3225,13 +3225,18 @@ void test_npc_silent_cleanup_and_corpse_effect_lifetime() {
         const auto &effects = r.storage->out.destruction.effects;
         CHECK(effects.size() == 1 && effects[0].effect == "corpse_decay");
         CHECK(effects[0].family == 1 && effects[0].attach_wire_handle == r.handle.packed);
+        // The corpse is the decay's descriptor tag [orig: Entity_UpdateInfantryAI
+        // @ 0x4B9F0F]; the respawn effect below carries tag 0 [orig:
+        // Entity_ResetToSpawnState `xor ebx, ebx` @ 0x4B962C].
+        CHECK(!effects.empty() && effects[0].section_tagged);
         CHECK(r.entity().death_effect_active[0] == 1);
         r.entity().corpse_timer = 1;
         r.tick(3, 4);
         bool released = false, spawned = false;
         for (const auto &effect : effects) {
             released |= effect.release && effect.attach_wire_handle == r.handle.packed;
-            spawned |= effect.effect == "npc_spawn" && effect.family == 0;
+            spawned |= effect.effect == "npc_spawn" && effect.family == 0 &&
+                    !effect.section_tagged;
         }
         CHECK(released && spawned && r.entity().death_effect_active[0] == 0);
         CHECK(r.entity().health == 125);

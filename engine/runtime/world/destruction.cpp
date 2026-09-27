@@ -904,10 +904,20 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 if (t->damage_state == 0) {
                     // Burn reacts before the damage callback's armor/team gates.
                     // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
-                    // Its attached hit emitter [orig: @0x4EB292] remains a separate
-                    // explosion-presentation gap recorded in world-wac-ai-re §24.
                     if (t->item_type == 3)
                         apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos, e.owner);
+                    // Then the victim's presentation, every pool-0 type: the
+                    // ammo's kz_sound full-volume at the victim, and its
+                    // secondary_effect into the victim's +0x1CC slot (the
+                    // witness sits on spawn_victim_hit_emitter).
+                    // [orig: @0x4EB1DA..0x4EB1EA (the +0x4C set ->
+                    //  Entity_PlaySound3D_FullVolume), @0x4EB1F2..0x4EB292 (the
+                    //  +0x48 effect)]
+                    if (!ammo->kz_sound.empty())
+                        world.out.fire_sounds.play_immediate(ammo->kz_sound.c_str(),
+                                t->position, t->bms_id, t->handle.packed);
+                    if (!ammo->secondary_effect.empty())
+                        spawn_victim_hit_emitter(*t, ammo->secondary_effect, events);
                     // An entry that deals no damage here stops after the burn:
                     // a zero kz_damage, or any entry on a non-authority session
                     // peer, where the damage read returns 0; the medic kit is
@@ -1074,15 +1084,19 @@ void process_destructible_death(World &world, Entity &target) {
         const std::vector<SectionDebrisSample> samples =
                 world.collision->sample_section_debris(
                         world, target.handle, target.death_blast_center);
-        // Material 17 (foliage) spawns with the ENTITY as the emitter owner
-        // (descriptor +12); wood spawns unowned [orig: the two
-        // submit_effect_descriptor calls @0x43f825..0x43f84d]. The event
-        // carries no owner tag yet — world-wac-ai-re.md §24.3 follow-up.
+        // Material 17 (foliage) spawns with the ENTITY as the descriptor's
+        // owner tag (+12), so its group takes the section gate; wood spawns
+        // with tag 0 [orig: Entity_SpawnSectionDebris @ 0x43F580 — the entity
+        // (ecx) kept in ebp @ 0x43F588; the material-17 branch @ 0x43f825
+        // pushes it @ 0x43F838, the wood branch pushes eax, zeroed @ 0x43F80A,
+        // @ 0x43F84C; the one submit @ 0x43F84D].
         for (const SectionDebrisSample &sample : samples) {
-            ev.effects.push_back(DestructionEffectEvent{
+            DestructionEffectEvent debris{
                     sample.material == 17 ? kSectionDebrisFoliageEffect
                                           : kSectionDebrisWoodEffect,
-                    sample.pos, sample.dir});
+                    sample.pos, sample.dir};
+            debris.section_tagged = sample.material == 17;
+            ev.effects.push_back(std::move(debris));
         }
         ev.debris_triangles += static_cast<int32_t>(samples.size());
     }
@@ -1379,8 +1393,10 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         // husk DEAD point through the complete authored pose, retain x/y, and
         // force z to Env_WaterHeightFixed. Zero is a real raw plane here (not
         // the no-water sentinel used by submerged-death selection), and an
-        // empty point bank has no entity-origin fallback.
-        // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0]
+        // empty point bank has no entity-origin fallback. Every shock carries
+        // the bridge as its descriptor tag, so it takes the section gate.
+        // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0, the tag store
+        //  @ 0x4945B4, the spawn @ 0x494635]
         if (!was_husked && traits != nullptr &&
             !traits->bridge_dead_points.empty()) {
             const CollisionMatrix orientation = destruction_orientation(target);
@@ -1388,11 +1404,13 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
                     static_cast<float>(world.env.water_z) / io::kFp16One;
             for (const Vec3 &point : traits->bridge_dead_points) {
                 const Vec3 offset = rotate_authored_point(orientation, point);
-                world.out.destruction.effects.push_back(DestructionEffectEvent{
+                DestructionEffectEvent shock{
                         "Effect_ShockWaterBrdg",
                         Vec3{target.position.x + offset.x,
                              target.position.y + offset.y, water_z},
-                        Vec3{}});
+                        Vec3{}};
+                shock.section_tagged = true;
+                world.out.destruction.effects.push_back(std::move(shock));
             }
         }
         break;
@@ -1400,7 +1418,14 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         mask = spawn_death_pieces(world, target);
         break;
     }
-    if (!matched_row) target.engine_flags &= ~kEntityFlagBuilding;
+    // The no-row arm's `(Flags & 0xFFFDFFFF) | 6` clears the matrix bit from
+    // the one retail dword, so both halves of the port's split word drop it
+    // (a joiner seeds both halves from the streamed dword).
+    // [orig: Entity_DispatchDeathCallback @0x493F3C..0x493F4B]
+    if (!matched_row) {
+        target.engine_flags &= ~kEntityFlagMatrixBuilt;
+        target.flags &= ~kEntityFlagMatrixBuilt;
+    }
     // The second death entry clears the scar ring the same way
     // [orig: Scar_ClearEntriesByEntity @ 0x5ccec0 ahead of the Flags |= 6].
     if (!was_husked) world.out.scars.clear_entity(target.handle);
@@ -1596,7 +1621,7 @@ void tick_item_death_motion(World &world, Entity &entity,
             events.sounds.push_back(DestructionSoundEvent{
                     "EXPLO_VEHCL_LG", e->position});
         }
-        e->engine_flags &= ~kEntityFlagBuilding;
+        e->engine_flags &= ~kEntityFlagMatrixBuilt;
         publish_piece_physics_angles(*e);
         return;
     }
@@ -1612,7 +1637,7 @@ void tick_item_death_motion(World &world, Entity &entity,
     }
     const bool routed_falling = e->death_motion == DeathMotionMode::Falling;
     const bool static_motion = e->death_motion == DeathMotionMode::Static;
-    if (routed_falling) e->engine_flags &= ~kEntityFlagBuilding;
+    if (routed_falling) e->engine_flags &= ~kEntityFlagMatrixBuilt;
     const Vec3 old_position = e->position;
     if (static_motion) {
         // Entity_UpdateStaticDeathPhysics @ 0x494230 samples the
@@ -1621,7 +1646,7 @@ void tick_item_death_motion(World &world, Entity &entity,
         if (terrain != nullptr && terrain->valid())
             ground = terrain::height_field_height_world_bilinear(
                     *terrain, e->position.x, -e->position.y);
-        e->engine_flags &= ~kEntityFlagBuilding;
+        e->engine_flags &= ~kEntityFlagMatrixBuilt;
         const float static_water =
                 water_height <= -1.0e8f ? 0.0f : water_height;
         const float water_above_ground = static_water - ground;

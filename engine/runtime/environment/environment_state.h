@@ -277,7 +277,8 @@ public:
 	// color — water x combined terrain light, the same derived chain the
 	// water surface renders with [orig: @ 0x5ca78b; the `jle` @ 0x5ca790
 	// keeps the water color at exact equality]. No blink letter reaches the beauty clear
-	// (the black clear @ 0x5c1597 is the water mirror's, render_main_scene).
+	// (the black @ 0x5c1474 / skyfog @ 0x5c1597 clear is the water mirror's,
+	// render_main_scene; see water_mirror_clear_color).
 	// Every branch serves RENDER-SPACE (x2-gained) colors for the
 	// modulate2x-path device Clear (D-RMAT-7).
 	Rgb frame_clear_color_for(bool eye_above_water) const;
@@ -286,6 +287,14 @@ public:
 	// @ 0x5d064e..0x5d0699 -- the `jle` @ 0x5d0660 keeps the water color at
 	// exact equality too]; the frame clear's water arm is this.
 	Rgb nvg_scene_clear_color(bool eye_above_water) const;
+	// The water mirror's clear: the prerender picks black, then the skyfog on
+	// its outdoors path, the path the indoors blink letter (0x2) turns off
+	// [orig: render_main_scene @ 0x5c1342..0x5c1353 (the outdoors flag),
+	// @ 0x5c1474 (black), @ 0x5c1597 (Env_SkyfogBlock)], and the RTT select
+	// clears colour and depth with it [orig: GTexRT_Select @ 0x67fcd2]. No
+	// thermal, waterline or NVG leg reaches it; under the letter the mirror
+	// draws no sky or terrain either, so the water reflects this black.
+	Rgb water_mirror_clear_color(bool mirror_outdoors) const;
 	// The raw interior pair (the object block's NVG rewrite gives it the
 	// modulator's R term on all three channels, apply_nvg_hemi_gain_r).
 	Rgb ceiling_color() const { return ceiling_color_rt_; }
@@ -482,6 +491,14 @@ public:
 	// [orig: SkyDome_RenderWithSkyfog @ 0x579ce7..0x579cf6]: the weather fog block, never the
 	// thermal grey or the underwater lit water.
 	SceneFogValues build_water_mirror_fog() const;
+	// The weapon Inset pass's fog: its own eye's side of the water, never the
+	// alternate (thermal) grey — the Inset applies (0, its eye below the
+	// water) and its scene core re-applies it with the pass's zero second
+	// argument [orig: Render_WeaponInsetScene @ 0x5c9d41..0x5c9d4f ->
+	// Environment_ApplyFogAndAmbient; Terrain_RenderWorldScene
+	// @ 0x5c9488..0x5c949f]. `underwater_view` is classify_render_eye's
+	// over the Inset eye.
+	SceneFogValues build_inset_scene_fog(bool underwater_view) const;
 
 	// The one witnessed render-eye/waterline rule. The device fog selector is
 	// STRICT below [orig: is_underwater = view_z < waterline, the

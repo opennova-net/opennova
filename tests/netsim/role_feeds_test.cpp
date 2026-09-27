@@ -199,7 +199,7 @@ int main() {
 		cs.roster[0] = ace;
 		replication::ClientEntityState member;
 		member.handle = 4;
-		member.name = "Bravo";
+		member.display_name = "Bravo";
 		cs.entities.push_back(member);
 		RoleView jv;
 		jv.kernel = &kernel;

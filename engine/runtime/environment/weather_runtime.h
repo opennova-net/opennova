@@ -181,7 +181,8 @@ public:
 	uint32_t terrain_light_combined_rgb() const;
 
 	// The witnessed cloud-scroll UV translations for a camera at
-	// (cam_x, cam_z) world units [orig: render_skybox @ 0x5791de..0x579260].
+	// (cam_x, cam_z) in the render basis the dome's UVs use (render x =
+	// -mission y, render z = mission x) [orig: render_skybox @ 0x5791de..0x579260].
 	CloudUvOffsets cloud_uv_offsets(float cam_x, float cam_z) const;
 	float cloud_uv_rate_per_second() const;
 

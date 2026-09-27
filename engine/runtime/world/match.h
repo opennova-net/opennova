@@ -482,6 +482,10 @@ class Match {
         int32_t return_ticks = 0;
         int32_t previous_x_q16 = 0;
         int32_t previous_y_q16 = 0;
+        // The authored heading as its whole-degree placement yaw: the
+        // definition pose's yaw word is its spawn angle, spawn_angle_bam(90 -
+        // yaw) (aiRuntime f0_7[7]).
+        int16_t home_yaw = 0;
     };
 
     void share_experience(const World &world, MatchPlayer &recipient, int32_t amount);
@@ -532,6 +536,40 @@ class Match {
     std::vector<MatchGameplayEvent> gameplay_events_;
 };
 
+
+// The carrier's words a drop reads: its position, its +0x10/+0x14 heading
+// and pitch, its Flags (the indoors bit), its blink quad, and its identity as
+// the drop sound's source (none for a replica-only carrier).
+struct DropCarrierPose {
+    Vec3 position;
+    int32_t heading_bam = 0;
+    int32_t pitch_bam = 0;
+    uint32_t flags = 0;
+    uint32_t blink_hits[4] = {};
+    int32_t bms_id = 0;
+    uint16_t handle = 0xFFFF;
+};
+
+// A native carrier's drop words: a person's live heading and pitch from its
+// body record, any other carrier's from its live euler.
+DropCarrierPose drop_carrier_pose(const World &world, const Entity &carrier);
+
+// The dropped object's own legs of a drop, over its carrier's words: the
+// carried and indoors bits, the motion, the installed fall, the pose off the
+// carrier (Z + 0x4000, a quarter turn) and the blink quad with its proximity
+// refresh. The host's Match::drop_carried_object runs it, and so does a
+// joiner whose 0x2F state takes the flag off its carrier.
+// [orig: Entity_DropCarriedObject @0x439df0; its joiner callers
+//  NapiNPClientMsg_0x02F @0x43105c / @0x4310dc]
+void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPose &carrier);
+
+// One pool-1 visit of a dropped object's installed callback (Entity::
+// drop_motion): the fall until the clamped ground stops it, then the ride on
+// the entity it landed on, which falls again when that entity dies.
+// [orig: Entity_UpdatePositionAndTransform @0x4adef0;
+//  Entity_UpdateParentTransform @0x4a88b0; Entity_InterpolateFromParentDelta
+//  @0x4a8d60]
+void update_dropped_object(World &world, Entity &object);
 
 // The sim-side end-of-round state plus the SP kill-stat buckets the epilog
 // score screen and the WAC bluekills/greenkills builtins read, as one value

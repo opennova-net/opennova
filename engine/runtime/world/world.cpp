@@ -27,48 +27,32 @@ namespace opennova::world {
 // zero takes pose_mounted_occupant's parent-root/local fallback.
 static void pose_emplacement_attachments(World &world) {
     devtools::ProfileLap lap(world.profile);
-    // Parent ownership ends when the carrier dies, even though ordinary item
-    // destruction keeps that carrier resident as a husk. Peel orphan chains
-    // without mutating registry slots during traversal.
-    for (int depth = 0; depth < 8; ++depth) {
-        std::vector<EntityHandle> orphans;
-        world.registry.for_each([&](const Entity &candidate) {
-            if (!candidate.emplacement_parent.valid()) return;
-            const Entity *parent =
-                    world.registry.get(candidate.emplacement_parent);
-            if (parent == nullptr ||
-                parent->registry_spawn_id !=
-                        candidate.emplacement_parent_spawn_id ||
-                !parent->alive || parent->health <= 0)
-                orphans.push_back(candidate.handle);
-        });
-        if (orphans.empty()) break;
-        for (EntityHandle orphan : orphans) {
-            std::vector<EntityHandle> occupants;
-            world.registry.for_each([&](const Entity &candidate) {
-                if (candidate.mounted && candidate.mount_target == orphan)
-                    occupants.push_back(candidate.handle);
-            });
-            for (EntityHandle occupant : occupants)
-                world.vehicles.detach(occupant);
-            world.commands.remove_ssn(orphan);
-        }
-    }
+    // A carrier's death leaves its attachments in place: the ewep class update
+    // hides a dead PlayerControl hull's children and its vehicle block clears
+    // that hide when the hull respawns (tick_emplaced_weapon_class_update); a
+    // dead carrier of any other kind keeps them riding its wreck. Destroying
+    // the carrier's row destroys every child whose def carries EWeap, as the
+    // child shares the carrier's refNum (EntityCommands::remove_ssn). A child
+    // without EWeap keeps its pointer to the freed row: it takes that zeroed
+    // row's pose (the class update's root copy) and rides whatever entity is
+    // next allocated there. The pass below poses against the row's current
+    // occupant.
+    // [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1 (the hide),
+    //  @0x440EB3 (the clear), the root copy @0x4410EA..0x4411BC; Entity_Destroy
+    //  @0x43E810 (the refNum walk @0x43E9CD -> CStreamingMem_Destroy @0x546F30,
+    //  memset @0x43EA70)]
     lap.mark(devtools::Slot::SIM_ATTACHMENT_ORPHANS);
     world.registry.for_each([&](const Entity &snapshot) {
         if (!snapshot.emplacement_parent.valid()) return;
-        // A stock streamed child carries an exact absolute spawn pose, but its
-        // parent/type pair can map to multiple authored addeweap slots. Only a
-        // resolved attachment row may replace that wire pose with a userpoint
-        // pose. Orphan ownership and mounted-rider refresh remain independent.
+        // A stock streamed child carries an exact absolute spawn pose. Only a
+        // resolved attachment row (its subType's slot on the carrier's def) may
+        // replace that wire pose with a userpoint pose. The mounted-rider
+        // refresh below stays independent.
         if (!snapshot.emplacement_pose_metadata_resolved) return;
         Entity *child = world.registry.get(snapshot.handle);
         const Entity *parent =
                 world.registry.get(snapshot.emplacement_parent);
-        if (child == nullptr || parent == nullptr ||
-            parent->registry_spawn_id !=
-                    snapshot.emplacement_parent_spawn_id)
-            return;
+        if (child == nullptr || parent == nullptr) return;
         Seat anchor;
         anchor.type = SeatType::Gunner;
         anchor.bone_index = child->emplacement_bone;
@@ -360,6 +344,10 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
                 env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
         tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
     }
+    if ((e = live()) == nullptr) return;
+    // A dropped carried object's installed fall or ride (Match owns the
+    // carry objects).
+    if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
     if ((e = live()) == nullptr) return;
     // A mounted non-organic brain re-poses on its seat after the mover ran.
     if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0)

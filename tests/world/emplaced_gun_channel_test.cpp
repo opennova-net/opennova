@@ -613,6 +613,9 @@ void test_parent_publication_runs_unoccupied_every_tick() {
     tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == yaw);
     CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == yaw);
+    // The carried leg rebuilt the gun's matrix from its carrier: Flags 0x20000
+    // on engine_flags [orig: Entity_UpdateTransformAndTurret @0x4411C2].
+    CHECK((pr.r.gun().engine_flags & kEntityFlagMatrixBuilt) != 0);
     // The world tick's pool-1 walk runs that class update for the empty gun.
     pr.parent_ai->brain.f[AiBrain::kActiveYaw] = 0x12340000;
     pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] = 0x12340000;
@@ -628,14 +631,174 @@ void test_parent_publication_runs_unoccupied_every_tick() {
     // Without the gun's weapon Def the class update publishes nothing.
     pr.r.gun().primary_weapon_slot_adm = kAdmSlotNone;
     pr.parent_ai->brain.f[AiBrain::kActiveYaw] = 0x12340000;
+    pr.r.gun().engine_flags &= ~kEntityFlagMatrixBuilt;
     tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
+    // ...and the slot gate's exit skips the matrix bit too [orig: @0x440EA0].
+    CHECK((pr.r.gun().engine_flags & kEntityFlagMatrixBuilt) == 0);
     // A slot the port has not bound yet still carries the Def its item def
     // names: retail binds it at spawn.
     // [orig: WeaponSlot_InitFromEntityDef @0x5466E8..0x54670A]
     pr.r.gun().primary_weapon = "CHILD_GUN";
     tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == yaw);
+}
+
+// On a vehicle carrier (def type 1) the ewep class update clears the child's
+// hide and kill bits (Flags & ~7, on both words) and copies the carrier's
+// 16-bit Health word, every update. A dead PlayerControl carrier instead
+// hides the child (Flags bit 0) and ends the update: no vehicle block, no
+// publication, no matrix bit, no spin tail. Occupied, the producer still
+// refreshes the words, but the class update's publication and window leg
+// stop. A revived hull brings both back, and its vehicle block clears the
+// hide. [orig: Entity_UpdateTransformAndTurret — the exit @0x440CBF..0x440CE1,
+//  the vehicle block @0x440EA6..0x440EBE, the OR @0x4411C2, the window leg
+//  @0x4411d1..0x4412b3]
+void test_class_update_vehicle_block_and_dead_hull_exit() {
+    ParentRig pr(/*profile_type=*/2, /*anchor_subobject=*/0, kItemAttribPlayerControl);
+    World &w = pr.r.w;
+    Entity &hull = *w.registry.get(pr.parent_h);
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.health = 250;
+    Entity &gun = pr.r.gun();
+    author_arc(gun);
+    gun.flags |= kEntityFlagCarried | kEntityFlagDead;
+    gun.engine_flags |= kEntityFlagHusk;
+    gun.health = 17;
+
+    // A live hull: the vehicle block, the publication and the matrix bit.
+    gun.emplaced_gun_yaw_word = 0x1234;
+    tick_emplaced_weapon_class_update(w, gun);
+    CHECK(((gun.flags | gun.engine_flags) &
+                  (kEntityFlagCarried | kEntityFlagDead | kEntityFlagHusk)) == 0);
+    CHECK(gun.health == 250);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
+    CHECK((gun.engine_flags & kEntityFlagMatrixBuilt) != 0);
+
+    // The hull dies: the child hides and the update ends at once.
+    hull.flags |= kEntityFlagDead | kEntityFlagHusk;
+    hull.health = 0;
+    gun.health = 17;
+    gun.engine_flags &= ~kEntityFlagMatrixBuilt;
+    gun.emplaced_gun_yaw_word = 0x2222;
+    gun.primary_weapon_slot.kick = 2;
+    tick_emplaced_weapon_class_update(w, gun);
+    CHECK((gun.flags & kEntityFlagCarried) != 0);
+    CHECK(gun.health == 17);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
+    CHECK((gun.engine_flags & kEntityFlagMatrixBuilt) == 0);
+    CHECK(gun.primary_weapon_slot.kick == 2 && gun.emplaced_spin_ticks == 0);
+
+    // Occupied on the dead hull: the word follows the look 50 deg past the
+    // arc, unpinned, the look keeps its heading and the brain its word.
+    const int32_t look_heading = bam_sub(kGunHeading, 50 * kBamPerDegree);
+    pr.r.look(look_heading, 0);
+    pr.r.tick_channel();
+    const int16_t unpinned = static_cast<int16_t>((50 * kBamPerDegree) >> 16);
+    CHECK(gun.emplaced_gun_yaw_word == unpinned);
+    CHECK(pr.r.body->heading == look_heading);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
+
+    // Revived: the publication (before the pin) and the window pin return,
+    // and the vehicle block clears the hide.
+    hull.flags &= ~(kEntityFlagDead | kEntityFlagHusk);
+    hull.health = 250;
+    pr.r.look(look_heading, 0);
+    pr.r.tick_channel();
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == emplaced_word_bam(unpinned));
+    CHECK(gun.emplaced_gun_yaw_word == static_cast<int16_t>((30 * kBamPerDegree) >> 16));
+    CHECK(pr.r.body->heading == bam_sub(kGunHeading, 30 * kBamPerDegree));
+    tick_emplaced_weapon_class_update(w, gun);
+    CHECK((gun.flags & kEntityFlagCarried) == 0);
+    CHECK(gun.health == 250);
+}
+
+// Through a carrier's death and respawn the attachment stays: the world tick
+// keeps it resident on the dead PlayerControl hull, which hides it, and the
+// hull's respawn brings it back through the vehicle block (the hide, kill and
+// husk bits cleared, the Health word copied, the intact model restored).
+// [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1, @0x440EB3..0x440EBE;
+//  Entity_RespawnVehicle @0x45FF40]
+void test_carrier_death_and_respawn_keep_the_child() {
+    ParentRig pr(/*profile_type=*/2, /*anchor_subobject=*/0, kItemAttribPlayerControl);
+    World &w = pr.r.w;
+    Entity *hull = w.registry.get(pr.parent_h);
+    hull->has_item_def = true;
+    hull->item_type = 1;
+    hull->health = 250;
+    hull->health_max = 250;
+    Entity &gun = pr.r.gun();
+    gun.emplacement_parent_spawn_id = hull->registry_spawn_id;
+    gun.ground_target = pr.parent_h;
+    CHECK(w.vehicles.detach(pr.r.gunner_h));
+
+    // The hull dies (the kill's |= 6 on both words) and the child with it.
+    hull->health = 0;
+    hull->alive = false;
+    hull->flags |= kEntityFlagDead | kEntityFlagHusk;
+    hull->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+    hull->spawn_phase = 1000; // the hull's brain stays out of these ticks
+    gun.health = 0;
+    gun.alive = false;
+    gun.engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+    w.run_logic_tick(true);
+    const Entity *child = w.registry.get(pr.r.gun_h);
+    CHECK(child != nullptr);
+    if (child == nullptr) return;
+    CHECK((child->flags & kEntityFlagCarried) != 0);
+    CHECK(!child->alive);
+
+    // The respawned hull's vehicle block revives it.
+    w.vehicles.respawn(*w.registry.get(pr.parent_h));
+    w.registry.get(pr.parent_h)->spawn_phase = 1000;
+    w.run_logic_tick(true);
+    child = w.registry.get(pr.r.gun_h);
+    CHECK(child != nullptr);
+    if (child == nullptr) return;
+    CHECK(((child->flags | child->engine_flags) &
+                  (kEntityFlagCarried | kEntityFlagDead | kEntityFlagHusk)) == 0);
+    CHECK(child->alive && child->health == 250);
+    bool restored = false;
+    for (const HuskSwapEvent &swap : w.out.destruction.husk_swaps)
+        restored |= swap.wire_handle == pr.r.gun_h.packed && swap.restore_intact;
+    CHECK(restored);
+}
+
+// A carrier row destroyed under its child (a child outside the carrier's EWeap
+// refNum group, which the destroy would take with it): retail keeps the child's
+// pointer to the zeroed row, so the class update finds no def (no hide or
+// vehicle block) and its root copy puts the child on the zeroed pose, the world
+// origin with zero angles, keeping any earlier hide. The next entity allocated
+// in that row becomes the child's carrier: a live vehicle there clears the hide.
+// [orig: Entity_Destroy memset @0x43EA70, its refNum walk @0x43E9CD ->
+//  CStreamingMem_Destroy @0x546F30; Entity_UpdateTransformAndTurret def test
+//  @0x440EA6, root copy @0x4410EA..0x4411BC, the vehicle block @0x440EB3]
+void test_freed_carrier_row_keeps_the_child() {
+    ParentRig pr(/*profile_type=*/2, /*anchor_subobject=*/0, kItemAttribPlayerControl);
+    World &w = pr.r.w;
+    Entity &gun = pr.r.gun();
+    gun.position = {12.0f, 34.0f, 5.0f};
+    gun.flags |= kEntityFlagCarried; // hidden by the hull's death
+    w.registry.despawn(pr.parent_h);
+    tick_emplaced_weapon_class_update(w, gun);
+    CHECK(gun.position.x == 0.0f && gun.position.y == 0.0f && gun.position.z == 0.0f);
+    CHECK(gun.yaw == 90 && gun.pitch == 0 && gun.roll == 0);
+    CHECK((gun.engine_flags & kEntityFlagMatrixBuilt) != 0);
+    CHECK((gun.flags & kEntityFlagCarried) != 0);
+
+    Entity next;
+    next.kind = EntityKind::Item;
+    next.has_item_def = true;
+    next.item_type = 1;
+    next.item_attrib = kItemAttribPlayerControl;
+    next.health = 400;
+    next.position = {7.0f, 8.0f, 9.0f};
+    const EntityHandle next_h = w.registry.spawn_at(pr.parent_h, next);
+    CHECK(next_h == pr.parent_h);
+    tick_emplaced_weapon_class_update(w, pr.r.gun());
+    CHECK((pr.r.gun().flags & kEntityFlagCarried) == 0);
+    CHECK(pr.r.gun().health == 400);
 }
 
 // The destroyed carrier's refNum children return to rest: their held gun
@@ -689,6 +852,9 @@ int main() {
     test_weapon_window_zero_yawrange_locks_traverse();
     test_unoccupied_gun_publishes_held_words_spin_and_heat();
     test_parent_publication_runs_unoccupied_every_tick();
+    test_class_update_vehicle_block_and_dead_hull_exit();
+    test_carrier_death_and_respawn_keep_the_child();
+    test_freed_carrier_row_keeps_the_child();
     test_carrier_destruction_resets_child_words();
     test_barrel_spin_once_before_weapon_pump();
     test_barrel_spin_tail_and_class_gate();

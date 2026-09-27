@@ -19,7 +19,7 @@ ClientReplicaCard client_replica_card(const replication::ClientState &state,
 		card.type_id = static_cast<int32_t>(es.type_id);
 		card.cls = static_cast<int32_t>(es.cls);
 		card.net_id = static_cast<int32_t>(es.net_id);
-		card.name = es.name;
+		card.name = es.display_name;
 		card.carrier_handle = static_cast<int32_t>(es.carrier_handle);
 		card.mount_bone = static_cast<int32_t>(es.mount_bone);
 		card.seat_type = static_cast<int32_t>(es.seat_type);

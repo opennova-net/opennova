@@ -63,6 +63,30 @@ enum class Q3GeometryKind : std::uint8_t {
 //  opaque list and the Q1/Q2 alpha queues (@ 0x5d97ca, @ 0x5d983b); the Q3
 //  copy @ 0x5d93b5..0x5d9447 lives only in collect_render_objects_for_batch
 //  @ 0x5d8f20]
+//
+// The first-person pass is an object-path producer like the world pass. It
+// submits the equipped weapon's model, then the arms, with render flags 0x80
+// while the player holds a weapon-slot reference and 0 otherwise, never
+// kSubmitNoGlowCopy, so the collector copies every glow-capable strip of the
+// rigid gun into Q3 at its part matrix exactly as it does a world object's,
+// while the bone-path arms never reach it. The pass's own flush (mode 0)
+// drains Q0, Q2 and Q1 alone: the copies wait in Q3 for FrameFX's mode-4
+// flush, which draws them under the WORLD projection over the full scene
+// viewport against the beauty depth (the part matrices stay in the batch
+// context until the next frame begins). With the world fov equal to the
+// weapon's renderfov a copy covers its own strip and the gun's depth band
+// rejects it; otherwise it lands at tan(renderfov/2) / tan(fov/2) times the
+// gun's offset from the view centre and glows wherever it leaves the gun's
+// footprint. So a viewmodel strip is an ordinary object source drawn with
+// the world camera's view-projection, and a rigid strip riding one bone of
+// the viewmodel skeleton takes that bone's part matrix.
+// [orig: Player_RenderFirstPersonViewModel @ 0x4def5c..0x4def6a (the flags),
+//  @ 0x4defc1 / @ 0x4df032 (the gun submits), @ 0x4df09b (the mode-0 flush);
+//  collect_render_objects_for_batch @ 0x5d93b5..0x5d9449 (0x100 the only
+//  gate); CRenderBatchQueue_SortAndFlush @ 0x5dae5b..0x5daeb4;
+//  FrameFX_RenderGlowSource @ 0x582a45..0x582a54; RenderBatchCtx_BeginFrame
+//  @ 0x5d8990, called once per frame from Render_ProcessMainSceneFrame
+//  @ 0x5ca156]
 inline constexpr bool q3_object_source_admitted(bool skinned_mesh) {
 	return !skinned_mesh;
 }

@@ -1,5 +1,6 @@
 #include <runtime/replication/client_world_materializer.h>
 
+#include <formats/mission/authoring.h> // entity_kind_for_item_type: items.def type -> BMS list
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/world.h>
@@ -48,7 +49,7 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.kind = kind_for_pool(handle.pool());
 	seed.item_id = row.type_id;
 	seed.net_id = row.net_id;
-	seed.name = row.name;
+	seed.display_name = row.display_name; // entity+0xF4
 	seed.position = {
 			static_cast<float>(row.x) / 65536.0f,
 			static_cast<float>(row.y) / 65536.0f,
@@ -61,8 +62,19 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.roll = static_cast<int16_t>(std::lround(
 			static_cast<double>(row.roll_bam) * world::kDegreesPerBam));
 	seed.team = row.team_known ? row.team : 0;
-	seed.flags = row.spawn_entity_flags;
-	seed.engine_flags = row.spawn_entity_flags;
+	// The streamed dword is the host's one Flags word, which the port splits;
+	// each bit lands in the half whose clears own it, as the host homes them:
+	// the movers' runtime bits (airborne, afloat, the MoveOrder lights/state
+	// bits, the suspension crash) in `flags`, where the client movers clear
+	// them, and the matrix bit in engine_flags, where its clears land. Every
+	// other bit rides both. [orig: NapiNPClientMsg_0x00D @0x432D7D (the one
+	// Flags store); the movers' own Flags writes, e.g. the airborne set/clear
+	// @0x483B98 / @0x483D55 and Entity_UpdateVehiclePhysics `or [esi+24h],20h`
+	// @0x48BACA]
+	constexpr uint32_t kMoverRuntimeBits = world::kEntityFlagInAir | world::kEntityFlagDrowning |
+			0x80u | 0x20u | 0x10u | 0x08u;
+	seed.flags = row.spawn_entity_flags & ~world::kEntityFlagMatrixBuilt;
+	seed.engine_flags = row.spawn_entity_flags & ~kMoverRuntimeBits;
 	seed.section_mask = row.spawn_section_mask;
 	seed.ammo_count = static_cast<uint8_t>(row.spawn_ammo_count & 0xFFu);
 	seed.ref_num = row.spawn_ref_num;
@@ -81,10 +93,6 @@ world::Entity seed_from(const ClientEntityState &row) {
 	return seed;
 }
 
-bool is_carry_objective(uint16_t item_id) {
-	return item_id == 4091 || item_id == 4093 || item_id == 4095;
-}
-
 bool update_live_row_state(
 		const ClientEntityState &row, world::Entity &entity) {
 	const world::Entity seed = seed_from(row);
@@ -92,18 +100,47 @@ bool update_live_row_state(
 			entity.position.y != seed.position.y ||
 			entity.position.z != seed.position.z || entity.yaw != seed.yaw ||
 			entity.pitch != seed.pitch || entity.roll != seed.roll ||
-			entity.team != seed.team ||
-			(is_carry_objective(row.type_id) &&
-			 (entity.flags & 0xFFu) != (row.spawn_entity_flags & 0xFFu));
+			entity.team != seed.team;
 	if (!changed) return false;
 	entity.position = seed.position;
 	entity.yaw = seed.yaw;
 	entity.pitch = seed.pitch;
 	entity.roll = seed.roll;
 	entity.team = seed.team;
-	if (is_carry_objective(row.type_id))
-		entity.flags = (entity.flags & 0xFFFFFF00u) |
-				(row.spawn_entity_flags & 0xFFu);
+	return true;
+}
+
+// The drop's carrier words: a native carrier's own (a materialized pool-1..3
+// carrier, or the client's own player); a destroyed person carrier's last
+// pose, which the destroy left on the flag's row; else the carrier's decoded
+// row (a remote person lives in the replica only).
+bool drop_carrier_pose_for(const ClientState &state, const world::World &world,
+		const world::Entity *native, uint16_t carrier, const ClientEntityState &flag_row,
+		world::DropCarrierPose &out) {
+	if (native != nullptr) {
+		out = world::drop_carrier_pose(world, *native);
+		return true;
+	}
+	out = world::DropCarrierPose{};
+	int32_t x = 0, y = 0, z = 0;
+	if (flag_row.objective_drop_serial != 0 &&
+			flag_row.objective_drop_serial == flag_row.objective_state_serial) {
+		x = flag_row.objective_drop_x;
+		y = flag_row.objective_drop_y;
+		z = flag_row.objective_drop_z;
+		out.heading_bam = flag_row.objective_drop_heading_bam;
+		out.pitch_bam = flag_row.objective_drop_pitch_bam;
+	} else if (const ClientEntityState *row = state.find(carrier)) {
+		x = row->x;
+		y = row->y;
+		z = row->z;
+		out.heading_bam = row->heading_bam;
+		out.pitch_bam = row->pitch_bam;
+	} else {
+		return false;
+	}
+	out.position = {static_cast<float>(x) / 65536.0f, static_cast<float>(y) / 65536.0f,
+			static_cast<float>(z) / 65536.0f};
 	return true;
 }
 
@@ -114,11 +151,16 @@ bool update_live_row_state(
 // collect_visible_entities_for_terrain @0x5c8c60; Terrain_RenderSectorModels
 // @0x5c5d30] — there is no per-role render path. The placed identity stamped
 // here is the shell's key into its one placed/batched presenter, so a joiner's
-// statics draw exactly as the host's do. Kind follows the streamed Flags
-// dword's Building bit (retail sets it for itemDef types 2/5/6 or a
-// model-less entity [orig: Entity_InitFromModel @0x40e0d4..0x40e105]), pool 3
-// rows are markers; the order (pool 2, pool 1, pool 3,
-// slot ascending) is the witnessed initial-state order.
+// statics draw exactly as the host's do. Kind follows the row's item def the
+// way the host's own placement does: the BMS list a record of that items.def
+// type sits in (authoring::entity_kind_for_item_type — building and
+// decoration defs are Buildings, every other pool-1/2 def an Item), pool 3
+// rows are markers. It never follows the streamed Flags bit 0x20000: retail
+// sets that bit every tick a mover rebuilds the entity matrix, so a live
+// vehicle streams it [orig: Entity_InitFromModel @0x40e0d4..0x40e105 (types
+// 2/5/6 at init); Entity_UpdateVehiclePhysics @0x48D451 and every mover tail].
+// A row whose def did not resolve keeps its pool's kind. The order (pool 2,
+// pool 1, pool 3, slot ascending) is the witnessed initial-state order.
 int ClientWorldMaterializer::assign_placement_origins(world::World &world) {
 	std::vector<uint16_t> handles;
 	handles.reserve(materialized_rows_.size());
@@ -146,7 +188,10 @@ int ClientWorldMaterializer::assign_placement_origins(world::World &world) {
 		world::EntityKind kind = world::EntityKind::Item;
 		if (handle.pool() == 3)
 			kind = world::EntityKind::Marker;
-		else if ((entity->engine_flags & world::kEntityFlagBuilding) != 0)
+		else if (!entity->has_item_def)
+			kind = kind_for_pool(handle.pool());
+		else if (mission::authoring::entity_kind_for_item_type(entity->item_type) ==
+				mission::EntityKind::Building)
 			kind = world::EntityKind::Building;
 		int &next = placement_index_next_[static_cast<int>(kind)];
 		entity->spawn_origin = world::spawn_origin_pack(
@@ -222,6 +267,84 @@ void ClientWorldMaterializer::fill_minefield_actors(const ClientState &state,
     }
 }
 
+// A flag row's carry state, taken from a new S2C 0x2F state (or a fresh
+// native lifetime's load record) only: its flags byte and position, its
+// ground entity, then the occupant legs. A flag that loses its occupant is
+// dropped off it by the drop's own legs over the occupant's words, which
+// install the local fall; between states that fall and the ride after it
+// own the flag's pose. The flag's parent field is occupantEntity, not the
+// static-load emplacement metadata: the carrier's mountedChild inverse stays
+// in lockstep.
+// [orig: NapiNPClientMsg_0x02F @0x430E10 — the flags/position stores
+//  @0x430F5F..0x430F74, groundEntity @0x430FBD, the old occupant's drop
+//  @0x43105C / @0x4310DC (Entity_DropCarriedObject), the attach @0x43106F /
+//  @0x4310C7 (Entity_AttachCarriedObject), the moved flag's proximity
+//  refresh @0x4310EC]
+// A carry relationship's entity: a materialized pool-1..3 row; in pool 0
+// only the client's own player, through its wire handle (its native row need
+// not sit at that slot); any other pool-0 handle is a replica-only person
+// and never names a native row.
+world::Entity *ClientWorldMaterializer::resolve_carrier(
+		world::World &world, uint16_t packed) const {
+	if (packed == world::EntityHandle::kInvalid) return nullptr;
+	const world::EntityHandle handle{packed};
+	if (handle.pool() >= 1 && handle.pool() <= 3) return owned(world, handle);
+	if (packed == local_wire_handle_) return world.registry.get(local_player_);
+	return nullptr;
+}
+
+void ClientWorldMaterializer::apply_objective_state(const ClientState &state,
+		world::World &world, uint16_t packed, const ClientEntityState &row,
+		world::Entity &child) {
+	MaterializedRow &tracked = materialized_rows_[packed];
+	const bool fresh = tracked.objective_lifetime != child.registry_spawn_id;
+	if (!fresh && tracked.objective_state_serial == row.objective_state_serial)
+		return;
+	if (fresh) tracked.objective_parent = world::EntityHandle::kInvalid;
+	tracked.objective_lifetime = child.registry_spawn_id;
+	tracked.objective_state_serial = row.objective_state_serial;
+	const auto resolve = [&](uint16_t packed_handle) {
+		return resolve_carrier(world, packed_handle);
+	};
+
+	const world::Vec3 position{static_cast<float>(row.x) / 65536.0f,
+			static_cast<float>(row.y) / 65536.0f,
+			static_cast<float>(row.z) / 65536.0f};
+	const bool position_changed = child.position.x != position.x ||
+			child.position.y != position.y || child.position.z != position.z;
+	child.flags = (child.flags & 0xFFFFFF00u) | (row.spawn_entity_flags & 0xFFu);
+	child.position = position;
+	const world::Entity *ground = resolve(row.target_handle);
+	child.ground_target = ground != nullptr ? ground->handle : world::EntityHandle{};
+
+	const uint16_t previous = tracked.objective_parent;
+	const uint16_t next = row.parent_handle;
+	if (previous != world::EntityHandle::kInvalid && previous != next) {
+		world::Entity *old_carrier = resolve(previous);
+		if (old_carrier != nullptr && old_carrier->mounted_child == child.handle)
+			old_carrier->mounted_child = world::EntityHandle{};
+		child.primary_occupant = world::EntityHandle{};
+		world::DropCarrierPose pose;
+		if (drop_carrier_pose_for(state, world, old_carrier, previous, row, pose))
+			world::drop_object_from_carrier(world, child, pose);
+	}
+	if (next != world::EntityHandle::kInvalid) {
+		if (world::Entity *carrier = resolve(next)) {
+			child.primary_occupant = carrier->handle;
+			carrier->mounted_child = child.handle;
+		}
+		// The attach hides the flag and puts back the def's own update
+		// callback. [orig: Entity_AttachCarriedObject @0x43c14a, @0x43c191]
+		child.flags |= world::kEntityFlagCarried;
+		child.drop_motion = world::DropMotion::None;
+	}
+	tracked.objective_parent = next;
+	// A moved flag re-runs its proximity/blink query at the new position.
+	// [orig: @0x4310EC -> Entity_BuildProximityList]
+	if (position_changed && world.collision != nullptr)
+		world.collision->refresh_blink(world, child);
+}
+
 ClientWorldSyncResult ClientWorldMaterializer::sync(
 		const ClientState &state, world::World &world) {
 	ClientWorldSyncResult result;
@@ -264,8 +387,9 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 			world::Entity *owned_row = world.registry.get(lifetime);
 			if (owned_row != nullptr) {
 				if (tracked->second.spawn_revision == row->spawn_revision) {
-					if ((row->spawn_tag == s2c::DEPLOYED_ITEM ||
-								is_carry_objective(row->type_id)) &&
+					// A flag's live state lands per S2C 0x2F state in the link
+					// pass below (apply_objective_state).
+					if (row->spawn_tag == s2c::DEPLOYED_ITEM &&
 							update_live_row_state(*row, *owned_row))
 						result.updated.push_back(lifetime);
 					continue;
@@ -334,34 +458,7 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 		world::Entity *child = owned(world, world::EntityHandle{packed});
 		if (child == nullptr) continue;
 		if (is_carry_objective(row->type_id)) {
-			// The flag's parent field is occupantEntity, not the static-load
-			// emplacement metadata. Keep the carrier's mountedChild inverse in
-			// lockstep, including a carrier swap or detached update.
-			if (world::Entity *old_carrier =
-					world.registry.get(child->primary_occupant);
-					old_carrier != nullptr && old_carrier->mounted_child == child->handle)
-				old_carrier->mounted_child = world::EntityHandle{};
-			child->primary_occupant = world::EntityHandle{};
-			child->ground_target = world::EntityHandle{};
-			if (row->parent_handle != 0xFFFFu) {
-				const world::EntityHandle carrier_handle{row->parent_handle};
-				world::Entity *carrier = carrier_handle.pool() >= 1 &&
-						carrier_handle.pool() <= 3
-						? owned(world, carrier_handle)
-						: world.registry.get(carrier_handle);
-				if (carrier != nullptr) {
-					child->primary_occupant = carrier->handle;
-					carrier->mounted_child = child->handle;
-				}
-			}
-			if (row->target_handle != 0xFFFFu) {
-				const world::EntityHandle ground_handle{row->target_handle};
-				const world::Entity *ground = ground_handle.pool() >= 1 &&
-						ground_handle.pool() <= 3
-						? owned(world, ground_handle)
-						: world.registry.get(ground_handle);
-				if (ground != nullptr) child->ground_target = ground->handle;
-			}
+			apply_objective_state(state, world, packed, *row, *child);
 			continue;
 		}
 		child->emplacement_parent = world::EntityHandle{};

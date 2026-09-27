@@ -128,6 +128,22 @@ struct GameConfig {
 	bool hit_feedback = true; // [orig: hitFeedback_198 @0x54D18B]
 	bool fat_bullets = false;                   // [orig g_FatBullets @0x24D21A0]
 	bool one_shot_kill = false;                 // [orig g_OneShotKill @0x24D219C]
+	// game.cfg `unlimited_vehicles`, stock 1: a destroyed PlayerControl hull
+	// respawns instead of being removed (World::Rules::vehicle_respawns), the
+	// S2C 0x70 vehicle-spawn availability rows read unlimited, and an accepted
+	// C2S 0x40 skips the EntityLimit table. The config word reaches its readers
+	// through the mission-data block every Game_StartMission rebuilds.
+	// [orig: g_GameConfigState.unlimitedVehicles_4D0 (Config_SetDefaults
+	//  @0x54D352, Config_ParseSettingsLine @0x551297, Game_SaveConfig
+	//  @0x54CBEB) -> dword_24D2258 (Game_ApplySessionSettingsToGlobals
+	//  @0x551D80..0x551D91) -> mission-data block +0x30, dword_24D1E38
+	//  (Client_BuildMissionDataRequestBlock @0x51E8C5..0x51E8CB, called from
+	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E8F4 in Game_StartMission
+	//  @0x5248A7); readers AI_TickState_VehicleDead @0x467EE9,
+	//  Entity_UpdateVehicleAIMovement @0x461246,
+	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105F5,
+	//  NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C5E2]
+	bool unlimited_vehicles = true;
 
 	// --- §6.9 rule globals — the S2C 0x08 ServerConfig block [orig: ServerConfig_SerializeToPacket
 	// @0x505bd0]. dword[3] is `game_type` above; the rest are the standalone g_* rule globals in wire

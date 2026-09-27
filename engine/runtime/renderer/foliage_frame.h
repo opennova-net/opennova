@@ -73,6 +73,13 @@ struct FoliageViewInput {
 	int32_t wind_osc_ring0 = 0;
 	// The local player's thermal view (foliage::FrameRequest::thermal_view).
 	bool thermal_view = false;
+	// The scene core's detail-pass gate (ScenePassGates::detail_foliage):
+	// false skips both detail passes, so the compile commands no detail draw,
+	// while the BySide waves and the MODEL masks inside them still run
+	// [orig: Terrain_RenderWorldScene @ 0x5C93D5..0x5C93E0 -> the skips
+	// @ 0x5C95BD..0x5C95BF / @ 0x5C965D..0x5C965F]. The cache update the
+	// cells feed is the traversal's (PolyTrn_RenderFrame), gated upstream.
+	bool detail_passes = true;
 };
 
 // The detail tier's c24.x sway phase: the ms clock x 0.003 plus the weather
@@ -276,6 +283,18 @@ struct FoliageDrawList {
 // instance blocks, forms per-submission commands with their uniform state,
 // advances both wind clocks, and mirrors the runtime's detail eviction
 // lifecycle. The returned draw list remains valid until the next compile call.
+// A frame compiles once per scene pass on the ONE compiler, so every pass
+// stamps the same detail cache and model pool and advances the same clocks:
+// the main view, then, while the weapon Inset renders, the Inset pass, which
+// runs its own traversal (its own detail cells and cache update), its own
+// Render_TerrainScene (the model scene counter) and its own scene core (its
+// own collector's anchors, BySide masks and detail passes)
+// [orig: Render_ProcessMainSceneFrame -> Render_WeaponInsetScene @ 0x5CA949;
+// Render_WeaponInsetScene: sub_60FF50 @ 0x5C9A2F, Render_TerrainScene
+// @ 0x5C99B7, Terrain_RenderWorldScene @ 0x5C9DE9; the counters
+// Foliage_UpdateDetailCellSlots `add g_FoliageFarSlotFrameCounter, 1`
+// @ 0x601B36 and Render_TerrainScene -> Foliage_AdvanceModelSceneCounter
+// @ 0x610CF7].
 class FoliageFrameCompiler {
 public:
 	// The MODEL-tier view-depth floor for silhouette anchors — the near bound

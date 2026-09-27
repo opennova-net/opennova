@@ -441,8 +441,15 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
 // The RENDERED frame: the view read plus the main scene's compose and, with
 // the Inset scene up, its second compose and slot offsets. Advances the
 // composition state; the presenter's per-frame leg is its one live caller.
-// [orig: Render_ProcessMainSceneFrame @0x5CA34D; Render_RadarCompassOverlay
-//  @0x5C9841..0x5C9903]
+// Each pose serves the pass of the frame that composed it: the Inset pass
+// composes its camera inside itself, after the main scene and right before
+// its own scene, so everything that pass draws reads this frame's Inset pose
+// and the frame's own verdict on whether the pass renders; an embedder
+// places both cameras before any leg of either pass reads them.
+// [orig: Render_ProcessMainSceneFrame @0x5CA34D (the main compose), the
+//  Inset gate @0x5CA290..0x5CA2C5 and call @0x5CA949 after the main scene
+//  @0x5CA8EC; Render_WeaponInsetScene @0x5C9841..0x5C9903 (its compose and
+//  slot offsets), @0x5C997F (its view) and @0x5C9DE9 (its scene)]
 void local_player_view_frame(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
                              LocalPlayerViewTracker &t, LocalPlayerViewFrame &out);
 

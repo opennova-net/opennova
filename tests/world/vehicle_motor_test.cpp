@@ -1449,6 +1449,48 @@ static void test_helo_waits_for_its_boarders() {
     CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
 }
 
+// Every mover ends by rebuilding the entity matrix and setting Flags 0x20000
+// (kEntityFlagMatrixBuilt, homed on engine_flags), and a dead hull's bail jumps to
+// that same tail, so every live and every dead vehicle a mover ran carries it —
+// the retail load stream's live 0x20400. [orig: cveh @0x48D451; ctan
+// @0x48AEC9; cbik @0x486A17; cbot @0x48EF63 (dead bail @0x48DDFA); aircraft
+// @0x492766 (dead bail @0x490CD0); selector-zero ground @0x46F9C5 and boat
+// @0x471683 (dead bails @0x46E89D / @0x470398)]
+void test_every_mover_tail_sets_the_matrix_bit() {
+	for (int physics : {1, 0}) {
+		for (VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Bike,
+					VehicleFamily::Tank, VehicleFamily::Watercraft, VehicleFamily::Helicopter,
+					VehicleFamily::Plane }) {
+			for (bool dead : {false, true}) {
+				Rig r;
+				VehicleTraits t = buggy_traits();
+				t.family = family;
+				t.physics = physics;
+				r.veh().engine_flags = 0;
+				r.veh().flags = dead ? kEntityFlagDead : 0u;
+				if (vehicle_family_uses_direct_air_mover(family)) {
+					r.veh().veh.ai_drive = true;
+					r.w.vehicles.aircraft_client_tick(r.veh(), t);
+				} else if (family == VehicleFamily::Watercraft) {
+					r.w.vehicles.tick_watercraft_motor(r.veh(), t);
+				} else {
+					r.w.vehicles.tick_motor(r.veh(), t);
+				}
+				CHECK((r.veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+				CHECK((r.veh().flags & kEntityFlagMatrixBuilt) == 0);
+			}
+		}
+	}
+	// An aircraft row the reimpl's guard skips (no pilot, no AI drive, not
+	// predicted) still ran retail's mover to its tail.
+	Rig parked;
+	VehicleTraits air = buggy_traits();
+	air.family = VehicleFamily::Helicopter;
+	parked.veh().engine_flags = 0;
+	parked.w.vehicles.aircraft_client_tick(parked.veh(), air);
+	CHECK((parked.veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+}
+
 // Exercise the real family entries: same cadence, distinct water behavior.
 void test_family_health_cadence_and_submersion() {
 	for (VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Bike, VehicleFamily::Tank,
@@ -1532,6 +1574,10 @@ void test_damage_effects_release_on_respawn() {
 	CHECK(r.w.out.destruction.effects.size() == 2);
 	CHECK(r.veh().veh.damage_fire_active);
 	CHECK(r.w.out.destruction.effects.back().effect == "Effect_vehicleFireMed");
+	// Both motor effects carry the vehicle as the descriptor tag [orig:
+	// Entity_UpdateVehiclePhysics push esi @ 0x48B0BB / 0x48B0F0].
+	for (const auto &e : r.w.out.destruction.effects)
+		CHECK(e.section_tagged);
 	r.tick(1, t);
 	CHECK(r.w.out.destruction.effects.size() == 2); // persistent slots spawn once
 	r.w.out.destruction.clear();
@@ -2749,6 +2795,7 @@ int main() {
 	test_selector_zero_sound_tails();
 	test_warning_cadence_by_family();
 	test_family_health_cadence_and_submersion();
+	test_every_mover_tail_sets_the_matrix_bit();
 	test_damage_effects_release_on_respawn();
 	test_zero_speed_displacement_and_submerged_sound();
 

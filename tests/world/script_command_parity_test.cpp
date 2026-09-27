@@ -702,6 +702,71 @@ static void test_player_removal_sweeps_placed_devices() {
     CHECK(w.registry.get(npc_charge) != nullptr);
 }
 
+// Destroying a non-person row that holds a refNum destroys every other member
+// of that refNum group whose def carries EWeap, each through the same destroy
+// and without a notify of its own (the joiners' own destroy of the carrier
+// takes them): an addeweap child never outlives its carrier's row, even when
+// the carrier's def is EWeap too. A member without EWeap, a row of another
+// refNum, and every member of a person's or a def-less row's group stay.
+// [orig: Entity_Destroy @0x43E810 — the list removal @0x43E840..0x43E858, the
+//  def / def type != 3 / refNum gates @0x43E9B6..0x43E9CA, the call @0x43E9CD;
+//  CStreamingMem_Destroy @0x546F30 — member tests @0x546F8A..0x546FA0,
+//  Entity_Destroy @0x546FA3]
+static void test_destroy_takes_the_eweap_refnum_group() {
+    ScriptWorld w;
+    auto row = [&](int pool, uint8_t ref, uint32_t attrib, uint8_t type, bool def = true) {
+        Entity e;
+        e.item_id = 2102;
+        e.has_item_def = def;
+        e.item_type = type;
+        e.item_type_index = 9;
+        e.item_attrib = attrib;
+        e.ref_num = ref;
+        e.health = 10;
+        if (type == 3) e.kind = EntityKind::Organic;
+        return w.registry.spawn(pool, e);
+    };
+    const EntityHandle carrier = row(1, 9, kItemAttribPlayerControl | kItemAttribEweap, 1);
+    const EntityHandle turret = row(1, 9, kItemAttribEweap, 5);
+    const EntityHandle gun = row(1, 9, kItemAttribEweap, 5);
+    const EntityHandle plain = row(1, 9, 0, 5);
+    const EntityHandle stranger = row(1, 10, kItemAttribEweap, 5);
+    Entity rider;
+    rider.kind = EntityKind::Organic;
+    rider.item_type = 3;
+    rider.has_item_def = true;
+    rider.health = 100;
+    const EntityHandle rider_h = w.registry.spawn(0, rider);
+    Entity *gun_row = w.registry.get(gun);
+    Seat seat;
+    seat.type = SeatType::Gunner;
+    seat.occupant = rider_h;
+    gun_row->seats.push_back(seat);
+    Entity *rider_row = w.registry.get(rider_h);
+    rider_row->mounted = true;
+    rider_row->mount_target = gun;
+    rider_row->mount_seat = 0;
+    rider_row->mount_type = SeatType::Gunner;
+    w.out.entity_events.clear();
+    CHECK(w.commands.server_remove_and_notify(carrier));
+    CHECK(queued_removals(w) == (std::vector<uint16_t>{carrier.packed}));
+    CHECK(w.registry.get(carrier) == nullptr);
+    CHECK(w.registry.get(turret) == nullptr && w.registry.get(gun) == nullptr);
+    CHECK(w.registry.get(plain) != nullptr && w.registry.get(stranger) != nullptr);
+    CHECK(w.registry.get(plain)->ref_num == 9);
+    rider_row = w.registry.get(rider_h);
+    CHECK(rider_row != nullptr && !rider_row->mounted);
+
+    const EntityHandle person = row(0, 11, 0, 3);
+    const EntityHandle person_gun = row(1, 11, kItemAttribEweap, 5);
+    const EntityHandle bare = row(1, 12, 0, 1, /*def=*/false);
+    const EntityHandle bare_gun = row(1, 12, kItemAttribEweap, 5);
+    CHECK(w.commands.remove_ssn(person));
+    CHECK(w.commands.remove_ssn(bare));
+    CHECK(w.registry.get(person) == nullptr && w.registry.get(bare) == nullptr);
+    CHECK(w.registry.get(person_gun) != nullptr && w.registry.get(bare_gun) != nullptr);
+}
+
 // BMS SingleTeleport's target walk keeps the ItemTypeIndex gate inside: a
 // gated row carrying the SSN is passed over for the next match, in the same
 // pool or the next, and only gated rows mean no teleport.
@@ -762,6 +827,7 @@ int main() {
     test_hold_ssn_cause_bit();
     test_wac_removals_notify_the_joiners();
     test_player_removal_sweeps_placed_devices();
+    test_destroy_takes_the_eweap_refnum_group();
     test_teleport_walk_gates_inside();
     if (failures) {
         std::printf("SCRIPT COMMAND PARITY TESTS FAILED (%d)\n", failures);

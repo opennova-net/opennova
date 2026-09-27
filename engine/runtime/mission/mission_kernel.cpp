@@ -746,6 +746,10 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	// [orig: g_entity_update_counter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
+	// [orig: dword_2C05A14 (the mode) and dword_2C05A18..20 (the camera),
+	// zero-initialized data whose only writer is Render_WeatherTrailParticles
+	// @0x5DEEB4..0x5DEED8]
+	precipitation_draw = previous.precipitation_draw;
 }
 
 // --- the tick ---------------------------------------------------------------

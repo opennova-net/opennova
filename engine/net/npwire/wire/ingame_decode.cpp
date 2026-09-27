@@ -185,21 +185,30 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		rec.bone_byte = c.u8();  // entity+290, unconditional bone/other byte — NOT team (D-NET-58)
 
 		if (rec.spawn_flags & kPoolSpawnHasAiTrailer) {
+			rec.has_ai_trailer = true;
 			rec.ai_profile_1 = c.u32();
 			rec.ai_profile_2 = c.u32();
 			rec.ai_name = c.cstr();
 		}
 		if (rec.spawn_flags & kPoolSpawnHasRefNum) rec.alert_byte = c.u8();
 		if (rec.spawn_flags & kPoolSpawnHasSubType) rec.action_byte = c.u8();
-		if (rec.spawn_flags & kPoolSpawnHasWeaponTypeByte) rec.weapon_type_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasSoundLatchByte) {
+			rec.has_sound_latch_byte = true;
+			rec.sound_latch_byte = c.u8();
+		}
 
 		if (rec.spawn_flags & kPoolSpawnHasZoneNumberRank) {
+			rec.has_zone_number_rank = true;
 			rec.zone_number_rank = c.u8();
 			rec.zone_radius = c.u16();
 		} else if (rec.spawn_flags & kPoolSpawnHasZoneRadiusAlt) {
+			rec.has_zone_radius_alt = true;
 			rec.zone_radius = c.u16();
 		}
-		if (rec.spawn_flags & kPoolSpawnHasDifficultyByte) rec.difficulty_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasDifficultyByte) {
+			rec.has_difficulty_byte = true;
+			rec.difficulty_byte = c.u8();
+		}
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
@@ -307,7 +316,10 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		rec.ammo_count = c.u8();                                  // entity+290, unconditional
 		if (rec.field_flags & kStaticEntityHasRefNum) rec.bone_a = c.u8();
 		if (rec.field_flags & kStaticEntityHasSubType) rec.bone_b = c.u8();
-		if (rec.field_flags & kStaticEntityHasScoreFlag) rec.score_flag = c.u8();
+		if (rec.field_flags & kStaticEntityHasScoreFlag) {
+			rec.has_score_flag = true;
+			rec.score_flag = c.u8();
+		}
 		rec.weapon_byte = c.u8();                                 // entity+538, unconditional
 		if (rec.weapon_byte != 0 || (rec.field_flags & kStaticEntityHasAttachRef)) rec.attach_ref = c.u16();
 

@@ -608,7 +608,16 @@ struct SessionRules {
     // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
     // @0x4E682E..0x4E6860]
     bool destroy_buildings = false;
-	// [orig: dword_24D1E38, initially -1; AI_TickState_VehicleDead @0x467EE9]
+	// A destroyed PlayerControl hull respawns (true) or is removed at its first
+	// dead tick (false): the host config's `unlimited_vehicles`, stock 1
+	// (inmatch::GameConfig::unlimited_vehicles, stamped by the host bring-up).
+	// Retail reads it as the mission-data block's +0x30 word, zero until every
+	// Game_StartMission rebuilds the block from the config.
+	// [orig: dword_24D1E38 = block unk_24D1E08 +0x30, stored by
+	//  Client_BuildMissionDataRequestBlock @0x51E8C5..0x51E8CB from dword_24D2258
+	//  = g_GameConfigState.unlimitedVehicles_4D0 (Game_ApplySessionSettingsToGlobals
+	//  @0x551D80..0x551D91; Config_SetDefaults @0x54D352); AI_TickState_VehicleDead
+	//  @0x467EE9, Entity_UpdateVehicleAIMovement @0x461246]
 	bool vehicle_respawns = true;
     // The local debug/cheat word's 0x800 bit (dword_24C1930): the SM feed's
     // class-0 player leg skips the LOCAL player and the weapon validator

@@ -12,6 +12,7 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -298,6 +299,18 @@ int main() {
     std::strcpy(tank->particlefxw4.userpoint, "FX01");
     std::strcpy(tank->sound_profile, "SP_Tank");
     std::strcpy(tank->soundloops[0], "LP_TANK");
+    // Four addeweap slots, the fourth authoring an arc (down 70, up 10, right
+    // 30, left 30 degrees, stored as the parser scales them), and a daylight
+    // transfer: the tables the subType -1 read lands on.
+    tank->light_transfer = 0.2f;
+    tank->emplacement_attachments = static_cast<DefItemEmplacementAttachment *>(
+            std::calloc(4, sizeof(DefItemEmplacementAttachment)));
+    tank->emplacement_attachments_count = 4;
+    tank->emplacement_attachments[3].down_angle = 70 * 11930464;
+    tank->emplacement_attachments[3].up_angle = -10 * 11930464;
+    tank->emplacement_attachments[3].right_angle = 30 * 11930464;
+    tank->emplacement_attachments[3].left_angle = -30 * 11930464;
+    tank->emplacement_attachments[3].angle_count = 4;
     std::strcpy(rifle->ammo_closeattack, "at_rifle");
     std::strcpy(rifle->ammo_easyrocket, "AT_EASY");
     std::strcpy(rifle->ammo_advancedrocket, "AT_ADVANCED");
@@ -339,6 +352,21 @@ int main() {
     const EntityHandle bunker_h = spawn(w, 2, 520, EntityKind::Building);
     const EntityHandle bush_h = spawn(w, 2, 530, EntityKind::Building);
     const EntityHandle unknown_h = spawn(w, 2, 999, EntityKind::Building);
+    // The hp-0 def as an addeweap child on the tank's second slot, its anchor
+    // resolved at promotion.
+    const EntityHandle shield_h = spawn(w, 1, 520, EntityKind::Item);
+    if (Entity *shield = w.registry.get(shield_h)) {
+        shield->emplacement_parent = tank_h;
+        shield->emplacement_parent_spawn_id = w.registry.get(tank_h)->registry_spawn_id;
+        shield->emplacement_pose_metadata_resolved = true;
+        shield->emplacement_slot = 2;
+        shield->sub_type = 1;
+        shield->emplacement_bone = 4;
+        shield->emplacement_anchor_subobject = 0;
+        shield->emplacement_local = {2.f, 0.f, 1.f};
+        shield->emplacement_yaw_offset = 30;
+        shield->emplacement_attachment_flags = 1;
+    }
     // The ai_function class rows (one entity each; only the death-trait row
     // is read back).
     for (uint16_t id = 540; id <= 546; ++id) spawn(w, 2, id, EntityKind::Building);
@@ -411,6 +439,27 @@ int main() {
     const Entity *tank_armor = w.registry.get(tank_h);
     CHECK(tank_armor != nullptr && tank_armor->armor_impact == 7 && tank_armor->armor_kz == 8);
     CHECK(bunker_e->deathtime_ticks == 0);
+
+    // As an addeweap child, the same def's subType 0xFF lands before the ewep
+    // class init reads its anchor at subType -1: no userpoint, no designation,
+    // so it rides its carrier's root. [orig: Entity_SpawnWeaponOverlays
+    //  @0x40F40E -> Entity_InitFromModel @0x40DCAF -> Entity_InitBoneReferences
+    //  @0x4415F1]
+    const Entity *shield_e = w.registry.get(shield_h);
+    CHECK(shield_e != nullptr && shield_e->sub_type == 0xFF);
+    CHECK(shield_e != nullptr && shield_e->emplacement_bone == 0 &&
+          shield_e->emplacement_anchor_subobject == -1 &&
+          shield_e->emplacement_local.x == 0.f && shield_e->emplacement_local.z == 0.f &&
+          shield_e->emplacement_yaw_offset == 0 &&
+          shield_e->emplacement_attachment_flags == 0 &&
+          shield_e->emplacement_pose_metadata_resolved);
+    // Its turret window reads the tank def's four slot tables at -1: down takes
+    // light_transfer's float bits (0.2f), up slot 4's down, right slot 4's up and
+    // left slot 4's right. [orig: Entity_GetWeaponTurretLimits @0x540DBB..0x540E15]
+    CHECK(shield_e != nullptr && shield_e->emplacement_down_limit_bam == 0x3E4CCCCD &&
+          shield_e->emplacement_up_limit_bam == 70 * 11930464 &&
+          shield_e->emplacement_right_limit_bam == -10 * 11930464 &&
+          shield_e->emplacement_left_limit_bam == 30 * 11930464);
 
     const Entity *unknown_e = w.registry.get(unknown_h);
     CHECK(unknown_e != nullptr);

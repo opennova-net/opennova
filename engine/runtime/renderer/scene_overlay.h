@@ -39,6 +39,11 @@ enum class SceneOverlaySlot : uint8_t {
 	MirrorDim = 6,
 	MirrorCelestialBodies = 7,
 	MirrorSunGlow = 8,
+	// The weapon Inset pass's own draws of the tail (kInsetOverlayOrder).
+	InsetLightCoronas = 9,
+	InsetNvgLaserBeams = 10,
+	InsetPrecipitation = 11,
+	InsetWaterGlint = 12,
 };
 
 // The main scene's tail, in draw order. The scope's aperture view runs the
@@ -50,6 +55,47 @@ inline constexpr std::array<SceneOverlaySlot, 6> kSceneOverlayOrder = {
 	SceneOverlaySlot::WaterGlint,     // @ 0x5c96c0
 	SceneOverlaySlot::UnderwaterMurk, // @ 0x5c96f5
 	SceneOverlaySlot::SunGlare,       // @ 0x5c9714
+};
+
+// The weapon Inset pass's tail. Its scene core is the same routine
+// [orig: Render_WeaponInsetScene @ 0x5c9740 -> Terrain_RenderWorldScene
+// (view, 0, 0, 0) @ 0x5c9de9], so it draws the main tail in the main order,
+// every draw its own over the Inset's camera, which the Inset composes and
+// sets inside the pass right before its scene [orig: Camera_ComputeThirdPersonView
+// @ 0x5c9841, Render_SetViewAndProjectionMatrices @ 0x5c997f]:
+// - the NVG laser beams of the visible-person list the Inset's own collect
+//   rebuilt [orig: @ 0x5c9695; Terrain_CollectVisibleEntities zeroes the
+//   list @ 0x5c916b, Terrain_CollectVisibleEntitiesForTerrain appends
+//   @ 0x5c8eb1..0x5c8ef9];
+// - the precipitation drawer again at the Inset camera: its camera memory
+//   (the velocity term) and the fall accumulator it zeroes are one state
+//   across both passes' calls [orig: @ 0x5c96a6 -> Render_WeatherTrailParticles
+//   @ 0x5dee65 (the pool update), @ 0x5dee74..0x5deed8 (the camera memory),
+//   @ 0x5deede..0x5deef4 (the fall read and its zeroing)];
+// - its own corona walk: EffectWorld_RenderLightCoronas(1) @ 0x5c96ad at the
+//   corona phase the Inset's own effect-world prologue advanced (it runs once
+//   per scene pass) [orig: sub_5A9F70 @ 0x5a9f70 `add dword_2732DA0, 1`,
+//   called @ 0x5ca69c by Render_ProcessMainSceneFrame and @ 0x5c9a5d by the
+//   Inset], gating owned coronas on the section masks the Inset's own
+//   collect wrote [orig: Terrain_CollectVisibleEntities @ 0x5c94f0;
+//   Terrain_IsBuildingSectionBitSet @ 0x5c6960];
+// - the water glint's leg again at the Inset camera, behind the same
+//   water-height test: its frame counter, visibility window and brightness
+//   are one accumulator across both passes' calls, and the glint model
+//   draws at the Inset eye with the Inset's view dot [orig: @ 0x5c96b5,
+//   @ 0x5c96c0 -> Environment_UpdateSunGlare @ 0x5ad1c8..0x5ad356 (the
+//   accumulator), @ 0x5ad1ba..0x5ad213 (the placement), @ 0x5ad384..0x5ad41c
+//   (the view dot)].
+// Its second argument is zero, and the sun glare is gated on it, so the
+// Inset draws no glare [orig: @ 0x5c96cd, the test @ 0x5c970a..0x5c970e skips
+// render_skybox_sun_glow @ 0x5c9714]. The murk quad is the main tail's
+// batch: each view gates it on its own eye (scene_overlay_view_draws).
+inline constexpr std::array<SceneOverlaySlot, 5> kInsetOverlayOrder = {
+	SceneOverlaySlot::InsetNvgLaserBeams,
+	SceneOverlaySlot::InsetPrecipitation,
+	SceneOverlaySlot::InsetLightCoronas,
+	SceneOverlaySlot::InsetWaterGlint,
+	SceneOverlaySlot::UnderwaterMurk,
 };
 
 // The water mirror's reflected scene draws only the coronas after its two
@@ -165,16 +211,21 @@ bool scene_overlay_view_draws(const SceneOverlayBatch &batch, float eye_height);
 // identity world matrix @ 0x5def50), the frame's one diffuse
 // (Env_TerrainLightCombined | 0xFF000000), the pass state of the drawer
 // [orig: render_weather_trail_particles @ 0x5dee10 — mode word 0x651, pass
-// flags 0x10500000: z-write off, z-test on, no fog].
+// flags 0x10500000: z-write off, z-test on, no fog]. `slot` names the view's
+// call: the main scene's (Precipitation) or the weapon Inset pass's own
+// (InsetPrecipitation).
 void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
-		uint32_t texture, SceneOverlayFrame &out);
+		uint32_t texture, SceneOverlayFrame &out,
+		SceneOverlaySlot slot = SceneOverlaySlot::Precipitation);
 
 // The corona billboards: one camera-facing quad per segment, the
 // premultiplied colour as its diffuse, depth-tested, no depth write
 // [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 — fog+blend mode 2
-// @ 0x5aafb6].
+// @ 0x5aafb6]. `slot` names the walk: the main scene's (LightCoronas, which
+// the water mirror draws too) or the weapon Inset pass's own
+// (InsetLightCoronas).
 void append_corona_overlay(const std::vector<LightCoronaQuad> &quads, uint32_t texture,
-		SceneOverlayFrame &out);
+		SceneOverlayFrame &out, SceneOverlaySlot slot = SceneOverlaySlot::LightCoronas);
 
 // The full-viewport murk quad: Env_WaterColorLit under the alpha byte
 // 0x80 - ftol(murk x -96), source-over, ZFUNC ALWAYS (the scene passes the
@@ -222,9 +273,12 @@ struct SceneOverlayFog {
 // [orig: Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 from Terrain_RenderWorldScene
 //  @ 0x5c9695 -> Entity_RenderNVGLaserBeam @ 0x5c6090 ->
 //  Render_DrawTrailOrBeamSegments @ 0x5dcb80 (the ribbon pass flags
-//  0x10520000: fog on, z-write off, z-test on)]
+//  0x10520000: fog on, z-write off, z-test on)]. `slot` names the view's
+// walk: the main scene's (NvgLaserBeams) or the weapon Inset pass's own
+// (InsetNvgLaserBeams).
 void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture,
-		const SceneOverlayFog &fog, SceneOverlayFrame &out);
+		const SceneOverlayFog &fog, SceneOverlayFrame &out,
+		SceneOverlaySlot slot = SceneOverlaySlot::NvgLaserBeams);
 
 // The mirror's dim: one viewport quad whose flat diffuse (`factor` on every
 // channel, the 0xFF404040 vertex colour) multiplies the finished mirror

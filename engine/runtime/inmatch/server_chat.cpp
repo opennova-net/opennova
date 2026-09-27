@@ -124,7 +124,10 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	const world::Entity *requester = world->registry.get(conn.link.owned_entity);
 	if (requester == nullptr || conn.link.downed_revive_seconds == 0u) return replies;
 	world->zones.spawn_waves.remove_player(conn.link.owned_entity);
-	const std::string message = format_medic_request(*format, requester->name);
+	// The name is the player record's own (+0x28), the string Server_PlayerAdd
+	// copies into the entity's Name (+0xF4). [orig: Server_BroadcastMedicRequest
+	//  `lea eax,[esi+28h]` @0x515417 -> sprintf @0x515421]
+	const std::string message = format_medic_request(*format, conn.reply.player_name);
 	if (!conn.link.auto_medic_enabled && !conn.link.medic_request_active) {
 		PlayerDownedState state;
 		state.entity_handle = conn.link.owned_entity.packed;

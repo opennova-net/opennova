@@ -333,6 +333,15 @@ struct DestructionEffectEvent {
 	bool release = false; // stop the attached family without spawning a replacement
 	uint8_t bank_slot = 0;
 	Vec3 attach_local_pos; // model-local mission axes; presentation composes the live pose
+	// The descriptor's owner tag: set only by the producers whose retail
+	// submit stores the spawning entity at descriptor +0x0C, so the presented
+	// group takes the building-section gate (particle::EffectSectionGate);
+	// every other row spawns with tag 0 [orig: CEffectWorld_SpawnEmitterAtPosition
+	// @ 0x5F6DF0, the tag store @ 0x5F6EFB].
+	bool section_tagged = false;
+	// A slot-held group that stays where it spawned: the slot keeps only its
+	// handle for the next release (spawn_victim_hit_emitter).
+	bool positioned = false;
 };
 
 struct DestructionEvents;
@@ -341,6 +350,10 @@ void spawn_death_effect_banks(
 void update_dead_wreck_effects(World &world, Entity &entity, const ItemDeathTraits *traits,
 		float water_height, DestructionEvents &events);
 void release_death_effect_bank(Entity &entity, uint8_t family, DestructionEvents &events);
+// A blast victim's hit emitter: the ammo's secondary effect replaces whatever
+// the victim's +0x1CC emitter (the death family's slot 0) holds.
+void spawn_victim_hit_emitter(Entity &victim, const std::string &effect,
+		DestructionEvents &events);
 
 struct DestructionSoundEvent {
     std::string sound;         // sound/set name ('' = none)
@@ -438,7 +451,12 @@ inline constexpr uint16_t kFireCrackleThreshold = 16; // [orig: @ 0x4932bf]
 
 // The debris-type trail-effect column, by DeathPiece::type_index
 // [orig: g_death_piece_types @ 0x8404f0 +0x2C; "" = the type authors no trail
-// (NP rows); out-of-range indexes take no trail].
+// (NP rows); out-of-range indexes take no trail]. Every death-piece submit
+// carries tag 0, the trail included, so it takes no section gate
+// [orig: Entity_ProcessDeathPiecePhysics `xor edi, edi` @ 0x492FC2 ahead of
+// the submit @ 0x493014; update_projectile_physics `xor ebx, ebx` @ 0x57BA0F
+// ahead of the submits @ 0x57BA2A..0x57BB8A; DeathPiece_PhysicsUpdate's
+// submits @ 0x48F547 / 0x48F692 push 0].
 const char *death_piece_trail_effect(uint8_t type_index);
 
 // World-local stand-in for the destruction paths' witnessed rol-xor PRNG

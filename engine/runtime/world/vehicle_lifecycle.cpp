@@ -282,8 +282,17 @@ void VehicleSystem::respawn(Entity &e) {
 		for (auto &seat : e.seats)
 			seat.occupant = {};
 	}
-	e.engine_flags = ((e.engine_flags | e.flags) & 0x400u) | 0x22000u;
-	e.flags = e.engine_flags;
+	// Retail rewrites its one Flags dword: keep 0x400, set 0x2000 (airborne),
+	// later OR the matrix bit 0x20000, clear the kill bits. The port splits that
+	// word, so each set bit goes to the half whose clears own it: the airborne
+	// bit to the runtime word the movers clear on landing, the matrix bit to
+	// engine_flags, where every 0x20000 clear lands. Mirroring 0x2000 into
+	// engine_flags left it set forever, and the streamed dword with it.
+	// [orig: Entity_RespawnVehicle @0x45FFB2..0x45FFBD, store @0x460009,
+	//  OR @0x46017E, `and [esi+24h], 0FFFFFFF8h` @0x460064]
+	const uint32_t kept = (e.engine_flags | e.flags) & kEntityFlagReflective;
+	e.engine_flags = kept | kEntityFlagMatrixBuilt;
+	e.flags = kept | kEntityFlagInAir;
 	e.health = e.health_max;
 	e.alive = e.health > 0;
 	e.death_motion = DeathMotionMode::None;

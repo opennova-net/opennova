@@ -425,6 +425,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	// definitions. Item/model resolution above installs them, then this
 	// idempotent fold projects the retained 0x0D mountHandles image by each
 	// seat's fixed retail_slot.
+	materializer_.set_local_player(self_wire_handle(), kernel.world.cached.local_player);
 	(void)materializer_.sync(runtime->state(), kernel.world);
 	kernel.refresh_collision_instances();
 }
@@ -1163,6 +1164,7 @@ void JoinerRole::materialize_replica_world() {
 	if (wire_world_topology_revision_seen_ == state.topology_revision &&
 			wire_world_stream_revision_seen_ == state.world_stream_revision)
 		return;
+	materializer_.set_local_player(self_wire_handle(), world.cached.local_player);
 	const replication::ClientWorldSyncResult sync =
 			materializer_.sync(state, world);
 	wire_world_topology_revision_seen_ = state.topology_revision;
@@ -1679,6 +1681,23 @@ void JoinerRole::mirror_mission_entities() {
 		if (local == nullptr ||
 				static_cast<uint16_t>(local->item_id) != es.type_id)
 			continue;
+		// A flag's pose is the client's own between S2C 0x2F states: the
+		// materializer lands each state on the registry row and the drop's
+		// fall and ride move it after, so the presented row follows the
+		// registry row here, not the other way round.
+		// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
+		//  flag's pose]
+		if (kernel_->wire_header_world && replication::is_carry_objective(es.type_id)) {
+			es.x = world::to_fixed(local->position.x);
+			es.y = world::to_fixed(local->position.y);
+			es.z = world::to_fixed(local->position.z);
+			if (local->veh.yaw_seeded) {
+				es.heading_bam = local->veh.yaw_bam;
+				es.pitch_bam = local->veh.air_pitch_bam;
+				es.roll_bam = local->veh.air_roll_bam;
+			}
+			continue;
+		}
 		// Pools 1..3 are live client rows, not just presentation records. Keep
 		// every world-side collision/seat consumer on the same full wire pose.
 		const world::Entity *attachment_parent =

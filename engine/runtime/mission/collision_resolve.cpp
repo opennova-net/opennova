@@ -235,6 +235,18 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 	shape.model_id = collision_model_for_graphic(state, deps, key);
 	shape.uniform_scale_q16 = def->scale_q16;
 	shape.has_collision_block = state.collision_block_by_graphic[key];
+	// The row's render model, as resolve_collision_instances stamps a placed
+	// entity's (the same producer, the entity-init form).
+	if (const Threedi3di3 *render_model =
+				deps.models.has_source() ? deps.models.model(key).get() : nullptr) {
+		const renderer::ObjectProjectionSphere sphere =
+				world::collision_projection_sphere_from_3di(*render_model, 0, 0,
+						world::item_def_zero_bbox_center(def->type, def->attrib));
+		shape.has_render_model = true;
+		shape.render_sphere_center_q16 = world::FixedVec3{
+				sphere.center_q16[0], sphere.center_q16[1], sphere.center_q16[2]};
+		shape.render_sphere_radius_q16 = sphere.radius_q16;
+	}
 	if (!shape.has_collision_block) return shape;
 
 	world::EntityBoundRadiusInputs bound;
@@ -298,6 +310,21 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				? visual_item_id_for_runtime_type(e->item_id, items)
 				: static_cast<int>(e->item_id) + mission::kItemIdOffset;
 		const DefItemDef *def = find_item_def(items, def_id);
+		// The collectors' render model: every entity whose graphic loads carries
+		// its CMDL sphere (the entity-init form, radius 0 without a collision
+		// block), whatever its collision geometry; an entity without one is
+		// never collected. [orig: Entity_InitFromModel @ 0x40df06..0x40dfac;
+		// the entity+0x30 gates @ 0x5c6fd8..0x5c6fe1 / @ 0x5c8cf6..0x5c8cff]
+		const Threedi3di3 *render_model =
+				def != nullptr && def->graphic[0] != '\0' && deps.models.has_source()
+				? deps.models.model(std::string(def->graphic)).get()
+				: nullptr;
+		if (render_model != nullptr) {
+			deps.occlusion.assign_render_model(h, world::collision_projection_sphere_from_3di(
+					*render_model, 0, 0, world::item_def_zero_bbox_center(def->type, def->attrib)));
+		} else {
+			deps.occlusion.remove_render_model(h);
+		}
 		if (def == nullptr || def->graphic[0] == '\0') continue;
 		const std::string key(def->graphic);
 		const int32_t resolved_model = collision_model_for_graphic(state, deps, key);

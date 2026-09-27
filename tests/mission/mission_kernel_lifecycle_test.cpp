@@ -309,6 +309,45 @@ int main() {
 		CHECK(third.world.script.vars.get_mission(2) == 2);
 	}
 
+	// --- the precipitation drawer's memory across kernels -------------------------
+	// Retail's drawer memory (dword_2C05A14 the mode, dword_2C05A18..20 the
+	// camera) is zero-initialized data only the drawer writes, never reset
+	// [orig: Render_WeatherTrailParticles @0x5DEEB4..0x5DEED8]: the next
+	// mission's first rainy call measures its velocity from the previous
+	// mission's last camera. A rebuilt kernel carries it (the embedder's
+	// reset_world seam: MissionKernel::carry_across_load_from).
+	{
+		env::PrecipitationField field;
+		field.slots[0] = {10 << 16, 0, 2 << 16, 0}; // a drop 10 east, 2 up
+		renderer::PrecipitationDrawFrame frame;
+		auto first_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &first = *first_box;
+		// The first mission's last call: 1/16 east of the origin, mode 0.
+		renderer::PrecipitationCamera last;
+		last.position_q16[0] = 0x1000;
+		renderer::compile_precipitation_frame(field, 0x10000, 0, 0, last,
+				first.precipitation_draw, frame);
+		auto second_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &second = *second_box;
+		second.carry_across_load_from(first);
+		CHECK(second.precipitation_draw.last_camera_q16[0] == 0x1000);
+		CHECK(second.precipitation_draw.last_mode == 0);
+		// The second mission's first call at the origin: velocity (-1/16, 0, 0)
+		// from that camera, unclamped.
+		renderer::PrecipitationCamera origin;
+		renderer::compile_precipitation_frame(field, 0x10000, 0, 0, origin,
+				second.precipitation_draw, frame);
+		const float length = 1.0f + std::sqrt(10.0f * 10.0f + 2.0f * 2.0f) * 0.05f;
+		CHECK(!frame.vertices.empty() &&
+				std::fabs(frame.vertices[0] - (10.0f - 0.0625f * length)) < 0.001f);
+		// A kernel that carried nothing measures from the zeroed origin: no
+		// motion at the origin.
+		auto fresh_box = std::make_unique<ms::MissionKernel>();
+		renderer::compile_precipitation_frame(field, 0x10000, 0, 0, origin,
+				fresh_box->precipitation_draw, frame);
+		CHECK(!frame.vertices.empty() && std::fabs(frame.vertices[0] - 10.0f) < 0.001f);
+	}
+
 	// --- the no-session objective relay ------------------------------------------
 	// The bare tick has no connection for the S2C 0x3F relay, so the queue is
 	// released while the local chat effect stays. [orig:

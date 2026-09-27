@@ -480,8 +480,8 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 		            r.ai_profile_1, r.ai_profile_2, r.ai_name.c_str());
 	if (r.spawn_flags & kPoolSpawnHasRefNum) std::printf(" refNum=0x%02x", r.alert_byte);
 	if (r.spawn_flags & kPoolSpawnHasSubType) std::printf(" subType=0x%02x", r.action_byte);
-	if (r.spawn_flags & kPoolSpawnHasWeaponTypeByte)
-		std::printf(" weapType=0x%02x", r.weapon_type_byte);
+	if (r.spawn_flags & kPoolSpawnHasSoundLatchByte)
+		std::printf(" soundLatch=0x%02x", r.sound_latch_byte);
 	if (r.spawn_flags & kPoolSpawnHasZoneNumberRank)
 		std::printf(" zone=%u rank=%u radius=%u", r.zone_number_rank & 0x1F,
 		            r.zone_number_rank >> 5, r.zone_radius);

@@ -56,7 +56,7 @@ struct FourPoolWorld final : w::World {
 		w::Entity organic;
 		organic.kind = w::EntityKind::Organic;
 		organic.item_id = 0x0816;     // AI infantry
-		organic.name = "tango1";
+		organic.display_name = "tango1"; // entity+0xF4 Name
 		organic.position = {10.0f, 20.0f, 1.5f};
 		organic.yaw = 30;
 		organic.team = 2;
@@ -67,8 +67,10 @@ struct FourPoolWorld final : w::World {
 		w::Entity item;
 		item.kind = w::EntityKind::Item;
 		item.item_id = 0x050E;        // a truck / destructible
-		item.name = "crate";
+		item.display_name = "crate";   // entity+0xF4 Name
+		item.ai_text_file = "d_crate";  // the AI slot's +156 BMS ai_textfile
 		item.position = {30.0f, 40.0f, 0.0f};
+		item.spawn_position = item.position; // where its model init placed it
 		item.yaw = 90;
 		item.team = 1;
 		item.health = 250;
@@ -120,7 +122,6 @@ bool run_pool0_organic() {
 bool check_pool1_common(const nw::PoolSpawnRecord &r) {
 	if (!expect(r.slot_id == w::EntityHandle::make(1, 0).packed, "slot_id = pool-1 handle")) return false;
 	if (!expect(r.item_type_id == 0x050E, "item type id")) return false;
-	if (!expect(r.entity_name == "crate", "name carried")) return false;
 	if (!expect(r.pos_x == w::to_fixed(30.0), "pos 16.16")) return false;
 	if (!expect(r.euler_z == heading_bam(90), "euler_z = engine heading BAM")) return false;
 	if (!expect(r.team_byte == 1, "team carried")) return false;
@@ -147,9 +148,11 @@ bool run_pool1_spawn_ai_capable() {
 	if (!expect(out.records.size() == 1, "one decoded item")) return false;
 	const nw::PoolSpawnRecord &r = out.records[0];
 	if (!check_pool1_common(r)) return false;
+	if (!expect(r.entity_name == "crate", "an AIData def carries its name")) return false;
 	if (!expect((r.spawn_flags & 0x0800) != 0, "0x0800 AI-trailer present for AI-capable item")) return false;
-	if (!expect(r.ai_name == "crate", "ai_name carried (the strcpy-safe trailer name)")) return false;
-	if (!expect(r.ai_profile_1 == w::to_fixed(30.0), "ai_profile_1 mirrors pos_x (retail trailer convention)")) return false;
+	if (!expect(r.ai_name == "d_crate", "ai_name is the AI slot's ai_textfile (the strcpy-safe trailer name)")) return false;
+	if (!expect(r.ai_profile_1 == w::to_fixed(30.0),
+	            "ai_profile_1 is the spawn x its model init stamped (aiSlot+0x10)")) return false;
 	std::printf("PASS pool1_spawn_ai_capable\n");
 	return true;
 }
@@ -168,6 +171,9 @@ bool run_pool1_spawn_non_ai() {
 	if (!expect(out.records.size() == 1, "one decoded item")) return false;
 	const nw::PoolSpawnRecord &r = out.records[0];
 	if (!check_pool1_common(r)) return false;
+	// The name rides only for an AIData def [orig: serialize_entity_pool_to_packet_0
+	// @0x503A64..0x503ADF].
+	if (!expect(r.entity_name.empty(), "a non-AI record carries the empty name")) return false;
 	if (!expect((r.spawn_flags & 0x0800) == 0, "0x0800 AI-trailer absent for non-AI item")) return false;
 	if (!expect(r.ai_name.empty(), "no ai_name on a non-AI record")) return false;
 	std::printf("PASS pool1_spawn_non_ai\n");
@@ -181,7 +187,7 @@ bool run_pool1_spawn_mount_handles() {
 	carrier.kind = w::EntityKind::Item;
 	carrier.item_id = 0x050E;
 	carrier.has_item_def = true;
-	carrier.name = "occupied carrier";
+	carrier.display_name = "occupied carrier";
 	auto add_seat = [&](uint8_t retail_slot, w::EntityHandle occupant) {
 		w::Seat seat;
 		seat.type = retail_slot == 8
@@ -363,7 +369,7 @@ bool run_full_entity_spawn_player() {
 	player.has_item_def = true;
 	player.item_type = 3;
 	player.item_attrib = 0x100000u;      // AIData: exact retail name gate
-	player.name = "Player";
+	player.display_name = "Player";
 	player.position = {12.0f, 34.0f, 5.0f};
 	player.yaw = 30;
 	player.team = 1;
@@ -417,7 +423,7 @@ bool run_full_entity_spawn_rich_fields() {
 	entity.has_item_def = true;
 	entity.item_type = 1;
 	entity.item_attrib = 0x100000u;
-	entity.name = "repair_target";
+	entity.display_name = "repair_target";
 	entity.team = 2;
 	entity.owner_connection_id = 0x10203040u;
 	entity.primary_occupant = w::EntityHandle::make(0, 4);
@@ -527,7 +533,7 @@ bool run_full_entity_spawn_itemdef_gates() {
 	unresolved.item_type = 1;              // stale carrier must not defeat null semantics
 	unresolved.item_attrib = 0x100000u;
 	unresolved.is_ai_capable = true;
-	unresolved.name = "must_not_cross";
+	unresolved.display_name = "must_not_cross";
 	const nw::FullEntitySpawnRecord null_def = ns::build_full_entity_spawn(unresolved);
 	if (!expect(null_def.item_type_id == 0 && null_def.item_type == 0,
 	            "null ItemDef writes type id/type zero")) return false;
@@ -552,10 +558,141 @@ bool run_full_entity_spawn_itemdef_gates() {
 	return true;
 }
 
+// The 0x0D zone block rides its sources, not its values: a SpawnPoint def with
+// no zone number emits 0x8000 and its radius word even at radius 0, and a zone
+// number emits 0x2000 with the packed info byte and radius.
+// [orig: serialize_entity_pool_to_packet_0 `cmp byte [ebp+21Ah],0`
+//  @0x503ECC..0x503ED3, `test dword [def+54h],40000h` @0x503F1F..0x503F43]
+bool run_pool1_zone_block_rides_its_sources() {
+	w::World world;
+	world.registry.configure_pool(1, 4);
+	w::Entity spawn_point;
+	spawn_point.kind = w::EntityKind::Item;
+	spawn_point.item_id = 0x0123;
+	spawn_point.position = {1.0f, 2.0f, 3.0f};
+	spawn_point.yaw = 90; // engine heading 0: no 0x0001
+	spawn_point.is_spawn_point = true;
+	spawn_point.zone_radius = 0;
+	world.registry.spawn(1, spawn_point);
+	const std::vector<uint8_t> wire =
+			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
+	const std::vector<uint8_t> want = {
+			0x01, 0x00,                                     // one record
+			0x00, 0x80, 0x00, 0x10, 0x23, 0x01, 0x00,       // flags 0x8000, slot, type, name
+			0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, // x, y
+			0x00, 0x00, 0x03, 0x00,                         // z
+			0x00,                                           // entity+290
+			0x00, 0x00};                                    // the zero radius word
+	bool ok = expect(wire == want, "a radius-0 SpawnPoint keeps its 0x8000 word, byte for byte");
+
+	w::Entity *zone = world.registry.get(w::EntityHandle::make(1, 0));
+	zone->zone_number = 3;
+	zone->zone_radius = 70;
+	const std::vector<uint8_t> zoned =
+			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
+	const std::vector<uint8_t> want_zoned = {
+			0x01, 0x00,
+			0x00, 0x20, 0x00, 0x10, 0x23, 0x01, 0x00,       // flags 0x2000 alone
+			0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00,
+			0x00, 0x00, 0x03, 0x00,
+			0x00,
+			0x03, 0x46, 0x00};                              // zone 3 rank 0, radius 70
+	ok &= expect(zoned == want_zoned, "a zone number takes the 0x2000 block instead");
+	if (ok) std::printf("PASS pool1_zone_block_rides_its_sources\n");
+	return ok;
+}
+
+// A palm (its def's damage callback) or a psec mover streams its entity+0x270
+// byte whatever its value: field 0x4000 on the 0x0D record and field 0x100 on
+// the 0x10 record, a standing palm's 0 included.
+// [orig: serialize_entity_pool_to_packet_0 @0x503F4C..0x503F80;
+//  serialize_pool2_static_to_buffer @0x504554..0x504588]
+bool run_palm_state_rides_its_callbacks() {
+	w::World world;
+	world.registry.configure_pool(1, 4);
+	world.registry.configure_pool(2, 4);
+	w::Entity palm;
+	palm.kind = w::EntityKind::Item;
+	palm.item_id = 0x0321;
+	palm.position = {1.0f, 2.0f, 3.0f};
+	palm.yaw = 90; // engine heading 0: no 0x0001
+	palm.palm_state_streamed = true;
+	palm.palm_state = 0; // standing
+	world.registry.spawn(1, palm);
+	const std::vector<uint8_t> wire =
+			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
+	const std::vector<uint8_t> want = {
+			0x01, 0x00,
+			0x00, 0x40, 0x00, 0x10, 0x21, 0x03, 0x00,       // flags 0x4000 alone
+			0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00,
+			0x00, 0x00, 0x03, 0x00,
+			0x00,                                           // entity+290
+			0x00};                                          // the standing palm's 0
+	bool ok = expect(wire == want, "a standing palm streams its zero state byte, byte for byte");
+
+	w::Entity tree = palm;
+	tree.kind = w::EntityKind::Building;
+	tree.palm_state = 2; // fallen
+	world.registry.spawn(2, tree);
+	nw::StaticEntityBatch statics;
+	const std::vector<uint8_t> swire =
+			nw::encode_static_entity_batch(ns::build_pool2_static_batch(world));
+	ok &= expect(nw::decode_static_entity_batch(swire.data(), swire.size(), statics) &&
+	                     statics.records.size() == 1 && statics.records[0].has_score_flag &&
+	                     statics.records[0].score_flag == 2,
+	             "the 0x10 record streams the same byte under 0x100");
+	world.registry.get(w::EntityHandle::make(2, 0))->palm_state_streamed = false;
+	const std::vector<uint8_t> plain =
+			nw::encode_static_entity_batch(ns::build_pool2_static_batch(world));
+	ok &= expect(nw::decode_static_entity_batch(plain.data(), plain.size(), statics) &&
+	                     statics.records.size() == 1 && !statics.records[0].has_score_flag,
+	             "another def streams no state byte");
+	if (ok) std::printf("PASS palm_state_rides_its_callbacks\n");
+	return ok;
+}
+
+// A child whose carrier row was destroyed still streams that row's handle: the
+// 0x0D target and the 0x18 ground field ride the stored pointer, whose pool
+// handle needs no live entity. [orig: serialize_entity_pool_to_packet_0
+//  @0x503C22..0x503C49; serialize_object_to_buffer @0x504e8c..0x504fb4]
+bool run_freed_carrier_row_keeps_the_target_handle() {
+	w::World world;
+	world.registry.configure_pool(1, 8);
+	w::Entity carrier;
+	carrier.kind = w::EntityKind::Item;
+	carrier.item_id = 0x00A4;
+	const w::EntityHandle carrier_h = world.registry.spawn(1, carrier);
+	w::Entity gun;
+	gun.kind = w::EntityKind::Item;
+	gun.item_id = 0x00A6;
+	gun.has_item_def = true;
+	gun.ground_target = carrier_h;
+	gun.emplacement_parent = carrier_h;
+	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	world.registry.despawn(carrier_h);
+	const std::vector<uint8_t> wire =
+			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
+	nw::PoolSpawnBatch out;
+	bool ok = expect(nw::decode_pool_spawn_batch(wire.data(), wire.size(), out) &&
+	                         out.records.size() == 1 && out.records[0].slot_id == gun_h.packed &&
+	                         (out.records[0].spawn_flags & nw::kPoolSpawnHasTargetHandle) != 0 &&
+	                         out.records[0].target_handle == carrier_h.packed,
+	                 "a freed carrier row's handle still rides the 0x0D target");
+	const nw::FullEntitySpawnRecord full =
+			ns::build_full_entity_spawn(*world.registry.get(gun_h), w::EntityHandle{});
+	ok &= expect(full.ground_entity_handle == carrier_h.packed,
+	             "and the 0x18 ground field");
+	if (ok) std::printf("PASS freed_carrier_row_keeps_the_target_handle\n");
+	return ok;
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
+	ok = run_pool1_zone_block_rides_its_sources() && ok;
+	ok = run_freed_carrier_row_keeps_the_target_handle() && ok;
+	ok = run_palm_state_rides_its_callbacks() && ok;
 	ok = run_pool0_organic() && ok;
 	ok = run_pool1_spawn_ai_capable() && ok;
 	ok = run_pool1_spawn_non_ai() && ok;

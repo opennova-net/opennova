@@ -2247,8 +2247,8 @@ static void test_structural_bms_actions() {
         entity.group_id = 2;
         entity.team = 1;
         entity.alive = true;
-        entity.flags = world::kEntityFlagBuilding;
-        entity.engine_flags = world::kEntityFlagBuilding;
+        entity.flags = world::kEntityFlagMatrixBuilt;
+        entity.engine_flags = world::kEntityFlagMatrixBuilt;
         entity.position = {-1.0f, -2.0f, -3.0f};
         return entity;
     };
@@ -2319,11 +2319,11 @@ static void test_structural_bms_actions() {
     }
     CHECK(w.registry.get(pool0_h)->spawn_position.x == 10.0f);
     CHECK((w.registry.get(pool0_h)->engine_flags &
-           world::kEntityFlagBuilding) != 0);
+           world::kEntityFlagMatrixBuilt) != 0);
     CHECK((w.registry.get(pool1_h)->engine_flags &
-           world::kEntityFlagBuilding) == 0);
+           world::kEntityFlagMatrixBuilt) == 0);
     CHECK((w.registry.get(pool2_h)->engine_flags &
-           world::kEntityFlagBuilding) == 0);
+           world::kEntityFlagMatrixBuilt) == 0);
     CHECK(pool1_ai.pos[0] == (10 << 16));
     CHECK(pool1_ai.pos[1] == (20 << 16));
     CHECK(pool1_ai.pos[2] == (30 << 16));
@@ -2336,12 +2336,12 @@ static void test_structural_bms_actions() {
     CHECK(w.registry.get(pool0_h)->group_id == 7);
 
     w.registry.get(pool0_h)->position = {};
-    w.registry.get(pool0_h)->engine_flags |= world::kEntityFlagBuilding;
+    w.registry.get(pool0_h)->engine_flags |= world::kEntityFlagMatrixBuilt;
     dispatch(bms::ActionType::SingleTeleportAction, 100, 9);
     CHECK(w.registry.get(pool0_h)->position.x == 10.0f);
     CHECK(w.registry.get(pool0_h)->spawn_position.z == 30.0f);
     CHECK((w.registry.get(pool0_h)->engine_flags &
-           world::kEntityFlagBuilding) == 0);
+           world::kEntityFlagMatrixBuilt) == 0);
     CHECK((w.registry.get(pool0_h)->flags & world::kEntityFlagParachute) != 0);
     CHECK((w.registry.get(pool0_h)->engine_flags &
            world::kEntityFlagParachute) != 0);

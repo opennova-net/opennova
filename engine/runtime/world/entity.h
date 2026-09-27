@@ -171,6 +171,21 @@ enum class DeathMotionMode : uint8_t {
     SectionSettled = 10, // @0x4A8220
 };
 
+// The update callback a drop installs on the dropped carried object, then its
+// landing's successor: the fall until the clamped ground stops it; on a
+// ground entity the parent follow, which drops back into the fall when that
+// entity dies; a non-flag landing on a dead entity takes the plain follow.
+// [orig: Entity_DropCarriedObject @0x439e95 -> Entity_UpdatePositionAndTransform
+//  @0x4adef0, the successor select @0x4adfc9..0x4ae00e;
+//  Entity_UpdateParentTransform @0x4a88b0; Entity_InterpolateFromParentDelta
+//  @0x4a8d60]
+enum class DropMotion : uint8_t {
+    None = 0,
+    Fall = 1,
+    Ride = 2,
+    Follow = 3,
+};
+
 // Minimal live-entity state the scripting evaluators read and mutate. This is a
 // clean model over the original 172-byte bms record + the pool record's net id;
 // the renderer/AI's full entity layout is a separate, deferred concern.
@@ -238,7 +253,16 @@ inline constexpr uint32_t kEntityFlagInAir = 0x2000;          // airborne/swimmi
 inline constexpr uint32_t kEntityFlagPriorityTarget = 0x4000; // set on every fire, decays per perception scan
                                                               // [orig: @0x4bf370 set; @0x4BBF88 clear; §16.2 x6 scoring]
 inline constexpr uint32_t kEntityFlagDrowning = 0x8000;       // zeroes vertical swim input [orig: §7 movement]
-inline constexpr uint32_t kEntityFlagBuilding = 0x20000;      // [orig: Entity_InitFromModel @0x40e105]
+inline constexpr uint32_t kEntityFlagMatrixBuilt = 0x20000;   // the entity matrix is current: set after every
+                                                              // Math_BuildFixedPointMatrixFromEulerAngles of the
+                                                              // entity (each mover tail, e.g. @0x48D451; respawn
+                                                              // @0x46017E; the ewep update @0x4411C2) and at model
+                                                              // init for a decoration, building or powerup def
+                                                              // [orig: Entity_InitFromModel @0x40e0d4..0x40e105];
+                                                              // a teleport or the no-row death clears it
+                                                              // [orig: Entity_DispatchDeathCallback @0x493F3F]; the
+                                                              // ewep update rebuilds a carrier matrix without it
+                                                              // [orig: Entity_UpdateTransformAndTurret @0x44102D]
 inline constexpr uint32_t kEntityFlagNoEngage = 0x80000;      // org1 combat think: skips the attack-stance aim
                                                               // block [orig: @0x4bc958] and the reaction/approach
                                                               // arm [orig: @0x4bc054, unported there]; the writer
@@ -473,6 +497,12 @@ struct Entity {
     // [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; read
     //  HUD_DrawEntityLabel @0x5a4021]
     std::string display_name;
+    // The AI slot's +156 name: the BMS record's raw 8-byte ai_textfile (name2),
+    // copied as two dwords for an AIData def and never rewritten; the 0x0D
+    // record's AI trailer streams it. The port's .aip resolver reads its own
+    // trimmed, lowercased copy. [orig: Entity_SpawnFromBMSRecord
+    //  @0x40ED66..0x40ED8C; serialize_entity_pool_to_packet_0 @0x503D85..0x503DAB]
+    std::string ai_text_file;
     uint8_t group_id = 0;     // BMS commandGroup (+284), not the WAC named-group table
     uint8_t waypoint_id = 0;  // wplist / route this entity follows
     int32_t wp_number = 0;    // position along that route
@@ -742,6 +772,12 @@ struct Entity {
     bool item_section_piece = false; // locally allocated class fragment
     bool palm_sections = false; // palm/psec model callback @0x53BF10
     int32_t palm_state = 0; // entity+0x270
+    // The def's damage callback is the palm row's (WeaponOverlay_HandleDamage)
+    // or its update is psec's physics step (Entity_UpdatePhysicsStep): the load
+    // serializers then stream entity+0x270 (palm_state), whatever its value.
+    // [orig: serialize_entity_pool_to_packet_0 @0x503F4C..0x503F80;
+    //  serialize_pool2_static_to_buffer @0x504554..0x504588]
+    bool palm_state_streamed = false;
     // The per-section damage bytes at entity+0x2BA+section. Retail indexes
     // them unchecked; this bank grows on first write (the caller bounds the
     // section by the def's int8 huskSubPartCount, the authority bound
@@ -1031,6 +1067,9 @@ struct Entity {
     // Entity_AttachCarriedObject @0x43c130; cleared Entity_DropCarriedObject
     // @0x439df0, the capture-zone clear @0x4ada07, Entity_Destroy @0x43ea03]
     EntityHandle mounted_child;         // kInvalid = carrying nothing
+    // The +0x1C4 update callback a drop installs on the carried object and
+    // the landing's successor (Match::update_dropped_object).
+    DropMotion drop_motion = DropMotion::None;
 
     // The shooter's last claimed fire target (entity+104 -> +12): stamped per accepted
     // C2S 0x06 [orig: Server_ClientFiredRound @0x50c2ad stores the resolved target ptr],

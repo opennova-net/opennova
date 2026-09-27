@@ -437,7 +437,7 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 					}
 					if (name.empty()) {
 						if (const replication::ClientEntityState *row_state = cs.find(member))
-							name = row_state->name;
+							name = row_state->display_name;
 					}
 					o.name = name;
 					o.self = member == self_handle;
@@ -507,7 +507,15 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 	local_quality = local != nullptr ? entity_lighting(*local).quality : 4;
 
 	w.registry.for_each([&](const world::Entity &e) {
-		if (e.kind == world::EntityKind::Building || e.kind == world::EntityKind::Marker) return;
+		// The pool-2 decorations and foliage are entity-collected, so the
+		// entity wave lights them too; only the Building-type defs draw in the
+		// building pass. [orig: Terrain_RenderSectorEntities walks
+		// g_SectorEntityList — which Terrain_CollectVisibleEntities_0 fills from
+		// the non-building statics — and sets each one's context
+		// (Terrain_SetupEffectForEntity @ 0x5c7bf1); world::building_def_row]
+		if ((e.kind == world::EntityKind::Building && world::building_def_row(e)) ||
+				e.kind == world::EntityKind::Marker)
+			return;
 		// Only authored placements have a placed node addressed by BMS id.
 		// Runtime-spawned rows can also carry a nonzero bms_id (players use
 		// their net id), but the wire walk owns their rendering.

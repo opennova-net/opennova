@@ -34,22 +34,22 @@ void before_server_tick(void *context) {
 HostRole::HostRole() = default;
 
 HostRole::HostRole(RoleKind kind,
-		replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver)
-		: kind_(kind), item_class_resolver_(std::move(item_class_resolver)) {}
+		std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog)
+		: kind_(kind), item_catalog_(std::move(item_catalog)) {}
 
 // The boot hook's bring-up: the staged record through the general bring-up
-// (the HostClient view follows on serve-and-play, taking the resolver this
+// (the HostClient view follows on serve-and-play, taking the catalog this
 // role holds).
 bool HostRole::bring_up() {
 	bring_up(staged_bringup_);
 	return false;
 }
 
-void HostRole::set_item_class_resolver(
-		replication::ClientReplicaPipeline::ItemClassResolver resolver) {
-	item_class_resolver_ = std::move(resolver);
-	if (state.client_runtime && item_class_resolver_)
-		state.client_runtime->view().set_item_class_resolver(item_class_resolver_);
+void HostRole::set_item_catalog(
+		std::shared_ptr<const replication::ItemReplicationCatalog> catalog) {
+	item_catalog_ = std::move(catalog);
+	if (state.client_runtime && item_catalog_)
+		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
 // The shared bring-up preamble: a fresh loopback + owner over the kernel's
@@ -67,6 +67,10 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	state.host_owner.ctx.mission_text_loaded = false;
 	kernel.world.rules.fat_bullets = config.fat_bullets;
 	kernel.world.rules.one_shot_kill = config.one_shot_kill;
+	// The mission-data block's unlimited-vehicles word, rebuilt from the host
+	// config at every mission start [orig: Client_BuildMissionDataRequestBlock
+	// @0x51E8C5..0x51E8CB from dword_24D2258 = unlimitedVehicles_4D0].
+	kernel.world.rules.vehicle_respawns = config.unlimited_vehicles;
 	// The mpattrib word's 0x10000 bit the scope-zero -1 floor reads in session
 	// [orig: `test g_rules_flags,10000h` @0x4dbd15; g_rules_flags @0x24D1E34 is
 	// the host's mpattrib word, the S2C 0x64 +44 dword on a joiner].
@@ -91,8 +95,8 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
-	if (item_class_resolver_)
-		state.client_runtime->view().set_item_class_resolver(item_class_resolver_);
+	if (item_catalog_)
+		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
 GameConfig singleplayer_game_config(uint32_t game_type) {

@@ -850,12 +850,17 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     world.registry.for_each_in_pool(0, push_person);
     world.registry.for_each_in_pool(1, push_dynamic);
     if (rebuild_statics) {
+        // The split key is the items.def TYPE, not the record family: every
+        // pool-2 row is a BMS "building" record, but only the Building-type
+        // defs form the prefix; the decorations and foliage follow it.
+        // [orig: `def->type == ItemType_Building` @ 0x4b946e, `!=` @ 0x4b9502
+        //  — building_def_row, world/collision.h]
         world.registry.for_each_in_pool(2, [&](const Entity &e) {
-            if (e.kind == EntityKind::Building) push_static(e);
+            if (building_def_row(e)) push_static(e);
         });
         static_building_count_ = static_cast<int32_t>(statics_.size());
         world.registry.for_each_in_pool(2, [&](const Entity &e) {
-            if (e.kind != EntityKind::Building) push_static(e);
+            if (!building_def_row(e)) push_static(e);
         });
         static_count_ = static_cast<int32_t>(statics_.size());
         statics_dirty_ = false;

@@ -268,9 +268,30 @@ int main() {
 		ok &= expect(rgb_near(env.build_scene_fog(true).color,
 					underwater_before.color),
 				"underwater lit water outranks the thermal fog");
+		// The weapon Inset pass applies no alternate fog: its dry pass fogs
+		// toward the fog block under the thermal view, its underwater pass
+		// toward the lit water [orig: Render_WeaponInsetScene
+		// @ 0x5c9d41..0x5c9d4f].
+		const opennova::env::SceneFogValues inset_dry = env.build_inset_scene_fog(false);
+		ok &= expect(rgb_near(inset_dry.color, env.fog_color()) &&
+						!rgb_near(inset_dry.color, grey_fog) &&
+						near(inset_dry.end, env.fog_end_distance()) &&
+						inset_dry.type == env.fog_type(),
+				"the Inset pass never fogs toward the thermal grey");
+		ok &= expect(rgb_near(env.build_inset_scene_fog(true).color,
+						underwater_before.color),
+				"the Inset pass below the water fogs toward the lit water");
 		ok &= expect(rgb_near(env.frame_clear_color_for(true), grey_fog) &&
 						rgb_near(env.frame_clear_color_for(false), grey_fog),
 				"the thermal clear outranks the water test");
+		// The water mirror's clear takes no thermal, waterline or NVG leg: the
+		// skyfog on its outdoors path, black under the indoors letter
+		// [orig: render_main_scene @ 0x5c1342..0x5c1353, @ 0x5c1474, @ 0x5c1597].
+		ok &= expect(rgb_near(env.water_mirror_clear_color(true), env.frame_clear_color()) &&
+						!rgb_near(env.water_mirror_clear_color(true), grey_fog),
+				"the thermal grey never reaches the mirror clear");
+		ok &= expect(rgb_near(env.water_mirror_clear_color(false), {0.0f, 0.0f, 0.0f}),
+				"the indoors letter clears the mirror to black");
 		// The terrain ramps: c1 light 0x101010, c0 sky 0xF0F0F0.
 		const opennova::env::Rgb ramp_light{16.0f / 255.0f, 16.0f / 255.0f,
 				16.0f / 255.0f};
@@ -430,8 +451,7 @@ int main() {
 		source.basis_y = {0.0f, 0.8f, -0.6f};
 		source.basis_z = {0.0f, 0.6f, 0.8f};
 		source.origin = {3.0f, 12.0f, -4.0f};
-		source.viewport_width = 1024.0f;
-		source.viewport_height = 600.0f;
+		source.aspect = 1024.0f / 600.0f;
 		source.v_offset = 0.5f;
 		const opennova::env::WaterMirrorView mirrored =
 				opennova::env::build_water_mirror_view(source, 7.0f);
@@ -449,9 +469,10 @@ int main() {
 				"below the plane the reflected camera is the live camera unchanged");
 
 		// The reflected pass projects with the main view's field on both axes
-		// [orig: render_main_scene @ 0x5c1255, its
-		// Render_SetViewAndProjectionMatrices call @ 0x5c163e]: the mirror keeps
-		// the source projection and a target of 512 rows at the source aspect.
+		// over the square RTT [orig: render_main_scene @ 0x5c1255,
+		// @ 0x5c1464..0x5c1482, its Render_SetViewAndProjectionMatrices call
+		// @ 0x5c1619..0x5c163e]: the mirror keeps the source frustum, its aspect
+		// included, over the 512 x 512 target (non-square texels).
 		source.origin.y = 12.0f;
 		source.fov_deg = 60.0f;
 		source.keep_aspect_height = true;
@@ -459,15 +480,13 @@ int main() {
 				opennova::env::build_water_mirror_view(source, 7.0f);
 		ok &= expect(field.projection == opennova::env::MirrorProjection::kPerspective &&
 					near(field.fov_deg, 60.0f) && field.keep_aspect_height &&
-					field.rtt.width == 874 && field.rtt.height == 512,
-				"the mirror takes the source field over a 512-row target at its aspect");
-		const opennova::env::ReflectionRttSize thin =
-				opennova::env::reflection_rtt_size(1024.0f, 2.0f);
-		const opennova::env::ReflectionRttSize tall =
-				opennova::env::reflection_rtt_size(600.0f, 1024.0f);
-		ok &= expect(thin.width == 16384 && thin.height == 32 && tall.width == 300 &&
-					tall.height == 512,
-				"a degenerate aspect keeps its ratio inside the device width");
+					near(field.aspect, 1024.0f / 600.0f) &&
+					opennova::env::kReflectionRttSize == 512,
+				"the mirror takes the source field at its aspect over the 512 square");
+		source.aspect = 600.0f / 1024.0f;
+		ok &= expect(near(opennova::env::build_water_mirror_view(source, 7.0f).aspect,
+							 600.0f / 1024.0f),
+				"a portrait source keeps its own aspect over the same square");
 
 		// The mirror's per-draw CLIP arming [orig: Terrain_RenderSectorModels
 		// @ 0x5c5e57..0x5c5e75, Terrain_RenderSectorEntities @ 0x5c7c1a..0x5c7c2e]:

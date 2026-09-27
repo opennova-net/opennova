@@ -9,7 +9,8 @@
 //
 // [orig: render_weather_trail_particles @ 0x5dee10 — gated on
 // Env_RainPctCurrent > 48; camera velocity = the camera's delta since the
-// last frame (clamped to 0.2), the fall vector = the accumulated per-tick
+// drawer's last call under the same camera mode, else zero (clamped to 0.2),
+// the fall vector = the accumulated per-tick
 // fall since the last draw (clamped to 0.1, then zeroed @ 0x5deee8); snow:
 // trail = camera up x 0.05, right = camera right x 0.025; rain: trail =
 // (0, 0.1, 0) + velocity - fall, right = camera right x 0.01, width
@@ -36,12 +37,22 @@ struct PrecipitationCamera {
 	int32_t position_q16[3] = {0, 0, 0}; // mission frame 16.16
 	float right[3] = {1.0f, 0.0f, 0.0f}; // render frame, unit
 	float up[3] = {0.0f, 1.0f, 0.0f};    // render frame, unit
+	// The scene's camera mode, the drawer's second argument
+	// [orig: g_CameraMode pushed @ 0x5c969a..0x5c96a4].
+	int32_t mode = 0;
 };
 
-// The drawer's frame-to-frame memory: the last camera position (its delta
-// is the rain velocity term) [orig: dword_2C05A18..20, dword_2C05A14].
+// The drawer's call-to-call memory: the last call's camera mode and camera
+// position (the position's delta is the rain velocity term)
+// [orig: dword_2C05A14 (the mode), dword_2C05A18..20 (the position)]. Retail
+// keeps it in zero-initialized data only the drawer writes, never reset, so
+// the first call at mode 0 measures its velocity from the origin.
+// Every scene pass calls the drawer at its own camera, so while the weapon
+// Inset renders its call reads the main pass's camera of the same frame and
+// the next main call reads the Inset's (runtime/renderer/scene_overlay.h
+// kInsetOverlayOrder carries the witness); one state serves both calls.
 struct PrecipitationDrawState {
-	bool have_last_camera = false;
+	int32_t last_mode = 0;
 	int32_t last_camera_q16[3] = {0, 0, 0};
 };
 
@@ -62,7 +73,8 @@ struct PrecipitationDrawFrame {
 // The witnessed drop-streak build over the first active_count(rain) slots.
 // Consumes and ZEROES the field's fall accumulator (the drawer's read-then-
 // clear) and advances the draw state's camera memory. An un-raining field
-// (rain_pct_q16 <= 48) compiles nothing.
+// (rain_pct_q16 <= 48) compiles nothing and touches neither: the drawer
+// returns before any of it [orig: @ 0x5dee27..0x5dee48].
 void compile_precipitation_frame(env::PrecipitationField &field,
 		int32_t rain_pct_q16, uint32_t precipitation_kind,
 		uint32_t terrain_light_combined_rgb, const PrecipitationCamera &camera,

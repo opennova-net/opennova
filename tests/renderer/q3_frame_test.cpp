@@ -419,6 +419,43 @@ void check_far_band_matches_the_retail_depth_test() {
 	CHECK(disc >= 0.0);
 }
 
+// The first-person pass submits the gun with render flags 0x80 (a held
+// weapon-slot reference) or 0, never kSubmitNoGlowCopy, so its glow-capable
+// rigid strips join the world's copies in the one back-to-front object
+// queue FrameFX flushes; only 0x100 (the sky pass's celestial submits)
+// suppresses a copy. [orig: Player_RenderFirstPersonViewModel
+// @ 0x4def5c..0x4def6a; collect_render_objects_for_batch
+// @ 0x5d93b5..0x5d9449]
+void check_first_person_copies_share_the_object_queue() {
+	CHECK(q3_object_source_admitted(false));
+	CHECK(!q3_object_source_admitted(true));
+	Q3FrameSnapshot snapshot{};
+	snapshot.transforms.resize(4);
+
+	snapshot.submissions.push_back(object_submission(70, "FF_ST_OP_LUM", 40.0f, 0, 1));
+	auto armed_gun = object_submission(71, "FF_ST_OP_LUM", 0.6f, 1, 1);
+	armed_gun.submit_flags = kSubmitAltStream;
+	snapshot.submissions.push_back(armed_gun);
+	auto scope_glass = object_submission(72, "FFP_GLASS", 0.4f, 2, 1);
+	snapshot.submissions.push_back(scope_glass);
+	auto celestial = object_submission(73, "FF_ST_AD_LUM", 500.0f, 3, 1);
+	celestial.submit_flags = kSubmitNoGlowCopy | kSubmitAltStream;
+	snapshot.submissions.push_back(celestial);
+
+	Q3FrameCompiler compiler;
+	const Q3DrawList &draw = compiler.compile(snapshot);
+	CHECK(draw.commands.size() == 3);
+	CHECK(draw.commands[0].submission_id == 70);
+	CHECK(draw.commands[1].submission_id == 71);
+	CHECK(draw.commands[1].technique == Q3Technique::NormalCopy);
+	CHECK(draw.commands[1].sort_key == transparent_sort_key(0.6f));
+	CHECK(draw.commands[2].submission_id == 72);
+	CHECK(draw.commands[2].technique == Q3Technique::RotatedSpecularGlass);
+	CHECK(draw.rejected.size() == 1);
+	CHECK(draw.rejected[0].submission_id == 73);
+	CHECK(draw.rejected[0].reason == Q3RejectReason::GlowCopySuppressed);
+}
+
 int main() {
 	check_shading_constants_are_engine_homed();
 	check_technique_derivation_and_ordering();
@@ -430,6 +467,7 @@ int main() {
 	check_emissive_copies_saturate_colour_times_gain();
 	check_mip_ceilings_pack_both_stages();
 	check_far_band_matches_the_retail_depth_test();
+	check_first_person_copies_share_the_object_queue();
 
 	if (failures != 0) {
 		std::printf("renderer_q3_frame: %d failure(s)\n", failures);

@@ -88,6 +88,26 @@ int main() {
 	CHECK(kRungSkyBody < kRungSkyClouds);
 	// The viewmodel draws after the whole sky pass and before every world draw.
 	CHECK(kRungSkyClouds < kRungViewmodel);
+	// The slot drapes follow the terrain batch inside the terrain sector pass,
+	// after the viewmodel and before every model/foliage/water/transparent
+	// submit [orig: Render_ProcessMainSceneFrame @ 0x5ca829 -> @ 0x5ca867
+	// (Terrain_RenderMainSectorPass: @ 0x610c34 batch, @ 0x610c47 drapes) ->
+	// Terrain_RenderWorldScene @ 0x5ca8ec].
+	CHECK(kRungViewmodel < kRungSlotDrape);
+	CHECK(kRungSlotDrape < kRungObjectPostMultiply);
+	{
+		const int world_rungs[] = {kRungObjectPostMultiply, kRungFoliageMaskFarSide,
+				kRungAlphaFarSide, kRungTracerFarSide, kRungParticleFarSide,
+				kRungFoliageFarSide, kRungWater, kRungWaterDecals,
+				kRungFoliageMaskCameraSide, kRungScars, kRungFoliageCameraSide,
+				kRungAlphaCameraSide, kRungTracerCameraSide};
+		for (int rung : world_rungs) {
+			CHECK(kRungSlotDrape < rung);
+		}
+		CHECK(kRungSlotDrape > kRungSkyClouds);
+		CHECK(kRungSlotDrape > kRungSkyBody);
+		CHECK(kRungSlotDrape > kRungSkyDome);
+	}
 	CHECK(kRungViewmodel < kRungObjectPostMultiply);
 	// The non-person wave's flush @ 0x5c9506 (the post-multiply passes) ->
 	// the far person wave's foliage MODEL masks @ 0x5c955f -> the far-side
@@ -145,6 +165,43 @@ int main() {
 		CHECK(underwater.terrain && !underwater.sky && underwater.mirror_sky);
 		const ScenePassGates water_letter = scene_pass_gates(0x8, false);
 		CHECK(water_letter.terrain && water_letter.sky && water_letter.mirror_sky);
+		// The scene core's detail-foliage passes follow the indoors letter
+		// alone [orig: Terrain_RenderWorldScene @ 0x5C93D5..0x5C93E0, the skips
+		// @ 0x5C95BD..0x5C95BF / @ 0x5C965D..0x5C965F]; the terrain gate
+		// keeps its own.
+		CHECK(open.detail_foliage);
+		CHECK(!indoors.detail_foliage && !indoors.terrain);
+		CHECK(sky_off.detail_foliage && underwater.detail_foliage);
+		CHECK(water_letter.detail_foliage);
+		CHECK(!scene_pass_gates(0x2 | 0x4 | 0x8, true).detail_foliage);
+	}
+
+	// --- the reopen edges: a letter read in the frame that draws it
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca192 ahead of @ 0x5ca645;
+	// Terrain_RenderWorldScene @ 0x5c93b8 ahead of @ 0x5c95d4]. Only a
+	// cleared indoors or water letter reopens a pass; a set letter, a steady
+	// value and the sky letter take no edge.
+	{
+		const ScenePassGateEdges out_of_room = scene_pass_gate_edges(0x2, 0);
+		CHECK(out_of_room.terrain_opened && !out_of_room.water_opened);
+		const ScenePassGateEdges water_back = scene_pass_gate_edges(0x8, 0);
+		CHECK(!water_back.terrain_opened && water_back.water_opened);
+		const ScenePassGateEdges both = scene_pass_gate_edges(0x2 | 0x8, 0);
+		CHECK(both.terrain_opened && both.water_opened);
+		// The letters beside the cleared one ride along untouched: 00TRa's
+		// Armry01 room box with the indoors letter (flags 0x28, letters 0x2E)
+		// into its box without it (letters 0x28): the water letter stays.
+		const ScenePassGateEdges next_room = scene_pass_gate_edges(0x2E, 0x28);
+		CHECK(next_room.terrain_opened && !next_room.water_opened);
+		const ScenePassGateEdges keeps_sky = scene_pass_gate_edges(0x0E, 0x04);
+		CHECK(keeps_sky.terrain_opened && keeps_sky.water_opened);
+		const uint32_t no_edge[][2] = {
+				{0, 0x2}, {0, 0x8}, {0x2, 0x2}, {0x8, 0x8}, {0x2A, 0x2A},
+				{0x4, 0}, {0, 0x4}, {0x28, 0x2A}, {0, 0}};
+		for (const auto &pair : no_edge) {
+			const ScenePassGateEdges e = scene_pass_gate_edges(pair[0], pair[1]);
+			CHECK(!e.terrain_opened && !e.water_opened);
+		}
 	}
 
 	if (failures != 0) {

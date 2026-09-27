@@ -1601,7 +1601,7 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     marker.wp_number = 9;
     marker.position = {20.0f, 10.0f, 5.0f};
     marker.yaw = 30; marker.roll = 4;
-    marker.flags = marker.engine_flags = kEntityFlagBuilding;
+    marker.flags = marker.engine_flags = kEntityFlagMatrixBuilt;
     const auto first_marker = w.registry.spawn(3, marker);
     marker.position.x = 40.0f;
     const auto later_marker = w.registry.spawn(3, marker);
@@ -1629,8 +1629,8 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     CHECK(w.script.vars.get_mission(4) == 1);
     CHECK(w.script.vars.get_mission(5) == 0 && w.script.vars.get_mission(6) == 0);
     CHECK(w.registry.get(itemless)->position.x == -2.0f); // retail loses the source
-    CHECK((w.registry.get(first_marker)->engine_flags & kEntityFlagBuilding) == 0);
-    CHECK((w.registry.get(later_marker)->engine_flags & kEntityFlagBuilding) != 0);
+    CHECK((w.registry.get(first_marker)->engine_flags & kEntityFlagMatrixBuilt) == 0);
+    CHECK((w.registry.get(later_marker)->engine_flags & kEntityFlagMatrixBuilt) != 0);
     program = compile_source("v7 = teleport(7,9)\n", {});
     CHECK(program.ok()); vm.load(program); vm.execute(w);
     CHECK(w.script.vars.get_mission(7) == 0); // handler's return is not the moved count

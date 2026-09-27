@@ -41,7 +41,7 @@ bool scene_overlay_view_draws(const SceneOverlayBatch &batch, float eye_height) 
 }
 
 void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
-		uint32_t texture, SceneOverlayFrame &out) {
+		uint32_t texture, SceneOverlayFrame &out, SceneOverlaySlot slot) {
 	if (precipitation.drops <= 0) {
 		return;
 	}
@@ -57,7 +57,7 @@ void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
 	const float b = static_cast<float>(argb & 0xFFu) / 255.0f;
 	const float a = static_cast<float>((argb >> 24) & 0xFFu) / 255.0f;
 	SceneOverlayBatch batch;
-	batch.slot = SceneOverlaySlot::Precipitation;
+	batch.slot = slot;
 	batch.shading = SceneOverlayShading::Modulate2xBlend;
 	batch.depth = SceneOverlayDepth::TestNoWrite;
 	batch.geometry = SceneOverlayGeometry::World;
@@ -79,12 +79,12 @@ void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
 }
 
 void append_corona_overlay(const std::vector<LightCoronaQuad> &quads, uint32_t texture,
-		SceneOverlayFrame &out) {
+		SceneOverlayFrame &out, SceneOverlaySlot slot) {
 	if (quads.empty()) {
 		return;
 	}
 	SceneOverlayBatch batch;
-	batch.slot = SceneOverlaySlot::LightCoronas;
+	batch.slot = slot;
 	batch.shading = SceneOverlayShading::AdditiveModulate;
 	batch.depth = SceneOverlayDepth::TestNoWrite;
 	batch.geometry = SceneOverlayGeometry::Billboard;
@@ -183,13 +183,13 @@ void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, cons
 }
 
 void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture,
-		const SceneOverlayFog &fog, SceneOverlayFrame &out) {
+		const SceneOverlayFog &fog, SceneOverlayFrame &out, SceneOverlaySlot slot) {
 	for (const TracerDraw &draw : ribbons.draws) {
 		if (draw.index_count < 3) {
 			continue;
 		}
 		SceneOverlayBatch batch;
-		batch.slot = SceneOverlaySlot::NvgLaserBeams;
+		batch.slot = slot;
 		batch.shading = SceneOverlayShading::NvgLaser;
 		batch.depth = SceneOverlayDepth::TestNoWrite;
 		batch.geometry = SceneOverlayGeometry::World;

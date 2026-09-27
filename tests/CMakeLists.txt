@@ -1806,6 +1806,14 @@ target_include_directories(item_death_traits_resolve_test PRIVATE ${CMAKE_CURREN
 target_compile_features(item_death_traits_resolve_test PRIVATE cxx_std_17)
 add_test(NAME item_death_traits_resolve COMMAND item_death_traits_resolve_test)
 
+# The collectors' render model, stamped where the model resolves (placed
+# entities) and carried on the decoded wire row's resolved shape.
+add_executable(render_model_resolve_test world/render_model_resolve_test.cpp)
+target_link_libraries(render_model_resolve_test PRIVATE opennova_runtime opennova_base)
+target_include_directories(render_model_resolve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(render_model_resolve_test PRIVATE cxx_std_17)
+add_test(NAME render_model_resolve COMMAND render_model_resolve_test)
+
 add_executable(husk_section_origins_test world/husk_section_origins_test.cpp)
 target_link_libraries(husk_section_origins_test PRIVATE opennova_runtime opennova_base)
 target_include_directories(husk_section_origins_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3176,6 +3184,25 @@ foreach(port
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
     opennova_add_gated_test(${port_name} COMMAND ${port_name}_test)
 endforeach()
+
+# The indoor-visibility walk (the "occlusion issues in a building" report):
+# the local player walked through a retail building's doorway on the shared
+# rig, the render-occlusion frame run over the game's camera every tick
+# (00TRa's armory door), and CP03's authored spawn (a doorway of HN_Bld1)
+# held still and swept. Gated: OPENNOVA_JO_DIR.
+add_executable(indoor_visibility_walk_test world/indoor_visibility_walk_test.cpp)
+target_link_libraries(indoor_visibility_walk_test PRIVATE opennova_test_rig)
+opennova_add_gated_test(indoor_visibility_walk_00tra
+    COMMAND indoor_visibility_walk_test --bms 00TRa.bms --bms-id 20 --door 5)
+opennova_add_gated_test(indoor_visibility_spawn_cp03
+    COMMAND indoor_visibility_walk_test --bms CP03.bms --spawn --idle 120 --yaw-step 45 --retail-truth)
+# The blink rules those walks surfaced (synthetic rigs, no data gate): the
+# first-pass-only blink letters, and the parent blink-quad copies (the dropped
+# object, the ewep class callback and move function, a seated rider).
+add_executable(indoor_visibility_fixes_test world/indoor_visibility_fixes_test.cpp)
+target_link_libraries(indoor_visibility_fixes_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(indoor_visibility_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME indoor_visibility_fixes COMMAND indoor_visibility_fixes_test)
 
 # The witnessed SP lose flow on the retail data, one executable per training
 # mission's WAC: 04TR carries both team legs, 00TRa only `true(bluekills) ->

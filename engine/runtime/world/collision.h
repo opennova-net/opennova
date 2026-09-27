@@ -653,6 +653,16 @@ struct ResolvedCollisionShape {
     // The raw ItemDef+0x5C type (1 vehicle, 3 person): the client-side blink
     // walk's branch key [orig: Entity_BuildProximityList @ 0x4b3e47..0x4b3e5f].
     uint8_t item_type = 0;
+    // The render model the collectors' model leg reads when the graphic has
+    // no usable collision geometry: its collision-block CMDL sphere, UNSCALED
+    // (world::collision_projection_sphere_from_3di in the entity-init form;
+    // radius 0 without the block). has_render_model false = the graphic did
+    // not load, and the collectors never collect the row. [orig: the
+    // entity+0x30 gate @ 0x5c8cf6..0x5c8cff; Entity_ComputeBoundingSphere
+    // @ 0x5c69a0, the null-block early out @ 0x5c69be]
+    bool has_render_model = false;
+    FixedVec3 render_sphere_center_q16;
+    int32_t render_sphere_radius_q16 = 0;
 };
 
 // One decoded remote pool-0 person (player or non-player infantry) projected
@@ -751,9 +761,38 @@ struct ProjectileHit {
     // a surviving round that far past the hit. [orig: Projectile_UpdatePhysics
     // @0x4EA7BE..0x4EA7D5]
     int32_t victim_bound_radius_q16 = 0;
+    // A decoded pool-1 wire proxy's verified registry twin, when the hit is
+    // that proxy (geometry_entity stays invalid on a proxy hit): the client's
+    // own row of the entity the retail client's table walk would name.
+    EntityHandle wire_registry_twin;
 
     constexpr bool hit() const { return hit_class != ProjectileHitClass::None; }
 };
+
+// The raw ItemDef+0x5C type the statics table splits pool 2 on.
+inline constexpr uint8_t kItemDefTypeBuilding = 5;
+
+// The entity's items.def type is Building — the key retail splits pool 2 on.
+// Every pool-2 row is a BMS "building" record (EntityKind::Building), but
+// only the Building-type defs form the statics table's building prefix
+// [0, static_building_count) that the building collector, the blink queries
+// and the portal init walk, and only they skip the blink refresh; the other
+// def types (decoration, foliage, ...) follow the prefix and are collected
+// as ENTITIES — the blink-quad gate, the view cull and latch, then the render
+// waves' render_TOC for an empty quad — each with its own blink quad from the
+// mission-start refresh. An entity with no resolved def keeps its record
+// family's answer (a synthetic world; retail tables no def-less row).
+// [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 — pass 1 `def->type ==
+//  ItemType_Building` @ 0x4b946e, pass 2 `!=` @ 0x4b9502; the prefix reader
+//  Terrain_CollectVisibleSectorUserpoints @ 0x5c6b97 and the tail reader
+//  Terrain_CollectVisibleEntities_0 @ 0x5c6f48..0x5c721e; the blink refresh's
+//  Building arm Entity_BuildProximityList @ 0x4b3e4d, its candidate walk's
+//  `childModel->type == ItemType_Building` @ 0x4b3f73, and the mission-start
+//  refresh's pool-2 filter @ 0x5240f3]
+inline bool building_def_row(const Entity &e) {
+    return e.has_item_def ? e.item_type == kItemDefTypeBuilding
+                          : e.kind == EntityKind::Building;
+}
 
 // ----------------------------------------------------------------------------
 // CollisionWorld: the proximity tables + per-entity instances, and the
@@ -1015,8 +1054,14 @@ public:
     // Segment arbitration shared by authoritative and visual-only projectile
     // loops. The query is read-only: callers must publish/build collision
     // snapshots at the normal tick seam before tracing.
+    // `out_ground` takes the entity whose geometry clamped the height (the
+    // query's own out word; a client's wire-proxied mover names its registry
+    // twin), kInvalid when none did, even where the terrain floor then wins.
+    // [orig: Entity_ComputeClampedDisplacement @0x4ad6a0, the out store
+    // @0x4ad80e..0x4ad810]
     int32_t minefield_ground(const World &world, EntityHandle source,
-                             FixedVec3 position, bool indoors) const;
+                             FixedVec3 position, bool indoors,
+                             EntityHandle *out_ground = nullptr) const;
 
     ProjectileHit trace_projectile(const World &world,
                                    const ProjectileTrace &trace) const;

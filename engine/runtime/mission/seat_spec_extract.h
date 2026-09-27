@@ -74,6 +74,18 @@ inline const mission::ItemSeatSpec *item_seat_spec_for_type(
 void stamp_seat_spec_turret_limits(world::World &world,
 		std::vector<mission::ItemSeatSpec> &specs);
 
+// The turret window an addeweap child at subType -1 reads (an hp-0 child def,
+// whose init leaves 0xFF before the class init). Entity_GetWeaponTurretLimits
+// indexes the carrier def's four slot tables (down +0x21C, up +0x22C, right
+// +0x23C, left +0x24C; four dwords each) at -1, so each output reads the dword
+// before its table: down the def's light_transfer float (+0x218) as raw bits,
+// up slot 4's down, right slot 4's up and left slot 4's right.
+// [orig: Entity_GetWeaponTurretLimits @0x540DBB..0x540E15; ItemDef_ParseProperty
+//  addeweap arcs @0x4A1BDA/@0x4A1BFE/@0x4A1C22/@0x4A1C49, light_transfer
+//  @0x4A1A12..0x4A1A50]
+void stamp_minus_one_slot_window(world::Entity &child, float carrier_light_transfer,
+		int32_t slot4_down, int32_t slot4_up, int32_t slot4_right);
+
 // Re-apply the installed table to ONE live entity: emplacement-attachment
 // identity (a promoted child on an authority/complete-BMS world preserves
 // its authored slot — p_wire_header_world true disables that, matching the

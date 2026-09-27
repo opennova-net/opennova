@@ -219,6 +219,23 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             for (int c = 0; c < count; ++c)
                 current.armor_density[c] = parse_int_n(tok[c].s, tok[c].len);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "secondary_effect", 16)) {
+            /* The blast's per-victim effect [orig: @0x40aa15..0x40aa36
+               CEffectWorld_InternEffectHandle -> +0x48]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.secondary_effect, sizeof(current.secondary_effect), tok[0].s,
+                          tok[0].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kz_sound", 8)) {
+            /* The blast's per-victim sound set [orig: @0x40a92a..0x40a94b
+               SoundBank_FindSetByNameAnyBank -> +0x4C]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.kz_sound, sizeof(current.kz_sound), tok[0].s, tok[0].len);
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "secondary_anim", 14)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
             current.secondary_anim = parse_int_n(v, vl);

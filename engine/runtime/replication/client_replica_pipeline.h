@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -11,6 +12,7 @@
 #include <net/npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
 
 #include <runtime/replication/client_state.h>
+#include <runtime/replication/item_replication_catalog.h>
 #include <runtime/inmatch/session_transport.h>
 
 namespace opennova::world {
@@ -265,6 +267,12 @@ public:
 	// frame. nullopt falls through to the learned map, then the phase-1 resolver;
 	// a present Unknown is a known unresolved definition and fails closed.
 	void set_item_class_resolver(ItemClassResolver resolver);
+	// Install the embedder's items.def catalog, the one table the host's traits
+	// sweep reads too. Its wire classes become the classifier above, and each
+	// type's def facts (the def type +0x5C, the EWeap attrib +0x54 bit 0x20)
+	// feed the destroy's refNum walk (erase_entity_tree). Without a catalog a
+	// row has no def and the walk never runs. Null clears both.
+	void set_item_catalog(std::shared_ptr<const ItemReplicationCatalog> catalog);
 
 	// Inject the embedder's .adm root-motion source (JOINER role): armed rows
 	// (rm_adm_id >= 0, stamped by the embedder) advance their own AnimMap
@@ -392,6 +400,10 @@ private:
 	int32_t water_z_ = 0;
 	bool has_water_ = false;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
+	std::shared_ptr<const ItemReplicationCatalog> item_catalog_; // the items.def def facts
+	// A row's def as the destroy reads it (entity+0x20): its wire type's
+	// catalog profile, or null without a catalog or a definition.
+	const ItemReplicationProfile *item_def(uint16_t type_id) const;
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;

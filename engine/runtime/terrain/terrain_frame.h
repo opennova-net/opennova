@@ -180,6 +180,19 @@ struct TerrainDrawList {
 // patches in emission order, applies the pool budget, and resolves the mesh
 // family per patch. The returned draw list remains valid until the next compile
 // call; retained vectors make no-allocation-after-warmup observable.
+// A frame compiles once per scene pass that traverses: the main view, then,
+// while the weapon Inset renders, the Inset pass over its own view and FOV (its
+// own patch set, LOD and foliage handoff), each on its own compiler. Each
+// traversal is its own PolyTrn frame of the ONE shared page cache: its sweep
+// advances the cache's frame counter and claims pages like the main one
+// (TerrainTileCompositionCache::begin_frame). Both skip under the main
+// frame's indoors letter (renderer::ScenePassGates::terrain).
+// [orig: Render_ProcessMainSceneFrame -> sub_60FF50 @ 0x5CA654, then
+// Render_WeaponInsetScene @ 0x5CA949 -> Render_SetViewAndProjectionMatrices
+// @ 0x5C9A1B, sub_60FF50 @ 0x5C9A2F (its context from g_ViewportViewMatrixFloat
+// @ 0x60FF6F) -> PolyTrn_ResetFrameStatsAndRender @ 0x610009 -> PolyTrn_RenderFrame,
+// whose `add dword_319FC04` @ 0x60EAE8 advances the page frame; the Inset's
+// sector pass Terrain_RenderMainSectorPass @ 0x5C9D65]
 class TerrainFrameCompiler {
 public:
 	// The embedder-side instance-pool budget the draw list is truncated to (the
@@ -201,5 +214,16 @@ private:
 	std::vector<VisiblePatch> foliage_handoffs_;
 	uint64_t compile_index_ = 0;
 };
+
+// The frame's bounds walk alone: the tracked visible-terrain bounds the
+// water-active test reads, over the same routed sector window and cull as a
+// compile, with no draw list. Retail walks it every frame from the view setup
+// whatever the blink letters; the indoors letter skips only the traversal and
+// the sector pass, so a frame with its terrain hidden still has bounds.
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca504 -> Render_TerrainScene ->
+//  Terrain_SetupViewAndLighting @ 0x610ccd -> terrain_render_visible_sectors
+//  @ 0x60fee7 (trackBounds = 1 @ 0x609263); g_WaterActive @ 0x60ff18..0x60ff33]
+VisibleBounds track_terrain_visible_bounds(const TerrainSceneSnapshot &scene,
+		const TerrainViewInput &view);
 
 } // namespace opennova

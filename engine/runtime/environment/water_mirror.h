@@ -65,41 +65,18 @@ namespace opennova::env {
 // That square target renders with the MAIN view's projection: render_main_scene
 // hands the main target's h/w as the projection's vertical scale
 // [orig: render_main_scene @ 0x5c1255 (Render_GetTargetAspectRatio returns flt_8409EC), its
-// Render_SetViewAndProjectionMatrices call @ 0x5c163e], so the 512 x 512
-// texels cover exactly the main view's field (non-square texels, 512 rows
-// across the vertical field) and the strip rows sample it at (screen U,
-// 1 - screen V). A
-// Godot camera renders square pixels only, so the port keeps the source
-// projection and sizes the target round(512 x aspect) x 512
-// (reflection_rtt_size): the same field and the same 512 rows across it, with
-// round(512 x aspect) columns where retail has 512.
+// Render_SetViewAndProjectionMatrices call @ 0x5c163e] over the square
+// viewport [orig: render_main_scene @ 0x5c1464..0x5c1482 (width = height =
+// the RTT side), Render_SetViewport @ 0x5c1614, the projection call
+// @ 0x5c1619..0x5c163e; Render_SetViewAndProjectionMatrices
+// @ 0x58d971..0x58d9de (vw = w x scaleX, vh = h x scaleY, aspect vw/vh)], so
+// the 512 x 512 texels cover exactly the main view's field, non-square: 512
+// columns across the horizontal field and 512 rows across the vertical one.
+// The strip rows sample it at (screen U, 1 - screen V). The mirror view
+// therefore keeps the source frustum's aspect (WaterMirrorView::aspect) over
+// this square; a shell whose camera couples its two fovs through the
+// target's own ratio must supply that projection explicitly.
 inline constexpr int kReflectionRttSize = 512;
-// A degenerate layout (a collapsed or very thin view) would ask for more
-// columns than a device texture holds; past this width the target keeps the
-// source aspect with fewer rows.
-inline constexpr int kReflectionRttMaxWidth = 16384;
-
-struct ReflectionRttSize {
-	int width = kReflectionRttSize;
-	int height = kReflectionRttSize;
-};
-
-inline ReflectionRttSize reflection_rtt_size(float source_width, float source_height) {
-	ReflectionRttSize size;
-	if (!(source_width > 0.0f) || !(source_height > 0.0f)) {
-		return size;
-	}
-	const double aspect = static_cast<double>(source_width) / source_height;
-	const double columns = std::round(kReflectionRttSize * aspect);
-	if (columns > kReflectionRttMaxWidth) {
-		size.width = kReflectionRttMaxWidth;
-		size.height = std::max(1, static_cast<int>(
-				std::round(kReflectionRttMaxWidth / aspect)));
-	} else {
-		size.width = std::max(1, static_cast<int>(columns));
-	}
-	return size;
-}
 
 // The witnessed reflected-scene dim (env #37's mechanism): after the mirrored
 // sky/terrain/world render into the RTT, detail >= 2 multiplies the WHOLE
@@ -138,8 +115,9 @@ struct MirrorSourceView {
 	float frustum_offset_x = 0.0f;
 	float frustum_offset_y = 0.0f;
 	bool keep_aspect_height = true;
-	float viewport_width = 0.0f;
-	float viewport_height = 0.0f;
+	// The drawn frustum's width over height (the main view's, whatever
+	// raster it is drawn into).
+	float aspect = 1.0f;
 	float v_offset = 0.0f;
 };
 
@@ -161,10 +139,11 @@ struct WaterMirrorView {
 	bool keep_aspect_height = true;
 	float frustum_offset_x = 0.0f;
 	float frustum_offset_y = 0.0f;
-	// The mirror target (reflection_rtt_size of the source viewport): its
-	// aspect is the source's, so the strip rows' (screen U, 1 - screen V)
-	// lookup lands on the reflected point without a rescale.
-	ReflectionRttSize rtt{};
+	// The mirror frustum's width over height: the source's, drawn over the
+	// kReflectionRttSize square (non-square texels), so the strip rows'
+	// (screen U, 1 - screen V) lookup lands on the reflected point without a
+	// rescale.
+	float aspect = 1.0f;
 	// The proper mirror negates the reflected UP column; the local vertical
 	// offset negates too so the effective camera origin is the geometric
 	// reflection of the source rather than shifted oppositely. The unmirrored
@@ -251,7 +230,9 @@ inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 	view.frustum_offset_x = source.frustum_offset_x;
 	view.frustum_offset_y = view.below_water ? source.frustum_offset_y
 											 : -source.frustum_offset_y;
-	view.rtt = reflection_rtt_size(source.viewport_width, source.viewport_height);
+	// The main view's aspect over the square RTT [orig: render_main_scene
+	// @ 0x5c1619..0x5c163e].
+	view.aspect = source.aspect;
 	return view;
 }
 

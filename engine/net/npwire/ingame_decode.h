@@ -95,7 +95,7 @@ inline constexpr uint16_t kPoolSpawnHasParentHandle   = 0x0100; // entity+368 oc
 inline constexpr uint16_t kPoolSpawnHasTargetHandle   = 0x0200; // entity+40 structural carrier
 inline constexpr uint16_t kPoolSpawnHasMountOccupancy = 0x0400; // seat mask + occupant handles
 inline constexpr uint16_t kPoolSpawnHasAiTrailer      = 0x0800; // aiSlot+16/+20/+156
-inline constexpr uint16_t kPoolSpawnHasWeaponTypeByte = 0x1000; // entity+176
+inline constexpr uint16_t kPoolSpawnHasSoundLatchByte = 0x1000; // brain+0x318 -> entity+0xB0
 inline constexpr uint16_t kPoolSpawnHasZoneNumberRank = 0x2000; // entity+538 + radius entity+350
 inline constexpr uint16_t kPoolSpawnHasDifficultyByte = 0x4000; // entity+624
 inline constexpr uint16_t kPoolSpawnHasZoneRadiusAlt  = 0x8000; // entity+350 (SpawnPoint path @0x503f29)
@@ -150,24 +150,47 @@ struct PoolSpawnRecord {
 
 	// AI trailer (gated by `spawn_flags & 0x0800`). D-NET-52 confirms each
 	// of the two pre-cstring fields is a wire u32 (handler advances cursor
-	// by 4 bytes per read).
+	// by 4 bytes per read). The serializer gates it on the AIData def's AI
+	// slot pointer (entity+0x68), never on the values, so presence rides its
+	// own field. [orig: serialize_entity_pool_to_packet_0 @0x503D3D..0x503D5C]
+	bool has_ai_trailer = false;     // 0x0800
 	uint32_t ai_profile_1 = 0;       // 0x0800   aiSlot+16
 	uint32_t ai_profile_2 = 0;       // 0x0800   aiSlot+20
 	std::string ai_name;             // 0x0800   aiSlot+156 (NUL-terminated)
 
 	uint8_t alert_byte = 0;          // 0x0040   entity+533
 	uint8_t action_byte = 0;         // 0x0080   entity+532
-	uint8_t weapon_type_byte = 0;    // 0x1000   entity+176
+	// The vehicle brain's +0x318 sound-latch byte (the movers' engine, reverse,
+	// lights/flare, skid, collision, pivot and tumble cue bits; 0x80 also while
+	// a helo profile's rotor spins), gated on the brain pointer (entity+0x64)
+	// whatever its value: every retail vehicle carries it, 0x00 when parked. The
+	// client stores it sign-extended into entity+0xB0.
+	// [orig: serialize_entity_pool_to_packet_0 @0x503E7F..0x503EC0;
+	//  NapiNPClientMsg_0x00D `movsx ecx,cl; mov [ebx+0B0h],ecx` @0x4331B7..0x4331BA]
+	bool has_sound_latch_byte = false; // 0x1000
+	uint8_t sound_latch_byte = 0;    // 0x1000   brain+0x318 -> entity+0xB0
 
 	// Zone block (the old "health" reading was a decode-era misnomer — these are
 	// zone-object fields, witness 2026-07-03): `0x2000` reads (u8 zone_number_rank =
 	// zoneNumber + 32*rank → entity+538 [orig: ZoneSlotChain_GetZoneInfo @0x503eeb],
 	// u16 zone_radius → entity+350); a def-attrib-0x40000 SpawnPoint without a zone
 	// number instead gates `0x8000` = u16 zone_radius alone [orig: @0x503f29]. Golden
-	// ASH_I5A bunkers: 0x22/0x0046 = zone 2 rank 1, radius 70.
+	// ASH_I5A bunkers: 0x22/0x0046 = zone 2 rank 1, radius 70. Neither gate reads the
+	// written values: 0x2000 rides the zone number byte (entity+538 != 0), whatever the
+	// packed info byte, and 0x8000 the def's SpawnPoint attrib, whatever the radius, so
+	// both ride presence fields. The client reads 0x8000 only without 0x2000.
+	// [orig: serialize_entity_pool_to_packet_0 `cmp byte [ebp+21Ah],0` @0x503ECC..0x503ED3,
+	//  `test dword [def+54h],40000h` @0x503F1F..0x503F29; NapiNPClientMsg_0x00D
+	//  @0x4331C6..0x433206]
+	bool has_zone_number_rank = false; // 0x2000
+	bool has_zone_radius_alt = false;  // 0x8000 (only without 0x2000)
 	uint8_t  zone_number_rank = 0;  // 0x2000   entity+538 (+ the chain rank in bits 5-7)
 	uint16_t zone_radius = 0;       // 0x2000 OR 0x8000   entity+350
 
+	// The 0x4000 byte is gated on the def's callbacks (the weapon-overlay damage
+	// callback or the physics-step mover), not on its value.
+	// [orig: serialize_entity_pool_to_packet_0 @0x503F4C..0x503F80]
+	bool has_difficulty_byte = false;  // 0x4000
 	uint8_t  difficulty_byte = 0;    // 0x4000   entity+624
 };
 
@@ -294,6 +317,10 @@ struct StaticEntityRecord {
 	uint8_t  ammo_count = 0;     // always  entity+290 (BMS record byte 81)
 	uint8_t  bone_a = 0;         // 0x40    entity+533 refNum (BMS byte 153; D-NET-94)
 	uint8_t  bone_b = 0;         // 0x80    entity+532 subType (0xFF on indestructible defs)
+	// entity+624 (0x270), gated on the def's callbacks (a palm damage callback or
+	// a psec mover), not its value. [orig: serialize_pool2_static_to_buffer
+	// @0x504554..0x504588]
+	bool     has_score_flag = false; // 0x100
 	uint8_t  score_flag = 0;     // 0x100   entity+624
 	uint8_t  weapon_byte = 0;    // always  entity+538
 	uint16_t attach_ref = 0;     // weapon_byte != 0 || flags & 0x200; entity+350

@@ -34,6 +34,13 @@ public:
     static void fill_minefield_actors(const ClientState &state, uint16_t self_handle,
             std::vector<world::MinefieldActor> &out);
 	ClientWorldSyncResult sync(const ClientState &state, world::World &world);
+	// The client's own player: its wire handle and its native row. A pool-0
+	// carrier resolves to that native row only through that wire handle;
+	// every other pool-0 handle is a replica-only person.
+	void set_local_player(uint16_t wire_handle, world::EntityHandle native) {
+		local_wire_handle_ = wire_handle;
+		local_player_ = native;
+	}
 	// Stamp every materialized pool-1..3 row that still carries no placed
 	// identity with one: spawn_origin = (kind, per-kind ordinal) and a
 	// nonzero bms_id. Run once the initial world stream's static pools are
@@ -76,7 +83,18 @@ private:
 		// lifetime is already gone.
 		uint32_t spawn_origin = 0xFFFFFFFFu;
 		int32_t bms_id = 0;
+		// A flag row's applied carry state: the native lifetime and the 0x2F
+		// state it last took, and the occupant that state named (0xFFFF none)
+		// — the joiner's occupantEntity, whose loss is the drop.
+		uint64_t objective_lifetime = 0;
+		uint32_t objective_state_serial = 0;
+		uint16_t objective_parent = 0xFFFF;
 	};
+	void apply_objective_state(const ClientState &state, world::World &world,
+			uint16_t packed, const ClientEntityState &row, world::Entity &child);
+	world::Entity *resolve_carrier(world::World &world, uint16_t packed) const;
+	uint16_t local_wire_handle_ = 0xFFFF;
+	world::EntityHandle local_player_;
 	std::vector<int32_t> retired_placement_ids_;
 	std::unordered_map<uint16_t, MaterializedRow> materialized_rows_;
 	// The next spawn_origin index per kind (Marker/Item/Building/Organic).

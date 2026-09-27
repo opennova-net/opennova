@@ -38,6 +38,7 @@
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/particle/effect_catalog_names.h>
+#include <runtime/renderer/precipitation_frame.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -222,7 +223,8 @@ public:
 	// V# and G# start at zero per load, ScriptVarStore::carry_declared_from),
 	// and the entity-update counter (process-global and never reset: the next
 	// mission's staggers continue its phase [orig: g_entity_update_counter,
-	// whose one writer is Entity_UpdateAllEntities @0x4C2639]).
+	// whose one writer is Entity_UpdateAllEntities @0x4C2639]), and the
+	// precipitation drawer's memory (precipitation_draw).
 	void carry_across_load_from(MissionKernel &previous);
 
 
@@ -251,6 +253,12 @@ public:
 	// wrapped drop on terrain / water / the first entity under it
 	// [orig: update_weather_particle_positions @ 0x5dec40 from the drawer].
 	void update_precipitation(int32_t cam_x, int32_t cam_y, int32_t cam_z);
+	// The precipitation drawer's call-to-call memory, the last call's camera
+	// mode and position (renderer/precipitation_frame.h PrecipitationDrawState):
+	// retail keeps it in zero-initialized data only the drawer writes, so it
+	// crosses every load (carry_across_load_from) and the next mission's first
+	// rainy call measures from the previous mission's last camera.
+	renderer::PrecipitationDrawState precipitation_draw;
 
 	// --- the per-tick legs a session frame orders around its pump -----------
 	// Ground every soldier that appeared since the previous sweep on its OWN

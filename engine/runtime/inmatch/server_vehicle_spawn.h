@@ -18,8 +18,8 @@ namespace opennova::inmatch {
 int Server_CountEntitiesByTypeAndTeam(const world::World &world, uint16_t type_id, uint8_t team);
 
 // The S2C 0x70 body for the requester's team: [u8 3] + one
-// [u16 typeId][u8 avail][u8 max] per limit row + u16 0. With the unlimited
-// global, or a row whose type cap and per-team flag are both -1, the pair is
+// [u16 typeId][u8 avail][u8 max] per limit row + u16 0. With the host config's
+// unlimited_vehicles set, or a row whose type cap and per-team flag are both -1, the pair is
 // 0xFF/0xFF; a row with a type cap but no per-team flag is (cap - live, 0xFF);
 // otherwise max = the team's slot count and avail = min(cap - live, max), or
 // max alone when the cap is -1. [orig: serialize_weapon_overlay_slots_0 @0x5105A0]

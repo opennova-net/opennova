@@ -903,11 +903,6 @@ bool test_local_player_person_overlays() {
 	return ok;
 }
 
-// The held-weapon draw gate's remote ammo leg on the listen host: the player
-// entity's EquippedSlot (the host's record — the weapon echo does not move it)
-// naming a NoClipsNoDraw def hides whatever +0x2B0 draws once that def's pool
-// plus its one-round clip reads zero. The local player keeps its own branch.
-// [orig: Entity_CanFireWeapon @0x4dcb5f..0x4dcbc6]
 // The render-slot march start the rows carry (world::PF_SLOT_MARCH_OFFSET_*):
 // the collision-bbox centre rotated by the entity's Euler matrix while the
 // Flags dword is zero, else zero [orig: RenderSlot_UpdateEntityLight
@@ -969,6 +964,11 @@ bool test_rows_carry_the_slot_march_start() {
 	return ok;
 }
 
+// The held-weapon draw gate's remote ammo leg on the listen host: the player
+// entity's EquippedSlot (the host's record — the weapon echo does not move it)
+// naming a NoClipsNoDraw def hides whatever +0x2B0 draws once that def's pool
+// plus its one-round clip reads zero. The local player keeps its own branch.
+// [orig: Entity_CanFireWeapon @0x4dcb5f..0x4dcbc6]
 bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	opennova::mission::MissionKernel kernel;
 	kernel.world.registry.configure_pool(0, 32);
@@ -1025,6 +1025,89 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	return ok;
 }
 
+// An org1 NPC mounted on a vehicle holds the +0x2B0 byte its mounted
+// fire-request window copied from the parent, and draw 5 draws it through the
+// gate's remote branch: a seat-1 (sitex) rider draws it, a control, UseGun or
+// driver seat hides it, and so does a dead rider. An on-foot NPC's spawn 0 or
+// 0xFF draws nothing. Both authority collectors publish it; a pure client's
+// decoded NPC row never does (the byte exists only on the authority).
+// [orig: Entity_UpdateInfantryAI @0x4bf4f4..0x4bf4fa; Entity_CanFireWeapon
+//  @0x4dcb1e, @0x4dcb3c..0x4dcb57; BoneCallback_org0_World @0x4e3c97]
+bool test_host_rows_draw_the_mounted_rider_weapon() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(0, 32);
+	kernel.world.registry.configure_pool(1, 32);
+	w::Entity *vehicle = spawn_pool_row(kernel, 1, 0x02, 1291);
+	w::Entity *npc = spawn_pool_row(kernel, 0, 0x10, 1337);
+	if (!expect(vehicle != nullptr && npc != nullptr, "the vehicle and its rider spawn"))
+		return false;
+	const w::EntityHandle vehicle_handle = vehicle->handle;
+	const w::EntityHandle rider_handle = npc->handle;
+	npc->kind = w::EntityKind::Organic; // no kEntityFlagPlayer: an org1 NPC
+	npc->equipped_adm_index = 5;        // the parent's byte, as the window copied it
+	npc->mounted = true;
+	npc->mount_target = vehicle_handle;
+	npc->mount_type = w::SeatType::Passenger;
+	w::AiEntity *ae = kernel.world.ai.at(kernel.world.ai.attach(rider_handle));
+	ae->inf.active = true;
+	const auto rider = [&]() { return kernel.world.registry.get(rider_handle); };
+
+	std::vector<float> rows;
+	im::PoolPresentLifecycleMap lifecycle;
+	im::DoorPhaseTable doors;
+	const auto held_in = [&](uint16_t handle) -> int {
+		for (size_t i = 0; i * w::PF_STRIDE < rows.size(); ++i)
+			if (static_cast<uint16_t>(row_at(rows, i)[w::PF_WIRE_HANDLE]) == handle)
+				return static_cast<int>(row_at(rows, i)[w::PF_HELD_WEAPON_ADM]);
+		return -1;
+	};
+	const auto held = [&]() {
+		im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+		return held_in(rider_handle.packed);
+	};
+	bool ok = expect(held() == 5, "a seat-1 rider draws the byte copied from its parent");
+	for (const w::SeatType seat :
+			{w::SeatType::Controller, w::SeatType::Gunner, w::SeatType::Driver}) {
+		rider()->mount_type = seat;
+		ok = expect(held() == 0, "a control, UseGun or driver seat hides the rider's gun") && ok;
+	}
+	rider()->mount_type = w::SeatType::Passenger;
+	rider()->flags |= w::kEntityFlagDead;
+	ok = expect(held() == 0, "a dead rider draws nothing") && ok;
+	rider()->flags &= ~w::kEntityFlagDead;
+
+	// The listen host's client-backed collector publishes the same byte from
+	// the authoritative record; a joiner's decoded NPC row publishes none.
+	im::ClientRuntime runtime("MountedRiderRows");
+	nw::OrganicSpawnBatch batch;
+	batch.records.push_back(organic_record(rider_handle.packed, 0x1410u));
+	batch.entity_count = 1;
+	opennova::replication::ClientReplicaPipeline pipeline;
+	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
+	runtime.state() = pipeline.state();
+	if (!expect(runtime.state().entities.size() == 1, "the rider's organic record decoded"))
+		return false;
+	im::build_client_replica_present_rows({kernel, &runtime, false}, lifecycle, rows, doors);
+	ok = expect(held_in(rider_handle.packed) == 5,
+			"the host's client-backed rows publish the rider's byte too") && ok;
+	runtime.state().entities[0].cls = nw::EntityClass::Infantry;
+	runtime.state().entities[0].equipped_adm_index = 5;
+	im::PoolPresentLifecycleMap joiner_lifecycle;
+	im::build_client_replica_present_rows({kernel, &runtime, true}, joiner_lifecycle, rows, doors);
+	ok = expect(held_in(rider_handle.packed) == 0,
+			"a joiner's decoded NPC row never draws a held weapon") && ok;
+
+	// On foot the byte is the spawn clear or the none sentinel.
+	rider()->mounted = false;
+	rider()->mount_target = {};
+	rider()->mount_type = w::SeatType::None;
+	for (const uint8_t byte : {uint8_t{0}, w::kAdmSlotNone}) {
+		rider()->equipped_adm_index = byte;
+		ok = expect(held() == 0, "an on-foot NPC's spawn 0 or 0xFF draws nothing") && ok;
+	}
+	return ok;
+}
+
 int main() {
     test_attached_rows_retain_subdegree_frame();
     test_joiner_palm_source_and_local_fragment();
@@ -1045,6 +1128,7 @@ int main() {
 	ok = test_replica_rows_publish_the_person_overlays() && ok;
 	ok = test_local_player_person_overlays() && ok;
 	ok = test_host_rows_apply_the_remote_held_weapon_ammo_leg() && ok;
+	ok = test_host_rows_draw_the_mounted_rider_weapon() && ok;
 	ok = test_rows_carry_the_slot_march_start() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);

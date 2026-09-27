@@ -325,6 +325,72 @@ void test_explosion_damage_gates() {
     w.tables.ammo.entries[1].flags = 0;
 }
 
+// Every pool-0 victim the blast admits with its damage word clear takes the
+// ammo's kz_sound at full volume and its secondary_effect into its +0x1CC
+// slot: at the victim, oriented (0, 0, -0.5), tagged, never re-posed, and a
+// held emitter releases first. [orig: Projectile_ProcessExplosionQueue
+// @0x4EB1DA..0x4EB292]
+void test_blast_victim_hit_emitter_and_kz_sound() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.tables.ammo.entries[1].secondary_effect = "Effect_Burn";
+    w.tables.ammo.entries[1].kz_sound = "EXPLO_BURN";
+    w.tables.ammo.entries[1].kz_damage = 0; // the presentation alone
+    w.registry.configure_pool(0, 4);
+    w.out.fire_sounds.set_listener(Vec3{0.0f, 0.0f, 0.0f});
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    seed.health_max = 100;
+    seed.position = Vec3{3.0f, 4.0f, 0.5f};
+    seed.bound_radius = 0.6f;
+    const EntityHandle victim = w.registry.spawn(0, seed);
+    ExplosionEntry e;
+    e.pos = seed.position;
+    e.type = ammo_kz::kStandard;
+    e.ammo_index = 1;
+    w.explosions.queue_explosion(w, e);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    const std::vector<DestructionEffectEvent> &fx = w.out.destruction.effects;
+    CHECK(fx.size() == 1);
+    if (fx.size() == 1) {
+        CHECK(fx[0].effect == "Effect_Burn");
+        CHECK(fx[0].family == 1 && fx[0].bank_slot == 0 && !fx[0].release);
+        CHECK(fx[0].positioned && fx[0].section_tagged);
+        CHECK(fx[0].attach_wire_handle == victim.packed);
+        CHECK(fx[0].pos.x == 3.0f && fx[0].pos.y == 4.0f && fx[0].pos.z == 0.5f);
+        CHECK(fx[0].dir.x == 0.0f && fx[0].dir.y == 0.0f && fx[0].dir.z == -0.5f);
+    }
+    CHECK((w.registry.get(victim)->death_effect_active[0] & 1u) != 0);
+    const std::vector<ReadyFireSound> sounds = w.out.fire_sounds.drain();
+    CHECK(sounds.size() == 1);
+    if (sounds.size() == 1) {
+        CHECK(sounds[0].set_name == "EXPLO_BURN");
+        CHECK(sounds[0].pos.x == 3.0f && sounds[0].pos.y == 4.0f);
+    }
+
+    // A second blast releases the held emitter before spawning its own.
+    w.out.destruction.clear();
+    w.explosions.queue_explosion(w, e);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    CHECK(fx.size() == 2);
+    if (fx.size() == 2) {
+        CHECK(fx[0].release && fx[0].family == 1 && fx[0].bank_slot == 0);
+        CHECK(!fx[1].release && fx[1].effect == "Effect_Burn");
+    }
+    (void)w.out.fire_sounds.drain();
+
+    // The damage-disabled word keeps both away [orig: `cmp [edi+124h], ebx;
+    // jnz` @ 0x4eb17e..0x4eb18b].
+    w.out.destruction.clear();
+    w.registry.get(victim)->damage_state = 1;
+    w.explosions.queue_explosion(w, e);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    CHECK(fx.empty());
+    CHECK(w.out.fire_sounds.drain().empty());
+}
+
 // `destroybuild` gates only Building targets in a network session. Offline
 // damage ignores the setting, and enabled multiplayer uses the ordinary blast
 // path. No other retail consumer reads the option.
@@ -739,7 +805,14 @@ void test_section_debris_samples_collision_faces() {
         CHECK(std::abs(debris[1].dir.y - 0.4472136f) < 1.0e-5f);
         CHECK(std::abs(debris[2].pos.x - 12.0f) < 1.0e-6f);
         CHECK(std::abs(debris[2].pos.y - 20.0f) < 1.0e-6f);
+        // Foliage carries the entity as its descriptor tag, wood tag 0.
+        // [orig: Entity_SpawnSectionDebris push ebp @ 0x43F838 / push eax
+        //  (zeroed @ 0x43F80A) @ 0x43F84C]
+        CHECK(debris[0].section_tagged);
+        CHECK(!debris[1].section_tagged);
     }
+    for (const DestructionEffectEvent &effect : debris)
+        CHECK(effect.section_tagged == (effect.effect == "Effect_TreeFoliageExp"));
 }
 
 // Static-building glass is a model-authored point, not a coarse building
@@ -938,6 +1011,9 @@ void test_bridge_dead_points_emit_water_shocks() {
         CHECK(std::abs(shocks[1].pos.z - 3.25f) < 1.0e-6f);
         CHECK(shocks[0].attach_net_id == 0);
         CHECK(shocks[0].family == 0);
+        // The bridge is each shock's descriptor tag [orig:
+        // Entity_SpawnDeathEffectsAtBones @ 0x4945B4].
+        CHECK(shocks[0].section_tagged && shocks[1].section_tagged);
     }
 
     // Zero is still the raw bridge plane, and no DEAD bank means no fallback.
@@ -1464,7 +1540,7 @@ void test_specialized_piece_physics_callback() {
     const EntityHandle h = w.registry.spawn(1, seed);
     Entity *piece = w.registry.get(h);
     piece->engine_flags |=
-            kEntityFlagDead | kEntityFlagHusk | kEntityFlagBuilding;
+            kEntityFlagDead | kEntityFlagHusk | kEntityFlagMatrixBuilt;
     // The HUSK shell floor at -1.0 is the witnessed source for a husked piece.
     CollisionWorld wreck_collision;
     attach_wreck_shells(w, wreck_collision, h, -2.0, -1.0);
@@ -1504,7 +1580,7 @@ void test_specialized_piece_physics_callback() {
     // avg ground 0 - ((240 * HUSK floor -65536) >> 8) = 0xF000, then -0x8000.
     // (The graphic floor -2.0 would have produced 0x16000.)
     CHECK(to_fixed(piece->position.z) == 0x7000);
-    CHECK((piece->engine_flags & kEntityFlagBuilding) == 0);
+    CHECK((piece->engine_flags & kEntityFlagMatrixBuilt) == 0);
 
     bool ground_hit = false;
     for (const DestructionEffectEvent &fx : w.out.destruction.effects)
@@ -1613,7 +1689,7 @@ void test_specialized_piece_physics_callback() {
     const EntityHandle wet_h = wet.registry.spawn(1, seed);
     Entity *submerged = wet.registry.get(wet_h);
     submerged->engine_flags |=
-            kEntityFlagDead | kEntityFlagHusk | kEntityFlagBuilding;
+            kEntityFlagDead | kEntityFlagHusk | kEntityFlagMatrixBuilt;
     submerged->death_motion = DeathMotionMode::PiecePhysics;
     submerged->veh.vel_x = 65536;
     submerged->veh.vel_y = -65535;
@@ -1629,7 +1705,7 @@ void test_specialized_piece_physics_callback() {
     CHECK(submerged->veh.slide_z == -2048);
     CHECK(submerged->veh.air_pitch_rate == 0);
     CHECK(submerged->veh.air_roll_rate == 0);
-    CHECK((submerged->engine_flags & kEntityFlagBuilding) == 0);
+    CHECK((submerged->engine_flags & kEntityFlagMatrixBuilt) == 0);
     CHECK(to_fixed(submerged->position.z) == fixed16(-0.25) - 2048);
     bool wet_effect = false;
     for (const DestructionEffectEvent &fx : wet.out.destruction.effects) {
@@ -2308,6 +2384,10 @@ void test_death_effect_banks_and_water_crossings() {
 	CHECK(e.death_effect_active[0] == 3 && e.death_effect_active[1] == 3);
 	CHECK(w.out.destruction.effects[0].pos.x == 12);
 	CHECK(w.out.destruction.effects[1].bank_slot == 1);
+	// The masked bank tags every spawn with the entity [orig:
+	// Entity_SpawnMaskedEffectBank calls @ 0x493A9C..0x493BD4 push esi].
+	for (const auto &event : w.out.destruction.effects)
+		CHECK(event.section_tagged);
 	w.out.destruction.effects.clear();
 	update_dead_wreck_effects(w, e, &traits, 0, w.out.destruction);
 	CHECK(e.death_effect_active[0] == 1 && e.death_effect_active[1] == 2);
@@ -2317,6 +2397,10 @@ void test_death_effect_banks_and_water_crossings() {
 		stopped += event.release;
 		if (event.effect == "Effect_Boat01Steam")
 			CHECK(event.pos.z == -1);
+		// The wreck update submits with tag 0 [orig:
+		// Entity_UpdateDeadWreckEffects @ 0x4932D1 / 0x493331 / 0x493367].
+		if (!event.release)
+			CHECK(!event.section_tagged);
 	}
 	CHECK(steam == 1 && stopped == 2);
 	e.position.z = 4;
@@ -2331,6 +2415,9 @@ void test_death_effect_banks_and_water_crossings() {
 	w.out.destruction.effects.clear();
 	spawn_death_effect_banks(e, traits, true, w.out.destruction);
 	CHECK(w.out.destruction.effects.size() == 1); // only death has origin fallback
+	// The origin fallback submits with tag 0 [orig: Effect_SubmitDescriptor(0,
+	// 0, ...) @ 0x493ABB / 0x493B0E].
+	CHECK(!w.out.destruction.effects.empty() && !w.out.destruction.effects[0].section_tagged);
 	CHECK(!e.death_effect_underwater); // absent water effect uses the ordinary family
 	traits.husk_model_loaded = false;
 	w.out.destruction.effects.clear();
@@ -2545,7 +2632,10 @@ static void test_vehicle_respawn_lifecycle() {
 	CHECK(e.veh.part_spin.rate == 0 && e.veh.part_spin.speed == 0);
 	CHECK(e.position.x == 10 && e.position.y == 20 && e.position.z == 30);
 	CHECK(e.alive && e.team == 2 && ai.team == 2);
-	CHECK(e.engine_flags == 0x22400 && e.flags == e.engine_flags);
+	// Retail's one dword reads 0x22400; the airborne bit lands in the runtime
+	// word the movers clear on landing, the matrix bit in engine_flags.
+	CHECK((e.engine_flags | e.flags) == 0x22400 && e.engine_flags == 0x20400 &&
+			e.flags == 0x2400);
 	CHECK(e.death_motion == DeathMotionMode::None && e.section_mask == 0);
 	CHECK(e.spawned_piece_mask == 0 && e.veh.crashed == 0 && e.veh.fresh_2f1 == 1);
 	CHECK(e.veh.wheel_comp[5] == 0 && e.veh.slide_z == -501);
@@ -4091,6 +4181,7 @@ int main() {
 	test_wreck_fire_crackle_rolls_on_the_engine_prng();
 	test_death_piece_trail_effect_rows();
     test_explosion_damage_gates();
+    test_blast_victim_hit_emitter_and_kz_sound();
     test_multiplayer_destroy_buildings_rule();
     test_explosion_los_excludes_victim_hull();
     test_radius_blast_skips_pool1_los();

@@ -550,9 +550,12 @@ ViewProjection nvg_view_projection(const ViewProjection &frame,
             static_cast<float>(renderer::nvg_sighted_scene_fov_q16(zoom)) / io::kFp16One;
         out.fov_v_deg = fov_vertical_from_horizontal_deg(out.fov_h_deg, out.aspect);
     }
+    // The frame-shaped arms rasterise the 512 square as well: 512 columns
+    // across fov_h and 512 rows across fov_v, the frame's aspect riding the
+    // projection's vertical scale (non-square texels)
+    // [orig: NVG_RenderScene @0x5d2954..0x5d296d; NVG_RenderSightedScene @0x5d2aa9..0x5d2ada].
+    out.target_w = side;
     out.target_h = side;
-    out.target_w = static_cast<int>(std::lround(static_cast<double>(side) * frame.aspect));
-    if (out.target_w < 1) out.target_w = 1;
     return out;
 }
 

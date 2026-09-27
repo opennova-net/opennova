@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <variant>
 
 #include <runtime/mission/promote.h>
 #include <runtime/world/ai.h>
@@ -203,6 +204,18 @@ static void test_emplacement_attachments() {
           plain_child->position.z == 4.f);
     CHECK(gun_child->position.x == 10.f && gun_child->position.y == 20.f &&
           gun_child->position.z == 3.f);
+    // Each child's subType is its slot index; the refNum-less carrier took the
+    // lowest free refNum for its group, and every child carries it, the
+    // carrier's command group and its Flags.
+    // [orig: Entity_SpawnWeaponOverlays @0x40F361..0x40F40E]
+    CHECK(plain_child->sub_type == 0 && gun_child->sub_type == 1 &&
+          crosshair_child->sub_type == 2);
+    CHECK(parent->ref_num == 1);
+    CHECK(plain_child->ref_num == 1 && gun_child->ref_num == 1 &&
+          crosshair_child->ref_num == 1);
+    CHECK(plain_child->group_id == parent->group_id);
+    CHECK(gun_child->engine_flags == parent->engine_flags &&
+          gun_child->flags == parent->flags);
 
     parent->position = {30.f, 40.f, 5.f};
     parent->yaw = 90;
@@ -220,23 +233,107 @@ static void test_emplacement_attachments() {
     rider->mount_seat = 0;
     rider->mount_type = SeatType::Gunner;
     gun_child->seats[0].occupant = rider_h;
+    // The carrier's row destroyed: every child whose def carries EWeap goes with
+    // it, as they share its refNum, through the same destroy and without a
+    // notify of their own, and the gun's rider is let off. A child without
+    // EWeap keeps its pointer to the freed row and holds its last pose while
+    // the row is free; the next entity allocated in that row carries it.
+    // [orig: Entity_Destroy @0x43E810 — the refNum walk @0x43E9B6..0x43E9CD ->
+    //  CStreamingMem_Destroy @0x546F30 (member tests @0x546F8A..0x546FA0,
+    //  Entity_Destroy @0x546FA3); Entity_UpdateTransformAndTurret @0x440CBF]
+    parent->has_item_def = true;
+    parent->item_type = 1;
+    plain_child->has_item_def = true;
+    gun_child->has_item_def = true;
+    gun_child->item_attrib |= kItemAttribEweap;
+    crosshair_child->has_item_def = true;
+    crosshair_child->item_attrib |= kItemAttribEweap;
     const uint64_t old_parent_spawn_id = parent->registry_spawn_id;
-    cw->registry.despawn(parent_h);
+    cw->out.entity_events.clear();
+    CHECK(cw->commands.server_remove_and_notify(parent_h));
+    int removal_events = 0;
+    for (const auto &event : cw->out.entity_events)
+        if (const auto *removal = std::get_if<EntityRemoveEvent>(&event)) {
+            ++removal_events;
+            CHECK(removal->handle == parent_h.packed);
+        }
+    CHECK(removal_events == 1);
+    CHECK(cw->registry.get(gun_h) == nullptr);
+    CHECK(cw->registry.get(crosshair_h) == nullptr);
+    rider = cw->registry.get(rider_h);
+    CHECK(rider != nullptr && !rider->mounted);
+    cw->run_logic_tick();
+    plain_child = cw->registry.get(plain_h);
+    CHECK(plain_child != nullptr && plain_child->position.x == 30.f &&
+          plain_child->position.y == 38.f && plain_child->position.z == 6.f);
     Entity replacement_seed{};
     replacement_seed.kind = EntityKind::Item;
     replacement_seed.item_id = 999;
+    replacement_seed.position = {50.f, 60.f, 7.f};
     const EntityHandle replacement_h =
             cw->registry.spawn(1, replacement_seed);
     CHECK(replacement_h == parent_h);
     CHECK(cw->registry.get(replacement_h)->registry_spawn_id !=
           old_parent_spawn_id);
     cw->run_logic_tick();
-    CHECK(cw->registry.get(plain_h) == nullptr);
-    CHECK(cw->registry.get(gun_h) == nullptr);
-    CHECK(cw->registry.get(crosshair_h) == nullptr);
-    rider = cw->registry.get(rider_h);
-    CHECK(rider != nullptr && !rider->mounted);
+    plain_child = cw->registry.get(plain_h);
+    CHECK(plain_child != nullptr && plain_child->position.x == 52.f &&
+          plain_child->position.y == 60.f && plain_child->position.z == 8.f);
     CHECK(cw->registry.get(replacement_h) != nullptr);
+}
+
+// The loader's addeweap pass walks pool 1 and then pool 2, each over the rows
+// its count held before the pass: a building carrier's slot spawns its child
+// into pool 1 (subType = its slot index), and a child's own slots are never
+// walked, so no grandchild spawns. [orig: Mission_LoadBMSFile
+//  @0x40FD49..0x40FD96; Entity_SpawnWeaponOverlays @0x40F300]
+static void test_attachment_pass_walks_the_loaded_rows() {
+    bms::File m{};
+    m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
+    m.items[0].id = 11;
+    bms::Entity bunker = item(/*type_id=*/700, 40 << 16, 50 << 16, 0);
+    bunker.type = bms::ItemType::Building;
+    bunker.id = 12;
+    m.buildings.push_back(bunker);
+
+    mission::PromoteOptions o{};
+    mission::ItemSeatSpec tank{};
+    tank.type_id = 164;
+    mission::ItemEmplacementAttachmentSpec turret{};
+    turret.child_type_id = 166;
+    turret.stored_slot = 1;
+    tank.emplacement_attachments.push_back(turret);
+    mission::ItemSeatSpec nested{};
+    nested.type_id = 166;
+    mission::ItemEmplacementAttachmentSpec never{};
+    never.child_type_id = 183;
+    never.stored_slot = 1;
+    nested.emplacement_attachments.push_back(never);
+    mission::ItemSeatSpec building{};
+    building.type_id = 700;
+    mission::ItemEmplacementAttachmentSpec roof_gun{};
+    roof_gun.child_type_id = 182;
+    roof_gun.stored_slot = 2;
+    building.emplacement_attachments.push_back(roof_gun);
+    o.item_seat_specs = {tank, nested, building};
+
+    auto w = std::make_unique<World>();
+    mission::promote_mission(m, *w, o);
+    int turrets = 0, grandchildren = 0;
+    const Entity *roof = nullptr;
+    w->registry.for_each([&](const Entity &e) {
+        if (e.item_id == 166) ++turrets;
+        if (e.item_id == 183) ++grandchildren;
+        if (e.item_id == 182) roof = &e;
+    });
+    CHECK(turrets == 1);
+    CHECK(grandchildren == 0);
+    CHECK(roof != nullptr);
+    if (roof == nullptr) return;
+    const EntityHandle bunker_h = w->registry.find_by_net_id(12);
+    CHECK(roof->handle.pool() == 1 && roof->emplacement_parent == bunker_h &&
+          bunker_h.pool() == 2);
+    CHECK(roof->sub_type == 1);
 }
 
 #if defined(_MSC_VER)
@@ -244,7 +341,7 @@ __declspec(noinline)
 #elif defined(__GNUC__)
 __attribute__((noinline))
 #endif
-static void test_emplacement_parent_death_cascades() {
+static void test_emplacement_parent_death_keeps_children() {
     auto world = std::make_unique<World>();
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 8);
@@ -292,8 +389,13 @@ static void test_emplacement_parent_death_cascades() {
     rider->mount_seat = 0;
     rider->mount_type = SeatType::Gunner;
 
-    // The ordinary item-death path keeps the carrier entity resident as a husk.
-    // Its implicit attachment ownership must still end immediately.
+    // The ordinary item-death path keeps the carrier entity resident as a husk,
+    // and its attachments stay with it: no death leg in retail walks a dead
+    // carrier's children (the ewep class update hides them on a dead
+    // PlayerControl hull), and the rider keeps its seat.
+    // [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1;
+    //  AI_TransitionToDeath_GroundVehicle @0x467B20 (only the Parent-gated
+    //  list @0x467B90..0x467BCC)]
     parent->health = 0;
     destruction_notify_item_damage(*world, *parent, 2);
     CHECK(world->registry.get(parent_h) != nullptr);
@@ -301,11 +403,10 @@ static void test_emplacement_parent_death_cascades() {
 
     world->run_logic_tick();
     CHECK(world->registry.get(parent_h) != nullptr);
-    CHECK(world->registry.get(child_h) == nullptr);
-    CHECK(world->registry.get(grandchild_h) == nullptr);
+    CHECK(world->registry.get(child_h) != nullptr);
+    CHECK(world->registry.get(grandchild_h) != nullptr);
     rider = world->registry.get(rider_h);
-    CHECK(rider != nullptr && !rider->mounted);
-    CHECK(rider != nullptr && !rider->mount_target.valid());
+    CHECK(rider != nullptr && rider->mounted && rider->mount_target == grandchild_h);
 }
 
 static void test_unresolved_emplacement_preserves_streamed_pose() {
@@ -1405,9 +1506,10 @@ int main() {
 
     // ---- items.def addeweap*: spawn every child and carry it on the parent frame ----
     test_emplacement_attachments();
+    test_attachment_pass_walks_the_loaded_rows();
     test_bms_record_index_is_pool_slot();
     test_friendly_tag_names_and_gather();
-    test_emplacement_parent_death_cascades();
+    test_emplacement_parent_death_keeps_children();
     test_unresolved_emplacement_preserves_streamed_pose();
     test_nameless_vehicle_takes_the_retail_default_profile();
     test_vehicle_records_seed_the_ai_slot();

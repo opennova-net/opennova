@@ -122,6 +122,40 @@ bool remote_held_weapon_out_of_ammo(const World &w, const NapiNPServerCtx &serve
 	return false;
 }
 
+// One authoritative body's third-person gun: draw 5 draws the ADM model its
+// entity+0x2B0 names once Entity_CanFireWeapon passes [orig:
+// BoneCallback_org0_World precondition @0x4e3c97, gate call @0x4e3ca5]. Both
+// authority collectors publish it through here. A pure client never holds an
+// NPC's byte: the rider copy below needs the combat target only the
+// authority's think writes [orig: Entity_UpdateInfantryAI @0x4ba97e..0x4ba985],
+// and the org serializer never streams +0x2B0 [orig:
+// NetPacket_SerializeInfantryEntityState @0x4c0320], so the decoded projection
+// publishes player rows only.
+void write_pool_held_weapon(float *r, const PresentRowsContext &context,
+		const Entity *local_player, const Entity &e, const AiEntity &ae,
+		const anim::AimOverlayInputs &inputs) {
+	if ((e.engine_flags & kEntityFlagPlayer) != 0) {
+		// A remote player's gun also answers the gate's ammo leg on the host.
+		const bool out_of_ammo = context.server != nullptr && &e != local_player &&
+				remote_held_weapon_out_of_ammo(context.kernel.world, *context.server, e);
+		write_present_held_weapon(
+				r, out_of_ammo ? 0 : e.equipped_adm_index, (e.flags & kEntityFlagDead) != 0,
+				inputs, ae.inf.wpn_state);
+		return;
+	}
+	// An org1 body's byte is 0 or 0xFF on foot: the org init never writes it
+	// and the fire stamps clear it in the same pass [orig: Entity_InitOrganicAI
+	// @0x4bfcc0; stamp and clear @0x4bf347..0x4bf369]. A mounted rider's
+	// survives the frame: the mounted fire-request window copies the parent's
+	// byte [orig: Entity_UpdateInfantryAI @0x4bf4f4..0x4bf4fa] and only a
+	// detach clears it [orig: Entity_DetachFromVehicle @0x43569c]. A seat-1
+	// rider's EquippedSlot is null, so only the gate's dead and seat legs apply
+	// [orig: Entity_CanFireWeapon @0x4dcb1e, @0x4dcb3c..0x4dcb57,
+	//  @0x4dcb5d..0x4dcb5f].
+	write_present_held_weapon(r, e.equipped_adm_index,
+			((e.flags | e.engine_flags) & kEntityFlagDead) != 0, inputs, ae.inf.wpn_state);
+}
+
 // The EWEAP articulation registers a mounted gun's .3di CTRL table names.
 inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
@@ -657,21 +691,9 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 					anim::compute_aim_overlay_angles(inputs, angles);
 					write_present_overlay(r, angles);
-					// This body's third-person gun. Player rows only: an NPC's
-					// entity+0x2B0 is zero whenever a frame draws it — the org
-					// init never writes it and org1's fire stamps clear it after
-					// the shot [orig: Entity_InitOrganicAI @0x4bfcc0; stamp and
-					// clear @0x4bf347..0x4bf369], so draw 5's own precondition
-					// [orig: @0x4e3c97] skips every NPC.
-					if ((ent->engine_flags & kEntityFlagPlayer) != 0) {
-						const bool out_of_ammo = context.server != nullptr &&
-								ent != local_player &&
-								remote_held_weapon_out_of_ammo(kernel.world, *context.server, *ent);
-						write_present_held_weapon(
-								r, out_of_ammo ? 0 : ent->equipped_adm_index,
-								(ent->flags & kEntityFlagDead) != 0, inputs,
-								ae->inf.wpn_state);
-					}
+					// This body's third-person gun, from the authoritative
+					// record (this block runs on the authority only).
+					write_pool_held_weapon(r, context, local_player, *ent, *ae, inputs);
 					write_present_person_overlays(r, person_overlays(
 							pool_person_overlay_inputs(kernel.world, *ent, *ae, inputs)));
 				}
@@ -821,8 +843,8 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_ROLL_DEG] = static_cast<float>(pool_present_roll_deg(e));
 	// The decoded fold bumps a row's respawn revision on every dead->alive
 	// edge of its wire state byte (organic bit 1; vehicle wrecks flag 4).
-	// Mirror that edge from the authoritative flags so WirePresentPass
-	// re-seeds the same way on the host.
+	// Mirror that edge from the authoritative flags so the EntityPresenter wire
+	// walk re-seeds the same way on the host.
 	{
 		const uint8_t dead_bit = cls == EntityClass::Vehicle
 				? replication::kVehicleFlagDeadPose
@@ -970,18 +992,9 @@ static void write_world_present_row(const PresentRowsContext &context,
 	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 	anim::compute_aim_overlay_angles(inputs, angles);
 	write_present_overlay(r, angles);
-	// This body's third-person gun. Player rows only: an NPC's entity+0x2B0 is
-	// zero whenever a frame draws it (the org init never writes it; org1's fire
-	// stamps clear it after the shot) [orig: Entity_InitOrganicAI @0x4bfcc0;
-	// @0x4bf347..0x4bf369], so draw 5's precondition [orig: @0x4e3c97] skips it.
-	if ((e.engine_flags & kEntityFlagPlayer) != 0) {
-		// A remote player's gun also answers the gate's ammo leg on the host.
-		const bool out_of_ammo = context.server != nullptr && &e != local_player &&
-				remote_held_weapon_out_of_ammo(w, *context.server, e);
-		write_present_held_weapon(
-				r, out_of_ammo ? 0 : e.equipped_adm_index, (e.flags & kEntityFlagDead) != 0,
-				inputs, ae->inf.wpn_state);
-	}
+	// This body's third-person gun: a player's echo, or the copy a mounted org1
+	// rider holds of its parent's byte.
+	write_pool_held_weapon(r, context, local_player, e, *ae, inputs);
 	// The body's item overlays: the canopy, the goggles, the binoculars and the
 	// carried object. [orig: BoneCallback_org0_World @0x4e3940]
 	write_present_person_overlays(r, person_overlays(pool_person_overlay_inputs(w, e, *ae, inputs)));

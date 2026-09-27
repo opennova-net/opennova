@@ -33,9 +33,11 @@
 
 namespace opennova::env {
 
-// One frame of the water-glint leg [orig: update_sun_glare @ 0x5ad130, once
-// per main scene render from Terrain_RenderWorldScene @ 0x5c96c0]:
-// one sample per frame — the reflected-sun point on the water (with the
+// One call of the water-glint leg [orig: update_sun_glare @ 0x5ad130, once
+// per scene pass from Terrain_RenderWorldScene @ 0x5c96c0: the main scene's,
+// then the weapon Inset pass's at its own camera and view, on the same
+// WaterGlintState (runtime/renderer/scene_overlay.h kInsetOverlayOrder)]:
+// one sample per call — the reflected-sun point on the water (with the
 // 0.25 * (frame & 3) reflected-height jitter and the +-2 point x/z jitter),
 // visible when the point sees BOTH the sun (point -> camera + sun * 2048) and
 // the camera over terrain, then the +-16 chase toward popcount * 64 and the

@@ -31,6 +31,22 @@ inline constexpr int kEntityKindItem = static_cast<int>(EntityKind::Item);
 inline constexpr int kEntityKindBuilding = static_cast<int>(EntityKind::Building);
 inline constexpr int kEntityKindOrganic = static_cast<int>(EntityKind::Organic);
 
+// Whether a placed record is a BUILDING to the renderer and the light spawner:
+// its items.def type is Building. Every pool-2 record is a BMS "building" by
+// family, but a decoration or foliage there is an entity: the statics table's
+// non-building tail, collected by its own blink quad, drawn in the first
+// entity wave (that wave's lighting lane and mirror-clip form), and its LGHT
+// records run the spawner's blink query like any entity's. A record whose def
+// does not resolve keeps its family (world::building_def_row is the twin over a
+// world Entity).
+// [orig: Entity_BuildProximityLists_Pool2 `def->type == ItemType_Building`
+//  @ 0x4b946e / `!=` @ 0x4b9502; the tail's collector
+//  Terrain_CollectVisibleEntities_0 @ 0x5c6f48..0x5c721e; Entity_SpawnGlowEffects
+//  `cmp dword ptr [eax+5Ch], 5` @ 0x56c7e8..0x56c7ec]
+inline bool placed_record_is_building(int entity_kind, bool has_def, int item_type) {
+	return has_def ? item_type == kItemTypeBuilding : entity_kind == kEntityKindBuilding;
+}
+
 // Attrib bits (DEF_ITEM_ATTRIB_NOSHADOW mirrors engine/formats/def).
 inline constexpr uint32_t kItemAttribNoShadow = 0x04000000u;
 inline constexpr uint32_t kItemAttrib2DynamicShadow = 0x10u;

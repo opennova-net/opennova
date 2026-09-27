@@ -165,6 +165,12 @@ struct ClientChatLine {
 // is_dead_pose = (flags_byte & 4)].
 inline constexpr uint8_t kVehicleFlagDeadPose = 0x04;
 
+// The carried-objective ids: the flags whose client state S2C 0x2F writes.
+// [orig: NapiNPClientMsg_0x02F @0x430F19 (the 4091/4093/4095 gate)]
+inline bool is_carry_objective(uint16_t item_id) {
+	return item_id == 4091 || item_id == 4093 || item_id == 4095;
+}
+
 // renders exactly the state a networked peer would see.
 struct ClientEntityState {
 	uint16_t handle = 0;                          // (pool<<12)|slot
@@ -175,7 +181,13 @@ struct ClientEntityState {
 	// it never participates in compact record sizing. Keeping it on the decoded
 	// row lets every consumer use one entity model instead of decoding spawn
 	// batches twice.
-	std::string name;
+	// The entity Name (entity+0xF4, world::Entity::display_name) as the spawn
+	// handlers store it: 0x0C copies at most 15 characters for every organic,
+	// 0x0D and 0x18 copy it whole for an AIData def (the only records whose
+	// serializer writes one).
+	// [orig: NapiNPClientMsg_0x00C @0x42E867..0x42E8EA; NapiNPClientMsg_0x00D
+	//  @0x433320..0x43334A; NapiNPClientMsg_FullEntitySpawn @0x433D37..0x433D61]
+	std::string display_name;
 	uint16_t net_id = 0xFFFF;
 	uint8_t spawn_tag = 0;
 	int32_t x = 0;                                // world i32 16.16 (decompressed
@@ -376,6 +388,24 @@ struct ClientEntityState {
 	//  'ewep' move fn Entity_UpdateTransformAndTurret @0x440ca0 via the class
 	//  table row @0x82abe0]
 	uint16_t target_handle = 0xFFFF;
+	// The S2C 0x2F states a flag row took. A client writes a flag's pose,
+	// flags byte and carry links from a new state only: its own drop, fall
+	// and ride move the flag between states (ClientWorldMaterializer). The
+	// destroy of the flag's person carrier makes a state too.
+	// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
+	//  flag's pose]
+	uint32_t objective_state_serial = 0;
+	// The dying carrier's last pose, taken when the client destroys the row
+	// of the person carrying this flag: Entity_Destroy drops the carried
+	// object off it before its fields are wiped. Valid for the state that
+	// destroy made (objective_drop_serial == objective_state_serial).
+	// [orig: Entity_Destroy @0x43E8B1..0x43E8B8 -> Entity_DropCarriedObject]
+	int32_t objective_drop_x = 0;
+	int32_t objective_drop_y = 0;
+	int32_t objective_drop_z = 0;
+	int32_t objective_drop_heading_bam = 0;
+	int32_t objective_drop_pitch_bam = 0;
+	uint32_t objective_drop_serial = 0;
 	uint16_t fire_target_handle = 0xFFFF; // shooter AI lock from the tag-2 fire descriptor
 	// The pure-client stale-carrier sweep's run length: consecutive mover
 	// ticks this no-callback child's persistent carrier stayed unresolvable.
