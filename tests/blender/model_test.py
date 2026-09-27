@@ -563,6 +563,29 @@ def an_authored_hit_sphere_keeps_its_helpers():
 
 
 @case
+def registers_are_declared_in_oed_order():
+    # OED collected the materials' registers, then the tracks', then the
+    # lights' (every JOTAC model that declares registers keeps that order),
+    # whatever order the records name them in.
+    root, lod = model("regs")
+    pn1 = empty("PN01", lod)
+    body = box("Body", pn1)
+    lamp_mat = bpy.data.materials.new("Lamp")
+    lamp_mat.o3d.rgb_style, lamp_mat.o3d.rgb_register = 113, "LIGHTSWITCH0"
+    body.data.materials.append(lamp_mat)
+    pn2 = empty("PN02", pn1, (0.0, 0.1, 0.0))
+    box("Door", pn2, (0.0, 0.1, 0.0), 0.03)
+    track = pn2.o3d.tracks.add()
+    track.target, track.style, track.register = "roty", 113, "DOOR_00"
+    light = link(bpy.data.objects.new("LP", bpy.data.lights.new("LP", "POINT")), pn2)
+    light.data.o3d.style, light.data.o3d.register = 113, "FLICKER"
+    _, lines = export_model(root)
+    assert records(lines, "register") == [["LIGHTSWITCH0"], ["DOOR_00"], ["FLICKER"]], records(lines, "register")
+    # light: part x y z atten_start atten_end style rate register ...
+    assert records(lines, "rgbgen")[0][1] == "0" and records(lines, "light")[0][8] == "2", lines
+
+
+@case
 def attach_helpers_make_the_tables_one_per_part_cannot():
     root, lod = model("attach")
     pn1 = empty("PN01", lod)

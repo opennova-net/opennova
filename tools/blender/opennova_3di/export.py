@@ -93,6 +93,10 @@ UNLISTED_TYPE_CODE = "CX"
 VOLUME_RE = re.compile(r"^([A-Z]{2})([VSWLO]*)(\d{2})?([a-z]*)-colonly$")
 BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
 
+# A PANM row's tracks in their record order (rotation x, y, z, scale x, y,
+# z, translation), the order OED collected their registers in.
+TRACK_ORDER = ("rotx", "roty", "rotz", "scalex", "scaley", "scalez", "trans")
+
 # A strip holds at most 65535 indices (u16), so 21,845 triangles; export
 # starts another strip there, and a skinned one whenever its bone table would
 # pass 16 parts (the skinned palette, MAX_SKIN_MATRICES).
@@ -274,6 +278,42 @@ class Exporter(Notes):
         self.notes = []
 
     # --- helpers ------------------------------------------------------------
+    def declare_registers(self, lods):
+        """The CTRL table in OED's collection order (the retired port's
+        collect_control_registers, 5fc5b4f6a^ engine/formats/oed/
+        export_3di.cpp): the materials' registers in export order, each one's
+        U, V, alpha and RGB generators above style 112 and then a register-
+        driven flipbook; then every LOD's tracks above 0x70, part by part,
+        rotations x, y, z, the scales, the translation; then LOD 0's lights.
+        Each name comes once, at its first use. Every JOTAC model whose
+        registers anything references keeps this order (256 models; 30 more
+        declare only names nothing references). Called once the materials are
+        in order; the records then take their indices from it."""
+        self.registers = []
+        for mat in self.materials.used:
+            if mat is None:
+                continue
+            p = mat.o3d
+            for style, name, what in ((p.u_style, p.u_register, "the U gen"), (p.v_style, p.v_register, "the V gen"),
+                                      (p.alpha_style, p.alpha_register, "the alpha gen"),
+                                      (p.rgb_style, p.rgb_register, "the RGB gen")):
+                if style > CTRL_REFERENCE_THRESHOLD:
+                    self.register(name, f"{mat.name}: {what}")
+            if p.anim_type == 1:
+                self.register(p.anim_register, f"{mat.name} texture flipbook")
+        for lod in lods:
+            for part in lod.parts:
+                holder = part.empty if part.empty is not None else part.bone
+                if holder is None:
+                    continue
+                what = part.name if part.empty is not None else f"{part.rig.name} bone {part.name}"
+                for t in sorted(holder.o3d.tracks, key=lambda t: TRACK_ORDER.index(t.target)):
+                    if t.style > CTRL_REFERENCE_THRESHOLD:
+                        self.register(t.register, f"{what} track {t.target}")
+        for _, ob in sorted(lods[0].lights, key=lambda e: order_key(e[1])):
+            if ob.data.o3d.style > CTRL_REFERENCE_THRESHOLD:
+                self.register(ob.data.o3d.register, f"{ob.name} colour")
+
     def register(self, name, what):
         """A CTRL register's index, declaring it on first use. An empty name is
         a register too (retail's IBlock02 declares one and drives a door by
@@ -1212,11 +1252,15 @@ class Exporter(Notes):
         lod_lines, tail_lines, material_lines = [], [], []
         for lod in lods:
             self.emit_lod(lod, lod_lines)
+        # The materials take their export order once the geometry has named
+        # them all; the register table follows it, and the records written
+        # after this take their register indices from it.
+        remap = self.materials.order()
+        self.declare_registers(lods)
         self.emit_points(lods[0], tail_lines)
         self.emit_lights(lods[0], tail_lines)
         self.emit_occlusion(lods[0], tail_lines)
         self.emit_collision(lods[0], lods[bullet_index], tail_lines)
-        remap = self.materials.order()
         for i, line in enumerate(lod_lines):
             if line.startswith("strip "):
                 record, _, comment = line.partition("  #")
