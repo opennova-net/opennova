@@ -97,6 +97,16 @@ inline bool starts_with_icase(std::string_view s, std::string_view prefix)
     return iequals(s.substr(0, prefix.size()), prefix);
 }
 
+// The text inside one pair of surrounding double quotes; anything else (no
+// quotes, a quote on one side only, a lone '"') comes back unchanged. The
+// .env and .trn value readers strip a quoted value this way.
+inline std::string unquote(std::string_view s)
+{
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+        return std::string(s.substr(1, s.size() - 2));
+    return std::string(s);
+}
+
 // The text held in a fixed-width, NUL-padded on-disk field: up to max_len
 // bytes, cut at the first NUL (a full-width field carries no terminator).
 inline std::string fixed_string(const char *data, size_t max_len)
