@@ -15,18 +15,13 @@ extends GutTest
 const DeployPresenter := preload("res://game/world/deploy_screen_presenter.gd")
 const TMP_DIR := "res://.godot/deploy_screen_presenter_test"
 
-# The retail death.mnu and the string tables it resolves come from the
-# reference fixture set (docs/asset-gated-tests.md); the whole script skips
-# without it.
+# DeployMenuFixture authors the death-screen controls and string tables.
 const STAGED_FIXTURES := {
 	"mnu/jo_death.mnu": "death.mnu",
 	"rtxt/menutxt.bin": "menutxt.BIN",
 	"rtxt/gametext.bin": "gametext.bin",
 }
 
-
-func should_skip_script():
-	return RetailData.fixtures_skip(STAGED_FIXTURES.keys())
 
 const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)
 const SPAWN_ZONE_TYPE := 1359  # pool-1 fixture; ItemDef supplies SpawnPoint
@@ -38,7 +33,7 @@ var _overlay: Control = null
 
 func before_each() -> void:
 	Strings.clear()
-	PresenterFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
+	DeployMenuFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
 
 
 func after_each() -> void:

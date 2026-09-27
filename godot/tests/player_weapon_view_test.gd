@@ -8,12 +8,9 @@ extends GutTest
 func test_viewmodel_def_carries_fsm_fields() -> void:
 	# The slice decodes the WeaponDef record field for field (the record's
 	# getters are the weapon.def parse; a synthetic dict no longer exists).
-	var weapon_path := RetailData.fixture("def/weapon.def")
-	if weapon_path.is_empty():
-		pending(RetailData.fixture_pending_text("def/weapon.def"))
-		return
+	var weapon_path := DefFixture.directory().path_join("weapon.def")
 	var wdb := WeaponDatabase.new()
-	assert_eq(wdb.load(weapon_path), OK, "the shipped weapon.def loads")
+	assert_eq(wdb.load(weapon_path), OK, "the authored weapon.def loads")
 	var index := wdb.find_weapon("WPN_M4AUTO")
 	assert_gte(index, 0, "the fixture carries WPN_M4AUTO")
 	var weapon := wdb.get_weapon(index)

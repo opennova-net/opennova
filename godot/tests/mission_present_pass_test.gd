@@ -312,42 +312,6 @@ func test_cold_door_row_releases_only_what_the_door_writer_owned() -> void:
 	assert_eq(_ctrl(model, "DOOR_01"), 65536, "the side table carries the exact signed dword")
 
 
-func test_retail_door_visible_part_uses_the_presented_phase() -> void:
-	var assets := RetailData.assets()
-	if assets.is_empty():
-		pending("OPENNOVA_JO_ASSETS is required for the Iblock01 door")
-		return
-	var data := ObjectData.new()
-	assert_eq(data.open_file(assets.path_join("IBlock01.3di")), OK)
-	var model := _model()
-	model.set_object_data(data)
-	var clock := PanmClock.new()
-	clock.set_time_ms_for_test(0)
-	model.set_panm_clock(clock)
-	var parts := model.get_render_part_nodes()
-	assert_true(parts.has(0) and parts.has(1))
-	if not parts.has(0) or not parts.has(1):
-		return
-	var building := parts[0] as Node3D
-	var door := parts[1] as Node3D
-	var p := _make_pass(_index_of({ 1: model }))
-	var snap := Snapshot.new()
-	snap.entities = [{ "bms_id": 1, "doors": [0] }]
-	_present(p, snap)
-	model.advance_runtime_frame(0.0)
-	var closed := door.transform
-	var fixed := building.transform
-	snap.entities[0]["doors"] = [65536]
-	_present(p, snap)
-	model.advance_runtime_frame(0.0)
-	assert_ne(door.transform, closed, "the retail door visibly opens at the endpoint")
-	assert_eq(building.transform, fixed, "the building stays fixed")
-	snap.entities[0]["doors"] = [0]
-	_present(p, snap)
-	model.advance_runtime_frame(0.0)
-	assert_eq(door.transform, closed, "closing returns to the exact initial transform")
-
-
 func test_active_channel_poses_to_phase() -> void:
 	var model := _model()
 	var p := _make_pass(_index_of({ 1001: model }))

@@ -37,7 +37,7 @@
     "has_method_guards": 0,
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 0,
-    "test_private_pokes": 3
+    "test_private_pokes": 1
   },
   "dict_contract_allowlist": [
     "player_profile.gd|static func load_character_profile(",

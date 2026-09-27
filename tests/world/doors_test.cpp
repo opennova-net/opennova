@@ -270,7 +270,8 @@ static void test_retail_door_pose() {
     def::def_free_items(&items);
 }
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     test_retail_door_pose();
     test_parse_and_bind();
     test_motion_contact_sound_restart();

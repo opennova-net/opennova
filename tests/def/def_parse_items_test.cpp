@@ -659,7 +659,8 @@ static int test_scale_keeps_the_low_dword_of_the_fistp() {
     return ok ? 0 : 1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     if (test_regional_sound_delays() != 0) return 1;
     if (test_scale_keeps_the_low_dword_of_the_fistp() != 0) return 1;
     if (test_out_of_range_values_take_the_sse2_leg() != 0) return 1;

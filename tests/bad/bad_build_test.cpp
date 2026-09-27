@@ -74,7 +74,8 @@ BadBuildClip two_bone_clip(uint32_t flags) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     // The frame maps: mission x forward / y left / z up becomes clip
     // x side / y up / z forward, and both directions invert.
     {

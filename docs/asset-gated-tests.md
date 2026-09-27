@@ -1,120 +1,148 @@
-# Asset-gated tests — the roots, the matrix, local setup, and the CI stance
+# Core and retail test suites
 
-Some tests exercise data we cannot commit: retail game installs, extracted retail
-assets, retail mission corpora, and network captures of retail sessions. Each such
-test is gated on one of two documented roots and **reports Skipped** without it:
-a fully gated ctest returns 77 (`opennova_add_gated_test` sets
-`SKIP_RETURN_CODE`, so `ctest` prints `***Skipped`) after a `SKIP: needs ...`
-line; a mixed test runs its synthetic legs and prints `SKIP-LEG: needs ...` for
-the retail leg, exiting 0; the GUT gates `pending()`. A green run therefore
-never hides an unexercised gate, but it also never proves the gate ran: when
-touching a gated area, set the root and read the test's output.
+Ordinary CI runs the portable engine and Godot binding/presentation tests without
+either retail root. Small authored definitions, generated models and menus, and
+in-memory engine scenarios supply their inputs. This removes the private checkout
+dependency; it does not make every test asset-free. File-format and Godot resource
+tests still need small, public fixtures to exercise their actual APIs.
 
-The two roots (`docs/dev-env-vars.md`) are read only by the resolvers —
-`tests/common/retail_paths.h` (`retail::install()`, `assets()`,
-`reference_fixture(rel)`, `asset_file(name)`, `expansions()`, `weapon_sav()`, `skip`,
-`skip_leg`, `RETAIL_REQUIRE_OR_SKIP`), `godot/tests/support/retail_data.gd`
-(`RetailData.install()`, `assets()`, `expansions()`,
-`mount_install_with(witness)`), and the
-`Get-OpenNovaRetail*` getters in `scripts/net/lib.ps1`. Machine paths live in
-`.claude/settings.local.json` `env` (untracked), never in tracked files.
+## Running the suites
 
-## The matrix
+```bash
+scripts/build.sh --no-godot --suite core
+scripts/test_godot.sh --suite core
 
-| Root | Points at | Gates |
-|---|---|---|
-| `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set; expansions under `expansion/<name>/`) | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `bink_retail`, `sbf_jo_install_sweep`, `mission_ai_path_conformance`, `truck_dismount`, `threedi_retail_material_facts` (Scrate1.3di from the base mount or an expansion), `npruntime_authored_payload_00trg` (00TRg through revx02, or the `OPENNOVA_JO_ASSETS` tree); the mission-kernel ctests (`mission::MissionKernel` over `tests/common/retail_mission_files`) `training_gameplay` (00TRa movement/footsteps and truck glass, 03TR neutral tags and armed Little Bird pilot; base plus revx02 when installed), `buggy_01tr` and `fire_hold_01tr` (01TR), `ai_threat`, `ladder_00tra`, `truck_rest_00tra`, `ai_muzzle_pose` (CP01), `vehicle_ride_00tra`, `watercraft_02tr` (authored hull contact retention and zero-height water support), `defense_00trg`, `lose_flow_04tr`, `lose_flow_00tra`, `lose_flow_04tr_self_kill` and `lose_flow_05tr_self_kill` (the player's own blast tallies nothing), `particle_gore_set_catalog`, `minefield_retail` (`00TRd` and `CP09` field binding, trigger, damage and reset); the SKIP-LEG legs of `mnu_compat` (every `.mnu` the packed install serves, base mount and each expansion), `terrain_tile_composer` (iterates `expansions()` for the CP12/00TRa tile witnesses), `ground_conform` (the CP01 standing leg), `score_roundtrip` (the `score.ini` the install ships loose beside its archives), `playersav_weapon_sav` (`weapon.sav` at the root or under an expansion), `minimap_overlay` (00TRg with revx02), `npruntime_weapon_table` (the live `weapon.def` oracle over the install's expansions); GUT `avatar_preview_test`, `e50trib_mount_alignment_test`, `skeletal_anim_test`, `sound_pff_install_test` (every expansion), `terrain_static_shadow_runtime_test`, `foliage_dispatcher_assets_test`, `vehicle_emplacement_alignment_test`, `virtual_display_present_test` (the installed M1A1 driver display), `hud_installed_assets_test` (authored launcher/mortar cards, impact cues and vehicle entry/exit; GPU runs write local `user://hud-installed-captures/` readbacks), `mounted_weapon_switch_test` (the designated-G alternate-gun switch on every candidate carrier the install authors it for, placed unoccupied in 07TR: the stock Escalation Apache and Ka-52, plus JOTAC's M1A1 and T80; an install with none fails), `mounted_view_test` (03TR mounted camera, muzzle and continuous NPC attachment during flight), `tank_parity_test` (installed M1A1/T80 driver, cannon and roof-gun seat selection, optical wheel signs and remapping, authored zoom clamps and hull HUD routing on 07TR; assisted placement/boarding), `tank_training_test` (07TR visible cannon prompt and USE boarding, then cannon combat and victory, with explicit positioning after the authored route for occluded respawns; installed revx02 when available, otherwise the base/expansion mount serving 07TR) |
-| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, `ammo.def`, models, `.adm`, the shipped `.bms` missions loose at its root, `.til`, `.lwf`, ...) plus its `fixtures/` subtree: the retail-interop fixture set (`retail::reference_fixture(rel)` / `RetailData.fixture(rel)` resolve `<assets>/fixtures/<rel>`), the retail files whose in-tree copies this repository no longer carries | ctest `mission_corpus` (every loose `.bms`), `threedi_o3d_retail_roundtrip` (Armry01, Dblkhwk1, US01, ArmsG and Mp5b_1st through `opennova-3di` scene -> build -> compare, CXLT rows included), `anim_o3a_retail_roundtrip` (US01.ADM, mp5_1st.adm, 357_1st.adm, DT1RST.bad and DVFLEE1E.BAD through `opennova-3di anim` scene -> build -> compare), `anim_o3a_runtime_playback` (the same three tables rebuilt and played back through the runtime's loader over the bone tables of US01.3di, Mp5b_1st.3di and 357_1st.3di, pose for pose; these three print a SKIP-LEG per missing file and skip whole only when none is there), `mnu_compat` and `mnu_coverage` (the fifteen shipped revx02 menus from the reference fixture set), `adm_parse` (mp5_1st.adm), `anim_skeletal_clips_weapon_channel` (BINOC.bad and its twist), `def_parse_hudpos` (hudpos.def) and `round_debug_trail` (ammo.def), `root_motion`, `anim_positions_from_model_corpus`, `anim_reload_clips_us01`, `anim_weapon_action_clips`, `wac_corpus` (plus argv corpus dirs), `cpt_jo_assets_sweep`, `lwf_jo_assets_sweep`, `npruntime_authored_payload_00trg` (00TRg; also served by the install's revx02); the mission-kernel ctests `ai_corpse`, `parachute_09tr` (unseated player and authored NPC boarding through helicopter takeoff), `rock_collision_00trg`, `soak_00trg`, `native_assets_00trg`, `motorcycle_gravity_06tr` (06TR; the install first when its base mount carries the mission, which JO:CA's does not: it ships 06TR in `jox01`), `npruntime_remote_body_state`, `npruntime_held_weapon_attach`; the SKIP-LEG legs of `occlusion_armry`, `particle_smoke_all_fixtures` (the `.ptl` corpus), `sound_profile` (`sndprof.def`), `def_parse_items` (the particlefx rows), `infantry` (the weapon-channel leg), `minimap_overlay` (00TRg), `trn_config_roundtrip` (06TR.bms and G13.trn), the loose-mission fallback of the `OPENNOVA_JO_DIR` mission-kernel tests; GUT `mission_corpus_binding_test`, `sound_dialog_test`, `sound_integration_test`, `mission_present_pass_test` (the Iblock01 door leg); the render-fixture capture's loose mission (`scripts/render/*.ps1`); over the `fixtures/` subtree (the reference fixture set) the SKIP-LEG legs of `dbf_roundtrip` (00TRg.DBF), `cbin_roundtrip` (the three shipped `nlist.kda`), `mission_mis_idempotency` (ash_i5b), `avatars_parse` and `avatars_roundtrip` (Avatars.def), `mns_document` (menu_style.mns), `hud_layout` (hudpos.def), `bad_parse` (BINOC.bad; loose 357_RST.bad from the asset root), `anim_sample`, `bad_roundtrip` (BINOC.bad) and `bad_build` (BINOC.bad; loose DT1RST.BAD and DT1PRONE.BAD from the asset root), `def_parse_weapons`, `def_parse_ammo`, `npruntime_weapon_table` and `npruntime_handshake_server` (the shipped weapon.def / ammo.def pins), `mus_parse`, `mus_compat`, `mus_decompile`, `mus_roundtrip`, `mus_names_roundtrip`, `mus_entry_roundtrip`, `mus_encode_idempotence` and `mus_vm` (jo_gamemus.bin, jo_menumus.bin and the decoded golden: the MDEdit layout pins, the decompile golden and the Unicorn-proved VM streams), the menu-driven GUT scripts `armory_menu_seam_test`, `armory_presenter_test`, `deploy_screen_presenter_test`, `host_punt_surfacing_test`, `menu_shell_test`, `mnu_corpus_test`, `hud_pos_test`, `throwable_repro_test`, `wire_present_pass_test`, `local_player_presenter_test`, `coop_two_sim_test`, `wire_header_world_materialization_test` (whole scripts, `should_skip_script`; the def scripts stage the shipped weapon.def / ammo.def / hudpos.def through `RetailData.def_root()`) and the legs `game_world_test` (the armory weapon-database reuse), `loading_screen_test` (the session-variable overlay), `avatar_preview_test` (the retail-root portrait legs compose the shipped table's parts) and `render_fixture_capture_probe_test` (the arms blue's 0x0402 wears in the shipped table), `mnu_document_test` (jo_main's 800x600 canvas, the shipped style sheet's entries and edits), `player_info_menu_seam_test` (the two legs over the shipped player.mnu) `main_game_lifecycle_test` (the ESC/armory screen verbs over the shipped game.mnu / weapon.mnu) `simulation_test` (the seven posed-collision rig tests over BINOC.bad and the sixteen weapon-table tests over the shipped defs), `player_info_menu_seam_test` (the loadout legs), `hud_overlay_test`, `hud_helpers_test`, `player_weapon_view_test`, `listen_server_test`, `mission_root_test` and `weapon_profile_kit_test` (their shipped-def legs), `npc_attention_test` and `teammate_spawn_test` (BINOC.bad) |
+# Both roots must point at complete retail data before either command runs.
+scripts/build.sh --no-godot --suite retail
+scripts/test_godot.sh --suite retail
 
-Developer knobs are argv, not roots: `mnu_compat_test <extra.mnu>...`,
-`wac_corpus_test <dir>...`, `ai_path_conformance_test --report/--ticks/--bms`;
-dumps are `--dump`, `--write`,
-`--write-fixture`, `--write-pff` (`docs/dev-env-vars.md`).
+# Local convenience: run both; missing retail data is reported as skipped.
+scripts/build.sh --no-godot --suite all
+scripts/test_godot.sh --suite all
 
-The 00TRa tile-composer leg fingerprints the archived `TRNTILE10.TGA`
-payload (`SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490`)
-and pins the correct shipped-output RGB hashes for entries 761/781. This
-guards against repeating the 2026-08-21 test-only re-pin that left the
-asset-gated test permanently red without changing the renderer.
+# Separate graphics validation, on a Forward+ capable machine with retail data.
+scripts/test_godot.sh --suite retail --windowed
+```
 
-Runtime probes (`game_probe` tools under `godot/probes/`, `docs/mcp.md`) take
-their retail roots as typed arguments (`mission_path`, `mission_resource_dir`,
-`output_dir`, ...) or from the launch's `--resource-dir`; they read no environment
-variable. The scripts that drive them default those arguments to the two roots.
+`all` is the default for both runners. `core` unsets `OPENNOVA_JO_DIR` and
+`OPENNOVA_JO_ASSETS` before launching tests, even when the developer has them set.
+`retail` requires both directories and rejects every skipped test and `SKIP-LEG:`.
+A green `all` run with missing data proves only the tests that executed. Windowed
+retail graphics tests are excluded from all headless selections.
 
-## Local setup
+CTest's `retail` label is the native source of truth. List it with:
 
-Add to `.claude/settings.local.json` (adjust to this machine's paths):
+```bash
+ctest --test-dir build -C Release -N -L '^retail$'
+ctest --test-dir build -C Release -N -LE '^retail$'
+```
+
+Godot compatibility scripts live under `godot/tests/retail/`; graphics-only scripts
+live under its `windowed/` subdirectory. All other GUT scripts are core.
+`scripts/ci/test_suites.py` generates the exact GUT configuration and snapshots the
+selected scripts and methods, or the actual CTest inventory, before execution.
+The runners compare that inventory with JUnit afterward. Empty runs, missing
+methods/tests, script parse errors, and dropped scripts fail. Core also rejects
+retail-data skips; unrelated existing headless/renderer pending tests remain
+visible in its report. CI checks that core scripts contain no retail resolver or
+retail presenter-fixture calls.
+
+Reports, inventories and Godot logs are written under `build/Testing/` using the
+suite name (`ctest-core.xml`, `gut-retail.xml`, etc.) and uploaded by each CI job.
+
+## Migration and coverage
+
+At this migration there are **523 core and 88 retail CTest entries**. Thirty-six
+formerly mixed entries now have a core invocation and a separately labelled
+`<name>_retail` invocation. The latter passes `--retail`, enabling the original
+corpus leg in the same executable; it also repeats the synthetic assertions.
+The 52 wholly retail entries retain their original names. No native assertions
+were removed. `scripts/ci/native_migration.json` records the 36 pairs and sources.
+
+The audit followed retail access paths from 260 Godot methods (259 headless and
+one graphics-only). **146 had their retail inputs replaced**, and one already
+authored player-info scenario stays in core after removing its helper's optional
+retail-loading branch. Thus **147 audited methods belong to core**; the remaining
+**112 headless methods and one windowed method** retain retail compatibility
+coverage. Every audited method and its current home is recorded in
+`scripts/ci/retail_migration.json`; the layout guard checks that these homes still
+exist.
+
+| Converted behavior | Methods | Replacement input and retained validation |
+| --- | ---: | --- |
+| Wire presentation | 43 | One authored weapon row plus the existing generated models and clips; node, pose and event assertions remain. |
+| Local-player presentation | 23 | Authored action/weapon catalog; switching, reload, animation and loadout assertions remain. |
+| Two-simulation networking | 21 | Authored weapons and ammo; real UDP transport, prediction, damage, impacts and replication assertions remain. |
+| Menu shell | 13 | Minimal authored menus; navigation, selection, quit and shell state remain. |
+| Armory menu and presenter | 18 | Authored catalog, menus and strings; filtering, weights, ammo, icons and commit/cancel remain. |
+| Deploy and host-punt presentation | 10 | Authored death-screen controls and strings; real driver and transport assertions remain. |
+| Throwable regressions | 8 | Authored action timings, ammo and motors; switching, charge, bounce and detonation assertions remain. |
+| HUD and player weapon binding | 6 | Nonzero authored HUD fields and catalog; projection and null behavior remain. |
+| Wire-header world materialization | 3 | Authored catalog plus existing generated missions/models; camera, culling and weapon selection remain. |
+| Main-game lifecycle | 1 | Generated shell menus; pause and armory lifecycle remain. |
+| Existing authored player-info ammo-type case | 1 | Keep the inline catalog in core; require the helper's explicit database argument. |
+
+Portable logic continues to be tested under `tests/` against the engine's public
+APIs. Godot tests validate the binding, scene, UI and device boundaries. The new
+helpers in `godot/tests/support/` create small inputs through those same public
+loaders; they do not copy or edit private retail files and do not fake the engine.
+
+Remaining retail checks establish facts synthetic inputs cannot establish:
+real parser/corpus compatibility and round trips; shipped weapon timings, menu
+layout and localization; authored missions and mounted-vehicle transforms;
+installed PFF/audio/model resolution; and actual retail animation/rendering
+witnesses. For example, the armory's three shipped-menu/string checks and both
+shipped smoke-fuse checks remain separate from their authored behavior tests.
+Do not replace these with generated bytes and call that equivalent coverage.
+
+## Local retail data
+
+The only roots are `OPENNOVA_JO_DIR` (the packed JO:CA install and expansions)
+and `OPENNOVA_JO_ASSETS` (the extracted tree plus reference fixtures). Native
+tests resolve them through `tests/common/retail_paths.h`; Godot uses
+`godot/tests/support/retail_data.gd`. The runner only checks their availability.
+Machine paths belong in `.claude/settings.local.json` `env`, never tracked:
 
 ```json
 {
   "env": {
-    "OPENNOVA_JO_DIR": "C:/Users/<you>/Desktop/Games/Joint Operations Combined Arms",
-    "OPENNOVA_JO_ASSETS": "C:/Users/<you>/Desktop/JOX"
+    "OPENNOVA_JO_DIR": "C:/Games/Joint Operations Combined Arms",
+    "OPENNOVA_JO_ASSETS": "C:/Assets/JOX"
   }
 }
 ```
 
-The extracted tree must also carry the `fixtures/` subtree of
-`opennova-net/opennova-reference-assets` (the retail-interop fixture set:
-`fixtures/mnu/jo_*.mnu`, `fixtures/def/weapon.def`, `fixtures/rtxt/*.bin`, ...),
-which a plain JOX extract lacks: clone that repository and point
-`OPENNOVA_JO_ASSETS` at the clone, or copy its `fixtures/` directory into the
-extract. A test that needs one of those files reads
-`retail::reference_fixture("mnu/jo_main.mnu")` (ctest) or
-`RetailData.fixture("mnu/jo_main.mnu")` (GUT) and skips or pends without it.
-
-A packed install without an expansion the test needs (revx02 for the 00TRg
-payload oracle) skips that leg; the extracted tree carries the same pair and
-serves it. No test reads a machine-local capture: the wire coverage that used
-to ride gitignored local pcaps is the in-tree `fixtures/novaworld/` set
-(`nw_self_capture`, `nw204_lobby_decode`, the `.nwmsg` replays) plus the
-inline-pcap unit tests.
-
-Run the gated set with the roots exported, e.g. `ctest --test-dir build -C
-Release -R "00tra|00trg|ai_|muzzle|reload_clips|weapon_action|remote_body|held_weapon|authored_payload|gore_set"`,
-and read the output: a real run prints its measurements, a skipped one prints
-`SKIP:`.
+Export these variables when invoking the runners from a separate terminal.
+The extracted root must include the `fixtures/` subtree from
+`opennova-net/opennova-reference-assets`: shipped menus, definitions, string
+tables and other interoperability witnesses. A plain JOX extract lacks that
+subtree. The packed root must include the required expansion data. An incomplete
+mount fails the retail suite instead of silently reducing its coverage.
 
 ## CI
 
-Retail data never reaches public runners as tracked files (copyright, size,
-credentials). Two private repositories carry what CI needs:
-`opennova-net/opennova-reference-assets` (the extracted tree behind
-`OPENNOVA_JO_ASSETS`: the loose asset set, the shipped `.bms` missions and the
-reference fixture set; its README lists the files) and `opennova-net/opennova-reference-retail-packed` (the packed install
-behind `OPENNOVA_JO_DIR`: the retail JO:CA `language.pff`, `localres.pff`,
-`resource.pff`, `main.bik`, the SBF banks, `score.ini`, the `weapon.sav` pair,
-`Jointops.exe` + Bink, and `expansion/jox01`; the archives are committed as
-95 MiB plain-git parts that its `reassemble.sh` rebuilds and verifies against
-`MANIFEST.sha256`; a JOTAC tree is a mod install whose `items.def`,
-`weapon.def`, rigs and models the retail pins reject, so it never feeds this
-root). With the
-`REFERENCE_ASSETS_TOKEN` secret (a token with `contents: read` on BOTH
-repositories) the `test` and `godot-tests` jobs check the assets out beside
-the tree (both restored from the Actions cache keyed by each repository's
-`main` commit and saved as soon as the data is ready, so a miss clones — and
-reassembles the packed set — once, even when the tests then fail), and point
-the two roots at them, so every root-gated test runs in CI instead of
-reporting Skipped; without the secret the gates stay closed and the job is
-still green. `.github/workflows/ci.yml` is the record.
+The ordinary `test`, `test-linux`, and `godot-tests` jobs use `--suite core` and
+never mount the private repositories. The separate `test-retail` and
+`godot-tests-retail` jobs run on the same PR, master-push and manual triggers
+when reference-data credentials are available. Both Godot jobs consume the same
+`template_debug` DLL artifact. Windowed retail graphics validation is a separate
+local run; hosted headless CI does not establish its pixel/instance-row coverage.
 
-A green run still never proves a gate opened, so with the data mounted both
-jobs end by attesting it: `scripts/ci/retail_gates_ran.py` reads ctest's JUnit
-report (`scripts/build.sh` writes `build/Testing/ctest.xml`) and the GUT log,
-and fails on any fully gated test that reported Skipped or any `SKIP-LEG:` /
-`[Pending]` line that names a mounted root. Its expectation tables are this
-page's matrix; a new gated test is added to both, and
-`retail_gates_ran.py --check-docs` (the lint job, and again after the build
-with `--junit` for the full ctest universe) fails when a root's table and its
-row here name different ctests. With the data mounted nothing is exempt: the
-`KNOWN_ABSENT` table is empty and every Skipped gate is a gap.
+`retail-availability` explicitly reports unavailable credentials, such as on a
+fork PR, and only the retail jobs skip. With `REFERENCE_ASSETS_TOKEN` available,
+the composite `mount-reference-data` action mounts these two private repositories:
 
-The wire logic the retired capture gates exercised is covered in CI by the
-**inline-pcap unit tests** (`nw_pool_decode_unit_test`,
-`nw_capture_decoder_test` craft tiny in-memory pcaps and run unconditionally)
-and the committed `fixtures/novaworld/` replays — the sanctioned substitute,
-per the net-test convention.
+- `opennova-net/opennova-reference-assets`: the extracted assets and reference
+  fixture set behind `OPENNOVA_JO_ASSETS`.
+- `opennova-net/opennova-reference-retail-packed`: the packed JO:CA install behind
+  `OPENNOVA_JO_DIR`, including the expansion; `reassemble.sh` verifies the archive
+  parts against `MANIFEST.sha256`.
+
+The token needs read access to both repositories. The existing action caches
+each root by its repository commit. A mount failure or skipped compatibility
+case fails the retail job. There is no duplicated expected-test allowlist:
+CTest labels, the Godot directory layout and the collected method inventory
+define what must run. `.github/workflows/ci.yml` is the CI record.
 
 ## Why captures are never committed
 

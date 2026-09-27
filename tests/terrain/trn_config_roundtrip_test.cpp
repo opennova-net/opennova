@@ -77,7 +77,8 @@ bool test_retail_06tr_draws_from_its_mission_tile_set() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     if (!test_mission_tilestrip() || !test_retail_06tr_draws_from_its_mission_tile_set()) {
         return 1;
     }

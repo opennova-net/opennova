@@ -138,37 +138,6 @@ func test_ammo_text_format() -> void:
 	assert_eq(HudPos.format_ammo(5, 90, -1), "", "Capacity -1 hides the element.")
 
 
-func test_hud_weapon_def_decode() -> void:
-	# The ADR 0017 slice over the WeaponDef record: field for field from the
-	# shipped weapon.def, null for no weapon.
-	assert_null(PlayerHudWeaponDef.from_weapon_def(null), "No weapon decodes to null.")
-	var weapon_path := RetailData.fixture("def/weapon.def")
-	if weapon_path.is_empty():
-		pending(RetailData.fixture_pending_text("def/weapon.def"))
-		return
-	var wdb := WeaponDatabase.new()
-	assert_eq(wdb.load(weapon_path), OK, "the shipped weapon.def loads")
-	var index := wdb.find_weapon("WPN_M4AUTO")
-	assert_gte(index, 0, "the fixture carries WPN_M4AUTO")
-	var weapon := wdb.get_weapon(index)
-	var def := PlayerHudWeaponDef.from_weapon_def(weapon)
-	assert_eq(def.weapon_name, "WPN_M4AUTO")
-	assert_eq(def.round_type, weapon.round_type)
-	assert_eq(def.clipsize, weapon.clipsize)
-	assert_eq(def.error_deg, weapon.error)
-	assert_eq(def.clipgfx_texture, weapon.hudclipgfx_texture)
-	assert_eq(def.rndgfx_offset, weapon.hudrndgfx_offset)
-	assert_eq(def.rndgfx_step, Vector2i(weapon.hudrndgfx_layout.x, weapon.hudrndgfx_layout.y))
-	assert_eq(def.sights.size(), weapon.get_sights().size(), "every authored SIGHTS row rides along")
-	assert_almost_eq(def.error_row_deg(2), weapon.error[2], 0.0001, "Hip-stand dispersion row.")
-	assert_eq(def.error_row_deg(9), 0.0, "Out-of-table row reads 0.")
-	# The divisor is a byte in the original (weapon+727) — out-of-range wraps.
-	# [orig: HUDRNDGFX parse @0x5442fc; unsigned byte read @0x599bb1]
-	assert_eq(PlayerHudWeaponDef.rounds_per_icon_from_layout(Vector3i(18, 0, 1)), 1)
-	assert_eq(PlayerHudWeaponDef.rounds_per_icon_from_layout(Vector3i(18, 0, 257)), 1,
-			"Divisor 257 wraps to the byte 1.")
-
-
 func test_stance_shared_scale() -> void:
 	# One 16.16 factor from FRAME 0 scales every frame; centering comes from frame
 	# 0's scaled dims and skips at 127+. [orig: HUD_DrawStanceIndicator
@@ -265,3 +234,37 @@ func test_scope_circle_mask_geometry() -> void:
 		"They suppress the reticle cross.")
 	assert_true(HudPos.scope_mask_points(surface, 1024, false, HudPos.SCOPE_MASK_GRID).is_empty(),
 		"And the grid ticks.")
+
+
+func test_hud_weapon_def_decode() -> void:
+	# The ADR 0017 slice over the WeaponDef record: field for field from the
+	# authored weapon.def, null for no weapon.
+	assert_null(PlayerHudWeaponDef.from_weapon_def(null), "No weapon decodes to null.")
+	var weapon_path := DefFixture.directory().path_join("hud_weapon.def")
+	var wdb := WeaponDatabase.new()
+	assert_eq(wdb.load(weapon_path), OK, "the authored weapon.def loads")
+	var index := wdb.find_weapon("WPN_M4AUTO")
+	assert_gte(index, 0, "the fixture carries WPN_M4AUTO")
+	var weapon := wdb.get_weapon(index)
+	var def := PlayerHudWeaponDef.from_weapon_def(weapon)
+	assert_eq(def.weapon_name, "WPN_M4AUTO")
+	assert_eq(def.clipsize, 30)
+	assert_eq(def.clipgfx_texture, "fixture_clip.tga")
+	assert_eq(def.rndgfx_offset, Vector2i(13, 14))
+	assert_eq(def.rndgfx_step, Vector2i(15, 16))
+	assert_eq(def.sights.size(), 1)
+	assert_almost_eq(def.error_row_deg(2), 3.0, 0.0001)
+	assert_eq(def.round_type, weapon.round_type)
+	assert_eq(def.clipsize, weapon.clipsize)
+	assert_eq(def.error_deg, weapon.error)
+	assert_eq(def.clipgfx_texture, weapon.hudclipgfx_texture)
+	assert_eq(def.rndgfx_offset, weapon.hudrndgfx_offset)
+	assert_eq(def.rndgfx_step, Vector2i(weapon.hudrndgfx_layout.x, weapon.hudrndgfx_layout.y))
+	assert_eq(def.sights.size(), weapon.get_sights().size(), "every authored SIGHTS row rides along")
+	assert_almost_eq(def.error_row_deg(2), weapon.error[2], 0.0001, "Hip-stand dispersion row.")
+	assert_eq(def.error_row_deg(9), 0.0, "Out-of-table row reads 0.")
+	# The divisor is a byte in the original (weapon+727) — out-of-range wraps.
+	# [orig: HUDRNDGFX parse @0x5442fc; unsigned byte read @0x599bb1]
+	assert_eq(PlayerHudWeaponDef.rounds_per_icon_from_layout(Vector3i(18, 0, 1)), 1)
+	assert_eq(PlayerHudWeaponDef.rounds_per_icon_from_layout(Vector3i(18, 0, 257)), 1,
+			"Divisor 257 wraps to the byte 1.")

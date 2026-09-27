@@ -254,7 +254,8 @@ void test_cp01_standing_player_is_vertically_stable() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
 	test_travel_from_def();
 	test_compress_bottomed_absorbs_nothing();
 	test_compress_normal();
