@@ -38,8 +38,6 @@ void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *tr
 			{ sound.empty() ? fallback : sound, sound.empty() ? fallback_pos : e.position });
 }
 
-constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / 2pi
-
 // The environment water plane (env.water_z, 16.16 — the #265 sound-profile
 // home; 0 = no water authored) as float units [orig: g_EnvWaterHeightFixed
 // @0x26c6454].
@@ -348,7 +346,7 @@ bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_ta
     if (cone_half_bam == 0) return true;
     const int64_t scaled = static_cast<int64_t>(
             std::atan2(static_cast<double>(to_target.y), static_cast<double>(to_target.x)) *
-            kBamPerRadian);
+            io::kBamPerRadian);
     const uint32_t ang = static_cast<uint32_t>(scaled);
     const uint32_t delta = ang - static_cast<uint32_t>(e.dir_bam);
     const uint32_t neg_delta = 0u - delta;

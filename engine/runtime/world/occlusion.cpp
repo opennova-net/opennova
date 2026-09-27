@@ -19,7 +19,7 @@ namespace opennova::world {
 namespace {
 
 // The engine's angle scale — NOT exactly 2*pi/2^32: the retail double is
-// 0x3E19222D9890E4A8 (~2.1 ppm above), and the quantized trig below feeds off
+// 0x3E19222D9890E4A8 (~30.5 ppm above), and the quantized trig below feeds off
 // it, so we carry the exact bits. [orig: dbl_7C3608]
 inline double bam_angle_scale() {
     static const double v = [] {

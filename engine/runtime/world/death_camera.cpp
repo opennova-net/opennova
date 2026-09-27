@@ -10,8 +10,6 @@ namespace opennova::world {
 namespace {
 
 constexpr double kPi = io::kPi;
-// dbl_7C19D8 = 2^32 / (2 pi): radians -> BAM32 [orig: @0x7c19d8].
-constexpr double kBamPerRadian = 683565275.5764316;
 // flt_7C32BC = 65536.0: the float normalise scale [orig: @0x7c32bc].
 constexpr double kQ16 = 65536.0;
 
@@ -50,8 +48,9 @@ void normalise_q16(int32_t v[3], int32_t *length_q16) {
     }
 }
 
+// dbl_7C19D8 = 2^32 / (2 pi): radians -> BAM32 [orig: @0x7c19d8].
 inline int32_t atan2_bam(double y, double x) {
-    return static_cast<int32_t>(std::atan2(y, x) * kBamPerRadian);
+    return static_cast<int32_t>(std::atan2(y, x) * io::kBamPerRadian);
 }
 
 } // namespace

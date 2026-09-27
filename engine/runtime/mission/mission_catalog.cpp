@@ -1,7 +1,6 @@
 #include <runtime/mission/mission_catalog.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstring>
 
 #include <base/io/strutil.h>
@@ -16,17 +15,7 @@ namespace {
 // Retail's list order comparator [orig: Mission_CompareMapNames @ 0x5628e0 —
 // stricmp over the two filenames].
 bool file_less(const Row &a, const Row &b) {
-	const char *pa = a.file.c_str();
-	const char *pb = b.file.c_str();
-	while (*pa && *pb) {
-		const int ca = std::tolower(static_cast<unsigned char>(*pa));
-		const int cb = std::tolower(static_cast<unsigned char>(*pb));
-		if (ca != cb) return ca < cb;
-		++pa;
-		++pb;
-	}
-	return std::tolower(static_cast<unsigned char>(*pa)) <
-			std::tolower(static_cast<unsigned char>(*pb));
+	return strutil::iless(a.file, b.file);
 }
 
 std::string bin_sibling_name(const std::string &file) {
