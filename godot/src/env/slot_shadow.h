@@ -69,7 +69,8 @@ public:
 	// Models flagged as dynamic shadow casters join this group
 	// (ObjectModel::set_shadow_caster_enabled).
 	static const StringName &caster_group();
-	// The shared terrain drape next-pass. Terrain installs it at build.
+	// The shared drape material every patch instance draws with, on
+	// renderer::kRungSlotDrape and reading the terrain/sky stencil mark.
 	static Ref<ShaderMaterial> get_drape_material();
 	// The capture texture bound to the drape's u_slot_tex_<order> (a
 	// Texture2DRD over the live device's resolve target; empty of a device
@@ -106,6 +107,13 @@ public:
 	void set_local_player_parent_model(ObjectModel *p_model);
 	void set_local_player_first_person(bool p_first_person);
 	void set_local_player_prone(bool p_prone);
+	// The terrain sector pass's gate: retail draws every drape inside that
+	// pass, which the indoors letter skips with its terrain, while the slot
+	// captures run earlier in the frame and keep going
+	// (renderer::kRungSlotDrape carries the witness). OcclusionFrame closes it
+	// with the terrain's; a closed pass hides every drape patch at once.
+	void set_terrain_pass_drawn(bool p_drawn);
+	bool is_terrain_pass_drawn() const { return terrain_pass_drawn_; }
 
 	// One display frame: plan, publish the armed capture requests, publish
 	// the drape terms.
@@ -261,6 +269,7 @@ private:
 	ObjectID local_player_parent_id_;
 	bool local_first_person_ = true;
 	bool local_prone_ = false;
+	bool terrain_pass_drawn_ = true;
 	// Retail's highest selectable SHADOWQUALITY is 3 (Settings_ClampGraphicsOptions
 	// @0x54d546, copied into RenderSlot_DetailLevel @0x5d6159); 4 is the
 	// unreachable 1024-base oversample tier.

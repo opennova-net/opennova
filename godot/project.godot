@@ -167,6 +167,14 @@ opennova_foliage_mask_eye={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+opennova_foliage_mask_inset_active={
+"type": "bool",
+"value": false
+}
+opennova_foliage_mask_inset_eye={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
 opennova_viewmodel_projection={
 "type": "vec4",
 "value": Vector4(1, 0.05, 4000, 1)

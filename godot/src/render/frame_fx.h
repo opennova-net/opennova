@@ -32,6 +32,7 @@ class Camera3D;
 class Compositor;
 class GeometryInstance3D;
 class Material;
+class Skeleton3D;
 class Texture2D;
 class Viewport;
 class WorldEnvironment;
@@ -163,9 +164,12 @@ public:
 	// record, its swapped mesh is re-read once); any other material, or
 	// unregister_q3_source, parks the record inactive without losing its
 	// generations (the ObjectModel level swap re-registers the same node
-	// many times).
+	// many times). A strip whose skin binds every vertex to one bone (the
+	// first-person gun's rigid parts) names that skeleton and bone, so its
+	// copy draws at the bone's part matrix.
 	static void register_q3_object_source(GeometryInstance3D *p_source,
-			const Ref<Material> &p_material);
+			const Ref<Material> &p_material, Skeleton3D *p_rigid_skeleton = nullptr,
+			int p_rigid_bone = -1);
 	static void unregister_q3_source(GeometryInstance3D *p_source);
 	// A celestial source's bloom-pass SelfLumColor (runtime/renderer/q3_frame.h
 	// Q3CelestialMaterialParameters), written by the producer every frame.

@@ -399,6 +399,11 @@ bool TerrainSurfaceInputs::apply_to_material(
 		static_cast<float>(get_detail2_density()));
 	p_material->set_shader_parameter("u_detail_density",
 		static_cast<float>(get_detail_density()));
+	// The ps.1.1 terrain light pass's t1: retail binds the generated detail
+	// coefficient map to texture slot 8 for every batch
+	// (renderer/light_terrain_pass.h, the stage map).
+	p_material->set_shader_parameter("u_terrain_light_normal",
+		detail_coefficient_texture);
 	return true;
 }
 

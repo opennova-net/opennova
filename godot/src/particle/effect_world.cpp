@@ -795,6 +795,7 @@ TypedArray<EffectGroupReport> EffectWorld::get_debug_group_report(bool p_include
 		row->set_transform(godot_pose(group.pose));
 		row->set_source_tick(token_to_godot(group.source_tick));
 		row->set_source_order(token_to_godot(group.source_order));
+		row->set_section_tagged(group.section_gate.tagged);
 		out.push_back(row);
 	}
 	return out;

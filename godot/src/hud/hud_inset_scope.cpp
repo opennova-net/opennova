@@ -31,7 +31,12 @@ void HudInsetScope::_notification(int what) {
 	if (what == NOTIFICATION_VISIBILITY_CHANGED && target_ && !is_visible_in_tree())
 		target_->set_update_mode(SubViewport::UPDATE_DISABLED);
 }
+void HudInsetScope::refresh_view(const Ref<PlayerLocalView> &view) {
+	Viewport *surface = is_inside_tree() ? get_viewport() : nullptr;
+	update_view(view, surface != nullptr ? surface->get_camera_3d() : nullptr, aspect_mode_);
+}
 void HudInsetScope::update_view(const Ref<PlayerLocalView> &view, Camera3D *source, int mode) {
+	aspect_mode_ = mode;
 	active_ = view.is_valid() && view->native_frame().inset_scope_active &&
 			view->native_frame().camera_pose_valid && source;
 	set_visible(active_);
@@ -76,8 +81,10 @@ void HudInsetScope::update_view(const Ref<PlayerLocalView> &view, Camera3D *sour
 	camera_->set_fov(geometry_.fov_h_deg);
 	// The gameplay camera admits the first-person viewmodel layer; this second
 	// scene pass draws terrain, sky and the world only, so the aimed gun must
-	// never render magnified inside the aperture.
-	camera_->set_cull_mask(source->get_cull_mask() & ~visual_layers::SECOND_SCENE_VIEW_EXCLUDED);
+	// never render magnified inside the aperture. It takes the Inset's own
+	// twin instances in place of the main view's split nodes.
+	camera_->set_cull_mask((source->get_cull_mask() & ~visual_layers::SECOND_SCENE_VIEW_EXCLUDED) |
+			visual_layers::INSET_VIEW);
 	camera_->set_environment(source->get_environment());
 	camera_->set_attributes(source->get_attributes());
 	// The same stamp as the gameplay camera: the basis straight from the

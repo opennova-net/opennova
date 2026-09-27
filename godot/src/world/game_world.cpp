@@ -12,6 +12,7 @@
 
 #include "network/net_session_policy.h"
 #include "audio/music_director.h"
+#include "hud/hud_inset_scope.h"
 
 using namespace godot;
 
@@ -74,23 +75,23 @@ void GameWorld::_ready() {
 	celestial_ = Object::cast_to<Celestial>(get_node_or_null(NodePath("Celestial")));
 	sky_dome_ = Object::cast_to<SkyDome>(get_node_or_null(NodePath("SkyDome")));
 	clear_color_ = Object::cast_to<WorldEnvironment>(get_node_or_null(NodePath("ClearColor")));
+	// The foliage dispatcher sits beside the terrain, never under it: the
+	// indoors letter hides the terrain but closes only the dispatcher's
+	// detail passes (the occlusion frame's gates), so the MODEL masks draw on.
+	dispatcher_ = Object::cast_to<FoliageDispatcher>(get_node_or_null(NodePath("FoliageDispatcher")));
 	// The occlusion frame's retained render nodes exist from here on; its
 	// per-mission members arrive with each load.
-	occlusion_->setup(terrain_, sky_dome_, celestial_, water_, env_);
+	occlusion_->setup(terrain_, dispatcher_, sky_dome_, celestial_, water_, env_);
 	if (clear_color_ != nullptr && clear_color_->get_environment().is_valid()) {
 		idle_frame_clear_color_ = clear_color_->get_environment()->get_bg_color();
 	}
-	if (terrain_ != nullptr) {
-		dispatcher_ = Object::cast_to<FoliageDispatcher>(
-				terrain_->get_node_or_null(NodePath("FoliageDispatcher")));
-		if (dispatcher_ != nullptr) {
-			// The applier reads the native detail-cell handoff and the composed
-			// surface textures through this wired owner (never a parent probe).
-			dispatcher_->set_terrain(terrain_);
-			// The detail sway phase reads the weather oscillator's ring slot 0
-			// (retail Env_WaveOscRing[0] in Foliage_SetupVertexShaderConstants).
-			dispatcher_->set_weather(weather_);
-		}
+	if (dispatcher_ != nullptr) {
+		// The applier reads the native detail-cell handoff and the composed
+		// surface textures through this wired owner (never a parent probe).
+		dispatcher_->set_terrain(terrain_);
+		// The detail sway phase reads the weather oscillator's ring slot 0
+		// (retail Env_WaveOscRing[0] in Foliage_SetupVertexShaderConstants).
+		dispatcher_->set_weather(weather_);
 	}
 	// The two shadow nodes live in game_world.tscn (after Celestial) like the
 	// other env presenters, absent from a code-built world; the environment
@@ -404,6 +405,10 @@ LocalPlayerPresenter *GameWorld::local_view_presenter() const {
 	return Object::cast_to<LocalPlayerPresenter>(ObjectDB::get_instance(local_view_presenter_id_));
 }
 
+void GameWorld::set_inset_scope(HudInsetScope *p_scope) {
+	inset_scope_id_ = p_scope != nullptr ? ObjectID(p_scope->get_instance_id()) : ObjectID();
+}
+
 Ref<EffectLightReport> GameWorld::get_effect_light_report() const {
 	return light_director_.is_valid() ? light_director_->get_report() : Ref<EffectLightReport>();
 }
@@ -698,7 +703,10 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_view_presenter", "presenter"),
 			&GameWorld::set_local_view_presenter);
 	ClassDB::bind_method(D_METHOD("local_view_presenter"), &GameWorld::local_view_presenter);
+	ClassDB::bind_method(D_METHOD("set_inset_scope", "scope"), &GameWorld::set_inset_scope);
 	ClassDB::bind_method(D_METHOD("get_effect_light_report"), &GameWorld::get_effect_light_report);
+	ClassDB::bind_method(D_METHOD("get_effect_light_director"),
+			&GameWorld::get_effect_light_director);
 	ClassDB::bind_method(D_METHOD("get_seconds_since_render"), &GameWorld::get_seconds_since_render);
 	ClassDB::bind_method(D_METHOD("tick", "camera_pos", "camera_xform", "delta", "frame_input"),
 			&GameWorld::tick, DEFVAL(Transform3D()), DEFVAL(-1.0), DEFVAL(Variant()));

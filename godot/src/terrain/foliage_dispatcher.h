@@ -33,6 +33,7 @@
 
 namespace godot {
 
+class Camera3D;
 class Image;
 class ObjectData;
 class RenderingServer;
@@ -103,7 +104,7 @@ public:
   //     bundled; runtime and editor callers pass the same flat ResourceRoot
   //     used for terrain/env/credits. The caches (meshes, :fd textures,
   //     model paths, the per-root graphics listing) are keyed by root +
-  //     graphic, survive mission reloads (the dispatcher lives under the
+  //     graphic, survive mission reloads (the dispatcher lives beside the
   //     world's Terrain for the world's whole life) and die with it;
   //     clear_asset_cache() empties them explicitly (the shell's exit) and
   //     every cache-reading verb self-clears them when the global cache
@@ -169,6 +170,13 @@ public:
   // engine compiler carries the witness).
   void set_water_height(float p_height);
   float get_water_height() const { return water_height_; }
+  // The scene pass gates' detail-foliage verdict (the occlusion frame feeds
+  // it; renderer::ScenePassGates::detail_foliage carries the witness).
+  // Closing it hides every detail-tier draw at once, both water-side rungs,
+  // and the compile commands none until it reopens; the MODEL draws and the
+  // mask frame keep running, as retail's BySide waves do indoors.
+  void set_detail_passes_drawn(bool p_drawn);
+  bool is_detail_passes_drawn() const { return detail_passes_drawn_; }
 
   // Runtime fast path. Height, authored foliage-map, and terrain-atlas
   // projection all come directly from this resource.
@@ -212,6 +220,20 @@ public:
   // Standalone frame. Builds a deterministic 16-unit preview cell set whose
   // sampled terrain centers are at most 42 units in 3D from the camera.
   void render_preview(const Transform3D &p_camera_xform, int64_t p_time_ms);
+
+  // The weapon Inset pass's own foliage frame, compiled after the main frame
+  // and after the Inset's own collect: its detail cells from its own terrain
+  // frame (Terrain::render_inset_frame, which runs first), its MODEL
+  // anchors from its own collector verdicts, on the SHARED placement caches
+  // (both passes stamp retail's one detail cache and model pool), drawn on
+  // INSET_VIEW and published as the Inset view's mask frame. The engine
+  // compiler carries the witness order. Without a wired Terrain the Inset
+  // compiles its anchors alone, as render_frame does.
+  void render_inset_frame(Camera3D *p_camera, const PackedVector3Array &p_anchors,
+                          int64_t p_time_ms);
+  // The Inset stopped rendering: hide and unbind its draws and mask frame.
+  void release_inset_frame();
+  bool is_inset_frame_live() const { return inset_live_; }
 
   void reset();
   int get_total_instances() const;
@@ -334,6 +356,7 @@ private:
   Weather *_weather() const;
   int64_t wind_clock_override_ms_ = -1;
   bool thermal_view_ = false;
+  bool detail_passes_drawn_ = true;
   Ref<TerrainData> terrain_data_;
   Ref<TerrainTileInfo> tile_info_;
   Ref<TerrainData> colormap_source_;
@@ -359,10 +382,6 @@ private:
   // generation moves.
   std::array<Ref<ArrayMesh>, opennova::FOLIAGE_MAX_DEFS> model_meshes_{};
   uint64_t model_mesh_generation_ = 0;
-  std::vector<RID> detail_draw_pool_;
-  std::vector<RID> model_draw_pool_;
-  // One MultiMesh per model pool instance (its base), sized for a full tile.
-  std::vector<RID> model_multimesh_pool_;
   RID draw_scenario_;
   FoliageMaskPass mask_pass_;
   float water_height_ = 0.0f;
@@ -397,8 +416,22 @@ private:
     float tile_cache_layer = 0.0f;
     Vector4 tile_cache_projection;
   };
-  std::vector<DrawInstanceStamp> detail_draw_stamps_;
-  std::vector<DrawInstanceStamp> model_draw_stamps_;
+  // One view's retained draw instances: the main view's ride
+  // TERRAIN_FOLIAGE, the weapon Inset pass's INSET_VIEW (the one bit only
+  // the Inset camera admits).
+  struct DrawSet {
+    std::vector<RID> detail_pool;
+    std::vector<RID> model_pool;
+    // One MultiMesh per model pool instance (its base), sized for a full tile.
+    std::vector<RID> model_multimesh_pool;
+    std::vector<DrawInstanceStamp> detail_stamps;
+    std::vector<DrawInstanceStamp> model_stamps;
+    uint32_t layer_mask = 0;
+  };
+  DrawSet main_set_;
+  DrawSet inset_set_;
+  // An Inset frame compiled since the Inset opened (release_inset_frame).
+  bool inset_live_ = false;
   // The material inputs last written (texture RIDs): _update_materials
   // writes the ~100 material parameters only when one of them changes.
   struct MaterialInputs {
@@ -420,16 +453,15 @@ private:
   void _ensure_visuals();
   void _update_materials();
   void _refresh_model_meshes();
-  // Grow one pool to cover p_index. The apply loop binds the scenario once
-  // (_bind_current_scenario) and passes the server down: nothing here walks
-  // the tree per draw.
-  RID _ensure_draw_instance(RenderingServer *p_server,
-                            std::vector<RID> &r_pool,
-                            std::vector<DrawInstanceStamp> &r_stamps,
+  // Grow one of the set's pools to cover p_index. The apply loop binds the
+  // scenario once (_bind_current_scenario) and passes the server down:
+  // nothing here walks the tree per draw.
+  RID _ensure_draw_instance(RenderingServer *p_server, DrawSet &r_set,
                             size_t p_index, bool p_model_tier);
   bool _bind_current_scenario();
   void _set_draw_pool_visibility(bool p_visible);
   void _release_draw_pools();
+  void _release_draw_set(RenderingServer *p_server, DrawSet &r_set);
   // Hide (and unbind) every pool instance from p_first on; earlier instances keep
   // this frame's bindings.
   void _hide_pool_tail(std::vector<RID> &r_pool,
@@ -444,7 +476,11 @@ private:
   std::vector<opennova::foliage::DetailCell>
   _preview_cells(const Vector3 &p_camera_position) const;
   void _compile_and_apply(const opennova::renderer::FoliageViewInput &p_view);
-  void _apply_draw_list(const opennova::renderer::FoliageDrawList &p_draw_list);
+  opennova::renderer::FoliageExpansionSamplers _expansion_samplers();
+  // `p_mirror_debug`: the main view's list feeds the frame counters; the
+  // Inset's adds only its device writes.
+  void _apply_draw_list(const opennova::renderer::FoliageDrawList &p_draw_list,
+                        DrawSet &r_set, bool p_mirror_debug);
   Ref<ArrayMesh> _upload_mesh_build(const opennova::renderer::FoliageDrawList &p_draw_list,
                                     const opennova::renderer::FoliageMeshBuild &p_build) const;
 

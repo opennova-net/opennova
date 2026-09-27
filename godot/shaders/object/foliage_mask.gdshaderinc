@@ -7,7 +7,10 @@
 // opaque pass: R = the nearest far-wave mask depth, G = the nearest
 // camera-wave one. u_foliage_mask_side is the person's wave (0 = not a
 // person draw, 1 = far, 2 = camera side); the eye match keeps the mirror and
-// every other camera unmasked. Every pass of a person strip reads it: the
+// every other camera unmasked. The weapon Inset pass runs its own scene core
+// with its own masks, rasterized into the same target before its opaque pass,
+// so its persons match the Inset eye instead (each pass's active flag gates
+// its own eye). Every pass of a person strip reads it: the
 // opaque and blended NORMAL outputs and the post-multiply (P3) layer, which
 // retail draws inside the same wave flush after the masks. Retail
 // Terrain_RenderWorldScene @ 0x5c953e..0x5c9567 (far wave:
@@ -17,6 +20,8 @@
 global uniform sampler2D opennova_foliage_mask_depth;
 global uniform bool opennova_foliage_mask_active;
 global uniform vec3 opennova_foliage_mask_eye;
+global uniform bool opennova_foliage_mask_inset_active;
+global uniform vec3 opennova_foliage_mask_inset_eye;
 instance uniform float u_foliage_mask_side = 0.0;
 
 // 0: no mask in front; 1: a mask of the fragment's own wave is in front, so
@@ -24,8 +29,11 @@ instance uniform float u_foliage_mask_side = 0.0;
 // of a camera-wave fragment, which hides its pre-pass too. Reverse-Z: a
 // nearer mask stores the larger depth; the D3D LESSEQUAL test passes ties.
 int obj_foliage_mask_outcome(vec4 frag_coord, vec3 camera_position_world) {
-	if (u_foliage_mask_side < 0.5 || !opennova_foliage_mask_active ||
-			distance(camera_position_world, opennova_foliage_mask_eye) >= 0.01) {
+	bool main_view = opennova_foliage_mask_active &&
+			distance(camera_position_world, opennova_foliage_mask_eye) < 0.01;
+	bool inset_view = opennova_foliage_mask_inset_active &&
+			distance(camera_position_world, opennova_foliage_mask_inset_eye) < 0.01;
+	if (u_foliage_mask_side < 0.5 || !(main_view || inset_view)) {
 		return 0;
 	}
 	ivec2 size = textureSize(opennova_foliage_mask_depth, 0);

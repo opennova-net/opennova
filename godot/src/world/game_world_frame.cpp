@@ -9,6 +9,7 @@
 #include <runtime/renderer/render_order.h>
 #include <runtime/renderer/device_fog.h>
 #include <runtime/renderer/scene_overlay.h>
+#include <runtime/renderer/scene_pass_gates.h>
 #include <runtime/environment/water_mirror.h>
 
 #include <godot_cpp/classes/engine.hpp>
@@ -23,6 +24,7 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "hud/hud_inset_scope.h"
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
 #include "particle/effect_distortion_drawer.h"
@@ -62,6 +64,16 @@ struct LegScope {
 };
 
 constexpr int kNoSlot = -1;
+
+// The weapon Inset pass's scene fog, over its own eye's side of the water
+// (env::EnvironmentState::build_inset_scene_fog carries the witness).
+opennova::env::SceneFogValues inset_scene_fog(const MissionEnvironment &p_env, float p_eye_y,
+		float p_water_height, bool p_water_active) {
+	return p_env.state().build_inset_scene_fog(
+			opennova::env::EnvironmentState::classify_render_eye(
+					p_eye_y, p_water_height, p_water_active)
+					.underwater_view);
+}
 
 } // namespace
 
@@ -650,8 +662,18 @@ void GameWorld::render_precipitation_frame() {
 		if (env_ != nullptr && env_->is_raining()) {
 			Viewport *viewport = get_viewport();
 			Ref<Simulation> sim = get_sim();
+			// The drawer's second argument, the local view's camera mode.
+			const int camera_mode = local_frame_fx_view().camera_mode;
 			precipitation_->render_frame(sim.ptr(),
-					viewport != nullptr ? viewport->get_camera_3d() : nullptr);
+					viewport != nullptr ? viewport->get_camera_3d() : nullptr, camera_mode);
+			// The weapon Inset pass calls the drawer again at its own camera,
+			// after the main scene's call (Precipitation::render_inset_frame).
+			Camera3D *inset = inset_pass_camera();
+			if (inset != nullptr) {
+				precipitation_->render_inset_frame(sim.ptr(), inset, camera_mode);
+			} else {
+				precipitation_->release_inset_frame();
+			}
 		} else {
 			// Below the rain gate the drawer never runs (retail returns at
 			// 0x5dee48 before touching the device).
@@ -736,7 +758,9 @@ void GameWorld::render_scene_overlay_frame() {
 // every beam (the defaults with no local player or for a spectator), the
 // frame's render camera builds the ribbons and the frame's scene fog folds
 // into them; the entity presenter's third-person guns carry the action
-// points (FirePresenter::append_nvg_laser_beams).
+// points (FirePresenter::append_nvg_laser_beams). The weapon Inset pass walks
+// again: the persons its own collect drew, ribbons built at its camera under
+// its own pass fog (renderer/scene_overlay.h kInsetOverlayOrder).
 void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) {
 	MissionRoot *runtime = get_runtime();
 	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
@@ -750,30 +774,41 @@ void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) 
 	if (!local.nvg_active) {
 		return;
 	}
-	NvgLaserView view;
-	view.eye = camera->get_camera_transform();
-	view.projection_x_scale = static_cast<float>(camera->get_camera_projection()[0][0]);
-	view.tick_ms = static_cast<std::uint32_t>(current_frame_clock_ms());
-	view.nvg_active = local.nvg_active;
-	view.camera_mode = local.camera_mode;
-	const opennova::env::SceneFogValues fog =
-			env_->state().build_scene_fog(env_->is_underwater_view());
 	const Ref<EnvLightValues> light = frame_light_values();
-	const Vector3 forward = -view.eye.basis.get_column(2).normalized();
-	view.fog.eye[0] = static_cast<float>(view.eye.origin.x);
-	view.fog.eye[1] = static_cast<float>(view.eye.origin.y);
-	view.fog.eye[2] = static_cast<float>(view.eye.origin.z);
-	view.fog.forward[0] = static_cast<float>(forward.x);
-	view.fog.forward[1] = static_cast<float>(forward.y);
-	view.fog.forward[2] = static_cast<float>(forward.z);
-	view.fog.start = fog.start;
-	view.fog.end = fog.end;
-	view.fog.type = fog.type;
-	view.fog.enabled = light.is_valid() && light->fog_enabled;
-	view.fog.color[0] = fog.color.r;
-	view.fog.color[1] = fog.color.g;
-	view.fog.color[2] = fog.color.b;
-	entities->append_nvg_laser_beams(sim.ptr(), view, r_submission);
+	const auto walk = [&](Camera3D *p_camera, const opennova::env::SceneFogValues &p_fog,
+							  bool p_inset) {
+		NvgLaserView view;
+		view.eye = p_camera->get_camera_transform();
+		view.projection_x_scale = static_cast<float>(p_camera->get_camera_projection()[0][0]);
+		view.tick_ms = static_cast<std::uint32_t>(current_frame_clock_ms());
+		view.nvg_active = local.nvg_active;
+		view.camera_mode = local.camera_mode;
+		view.inset_view = p_inset;
+		const Vector3 forward = -view.eye.basis.get_column(2).normalized();
+		view.fog.eye[0] = static_cast<float>(view.eye.origin.x);
+		view.fog.eye[1] = static_cast<float>(view.eye.origin.y);
+		view.fog.eye[2] = static_cast<float>(view.eye.origin.z);
+		view.fog.forward[0] = static_cast<float>(forward.x);
+		view.fog.forward[1] = static_cast<float>(forward.y);
+		view.fog.forward[2] = static_cast<float>(forward.z);
+		view.fog.start = p_fog.start;
+		view.fog.end = p_fog.end;
+		view.fog.type = p_fog.type;
+		view.fog.enabled = light.is_valid() && light->fog_enabled;
+		view.fog.color[0] = p_fog.color.r;
+		view.fog.color[1] = p_fog.color.g;
+		view.fog.color[2] = p_fog.color.b;
+		entities->append_nvg_laser_beams(sim.ptr(), view, r_submission);
+	};
+	walk(camera, env_->state().build_scene_fog(env_->is_underwater_view()), false);
+	if (Camera3D *inset = inset_pass_camera()) {
+		const float eye_y = static_cast<float>(inset->get_camera_transform().origin.y);
+		const bool water_active = is_water_render_active() && water_ != nullptr;
+		walk(inset,
+				inset_scene_fog(*env_, eye_y, water_active ? water_->get_water_height() : 0.0f,
+						water_active),
+				true);
+	}
 }
 
 // The water glint and the sun glare: Celestial places both models and
@@ -834,6 +869,27 @@ void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) 
 		scene_overlay_bodies_.append(leg.slot, leg.body.model, leg.light_scale, visibility,
 				r_submission);
 	}
+	// The weapon Inset pass's glint: the leg's second call at the Inset camera
+	// (Celestial::get_inset_glint), the body drawn from that eye at the
+	// Inset's submit value under the Inset's pass fog, behind the same water
+	// test; that pass draws no glare (renderer/scene_overlay.h
+	// kInsetOverlayOrder).
+	const Celestial::InsetGlint &inset = celestial_->get_inset_glint();
+	if (inset.model != nullptr && inset.drawn && water_height_set) {
+		const opennova::env::SceneFogValues inset_fog = inset_scene_fog(*env_,
+				static_cast<float>(inset.eye.y), water_->get_water_height(),
+				is_water_render_active());
+		const float view_depth = static_cast<float>(
+				(inset.model->get_global_position() + inset.offset - inset.eye).dot(inset.forward));
+		SceneOverlayModelSurfaces::AppendOptions options;
+		options.offset = inset.offset;
+		options.self_lum = &inset.self_lum;
+		scene_overlay_bodies_.append(opennova::renderer::SceneOverlaySlot::InsetWaterGlint,
+				inset.model, frame_scale,
+				opennova::renderer::device_fog_visibility(view_depth, inset_fog.start,
+						inset_fog.end, inset_fog.type, light->fog_enabled),
+				r_submission, options);
+	}
 }
 
 // The water mirror's closing draws (runtime/renderer/scene_overlay.h
@@ -892,7 +948,27 @@ void GameWorld::append_water_mirror_overlays(SceneOverlaySubmission &r_submissio
 
 void GameWorld::apply_blink_frame() {
 	if (world_ready_) {
-		occlusion_->apply_blink_gates(mission_forces_indoors_);
+		const opennova::renderer::ScenePassGateEdges reopened =
+				occlusion_->apply_blink_gates(mission_forces_indoors_);
+		// The water mirror's clear follows the same gates' mirror flag (the
+		// indoors letter, renderer::ScenePassGates::mirror_sky).
+		if (water_ != nullptr) {
+			water_->set_mirror_scene_outdoors(!occlusion_->is_blink_indoors());
+		}
+		// The letters gate the frame they are read in (renderer::
+		// scene_pass_gate_edges), but this frame's terrain and water legs ran
+		// before this tick's letters reached the gates: a pass the new
+		// letters reopen re-runs here, so it draws this frame and not the
+		// next. The water leg needs no re-run for a terrain reopen: the hidden
+		// terrain leg already tracked this frame's visible bounds. The camera
+		// is already placed (local_view), and the foliage leg after this one
+		// takes the re-run terrain's detail cells.
+		if (reopened.terrain_opened) {
+			render_terrain_frame();
+		}
+		if (reopened.water_opened) {
+			render_water_frame();
+		}
 	}
 }
 
@@ -908,6 +984,27 @@ void GameWorld::present_local_view_frame() {
 	if (presenter != nullptr) {
 		presenter->after_world_tick();
 	}
+	// The weapon Inset pass's camera, D-RORD-8's order for the second view:
+	// the scope takes the pose and activation the view just composed and the
+	// effect world holds its camera while the pass renders, before any leg
+	// reads either (world/local_player_view.h local_player_view_frame carries
+	// the witness: retail composes the Inset camera inside the pass that
+	// draws it). The HUD's own later update is then this same view again.
+	HudInsetScope *scope = Object::cast_to<HudInsetScope>(ObjectDB::get_instance(inset_scope_id_));
+	if (scope != nullptr && scope->is_inside_tree()) {
+		scope->refresh_view(presenter != nullptr ? presenter->presented_view() : local_player_view());
+		if (EffectWorld *effects = get_effect_world()) {
+			effects->set_second_scene_camera(scope->get_active_render_camera());
+		}
+	}
+}
+
+Camera3D *GameWorld::inset_pass_camera() const {
+	EffectWorld *effects = get_effect_world();
+	Camera3D *inset = effects != nullptr ? effects->get_second_scene_camera() : nullptr;
+	return inset != nullptr && inset->is_inside_tree() && inset->get_viewport() != nullptr
+			? inset
+			: nullptr;
 }
 
 // Compile the typed focused-Q3 snapshot after the camera and every live
@@ -937,6 +1034,9 @@ void GameWorld::render_environment_nodes_frame() {
 		sky_dome_->advance_frame(frame_delta_);
 	}
 	if (celestial_ != nullptr) {
+		// The weapon Inset pass runs the glint's leg again at its own camera
+		// (Celestial::set_inset_view).
+		celestial_->set_inset_view(inset_pass_camera());
 		celestial_->advance_frame(frame_delta_);
 	}
 }
@@ -992,6 +1092,11 @@ void GameWorld::apply_scene_environment_frame() {
 	// frame (the blink letters latch per tick); OcclusionFrame owns the gates.
 	if (occlusion_.is_valid()) {
 		occlusion_->apply_scene_pass_gates();
+		// The water mirror's clear rides the same gates (their mirror flag:
+		// the indoors letter, renderer::ScenePassGates::mirror_sky).
+		if (water_ != nullptr) {
+			water_->set_mirror_scene_outdoors(!occlusion_->is_blink_indoors());
+		}
 	}
 	// Publish the same adjusted render eye to the per-strip Q1/Q2 classifier.
 	// This frame leg runs after camera placement and before ObjectModel's
@@ -1147,24 +1252,48 @@ void GameWorld::render_material_frame() {
 	// at a defined ladder slot (after occlusion resolves visibility, before
 	// the particle composite) [orig: Terrain_RenderSectorModels @ 0x5c5d30
 	// computes model runtime constants during the render sector walk].
-	// Every view drawing the world this frame: the frame's image (the
-	// stretched target's camera while it is live) over the surface width, the
-	// retail viewport width the focal and frame scale derive from, and the
-	// weapon Inset pass over its own target while it renders.
+	// Every view drawing the world this frame, each its own scene pass: view
+	// 0 the frame's image (the stretched target's camera while it is live)
+	// over the surface width, the retail viewport width the focal and frame
+	// scale derive from; view 1 the weapon Inset pass over its own target
+	// while it renders. The Inset pass collects its own verdicts first (after
+	// the main collect of the occlusion leg), then both views select levels.
 	ObjectLodFrame frames[2];
-	int frame_count = 0;
 	if (Camera3D *image = image_camera()) {
-		frames[frame_count] = ObjectLodFrame::from_camera(image, surface_width());
-		frame_count += frames[frame_count].valid ? 1 : 0;
+		frames[0] = ObjectLodFrame::from_camera(image, surface_width());
 	}
-	EffectWorld *effects = get_effect_world();
-	Camera3D *inset = effects != nullptr ? effects->get_second_scene_camera() : nullptr;
-	if (inset != nullptr && inset->is_inside_tree() && inset->get_viewport() != nullptr) {
-		frames[frame_count] = ObjectLodFrame::from_camera(
-				inset, inset->get_viewport()->get_visible_rect().size.x);
-		frame_count += frames[frame_count].valid ? 1 : 0;
+	// The Inset camera carries this frame's pose: the local-view leg handed it
+	// over (present_local_view_frame).
+	Camera3D *inset = inset_pass_camera();
+	int frame_count = 1;
+	if (inset != nullptr) {
+		const float inset_width = inset->get_viewport()->get_visible_rect().size.x;
+		frames[1] = ObjectLodFrame::from_camera(inset, inset_width);
+		frame_count = frames[1].valid ? 2 : 1;
+		if (frame_count == 2 && world_ready_ && !frame_skip_occlusion_) {
+			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors_);
+			// The Inset pass's own terrain frame, then its foliage frame, after
+			// its own collect and after the main view's
+			// (Terrain::render_inset_frame, FoliageDispatcher::render_inset_frame).
+			if (terrain_ != nullptr) {
+				terrain_->render_inset_frame(inset);
+			}
+			if (dispatcher_ != nullptr) {
+				dispatcher_->render_inset_frame(inset,
+						occlusion_->get_inset_foliage_mask_anchors(), get_frame_clock_ms());
+			}
+		}
 	}
-	if (frame_count > 0) {
+	if (frame_count < 2) {
+		occlusion_->release_inset();
+		if (terrain_ != nullptr) {
+			terrain_->release_inset_frame();
+		}
+		if (dispatcher_ != nullptr) {
+			dispatcher_->release_inset_frame();
+		}
+	}
+	if (frames[0].valid || frame_count == 2) {
 		ObjectModel::update_authored_lod_views(frames, frame_count);
 		// The retained static instances select their RLOD per entity from the
 		// same views (the placer rewrites only the slots that crossed).
@@ -1172,11 +1301,24 @@ void GameWorld::render_material_frame() {
 			placer_->update_static_lod_views(frames, frame_count);
 		}
 	}
+	// The Inset pass's own light legs over the twins and verdicts just
+	// settled: its draws' selection and its corona walk
+	// (EffectLightDirector::render_inset_frame).
+	if (light_director_.is_valid()) {
+		if (frame_count == 2 && world_ready_) {
+			light_director_->render_inset_frame(inset, get_frame_clock_ms());
+		} else {
+			light_director_->release_inset_frame();
+		}
+	}
 	if (!frame_stats_on_) {
 		ObjectModel::advance_awake_frame(frame_delta_);
+		// The Inset twins follow the poses the advance just wrote.
+		ObjectModel::sync_view_twins();
 		return;
 	}
 	const PackedInt64Array profile = ObjectModel::profile_awake_frame(frame_delta_);
+	ObjectModel::sync_view_twins();
 	if (profile.size() < ObjectModel::AWAKE_PROFILE_SLOT_COUNT) {
 		return;
 	}

@@ -202,7 +202,9 @@ public:
 
 	// The witnessed 21x21 sky dome mesh in Mesh.ARRAY_* layout (VERTEX /
 	// NORMAL / TEX_UV / TEX_UV2 / INDEX populated), built at p_sky_height
-	// (engine: formats/env/env_celestial.h). The reimpl builds ONCE at
+	// (engine: formats/env/env_celestial.h) in the render basis and placed
+	// in the Godot world through the util/axes.h x/z swap (the UVs stay the
+	// builder's render-basis ones). The reimpl builds ONCE at
 	// dome_reference_height() and folds the Y-only height scale into the
 	// vertex shader (env #20's ratified structure; retail re-bakes on
 	// smoothed-height change via SkyDome_SetHeightAndRebuild @ 0x579070).

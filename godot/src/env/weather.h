@@ -134,12 +134,13 @@ public:
 	Vector3 get_smooth_cloud_edge() const;
 
 	// The witnessed cloud-scroll UV translations for a camera at
-	// (cam_x, cam_z) world units — U carries the accumulator NEGATIVELY, V
-	// positively (weather_runtime.h carries the cites). The sky dome
-	// consumes these through this seam, like the terrain consumes
-	// get_smooth_sun.
-	Vector2 get_cloud_uv_offset1(float p_cam_x, float p_cam_z) const;
-	Vector2 get_cloud_uv_offset2(float p_cam_x, float p_cam_z) const;
+	// (render_x, render_z) — the RENDER basis the dome's UVs use, so
+	// render_x is the Godot z and render_z the Godot x (util/axes.h). U
+	// carries the accumulator NEGATIVELY, V positively (weather_runtime.h
+	// carries the cites). The sky dome consumes these through this seam,
+	// like the terrain consumes get_smooth_sun.
+	Vector2 get_cloud_uv_offset1(float p_render_x, float p_render_z) const;
+	Vector2 get_cloud_uv_offset2(float p_render_x, float p_render_z) const;
 	float get_cloud_uv_rate_per_second() const;
 
 	// C++-only seams for sibling native appliers.

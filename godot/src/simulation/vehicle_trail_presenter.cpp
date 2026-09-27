@@ -142,7 +142,7 @@ void VehicleTrailPresenter::sync_visuals(
 		const Vector3 pos(row.pos.x, row.pos.z, -row.pos.y);
 		const Vector3 dir(row.dir.x, row.dir.z, -row.dir.y);
 		present_group(key, opennova::to_gd(row.effect), EffectWorld::forward_pose(pos, dir),
-				float(row.magnitude_q16) / 65536.0f);
+				float(row.magnitude_q16) / 65536.0f, row.section_tagged);
 	}
 	Vector<String> gone;
 	for (const auto &kv : groups_)
@@ -153,7 +153,7 @@ void VehicleTrailPresenter::sync_visuals(
 }
 
 void VehicleTrailPresenter::present_group(const String &p_key, const String &p_effect,
-		const Transform3D &p_transform, float p_magnitude) {
+		const Transform3D &p_transform, float p_magnitude, bool p_section_tagged) {
 	bool has_group = groups_.has(p_key);
 	if (has_group && groups_[p_key].effect != p_effect) {
 		retire_group(p_key);
@@ -176,7 +176,8 @@ void VehicleTrailPresenter::present_group(const String &p_key, const String &p_e
 	anchors_->register_effect_anchor(
 			p_key, callable_mp(this, &VehicleTrailPresenter::resolve_trail_anchor).bind(p_key));
 	const Ref<EffectSpawnReceipt> receipt = effect_world->spawn_effect_owned_request(
-			p_key, p_effect, p_transform.origin, p_transform.basis.get_column(2));
+			p_key, p_effect, p_transform.origin, p_transform.basis.get_column(2),
+			p_section_tagged);
 	if (receipt.is_null() || !receipt->get_spawned()) {
 		anchors_->unregister_effect_anchor(p_key);
 		transforms_.erase(p_key);

@@ -66,8 +66,9 @@ private:
 
 	Simulation *sim() const;
 	EffectWorld *fx() const;
+	// `p_section_tagged` is the row's descriptor tag (VehicleTrailVisualRow).
 	void present_group(const String &p_key, const String &p_effect, const Transform3D &p_transform,
-			float p_magnitude);
+			float p_magnitude, bool p_section_tagged);
 	void retire_group(const String &p_key);
 
 	ObjectID sim_id_;

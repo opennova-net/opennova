@@ -11,6 +11,7 @@
 #include <runtime/world/occlusion_feed.h>
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of (the host's own rows)
 #include <runtime/renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
+#include <runtime/renderer/object_lod.h> // the render-model sphere a bare row's model leg scales
 #include <runtime/world/occlusion_camera.h> // the camera hand-over
 #include <runtime/world/iris_march.h> // the iris exposure march
 #include <runtime/world/presentation_frame.h>
@@ -19,20 +20,16 @@
 
 using namespace sim_internal;
 
-void Simulation::occlusion_init_mission() {
-	// The kernel's mission-start portal init (the witness lives there).
-	if (!kernel_) return;
-	kernel_->occlusion_init_mission();
-}
+namespace {
 
-void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
-                                         double p_aspect, double p_viewport_width,
-                                         double p_near, double p_fog_dist_units,
-                                         double p_water_z_units, bool p_force_indoors) {
-	if (!kernel_) return;
-	// The camera hand-over: the scene's view as presentation-frame vectors;
-	// the mission/render remaps, the frustum planes and the Q22 rows are the
-	// engine's (runtime/world/occlusion_camera.h).
+// The camera hand-over: the scene's view as presentation-frame vectors; the
+// mission/render remaps, the frustum planes and the Q22 rows are the
+// engine's (runtime/world/occlusion_camera.h). No near distance: the
+// occlusion planes pass through the eye.
+opennova::world::OcclusionFrameCamera occlusion_frame_camera(const Transform3D &p_camera,
+		double p_fov_y_deg, double p_aspect, double p_viewport_width,
+		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
+		uint32_t p_local_blink_flags) {
 	opennova::world::OcclusionViewSpec view;
 	const Vector3 eye = p_camera.origin;
 	const Vector3 fwd_g = -p_camera.basis.get_column(2).normalized();
@@ -49,14 +46,292 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	store(up_g, view.up);
 	view.fov_y_deg = static_cast<float>(p_fov_y_deg);
 	view.aspect = static_cast<float>(p_aspect);
-	view.near_units = static_cast<float>(p_near);
 	view.viewport_width = static_cast<float>(p_viewport_width);
 	view.fog_dist_units = static_cast<float>(p_fog_dist_units);
 	view.water_z_units = static_cast<float>(p_water_z_units);
-	view.local_blink_flags = kernel_->collision.local_player_blink_flags;
+	view.local_blink_flags = p_local_blink_flags;
 	view.force_indoors = p_force_indoors;
 	opennova::world::OcclusionFrameCamera cam;
 	opennova::world::occlusion_camera_from_view(view, cam);
+	return cam;
+}
+
+// The building verdict walk, emitting only triples whose packed
+// visible<<32|mask changed since `r_last` (the view's applied baseline),
+// read from the view the OcclusionWorld has selected.
+PackedInt64Array building_visibility_changes_since(opennova::mission::MissionKernel &kernel,
+		std::unordered_map<uint32_t, int64_t> &r_last) {
+	PackedInt64Array out;
+	// Triples [bms_id, visible<<32 | raw mask, forced mask] for every building
+	// with an OCCLUSION instance or a collision model (every retail building
+	// batch member): the raw g_BuildingSectionVisMask word the other readers
+	// share, and the def's forced sections the part draw ORs over it
+	// (ObjectModel::section_part_visible). Only the Building-type defs: the
+	// pool-2 decorations and foliage take the entity verdicts below
+	// (world::building_def_row carries the split).
+	kernel.world.registry.for_each([&](const opennova::world::Entity &e) {
+		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
+		if (!opennova::world::building_def_row(e)) return;
+		if (!kernel.occlusion.has_instance(e.handle) &&
+				kernel.collision.model_for(kernel.world, e.handle) == nullptr)
+			return;
+		const bool visible = kernel.occlusion.building_visible(e.handle);
+		const int64_t packed = opennova::world::pack_building_visibility(
+				kernel.occlusion.section_mask(e.handle), visible);
+		const uint32_t key = e.handle.packed;
+		auto it = r_last.find(key);
+		if (it != r_last.end() && it->second == packed) return;
+		r_last[key] = packed;
+		out.push_back(e.bms_id);
+		out.push_back(packed);
+		out.push_back(static_cast<int64_t>(kernel.occlusion.forced_section_mask(e.handle)));
+	});
+	return out;
+}
+
+// One view's collector walk over the view the kernel's OcclusionWorld has
+// selected (its frame words built for `cam`): the placed non-building
+// entities, the decoded wire rows and the local player, each through the
+// entity render gates; `r_culled_bms` / `r_culled_wire` take the dropped
+// identities and `r_anchors` the MODEL foliage tier's anchors. The latches it
+// ticks are the entities' own, whichever view collects.
+void collect_view_verdicts(opennova::mission::MissionKernel &kernel,
+		opennova::inmatch::ClientRuntime *runtime, bool joiner,
+		std::unordered_map<uint16_t, uint8_t> &r_wire_latch,
+		std::vector<opennova::world::EntityHandle> &r_handles,
+		const opennova::world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
+		std::vector<int32_t> &r_culled_wire, PackedVector3Array &r_anchors) {
+	r_culled_bms.clear();
+	// The BySide walks update the MODEL foliage tiles around the collected
+	// person entities whose MoveOrder carries a stance bit (0x100 prone /
+	// 0x200 crouch) and whose groundEntity is empty; the visible-entity walk
+	// below is that collection, so the anchors ride its verdicts (no second
+	// gate call: the latch ticks once per collected entity).
+	// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
+	// (flags & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7; stance writers
+	// Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd,
+	// NapiNPServerMsg_HandleStanceChange @ 0x501c60]
+	r_anchors.clear();
+	const auto anchor_entity = [&](const opennova::world::Entity &e) {
+		if (e.kind != opennova::world::EntityKind::Organic ||
+				(e.net_stance_bits & 0x3u) == 0 || e.ground_target.valid())
+			return;
+		r_anchors.push_back(
+				Vector3(e.position.x, e.position.z, -e.position.y));
+	};
+	std::vector<opennova::world::EntityHandle> &handles =
+			r_handles;
+	handles.clear();
+	kernel.world.registry.for_each([&](const opennova::world::Entity &e) {
+		// Every row but the Building-type defs (the batch verdicts above):
+		// the pool-2 decorations and foliage are entity-collected too.
+		if ((e.kind == opennova::world::EntityKind::Building &&
+		     opennova::world::building_def_row(e)) ||
+		    e.kind == opennova::world::EntityKind::Marker)
+			return;
+		if (e.bms_id == 0) return; // wire avatars ride their own present path
+		handles.push_back(e.handle);
+	});
+	for (const opennova::world::EntityHandle h : handles) {
+		opennova::world::Entity *e = kernel.world.registry.get(h);
+		if (e == nullptr) continue;
+		if (!kernel.occlusion.entity_render_visible(kernel.world, kernel.collision, *e, cam))
+			r_culled_bms.push_back(e->bms_id);
+		else
+			anchor_entity(*e);
+	}
+	// The decoded rows the wire pass draws — remote organics and runtime
+	// spawns with no placed identity — pass the SAME collector gate: retail's
+	// client walks the pool entities it built from the wire exactly as the
+	// host walks its own (the witness lives on OcclusionWorld::
+	// sphere_render_visible). A row with a registry twin (the host's own
+	// runtime spawns) takes the twin's live verdict, exactly like the placed
+	// rows above; a bare row without a usable collision model takes its
+	// type's render-model sphere, and one without a render model is never
+	// collected.
+	r_culled_wire.clear();
+	if (runtime != nullptr) {
+		// A latch belongs to one row lifetime: drop the counters of handles
+		// that left the state so a reused handle starts fresh (retail memsets
+		// the destroyed entity, latch included).
+		std::unordered_set<uint16_t> live_handles;
+		for (const opennova::replication::ClientEntityState &es :
+				runtime->state().entities)
+			live_handles.insert(es.handle);
+		for (auto it = r_wire_latch.begin();
+				it != r_wire_latch.end();) {
+			if (live_handles.count(it->first) == 0)
+				it = r_wire_latch.erase(it);
+			else
+				++it;
+		}
+		const uint16_t self_handle = runtime->has_self_handle()
+				? runtime->self_handle()
+				: opennova::world::EntityHandle::kInvalid;
+		for (const opennova::replication::ClientEntityState &es :
+				runtime->state().entities) {
+			const uint16_t handle = es.handle;
+			if (handle == opennova::world::EntityHandle::kInvalid ||
+					es.type_id == 0 || handle == self_handle)
+				continue;
+			// A hidden row is never collected; the present pass hides it
+			// itself, and its latch does not tick (the gate's bit0 test in
+			// OcclusionWorld::entity_render_visible).
+			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
+			const opennova::world::EntityHandle h{handle};
+			const opennova::world::Entity *twin = nullptr;
+			if (!joiner || h.pool() != 0) {
+				const opennova::world::Entity *candidate =
+						kernel.world.registry.get(h);
+				if (candidate != nullptr &&
+						static_cast<uint16_t>(candidate->item_id) == es.type_id)
+					twin = candidate;
+			}
+			if (twin != nullptr && (twin->bms_id != 0 ||
+					twin->spawn_origin != opennova::world::kSpawnOriginNone))
+				continue; // a placed row: the registry walk above gated it
+			if (h == kernel.world.cached.local_player) continue;
+			if (twin != nullptr) {
+				// The host's own runtime spawn (an addeweap gun child, a
+				// runtime-placed item): the listen host walks its OWN pool entity
+				// with the same live pose the placed walk above uses. Its decoded
+				// row is a spawn image — the loopback 0x0A is header-only, so
+				// es.x/y/z never follow a moving carrier, and a sphere pinned
+				// there culled the gun the moment the driven buggy left it.
+				opennova::world::Entity *live = kernel.world.registry.get(h);
+				if (live == nullptr) continue;
+				if (!kernel.occlusion.entity_render_visible(
+							kernel.world, kernel.collision, *live, cam))
+					r_culled_wire.push_back(static_cast<int32_t>(handle));
+				else
+					anchor_entity(*live);
+				continue;
+			}
+			// A bare row is the client-built pool entity retail's collector
+			// walks: its type's entity+0 bound radius from the shared items.def/
+			// model resolve (the replica pipeline's own source), through the
+			// person leg for Player/Infantry rows (the parachute flag swaps in
+			// the item-185 radius) or the model leg's bound sphere placed by the
+			// row's full Euler pose.
+			const opennova::world::ResolvedCollisionShape shape =
+					kernel.wire_collision_shape_for_type(es.type_id);
+			const int32_t pos[3] = {es.x, es.y, es.z};
+			// The row's blink quad from the client's own blink walk (the one
+			// the lighting feed runs for a twin-less row): the collector's
+			// blink-hits gate reads it before the legs, and the render waves'
+			// contained test after them.
+			opennova::world::BlinkAccum blink;
+			const bool person_source = h.pool() == 0 &&
+					(es.cls == opennova::EntityClass::Player ||
+							es.cls == opennova::EntityClass::Infantry);
+			kernel.collision.query_wire_blink_boxes_at_point(kernel.world, handle, pos,
+					person_source || shape.item_type == 1 || shape.item_type == 3, blink);
+			if (!kernel.occlusion.blink_hits_render_active(blink.hits)) {
+				r_culled_wire.push_back(static_cast<int32_t>(handle));
+				continue;
+			}
+			uint8_t &latch = r_wire_latch[handle];
+			bool visible = true;
+			if (es.cls == opennova::EntityClass::Player ||
+					es.cls == opennova::EntityClass::Infantry) {
+				const int32_t radius = kernel.occlusion.person_collector_radius(
+						shape.bound_radius_q16,
+						(es.rm_entity_flags & opennova::world::kEntityFlagParachute) != 0);
+				visible = kernel.occlusion.person_render_visible(kernel.collision, cam,
+						pos, radius, latch, kernel.world.logic_tick);
+			} else {
+				// The model leg: the collision model's bounds, else the render
+				// model's CMDL sphere (radius 0 without the block); a row whose
+				// graphic did not load has no render model and is never
+				// collected (world/occlusion.h assign_render_model carries the
+				// witness, the same rule the placed rows take).
+				int32_t center_local[3] = {0, 0, 0};
+				int32_t radius = 0;
+				if (const opennova::world::CollisionModel *model =
+								kernel.collision.model(shape.model_id);
+						model != nullptr && model->valid()) {
+					opennova::world::OcclusionWorld::bound_sphere_fixed(
+							*model, center_local, radius, shape.uniform_scale_q16);
+				} else if (shape.has_render_model) {
+					opennova::renderer::ObjectProjectionSphere sphere;
+					sphere.valid = true;
+					sphere.center_q16 = {shape.render_sphere_center_q16.x,
+							shape.render_sphere_center_q16.y, shape.render_sphere_center_q16.z};
+					sphere.radius_q16 = shape.render_sphere_radius_q16;
+					sphere = opennova::renderer::scale_object_projection_sphere_q16(
+							sphere, shape.uniform_scale_q16);
+					for (int axis = 0; axis < 3; ++axis) center_local[axis] = sphere.center_q16[axis];
+					radius = sphere.radius_q16;
+				} else {
+					r_culled_wire.push_back(static_cast<int32_t>(handle));
+					continue;
+				}
+				int32_t center_world[3];
+				opennova::world::collision_matrix_from_euler(
+						es.heading_bam, es.pitch_bam, es.roll_bam, pos)
+						.transform_point(center_local, center_world);
+				visible = kernel.occlusion.sphere_render_visible(kernel.collision, cam,
+						center_world, radius, latch, kernel.world.logic_tick);
+			}
+			if (visible) {
+				// render_TOC over the row's entity+4 position, entity+0 radius,
+				// model bounds and pose (skipped when contained).
+				opennova::world::OcclusionWorld::TocCandidate toc;
+				toc.self = h;
+				toc.pos_fixed[0] = es.x;
+				toc.pos_fixed[1] = es.y;
+				toc.pos_fixed[2] = es.z;
+				toc.radius_q16 = shape.bound_radius_q16;
+				toc.model = kernel.collision.model(shape.model_id);
+				toc.heading_bam = es.heading_bam;
+				toc.pitch_bam = es.pitch_bam;
+				toc.roll_bam = es.roll_bam;
+				visible = !kernel.occlusion.render_wave_toc_occluded(blink.hits, toc);
+			}
+			if (!visible) {
+				r_culled_wire.push_back(static_cast<int32_t>(handle));
+			} else if (h.pool() == 0 && (es.net_stance_bits & 0x3u) != 0 &&
+					es.carrier_handle == 0xFFFFu) {
+				// A bare organics-pool row: the received MoveOrder stance bits,
+				// and no carrier for the standing-on-terrain test.
+				r_anchors.push_back(godot_from_fixed3(pos));
+			}
+		}
+	}
+	// The local player's body is presented outside the walks above (the local
+	// view presenter), but retail's pool walk collects it like any other
+	// person: the collector has no local-player exception (first person only
+	// skips the body's draw later), so it takes the same gate before its
+	// stance can anchor the MODEL tier.
+	// [orig: collect_visible_entities_for_terrain @ 0x5c8c60 (pool walk
+	// @ 0x5c8caa..0x5c8cd9, the gates @ 0x5c8cef..0x5c8eab)]
+	if (opennova::world::Entity *local =
+				kernel.world.registry.get(kernel.world.cached.local_player);
+			local != nullptr && local->bms_id == 0 &&
+			kernel.occlusion.entity_render_visible(
+					kernel.world, kernel.collision, *local, cam))
+		anchor_entity(*local);
+}
+
+} // namespace
+
+static PackedInt32Array culled_changes_since(const std::vector<int32_t> &p_now,
+		std::vector<int32_t> &r_applied);
+
+void Simulation::occlusion_init_mission() {
+	// The kernel's mission-start portal init (the witness lives there).
+	if (!kernel_) return;
+	kernel_->occlusion_init_mission();
+}
+
+void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
+                                         double p_aspect, double p_viewport_width,
+                                         double p_fog_dist_units,
+                                         double p_water_z_units, bool p_force_indoors) {
+	if (!kernel_) return;
+	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_camera,
+			p_fov_y_deg, p_aspect, p_viewport_width, p_fog_dist_units,
+			p_water_z_units, p_force_indoors, kernel_->collision.local_player_blink_flags);
 	// Mirror the env view distance into the 0x0A priority score's global — the
 	// same value retail's env writes into word_26C681E for the render AND the
 	// priority builder to read (D-NET-139: the LOS gate + the +200 inside-view
@@ -64,6 +339,8 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// which disables both terms exactly like an unwritten retail global.
 	opennova::replication::set_view_distance_units(static_cast<int>(p_fog_dist_units));
 
+	// The main scene's collect runs over the main view's frame words.
+	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
 	const uint64_t occl_build_start =
 			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 	kernel_->occlusion.build_frame(kernel_->world, kernel_->collision, cam);
@@ -80,196 +357,43 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// Terrain_CollectVisibleEntities @ 0x5c91bc).
 	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam,
 			present_.death_piece_draws);
-	present_.occlusion_culled_bms.clear();
-	// The BySide walks update the MODEL foliage tiles around the collected
-	// person entities whose MoveOrder carries a stance bit (0x100 prone /
-	// 0x200 crouch) and whose groundEntity is empty; the visible-entity walk
-	// below is that collection, so the anchors ride its verdicts (no second
-	// gate call: the latch ticks once per collected entity).
-	// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
-	// (flags & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7; stance writers
-	// Player_PackInputStateToEntity @ 0x4df6a7..0x4df6cd,
-	// NapiNPServerMsg_HandleStanceChange @ 0x501c60]
-	present_.foliage_mask_anchors.clear();
-	const auto anchor_entity = [&](const opennova::world::Entity &e) {
-		if (e.kind != opennova::world::EntityKind::Organic ||
-				(e.net_stance_bits & 0x3u) == 0 || e.ground_target.valid())
-			return;
-		present_.foliage_mask_anchors.push_back(
-				Vector3(e.position.x, e.position.z, -e.position.y));
-	};
-	std::vector<opennova::world::EntityHandle> &handles =
-			present_.occlusion_probe_handles;
-	handles.clear();
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (e.kind == opennova::world::EntityKind::Building ||
-		    e.kind == opennova::world::EntityKind::Marker)
-			return;
-		if (e.bms_id == 0) return; // wire avatars ride their own present path
-		handles.push_back(e.handle);
-	});
-	for (const opennova::world::EntityHandle h : handles) {
-		opennova::world::Entity *e = kernel_->world.registry.get(h);
-		if (e == nullptr) continue;
-		if (!kernel_->occlusion.entity_render_visible(kernel_->world, kernel_->collision, *e, cam))
-			present_.occlusion_culled_bms.push_back(e->bms_id);
-		else
-			anchor_entity(*e);
-	}
-	// The decoded rows the wire pass draws — remote organics and runtime
-	// spawns with no placed identity — pass the SAME collector gate: retail's
-	// client walks the pool entities it built from the wire exactly as the
-	// host walks its own (the witness lives on OcclusionWorld::
-	// sphere_render_visible). A row with a registry twin (the host's own
-	// runtime spawns) takes the twin's live verdict, exactly like the placed
-	// rows above; a bare row is the position-centred unit sphere the organics
-	// leg above falls back to.
-	present_.occlusion_culled_wire.clear();
-	if (runtime_ != nullptr) {
-		// A latch belongs to one row lifetime: drop the counters of handles
-		// that left the state so a reused handle starts fresh (retail memsets
-		// the destroyed entity, latch included).
-		std::unordered_set<uint16_t> live_handles;
-		for (const opennova::replication::ClientEntityState &es :
-				runtime_->state().entities)
-			live_handles.insert(es.handle);
-		for (auto it = present_.wire_occlusion_latch.begin();
-				it != present_.wire_occlusion_latch.end();) {
-			if (live_handles.count(it->first) == 0)
-				it = present_.wire_occlusion_latch.erase(it);
-			else
-				++it;
-		}
-		const uint16_t self_handle = runtime_->has_self_handle()
-				? runtime_->self_handle()
-				: opennova::world::EntityHandle::kInvalid;
-		for (const opennova::replication::ClientEntityState &es :
-				runtime_->state().entities) {
-			const uint16_t handle = es.handle;
-			if (handle == opennova::world::EntityHandle::kInvalid ||
-					es.type_id == 0 || handle == self_handle)
-				continue;
-			// A hidden row is never collected; the present pass hides it
-			// itself, and its latch does not tick (the gate's bit0 test in
-			// OcclusionWorld::entity_render_visible).
-			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
-			const opennova::world::EntityHandle h{handle};
-			const opennova::world::Entity *twin = nullptr;
-			if (!is_joiner() || h.pool() != 0) {
-				const opennova::world::Entity *candidate =
-						kernel_->world.registry.get(h);
-				if (candidate != nullptr &&
-						static_cast<uint16_t>(candidate->item_id) == es.type_id)
-					twin = candidate;
-			}
-			if (twin != nullptr && (twin->bms_id != 0 ||
-					twin->spawn_origin != opennova::world::kSpawnOriginNone))
-				continue; // a placed row: the registry walk above gated it
-			if (h == kernel_->world.cached.local_player) continue;
-			if (twin != nullptr) {
-				// The host's own runtime spawn (an addeweap gun child, a
-				// runtime-placed item): the listen host walks its OWN pool entity
-				// with the same live pose the placed walk above uses. Its decoded
-				// row is a spawn image — the loopback 0x0A is header-only, so
-				// es.x/y/z never follow a moving carrier, and a sphere pinned
-				// there culled the gun the moment the driven buggy left it.
-				opennova::world::Entity *live = kernel_->world.registry.get(h);
-				if (live == nullptr) continue;
-				if (!kernel_->occlusion.entity_render_visible(
-							kernel_->world, kernel_->collision, *live, cam))
-					present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
-				else
-					anchor_entity(*live);
-				continue;
-			}
-			// A bare row is the client-built pool entity retail's collector
-			// walks: its type's entity+0 bound radius from the shared items.def/
-			// model resolve (the replica pipeline's own source), through the
-			// person leg for Player/Infantry rows (the parachute flag swaps in
-			// the item-185 radius) or the model leg's bound sphere placed by the
-			// row's full Euler pose.
-			const opennova::world::ResolvedCollisionShape shape =
-					kernel_->wire_collision_shape_for_type(es.type_id);
-			const int32_t pos[3] = {es.x, es.y, es.z};
-			// The row's blink quad from the client's own blink walk (the one
-			// the lighting feed runs for a twin-less row): the collector's
-			// blink-hits gate reads it before the legs, and the render waves'
-			// contained test after them.
-			opennova::world::BlinkAccum blink;
-			const bool person_source = h.pool() == 0 &&
-					(es.cls == opennova::EntityClass::Player ||
-							es.cls == opennova::EntityClass::Infantry);
-			kernel_->collision.query_wire_blink_boxes_at_point(kernel_->world, handle, pos,
-					person_source || shape.item_type == 1 || shape.item_type == 3, blink);
-			if (!kernel_->occlusion.blink_hits_render_active(blink.hits)) {
-				present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
-				continue;
-			}
-			uint8_t &latch = present_.wire_occlusion_latch[handle];
-			bool visible = true;
-			if (es.cls == opennova::EntityClass::Player ||
-					es.cls == opennova::EntityClass::Infantry) {
-				const int32_t radius = kernel_->occlusion.person_collector_radius(
-						shape.bound_radius_q16,
-						(es.rm_entity_flags & opennova::world::kEntityFlagParachute) != 0);
-				visible = kernel_->occlusion.person_render_visible(kernel_->collision, cam,
-						pos, radius, latch, kernel_->world.logic_tick);
-			} else {
-				int32_t center_world[3] = {es.x, es.y, es.z};
-				int32_t radius = 0x10000;
-				if (const opennova::world::CollisionModel *model =
-								kernel_->collision.model(shape.model_id);
-						model != nullptr && model->valid()) {
-					int32_t center_local[3];
-					opennova::world::OcclusionWorld::bound_sphere_fixed(
-							*model, center_local, radius, shape.uniform_scale_q16);
-					opennova::world::collision_matrix_from_euler(
-							es.heading_bam, es.pitch_bam, es.roll_bam, pos)
-							.transform_point(center_local, center_world);
-				}
-				visible = kernel_->occlusion.sphere_render_visible(kernel_->collision, cam,
-						center_world, radius, latch, kernel_->world.logic_tick);
-			}
-			if (visible) {
-				// render_TOC over the row's entity+4 position, entity+0 radius,
-				// model bounds and pose (skipped when contained).
-				opennova::world::OcclusionWorld::TocCandidate toc;
-				toc.self = h;
-				toc.pos_fixed[0] = es.x;
-				toc.pos_fixed[1] = es.y;
-				toc.pos_fixed[2] = es.z;
-				toc.radius_q16 = shape.bound_radius_q16;
-				toc.model = kernel_->collision.model(shape.model_id);
-				toc.heading_bam = es.heading_bam;
-				toc.pitch_bam = es.pitch_bam;
-				toc.roll_bam = es.roll_bam;
-				visible = !kernel_->occlusion.render_wave_toc_occluded(blink.hits, toc);
-			}
-			if (!visible) {
-				present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
-			} else if (h.pool() == 0 && (es.net_stance_bits & 0x3u) != 0 &&
-					es.carrier_handle == 0xFFFFu) {
-				// A bare organics-pool row: the received MoveOrder stance bits,
-				// and no carrier for the standing-on-terrain test.
-				present_.foliage_mask_anchors.push_back(godot_from_fixed3(pos));
-			}
-		}
-	}
-	// The local player's body is presented outside the walks above (the local
-	// view presenter), but retail's pool walk collects it like any other
-	// person: the collector has no local-player exception (first person only
-	// skips the body's draw later), so it takes the same gate before its
-	// stance can anchor the MODEL tier.
-	// [orig: collect_visible_entities_for_terrain @ 0x5c8c60 (pool walk
-	// @ 0x5c8caa..0x5c8cd9, the gates @ 0x5c8cef..0x5c8eab)]
-	if (opennova::world::Entity *local =
-				kernel_->world.registry.get(kernel_->world.cached.local_player);
-			local != nullptr && local->bms_id == 0 &&
-			kernel_->occlusion.entity_render_visible(
-					kernel_->world, kernel_->collision, *local, cam))
-		anchor_entity(*local);
+	collect_view_verdicts(*kernel_, runtime_, is_joiner(), present_.wire_occlusion_latch,
+			present_.occlusion_probe_handles, cam, present_.occlusion_culled_bms,
+			present_.occlusion_culled_wire, present_.foliage_mask_anchors);
 	if (runtime_profiling_enabled_)
 		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;
+}
+
+// The weapon Inset pass's collect, after the main scene's: the same build and
+// walk over the Inset camera on the Inset view's frame words, then the main
+// view's words back in place for every later reader (engine:
+// world/occlusion.h OcclusionView carries the witness).
+const InsetOcclusionView &Simulation::run_inset_occlusion(const InsetOcclusionRequest &p_request) {
+	InsetOcclusionView &inset = present_.inset_occlusion;
+	inset.building_changes = PackedInt64Array();
+	inset.culled_changes = PackedInt32Array();
+	inset.culled_wire_changes = PackedInt32Array();
+	if (!kernel_) return inset;
+	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_request.camera,
+			p_request.fov_y_deg, p_request.aspect, p_request.viewport_width,
+			p_request.fog_dist_units, p_request.water_z_units, p_request.force_indoors,
+			kernel_->collision.local_player_blink_flags);
+	kernel_->occlusion.select_view(opennova::world::OcclusionView::kInset);
+	kernel_->occlusion.build_frame(kernel_->world, kernel_->collision, cam);
+	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam, inset.death_piece_draws);
+	collect_view_verdicts(*kernel_, runtime_, is_joiner(), present_.wire_occlusion_latch,
+			present_.occlusion_probe_handles, cam, inset.culled_bms, inset.culled_wire,
+			inset.foliage_mask_anchors);
+	inset.building_changes = building_visibility_changes_since(*kernel_, inset.building_last);
+	inset.water_visible = kernel_->occlusion.water_visible();
+	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
+	inset.culled_changes = culled_changes_since(inset.culled_bms, inset.culled_last);
+	inset.culled_wire_changes = culled_changes_since(inset.culled_wire, inset.culled_wire_last);
+	return inset;
+}
+
+void Simulation::release_inset_occlusion() {
+	present_.inset_occlusion = InsetOcclusionView();
 }
 
 int64_t Simulation::building_visibility_mask(int64_t p_packed) {
@@ -285,30 +409,8 @@ bool Simulation::building_visibility_visible(int64_t p_packed) {
 // instead of the whole building set, so a steady frame does no per-building
 // node work at all.
 PackedInt64Array Simulation::get_building_visibility_changes() {
-	PackedInt64Array out;
-	if (!kernel_) return out;
-	// Triples [bms_id, visible<<32 | raw mask, forced mask] for every building
-	// with an OCCLUSION instance or a collision model (every retail building
-	// batch member): the raw g_BuildingSectionVisMask word the other readers
-	// share, and the def's forced sections the part draw ORs over it
-	// (ObjectModel::section_part_visible).
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
-		if (!kernel_->occlusion.has_instance(e.handle) &&
-				kernel_->collision.model_for(kernel_->world, e.handle) == nullptr)
-			return;
-		const bool visible = kernel_->occlusion.building_visible(e.handle);
-		const int64_t packed = opennova::world::pack_building_visibility(
-				kernel_->occlusion.section_mask(e.handle), visible);
-		const uint32_t key = e.handle.packed;
-		auto it = present_.occl_apply_building_last.find(key);
-		if (it != present_.occl_apply_building_last.end() && it->second == packed) return;
-		present_.occl_apply_building_last[key] = packed;
-		out.push_back(e.bms_id);
-		out.push_back(packed);
-		out.push_back(static_cast<int64_t>(kernel_->occlusion.forced_section_mask(e.handle)));
-	});
-	return out;
+	if (!kernel_) return PackedInt64Array();
+	return building_visibility_changes_since(*kernel_, present_.occl_apply_building_last);
 }
 
 // [added..., removed...] as [count, ids..., count, ids...] against the applied
@@ -384,6 +486,9 @@ void Simulation::reset_occlusion_apply_baseline() {
 	present_.occl_apply_building_last.clear();
 	present_.occl_apply_culled_last.clear();
 	present_.occl_apply_culled_wire_last.clear();
+	present_.inset_occlusion.building_last.clear();
+	present_.inset_occlusion.culled_last.clear();
+	present_.inset_occlusion.culled_wire_last.clear();
 	present_.entity_lighting = opennova::inmatch::EntityLightingFeed();
 	present_.iris_interior_group_entity = opennova::world::EntityHandle{};
 	present_.iris_interior_group_section = 0;

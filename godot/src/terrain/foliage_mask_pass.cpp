@@ -157,6 +157,9 @@ public:
 
 	mutable std::mutex frame_mutex;
 	std::shared_ptr<const FoliageMaskFrame> frame;
+	// The weapon Inset pass's own frame, drawn only for the render whose
+	// camera is the one it was compiled for (FoliageMaskFrame::view_camera).
+	std::shared_ptr<const FoliageMaskFrame> view_frame;
 
 	mutable std::mutex diagnostics_mutex;
 	std::string status = "waiting_for_frame";
@@ -605,6 +608,15 @@ void FoliageMaskCompositorEffect::publish(
 	impl_->frame = p_frame;
 }
 
+void FoliageMaskCompositorEffect::publish_view(
+		const std::shared_ptr<const FoliageMaskFrame> &p_frame) {
+	if (shutdown_requested_.load(std::memory_order_acquire)) {
+		return;
+	}
+	std::lock_guard<std::mutex> lock(impl_->frame_mutex);
+	impl_->view_frame = p_frame;
+}
+
 void FoliageMaskCompositorEffect::release_device_resources() {
 	set_enabled(false);
 	if (shutdown_requested_.exchange(true, std::memory_order_acq_rel)) {
@@ -613,6 +625,7 @@ void FoliageMaskCompositorEffect::release_device_resources() {
 	{
 		std::lock_guard<std::mutex> lock(impl_->frame_mutex);
 		impl_->frame.reset();
+		impl_->view_frame.reset();
 	}
 	impl_->rd = main_rendering_device();
 	impl_->release_all();
@@ -641,9 +654,21 @@ void FoliageMaskCompositorEffect::_render_callback(int32_t p_effect_callback_typ
 		impl_->callback_seen = true;
 	}
 	std::shared_ptr<const FoliageMaskFrame> frame;
+	std::shared_ptr<const FoliageMaskFrame> view_frame;
 	{
 		std::lock_guard<std::mutex> lock(impl_->frame_mutex);
 		frame = impl_->frame;
+		view_frame = impl_->view_frame;
+	}
+	// Each scene pass draws its own view's masks: the weapon Inset's render
+	// (its camera the one the Inset frame was compiled for) takes the Inset
+	// frame, every other view the main one.
+	if (view_frame) {
+		RenderSceneData *scene = p_render_data->get_render_scene_data();
+		if (scene != nullptr &&
+				scene->get_cam_transform().is_equal_approx(view_frame->view_camera)) {
+			frame = view_frame;
+		}
 	}
 	if (!frame) {
 		return;
@@ -797,6 +822,30 @@ void FoliageMaskPass::_set_eye(const Vector3 &p_eye) {
 	}
 }
 
+// The Inset view's pair: its persons test the Inset's own eye, so each scene
+// pass's persons take the masks compiled for that pass.
+void FoliageMaskPass::_set_view_active(bool p_active) {
+	if (view_active_written_ && view_active_ == p_active) {
+		return;
+	}
+	if (RenderingServer *server = RenderingServer::get_singleton()) {
+		server->global_shader_parameter_set("opennova_foliage_mask_inset_active", p_active);
+		view_active_ = p_active;
+		view_active_written_ = true;
+	}
+}
+
+void FoliageMaskPass::_set_view_eye(const Vector3 &p_eye) {
+	if (view_eye_written_ && view_eye_ == p_eye) {
+		return;
+	}
+	if (RenderingServer *server = RenderingServer::get_singleton()) {
+		server->global_shader_parameter_set("opennova_foliage_mask_inset_eye", p_eye);
+		view_eye_ = p_eye;
+		view_eye_written_ = true;
+	}
+}
+
 void FoliageMaskPass::publish(Node *p_scope,
 		const opennova::renderer::FoliageDrawList &p_draw_list,
 		const opennova::renderer::FoliageFrameCompiler &p_compiler,
@@ -829,6 +878,52 @@ void FoliageMaskPass::publish(Node *p_scope,
 		_set_active(false);
 		return;
 	}
+	int64_t instances = 0;
+	const std::shared_ptr<FoliageMaskFrame> frame =
+			_build_frame(p_draw_list, p_compiler, p_fd_textures, instances);
+	last_draws_ = static_cast<int64_t>(frame->draws.size());
+	last_instances_ = instances;
+	main_draws_ = !frame->draws.empty();
+	effect_->publish(frame);
+	_set_active(main_draws_);
+}
+
+void FoliageMaskPass::publish_view(Camera3D *p_camera,
+		const opennova::renderer::FoliageDrawList &p_draw_list,
+		const opennova::renderer::FoliageFrameCompiler &p_compiler,
+		const std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> &p_fd_textures) {
+	// The Inset view rides the main pass's installed effect and target: the
+	// two scene passes render one after the other, each rasterizing its own
+	// masks into the target before its own opaque pass samples them.
+	if (p_camera == nullptr || effect_.is_null() || !target_.is_valid()) {
+		clear_view();
+		return;
+	}
+	int64_t instances = 0;
+	const std::shared_ptr<FoliageMaskFrame> frame =
+			_build_frame(p_draw_list, p_compiler, p_fd_textures, instances);
+	frame->view_camera = p_camera->get_camera_transform();
+	// The Inset render's eye (its own composed pose, offsets included) is
+	// what its persons see as CAMERA_POSITION_WORLD.
+	_set_view_eye(frame->view_camera.origin);
+	view_draws_ = !frame->draws.empty();
+	effect_->publish_view(frame);
+	_set_view_active(view_draws_);
+}
+
+void FoliageMaskPass::clear_view() {
+	view_draws_ = false;
+	if (effect_.is_valid()) {
+		effect_->publish_view(nullptr);
+	}
+	_set_view_active(false);
+}
+
+std::shared_ptr<FoliageMaskFrame> FoliageMaskPass::_build_frame(
+		const opennova::renderer::FoliageDrawList &p_draw_list,
+		const opennova::renderer::FoliageFrameCompiler &p_compiler,
+		const std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> &p_fd_textures,
+		int64_t &r_instances) {
 	if (mesh_generation_ != p_compiler.model_mesh_generation()) {
 		mesh_generation_ = p_compiler.model_mesh_generation();
 		for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
@@ -865,7 +960,7 @@ void FoliageMaskPass::publish(Node *p_scope,
 		std::memcpy(frame->instance_rows.ptrw(), p_draw_list.model_instances.data(),
 				p_draw_list.model_instances.size() * kInstanceBytes);
 	}
-	int64_t instances = 0;
+	r_instances = 0;
 	for (const opennova::renderer::FoliageDrawCommand &command : p_draw_list.commands) {
 		if (command.tier != opennova::renderer::FoliageTier::Silhouette) {
 			continue;
@@ -877,28 +972,30 @@ void FoliageMaskPass::publish(Node *p_scope,
 		draw.instance_count = command.instance_count;
 		draw.alpha_reference = command.alpha_reference;
 		draw.wind_offset = command.wind_offset;
-		instances += command.instance_count;
+		r_instances += command.instance_count;
 		frame->draws.push_back(draw);
 	}
 	frame->target = target_;
 	frame->target_size = target_size_;
-	last_draws_ = static_cast<int64_t>(frame->draws.size());
-	last_instances_ = instances;
-	effect_->publish(frame);
-	_set_active(!frame->draws.empty());
+	return frame;
 }
 
 void FoliageMaskPass::clear() {
 	last_draws_ = 0;
 	last_instances_ = 0;
+	main_draws_ = false;
+	view_draws_ = false;
 	if (effect_.is_valid()) {
 		effect_->publish(nullptr);
+		effect_->publish_view(nullptr);
 	}
 	_set_active(false);
+	_set_view_active(false);
 }
 
 void FoliageMaskPass::release() {
 	_set_active(false);
+	_set_view_active(false);
 	_uninstall();
 	RenderingServer *server = RenderingServer::get_singleton();
 	if (server != nullptr && server->get_rendering_device() != nullptr) {
@@ -931,6 +1028,8 @@ FoliageMaskReport FoliageMaskPass::get_report() const {
 	report.target_size = target_size_;
 	report.draws = last_draws_;
 	report.instances = last_instances_;
+	report.view_active = view_active_;
+	report.view_eye = view_eye_;
 	return report;
 }
 

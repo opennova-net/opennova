@@ -221,7 +221,7 @@ bool Simulation::enable_host_listen(int p_port) {
 	// ensure_session_role) -- the contract the armory's MP open rides.
 	const bool installed = install_role(std::make_unique<opennova::inmatch::HostRole>(
 			net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost,
-			item_class_resolver()));
+			assets_.item_replication_catalog));
 	net_.lan_host_pending = !installed;
 	if (net_.pump.is_null()) net_.pump.instantiate();
 	net_.pump->set_capture_path(net_.capture_pcap_path);
@@ -452,6 +452,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.send_holdoff_ticks = in.send_holdoff_ticks;
 	config.fat_bullets = in.fat_bullets;
 	config.one_shot_kill = in.one_shot_kill;
+	config.unlimited_vehicles = in.unlimited_vehicles;
 	config.spawn_x = in.spawn_x;
 	config.spawn_y = in.spawn_y;
 	config.spawn_z = in.spawn_z;
@@ -467,6 +468,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	if (kernel_ && is_host_listening()) {
 		kernel_->world.rules.fat_bullets = net_.host_session_config.fat_bullets;
 		kernel_->world.rules.one_shot_kill = net_.host_session_config.one_shot_kill;
+		kernel_->world.rules.vehicle_respawns = net_.host_session_config.unlimited_vehicles;
 	}
 	// A LAN host role follows the server type it was just given.
 	ensure_session_role();
@@ -584,7 +586,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_expansion_version_root();
 	install_app_id();
 	install_join_cd_cookie();
-	install_item_class_resolver();
+	install_item_catalog();
 	// The kind-derived world rules (no authority, an mp session) applied with
 	// the role install.
 	joiner_role_->reset_for_join();
@@ -1028,7 +1030,7 @@ TypedArray<FeedRow> Simulation::drain_feed_events() {
 			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
 	const auto actor_of = [&cs](uint8_t index) -> opennova::hud::FeedActor {
 		const auto *e = cs.find(static_cast<uint16_t>(index));
-		return e != nullptr ? opennova::hud::FeedActor{e->name, e->team}
+		return e != nullptr ? opennova::hud::FeedActor{e->display_name, e->team}
 		                    : opennova::hud::FeedActor{};
 	};
 	std::vector<opennova::hud::FeedEventInput> inputs;

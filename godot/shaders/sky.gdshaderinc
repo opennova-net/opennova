@@ -48,6 +48,11 @@ varying vec3 v_sky_behind; // pass-2 oD1
 varying float v_fog; // oFog = 1 - dist/(0.9*fogEnd)
 varying vec2 v_uv1;
 varying vec2 v_uv2;
+#ifdef SKY_GATED_PASS_KEEPS_STENCIL
+// 1 while this pass draws its sky bracket, 0 while the bracket is closed and
+// the dome only marks the slot-drape stencil (sky.gdshader).
+varying flat float v_sky_pass_drawn;
+#endif
 
 // The capture cameras cull to the environment-capture layer ALONE (the water
 // layer's alias, render/visual_layers.h); the water mirror culls the water
@@ -122,10 +127,13 @@ void vertex() {
 	v_cloud_ramp = clamp(mix(mix(u_cloud_base, u_cloud_edge, p4_light), u_cloud_highlight, p8_light), vec3(0.0), vec3(1.0));
 
 	// Per-vertex dome fog (retail SkyVS oFog = 1 - dist(world, eye)/(0.9*fogDist),
-	// c9 upload @ 0x5792c2).
+	// c9 upload @ 0x5792c2). vs_1_1 oFog, like oD0/oD1, is saturated per
+	// vertex before the rasterizer interpolates it (the D3D9 output-register
+	// contract), so a triangle that straddles the fog end blends from 0, not
+	// from a negative factor clamped per pixel.
 	// (divisor floor keeps the varying defined when fog is off; the fragment
 	// guard never reads it in that case)
-	v_fog = 1.0 - distance(world_pos, eye) / max(0.9 * u_fog_end, 0.001);
+	v_fog = clamp(1.0 - distance(world_pos, eye) / max(0.9 * u_fog_end, 0.001), 0.0, 1.0);
 
 	v_uv1 = UV + u_scroll_offset1;
 	v_uv2 = UV2 + u_scroll_offset2;
@@ -138,10 +146,21 @@ void vertex() {
 	// plane (reverse-Z 0) and never write depth: every nearer surface wins
 	// the depth test whatever the draw order, while the cleared sky passes.
 	POSITION.z = 0.0;
+#ifdef SKY_GATED_PASS_KEEPS_STENCIL
+	v_sky_pass_drawn = 1.0;
+#endif
 	if (!IN_SHADOW_PASS && !sky_pass_drawn(CAMERA_VISIBLE_LAYERS)) {
+#ifdef SKY_GATED_PASS_KEEPS_STENCIL
+		// The gradient pass keeps rasterizing at alpha 0: the clear colour
+		// stays, but its pixels still carry the slot-drape stencil mark, as
+		// retail's drape multiplies whatever the frame holds there
+		// (sky.gdshader).
+		v_sky_pass_drawn = 0.0;
+#else
 		// This pass skips its sky bracket: park every vertex outside the
 		// clip volume so no triangle rasterizes.
 		POSITION = vec4(2.0, 2.0, 2.0, 1.0);
+#endif
 	}
 	VERTEX = scaled;
 }
@@ -152,7 +171,8 @@ void vertex() {
 // restore ordinary fog afterward (retail sky fog wrapper @ 0x579cb0).
 vec3 sky_apply_fog(vec3 col) {
 	if (u_fog_end > 0.0) {
-		return mix(u_fog_color, col, clamp(v_fog, 0.0, 1.0));
+		// v_fog interpolates per-vertex factors already in [0, 1].
+		return mix(u_fog_color, col, v_fog);
 	}
 	return col;
 }

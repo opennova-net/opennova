@@ -159,6 +159,8 @@ ObjectModel::~ObjectModel() {
 	foliage_mask_models_.erase(this);
 	authored_lod_models_.erase(this);
 	pixel_cull_models_.erase(this);
+	free_view_twins();
+	inset_view_models_.erase(this);
 	retire_geometry_instances();
 }
 
@@ -403,6 +405,14 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 	// first-person body, and stays in its render-slot capture.
 	if (camera_pixel_culled_ && presentation_layer_ != PRESENTATION_LAYER_VIEWMODEL) {
 		base = LAYER_FP_BODY_SHADOW_ONLY;
+	}
+	// While the weapon Inset's verdicts differ the node draws the main view's
+	// only: the world bits swap for the main-view bits the Inset camera lacks
+	// (a twin draws the Inset's, object_model_views.cpp).
+	if (view_split_) {
+		base = base == LAYER_WORLD ? LAYER_MAIN_VIEW
+				: base == LAYER_WORLD_NO_MIRROR ? LAYER_MAIN_VIEW_NO_MIRROR
+				: base;
 	}
 	return markers ? (base | shadow_caster_layers_) : base;
 }
@@ -1002,202 +1012,6 @@ void ObjectModel::retire_geometry_instances() {
 	geometry_instance_count_ = 0;
 }
 
-int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
-		float p_vertical_fov_degrees,
-		float p_viewport_width,
-		float p_viewport_height) {
-	// The frame scale, the projected radius and the selector are engine facts
-	// (runtime/renderer/object_lod.h); the frame struct converts the camera.
-	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
-			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
-	return update_authored_lod_views(&frame, 1);
-}
-
-int ObjectModel::update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width) {
-	const ObjectLodFrame frame = ObjectLodFrame::from_camera(p_camera, p_viewport_width);
-	return update_authored_lod_views(&frame, 1);
-}
-
-// [engine: renderer::select_object_lod, object_subpixel_culled and
-//  project_bound_sphere_radius_q16 own the witnessed rules — the sector-entity
-//  draw returns before the RLOD walk below 0.75 px (retail render_sector_entity
-//  @ 0x5c42d8..0x5c42de); this walk feeds them each registered model per view]
-int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
-		int p_frame_count) {
-	if ((authored_lod_models_.is_empty() && pixel_cull_models_.is_empty()) ||
-			p_frames == nullptr) {
-		return 0;
-	}
-	const int view_count = std::min(p_frame_count, static_cast<int>(kMaxLodViews));
-	bool any_valid = false;
-	for (int v = 0; v < view_count; ++v) {
-		any_valid = any_valid || p_frames[v].valid;
-	}
-	if (!any_valid) {
-		return 0;
-	}
-	// The held weapon's own 2 px gate: its model sphere projected at its
-	// attach point, the raw radius against 0x20000, per view; the shared node
-	// leaves the camera only when every view that sees it culls it. A sphere
-	// no view sees is not drawn by any camera either way. [retail
-	// BoneCallback_org0_World @ 0x4e3d07..0x4e3d4b]
-	for (ObjectModel *model : pixel_cull_models_) {
-		bool seen = false;
-		bool drawn = false;
-		if (model->is_inside_tree()) {
-			const Vector3 origin = model->get_global_transform().origin;
-			for (int v = 0; v < view_count; ++v) {
-				int32_t projected_q16 = 0;
-				if (!p_frames[v].valid || !p_frames[v].project_q16(origin,
-								model->attachment_pixel_cull_radius_q16_, projected_q16)) {
-					continue;
-				}
-				seen = true;
-				drawn = drawn ||
-						!opennova::renderer::held_weapon_projection_culled(projected_q16);
-			}
-		}
-		model->set_camera_pixel_culled(seen && !drawn);
-	}
-	if (authored_lod_models_.is_empty()) {
-		return 0;
-	}
-	// The cheap math runs over the registered set in place; visibility and
-	// level changes are applied after the walk so a visibility notification or
-	// set_active_lod's runtime-state refresh never runs against the set being
-	// iterated. Nothing allocates while no model crosses a threshold.
-	struct LodSwitch {
-		ObjectModel *model = nullptr;
-		int lod_index = 0;
-	};
-	struct SubpixelChange {
-		ObjectModel *model = nullptr;
-		bool hidden = false;
-	};
-	// Frame scratch that keeps its capacity across calls (deliberately never
-	// freed: a static with a Godot allocator destructor would run after the
-	// extension's allocator hooks are gone), so a frame with attachments or
-	// crossings allocates nothing once warm.
-	static LocalVector<LodSwitch> &switches = *memnew(LocalVector<LodSwitch>);
-	static LocalVector<SubpixelChange> &subpixel_changes =
-			*memnew(LocalVector<SubpixelChange>);
-	switches.clear();
-	subpixel_changes.clear();
-	static uint64_t projection_frame = 0;
-	++projection_frame;
-	// Attachments take their owner's level (and sub-pixel verdict) after the
-	// owners' own selections have been applied (renderer::attachment_lod_index).
-	static LocalVector<ObjectModel *> &attachments =
-			*memnew(LocalVector<ObjectModel *>);
-	attachments.clear();
-	for (ObjectModel *model : authored_lod_models_) {
-		if (!model->is_inside_tree()) {
-			continue;
-		}
-		if (!model->authored_lod_owner_.is_null()) {
-			attachments.push_back(model);
-			continue;
-		}
-		ObjectModel *source = model->get_authored_lod_projection_owner();
-		if (source == nullptr) source = model;
-		if (source->lod_projection_frame_ != projection_frame) {
-			source->lod_projection_frame_ = projection_frame;
-			const Transform3D world = source->get_global_transform();
-			const auto &sphere = source->entity_projection_sphere_;
-			for (int v = 0; v < view_count; ++v) {
-				const ObjectLodFrame &frame = p_frames[v];
-				if (!frame.valid) {
-					source->lod_projection_visible_[v] = false;
-					continue;
-				}
-				if (sphere.valid) {
-					const Vector3 center = ObjectLodFrame::projection_center(
-							world, sphere, source->entity_projection_scale_q16_);
-					source->lod_projection_visible_[v] = frame.project_q16(center,
-							sphere.radius_q16, source->lod_projected_radius_q16_[v]);
-				} else {
-					// Document-less previews have no entity collision-bound producer.
-					const float radius = (source->model_sphere_radius_ > 0.0f
-							? source->model_sphere_radius_
-							: source->model_bounds_.get_longest_axis_size() * 0.5f) *
-							ObjectLodFrame::uniform_scale(world.basis);
-					source->lod_projection_visible_[v] = frame.project(
-							world.origin, radius, source->lod_projected_radius_q16_[v]);
-				}
-			}
-		}
-		// A view that rejected the entity never reaches its selector; an
-		// entity no view sees keeps its level and its sub-pixel verdict.
-		bool seen = false;
-		bool above_floor = false;
-		int lod_index = -1;
-		for (int v = 0; v < view_count; ++v) {
-			if (!source->lod_projection_visible_[v]) {
-				continue;
-			}
-			seen = true;
-			const int32_t projected_q16 = source->lod_projected_radius_q16_[v];
-			if (opennova::renderer::object_subpixel_culled(projected_q16)) {
-				continue;
-			}
-			above_floor = true;
-			const opennova::renderer::ObjectLodSelection selection =
-					opennova::renderer::select_object_lod(
-							model->authored_lod_thresholds_q16_, projected_q16,
-							p_frames[v].projection_scale, model->authored_lod_available_);
-			if (selection.lod_index >= 0 &&
-					(lod_index < 0 || selection.lod_index < lod_index)) {
-				lod_index = selection.lod_index;
-			}
-		}
-		if (!seen) continue;
-		if (above_floor == model->subpixel_hidden_) {
-			subpixel_changes.push_back(SubpixelChange{ model, !above_floor });
-		}
-		if (lod_index >= 0 && lod_index != model->active_lod_) {
-			switches.push_back(LodSwitch{ model, lod_index });
-		}
-	}
-	for (const SubpixelChange &change : subpixel_changes) {
-		if (authored_lod_models_.has(change.model)) {
-			change.model->set_subpixel_hidden(change.hidden);
-		}
-	}
-	int applied = 0;
-	for (const LodSwitch &change : switches) {
-		// A switch applied earlier in this loop can unregister or free another
-		// queued model (set_active_lod's runtime-state refresh reaches child
-		// nodes); only a still-registered model is dereferenced. The
-		// tree-visibility walk only for the models that actually cross: a
-		// hidden model re-selects on the frame it becomes visible.
-		if (!authored_lod_models_.has(change.model) ||
-				!change.model->is_visible_in_tree()) {
-			continue;
-		}
-		change.model->set_active_lod(change.lod_index);
-		++applied;
-	}
-	for (ObjectModel *attachment : attachments) {
-		if (!authored_lod_models_.has(attachment)) {
-			continue;
-		}
-		const ObjectModel *owner = attachment->get_authored_lod_owner();
-		// Retail draws an attachment inside its owner's bone callback, so the
-		// owner's sub-pixel return drops it too.
-		attachment->set_subpixel_hidden(owner != nullptr && owner->subpixel_hidden_);
-		const int level = attachment->exact_owner_lod_ && owner != nullptr ? owner->active_lod_
-                : opennova::renderer::attachment_lod_index(
-				owner != nullptr ? owner->active_lod_ : 0,
-				static_cast<int>(attachment->authored_lod_thresholds_q16_.size()));
-		if (level < 0 || level == attachment->active_lod_) {
-			continue;
-		}
-		attachment->set_active_lod(level);
-		++applied;
-	}
-	return applied;
-}
-
 void ObjectModel::advance_awake_frame(double p_delta) {
 	advance_awake_frame_impl(p_delta, nullptr);
 }
@@ -1551,6 +1365,13 @@ void ObjectModel::_notification(int p_what) {
 		// draw parts, order) that stayed stale while hidden.
 		point_light_draw_parts_dirty_ = true;
 		wake_runtime_frame();
+		// An ancestor's edge reaches the Inset twins too (they are no nodes).
+		if (inset_view_open_ && inset_view_models_.has(this)) {
+			refresh_view_split();
+		}
+	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		// The twins live in the world's scenario, not under this node.
+		free_view_twins();
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
 		// Models with blended strips or their own mirror CLIP arming enable
 		// this notification: a moved model re-classifies its strips against
@@ -1574,6 +1395,8 @@ void ObjectModel::_notification(int p_what) {
 		}
 		alpha_strip_models_.erase(this);
 		water_mirror_clip_models_.erase(this);
+		free_view_twins();
+		inset_view_models_.erase(this);
 		retire_geometry_instances();
 	}
 }
@@ -1594,7 +1417,10 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 		}
 		return;
 	}
-	const bool renderable = is_visible_in_tree() && on_screen_;
+	// A model the weapon Inset pass draws through its twins is submitted
+	// there even while the main view hides the node: its pose, PANM and
+	// materials advance for the twins (object_model_views.cpp).
+	const bool renderable = (is_visible_in_tree() && on_screen_) || !view_twins_.empty();
 	if (p_profile != nullptr && renderable) {
 		++p_profile->renderable_models;
 	}
@@ -1768,75 +1594,8 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		if (material.is_null()) {
 			continue;
 		}
-		const int material_index = surface_material_indices_[i];
-		MaterialRuntimeStamp &stamp = material_runtime_stamps_[
-				static_cast<size_t>(i)];
-		// The focused Q3 compile caches this material's block; every write
-		// below names the material so its surfaces re-read it once.
-		bool q3_parameters_changed = false;
-		if (material_needs_eval_[i]) {
-			opennova::renderer::MaterialRuntime runtime;
-			if (object_data_->eval_material_runtime_native(material_index,
-						anim_time_ms_, material_ctrl_values, runtime)) {
-				const opennova::renderer::MaterialRuntime &previous = stamp.runtime;
-				if (!stamp.runtime_valid || runtime.uv.m00 != previous.uv.m00 ||
-						runtime.uv.m10 != previous.uv.m10 ||
-						runtime.uv.m20 != previous.uv.m20) {
-					material->set_shader_parameter("u_uv_transform_u",
-							Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20));
-					q3_parameters_changed = true;
-				}
-				if (!stamp.runtime_valid || runtime.uv.m01 != previous.uv.m01 ||
-						runtime.uv.m11 != previous.uv.m11 ||
-						runtime.uv.m21 != previous.uv.m21) {
-					material->set_shader_parameter("u_uv_transform_v",
-							Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21));
-					q3_parameters_changed = true;
-				}
-				if (!stamp.runtime_valid || runtime.rgb_r != previous.rgb_r ||
-						runtime.rgb_g != previous.rgb_g ||
-						runtime.rgb_b != previous.rgb_b) {
-					material->set_shader_parameter("u_rgb_mod",
-							Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
-					q3_parameters_changed = true;
-				}
-				if (!stamp.runtime_valid || runtime.alpha != previous.alpha) {
-					material->set_shader_parameter("u_alpha_mod", runtime.alpha);
-					q3_parameters_changed = true;
-				}
-				if (!stamp.runtime_valid || runtime.reflect != previous.reflect) {
-					set_material_and_auxiliary_parameter(material,
-							postmultiply_material_for_index(material_index),
-							"u_reflect_color",
-							Vector4(runtime.reflect[0], runtime.reflect[1],
-									runtime.reflect[2], runtime.reflect[3]));
-					q3_parameters_changed = true;
-				}
-				stamp.runtime = runtime;
-				stamp.runtime_valid = true;
-			}
-		}
-		const Array *frames = anim_frames_by_mat_.getptr(material_index);
-		if (frames != nullptr && frames->size() > 1) {
-			const int frame_index = object_data_->compute_anim_frame_native(
-					material_index, anim_time_ms_, material_ctrl_values);
-			if (frame_index != stamp.anim_frame && frame_index >= 0 &&
-					frame_index < frames->size()) {
-				const Ref<Texture2D> frame = (*frames)[frame_index];
-				if (frame.is_valid()) {
-					const Ref<ShaderMaterial> postmultiply =
-							postmultiply_material_for_index(material_index);
-					set_material_and_auxiliary_parameter(material, postmultiply, "u_diffuse", frame);
-					set_material_and_auxiliary_parameter(material, postmultiply,
-							"u_diffuse_max_lod", opennova::material_texture_max_lod(frame));
-					stamp.anim_frame = frame_index;
-					q3_parameters_changed = true;
-				}
-			}
-		}
-		if (q3_parameters_changed) {
-			FrameFx::invalidate_q3_object_material(material);
-		}
+		apply_dynamic_material(material, surface_material_indices_[i], material_needs_eval_[i],
+				material_runtime_stamps_[static_cast<size_t>(i)], material_ctrl_values);
 	}
 	if (p_profile != nullptr) {
 		p_profile->material_us +=
@@ -1857,6 +1616,81 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	if (p_profile != nullptr) {
 		p_profile->order_bounds_us +=
 				Time::get_singleton()->get_ticks_usec() - order_start;
+	}
+}
+
+// One dynamic material's per-frame push: the evaluated UV/RGB/alpha/reflect
+// generators and the animated diffuse frame, each written only when it moved
+// (the stamp holds what this material last took). Shared by the node's
+// active level and an Inset twin's level (object_model_views.cpp).
+void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
+		int material_index, bool p_needs_eval, MaterialRuntimeStamp &stamp,
+		const opennova::renderer::ControlRegisterValues &p_ctrl) {
+	// The focused Q3 compile caches this material's block; every write
+	// below names the material so its surfaces re-read it once.
+	bool q3_parameters_changed = false;
+	if (p_needs_eval) {
+		opennova::renderer::MaterialRuntime runtime;
+		if (object_data_->eval_material_runtime_native(material_index,
+					anim_time_ms_, p_ctrl, runtime)) {
+			const opennova::renderer::MaterialRuntime &previous = stamp.runtime;
+			if (!stamp.runtime_valid || runtime.uv.m00 != previous.uv.m00 ||
+					runtime.uv.m10 != previous.uv.m10 ||
+					runtime.uv.m20 != previous.uv.m20) {
+				material->set_shader_parameter("u_uv_transform_u",
+						Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20));
+				q3_parameters_changed = true;
+			}
+			if (!stamp.runtime_valid || runtime.uv.m01 != previous.uv.m01 ||
+					runtime.uv.m11 != previous.uv.m11 ||
+					runtime.uv.m21 != previous.uv.m21) {
+				material->set_shader_parameter("u_uv_transform_v",
+						Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21));
+				q3_parameters_changed = true;
+			}
+			if (!stamp.runtime_valid || runtime.rgb_r != previous.rgb_r ||
+					runtime.rgb_g != previous.rgb_g ||
+					runtime.rgb_b != previous.rgb_b) {
+				material->set_shader_parameter("u_rgb_mod",
+						Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
+				q3_parameters_changed = true;
+			}
+			if (!stamp.runtime_valid || runtime.alpha != previous.alpha) {
+				material->set_shader_parameter("u_alpha_mod", runtime.alpha);
+				q3_parameters_changed = true;
+			}
+			if (!stamp.runtime_valid || runtime.reflect != previous.reflect) {
+				set_material_and_auxiliary_parameter(material,
+						postmultiply_material_for_index(material_index),
+						"u_reflect_color",
+						Vector4(runtime.reflect[0], runtime.reflect[1],
+								runtime.reflect[2], runtime.reflect[3]));
+				q3_parameters_changed = true;
+			}
+			stamp.runtime = runtime;
+			stamp.runtime_valid = true;
+		}
+	}
+	const Array *frames = anim_frames_by_mat_.getptr(material_index);
+	if (frames != nullptr && frames->size() > 1) {
+		const int frame_index = object_data_->compute_anim_frame_native(
+				material_index, anim_time_ms_, p_ctrl);
+		if (frame_index != stamp.anim_frame && frame_index >= 0 &&
+				frame_index < frames->size()) {
+			const Ref<Texture2D> frame = (*frames)[frame_index];
+			if (frame.is_valid()) {
+				const Ref<ShaderMaterial> postmultiply =
+						postmultiply_material_for_index(material_index);
+				set_material_and_auxiliary_parameter(material, postmultiply, "u_diffuse", frame);
+				set_material_and_auxiliary_parameter(material, postmultiply,
+						"u_diffuse_max_lod", opennova::material_texture_max_lod(frame));
+				stamp.anim_frame = frame_index;
+				q3_parameters_changed = true;
+			}
+		}
+	}
+	if (q3_parameters_changed) {
+		FrameFx::invalidate_q3_object_material(material);
 	}
 }
 
@@ -1916,6 +1750,9 @@ void ObjectModel::set_on_screen(bool p_value) {
 // draw parts dirty + the runtime wake) fires exactly on the product's edges.
 void ObjectModel::apply_node_visibility() {
 	set_visible(present_visible_ && !occlusion_hidden_ && !subpixel_hidden_);
+	if (inset_view_open_ && inset_view_models_.has(this)) {
+		refresh_view_split();
+	}
 }
 
 void ObjectModel::set_present_visible(bool p_visible) {
@@ -2125,6 +1962,27 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("update_authored_lods_for_camera", "camera", "viewport_width"),
 			&ObjectModel::update_authored_lods_for_camera);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("update_authored_lods_for_views", "main_camera", "main_width",
+					"inset_camera", "inset_width"),
+			&ObjectModel::update_authored_lods_for_views);
+	ClassDB::bind_static_method("ObjectModel", D_METHOD("sync_view_twins"),
+			&ObjectModel::sync_view_twins);
+	ClassDB::bind_method(D_METHOD("set_inset_occlusion_hidden", "hidden"),
+			&ObjectModel::set_inset_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("set_inset_occlusion_section_mask", "raw_mask", "forced_mask"),
+			&ObjectModel::set_inset_occlusion_section_mask);
+	ClassDB::bind_method(D_METHOD("clear_inset_occlusion"), &ObjectModel::clear_inset_occlusion);
+	ClassDB::bind_method(D_METHOD("get_inset_view_lod"), &ObjectModel::get_inset_view_lod);
+	ClassDB::bind_method(D_METHOD("is_inset_view_subpixel_hidden"),
+			&ObjectModel::is_inset_view_subpixel_hidden);
+	ClassDB::bind_method(D_METHOD("is_view_split"), &ObjectModel::is_view_split);
+	ClassDB::bind_method(D_METHOD("get_view_twin_count"), &ObjectModel::get_view_twin_count);
+	ClassDB::bind_method(D_METHOD("get_view_twin_shader_parameter", "index", "name"),
+			&ObjectModel::get_view_twin_shader_parameter);
+	ClassDB::bind_method(D_METHOD("is_inset_view_drawn"), &ObjectModel::is_inset_view_drawn);
+	ClassDB::bind_method(D_METHOD("get_inset_view_section_mask"),
+			&ObjectModel::get_inset_view_section_mask);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("get_live_geometry_instance_count"),
 			&ObjectModel::get_live_geometry_instance_count);

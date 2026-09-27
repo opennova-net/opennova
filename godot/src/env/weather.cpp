@@ -102,9 +102,9 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_smooth_cloud_edge"),
 			&Weather::get_smooth_cloud_edge);
 
-	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset1", "cam_x", "cam_z"),
+	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset1", "render_x", "render_z"),
 			&Weather::get_cloud_uv_offset1);
-	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset2", "cam_x", "cam_z"),
+	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset2", "render_x", "render_z"),
 			&Weather::get_cloud_uv_offset2);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"),
 			&Weather::get_cloud_uv_rate_per_second);
@@ -592,15 +592,15 @@ Vector3 Weather::get_smooth_cloud_edge() const {
 	return to_vector3(runtime_.smooth_cloud_edge());
 }
 
-Vector2 Weather::get_cloud_uv_offset1(float p_cam_x, float p_cam_z) const {
+Vector2 Weather::get_cloud_uv_offset1(float p_render_x, float p_render_z) const {
 	const opennova::env::CloudUvOffsets offsets =
-			runtime_.cloud_uv_offsets(p_cam_x, p_cam_z);
+			runtime_.cloud_uv_offsets(p_render_x, p_render_z);
 	return Vector2(offsets.u1, offsets.v1);
 }
 
-Vector2 Weather::get_cloud_uv_offset2(float p_cam_x, float p_cam_z) const {
+Vector2 Weather::get_cloud_uv_offset2(float p_render_x, float p_render_z) const {
 	const opennova::env::CloudUvOffsets offsets =
-			runtime_.cloud_uv_offsets(p_cam_x, p_cam_z);
+			runtime_.cloud_uv_offsets(p_render_x, p_render_z);
 	return Vector2(offsets.u2, offsets.v2);
 }
 

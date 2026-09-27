@@ -98,29 +98,33 @@ float terrain_water_mirror_pass_flag(uint camera_layers, bool in_shadow_pass) {
 // --- The terrain leg of the EffectWorld light pool --------------------------
 // Retail re-draws each terrain batch once more PER pool light (the first
 // opaquely, later ones additively; terrain.gdshader composites the pool with
-// the page and the fogged ordinary pass) through a two-stage projected-
-// texture shader: stage 0 samples the 64x64
-// "texlight2d" disc projected on the ground plane around the light, stage 1
-// the 64x8 "texlightspot1d" strip by height above/below it, both MODULATE2X
-// over the pixel constants c4..c6 the pass uploads (the light colour already
-// folded by 0.5 so stage 0's 2x restores it; stage 1's 2x stays).
-// (retail: the per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
-//  Light_SetupTerrainProjectedPass @0x5AA830; the collect, the 16-per-batch
-//  cap, the authored terrain-disable gate and the constants are portable in
-//  renderer::LightScene::collect_terrain_pass_rows; the two textures are
-//  renderer::falloff_texture_light2d_argb / _spot1d_argb; the projection
-//  contract terrain_light_uv_disc / _height — see
-//  docs/render/render-lighting-re.md.)
+// the page and the fogged ordinary pass). The reference adapter (caps bit
+// 0x100, four stages) draws it with the ps.1.1 program
+//   mov r0, t0; dp3_sat r0, r0_bx2, t1_bx2; mul r0, r0, t2; mul r0, r0, t3;
+//   mul r0, r0, c0
+// over t0 = the cube-normalize map along the light vector, t1 = the batch's
+// detail coefficient map at the detail coordinate, t2 = the 64x64
+// "texlight2d" disc projected on the ground plane around the light, t3 = the
+// same texture at the height above/below it, and c0 = the light colour
+// (retail: the per-light arm of render_terrain_sector_batch @0x6098a5 ->
+//  Light_SetupTerrainProjectedPassPS @0x5aab30, the source @0x7d9fa0; the
+//  collect, the 16-per-batch cap, the authored terrain-disable gate and c0
+//  are portable in renderer::LightScene::collect_terrain_pass_rows, the
+//  textures in renderer::falloff_texture_light2d_argb /
+//  cube_normalize_texel_argb and terrain::build_detail_coefficient_map, the
+//  projections in terrain_light_uv_disc / _height / terrain_light_cube_vector
+//  — renderer/light_terrain_pass.h carries the stage map).
 // Device fold: Godot instance uniforms take neither arrays nor samplers, so
 // the <= 16 rows per patch ride one RGBAF texture row per pool slot (two
-// texels per light: position.xyz + inv_scale, then c4..c6 + the patch's
-// count) and each patch instance carries its slot. The 0x600 shader retail
-// binds addresses CLAMP (sub_680720(this, clamp=1, 0, 0, 0)
-// @0x5a98eb..0x5a98f4) and both textures are created without mips, hence
-// filter_linear + repeat_disable here.
+// texels per light: position.xyz + inv_scale, then c0 + the patch's count)
+// and each patch instance carries its slot. The disc texture is created
+// clamped, bilinear and without mips (flags 0x40001), the cube map as one
+// bilinear level; the coefficient map wraps with the detail textures' device
+// filter. An unbound coefficient map samples black like retail's empty stage.
 uniform sampler2D u_terrain_light_rows : filter_nearest, repeat_disable, hint_default_black;
 uniform sampler2D u_terrain_light_disc : filter_linear, repeat_disable, hint_default_black;
-uniform sampler2D u_terrain_light_strip : filter_linear, repeat_disable, hint_default_black;
+uniform samplerCube u_terrain_light_cube : filter_linear, hint_default_black;
+uniform sampler2D u_terrain_light_normal : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_black;
 uniform bool u_terrain_light_enabled = false;
 const int TERRAIN_LIGHT_ROWS_PER_PATCH = 16;
 
@@ -133,33 +137,38 @@ int terrain_point_light_count(float slot) {
 	return int(texelFetch(u_terrain_light_rows, ivec2(1, int(slot + 0.5)), 0).a + 0.5);
 }
 
-vec3 terrain_point_light_pool(vec3 world_pos, float slot) {
+vec3 terrain_point_light_pool(vec3 world_pos, vec2 detail_uv, float slot) {
 	vec3 sum = vec3(0.0);
 	if (!u_terrain_light_enabled) {
 		return sum;
 	}
 	int row = int(slot + 0.5);
 	int count = int(texelFetch(u_terrain_light_rows, ivec2(1, row), 0).a + 0.5);
+	// t1_bx2: the coefficient texel is the batch's, shared by every light.
+	vec3 normal = texture(u_terrain_light_normal, detail_uv).rgb * 2.0 - 1.0;
 	for (int k = 0; k < TERRAIN_LIGHT_ROWS_PER_PATCH; k++) {
 		if (k >= count) {
 			break;
 		}
 		vec4 posr = texelFetch(u_terrain_light_rows, ivec2(2 * k, row), 0);
-		vec4 pixel = texelFetch(u_terrain_light_rows, ivec2(2 * k + 1, row), 0);
+		vec4 c0 = texelFetch(u_terrain_light_rows, ivec2(2 * k + 1, row), 0);
 		vec3 d = world_pos - posr.xyz;
 		// The mission-space contract (d3d.x = -mission.y, d3d.y = mission.z,
 		// d3d.z = mission.x): disc u = (light.y - p.y) * inv + 0.5,
-		// v = (p.x - light.x) * inv + 0.5; strip u = (p.z - light.z) * inv +
-		// 0.5, v = 0.5. In the Godot frame (x, y-up, z = -mission.y) that is
-		// disc (p.z - light.z, p.x - light.x) and strip (p.y - light.y).
+		// v = (p.x - light.x) * inv + 0.5; height u = (p.z - light.z) * inv +
+		// 0.5, v = 0.5; the cube lookup (light - p) . (x, -y, z) * inv. In the
+		// Godot frame (x, y-up, z = -mission.y) that is disc
+		// (p.z - light.z, p.x - light.x), height (p.y - light.y) and the cube
+		// lookup (light - p).xzy.
 		vec2 disc_uv = vec2(d.z, d.x) * posr.w + 0.5;
-		vec2 strip_uv = vec2(d.y * posr.w + 0.5, 0.5);
+		vec2 height_uv = vec2(d.y * posr.w + 0.5, 0.5);
+		vec3 light_vec = texture(u_terrain_light_cube, -d.xzy * posr.w).rgb * 2.0 - 1.0;
+		// dp3_sat r0, t0_bx2, t1_bx2, then x t2 x t3 x c0 (no doubling
+		// anywhere in the program).
+		float n_dot_l = clamp(dot(light_vec, normal), 0.0, 1.0);
 		vec3 disc = texture(u_terrain_light_disc, disc_uv).rgb;
-		vec3 strip = texture(u_terrain_light_strip, strip_uv).rgb;
-		// Stage 0 MODULATE2X (c * disc) x2, stage 1 MODULATE2X (prev * strip)
-		// x2: the explicit 2 * 2 is the witnessed fold, with the 0.5 already
-		// inside pixel.rgb.
-		sum += 2.0 * 2.0 * pixel.rgb * disc * strip;
+		vec3 height = texture(u_terrain_light_disc, height_uv).rgb;
+		sum += n_dot_l * disc * height * c0.rgb;
 	}
 	return sum;
 }

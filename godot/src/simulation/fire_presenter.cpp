@@ -479,8 +479,16 @@ int FirePresenter::append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_s
 		}
 		ObjectModel *body = owner_->resolve_wire_handle(source.handle);
 		ObjectModel *weapon = owner_->held_weapon_node(source.handle);
-		if (body == nullptr || !body->is_visible_in_tree() || weapon == nullptr ||
-				!weapon->is_visible_in_tree()) {
+		// The view's own draw: the main view the nodes, the Inset view the
+		// nodes while the two views agree, else the twins its collect's
+		// verdicts built (ObjectModel's view split); the gun is posed for
+		// either view.
+		const auto view_draws = [&p_view](ObjectModel *p_model) {
+			return p_view.inset_view && p_model->is_view_split()
+					? p_model->get_view_twin_count() > 0
+					: p_model->is_visible_in_tree();
+		};
+		if (body == nullptr || !view_draws(body) || weapon == nullptr || !view_draws(weapon)) {
 			continue;
 		}
 		const Ref<ObjectData> data = weapon->get_object_data();
@@ -520,7 +528,9 @@ int FirePresenter::append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_s
 		opennova::renderer::append_tracer_beam(points, count,
 				opennova::world::kNvgLaserTracerStyle, view, laser_frame_);
 		opennova::renderer::append_nvg_laser_overlay(laser_frame_,
-				r_submission.texture_index(smoke_texture()), p_view.fog, r_submission.frame);
+				r_submission.texture_index(smoke_texture()), p_view.fog, r_submission.frame,
+				p_view.inset_view ? opennova::renderer::SceneOverlaySlot::InsetNvgLaserBeams
+								  : opennova::renderer::SceneOverlaySlot::NvgLaserBeams);
 		++drawn;
 	}
 	return drawn;

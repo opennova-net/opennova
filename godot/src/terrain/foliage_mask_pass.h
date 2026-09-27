@@ -8,6 +8,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/rid.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -27,6 +28,7 @@ class FoliageFrameCompiler;
 
 namespace godot {
 
+class Camera3D;
 class Node;
 
 // One slot's normalized MODEL mesh as device bytes: (x, y, z, u, v) floats
@@ -62,6 +64,8 @@ struct FoliageMaskFrame {
 	// The RG32F mask target (owned by FoliageMaskPass) and its size.
 	RID target;
 	Vector2i target_size;
+	// An Inset frame's camera transform: the render of that camera draws it.
+	Transform3D view_camera;
 };
 
 // The pass's diagnostics (FoliageDispatcher::get_backend_report "mask").
@@ -77,6 +81,9 @@ struct FoliageMaskReport {
 	Vector2i target_size;
 	int64_t draws = 0;
 	int64_t instances = 0;
+	// The weapon Inset view's published flag and eye.
+	bool view_active = false;
+	Vector3 view_eye;
 };
 
 // The MODEL-tier depth masks as a texture for the opaque pass. Retail draws
@@ -101,6 +108,9 @@ public:
 	~FoliageMaskCompositorEffect() override;
 
 	void publish(const std::shared_ptr<const FoliageMaskFrame> &p_frame);
+	// The weapon Inset pass's own frame (null clears it): the render whose
+	// camera transform equals the frame's view_camera draws it instead.
+	void publish_view(const std::shared_ptr<const FoliageMaskFrame> &p_frame);
 	// Stop callbacks and free device objects while the RenderingDevice lives.
 	void release_device_resources();
 	// The render side's half of the report.
@@ -122,7 +132,9 @@ private:
 // WorldEnvironment compositor, owns the RG32F target the opaque-pass
 // consumers sample through the opennova_foliage_mask_depth global, publishes
 // the compiling camera's eye (opennova_foliage_mask_eye: only that view's
-// persons take the masks) and one frame per foliage compile.
+// persons take the masks) and one frame per foliage compile; the weapon Inset
+// pass publishes its own frame and eye (opennova_foliage_mask_inset_eye /
+// _inset_active) the same way.
 class FoliageMaskPass {
 public:
 	FoliageMaskPass();
@@ -134,18 +146,34 @@ public:
 			const opennova::renderer::FoliageDrawList &p_draw_list,
 			const opennova::renderer::FoliageFrameCompiler &p_compiler,
 			const std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> &p_fd_textures);
-	// Publishes an empty frame and clears the active global.
+	// The weapon Inset pass's own mask frame, compiled for `p_camera` after
+	// the main one (retail's Inset scene core draws its own BySide masks):
+	// drawn by the Inset camera's render, into the same target, before that
+	// render's opaque pass. Needs the main publish's installed effect.
+	void publish_view(Camera3D *p_camera,
+			const opennova::renderer::FoliageDrawList &p_draw_list,
+			const opennova::renderer::FoliageFrameCompiler &p_compiler,
+			const std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> &p_fd_textures);
+	void clear_view();
+	// Publishes an empty frame (both views') and clears the active global.
 	void clear();
 	void release();
 	FoliageMaskReport get_report() const;
 
 private:
+	std::shared_ptr<FoliageMaskFrame> _build_frame(
+			const opennova::renderer::FoliageDrawList &p_draw_list,
+			const opennova::renderer::FoliageFrameCompiler &p_compiler,
+			const std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> &p_fd_textures,
+			int64_t &r_instances);
 	void _install(Node *p_scope);
 	void _uninstall();
 	bool _ensure_target(const Vector2i &p_size);
 	void _flush_deferred_frees(bool p_all);
 	void _set_active(bool p_active);
 	void _set_eye(const Vector3 &p_eye);
+	void _set_view_active(bool p_active);
+	void _set_view_eye(const Vector3 &p_eye);
 
 	Ref<FoliageMaskCompositorEffect> effect_;
 	Ref<Compositor> installed_into_;
@@ -167,6 +195,14 @@ private:
 	bool texture_bound_ = false;
 	int64_t last_draws_ = 0;
 	int64_t last_instances_ = 0;
+	// Whether the main / Inset frame carries masks (each view's active global).
+	bool main_draws_ = false;
+	bool view_draws_ = false;
+	// The Inset view's globals (opennova_foliage_mask_inset_active / _eye).
+	bool view_active_ = false;
+	bool view_active_written_ = false;
+	Vector3 view_eye_;
+	bool view_eye_written_ = false;
 };
 
 } // namespace godot

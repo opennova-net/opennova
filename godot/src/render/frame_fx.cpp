@@ -74,14 +74,14 @@ using opennova::renderer::FrameFxTaps;
 // through its shader-side renderfov projection and depth band, retail's
 // "viewmodel first" step), and the empty-sector flat terrain fallback (bit
 // 18, which the water mirror excludes: docs/terrain/terrain-re.md, "Empty-sector
-// flat fallback"). Q3 omits the plumbing bit and the viewmodel; leaving the
-// gun out is observably equivalent: retail flushes Q3 under the world
-// projection and the full viewport (retail Render_SetViewport from
-// FrameFX_RenderGlowSource @ 0x582940 (the call @ 0x582a45))
-// against the beauty depth, where the gun's own band depth hides its copies
-// (D-RORD-10). That gives shaders a collision-free exact-mask signature
+// flat fallback"). Q3 omits the plumbing bit but not the viewmodel: the gun's
+// rigid glow-capable strips copy like a world object's and draw under this
+// camera's (the world's) projection against the beauty depth, where the gun's
+// band depth rejects a copy over its own opaque strips and a renderfov other
+// than the world fov moves the copy off the gun (runtime/renderer/q3_frame.h
+// q3_object_source_admitted). That gives shaders a collision-free exact-mask signature
 // without admitting caster or slot-capture geometry anywhere.
-constexpr std::uint32_t kBeautyCameraMask = 0x00078C01u;
+constexpr std::uint32_t kBeautyCameraMask = 0x00D78C01u; // + MAIN_VIEW bits 20/22/23 (visual_layers.h)
 // FrameFX's 256-square work targets. Focused Q3 is rendered at beauty
 // resolution into the compositor's color attachment with resolved beauty
 // depth attached; this size applies from the capture's downsample on.
@@ -1322,9 +1322,9 @@ bool FrameFxCompositorEffect::Impl::composite_q3(ViewTarget &target,
 // NVG_RenderScene @0x5d296d; NVG_AccumulateGlow @0x5d0290..0x5d048a;
 // NVG_Composite @0x5d0f28..0x5d1059) or, on the Scoped arm, the
 // polar unwrap and the lens (NvgViewDevice; retail NVG_DrawScopedLensThunk @0x5d2b10).
-// While the composite is up the world renders into 512 rows
-// (LocalPlayerPresenter's NVG raster), so the scene here is that frame
-// resampled to 512 x 512.
+// While the composite is up the world renders into the 512 square at the
+// frame's frustum (LocalPlayerPresenter's NVG raster, served through
+// TargetProjectionXrInterface), so the stretch here is 1:1.
 bool FrameFxCompositorEffect::Impl::run_nvg(ViewTarget &target,
 		const FrameFxNvgPlan &nvg, bool first_use, const FrameFxScreenFrame *screen,
 		std::size_t &draws) {
@@ -1711,8 +1711,10 @@ void FrameFx::invalidate_q3_object_material(const Ref<Material> &p_material) {
 }
 
 void FrameFx::register_q3_object_source(GeometryInstance3D *p_source,
-		const Ref<Material> &p_material) {
-	Q3SourceRegistry::register_object_source(p_source, p_material);
+		const Ref<Material> &p_material, Skeleton3D *p_rigid_skeleton,
+		int p_rigid_bone) {
+	Q3SourceRegistry::register_object_source(p_source, p_material,
+			p_rigid_skeleton, p_rigid_bone);
 }
 
 void FrameFx::unregister_q3_source(GeometryInstance3D *p_source) {

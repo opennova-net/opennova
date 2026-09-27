@@ -28,6 +28,7 @@
 #include <godot_cpp/variant/vector3i.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/classes/skin.hpp>
+#include <godot_cpp/classes/skin_reference.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/visible_on_screen_notifier3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -185,6 +186,9 @@ public:
 		LAYER_STATIC_SHADOW_CASTER = 1 << 13,
 		LAYER_DYNAMIC_SHADOW_CASTER = 1 << 14,
 		LAYER_WORLD_NO_MIRROR = 1 << 16,
+		LAYER_MAIN_VIEW = 1 << 20,
+		LAYER_INSET_VIEW = 1 << 21,
+		LAYER_MAIN_VIEW_NO_MIRROR = 1 << 22,
 		LAYER_SHADOW_CASTER_MASK =
 				LAYER_STATIC_SHADOW_CASTER | LAYER_DYNAMIC_SHADOW_CASTER,
 	};
@@ -381,12 +385,79 @@ private:
 	Vector3 slot_march_offset_;
 	int32_t parachute_projection_radius_q16_ = 0;
 	void refresh_entity_projection_sphere();
-	// The frame's views a projection is kept for: the frame's image and the
-	// weapon Inset pass (update_authored_lod_views).
-	static constexpr int kMaxLodViews = 2;
+	// The frame's views a projection is kept for: the frame's image (view 0)
+	// and the weapon Inset pass (view 1; update_authored_lod_views).
 	uint64_t lod_projection_frame_ = 0;
-	int32_t lod_projected_radius_q16_[kMaxLodViews] = {};
-	bool lod_projection_visible_[kMaxLodViews] = {};
+	int32_t lod_projected_radius_q16_[2] = {};
+	bool lod_projection_visible_[2] = {};
+	// --- the weapon Inset view (object_model_views.cpp) ---
+	// The Inset view's own verdicts where it gave one (a clear bit follows the
+	// main view's): the Inset collect's hide and raw section mask, the Inset
+	// RLOD walk's level and sub-pixel floor, the held weapon's 2 px gate.
+	enum : uint8_t {
+		kInsetOwnOcclusion = 1 << 0,
+		kInsetOwnSections = 1 << 1,
+		kInsetOwnLod = 1 << 2,
+		kInsetOwnPixel = 1 << 3,
+	};
+	uint8_t inset_own_ = 0;
+	bool inset_occlusion_hidden_ = false;
+	int64_t inset_section_mask_ = -1;
+	int inset_lod_ = 0;
+	bool inset_subpixel_hidden_ = false;
+	bool inset_camera_pixel_culled_ = false;
+	// The views differ: the node draws the main view's on the main-view bits
+	// and a twin RenderingServer instance per drawn surface of the Inset's
+	// level draws the Inset's on LAYER_INSET_VIEW, mirroring the part pose,
+	// skeleton, material and instance uniforms; freed when the views converge
+	// or the Inset closes.
+	struct ViewTwin {
+		RID instance;
+		int surface = 0; // the surface row of view_twin_lod_
+		bool auxiliary = false;
+		// The Inset pass selected this twin's point lights itself
+		// (apply_inset_point_light_selection); the node's are not mirrored.
+		bool own_lights = false;
+		uint64_t lights_hash = 0;
+	};
+	bool view_split_ = false;
+	std::vector<ViewTwin> view_twins_;
+	int view_twin_lod_ = -1;
+	int64_t view_twin_mask_ = -1;
+	uint32_t view_twin_destroyed_ = 0;
+	uint32_t view_twin_serial_ = 0;
+	// The part poses of a twin level the node does not show (Node3D objects
+	// outside the tree, written through the per-graphic PANM cache).
+	Array view_twin_pose_nodes_;
+	int64_t view_twin_pose_revision_ = 0;
+	Ref<SkinReference> view_twin_skin_;
+	// Section-bound instances another owner minted for the Inset view (the
+	// scar presenter's section-local scar twins): posed like this model's
+	// twins, shown only while a twin draws their section.
+	struct InsetSectionTwin {
+		RID instance;
+		int section = 0;
+	};
+	std::vector<InsetSectionTwin> inset_section_twins_;
+	void sync_inset_section_twins(bool p_drawn);
+	static HashSet<ObjectModel *> inset_view_models_;
+	static bool inset_view_open_;
+	void mark_inset_view();
+	static void set_inset_view_open(bool p_open);
+	static void refresh_inset_views();
+	void refresh_view_split();
+	// The Inset pass's draw verdict for the node (its own verdicts, else the
+	// main view's), under ancestors that draw there.
+	bool inset_view_draws() const;
+	void apply_view_split_layers();
+	bool inset_section_part_visible(int64_t p_mask, int p_section) const;
+	// Write one Inset selection to the twins it covers: every twin
+	// (p_all), else the twins of ROBJ p_robj_index (-1: the skinned ones).
+	void write_twin_point_lights(bool p_all, int p_robj_index, int p_count,
+			const Vector4 *p_posr, const Vector4 *p_color);
+	void build_view_twins(int p_level, int64_t p_mask);
+	void free_view_twins();
+	void sync_view_twin();
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
 	std::vector<bool> authored_lod_available_;
@@ -440,9 +511,10 @@ private:
 	bool present_visible_ = true;
 	bool occlusion_hidden_ = false;
 	// The authored-LOD walk's sub-pixel verdict: a world model whose bound
-	// sphere projects to at most 0.75 px in every view that sees it is not
-	// drawn (retail render_sector_entity @ 0x5c42d8..0x5c42de returns before
-	// the RLOD walk); an attachment takes its owner's.
+	// sphere projects to at most 0.75 px in the main view is not drawn there
+	// (retail render_sector_entity @ 0x5c42d8..0x5c42de returns before the
+	// RLOD walk; the Inset view keeps its own verdict); an attachment takes
+	// its owner's.
 	bool subpixel_hidden_ = false;
 	void set_subpixel_hidden(bool p_hidden);
 	void apply_node_visibility();
@@ -573,6 +645,19 @@ private:
 		int anim_frame = -1;
 	};
 	std::vector<MaterialRuntimeStamp> material_runtime_stamps_;
+	void apply_dynamic_material(const Ref<ShaderMaterial> &material, int material_index,
+			bool p_needs_eval, MaterialRuntimeStamp &stamp,
+			const opennova::renderer::ControlRegisterValues &p_ctrl);
+	// An Inset twin level's dynamic materials the node's own level does not
+	// carry (its alpha-strip duplicates, material rows only that level uses):
+	// the twin pushes them per frame exactly as the node pushes its own.
+	struct TwinDynamicMaterial {
+		Ref<ShaderMaterial> material;
+		int material_index = 0;
+		bool needs_eval = false;
+		MaterialRuntimeStamp stamp;
+	};
+	std::vector<TwinDynamicMaterial> view_twin_dynamic_;
 	// Set by an EntityPresenter row plan that retains this model by pointer and
 	// cleared when that plan drops the row; only planned models advance
 	// lifetime_generation_ when they die.
@@ -864,12 +949,61 @@ public:
 			float p_vertical_fov_degrees,
 			float p_viewport_width,
 			float p_viewport_height);
-	// The same walk over every view drawing the world this frame (at most
-	// kMaxLodViews: the frame's image and, while it renders, the weapon Inset
-	// pass). The views share one node per entity, so each model takes the
-	// finest level any view selects and is sub-pixel hidden only when every
-	// view that sees it projects it at or below 0.75 px.
+	// The same walk per view drawing the world this frame: view 0 the frame's
+	// image, view 1 (present while it renders) the weapon Inset pass, which
+	// retail runs as its own scene pass with its own frame scale, sub-pixel
+	// floor and RLOD walk. The node takes view 0's level and verdict; view 1's
+	// are the model's Inset state, drawn by a twin where they differ
+	// (object_model_views.cpp). A frame set without view 1 closes the Inset
+	// view and converges every split model.
 	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count);
+	// The two-camera form (view 1 null = no Inset view), for tools and tests.
+	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
+			Camera3D *p_inset, float p_inset_width);
+	// The frame driver's leg after the awake advance: every twin follows its
+	// model's final transform, part pose, instance uniforms and strip rung.
+	static void sync_view_twins();
+	// The Inset collect's verdicts (OcclusionFrame::apply_inset_frame): its
+	// hide and its raw section mask (the def's forced sections are shared);
+	// clear releases both onto the main view's.
+	void set_inset_occlusion_hidden(bool p_hidden);
+	void set_inset_occlusion_section_mask(int64_t p_raw_mask, int64_t p_forced_mask);
+	void clear_inset_occlusion();
+	// A presenter-driven model's Inset level (the death pieces' own level
+	// walk, run per collect): the set_active_lod of the Inset view.
+	void set_inset_view_lod(int p_lod_index);
+	// An instance another owner keeps (and frees) that must draw in the Inset
+	// view with this model's section `p_section`: posed with the Inset's part
+	// pose every twin sync and shown only while a twin draws that section.
+	void attach_inset_section_twin(const RID &p_instance, int p_section);
+	void detach_inset_section_twin(const RID &p_instance);
+	// The Inset view's level and sub-pixel verdict (its own, else the main
+	// view's), whether the views differ (the node on the main-view bits) and
+	// the twin instances drawing the Inset's.
+	int get_inset_view_lod() const;
+	bool is_inset_view_subpixel_hidden() const;
+	bool is_view_split() const { return view_split_; }
+	int get_view_twin_count() const { return static_cast<int>(view_twins_.size()); }
+	// One twin's instance uniform as the RenderingServer holds it (the typed
+	// read-back of what the Inset draws with; nil past the count).
+	Variant get_view_twin_shader_parameter(int p_index, const StringName &p_name) const;
+	// The Inset pass's reads for its light legs (the EffectWorld device):
+	// whether it draws this model (the twins while the views differ, else the
+	// node), the raw section mask it draws with (its own verdict, else the
+	// main view's; -1 = none), whether its level is skinned, and the rigid
+	// ROBJs the twins draw (ascending).
+	bool is_inset_view_drawn() const;
+	int64_t get_inset_view_section_mask() const;
+	bool is_inset_view_level_skinned() const;
+	void collect_inset_point_light_draw_parts(std::vector<int32_t> &r_robjs) const;
+	// The Inset pass's own point-light selection for the twins (the packed
+	// form apply_point_light_selection writes to the node): every twin, or the
+	// twins of one ROBJ (-1: the skinned twins). A twin holding its own keeps
+	// it over the node's; a rebuilt twin mirrors the node until it gets one.
+	void apply_inset_point_light_selection(int p_count, const Vector4 *p_posr,
+			const Vector4 *p_color);
+	void apply_inset_point_light_selection_to_robj(int p_robj_index, int p_count,
+			const Vector4 *p_posr, const Vector4 *p_color);
 	// One camera's view (ObjectLodFrame::from_camera): its own drawn frustum
 	// (the keep-aspect mode decides which axis its fov names) and the focal
 	// over `viewport_width`, the width the image reaches the surface at.

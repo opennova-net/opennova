@@ -53,6 +53,7 @@ void Celestial::_bind_methods() {
 			&Celestial::is_sky_beauty_pass_drawn);
 	ClassDB::bind_method(D_METHOD("is_sky_mirror_pass_drawn"),
 			&Celestial::is_sky_mirror_pass_drawn);
+	ClassDB::bind_method(D_METHOD("set_inset_view", "camera"), &Celestial::set_inset_view);
 	ClassDB::bind_static_method("Celestial",
 			D_METHOD("source_material_uses_additive", "source"),
 			&Celestial::source_material_uses_additive);
@@ -398,7 +399,14 @@ void Celestial::_publish_idle_veil() {
 	}
 }
 
+void Celestial::set_inset_view(Camera3D *p_camera) {
+	inset_camera_id_ = p_camera != nullptr ? ObjectID(p_camera->get_instance_id()) : ObjectID();
+}
+
 void Celestial::advance_frame(double p_delta) {
+	inset_glint_.model = nullptr;
+	inset_glint_.drawn = false;
+	inset_glint_.upl = 0;
 	if (bodies_.is_empty()) {
 		_rebuild_if_needed();
 		if (bodies_.is_empty()) {
@@ -467,6 +475,9 @@ void Celestial::advance_frame(double p_delta) {
 		// mirrored placement, CPU alpha) [orig: update_sun_glare @ 0x5ad130,
 		// see docs/env/env-tod-re.md].
 		_advance_water_glint(state, cam_pos, sun_dir, forward, *glint);
+		// The weapon Inset pass calls it again at its own camera, before the
+		// frame's veil below reads the accumulator (env::WaterGlintState).
+		_advance_inset_water_glint(state, cam_pos, sun_dir, *glint);
 	}
 
 	// The sun-glare screen veil + exposure stop-down, once per frame after
@@ -660,7 +671,9 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 	// eight consecutive frames (a full window turnover at any jitter phase)
 	// after the window itself is full (4 frames of 2 samples). The
 	// water-glint accumulator settles alongside on the same frames (its
-	// snap-through +-16 chase converges within the same cap).
+	// snap-through +-16 chase converges within the same cap), each frame
+	// stepping every scene pass's call the live frame makes: the main
+	// scene's, then the weapon Inset pass's while one is set (set_inset_view).
 	Body *glint_body = bodies_.getptr("glint");
 	int held = 0;
 	int last = glare_occlusion_->get_brightness();
@@ -669,6 +682,7 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 		if (glint_body != nullptr) {
 			_advance_water_glint(state, cam_pos, sun_dir, forward,
 					*glint_body);
+			_advance_inset_water_glint(state, cam_pos, sun_dir, *glint_body);
 		}
 		const int brightness = glare_occlusion_->get_brightness();
 		held = brightness == last ? held + 1 : 0;
@@ -692,6 +706,11 @@ Dictionary Celestial::get_diagnostics() const {
 	Dictionary glint;
 	glint["brightness"] = water_glint_.brightness;
 	glint["window"] = static_cast<int>(water_glint_.window);
+	glint["frame_index"] = static_cast<int64_t>(water_glint_.frame_index);
+	// The weapon Inset pass's call this frame (set_inset_view).
+	glint["inset_drawn"] = inset_glint_.drawn;
+	glint["inset_upl"] = inset_glint_.upl;
+	glint["inset_eye"] = inset_glint_.eye;
 	diag["water_glint"] = glint;
 	Dictionary veil;
 	veil["glare"] = sun_veil_glare_;
@@ -783,6 +802,50 @@ void Celestial::_advance_water_glint(
 	p_body.drawn = frame.drawn;
 	_set_body_parameter(p_body, "u_sky_beauty_drawn", frame.drawn);
 	p_body.model->set_visible(frame.drawn);
+}
+
+void Celestial::_advance_inset_water_glint(const opennova::env::EnvironmentState &p_state,
+		const Vector3 &p_main_eye, const Vector3 &p_sun_dir, Body &p_body) {
+	Camera3D *inset = Object::cast_to<Camera3D>(ObjectDB::get_instance(inset_camera_id_));
+	if (inset == nullptr || !inset->is_inside_tree() || p_body.model == nullptr) {
+		return;
+	}
+	// The same water test as the main call (no water = no glint).
+	if (!p_state.has_water_height() || p_state.water_height() == 0.0f) {
+		return;
+	}
+	const Transform3D eye = inset->get_global_transform();
+	const Vector3 forward = -eye.basis.get_column(2).normalized();
+	const opennova::env::WaterGlintFrame frame = opennova::env::advance_water_glint(
+			p_state, godot_to_mission(eye.origin), godot_to_mission(p_sun_dir),
+			godot_to_mission(forward), water_glint_,
+			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
+				return _segment_clear(mission_to_godot(a), mission_to_godot(b));
+			});
+	inset_glint_.model = p_body.model;
+	inset_glint_.drawn = frame.drawn;
+	inset_glint_.upl = frame.upl;
+	inset_glint_.eye = eye.origin;
+	inset_glint_.forward = forward;
+	// The main call placed the body at its eye + the mirrored sun * 128; the
+	// Inset draws the same direction from its own eye.
+	inset_glint_.offset = eye.origin - p_main_eye;
+	inset_glint_.self_lum.clear();
+	const Ref<ObjectData> data = p_body.model->get_object_data();
+	if (data.is_null()) {
+		return;
+	}
+	opennova::renderer::ControlRegisterValues registers{};
+	registers[static_cast<size_t>(opennova::env::kCelestialUplRegister)] = frame.upl;
+	for (int i = 0; i < p_body.meshes.size(); ++i) {
+		opennova::renderer::MaterialRuntime runtime;
+		if (p_body.material_indices[i] < 0 ||
+				!data->eval_material_runtime_native(p_body.material_indices[i], 0, registers,
+						runtime)) {
+			continue;
+		}
+		inset_glint_.self_lum[p_body.meshes[i]] = { runtime.rgb_r, runtime.rgb_g, runtime.rgb_b };
+	}
 }
 
 } // namespace godot

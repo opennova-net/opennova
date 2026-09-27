@@ -76,6 +76,8 @@
 
 namespace godot {
 
+class HudInsetScope;
+
 // Loads a playable world (terrain + environment + vegetation + foliage) from
 // ONE resource root and wires it onto the engine nodes it contains (Terrain,
 // MissionEnvironment, Water). The data core is shared engine code
@@ -344,7 +346,15 @@ public:
 	// The presenter the local-view leg and the fixed-tick weapon drain reach
 	// (null in worlds without one).
 	LocalPlayerPresenter *local_view_presenter() const;
+	// The handoff from the HUD (its scope build binds, its teardown releases):
+	// the weapon Inset scope the local-view leg refreshes over the view it
+	// just composed, so every Inset leg of the frame reads this frame's
+	// camera (present_local_view_frame).
+	void set_inset_scope(HudInsetScope *p_scope);
 	Ref<EffectLightReport> get_effect_light_report() const;
+	// The frame's light director (its scene's published static-row atlas is
+	// what a static row draws with).
+	Ref<EffectLightDirector> get_effect_light_director() const { return light_director_; }
 	// The Godot per-frame order, faithful to the original main loop's
 	// server-tick-then-client-render: the leg table, once per display frame.
 	void tick(const Vector3 &p_camera_pos, const Transform3D &p_camera_xform = Transform3D(),
@@ -468,7 +478,7 @@ public:
 	// The live terrain node, for the F3 Terrain & foliage page's
 	// counters/knobs.
 	Terrain *get_terrain_node() const { return terrain_; }
-	// The foliage dispatcher under Terrain (null in a code-built world without
+	// The foliage dispatcher beside Terrain (null in a code-built world without
 	// one): the vegetation asset caches live on it for the world's whole life
 	// (the shell's exit empties them through clear_asset_cache).
 	FoliageDispatcher *get_foliage_dispatcher() const { return dispatcher_; }
@@ -586,6 +596,9 @@ private:
 	Camera3D *image_camera() const;
 	// The surface (window) width in pixels: the retail viewport width.
 	float surface_width() const;
+	// The weapon Inset pass's camera while that pass renders this frame (the
+	// local-view leg's hand-over), else null.
+	Camera3D *inset_pass_camera() const;
 	Transform3D render_camera_xform() const;
 	void stamp_iris_samples(const Transform3D &p_camera_xform);
 	void render_terrain_light_leg();
@@ -773,6 +786,9 @@ private:
 	// occlusion/iris/particle legs lets them read the camera THIS frame's tick
 	// produced, not last frame's.
 	ObjectID local_view_presenter_id_;
+	// The HUD's weapon Inset scope (set_inset_scope); the same D-RORD-8 order
+	// for the Inset camera: the local-view leg stamps it and hands it over.
+	ObjectID inset_scope_id_;
 	// The 256x256 depthspin-equivalent shore mask. The base map always binds
 	// the original sharp colormap; this texture carries only transparent/blue
 	// water.

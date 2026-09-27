@@ -114,6 +114,24 @@ public:
 	// Discard mission-run presentation state (the Stop -> Play boundary): every
 	// scar mesh goes; the presenter and its texture cache stay.
 	void reset_runtime_state();
+	// The weapon Inset view (OcclusionFrame::apply_inset_frame / release_inset).
+	// Retail's Inset scene core compiles and draws the scar caches inside its
+	// own collect (engine: world/occlusion.h OcclusionView carries the
+	// witness): while it renders, present_frame compiles the list a second
+	// time over the Inset's section masks and eye. The main list's world mesh
+	// then draws for the main view only, the Inset list's on INSET_VIEW; an
+	// entity-ring group of an owner whose views differ (ObjectModel split)
+	// takes an Inset twin the owner poses with its Inset part pose, while the
+	// owner's node scars follow the node's main-view bits.
+	void set_inset_view(bool p_active, const Vector3 &p_camera);
+	// The Inset leg's typed read-back: its world surfaces and entity twins.
+	int get_inset_world_surface_count() const { return stat_inset_world_surfaces_; }
+	int get_inset_entity_twin_count() const { return static_cast<int>(inset_twins_.size()); }
+	// The Inset leg over an authored list (the present_draw_list precedent),
+	// and its owner-map form (the present precedent).
+	void present_inset_draw_list(const Ref<ScarDrawList> &p_draw_list, EntityIndex *p_index,
+			EntityPresenter *p_wire);
+	void present_inset(const Ref<ScarDrawList> &p_draw_list, const Dictionary &p_owner_nodes);
 	// Typed diagnostic counters of the pass (ADR 0017: cross-object contracts
 	// are typed records) — probes assert the presentation leg actually ran.
 	Ref<ScarPresentStats> get_present_stats() const;
@@ -164,6 +182,22 @@ private:
 	int stat_slots_culled_ = 0;
 	int stat_rings_leased_ = 0;
 	int stat_owners_unresolved_ = 0;
+	// The weapon Inset view's leg (set_inset_view).
+	struct InsetScarTwin {
+		RID instance;
+		Ref<ArrayMesh> mesh;
+		ObjectID owner;
+	};
+	bool inset_active_ = false;
+	Vector3 inset_camera_;
+	ObjectID inset_world_mesh_id_;
+	HashMap<uint32_t, InsetScarTwin> inset_twins_;
+	int stat_inset_world_surfaces_ = 0;
+	void present_inset_(const Ref<ScarDrawList> &p_draw_list, const Dictionary &p_owner_nodes);
+	void release_inset_();
+	// The main world mesh's view bits: the world layer, or the main view's
+	// alone while the Inset draws its own list.
+	void apply_world_mesh_view_(bool p_split);
 };
 
 } // namespace godot

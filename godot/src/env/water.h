@@ -14,6 +14,8 @@
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/node_path.hpp>
+#include <godot_cpp/variant/projection.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 
 #include <runtime/environment/water_frame.h>
 #include <runtime/environment/water_mirror.h>
@@ -25,6 +27,7 @@ namespace godot {
 
 class Compositor;
 class EnvFile;
+class Environment;
 class FrameFxCompositorEffect;
 class MissionEnvironment;
 
@@ -101,6 +104,14 @@ public:
 	void set_visible_terrain_bounds(bool p_valid, float p_min_height,
 			float p_max_height);
 	void set_blink_water_visible(bool p_visible);
+	// While the weapon Inset renders, each view's blink-water gate: the
+	// Inset scene core draws its water passes on its own collect's
+	// g_BlinkWaterVisible (engine: world/occlusion.h OcclusionView). The one
+	// strip carries both views' verdicts: both -> the water layer, the main
+	// view alone -> MAIN_VIEW_WATER (the beauty camera admits it, neither the
+	// Inset nor either mirror mask does), the Inset alone -> the Inset bit,
+	// neither -> hidden. (true, true) restores the ordinary strip.
+	void set_blink_water_views(bool p_main, bool p_inset);
 	bool is_water_pass_active() const;
 	// The world's entity-update counter, the noise pair's frame counter (the
 	// one retail's noise generator reads; witness in advance_frame): a frame
@@ -108,6 +119,13 @@ public:
 	// nobody feeds counts its own render frames.
 	void set_noise_frame_counter(uint32_t p_counter);
 	int get_noise_frame_counter() const { return frame_counter_; }
+	// The mirror's outdoors flag (renderer::ScenePassGates::mirror_sky, off
+	// under the indoors blink letter), fed from the scene-pass gates; it
+	// selects the mirror target's own clear (EnvironmentState::
+	// water_mirror_clear_color), which the mirror camera's BG_COLOR
+	// environment carries while a loaded MissionEnvironment exists.
+	void set_mirror_scene_outdoors(bool p_outdoors);
+	bool is_mirror_scene_outdoors() const { return mirror_scene_outdoors_; }
 
 	void build();
 	bool is_built() const { return built_; }
@@ -144,17 +162,25 @@ private:
 	void _apply_environment_water_height();
 	void _push_water_split_height();
 	void _sync_render_activity();
-	// The camera drawing the world this frame: the world's local view
-	// presenter's aspect-mode target camera while that target is live (its
-	// viewport is the target the blit stretches over the surface), else the
-	// surface camera `p_surface_cam`.
-	Camera3D *_view_camera(Camera3D *p_surface_cam) const;
-	void _update_reflection_camera(Camera3D *p_cam);
+	// The view drawing the world this frame: the world's local view
+	// presenter's target while that target is live (its camera; the frame's
+	// projection, LocalPlayerPresenter::view_projection, the NVG raster's
+	// served matrix included; the target's raster -- the blit stretches it
+	// over the surface), else the surface camera `p_surface_cam` over its own
+	// viewport.
+	struct DrawingView {
+		Camera3D *camera = nullptr;
+		Projection projection;
+		Vector2i raster;
+	};
+	DrawingView _drawing_view(Camera3D *p_surface_cam) const;
+	void _update_reflection_camera(Camera3D *p_cam, const Projection &p_projection);
+	void _apply_reflection_clear();
 	void _install_reflection_decode();
 	void _release_reflection_decode();
-	// One strip march for `p_cam` into WaterCore's rows; returns the row count
+	// One strip march for `p_view` into WaterCore's rows; returns the row count
 	// (0 when the view cannot march). The pass fog end follows the side.
-	int _march_strip(Camera3D *p_cam, bool p_underwater, bool p_nightvision,
+	int _march_strip(const DrawingView &p_view, bool p_underwater, bool p_nightvision,
 			float p_murk, float p_fog_end,
 			const opennova::env::WaterDepthCurve &p_depth_curve,
 			const Color &p_lit, const Ref<EnvFile> &p_env_data);
@@ -189,6 +215,9 @@ private:
 	// callback while RenderingServer is still alive, before deleting the view.
 	Ref<FrameFxCompositorEffect> reflection_decode_effect_;
 	Ref<Compositor> reflection_compositor_;
+	// The mirror camera's own clear environment (_apply_reflection_clear).
+	Ref<Environment> reflection_environment_;
+	bool mirror_scene_outdoors_ = true;
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
 	ObjectID env_node_id_;

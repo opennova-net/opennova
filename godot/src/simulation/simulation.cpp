@@ -139,9 +139,6 @@ void Simulation::reset_world() {
 	// WeatherState is the environment's live view): release it before the
 	// kernel is replaced.
 	_release_weather_owner();
-	// The drawer's last-camera latch is mission-scoped: a stale one would
-	// hand the next mission's first rain frame a bogus (clamped) streak.
-	assets_.precipitation_draw = opennova::renderer::PrecipitationDrawState{};
 	if (joiner_role_ != nullptr) joiner_role_->reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
@@ -253,7 +250,7 @@ bool Simulation::complete_mission_start() {
 
 const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitation_frame(
 		const Vector3 &p_camera, const Vector3 &p_camera_right, const Vector3 &p_camera_up,
-		int p_terrain_light_rgb) {
+		int p_terrain_light_rgb, int p_camera_mode) {
 	if (!world_installed_ || kernel_ == nullptr) {
 		assets_.precipitation_frame.clear();
 		assets_.precipitation_frame.snow = false;
@@ -277,10 +274,11 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 	camera.up[0] = p_camera_up.x;
 	camera.up[1] = p_camera_up.y;
 	camera.up[2] = p_camera_up.z;
+	camera.mode = p_camera_mode;
 	opennova::renderer::PrecipitationDrawFrame &frame = assets_.precipitation_frame;
 	opennova::renderer::compile_precipitation_frame(weather.precipitation,
 			weather.core.scalar_channels.rain_pct_fp, weather.precipitation_kind,
-			static_cast<uint32_t>(p_terrain_light_rgb), camera, assets_.precipitation_draw, frame);
+			static_cast<uint32_t>(p_terrain_light_rgb), camera, kernel_->precipitation_draw, frame);
 	return frame;
 }
 
@@ -554,7 +552,7 @@ std::function<void()> Simulation::role_bringup_hook() {
 			// when the shell's load_weapon_table lands.
 			push_joiner_loadout_kit();
 		}
-		install_item_class_resolver();
+		install_item_catalog();
 	};
 }
 

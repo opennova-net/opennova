@@ -379,7 +379,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("occlusion_init_mission"),
 	                     &Simulation::occlusion_init_mission);
 	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_y_deg", "aspect",
-	                              "viewport_width", "near", "fog_dist_units", "water_z_units",
+	                              "viewport_width", "fog_dist_units", "water_z_units",
 	                              "force_indoors"),
 	                     &Simulation::run_occlusion_frame);
 	ClassDB::bind_method(D_METHOD("get_building_visibility_changes"),

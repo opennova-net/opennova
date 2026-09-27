@@ -11,10 +11,13 @@ using namespace godot;
 Ref<DestructionEffectEvent> DestructionEffectEvent::make(const String &p_effect,
 		const Vector3 &p_pos, int p_family, const Vector3 &p_dir, int p_attach_net_id,
 		int p_attach_bms_id, int p_attach_wire_handle, int64_t p_attach_spawn_origin,
-		bool p_release, int p_bank_slot, const Vector3 &p_local_pos) {
+		bool p_release, int p_bank_slot, const Vector3 &p_local_pos, bool p_section_tagged,
+		bool p_positioned) {
 	opennova::world::DestructionEffectEvent v;
 	v.effect = p_effect.utf8().get_data();
 	v.release = p_release;
+	v.section_tagged = p_section_tagged;
+	v.positioned = p_positioned;
 	v.bank_slot = static_cast<uint8_t>(p_bank_slot);
 	v.attach_local_pos = { p_local_pos.z, -p_local_pos.x, p_local_pos.y };
 	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
@@ -38,17 +41,19 @@ void DestructionEffectEvent::_bind_methods() {
 	ClassDB::bind_static_method("DestructionEffectEvent",
 			D_METHOD("make", "effect", "pos", "family", "dir", "attach_net_id", "attach_bms_id",
 					"attach_wire_handle", "attach_spawn_origin", "release", "bank_slot",
-					"local_pos"),
+					"local_pos", "section_tagged", "positioned"),
 			&DestructionEffectEvent::make, DEFVAL(0), DEFVAL(Vector3()), DEFVAL(0), DEFVAL(0),
 			DEFVAL(static_cast<int>(opennova::world::EntityHandle::kInvalid)),
 			DEFVAL(static_cast<int64_t>(opennova::world::kSpawnOriginNone)), DEFVAL(false),
-			DEFVAL(0), DEFVAL(Vector3()));
+			DEFVAL(0), DEFVAL(Vector3()), DEFVAL(false), DEFVAL(false));
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::STRING, effect)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::VECTOR3, pos)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::VECTOR3, dir)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, family)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, bank_slot)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::BOOL, release)
+	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::BOOL, section_tagged)
+	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::BOOL, positioned)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_net_id)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_bms_id)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_wire_handle)

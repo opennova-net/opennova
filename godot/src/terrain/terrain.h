@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/static_body3d.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/cubemap.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
@@ -67,27 +68,83 @@ private:
 	// once per load and the per-frame compiler whose draw list this node applies.
 	opennova::TerrainSceneSnapshot scene_snapshot;
 	opennova::TerrainFrameCompiler frame_compiler;
+	// The weapon Inset pass's own traversal (render_inset_frame).
+	opennova::TerrainFrameCompiler inset_frame_compiler;
+	opennova::TerrainViewInput _view_input_for(Camera3D *p_camera);
+	void _apply_frame_draw_list(const opennova::TerrainDrawList &draw_list);
 	// False until a compile ran for the current frame's camera; the foliage
 	// handoff getter returns no cells while it is down (mission teardown, no
 	// active camera) rather than a stale draw list's.
 	bool frame_draw_list_live = false;
+	// This frame's tracked visible-terrain bounds: the compile's while the
+	// terrain draws, the bounds walk alone while it is hidden; down until a
+	// frame with a camera ran either.
+	opennova::VisibleBounds frame_bounds;
+	bool frame_bounds_live = false;
+	// The Inset's own frame compiled since it opened (release_inset_frame).
+	bool inset_draw_list_live = false;
 
-	// Lightweight RenderingServer instance pool for visible patches. The pool
-	// size is the engine compiler's draw list budget; draw-list index == pool slot.
+	// One view's light rows: one RGBAF row per pool slot, two texels per light
+	// — (position.xyz Godot world, inv_scale) then (c0, the patch's count).
+	static constexpr int LIGHT_ROWS_PER_PATCH =
+			opennova::renderer::kTerrainLightQueryLimit;
+	static constexpr int LIGHT_ROWS_TEXELS = LIGHT_ROWS_PER_PATCH * 2;
+	struct LightRows {
+		Ref<Image> image;
+		Ref<ImageTexture> texture;
+		PackedByteArray bytes;
+		// The bytes the rows texture currently holds: the per-frame rebuild
+		// uploads only when they differ (a full RGBAF texture update otherwise).
+		PackedByteArray uploaded;
+		int enabled_written = -1; // -1 unset, else the bool last pushed
+	};
+
+	// Lightweight RenderingServer instance pool for one view's visible
+	// patches. The pool size is the engine compiler's draw list budget;
+	// draw-list index == pool slot == the row of the view's light rows.
 	static constexpr int PATCH_POOL_SIZE = opennova::TerrainFrameCompiler::kPatchBudget;
-	RID patch_instances[PATCH_POOL_SIZE];
-	RID last_mesh_rid[PATCH_POOL_SIZE];
-	Transform3D last_transform[PATCH_POOL_SIZE];
-	bool patch_visible[PATCH_POOL_SIZE] = {};
-	// The per-instance uniforms each slot holds (written on change only: an
-	// instance uniform write is a RenderingServer call per patch per frame).
-	bool patch_uniforms_stamped[PATCH_POOL_SIZE] = {};
-	Vector2 last_quadrant[PATCH_POOL_SIZE];
-	bool last_page_ready[PATCH_POOL_SIZE] = {};
-	bool last_zero_height[PATCH_POOL_SIZE] = {};
-	float last_page_layer[PATCH_POOL_SIZE] = {};
-	Vector4 last_page_projection[PATCH_POOL_SIZE];
-	int patches_active = 0;
+	struct PatchPool {
+		RID instances[PATCH_POOL_SIZE];
+		RID last_mesh_rid[PATCH_POOL_SIZE];
+		Transform3D last_transform[PATCH_POOL_SIZE];
+		bool visible[PATCH_POOL_SIZE] = {};
+		// The per-instance uniforms each slot holds (written on change only: an
+		// instance uniform write is a RenderingServer call per patch per frame).
+		bool uniforms_stamped[PATCH_POOL_SIZE] = {};
+		Vector2 last_quadrant[PATCH_POOL_SIZE];
+		bool last_page_ready[PATCH_POOL_SIZE] = {};
+		bool last_zero_height[PATCH_POOL_SIZE] = {};
+		float last_page_layer[PATCH_POOL_SIZE] = {};
+		Vector4 last_page_projection[PATCH_POOL_SIZE];
+		uint32_t last_layer[PATCH_POOL_SIZE] = {};
+		int active = 0;
+		// The visual layers the pool's authored and flat-fallback patches ride.
+		uint32_t world_layer = 0;
+		uint32_t flat_layer = 0;
+		LightRows rows;
+	};
+	// The main view's pool, and the weapon Inset pass's own while it renders.
+	PatchPool main_pool;
+	PatchPool inset_pool;
+	// One id per page sweep: each traversal (main or Inset) is its own
+	// PolyTrn frame of the shared page cache.
+	uint64_t page_sweep_id = 0;
+	void _create_pool_instances(PatchPool &r_pool, const RID &p_material);
+	void _free_pool_instances(PatchPool &r_pool);
+	void _hide_pool(PatchPool &r_pool);
+	void _set_pool_world_layer(PatchPool &r_pool, uint32_t p_layer);
+	// `p_display_frame_start`: the main traversal also opens the display
+	// frame's static-shadow planner (the Inset sweep reuses it).
+	const std::vector<opennova::TerrainTilePageBinding> &_compose_pages(
+			const opennova::TerrainDrawList &draw_list, bool p_display_frame_start);
+	void _apply_pool(PatchPool &r_pool, const opennova::TerrainDrawList &draw_list,
+			const std::vector<opennova::TerrainTilePageBinding> &pages);
+	// The Inset pool's material: the main one's parameters, synced per Inset
+	// frame, except its own light rows and below-water flag.
+	Ref<ShaderMaterial> inset_material;
+	ObjectID inset_material_source;
+	std::vector<StringName> inset_synced_parameters;
+	void _sync_inset_material();
 
 	// Shader
 	Ref<Shader> terrain_shader;
@@ -112,18 +169,9 @@ private:
 	// neither arrays nor samplers and this shader already spends seven of the
 	// sixteen instance slots, so the rows ride a texture rather than the object
 	// pass's four scalar pairs — retail draws each of the sixteen, not four.
-	static constexpr int LIGHT_ROWS_PER_PATCH =
-			opennova::renderer::kTerrainLightQueryLimit;
-	static constexpr int LIGHT_ROWS_TEXELS = LIGHT_ROWS_PER_PATCH * 2;
+	// Each view's pool carries its own rows (PatchPool::rows).
 	Ref<LightScene> light_scene;
 	int light_time_ms = 0;
-	Ref<Image> light_rows_image;
-	Ref<ImageTexture> light_rows_texture;
-	PackedByteArray light_rows_bytes;
-	// The bytes the rows texture currently holds: the per-frame rebuild
-	// uploads only when they differ (a full RGBAF texture update otherwise).
-	PackedByteArray light_rows_uploaded;
-	int light_rows_enabled_written = -1; // -1 unset, else the bool last pushed
 	bool light_textures_bound = false;
 	int light_patches_lit = 0;
 	int light_rows_total = 0;
@@ -132,10 +180,13 @@ private:
 	// Per node rather than process-static: a static Ref would destruct at DLL
 	// teardown after Godot's servers are gone.
 	Ref<ImageTexture> light_disc_texture;
-	Ref<ImageTexture> light_strip_texture;
+	Ref<Cubemap> light_cube_texture;
 
 	void _bind_light_textures();
-	void _render_light_rows(const opennova::TerrainDrawList &draw_list);
+	void _ensure_light_rows(LightRows &r_rows);
+	// Returns the number of patches that received a row; `r_total` the rows.
+	int _render_light_rows(const opennova::TerrainDrawList &draw_list, LightRows &r_rows,
+			const Ref<ShaderMaterial> &p_material, int &r_total);
 
 	// Cached typed node pointers — avoids per-frame get_node_or_null()
 	MissionEnvironment *cached_env_node = nullptr;
@@ -246,8 +297,9 @@ public:
 	void render_frame();
 
 	// The frustum-surviving terrain height range of the last render_frame
-	// (the water leg's g_WaterActive input); false when no terrain was in
-	// view or no frame compiled.
+	// (the water leg's water-active input), tracked whether or not the
+	// terrain draws; false when no terrain was in view or no frame ran with a
+	// camera.
 	bool has_visible_terrain_bounds() const;
 	float get_visible_terrain_min_height() const;
 	float get_visible_terrain_max_height() const;
@@ -262,6 +314,24 @@ public:
 	int get_patches_active() const;
 	int get_visible_patch_count() const;
 	const std::vector<FoliageDetailPatch> &get_foliage_detail_patches_native() const;
+
+	// The weapon Inset pass's own terrain frame over `p_camera`, after the
+	// main one (runtime/terrain/terrain_frame.h carries the witness): its own
+	// traversal and LOD on a second compiler, its pages swept through the
+	// shared page cache, drawn by its own patch pool on INSET_VIEW with its
+	// own light rows, while the main pool rides MAIN_VIEW so the Inset camera
+	// never draws the main view's patches. The traversal takes the main
+	// frame's indoors gate: a hidden terrain releases the Inset frame.
+	void render_inset_frame(Camera3D *p_camera);
+	// The Inset stopped rendering: free its pool and return the main pool to
+	// WORLD.
+	void release_inset_frame();
+	bool is_inset_frame_live() const { return inset_draw_list_live; }
+	// The Inset traversal's foliage handoff (empty while it is not live).
+	const std::vector<FoliageDetailPatch> &get_inset_foliage_detail_patches_native() const;
+	// Diagnostics: the visual layers of one view's visible patches, in pool
+	// order (the Inset's when `p_inset`).
+	PackedInt32Array get_visible_patch_layers(bool p_inset) const;
 
 	void set_debug_no_frustum(bool v);
 	bool get_debug_no_frustum() const;

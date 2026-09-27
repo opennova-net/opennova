@@ -510,8 +510,11 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 	const int wire_handle = static_cast<int>(p_effect.attach_wire_handle);
 	const bool dynamic_identity = uses_dynamic_husk_identity(
 			bms_id, spawn_origin, wire_handle);
+	// The row's descriptor tag (the engine producer sets it) decides whether
+	// the group takes the building-section gate.
 	if (family == 0 || (net_id == 0 && !dynamic_identity)) {
-		fx_world->spawn_effect(effect, pos, mission_to_godot(p_effect.dir));
+		fx_world->spawn_effect(effect, pos, mission_to_godot(p_effect.dir),
+				p_effect.section_tagged);
 		++stat_effects_;
 		return;
 	}
@@ -532,8 +535,24 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 		burning_.erase(key);
 		return;
 	}
-	attached_groups_[key] =
-			fx_world->spawn_effect_owned(key, effect, pos, mission_to_godot(p_effect.dir));
+	if (p_effect.positioned) {
+		// The slot holds the group for its next release only: a world-bound
+		// spawn under the slot key, with no owner pose to follow.
+		unregister_effect_anchor(key);
+		wreck_anchor_keys_.erase(key);
+		Ref<EffectSpawnOptions> options;
+		options.instantiate();
+		options->set_admission(EffectWorld::ADMISSION_REPLACE_OWNED);
+		options->set_slot_key(key);
+		options->set_section_tagged(p_effect.section_tagged);
+		const Ref<EffectSpawnReceipt> receipt = fx_world->spawn_effect_request(effect,
+				EffectWorld::descriptor_pose(pos, mission_to_godot(p_effect.dir)), options);
+		attached_groups_[key] = receipt.is_valid() ? receipt->get_group_id() : 0;
+		++stat_effects_;
+		return;
+	}
+	attached_groups_[key] = fx_world->spawn_effect_owned(key, effect, pos,
+			mission_to_godot(p_effect.dir), p_effect.section_tagged);
 	++stat_effects_;
 	if (anchors_.is_valid()) {
 		Node3D *node = nullptr;
@@ -650,6 +669,8 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 			const String trail(opennova::world::death_piece_trail_effect(piece.type_index));
 			if (fx_world != nullptr && !trail.is_empty()) {
 				const String key = piece_owner_key(slot);
+				// Untagged: every death-piece submit carries tag 0 (the engine
+				// table death_piece_trail_effect carries the witness).
 				fx_world->spawn_effect_owned(key, trail, pos, Vector3(0, 1, 0));
 				if (anchors_.is_valid()) {
 					anchors_->register_effect_anchor(key,
@@ -759,6 +780,46 @@ void DestructionPresenter::apply_piece_draws(
 		model->set_destroyed_section_mask(draw.hidden_mask);
 		model->set_transform(piece_draw_transform(draw));
 		model->set_present_visible(true);
+		model->set_occlusion_hidden(false);
+		drawn.insert(draw.slot);
+	}
+	// A piece this view's collect did not draw is the view's verdict (the
+	// occlusion bit), so the weapon Inset's own collect can still draw it
+	// (apply_piece_draws_inset).
+	for (const KeyValue<int, ObjectID> &kv : piece_models_) {
+		if (drawn.has(kv.key)) {
+			continue;
+		}
+		if (ObjectModel *model = piece_model(kv.key)) {
+			model->set_occlusion_hidden(true);
+		}
+	}
+}
+
+// The weapon Inset pass's own piece draws: its collect runs the piece
+// collect again over the Inset camera, and its draws carry their own level
+// (the engine's collect_death_piece_draws carries the witness). A piece the
+// Inset draws takes that level as the model's Inset state, drawn by its twin
+// where the main view's differs; a piece it does not draw is hidden there.
+void DestructionPresenter::apply_piece_draws_inset(
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	HashSet<int> drawn;
+	for (const opennova::world::DeathPieceDraw &draw : p_draws) {
+		const int64_t *generation = piece_generation_.getptr(draw.slot);
+		if (generation == nullptr || *generation != static_cast<int64_t>(draw.generation)) {
+			continue;
+		}
+		ObjectModel *model = piece_model(draw.slot);
+		if (model == nullptr) {
+			continue;
+		}
+		// The piece's own pose and collapsed sections are the piece's state,
+		// not the view's: a piece only the Inset draws still needs them.
+		model->set_destroyed_section_mask(draw.hidden_mask);
+		model->set_transform(piece_draw_transform(draw));
+		model->set_present_visible(true);
+		model->set_inset_view_lod(draw.lod_level);
+		model->set_inset_occlusion_hidden(false);
 		drawn.insert(draw.slot);
 	}
 	for (const KeyValue<int, ObjectID> &kv : piece_models_) {
@@ -766,7 +827,7 @@ void DestructionPresenter::apply_piece_draws(
 			continue;
 		}
 		if (ObjectModel *model = piece_model(kv.key)) {
-			model->set_present_visible(false);
+			model->set_inset_occlusion_hidden(true);
 		}
 	}
 }

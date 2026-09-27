@@ -98,6 +98,9 @@ public:
 	enum ViewKind {
 		VIEW_SCENE = 0,  // the main view and the scope aperture: the full tail
 		VIEW_MIRROR = 1, // the water mirror: the coronas, the dim and the sky redraw
+		// The weapon Inset pass: the tail without the glare, its own coronas
+		// (runtime/renderer/scene_overlay.h kInsetOverlayOrder).
+		VIEW_INSET = 2,
 	};
 
 	SceneOverlayCompositorEffect();

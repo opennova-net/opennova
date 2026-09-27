@@ -5,6 +5,7 @@
 #include "render/q3_vertex_format.h"
 #include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
+#include "render/visual_layers.h"
 
 #include <algorithm>
 #include <array>
@@ -1189,11 +1190,18 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	const std::uint64_t scope_id = p_scope->get_instance_id();
 	const Vector3 camera_position = p_camera->get_global_position();
 	const Vector3 camera_forward = -p_camera->get_global_basis().get_column(2);
-	// Focused Q3 admits world/local-body object geometry, never the
-	// first-person render-FOV/depth-band or shadow/capture-only layers.
-	// World-no-mirror is still ordinary beauty geometry and remains eligible.
-	constexpr std::uint32_t kWorldLayer = 1u << 0;
-	constexpr std::uint32_t kWorldNoMirrorLayer = 1u << 16;
+	// Focused Q3 admits the object geometry both object passes of the main
+	// view submit: the world pass (the world and local-body layers, and the
+	// main view's own bits where the weapon Inset draws a twin;
+	// world-no-mirror is still ordinary beauty geometry) and the
+	// first-person pass (the viewmodel layer, whose rigid strips copy like a
+	// world object's and draw here under this camera's projection, not the
+	// gun's renderfov fold; runtime/renderer/q3_frame.h
+	// q3_object_source_admitted). The shadow- and capture-only layers and
+	// the Inset's twins never reach it.
+	constexpr std::uint32_t kObjectPassLayers = visual_layers::WORLD |
+			visual_layers::WORLD_NO_MIRROR | visual_layers::MAIN_VIEW |
+			visual_layers::MAIN_VIEW_NO_MIRROR | visual_layers::VIEWMODEL;
 	std::vector<Transform3D> &emitted_transforms = impl_->emitted_transforms;
 	const std::vector<Q3SourceRecord *> &live = Q3SourceRegistry::live_records();
 	for (std::size_t index = 0; index < live.size(); ++index) {
@@ -1215,13 +1223,15 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		if (!record.visible)
 			continue;
 		if (record.source == Q3Source::Object &&
-				(record.node->get_layer_mask() &
-						(kWorldLayer | kWorldNoMirrorLayer)) == 0)
+				(record.node->get_layer_mask() & kObjectPassLayers) == 0)
 			continue;
 		// The one per-frame probe of a visible record: Godot exposes no
 		// transform-changed signal for an engine-class node to an extension,
-		// so the cached bounds and rows follow a compare of the transform.
-		const Transform3D global_transform = record.node->get_global_transform();
+		// so the cached bounds and rows follow a compare of the transform (a
+		// bone-bound strip's includes its bone's skinning matrix).
+		Transform3D global_transform;
+		if (!Q3SourceRegistry::source_transform(record, global_transform))
+			continue;
 		if (!record.transform_valid || global_transform != record.global_transform) {
 			record.global_transform = global_transform;
 			record.transform_valid = true;

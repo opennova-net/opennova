@@ -52,6 +52,7 @@
 #include "render/q3_source_registry.h"
 #include "render/retained_array_mesh.h"
 #include "render/scene_overlay_compositor.h"
+#include "render/target_projection_xr_interface.h"
 #include "world/item_effect_director.h"
 #include "world/occlusion_frame.h"
 #include "world/game_world.h"
@@ -380,6 +381,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EffectLightDirector);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
 	GDREGISTER_CLASS(SceneOverlayCompositorEffect);
+	GDREGISTER_CLASS(TargetProjectionXrInterface);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(EffectWorld);
 	GDREGISTER_CLASS(ItemEffectDirectorStats);
@@ -470,6 +472,7 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	}
 
 	ObjectShaderCache::destroy_singleton();
+	TargetProjectionXrInterface::cleanup_statics();
 	SlotShadow::cleanup_statics();
 	Q3SourceRegistry::cleanup_statics();
 	ObjectData::clear_static_caches();

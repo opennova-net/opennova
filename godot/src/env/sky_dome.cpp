@@ -220,11 +220,11 @@ void SkyDome::advance_frame(double p_delta) {
 					to_vector3(frame.cloud_highlight));
 			_set_dome_parameter("u_cloud_edge", to_vector3(frame.cloud_edge));
 		}
-		// The dome mesh is the engine layout drawn identity into the Godot
-		// world, so its shader dots GODOT-world sun/light vectors: route the
-		// render-float tuples through the util/axes.h swap (2026-08-20 — the
-		// identity mapping put the sun-proximity highlight 90 degrees off in
-		// yaw, the 03tr-sun-sky dome half).
+		// The dome mesh reaches the Godot world through the util/axes.h swap
+		// (EnvFile::build_sky_dome_arrays), so its shader dots GODOT-world
+		// sun/light vectors: route the render-float tuples through the same
+		// swap (2026-08-20 — the identity mapping put the sun-proximity
+		// highlight 90 degrees off in yaw, the 03tr-sun-sky dome half).
 		_set_dome_parameter("u_sun_dir", render_float_to_godot(frame.sun_dir));
 		_set_dome_parameter("u_light_dir",
 				render_float_to_godot(frame.light_dir));
@@ -242,26 +242,29 @@ void SkyDome::advance_frame(double p_delta) {
 
 	// Cloud scroll: the weather runtime owns the ramping rate and the four
 	// integer accumulators (weather_runtime.h carries the cites); standalone
-	// owners tick the engine fallback core at the same 62 Hz cadence.
-	double cam_x = 0.0;
-	double cam_z = 0.0;
+	// owners tick the engine fallback core at the same 62 Hz cadence. The
+	// camera term is in the render basis, like the dome's UVs (render x =
+	// Godot z, render z = Godot x).
+	float cam_render_x = 0.0f;
+	float cam_render_z = 0.0f;
 	if (cam != nullptr) {
-		const Vector3 cam_pos = cam->get_global_position();
-		cam_x = cam_pos.x;
-		cam_z = cam_pos.z;
+		const opennova::env::Vec3 cam_render =
+				godot_to_render_float(cam->get_global_position());
+		cam_render_x = cam_render.x;
+		cam_render_z = cam_render.z;
 	}
 	Weather *weather = _weather_node();
 	if (weather != nullptr) {
 		cloud_material_->set_shader_parameter("u_scroll_offset1",
-				weather->get_cloud_uv_offset1(cam_x, cam_z));
+				weather->get_cloud_uv_offset1(cam_render_x, cam_render_z));
 		cloud_material_->set_shader_parameter("u_scroll_offset2",
-				weather->get_cloud_uv_offset2(cam_x, cam_z));
+				weather->get_cloud_uv_offset2(cam_render_x, cam_render_z));
 	} else {
 		fallback_scroll_.advance(p_delta, frame.sky_speed);
 		const opennova::env::CloudUvOffsets offsets =
 				opennova::env::cloud_scroll_uv_offsets(
 						fallback_scroll_.core.cloud_scroll,
-						static_cast<float>(cam_x), static_cast<float>(cam_z));
+						cam_render_x, cam_render_z);
 		cloud_material_->set_shader_parameter("u_scroll_offset1",
 				Vector2(offsets.u1, offsets.v1));
 		cloud_material_->set_shader_parameter("u_scroll_offset2",

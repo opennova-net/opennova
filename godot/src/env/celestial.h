@@ -83,6 +83,26 @@ public:
 	// (null when the mission names no such model).
 	Node3D *get_overlay_body_node(const String &p_body) const;
 
+	// The weapon Inset pass's water glint (renderer/scene_overlay.h
+	// kInsetOverlayOrder carries the witness): the camera that pass renders
+	// through this frame (null while it does not render), set before
+	// advance_frame, which then runs the glint's leg again at that camera,
+	// after the main scene's call and before the sun veil reads the one
+	// accumulator. The frame's Inset draw: the glint body drawn from the
+	// Inset eye (`offset` from its main placement), each surface's
+	// SelfLumColor at the Inset's submit value, and whether it draws.
+	void set_inset_view(Camera3D *p_camera);
+	struct InsetGlint {
+		ObjectModel *model = nullptr;
+		bool drawn = false;
+		int32_t upl = 0;
+		Vector3 eye;
+		Vector3 forward;
+		Vector3 offset;
+		std::unordered_map<const MeshInstance3D *, std::array<float, 3>> self_lum;
+	};
+	const InsetGlint &get_inset_glint() const { return inset_glint_; }
+
 	// The water mirror's post-dim redraw (retail render_main_scene after the
 	// dim: render_celestial_bodies(0) @ 0x5c18fb, render_skybox_sun_glow(0, 0)
 	// @ 0x5c1904): the discs at their beauty submit value (their live
@@ -195,6 +215,12 @@ private:
 	void _advance_water_glint(const opennova::env::EnvironmentState &p_state,
 			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir,
 			const Vector3 &p_forward, Body &p_body);
+	// The same leg's second call at the weapon Inset camera (set_inset_view):
+	// the accumulator ticks again; the body stays at its main placement (the
+	// main call's eye `p_main_eye`) and the Inset draw is recorded in
+	// inset_glint_.
+	void _advance_inset_water_glint(const opennova::env::EnvironmentState &p_state,
+			const Vector3 &p_main_eye, const Vector3 &p_sun_dir, Body &p_body);
 
 	NodePath environment_path_;
 	Ref<TerrainData> terrain_data_;
@@ -218,6 +244,9 @@ private:
 	// The water-reflected sun glint accumulator
 	// [orig: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md].
 	opennova::env::WaterGlintState water_glint_;
+	// The weapon Inset pass's camera this frame and its glint draw.
+	ObjectID inset_camera_id_;
+	InsetGlint inset_glint_;
 };
 
 } // namespace godot

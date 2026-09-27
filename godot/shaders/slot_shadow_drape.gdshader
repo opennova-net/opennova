@@ -1,5 +1,13 @@
 shader_type spatial;
 render_mode blend_mul, depth_draw_never, cull_disabled, unshaded, fog_disabled;
+// Retail's drape follows the terrain batch with Z-write off, so every later
+// model, foliage or water draw in front of the terrain overwrites it and it
+// survives only where the terrain, or the sky/clear drawn before it, is the
+// front-most surface (renderer::kRungSlotDrape carries the witness). The
+// terrain and the sky dome mark those pixels with stencil 1 in their colour
+// pass; the drape multiplies nothing else. Stencil reads run in the
+// transparent list, where this blend_mul, no-depth-write pass already sits.
+stencil_mode read, compare_equal, 1;
 
 // The terrain's fog uniforms and law: the drape shares the device's primary
 // fog config with the terrain batch it multiplies into (SlotShadow pushes the

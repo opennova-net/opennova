@@ -20,8 +20,13 @@ void Precipitation::_bind_methods() {
 			&Precipitation::get_weather_path);
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "weather_path"),
 			"set_weather_path", "get_weather_path");
-	ClassDB::bind_method(D_METHOD("render_frame", "sim", "camera"),
+	ClassDB::bind_method(D_METHOD("render_frame", "sim", "camera", "camera_mode"),
 			&Precipitation::render_frame);
+	ClassDB::bind_method(D_METHOD("render_inset_frame", "sim", "camera", "camera_mode"),
+			&Precipitation::render_inset_frame);
+	ClassDB::bind_method(D_METHOD("release_inset_frame"), &Precipitation::release_inset_frame);
+	ClassDB::bind_method(D_METHOD("get_drop_count"), &Precipitation::get_drop_count);
+	ClassDB::bind_method(D_METHOD("get_inset_drop_count"), &Precipitation::get_inset_drop_count);
 }
 
 void Precipitation::set_resource_root(const Ref<ResourceRoot> &p_root) {
@@ -56,29 +61,54 @@ Ref<Texture2D> Precipitation::_texture_for(bool p_snow) {
 	return p_snow ? snow_texture_ : rain_texture_;
 }
 
-void Precipitation::render_frame(Object *p_sim, Camera3D *p_camera) {
+void Precipitation::render_frame(Object *p_sim, Camera3D *p_camera, int p_camera_mode) {
+	compile_into_(p_sim, p_camera, p_camera_mode, frame_);
+}
+
+void Precipitation::render_inset_frame(Object *p_sim, Camera3D *p_camera, int p_camera_mode) {
+	compile_into_(p_sim, p_camera, p_camera_mode, inset_frame_);
+}
+
+void Precipitation::release_inset_frame() {
+	inset_frame_.clear();
+}
+
+void Precipitation::compile_into_(Object *p_sim, Camera3D *p_camera, int p_camera_mode,
+		opennova::renderer::PrecipitationDrawFrame &r_frame) {
 	Simulation *sim = Object::cast_to<Simulation>(p_sim);
 	Weather *weather = _weather_node();
 	if (sim == nullptr || p_camera == nullptr || weather == nullptr) {
-		hide_frame();
+		r_frame.clear();
 		return;
 	}
 	const Transform3D xform = p_camera->get_global_transform();
 	const Basis basis = xform.basis;
-	frame_ = sim->compile_precipitation_frame(xform.origin, basis.get_column(0).normalized(),
-			basis.get_column(1).normalized(), weather->get_terrain_light_combined_rgb());
+	r_frame = sim->compile_precipitation_frame(xform.origin, basis.get_column(0).normalized(),
+			basis.get_column(1).normalized(), weather->get_terrain_light_combined_rgb(),
+			p_camera_mode);
 }
 
 void Precipitation::hide_frame() {
 	frame_.clear();
+	inset_frame_.clear();
 }
 
 void Precipitation::append_overlay(SceneOverlaySubmission &r_submission) {
-	if (frame_.drops <= 0) {
-		return;
+	const struct {
+		const opennova::renderer::PrecipitationDrawFrame &frame;
+		opennova::renderer::SceneOverlaySlot slot;
+	} views[] = {
+		{ frame_, opennova::renderer::SceneOverlaySlot::Precipitation },
+		{ inset_frame_, opennova::renderer::SceneOverlaySlot::InsetPrecipitation },
+	};
+	for (const auto &view : views) {
+		if (view.frame.drops <= 0) {
+			continue;
+		}
+		const uint32_t texture = r_submission.texture_index(_texture_for(view.frame.snow));
+		opennova::renderer::append_precipitation_overlay(view.frame, texture,
+				r_submission.frame, view.slot);
 	}
-	const uint32_t texture = r_submission.texture_index(_texture_for(frame_.snow));
-	opennova::renderer::append_precipitation_overlay(frame_, texture, r_submission.frame);
 }
 
 } // namespace godot

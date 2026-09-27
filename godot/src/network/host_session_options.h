@@ -127,6 +127,10 @@ public:
 	void set_fat_bullets(bool p_value) { config_.fat_bullets = p_value; }
 	bool get_one_shot_kill() const { return config_.one_shot_kill; }
 	void set_one_shot_kill(bool p_value) { config_.one_shot_kill = p_value; }
+	// game.cfg `unlimited_vehicles` (GameConfig::unlimited_vehicles, stock on):
+	// a destroyed hull respawns and the vehicle-spawn limits are bypassed.
+	bool get_unlimited_vehicles() const { return config_.unlimited_vehicles; }
+	void set_unlimited_vehicles(bool p_value) { config_.unlimited_vehicles = p_value; }
 	PackedStringArray get_spawn_names() const;
 	void set_spawn_names(const PackedStringArray &p_names);
 

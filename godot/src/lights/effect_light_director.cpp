@@ -18,6 +18,7 @@
 #include "simulation/simulation.h"
 
 #include <runtime/environment/water_mirror.h>
+#include <runtime/mission/placement_traits.h>
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -177,9 +178,10 @@ void EffectLightDirector::reattach() {
 		// tagged owner and the atlas draw row declares the same identity.
 		// [orig: Entity_SpawnGlowEffects @ 0x56c8ae; SetOwnerGroup(entity,bone)]
 		const Transform3D xform = from_static_source_transform(source.world_transform);
-		const bool is_building = source.kind == MissionData::KIND_BUILDING;
-		// Retail skips the blink query for a building's own records; every
-		// other static resolves containment once at its placement origin.
+		const bool is_building = _record_is_building(source.kind, source.item_id);
+		// Retail skips the blink query for a Building-type def's own records;
+		// every other static (the pool-2 decorations too) resolves containment
+		// once at its placement origin.
 		const BlinkOwner blink_owner = is_building ? BlinkOwner() : _blink_owner_at(xform.origin);
 		const Vector<int64_t> handles = _spawn_model_lights(data, xform,
 				LightScene::owner_id_for_static_source(source_index), blink_owner, is_building);
@@ -217,9 +219,11 @@ void EffectLightDirector::on_wire_node_spawned(ObjectModel *p_node, int p_kind, 
 	// Retail runs the blink query once per spawning entity, and skips it
 	// outright for a BUILDING — a building's own unattached records stay
 	// world lights even though its blink volumes contain them (the query has
-	// no self-exclusion) [orig: the ItemType_Building gate @ 0x56c7ec].
+	// no self-exclusion) [orig: the ItemType_Building gate @ 0x56c7ec]. The
+	// gate is the items.def type: a pool-2 decoration queries like any entity.
 	const Ref<EntityRef> ref = p_node->get_entity_ref();
-	const bool is_building = ref.is_valid() && ref->get_kind() == MissionData::KIND_BUILDING;
+	const bool is_building =
+			ref.is_valid() && _record_is_building(ref->get_kind(), ref->get_item_id());
 	BlinkOwner blink_owner;
 	if (!is_building) {
 		blink_owner = _blink_owner_at(p_node->get_global_position());
@@ -374,6 +378,14 @@ int64_t EffectLightDirector::interior_owner_for_bms(int p_bms_id) {
 	return _owner_id_for_bms(p_bms_id);
 }
 
+bool EffectLightDirector::_record_is_building(int p_kind, int p_item_id) const {
+	const Ref<ItemDatabase> items =
+			provider_ != nullptr ? provider_->static_source_item_db() : Ref<ItemDatabase>();
+	const bool has_def = items.is_valid() && items->has_item(p_item_id);
+	return opennova::mission::placed_record_is_building(p_kind, has_def,
+			has_def ? items->get_item_type(p_item_id) : 0);
+}
+
 // The owner id a containing building's bms_id resolves to — the SAME id its
 // own draw context declares, or owner gating never matches.
 int64_t EffectLightDirector::_owner_id_for_bms(int p_bms_id) {
@@ -467,12 +479,14 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 		// (renderer::static_light_row_groups): a building is its own
 		// interior group at section zero with the owner section re-scoped
 		// to this exact ROBJ; every other row is owned by its static owner
-		// and carries the blink interior its placement origin resolves.
+		// and carries the blink interior its placement origin resolves. A
+		// building is a Building-type DEF: the pool-2 decorations and foliage
+		// draw in the entity wave (mission::placed_record_is_building).
 		opennova::renderer::StaticLightRowInputs inputs;
 		inputs.static_owner = static_cast<uint64_t>(LightScene::owner_id_for_static_source(source_index));
 		inputs.robj_index = descriptor.robj_index;
-		inputs.is_building = (descriptor.kind >= 0 ? descriptor.kind : source.kind) ==
-				MissionData::KIND_BUILDING;
+		inputs.is_building = _record_is_building(descriptor.kind >= 0 ? descriptor.kind : source.kind,
+				descriptor.item_id != 0 ? descriptor.item_id : source.item_id);
 		if (!inputs.is_building) {
 			const BlinkOwner interior = _blink_owner_at(from_static_source_transform(source.world_transform).origin);
 			inputs.blink_hit = interior.valid();
@@ -525,17 +539,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 	Weather *weather = _weather();
 	const Vector3 cam_pos = p_camera->get_camera_transform().origin;
 	const int time_ms = static_cast<int>(p_time_ms);
-	frame_models_.clear();
-	frame_entity_positions_.clear();
-	frame_entity_bound_radii_q16_.clear();
-	frame_owners_.clear();
-	// interior_*: the second witnessed group — the building each draw
-	// currently stands inside, plus that blink volume's section (the engine
-	// pool's LightActiveGroups; the entity lighting feed stamps it on the
-	// entity's model beside its lighting context).
-	frame_interior_owners_.clear();
-	frame_interior_sections_.clear();
-	frame_robj_scoped_.clear();
+	_clear_frame_draws();
 	_render_static_light_rows(gain, weather, time_ms);
 	if (Node *container = _mission_objects()) {
 		_ensure_model_registry(container);
@@ -547,25 +551,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 			if (model->get_global_position().distance_to(cam_pos) > QUERY_RADIUS) {
 				continue;
 			}
-			frame_models_.push_back(model);
-			ObjectModel *entity_model = model->get_entity_light_owner();
-			if (entity_model == nullptr) entity_model = model;
-			frame_entity_positions_.push_back(entity_model->get_global_position());
-			frame_entity_bound_radii_q16_.push_back(entity_model->get_entity_bound_radius_q16());
-			frame_owners_.push_back(reg_owners_[i]);
-			frame_robj_scoped_.push_back(reg_robj_scoped_[i]);
-			int64_t interior_owner = 0;
-			int interior_section = 0;
-			const int interior_bms = entity_model->get_interior_light_group_bms();
-			if (interior_bms != 0) {
-				const int64_t owner = _owner_id_for_bms(interior_bms);
-				if (owner != 0) {
-					interior_owner = owner;
-					interior_section = entity_model->get_interior_light_group_section();
-				}
-			}
-			frame_interior_owners_.push_back(interior_owner);
-			frame_interior_sections_.push_back(interior_section);
+			_push_model_draw(model, i);
 		}
 	}
 	// The first-person parts inherit the LOCAL PLAYER's interior group, so
@@ -613,6 +599,81 @@ void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 			frame_interior_sections_, frame_robj_scoped_, gain, time_ms, weather,
 			frame_entity_positions_, frame_entity_bound_radii_q16_);
 	_render_coronas(p_camera, gain, time_ms, weather, frame_models_, frame_owners_, env);
+}
+
+void EffectLightDirector::_clear_frame_draws() {
+	frame_models_.clear();
+	frame_entity_positions_.clear();
+	frame_entity_bound_radii_q16_.clear();
+	frame_owners_.clear();
+	// interior_*: the second witnessed group — the building each draw
+	// currently stands inside, plus that blink volume's section (the engine
+	// pool's LightActiveGroups; the entity lighting feed stamps it on the
+	// entity's model beside its lighting context).
+	frame_interior_owners_.clear();
+	frame_interior_sections_.clear();
+	frame_robj_scoped_.clear();
+}
+
+void EffectLightDirector::_push_model_draw(ObjectModel *p_model, int64_t p_reg_index) {
+	frame_models_.push_back(p_model);
+	ObjectModel *entity_model = p_model->get_entity_light_owner();
+	if (entity_model == nullptr) entity_model = p_model;
+	frame_entity_positions_.push_back(entity_model->get_global_position());
+	frame_entity_bound_radii_q16_.push_back(entity_model->get_entity_bound_radius_q16());
+	frame_owners_.push_back(reg_owners_[p_reg_index]);
+	frame_robj_scoped_.push_back(reg_robj_scoped_[p_reg_index]);
+	int64_t interior_owner = 0;
+	int interior_section = 0;
+	const int interior_bms = entity_model->get_interior_light_group_bms();
+	if (interior_bms != 0) {
+		const int64_t owner = _owner_id_for_bms(interior_bms);
+		if (owner != 0) {
+			interior_owner = owner;
+			interior_section = entity_model->get_interior_light_group_section();
+		}
+	}
+	frame_interior_owners_.push_back(interior_owner);
+	frame_interior_sections_.push_back(interior_section);
+}
+
+void EffectLightDirector::render_inset_frame(Camera3D *p_camera, int64_t p_time_ms) {
+	if (p_camera == nullptr) {
+		release_inset_frame();
+		return;
+	}
+	const Vector3 gain = light_gain();
+	Weather *weather = _weather();
+	const Transform3D camera_transform = p_camera->get_camera_transform();
+	const int time_ms = static_cast<int>(p_time_ms);
+	// The registry rows the Inset pass draws (its twins, or the node both
+	// views draw), gathered around the Inset eye like the main pass's.
+	_clear_frame_draws();
+	if (Node *container = _mission_objects()) {
+		_ensure_model_registry(container);
+		for (int64_t i = 0; i < reg_models_.size(); ++i) {
+			ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(reg_models_[i]));
+			if (model == nullptr || !model->is_inset_view_drawn()) {
+				continue;
+			}
+			if (model->get_global_position().distance_to(camera_transform.origin) > QUERY_RADIUS) {
+				continue;
+			}
+			_push_model_draw(model, i);
+		}
+	}
+	scene()->render_inset_model_frame(frame_models_, frame_owners_, frame_interior_owners_,
+			frame_interior_sections_, frame_robj_scoped_, gain, time_ms, weather,
+			frame_entity_positions_, frame_entity_bound_radii_q16_);
+	// The Inset's own walk: its prologue advanced the phase once more.
+	corona_frame_ = (corona_frame_ + 1) & 3;
+	scene()->collect_inset_corona_rows(camera_transform.origin,
+			-camera_transform.basis.get_column(2), gain, time_ms, corona_frame_, weather,
+			frame_models_, frame_owners_, _corona_fog(_environment()), inset_coronas_);
+}
+
+void EffectLightDirector::release_inset_frame() {
+	inset_coronas_.clear();
 }
 
 void EffectLightDirector::run_census_now() {
@@ -672,8 +733,10 @@ void EffectLightDirector::_rebuild_model_registry(Node *p_container) {
 		const int64_t *static_owner = ref.is_valid()
 				? static_owner_by_bms_.getptr(ref->get_bms_id()) : nullptr;
 		reg_owners_.push_back(static_owner != nullptr ? *static_owner : owner_id_for_node(model));
+		// Only a building pass draw re-scopes its owner per ROBJ: a
+		// Building-type def, not every pool-2 record.
 		reg_robj_scoped_.push_back(
-				ref.is_valid() && ref->get_kind() == MissionData::KIND_BUILDING ? 1 : 0);
+				ref.is_valid() && _record_is_building(ref->get_kind(), ref->get_item_id()) ? 1 : 0);
 	}
 	reg_dirty_ = false;
 }
@@ -711,34 +774,39 @@ void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_g
 		int p_time_ms, Weather *p_weather, const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 		MissionEnvironment *p_env) {
 	corona_frame_ = (corona_frame_ + 1) & 3;
-	Ref<EnvLightValues> fog;
-	if (p_env != nullptr) {
-		const Ref<EnvLightState> state = p_env->get_light_state();
-		if (state.is_valid()) {
-			fog = state->get_values();
-		}
-	}
 	const Transform3D camera_transform = p_camera->get_camera_transform();
 	scene()->collect_corona_rows(camera_transform.origin,
 			-camera_transform.basis.get_column(2), p_gain, p_time_ms, corona_frame_, p_weather,
-			p_models, p_owners, fog);
+			p_models, p_owners, _corona_fog(p_env));
 	coronas_ = scene()->last_corona_quads();
+}
+
+Ref<EnvLightValues> EffectLightDirector::_corona_fog(MissionEnvironment *p_env) const {
+	if (p_env == nullptr) {
+		return Ref<EnvLightValues>();
+	}
+	const Ref<EnvLightState> state = p_env->get_light_state();
+	return state.is_valid() ? state->get_values() : Ref<EnvLightValues>();
 }
 
 void EffectLightDirector::_clear_coronas() {
 	coronas_.clear();
+	inset_coronas_.clear();
 }
 
 void EffectLightDirector::append_overlay(SceneOverlaySubmission &r_submission) {
-	if (coronas_.empty()) {
+	if (coronas_.empty() && inset_coronas_.empty()) {
 		return;
 	}
 	// The coronas draw after particle pass B, in the main scene and in the
 	// mirror's reflected scene alike (retail EffectWorld_RenderLightCoronas(1)
 	// from Terrain_RenderWorldScene @ 0x5c96ad and from
-	// Water_RenderReflectedWorldScene @ 0x5c85fd).
+	// Water_RenderReflectedWorldScene @ 0x5c85fd); the weapon Inset pass's
+	// own walk rides its own slot (scene_overlay.h kInsetOverlayOrder).
 	const uint32_t texture = r_submission.texture_index(_corona_texture());
 	opennova::renderer::append_corona_overlay(coronas_, texture, r_submission.frame);
+	opennova::renderer::append_corona_overlay(inset_coronas_, texture, r_submission.frame,
+			opennova::renderer::SceneOverlaySlot::InsetLightCoronas);
 }
 
 Ref<ImageTexture> EffectLightDirector::_corona_texture() {
@@ -874,6 +942,11 @@ void EffectLightDirector::_bind_methods() {
 								 "run_census"),
 			&EffectLightDirector::render_frame, DEFVAL(TypedArray<ObjectModel>()),
 			DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("render_inset_frame", "camera", "time_ms"),
+			&EffectLightDirector::render_inset_frame);
+	ClassDB::bind_method(D_METHOD("release_inset_frame"), &EffectLightDirector::release_inset_frame);
+	ClassDB::bind_method(D_METHOD("get_inset_corona_count"),
+			&EffectLightDirector::get_inset_corona_count);
 	ClassDB::bind_method(D_METHOD("advance_fixed_tick"), &EffectLightDirector::advance_fixed_tick);
 	ClassDB::bind_method(D_METHOD("on_muzzle_fire", "shooter_handle", "world_pos"),
 			&EffectLightDirector::on_muzzle_fire);

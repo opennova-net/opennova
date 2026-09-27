@@ -40,7 +40,8 @@ struct SimulationAssetState {
 	// decoded client replicas.
 	Ref<ItemDatabase> item_traits_db;
 	// One immutable items.def catalog supplies both the authoritative entity
-	// stamp and the decoded-client record-width resolver. The callback codec,
+	// stamp and the decoded client's record widths and def facts
+	// (ClientReplicaPipeline::set_item_catalog). The callback codec,
 	// physical motion family, and allocation inputs remain independent traits.
 	std::shared_ptr<const opennova::replication::ItemReplicationCatalog>
 			item_replication_catalog;
@@ -81,10 +82,9 @@ struct SimulationAssetState {
 	// The Weather node bound through set_weather_render_owner; released
 	// whenever the kernel (and the WeatherState it owns) is replaced or dies.
 	ObjectID weather_owner_id;
-	// The precipitation drawer's last-camera latch (mission-scoped) and the
-	// compiled streak frame, reused across frames (its vertex capacity
-	// survives clear()).
-	opennova::renderer::PrecipitationDrawState precipitation_draw;
+	// The compiled precipitation streak frame, reused across frames (its
+	// vertex capacity survives clear()); the drawer's memory is the kernel's
+	// (MissionKernel::precipitation_draw, carried across loads).
 	opennova::renderer::PrecipitationDrawFrame precipitation_frame;
 };
 

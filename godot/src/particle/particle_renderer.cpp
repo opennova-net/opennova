@@ -732,6 +732,10 @@ public:
 		// The mirror's reflected scene draws only its coronas after its
 		// particle passes.
 		reflection_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
+		// The second scene view is the weapon Inset pass: its tail draws its
+		// own corona walk and no glare (runtime/renderer/scene_overlay.h
+		// kInsetOverlayOrder).
+		second_scene_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_INSET);
 		// The distortion subset draws inside FrameFX's type-0 row through the
 		// drawer, never as a camera compositor pass.
 		distortion_drawer->set_particle_effect(distortion_effect);

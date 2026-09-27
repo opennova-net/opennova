@@ -176,11 +176,13 @@ public:
 	// a mode renders the world through a SubViewport target of the selected
 	// aspect (its camera at the horizontal fov, KEEP_WIDTH) that a full-surface
 	// blit stretches onto the window -- the retail anamorphic fill; a native or
-	// matched mode draws the surface directly. Anything that projects world
-	// points onto the surface (HUD labels, tags, picks) must read THIS
-	// projection: while the target is live the gameplay camera only carries a
-	// CULLING SUPERSET of the frustum (the cullers that read it must never
-	// clip what the target draws).
+	// matched mode draws the surface directly. The NVG raster draws the 512
+	// square at the frame's frustum instead, through the matrix it serves to
+	// TargetProjectionXrInterface (which this returns while it is served).
+	// Anything that projects world points onto the surface (HUD labels, tags,
+	// picks) must read THIS projection: while the target is live the gameplay
+	// camera only carries a CULLING SUPERSET of the frustum (the cullers that
+	// read it must never clip what the target draws).
 	Projection view_projection() const;
 	// The camera drawing the world while the stretched target is live (null
 	// when the surface draws directly), and that target.
@@ -189,9 +191,10 @@ public:
 	// The vertical stretch of the frame onto the surface (1 = none).
 	float projection_scale_y() const { return projection_scale_y_; }
 	// True while the NVG composite is up: the world renders as the NVG scene,
-	// through the target at world::nvg_view_projection's raster (512 rows at
-	// the frame's frustum, or the Scoped arm's 512-square square frustum),
-	// the surface's own 3D pass off -- one world render a frame.
+	// through the target at world::nvg_view_projection's raster (the 512
+	// square at the frame's frustum, its texels non-square, or at the Scoped
+	// arm's square frustum), the surface's own 3D pass off -- one world render
+	// a frame.
 	bool is_nvg_raster_active() const { return nvg_raster_active_; }
 	// The FP viewmodel owner (tests and probes inspect the projection feed and
 	// sweep the placement tunables through it).
@@ -318,6 +321,10 @@ private:
 	ObjectID projection_surface_id_;
 	float projection_scale_y_ = 1.0f;
 	bool nvg_raster_active_ = false;
+	// The NVG raster's frame frustum as served to TargetProjectionXrInterface
+	// (the matrix the target draws with while nvg_raster_served_).
+	Projection nvg_raster_projection_;
+	bool nvg_raster_served_ = false;
 	bool debug_force_viewmodel_ = false;
 	bool debug_body_in_first_person_ = false;
 	bool debug_third_person_ = false;

@@ -682,11 +682,15 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 				"the overlay stage requires RenderSceneBuffersRD and RenderSceneData");
 		return;
 	}
-	const bool mirror = view_kind.load(std::memory_order_acquire) == VIEW_MIRROR;
-	if (mirror) {
+	const int kind = view_kind.load(std::memory_order_acquire);
+	if (kind == VIEW_MIRROR) {
 		opennova::renderer::compile_scene_overlay(p_submission.frame,
 				opennova::renderer::kMirrorOverlayOrder.data(),
 				opennova::renderer::kMirrorOverlayOrder.size(), draw_list);
+	} else if (kind == VIEW_INSET) {
+		opennova::renderer::compile_scene_overlay(p_submission.frame,
+				opennova::renderer::kInsetOverlayOrder.data(),
+				opennova::renderer::kInsetOverlayOrder.size(), draw_list);
 	} else {
 		opennova::renderer::compile_scene_overlay(p_submission.frame,
 				opennova::renderer::kSceneOverlayOrder.data(),
@@ -826,8 +830,10 @@ void SceneOverlayCompositorEffect::write_backend_report(Dictionary &result) cons
 	const Impl::Diagnostics &d = impl_->diagnostics;
 	result["backend"] = "rendering_device_compositor";
 	result["callback"] = "post_transparent";
-	result["view_kind"] = impl_->view_kind.load(std::memory_order_acquire) == VIEW_MIRROR ?
-			String("mirror") : String("scene");
+	const int kind = impl_->view_kind.load(std::memory_order_acquire);
+	result["view_kind"] = kind == VIEW_MIRROR ? String("mirror")
+			: kind == VIEW_INSET ? String("inset")
+								: String("scene");
 	result["status"] = opennova::to_gd(d.status);
 	result["failure"] = opennova::to_gd(d.failure);
 	result["shutdown"] = impl_->shutdown_requested.load(std::memory_order_acquire);

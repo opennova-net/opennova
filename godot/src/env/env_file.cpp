@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "util/axes.h"
 #include "util/data_format.h"
 #include "util/pcx_texture_bridge.h"
 #include "util/texture_path_resolver.h"
@@ -553,8 +554,17 @@ Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
 	uv1.resize(vertex_count);
 	uv2.resize(vertex_count);
 	for (int i = 0; i < vertex_count; ++i) {
-		vertices[i] = Vector3(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
-		normals[i] = Vector3(mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]);
+		// The builder authors the dome in the render basis, its UV1/UV2 the
+		// scaled render x/z: each vertex and normal reaches the Godot world
+		// through the util/axes.h swap like every render-float tuple, so the
+		// cloud texture axes (and the camera term of the scroll) lie along
+		// retail's world axes. Drawn identity, u ran along render z instead:
+		// a mirrored cloud field drifting the opposite way. The swap mirrors
+		// the winding; the sky shaders cull for it.
+		vertices[i] = render_float_to_godot(opennova::env::Vec3{mesh.positions[i * 3],
+				mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]});
+		normals[i] = render_float_to_godot(opennova::env::Vec3{mesh.normals[i * 3],
+				mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]});
 		uv1[i] = Vector2(mesh.uv1[i * 2], mesh.uv1[i * 2 + 1]);
 		uv2[i] = Vector2(mesh.uv2[i * 2], mesh.uv2[i * 2 + 1]);
 	}

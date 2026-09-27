@@ -53,6 +53,9 @@ struct NvgLaserView {
 	opennova::renderer::SceneOverlayFog fog;
 	bool nvg_active = false;
 	int camera_mode = 0;
+	// The weapon Inset pass's walk: the persons that view draws (its own
+	// collect's verdicts), in its own overlay slot.
+	bool inset_view = false;
 };
 
 // THE viewing-client fire-presentation pass (the former fire_present_pass.gd,

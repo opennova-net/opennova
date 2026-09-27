@@ -303,7 +303,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 	// silhouette never lands on another model [orig:
 	// RenderSlot_DrawAllDrapes @0x5d6e20 draws the slot's terrain patch via
 	// RenderSlot_DrawSilhouetteDrape @0x5d5ca0; see docs/render/render-lighting-re.md].
-	// The terrain material carries the drape pass (SlotShadow).
+	// SlotShadow draws each drape as its own patch mesh over the terrain.
 	return material;
 }
 
