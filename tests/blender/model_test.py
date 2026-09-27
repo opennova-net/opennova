@@ -458,7 +458,7 @@ def mesh_part_holds_the_skinned_geometry():
     assert abs(float(parts[3][3]) + 1.0) < 1e-6, parts[3]
     # The bullet faces sit in the mesh part's section; each bone that moves
     # vertices carries a derived hit sphere.
-    sections, faces, spheres, at = [], {}, set(), -1
+    faces, spheres, at = {}, set(), -1
     for line in lines:
         key = line.split()[:1]
         if key == ["cobj"]:

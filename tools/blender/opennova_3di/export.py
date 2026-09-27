@@ -66,7 +66,7 @@ from . import assembly, materials
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
                       export_text, fmt, quoted)
 from .rig import (PART_RE, WEIGHT_EPS, clean_name, descendants, ignored, is_lod_root, is_model_root,
-                  lod_of, lod_parts, lod_roots, model_of, part_bones, part_of, rig_of)
+                  lod_of, lod_parts, lod_roots, model_of, model_roots, part_bones, part_of, rig_of)
 
 
 POINT_RE = re.compile(r"^UP([A-Za-z])(\d{2})?(?: (.*))?$")
@@ -179,23 +179,14 @@ def output_path(model):
     return bpy.path.abspath(model.o3d.output_path or f"//{clean_name(model.name)}.3di")
 
 
-def is_first_person(model, lp):
+def is_first_person(scene, model, lp):
     """A first-person gun: a rigid model on a rig of its own that an arms
-    model deforms with, or that carries a clip table."""
+    model of the scene deforms with, or that carries a clip table."""
     if lp.rig is None or lp.shared or lp.skinned:
         return False
     if len(model.o3d.rows) > 0:
         return True
-    return any(m is not model and rig_of(m) == lp.rig for m in rig_models(model))
-
-
-def rig_models(model):
-    """Every model of the scene the model's root belongs to."""
-    top = model
-    while top.parent is not None:
-        top = top.parent
-    scene = next((s for s in bpy.data.scenes if model.name in s.objects), None)
-    return [ob for ob in (scene.objects if scene is not None else ()) if is_model_root(ob)]
+    return any(m is not model and rig_of(m) == lp.rig for m in model_roots(scene))
 
 
 class ExportRun:
@@ -1021,7 +1012,7 @@ class Exporter(Notes):
                               "so the game reads the parent before posing it (Number Parts numbers parents first)")
         lp = lods[0].lp
         parts = len(lods[0].parts)
-        if is_first_person(self.model, lp):
+        if is_first_person(self.scene, self.model, lp):
             if parts > FIRST_PERSON_PARTS:
                 raise ExportError(f"{self.model.name}: {parts} parts; a first-person gun has at most "
                                   f"{FIRST_PERSON_PARTS}, the game's bone arrays")
