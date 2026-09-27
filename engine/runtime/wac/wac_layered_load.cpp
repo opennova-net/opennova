@@ -60,10 +60,9 @@ void load_script_effect_catalog(const mission::BootFileSource &files,
 WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		const mission::BootFileSource &files,
 		const std::string &mission_basename, world::World *world,
-		bool strict_diagnostics, std::string &error, particle::EffectCatalogNames *effect_catalog,
+		particle::EffectCatalogNames *effect_catalog,
         const audio::SoundSetIndex *sound_catalog,
         const std::shared_ptr<opennova::mus::MusGlobals> &music_globals) {
-	error.clear();
     CompileEnv env;
     env.music_globals = music_globals;
 	if (!files.valid()) {
@@ -152,20 +151,6 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		return std::nullopt;
 	};
 	Program program = compile_program(sources, env);
-	// Only strict mode refuses, and only a catalog miss (Diagnostic::error).
-	if (strict_diagnostics && !program.ok()) {
-		error = "WAC for " + mission_basename + " misses the mounted catalogs (" +
-				std::to_string(program.error_count()) + " error(s), " +
-				std::to_string(program.diagnostics.size()) + " diagnostic(s))";
-		for (const Diagnostic &diagnostic : program.diagnostics) {
-			if (!diagnostic.error) continue;
-			const std::string file = diagnostic.source < program.source_names.size()
-					? program.source_names[diagnostic.source] : std::string();
-			error += ": " + file + " (" + std::to_string(diagnostic.line) + ") " + diagnostic.message;
-			break;
-		}
-		return WacLayeredLoadStatus::kBlocked;
-	}
 	system.set_program(std::move(program));
 	return sources.empty() ? WacLayeredLoadStatus::kAbsent : WacLayeredLoadStatus::kLoaded;
 }

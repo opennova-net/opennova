@@ -6,7 +6,6 @@ using namespace opennova::inmatch;
 
 int main() {
     GameConfig config;
-    apply_fresh_host_rule_defaults(config);
     int32_t player_limit = 32;
     bool serve_and_play = true;
     const auto read = [&](const char* name, const char* value) {

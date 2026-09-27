@@ -61,30 +61,6 @@ constexpr bool is_stock_coop(uint32_t game_type) {
     return is_waypoint_family(game_type) && !is_objective(game_type);
 }
 
-// Every g_GameType code word Game_StartMission can produce; anything else is
-// a typo, not a mode (what the dedicated host's --game-type override is
-// validated against). [orig: Game_StartMission @0x524360 type switch]
-constexpr bool is_retail_code_word(uint32_t game_type) {
-    switch (game_type) {
-    case kDeathmatch:
-    case kKingOfTheHill:
-    case kFlagMe:
-    case kTeamDeathmatch:
-    case kTeamKingOfTheHill:
-    case kAttackDefend:
-    case kCaptureTheFlag:
-    case kFlagBall:
-    case kAdvanceAndSecure:
-    case kCoop:
-    case kObjectiveCoop:
-    case kConquerAndControl:
-    case kSearchAndDestroy:
-        return true;
-    default:
-        return false;
-    }
-}
-
 // The raw retail score-table row selector. Row zero is a real selector result
 // that the consumers normalize to Co-op row 2; it is distinct from Deathmatch
 // row 11. Flag Me deliberately maps to 12 even though the table has only rows
@@ -151,8 +127,6 @@ static_assert(score_table_index(kDeathmatch) == 11);
 static_assert(score_table_index(kCoop) == 0);
 static_assert(score_table_index(kObjectiveCoop) == 2);
 static_assert(!has_score_table(kFlagMe));
-static_assert(is_retail_code_word(kDeathmatch) && is_retail_code_word(kObjectiveCoop));
-static_assert(!is_retail_code_word(2) && !is_retail_code_word(0x10003u));
 
 // Retail's mission-attrib -> g_GameType selection: the single-select game-mode
 // bit from the mission header (bms::AttribFlags) picks the session code word.

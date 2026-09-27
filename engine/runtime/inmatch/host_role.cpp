@@ -128,15 +128,6 @@ void HostRole::bring_up_singleplayer() {
 	kernel.local.reset_local_player_input_to_player_facing();
 }
 
-void HostRole::bring_up_dedicated(const inmatch::HostConfig &host_cfg) {
-	reset_state(host_cfg.config, /*serve_and_play=*/false);
-	// HostOnly registers no local-player connection: no type-2 loopback is
-	// handed to create_session and no local player spawns.
-	inmatch::HostConfig cfg = host_cfg;
-	cfg.serve_and_play = false;
-	inmatch::start_host_session(state.host_owner, cfg);
-}
-
 // The shell's bring-up: the LAN host from its consolidated server config, or
 // its SP listen server; serve_and_play false is the dedicated (no local
 // player) form of the same session [orig: the §5.0 mode-3 listen server].

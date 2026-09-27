@@ -13,6 +13,7 @@
 #include "util/string_convert.h"
 #include <runtime/environment/environment_state.h>
 #include <base/io/fixed.h>
+#include <base/gameprofile/game_type.h> // game_type::for_mission_attribs
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers

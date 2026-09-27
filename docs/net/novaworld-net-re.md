@@ -897,7 +897,7 @@ per-session state.
   (the recv pass) and the wire send is `[orig: CNapiNetwork_SendUDPPacket @0x4c4d30]` →
   `CNapiNPManager_SendTo @0x61ec20`. **Reimpl (P6):** `apps/common/net_sockets::udp_bind` /
   `udp_recv_from` / `udp_send_to` cover the open / recv / send; the 64 KB `SO_RCVBUF`/`SO_SNDBUF` and the
-  PORTMIN..RANDOM selection are noted faithful details (irrelevant on the loopback `apps/nw_server` binds).
+  PORTMIN..RANDOM selection are noted faithful details (irrelevant on the loopback the socket tests bind).
   `host_owner_loop.h` (since folded into the in-match session, ADR 0036) was the owner pump; the real-socket peers run full SCRK via
   `frame_in_match_s2c` (so the loopback crypto-bypass question (b) stays orthogonal to the MP path).
 - `font_name @ 0x7C08C6` is the empty/default-string global that `SinglePlayer_StartMission` and
@@ -6813,7 +6813,7 @@ mode / target conn / target slot / target team); not a bug, an artifact of the c
   (`decode_medic_request`, `encode_medic_request`, `encode_chat_broadcast`), the dispatcher case
   keyed on the connection's own slot (the body is never read), the shared `is_medic_recipient`
   predicate with the death-path 0x54 split, `ServerTextTable::medic_request_format` loaded by the
-  embedder (nw_server reads a loose `gametext.bin`; the Godot shell wires its gametext table), the
+  embedder (the Godot shell wires its gametext table), the
   once-only latch feeding bit 7 of later 0x54/0x46, and the listen host's own copy of the sound
   through the local slot-sound route (`npruntime_round_sim_test`, `nw_message_coverage`). The
   client sender (`Input_HandleActionBinding` case 217 `@0x49B4B4..0x49B51B`: dead local entity,
@@ -7145,8 +7145,8 @@ units with the previous frame's sub-4 ms residual (`@0x52b7b2`), clamps a bank o
 (`@0x52b85b`), and drains 4 ms quanta with the logic tick on `(g_TickPhase & 3) == 0`
 (`@0x52ba21`/`@0x52ba47`, the phase free-running across frames) — so a stall is followed by the
 EMA's geometric fast-forward, never a dropped backlog; `world::TickAccumulator` is that bank,
-the only one, and `apps/nw_server` feeds it the measured delta instead of a constant one-tick
-frame. The game banks through it too (2026-09-25; the `WallClock` bank it replaced, which ran a
+the only one, fed the measured delta instead of a constant one-tick frame. The game banks
+through it (2026-09-25; the `WallClock` bank it replaced, which ran a
 hitch's whole backlog as a burst of catch-up ticks in the next frame, is deleted), together
 with retail's mission-start re-base: the load is never banked, and the
 three frames drawn after the start re-read the clock after their render (`Game_StartMission`
@@ -11150,8 +11150,7 @@ accepted 0x82 with the admitted-only stamp and the CLNTTMOUT latch, the 0x82 CS 
 `SessionTimeoutConfig` / `parse_nstmout` / `load_session_timeout_config`
 (`session_timeout_config.h`); the host template on `NapiNPProtocol::connection_template`, loaded
 from `HostConfig::game_root` (the Godot host stamps it from the `HostSessionOptions` game root the
-mission root sets to the mounted resource root, `Simulation::configure_host_session`; `apps/nw_server`
-from its mounted resource root), advertised by `make_server_auth_datagram`. Pinned by
+mission root sets to the mounted resource root, `Simulation::configure_host_session`), advertised by `make_server_auth_datagram`. Pinned by
 `npruntime_handshake_server` (the 0x46 echo burst, the SERTMOUT burst and the stamp set, the
 replacement burst, the spawn-wave removal, NEVER), `npruntime_host_punt` (the 0x86 receive leg and
 its negatives, the punt echo, both MSGCRE overflows, the STOP burst) and

@@ -10,8 +10,8 @@
 //   create_session(settings)[CNapiGameSession_CreateSession @0x4c97c0]   (installs cbs, P1)
 //     -> start_server()      [NapiNPProtocol_StartServer     @0x62b5e0]   (host_running=1, P1)
 //
-// All functions are pure state writes on the ctx — no sockets, no Godot. The owner (apps/nw_server
-// or the Godot binding) opens any real socket; here we only record the witnessed mode.
+// All functions are pure state writes on the ctx — no sockets, no Godot. The owner (the Godot
+// binding) opens any real socket; here we only record the witnessed mode.
 namespace opennova::inmatch {
 
 // Step 1 — map the connection mode to the three witnessed fields on the ctx (§5.0 table):

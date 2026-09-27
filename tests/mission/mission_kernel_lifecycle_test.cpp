@@ -208,58 +208,31 @@ int main() {
 	}
 
 	// --- the WAC diagnostic policy ---------------------------------------------
-	// An unknown command is retail's first error "Unknown '...'" and the
-	// program runs anyway, so the game's policy loads it.
-	{
+	// Retail never refuses a script: an unknown command ("Unknown '...'") and a
+	// literal the mounted catalogs miss (no .ptl here, so every FX name misses)
+	// are both recorded as the first error and the program runs anyway.
+	for (const char *source : {"if never() then bogus_command(1) endif\n",
+				 "if never() then fx2tgt(nosuch_effect, 1) endif\n"}) {
 		std::map<std::string, std::string> files;
-		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
+		files["synth.wac"] = source;
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
-		ms::KernelBootOptions options; // lenient
+		ms::KernelBootOptions options;
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		CHECK(error.empty());
 		CHECK(kernel.wac_loaded);
 		CHECK(kernel.wac.vm().loaded());
+		CHECK(!kernel.wac.program().diagnostics.empty());
 	}
-	// Strict mode loads retail's own first errors and refuses only a literal
-	// the mounted catalogs miss (no .ptl here, so every FX name misses).
-	{
-		std::map<std::string, std::string> files;
-		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
-		auto kernel_box = std::make_unique<ms::MissionKernel>();
-		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
-		ms::KernelBootOptions options;
-		options.wac_strict_diagnostics = true;
-		std::string error;
-		CHECK(kernel.boot(options, error));
-		CHECK(kernel.wac_loaded);
-		CHECK(!kernel.wac.program().diagnostics.empty() &&
-				kernel.wac.program().diagnostics[0].message == "Unknown 'BOGUS_COMMAND'");
-	}
-	{
-		std::map<std::string, std::string> files;
-		files["synth.wac"] = "if never() then fx2tgt(nosuch_effect, 1) endif\n";
-		auto kernel_box = std::make_unique<ms::MissionKernel>();
-		ms::MissionKernel &kernel = *kernel_box;
-		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
-		ms::KernelBootOptions options;
-		options.wac_strict_diagnostics = true;
-		std::string error;
-		CHECK(!kernel.boot(options, error));
-		CHECK(!kernel.wac_loaded);
-		CHECK(error.find("Unknown FX") != std::string::npos);
-	}
-	// No script at all is the valid BMS-only mission under both policies.
+	// No script at all is the valid BMS-only mission.
 	{
 		std::map<std::string, std::string> files;
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
-		options.wac_strict_diagnostics = true;
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		CHECK(!kernel.wac_loaded);
