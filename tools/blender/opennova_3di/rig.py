@@ -453,6 +453,32 @@ def editing(context, arm):
         vl.objects.active = held
 
 
+def lay_bones(edit_bones, names, heads, parents):
+    """New bones for parts: {part index: name}, their heads (armature space)
+    and parent parts (None: a top bone). A bone's tail points at its first
+    child part more than a millimetre away, else on along its parent's
+    direction, else up; 5 cm when it points at no child. Returns
+    {part index: edit bone}."""
+    made = {i: edit_bones.new(names[i]) for i in sorted(names)}
+    for i, eb in made.items():
+        eb.head = heads[i]
+        eb.use_connect = False
+    for i, eb in made.items():
+        if parents.get(i) is not None:
+            eb.parent = made[parents[i]]
+    for i, eb in made.items():
+        kids = sorted(k for k, p in parents.items() if p == i and k != i)
+        far = [Vector(heads[k]) for k in kids if (Vector(heads[k]) - Vector(heads[i])).length > 1e-3]
+        up = parents.get(i)
+        if far:
+            eb.tail = far[0]
+        elif up is not None and (Vector(heads[i]) - Vector(heads[up])).length > 1e-3:
+            eb.tail = Vector(heads[i]) + (Vector(heads[i]) - Vector(heads[up])).normalized() * 0.05
+        else:
+            eb.tail = Vector(heads[i]) + Vector((0.0, 0.0, 0.05))
+    return made
+
+
 def bone_parent_matrix(arm, bone):
     """The world matrix a child parented to `bone` hangs from, at rest: the
     bone's tail (Blender parents an object to a bone's tail)."""
@@ -518,22 +544,7 @@ def make_rig(context, model):
     frames = {i: to_arm @ ob.matrix_world for i, ob in empties.items()}
     names = {i: f"BN{i + 1:02d}" for i in empties}
     with editing(context, arm) as edit_bones:
-        made = {i: edit_bones.new(names[i]) for i in sorted(empties)}
-        for i, eb in made.items():
-            eb.head = frames[i].translation
-            eb.use_connect = False
-        for i, eb in made.items():
-            if parents[i] is not None:
-                eb.parent = made[parents[i]]
-        for i, eb in made.items():
-            kids = sorted(k for k, p in parents.items() if p == i)
-            far = [made[k].head for k in kids if (made[k].head - eb.head).length > 1e-3]
-            if far:
-                eb.tail = far[0]
-            elif parents[i] is not None and (eb.head - made[parents[i]].head).length > 1e-3:
-                eb.tail = eb.head + (eb.head - made[parents[i]].head).normalized() * 0.05
-            else:
-                eb.tail = eb.head + Vector((0.0, 0.0, 0.05))
+        lay_bones(edit_bones, names, {i: m.translation for i, m in frames.items()}, parents)
     for i, ob in empties.items():
         p, q = ob.o3d, arm.data.bones[names[i]].o3d
         q.panm_flags = p.panm_flags
@@ -556,3 +567,135 @@ def make_rig(context, model):
         bpy.data.objects.remove(ob)
     context.view_layer.update()
     return arm, notes
+
+
+# How far an arms model's bones may sit from a gun's parts of the same index
+# and still share the gun's rig: ArmsG's bone heads sit within 0.5 mm of
+# 357_1st's part pivots, but each weapon places the hands itself: against
+# REVVY's AKM_1st the same arms are 1.2 cm out on a finger joint, and that is
+# still the pair retail draws.
+PAIR_TOLERANCE = 0.025
+
+
+def numbered(name, index):
+    """An object's name carrying part number index + 1 where the naming
+    contract takes one (a helper, a user point, a light, a volume, an
+    occluder), else None."""
+    from . import export
+    raw = clean_name(name)
+    nn = f"{index + 1:02d}"
+    m = export.HELPER_RE.match(raw)
+    if m:
+        return f"_{nn} {m.group(2)}"
+    m = export.POINT_RE.match(raw)
+    if m:
+        return f"UP{m.group(1)}{nn}" + (f" {m.group(3)}" if m.group(3) is not None else "")
+    m = export.LIGHT_RE.match(raw)
+    if m:
+        return f"LP{nn}{m.group(2)}"
+    m = export.VOLUME_RE.match(raw)
+    if m:
+        return f"{m.group(1)}{m.group(2)}{nn}{m.group(4)}-colonly"
+    m = export.OCC_RE.match(raw)
+    if m:
+        return f"{m.group(1)}{nn}{m.group(3)}" + (f"-{m.group(4)}" if m.group(4) else "") + "-occonly"
+    return None
+
+
+def share_rig(context, arms, gun):
+    """Make an arms model deform with a first-person gun's rig, as retail draws
+    a gun's arms with the gun's part matrices, paired by index [orig:
+    Player_RenderFirstPersonViewModel @ 0x4DED60, the arms submit @ 0x4DF088]:
+    every mesh of the arms deforming with their own rig deforms with the gun's
+    instead, its vertex groups renamed after the gun's bones of the same BN##
+    number; a mesh hung from an arms bone is skinned wholly on that bone, and a
+    helper there moves under its LOD root, its name carrying its part; the
+    arms' own rig goes, and their root stands under the gun's root with no
+    offset. Returns notes. An ExportError, with nothing changed, when either
+    model lacks a rig of its own, when the arms' bones are not the gun's first
+    K bones (the same parents, heads within PAIR_TOLERANCE in each model's
+    frame), when their weights do not reach their last bone (a shared rig
+    gives the arms the bones their weights reach), or when the arms would have
+    more parts than the gun (every first-person bone buffer is the gun's)."""
+    own, theirs = rig_of(arms), rig_of(gun)
+    if arms is gun:
+        raise ExportError(f"{arms.name}: a model shares another model's rig")
+    if own is None or model_of(own) is not arms:
+        raise ExportError(f"{arms.name} has no rig of its own to give up")
+    if theirs is None or model_of(theirs) is not gun:
+        raise ExportError(f"{gun.name} has no rig of its own (Add Animation Rig makes one from its PN## parts)")
+    bones, gun_bones = part_bones(own), part_bones(theirs)
+    count = max(bones) + 1 if bones else 0
+    if sorted(bones) != list(range(count)) or count == 0:
+        raise ExportError(f"{own.name}: its part bones are not contiguous from BN01 (Number Parts numbers them)")
+    root = lod_roots(arms)[0]
+    meshes = [ob for r in lod_roots(arms) for ob in descendants(r) if not ignored(ob) and skin_rig(ob) == own]
+    hung = [ob for ob in own.children if ob.parent_type == "BONE"]
+    used = weighted_parts(meshes, bones)
+    top = max(used) + 1 if used else 0
+    if top != count:
+        raise ExportError(f"{arms.name}: its weights reach BN{top:02d}, not its last bone BN{count:02d}: on "
+                          f"{gun.name}'s rig its parts are the bones its weights reach")
+    need = count + (1 if arms.o3d.mesh_part else 0)
+    if need > len(gun_bones):
+        raise ExportError(f"{arms.name}: {need} parts, more than the {len(gun_bones)} of {gun.name}: the game draws "
+                          "the arms with the gun's part matrices, and a part past them has none")
+    into_arms = arms.matrix_world.inverted_safe() @ own.matrix_world
+    into_gun = gun.matrix_world.inverted_safe() @ theirs.matrix_world
+    worst = 0.0
+    for i in range(count):
+        if i not in gun_bones:
+            raise ExportError(f"{gun.name}: its rig lacks BN{i + 1:02d}")
+        mine, other = parent_part(bones[i]), parent_part(gun_bones[i])
+        if (mine or 0) != (other or 0):
+            raise ExportError(f"{arms.name}: bone {bones[i].name} hangs from part {(mine or 0) + 1:02d}, but "
+                              f"{gun.name}'s {gun_bones[i].name} from part {(other or 0) + 1:02d}")
+        d = ((into_arms @ bones[i].head_local) - (into_gun @ gun_bones[i].head_local)).length
+        if d > PAIR_TOLERANCE:
+            raise ExportError(f"{arms.name}: bone {bones[i].name} sits {d * 100:.1f} cm from {gun.name}'s "
+                              f"{gun_bones[i].name} (at most {PAIR_TOLERANCE * 100:.1f} cm)")
+        worst = max(worst, d)
+    for ob in hung:
+        bone = own.data.bones.get(ob.parent_bone)
+        index = bone_part(bone) if bone is not None else None
+        if index is None or index >= count:
+            raise ExportError(f"{ob.name}: it hangs from {own.name}'s bone '{ob.parent_bone}', which no part of "
+                              f"{gun.name}'s rig stands for")
+        if ob.type != "MESH" and numbered(ob.name, index) is None:
+            raise ExportError(f"{ob.name}: it hangs from {bone.name}; move it off the arms' rig first")
+    # Nothing refused: now change the scene.
+    names = {bones[i].name: gun_bones[i].name for i in range(count)}
+    for ob in meshes:
+        renames = [(g, names[g.name]) for g in ob.vertex_groups if g.name in names and g.name != names[g.name]]
+        for n, (g, _) in enumerate(renames):
+            g.name = f"~share {n}"
+        for g, new in renames:
+            g.name = new
+        for m in ob.modifiers:
+            if m.type == "ARMATURE" and m.object == own:
+                m.object = theirs
+    for ob in list(own.children):
+        world = ob.matrix_world.copy()
+        if ob.parent_type == "BONE":
+            index = bone_part(own.data.bones[ob.parent_bone])
+            if ob.type == "MESH" and skin_rig(ob) is None:
+                name = gun_bones[index].name
+                g = ob.vertex_groups.get(name) or ob.vertex_groups.new(name=name)
+                g.add(list(range(len(ob.data.vertices))), 1.0, "REPLACE")
+                ob.modifiers.new("Armature", "ARMATURE").object = theirs
+            elif ob.type != "MESH":
+                ob.name = numbered(ob.name, index)
+        ob.parent = root
+        ob.parent_type = "OBJECT"
+        ob.matrix_parent_inverse = root.matrix_world.inverted_safe()
+        ob.matrix_basis = world
+    data = own.data
+    bpy.data.objects.remove(own)
+    if data.users == 0:
+        bpy.data.armatures.remove(data)
+    arms.parent = gun
+    arms.matrix_parent_inverse = Matrix.Identity(4)
+    arms.matrix_basis = Matrix.Identity(4)
+    context.view_layer.update()
+    return [f"{arms.name} deforms with {theirs.name}: its bones sat up to {worst * 1000:.2f} mm from "
+            f"{gun.name}'s parts, whose pivots it now exports"]

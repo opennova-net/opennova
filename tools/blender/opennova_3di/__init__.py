@@ -571,6 +571,53 @@ class O3D_OT_add_rig(bpy.types.Operator):
         return {"FINISHED"}
 
 
+# The gun models a Deform with Rig of can pick, kept alive for Blender (an
+# enum's items must outlive the call that made them).
+_gun_items = []
+
+
+def gun_models(self, context):
+    """The scene's other models with a rig of their own."""
+    model = active_model(context)
+    _gun_items[:] = [(m.name, m.name, f"Deform with {m.name}'s rig") for m in rig.model_roots(context.scene)
+                     if m is not model and rig.rig_of(m) is not None and rig.model_of(rig.rig_of(m)) is m]
+    return _gun_items
+
+
+class O3D_OT_share_rig(bpy.types.Operator):
+    bl_idname = "opennova_3di.share_rig"
+    bl_label = "Deform with Rig of"
+    bl_description = ("Make the active arms model deform with a first-person gun's rig, as the game draws a gun's "
+                      "arms with the gun's parts: its meshes deform with the gun's bones of the same BN## numbers, "
+                      "its own rig goes and its root stands under the gun's")
+    bl_options = {"REGISTER", "UNDO"}
+    gun: EnumProperty(name="Gun", items=gun_models)
+
+    @classmethod
+    def poll(cls, context):
+        model = active_model(context)
+        arm = rig.rig_of(model) if model is not None else None
+        return context.mode == "OBJECT" and arm is not None and rig.model_of(arm) is model
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        model = active_model(context)
+        gun = bpy.data.objects.get(self.gun)
+        if gun is None:
+            self.report({"ERROR"}, "choose the gun whose rig the arms deform with")
+            return {"CANCELLED"}
+        try:
+            notes = rig.share_rig(context, model, gun)
+        except ExportError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        for note in notes:
+            self.report({"INFO"}, note)
+        return {"FINISHED"}
+
+
 class O3D_OT_number_parts(bpy.types.Operator):
     bl_idname = "opennova_3di.number_parts"
     bl_label = "Number Parts"
@@ -1288,7 +1335,8 @@ class O3D_PT_material(bpy.types.Panel):
 CLASSES = (O3DTrack, O3DAdmVariant, O3DAdmRow, O3DActionProps, O3DObjectProps, O3DBoneProps, O3DTexture,
            O3DMaterialProps, O3DLightProps, O3DSceneProps,
            O3D_OT_add_track, O3D_OT_remove_track, O3D_OT_add_texture, O3D_OT_remove_texture, O3D_OT_export,
-           O3D_OT_export_all, O3D_OT_add_model, O3D_OT_add_rig, O3D_OT_number_parts, O3D_OT_import,
+           O3D_OT_export_all, O3D_OT_add_model, O3D_OT_add_rig, O3D_OT_share_rig, O3D_OT_number_parts,
+           O3D_OT_import,
            O3D_OT_export_anim, O3D_OT_export_all_anim, O3D_OT_import_anim, O3D_OT_add_row,
            O3D_OT_remove_row, O3D_OT_add_variant, O3D_OT_remove_variant,
            O3D_OT_assign_weapon_action, O3D_OT_timing_marker, O3D_OT_edit_clip, O3D_OT_preview_weapon,

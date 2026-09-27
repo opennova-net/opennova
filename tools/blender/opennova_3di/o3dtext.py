@@ -236,20 +236,19 @@ class ModelSpace:
 @contextlib.contextmanager
 def playing(data, action, slot=None):
     """`action` played on its own through `data` (a rig's animation data)
-    while the block runs: the NLA off and, on Blender 4.4 and up, through
-    `slot` when one is given (else the slot assigning the Action picks). The
-    rig's own Action, slot and NLA come back after."""
-    slotted = hasattr(data, "action_slot")
-    held = (data.action, data.use_nla, data.action_slot if slotted else None)
+    while the block runs: the NLA off and through `slot` when one is given
+    (else the slot assigning the Action picks). The rig's own Action, slot and
+    NLA come back after."""
+    held = (data.action, data.use_nla, data.action_slot)
     try:
         data.use_nla = False
         data.action = action
-        if slotted and slot is not None:
+        if slot is not None:
             data.action_slot = slot
         yield
     finally:
         data.action, data.use_nla = held[0], held[1]
-        if slotted and held[0] is not None and held[2] is not None:
+        if held[0] is not None and held[2] is not None:
             data.action_slot = held[2]
 
 
