@@ -2124,8 +2124,6 @@ in-match session), both peers retail `Jointops.exe`, same Laba-Laba map. 527 dat
 **0 decode failures**, both 61-char SCRKs recovered. The joiner spent the session on foot
 AND in a vehicle (handle `0x108b` = pool 1 / slot 139) — provides the cross-witness oracle
 for the per-entity-type callback (§5.10), including its world-vs-vehicle-local position branch.
-A reusable `tshark`-backed converter ships at `tools/net/pcap_to_hexcap.py` so any future
-`.pcapng` produces the hexcap format `nw_ingame_histogram_test` consumes.
 
 **Entity handle encoding — `(pool << 12) | slot`.** Every in-match entity reference is a `u16`:
 high 4 bits select the pool, low 12 the slot, resolved as

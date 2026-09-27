@@ -193,7 +193,7 @@ the same text transport, the same add-on.
    with their Armature modifiers off, and every model in its own root's frame.
 10. **Standing from ADR 0038.** No other Python product code, Qt importer, or
    Python test suite (the stdlib `scripts/lint`, `scripts/ida`, `scripts/net`,
-   `scripts/mcp`, `scripts/ci`, `scripts/parity` and `tools/net` scripts and
+   `scripts/mcp`, `scripts/ci` and `scripts/parity` scripts and
    the `scripts/oracles` witness regenerators, which drive the pinned retail
    executable under Unicorn, remain); no native
    ASE/TDP/OED modules; Godot `ObjectData` loads immutable 3DI documents. A
