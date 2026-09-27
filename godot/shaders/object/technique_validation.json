@@ -178,13 +178,32 @@
         "kind": "scr_fx",
         "sources": [
           {"file": "Dot3DiffT.fx", "symbols": ["technique TSegTanDiff_Std", "ps11Diffuse"]},
-          {"file": "SkBDiffT.fx", "symbols": ["technique TSkinTanDiff_Std", "ps11Diffuse"]},
           {"file": "_psDiff.fx", "symbols": ["shared PIXELSHADER ps11Diffuse"]}
         ]
       },
       "channels": "Tangent-space normal map drives per-pixel N.L; Diffuse1.rgb is the albedo and alpha is optional cutout coverage.",
       "light_response": "Hemisphere plus mapped-normal directional and point diffuse, with the retail geometric-normal self-shadow multiplier on each lit pass.",
       "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "PhongTangentDiffuseSkinned",
+      "implementation": "phong_diffuse",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "SkBDiffT.fx", "symbols": ["technique TSkinTanDiff_Std", "vscTanSkinDot3DirPS", "vscTanSkinDot3PointPS", "ps11Diffuse"]},
+          {"file": "_vsSkDfT.fx", "symbols": ["vsTanSkinDot3DirPS", "vsTanSkinDot3PointPS"]},
+          {"file": "_psDiff.fx", "symbols": ["shared PIXELSHADER ps11Diffuse"]}
+        ]
+      },
+      "channels": "Tangent-space normal map drives per-pixel N.L; Diffuse1.rgb is the albedo and alpha is optional cutout coverage.",
+      "light_response": "Skinned hemisphere plus mapped-normal directional and point diffuse, with the retail geometric-normal self-shadow multiplier on each lit pass.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog; no CLIP technique (the bone path skips CLIP), the skinned MATCHTERRAIN pre-pass.",
       "shader_tokens": ["obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
       "parity_status": "matching",
       "exceptions": []
@@ -238,13 +257,32 @@
         "kind": "scr_fx",
         "sources": [
           {"file": "Dot3DiffO.fx", "symbols": ["technique TSegObjDiff_std", "ps11Diffuse"]},
-          {"file": "SkBDiffO.fx", "symbols": ["technique TSkinObjDiff_Std", "ps11Diffuse"]},
           {"file": "_psDiff.fx", "symbols": ["shared PIXELSHADER ps11Diffuse"]}
         ]
       },
       "channels": "Object-space normal map drives per-pixel N.L; Diffuse1.rgb is albedo and alpha is optional cutout coverage.",
       "light_response": "Hemisphere plus mapped-normal directional and point diffuse with geometric-normal self-shadow.",
       "state": "Opaque NORMAL pass, optional cutout, regular fog.",
+      "shader_tokens": ["obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
+      "parity_status": "matching",
+      "exceptions": []
+    },
+    {
+      "engine_enum": "PhongObjectDiffuseSkinned",
+      "implementation": "phong_diffuse",
+      "policies": ["opaque", "cutout_mix"],
+      "responses": {"directional": true, "hemisphere": true, "ambient": true, "point": true},
+      "evidence": {
+        "kind": "scr_fx",
+        "sources": [
+          {"file": "SkBDiffO.fx", "symbols": ["technique TSkinObjDiff_Std", "vscObjSkinDot3DirPS", "vscObjSkinDot3PointPS", "ps11Diffuse"]},
+          {"file": "_vsSkDfO.fx", "symbols": ["vsObjSkinDot3DirPS", "vsObjSkinDot3PointPS", "ObjSpaceFixup"]},
+          {"file": "_psDiff.fx", "symbols": ["shared PIXELSHADER ps11Diffuse"]}
+        ]
+      },
+      "channels": "Object-space normal map drives per-pixel N.L; Diffuse1.rgb is albedo and alpha is optional cutout coverage.",
+      "light_response": "Skinned hemisphere plus mapped-normal directional and point diffuse with geometric-normal self-shadow.",
+      "state": "Opaque NORMAL pass, optional cutout, regular fog; no CLIP technique (the bone path skips CLIP), the skinned MATCHTERRAIN pre-pass.",
       "shader_tokens": ["obj_bump_diffuse_lighting", "obj_bump_diffuse_points", "obj_self_shadow"],
       "parity_status": "matching",
       "exceptions": []

@@ -457,7 +457,7 @@ int main() {
 	// 14. PROJSHAD state is technique-owned, not inherited from NORMAL. The
 	// decoded retail corpus has one material-variant _FFP declaration, fifteen
 	// hard-opaque shader declarations, and no pass for tracer/flag/glass.
-	// Shared declarations expand to all 24 reachable runtime techniques.
+	// Shared declarations expand to all 26 reachable runtime techniques.
 	// [orig: _FFP.fx TBoringFFPProjShad; shipped TECHNIQUE_PROJSHAD declarations]
 	{
 		struct ProjectedCase {
@@ -474,9 +474,11 @@ int main() {
 			{ObjectShaderTechnique::Tracer, ObjectProjectedShadowPolicy::NoPass},
 			{ObjectShaderTechnique::Flag, ObjectProjectedShadowPolicy::NoPass},
 			{ObjectShaderTechnique::PhongTangentDiffuse, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::PhongTangentDiffuseSkinned, ObjectProjectedShadowPolicy::Opaque},
 			{ObjectShaderTechnique::PhongTangentSpecular, ObjectProjectedShadowPolicy::Opaque},
 			{ObjectShaderTechnique::PhongTangentSpecularSkinned, ObjectProjectedShadowPolicy::Opaque},
 			{ObjectShaderTechnique::PhongObjectDiffuse, ObjectProjectedShadowPolicy::Opaque},
+			{ObjectShaderTechnique::PhongObjectDiffuseSkinned, ObjectProjectedShadowPolicy::Opaque},
 			{ObjectShaderTechnique::PhongObjectSpecular, ObjectProjectedShadowPolicy::Opaque},
 			{ObjectShaderTechnique::PhongObjectSpecularPhongMap, ObjectProjectedShadowPolicy::Opaque},
 			{ObjectShaderTechnique::Dot3Tangent, ObjectProjectedShadowPolicy::Opaque},
@@ -517,9 +519,11 @@ int main() {
 			{ObjectShaderTechnique::Tracer, ObjectProjectedShadowCoverage::NoPass, "no_pass"},
 			{ObjectShaderTechnique::Flag, ObjectProjectedShadowCoverage::NoPass, "no_pass"},
 			{ObjectShaderTechnique::PhongTangentDiffuse, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::PhongTangentDiffuseSkinned, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
 			{ObjectShaderTechnique::PhongTangentSpecular, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
 			{ObjectShaderTechnique::PhongTangentSpecularSkinned, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
 			{ObjectShaderTechnique::PhongObjectDiffuse, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::PhongObjectDiffuseSkinned, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
 			{ObjectShaderTechnique::PhongObjectSpecular, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
 			{ObjectShaderTechnique::PhongObjectSpecularPhongMap, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
 			{ObjectShaderTechnique::Dot3Tangent, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
@@ -547,6 +551,62 @@ int main() {
 			        ObjectProjectedShadowPolicy::NoPass),
 			       "coverage and state agree on which techniques submit a pass");
 		}
+	}
+
+	// 15. The skinned effects' vertex programs: SkBDiffT and SkBDiffO are
+	// techniques of their own (their unskinned twins Dot3DiffT and Dot3DiffO
+	// keep their CLIP block and carry no MATCHTERRAIN), and every skinned
+	// technique names retail's skinnormal: SkBasic and SkGlass blend the
+	// normal, every lit bump effect lights the vertex's first palette entry.
+	// [orig: _BaseInc.fx CalcSkinWorldPosAndNormal; SkBasic.fx vsSkinBasic;
+	//  SkGlass.fx vsSkinGlass; _vsSkDfT.fx; _vsSkPhT.fx; _vsSkDfO.fx; _vsSkPhO.fx]
+	{
+		struct TagCase {
+			const char *tag;
+			ObjectShaderTechnique technique;
+			ObjectSkinNormal skin_normal;
+		};
+		const TagCase cases[] = {
+			{"VS_DOT3DIFF", ObjectShaderTechnique::PhongTangentDiffuse, ObjectSkinNormal::None},
+			{"VS_DOT3DIFFOBJ", ObjectShaderTechnique::PhongObjectDiffuse, ObjectSkinNormal::None},
+			{"VS_SKBASIC", ObjectShaderTechnique::FixedSkinned, ObjectSkinNormal::Blended},
+			{"VS_SKBASIC#UV", ObjectShaderTechnique::FixedSkinned, ObjectSkinNormal::Blended},
+			{"VS_SKGLASS", ObjectShaderTechnique::GlassSkinned, ObjectSkinNormal::Blended},
+			{"VS_SKBUMPDIFFT", ObjectShaderTechnique::PhongTangentDiffuseSkinned,
+			 ObjectSkinNormal::FirstBone},
+			{"VS_SKBUMPPHONGT", ObjectShaderTechnique::PhongTangentSpecularSkinned,
+			 ObjectSkinNormal::FirstBone},
+			{"VS_SKBUMPDIFFT2", ObjectShaderTechnique::Dot3TangentDetailSkinned,
+			 ObjectSkinNormal::FirstBone},
+			{"VS_SKBUMPDIFFOBJ", ObjectShaderTechnique::PhongObjectDiffuseSkinned,
+			 ObjectSkinNormal::FirstBone},
+			{"VS_SKBUMPPHONGOBJ", ObjectShaderTechnique::PhongObjectSpecularPhongMap,
+			 ObjectSkinNormal::FirstBone},
+			{"VS_SKBUMPDIFFOBJ2", ObjectShaderTechnique::Dot3ObjectDetail,
+			 ObjectSkinNormal::FirstBone},
+		};
+		for (const TagCase &test : cases) {
+			const auto pipeline = describe_object_shader_pipeline(build_object_shader_key(
+				classify_object_material(test.tag, 0, 0, 0, 128)));
+			expect(pipeline.technique == test.technique,
+			       std::string("the tag selects its retail effect's technique: ") + test.tag);
+			expect(pipeline.skin_normal == test.skin_normal,
+			       std::string("the technique carries its effect's skinnormal: ") + test.tag);
+			expect(pipeline.skin_normal == object_skin_normal(pipeline.technique),
+			       "the descriptor's rule is the technique's");
+		}
+		// The single-stage downgrades keep their effect's rule.
+		expect(object_skin_normal(ObjectShaderTechnique::Dot3TangentSkinned) ==
+		               ObjectSkinNormal::FirstBone &&
+		               object_skin_normal(ObjectShaderTechnique::Dot3Object) ==
+		               ObjectSkinNormal::FirstBone,
+		       "the no-detail skinned DOT3 downgrades still light the first entry");
+		expect(std::string(object_skin_normal_name(ObjectSkinNormal::None)) == "none" &&
+		               std::string(object_skin_normal_name(ObjectSkinNormal::Blended)) ==
+		               "blended" &&
+		               std::string(object_skin_normal_name(ObjectSkinNormal::FirstBone)) ==
+		               "first_bone",
+		       "the skin-normal names are the manifest tokens");
 	}
 
 	std::cerr << "renderer_material_classify_test ok\n";

@@ -138,6 +138,20 @@ func test_configure_material_selects_compile_time_techniques() -> void:
 	assert_eq(object_normal.shader.resource_path,
 			"res://shaders/object/phong_object_diffuse/opaque.gdshader",
 			"object-space normal topology is a distinct resource")
+	# SkBDiffT/SkBDiffO share their pixel shaders with Dot3DiffT/Dot3DiffO but
+	# not their vertex programs, CLIP or MATCHTERRAIN: techniques of their own.
+	var skinned_tangent_diffuse := ShaderMaterial.new()
+	cache.configure_material_for_key(skinned_tangent_diffuse,
+			cache.classify("VS_SKBUMPDIFFT", 0, 0, 0, 128))
+	assert_eq(skinned_tangent_diffuse.shader.resource_path,
+			"res://shaders/object/phong_tangent_diffuse_skinned/opaque.gdshader",
+			"skinned tangent bump-diffuse selects its own skinned resource")
+	var skinned_object_diffuse := ShaderMaterial.new()
+	cache.configure_material_for_key(skinned_object_diffuse,
+			cache.classify("VS_SKBUMPDIFFOBJ", 0, 0, 0, 128))
+	assert_eq(skinned_object_diffuse.shader.resource_path,
+			"res://shaders/object/phong_object_diffuse_skinned/opaque.gdshader",
+			"skinned object bump-diffuse selects its own skinned resource")
 	var skinned_tangent_phong := ShaderMaterial.new()
 	cache.configure_material_for_key(skinned_tangent_phong,
 			cache.classify("VS_SKBUMPPHONGT", 0, 0, 0, 128))

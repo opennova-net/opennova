@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "resource_count": 128,
+  "resource_count": 136,
   "auxiliary_resource_count": 4,
-  "total_resource_count": 132,
+  "total_resource_count": 140,
   "description": "Reachable object shader techniques and static render policies. Runtime selection must fail closed outside this table.",
   "auxiliary_resources": [
     {
@@ -98,9 +98,11 @@
     "Tracer": "no_pass",
     "Flag": "no_pass",
     "PhongTangentDiffuse": "diffuse_alpha",
+    "PhongTangentDiffuseSkinned": "diffuse_alpha",
     "PhongTangentSpecular": "diffuse_alpha",
     "PhongTangentSpecularSkinned": "diffuse_alpha",
     "PhongObjectDiffuse": "diffuse_alpha",
+    "PhongObjectDiffuseSkinned": "diffuse_alpha",
     "PhongObjectSpecular": "diffuse_alpha",
     "PhongObjectSpecularPhongMap": "diffuse_alpha",
     "Dot3Tangent": "diffuse_alpha",
@@ -124,9 +126,11 @@
     "Tracer": "no_pass",
     "Flag": "no_pass",
     "PhongTangentDiffuse": "opaque",
+    "PhongTangentDiffuseSkinned": "opaque",
     "PhongTangentSpecular": "opaque",
     "PhongTangentSpecularSkinned": "opaque",
     "PhongObjectDiffuse": "opaque",
+    "PhongObjectDiffuseSkinned": "opaque",
     "PhongObjectSpecular": "opaque",
     "PhongObjectSpecularPhongMap": "opaque",
     "Dot3Tangent": "opaque",
@@ -149,10 +153,12 @@
     "SelfLitDetail": "no_pass",
     "Tracer": "no_pass",
     "Flag": "no_pass",
-    "PhongTangentDiffuse": "skinned_stance",
+    "PhongTangentDiffuse": "no_pass",
+    "PhongTangentDiffuseSkinned": "skinned_stance",
     "PhongTangentSpecular": "no_pass",
     "PhongTangentSpecularSkinned": "skinned_stance",
-    "PhongObjectDiffuse": "skinned_stance",
+    "PhongObjectDiffuse": "no_pass",
+    "PhongObjectDiffuseSkinned": "skinned_stance",
     "PhongObjectSpecular": "no_pass",
     "PhongObjectSpecularPhongMap": "skinned_stance",
     "Dot3Tangent": "no_pass",
@@ -176,9 +182,11 @@
     "Tracer": "no_pass",
     "Flag": "no_pass",
     "PhongTangentDiffuse": "no_pass",
+    "PhongTangentDiffuseSkinned": "no_pass",
     "PhongTangentSpecular": "no_pass",
     "PhongTangentSpecularSkinned": "no_pass",
     "PhongObjectDiffuse": "no_pass",
+    "PhongObjectDiffuseSkinned": "no_pass",
     "PhongObjectSpecular": "no_pass",
     "PhongObjectSpecularPhongMap": "no_pass",
     "Dot3Tangent": "no_pass",
@@ -344,7 +352,24 @@
       "rgb_modulation": "none",
       "alpha_modulation": "none",
       "coverage_source": "diffuse_alpha",
-      "clip_class": "explicit_unskinned_or_submit_skip_skinned"
+      "clip_class": "explicit"
+    },
+    {
+      "engine_enum": "PhongTangentDiffuseSkinned",
+      "directory": "phong_tangent_diffuse_skinned",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "phong_diffuse",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
     },
     {
       "engine_enum": "PhongTangentSpecular",
@@ -395,7 +420,24 @@
       "rgb_modulation": "none",
       "alpha_modulation": "none",
       "coverage_source": "diffuse_alpha",
-      "clip_class": "explicit_unskinned_or_submit_skip_skinned"
+      "clip_class": "explicit"
+    },
+    {
+      "engine_enum": "PhongObjectDiffuseSkinned",
+      "directory": "phong_object_diffuse_skinned",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "object_uv1",
+      "vertex": "standard",
+      "vertex_point_lights": "self_shadowed_attenuation",
+      "implementation": "phong_diffuse",
+      "rgb_modulation": "none",
+      "alpha_modulation": "none",
+      "coverage_source": "diffuse_alpha",
+      "clip_class": "skinned_submit_skip"
     },
     {
       "engine_enum": "PhongObjectSpecular",

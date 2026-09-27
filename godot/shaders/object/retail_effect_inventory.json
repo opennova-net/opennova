@@ -55,7 +55,7 @@
     "TECHNIQUE_NORMAL": {
       "declaration_count": 30,
       "pass_declaration_count": 101,
-      "disposition": "ported_to_24_runtime_techniques_d3d12_raster_validated",
+      "disposition": "ported_to_26_runtime_techniques_d3d12_raster_validated",
       "highest_quality_selected": [
         {"file": "_FFP.fx", "ordinal": 0, "name": "TBoringFFP", "runtime_techniques": ["Fixed", "FixedDetail", "SelfLit", "SelfLitDetail"]},
         {"file": "BDiffT2.fx", "ordinal": 0, "name": "TSegTanDiff_Std", "runtime_techniques": ["Dot3Tangent", "Dot3TangentDetail"]},
@@ -69,9 +69,9 @@
         {"file": "PhongO.fx", "ordinal": 0, "name": "TSegObjPhong", "runtime_techniques": ["PhongObjectSpecular"]},
         {"file": "PhongT.fx", "ordinal": 0, "name": "TSegTanPhong_Std", "runtime_techniques": ["PhongTangentSpecular"]},
         {"file": "SkBasic.fx", "ordinal": 0, "name": "TSkBasic", "runtime_techniques": ["FixedSkinned"]},
-        {"file": "SkBDiffO.fx", "ordinal": 0, "name": "TSkinObjDiff_Std", "runtime_techniques": ["PhongObjectDiffuse"]},
+        {"file": "SkBDiffO.fx", "ordinal": 0, "name": "TSkinObjDiff_Std", "runtime_techniques": ["PhongObjectDiffuseSkinned"]},
         {"file": "SkBDiffO2.fx", "ordinal": 0, "name": "TSkObjDiff", "runtime_techniques": ["Dot3Object", "Dot3ObjectDetail"]},
-        {"file": "SkBDiffT.fx", "ordinal": 0, "name": "TSkinTanDiff_Std", "runtime_techniques": ["PhongTangentDiffuse"]},
+        {"file": "SkBDiffT.fx", "ordinal": 0, "name": "TSkinTanDiff_Std", "runtime_techniques": ["PhongTangentDiffuseSkinned"]},
         {"file": "SkBDiffT2.fx", "ordinal": 0, "name": "TSkTanDiff", "runtime_techniques": ["Dot3TangentSkinned", "Dot3TangentDetailSkinned"]},
         {"file": "SkBPhongO.fx", "ordinal": 0, "name": "TSkObjPhong_Std", "runtime_techniques": ["PhongObjectSpecularPhongMap"]},
         {"file": "SkBPhongT.fx", "ordinal": 0, "name": "TSkTanPhong_Std", "runtime_techniques": ["PhongTangentSpecularSkinned"]},

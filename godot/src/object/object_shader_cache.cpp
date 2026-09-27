@@ -32,12 +32,16 @@ const char *shader_technique_directory(opennova::renderer::ObjectShaderTechnique
 		case opennova::renderer::ObjectShaderTechnique::Flag: return "flag";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentDiffuse:
 			return "phong_tangent_diffuse";
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentDiffuseSkinned:
+			return "phong_tangent_diffuse_skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecular:
 			return "phong_tangent_specular";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned:
 			return "phong_tangent_specular_skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectDiffuse:
 			return "phong_object_diffuse";
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectDiffuseSkinned:
+			return "phong_object_diffuse_skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecular:
 			return "phong_object_specular";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap:

@@ -95,9 +95,11 @@ enum class ObjectShaderTechnique : uint8_t {
 	Tracer,
 	Flag,
 	PhongTangentDiffuse,
+	PhongTangentDiffuseSkinned,
 	PhongTangentSpecular,
 	PhongTangentSpecularSkinned,
 	PhongObjectDiffuse,
+	PhongObjectDiffuseSkinned,
 	PhongObjectSpecular,
 	PhongObjectSpecularPhongMap,
 	Dot3Tangent,
@@ -112,6 +114,34 @@ enum class ObjectShaderTechnique : uint8_t {
 	GlassFixed,
 	GlassSkinned,
 };
+
+// How a technique's vertex program forms the frame it lights with. Every
+// retail skinned effect blends the position over four palette entries (the
+// three stored weights and 1 - (w0 + w1 + w2) on index byte 3), but only
+// SkBasic and SkGlass blend and normalize the normal too (skinnormal = true).
+// Every lit bump effect (the vsObjSkin* and vsTanSkin* programs) passes
+// skinnormal = false: its normal is the vertex's FIRST entry alone
+// (IndexArray[0], not normalized), and it takes the light, hemisphere and eye
+// vectors into that entry's model space to meet the UNDEFORMED In.Norm,
+// In.Tangent and In.Binormal: SkinModelLightArray[indexvector.x] holds the
+// light through the inverse of that entry's matrix (a point light's position,
+// from which the shader subtracts In.Pos, so the vector starts at the vertex
+// the entry carries rigidly), and transpose(SkinWorldMatrixArray[indexvector.x])
+// takes the hemisphere and eye vectors there.
+// [orig: _BaseInc.fx CalcSkinWorldPosAndNormal; SkBasic.fx vsSkinBasic and
+//  SkGlass.fx vsSkinGlass (true); _vsSkDfT.fx, _vsSkPhT.fx, _vsSkDfO.fx and
+//  _vsSkPhO.fx (false); the SkinModelLightArray fill in
+//  CRenderBatchQueue_FlushBatches @ 0x5DA4F6..0x5DA5CE (directional) and
+//  @ 0x5DA950..0x5DA9A1 (point)]
+enum class ObjectSkinNormal : uint8_t {
+	None,       // an unskinned effect: the mesh vertex as it is
+	Blended,    // skinnormal = true
+	FirstBone,  // skinnormal = false
+};
+
+ObjectSkinNormal object_skin_normal(ObjectShaderTechnique technique) noexcept;
+// The manifest token of a skin-normal rule ("none", "blended", "first_bone").
+const char *object_skin_normal_name(ObjectSkinNormal skin_normal) noexcept;
 
 // The PROJSHAD pass is not a copy of NORMAL's blend policy. The four _FFP
 // techniques compile material blend variants (BLEND_NONE ONE/ZERO;
@@ -167,6 +197,7 @@ struct ObjectShaderPipelineDescriptor {
 	ObjectEnvironmentSource environment_source = ObjectEnvironmentSource::None;
 	ObjectSpecularSource specular_source = ObjectSpecularSource::None;
 	ObjectShaderTechnique technique = ObjectShaderTechnique::Unsupported;
+	ObjectSkinNormal skin_normal = ObjectSkinNormal::None;
 	ObjectNormalSpace normal_space = ObjectNormalSpace::None;
 	bool writes_alpha = false;
 	bool alpha_test = false;

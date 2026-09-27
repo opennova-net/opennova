@@ -4,16 +4,15 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 #define OBJ_RGB_MOD_NONE
 #define OBJ_ALPHA_MOD_NONE
 #define OBJ_COVERAGE_DIFFUSE_ALPHA
-#define OBJ_CLIP_EXPLICIT
-#define OBJ_CLIP_DOT3
+#define OBJ_CLIP_SKINNED_SUBMIT_SKIP
 #define OBJ_VERTEX_POINT_LIGHTS_SELF_SHADOWED_ATTENUATION
-#define OBJ_MATCHTERRAIN_NO_PASS
+#define OBJ_MATCHTERRAIN_SKINNED_STANCE
 #define OBJ_FOG_VERTEX_SHADER
 
 #include "res://shaders/object/shared.gdshaderinc"
 #include "res://shaders/object/sampling/single.gdshaderinc"
 #include "res://shaders/object/coverage/cutout.gdshaderinc"
-#include "res://shaders/object/normal/object_uv1.gdshaderinc"
+#include "res://shaders/object/normal/tangent_uv1.gdshaderinc"
 #include "res://shaders/object/surface.gdshaderinc"
 #include "res://shaders/object/match_terrain.gdshaderinc"
 #include "res://shaders/object/vertex_standard.gdshaderinc"

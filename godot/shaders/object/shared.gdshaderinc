@@ -223,11 +223,6 @@ void obj_apply_water_reflection_clip(vec3 camera_position_world) {
 		discard;
 	}
 	#endif
-	#ifdef OBJ_CLIP_EXPLICIT_UNSKINNED_OR_SUBMIT_SKIP_SKINNED
-	if (obj_water_reflection_clips(camera_position_world)) {
-		discard;
-	}
-	#endif
 }
 
 // Full D3D COUNT2 affine transform. Coefficient rows preserve SET, shear,
