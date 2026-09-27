@@ -1,65 +1,73 @@
 # opennova-3di anim scene -> .o3a -> Blender Actions on a model's rig.
 #
-# The inverse of animation.py: every clip becomes one Action on its own NLA
-# track, keyed on the rig's BN## bones (replacing a clip the rig already holds
-# under its name), and the table becomes the model root's rows. Nothing is
-# stashed so that a re-export reproduces the source: the bind, the bone
-# positions and the terminal duplicate key are the engine's derivations, the
-# events are the pose's own (animation.py), and what the scene form cannot
-# carry is reported.
+# The inverse of animation.py: every clip becomes one Action keyed for the
+# model's rig, as long as its manual frame range, Cyclic when it loops, at its
+# Clip rate, with a marker per event trigger bit, and the table's rows merge
+# into the model root's: a row answering a slot the model already has takes
+# the set's clips, and the others stay. Nothing is stashed so that a re-export
+# reproduces the source: the bind, the bone positions and the terminal
+# duplicate key are the engine's derivations, the events are the pose's own
+# (animation.py), and what the scene form cannot carry is reported.
+#
+# A model with no rig (a first-person gun imported from its .3di, its parts
+# PN## empties) gets one first: its parts become the BN## bones of an Armature
+# under its LOD 0 root and everything on a part hangs from its bone
+# (rig.make_rig, what Add Animation Rig runs). A model whose meshes deform
+# with another model's rig (arms on a gun) takes no clips: the gun's set
+# poses both.
 #
 # The rig's rest pose is the bind. The runtime binds every clip of a table to
 # the reset clip and composes each key as `key * bind^-1`, the bind being that
 # clip's first key [orig: AnimChannel_ComputeBoneMatrices @0x410da0 over the
-# bind AnimMap_RegisterEntity @0x40bb60 pins]. A rig imported from a `.3di`
-# carries only pivots, so its bones point wherever the model importer put
-# them; the first table imported onto a rig that holds no clip yet turns each
-# rest bone onto that bind. The heads, the lengths and the weights do not move,
-# so the model still exports the same model, and a clip then shows in Blender
-# the pose the game draws. A rig that already holds clips keeps its rest (their
-# Actions are keyed against it), and a lone `.bad`, or a table with no reset
-# row, names no bind at all (the game cannot load such a table, and export
-# refuses one).
+# bind AnimMap_RegisterEntity @0x40bb60 pins]. A rig made from a `.3di`'s
+# parts carries only pivots, so its bones point wherever it put them; the
+# first table imported onto a rig that holds no clip yet turns each rest bone
+# onto that bind. The heads, the lengths, the weights and the place of
+# everything hung from a bone do not move, so the model still exports the same
+# model, and a clip then shows in Blender the pose the game draws. A rig that
+# already holds clips keeps its rest (their Actions are keyed against it), and
+# a lone `.bad`, or a table with no reset row, names no bind at all.
 #
 # A clip is sampled the way the runtime evaluates it: one pose per frame of the
 # header's length, frames 0..frame_count, each bone's key found by walking its
 # key durations and blending inside the window, the last key held past them.
 #
-# The events stand the body on the ground. Each frame keys the hips (BN01) at
-# the frame's bottom above the ground and, when the set travels (an event
-# steps across the ground), keys a `Root` bone at the ground along the summed
-# steps, so a planted foot stays put. A rig without Root gets one under the
-# hips, the bind clip's first bottom below them, as its top-level bone. A set
-# that never steps (every first-person set) needs none: its ground is
-# Blender's Z = 0. A model root still at the world origin rises so the ground
-# is Z = 0, and so do the models whose bones follow it (arms on a gun): display
-# only, since export reads a model standing at the origin. A stored top and a
-# stored vertical step are not carried: export measures the head bone's height
-# and the bottom's change, and a clip whose top stands more than 3 cm from the
-# head's (from the bottom on a rig without a head) is noted.
+# The events stand the body on the ground. A set whose events step or bob (a
+# body's) keys the hips (BN01) at each frame's bottom above the ground and a
+# `Root` bone at the ground along the summed steps, so a planted foot stays
+# put; a rig without Root gets one under the hips, the bind clip's first
+# bottom below them, as its top bone. A set whose events stand still (every
+# first-person set) needs none: its ground is Blender's Z = 0 and its hips
+# keep their rest. A model root still at the world origin rises so the ground
+# is Z = 0, and so do the models whose meshes deform with its rig (arms on a
+# gun): display only, since export reads a model standing at the origin. A
+# stored top and a stored vertical step are not carried: export measures the
+# head bone's height and the bottom's change, and a clip whose top stands more
+# than 3 cm from the head's (from the bottom on a rig without a head) is
+# noted.
 
-import contextlib
 import math
 import re
 
 import bpy
+from bpy_extras import anim_utils
 from mathutils import Matrix, Quaternion, Vector
 
-from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, bone_rows, clip_actions,
-                        ground_under, head_of, part_bone, rig_of, root_of, slot_of, trigger_value)
-from .rig import BONE_RE, active_model, clean_name, model_of, model_roots
-from .rig import rig_of as model_rig
-from .o3dtext import (ImportFailed, Notes, axis_basis, blender_axes, import_text, num, playing, strip_comment,
-                      tokens)
+from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, ground_under, head_of, rig_bones,
+                        root_of, slot_of)
+from .rig import (BONE_RE, active_model, bone_parent_matrix, editing, lod_parts, lod_roots, make_rig, model_of,
+                  model_roots, rig_of)
+from .o3dtext import ExportError, ImportFailed, Notes, axis_basis, blender_axes, import_text, num, strip_comment, tokens
 
 # A clip's own bone name that is a part's label with its BN## in lower case
 # (22 of the 82 retail tables name a weapon's own bones `bn38 bone`).
 LOWER_BONE_RE = re.compile(r"^bn(\d{2})(?: (.*))?$", re.IGNORECASE)
-# The Root bone import makes, and how far a stored top may stand from the head
+# The Root bone import makes, how far a stored top may stand from the head
 # bone's height before a clip is noted (the corpus holds 97% of person frames
-# within it).
+# within it), and how far a set's bottoms may spread and still stand still.
 ROOT_NAME = "Root"
 TOP_TOLERANCE = 0.03
+STILL = 1e-4
 
 
 def read_o3a(path):
@@ -109,20 +117,6 @@ def read_o3a(path):
                     "top": num(parts[6]),
                 })
     return set_
-
-
-def linear(action):
-    """Every keyframe interpolates linearly, as the runtime's own slerp between
-    two keys does [orig: Math_QuaternionSlerp @0x615e20]."""
-    for group in getattr(action, "layers", []):
-        for strip in group.strips:
-            for bag in getattr(strip, "channelbags", []):
-                for curve in bag.fcurves:
-                    for point in curve.keyframe_points:
-                        point.interpolation = "LINEAR"
-    for curve in getattr(action, "fcurves", []):
-        for point in curve.keyframe_points:
-            point.interpolation = "LINEAR"
 
 
 def slerp(a, b, t):
@@ -183,6 +177,10 @@ def bone_name(index, name):
     return f"BN{index + 1:02d} {label}".strip()
 
 
+def fcurve_path(bone, channel):
+    return f'pose.bones["{bpy.utils.escape_identifier(bone)}"].{channel}'
+
+
 class Loader(Notes):
     def __init__(self, context, model, set_, op=None):
         self.context = context
@@ -194,7 +192,8 @@ class Loader(Notes):
         self.basis = axis_basis()
         self.to_blender = blender_axes()
         # What the run changed, each with its inverse: a failure puts the scene
-        # back as it found it (never a half-built rig).
+        # back as it found it (but for a rig it made of the model's parts,
+        # which is the model's shape from then on).
         self.undo = []
 
     def blender_rot(self, quat):
@@ -211,24 +210,29 @@ class Loader(Notes):
         is in (export reads it back through the same root)."""
         return (self.model.matrix_world.inverted_safe() @ arm.matrix_world).to_3x3().normalized()
 
-    @contextlib.contextmanager
-    def editing(self, arm):
-        """The rig in edit mode for the block, in the view layer the import
-        runs in (the rig may be in no other)."""
-        vl = self.context.view_layer
-        held = vl.objects.active
-        with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm,
-                                        object=arm, selected_objects=[arm]):
-            vl.objects.active = arm
-            bpy.ops.object.mode_set(mode="EDIT")
-            try:
-                yield arm.data.edit_bones
-            finally:
-                bpy.ops.object.mode_set(mode="OBJECT")
-        if held is not None:
-            vl.objects.active = held
-
     # --- the rig ------------------------------------------------------------
+    def rig(self):
+        """The model's rig, made of its PN## parts when it has none."""
+        arm = rig_of(self.model)
+        if arm is not None:
+            owner = model_of(arm)
+            if owner is not self.model:
+                raise ImportFailed(f"{self.model.name}: its meshes deform with {owner.name}'s rig ({arm.name}), "
+                                   f"whose clips pose it: import the clips onto {owner.name}")
+            return arm
+        try:
+            parts = lod_parts(lod_roots(self.model)[0]).parts
+            if not parts:
+                raise ImportFailed(f"{self.model.name}: its LOD 0 has no parts for clips to pose")
+            arm, notes = make_rig(self.context, self.model)
+        except ExportError as e:
+            raise ImportFailed(str(e)) from e
+        for note in notes:
+            self.note(note)
+        self.note(f"{self.model.name}'s PN## parts are now the bones of {arm.name}, everything on a part hung from "
+                  "its bone (as Add Animation Rig does)")
+        return arm
+
     def bind_clip(self):
         """The clip every clip of the table composes against: the reset row's
         (a key naming slot 0, `reset`, past its first five characters; the last
@@ -248,12 +252,17 @@ class Loader(Notes):
         stem = clip_stem(reset[-1]).lower()
         return next((c for c in self.set["clips"] if c["name"].lower() == stem), None)
 
+    def fresh(self, arm):
+        """A rig no clip is keyed against yet: the model's rows name no Action
+        and the rig plays none."""
+        rows = any(v.action is not None for r in self.model.o3d.rows for v in r.variants)
+        return not rows and (arm.animation_data is None or arm.animation_data.action is None)
+
     def name_bones(self, arm, bones, clip):
         """The bone names the clip carries. A model's part table has none, so a
-        rig imported from a `.3di` calls its bones BN## alone; the clip labels
+        rig made of a `.3di`'s parts calls its bones BN## alone; the clip labels
         them (BN16 L Hand), and the vertex groups follow."""
-        meshes = [ob for ob in bpy.data.objects
-                  if ob.type == "MESH" and ob.find_armature() == arm]
+        meshes = [ob for ob in bpy.data.objects if ob.type == "MESH" and ob.find_armature() == arm]
         for i, pb in enumerate(bones):
             if i >= len(clip["bones"]):
                 break
@@ -269,18 +278,60 @@ class Loader(Notes):
                     group.name = name
             # By name: edit mode rebuilds the bones, so a held Bone goes stale.
             self.undo.append(lambda name=name, old=old: rename(arm, name, old))
-        return bone_rows(arm)
+        return rig_bones(arm, ImportFailed)[0]
+
+    def hung(self, arm):
+        """The objects hung from the rig's bones, each with its bone's frame at
+        rest and its place, parent inverse and offset, before an edit of the
+        rig's rest; the rig stays at rest until rehang takes its pose position
+        back."""
+        position = arm.data.pose_position
+        arm.data.pose_position = "REST"
+        self.context.view_layer.update()
+        out = []
+        for ob in arm.children:
+            bone = arm.data.bones.get(ob.parent_bone) if ob.parent_type == "BONE" else None
+            if bone is not None:
+                out.append((ob, bone.name, bone_parent_matrix(arm, bone), ob.matrix_world.copy(),
+                            ob.matrix_parent_inverse.copy(), ob.location.copy()))
+        return position, out
+
+    def rehang(self, arm, position, hung):
+        """Each hung object back where it stood after an edit of the rig's
+        rest: its parent inverse takes up its bone's turn, keeping the object's
+        own matrix (hang). Through the edited bone the place still comes back a
+        float step or so off, which moves a 16.16 word a step (a user point's
+        place): its own offset takes up the difference, one step at a time,
+        until the place is the bits it was."""
+        for ob, name, before, _, inverse, _ in hung:
+            after = bone_parent_matrix(arm, arm.data.bones[name])
+            ob.matrix_parent_inverse = after.inverted() @ before @ inverse
+        for _ in range(8):
+            self.context.view_layer.update()
+            off = [(ob, world.translation - ob.matrix_world.translation) for ob, _, _, world, _, _ in hung]
+            off = [(ob, d) for ob, d in off if d.length > 0.0]
+            if not off:
+                break
+            for ob, d in off:
+                ob.location += (ob.matrix_world @ ob.matrix_basis.inverted()).to_3x3().inverted() @ d
+        arm.data.pose_position = position
+        self.context.view_layer.update()
+
+    def unhang(self, hung):
+        """The hung objects' parent inverses and offsets as they were."""
+        for ob, _, _, _, inverse, location in hung:
+            ob.matrix_parent_inverse = inverse
+            ob.location = location
 
     def align_rest(self, arm, bones, clip):
         """Turn each rest bone onto the bind, the reset clip's first key: the
         rig's rest pose is the bind. Heads and lengths keep their places, and
-        so does an object hung from a turned bone (a skinned part's `~PPx
-        attach` helper, whose place is a CXLT row): the model is unchanged."""
+        so does everything hung from a turned bone: the model is unchanged."""
         rows = clip["bones"]
         to_arm = self.arm_space(arm).inverted()
-        position, hung = self.hung_from(arm, {pb.name for pb in bones[:len(rows)]})
+        position, hung = self.hung(arm)
         held = {}
-        with self.editing(arm) as edit_bones:
+        with editing(self.context, arm) as edit_bones:
             for i, pb in enumerate(bones[:len(rows)]):
                 eb = edit_bones.get(pb.name)
                 if eb is None:
@@ -292,227 +343,17 @@ class Loader(Notes):
                 length = eb.length if eb.length > 1e-6 else 0.05
                 eb.tail = eb.head + m @ Vector((0.0, length, 0.0))
                 eb.align_roll(m @ Vector((0.0, 0.0, 1.0)))
-        self.keep_places(arm, position, hung)
+        self.rehang(arm, position, hung)
 
         def restore():
-            with self.editing(arm) as edit_bones:
+            with editing(self.context, arm) as edit_bones:
                 for name, (tail, roll) in held.items():
                     eb = edit_bones.get(name)
                     if eb is not None:
                         eb.tail = tail
                         eb.roll = roll
-            for ob, _, basis in hung:
-                ob.matrix_basis = basis
+            self.unhang(hung)
         self.undo.append(restore)
-
-    def hung_from(self, arm, names):
-        """The objects hung from the named bones, each with its place at rest
-        and its own transform, before an edit of the rig's rest; the rig stays
-        at rest until keep_places, which takes the pose position back."""
-        position = arm.data.pose_position
-        arm.data.pose_position = "REST"
-        self.context.view_layer.update()
-        return position, [(ob, ob.matrix_world.copy(), ob.matrix_basis.copy()) for ob in arm.children
-                          if ob.parent_type == "BONE" and ob.parent_bone in names]
-
-    def keep_places(self, arm, position, hung):
-        """Each hung object back at its place after an edit of the rig's rest
-        (a skinned part's `~PPx attach` helper, whose place is a CXLT row).
-        Through an edited bone's matrix the place comes back a float step or
-        so off, which moves a CXLT row a 16.16 step: its own offset takes up
-        the difference, one step at a time, until the place is the bits it
-        was."""
-        self.context.view_layer.update()
-        for ob, world, _ in hung:
-            ob.matrix_world = world
-        for _ in range(8):
-            self.context.view_layer.update()
-            off = [(ob, world.translation - ob.matrix_world.translation) for ob, world, _ in hung]
-            off = [(ob, d) for ob, d in off if d.length > 0.0]
-            if not off:
-                break
-            for ob, d in off:
-                ob.location += (ob.matrix_world @ ob.matrix_basis.inverted()).to_3x3().inverted() @ d
-        arm.data.pose_position = position
-        self.context.view_layer.update()
-
-    # --- the clips ----------------------------------------------------------
-    def shape_notes(self, clip):
-        """What a clip keys that Blender's one-pose-per-frame channels cannot
-        hold as it is stored."""
-        name, frames = clip["name"], clip["frames"]
-        spans = [sum(b["durations"]) for b in clip["bones"]]
-        past = [i for i, s in enumerate(spans) if s > frames + 1]
-        held = [i for i, s in enumerate(spans) if s < frames + 1]
-        spread = [i for i, b in enumerate(clip["bones"]) if any(d > 1 for d in b["durations"])]
-        if past:
-            self.note(f"{name}: bones {past[:6]} key past the clip's {frames} frames, which it never "
-                      "plays; those keys are not imported")
-        if spread:
-            self.note(f"{name}: bones {spread[:6]} hold a key over several frames; Blender keys each "
-                      "frame with the pose the runtime blends there, so a re-export keys every frame")
-        if held:
-            self.note(f"{name}: bones {held[:6]} stop keying before the clip's last frame and hold "
-                      "their last key; a re-export keys those frames too")
-        if clip["version"] == 0:
-            self.note(f"{name}: a version 0 clip, whose events carry no trigger word (the reader "
-                      "gives each 0xffffffff); it re-exports as version 1 with that word")
-
-    def action_for(self, clip, arm, bones, rest, stand):
-        name = clip["name"]
-        action = bpy.data.actions.new(name)
-        self.undo.append(lambda: bpy.data.actions.remove(action))
-        action.o3d.fps = float(clip["fps"])
-        action.o3d.loop = bool(clip["flags"] & ANIM_FLAG_LOOP)
-        action.o3d.translation = bool(clip["flags"] & ANIM_FLAG_TRANSLATION)
-        action.o3d.raw_flag_8 = bool(clip["flags"] & ANIM_FLAG_BIT3)
-        rows = clip["bones"]
-        if len(rows) > len(bones):
-            self.note(f"{name}: the clip carries {len(rows)} bones, the rig {len(bones)}; the extra "
-                      "channels are dropped")
-        self.shape_notes(clip)
-        frames = clip["frames"]
-        events = clip["events"]
-        translated = bool(clip["flags"] & ANIM_FLAG_TRANSLATION)
-        to_arm = self.arm_space(arm).inverted()
-        order = {pb.name: i for i, pb in enumerate(bones)}
-        above = [order[p.name] if p is not None else None for p in (part_bone(pb) for pb in bones)]
-        root, head = stand["root"], stand["head"]
-        disp, arm_model = stand["disp"], stand["arm_model"]
-        travel = Vector((0.0, 0.0, 0.0))
-        worst = (0.0, 0)
-        data = arm.animation_data or arm.animation_data_create()
-        with playing(data, action):
-            # The pose that shows what the game draws: a key IS the bone's
-            # rotation in the model's frame, and the rig's rest pose is the bind
-            # the runtime measures it against, so the key poses the bone
-            # directly. The head follows its part parent's rest offset, and
-            # the hips stand the frame's bottom above the ground, the summed
-            # steps along it.
-            for f in range(frames + 1):
-                ev = events[f] if f < len(events) else None
-                lift = travel.copy()
-                if ev is not None:
-                    lift.z += ev["bottom"] - stand["height"]
-                posed = []
-                for i, pb in enumerate(bones):
-                    if i >= len(rows):
-                        posed.append(rest[i])
-                        continue
-                    key = key_at(rows[i]["keys"], rows[i]["durations"], f)
-                    rot = to_arm @ self.blender_rot(key)
-                    j = above[i]
-                    at = rest[i].translation if j is None else \
-                        (posed[j] @ rest[j].inverted() @ rest[i]).translation
-                    if i == 0:
-                        at = at + disp @ lift
-                    tr = rows[i]["tr"]
-                    if translated and tr:
-                        at = at + to_arm @ self.to_blender(tr[min(f, len(tr) - 1)])
-                    posed.append(Matrix.Translation(at) @ rot.to_4x4())
-                anchors = {pb.name: (rest[i], posed[i]) for i, pb in enumerate(bones)}
-                if root is not None:
-                    anchors[root.name] = (stand["root_rest"],
-                                          Matrix.Translation(disp @ travel) @ stand["root_rest"])
-                self.write_frame(bones, root, anchors, f, translated)
-                if ev is not None:
-                    hips = arm_model @ posed[0].translation
-                    top = ev["bottom"] + ((arm_model @ posed[head].translation) - hips).z \
-                        if head is not None else ev["bottom"]
-                    if abs(ev["top"] - top) > worst[0]:
-                        worst = (abs(ev["top"] - top), f)
-                    step = self.to_blender(ev["velocity"])
-                    travel += Vector((step.x, step.y, 0.0))
-            self.write_triggers(arm, clip, frames)
-            linear(action)
-            slot = getattr(data, "action_slot", None)
-        # A known gap, not a fault: retail's exporter measured most tops at the
-        # head, but not all (a death fall, a crawl; 64 of the 204 first-person
-        # registrations carry a top above the bottom by a rule nothing has
-        # witnessed), and export writes the rig's own measure.
-        if worst[0] > TOP_TOLERANCE and head is not None:
-            self.note(f"{name}: its top stands up to {worst[0] * 100:.1f} cm from the head bone's height "
-                      f"({bones[head].name}, frame {worst[1]}), which a re-export writes")
-        elif worst[0] > TOP_TOLERANCE:
-            self.note(f"{name}: its top stands up to {worst[0] * 100:.1f} cm above its bottom (frame {worst[1]}) "
-                      "by a rule nothing has witnessed; a rig without a head bone re-exports the bottom")
-        return action, slot
-
-    @staticmethod
-    def carried(bone, anchors):
-        """A bone's pose where the frame keys it, else its rest carried by the
-        nearest keyed bone above it (its rest when there is none): a control
-        bone the clip does not key rides the bone it hangs from."""
-        walk = bone
-        while walk is not None and walk.name not in anchors:
-            walk = walk.parent
-        if walk is None:
-            return bone.bone.matrix_local
-        rest, pose = anchors[walk.name]
-        return pose @ rest.inverted() @ bone.bone.matrix_local
-
-    def write_frame(self, bones, root, anchors, frame, translated):
-        """One frame's pose, keyed on the rig's bone channels: each bone's basis
-        against its Blender parent's pose. Every bone keys its rotation; the
-        hips and Root their place, which carries the events; the others their
-        place only under the translation flag."""
-        for pb in bones + ([root] if root is not None else []):
-            rest, pose = anchors[pb.name]
-            parent = pb.parent
-            if parent is None:
-                basis = rest.inverted() @ pose
-            else:
-                parent_pose = self.carried(parent, anchors)
-                basis = (parent_pose @ parent.bone.matrix_local.inverted() @ rest).inverted() @ pose
-            if pb is not root:
-                pb.rotation_mode = "QUATERNION"
-                pb.rotation_quaternion = basis.to_quaternion()
-                pb.keyframe_insert("rotation_quaternion", frame=frame)
-            if pb is root or pb is bones[0] or translated:
-                pb.location = basis.translation
-                pb.keyframe_insert("location", frame=frame)
-
-    def write_triggers(self, arm, clip, frames):
-        """The clip's trigger words, keyed on the rig on the clip's own
-        Action."""
-        events = clip["events"]
-        if not events:
-            self.note(f"{clip['name']}: the clip carries no event record (no step, bottom or trigger word)")
-            return
-        for f in range(frames + 1):
-            ev = events[min(f, len(events) - 1)]
-            # A version 0 event has no trigger word (the text states 0) and the
-            # reader gives it 0xffffffff, the word the game plays.
-            arm.o3d.anim_trigger = trigger_value(0xFFFFFFFF if clip["version"] == 0 else ev["trigger"])
-            arm.keyframe_insert("o3d.anim_trigger", frame=f)
-
-    # --- the ground ---------------------------------------------------------
-    def place(self, arm, bones, bottom):
-        """Stand the model on Blender's ground plane, display only: a model
-        root at the world origin rises until the ground its set stands on (its
-        Root's head, else the bind clip's first bottom below the hips) is Z = 0,
-        and so does each model whose bones follow it (arms on a gun), so a
-        first-person gun and its arms overlay a body at the hips. It rises once
-        its rig is set up at the origin, where every export reads it
-        (o3dtext.at_world_origin), and what binds to where things stand (a
-        part's `O3D follow`, the arms' sockets) binds again. A model whose own
-        bones follow another stays where it is."""
-        if bottom is None or model_of(arm) is not self.model or not at_origin(self.model):
-            return
-        root = root_of(arm, ImportFailed)
-        ground = (arm.matrix_world @ root.bone.head_local).z if root is not None else \
-            (arm.matrix_world @ bones[0].bone.head_local).z - bottom
-        if ground == 0.0:
-            return
-        movers = [self.model] + [m for m in model_roots(self.scene)
-                                 if m is not self.model and m.parent is None and model_rig(m) == arm and at_origin(m)]
-
-        def move(at):
-            for m in movers:
-                m.matrix_world = at
-            self.context.view_layer.update()
-        self.undo.append(lambda: move(Matrix.Identity(4)))
-        move(Matrix.Translation((0.0, 0.0, -ground)))
 
     def ensure_root(self, arm, bones, bottom):
         """The rig's Root, made on first need: a bone on the ground, `bottom`
@@ -530,8 +371,8 @@ class Loader(Notes):
         top_name = top.name
         # A bone below a new parent has its rest rebuilt through the parent's,
         # a float step off: what hangs from any bone keeps its place.
-        position, hung = self.hung_from(arm, {b.name for b in arm.data.bones})
-        with self.editing(arm) as edit_bones:
+        position, hung = self.hung(arm)
+        with editing(self.context, arm) as edit_bones:
             eb = edit_bones.new(ROOT_NAME)
             eb.head = edit_bones[bones[0].name].head - up * bottom
             eb.tail = eb.head + forward.normalized() * 0.2
@@ -540,20 +381,237 @@ class Loader(Notes):
             below.use_connect = False
             below.parent = eb
             made = eb.name
-        self.keep_places(arm, position, hung)
+        self.rehang(arm, position, hung)
 
         def remove():
-            with self.editing(arm) as edit_bones:
+            with editing(self.context, arm) as edit_bones:
                 below = edit_bones.get(top_name)
                 if below is not None:
                     below.parent = None
                 eb = edit_bones.get(made)
                 if eb is not None:
                     edit_bones.remove(eb)
-            for ob, _, basis in hung:
-                ob.matrix_basis = basis
+            self.unhang(hung)
         self.undo.append(remove)
         return root_of(arm, ImportFailed)
+
+    # --- the clips ----------------------------------------------------------
+    def shape_notes(self, clip, bones):
+        """What a clip keys that Blender's one-pose-per-frame channels cannot
+        hold as it is stored."""
+        name, frames = clip["name"], clip["frames"]
+        spans = [sum(b["durations"]) for b in clip["bones"]]
+        past = [i for i, s in enumerate(spans) if s > frames + 1]
+        held = [i for i, s in enumerate(spans) if s < frames + 1]
+        spread = [i for i, b in enumerate(clip["bones"]) if any(d > 1 for d in b["durations"])]
+        if len(clip["bones"]) > len(bones):
+            self.note(f"{name}: the clip carries {len(clip['bones'])} bones, the rig {len(bones)}; the extra "
+                      "channels are dropped")
+        elif len(clip["bones"]) < len(bones):
+            self.note(f"{name}: the clip carries {len(clip['bones'])} bones, the rig {len(bones)}; a re-export "
+                      "keys the others at rest")
+        if past:
+            self.note(f"{name}: bones {past[:6]} key past the clip's {frames} frames, which it never "
+                      "plays; those keys are not imported")
+        if spread:
+            self.note(f"{name}: bones {spread[:6]} hold a key over several frames; Blender keys each "
+                      "frame with the pose the runtime blends there, so a re-export keys every frame")
+        if held:
+            self.note(f"{name}: bones {held[:6]} stop keying before the clip's last frame and hold "
+                      "their last key; a re-export keys those frames too")
+        if clip["flags"] & ANIM_FLAG_TRANSLATION and not any(
+                any(c != 0.0 for t in b["tr"] for c in t) for b in clip["bones"]):
+            self.note(f"{name}: the clip carries the translation flag and no translation, which a re-export leaves "
+                      "off (the reset still carries it when another clip moves a part)")
+
+    def poses(self, clip, arm, bones, above, rest, stand):
+        """The clip's pose on every frame, as the game draws it: each bone's
+        armature-space matrix, the Root's, and the worst gap between a stored
+        top and the head's height."""
+        rows = clip["bones"]
+        events = clip["events"]
+        translated = bool(clip["flags"] & ANIM_FLAG_TRANSLATION)
+        to_arm = self.arm_space(arm).inverted()
+        root, head = stand["root"], stand["head"]
+        disp, arm_model = stand["disp"], stand["arm_model"]
+        travel = Vector((0.0, 0.0, 0.0))
+        worst = (0.0, 0)
+        frames = []
+        for f in range(clip["frames"] + 1):
+            ev = events[f] if f < len(events) else None
+            lift = travel.copy()
+            if ev is not None:
+                lift.z += ev["bottom"] - stand["height"]
+            posed = []
+            for i in range(len(bones)):
+                if i >= len(rows):
+                    posed.append(rest[i])
+                    continue
+                key = key_at(rows[i]["keys"], rows[i]["durations"], f)
+                rot = to_arm @ self.blender_rot(key)
+                j = above[i]
+                at = rest[i].translation if j is None else (posed[j] @ rest[j].inverted() @ rest[i]).translation
+                if i == 0:
+                    at = at + disp @ lift
+                tr = rows[i]["tr"]
+                if translated and tr:
+                    at = at + to_arm @ self.to_blender(tr[min(f, len(tr) - 1)])
+                posed.append(Matrix.Translation(at) @ rot.to_4x4())
+            root_pose = Matrix.Translation(disp @ travel) @ stand["root_rest"] if root is not None else None
+            frames.append((posed, root_pose))
+            if ev is not None:
+                hips = arm_model @ posed[0].translation
+                top = ev["bottom"] + ((arm_model @ posed[head].translation) - hips).z \
+                    if head is not None else ev["bottom"]
+                if abs(ev["top"] - top) > worst[0]:
+                    worst = (abs(ev["top"] - top), f)
+                step = self.to_blender(ev["velocity"])
+                travel += Vector((step.x, step.y, 0.0))
+        return frames, worst
+
+    @staticmethod
+    def carried(bone, anchors):
+        """A bone's pose where the frame keys it, else its rest carried by the
+        nearest keyed bone above it (its rest when there is none): a control
+        bone the clip does not key rides the bone it hangs from."""
+        walk = bone
+        while walk is not None and walk.name not in anchors:
+            walk = walk.parent
+        if walk is None:
+            return bone.bone.matrix_local
+        rest, pose = anchors[walk.name]
+        return pose @ rest.inverted() @ bone.bone.matrix_local
+
+    def action_for(self, clip, arm, bones, above, rest, stand):
+        """One clip as an Action keyed for the rig: each bone's rotation every
+        frame against its Blender parent's pose, the hips' and Root's place
+        (which carry the events) and, under the translation flag, every bone's
+        place; its frame range, loop, rate and flag 8 from the header, its
+        event triggers as markers."""
+        name = clip["name"]
+        translated = bool(clip["flags"] & ANIM_FLAG_TRANSLATION)
+        self.shape_notes(clip, bones)
+        frames, worst = self.poses(clip, arm, bones, above, rest, stand)
+        root = stand["root"]
+        keyed = bones + ([root] if root is not None else [])
+        values = {pb.name: ([], []) for pb in keyed}
+        for posed, root_pose in frames:
+            anchors = {pb.name: (rest[i], posed[i]) for i, pb in enumerate(bones)}
+            if root is not None:
+                anchors[root.name] = (stand["root_rest"], root_pose)
+            for pb in keyed:
+                rest_m, pose = anchors[pb.name]
+                parent = pb.parent
+                if parent is None:
+                    basis = rest_m.inverted() @ pose
+                else:
+                    parent_pose = self.carried(parent, anchors)
+                    basis = (parent_pose @ parent.bone.matrix_local.inverted() @ rest_m).inverted() @ pose
+                locations, rotations = values[pb.name]
+                q = basis.to_quaternion()
+                # Neighbouring keys in one hemisphere, so Blender's per-channel
+                # blend between frames takes the short way (export samples whole
+                # frames and reads either sign alike).
+                if rotations and rotations[-1].dot(q) < 0.0:
+                    q.negate()
+                rotations.append(q)
+                locations.append(basis.translation.copy())
+        action = bpy.data.actions.new(name)
+        self.undo.append(lambda: bpy.data.actions.remove(action))
+        action.use_frame_range = True
+        action.frame_start, action.frame_end = 0, clip["frames"]
+        action.use_cyclic = bool(clip["flags"] & ANIM_FLAG_LOOP)
+        action.o3d.fps = max(1, min(255, clip["fps"]))
+        action.o3d.raw_flag_8 = bool(clip["flags"] & ANIM_FLAG_BIT3)
+        slot = action.slots.new(id_type="OBJECT", name=arm.name)
+        bag = anim_utils.action_ensure_channelbag_for_slot(action, slot)
+        linear = bpy.types.Keyframe.bl_rna.properties["interpolation"].enum_items["LINEAR"].value
+        count = len(frames)
+
+        def curve(bone, channel, index, series):
+            fc = bag.fcurves.new(fcurve_path(bone, channel), index=index, group_name=bone)
+            fc.keyframe_points.add(count)
+            fc.keyframe_points.foreach_set("co", [v for f, x in enumerate(series) for v in (float(f), x)])
+            fc.keyframe_points.foreach_set("interpolation", [linear] * count)
+            fc.update()
+
+        for pb in keyed:
+            locations, rotations = values[pb.name]
+            if pb is not root:
+                pb.rotation_mode = "QUATERNION"
+                for k in range(4):
+                    curve(pb.name, "rotation_quaternion", k, [q[k] for q in rotations])
+            if pb is root or pb is bones[0] or translated:
+                for k in range(3):
+                    curve(pb.name, "location", k, [t[k] for t in locations])
+        self.write_triggers(action, clip)
+        # A known gap, not a fault: retail's exporter measured most tops at the
+        # head, but not all (a death fall, a crawl; 64 of the 204 first-person
+        # registrations carry a top above the bottom by a rule nothing has
+        # witnessed), and export writes the rig's own measure.
+        head = stand["head"]
+        if worst[0] > TOP_TOLERANCE and head is not None:
+            self.note(f"{name}: its top stands up to {worst[0] * 100:.1f} cm from the head bone's height "
+                      f"({bones[head].name}, frame {worst[1]}), which a re-export writes")
+        elif worst[0] > TOP_TOLERANCE:
+            self.note(f"{name}: its top stands up to {worst[0] * 100:.1f} cm above its bottom (frame {worst[1]}) "
+                      "by a rule nothing has witnessed; a rig without a head bone re-exports the bottom")
+        return action
+
+    def write_triggers(self, action, clip):
+        """The clip's trigger words as markers, one per bit per frame, named
+        after the engine's event bits (opennova-3di catalog)."""
+        name = clip["name"]
+        events = clip["events"]
+        if not events:
+            self.note(f"{name}: the clip carries no event record (no step, bottom or trigger word)")
+            return
+        if clip["version"] == 0:
+            # A version 0 event has no trigger word (the text states 0), and
+            # the reader gives it 0xffffffff, every bit.
+            self.note(f"{name}: a version 0 clip, whose events carry no trigger word (the game reads every bit "
+                      "set); it re-exports as version 1 with the bits its markers set")
+            return
+        from . import catalog
+        bits = catalog().triggers
+        known = 0
+        for mask, _ in bits:
+            known |= mask
+        stray = 0
+        for f, ev in enumerate(events[:clip["frames"] + 1]):
+            word = ev["trigger"] & 0xFFFFFFFF
+            stray |= word & ~known
+            for mask, bit in bits:
+                if word & mask:
+                    action.pose_markers.new(bit).frame = f
+        if stray:
+            self.note(f"{name}: its events set trigger bits no engine table names (0x{stray:x}), which a marker "
+                      "cannot carry; a re-export leaves them off")
+
+    # --- the ground ---------------------------------------------------------
+    def place(self, arm, bones, bottom):
+        """Stand the model on Blender's ground plane, display only: a model
+        root at the world origin rises until the ground its set stands on (its
+        Root's head, else the bind clip's first bottom below the hips) is Z = 0,
+        and so does each model whose meshes deform with its rig (arms on a gun),
+        so a first-person gun and its arms overlay a body at the hips. Every
+        export reads a model standing at the origin (o3dtext.at_world_origin)."""
+        if bottom is None or not at_origin(self.model):
+            return
+        root = root_of(arm, ImportFailed)
+        ground = (arm.matrix_world @ root.bone.head_local).z if root is not None else \
+            (arm.matrix_world @ bones[0].bone.head_local).z - bottom
+        if ground == 0.0:
+            return
+        movers = [self.model] + [m for m in model_roots(self.scene)
+                                 if m is not self.model and m.parent is None and rig_of(m) == arm and at_origin(m)]
+
+        def move(at):
+            for m in movers:
+                m.matrix_world = at
+            self.context.view_layer.update()
+        self.undo.append(lambda: move(Matrix.Identity(4)))
+        move(Matrix.Translation((0.0, 0.0, -ground)))
 
     def stand(self, arm, bones, rest, root, bottom):
         """How the clips stand the rig on the ground: the Root and its rest,
@@ -562,24 +620,26 @@ class Loader(Notes):
         arm_model = self.model.matrix_world.inverted_safe() @ arm.matrix_world
         root_rest = root.bone.matrix_local.copy() if root is not None else None
         hips = arm_model @ rest[0].translation
-        ground = ground_under(self.model.matrix_world, (arm_model @ root_rest.translation) if root is not None else None,
-                              hips)
+        ground = ground_under(self.model.matrix_world, (arm_model @ root_rest.translation) if root is not None else
+                              None, hips)
         height = (hips - ground).z
         if root is None and bottom is not None and abs(height - bottom) > 0.001:
             # Measured from the bind rather than the ground, so the bind clip's
             # first frame is the rest pose wherever the model stands.
-            self.note(f"the hips stand {height:.3f} above Blender's ground (Z = 0), the set {bottom:.3f}: "
-                      "a rig without a Root bone stands on Z = 0, so a re-export measures its bottoms from "
-                      "there (place the model so its hips stand the set's height, or give the rig a Root)")
+            self.note(f"the hips stand {height:.3f} above Blender's ground (Z = 0), the set {bottom:.3f}: a rig "
+                      f"without a Root bone stands on Z = 0, so a re-export writes {height:.3f} as every clip's "
+                      "bottom (place the model so its hips stand the set's height)")
             height = bottom
-        try:
-            head = head_of(self.model, arm, ImportFailed)
-        except ImportFailed as e:
-            self.note(f"{e}; each top is checked against the bottom")
-            head = None
-        index = next((i for i, pb in enumerate(bones) if head is not None and pb.name == head.name), None)
+        head = None
+        if root is not None:
+            try:
+                pb = head_of(self.model, arm, ImportFailed)
+            except ImportFailed as e:
+                self.note(f"{e}; each top is checked against the bottom")
+                pb = None
+            head = next((i for i, b in enumerate(bones) if pb is not None and b.name == pb.name), None)
         return {"root": root, "root_rest": root_rest, "height": height, "arm_model": arm_model,
-                "disp": arm_model.to_3x3().inverted_safe(), "head": index}
+                "disp": arm_model.to_3x3().inverted_safe(), "head": head}
 
     # --- the run ------------------------------------------------------------
     def run(self):
@@ -601,113 +661,104 @@ class Loader(Notes):
         bind = self.bind_clip()
         if bind is None and self.set["rows"]:
             self.note("the table has no reset row naming a clip of the set, which the game cannot load: the "
-                      "rig's rest pose stays as it is, and export refuses the table until a row names one")
+                      "rig's rest pose stays as it is, and export writes a reset clip of it")
         first = bind if bind is not None else clips[0]
         bottom = first["events"][0]["bottom"] if first["events"] else None
-        travels = any(ev["velocity"][0] != 0.0 or ev["velocity"][1] != 0.0 for c in clips for ev in c["events"])
-        arm = rig_of(self.model)
-        if arm is not None:
-            data = arm.animation_data
-            if data is not None and data.use_tweak_mode:
-                raise ImportFailed(f"{arm.name} is in NLA tweak mode; leave it (Tab in the NLA editor) "
-                                   "before importing clips onto it")
-            bones = bone_rows(arm)
-            order = {pb.name: i for i, pb in enumerate(bones)}
-            for i, pb in enumerate(bones):
-                above = part_bone(pb)
-                if above is not None and order[above.name] >= i:
-                    raise ImportFailed(f"{pb.name}: its parent is not a lower part")
-        if arm is None:
-            raise ImportFailed(f"{self.model.name}: the model has no rig of its own: clips play on the BN## bones "
-                               "of an Armature under its LOD 0 root")
-        fresh = not clip_actions(arm)
-        bones = bone_rows(arm)
+        events = [ev for c in clips for ev in c["events"]]
+        travels = any(ev["velocity"][0] != 0.0 or ev["velocity"][1] != 0.0 for ev in events)
+        bobs = bool(events) and max(ev["bottom"] for ev in events) - min(ev["bottom"] for ev in events) > STILL
+        arm = self.rig()
+        data = arm.animation_data
+        if data is not None and data.use_tweak_mode:
+            raise ImportFailed(f"{arm.name} is in NLA tweak mode; leave it (Tab in the NLA editor) before "
+                               "importing clips onto it")
+        bones, _ = rig_bones(arm, ImportFailed)
+        fresh = self.fresh(arm)
         if fresh:
             bones = self.name_bones(arm, bones, bind if bind is not None else clips[0])
         if bind is not None and fresh and (self.op is None or self.op.align_rest):
             self.align_rest(arm, bones, bind)
-            self.context.view_layer.update()
         elif bind is not None and not fresh:
-            self.note(f"{arm.name} already holds clips keyed against its rest pose, so its rest "
-                      f"stays; {bind['name']}'s bind shows only on a rig without clips")
-        root = self.ensure_root(arm, bones, bottom) if travels and bottom is not None else \
+            self.note(f"{arm.name} already holds clips keyed against its rest pose, so its rest stays; "
+                      f"{bind['name']}'s bind shows only on a rig without clips")
+        # A set that steps or bobs is a body's, which stands on a Root; a set
+        # that stands still (every first-person set) needs none.
+        root = self.ensure_root(arm, bones, bottom) if (travels or bobs) and bottom is not None else \
             root_of(arm, ImportFailed)
-        bones = bone_rows(arm)
+        bones, above = rig_bones(arm, ImportFailed)
         self.place(arm, bones, bottom)
         rest = [pb.bone.matrix_local.copy() for pb in bones]
         stand = self.stand(arm, bones, rest, root, bottom)
-        data = arm.animation_data or arm.animation_data_create()
-        # A clip the rig already holds under a clip's name (the set imported
-        # again) is replaced in its place: two clips of one name would write
-        # one .bad, and the export refuses them. The old one steps aside until
-        # the import has succeeded.
+        # An Action a row of the model names under a clip's name (the set
+        # imported again) steps aside for the new one, which takes its place
+        # everywhere once the import has succeeded.
         held = {}
-        for track in data.nla_tracks:
-            for strip in track.strips:
-                if strip.action is not None:
-                    held.setdefault(clean_name(strip.action.name).lower(), []).append((strip.action, track, strip))
-        replaced = []
-        made = {}
+        for row in self.model.o3d.rows:
+            for v in row.variants:
+                if v.action is not None:
+                    held.setdefault(v.action.name.lower(), v.action)
+        made, replaced = {}, []
         for clip in clips:
-            olds = held.get(clip["name"].lower(), [])
-            for old in {a for a, _, _ in olds}:
+            old = held.get(clip["name"].lower())
+            if old is not None and old not in (a for a, _ in replaced):
                 self.set_aside(old)
-            action, slot = self.action_for(clip, arm, bones, rest, stand)
+            action = self.action_for(clip, arm, bones, above, rest, stand)
             made[clip["name"].lower()] = action
-            track = data.nla_tracks.new(prev=olds[0][1] if olds else None)
-            self.undo.append(lambda track=track: data.nla_tracks.remove(track))
-            track.name = clip["name"]
-            strip = track.strips.new(clip["name"], 0, action)
-            if slot is not None and strip.action_slot is None:
-                strip.action_slot = slot
-            replaced += [(old, old_track, old_strip, action) for old, old_track, old_strip in olds]
+            if old is not None:
+                replaced.append((old, action))
+        self.merge_rows(made)
+        reference = bind if bind is not None else clips[0]
+        render = self.scene.render
+        held_rate = (render.fps, render.fps_base)
 
-        # The table: its rows in file order, each variant an Action. A set with
-        # no table (a lone .bad) leaves the model's rows as they are.
-        props = self.model.o3d
-        if not self.set["rows"]:
-            self.note("the set carries no table, so the model's rows stay; add the clip to a row "
-                      "for the game to play it")
-        else:
-            props.rows.clear()
-            if self.set["adm"]:
-                props.adm_path = f"//{self.set['adm']}"
-            for key, variants in self.set["rows"]:
-                row = props.rows.add()
-                row.key = key
-                for variant in variants:
-                    action = made.get(clip_stem(variant).lower())
-                    if action is None:
-                        self.note(f"the row '{key}' names '{variant}', which the set does not hold")
-                        continue
-                    row.variants.add().action = action
-        self.retire(data, replaced)
+        def rate(fps, base):
+            render.fps, render.fps_base = fps, base
+        self.undo.append(lambda: rate(*held_rate))
+        rate(max(1, reference["fps"]), 1.0)
+        self.retire(replaced)
         return f"{len(clips)} clips on {arm.name}", self.notes
 
+    def merge_rows(self, made):
+        """The set's table merged into the model's rows by slot: a row the
+        model has takes the set's clips, a new one is added, and every other
+        row stays. A lone .bad carries no table and leaves the rows alone."""
+        props = self.model.o3d
+        if not self.set["rows"]:
+            self.note("the set carries no table, so the model's rows stay; add the clip to a row for the game to "
+                      "play it")
+            return
+        if self.set["adm"] and not props.adm_path:
+            props.adm_path = f"//{self.set['adm']}"
+        for key, variants in self.set["rows"]:
+            slot = slot_of(key)
+            row = next((r for r in props.rows if slot_of(r.key.strip()) == slot), None)
+            if row is None:
+                row = props.rows.add()
+                row.key = key
+            row.variants.clear()
+            for variant in variants:
+                action = made.get(clip_stem(variant).lower())
+                if action is None:
+                    self.note(f"the row '{key}' names '{variant}', which the set does not hold")
+                    continue
+                row.variants.add().action = action
+
     def set_aside(self, action):
-        """A clip the set replaces, renamed out of the way while its successor
-        takes the name (put back if the import fails)."""
+        """An Action the set replaces, renamed out of the way while its
+        successor takes the name (put back if the import fails)."""
         name = action.name
         action.name = f"{name} (replaced)"
         self.undo.append(lambda: setattr(action, "name", name))
 
-    def retire(self, data, replaced):
-        """The replaced clips gone, once the import has succeeded: their strips
-        (and a track left empty), then every use of each (a row of another
-        model's table, a lone .bad's row here) moved to its successor."""
-        for _, track, strip, _ in replaced:
-            track.strips.remove(strip)
-            if len(track.strips) == 0:
-                data.nla_tracks.remove(track)
-        gone = {}
-        for old, _, _, new in replaced:
-            gone.setdefault(old, new)
-        for old, new in gone.items():
+    def retire(self, replaced):
+        """The replaced Actions gone once the import has succeeded, every use
+        of each (a row of any model's table) moved to its successor."""
+        for old, new in replaced:
             old.user_remap(new)
             bpy.data.actions.remove(old)
-        if gone:
-            names = ", ".join(sorted({new.name for new in gone.values()}))
-            self.note(f"the rig held clips of this set's names ({names}); the set's replace them")
+        if replaced:
+            self.note("the rows named clips of this set's names (" + ", ".join(sorted(n.name for _, n in replaced))
+                      + "); the set's replace them")
 
 
 def rename(arm, name, old):

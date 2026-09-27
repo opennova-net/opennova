@@ -18,8 +18,8 @@
 # (collision planes, seam flags, tangents, bounds) is never stored in the
 # scene: export recomputes it from the meshes every time.
 
+import collections
 import importlib
-import json
 import os
 import sys
 
@@ -62,6 +62,14 @@ _catalog = {}
 PATH_OPTIONS = {"PATH_SUPPORTS_BLEND_RELATIVE"}
 
 
+# The engine's tables `opennova-3di catalog` prints: the CTRL register names,
+# the generator style names {code: name}, the shader tags with their capability
+# words [(tag, flags)], the 252 anim slots [(index, key)], the weapon actions
+# that have a slot of their own [(suffix, slot index, key)] and the animation
+# event bits [(mask, NAME)], each in the engine's order.
+Catalog = collections.namedtuple("Catalog", "registers styles shaders slots actions triggers")
+
+
 def read_catalog():
     """The catalog entry of the current executable, run once per executable
     (a new path or a rebuilt file reads again; a missing file is looked for
@@ -70,9 +78,9 @@ def read_catalog():
     try:
         key = (path, os.path.getmtime(path))
     except OSError:
-        return ([], {}, [], [], []), f"opennova-3di not found at {path}"
+        return Catalog([], {}, [], [], [], []), f"opennova-3di not found at {path}"
     if key not in _catalog:
-        registers, styles, shaders, slots, triggers = [], {}, [], [], []
+        table = Catalog([], {}, [], [], [], [])
         problem = None
         try:
             out = run_cli(None, ["catalog"], ExportError, timeout=10).stdout
@@ -81,27 +89,27 @@ def read_catalog():
         for line in out.splitlines():
             parts = line.split()
             if len(parts) == 2 and parts[0] == "register":
-                registers.append(parts[1])
+                table.registers.append(parts[1])
             elif len(parts) == 3 and parts[0] == "style":
-                styles[int(parts[1])] = parts[2]
+                table.styles[int(parts[1])] = parts[2]
             elif len(parts) == 3 and parts[0] == "shader":
-                shaders.append((parts[1], int(parts[2], 16)))
-            elif len(parts) == 2 and parts[0] == "animslot":
-                slots.append(parts[1])
+                table.shaders.append((parts[1], int(parts[2], 16)))
+            elif len(parts) == 3 and parts[0] == "animslot":
+                table.slots.append((int(parts[1]), parts[2]))
+            elif len(parts) == 4 and parts[0] == "weaponaction":
+                table.actions.append((parts[1], int(parts[2]), parts[3]))
             elif len(parts) == 3 and parts[0] == "trigger":
-                triggers.append((int(parts[1], 16), parts[2]))
-        if not shaders and problem is None:
+                table.triggers.append((int(parts[1], 16), parts[2]))
+        if not table.shaders and problem is None:
             problem = f"opennova-3di catalog ({path}) printed no shader table"
         _catalog.clear()
-        _catalog[key] = ((registers, styles, shaders, slots, triggers), problem)
+        _catalog[key] = (table, problem)
     return _catalog[key]
 
 
 def catalog():
-    """The CTRL register names, generator style names, shader tags (with their
-    capability words, in the engine's table order), anim slot keys and animation
-    event bits, read from `opennova-3di catalog` (the engine's own tables; no
-    Python copy). Empty tables when it failed: catalog_error() says why."""
+    """The engine's own tables (Catalog), read from `opennova-3di catalog`;
+    no Python copy. Empty tables when it failed: catalog_error() says why."""
     return read_catalog()[0]
 
 
@@ -116,11 +124,10 @@ def search_registers(self, context, edit_text):
 
 
 def search_slots(self, context, edit_text):
-    """The anim slot keys the engine itself names. Retail's namespace is far
-    wider (the JOX corpus authors 240), so the field takes any key: a row names
-    its slot by what follows the key's first five characters."""
+    """The engine's 252 anim slot keys; a row names its slot by what follows
+    the key's first five characters, and export refuses any other."""
     text = edit_text.lower()
-    return [k for k in catalog()[3] if text in k]
+    return [k for _, k in catalog().slots if text in k]
 
 
 def search_shaders(self, context, edit_text):
@@ -154,6 +161,10 @@ def is_other_model(self, ob):
     return rig.is_model_root(ob) and ob is not self.id_data
 
 
+def is_camera(self, ob):
+    return ob.type == "CAMERA"
+
+
 def update_mount(self, context):
     assembly.mount(self.id_data, context.scene)
 
@@ -183,43 +194,50 @@ def part_parent_prop():
 
 class O3DAdmVariant(bpy.types.PropertyGroup):
     action: PointerProperty(name="Clip", type=bpy.types.Action,
-                            description="The clip this variant plays (its name is the .bad file stem)")
+                            description="The Action this clip plays. Its file is named after the table and the "
+                                        "row's slot (<table>_<slot code>.bad)")
 
 
 class O3DAdmRow(bpy.types.PropertyGroup):
     # One .adm row: an anim slot and its clip ring, in the order the file
-    # stores. The engine serves a row from its LAST variant back
-    # [orig: AnimMap_RegisterBoneNode @0x40C2D0].
+    # stores. The engine serves a ring from its LAST clip back, one step at
+    # every play and loop wrap [orig: AnimMap_RegisterBoneNode @0x40c385;
+    # AnimMap_AdvanceToNextAnim @0x40bdf0].
     key: StringProperty(name="Slot", default="anim_reset", search=search_slots,
-                        description="The anim slot this row answers, named by what follows the key's "
-                                    "first five characters (anim_reset is the rig's bind and rest pose, "
-                                    "and a table needs it); retail authors far more keys than the "
-                                    "engine names, so any anim_<name> is allowed")
+                        description="The anim slot this row answers, one of the engine's 252 named by what follows "
+                                    "the key's first five characters: anim_reset is the bind and the rig's rest "
+                                    "pose, anim_wpn_<action> a weapon action's clips")
     variants: CollectionProperty(type=O3DAdmVariant)
-    weapon_role: EnumProperty(name="Weapon action", items=weapon.ROLES, default="NONE")
-    weapon_sound: StringProperty(name="Start sound", description="SOUNDSET reference at action entry")
-    weapon_end_sound: StringProperty(name="End sound", description="SOUNDSETEND reference at active completion")
-    weapon_particle: StringProperty(name="Particle", description="Effect reference; recoil emits it at its decision tick")
-    weapon_userpoint: StringProperty(name="Effect point", description="PARTICLEUSERPOINT on the model")
+
+
+class O3DWeaponEntry(bpy.types.PropertyGroup):
+    # A weapon.def entry that plays the model's clips (retail's AK47AUTO and
+    # AK47 share AKM_1st's), timed by the weapon FSM in its own fire mode.
+    name: StringProperty(name="Entry", default="",
+                         description="The weapon.def entry that plays these clips (WPN_AK47AUTO): 1 to 31 letters, "
+                                     "digits, _ - or .")
+    mode: EnumProperty(name="Fire mode", default="auto", items=[
+        ("semi", "Semi-auto", "A fresh press from Idle; the preview measures the earliest repeat the game takes"),
+        ("auto", "Automatic", "Hold the trigger to repeat through the recoil"),
+        ("burst", "Burst", "Three rounds a press; the preview measures the rate within a burst")],
+                       description="The mode the entry's FLAGS fire in (Merge into weapon.def checks it)")
+    rpm: FloatProperty(name="Target RPM", default=600.0, min=1.0, max=1875.0, precision=1,
+                       description="The rate this entry should fire at. The game fires on whole ticks, so the "
+                                   "preview shows the rate it gets (auto and burst at most 1875, semi 1250)")
 
 
 class O3DActionProps(bpy.types.PropertyGroup):
-    # A clip's own header, on its Action. Everything else a .bad carries is
-    # derived on export (formats/bad/bad_build.h).
-    fps: FloatProperty(name="Clip rate", default=30.0, min=1.0, max=255.0,
-                       description="The clip's own frame rate; every retail clip ships 30")
-    frames: IntProperty(name="Frames", default=0, min=0,
-                        description="The clip's length in frames; 0 takes the Action's own keyed "
-                                    "range. A longer one holds the Action's last pose over the "
-                                    "extra frames")
-    loop: BoolProperty(name="Loop", default=True, description="The clip repeats (flag 1)")
-    translation: BoolProperty(name="Translations", default=False,
-                              description="Carry each bone's per-frame displacement as well as its "
-                                          "rotation (flag 2): a bolt, a magazine, a rig that slides")
+    # A clip's own rate and the one flag nothing derives, on its Action. Its
+    # length is the Action's manual frame range, its loop the Action's Cyclic
+    # setting, its translations whether a part moves off its rest offset;
+    # everything else a .bad carries is derived on export
+    # (formats/bad/bad_build.h).
+    fps: IntProperty(name="Clip rate", default=30, min=1, max=255,
+                     description="The frames a second the game plays this clip at; every retail clip ships 30. "
+                                 "Blender plays it at the scene's rate")
     raw_flag_8: BoolProperty(name="Flag 8", default=False,
-                             description="The clip flag bit 3, which 73 of the 477 retail clips "
-                                         "carry (viewmodel draw clips, the bikes) and nothing has "
-                                         "witnessed; carried, not read")
+                             description="The clip flag bit 3, which 73 of the 477 retail clips carry (the viewmodel "
+                                         "draw clips, the bikes) and nothing has been seen to read; carried as set")
 
 
 class O3DObjectProps(bpy.types.PropertyGroup):
@@ -251,38 +269,22 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                             "not found: the parent's root")
     # On a model root: its animations (the clip set its rig carries).
     adm_path: StringProperty(name="Output .adm", subtype="FILE_PATH", default="", options=PATH_OPTIONS,
-                             description="Where Export Animations writes the clip table; every clip "
-                                         "it names is written beside it as <clip>.bad. Empty: "
-                                         "//<model name>.adm")
+                             description="Where Export Animations writes the clip table, and beside it each clip as "
+                                         "<table>_<slot code>.bad (15 characters at most, as a retail archive "
+                                         "holds). Empty: //<model name>.adm")
     rows: CollectionProperty(type=O3DAdmRow)
-    clip_prefix: StringProperty(name="Clip file prefix", default="",
-                                 description="Prefix exported BAD filenames and ADM references while keeping "
-                                             "Action names and engine row names unchanged (e.g. rifle_)")
-    weapon_enabled: BoolProperty(name="Export weapon actions", default=False,
-                                 description="Write marker-derived weapon.def ACTION blocks beside the animations")
-    weapon_mode: EnumProperty(name="Fire mode", default="semi", items=[
-        ("semi", "Semi-auto", "A fresh press from Idle; preview measures the earliest accepted repeat"),
-        ("auto", "Automatic", "Hold the trigger to repeat through recoil"),
-        ("burst", "Three-round burst", "Preview the within-burst firing cadence")])
-    weapon_cadence: EnumProperty(name="Cadence from", default="MARKER", items=[
-        ("MARKER", "Ready marker", "The Fire Action's Shot-to-Ready interval requests the firing cycle"),
-        ("RPM", "Target RPM", "Target RPM is authoritative; the Fire Ready marker is unused")])
-    weapon_rpm: FloatProperty(name="Target RPM", default=600, min=0.5, max=3750, precision=2,
-                              description="Requested rate; the native FSM reports the achievable integer-tick rate")
-    weapon_preview: StringProperty(options={"HIDDEN"}, description="Disposable preview cache; never an export input")
     head_bone: StringProperty(name="Head bone", default="",
-                              description="The rig bone whose height above the ground is each frame's "
-                                          "top (the body's capsule top). Empty: the one bone whose name "
-                                          "ends in 'head'; with none, the top is the bottom (the hips' "
-                                          "height), as a first-person rig's is")
-    # On a skinned model's Armature: the clip's per-frame event word. Key it to
-    # place footsteps, fire and foley (opennova-3di catalog lists the bits).
-    anim_trigger: IntProperty(name="Trigger", default=0,
-                              description="The animation event bits this frame fires: 1 and 2 the "
-                                          "left and right footstep, 4 8 and 16 the ammo rows, "
-                                          "0x20..0x400 the six foley sounds. The word is 32 bits, "
-                                          "so one with bit 31 set shows negative (a version 0 "
-                                          "clip's 0xffffffff is -1)")
+                              description="On a rig with a Root bone: the bone whose height above Root is each "
+                                          "frame's top (the body's capsule top). Empty: the one bone whose name ends "
+                                          "in 'head'; with none, the top is the bottom (the hips' height)")
+    # On a first-person gun's root: the weapon.def entries its clips time, and
+    # the eyes the view positions are measured from (weapon.py).
+    weapons: CollectionProperty(type=O3DWeaponEntry)
+    hip_camera: PointerProperty(name="Hip view", type=bpy.types.Object, poll=is_camera,
+                                description="A camera at the eye the gun is seen from at the hip: the entries' POS "
+                                            "(the game looks along the model's forward from it)")
+    aim_camera: PointerProperty(name="Aim view", type=bpy.types.Object, poll=is_camera,
+                                description="A camera at the eye the gun is aimed from: the entries' TPOS")
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
                             description="The part's raw PANM flags word; -1 derives it from the tracks")
@@ -838,33 +840,37 @@ def export_animation_sets(op, context, models):
     return {"FINISHED"}
 
 
+def clip_model(context):
+    """The active model when it carries a clip set (a rig of its own)."""
+    model = active_model(context)
+    return model if model is not None and animation.clip_rig(model) is not None else None
+
+
 class O3D_OT_export_anim(bpy.types.Operator):
     bl_idname = "opennova_3di.export_anim"
     bl_label = "Export Animations"
-    bl_description = ("Write the active model's clip set as a NovaLogic .adm table and its .bad clips "
-                      "through opennova-3di")
+    bl_description = ("Write the active model's clip set as a NovaLogic .adm table and its .bad clips through "
+                      "opennova-3di, and a first-person gun's weapon.def edits beside them")
+
+    @classmethod
+    def poll(cls, context):
+        return clip_model(context) is not None
 
     def execute(self, context):
-        model = active_model(context)
-        if model is None:
-            self.report({"ERROR"}, "select an object of the model whose animations to export")
-            return {"CANCELLED"}
-        return export_animation_sets(self, context, [model])
+        return export_animation_sets(self, context, [clip_model(context)])
 
 
 class O3D_OT_export_all_anim(bpy.types.Operator):
     bl_idname = "opennova_3di.export_all_anim"
     bl_label = "Export All Animations"
-    bl_description = "Write every rigged model's clip set to its own .adm"
+    bl_description = "Write every model's clip set to its own .adm"
 
     def execute(self, context):
         models = animation.models_with_rigs(context.scene)
         if not models:
-            self.report({"ERROR"}, "the scene holds no rigged model (a skinned model's LOD 0 carries "
-                                   "its BN## armature)")
+            self.report({"ERROR"}, "the scene holds no model with a rig of its own (an Armature of BN## bones under "
+                                   "its LOD 0 root)")
             return {"CANCELLED"}
-        # A rig with no clip set of its own (the arms beside a first-person
-        # gun, whose set the gun carries) is skipped, not an error.
         ready = []
         for model in models:
             gap = animation.clip_set_gap(model)
@@ -873,7 +879,7 @@ class O3D_OT_export_all_anim(bpy.types.Operator):
             else:
                 self.report({"WARNING"}, f"{model.name}: {gap}; skipped")
         if not ready:
-            self.report({"ERROR"}, "no rigged model carries a clip set (a table row and a clip)")
+            self.report({"ERROR"}, "no rigged model carries a clip set (a table row naming a clip)")
             return {"CANCELLED"}
         return export_animation_sets(self, context, ready)
 
@@ -881,17 +887,21 @@ class O3D_OT_export_all_anim(bpy.types.Operator):
 class O3D_OT_import_anim(bpy.types.Operator, ImportHelper):
     bl_idname = "opennova_3di.import_anim"
     bl_label = "Import Animations"
-    bl_description = ("Read a NovaLogic .adm clip table (or one .bad clip) onto the active model's rig "
-                      "through opennova-3di")
+    bl_description = ("Read a NovaLogic .adm clip table (or one .bad clip) onto the active model's rig through "
+                      "opennova-3di; a model with PN## parts gets a rig of them first")
     bl_options = {"REGISTER", "UNDO"}
 
     filename_ext = ".adm"
     filter_glob: StringProperty(default="*.adm;*.bad", options={"HIDDEN"})
     align_rest: BoolProperty(name="Rest pose from the reset clip", default=True,
-                             description="On a rig that holds no clip yet, turn each rest bone onto "
-                                         "the reset clip's bind, so a clip shows the pose the game "
-                                         "draws. Heads, lengths and weights do not move, so the "
-                                         "model still exports the same model")
+                             description="On a rig that holds no clip yet, turn each rest bone onto the reset "
+                                         "clip's bind, so a clip shows the pose the game draws. Heads, lengths, "
+                                         "weights and what hangs from a bone do not move, so the model still "
+                                         "exports the same model")
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == "OBJECT"
 
     def execute(self, context):
         model = active_model(context)
@@ -912,13 +922,15 @@ class O3D_OT_import_anim(bpy.types.Operator, ImportHelper):
 class O3D_OT_add_row(bpy.types.Operator):
     bl_idname = "opennova_3di.add_row"
     bl_label = "Add Row"
-    bl_description = "Add a .adm row: an anim slot and the clip ring that answers it"
+    bl_description = "Add a table row: an anim slot and the clips that answer it"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return clip_model(context) is not None
 
     def execute(self, context):
-        model = active_model(context)
-        if model is None:
-            return {"CANCELLED"}
-        row = model.o3d.rows.add()
+        row = clip_model(context).o3d.rows.add()
         row.variants.add()
         return {"FINISHED"}
 
@@ -926,32 +938,56 @@ class O3D_OT_add_row(bpy.types.Operator):
 class O3D_OT_remove_row(bpy.types.Operator):
     bl_idname = "opennova_3di.remove_row"
     bl_label = "Remove Row"
+    bl_options = {"REGISTER", "UNDO"}
     index: IntProperty()
 
+    @classmethod
+    def poll(cls, context):
+        return clip_model(context) is not None
+
     def execute(self, context):
-        active_model(context).o3d.rows.remove(self.index)
+        rows = clip_model(context).o3d.rows
+        if not 0 <= self.index < len(rows):
+            return {"CANCELLED"}
+        rows.remove(self.index)
         return {"FINISHED"}
 
 
 class O3D_OT_add_variant(bpy.types.Operator):
     bl_idname = "opennova_3di.add_variant"
-    bl_label = "Add Variant"
-    bl_description = "Add a clip to this row's ring (the engine serves a row from its last back)"
+    bl_label = "Add Clip"
+    bl_description = "Add a clip to this row's ring (the game serves a ring from its last clip back)"
+    bl_options = {"REGISTER", "UNDO"}
     row: IntProperty()
 
+    @classmethod
+    def poll(cls, context):
+        return clip_model(context) is not None
+
     def execute(self, context):
-        active_model(context).o3d.rows[self.row].variants.add()
+        rows = clip_model(context).o3d.rows
+        if not 0 <= self.row < len(rows):
+            return {"CANCELLED"}
+        rows[self.row].variants.add()
         return {"FINISHED"}
 
 
 class O3D_OT_remove_variant(bpy.types.Operator):
     bl_idname = "opennova_3di.remove_variant"
-    bl_label = "Remove Variant"
+    bl_label = "Remove Clip"
+    bl_options = {"REGISTER", "UNDO"}
     row: IntProperty()
     index: IntProperty()
 
+    @classmethod
+    def poll(cls, context):
+        return clip_model(context) is not None
+
     def execute(self, context):
-        active_model(context).o3d.rows[self.row].variants.remove(self.index)
+        rows = clip_model(context).o3d.rows
+        if not 0 <= self.row < len(rows) or not 0 <= self.index < len(rows[self.row].variants):
+            return {"CANCELLED"}
+        rows[self.row].variants.remove(self.index)
         return {"FINISHED"}
 
 
@@ -959,37 +995,60 @@ def menu_import_anim(self, context):
     self.layout.operator(O3D_OT_import_anim.bl_idname, text="NovaLogic Animations (.adm, .bad)")
 
 
+def edited_clip(context):
+    """The rig playing an Action, and that Action, when the active object is
+    a model's rig."""
+    ob = getattr(context, "object", None)
+    if ob is None or ob.type != "ARMATURE" or ob.animation_data is None or ob.animation_data.action is None:
+        return None, None
+    return ob, ob.animation_data.action
+
+
+# The roles Assign Weapon Action offers, kept alive for Blender (an enum's
+# items must outlive the call that made them).
+_role_items = []
+
+
+def weapon_roles(self, context):
+    """Reset, then the weapon actions with a slot of their own (the catalog's
+    weaponaction rows)."""
+    _role_items[:] = [("reset", "Reset (anim_reset)", "The bind: the rig's rest pose")] + [
+        (suffix, f"{suffix.capitalize()} ({key})", f"The clip of the {suffix} action, row {key}")
+        for suffix, _, key in catalog().actions]
+    return _role_items
+
+
 class O3D_OT_assign_weapon_action(bpy.types.Operator):
     bl_idname = "opennova_3di.assign_weapon_action"
     bl_label = "Assign Weapon Action"
-    bl_description = "Keep the active Action on an NLA track and bind it to a weapon animation slot"
+    bl_description = ("Make the Action the rig plays the clip of a weapon action's row (adding the row), with that "
+                      "action's timing markers; its loop and other settings stay as they are")
     bl_options = {"REGISTER", "UNDO"}
-    role: EnumProperty(name="Role", items=[("RESET", "Bind / Reset", "The rig's authored bind pose")] + weapon.ROLES[1:])
+    role: EnumProperty(name="Action", items=weapon_roles)
+
+    @classmethod
+    def poll(cls, context):
+        arm, action = edited_clip(context)
+        return action is not None and rig.model_of(arm) is not None
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
-        model = active_model(context)
-        rig = animation.rig_of(model) if model else None
-        if rig is None or rig.animation_data is None or rig.animation_data.action is None:
-            self.report({"ERROR"}, "select a model's rig with an active Action")
-            return {"CANCELLED"}
-        if rig.animation_data.use_tweak_mode:
+        arm, action = edited_clip(context)
+        model = rig.model_of(arm)
+        if arm.animation_data.use_tweak_mode:
             self.report({"ERROR"}, "leave NLA tweak mode before assigning an Action")
             return {"CANCELLED"}
-        action = rig.animation_data.action
         try:
             weapon.clip_bounds(action)
-            weapon.assign_action(model, action, self.role)
-            # Retail's weapon clips are one-shots, its idle holds too (M4's
-            # m4_1i / m4_1i2: flags 0x0 / 0x2); the idle ACTION replays them.
-            action.o3d.loop = False
-            if self.role != "RESET":
-                weapon.initialize_markers(action, self.role)
+            replaced = weapon.assign(model, action, self.role)
+            weapon.initialize_markers(action, self.role)
         except ExportError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
+        if replaced:
+            self.report({"INFO"}, f"{action.name} replaces {', '.join(replaced)} on the row")
         if context.area and context.area.type == "DOPESHEET_EDITOR":
             context.space_data.show_pose_markers = True
         return {"FINISHED"}
@@ -1002,12 +1061,13 @@ class O3D_OT_timing_marker(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
     name: EnumProperty(items=[(n, n[3:], "") for n in weapon.MARKERS])
 
+    @classmethod
+    def poll(cls, context):
+        return edited_clip(context)[1] is not None
+
     def execute(self, context):
-        ob = context.object
-        action = ob.animation_data.action if ob and ob.animation_data else None
-        if action is None:
-            return {"CANCELLED"}
-        if ob.animation_data.use_tweak_mode:
+        arm, action = edited_clip(context)
+        if arm.animation_data.use_tweak_mode:
             self.report({"ERROR"}, "leave NLA tweak mode to place a marker in Action time")
             return {"CANCELLED"}
         weapon.set_marker(action, self.name, context.scene.frame_current)
@@ -1016,138 +1076,258 @@ class O3D_OT_timing_marker(bpy.types.Operator):
         return {"FINISHED"}
 
 
+# The event bits Add Event Trigger offers, kept alive for Blender.
+_trigger_items = []
+
+
+def trigger_names(self, context):
+    _trigger_items[:] = [(name, name, f"Event bit 0x{mask:x}") for mask, name in catalog().triggers]
+    return _trigger_items
+
+
+class O3D_OT_trigger_marker(bpy.types.Operator):
+    bl_idname = "opennova_3di.trigger_marker"
+    bl_label = "Add Event Trigger"
+    bl_description = ("Mark the current frame with an animation event bit (a footstep, a fire row, a foley "
+                      "sound): an Action-local marker named after the bit, which sets it on that frame's event")
+    bl_options = {"REGISTER", "UNDO"}
+    name: EnumProperty(name="Event", items=trigger_names)
+
+    @classmethod
+    def poll(cls, context):
+        return edited_clip(context)[1] is not None
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        arm, action = edited_clip(context)
+        if arm.animation_data.use_tweak_mode:
+            self.report({"ERROR"}, "leave NLA tweak mode to place a marker in Action time")
+            return {"CANCELLED"}
+        frame = context.scene.frame_current
+        if not any(m.name == self.name and m.frame == frame for m in action.pose_markers):
+            action.pose_markers.new(self.name).frame = frame
+        if context.area and context.area.type == "DOPESHEET_EDITOR":
+            context.space_data.show_pose_markers = True
+        return {"FINISHED"}
+
+
 class O3D_OT_edit_clip(bpy.types.Operator):
     bl_idname = "opennova_3di.edit_clip"
     bl_label = "Edit Clip"
-    bl_description = "Activate this clip on its rig and show its Action-local markers"
+    bl_description = ("Play this clip on the model's rig through its slot, every channel it does not key at rest, "
+                      "the timeline's preview range on its frames")
     bl_options = {"REGISTER", "UNDO"}
     row: IntProperty()
     variant: IntProperty()
 
+    @classmethod
+    def poll(cls, context):
+        return clip_model(context) is not None
+
     def execute(self, context):
-        model = active_model(context)
-        rig = animation.rig_of(model) if model else None
-        if rig is None:
+        model = clip_model(context)
+        arm = animation.clip_rig(model)
+        rows = model.o3d.rows
+        if not 0 <= self.row < len(rows) or not 0 <= self.variant < len(rows[self.row].variants):
             return {"CANCELLED"}
-        action = model.o3d.rows[self.row].variants[self.variant].action
+        action = rows[self.row].variants[self.variant].action
         if action is None:
             return {"CANCELLED"}
-        if rig.animation_data and rig.animation_data.use_tweak_mode:
+        data = arm.animation_data or arm.animation_data_create()
+        if data.use_tweak_mode:
             self.report({"ERROR"}, "leave NLA tweak mode before changing clips")
             return {"CANCELLED"}
-        start, end, fps = weapon.clip_bounds(action)
-        for ob in context.selected_objects:
-            ob.select_set(False)
-        rig.hide_set(False)
-        rig.select_set(True)
-        context.view_layer.objects.active = rig
-        rig.animation_data_create()
-        rig.animation_data.use_nla = False
-        rig.animation_data.action = action
-        strip = next((s for a,s in animation.clip_strips(rig) if a == action), None)
-        if hasattr(rig.animation_data, "action_slot"):
-            rig.animation_data.action_slot = strip.action_slot if strip else next(iter(action.slots), None)
-        context.scene.frame_start, context.scene.frame_end = start, end
-        context.scene.render.fps, context.scene.render.fps_base = fps, 1.0
-        context.scene.frame_set(start)
-        for area in context.screen.areas:
-            if area.type == "DOPESHEET_EDITOR":
-                area.spaces.active.mode = "ACTION"
-                area.spaces.active.show_pose_markers = True
+        try:
+            slot = animation.clip_slot(action, arm)
+        except ExportError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        # A clip shows what it keys over the rig's rest, as export reads it:
+        # a channel the last clip keyed and this one does not goes back.
+        animation.rest_pose(arm)
+        data.action = action
+        data.action_slot = slot
+        start, end = animation.clip_range(action)
+        scene = context.scene
+        scene.use_preview_range = True
+        scene.frame_preview_start, scene.frame_preview_end = start, max(start + 1, end)
+        scene.frame_set(start)
+        if arm.name in context.view_layer.objects:
+            for ob in context.selected_objects:
+                ob.select_set(False)
+            arm.hide_set(False)
+            arm.select_set(True)
+            context.view_layer.objects.active = arm
+        if context.screen is not None:
+            for area in context.screen.areas:
+                if area.type == "DOPESHEET_EDITOR":
+                    area.spaces.active.mode = "ACTION"
+                    area.spaces.active.show_pose_markers = True
+        return {"FINISHED"}
+
+
+class O3D_OT_add_weapon_entry(bpy.types.Operator):
+    bl_idname = "opennova_3di.add_weapon_entry"
+    bl_label = "Add Weapon Entry"
+    bl_description = "Add a weapon.def entry these clips play for (one per fire mode that shares them)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return clip_model(context) is not None
+
+    def execute(self, context):
+        clip_model(context).o3d.weapons.add()
+        return {"FINISHED"}
+
+
+class O3D_OT_remove_weapon_entry(bpy.types.Operator):
+    bl_idname = "opennova_3di.remove_weapon_entry"
+    bl_label = "Remove Weapon Entry"
+    bl_options = {"REGISTER", "UNDO"}
+    index: IntProperty()
+
+    @classmethod
+    def poll(cls, context):
+        return clip_model(context) is not None
+
+    def execute(self, context):
+        entries = clip_model(context).o3d.weapons
+        if not 0 <= self.index < len(entries):
+            return {"CANCELLED"}
+        entries.remove(self.index)
         return {"FINISHED"}
 
 
 class O3D_OT_preview_weapon(bpy.types.Operator):
     bl_idname = "opennova_3di.preview_weapon"
     bl_label = "Preview Game Timing"
-    bl_description = "Run the authored action windows through the engine's weapon FSM"
+    bl_description = ("Measure the weapon entries' timing with the engine's weapon FSM: each entry's rate, the "
+                      "delays its ACTION blocks get and how much of each clip the viewmodel shows")
+
+    @classmethod
+    def poll(cls, context):
+        model = clip_model(context)
+        return model is not None and len(model.o3d.weapons) > 0
 
     def execute(self, context):
-        model = active_model(context)
-        if model is None:
-            return {"CANCELLED"}
+        model = clip_model(context)
         try:
-            preview, snippet = weapon.compile_timing(context, model)
+            lines, notes = weapon.preview(context, model)
         except ExportError as e:
-            model.o3d.weapon_preview = ""
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
-        model.o3d.weapon_preview = json.dumps(preview)
-        name = f"{model.name} - Weapon Timing"
-        report = bpy.data.texts.get(name) or bpy.data.texts.new(name)
-        report.clear()
-        report.write(snippet + "\n// Native FSM trace (tick zero is each scenario's entry):\n")
-        for e in preview["events"]:
-            report.write(f"// {e['scenario']:12} tick {e['tick']:5} {e['action']:12} {e['kind']:16} clip {e['clip_seconds']:.6f}s\n")
-        self.report({"INFO"}, f"{preview['rpm']:.2f} RPM, {preview['cycle_ticks']} ticks/shot. Full trace: {name}")
+        for note in notes:
+            self.report({"WARNING"}, note)
+        self.report({"INFO"}, lines[0][0] if lines else "no weapon entry")
+        return {"FINISHED"}
+
+
+class O3D_OT_merge_weapon_def(bpy.types.Operator, ImportHelper):
+    bl_idname = "opennova_3di.merge_weapon_def"
+    bl_label = "Merge into weapon.def"
+    bl_description = ("Set the weapon entries' timing and view keys in a copy of a weapon.def, written as a new file "
+                      "(opennova-3di weapon merge); every other byte of the def stays as it was")
+    filename_ext = ".def"
+    filter_glob: StringProperty(default="*.def", options={"HIDDEN"})
+    output: StringProperty(name="Write to", subtype="FILE_PATH", default="",
+                           description="The merged weapon.def; empty: <the def's name>_merged.def beside it")
+
+    @classmethod
+    def poll(cls, context):
+        model = clip_model(context)
+        return model is not None and len(model.o3d.weapons) > 0
+
+    def execute(self, context):
+        model = clip_model(context)
+        source = bpy.path.abspath(self.filepath)
+        stem, ext = os.path.splitext(source)
+        target = bpy.path.abspath(self.output) if self.output else f"{stem}_merged{ext}"
+        try:
+            said, notes = weapon.merge(context, model, source, target)
+        except ExportError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        for note in notes:
+            self.report({"WARNING"}, note)
+        self.report({"INFO"}, said)
         return {"FINISHED"}
 
 
 def draw_weapon(layout, model):
+    """A first-person gun's weapon.def side: its entries, its view cameras,
+    the last preview while it is current, and what writes the edits."""
     p = model.o3d
-    layout.prop(p, "weapon_enabled")
-    if not p.weapon_enabled:
-        return
     box = layout.box()
-    box.label(text="Weapon timing")
-    box.prop(p, "weapon_mode")
-    box.prop(p, "weapon_cadence")
-    if p.weapon_cadence == "RPM":
-        box.prop(p, "weapon_rpm")
-        box.label(text="Fire Ready marker is unused")
+    box.label(text="Weapon", icon="MOD_PHYSICS")
+    for i, entry in enumerate(p.weapons):
+        row = box.row(align=True)
+        row.prop(entry, "name", text="")
+        row.prop(entry, "mode", text="")
+        row.prop(entry, "rpm", text="RPM")
+        row.operator("opennova_3di.remove_weapon_entry", text="", icon="X").index = i
+    box.operator("opennova_3di.add_weapon_entry", icon="ADD")
+    if not p.weapons:
+        box.label(text="No entry: the clips export without weapon.def edits")
+        return
+    box.prop(p, "hip_camera")
+    box.prop(p, "aim_camera")
     box.operator("opennova_3di.preview_weapon", icon="PLAY")
-    if p.weapon_preview:
-        try:
-            preview = json.loads(p.weapon_preview)
-            fresh = preview["signature"] == weapon.signature(weapon.request_text(model))
-            if not fresh:
-                box.label(text="Timing changed: preview again", icon="ERROR")
-            else:
-                box.label(text=f"Actual: {preview['rpm']:.2f} RPM / {preview['cycle_ticks']} ticks")
-                box.label(text=f"Requested: {preview['requested_rpm']:.2f} RPM")
-                if abs(preview['rpm'] - preview['requested_rpm']) > 0.01:
-                    box.label(text="Rounded to whole game ticks", icon="INFO")
-                for row in preview["rows"]:
-                    box.label(text=f"{row['role']}: delaystart {row['delaystart']}, delayend {row['delayend']}")
-        except (ExportError, ValueError, KeyError):
-            box.label(text="Timing changed: preview again", icon="ERROR")
-    box.label(text="Exports <table>_weapon_actions.txt")
-    box.label(text="Reload ammo applies on entry; switches have a fixed timer")
+    preview = weapon.last_preview(model)
+    if preview is not None:
+        for text, warn in weapon.preview_lines(model, preview):
+            box.label(text=text, icon="ERROR" if warn else "NONE")
+    elif weapon._previews.get(model.name_full) is not None:
+        box.label(text="The timing changed: preview again", icon="INFO")
+    box.operator("opennova_3di.merge_weapon_def", icon="FILE_TEXT")
+    box.label(text="Export Animations writes <table>_weapon_edits.txt")
 
 
 def draw_animations(layout, model):
-    """The model's clip set: the table's rows, and what writes them."""
+    """The model's clip set: its rig, the table's rows, and what writes them."""
     p = model.o3d
-    rig = animation.rig_of(model)
+    arm = rig.rig_of(model)
     box = layout.box()
     box.label(text="Animations", icon="ARMATURE_DATA")
-    if rig is None:
-        box.label(text="No rig: a skinned model's LOD 0 carries its BN## armature")
+    if arm is None:
+        box.label(text="No rig: clips pose the BN## bones of a rig")
+        box.operator("opennova_3di.add_rig", icon="ARMATURE_DATA")
+        return
+    owner = rig.model_of(arm)
+    if owner is not model:
+        box.label(text=f"Deforms with {owner.name}'s rig: {owner.name}'s clips pose it")
         return
     box.prop(p, "adm_path")
-    box.prop(p, "clip_prefix")
     if not p.adm_path:
         box.label(text=f"Writes {animation.adm_default(model)}")
-    clips = animation.clip_actions(rig)
-    box.label(text=f"{len(clips)} clips on {rig.name} (its NLA tracks)")
-    box.prop_search(p, "head_bone", rig.data, "bones", text="Head")
-    if not p.head_bone:
-        heads = animation.head_candidates(rig)
-        box.label(text=f"Head: {heads[0].name} (its name ends in 'head')" if len(heads) == 1 else
-                  "No head: each top is the bottom" if not heads else "Several bones end in 'head': choose one")
-    box.label(text="Root bone: the ground; hips BN01; top: the head's height")
-    draw_weapon(box, model)
+    row = box.row()
+    row.label(text=f"Rig {arm.name}")
+    row.operator("opennova_3di.number_parts")
+    try:
+        grounded = animation.root_of(arm) is not None
+    except ExportError:
+        grounded = True  # two Root bones, which export names
+    if grounded:
+        box.prop_search(p, "head_bone", arm.data, "bones", text="Head")
+    else:
+        box.label(text="No Root bone: the clips pose the model in place (first person)")
+    try:
+        table = catalog().actions
+    except Exception:  # noqa: BLE001 (a panel draws whatever the catalog holds)
+        table = []
     for i, row in enumerate(p.rows):
         line = box.box()
         head = line.row()
         head.prop(row, "key", text="")
+        suffix = weapon.action_of(row.key, table) if table else None
+        if suffix is not None:
+            head.label(text=suffix)
         head.operator("opennova_3di.add_variant", text="", icon="ADD").row = i
         head.operator("opennova_3di.remove_row", text="", icon="X").index = i
-        if p.weapon_enabled:
-            line.prop(row, "weapon_role")
-            if row.weapon_role != "NONE":
-                for prop in ("weapon_sound", "weapon_end_sound", "weapon_particle", "weapon_userpoint"):
-                    line.prop(row, prop)
+        if animation.slot_of(row.key.strip()) == "reset" and not any(v.action for v in row.variants):
+            line.label(text="No clip: export writes one of the rest pose")
         for v, variant in enumerate(row.variants):
             entry = line.row()
             entry.prop(variant, "action", text="")
@@ -1158,6 +1338,7 @@ def draw_animations(layout, model):
             drop.index = v
     box.operator("opennova_3di.add_row", icon="ADD")
     box.operator("opennova_3di.export_anim", icon="EXPORT")
+    draw_weapon(box, model)
 
 
 class O3D_PT_action(bpy.types.Panel):
@@ -1168,38 +1349,47 @@ class O3D_PT_action(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        ob = getattr(context, "object", None)
-        return (ob is not None and ob.type == "ARMATURE" and ob.animation_data is not None and
-                ob.animation_data.action is not None)
+        return edited_clip(context)[1] is not None
 
     def draw(self, context):
-        action = context.object.animation_data.action
+        arm, action = edited_clip(context)
         col = self.layout.column()
         col.label(text=f"Clip {action.name}")
+        model = rig.model_of(arm)
+        rows = [r for r in model.o3d.rows if any(v.action == action for v in r.variants)] if model else []
+        col.label(text=", ".join(r.key.strip() for r in rows) if rows else "On no row: not exported",
+                  icon="NONE" if rows else "INFO")
+        col.prop(action, "use_frame_range", text="Manual Frame Range")
+        if action.use_frame_range:
+            row = col.row(align=True)
+            row.prop(action, "frame_start", text="Start")
+            row.prop(action, "frame_end", text="End")
+        else:
+            start, end = animation.clip_range(action)
+            col.label(text=f"Frames {start} to {end} (its keys)")
+        col.prop(action, "use_cyclic", text="Loop (Cyclic)")
         col.prop(action.o3d, "fps")
-        col.prop(action.o3d, "frames")
-        col.prop(action.o3d, "loop")
-        col.prop(action.o3d, "translation")
-        col.prop(action.o3d, "raw_flag_8")
-        col.prop(context.object.o3d, "anim_trigger")
-        col.label(text="Key the trigger per frame: 1/2 footsteps, 4/8/16 fire, 0x20+ foley")
+        render = context.scene.render
+        if abs(action.o3d.fps - render.fps / render.fps_base) > 1e-6:
+            col.label(text=f"The scene plays at {render.fps / render.fps_base:g} fps", icon="INFO")
         box = col.box()
-        box.label(text="Weapon timing (Action-local markers)")
+        box.label(text="Event triggers (markers)")
+        names = {name for _, name in catalog().triggers}
+        for marker in sorted((m for m in action.pose_markers if m.name in names), key=lambda m: m.frame):
+            box.label(text=f"{marker.frame}: {marker.name}")
+        box.operator("opennova_3di.trigger_marker", icon="MARKER_HLT")
+        table = catalog().actions
+        suffixes = {s for s in (weapon.action_of(r.key, table) for r in rows) if s is not None} if table else set()
+        box = col.box()
+        box.label(text="Weapon timing (markers)")
         box.operator("opennova_3di.assign_weapon_action")
-        model = active_model(context)
-        roles = {r.weapon_role for r in model.o3d.rows if r.weapon_role != "NONE" and
-                 any(v.action == action for v in r.variants)} if model else set()
-        names = {weapon.READY} if roles - weapon.FIXED_ROLES else set()
-        if roles & weapon.FIXED_ROLES:
-            box.label(text="Fixed engine switch timer; inspect Preview Game Timing")
-        if "fire" in roles:
-            names.add(weapon.SHOT)
-        if "recoil" in roles:
-            names.add(weapon.EJECT)
-        if roles - {"fire", "recoil"} - weapon.IDLE_ROLES - weapon.FIXED_ROLES:
-            names.add(weapon.ACTIVE)
+        wanted = set()
+        for suffix in suffixes:
+            wanted |= weapon.TIMED_BY.get(suffix, {weapon.ACTIVE, weapon.READY})
+        if suffixes & weapon.SWITCHES:
+            box.label(text="Draw and holster pace themselves on the switch timer")
         for name in weapon.MARKERS:
-            if name not in names:
+            if name not in wanted:
                 continue
             row = box.row()
             marker = action.pose_markers.get(name)
@@ -1208,8 +1398,22 @@ class O3D_PT_action(bpy.types.Panel):
             else:
                 row.label(text=name[3:])
             row.operator("opennova_3di.timing_marker", text="At Playhead").name = name
-        if model and roles:
-            draw_weapon(box, model)
+
+
+class O3D_PT_action_raw(bpy.types.Panel):
+    bl_label = "Raw"
+    bl_space_type = "DOPESHEET_EDITOR"
+    bl_region_type = "UI"
+    bl_category = "Action"
+    bl_parent_id = "O3D_PT_action"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return edited_clip(context)[1] is not None
+
+    def draw(self, context):
+        self.layout.prop(edited_clip(context)[1].o3d, "raw_flag_8")
 
 
 def menu_import(self, context):
@@ -1515,16 +1719,18 @@ class O3D_PT_material(bpy.types.Panel):
                 row.prop(p, f"{axis}_end")
 
 
-CLASSES = (O3DTrack, O3DAdmVariant, O3DAdmRow, O3DActionProps, O3DObjectProps, O3DBoneProps, O3DTexture,
-           O3DMaterialProps, O3DLightProps, O3DSceneProps, O3DPreferences,
+CLASSES = (O3DTrack, O3DAdmVariant, O3DAdmRow, O3DWeaponEntry, O3DActionProps, O3DObjectProps, O3DBoneProps,
+           O3DTexture, O3DMaterialProps, O3DLightProps, O3DSceneProps, O3DPreferences,
            O3D_OT_add_track, O3D_OT_remove_track, O3D_OT_add_texture, O3D_OT_remove_texture, O3D_OT_export,
            O3D_OT_export_all, O3D_OT_add_model, O3D_OT_add_lod, O3D_OT_add_part, O3D_OT_add_rig,
            O3D_OT_share_rig, O3D_OT_number_parts,
            O3D_OT_import,
            O3D_OT_export_anim, O3D_OT_export_all_anim, O3D_OT_import_anim, O3D_OT_add_row,
            O3D_OT_remove_row, O3D_OT_add_variant, O3D_OT_remove_variant,
-           O3D_OT_assign_weapon_action, O3D_OT_timing_marker, O3D_OT_edit_clip, O3D_OT_preview_weapon,
-           O3D_PT_action, O3D_PT_scene, O3D_PT_object, O3D_PT_bone, O3D_PT_light, O3D_PT_material)
+           O3D_OT_assign_weapon_action, O3D_OT_timing_marker, O3D_OT_trigger_marker, O3D_OT_edit_clip,
+           O3D_OT_add_weapon_entry, O3D_OT_remove_weapon_entry, O3D_OT_preview_weapon, O3D_OT_merge_weapon_def,
+           O3D_PT_action, O3D_PT_action_raw, O3D_PT_scene, O3D_PT_object, O3D_PT_bone, O3D_PT_light,
+           O3D_PT_material)
 
 
 def register():
