@@ -49,10 +49,9 @@ interface AdminSection {
   label: string;
 }
 
-// /admin and /admin/expansions are pure redirects to /admin/releases, so the
-// route path is always one of the `to` values below.
+// /admin is a pure redirect to /admin/users, so the route path is always one
+// of the `to` values below.
 const sections: AdminSection[] = [
-  { to: '/admin/releases', label: 'Expansion Releases' },
   { to: '/admin/users', label: 'Users' },
   { to: '/admin/server', label: 'Server Status' },
   { to: '/admin/connections', label: 'Connections' },
@@ -61,7 +60,7 @@ const sections: AdminSection[] = [
 const route = useRoute();
 
 // Explicit active check — RouterLink's default active class would light up the
-// releases item on every child path since '/admin' is a prefix of them all.
+// first item on every child path since '/admin' is a prefix of them all.
 function isActive(item: AdminSection): boolean {
   return route.path === item.to;
 }

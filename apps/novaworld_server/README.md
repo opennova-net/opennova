@@ -64,9 +64,7 @@ All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
 and the GLSVSS leg `ONNET_GLSVSS_REQUEST`, `ONNET_GLSVSS_RIMS`,
 `ONNET_GLSVSS_AGRMS` (the gate VARs) plus `ONNET_GLSVSS_RESULTS` (what
 `ClientGLSVSSRequest` is answered with). The gate response carries only the
-nineteen keys the retail parser recognises. Expansion-publish pipeline: `EXPANSION_GITHUB_TOKEN` (PAT the
-server tags the expansion repos with) and `EXPANSION_PUBLISH_TOKEN` (bearer the
-repos' CI presents to `/admin/internal/.../publish`); both empty by default.
+nineteen keys the retail parser recognises.
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).

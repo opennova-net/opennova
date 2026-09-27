@@ -32,9 +32,9 @@ unexercised gate.
 
 ## The deployed service
 
-`apps/novaworld_server/`, `deploy/`, `launcher/`, `web/`, `backend/` and
-`infra/` keep their own 12-factor configuration (`ONNET_*`, `DATABASE_PATH`,
-`ADMIN_*`, `ONLAUNCHER_*`, the service's `NW_LOG_DEBUG`); see `DEPLOY.md`.
+`apps/novaworld_server/`, `deploy/`, `web/`, `backend/` and `infra/` keep
+their own 12-factor configuration (`ONNET_*`, `DATABASE_PATH`, `ADMIN_*`, the
+service's `NW_LOG_DEBUG`); see `DEPLOY.md`.
 The lint treats those trees as a family, not a list.
 
 ## OS variables

@@ -45,12 +45,6 @@ scripts/build_godot.sh
 scripts/test_godot.sh
 ```
 
-Launcher work:
-
-```powershell
-dotnet test launcher/OpenNovaLauncher.sln -c Release
-```
-
 Packet tools:
 
 ```bash
@@ -71,7 +65,7 @@ a gated ctest reports Skipped (exit 77) without its root, never a silent pass.
 ## Logs and Cleanup
 
 - Docker dev: collect `docker compose ... logs --tail=200 novaworld web`,
-  `/api/server-info`, `/api/hosts`, `/api/lobbies`, and `/api/unknowns`.
+  `/api/health`, `/api/hosts`, `/api/lobbies`, and `/api/unknowns`.
 - Native server: collect stdout/stderr. It clears active hosts and active user
   sessions at boot and sweeps stale hosts.
 - Godot: fully close the editor after GDExtension rebuilds. If GUT reports odd
@@ -82,8 +76,8 @@ a gated ctest reports Skipped (exit 77) without its root, never a silent pass.
   directory existence. For performance observations never use a Debug config;
   MSVC `/Od` and `/RTC1` invalidate frame-time readings. `scripts/build.sh`
   builds the main tree with `--config Release`.
-- Launcher: use the launcher to remove managed hosts entries. Inspect only the
-  OpenNova marker block in the hosts file, and do not commit launcher settings.
+- Hosts file: remove the `gs.novaworld.net` redirect line you added when the run is
+  done, and touch no other hosts entry.
 
 ## When To Stop
 

@@ -45,9 +45,12 @@ easier to relay than to rediscover.
   `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
-- `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a
-  stock install at our servers; `backend/` + `deploy/` + `infra/` — service data and
-  deployment stack (DEPLOY.md).
+- `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
+  data and deployment stack (DEPLOY.md).
+- `assets/` — the game's own bundled data (authored from scratch, no retail bytes), shipped
+  beside `opennova.exe` and mounted when no `--resource-dir` is given: today only the
+  placeholder main menu whose PLAY RETAIL picks and remembers a retail install (ADR 0048;
+  `assets/README.md`).
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
 - `docs/` — tracked golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly

@@ -14,7 +14,6 @@
     "tests/common/test_paths.h": ["TEMP", "TMP"],
     "apps/novaworld_server/*": ["*"],
     "deploy/*": ["*"],
-    "launcher/*": ["*"],
     "web/src/*": ["*"],
     "backend/*": ["*"],
     "infra/*": ["*"]
@@ -25,7 +24,6 @@
     "scripts/net/lib.ps1",
     "apps/novaworld_server/*",
     "deploy/*",
-    "launcher/*",
     "web/src/*",
     "backend/*",
     "infra/*"
