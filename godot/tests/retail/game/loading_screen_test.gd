@@ -36,8 +36,8 @@ func test_mp_setup_carries_the_session_variables() -> void:
 
 func _setup_screen(info: LoadingScreenInfo) -> LoadingScreen:
 	var dir := _make_temp_dir("loadscreen_setup")
-	_write_test_pcx(dir.path_join("00trg.pcx"))
-	_write_test_pcx(dir.path_join("loadscrn.pcx"))
+	TestFs.write_bytes(self, dir.path_join("00trg.pcx"), TestPcx.ramp_2x2())
+	TestFs.write_bytes(self, dir.path_join("loadscrn.pcx"), TestPcx.ramp_2x2())
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
@@ -65,31 +65,3 @@ func _make_temp_dir(name: String) -> String:
 	DirAccess.make_dir_recursive_absolute(dir)
 	_temp_dirs.append(dir)
 	return dir
-
-
-func _write_test_pcx(path: String) -> void:
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_buffer(_test_pcx_bytes())
-	f.close()
-
-
-func _test_pcx_bytes() -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(128)
-	bytes[0] = 0x0A  # manufacturer
-	bytes[1] = 5     # version
-	bytes[2] = 1     # RLE
-	bytes[3] = 8     # bits per pixel
-	# xmin/ymin = 0, xmax/ymax = 1 (little-endian u16 pairs at 4..11)
-	bytes[8] = 1
-	bytes[10] = 1
-	bytes[65] = 1    # planes
-	bytes[66] = 2    # bytes per line
-	for p in [0, 1, 2, 3]:  # 4 literal pixels (values < 0xC0 pass through RLE)
-		bytes.append(p)
-	bytes.append(0x0C)  # palette marker
-	for i in range(256):
-		bytes.append(i)  # r
-		bytes.append(i)  # g
-		bytes.append(i)  # b
-	return bytes
