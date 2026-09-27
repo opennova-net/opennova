@@ -10,6 +10,7 @@
 // hold, or a token past the record's fields fails the build naming the line,
 // so nothing an exporter writes is silently wrapped or dropped.
 
+#include <algorithm>
 #include <array>
 #include <climits>
 #include <cmath>
@@ -27,8 +28,9 @@
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
-// Header-only (the shader table): opennova-3di links opennova_base alone.
+// The shader table, and the texture-name cut the loader applies.
 #include <runtime/renderer/material_descriptor.h>
+#include <runtime/renderer/material_texture.h>
 
 #include "scene_text.h"
 #include "threedi_cli.h"
@@ -523,8 +525,26 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("texture needs an open material and a file name");
 				continue;
 			}
+			// The name is the MTRL row's 16-byte field, which retail fills with
+			// no NUL (124 names such as `bo105blur.dds.tg`), and the loader looks
+			// its file up by that string: printable ASCII, a file name alone.
 			if (name.size() > 16) {
-				ps.error("texture name '" + name + "' exceeds 16 characters");
+				ps.error("texture name '" + name + "' is " + std::to_string(name.size()) +
+						" bytes: the MTRL field holds 16");
+				continue;
+			}
+			const auto unprintable = std::find_if(name.begin(), name.end(), [](char c) {
+				return static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) > 0x7E;
+			});
+			if (unprintable != name.end()) {
+				char byte[8];
+				std::snprintf(byte, sizeof(byte), "0x%02X", static_cast<unsigned char>(*unprintable));
+				ps.error("texture name '" + name + "' holds the byte " + byte +
+						": a texture name is printable ASCII, as the game's file names are");
+				continue;
+			}
+			if (name.find_first_of("/\\") != std::string::npos) {
+				ps.error("texture name '" + name + "' names a folder: the game finds a texture by its file name alone");
 				continue;
 			}
 			long long *optional[] = {&slot, &type, &flags, &frame};
@@ -545,6 +565,22 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			t.type = static_cast<uint8_t>(type);
 			t.flags = static_cast<uint8_t>(flags);
 			t.frame = static_cast<uint8_t>(frame);
+			// The loader opens the name cut three characters past its first
+			// '.' and decodes a .tga, .mdt or .pcx file itself; any other name
+			// loads only as the .dds of its stem, when one lies beside it
+			// [orig: Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B4FA,
+			// @ 0x58B53C..0x58B598, @ 0x58B66F..0x58B6E6] (material_texture.h).
+			// An empty name is a row with no file (retail ships 65).
+			const std::string query = opennova::renderer::material_texture_query(name);
+			const std::string dds = opennova::renderer::material_dds_sibling(query);
+			if (!name.empty() &&
+					opennova::renderer::plain_material_image_source(query).decoder ==
+							opennova::renderer::MaterialImageDecoder::None &&
+					!opennova::strutil::iequals(dds, query))
+				std::fprintf(stderr,
+						"%s:%d: note: texture '%s' loads only as '%s': the game opens '%s' (the name cut three "
+						"characters past its first '.') and decodes .tga, .mdt and .pcx files itself\n",
+						ps.path.c_str(), ps.line, name.c_str(), dds.c_str(), query.c_str());
 		} else if (key == "texanim") {
 			long long frames = 0, type = 0, time = 0;
 			if (material < 0 || !in.integer(frames) || !in.integer(type) || !in.integer(time)) {
@@ -1008,9 +1044,15 @@ void validate(Parser &ps, const ThreediBuildModel &m) {
 		}
 	}
 	for (size_t o = 0; o < m.collision.size(); ++o) {
+		// A bullet face names its normal by a signed 16-bit index too
+		// [orig: Physics_RaycastAgainstBoneCollision @ 0x4E5079]; section o
+		// pairs with part o of the collision LOD.
 		if (m.collision[o].normals.size() > static_cast<size_t>(SHRT_MAX) + 1)
-			ps.model_error("cobj " + std::to_string(o) + " exceeds " + std::to_string(SHRT_MAX + 1) +
-					" collision normals (signed int16 indices)");
+			ps.model_error("collision section " + std::to_string(o) + " (part " + std::to_string(o) + ") has " +
+					grouped(m.collision[o].normals.size()) +
+					" distinct bullet-face normals, past the 32,768 a face's signed 16-bit normal index reaches: "
+					"simplify its bullet faces (faces in one plane share a normal), split them over more parts, or "
+					"give the part none");
 		for (const ThreediBoundingVolume &v : m.collision[o].volumes)
 			if (v.plane_count < 4) ps.model_error("cobj " + std::to_string(o) + " has a volume with fewer than 4 planes");
 	}

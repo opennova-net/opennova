@@ -52,7 +52,7 @@ import; any other front end may.
 | `register` | NAME | a CTRL register, declared in order; a name outside `threedi_ctrl_catalog.h` is a note (the loader reads LOD_FRAC for it) |
 | `mtrx` | r00 .. r22 | a PANM rotation frame, MTRX row 1, 2, ... (row 0 is the identity build writes itself): a 3x3 rotation in mission axes, row-major, `p' = p R` |
 | `material` | SHADER | opens a material (a shader tag of the engine's table, `opennova-3di catalog`; another tag is a note) |
-| `texture` | name [slot type flags frame] | a texture on the open material (16 characters max; slot 1 diffuse, 2 detail, 3/4 normal) |
+| `texture` | name [slot type flags frame] | a texture on the open material (slot 1 diffuse, 2 detail, 3/4 normal). The name is the MTRL row's 16-byte field, which retail fills to the last byte with no NUL (`bo105blur.dds.tg`): at most 16 bytes of printable ASCII, a file name without a folder. The loader opens the name cut three characters past its first `.` and decodes a `.tga`, `.mdt` or `.pcx` file itself; any other name loads only as the `.dds` of its stem, which `build` notes ([orig: Texture_LoadByNameWithChannel @ 0x58B4E1]) |
 | `texanim` | frames type time | the material's texture flipbook |
 | `reflect` | r g b a | the glass reflection colour (0..255) |
 | `matflags` / `alphatest` / `glass` / `emissive` | value | material flag byte, alpha-test threshold, glass, emissive type |
@@ -147,31 +147,32 @@ degenerate UVs reuses the previous one's).
 
 ## Validation
 
-The build fails, naming the line, on an unknown record, a field that does
-not parse (an optional one included: `cf 0 1 2 abc`, `lod abc`), a value its
-word cannot hold (a byte field over 255, an int16 field, a negative light
-rate), a token past the record's fields, an unclosed quote or a `"` inside a
-name, an index outside its strip, collision object or occlusion record, a
-triangle that repeats a vertex, a strip over 65535 vertices or indices, a
-skinned weight that is no finite number from 0 to 1 or weights summing past 1
-(within 1e-4), more than 255 parts, a part parent the LOD lacks, a PANM row
-out of part order, a skinned strip without a bone table or naming a missing
-part, a track `axis` other than 1..3 or on a track other than `trans`, a
-generator or light register that is not declared, more than 8 `sitex` seats
-in any case (the
-seat scan reads the prefix without case and stops at 8 [orig:
+The build fails, naming the line, on an unknown record, a field that does not
+parse (an optional one included: `cf 0 1 2 abc`, `lod abc`), a value its word
+cannot hold (a byte field over 255, an int16 field, a negative light rate), a
+token past the record's fields, an unclosed quote or a `"` inside a name, an
+index outside its strip, collision object or occlusion record, a triangle that
+repeats a vertex, a strip over 65535 vertices or indices, a texture name over
+16 bytes, outside printable ASCII or naming a folder, a skinned weight that is
+no finite number from 0 to 1 or weights summing past 1 (within 1e-4), more
+than 255 parts, a part parent the LOD lacks, a PANM row out of part order, a
+skinned strip without a bone table or naming a missing part, a track `axis`
+other than 1..3 or on a track other than `trans`, a generator or light
+register that is not declared, more than 8 `sitex` seats in any case (the seat
+scan reads the prefix without case and stops at 8 [orig:
 Entity_GetBoneSlotType @ 0x434ED0; the scan end @ 0x43A5AF]), a volume with
 fewer than 4 planes, an occlusion record over 128 vertices or 32 planes, a
 collision vertex 128 or more from the origin, a collision section over 32,768
-vertices, or a model the writer refuses (named with its chunk and size when a
-chunk outgrows the 16,777,215 bytes a 3DI3 chunk's 24-bit length says: ROOT
-holds the whole model, an RLOD one LOD); a
-whole-model error names the file alone. Notes (not errors): a
-register outside the catalog, a shader outside the engine's table, a volume
-mesh that is not convex, more than 16 user points (the item-effect scan
-reads 16), weighted bone slots past their strip's table (retail FSldr03 ships
-them), collision faces whose corners are collinear. The minted bytes are read
-back before the file is written. The ctest fixtures are
+vertices or 32,768 distinct bullet-face normals (a face names its normal by a
+signed 16-bit index too), or a model the writer refuses (named with its chunk
+and size when a chunk outgrows the 16,777,215 bytes a 3DI3 chunk's 24-bit
+length says: ROOT holds the whole model, an RLOD one LOD); a whole-model error
+names the file alone. Notes (not errors): a register outside the catalog, a
+shader outside the engine's table, a texture that loads only as the `.dds` of
+its stem, a volume mesh that is not convex, more than 16 user points (the
+item-effect scan reads 16), weighted bone slots past their strip's table
+(retail FSldr03 ships them), collision faces whose corners are collinear. The
+minted bytes are read back before the file is written. The ctest fixtures are
 `fixtures/threedi/o3d/spinner.o3d`, `skinned.o3d` and `building.o3d`.
 
 A skinned model's strips are all owned by the root ROBJ while each part keeps

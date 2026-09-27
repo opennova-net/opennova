@@ -69,16 +69,32 @@ void refuses(const std::string &name, const std::string &text) { check(!build(na
 
 std::string cli; // the opennova-3di executable
 
-// The CLI must refuse `text` and say `words` on stderr: the message an author
-// reads is part of the contract.
-void refuses_saying(const std::string &name, const std::string &text, const std::string &words) {
+// Run the CLI's `build` over `text`: its exit status, and what it said on
+// stderr in `said`.
+int build_with_cli(const std::string &name, const std::string &text, std::string &said) {
 	std::ofstream(path_of(name, ".o3d"), std::ios::binary) << text;
 	const std::string said_path = path_of(name, ".err");
 	const int status = test_cmd::run(test_cmd::quoted(cli) + " build " + test_cmd::quoted(path_of(name, ".o3d")) + " -o " +
 			test_cmd::quoted(path_of(name, ".3di")) + " 2> " + test_cmd::quoted(said_path));
-	check(status != 0, name + ": refused");
-	const std::string said = slurp(said_path);
+	said = slurp(said_path);
+	return status;
+}
+
+// The CLI must refuse `text` and say `words` on stderr: the message an author
+// reads is part of the contract.
+void refuses_saying(const std::string &name, const std::string &text, const std::string &words) {
+	std::string said;
+	check(build_with_cli(name, text, said) != 0, name + ": refused");
 	check(said.find(words) != std::string::npos, name + ": says \"" + words + "\" (it said: " + said.substr(0, 400) + ")");
+}
+
+// The CLI must build `text`, and say `words` on stderr (a note), or say
+// nothing of `words` when `says` is false.
+void builds_saying(const std::string &name, const std::string &text, const std::string &words, bool says = true) {
+	std::string said;
+	check(build_with_cli(name, text, said) == 0, name + ": built (it said: " + said.substr(0, 400) + ")");
+	check((said.find(words) != std::string::npos) == says,
+			name + (says ? ": says \"" : ": does not say \"") + words + "\" (it said: " + said.substr(0, 400) + ")");
 }
 
 const std::string kSkinned =
@@ -464,7 +480,20 @@ int main(int argc, char **argv) {
 		refuses_saying("strict-strip-count", long_strip, "strip exceeds 65,535 vertices: its triangles index them with u16 words");
 		const std::string strip_said = slurp(path_of("strict-strip-count", ".err"));
 		check(strip_said.find("exceeds 65,535") == strip_said.rfind("exceeds 65,535"), "strict-strip-count: said once");
-		refuses("strict-texture-name", swap(base, "texture skin.tga", "texture seventeen_chars.tga"));
+		// A texture name is the MTRL row's 16-byte field, counted in bytes,
+		// printable ASCII and a file name alone; retail fills all 16 bytes
+		// (bo105blur.dds.tg), and the loader's name cut decides what loads.
+		refuses_saying("strict-texture-bytes", swap(base, "texture skin.tga", "texture seventeen_chars.tga"),
+				"texture name 'seventeen_chars.tga' is 19 bytes: the MTRL field holds 16");
+		refuses_saying("strict-texture-utf8", swap(base, "texture skin.tga", "texture \xD1\x81\xD1\x82\xD0\xB2\xD0\xBE\xD0\xBB_c.tga"),
+				"holds the byte 0xD1: a texture name is printable ASCII");
+		refuses_saying("strict-texture-folder", swap(base, "texture skin.tga", "texture tex/skin.tga"),
+				"texture name 'tex/skin.tga' names a folder");
+		builds_saying("texture-sixteen-bytes", swap(base, "texture skin.tga", "texture bo105blur.dds.tg"), "note: texture", false);
+		builds_saying("texture-png", swap(base, "texture skin.tga", "texture skin.png"),
+				"note: texture 'skin.png' loads only as 'skin.dds'");
+		builds_saying("texture-cut", swap(base, "texture skin.tga", "texture a.bmp.tga"),
+				"note: texture 'a.bmp.tga' loads only as 'a.dds': the game opens 'a.bmp'");
 		std::string planes = base + "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
 		for (int i = 0; i < 33; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n";
 		refuses("strict-occ-planes", planes);
@@ -528,6 +557,33 @@ int main(int argc, char **argv) {
 				check(false, "shared-window: read the rebuilt model");
 			}
 		}
+	}
+
+	// A bullet face names its normal by a signed 16-bit index: a section with
+	// more distinct face normals is refused, naming its part and what to
+	// change (a rough 130 x 130 height field: 33,282 faces, nearly every one
+	// facing its own way).
+	{
+		std::string rough = "o3d 1\nmodel ROUGH\nlod 0\npart 0 0 0 0\ncobj 0\n";
+		uint32_t seed = 12345;
+		for (int j = 0; j < 130; ++j)
+			for (int i = 0; i < 130; ++i) {
+				seed = seed * 1664525u + 1013904223u;
+				rough += "cv " + std::to_string(i * 0.25) + " " + std::to_string(j * 0.25) + " " +
+						std::to_string(static_cast<double>((seed >> 8) % 2048) / 256.0) + "\n";
+			}
+		for (int j = 0; j < 129; ++j)
+			for (int i = 0; i < 129; ++i) {
+				const int a = j * 130 + i, b = a + 1, c = a + 130, d = c + 1;
+				rough += "cf " + std::to_string(a) + " " + std::to_string(b) + " " + std::to_string(c) + "\n";
+				rough += "cf " + std::to_string(b) + " " + std::to_string(d) + " " + std::to_string(c) + "\n";
+			}
+		std::string said;
+		check(build_with_cli("collision-normals", rough, said) != 0, "collision-normals: refused");
+		check(said.find("collision section 0 (part 0) has ") != std::string::npos &&
+						said.find(" distinct bullet-face normals, past the 32,768 a face's signed 16-bit normal index "
+								  "reaches") != std::string::npos,
+				"collision-normals: names the part and the limit (it said: " + said.substr(0, 400) + ")");
 	}
 
 	// A 3DI3 chunk says its payload length in 24 bits: the writer refuses a
