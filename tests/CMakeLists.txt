@@ -113,7 +113,7 @@ endif()
 # Blender add-on parses them), and `info` refuses a flag it does not take.
 add_test(NAME threedi_cli_catalog_anim COMMAND opennova_3di catalog)
 set_tests_properties(threedi_cli_catalog_anim PROPERTIES PASS_REGULAR_EXPRESSION
-    "animslot anim_reset[\r\n]+.*animslot anim_guard[\r\n]+.*animslot anim_death_bullet_leftfoot_left[\r\n]+.*animslot anim_wpn_scopedown[\r\n]+weaponaction idle anim_wpn_idle[\r\n]+weaponaction emptyidle anim_wpn_empty_idle[\r\n]+.*weaponaction scopedown anim_wpn_scopedown[\r\n]+trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
+    "animslot 0 anim_reset[\r\n]+.*animslot 140 anim_guard[\r\n]+.*animslot 239 anim_death_bullet_leftfoot_left[\r\n]+.*animslot 251 anim_wpn_scopedown[\r\n]+weaponaction idle 241 anim_wpn_idle[\r\n]+weaponaction emptyidle 242 anim_wpn_empty_idle[\r\n]+.*weaponaction scopedown 251 anim_wpn_scopedown[\r\n]+trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
 add_test(NAME threedi_cli_anim_info_flag COMMAND opennova_3di anim info unread.adm --bogus)
 set_tests_properties(threedi_cli_anim_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "anim info takes --verbose or --keys")

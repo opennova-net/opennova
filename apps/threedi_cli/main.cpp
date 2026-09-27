@@ -59,7 +59,7 @@ int usage(const char *why) {
 // with their capability words, the anim slot keys a table row can name, the
 // weapon actions an author times and the event trigger bits the runtime
 // consumes, one per line (`register NAME`, `style CODE NAME`, `shader TAG
-// 0xFLAGS`, `animslot KEY`, `weaponaction SUFFIX KEY`, `trigger 0xMASK NAME`),
+// 0xFLAGS`, `animslot INDEX KEY`, `weaponaction SUFFIX SLOT KEY`, `trigger 0xMASK NAME`),
 // so a front end offers exactly what the builder and the runtime know without
 // keeping its own copy. The shader flag bits are
 // runtime/renderer/material_descriptor.h's (BLENDING 0x1000 puts a strip in
@@ -81,12 +81,12 @@ int cmd_catalog() {
 	for (const opennova::renderer::MaterialDescriptorRecord &d : opennova::renderer::kMaterialDescriptorTable)
 		std::printf("shader %s 0x%x\n", d.name, static_cast<unsigned>(d.shader_flags));
 	for (int slot = 0; slot < opennova::world::kInfantryAnimStateCount; ++slot)
-		std::printf("animslot %s\n", opennova::world::infantry_anim_key(slot).c_str());
+		std::printf("animslot %d %s\n", slot, opennova::world::infantry_anim_key(slot).c_str());
 	for (int32_t action = 0; action < opennova::world::weapon_action::kCount; ++action) {
 		const int32_t slot = opennova::world::weapon_action_anim_slot(action);
 		if (slot >= 0)
-			std::printf("weaponaction %s %s\n", opennova::world::kWeaponActionSuffixes[action],
-					opennova::world::infantry_anim_key(slot).c_str());
+			std::printf("weaponaction %s %d %s\n", opennova::world::kWeaponActionSuffixes[action],
+					static_cast<int>(slot), opennova::world::infantry_anim_key(slot).c_str());
 	}
 	for (const opennova::anim::AnimEventBit &bit : opennova::anim::kAnimEventBits)
 		std::printf("trigger 0x%x %s\n", static_cast<unsigned>(bit.mask), bit.name);
