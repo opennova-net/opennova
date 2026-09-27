@@ -547,7 +547,7 @@ class Exporter(Notes):
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals
             uv0, uv1 = self.uv_layers(mesh)
-            self.materials.record_uvs(ob, ev, mesh, uv0)
+            self.materials.record_mesh(ob, ev, mesh, uv0)
             for tri in mesh.loop_triangles:
                 mi = self.materials.index_of(slot_material(ev, tri.material_index))
                 runs = strips.setdefault(mi, [])
@@ -625,7 +625,7 @@ class Exporter(Notes):
             mirrored = mw.to_3x3().determinant() < 0
             normals = mesh.corner_normals
             uv0, uv1 = self.uv_layers(mesh)
-            self.materials.record_uvs(ob, ev, mesh, uv0)
+            self.materials.record_mesh(ob, ev, mesh, uv0)
             if bone is None:
                 influences = self.weights(ob, ev, mesh, lod)
             else:

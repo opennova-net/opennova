@@ -355,7 +355,8 @@ class O3DMaterialProps(bpy.types.PropertyGroup):
                                        "its Emission, a U or V generator and a normal map")
     order: IntProperty(name="Export order", default=-1, min=-1,
                        description="The material's index in the model; -1 sorts it after the ordered ones, in the "
-                                   "order meshes first use it")
+                                   "order meshes first use it. A material in a mesh's slots that no face draws "
+                                   "with exports only with an order (retail models keep such materials)")
     # The bullet-mesh face material on COLLISION meshes: the impact effect is
     # the ammo effects-table row material + 4 (metal = 14 -> "metal").
     surface: IntProperty(name="Collision surface", default=14, min=0, max=255,

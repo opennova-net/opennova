@@ -449,6 +449,35 @@ def a_row_that_names_no_file_is_said_where_it_matters():
     refused(root, "Unnamed", "needs a file name")
 
 
+@case
+def a_material_no_face_draws_with_keeps_its_place():
+    # Retail models keep materials no strip draws with (OPMP01's first two):
+    # a material in a mesh's slots that no face uses exports with an Export
+    # order, which keeps the table's indices, and comes back from an import
+    # in the first mesh's slots. Without an order it is left out, as before.
+    kept = textured("Kept", image("kept", (1, 0, 0, 1)))
+    kept.o3d.shader, kept.o3d.order = "FF_ST_OP", 0
+    drawn = textured("Drawn", image("drawn", (0, 1, 0, 1)))
+    drawn.o3d.shader, drawn.o3d.order = "FF_ST_OP", 1
+    spare = textured("Spare", image("spare", (0, 0, 1, 1)))
+    root, obs = model("unused", drawn)
+    me = obs[0].data
+    me.materials.append(spare)
+    me.materials.append(kept)
+    _, sc = export_model(root)
+    assert [textures(sc, i)[0][0] for i in range(len(sc["materials"]))] == ["unused_0.tga", "unused_1.tga"], \
+        [m["textures"] for m in sc["materials"]]
+    assert {s["material"] for part in sc["lods"][0]["parts"] for s in part["strips"]} == {1}
+    assert first_pixel(root, "unused_0.tga") == (0, 0, 255, 255)  # Kept: red
+    imported, _ = importer.import_file(bpy.context, root.o3d.output_path)
+    slots = [m.o3d.order for ob in imported.children_recursive if ob.type == "MESH" for m in ob.data.materials]
+    assert sorted(slots) == [0, 1], slots
+    imported.o3d.output_path = os.path.join(OUT, "unused2", "unused2.3di").replace("\\", "/")
+    _, again = export_model(imported)
+    assert [m["textures"] for m in again["materials"]] == [m["textures"] for m in sc["materials"]]
+    assert {s["material"] for part in again["lods"][0]["parts"] for s in part["strips"]} == {1}
+
+
 # --- geom-14, geom-5: the shader and flags from Blender's settings --------------
 
 def material_record(sc, index=0):

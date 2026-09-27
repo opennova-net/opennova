@@ -250,7 +250,9 @@ shaders are glass, `*_LUM` shaders emissive, blending shaders draw in the alpha
 pass, and a bump shader gets tangents derived from the render UV map, so its
 meshes need one with area. **Export order** is the material's index in the
 model (import sets it; -1 sorts a material after the ordered ones, by first
-use). The name is free.
+use). A material in a mesh's slots that no face draws with exports only with
+an Export order: 208 JO models keep such materials, and import puts them in
+the slots of the model's first mesh. The name is free.
 
 An image loaded unchanged from a texture file the game reads (`.tga`, `.dds`,
 `.mdt`, `.pcx`) is that file: its row names it the way the game finds it

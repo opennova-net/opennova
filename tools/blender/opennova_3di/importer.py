@@ -489,6 +489,7 @@ class Builder(Notes):
                 lod_objects[li] += self.rig_lod(lod, mats)
             else:
                 lod_objects[li] += self.rigid_lod(li, lod, mats)
+        materials.keep_unused(self, mats, lod_objects)
         self.points(lod_objects)
         if self.op is None or self.op.import_lights:
             self.lights(lod_objects)
