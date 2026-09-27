@@ -36,7 +36,9 @@
 // order, a triangle's starting corner, the occlusion edge words (indices into
 // the record's vertex order), the order of a volume's planes (but a ladder's
 // plane 0), and materials no strip draws. Not compared because the JO runtime
-// never reads it: LGHT view_proj, PANM matrix_offset and bind_matrix_index.
+// never reads it: LGHT view_proj, PANM matrix_offset and bind_matrix_index,
+// and the PANM rows of a LOD none of whose rows animates (the loader keeps no
+// table for it: panm_table_kept).
 //
 // Exit 0 same model (drift notes allowed unless --strict), 1 different, or a
 // file that cannot be read or is malformed (an index outside its table).
@@ -887,14 +889,31 @@ std::string track_key(const Threedi3di3 &m, const ThreediTransform &t) {
 			std::to_string(t.end);
 }
 
+// Whether the loader keeps a LOD's PANM table: only when some row sets a
+// scale, rotation or translate type; otherwise the render model carries no
+// table at all and the part matrices pass through unposed [orig:
+// GPM_LoadRenderModel @ 0x5B5450..0x5B5471, the type-byte scan that skips
+// the allocation; Model_TransformBoneMatrices @ 0x58E390 tests the table].
+bool panm_table_kept(const ThreediLod &l) {
+	for (size_t i = 0; i < l.part_animation_count; ++i) {
+		const uint32_t f = l.part_animations[i].flags;
+		if (threedi_panm_scale_type(f) != 0 || threedi_panm_rotation_type(f) != 0 || threedi_panm_translate_type(f) != 0)
+			return true;
+	}
+	return false;
+}
+
 // Rows in row order, never keyed by part: the runtime computes row i's matrix
 // for part subobject_index from row i's basis and the row its parent names
 // (threedi_panm_matrices.cpp) and poses a part by its LAST row
 // (threedi_panm_pose.cpp), so row order, count and duplicates all change
 // the pose. Every retail table is canonical (row i transforms part i: all
-// 1,916 in the JO corpus).
+// 1,916 in the JO corpus). A table no row of which animates is never read
+// (panm_table_kept), whatever its rows say: the 251 JOTAC tables that stop
+// short of their LOD's parts (DRGVLA's one row for two parts) are all such.
 void compare_panm(Diff &d, const std::string &where, const Threedi3di3 &a, const ThreediLod &la, const Threedi3di3 &b,
 		const ThreediLod &lb) {
+	if (!panm_table_kept(la) && !panm_table_kept(lb)) return;
 	if (la.part_animation_count != lb.part_animation_count)
 		d.add(where + ": " + std::to_string(la.part_animation_count) + " vs " + std::to_string(lb.part_animation_count) +
 				" panm rows");

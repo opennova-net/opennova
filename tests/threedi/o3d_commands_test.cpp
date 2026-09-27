@@ -184,6 +184,20 @@ int main(int argc, char **argv) {
 	const auto occ_a = build("occlusion", plain + occlusion);
 	const auto occ_b = build("occlusion-reversed", plain + replace(occlusion, "of 0 1 2", "of 0 2 1"));
 	check(threedi_cli::cmd_compare(occ_a.c_str(), occ_b.c_str()) == 1, "reversed occlusion faces");
+	// A PANM table no row of which animates is never read (the loader keeps
+	// no table), so its row count does not matter; with a track it does.
+	{
+		const std::string two = plain + "part 0 0 0 1\npanm 0 0\n";
+		const auto one_row = build("panm-one-row", two);
+		const auto two_rows = build("panm-two-rows", two + "panm 1 0\n");
+		check(threedi_cli::cmd_compare(one_row.c_str(), two_rows.c_str()) == 0, "static PANM tables of any length");
+		const std::string turning = "register DOOR_00\n";
+		const auto animated_one = build("panm-animated-one-row",
+				replace(two, "model FACES\n", "model FACES\n" + turning) + "track roty 113 DOOR_00 0 0 90\n");
+		const auto animated_two = build("panm-animated-two-rows",
+				replace(two, "model FACES\n", "model FACES\n" + turning) + "track roty 113 DOOR_00 0 0 90\npanm 1 0\n");
+		check(threedi_cli::cmd_compare(animated_one.c_str(), animated_two.c_str()) == 1, "an animated PANM table's rows");
+	}
 
 	// Every check of compare, one field at a time against the rich model.
 	const auto rich_a = build("rich", rich);
