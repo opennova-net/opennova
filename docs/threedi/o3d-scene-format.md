@@ -231,13 +231,13 @@ parent its LOD lacks (mwr_1st, panc_1st), an occlusion record over 32 planes
 (dmrk51), a track or generator naming no register (Dt801x, kat13), more than
 8 seats (StrgateE), and faces naming vertices outside their section (mLpost02
 to 05). For all 2,396, `build(scene(x))` is byte for byte
-`build(scene(build(scene(x))))`, and `opennova-3di compare` calls 1,883 of
-them the same model as `x` (1,859 with drift notes; a part sphere the rule
+`build(scene(build(scene(x))))`, and `opennova-3di compare` calls 2,042 of
+them the same model as `x` (2,018 with drift notes; a part sphere the rule
 above does not give over a part's own vertices, 525 models, is drift: nothing
-reads it beside the GHDR radius). The rest differ in words retail derived from
-what the file does not keep: occlusion record centres (205 models, each stored
-centre the mirror across y of its vertices' centre), section bounds (194),
-part `rel` words (101, NaN ones included), GHDR radii over geometry the file
-does not carry (56, the 30 of the `fxflsh` family among them), CMDL radii
-(35), bullet faces (CB2048, carrier, kat04, mere), and six models that draw
-with a material id they lack or name no LOD type.
+reads it beside the GHDR radius; the 206 mirrored occlusion centres come back
+through `occ`'s sphere). The rest differ in words retail derived from what the
+file does not keep: section bounds (194), part `rel` words (101, NaN ones
+included), GHDR radii over geometry the file does not carry (56, the 30 of the
+`fxflsh` family among them), CMDL radii (35), bullet faces (CB2048, carrier,
+kat04, mere), and six models that draw with a material id they lack or name
+no LOD type.
