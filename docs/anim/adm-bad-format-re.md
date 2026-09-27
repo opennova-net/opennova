@@ -393,6 +393,26 @@ rows, `frame_count + 1` of each) it counts and refuses when short:
 - **The loader refuses a file over 500,000 bytes** [orig: `BoneFile_Load
   @ 0x40fff0`, the `0x7A120` gate]; the largest shipped clip is 298,172 bytes
   (`M60_1i`), and the seam refuses to mint a larger one.
+- **Every bone buffer the game samples a clip into holds 64 bones**, and
+  nothing clamps a clip's own count to it [orig: `BoneSystem_Init @ 0x410170`,
+  the 64-bone scratch, from `AnimMap_Init @ 0x40BE52`; `BoneAnim_TransformBones
+  @ 0x410360`; `BoneAnim_BuildWorldMatrices @ 0x40C400`, its 64-matrix locals];
+  the largest shipped clip carries 61 and the seam refuses more than 64
+  (`kBadMaxBones`).
+- **A loop steps `fps / (62 * frame_count)` of its cycle a tick** and takes one
+  away once at the wrap [orig: `AnimChannel_InitFromData @ 0x410560`, the step
+  `@0x4105BA`; `AnimChannel_AdvancePlayback @ 0x40B140`, `@0x40B199`], so a
+  step of a whole cycle or more never plays: at exactly one it holds its first
+  frame, past one its time runs on past the clip's rows. Every shipped clip is
+  30 fps over one frame or more; the seam refuses a loop at 62 times its frame
+  count or more.
+- **Across a table** (`bad_build_check_set`): every clip's file name packs, at
+  most 15 bytes with its `.bad` and ASCII, as every shipped name does (the
+  longest is `avenger_025.bad`) [orig: `PFF_FindEntry @ 0x7685D0`, a strcmp
+  over the entry's 16-byte name field]; and a clip carries translations only
+  when the reset clip does, since a bone moves only when both do (the
+  translation gate above; no shipped table pairs a translated clip with an
+  untranslated reset).
 - **The header words the reader never names are constant**: word 8 = 0,
   9 = 0, 10 = 8, 14 = 1, 17 = 1, 18 = 0, 19 = 0 across all 477.
 - **`event_count == frame_count + 1`** wherever a clip carries events, as the
@@ -629,11 +649,6 @@ All existing ledger IDs — this record mints none:
   `SkeletalClips::eval_pose_blended` lerps the two sampled poses' origins, so a
   translated clip cross-faded with an untranslated one reaches its translation
   over the window instead of at its start.
-- The `.adm` parser keeps only rows whose key starts `anim_`, compared with
-  case; retail reads no prefix (the slot is the key past its first five
-  characters, above), so a row keyed `ANIM_RESET` binds in retail and is
-  dropped by the parser. No shipped table keys a row without `anim_` (the
-  82-table scan).
 
 ## Playback clock follow-up (2026-09-11)
 

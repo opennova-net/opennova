@@ -1,6 +1,7 @@
 // opennova-3di anim compare: whether two clip sets hold the same animation.
 // It compares what the runtime reads — the table's rows and rings (a variant
-// whose clip does not load is a difference), each clip's header, its bones'
+// whose clip does not load is a difference; a row whose key names no anim slot
+// registers nothing, so it is not compared), each clip's header, its bones'
 // names and parents, the bone table's bind rotation and every channel key as a
 // ROTATION (q and -q are one rotation, and retail stores both), the key
 // durations, the translations and the events — and ignores what it does not:

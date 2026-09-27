@@ -8,6 +8,7 @@
 #include <formats/threedi/threedi_build.h>
 
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cmath>
@@ -214,7 +215,23 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, Bad
     out = BadAssembled{};
     const size_t bones = clip.bones.size();
     if (bones == 0) return fail(error, "a clip holds no bones");
+    if (bones > kBadMaxBones)
+        return fail(error, "a clip holds " + std::to_string(bones) + " bones; the game's bone arrays hold " +
+                                   std::to_string(kBadMaxBones));
     if (clip.frame_count == 0) return fail(error, "a clip holds no frames");
+    // A loop steps fps / (62 * frames) of its cycle a tick and takes one away
+    // once at the wrap, so a step of a whole cycle or more never plays: at
+    // exactly one it shows its first frame for ever, past one its time runs on
+    // past the clip's rows. [orig: AnimChannel_InitFromData @0x410560, the step
+    // fps / 62 / frames @0x4105BA; AnimChannel_AdvancePlayback @0x40B140, t -= 1
+    // once @0x40B199; sub_4102D0 @0x4102D0 reads row trunc(frames * t) unbounded]
+    if ((clip.flags & BAD_FLAG_LOOP) != 0 &&
+            static_cast<uint64_t>(clip.fps) >=
+                    static_cast<uint64_t>(io::kTicksPerSecondInt) * clip.frame_count)
+        return fail(error, "a looping clip at " + std::to_string(clip.fps) + " fps over " +
+                                   std::to_string(clip.frame_count) + " frames steps its whole cycle or more "
+                                   "each tick; a loop's fps stays under " +
+                                   std::to_string(io::kTicksPerSecondInt) + " times its frame count");
     // The two event record shapes the loader knows: version 1 (24 bytes, with
     // the trigger word) and version 0 (20 bytes, none).
     if (clip.version > 1) return fail(error, "a clip's version is 0 or 1");
@@ -371,6 +388,36 @@ bool bad_build_bare_stem(const std::string &name) {
             return false;
     }
     return true;
+}
+
+bool bad_build_packable_name(const std::string &file_name) {
+    if (file_name.empty() || file_name.size() > kBadPackedNameMax) return false;
+    for (const char c : file_name) {
+        if (static_cast<unsigned char>(c) >= 0x80) return false;
+    }
+    return true;
+}
+
+bool bad_build_check_set(const BadBuildSet &set, std::vector<std::string> &problems) {
+    const size_t before = problems.size();
+    if (set.rows.empty()) return true; // a lone clip: its output name is the file
+    for (const BadBuildClip &clip : set.clips) {
+        const std::string file = clip.name + ".bad";
+        if (!bad_build_packable_name(file))
+            problems.push_back("clip '" + clip.name + "' writes '" + file + "', " +
+                               std::to_string(file.size()) + " bytes; the game packs a file name of at most " +
+                               std::to_string(kBadPackedNameMax) + " ASCII bytes, its extension included");
+    }
+    const BadBuildClip *reset = bad_build_reset_clip(set);
+    if (reset != nullptr && (reset->flags & BAD_FLAG_TRANSLATION) == 0) {
+        for (const BadBuildClip &clip : set.clips) {
+            if ((clip.flags & BAD_FLAG_TRANSLATION) != 0)
+                problems.push_back("clip '" + clip.name + "' carries translations but the reset clip '" +
+                                   reset->name + "' does not; the game moves a bone only when both do "
+                                   "(give the reset clip translations, flag 0x2)");
+        }
+    }
+    return problems.size() == before;
 }
 
 std::string bad_build_reset_stem(const std::vector<BadBuildRow> &rows) {

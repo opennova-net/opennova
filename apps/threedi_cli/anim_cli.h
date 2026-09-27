@@ -39,7 +39,10 @@ struct AnimMissingClip {
 struct AnimLoadedSet {
 	std::string table_name;  // the `.adm` file name, empty for a lone clip
 	std::string table_path;  // as given
-	std::vector<opennova::bad::BadBuildRow> rows;
+	std::vector<opennova::bad::BadBuildRow> rows; // the rows the game registers
+	// Rows whose key names no anim slot: the game registers nothing under them,
+	// so they are no part of the table's rows and name no clip here.
+	std::vector<opennova::bad::BadBuildRow> dropped_rows;
 	std::vector<AnimLoadedClip> clips; // in the order the rows first name them
 	std::vector<AnimMissingClip> missing; // in table order, each variant once
 };

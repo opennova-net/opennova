@@ -59,6 +59,22 @@ inline constexpr uint32_t BAD_FLAG_BIT3 = 0x8u;
 // 0x7A120 size gate].
 inline constexpr size_t kBadFileMaxBytes = 500000;
 
+// The most bones a clip may carry: every bone buffer the game samples a clip
+// into holds 64, and nothing clamps the clip's own count to them (retail's
+// largest clip carries 61) [orig: BoneSystem_Init @0x410170, the 64-bone
+// scratch, from AnimMap_Init @0x40BE52; BoneAnim_TransformBones @0x410360
+// fills it for the clip's bone count; BoneAnim_BuildWorldMatrices @0x40C400,
+// its 64-matrix locals].
+inline constexpr size_t kBadMaxBones = 64;
+
+// The longest file name the game can pack: an archive entry's name field is
+// 16 bytes and must hold its NUL, so a file the pipeline ships (a clip, a
+// table) is at most 15 bytes, its extension included; no shipped entry is
+// longer [orig: PFF_FindEntry @0x7685D0 bsearches with
+// PFF_CompareSearchNameToEntry @0x768240, a strcmp over the entry's 16-byte
+// field at +16; PFF_SortEntries @0x768280 strupr's it @0x7682A1].
+inline constexpr size_t kBadPackedNameMax = 15;
+
 struct BadBuildVec3 {
     double x = 0.0, y = 0.0, z = 0.0;
 };
@@ -179,6 +195,21 @@ std::string bad_build_clip_stem(const std::string &variant);
 // (`/ \ : | * ? < > "`) or control character (no retail table names one).
 bool bad_build_bare_stem(const std::string &name);
 
+// Whether `file_name` (a clip's `<name>.bad`, a table's `<name>.adm`) can be
+// packed: 1 to kBadPackedNameMax bytes, all of them ASCII.
+bool bad_build_packable_name(const std::string &file_name);
+
+// What a table needs across its clips, past each clip's own checks
+// (bad_build_assemble): every clip's file (`<name>.bad`) can be packed
+// (bad_build_packable_name), and a clip carries translations only when the
+// table's reset clip does too, because the game moves a bone only when the
+// playing clip AND the bind carry them [orig: BoneAnim_TransformBones
+// @0x410360, the playing clip's flag @0x41038D; AnimChannel_ComputeBoneMatrices
+// @0x410DA0, the bind's flag @0x410DE7]. A lone clip (a set with no row) is
+// checked by its own output name. Appends one line per problem; true when there
+// is none.
+bool bad_build_check_set(const BadBuildSet &set, std::vector<std::string> &problems);
+
 // The clip every clip of a table composes against: the reset row's (a key
 // naming slot 0, `reset`, past its first five characters; the last such row)
 // LAST variant, because each reset variant replaces the slot's head instead of
@@ -210,11 +241,13 @@ void bad_derive_bone_table(const BadBuildClip &clip, const BadBuildClip *reset,
 
 // Assemble `clip` into the document the writer serializes; `reset` is the
 // set's reset clip (bad_build_reset_clip), null for a lone clip. False with
-// `error` set for a clip the format cannot hold (no bones, a parent that is
-// not a lower index, a key list that is not frame_count + 1 long, a
-// translation block a flag promises and the clip lacks or holds without the
-// flag, a name over 31 characters, a version other than 0 or 1, a trigger
-// word on a version 0 event).
+// `error` set for a clip the format cannot hold (no bones, more than
+// kBadMaxBones, a parent that is not a lower index, a key list that is not
+// frame_count + 1 long, a translation block a flag promises and the clip
+// lacks or holds without the flag, a name over 31 characters, a version other
+// than 0 or 1, a trigger word on a version 0 event) or the game cannot play (a
+// loop stepping a whole cycle or more a tick: fps at 62 times its frame count
+// or more).
 bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, BadAssembled &out,
                         std::string *error);
 

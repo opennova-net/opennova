@@ -374,6 +374,33 @@ int main(int argc, char **argv) {
 		threedi_cli::anim_free(b);
 	}
 
+	// A row whose key names no anim slot: build refuses it and scene notes and
+	// drops it, since the game registers nothing under it. And an output the
+	// game could not pack (over 15 bytes with its extension) is refused.
+	{
+		build("no-slot-row", replace(text, "row anim_walk_forward", "row anim_notaslot \"walk\"\nrow anim_walk_forward"),
+				false);
+		const std::filesystem::path home = dir / "no-slot-scene";
+		std::filesystem::remove_all(home);
+		std::filesystem::create_directories(home);
+		std::filesystem::copy_file(std::filesystem::path(original).parent_path() / "walk.bad", home / "walk.bad");
+		std::ofstream(home / "SLOTS.adm", std::ios::binary)
+				<< "\r\nanim_reset\t\t\t\t\"walk\"\r\nanim_notaslot\t\t\t\t\"walk\"\r\n";
+		const std::string scene = (home / "set.o3a").string();
+		check(threedi_cli::cmd_anim_scene((home / "SLOTS.adm").string().c_str(), scene.c_str()) == 0,
+				"scene of a table with a row naming no slot");
+		std::string written;
+		check(read_file_text(scene, written) &&
+						written.find("# dropped: row 'anim_notaslot' (its key names no anim slot") !=
+								std::string::npos &&
+						written.find("row anim_notaslot") == std::string::npos,
+				"a row naming no slot is noted and dropped");
+		std::ofstream(home / "long.o3a") << text;
+		check(threedi_cli::cmd_anim_build((home / "long.o3a").string().c_str(),
+					  (home / "CHECK_TOO_LONG.adm").string().c_str()) != 0,
+				"an output name over 15 bytes is refused");
+	}
+
 	// A table with no reset row is noted: build refuses it.
 	{
 		const std::filesystem::path home = dir / "no-reset-scene";
