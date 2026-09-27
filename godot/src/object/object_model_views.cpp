@@ -94,7 +94,7 @@ int ObjectModel::update_authored_lods_for_views(Camera3D *p_main, float p_main_w
 
 // [engine: renderer::select_object_lod, object_subpixel_culled and
 //  project_bound_sphere_radius_q16 own the witnessed rules — the sector-entity
-//  draw returns before the RLOD walk below 0.75 px (retail render_sector_entity
+//  draw returns before the RLOD walk below 0.75 px (retail Render_SectorEntity
 //  @ 0x5c42d8..0x5c42de); this walk feeds them each registered model per
 //  view, on that view's own frame scale]
 int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,

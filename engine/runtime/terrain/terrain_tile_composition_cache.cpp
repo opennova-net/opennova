@@ -94,7 +94,7 @@ TerrainTileCompositionCache::page_projection(
 	return TerrainTilePageProjection{
 			static_cast<float>(origin_x),
 			static_cast<float>(origin_z),
-			// [orig: decode_terrain_tile_vertices @ 0x602AA0, UV stores @ 0x602DCC..0x602DCF]
+			// [orig: Terrain_DecodeTileVertices @ 0x602AA0, UV stores @ 0x602DCC..0x602DCF]
 			zero_primary_uv ? 0.0f : 1.0f / static_cast<float>(span),
 			static_cast<float>(span),
 	};
@@ -161,7 +161,7 @@ std::optional<TerrainTileCompositionDecision> TerrainTileCompositionCache::reque
 	}
 
 	// [orig: the claim stamps @ 0x60DB56..0x60DBF0 — last use and compose
-	// frame = frame, TOD epoch = Env_TodEpoch, then lod, packed
+	// frame = frame, TOD epoch = g_EnvTodEpoch, then lod, packed
 	// coordinate and sector]
 	Slot &slot = slots_[static_cast<size_t>(claimed)];
 	slot.lod_valid = true;
@@ -191,7 +191,7 @@ std::optional<TerrainTileCompositionDecision> TerrainTileCompositionCache::reque
 
 bool TerrainTileCompositionCache::evict_one_tod_stale() noexcept {
 	// [orig: Terrain_EvictOldestTodStaleTile @ 0x604600 — candidates @ 0x604620..
-	// 0x6046AA (lod and coordinate valid, TOD stamp != Env_TodEpoch,
+	// 0x6046AA (lod and coordinate valid, TOD stamp != g_EnvTodEpoch,
 	// compose age above the best so far, starting at 1), retire @ 0x6046C5..
 	// 0x6046EA (lod = coordinate = -1, last use = frame - 0x10000)]
 	int32_t oldest_age = 1;
@@ -259,7 +259,7 @@ std::optional<TerrainTilePageBinding> TerrainTileCompositionCache::lookup(
 	// The consumer floors its world position to whole units; the low nine
 	// bits are the sector-local coordinate the record packs, the rest the
 	// routed sector origin. [orig: CRenderBatchQueue_FlushBatches floor/ftol
-	// @ 0x5DA77B..0x5DA7BD; terrain_tile_cache_lookup split @ 0x604173..
+	// @ 0x5DA77B..0x5DA7BD; TerrainTile_CacheLookup split @ 0x604173..
 	// 0x6041A2]
 	const int32_t point_x = static_cast<int32_t>(std::floor(point.world_x));
 	const int32_t point_z = static_cast<int32_t>(std::floor(point.world_z));
@@ -271,7 +271,7 @@ std::optional<TerrainTilePageBinding> TerrainTileCompositionCache::lookup(
 	// order and takes the first masked match in the point's sector. The flat
 	// page's packed coordinate masks to zero, so it can answer at its
 	// canonical sector origin.
-	// [orig: terrain_tile_cache_lookup @ 0x604140, probe @ 0x6041A4..0x604206,
+	// [orig: TerrainTile_CacheLookup @ 0x604140, probe @ 0x6041A4..0x604206,
 	// last-use stamp @ 0x60423E..0x604243, the hit's page projection
 	// @ 0x604215..0x604292; Terrain_FindSectorPatchRT @ 0x6042B0..0x60430B
 	// walks the same records with a ten-bit mask whose quadrant bit agrees

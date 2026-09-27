@@ -29,15 +29,15 @@ remaining `player.sav`-level options.
 | --- | --- | --- |
 | `Avatars.def` grammar + parser | **matching** | full decompile of `CAvatarDefs_ParseConfigLine @ 0x57a3f0`; implementation re-verified on 2026-06-16 for part cap, duplicate slots, byte truncation, parse-time combo resolution, and required/optional combo refs |
 | Avatar object layout (combo / nationality / division / part structs) | **matching** | allocators decompiled (`@ 0x579f40` / `@ 0x579ff0` / `@ 0x579e10`); `engine/formats/avatars` keeps writer reference names but stores parse-time denormalized part snapshots for runtime/tool consumers |
-| `PLAYER_INFO` menu consumption | **matching (read-only grill)** | `PlayerInfo_PopulateNationalityList @ 0x55d8c0`, `PlayerInfo_PopulateDivisionList @ 0x55da50`, `populate_avatar_combo_list @ 0x560210` decompiled; `PlayerInfoMenuCompanion` hosts the same tree, alignment, and resolved-combo data in the in-game menu |
-| combo → spawned-player / first-person model binding | **matching (ported 2026-08-15; review-hardened same day)** | packed id resolver `lookup_entity_slot_and_pack_entry @ 0x57AD40` / decoder `MinimapSlot_FindByPackedId @0x57a270`; world head/body camo+submit sites `@0x5C7FEC/@0x5C800F` (blip +4 head, +0 body); first-person arms = the CharacterEntity's arms model (blip +8) `@0x4df05f/@0x4deff4`, submitted after `Avatar_SetArmsCamoCtrl @0x4DF008/@0x4DF070` — the ONLY arms source (weapon.def `gfx1a`/`gfx1b` are parsed-and-discarded tokens, `WeaponDefs_ParseLineCallback @0x5448d0/@0x5448e6 → loc_545098`); no resolved arms → no arms submit `@0x4df064/@0x4df06b`. `MissionObjectPlacer` builds the selected body+head, `renderer::fp_viewmodel_spec` takes the character arms; the local player's id is read back from the authority's stamp (`Simulation.get_local_player_character_id`, entity+0x15C / the joiner's 0x0C record). `player_visual_resolver_test` + `game_world_test` pin the composition, the raw part-local controls, and the no-arms case. Residual: an id the registry cannot resolve draws the item model (retail's client 0x0C fold re-stamps it to the first combo of the team side `@0x42eae4..0x42eb03` — rides D-NET-137's registry validation). |
+| `PLAYER_INFO` menu consumption | **matching (read-only grill)** | `PlayerInfo_PopulateNationalityList @ 0x55d8c0`, `PlayerInfo_PopulateDivisionList @ 0x55da50`, `PlayerInfo_PopulateAvatarComboList @ 0x560210` decompiled; `PlayerInfoMenuCompanion` hosts the same tree, alignment, and resolved-combo data in the in-game menu |
+| combo → spawned-player / first-person model binding | **matching (ported 2026-08-15; review-hardened same day)** | packed id resolver `EntitySlot_LookupAndPackEntry @ 0x57AD40` / decoder `MinimapSlot_FindByPackedId @0x57a270`; world head/body camo+submit sites `@0x5C7FEC/@0x5C800F` (blip +4 head, +0 body); first-person arms = the CharacterEntity's arms model (blip +8) `@0x4df05f/@0x4deff4`, submitted after `Avatar_SetArmsCamoCtrl @0x4DF008/@0x4DF070` — the ONLY arms source (weapon.def `gfx1a`/`gfx1b` are parsed-and-discarded tokens, `WeaponDefs_ParseLineCallback @0x5448d0/@0x5448e6 → loc_545098`); no resolved arms → no arms submit `@0x4df064/@0x4df06b`. `MissionObjectPlacer` builds the selected body+head, `renderer::fp_viewmodel_spec` takes the character arms; the local player's id is read back from the authority's stamp (`Simulation.get_local_player_character_id`, entity+0x15C / the joiner's 0x0C record). `player_visual_resolver_test` + `game_world_test` pin the composition, the raw part-local controls, and the no-arms case. Residual: an id the registry cannot resolve draws the item model (retail's client 0x0C fold re-stamps it to the first combo of the team side `@0x42eae4..0x42eb03` — rides D-NET-137's registry validation). |
 | combo head sex → player sound profile | **matching (ported 2026-08-15)** | `AvatarDatabase::character_sex_rows` projects file-order packed character ids and the parse-time combo head's sex into `Simulation::set_character_avatar_database`; the reset-stable native `CharacterTraitsTable` lets player `Entity_GetProfileSlotSound @0x52831c` select items.def def+2152 for female characters. Unknown ids and NPCs stay on primary so a packed-id collision cannot rewrite authored AI sound. `avatars_data_test` and ctest `slot_sound` pin the boundary (D-SND-12 fixed). |
 | second `AvatarDefs_Init` path (`@ 0x53d281`/`@ 0x53d2b4`) | **unwitnessed** | flagged follow-up; different buffer sizes, also parses `Avatars.def` |
 | `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade + team) | **matching (ported 2026-06-23; side memory 2026-08-15)** | `PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_PopulateAllControls @ 0x5606f0`, `PlayerInfo_RegisterAllControls @ 0x561470`, cascade handlers `@ 0x560600`/`@ 0x560690` decompiled; ported as `PlayerInfoMenuCompanion` — cascade + team filter + RTXT resolve wired by control name onto the `.mnu`'s own control tree, with independent blue/red state restored for active slot 0; pinned by `player_info_menu_seam_test` (D-PLAYERINFO-7/-12 FIXED). |
 | Voice preview + PLAYERVOICE list | **matching (ported 2026-07-22)** | `PlayerInfoMenuCompanion` binds the real `TESTPLAYERVOICE` control and requests the selected avatar's `VOICE_%d` trigger through `menu.lwf`; `player_info_menu_seam_test` pins the public sound request. Persisted profile overrides remain part of D-PLAYERINFO-9. `[orig: PlayerInfo_PreviewVoice @ 0x55ff70; PlayerInfo_HandleVoiceSelect @ 0x55fe00]` |
-| ACCEPT commit + profile persistence | **matching for avatar/class; kit-page write residual** | `save_player_info_from_dialog @ 0x55EE10`: class loop `@0x55EE3F..0x55EE6D`, selected-side nationality/division/packed stores `@0x55EE93..0x55EF38`. `PlayerProfile` restores both sides from active `weapon.sav` slot 0; the atomic writer preserves all five slots and existing kit pages. Callsign remains in OpenNova's machine-local config; serializing newly edited kit tuples remains D-PLAYERINFO-9. |
-| Loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) | **matching** | producer `WeaponDef_ParseProperty @ 0x54d730` + consumer `populate_weapon_slot_lists @ 0x560430`; ported in `engine/formats/def` (`DefWeaponDef` loadout fields + `def_parse_weapons_memory`) + `WeaponDatabase` + the host's `_populate_loadout` (class/team filter, NONE-first). Pinned by `def_parse_weapons` ctest + `player_info_menu_seam_test` (D-PLAYERINFO-8/11) |
-| Loadout ammo combos + weight readout + icons | **matching (ported 2026-07-30)** | `populate_weapon_accessory_ammo_ui @ 0x55e8b0`, `populate_ammo_combo_boxes @ 0x55def0`, `update_player_info_weight_and_weapon_icons @ 0x55f480`, `calculate_loadout_weight @ 0x55f1f0` fully decompiled + the handler map off `PlayerInfo_RegisterAllControls @ 0x561470` (see "Ammo combos, weight, and icons" below); ported in `PlayerInfoMenuCompanion` (`_populate_slot_ammo`/`_populate_grenades`/`_update_weight`/`_update_icons`) over the `WeaponDatabase.loadout_weight`/`encumbrance_class` bindings; `player_info_menu_seam_test` pins the row models, labels, defaults, the `flags2 0x40` type lock, the subclass walk, the weight format, and the snapshot clips (D-PLAYERINFO-11 FIXED; saved-kit restore rides D-PLAYERINFO-9) |
+| ACCEPT commit + profile persistence | **matching for avatar/class; kit-page write residual** | `PlayerInfo_SaveFromDialog @ 0x55EE10`: class loop `@0x55EE3F..0x55EE6D`, selected-side nationality/division/packed stores `@0x55EE93..0x55EF38`. `PlayerProfile` restores both sides from active `weapon.sav` slot 0; the atomic writer preserves all five slots and existing kit pages. Callsign remains in OpenNova's machine-local config; serializing newly edited kit tuples remains D-PLAYERINFO-9. |
+| Loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) | **matching** | producer `WeaponDef_ParseProperty @ 0x54d730` + consumer `PlayerInfo_PopulateWeaponSlotLists @ 0x560430`; ported in `engine/formats/def` (`DefWeaponDef` loadout fields + `def_parse_weapons_memory`) + `WeaponDatabase` + the host's `_populate_loadout` (class/team filter, NONE-first). Pinned by `def_parse_weapons` ctest + `player_info_menu_seam_test` (D-PLAYERINFO-8/11) |
+| Loadout ammo combos + weight readout + icons | **matching (ported 2026-07-30)** | `PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8b0`, `PlayerInfo_PopulateAmmoComboBoxes @ 0x55def0`, `PlayerInfo_UpdateWeightAndWeaponIcons @ 0x55f480`, `PlayerInfo_CalculateLoadoutWeight @ 0x55f1f0` fully decompiled + the handler map off `PlayerInfo_RegisterAllControls @ 0x561470` (see "Ammo combos, weight, and icons" below); ported in `PlayerInfoMenuCompanion` (`_populate_slot_ammo`/`_populate_grenades`/`_update_weight`/`_update_icons`) over the `WeaponDatabase.loadout_weight`/`encumbrance_class` bindings; `player_info_menu_seam_test` pins the row models, labels, defaults, the `flags2 0x40` type lock, the subclass walk, the weight format, and the snapshot clips (D-PLAYERINFO-11 FIXED; saved-kit restore rides D-PLAYERINFO-9) |
 
 ## Load entry — witness map
 
@@ -49,7 +49,7 @@ remaining `player.sav`-level options.
   `"Avatars.def"` literal is `@ 0x7d76c0`.
 - Called from `[orig: Game_InitSubsystems @ 0x4a6cd0]` at `0x4a70b5`, immediately
   preceded by `mov ecx, offset count_and_entries` (`@ 0x4a70b0`) — so **the
-  avatar object IS the static `count_and_entries @ 0x26A7748`**. Load order in
+  avatar object IS the static `g_AvatarDefs @ 0x26A7748`**. Load order in
   `Game_InitSubsystems`: avatars are parsed *before* `items.def`
   (`ItemDefs_LoadAndValidate @ 0x4a1da0`, decrypt key `0x2A5A8EAD`), `SndProf.def`,
   `Team_LoadNames @ 0x4fcff0`, and the mission scan.
@@ -137,7 +137,7 @@ combos are built it is dead. Part struct (124 B):
 String copies are unbounded (`strcpy`/inline `do{}while`); the 16/32 widths are
 the field strides, not bounds checks.
 
-### Persistent avatar object — `count_and_entries @ 0x26A7748`
+### Persistent avatar object — `g_AvatarDefs @ 0x26A7748`
 
 - **+0** `int comboCount`.
 - **+4** combo array — **288 bytes/entry, max 128**, allocated by
@@ -187,7 +187,7 @@ normalization — the stock values are 0..4 texture-variant selectors, not RGB.
 The matching adjacent state dwords at `0x83FFD4/0x83FFDC/0x83FFE4` are
 statically one, so a controlled material consumes each raw selector through
 the modulo-frame branch (`selector % frame_count`) rather than the ordinary
-16.16 fractional branch `[orig: apply_shader_parameters @ 0x58DC36..0x58DC42]`.
+16.16 fractional branch `[orig: Material_ApplyShaderParameters @ 0x58DC36..0x58DC42]`.
 RevX02 `IndoArms.3di` is the concrete two-frame witness: `TEX_CAMO1 = 1`
 selects `A_Arm2nd.tga`, the plain retail forearm; treating 1 as 16.16 instead
 selected frame zero `A_Arm1st.tga`, producing the tattoo mismatch caught by
@@ -278,7 +278,7 @@ nationality-alignment accessor.
   — 16 division slots via `[orig: CAvatarDefs_GetDivisionNameKey @ 0x579fb0]` (name by nat+div),
   availability `[orig: CAvatarDefs_IsDivisionAvailable @ 0x579ed0]`; same `"Avatars"` string-table
   display; selection `byte_2551132[…]`.
-- `[orig: populate_avatar_combo_list @ 0x560210]` — fills `COMBO_LIST`.
+- `[orig: PlayerInfo_PopulateAvatarComboList @ 0x560210]` — fills `COMBO_LIST`.
   Enumerates combos for the selected (nat, div) via
   `[orig: sub_57AEC0 @ 0x57aec0]`, which packs matches into `word_26B7850`
   (bitfield: bits 0–4 nat, 5–8 div, 9–14 comboId, 15 alignment). Per combo the
@@ -286,7 +286,7 @@ nationality-alignment accessor.
   name) and "first name" key = `[orig: sub_57A340 @ 0x57a340]` (combo +100, the
   body display name), both resolved through the `"Avatars"` RTXT table and shown
   as `sprintf("%s - %s", last, first)`. The voice list then comes from
-  `[orig: populate_player_voice_combo @ 0x55dce0]`. Combo lookup by packed id:
+  `[orig: PlayerInfo_PopulatePlayerVoiceCombo @ 0x55dce0]`. Combo lookup by packed id:
   `[orig: MinimapSlot_FindByPackedId @ 0x57a270]`.
 
 So the menu reads the parsed object directly; the display vocabulary lives in the
@@ -318,7 +318,7 @@ and binds the **idle animation** `AnimChannel_InitFromData("PI_Idle.BAD")` (plus
 a `HwmCube.dds` reflection map, and the preview render target. So the original character
 preview plays a **skeletal idle animation**, not a static pose.
 
-Per frame, `[orig: update_player_preview_animation @ 0x55dba0]` drives two transform values
+Per frame, `[orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0]` drives two transform values
 consumed by the preview render:
 - **Zoom blend** `flt_25DC538 = blend*0.95 + target*0.05` — `target` is 1 while the cursor is
   over `PLAYER_PREVIEW`/`COMBO_LIST`/`DIVISION`/`NATIONALITY` (`sub_6467D0` = widget-hovered
@@ -341,7 +341,7 @@ with the active weapon's larger model table and ADM. `AvatarPreview` therefore k
 the standing composition instead of binding them to `Dt1rst`. The later 2026-08-15 grill closed
 the spawned-player consumer: packed identity selects the composed world head/body and the
 first-person arms, with each part's raw camo triplet stored immediately before its draw
-`[orig: lookup_entity_slot_and_pack_entry @0x57AD40; @0x5C7FEC/@0x5C800F;
+`[orig: EntitySlot_LookupAndPackEntry @0x57AD40; @0x5C7FEC/@0x5C800F;
 @0x4DF008/@0x4DF070]`. The `.bad` assets resolve from the retail PFFs; when absent
 (a loose mount lacking them) the composed parts
 render static at rest. (`HwmCube.dds` reflection map: not yet applied — minor.)
@@ -356,12 +356,12 @@ set-selected-index is `[orig: UIList_SelectByValue @ 0x645240]`, read-selected-v
 `[orig: UIList_GetSelectedValue @ 0x644660]`.
 
 **Selection state** lives in a per-slot/per-team block of globals (NOT the
-profile), keyed `[67596*g_curProfileSlot + 32774*team]` (`g_curProfileSlot @
-0x25506B8` = active profile index): `g_charSelClass @ 0x2551130` (u8, class 5..9),
-`g_charSelNationality @ 0x2551131` (u8), `g_charSelDivision @ 0x2551132` (u8),
-`g_charSelCombo @ 0x2551134` (u16; also holds the per-character voice). The current
-profile object is `g_curPlayerProfile @ 0x25510FC = &profile[15488 *
-g_curProfileSlot]` (`profile @ 0x252de58`, 15488 B/entry; the array ends at
+profile), keyed `[67596*g_GameConfigState.currentProfileSlot_000 + 32774*team]` (`g_GameConfigState.currentProfileSlot_000 @
+0x25506B8` = active profile index): `g_CharSelClass @ 0x2551130` (u8, class 5..9),
+`g_CharSelNationality @ 0x2551131` (u8), `g_CharSelDivision @ 0x2551132` (u8),
+`g_CharSelCombo @ 0x2551134` (u16; also holds the per-character voice). The current
+profile object is `g_CurPlayerProfile @ 0x25510FC = &profile[15488 *
+g_GameConfigState.currentProfileSlot_000]` (`profile @ 0x252de58`, 15488 B/entry; the array ends at
 `0x2540CDC`). See **D-PLAYERINFO-12**.
 
 - `[orig: PlayerInfo_InitProfileSelector @ 0x5611b0]` — screen show. Builds the
@@ -369,40 +369,40 @@ g_curProfileSlot]` (`profile @ 0x252de58`, 15488 B/entry; the array ends at
   `"PROFILE_%d"`/`Profile %d` keys, `CS_NONAME` from the `"Menu"` table when
   `profile+48 & 1`); selects the current profile; reads `SIDE_BLUE` (vtable+96 =
   get-check) to derive the team; calls `PlayerInfo_PopulateAllControls(team)`; then
-  `update_player_info_weight_and_weapon_icons` and `j_SoundBank_OpenFile("menu.lwf",
+  `PlayerInfo_UpdateWeightAndWeaponIcons` and `j_SoundBank_OpenFile("menu.lwf",
   &g_MenuSoundBank)` (the voice-preview bank `@ 0x25DC3E0`).
 - `[orig: PlayerInfo_PopulateAllControls @ 0x5606f0]` `(teamIndex)` — the
   populate-everything pass, in order: `PlayerInfo_SetTeamAndClassMask(team)` →
   OPTIONS_AUTORELOAD ← `profile+1524` → OPTIONS_AUTOMEDIC ← `profile+1660 == 0`
-  (inverted) → PLAYERCLASS sel ← `g_charSelClass` →
+  (inverted) → PLAYERCLASS sel ← `g_CharSelClass` →
   `PlayerInfo_PopulateNationalityList(team)` + NATIONALITY sel ←
-  `g_charSelNationality` → `PlayerInfo_PopulateDivisionList(nat, team)` + DIVISION
-  sel ← `g_charSelDivision` → `populate_avatar_combo_list()` + COMBO_LIST sel ←
-  `g_charSelCombo` → PLAYERNAME edit ← `profile+4` (vtable+76 = SetText) →
-  `populate_player_voice_combo(...)` → `populate_weapon_slot_lists()`.
+  `g_CharSelNationality` → `PlayerInfo_PopulateDivisionList(nat, team)` + DIVISION
+  sel ← `g_CharSelDivision` → `PlayerInfo_PopulateAvatarComboList()` + COMBO_LIST sel ←
+  `g_CharSelCombo` → PLAYERNAME edit ← `profile+4` (vtable+76 = SetText) →
+  `PlayerInfo_PopulatePlayerVoiceCombo(...)` → `PlayerInfo_PopulateWeaponSlotLists()`.
 - `[orig: PlayerInfo_RegisterAllControls @ 0x561470]` — registers 28 PLAYER_INFO
   controls, each `[orig: CUIScene_RegisterControlCallback @ 0x63c060](category, name, handler, …)`. Change
   handlers route the selection-change notification (`0x5000001`, selected value in
   `eventData+16`):
   - `[orig: PlayerInfo_HandleNationalitySelect @ 0x560600]` — store
-    `g_charSelNationality`, reset `g_charSelDivision = 0`, repopulate division then
+    `g_CharSelNationality`, reset `g_CharSelDivision = 0`, repopulate division then
     combo (the nat→div→combo **cascade**).
-  - `[orig: PlayerInfo_HandleDivisionSelect @ 0x560690]` — store `g_charSelDivision`,
+  - `[orig: PlayerInfo_HandleDivisionSelect @ 0x560690]` — store `g_CharSelDivision`,
     repopulate combo.
-  - `[orig: PlayerInfo_HandleClassSelect @ 0x560910]` — store `g_charSelClass` (and
+  - `[orig: PlayerInfo_HandleClassSelect @ 0x560910]` — store `g_CharSelClass` (and
     a mirror `@ 0x2559136`), re-`PlayerInfo_PopulateAllControls` (a class change
     re-filters the loadout).
   - `[orig: PlayerInfo_HandleProfileSelect @ 0x560960]` — on PLAYER combo change:
-    `save_player_info_from_dialog` (commit current), switch `g_curPlayerProfile`/
-    `g_curProfileSlot`, re-populate.
+    `PlayerInfo_SaveFromDialog` (commit current), switch `g_CurPlayerProfile`/
+    `g_GameConfigState.currentProfileSlot_000`, re-populate.
   - `[orig: PlayerInfo_HandleVoiceSelect @ 0x55fe00]` — **the COMBO_LIST
     handler despite the name** (registered against `"COMBO_LIST"` `@0x5615a6`):
-    store the selected avatar into `g_charSelCombo[…]`, then rebuild PLAYERVOICE
-    inline and again through `populate_player_voice_combo`. See "PLAYERVOICE
+    store the selected avatar into `g_CharSelCombo[…]`, then rebuild PLAYERVOICE
+    inline and again through `PlayerInfo_PopulatePlayerVoiceCombo`. See "PLAYERVOICE
     list" below.
   - `[orig: sub_560030 @ 0x560030]` — the real PLAYERVOICE handler
     (`@0x5615c7`): on `0x5000001` it stores the notification's value BYTE
-    (`eventData+16`) into `g_curPlayerProfile[teamIndex + 1532]` and does
+    (`eventData+16`) into `g_CurPlayerProfile[teamIndex + 1532]` and does
     nothing else — no repopulate, no other side effect.
   - Team radios `SIDE_BLUE`/`SIDE_RED` re-run the populate for the new team via
     `[orig: PlayerInfo_SaveAndRepopulate @ 0x5608f0]` (save → populate(team) →
@@ -410,15 +410,15 @@ g_curProfileSlot]` (`profile @ 0x252de58`, 15488 B/entry; the array ends at
 
 ### Class → loadout filter mask (D-PLAYERINFO-8)
 `[orig: PlayerInfo_SetTeamAndClassMask @ 0x55de60]` `(team)` — sets the global
-`teamIndex` and maps the PLAYERCLASS byte (`g_charSelClass`, 5..9) to a
-power-of-two mask `g_playerInfoClassMask @ 0x25DC550` (5→1, 6→2, 7→4, 8→8, 9→16)
-plus `g_playerInfoTeamMask @ 0x25DC54C = 2 - (team != 0)`. Both gate the loadout.
+`teamIndex` and maps the PLAYERCLASS byte (`g_CharSelClass`, 5..9) to a
+power-of-two mask `g_PlayerInfoClassMask @ 0x25DC550` (5→1, 6→2, 7→4, 8→8, 9→16)
+plus `g_PlayerInfoTeamMask @ 0x25DC54C = 2 - (team != 0)`. Both gate the loadout.
 
 ### PLAYERVOICE list (D-PLAYERINFO-10 — witnessed + PORTED 2026-09-16)
-`[orig: populate_player_voice_combo @ 0x55dce0]` `(teamIndex)` builds the list:
+`[orig: PlayerInfo_PopulatePlayerVoiceCombo @ 0x55dce0]` `(teamIndex)` builds the list:
 
-1. `list_widget_remove_row(list, -1)` clears it.
-2. `v11 = [orig: sub_57AE90 @ 0x57ae90](g_charSelCombo[33798*slot + 16387*team])`
+1. `CListWnd_RemoveRow(list, -1)` clears it.
+2. `v11 = [orig: sub_57AE90 @ 0x57ae90](g_CharSelCombo[33798*slot + 16387*team])`
    — the packed combo id is looked up in the avatar registry by
    `[orig: MinimapSlot_FindByPackedId @ 0x57a270]` (72-dword records; fields
    `+0` nationality `id & 0x1F`, `+4` division `(id >> 5) & 0xF`, `+8` combo
@@ -429,7 +429,7 @@ plus `g_playerInfoTeamMask @ 0x25DC54C = 2 - (team != 0)`. Both gate the loadout
    So the list's filter key is the avatar's SEX, not its voice.
 3. `DEFAULT_VOICE` is added with value **0** `@0x55dd76`.
 4. The voice-definition table is walked from `0x83C7AC` in 12-byte strides while
-   `ptr < ammoDef @ 0x83C830` — **11 rows based at `0x83C7A8`**, each
+   `ptr < g_PlayerPreviewAnimTable @ 0x83C830` — **11 rows based at `0x83C7A8`**, each
    `{enabled, CHARVOICE id, sex}`. A row is added as `"CHARVOICE_%d"` with
    value `*ptr` when `*(ptr - 1) != 0 && v11 == ptr[1]` `@0x55dd9d`:
 
@@ -450,9 +450,9 @@ plus `g_playerInfoTeamMask @ 0x25DC54C = 2 - (team != 0)`. Both gate the loadout
    A male head therefore offers `DEFAULT_VOICE` + ids 1..6 and 10 (id 9 is the
    table's one disabled row); a female head offers `DEFAULT_VOICE` + 7, 8, 11.
 5. `found` is set when a listed id equals the persisted override
-   `g_curPlayerProfile[team + 1532]` `@0x55ddf4`; after the walk
-   `if (!found) g_curPlayerProfile[team + 1532] = 0` `@0x55de21`.
-6. `[orig: UIList_SelectByValue @ 0x645240](list, g_curPlayerProfile[team + 1532], 1)`
+   `g_CurPlayerProfile[team + 1532]` `@0x55ddf4`; after the walk
+   `if (!found) g_CurPlayerProfile[team + 1532] = 0` `@0x55de21`.
+6. `[orig: UIList_SelectByValue @ 0x645240](list, g_CurPlayerProfile[team + 1532], 1)`
    selects by VALUE, not position `@0x55de3c`.
 
 PORTED 2026-09-16 — `PlayerInfoMenuCompanion._populate_voices` carries the
@@ -465,9 +465,9 @@ value seeded into both sides — the per-side persistence rides D-PLAYERINFO-9.
 
 ### Voice preview — TESTPLAYERVOICE (D-PLAYERINFO-10)
 `[orig: PlayerInfo_PreviewVoice @ 0x55ff70]` — on the click notification
-`0x3000001`, the voice index is the profile override `*(g_curPlayerProfile + team +
+`0x3000001`, the voice index is the profile override `*(g_CurPlayerProfile + team +
 1532)` when non-zero, else derived from the selected combo's avatar voice
-(`[orig: Avatars_ResolveSelectionIndex (ex sub_57AE60) @ 0x57ae60](g_avatarDefs, g_charSelCombo[…])`); then
+(`[orig: Avatars_ResolveSelectionIndex (ex sub_57AE60) @ 0x57ae60](g_avatarDefs, g_CharSelCombo[…])`); then
 `sprintf("VOICE_%d", idx)` → `[orig: SoundBank_FindTriggerAndPlay @ 0x75d010](key,
 params, &g_MenuSoundBank)` (params `[0]=0x10000, [2]=255`). The `menu.lwf` bank is
 loaded by the screen init.
@@ -475,7 +475,7 @@ loaded by the screen init.
 The avatar-derived fallback reads a DIFFERENT field than the list filter:
 `Avatars_ResolveSelectionIndex` returns the BYTE at `combo+284`, stored from the
 head part's `voice` field (`AvatarPartDefinition+0x47`, the store `@0x57aae3`),
-whereas `populate_player_voice_combo` reads the `sex` dword at `combo+280`.
+whereas `PlayerInfo_PopulatePlayerVoiceCombo` reads the `sex` dword at `combo+280`.
 
 PORTED 2026-09-16 — the reimpl binds `TESTPLAYERVOICE` by control name and now
 reproduces the full rule: the per-side override when non-zero, else the selected
@@ -483,15 +483,15 @@ combo head's own `voice`, requested as `VOICE_%d` through
 `MenuDriver.play_widget_sound(..., "menu.lwf")`.
 
 ### ACCEPT / commit + persistence (D-PLAYERINFO-9)
-`[orig: save_player_info_from_dialog @ 0x55ee10]` reads each control back (combo
+`[orig: PlayerInfo_SaveFromDialog @ 0x55ee10]` reads each control back (combo
 value via `UIList_GetSelectedValue @ 0x644660`, checkbox via `[orig: sub_64ACB0 @ 0x64acb0]`):
-PLAYERCLASS → `g_charSelClass` for **both** teams (`side = 0, 32774`); NATIONALITY/
+PLAYERCLASS → `g_CharSelClass` for **both** teams (`side = 0, 32774`); NATIONALITY/
 DIVISION/COMBO_LIST → their `g_charSel*`; OPTIONS_AUTORELOAD → `profile+1524`;
 OPTIONS_AUTOMEDIC → `profile+1660 = (state == 0)` (inverted); PLAYERNAME →
 `profile+4` (char[16]; whitespace-only rejected via `iswspace`, clearing the name
-and setting `profile+52 |= 1`). Returns `[orig: serialize_weapon_loadout @
+and setting `profile+52 |= 1`). Returns `[orig: PlayerInfo_SerializeWeaponLoadout @
 0x55e4b0]` (persists the loadout). The live session reads the same selection
-globals via `[orig: apply_session_settings_to_globals @ 0x551500]`.
+globals via `[orig: Game_ApplySessionSettingsToGlobals @ 0x551500]`.
 
 The stores also pin the `weapon.sav` side header: selected control values land
 at side `+0` class, `+1` nationality id, `+2` division id, and `+4` packed u16.
@@ -499,13 +499,13 @@ The class loop advances by `0x8006` and updates both sides
 `[orig: @0x55EE3F..0x55EE6D]`; nationality/division/packed add
 `0x8006*teamIndex` (`@0x25dc548`) and update only the selected side
 `[orig: @0x55EE93..0x55EF38]`. The enclosing active-record index uses the
-`0x1080C` stride (`g_curProfileSlot @0x25506B8`). One recorded, bounded
+`0x1080C` stride (`g_GameConfigState.currentProfileSlot_000 @0x25506B8`). One recorded, bounded
 divergence: retail writes only the SELECTED side's avatar bytes, while the
 port rewrites both sides from memory — normalizing a stale other side to
 the retail default.
 
 ### Kit page serialization (D-PLAYERINFO-9 — witnessed + PORTED 2026-09-16)
-`[orig: serialize_weapon_loadout @ 0x55e4b0]` writes the side's kit page as
+`[orig: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0]` writes the side's kit page as
 consecutive NUL-terminated ASCII strings, **four per entry**
 (name, primary ammo count, secondary ammo count, ammo-type/flags). The filler
 for any value it has no number for is the literal `"-1"` (`@ 0x7C3328`), which
@@ -513,29 +513,29 @@ the four-at-a-time reader decodes the same as a missing value
 (`playersav::KitEntry` defaults). The order is fixed:
 
 1. **Knife, always first** `@0x55e4dc`: `"WPN_KNIFE"` (`@ 0x7C3584`) when
-   `(g_playerInfoTeamMask & 2) != 0 || g_playerInfoTeamMask == 0`, else
+   `(g_PlayerInfoTeamMask & 2) != 0 || g_PlayerInfoTeamMask == 0`, else
    `"WPN_KNIFE2"` (`@0x55e4ec`). With the mask rule
-   `g_playerInfoTeamMask = 2 - (team != 0)` that is blue → `WPN_KNIFE`,
+   `g_PlayerInfoTeamMask = 2 - (team != 0)` that is blue → `WPN_KNIFE`,
    red → `WPN_KNIFE2`; the mask-zero leg is defensive. The other three values
    are the filler.
 2. **Medpack**, only when the profile slot's class byte for the selected side
-   (`g_charSelClass[67596*slot + 32774*team]`) is `5` `@0x55e624`:
+   (`g_CharSelClass[67596*slot + 32774*team]`) is `5` `@0x55e624`:
    `"WPN_MEDPACK"` (`@ 0x7D5CA8`) plus three fillers.
 3. **PRIMARY, SECONDARY, ACCESSORY** in that order `@0x55e6bb`
    (`category_names[]` built `@0x55e4bc`). Each entry is
-   `UIList_GetSelectedValue(list)` → `g_weaponDefTable[192 * id]` (the weapon
-   name), `"%d"` of `g_playerInfoAmmoPriCounts[2*id]`, `"%d"` of
-   `g_playerInfoAmmoSecCounts[2*id]` (the interleaved pair), then the fourth
-   value: PRIMARY → `g_playerInfoAmmoTypePri[teamIndex]` `@0x55e7a9`,
-   SECONDARY → `g_playerInfoAmmoTypeSec[teamIndex]` `@0x55e79b`,
+   `UIList_GetSelectedValue(list)` → `g_WeaponDefTable[192 * id]` (the weapon
+   name), `"%d"` of `g_PlayerInfoAmmoPriCounts[2*id]`, `"%d"` of
+   `g_PlayerInfoAmmoSecCounts[2*id]` (the interleaved pair), then the fourth
+   value: PRIMARY → `g_PlayerInfoAmmoTypePri[teamIndex]` `@0x55e7a9`,
+   SECONDARY → `g_PlayerInfoAmmoTypeSec[teamIndex]` `@0x55e79b`,
    ACCESSORY → `-1` `@0x55e790`. **A NONE slot is not skipped**: the `"NONE"`
    row is inserted with value `0` (`@0x56058f`), so it serializes weapon-table
    entry 0's name with entry 0's count pair.
-4. **Exactly three grenade entries** from `g_playerInfoGrenadeSlots @ 0x25DC554`
-   `@0x55e7e0`, the loop bounded by `g_playerInfoAmmoPriCounts @ 0x25DC560`
+4. **Exactly three grenade entries** from `g_PlayerInfoGrenadeSlots @ 0x25DC554`
+   `@0x55e7e0`, the loop bounded by `g_PlayerInfoAmmoPriCounts @ 0x25DC560`
    (three dwords further on). Each is the slot's weapon name, its count pair,
    and a filler. The three-slot array is ZEROED before each ammo refill
-   (`@0x55e8d0-0x55e8da` in `[orig: populate_weapon_accessory_ammo_ui
+   (`@0x55e8d0-0x55e8da` in `[orig: PlayerInfo_PopulateWeaponAccessoryAmmoUI
    @ 0x55e8b0]`, which also resets every count pair to `-1`), so a slot the
    class/team filter left empty serializes weapon-table entry 0 as well.
 
@@ -547,25 +547,25 @@ side header (class + avatar bytes) and leaves the existing kit pages alone, so
 the serialized page is not yet handed to `playersav::encode_kit_page`.
 
 ### Loadout population (D-PLAYERINFO-11)
-`[orig: populate_weapon_slot_lists @ 0x560430]` fills PRIMARY/SECONDARY/ACCESSORY
+`[orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430]` fills PRIMARY/SECONDARY/ACCESSORY
 from the weapon table `@ 0x2540D08` (192 B/entry, ending at `0x254CC48`). A row
-shows only when `(entry+76 & g_playerInfoClassMask) != 0` **and**
-`(g_playerInfoTeamMask & entry+72) != 0`; it routes to PRIMARY/SECONDARY/ACCESSORY
+shows only when `(entry+76 & g_PlayerInfoClassMask) != 0` **and**
+`(g_PlayerInfoTeamMask & entry+72) != 0`; it routes to PRIMARY/SECONDARY/ACCESSORY
 by `entry+68` (1/2/0); display name = `entry+0` (else the id at `entry-40`). A
 `"NONE"` row (`"Menu"`/`NONE`) is inserted at index 0 of each. It then calls
-`[orig: populate_weapon_accessory_ammo_ui @ 0x55e8b0]` (the `*_AMMO*` combos) and
-`[orig: update_player_info_weight_and_weapon_icons @ 0x55f480]` (the
+`[orig: PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8b0]` (the `*_AMMO*` combos) and
+`[orig: PlayerInfo_UpdateWeightAndWeaponIcons @ 0x55f480]` (the
 `STATIC_TOTAL_WEIGHT` budget + weapon icons; light/normal/heavy, sibling of
 `UI_UpdateWeaponWeightDisplay @ 0x565640`). The weapon table itself is built by
-`[orig: WeaponDef_LoadAll @ 0x54dd10]` (zeroes `g_weaponDefTable @ 0x2540CE0`, 0xBF40 B,
+`[orig: WeaponDef_LoadAll @ 0x54dd10]` (zeroes `g_WeaponDefTable @ 0x2540CE0`, 0xBF40 B,
 count `@ 0x2540CDC` starting at 1 with a `"None"` entry, then
 `File_ParseASCIIFile("weapon.def", WeaponDef_ParseProperty, key 0x2A56F6AD)`); the
-loadout table `@ 0x2540D08` is that table at `g_weaponDefTable + 0x28` (so the
+loadout table `@ 0x2540D08` is that table at `g_WeaponDefTable + 0x28` (so the
 consumer's `+68/+72/+76` and the `-40` name fallback are the absolute offsets below
 minus `0x28`).
 
 **Producer field map — `[orig: WeaponDef_ParseProperty @ 0x54d730]`** (192 B/entry,
-written at `g_weaponDefTable + 192*count`; absolute offsets):
+written at `g_WeaponDefTable + 192*count`; absolute offsets):
 
 | Off | weapon.def token | Meaning |
 |---|---|---|
@@ -586,9 +586,9 @@ written at `g_weaponDefTable + 192*count`; absolute offsets):
 | `+144` | `loadout_menu_icon` | char[32] |
 | `+184`/`+188` | `flags` | lo/hi bit masks (table `off_830BF0`) |
 
-Consumer `populate_weapon_slot_lists @ 0x560430` shows a row when `loadout_selectable
-(+32) != 0` **and** `(charfilter +116 & g_playerInfoClassMask) != 0` **and**
-`(teamfilter +112 & g_playerInfoTeamMask) != 0`; routes by `weapon_class (+108)` (1→
+Consumer `PlayerInfo_PopulateWeaponSlotLists @ 0x560430` shows a row when `loadout_selectable
+(+32) != 0` **and** `(charfilter +116 & g_PlayerInfoClassMask) != 0` **and**
+`(teamfilter +112 & g_PlayerInfoTeamMask) != 0`; routes by `weapon_class (+108)` (1→
 PRIMARY, 2→SECONDARY, 0→ACCESSORY; 3=grenade is handled by the ammo UI, not these
 three lists); display = `loadout_menu_textid (+40)` resolved string, else the raw
 `weapon_name (+0)`; `"NONE"` (the menu resource `"Menu"/"NONE"`) at index 0. Names
@@ -608,25 +608,25 @@ player-info work is D-PLAYERINFO-9's edited-kit serialization and `player.sav` o
 ### Ammo combos, weight, and icons (D-PLAYERINFO-11 — witnessed 2026-07-30)
 
 All decompiled this session; every read below is a field slice of
-`g_weaponDefTable @ 0x2540CE0` (192 B/entry — the offsets in the producer map
-above), never `g_ammoDefTable`. Entry 0 is the `"None"` record, and the combo
+`g_WeaponDefTable @ 0x2540CE0` (192 B/entry — the offsets in the producer map
+above), never `g_AmmoDefTable`. Entry 0 is the `"None"` record, and the combo
 get-selected helper returns 0 for "no selection", so a NONE selection resolves
 every lookup to the null entry.
 
-**Saved-kit consumption — `[orig: populate_weapon_accessory_ammo_ui @ 0x55e8b0]`.**
+**Saved-kit consumption — `[orig: PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8b0]`.**
 The input is the profile kit page (net-re §5.66): repeated 4-string tuples
 `(name, ammoPri, ammoSec, flags)` until an empty name. Per tuple:
-`ammoPri` → `g_playerInfoAmmoPriCounts[2*idx] @ 0x25DC560`, `ammoSec` →
-`g_playerInfoAmmoSecCounts[2*idx] @ 0x25DC564` (interleaved pair; `-1` = default;
+`ammoPri` → `g_PlayerInfoAmmoPriCounts[2*idx] @ 0x25DC560`, `ammoSec` →
+`g_PlayerInfoAmmoSecCounts[2*idx] @ 0x25DC564` (interleaved pair; `-1` = default;
 the ammoSec store is gated on the subclass walk finding a differing round name),
-`flags` → `g_playerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68` (the
+`flags` → `g_PlayerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68` (the
 ammo-TYPE byte, stored per team) — for PRIMARY/SECONDARY-class defs respectively.
 `weapon_class` 1/2/0 selects the def in the PRIMARY/SECONDARY/ACCESSORY combo;
-class 3 appends the def index to `g_playerInfoGrenadeSlots @ 0x25DC554` (3 slots).
+class 3 appends the def index to `g_PlayerInfoGrenadeSlots @ 0x25DC554` (3 slots).
 It then fills the ammo combos (slots 0/1/3 via `@ 0x55def0`; the ACCESSORY block
-is inlined) and is itself called from `populate_weapon_slot_lists @ 0x560430`.
+is inlined) and is itself called from `PlayerInfo_PopulateWeaponSlotLists @ 0x560430`.
 
-**Ammo-combo fill — `[orig: populate_ammo_combo_boxes @ 0x55def0]`** (slot 0 =
+**Ammo-combo fill — `[orig: PlayerInfo_PopulateAmmoComboBoxes @ 0x55def0]`** (slot 0 =
 PRIMARY, 1 = SECONDARY, 2 = ACCESSORY, ≥3 = grenades):
 
 - `*_AMMO1`: hidden when nothing is selected or `clipsize <= 0`; else rows
@@ -645,37 +645,37 @@ PRIMARY, 1 = SECONDARY, 2 = ACCESSORY, ≥3 = grenades):
   `clipsize <= 0`; else rows 1..sub.maxclips from the sub-def's fields, selection
   from the saved ammoSec count (same `-1` = max rule).
 - Grenades: walk the whole table in order; a def qualifies when
-  `loadout_selectable && (charfilter & g_playerInfoClassMask) && (teamfilter &
-  g_playerInfoTeamMask) && weapon_class == 3`; the first three fill
-  `GRENADE_AMMO1..3` (and `g_playerInfoGrenadeSlots`), leftover widgets are
+  `loadout_selectable && (charfilter & g_PlayerInfoClassMask) && (teamfilter &
+  g_PlayerInfoTeamMask) && weapon_class == 3`; the first three fill
+  `GRENADE_AMMO1..3` (and `g_PlayerInfoGrenadeSlots`), leftover widgets are
   **hidden**. Rows **0..maxclips including the zero row**, row value =
   `count*clipsize` (rounds); selection = saved count's row, `-1` → maxclips row.
 
 **Recompute graph — `[orig: PlayerInfo_RegisterAllControls @ 0x561470]`** (all
 handlers gate on notify `0x5000001`): PRIMARY/SECONDARY select
 (`@ 0x55f710`/`@ 0x55f790`) → refill that slot's ammo combos + weight/icons;
-ACCESSORY select (`handle_accessory_ammo_slot_selection @ 0x55f810`) → inlined
+ACCESSORY select (`PlayerInfo_HandleAccessoryAmmoSlotSelection @ 0x55f810`) → inlined
 slot-2 refill + weight/icons; `*_AMMO1`/`*_AMMO2`
 (`@ 0x55f730`/`@ 0x55f7b0`/`@ 0x55fb40`, ctx 0/1 = pri/sec column) → store
 `selected_row + 1` keyed by the row's def-index value + weight/icons;
 `*_AMMO1_TYPE` (`@ 0x55f760`/`@ 0x55f7e0`) → store the row value byte per team +
 weight/icons; `GRENADE_AMMO1..3` (`@ 0x55fb70`, ctx 0..2) → store the **row
 value** (rounds — see the quirk below) + weight/icons; ACCEPT (`@ 0x55fdf0`) →
-`save_player_info_from_dialog`; SIDE_BLUE/SIDE_RED →
+`PlayerInfo_SaveFromDialog`; SIDE_BLUE/SIDE_RED →
 `PlayerInfo_SaveAndRepopulate(0/1)`.
 
-**Weight + icons — `[orig: update_player_info_weight_and_weapon_icons @
-0x55f480]`.** Weight = `calculate_loadout_weight @ 0x55f1f0` →
-`g_playerInfoLoadoutWeight @ 0x25DCD5C`; bands ≥66.6 HEAVY / ≥33.3 NORMAL / else
+**Weight + icons — `[orig: PlayerInfo_UpdateWeightAndWeaponIcons @
+0x55f480]`.** Weight = `PlayerInfo_CalculateLoadoutWeight @ 0x55f1f0` →
+`g_PlayerInfoLoadoutWeight @ 0x25DCD5C`; bands ≥66.6 HEAVY / ≥33.3 NORMAL / else
 LIGHT; rendered into `STATIC_TOTAL_WEIGHT` as `sprintf("%s %.1f %s (%s)")` with
 menu-string keys `TOTAL_WEIGHT`, `LBS`, `LIGHT_/NORMAL_/HEAVY_ENCUMBRANCE`
 (resolved through the control's own string table — the armory sibling
-`update_weapon_weight_display @ 0x565640` uses the same keys). Icons: the
+`UI_UpdateWeaponWeightDisplay @ 0x565640` uses the same keys). Icons: the
 `PRIMARY/SECONDARY/ACCESSORY_ICON` windows are textured from the selected def's
 `loadout_menu_icon (+144)`; no selection resolves to entry 0 (blank);
 `GRENADE_ICON` is never touched (it keeps the .mnu's authored `m_nades.tga`).
 
-**Weight terms — `[orig: calculate_loadout_weight @ 0x55f1f0]`** (confirms the
+**Weight terms — `[orig: PlayerInfo_CalculateLoadoutWeight @ 0x55f1f0]`** (confirms the
 ported `def_loadout_weight` for parents, refines the rest):
 
 - Parent slots (PRIMARY/SECONDARY/ACCESSORY): `weaponweight (+120) +
@@ -687,9 +687,9 @@ ported `def_loadout_weight` for parents, refines the rest):
 - Grenades (only for grenade controls that exist **and are shown**): **clip term
   only**, with `saved == -1` → maxclips (a saved **0 stays 0** — the zero row).
 
-**Kit-page writer — `[orig: serialize_weapon_loadout @ 0x55e4b0]`** (doc-only;
+**Kit-page writer — `[orig: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0]`** (doc-only;
 the write side is D-PLAYERINFO-9): first entry = the knife —
-`g_playerInfoTeamMask & 2 || mask == 0` → `WPN_KNIFE`, else `WPN_KNIFE2` — then
+`g_PlayerInfoTeamMask & 2 || mask == 0` → `WPN_KNIFE`, else `WPN_KNIFE2` — then
 `WPN_MEDPACK` when the class byte is 5 (medic), then the three category
 selections and the grenade/registered tail; every entry is the 4-string tuple
 with `"-1"` as the default filler. Field-level mining deferred to the
@@ -702,18 +702,18 @@ stable.
 
 | ID | Original (Jointops.exe) | Why / consequence for the port |
 | --- | --- | --- |
-| D-PLAYERINFO-1 | combo → spawned-player / FP model binding | **FIXED 2026-08-15.** The packed identity resolver is witnessed at `lookup_entity_slot_and_pack_entry @0x57AD40`; selected head/body submissions and their immediately preceding camo writers are pinned at `@0x5C7FEC/@0x5C800F`, and the first-person arms — the CharacterEntity's arms model, the only arms source — at `@0x4df05f/@0x4deff4` after `@0x4DF008/@0x4DF070`. `MissionObjectPlacer` composes the resolved head+body on the player ADM, `fp_viewmodel_spec` takes the character arms (no character arms → no arms, as retail), the local player reads its id from the authority's stamp, and the wire presentation rebuild key includes the packed character id. Residual (rides D-NET-137): an id the mounted registry cannot resolve draws the entity's item model, where retail's client 0x0C fold re-stamps the entity to the first combo of its team side (`@0x42eae4..0x42eb03`, `lookup_entity_slot_and_pack_entry(side = team != 1)`); with a populated stock Avatars.def every host-stamped id resolves, so the case needs a mismatched registry. |
+| D-PLAYERINFO-1 | combo → spawned-player / FP model binding | **FIXED 2026-08-15.** The packed identity resolver is witnessed at `EntitySlot_LookupAndPackEntry @0x57AD40`; selected head/body submissions and their immediately preceding camo writers are pinned at `@0x5C7FEC/@0x5C800F`, and the first-person arms — the CharacterEntity's arms model, the only arms source — at `@0x4df05f/@0x4deff4` after `@0x4DF008/@0x4DF070`. `MissionObjectPlacer` composes the resolved head+body on the player ADM, `fp_viewmodel_spec` takes the character arms (no character arms → no arms, as retail), the local player reads its id from the authority's stamp, and the wire presentation rebuild key includes the packed character id. Residual (rides D-NET-137): an id the mounted registry cannot resolve draws the entity's item model, where retail's client 0x0C fold re-stamps the entity to the first combo of its team side (`@0x42eae4..0x42eb03`, `EntitySlot_LookupAndPackEntry(side = team != 1)`); with a populated stock Avatars.def every host-stamped id resolves, so the case needs a mismatched registry. |
 | D-PLAYERINFO-2 | `>= 512` parts → `MessageBoxA("ComboObj Parse Error")` + abort | **FIXED 2026-07-05 (verified enforced)**: the parser errors at the cap (`avatars.cpp` guard `[orig: CAvatarDefs_ParseConfigLine @ 0x57a456]`), `AvatarDatabase` propagates, and `avatars_parse_test.cpp` pins the 512-part failure. |
 | D-PLAYERINFO-3 | `graphic` and `graphic_d` write the **same** part field (+76) | `graphic_d` aliases/overwrites `graphic`; only `graphic_j` (+92) and `graphic_s` (+108) are distinct slots. A faithful parser stores both keywords into one field (last wins). |
 | D-PLAYERINFO-4 | combo retains only denormalized part data, not the part names/indices | the runtime struct cannot reproduce the `combo <id> <head> <body> <arms>` line. The reimpl's authoring model must *additionally* keep the three reference names to round-trip the writer — a superset; runtime behavior is unchanged. |
 | D-PLAYERINFO-5 | nationality list filtered by `alignment` vs `teamIndex` (good→0, evil→1) | the menu population is team-aware; the reimpl port must reproduce the filter and order. |
 | D-PLAYERINFO-6 | `nationality`/`division` id token: `if (*idStr > '9') ++idStr;` then `atol` | a single leading non-digit character is skipped before parsing the numeric id. The reimpl parser must mirror this lenient id read. |
 | D-PLAYERINFO-7 | screen = init (`PlayerInfo_InitProfileSelector @ 0x5611b0`) → `PlayerInfo_PopulateAllControls(team)` + 28 per-control handlers registered via `CUIScene_RegisterControlCallback @ 0x63c060`; the nat→div→combo cascade (`@ 0x560600`/`@ 0x560690`, notify `0x5000001`) repopulates dependents and **resets the division on a nationality change** | the reimpl port reproduces the populate order and the cascade: selecting a nationality resets the division selection and refills division+combo; selecting a division refills combo. |
-| D-PLAYERINFO-8 | PLAYERCLASS byte 5..9 → power-of-two class mask `g_playerInfoClassMask` (1/2/4/8/16); team → `g_playerInfoTeamMask = 2-(team!=0)` (`PlayerInfo_SetTeamAndClassMask @ 0x55de60`) | **implemented**: `player_info_menu_companion._selected_class_mask` (5..9→1/2/4/8/16) + team mask `2-(team!=0)` gate the weapon slot lists; repopulate on class/team change. |
-| D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55EE10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | **avatar/class slice FIXED 2026-08-15:** both per-side selections restore from and atomically save to active `weapon.sav` slot 0; class is written to both side blocks (`@0x55EE3F..0x55EE6D`) while avatar bytes remain per-side (`@0x55EE93..0x55EF38`), and other slots/pages are preserved. Recorded, bounded divergence: retail writes only the selected side's avatar bytes; the port rewrites both sides from memory, normalizing a stale other side to the retail default. The kit-page WRITER ORDER is witnessed and ported 2026-09-16 (see "Kit page serialization"): `PlayerInfoMenuCompanion.kit_entries()` emits the knife, the class-5 medpack, the three categories and the three fixed grenade slots as `playersav::KitEntry` rows on the snapshot's `kit` key. Remaining: hand that page to `playersav::encode_kit_page` from `Simulation::save_weapon_profile_selection` (which still writes only the side header), the per-side voice-override byte pair (`profile+1532`/`+1533`), and the `player.sav`-level option fields. |
-| D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's own voice byte (`combo+284`); PLAYERVOICE list = DEFAULT_VOICE (value 0) + every ENABLED row of the 11-row voice table `@0x83C7A8` whose SEX field matches the avatar's `combo+280`, valued by its `CHARVOICE_%d` id, with the not-found override reset and a select-by-value (`populate_player_voice_combo @ 0x55dce0`, handler `sub_560030 @ 0x560030`) | **FIXED 2026-09-16**: `PlayerInfoMenuCompanion` carries the full table walk, the sex filter, the override reset and the select-by-value; the preview prefers the override and falls back to the head's voice. `player_info_menu_seam_test` pins the male/female row sets, the value store, the reset and the preview order. Residual: the per-side override BYTE PAIR is persisted as one profile value (D-PLAYERINFO-9). |
+| D-PLAYERINFO-8 | PLAYERCLASS byte 5..9 → power-of-two class mask `g_PlayerInfoClassMask` (1/2/4/8/16); team → `g_PlayerInfoTeamMask = 2-(team!=0)` (`PlayerInfo_SetTeamAndClassMask @ 0x55de60`) | **implemented**: `player_info_menu_companion._selected_class_mask` (5..9→1/2/4/8/16) + team mask `2-(team!=0)` gate the weapon slot lists; repopulate on class/team change. |
+| D-PLAYERINFO-9 | ACCEPT/commit (`PlayerInfo_SaveFromDialog @ 0x55EE10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `PlayerInfo_SerializeWeaponLoadout` | **avatar/class slice FIXED 2026-08-15:** both per-side selections restore from and atomically save to active `weapon.sav` slot 0; class is written to both side blocks (`@0x55EE3F..0x55EE6D`) while avatar bytes remain per-side (`@0x55EE93..0x55EF38`), and other slots/pages are preserved. Recorded, bounded divergence: retail writes only the selected side's avatar bytes; the port rewrites both sides from memory, normalizing a stale other side to the retail default. The kit-page WRITER ORDER is witnessed and ported 2026-09-16 (see "Kit page serialization"): `PlayerInfoMenuCompanion.kit_entries()` emits the knife, the class-5 medpack, the three categories and the three fixed grenade slots as `playersav::KitEntry` rows on the snapshot's `kit` key. Remaining: hand that page to `playersav::encode_kit_page` from `Simulation::save_weapon_profile_selection` (which still writes only the side header), the per-side voice-override byte pair (`profile+1532`/`+1533`), and the `player.sav`-level option fields. |
+| D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's own voice byte (`combo+284`); PLAYERVOICE list = DEFAULT_VOICE (value 0) + every ENABLED row of the 11-row voice table `@0x83C7A8` whose SEX field matches the avatar's `combo+280`, valued by its `CHARVOICE_%d` id, with the not-found override reset and a select-by-value (`PlayerInfo_PopulatePlayerVoiceCombo @ 0x55dce0`, handler `sub_560030 @ 0x560030`) | **FIXED 2026-09-16**: `PlayerInfoMenuCompanion` carries the full table walk, the sex filter, the override reset and the select-by-value; the preview prefers the override and falls back to the head's voice. `player_info_menu_seam_test` pins the male/female row sets, the value store, the reset and the preview order. Residual: the per-side override BYTE PAIR is persisted as one profile value (D-PLAYERINFO-9). |
 | D-PLAYERINFO-11 | loadout combos from the weapon table `@ 0x2540D08` (192 B), filtered by class+team mask, slot-routed by `weapon_class +108` (1/2/0 = PRIMARY/SECONDARY/ACCESSORY), `"NONE"` first; ammo `@ 0x55e8b0`; weight `@ 0x55f480`. Producer `WeaponDef_ParseProperty @ 0x54d730` grilled — full `weapon.def` field map (above). | **FIXED 2026-07-30:** weapon lists, ammo combos, weight math/readout, and icons are ported through `engine/formats/def`, `WeaponDatabase`, and `PlayerInfoMenuCompanion`; `def_loadout_weight_test` and `player_info_menu_seam_test` pin the rules and UI host wiring. Persisting newly edited kit tuples is tracked separately by D-PLAYERINFO-9. |
-| D-PLAYERINFO-12 | selection state lives in per-slot/per-team globals keyed `[67596*slot + 32774*team]` (`g_charSelClass/Nationality/Division/Combo @ 0x2551130/1/2/4`), distinct from the 15488-B profile object (`profile @ 0x252de58`: name`+4`, autoreload`+1524`, voice`+1532`, automedic`+1660`) | **per-team memory FIXED 2026-08-15; the profile-slot dimension stays OPEN.** `PlayerCharacterSelectionState` keeps both team sides for slot 0 (restore on entry, survive a team switch, ClientAuth/host spawn, 0x0C decode, presentation) and the writer preserves the other four `weapon.sav` records; retail's five-slot `PLAYER` selector (`PlayerInfo_InitProfileSelector @0x5611b0`, `g_curProfileSlot @0x25506B8`) is not ported — the ledger row tracks that residual, it is not a "kept" decision. |
+| D-PLAYERINFO-12 | selection state lives in per-slot/per-team globals keyed `[67596*slot + 32774*team]` (`g_CharSelClass/Nationality/Division/Combo @ 0x2551130/1/2/4`), distinct from the 15488-B profile object (`profile @ 0x252de58`: name`+4`, autoreload`+1524`, voice`+1532`, automedic`+1660`) | **per-team memory FIXED 2026-08-15; the profile-slot dimension stays OPEN.** `PlayerCharacterSelectionState` keeps both team sides for slot 0 (restore on entry, survive a team switch, ClientAuth/host spawn, 0x0C decode, presentation) and the writer preserves the other four `weapon.sav` records; retail's five-slot `PLAYER` selector (`PlayerInfo_InitProfileSelector @0x5611b0`, `g_GameConfigState.currentProfileSlot_000 @0x25506B8`) is not ported — the ledger row tracks that residual, it is not a "kept" decision. |
 
 ## Implementation grill notes (2026-06-16)
 
@@ -755,12 +755,12 @@ Applied to `Jointops.exe.kong.i64` (all auto-named, anchored; saved):
   `sub_5608F0 → PlayerInfo_SaveAndRepopulate`,
   `sub_55FF70 → PlayerInfo_PreviewVoice`,
   `sub_55DE60 → PlayerInfo_SetTeamAndClassMask`.
-- **Globals:** `dword_25DC550 → g_playerInfoClassMask`,
-  `dword_25DC54C → g_playerInfoTeamMask`, `dword_25510FC → g_curPlayerProfile`,
-  `dword_25506B8 → g_curProfileSlot`, `byte_2551130 → g_charSelClass`,
-  `byte_2551131 → g_charSelNationality`, `byte_2551132 → g_charSelDivision`,
-  `word_2551134 → g_charSelCombo`; `dword_2540CE0 → g_weaponDefTable`,
-  `dword_2540CDC → g_weaponDefCount` (the loadout weapon table, anchored via
+- **Globals:** `dword_25DC550 → g_PlayerInfoClassMask`,
+  `dword_25DC54C → g_PlayerInfoTeamMask`, `dword_25510FC → g_CurPlayerProfile`,
+  `dword_25506B8 → g_GameConfigState.currentProfileSlot_000`, `byte_2551130 → g_CharSelClass`,
+  `byte_2551131 → g_CharSelNationality`, `byte_2551132 → g_CharSelDivision`,
+  `word_2551134 → g_CharSelCombo`; `dword_2540CE0 → g_WeaponDefTable`,
+  `dword_2540CDC → g_WeaponDefCount` (the loadout weapon table, anchored via
   `WeaponDef_LoadAll @ 0x54dd10`).
 - Entry comments linking the eight orchestration functions + `WeaponDef_LoadAll` to
   this record.
@@ -768,9 +768,9 @@ Applied to `Jointops.exe.kong.i64` (all auto-named, anchored; saved):
 Names already curated (used as-is): `PlayerInfo_PopulateAllControls @ 0x5606f0`,
 `PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_RegisterAllControls @
 0x561470`, `PlayerInfo_HandleNationalitySelect @ 0x560600`,
-`PlayerInfo_HandleVoiceSelect @ 0x55fe00`, `save_player_info_from_dialog @
-0x55ee10`, `populate_weapon_slot_lists @ 0x560430`,
-`update_player_info_weight_and_weapon_icons @ 0x55f480`.
+`PlayerInfo_HandleVoiceSelect @ 0x55fe00`, `PlayerInfo_SaveFromDialog @
+0x55ee10`, `PlayerInfo_PopulateWeaponSlotLists @ 0x560430`,
+`PlayerInfo_UpdateWeightAndWeaponIcons @ 0x55f480`.
 
 Still proposed (NOT applied — generic UI framework / struct declarations, propose
 first): the IDB names landed as `UI_FindScreenControl @ 0x63ae80`, `UIList_SelectByValue @ 0x645240`, `UIList_GetSelectedValue @ 0x644660`, `CUIScene_RegisterControlCallback @ 0x63c060` (the proposals were `sub_63AE80 → UIScene_FindWidgetByName`, `sub_645240 →
@@ -781,7 +781,7 @@ UI_RegisterScreenControlCallback`; declare the weapon-table struct `@ 0x2540D08`
 ## Follow-ups / open questions
 
 - **Second avatar-defs init path.** `AvatarDefs_Init` (referenced at `0x53d281`
-  and `0x53d2b4` inside `avatar_def_function_size_callback`) clears a
+  and `0x53d2b4` inside `AvatarDef_FunctionSizeCallback`) clears a
   `0x6000 + 0x4D00` object and also parses `Avatars.def` — a different/alternate
   manager. Unwitnessed; resolve whether it is a separate consumer (e.g. server-
   side) before assuming a single object.

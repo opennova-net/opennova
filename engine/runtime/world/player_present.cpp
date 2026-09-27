@@ -4,7 +4,7 @@
 
 namespace opennova::world {
 
-// [orig: the FP viewmodel gate g_camera_mode == 0 in
+// [orig: the FP viewmodel gate g_CameraMode == 0 in
 //  Entity_ComputeActionTransform @0x40133e -- the death lerp camera (4)
 //  presents like the chase (1)]
 bool presents_third_person(bool third_person, int camera_mode) {

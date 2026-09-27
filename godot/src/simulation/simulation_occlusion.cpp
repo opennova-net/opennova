@@ -303,7 +303,7 @@ void collect_view_verdicts(opennova::mission::MissionKernel &kernel,
 	// person: the collector has no local-player exception (first person only
 	// skips the body's draw later), so it takes the same gate before its
 	// stance can anchor the MODEL tier.
-	// [orig: collect_visible_entities_for_terrain @ 0x5c8c60 (pool walk
+	// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 (pool walk
 	// @ 0x5c8caa..0x5c8cd9, the gates @ 0x5c8cef..0x5c8eab)]
 	if (opennova::world::Entity *local =
 				kernel.world.registry.get(kernel.world.cached.local_player);
@@ -351,7 +351,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 
 	// The entity collectors' render gates over the non-building entities the
 	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
-	// collect_visible_entities_for_terrain @ 0x5c8c60]
+	// Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60]
 	// The death pieces ride the same collect, after the scar caches (retail
 	// DeathPiece_CollectVisible @ 0x57b560, called from
 	// Terrain_CollectVisibleEntities @ 0x5c91bc).

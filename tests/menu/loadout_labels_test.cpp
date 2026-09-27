@@ -4,7 +4,7 @@
 // id fallback, the "<rounds> - <round label>" ammo row with the null-def
 // form, the armory's case-insensitive row order, and the weight readout with
 // its encumbrance band tokens.
-// [orig: populate_weapon_slot_lists @0x560430; update_weapon_weight_display
+// [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430; UI_UpdateWeaponWeightDisplay
 //  @0x565640; ListWidget_SortRows cmp @0x6448a0]
 #include <runtime/menu/loadout_labels.h>
 

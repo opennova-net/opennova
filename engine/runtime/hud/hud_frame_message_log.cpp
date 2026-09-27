@@ -2,7 +2,7 @@
 // ring down the left column and the SYSTEM ring down the right, sixteen rows
 // each, no expiry gate [orig: HUD_DrawMessageLog @0x5b9d70, called from the
 // frame drawer Server_DrawStatusScreen @0x50a2d0 (the call @0x50b21f) when
-// g_showMessageLog @0x24C18C0 is set — no hud_detail / declutter test on that
+// g_ShowMessageLog @0x24C18C0 is set — no hud_detail / declutter test on that
 // path].
 //
 // Geometry is computed in SCREEN pixels from the surface width
@@ -21,7 +21,7 @@ namespace opennova::hud {
 void HudFrameCompiler::element_message_log(const HudFrameState &state, float w,
 		float h) {
 	if (!state.message_log_shown) return;
-	// Every row rides the BOLD label font [orig: &g_hudLabelFontBold at both
+	// Every row rides the BOLD label font [orig: &g_HUDLabelFontBold at both
 	// column draws @0x5b9eac/@0x5b9ef2]; layout-only embedders fall back.
 	const bool have_bold = label_font_bold_.font() != nullptr;
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;

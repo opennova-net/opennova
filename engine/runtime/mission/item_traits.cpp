@@ -77,7 +77,7 @@ void bind_regional_sounds(world::World &world, const DefItemDef &def,
 // repeats 102044: "Map Named Location" first, "Power Up Med Pack Infinite"
 // later). [orig: ItemList_FindIndexByTypeId @0x49E100 — `cmp [ecx],esi; jz`
 // @0x49E120..0x49E122 returns the first hit; Entity_SpawnFromBMSRecord
-// ItemTypeIndex @0x40EBFC, ItemDef = gItemDefs + index @0x40EBFF..0x40EC07]
+// ItemTypeIndex @0x40EBFC, ItemDef = g_ItemDefs + index @0x40EBFF..0x40EC07]
 std::unordered_map<int, const DefItemDef *> index_items(
         const DefItemsFile &items) {
     std::unordered_map<int, const DefItemDef *> by_id;
@@ -174,7 +174,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // "Null" row is ordinal 0 too): each `begin` appends the next row.
         // [orig: entity+0x1C = ItemList_FindIndexByTypeId(type) @0x40EBFC; the
         //  `begin` arm of ItemDef_ParseProperty @0x49EBA8 allocates the row,
-        //  ItemDef_AllocateWithDefaults @0x49E3BE bumps gItemCount]
+        //  ItemDef_AllocateWithDefaults @0x49E3BE bumps g_ItemCount]
         e->item_type_index = def != nullptr ? static_cast<int32_t>(def - items.entries) : 0;
         // The org1 initializer seeds this magazine even without an ammo name.
         // Bind the definition value here; a later traits refresh must not refill it.
@@ -666,7 +666,7 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items,
             const int id = world.tables.ammo.index_of(ammo_names[slot]);
             weapons.ammo[slot] = static_cast<uint8_t>(id >= 0 ? id : 0);
         }
-        // modelgpm_FindUserpointByName returns the FIRST case-insensitive
+        // ModelGPM_FindUserpointByName returns the FIRST case-insensitive
         // match. The index-plus-one stores wrap to a byte, as in retail.
         // [orig: Entity_InitOrganicAI @0x4BFE8F..0x4BFF82]
         const auto *model = models != nullptr ? models->model(def->graphic).get() : nullptr;

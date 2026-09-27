@@ -89,7 +89,7 @@ public:
     // run it. [orig: Entity_RemovePlacedDevicesByOwner @0x546E00]
     void remove_placed_devices_by_owner(EntityHandle owner);
     // BMS VaporizeSingle: the first pool 0..3 row carrying the SSN is removed
-    // with the notification. [orig: find_entity_by_parent_and_dispatch @0x43e210]
+    // with the notification. [orig: Entity_FindByParentAndDispatch @0x43e210]
     bool remove_bms_ref(int32_t ssn);
     // WAC SSNHP: the health word, the attacker cleared; no gate.
     // [orig: WacCmd_SsnHp @0x4F2100]

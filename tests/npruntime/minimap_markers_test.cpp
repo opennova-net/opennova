@@ -1,7 +1,7 @@
 // The retained minimap marker rows (npruntime/minimap_markers.h): bank order,
 // the policy resolve against the local entity, and the locally deployed
 // player's restored regular row — appended only when no decoded regular row
-// already covers its wire handle. [orig: render_minimap_slot_blip @0x5BE240;
+// already covers its wire handle. [orig: Render_MinimapSlotBlip @0x5BE240;
 // the regular TSDicon submit @0x597F73]
 #include <cstdint>
 #include <cstdio>

@@ -3111,7 +3111,7 @@ bool run_medic_request_queues_one_reliable_0x2e() {
 }
 
 // The server-info VarList walk lands EXP_FANFARE as the u16 the 0x81 tone
-// ladder reads [orig: parse_server_session_variables @0x520440 -> @0x520478].
+// ladder reads [orig: Client_ParseServerSessionVariables @0x520440 -> @0x520478].
 bool run_session_vars_exp_fanfare_walk() {
 	auto kv = [](std::vector<uint8_t> &out, const char *key, std::vector<uint8_t> value) {
 		for (const char *p = key; *p; ++p) out.push_back(uint8_t(*p));
@@ -3456,7 +3456,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	// startup 0x0C organic row streams, but no compact record ever folds — the
 	// host presents the mounted child from its own pools, where the attach
 	// already lifted it through the load-time no-callback carrier
-	// [orig: serialize_entity_states_to_packet @0x50f07e].
+	// [orig: NetPacket_SerializeEntityStatesToPacket @0x50f07e].
 	const ns::ClientEntityState *child = host_view.view().state().find(infantry_h.packed);
 	if (!expect(child != nullptr && child->type_id == 5311,
 	            "production host startup streams the infantry 0x0C row")) return false;
@@ -3511,7 +3511,7 @@ bool run_host_startup_maps_claymore_preference() {
 }
 
 // The advertised NoTracers mission attribute (rules word bit 0) feeds the authoritative
-// tracer-visual gate the same way [orig: g_rules_flags @ 0x24D1E34 & 1 @ 0x4ec41f].
+// tracer-visual gate the same way [orig: g_RulesFlags @ 0x24D1E34 & 1 @ 0x4ec41f].
 bool run_host_startup_maps_no_tracers_rule() {
 	{
 		w::World world;
@@ -3627,7 +3627,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 // [orig: challenge senders NapiNPClientMsg_HandleChecksumChallenge @0x42E6D0 (-> 0x1C),
 //  NapiNPClientMsg_0x043 @0x42FA90 (-> 0x08), NapiNPClientMsg_0x068 @0x42DAA0 (-> 0x3D);
 //  host side NapiNPServerMsg_AnimChecksumRequest @0x501D40 (discard @0x501d71 + counter
-//  reset @0x501d79), NapiNPServerMsg_0x03D @0x500EC0, validate_time_sync @0x502210]
+//  reset @0x501d79), NapiNPServerMsg_0x03D @0x500EC0, NapiNPServerMsg_ValidateTimeSync @0x502210]
 bool build_retail_class8_charattr_table(
 		inmatch::CharAttrChallengeTable &table) {
 	// Sections 1..7 only need to exist: CharAttr_LoadFromDef stops at the
@@ -4316,7 +4316,7 @@ bool run_client_quality_level_folds_the_ping_ring() {
 }
 
 // The client window's frame-pressure term reads the main loop's FR counter
-// [orig: CNetQuality_UpdateMetrics @0x4C5643 g_statsAvgFps]: with no ping
+// [orig: CNetQuality_UpdateMetrics @0x4C5643 g_StatsAvgFps]: with no ping
 // samples (term 1) an 8 fps rate scores 256 - 128 = 128 per sample (five
 // samples: level 2), and the unmeasured 0 of the first 2 s window (retail's
 // mode-init value, the default) scores the ceiling 255 (level 3).
@@ -5085,7 +5085,7 @@ bool run_finite_quality_retention_expires_on_flush_310() {
 }
 
 // S2C 0x0F carries the authority's 128-dword ammo-pool image (serverPlayer+88664 ->
-// client g_localAmmoPools) at the fixed body offset 23; the runtime retains it with
+// client g_LocalAmmoPools) at the fixed body offset 23; the runtime retains it with
 // a revision the embedder applies after the 0x5A slot rebuild, and start() clears
 // it with the other authoritative state. [orig: NapiNPClientMsg_0x00F
 // @0x42e324..0x42e34a -> WeaponSlots_RecalculateAmmoFromCapacity @0x42e424]

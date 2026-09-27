@@ -310,7 +310,7 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
         // An addeweap child carries the full bone attitude into its own model,
         // collision, and camera. Ordinary infantry retain independent LOOK.
         // [orig: Entity_UpdateTransformAndTurret @0x440ca0 ->
-        //  build_bone_attachment_matrix @0x56c630]
+        //  Bone_BuildAttachmentMatrix @0x56c630]
         occ.veh.yaw_seeded = true;
         occ.veh.yaw_bam = live.heading;
         occ.veh.air_pitch_bam = live.pitch;

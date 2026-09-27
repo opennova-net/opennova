@@ -21,9 +21,9 @@ std::array<float, 4> build_point_light_attenuation(float light_range);
 // how it reaches the shader path (ColorSrcGlobalGain, handle slot 232) and
 // the effects/foliage/point-light renderers.
 // [orig: Render_UnpackModulatorToLightScale @ 0x58db30 ->
-//  Render_LightScaleR/G/B @ 0x8409f4..fc, consumed by apply_shader_parameters
+//  g_RenderLightScaleR/G/B @ 0x8409f4..fc, consumed by Material_ApplyShaderParameters
 //  @ 0x58e05d; EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaef0 ->
-//  EffectWorld_AmbientScaleR/G/B @ 0x840b24..2c]
+//  g_EffectWorldAmbientScaleR/G/B @ 0x840b24..2c]
 std::array<float, 3> unpack_modulator_scale(uint32_t packed_rgb);
 
 // The per-scene-pass world lighting block, built from the environment color
@@ -32,11 +32,11 @@ std::array<float, 3> unpack_modulator_scale(uint32_t packed_rgb);
 // [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 ->
 //  RenderBatchCtx_StoreLightingConstants @ 0x5d89e0 (ctx+112..236)]
 struct WorldLightingInputs {
-	uint32_t light_packed = 0;   // Env_LightBlock[0]  @ 0x26c6574 (sun by day, moon by night)
-	uint32_t sky_packed = 0;     // Env_SkyBlock[0]    @ 0x26c65dc
-	uint32_t ground_packed = 0;  // Env_GroundBlock[0] @ 0x26c6610
-	uint32_t ceiling_packed = 0; // Env_CeilingBlock[0] @ 0x26c6470 (indoor "sky")
-	uint32_t floor_packed = 0;   // Env_FloorBlock[0]  @ 0x26c64d8 (indoor "ground")
+	uint32_t light_packed = 0;   // g_EnvLightBlock[0]  @ 0x26c6574 (sun by day, moon by night)
+	uint32_t sky_packed = 0;     // g_EnvSkyBlock[0]    @ 0x26c65dc
+	uint32_t ground_packed = 0;  // g_EnvGroundBlock[0] @ 0x26c6610
+	uint32_t ceiling_packed = 0; // g_EnvCeilingBlock[0] @ 0x26c6470 (indoor "sky")
+	uint32_t floor_packed = 0;   // g_EnvFloorBlock[0]  @ 0x26c64d8 (indoor "ground")
 	// The environment light direction (sun/moon), pre-negation
 	// [orig: Environment_GetLightDirectionFloat @ 0x57d870].
 	std::array<float, 3> light_dir = { 0.0f, 0.0f, 0.0f };
@@ -46,9 +46,9 @@ struct WorldLightingInputs {
 	//  g_NVGBrightnessLevel @ 0xb76550].
 	bool nvg_hemi_rewrite = false;
 	int nvg_level = 0;              // 0..4
-	uint32_t modulator_packed = 0;  // Env_ModulatorBlock[0] @ 0x26c6644
+	uint32_t modulator_packed = 0;  // g_EnvModulatorBlock[0] @ 0x26c6644
 	// The thermal-view grey override: dir 0.1, everything else 0.5, dir
-	// disabled [orig: @ 0x5c837c..0x5c843c, gated on Player_CanFireWeapon &&
+	// disabled [orig: @ 0x5c837c..0x5c843c, gated on Player_IsOpticalViewVisible &&
 	// the equipped weapon def's flags2 & 4 (Thermal) — the IDB's
 	// Player_IsHeldWeaponThermal @ 0x4dcd70 reads EquippedSlot(+0x118)
 	// ->Def(+0x20)->flags2(+0x0C)]. The production feed is
@@ -89,7 +89,7 @@ WorldLightingBlock build_world_lighting(const WorldLightingInputs &in);
 // daylight-openness float (interior model data +536, captured into the
 // render-state stack aux -> entry[10]); effect_scale = the per-entity
 // sun-visibility factor (entry[9]).
-// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0 — lerp branch
+// [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0 — lerp branch
 //  @ 0x5d9a6a.., direct branch @ 0x5d9db5..]
 struct EntityLightingUniforms {
 	std::array<float, 3> dir_color = { 0.0f, 0.0f, 0.0f };   // slot 227 (x scale [x t])
@@ -111,7 +111,7 @@ EntityLightingUniforms compute_entity_lighting(const WorldLightingBlock &block,
 // is its OWN ItemDef+0x218 (light_transfer / 100) and every submit carries
 // 0x40, which the rigid collector turns into the interior lerp for ROBJ 1+
 // only [orig: @ 0x5c5df2..0x5c5e00; `push 40h` @ 0x5c5f1f;
-// collect_render_objects_for_batch @ 0x5d914f..0x5d9162]. Any other static is
+// Render_CollectRenderObjectsForBatch @ 0x5d914f..0x5d9162]. Any other static is
 // a non-person entity-wave draw: contained (a placement blink hit) takes the
 // lerp with the stack-base aux 0, which the non-person wave never overwrites
 // [orig: Terrain_RenderSectorEntities @ 0x5c7c05..0x5c7c14;
@@ -142,7 +142,7 @@ std::array<float, 3> ff_vertex_light(const EntityLightingUniforms &u,
 
 // The fixed-function output combine is MODULATE2X(Texture, Diffuse): pixel =
 // texture * saturated vertex light * 2 [orig: _FFP.fx TBoringFFP TSSColor;
-// decode_mode_color_stage @ 0x681080 mode 0x600]. VS_TRACER alone modulates
+// RenderState_DecodeModeColorStage @ 0x681080 mode 0x600]. VS_TRACER alone modulates
 // 1x (MODULATE, unlit — the OSCAP_VIEW_FADE path).
 inline constexpr float kFFModulate2x = 2.0f;
 
@@ -180,10 +180,10 @@ std::array<float, 4> point_light_attenuation(int32_t range_fixed);
 // both /255 — pushed per terrain draw; the foliage/sector-model blend PS
 // inherits the same two device constants (its combine is
 // t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8 with t1 = the planar lightmap tile).
-// [orig: compile_terrain_pixel_shaders @ 0x605260 (the shared PS shape);
-//  terrain_setup_lighting_and_shader @ 0x604420 (c0 <- PolyTrn_PSConstC0_Sky,
-//  c1 <- PolyTrn_PSConstC1_Light); init_terrain_lighting_color_ramps
-//  @ 0x604ee0 <- Render_TerrainScene @ 0x610c80 (Env_LightBlock/Env_SkyBlock;
+// [orig: Terrain_CompilePixelShaders @ 0x605260 (the shared PS shape);
+//  Terrain_SetupLightingAndShader @ 0x604420 (c0 <- PolyTrn_PSConstC0_Sky,
+//  c1 <- PolyTrn_PSConstC1_Light); Terrain_InitLightingColorRamps
+//  @ 0x604ee0 <- Render_TerrainScene @ 0x610c80 (g_EnvLightBlock/g_EnvSkyBlock;
 //  NVG / vehicle-scope overrides); Foliage_CreateLightmapBlendPS @ 0x5ff7a0]
 std::array<float, 3> terrain_surface_light(float sun_mask,
                                            const std::array<float, 3> &light,

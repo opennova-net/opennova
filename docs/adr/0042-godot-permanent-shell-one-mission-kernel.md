@@ -27,7 +27,7 @@ times (godot/src/simulation; tests/common/retail_mission_rig, whose 1,329 Godot-
 ~15 Simulation methods verbatim; apps/nw_server, which boots no terrain, tables or collision; two
 more boots in tests/mission), the engine has no inspection API (the ~50 Dictionary getters on
 Simulation and a GDScript join in debug_entities.gd are the inspection API), and the witnessed
-`Player_CanFireWeapon @0x5cf780` port's only `[orig:]` cite ships in the TEST rig while the
+`Player_IsOpticalViewVisible @0x5cf780` port's only `[orig:]` cite ships in the TEST rig while the
 shipping copy in simulation_player.cpp is uncited — a live violation of the one-implementation
 rule.
 

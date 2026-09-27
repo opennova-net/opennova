@@ -4,7 +4,7 @@ extends GutTest
 ## ObjectModel is its own draw context — owned pool lights reach ONLY their
 ## owner entity's draws, world lights reach every nearby draw, and the
 ## selected three land as per-instance shader parameters
-## [orig: the per-draw collect @ 0x5aa250 feeding update_light_slots
+## [orig: the per-draw collect @ 0x5aa250 feeding Light_UpdateSlots
 ## @ 0x5abc50 with that draw's owner group].
 
 const PMP_3DI := "res://../fixtures/threedi/synth/pump.3di"
@@ -70,7 +70,7 @@ func _static_light_atlas(scene: LightScene) -> Image:
 
 ## The owner light group a submit declares [retail
 ## Terrain_RenderSectorEntitiesBySide Lighting_SetOwnerLightGroup @0x5c7fb1 /
-## @0x5c8004; collect_render_objects_for_batch re-scopes rigid ROBJs to
+## @0x5c8004; Render_CollectRenderObjectsForBatch re-scopes rigid ROBJs to
 ## (0, robj) @0x5d8ff7; Render_SubmitEntity @0x5daddc]: an owned light reaches
 ## its owner's SKINNED person draw only. A rigid model -- the held gun, a
 ## vehicle, a prop -- never takes its own owned light.
@@ -465,7 +465,7 @@ func test_static_building_rows_rescope_owned_lights_per_robj() -> void:
 ## CONTAINING building + that volume's section, and each draw declares the
 ## building it stands inside so the room's light reaches exactly the draws in
 ## that room [orig: Entity_SpawnGlowEffects @ 0x56c8bd..0x56c8db;
-## setup_terrain_effect_for_entity @ 0x5c74a0 -> Lighting_SetInteriorLightGroup
+## Terrain_SetupEffectForEntity @ 0x5c74a0 -> Lighting_SetInteriorLightGroup
 ## @ 0x5a90e0; the gate Light_PassesActiveGroups @ 0x5a9120].
 func test_blink_owned_light_reaches_only_its_own_interior_section() -> void:
 	var container := Node3D.new()
@@ -491,7 +491,7 @@ func test_blink_owned_light_reaches_only_its_own_interior_section() -> void:
 	var interior_sections := PackedInt32Array([2, 5, 0])
 	# The building here is an ordinary rigid entity draw (not the building
 	# batch): it re-scopes to (0, robj) with no interior group, so its own
-	# room light does not reach it [retail collect_render_objects_for_batch
+	# room light does not reach it [retail Render_CollectRenderObjectsForBatch
 	# @0x5d8ff7].
 	assert_eq(scene.render_model_frame(models, owners, interior_owners,
 			interior_sections, PackedByteArray([0, 0, 0]),
@@ -544,7 +544,7 @@ func test_a_buildings_own_unattached_record_stays_a_world_light() -> void:
 ## ROBJ. Attached section-2 and section-4 lights therefore reach only those
 ## two render objects, even though every part shares one entity owner.
 ## [orig: Terrain_RenderSectorModels @0x5c5e07 pushes building/section 0;
-## collect_render_objects_for_batch @0x5d8ff7 re-scopes owner section].
+## Render_CollectRenderObjectsForBatch @0x5d8ff7 re-scopes owner section].
 func test_building_owned_lights_are_selected_per_robj() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -706,7 +706,7 @@ func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
 	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(light_pos, 0.1)), 0)
 	# An owned light of the same entity inside the cube: every one of these
 	# draws is RIGID, re-scoped to (0, robj), so none takes it [retail
-	# collect_render_objects_for_batch @0x5d8ff7].
+	# Render_CollectRenderObjectsForBatch @0x5d8ff7].
 	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(
 			light_pos + Vector3(0, 0.5, 0), 0.1).attached(1, LightScene.owner_id_for_wire(77))), 0)
 	# A tempting light at the posed held model's origin is outside the entity cube.

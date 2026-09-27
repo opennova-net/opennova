@@ -4,7 +4,7 @@ extends GutTest
 ## terrain patch (an AABB), the pool lights whose volume overlaps it, gated by
 ## the authored terrain-disable flag, as the rows the terrain shader re-draws
 ## the patch with — the terrain twin of per_model_light_isolation_test
-## [orig: the per-light arm of render_terrain_sector_batch @0x6092A0
+## [orig: the per-light arm of Terrain_RenderSectorBatch @0x6092A0
 ## (the <= 16 collect @0x609658, both light groups cleared @0x60967c /
 ## @0x609685, LightInstance_IsAliveAndLightsTerrain @0x609880) ->
 ## Light_SetupTerrainProjectedPassPS @0x5aab30, the reference adapter's

@@ -9,7 +9,7 @@
 //  @ 0x57b830 (the level walk) from Terrain_RenderWorldScene @ 0x5c9575,
 //  and DeathPiece_RenderSection @ 0x57b690 (the section draw); the
 //  256 x 180-B pool
-//  g_death_piece_pool @ 0x26bac58]
+//  g_DeathPiecePool @ 0x26bac58]
 #pragma once
 
 #include <array>

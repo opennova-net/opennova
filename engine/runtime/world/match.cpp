@@ -35,7 +35,7 @@ constexpr int32_t kTicksPerMinute = 60 * io::kTicksPerSecondInt;
 // 4102 @0x4dd216, and Entity_ProcessWaypointInteraction @0x4AD820's id switch
 // (jumptable @0x4ad89a) carries the bay cases (4100 @0x4ad9a4, 4103 @0x4ad9d4,
 // 4102 @0x4ad9e1). The hill: the proximity pass's pool-3 scan @0x5089e8,
-// Entity_SpawnFromBMSRecord @0x40E9F0 @0x40f157, find_max_proximity_coverage
+// Entity_SpawnFromBMSRecord @0x40E9F0 @0x40f157, CaptureZone_FindMaxProximityCoverage
 // @0x5BF4D0 @0x5bf511.
 constexpr int32_t kBlueFlag = 4091;       // [orig: @0x52f7e1 / @0x50883b]
 constexpr int32_t kRedFlag = 4093;        // [orig: @0x52f7ef / @0x508842]
@@ -426,8 +426,8 @@ void Match::configure(const MatchRules &rules) {
     gameplay_events_.clear();
     // Game_StartMission starts at -1 and seeds GameTime only for a network
     // session outside the Co-op waypoint family, and only when nonzero.
-    // [orig: g_round_time_remaining=-1 @0x524A89; seed
-    // 3720*g_respawn_time @0x525242..0x525251; decrement @0x5266D6]
+    // [orig: g_RoundTimeRemaining=-1 @0x524A89; seed
+    // 3720*g_RespawnTime @0x525242..0x525251; decrement @0x5266D6]
     if (rules.game_time_minutes != 0 && !is_waypoint_family(rules.game_type)) {
         const uint64_t ticks = uint64_t(rules.game_time_minutes) * kTicksPerMinute;
         remaining_ticks_ = ticks > uint64_t(std::numeric_limits<int32_t>::max())
@@ -629,7 +629,7 @@ void Match::ensure_objective_census(const World &world) {
     world.registry.for_each([&](const Entity &entity) {
         // CTF's two target globals count the authored opposing flags once at
         // round start. Capturing one removes its entity but not the target.
-        // [orig: reset_round_counters @0x516C50; CTF arm @0x51B0F0]
+        // [orig: Server_ResetRoundCounters @0x516C50; CTF arm @0x51B0F0]
         if (entity.item_id == kRedFlag)
             ++flag_capture_targets_[1];
         else if (entity.item_id == kBlueFlag)
@@ -637,7 +637,7 @@ void Match::ensure_objective_census(const World &world) {
 
         // S&D/AD count item-attrib 0x8000 targets by defending team; the
         // opposite team must destroy that complete authored census.
-        // [orig: reset_round_counters @0x516C50; win arm @0x51B18B]
+        // [orig: Server_ResetRoundCounters @0x516C50; win arm @0x51B18B]
         if ((entity.item_attrib & kItemAttribObjectiveTarget) != 0) {
             if (entity.team == 1)
                 ++demolition_targets_[2];
@@ -1233,7 +1233,7 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
 // (D-AI-10; world-wac-ai-re §20.4).
 // [orig: Score_ProcessKillEvent @0x4FD400 — killer @0x4FD405, target def
 //  @0x4FD41E, `cmp word ptr [eax+194h], 0` @0x4FD422, event 12 @0x4FD438, the
-//  session test @0x4FD440..0x4FD447, `cmp edi, g_local_player_entity` @0x4FD449;
+//  session test @0x4FD440..0x4FD447, `cmp edi, g_LocalPlayerEntity` @0x4FD449;
 //  Score_TallyKillByLocalPlayer @0x4FD160 (persons @0x4FD1F6 / @0x4FD213);
 //  Score_TallyKillByOthers @0x4FD300 (@0x4FD325..0x4FD366)]
 void Match::process_kill_event(World &world, const RoundDeath &death) {
@@ -1847,7 +1847,7 @@ void Match::advance_tick(World &world, TickPhase phase) {
     // Flags use their own class countdown. The host reads the shared verdict
     // through periodic_second(). The countdown keeps running after the round
     // ends because the host's linger-phase legs still ride it.
-    // [orig: g_periodic_second_timer in Server_TickUpdate @0x51D7E0;
+    // [orig: g_PeriodicSecondTimer in Server_TickUpdate @0x51D7E0;
     // Server_UpdateCaptureZoneProximity @0x5086A0]
     if (periodic_second_timer_ > 0)
         --periodic_second_timer_;
@@ -2058,7 +2058,7 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         // The clinch: each team's floor is score - koth_delta * remaining; the
         // moment one floor exceeds every other team's score + remaining the
         // round clock is zeroed. [orig: Server_CheckWinConditions
-        // @0x51B018..0x51B064 — g_koth_delta * remaining @0x51B018..0x51B024,
+        // @0x51B018..0x51B064 — g_KothDelta * remaining @0x51B018..0x51B024,
         // the four floor comparisons @0x51B02C..0x51B062, clock = 0 @0x51B064]
         if (remaining_ticks_ > 0) {
             for (uint8_t team = 1; team <= 4; ++team) {
@@ -2157,7 +2157,7 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
     }
 
     if (rules_.game_type == gt::kFlagMe) {
-        // `if (!g_kill_limit) return;` guards the whole arm, then the per-slot
+        // `if (!g_KillLimit) return;` guards the whole arm, then the per-slot
         // field-0xB scan ends the round with no clock arm at all.
         // [orig: Server_CheckWinConditions @0x51B422..0x51B47C]
         if (rules_.max_score == 0)
@@ -2268,7 +2268,7 @@ bool Match::finish(int32_t winner_team, const World &world) {
     // non-team type the sort key IS the primary.
     // [orig: Server_BuildEndOfRoundScoreboard — max @0x509053..0x509055, v47
     // = 1 @0x50909D, the per-row clear @0x50920E..0x509210, the single-row
-    // clear @0x50926A..0x50926C, g_endround_draw_flag @0x509270/@0x5092B2]
+    // clear @0x50926A..0x50926C, g_EndRoundDrawFlag @0x509270/@0x5092B2]
     int32_t max_key = 0;
     for (const MatchResultPlayer &row : result_.players)
         max_key = std::max(max_key, row.primary_score);

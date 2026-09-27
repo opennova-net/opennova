@@ -33,8 +33,8 @@ int16_t weapon_scope_zero_initial(const WeaponScopeZero &zero);
 // rangefinder zero) offline or when the mpattrib rules word carries 0x10000,
 // else at 0, then at +0x88 when set.
 // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd3f -- `cmp
-//  g_napi_np_ctx.is_in_session,0` @0x4dbd0c, `test g_rules_flags,10000h`
-//  @0x4dbd15 (g_rules_flags @0x24D1E34 = the mpattrib word), the -1 floor
+//  g_NapiNPCtx.is_in_session,0` @0x4dbd0c, `test g_RulesFlags,10000h`
+//  @0x4dbd15 (g_RulesFlags @0x24D1E34 = the mpattrib word), the -1 floor
 //  @0x4dbd29..0x4dbd2e, the 0 floor @0x4dbd21..0x4dbd25]
 int16_t weapon_scope_zero_adjust(const WeaponScopeZero &zero, int16_t current,
     int delta, bool in_session, bool auto_scope_zero);

@@ -232,7 +232,7 @@ void SkyDome::advance_frame(double p_delta) {
 		// The sky wrapper keeps its dedicated skyfog color and its own fog end
 		// on both sides of the water plane: the engine frame's fog_end is the
 		// raw smoothed distance the dome VS constant c9.x carries unconditionally
-		// (sky_frame.cpp cites render_skybox @ 0x5792c2); the murk-derived
+		// (sky_frame.cpp cites Render_Skybox @ 0x5792c2); the murk-derived
 		// world end is the object/terrain passes' alone.
 		_set_dome_parameter("u_fog_end", frame.fog_end);
 		_set_dome_parameter("u_sky_height", frame.sky_height);
@@ -295,7 +295,7 @@ void SkyDome::_set_dome_parameter(const StringName &p_name,
 }
 
 // The cloud pass exists only on the shader path with a bound cloud layer
-// (retail render_skybox pass 2 @ 0x5798f1..0x579b15; the flat
+// (retail Render_Skybox pass 2 @ 0x5798f1..0x579b15; the flat
 // advanced_clouds=0 path @ 0x579b42 draws the single flat dome).
 void SkyDome::_apply_cloud_pass(bool p_drawn) {
 	if (sky_material_.is_null()) {

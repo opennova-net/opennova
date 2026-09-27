@@ -3,8 +3,8 @@ extends GutTest
 # =============================================================================
 # Water surface pins (env #29, docs/env/env-tod-re.md "Water surface"):
 # the witnessed per-side material swap (camera-above -> the BLEND material,
-# underwater -> the OPAQUE one [orig: selection in render_water_surface
-# @ 0x5c33e6..0x5c34ea; Water_ShaderOpaque @ 0x28ee8c8]) and the retirement of
+# underwater -> the OPAQUE one [orig: selection in Render_WaterSurface
+# @ 0x5c33e6..0x5c34ea; g_WaterShaderOpaque @ 0x28ee8c8]) and the retirement of
 # the invented terrain-fog-curve uniforms (the water fog is the per-row
 # spec-alpha factor). ADR 0018 discipline: everything pins through PUBLIC
 # seams only — exported/public properties and shader parameters.
@@ -84,7 +84,7 @@ func test_water_pass_follows_the_visible_terrain_height_range() -> void:
 	# Retail runs the reflection prerender, the noise pair and the strip only
 	# while the lowest visible terrain sits at or below the water height, or
 	# the Blink walk saw the water last frame [orig:
-	# terrain_setup_view_and_lighting @ 0x60fe40 @ 0x60ff12..0x60ff33].
+	# Terrain_SetupViewAndLighting @ 0x60fe40 @ 0x60ff12..0x60ff33].
 	var fixture := _make_water_fixture(4.0)
 	var water: Node = fixture["water"]
 	assert_true(water.is_water_pass_active(),
@@ -146,7 +146,7 @@ func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:
 func test_reflection_rtt_is_the_512_square_at_the_main_field() -> void:
 	# Retail's 512 x 512 RTT renders with the main view's projection (the
 	# target's h/w as the vertical scale over the square viewport, retail
-	# render_main_scene @ 0x5c1255..0x5c163e): the main field over the square,
+	# Render_MainScene @ 0x5c1255..0x5c163e): the main field over the square,
 	# non-square texels. The raster is served that frustum
 	# (TargetProjectionXrInterface); the mirror camera node keeps the source's
 	# frame, so its own projection is the source camera's.
@@ -445,7 +445,7 @@ func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 	# Exercise the exact strip payload consumed by the shader too. Sample each
 	# row's LEFT vertex because vbase is built from that vertex's rhw and then
 	# copied across the row. vbase = 1 - min(300 * rhw + 0.15, 2) / 256
-	# (flt_7DBF68 = 300.0, retail render_water_strip_detailed @ 0x5c2f04).
+	# (flt_7DBF68 = 300.0, retail Render_WaterStripDetailed @ 0x5c2f04).
 	var mesh := water.get_mesh_instance().mesh as ArrayMesh
 	assert_gt(mesh.get_surface_count(), 0,
 			"the reflected projection fixture must produce water strip rows")
@@ -499,7 +499,7 @@ func test_underwater_swaps_to_opaque_side() -> void:
 	water.set_mission_water_height_override(7.0)
 	water.advance_frame(TICK)
 	# Drop the camera below the 7.0 plane: the pass swaps to the OPAQUE
-	# material [orig: Water_ShaderOpaque @ 0x28ee8c8; selection
+	# material [orig: g_WaterShaderOpaque @ 0x28ee8c8; selection
 	# @ 0x5c33e6..0x5c34ea].
 	cam.global_position = Vector3(100.3, 1.0, -33.7)
 	env.set_underwater_view(true)
@@ -515,7 +515,7 @@ func test_mirror_clears_to_the_skyfog_or_black_under_the_indoors_letter() -> voi
 	# The mirror RTT has its own clear: the skyfog on the prerender's outdoors
 	# path, black under the indoors blink letter, and no thermal, waterline or
 	# NVG leg (EnvironmentState::water_mirror_clear_color; retail
-	# render_main_scene @ 0x5c1342..0x5c1353, @ 0x5c1474, @ 0x5c1597). The
+	# Render_MainScene @ 0x5c1342..0x5c1353, @ 0x5c1474, @ 0x5c1597). The
 	# mirror camera carries it in its own BG_COLOR environment, pre-encoded
 	# like the beauty clear, whatever the beauty clear shows.
 	var fixture := _make_water_fixture()
@@ -651,7 +651,7 @@ func test_strip_and_mirror_register_to_the_nvg_raster() -> void:
 	# served through TargetProjectionXrInterface). The strip marches over that
 	# square under that projection, and the mirror takes the same frustum over
 	# its own square (retail NVG_RenderScene @ 0x5d2954..0x5d296d; the mirror,
-	# render_main_scene @ 0x5c1619..0x5c163e).
+	# Render_MainScene @ 0x5c1619..0x5c163e).
 	var world := WorldFixture.boot_minimal(self)
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
@@ -703,11 +703,11 @@ func test_strip_and_mirror_register_to_the_nvg_raster() -> void:
 func test_strip_texcoords_are_the_render_basis_world_over_32() -> void:
 	# Retail's texcoord 0 (duplicated into texcoord 3) is the unprojected
 	# ABSOLUTE render-basis world x/32, z/32 of each strip vertex (retail
-	# render_water_strip_detailed @ 0x5c2aec..0x5c2b00, flt_7DBFAC = 1/32). The
+	# Render_WaterStripDetailed @ 0x5c2aec..0x5c2b00, flt_7DBFAC = 1/32). The
 	# render basis is the util/axes.h x/z swap of the Godot world, so every
 	# vertex carries TEX_UV = (godot z, godot x) / 32, and no scale, bias,
 	# offset or cloud scroll reaches the texcoords (the scroll "offsets"
-	# render_water_surface stores @ 0x5c33b9 / @ 0x5c33db are never read).
+	# Render_WaterSurface stores @ 0x5c33b9 / @ 0x5c33db are never read).
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
 	water.advance_frame(TICK)
@@ -798,10 +798,10 @@ func _strip_arrays(instance: MeshInstance3D) -> Array:
 
 
 func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() -> void:
-	# The FrameFX bloom pass redraws the strip as render_water_surface(0, 1)
+	# The FrameFX bloom pass redraws the strip as Render_WaterSurface(0, 1)
 	# (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d): the above-water
 	# march with the nightvision row colors — the flat 0.1 base and no
-	# specular RGB (retail render_water_strip_detailed @ 0x5c2d5a / @ 0x5c2ef8)
+	# specular RGB (retail Render_WaterStripDetailed @ 0x5c2d5a / @ 0x5c2ef8)
 	# — on the same geometry as the beauty strip.
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
@@ -836,7 +836,7 @@ func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() ->
 	assert_true(any_beauty_specular, "the beauty rows do carry specular RGB")
 
 	# Underwater the bloom pass's view-0 call has no side (retail
-	# render_water_surface @ 0x5c3304): no redraw, while the beauty strip
+	# Render_WaterSurface @ 0x5c3304): no redraw, while the beauty strip
 	# swaps to the underwater side.
 	cam.global_position = Vector3(100.3, 1.0, -33.7)
 	water.advance_frame(TICK)
@@ -846,7 +846,7 @@ func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() ->
 
 
 func test_eye_exactly_on_the_plane_draws_neither_water_side() -> void:
-	# render_water_surface's gates are strict on both sides: the view-0 call
+	# Render_WaterSurface's gates are strict on both sides: the view-0 call
 	# skips cam.z <= wh (jle @ 0x5c330a) and the underwater call cam.z >= wh
 	# (jge @ 0x5c32fc), so an eye exactly on the plane draws no surface.
 	var fixture := _make_water_fixture()
@@ -874,9 +874,9 @@ func test_night_vision_redraw_is_not_gated_on_the_visible_terrain() -> void:
 
 
 func test_reflected_scene_mirrors_above_the_plane_and_keeps_the_live_eye_below() -> void:
-	# render_main_scene mirrors the camera block only while the camera is at or
+	# Render_MainScene mirrors the camera block only while the camera is at or
 	# above the water (z' = 2wh - z, pitch/roll negated) and copies it
-	# unchanged below (retail render_main_scene @ 0x5c1361..0x5c1370 jl,
+	# unchanged below (retail Render_MainScene @ 0x5c1361..0x5c1370 jl,
 	# @ 0x5c13f6..0x5c1414). Below the plane the collectors run unfiltered.
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
@@ -952,7 +952,7 @@ func _render_water_frame(fixture: Dictionary, fog_color: Vector3,
 
 func test_water_beyond_the_far_plane_reaches_the_horizon() -> void:
 	# The pre-transformed strip is never far-clipped: rows past the scene far
-	# plane clamp to the viewport MaxZ (retail render_water_strip_detailed
+	# plane clamp to the viewport MaxZ (retail Render_WaterStripDetailed
 	# @ 0x5c2c1f..0x5c2c4a) and draw fully fogged water up to the horizon.
 	var fixture := _depth_fixture(Vector3(0.0, 107.0, 0.0), -5.0)
 	var image: Image = await _render_water_frame(fixture, Vector3(0.0, 1.0, 0.0))
@@ -963,7 +963,7 @@ func test_water_beyond_the_far_plane_reaches_the_horizon() -> void:
 		return
 	var cam: Camera3D = fixture["camera"]
 	# The strip's first row is the plane point 2000 units ahead
-	# (terrain_project_sector_to_screen @ 0x5c0c7c..0x5c0d25); 1500 units out
+	# (Terrain_ProjectSectorToScreen @ 0x5c0c7c..0x5c0d25); 1500 units out
 	# lies between the 1001 far plane and that row.
 	var far_px := cam.unproject_position(Vector3(0.0, 7.0, -1500.0))
 	var far_pixel := image.get_pixelv(Vector2i(far_px))

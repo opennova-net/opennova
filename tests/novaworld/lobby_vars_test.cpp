@@ -187,7 +187,7 @@ int main() {
 		       "unknown region index -> ?");
 
 		// A stock registration advertises AllowPing 'y': game.cfg `ping`
-		// defaults to 1 [orig: Config_SetDefaults @0x54D324 -> dword_24D2184
+		// defaults to 1 [orig: Config_SetDefaults @0x54D324 -> g_NWAllowPing
 		// @0x551D4F; read @0x4FEF72].
 		expect(value_of(nw::make_host_var_list(nw::HostRegistration{}, text, true), "AllowPing") == "y",
 		       "a default registration advertises AllowPing y");

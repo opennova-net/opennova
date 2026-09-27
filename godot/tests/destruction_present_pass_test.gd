@@ -125,7 +125,7 @@ func _piece(slot: int, generation: int, type_index: int, pos: Vector3,
 	# The rows resolve the type's trail through the ONE native table
 	# (world/destruction death_piece_trail_effect, S12b): types 1 and 2 of
 	# these tests author Effect_VexpM / Effect_VexpS, type 0 none
-	# [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+	# [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C].
 	return DeathPieceRow.make(slot, generation, type_index, pos, settled)
 
 

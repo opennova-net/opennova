@@ -189,7 +189,7 @@ env-tod-re.md §Celestial bodies) and found one global gain behind a ~15 %
 uniform lit-ground gap against the superseded 2026-08-20 frame: every iris
 sample at that pose lies inside the hangar's blink volume (bms 71), so all
 three take the indoor ceiling/floor branch `[orig:
-terrain_sector_compute_lighting @ 0x5c7660..0x5c76fe]` and the settled
+Terrain_SectorComputeLighting @ 0x5c7660..0x5c76fe]` and the settled
 modulator is 76/64 = 1.1875, while that frame was captured three frames
 after its fixture apply, before the modulator had chased its target
 (`ColorBlock_SetStepDeltas(62) @ 0x57e538`); no engine change followed.
@@ -241,7 +241,7 @@ leg pins retail's 0.2 world near plane on the render camera every frame
 water-mirror check (`realized_reflection_pose_matches`,
 `godot/probes/render/render_fixture_contract.gd`) expects the reflection
 camera to mirror the eye only at or above the water plane; below it the
-reflected pass keeps the live eye, as `render_main_scene` copies the camera
+reflected pass keeps the live eye, as `Render_MainScene` copies the camera
 block unchanged there (env-tod-re.md #30).
 
 Retail references carry the same settle obligation as OpenNova captures: a

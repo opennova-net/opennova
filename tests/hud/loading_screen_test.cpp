@@ -47,7 +47,7 @@ int main() {
 	check(std::strcmp(kLoadingServerMessageLabelFallback, "Message from Game Server") == 0,
 			"label fallback");
 
-	// --- the wrapped text block [orig: render_draw_wrapped_text_block_ex @ 0x580eb0] ---
+	// --- the wrapped text block [orig: Render_DrawWrappedTextBlockEx @ 0x580eb0] ---
 	// A monospace measure (8 px per byte) so every box width derives from the
 	// same rule the assertions pin: the BREAK RULE, not a glyph metric.
 	const TextExtent mono = [](const std::string &s) { return 8.0f * static_cast<float>(s.size()); };

@@ -483,7 +483,7 @@ uint16_t OcclusionWorld::latch_rand16() {
 	return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
 }
 
-// [orig: terrain_occlusion_check_three_rays @ 0x610ed0 — TRUE = some ray clear
+// [orig: Terrain_OcclusionCheckThreeRays @ 0x610ed0 — TRUE = some ray clear
 // (Terrain_RaycastHeightmapHiRes nonzero = clear = our !los_terrain_blocked).
 // Rays run from the camera one unit up (`add edx, 10000h` @ 0x610eef) to the
 // bound-sphere top, then the two lateral silhouette points (+- radius along
@@ -535,7 +535,7 @@ bool OcclusionWorld::three_rays_clear(const CollisionWorld &collision,
 // Per-frame: building batch + portal slots
 // ----------------------------------------------------------------------------
 
-// [orig: collect_visible_sector_userpoints @ 0x5c6b60, main scene (NULL filter
+// [orig: Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60, main scene (NULL filter
 // args from Terrain_CollectVisibleEntities @ 0x5c9183); the reflection-pass
 // variant (def-flag 0x2000000) is not ported — D-OCC-13.]
 void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
@@ -705,7 +705,7 @@ void OcclusionWorld::sort_portal_slots() {
 // ----------------------------------------------------------------------------
 
 // [orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0 per slot ->
-// build_clip_planes_from_collision @ 0x5b34e0 (thunk @ 0x5b3ac0): front/back
+// Terrain_BuildClipPlanesFromCollision @ 0x5b34e0 (thunk @ 0x5b3ac0): front/back
 // classify the record's faces from the camera; back faces contribute their
 // edges to the silhouette (pairwise cancellation); silhouette edges become
 // camera-through-edge planes; front faces (deduped BY PLANE INDEX) become world
@@ -837,7 +837,7 @@ void OcclusionWorld::build_occluder_planes(World &world, const OcclusionFrameCam
 // The portal traversal — render_VPT
 // ----------------------------------------------------------------------------
 
-// [orig: render_visibility_portal_traversal @ 0x5c4ae0 — frameless stack args
+// [orig: Render_VisibilityPortalTraversal @ 0x5c4ae0 — frameless stack args
 // (currentSection, frustumPlanes, planeCount) witnessed at the seeder call
 // sites @ 0x5c7448/0x5c73a5 and the internal recursions @ 0x5c5619/0x5c57fc.]
 void OcclusionWorld::traverse(TraverseCtx &ctx, int32_t current_section,
@@ -1175,7 +1175,7 @@ bool OcclusionWorld::sphere_in_plane_groups(const float pos[3], float radius,
 
 namespace {
 
-// The render_TOC fields of one entity. [orig: test_sector_entity_occlusion
+// The render_TOC fields of one entity. [orig: Terrain_TestSectorEntityOcclusion
 // @ 0x5c4610 — entity+4 @ 0x5c4639, entity+0 @ 0x5c463e..0x5c4640, the
 // entity+0x30 -> +0xB0 bounds @ 0x5c4920, the entity+4 pose @ 0x5c497f]
 OcclusionWorld::TocCandidate toc_candidate(const Entity &e, const CollisionModel *cm) {
@@ -1192,7 +1192,7 @@ OcclusionWorld::TocCandidate toc_candidate(const Entity &e, const CollisionModel
 
 } // namespace
 
-// [orig: test_sector_entity_occlusion @ 0x5c4610 — "render_TOC()"; TRUE =
+// [orig: Terrain_TestSectorEntityOcclusion @ 0x5c4610 — "render_TOC()"; TRUE =
 // occluded, and the batch entry is zeroed.]
 bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry) {
     const Entity *cand = world.registry.get(entry.entity);
@@ -1204,7 +1204,7 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
     return true;
 }
 
-// [orig: test_sector_entity_occlusion @ 0x5c4610 — "render_TOC()"; TRUE =
+// [orig: Terrain_TestSectorEntityOcclusion @ 0x5c4610 — "render_TOC()"; TRUE =
 // occluded (every culling return zeroes the caller's list row).]
 bool OcclusionWorld::toc_occludes(const TocCandidate &cand) const {
     const CollisionModel *cand_cm = cand.model;
@@ -1348,7 +1348,7 @@ bool OcclusionWorld::toc_occludes(const TocCandidate &cand) const {
 // The section-mask build
 // ----------------------------------------------------------------------------
 
-// [orig: build_sector_visibility_masks @ 0x5c8610]
+// [orig: Terrain_BuildSectorVisibilityMasks @ 0x5c8610]
 // [orig: the indoor walk's open-building leg @ 0x5c8a4e-0x5c8aab; the
 //  outdoor twin @ 0x5c871f-0x5c87d1]
 void OcclusionWorld::bank_open_building(World &world, EntityHandle entity,
@@ -1558,7 +1558,7 @@ void OcclusionWorld::select_view(OcclusionView view) {
 // ----------------------------------------------------------------------------
 
 // [orig: the shared per-entity occlusion rules of Terrain_CollectVisibleEntities_0
-// @ 0x5c6f20 and collect_visible_entities_for_terrain @ 0x5c8c60 — the entity
+// @ 0x5c6f20 and Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 — the entity
 // flag skip, the blink-hits gate, the view cull, and the three-ray latch —
 // then the render waves' render_TOC for an entity in no blink box.]
 bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
@@ -1572,7 +1572,7 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
     bool collected = false;
     if (ent.kind == EntityKind::Organic) {
         // Persons (def type 3) project their own position with the entity+0
-        // bound radius. [orig: collect_visible_entities_for_terrain — the
+        // bound radius. [orig: Terrain_CollectVisibleEntitiesForTerrain — the
         // type-3 branch @ 0x5c8dd7..0x5c8de9, the position @ 0x5c8e18]
         const bool parachute =
             ((ent.flags | ent.engine_flags) & kEntityFlagParachute) != 0;
@@ -1612,7 +1612,7 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
 }
 
 // [orig: Terrain_RenderSectorEntities `cmp dword ptr [eax+1D0h],0; jnz`
-// @ 0x5c7b92..0x5c7b99 around `call test_sector_entity_occlusion` @ 0x5c7b9c,
+// @ 0x5c7b92..0x5c7b99 around `call Terrain_TestSectorEntityOcclusion` @ 0x5c7b9c,
 // its cull `jnz` @ 0x5c7ba6; Terrain_RenderSectorEntitiesBySide
 // `mov eax,[esi+1D0h]; test; jnz` @ 0x5c7d8b..0x5c7d93, the call @ 0x5c7d96,
 // the cull @ 0x5c7da0 (its contained leg instead fetches the pool-2
@@ -1638,16 +1638,16 @@ bool OcclusionWorld::blink_hits_render_active(const uint32_t hits[4]) const {
     return false;
 }
 
-// [orig: collect_visible_entities_for_terrain @ 0x5c8c60 — `mov esi,[edi]`
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 — `mov esi,[edi]`
 // (entity+0) @ 0x5c8df3, and under Flags 0x20 (`test byte ptr [edi+24h],20h`
-// @ 0x5c8def) the special item-185 model's radius instead: gItemDefs[
+// @ 0x5c8def) the special item-185 model's radius instead: g_ItemDefs[
 // g_ParachuteItemIndex]+0xF0 -> model +0x14 @ 0x5c8df7..0x5c8e10]
 int32_t OcclusionWorld::person_collector_radius(int32_t bound_radius_q16,
                                                 bool parachute) const {
     return parachute ? parachute_radius_q16_ : bound_radius_q16;
 }
 
-// [orig: collect_visible_entities_for_terrain @ 0x5c8c60, the person leg: the
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60, the person leg: the
 // |view depth| < fog + radius cull @ 0x5c8e26..0x5c8e3c, the viewport clip
 // @ 0x5c8e4d, the sub-pixel floor `cmp dword_A784F0,0C000h; jle` @ 0x5c8e5e
 // BEFORE the latch, then the latch @ 0x5c8e7b..0x5c8eab with the probe aimed

@@ -458,7 +458,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    plus an optional fourth value -> +0x88, stored only when the line
                    carries four (the token count the gate compares includes the key:
                    `cmp dword ptr [esi],4; jle`). Consumers: the SIGHTS `slide`
-                   multiplier in draw_weapon_sight_overlays @ 0x4dcf57..0x4dcff7 and
+                   multiplier in HUD_DrawWeaponSightOverlays @ 0x4dcf57..0x4dcff7 and
                    Weapon_GetScopeZoomLevel @ 0x422ff3; see def.h.
                    [orig: WeaponDefs_ParseLineCallback @ 0x544e8b..0x544efd — the
                     stores @ 0x544eac / @ 0x544ec1 / @ 0x544ed9, the count gate

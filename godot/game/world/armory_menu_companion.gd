@@ -9,12 +9,12 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # over the compiled MenuFrame surface. The original registers exactly these
 # controls on the "WEAPON" screen [orig: WeaponDef_RegisterUICallbacks @0x567020,
 # run once from the screen's INIT event @0x567250]:
-#   PLAYER_CLASS (spinlist)                  -> handle_team_class_selection @0x566f60
+#   PLAYER_CLASS (spinlist)                  -> UI_HandleTeamClassSelection @0x566f60
 #   PRIMARY / SECONDARY / ACCESSORY (combos) -> UI_OnPrimaryWeaponTypeChanged @0x5662d0 /
 #                                               UI_OnSecondaryWeaponChanged @0x566670 /
-#                                               ui_on_weapon_ammo_slot_changed @0x566a10
+#                                               UI_OnWeaponAmmoSlotChanged @0x566a10
 #   PRIMARY_AMMO1/2, SECONDARY_AMMO1/2, ACCESSORY_AMMO1/2, GRENADE_AMMO1..3,
-#   *_AMMO1_TYPE (combos)                    -> populate_ammo_combo_boxes @0x55def0
+#   *_AMMO1_TYPE (combos)                    -> PlayerInfo_PopulateAmmoComboBoxes @0x55def0
 #   ACCEPT / CANCEL (buttons)                -> WeaponLoadout_ApplyFromBuffer @0x565cd0
 # The screen opens in-match from the USE-ITEM key (action 177 "useitem", retail default
 # SHIFT per the shipped KeyChart) while the player stands in a type-6 armory volume
@@ -23,14 +23,14 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # that key + gate and the ACCEPT apply (sim + FP viewmodel rebuild).
 #
 # Slot population is the witnessed class/team/availability filter of the
-# WEAPON-screen populate [orig: populate_three_category_lists @0x566db0 via
-# WeaponDatabase.get_slot_weapons + the g_armoryWeaponAvailability term
+# WEAPON-screen populate [orig: UI_PopulateThreeCategoryLists @0x566db0 via
+# WeaponDatabase.get_slot_weapons + the g_ArmoryWeaponAvailability term
 # @0x566e6b — value semantics in net-re §5.63], rows sorted case-insensitively
 # ascending [orig: ListWidget_SortRows -> cmp @0x6448a0, mode (string, asc)]
 # under NONE at row 0; every slot reselects from the canonical parent tuples.
 # Deferred (tracked in the armory RE notes): the per-class 2048-byte loadout
 # buffer MEMORY (save-on-flip + remembered counts) [orig:
-# g_armoryLoadoutBufferByClass @0x25DD740 -> populate_ammo_type_combo_boxes
+# g_ArmoryLoadoutBufferByClass @0x25DD740 -> UI_PopulateAmmoTypeComboBoxes
 # @0x564930], the *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
 
 var _weapons: WeaponDatabase
@@ -39,7 +39,7 @@ var _team := 0                       # 0 = blue/good, 1 = red/evil (host stamps 
 # open-time class resolution [orig: Armory_ResolveSelectedClass @0x5642f0].
 # 0 = unclassed (SP spawn before any armory apply); the no-restriction mask
 # default lives at engine world/player_loadout.h kClassAllowMaskAll
-# [orig: g_hostClassAllowMask default 0x3FF].
+# [orig: g_HostClassAllowMask default 0x3FF].
 var _player_class := 0
 var _class_allow_mask := WeaponDatabase.CLASS_ALLOW_ALL
 # Class selection is interactive only in an MP session — the original disables the
@@ -47,8 +47,8 @@ var _class_allow_mask := WeaponDatabase.CLASS_ALLOW_ALL
 # the WEAPON on-show handler @0x567370]. SP leaves this false.
 var _class_selection_enabled := false
 # The current kit's canonical parent weapon.def ids; each slot reselects its row
-# [orig: g_armoryLoadoutBufferByClass -> select-by-adm-index UIList_SelectByValue @0x645240 in
-# populate_ammo_type_combo_boxes @0x564930]. Per-class buffer MEMORY stays deferred.
+# [orig: g_ArmoryLoadoutBufferByClass -> select-by-adm-index UIList_SelectByValue @0x645240 in
+# UI_PopulateAmmoTypeComboBoxes @0x564930]. Per-class buffer MEMORY stays deferred.
 var _current_primary := ""
 var _current_secondary := ""
 var _current_accessory := ""
@@ -58,7 +58,7 @@ var _current_grenades: Array = []
 # authored maximum [orig: @0x564c7d..0x564ce4].
 var _current_parent_clips := {}
 # Availability lookup (name -> value); banned (0) weapons drop from the lists
-# [orig: the g_armoryWeaponAvailability term @0x566e6b]. Invalid = allow all.
+# [orig: the g_ArmoryWeaponAvailability term @0x566e6b]. Invalid = allow all.
 var _availability_lookup := Callable()
 # Selected weapon dicts per slot control name ("" row 0 = NONE).
 var _slot_rows := {}                 # control name -> Array[WeaponDef] (row-1 aligned)
@@ -68,7 +68,7 @@ var _slot_rows := {}                 # control name -> Array[WeaponDef] (row-1 a
 var _grenade_rows: Array[WeaponDef] = []
 # The ACCEPT-hotkey debounce: the opener press that showed the screen must release
 # once before the key acts as ACCEPT — the open stamps it, only the row's KEYUP
-# arms it [orig: g_weaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
+# arms it [orig: g_WeaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
 # Input_HandleMenuKeyRelease @0x4de2d0].
 var _accept_hotkey_armed := false
 
@@ -105,7 +105,7 @@ func set_class_allow_mask(mask: int) -> void:
 ## The current canonical parent tuples; each slot pre-selects its row on populate.
 ## The per-class loadout-buffer MEMORY (remembered ammo counts, save-on-class-flip)
 ## stands deferred; initial selection reads the active authoritative tuple buffer
-## [orig: populate_ammo_type_combo_boxes @0x564930 select-by-adm-index].
+## [orig: UI_PopulateAmmoTypeComboBoxes @0x564930 select-by-adm-index].
 func set_current_loadout(primary: String, secondary: String = "",
 		accessory: String = "", grenades: Array = [],
 		parent_clips: Dictionary = {}) -> void:
@@ -122,7 +122,7 @@ func set_current_loadout(primary: String, secondary: String = "",
 
 ## Availability lookup (weapon name -> 0 banned / 1 allowed / 2 armory-zone-only /
 ## 3 mission-allowed); banned weapons drop from every slot list
-## [orig: the g_armoryWeaponAvailability term of populate_three_category_lists
+## [orig: the g_ArmoryWeaponAvailability term of UI_PopulateThreeCategoryLists
 ## @0x566e6b — any nonzero value lists]. Unset = everything allowed.
 func set_availability_lookup(lookup: Callable) -> void:
 	_availability_lookup = lookup
@@ -166,7 +166,7 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	_activation_handlers["CANCEL"] = _on_cancel   # [orig: @0x567214 arg 1 skips the apply]
 	# The on-show re-registers the ACCEPT hotkeys and the open re-stamps the
 	# debounce [orig: CUIWidget_ResetScreenHotkeys/AddScreenHotkey @0x567483..
-	# 0x5674c0; g_weaponScreenOpenDebounce = 1 @0x4e0b21].
+	# 0x5674c0; g_WeaponScreenOpenDebounce = 1 @0x4e0b21].
 	_accept_hotkey_armed = false
 	_update_weight()
 
@@ -181,7 +181,7 @@ func _ensure_weapons() -> void:
 # (weapon.mnu authors it empty) from the engine catalog rows
 # ({value:int, text_key:String} in the authored spin order — the witness
 # [orig: UI_InitWeaponClassSelection @0x567250 — CHARCLASS_MEDIC..ENGINEER,
-# values 5..9 via spin_list_insert_item] lives at engine
+# values 5..9 via CSpinListWnd_InsertItem] lives at engine
 # world/player_loadout.h kArmoryClassCatalog).
 var _class_catalog: Array[ArmoryClassRow] = WeaponDatabase.armory_class_catalog()
 # Display FALLBACK strings stay godot-side, keyed by the catalog row's text_key.
@@ -193,7 +193,7 @@ const CLASS_FALLBACK_TEXT := {
 	"CHARCLASS_ENGINEER": "Engineer",
 }
 
-# The g_armorySelectedClass mirror: the class the filters + ACCEPT run against. The
+# The g_ArmorySelectedClass mirror: the class the filters + ACCEPT run against. The
 # spin row only writes it through _on_class_changed (MP); an unclassed resolve keeps
 # it outside 5..9 while the spin merely SHOWS row 0.
 var _selected_class_value := 0
@@ -221,7 +221,7 @@ func _populate_classes() -> void:
 
 # The class the screen opens on — the engine's one impl (world/player_loadout
 # armory_resolve_selected_class [orig: Armory_ResolveSelectedClass @0x5642f0
-# against g_hostClassAllowMask]).
+# against g_HostClassAllowMask]).
 func _resolve_selected_class() -> int:
 	return WeaponDatabase.armory_resolve_selected_class(
 			_player_class, _class_allow_mask)
@@ -259,7 +259,7 @@ func _on_class_changed(index: int) -> void:
 func _populate_slots() -> void:
 	if _weapons == null:
 		return
-	# [orig: g_playerInfoTeamMask = 2 - (team != 0)] — the witness lives at
+	# [orig: g_PlayerInfoTeamMask = 2 - (team != 0)] — the witness lives at
 	# engine world/player_loadout.h player_info_team_mask.
 	var team_mask := WeaponDatabase.player_info_team_mask(_team)
 	_fill_slot("PRIMARY", WeaponDatabase.SLOT_PRIMARY, team_mask)
@@ -285,7 +285,7 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 	var defs := _available_slot_weapons(slot, team_mask)
 	# The map availability term: banned (0) weapons never list; every nonzero value
 	# (allowed / armory-zone-only / mission-allowed) does
-	# [orig: the !g_armoryWeaponAvailability[i] skip @0x566e6b].
+	# [orig: the !g_ArmoryWeaponAvailability[i] skip @0x566e6b].
 	# The rows take the engine's order (case-insensitive ascending by display
 	# label, loadout_labels.h armory_slot_order); NONE is prepended at row 0.
 	var gametext := Strings.get_table(Strings.TABLE_GAMETEXT)
@@ -407,7 +407,7 @@ func _update_weight() -> void:
 # The blank PRIMARY/SECONDARY/ACCESSORY_ICON windows receive the selected
 # weapon.def row's loadout_menu_icon (+144); NONE clears the image. Retail does
 # this in the same combined refresh as the weight line [orig:
-# update_weapon_weight_display @0x5657a8..0x5658a3]. TextureRects are mounted as
+# UI_UpdateWeaponWeightDisplay @0x5657a8..0x5658a3]. TextureRects are mounted as
 # frame children because the compiled MenuFrame has no per-widget Control nodes.
 func _update_icons() -> void:
 	_update_weapon_icons("ArmoryIcon", selected_weapon)
@@ -448,7 +448,7 @@ func _on_accept() -> void:
 ## registers the USE-ITEM binding row's runtime keys on the ACCEPT control, so the
 ## armory-opener key doubles as ACCEPT while the screen is up
 ## [orig: UI_InitTeamClassSelection @0x567370 — control "ACCEPT" gains
-##  g_useItemBindingKey0/1 via CUIWidget_AddScreenHotkey @0x5674a8/@0x5674c0].
+##  g_UseItemBindingKey0/1 via CUIWidget_AddScreenHotkey @0x5674a8/@0x5674c0].
 ## Same collect + apply as clicking the button.
 func trigger_accept() -> void:
 	_on_accept()

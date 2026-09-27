@@ -83,8 +83,8 @@ void Server_StoreClientQuality(NapiNPConnection &conn, uint8_t reported) {
 }
 
 void Server_EmitQualityResends(NapiNPServerCtx &ctx, const world::World &world) {
-	// [orig: @0x51DE79] is_in_session && !g_preround_delay_timer &&
-	// !g_spawn_success_gate (the latter is not copied into this context).
+	// [orig: @0x51DE79] is_in_session && !g_PreRoundDelayTimer &&
+	// !g_SpawnSuccessGate (the latter is not copied into this context).
 	if (!ctx.is_in_session || world.preround_delay_seconds != 0) return;
 	std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 	const int32_t capacity = static_cast<int32_t>(roster.size());
@@ -124,8 +124,8 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	ctx.net_quality_sample_countdown = kNetQualitySampleFrames;
 	if (!ctx.is_in_session) return;
 	// The pre-round hold clears the send window instead of sampling it
-	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — `g_net_spawn_suspended ||
-	//  g_spawn_success_gate || g_preround_delay_timer` -> CNetStats_ClearSendCounters
+	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — `g_NetSpawnSuspended ||
+	//  g_SpawnSuccessGate || g_PreRoundDelayTimer` -> CNetStats_ClearSendCounters
 	//  @0x4C2F50]; the two spawn gates have no host-side model here.
 	if (ctx.world != nullptr && ctx.world->preround_delay_seconds != 0) {
 		replication::net_quality_window_clear(ctx.host_quality_window);
@@ -153,7 +153,7 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// which the loss term floors to 1.
 	const uint32_t avg_ping = active != 0 ? ping_sum / active : 0u;
 	// The frame-pressure term reads the main loop's FR counter
-	// [orig: `mov ecx, g_statsAvgFps` @0x4C531B].
+	// [orig: `mov ecx, g_StatsAvgFps` @0x4C531B].
 	replication::net_quality_window_push(ctx.host_quality_window,
 			replication::net_quality_bandwidth_metric(ctx.stats_avg_fps),
 			active != 0 ? replication::net_quality_host_ping_metric(avg_ping) : 0,

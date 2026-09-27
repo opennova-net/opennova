@@ -10,8 +10,8 @@ namespace opennova::hud {
 
 namespace {
 
-// g_bam_sin_table_q22 @0x31bfbc0 and the cosine view of it, off_849934 =
-// &g_bam_sin_table_q22[256]: 1024 Q22 entries per revolution plus the 257-entry
+// g_BamSinTableQ22 @0x31bfbc0 and the cosine view of it, off_849934 =
+// &g_BamSinTableQ22[256]: 1024 Q22 entries per revolution plus the 257-entry
 // tail the cosine view needs, read as `table[index] * (1 / 4194304)`
 // (io::bam_table_sin / io::bam_table_cos)
 // [orig: the `* 0.00000023841858` pairs @0x5d18cd / @0x5d18e7].
@@ -90,7 +90,7 @@ bool scoped_selector_from_def(uint32_t weapon_flags, uint32_t weapon_flags2) {
 
 bool sighted_selector_from_def(uint32_t weapon_flags, bool slot_switching_from) {
 	// [orig: Player_IsVehicleGunnerScoped @0x4dcd30 — `Flags & 2`,
-	//  g_weaponScopeActive, and MountSlot.currentAction != SWITCHFROM (7);
+	//  g_WeaponScopeActive, and MountSlot.currentAction != SWITCHFROM (7);
 	//  the byte set @0x5ca2d5]
 	return (weapon_flags & def::DEF_WEAPON_FLAG_SIGHTED) != 0 && !slot_switching_from;
 }
@@ -98,7 +98,7 @@ bool sighted_selector_from_def(uint32_t weapon_flags, bool slot_switching_from) 
 namespace {
 
 // The reticle cross and the cardinal grid about the geometry's centre, at its
-// scales. [orig: draw_minimap_crosshair_and_grid @0x5d1160]
+// scales. [orig: HUD_DrawMinimapCrosshairAndGrid @0x5d1160]
 void append_crosshair_and_grid(const ScopeCircleMaskGeometry &g, ScopeCircleMask &out) {
 	// --- the reticle cross ------------------------------------------------
 	// A = scale_x * ring_size, B = scale_y * ring_size; every endpoint is

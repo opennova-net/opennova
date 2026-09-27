@@ -107,7 +107,7 @@ void test_scripted_sky_speed_reaches_the_wire() {
 	w::World world;
 	w::WeatherTickEvents events;
     // A mission only advances while a human is in the world - retail holds the
-    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
+    // WAC tick and the BMS event pump on `g_WacVarHumans || !g_WacVarTicks`
     // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
     // so they stand a player up; the empty-server hold has its own test.
 	world.cached.humans = 1;

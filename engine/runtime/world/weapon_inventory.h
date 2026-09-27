@@ -2,9 +2,9 @@
 // manual weapon-switching walks — structural translations of the witnessed originals.
 //
 // The original keeps ONE local-player instance of all of this in globals (the 780-slot
-// 100-B array weaponSlotArrayBase @ 0xB75FD4, the per-ammo-class pools g_localAmmoPools
+// 100-B array weaponSlotArrayBase @ 0xB75FD4, the per-ammo-class pools g_LocalAmmoPools
 // @ 0xB75FE8 + entity+288 for class 1, the 2048-B spawn-kit tuple buffer 'restrictionData'
-// @ 0x24D4E00, the availability table g_armoryWeaponAvailability @ 0x24D5600) and one
+// @ 0x24D4E00, the availability table g_ArmoryWeaponAvailability @ 0x24D5600) and one
 // per-player copy server-side (slot+464 table / +94408 buffer / +88664 pools). This port
 // gathers the local-player instance into value types; the server-side copy stays in
 // engine/runtime/inmatch (D-NET-152 shape).
@@ -28,12 +28,12 @@ enum : int32_t {
     kCategories = 12,
     kSlotCount = 780,
     // The engine's default spawn selection: category 3 (the Primary key), rank 0
-    // [orig: Player_InitPlayer @ 0x4e17ff g_currentWeaponSlot = 195].
+    // [orig: Player_InitPlayer @ 0x4e17ff g_CurrentWeaponSlot = 195].
     kDefaultSpawnCombo = 195,
 };
 }
 
-// Availability values [orig: g_armoryWeaponAvailability semantics — server 0x2F gate
+// Availability values [orig: g_ArmoryWeaponAvailability semantics — server 0x2F gate
 // @ 0x515a3f: 0 rejects, 2 additionally requires the requester inside an armory zone
 // (entity Flags & 0x400000); every nonzero value lists in the armory populate
 // @ 0x566e6b; the S2C 0x66 wire carries only 0/2 entries @ 0x5102e0].
@@ -60,7 +60,7 @@ struct WeaponAvailability {
 };
 
 // Apply a name->value pair list over the table order — the name-list mode of
-// build_item_restriction_table @ 0x54DDB0: default 1 per entry, matched names take
+// WeaponDef_BuildItemRestrictionTable @ 0x54DDB0: default 1 per entry, matched names take
 // their pair value (-1 maps to 3 kMissionAllowed), and a parent's loadout_subclasses
 // sub-entries INHERIT the parent's value (the skip_count walk). Pair source: the .mis
 // item_availability chunk ({name, status} records).
@@ -70,7 +70,7 @@ void weapon_availability_apply_pairs(
 
 // One spawn-kit / loadout tuple {name, ammoPrimary, ammoSecondary, flags} — the
 // 4-string record of the 2048-B loadout buffers ({name\0 ammoPri\0 ammoSec\0 flags\0}*)
-// [orig: restrictionData @ 0x24D4E00 and the per-class buffers @ 0x25DD740 share the
+// [orig: g_SpawnLoadoutBuffer @ 0x24D4E00 and the per-class buffers @ 0x25DD740 share the
 // format; values default -1 = "engine default"].
 struct WeaponKitEntry {
     std::string name;
@@ -144,13 +144,13 @@ struct WeaponInventory {
     // original splits storage (class 1 = entity+288 u16, others = the pool array);
     // the arithmetic (per-class cap clamp) is identical and the split is not
     // observable, so one array carries all classes here (D-WPN-24).
-    // [orig: g_localAmmoPools @ 0xB75FE8; entity+288 @ 0x540ba5; caps @ 0x24E7DE0]
+    // [orig: g_LocalAmmoPools @ 0xB75FE8; entity+288 @ 0x540ba5; caps @ 0x24E7DE0]
     std::vector<int32_t> pools;
     // Shared loaded rounds, distinct from carried reserves [orig: sub_5405F0
     // @0x5405F0 / sub_540670 @0x540670, local table @0xB761E8].
     std::vector<int32_t> shared_clips;
-    int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118 / g_currentWeaponSlot]
-    int32_t pending_combo = -1;  // [orig: entity+0x308 staged slot / g_pendingWeaponSlot]
+    int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118 / g_CurrentWeaponSlot]
+    int32_t pending_combo = -1;  // [orig: entity+0x308 staged slot / g_PendingWeaponSlot]
     // entity+44 carry-presentation bits gathered by the fill (8 = def.flags&0x1000,
     // 0x10 = def.flags2&2) [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5415aa/0x5415bc].
     uint32_t carry_flags = 0;
@@ -214,7 +214,7 @@ void weapon_inventory_seed_pools(const WeaponTable &table, WeaponInventory &inv,
                                  int player_class);
 
 // The joiner's S2C 0x0F pool apply [orig: NapiNPClientMsg_0x00F @ 0x42e324..0x42e34a —
-// the 128 wire dwords land in g_localAmmoPools verbatim (every entry, zeros
+// the 128 wire dwords land in g_LocalAmmoPools verbatim (every entry, zeros
 // included; indexed by the retail ammo-class id), then
 // WeaponSlots_RecalculateAmmoFromCapacity @ 0x42e424 returns each slot's clip and
 // re-draws it from the authority's pools]. Entries past the table's class count
@@ -246,7 +246,7 @@ int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
 // weapons) is deferred — see the RE record's divergence entry.
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv);
 
-// The eligibility ammo score [orig: calculate_kill_score @ 0x5407E0 in its
+// The eligibility ammo score [orig: Score_CalculateKillScore @ 0x5407E0 in its
 // slot-predicate role: pool for the def's ammo class + the slot's loaded rounds].
 int32_t weapon_slot_ammo_score(const WeaponTable &table, const WeaponInventory &inv,
                                int32_t combo);

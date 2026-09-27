@@ -494,9 +494,9 @@ int main() {
 		// The tracked visible bounds follow the same frustum verdict: valid
 		// with the tile heights inside them when terrain is in view, absent
 		// when nothing survives [orig: Terrain_TraverseQuadtreeNode @ 0x608a00
-		// trackBounds leg; terrain_render_visible_sectors @ 0x609263].
+		// trackBounds leg; Terrain_RenderVisibleSectors @ 0x609263].
 		// The g_WaterActive predicate over tracked bounds
-		// [orig: terrain_setup_view_and_lighting @0x60ff12..0x60ff31].
+		// [orig: Terrain_SetupViewAndLighting @0x60ff12..0x60ff31].
 		if (!expect(opennova::water_pass_active(false, 0.0f, 0.0f, 4.0f, false),
 						"untracked bounds keep the water pass live") ||
 				!expect(opennova::water_pass_active(true, 3.0f, 9.0f, 4.0f, false),
@@ -519,7 +519,7 @@ int main() {
 		// The bounds walk alone, as a frame whose terrain is hidden under the
 		// indoors letter runs it: the same routing and cull track the same
 		// bounds, with no draw list [orig: Terrain_SetupViewAndLighting
-		// @ 0x610ccd -> terrain_render_visible_sectors @ 0x60fee7].
+		// @ 0x610ccd -> Terrain_RenderVisibleSectors @ 0x60fee7].
 		if (!expect(same_bounds(opennova::track_terrain_visible_bounds(scene, fv),
 						toward.visible_bounds),
 				"the bounds walk alone tracks the compile's bounds")) return 1;
@@ -534,7 +534,7 @@ int main() {
 
 	// --- Empty sectors: topology reuse, independent geometry/UV/cache mode --
 	// [orig: PolyTrn_RenderFrame @ 0x60EAC0, routing @ 0x60EC94..0x60ECBD;
-	// decode_terrain_tile_vertices @ 0x602AA0, zero stores @ 0x602DC7..0x602DCF]
+	// Terrain_DecodeTileVertices @ 0x602AA0, zero stores @ 0x602DC7..0x602DCF]
 	{
 		opennova::CptFile fallback_cpt = make_cpt_base();
 		opennova::CptTile tile = make_tile(0, 0);
@@ -696,7 +696,7 @@ int main() {
 						pkt.patches.size() <= TerrainFrameCompiler::kPatchBudget,
 				"the draw_list stays within the pool budget")) return 1;
 		// Retail keeps emission order (its batch sort keys on a field nothing
-		// writes [orig: render_terrain_sector_batch @ 0x6093C0..0x609550]):
+		// writes [orig: Terrain_RenderSectorBatch @ 0x6093C0..0x609550]):
 		// the sector walk finishes one sector before the next, so each
 		// sector's patches form one contiguous run even though the camera
 		// sits on the corner all four share.

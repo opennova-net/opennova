@@ -515,7 +515,7 @@ void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
 // always keeps effectScale 1 with no interior lerp, and only ROBJ 1+ takes
 // its own ItemDef light transfer. Re-stamped by rebuild_scene (fresh
 // instances) and on every context edge; never per frame [orig:
-// setup_entity_lighting_and_shader_constants @0x5d98a0 and the model+536
+// Render_SetupEntityLightingAndShaderConstants @0x5d98a0 and the model+536
 // daylight push per visible building in Terrain_RenderSectorModels
 // @0x5c5d30, see docs/render/render-lighting-re.md; the math itself is
 // opennova::renderer::compute_entity_lighting].
@@ -1563,7 +1563,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	// flush evaluates material generators — noise waveforms share one random
 	// stream. [orig: Render_SubmitEntity @0x5DAD80 -> Model_TransformBoneMatrices
 	//  @0x58E390; CRenderBatchQueue_SortAndFlush @0x5DAE40 ->
-	//  apply_shader_parameters @0x58DB80]
+	//  Material_ApplyShaderParameters @0x58DB80]
 	const uint64_t panm_start = p_profile != nullptr
 			? Time::get_singleton()->get_ticks_usec()
 			: 0;

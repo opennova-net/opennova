@@ -1,6 +1,6 @@
 // The local player's view cluster, orchestrated (world/local_player_view.h)
 // [orig: Player_ToggleWeaponScope @0x4df0c0 — the refusal ladder @0x4df29c /
-//  @0x4df12d / @0x4df177; the binocular action 26 gate (g_fireChargeStartTick
+//  @0x4df12d / @0x4df177; the binocular action 26 gate (g_FireChargeStartTick
 //  @0xB76800); the NVG action 41 Inset restore latch; the arbiter feed
 //  Render_ProcessMainSceneFrame @0x5ca1f4..0x5ca24b and the death stamp
 //  @0x4b4d00]: the gates in front of the primitives and the order the tick
@@ -361,8 +361,8 @@ void test_unadmitted_seat_takes_the_ground_or_person_leg() {
 
 // Both shake legs add their yaw delta to the BAM HEADING, so the mission yaw
 // (90 - heading) takes it negated while pitch and roll take it as is.
-// [orig: `add g_view_rot_yaw, edx` @0x4380D9 in the mode-0 IIR block;
-//  `add g_view_rot_pitch` @0x4380D0 / `add g_view_rot_roll` @0x4380C7]
+// [orig: `add g_ViewRotYaw, edx` @0x4380D9 in the mode-0 IIR block;
+//  `add g_ViewRotPitch` @0x4380D0 / `add g_ViewRotRoll` @0x4380C7]
 void test_shake_turns_the_bam_heading() {
     LocalWorld lw;
     lw.ai.attach(lw.local);
@@ -465,7 +465,7 @@ void test_scope_toggle_refuses_inactive_weapon() {
 
 void test_scope_up_refused_while_moving_on_scoped_weapon() {
     LocalWorld lw;
-    // [orig: g_movementKeyHeld && (flags & 1) -> return @0x4df29c]
+    // [orig: g_MovementKeyHeld && (flags & 1) -> return @0x4df29c]
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
     PlayerViewState v;
     v.move_held = true;
@@ -767,7 +767,7 @@ void test_scope_fov_target_and_render_queries_share_weather_state() {
 
 // The FP draw's own gates the frame publishes [orig:
 // Player_RenderViewModelIfAlive @0x4E0145 (Flags & 2) / @0x4E014B
-// (g_endround_winner_team); Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEDF1
+// (g_EndRoundWinnerTeam); Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEDF1
 // (flags1 & Emplaced skips the showhud bit) / @0x4DEDF7..0x4DEE19 (CanFire &&
 // Player_IsEquippedWeaponScoped && flags2 & Inset skips the model)].
 void test_frame_publishes_the_fp_draw_gates() {
@@ -1463,7 +1463,7 @@ void test_view_uses_current_motor_offset_and_live_position() {
 } // namespace
 
 // --- the heat window's water gate at the local pump (D-WPN-29) ---------------
-// [orig: WeaponAction_ProcessFrame @ 0x540e60 — `Position.Z > Env_WaterHeightFixed
+// [orig: WeaponAction_ProcessFrame @ 0x540e60 — `Position.Z > g_EnvWaterHeightFixed
 //  || (Def->Flags & 4)` @ 0x54101c keeps the window, else the clear @ 0x54125f]:
 // the pump feeds the owner's BODY Z against env.water_z, so a body at or below
 // the plane drops a live window unless the def carries Underwater; no authored
@@ -2352,8 +2352,8 @@ void test_hud_context_tracks_mount_weapon_and_dismount() {
 // The HUD's death gate is the death-screen latch alone: the local dead bit and
 // the death lerp camera (mode 4) leave the crosshair, instrument and scope
 // passes running until the latch arrives.
-// [orig: g_death_screen_active -- HUD_DrawCrosshair @0x592646,
-//  HUD_RenderOverlays @0x5A7BBC; no Flags & 2 / g_camera_mode test on either]
+// [orig: g_DeathScreenActive -- HUD_DrawCrosshair @0x592646,
+//  HUD_RenderOverlays @0x5A7BBC; no Flags & 2 / g_CameraMode test on either]
 void test_hud_death_gate_is_the_death_screen_latch_alone() {
     LocalWorld lw;
     LocalPlayerWeapon weapon;

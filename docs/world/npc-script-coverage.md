@@ -86,7 +86,7 @@ Routing snapshot: 2026-09-09, refreshed 2026-09-23 for the rows the WAC/BMS/AI p
 | 75 | dec | 0x4ED560 | Variable | Explicit branch; verify consumer |
 | 76 | store | 0x4ED580 | Variable | Explicit branch; verify consumer |
 | 77 | load | 0x4ED570 | Value | Explicit branch; verify consumer |
-| 78 | TOD | 0x4EDC70 | Hour | Explicit branch; `WacCmd_Tod` stores `arg * 0x44444` raw into `Env_CurTimeFixed24` (@0x4EDC74/@0x4EDC7A) and returns 1 (@0x4EDC7F); the day wrap happens in the weather tick on the SIGNED word (`Environment_ComputeTimeOfDayColors` @0x57DE51..0x57DE78, stored @0x57DE84): TOD(-60) is 23:00 |
+| 78 | TOD | 0x4EDC70 | Hour | Explicit branch; `WacCmd_Tod` stores `arg * 0x44444` raw into `g_EnvCurTimeFixed24` (@0x4EDC74/@0x4EDC7A) and returns 1 (@0x4EDC7F); the day wrap happens in the weather tick on the SIGNED word (`Environment_ComputeTimeOfDayColors` @0x57DE51..0x57DE78, stored @0x57DE84): TOD(-60) is 23:00 |
 | 79 | targetfx | 0x4EE190 | Target | Typed particle consumer; native command/lifetime tests; D-PTL-26 tracks shared entity-slot integration; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 80 | ammo2tgt | 0x4F8100 | Ammo, Target | Explicit branch; projectile consumer verified |
 | 81 | fx2tgt | 0x4F7FD0 | Fx, Target | Typed particle consumer; native command/lifetime tests; D-PTL-26 tracks shared entity-slot integration; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |

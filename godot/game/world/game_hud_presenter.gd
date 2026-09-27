@@ -80,7 +80,7 @@ class PendingHudMessage:
 		text_id = p_text_id
 		chat = p_chat
 # The end-of-round banner line (the WAC Lose cause). Persists until teardown so the
-# MISSION FAILED screen can compose it. [orig: g_banner_text @0x28E3DA0, written by
+# MISSION FAILED screen can compose it. [orig: g_BannerText @0x28E3DA0, written by
 # GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
 var _endround_banner := ""
 # The HUD color-scheme index is persisted like retail's config token (read at
@@ -365,7 +365,7 @@ func ensure_game_hud() -> void:
 		_game_hud.set_objectives_header(
 				t.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"))
 	# The presenter-held friendly-tags mode survives the per-mission rebuild
-	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
+	# like retail's process-lifetime global [orig: g_FriendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
 	_game_hud.set_hud_color_index(_toggles.get_hud_color_index())
 	# The HUD build stamps the LIVE declutter level, mirroring the round-init
@@ -586,9 +586,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# accumulators — the simulation owns the stance/aimed-shot row (body-state
 	# predicates), the HUD owns only projection [orig: @0x592b07..0x592bf5];
 	# the sim's promoted aimed-shot verdict gates the reticle [orig: the
-	# @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780], with the equipped
+	# @0x4de4f7 promoter; Player_IsOpticalViewVisible @0x5cf780], with the equipped
 	# weapon's Inset keep-up predicate from the native view frame; and
-	# the PowerThrow windup driving the charge bar [orig: g_fireChargeStartTick
+	# the PowerThrow windup driving the charge bar [orig: g_FireChargeStartTick
 	# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
 	var live := wv != null and wv.active
 	_game_hud.set_weapon_state(weapon_active and weapon != null, clip, reserve,
@@ -695,9 +695,9 @@ func _hud_ticks() -> int:
 # name resolved and the 2D ground distance in meters. Null = the label hides
 # (no track, ShowWaypoints off, or no current selection) — the compiler treats
 # absence as the original's null-current / flag-off gates.
-# [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 gates @0x5a7daf (g_showWaypoints
+# [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 gates @0x5a7daf (g_ShowWaypoints
 #  + a current present in the list); distance @0x5947e5..0x594836 = 2D fixed sqrt
-#  >> 16; name get_waypoint_name @0x594630]
+#  >> 16; name HUD_GetWaypointName @0x594630]
 func _build_waypoint_entry() -> WaypointHudEntry:
 	if _world == null:
 		return null
@@ -720,7 +720,7 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	return entry
 
 
-# The waypoint display name (the engine's get_waypoint_name rule with its
+# The waypoint display name (the engine's HUD_GetWaypointName rule with its
 # STRWPNAMEDEFAULT fallback; hud_game_text.h) over the mission and gametext tables.
 func _resolve_waypoint_name(name_id: int) -> String:
 	return HudPos.waypoint_display_name(Strings.get_table(Strings.TABLE_MISSION),

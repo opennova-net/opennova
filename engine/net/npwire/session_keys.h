@@ -52,14 +52,14 @@ inline constexpr uint8_t SESSION_OPCODE_SERVER_RESEND_LIST = 0x84;
 // The host-initiated teardown burst: the same disconnect-record body as the
 // C2S 0x46 ClientGoodBye, keyed by the CLIENT's key (CK). Dispatched by the
 // retail client's opcode table entry 12 -> Nwu_HandleServerGoodbye.
-// [orig: g_np_opcode_handlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye
+// [orig: g_NPOpcodeHandlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye
 //  @0x624310; writer opcode select CNapiNPConnection_SendDisconnectPacket
 //  @0x61f367 (0x86 when is_server, 0x46 @0x61f37b when is_client)]
 inline constexpr uint8_t SESSION_OPCODE_SERVER_GOODBYE = 0x86;
 // The outer-namespace ping pair: the receiver-local key dword, then the WR (u8
 // wants-reply) and MS (u32 sender ms) flat TLVs; a WR reply echoes MS with WR
 // clear and the receiver stores `now - MS` as the session RTT.
-// [orig: g_np_opcode_handlers @0x849D90 entry 4 {0x45 -> Nwu_HandleClientPing
+// [orig: g_NPOpcodeHandlers @0x849D90 entry 4 {0x45 -> Nwu_HandleClientPing
 //  @0x624220} and entry 11 {0x85 -> Nwu_HandleServerPing @0x6242E0}, both thin
 //  wrappers over Nwu_HandlePing @0x623A70; writer CNapiNPConnection_SendPing
 //  @0x61F080 selects 0x85 when is_server @0x61F131, 0x45 for a client @0x61F145]

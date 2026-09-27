@@ -168,7 +168,7 @@ int main() {
 					"local mission start restores the recovered post-WAC clamps")) return 1;
 	}
 
-	// --- Channel smoothing [orig: interpolate_weather_color @ 0x57d9e0] -----
+	// --- Channel smoothing [orig: Environment_InterpolateWeatherColor @ 0x57d9e0] -----
 	{
 		ColorChannelState state;
 		state.snap_to(0x00FF8040u);
@@ -197,7 +197,7 @@ int main() {
 		if (!expect(byte_of(add.ground.r) == 63, "ground additive is (255*255)>>10")) return 1;
 	}
 
-	// --- Sun glare [orig: compute_sun_glare_and_fog_blend @ 0x5ad610] -------
+	// --- Sun glare [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610] -------
 	{
 		const GlareResult full = compute_sun_glare(1.0f, 255);
 		if (!expect(full.glare == 192 && full.fog_whiten == 40, "dot 1.0 gives glare 192 / whiten 40")) return 1;
@@ -362,7 +362,7 @@ int main() {
 		if (!expect(tint.full == 0xFF8040C0u && tint.half == 0xFF402060u,
 		            "Rgb path packs to the same tint split")) return 1;
 
-		// Foliage lightmap tint [orig: sample_terrain_colormap_tinted @ 0x606030]:
+		// Foliage lightmap tint [orig: Terrain_SampleColorMapTinted @ 0x606030]:
 		// 128 is identity, 255 saturates ~2x, alpha passes through.
 		const uint32_t full_identity = 0xFF808080u;
 		uint32_t out = foliage_lightmap_tint(0x40C08020u, full_identity);
@@ -410,7 +410,7 @@ int main() {
 		            "packs r<<16 | g<<8 | b")) return 1;
 	}
 
-	// Iris auto-exposure — the witnessed curve [orig: terrain_sector_compute_lighting
+	// Iris auto-exposure — the witnessed curve [orig: Terrain_SectorComputeLighting
 	// @ 0x5c7550]. lum = 0.25*(r+b) + 0.5*g; gain = 0.01*(pct*base/(2m) + (100-pct)*base).
 	{
 		// Luminance is exact.
@@ -488,7 +488,7 @@ int main() {
 			}
 		}
 
-		// Wind at the WITNESSED intensity (Env_WindScale = 256, its only
+		// Wind at the WITNESSED intensity (g_EnvWindScale = 256, its only
 		// retail value [orig: Environment_InitDefaults @ 0x57c1d1; sole other
 		// xref is the tick read]): a stable ambient sway around the 0x8000
 		// rest. The noise feedback term 15*prev has gain 15*intensity/4096 —
@@ -572,7 +572,7 @@ int main() {
 		if (!expect(add.ground == 0x0A0B07u, "packed ground additive >> 10")) return 1;
 	}
 
-	// --- Hit-dim factor + weather color block [orig: interpolate_weather_color
+	// --- Hit-dim factor + weather color block [orig: Environment_InterpolateWeatherColor
 	//     @ 0x57d9e0] --------------------------------------------------------
 	{
 		if (!expect(hit_dim_factor(0) == 0x8000, "hit-dim factor at 0")) return 1;
@@ -692,7 +692,7 @@ int main() {
 		            "accumulator /3 truncates toward zero")) return 1;
 	}
 
-	// --- Sky dome mesh [orig: build_sky_dome_mesh @ 0x578db0] ----------------
+	// --- Sky dome mesh [orig: SkyDome_BuildMesh @ 0x578db0] ----------------
 	{
 		// Reference-height build (v14 ~= 1): the dome the reimpl renders, with
 		// the Y scale folded into the shader (env #20's ratified structure).
@@ -766,7 +766,7 @@ int main() {
 
 	// --- Water noise textures + UV state [orig: Water_GenerateNoiseTextures
 	// @ 0x5c0360; Water_InitNoiseFieldAndSineLut @ 0x5c01a0;
-	// render_water_surface @ 0x5c32c0] ------------------------------------
+	// Render_WaterSurface @ 0x5c32c0] ------------------------------------
 	{
 		// PRNG_Next16 chain from the boot state 0 [orig: @ 0x6130a0].
 		uint32_t s = water_noise_prng_step(0);
@@ -893,7 +893,7 @@ int main() {
 		if (!expect(nsum == 0x203FC000u, "normal checksum")) return 1;
 
 		// Depth curve: scale/bias from the fog-distance INT part
-		// [orig: render_water_surface @ 0x5c332d..0x5c3362]; the fraction is
+		// [orig: Render_WaterSurface @ 0x5c332d..0x5c3362]; the fraction is
 		// dropped (the movsx of the 16.16 word's high half).
 		const WaterDepthCurve curve = water_depth_curve(1024.0f);
 		if (!expect(near(curve.scale, 1.0001649f, 1e-6f), "depth scale = 0.99996948*w/(w-0.2)")) return 1;
@@ -903,8 +903,8 @@ int main() {
 		            "the depth curve reads only the fog distance's integer word")) return 1;
 	}
 
-	// --- Celestial bodies + glare occlusion [orig: render_celestial_bodies
-	// @ 0x5acaa0; render_skybox_sun_glow @ 0x5acd00] ------------------------
+	// --- Celestial bodies + glare occlusion [orig: Render_CelestialBodies
+	// @ 0x5acaa0; Render_SkyboxSunGlow @ 0x5acd00] ------------------------
 	{
 		if (!expect(kCelestialBodyDistance == 64.0f, "bodies place at camera + dir * 64")) return 1;
 
@@ -922,7 +922,7 @@ int main() {
 		const int moon_700 = celestial_moon_alpha_fixed(700.0f, 0, false);
 		if (!expect(moon_700 >= 0x7FFE && moon_700 <= 0x8001, "moon half at fog 700")) return 1;
 		if (!expect(celestial_moon_alpha_fixed(1024.0f, 0x10000, false) == 0, "overcast hides the moon")) return 1;
-		// The fog-shader leg (the bloom-pass redraw, render_celestial_bodies(1)):
+		// The fog-shader leg (the bloom-pass redraw, Render_CelestialBodies(1)):
 		// fogInt x 0.0002 x (1 - overcast), 0.2048 at fog 1024, saturating past 5000.
 		const int moon_q3_1024 = celestial_moon_alpha_fixed(1024.0f, 0, true);
 		if (!expect(moon_q3_1024 > 0x3400 && moon_q3_1024 < 0x3500, "moon Q3 opacity at fog 1024 is 0.2048")) return 1;
@@ -975,7 +975,7 @@ int main() {
 		            "FBEFFECTS>=3 quarters the direct glow")) return 1;
 
 		// The Q3 (bloom source) law: no occlusion, (fog_km + 1) * 0.5 *
-		// dot_factor [orig: render_skybox_sun_glow(0, 0) no-occlusion
+		// dot_factor [orig: Render_SkyboxSunGlow(0, 0) no-occlusion
 		// brightness @ 0x5ad013..0x5ad027]. fog 1000 u -> fog_km = 1 ->
 		// scaled = 2 * 0.5 * 0x8000 = 0x8000; quartered = 0x2000.
 		if (!expect(glare_q3_alpha_fixed(0x10000, 1000.0f, 0, 0, true) == 0x2000,
@@ -988,9 +988,9 @@ int main() {
 		            "q3 glow: zero fog keeps the +1 floor")) return 1;
 	}
 
-	// --- Water strip tessellation (env #29) [orig: render_water_strip_detailed
-	// @ 0x5c27d0; terrain_project_sector_to_screen @ 0x5c0bf0;
-	// clip_line_to_viewport @ 0x5c0a30] --------------------------------------
+	// --- Water strip tessellation (env #29) [orig: Render_WaterStripDetailed
+	// @ 0x5c27d0; Terrain_ProjectSectorToScreen @ 0x5c0bf0;
+	// Water_ClipLineToViewport @ 0x5c0a30] --------------------------------------
 	{
 		// Stride pins: clamp(int(rhw * 500), 2, 9) [orig: @ 0x5c30c7..0x5c30eb].
 		if (!expect(water_strip_stride(0.004f) == 2, "stride lands the low edge (0.004*500 = 2)")) return 1;

@@ -13,7 +13,7 @@
 // [orig: Terrain_CollectVisibleSectors @ 0x5C9120 (jodemo.exe) — the 512-unit sector
 //  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe);
 //  Terrain_GetLodSlotFamily @ 0x60288E..0x6028B1 — the per-batch family select, called from
-//  render_terrain_sector_batch @ 0x609581]
+//  Terrain_RenderSectorBatch @ 0x609581]
 
 #include <runtime/terrain/foliage_detail_collector.h>
 #include <runtime/terrain/quadtree.h>
@@ -85,7 +85,7 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 // never owns culling math; the projection matrix plays no part (retail's
 // terrain walk never reads it).
 // [orig: PolyTrn_RenderFrame @ 0x60EAC0 — ctx[3] fov @0x60eaf6, ctx[6] view
-//  distance @0x60eb7e; render_scene_with_water_reflection @ 0x5d7ea0 fills
+//  distance @0x60eb7e; Render_SceneWithWaterReflection @ 0x5d7ea0 fills
 //  ctx[3] from dword_A7839C/65536 @0x5d8037 and ctx[6] from word_26C681E
 //  @0x5d8052]
 struct TerrainViewInput {
@@ -95,13 +95,13 @@ struct TerrainViewInput {
 	float view[16] = {};
 	float fov_deg = kTerrainDefaultFovDeg;
 	// The frame's view distance in world units (the high word of
-	// Env_FogDistCurrent); <= 0 keeps the traversal's 2000-unit default.
+	// g_EnvFogDistCurrent); <= 0 keeps the traversal's 2000-unit default.
 	float far_distance = 0.0f;
 	// The polygon-detail setting 0..3 (dword_24D2040); 3 is the max-quality
 	// target and leaves the context scale untouched.
 	int polygon_detail = kTerrainMaxPolygonDetail;
 	// Live water height in world units; 0 = no water this mission (the retail
-	// Env_WaterHeightFixed == 0 sentinel). Feeds the below-water terrain flag.
+	// g_EnvWaterHeightFixed == 0 sentinel). Feeds the below-water terrain flag.
 	float water_height = 0.0f;
 	// Retail view +100: the ordinary main view includes the flat fallback.
 	// [orig: PolyTrn_RenderFrame @ 0x60EAC0, gate @ 0x60ECB0]
@@ -162,13 +162,13 @@ struct TerrainDrawList {
 	std::vector<FoliageDetailPatch> detail_cells;
 	// Camera below the live water surface: the terrain surface swaps its
 	// stage-3 modulation input to the water noise (D-TERRAIN-8) [orig:
-	// terrain_setup_view_and_lighting @ 0x60FE40 stores
-	// cameraY < Env_WaterHeightFixed @ 0x60FEE0; terrain_render_visible_sectors
+	// Terrain_SetupViewAndLighting @ 0x60FE40 stores
+	// cameraY < g_EnvWaterHeightFixed @ 0x60FEE0; Terrain_RenderVisibleSectors
 	// copies it to dword_319FB3C @ 0x60915F].
 	bool below_water = false;
 	// The frustum-surviving terrain bounds of this compile (every routed
 	// sector's trackBounds walk), reset per compile; the water-active test
-	// reads their height range. [orig: terrain_render_visible_sectors
+	// reads their height range. [orig: Terrain_RenderVisibleSectors
 	// @ 0x6090c0 resets the tracked AABB @ 0x609177..0x60919f and traverses
 	// with trackBounds = 1 @ 0x609263]
 	VisibleBounds visible_bounds{};
@@ -221,7 +221,7 @@ private:
 // whatever the blink letters; the indoors letter skips only the traversal and
 // the sector pass, so a frame with its terrain hidden still has bounds.
 // [orig: Render_ProcessMainSceneFrame @ 0x5ca504 -> Render_TerrainScene ->
-//  Terrain_SetupViewAndLighting @ 0x610ccd -> terrain_render_visible_sectors
+//  Terrain_SetupViewAndLighting @ 0x610ccd -> Terrain_RenderVisibleSectors
 //  @ 0x60fee7 (trackBounds = 1 @ 0x609263); g_WaterActive @ 0x60ff18..0x60ff33]
 VisibleBounds track_terrain_visible_bounds(const TerrainSceneSnapshot &scene,
 		const TerrainViewInput &view);

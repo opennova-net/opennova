@@ -4,7 +4,7 @@
 // name's "null" fallback, the subgoal announcement sections, the triggered
 // text key, the WepDes miss, and the feed's template / camp / bonus / unknown
 // lookups.
-// [orig: get_waypoint_name @0x594630; HUD_DisplayTriggeredText @0x51f190;
+// [orig: HUD_GetWaypointName @0x594630; HUD_DisplayTriggeredText @0x51f190;
 //  HUD_FormatKillEventMessage @0x422DA0]
 #include <runtime/hud/feed_format.h>
 #include <runtime/hud/hud_game_text.h>

@@ -224,7 +224,7 @@ unaffected; full ctest 223/223.
 ### ✅ P4 — Per-frame host loop (SP) (DONE)
 `Server_TickUpdate` (`server_tick.{h,cpp}`): **(1)** drain C2S (`NapiNPProtocol_Pump` →
 `PumpRecvQueues` → `DispatchOpcode` → `DispatchMessage`; in-match `0x0C` →
-`dispatch_entity_packet_callback` → `NetPacket_SerializePlayerState` SNAP) **(2)** `World::run_logic_tick`
+`NetPacket_DispatchEntityPacketCallback` → `NetPacket_SerializePlayerState` SNAP) **(2)** `World::run_logic_tick`
 **(3)** per-connection S2C `0x0A` fan **(4)** flush.
 
 **Single-owner decision:** `NapiNPProtocol.connection_list` is the one connection table (each node's
@@ -313,7 +313,7 @@ popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43
   (29760-tick, both roles), `0x4C` net-quality (310-tick, Joiner in-match), `0x2C` RTT ping (every
   deployed frame), and the `send_holdoff_countdown` send-block gate — all `[orig @0x42c1a9..0x42c4bc]`,
   via a new public `JoinerConnection::frame_inner(tag,body)` so they ride the same `0x43`/SCRK envelope
-  as the `0x0C`. **Witness correction (re-doc §5.44):** `g_tag2CSendCooldown` (`@0xA860D8`) is set-to-62
+  as the `0x0C`. **Witness correction (re-doc §5.44):** `g_Tag2CSendCooldown` (`@0xA860D8`) is set-to-62
   + self-decremented but is **NOT read as a send gate** (the only three xrefs are this fn's read/dec/set)
   — so the `0x2C` fires every deployed frame, NOT throttled 62-tick as §5.44 first phrased. `seed_session`
   sets a `replay_mode_` that suppresses the housekeeping so a seeded golden replay reproduces only the
@@ -455,7 +455,7 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
 - 0x45 terrain-delta + 0x7E briefing are emitted by the original ONLY when present; both `return 0` and
   the orig skips otherwise, so they are faithfully ABSENT on the headless host (not deferrals).
 - IDB hygiene: `WriteTypeNameAndBaseName → NetPacket_WriteServerNameAndMapFile`; `byte_24D1FC4 →
-  g_server_name_str`; `baseName → g_map_file_name` (the wire proved serverName+mapFile, not type/base).
+  g_ServerNameStr`; `baseName → g_MapFileName` (the wire proved serverName+mapFile, not type/base).
 - Tests: `npruntime_initial_state_burst` (full order + per-body byte assertions, including a
   non-default configured 0x76), `npruntime_golden_lan_join` (retail 0x2A/0x76 byte-parity +
   0x2C/0x08/0x66 structure-parity), and `npruntime_client_runtime` (retail-host 0x76 receive plus

@@ -120,10 +120,10 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::SquadSSN: return w.script.squad_events.selected_ssn;
                 case Builtin::SquadWho: return w.script.squad_events.selected_who;
                 case Builtin::RandomResult: return w.script.wac_values.random_result;
-                case Builtin::Ticks: return static_cast<int32_t>(time_); // VM executions [orig: wac_var_ticks]
+                case Builtin::Ticks: return static_cast<int32_t>(time_); // VM executions [orig: g_WacVarTicks]
                 case Builtin::Result: return acc_;
                 case Builtin::Health: return w.cached.local_health;
-                case Builtin::Wind: return w.weather.wind_scale();   // Env_WindScale [orig: @0x26c68c0]
+                case Builtin::Wind: return w.weather.wind_scale();   // g_EnvWindScale [orig: @0x26c68c0]
                 case Builtin::Mana: return cached_mana_;
                 case Builtin::CurTOD: return cached_tod_;
                 case Builtin::Bluekills: return w.kill_stats.bluekills_by_player;   // [orig: 0xC846F0]
@@ -139,9 +139,9 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::Fallmps: return w.script.wac_values.fallmps;               // [orig: 0xC6EAE4]
 				case Builtin::Seatbelt:
 					return w.script.wac_values.seatbelt;
-				case Builtin::Night: return w.weather.night_phase;   // Env_IsNightPhase [orig: @0x26c645c]
+				case Builtin::Night: return w.weather.night_phase;   // g_EnvIsNightPhase [orig: @0x26c645c]
                 case Builtin::Breathtime: return w.script.wac_values.breathtime; // [orig: 0xC6EAE0]
-                case Builtin::Autogain: return w.script.wac_values.autogain;     // [orig: wac_var_autogain 0xC6EAFC]
+                case Builtin::Autogain: return w.script.wac_values.autogain;     // [orig: g_WacVarAutoGain 0xC6EAFC]
                 case Builtin::Scratch: return scratch_;                          // [orig: dword_C6EAEC]
             }
             return 0;
@@ -167,8 +167,8 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
                 case Builtin::SquadSSN: w.script.squad_events.selected_ssn = v; break;
                 case Builtin::SquadWho: w.script.squad_events.selected_who = v; break;
                 case Builtin::RandomResult: w.script.wac_values.random_result = v; break;
-                case Builtin::Ticks: time_ = static_cast<uint32_t>(v); break;   // [orig: wac_var_ticks 0xC6EAD8]
-                case Builtin::Result: acc_ = v; break;                           // [orig: wac_var_result 0xC6EB24]
+                case Builtin::Ticks: time_ = static_cast<uint32_t>(v); break;   // [orig: g_WacVarTicks 0xC6EAD8]
+                case Builtin::Result: acc_ = v; break;                           // [orig: g_WacVarResult 0xC6EB24]
                 case Builtin::Health: w.cached.local_health = v; break;
                 case Builtin::Mana: cached_mana_ = v; break;
                 case Builtin::CurTOD: cached_tod_ = v; break;
@@ -177,14 +177,14 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
                 case Builtin::LoseVar: cached_lose_ = v; break;
                 case Builtin::Bluekills: w.kill_stats.bluekills_by_player = v; break;   // [orig: 0xC846F0]
                 case Builtin::Greenkills: w.kill_stats.greenkills_by_player = v; break; // [orig: 0xC846F8]
-                // Rebuilt by the next slot-list pass. [orig: wac_var_humans 0xC6EB14]
+                // Rebuilt by the next slot-list pass. [orig: g_WacVarHumans 0xC6EB14]
                 case Builtin::Humans: w.cached.humans = v; break;
                 case Builtin::AccuracySpread: w.script.wac_values.accuracy_spread = v; break; // [orig: 0xC6EAE8]
                 case Builtin::Fallmps: w.script.wac_values.fallmps = v; break;       // [orig: 0xC6EAE4]
                 case Builtin::Seatbelt: w.script.wac_values.seatbelt = v; break;     // [orig: 0xC6EADC]
                 case Builtin::Breathtime: w.script.wac_values.breathtime = v; break; // [orig: 0xC6EAE0]
                 case Builtin::Autogain: w.script.wac_values.autogain = v; break;     // [orig: 0xC6EAFC]
-                case Builtin::Wind: w.commands.set_wind_scale(v); break; // Env_WindScale [orig: the `wind` row @0x82EEF0]
+                case Builtin::Wind: w.commands.set_wind_scale(v); break; // g_EnvWindScale [orig: the `wind` row @0x82EEF0]
                 case Builtin::Scratch: scratch_ = v; break;               // [orig: dword_C6EAEC]
                 case Builtin::Night: w.weather.night_phase = v; break; // [orig: @0x26C645C]
             }

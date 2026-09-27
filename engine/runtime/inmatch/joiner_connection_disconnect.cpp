@@ -114,7 +114,7 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 
 // [orig: the cs_dir0/cs_dir1 timeout_ms = 120000 reap installed by CNapiNetwork_Init
 //  @0x4ca4a0 -> CNapiNetwork_OnDisconnectedFromServer @0x4c63d0, which clears the
-//  session strings and maps the disconnect code onto g_mission_exit_reason]
+//  session strings and maps the disconnect code onto g_MissionExitReason]
 bool JoinerConnection::session_lost() const {
 	// An explicit close is terminal at any stage; the silence reap runs for the whole
 	// accepted-0x82 state (Driving = every join/deploy stage, InMatch) with no gameplay gate,

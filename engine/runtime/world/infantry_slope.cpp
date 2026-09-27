@@ -134,7 +134,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
     if (org2 && (logic_tick & 1u) != 0) return;
 
     // The four short ground columns include the body's candidate models.
-    // [orig: Entity_RaycastGroundHeight @0x4142C0 -> raycast_entity_collision
+    // [orig: Entity_RaycastGroundHeight @0x4142C0 -> Entity_RaycastCollision
     // @0x413760; org1 probes @0x4BA1A8, org2 @0x4B6E41]
     auto probe = [&](int32_t dx, int32_t dy) -> int32_t {
         if (collision != nullptr)
@@ -145,7 +145,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tic
         // body skips the heightfield, the clip's own gate). The vertical column
         // writes the terrain height whether or not the ray reaches it; with no
         // terrain the ray's end comes back.
-        // [orig: Entity_RaycastGroundHeight @0x4142C0 -> raycast_entity_collision
+        // [orig: Entity_RaycastGroundHeight @0x4142C0 -> Entity_RaycastCollision
         //  terrain leg @0x413760; the clipped end returned @0x41430D]
         const int32_t start[3] = {io::bam_add(e.pos[0], dx), io::bam_add(e.pos[1], dy),
                                   io::bam_add(e.pos[2], 0x4000)};

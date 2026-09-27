@@ -55,7 +55,7 @@ std::string scoreboard_row_text(const ScoreboardEntry &e, bool non_team) {
 
 ScoreboardTeamPage scoreboard_team_page(int team_count, int frame_counter) {
 	// [orig: HUD_DrawKillList @0x423cd0-0x423cf1 — the palette pair for
-	// teams 1/2 unless `g_num_teams_config > 2` AND bit 7 of the HUD frame
+	// teams 1/2 unless `g_NumTeamsConfig > 2` AND bit 7 of the HUD frame
 	// counter, which selects teams 3/4 with the two literal colors]
 	ScoreboardTeamPage page;
 	if (team_count > 2 && (frame_counter & 0x80) != 0) {

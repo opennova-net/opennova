@@ -12,10 +12,10 @@
 namespace opennova::env {
 
 // The glare ray length in world units: camera + sun_dir * 1024
-// [orig: render_skybox_sun_glow @ 0x5acd71/0x5acde8 -- sun_dir << 10].
+// [orig: Render_SkyboxSunGlow @ 0x5acd71/0x5acde8 -- sun_dir << 10].
 inline constexpr float kGlareRayLength = 1024.0f;
 
-// One frame of the glare occlusion [orig: render_skybox_sun_glow
+// One frame of the glare occlusion [orig: Render_SkyboxSunGlow
 // @ 0x5acd9e..0x5acf7f -- the fine rays' entity leg keeps the documented
 // sun-occlusion statics posture (render-lighting-re.md D-RLIT-2/D-RLIT-3),
 // see docs/env/env-tod-re.md]: ONE coarse unjittered gate ray from the camera

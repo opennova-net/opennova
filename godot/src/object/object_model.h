@@ -512,7 +512,7 @@ private:
 	bool occlusion_hidden_ = false;
 	// The authored-LOD walk's sub-pixel verdict: a world model whose bound
 	// sphere projects to at most 0.75 px in the main view is not drawn there
-	// (retail render_sector_entity @ 0x5c42d8..0x5c42de returns before the
+	// (retail Render_SectorEntity @ 0x5c42d8..0x5c42de returns before the
 	// RLOD walk; the Inset view keeps its own verdict); an attachment takes
 	// its owner's.
 	bool subpixel_hidden_ = false;
@@ -876,7 +876,7 @@ public:
 	float get_interior_daylight() const { return interior_daylight_; }
 	// The interior light group the entity's draws declare: the building its
 	// first blink hit names plus that volume's section (retail
-	// setup_terrain_effect_for_entity -> Lighting_SetInteriorLightGroup
+	// Terrain_SetupEffectForEntity -> Lighting_SetInteriorLightGroup
 	// @0x5a90e0), stamped by the entity lighting feed beside the context.
 	void set_interior_light_group(int p_building_bms, int p_section);
 	int get_interior_light_group_bms() const { return interior_light_group_bms_; }
@@ -897,7 +897,7 @@ public:
 	};
 	// Visible rigid ROBJ draws and their exact world bounds. The EffectWorld
 	// device leg uses these only for a building's per-ROBJ owner-section scope
-	// [orig: collect_render_objects_for_batch @0x5d8ff7, see
+	// [orig: Render_CollectRenderObjectsForBatch @0x5d8ff7, see
 	// docs/render/render-lighting-re.md].
 	void collect_point_light_draw_parts(
 			std::vector<PointLightDrawPart> &r_parts) const;

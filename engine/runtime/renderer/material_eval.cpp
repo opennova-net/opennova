@@ -165,7 +165,7 @@ void eval_rgb_gen(uint8_t style,
 
 // The effect a material draws with: its tag's registry row, or the first
 // registry entry (FF_ST_OP) when the tag is unknown.
-// [orig: convert_material_definition @ 0x5B0664..0x5B0672 (a negative
+// [orig: Material_ConvertDefinition @ 0x5B0664..0x5B0672 (a negative
 //  HLSLEffect_FindByName result becomes index 0)]
 const MaterialDescriptorRecord& material_effect(const ThreediMaterial& mat) {
     const MaterialDescriptorRecord* descriptor =
@@ -175,10 +175,10 @@ const MaterialDescriptorRecord& material_effect(const ThreediMaterial& mat) {
 
 // Whether the effect resolved a handle for the colour a channel routes to.
 // HLSLEffect_LoadFromFile zeroes every handle no technique reads, and
-// apply_shader_parameters skips a channel whose handle is zero. SelfLumColor
+// Material_ApplyShaderParameters skips a channel whose handle is zero. SelfLumColor
 // is read only by the _FFP.fx SELFLUM block (the EMISSIVE rows); ReflectColor
 // only by Glass, SkGlass, BumpMirrT, BmTxMirrT and EnvPhongT (the GLASS rows).
-// [orig: HLSLEffect_LoadFromFile @ 0x5AF6C0..0x5AF737; apply_shader_parameters
+// [orig: HLSLEffect_LoadFromFile @ 0x5AF6C0..0x5AF737; Material_ApplyShaderParameters
 //  @ 0x58DD2F..0x58DD38 (static colours), @ 0x58DDEC..0x58DDF4 (RgbGen)]
 bool effect_reads_color(const MaterialDescriptorRecord& effect,
                         MaterialColorTarget target) {
@@ -205,7 +205,7 @@ void store_color(MaterialRuntime& rt, MaterialColorTarget target,
 }
 
 // One static colour: the BGRA bytes as (R, G, B)/255 with W forced to 1.
-// [orig: apply_shader_parameters @ 0x58DD3A..0x58DD7F (fld1 @ 0x58DD7D)]
+// [orig: Material_ApplyShaderParameters @ 0x58DD3A..0x58DD7F (fld1 @ 0x58DD7D)]
 void apply_static_color(MaterialRuntime& rt,
                         const MaterialDescriptorRecord& effect,
                         const float (&color)[4],
@@ -267,7 +267,7 @@ void apply_rgb_gen(MaterialRuntime& rt,
 } // namespace
 
 MaterialColorTarget material_color_target(uint8_t routing_byte) {
-    // [orig: convert_material_definition @ 0x5B0567..0x5B057B]
+    // [orig: Material_ConvertDefinition @ 0x5B0567..0x5B057B]
     if (routing_byte == 1) return MaterialColorTarget::ReflectColor;
     if (routing_byte == 2) return MaterialColorTarget::SelfLumColor;
     return MaterialColorTarget::None;
@@ -293,7 +293,7 @@ bool rgb_gen_is_dynamic(const MaterialDescriptorRecord& effect,
            generator_is_dynamic(gen.style);
 }
 
-// apply_shader_parameters' parameter order: static colours, AlphaGen, both
+// Material_ApplyShaderParameters' parameter order: static colours, AlphaGen, both
 // RgbGen channels, then the UV transform. static_only skips every dynamic
 // generator, leaving its effect default.
 MaterialRuntime evaluate(const ThreediMaterial& mat,
@@ -305,12 +305,12 @@ MaterialRuntime evaluate(const ThreediMaterial& mat,
     const MaterialDescriptorRecord& effect = material_effect(mat);
 
     // Static colours first, both channels in order.
-    // [orig: apply_shader_parameters @ 0x58DD11..0x58DD9C]
+    // [orig: Material_ApplyShaderParameters @ 0x58DD11..0x58DD9C]
     apply_static_color(rt, effect, mat.reflect_color, mat.is_glass);
     apply_static_color(rt, effect, mat.reflect_color2, mat.glass_type2);
 
     // AlphaGen runs for every effect; only its upload needs the AlphaGenValue
-    // handle [orig: apply_shader_parameters @ 0x58DDA6 call, @ 0x58DDAB
+    // handle [orig: Material_ApplyShaderParameters @ 0x58DDA6 call, @ 0x58DDAB
     // handle test]. An inactive style (no high nibble) returns 1.0, style 24
     // the start, style 113 the start + (end - start) * CTRL >> 16, and every
     // other style the waveform.
@@ -341,7 +341,7 @@ MaterialRuntime evaluate(const ThreediMaterial& mat,
     }
 
     // Both RgbGen channels, each only when its routed colour handle exists.
-    // [orig: apply_shader_parameters @ 0x58DDC7..0x58DE4D]
+    // [orig: Material_ApplyShaderParameters @ 0x58DDC7..0x58DE4D]
     if (!static_only || !generator_is_dynamic(mat.rgb_gen.style)) {
         apply_rgb_gen(rt, effect, mat.rgb_gen, mat.emissive_type, time_ms,
                 ctrl_names, ctrl_bus);
@@ -354,7 +354,7 @@ MaterialRuntime evaluate(const ThreediMaterial& mat,
     // The UV transform runs only for effects that read MatTexCoord1: the #UV
     // (TEX_UVXFORM) twins. Every other effect keeps the identity rows and
     // draws no noise sample for its UV channels.
-    // [orig: apply_shader_parameters @ 0x58DE4F..0x58DE56; _FFP.fx and the
+    // [orig: Material_ApplyShaderParameters @ 0x58DE4F..0x58DE56; _FFP.fx and the
     //  VS effects reference MatTexCoord1 only under TEX_UVXFORM]
     if ((effect.descriptor_flags & MATERIAL_DESCRIPTOR_UV_TRANSFORM) == 0 ||
             (static_only && uv_is_dynamic(effect, mat))) {
@@ -372,7 +372,7 @@ MaterialRuntime evaluate(const ThreediMaterial& mat,
             v_uses_noise ? crt_rand15() : 0;
     // The decoder exposes author-friendly floats; retail evaluates the packed
     // 8-byte channel blocks. Reconstruct those raw fields before entering the
-    // exact transform port. [orig: compute_uv_transform_matrix @ 0x5B1990]
+    // exact transform port. [orig: Material_ComputeUVTransformMatrix @ 0x5B1990]
     rt.uv = uv_anim_transform(
             u_channel,
             v_channel,
@@ -465,15 +465,15 @@ int compute_anim_frame(const ThreediMaterial& mat,
 
     if (mat.animation.animation_type == 0) {
         // The loader rewrites a zero frame time to 1 and the draw divides by
-        // the unsigned word. [orig: convert_material_definition @ 0x5B06F6..
-        // 0x5B070A; apply_shader_parameters @ 0x58DBD8..0x58DBEC]
+        // the unsigned word. [orig: Material_ConvertDefinition @ 0x5B06F6..
+        // 0x5B070A; Material_ApplyShaderParameters @ 0x58DBD8..0x58DBEC]
         const uint16_t authored = static_cast<uint16_t>(mat.animation.cycle_frame_time);
         const uint32_t frame_ms = authored == 0 ? 1u : authored;
         return static_cast<int>((time_ms / frame_ms) %
                 static_cast<uint32_t>(frame_count));
     }
     // Only type 1 is the controlled branch; any other type keeps frame zero.
-    // [orig: apply_shader_parameters @ 0x58DBF0..0x58DBF2]
+    // [orig: Material_ApplyShaderParameters @ 0x58DBF0..0x58DBF2]
     if (mat.animation.animation_type != 1) {
         return 0;
     }
@@ -487,14 +487,14 @@ int compute_anim_frame(const ThreediMaterial& mat,
     // modulo-frame branch instead of interpreting these values as signed 16.16.
     // [orig: Avatar_SetArmsCamoCtrl @ 0x57A3B0;
     //  dword_83FFCC/dword_83FFD4/dword_83FFDC/dword_83FFE4 = 1;
-    //  apply_shader_parameters @ 0x58DC36..0x58DC42]
+    //  Material_ApplyShaderParameters @ 0x58DC36..0x58DC42]
     if (ctrl_uses_discrete_frame_selector(ctrl_ordinal)) {
         return ctrl % frame_count;
     }
     // The odd dword in retail's 8-byte CTRL slot selects an alternate modulo
     // mode. Ordinary animation controls retain the signed low-dword IMUL/SAR
     // fractional-frame branch; the static texture-selector state is handled above.
-    // [orig: apply_shader_parameters @ 0x58DB80]
+    // [orig: Material_ApplyShaderParameters @ 0x58DB80]
     int frame = mul_shift16(frame_count, ctrl);
     if (frame >= frame_count) frame = frame_count - 1;
     return frame;

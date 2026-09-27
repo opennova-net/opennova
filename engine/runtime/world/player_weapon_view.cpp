@@ -72,7 +72,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	}
 	// The PowerThrow windup for the HUD charge bar [orig: HUD_DrawPowerThrowChargeBar
 	// @ 0x599830 (ex kong "HUD_DrawWeaponReloadBar" misnomer — it only draws the
-	// windup): gates = def+8 sign bit, g_fireChargeStartTick != 0, ammo available;
+	// windup): gates = def+8 sign bit, g_FireChargeStartTick != 0, ammo available;
 	// the drawer derives the fill from held ticks].
 	const bool windup_active = (w.def.flags & weapon_flag::kPowerThrow) != 0 &&
 			w.power_throw_start_tick != 0 && (active_slot.clip > 0 || w.def.clip_capacity < 0);
@@ -99,7 +99,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	// presentation edge: choose the stance triplet, then add the two arithmetic
 	// shifts. Category order is prone/crouch/stand; airborne or submerged forces
 	// stand, and a parent attachment finally forces crouch. The +3 triplet is the
-	// shared Player_CanFireWeapon verdict stamped before the body tick.
+	// shared Player_IsOpticalViewVisible verdict stamped before the body tick.
 	// [orig: HUD_DrawCrosshair @0x592b07..0x592b87]
 	{
 		int32_t recoil_pitch = 0;

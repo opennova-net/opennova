@@ -18,7 +18,7 @@ namespace godot {
 
 // The NVG view's draws beyond the full-screen composite, on the
 // RenderingDevice: the Sighted arm's SIGHTS card into the NVG scene (retail
-// NVG_RenderSceneToTarget @0x5d08cb..0x5d0952 -> draw_weapon_sight_overlays
+// NVG_RenderSceneToTarget @0x5d08cb..0x5d0952 -> HUD_DrawWeaponSightOverlays
 // @0x4dce00), and the Scoped arm's lens -- the 64 x 16 polar unwrap of the
 // NVG scene, then the frame cleared black and the lens's five band passes and
 // ring drawn over it (runtime/renderer/nvg_scope_lens.h carries the geometry
@@ -30,7 +30,7 @@ namespace godot {
 class NvgViewDevice {
 public:
 	// One SIGHTS card row in the NVG scene's pixels: its RD texture, its rect
-	// (retail's fill_fullscreen_quad_vertices corners, draw_weapon_sight_overlays
+	// (retail's GDynamicVB_FillFullscreenQuadVertices corners, HUD_DrawWeaponSightOverlays
 	// @0x4dd123) and its DefSightBlendMode (the card's six-mode material map,
 	// godot/game/world/hud_sights_card.gd; retail
 	// WeaponDef_CreateBlendNamedMaterial @0x540180).

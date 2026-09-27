@@ -1,4 +1,4 @@
-// Scoped + Inset terrain-window geometry [orig: Render_RadarCompassOverlay @0x5C9740].
+// Scoped + Inset terrain-window geometry [orig: Render_WeaponInsetScene @0x5C9740].
 #include <algorithm>
 #include <base/io/bam.h>
 #include <cmath>

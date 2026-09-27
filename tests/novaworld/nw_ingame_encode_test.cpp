@@ -4,7 +4,7 @@
 //
 // The encode side is a faithful port of the original serializer; the decode
 // side is independently verified against the inverse handler in IDA:
-//   encode_pool3_sync_batch  <- [orig: serialize_entity_pool_to_packet @ 0x503460]
+//   encode_pool3_sync_batch  <- [orig: NetPacket_SerializeEntityPoolToPacket @ 0x503460]
 //   decode_pool3_sync_batch  <- [orig: NapiNPClientMsg_0x020          @ 0x425C00]
 // Because the two ports reference DIFFERENT binary functions (not each other),
 // a clean round-trip pins the wire format, not just internal consistency. The
@@ -392,7 +392,7 @@ int test_pool_spawn_minimal() {
 // ride their presence fields whatever the values: an all-zero trailer and a
 // zero byte still emit, and values without presence emit nothing. Every retail
 // vehicle record carries 0x1000 with byte 0x00 (the 2026-04-26 load stream).
-// [orig: serialize_entity_pool_to_packet_0 @0x503D3D..0x503D5C, @0x503E7F..0x503EC0]
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503D3D..0x503D5C, @0x503E7F..0x503EC0]
 int test_pool_spawn_pointer_gated_fields() {
 	PoolSpawnBatch in;
 	PoolSpawnRecord r;
@@ -632,7 +632,7 @@ int test_weapon_reload_roundtrip() {
 }
 
 // S2C 0x4E page + C2S 0x28 request: the join-window kill-list walk's two bodies.
-// [orig: collect_valid_weapon_slots @0x516000 / NapiNPClientMsg_HandleBatchKill @0x431870;
+// [orig: Server_CollectValidWeaponSlots @0x516000 / NapiNPClientMsg_HandleBatchKill @0x431870;
 //  the 0x4E continuation @0x4318db..0x4318ff / NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550]
 int test_join_window_kill_walk_roundtrip() {
 	BatchKillBatch page;
@@ -667,7 +667,7 @@ int test_join_window_kill_walk_roundtrip() {
 	return 0;
 }
 
-// S2C 0x6A clan-roster + C2S 0x4E walk. [orig: serialize_minimap_slot @0x5073B0 /
+// S2C 0x6A clan-roster + C2S 0x4E walk. [orig: NetPacket_SerializeMinimapSlot @0x5073B0 /
 //  NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
 int test_clan_roster_roundtrip() {
 	for (uint8_t action : {kClanRosterAdd, kClanRosterWalkReply}) {
@@ -727,7 +727,7 @@ int test_door_slot_action_roundtrip() {
 }
 
 // C2S 0x42 -> S2C 0x70 availability list and the C2S 0x40 pick.
-// [orig: serialize_weapon_overlay_slots_0 @0x5105A0 / NapiNPClientMsg_HandleWeaponLoadoutList
+// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0 / NapiNPClientMsg_HandleWeaponLoadoutList
 //  @0x429a30; NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
 int test_vehicle_spawn_codec_roundtrip() {
 	VehicleSpawnAvailabilityList list;
@@ -1214,7 +1214,7 @@ static int test_terrain_load_continuation_chunk_roundtrip() {
 }
 
 // §5.46 S2C 0x18 FULL-ENTITY-SPAWN — the 0x0F-query reply record.
-// Byte layout pinned against the witnessed serializer [orig: serialize_object_to_buffer
+// Byte layout pinned against the witnessed serializer [orig: NetPacket_SerializeObjectToBuffer
 // @0x504d10]; the decode side is the independent inverse port of the client handler
 // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780].
 static int test_full_entity_spawn_player_layout() {

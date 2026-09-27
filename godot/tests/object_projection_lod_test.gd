@@ -143,7 +143,7 @@ func test_live_object_uses_scaled_cmdl_diagonal_instead_of_ghdr_radius() -> void
 
 func test_sub_pixel_world_models_are_not_drawn_at_any_level_count() -> void:
 	# Retail's sector-entity draw returns before the RLOD walk when the bound
-	# sphere projects to at most 0.75 px (retail render_sector_entity
+	# sphere projects to at most 0.75 px (retail Render_SectorEntity
 	# @0x5c42d8..0x5c42de), whatever the model's level count: the two-level
 	# pump and the one-level crate both drop, and come back when near.
 	var placer := _placer()

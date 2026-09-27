@@ -1,5 +1,5 @@
 // Pins the witnessed precipitation streak compile
-// [orig: render_weather_trail_particles @ 0x5dee10].
+// [orig: Render_WeatherTrailParticles @ 0x5dee10].
 
 #include <runtime/renderer/precipitation_frame.h>
 

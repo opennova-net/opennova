@@ -51,7 +51,7 @@ void ClientReplicaPipeline::apply_deployed_item(
 	// authored variant ids are nonzero — a one-sided pair shows every
 	// client the base item id.
 	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x5469db (found &&
-	//  g_local_player_entity && packet[2] != 0 && packet[3] != 0),
+	//  g_LocalPlayerEntity && packet[2] != 0 && packet[3] != 0),
 	//  enemy pick @0x5469fb..0x546a08, base id @0x546a11; the found-path
 	//  update @0x546828..0x54697a leaves the type alone]
 	if (existing != nullptr) {

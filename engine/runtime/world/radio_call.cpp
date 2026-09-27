@@ -19,7 +19,7 @@ const char *vehicle_prefix(int type, const char *fallback) {
 }
 // The 6006 coverage probe has a strict interior test after integer percentage
 // quantization. The boundary and the outermost <1% ring both return zero.
-// [orig: find_max_proximity_coverage @0x5BF4D0]
+// [orig: CaptureZone_FindMaxProximityCoverage @0x5BF4D0]
 bool has_proximity_coverage(const World &world, const Entity &speaker) {
     for (size_t i = 0; i < world.registry.pool_capacity(3); ++i) {
         const Entity *e = world.registry.get(EntityHandle::make(3, static_cast<int>(i)));

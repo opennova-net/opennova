@@ -623,7 +623,7 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
 // per-tick weapon mirrors (scope_raised, wpn_run_anim, wpn_force_crouch).
 // The local player's rain ambient [orig: Entity_UpdateInfantryPlayerBody
 // @ 0x4b4747..0x4b490e — on the frame's last 16 ms quantum, while
-// Env_RainPctCurrent != 0, the rain set handles are loaded (dword_24E0E80)
+// g_EnvRainPctCurrent != 0, the rain set handles are loaded (dword_24E0E80)
 // and the kind is rain: the volume is the rain current (<= 0xFFFF by its max
 // clamp), scaled by (lightTransfer x 0.5 + 0.5) when the first blink hit
 // (entity+0x1D0) names a pool-2 building (ItemDef+0x218) — that hit alone
@@ -986,7 +986,7 @@ int32_t death_ctrl_register_value(bool dead, int32_t corpse_timer) {
 // ----------------------------------------------------------------------------
 // The resolver's player predicate is the entity's wire Player class bit, for
 // local and remote bodies alike; the resolver keys every physics leg on it and
-// reserves `entity == g_local_player_entity` for the local side-writes.
+// reserves `entity == g_LocalPlayerEntity` for the local side-writes.
 // [orig: Entity_MovementCollisionResolver @0x4B2BD0 — Flags & 0x100 @0x4B2CD9 /
 // @0x4B2F7C / @0x4B3271 / @0x4B33AA / @0x4B3C78]
 static bool entity_is_player_class(const World &world, EntityHandle handle) {
@@ -1245,7 +1245,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     //  @0x4B99B8; set @0x4BC93F / @0x4BF39B, tested @0x4BF406]
     if (npc_body) e.inf.fire_secondary_latch = false;
     // While the SP epilog screen is up the NPC motor does nothing at all.
-    // [orig: Entity_UpdateInfantryAI `cmp g_epilog_screen_active,ebp` @0x4B998C,
+    // [orig: Entity_UpdateInfantryAI `cmp g_EpilogScreenActive,ebp` @0x4B998C,
     //  `jnz loc_4BFC8B` @0x4B99CD]
     if (npc_body && world.epilog_screen_active()) return;
     if (tick_entity != nullptr && npc_body) {
@@ -1724,7 +1724,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     infantry_anim_sound_pass(e, world, logic_tick, frame.capsule_bottom);
     // The fire pass: consume the fresh trigger bits + the walking-fire latch into
     // authoritative rounds (odd ticks). [orig: the @0x4bf15c-0x4bf4b0 fire block runs
-    // after the anim advance refreshed g_animEventTriggerBits; §17.4] Nothing
+    // after the anim advance refreshed g_AnimEventTriggerBits; §17.4] Nothing
     // between the odd-tick gate and the dedicated request tests the seat: a
     // mounted body fires its own anim events too, and every mounted body,
     // whatever its seat, then makes the request.
@@ -1856,7 +1856,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // sin/cos at 2^22; org1 pos += rotated + velocity @0x4bf684-0x4bf6a2 (the
     // drowning-0x8000/ladder-0x100000 zeroing @0x4bf667-0x4bf680 rides those
     // slices); org2 identical 1× @0x4b7cbf-0x4b7cd9 — its 2× local-player branch
-    // @0x4b7c8d-0x4b7cb7 is gated on g_localPlayerPoofMode, the "!Poof!" ghost-mode
+    // @0x4b7c8d-0x4b7cb7 is gated on g_LocalPlayerPoofMode, the "!Poof!" ghost-mode
     // toggle (@0x42d450), NOT normal play, and stays unported:
     // docs/world/world-wac-ai-re.md (D-INF-21).]
     // The rotated deltas outlive the block: the org2 jump/fall edges carry 3/4 of
@@ -1867,7 +1867,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         int32_t lat = terrain_slide ? gradient_dy : frame.dy;
         // Root TRANSLATION is integrated for EVERY state, not just movement states. The original
         // advances the playing clip ONCE per tick (AnimMap_UpdateEntity @0x40b5f0) and integrates
-        // the root delta unconditionally: the g_animStateFlagsTable bit0 flag gates the anim COMMIT rules
+        // the root delta unconditionally: the g_AnimStateFlagsTable bit0 flag gates the anim COMMIT rules
         // (@0x4bd85c) and the leg replant path (@0x4be95f), NOT the position integration. Idle
         // clips author a small mean-~0 root velocity — the bored weight-shift / "rock on the feet".
         // Integrating it sways the entity's centre of mass under the swaying skeleton, so the FEET
@@ -2053,7 +2053,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // gate), then clearance = feet - ground.
             // [orig: Entity_MovementCollisionResolver ground-settle tail
             //  @0x4B3D6E..0x4B3DA9 -> Entity_RaycastGroundHeightAndObject(e, 0, 0,
-            //  0, 0x20000) @0x4B3D95 -> raycast_entity_collision terrain leg
+            //  0, 0x20000) @0x4B3D95 -> Entity_RaycastCollision terrain leg
             //  @0x413760 (no candidates)]
             const uint32_t settle_flags = tick_entity != nullptr
                     ? (tick_entity->flags | tick_entity->engine_flags)

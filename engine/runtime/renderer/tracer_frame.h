@@ -82,9 +82,9 @@ struct TracerVec3 {
 struct TracerView {
 	TracerVec3 camera;                  // the eye [orig: byte_A78364]
 	// The view matrix's third column: the look direction, either sign
-	// [orig: viewMatrix @ 0xA7845C, _13/_23/_33 = flt_A78464/74/84].
+	// [orig: g_ViewportViewMatrixFloat @ 0xA7845C, _13/_23/_33 = flt_A78464/74/84].
 	TracerVec3 forward{0.0f, 0.0f, 1.0f};
-	// The projection's _11 (cot(horizontal fov / 2)) [orig: `mat` @ 0x2721980].
+	// The projection's _11 (cot(horizontal fov / 2)) [orig: `g_ProjectionMatrix` @ 0x2721980].
 	float projection_x_scale = 1.0f;
 	// The wall clock in milliseconds [orig: GetTickCount @ 0x5DC104].
 	std::uint32_t tick_ms = 0;

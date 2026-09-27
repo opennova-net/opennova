@@ -49,7 +49,7 @@ func _font_overlay() -> HudOverlay:
 # engine's HudToggles and runs the respawn init that keeps one window up
 # (the rule itself is pinned by the hud_toggles ctest); the binding carries
 # the flag across polls and reset_mission() clears it like retail's respawn
-# init [orig: xor g_showMessageLog,1 @0x49b55a; Game_InitRespawnState
+# init [orig: xor g_ShowMessageLog,1 @0x49b55a; Game_InitRespawnState
 # @0x49939a].
 func test_message_log_toggle_edge() -> void:
 	var toggles := HudToggles.new()

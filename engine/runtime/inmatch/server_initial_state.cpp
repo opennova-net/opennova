@@ -80,7 +80,7 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	// The password bit is NESTED under spectators-enabled: a configured
 	// password with spectating off advertises neither bit.
 	// [orig: CNapiServerConfig_BuildFlags @0x4c4dc0 — the 0x4000 strlen check
-	// @0x4c4ead sits inside the `if (g_spectator_slots)` @0x4c4e8a]
+	// @0x4c4ead sits inside the `if (g_GameConfigState.maxSpectators_26C)` @0x4c4e8a]
 	if (gs.spectator_slots != 0) {
 		flags |= server_flag::kSpectators;
 		if (!gs.spectator_password.empty()) flags |= server_flag::kSpectatorPassword;
@@ -102,14 +102,14 @@ std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 	b.reserve(51);
 	put_u32(b, r.respawn_time);
 	put_u32(b, r.time_limit_minutes);
-	put_u32(b, r.replay_enabled);      // [orig g_replay_enabled @0x24D2120, SET `replay`]
+	put_u32(b, r.replay_enabled);      // [orig g_ReplayEnabled @0x24D2120, SET `replay`]
 	put_u32(b, r.game_type);
-	put_u32(b, r.max_team_lives);      // [orig g_max_team_lives @0x24D2130, SET `max_team_lives`]
+	put_u32(b, r.max_team_lives);      // [orig g_MaxTeamLives @0x24D2130, SET `max_team_lives`]
 	put_u32(b, r.score_limit);
-	put_u32(b, r.respawn_timeout);     // [orig g_respawn_timeout @0x24D214C, SET `timeout`]
+	put_u32(b, r.respawn_timeout);     // [orig g_RespawnTimeout @0x24D214C, SET `timeout`]
 	put_u32(b, r.start_delay);
-	put_u32(b, r.destroy_buildings);   // [orig g_destroy_buildings @0x24D2164, SET `destroybuild`]
-	put_u32(b, r.death_messages);      // [orig g_death_messages @0x24D2168, SET `deathmes`]
+	put_u32(b, r.destroy_buildings);   // [orig g_DestroyBuildings @0x24D2164, SET `destroybuild`]
+	put_u32(b, r.death_messages);      // [orig g_DeathMessages @0x24D2168, SET `deathmes`]
 	for (int i = 0; i < 7; ++i) b.push_back(r.config_bytes[i]);
 	// P2 advertised the create-session snapshot. Keep the later 0x08 record on
 	// that same immutable contract even if a caller mutates ctx.config while a
@@ -220,9 +220,9 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	b.push_back(game_flags);
 	// bit0 = SpawnZoneList nonempty; bit1 = the target-less spawn restriction
 	// while in session. [orig: NetPacket_WriteWorldStateLoad0x0F
-	// @0x502DA7..0x502DC4; g_respawn_requires_team_dead @0x24D2260]
+	// @0x502DA7..0x502DC4; g_RespawnRequiresTeamDead @0x24D2260]
 	// The fixed 128-i32 block is the authority player's per-ammo-class pool
-	// table (serverPlayer+88664 -> client g_localAmmoPools @0xB75FE8), retained
+	// table (serverPlayer+88664 -> client g_LocalAmmoPools @0xB75FE8), retained
 	// when this connection's C2S 0x2F loadout is accepted.
 	for (int32_t value : conn.reply.ammo_pools)
 		put_u32(b, static_cast<uint32_t>(value));
@@ -256,7 +256,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 		b.push_back(0);
 	}
 	// LOCATION NAMES [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10 tail — u16 count +
-	// cstrings from g_location_names (64-B stride), registered at BMS spawn of def-type 2044
+	// cstrings from g_LocationNames (64-B stride), registered at BMS spawn of def-type 2044
 	// markers in spawn order (Entity_SpawnFromBMSRecord @0x40f182-0x40f221; the text is the
 	// mission's Locations/LOCATION%03i string, fallback = the key string)]. The client's 0x0F
 	// handler overwrites its LOCAL copies — the deploy-map name labels (golden ASH_I5A: 6
@@ -404,7 +404,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		        // request (it writes world_stream_phase = 0 [orig: @0x5132f6]).
 			b.phase_loop_counter = 0;
 			break;
-		case InitialStateBurst::kStreamPool2Static: { // 0x10 pool-2 static structures [orig: serialize_pool2_static_to_buffer @0x5042f0]
+		case InitialStateBurst::kStreamPool2Static: { // 0x10 pool-2 static structures [orig: NetPacket_SerializePool2StaticToBuffer @0x5042f0]
 			const opennova::StaticEntityBatch full = opennova::replication::build_pool2_static_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x10, full.records.size(),
 			                                initial_state_page_limits::pool2_static(),
@@ -418,7 +418,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case InitialStateBurst::kStreamPool1Items: { // 0x0D pool-1 destructibles / items / vehicles [orig: serialize_entity_pool_to_packet_0 @0x503940]
+		case InitialStateBurst::kStreamPool1Items: { // 0x0D pool-1 destructibles / items / vehicles [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940]
 			const opennova::PoolSpawnBatch full = opennova::replication::build_pool1_spawn_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x0D, full.records.size(),
 			                                initial_state_page_limits::pool1_entities(),
@@ -431,7 +431,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case InitialStateBurst::kStreamPool0Organics: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner owner-ID match) [orig: serialize_entity_states_to_buffer @0x5030a0]
+		case InitialStateBurst::kStreamPool0Organics: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner owner-ID match) [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0]
 			// Pass THIS joiner's owned entity so ONLY its own record gets minimap_flags bit 0x01
 			// (recipient's-own marker); the host player + other peers get 0x0100 (retail same-map parity).
 			const opennova::OrganicSpawnBatch full =
@@ -447,7 +447,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case InitialStateBurst::kStreamPool3Markers: { // 0x20 pool-3 markers / waypoints / nav nodes (FULL, not just spawn markers) [orig: serialize_entity_pool_to_packet @0x503460]
+		case InitialStateBurst::kStreamPool3Markers: { // 0x20 pool-3 markers / waypoints / nav nodes (FULL, not just spawn markers) [orig: NetPacket_SerializeEntityPoolToPacket @0x503460]
 			const opennova::Pool3SyncBatch full = opennova::replication::build_pool3_marker_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x20, full.records.size(),
 			                                initial_state_page_limits::pool3_markers(),
@@ -461,11 +461,11 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case InitialStateBurst::kStreamTerrainTiles: { // 0x45 terrain-tile (.til) load [orig: serialize_terrain_tiles @0x6080F0, §5.37/D-NET-83]
-			// Stream the mission's terrain-tile array so the joiner's g_loading_progress climbs 5 -> 6 and
+		case InitialStateBurst::kStreamTerrainTiles: { // 0x45 terrain-tile (.til) load [orig: Terrain_SerializeTiles @0x6080F0, §5.37/D-NET-83]
+			// Stream the mission's terrain-tile array so the joiner's g_LoadingProgress climbs 5 -> 6 and
 			// its terrain finishes loading. The raw .til header maps 1:1 onto the 0x45 header
 			// (`[u32 'til0'][u32 count][u32 res0][u32 res1]` then count × 12-B entries). EMPTY .til =>
-			// faithfully skip (serialize_terrain_tiles returns 0 with no tile data). Page boundaries are set
+			// faithfully skip (Terrain_SerializeTiles returns 0 with no tile data). Page boundaries are set
 			// by the shared byte-budget chunker (client reassembles by start/end index, so the split is
 			// transport-transparent — not a byte-parity field like the entity pools).
 			action = Action::SkipSilent;
@@ -483,7 +483,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			const uint32_t res1 = rd_u32(til.data() + 12);
 			std::size_t avail = (til.size() - kTilHeaderBytes) / kTilEntryBytes;
 			std::size_t n_tiles = total_count < avail ? total_count : avail; // bound to actual bytes
-			if (n_tiles == 0) { // no tiles -> serialize_terrain_tiles returns 0 (emit nothing), not an empty marker
+			if (n_tiles == 0) { // no tiles -> Terrain_SerializeTiles returns 0 (emit nothing), not an empty marker
 				world_pool_done = true;
 				break;
 			}

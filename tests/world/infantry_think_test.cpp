@@ -520,7 +520,7 @@ static void test_leaving_guard_plays_guard_leave() {
 // and aim headings. The route leg itself writes only the goal; a moving
 // selection's detour publishes the bearing. [orig: the entry local
 // @0x4BA9B4..0x4BA9BA; the restore @0x4BBE11..0x4BBE1E; the marker wait
-// @0x4BAD1E..0x4BAD48; the detour's +0x1A8 write ai_find_cover_position
+// @0x4BAD1E..0x4BAD48; the detour's +0x1A8 write AI_FindCoverPosition
 // @0x4AFF2C]
 static void test_guard_keeps_the_think_entry_heading() {
     {

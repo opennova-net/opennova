@@ -246,7 +246,7 @@ static void test_emplacement_attachments() {
     // EWeap keeps its pointer to the freed row and holds its last pose while
     // the row is free; the next entity allocated in that row carries it.
     // [orig: Entity_Destroy @0x43E810 — the refNum walk @0x43E9B6..0x43E9CD ->
-    //  CStreamingMem_Destroy @0x546F30 (member tests @0x546F8A..0x546FA0,
+    //  EntityReference_DestroyEWeapGroup @0x546F30 (member tests @0x546F8A..0x546FA0,
     //  Entity_Destroy @0x546FA3); Entity_UpdateTransformAndTurret @0x440CBF]
     parent->has_item_def = true;
     parent->item_type = 1;

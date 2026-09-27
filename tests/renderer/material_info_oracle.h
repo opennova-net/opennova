@@ -32,7 +32,7 @@ namespace material_oracle {
 // probe sets it for "uses TexCubeRotSpecular" [orig: @ 0x5af04b] and the FF
 // path authors it on the _LUM rows [orig: selflum table @ 0x5afa36] — both mean
 // the same runtime capability, "renders a glow/bloom copy": the batch queue's
-// Q3 duplicate is gated on this bit [orig: collect_render_objects_for_batch
+// Q3 duplicate is gated on this bit [orig: Render_CollectRenderObjectsForBatch
 // @ 0x5d93b5], and the probe booleans are UNIONS over ALL techniques [orig:
 // HLSLEffect_LoadFromFile @ 0x5ae690 technique loop], so at runtime FFP_GLASS
 // (whose GLOW technique samples TexCubeRotSpecular — Glass.fx) carries it even

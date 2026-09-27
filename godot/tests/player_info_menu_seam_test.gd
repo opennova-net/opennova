@@ -570,7 +570,7 @@ func _weight_text() -> String:
 # Select the named weapon in a parent slot combo and fire the selection relay the
 # way a user pick would (select_row emits the "combo" value change). The row model
 # is public: row = position in the filtered slot list + 1 (row 0 is NONE)
-# [orig: populate_weapon_slot_lists @ 0x560430].
+# [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430].
 func _select_weapon(wdb: WeaponDatabase, control: String, slot: int,
 		class_mask: int, weapon_name: String) -> WeaponDef:
 	var combo := _ammo_id(control)
@@ -585,7 +585,7 @@ func _select_weapon(wdb: WeaponDatabase, control: String, slot: int,
 
 
 # The expected *_AMMO2 sub-weapon, computed from the public table walk the companion
-# mirrors [orig: the stricmp walk in populate_ammo_combo_boxes @ 0x55def0].
+# mirrors [orig: the stricmp walk in PlayerInfo_PopulateAmmoComboBoxes @ 0x55def0].
 func _expected_sub(wdb: WeaponDatabase, parent: WeaponDef) -> WeaponDef:
 	var parent_round := parent.round_type
 	for k in range(1, parent.loadout_subclasses + 1):
@@ -727,7 +727,7 @@ func test_primary_ammo_rows_follow_selected_weapon() -> void:
 	var maxclips := w.maxclips
 	assert_true(_ammo_driver.is_widget_shown(ammo), "a clip-carrying weapon shows its ammo combo")
 	assert_eq(_ammo_driver.item_count(ammo), maxclips,
-		"rows 1..maxclips [orig: populate_ammo_combo_boxes @ 0x55def0]")
+		"rows 1..maxclips [orig: PlayerInfo_PopulateAmmoComboBoxes @ 0x55def0]")
 	assert_eq(_ammo_driver.item_text(ammo, 0),
 		"%d - %s" % [w.clipsize, w.round_type],
 		"row labels are the witnessed \"%d - %s\" rounds + round type")
@@ -806,7 +806,7 @@ func test_weight_label_renders_witnessed_format_and_band() -> void:
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
-	# Expected parent term [orig: calculate_loadout_weight @ 0x55f1f0]:
+	# Expected parent term [orig: PlayerInfo_CalculateLoadoutWeight @ 0x55f1f0]:
 	# weight + maxclips*clip_weight (untouched default), plus the sub-weapon and
 	# full-grenade clip-only terms the fill selects by default.
 	var expected := w.weight \
@@ -907,7 +907,7 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 	if RetailData.def_root().is_empty():
 		pending(RetailData.fixture_pending_text("def/weapon.def"))
 		return
-	# The witnessed asymmetry [orig: calculate_loadout_weight @ 0x55f1f0]:
+	# The witnessed asymmetry [orig: PlayerInfo_CalculateLoadoutWeight @ 0x55f1f0]:
 	# grenades default -1 -> maxclips, but a PICKED 0 stays 0 (the zero row) —
 	# unlike the parents' <=0 -> maxclips rule.
 	var wdb := _load_weapons()

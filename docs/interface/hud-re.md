@@ -41,7 +41,7 @@ decay/drift, the local movement/weapon-weight accumulator, and their distinct
 projectile-versus-HUD shifts are now witnessed and ported (D-HUD-7).
 The 2026-09-16 pass witnessed and ported the **scoped-view circle mask**
 (`Hud_DrawScopeCircleMask @0x5d17a0` + the reticle cross/grid
-`draw_minimap_crosshair_and_grid @0x5d1160`), refuting this record's
+`HUD_DrawMinimapCrosshairAndGrid @0x5d1160`), refuting this record's
 "rowless-weapon fallback" gate reading — the mask draws on every Scoped frame
 and the SIGHTS row count gates only the inner cross and grid — and corrected
 the HUD declutter level arithmetic to retail's unclamped 8-bit form.
@@ -66,15 +66,15 @@ completed launcher targeting, Inset scene, mortar impact HUD, and pilot instrume
 | Health bar | ported (`HudFrameCompiler::element_health` + `hud_math::health_color_band_fp16`) | `[orig: HUD_DrawHealthBar @0x5a2e50]` rect/fill/threshold-color; `hud_helpers_test.gd` thresholds |
 | Stance indicator + cross-fade (IDB-misnamed "compass") | ported (`HudFrameCompiler::element_stance` — frame draw, offsets, fade pair, prev/current state) | `[orig: HUD_DrawStanceIndicator @0x599f10]` full witness incl. fade pair + per-frame offsets; `hud_helpers_test.gd` fade curve |
 | HUD text + half-bright | ported (`engine/runtime/hud/game_font` — the CGameFont text engine) | `[orig: HUD_DrawTextRightAligned_HalfBright @0x580850]` → `[orig: CGameFont_DrawText @0x6752c0]` |
-| Ammo count + weapon name text | **ported** (`HudFrameCompiler::element_weapon_cluster` + `hud_math::format_ammo`) | `[orig: hud_draw_weapon_ammo_and_name @0x5939d0]`; format/hide/alignment/nudge witnessed; `hud_helpers_test.gd` format_ammo |
-| Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`HudFrameCompiler::element_clip_indicator`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
+| Ammo count + weapon name text | **ported** (`HudFrameCompiler::element_weapon_cluster` + `hud_math::format_ammo`) | `[orig: HUD_DrawWeaponAmmoAndName @0x5939d0]`; format/hide/alignment/nudge witnessed; `hud_helpers_test.gd` format_ammo |
+| Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`HudFrameCompiler::element_clip_indicator`, D-HUD-5) | `[orig: HUD_DrawAmmoIndicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
 | Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / friendly brackets ported 2026-09-19) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
 | Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `HudFrameCompiler::element_sights_card` + `godot/game/world/hud_sights_card.gd` materialize the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `simulation_test.gd` + `hud_overlay_test.gd` + ctest `weapon_fsm` |
-| Scoped-view circle mask + reticle cross/grid | **ported** (`engine/runtime/hud/scope_circle_mask.*` → the `HudPos.scope_mask_*` statics → `godot/game/world/hud_scope_circle_mask.gd`; the record's old “rowless-weapon fallback” gate reading corrected 2026-09-16) | `[orig: Hud_DrawScopeCircleMask @0x5d17a0]` + `[orig: draw_minimap_crosshair_and_grid @0x5d1160]`; the unconditional Scoped-arm call + the `!rows` crosshair argument `[orig: Render_ProcessMainSceneFrame @0x5cab08..0x5cab15; render_hud_overlay @0x5d82e5..0x5d82f2]`; ctest `sight_overlay` |
+| Scoped-view circle mask + reticle cross/grid | **ported** (`engine/runtime/hud/scope_circle_mask.*` → the `HudPos.scope_mask_*` statics → `godot/game/world/hud_scope_circle_mask.gd`; the record's old “rowless-weapon fallback” gate reading corrected 2026-09-16) | `[orig: Hud_DrawScopeCircleMask @0x5d17a0]` + `[orig: HUD_DrawMinimapCrosshairAndGrid @0x5d1160]`; the unconditional Scoped-arm call + the `!rows` crosshair argument `[orig: Render_ProcessMainSceneFrame @0x5cab08..0x5cab15; Render_HUDOverlay @0x5d82e5..0x5d82f2]`; ctest `sight_overlay` |
 | First-person view effects: binocular mask/crosshair/rangefinder, NVG mask + gain scale | **ported**, layout witnessed 2026-09-24 (`engine/runtime/hud/view_effects.h` → `godot/game/world/player_view_effects.gd`); the NVG image under the mask is FrameFX's render-to-texture chain, the underwater murk is the render overlay stage's (§First-person view effects) | `[orig: Binoculars_DrawMask @0x5cfe95..0x5cff5b; NVG_DrawMaskAndGain @0x5cffab..0x5d004a; Binoculars_DrawRangefinder @0x5908c0; NVG_Composite @0x5d107e..0x5d1080]`; GUT `hud_overlay_test` |
 | ALPHAFADE semantics | **ported** (`hud_math::fade_decay`/`fade_flash_alpha`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
-| Attach labels (seat/armory floats) | **ported** (`VehicleSystem::collect_attach_labels` + `LocalPlayer::local_player_can_fire` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13 CLOSED) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; nearest-entity branch consumes complete `Player_CanFireWeapon @0x5cf780`; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; the bold Arial label font + slot scale `[orig: @0x5a3680; HUD_InitAllFonts @0x51ee20]` ported 2026-08-11; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `simulation_test.gd`/`hud_helpers_test.gd` |
-| Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; eye-offset anchor `[orig: @0x4bf078..0x4bf14c]` + Arial label font `[orig: HUD_InitAllFonts @0x51ee20]` witnessed + ported 2026-08-11; ctest `hud_math`/`hud_frame_compiler`/`infantry`/`promote` |
+| Attach labels (seat/armory floats) | **ported** (`VehicleSystem::collect_attach_labels` + `LocalPlayer::local_player_can_fire` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13 CLOSED) | `[orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290]` full witness; nearest-entity branch consumes complete `Player_IsOpticalViewVisible @0x5cf780`; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; the bold Arial label font + slot scale `[orig: @0x5a3680; HUD_InitAllFonts @0x51ee20]` ported 2026-08-11; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `simulation_test.gd`/`hud_helpers_test.gd` |
+| Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_FallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; eye-offset anchor `[orig: @0x4bf078..0x4bf14c]` + Arial label font `[orig: HUD_InitAllFonts @0x51ee20]` witnessed + ported 2026-08-11; ctest `hud_math`/`hud_frame_compiler`/`infantry`/`promote` |
 | Armory/vehicle-bay/FARP bottom prompts | draw/feed ported; remaining menu/system integration in D-HUD-14 | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
 | BMS triggered text (OutputText) and the console lines | **ported** (`HudFrameCompiler::push_message` → the SYSTEM ring drawn by `element_feed`, D-HUD-6) | `[orig: HUD_DisplayTriggeredText @0x51f190]` → `[orig: Chat_AddMessageChannel2(text, -1, 930) @0x51f216]`, the SAME ring as the 0x1E lines; the WAC consol/pconsol/consol# and forceanim lines (`debug_text`) post there too; `hud_helpers_test.gd` expiry |
 | WAC text/ptext/text#, the WAC lose line, the BMS subgoal won/lost lines | **ported 2026-09-23** (`HudOverlay.push_chat_line(line, -1)` → the CHAT ring, D-HUD-6) | `[orig: Chat_AddSystemMessage @0x4EDB50]` (the `Chat_AddMessageChannel1` call `@0x4EDB5C`, color −1 `@0x4EDB59`, 930 ticks `@0x4EDB54`; text# through `Chat_AddFormattedIntMessage @0x4EDB70`, the sprintf `@0x4EDB9E`) and `[orig: GameMsg_AddChatLineAndRelay @0x5BA170]` (the `Chat_AddMessageChannel1(line, -1, 930)` call `@0x5BA197`; callers `WacAction_Lose @0x4ED3F0` and `EventAction_Dispatch @0x4542E0` cases 14/15, the calls `@0x454578` / `@0x454632`) → `[orig: Chat_AddMessageChannel1 @0x4985D0]`, the CHAT ring |
@@ -83,17 +83,17 @@ completed launcher targeting, Inset scene, mortar impact HUD, and pilot instrume
 | Parachute / armor status icons | witnessed — port pending (entity+44 flag writer unwalked) | `[orig: HUD_DrawParachuteAndArmorIcons @0x5925c0]` — entity+44 `&0x10` parachute / `&0x8` armor through the info struct's entity ptr; `ParachuteIcon`/`ArmorIcon` tokens |
 | MP objective status text + team tile | confirm-only — MP HUD phase | `[orig: HUD_DrawTeamIdLine @0x59aa30]` (ex "draw_objective_status_text") client/strcli* strings witnessed |
 | Weapon heat bar (HUDHEAT) | **ported** (`HudFrameCompiler::element_heat`, D-HUD-15) | `[orig: HUD_DrawWeaponHeatBar @0x599700]` (ex kong "draw_minimap_overlay" — a misnomer; there is no radar here) full witness: border + proportional fill in the HUDHEAT rect |
-| Waypoint HUD label (HUDWPDINFO) | **ported** (`HudFrameCompiler::element_waypoint` + `game_hud_presenter.gd`, D-HUD-16/17) | `[orig: HUD_DrawWaypointNameAndDistance @0x5947a0]` + `[orig: get_waypoint_name @0x594630]` full witness; gates `[orig: @0x5a7daf]` |
+| Waypoint HUD label (HUDWPDINFO) | **ported** (`HudFrameCompiler::element_waypoint` + `game_hud_presenter.gd`, D-HUD-16/17) | `[orig: HUD_DrawWaypointNameAndDistance @0x5947a0]` + `[orig: HUD_GetWaypointName @0x594630]` full witness; gates `[orig: @0x5a7daf]` |
 | Waypoint track (list/current/advance/mission gate) | **ported** (`engine/runtime/world` waypoint track + `Simulation`, D-HUD-16/17) | list `[orig: NetPacket_WriteWorldStateLoad0x0F @0x502d10 @0x502e41]` (nav channel `flags&2`); BMS marker fields `[orig: Entity_SpawnFromBMSRecord @0x40f0aa]`; advance `[orig: Player_UpdatePerFrame @0x4de5f7]`; done-mark `[orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0]`; cycle `[orig: Spectator_CycleTarget @0x4dc1d0]` + input case 23 `[orig: @0x49b3de]`; `ShowWaypoints` `[orig: Game_SetShowWaypoints @0x58fb50]` |
-| Gameplay spinmap (`HUDSPINMAP*`: heading-up terrain, blips, pulse markers, waypoint tether/distance, compass ring) | **ported** (`HudMinimapCompiler` → `HudFrameCompiler::element_spinmap` → `HudOverlay`; retained 0x40/0x6B state in `ClientReplicaPipeline`; in-map indicator/label legs = D-HUD-21) | `[orig: HUD_RenderAllOverlays @0x5a8070 (gate @0x5a86e8, mask 0xD07FF @0x5a86f0)]` → `[orig: HUD_DrawMapOverlay @0x5a5f40]`; transform `[orig: Terrain_FixedPointToWorldFloat @0x607060]`; terrain `[orig: render_terrain_decal @0x6071C0]`; blips `[orig: MapOverlay_RenderAllByLayer @0x5be590 → render_minimap_slot_blip @0x5be240]`; compass `[orig: draw_compass_indicator @0x59c900]`; ctests `hud_frame_compiler`/`client_minimap_overlay`/`minimap_overlay` + GUT `hud_overlay_test.gd` |
+| Gameplay spinmap (`HUDSPINMAP*`: heading-up terrain, blips, pulse markers, waypoint tether/distance, compass ring) | **ported** (`HudMinimapCompiler` → `HudFrameCompiler::element_spinmap` → `HudOverlay`; retained 0x40/0x6B state in `ClientReplicaPipeline`; in-map indicator/label legs = D-HUD-21) | `[orig: HUD_RenderAllOverlays @0x5a8070 (gate @0x5a86e8, mask 0xD07FF @0x5a86f0)]` → `[orig: HUD_DrawMapOverlay @0x5a5f40]`; transform `[orig: Terrain_FixedPointToWorldFloat @0x607060]`; terrain `[orig: Render_TerrainDecal @0x6071C0]`; blips `[orig: MapOverlay_RenderAllByLayer @0x5be590 → Render_MinimapSlotBlip @0x5be240]`; compass `[orig: HUD_DrawCompassIndicator @0x59c900]`; ctests `hud_frame_compiler`/`client_minimap_overlay`/`minimap_overlay` + GUT `hud_overlay_test.gd` |
 | Fullscreen / CMAP / DEATH map surfaces | witnessed — deferred (D-HUD-19) | shared fullscreen `HUD_DrawMapOverlay @0x5a5f40` legs plus windowed `MapOverlay_DrawView @0x5a58e0`: pan/zoom, grid coordinates, command/deploy labels and window hosting |
 | Objectives panel + subgoal state (MISSION OBJECTIVES) | **ported** (`world::SubgoalState` + `HudFrameCompiler::element_objectives` + `game_hud_presenter.gd`, D-HUD-18; the toggle is polled from catalog row 55 `Goals` (dispatch 31, default G) since 2026-09-10 — the earlier hard-coded O collided with `dotsize`) | `[orig: HUD_DrawWinConditions @0x5ba940]` full witness; actions 14/15/35/36 `[orig: EventAction_Dispatch @0x454500/@0x4545e0/@0x4546af/@0x454724]`; toggle `[orig: @0x49b68b]`; ctest `event_runtime_bms` subgoal block; the objective notification and the 0x3F relays since 2026-09-23 (`[orig: HUD_ShowObjectiveNotification @0x5BA2E0]`; ctests `bms_hud_relay`, `hud_game_text`) |
 | HUD declutter (`hud_detail` + `HUDDECLUT_*` masks) | **ported** (`engine/runtime/hud/hud_declutter.*` + `HudFrameCompiler` per-slot gates + the shell's persisted `hud_detail`) | `[orig: HUD_ParseHudposToken @0x59F370 mask arms → CRenderState_SetLayerVisibility @0x59B0F0 → dword_2723C80]`; cycle `[orig: Input_HandleActionBinding_0 @0x4e060b..24]`; level-3 blackout `[orig: @0x5a80c4]`; death force-3 `[orig: @0x42e410]`; the full section below |
 | Mounted-vehicle panel (VEHICLE_HUD silhouette + seat markers) | **ported end to end** (2026-08-21: `HudFrameCompiler` vehicle-panel leg + `hud_vehicle_panel.h` band/marker policy + the `def_hudpos` VEHICLE_HUD blocks + `world/vehicle_panel_feed` (the re-root, the slot list, the three marker arms) + `HudOverlay::set_vehicle_panel` (the per-sid `interface` upload) + `vehicle_panel_presenter.gd` — the device + lane landed 2026-08-21, D-HUD) | `[orig: HUD_DrawVehicleHealthBars @0x5a4fd0; Entity_BuildWeaponSlotList @0x434c60; Entity_GetMountSlotBoneIndex @0x546680; the VEHICLE_HUD arms of HUD_ParseHudposToken @0x59f370 (@0x59f380..0x59f5cb)]`; ctest `hud_vehicle_panel`, `hud_frame_compiler`, `vehicle_panel_feed`, `def_parse_hudpos` |
-| Recent Messages window (the J-key `OldMessages` history) | **ported** (2026-08-21: `hud_frame_message_log.cpp` over the two display-slot rings, `hud_message_log.h` layout; the `OldMessages` toggle lane `message_log_presenter.gd` landed 2026-08-21, D-HUD) | `[orig: HUD_DrawMessageLog @0x5b9d70]` (IDB-renamed 2026-08-21, ex `draw_credits_scroll`); the `g_showMessageLog`-only gate `[orig: Server_DrawStatusScreen @0x50b211..0x50b21f]`; ctest `hud_message_log`, `hud_frame_compiler` |
+| Recent Messages window (the J-key `OldMessages` history) | **ported** (2026-08-21: `hud_frame_message_log.cpp` over the two display-slot rings, `hud_message_log.h` layout; the `OldMessages` toggle lane `message_log_presenter.gd` landed 2026-08-21, D-HUD) | `[orig: HUD_DrawMessageLog @0x5b9d70]` (IDB-renamed 2026-08-21, ex `draw_credits_scroll`); the `g_ShowMessageLog`-only gate `[orig: Server_DrawStatusScreen @0x50b211..0x50b21f]`; ctest `hud_message_log`, `hud_frame_compiler` |
 | Message feed — the CHAT ring (player chat, S2C 0x14) | **ported** (2026-08-21: the netsim 0x14 fold → `ClientChatLine`, `HudFrameCompiler::push_chat_line` + `chat_wrap_text` (the display-slot sink), `hud::chat_channel_sink/color`, the HUDCHATTEXT first loop of `element_feed`; D-HUD-6 narrowed to the announce banner) | `[orig: Chat_AddMessageChannel1 @0x4985d0; Chat_DispatchToChannel @0x42b910; HUD_DrawConsoleMessages @0x59ad30 (first loop); HUD_GetChatBoxCoord @0x5bbe90]`; ctest `hud_frame_compiler`, `client_replica_chat` |
 | AAS zone status panel (LFP objective markers + Under Attack / Ready text) | **ported** (2026-08-21: `hud_frame_lfp_panel.cpp` + `hud_lfp_panel.h` + `world/lfp_feed` + the 0x6F contest bytes retained in `ZoneState`; `HudOverlay::set_lfp_panel` + `lfp_panel_presenter.gd` landed 2026-08-21, D-HUD; residuals in the section below) | `[orig: HUD_DrawZoneStatusPanel @0x5a2480; HUD_DrawZoneMarker @0x5986f0; HUD_LoadAllTextures @0x59e0a3..0x59e11f; ZoneTimerList_SetEntryValue @0x537ec0]` (IDB-renamed 2026-08-21, ex `draw_capture_point_*`); ctest `hud_lfp_panel`, `lfp_feed`, `hud_frame_compiler`, `npruntime_client_runtime` |
-| Map medic marker (the teammate-blip replacement) | **ported** (2026-08-21: `HudMinimapMarker::medic` from the charattr Medic bit → `medic_cross_quads` overlays in `hud_minimap.cpp`; snapshot v4 + the decoder landed 2026-08-21, D-HUD; the charattr ATTRIBUTES loader behind `World::tables.class_attribute_flags` — `CharAttr_LoadFromDef @0x412140` — is ported in this PR (R2): the field had no loader before the final review) | `[orig: draw_entity_labels_and_markers @0x5a49e0 (the call @0x5a4d40); AnimMap_IsSlotActive @0x4125e0; CharAttr_LoadFromDef @0x412140]`; ctest `hud_frame_compiler` (the spinmap medic case) |
+| Map medic marker (the teammate-blip replacement) | **ported** (2026-08-21: `HudMinimapMarker::medic` from the charattr Medic bit → `medic_cross_quads` overlays in `hud_minimap.cpp`; snapshot v4 + the decoder landed 2026-08-21, D-HUD; the charattr ATTRIBUTES loader behind `World::tables.class_attribute_flags` — `CharAttr_LoadFromDef @0x412140` — is ported in this PR (R2): the field had no loader before the final review) | `[orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 (the call @0x5a4d40); AnimMap_IsSlotActive @0x4125e0; CharAttr_LoadFromDef @0x412140]`; ctest `hud_frame_compiler` (the spinmap medic case) |
 
 ## Render pipeline — the two-struct model
 
@@ -133,10 +133,10 @@ each frame); the draw code reads both.
   | `dword_2723CA0` | 8 WPNGRP | weapon/ammo + stance-indicator + ammo-indicator cluster (gates `@0x5A7CC8`/`@0x5A7D04`/`@0x5A7D42`; the seat-mode-2/5 leg falls through `@0x5A7D34`) |
   | `dword_2723CB4` | 13 XHAIRS | crosshair cluster (read in `HUD_DrawCrosshair @0x592757`, AND !binoculars) |
   | `dword_2723C90` | 4 ALTGRP | altitude / power bar (gate `@0x5A7D81`) |
-  | `dword_2723CD0` | 20 PWRBAR | PowerThrow charge bar (`[orig: HUD_DrawPowerThrowChargeBar @0x599830]` — ex kong "HUD_DrawWeaponReloadBar" misnomer: it gates on the PowerThrow def bit + `g_fireChargeStartTick` and never draws reloads; witnessed + ported, world-wac-ai-re §27.3; gate `@0x5A7DD2`) |
+  | `dword_2723CD0` | 20 PWRBAR | PowerThrow charge bar (`[orig: HUD_DrawPowerThrowChargeBar @0x599830]` — ex kong "HUD_DrawWeaponReloadBar" misnomer: it gates on the PowerThrow def bit + `g_FireChargeStartTick` and never draws reloads; witnessed + ported, world-wac-ai-re §27.3; gate `@0x5A7DD2`) |
   | `dword_2723CD8` | 22 HUDLS | weapon slot bar (`[orig: HUD_DrawWeaponSlotBar @0x599cd0]`, unwitnessed; gate `@0x5A7DEE`) |
 
-  A spectator path (`g_death_screen_active`) rebuilds the info for the *spectated* entity
+  A spectator path (`g_DeathScreenActive`) rebuilds the info for the *spectated* entity
   and restores: `qmemcpy(tmp, &dword_2723388, 0x240)` → `HUD_BuildEntityInfo` →
   `qmemcpy(&dword_2723388, tmp, 0x240)` `[orig: @0x5a7bf1]` — pinning the 576-byte
   size.
@@ -148,8 +148,8 @@ level cells plus the 24 hudpos mask bytes `byte_2723CE0[24]`. The persisted
 config value `hud_detail` (0..3) lives in the config struct
 (`g_GameConfigState.hudDetail_518`: parse `@0x550339`, default 0 `@0x54d3d8`,
 written to `game.cfg` by `Game_SaveConfig @0x54c80d`); the LIVE layer level is
-`layerIndex @0x24D20BC`, written by the mission-start apply
-`apply_session_settings_to_globals @0x55154d` (config -> live, called from
+`g_HUDDetailLevel @0x24D20BC`, written by the mission-start apply
+`Game_ApplySessionSettingsToGlobals @0x55154d` (config -> live, called from
 `Game_StartMission @0x524662`, `SinglePlayer_StartMission @0x561c28` and the
 session create/join paths), by the `huddetail` cycle `@0x4e060b..14` and by
 the death force `@0x42e412` — neither of the last two touches the config
@@ -213,7 +213,7 @@ every other level.
   the separate `/NOHUD` `dword_840B18 & 2`. The FP draw's bit-0 test is
   skipped for an Emplaced weapon def (`@0x4dedd9..0x4dedf1`), and a scoped
   Inset weapon the player can fire draws no FP model
-  (`Player_CanFireWeapon && IsScoped && def+0xC & 0x200`, `@0x4dedf7..0x4dee19`);
+  (`Player_IsOpticalViewVisible && IsScoped && def+0xC & 0x200`, `@0x4dedf7..0x4dee19`);
   both ported 2026-09-24 (`world::fp_viewmodel_retail_submit`,
   `FpViewmodelSubmitGates`).
 - **The mission HUD item flash** (corrected 2026-09-23: BMS action 28's sub 37,
@@ -231,7 +231,7 @@ every other level.
   strip (`HUD_DrawCompassStrip @0x595470`, [5] `@0x595CAC`, [14] `@0x5958D0`), the
   map overlay's tracked-target pointer (`HUD_DrawMapOverlay @0x5A5F40`,
   [14] `@0x5A77FE`) and waypoint state line ([5] `@0x5A785B`), and the minimap
-  blips, each skipped while its timer has bit 0x10 (`draw_minimap_blip @0x597890`: [12]
+  blips, each skipped while its timer has bit 0x10 (`Minimap_DrawBlip @0x597890`: [12]
   `@0x597E0A` for the 0xFF204080 blips, [13] `@0x597E29` for 0xFF802020, [15]
   `@0x597E45` class 5, [10] `@0x597E65` class 3, [11] `@0x597E84` class 0).
   Sub 38 zeroes the input word (`@0x4535C2`); sub 39 stores `p1 == 0` into
@@ -296,7 +296,7 @@ by the same first-match rule.
 ### Breath bar
 
 `[orig: HUD_DrawBreathBar @0x59D6F0..0x59D9C9]`, whose only caller is
-`HUD_DrawGameplayOverlays @0x5BDED3`, skipped while `g_spawn_success_gate` is
+`HUD_DrawGameplayOverlays @0x5BDED3`, skipped while `g_SpawnSuccessGate` is
 set (`@0x5BDECA..0x5BDED1`). Port: `HudFrameCompiler::element_breath_bar` over
 `emit_progress_bar` (`engine/runtime/hud/hud_frame.cpp`); ctest
 `hud_frame_compiler` (`test_compiler_breath_bar`).
@@ -320,7 +320,7 @@ set (`@0x5BDECA..0x5BDED1`). Port: `HudFrameCompiler::element_breath_bar` over
 - **Geometry.** 200 x 10 design px from the anchor, left (align 0), right (1)
   or centred (2), each corner scaled on its own through
   `Viewport_ScaleToVirtualCoords` (`@0x59D794..0x59D817`, `@0x59D90E..0x59D991`,
-  `@0x59D851..0x59D8D4`). `draw_progress_bar @0x59B340` draws three untextured
+  `@0x59D851..0x59D8D4`). `HUD_DrawProgressBar @0x59B340` draws three untextured
   quads in one 12-vertex draw (`@0x59B5EB`): the border in the colour, the inner
   rect in opaque black (`@0x59B4DB`), then the fill, centred:
   mid ± (xr - xl - 4) * fraction * 0.5 about the integer mid
@@ -367,7 +367,7 @@ count, and the crosshair spread projection/sum/ERROR-row/gate — is native
 CanvasItem draw work and delegate every decision here. DISPOSITION, avatar
 menu-portrait presentation math (`avatar_preview.gd` — the BAM/frame idle
 rotation, the 2^28 sway amplitude, the `(rand()%180)*0xB60B60` initial yaw
-`[orig: update_player_preview_animation @0x55dba0; PlayerInfo_InitPreviewModel
+`[orig: PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0; PlayerInfo_InitPreviewModel
 @0x5600d0]`): granted the shell exception reviewed with this slice — pure
 menu-preview presentation, already `[orig]`-cited named constants at the
 node, no sim consumer; a lib hop adds nothing observable.
@@ -415,9 +415,9 @@ orders them crouch=1/prone=2; the ERROR table orders prone=0/crouch=1/stand=2).
 - **Border**: `[orig: Render_DrawWireframeRect @0x5d4760]` over the full rect,
   color `dword_27237C4` (the `HEALTHBORDER` color).
 - **Fill color** by a freshly recomputed `(currentHealth << 16)/maxHealth`
-  (currentHealth = `entity+286`): `> 0xC000` (0.75) → `g_stanceColorGood @0x2723ADC` (good;
+  (currentHealth = `entity+286`): `> 0xC000` (0.75) → `g_StanceColorGood @0x2723ADC` (good;
   named 2026-08-21, ex `dword_2723ADC`); `> 28671` (`0x6FFF` ≈ 0.437) →
-  `g_stanceColorMiddle @0x2723AE0` (mid); else `g_stanceColorBad @0x2723AE4` (bad).
+  `g_StanceColorMiddle @0x2723AE0` (mid); else `g_StanceColorBad @0x2723AE4` (bad).
   (Note D-HUD-4: the *fill width* uses the capped `+92` ratio while the *color*
   uses an uncapped recompute — equivalent in range, recorded for fidelity.)
 
@@ -489,7 +489,7 @@ across `hud_stance.gd`/`hud_fade.gd`/`game_hud.gd`, deleted at the cutover).
   follow-up; the OpenNova port uses `FntResource` (already parses the `.fnt`
   glyph atlas) for the glyphs.
 
-### Ammo count + weapon name — `hud_draw_weapon_ammo_and_name @0x5939d0` (ported 2026-07-09)
+### Ammo count + weapon name — `HUD_DrawWeaponAmmoAndName @0x5939d0` (ported 2026-07-09)
 
 Both elements gate on the info struct's weapon-def pointer (`dword_27235B0`,
 info+552) and their own token's **hidden** dword, and both draw **half-bright**
@@ -515,7 +515,7 @@ Port: `HudFrameCompiler::element_weapon_cluster`; name resolution +
 capacity/-1 mapping in `godot/game/world/game_hud_presenter.gd`
 (`_resolve_weapon_display_name` + the per-frame info build).
 
-### Clip + rounds indicator — `draw_hud_ammo_indicator @0x599a30` (ported 2026-07-09)
+### Clip + rounds indicator — `HUD_DrawAmmoIndicator @0x599a30` (ported 2026-07-09)
 
 The weapon's magazine graphic at the `HUDCLIP` anchor (`dword_27237B8/BC`;
 either component nonzero enables), gated on the ALPHAFADE ramp and the ammo
@@ -559,14 +559,14 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   `[orig: @0x592bd5]`; default white witnessed at Config_SetDefaults @0x54D461; D-HUD-8 corrected below.
 - **Visibility**: the cluster gates on `dword_2723CB4` and the weapon-def ptr;
   the spread crosshair draws when the player **cannot** take an aimed shot —
-  `!Player_CanFireWeapon() || equipped Inset || (dword_A8235C && promoted
+  `!Player_IsOpticalViewVisible() || equipped Inset || (dword_A8235C && promoted
   Sighted)` `[orig: @0x592adc..0x592b01]`. Rechecked 2026-09-19:
   `Player_IsVehicleHasAutoAim @0x4dccb0` actually reads equipped `flags2 & 0x200`,
   and `Player_IsVehicleGunnerScoped @0x4dcd30` is the promoted Sighted selector;
   neither name implies that a vehicle seat is required.
-  `Player_CanFireWeapon @0x5cf780`
+  `Player_IsOpticalViewVisible @0x5cf780`
   requires either the **settled Scoped** view (`Player_IsEquippedWeaponScoped
-  @0x4dcc80` = `WeaponDef.Flags & 1` plus `g_weaponScopeActive`) or the separate
+  @0x4dcc80` = `WeaponDef.Flags & 1` plus `g_WeaponScopeActive`) or the separate
   settled **Sighted** predicate (`@0x4dcd30` = `Flags & 2`, promoted active,
   and current action is not SWITCHFROM). The ordinary Scoped leg rejects
   movement and drowning/below-water state; Sighted bypasses those two gates.
@@ -575,13 +575,13 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   the scope/movement/air/water verdicts in first person, but not the early
   slot/seat/reload rejects. Thus the crosshair draws throughout ADS ease and
   whenever the applicable CanFire gate fails. Its can't-fire path also resets
-  `g_cameraFovTargetQ16 = 5242880` = **80.0 deg** 16.16
+  `g_CameraFovTargetQ16 = 5242880` = **80.0 deg** 16.16
   `[orig: @0x5cf88e]` — the port's `fov_deg` default.
 - **Anchor**: the offset applies to the **virtual-space** projection of the
   aim point (`Viewport_ScreenToVirtual`). For the on-foot local player with no
   camera mode that point is the literal screen center
   `[orig: @0x5928a0 — overlayCtx/2, dword_24C1424/2]`; a spectated entity or
-  `g_camera_mode` (external/3P) projects `Entity_BuildCameraView` instead
+  `g_CameraMode` (external/3P) projects `Entity_BuildCameraView` instead
   `[orig: @0x592910..0x59295e]` (D-HUD-10 CLOSED 2026-07-11: the reimpl's
   `aim_screen_point()` returns no projection in first person — the HUD pins the
   exact design center — and projects the aim ray's 1000.0-unit far point
@@ -591,12 +591,12 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
 - **Spread**: with `mp_CrossHairSpread` enabled (`dword_25510E4`; disabled
   still draws the assembled reticle at offset 0 `[orig: fldz @0x592bcc]`; the
   config default is ON `[orig: Config_SetDefaults @0x54d472]` and the options
-  checkbox seeds from the global `[orig: options_screen_init @0x554d15]` — the
+  checkbox seeds from the global `[orig: UI_OptionsScreenInit @0x554d15]` — the
   port carries the toggle as `HudLayout::crosshair_spread_enabled` off the
   XHAIR_SPREAD option):
-  `row = stance + 3*Player_CanFireWeapon()` where stance = 0 prone (`&0x100`)
+  `row = stance + 3*Player_IsOpticalViewVisible()` where stance = 0 prone (`&0x100`)
   / 1 crouch (`&0x200`) / 2 stand, forced 2 when swimming/under water
-  (`entity+36 & 0x108020` or below `Env_WaterHeightFixed`), forced 1 when
+  (`entity+36 & 0x108020` or below `g_EnvWaterHeightFixed`), forced 1 when
   mounted `[orig: @0x592b35..0x592b87]`. Because the draw gate and the row
   select share the CanFire predicate, the ordinary un-aimed crosshair reads
   hip rows 0..2. Inset and the Sighted hit-feedback exception can draw aimed
@@ -669,11 +669,11 @@ roles in projectile spread:
 The HUD deliberately uses `R>>7` and `M>>7`; ordinary projectile magnitude
 uses `R>>8` and `M>>7`. The projectile ERROR selector is also independent of
 the HUD selector: `verticalSpread ? 3 : category`, whereas the HUD uses
-`stance + 3*Player_CanFireWeapon()`. Keeping those two consumers separate is
+`stance + 3*Player_IsOpticalViewVisible()`. Keeping those two consumers separate is
 required for retail parity. `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
 `[orig: HUD_DrawCrosshair @ 0x592640]`
 - **Targeting sub-elements** (witnessed 2026-07-11; ported 2026-09-19):
-  - the **target-tracking cursor** — with a tracked entity (`ptr @0x27234F0`)
+  - the **target-tracking cursor** — with a tracked entity (`g_HUDTargetCursorEntity @0x27234F0`)
     and the cursor art loaded, a quad draws at the projected
     `Entity_ComputeWeaponFireOrigin` of the target, color/texture switching on
     same-team (`dword_2723900` vs `dword_27238F0` records) with an MP team
@@ -702,7 +702,7 @@ required for retail parity. `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
 
 Port: `HudFrameCompiler::element_crosshair` (spread_px / error_row / the 5
 UV'd strips, visibility + row select — `engine/runtime/hud/hud_frame.cpp`),
-fed by the sim's shared `Player_CanFireWeapon` projection. Scoped/Sighted,
+fed by the sim's shared `Player_IsOpticalViewVisible` projection. Scoped/Sighted,
 promotion timing, movement, camera, reload, air/water, ForceScoped, and the
 seat gates therefore select visibility and the ERROR triplet together.
 
@@ -712,11 +712,11 @@ The standard 2D card is chosen dynamically after ADS settles; neither the
 presence of a `SIGHTS` block nor a static Scoped bit alone is its gate:
 
 - The **Scoped** predicate is `Player_IsEquippedWeaponScoped @0x4dcc80`
-  (`Flags & 1` plus `g_weaponScopeActive`). `Render_ProcessMainSceneFrame`
+  (`Flags & 1` plus `g_WeaponScopeActive`). `Render_ProcessMainSceneFrame`
   begins this path at `0x5ca299`; Inset (`Flags2 & 0x200`) does not set the
   ordinary Scoped-card byte, while the standard path sets it at `0x5ca2c7`.
 - The separate **Sighted** predicate at `0x4dcd30`, called at `0x5ca2cc`,
-  requires `Flags & 2`, `g_weaponScopeActive`, and
+  requires `Flags & 2`, `g_WeaponScopeActive`, and
   `MountSlot.currentAction != SWITCHFROM (7)`. It sets the second selector byte
   at `0x5ca2d5`.
 - The predicate at `0x4dcce0`, called at `0x5ca2f6`, recognizes
@@ -724,7 +724,7 @@ presence of a `SIGHTS` block nor a static Scoped bit alone is its gate:
   `0x5ca2ff/0x5ca304`. ForceScoped overrides this suppression.
 
 Only the post-clear bytes reach the drawing branch. Sighted calls
-`draw_weapon_sight_overlays @0x4dce00` at `0x5caaf3/0x5caafa`; otherwise
+`HUD_DrawWeaponSightOverlays @0x4dce00` at `0x5caaf3/0x5caafa`; otherwise
 Scoped calls it at `0x5cab01/0x5cab08` and then **always**
 `Hud_DrawScopeCircleMask @0x5d17a0` at `0x5cab15`. When both selectors are
 zero, the first-person viewmodel path remains available
@@ -734,19 +734,19 @@ zero, the first-person viewmodel path remains available
 previously read the mask as a rowless-weapon fallback that "a nonzero count
 suppresses". The byte sequence refutes it: `Hud_DrawScopeCircleMask` is called
 unconditionally on the Scoped arm, and the SIGHTS row count only forms its
-single argument — `v11 = draw_weapon_sight_overlays(...);
+single argument — `v11 = HUD_DrawWeaponSightOverlays(...);
 Hud_DrawScopeCircleMask(!v11, ...)` `@0x5cab08..0x5cab15`, and the same shape
-in the second caller `render_hud_overlay @0x5d82e5..0x5d82f2`
+in the second caller `Render_HUDOverlay @0x5d82e5..0x5d82f2`
 (`xor ecx,ecx; cmp eax,ebx; setz cl; push ecx`). Inside the drawer that
 argument reaches ONLY the tail `if (draw_crosshair)
-draw_minimap_crosshair_and_grid(...)` `@0x5d1cc9..0x5d1cf4`, after the ring has
+HUD_DrawMinimapCrosshairAndGrid(...)` `@0x5d1cc9..0x5d1cf4`, after the ring has
 already been submitted `@0x5d1cc4`. So every scoped frame gets the annulus, and
 an authored SIGHTS row suppresses only the inner reticle cross and grid ticks.
 The consequence of the old reading — a scoped weapon with rows drawing with no
 circular mask at all — was the visible symptom in OpenNova before the port. The
 full geometry is the new section below.
 
-`draw_weapon_sight_overlays` itself reads only the authored count
+`HUD_DrawWeaponSightOverlays` itself reads only the authored count
 (`WeaponDef+0x258`) and rows (`WeaponDef+0x1c8`, stride `0x24`). Those rows are
 card **content**, including draw order/blend/scale, not selection policy. A
 nonzero count is reported even if a row's texture handle is missing, so a
@@ -826,9 +826,9 @@ shifts 66 px), `1 100 100 1` and `1 300 300` to 1, `10 100 300 1` to 3.
 
 The near-black annulus every Scoped frame draws over the scoped view, and the
 reticle cross + cardinal grid it chains through
-`draw_minimap_crosshair_and_grid @0x5d1160` when the SIGHTS card drew no
+`HUD_DrawMinimapCrosshairAndGrid @0x5d1160` when the SIGHTS card drew no
 authored row. Both callers (`Render_ProcessMainSceneFrame @0x5cab15`,
-`render_hud_overlay @0x5d82f2`) pass `draw_crosshair = (row count == 0)`; see
+`Render_HUDOverlay @0x5d82f2`) pass `draw_crosshair = (row count == 0)`; see
 the correction in the SIGHTS-card section above for why this is not a fallback.
 
 **Frame.** All of it derives from the viewport rect
@@ -862,8 +862,8 @@ mask the whole surface outside the circle), and `scaleX = 511 / 383 x 0.75 =
 two vertices per stop, submitted as ONE 130-vertex `D3DPT_TRIANGLESTRIP`
 through the dynamic VB (`GDynamicVB_DrawPrimitive(5, &unk_2BE1088, 0x82)`
 `@0x5d1cc4`). Segment `s` reads BAM table index `16 * s`:
-`g_bam_sin_table_q22 @0x31bfbc0` holds 1024 Q22 entries per revolution and
-`off_849934 = &g_bam_sin_table_q22[256]` is its cosine view, both read as
+`g_BamSinTableQ22 @0x31bfbc0` holds 1024 Q22 entries per revolution and
+`off_849934 = &g_BamSinTableQ22[256]` is its cosine view, both read as
 `table[i] * 2^-22` (`@0x5d18cd` / `@0x5d18e7`). Each stop emits
 `x = cos*r*scaleX + cx`, `y = cy - sin*r*scaleY` (`@0x5d18f6` / `@0x5d190d`),
 inner first at `0xFF181820` (`@0x5d18cf`) then outer at `0xFF040408`
@@ -931,7 +931,7 @@ truncated spoke endpoints and the tick lattice.
 **Under the NVG composite (2026-09-24, the rendering parity pass).** Under the
 NVG composite's Scoped arm the circle mask does not draw: the lens draws its
 own ring, then the SIGHTS card on top, then (no authored row)
-`draw_minimap_crosshair_and_grid(ring, cx, cy, 1.0, 1.0)`, the cross and grid
+`HUD_DrawMinimapCrosshairAndGrid(ring, cx, cy, 1.0, 1.0)`, the cross and grid
 at unit scale (`NVG_DrawScopedLens @0x5d2798..0x5d27bc`;
 `hud::build_nvg_lens_reticle`, `HudPos.scope_mask_*` `nvg_lens`). No NVG mask
 draws under the lens or on the death screen (`NVG_Composite
@@ -991,13 +991,13 @@ reach the screen through the SYSTEM ring.
 
 ### Parachute / armor icons — `HUD_DrawParachuteAndArmorIcons @0x5925c0`
 
-- Parachute: `entityA flags &0x10` → draw `ParachuteIcon` at `(x@0x272383C, y@0x2723840)`,
+- Parachute: `entityA flags &0x10` → draw `ParachuteIcon` at `(g_HUDParachuteIconX@0x272383C, g_HUDParachuteIconY@0x2723840)`,
   handle `dword_27239A4`.
 - Armor: `entityA flags &8` → draw `ArmorIcon` at `(dword_2723844, dword_2723848)`,
   handle `dword_27239B4`.
 - The static HUD frame background is `STATICFRAME` → pos `dword_2723B1C/B20`,
   name `byte_2723C24`, drawn at the top of `HUD_RenderOverlays`
-  (`[orig: draw_textured_quad_with_border @0x590c40]`).
+  (`[orig: HUD_DrawTexturedQuadWithBorder @0x590c40]`).
 - Port pending: the runtime does not yet surface the entity flag bits.
 
 ### MP objective status — `HUD_DrawTeamIdLine @0x59aa30` (ex "draw_objective_status_text"; witnessed, MP HUD phase)
@@ -1008,7 +1008,7 @@ section keys `strcli19/05/06/17/18/01` with per-state colors; KOTH appends
 `strcli20/21` by flag-carrier state; the death screen shifts the draw up by the
 measured text height. Not an SP element; ported later with the MP HUD.
 
-### Attach labels — `draw_vehicle_seat_and_armory_labels @0x5a3290` (ported 2026-07-17)
+### Attach labels — `HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290` (ported 2026-07-17)
 
 The floating "indicator near where you attach": a wireframe box + centered text
 drawn at the **screen projection** of every eligible seat/armory userpoint on
@@ -1021,11 +1021,11 @@ nearby entities. Called **unconditionally** by `HUD_RenderOverlays`
 
 | Global (renamed this session) | Key | Retail text | Fallback |
 |---|---|---|---|
-| `g_hudLabelTextSit @0x2723860` | `STROVER_SIT` | "Sit" | `!sit` |
-| `g_hudLabelTextControl @0x2723864` | `STROVER_CONTROL` | "Control" | `!Control` |
-| `g_hudLabelTextUseGun @0x2723868` | `STROVER_USEGUN` | "UseGun" | `!UseGun` |
-| `g_hudLabelTextUseArmory @0x272386C` | `STROVER_USEARMORY` | "Armory" | `!UseArmory` |
-| `g_hudLabelFmtArmoryDelay @0x2723870` | `STROVER_USEARMORYD` | "Armory in %d Seconds" | `!ArmoryDelay %d` |
+| `g_HUDLabelTextSit @0x2723860` | `STROVER_SIT` | "Sit" | `!sit` |
+| `g_HUDLabelTextControl @0x2723864` | `STROVER_CONTROL` | "Control" | `!Control` |
+| `g_HUDLabelTextUseGun @0x2723868` | `STROVER_USEGUN` | "UseGun" | `!UseGun` |
+| `g_HUDLabelTextUseArmory @0x272386C` | `STROVER_USEARMORY` | "Armory" | `!UseArmory` |
+| `g_HUDLabelFmtArmoryDelay @0x2723870` | `STROVER_USEARMORYD` | "Armory in %d Seconds" | `!ArmoryDelay %d` |
 
 **Selection** (the ported half — `VehicleSystem::collect_attach_labels`,
 `engine/runtime/world/vehicle_attach.cpp`):
@@ -1038,8 +1038,8 @@ nearby entities. Called **unconditionally** by `HUD_RenderOverlays`
 - Per-entity: iterate the player's proximity list (`entity+0x1BC/+0x1C0`,
   read through `entityA @0x27234e8` — the current-entity POINTER, spectator-
   aware) `[orig: @0x5a32a9]`; a ready weapon limits labels to the **nearest
-  entity** — `!Player_CanFireWeapon() || entity == nearest` `[orig: @0x5a3354;
-  Player_CanFireWeapon @0x5cf780]`; dead/destroyed skip, enemy-occupied
+  entity** — `!Player_IsOpticalViewVisible() || entity == nearest` `[orig: @0x5a3354;
+  Player_IsOpticalViewVisible @0x5cf780]`; dead/destroyed skip, enemy-occupied
   vehicles reject (`Vehicle_HasEnemyOccupant @0x4359f0`), carrier rules
   `[orig: @0x5a33d9]` (unmodeled — D-AI-11 b).
 - Seat labels (not armory mode): per `itemDef->seatBoneIndex[0..9]` slot —
@@ -1052,10 +1052,10 @@ nearby entities. Called **unconditionally** by `HUD_RenderOverlays`
 - Armory labels (armory mode): items with **attrib 0x80000 Armory** walk ALL
   model userpoints for the `armory` prefix (strnicmp 6) `[orig: @0x5a36f5,
   @0x5a372b]`; with `dword_A85B6C` nonzero the label is
-  `sprintf(g_hudLabelFmtArmoryDelay, A85B6C)` `[orig: @0x5a377f]` (the MP
+  `sprintf(g_HUDLabelFmtArmoryDelay, A85B6C)` `[orig: @0x5a377f]` (the MP
   armory-delay state; SP always 0 → plain "Armory").
 - Per point: world pos = the posed userpoint through the entity basis
-  (`build_bone_attachment_matrix @0x56c630`) **+ 12288 (0.1875 u) Z lift**
+  (`Bone_BuildAttachmentMatrix @0x56c630`) **+ 12288 (0.1875 u) Z lift**
   `[orig: @0x5a3585]`; distance gate = full 3D from the **entity position**
   (not the eye) `< 0x40000` (4.0 u) `[orig: @0x5a35f0]`; LOS raycast from the
   player position to the lifted point, the gun's carrier substituted as the
@@ -1065,7 +1065,7 @@ nearby entities. Called **unconditionally** by `HUD_RenderOverlays`
 resolves text, `hud_attach_labels.gd` draws):
 
 - Project world→screen (`Math_FixedPointTransformPoint22 @0x5a3628` +
-  `clip_point_to_frustum_and_project @0x5a3655` — behind-frustum points skip).
+  `HUD_ClipPointToFrustumAndProject @0x5a3655` — behind-frustum points skip).
   The label geometry is **raw screen pixels**, not the 1024×768 design space.
 - Color: the nearest (entity, bone) pair draws the master overlay color
   (`alpha @0x24c1868` = `overlayCtx+0x448`); every other label draws
@@ -1073,7 +1073,7 @@ resolves text, `hud_attach_labels.gd` draws):
   `[orig: @0x5a3640..0x5a364e]`.
 - Geometry: measure w/h (`HUD_MeasureTextWH @0x580ab0` →
   `CGameFont_MeasureText @0x674e70` with the bold slot's
-  (`g_hudLabelFontBold @0xB4C394`, ex "fontObj") scale pair); box
+  (`g_HUDLabelFontBold @0xB4C394`, ex "fontObj") scale pair); box
   `(x−w/2, y−2)..(x+w/2+5, y+h+1)` (`Render_DrawWireframeRect @0x5a36ad`);
   text centered through the half-bright text path
   (`HUD_DrawTextCentered_HalfBright @0x5a36c1`).
@@ -1096,14 +1096,14 @@ to attach to the $B" — **unreferenced by this binary**; no code cites it.)
 The overhead entity name labels (retail's **FRIENDLYTAGS** feature — the toast
 strings name it). The pass runs from `HUD_RenderAllOverlays @0x5a87cc`, after
 the overlay cluster and before the console messages, gated on
-`g_friendlyTagsMode @0x24C18C4 != 0` and `g_rules_flags @0x24D1E34` bit
+`g_FriendlyTagsMode @0x24C18C4 != 0` and `g_RulesFlags @0x24D1E34` bit
 `0x400` clear (the host option `FriendlyTag 0` sets it
 `[orig: ServerConfig_ApplyHostSetting @0x4a6358]`).
 
 **Selection** `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]`: walk 1 = pool-0
 entities WITHOUT `Flags & 0x100` (player-controlled ones ride walk 2), team
 `0`/local/death-screen, gametype set → `HUD_DrawEntityLabel(entity, NULL)`;
-walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
+walk 2 = the player-slot table (`g_PlayerSlotPtrTable @0xA822D0`, entries
 `{+13 active, +36 entity}`) with the same gates →
 `HUD_DrawEntityLabel(entity, slot)`.
 
@@ -1111,7 +1111,7 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
 
 - Entry bails: null/local entity, `Flags & 1`, null itemDef. The
   `PlayerSlot_FindByEntityPtr` call at `@0x5a3a5a` discards its result (dead
-  code); the `Player_CanFireWeapon`/`Player_IsEquippedWeaponScoped` pair at
+  code); the `Player_IsOpticalViewVisible`/`Player_IsEquippedWeaponScoped` pair at
   `@0x5a3b1a` runs for its auto-aim side effect only.
 - Anchor `(x, y, z + entity[+116] + 0x4000)` `[orig: @0x5a3a84..0x5a3a98]` —
   +116 (+0x74) is the z of the entity's **eye/camera-offset triple**
@@ -1138,21 +1138,21 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
   mounted @0x4b66fc..0x4b68e5]`; the z lane is ported with its witnessed
   `0x2000` floor `[orig: @0x4b6b98]`).
 - Gates: view distance ≥ `0x8000` (0.5 u, spectate target exempt)
-  `[orig: @0x5a3b0c]`; fog cull vs `Env_FogDistCurrent` `[orig: @0x5a3b28]`;
+  `[orig: @0x5a3b0c]`; fog cull vs `g_EnvFogDistCurrent` `[orig: @0x5a3b28]`;
   frustum project-or-bail (`Math_FixedPointTransformPoint22` +
-  `clip_point_to_frustum_and_project @0x5a3b47`); the death screen pins the
+  `HUD_ClipPointToFrustumAndProject @0x5a3b47`); the death screen pins the
   spectated entity to `(screenW/2, 2·fontH)` `[orig: @0x5a3b74]`.
 - Line metric = the `'0'` glyph's height × the slot's scaleY
   `[orig: GameFont_MeasureCharHeight @0x580a80 ('0', font) @0x5a3a36]`; fonts
-  `g_hudLabelFont @0xB4C388` / spectated `g_hudLabelFontLarge @0xB4C3A0`.
+  `g_HUDLabelFont @0xB4C388` / spectated `g_HUDLabelFontLarge @0xB4C3A0`.
   The overlay font slots are `{CGameFont*, scaleX float, scaleY float}` loaded
   by `HUD_LoadFontIntoSlot @0x580400` (scale float = `scaleFP/65536`
   `[orig: @0x58045d]`) from `HUD_InitAllFonts @0x51ee20`:
-  `g_hudLabelFont` = `Arial14n.fnt` (width ≤ 800) / `Arial16n.fnt` (> 800),
-  the bold slot `g_hudLabelFontBold @0xB4C394` = `Arial12b/14b/16b.fnt` per
+  `g_HUDLabelFont` = `Arial14n.fnt` (width ≤ 800) / `Arial16n.fnt` (> 800),
+  the bold slot `g_HUDLabelFontBold @0xB4C394` = `Arial12b/14b/16b.fnt` per
   the same 640/800/1024 tiers, both at scale
   `(screenWidth<<16)/{640,800,1024}` `[orig: @0x51ef26]`;
-  `g_hudLabelFontLarge` = `Impac22b.fnt`, `g_hudLabelFontImpact38 @0xB4C3AC`
+  `g_HUDLabelFontLarge` = `Impac22b.fnt`, `g_HUDLabelFontImpact38 @0xB4C3AC`
   = `Impac38b.fnt`, both over 800. The draw/measure helpers pass the slot
   scales into `CGameFont_DrawText`/`_MeasureText`
   `[orig: HUD_DrawTextCentered_HalfBright @0x580680;
@@ -1166,11 +1166,11 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
   (`HUD_ClassifyHealthBand @0x59c1f0` — good > 0xC000, middle > 0x6FFF, both
   callers pass health ratios; the "distance LOD" name was a misnomer) →
   hudpos `tagcolor_good/middle/bad`. A non-default `cfg_hud_color_index`
-  replaces the good tier with `g_hudColorTable[index]` (`@0x5a3c9e`); the
+  replaces the good tier with `g_HUDColors[index]` (`@0x5a3c9e`); the
   index's real producer is the `hudcolor` action row — code 10, default F6,
   retail-shadowed by `huddetail` (see "The hud_color_index scheme"; both
   earlier H mappings are refuted by the catalog walk). Unequal team =
-  `0xFF00FF`, drawn only under `g_enemyTagsVisible @0x24D1DF4`; outside the
+  `0xFF00FF`, drawn only under `g_EnemyTagsVisible @0x24D1DF4`; outside the
   death screen the pass gate has already dropped real enemies, so magenta can
   only reach team 0. Its writers: S2C 0x0A (set on the rising edge
   `@0x42ffb2`, cleared on the falling edge `@0x430025`),
@@ -1178,15 +1178,15 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
   clear unless the death screen is up (`@0x526388`), and the action-130
   toggle (`Input_HandleActionBinding @0x49bbce..0x49bbd9`, no catalog row). Death screen: team 1
   `tagcolor_blueteam`, team 2 `tagcolor_redteam`, else `0xFF208020`
-  `[orig: @0x5a3c3a..0x5a3c60]`. Squad override: `g_squadColors @0x83B450`
+  `[orig: @0x5a3c3a..0x5a3c60]`. Squad override: `g_SquadColors @0x83B450`
   (8 pastel entries) by slot+51, the middle tier × 0.7/channel
   (`dbl_7D9DE8`) `[orig: @0x5a3d14]`; the flag-2 legs read
-  `g_hudColorLightBlue` (table[3], pulsing to white on the
+  `g_HUDColors.palette[3]` (table[3], pulsing to white on the
   `((tick-8) & 0x3F)` triangle when slot+44) or `g_hudColorGray` (table[8])
   `[orig: @0x5a3dcb..0x5a3e7f]`.
-- **Speaking pulse**: entity == `g_voicePlaybackEntity @0xC6EC38` (stamped at
+- **Speaking pulse**: entity == `g_VoicePlaybackEntity @0xC6EC38` (stamped at
   scripted positional voice start `[orig: Audio_StartEntityPlayback
-  @0x4ece03]`) → each channel saturates at `c/2 + g_audioOutLevelStage1/4`
+  @0x4ece03]`) → each channel saturates at `c/2 + g_AudioOutLevelStage1/4`
   (the MMX blend `@0x5a3e98..0x5a3ebf`) — the training sergeant's label
   pulses with his voice.
 - **Distance alpha**: `255 − clamp(192·(dist_m − 50)/250, 0, 192)`
@@ -1196,12 +1196,12 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
   `name_index`(+4) ≠ 0 → `sprintf("STRNAME%03i")` → mission-RTXT
   `[PeopleNames]` value, `strncpy` 15 `[orig: Entity_SpawnFromBMSRecord
   @0x40ecbf..0x40ed0a]`; else a literal `'^'` + the compiled-in 36-name table
-  `[orig: g_fallbackPeopleNames @0x840A78; @0x5a4047..0x5a40cd]` indexed
+  `[orig: g_FallbackPeopleNames @0x840A78; @0x5a4047..0x5a40cd]` indexed
   `(pool<<12|slot) % 36` — the shared generator is `Entity_GetDisplayName
   @0x59bf70`. (The TR capture's `^SGT. Brown` is the AUTHORED path — the
   caret and period live in the rtxt value; the fallback table's row 24 is
   `SGT  Brown`.)
-- **Modes** (`g_friendlyTagsMode`, boot default **2**
+- **Modes** (`g_FriendlyTagsMode`, boot default **2**
   `[orig: Game_Run @0x4a7fed]`; input action case 30 cycles 0→1→2→3→0 with
   `GameText("Misc", STRMISC_FRIENDLYTAGS_{OFF,FARBRIEF,FULL,BRIEF})` through
   `Chat_AddMessageChannel2` `[orig: @0x49b573..0x49bc60]`): 1 = text under 300 m
@@ -1223,30 +1223,30 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
   The earlier `@0x5a4212` cite was the mode-3 jump into that shared draw.
 - **Downed recolor (the bad tier)** `[orig: @0x5a3dc9..0x5a3e85]`: with the
   dead latch (`Flags & 2` `@0x5a3c1c..0x5a3c27`) a slot-owned entity inside
-  its revive window (`slot+0x10 != 0`) draws `g_hudColorTable[3]` light blue
+  its revive window (`slot+0x10 != 0`) draws `g_HUDColors[3]` light blue
   (`0xFF80A0FF`), pulsing toward white while the medic-request latch
-  `slot+0x2C` stands — `t = (g_hudFrameCounter − 8) & 0x3F; if (t > 0x20)
+  `slot+0x2C` stands — `t = (g_HUDFrameCounter − 8) & 0x3F; if (t > 0x20)
   t = 0x3F − t; c += ((255 − c) × t) >> 5` per RGB channel
-  `[orig: @0x5a3dfb..0x5a3e6d]` — and `g_hudColorTable[8]` gray
+  `[orig: @0x5a3dfb..0x5a3e6d]` — and `g_HUDColors[8]` gray
   (`0xFFA0A0A0`, `HUD_InitTeamColorTable @0x51f295`) without a slot or window;
   an alive bad-tier entity keeps `tagcolor_bad`. The slot bytes are fed by
   S2C 0x54 / 0x46 bit 0x0008 (`PlayerSlot_SetDownedState @0x4348d0`) and
   counted down CLIENT-side at 1 Hz: `Client_ProcessNetworkFrame
-  @0x42c27e..0x42c2da` bumps `g_slotRefreshTimer @0xa85b80` per frame and,
+  @0x42c27e..0x42c2da` bumps `g_SlotRefreshTimer @0xa85b80` per frame and,
   past 62, decrements every active slot's nonzero window (entity required),
   re-storing the request latch, then zeroes the timer. Ported: the walk
   (`world::collect_friendly_tags` slot walk / `replication::collect_roster_tags`),
   the countdown (`ClientRuntime::tick_roster_revive_countdown`), the recolor
   + pulse (`friendly_tag_revive_pulse`), and both count forms.
 - **The walks' gates** `[orig: HUD_DrawFriendlyTagsPass @0x5a44b0..0x5a4597]`:
-  BOTH walks require `g_GameType != 0 || g_death_screen_active`
+  BOTH walks require `g_GameType != 0 || g_DeathScreenActive`
   (`@0x5a44e8`/`@0x5a456d`) after the team gate (`team == 0 || team == local
   || death screen`); the drawer's entry bails are `entity == playerEntity`,
   `Flags & 1` (CARRIED — a DEAD entity is still labelled) and a NULL itemDef
   `[orig: @0x5a39df..0x5a39fb]`. The drawer then takes its death-screen arm,
   which draws every team (`@0x5a3c33..0x5a3c3a`), or compares the entity Team
-  with `g_local_player_entity`'s (`@0x5a3c6b..0x5a3c7d`): an unequal team,
-  neutral 0 included, draws magenta only under `g_enemyTagsVisible` and
+  with `g_LocalPlayerEntity`'s (`@0x5a3c6b..0x5a3c7d`): an unequal team,
+  neutral 0 included, draws magenta only under `g_EnemyTagsVisible` and
   otherwise bails (`@0x5a3c7f..0x5a3c95`). In ordinary play the net gate is
   therefore `team == local && g_GameType`; a team-0 local player still labels
   team-0 neutrals (corrected 2026-09-23: applying only the pass gate labelled
@@ -1262,7 +1262,7 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
   quads; white corners `unk_FFFFFF + alpha<<24 @0x59be64`, red bars `unk_FF0000
   + alpha<<24 @0x59be76`, the 0.125 insets `@0x59bd1c/@0x59bd7e`) has two
   more callers: the MAP medic marker for a teammate whose AnimMap slot 8 is
-  active (`draw_entity_labels_and_markers @0x5a49e0`, the call `@0x5a4d40`)
+  active (`HUD_DrawEntityLabelsAndMarkers @0x5a49e0`, the call `@0x5a4d40`)
   and the help-screen icons (`HUD_DrawHelpScreenIcons @0x497480`, the call
   `@0x497620`). Ported once as `engine/runtime/hud/hud_medic_cross.h`
   (`medic_cross_quads`), which the plate and the map marker share — the map
@@ -1354,7 +1354,7 @@ completed in the wire-up round (the list builder, the gate, the label digits):
   `hud_overlay_test.gd` vehicle-panel fixture relies on it.
 - **Gate** `@0x5a5038`: the panel draws iff the root vehicle's def has the
   VEHICLE_HUD `interface` texture loaded with nonzero size (`itemDef+0x960/
-  +0x964/+0x968`). There is NO seat-class gate inside the drawer: the root is `rootEntity
+  +0x964/+0x968`). There is NO seat-class gate inside the drawer: the root is `g_HUDRootEntity
   @0x27235bc`, whose writer is UNWITNESSABLE (all five xrefs are reads — the
   HUD entity-info block is filled from outside the image), and the list
   builder re-roots a mount on an attached gun child to its parent vehicle
@@ -1391,7 +1391,7 @@ completed in the wire-up round (the list builder, the gate, the label digits):
   `HUD_ClassifyHealthBand(min(ratio, 0x10000))` `@0x5a54e3` (2 Good, 1
   Middle); the silhouette takes the HULL's band `@0x5a50d1`.
 - **Silhouette window** (2026-09-22): the panel's
-  `draw_textured_quad_with_border @0x590C40` call (`@0x5A50D1`) passes the
+  `HUD_DrawTexturedQuadWithBorder @0x590C40` call (`@0x5A50D1`) passes the
   silhouette's authored width/height as both the texture and the quad extent;
   u0 = 0.05 / tex_w (`flt_7C68E8` = 0.05f `@0x590D36`, divides
   `@0x590D3C..0x590D40`), u1 = 1 − u0 + 1 / (right − left) in scaled screen
@@ -1407,13 +1407,13 @@ completed in the wire-up round (the list builder, the gate, the label digits):
 - **Base**: `HUDVEHSTANCEPOS (dword_2723AF4/AF8)` + the rider's stance offset
   from the shared `HUDSTANCE` tables (`dword_2723B24/B44[byte_27235C0]`)
   `[orig: @0x5a509b..0x5a50b9]` — the panel moves with the stance icon.
-- **Seat box**: `g_hudVehSeatMarkerW/H = 11` (named 2026-08-21, ex
+- **Seat box**: `g_HUDVehSeatMarkerW/H = 11` (named 2026-08-21, ex
   `dword_27237FC/2723800`; set from `eax = 0Bh` `@0x5a47b0/@0x5a47b5` in
   `HUD_InitOverlaySystem @0x5a4620`); labels centre at `floor(11/2) = 5`.
 - **Band**: `(health << 16) / max` with `max` forced to 1 BEFORE the divide;
   the Good test is UNSIGNED vs `0xC000` `@0x5a507f`, the Middle test SIGNED vs
   `0x6FFF` `@0x5a508a`, so a negative ratio wraps large and reads Good;
-  colours are the stance triple `g_stanceColorGood/Middle/Bad`
+  colours are the stance triple `g_StanceColorGood/Middle/Bad`
   `@0x5a5130/@0x5a513b/@0x5a5095`. Riders classify through
   `HUD_ClassifyHealthBand` with the `0x10000` clamp `@0x5a54db` —
   behaviourally equal on the tested edges.
@@ -1446,35 +1446,35 @@ four `@0x5a2797..0x5a279b`, cleanup folded `@0x5a27a0`.
 
 - **List**: `Entity_BuildSpawnZoneList @0x43eae0` order (pools 2/1, def attrib
   `0x40000`), walked via `SpawnZoneList_GetCount/GetByIndex @0x43b920/@0x43b930`;
-  a zone draws only with a `g_zone_timer_list` entry (`CProximityList_FindEntryById
+  a zone draws only with a `g_ZoneTimerList` entry (`CProximityList_FindEntryById
   @0x537f50`). The marker letter is `'A' + list index`.
 - **Layout**: HUD space, never a world projection. Markers step ACROSS 98 px
   within a team group (`x += 0x62 @0x5a27a3`), groups step DOWN 86 px
   (`y += 0x56 @0x5a2667/@0x5a2781`); the group is right-anchored: first marker
-  at `g_hudZonePanelX − 98·zonesInGroup` `@0x5a2589..0x5a259d` and at the
-  group's OWN y = `g_hudZonePanelY + 86·group` (no offset); only the status
+  at `g_HUDZonePanelX − 98·zonesInGroup` `@0x5a2589..0x5a259d` and at the
+  group's OWN y = `g_HUDZonePanelY + 86·group` (no offset); only the status
   TEXT sits at `(x − 4, y + 12)` — `ebx = y + 0Ch` `@0x5a25b9..0x5a25bd` is
   the text row, `x − 4` `@0x5a2601` (the final review corrected the port's
   marker-row +12 and the "y − 4" slip; the IDB comment likewise); the anchor
   is the `LFP_FLAGS`
-  token (`g_hudZonePanelX/Y`, named 2026-08-21). The conquest arm
+  token (`g_HUDZonePanelX/Y`, named 2026-08-21). The conquest arm
   (`g_GameType == 0x50010 @0x5a24a1`) is unmodelled.
 - **Marker** `@0x5986f0`: the sheet by the zone's `+0x162` team byte — 1 →
   `JO_LFP.tga` (`dword_27231A4`), 2 → `R_LFP.tga` (`dword_27231A0`), else
   `N_LFP.tga` (`dword_272319C`) `[orig: HUD_LoadAllTextures @0x59e0a3..
   0x59e0f3; the pick @0x59893d..0x598957]`; the team colour is
-  `g_hudColorTable[3]` / `[5]` / `[1]` = `FF80A0FF` / `FFFF5050` / `FF00FF00`
-  (`HUD_InitTeamColorTable @0x51f240` — the BSS globals `g_hudColorLightBlue
+  `g_HUDColors[3]` / `[5]` / `[1]` = `FF80A0FF` / `FFFF5050` / `FF00FF00`
+  (`HUD_InitTeamColorTable @0x51f240` — the BSS globals `g_HUDColors.palette[3]
   @0x24c1844` / `dword_24C184C` / `dword_24C183C` are those table slots; the
   port's literals are the witnessed values); in-cylinder = 2D distance ≤
   `+0x15E << 16` with `|dz|` ≤ half `@0x5987a6..0x598810` — the capture radius
   IS on the wire (`client_state.h` `zone_radius`, the pool-1 0x0D block), so
   the frame is computable; dimmed when neither in-cylinder nor contested;
   atlas ROW passed to `CEffect_Begin_Debug @0x67bb50` (a thunk to
-  `draw_tiled_texture_strip @0x67aed0 (effect, rect[4], colour, frame)`):
+  `Render_DrawTiledTextureStrip @0x67aed0 (effect, rect[4], colour, frame)`):
   0 default, 1 in-cylinder `@0x598911..0x598915`, **2 = own zone under
   attack** (timer rate `entry[11] < 0` and `entry[1] == team`) on the
-  off-blink phase `(g_hudFrameCounter & 0x18) == 0` `@0x59891a..0x598926`,
+  off-blink phase `(g_HUDFrameCounter & 0x18) == 0` `@0x59891a..0x598926`,
   **3 = another team's zone ready** (`entry[9] == 0`) on the on-blink phase
   `@0x59892d..0x598934` — 8 frames of phase A in every 32 (the counter is
   `++` per MAIN FRAME in `Game_TickHudFrameCounters @0x434c00`, so retail's
@@ -1483,7 +1483,7 @@ four `@0x5a2797..0x5a279b`, cleanup folded `@0x5a27a0`.
   under-attack off-phase `0xFFFFFF00` `@0x5988ea`, ready on-phase half-bright
   `@0x5988fd..0x59890d`, out of range and no state quarter+half dim
   `@0x5988b9..0x5988d6`; the half-bright modulate `0xFF7F7F7F` pushed
-  `@0x598975`; the flag tile `draw_textured_quad_centered(x+34, y+52, 36, 36,
+  `@0x598975`; the flag tile `HUD_DrawTexturedQuadCentered(x+34, y+52, 36, 36,
   zoneTeam == localTeam ? lfp_dlf.tga (dword_27239D0/D4) : lfp_alf.tga
   (dword_27239C0/C4), colour)` `@0x5989de` — both tiles loaded by
   `HUD_LoadAllTextures @0x59e104..0x59e11f` (the own-zone tile is NOT the
@@ -1494,7 +1494,7 @@ four `@0x5a2797..0x5a279b`, cleanup folded `@0x5a27a0`.
   `NapiNPClientMsg_ZoneTimerValue @0x428e79/@0x428e7f`; the distance subtracts
   the zone entity's own bound radius `@0x5990f3` (not the zone radius),
   `%1dm` / `%01.2fk` at `(x+16, y+18)`. The marker publishes
-  `g_hudZoneStatusKind` (1 attack / 2 ready) and `g_hudZoneStatusColor` for
+  `g_HUDZoneStatusKind` (1 attack / 2 ready) and `g_HUDZoneStatusColor` for
   the caller's text (named 2026-08-21).
 - **The timer entry** `[orig: ZoneTimerList_SetEntryValue @0x537ec0]`, 13
   dwords: [0] zone entity, [1] = [2] team, [8] value (creation only), [9]
@@ -1531,7 +1531,7 @@ master-gated on `dword_840B18` and skipped while `layerIndex == 3`:
 - **Armory prompt** — `dword_A85B64` (the preround/deploy timer, an S2C 0x0A
   header field; net-re §5.47) nonzero → `STROVER_ARMORY_INFO` "Press '%s' to
   access armory menu", `%s` = `KeyBinding_FormatDisplayString @0x496bd0` over
-  `g_bindingRow_useitem @0x81A454` (binding row 44 `useitem`, retail SHIFT);
+  `g_BindingRowUseItem @0x81A454` (binding row 44 `useitem`, retail SHIFT);
   suppressed while a menu is open (`sub_54B970` → the active-menu index
   `dword_255110C`). The `STROVER_ARMORY_WAIT` "Armory available again in %d
   seconds" leg `[orig: @0x5bdf61]` is **dead code** in this build: the
@@ -1561,8 +1561,8 @@ master-gated on `dword_840B18` and skipped while `layerIndex == 3`:
   `@0x5BDFAC`). Ctest `hud_game_text`.
 
 Every line is one call of the same shape: design anchor (0x200, 0x118) =
-(512, 280), the **large** overlay slot `g_hudLabelFontLarge @0xB4C3A0`
-(Impac22b), `g_hudColors.active`, draw mode 2 `[orig: the slot push @0x5BDFD7
+(512, 280), the **large** overlay slot `g_HUDLabelFontLarge @0xB4C3A0`
+(Impac22b), `g_HUDColors.active`, draw mode 2 `[orig: the slot push @0x5BDFD7
 (armory / vehicle bay), @0x5BE0AA (FARP wait), @0x5BE0F7 (FARP reloading);
 HUD_DrawTextAtVirtualPos @0x5D3EC0 -> the mode dispatch @0x5D2EA0, mode 2 =
 HUD_DrawTextCentered_HalfBright @0x5D2ECE]`. The unlock word `dword_A85BBC`
@@ -1584,7 +1584,7 @@ matrix and the validation runs live in
 section owns the witnesses.
 
 **Which overlay slot each text rides.** The slot table is
-`g_hudLabelFont @0xB4C388` + 12 per slot (normal, bold `@0xB4C394`, large
+`g_HUDLabelFont @0xB4C388` + 12 per slot (normal, bold `@0xB4C394`, large
 `@0xB4C3A0`, Impact38 `@0xB4C3AC`); the hudpos-named HUD font is its own slot
 `dword_2723C74`, loaded at scale 1.0 (`0x10000`) from the hudpos font name for
 the surface width tier, and a copy of the BOLD slot when hudpos names none
@@ -1593,10 +1593,10 @@ the surface width tier, and a copy of the BOLD slot when hudpos names none
 
 | Text | Slot | Draw | Witness |
 | --- | --- | --- | --- |
-| Control-seat gear label (Low / Med / High) | large (Impac22b) | left-aligned at the scaled design anchor (`gear_x`, `gear_y - 50`), `g_hudColors.active`, flags 1 | `hud_draw_target_entity_overlay @0x59A5D0`: string select `@0x59A694..0x59A6BB` (byte 0 -> Med, 2 -> High, else Low; strings loaded `@0x5A4871..0x5A48CF`), anchor `@0x59A6C1..0x59A6E6`, slot push `@0x59A6F9`, `HUD_DrawTextLeft_HalfBright @0x59A6FE` |
+| Control-seat gear label (Low / Med / High) | large (Impac22b) | left-aligned at the scaled design anchor (`gear_x`, `gear_y - 50`), `g_HUDColors.active`, flags 1 | `HUD_DrawTargetEntityOverlay @0x59A5D0`: string select `@0x59A694..0x59A6BB` (byte 0 -> Med, 2 -> High, else Low; strings loaded `@0x5A4871..0x5A48CF`), anchor `@0x59A6C1..0x59A6E6`, slot push `@0x59A6F9`, `HUD_DrawTextLeft_HalfBright @0x59A6FE` |
 | Armory / vehicle-bay / FARP prompts | large (Impac22b) | centred on design (512, 280) | the Gameplay prompts section above |
 | Inset friendly name | bold (Arial bold) | centred on the aperture centre in SURFACE pixels, colour `0xFFFF0000` through the half-bright fold | `Render_WeaponInsetScene`: slot push `@0x5CA0C0`, `HUD_DrawTextAligned_HalfBright @0x5D2F20` mode 2 `@0x5CA0CF` |
-| Mortar impact distance (`STROVER_DIST`) | drawn in the hudpos slot, MEASURED in the bold slot | design x = `impact_x - (width >> 1)` where width = the bold slot's unscaled extent x its scale, truncated; then the design pair scales to the surface and the line draws LEFT-aligned, flags 1, `g_hudFrameOverlayColor` | `HUD_RenderAllOverlays`: `GameFont_MeasureTextWidth @0x580A50` with slot `0xB4C394` `@0x5A897E..0x5A8984`, `sar 1` `@0x5A8995`, `Viewport_ScaleToVirtualCoords @0x5A89B0`, hudpos slot push `@0x5A89D0`, draw `@0x5A89D5` |
+| Mortar impact distance (`STROVER_DIST`) | drawn in the hudpos slot, MEASURED in the bold slot | design x = `impact_x - (width >> 1)` where width = the bold slot's unscaled extent x its scale, truncated; then the design pair scales to the surface and the line draws LEFT-aligned, flags 1, `g_HUDFrameOverlayColor` | `HUD_RenderAllOverlays`: `GameFont_MeasureTextWidth @0x580A50` with slot `0xB4C394` `@0x5A897E..0x5A8984`, `sar 1` `@0x5A8995`, `Viewport_ScaleToVirtualCoords @0x5A89B0`, hudpos slot push `@0x5A89D0`, draw `@0x5A89D5` |
 
 `HUD_DrawTextLeft_HalfBright @0x5804C0` folds the colour to
 `(c >> 1) & 0x7F7F7F | 0xFF000000` `[orig: @0x5804D8..0x5804F0]` and passes the
@@ -1612,14 +1612,14 @@ marker on weapon flag 0x8000 alone `[orig: Entity_CheckWeaponSeatFlags
 the player (+2 units up) to the impact point (+2 up) is clear and 0x60 when it
 is blocked `[orig: @0x5A8865..0x5A88C3]`, scales it
 `clamp(1 / (distance_m * 0.005), 0.25, 2.0)` `[orig: @0x5A88CE..0x5A8910]` and
-calls `draw_entity_marker(position, type 0, scale, colour, 0, 0, 0, 0)
+calls `HUD_DrawEntityMarker(position, type 0, scale, colour, 0, 0, 0, 0)
 @0x5A8924`. Type 0 draws a stem from the projected point up by
 `half = ftol(scale * 20.0)` `[orig: @0x5931E0..0x59321D]` and one
-`draw_ring_overlay @0x5D4270` record centred `2 * half` above the point
+`Render_DrawRingOverlay @0x5D4270` record centred `2 * half` above the point
 `[orig: @0x59322D..0x593283]`. The ring record is eight dwords:
 `{x, y, z = 0.5, radius = half, stroke = 2.0, fan texture = 0, colour,
 x-scale = 2.0}`. The stroke and the x-scale are the same `2.0` constant stored
-twice `[orig: +0x1C @0x59327B, +0x10 @0x59327F]`. `draw_ring_overlay` multiplies
+twice `[orig: +0x1C @0x59327B, +0x10 @0x59327F]`. `Render_DrawRingOverlay` multiplies
 ONLY the x term by record `+0x1C` `[orig: @0x5D4513]`, so the head is twice as
 wide as it is tall; its segment count keys on the unscaled radius
 (`clamp(ftol(radius * (1/3) * 4pi), 4, 95)`), and the four radial stops are
@@ -1627,25 +1627,25 @@ wide as it is tall; its segment count keys on the unscaled radius
 Inset aperture ring is the same record with `+0x1C` = the viewport aspect
 factor `Render_GetViewportScaleY` and stroke 2.0 `[orig: @0x5C9E16..0x5C9E7F]`.
 
-**The HUD's death gate is `g_death_screen_active @0xA860EC`, alone.** Neither
-the local dead bit (`Flags & 2`) nor the death lerp camera (`g_camera_mode`
+**The HUD's death gate is `g_DeathScreenActive @0xA860EC`, alone.** Neither
+the local dead bit (`Flags & 2`) nor the death lerp camera (`g_CameraMode`
 4, which the main-scene arbiter selects from that bit `@0x5CA217..0x5CA24B`) is
 a HUD gate; between the death and the latch the passes below still run.
 
 | Pass | Gate | Witness |
 | --- | --- | --- |
-| Crosshair, tracked-target cursor, CustomAim, friendly brackets | `!g_death_screen_active` | `HUD_DrawCrosshair @0x592646` |
-| Weapon / vehicle silhouettes, gear label, ammo, stance, heat, parachute/armor/cargo, altitude ladder | `!g_death_screen_active` (the death-screen arm draws the spectated entity's health, the team line and the timer instead) | `HUD_RenderOverlays @0x5A7BBC` |
-| Scope overlay details (commander reticle) / binocular speedometer | `!g_death_screen_active` | `HUD_RenderAllOverlays @0x5A850D` |
-| Scope selection incl. the Inset scene | `!g_death_screen_active` | `Render_ProcessMainSceneFrame @0x5CA26A` |
-| Controller forward pip | none of the above; `!g_binocularsViewActive && g_camera_mode == 0` | `draw_weapon_sight_crosshair @0x59ECA0`, gate `@0x59ECE0` |
-| Turret lag pip | no death, camera or binocular test at its head; reached only with a parent whose `attrib2 & 0x1000` | `HUD_draw_crosshair @0x59EA20`, call site `@0x5A84DF` |
+| Crosshair, tracked-target cursor, CustomAim, friendly brackets | `!g_DeathScreenActive` | `HUD_DrawCrosshair @0x592646` |
+| Weapon / vehicle silhouettes, gear label, ammo, stance, heat, parachute/armor/cargo, altitude ladder | `!g_DeathScreenActive` (the death-screen arm draws the spectated entity's health, the team line and the timer instead) | `HUD_RenderOverlays @0x5A7BBC` |
+| Scope overlay details (commander reticle) / binocular speedometer | `!g_DeathScreenActive` | `HUD_RenderAllOverlays @0x5A850D` |
+| Scope selection incl. the Inset scene | `!g_DeathScreenActive` | `Render_ProcessMainSceneFrame @0x5CA26A` |
+| Controller forward pip | none of the above; `!g_BinocularsViewActive && g_CameraMode == 0` | `HUD_DrawWeaponSightCrosshair @0x59ECA0`, gate `@0x59ECE0` |
+| Turret lag pip | no death, camera or binocular test at its head; reached only with a parent whose `attrib2 & 0x1000` | `HUD_DrawCrosshair_0 @0x59EA20`, call site `@0x5A84DF` |
 | LollyPop marker, impact distance | **none**: the tail of the walk runs unconditionally after the takeover-status test | `HUD_RenderAllOverlays @0x5A87EF..0x5A89DA` |
 | The impact preview that feeds them (and the 2DImpact map slot) | **none**: weapon-flag admission only | `Player_UpdatePerFrame @0x4DE760..0x4DE79D`, the preview `@0x4DE80A..0x4DE929` |
 
 `Entity_CheckWeaponSeatFlags @0x540D00` is the only admission those last rows
 have: OnlyScoped (0x80000) on the local player's slot requires
-`g_weaponScopeActive`. Every stock weapon that authors the impact flags also
+`g_WeaponScopeActive`. Every stock weapon that authors the impact flags also
 authors OnlyScoped, so the missing death test is unobservable on stock data;
 the port keeps the structure rather than the accident.
 
@@ -1683,7 +1683,7 @@ A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
 | `HUDSTANCE <idx> <x> <y> <tex>` | `dword_2723B24[idx]`, `dword_2723B44[idx]`, `byte_2723B8C+idx*0x13` |
 | `HUDSTANCEPOS` | `dword_2723AEC` (x), `dword_2723AF0` (y) |
 | `HUDVEHSTANCEPOS` | `dword_2723AF4` (x), `dword_2723AF8` (y) |
-| `LFP_FLAGS <x> <y>` | `g_hudZonePanelX @0x2723D94` / `g_hudZonePanelY @0x2723D98` (named 2026-08-21) — the AAS zone status panel anchor `[orig: @0x5a0563 / @0x5a057b]` |
+| `LFP_FLAGS <x> <y>` | `g_HUDZonePanelX @0x2723D94` / `g_HUDZonePanelY @0x2723D98` (named 2026-08-21) — the AAS zone status panel anchor `[orig: @0x5a0563 / @0x5a057b]` |
 | `VEHICLE_HUD` … `VEHICLE_END` | the 0xDC staging block at `dword_2723DC0` (`sid` +0x04/16, `icon`/`interface`/`statictexture` +0x7C/+0x9C/+0xBC ×32, `driver x y`, `emplace n pairs` ≤4, `seats n pairs` ≤8), committed against the item table at `VEHICLE_END` and memset back to zero `[orig: open @0x59f380, close @0x59f3b8]`; parsed into `DefHudPosDef::vehicle_huds` (ctest `def_parse_hudpos`) |
 | `STATICFRAME` | name `byte_2723C24`, pos `dword_2723B1C/B20` |
 | `ParachuteIcon` | name `byte_2723C34`, pos `0x272383C/0x2723840` |
@@ -1692,36 +1692,36 @@ A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
 | `ALPHAFADE <base%> <max%> <seconds>` | `dword_2723614` = base×**2.55**, `dword_2723618` = max×**2.55**, `dword_272361C` = seconds×**62** (ticks) `[orig: @0x5a0882..0x5a08c2; dbl_7D9A20 = 2.55, dbl_7C88C0 = 62.0]`. Each field goes through **atof**, so fractional file values (`1.5` s → 93 ticks) survive into the converts — `engine/formats/def` stores the raw fields as floats and the consumers apply ×2.55/×62 with the same truncation (fixed 2026-07-11; `def_parse_hudpos` pins the fractional case) |
 | `STANCEICON_COLOR <a> <r> <g> <b>` | `dword_2723AE8` packed ARGB `[orig: @0x5a0ec0]` — the stance/clip-indicator tint |
 | `HUDCLIP` | `dword_27237B8/BC` — the clip-indicator anchor |
-| `HUDWPDINFO <x> <y> <hideBox> <align>` | `g_hudWpdInfoX/Y/HideBox/Align @0x2723694/98/9C/A0` — the waypoint label anchor; field 3 hides the box only `[orig: @0x5a02c3]` |
-| `HUDHEAT <x1> <y1> <x2> <y2>` | `g_hudHeatRectX1/Y1/X2/Y2 @0x27237DC/E0/E4/E8` — the heat-bar rect `[orig: @0x5a1449]` |
-| `HUDHEATBORDER <a> <r> <g> <b>` | `g_hudHeatBorderColor @0x27237D8` packed ARGB `[orig: @0x5a14b3]` |
-| `stancecolor_good` / `stancecolor_middle` / `stancecolor_bad` | `g_stanceColorGood @0x2723ADC` / `g_stanceColorMiddle @0x2723AE0` / `g_stanceColorBad @0x2723AE4` packed ARGB — the shared bar colors (health-bar tiers, heat fill, the vehicle panel's seat/hull bands `@0x5a5130/@0x5a513b/@0x5a5095`) `[orig: @0x5a0dd5/@0x5a0e4b]`; all three reach `HudLayout` since 2026-08-21 |
-| `hud_textcolor` | `g_hudposTextColor @0x2723AC0` `[orig: parse @0x5a0f37]` — copied into `g_hudColorTable[2]` every frame `[orig: HUD_RenderAllOverlays @0x5a8100]`; with `hud_color_index` default 2 this IS the master overlay color `g_hudActiveColor @0x24c1868` (the ex-D-HUD-13 open writer) |
+| `HUDWPDINFO <x> <y> <hideBox> <align>` | `g_HUDWpdInfoX/Y/HideBox/Align @0x2723694/98/9C/A0` — the waypoint label anchor; field 3 hides the box only `[orig: @0x5a02c3]` |
+| `HUDHEAT <x1> <y1> <x2> <y2>` | `g_HUDHeatRectX1/Y1/X2/Y2 @0x27237DC/E0/E4/E8` — the heat-bar rect `[orig: @0x5a1449]` |
+| `HUDHEATBORDER <a> <r> <g> <b>` | `g_HUDHeatBorderColor @0x27237D8` packed ARGB `[orig: @0x5a14b3]` |
+| `stancecolor_good` / `stancecolor_middle` / `stancecolor_bad` | `g_StanceColorGood @0x2723ADC` / `g_StanceColorMiddle @0x2723AE0` / `g_StanceColorBad @0x2723AE4` packed ARGB — the shared bar colors (health-bar tiers, heat fill, the vehicle panel's seat/hull bands `@0x5a5130/@0x5a513b/@0x5a5095`) `[orig: @0x5a0dd5/@0x5a0e4b]`; all three reach `HudLayout` since 2026-08-21 |
+| `hud_textcolor` | `g_HudposTextColor @0x2723AC0` `[orig: parse @0x5a0f37]` — copied into `g_HUDColors[2]` every frame `[orig: HUD_RenderAllOverlays @0x5a8100]`; with `hud_color_index` default 2 this IS the master overlay color `g_HUDColors.active @0x24c1868` (the ex-D-HUD-13 open writer) |
 | `tagcolor_blueteam`/`redteam`/`good`/`middle`/`bad` | `g_hudposTagcolor* @0x2723AC8/ACC/AD0/AD4/AD8` — packed `(r<<16)\|(g<<8)\|b` from three decimal fields `[orig: @0x5a1040..0x5a11d1]`; the friendly-tag health tiers + death-screen team colors (D-HUD-20) |
 | `HUDTIMECLOCK`, `mapcoords`, `HUDPOWERBAR` | recon-confirmed token set (timer/map — witness when those elements land) |
 
 ## The hud_color_index scheme (witnessed + ported; binding adjudicated 2026-08-13)
 
 The binary has a two-global pair over one 16-dword table
-(`g_hudColorTable @0x24C1838`, filled by `HUD_InitTeamColorTable @0x51f240`).
+(`g_HUDColors @0x24C1838`, filled by `HUD_InitTeamColorTable @0x51f240`).
 
 - **Entries 0..5**: 0 white `FFFFFFFF`, 1 green `FF00FF00`,
   2 `FF010101` (an init placeholder — refreshed per frame from the hudpos
   `hud_textcolor`), 3 light blue `FF80A0FF`, 4 yellow `FFF0F000`,
   5 salmon `FFFF5050`. (The tail entries 6..15 are the team/status colors —
   6 `FFFF40FF`, 7 `FFFF8020`, 8 gray `FFA0A0A0`, 9 `FF4040FF`, 10 `FF00EAE7`,
-  13 `0000FF00`, 14 `41018101`, 15 `1E093309`; slot 12 IS `g_hudActiveColor`'s
+  13 `0000FF00`, 14 `41018101`, 15 `1E093309`; slot 12 IS `g_HUDColors.active`'s
   own cell.)
-- **The snapshot global** `g_hudActiveColor @0x24C1868` =
+- **The snapshot global** `g_HUDColors.active @0x24C1868` =
   `table[cfg_hud_color_index] | 0xFF000000` at init `@0x51f2de` (and again by
   `HUD_InitOverlaySystem @0x5a4970`), restamped WITHOUT the OR at the cycle
   `@0x49afe0`. Read by the label/chat drawer family
-  (`draw_vehicle_seat_and_armory_labels @0x5a362d/@0x5a3851`,
+  (`HUD_DrawVehicleSeatAndArmoryLabels @0x5a362d/@0x5a3851`,
   `HUD_DrawEntityLabel @0x5a3cb1`, the chat text `@0x5930e0`, score/kill-list,
   the spinmap's current-waypoint tether `@0x5a77fe`).
-- **The per-frame global** `g_hudFrameOverlayColor @0x840B1C` (ex `unused2`):
+- **The per-frame global** `g_HUDFrameOverlayColor @0x840B1C` (ex `unused2`):
   `HUD_RenderAllOverlays @0x5a8100-0x5a8125` refreshes
-  `table[2] = g_hudposTextColor` then stamps `= table[index]` every frame.
+  `table[2] = g_HudposTextColor` then stamps `= table[index]` every frame.
   Read by the 0x593xxx-0x596xxx drawer family (waypoint pair
   `HUD_DrawWaypointNameAndDistance @0x5949dd..`, reticles,
   `HUD_DrawTeamIdLine @0x59aa4c`, the `STROVER_DIST` readout, the
@@ -1757,7 +1757,7 @@ The binary has a two-global pair over one 16-dword table
   visibility toggle — are refuted by this catalog walk.
 - **Config**: token `hud_color_index` `@0x5502eb` (cfg cell `@0x2550BCC`),
   default 2 `Config_SetDefaults @0x54d2a6`, applied to the live index
-  `dword_24D20B8` by `apply_session_settings_to_globals @0x55152f`.
+  `dword_24D20B8` by `Game_ApplySessionSettingsToGlobals @0x55152f`.
 - **The friendly-tag good tier** (`HUD_DrawEntityLabel @0x5a3c9e..0x5a3cf5`):
   `tagcolor_good` only when the index == 2, else `table[index]`; the
   middle/bad tiers never swap.
@@ -1782,15 +1782,15 @@ function draws no map. It is the weapon **heat bar**:
   written per frame by `[orig: HUD_BuildEntityInfo @0x4b8533]` from
   `[orig: WeaponSlot_CalcAccumulatedHeat @0x53f780]`, clamped `0xFFFF`. Zero
   heat = no bar (the element self-hides).
-- Rect: the `HUDHEAT x1 y1 x2 y2` hudpos token (`g_hudHeatRectX1..Y2
+- Rect: the `HUDHEAT x1 y1 x2 y2` hudpos token (`g_HUDHeatRectX1..Y2
   @0x27237DC..0x27237E8`), scaled to virtual per corner. A wireframe border
-  always draws first in `HUDHEATBORDER` color (`g_hudHeatBorderColor
+  always draws first in `HUDHEATBORDER` color (`g_HUDHeatBorderColor
   @0x27237D8`) `[orig: Render_DrawWireframeRect @0x599787]`.
 - Fill: a solid rect (`[orig: sub_5D48E0]` — viewport-offset color fill) inset
   by 1px, proportional to `heat/0x10000` with round-to-nearest
   (`(span*heat + 0x8000) >> 16`): **horizontal** bars (`h <= w`) fill
   left→right; **vertical** bars fill bottom→up `[orig: @0x5997a9..0x59981f]`.
-  Fill color = `g_stanceColorBad @0x2723AE4` — the `stancecolor_bad` hudpos
+  Fill color = `g_StanceColorBad @0x2723AE4` — the `stancecolor_bad` hudpos
   token, shared with the health-bar/vehicle-bar "bad" color.
 
 ## Waypoint HUD — the track + the HUDWPDINFO label (witnessed 2026-07-18)
@@ -1813,8 +1813,8 @@ map overlay are the entire display surface.
   `[orig: NetPacket_WriteWorldStateLoad0x0F @0x502e41]`. Records (≤128):
   `{u16 pool-3 slot, u16 nameId = entity+672, u8 done = entity+536}`, present
   only when the recipient's team byte (+354) is 1. The client apply resolves
-  each slot via `Pool_GetEntryUnchecked(3, slot)` into `g_waypointList
-  @0xB76570` (count `g_waypointCount @0xB76568`) and re-resolves
+  each slot via `Pool_GetEntryUnchecked(3, slot)` into `g_WaypointList
+  @0xB76570` (count `g_WaypointCount @0xB76568`) and re-resolves
   `WPNames/STRWPNAME%03i(nameId)` into the entity's inline name (entity+244,
   15 chars + NUL) `[orig: NapiNPClientMsg_0x00F @0x42e4b8]`.
 - **Non-waypoint gametypes**: the same storage holds the MP POI list instead —
@@ -1832,7 +1832,7 @@ map overlay are the entire display surface.
 
 ### Current waypoint + advance
 
-`g_currentWaypoint @0xB7656C` (ex kong "entityDef" — renamed; it is the
+`g_CurrentWaypoint @0xB7656C` (ex kong "entityDef" — renamed; it is the
 current waypoint/POI **entity pointer**), reset by
 `[orig: Game_InitNewRound @0x422772]`.
 
@@ -1863,21 +1863,21 @@ current waypoint/POI **entity pointer**), reset by
 ### The HUDWPDINFO label — `HUD_DrawWaypointNameAndDistance @0x5947a0`
 
 - **Gates** `[orig: @0x5a7daf; death-screen leg @0x5a7c29]`:
-  `g_showWaypoints @0x27238BC` (init **1** at
+  `g_ShowWaypoints @0x27238BC` (init **1** at
   `[orig: HUD_InitOverlaySystem @0x5a4913]`; the BMS `ShowWaypoints` action 40
   writes it via `[orig: Game_SetShowWaypoints @0x58fb50]`, getter
   `@0x58fb60`) `&& dword_2723C8C` (the declutter WAYPOINT `visible[3]` —
   authored visible at default `hud_detail`) `&& g_GameType != 0x10010`,
   plus a non-null current that is present in the list.
 - **Layout**: the `HUDWPDINFO <x> <y> <hideBox> <align>` hudpos token
-  (`g_hudWpdInfoX/Y/HideBox/Align @0x2723694..0x27236A0`,
+  (`g_HUDWpdInfoX/Y/HideBox/Align @0x2723694..0x27236A0`,
   `[orig: parse @0x5a02c3]`; align via `HUD_ParseTextAlignment` right=1
   center=2). Field 3 hides only the wireframe **box**, not the element.
 - **Distance** = 2D `sqrt(dx²+dy²)` of entity X/Y deltas (through the info
   struct's entity pointer), fixed→int meters (`>>16` with the signed
   correction) `[orig: @0x5947e5..0x594836]`, rendered `"%d"` right-aligned at
   the anchor.
-- **Name** = `[orig: get_waypoint_name @0x594630]`: wp_index = entity+672,
+- **Name** = `[orig: HUD_GetWaypointName @0x594630]`: wp_index = entity+672,
   **+1 unless `g_GameType & 0x20000`** (co-op keeps the raw index). In-session
   specials from gametext `WPNames`: attrib `0x80000` → `STRWPNAMEARMORY`,
   `0x8000` → `STRWPNAMETARGET`, type 4091/4093/4095–4097 → `STRWPNAMEFLAG`,
@@ -1897,11 +1897,11 @@ current waypoint/POI **entity pointer**), reset by
 
 ### Dead code (do not port)
 
-- `[orig: draw_entity_labels @0x593820]` — in-world number/line/circle
+- `[orig: HUD_DrawEntityLabels @0x593820]` — in-world number/line/circle
   markers over the current + next waypoint (terrain-clamped): **no callers**
   in JO:CA.
 - `[orig: HUD_DrawCompassStrip @0x595470]` — the heading strip with waypoint
-  carets (reads `g_showWaypoints @0x595c9f`): **no callers** in JO:CA.
+  carets (reads `g_ShowWaypoints @0x595c9f`): **no callers** in JO:CA.
 
 ## Gameplay spinmap — `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` (grilled + ported through 2026-08-15)
 
@@ -1927,17 +1927,17 @@ story is refuted there). The comparison evidence for this section is
 - **The mask is a content selector, not a gate.** Witnessed bits: 0 backing
   disc, 1 marker banks, 2 objective tether lines (`source & 0xC0` markers,
   team-colored, suppressing the bit-8 line), 5 entity labels
-  (`draw_entity_labels_and_markers @0x5a49e0`), 6 compass ring (paired —
+  (`HUD_DrawEntityLabelsAndMarkers @0x5a49e0`), 6 compass ring (paired —
   the gate is bit9 && bit6, with the bit10 legs nested inside), 7
-  tracked-target pointer in `g_hudActiveColor` (`@0x5a77fe`, ctx
-  `g_trackedTargetPos @0x272350C`, drawer args no-line/tip-when-ahead), 8
-  the waypoint state line in `g_waypointAltitudeColor @0x2723D7C` (ctx
-  `g_waypointPosXY @0x2723518`; drawer args line+tip), 9 pairs into the
-  compass gate, selects `render_terrain_decal`'s adjacent `use_alt_blend`
+  tracked-target pointer in `g_HUDColors.active` (`@0x5a77fe`, ctx
+  `g_TrackedTargetPos @0x272350C`, drawer args no-line/tip-when-ahead), 8
+  the waypoint state line in `g_WaypointAltitudeColor @0x2723D7C` (ctx
+  `g_WaypointPosXY @0x2723518`; drawer args line+tip), 9 pairs into the
+  compass gate, selects `Render_TerrainDecal`'s adjacent `use_alt_blend`
   argument, and gates the player grid-coordinate label with !bit12
   (`HUD_DrawPlayerGridLabel @0x59cb40`:
   `"(%s,%d)"` right-aligned half-bright at the authored `mapcoords` position
-  `g_mapCoordsLabelX/Y @0x27236F4/F8`, gated `g_mapCoordsLabelOff
+  `g_MapCoordsLabelX/Y @0x27236F4/F8`, gated `g_MapCoordsLabelOff
   @0x27236FC == 0` — the token's 3rd value; the global is BSS (no file
   bytes → ZERO = label LIVE; the earlier "initializer −1 = suppressed"
   gloss read undefined bytes, the same misread the bit-18 suppressor
@@ -1954,10 +1954,10 @@ story is refuted there). The comparison evidence for this section is
   suppression; the grid branch falls through into the bank walk; the
   2026-08-13 "marker-bank suppress" gloss is corrected), 15 KOTH route
   lines (GameType `0x10010`), 16 fullscreen centering, 17 pool-4 location
-  labels (`g_location_names`, `0x9F9F9F`), 18 ring-edge waypoint distance
+  labels (`g_LocationNames`, `0x9F9F9F`), 18 ring-edge waypoint distance
   (`"%03dm"`/`"%01.2fk"`, `flt_7C69E8 = 0.001`, position/distance from the
   slot fields the pointer drawer stores — see the pointer bullet; drawn only
-  when `g_spinmapWpDistLabelOff @0x27237C0 == 0`: the global is BSS
+  when `g_SpinmapWpDistLabelOff @0x27237C0 == 0`: the global is BSS
   (uninitialized .data, no file bytes -> ZERO = label LIVE; the earlier
   "static 0xFFFFFFFF" gloss read undefined bytes — re-adjudicated
   2026-08-14 against the segment map) and only an authored NONZERO
@@ -1965,9 +1965,9 @@ story is refuted there). The comparison evidence for this section is
   replaces it `@0x59fc1f` — neither JO:CA nor JOTAC authors the token, so
   retail never suppresses this label), 19 tracked-target distance at the
   `0x2721ED0/ED8/EDC/EE4` slot (written by
-  `render_laser_sight_effect`/`HUD_SetTrackedEntityTarget`; the sibling
+  `Render_LaserSightEffect`/`HUD_SetTrackedEntityTarget`; the sibling
   `HUD_DrawTrackedTargetDistance @0x594b60` element draws the gametext
-  `hud_farp` label + `"%d"` distance to `g_trackedTargetPos` in a wireframe
+  `hud_farp` label + `"%d"` distance to `g_TrackedTargetPos` in a wireframe
   box at `0x2723628/262C`), 20 the waypoint altitude nub above the rect (see
   the pointer bullet; NO witnessed caller mask carries bit20 — `0xD07FF`
   and `0xAF937` both lack it, so the leg ships dormant in retail JO; the
@@ -1979,12 +1979,12 @@ story is refuted there). The comparison evidence for this section is
   `0xD07FF` sets bits 0-10 and 16/18/19.
 - **Waypoint/tracked pointer** [orig: `HUD_DrawMapTargetPointer @0x599220`
   (ex "CTerrainTile_UpdateShadowState"), call sites `@0x5a7835` (bit 7,
-  args `0,0,1`, color `g_hudActiveColor`) and `@0x5a7894` (bit 8, args
-  `1,1,1`, color `g_waypointAltitudeColor`)]: computes the bearing from the
+  args `0,0,1`, color `g_HUDColors.active`) and `@0x5a7894` (bit 8, args
+  `1,1,1`, color `g_WaypointAltitudeColor`)]: computes the bearing from the
   slot entity to the ctx position through the Q22 BAM tables, draws a
   2-vertex line from the entity's map position along the bearing (bit 8
   only — the first bool arg), and a `TSDicon` strip cell via
-  `Render_DrawIconStripCell_Debug @0x67bae0 → render_tiled_image_strip
+  `Render_DrawIconStripCell_Debug @0x67bae0 → Render_TiledImageStrip
   @0x67b540`: ONE strip cell per call, index = the `lodLevel` local —
   default **7 (chevron)** at the clamped tip while the target projects
   OUTSIDE the clip, switched to **1 (dot)** drawn AT the target once the
@@ -1993,7 +1993,7 @@ story is refuted there). The comparison evidence for this section is
   2026-08-13 "anchor dot" gloss over-read the two cell constants; the
   32-m 00TRa capture (dot at the waypoint, nothing at center) plus the
   single `Render_DrawIconStripCell_Debug` submit `@0x59953d` settle it.
-  **Color path**: the INSIDE-dot branch BLINKS on `g_hudFrameCounter &
+  **Color path**: the INSIDE-dot branch BLINKS on `g_HUDFrameCounter &
   0x20` (ex `dword_A87064` — the per-main-frame counter, `++`ed from
   `Game_ProcessMainFrame @0x5265d5` via `Game_TickHudFrameCounters
   @0x434c23`; NOT device caps — the earlier "2X-modulate caps flag" gloss
@@ -2025,7 +2025,7 @@ story is refuted there). The comparison evidence for this section is
   `wp_z − player_z` vs ±`0x20000` (2.0 wu) → level `0xFF007000`
   (`extra = 2`), above `0xFF7F5000` (`extra = 0`), below `0xFF20407F`
   (`extra = 1`). **Altitude nub** (bit 20): `WPIndctr.tga`
-  (`g_texWpIndicator`, loaded `HUD_LoadAllTextures @0x59e079`; a 4-frame
+  (`g_TexWpIndicator`, loaded `HUD_LoadAllTextures @0x59e079`; a 4-frame
   vertical strip — up-triangle/down-triangle/circle/blank) drawn as a
   20×20-design quad ending at `y1 − rect_h/32`, x = center ∓10 shifted
   ±8 by `extra`, frame = `extra`, in the tricolor.
@@ -2041,7 +2041,7 @@ story is refuted there). The comparison evidence for this section is
   above. The 1920x1080 completed-pass probe reads it as four physical
   pixels because `scaleX(2)` IS 4 at that width; it is 3 at 1280 and 5
   at 2560, so a constant only matched the probed display (corrected
-  2026-08-19). `draw_compass_indicator @0x59c900` still
+  2026-08-19). `HUD_DrawCompassIndicator @0x59c900` still
   uses the uninset half-height times the witnessed `1.25`. The rect
   scales per axis through `Viewport_ScaleToVirtualCoords @0x5d2b20`
   (x·w/1024, y·h/768, rounded), but all circular radii come from its
@@ -2050,16 +2050,16 @@ story is refuted there). The comparison evidence for this section is
   before rasterization, and compass half-extent `175.625`. This closes
   the earlier `0.9275 × base`, mean-half-extent, and “10% smaller”
   hypotheses.
-- **View transform** (`render_terrain_decal`'s tail `@0x607ac1..0x607b13`
+- **View transform** (`Render_TerrainDecal`'s tail `@0x607ac1..0x607b13`
   writes the shared globals `0x319A278..294`; the unreferenced twin is
   `MapView_SetTransform @0x607130`, defined + named this session): screen
   centers = truncated midpoints of the `Viewport_ScaleToVirtualCoords`-scaled
   rect; world-per-pixel scale = `zoom / (rect_height_px × 200.0)`
   (`flt_7D2290`). The completed-pass probe pins 00TRa to
   `25559 / (281 × 200) = 0.45478648` wu/px;
-  rotation angle = `yaw + g_mapYaw180 − 0x40000000` folded to BAM16 × 2π/65536
-  (`flt_7C7988`), where `g_mapYaw180 @0x2723EB0` = `0x80000000` iff
-  `Bms_AttribFlags & 0x20` (the mission's RotateMap180 attribute,
+  rotation angle = `yaw + g_MapYaw180 − 0x40000000` folded to BAM16 × 2π/65536
+  (`flt_7C7988`), where `g_MapYaw180 @0x2723EB0` = `0x80000000` iff
+  `g_BmsAttribFlags & 0x20` (the mission's RotateMap180 attribute,
   `@0x5a49bc`). Projection [orig: `Terrain_FixedPointToWorldFloat @0x607060`]:
   `lx = (x−px)·inv/65536`, `ly = (y−py)·inv·(−1/65536)` — mission +Y is
   NEGATED into screen space — then `sx = ctr_x + lx·cos − ly·sin`,
@@ -2067,7 +2067,7 @@ story is refuted there). The comparison evidence for this section is
   `radarout` (row 48 → case 361 `@0x49beaf`) multiplies by `dbl_7C7AA8 = 1.15`
   clamped ≤ `0x100000`; `radarin` (row 49 → case 360 `@0x49bcb0`) by
   `dbl_7C7AB0 = 0.85` clamped ≥ `4096`; the value resets to
-  `65536 × clamp(1 − Bms_MapZoom, 0.0625, 1.0)` at
+  `65536 × clamp(1 − g_BmsMapZoom, 0.0625, 1.0)` at
   `Player_InitPlayer @0x4e1741..0x4e1763` — `flt_A7640C` is NOT a
   static zero: it is the BMS HEADER's `map_zoom` float
   (`g_BmsHeaderBlock @0xA761D0` + 0x23C, bulk fread, no per-field
@@ -2088,15 +2088,15 @@ story is refuted there). The comparison evidence for this section is
   `0x8000000` steps — exactly 32 uniform segments (the offset vanishes below
   the table resolution). The disc pass lays the stencil that crops every later
   leg; the triangles themselves clip only against the rect
-  (`clip_triangle_and_emit_vertices @0x688e30` is a min/max box clip). The
+  (`Vertex_ClipTriangleAndEmitVertices @0x688e30` is a min/max box clip). The
   OpenNova compiler clips the terrain quads against the same 32-gon instead —
   the software equivalent of that stencil.
-- **Terrain** [orig: `render_terrain_decal @0x6071C0`]: cover bound =
+- **Terrain** [orig: `Render_TerrainDecal @0x6071C0`]: cover bound =
   `diag(rect_px) × 0.8 (flt_7C6F9C) × scale` world units; 512-unit tiles
   (`0x2000000` Q16 snap); the row index derives from **negated mission Y**
   (`(−0x1000000 − y) >> 25`) and the column from `x >> 25`, offset by
   `Terrain_SectorOrigin*` with OOB clamp masks, then
-  `Terrain_SectorGrid[16×(row & 0xF) + (col & 0xF)] − 1` — the shared TRN
+  `g_TerrainSectorGrid[16×(row & 0xF) + (col & 0xF)] − 1` — the shared TRN
   routing table. The base pass selects the corresponding one of the four
   original 512×512 `Colormap0..3` textures — it does **not** sample the
   PolyTrn per-cell render-target cache. OpenNova packs those four independent
@@ -2143,7 +2143,7 @@ story is refuted there). The comparison evidence for this section is
   the same shoreline footprint while retaining the source colormap detail.
 - **Marker banks** (net-re §5.19/§5.35 carries the wire/retention story):
   draw order per layer is persistent (buildings with interior models first,
-  via `render_collision_wireframe @0x596800` footprints — PORTED
+  via `Render_CollisionWireframe @0x596800` footprints — PORTED
   (`engine/runtime/world/minimap_footprint.*`): the model's 60-byte
   **OOBJ occlusion records** at `model+0xDC/+0xE0`, not COBJ collision
   sections. Records with type byte `<= 1` pass `@0x596803`; faces whose
@@ -2159,7 +2159,7 @@ story is refuted there). The comparison evidence for this section is
   captures show no observable stroke; OpenNova therefore retains the
   parity result in the feed but does not submit black lines. Retail hands the
   unfurled `map_heading - entity_heading` directly to
-  `render_collision_wireframe` (`@0x5a636e`, `@0x5be55b..0x5be57b`), whose
+  `Render_CollisionWireframe` (`@0x5a636e`, `@0x5be55b..0x5be57b`), whose
   local screen formula is reflected (`@0x596844..0x596bbb`). OpenNova places
   the outline in mission space first, so it subtracts 90 degrees from the
   entity heading to compensate for the map projection's separate -90-degree
@@ -2178,9 +2178,9 @@ story is refuted there). The comparison evidence for this section is
   lifetime-only draw gate. (Two witnessed quirks stay
   unported under D-HUD-21: the persistent bank walks twice with a
   building/non-building split across two layer functions, and layers 1/2
-  re-draw every live special slot `@0x5be7ad`.) `render_minimap_slot_blip @0x5be240`:
+  re-draw every live special slot `@0x5be7ad`.) `Render_MinimapSlotBlip @0x5be240`:
   special icons 253/254 draw FIXED CENTER rings over the slot's ZEROED z —
-  `minimap_draw_ring_blip @0x597320` takes `max(min_radius, height_px)`
+  `Minimap_DrawRingBlip @0x597320` takes `max(min_radius, height_px)`
   with `height_px = 0`, so the radii are the fixed minima: the 2/1/0-px
   yellow ring trio for 254, plus a second 1-px pulse ring for 253. The
   pulse color is the 64-frame triangle wave `phase = (frame − 8) & 0x3F`
@@ -2188,14 +2188,14 @@ story is refuted there). The comparison evidence for this section is
   The former "shrinking `×0.75` ring stack" gloss was a dead-code misread:
   the `49152`/`65536` Q16 folds multiply the already-zeroed z. Ring colors
   submit OPAQUE (`| 0xFF000000` `@0x597392`). Other special icons draw
-  **unrotated 6-px half-extent** billboards (`draw_billboard_decal
+  **unrotated 6-px half-extent** billboards (`Minimap_DrawBillboardDecal
   @0x5975f0`, `size_override = 6.0`, BAM16 rotation × 2π/65536 when
   nonzero) and take the caller's drawMode `0xFF` alpha (`@0x597775`; call
   sites `@0x5a6d20`/`@0x5a5a02`) — special sprites submit opaque. Regular
   (non-special) markers draw from
   the LIVE pool entity gated on `entity[538]`
-  (`draw_minimap_blip @0x597890`): team colors from the HUD globals
-  (`g_hudColorLightBlue @0x24C1844` / `@0x24C184C` / `@0x24C183C`), sizes
+  (`Minimap_DrawBlip @0x597890`): team colors from the HUD globals
+  (`g_HUDColors.palette[3] @0x24C1844` / `@0x24C184C` / `@0x24C183C`), sizes
   from the model footprint with class fallbacks (generic 10.0 wu = `655360`,
   person 2.0 wu, def-flag overrides 4/8 wu) and pixel floors (6.0 default,
   4/8/12/16 by class), icon 9 × 1.2, spectate icons 26/27 at ×2. The ordinary
@@ -2214,7 +2214,7 @@ story is refuted there). The comparison evidence for this section is
   blending, and live state rather than a different configured base color. The
   `TSDicon.tga` sheet is a **30-cell vertical strip of square cells at its
   authored physical resolution** — stock JO ships 16×480, JOTAC's RevX02
-  authors 64×1920 — indexed by `render_tiled_image_strip @0x67b540`, whose
+  authors 64×1920 — indexed by `Render_TiledImageStrip @0x67b540`, whose
   half-texel cell insets are derived from the loaded tile's stored physical
   dimensions (`0.5 / tile_dim`; the right/bottom bounds intentionally reach
   half a texel past the cell under the clamp sampler). `Texture_LoadFromFile_0
@@ -2233,7 +2233,7 @@ story is refuted there). The comparison evidence for this section is
   `0x2723D0C..D34` are unwritten statics (always pass). Capture-zone def ids
   6027/6028 add team rings (`0xFF2020`/`0x4060FF`, alpha pair `0x50/0x40`,
   min radius 64 wu `@0x5a7027..0x5a7061`).
-- **Compass ring** [orig: `draw_compass_indicator @0x59c900`]: the
+- **Compass ring** [orig: `HUD_DrawCompassIndicator @0x59c900`]: the
   `compring.tga` quad at ×1.25 the map radius (`flt_7C6F18`),
   counter-rotated `(0x3FFFFFC0 − yaw) >> 16` × 2π/65536 so its north marker
   points at world north. OpenNova's draw-list angle negates that numeric delta
@@ -2261,7 +2261,7 @@ story is refuted there). The comparison evidence for this section is
   `{bank, handle, x, y, z, heading, icon, argb, flags, source,
   remaining_ticks, entity_known, policy_flags (bit0 rotate / bit1
   footprint), half_x_q16, half_y_q16, floor_px}` — the policy tail is the
-  `draw_minimap_blip @0x597890` per-class table resolved against the local
+  `Minimap_DrawBlip @0x597890` per-class table resolved against the local
   entity at snapshot build, retail's own client-side resolve site;
   `HudOverlay` rejects unknown versions/short strides atomically. Static
   footprint polygons ride the separate once-per-mission
@@ -2285,32 +2285,32 @@ story is refuted there). The comparison evidence for this section is
   whole big-map trio ABOVE the flat pass (the witnessed frame order).
 
 Unported in-map legs, each witnessed above and tracked under D-HUD-21:
-the in-map weapon-direction indicators (`draw_weapon_direction_indicators
-@0x59c350`) + round-timer box (`draw_timer_overlay_box @0x59c7b0`) +
+the in-map weapon-direction indicators (`HUD_DrawWeaponDirectionIndicators
+@0x59c350`) + round-timer box (`HUD_DrawTimerOverlayBox @0x59c7b0`) +
 radar-contact state (producers `Radar_AddBlip @0x59b280` ← damage
-`@0x4dd8ee` / tracer `@0x4e5cb1`; consumer `update_radar_contacts @0x59a7e0`
+`@0x4dd8ee` / tracer `@0x4e5cb1`; consumer `Radar_UpdateContacts @0x59a7e0`
 building the 12/24-sector rings at `0x2721EF4..0x2721F3B` and the 4-quadrant
 damage flashes `@0x2721EEC`), the objective tether lines (bit 2), entity
 labels (bit 5), location labels (bit 17), the tracked-target legs (bits
 7/19 — no tracked-target source exists in this runtime yet), the remaining
 model-extent size feed and pointer line length, and the sibling out-of-map
-consumers (`draw_radar_blips @0x5a2c00`
-in-world markers, `draw_directional_indicator_ring @0x598180`).
+consumers (`Radar_DrawBlips @0x5a2c00`
+in-world markers, `HUD_DrawDirectionalIndicatorRing @0x598180`).
 Radar topology re-read 2026-09-16 (live IDB): `Radar_AddBlip @0x59b280` (skipped when
-`g_rules_flags & 1`) stamps ONE of four compass-edge WORD timers
+`g_RulesFlags & 1`) stamps ONE of four compass-edge WORD timers
 `@0x2721EEC..0x2721EF3` to 31 ticks (`quadrant = (atan2 BAM - Yaw - 0x1FFFFFE0) >> 30`)
 and takes the first free row of the 128 x 24-byte blip table `@0x2721F40` (type, xyz, life
-62, colour). `update_radar_contacts @0x59a7e0` runs from `HUD_DrawMapOverlay @0x5a791c`
+62, colour). `Radar_UpdateContacts @0x59a7e0` runs from `HUD_DrawMapOverlay @0x5a791c`
 only when the map element flags carry `0x200 | 0x40 | 0x400` (`@0x5a78ff..0x5a790f`), and
 from `HUD_RenderAllOverlays @0x5a817d`; it decays the edge timers and rebuilds the sector
 bytes (type 0 -> 12 `@0x2721F30`, 1 -> 12 `@0x2721F24`, 2 -> 24 `@0x2721F0C`, 3 -> 24
 `@0x2721EF4`, type 255 = all 12). `Player_OnDamageReceived @0x4dd880` produces type 255 for
 self-damage, 2 when the attacker's item def `+0x294 == 6`, else 0. Under that same gate
-`draw_weapon_direction_indicators @0x59c350` draws the 12 + 24 sector marks and
-`draw_timer_overlay_box @0x59c7b0` ends in `draw_directional_indicator_ring @0x598180`
+`HUD_DrawWeaponDirectionIndicators @0x59c350` draws the 12 + 24 sector marks and
+`HUD_DrawTimerOverlayBox @0x59c7b0` ends in `HUD_DrawDirectionalIndicatorRing @0x598180`
 (12 segments: 1 = friendly list `@0x27233E8`, 2 = the `sub_59B200` contact list
 `@0x2722B40`, 2 blinking on `tick & 8` for the type-0 damage sectors). The
-four-quadrant edge drawer `draw_damage_direction_indicators @0x59a300` (four screen-edge
+four-quadrant edge drawer `HUD_DrawDamageDirectionIndicators @0x59a300` (four screen-edge
 triangles, colour `0xFB441A`, visible while `timer/31 > 0.375`) has **no callers** in JO:
 the edge timers are written and decayed but never drawn. The HUDDECLUT_* consumer is
 no longer an open witness: the declutter system is witnessed and ported
@@ -2324,11 +2324,11 @@ The `map_toggle` action (catalog row 98, code 28, default `M`) cycles the
 map overlay mode **0 → 2 → 3 → 0** [orig: `HUD_CycleMapMode @0x520bc0`
 (ex "UI_CycleAmmoDisplayMode" misname), dispatched from the IN-GAME binding
 arm `@0x4e0662` — the earlier "code 28 is a dispatcher no-op" adjudication
-read the MENU-context switch and is corrected]. `g_mapOverlayMode
+read the MENU-context switch and is corrected]. `g_MapOverlayMode
 @0x24C18BC` clears on round init [orig: `Game_InitNewRound @0x42275a`],
 respawn-state init [orig: `Game_InitRespawnState @0x499395`], and every
 render frame while the local player is dead [orig: `@0x5cac67..0x5cac6d —
-Flags & 2 → g_mapOverlayMode = 0`]. Frame order [orig:
+Flags & 2 → g_MapOverlayMode = 0`]. Frame order [orig:
 `Render_ProcessMainSceneFrame @0x5ca0f0`]: `HUD_RenderAllOverlays
 @0x5cad04` (bars, crosshair, messages, tags, the corner spinmap) → the
 mode-gated `HUD_BuildMapOverlayView @0x5cad15` (the big map draws ABOVE
@@ -2360,13 +2360,13 @@ builds the mode's ctx and calls the same `HUD_DrawMapOverlay`:
 - rotation base `entity_ref = 0x40000000` for modes 2/3 — NORTH-UP after
   the transform's −90 fold. Blip sprites rotate against the VIEW base
   (world-stable facing on the north-up modes), not the player heading.
-- zoom = `g_bigMapZoom @0xB76490`, spawn default **524288** (0x80000 =
+- zoom = `g_BigMapZoom @0xB76490`, spawn default **524288** (0x80000 =
   8× the spinmap's world extent) [orig: `Player_InitPlayer
   @0x4e1741..0x4e1754 — flt_7CD424 = 524288.0`]; the radar keys step IT
   while a mode is up [orig: the mode-gated case reads
   `@0x49bc98`/`@0x49be97`].
 - the big map clips to its RECT (the box clip
-  `clip_triangle_and_emit_vertices @0x688e30`); the circular stencil
+  `Vertex_ClipTriangleAndEmitVertices @0x688e30`); the circular stencil
   belongs to the corner spinmap alone. The corner spinmap keeps drawing
   under an active mode (both passes run per frame).
 - the grid leg [orig: the `@0x5a5f40` grid loops off the bit12 branch]:
@@ -2384,7 +2384,7 @@ builds the mode's ctx and calls the same `HUD_DrawMapOverlay`:
   The leg CLOSES with an on-map player readout `"(%s,%d)"` — the
   MAPCOORDS column fold + the zero-skip row — at the projected player
   point −(50,25) px. Letters, numbers, and the readout all draw with
-  `HUD_DrawTextCentered_HalfBright` on **`g_hudLabelFontLarge`**. The
+  `HUD_DrawTextCentered_HalfBright` on **`g_HUDLabelFontLarge`**. The
   exact label pixel anchors are capture-derived pending a retail M-map
   reference; the values and lattices are byte-witnessed.
 - OpenNova: `Simulation.request_hud_map_cycle/get_hud_map_mode/
@@ -2429,7 +2429,7 @@ behind it.
     `@0x454532`: on the authority outside a session the won count `0xC846D0`
     +1 and the bonus `0xC846D4` += the value, scaled 3/4 at difficulty −1 and
     3/2 at 1; unported, with its SP epilog and end-round statistics consumers)
-    + when the round is still running (`g_spawn_success_gate == 0` `@0x45453a`)
+    + when the round is still running (`g_SpawnSuccessGate == 0` `@0x45453a`)
     a chat line = mission text `WinConditions/STRWINMSG%03i(win_id)`, posted to
     the CHAT ring and relayed to the joiners as S2C 0x3F kind 1 with team 1
     through `GameMsg_AddChatLineAndRelay @0x5BA170` (the call `@0x454578`); a
@@ -2471,16 +2471,16 @@ behind it.
   the previously elided operands; x/y are the CALLER's arguments, x=15,
   y=+0xF0 off `dword_24C1900` at the `@0x5be163` site):
   - Measure pass `@0x5ba9c9`: per shown row, `HUD_MeasureTextWH` with
-    `g_hudLabelFontLarge`, height scaled `(h<<10)/overlayCtx` accumulates the
+    `g_HUDLabelFontLarge`, height scaled `(h<<10)/overlayCtx` accumulates the
     panel height; max width over the rows AND the header (header measured with
-    fontLarge but DRAWN with `g_hudLabelFontBold` — a witnessed asymmetry).
+    fontLarge but DRAWN with `g_HUDLabelFontBold` — a witnessed asymmetry).
   - Backing box `@0x5baaba`: `HUD_DrawLabelBox(ctx, x, y−0x18,
     x+scaledMaxW+0x48, y+totalTextH+0x30, 0, (alpha<<24)+0xFFFFFF)`.
   - Header `@0x5baae4`: `Render_DrawTextScaled` at (x+0x18, y), fontBold,
     `(alpha<<24)+0xFFFFFF`; rows start at y+0x18 and each advances by ITS OWN
     scaled measured height (`esi += heights[slot]` `@0x5bacc1`), not a constant.
   - Checkbox `@0x5bab47..0x5bab9a`: a 16×16 outline at (x+0x18, rowY), four
-    `draw_clipped_2d_line` calls, color `0xFFE0E0E0` with the panel alpha as
+    `Render_DrawClipped2DLine` calls, color `0xFFE0E0E0` with the panel alpha as
     the separate modulate arg.
   - The done mark `@0x5babc1..0x5bac5b` is a **RED X** (color `0xFFFF0000`),
     NOT a checkmark: both diagonals of the box, each drawn three times with
@@ -2488,7 +2488,7 @@ behind it.
   - Row text `@0x5bacb5`: (x+0x30, rowY−2), fontLarge, color =
     `(won ? 0xFF808081 : 0) + 0xFFFFFF + alpha·0x1000000` (wraps to the
     **gray 0x808080** for completed rows at any alpha).
-  (KOTH's separate directive list = `draw_koth_win_lose_directives @0x5ba500`,
+  (KOTH's separate directive list = `HUD_DrawKOTHWinLoseDirectives @0x5ba500`,
   unported with KOTH.) PORT (2026-08-12): `HudFrameCompiler::element_objectives`
   carries the witnessed rect/checkbox/red-X geometry, the exact color folds,
   and the panel alpha byte (`HudFrameState::objectives_alpha`, folded into
@@ -2605,33 +2605,33 @@ were made for this review.
 | ID | Ours / reference | Original (Jointops.exe) | Why / consequence |
 |---|---|---|---|
 | D-HUD-1 | IDB curated name `draw_minimap_compass_overlay`; the oscarmike reference models a "spinmap" compass | `HUD_DrawStanceIndicator @0x599f10` renders the **stance** indicator, keyed by `byte_27235C0` = `hudInfo+568` stance index | The function is mis-named in the IDB and mis-modeled in oscarmike. The OpenNova stance widget must be the discrete cross-faded `HUDSTANCE` frames, not a compass. Rename proposed (held). |
-| D-HUD-2 | oscarmike `spinmap.gd` conflated the IDB-misnamed stance function with a rotating compass-ring texture | the stance widget is discrete pre-rendered frames cross-faded on stance change. The `@0x599700` "radar" is separately the weapon heat bar, while the actual normal gameplay spinmap is `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` in the authored HUDSPINMAP rect, gated by the declutter SPINMAP slot `dword_2723CC4` = `visible[17]` (visible at JOX's default `hud_detail 0` — the "compiled-in-true master switch" reading was the unloaded-BSS misread, corrected 2026-08-15; the 2026-07-18 "no in-HUD radar" gloss overstated: only the compass STRIP `@0x595470` and `draw_entity_labels @0x593820` are dead) | **FIXED 2026-08-13.** Stance and gameplay map are separate elements: discrete `HUDSTANCE` frames plus the heading-up terrain/blip spinmap with its counter-rotating `compring` overlay. The dead `HUD_DrawCompassStrip @0x595470` remains unported. |
+| D-HUD-2 | oscarmike `spinmap.gd` conflated the IDB-misnamed stance function with a rotating compass-ring texture | the stance widget is discrete pre-rendered frames cross-faded on stance change. The `@0x599700` "radar" is separately the weapon heat bar, while the actual normal gameplay spinmap is `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` in the authored HUDSPINMAP rect, gated by the declutter SPINMAP slot `dword_2723CC4` = `visible[17]` (visible at JOX's default `hud_detail 0` — the "compiled-in-true master switch" reading was the unloaded-BSS misread, corrected 2026-08-15; the 2026-07-18 "no in-HUD radar" gloss overstated: only the compass STRIP `@0x595470` and `HUD_DrawEntityLabels @0x593820` are dead) | **FIXED 2026-08-13.** Stance and gameplay map are separate elements: discrete `HUDSTANCE` frames plus the heading-up terrain/blip spinmap with its counter-rotating `compring` overlay. The dead `HUD_DrawCompassStrip @0x595470` remains unported. |
 | D-HUD-3 | — | Design space is fixed **1024×768**, scaled with round-to-nearest (`Viewport_ScaleToVirtualCoords @0x5d2b20`) | OpenNova authors HUD positions in 1024×768 and scales to the actual surface with the `(p*s+½s)/dim` rounding. |
 | D-HUD-4 | — | Health bar *fill width* uses the capped `+92` ratio; *fill color* uses an uncapped recomputed ratio (`HUD_DrawHealthBar @0x5a2e50`) | Equivalent over `[0,1]`; recorded so the port matches both reads rather than collapsing to one. |
 | D-HUD-5 | `hud_clip_indicator.gd` restamps its flash on (`round_type`, reserve) change | restamp keys are (`weapondef+220` ammo class, reserve, `weapondef+216` pool id) `[orig: @0x599ab2]` | Our weapon model runs a single ammo pool (net-re D-WPN-2), so the ammo-class/pool ids aren't distinct state yet; the proxy fires on the same reload/switch transitions. Revisit with per-class pools. |
-| D-HUD-6 | **NARROWED 2026-09-11: the centre announcement banner is now ported.** The SYSTEM ring (D-HUD-23) and now the player-CHAT ring are ported: the S2C 0x14 fold → `HudFrameCompiler::push_chat_line` (the display-slot sink with the witnessed wrap), the `Chat_DispatchToChannel` channel → sink/colour table, the HUDCHATTEXT first loop of `element_feed`, and the J-key Recent Messages window over both display rings | the chat writer `[orig: Chat_AddMessageChannel1 @0x4985d0]` (raw ring 40×128 B, the display buffer 41×128 B with the newest message's last line in slot 1 and two-space continuation lines at timer 0, only slot 1's timer = `max(930, slot2 + 186)`); the dispatcher `[orig: Chat_DispatchToChannel @0x42b910]` — no local-team colour term; the geometry table `g_hudChatBoxCoords @0x28e4df8` (ex `dword_28E4DF8`) rows 1/2 = HUDCHATTEXT x1/x2 read through `HUD_GetChatBoxCoord @0x5bbe90` — its writer has no xref in the image; the involved-line copy `[orig: strncpy @0x427B8B]` feeding `HUD_DrawKillAnnounceBanner @0x59dc90` | The centre banner now uses the large white font at virtual (512,30), signed age <=186, and retained text after expiry (see the follow-up section below). Residuals: channel 13's `HUD_SetTrackedEntityTarget @0x59D050` (a world leg); `HUD_DrawOverlayPanels (ex sub_5C0060) @0x5c0060`, a third reader of the J toggle (unwitnessed). The geometry table's writer sits outside the image, so the authored HUDCHATTEXT/HUDSYSTEXT rows are the faithful source (`HudLayout::chat_box_x1/x2`). Narrowed 2026-09-23: the script chat lines (WAC text/ptext/text#, the WAC lose line, the BMS subgoal won/lost lines) post into the CHAT ring in raw white with the 930-tick timer (`Chat_AddSystemMessage @0x4EDB50` and `GameMsg_AddChatLineAndRelay @0x5BA170` → `Chat_AddMessageChannel1 @0x4985D0`); the SYSTEM ring keeps the triggered text and the console lines (consol/pconsol/consol#, forceanim; `Chat_AddMessageChannel2 @0x4987F0`). |
+| D-HUD-6 | **NARROWED 2026-09-11: the centre announcement banner is now ported.** The SYSTEM ring (D-HUD-23) and now the player-CHAT ring are ported: the S2C 0x14 fold → `HudFrameCompiler::push_chat_line` (the display-slot sink with the witnessed wrap), the `Chat_DispatchToChannel` channel → sink/colour table, the HUDCHATTEXT first loop of `element_feed`, and the J-key Recent Messages window over both display rings | the chat writer `[orig: Chat_AddMessageChannel1 @0x4985d0]` (raw ring 40×128 B, the display buffer 41×128 B with the newest message's last line in slot 1 and two-space continuation lines at timer 0, only slot 1's timer = `max(930, slot2 + 186)`); the dispatcher `[orig: Chat_DispatchToChannel @0x42b910]` — no local-team colour term; the geometry table `g_HUDChatBoxCoords @0x28e4df8` (ex `dword_28E4DF8`) rows 1/2 = HUDCHATTEXT x1/x2 read through `HUD_GetChatBoxCoord @0x5bbe90` — its writer has no xref in the image; the involved-line copy `[orig: strncpy @0x427B8B]` feeding `HUD_DrawKillAnnounceBanner @0x59dc90` | The centre banner now uses the large white font at virtual (512,30), signed age <=186, and retained text after expiry (see the follow-up section below). Residuals: channel 13's `HUD_SetTrackedEntityTarget @0x59D050` (a world leg); `HUD_DrawOverlayPanels (ex sub_5C0060) @0x5c0060`, a third reader of the J toggle (unwitnessed). The geometry table's writer sits outside the image, so the authored HUDCHATTEXT/HUDSYSTEXT rows are the faithful source (`HudLayout::chat_box_x1/x2`). Narrowed 2026-09-23: the script chat lines (WAC text/ptext/text#, the WAC lose line, the BMS subgoal won/lost lines) post into the CHAT ring in raw white with the 930-tick timer (`Chat_AddSystemMessage @0x4EDB50` and `GameMsg_AddChatLineAndRelay @0x5BA170` → `Chat_AddMessageChannel1 @0x4985D0`); the SYSTEM ring keeps the triggered text and the console lines (consol/pconsol/consol#, forceanim; `Chat_AddMessageChannel2 @0x4987F0`). |
 | D-HUD-7 | **CLOSED 2026-07-31.** The HUD consumes the exact ERROR integer plus the sim's signed `pitchBlend(+0x380)>>7` and movement/weapon-weight `(+0x384)>>7`; the same live `pitchBlend` feeds the first-person camera and local/decoded-player aim overlays | spread adds `(player+0x380 >> 7) + (player+0x384 >> 7)` `[orig: HUD_DrawCrosshair @ 0x592640]`; the write/decay side is `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]` | **FIXED.** Exact integer carriers now run ammo/weapon parse → runtime tables → round/body sim → local HUD/camera/overlay; decoded rows stamp and decay recoil, while their movement term remains the retail zero of a local-only producer. The projectile's intentionally different `R>>8` stays separate. The water-height category's position-only `CameraOffset.Z` projection remains D-INF-18, not D-HUD-7. Pinned by `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd`. |
 | D-HUD-8 | **FIXED / premise corrected 2026-09-19.** User color and hit feedback modulate the texture through vertex diffuse | FVF `0x2C4`, diffuse +16 and zero specular +20 `[orig: @0x5914CC..0x591500; @0x678962/@0x678A3E]` | The decompiler mislabeled the vertex fields. Literal UVs and integer corner/midpoint snapping are ported; native and GPU checks cover the reticle. The XHAIR_COLOR option stays live: persisted as the RGB value, the spinlist row selected by value `[orig: SpinList_SelectItemByValue(…, dword_25510E0) @0x554cec]`, default white `[orig: Config_SetDefaults @0x54d461 = 0xFFFFFF]`; the strip's colour store is `[orig: @0x5914d7]` and the draw `[orig: GDynamicVB_DrawPrimitive @0x6788e0]`. Not witnessed: the texture-stage setup inside `GfxShader_ApplyPassChecked @0x677020`; MODULATE is inferred from the colour riding the diffuse channel. |
-| D-HUD-9 | **CLOSED 2026-07-31.** The crosshair previously hid from generic settled ADS | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, whose promoted predicates are Scoped (`Flags & 1`) or Sighted (`Flags & 2`, except SWITCHFROM); movement/water reject only the ordinary Scoped leg, while reload-card-switch, camera, dead/airborne, ForceScoped, and seat gates complete the verdict | **FIXED.** The sim now stamps that bounded retail verdict once and feeds both visibility and ERROR row selection. The reticle remains through ADS ease and follows the witnessed Scoped/Sighted failure/override gates rather than raw `scope_engaged`. |
-| D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerPresenter.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `GameHudPresenter` feeds it to both shells. |
-| D-HUD-11 | **CLOSED 2026-08-16.** `Simulation::fill_attach_labels` (ex `get_attach_labels`) now consumes the same complete `LocalPlayer::local_player_can_fire` verdict used to stamp the body/HUD aimed row: alive/equipped, passenger-or-borrowed-UseGun seat, reload-card-switch, promoted Scoped/Sighted/SWITCHFROM, movement, air, eye/water, ForceScoped, binocular, and camera gates | `Player_CanFireWeapon @0x5cf780`; the label branch is `!Player_CanFireWeapon() || entity == nearest_entity @0x5a32df..0x5a3354` | **FIXED.** The promoted scope bit is the body mirror committed for the current sim tick, while camera/binocular state is queried live so a presentation-time third-person toggle cannot lag. `simulation_test.gd::test_attach_labels_share_complete_can_fire_verdict` pins unraised ADS, settled ADS, immediate third person, and underwater behavior across two candidate entities. |
-| D-HUD-12 | **FIXED 2026-08-11.** Attach labels lay out through the ported CGameFont engine with the witnessed BOLD Arial label font at the slot scale (`HudFrameCompiler::element_attach_labels` + `configure_label_fonts`) | `HUD_MeasureTextWH @0x580ab0` measures through the bold slot's (`g_hudLabelFontBold @0xB4C394`, ex "fontObj") `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph walk, same font file, same scale; box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` ported verbatim. Pinned by ctest `hud_frame_compiler` (label-font faces/scale). |
-| D-HUD-13 | **CLOSED 2026-08-10.** The label color base is the hudpos `hud_textcolor` | the master overlay color `g_hudActiveColor @0x24c1868`; table slot 2 is refreshed per frame from hudpos `hud_textcolor` (`@0x5a8100`) and is the observed/default source | **The reimpl base is exact for the shipped observable path** and the dim transform stays ported (`HudAttachLabels.dim`). The scheme port (see "The hud_color_index scheme") is restored 2026-08-13 with the byte-witnessed producer: the `hudcolor` action row (code 10, default F6, retail-shadowed by `huddetail`) — neither of the earlier H mappings survives the catalog walk. |
+| D-HUD-9 | **CLOSED 2026-07-31.** The crosshair previously hid from generic settled ADS | it draws while an aimed shot is NOT available — `!Player_IsOpticalViewVisible() @0x5cf780`, whose promoted predicates are Scoped (`Flags & 1`) or Sighted (`Flags & 2`, except SWITCHFROM); movement/water reject only the ordinary Scoped leg, while reload-card-switch, camera, dead/airborne, ForceScoped, and seat gates complete the verdict | **FIXED.** The sim now stamps that bounded retail verdict once and feeds both visibility and ERROR row selection. The reticle remains through ADS ease and follows the witnessed Scoped/Sighted failure/override gates rather than raw `scope_engaged`. |
+| D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_CameraMode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerPresenter.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `GameHudPresenter` feeds it to both shells. |
+| D-HUD-11 | **CLOSED 2026-08-16.** `Simulation::fill_attach_labels` (ex `get_attach_labels`) now consumes the same complete `LocalPlayer::local_player_can_fire` verdict used to stamp the body/HUD aimed row: alive/equipped, passenger-or-borrowed-UseGun seat, reload-card-switch, promoted Scoped/Sighted/SWITCHFROM, movement, air, eye/water, ForceScoped, binocular, and camera gates | `Player_IsOpticalViewVisible @0x5cf780`; the label branch is `!Player_IsOpticalViewVisible() || entity == nearest_entity @0x5a32df..0x5a3354` | **FIXED.** The promoted scope bit is the body mirror committed for the current sim tick, while camera/binocular state is queried live so a presentation-time third-person toggle cannot lag. `simulation_test.gd::test_attach_labels_share_complete_can_fire_verdict` pins unraised ADS, settled ADS, immediate third person, and underwater behavior across two candidate entities. |
+| D-HUD-12 | **FIXED 2026-08-11.** Attach labels lay out through the ported CGameFont engine with the witnessed BOLD Arial label font at the slot scale (`HudFrameCompiler::element_attach_labels` + `configure_label_fonts`) | `HUD_MeasureTextWH @0x580ab0` measures through the bold slot's (`g_HUDLabelFontBold @0xB4C394`, ex "fontObj") `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph walk, same font file, same scale; box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` ported verbatim. Pinned by ctest `hud_frame_compiler` (label-font faces/scale). |
+| D-HUD-13 | **CLOSED 2026-08-10.** The label color base is the hudpos `hud_textcolor` | the master overlay color `g_HUDColors.active @0x24c1868`; table slot 2 is refreshed per frame from hudpos `hud_textcolor` (`@0x5a8100`) and is the observed/default source | **The reimpl base is exact for the shipped observable path** and the dim transform stays ported (`HudAttachLabels.dim`). The scheme port (see "The hud_color_index scheme") is restored 2026-08-13 with the byte-witnessed producer: the `hudcolor` action row (code 10, default F6, retail-shadowed by `huddetail`) — neither of the earlier H mappings survives the catalog walk. |
 | D-HUD-14 | **NARROWED 2026-09-19.** Localized armory, vehicle-bay and FARP wait/reload draw commands and retained phase-0 timer/zone inputs are ported | `HUD_DrawGameplayOverlays @0x5BDE60`; `STROVER_ARMORY_WAIT` remains unreachable | Active-menu suppression and integration with the vehicle-bay menu/host FARP rearm service remain. Native tests cover team/zone/timer gates and retained received state. The USE key's vehicle-loadout arm stays ported `[orig: Input_HandleActionBinding_0 @0x4e0a91..0x4e0aeb]`; the floating armory-delay label variant remains with this row. |
 | D-HUD-15 | **CLOSED 2026-07-22.** The drawer was already parity-complete; the missing half was the source. The accumulator is now witnessed and ported (D-WPN-4, net-re §5.62): heat is a DEADLINE on the slot, `def+880 × (slot+0x14 − tick)`, stamped once per shot by the recoil arbiter | heat = `WeaponSlot_CalcAccumulatedHeat @0x53f780` per frame, clamped to `0xFFFF` into `hudInfo+60` `[orig: HUD_BuildEntityInfo @0x4b852e, clamp @0x4b854d]` | Fed sim → weapon view → HUD with the clamp applied where the original's info builder applies it. The bar fills on the thirteen emplaced/vehicle guns that author `heat_values` and stays hidden on foot, because no infantry weapon authors heat in retail either. |
 | D-HUD-16 | the SP waypoint track is built sim-side at mission load from the BMS nav channel (`flags & 2`) + pool-3 markers — no 0x0F wire leg in the loop | retail always routes the list through the S2C 0x0F apply, even in SP mode 3 (the local server serializes, the local client applies) | Same data, same selection rule, no serialization round-trip. The npwire 0x0F waypoint block already decodes (net-re §5.29); wire-parity for MP join is the npwire follow-up, not a HUD divergence. |
 | D-HUD-17 | proximity advance ports the distance/last-entry/skip-done legs; `SpawnPoint_CheckWeaponRestrictions @0x4dbe80` (the AAS spawn-point weapon-restriction pass gate) is modeled as always-pass; the MP POI list (`Entity_BuildMapPoiLists @0x42de40`) and spectate reuse are unported | the restriction check reads the 4 weapon slots vs the event-system restriction mask and can force-advance | SP missions author no weapon restrictions on route markers; port the check with the AAS/MP HUD phase. |
 | D-HUD-18 | GEOMETRY CLOSED 2026-08-12: the checkbox (16×16, 4 lines, 0xFFE0E0E0), the done-mark RED X (6 lines, 0xFFFF0000 — the old "checkmark" gloss was wrong), the `HUD_DrawLabelBox` rect (y−0x18 / +0x48 / +0x30), the measured-height row advance, and the exact alpha/gray color folds are ported into `element_objectives` with the panel alpha byte carried in the frame state. The "New Objective" notification is walked and ported 2026-09-23 (`HUD_ShowObjectiveNotification @0x5BA2E0`: two CHAT-ring lines, the header and the directive, a directive of length <= 1 dropped, NEW_GOAL for action 35, the S2C 0x3F kind-0 relay; no separate toast widget). Remaining: the win-score add `@0x454526` (`Score_TallySubGoalWon @0x4FD100`; no SP score consumer), the header unknown5[2]/[3] team-banner legs (`byte_A762D6/D7`), the KEY_O reimpl binding (input layer), `HUD_DrawLabelBox`'s internal box-shader styling (fill+wire stand-in at the witnessed rect), and the fontLarge/fontBold slot plumb (single HUD font stand-in) | disasm 2026-08-12 (the full drawer); score add `@0x454526`, the notification call `@0x4546e2`, banner masks `byte_A762D6/D7`, binding row = the input layer | The state machine, row walk, geometry, color folds, the chat/banner announcements and the objective notification are exact; the residuals each ride an unported system (score / banner / input binding) plus the two cited drawer stand-ins. |
-| D-HUD-19 | the DEATH deploy screen (`DeployScreenPresenter`, death.mnu) ships the authored chrome, the witnessed SPAWNPOINTS_LIST populate, and the pick flow — its MAP window renders no map image | the MAP window's render pass draws the windowed map view `MapOverlay_DrawView @0x5a58e0` (terrain layers + blips + labels; pan/zoom via `command_map_overlay_input_handler @0x554310`), the sibling of the fullscreen `HUD_DrawMapOverlay @0x5a5f40` | The pick behavior is complete without the image (the list is the pick surface); the map draw internals are the tracked next map-phase witness — port `MapOverlay_DrawView` and feed both the CMAP and DEATH windows from it; the 2026-08-13 gameplay-spinmap port (D-HUD-21) supplies the reusable compiler and banks to host there. **2026-08-24 — the populate's second loop + statics PORTED** (`world/deploy_screen_feed`, `Simulation::get_deploy_list_rows` / `get_deploy_status`, `DeployScreenPresenter._apply_statics`): after the zone loop `ListWidget_SortRows(list, 0, 1) @0x553c5a` sorts the WHOLE list (Default row included) with `cmp @0x6448a0` in string mode ascending = `stricmp(rowA.text, rowB.text)` (NULL text last); the occupant loop `@0x553c5f..0x553de3` walks the team zones with attrib 0x40000 and NO secured gate, finds the row whose value is `index+1` (else `insert_pos = 0` — the rows then land right after row 0, kept), inserts each `dword_A85BC4[idx]` member (`unk_A85CC4[idx*8+i]`, named `entity->Name`; self = `"<b><cFF4040>** %s **"`) at `insert_pos + 1` (UIList_AddRow returns the landed row = `list_insert_row @0x644f20` `return insert_index`) then ONE empty row; `sub_644AF0/@0x644b00` save/restore the scroll offset (list+796, clamped). STATIC_RESPAWN_MSG1 `@0x5538e7..0x553a7b`: hidden, penalty `dword_A85B5C` → `"%s  <cFF4040>%i"` over STROVER_PENALTYTIMER, else the wave zone listing the local player (`word_A85BC0 != -1`, `SpawnZoneList_IndexOf >= 0`): numbered (`entity+538`) `"'<WPNames/STRWPNAME%03d>':  <cFF4040><entity+548>"`, lettered `"%c:  <cFF4040>%d"`. STATIC_PSPRESPAWN_MSG1: `dword_A85B68` → STROVER_PSPRESPAWN. STATIC_MEDIC_MSG1 / STATIC_CALLMEDIC_MSG: `dword_A85B60 && entity+0x1E0 == 0` (`@0x553ec5`; the layout's carried/mounted parent reference — the IDB's `weaponSlots[16]` label is the struct's array overrun) → STROVER_MEDICTIMER and STROVER_CALLMEDIC formatted with `KeyBinding_FormatDisplayString(bindingEntry @0x81B534 = the MedicReq row) @0x496bd0` (three arms: modified slots joined by the localized `OR` separator with per-slot `Ctrl-`/`Shift-` prefixes, every keyed slot re-resolving the ONE keyName scratch `@0x496c07/@0x496ca7`; a modifier-less slot RESETS the buffer and prints the LAST RESOLVED key `@0x496f01` (the secondary when both slots are keyed; `Key 0` for an empty primary) behind either slot's Ctrl/Alt/Shift; the mouse arm; `" *"` on entry flag 0x200; every prefix, separator, mouse name and key name is a `KeyHelp_GetStringWithFallback("Keys", key, fallback) @0x51ed40` lookup over keyhelp.bin (the shipped table: `Ctrl-`, `Shift-`, ` or `, `Mouse 1`, `Key`; corrected 2026-09-12); port `controls::format_display_string` over `controls::key_string`). The three timers are the 0x0A sub-block-0 bytes `@0x430084/@0x43009f/@0x4300c3` (`ClientState::respawn_penalty_seconds/local_revive_seconds/spawn_hold_seconds`); the wave facts are the 0x6E fold (`ClientSpawnWaveStatus::self_zone_handle` = `word_A85BC0`). Remaining: the STATIC_INSTRUCTIONS arms and the permanent-death arm (ledger row). **2026-08-31 — the deploy-map OVERLAY open/close latch PORTED** (`ClientState::deploy_overlay_active`, `Simulation::is_join_deploy_overlay_active`, the MainGame frame-loop latch + the presenter's overlay open/close): retail arms `g_deploy_screen_active @0xA860DC` from the 0x0F game_flags bit0 unless the death screen is up (`NapiNPClientMsg_0x00F @0x42e2d8/@0x42e2f8`), then host-ASSIGNS it every per-frame 0x0A from flags1 bit1 (`@0x42ff82`); the frame loop opens death.mnu's DEATH once off it OR the local entity's undeployed bit (+0x24 & 2), latched `dword_24C1894` (`Render_ProcessMainSceneFrame @0x5cab5e..0x5cab8b`; suppressed while a menu is open `@0x5cab67` or the spawn-success gate `0x24C1928` is set), auto-closes the latched screen when both triggers clear (`@0x5cac8e` → the close-all-screens helper `@0x54b954` — the IDB's `Server_ResetBalanceCounters` label is a misnomer), and resets the latch at mission start (`Game_StartMission @0x525b31`). The deploy-screen keys 'X'/SPACE and the row select all route input case 12 — dialogs reset + one C2S 0x0E (`Input_HandleSpecialKeys @0x49c9fd/@0x49ca06`, letter keys pick a same-team `SpawnZoneList` row `@0x49ca42..0x49ca73`; the list select `@0x55364d`). The overlay dismiss's 0x0E SEND half is deliberately not ported yet: case 12 re-arms the client uplink hold, and how a host releases that hold for an already-deployed player is unwitnessed (the stock wave-join capture carries zero 0x0E) — the reimpl dismisses locally and stays silent, which a stock host cannot distinguish from a player who never pressed the keys. **2026-09-11:** both instruction statics and the permanent-death timer/player-count overrides are ported; see the follow-up section below. |
-| D-HUD-20 | **FIXED 2026-08-10** (core). The friendly tags (overhead name labels) are ported end to end for the SP/AI path: `world::collect_friendly_tags` → `inmatch::collect_friendly_tags` → `Simulation::fill_friendly_tags` → presenter projection/fog/KEY_F cycle → `HudFrameCompiler::element_friendly_tags` — the witnessed gates, health-tier colors, distance alpha, centered alpha-preserving half-bright text, the `'^'`+36-name fallback, the BMS→`[PeopleNames]` authored names, the BRIEF ticks, and the medic cross plate (feed pending) | the drawer is `HUD_DrawEntityLabel @ 0x5a39b0` off `HUD_DrawFriendlyTagsPass @ 0x5a4480` (full witness: the element map section). The 2026-08-10 hunt's dead ends stay recorded: `hud_draw_target_entity_overlay @ 0x59a5d0` = the targeted-GEAR overlay, `sub_599C20 @ 0x599c20` = the scope quad | Residues, each with its owning system: (a) PORTED 2026-08-24 — the player-slot walk (authority: the connection table via `PlayerSlotLookup`; joiner: `replication::collect_roster_tags` over the 0x46 roster + decoded rows), the dead latch, the downed light-blue/gray recolor, the slot+44 medic-request pulse, the slot+16 revive count in both text forms, and the client 1 Hz countdown (`ClientRuntime::tick_roster_revive_countdown`); still open in (a): squad colors (`g_squadColors @0x83B450`, middle × 0.7), the slot+32 `<ch>`…`<co>` wrap (its writer is not the 0x46 clan/vehicle-name field: those land at slot+0x18/+0x1C `@0x434840`/`@0x434870`), the decoded remote player's class (no medic plate on joiner roster rows) and eye offset (the anchor rides the origin + 0x4000 there); (b) the magenta leg behind `g_enemyTagsVisible @0x24D1DF4`, which outside the death screen can only reach team-0 neutrals (the S2C 0x0A edge is mirrored but only rises with the death screen; the spectator-mode and action-130 writers are unported, so ordinary play takes the drawer's unequal-team bail); (c) CLOSED 2026-08-21 — the medic-plate FEED is the parsed charattr.def `ATTRIBUTES` Medic (0x8) by `playerClass` (`world::class_has_attribute`; `CharAttr_LoadFromDef @0x412140`, the flags word at +28 of the 31-dword class record), feeding the plate AND the map marker; (d) PORTED 2026-09-12 — the radio-request icon (TSDicon cell 0x17 beside the label, the ex-"wounded icon"; `entity+885` is the S2C 0x6D latch `@0x430C50`), the compiler arm with its two feeds (`HudFriendlyTag::radio_request`, `HudFrameState::radio_request_icon_viewer`) ported with the arm (2026-09-12: the world fold `FriendlyTagSource::radio_request` via `friendly_tag_aboard_vehicle`, the joiner's `collect_roster_tags` fold, and the viewer word `friendly_tag_radio_request_viewer` -> `Simulation::local_player_radio_request_icon_viewer` -> `HudOverlay::set_radio_request_icon_viewer`); (e) the good-tier scheme swap is live again with the witnessed `hudcolor` producer (D-CTRL-4 tracks the reachability divergence); (f) the speaking-pulse LEVEL feed (formula ported; the dialog-channel amplitude is a device follow-up); (g) the eye-offset triple is ported 2026-08-19 (local = exact head−Position, terrain-floored on foot; NPC = capsule z + witnessed lateral pair) — only the sample-less player legs' 3-angle lateral tilt (on-foot `@0x4b69ab..0x4b6b7c`, mounted `@0x4b66fc..0x4b68e5`) remains, plus the difficulty term of `Entity_GetMaxHealthWithDifficulty`; (h) the death-screen recolor/center-pin legs and the `0x27233DC/E0` latch bits (consumers unwitnessed). |
-| D-HUD-21 | Gameplay spinmap ported and synchronized against retail JOTAC 00TRa (`HudMinimapCompiler` → `element_spinmap` → `HudOverlay`, snapshot v3): mission spawn zoom `65536/524288 × clamp(1 − Bms_MapZoom, 0.0625, 1)` with world-per-pixel `zoom/(rect height × 200)`, the true-pixel-circle disc `half-height − scaleX((flags >> 8) & 2)` (two design px width-scaled; 4 physical at 1920) + compass ×1.25 with the 0.05..0.95 UV crop, OOBJ footprints (opaque team fills, no boundary stroke), direct Colormap0..3 sampling + the depthspin water pass, the TSDicon MODULATE2X fold, the 253/254 fixed center rings, the M-cycle modes 2/3 + bit-12 grid, and 0x6B range-valid liveness | `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` + the full witness map above | The residual in-map legs are this record's "Unported in-map legs" bullet (weapon-direction/timer/radar-contact, objective tether lines, entity/location labels, the tracked-target legs, the persistent-bank split + special layer-1/2 redraw quirks, the out-of-map siblings) plus big-map pan/drag, mask bits 11/13/14/15, modes 1/4, and the objectives-above-big-map ordering; the backing-disc color stays capture-calibrated pending a pass-state witness; 2026-08-21: the `hud_map_bracket` "target bracket" port (#545) was a misattribution of `HUD_DrawMedicCrossQuad @0x59bcb0` — the medic cross, drawn on the map by `draw_entity_labels_and_markers @0x5a4d40` for teammates with AnimMap slot 8 active — now `hud_medic_cross.h` shared with the friendly-tag plate; its map-scale half duplicated `hud_minimap`'s `zoom/(height×200)` and was dropped; the map medic marker itself PORTED in the wire-up round (`HudMinimapMarker::medic` replaces the teammate blip, snapshot v4) — `draw_entity_labels_and_markers @0x5a49e0`'s other legs (the pickup pulse icons 8/14, the parachute icon 23, the selection icon 28, the name/clan labels, the second `unit_type == 3` loop) remain in the in-map tails |
-| D-HUD-22 | The HUDWPDINFO element renders "761 Marketplace" where retail (JOTAC 00TRa, identical pose) shows "760 m to Alley Corner" — same selected waypoint (distances agree within truncation) | the localized "m to" infix is an INDEXED string-table entry (witnessed in the RevX02 strings blob next to "m to FARP"; the composing drawer's table/index is unwitnessed), and the name pick is `get_waypoint_name @0x594630`'s raw-id vs +1-remap branch for gametype 0x30020 (or the mission-table source) | witness pass owed against the live JOTAC session; at the 32 m spawn waypoint retail shows the map's at-tip "032m" label while the HUDWPDINFO text row is ABSENT — a range or state gate on the info row to witness alongside the name/infix pass |
+| D-HUD-19 | the DEATH deploy screen (`DeployScreenPresenter`, death.mnu) ships the authored chrome, the witnessed SPAWNPOINTS_LIST populate, and the pick flow — its MAP window renders no map image | the MAP window's render pass draws the windowed map view `MapOverlay_DrawView @0x5a58e0` (terrain layers + blips + labels; pan/zoom via `CMap_OverlayInputHandler @0x554310`), the sibling of the fullscreen `HUD_DrawMapOverlay @0x5a5f40` | The pick behavior is complete without the image (the list is the pick surface); the map draw internals are the tracked next map-phase witness — port `MapOverlay_DrawView` and feed both the CMAP and DEATH windows from it; the 2026-08-13 gameplay-spinmap port (D-HUD-21) supplies the reusable compiler and banks to host there. **2026-08-24 — the populate's second loop + statics PORTED** (`world/deploy_screen_feed`, `Simulation::get_deploy_list_rows` / `get_deploy_status`, `DeployScreenPresenter._apply_statics`): after the zone loop `ListWidget_SortRows(list, 0, 1) @0x553c5a` sorts the WHOLE list (Default row included) with `cmp @0x6448a0` in string mode ascending = `stricmp(rowA.text, rowB.text)` (NULL text last); the occupant loop `@0x553c5f..0x553de3` walks the team zones with attrib 0x40000 and NO secured gate, finds the row whose value is `index+1` (else `insert_pos = 0` — the rows then land right after row 0, kept), inserts each `dword_A85BC4[idx]` member (`unk_A85CC4[idx*8+i]`, named `entity->Name`; self = `"<b><cFF4040>** %s **"`) at `insert_pos + 1` (UIList_AddRow returns the landed row = `CListWnd_InsertRow @0x644f20` `return insert_index`) then ONE empty row; `sub_644AF0/@0x644b00` save/restore the scroll offset (list+796, clamped). STATIC_RESPAWN_MSG1 `@0x5538e7..0x553a7b`: hidden, penalty `dword_A85B5C` → `"%s  <cFF4040>%i"` over STROVER_PENALTYTIMER, else the wave zone listing the local player (`word_A85BC0 != -1`, `SpawnZoneList_IndexOf >= 0`): numbered (`entity+538`) `"'<WPNames/STRWPNAME%03d>':  <cFF4040><entity+548>"`, lettered `"%c:  <cFF4040>%d"`. STATIC_PSPRESPAWN_MSG1: `dword_A85B68` → STROVER_PSPRESPAWN. STATIC_MEDIC_MSG1 / STATIC_CALLMEDIC_MSG: `dword_A85B60 && entity+0x1E0 == 0` (`@0x553ec5`; the layout's carried/mounted parent reference — the IDB's `weaponSlots[16]` label is the struct's array overrun) → STROVER_MEDICTIMER and STROVER_CALLMEDIC formatted with `KeyBinding_FormatDisplayString(g_BindingRowMedicReq @0x81B534 = the MedicReq row) @0x496bd0` (three arms: modified slots joined by the localized `OR` separator with per-slot `Ctrl-`/`Shift-` prefixes, every keyed slot re-resolving the ONE keyName scratch `@0x496c07/@0x496ca7`; a modifier-less slot RESETS the buffer and prints the LAST RESOLVED key `@0x496f01` (the secondary when both slots are keyed; `Key 0` for an empty primary) behind either slot's Ctrl/Alt/Shift; the mouse arm; `" *"` on entry flag 0x200; every prefix, separator, mouse name and key name is a `KeyHelp_GetStringWithFallback("Keys", key, fallback) @0x51ed40` lookup over keyhelp.bin (the shipped table: `Ctrl-`, `Shift-`, ` or `, `Mouse 1`, `Key`; corrected 2026-09-12); port `controls::format_display_string` over `controls::key_string`). The three timers are the 0x0A sub-block-0 bytes `@0x430084/@0x43009f/@0x4300c3` (`ClientState::respawn_penalty_seconds/local_revive_seconds/spawn_hold_seconds`); the wave facts are the 0x6E fold (`ClientSpawnWaveStatus::self_zone_handle` = `word_A85BC0`). Remaining: the STATIC_INSTRUCTIONS arms and the permanent-death arm (ledger row). **2026-08-31 — the deploy-map OVERLAY open/close latch PORTED** (`ClientState::deploy_overlay_active`, `Simulation::is_join_deploy_overlay_active`, the MainGame frame-loop latch + the presenter's overlay open/close): retail arms `g_DeployScreenActive @0xA860DC` from the 0x0F game_flags bit0 unless the death screen is up (`NapiNPClientMsg_0x00F @0x42e2d8/@0x42e2f8`), then host-ASSIGNS it every per-frame 0x0A from flags1 bit1 (`@0x42ff82`); the frame loop opens death.mnu's DEATH once off it OR the local entity's undeployed bit (+0x24 & 2), latched `dword_24C1894` (`Render_ProcessMainSceneFrame @0x5cab5e..0x5cab8b`; suppressed while a menu is open `@0x5cab67` or the spawn-success gate `0x24C1928` is set), auto-closes the latched screen when both triggers clear (`@0x5cac8e` → the close-all-screens helper `@0x54b954` — the IDB's `Server_ResetBalanceCounters` label is a misnomer), and resets the latch at mission start (`Game_StartMission @0x525b31`). The deploy-screen keys 'X'/SPACE and the row select all route input case 12 — dialogs reset + one C2S 0x0E (`Input_HandleSpecialKeys @0x49c9fd/@0x49ca06`, letter keys pick a same-team `SpawnZoneList` row `@0x49ca42..0x49ca73`; the list select `@0x55364d`). The overlay dismiss's 0x0E SEND half is deliberately not ported yet: case 12 re-arms the client uplink hold, and how a host releases that hold for an already-deployed player is unwitnessed (the stock wave-join capture carries zero 0x0E) — the reimpl dismisses locally and stays silent, which a stock host cannot distinguish from a player who never pressed the keys. **2026-09-11:** both instruction statics and the permanent-death timer/player-count overrides are ported; see the follow-up section below. |
+| D-HUD-20 | **FIXED 2026-08-10** (core). The friendly tags (overhead name labels) are ported end to end for the SP/AI path: `world::collect_friendly_tags` → `inmatch::collect_friendly_tags` → `Simulation::fill_friendly_tags` → presenter projection/fog/KEY_F cycle → `HudFrameCompiler::element_friendly_tags` — the witnessed gates, health-tier colors, distance alpha, centered alpha-preserving half-bright text, the `'^'`+36-name fallback, the BMS→`[PeopleNames]` authored names, the BRIEF ticks, and the medic cross plate (feed pending) | the drawer is `HUD_DrawEntityLabel @ 0x5a39b0` off `HUD_DrawFriendlyTagsPass @ 0x5a4480` (full witness: the element map section). The 2026-08-10 hunt's dead ends stay recorded: `HUD_DrawTargetEntityOverlay @ 0x59a5d0` = the targeted-GEAR overlay, `sub_599C20 @ 0x599c20` = the scope quad | Residues, each with its owning system: (a) PORTED 2026-08-24 — the player-slot walk (authority: the connection table via `PlayerSlotLookup`; joiner: `replication::collect_roster_tags` over the 0x46 roster + decoded rows), the dead latch, the downed light-blue/gray recolor, the slot+44 medic-request pulse, the slot+16 revive count in both text forms, and the client 1 Hz countdown (`ClientRuntime::tick_roster_revive_countdown`); still open in (a): squad colors (`g_SquadColors @0x83B450`, middle × 0.7), the slot+32 `<ch>`…`<co>` wrap (its writer is not the 0x46 clan/vehicle-name field: those land at slot+0x18/+0x1C `@0x434840`/`@0x434870`), the decoded remote player's class (no medic plate on joiner roster rows) and eye offset (the anchor rides the origin + 0x4000 there); (b) the magenta leg behind `g_EnemyTagsVisible @0x24D1DF4`, which outside the death screen can only reach team-0 neutrals (the S2C 0x0A edge is mirrored but only rises with the death screen; the spectator-mode and action-130 writers are unported, so ordinary play takes the drawer's unequal-team bail); (c) CLOSED 2026-08-21 — the medic-plate FEED is the parsed charattr.def `ATTRIBUTES` Medic (0x8) by `playerClass` (`world::class_has_attribute`; `CharAttr_LoadFromDef @0x412140`, the flags word at +28 of the 31-dword class record), feeding the plate AND the map marker; (d) PORTED 2026-09-12 — the radio-request icon (TSDicon cell 0x17 beside the label, the ex-"wounded icon"; `entity+885` is the S2C 0x6D latch `@0x430C50`), the compiler arm with its two feeds (`HudFriendlyTag::radio_request`, `HudFrameState::radio_request_icon_viewer`) ported with the arm (2026-09-12: the world fold `FriendlyTagSource::radio_request` via `friendly_tag_aboard_vehicle`, the joiner's `collect_roster_tags` fold, and the viewer word `friendly_tag_radio_request_viewer` -> `Simulation::local_player_radio_request_icon_viewer` -> `HudOverlay::set_radio_request_icon_viewer`); (e) the good-tier scheme swap is live again with the witnessed `hudcolor` producer (D-CTRL-4 tracks the reachability divergence); (f) the speaking-pulse LEVEL feed (formula ported; the dialog-channel amplitude is a device follow-up); (g) the eye-offset triple is ported 2026-08-19 (local = exact head−Position, terrain-floored on foot; NPC = capsule z + witnessed lateral pair) — only the sample-less player legs' 3-angle lateral tilt (on-foot `@0x4b69ab..0x4b6b7c`, mounted `@0x4b66fc..0x4b68e5`) remains, plus the difficulty term of `Entity_GetMaxHealthWithDifficulty`; (h) the death-screen recolor/center-pin legs and the `0x27233DC/E0` latch bits (consumers unwitnessed). |
+| D-HUD-21 | Gameplay spinmap ported and synchronized against retail JOTAC 00TRa (`HudMinimapCompiler` → `element_spinmap` → `HudOverlay`, snapshot v3): mission spawn zoom `65536/524288 × clamp(1 − g_BmsMapZoom, 0.0625, 1)` with world-per-pixel `zoom/(rect height × 200)`, the true-pixel-circle disc `half-height − scaleX((flags >> 8) & 2)` (two design px width-scaled; 4 physical at 1920) + compass ×1.25 with the 0.05..0.95 UV crop, OOBJ footprints (opaque team fills, no boundary stroke), direct Colormap0..3 sampling + the depthspin water pass, the TSDicon MODULATE2X fold, the 253/254 fixed center rings, the M-cycle modes 2/3 + bit-12 grid, and 0x6B range-valid liveness | `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` + the full witness map above | The residual in-map legs are this record's "Unported in-map legs" bullet (weapon-direction/timer/radar-contact, objective tether lines, entity/location labels, the tracked-target legs, the persistent-bank split + special layer-1/2 redraw quirks, the out-of-map siblings) plus big-map pan/drag, mask bits 11/13/14/15, modes 1/4, and the objectives-above-big-map ordering; the backing-disc color stays capture-calibrated pending a pass-state witness; 2026-08-21: the `hud_map_bracket` "target bracket" port (#545) was a misattribution of `HUD_DrawMedicCrossQuad @0x59bcb0` — the medic cross, drawn on the map by `HUD_DrawEntityLabelsAndMarkers @0x5a4d40` for teammates with AnimMap slot 8 active — now `hud_medic_cross.h` shared with the friendly-tag plate; its map-scale half duplicated `hud_minimap`'s `zoom/(height×200)` and was dropped; the map medic marker itself PORTED in the wire-up round (`HudMinimapMarker::medic` replaces the teammate blip, snapshot v4) — `HUD_DrawEntityLabelsAndMarkers @0x5a49e0`'s other legs (the pickup pulse icons 8/14, the parachute icon 23, the selection icon 28, the name/clan labels, the second `unit_type == 3` loop) remain in the in-map tails |
+| D-HUD-22 | The HUDWPDINFO element renders "761 Marketplace" where retail (JOTAC 00TRa, identical pose) shows "760 m to Alley Corner" — same selected waypoint (distances agree within truncation) | the localized "m to" infix is an INDEXED string-table entry (witnessed in the RevX02 strings blob next to "m to FARP"; the composing drawer's table/index is unwitnessed), and the name pick is `HUD_GetWaypointName @0x594630`'s raw-id vs +1-remap branch for gametype 0x30020 (or the mission-table source) | witness pass owed against the live JOTAC session; at the 32 m spawn waypoint retail shows the map's at-tip "032m" label while the HUDWPDINFO text row is ABSENT — a range or state gate on the info row to witness alongside the name/infix pass |
 | D-HUD-23 | The kill/objective/medic message feed: S2C 0x1E folds to typed client events (`replication::ClientGameEvent`), each line is the game's own "Canned Msg" template with the witnessed substitution, and the line posts to the SYSTEM ring (see "The message feeds") with the per-case color table; the verbose gate is held at the verbose-on session default | `[orig: Chat_FormatMessage @0x422C60 -> String_ReplaceAllCaseInsensitive @0x422970]` (sequential case-insensitive `$A` then `$B`), the `STRCND48` bonus re-compose when aux is the local player `[orig: @0x422CA2]`, `STRCLI01` "Unknown" for a null actor `[orig: @0x422DDA]`; the `@0x426270` color switch (own white `-1` / other grey `0xFFAFAFAF`; friendly-fire 7/8/9 and 16-18/27-31/35-37 white; bonus 32/33/34 yellow `-256`; medic trio 38/39/45 + SSKB 46/47 `0xFF008CEE`; PSP/LFP blue `0xFF00AFFF` / red `0xFFFF0000`; 40 red, 48 orange `-32768`; camp 59/60 by team byte with the `WPNames[level+1]` `%s` compose `[orig: @0x4272EC/@0x427327]`); the suppression set (50-53 format-and-return `@0x42702E-@0x42716D`; 58 tip-only `@0x427202`); the verbose gate on uninvolved kill lines `[orig: g_MpVerbose2 @0x24D2154, 13 tests @0x426472..@0x4267C6]` | **OPEN (partial).** The 0x1E fold, the SYSTEM ring and the witnessed line/color policy are ported. Runtime team/gametype keys (19/20/21/46/47), signed SSKB counts, and flag-event immediate/delayed sounds are ported (2026-09-11; details below). Residuals: join/leave lines + the host-exclusion filter have their roster (D-HUD-24 folds S2C 0x46 into `ClientState`) and only need wiring; player-slot names with `<ch>clan<co>` tags `[orig: @0x422E1D]` (roster names serve today); the verbose keybind toggle `[orig: @0x49B78F]`; the other PSP/LFP/camp team sounds, tips and effect spawns beside the lines. |
-| D-HUD-24 | The Tab scoreboard. DATA lane: S2C 0x16 folds to `ClientScoreboard` (flags, rows in wire order, the team table, the in-game/spectator trailer) and S2C 0x46 to a connection-slot roster, both in `ClientState`; joiners receive all three lanes on the reducer stream, the host's own view binds via the loopback self-0x46 (D-NET-114 form). PANEL (drawn 2026-08-19): `HudFrameCompiler::element_scoreboard` + `hud::hud_scoreboard` carry the witnessed layout in raw design-space constants through the shared scaler, every string on `g_hudLabelFontBold`; a press-TOGGLE on the playerlist action; the stdbox geometry (pieces, fill insets, the title notch, the screen-anchored wrap-tiled fill) pinned by ctest `hud_frame_compiler`; the monogram watermark deliberately not drawn (pure additive over a measured all-black sheet) | data: `[orig: NapiNPClientMsg_PlayerList @0x42FAE0; NapiNPClientMsg_PlayerSync @0x431370; Server_BuildAndBroadcastScoreboard @0x50D960 every 311 ticks]` — every well-formed 0x16 applies unconditionally (an empty update EMPTIES the board `@0x42fb46`), roster-unknown rows drop `@0x42fc05`, name/clan join at apply time `@0x42fd4c..0x42fd8f`, a 0x46 removal deactivates + wipes the slot `@0x434730/@0x4346c0`; the second row u16 is a STATUS BITFIELD not a ping `@0x42fdb4`, the fourth is accumulated points/EXP `@0x52C8E0`, the team-row bytes are kothHold/ctfFlag `@0x50dc62/@0x50dd30`. panel: `HUD_DrawKillList @0x423A30` + the header block `@0x423060` — stdbox (20,78)-(1004,550) `HUD_DrawLabelBox @0x423a90`, header rungs 105..185 stepping 0x14 `@0x42315c..0x42322a`, rows from base + 18 `@0x423d30` while y < 490 `@0x424168`, non-team modes (types 0/1/8) alternate x190/x690 with a SIGNED score, team modes column by team and draw only live-entity rows `@0x423d1b`, spectators at x440 with no score/rank `@0x423e04`, one GLOBAL rank counter `@0x42424f`, the neticon2.tga band `NetIcon_DrawConnectionQualityBand @0x4c2ee0`, the status-glyph append order `@0x423f29-0x4240e5`; the toggle `Scoreboard_TogglePlayerList @0x4244c0` from `@0x49bb68`, the drawer gate `HUD_DrawKillListIfVisible @0x424300`; the stdbox scale `s = surface_w / 1600` `@0x51f02e`, the fill cell extraction `@0x56adbd-0x56ae44` -> `stdbox_draw_fill_wrap_tiled @0x56b5d0` | **OPEN (partial).** One capability gap, not a missing witness: the eight border pieces bind border x boxtile as ONE combined material with a screen-anchored second stage `[orig: CGfxTexture_Create @0x56af3c, applied @0x56b902; draw_textured_quad_0 @0x56b3e0]`, so retail's pieces read camo where ours read plain stencil (needs a second texture stage the HUD quad stream does not carry). PORTED 2026-08-29: the C2S 0x22 unknown-row retry (reducer-queued slot ids, one reliable `{slot, 0x1CF7}` per dropped row framed by the joiner runtime `@0x42fc05..0x42fc3a`) and the 4-team page (`g_num_teams_config > 2 && dword_A87060 & 0x80` flips the team board to teams 3/4 with 0xFFFFFF00/0xFFFF027F every 128 HUD frames `@0x423cd0-0x423cf1`; the joiner's side count is the 0x16 team-table byte `@0x42fdda`). Unported tails: the per-mode team-score header block `@0x4232bf-0x423a12`; the per-recipient SU status gate `@0x423ef8`; host-side sessionvar strings; the host-side 0x16 serializer's `CPlayerStats` sources (`encode_player_list` emits zero status/score words, so an opennova-HOSTED board shows zero scores; retail-server joins are unaffected); the slot+0x20 label `@0x434870`; the same-team class suffix `@0x423d8a`; the KOTH countdown row `@0x423e7d`; the PgUp/PgDn page fold `@0x423c1c`. Full row text: the ledger's D-HUD-24 entry. |
-| D-HUD-25 | **FIXED 2026-08-24.** The MP end-of-round presentation: both S2C 0x1D header forms decode (the non-team top-three names/scores form included) into the overlay ladder (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`); the S2C 0x56 stat board pulled over C2S 0x2B feeds the stat.mnu STAT screen (`engine/runtime/inmatch/stat_screen_feed.h`); the toggled Show Score statistics panel (`hud/end_round_statistics.h`; catalog row 99 `ShowScore`, F5, action 422) and the joiner's `g_round_time_remaining` fold are live; the stat.mnu exit is confirmed and player-initiated: HIDDEN_BACK's authored actions raise CONFIRM_EXIT and the CONFIRM_YES command exits the mission (`[orig: UI_StatConfirmExitCommand @0x562210]` — the same close-screens + action-3 pair as the pause menu's confirm; `EndRoundPresenter.exit_to_menu_requested` → the shell's return-to-menu teardown), while the round cycle's own transitions stay the host's | `EndRoundScoreboard_SerializeHeader @0x505280` sent from `Server_ProcessRoundEnd @0x516839`; the non-team form `@0x43086c..0x430883` staged into `byte_A81B40/60/80` `@0x430889..0x4309af`; the ladder `draw_endround_stats_overlay @0x5b7cd0`; `populate_stat_results_list @0x562240`; `HUD_DrawEndRoundStatistics @0x5b7600` behind `g_showEndRoundStatistics @0x24C18AC`; the 0x0A sub-block 1 host projection `@0x4ffa81..0x4ffaca`; the post-STAT once-only latch `@0x5b864a`; the host's linger-expiry mission exit, reason 3 `@0x51db63` | Closed on the ledger's 2026-08-24 closure line; the full transaction is net-re §5.68 (the 0x56 chunk pull) plus the 0x1D / 0x56 catalog rows. One recorded residual rides the npwire protocol-cursor contract: the decoder REJECTS a short stream where retail zero-fills. |
+| D-HUD-24 | The Tab scoreboard. DATA lane: S2C 0x16 folds to `ClientScoreboard` (flags, rows in wire order, the team table, the in-game/spectator trailer) and S2C 0x46 to a connection-slot roster, both in `ClientState`; joiners receive all three lanes on the reducer stream, the host's own view binds via the loopback self-0x46 (D-NET-114 form). PANEL (drawn 2026-08-19): `HudFrameCompiler::element_scoreboard` + `hud::hud_scoreboard` carry the witnessed layout in raw design-space constants through the shared scaler, every string on `g_HUDLabelFontBold`; a press-TOGGLE on the playerlist action; the stdbox geometry (pieces, fill insets, the title notch, the screen-anchored wrap-tiled fill) pinned by ctest `hud_frame_compiler`; the monogram watermark deliberately not drawn (pure additive over a measured all-black sheet) | data: `[orig: NapiNPClientMsg_PlayerList @0x42FAE0; NapiNPClientMsg_PlayerSync @0x431370; Server_BuildAndBroadcastScoreboard @0x50D960 every 311 ticks]` — every well-formed 0x16 applies unconditionally (an empty update EMPTIES the board `@0x42fb46`), roster-unknown rows drop `@0x42fc05`, name/clan join at apply time `@0x42fd4c..0x42fd8f`, a 0x46 removal deactivates + wipes the slot `@0x434730/@0x4346c0`; the second row u16 is a STATUS BITFIELD not a ping `@0x42fdb4`, the fourth is accumulated points/EXP `@0x52C8E0`, the team-row bytes are kothHold/ctfFlag `@0x50dc62/@0x50dd30`. panel: `HUD_DrawKillList @0x423A30` + the header block `@0x423060` — stdbox (20,78)-(1004,550) `HUD_DrawLabelBox @0x423a90`, header rungs 105..185 stepping 0x14 `@0x42315c..0x42322a`, rows from base + 18 `@0x423d30` while y < 490 `@0x424168`, non-team modes (types 0/1/8) alternate x190/x690 with a SIGNED score, team modes column by team and draw only live-entity rows `@0x423d1b`, spectators at x440 with no score/rank `@0x423e04`, one GLOBAL rank counter `@0x42424f`, the neticon2.tga band `NetIcon_DrawConnectionQualityBand @0x4c2ee0`, the status-glyph append order `@0x423f29-0x4240e5`; the toggle `Scoreboard_TogglePlayerList @0x4244c0` from `@0x49bb68`, the drawer gate `HUD_DrawKillListIfVisible @0x424300`; the stdbox scale `s = surface_w / 1600` `@0x51f02e`, the fill cell extraction `@0x56adbd-0x56ae44` -> `HUD_StdboxDrawFillWrapTiled @0x56b5d0` | **OPEN (partial).** One capability gap, not a missing witness: the eight border pieces bind border x boxtile as ONE combined material with a screen-anchored second stage `[orig: CGfxTexture_Create @0x56af3c, applied @0x56b902; HUD_DrawTexturedQuad_0 @0x56b3e0]`, so retail's pieces read camo where ours read plain stencil (needs a second texture stage the HUD quad stream does not carry). PORTED 2026-08-29: the C2S 0x22 unknown-row retry (reducer-queued slot ids, one reliable `{slot, 0x1CF7}` per dropped row framed by the joiner runtime `@0x42fc05..0x42fc3a`) and the 4-team page (`g_NumTeamsConfig > 2 && dword_A87060 & 0x80` flips the team board to teams 3/4 with 0xFFFFFF00/0xFFFF027F every 128 HUD frames `@0x423cd0-0x423cf1`; the joiner's side count is the 0x16 team-table byte `@0x42fdda`). Unported tails: the per-mode team-score header block `@0x4232bf-0x423a12`; the per-recipient SU status gate `@0x423ef8`; host-side sessionvar strings; the host-side 0x16 serializer's `CPlayerStats` sources (`encode_player_list` emits zero status/score words, so an opennova-HOSTED board shows zero scores; retail-server joins are unaffected); the slot+0x20 label `@0x434870`; the same-team class suffix `@0x423d8a`; the KOTH countdown row `@0x423e7d`; the PgUp/PgDn page fold `@0x423c1c`. Full row text: the ledger's D-HUD-24 entry. |
+| D-HUD-25 | **FIXED 2026-08-24.** The MP end-of-round presentation: both S2C 0x1D header forms decode (the non-team top-three names/scores form included) into the overlay ladder (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`); the S2C 0x56 stat board pulled over C2S 0x2B feeds the stat.mnu STAT screen (`engine/runtime/inmatch/stat_screen_feed.h`); the toggled Show Score statistics panel (`hud/end_round_statistics.h`; catalog row 99 `ShowScore`, F5, action 422) and the joiner's `g_RoundTimeRemaining` fold are live; the stat.mnu exit is confirmed and player-initiated: HIDDEN_BACK's authored actions raise CONFIRM_EXIT and the CONFIRM_YES command exits the mission (`[orig: UI_StatConfirmExitCommand @0x562210]` — the same close-screens + action-3 pair as the pause menu's confirm; `EndRoundPresenter.exit_to_menu_requested` → the shell's return-to-menu teardown), while the round cycle's own transitions stay the host's | `EndRoundScoreboard_SerializeHeader @0x505280` sent from `Server_ProcessRoundEnd @0x516839`; the non-team form `@0x43086c..0x430883` staged into `byte_A81B40/60/80` `@0x430889..0x4309af`; the ladder `HUD_DrawEndRoundStatsOverlay @0x5b7cd0`; `StatScreen_PopulateStatResultsList @0x562240`; `HUD_DrawEndRoundStatistics @0x5b7600` behind `g_ShowEndRoundStatistics @0x24C18AC`; the 0x0A sub-block 1 host projection `@0x4ffa81..0x4ffaca`; the post-STAT once-only latch `@0x5b864a`; the host's linger-expiry mission exit, reason 3 `@0x51db63` | Closed on the ledger's 2026-08-24 closure line; the full transaction is net-re §5.68 (the 0x56 chunk pull) plus the 0x1D / 0x56 catalog rows. One recorded residual rides the npwire protocol-cursor contract: the decoder REJECTS a short stream where retail zero-fills. |
 | D-HUD-26 | **FIXED 2026-09-19.** Scoped + FLAGS2 Inset uses a separate scene viewport, aperture/ring/cross, friendly label, slot offsets and a full second compose (its own shake step and, mounted, its own look-ahead step; the Inset offsets a copy of the composed view `@0x5C9846..0x5C9903`, corrected 2026-09-22 from "a third shake sample") | Definition `+0x0C & 0x200` `[orig: @0x5CA2B1..0x5CA2B4]`, scene `@0x5C9740..0x5CA0E1` | This is not the mortar view. Native geometry and live viewport lifecycle/declutter tests cover the port; mortar impact prediction/designator/map callbacks are separate. |
 | D-HUD-27 | **FIXED 2026-09-16.** Rendered scope camera omitted the active slot offsets; scope range/elevation/magnification text was absent | Modern main-scene Sighted/Scoped camera branches `[orig: Render_ProcessMainSceneFrame @ 0x5ca452..0x5ca4a0]`; HUD text/gates `[orig: HUD_DrawScopeOverlayDetails @ 0x59e420]` | Camera consumer and typed HUD feed ported; standing/prone and text policy regressions pass. The flag-8 vehicle target reticle and D-HUD-26 Inset scene were added in the 2026-09-19 follow-up. |
-| D-HUD-28 | **FIXED 2026-09-19.** Missing seat-specific HUD dispatch and mounted stance; vehicle proxy for Inset reticle; repeated capacity-one ammo folding for flash | `HUD_RenderOverlays @0x5A7CBE..0x5A7D55`; `HUD_BuildEntityInfo @0x4B8440` (seat switch `@0x4B863D..0x4B8767`, EmplacedStance override `@0x4B8539..0x4B8549`; the carrier-is-a-vehicle leg `@0x4B84D1..0x4B8507` is DEAD because `HUD_RenderAllOverlays` zeroes the struct `@0x5A80A5..0x5A80B1` first, so a gunner always reads Emplaced); Inset `@0x4DCCB0` (called `@0x592AE5`); centred cues slide on-screen and recolour `draw_textured_quad_centered @0x5909E0`; flash `@0x599A30` | Native seat/view and real presenter regressions pass; [mode matrix and remaining gaps](weapon-vehicle-hud-validation.md). |
+| D-HUD-28 | **FIXED 2026-09-19.** Missing seat-specific HUD dispatch and mounted stance; vehicle proxy for Inset reticle; repeated capacity-one ammo folding for flash | `HUD_RenderOverlays @0x5A7CBE..0x5A7D55`; `HUD_BuildEntityInfo @0x4B8440` (seat switch `@0x4B863D..0x4B8767`, EmplacedStance override `@0x4B8539..0x4B8549`; the carrier-is-a-vehicle leg `@0x4B84D1..0x4B8507` is DEAD because `HUD_RenderAllOverlays` zeroes the struct `@0x5A80A5..0x5A80B1` first, so a gunner always reads Emplaced); Inset `@0x4DCCB0` (called `@0x592AE5`); centred cues slide on-screen and recolour `HUD_DrawTexturedQuadCentered @0x5909E0`; flash `@0x599A30` | Native seat/view and real presenter regressions pass; [mode matrix and remaining gaps](weapon-vehicle-hud-validation.md). |
 | D-HUD-29 | Pointer row: owned by the [tank record](../world/tank-parity-re.md#divergence-catalog). Live HUD observation recomposed the camera and advanced shake/drift state; the HUD consumes the displayed snapshot, and every non-rendering reader observes the last composed view. | `Camera_ComputeThirdPersonView @0x437D10` callers `@0x526781` / `@0x5CA34D` / `@0x5C9841` | Minted-and-closed 2026-09-22 (FIXED) in PR #671; GUT `game_hud_presenter_declutter_test.gd` (`test_hud_uses_the_presented_camera_frame`). |
 | D-HUD-30 | **Minted-and-closed 2026-09-22 (FIXED).** Scope and mortar Distance labels left the installed `%ld` conversion literal | Both callers pass the localized `STROVER_DIST` and one integer to `sprintf`: scope `@ 0x59E530` (the floor arm's `jmp` `@ 0x59E504` joins it); impact `@ 0x5A8972`; the no-argument labels `@ 0x59E4D5` / `@ 0x59E938` | `hud_sprintf` runs each HUD template with CRT sprintf semantics and its call's own argument list (the whole integer specification, `l`/`h`/`I32` prefixes reduced to 32/16 bits, `%%`); glyph-output regressions cover both callers, the no-argument collapse and the 1000m boundary. |
 
@@ -2646,7 +2646,7 @@ were made for this review.
 - **Chat**: channel 13's `HUD_SetTrackedEntityTarget(sender)` (a world leg);
   the centre announce banner (D-HUD-6). The C2S chat SENDER is unported, and
   its gate is witnessed (2026-08-25) for when it lands: `Chat_SendGlobalMessage
-  @0x49a6b0` sends only when `(!g_death_screen_active || g_spawn_success_gate)
+  @0x49a6b0` sends only when `(!g_DeathScreenActive || g_SpawnSuccessGate)
   && message[0]` (a dead player who has never spawned cannot send), after
   `Chat_StripHtmlTags @0x4983f0` and `Chat_CheckFloodControl @0x498f60` (a
   17-entry ring of the last texts, 68 bytes each: the SAME text within 0x500
@@ -2671,8 +2671,8 @@ were made for this review.
   @0x57b1e0`, `MinimapSlot_InitBlipFromPackedId @0x57b080`; fed by
   `NapiNPClientMsg_CharMinimapUpdate`/TeamAssign/HandlePlayerSpawn/
   FullEntitySpawn). Supporting inventory for those legs:
-  `minimap_draw_ring_blip @0x597320`, `draw_billboard_decal @0x5975f0`,
-  `draw_minimap_blip @0x597890`, `WPNames/STRWPNAME%03d`,
+  `Minimap_DrawRingBlip @0x597320`, `Minimap_DrawBillboardDecal @0x5975f0`,
+  `Minimap_DrawBlip @0x597890`, `WPNames/STRWPNAME%03d`,
   `STROVER_OBJECTIVEPOINT_SHORT`/`STROVER_DEFENSIVEPOSITION`, `%01.2fk`.
   The gameplay compiler is reusable substrate, but those surfaces require
   their distinct view state and UI orchestration — D-HUD-19.
@@ -2711,7 +2711,7 @@ the system ring — behind ONE shared gate: the CHAT declutter mask bit
   DISPLAY buffer (`byte_B3FDBC`, slots 1..40) of font-wrapped lines: the
   newest message's LAST line sits in slot 1, its continuation lines above it
   prefixed two spaces, the wrap width `box[2] − (box[1] − 4)` from
-  `g_hudChatBoxCoords` (`HUD_GetChatBoxCoord @0x5bbe90` — the `hud.def`
+  `g_HUDChatBoxCoords` (`HUD_GetChatBoxCoord @0x5bbe90` — the `hud.def`
   `chat_message x1 y1 x2 y2` / `sys_message` table, zero in retail, which
   ships no `hud.def`: see Chat channel geometry below; the wrapper is
   `HUD_WordWrapText` over `CGameFont_GetCharExtent`, measuring the RAW font object,
@@ -2734,7 +2734,7 @@ the system ring — behind ONE shared gate: the CHAT declutter mask bit
   @0x5267a6]`. The sink is the S2C 0x14 fold (`engine/runtime/replication/
   client_replica_feed.cpp` → `ClientChatLine{channel, sender_slot, text}`)
   routed by `[orig: Chat_DispatchToChannel @0x42b910]` — NO local-team colour
-  term: 0 and ≥ 15 → the SYSTEM ring white; 1/4/5 → CHAT `g_hudColorTable[3]`;
+  term: 0 and ≥ 15 → the SYSTEM ring white; 1/4/5 → CHAT `g_HUDColors[3]`;
   2 → [1]; 3 → [4]; 6/10 → [0]; 7 → [7]; 9 → [5]; 11 → [10]; 12 → [6]; 13 →
   [0] + `HUD_SetTrackedEntityTarget(sender)` (unported world leg); 8 → the
   message queue (no ring); 14 → `Chat_AddMessageChannel3` (a third ring, never
@@ -2761,8 +2761,8 @@ The per-case color/policy table of the `@0x426270` switch (jump table
 |---|---|---|
 | 1/2/3 (suicide), 4/5/6 (kill), 10/11/12 (vehicle), 13/14/15 (knife) | own white / other grey; the grey branch returns unless `g_MpVerbose2` `[orig: 13 test sites @0x426472..@0x4267C6 over 15 gated types — 10/11/12 funnel through ONE shared test @0x42664A; 39/45 jump to their canned post before any gate @0x426454/@0x426468]` | `-1` / `-5263441` (0xFFAFAFAF) |
 | 7/8/9 (friendly fire) | always posts | `-1` white |
-| 16/17/18 | always posts | `g_hudColorTable[0]` = `-1` `[orig: HUD_InitTeamColorTable @0x51F245]` |
-| 19/20/21 | team/gametype-keyed strings, positional/interface sound cues and delayed interface voices; the progress-bar label is refuted below | `g_hudColorTable[0]` (gametype 65544 team literals in 20) |
+| 16/17/18 | always posts | `g_HUDColors[0]` = `-1` `[orig: HUD_InitTeamColorTable @0x51F245]` |
+| 19/20/21 | team/gametype-keyed strings, positional/interface sound cues and delayed interface voices; the progress-bar label is refuted below | `g_HUDColors[0]` (gametype 65544 team literals in 20) |
 | 22/23 ("$A is dead."), 25/26 | own white / other grey, NO verbose gate | `-1` / `-5263441` |
 | 24 (explosive), 49 | own white / other grey, NO verbose gate | `-1` / `-5263441` |
 | 27-31, 35, 36, 37 | always posts | `-1` white |
@@ -2777,7 +2777,7 @@ The per-case color/policy table of the `@0x426270` switch (jump table
 | 59/60 (camp) | team 1/2 only (no else branch `@0x4272F4/@0x427338`); `sprintf(tmpl, WPNames["STRWPNAME%03d" % (level+1)])` `[orig: @0x4272EC/@0x427327]` + team sounds/tips | team 1 `-16732161` / team 2 `-65536` |
 
 `g_MpVerbose2 @0x24D2154` is seeded verbose-on from the session settings
-`[orig: apply_session_settings_to_globals @0x551D0F]` and flipped by the
+`[orig: Game_ApplySessionSettingsToGlobals @0x551D0F]` and flipped by the
 keybind that announces `STRMISC_VERBOSE_ON/OFF` `[orig: @0x49B78F]`; the
 reimpl holds the seed default (the toggle is unported).
 
@@ -2793,14 +2793,14 @@ multi-kill bonus `+32`, explosive-weapon `24`, drowned/crashed/environment
 `22/23/26`.
 
 An involved line (attacker or victim is the local player) is ALSO copied into
-`g_killAnnounceText` with a tick stamp `[orig: the shared sink call @0x427B71,
-then strncpy @0x427B8B + the g_killAnnounceTick stamp @0x427B96]`, drawn
+`g_KillAnnounceText` with a tick stamp `[orig: the shared sink call @0x427B71,
+then strncpy @0x427B8B + the g_KillAnnounceTick stamp @0x427B96]`, drawn
 centred at x=512 in the large HUD font for 186 ticks by the centre announce
 banner `[orig: HUD_DrawKillAnnounceBanner @0x59dc90]` — banner unported
 (D-HUD-6 residual).
 
 - **Chat channel geometry** — RESOLVED 2026-08-21, the writer found in the
-  final review: `g_hudChatBoxCoords @0x28e4df8` (ex `dword_28E4DF8`; rows 1/2
+  final review: `g_HUDChatBoxCoords @0x28e4df8` (ex `dword_28E4DF8`; rows 1/2
   chat, 3/4 system) is read through `HUD_GetChatBoxCoord @0x5bbe90` and
   WRITTEN by the `hud.def` parser — `File_ParseASCIIFile("hud.def", cb,
   0x2A5A8EAD)` `@0x5be210..0x5be228`, callback `@0x5bb7a0`, the `chat_message
@@ -2839,7 +2839,7 @@ banner `[orig: HUD_DrawKillAnnounceBanner @0x59dc90]` — banner unported
   vertex field interpretation; the `dword_25510E0` default is witnessed
   (`[orig: Config_SetDefaults @0x54d461]` = 0xFFFFFF) and the style write is
   `sprintf("cross%02d.tga", selected_value + 1)`
-  `[orig: ingame_options_dialog_event_handler @0x5551f4]`.
+  `[orig: UI_IngameOptionsDialogEventHandler @0x5551f4]`.
 - **Crosshair sub-elements (ported 2026-09-19)** — the target-tracking cursor
   (`@0x592790..0x592875`), the `weapondef+12 & 0x80` aim-point quad
   (`@0x592973..0x592ac8`), and the lock brackets (`@0x592ce2..0x592dd7`);
@@ -2875,14 +2875,14 @@ banner `[orig: HUD_DrawKillAnnounceBanner @0x59dc90]` — banner unported
 ### The Recent Messages window — `HUD_DrawMessageLog @0x5b9d70` (witnessed + ported 2026-08-21)
 
 The J-key history panel behind the `OldMessages` action (catalog action 56,
-default VK 0x4A; `g_showMessageLog @0x24c18c0` is toggled `xor … , 1`
+default VK 0x4A; `g_ShowMessageLog @0x24c18c0` is toggled `xor … , 1`
 `@0x49b55a` in `Input_HandleActionBinding` (jumptable case 29) and cleared by
 `Game_InitRespawnState @0x49939a`). The IDB had it as `draw_credits_scroll`
 with a "NOT network-related, name confirmed" comment; the body walks the two
 message rings, and it was renamed 2026-08-21.
 
 - Called from `Server_DrawStatusScreen @0x50a2d0` (the call `@0x50b211..
-  0x50b21f`, gated on `g_showMessageLog` ONLY — no `hud_detail` or declutter
+  0x50b21f`, gated on `g_ShowMessageLog` ONLY — no `hud_detail` or declutter
   test; drawn after every HUD element and before `HUD_DrawClassRosterOverlay
   @0x50b23d` / the Tab board `HUD_DrawPlayerScoreList @0x50b281`; that caller's
   name is a standing proposal) and `HUD_DrawOverlayPanels @0x5c0060` (a third reader of
@@ -2904,7 +2904,7 @@ message rings, and it was renamed 2026-08-21.
   system ring at `+0x2808` in the right, each entry's colour at `+120`, with
   NO expiry gate — the oldest shown line is the top row and a short history
   leaves the TOP rows blank.
-- Two terms are zero in retail and not carried: `fixedZ @0x24c18f4`
+- Two terms are zero in retail and not carried: `g_OverlayOriginY @0x24c18f4`
   (provably — single writer `Renderer_SetDisplayModeWithFallback @0x587622`,
   edi zeroed `@0x58761a`) and the chat-box table's `dword_28E51FC`
   (`chat_message`'s y1, written only by the `hud.def` parser `@0x5bb7a0`;
@@ -2927,13 +2927,13 @@ staged HUD modules; IDB saved):
 - **Renames** (anchored: bodies read): `sub_546680` →
   `Entity_GetMountSlotBoneIndex` (the attached child's gun-slot bone,
   cached +0x319), `sub_5BBE90` → `HUD_GetChatBoxCoord`, `dword_28E4DF8` →
-  `g_hudChatBoxCoords` (the `hud.def` `chat_message`/`sys_message` x1 y1 x2
+  `g_HUDChatBoxCoords` (the `hud.def` `chat_message`/`sys_message` x1 y1 x2
   y2 table — rows 1/2 chat, 3/4 system — written by the parser callback
   `@0x5bb7a0`; the "HUDCHATTEXT/HUDSYSTEXT rows" gloss was the port's
   stand-in).
 - **Comment corrected by the orchestrator** (the final review, 2026-08-21):
   the entry comment on `HUD_DrawZoneStatusPanel @0x5a2480` read "y + 12 +
-  86*group" and "(x, y−4)" — both wrong: the markers sit at `g_hudZonePanelY
+  86*group" and "(x, y−4)" — both wrong: the markers sit at `g_HUDZonePanelY
   + 86·group` and only the status text is at `(x − 4, y + 12)` (`ebx = y +
   0Ch` `@0x5a25b9..0x5a25bd`).
 - **Comments** (`[opennova 2026-08-21 …]` entry comments + `reimpl:` links):
@@ -2941,13 +2941,13 @@ staged HUD modules; IDB saved):
   `Chat_AddMessageChannel1 @0x4985d0` (raw ring vs display buffer, the slot-1
   timer), `Chat_DispatchToChannel @0x42b910` (the channel table, no team
   term), `HUD_DrawConsoleMessages @0x59ad30` (the display-slot walk),
-  `HUD_DrawMessageLog @0x5b9d70` (display-buffer source, the `g_showMessageLog`
+  `HUD_DrawMessageLog @0x5b9d70` (display-buffer source, the `g_ShowMessageLog`
   gate), `Input_DecrementCooldownTimers @0x498440`, `ZoneTimerList_SetEntryValue
   @0x537ec0` (the entry map), `CharAttr_LoadFromDef @0x412140` (the 31-dword
   records, Medic 0x8), `HUD_DrawVehicleHealthBars @0x5a4fd0` (the `"%1d"`
   labels), `HUD_DrawZoneMarker @0x5986f0` (the sheets + atlas rows). Proposed,
   not applied: `off_7D8E64` → `aFmt1d` (it is the "%1d" string, not a pointer).
-- **Unwitnessable, recorded**: the writer of `rootEntity @0x27235bc` (all five
+- **Unwitnessable, recorded**: the writer of `g_HUDRootEntity @0x27235bc` (all five
   xrefs read; the panel's only witnessed gate is the interface-texture test).
 
 Applied 2026-08-21 (the post-merge tidy of #536..#552; IDB saved):
@@ -2960,17 +2960,17 @@ Applied 2026-08-21 (the post-merge tidy of #536..#552; IDB saved):
   `int __cdecl (int x, int y, int zoneEntity, int letterIndex)` (four pushes
   at both call sites). `HUD_DrawMedicCrossQuad @0x59bcb0` KEPT — the body is
   the medic cross; the 2026-08-21 "target bracket" reading was wrong.
-- **Data names**: `g_showMessageLog @0x24c18c0`, `g_hudVehSeatMarkerW/H
-  @0x27237fc/@0x2723800`, `g_hudZonePanelX/Y @0x2723d94/@0x2723d98` (the
-  `LFP_FLAGS` token), `g_hudZoneStatusKind/Color @0x2721db4/@0x2721db0`,
-  `g_stanceColorGood @0x2723adc`.
+- **Data names**: `g_ShowMessageLog @0x24c18c0`, `g_HUDVehSeatMarkerW/H
+  @0x27237fc/@0x2723800`, `g_HUDZonePanelX/Y @0x2723d94/@0x2723d98` (the
+  `LFP_FLAGS` token), `g_HUDZoneStatusKind/Color @0x2721db4/@0x2721db0`,
+  `g_StanceColorGood @0x2723adc`.
 - **Comments**: `Game_TickHudFrameCounters @0x434c00` (the stale "death
   counters" comment replaced — it is the HUD blink clock), entry comments +
   `reimpl:` links on `HUD_DrawVehicleHealthBars @0x5a4fd0`,
   `HUD_ParseHudposToken @0x59f370` (first comment; VEHICLE_HUD/VEHICLE_END
   marked `@0x59f380`), the three renamed functions, `HUD_DrawMedicCrossQuad`
   (its three callers), `CEffect_Begin_Debug @0x67bb50` (thunk →
-  `draw_tiled_texture_strip @0x67aed0`), `render_tiled_image_strip @0x67b540`
+  `Render_DrawTiledTextureStrip @0x67aed0`), `Render_TiledImageStrip @0x67b540`
   (the row select `@0x67b5c2`), `Entity_BuildSpawnZoneList @0x43eae0`.
 
 
@@ -2978,7 +2978,7 @@ Applied 2026-08-15 (the post-merge review + declutter session; IDB saved).
 The misnomers earlier sessions recorded here "rather than renamed" are now
 renamed:
 
-- **Renames this session**: `g_hudFrameCounter @0xA87064` (ex `dword_A87064`
+- **Renames this session**: `g_HUDFrameCounter @0xA87064` (ex `dword_A87064`
   — the per-main-frame counter, NOT device caps), `Game_TickHudFrameCounters
   @0x434c00` (ex "PlayerStats_IncrementDeathCounters" — the `++` site
   `@0x434c23`, called from `Game_ProcessMainFrame @0x5265d5`),
@@ -2988,22 +2988,22 @@ renamed:
   `sub_594100`), `HUD_DrawTeamIdLine @0x59AA30` (ex
   "draw_objective_status_text"), and `ScarOverlay_StoreParams4 @0x5891b0`
   (the ex-"qt_register_signal_spy_callbacks" Qt FLIRT false positive — a
-  4-dword parameter stash read by `render_scar_debug_overlay @0x589220`,
+  4-dword parameter stash read by `Render_ScarDebugOverlay @0x589220`,
   not shadow callbacks).
 - **Earlier applied renames this log never recorded** (the spinmap
   sessions): `HUD_DrawMapTargetPointer @0x599220` (ex
   "CTerrainTile_UpdateShadowState"), `HUD_BuildMapOverlayView @0x5a7e10`
   (ex "render_glow_effect"), `HUD_CycleMapMode @0x520bc0`,
   `HUD_UpdateWaypointAltitudeColor @0x590970`, `HUD_DrawPlayerGridLabel
-  @0x59cb40`, `g_gridOriginEntity`, `g_spinmapWpDistLabelOff @0x27237C0`,
-  `g_mapCoordsLabelX/Y/Off @0x27236F4/F8/FC`, `g_texWpIndicator`,
-  `g_mapYaw180 @0x2723EB0`, `Bms_MapZoom @0xA7640C`, `g_squadColors
-  @0x83B450`, `g_rules_flags @0x24D1E34`.
+  @0x59cb40`, `g_GridOriginEntity`, `g_SpinmapWpDistLabelOff @0x27237C0`,
+  `g_MapCoordsLabelX/Y/Off @0x27236F4/F8/FC`, `g_TexWpIndicator`,
+  `g_MapYaw180 @0x2723EB0`, `g_BmsMapZoom @0xA7640C`, `g_SquadColors
+  @0x83B450`, `g_RulesFlags @0x24D1E34`.
 
 Applied 2026-08-13 (the gameplay-spinmap grill; HTTP-fallback session):
 `MapView_SetTransform @0x607130` defined (`add_func 0x607130..0x6071c0` —
 the region was undefined) and named — the unreferenced twin of
-`render_terrain_decal`'s transform-global tail. Read-only elsewhere
+`Render_TerrainDecal`'s transform-global tail. Read-only elsewhere
 (`Server_DumpPuntLogToFile` as the code-48 dispatcher arm was checked and
 is correct); the misnomers spotted then are renamed in the 2026-08-15
 block above.
@@ -3013,9 +3013,9 @@ renames; IDB saved):
 
 - **Rename** `sub_580400` → `HUD_LoadFontIntoSlot` (anchored: allocates the
   CGameFont, loads via `File_LoadResource`, stores the slot scale floats).
-- **Data renames** `fontObj @0xB4C394` → `g_hudLabelFontBold` (anchored:
+- **Data renames** `fontObj @0xB4C394` → `g_HUDLabelFontBold` (anchored:
   `HUD_InitAllFonts` loads the Arial bold tier into it — the placeholder name
-  said nothing), `dword_B4C3AC` → `g_hudLabelFontImpact38` (anchored:
+  said nothing), `dword_B4C3AC` → `g_HUDLabelFontImpact38` (anchored:
   `Impac38b.fnt`).
 - **Comments** at `0x51ee20` (the four font slots, names + divisors),
   `0x4bf078` (the org1 eye-offset restamp math + port back-ref), `0x4e18a1` /
@@ -3035,15 +3035,15 @@ anchored confidence; IDB saved):
   `draw_textured_quad_with_border_0 @0x59bcb0` → `HUD_DrawMedicCrossQuad`
   (anchored: bodies read).
 - **Data renames** (anchored: token strcmps / init immediates / toast strings):
-  `g_friendlyTagsMode @0x24C18C4`, `g_fallbackPeopleNames @0x840A78` +
-  `g_fallbackPeopleNamesCount @0x840A0C`, `g_voicePlaybackEntity @0xC6EC38`,
-  `g_enemyTagsVisible @0x24D1DF4`, `g_hudposTagcolorBlueteam/Redteam/Good/
-  Middle/Bad @0x2723AC8..AD8`, `g_hudposTextColor @0x2723AC0`,
-  `g_hudColorTable @0x24C1838`, `g_hudActiveColor @0x24C1868` (ex "alpha"),
-  `g_hudColorLightBlue @0x24C1844` (ex "color_rgb"), `g_hudColorGray
-  @0x24C1858` (ex "depth"), `g_hudLabelFont @0xB4C388` (ex "mantissa"),
-  `g_hudLabelFontLarge @0xB4C3A0`, `cfg_hud_color_index @0x2550BCC`,
-  `g_playerSlotPtrTable/Count @0xA822D0/D4`.
+  `g_FriendlyTagsMode @0x24C18C4`, `g_FallbackPeopleNames @0x840A78` +
+  `g_FallbackPeopleNamesCount @0x840A0C`, `g_VoicePlaybackEntity @0xC6EC38`,
+  `g_EnemyTagsVisible @0x24D1DF4`, `g_HudposTagcolorBlueteam/Redteam/Good/
+  Middle/Bad @0x2723AC8..AD8`, `g_HudposTextColor @0x2723AC0`,
+  `g_HUDColors @0x24C1838`, `g_HUDColors.active @0x24C1868` (ex "alpha"),
+  `g_HUDColors.palette[3] @0x24C1844` (ex "color_rgb"), `g_hudColorGray
+  @0x24C1858` (ex "depth"), `g_HUDLabelFont @0xB4C388` (ex "mantissa"),
+  `g_HUDLabelFontLarge @0xB4C3A0`, `g_GameConfigState.hudColorIndex_514 @0x2550BCC`,
+  `g_PlayerSlotPtrTable/Count @0xA822D0/D4`.
 - **Comments** at `0x5a4480`, `0x5a39b0` (the drawer summary + reimpl
   back-ref), `0x51f240` (the color-table semantics), `0x49b573` (the mode
   cycle), `0x4a6358` (the FriendlyTag host option → mpattrib 0x400),
@@ -3061,7 +3061,7 @@ comments; IDB saved):
 - **Rename** `sub_5804C0` → `HUD_DrawTextLeft_HalfBright` (anchored: drawFlags
   init 0 `@0x5804da`).
 - **Comment** at `0x592b87`: the ERROR row select = `stance +
-  3*Player_CanFireWeapon()`. The 2026-07-19 re-witness supersedes the old
+  3*Player_IsOpticalViewVisible()`. The 2026-07-19 re-witness supersedes the old
   vehicle-only interpretation: `0x4dcd30` is the Sighted predicate with no
   mount gate, alongside the Scoped predicate at `0x4dcc80`.
 - **Comment** at `0x51f1c8`: the `dword_24C1930 & 0x10000` → `"&"` replacement
@@ -3079,8 +3079,8 @@ call; IDB saved):
   @0x5cab15` caller is NOT a fallback — the mask draws on every Scoped frame and
   the SIGHTS-row count only forms the `draw_crosshair` argument that gates the
   inner cross/grid. The function comment carried the old fallback gloss and was
-  rewritten this session. The second caller remains `render_hud_overlay
-  @0x5d82f2`. The sibling reticle drawer `draw_minimap_crosshair_and_grid
+  rewritten this session. The second caller remains `Render_HUDOverlay
+  @0x5d82f2`. The sibling reticle drawer `HUD_DrawMinimapCrosshairAndGrid
   @0x5d1160` keeps its name (its second caller is `NVG_DrawScopedLens
   @0x5d27bc`, which IS a minimap element) and carries a candidate-rename
   comment for the next HUD grill.
@@ -3098,13 +3098,13 @@ confidence; IDB saved):
   `(x*w+512)/1024` / `(y*h+384)/768` virtual-space scale + text dispatch).
 - **Rename** `sub_580AB0` → `HUD_MeasureTextWH` (anchored: the
   `CGameFont_MeasureText` wrapper returning the w/h pair).
-- **Rename** `dword_2723860/64/68/6C/70` → `g_hudLabelTextSit` /
-  `g_hudLabelTextControl` / `g_hudLabelTextUseGun` / `g_hudLabelTextUseArmory`
-  / `g_hudLabelFmtArmoryDelay` (anchored: the `HUD_InitOverlaySystem`
+- **Rename** `dword_2723860/64/68/6C/70` → `g_HUDLabelTextSit` /
+  `g_HUDLabelTextControl` / `g_HUDLabelTextUseGun` / `g_HUDLabelTextUseArmory`
+  / `g_HUDLabelFmtArmoryDelay` (anchored: the `HUD_InitOverlaySystem`
   STROVER_* writers + the label-draw readers).
-- **Rename** `byte_81A454` → `g_bindingRow_useitem` (anchored: the row whose
+- **Rename** `byte_81A454` → `g_BindingRowUseItem` (anchored: the row whose
   +0x14/+0x16 runtime keys are the armory grill's
-  `g_useItemBindingKey0/1 @0x81A468/6A`; both prompt legs format it).
+  `g_UseItemBindingKey0/1 @0x81A468/6A`; both prompt legs format it).
 - **Comments** at `0x5a3290` (label sources/gates summary), `0x5bdee2`
   (preround gate + the dead ARMORY_WAIT leg), `0x435d50` (the armory
   searchMode's only consumer), `0x5a479c` (the label-string resolve block).
@@ -3119,8 +3119,8 @@ confidence — two kong-misnomer corrections announced inline; IDB saved):
 - **Rename** `draw_minimap_overlay @0x599700` → `HUD_DrawWeaponHeatBar`
   (anchored kong-misnomer fix: reads hudInfo+60 heat, fills the HUDHEAT rect).
 - **Rename** `HUD_DrawTargetNameAndDistance @0x5947a0` →
-  `HUD_DrawWaypointNameAndDistance` (anchored: `get_waypoint_name` +
-  `g_waypointList` + the HUDWPDINFO anchor globals).
+  `HUD_DrawWaypointNameAndDistance` (anchored: `HUD_GetWaypointName` +
+  `g_WaypointList` + the HUDWPDINFO anchor globals).
 - **Rename** `sub_58FB50/Game_GetShowWaypoints` → `Game_SetShowWaypoints` /
   `Game_GetShowWaypoints` (anchored: the BMS action-40 target + the
   label/cycle gates).
@@ -3128,17 +3128,17 @@ confidence — two kong-misnomer corrections announced inline; IDB saved):
   string cluster + `HUD_RenderAllOverlays` caller).
 - **Rename** `sub_5925C0` → `HUD_DrawParachuteAndArmorIcons` (anchored:
   entity+44 bit gates + the ParachuteIcon/ArmorIcon token textures).
-- **Data renames**: `dword_27238BC` → `g_showWaypoints`, `dword_B76570` →
-  `g_waypointList`, `dword_B76568` → `g_waypointCount`, `entityDef @0xB7656C`
-  → `g_currentWaypoint` (kong-misnomer fix), `dword_2723694/98/9C/A0` →
-  `g_hudWpdInfoX/Y/HideBox/Align`, `dword_27237DC/E0/E4/E8` →
-  `g_hudHeatRectX1/Y1/X2/Y2`, `dword_27237D8` → `g_hudHeatBorderColor`,
-  `flt_2723AE4` → `g_stanceColorBad`, `dword_2723AE0` → `g_stanceColorMiddle`.
+- **Data renames**: `dword_27238BC` → `g_ShowWaypoints`, `dword_B76570` →
+  `g_WaypointList`, `dword_B76568` → `g_WaypointCount`, `entityDef @0xB7656C`
+  → `g_CurrentWaypoint` (kong-misnomer fix), `dword_2723694/98/9C/A0` →
+  `g_HUDWpdInfoX/Y/HideBox/Align`, `dword_27237DC/E0/E4/E8` →
+  `g_HUDHeatRectX1/Y1/X2/Y2`, `dword_27237D8` → `g_HUDHeatBorderColor`,
+  `flt_2723AE4` → `g_StanceColorBad`, `dword_2723AE0` → `g_StanceColorMiddle`.
 - **Comments** at `0x599700` (heat-bar semantics), `0x5947a0` (label gates +
   draw shape), `0x594630` (name-resolve ladder), `0x4de5f7` (auto-advance),
   `0x502e41` (0x0F waypoint source = nav channel `flags&2`), `0x40f0aa` (BMS
   marker waypoint fields), `0x49b3de` (cycle key case 23), `0x593820` +
-  `0x595470` (dead code), `0x5a4913` (`g_showWaypoints` init 1), `0x2723c8c`
+  `0x595470` (dead code), `0x5a4913` (`g_ShowWaypoints` init 1), `0x2723c8c`
   (the "static -1 element-switch block" — a comment since REFUTED and
   rewritten by the 2026-08-15 declutter witness), `0x42e4b8` (the 0x0F
   client apply).
@@ -3162,7 +3162,7 @@ Applied 2026-09-16 (the scoped-view circle-mask grill; comments only, IDB saved)
 - **Comment** at `0x5d17a0` — replaces the old "drawn for Scoped weapons that
   author no SIGHTS rows" gloss with the refuting byte sequence (both callers
   compute `arg1 = (row count == 0)` and it only gates the tail
-  `draw_minimap_crosshair_and_grid` call `@0x5d1cc9`), plus the full ring
+  `HUD_DrawMinimapCrosshairAndGrid` call `@0x5d1cc9`), plus the full ring
   geometry, the two colours, the 130-vertex strip and the vertex stride.
 - **Comment** at `0x5d1160` — the four tapered spokes and the sixteen tick
   diamonds with their fractions, ftol truncation, `W/320` / `W/64` units and
@@ -3174,7 +3174,7 @@ Applied 2026-09-16 (the scoped-view circle-mask grill; comments only, IDB saved)
 - **Comment** at `0x843480` — the shipped-constant-1 scope-treatment feature
   switch, its three readers and the dead zero arm.
 
-No renames were applied: `draw_minimap_crosshair_and_grid` keeps its name now
+No renames were applied: `HUD_DrawMinimapCrosshairAndGrid` keeps its name now
 that its minimap caller is witnessed, and the 2026-07-19 held proposals for
 `0x4dcd30` / `0x4dcce0` remain held.
 
@@ -3192,7 +3192,7 @@ renamed back, since the sync would reapply it.
 Closed ledger rows whose full text previously lived only in the divergence
 ledger, transplanted verbatim at the 2026-08-06 compaction (Standing rule 6).
 
-- **D-HUD-10** [FIXED 2026-07-11 (weapon round: `aim_screen_point()` = INF in 1P -> the HUD pins the exact center; the 3P projection uses the witnessed 1000.0 far point)] Crosshair anchors at the fixed design center — the original anchors at the projected aim point (screen center only on-foot first-person `@ 0x5928a0`; spectate/`g_camera_mode` project `Entity_BuildCameraView` `@ 0x592910`)
+- **D-HUD-10** [FIXED 2026-07-11 (weapon round: `aim_screen_point()` = INF in 1P -> the HUD pins the exact center; the 3P projection uses the witnessed 1000.0 far point)] Crosshair anchors at the fixed design center — the original anchors at the projected aim point (screen center only on-foot first-person `@ 0x5928a0`; spectate/`g_CameraMode` project `Entity_BuildCameraView` `@ 0x592910`)
 
 
 ## #645 follow-ups: flag feed, announcement banner, and death instructions (2026-09-11)
@@ -3282,7 +3282,7 @@ UI_UpdateDeathScreenContent @0x5536A0 now supplies both instruction statics:
   0x10020 family gets RESPawn4 for Co-op/alive and RESPawn5 for dead
   non-Co-op. sub_43B910 @0x43B910 tests zone count, not player count.
 
-**REFUTED global name:** g_scoreboardDeadRowCount @0xA85B44 counts
+**REFUTED global name:** g_ScoreboardDeadRowCount @0xA85B44 counts
 **living nonspectating players**, only in permanent-death mode and at
 accepted 0x16 row parse time. Dead bodies and spectator-bit rows do not
 increment it. Unknown roster rows are dropped before the count.
@@ -3335,7 +3335,7 @@ Clear: `Game_InitNewRound @0x422778` / `@0x422784` / `@0x422790`.
 ### The HUD suppression
 
 `HUD_RenderAllOverlays @0x5A8070` early-returns on
-`if (g_spawn_success_gate || dword_B764B8 || !g_local_player_entity) return`
+`if (g_SpawnSuccessGate || dword_B764B8 || !g_LocalPlayerEntity) return`
 `[orig: @0x5a8084..0x5a80a3]`. A collision or explosive hit therefore BLANKS the
 entire gameplay HUD overlay pass for up to 64 ticks. The SIGHTS card rows and the
 FP viewmodel are drawn by `Render_ProcessMainSceneFrame`, not by that pass, so
@@ -3344,17 +3344,17 @@ they keep drawing.
 ### The draw
 
 `Render_ProcessMainSceneFrame @0x5CAB9A..0x5CAC48`, only while
-`!g_death_screen_active` `[orig: @0x5cab9a..0x5caba1]`, AFTER the HUD overlay
+`!g_DeathScreenActive` `[orig: @0x5cab9a..0x5caba1]`, AFTER the HUD overlay
 pass and the death-menu latch and BEFORE
 `Environment_ApplySunVeilAndExposureStopdown @0x5cac4b`. Each quad goes through
-`render_fullscreen_decal_quad(x, z, colour, mode) @0x5C6590`: the viewport rect
+`Render_FullscreenDecalQuad(x, z, colour, mode) @0x5C6590`: the viewport rect
 as 4 x 40-byte vertices at `0x29D6000`, `uv (0,0)(1,0)(0,1)(1,1)`, drawn as a
 triangle strip with pass flags `0x300000` (NOWRITEDEPTH | NOCHECKDEPTH).
 
 | # | word | condition | colour | quad mode |
 |---|---|---|---|---|
 | 1 | white | `!= 0` `@0x5caba7` | `(word << 24) \| 0xFFFFFF` | 2 - device render state 2, the untextured iterated-colour material (the same one the sun-glare veil uses) |
-| 2 | red | `!= 0` AND `g_camera_mode != 3` `@0x5cabd5..0x5cabe5` | `a = min(word, 0xC0)`; `(a << 24) \| 0xFF0000` | 3 - `g_vignetteMaterial`, `vignette.tga` loaded by `sub_5C36B0 @0x5c36c1` with material flags 593 = 0x251 = AFUNC_BLEND \| ASRC_TEXTURExITERATED \| COLOR_ITERATED (texture alpha x vertex alpha, vertex colour) |
+| 2 | red | `!= 0` AND `g_CameraMode != 3` `@0x5cabd5..0x5cabe5` | `a = min(word, 0xC0)`; `(a << 24) \| 0xFF0000` | 3 - `g_VignetteMaterial`, `vignette.tga` loaded by `sub_5C36B0 @0x5c36c1` with material flags 593 = 0x251 = AFUNC_BLEND \| ASRC_TEXTURExITERATED \| COLOR_ITERATED (texture alpha x vertex alpha, vertex colour) |
 | 3 | revive | `!= 0` `@0x5cac18` | `0xFFFFFFFF - ((word >> 1) * 0x10100)` = A 255, R = G = `255 - (word >> 1)`, B 255 | 0 - device render state 3 |
 
 Camera mode 3 is the retail free/spectator camera; the red vignette is the only

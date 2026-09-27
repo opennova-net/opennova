@@ -6,7 +6,7 @@
 
 namespace godot {
 
-// The sun-glare terrain-occlusion state of [orig: render_skybox_sun_glow
+// The sun-glare terrain-occlusion state of [orig: Render_SkyboxSunGlow
 // @ 0x5acd00, see docs/env/env-tod-re.md] (env #14): the engine's ray
 // sequence (runtime/environment/glare_occlusion.h advance_glare_occlusion)
 // feeds an 8-bit sliding visibility window; brightness steps +-16 (dead-band)
@@ -35,11 +35,11 @@ public:
 				p_fog_distance, std::forward<SegmentClear>(p_segment_clear));
 	}
 
-	// The hysteresis brightness 0..256 [orig: Glare_OcclusionBrightness, see docs/env/env-tod-re.md].
+	// The hysteresis brightness 0..256 [orig: g_GlareOcclusionBrightness, see docs/env/env-tod-re.md].
 	int get_brightness() const;
 
 	// The 8-sample sliding visibility window bits (diagnostics)
-	// [orig: Glare_OcclusionWindow @ 0x27E2E34, see docs/env/env-tod-re.md].
+	// [orig: g_GlareOcclusionWindow @ 0x27E2E34, see docs/env/env-tod-re.md].
 	int get_window() const;
 };
 

@@ -138,7 +138,7 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
 int infantry_weapon_hold_state(int hold_kind, int primary_anim_state, bool scope_raised,
                                bool binoculars_raised, bool reloading) {
     // Desired state [orig: @0x4b5dad..0x4b5e6f]: the held weapon's hold kind (the
-    // AdmDefs dword @0x24E8084 + 0x460*idx = the def's special_hold key) selects the
+    // g_AdmDefs dword @0x24E8084 + 0x460*idx = the def's special_hold key) selects the
     // pose ladder; the default (rifles, kind 0) MIRRORS the primary state.
     int desired;
     switch (hold_kind) {

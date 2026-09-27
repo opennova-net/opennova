@@ -163,9 +163,9 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // The upper-body weapon channel runs for a WIRE PEER exactly as it does for the
     // local player. The original has no ownership test on it: the only locality check
     // in the whole region guards the refresh of Flags bits 2-4 from the local
-    // g_weaponScopeActive / g_binocularsRaised / NVG globals, and a non-local entity
+    // g_WeaponScopeActive / g_BinocularsRaised / NVG globals, and a non-local entity
     // jumps straight past it into the hold-kind ladder [orig: @0x4b5d77
-    // `cmp g_local_player_entity, esi ; jnz short loc_4B5DAD`]. For a peer those same
+    // `cmp g_LocalPlayerEntity, esi ; jnz short loc_4B5DAD`]. For a peer those same
     // three bits arrive over the wire instead — the host has already replaced them
     // from the sender's C2S 0x0C state byte (mask 0x1C) — so the selection reads the
     // peer's OWN entity for both of its inputs: bit 0x10 scoped [orig: test @0x4b5deb]

@@ -5,8 +5,8 @@
 // 90-degree square view, and the byte multiply the face callback applies to
 // every completed face. A device presenter (the Godot capture node) reads
 // these; it never re-derives them.
-// [orig: init_render_textures @ 0x58f6e0 (64/128/256 by quality);
-// update_environment_cubemap @ 0x6106a0 (all six faces initially, on force,
+// [orig: Render_InitTextures @ 0x58f6e0 (64/128/256 by quality);
+// EnvCube_Update @ 0x6106a0 (all six faces initially, on force,
 // and every 128 render frames; eye = local player + 1 Y, raised to at least
 // terrain + 10); GTexture_RenderCubeMapFace @ 0x6864d0 (90-degree square
 // LH view, near 0.5 / far 1000); face callback @ 0x5c3700 (sky dome and

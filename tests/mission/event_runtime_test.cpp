@@ -65,7 +65,7 @@ static bms::Event simple_event(bms::EventFlags flags, int action_index) {
 static void test_bms_to_wac_shared_var() {
     World w;
     // A mission only advances while a human is in the world - retail holds the
-    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
+    // WAC tick and the BMS event pump on `g_WacVarHumans || !g_WacVarTicks`
     // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
     // so they stand a player up; the empty-server hold has its own test.
     w.cached.humans = 1;
@@ -137,7 +137,7 @@ static void test_wac_to_bms_shared_var() {
 // A mission WAC script can tune the global infantry aim spread, and the AI pass
 // consumes the new value. Retail resolves `accuracyspread` through the writable
 // named-value table, then reads that same dword in the sawtooth aim-error formula.
-// [orig: WacScript_ResolveParameter @0x4f2920 -> wac_var_accuracyspread
+// [orig: WacScript_ResolveParameter @0x4f2920 -> g_WacVarAccuracySpread
 // @0xC6EAE8; Entity_UpdateInfantryAI @0x4bc5ea]
 static void test_wac_accuracyspread_drives_npc_aim() {
     World w;
@@ -1988,7 +1988,7 @@ static void test_bluewin_ends_round() {
 
 // An EMPTY host must not burn through its mission. Retail wraps the WAC tick,
 // the idle sweep and the BMS event pump in one condition whose live half is
-// `wac_var_humans || !wac_var_ticks`: once the VM has run at all, the whole
+// `g_WacVarHumans || !g_WacVarTicks`: once the VM has run at all, the whole
 // script HOLDS until a human is in the world.
 //
 // This is not academic. 05TRcoop's event 40 is "group 1 is NOT within area 6"

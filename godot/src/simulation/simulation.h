@@ -1009,7 +1009,7 @@ public:
 	bool is_listen_server() const { return listen_server_; }
 
 	// Feed the mission's raw terrain-tile (.til) file bytes so the listen host streams the S2C 0x45
-	// terrain-tile load to joiners (climbs the client's g_loading_progress 5 -> 6; §5.37). The Godot
+	// terrain-tile load to joiners (climbs the client's g_LoadingProgress 5 -> 6; §5.37). The Godot
 	// shell owns the resource root, so it read_file()s the .til (named by the .trn tileinfo) and passes
 	// the bytes here BEFORE loading the mission. Empty / not-called => 0x45 is faithfully skipped.
 	void set_terrain_til_data(const PackedByteArray &p_til_bytes);
@@ -1114,7 +1114,7 @@ public:
 	// Live player-slot spectator state: joiner = S2C 0x75 latch; authority = Server_SetPlayerSpectator.
 	bool is_local_spectator() const;
 	bool set_local_spectator(bool p_spectator);
-	// The client-local death screen latch (retail g_death_screen_active): gates the
+	// The client-local death screen latch (retail g_DeathScreenActive): gates the
 	// friendly-tags walks + camera arbiter sub-mode; fed by simulation_player_view.cpp.
 	bool local_death_screen_active() const;
 	// True while a live net session owns this sim: the world tick is the ONLY pump for the
@@ -1288,7 +1288,7 @@ public:
 	// and the in-match arm.
 	bool is_join_deploy_hold_ready() const;
 	bool is_join_in_match_ready(bool p_auto_deploy) const;
-	// The deploy-map overlay signal (retail g_deploy_screen_active). UI only.
+	// The deploy-map overlay signal (retail g_DeployScreenActive). UI only.
 	bool is_join_deploy_overlay_active() const;
 	// The frame loop's open decision for death.mnu's DEATH screen: true once
 	// per arming of the overlay (the engine-side open latch stamps itself and
@@ -1753,7 +1753,7 @@ public:
 	// `profile.player_class` (5..9) is written to BOTH side blocks and each
 	// non-empty `profile.side_profiles[side]` {avatar_a, avatar_b, avatar_packed}
 	// to its own block — playersav::update_avatar_selection carries the
-	// save_player_info_from_dialog witness. The other four slots and every kit
+	// PlayerInfo_SaveFromDialog witness. The other four slots and every kit
 	// page survive; the file is replaced atomically.
 	// ERR_INVALID_PARAMETER when the snapshot carries no committable side.
 	static Error save_weapon_profile_selection(const String &p_path,
@@ -1804,8 +1804,8 @@ public:
 	// Inventory snapshot for hosts/tests (simulation/player_inventory.h).
 	Ref<PlayerInventory> get_local_player_inventory() const;
 	// Canonical, unexpanded current tuples for the armory host. Retail preselects
-	// visible parent rows from g_armoryLoadoutBufferByClass, never from the expanded
-	// weaponSlotArrayBase [orig: populate_ammo_type_combo_boxes @ 0x564930].
+	// visible parent rows from g_ArmoryLoadoutBufferByClass, never from the expanded
+	// weaponSlotArrayBase [orig: UI_PopulateAmmoTypeComboBoxes @ 0x564930].
 	TypedArray<WeaponKitEntry> get_local_player_loadout() const;
 
 	// --- WAC scripts ------------------------------------------------------
@@ -2336,7 +2336,7 @@ public:
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's
-	// camera (Godot space), fog distance and Env_TerrainLightCombined
+	// camera (Godot space), fog distance and g_EnvTerrainLightCombined
 	// (EnvFile.combine_terrain_light(sun, sky) — the sun+sky combine).
 	// { vertices (PackedVector3Array, Godot axes; world space for shared-ring
 	//   batches, SECTION-LOCAL for entity-ring batches), uvs, colors,

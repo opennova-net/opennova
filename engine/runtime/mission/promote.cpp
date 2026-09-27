@@ -228,7 +228,7 @@ void initialize_class_brain(AiEntity &ae, const aip::Profile *profile, bool heli
 
 namespace {
 
-// Kind -> g_pool_list index: the BMS loader places each record list in its own pool.
+// Kind -> g_PoolList index: the BMS loader places each record list in its own pool.
 // [orig: Mission_LoadBMSFile @0x40F4E0 — pool 1 @0x40f9bb..0x40f9c6, pool 2
 //  @0x40fa28..0x40fa34, pool 3 @0x40fa98..0x40faa4, pool 0 @0x40fb0d..0x40fb19]
 int pool_for_kind(EntityKind k) {
@@ -697,7 +697,7 @@ namespace {
 
 // The record is temporary: retail remaps a 5305 teammate before the item lookup.
 // Its class selector has one runtime writer, the settings copy of the constant
-// default 1. [orig: Config_SetDefaults @0x54d400; apply_session_settings_to_globals
+// default 1. [orig: Config_SetDefaults @0x54d400; Game_ApplySessionSettingsToGlobals
 // @0x551a2a; Entity_SpawnFromBMSRecord @0x40ea5c]
 constexpr int32_t kBmsTeammateClass = 1;
 
@@ -1107,7 +1107,7 @@ void stash_mission_loadout_rules(
         if (row.name.empty()) continue;
         // The status byte is SIGNED in retail: -1 is the "mission allowed"
         // sentinel the availability builder maps to 3 [orig:
-        // build_item_restriction_table @0x54ddb0 reads `(char)name[strlen+1]`,
+        // WeaponDef_BuildItemRestrictionTable @0x54ddb0 reads `(char)name[strlen+1]`,
         // `== -1 -> 3`]; an unsigned widen (255) would never hit that arm.
         r_availability_rows.emplace_back(row.name,
                                          static_cast<int32_t>(static_cast<int8_t>(row.status)));

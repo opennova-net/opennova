@@ -152,7 +152,7 @@ struct PoolSpawnRecord {
 	// of the two pre-cstring fields is a wire u32 (handler advances cursor
 	// by 4 bytes per read). The serializer gates it on the AIData def's AI
 	// slot pointer (entity+0x68), never on the values, so presence rides its
-	// own field. [orig: serialize_entity_pool_to_packet_0 @0x503D3D..0x503D5C]
+	// own field. [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503D3D..0x503D5C]
 	bool has_ai_trailer = false;     // 0x0800
 	uint32_t ai_profile_1 = 0;       // 0x0800   aiSlot+16
 	uint32_t ai_profile_2 = 0;       // 0x0800   aiSlot+20
@@ -165,7 +165,7 @@ struct PoolSpawnRecord {
 	// a helo profile's rotor spins), gated on the brain pointer (entity+0x64)
 	// whatever its value: every retail vehicle carries it, 0x00 when parked. The
 	// client stores it sign-extended into entity+0xB0.
-	// [orig: serialize_entity_pool_to_packet_0 @0x503E7F..0x503EC0;
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503E7F..0x503EC0;
 	//  NapiNPClientMsg_0x00D `movsx ecx,cl; mov [ebx+0B0h],ecx` @0x4331B7..0x4331BA]
 	bool has_sound_latch_byte = false; // 0x1000
 	uint8_t sound_latch_byte = 0;    // 0x1000   brain+0x318 -> entity+0xB0
@@ -179,7 +179,7 @@ struct PoolSpawnRecord {
 	// written values: 0x2000 rides the zone number byte (entity+538 != 0), whatever the
 	// packed info byte, and 0x8000 the def's SpawnPoint attrib, whatever the radius, so
 	// both ride presence fields. The client reads 0x8000 only without 0x2000.
-	// [orig: serialize_entity_pool_to_packet_0 `cmp byte [ebp+21Ah],0` @0x503ECC..0x503ED3,
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 `cmp byte [ebp+21Ah],0` @0x503ECC..0x503ED3,
 	//  `test dword [def+54h],40000h` @0x503F1F..0x503F29; NapiNPClientMsg_0x00D
 	//  @0x4331C6..0x433206]
 	bool has_zone_number_rank = false; // 0x2000
@@ -189,7 +189,7 @@ struct PoolSpawnRecord {
 
 	// The 0x4000 byte is gated on the def's callbacks (the weapon-overlay damage
 	// callback or the physics-step mover), not on its value.
-	// [orig: serialize_entity_pool_to_packet_0 @0x503F4C..0x503F80]
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503F4C..0x503F80]
 	bool has_difficulty_byte = false;  // 0x4000
 	uint8_t  difficulty_byte = 0;    // 0x4000   entity+624
 };
@@ -313,12 +313,12 @@ struct StaticEntityRecord {
 	// entity+36 = the entity FLAGS dword, streamed raw (was misread as "parentSlot" — the
 	// D-NET-147 grill witnessed the serializer source @0x50435f: BMS Indestructible/Reflective/
 	// NoShadow attributes + Building/indestructible def bits; golden buildings carry 0x04020400).
-	uint32_t entity_flags = 0;   // 0x20    entity+36 [orig: serialize_pool2_static_to_buffer @0x5044e6]
+	uint32_t entity_flags = 0;   // 0x20    entity+36 [orig: NetPacket_SerializePool2StaticToBuffer @0x5044e6]
 	uint8_t  ammo_count = 0;     // always  entity+290 (BMS record byte 81)
 	uint8_t  bone_a = 0;         // 0x40    entity+533 refNum (BMS byte 153; D-NET-94)
 	uint8_t  bone_b = 0;         // 0x80    entity+532 subType (0xFF on indestructible defs)
 	// entity+624 (0x270), gated on the def's callbacks (a palm damage callback or
-	// a psec mover), not its value. [orig: serialize_pool2_static_to_buffer
+	// a psec mover), not its value. [orig: NetPacket_SerializePool2StaticToBuffer
 	// @0x504554..0x504588]
 	bool     has_score_flag = false; // 0x100
 	uint8_t  score_flag = 0;     // 0x100   entity+624
@@ -408,7 +408,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 // (itemDef/models/playerClass/minimap slot/anim registration). It never appears
 // in a healthy join — the retail↔retail golden carries zero 0x0F/0x18 — it is
 // the self-heal path. [orig: server NapiNPServerMsg_HandlePlayerInfoRequest
-// @0x514180 → serialize_object_to_buffer @0x504d10; client
+// @0x514180 → NetPacket_SerializeObjectToBuffer @0x504d10; client
 // NapiNPClientMsg_FullEntitySpawn @0x433780]
 struct FullEntitySpawnRecord {
 	uint16_t slot_id = 0;          // (pool<<12)|slot; 0xFFFF ⇒ client returns immediately
@@ -461,7 +461,7 @@ struct PlayerListRow {
 	// movzx ecx,[ebx+6] @0x423f1f and the thirteen bit tests
 	// @0x423f23-0x4240e0]; both ends zero it behind a capability gate
 	// (the server per-recipient @0x504bd6; the client when
-	// g_scoreboardStatusSuffixEnabled — the 'SU' text command @0x429f71 —
+	// g_ScoreboardStatusSuffixEnabled — the 'SU' text command @0x429f71 —
 	// is clear [orig: @0x42fbfb]) — which a latency number never would be.
 	uint16_t status_flags = 0;
 	// The MODE's primary stat, filled by the server's game-type switch
@@ -494,15 +494,15 @@ struct PlayerListTeamRow {
 	uint8_t  ctf_flag = 0;
 };
 struct PlayerList {
-	uint8_t  flags = 0;        // byte 0 -> g_scoreboard_flags: bit0 team-mode, bit1 timed-scores
+	uint8_t  flags = 0;        // byte 0 -> g_ScoreboardFlags: bit0 team-mode, bit1 timed-scores
 	                           // (the old `max_players` reading was a misnomer, witness 2026-07-03)
-	uint8_t  player_count = 0; // row count -> g_scoreboard_row_count (HUD count minuend, D-NET-158)
+	uint8_t  player_count = 0; // row count -> g_ScoreboardRowCount (HUD count minuend, D-NET-158)
 	std::vector<PlayerListRow> players; // rows accepted ONLY for 0x46-known slots; a row for an
 	                                    // unknown slot is dropped + retried via C2S 0x22 [slot, 0x1CF7]
 	uint8_t  team_count = 0;
 	std::vector<PlayerListTeamRow> teams;  // team_count + 1 rows (T0 neutral + per team)
-	uint8_t  in_game_count = 0;   // trailer -> g_scoreboard_ingame_count (g_scoreboard_ingame_count)
-	uint8_t  spectator_count = 0; // trailer -> g_scoreboard_spectator_count (g_scoreboard_spectator_count);
+	uint8_t  in_game_count = 0;   // trailer -> g_ScoreboardInGameCount (g_ScoreboardInGameCount)
+	uint8_t  spectator_count = 0; // trailer -> g_ScoreboardSpectatorCount (g_ScoreboardSpectatorCount);
 	                              // HUD "Number of players" = accepted rows − this
 };
 // The row loop runs min(player_count, 252) rows — the retail parser's 252-row
@@ -571,7 +571,7 @@ struct PlayerSync {
 bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out);
 
 // §5.19 minimap-overlay entry vocabulary: the icon-color byte indexes
-// g_minimap_overlay_color_table @ 0x840A10 (LE 0xAARRGGBB dwords), and the
+// g_MinimapOverlayColorTable @ 0x840A10 (LE 0xAARRGGBB dwords), and the
 // flags byte carries the two witnessed marker bits.
 inline constexpr uint8_t kZoneIconNeutral = 0x0C; // 0xFF208020 green — neutral (BMS team 0)
 inline constexpr uint8_t kZoneIconRed     = 0x09; // 0xFF802020 — Red (BMS team 2)
@@ -583,11 +583,11 @@ inline constexpr uint8_t kZoneOverlayFlagClearSlot  = 0x20; // clear slot (handl
 // (§5.19). 6 bytes per entry, prefixed by a u8 count. Overlay position is read
 // from the resolved pool entity, not the wire — this packet carries no coords.
 // [orig: NapiNPClientMsg_0x040 @ 0x425A50 → MapOverlay_DecodeOverlayEntries @ 0x5BEBB0 (6-byte walker)
-//  → MapOverlay_UpdateOrCreateSlot @ 0x5BEA60; color table g_minimap_overlay_color_table @ 0x840A10]
+//  → MapOverlay_UpdateOrCreateSlot @ 0x5BEA60; color table g_MinimapOverlayColorTable @ 0x840A10]
 struct CaptureZoneOverlay {
-	uint16_t handle = 0;       // +0  (pool<<12)|slot, resolved via g_pool_list
+	uint16_t handle = 0;       // +0  (pool<<12)|slot, resolved via g_PoolList
 	uint8_t  param = 0;        // +2  → slot+2
-	uint8_t  icon_color = 0;   // +3  index into g_minimap_overlay_color_table: 0x0c neutral / 0x09 Red / 0x0a Blue (BMS team 0/2/1)
+	uint8_t  icon_color = 0;   // +3  index into g_MinimapOverlayColorTable: 0x0c neutral / 0x09 Red / 0x0a Blue (BMS team 0/2/1)
 	uint8_t  flags = 0;        // +4  0x10 = persistent capture-zone marker; 0x20 = clear slot
 	uint8_t  source = 0;       // +5  → slot+4
 };
@@ -656,7 +656,7 @@ struct PlayerCompactRecord {
 	                                  // fires on its 1->0 edge @0x4c1109; the XOR masks exclude it:
 	                                  // local 0xE1 / remote 0xFD @0x4c12ff)
 	uint8_t  anim_state_id = 0;       // body/weapon anim-STATE id -> entity+0x2BC (vs the per-state
-	                                  // flags table g_animStateFlagsTable; transition-arbitrated, remote-only
+	                                  // flags table g_AnimStateFlagsTable; transition-arbitrated, remote-only
 	                                  // apply except the wire-bit2 dead path) [orig: @0x4c1153;
 	                                  // renamed from weapon_anim_state/weapon_id — witness 2026-07-02]
 	uint8_t  anim_channel_ratio = 0;  // elapsed half-frame ticks in the current body loop (legacy field name)
@@ -757,7 +757,7 @@ inline constexpr uint8_t kRoundEventHasTargetHandle     = 0x40; // [live fire ta
 // FIRED by another player, carried as the fire origin + direction the receiving
 // client re-simulates the round from (RoundData_SpawnRound); no impact is on the
 // wire. Host write side: NetPacket_SerializeRoundEvent @0x504820 serializes one
-// g_round_ring record per event; client read side:
+// g_RoundRing record per event; client read side:
 // [orig: NetPacket_DeserializeRoundEvent @ 0x42F270], sole sender is the tag==2
 // branch of the S2C 0x0A event loop [0x4306EF]. Variable length 17-20 B by
 // `flags` gate bits (witness 2026-07-03, D-NET-152):
@@ -810,7 +810,7 @@ bool decode_round_event_record(const uint8_t *body, size_t len,
 // matrix of `mode` (packetCtx[6] ∈ {1..4}) × `field-group` (packetCtx[7] ∈
 // {1..6}); each call serializes exactly ONE group. The group selector rides the
 // wire as the `sub_op` byte of the 5-byte entity sub-header (EntityPacketSubHeader
-// .sub_op): [orig: dispatch_entity_packet_callback @ 0x4D6A80] copies it to
+// .sub_op): [orig: NetPacket_DispatchEntityPacketCallback @ 0x4D6A80] copies it to
 // packetCtx[7] and hardwires packetCtx[6]=4 (read-apply) on the host C2S-receive
 // path. The serializer rejects format 11, so guided entities NEVER appear as a
 // §5.10b 0x0A compact record — decode_frame_update correctly fails closed on
@@ -902,13 +902,13 @@ struct FrameUpdateRecord {
 // [orig: NapiNPClientMsg_0x00A @ 0x430244..0x43034C case 2]
 struct FrameEnv {
 	bool     present = false;
-	uint16_t fog_dist = 0;      // → Env_FogDistTarget (raw << 16)        [0x430267]
-	uint16_t fog_accel = 0;     // → Env_FogDistAccelClamp (raw << 8)     [0x430286]
-	uint16_t tod_fixed = 0;     // → Env_CurTimeFixed24 (time-of-day, raw << 13) [0x4302AE]
-	uint8_t  quake_ticks = 0;   // → Env_QuakeTicks (screen-shake)        [0x4302CE]
-	uint8_t  cloud_scroll = 0;  // → Env_CloudScrollRateTarget (raw << 10) [0x4302EC]
-	uint8_t  rain_pct = 0;      // → Env_RainPctTarget (raw << 8)             [0x430311]
-	uint8_t  overcast = 0;      // → Env_OvercastBlendTarget (raw << 8)   [0x43032D]
+	uint16_t fog_dist = 0;      // → g_EnvFogDistTarget (raw << 16)        [0x430267]
+	uint16_t fog_accel = 0;     // → g_EnvFogDistAccelClamp (raw << 8)     [0x430286]
+	uint16_t tod_fixed = 0;     // → g_EnvCurTimeFixed24 (time-of-day, raw << 13) [0x4302AE]
+	uint8_t  quake_ticks = 0;   // → g_EnvQuakeTicks (screen-shake)        [0x4302CE]
+	uint8_t  cloud_scroll = 0;  // → g_EnvCloudScrollRateTarget (raw << 10) [0x4302EC]
+	uint8_t  rain_pct = 0;      // → g_EnvRainPctTarget (raw << 8)             [0x430311]
+	uint8_t  overcast = 0;      // → g_EnvOvercastBlendTarget (raw << 8)   [0x43032D]
 	uint8_t  env_param = 0;     // → dword_2C059D0                        [0x43034C]
 };
 
@@ -922,7 +922,7 @@ struct FrameEnv {
 // @0x4ff81b (writer) / NapiNPClientMsg_0x00A @ 0x430054..0x430136 (reader)]
 struct FrameWeaponBlock {
 	bool     present = false;
-	uint8_t  preround_timer = 0; // [orig: g_preround_delay_timer @0xC8D824] → dword_A85B64 [0x430064]
+	uint8_t  preround_timer = 0; // [orig: g_PreRoundDelayTimer @0xC8D824] → dword_A85B64 [0x430064]
 	uint8_t  slot_state360 = 0;  // playerSlot+360 (0 unless entity+36 bit 1) → dword_A85B5C [0x430084]
 	uint8_t  slot_state368 = 0;  // revive seconds, playerSlot+368 (0 unless dead) → dword_A85B60 [0x43009F]
 	uint8_t  slot_state364 = 0;  // playerSlot+364 → dword_A85B68  [0x4300C3]
@@ -937,8 +937,8 @@ struct FrameWeaponBlock {
 // snapshot (client only). [orig: NapiNPClientMsg_0x00A @ 0x430191..0x430235]
 struct FrameTimerBlock {
 	bool     present = false;
-	uint8_t  state0 = 0;        // → wac_var_breathtime  [0x4301A1]
-	uint8_t  state1 = 0;        // → wac_var_fallmps  [0x4301BC]
+	uint8_t  state0 = 0;        // → g_WacVarBreathTime  [0x4301A1]
+	uint8_t  state1 = 0;        // → g_WacVarFallMps  [0x4301BC]
 	uint8_t  state2 = 0;        // → dword_C8FC64  [0x4301E0]
 	uint8_t  state3 = 0;        // → dword_C8FC68  [0x430200]
 	int16_t  timer_seconds = 0; // → dword_24C1958 = 62 × this (62 Hz ticks); <0 ⇒ -1 [0x430235]
@@ -1057,8 +1057,8 @@ bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
 // so a client that ignores this message can never land a shot on a stock host. A body
 // shorter than four bytes seeds ZERO — which is also the witnessed round-end disarm form,
 // so a short read is a valid seed, not a decode failure (this always returns true).
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — currentTick @0xA8229C @0x4297f8,
-//  g_lastKeepaliveTick @0xA822A0 @0x4297fd, short-body zero @0x4297eb;
+// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — g_ClientCurrentTick @0xA8229C @0x4297f8,
+//  g_LastKeepaliveTick @0xA822A0 @0x4297fd, short-body zero @0x4297eb;
 //  Server_SendRandomSeedToPlayer @0x5101a0 (value @0x5101d4, disarm @0x510237);
 //  gate PlayerSlot_IsActive @0x4fc760]
 bool decode_tick_seed(const uint8_t *body, size_t len, uint32_t &out);
@@ -1084,7 +1084,7 @@ bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
 // most 33 slots (the builder loops while `count <= 32`).
 // [orig: NapiNPClientMsg_HandleBatchKill @ 0x431870 — count @0x43188a, the kill
 //  loop @0x4318a5..0x4318c2, the reply @0x4318db..0x4318ff, the bare-page return
-//  @0x431904; page builder collect_valid_weapon_slots @0x516000 (resume store
+//  @0x431904; page builder Server_CollectValidWeaponSlots @0x516000 (resume store
 //  @0x5160d7); Kong labeled the handler HandleBatchSpawn; it kills].
 struct BatchKillBatch {
 	uint16_t count = 0;             // the resume index echoed as the next C2S 0x28 `start`
@@ -1122,7 +1122,7 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
 //       refreshes restrictionData, and RE-SENDS ONE C2S 0x2F via
 //       NetPacket_SendLoadoutSubmit @0x431a9e carrying the NEW team, the per-side
 //       profile class, and slot 195 RAW (the pre-Player_InitPlayer form, NOT the
-//       live g_currentWeaponSlot), then C2S 0x22/0x23 acks (@0x431acb..0x431b05),
+//       live g_CurrentWeaponSlot), then C2S 0x22/0x23 acks (@0x431acb..0x431b05),
 //       Player_InitPlayer(1) @0x431b14, then the identity stores
 //       `entity->animSlot = animSlot` @0x431b3a / `entity->NetId = netId` @0x431b46
 //       and the minimap maintenance they feed (@0x431b4d..0x431b91).
@@ -1135,7 +1135,7 @@ struct TeamAssign {
 	// player record carries (fields 3-4 / 5). Retail's producer ZEROES both for a
 	// non-player entity — the `entity->Flags & 0x100` gate @0x506b3d picks between the
 	// live values @0x506b51/@0x506b6b and the zero arms @0x506b96/@0x506bab — so any
-	// future emitter must reproduce that gate. [orig: write_entity_handle_packet @0x506ad0]
+	// future emitter must reproduce that gate. [orig: NetPacket_WriteEntityHandlePacket @0x506ad0]
 	uint16_t net_id = 0;
 	uint8_t  anim_slot = 0;
 };
@@ -1146,7 +1146,7 @@ bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
 // C2S 0x0C — per-entity client-to-host packet. Outer body starts with a 5-byte
 // sub-header `[u16 handle][u16 itemTypeId][u8 sub_op]` written by
 // [orig: Pool_SerializeEntityViaVTable @ 0x4D64E0] and parsed by
-// [orig: dispatch_entity_packet_callback @ 0x4D6A80]. `sub_op` selects the
+// [orig: NetPacket_DispatchEntityPacketCallback @ 0x4D6A80]. `sub_op` selects the
 // per-entity callback's mode:
 //   0x0A (=10) → extended (type-10) — case 3/4, joiner uplink, §5.10 "Tag 0x0C body"
 //   0x0B (=11) → compact (type-11)  — case 1/2, S2C 0x0A trailing-record format
@@ -1162,7 +1162,7 @@ struct EntityPacketSubHeader {
 
 // sub_op selector values (§5.10b). NOT message tags — sub_op 0x0A is unrelated
 // to tag 0x0A. [orig: Pool_SerializeEntityViaVTable @0x4D64E0 writes;
-// dispatch_entity_packet_callback @0x4D6A80 dispatches]
+// NetPacket_DispatchEntityPacketCallback @0x4D6A80 dispatches]
 inline constexpr uint8_t ENTITY_SUB_OP_EXTENDED = 0x0A; // type-10 extended (§5.10 joiner uplink)
 inline constexpr uint8_t ENTITY_SUB_OP_COMPACT = 0x0B;  // type-11 compact (S2C 0x0A trailing records)
 
@@ -1190,7 +1190,7 @@ struct PlayerExtendedUplink {
 	                                   // pool 0-4, pool-2 statics included [orig: op3 reads
 	                                   // entity+0x28 at its case head (the same field op1
 	                                   // reads @0x4c0a08); the op4 apply resolves it against
-	                                   // g_pool_list @0x4c1d07-0x4c1d26]. Renamed from the
+	                                   // g_PoolList @0x4c1d07-0x4c1d26]. Renamed from the
 	                                   // carrier_handle misnomer (witness 2026-07-03,
 	                                   // D-NET-151).
 	int32_t  pos_x = 0;                // entity+4/+8/+0xC — ABSOLUTE world 16.16 when free
@@ -1221,7 +1221,7 @@ struct PlayerExtendedUplink {
 	uint8_t  analog_y = 0;           // entity+0x131
 	uint8_t  analog_z = 0;           // entity+0x132
 	uint8_t  equipped_adm_index = 0;   // entity+0x2B0 equipped-weapon AdmDef index — case-4 store
-	                                   // @0x4C20A3 gated AdmDefs[idx].category < 11; the host
+	                                   // @0x4C20A3 gated g_AdmDefs[idx].category < 11; the host
 	                                   // ECHOES it at 0x0A off-16 (renamed from the reserved_24
 	                                   // "read into AL, discarded" misnomer; witness 2026-07-02,
 	                                   // D-NET-143)
@@ -1255,7 +1255,7 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 // pose deltas). The host validates it in Server_ClientFiredRound @0x50baa0
 // (anti-spoof, cease-fire, adm lookup, warp compensation, mounted-fire, ammo)
 // and an accepted PRIMARY fire runs the adm 'fire' action → re-enters the
-// validator locally → RoundData_AddRound appends a g_round_ring event that
+// validator locally → RoundData_AddRound appends a g_RoundRing event that
 // fans to every OTHER in-match recipient as an S2C 0x0A tag-2 round event
 // (§5.9.1); alt fire appends directly. (D-NET-152)
 // [orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]
@@ -1320,7 +1320,7 @@ bool decode_client_fired_round(const uint8_t *body, size_t len,
 // player record (with 6 volatile fields temporarily zeroed), XORs against a
 // per-connection salt (`playerCtx+89924`), and compares against the reply's
 // `expected_crc`. Mismatch logs "ACRC" and disconnects with "PUNT ACRC".
-// [orig: handle_anti_cheat_crc_check @ 0x502050]
+// [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck @ 0x502050]
 // ===========================================================================
 
 struct ClientChecksumReply {
@@ -1426,7 +1426,7 @@ bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &ou
 //   [u8 gameFlags]
 //   i32 ammoPools[kWorldStateAmmoPoolCount]            (fixed 128-entry block: the
 //       serverPlayer+88664 image, copied straight into the client's
-//       g_localAmmoPools @0xB75FE8 and followed by the clip recalculation
+//       g_LocalAmmoPools @0xB75FE8 and followed by the clip recalculation
 //       [orig: loop @0x42e324..0x42e34a -> WeaponSlots_RecalculateAmmoFromCapacity
 //        @0x42e424]; NOT a score table — the pre-2026-09-10 label was wrong)
 //   [u16 waypointCount]
@@ -1437,7 +1437,7 @@ bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &ou
 // 0x10020 (a waypoint gametype). That gate is NOT on the wire, so an off-wire
 // decoder takes the is_waypoint_gametype hint (default false; TDM/DM send
 // waypointCount 0 / no records). [orig: NapiNPClientMsg_0x00F @ 0x42E200]
-inline constexpr int kWorldStateAmmoPoolCount = 128; // (data - g_localAmmoPools)/4 @ 0x42e324
+inline constexpr int kWorldStateAmmoPoolCount = 128; // (data - g_LocalAmmoPools)/4 @ 0x42e324
 struct WorldStateWaypoint {
 	uint16_t slot_id = 0;
 	uint16_t name_id = 0;
@@ -1508,7 +1508,7 @@ bool decode_burst_visible_request(const uint8_t *body, size_t len, size_t &consu
 // world-state-load reply burst (@0x42e647, beside 0x28/0x29/0x2D — §5.29); the
 // host's handler reads NO fields from it and answers S2C 0x5D with every empty
 // pool-0 slot index. The handler is authority-gated and skipped while
-// `g_net_spawn_suspended` or `g_spawn_success_gate` (round over) is set. Because
+// `g_NetSpawnSuspended` or `g_SpawnSuccessGate` (round over) is set. Because
 // the body is never read, this decoder consumes nothing and accepts any length —
 // the sender's exact filler (if retail writes any) is unwitnessed.
 // [orig: NapiNPServerMsg_SendEmptySlots @ 0x51a600; body builder @ 0x5160f0;
@@ -1530,9 +1530,9 @@ bool decode_empty_slots_request(const uint8_t *body, size_t len, size_t &consume
 // "weapon loadout" reading named the fields below; the consumers still spell
 // them: loadout_filter = windowMin, flags = windowMax, extra = start.
 // [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550 ->
-//  collect_valid_weapon_slots @0x516000 (spawn-suspended / round-gate return
+//  Server_CollectValidWeaponSlots @0x516000 (spawn-suspended / round-gate return
 //  @0x51602e, exhausted-at-begin return @0x516057, append @0x5160a9, loop bound
-//  @0x5160d1, resume word @0x5160d7); weapon_loadout_iterator_begin @0x501680;
+//  @0x5160d1, resume word @0x5160d7); WeaponLoadout_IteratorBegin @0x501680;
 //  ItemPoolIterator_Advance @0x501740; NetSync_IsEntityEligibleInWindow @0x507AA0]
 struct BurstLoadoutRequest {
 	uint32_t loadout_filter = 0;  // windowMin: the S2C 0x19 spawn-ack timestamp (dword_A82360)
@@ -1544,7 +1544,7 @@ bool decode_burst_loadout_request(const uint8_t *body, size_t len,
 
 // C2S 0x29 — team/spawn ack `[u16 team_change_index]` (2 B). The client emits it with
 // team_index+1 from its 0x51 apply [orig: NapiNPClientMsg_HandlePlayerSpawn @ 0x431c99]
-// and at deploy/team pick; the server treats the value as a g_team_change_entity_list
+// and at deploy/team pick; the server treats the value as a g_TeamChangeEntityList
 // index and replies S2C 0x51 ONLY for a pending team-change entry [orig:
 // NapiNPServerMsg_0x029 @ 0x514F10 @ 0x514f7c] — never on a plain join (D-NET-148).
 struct TeamSpawnAck {
@@ -1612,7 +1612,7 @@ bool decode_u32_scalar(const uint8_t *body, size_t len,
 // the pulse icon (3 -> 24, else 253), and the height byte (shifted to 16.16)
 // is the map ring radius. Only the team color is taken from the entity
 // (+354). [orig: NapiNPClientMsg_0x06B @ 0x425520 marshalling
-//  @0x42559f..0x4255dd → update_minimap_overlay_entity @ 0x5BEC10]
+//  @0x42559f..0x4255dd → Minimap_UpdateOverlayEntity @ 0x5BEC10]
 struct MinimapOverlayBatch {
 	struct Entry {
 		uint16_t handle = 0;      // +0  (pool<<12)|slot of the overlaid entity
@@ -1690,7 +1690,7 @@ bool decode_medic_request(const uint8_t *body, size_t len,
 // player died it stamps the respawn tick + toggles the weapon scope. Unlike
 // 0x26 (which routes through Entity_KillBySlotId), this path acts directly on
 // the entity.
-// [orig: BuildDeathNotifyPayload @0x5036E0 (@0x503733);
+// [orig: NetPacket_BuildDeathNotifyPayload @0x5036E0 (@0x503733);
 //  NapiNPClientMsg_EntityDeath @0x42EB50 (movsx @0x42EB8D, store @0x42EBDF)]
 struct EntityDeathRecord {
 	uint16_t entity_handle = 0;        // the dying entity
@@ -1843,7 +1843,7 @@ bool decode_objective_notification(const uint8_t *body, size_t len,
 // relationship is entity+368 occupantEntity (the carrier); the second is
 // entity+40 groundEntity. The flags field is deliberately one byte: retail
 // merges it into the low byte of the client's existing entity flags.
-// [orig: serialize_entity_with_parent_and_target @0x505810;
+// [orig: NetPacket_SerializeEntityWithParentAndTarget @0x505810;
 // NapiNPClientMsg_0x02F @0x430E10]
 struct ObjectiveEntityState {
 	uint16_t entity_handle = 0xFFFF;
@@ -1925,7 +1925,7 @@ bool decode_entity_routed_packet(const uint8_t *body, size_t len,
 // g_TerrainTileData+16+12*idx (the network layer never interprets the 3 dwords —
 // the terrain renderer does, later), so we expose them at the engine's own copy
 // granularity rather than inventing field names.
-// [orig: serialize_terrain_tiles @ 0x6080F0 (writer) / PolyTrn_LoadTileData
+// [orig: Terrain_SerializeTiles @ 0x6080F0 (writer) / PolyTrn_LoadTileData
 //  @ 0x6081D0 (reader) / NapiNPClientMsg_0x045 @ 0x422890 (handler)]
 struct TerrainTileEntry {
 	uint32_t word0 = 0;  // 12-B opaque tile record (copied raw into g_TerrainTileData)
@@ -1959,7 +1959,7 @@ bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch
 
 // §5.48 S2C 0x58 — SESSION-STATUS block (server name, mission name, session
 // up-time sync, and the end-game scoring-rule table). The client parses it into
-// the single global g_session_status (0x24E3E88): server name feeds the
+// the single global g_SessionStatus (0x24E3E88): server name feeds the
 // STROVER_SERVERNAME end-game line, uptime_ms is elapsed-at-send (the client
 // stamps GetTickCount at parse so elapsed = wire − parseTick + now,
 // CSessionTimer_GetElapsedMS), and the 39 i32s are the per-stat point values
@@ -1975,7 +1975,7 @@ struct SessionStatusKV {
 struct SessionStatusBlock {
 	std::string server_name;   // cstr; client keeps <= 31 chars
 	std::string mission_name;  // cstr; client keeps <= 63 chars
-	uint8_t  byte0 = 0, byte1 = 0, byte2 = 0; // → g_session_status[25..27]
+	uint8_t  byte0 = 0, byte1 = 0, byte2 = 0; // → g_SessionStatus[25..27]
 	uint32_t uptime_ms = 0;    // session elapsed ms at send time
 	int32_t  stat_values[39] = {}; // STROVER_STATVAR00..38 point table
 	uint8_t  kv_count = 0;     // wire count; MAY exceed the pairs present (reader
@@ -2059,14 +2059,14 @@ struct PlaySoundCommand {
 bool decode_play_sound(const uint8_t *body, size_t len, PlaySoundCommand &out);
 
 // §5.51 S2C 0x2C — SESSION + MISSION-FILE NAME assign: [cstr sessionName]
-// [cstr bmsFileName] → byte_A82378 / g_map_file_name; bumps g_loading_progress
+// [cstr bmsFileName] → byte_A82378 / g_MapFileName; bumps g_LoadingProgress
 // to >= 1. A join-burst member; the historic "chat entry" table note was wrong
 // (chat-history is 0x2A). Golden values: "Untitled" (the host's session name,
 // matching the 0x58 server name) + "TDH_I5A.BMS".
 // [orig: NapiNPClientMsg_MissionMapNames @ 0x427E10]
 struct MissionMapNames {
 	std::string session_name;   // → byte_A82378 (host session/server name)
-	std::string map_file_name;  // → g_map_file_name (0x24D1F3E), the .BMS file
+	std::string map_file_name;  // → g_MapFileName (0x24D1F3E), the .BMS file
 };
 bool decode_mission_map_names(const uint8_t *body, size_t len, MissionMapNames &out);
 
@@ -2121,7 +2121,7 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 //  @0x5164F0, the call @0x516590]. While a chunk leaves the board
 // incomplete the client answers with C2S 0x2B [u16 chunk_offset + chunk_len]
 // [orig: @0x431DB3..0x431DC4],
-// and on completion raises g_scoreboardDirty, the stat.mnu trigger
+// and on completion raises g_ScoreboardDirty, the stat.mnu trigger
 // [orig: @0x4321BE; polled by UI_ProcessEndRoundScreenTransition @0x5B8600].
 //
 // Reassembly AND the 0x2B request leg deliberately stay with the CALLER: the
@@ -2236,11 +2236,11 @@ bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out)
 struct SessionSlotConfig {
 	uint32_t skipped[4] = {};   // on the wire, not read by the handler
 	uint8_t  session_config = 0; // → dword_24D2110
-	uint8_t  local_player_slot = 0; // → g_local_player_slot_id = g_local_player_slot_id, the recipient's
+	uint8_t  local_player_slot = 0; // → g_LocalPlayerSlotId = g_LocalPlayerSlotId, the recipient's
 	                                // OWN roster slot [orig: the write side is slot+20,
 	                                // NetPacket_WriteSlotAssignment @0x502b30; the old
 	                                // `team_mode` reading was a misnomer, witness 2026-07-03]
-	uint8_t  max_players = 0;    // → g_max_player_slots = g_max_player_slots + PlayerSlotTable_Reallocate;
+	uint8_t  max_players = 0;    // → g_MaxPlayerSlots = g_MaxPlayerSlots + PlayerSlotTable_Reallocate;
 	                             // the 0x46/0x22 roster walk terminates at this count
 	uint32_t skipped4 = 0;       // on the wire, not read
 	uint8_t  trailing = 0;       // → byte_A85B48
@@ -2250,7 +2250,7 @@ bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConf
 // §5.54 S2C 0x08 — SESSION CONFIG (fixed 51 B; the historic "game-state
 // snapshot ~2 KB" note was wrong): [10 × i32][7 × u8][u32 bitflags]. fields[3]
 // = gameType (→ g_GameType); bitflags bits 13/15/16 are latched into
-// byte_A821EE/EF/F0. Bumps g_loading_progress to >= 1.
+// byte_A821EE/EF/F0. Bumps g_LoadingProgress to >= 1.
 // [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
 struct SessionConfig {
 	int32_t  fields[10] = {};  // → dword_A821BC..A821E0; fields[3] = gameType
@@ -2282,12 +2282,12 @@ bool decode_join_padding_probe(const uint8_t *body, size_t len, JoinPaddingProbe
 // (playerClass — class 0 applies with an empty soldier-type mask @0x5159af),
 // rebuilds the avatar display list + weapon slots, and replies with the S2C 0x5A
 // weapon-slot list. The in-range class is remapped through the host class-allow
-// mask g_hostClassAllowMask @0x24D59FC (@0x5158e6) before the [5,9]-else-8 tail
+// mask g_HostClassAllowMask @0x24D59FC (@0x5158e6) before the [5,9]-else-8 tail
 // @0x515913. Entries repeat until an 0xFF adm_index terminator — the same
 // {typeId, ammoP, ammoS, variant} slot vocabulary as the §5.30 S2C 0x5A downlink.
 // [orig: builder NetPacket_SendLoadoutSubmit @ 0x42cdc0 (team = byte_A85B48,
 //  the S2C 0x04 tail byte; class = the profile's per-side class byte; slot =
-//  195 pre-Player_InitPlayer, g_currentWeaponSlot after);
+//  195 pre-Player_InitPlayer, g_CurrentWeaponSlot after);
 //  decoder NapiNPServerMsg_HandlePlayerLoadout @ 0x515790]
 struct LoadoutSubmitEntry {
 	uint8_t adm_index = 0;      // AdmDef index (0xFF = list terminator, not stored)
@@ -2384,7 +2384,7 @@ bool decode_clan_roster_update(const uint8_t *body, size_t len, ClanRosterUpdate
 // action 3 (@0x43266c). The host answers with the smallest node id strictly
 // greater than the value as 0x6A action 3, or nothing when none exists.
 // [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210 — read @0x511245,
-//  sub_52B190 @0x511253, serialize_minimap_slot(3) @0x51127c, send @0x51129e]
+//  sub_52B190 @0x511253, NetPacket_SerializeMinimapSlot(3) @0x51127c, send @0x51129e]
 struct ClanRosterWalkRequest {
 	uint32_t after_account_id = 0;
 };
@@ -2402,10 +2402,10 @@ bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
 
 // S2C 0x70 — `[u8 3]` then per table row `[u16 typeId][u8 avail][u8 max]`,
 // terminated by `u16 0`. Per row the writer ladders: unlimited vehicles
-// (dword_24D1E38) -> 0xFF/0xFF; max == -1 && initial == -1 -> 0xFF/0xFF;
+// (g_RulesUnlimitedVehicles) -> 0xFF/0xFF; max == -1 && initial == -1 -> 0xFF/0xFF;
 // initial == -1 -> max 0xFF, avail = (u8)max_count - liveCount; else max =
 // limit[team], avail = (max_count == -1) ? max : min((u8)max_count - liveCount,
-// max) (unsigned compare) [orig: serialize_weapon_overlay_slots_0 @0x5105A0 —
+// max) (unsigned compare) [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0 —
 // the constant 3 @0x5105c3, the ladder @0x5105ff..0x510651, rows @0x510660..
 // 0x510681, terminator @0x5106b8]. The client stores the leading byte
 // (dword_A81BB4) and fills a 12-B-stride table until the 0 word or fewer than

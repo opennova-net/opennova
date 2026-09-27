@@ -3,11 +3,11 @@
 //
 // The original runs these in its 62 Hz frame loop: the scope camera interp is a
 // 15-step ease [orig: CNetPlayerInterp_Setup @ 0x4df36e; engaged mirror
-// g_scopeEngaged @ 0x82CE94], the chase camera's anchor eases a quarter-step
+// g_ScopeEngaged @ 0x82CE94], the chase camera's anchor eases a quarter-step
 // per tick [orig: ThirdPersonCamera_Update @ 0x437c8d], and the scoped fov is
 // 80 / zoom for sighted weapons, suppressed in third person
-// [orig: Player_ToggleWeaponScope @ 0x4df401 / the g_camera_mode check
-// @ 0x4df3fa; base fov g_cameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80 deg].
+// [orig: Player_ToggleWeaponScope @ 0x4df401 / the g_CameraMode check
+// @ 0x4df3fa; base fov g_CameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80 deg].
 //
 // Hosted, the simulation ticks camera lag and the ADS pose at world cadence.
 // The optical render query can rewrite the shared FOV target, as in retail;
@@ -36,7 +36,7 @@ class World;
 constexpr int32_t kScopeEaseSteps = 15;
 constexpr int32_t kScopeEaseStepsInset = 7;
 constexpr int32_t kScopeEaseStepsHipfire = 1;
-// [orig: g_cameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
+// [orig: g_CameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
 constexpr float kPlayerCameraFovHDeg = 80.0f;
 // [orig: binocular camera fov constant in Player_UpdateFirstPersonCamera]
 constexpr float kBinocularCameraFovHDeg = 20.0f;
@@ -53,7 +53,7 @@ constexpr int32_t kNvgGainMax = 4;
 constexpr float kTpAnchorEase = 0.25f;
 // The first-person eye pull-back along the full view rotation: -0x3000 on the
 // view-frame FORWARD axis [orig: Math_FixedPointTransformPoint22 of
-// (-0x3000, 0, 0) added onto g_view_pos_x/y @ 0x438001..0x438031].
+// (-0x3000, 0, 0) added onto g_ViewPosX/Y @ 0x438001..0x438031].
 constexpr float kFpEyePullback = 0.1875f;
 // The CameraOffset floor and the non-person eye bump.
 // [orig: the 0x2000 floor @ 0x4b6b98; the +0x10000 bump @ 0x437e8f]
@@ -137,8 +137,8 @@ struct MountedCameraInput {
     float bound_radius = 0.0f;              // carrier +0, mission units
     bool watercraft = false;                // unit_type 3/4 [orig: @0x43861D]
     // The water plane every chase eye clears, on foot as well as mounted
-    // [orig: Env_WaterHeightFixed + 0x4000 @0x438409..0x43841E].
-    float water_z = 0.0f;                   // Env_WaterHeightFixed, units
+    // [orig: g_EnvWaterHeightFixed + 0x4000 @0x438409..0x43841E].
+    float water_z = 0.0f;                   // g_EnvWaterHeightFixed, units
 };
 
 // THE FIRST-PERSON CAMERA SHAKE. A single counter drives an angular jitter on
@@ -214,9 +214,9 @@ inline void camera_shake_decay(CameraShakeState &st) {
 // [orig: Game_InitNewRound @0x422778 / @0x422784 / @0x422790].
 //
 // DRAW [orig: Render_ProcessMainSceneFrame @0x5CAB9A..0x5CAC48, only while
-// !g_death_screen_active, after the HUD overlay pass and before the sun veil]:
+// !g_DeathScreenActive, after the HUD overlay pass and before the sun veil]:
 //   1. white:  colour (white << 24) | 0xFFFFFF, quad mode 2
-//   2. red:    only while g_camera_mode != 3, alpha = min(red, 0xC0),
+//   2. red:    only while g_CameraMode != 3, alpha = min(red, 0xC0),
 //              colour (alpha << 24) | 0xFF0000, quad mode 3 = the vignette.tga
 //              material (flags 593 = 0x251 AFUNC_BLEND | ASRC_TEXTURExITERATED
 //              | COLOR_ITERATED: texture alpha x vertex alpha, vertex colour)
@@ -388,14 +388,14 @@ struct PlayerViewState {
     // consumer keys on, `scope_hipfire` the latch every interp Setup stores
     // beside its target: the toggle and the PackInput legs target the hip
     // exactly when they store 1 and tpos when they store 0, so the latch IS
-    // the interp's target pose [orig: g_scopeEngaged @0x82CE94;
-    // g_weaponScopeActive @0xB76478; g_scopeHipfire @0x82CE98, init/reset 1;
+    // the interp's target pose [orig: g_ScopeEngaged @0x82CE94;
+    // g_WeaponScopeActive @0xB76478; g_ScopeHipfire @0x82CE98, init/reset 1;
     // the paired Setup/latch stores @0x4df1c3/@0x4df212, @0x4df36e/@0x4df373,
     // @0x4df567/@0x4df56c, @0x4df5d1/@0x4df5d6, @0x4df636/@0x4df63b].
     bool scope_engaged = false;
     bool scope_settled = false;
     bool scope_hipfire = true;
-    // THE FP CAMERA INTERP ITSELF [orig: g_fpCameraInterp @0x82CE40 -- the
+    // THE FP CAMERA INTERP ITSELF [orig: g_FpCameraInterp @0x82CE40 -- the
     // per-step velocity +4..24, the current pose +28..48, the target +52..72,
     // the counter +0, entitySlotPtr +76, activeFlag +80]: the two authored
     // endpoints (WeaponDef +0x10C hip copy / +0x124 tpos) and the six-lane
@@ -407,34 +407,34 @@ struct PlayerViewState {
     PlayerViewPose weapon_ads_pose;
     PlayerViewBiasInterp weapon_pose_interp;
     bool weapon_pose_bound = false; // fpCameraInterp.entitySlotPtr + its non-null Def
-    bool move_held = false;       // [orig: the movement-held latch g_movementKeyHeld @ 0xB7653B]
+    bool move_held = false;       // [orig: the movement-held latch g_MovementKeyHeld @ 0xB7653B]
     // THE CAMERA MODE, two words. `third_person_selected` is the user's
     // preference — the chase byte the view actions write, 1 from the session
-    // reset on [orig: g_camera_third_person_selected @ 0xA860DF — set to 1 by
+    // reset on [orig: g_CameraThirdPersonSelected @ 0xA860DF — set to 1 by
     // Client_ResetGameSessionState @ 0x42ca3c; written by
     // Input_HandleActionBinding cases 400 @ 0x49c084 (0), 401 @ 0x49c0ea (0),
     // 402 @ 0x49c100 (1), 412 @ 0x49c0ad/@ 0x49c0c8 (the cycle)].
     // `third_person` is the RESOLVED mode the per-frame arbiter derives from
     // that preference and the seat — player_view_resolve_mode
-    // [orig: g_camera_mode @ 0xA890C8].
+    // [orig: g_CameraMode @ 0xA890C8].
     bool third_person_selected = true;
     bool third_person = false;
-    // THE RESOLVED MODE WORD itself (g_camera_mode): 0 first person, 1 the
+    // THE RESOLVED MODE WORD itself (g_CameraMode): 0 first person, 1 the
     // chase, 3 the spectator/overhead (unmodelled), 4 the death lerp camera.
     int camera_mode = 0;
     // The arbiter's remaining inputs [orig: Render_ProcessMainSceneFrame
     // @0x5ca1f4..0x5ca24b]: the client-local death screen and its sub-mode
     // (dword_A860F0: 0 / 1 / 2 = kill-cam; the sub-mode writers are the
     // spectate actions, unported), the local dead bit (`Flags & 2`), the
-    // end-of-round gate (g_spawn_success_gate) with the on-foot test
-    // (parentEntity == 0), and the two g_rules_flags bits (bit 0 = no death
+    // end-of-round gate (g_SpawnSuccessGate) with the on-foot test
+    // (parentEntity == 0), and the two g_RulesFlags bits (bit 0 = no death
     // camera, bit 0x40 = server force-first-person while in session — both
     // admin `set` commands, no wire fold yet).
     bool death_screen_active = false;
     int death_screen_submode = 0;
     bool local_dead = false;
     bool round_ended = false;
-    // The client's decided round winner (g_endround_winner_team, the S2C
+    // The client's decided round winner (g_EndRoundWinnerTeam, the S2C
     // 0x1D header's winner byte); nonzero hides the FP viewmodel [orig:
     // Player_RenderViewModelIfAlive @0x4E014B].
     int32_t end_round_winner_team = 0;
@@ -463,9 +463,9 @@ struct PlayerViewState {
     // armed by the damage/collision/revive legs, decayed beside the shake in
     // the same pre-tick pass, cleared by the local respawn.
     ScreenFlashState flash;
-    bool binoculars_requested = false;   // [orig: raw toggle g_binocularsToggle @ 0xB76539]
-    bool binoculars_raised = false;      // [orig: body-pose g_binocularsRaised @ 0xB7653A]
-    bool binoculars_view_active = false; // [orig: first-person view g_binocularsViewActive @ 0xB76538]
+    bool binoculars_requested = false;   // [orig: raw toggle g_BinocularsToggle @ 0xB76539]
+    bool binoculars_raised = false;      // [orig: body-pose g_BinocularsRaised @ 0xB7653A]
+    bool binoculars_view_active = false; // [orig: first-person view g_BinocularsViewActive @ 0xB76538]
     bool nvg_active = false;
     int32_t nvg_gain = kNvgGainMin;
     bool tp_anchor_valid = false;
@@ -498,9 +498,9 @@ struct PlayerViewState {
 //   lives in Camera_SetTrackedEntity), anything else keeps desired
 //   [@0x5ca1f4..0x5ca215];
 //   else the local dead bit (`Flags & 2`), or the end-of-round gate with the
-//   player on foot (parentEntity == 0) -> 4 unless g_rules_flags bit 0
+//   player on foot (parentEntity == 0) -> 4 unless g_RulesFlags bit 0
 //   [@0x5ca217..0x5ca24b];
-//   else in session with g_rules_flags bit 0x40 -> 0 [@0x5ca22d..0x5ca23e].
+//   else in session with g_RulesFlags bit 0x40 -> 0 [@0x5ca22d..0x5ca23e].
 // The mode is then applied only when it changed, so the orbit/distance state
 // carries across the flip [the changed test @ 0x5ca258 -> Camera_SetTrackedEntity
 // @ 0x5ca262 — mode 4 computes the lerp camera there @0x439257]. Boarding and
@@ -511,7 +511,7 @@ struct PlayerViewState {
 // passenger stays first person, a dismount returns to first person. The debug
 // on-foot override ORs in. RESIDUAL: mode 3 (the spectator camera) and the
 // death-screen sub-mode writers (the spectate actions) are not modelled; the
-// two g_rules_flags bits are carried as inputs with no wire fold.
+// two g_RulesFlags bits are carried as inputs with no wire fold.
 void player_view_resolve_mode(PlayerViewState &v);
 
 // The view actions' preference writes: `view1st` (400) and `viewwithgun` (401)
@@ -542,7 +542,7 @@ void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bi
 // interp toward its target and promote the settled byte on the tick its
 // active latch drops [orig: Player_UpdatePerFrame -- the step runs only
 // behind an active interp @0x4de4c7 -> Player_StepFpViewBiasInterp @0x4de4c9,
-// then `if (!activeFlag)` @0x4de4d9 -> g_weaponScopeActive = (g_scopeEngaged
+// then `if (!activeFlag)` @0x4de4d9 -> g_WeaponScopeActive = (g_ScopeEngaged
 // != 0) @0x4de4f7; the stepper reports done on the call AFTER the last
 // moving lane snapped, so a 15-step authored ease promotes on tick 16, and
 // an unbound slot (null entitySlotPtr/Def) deactivates on its first step
@@ -558,10 +558,10 @@ void player_view_tick(PlayerViewState &v, const float eye[3]);
 
 // Whether the scope-camera interp is mid-ease: its active latch, which holds
 // one call past the last lane snap. Every scope toggle is REFUSED while it
-// runs [orig: the !g_fpCameraInterp.activeFlag gate @ 0x4df177].
+// runs [orig: the !g_FpCameraInterp.activeFlag gate @ 0x4df177].
 bool player_view_scope_ease_active(const PlayerViewState &v);
 
-// The PROMOTED scope byte [orig: g_weaponScopeActive @0xB76478]: set only by
+// The PROMOTED scope byte [orig: g_WeaponScopeActive @0xB76478]: set only by
 // the settle promoter (= the engaged target when the interp lands @0x4de4f7)
 // and by the mount stamp, cleared by both toggle branches (@0x4df20c /
 // @0x4df31d) and by the auto-re-raise (@0x4df609). It holds through the
@@ -615,10 +615,10 @@ float player_view_scope_fraction(const PlayerViewState &v);
 
 // The per-frame movement input pack and its scope legs, in retail order
 // [orig: Player_PackInputStateToEntity @0x4df450]. Latches `move_held` (any of
-// the four movement-direction keys [orig: g_movementKeyHeld set @0x4df4bb,
+// the four movement-direction keys [orig: g_MovementKeyHeld set @0x4df4bb,
 // cleared @0x4df4f9]) and returns true when the SETTLED-at-scope unscope must
 // fire: movement while PROMOTED on a Scoped (flags 1) weapon routes through
-// the normal scope toggle [orig: g_weaponScopeActive && Def->Flags & 1 ->
+// the normal scope toggle [orig: g_WeaponScopeActive && Def->Flags & 1 ->
 // Player_ToggleWeaponScope, the call @0x4df4ec from the gate @0x4df4c9] -- the
 // caller runs its standard disengage, and the toggle's own ForceScoped pin
 // applies there. Otherwise, on a Scoped def [orig: the entitySlotPtr block
@@ -640,13 +640,13 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
 
 // Whether a scope-UP toggle is refused by the movement-held latch: engaging a
 // Scoped (flags 1) weapon is blocked while a movement key is down
-// [orig: g_movementKeyHeld && (flags & 1) -> return @ 0x4df29c].
+// [orig: g_MovementKeyHeld && (flags & 1) -> return @ 0x4df29c].
 bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags);
 
 // Toggle the persistent binocular request. Raising is resolved separately so
 // movement/death/round-end/camera suppression never destroys the request.
 // Turning the request off clears both derived states immediately. Returns the
-// new requested state. [orig: input action 26; g_binocularsToggle]
+// new requested state. [orig: input action 26; g_BinocularsToggle]
 bool player_view_toggle_binoculars(PlayerViewState &v);
 
 // The one random fixed-radius aim displacement a binocular raise seeds:
@@ -660,7 +660,7 @@ void player_view_binocular_sway_offset(float unit_random,
 // Recompute the binocular body pose and first-person view. The raised pose is
 // suppressed by movement, death, and round end, but survives third person;
 // the optical view additionally requires first person. [orig: per-frame
-// binocular state update around g_binocularsViewActive..g_movementKeyHeld]
+// binocular state update around g_BinocularsViewActive..g_MovementKeyHeld]
 void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool round_ended);
 
 // Toggle NVG and return its new active state. Gain is independent of the
@@ -672,8 +672,8 @@ bool player_view_toggle_nvg(PlayerViewState &v);
 int32_t player_view_adjust_nvg_gain(PlayerViewState &v, int32_t delta);
 
 // The NVG state remains active in every camera, but its world/post treatment
-// needs the resolved mode word g_camera_mode == 0: the chase (1) and the
-// death lerp camera (4) both drop it. [orig: the g_camera_mode gates in the
+// needs the resolved mode word g_CameraMode == 0: the chase (1) and the
+// death lerp camera (4) both drop it. [orig: the g_CameraMode gates in the
 // NVG render path, player_view.cpp]
 bool player_view_nvg_visible(const PlayerViewState &v);
 
@@ -757,13 +757,13 @@ ViewProjection nvg_view_projection(const ViewProjection &frame,
 float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg);
 
 // The first-person view position in RAW weapon.def units: the def `pos`
-// (+0xF4) plus the interp's PUBLISHED position bias (g_view_pos_bias_x/y/z,
+// (+0xF4) plus the interp's PUBLISHED position bias (g_ViewPosBiasX/Y/Z,
 // the truncating ftol of interp_current - the hip copy at +0x10C, in the
 // def's *256 Q16 scale) brought back to file units over kWeaponDefPosScale.
 // Zero bias at the hip, tpos - pos once the lanes snap; no float blend and no
 // tpos input, the ADS endpoint lives in the bound pose. [orig:
 // Player_UpdateFirstPersonCamera @ 0x4dd380 -- ftol(Bone +0xF4) @0x4dd479..
-// 0x4dd490 then + g_view_pos_bias_x/y/z @0x4dd4ce..0x4dd4da; Player_StepFpViewBiasInterp publication
+// 0x4dd490 then + g_ViewPosBiasX/Y/Z @0x4dd4ce..0x4dd4da; Player_StepFpViewBiasInterp publication
 // @ 0x4ddf53..0x4ddfc3]. (The camera's `Flags & 2` leg is the dead/round-end
 // camera, not ADS; unported.)
 void player_view_bias_units(const PlayerViewState &v, const float pos[3], float out[3]);
@@ -787,7 +787,7 @@ float player_view_fp_pitch_recoil_deg(int32_t recoil_pitch_bam);
 
 // The FP camera roll: torsoRoll + lean/4 (arithmetic-shift BAM quarter).
 // [orig: the on-foot person leg @ 0x437fe6 —
-//  g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)]
+//  g_ViewRotRoll = entity+0x2DC + (entity+0xB0 >> 2)]
 float player_view_fp_roll_deg(int32_t torso_roll_bam, int32_t lean_bam);
 
 // The chase camera's collision-march NO-COLLISION landing [orig:

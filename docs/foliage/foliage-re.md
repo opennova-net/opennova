@@ -28,12 +28,12 @@ remain in place; ONED's paint and eyedropper consumers were removed by ADR 0037.
 |---|---|---|---|
 | Definition/map source data | `.trn` foliage defs (`match` = up to seven byte args per slot, FOUR consumed), charmap, foliagemap | formats (four-code `FoliageDef::match` since 2026-09-14, see Definition match codes) and the flat wrapped map lookup retained; no ONED authoring UI | matching format/coordinate helpers |
 | Detail-cell collection | frustum-surviving traversal nodes (level ≥ 3, node distance less 16 within 42) hand subtrees to `Terrain_CollectNearFoliagePatches @ 0x603e60`, independent of the 224 main-draw cap; foliage cap 128 | an independent handoff from the same traversal decisions and node gate into the 16-unit mip-bound collector; each cell carries its Z-min key, atlas minimum and leaf maximum height | matching (seating corrected 2026-07-16, D-FOLIAGE-13; budget independence and node gate corrected 2026-09-13, D-FOLIAGE-14) |
-| Detail placement | `generate_foliage_instances_0 @ 0x5ffdd0` | fresh `foliage::Runtime` literal vectors on retail's key frame (Z-min low half, B adds) and yaw step `flt_7CD4DC` | matching; PORTED 2026-09-24 ("Place foliage candidates on retail's key frames") |
+| Detail placement | `Foliage_GenerateInstances_0 @ 0x5ffdd0` | fresh `foliage::Runtime` literal vectors on retail's key frame (Z-min low half, B adds) and yaw step `flt_7CD4DC` | matching; PORTED 2026-09-24 ("Place foliage candidates on retail's key frames") |
 | Detail map gate | flat 1024-wrap lookup at the key's atlas position plus the local offsets | gate at `DetailCell::atlas_x/atlas_z` + (A, B) | matching; PORTED 2026-09-24 ("Close the foliage mask residuals: atlas map gate, local anchor, P3 order"); D-FOLIAGE-12's world-position premise refuted |
 | Detail geometry | every surface of every LOD0 submesh expanded and terrain-bent | fresh CPU-expanded aggregate ArrayMesh batches | matching |
 | Detail pass split | high ref 180 / low ref 8 at distance 33; thermal forces one LOW at fade × 0.1 | separate high/low shaders and batches; `FrameRequest::thermal_view` | matching; thermal PORTED 2026-09-24 ("Draw new detail cells at once and thin them under thermal") |
 | Detail water sides | pass 0 / pass 1 split by the leaf's maximum height against the water and the camera side | `kRungFoliageFarSide` / `kRungFoliageCameraSide` | matching; PORTED 2026-09-24 ("Port the foliage depth masks, their water sides and anchors") |
-| Detail sway and fog | `Foliage_SetupVertexShaderConstants @ 0x600450`, `Foliage_WindSwayVS` literal @ 0x7de648 | sector-local sine, `c25.x` scale, 1/655360 ring term; linear eye-depth vertex fog for every fog type | matching; PORTED 2026-09-24 ("Port the foliage vertex-shader sway and fog constants") |
+| Detail sway and fog | `Foliage_SetupVertexShaderConstants @ 0x600450`, `g_FoliageWindSwayVS` literal @ 0x7de648 | sector-local sine, `c25.x` scale, 1/655360 ring term; linear eye-depth vertex fog for every fog type | matching; PORTED 2026-09-24 ("Port the foliage vertex-shader sway and fog constants") |
 | Distant MODEL placement | `Foliage_GenerateModelTileInstances @ 0x600980` | fresh runtime, four cells in the mission frame, cap 21/cell | matching; key frame PORTED 2026-09-24 |
 | Distant ground fit | four corners + four edge midpoints | portable corners/fold packed as `GridPlacementVS` instance blocks, evaluated on the GPU per instance | matching; GPU placement PORTED 2026-09-24 |
 | Distant MODEL blend/depth | `Foliage_LoadDefAssets @ 0x6015b7`, `Foliage_DrawModelTileSlot @ 0x601d90` | additive black, alpha-tested, depth-writing mask at the retail wave slots, plus the opaque-pass mask texture the person draws test | matching effect/state and order; D-FOLIAGE-10 FIXED 2026-09-24 |
@@ -127,7 +127,7 @@ actual function starts establishes this schedule:
 
 1. **Detail tier, camera distance ≤ 42:**
    `Terrain_CollectNearFoliagePatches @ 0x603e60` supplies 16-unit terrain
-   leaves to `generate_foliage_instances_0 @ 0x5ffdd0`. This generator expands
+   leaves to `Foliage_GenerateInstances_0 @ 0x5ffdd0`. This generator expands
    the complete foliage model once per accepted candidate.
 2. **Distant MODEL/depth-mask tier, view depth ≥ 38:**
    `Terrain_RenderSectorEntitiesBySide @ 0x5c7d50` drives
@@ -140,7 +140,7 @@ The 38–42 region is intentional overlap: detail geometry fades toward zero
 while MODEL masks have already begun. There is no retail transition from a near
 ground quad to a far colored model.
 
-The former `generate_foliage_instances_0 @ 0x600197` anchor was also wrong:
+The former `Foliage_GenerateInstances_0 @ 0x600197` anchor was also wrong:
 `0x600197` is an internal colormap-sampling instruction inside the function,
 not its entry point. The correct start is `0x5ffdd0`.
 
@@ -155,10 +155,10 @@ cell):
   the Godot plane. The collector packs PolyTrn's sector of `-camera_y`
   (`FB20`, the Godot Z axis) plus the node minimum, and local B **adds** to the
   Z-min [`orig: Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a`;
-  `generate_foliage_instances_0 @ 0x5fff84..0x5fffa2`]. A detail vertex lands
+  `Foliage_GenerateInstances_0 @ 0x5fff84..0x5fffa2`]. A detail vertex lands
   at render x (Godot Z) = keyLo + B + sx·sin + sz·cos and render z (Godot X) =
   keyHi + A + sx·cos − sz·sin, with the imported x = −sx
-  [`orig: generate_foliage_instances_0 @ 0x600112..0x60014d`];
+  [`orig: Foliage_GenerateInstances_0 @ 0x600112..0x60014d`];
 - **MODEL key**: packed in the mission frame (y = −Godot z). The low half keys
   the mission-y cell top and the candidate is (keyHi + A, keyLo − B); corners
   and edge midpoints follow in mission fixed point with `sar 1` midpoints
@@ -174,7 +174,7 @@ Each cell evaluates 36 candidates as a 6×6 grid:
 - independent X/Z jitter `1.8 × draw / 65536`;
 - yaw `draw × flt_7CD4DC`, where `flt_7CD4DC = 0x38C90FD0` sits slightly
   below the float nearest 2π/65536 (`0x38C90FDB`)
-  [`orig: generate_foliage_instances_0 @ 0x5fff7a;
+  [`orig: Foliage_GenerateInstances_0 @ 0x5fff7a;
   Foliage_GenerateModelTileInstances @ 0x600aeb`].
 
 The portable vectors (`foliage_runtime_vectors`, re-derived 2026-09-24 from an
@@ -205,7 +205,7 @@ the authored spawn `(297.805573,+409.123169)`, the armory-truck center
 `(318.975696,+397.309534)` remain eligible.
 `Terrain_LoadTileInfoFile @ 0x60a740` loads the same `<mission>.til` array
 used by `Terrain_GetSurfaceTypeAtPosition @ 0x606510` and streamed by
-`serialize_terrain_tiles @ 0x6080f0`. The reimpl parses it once before terrain
+`Terrain_SerializeTiles @ 0x6080f0`. The reimpl parses it once before terrain
 build and shares the resource with terrain, foliage, and listen-server state.
 
 The sibling `shadow` attribute is parsed but dead. `forceon` is compared at
@@ -229,7 +229,7 @@ literal, not the quality-scaled near zone the LOD decision subtracts: the x87
 stack carries `[dist, 16.0]` through the emit block and the gate is
 `fsubrp; fcomp 42.0; jp skip`, so a node farther than 58 units is never
 handed off however near its own leaves are. Cells behind the camera therefore never
-enter the visible-key list (`Foliage_VisibleDetailKeyList`, cap 128), which is
+enter the visible-key list (`g_FoliageVisibleDetailKeyList`, cap 128), which is
 what keeps the far-slot pool's working set below its 16-bit-index capacity
 (D-FOLIAGE-13). `Terrain_CollectNearFoliagePatches @ 0x603e60` then
 recursively reaches 16-unit leaves over the height mipchain, rejects a leaf
@@ -286,13 +286,13 @@ later authored cells when it fills. The collector regression covers authored
 and flat 127→128 transitions and an already-full 128-entry list.
 
 The adversarial follow-up also traced empty-sector keys through their final
-consumer. `terrain_render_visible_sectors @ 0x6090C0` sets `0x80000000` at
+consumer. `Terrain_RenderVisibleSectors @ 0x6090C0` sets `0x80000000` at
 `0x60924A`, then traverses quadrant 1. The collector retains the raw node `+52`
 height center at `0x603F46` and combines the flat flag into the key at
 `0x603F7E..0x603F8A`; zero-height terrain drawing does not flatten this distance
 input. `Foliage_UpdateDetailCellSlots @ 0x601B30` performs ordinary key lookup,
 allocation and LRU touching for flagged keys. The flag test belongs to
-`generate_foliage_instances_0 @ 0x5FFDD0`, at `0x5FFE05`: it writes zero index
+`Foliage_GenerateInstances_0 @ 0x5FFDD0`, at `0x5FFE05`: it writes zero index
 and vertex counts at `0x5FFE10..0x5FFE16` before placement/map/height sampling.
 `Foliage_SetupDetailSlotDraw @ 0x6007C0` subsequently reads those zero counts,
 so these are real empty cache residents, not drawable flat grass.
@@ -367,7 +367,7 @@ For every detail candidate:
   `world_y = terrain_height(world_x, world_z) + source_y × 0.5`;
 - the source height becomes the clamped bend byte used by the wind shader.
 The scale audit rules out a hidden foliage-width correction. Raw source X/Z
-feed the yaw/translation path directly at `generate_foliage_instances_0 @
+feed the yaw/translation path directly at `Foliage_GenerateInstances_0 @
 0x600112..0x60014d`; only source Y is multiplied by
 `flt_7C3B94 = 0.5` at `0x600121..0x60012a`. The bend byte is independently
 `clamp(sourceY × 128,0,255)` at `0x6002db..0x60030a`.
@@ -425,7 +425,7 @@ The main scene invokes the renderer twice per frame, split by water side:
 `Foliage_RenderDetailPatchesPass @ 0x60c6d0` brackets `Foliage_RenderDetailPatches`
 with fog on/off). The side test compares the collected node's AABB maximum
 height (node `+0x28`, `fcom [ecx+28h]` @ 0x60a1a2) with
-`Env_WaterHeightFixed`: pass `formatType` 0 draws the patches lying wholly
+`g_EnvWaterHeightFixed`: pass `formatType` 0 draws the patches lying wholly
 at or below the water while the camera is above it (and the patches reaching
 above the water while the camera is below), pass 1 the rest
 [`orig: Foliage_RenderDetailPatches @ 0x609df4..0x609e1b, @ 0x60a1a0..0x60a1c6`].
@@ -477,7 +477,7 @@ patch's D3D world translation, `FB20 << 9` stored by the collector
 @ 0x603fc1), scaled by `c24.y = 1` and offset by the phase `c24.x`. The
 displacement goes to render z (the Godot X): `mad r1.z, sin*bend, c25.x,
 v0.z` with `c25.x = 0.03` (`flt_7C9B90`), weighted by the source-height bend
-[`orig: Foliage_WindSwayVS literal @ 0x7de648;
+[`orig: g_FoliageWindSwayVS literal @ 0x7de648;
 Foliage_SetupVertexShaderConstants @ 0x60074a..0x6007b4`]. The earlier port
 swayed Godot Z by a sine of world X. The compiler resolves each detail
 command's sector origin (`renderer::foliage_detail_wind_sector_origin_z`)
@@ -516,7 +516,7 @@ plus the byte-quantized heightfield-normal/light DOT3 alpha.
 `PolyTrn_RenderTile @ 0x60da70` clears authored colormap A in its
 `0x00808080` base draw, so no colormap sun mask survives into this input;
 `Terrain_GenerateNormalMap @ 0x603210` and
-`PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e` supply the alpha
+`g_PolyTrnTileBakeDot3LightPass @ 0x60e385..0x60e39e` supply the alpha
 instead. The preview's 1024 normal atlas is clamped to the selected
 quadrant's texel-center bounds, matching four retail 512 CLAMP samplers. The
 detail emitter color is not a second dynamic time-of-day input.
@@ -524,13 +524,13 @@ detail emitter color is not a second dynamic time-of-day input.
 componentwise product
 `0x319F9D0/D4/D8 × 0x319F9E0/E4/E8`. The complete xref set for the second
 vector contains only the render reads plus the writes of literal `1.0` at
-`init_terrain_lighting_color_ramps @ 0x604ffa/0x605004/0x605010`; there is no
+`Terrain_InitLightingColorRamps @ 0x604ffa/0x605004/0x605010`; there is no
 per-frame color writer. Therefore the active multitexture path's c6.rgb is
 exactly the first vector.
 
 `PolyTrn_InitTextures @ 0x60b03c..0x60b065` writes that first vector to
-`(128/255,128/255,128/255)` when `PolyTrn_HasBlendmap` is true and
-`PolyTrn_ShaderTier >= 1`. The constant at `0x7DF2E0` has bytes
+`(128/255,128/255,128/255)` when `g_PolyTrnHasBlendmap` is true and
+`g_PolyTrnShaderTier >= 1`. The constant at `0x7DF2E0` has bytes
 `81 80 00 3F`, the exact float encoding of `128/255`. Only the fallback at
 `0x60b06a..0x60b13e` writes the source terrain texture's average RGB divided
 by 255. The reimpl's fixed `0.5019608` uniform is therefore exact for the top
@@ -542,7 +542,7 @@ The apparent EffectWorld point-light hook is inert on that selected path.
 `Foliage_RenderDetailPatches` does call `Light_SelectAndEnableForDraw` once per
 patch at `0x60a5dc`, after building the patch AABB, so the legacy device state
 really does select and enable up to four D3D lights. But asset load first
-creates `Foliage_WindSwayVS` unconditionally (`Foliage_LoadDefAssets
+creates `g_FoliageWindSwayVS` unconditionally (`Foliage_LoadDefAssets
 @ 0x601278 -> Terrain_CreateFoliageVertexShaders @ 0x5ff630`), and
 `Foliage_SetupDetailSlotDraw` installs that nonzero handle in every selected draw
 descriptor at `0x60087a..0x600883`. The complete `vs_1_1` literal at
@@ -569,7 +569,7 @@ only into the page (see the tile record); the page composition itself is
 terrain's (D-TERRAIN-7, closed 2026-09-26).
 
 The tile projection is explicitly **pre-wind**. In the
-`Foliage_WindSwayVS` literal (`0x7de648`, copied at `0x5ff691`, assembled
+`g_FoliageWindSwayVS` literal (`0x7de648`, copied at `0x5ff691`, assembled
 at `0x5ff6df`), `mad r1.z` applies wind at `0x7de7f1` and
 `m4x4 oPos,r1,c0` consumes it at `0x7de821`; independently,
 `m4x3 r10,v0,c12` at `0x7de835` and the c7/c8 `oT1` projections at
@@ -589,7 +589,7 @@ page that does not contain the point
 `TerrainTileCompositionCache::lookup`, queried at the cell centre
 (corrected 2026-09-24; the earlier text named the function
 `Terrain_FindSectorTileRT` and called the match exact). The live quality
-branch is not the inverse-view fallback: `Foliage_WindSwayVS != 0 @ 0x5ffbb0`
+branch is not the inverse-view fallback: `g_FoliageWindSwayVS != 0 @ 0x5ffbb0`
 is true after required shader creation, so `Foliage_RenderDetailPatches @
 0x60a25d..0x60a297` builds c7/c8 from the packed page origin and
 `1/(1024>>lod)`. Its model translation is D3D `(world Z,0,world X)`
@@ -672,12 +672,12 @@ bits and no ground entity: placed rows through `entity_render_visible`
 twins through their live verdict, and bare wire rows through the person or
 sphere collector legs with the received stance bits and no carrier
 (`godot/src/simulation/simulation_occlusion.cpp`). Retail's
-`test_sector_entity_occlusion` call inside the BySide wave
+`Terrain_TestSectorEntityOcclusion` call inside the BySide wave
 (`Terrain_RenderSectorEntitiesBySide @ 0x5c7d96`, skipped for contained
 entities `@ 0x5c7d8b..0x5c7da0`) reaches the anchors through those same
 verdicts (`OcclusionWorld::render_wave_toc_occluded`). The local player takes
 the same collector verdict as any person, because retail's pool walk has no
-local-player exception [`orig: collect_visible_entities_for_terrain
+local-player exception [`orig: Terrain_CollectVisibleEntitiesForTerrain
 @ 0x5c8c60`]. The frame compiler applies only the MODEL walk's `>= 38`
 view-depth floor and each anchor's water side
 (`renderer::foliage_entity_far_side`, camera side
@@ -697,7 +697,7 @@ replay.
 
 The generator samples four rotated footprint corners and the four edge
 midpoints. Those eight heights form `(E_A, T_A, E_B, T_B)`, the biquadratic
-correction consumed by `Foliage_GridPlacementVS`. The fresh runtime returns the
+correction consumed by `g_FoliageGridPlacementVS`. The fresh runtime returns the
 four corners and fold explicitly. Since 2026-09-24 the GPU runs the
 placement: the compiler builds each slot's normalized instanced vertex buffer
 (x/z over the bound square mapped to [0,1], y halved)
@@ -792,11 +792,11 @@ draw, repeated submissions of one resident entry included
 moves depth coverage, not black scene color.
 
 The DETAIL tier's phase register is `c24 = (GetTickCount() × 0.003 +
-Env_WaveOscRing[0] / 655360, 1, 0, -)` with the `0.03` sway scale in `c25.x`
+g_EnvWaveOscRing[0] / 655360, 1, 0, -)` with the `0.03` sway scale in `c25.x`
 (`Foliage_SetupVertexShaderConstants @ 0x60074a..0x6007b4`: `fild` the ms
-word, `fmul` 0.003 (`flt_7DE9D4`), `fild Env_WaveOscRing`, `fmul`
+word, `fmul` 0.003 (`flt_7DE9D4`), `fild g_EnvWaveOscRing`, `fmul`
 `flt_7DE9D0 = 0x35CCCCCD` = 1/655360 (`@ 0x600767`), `faddp`; `c25.x =
-flt_7C9B90` uploaded `@ 0x600788..0x6007b4`), so `Foliage_WindSwayVS`'s
+flt_7C9B90` uploaded `@ 0x600788..0x6007b4`), so `g_FoliageWindSwayVS`'s
 `sin(v0.x + c24.x) × bend × c25.x` sways on a WALL-CLOCK phase (3 rad/s, one
 cycle every ~2.1 s) offset by the weather oscillator's ring slot 0
 ([env-tod-re.md](../env/env-tod-re.md) §weather tick, the ring readers).
@@ -842,9 +842,9 @@ successively smaller mips approach gray. A constant 8×8
 The definition color modes do not restore this color through vertex diffuse.
 The live `color_lower`/`color_upper` fields at `0x2C25F78/0x2C25F7C` are
 selected around the source-Y `0.125` boundary at `0x6001fd..0x6002d8`, but
-`generate_foliage_instances_0` then unconditionally overwrites that packed
+`Foliage_GenerateInstances_0` then unconditionally overwrites that packed
 color at `0x6002db..0x60030a` with the source-height bend carrier.
-`Foliage_WindSwayVS` (`0x7DE648`) consumes v5.x only for bend and emits
+`g_FoliageWindSwayVS` (`0x7DE648`) consumes v5.x only for bend and emits
 `oD0=c6`. Authored leaf color therefore survives through sampled t0, not v0
 or `color_upper`.
 
@@ -1069,11 +1069,11 @@ claim or divergence.
 | D-FOLIAGE-6 | **FIXED 2026-07-14.** The former opaque-black conclusion missed the downstream ONE/ONE blend state. The reimpl now preserves destination color while retaining the recovered strict-alpha-tested MODEL depth write. |
 | D-FOLIAGE-7 | **FIXED (MATCHING, 2026-09-26: the last facet, the detail pass's page-edge addressing, is the CLAMP the reimpl already sampled; narrowed 2026-09-24 and 2026-08-23).** The foliage half of the page input is ported: detail `t1` is the page `TerrainTileCompositionCache::lookup` returns, retail's `Terrain_FindSectorPatchRT @ 0x6042a0` rule (first resident record in record order at granularity 32..512 in the point's sector, no LOD or same-frame preference, `@ 0x6042B0..0x60430B`), from the ported 128-record cache whose pages compose inside the frame that draws them, with retail's TOD refresh ("Port retail's terrain page record cache and compose pages before they draw"); a patch with no resident page is skipped, as retail's null lookup skips it (`Foliage_RenderDetailPatches @ 0x60a1de`, `@ 0x60a1e6..0x60a1e8` -> `@ 0x60a6a2`; "Retire the detail foliage's raw .til overlay fallback"); the raw `.til` overlay path and the hosted 1024 bake are gone ("Retire the hosted 1024 .til overlay bake"), so the overlay reaches foliage only through the page composer, whose `.til` quads are RGB only over the DXT5 atlas ("Compose terrain pages with the retail D3D9 raster and texture filters", "Encode the terrain atlas and detail layers with retail's D3DX DXT codec"). The c7/c8 reduction, PROJSHAD admission/blending and the temporary-blue composite stay exact as recorded 2026-08-23. The last two facets closed 2026-09-26: (1) where the patch UV leaves the returned page (a coarse or finer record need not contain the patch), the page clamps: it reaches t1 through slot 2 (`@ 0x60A211`), and both detail pass states' intrinsic words (LOW `0x2560000`, HIGH `0x2460000`; `Foliage_LoadDefAssets @ 0x601519 / 0x601530`) carry the stage-1 CLAMP bit (`CGfxShader_ApplyPass @ 0x68327E..0x683286`), the reimpl's clamp-to-edge; (2) the page producer's last facet closed with D-TERRAIN-7. Generic whole-process CTRL/RNG ordering is D-3DI-2. |
 | D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadTileInfoFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
-| D-FOLIAGE-9 | **FIXED 2026-09-24** ("Port the foliage depth masks, their water sides and anchors", "Close the foliage mask residuals: atlas map gate, local anchor, P3 order", "Run render_TOC on collected entities outside blink boxes"). Narrowed 2026-07-16 to visibility membership: a camera frustum stood in for retail's visible-sector walk and `test_sector_entity_occlusion @ 0x5c4610`, and same-frame refreshes of one `(slot, cell key)` were coalesced. The anchors are now the occlusion frame's collected organics with stance bits and no ground entity (placed rows via `entity_render_visible`, runtime twins via their live verdict, bare wire rows via the person/sphere collector legs with the received stance bits and no carrier); the waves' contained render_TOC test (`Terrain_RenderSectorEntitiesBySide @ 0x5c7d96`, skipped for contained entities `@ 0x5c7d8b..0x5c7da0`) runs inside those verdicts (`OcclusionWorld::render_wave_toc_occluded`); the local player takes the same collector verdict, since `collect_visible_entities_for_terrain @ 0x5c8c60` has no local-player exception. The compiler keeps only the MODEL walk's `>= 38` floor (`Foliage_UpdateModelTiles @ 0x601f99..0x601fab`), and every on-phase visit regenerates around its own anchor (`@ 0x602085..0x6020aa`), so the coalescing is gone. Since 2026-09-26 the weapon Inset pass (`Render_WeaponInsetScene @ 0x5C9740`: its traversal `sub_60FF50` called `@ 0x5C9A2F`, `Render_TerrainScene` called `@ 0x5C99B7`, `Terrain_RenderWorldScene` called `@ 0x5C9DE9`) compiles its own detail cells (from its own terrain traversal), anchors and mask frame on the shared compiler (one cache, one model pool), after the main view and the Inset collect (the counters `@ 0x601B36`, `@ 0x610CF7`; the 2026-09-26 section). |
+| D-FOLIAGE-9 | **FIXED 2026-09-24** ("Port the foliage depth masks, their water sides and anchors", "Close the foliage mask residuals: atlas map gate, local anchor, P3 order", "Run render_TOC on collected entities outside blink boxes"). Narrowed 2026-07-16 to visibility membership: a camera frustum stood in for retail's visible-sector walk and `Terrain_TestSectorEntityOcclusion @ 0x5c4610`, and same-frame refreshes of one `(slot, cell key)` were coalesced. The anchors are now the occlusion frame's collected organics with stance bits and no ground entity (placed rows via `entity_render_visible`, runtime twins via their live verdict, bare wire rows via the person/sphere collector legs with the received stance bits and no carrier); the waves' contained render_TOC test (`Terrain_RenderSectorEntitiesBySide @ 0x5c7d96`, skipped for contained entities `@ 0x5c7d8b..0x5c7da0`) runs inside those verdicts (`OcclusionWorld::render_wave_toc_occluded`); the local player takes the same collector verdict, since `Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60` has no local-player exception. The compiler keeps only the MODEL walk's `>= 38` floor (`Foliage_UpdateModelTiles @ 0x601f99..0x601fab`), and every on-phase visit regenerates around its own anchor (`@ 0x602085..0x6020aa`), so the coalescing is gone. Since 2026-09-26 the weapon Inset pass (`Render_WeaponInsetScene @ 0x5C9740`: its traversal `sub_60FF50` called `@ 0x5C9A2F`, `Render_TerrainScene` called `@ 0x5C99B7`, `Terrain_RenderWorldScene` called `@ 0x5C9DE9`) compiles its own detail cells (from its own terrain traversal), anchors and mask frame on the shared compiler (one cache, one model pool), after the main view and the Inset collect (the counters `@ 0x601B36`, `@ 0x610CF7`; the 2026-09-26 section). |
 | D-FOLIAGE-11 | **FIXED 2026-07-16.** The reimpl fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity`, the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query (over the occlusion frame's collector verdicts since 2026-09-24, D-FOLIAGE-9). The former ONED preview had no infantry and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |
 | D-FOLIAGE-13 | **FIXED 2026-07-16.** The reimpl collected detail cells with a standalone RADIAL walk (the full 42-unit disc, ~34 cells on open ground); retail's collector is invoked only from frustum-surviving traversal nodes of level ≥ 3 [`orig: @ 0x60905c..0x60907c`], so its working set is the frustum wedge. Over-collection pushed the far-slot pool past its witnessed 16-bit-index capacity (`min(128, 65534/(36×V))` ≈ 32 for a ~54-vertex def) and the witnessed strict-first-max LRU (per-update stamps, all-ties) then hammered one slot per frame — a user-visible two-frame grass blink at working-set-over-capacity poses that retail never exhibits. Collection is now seated in the traversal handoff; at the reported 00TRa pose: 34→24 cells, 2 misses+evictions/frame→0, blink gone. |
 | D-FOLIAGE-14 | **FIXED 2026-09-13 (minted and closed).** Collector capacity and node gating after the D-FOLIAGE-13 seating. The follow-up audit found that collection still depended on the retained 224-entry main draw list, dropping nearby foliage when earlier sectors filled it. Traversal now carries foliage handoffs independently while preserving LOD/frustum admission and the collector's 42-unit/128-cell limits. Full retail leaf execution pins main 223/224 versus independent near/key 127/128 boundaries; portable frame fixtures pin ordered nearby cells after authored or default-flat main saturation, with no extra far/behind-view cells. Adversarial review also corrected sector-zero rejection and the premature high-bit cache gate: flat cells use quadrant 1's raw height center, retain their flagged keys in the independent 128-cell budget, and allocate/touch ordinary empty cache residents whose generator performs no sampling. Nine additional original collector boundary cases and a two-frame original cache/generator sequence pin that behavior; portable terrain-to-foliage frame and capacity-one eviction fixtures cover the full consumer chain. A second collector correction moves distance rejection after unconditional nonleaf descent, preserving near low leaves under mixed-height ancestors; original flagged/unflagged execution and portable whole-sector/64-unit/32-unit fixtures pin that boundary. A third correction restores the traversal's own node gate, which the independent handoff had dropped: a handoff requires the raw node distance less a fixed 16.0 to be within 42, so a far node center (a [0,127] node under a camera at Y=0) or a flat sector under a camera above 58 never reaches the collector; a compiler fixture pins both plus the inclusive 58-unit boundary. See Exact 16-unit collection above. [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, 16.0 @ 0x608D46, cap bypass @ 0x608FBC -> 0x609012, handoff gate @ 0x60906B..0x609078, call @ 0x60907C; Terrain_CollectNearFoliagePatches @ 0x603E60, capacity gates @ 0x603F98 and @ 0x603FF1]. |
-| D-FOLIAGE-12 | **FIXED 2026-07-17; premise REFUTED and corrected 2026-09-24** ("Close the foliage mask residuals: atlas map gate, local anchor, P3 order"). The 2026-07-17 entry split the gate into two samplers, detail = the flat 1024-wrap at the WORLD position's low ten bits, MODEL = sector-grid-routed. The flat wrap is real (`Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0` masks `& 0x3FF`; `foliage_sample_detail_flat_wrap` keeps the loader's actual-width stride, width-derived `floor(log2(width))` and the low-10-bit wrap, [`orig: Foliage_LoadFoliageMapPCX @ 0x605ad0`]), but its input is not the world position: the detail key's halves are `(sector << 10)` plus the leaf node's integer position in the one 1024 atlas quadtree (`quadtree_init_root_node` runs once with total 1024 at origin 0 from `PolyTrn_LoadTerrainConfig @ 0x60e692..0x60e69d`; the node ints are stored `quadtree_node_init_recursive @ 0x6082fc..0x608302`; packed at `Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a`), and the generator samples at `key & 0x3FF` plus (A, B) (`generate_foliage_instances_0 @ 0x5ffddb..0x5ffdee, @ 0x5fff84..0x5fff9d`, the gate call `@ 0x600065`) while it places vertices from `key & 0x1FF` and rebuilds the blocker's world position as `key & 0x1FF` + bits 10..14 `<< 9` (`@ 0x5fffb8..0x60000e`). The detail sample therefore lands on the sector-routed pixel, the same one `Foliage_SampleFoliageMapMask @ 0x606620` routes the MODEL tier to. The collector now carries each cell's atlas minimum and the gate samples there; the world-flat seam (`get_detail_foliage_index_world`, `sample_detail_index_world`) is deleted. The Dvxi5 GameWorld fixture's witnesses are flipped: the routed witness grows detail grass, the flat-only witness grows none. |
+| D-FOLIAGE-12 | **FIXED 2026-07-17; premise REFUTED and corrected 2026-09-24** ("Close the foliage mask residuals: atlas map gate, local anchor, P3 order"). The 2026-07-17 entry split the gate into two samplers, detail = the flat 1024-wrap at the WORLD position's low ten bits, MODEL = sector-grid-routed. The flat wrap is real (`Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0` masks `& 0x3FF`; `foliage_sample_detail_flat_wrap` keeps the loader's actual-width stride, width-derived `floor(log2(width))` and the low-10-bit wrap, [`orig: Foliage_LoadFoliageMapPCX @ 0x605ad0`]), but its input is not the world position: the detail key's halves are `(sector << 10)` plus the leaf node's integer position in the one 1024 atlas quadtree (`Terrain_QuadtreeInitRootNode` runs once with total 1024 at origin 0 from `PolyTrn_LoadTerrainConfig @ 0x60e692..0x60e69d`; the node ints are stored `Terrain_QuadtreeNodeInitRecursive @ 0x6082fc..0x608302`; packed at `Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a`), and the generator samples at `key & 0x3FF` plus (A, B) (`Foliage_GenerateInstances_0 @ 0x5ffddb..0x5ffdee, @ 0x5fff84..0x5fff9d`, the gate call `@ 0x600065`) while it places vertices from `key & 0x1FF` and rebuilds the blocker's world position as `key & 0x1FF` + bits 10..14 `<< 9` (`@ 0x5fffb8..0x60000e`). The detail sample therefore lands on the sector-routed pixel, the same one `Foliage_SampleFoliageMapMask @ 0x606620` routes the MODEL tier to. The collector now carries each cell's atlas minimum and the gate samples there; the world-flat seam (`get_detail_foliage_index_world`, `sample_detail_index_world`) is deleted. The Dvxi5 GameWorld fixture's witnesses are flipped: the routed witness grows detail grass, the flat-only witness grows none. |
 | D-FOLIAGE-10 | **FIXED 2026-09-24** ("Port the foliage depth masks, their water sides and anchors", "Give the foliage MODEL masks their own ladder rungs", "Close the foliage mask residuals: atlas map gate, local anchor, P3 order", "Keep a person's blended strip off its MATCHTERRAIN path behind a mask"). The state half retired 2026-07-15 (the strict `LESS` secondary via the high-pass cutoff discard) and the reflection half 2026-09-01 (the mirror draws no foliage, env #30; the `fade × 0.1` flag it described is in fact the thermal view, ported 2026-09-24). The order half is ported: the masks draw at their retail wave slots in the transparent list (leading `kRungAlphaFarSide` / `kRungScars` at sorting offset `-1e6`) and in a PRE_OPAQUE mask texture that person draws, their P3 layer and their blended NORMAL output test, so a same-wave mask leaves only the MATCHTERRAIN pre-pass and a far-wave mask hides a camera-wave person, as inside retail's BySide waves (`Terrain_RenderSectorEntitiesBySide @ 0x5c7ddf..0x5c7f11`; far wave `@ 0x5c955f`, camera wave `@ 0x5c9638`). First-wave P3 stays before both masks (`@ 0x5c9506`). The last suspected residual, a blended strip losing its MATCHTERRAIN colour behind a mask, is not a divergence: no blending technique has a MATCHTERRAIN pass, so retail's blended strip behind a mask shows nothing of itself either. See MODEL blend/depth draw. |
 
 ## Cross-references

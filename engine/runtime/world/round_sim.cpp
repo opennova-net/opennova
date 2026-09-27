@@ -817,7 +817,7 @@ RoundSourceState resolve_round_source(World &world,
 // byte_24D217C gate has no writer in the image (hud/sight_overlay.h).
 // [orig: RoundData_SpawnRound @0x4ec155 (& 0x3F), sourceEntity && step
 //  @0x4ec16a, entity+0x2B0 @0x4ec16f; Score_GetMultiplierValue @0x4fc440 --
-//  the 39 clamp @0x4fc44f..0x4fc451, AdmDefs+0x3B0 @0x4fc46d]
+//  the 39 clamp @0x4fc44f..0x4fc451, g_AdmDefs+0x3B0 @0x4fc46d]
 int32_t round_zero_elevation(const World &world, const RoundSpawnParams &params) {
     uint8_t adm = 0;
     if (params.source_state != nullptr) {

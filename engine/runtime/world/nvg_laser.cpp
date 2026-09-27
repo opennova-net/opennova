@@ -8,8 +8,8 @@ namespace opennova::world {
 
 // [orig: Entity_RenderNVGLaserBeam @ 0x5c609a (attach bone +0x157),
 //  @ 0x5c60a7 (+0x298), @ 0x5c60b5..0x5c60c2 (def+8 & 0x40000000),
-//  @ 0x5c60c8 (g_NVGActive), @ 0x5c60d4 (g_camera_mode), @ 0x5c60e0
-//  (g_local_player_entity)]
+//  @ 0x5c60c8 (g_NVGActive), @ 0x5c60d4 (g_CameraMode), @ 0x5c60e0
+//  (g_LocalPlayerEntity)]
 bool nvg_laser_beam_drawn(const NvgLaserGate &gate) {
 	if (gate.attach_bone != 0 || !gate.has_weapon_def) return false;
 	if ((static_cast<uint32_t>(gate.weapon_flags) & def::DEF_WEAPON_FLAG_LASERBEAM) == 0)

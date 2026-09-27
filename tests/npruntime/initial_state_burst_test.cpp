@@ -621,7 +621,7 @@ int main_impl() {
 // clear dword keeps the gate clear. The live values are the retail load
 // stream's own (fixtures/novaworld/run_20260426_120859/server_load_packets.nwmsg):
 // 0x20400 for a vehicle whose motor has run, 0x406 for a wreck.
-// [orig: serialize_entity_pool_to_packet_0 @0x503ae1..0x503aed;
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503ae1..0x503aed;
 //  Entity_InitFromModel @0x40e204..0x40e20a]
 int pool1_flags_field_impl() {
 	w::World world;
@@ -688,7 +688,7 @@ std::vector<uint8_t> hex_bytes(const char *hex) {
 // byte, the placement heading and no AIData name. Then a whole live retail vehicle
 // record (line 191, slot 0x101F), with the AI trailer's spawn x/y a vehicle that drove
 // away keeps streaming.
-// [orig: serialize_entity_pool_to_packet_0 @0x503940 — name @0x503A64..0x503ADF, Flags
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940 — name @0x503A64..0x503ADF, Flags
 //  @0x503AE1, byte @0x503D27..0x503D38, trailer @0x503D3D..0x503DAB, brain byte
 //  @0x503E7F..0x503EC0; Entity_InitFromModel @0x40E10C..0x40E11E;
 //  Entity_SpawnFromBMSRecord @0x40ED80/@0x40ED8C]
@@ -772,7 +772,7 @@ int pool1_fixture_bytes_impl() {
 	// before the carrier's init set REFLECTABLE), the turret's live attitude, team
 	// 1, the carrier as its target, the zero byte, the carrier's refNum 1 and its
 	// slot index 1 as subType. The position is float-exact near the record's.
-	// [orig: serialize_entity_pool_to_packet_0 @0x503940; Entity_SpawnWeaponOverlays
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940; Entity_SpawnWeaponOverlays
 	//  refNum @0x40F3B1, Flags @0x40F404, subType @0x40F40E]
 	w::World cworld;
 	cworld.registry.configure_pool(1, 0x60);
@@ -809,7 +809,7 @@ int pool1_fixture_bytes_impl() {
 	if (!expect(cwire == cwant, "the retail child record's layout rebuilds byte for byte")) return 1;
 
 	// The 0x10 static record streams the same live dword: the runtime word joins
-	// the spawn-composed one. [orig: serialize_pool2_static_to_buffer @0x5044E6]
+	// the spawn-composed one. [orig: NetPacket_SerializePool2StaticToBuffer @0x5044E6]
 	w::World sworld;
 	sworld.registry.configure_pool(2, 4);
 	w::Entity building;

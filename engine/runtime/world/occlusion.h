@@ -45,7 +45,7 @@ enum class OcclusionView : uint8_t { kMain = 0, kInset = 1 };
 
 // ----------------------------------------------------------------------------
 // Occlusion model (per graphic) — the "GPM Occ" arena records.
-// [orig: load_occlusion_model_data @ 0x5b4a00 — OVRT/OPLN copied verbatim, OFAC
+// [orig: ThreediGp_LoadOcclusionModelData @ 0x5b4a00 — OVRT/OPLN copied verbatim, OFAC
 // keeps disk field order, OOBJ 36 B disk -> 60 B runtime with per-object slice
 // pointers advancing sequentially. Runtime model +0xDC = count, +0xE0 = array.]
 // ----------------------------------------------------------------------------
@@ -78,7 +78,7 @@ inline constexpr uint8_t kOccRecWeldedLink = 5; // cross-building link (weld-mad
 // The per-axis portal-slot collection range, world units: only buildings within
 // 250 u of the camera contribute portal slots to the frame (the batch itself
 // ranges out to the fog distance). [orig: the 0xFA0000 slot-range compare in
-// collect_visible_sector_userpoints @ 0x5c6b60, at @ 0x5c6d7f]
+// Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60, at @ 0x5c6d7f]
 inline constexpr float kPortalSlotCollectRadius = 250.0f;
 
 // The 60 B runtime portal-face record; slice pointers become run indices into
@@ -163,8 +163,8 @@ struct OcclusionFrameCamera {
     // Viewport_BuildProjectionMatrix @ 0x4110e1; read by
     // Viewport_TransformAndClipPoint @ 0x4117b0]
     int32_t focal_pixels = 0;
-    int32_t fog_dist = 0;         // 16.16 [orig: Env_FogDistCurrent @ 0x26C681C]
-    int32_t water_z = 0;          // 16.16 [orig: Env_WaterHeightFixed @ 0x26C6454]
+    int32_t fog_dist = 0;         // 16.16 [orig: g_EnvFogDistCurrent @ 0x26C681C]
+    int32_t water_z = 0;          // 16.16 [orig: g_EnvWaterHeightFixed @ 0x26C6454]
     uint32_t local_blink_flags = 0; // [orig: g_LocalPlayerBlinkFlags @ 0x24C1934]
 };
 
@@ -208,7 +208,7 @@ public:
     // stamp nor a collision instance has no render model and is never
     // collected. [orig: the entity+0x30 model gates
     // Terrain_CollectVisibleEntities_0 @ 0x5c6fd8..0x5c6fe1 /
-    // collect_visible_entities_for_terrain @ 0x5c8cf6..0x5c8cff;
+    // Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8cf6..0x5c8cff;
     // Entity_ComputeBoundingSphere @ 0x5c69a0 over model+0xB0, its null-block
     // early out @ 0x5c69be]
     void assign_render_model(EntityHandle h, const renderer::ObjectProjectionSphere &sphere);
@@ -250,7 +250,7 @@ public:
     // terrain latch (mutates Entity::occlusion_latch); an entity in no blink
     // box then takes render_TOC (render_wave_toc_occluded). TRUE = render.
     // [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 (statics) /
-    // collect_visible_entities_for_terrain @ 0x5c8c60 (pools 0/1) — the gates
+    // Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 (pools 0/1) — the gates
     // @ 0x5c7022-0x5c708a and the latch @ 0x5c7125-0x5c7162]
     bool entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
                                const OcclusionFrameCamera &cam);
@@ -258,9 +258,9 @@ public:
     // hit nonzero) is collected only while one of its packed (building,
     // section) hits is set in the frame's raw section mask. TRUE = pass.
     // [orig: Terrain_CollectVisibleEntities_0 @ 0x5c7022-0x5c708a /
-    //  collect_visible_entities_for_terrain @ 0x5c8d70-0x5c8dd1]
+    //  Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8d70-0x5c8dd1]
     bool blink_hits_render_active(const uint32_t hits[4]) const;
-    // One render_TOC candidate: the fields test_sector_entity_occlusion reads
+    // One render_TOC candidate: the fields Terrain_TestSectorEntityOcclusion reads
     // through the list row's entity pointer.
     struct TocCandidate {
         EntityHandle self;                     // the slot self-skip key
@@ -277,14 +277,14 @@ public:
     // draws on the collector's blink-hits gate alone. TRUE = occluded.
     // [orig: Terrain_RenderSectorEntities `cmp dword ptr [eax+1D0h],0; jnz`
     //  @ 0x5c7b92..0x5c7ba6 and Terrain_RenderSectorEntitiesBySide
-    //  @ 0x5c7d8b..0x5c7da0, each calling test_sector_entity_occlusion
+    //  @ 0x5c7d8b..0x5c7da0, each calling Terrain_TestSectorEntityOcclusion
     //  @ 0x5c4610]
     bool render_wave_toc_occluded(const uint32_t hits[4], const TocCandidate &cand) const;
     // The same collector gate's view-cull + outdoors three-ray latch over a
     // bound sphere the caller derived (a decoded wire row: the client-built
     // pool entities retail's collector walks exactly like the host's own).
     // `latch` is that row's persistent latch counter. TRUE = render.
-    // [orig: collect_visible_entities_for_terrain @ 0x5c8c60 — the person
+    // [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 — the person
     // leg's view clip @ 0x5c8e21..0x5c8e68 and latch @ 0x5c8e7b..0x5c8eab,
     // the model leg's @ 0x5c8f86..0x5c8fd6; the statics collector
     // Terrain_CollectVisibleEntities_0 @ 0x5c6f20 runs the same latch
@@ -296,7 +296,7 @@ public:
     // The person leg of the same collector: the sphere is the entity position
     // with the person radius (person_collector_radius), and a sphere that
     // projects to at most 0.75 px is dropped BEFORE the latch is touched.
-    // [orig: collect_visible_entities_for_terrain @ 0x5c8c60, the sub-pixel
+    // [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60, the sub-pixel
     //  floor @ 0x5c8e5e]
     bool person_render_visible(const CollisionWorld &collision,
                                const OcclusionFrameCamera &cam,
@@ -304,7 +304,7 @@ public:
                                uint8_t &latch, uint32_t logic_tick);
     // A person's collector radius: its entity+0 bound radius, or under the
     // deployed-parachute flag the special item-185 model's radius.
-    // [orig: collect_visible_entities_for_terrain @ 0x5c8df3..0x5c8e10]
+    // [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8df3..0x5c8e10]
     int32_t person_collector_radius(int32_t bound_radius_q16, bool parachute) const;
     // The item-185 (parachute) model's GHDR radius, 16.16, host-fed at the
     // mission's collision resolve. [orig: the model preloaded by
@@ -454,7 +454,7 @@ private:
     // [orig: the flag-stamp tail @ 0x5c5860]
     void stamp_building_flags(CollisionWorld &collision);
 
-    // [orig: collect_visible_sector_userpoints @ 0x5c6b60] — the building batch
+    // [orig: Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60] — the building batch
     // + portal-slot collection (main scene: no def/entity flag filters).
     void collect_buildings(World &world, CollisionWorld &collision,
                            const OcclusionFrameCamera &cam);
@@ -465,12 +465,12 @@ private:
     //  @ 0x5c4440, the clamp @ 0x5c449f..0x5c44a4]
     void sort_portal_slots();
     // [orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0 ->
-    // build_clip_planes_from_collision @ 0x5b34e0]
+    // Terrain_BuildClipPlanesFromCollision @ 0x5b34e0]
     void build_occluder_planes(World &world, const OcclusionFrameCamera &cam);
-    // [orig: build_sector_visibility_masks @ 0x5c8610]
+    // [orig: Terrain_BuildSectorVisibilityMasks @ 0x5c8610]
     void build_section_masks(World &world, CollisionWorld &collision,
                              const OcclusionFrameCamera &cam);
-    // [orig: render_visibility_portal_traversal @ 0x5c4ae0 — "render_VPT()"]
+    // [orig: Render_VisibilityPortalTraversal @ 0x5c4ae0 — "render_VPT()"]
     void traverse(TraverseCtx &ctx, int32_t current_section, const float (*planes)[4],
                   int32_t plane_count);
     // The two seeders. [orig: Terrain_TraversePortalsFromSection @ 0x5c73d0 /
@@ -486,16 +486,16 @@ private:
     void bank_open_building(World &world, EntityHandle entity, int32_t mask_index,
                             const OcclusionFrameCamera &cam);
     // The building batch's render_TOC: toc_occludes over the row's entity,
-    // zeroing the row when it culls. [orig: test_sector_entity_occlusion
-    // @ 0x5c4610 from build_sector_visibility_masks @ 0x5c87f1 / 0x5c8a2f]
+    // zeroing the row when it culls. [orig: Terrain_TestSectorEntityOcclusion
+    // @ 0x5c4610 from Terrain_BuildSectorVisibilityMasks @ 0x5c87f1 / 0x5c8a2f]
     bool toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry);
-    // [orig: test_sector_entity_occlusion @ 0x5c4610 — "render_TOC()"; TRUE = occluded]
+    // [orig: Terrain_TestSectorEntityOcclusion @ 0x5c4610 — "render_TOC()"; TRUE = occluded]
     bool toc_occludes(const TocCandidate &cand) const;
     // [orig: Terrain_TestSphereInPlaneGroups @ 0x5c4580]
     bool sphere_in_plane_groups(const float pos[3], float radius,
                                 const std::vector<float> &plane_bank,
                                 const PlaneGroup *groups, int32_t group_count) const;
-    // [orig: terrain_occlusion_check_three_rays @ 0x610ed0; TRUE = some ray clear]
+    // [orig: Terrain_OcclusionCheckThreeRays @ 0x610ed0; TRUE = some ray clear]
     bool three_rays_clear(const CollisionWorld &collision, const OcclusionFrameCamera &cam,
                           const int32_t target[3], int32_t radius,
                           uint32_t debug_tick) const;

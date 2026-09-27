@@ -74,7 +74,7 @@ constexpr uint32_t SESSION_GATE_PROBE_TIMEOUT_MS = 30000u;
 // lobby session sits in state 4 (verified), the session checks its GLSVSS deadline at most once
 // per 1000 ms. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d4400 @0x4d44e3]
 constexpr uint32_t SESSION_GLSVSS_POLL_MS = 1000u;
-// The host's server-info refresh: Server_TickUpdate reloads g_serverinfo_update_timer to 0x744
+// The host's server-info refresh: Server_TickUpdate reloads g_ServerInfoUpdateTimer to 0x744
 // logic ticks, advances the PCID cookie-key ring and republishes the Host list.
 // [orig: Server_TickUpdate @0x51d7e0 @0x51d91d..0x51d948]
 constexpr uint32_t SESSION_HOST_INFO_REFRESH_TICKS = 0x744u;
@@ -287,13 +287,13 @@ NapiMessage make_client_glsvss_request(const std::string &request,
 // gated on the receiver being the authority (`is_authority`) and in a session; TextChatServer /
 // Cycle / EndMission / GameOver / Earthquake / Lightning / TimeOfDay / SetServerName /
 // SetServerMsg / SetMPReset compare the whole token case-insensitively.
-// [orig: the ServerCommand handler loc_4D22F0 — "Cmd" read @0x4d2333, tokenize @0x4d2392,
+// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand — "Cmd" read @0x4d2333, tokenize @0x4d2392,
 //  PuntPlayer @0x4d23aa, TextChatServer @0x4d256e, TextChatPlayer @0x4d2628, CmdEchoPlayer
 //  @0x4d276f, KillPlayer @0x4d28b6, ChangeTeam @0x4d2a11, SwapTeam @0x4d2a2c, Cycle @0x4d2a46,
 //  EndMission @0x4d2a60, GameOver @0x4d2a7a, Earthquake @0x4d2a94, Lightning @0x4d2b33,
 //  TimeOfDay @0x4d2bb5, SetServerName @0x4d2cc2, SetServerMsg @0x4d2d53, SetMPReset @0x4d2e00,
 //  ReloadPlayer @0x4d2e4f, DisarmPlayer @0x4d2f99; the suffix strings @0x7cc65c/0x7cc650/
-//  0x7cc648/0x7cc640; String_TokenizeQuotedToArray @0x616d60; StrStartsWithNoCase @0x616f40;
+//  0x7cc648/0x7cc640; String_TokenizeQuotedToArray @0x616d60; String_StartsWithNoCase @0x616f40;
 //  String_MatchSuffix @0x617040]
 enum class ServerCommandVerb : uint8_t {
 	None = 0,

@@ -271,7 +271,7 @@ private:
 	bool local_prone_ = false;
 	bool terrain_pass_drawn_ = true;
 	// Retail's highest selectable SHADOWQUALITY is 3 (Settings_ClampGraphicsOptions
-	// @0x54d546, copied into RenderSlot_DetailLevel @0x5d6159); 4 is the
+	// @0x54d546, copied into g_RenderSlotDetailLevel @0x5d6159); 4 is the
 	// unreachable 1024-base oversample tier.
 	int shadow_detail_ = 3;
 	uint32_t frame_ = 0;

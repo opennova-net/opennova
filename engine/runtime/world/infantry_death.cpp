@@ -41,7 +41,7 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     // The death scream. NPC (org1): profile slot 7 (sounddeath), or 8
     // (SSNightDead) on a night mission — the runtime reads the mission's
     // EnableNVG attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
-    // Bms_AttribFlags & 0x100000 pick; play at &entity->pos]
+    // g_BmsAttribFlags & 0x100000 pick; play at &entity->pos]
     // Player body (org2): the body-model composite set "<prefix>_DEATH"
     // ("_DEATH_K" at night) from the entity's anim-slot byte — NOT the
     // profile slots; a bank without the set is the id-0 silence with no

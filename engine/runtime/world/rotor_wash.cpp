@@ -72,7 +72,7 @@ void RotorWashSystem::update(Entity &e, const VehicleTraits &traits) {
 // released there; it dies with its last child (CEffectWorld_UpdateAndReapGroups
 // @0x5EC920). [orig: Terrain_ClearShadowTileSlot @0x5CB0D0, called from
 // Entity_InitDeathState @0x48F9F8 and Entity_Destroy @0x43E984; the owner tag
-// terrain_overlay_alloc @0x5CAF40 stamps]
+// Terrain_OverlayAlloc @0x5CAF40 stamps]
 void RotorWashSystem::release(Entity &e) {
 	const auto slot = std::size_t(e.veh.rotor_wash_handle & 0x7fffu);
 	if (e.veh.rotor_wash_handle && slot < zones_.size() && zones_[slot].owner == e.handle)
@@ -257,7 +257,7 @@ uint16_t RotorWashSystem::zone_at(const particle::Vec3 &position) const {
 	return nearest(p);
 }
 
-// [orig: find_nearest_force_zone @0x5CB5B0]
+// [orig: Terrain_FindNearestForceZone @0x5CB5B0]
 bool RotorWashSystem::sample_sway(const int32_t p[3], int32_t &magnitude, int32_t dir[3]) const {
 	for (std::size_t i = 0; i < count_; ++i) {
 		const auto &z = zones_[i];
@@ -434,7 +434,7 @@ void RotorWashSystem::tick() {
 		// height divisor is the slot's EXTENT: `fidiv dword ptr [esi-4]`
 		// @0x5CB532 (bytes DA 76 FC) is a 4-BYTE displacement from
 		// _ESI = &slot dword 31, i.e. slot dword 30, the extent stamped by
-		// terrain_overlay_alloc @0x5CAFC4 (slot[31] there is the intensity
+		// Terrain_OverlayAlloc @0x5CAFC4 (slot[31] there is the intensity
 		// word; the ray radius's `*(_ESI - 4)` @0x5CB265 is the DWORD index
 		// -4 = slot dword 27, the inner radius).
 		// [orig: WeatherParticle_UpdateAllEmitters @0x5CB4D1..0x5CB584;

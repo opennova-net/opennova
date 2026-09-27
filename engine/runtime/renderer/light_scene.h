@@ -1,6 +1,6 @@
 // The EffectWorld dynamic light/glow instance pool — the runtime system behind
 // D-RLIT-4. Retail keeps one process-global table of 176-byte instances
-// [orig: Light_InstanceTable @ 0x2732e28, capacity 4096, high-water count
+// [orig: g_LightInstanceTable @ 0x2732e28, capacity 4096, high-water count
 // @ 0x2732de4; spawner LightPool_SpawnGlowEffect @ 0x5a8d50 returns
 // slot | 0x8000]. Placed-model lights enter it at mission start — a walk over
 // entity pools 1..2 spawning one instance per model light record
@@ -17,29 +17,29 @@
 //
 // Per draw context retail queries the pool by AABB and takes the NEAREST
 // instances: overlap test + center-distance sort, at most 64 handles
-// [orig: collect_nearby_zones_by_aabb @ 0x5aa250 — distance metric
+// [orig: Light_CollectNearbyZonesByAABB @ 0x5aa250 — distance metric
 // sum(((d*d + 0x8000) >> 16)) per axis, bubble sort, skip flag bit 2].
 // THE DRAW IS ONE ENTITY, THE QUERY BOX IS THAT ENTITY'S OWN BOUND: both
 // sector walks build min/max = position -/+ boundRadius (entity+0, per axis)
-// and hand it to the live select [orig: setup_terrain_effect_for_entity
+// and hand it to the live select [orig: Terrain_SetupEffectForEntity
 // @ 0x5c74fb..0x5c753a; Terrain_RenderSectorModels @ 0x5c5ea6..0x5c5ee4 ->
 // @ 0x5c5f12 / @ 0x5c602e]. Light_SelectAndEnableForDraw @ 0x5ab9d0 runs the
-// same overlap + nearest sort into Light_VisibleHandles/Light_VisibleCount
+// same overlap + nearest sort into g_LightVisibleHandles/g_LightVisibleCount
 // and D3D-LightEnables the first <= 4 of them (the > 4 clamp @ 0x5abbeb;
-// update_light_slots @ 0x5abc50 is its xref-less twin) — that enable set is
+// Light_UpdateSlots @ 0x5abc50 is its xref-less twin) — that enable set is
 // the fixed-function fallback's only consumer and is torn down again per
 // batch entry (below). The lights a drawn strip actually receives come from
 // the BATCH ENTRY: each collector re-walks the sorted visible list in order,
 // gates Light_PassesActiveGroups @ 0x5a9120 [owner entity at record dword
 // 19, section at dword 20; an owned light passes only for the active
-// interior/owner group — called from collect_render_objects_for_batch
-// @ 0x5d91f8, collect_render_batches_for_entity @ 0x5d96b8,
-// render_terrain_sector_batch @ 0x60969f and RenderSlot_UpdateEntityLight
+// interior/owner group — called from Render_CollectRenderObjectsForBatch
+// @ 0x5d91f8, Render_CollectRenderBatchesForEntity @ 0x5d96b8,
+// Terrain_RenderSectorBatch @ 0x60969f and RenderSlot_UpdateEntityLight
 // @ 0x5d6b89] plus the objects-enable flag (render flag 0x800 clear
 // @ 0x5a9010, called @ 0x5d920c / @ 0x5d96cc), and stores AT MOST THREE
 // handles in entry dwords 5..7 with the count in dword 8 [orig: `cmp esi, 3;
-// jge` @ 0x5d9226..0x5d9229 in collect_render_objects_for_batch @ 0x5d8f20;
-// the twin @ 0x5d96e6..0x5d96e9 in collect_render_batches_for_entity
+// jge` @ 0x5d9226..0x5d9229 in Render_CollectRenderObjectsForBatch @ 0x5d8f20;
+// the twin @ 0x5d96e6..0x5d96e9 in Render_CollectRenderBatchesForEntity
 // @ 0x5d94b0]. CRenderBatchQueue_FlushBatches @ 0x5d9f50 walks exactly those
 // three slots (`X[2] = 3` @ 0x5da26b), pushes the survivors as
 // PointLightCoordArray/ColorArray/AttenArray with CurNumPointLights = the
@@ -63,10 +63,10 @@
 //
 // FOLIAGE IS NOT A DELIVERY TARGET ON THE LOCKED HIGHEST-QUALITY PATH. The
 // far-patch loop does call Light_SelectAndEnableForDraw @ 0x60a5dc, but
-// Foliage_LoadDefAssets first creates Foliage_WindSwayVS @ 0x601278 and
+// Foliage_LoadDefAssets first creates g_FoliageWindSwayVS @ 0x601278 and
 // Foliage_SetupDetailSlotDraw installs it in the descriptor @ 0x60087a..0x600883.
 // The complete vs_1_1 literal @ 0x7de648 declares position/color/texcoord only,
-// never normal/light input, and writes oD0 = c6; Foliage_LightmapBlendPS then
+// never normal/light input, and writes oD0 = c6; g_FoliageLightmapBlendPS then
 // uses that oD0 plus cached-tile c0/c1. SetLight/LightEnable can affect foliage
 // only when VS creation failed and the FVF fixed-function fallback runs. That
 // fallback is excluded by the highest-quality-retail-path capture contract.
@@ -77,7 +77,7 @@
 // 0x83FD00 = ctrl value slot 0x83FCE8 + 8 * ordinal 3 (THREEDI_CTRL_FLICKER)
 // — so each light flickers with a position-phased sample of the shared ring
 // [orig: Light_TickGenBlock @ 0x5a8ae0: index = (z>>15) + (y>>14) + (x>>14)
-// + Env_WaveRingIndex, value = Env_WaveAmpRing[index & 0xFF]]. The RGB-gen
+// + g_EnvWaveRingIndex, value = g_EnvWaveAmpRing[index & 0xFF]]. The RGB-gen
 // styles then evaluate exactly like model lights (styles 113/114 read the
 // ctrl value) via renderer::eval_light_runtime.
 //
@@ -131,7 +131,7 @@
 // <= 100 wu (0x640000 fixed) and a +-512-fixed x/y jitter phased on
 // frame & 3; texture = the procedural 128x128 "texlightcrn" radial
 // (intensity = 255 x (0.4 - 0.45 x d), d = sqrt(((x-64)/64)^2 +
-// ((y-64)/64)^2), border texels 0) via Light_CoronaShader @ 0x2732db8
+// ((y-64)/64)^2), border texels 0) via g_LightCoronaShader @ 0x2732db8
 // [orig: Lighting_InitTextures @ 0x5a94f0], fog+blend mode 2 (additive
 // with FOGCOLOR forced black @ 0x677740 case 2 — fog fades coronas OUT,
 // never toward the fog color). Owned lights additionally gate on the owner
@@ -153,18 +153,18 @@
 // record's falloff byte, rotation, and view_proj never reach the runtime —
 // every model light renders as an omni point light, and the spotlight
 // projected-texture legs in CRenderBatchQueue_FlushBatches
-// (Light_IsSpotlight @ 0x5a9040 -> get_light_projection_info @ 0x5aa5c0)
+// (Light_IsSpotlight @ 0x5a9040 -> Light_GetProjectionInfo @ 0x5aa5c0)
 // are unreachable. LightSpawnParams therefore carries no spot fields.
 //
 // Intentional safety divergence: retail's setters write through stale handles
 // into reused slots; OpenNova's generation lease rejects those writes.
 //
-// The ambient scale the select multiplies (EffectWorld_AmbientScale{R,G,B}
+// The ambient scale the select multiplies (g_EffectWorldAmbientScale{R,G,B}
 // @ 0x840b24..0x840b2c) is the fog/ambient modulator's packed colour x 1/64
 // [orig: EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaf1d..0x5aaf37, sole
 // caller Environment_ApplyFogAndAmbient @ 0x57e464] — the env light-state
 // gain the presenter feeds. The same per-frame tick that decays the pool
-// ALSO unpacks Env_TerrainColorRecip bytes x 1/128 into flt_2732DA{C,8,4}
+// ALSO unpacks g_EnvTerrainColorRecip bytes x 1/128 into flt_2732DA{C,8,4}
 // (@ 0x5aa21d..0x5aa23f), but that triple is a SEPARATE factor consumed only
 // by the terrain projected pass (light_terrain_pass.h
 // terrain_per_channel_factor; env::terrain_color_recip_packed is the producer)
@@ -287,7 +287,7 @@ struct SelectedLight {
 };
 
 struct LightFlickerInputs {
-	// Env_WaveAmpRing / Env_WaveRingIndex (engine/formats/env env_weather.h).
+	// g_EnvWaveAmpRing / g_EnvWaveRingIndex (engine/formats/env env_weather.h).
 	const int32_t *amp_ring = nullptr;
 	size_t amp_ring_size = 0;
 	uint8_t ring_index = 0;
@@ -364,8 +364,8 @@ struct LightCoronaFrameInputs {
 };
 
 // The batch-entry light cap: a drawn strip carries at most three dynamic
-// lights [orig: collect_render_objects_for_batch @ 0x5d9226..0x5d9229 and
-// collect_render_batches_for_entity @ 0x5d96e6..0x5d96e9 break the visible
+// lights [orig: Render_CollectRenderObjectsForBatch @ 0x5d9226..0x5d9229 and
+// Render_CollectRenderBatchesForEntity @ 0x5d96e6..0x5d96e9 break the visible
 // walk at the third stored handle; CRenderBatchQueue_FlushBatches reads the
 // three entry slots @ 0x5da26b]. The 4 of Light_SelectAndEnableForDraw
 // @ 0x5abbeb is only the transient D3D LightEnable count the flush tears
@@ -391,12 +391,12 @@ struct LightDrawContext {
 // cube; only the active groups vary between that entity's split draws.
 // All render parts of an entity share this source before their posed submits:
 // [orig: Terrain_RenderSectorEntitiesBySide @0x5c7f9a..0x5c8020, the one
-// setup_terrain_effect_for_entity call before the head/body submits]. First-person
+// Terrain_SetupEffectForEntity call before the head/body submits]. First-person
 // arms/gun use the local player's query before applying camera-relative poses
 // [orig: Player_RenderFirstPersonViewModel @0x4DEEA9..0x4DEEB0]. A graphic-only
 // husk swap retains the initialized entity radius and ownership instead of
 // deriving them from the replacement mesh [orig: Entity_InitFromModel
-// @0x40E062..0x40E076; render_sector_entity @0x5c41a9, the entity+36 & 4 ->
+// @0x40E062..0x40E076; Render_SectorEntity @0x5c41a9, the entity+36 & 4 ->
 // entity+52 RLOD table swap]. Embedders preserve these inputs.
 struct EntityLightQuery {
 	std::array<int32_t, 3> position_fixed{};
@@ -453,7 +453,7 @@ public:
 	void tick();
 
 	// AABB overlap + nearest-first handle list (the witnessed per-draw
-	// collection) [orig: collect_nearby_zones_by_aabb @ 0x5aa250].
+	// collection) [orig: Light_CollectNearbyZonesByAABB @ 0x5aa250].
 	size_t query(const std::array<int32_t, 3> &query_min_fixed,
 			const std::array<int32_t, 3> &query_max_fixed,
 			std::array<LightHandle, kQueryLimit> &out_handles) const;
@@ -505,7 +505,7 @@ public:
 	// The render-slot dominant-light candidates for one entity
 	// [orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]: the collector over the
 	// entity cube (position -/+ entity+0 radius @ 0x5d6af1..0x5d6b24) with its
-	// output limit FOUR (`push 4` @ 0x5d6b00 -> collect_nearby_zones_by_aabb
+	// output limit FOUR (`push 4` @ 0x5d6b00 -> Light_CollectNearbyZonesByAABB
 	// @ 0x5aa250: the capped slot-order scan, the nearest sort, then
 	// min(found, limit) @ 0x5aa418..0x5aa425), each candidate gated only by
 	// Light_PassesActiveGroups (@ 0x5d6b89, the entity's interior group set
@@ -563,10 +563,10 @@ public:
 
 	// The terrain projected pass's per-patch collect + gate + constant build
 	// (light_terrain_pass.h carries the contract; defined in
-	// light_terrain_pass.cpp) [orig: render_terrain_sector_batch
+	// light_terrain_pass.cpp) [orig: Terrain_RenderSectorBatch
 	// @0x6095f9..0x6098bc + Light_SetupTerrainProjectedPass @0x5aa830]. Per
 	// patch: the slot-order collect capped at SIXTEEN then nearest-first
-	// (collect_nearby_zones_by_aabb @0x5aa250 with the 16 cap @0x609658), the
+	// (Light_CollectNearbyZonesByAABB @0x5aa250 with the 16 cap @0x609658), the
 	// group gate with BOTH groups cleared (@0x60967c/@0x609685 — so every
 	// owned light fails), the alive + !terrain-disabled gate, and one row per
 	// survivor with NO three-light cap. Returns the total row count.
@@ -583,7 +583,7 @@ private:
 		bool live = false;
 		uint32_t generation = 0;
 		// Flag bit 2: a hidden slot stays allocated but no query returns it
-		// [orig: the bit-2 skip in collect_nearby_zones_by_aabb @ 0x5aa250,
+		// [orig: the bit-2 skip in Light_CollectNearbyZonesByAABB @ 0x5aa250,
 		// toggled by CEffectInstance_SetBlendAmount @ 0x5a8ee0].
 		bool hidden = false;
 		LightSpawnParams params{};
@@ -690,7 +690,7 @@ ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
 // its body submits [orig: Terrain_RenderSectorEntitiesBySide
 // Lighting_SetOwnerLightGroup calls @ 0x5c7fb1 / @ 0x5c8004]. The RIGID
 // collector then re-scopes every ROBJ it collects to (0, robjIndex)
-// [orig: collect_render_objects_for_batch @ 0x5d8ff7], while the SKINNED
+// [orig: Render_CollectRenderObjectsForBatch @ 0x5d8ff7], while the SKINNED
 // collector keeps whatever is set — Render_SubmitEntity dispatches on the
 // model's skinned flag [orig: @ 0x5daddc..0x5dae2d]. Every other context
 // leaves entity 0: the wave's reset @ 0x5c806e..0x5c808a, the terrain's
@@ -711,11 +711,11 @@ SubmitOwnerGroup submit_owner_group(uint64_t drawn_entity, bool person_wave,
 // per draw context (LightActiveGroups). Every static row is a rigid submit, so
 // its owner group is (0, robjIndex) (submit_owner_group). A BUILDING row is
 // also its own interior group at section zero [orig: Terrain_RenderSectorModels
-// pushes building/section 0; collect_render_objects_for_batch @ 0x5d8ff7 ->
+// pushes building/section 0; Render_CollectRenderObjectsForBatch @ 0x5d8ff7 ->
 // Lighting_SetOwnerLightGroup (0, robjIndex)]; every other static row carries
 // the interior group the blink query at its placement origin resolved — the
 // building it stands inside plus that blink volume's section, the second
-// witnessed group [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
+// witnessed group [orig: Terrain_SetupEffectForEntity @ 0x5c74a0 ->
 // Lighting_SetInteriorLightGroup @ 0x5a90e0]; outdoors (no hit) both
 // interior words stay zero.
 struct StaticLightRowInputs {

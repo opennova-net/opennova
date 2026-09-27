@@ -19,7 +19,7 @@
 // Witnessed against retail Jointops.exe (grill NW-S5/B, 2026-06-12):
 //   * POST builder GopherWebWidget_SendHttpPost @ 0x658b30 sends
 //     `Content-type: application/x-www-form-urlencoded` with the field body
-//     assembled by the form widgets (build_form_field_query_string @ 0x657760).
+//     assembled by the form widgets (CWnd_BuildFormFieldQueryString @ 0x657760).
 //   * The echoed EPASK public key travels plaintext; EVERY other field is
 //     EPASK-encrypted — not just NAME/PASSWORD but the hidden fields too (pfid,
 //     needtoagree, nodb, relay, msgbase, enterkey, failure, success, ...).
@@ -80,8 +80,8 @@ parse_set_cookie_values(const std::vector<std::string> &set_cookie_values);
 // **APPID** conn-tag (NOT the BT tag: the host reads the APPID tag into that
 // same int field and the BT tag into a different one); NI/NP are the plaintext
 // game-node ip/port; BK is the plaintext relay tunnel cookie.
-// [orig: parse_connection_query_string @0x54dfb0 (CK key "cfhdcegjigecjehcgjdhe")
-//  -> UI_JoinSelectedSession @0x5699d0 (`net_config.bt = atol(&nk_extra_buf[64])`
+// [orig: URL_ParseConnectionQueryString @0x54dfb0 (CK key "cfhdcegjigecjehcgjdhe")
+//  -> UI_JoinSelectedSession @0x5699d0 (`net_config.bt = atol(&g_NkExtraBuf[64])`
 //  = atol(decoded CK)); the host side NapiNetConfig_LoadFromConnTags @0x4c7260
 //  ("APPID" -> the same field IDA labels net_cfg.bt, "BT" -> char_name) and the
 //  compare in Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5 (reject
@@ -95,7 +95,7 @@ struct JoiConnection {
 	// LN: the lobby number (atol). When nonzero the retail transport dials the
 	// LAN-discovered endpoint instead of the NK relay pair and reports it as
 	// the session var "Lan"; 0 when absent. GS is copied but never read by
-	// any retail code. [orig: parse_connection_query_string @0x54dfb0 LN
+	// any retail code. [orig: URL_ParseConnectionQueryString @0x54dfb0 LN
 	//  @0x54e33e / GS @0x54e38a; CNapiGameSession_InitTransportConnection
 	//  @0x4c9e6c; CNapiGameSession_ConnectOrHost @0x4d5418]
 	int ln = 0;
@@ -112,7 +112,7 @@ struct JoiConnection {
 
 // Extract the bracketed connection string the join page carries in its <TITLE>:
 //   [NK=<enc>&CK=<enc>&NI=<ip>&NP=<port>&BK=986119&LN=<n>&GS=<s>&]
-// This is exactly what retail's browser scrapes (parse_connection_query_string
+// This is exactly what retail's browser scrapes (URL_ParseConnectionQueryString
 // @ 0x54dfb0). Splits the first `[...]` run on '&' into KEY=VALUE pairs. The
 // url_cipher-encoded NK/CK never contain '&', so the split is unambiguous (and
 // matches retail, whose NK/CK decode also terminates at '&'). The host address
@@ -150,7 +150,7 @@ public:
 	// pairs, in insertion order — the retail CD-cookie blob the game-session join
 	// relays (the NovaWorld-issued PUB* identity: PUBPCID/PUBNAMEINFO/PUBSQUADINFO/
 	// PUBJOINTICKET). Empty when nothing matches.
-	// [orig: config_query_matching_entries @0x64eb70 gather-by-prefix ("PUB*") ->
+	// [orig: Config_QueryMatchingEntries @0x64eb70 gather-by-prefix ("PUB*") ->
 	//  NetPacket_BuildAnnouncePayload @0x4c4bf0 -> the C2S 0x00 JOIN "CD" TLV
 	//  (NapiNP_WriteClientAuthPayload @0x42a180)]
 	std::vector<uint8_t> build_prefixed_blob(const std::string &prefix) const;

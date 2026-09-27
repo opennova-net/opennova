@@ -7,8 +7,8 @@
 //
 //   * the authoritative listen host / SP local client presents from its OWN
 //     pools -- retail's local client reads process memory and its loopback
-//     0x0A is header-only [orig: serialize_entity_states_to_packet @0x50f07e;
-//     collect_visible_entities_for_terrain @0x5c8c60] (D-NET-140);
+//     0x0A is header-only [orig: NetPacket_SerializeEntityStatesToPacket @0x50f07e;
+//     Terrain_CollectVisibleEntitiesForTerrain @0x5c8c60] (D-NET-140);
 //   * a joiner renders the host's stream wire-direct from the state its
 //     ClientReplicaPipeline decoded (ClientState), enriched by the local
 //     player's own mount state and by the registry rows an explicit complete-
@@ -74,7 +74,7 @@ double pool_present_roll_deg(const world::Entity &e);
 // The door phases of the rows that publish any: a flat int32 side table of
 // (row index, count, phase[count]) entries in row order, rebuilt beside the
 // rows on every build, so only door-bearing entities carry retail's ordinal
-// DOOR_xx bus [orig: build_bone_transforms @0x4E3070 loop @0x4e312a..0x4e3145;
+// DOOR_xx bus [orig: BoneCallback_BuildBoneTransforms @0x4E3070 loop @0x4e312a..0x4e3145;
 //  BoneCallback_AnimatedBones_World @0x4E3180 loop @0x4e3201..0x4e3218 write
 //  exactly num_doors slots per model]. A row's PF_DOOR_COUNT is its entry's
 // count (0 = no entry); the signed phase dwords ride exactly.

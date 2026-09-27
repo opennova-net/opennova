@@ -450,7 +450,7 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 		OS.delay_msec(2)
 	assert_true(learned, "joiner learned the host mission through the post-auth 0x7B")
 	assert_eq(joiner.get_join_server_name(), "Preload Host")
-	# Retail LAN duplicates g_map_file_name in 0x7B fields 4 AND 5 — field 4 is
+	# Retail LAN duplicates g_MapFileName in 0x7B fields 4 AND 5 — field 4 is
 	# NOT the MissionText display title, so the configured "Preload Island" can
 	# never reach a LAN joiner pre-load. [orig: NapiNPMsg_0x7B_BuildPayload
 	# @0x507740; the PR #403 live retail-LAN witness]

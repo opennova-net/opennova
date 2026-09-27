@@ -665,7 +665,7 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 		if (is_new_generation) {
 			// The type's trail effect from the ONE native table
 			// (world/destruction death_piece_trail_effect, S12b)
-			// [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+			// [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C].
 			const String trail(opennova::world::death_piece_trail_effect(piece.type_index));
 			if (fx_world != nullptr && !trail.is_empty()) {
 				const String key = piece_owner_key(slot);

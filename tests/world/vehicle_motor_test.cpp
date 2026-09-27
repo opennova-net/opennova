@@ -2604,7 +2604,7 @@ void test_vehicle_carrier_follow_and_refresh() {
 	// A ground mover refreshes its ground link on every eighth ENTITY UPDATE
 	// (the entity-update counter), not on the tick.
 	// [orig: Entity_UpdateVehiclePhysics @0x48AFB9, `test byte ptr
-	//  g_entity_update_counter,7`]
+	//  g_EntityUpdateCounter,7`]
 	r.w.logic_tick = 0;
 	r.w.entity_update_counter = 0;
 	r.w.vehicles.tick_motor(v, t);

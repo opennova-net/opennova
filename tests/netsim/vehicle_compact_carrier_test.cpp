@@ -239,8 +239,8 @@ bool run_fan_full_precision_heading_and_wreck_pose() {
 	                     live->vehicle.euler_z == static_cast<int16_t>(0x1234),
 	             "a seeded hull's heading word rounds its own BAM (0x12345678 -> 0x1234)");
 	// The 0x0D spawn record carries the three dwords themselves and the 0x18
-	// rebuild their truncated high words [orig: serialize_entity_pool_to_packet_0
-	// @0x503B37, @0x503B53, @0x503B6F; serialize_object_to_buffer @0x505166 /
+	// rebuild their truncated high words [orig: NetPacket_SerializeEntityPoolToPacket_0
+	// @0x503B37, @0x503B53, @0x503B6F; NetPacket_SerializeObjectToBuffer @0x505166 /
 	// @0x505179].
 	{
 		const nw::PoolSpawnBatch batch = ns::build_pool1_spawn_batch(world);

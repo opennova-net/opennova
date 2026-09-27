@@ -40,7 +40,7 @@ const PICK_KEY := KEY_F6
 # as ARMORY: the world (and therefore the session socket) keeps ticking, only the
 # mouse is released and player input idles. Retail's dead player has no gameplay
 # input anyway — the uplink is held by dword_81474C and the input legs gate on
-# g_spawn_success_gate — so this state is what makes the spawn list clickable.
+# g_SpawnSuccessGate — so this state is what makes the spawn list clickable.
 enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND }
 
 @onready var _world: GameWorld = $World
@@ -555,7 +555,7 @@ func _show_end_screen() -> void:
 			_hud if _hud != null else self, _on_end_screen_exit)
 
 
-# [orig: g_mission_exit_reason = 1 (ESC / the epilog timeout) -> the main loop pushes
+# [orig: g_MissionExitReason = 1 (ESC / the epilog timeout) -> the main loop pushes
 # the "Post Menu" scene @0x526867 — our post-mission menu is the main menu.]
 func _on_end_screen_exit() -> void:
 	_on_return_to_menu()
@@ -843,7 +843,7 @@ func _on_world_loaded() -> void:
 		return
 	# The SP start-mission splash holds the reveal until its dismissal edge;
 	# the gate + device legs live on the coordinator
-	# [orig: show_start_mission_splash @ 0x520820 precedes the release @ 0x525d45].
+	# [orig: Game_ShowStartMissionSplash @ 0x520820 precedes the release @ 0x525d45].
 	if _world_load.maybe_begin_start_mission_splash(_world.get_mission_audio()):
 		if not _world_load.splash_dismissed.is_connected(
 				_finish_world_load_presentation):
@@ -893,7 +893,7 @@ func _on_join_deploy_pick_required() -> void:
 ## joiner's session dies with the host's exit and lands here too (its
 ## net-session drive may also route the loss through _on_session_lost first —
 ## whichever fires first tears down, the other sees MENU).
-## [orig: Server_TickUpdate linger drain @0x51da04..; g_mission_exit_reason = 3
+## [orig: Server_TickUpdate linger drain @0x51da04..; g_MissionExitReason = 3
 ##  @0x51db63; every exit reason lands on the same teardown + nav push
 ##  @0x568654. SP mission end runs the epilog flow instead.]
 # The frame loop's death.mnu DEATH open off the host-driven deploy-map overlay.
@@ -939,7 +939,7 @@ func _maybe_exit_round_cycle() -> void:
 ## [orig: the punt record CNapiNPConnection_HandleDescriptionPacket @ 0x621ae0 and the
 ##  cs_dir0.timeout_ms = 120000 reap CNapiNetwork_Init @ 0x4ca4a0, both ->
 ##  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0. The captured DPC 33 falls to
-##  Input_QueueEvent(3) @ 0x4c67a4, whose action sets g_mission_exit_reason = 1 and drops
+##  Input_QueueEvent(3) @ 0x4c67a4, whose action sets g_MissionExitReason = 1 and drops
 ##  the connection (Input_HandleActionBinding case 3 @ 0x49af2c) — reason 1 is the same
 ##  teardown + "MainMenu" push every abort leg takes @ 0x568654]
 func _on_session_lost(reason: String) -> void:

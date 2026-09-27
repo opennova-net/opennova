@@ -772,7 +772,7 @@ void test_carrier_death_and_respawn_keep_the_child() {
 // origin with zero angles, keeping any earlier hide. The next entity allocated
 // in that row becomes the child's carrier: a live vehicle there clears the hide.
 // [orig: Entity_Destroy memset @0x43EA70, its refNum walk @0x43E9CD ->
-//  CStreamingMem_Destroy @0x546F30; Entity_UpdateTransformAndTurret def test
+//  EntityReference_DestroyEWeapGroup @0x546F30; Entity_UpdateTransformAndTurret def test
 //  @0x440EA6, root copy @0x4410EA..0x4411BC, the vehicle block @0x440EB3]
 void test_freed_carrier_row_keeps_the_child() {
     ParentRig pr(/*profile_type=*/2, /*anchor_subobject=*/0, kItemAttribPlayerControl);
@@ -803,7 +803,7 @@ void test_freed_carrier_row_keeps_the_child() {
 
 // The destroyed carrier's refNum children return to rest: their held gun
 // words are zeroed, and their ammo re-splits only through a resolved Def.
-// [orig: Vehicle_CleanupTeamEntitiesOnDestruction @0x547040 (+0x324/+0x322 =
+// [orig: Vehicle_ReleaseEWeapGroupOnDestruction @0x547040 (+0x324/+0x322 =
 //  0 @0x5470f9..0x547100; WeaponSlot_SplitAmmoIntoClipAndReserve
 //  @0x547107..0x54710e)]
 void test_carrier_destruction_resets_child_words() {

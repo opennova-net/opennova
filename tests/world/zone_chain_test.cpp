@@ -3,7 +3,7 @@
 // 0x0E pick resolve — pinned against the ASH_I5A authored shape (four type-1359 zone
 // objects: zone 1 team 1, zone 2 x2 neutral, zone 3 team 2; 6003/6004 base markers).
 // [orig: ZoneSlotChain_* @0x4A2350..0x4A2DE0; Server_ResolveSpawnTargetHandle @0x4fe110;
-//  find_spawn_entity_for_team @0x4fc810]
+//  Spawn_FindEntityForTeam @0x4fc810]
 #include <runtime/world/entity.h>
 #include <runtime/world/collision.h>
 #include <base/gameprofile/game_type.h>
@@ -198,7 +198,7 @@ void test_auto_deploy_pick() {
     // 0xFFFE auto-deploy (AS 0x10010): team 1's zone 1 is NOT on team 2's frontier and
     // carries number 1 != frontier 2, so the first walk misses; the frontier then
     // steps down to 1 (team 1's mask holds number 1) and the retry picks the secured
-    // zone 1. [orig: find_spawn_entity_for_team @0x4fc810 — the direction
+    // zone 1. [orig: Spawn_FindEntityForTeam @0x4fc810 — the direction
     // @0x4fc88f..0x4fc8bb, the step @0x4fc941..0x4fc952]
     const Entity *base = f.w.zones.find_spawn_zone_for_team(1, 0x10010u);
     CHECK(base != nullptr && base->zone_number == 1);
@@ -261,7 +261,7 @@ void test_spawn_zone_presence_and_zone_info() {
     // [orig: SpawnZoneList_GetCount() > 0 @0x51a6f2 -> stateByte |= 0x10; D-NET-156].
     CHECK(f.w.zones.has_spawn_zone());
     // The 0x0D packed zone byte = zoneNumber + 32*rank [orig:
-    // serialize_entity_pool_to_packet_0 @0x503940 (the ZoneSlotChain_GetZoneInfo call
+    // NetPacket_SerializeEntityPoolToPacket_0 @0x503940 (the ZoneSlotChain_GetZoneInfo call
     // @0x503EEB)]. The two zone-2 entities share a number: descending rank within it —
     // golden ASH_I5A bunker 0x22 = zone 2 rank 1.
     const Entity *z2a = f.w.registry.get(f.z2a);
@@ -290,7 +290,7 @@ EntityHandle spawn_soldier(World &w, uint8_t team, Vec3 pos) {
     e.net_move_input = Entity::kMoveOrderMoving;
     const EntityHandle handle = w.registry.spawn(0, e);
     // The capture census and scoring walk the player slots.
-    // [orig: calculate_capture_zone_control_delta @0x501120;
+    // [orig: CaptureZone_CalculateControlDelta @0x501120;
     // CaptureZone_CheckProximityScoring @0x500C50]
     w.match.upsert_player({handle, static_cast<uint8_t>(handle.slot()), "Soldier"});
     return handle;
@@ -332,7 +332,7 @@ std::vector<T> events_of(const ZoneCaptureEvents &events) {
     return selected;
 }
 
-// The control-delta formula pins [orig: calculate_capture_zone_control_delta @0x501120].
+// The control-delta formula pins [orig: CaptureZone_CalculateControlDelta @0x501120].
 void test_control_delta_formula() {
     // A team-1 zone; `team1`/`team2` are the in-game census.
     auto delta = [](int presence, int team1, int team2, int speed_setting,
@@ -384,7 +384,7 @@ void test_control_delta_formula() {
     // In the last half of a timed round, the side already holding more numbered
     // spawn zones gets up to a 50% speed-denominator reduction. Here
     // 120 - trunc(120 * 2/4 * 1/2) = 90.
-    // [orig: calculate_capture_zone_control_delta @0x5013AB..0x50142A]
+    // [orig: CaptureZone_CalculateControlDelta @0x5013AB..0x50142A]
     CHECK(zone_capture_control_delta(endgame) == 65536 / 90);
     endgame.team1_zones = 1;
     endgame.team2_zones = 3;

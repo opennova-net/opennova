@@ -120,7 +120,7 @@ public:
 	// world/player_view.h player_view_apply_view_action). The preference is
 	// effective only in a control seat: the sim's arbiter resolves the camera mode every tick from
 	// the preference and the seat, so on foot the preference changes nothing
-	// visible [orig: g_camera_third_person_selected @0xA860DF; the arbiter
+	// visible [orig: g_CameraThirdPersonSelected @0xA860DF; the arbiter
 	// Render_ProcessMainSceneFrame @0x5ca1d2]. GameHudPresenter polls the rows
 	// (it owns the FP-gun bit two of them also write) and calls this.
 	void apply_view_action(int p_action);
@@ -131,7 +131,7 @@ public:
 	void set_debug_third_person(bool p_enabled);
 	bool is_debug_third_person() const { return debug_third_person_; }
 	// The RESOLVED camera mode, mirrored from the sim's view snapshot every
-	// tick [orig: g_camera_mode @0xA890C8]. Nothing on the shell writes it
+	// tick [orig: g_CameraMode @0xA890C8]. Nothing on the shell writes it
 	// directly.
 	bool is_third_person() const { return third_person_; }
 	// The last presented snapshot: the frame the camera displays, composed

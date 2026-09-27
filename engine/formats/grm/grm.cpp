@@ -17,7 +17,7 @@ namespace opennova::grm {
 namespace {
 
 // Token scratch is 1001 bytes and 30 pointers in the original. Quotes split
-// tokens even without surrounding whitespace. [orig: tokenize_config_line @0x588AD0]
+// tokens even without surrounding whitespace. [orig: FaceAnimConfig_TokenizeConfigLine @0x588AD0]
 std::vector<std::string> tokens(std::string_view line) {
 	const size_t nul = line.find('\0');
 	std::string scratch(line.substr(0, std::min(size_t{1000}, nul == std::string_view::npos ? line.size() : nul)));

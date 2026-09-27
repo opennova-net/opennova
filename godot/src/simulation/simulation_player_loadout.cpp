@@ -327,7 +327,7 @@ void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// The Player_InitPlayer weapon leg — world/player_loadout.h
 	// local_loadout_rebuild [orig: @ 0x4e15f0]. The 0x2F pair's SECOND submit
 	// carries the LIVE equipped slot, not the fixed 195 [orig:
-	// Game_StartMission @0x525c2e passes g_currentWeaponSlot — the value the
+	// Game_StartMission @0x525c2e passes g_CurrentWeaponSlot — the value the
 	// spawn fill just settled], so the seam re-arms here AFTER the inventory
 	// settles. push_joiner_loadout_kit never rebuilds (it holds a one-way
 	// re-entry latch), so this cannot recurse.
@@ -416,12 +416,12 @@ Ref<WeaponProfileSummary> Simulation::read_weapon_profile_summary(const String &
 	opennova::playersav::File profile = opennova::playersav::make_defaults();
 	// Raw bytes for the menu: the PLAYER_INFO screen selects its rows straight
 	// from the profile globals; the [5,9] class clamp is a SESSION-START step
-	// (apply_session_settings_to_globals) that load_weapon_profile applies.
+	// (Game_ApplySessionSettingsToGlobals) that load_weapon_profile applies.
 	const Error error = read_weapon_profile_file(p_path, profile);
 	Ref<WeaponProfileSummary> out;
 	out.instantiate();
 	// OpenNova's active profile is slot 0. Retail indexes the same five-record
-	// array by g_curProfileSlot @0x25506B8 (0x1080C stride) before reading or
+	// array by g_GameConfigState.currentProfileSlot_000 @0x25506B8 (0x1080C stride) before reading or
 	// writing its record; see docs/playerinfo/avatars-re.md.
 	out->assign(profile.slots[0], int(error), error == OK);
 	return out;
@@ -615,7 +615,7 @@ void Simulation::apply_joiner_authoritative_loadout() {
 			net_.joiner_applied_loadout_revision = revision;
 	}
 	// The S2C 0x0F pool image lands AFTER the 0x5A slot rebuild, exactly as the
-	// retail client handler copies g_localAmmoPools and re-draws every clip (the
+	// retail client handler copies g_LocalAmmoPools and re-draws every clip (the
 	// engine's weapon_inventory_apply_authority_pools carries the witness). It
 	// waits for a valid inventory: the rebuild above is what makes one on a joiner.
 	const uint64_t pools_revision = runtime_->authoritative_ammo_pools_revision();

@@ -111,7 +111,7 @@ bool vehicle_can_enter(const World &, const Entity *rider, const Entity &carrier
 bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_action);
 
 
-// One floating attach label [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the
+// One floating attach label [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290 — the
 // selection half; projection and drawing stay host-side]. world_pos carries the witnessed
 // +0.1875 u label lift [orig: point.z = boneZ + 12288 @0x5a3585].
 struct AttachLabel {

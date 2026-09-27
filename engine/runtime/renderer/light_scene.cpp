@@ -14,7 +14,7 @@ namespace opennova::renderer {
 namespace {
 
 using detail::apply_rgb_gen;
-using detail::axis_distance_term; // [orig: collect_nearby_zones_by_aabb @ 0x5aa37a]
+using detail::axis_distance_term; // [orig: Light_CollectNearbyZonesByAABB @ 0x5aa37a]
 using detail::kHandleFlag;
 using detail::kHandleIndexMask;
 using detail::saturating_add;
@@ -28,7 +28,7 @@ int32_t clamp_i32(int64_t value) {
 } // namespace
 
 LightDrawContext entity_light_draw_context(const EntityLightQuery &entity) {
-	// [orig: setup_terrain_effect_for_entity @0x5c74a0, entity+0 and
+	// [orig: Terrain_SetupEffectForEntity @0x5c74a0, entity+0 and
 	// position +/- radius @0x5c74fb..0x5c7536 before select @0x5c753a]
 	LightDrawContext draw;
 	const uint32_t radius = static_cast<uint32_t>(entity.bound_radius_fixed);
@@ -275,7 +275,7 @@ size_t LightScene::query_impl(
 		const std::array<int32_t, 3> &query_max_fixed,
 		bool collect_all_before_cap,
 		std::array<LightHandle, kQueryLimit> &out_handles) const {
-	// [orig: collect_nearby_zones_by_aabb @ 0x5aa250 — AABB overlap, the
+	// [orig: Light_CollectNearbyZonesByAABB @ 0x5aa250 — AABB overlap, the
 	// per-axis 16.16 distance metric from the query center, nearest-first
 	// (retail bubble sort == stable ascending order), at most 64].
 	struct Candidate {
@@ -421,7 +421,7 @@ size_t LightScene::slot_light_candidates(const std::array<int32_t, 3> &query_min
 		const LightFlickerInputs &flicker,
 		std::array<SelectedLight, kSlotPickLimit> &out) const {
 	// The collector's nearest-first list, handed back as min(found, 4)
-	// [orig: `push 4` @ 0x5d6b00; collect_nearby_zones_by_aabb
+	// [orig: `push 4` @ 0x5d6b00; Light_CollectNearbyZonesByAABB
 	// @ 0x5aa418..0x5aa425].
 	std::array<LightHandle, kQueryLimit> handles{};
 	const size_t found = query(query_min_fixed, query_max_fixed, handles);
@@ -477,7 +477,7 @@ void LightScene::refresh_compact_cache() const {
 		return;
 	}
 	// One pass snapshots the collection inputs in SLOT ORDER — the order the
-	// witnessed first-64 cap depends on [orig: collect_nearby_zones_by_aabb
+	// witnessed first-64 cap depends on [orig: Light_CollectNearbyZonesByAABB
 	// @ 0x5aa250 scans the table forward and breaks at 64 @ 0x5aa384;
 	// hidden flag bit 2 skipped @ 0x5aa2a4].
 	compact_cache_.clear();
@@ -946,7 +946,7 @@ LightActiveGroups static_light_row_groups(const StaticLightRowInputs &inputs) {
 int32_t light_flicker_value(const std::array<int32_t, 3> &position_fixed,
 		const LightFlickerInputs &flicker) {
 	// [orig: Light_TickGenBlock @ 0x5a8ae0 — index = (z >> 15) + (y >> 14) +
-	// (x >> 14) + Env_WaveRingIndex, byte-wrapped; the ring value is written
+	// (x >> 14) + g_EnvWaveRingIndex, byte-wrapped; the ring value is written
 	// to the global FLICKER ctrl slot (0x83FD00 = 0x83FCE8 + 8 * 3)].
 	if (flicker.amp_ring == nullptr || flicker.amp_ring_size == 0) {
 		return 0;

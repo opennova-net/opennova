@@ -25,7 +25,7 @@ struct SceneOverlaySubmission;
 // resource root, handed to the post-particle overlay stage
 // (renderer/scene_overlay.h), which draws them under the drawer's pass state
 // after particle pass B and before the coronas (retail
-// render_weather_trail_particles @ 0x5dee10 refills one vertex stream per
+// Render_WeatherTrailParticles @ 0x5dee10 refills one vertex stream per
 // call under a fixed layout, 768-vertex batches, from
 // Terrain_RenderWorldScene @ 0x5c96a6 — its only caller, the scene passes
 // (the main scene's and the weapon Inset pass's), so the water mirror never

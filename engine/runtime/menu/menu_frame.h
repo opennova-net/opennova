@@ -24,7 +24,7 @@
 namespace opennova::menu {
 
 // The runtime visual state written to elem+236 every frame by the input pump
-// [orig: widget_process_mouse_event @ 0x647a00; setter CWnd_SetVisualState
+// [orig: CWnd_ProcessMouseEvent @ 0x647a00; setter CWnd_SetVisualState
 // @ 0x646340]. The numeric values are the original's: they index the
 // per-state appearance records AND select the FONT color pair, and the
 // APPEARANCE STATE attribute parses to the same indices
@@ -49,7 +49,7 @@ inline constexpr int kMenuDesignHeight = 600;
 // table (texture_names()); kMenuTexNone is an untextured color fill. A valid
 // `texture2` asks the device leg for retail's two-stage frame material:
 // 2 * texture * texture2, with the first texture's alpha masking the result.
-// [orig: init_border_materials @ 0x646f70 creates border_material from the
+// [orig: CUIElement_InitBorderMaterials @ 0x646f70 creates border_material from the
 // STENCIL and BRUSH handles with mode 0x651 / two stages]. `tiled` repeats the
 // selected UV region at native device pixels; frame fills select the stencil
 // atlas cell (3, 0), copied by retail into border_fill_material. Everything
@@ -122,8 +122,8 @@ struct MenuDrawList {
 // configured screen tree (0 = the root window; children in authored order).
 // Unlisted widgets take the defaults. The fields mirror the original runtime
 // widget fields: shown (+224), enabled (+228), the pump's hover/press verdict
-// (+236) [orig: widget_process_mouse_event @ 0x647a00], checked (+772),
-// keyboard focus (g_ui_focus_wnd @ 0x31C16D4), and the caret char index
+// (+236) [orig: CWnd_ProcessMouseEvent @ 0x647a00], checked (+772),
+// keyboard focus (g_UIFocusWnd @ 0x31C16D4), and the caret char index
 // (+764) the edit render feeds the shared text draw
 // [orig: CEditWnd_Render @ 0x6619e0].
 struct MenuWidgetState {
@@ -171,7 +171,7 @@ struct MenuWidgetState {
 	std::vector<std::vector<std::string>> table_rows;
 	// MARQUEE nodes (runtime content from the widget's datasource file):
 	// text lines in roll order; empty string = a blank spacer line
-	// [orig: render_scrolling_credits @ 0x65ca00 walks the node list].
+	// [orig: CMarqueeWnd_RenderScrollingCredits @ 0x65ca00 walks the node list].
 	std::vector<std::string> marquee_lines;
 	// Restart the roll from the initial layout on the next compile.
 	bool marquee_reset = false;
@@ -194,9 +194,9 @@ struct MenuFrameState {
 // list in the witnessed walk order. Scale is the 800x600 anamorphic pair
 // [orig: CUIScene_SetScreenScale @ 0x639480]; every scaled coordinate is
 // truncated to int PER ELEMENT [orig: @ 0x647d40], and glyph runs are laid
-// out at the same pair [orig: font_cache_draw_text_scaled @ 0x653170
+// out at the same pair [orig: CFontCache_DrawTextScaled @ 0x653170
 // forwards scaleX/scaleY into CGameFont_DrawText]. The edit scroll window
-// (start/end per widget [orig: update_edit_scroll_range @ 0x661790]) is
+// (start/end per widget [orig: CEditWnd_UpdateScrollRange @ 0x661790]) is
 // compiler runtime state and survives across compiles.
 class MenuFrameCompiler {
 public:
@@ -348,7 +348,7 @@ public:
 	int hit_widget(const MenuFrameState &state, float mx, float my, float sx,
 			float sy) const;
 	// The multiline edit's wrapped-line counts at scale 1.0 — the scroll
-	// range twin [orig: font_cache_count_wrapped_lines @ 0x653b90 via
+	// range twin [orig: CFontCache_CountWrappedLines @ 0x653b90 via
 	// CMEditWnd_UpdateScrollRange @ 0x661180]: *fit = rows that fit the
 	// widget rect, *total = wrapped line count; scroll range = [0,
 	// total - fit]. False when the index is out of range.
@@ -361,8 +361,8 @@ public:
 	int hotkey_widget(const std::string &key, bool virtual_key,
 			const MenuFrameState &state) const;
 
-	// The witnessed per-frame mouse pump [orig: scene_end_frame @ 0x63e600 ->
-	// widget_process_mouse_event @ 0x647a00 (vtable+20)]: ONE widget claims
+	// The witnessed per-frame mouse pump [orig: CUIScene_EndFrame @ 0x63e600 ->
+	// CWnd_ProcessMouseEvent @ 0x647a00 (vtable+20)]: ONE widget claims
 	// the mouse per frame — front-most = last drawn (the reverse sibling walk
 	// + the per-frame claim scene+16; equivalently the LAST hit of the
 	// forward draw walk). A disabled claimant keeps visual state 1 (no
@@ -433,7 +433,7 @@ private:
 	// Per-marquee roll state (compiler runtime state, like edit_scroll_):
 	// the current scroll offset in design pixels and the last time_ms sample
 	// [orig: node y -= rate per frame; whole-roll reset when the last node
-	// passes the top — render_scrolling_credits @ 0x65ca00].
+	// passes the top — CMarqueeWnd_RenderScrollingCredits @ 0x65ca00].
 	struct MarqueeScroll {
 		double offset = 0.0;
 		uint32_t last_ms = 0;

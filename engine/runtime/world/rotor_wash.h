@@ -13,7 +13,7 @@ struct VehicleTraits;
 
 // The helicopter's bounded focal-wind pool, shared by downwash particles and
 // procedural foliage. A handle retains its slot until its vehicle is released.
-// [orig: terrain_overlay_alloc @0x5CAF40; sub_5CB020 @0x5CB020]
+// [orig: Terrain_OverlayAlloc @0x5CAF40; sub_5CB020 @0x5CB020]
 struct FocalSwayPose {
 	bool active = false;
 	float basis[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
@@ -49,7 +49,7 @@ private:
 		uint32_t tick = 0;
 		// The slot's surface-effect group: word +4 is the effect the group was
 		// created for, word +3 whether an instance was created (the device owns
-		// the instance itself). [orig: terrain_overlay_alloc @0x5CAF40 memsets
+		// the instance itself). [orig: Terrain_OverlayAlloc @0x5CAF40 memsets
 		// both; WeatherParticle_UpdateAllEmitters @0x5CB407..0x5CB46E]
 		std::string surface_effect;
 		bool effect_group = false;

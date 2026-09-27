@@ -6,8 +6,8 @@
 // constant build.
 // [orig: Light_SetupTerrainProjectedPassPS @0x5aab30;
 //  Light_SetupTerrainProjectedPass @0x5AA830 (ex render_foliage_instance
-//  — the arg is a Light_InstanceTable slot @0x5AA857); the literals @0x7D3E68 /
-//  @0x7C3618; the scale @0x5AA864..0x5AA873; render_terrain_sector_batch
+//  — the arg is a g_LightInstanceTable slot @0x5AA857); the literals @0x7D3E68 /
+//  @0x7C3618; the scale @0x5AA864..0x5AA873; Terrain_RenderSectorBatch
 //  @0x6095f9..0x6098bc; Lighting_InitTextures @0x5A94F0;
 //  Texture_GenerateProceduralFalloffTexture @0x5A92C0;
 //  GTexture_GenerateNormalMapCubeMap @0x685570]
@@ -413,7 +413,7 @@ void test_patch_rows() {
 // A lit batch's pixel is the pool multiplied by twice the saturated doubled
 // page colour (the DESTCOLOR/SRCCOLOR page pass), unfogged, plus the fogged
 // ordinary pass: dark ground keeps a light dim, bright ground doubles it, and
-// the fog never reaches the light term. [orig: render_terrain_sector_batch
+// the fog never reaches the light term. [orig: Terrain_RenderSectorBatch
 // @0x60984C..0x609AB6]
 void test_pool_composite() {
 	// A mid-grey page (0.25) passes the pool unchanged: 2 * sat(0.5) = 1.

@@ -48,7 +48,7 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     // The range/arc metrics frame is the scanner's own position and
     // orientation (ctx[0] = entity+4) [orig: Entity_FindNearestThreat
     // @0x4B09D0..0x4B09D3; Entity_FindTargets @0x53A67C..0x53A687;
-    // compute_relative_position_metrics @0x545723..0x545735]. The LOS rays
+    // Entity_ComputeRelativePositionMetrics @0x545723..0x545735]. The LOS rays
     // start at its weapon fire position, which for a UseGun gunner is the
     // gun's own point, not the eye inside the hull; anything but a posed
     // point takes the fire-origin recipe [orig: @0x53A658..0x53A679].
@@ -179,7 +179,7 @@ bool ground_at_position(AiSystem &sys, World &world, const Entity &probe, const 
 }
 
 // The aim blocks' sawtooth error unit and its two phases, in the 32-bit
-// registers retail computes them in: `imul reg,wac_var_accuracyspread; imul
+// registers retail computes them in: `imul reg,g_WacVarAccuracySpread; imul
 // reg,1D208h; sar reg,5` [orig: block 1 @0x4bc5ea..0x4bc60e; block 2
 // @0x4bc9ce..0x4bc9f2], then (32 - phase) * err with the HEADING phase
 // (key>>2)&63 [orig: block 1 `and ebp,3Fh` @0x4bc630 -> [esp+60h] @0x4bc669;
@@ -523,7 +523,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
 
     // --- The aim solution. [orig: §17.5 — lead + sawtooth error] ---
     // Retail runs TWO aim blocks over the same lead + sawtooth math, keyed by the
-    // anim's g_animStateFlagsTable bits @0x8139e8 (no state carries both):
+    // anim's g_AnimStateFlagsTable bits @0x8139e8 (no state carries both):
     //   block 1 [orig: @0x4bc555..0x4bc948] on a flag-0x8 anim (the walks, the
     //     plain idles 43/44) with a target: the aim writes, aimFlag @0x4bc894
     //     and the walking-fire latch; it never writes the detour byte +0x369;
@@ -725,7 +725,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         // Block 2's tail [orig: @0x4bcfa3..0x4bcff5]. The body re-face when the
         // aim drifts far off the target heading (> 262470208, ~22 deg) [orig:
         // @0x4bcfa3..0x4bcfcf]; the detour-state clear, whether or not the
-        // re-face fired, ahead of the selector's ai_find_cover_position calls
+        // re-face fired, ahead of the selector's AI_FindCoverPosition calls
         // [orig: @0x4bcfdb; the calls @0x4bd490..0x4bd5a4]; then the hold:
         // every move mode but the combat approach (1) and 5 collapses to 7 with
         // a zero goal distance [orig: @0x4bcfd5..0x4bcff5 — `cmp al, 5`

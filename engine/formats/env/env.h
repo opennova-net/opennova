@@ -139,7 +139,7 @@ TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, flo
 // snapshot and the .trn/overcast.def snapshot by the weather's overcast blend
 // (16.16, clamped to 0x10000) — the same per-byte lerp with the 63356 snap
 // quirk [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 ->
-// Environment_LerpKeyframeSet @ 0x57c3b0 over (env, trn, clamp(Env_OvercastBlend))].
+// Environment_LerpKeyframeSet @ 0x57c3b0 over (env, trn, clamp(g_EnvOvercastBlend))].
 TodState blend_tod_states(const TodState &env_state, const TodState &overcast_state,
 		int overcast_blend_fp);
 

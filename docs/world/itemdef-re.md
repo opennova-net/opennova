@@ -31,8 +31,8 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 
 ## Globals
 
-- `gItemDefs @ 0xB46250` — `ItemDef[]`, stride **2780** (0xADC).
-- `gItemCount @ 0xB46254` — populated count.
+- `g_ItemDefs @ 0xB46250` — `ItemDef[]`, stride **2780** (0xADC).
+- `g_ItemCount @ 0xB46254` — populated count.
 - `ItemList_FindIndexByTypeId @ 0x49e100` — linear scan from row 0 matching
   `.id` (`ItemDef+0x50`) → array index; it returns on the FIRST hit
   (`cmp [ecx],esi; jz` `@0x49E120..0x49E122`) and 0 when no row carries the id.
@@ -42,7 +42,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 
 - **`ItemDef_ParseProperty @ 0x49eb00`** (0x31B0 B) — the NSI property
   dispatcher. Each `_stricmp(propName, "<name>")` branch stores into
-  `gItemDefs[ctx.idx]+offset`; this is the primary source of the field map.
+  `g_ItemDefs[ctx.idx]+offset`; this is the primary source of the field map.
   Passed as the per-property callback by `ItemDefs_LoadAndValidate @0x4a1da0`
   and `ItemDefs_LoadFromNSIFiles @0x4a1cb0`.
 - Its **`phrase_set` branch** is exact: `mov eax,[edi+4] @0x49f9db` selects the
@@ -140,7 +140,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | 0x25c–0x266 | `seatMask`/`seatBoneIndex[8]`/`controlBone`/`useGunBone` | u8 | resolved from model bone user-points |
 | 0x268/0x26c | `defaultRes`/`defaultResDup` | u32 | sound-profile slot handles |
 | 0x270 | `foliageDebrisRef` | u32 | `cactdeb`/`palmdeb`/… |
-| 0x278 | `particleEffects` | char[723] | the per-item effect table, decomposed 2026-07-13 (`ItemDef_ParseProperty @ 0x49eb00` key sites `@ 0x4a13ad..0x4a179d`): slot A `particlefx` {effect 0x278, userpoint 0x298}; slot B `particlefxs` {0x2ae, 0x2ee, secondary 0x2ce}; slots C–F `particlefxw1..4` {0x304/0x344/0x324; 0x35a/0x39a/0x37a; 0x3ae/0x3ce (no secondary); 0x3e2/0x402 (no secondary)}; effect-only `particledeath` 0x416, `particleh2odeath` 0x44a, `particlefire` 0x47e, `particleother` 0x4b2, `particlespawn` 0x506, `particlefinale` 0x4e4. Resolved at mission start (`resolve_item_materials_and_spawn_bone_trails @ 0x522ee0`): handles/masks pack just AHEAD of each name block (slot A handle 0x274 + mask 0x276; slot B +48/+50/+52 relative to the name base; death/fire/other mask the HUSK's fixed `Dead`/`Fire`/`Other` points); userpoint→mask = `ItemDef_GetBoneMaskByName @ 0x49ea40` (exact stricmp, first 16 points). Parsed by `engine/formats/def` (`DefItemParticleFx`); slot A is ported by D-PTL-15 and the watercraft W3/W4 live route by D-PTL-25 |
+| 0x278 | `particleEffects` | char[723] | the per-item effect table, decomposed 2026-07-13 (`ItemDef_ParseProperty @ 0x49eb00` key sites `@ 0x4a13ad..0x4a179d`): slot A `particlefx` {effect 0x278, userpoint 0x298}; slot B `particlefxs` {0x2ae, 0x2ee, secondary 0x2ce}; slots C–F `particlefxw1..4` {0x304/0x344/0x324; 0x35a/0x39a/0x37a; 0x3ae/0x3ce (no secondary); 0x3e2/0x402 (no secondary)}; effect-only `particledeath` 0x416, `particleh2odeath` 0x44a, `particlefire` 0x47e, `particleother` 0x4b2, `particlespawn` 0x506, `particlefinale` 0x4e4. Resolved at mission start (`Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0`): handles/masks pack just AHEAD of each name block (slot A handle 0x274 + mask 0x276; slot B +48/+50/+52 relative to the name base; death/fire/other mask the HUSK's fixed `Dead`/`Fire`/`Other` points); userpoint→mask = `ItemDef_GetBoneMaskByName @ 0x49ea40` (exact stricmp, first 16 points). Parsed by `engine/formats/def` (`DefItemParticleFx`); slot A is ported by D-PTL-15 and the watercraft W3/W4 live route by D-PTL-25 |
 | 0x548 | `parent` (the tail of the 0x278 blob, `particleEffects[720]`) | u8 | the items.def attrib token `Parent` (`ItemDef_ParseProperty @ 0x49eb00` attrib arm; jo-c kong.c 193609..193611): the class initializers test it after the enter handler (`@ 0x46895a` / `@ 0x468688`) and call `Entity_SetupGunnerAttachments @ 0x468100`, which rides the vehicle's same-refNum pool-1 peers on its `agun*` userpoints; the vehicle DYING enter kills that list under the same byte (`@ 0x467b6e`). Witnessed 2026-09-12 (vehicle-client-movers-re §26.2); parsed the same day into `DefItemDef::attrib_parent` (`def_items.cpp` attrib arm, `@ 0x4a0cd6..0x4a0ce2`) and copied into `VehicleTraits::attrib_parent` by the items.def traits sweep (`mission/item_traits.cpp`); the `agun*` points ride `VehicleTraits::agun_points` from the collision resolve (`mission/collision_resolve.cpp`) |
 | 0x54b–0x60b | `primaryWeapon`/`ammo*`(×4)/`launchups*`(×3) | char[32]/char[16] | weapon-loadout strings |
 | 0x61b | `weaponUserpoints` | char[12][16] | the twelve weapon userpoint NAMES `weaplbup, weaplmup, weaplcup, weaprbup, weaprmup, weaprcup, weaplbup2 .. weaprcup2` (`ItemDef_ParseProperty @ 0x4a0ff2..0x4a1301`): b = fire origin, m = flash anchor, c = casing anchor; r/l/r2/l2 = weapon slots 0/1/2/3 (`Entity_InitBoneReferences @ 0x441470`; world-wac-ai-re §21.5) — `DefItemDef::weapon_userpoints` |
@@ -160,12 +160,12 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 The caller sets `entity->ItemTypeIndex` (`+28`, from
 `ItemList_FindIndexByTypeId`: the first-match row ordinal, 0 when no row
 matches; the store is `mov [esi+1Ch],ebp` in `Entity_SpawnFromBMSRecord
-@0x40E9F0` (the site `@0x40EBFC`), and the ItemDef pointer is `gItemDefs +
+@0x40E9F0` (the site `@0x40EBFC`), and the ItemDef pointer is `g_ItemDefs +
 index` `@0x40EBFF..0x40EC07`) first; then:
 
 | ItemDef field | → GamePlayerEntity field (offset) |
 |---|---|
-| `&gItemDefs[idx]` | `itemDef` (+0x20) |
+| `&g_ItemDefs[idx]` | `itemDef` (+0x20) |
 | `deathCallback` (0x138) | `deathCallback` (+0x1c8) — invoked by `Entity_KillByNetId` |
 | `updateCallback` (0x158) | `updateCallback` (+0x1c4) |
 | `graphicModel`/`huskModel`/`huskFinalModel` (0xf0/0xf4/0xf8) | `graphicModel`/`huskModel`/`huskFinalModel` (+0x30/+0x34/+0x38, was `rtCounter0/1/2`) |
@@ -176,7 +176,7 @@ index` `@0x40EBFF..0x40EC07`) first; then:
 
 **A type id resolves to its first row.** The loader never merges rows: each
 `begin` allocates the next one (`ItemDef_ParseProperty @0x49eb00`, the
-`ItemDef_AllocateWithDefaults @0x49e3b0` call `@0x49EBA8`, whose `gItemCount++` is
+`ItemDef_AllocateWithDefaults @0x49e3b0` call `@0x49EBA8`, whose `g_ItemCount++` is
 `@0x49E3BE`), so
 a later row repeating an id is unreachable through `ItemList_FindIndexByTypeId`,
 on the host (the spawn store above) and on the client (`NapiNPClientMsg_0x00D
@@ -228,7 +228,7 @@ and aircraft avoid brakes compare the ordinal against 1
 0x800`, `FastRope 0x1000`, `Takeable 0x2000`, `Easy 0x4000`, `S&D 0x8000` (the
 S&D/A&D objective target: `ItemDef_ParseProperty @ 0x4a084e..0x4a086d` compares the
 whole token case-insensitively against the string at `0x7C84E8` = `53 26 44 00`, which
-the IDB mis-types as `off_7C84E8`; consumers `reset_round_counters @ 0x516d3d /
+the IDB mis-types as `off_7C84E8`; consumers `Server_ResetRoundCounters @ 0x516d3d /
 @ 0x516d89` count the pool-1/2 carriers per team byte +354 into the S&D target counts,
 and the blast applier's same-team gate (jo-c 261654) makes them immune to friendly
 blast — `DEF_ITEM_ATTRIB_SD`, `ItemDeathTraits::team_protect`), `4Team 0x10000`,
@@ -280,8 +280,8 @@ frame, not a gunner-seat yaw offset: retail builds a direction look-at matrix,
 multiplies it through the live owning bone and carrier matrix, then writes the
 resulting child position plus yaw/pitch/roll every pool-1 update
 [`Entity_UpdateTransformAndTurret @ 0x440CA0`, attachment call `@ 0x44109D`,
-`build_bone_attachment_matrix @ 0x56C630`,
-`build_direction_look_at_matrix @ 0x612C90`]. Missing anchors copy the full
+`Bone_BuildAttachmentMatrix @ 0x56C630`,
+`Math_BuildDirectionLookAtMatrix @ 0x612C90`]. Missing anchors copy the full
 parent pose. The retail helper emits a row-vector render matrix, so the Godot
 port applies the same transpose plus X-axis conjugation used for PANM matrices.
 `Entity_UpdateAllEntities @ 0x4C2100` walks attachment ancestors parent-first

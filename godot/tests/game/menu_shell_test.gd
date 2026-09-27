@@ -182,7 +182,7 @@ func test_boots_into_main_menu_startup() -> void:
 # The shell seeds the five named Options sliders with the exact original
 # ranges/pages. Audio/input retain deterministic minimum fallbacks; gamma is
 # pinned to the registered high-quality retail comparison profile and locked.
-# [orig: options_screen_init @ 0x554800;
+# [orig: UI_OptionsScreenInit @ 0x554800;
 # UI_PopulateRenderAndAudioSettings @ 0x55c830]
 func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 	var config := ConfigFile.new()

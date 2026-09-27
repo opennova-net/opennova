@@ -47,7 +47,7 @@ is from `Entity_UpdateVehiclePhysics` decompile only, as permitted.
 Scope: originally the blocks a CLIENT executes for a REMOTE (non-local-driver,
 non-authority) watercraft — everything OUTSIDE the drive-INPUT block gated at
 0x48DF8C..0x48DFA2 (`attrib&0x40 && (is_authority || occupant ==
-g_local_player_entity)`), from the interp block's register mirror to the position
+g_LocalPlayerEntity)`), from the interp block's register mirror to the position
 integration. The per-record chase (interp) is already ported; it is recapped only
 for ordering and for the stale-speed decay it owns. **2026-08-06: the AUTHORITY
 half (the gated MoveOrder merge/capsize and the INPUT block's player/AI/parked
@@ -137,7 +137,7 @@ All of this is ONE call of Entity_UpdateWatercraftPhysics per world tick:
    interpProgress++ while < 128; **once >= 128 (stale records): brain[177] -=
    (brain[177] + 64) >> 7** [0x48DDC0..0x48DDCE]. (Ported chase; the [177] decay
    belongs to the prediction contract — the mirrored cmd coasts to zero.)
-7. **Register mirror** [0x48DDD4..0x48DDF4]: if `occupantEntity != g_local_player_entity`:
+7. **Register mirror** [0x48DDD4..0x48DDF4]: if `occupantEntity != g_LocalPlayerEntity`:
    `brain[136] = brain[177]; brain[132] = brain[179];`
    (client-side, every tick, including unoccupied boats).
 8. Dead check: `Flags & 2` -> skip everything to step 16 [0x48DDFA].
@@ -338,13 +338,13 @@ if (entity->Flags & 0x8000) {                     // afloat  [0x48EBB5]
 // look-ahead shore drag: sample terrain at the NEXT position
 int32 ground = Terrain_SampleHeightBilinear(entity->Position.X + entity->velocityX,
                                             entity->Position.Y + entity->velocityY); // [0x48EC19..0x48EC2D]
-if (ground >= Env_WaterHeightFixed) {             // ground at/above the water plane [0x48EC35]
+if (ground >= g_EnvWaterHeightFixed) {             // ground at/above the water plane [0x48EC35]
     entity->velocityX -= (entity->velocityX + 4) >> 3;    // [0x48EC3D..]
     entity->velocityY -= (entity->velocityY + 4) >> 3;
     entity->modelPtr0 -= (entity->modelPtr0 + 2) >> 2;
     // beached full stop: only while actively thrusting "into" the shore this tick
     if (vertical_thrust > 0                       // §4's fwd[2] term  [0x48EC7B]
-        && ground - Env_WaterHeightFixed > 30583  // 0x7777 ~ 0.467 u  [0x48EC84..0x48EC8A]
+        && ground - g_EnvWaterHeightFixed > 30583  // 0x7777 ~ 0.467 u  [0x48EC84..0x48EC8A]
         && entity->groundEntity == NULL) {        //                   [0x48EC91]
         entity->velocityX = 0;
         entity->velocityY = 0;
@@ -356,12 +356,12 @@ if (ground >= Env_WaterHeightFixed) {             // ground at/above the water p
 **What Z does between records** (the rest of part D): inside this function, only
 `Position.Z += slideDecay` (§7) and the slideDecay decrements above. There is **no
 buoyancy block in the ~150-500 decompile region**: the only water-height uses there are
-(a) the effect-anchor clamp `effectPos.Z = max(Position.Z, Env_WaterHeightFixed)` for
+(a) the effect-anchor clamp `effectPos.Z = max(Position.Z, g_EnvWaterHeightFixed)` for
 the fire/smoke emitters [orig: 0x48D5BD..0x48D5CB — cosmetic], and (b) the
 occupant-head-above-water gates on the enter/exit sounds [0x48DB06, 0x48DB41]. The real
 buoyancy/righting lives in **`Entity_ProcessPlatformPhysics` @ 0x481870** (10094 bytes),
 called UNGATED at 0x48ECE7, i.e. it runs on clients every tick: it references
-Env_WaterHeightFixed (0x482A9D/0x482BA5/0x482BEF/0x4834E6), writes Position.Z (5 sites,
+g_EnvWaterHeightFixed (0x482A9D/0x482BA5/0x482BEF/0x4834E6), writes Position.Z (5 sites,
 e.g. 0x482A8C `add [esi+0Ch],eax`), rewrites slideDecay (0x4819BC/0x483C1D/0x483F25),
 writes Yaw/Pitch/Roll (settle/capsize legs 0x483BEA..0x483F63), and is the producer of
 Flags 0x8000 (set 0x482CA5 / clear 0x482DB7) and 0x2000 (set 0x483B93 / clear
@@ -405,7 +405,7 @@ Tail rebuilds orientationMatrix from `&entity->Position` and sets Flags bit
 
 ### 8. Interp-block facts the prediction leg depends on (recap, already-ported chase)
 
-- Mirror site [orig: 0x48DDD4..0x48DDF4]: `if (occupantEntity != g_local_player_entity)
+- Mirror site [orig: 0x48DDD4..0x48DDF4]: `if (occupantEntity != g_LocalPlayerEntity)
   { brain[136] = brain[177]; brain[132] = brain[179]; }` — runs for every watercraft on
   a non-authority machine whose occupant is not the local player, every tick, after the
   interp step and before the motion blocks (same-tick freshness).
@@ -508,7 +508,7 @@ every tick (vs ground-contact gated); Z rides slideDecay + the platform buoyancy
 Reads: brain[132],[136],[137],[177],[179]; entity Position, Yaw/Pitch/Roll, Flags,
 groundEntity, occupantEntity, attachBone, currentSpeed, aiState, velocityX/Y,
 slideDecay, modelPtr0; itemDef acceleration/waterSpeed/turnRate/turnRate2;
-Env_WaterHeightFixed; terrain height at the look-ahead point.
+g_EnvWaterHeightFixed; terrain height at the look-ahead point.
 
 Writes (motion-relevant): brain[136]<-[177], brain[132]<-[179], brain[177] (stale
 decay); entity velocityX/Y, slideDecay, currentSpeed, aiState, modelPtr0, Position
@@ -544,13 +544,13 @@ is stale here), +0x8C = the budget divisor param [35] (IDB `stored_key_time`).
   Ported in `tick_watercraft_motor`.
 - **INPUT gate** [orig: @ 0x48DF7F..0x48DFA2]: no `attrib&0x40` → straight to
   the steer integrator @ 0x48E82C (the core runs on persisted registers).
-  Gate pass = `is_authority || occupant == g_local_player_entity`.
+  Gate pass = `is_authority || occupant == g_LocalPlayerEntity`.
 - **Entry split** [orig: @ 0x48DFA8..0x48DFCD]: occupant NULL **or entity
   Flags&2** → parked leg @ 0x48E7EE. (A second Flags&2 test @ 0x48DDFA
   earlier jumps dead hulls to the matrix tail — the port early-returns there.)
   Occupied: `moveTimer = 0`; occupant WITHOUT Flags&0x100 (an AI body) → AI
   leg @ 0x48E247; a PLAYER whose head is underwater (`occupant->Position.z +
-  CameraOffset.z <= Env_WaterHeightFixed` [orig: @ 0x48DFD3..0x48DFDF]) also
+  CameraOffset.z <= g_EnvWaterHeightFixed` [orig: @ 0x48DFD3..0x48DFDF]) also
   routes to the AI leg (deferred in the port — player-leg refinement).
 - **Player leg** [orig: @ 0x48DFE5..0x48E20F]: forces brain state 22
   [@ 0x48DFF5]; MoveOrder bit6 forces dir=1; bit7 → cmd = waterSpeed, dir=7;
@@ -762,7 +762,7 @@ constant set (§2 of the watercraft spec applies verbatim: dbl_7C3608 =
 
 Scope: the blocks a CLIENT executes for a REMOTE (non-local-driver, non-authority)
 aircraft — everything OUTSIDE the drive-INPUT gate at 0x490EF3..0x490F14
-(`attrib&0x40 && (is_authority || occupant == g_local_player_entity)`), from the interp
+(`attrib&0x40 && (is_authority || occupant == g_LocalPlayerEntity)`), from the interp
 block's register mirror to position/attitude integration. The per-record chase (interp)
 is recapped for ordering and for the register seeding it owns (which for aircraft
 includes the ALTITUDE register — see §5/§9).
@@ -895,7 +895,7 @@ All of this is ONE call of Entity_UpdateAircraftPhysics per world tick:
 5. `!is_authority` interp block [0x49095E..0x490C98] — §3. Includes the client state
    forcing, the record-apply register seeding (brain[131]/[137]!), the chase stepping,
    and the stale decay of brain[177] AND brain[178].
-6. **Register mirror** [0x490C9E..0x490CCA]: if `occupantEntity != g_local_player_entity`:
+6. **Register mirror** [0x490C9E..0x490CCA]: if `occupantEntity != g_LocalPlayerEntity`:
    `brain[136] = brain[177]; brain[135] = brain[178]; brain[132] = brain[179];`
    (every tick, including unoccupied aircraft).
 7. Dead check: `Flags & 2` -> skip to the tail matrix build [0x490CD0 -> 0x49274C].
@@ -973,7 +973,7 @@ dbl_7C3600/flt_7C19E0 loads, fpatan for atan2, ftol2_sse, sqrt clamp). Not repea
   `brain[178] -= (brain[178] + 64) >> 7` per tick — BOTH mirrored commands decay
   ~1/128/tick; brain[179] (steer) and brain[131] (altitude) do NOT decay, so an
   abandoned helicopter predicts to a hover at the last record's altitude.
-- **Mirror** [0x490C9E..0x490CCA]: `if (occupantEntity != g_local_player_entity)
+- **Mirror** [0x490C9E..0x490CCA]: `if (occupantEntity != g_LocalPlayerEntity)
   { brain[136] = brain[177]; brain[135] = brain[178]; brain[132] = brain[179]; }` —
   after the interp step, before the motion core (same-tick freshness), including
   occupant == NULL.
@@ -1230,7 +1230,7 @@ Z IS part of the mover, and the client runs all of it:
 - **`loc_47EF10` (UNDEFINED function in the IDB, 0x47EF10..~0x481866, sitting between
   `Entity_ProcessTrackedVehiclePhysics` and `Entity_ProcessPlatformPhysics`)** — the
   air-family ground/water contact + suspension solve, called ungated at 0x49254E.
-  Witnessed only as: consumer of Env_WaterHeightFixed (0x48015A/0x48019D/0x4801D3/
+  Witnessed only as: consumer of g_EnvWaterHeightFixed (0x48015A/0x48019D/0x4801D3/
   0x480D05), producer of Flags 0x8000 (0x48030B/0x48032B) and 0x2000 (0x480ED5, tests
   at 0x4802EC/0x480CF9/0x481089/0x4817FA), and Position.Z writer (0x480150/0x480EC9/
   0x48110A/0x4814C4/0x481849). Internals untraced — port separately (it is the
@@ -1471,7 +1471,7 @@ ItemDef fields:
 | +0x938 | bow-lift amount scale (§9) |
 | +0x93C | porpoise exit threshold scale (§9) |
 
-Globals: `Env_WaterHeightFixed` @ 0x26C6454 — the FLAT water plane (single 16.16
+Globals: `g_EnvWaterHeightFixed` @ 0x26C6454 — the FLAT water plane (single 16.16
 scalar; there is no wave field — "waves" are the §10 heave bob).
 Terrain: `Terrain_SampleHeightBilinear` @ 0x6067B0 (16.16 world XY → ground Z).
 
@@ -1692,7 +1692,7 @@ Position.X += dX; Position.Y += dY; Position.Z += 0;        // Z-sum always 0 [0
 
 ### 8. Water leg — submersion, draft, Flags 0x8000 [orig: 0x482A8F..0x482DB7]
 
-With W = Env_WaterHeightFixed and cz0..cz3 = the (pushed) world Z of corner probes
+With W = g_EnvWaterHeightFixed and cz0..cz3 = the (pushed) world Z of corner probes
 0..3 (saved v279..v282):
 
 ```c
@@ -2308,7 +2308,7 @@ no effect on the live boat solve.)
 
 | byte | writers (set) | writers (clear) | boat value |
 |------|---------------|-----------------|-----------|
-| +0x2EC | both solver machines [0x46CCB0/0x46B1F9]; Entity_ApplyWheelSuspensionForces 0x463642/0x463733; Entity_ApplyLightVehicleSuspensionForces 0x463832/0x463923; Entity_UpdateVehicleChassisOrientation 0x468B28; update_vehicle_suspension 0x46937B; Entity_ComputeSuspensionAndOrientation 0x469982; movers 0x476060/0x4785D8/0x478998/0x478C87/0x47BEB7/0x47E47B/0x47E89B/0x4810A0/0x48168D | Entity_BuildOrientationFromVectors 0x45904A; Entity_RebuildOrientationMatrixFromAxes 0x463532; respawn 0x45FFF1; 0x469C49; wheel-solver upright wreck 0x46B4FB; movers 0x479437/0x47C42C/0x47ED60/0x47EE3B/0x481544/0x48177C | **always 0** (no boat-family setter; platform §9 righting clears) — the platform's "write Yaw from fit" gate never opens for boats |
+| +0x2EC | both solver machines [0x46CCB0/0x46B1F9]; Entity_ApplyWheelSuspensionForces 0x463642/0x463733; Entity_ApplyLightVehicleSuspensionForces 0x463832/0x463923; Entity_UpdateVehicleChassisOrientation 0x468B28; Vehicle_UpdateSuspension 0x46937B; Entity_ComputeSuspensionAndOrientation 0x469982; movers 0x476060/0x4785D8/0x478998/0x478C87/0x47BEB7/0x47E47B/0x47E89B/0x4810A0/0x48168D | Entity_BuildOrientationFromVectors 0x45904A; Entity_RebuildOrientationMatrixFromAxes 0x463532; respawn 0x45FFF1; 0x469C49; wheel-solver upright wreck 0x46B4FB; movers 0x479437/0x47C42C/0x47ED60/0x47EE3B/0x481544/0x48177C | **always 0** (no boat-family setter; platform §9 righting clears) — the platform's "write Yaw from fit" gate never opens for boats |
 | +0x2ED | ground movers only (flip-threshold/slide/10-tick pulse, §3.1) | mover tails 0x4795DA/0x47C0B6/0x47E7E1/0x47EEEE; respawn 0x460018 | **always 0** |
 | +0x2EE | movers when a corner force < -5000 (0xFFFFEC78) while slideDecay < 0 [0x478E10..0x478E20, 0x47884F..0x47885F], aircraft 0x480E90/0x481259, light 0x47B4CE/0x47B986, tracked 0x47E32C/0x47EA2C | solvers [0x46CCC7/0x46B20D]; Entity_UpdateVehicleChassisOrientation 0x468B35; respawn 0x45FFF7; movers 0x478E07/0x47BD55/0x47EA12/0x47ED3A; aircraft 0x48123F/0x48151E | **always 0** → 0x46C8E0's disable machine dead for boats |
 | +0x2EF | Vehicle_UpdateTurretRotation 0x45AEF2 (§7); Entity_SmoothHeadingToTarget 0x45B363/0x45B547; movers (many) | platform fn 0x48390D/0x48392E/0x483962/0x483D5E; both solvers 0x46CC95/0x46B1DB; BuildOrientationFromVectors 0x459050; RebuildOrientationMatrixFromAxes 0x46352C; movers | toggles: set only while §9 planing-fast leg runs the lean machine |
@@ -2491,7 +2491,7 @@ All machines (client incl., every tick): prologue — `savedLivePose` recapture 
 live pose + `bodyHeading/Pitch/Roll` capture `[orig: @ 0x484054..0x484080]`; euler
 matrix build + forward/up extraction `[orig: @ 0x484010..0x484046]`; null-aiComp bail
 to the epilogue `[orig: @ 0x484086]`; AI-state default 22 `[orig: @ 0x48408c]`; ground
-raycast every 8th entity update `(g_entity_update_counter & 7) == 0` (the entity-update counter, section 29) →
+raycast every 8th entity update `(g_EntityUpdateCounter & 7) == 0` (the entity-update counter, section 29) →
 `Entity_RaycastGroundHeightAndObject(entity, 0, 0, 0x10000, 0x200000) @ 0x414320`
 `[orig: @ 0x4840a0..0x4840b1]`; death → state 21 `[orig: @ 0x4840c7..0x4840d6]`;
 damage presentation (smoke < healthMax/4 `[orig: @ 0x4841be..0x4841d6]`, fire +
@@ -2506,7 +2506,7 @@ drain `[orig: @ 0x48414a..0x484163]`; drowning damage −2 `[orig: @ 0x4865f9..0
 Client only (`!is_authority`): the chase block + register mirror `[orig:
 @ 0x484648..0x484930]` — §2.
 
-Authority ∥ local-driver only (`is_authority || occupantEntity == g_local_player_entity`):
+Authority ∥ local-driver only (`is_authority || occupantEntity == g_LocalPlayerEntity`):
 the input block `[orig: @ 0x484a92..0x4851e0]` — occupant MoveOrder/analog decode, seat
 gear cases, AI-drive leg, pool-1 stochastic avoid brake, no-driver settle. A REMOTE
 bike on a client skips all of it.
@@ -2555,7 +2555,7 @@ two bike-specific yaw gates. On `!is_authority`:
   (full signed 32-bit), else `progress++` `[orig: @ 0x4848ee..0x48490a]`. Identical to
   ground `[orig: @ 0x48b7c0..0x48b7e4]`.
 - **Register mirror** (the prediction feed): when `occupantEntity !=
-  g_local_player_entity`: `[136] = [177]` (speed) and `[132] = [179]` (steer)
+  g_LocalPlayerEntity`: `[136] = [177]` (speed) and `[132] = [179]` (steer)
   `[orig: @ 0x48491c..0x484930]`. Identical slots + gate in ground `[orig:
   @ 0x48b7f6..0x48b80a]`.
 
@@ -2987,7 +2987,7 @@ lowest = argmin(padZ_i); lowZ = min       // tracked during the scan
 avg = zsum >> 2
 if (Flags & 0x8000) avg -= r >> 1         // in-water hysteresis, r = pad radius
 testZ = avg + (−(B[10]+r+sink0))          // hull-bottom reference ('output_matrix')
-if (testZ >= Env_WaterHeightFixed) Flags &= ~0x8000;
+if (testZ >= g_EnvWaterHeightFixed) Flags &= ~0x8000;
 else {
   if (!(Flags & 0x8000)) {                // water ENTRY only
     spawn splash emitter: 14-dword descriptor, flags=1, handle =
@@ -3001,7 +3001,7 @@ else {
 }
 ```
 [orig: 0x48021A..0x48033D; emitter select 0x48025C..0x48027F; entry-only test
-0x480241..0x480243]. `Env_WaterHeightFixed` is the global water level (16.16).
+0x480241..0x480243]. `g_EnvWaterHeightFixed` is the global water level (16.16).
 
 ### 6. Settle flag +0x2F2 [orig: 0x480340..0x48042B]
 
@@ -3052,7 +3052,7 @@ variant (their live twins exist in the ground-family solves):
   wreck**, else −1. Max-depth scan #2 (`maxAll`): always, all 7 [orig:
   0x480BD3..0x480CE5].
 - Sink flush: `(wreck && up.z<0) || (Flags&0x2000 && Position.Z <
-  Env_WaterHeightFixed)` → zero all four sinks [orig: 0x480CF2..0x480D25].
+  g_EnvWaterHeightFixed)` → zero all four sinks [orig: 0x480CF2..0x480D25].
 
 ### 9. Bounding quad + pad extend loop [orig: 0x4805B4..0x480757]
 
@@ -3209,7 +3209,7 @@ inside the callee). EVERYTHING ELSE RUNS ON CLIENTS, notably:
    penetration and not (parked-frozen || wreck-rest); cleared on any pad contact.
    Our current terrain clamp approximates this; exact parity needs the 4-pad probe
    (§3) + per-point terrain depth (§4).
-2. **Flags 0x8000** (in-water): avg pad Z + hull-bottom offset vs Env_WaterHeightFixed
+2. **Flags 0x8000** (in-water): avg pad Z + hull-bottom offset vs g_EnvWaterHeightFixed
    with r/2 hysteresis (§5). Splash emitter spawn is client-local cosmetic; the
    overlay-action broadcast is authority-internal.
 3. **Position.Z**: airborne → untouched; grounded upright non-parked →
@@ -3525,7 +3525,7 @@ wire-up round's witness pass corrected two readings of the tidy:
   set by the bike mover `@0x48524c` when `Flags & 0x20 && speed > 0x1000`.
 - **The pick and what it scales**: with the seed armed, `flt_7C6F18 = 1.25`
   (authority, `@0x46b1cd`) / `flt_7C6F14 = 1.75` (client, `@0x46b1d5`) by
-  `g_napi_np_ctx.is_authority`; `+0x2EF = 0`; the authority raises `Flags |=
+  `g_NapiNPCtx.is_authority`; `+0x2EF = 0`; the authority raises `Flags |=
   0x10` `@0x46b1ed` while a client only TESTS the bit `@0x46b1f3` (the latch
   replicates through it — the vehicle rows' flags byte); `+0x2EC = 1`
   `@0x46b1f9`, `+0x2EE = 0`, `Entity_ClearSuspensionState @0x4592B0`. Then,
@@ -3617,7 +3617,7 @@ accumulator, no separate tail-rotor state.
   `angle += speed` always `@0x48fba9`. The HELO twin additionally plays the
   engine-start sound (`def->defaultResPlus64+120` when `speed <= 0.05·cap`
   above water `@0x48faea..0x48fafb`), spawns `Entity_SpawnBoneTrailEffect`,
-  lays the downwash terrain overlay (`terrain_overlay_alloc(handle, 786432,
+  lays the downwash terrain overlay (`Terrain_OverlayAlloc(handle, 786432,
   983040, ratio)` `@0x48fc7d`) and returns `!authority || speed >= cap`
   `@0x48fe4b` — presentation residuals.
 - **The wheel phase** `[orig: Entity_UpdateVehiclePhysics @0x48c4c5..0x48c4d0
@@ -4020,7 +4020,7 @@ complete mission-level vehicle parity.
 | Mounted panel gate `@ 0x5A5038` | A missing interface texture suppresses both silhouette and seats. A valid texture admits both. |
 | Critical warning (slot 34) cadence: `Entity_UpdateVehiclePhysics` `test bl,1Fh @0x48B08C`; `Entity_UpdateLightVehiclePhysics @0x48416C`; `Entity_UpdateTankVehiclePhysics @0x488C44`; `Entity_UpdateWatercraftPhysics @0x48D61F`; `Entity_ProcessInfantryPhysics @0x46E250..0x46E266`; `Entity_ProcessAirVehiclePhysics @0x46FB79`; `Entity_UpdateAircraftPhysics` `test byte ptr [esp+var_A4],3Fh @0x4904D7..0x4904F0` | The slot-34 warning fires on the `& 0x1F` (32-tick) phase for every mover except the direct-air family, which uses `& 0x3F` (64 ticks); the `0x3F` tests in the other movers are the authority health regen/drain cadence, not the warning. (Corrected 2026-09-08; `vehicle_motor::test_warning_cadence_by_family`.) |
 | Skid latch under the settle gate: cveh settle jump `@0x48D163..0x48D16A` lands ON the skid section `@0x48D264` (bit 8: and `@0x48D2C4`, set `@0x48D2EB`, clear `@0x48D345`); ctan's settle jump `@0x48AAB7..0x48AABE` lands at `0x48AD49` PAST its skid section `@0x48ABCB..0x48ACB5`; `flt_7C19E0` = 0x4EFFFE00 = 2147418112.0 | A settled cveh/cbik wreck still runs the skid latch/clear; only the tank skips it. The skid test is `ftol(min(sqrt(cx²+cy²+cz²), 2147418112.0)) != 0` with speed nonzero and `!(Flags & 0x2000)`. `+0x318` bit values: 1 claimant latch (`@0x48D3A5`), 2 reverse latch (`@0x48D1D7`), 4 lights latch (`@0x48D358`), 8 skid latch (`@0x48D2C4`), 0x20 a tank-only latch (`@0x48AAE0`). (Corrected 2026-09-08.) |
-| Helicopter loops: `update_vehicle_effect_emissions @0x528F20` `@0x52919D..0x5291CE` / `@0x5291ED..0x52921D` / `@0x529235..0x529260`; lifetime `effect_params+16 = 15 @0x528F94` → `SoundEmitter_RegisterSetLayers` slot word 21 `@0x528471`; `ItemDef_ResolveAllResources @0x49E7F0` fills `ItemDef.soundLoopId[7] @0x82C` from `res[16+i]` | Lane 21 reads `soundLoopId[2]` (+2100 = Soundloop_3, the `*_DLP` loop), lane 11 `soundLoopId[1]` (+2096 = Soundloop_2, `*_ILP`), lane 1 `soundLoopId[0]` (+2092 = Soundloop_1); each registers with lifetime 15 (the ground fold's `SoundEmitter_Register @0x5292A6` packs 30). Retail sndprof.def helicopter profiles author only soundloop_2/3 (SP_Apache1: V_APACHE_ILP / V_APACHE_DLP .8 1.2), so lane 1 is normally silent and Soundloop_4..7 are never consulted. (Corrected 2026-09-08 — the PR row had slots 7/6/5; `vehicle_part_anim::test_helicopter_sound_curves_and_decay`.) |
+| Helicopter loops: `VehicleEffect_UpdateEmissions @0x528F20` `@0x52919D..0x5291CE` / `@0x5291ED..0x52921D` / `@0x529235..0x529260`; lifetime `effect_params+16 = 15 @0x528F94` → `SoundEmitter_RegisterSetLayers` slot word 21 `@0x528471`; `ItemDef_ResolveAllResources @0x49E7F0` fills `ItemDef.soundLoopId[7] @0x82C` from `res[16+i]` | Lane 21 reads `soundLoopId[2]` (+2100 = Soundloop_3, the `*_DLP` loop), lane 11 `soundLoopId[1]` (+2096 = Soundloop_2, `*_ILP`), lane 1 `soundLoopId[0]` (+2092 = Soundloop_1); each registers with lifetime 15 (the ground fold's `SoundEmitter_Register @0x5292A6` packs 30). Retail sndprof.def helicopter profiles author only soundloop_2/3 (SP_Apache1: V_APACHE_ILP / V_APACHE_DLP .8 1.2), so lane 1 is normally silent and Soundloop_4..7 are never consulted. (Corrected 2026-09-08 — the PR row had slots 7/6/5; `vehicle_part_anim::test_helicopter_sound_curves_and_decay`.) |
 
 The presentation mask carries ownership only. A joiner publishes its local
 twin's motor controls (track phases, steering, speed, wheel phase, tire and
@@ -4441,7 +4441,7 @@ and sets it. AI fire-timer callers use the same dispenser directly. Verbatim
 (2026-09-08): `Entity_BuildWeaponSlotList(entityPtrs[10], slotTypes[10], entity)`
 `@0x4911a5..0x4911b5`; for entries 1..9 (`@0x4911c5..0x49145c`, unrolled) a
 non-null entry reads `occ = word[entry + slotTypes[i]*2 + 0x190]` (the per-slot
-seat occupant word), skips 0xFFFF, pool-resolves it through `g_pool_list`
+seat occupant word), skips 0xFFFF, pool-resolves it through `g_PoolList`
 (`handle >> 12` pool, `& 0xFFF` slot × stride) and ORs `(rider+0x12C >> 5) & 1`;
 then `if ((var_A4 & 0x3F) == 0) entity+0x318 &= ~4` `@0x49145e..0x491465`; then
 `if (entity+0x224 != 0 && pressed) { if (!(entity+0x318 & 4))
@@ -4459,7 +4459,7 @@ arm), off7 = the FLARE ammo-def index, off32 = the PILOT's `entity+352` (his
 handheld ammo-def index, `@0x42c052` → `@0x42a7da`), off33 = `fire_flags` =
 `Weapon_GetScopeZoomLevel(can_fire, 12) | (can_fire ? 0x80 : 0)`
 `@0x42bdd6..0x42bdf9` where a seated pilot (parentSlot 2 or 5) fails
-`Player_CanFireWeapon @0x5cf7a8..0x5cf7b6`, so off33 = 12 (`@0x422fd1`/`@0x422fd5`),
+`Player_IsOpticalViewVisible @0x5cf7a8..0x5cf7b6`, so off33 = 12 (`@0x422fd1`/`@0x422fd5`),
 off34 = 0, and off28 = the VEHICLE's `aiRuntime[3]` pool-resolved (0xFFFF when
 null, `@0x42a70d`). On a joiner the packet ships only when the pilot is the
 local player (`@0x53f6f4`). `JoinerRole::tick_local_weapon`'s source-fire leg
@@ -4778,11 +4778,11 @@ wreck streams the dead-pose form (net-re §5.13).
 
 ### Respawn marker research
 
-The authoritative selection entry is `assign_overlay_spawn_points
+The authoritative selection entry is `Spawn_AssignOverlaySpawnPoints
 @0x529E60`; 0x52A110 is an interior address. Server_TickUpdate calls it
 every 32 logic ticks. Game_StartMission resets its five lists, registers
 pool-1 type-1 vehicles by their saved spawn team, then invokes
-`build_spawn_marker_budget_list @0x529B40`. That builder requires numbered
+`Spawn_BuildMarkerBudgetList @0x529B40`. That builder requires numbered
 ChangeTeam+SpawnPoint zones at both ends of the chain, collects pool-3
 attrib2-bit-4 markers, and associates each with the nearest same-number
 zone in pools 1/2. Marker priority is its zone number when the minimum zone
@@ -4802,8 +4802,8 @@ nearby occupancy, the saved group mask, and the vehicle's saved spawn team.
 A successful assignment writes the complete six-word spawn pose and clears
 the overlay wait. There is no retry against a lower-priority occupied choice.
 The shared lifecycle restores that pose, team, health, children, controls and
-effect ownership. [orig: assign_overlay_spawn_points @ 0x529E60;
-build_spawn_marker_budget_list @ 0x529B40]
+effect ownership. [orig: Spawn_AssignOverlaySpawnPoints @ 0x529E60;
+Spawn_BuildMarkerBudgetList @ 0x529B40]
 
 The assignment pass runs in `Server_TickUpdate @0x51D7E0`'s every-32 leg,
 after the WAC tick and before the idle timers and the BMS quarter pass, under
@@ -4813,7 +4813,7 @@ counter `@0x51D8DC..0x51D8F4`); the port runs it in `world::ServerIdleLegs`,
 which the mission kernel registers between the WAC and BMS systems. The list
 itself is built once, at mission start: `Game_StartMission @0x524360` collects
 the spawn vehicles (the per-vehicle `sub_529A80` walk `@0x52527A..0x5252BF`) and
-calls `build_spawn_marker_budget_list @0x529B40` (`@0x5252C6`) right after the
+calls `Spawn_BuildMarkerBudgetList @0x529B40` (`@0x5252C6`) right after the
 mission load, ahead of the `Entity_InitAllFromModels @0x40E460` call
 (`@0x52567F`), the authority-gated PreMission pass (the
 `EventTrigger_UpdateAllWithFlag2 @0x454DC0` call `@0x525B86`) and the WAC's first
@@ -4899,7 +4899,7 @@ husk, `@0x457337..0x45734B`). Ported 2026-09-22 (the former D-NET-161 (e)):
 and radius-0 samples; the other one-ray-kind port of this function, the
 interim brain integrator's ground clamp, is deleted, and `aircraft_death_ground`
 and `vehicle_ground_height_at` already sampled radius 0 with the object form.
-`Vehicle_CleanupTeamEntitiesOnDestruction` zeroes the gun words (+804/+802 are
+`Vehicle_ReleaseEWeapGroupOnDestruction` zeroes the gun words (+804/+802 are
 +0x324 pitch and +0x322 yaw, not clip/reserve) unconditionally
 `@0x5470f9..0x547100` for every matched non-vehicle peer before the optional ammo
 split `@0x547107..0x54710e`; both death legs lead with the cleanup for a refNum
@@ -5009,7 +5009,7 @@ twin `@0x468688..0x468692`) and call `Entity_SetupGunnerAttachments @0x468100`.
 The byte is the items.def attrib token `Parent` (`ItemDef_ParseProperty
 @0x49EB00` attrib arm; jo-c kong.c 193609..193611 `stricmp(arg,"Parent")` ->
 `particleEffects[720] = 1`, 0x278 + 720 = 0x548). The setup walks
-`g_pool_list[1]` in slot order (`@0x468130..0x468173`): every OTHER entity
+`g_PoolList[1]` in slot order (`@0x468130..0x468173`): every OTHER entity
 whose refNum byte `+533` equals this entity's nonzero refNum lands in
 `brain+580+8*i` (+4 = the entity, sixteen at most `@0x468173`); with any peer
 it saves the current `+0x1C4` update callback into `brain[143]` (`@0x468183`),
@@ -5138,7 +5138,7 @@ Proof: `destruction`, `watercraft_client_motor`, GUT
 
 ## 29. Rotor sound, downwash, foliage and surface rings
 
-The historical name `update_vehicle_effect_emissions @ 0x528F20` is misleading:
+The historical name `VehicleEffect_UpdateEmissions @ 0x528F20` is misleading:
 the function registers helicopter sound loops. Lane 21 reads itemDef
 `soundLoopId[2]` (+2100 = Soundloop_3, the `*_DLP` loop) `@0x52919D..0x5291CE`,
 lane 11 `soundLoopId[1]` (+2096 = Soundloop_2, `*_ILP`) `@0x5291ED..0x52921D`,
@@ -5155,8 +5155,8 @@ SndProf words; the lateral loop uses climb intensity and rotor pitch. The
 medium scratch value is reused by a degenerate cruise interval. The float
 reciprocal and ftol chop preserve the one-unit endpoint loss; negative lateral
 volume wraps through the unsigned word. Empty helicopters refresh these loops
-while their rotors spin down. [orig: update_vehicle_effect_emissions @ 0x528F20;
-interpolate_value_in_range @ 0x527EA0;
+while their rotors spin down. [orig: VehicleEffect_UpdateEmissions @ 0x528F20;
+Math_InterpolateValueInRange @ 0x527EA0;
 Entity_UpdateHeloRotorSpin @ 0x48FA70]
 
 `rotor_wash.cpp` owns the bounded focal-wind pool. Rotor-axis rays select
@@ -5168,7 +5168,7 @@ also supplies the occlusion wind sampler; it is a PRESENTATION-ONLY stream —
 every draw sits behind the listener / 0x2200000 camera-distance gate
 `@0x5CB1CD` or a render gate — so `World::prng16_c_state` is never
 authoritative and must not enter any peer comparison.
-[orig: terrain_overlay_alloc @ 0x5CAF40;
+[orig: Terrain_OverlayAlloc @ 0x5CAF40;
 sub_5CB020 @ 0x5CB020; WeatherParticle_UpdateAllEmitters @ 0x5CB100
 (the function spans 0x5CB100..0x5CB5B0; the PR's 0x5CB220 was mid-body);
 WindZone_ApplyVortexForce @ 0x5CB8A0;
@@ -5215,7 +5215,7 @@ nearest containing zone. Reimpl: `emitter.cpp emit_one_internal` (window, else
 Sway renderers stay individually placed. Their five position-seeded waves
 bend the second part about its authored pivot and add the radial wind offset.
 The device composes that delta with a clean part pose each frame, preserving
-PANM and avoiding accumulated transforms. [orig: find_nearest_force_zone
+PANM and avoiding accumulated transforms. [orig: Terrain_FindNearestForceZone
 @ 0x5CB5B0; BoneCallback_Sway_World @ 0x4E2B10]
 
 Every eighth tick above a nonzero water plane, downwash can allocate a
@@ -5225,7 +5225,7 @@ nine radial rows and nineteen angular columns, the camera-distance height
 bias and both UV sets. The device uses the authored wake5/wakegrad textures.
 The ring opacity divides by the slot's EXTENT: `fidiv dword ptr [esi-4]`
 `@0x5CB532` (bytes DA 76 FC) is a 4-BYTE displacement from `_ESI` = &slot
-dword 31, i.e. slot dword 30, which `terrain_overlay_alloc @0x5CAFC4` stamps
+dword 31, i.e. slot dword 30, which `Terrain_OverlayAlloc @0x5CAFC4` stamps
 with the extent; the ray radius's `*(_ESI - 4)` `@0x5CB265` is the DWORD index
 −4 = slot dword 27 = the inner radius (the review's "divide by inner" claim was
 refuted 2026-09-08). Bank name map: `sub_5DDC60 @0x5DDC60` allocation,
@@ -5244,8 +5244,8 @@ The render side (corrected 2026-09-08): `WaterRing_BuildMesh @0x5DDEF0`
 builds the 19×9 ring geometry; `WaterRing_Draw @0x5DE0F0` owns the
 draw state — the 0.4 ambient material `@0x5DE202..0x5DE217`, `SetMaterial`
 `@0x5DE232`, `D3DRS_AMBIENT` (139) white `@0x5DE1EC`, `GfxShader_ApplyPassChecked`
-pass 0x100000 `@0x5DE245`, and the first-UV scroll `(g_entity_update_counter & 0x1FF) / 512`
-and `(g_entity_update_counter & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`. `WaterRing_LoadResources
+pass 0x100000 `@0x5DE245`, and the first-UV scroll `(g_EntityUpdateCounter & 0x1FF) / 512`
+and `(g_EntityUpdateCounter & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`. `WaterRing_LoadResources
 @0x5DDC90` loads wake5.tga / wakegrad.tga, and its `GfxShader_SetFfpLightingSources`
 (`@0x680720`) call also turns on FFP lighting with DIFFUSEMATERIALSOURCE =
 AMBIENTMATERIALSOURCE = MATERIAL (it writes +0x58..+0x5B, committed as RS 0x89 / 0x91 /
@@ -5264,15 +5264,15 @@ both sides; `compile_water_wakes` now writes the swapped offsets and
 ctest `vehicle_part_anim` and GUT `water_test.gd`). The Godot shader implements the
 two-texture draw through the compiled mesh (`water_wake.gdshader` cites
 `WaterRing_Draw @ 0x5DE0F0` / `WaterRing_LoadResources @ 0x5DDC90`).
-The UV scroll counter `g_entity_update_counter` is the ENTITY-UPDATE counter, not a render
-frame counter: its one writer is `add g_entity_update_counter,esi` (`@0x4C2639`) at the tail
+The UV scroll counter `g_EntityUpdateCounter` is the ENTITY-UPDATE counter, not a render
+frame counter: its one writer is `add g_EntityUpdateCounter,esi` (`@0x4C2639`) at the tail
 of a non-epilog `Entity_UpdateAllEntities @0x4C2100`, and nothing resets it, so it
 runs one behind `tick` through the process's first mission, holds on a skipped or
 epilog frame and keeps counting across restarts and mission loads. The compile
 reads `World::entity_update_counter`, which advances the same way
 (`water_wake_frame.h/.cpp`; corrected 2026-09-23, the logic tick had stood in).
 The counter's other readers: the ground-link cadence of the ground, light, tank
-and infantry movers (`test byte ptr g_entity_update_counter,7`, e.g.
+and infantry movers (`test byte ptr g_EntityUpdateCounter,7`, e.g.
 `Entity_UpdateVehiclePhysics @0x48AF00` `@0x48AFB9`,
 `Entity_UpdateLightVehiclePhysics @0x483FE0` `@0x484099`), the avoid-brake
 factors, the movement resolver's full update (`& 0x3F`,
@@ -5342,14 +5342,14 @@ ftol(sin(1.6P) × −1024.0); constants `dbl_7C6F20..7C6F58` = −1024.0, 1.6, 1
 reading was wrong; `vehicle_motor` pins P = 0.5 → 825755 / 574211 / −145 and
 P = 0.375 → 893366 / 439996 / −223.) A reverse boat does not enter the
 positive-only lean arm. The submerged-driver cut (`CameraOffset.z + Z <=
-Env_WaterHeightFixed` → the AI leg) exists on the ground selector-zero mover too
+g_EnvWaterHeightFixed` → the AI leg) exists on the ground selector-zero mover too
 (`Entity_ProcessInfantryPhysics @0x46E100 @0x46EA2E..0x46EA3A`) and on cveh
 (`@0x48B9A0..0x48B9AC`), not only the boat (`@0x48DFD3..0x48DFDF`) — the
 `!boat ||` guard was dropped 2026-09-08. The selector-zero boat's PlayerControl
 block sits at the HEAD of `@0x46FA00`, before the authority split `@0x470109`:
 `test byte [itemDef+54h],40h` `@0x47004B`, the claimant start/stop edge
 (`+0x170` claimant `@0x470055`, the `brain+0x318` bit-0 latch
-`@0x470063..0x47006F`, slot 30 on the claimant eye above `Env_WaterHeightFixed`
+`@0x470063..0x47006F`, slot 30 on the claimant eye above `g_EnvWaterHeightFixed`
 `@0x470075..0x4700EB`, the all-zero movement fold plus slot 31 on the hull
 `+0x18000` when the claimant leaves `@0x4700AB..0x4700EB`), then
 `Entity_UpdatePartSpinAccumulator @0x4700F5` — the GROUND machine, selected by
@@ -5482,8 +5482,8 @@ queries retain the building filter. Carried EWeap occupancy is checked at
 the root vehicle, and a non-PlayerControl EWeap ray uses its vehicle parent
 as the endpoint. The walker never tests the endpoint's own hull: its exclusion
 set is the query entity, the endpoint and both parent slots
-(`raycast_find_collision_entity @0x539ab8..0x539b10` -> ctx[17..20], skipped
-in `raycast_against_entity_pool @0x538832..0x538859`), and the 0x8000000 skip
+(`Physics_RaycastFindCollisionEntity @0x539ab8..0x539b10` -> ctx[17..20], skipped
+in `Physics_RaycastAgainstEntityPool @0x538832..0x538859`), and the 0x8000000 skip
 applies to sound rays only (the walker's includeFlagged is the caller's
 allTypes, `@0x539ba4 -> @0x5387ac`). What keeps a mounted USE from cycling
 seats is the scan's second gate, not any hull: the two caps `maxDistance =
@@ -5593,7 +5593,7 @@ which must be present and not a Player
 
 D-INF-2 scope (re-scoped 2026-09-23): the `+0x369` path-state byte is ported
 with its three values as `InfantryState::path_state`, with the detour target
-`+0x324..+0x32C`, and `ai_find_cover_position @0x4afab0` is ported as the
+`+0x324..+0x32C`, and `AI_FindCoverPosition @0x4afab0` is ported as the
 goal-directed obstacle detour (`infantry_detour.cpp`; world-wac-ai-re §33.16).
 Every `+0x369` writer stores 0, 1 or 2 (`@0x4AFEA8`, `@0x4AFF06`, `@0x4B37BB`,
 `@0x4BA94E`, `@0x4BCFDB`, `@0x4BD0EE`, `@0x4BD2E9`, `@0x4BD349`, `@0x4BD956`),
@@ -5902,7 +5902,7 @@ higher (`@0x43562A..0x43565F`), and a direct restore for anyone else
 
 `Input_HandleActionBinding_0 @0x4E09CB..0x4E09FF` rejects driver slot 5,
 rejects an unarmed controller slot 2, and fires an armed controller's
-`vehicle->EquippedSlot`, the same carrier slot. `Player_CanFireWeapon
+`vehicle->EquippedSlot`, the same carrier slot. `Player_IsOpticalViewVisible
 @0x5CF780` is an optical-view query (scope/FOV, crosshair, the fire-packet
 zoom byte); it gates fire only for OnlyFireScoped weapons
 (`@0x4E098B..0x4E09A0`), none of which sits on an armed ctrlx. The controller

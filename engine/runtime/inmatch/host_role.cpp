@@ -72,7 +72,7 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	// @0x51E8C5..0x51E8CB from dword_24D2258 = unlimitedVehicles_4D0].
 	kernel.world.rules.vehicle_respawns = config.unlimited_vehicles;
 	// The mpattrib word's 0x10000 bit the scope-zero -1 floor reads in session
-	// [orig: `test g_rules_flags,10000h` @0x4dbd15; g_rules_flags @0x24D1E34 is
+	// [orig: `test g_RulesFlags,10000h` @0x4dbd15; g_RulesFlags @0x24D1E34 is
 	// the host's mpattrib word, the S2C 0x64 +44 dword on a joiner].
 	kernel.world.rules.mpattrib = config.mp_attributes;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
@@ -82,7 +82,7 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 			(config.mp_attributes & GameConfig::kMpAttribNoFriendlyFire) != 0;
 	// The is_mp_session_peer bit is the is_client half of the connection
 	// mode: set for the SP/listen HostClient, clear for a HostOnly dedicated
-	// host. [orig: g_napi_np_ctx +0x64; napi_np_server_ctx.h connection modes]
+	// host. [orig: g_NapiNPCtx +0x64; napi_np_server_ctx.h connection modes]
 	kernel.world.rules.mp_session_peer = serve_and_play;
 }
 
@@ -249,7 +249,7 @@ void HostRole::run_tick(const TickInput &input) {
 	// client's death-screen latch, folded at the end of the previous frame as
 	// retail's client receive sets it at the head of this one.
 	// [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
-	//  `cmp g_death_screen_active,0` @0x526713]
+	//  `cmp g_DeathScreenActive,0` @0x526713]
 	kernel.world.cached.peer_death_screen = state.host_owner.ctx.is_mp_session_peer != 0 &&
 			state.client_runtime != nullptr && state.client_runtime->state().death_screen_active;
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,

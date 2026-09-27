@@ -3,7 +3,7 @@
 // The blink-letter and waterline gates of the passes one frame draws: the
 // main frame's terrain passes, detail-foliage passes and sky bracket, and the
 // water mirror's own sky bracket. The sky bracket is the dome AND the sun/moon discs
-// (SkyDome_RenderWithSkyfog -> render_skybox -> render_celestial_bodies); the sun glow,
+// (SkyDome_RenderWithSkyfog -> Render_Skybox -> Render_CelestialBodies); the sun glow,
 // the water glint and the sun veil are drawn outside it and are never gated
 // here.
 
@@ -20,7 +20,7 @@ struct ScenePassGates {
 	// @ 0x5ca197..0x5ca19f -> the traversal skip @ 0x5CA645..0x5CA64E over
 	// sub_60FF50 @ 0x5CA654, the sector-pass skip @ 0x5ca84f over
 	// Terrain_RenderMainSectorPass @ 0x5ca867]; the water mirror [orig:
-	// render_main_scene @ 0x5c1353], the weapon Inset on the main frame's
+	// Render_MainScene @ 0x5c1353], the weapon Inset on the main frame's
 	// value [orig: Render_WeaponInsetScene @ 0x5C9A23..0x5C9A2B over
 	// sub_60FF50 @ 0x5C9A2F, @ 0x5C9D57..0x5C9D5F; the push @ 0x5CA948] and
 	// the NVG scene [orig: NVG_RenderSceneToTarget @ 0x5D055C (the letter
@@ -41,7 +41,7 @@ struct ScenePassGates {
 	// Render_ProcessMainSceneFrame @ 0x5ca1a3..0x5ca1bd -> @ 0x5ca7c4..0x5ca81a].
 	bool sky = true;
 	// The water mirror's outdoors flag, clear under the indoors letter
-	// [orig: render_main_scene @ 0x5c1342..0x5c1353]. The one flag gates three
+	// [orig: Render_MainScene @ 0x5c1342..0x5c1353]. The one flag gates three
 	// things of the mirror: its sky bracket [orig: @ 0x5c166b..0x5c1676], its
 	// PolyTrn pass [orig: @ 0x5c14a7..0x5c14ab] and its clear colour, skyfog
 	// outdoors and black under the letter [orig: @ 0x5c1474, @ 0x5c1597]

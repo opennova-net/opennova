@@ -2,8 +2,8 @@
 // D-NET-152 — the C2S 0x06 client-fired-round pipeline. The dispatch case must validate the
 // shooter (anti-spoof vs the connection's own entity [orig: @0x51358d]), enforce the clip for
 // armory-known primary fire ("NO AMMO!" reject [orig: @0x50c15c]; decrement [orig:
-// consume_weapon_ammo @0x540913]), mirror the equipped weapon [orig: @0x50bd56] + the claimed
-// target [orig: @0x50c2ad], and append ONE g_round_ring event carrying the client's exact
+// Weapon_ConsumeAmmo @0x540913]), mirror the equipped weapon [orig: @0x50bd56] + the claimed
+// target [orig: @0x50c2ad], and append ONE g_RoundRing event carrying the client's exact
 // pre-spread fire pose [orig: RoundData_AddRound @0x4fdb40] — with NO reactive reply (the echo
 // rides the per-frame 0x0A tag-2 fan, §5.9.1). The 0x25 relay refills the same slot's clip
 // [orig: WeaponSlot_ReloadAmmo @0x541720 @0x514F03].

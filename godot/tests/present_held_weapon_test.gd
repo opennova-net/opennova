@@ -62,7 +62,7 @@ func test_orientation_sends_the_model_barrel_down_the_aim_direction() -> void:
 
 func test_orientation_ignores_the_hand_bone_rotation() -> void:
 	# Retail takes the weapon's 3x3 from the attachment matrix, never from bone 16 — the
-	# bone-16 branch @0x4b21b0 is gated on g_animStateFlagsTable[weaponState] & 0x80, and
+	# bone-16 branch @0x4b21b0 is gated on g_AnimStateFlagsTable[weaponState] & 0x80, and
 	# bit 0x80 is set only for the death_bullet_* states. Two very different hand bases must
 	# therefore produce the same weapon orientation.
 	var a := _make_skeleton(Basis(Vector3.UP, deg_to_rad(37.0)), Vector3(0.2, 1.3, 0.0))

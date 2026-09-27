@@ -11,10 +11,10 @@ enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, Hori
 
 // The texture-row dispatcher selects the loader by TYPE, not the sampler slot.
 // MDT is already a normal map; TGA carries height in A and output alpha in B.
-// [orig: Material_LoadStageTexture @0x5B16F0; load_texture_as_normalmap @0x58C480]
+// [orig: Material_LoadStageTexture @0x5B16F0; Texture_LoadAsNormalMap @0x58C480]
 // DDS sibling wins over a TGA unless the session allows an existing loose
 // TGA override. The selected file is decoded exactly: a broken DDS does not
-// fall through to a different extension. [orig: load_texture_as_normalmap @0x58C480]
+// fall through to a different extension. [orig: Texture_LoadAsNormalMap @0x58C480]
 std::string normal_material_filename(std::string_view name,
         bool loose_tga_preferred, bool dds_exists);
 
@@ -43,7 +43,7 @@ std::string material_dds_sibling(std::string_view query);
 MaterialImageSource material_image_source(std::string_view query,
 		bool loose_first_hit, bool dds_exists);
 // Runtime type 1: the plain path on the full name, no DDS probe.
-// [orig: load_texture_and_register @ 0x58B80E..0x58B881]
+// [orig: Texture_LoadAndRegister @ 0x58B80E..0x58B881]
 MaterialImageSource plain_material_image_source(std::string_view name);
 
 // The mip chain of a texture built from decoded pixels (TGA/MDT/PCX rows,
@@ -59,7 +59,7 @@ uint32_t pixel_texture_mip_levels(uint32_t width, uint32_t height);
 // the dispatcher's producers (0..2, 4..8, 16..18); 3, 9..15 and anything past
 // 18 leave the runtime byte at the record memset's zero, an ordinary diffuse
 // load. material_texture_transform takes this runtime type.
-// [orig: ThreediGp_LoadFromFile memset @ 0x5B59E5; convert_material_definition
+// [orig: ThreediGp_LoadFromFile memset @ 0x5B59E5; Material_ConvertDefinition
 // switch @ 0x5B045B..0x5B04A0 over byte_5B0778]
 uint8_t material_texture_runtime_type(uint8_t authored_type);
 
@@ -79,7 +79,7 @@ MaterialTextureTransform material_texture_transform(
 
 // Paired one-sided differences, dimension-1 wrapping, Z=2, and the original
 // float stores before normalization/green packing. Input/output are RGBA8.
-// [orig: load_texture_as_normalmap @0x58C985..0x58CAED (the live type-4/5
+// [orig: Texture_LoadAsNormalMap @0x58C985..0x58CAED (the live type-4/5
 // kernel); Texture_ApplyNormalMapFilter @0x58BD90..0x58C06C (its uncalled
 // instruction-for-instruction twin)]
 std::vector<uint8_t> normal_map_from_height_rgba(const uint8_t *rgba,
@@ -91,7 +91,7 @@ struct MaterialTexturePixels {
     std::vector<uint8_t> rgba;
     explicit operator bool() const { return !rgba.empty(); }
 };
-// [orig: generate_environment_map @0x58A220; AO generator @0x58CB90]
+// [orig: Texture_GenerateEnvironmentMap @0x58A220; AO generator @0x58CB90]
 MaterialTexturePixels horizon_volume_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
 MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
 // [orig: NQ8B @0x58F350; HRZ8 @0x58F470; AOC8 @0x58F590]

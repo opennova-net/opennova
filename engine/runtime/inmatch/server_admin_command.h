@@ -40,7 +40,7 @@ namespace opennova::inmatch {
 // Server_ChangeEntityTeam, then the "Changing team...." chat to the slot).
 // ReloadPlayer (Entity_UpdateWeaponOverlayFrameState) and DisarmPlayer are
 // not modeled on this host and return handled = false.
-// [orig: the ServerCommand handler loc_4D22F0 — gates @0x4D23C0..0x4D23E7,
+// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand — gates @0x4D23C0..0x4D23E7,
 //  the target suffixes @0x4D23F2..0x4D2505, PuntPlayer @0x4D2515..0x4D254D,
 //  TextChatServer @0x4D25A5..0x4D25E6, TextChatPlayer @0x4D2738..0x4D2765,
 //  CmdEchoPlayer @0x4D287F..0x4D28AC, KillPlayer @0x4D29C6..0x4D29EC,

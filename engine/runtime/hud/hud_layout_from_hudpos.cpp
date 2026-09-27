@@ -83,7 +83,7 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.wpd_info = pos_record4(hud.wpd_info);
 	out.chat_text = pos_record2(hud.chat_text[0], hud.chat_text[1]);
 	// The chat box's coordinate rows (the chat wrap width `x2 - (x1 - 4)`)
-	// are NOT the HUDCHATTEXT anchor: retail's g_hudChatBoxCoords are written
+	// are NOT the HUDCHATTEXT anchor: retail's g_HUDChatBoxCoords are written
 	// by a separate hud.def `chat_message x1 y1 x2 y2` / `sys_message` parser
 	// [orig: File_ParseASCIIFile("hud.def", cb, 0x2A5A8EAD) @0x5be210..0x5be228,
 	// the callback @0x5bb7a0, stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841],
@@ -97,7 +97,7 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// [orig: HUD_ParseHudposToken @0x59FB3B..0x59FB84 -> dword_2723810/14/18].
 	out.breath_time = pos_record2(hud.breath_time[0], hud.breath_time[1]);
 	out.breath_time.align = hud.breath_time[2];
-	// LFP_FLAGS — the AAS zone status panel's anchor (retail g_hudZonePanelX/Y,
+	// LFP_FLAGS — the AAS zone status panel's anchor (retail g_HUDZonePanelX/Y,
 	// written by the hudpos parse @0x5a0563/@0x5a057b).
 	out.lfp_anchor_x = hud.lfp_flags[0];
 	out.lfp_anchor_y = hud.lfp_flags[1];

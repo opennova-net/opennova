@@ -164,7 +164,7 @@ void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bi
 
 namespace {
 
-// CNetPlayerInterp_Setup(&g_fpCameraInterp, steps, idle_source, target) on
+// CNetPlayerInterp_Setup(&g_FpCameraInterp, steps, idle_source, target) on
 // the bound def's two poses: the caller names retail's source and destination
 // pointers (the hip copy +0x10C or the tpos +0x124); an active interp sources
 // from its own pose regardless. The caller stores the hipfire latch beside it.
@@ -210,8 +210,8 @@ void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_c
     }
     v.weapon_pose_bound = (flags & (3 | 0x04000000)) != 0;
     if ((flags & 3) != 0 && v.scope_settled) {
-        // [orig: g_scopeEngaged = 1 @0x4dfc5b; Setup(1, +0x10C hip, +0x124 tpos)
-        //  @0x4dfc7d; g_scopeHipfire = 0 @0x4dfc83]
+        // [orig: g_ScopeEngaged = 1 @0x4dfc5b; Setup(1, +0x10C hip, +0x124 tpos)
+        //  @0x4dfc7d; g_ScopeHipfire = 0 @0x4dfc83]
         v.scope_engaged = true;
         scope_interp_setup(v, 1, v.weapon_hip_pose, v.weapon_ads_pose);
         v.scope_hipfire = false;
@@ -225,8 +225,8 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
     // The scope-camera interp steps only while active, then THE SETTLE
     // PROMOTER fires on the call that drops the latch [orig: Player_UpdatePerFrame
     // -- `if (!activeFlag) goto done` @0x4de4c7; Player_StepFpViewBiasInterp
-    // @0x4de4c9; `if (!activeFlag)` @0x4de4d9 -> g_weaponScopeActive =
-    // (g_scopeEngaged != 0) @0x4de4f7]. The stepper itself deactivates on the
+    // @0x4de4c9; `if (!activeFlag)` @0x4de4d9 -> g_WeaponScopeActive =
+    // (g_ScopeEngaged != 0) @0x4de4f7]. The stepper itself deactivates on the
     // call after the last moving lane snapped, or at once for an unbound slot
     // [orig: Player_StepFpViewBiasInterp null slot/Def @0x4DDD2B..0x4DDDBC].
     if (v.weapon_pose_interp.active) {
@@ -303,7 +303,7 @@ float player_view_scope_fraction(const PlayerViewState &v) {
 }
 
 bool player_view_scope_ease_active(const PlayerViewState &v) {
-    // [orig: g_fpCameraInterp.activeFlag, tested @ 0x4df177]
+    // [orig: g_FpCameraInterp.activeFlag, tested @ 0x4df177]
     return v.weapon_pose_interp.active;
 }
 
@@ -321,17 +321,17 @@ bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon
     if (player_view_scope_ease_active(v)) return false;
     const int32_t full = inset_weapon ? kScopeEaseStepsInset : kScopeEaseSteps;
     if (engaged) {
-        // [orig: g_weaponScopeActive = 0 @0x4df31d; g_scopeEngaged = 1 @0x4df323;
+        // [orig: g_WeaponScopeActive = 0 @0x4df31d; g_ScopeEngaged = 1 @0x4df323;
         //  Setup 7 @0x4df355 / 15 @0x4df36e from the hip copy (+0x10C) to tpos
-        //  (+0x124); g_scopeHipfire = 0 @0x4df373]
+        //  (+0x124); g_ScopeHipfire = 0 @0x4df373]
         v.scope_settled = false;
         v.scope_engaged = true;
         scope_interp_setup(v, full, v.weapon_hip_pose, v.weapon_ads_pose);
         v.scope_hipfire = false;
     } else {
         // [orig: Setup 1 @0x4df1c3 (hipfire return) / 7 @0x4df1e8 / 15 @0x4df201
-        //  from tpos to the hip copy; g_scopeEngaged = 0 @0x4df206;
-        //  g_weaponScopeActive = 0 @0x4df20c; g_scopeHipfire = 1 @0x4df212]
+        //  from tpos to the hip copy; g_ScopeEngaged = 0 @0x4df206;
+        //  g_WeaponScopeActive = 0 @0x4df20c; g_ScopeHipfire = 1 @0x4df212]
         const int32_t steps = v.scope_hipfire ? kScopeEaseStepsHipfire : full;
         scope_interp_setup(v, steps, v.weapon_ads_pose, v.weapon_hip_pose);
         v.scope_engaged = false;
@@ -342,12 +342,12 @@ bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon
 }
 
 bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flags) {
-    // [orig: Player_PackInputStateToEntity @ 0x4df450 — g_movementKeyHeld = 1 while any
+    // [orig: Player_PackInputStateToEntity @ 0x4df450 — g_MovementKeyHeld = 1 while any
     //  of the four direction keys is down @ 0x4df4bb, = 0 otherwise @ 0x4df4f9]
     v.move_held = move_held;
     const bool scoped_def = (def_flags & 1) != 0;
     // Promoted at scope on a Scoped (flags 1) weapon: movement forces the full
-    // unscope through the normal toggle [orig: g_weaponScopeActive gate
+    // unscope through the normal toggle [orig: g_WeaponScopeActive gate
     // @ 0x4df4c9 && Def->Flags & 1 @ 0x4df4ea -> Player_ToggleWeaponScope
     // @ 0x4df4ec]. The caller runs it; the legs below are no-ops after it.
     if (move_held && scoped_def && player_view_scope_settled(v)) return true;
@@ -357,8 +357,8 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
     constexpr int32_t kPinnedFlags = 0x20000080; // ForceScoped | Emplaced
     if (move_held) {
         // (a) the running raise reverses toward the hip from its own pose
-        // [orig: activeFlag && !g_scopeHipfire @0x4df548 -> Setup(15, pos,
-        //  hip copy) @0x4df567; g_scopeHipfire = 1 @0x4df56c].
+        // [orig: activeFlag && !g_ScopeHipfire @0x4df548 -> Setup(15, pos,
+        //  hip copy) @0x4df567; g_ScopeHipfire = 1 @0x4df56c].
         if (player_view_scope_ease_active(v) && !v.scope_hipfire) {
             scope_interp_setup(v, kScopeEaseSteps, v.weapon_hip_pose, v.weapon_hip_pose);
             v.scope_hipfire = true;
@@ -367,8 +367,8 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
         // [orig: @0x4df57c..0x4df58e].
         if ((def_flags & kPinnedFlags) != 0) return false;
         // (b) settled drop with the promoted byte kept
-        // [orig: g_weaponScopeActive && !activeFlag && !g_scopeHipfire @0x4df5ae
-        //  -> Setup(15, tpos, hip copy) @0x4df5d1; g_scopeHipfire = 1 @0x4df5d6].
+        // [orig: g_WeaponScopeActive && !activeFlag && !g_ScopeHipfire @0x4df5ae
+        //  -> Setup(15, tpos, hip copy) @0x4df5d1; g_ScopeHipfire = 1 @0x4df5d6].
         if (player_view_scope_settled(v) && !player_view_scope_ease_active(v) &&
             !v.scope_hipfire) {
             scope_interp_setup(v, kScopeEaseSteps, v.weapon_ads_pose, v.weapon_hip_pose);
@@ -377,10 +377,10 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
         return false;
     }
     // (c) LABEL_33: the auto re-raise on key release
-    // [orig: g_weaponScopeActive && !activeFlag && g_scopeHipfire &&
-    //  !(flags & 0x20000080) @0x4df607 -> g_weaponScopeActive = 0 @0x4df609;
-    //  g_scopeEngaged = 1 @0x4df60f; Setup(15, hip copy, tpos) @0x4df636;
-    //  g_scopeHipfire = 0 @0x4df63b].
+    // [orig: g_WeaponScopeActive && !activeFlag && g_ScopeHipfire &&
+    //  !(flags & 0x20000080) @0x4df607 -> g_WeaponScopeActive = 0 @0x4df609;
+    //  g_ScopeEngaged = 1 @0x4df60f; Setup(15, hip copy, tpos) @0x4df636;
+    //  g_ScopeHipfire = 0 @0x4df63b].
     if (player_view_scope_settled(v) && !player_view_scope_ease_active(v) && v.scope_hipfire &&
         (def_flags & kPinnedFlags) == 0) {
         v.scope_settled = false;
@@ -393,7 +393,7 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
 
 bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags) {
     // [orig: the engage leg refuses while the movement latch is held on a
-    //  Scoped weapon — g_movementKeyHeld && (scope_flags & 1) -> return @ 0x4df29c]
+    //  Scoped weapon — g_MovementKeyHeld && (scope_flags & 1) -> return @ 0x4df29c]
     return v.move_held && (def_flags & 1) != 0;
 }
 
@@ -600,7 +600,7 @@ float player_view_fp_pitch_recoil_deg(int32_t recoil_pitch_bam) {
 }
 
 float player_view_fp_roll_deg(int32_t torso_roll_bam, int32_t lean_bam) {
-    // [orig: @ 0x437fe6 — g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)]
+    // [orig: @ 0x437fe6 — g_ViewRotRoll = entity+0x2DC + (entity+0xB0 >> 2)]
     return static_cast<float>(
             static_cast<double>(
                     io::bam_add(torso_roll_bam, io::bam_sar(lean_bam, 2))) *
@@ -861,7 +861,7 @@ void player_view_compose_camera(PlayerViewState &v,
                                 bool march_candidates, float entity_roll_deg,
                                 PlayerCameraPose &out) {
     // Mode 4: the death lerp camera — the composed FROM/TO poses against the
-    // view tick, nothing of the FP/TP legs below [orig: the g_camera_mode == 4
+    // view tick, nothing of the FP/TP legs below [orig: the g_CameraMode == 4
     // branch @0x4389eb..0x438b49 returns before the mode 0/1 composition].
     if (v.camera_mode == 4 && v.death_cam.valid) {
         DeathCameraPose pose;

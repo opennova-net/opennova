@@ -2,7 +2,7 @@
 // the field->string map and the SMALL/disabled toggle, the width split, the
 // per-player rows joined by slot to the board, the cell formats, the team
 // colours, the local selection, and the tab filter
-// [orig: populate_stat_results_list @0x562240; stat_filter_tab_handler
+// [orig: StatScreen_PopulateStatResultsList @0x562240; StatScreen_StatFilterTabHandler
 //  @0x562140].
 #include <cstdio>
 #include <string>

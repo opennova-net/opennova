@@ -3,11 +3,11 @@
 // "the render-slot (entity ground shadow) side").
 //
 // Retail shape: a 256-record slot table (128 B each)
-// [orig: RenderSlot_Table @ 0x2be3d30] registered at entity init — persons
+// [orig: g_RenderSlotTable @ 0x2be3d30] registered at entity init — persons
 // always, items via the attrib2 DynamicShadow bit, gated on the shadow-detail
 // option [orig: Entity_InitFromModel @ 0x40E1C8..0x40E1F7 ->
 // RenderSlot_AllocSlot @ 0x5d5690]. Each frame the slot pass
-// [orig: render_shadow_pass @ 0x5d7b70]:
+// [orig: Render_ShadowPass @ 0x5d7b70]:
 //   1. loads the sun into the slot default direction, clamps the vertical
 //      component to 0.25 and negates all three (light->surface form; a
 //      grazing sun never stretches a silhouette past 4x height);
@@ -64,7 +64,7 @@ namespace opennova::renderer {
 
 // The frame-open slot projection direction: vertical component clamped to
 // >= 0.25, then all three components negated into the light->surface form
-// [orig: render_shadow_pass @ 0x5d7bdc..0x5d7c30]. Input is the
+// [orig: Render_ShadowPass @ 0x5d7bdc..0x5d7c30]. Input is the
 // surface->light sun tuple with y vertical; the result is NOT normalized
 // (retail stores the clamped-negated tuple raw).
 std::array<float, 3> slot_projection_direction(
@@ -93,8 +93,8 @@ int grazing_slot_lod(int base_lod, float dir_y);
 float silhouette_half_extent(float bound_radius_units);
 
 // The silhouette capture view. Retail builds a rotation-only D3D view from
-// the slot direction [orig: setup_shadow_cascade_matrices @ 0x58d300 ->
-// build_direction_look_at_matrix @ 0x612c90, the shared
+// the slot direction [orig: RenderSlot_SetupShadowCascadeMatrices @ 0x58d300 ->
+// Math_BuildDirectionLookAtMatrix @ 0x612c90, the shared
 // renderer::direction_look_at frame in direction_look_at.h: forward =
 // normalize(dir), right = normalize(forward.z, 0, -forward.x), up = forward x
 // right; a vertical direction leaves right and up ZERO in retail and the
@@ -185,7 +185,7 @@ bool drape_culled(float camera_distance_units);
 
 // The sun-lit drape ambient: per channel
 //   ambient_c = 1 - (1 - fade) * sun_c*|dir_y| / (sun_c*|dir_y| + sky_c)
-// with sun = Env_LightBlock, sky = Env_SkyBlock (0..1 here; retail bytes)
+// with sun = g_EnvLightBlock, sky = g_EnvSkyBlock (0..1 here; retail bytes)
 // [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5f63..0x5d6008]. The shadow removes only
 // the direct sun term scaled by the projection vertical — never the sky
 // ambient — which is why a retail noon shadow darkens far more than a
@@ -376,7 +376,7 @@ void slot_patch_indices(int lod, std::vector<uint16_t> &out);
 
 // ---------------------------------------------------------------------------
 // The depth-clip stage [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0 ->
-// build_shadow_cascade_uv_matrices @ 0x58cf10; shadow_system_init_resources
+// RenderSlot_BuildShadowCascadeUVMatrices @ 0x58cf10; Shadow_SystemInitResources
 // @ 0x5d6230]
 // ---------------------------------------------------------------------------
 
@@ -384,7 +384,7 @@ void slot_patch_indices(int lod, std::vector<uint16_t> &out);
 // silhouette term — rows 0..2 are white below column 16, one gray texel
 // at column 16 and black beyond; row 3 is all white. Sampled CLAMP +
 // bilinear [orig: @ 0x5d6260..0x5d62a7 the fill; flags 1 -> clamp
-//  (apply_texture_stages @ 0x680870), linear min/mag]. Because the stage
+//  (CGfxShader_ApplyTextureStages @ 0x680870), linear min/mag]. Because the stage
 // ADDs and saturates, WHITE suppresses the shadow and BLACK keeps it:
 // u2 > 0.5 (ground beyond the plane through the caster, away from the
 // light) draws, u2 < 0.5 (toward the light) is suppressed, and v2 >= 0.75
@@ -428,13 +428,13 @@ inline constexpr float kSlotBindMaxDistance = 320.0f;
 // The is_person class (itemdef +0x5C == 3) does NOT stretch the drape. The
 // 4.0 (flt_7C44B8) multiplies the VERTICAL component of a COPY of the slot
 // direction, and that copy builds only the drape's SECOND texture matrix —
-// the depth-clip stage: "shadowztex" (shadow_system_init_resources
+// the depth-clip stage: "shadowztex" (Shadow_SystemInitResources
 // @ 0x5d62d2), a 32x4 white/black step addressed by depth along that
 // steepened direction, which clips the projected silhouette to the
 // half-space beyond the caster and, for a soldier, nearer its feet. The
 // silhouette projection itself uses the unscaled direction
 // [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d7f..0x5d5de1 ->
-// build_shadow_cascade_uv_matrices @ 0x58cf10: lookat_dir1 (primary,
+// RenderSlot_BuildShadowCascadeUVMatrices @ 0x58cf10: lookat_dir1 (primary,
 // unscaled) vs lookat_dir2 (detail, y x4); re-witnessed 2026-08-21 — the
 // earlier "elongate 4x along the direction" reading drew every person
 // shadow four times its projected length]. The depth-clip stage is
@@ -506,7 +506,7 @@ private:
 	// The fixed 256-record table: an entity keeps its index for its
 	// lifetime, so the refresh cadence keyed on it never re-phases when
 	// another record is released [orig: RenderSlot_AllocSlot @ 0x5d5690
-	// appends at RenderSlot_Count into RenderSlot_Table @ 0x2be3d30, and the
+	// appends at g_RenderSlotCount into g_RenderSlotTable @ 0x2be3d30, and the
 	// count only resets at subsystem init @ 0x5d61cb; Entity_Destroy's
 	// release zeroes the 128-byte record but never hands its index back
 	// [orig: RenderSlot_ReleaseSlot @ 0x5d5671..0x5d5679]]. Device fold: a Godot caster

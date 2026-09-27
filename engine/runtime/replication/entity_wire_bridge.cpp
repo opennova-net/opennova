@@ -304,8 +304,8 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 namespace {
 
 // entity+36 GamePlayerEntity Flags word for a PLAYER spawn record, written verbatim by the
-// original serializers [orig: serialize_entity_states_to_buffer @0x5030a0 writes
-// *(u16)(entity+36); serialize_object_to_buffer @0x504d10 likewise]. bit 0x100 =
+// original serializers [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0 writes
+// *(u16)(entity+36); NetPacket_SerializeObjectToBuffer @0x504d10 likewise]. bit 0x100 =
 // player/minimap-register (set for EVERY player so the client's handler re-resolves the model
 // at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01: WITNESSED to be PER-ENTITY host
 // state, not per-recipient — Server_PlayerAdd @0x51cbc0 sets `entity+36 |= 1` once at add time
@@ -331,8 +331,8 @@ uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient
 // two). The retail host allocates a per-team minimap id here [orig: Server_PlayerAdd @0x51cbc0
 // fills player_slot+442 (team 1) / +444 (team 2) — seeded from the JOINING client's own JSP
 // fields (jsp[56]/jsp[58], Server_BuildPlayerInfoAndAdd @0x51d560), validated by
-// MinimapSlot_HasEntity @0x57b140 and reallocated via lookup_entity_slot_and_pack_entry
-// @0x57ad40 when stale; serialized at serialize_entity_states_to_buffer @0x5030a0 name+21 =
+// MinimapSlot_HasEntity @0x57b140 and reallocated via EntitySlot_LookupAndPackEntry
+// @0x57ad40 when stale; serialized at NetPacket_SerializeEntityStatesToBuffer @0x5030a0 name+21 =
 // *(u16)(entity+348)]. The REAL packing (witnessed in the packer @0x57ae47 and its decoder
 // MinimapSlot_FindByPackedId @0x57a270) is type(bits 0-4) | subtype(5-8) | index(9-14) |
 // side(15) over the 288-byte minimap slot array — bit 15 is the nationality ALIGNMENT, not a
@@ -391,7 +391,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 		rec.orientation = engine_heading_bam(e.yaw);
 		rec.team = e.team;
 		// Field 13 = entity+0x374 animSlot, the character-model/anim-set selector — serialized RAW
-		// [orig: serialize_entity_states_to_buffer @0x5030a0 reads +0x374 @0x5032b8]. For players the
+		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0 reads +0x374 @0x5032b8]. For players the
 		// spawn stamped it from the joiner's per-side VCA/VCB join var (golden joiner=4); NEVER the
 		// body-anim clip — echoing Entity::body_anim_slot here was the DBuggy1-shadow bug (D-NET-146).
 		rec.anim_slot = e.anim_slot;
@@ -413,7 +413,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	rec.slot_id = e.handle.packed;
 	// Both fields are dereferenced from entity+0x20 ItemDef. A null def writes zero for each,
 	// which is load-bearing: item_type==0 makes the client stop after destroy+memset instead of
-	// rebuilding the slot. [orig: serialize_object_to_buffer @0x504d79/@0x504dc8;
+	// rebuilding the slot. [orig: NetPacket_SerializeObjectToBuffer @0x504d79/@0x504dc8;
 	// NapiNPClientMsg_FullEntitySpawn gate @0x433b5a]
 	rec.item_type_id = e.has_item_def ? static_cast<uint16_t>(e.item_id) : 0;
 	rec.item_type = e.has_item_def ? e.item_type : 0;
@@ -424,13 +424,13 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	// The name rides only when the resolved ItemDef carries AIData. Use the raw attrib source,
 	// rather than name presence or a pool heuristic, so a null/non-AI def emits the required
 	// one-byte empty cstr. The name is the entity Name, entity+0xF4.
-	// [orig: serialize_object_to_buffer @0x504e20..0x504e7c (`lea edi,[ebp+0F4h]`
+	// [orig: NetPacket_SerializeObjectToBuffer @0x504e20..0x504e7c (`lea edi,[ebp+0F4h]`
 	//  @0x504E24)]
 	if (e.has_item_def && (e.item_attrib & world::kItemAttribAIData) != 0)
 		rec.entity_name = e.display_name;
 	// The three live relationship pointers serialize independently; do not infer one from
 	// mounted, because the original simply resolves each stored pointer to its pool handle.
-	// [orig: serialize_object_to_buffer @0x504e8c..0x504fb4]
+	// [orig: NetPacket_SerializeObjectToBuffer @0x504e8c..0x504fb4]
 	if (e.primary_occupant.valid()) rec.parent_vehicle_handle = e.primary_occupant.packed;
 	if (e.ground_target.valid()) rec.ground_entity_handle = e.ground_target.packed;
 	if (e.mount_target.valid()) rec.parent_entity_handle = e.mount_target.packed;
@@ -460,7 +460,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	// Yaw high word — the client restores Yaw = (i16)heading_hi << 16 (@0x433aa1), so this is
 	// the engine-frame heading BAM's top half (same convention as the 0x0C orientation). The
 	// writer truncates the live dwords, so a seeded mover sends its own BAM
-	// [orig: serialize_object_to_buffer movzx word [ebx+12h] @0x505166, [ebx+16h] @0x505179].
+	// [orig: NetPacket_SerializeObjectToBuffer movzx word [ebx+12h] @0x505166, [ebx+16h] @0x505179].
 	rec.heading_hi = static_cast<uint16_t>(static_cast<uint32_t>(carrier_heading_bam(e)) >> 16);
 	rec.pitch_hi = static_cast<uint16_t>(static_cast<uint32_t>(carrier_pitch_bam(e)) >> 16);
 	rec.ai_state = static_cast<uint8_t>(e.ai_state); // entity+692 low byte, serialized raw
@@ -491,7 +491,7 @@ static uint32_t load_stream_flags_dword(const world::Entity &e) {
 // the claimant engine edge, 1 the movement direction, 2 the lights edge or an
 // aircraft's flare latch, 3 skid, 4 collision, 5 the tank pivot, 6/7 the tank
 // tumble cues), plus 0x80 while a type-1 profile's part spin runs.
-// [orig: serialize_entity_pool_to_packet_0 @0x503E85..0x503EC0, the rate read
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503E85..0x503EC0, the rate read
 //  sub_48F090 @0x48F09A (entity+0x468)]
 static uint8_t vehicle_sound_latch_byte(const world::Entity &e, const world::AiEntity &ae) {
 	const auto &m = e.veh;
@@ -518,13 +518,13 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		// The entity's Name (entity+0xF4, Entity::display_name) rides only for an
 		// AIData def (the AI trailer's own gate below); every other record carries
 		// the one-byte empty string.
-		// [orig: serialize_entity_pool_to_packet_0 @0x503A64..0x503ADF]
+		// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503A64..0x503ADF]
 		if (e.is_ai_capable) rec.entity_name = e.display_name;
 		rec.pos_x = world::to_fixed(e.position.x);
 		rec.pos_y = world::to_fixed(e.position.y);
 		rec.pos_z = world::to_fixed(e.position.z);
 		// The entity+16/+20/+24 dwords, full width: a seeded mover's own BAM, not its
-		// whole-degree mirror [orig: serialize_entity_pool_to_packet_0 @0x503B37,
+		// whole-degree mirror [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503B37,
 		// @0x503B53, @0x503B6F].
 		rec.euler_z = carrier_heading_bam(e);
 		rec.euler_x = carrier_pitch_bam(e);
@@ -533,7 +533,7 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		// The PARENT field is the occupantEntity (+0x170) back-reference: a
 		// vehicle's driver, a gun's gunner. An addeweap child's carrier is never
 		// written here; it rides the TARGET below (its groundEntity), which the
-		// client follows. [orig: serialize_entity_pool_to_packet_0
+		// client follows. [orig: NetPacket_SerializeEntityPoolToPacket_0
 		// `mov eax, [ebp+170h]` @0x503BC9, flag 0x100 @0x503BD3, the pool walk
 		// @0x503BDB..0x503C07]
 		if (e.primary_occupant.valid() && w.registry.get(e.primary_occupant) != nullptr)
@@ -545,7 +545,7 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		// The field rides the stored pointer alone: the handle is computed from
 		// its pool row whether or not an entity still lives there, so a child
 		// whose carrier row was destroyed streams that freed row's handle.
-		// [orig: serialize_entity_pool_to_packet_0 target write (entity+40)
+		// [orig: NetPacket_SerializeEntityPoolToPacket_0 target write (entity+40)
 		//  @0x503C22..0x503C49, the pool-range walk with no occupancy test;
 		//  handler resolve @0x4332bc, store @0x4332d7]
 		if (e.ground_target.valid()) rec.target_handle = e.ground_target.packed;
@@ -578,7 +578,7 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		// x/y, so a vehicle that drove off (or a wreck parked off the map) still
 		// streams where it spawned (the retail load stream shows both). The name
 		// is the slot's +156, the record's raw 8-byte ai_textfile.
-		// [orig: serialize_entity_pool_to_packet_0 @0x503D3D..0x503DAB;
+		// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503D3D..0x503DAB;
 		//  Entity_InitFromModel @0x40E10C..0x40E11E; Entity_SpawnFromBMSRecord
 		//  @0x40ED80/@0x40ED8C]
 		if (e.is_ai_capable) {
@@ -588,17 +588,17 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 			rec.ai_profile_2 = world::to_fixed(e.spawn_position.y);
 		}
 		// Every row carries its entity+290 byte (the BMS byte-81 ammo count).
-		// [orig: serialize_entity_pool_to_packet_0 @0x503D27..0x503D38]
+		// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503D27..0x503D38]
 		rec.bone_byte = e.ammo_count;
 		// Field 0x1000 rides every row with a vehicle brain (entity+0x64): the
 		// brain's +0x318 state byte, 0x00 on a parked hull.
-		// [orig: serialize_entity_pool_to_packet_0 @0x503E7F..0x503EC0]
+		// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503E7F..0x503EC0]
 		if (const world::AiEntity *brain = w.ai.for_handle(e.handle)) {
 			rec.has_sound_latch_byte = true;
 			rec.sound_latch_byte = vehicle_sound_latch_byte(e, *brain);
 		}
 		// The §5.11 zone/trait fields, per the witnessed serializer gates [orig:
-		// serialize_entity_pool_to_packet_0 @0x503940]: entity Flags dword (0x20 @0x503ae1),
+		// NetPacket_SerializeEntityPoolToPacket_0 @0x503940]: entity Flags dword (0x20 @0x503ae1),
 		// subType (0x80 @0x503e58), refNum (0x40), and the ZONE block — a NUMBERED zone
 		// (entity+538) emits 0x2000 + the packed (zoneNumber + 32*rank) byte + the u16 radius
 		// (entity+350) [orig: ZoneSlotChain_GetZoneInfo @0x503eeb; @0x503ecc-0x503f08]; an
@@ -615,7 +615,7 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		// vehicle emits field 0x20: the retail load stream in
 		// fixtures/novaworld/run_20260426_120859/server_load_packets.nwmsg carries 0x20400
 		// for each live vehicle (0x20000 is its motor's per-tick bit) and 0x406 for each
-		// wreck. [orig: serialize_entity_pool_to_packet_0 `mov edx,[ebp+24h]; test edx,edx`
+		// wreck. [orig: NetPacket_SerializeEntityPoolToPacket_0 `mov edx,[ebp+24h]; test edx,edx`
 		//  @0x503ae1..0x503aed; Entity_UpdateVehiclePhysics @0x48d451]
 		rec.entity_flags = load_stream_flags_dword(e);
 		rec.action_byte = e.sub_type; // entity+532 [orig: @0x503e58]
@@ -634,7 +634,7 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		}
 		// A palm def (its damage callback) or a psec mover streams the low byte of
 		// entity+0x270, the palm's standing/falling state or a piece's type,
-		// whatever its value. [orig: serialize_entity_pool_to_packet_0
+		// whatever its value. [orig: NetPacket_SerializeEntityPoolToPacket_0
 		//  @0x503F4C..0x503F80]
 		if (e.palm_state_streamed) {
 			rec.has_difficulty_byte = true;
@@ -683,14 +683,14 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 		// gates 0x0040) and subType (entity+532, gates 0x0080 — 0xFF on indestructible defs).
 		// Golden ASH_I5A buildings: flags 0x0A1, eflags 0x04020400, subType 0xFF, ammo 0xFF.
 		// The Flags field is the live dword, raw, exactly as the 0x0D record's.
-		// [orig: serialize_pool2_static_to_buffer @0x5042F0 field sources @0x5044e6/@0x504502/
+		// [orig: NetPacket_SerializePool2StaticToBuffer @0x5042F0 field sources @0x5044e6/@0x504502/
 		// @0x504519/@0x504535]
 		rec.entity_flags = load_stream_flags_dword(*e);
 		rec.ammo_count = e->ammo_count;
 		rec.bone_a = e->ref_num;
 		rec.bone_b = e->sub_type;
 		// The same entity+0x270 byte as the 0x0D record's, behind the same
-		// callback test. [orig: serialize_pool2_static_to_buffer @0x504554..0x504588]
+		// callback test. [orig: NetPacket_SerializePool2StaticToBuffer @0x504554..0x504588]
 		rec.has_score_flag = e->palm_state_streamed;
 		rec.score_flag = static_cast<uint8_t>(e->palm_state);
 		batch.records.push_back(rec);
@@ -710,7 +710,7 @@ static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 	// Pool-3 flag 0x02 is the raw entity+0 dword. For marker types whose
 	// BMS waypoint distance overrides that field (notably KOTH's 6006), this
 	// is the authored Q16 radius rather than an Euler component.
-	// [orig: serialize_entity_pool_to_packet @0x503593/@0x5035A9]
+	// [orig: NetPacket_SerializeEntityPoolToPacket @0x503593/@0x5035A9]
 	rec.orientation_val = static_cast<uint32_t>(
 			world::to_fixed(e.bound_radius));
 	rec.team_byte = e.team;
@@ -729,7 +729,7 @@ Pool3SyncBatch build_pool3_marker_batch(const world::World &w) {
 
 bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// 1. Resolve the joiner's owned entity by its wire handle (pool<<12 | slot).
-	//    [orig: dispatch_entity_packet_callback @0x4D6A80 resolves g_pool_list[h>>12] and
+	//    [orig: NetPacket_DispatchEntityPacketCallback @0x4D6A80 resolves g_PoolList[h>>12] and
 	//    verifies `entity == *owner_ctx` before invoking the +356 callback — the receive
 	//    path has NO entity+286/entity+36 health gate; that gate is send-side only
 	//    (Player_BuildTag0CInputBody @0x42A550).]
@@ -744,7 +744,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 
 	// 3. Movement/spawn gate: skip the apply while entity+0x24 bit1 is set (spawning).
 	//    [orig: case 4 gate @0x4c2000 `test [edi+24h], 2; jnz skip`.] The host-session
-	//    globals the original also gates on (g_spawn_success_gate==0, playerSlot+0x20==6
+	//    globals the original also gates on (g_SpawnSuccessGate==0, playerSlot+0x20==6
 	//    in-game, dword_C8D824==0 @0x4c200a-0x4c2028) hold for an active in-game peer and
 	//    are modeled implicitly here (the SP listen-server only drains C2S for joined peers).
 	if ((ent->flags & 0x2u) != 0)
@@ -833,7 +833,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	ent->net_analog_z = intent.analog_z;
 
 	// Equipped-weapon adm index (entity+0x2B0), the 0x0A off-16 echo source. Retail gates the
-	// ingest by AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; a table-less world
+	// ingest by g_AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; a table-less world
 	// (unit paths — a live host always feeds weapon.def) accepts the byte verbatim, and an
 	// index with no table entry (including the 0xFF none sentinel) is NOT stored, mirroring
 	// the failed AdmDef_GetEntryByIndex leg. (D-NET-143)

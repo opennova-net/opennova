@@ -186,7 +186,7 @@ void test_fire_chains_recoil() {
     CHECK(s.current == wa::kFire);
     CHECK(ev.fired);                 // fire ds == 0 -> the shot on the entry tick
     CHECK(ev.fired_clip_before_consume == 30); // mode byte samples MountSlot+0x10 first
-    CHECK(s.clip == 29);             // ammo consumed [orig: consume_weapon_ammo]
+    CHECK(s.clip == 29);             // ammo consumed [orig: Weapon_ConsumeAmmo]
     CHECK(s.next == wa::kRecoil);    // [orig: @ 0x542c9e unconditional]
     CHECK(s.kick > 0);
     in.fire_pressed = false;
@@ -406,7 +406,7 @@ void test_auto_reload_from_recoil() {
     s.clip = 1;
     s.reserve = 300;
     WeaponFsmInputs in;
-    in.auto_reload = true; // [orig: g_autoReloadEnabled @ 0x24D2118]
+    in.auto_reload = true; // [orig: g_AutoReloadEnabled @ 0x24D2118]
     in.fire_pressed = true;
     in.fire_held = false;
     bool requested = false, applied = false;
@@ -657,7 +657,7 @@ void test_reload_end_leg() {
 
 void test_keep_scope_reload_class() {
     // ForceCrouch (0x40000 — the mortars) keeps the sight view through a reload:
-    // no stash, no unscope, no rescope. [orig: @ 0x543126 -> g_rescopeAfterReload
+    // no stash, no unscope, no rescope. [orig: @ 0x543126 -> g_RescopeAfterReload
     // = 0 @ 0x54313d; every other weapon stashes @ 0x54312f]
     WeaponFsmDef def = make_ak_def();
     def.flags |= 0x40000;

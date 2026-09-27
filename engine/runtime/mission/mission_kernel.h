@@ -222,7 +222,7 @@ public:
 	// restart or the next mission reads slot n at the previous run's value;
 	// V# and G# start at zero per load, ScriptVarStore::carry_declared_from),
 	// and the entity-update counter (process-global and never reset: the next
-	// mission's staggers continue its phase [orig: g_entity_update_counter,
+	// mission's staggers continue its phase [orig: g_EntityUpdateCounter,
 	// whose one writer is Entity_UpdateAllEntities @0x4C2639]), and the
 	// precipitation drawer's memory (precipitation_draw).
 	void carry_across_load_from(MissionKernel &previous);
@@ -251,7 +251,7 @@ public:
 	// The precipitation pool's per-render update for a camera at (x, y, z)
 	// mission 16.16: the wrap into the camera volume and the re-floor of every
 	// wrapped drop on terrain / water / the first entity under it
-	// [orig: update_weather_particle_positions @ 0x5dec40 from the drawer].
+	// [orig: WeatherParticle_UpdatePositions @ 0x5dec40 from the drawer].
 	void update_precipitation(int32_t cam_x, int32_t cam_y, int32_t cam_z);
 	// The precipitation drawer's call-to-call memory, the last call's camera
 	// mode and position (renderer/precipitation_frame.h PrecipitationDrawState):

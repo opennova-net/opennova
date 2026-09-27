@@ -14,7 +14,7 @@ const HudHiddenCaptureWitness := preload(
 # [orig: the huddetail cycle Input_HandleActionBinding_0 @0x4E0601..0x4E0624
 #  (the layer global only); the death force NapiNPClientMsg_0x00F
 #  @0x42E410..0x42E41C (the layer global only); the mission-start apply
-#  apply_session_settings_to_globals @0x55154d from the config struct that
+#  Game_ApplySessionSettingsToGlobals @0x55154d from the config struct that
 #  Game_SaveConfig @0x54c80d persists; the first-match key scan @0x49d42f]
 #
 # user:// settings hygiene: every test wraps its cycles back to the starting

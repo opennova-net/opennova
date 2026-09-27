@@ -136,9 +136,9 @@ Vec3 annular_axis_scales(Emitter &e, const ParticleDef &def) noexcept {
 // +Y by the azimuth (RotationY), and finally map local +Y onto `reference`
 // through an orthonormal basis — unless `|reference|^2 < 0.99`, in which case
 // the local vector stands (emission around world +Y).
-//   vtable+28 [orig: generate_random_direction_basis @ 0x5e22a0]: azimuth =
+//   vtable+28 [orig: CParticleSystem_GenerateRandomDirectionBasis @ 0x5e22a0]: azimuth =
 //     rand01 * 2*pi, stored as the emitter's heading (+208) @ 0x5e2300.
-//   vtable+32 [orig: compute_cone_direction_vector @ 0x5e1f10]: azimuth =
+//   vtable+32 [orig: CParticleSystem_ComputeConeDirectionVector @ 0x5e1f10]: azimuth =
 //     heading + 2*pi / emit_burst @ 0x5e1f6e (the burst-distribute step; the
 //     helper still consumes the second rand() draw @ 0x5e1f35).
 // The basis choice only fixes where azimuth 0 points; its D3DX/FPU form is
@@ -1051,7 +1051,7 @@ Vec3 mission_wind_vector(int wind_speed, int wind_direction_degrees) noexcept {
 	// [orig: Weather_SetMissionWind @ 0x5de970]: the per-tick fixed-point magnitude is
 	// `65536000 * speed / 60 / 60 / 65` (integer steps), pointed along the
 	// compass heading `90 - direction` degrees in the game's horizontal plane
-	// (x = cos, y = sin, up = 0); render_emitter_effect @ 0x5f70c0 converts
+	// (x = cos, y = sin, up = 0); Render_EmitterEffect @ 0x5f70c0 converts
 	// that vector to the effect frame and multiplies by 62 (ticks per second).
 	// The port's effect frame keeps game x, maps game up to y and negates game
 	// y into z (world::render_float_from_fixed's swizzle).

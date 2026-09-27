@@ -33,7 +33,7 @@ func enter_menu(world: GameWorld, hud: CanvasLayer) -> void:
 
 ## Every SP and network mission start crosses this presentation edge: only the
 ## loading screen remains visible until the corresponding completion callback.
-## [orig: Game_StartMission -> render_loading_screen @ 0x521d10 /
+## [orig: Game_StartMission -> Render_LoadingScreen @ 0x521d10 /
 ## LoadingScreen_UpdateAndPresent @ 0x586be0, released by
 ## LoadingScreen_ReleaseEffect @ 0x525d52]
 func begin_world_load(

@@ -6,7 +6,7 @@ namespace opennova::menu {
 
 std::vector<int32_t> player_info_voice_values(int32_t sex) {
 	// DEFAULT_VOICE leads, then the enabled rows of the head's sex in table
-	// order [orig: populate_player_voice_combo @ 0x55dce0].
+	// order [orig: PlayerInfo_PopulatePlayerVoiceCombo @ 0x55dce0].
 	std::vector<int32_t> values;
 	values.push_back(kDefaultVoiceValue);
 	for (const PlayerVoiceRow &row : kPlayerVoiceTable) {

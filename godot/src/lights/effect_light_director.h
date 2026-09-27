@@ -50,7 +50,7 @@ class Weather;
 // [orig: Game_StartMission @ 0x525d19 -> Game_SpawnAllEntityGlowEffects @0x5227b0 ->
 // Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
 // group-passing three [orig: Light_SelectAndEnableForDraw @ 0x5ab9d0 ->
-// collect_nearby_zones_by_aabb @ 0x5aa250; the batch collectors' group gate
+// Light_CollectNearbyZonesByAABB @ 0x5aa250; the batch collectors' group gate
 // @ 0x5d91f8 / @ 0x5d96b8 and 3-cap @ 0x5d9229]. The object pass runs per
 // rendered model: one draw context per visible ObjectModel carrying BOTH
 // witnessed groups — the owner group its submit declares, and the building

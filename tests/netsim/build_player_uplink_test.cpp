@@ -445,7 +445,7 @@ bool run_ground_target_carrier_roundtrip() {
 
 // The equipped-adm ingest gate (D-NET-143): a table-less world accepts the uplinked byte
 // verbatim; with the armory fed, only an existing entry with category < 11 is stored
-// [orig: case-4 store @0x4C20A3 gated AdmDefs[idx].category < 11; a missing entry
+// [orig: case-4 store @0x4C20A3 gated g_AdmDefs[idx].category < 11; a missing entry
 // (including the 0xFF none sentinel) mirrors the failed AdmDef_GetEntryByIndex leg].
 bool run_equipped_adm_ingest_gate() {
 	w::World world;

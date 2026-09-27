@@ -2507,7 +2507,7 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
 }
 
 // The debris-type trail column reads the ONE native table row
-// [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+// [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C].
 void test_death_piece_trail_effect_rows() {
     CHECK(std::string(death_piece_trail_effect(0)).empty());       // HULL
     CHECK(std::string(death_piece_trail_effect(1)) == "Effect_VexpM");
@@ -2815,7 +2815,7 @@ static void test_aircraft_death_spin_rates_roll_in_retail_order() {
 // after the WAC tick under the same script admission, so an empty host with a
 // live WAC clock holds it, and only ticks on a 32 boundary run it.
 // [orig: Server_TickUpdate — the admission @0x51D89F..0x51D8BD, `test
-//  tick,1Fh` @0x51D8C4, the assign_overlay_spawn_points call @0x51D8D2]
+//  tick,1Fh` @0x51D8C4, the Spawn_AssignOverlaySpawnPoints call @0x51D8D2]
 static void test_spawn_markers_ride_the_script_admission() {
 	auto storage = std::make_unique<World>();
 	World &w = *storage;

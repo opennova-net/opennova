@@ -124,7 +124,7 @@ bool detail_vectors_and_gates() {
 	// Z-MIN and local B ADDS to it; the yaw step is retail's flt_7CD4DC
 	// (0x38C90FD0), a hair below 2*pi/65536. Vectors from an independent
 	// emulation of the instruction sequence.
-	// [orig: generate_foliage_instances_0 @ 0x5ffe88..0x5fffa2]
+	// [orig: Foliage_GenerateInstances_0 @ 0x5ffe88..0x5fffa2]
 	const struct Expected { float x, z, yaw; } expected[3] = {
 	    {18.63215637f, 49.69863892f, 4.83126879f},
 	    {20.66067505f, 50.26528931f, 1.83435190f},
@@ -330,7 +330,7 @@ bool tier_specific_foliage_sampler_routing() {
 	// a cell whose world minimum is (16, 48) routed to atlas (528, 560) takes
 	// its first candidate (world 18.63215637, 49.69863892) at atlas
 	// (530.63215637, 561.69863892).
-	// [orig: generate_foliage_instances_0 @ 0x5ffddb..0x5ffdee (& 0x3FF),
+	// [orig: Foliage_GenerateInstances_0 @ 0x5ffddb..0x5ffdee (& 0x3FF),
 	// @ 0x5fff84..0x5fff9d (sample coordinates), @ 0x600065 (the gate)]
 	FrameRequest routed = one_detail(10.0f);
 	routed.detail_cells[0].atlas_x = 528;
@@ -805,7 +805,7 @@ bool per_slot_mask_bit_selection_in_both_tiers() {
 	// Both tiers gate candidates on mask & (1u << slot_index). A foliage mask
 	// of 2 carries only slot 1's bit: slot 0 generates nothing while slot 1
 	// generates the full candidate sets, so a regression to `mask & 1u` fails.
-	// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+	// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 	// Foliage_GenerateModelTileInstances @ 0x600980]
 	auto world = world_with_foliage_mask(0x2u);
 
@@ -934,7 +934,7 @@ bool detail_cache_lru_evicts_oldest_at_capacity_three() {
 	// A,B re-touched, a new key replaces the OLDEST-stamped entry C — not the
 	// newest and not slot zero.
 	// [orig: Foliage_UpdateDetailCellSlots @ 0x601b30;
-	// terrain_tile_init_buffers @ 0x5ff920 — pool sizing]
+	// TerrainTile_InitBuffers @ 0x5ff920 — pool sizing]
 	if (!expect(Runtime::detail_cache_capacity(500) == 3,
 	            "source vertex count 500 sizes the pool to three cells")) {
 		return false;

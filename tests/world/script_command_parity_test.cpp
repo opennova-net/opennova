@@ -712,7 +712,7 @@ static void test_player_removal_sweeps_placed_devices() {
 // so a child's destroy takes the other EWeap children and leaves the carrier.
 // [orig: Entity_Destroy @0x43E810 — the list removal @0x43E840..0x43E858, the
 //  def / def type != 3 / refNum gates @0x43E9B6..0x43E9CA, the call @0x43E9CD;
-//  CStreamingMem_Destroy @0x546F30 — member tests @0x546F8A..0x546FA0,
+//  EntityReference_DestroyEWeapGroup @0x546F30 — member tests @0x546F8A..0x546FA0,
 //  Entity_Destroy @0x546FA3; the list join Entity_SpawnFromBMSRecord
 //  @0x40EC23..0x40EC45; Entity_SpawnWeaponOverlays @0x40F389 / @0x40F4C7]
 static void test_destroy_takes_the_eweap_refnum_group() {

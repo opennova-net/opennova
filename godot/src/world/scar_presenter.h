@@ -44,7 +44,7 @@
 //  Scar_RenderAllCaches @0x5CDF70 (the shared ring first, then every live
 //    entity ring) -> Scar_RenderCache @0x5CD830 (the fog box
 //    `|p - cam| <= fog + r` on the ground axes, the owner-visibility gate, the
-//    six vertices per slot coloured Env_TerrainLightCombined | FF000000);
+//    six vertices per slot coloured g_EnvTerrainLightCombined | FF000000);
 //  the drawer Scar_DrawBatches (ex Terrain_RenderFoliageBatches) @0x5ccd10 (the IDB's kong misnomer;
 //  the Scar_DrawBatches rename is proposed) after the lit sector entities.]
 

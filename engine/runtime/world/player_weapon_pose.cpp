@@ -113,7 +113,7 @@ void controller_fire_pose(World &world, Entity &carrier, const WeaponTableEntry 
 }
 
 // [orig: Entity_CheckWeaponSeatFlags @0x540D00 -- an OnlyScoped weapon held by
-//  the local player answers no flag query until g_weaponScopeActive]
+//  the local player answers no flag query until g_WeaponScopeActive]
 bool local_weapon_seat_flag(const LocalPlayerWeapon &weapon, bool scope_settled, uint32_t mask) {
     if (!weapon.active) return false;
     if ((weapon.def.flags & def::DEF_WEAPON_FLAG_ONLYSCOPED) != 0 && !scope_settled) return false;

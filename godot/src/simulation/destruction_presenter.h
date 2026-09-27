@@ -57,7 +57,7 @@ class Simulation;
 //    standing, the witnessed fallback);
 //  pieces: Entity_SpawnDeathPieces @ 0x493400 -> the 256-slot pool ticked by
 //    DeathPiece_TickAll @ 0x57b900 (each piece renders ONE husk section with a
-//    per-type trail effect from g_death_piece_types @ 0x8404f0); the draw is
+//    per-type trail effect from g_DeathPieceTypes @ 0x8404f0); the draw is
 //    the occlusion frame's collect (world/death_piece_draw.h) applied by
 //    apply_piece_draws;
 //  section debris: Entity_SpawnSectionDebris @ 0x43f580 — collision-face

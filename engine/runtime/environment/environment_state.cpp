@@ -471,8 +471,8 @@ Rgb EnvironmentState::nvg_scene_clear_color(bool eye_above_water) const {
 }
 
 Rgb EnvironmentState::water_mirror_clear_color(bool mirror_outdoors) const {
-	// [orig: render_main_scene @ 0x5c1474 xor esi, esi; @ 0x5c1597 mov esi,
-	//  Env_SkyfogBlock on the outdoors path]
+	// [orig: Render_MainScene @ 0x5c1474 xor esi, esi; @ 0x5c1597 mov esi,
+	//  g_EnvSkyfogBlock on the outdoors path]
 	return mirror_outdoors ? frame_clear_color() : Rgb{};
 }
 
@@ -588,7 +588,7 @@ float EnvironmentState::fog_end_distance() const {
 }
 
 int EnvironmentState::fog_type() const {
-	// Env_FogType: the .env value at the seed, the `fogtype` WAC after
+	// g_EnvFogType: the .env value at the seed, the `fogtype` WAC after
 	// [orig: @ 0x26c6808].
 	if (weather_live()) {
 		return weather_->fog_type;
@@ -659,7 +659,7 @@ bool EnvironmentState::build_light_values(const Vec3 &default_dir,
 	// and every sky/ground/ceiling/floor channel becomes 0.5; the gain is
 	// bound separately and untouched
 	// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c837c
-	//  (Player_CanFireWeapon) && @ 0x5c8389 (EquippedSlot->Def flags2 & 4)
+	//  (Player_IsOpticalViewVisible) && @ 0x5c8389 (EquippedSlot->Def flags2 & 4)
 	//  -> @ 0x5c839c..0x5c843c; RenderBatchCtx_StoreLightingConstants
 	//  @ 0x5d8b06..0x5d8b33].
 	if (thermal_view_) {
@@ -719,10 +719,10 @@ TerrainEnvUniforms EnvironmentState::build_terrain_uniforms(
 	// its branch first with the byte-rebuilt sky (nvg_terrain_sky); else the
 	// thermal view in first person swaps in the flat 0x101010 / 0xF0F0F0 pair
 	// [orig: Render_TerrainScene @ 0x610d10 (NVG gate) ->
-	//  init_terrain_lighting_color_ramps(Env_LightBlock, NVG sky) @ 0x610e36;
+	//  Terrain_InitLightingColorRamps(g_EnvLightBlock, NVG sky) @ 0x610e36;
 	//  @ 0x610e51 (flags2 & Thermal && camera mode 0) ->
-	//  init_terrain_lighting_color_ramps (0x101010, 0xF0F0F0) @ 0x610e65;
-	//  else (Env_LightBlock, Env_SkyBlock) @ 0x610ea1].
+	//  Terrain_InitLightingColorRamps (0x101010, 0xF0F0F0) @ 0x610e65;
+	//  else (g_EnvLightBlock, g_EnvSkyBlock) @ 0x610ea1].
 	if (nvg_view_active_) {
 		uniforms.sun_light = sun_light();
 		uniforms.sky_ambient = nvg_terrain_sky();
@@ -746,7 +746,7 @@ float EnvironmentState::water_murk() const {
 }
 
 SceneFogValues EnvironmentState::build_water_mirror_fog() const {
-	// Environment_ApplyFogAndAmbient(0, 0): Env_FogBlock under the dry range
+	// Environment_ApplyFogAndAmbient(0, 0): g_EnvFogBlock under the dry range
 	// and type [orig: @ 0x57e49b..0x57e4db]; the reflected pass never selects
 	// the alternate (thermal) or underwater branch.
 	SceneFogValues fog;
@@ -759,7 +759,7 @@ SceneFogValues EnvironmentState::build_water_mirror_fog() const {
 
 SceneFogValues EnvironmentState::build_inset_scene_fog(bool underwater_view) const {
 	// Environment_ApplyFogAndAmbient(0, underwater): the lit water below the
-	// plane, else Env_FogBlock under the dry range and type [orig: @ 0x57e46c
+	// plane, else g_EnvFogBlock under the dry range and type [orig: @ 0x57e46c
 	// (the underwater branch), @ 0x57e48c..0x57e4a1 (no alternate)].
 	return underwater_view ? build_scene_fog(true) : build_water_mirror_fog();
 }
@@ -782,7 +782,7 @@ SceneFogValues EnvironmentState::build_scene_fog(
 	// the murk visibility curve. Type 1 is linear and its retail caller start
 	// is the fixed 0.5 world units encoded by compute_fog_params.
 	// [orig: Environment_ApplyFogAndAmbient @ 0x57E471..0x57E4AD — device fog
-	// color <- Env_WaterColorLit and fog type <- 1 when underwater]
+	// color <- g_EnvWaterColorLit and fog type <- 1 when underwater]
 	const Rgb combined = combine_terrain_light(sun_light(), sky_ambient());
 	fog.color = lit_water_color(water_color(), combined);
 	fog.end = fog_end_underwater(water_murk());
@@ -794,7 +794,7 @@ SceneFogValues EnvironmentState::build_scene_fog(
 
 SceneFogValues EnvironmentState::build_viewmodel_fog(bool sky_dome_drawn) const {
 	// [orig: ApplyFogAndAmbient(0, thermal) @ 0x5ca3bf..0x5ca3ce; the dome
-	//  wrapper's Env_FogBlock restore @ 0x579ce6..0x579cf6]
+	//  wrapper's g_EnvFogBlock restore @ 0x579ce6..0x579cf6]
 	SceneFogValues fog = build_scene_fog(false);
 	if (thermal_view_ && sky_dome_drawn) {
 		fog.color = fog_color();

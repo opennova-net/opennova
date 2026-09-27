@@ -468,7 +468,7 @@ void test_deathmatch_and_hill_outcomes() {
     // while inside a type-6006 hill and decays it one service step outside.
     // Its timer starts at zero, so the first match tick runs immediately and
     // subsequent runs are exactly 62 ticks apart.
-    // [orig: g_periodic_second_timer in Server_TickUpdate @0x51D7E0;
+    // [orig: g_PeriodicSecondTimer in Server_TickUpdate @0x51D7E0;
     // Server_UpdateCaptureZoneProximity @0x5086A0]
     world->match.configure(koth);
     world->match.upsert_player({solo, 0, "Solo"});
@@ -913,7 +913,7 @@ void test_demolition_flag_and_flagball_gameplay() {
 
     // FlagReturnTime uses the flag's pool-1 class clock. A moved flag first
     // rearms its return counter; subsequent idle callbacks consume it.
-    // [orig: flag update callback @0x408430; g_FlagReturnTime_2 @0x24D2174]
+    // [orig: flag update callback @0x408430; g_FlagReturnTime2 @0x24D2174]
     MatchRules timed_return;
     timed_return.game_type = gt::kFlagBall;
     timed_return.flag_return_ticks = 5;

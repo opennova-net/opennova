@@ -74,7 +74,7 @@ in the managed standalone game from saved loose assets.
 - **Main-body skeletal `.bad`/`.adm`** — **superseded by [ADR 0007](0007-skeletal-runtime-and-entity-visual.md)**:
   the skeletal runtime is now built (`libs/anim` + `SkeletalAnim` + `Skeleton3D`/`Skin`), the present
   pass drives `play_body_anim(slot)`, and the re-anchored pose chain is `BoneAnim_FindKeyframeAtTime
-  @0x410220` → `build_world_bone_matrices @0x40c770` (not `AnimMap_PlayAnimBySlot @0x40bda0`, which is the
+  @0x410220` → `Bone_BuildWorldMatrices @0x40c770` (not `AnimMap_PlayAnimBySlot @0x40bda0`, which is the
   weapon/recoil + player-avatar `off_8135F0` layer).
 - **Pitch/roll** are reserved snapshot fields (yaw-only today), gated behind a basis-parity check.
 - No **inter-tick interpolation** for the 62-frame game cadence yet.

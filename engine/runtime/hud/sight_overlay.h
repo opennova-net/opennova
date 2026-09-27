@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // The standard-weapon SIGHTS card's per-row draw modes and the sight-scale
-// cycle [orig: draw_weapon_sight_overlays @0x4dce00]. Each authored weapon.def
+// cycle [orig: HUD_DrawWeaponSightOverlays @0x4dce00]. Each authored weapon.def
 // SIGHTS row (36 B at WeaponDef+0x1C8, stride 0x24 @0x4dce57: x1/y1/x2/y2 at
 // +8..+0x14, the slide frame count +0x18, the `scale` flag +0x1C, the `slide`
 // flag +0x20 [orig: WeaponDefs_ParseLineCallback `sights` @0x544b77..0x544bcc])
@@ -76,7 +76,7 @@ struct SightViewportRect {
 
 // The card scales Y about half the viewport height by 3/(4*selected_ratio),
 // after both corners pass the virtual-coordinate scaler. Other modes use H/W.
-// [orig: draw_weapon_sight_overlays @0x4dd0ad..0x4dd0f7;
+// [orig: HUD_DrawWeaponSightOverlays @0x4dd0ad..0x4dd0f7;
 // Render_SetAspectRatioMode @0x58d8c9..0x58d8d9 native mode]
 SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, float height, int aspect_mode = -1);
 

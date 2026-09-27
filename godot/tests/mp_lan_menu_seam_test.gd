@@ -262,7 +262,7 @@ func test_servertype_value_attr_selects_dedicated_not_the_label() -> void:
 # The witnessed host pool rules (D-MNU-17): stock co-op (the pure-SP family)
 # never lists [orig: the populate skip @0x558a70]; the GAME_TYPE spin filters
 # by the mapped category with an absent spin reading ALL
-# [orig: filter_mission_list_by_game_type @0x556fe0].
+# [orig: HostDialog_FilterMissionListByGameType @0x556fe0].
 func test_host_pool_filter_and_sp_exclusion() -> void:
 	var mp := MpMenuCompanion.new()
 	var driver := _make_host_driver()

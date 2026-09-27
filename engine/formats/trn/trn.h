@@ -67,7 +67,7 @@ struct TrnConfig {
 // tile-set name (the BMS header's +0x118 slot) then replaces it, its extension
 // from the first '.' replaced by, or else appended as, "TGA". The .TSD twin
 // takes the same name with "TSD".
-// [orig: Terrain_LoadEnvironmentConfig @ 0x610940 — Bms_TileSetName test
+// [orig: Terrain_LoadEnvironmentConfig @ 0x610940 — g_BmsTileSetName test
 //  @ 0x6109C8, copy into the atlas slot @ 0x6109D2..0x6109E2,
 //  Path_ReplaceOrAppendExtension(slot, "TGA") @ 0x6109EE, the TSD slot
 //  @ 0x610A00..0x610A1C; Path_ReplaceOrAppendExtension @ 0x53C780]

@@ -586,7 +586,7 @@ void test_live_pose_provider_and_static_fallback() {
 // An unarmed player's USE onto a UseGun seat is refused outside a session:
 // single player, the in-process listen server included, is outside it; in a
 // session the same USE mounts the gun.
-// [orig: Entity_AttachToUseGunSlot @0x546b80 -- `cmp g_napi_np_ctx.is_in_session`
+// [orig: Entity_AttachToUseGunSlot @0x546b80 -- `cmp g_NapiNPCtx.is_in_session`
 //  @0x546BF6, the player bit @0x546BFE, the EquippedSlot test @0x546C07;
 //  SinglePlayer_StartMission @0x561AF0 leaves is_in_session clear]
 void test_unarmed_usegun_needs_the_session() {
@@ -1022,7 +1022,7 @@ CollisionModel make_seat_hull() {
 // hull is clear and the cone alone decides.
 // [orig: Entity_ToggleVehicleMount @0x4369ac..0x4369c7 (scan, then
 //  TryEnterNearestVehicle / SendDetachPacket); the cone caps @0x435d90 /
-//  @0x435d9a and their gate @0x43611f; raycast_against_entity_pool ctx[17..20]
+//  @0x435d9a and their gate @0x43611f; Physics_RaycastAgainstEntityPool ctx[17..20]
 //  skips @0x538832..0x538859]
 void test_toggle_dismount_and_swap() {
 	Rig r;
@@ -1596,7 +1596,7 @@ void test_seated_body_claims_its_vehicle() {
 // session. Single player (the in-process listen server) is outside it, so
 // the body's berserk bit reaches the vehicle although a rider
 // holds it; in a non-co-op session the rider's hold blocks the copy.
-// [orig: Entity_UpdateAllEntities -- `cmp g_napi_np_ctx.is_in_session,0`
+// [orig: Entity_UpdateAllEntities -- `cmp g_NapiNPCtx.is_in_session,0`
 //  @0x4C24EA, `test g_GameType,10000h` @0x4C24F7, the seat words
 //  @0x4C2507..0x4C251F, the berserk sync @0x4C25B8..0x4C25C7;
 //  SinglePlayer_StartMission @0x561AF0 leaves is_in_session clear]
@@ -1643,7 +1643,7 @@ void test_same_team_hold_scan_follows_the_session() {
 // copied into its saved pose, only the row a player drives is visited, and the
 // update is not counted; the pool-0 walk still runs (it wakes the driven
 // vehicle on tick 8). Once the epilog lifts, the full update visits and counts.
-// [orig: Entity_UpdateAllEntities -- `cmp g_epilog_screen_active,0`
+// [orig: Entity_UpdateAllEntities -- `cmp g_EpilogScreenActive,0`
 //  @0x4C211D, the walk @0x4C239A..0x4C2408, the tail @0x4C2624..0x4C2639]
 void test_epilog_entity_update() {
     Rig r;
@@ -2842,7 +2842,7 @@ void test_player_spawn_group() {
     CHECK(e != nullptr && e->group_id == 1);
 }
 
-// The floating attach-label list [orig: draw_vehicle_seat_and_armory_labels @0x5a3290
+// The floating attach-label list [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290
 // selection half]: free seats within the 4.0 u 3D radius label, occupied seats never
 // label, the scan winner alone carries `nearest`, and a ready weapon limits labels to
 // the nearest entity [orig: @0x5a3354].
@@ -2876,7 +2876,7 @@ void test_attach_labels_seats() {
 }
 
 // can_fire keeps only the nearest ENTITY's labels: a second in-range vehicle labels only
-// when the player cannot fire [orig: !Player_CanFireWeapon() || entity == nearest @0x5a3354].
+// when the player cannot fire [orig: !Player_IsOpticalViewVisible() || entity == nearest @0x5a3354].
 void test_attach_labels_can_fire_gate() {
     Rig r(1.0f);
     Entity veh2;
@@ -3402,7 +3402,7 @@ static void test_use_scan_and_label_follow_live_seat_pose() {
 // carrier's attachment build, not only a UseGun seat. The provider answers
 // that attachment form and declines a plain rider pose for a non-gunner seat.
 // [orig: Entity_FindNearestSeatOrArmory seat kinds @0x435F6C..0x435FDF ->
-//  build_bone_attachment_matrix @0x435FFA; labels @0x5A3553]
+//  Bone_BuildAttachmentMatrix @0x435FFA; labels @0x5A3553]
 struct AttachmentFormProvider final : IPoseProvider {
     MountedPose pose;
     bool resolve_mounted_pose(World &, const Entity &, const Seat &seat,

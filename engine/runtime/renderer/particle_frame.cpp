@@ -346,7 +346,7 @@ void build_quad(const ParticleQuadSnapshot &particle,
 ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 		bool camera_side) {
 	// Terrain_RenderWorldScene swaps EffectWorld's mode-1/mode-2
-	// submissions when the render eye crosses Env_WaterHeightFixed
+	// submissions when the render eye crosses g_EnvWaterHeightFixed
 	// [orig: @ 0x5c93a0 -> EffectWorld_RenderParticlePass @ 0x5f7240].
 	const bool select_above = camera_above_water == camera_side;
 	return select_above ? ParticleWaterSubset::Above :

@@ -80,7 +80,7 @@ public:
 	// The banked residual in seconds.
 	double banked() const { return static_cast<double>(bank_) / (1000.0 * kUnitsPerMs); }
 
-	// The FR counter's average frame rate (g_statsAvgFps): the frame-pressure
+	// The FR counter's average frame rate (g_StatsAvgFps): the frame-pressure
 	// input of both CNetQuality windows and the host's 0x0A server-fps byte.
 	int32_t average_fps() const { return average_fps_; }
 
@@ -89,12 +89,12 @@ private:
 	static constexpr int32_t kInitialBankUnits = 16;
 
 	int32_t bank_ = kInitialBankUnits;   // esi: residual + this frame's elapsed, smoothed
-	int32_t smoothed_ = 0;               // g_frameTimeSmoothedFp4
-	uint8_t phase_ = 0;                  // g_tickPhase (a byte, free-running)
+	int32_t smoothed_ = 0;               // g_FrameTimeSmoothedFp4
+	uint8_t phase_ = 0;                  // g_TickPhase (a byte, free-running)
 	double carry_ = 0.0;                 // sub-unit wall-clock remainder
-	int32_t average_fps_ = 0;            // g_statsAvgFps
-	uint32_t frame_count_ = 0;           // g_statsFrameCount
-	uint32_t frame_time_sum_ = 0;        // g_statsFrameTimeSumFp4
+	int32_t average_fps_ = 0;            // g_StatsAvgFps
+	uint32_t frame_count_ = 0;           // g_StatsFrameCount
+	uint32_t frame_time_sum_ = 0;        // g_StatsFrameTimeSumFp4
 };
 
 } // namespace opennova::world

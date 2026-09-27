@@ -928,7 +928,7 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 	if (!std::isfinite(water_wu)) {
 		return Ref<ImageTexture>();
 	}
-	// Env_WaterHeightFixed == 0 suppresses the entire pass. Positive SHIWORD
+	// g_EnvWaterHeightFixed == 0 suppresses the entire pass. Positive SHIWORD
 	// conversion truncates to the integer plane; retail clamps it at 254.
 	const int water_int = std::clamp(
 			static_cast<int>(std::floor(water_wu)), 0, 254);

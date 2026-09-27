@@ -268,7 +268,7 @@ TerrainStaticShadowPageJob TerrainStaticShadowPlanner::compile(
 // tick the binding stamped on this planner for the job.
 // [orig: Terrain_CollectAndRenderTileModels — Render_SubmitEntity @0x60D971
 // then CRenderBatchQueue_SortAndFlush @0x60D97D per visible model;
-// apply_shader_parameters @0x58DB80 inside that flush]
+// Material_ApplyShaderParameters @0x58DB80 inside that flush]
 const TerrainStaticShadowPlanner::CasterMaterialStates &
 TerrainStaticShadowPlanner::caster_material_states(MaterialStateTable &table,
 		uint64_t caster_key,

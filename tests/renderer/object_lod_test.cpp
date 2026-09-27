@@ -228,7 +228,7 @@ int main() {
   CHECK(object_lod_focal_pixels(642.0f, 2.0) == 161);  // 160.5 + 0.5
   CHECK(object_lod_focal_pixels(0.0f, 1.0) == 0);
 
-  // The sub-pixel floor [orig: render_sector_entity @ 0x5c42de]: 0.75 px.
+  // The sub-pixel floor [orig: Render_SectorEntity @ 0x5c42de]: 0.75 px.
   using opennova::renderer::object_subpixel_culled;
   CHECK(object_subpixel_culled(kObjectLodSubPixelCullQ16));
   CHECK(!object_subpixel_culled(kObjectLodSubPixelCullQ16 + 1));

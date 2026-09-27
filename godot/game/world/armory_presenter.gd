@@ -24,7 +24,7 @@ const MENU_SCREEN := "WEAPON"
 # row's runtime keys (retail default: the Shifts — the same row 177 the shells'
 # open key mirrors) as ACCEPT accelerators on the ACCEPT control
 # [orig: UI_InitTeamClassSelection @0x567370 finds control "ACCEPT" (@0x7C7650)
-#  and adds word_81A468/g_useItemBindingKey1 @0x5674a8/@0x5674c0].
+#  and adds word_81A468/g_UseItemBindingKey1 @0x5674a8/@0x5674c0].
 const ACCEPT_HOTKEY := KEY_SHIFT
 
 signal opened
@@ -140,7 +140,7 @@ func open() -> bool:
 	# Retail resolves each visible parent tuple from the selected class's canonical
 	# buffer and routes it by that parent's weapon_class. It never scans the expanded
 	# runtime slot pool, whose hidden subclasses can occupy a different class.
-	# [orig: g_armoryLoadoutBufferByClass -> populate_ammo_type_combo_boxes
+	# [orig: g_ArmoryLoadoutBufferByClass -> UI_PopulateAmmoTypeComboBoxes
 	# @0x564930; name/catalog resolve @0x564A00; slot route @0x564B47]
 	var current_primary := fallback_primary
 	var current_secondary := ""

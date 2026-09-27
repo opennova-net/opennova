@@ -133,27 +133,27 @@ enum class Builtin : uint32_t {
     RandomResult = 22, // RND, the last random() result @0xC6B23C
     CurTOD = 19, // cached minute on the 8.24 clock [orig: @0x4F579E]
     AutoItem = 18, // Player/Item/auto share a mutable DWORD with a low-word handle @0xC6EC3C
-	Ticks = 0, // seconds-equivalent: logic tick counter [orig: wac_var_ticks @0xC6EAD8]
-	Result = 1, // accumulator / last return value [orig: wac_var_result @0xC6EB24]
-	Health = 2, // local player health [orig: wac_var_health @0xC6EB00]
+	Ticks = 0, // seconds-equivalent: logic tick counter [orig: g_WacVarTicks @0xC6EAD8]
+	Result = 1, // accumulator / last return value [orig: g_WacVarResult @0xC6EB24]
+	Health = 2, // local player health [orig: g_WacVarHealth @0xC6EB00]
 	Wind = 6,
 	Mana = 7,
 	// Round-outcome names (world-wac-ai-re §20). bluekills/greenkills count the
 	// local player's blue/green person kills; humans is the active human player
 	// slot count; GameOver/WinVar/LoseVar derive from the round winner.
-	Bluekills = 8, // [orig: g_stat_bluekills_by_player @0xC846F0]
-	Greenkills = 9, // [orig: g_stat_greenkills_by_player @0xC846F8]
-	Humans = 10, // [orig: wac_var_humans @0xC6EB14]
-	GameOver = 11, // winner != 0 [orig: wac_var_GameOver @0xC6EB0C, derived @0x4f57bb]
-	WinVar = 12, // winner == 1 [orig: wac_var_WinVar @0xC6EB08, derived @0x4f57c9]
-	LoseVar = 13, // winner == 2 [orig: wac_var_LoseVar @0xC6EB04, derived @0x4f57cf]
+	Bluekills = 8, // [orig: g_StatBlueKillsByPlayer @0xC846F0]
+	Greenkills = 9, // [orig: g_StatGreenKillsByPlayer @0xC846F8]
+	Humans = 10, // [orig: g_WacVarHumans @0xC6EB14]
+	GameOver = 11, // winner != 0 [orig: g_WacVarGameOver @0xC6EB0C, derived @0x4f57bb]
+	WinVar = 12, // winner == 1 [orig: g_WacVarWinVar @0xC6EB08, derived @0x4f57c9]
+	LoseVar = 13, // winner == 2 [orig: g_WacVarLoseVar @0xC6EB04, derived @0x4f57cf]
 	AccuracySpread = 14, // writable AI error multiplier [orig: @0xC6EAE8, read @0x4bc5ea]
 	Fallmps = 15, // writable fall-damage tolerance [orig: @0xC6EAE4, read @0x4bf839 /
 				  //  @0x4b7d13; seeded 13 by WacScript_FreeAll @0x4f638b]
 	Seatbelt = 17, // writable local-player dismount lock [orig: @0xC6EADC]
-	Night = 16, // Env_IsNightPhase @0x26c645c (the `night` row of the table @0x82EEF0)
+	Night = 16, // g_EnvIsNightPhase @0x26c645c (the `night` row of the table @0x82EEF0)
 	Breathtime = 23, // breath-hold seconds [orig: @0xC6EAE0; seeded 20 by WacScript_FreeAll @0x4f6381]
-	Autogain = 24, // ambient auto-gain switch [orig: wac_var_autogain @0xC6EAFC; seeded 1 @0x4f6371]
+	Autogain = 24, // ambient auto-gain switch [orig: g_WacVarAutoGain @0xC6EAFC; seeded 1 @0x4f6371]
 	// The unresolved-parameter sink: Script_Compile points every argument the
 	// resolver returns NULL for at this scratch dword, and the bytecode entry
 	// zeroes it. [orig: &dword_C6EAEC @0x4f3ae2; cleared @0x4f57b5]

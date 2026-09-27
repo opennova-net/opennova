@@ -41,7 +41,7 @@ struct MissionInfo {
 	std::string environment;
 	// The tile-set name as authored (header +0x118, extension kept): a
 	// non-empty value overrides the .trn tilestrip atlas and .TSD name
-	// [orig: Bms_TileSetName @ 0xA762E8, read by Terrain_LoadEnvironmentConfig
+	// [orig: g_BmsTileSetName @ 0xA762E8, read by Terrain_LoadEnvironmentConfig
 	// @ 0x6109C8; formats/trn trn_mission_tilestrip].
 	std::string tile_set;
 	int climate = 0;

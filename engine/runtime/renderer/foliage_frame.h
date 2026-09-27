@@ -8,7 +8,7 @@
 // identities that became resident this frame), per-submission uniform state,
 // and both retail wind clocks live here; the embedder keeps GPU uploads,
 // retained scenario-instance RID pooling, and material binding.
-// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 //  Foliage_GenerateModelTileInstances @ 0x600980;
 //  Foliage_RenderDetailPatches @ 0x60a659..0x60a694]
 
@@ -63,11 +63,11 @@ struct FoliageViewInput {
 	// floor and each anchor's water side.
 	std::vector<std::array<float, 3>> silhouette_anchors;
 	std::vector<opennova::foliage::DetailCell> detail_cells;
-	// Env_WaterHeightFixed in world units: the detail passes and the BySide
+	// g_EnvWaterHeightFixed in world units: the detail passes and the BySide
 	// waves split by it.
 	float water_height = 0.0f;
 	// The detail tier's sway phase inputs: the wall clock in milliseconds
-	// (retail GetTickCount) and the weather oscillator's Env_WaveOscRing[0]
+	// (retail GetTickCount) and the weather oscillator's g_EnvWaveOscRing[0]
 	// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60076f].
 	uint32_t time_ms = 0;
 	int32_t wind_osc_ring0 = 0;
@@ -84,14 +84,14 @@ struct FoliageViewInput {
 
 // The detail tier's c24.x sway phase: the ms clock x 0.003 plus the weather
 // oscillator's ring slot 0 / 655360 (`fild` the GetTickCount word, `fmul`
-// flt_7DE9D4 = 0.003; `fild Env_WaveOscRing`, `fmul` flt_7DE9D0 =
+// flt_7DE9D4 = 0.003; `fild g_EnvWaveOscRing`, `fmul` flt_7DE9D0 =
 // 0x35CCCCCD = 1/655360; `faddp`), uploaded as c24 = (phase, 1, 0, -) with
-// c25 = (0.03, ...) (flt_7C9B90) for Foliage_WindSwayVS:
+// c25 = (0.03, ...) (flt_7C9B90) for g_FoliageWindSwayVS:
 // `mad r0.w, v0.x, c24.y, c24.x` (v0.x = the pre-wind vertex's render x,
 // the Godot Z relative to the patch's sector origin) -> polynomial sine ->
 // `mad r1.z, sin*bend, c25.x, v0.z` (render z = Godot X).
 // [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x6007b4;
-// Foliage_WindSwayVS literal @ 0x7de648]. The clock term folds modulo 2 pi
+// g_FoliageWindSwayVS literal @ 0x7de648]. The clock term folds modulo 2 pi
 // so a long session keeps the sine's float precision — the sine is
 // periodic, nothing observable moves.
 float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0);
@@ -108,7 +108,7 @@ float foliage_detail_wind_sector_origin_z(uint32_t cell_key);
 float foliage_model_wind_offset(double angle);
 
 // The camera's side of the water: retail compares the camera z against
-// Env_WaterHeightFixed with setnl (camera >= water is above).
+// g_EnvWaterHeightFixed with setnl (camera >= water is above).
 // [orig: Terrain_RenderWorldScene @ 0x5c93a1..0x5c93b0]
 bool foliage_camera_above_water(float camera_y, float water_height);
 

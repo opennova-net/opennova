@@ -150,7 +150,7 @@ struct PromoteOptions {
     // TextResource_FindEntryBySectionAndKey("PeopleNames") -> strncpy(+0xF4, 15)]
     std::function<std::string(int32_t)> people_name_resolver;
 
-    // Per-pool registry capacities, defaulted to the witnessed retail g_pool_list
+    // Per-pool registry capacities, defaulted to the witnessed retail g_PoolList
     // sizes [orig: EntityPool_Allocate @0x442168].
     size_t pool_capacities[world::kEntityPoolCount] = {
             world::kRetailPoolCapacity[0], world::kRetailPoolCapacity[1],

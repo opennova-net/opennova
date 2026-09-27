@@ -74,7 +74,7 @@ bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
         else if (control == "TIME") config.respawn_time = static_cast<uint32_t>(number);
         // Config's 500-point limits and nonpositive KOTH limit have distinct
         // runtime sentinels; TIME has no such substitution.
-        // [orig: apply_session_settings_to_globals @ 0x551500]
+        // [orig: Game_ApplySessionSettingsToGlobals @ 0x551500]
         else if (control == "KILL_LIMIT") config.score_limit = number == 500 ? 65000u : static_cast<uint32_t>(number);
         else if (control == "MAX_SCORE") config.max_score = number == 500 ? 65000u : static_cast<uint32_t>(number);
         else if (control == "MAX_KOTH") config.time_limit_minutes = number <= 0 ? 0x2222222u : static_cast<uint32_t>(number);
@@ -144,7 +144,7 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
     // 65 publishes 66) and applies only for networkConnectType 1, which has no
     // writer other than its default 1. There is no lower clamp: a blank cap
     // publishes 0 (1 dedicated). The same live count gates BMS placements.
-    // [orig: apply_session_settings_to_globals @0x551b26..0x551b48;
+    // [orig: Game_ApplySessionSettingsToGlobals @0x551b26..0x551b48;
     // Config_SetDefaults @0x54d1d4 (networkConnectType_480 = 1);
     // Server_InitNewRoundState @ 0x51c8e0]
     int64_t total = static_cast<int64_t>(player_limit) + (serve_and_play ? 0 : 1);

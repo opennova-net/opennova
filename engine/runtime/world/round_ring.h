@@ -1,8 +1,8 @@
 // The host's fired-round event ring — the source of the S2C 0x0A tag-2 round-event
 // records every in-match recipient is served from (docs/net/novaworld-net-re.md §5.9.1).
 //
-// [orig: g_round_ring @0xC8D848 — 256 x 36-B records, write cursor g_round_ring_cursor
-// @0xC8FC4C, saturating count g_round_ring_count @0xC8FC48; appended ONLY by
+// [orig: g_RoundRing @0xC8D848 — 256 x 36-B records, write cursor g_RoundRingCursor
+// @0xC8FC4C, saturating count g_RoundRingCount @0xC8FC48; appended ONLY by
 // RoundData_AddRound @0x4fdb40 (alt-fire, AI fire, and the local/re-entrant primary-fire
 // paths of Server_ClientFiredRound @0x50baa0 — a NET primary fire reaches it through the
 // adm 'fire' action -> Entity_FireWeaponAndSendPacket @0x42bd80 -> local re-entry);
@@ -20,7 +20,7 @@ namespace opennova::world {
 // guess; witness 2026-07-03). Field sources are the 36-B ring record:
 struct RoundEvent {
     // Monotonic append sequence, compared against each recipient's watermark. [orig:
-    // ring+0 = stat_id @0xC86FB0 (the frame clock); ours is a per-append sequence — the
+    // ring+0 = g_ServerFrameClock @0xC86FB0 (the frame clock); ours is a per-append sequence — the
     // same strictly-greater watermark semantics at finer grain.]
     uint32_t stat = 0;
     // ring+4 — the SHOOTER's pool<<12|slot handle (RoundData_AddRound resolves the
@@ -56,8 +56,8 @@ struct RoundRing {
     static constexpr int kCapacity = 256; // [orig: cursor wrap @0x4fdd2d]
 
     std::array<RoundEvent, kCapacity> records{};
-    int32_t cursor = 0;      // next write index [orig: g_round_ring_cursor @0xC8FC4C]
-    int32_t count = 0;       // saturates at capacity [orig: g_round_ring_count @0xC8FC48]
+    int32_t cursor = 0;      // next write index [orig: g_RoundRingCursor @0xC8FC4C]
+    int32_t count = 0;       // saturates at capacity [orig: g_RoundRingCount @0xC8FC48]
     uint32_t next_stat = 1;  // append sequence; 0 stays "before any round" for watermarks
 
     // Last stamped sequence — what a recipient's watermark advances to after a sweep

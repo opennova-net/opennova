@@ -37,13 +37,13 @@ struct HudKeyEdge {
 
 // The toggles' shared state — the retail globals.
 struct HudToggleState {
-	int hud_color_index = kHudColorIndexDefault;      // [orig: g_hudActiveColor's index]
+	int hud_color_index = kHudColorIndexDefault;      // [orig: g_HUDColors.active's index]
 	int hud_detail_level = kHudDetailLevelDefault;    // the LIVE declutter level
 	uint32_t showhud_flags = kShowHudFlagsDefault;    // [orig: g_FpWeaponViewFlags]
-	FriendlyTagMode friendly_tag_mode = kFriendlyTagModeDefault; // [orig: g_friendlyTagsMode]
+	FriendlyTagMode friendly_tag_mode = kFriendlyTagModeDefault; // [orig: g_FriendlyTagsMode]
 	bool objectives_visible = false;  // [orig: dword_24C18CC, toggled 0 <-> 0xFF]
-	bool scoreboard_open = false;     // [orig: g_scoreboardPanelVisible]
-	bool message_log_open = false;    // [orig: g_showMessageLog @0x24C18C0]
+	bool scoreboard_open = false;     // [orig: g_ScoreboardPanelVisible]
+	bool message_log_open = false;    // [orig: g_ShowMessageLog @0x24C18C0]
 	bool end_round_stats_open = false; // [orig: dword_24C18AC]
 
 	HudKeyEdge huddetail, hudcolor, showhud, dotsize, goals;
@@ -93,7 +93,7 @@ inline constexpr uint32_t kMessageLogToggled = 0x200;
 inline constexpr uint32_t kShowScoreToggled = 0x400;
 // A window action ran the respawn init: the embedder closes the sim's map
 // overlay mode beside the windows this state already cleared
-// [orig: g_mapOverlayMode = 0 @0x499395].
+// [orig: g_MapOverlayMode = 0 @0x499395].
 inline constexpr uint32_t kOverlayWindowsCleared = 0x800;
 // viewwithgun (action 401): first person too, but its own input-action bit.
 inline constexpr uint32_t kGunViewSelected = 0x1000;

@@ -784,7 +784,7 @@ bool run_infantry_crouch_transition_stays_on_terrain() {
 // whose whole probe starts below the outdoor surface must not teleport upward
 // to it (the miss may only receive the resolver's sub-grid end-point settle).
 // [orig: Entity_MovementCollisionResolver probe setup @0x4B3D6E..0x4B3D95;
-// terrain hit-window in raycast_entity_collision @0x413785..0x4137CB,
+// terrain hit-window in Entity_RaycastCollision @0x413785..0x4137CB,
 // reached through Entity_RaycastGroundHeightAndObject @0x414320;
 // Entity_UpdateInfantryPlayerBody <=0 caller lift @0x4B7CFE..0x4B7D0A]
 bool run_terrain_settle_respects_retail_probe_window() {
@@ -989,7 +989,7 @@ bool run_player_root_motion_dead_reckons() {
 	return ok;
 }
 
-// The starved idle force [orig: @0x4B465D — g_animStateFlagsTable bit0]: a
+// The starved idle force [orig: @0x4B465D — g_AnimStateFlagsTable bit0]: a
 // movement state parked past the 512-progress cap must fall to idle 43, or
 // the root motion walks the starved row forever.
 bool run_starved_row_forces_idle() {

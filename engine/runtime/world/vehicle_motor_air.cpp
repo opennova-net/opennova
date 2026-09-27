@@ -326,7 +326,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	// machine adopts the received commands verbatim; the LOCAL PILOT'S
 	// machine runs the input block instead and reconciles BOTH air commands
 	// with the received mirrors — ([544]+[708])>>1 fwd, ([540]+[712])>>1
-	// lateral [orig: the occupantEntity == g_local_player_entity leg —
+	// lateral [orig: the occupantEntity == g_LocalPlayerEntity leg —
 	// `([2C4]+[220])>>1 -> [220]; ([2C8]+[21C])>>1 -> [21C]`
 	// @0x491546..0x491568; the input block is stage_air_vehicle_input above].
 	if (ai_drive) {

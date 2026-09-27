@@ -8,11 +8,11 @@
 //
 // [orig: Terrain_RenderWorldScene @ 0x5c93a0 — particle pass B
 // @ 0x5c9690, then Render_NVGLaserBeamsForVisiblePersons (the NVG laser beams) @ 0x5c9695,
-// render_weather_trail_particles @ 0x5c96a6, EffectWorld_RenderLightCoronas(1)
-// @ 0x5c96ad, update_sun_glare (the water glint; only while the water height
+// Render_WeatherTrailParticles @ 0x5c96a6, EffectWorld_RenderLightCoronas(1)
+// @ 0x5c96ad, Environment_UpdateSunGlare (the water glint; only while the water height
 // is nonzero, @ 0x5c96b5) @ 0x5c96c0, the underwater murk quad
 // Render_DrawViewportColorQuad @ 0x5c96f5, and the sun glare
-// render_skybox_sun_glow(1, 1) @ 0x5c9714; the frame effects follow in
+// Render_SkyboxSunGlow(1, 1) @ 0x5c9714; the frame effects follow in
 // Render_ProcessMainSceneFrame (FrameFX_QualityAtLeast3 @ 0x5caa7b ->
 // FrameFX_ApplyScreenEffect @ 0x5caa97, the bloom)].
 
@@ -74,7 +74,7 @@ inline constexpr std::array<SceneOverlaySlot, 6> kSceneOverlayOrder = {
 //   @ 0x5deede..0x5deef4 (the fall read and its zeroing)];
 // - its own corona walk: EffectWorld_RenderLightCoronas(1) @ 0x5c96ad at the
 //   corona phase the Inset's own effect-world prologue advanced (it runs once
-//   per scene pass) [orig: sub_5A9F70 @ 0x5a9f70 `add dword_2732DA0, 1`,
+//   per scene pass) [orig: EffectWorld_BeginScenePass @ 0x5a9f70 `add dword_2732DA0, 1`,
 //   called @ 0x5ca69c by Render_ProcessMainSceneFrame and @ 0x5c9a5d by the
 //   Inset], gating owned coronas on the section masks the Inset's own
 //   collect wrote [orig: Terrain_CollectVisibleEntities @ 0x5c94f0;
@@ -88,7 +88,7 @@ inline constexpr std::array<SceneOverlaySlot, 6> kSceneOverlayOrder = {
 //   (the view dot)].
 // Its second argument is zero, and the sun glare is gated on it, so the
 // Inset draws no glare [orig: @ 0x5c96cd, the test @ 0x5c970a..0x5c970e skips
-// render_skybox_sun_glow @ 0x5c9714]. The murk quad is the main tail's
+// Render_SkyboxSunGlow @ 0x5c9714]. The murk quad is the main tail's
 // batch: each view gates it on its own eye (scene_overlay_view_draws).
 inline constexpr std::array<SceneOverlaySlot, 5> kInsetOverlayOrder = {
 	SceneOverlaySlot::InsetNvgLaserBeams,
@@ -102,13 +102,13 @@ inline constexpr std::array<SceneOverlaySlot, 5> kInsetOverlayOrder = {
 // particle passes and its tracer pass [orig: Water_RenderReflectedWorldScene
 // @ 0x5c8510 — EffectWorld_RenderLightCoronas(1) @ 0x5c85fd]; the
 // precipitation drawer's one caller is the main scene core
-// [orig: render_weather_trail_particles <- @ 0x5c96a6]. render_main_scene
+// [orig: Render_WeatherTrailParticles <- @ 0x5c96a6]. Render_MainScene
 // then closes the mirror target: at water detail >= 2 the fullscreen dim
-// (DESTCOLOR / ZERO under 0xFF404040 [orig: render_main_scene @ 0x5c1727
+// (DESTCOLOR / ZERO under 0xFF404040 [orig: Render_MainScene @ 0x5c1727
 // gate, @ 0x5c1856..0x5c189e]), and at FrameFX quality >= 3 the far depth
-// band around the sun/moon redraw and the glow [orig: render_main_scene
+// band around the sun/moon redraw and the glow [orig: Render_MainScene
 // @ 0x5c18c6 FrameFX_QualityAtLeast3 test, @ 0x5c18f4 Render_SetViewportFarDepth,
-// @ 0x5c18fb render_celestial_bodies(0), @ 0x5c1904 render_skybox_sun_glow(0, 0)].
+// @ 0x5c18fb Render_CelestialBodies(0), @ 0x5c1904 Render_SkyboxSunGlow(0, 0)].
 // The locked profile runs both.
 inline constexpr std::array<SceneOverlaySlot, 4> kMirrorOverlayOrder = {
 	SceneOverlaySlot::LightCoronas,
@@ -209,8 +209,8 @@ bool scene_overlay_view_draws(const SceneOverlayBatch &batch, float eye_height);
 
 // The precipitation streaks: one triangle per drop in world space (the
 // identity world matrix @ 0x5def50), the frame's one diffuse
-// (Env_TerrainLightCombined | 0xFF000000), the pass state of the drawer
-// [orig: render_weather_trail_particles @ 0x5dee10 — mode word 0x651, pass
+// (g_EnvTerrainLightCombined | 0xFF000000), the pass state of the drawer
+// [orig: Render_WeatherTrailParticles @ 0x5dee10 — mode word 0x651, pass
 // flags 0x10500000: z-write off, z-test on, no fog]. `slot` names the view's
 // call: the main scene's (Precipitation) or the weapon Inset pass's own
 // (InsetPrecipitation).
@@ -227,7 +227,7 @@ void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
 void append_corona_overlay(const std::vector<LightCoronaQuad> &quads, uint32_t texture,
 		SceneOverlayFrame &out, SceneOverlaySlot slot = SceneOverlaySlot::LightCoronas);
 
-// The full-viewport murk quad: Env_WaterColorLit under the alpha byte
+// The full-viewport murk quad: g_EnvWaterColorLit under the alpha byte
 // 0x80 - ftol(murk x -96), source-over, ZFUNC ALWAYS (the scene passes the
 // alternate pass state 0x300000) [orig: Terrain_RenderWorldScene
 // @ 0x5c96d3..0x5c96f5 -> Render_DrawViewportColorQuad @ 0x5c38e0, pass flags
@@ -239,13 +239,13 @@ void append_underwater_murk_overlay(const float rgb[3], uint8_t alpha_byte, floa
 // redrawn discs): a world-space triangle list, sat(SelfLumColor x light
 // scale) per channel as its diffuse and the device fog visibility as its
 // alpha. The main tail's glare and glint submit with 0x110, ZFUNC ALWAYS
-// [orig: render_skybox_sun_glow @ 0x5ad0f7; update_sun_glare @ 0x5ad470];
+// [orig: Render_SkyboxSunGlow @ 0x5ad0f7; Environment_UpdateSunGlare @ 0x5ad470];
 // the mirror's redraws submit 0x100 inside the far band (`depth` FarBand)
-// [orig: render_skybox_sun_glow @ 0x5ad10c; render_celestial_bodies submits
+// [orig: Render_SkyboxSunGlow @ 0x5ad10c; Render_CelestialBodies submits
 // 0x100 @ 0x5acc1c / @ 0x5accdd]. The light scale is the unpacked modulator
-// block the draw runs under: Render_LightScaleR/G/B (byte / 64 each,
+// block the draw runs under: g_RenderLightScaleR/G/B (byte / 64 each,
 // Render_UnpackModulatorToLightScale @ 0x58db30), the effect's
-// ColorSrcGlobalGain [orig: apply_shader_parameters @ 0x58e05d].
+// ColorSrcGlobalGain [orig: Material_ApplyShaderParameters @ 0x58e05d].
 void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, const float *uvs,
 		std::size_t vertex_count, const float self_lum_rgb[3], const float light_scale_rgb[3],
 		float fog_visibility, uint32_t texture, SceneOverlayFrame &out,
@@ -282,13 +282,13 @@ void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture
 
 // The mirror's dim: one viewport quad whose flat diffuse (`factor` on every
 // channel, the 0xFF404040 vertex colour) multiplies the finished mirror
-// target, DESTCOLOR / ZERO, ZFUNC ALWAYS [orig: render_main_scene
+// target, DESTCOLOR / ZERO, ZFUNC ALWAYS [orig: Render_MainScene
 // @ 0x5c1856..0x5c189e].
 void append_mirror_dim_overlay(float factor, SceneOverlayFrame &out);
 
 // The light scale the glare draws under, every channel: the scene forces the
 // modulator block to 0xFF404040 (0x40 / 64 = 1.0) around the glow and
-// restores Env_ModulatorBlock after it [orig: Render_UnpackModulatorToLightScale
+// restores g_EnvModulatorBlock after it [orig: Render_UnpackModulatorToLightScale
 // @ 0x5c9702 and @ 0x5c9722]. The glint, drawn before that bracket
 // (@ 0x5c96c0), runs under the frame's own modulator.
 inline constexpr float kSunGlareLightScale = 1.0f;

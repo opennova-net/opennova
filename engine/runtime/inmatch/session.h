@@ -42,7 +42,7 @@ enum class SessionErrorCode : uint8_t {
 	TickFailed,
 	// A dedicated host's round-end linger expired: retail stores the mission
 	// exit reason and leaves the mission; a headless host exits its loop.
-	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_mission_exit_reason 4/3]
+	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_MissionExitReason 4/3]
 	RoundEnded,
 };
 
@@ -198,7 +198,7 @@ public:
 	virtual ClientRuntime *client_runtime() { return nullptr; }
 	// The last tick's wire leg, for the shell's stats board.
 	virtual int64_t last_net_us() const { return 0; }
-	// The main loop's measured frame rate (the FR counter's g_statsAvgFps,
+	// The main loop's measured frame rate (the FR counter's g_StatsAvgFps,
 	// world::TickAccumulator::average_fps), handed over by the session once
 	// per banked frame before that frame's ticks run. The base passes it to the
 	// role's replica runtime (the client quality window's frame-pressure term);

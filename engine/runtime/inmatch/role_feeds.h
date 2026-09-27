@@ -50,7 +50,7 @@ struct RoleView {
 
 // The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
 // role's view folds (the listen host's own loopback included)
-// [orig: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
+// [orig: g_DeathScreenActive, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
 bool local_death_screen_active(const RoleView &view);
 
 // The one role-agnostic read of the local player's dead bit: the joiner's
@@ -58,8 +58,8 @@ bool local_death_screen_active(const RoleView &view);
 bool local_player_dead(const RoleView &view);
 
 // [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
-//  g_spawn_success_gate, g_endround_winner_team, g_scoreTeamScore0/1,
-//  g_endround_draw_flag, dword_A81B2C = GetTickCount; the 0x56 board
+//  g_SpawnSuccessGate, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
+//  g_EndRoundDrawFlag, dword_A81B2C = GetTickCount; the 0x56 board
 //  completion.] Role-agnostic: every role's view folds both lanes.
 EndRoundSessionState end_round_session_state(const RoleView &view);
 
@@ -72,8 +72,8 @@ hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view);
 // the breath seconds are the authority's own WAC named value on a host and the
 // 0x0A sub-block-1 copy on a joiner; the round-over latch is the folded 0x1D
 // header. [orig: HUD_DrawBreathBar @0x59D6F0 reads word_A85B7C and
-// wac_var_breathtime; HUD_DrawGameplayOverlays skips it while
-// g_spawn_success_gate @0x5BDECA..0x5BDED1; the 0x1D latch
+// g_WacVarBreathTime; HUD_DrawGameplayOverlays skips it while
+// g_SpawnSuccessGate @0x5BDECA..0x5BDED1; the 0x1D latch
 // NapiNPClientMsg_0x01D @0x430840]
 struct BreathBarFacts {
 	int samples = 0;
@@ -84,7 +84,7 @@ BreathBarFacts breath_bar_facts(const RoleView &view);
 
 // The stat.mnu RESULTLIST rows the tab filter admits (0 all, 1 team 2, 2 team
 // 1): the roster joined to the frozen board, the local row resolved from the
-// header's board index [orig: populate_stat_results_list @0x562240 — row slot
+// header's board index [orig: StatScreen_PopulateStatResultsList @0x562240 — row slot
 // store @0x562576, board join @0x5624F3, selection compare @0x56272E].
 std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab);
 
@@ -150,7 +150,7 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 // Retail pushes a render-state stack level around every drawn entity's
 // submits [orig: Terrain_RenderSectorEntities @0x5c7bb6..0x5c7c14,
 // Terrain_RenderSectorEntitiesBySide @0x5c7f3c..0x5c7fc3]:
-//  - effectScale, the sun-visibility factor [orig: setup_terrain_effect_for_entity
+//  - effectScale, the sun-visibility factor [orig: Terrain_SetupEffectForEntity
 //    @0x5c74a0 -> Entity_ComputeSunVisibility @0x5c6800, stack write @0x5c7bff];
 //    a CONTAINED entity (+0x1D0, the first blink hit, nonzero) skips the rays,
 //    keeps 1.0 and takes the containing building's interior light group

@@ -32,10 +32,10 @@ bool minimap_overlay_entity_enabled(const Entity &entity);
 // dead persons) draw axis-aligned badges. Buildings with a marker model
 // leave the icon path entirely (footprint = the OOBJ occlusion ground-slice
 // polygons, drawn by the footprint feed).
-// [orig: draw_minimap_blip @0x597890 — branch heads @0x5979e4 (armory
+// [orig: Minimap_DrawBlip @0x597890 — branch heads @0x5979e4 (armory
 //  0x40000 = 4 wu, upright; re-adjudicated 2026-08-14 — the branch pushes
 //  40000h), @0x597a1b/@0x597a26 (attrib2 0x2000, 4 wu),
-//  @0x597a84 (Building -> render_collision_wireframe @0x596800),
+//  @0x597a84 (Building -> Render_CollisionWireframe @0x596800),
 //  @0x597b43 (Person 2 wu; dead upright cell 8), @0x597b87 (attrib 0x20
 //  non-vehicle, 4 wu floor 4, upright), @0x597bac (attrib bit1),
 //  @0x597c06 (cells 6/2 upright, floors 12/6), @0x597c13 (spawn point

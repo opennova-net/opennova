@@ -51,7 +51,7 @@ struct ZoneChain {
 // The 0x0D record's packed zone byte for one numbered zone entity: zoneNumber + 32 * rank
 // (rank = the entity's descending index within its shared zone number; an entity outside
 // the trigger chain carries rank 0 — its bare zone number).
-// [orig: serialize_entity_pool_to_packet_0 @0x503940 (the ZoneSlotChain_GetZoneInfo
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940 (the ZoneSlotChain_GetZoneInfo
 //  call @0x503EEB) feeding the 0x2000-gated byte (the zone-number test @0x503ECC);
 //  golden ASH_I5A bunker 0x22 = zone 2 rank 1]
 uint8_t zone_chain_zone_info_byte(const ZoneChain &chain, const Entity &zone);

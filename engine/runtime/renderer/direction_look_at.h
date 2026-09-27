@@ -6,13 +6,13 @@
 namespace opennova::renderer {
 
 // The retail direction look-at frame, the one engine home of
-// [orig: build_direction_look_at_matrix @ 0x612c90]: forward = dir / |dir|
+// [orig: Math_BuildDirectionLookAtMatrix @ 0x612c90]: forward = dir / |dir|
 // (zero for a zero direction @ 0x612d05), right = (fwd.z, 0, -fwd.x) /
 // |(fwd.z, -fwd.x)| (all zero when that length is zero @ 0x612d5b), up =
 // normalize(fwd x right) (zero when degenerate @ 0x612dfa). Retail stores the
 // three as the columns of its row-vector render matrix (@ 0x612e18..0x612e6d).
-// Consumed by the slot silhouette capture view (setup_shadow_cascade_matrices
-// @ 0x58d300) and the addeweap attachment frame (build_bone_attachment_matrix
+// Consumed by the slot silhouette capture view (RenderSlot_SetupShadowCascadeMatrices
+// @ 0x58d300) and the addeweap attachment frame (Bone_BuildAttachmentMatrix
 // @ 0x56c630).
 //
 // A vertical direction leaves right and up ZERO in retail (the degenerate

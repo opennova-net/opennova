@@ -36,7 +36,7 @@ PersonOverlays person_overlays(const PersonOverlayInputs &in) {
 	out.nvg = (in.flags & kEntityFlagNVGWorn) != 0;
 	if (out.nvg) out.nvg_flip = (in.flags & kEntityFlagDead) != 0 ? 0xFFFF : 0;
 	// Draw 4 needs the aim-branch anim state AND Flags & 8.
-	// [orig: g_animStateFlagsTable[entity+0x2BC] & 0x40 @ 0x4e3bf2,
+	// [orig: g_AnimStateFlagsTable[entity+0x2BC] & 0x40 @ 0x4e3bf2,
 	//  Flags & 8 @ 0x4e3c00]
 	out.binoculars = in.pose.aim_state && (in.flags & kEntityFlagBinoculars) != 0;
 	// Draw 6: the mounted child with an item def, oriented by the carrier's

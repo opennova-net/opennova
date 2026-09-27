@@ -209,8 +209,8 @@ void WeatherRuntime::feed_exposure_target(EnvironmentState *env) {
 	// the modulator over 62 ticks; retail re-targets every render pass,
 	// i.e. every tick
 	// [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
-	//  compute_ambient_light_along_direction @ 0x5c7a00;
-	//  curve terrain_sector_compute_lighting @ 0x5c7550].
+	//  Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00;
+	//  curve Terrain_SectorComputeLighting @ 0x5c7550].
 	const Vec3 sun_dir = env->sun_direction();
 	WeatherCore &core = state_->core;
 	core.set_exposure_from_iris_samples(iris_samples_.data(),
@@ -259,7 +259,7 @@ void WeatherRuntime::settle_exposure(EnvironmentState *env) {
 }
 
 uint32_t WeatherRuntime::lightning_packed(const EnvironmentState *env) const {
-	// Env_LightningColor: the .env lightning_rgb at the seed (envscaled like
+	// g_EnvLightningColor: the .env lightning_rgb at the seed (envscaled like
 	// every global parser color), the `lightning` WAC after — the weather
 	// home carries it [orig: @ 0x26c646c].
 	if (state_->valid) {
@@ -342,7 +342,7 @@ void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 	// WAC-written targets [orig: Environment_ComputeTimeOfDayColors
 	// @ 0x57de40 — the block writes @ 0x57e078..0x57e3c9 at the top of every
 	// weather tick (@ 0x57e9c7) while a keyframe table exists
-	// (Env_EnvSnapshotCount @ 0x57de8a); WacCmd_Sun @ 0x4edcd0 writes [11] +
+	// (g_EnvEnvSnapshotCount @ 0x57de8a); WacCmd_Sun @ 0x4edcd0 writes [11] +
 	// the step deltas]. Without a keyframe table the compute returns before
 	// the writes: no target is touched here and the eleven blocks chase
 	// whatever the load seeded or the WAC wrote.
@@ -372,7 +372,7 @@ void WeatherRuntime::write_weather_state(EnvironmentState &env) {
 	env.set_sun_light(smooth_sun());
 	env.set_fog_color_rt(smooth_fog());
 	// The sky block joins the writeback set — entity hemi_sky serves the
-	// smoothed+modulated block like fill/sun/fog [orig: Env_SkyBlock[0]
+	// smoothed+modulated block like fill/sun/fog [orig: g_EnvSkyBlock[0]
 	// consumed by the entity-constants writer @ 0x5c8090].
 	env.set_sky_ambient_rt(smooth_sky());
 	env.set_static_colors_rt(smooth_ceiling(), smooth_cloud(), smooth_floor());
@@ -492,7 +492,7 @@ WeatherShaderGlobals build_weather_shader_globals(
 	globals.base.fill_light = env.fill_light();
 	// The sun/sky pair and the pass fog quartet are the terrain's per-pass
 	// selection (foliage inherits the same two device constants; underwater
-	// the pass swaps in Env_WaterColorLit, thermal the 0x808080 grey).
+	// the pass swaps in g_EnvWaterColorLit, thermal the 0x808080 grey).
 	const TerrainEnvUniforms terrain = env.build_terrain_uniforms(underwater_view);
 	globals.base.sun_light = terrain.sun_light;
 	globals.base.sky_ambient = terrain.sky_ambient;

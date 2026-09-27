@@ -412,7 +412,7 @@ void stage_player_vehicle_input(
 }
 
 // The occupant whose input this machine should consume. Retail's gate is
-// `(occ->Flags & 0x100) && (occ == g_local_player_entity || is_authority)` — the
+// `(occ->Flags & 0x100) && (occ == g_LocalPlayerEntity || is_authority)` — the
 // AUTHORITY runs the input block for ANY player occupant, not only its own local
 // player. That distinction is invisible on a listen host flying its own
 // aircraft, and decisive when a JOINER is the pilot: the host owns the mover, so
@@ -555,7 +555,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
         } else if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
 			// A player driver whose eye (CameraOffset.z + Z) sits at or below the
 			// water plane drops to the AI leg like the boat twin [orig: `mov
-			// eax,[ecx+74h]; add eax,[ecx+0Ch]; cmp eax, Env_WaterHeightFixed;
+			// eax,[ecx+74h]; add eax,[ecx+0Ch]; cmp eax, g_EnvWaterHeightFixed;
 			// jle loc_48BC12` @0x48B9A0..0x48B9AC].
 			stage_player_vehicle_input(world_, veh, *occ, traits);
 		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {

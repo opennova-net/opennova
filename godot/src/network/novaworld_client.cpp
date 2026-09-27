@@ -763,7 +763,7 @@ void NovaWorldClient::join(int rid) {
 		return;  // a join is already in flight
 	}
 	sync_flow_context();
-	// The browsed row's name rides the PlaySetup as ServerName (g_napi_np_ctx.field_11AC).
+	// The browsed row's name rides the PlaySetup as ServerName (g_NapiNPCtx.field_11AC).
 	pending_join_rid_ = static_cast<uint32_t>(rid);
 	pending_join_server_name_.clear();
 	for (const opennova::GsbServerEntry &entry : server_entries_) {

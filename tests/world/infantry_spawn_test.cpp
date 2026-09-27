@@ -79,7 +79,7 @@ void warmup_permutation_and_root_motion() {
         CHECK(r.body().inf.clip_phase == steps[i] + 1);
         CHECK(r.body().inf.wpn_clip_phase == steps[i] + 1);
         // Idle's reset blend lasts ten ticks; walk has flag 0x400 and
-        // lasts fifteen (g_animStateFlagsTable[1] = 0x449).
+        // lasts fifteen (g_AnimStateFlagsTable[1] = 0x449).
         CHECK(std::count(r.source.calls.begin(), r.source.calls.end(), 0) ==
                 10 + std::min(steps[i] + 1, 15));
         std::vector<int> targets;

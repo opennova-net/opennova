@@ -687,7 +687,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// The ban compares the datagram's UDP source (conn+0x30, stored from the
 	// packet address at create), never the client-reported SIP TLV (conn+0x38 /
 	// session_keys+0x158, stored @0x62bf91/@0x62bf85 and read by nothing here).
-	// g_banned_id_list packs a.b.c.d as a | b<<8 | c<<16 | d<<24 -- PeerAddr::ip.
+	// g_BannedIdList packs a.b.c.d as a | b<<8 | c<<16 | d<<24 -- PeerAddr::ip.
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c6203..0x4c6217 reads conn+0x30 =
 	//  the datagram source stored @0x62bf28; BanList_ParseIPEntry @0x4fd5c9]
 	if (ctx.is_in_session && std::find(ctx.banned_join_addresses.begin(),
@@ -1228,7 +1228,7 @@ std::vector<TickOut> tick_connections(
 	};
 
 	// P3 World-driven path: the pending-player spawn pump runs on the shared periodic
-	// second — the call sits inside Server_TickUpdate's g_periodic_second_timer block,
+	// second — the call sits inside Server_TickUpdate's g_PeriodicSecondTimer block,
 	// not on every tick — before walking the connections to advance their bursts. The
 	// bring-up call for the host's own player (host_session.cpp) is direct.
 	// [orig: Server_TickUpdate @0x51DBFD inside the reload-62 block @0x51DB93]

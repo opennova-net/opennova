@@ -67,7 +67,7 @@ func _body_materials(body: Node) -> Array[ShaderMaterial]:
 
 
 func test_bodies_draw_their_authored_material_through_the_sky_hook() -> void:
-	# Retail renders every body through its own material (render_celestial_bodies
+	# Retail renders every body through its own material (Render_CelestialBodies
 	# @ 0x5acaa0 submits the model; celestial_frame.h): the ObjectModel's
 	# surface materials stay, taking only the sky placement hook.
 	var fixture := _make_fixture("", SKY_BODY_NAME)
@@ -151,11 +151,11 @@ func test_upl_intensity_drives_the_authored_self_lum() -> void:
 
 
 func test_each_disc_keeps_its_own_alpha_through_the_shared_flush() -> void:
-	# render_celestial_bodies writes the sun alpha, submits the sun, writes the
+	# Render_CelestialBodies writes the sun alpha, submits the sun, writes the
 	# moon alpha, submits the moon and flushes ONCE [orig: @ 0x5acbfa,
 	# @ 0x5acc1c, @ 0x5accc1, @ 0x5accdd, @ 0x5acce9], but each submit
 	# snapshots its material's registers and the flush restores them before
-	# that batch's RgbGen [orig: collect_render_objects_for_batch
+	# that batch's RgbGen [orig: Render_CollectRenderObjectsForBatch
 	# @ 0x5d91c0..0x5d91de; CRenderBatchQueue_FlushBatches
 	# @ 0x5da1d6..0x5da1fd]: the sun stays at its own 1.0 beside a moon at
 	# (700 - 400) / 600 = 0.5.
@@ -246,7 +246,7 @@ func test_additive_source_material_keeps_black_as_transparent_zero() -> void:
 
 func test_no_star_field_is_drawn() -> void:
 	# Retail loads the star 3DI but its only renderer has no caller in the
-	# image [orig: Star_RenderField_unused @ 0x5ad9c0]: a named star_3di draws nothing.
+	# image [orig: Star_RenderField_Unused @ 0x5ad9c0]: a named star_3di draws nothing.
 	var fixture := _make_fixture()
 	for child in fixture.celestial.get_children():
 		assert_false(child is MultiMeshInstance3D, "no star instances: %s" % child.name)
@@ -255,7 +255,7 @@ func test_no_star_field_is_drawn() -> void:
 
 func test_glare_submits_only_a_positive_alpha() -> void:
 	# The glow's beauty submit is skipped at a non-positive alpha
-	# [orig: render_skybox_sun_glow @ 0x5ad0ae]; the view dot is the MAIN
+	# [orig: Render_SkyboxSunGlow @ 0x5ad0ae]; the view dot is the MAIN
 	# camera's, folded on the CPU.
 	var fixture := _make_fixture("", SKY_BODY_NAME)
 	var celestial: Celestial = fixture.celestial
@@ -293,7 +293,7 @@ func test_glare_submits_only_a_positive_alpha() -> void:
 func test_settle_glare_occlusion_reaches_the_dead_band_hold() -> void:
 	# The capture-refresh seam (the D-RLIT-2 fixture starvation): the glare
 	# brightness steps +-16 per frame toward popcount * 32 * fog/1000 with a
-	# +-16 dead-band hold [orig: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f],
+	# +-16 dead-band hold [orig: Render_SkyboxSunGlow @ 0x5acdfb..0x5acf7f],
 	# so one zero-delta advance leaves a fresh accumulator dark. With no
 	# terrain loaded both jittered rays are clear every frame; the settle must
 	# fill the window (0xFF) and hold inside the dead-band around the
@@ -374,7 +374,7 @@ func test_sun_veil_publishes_the_dot32_alpha_global_when_facing_the_sun() -> voi
 
 
 func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
-	# The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130]: with
+	# The water-reflected sun glint [orig: Environment_UpdateSunGlare @ 0x5ad130]: with
 	# a water height authored and no terrain (every visibility ray clear),
 	# the settle must chase the glint accumulator to the full 4 * 64 and
 	# place the glare 3DI mirrored BELOW the eye (camera + sun * 128 with the
@@ -592,7 +592,7 @@ func _q3_glare_peak(glare_name: String, occluder_distance: float = -1.0) -> Dict
 
 func test_q3_glow_blends_as_its_material_is_classified() -> void:
 	# The glow's submit flags (0x100 in the bloom pass, 0x110 in the beauty
-	# pass) never override the material blend [orig: render_skybox_sun_glow
+	# pass) never override the material blend [orig: Render_SkyboxSunGlow
 	# @ 0x5ad0f5..0x5ad0fe]: the bloom redraw of an FF_ST_AD_LUM glow adds its
 	# SelfLumColor, while an FF_ST_AB_LUM glow's SELFLUM alpha 0 leaves the
 	# Q3 target untouched under SRCALPHA / INVSRCALPHA.

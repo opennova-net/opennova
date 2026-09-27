@@ -73,7 +73,7 @@ world::LocalViewSessionInputs Role::view_session_inputs_for(
 	s.joiner = joiner;
 	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
 	// role's view folds (the listen host's own loopback included)
-	// [orig: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
+	// [orig: g_DeathScreenActive, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
 	s.hud_hit_feedback_frames = runtime != nullptr ? runtime->state().hud_hit_feedback_frames : 0;
 	if (runtime) {
 		s.hud_service.preround_seconds = runtime->state().preround_delay_seconds;
@@ -93,7 +93,7 @@ world::LocalViewSessionInputs Role::view_session_inputs_for(
 	s.death_screen_active = runtime != nullptr && runtime->state().death_screen_active;
 	s.death_screen_submode = runtime != nullptr ? runtime->state().death_screen_submode : 0;
 	s.end_round_known = runtime != nullptr && runtime->state().end_round.known;
-	// [orig: NapiNPClientMsg_0x01D @0x430840 -> g_endround_winner_team]
+	// [orig: NapiNPClientMsg_0x01D @0x430840 -> g_EndRoundWinnerTeam]
 	s.end_round_winner_team = runtime != nullptr && runtime->state().end_round.header_known
 			? static_cast<int32_t>(runtime->state().end_round.header.winner_team)
 			: 0;
@@ -241,7 +241,7 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 		TickInput tick_input = merged_tick_input(input, consume_one_shots);
 		// [orig: Game_MainLoop @0x52ba21..0x52ba3a -- dword_24E0E80 = 1 when
 		//  less than one 16 ms tick of backlog remains after this quantum, 0
-		//  while catching up (and always 0 under g_cineFixedStepMode, which
+		//  while catching up (and always 0 under g_CineFixedStepMode, which
 		//  the port does not model)]
 		tick_input.last_tick_of_batch = i + 1 == due;
 		TickOutcome tick = run_one_tick(tick_input);
@@ -314,7 +314,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	rebase_clock_ = false;
 	const int32_t due = accumulator_.bank(elapsed);
 	// The FR counter is published before the drain runs this frame's ticks
-	// [orig: Game_MainLoop g_statsAvgFps store @0x52B98F, drain @0x52BA08].
+	// [orig: Game_MainLoop g_StatsAvgFps store @0x52B98F, drain @0x52BA08].
 	if (role_ != nullptr) role_->observe_frame_rate(accumulator_.average_fps());
 	out = run_ticks(due, input);
 	// Each of the first frames drawn after the mission start counts down and

@@ -35,7 +35,7 @@ public:
 	void set_environment_path(const NodePath &p_path);
 	NodePath get_environment_path() const { return environment_path_; }
 
-	// 100 = the witnessed retail constant (Env_WindScale 256, always on — the
+	// 100 = the witnessed retail constant (g_EnvWindScale 256, always on — the
 	// ambient foliage sway every retail map has), which is also the default.
 	void set_wind_strength(float p_value);
 	float get_wind_strength() const;
@@ -115,7 +115,7 @@ public:
 	float get_sway_amount() const;
 	float get_sway_phase() const;
 	float get_lightning_intensity() const;
-	// Env_TerrainLightCombined packed 0x00RRGGBB — the precipitation color.
+	// g_EnvTerrainLightCombined packed 0x00RRGGBB — the precipitation color.
 	int get_terrain_light_combined_rgb() const;
 
 	Vector3 get_smooth_fill() const;

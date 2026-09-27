@@ -3,8 +3,8 @@
 // geometry itself is env::build_sky_dome_mesh (engine/formats/env, built once
 // at the reference height per env #20's ratified fold); this header owns the
 // per-frame value block the applier pushes into the dome shader.
-// Engine equivalents: [orig: build_sky_dome_mesh @ 0x578db0] and
-// [orig: render_skybox @ 0x579080], fed by
+// Engine equivalents: [orig: SkyDome_BuildMesh @ 0x578db0] and
+// [orig: Render_Skybox @ 0x579080], fed by
 // [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] interpolated TOD
 // colors; see docs/env/env-tod-re.md.
 #pragma once
@@ -20,7 +20,7 @@ struct SkyFrameState {
 	// Flat cloud-color dome: the original applies the pass-1 NULL-texture
 	// effect with material ambient = cloud_rgb against D3DRS_AMBIENT
 	// 0xFFFFFF — the only render path that reads cloud_rgb
-	// [orig: render_skybox @ 0x579b42..0x579bb6].
+	// [orig: Render_Skybox @ 0x579b42..0x579bb6].
 	bool flat_pass = false;
 	Rgb flat_color;
 	// Retail unpacks these six packed ENV blocks at 2/255, without clamping
@@ -36,7 +36,7 @@ struct SkyFrameState {
 	Rgb cloud_highlight;
 	Rgb cloud_edge;
 	// Pass 1 is always sun-driven; the cloud pass follows the active light,
-	// moon at night [orig: render_skybox @ 0x579287
+	// moon at night [orig: Render_Skybox @ 0x579287
 	// Terrain_GetSunDirectionAsFloat vs @ 0x579291
 	// Environment_GetLightDirectionFloat].
 	Vec3 sun_dir{};
@@ -59,7 +59,7 @@ struct SkyFrameState {
 SkyFrameState build_sky_frame(const EnvironmentState &env);
 
 // The dome follows the camera in xz and rides at HALF the camera height
-// [orig: render_skybox @ 0x5790d0 — world translation z = camHeight >> 1].
+// [orig: Render_Skybox @ 0x5790d0 — world translation z = camHeight >> 1].
 inline Vec3 sky_dome_anchor(const Vec3 &cam_pos) {
 	return Vec3{cam_pos.x, cam_pos.y * 0.5f, cam_pos.z};
 }

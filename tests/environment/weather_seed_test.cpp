@@ -61,7 +61,7 @@ nw::FrameUpdate emit_phase2(w::World &world) {
 void test_resource_values_reach_the_real_wire_projection() {
 	w::World world;
     // A mission only advances while a human is in the world - retail holds the
-    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
+    // WAC tick and the BMS event pump on `g_WacVarHumans || !g_WacVarTicks`
     // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
     // so they stand a player up; the empty-server hold has its own test.
 	world.cached.humans = 1;

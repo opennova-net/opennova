@@ -406,7 +406,7 @@ ProjectileHit CollisionWorld::trace_knife_impact(
     return hit;
 }
 
-// [orig: compute_clamped_displacement @ 0x4AD6A0]
+// [orig: Entity_ComputeClampedDisplacement @ 0x4AD6A0]
 int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source,
         FixedVec3 position, bool indoors, EntityHandle *out_ground) const {
     ProjectileTrace trace;
@@ -1346,8 +1346,8 @@ void CollisionWorld::query_blink_boxes_at_point(World &world, const int32_t pos[
 void CollisionWorld::query_candidate_blink_boxes_at_point(
         World &world, EntityHandle source, const int32_t pos[3],
         BlinkAccum &accum) {
-    // [orig: terrain_sector_compute_lighting @ 0x5c7550 — its first argument
-    // is g_local_player_entity, and +0x1BC/+0x1C0 name that entity's fixed
+    // [orig: Terrain_SectorComputeLighting @ 0x5c7550 — its first argument
+    // is g_LocalPlayerEntity, and +0x1BC/+0x1C0 name that entity's fixed
     // candidate slice. The same walk appears in Entity_BuildProximityList's
     // person branch @ 0x4b3e5f-0x4b3f93.]
     accum.reset();

@@ -1,4 +1,4 @@
-// Infantry movement-goal detour. [orig: ai_find_cover_position @ 0x4AFAB0]
+// Infantry movement-goal detour. [orig: AI_FindCoverPosition @ 0x4AFAB0]
 // The historic name says "cover"; both rays actually seek a clear path TO the goal.
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/collision.h>

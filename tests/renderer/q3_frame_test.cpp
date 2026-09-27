@@ -306,7 +306,7 @@ void check_stale_geometry_leases_are_rejected() {
 void check_shading_constants_are_engine_homed() {
 	// The device adapter splices these into its GLSL; the witnessed values
 	// live here [orig: Glass.fx TGlassFFP TECHNIQUE_GLOW;
-	// Render_FillStaticCubemaps @ 0x58f290; Water_PSBumpReflectNV source
+	// Render_FillStaticCubemaps @ 0x58f290; g_WaterPSBumpReflectNV source
 	// @ 0x7dbd28].
 	CHECK(kQ3GlassWhiteLobeGain == 1.4f);
 	CHECK(kQ3GlassWhiteLobePower == 800.0f);
@@ -347,7 +347,7 @@ void check_emissive_copies_saturate_colour_times_gain() {
 	// SELFLUM / glass emissive: sat(colour x gain) x 2, so a gain above 1
 	// lifts a sub-1 colour (0.25 x 2 -> 1.0, 0.1 x 4 -> 0.8) instead of being
 	// clipped alone. [orig: _FFP.fx SELFLUM; Glass.fx TGlassFFP;
-	// apply_shader_parameters @ 0x58E050..0x58E06A]
+	// Material_ApplyShaderParameters @ 0x58E050..0x58E06A]
 	const std::array<float, 3> doubled =
 			q3_emissive_modulate2x({0.25f, 0.1f, 0.6f, 1.0f}, {2.0f, 4.0f, 2.0f});
 	CHECK(std::fabs(doubled[0] - 1.0f) < 1.0e-6f);
@@ -424,7 +424,7 @@ void check_far_band_matches_the_retail_depth_test() {
 // rigid strips join the world's copies in the one back-to-front object
 // queue FrameFX flushes; only 0x100 (the sky pass's celestial submits)
 // suppresses a copy. [orig: Player_RenderFirstPersonViewModel
-// @ 0x4def5c..0x4def6a; collect_render_objects_for_batch
+// @ 0x4def5c..0x4def6a; Render_CollectRenderObjectsForBatch
 // @ 0x5d93b5..0x5d9449]
 void check_first_person_copies_share_the_object_queue() {
 	CHECK(q3_object_source_admitted(false));

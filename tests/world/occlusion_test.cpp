@@ -1,8 +1,8 @@
 // Rendering-occlusion unit tests [orig: the Jointops.exe consumer set —
 // Terrain_InitBuildingPortals @0x5c7480 (register/weld/flags),
-// build_sector_visibility_masks @0x5c8610, render_visibility_portal_traversal
-// @0x5c4ae0, test_sector_entity_occlusion @0x5c4610, the entity-collector gates
-// @0x5c6f20/0x5c8c60, terrain_occlusion_check_three_rays @0x610ed0] over
+// Terrain_BuildSectorVisibilityMasks @0x5c8610, Render_VisibilityPortalTraversal
+// @0x5c4ae0, Terrain_TestSectorEntityOcclusion @0x5c4610, the entity-collector gates
+// @0x5c6f20/0x5c8c60, Terrain_OcclusionCheckThreeRays @0x610ed0] over
 // hand-built occlusion + collision models (docs/render/render-occlusion-re.md).
 //
 // Authoring convention used by the fixtures (derived from the witnessed side
@@ -539,7 +539,7 @@ void test_weld_and_flags() {
 
     const OcclusionFrameCamera cam = rig.camera(10.0, 10.0, 1.0, 0x2);
     rig.ow.build_frame(rig.world, rig.cw, cam);
-    // [orig: render_visibility_portal_traversal — the type-5 track leg's
+    // [orig: Render_VisibilityPortalTraversal — the type-5 track leg's
     // `jmp loc_5C560C` @ 0x5c5519 joins the recurse-windows gate @ 0x5c560c
     // and the recursion @ 0x5c5619]
     CHECK((rig.ow.section_mask(a) & (1u << 2)) != 0);
@@ -864,7 +864,7 @@ void test_toc_occlusion() {
     CHECK(rig.ow.slot_count() >= 1);
     CHECK(rig.ow.building_visible(occluder));
     // The candidate is fully inside the slab's shadow wedge -> TOC culls it.
-    // [orig: test_sector_entity_occlusion @ 0x5c4610]
+    // [orig: Terrain_TestSectorEntityOcclusion @ 0x5c4610]
     CHECK(!rig.ow.building_visible(candidate));
     CHECK(rig.ow.section_mask(candidate) == 0u);
     // The debug introspection split: TOC-culled = batched but not visible; the
@@ -1017,7 +1017,7 @@ void raise_ridge(Rig &rig, double height_units) {
 }
 
 // The three rays start ONE unit above the eye. [orig:
-// terrain_occlusion_check_three_rays `add edx, 10000h` @ 0x610eef] A 0.9 u
+// Terrain_OcclusionCheckThreeRays `add edx, 10000h` @ 0x610eef] A 0.9 u
 // sphere 55 u out behind a 1.5 u crest: from eye + 0.25 every ray dips below
 // the crest (the top ray at most 1.39 u over it), from eye + 1.0 the top ray
 // clears it (at least 1.67 u).
@@ -1035,7 +1035,7 @@ void test_three_rays_start_one_unit_up() {
 
 // The person leg: the entity position with the entity+0 bound radius, the
 // item-185 radius under the parachute flag, and the sub-pixel floor ahead of
-// the latch. [orig: collect_visible_entities_for_terrain @ 0x5c8dd7..0x5c8e10,
+// the latch. [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8dd7..0x5c8e10,
 // @ 0x5c8e5e, the latch @ 0x5c8e7b..0x5c8eab]
 void test_person_collector_leg() {
     Rig rig;
@@ -1131,7 +1131,7 @@ void test_portal_slot_sort_and_clamp() {
 }
 
 // render_TOC measures the candidate by its entity+0 bound radius. [orig:
-// test_sector_entity_occlusion `mov eax,[esi]; fild dword ptr [eax]`
+// Terrain_TestSectorEntityOcclusion `mov eax,[esi]; fild dword ptr [eax]`
 // @ 0x5c463e..0x5c4640] A 1 u bound sphere 1.5 u inside the slab's shadow
 // wedge is fully inside it; the wide collision box's corner length would
 // reach past the wedge and let the 8-corner refinement keep it visible.
@@ -1170,7 +1170,7 @@ void test_render_wave_toc_skips_contained_entities() {
 
     // Indoors: a blink room with no occlusion records. The camera inside it
     // latches camera-inside mode with no exterior plane, where render_TOC
-    // culls every candidate outright. [orig: test_sector_entity_occlusion
+    // culls every candidate outright. [orig: Terrain_TestSectorEntityOcclusion
     // @ 0x5c4693..0x5c46b0]
     {
         Rig rig;
@@ -1239,7 +1239,7 @@ void test_render_wave_toc_skips_contained_entities() {
 
 // A weld-linked building straddles the water plane by its bound SPHERE (z +
 // center z +- radius), not its collision header. [orig:
-// build_sector_visibility_masks @ 0x5c8985..0x5c89a9] The linked box spans z
+// Terrain_BuildSectorVisibilityMasks @ 0x5c8985..0x5c89a9] The linked box spans z
 // 0..3 (header: below 3.5 u water) while its sphere (center 1.5, radius 3.2)
 // reaches above it.
 void test_link_water_straddle_uses_bound_sphere() {
@@ -1276,7 +1276,7 @@ void test_link_water_straddle_uses_bound_sphere() {
 
 // The collectors place the sphere center through the full Euler pose.
 // [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40 from
-// collect_visible_sector_userpoints @ 0x5c6c6a] A building whose bounds sit
+// Terrain_CollectVisibleSectorUserpoints @ 0x5c6c6a] A building whose bounds sit
 // 10..12 u ahead of its origin is admitted yaw-only; pitched 180 deg the
 // center swings 11 u behind the camera and the batch drops it.
 void test_collector_center_uses_full_euler_pose() {
@@ -1360,7 +1360,7 @@ void test_building_visibility_feed_word() {
 // radius-0 sphere at the position. The camera at x = 5 looks down +X with its
 // near plane at x = 4.95. [orig: the entity+0x30 gates
 // Terrain_CollectVisibleEntities_0 @ 0x5c6fd8..0x5c6fe1 /
-// collect_visible_entities_for_terrain @ 0x5c8cf6..0x5c8cff;
+// Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8cf6..0x5c8cff;
 // Entity_ComputeBoundingSphere @ 0x5c69a0, the null-block early out @ 0x5c69be]
 void test_model_leg_render_model_sphere() {
     Rig rig;
@@ -1567,7 +1567,7 @@ void test_round_restart_keeps_the_first_weld() {
 // whole exterior — the Ghost Harvest spawn / doorway report.
 // [orig: Viewport_BuildProjectionMatrix — the forward plane through the eye
 //  @ 0x411577..0x4115c6; render_VPT's all-below skip @ 0x5c4d63..0x5c4df2;
-//  test_sector_entity_occlusion's camera-inside rule @ 0x5c4662..0x5c4721]
+//  Terrain_TestSectorEntityOcclusion's camera-inside rule @ 0x5c4662..0x5c4721]
 void test_eye_in_front_of_a_window_keeps_the_exterior() {
     Rig rig;
     rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());

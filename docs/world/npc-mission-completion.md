@@ -94,7 +94,7 @@ sessions, where retail's cycle and death force write only the live layer level
 and every mission start re-seeds it from the config
 ([interface/hud-re.md](../interface/hud-re.md), the HUD declutter section); the
 script tick ran on through the SP lose epilog, so the WAC `Lose` re-fired every
-second during the end-screen beat, where retail's `g_epilog_screen_active` halts
+second during the end-screen beat, where retail's `g_EpilogScreenActive` halts
 it two frames after the round end ([world-wac-ai-re.md §20.8a](world-wac-ai-re.md)).
 Observed and faithful: the range-arrival dialogs (events 46/47) never play for a
 truck-11 rider because of the flat left-to-right trigger fold retail shares

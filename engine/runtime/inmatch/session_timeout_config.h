@@ -38,7 +38,7 @@ inline constexpr char kSessionTimeoutOverrideFile[] = "_NSTMOUT.TXT";
 // case-insensitive "NEVER" PREFIX sets both values to -1; otherwise atol(text)
 // >= 0 sets timeout_ms = 1000 * seconds and leaves msg_out_max alone (so "0"
 // is a zero-millisecond reap and "abc" atol's to 0), and a negative number sets
-// both to -1. [orig: StrStartsWithNoCase(buf, "NEVER") @0x4caa13 -> -1/-1
+// both to -1. [orig: String_StartsWithNoCase(buf, "NEVER") @0x4caa13 -> -1/-1
 //  @0x4caa1f/@0x4caa22; atol @0x4caa2b; >= 0 -> 1000*sec @0x4caa44; < 0 ->
 //  -1/-1 @0x4caa37/@0x4caa3a]
 inline void parse_nstmout(std::string_view text, SessionTimeoutConfig &cfg) {

@@ -57,7 +57,7 @@ struct CollisionResolveState {
 	std::unordered_map<std::string, bool> collision_block_by_graphic;
 	// The graphic's CMDL bound-block XY half-extents (wu; the minimap blip
 	// size source). first = ground X, second = ground Y; {0,0} = no bound.
-	// [orig: draw_minimap_blip @0x5979a2..0x5979b8 model+176 pairs]
+	// [orig: Minimap_DrawBlip @0x5979a2..0x5979b8 model+176 pairs]
 	std::unordered_map<std::string, std::pair<float, float>> half_xy_by_graphic;
 	// The graphic's CMDL collision-bbox center in MODEL-LOCAL axes (signed
 	// Q16.16) — the entity +0x1FC LOS ray offset. {0,0,0} = no collision block.

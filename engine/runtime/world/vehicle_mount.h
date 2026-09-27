@@ -40,7 +40,7 @@ inline bool seat_type_blocks_weapon_channel(SeatType type) {
     }
 }
 
-// The binding's fire gate is separate from Player_CanFireWeapon's optical
+// The binding's fire gate is separate from Player_IsOpticalViewVisible's optical
 // view query: drivers cannot fire; controllers fire an EWeap carrier's slot.
 // [orig: Input_HandleActionBinding_0 @0x4E09CB..0x4E09FF]
 inline bool mount_blocks_firing(const Entity &occupant, const Entity *carrier) {

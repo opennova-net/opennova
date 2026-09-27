@@ -26,7 +26,7 @@ int32_t wrap_neg(int32_t v) {
 // The witnessed two-compare clamp: `if (v > limit) v = limit; limit = -limit;
 // if (v < limit) v = limit` — a NEGATIVE limit therefore pins v to +|limit|
 // instead of bounding it, and the negate wraps at INT32_MIN
-// [orig: interpolate_weather_color @ 0x57da2c..0x57da6b; the springs
+// [orig: Environment_InterpolateWeatherColor @ 0x57da2c..0x57da6b; the springs
 //  @ 0x57ede5..0x57ee12].
 int32_t neg_clamp(int32_t v, int32_t limit) {
 	if (v > limit) v = limit;
@@ -70,7 +70,7 @@ FogParams compute_fog_params(int fog_type, float fog_end_distance, float overcas
 		// stores the caller's 0.5 [orig: Render_SetFogState @ 0x58a992;
 		// Environment_ApplyFogAndAmbient @ 0x57e4d2], and the vertex-shader
 		// passes fog linearly from it (FogStart through the projection
-		// [orig: apply_shader_parameters @ 0x58e21b]).
+		// [orig: Material_ApplyShaderParameters @ 0x58e21b]).
 		params.exponential = true;
 		params.start = 0.5f;
 		params.exp_density = fog_end_distance > 0.0f ? kLn64 / fog_end_distance : 0.0f;
@@ -210,7 +210,7 @@ void ColorChannelState::snap_to(uint32_t packed) {
 }
 
 uint32_t ColorChannelState::step(uint32_t target_packed, int max_step_fp) {
-	// [orig: interpolate_weather_color @ 0x57d9e0] — per-channel (delta >> 3)
+	// [orig: Environment_InterpolateWeatherColor @ 0x57d9e0] — per-channel (delta >> 3)
 	// clamped, accumulate in 12.20, repack with +0x80000 rounding.
 	const auto step_channel = [max_step_fp](int32_t &channel_fp, int target_byte) {
 		const int32_t delta = neg_clamp(wrap_sub(target_byte << 20, channel_fp) >> 3, max_step_fp);
@@ -315,7 +315,7 @@ bool LightningSequencers::tick() {
 
 uint8_t WeatherOscillator::ring_slot(int32_t x_q16, int32_t y_q16, int32_t z_q16) const {
 	// [orig: HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3db5 — y >> 14 +
-	//  Env_WaveRingIndex + z >> 15 + x >> 14, `and eax, 0FFh`; the same hash
+	//  g_EnvWaveRingIndex + z >> 15 + x >> 14, `and eax, 0FFh`; the same hash
 	//  in Light_TickGenBlock @ 0x5a8ae0]
 	return static_cast<uint8_t>((z_q16 >> 15) + (y_q16 >> 14) + (x_q16 >> 14) + ring_index);
 }
@@ -348,7 +348,7 @@ int WeatherOscillator::tick() {
 // Rain + weather color blocks
 
 int hit_dim_factor(int hit_dim_intensity) {
-	// [orig: interpolate_weather_color @ 0x57d9e0] — the unsigned over-range
+	// [orig: Environment_InterpolateWeatherColor @ 0x57d9e0] — the unsigned over-range
 	// check zeroes the factor, otherwise 0x8000 - intensity.
 	if (static_cast<uint32_t>(hit_dim_intensity) > 0x8000u) {
 		return 0;
@@ -405,7 +405,7 @@ void WeatherColorBlock::set_step_deltas(int frames) {
 }
 
 void WeatherColorBlock::tick(uint32_t modulator_packed, int hit_dim_intensity) {
-	// [orig: interpolate_weather_color @ 0x57d9e0] — the full block pipeline.
+	// [orig: Environment_InterpolateWeatherColor @ 0x57d9e0] — the full block pipeline.
 	// Step: per-channel (delta >> 3) clamped to that channel's max rate,
 	// accumulate in 12.20, repack with +0x80000 rounding.
 	// The delta is the wrapping subtract shifted, the clamp the two-compare
@@ -515,7 +515,7 @@ void CloudScrollState::tick_accumulators() {
 
 CloudUvOffsets cloud_scroll_uv_offsets(const CloudScrollState &scroll,
                                        float cam_x, float cam_z) {
-	// [orig: render_skybox @ 0x5791de..0x579260] — the witnessed texture-
+	// [orig: Render_Skybox @ 0x5791de..0x579260] — the witnessed texture-
 	// transform translations in the render basis: the camera term is
 	// +cam/4096 on both axes (16.16 camera / 2^28|29), the accumulator term
 	// is NEGATIVE on U and positive on V.
@@ -540,7 +540,7 @@ float cloud_uv_rate_per_second(const CloudScrollState &scroll) {
 // Sky dome mesh
 
 SkyDomeMesh build_sky_dome_mesh(float sky_height) {
-	// [orig: build_sky_dome_mesh @ 0x578db0] — structural translation; see the
+	// [orig: SkyDome_BuildMesh @ 0x578db0] — structural translation; see the
 	// header block for the full witness map. Doubles seeded from the binary's
 	// float32 literals (.rdata @ 0x7d75c4..0x7d75e0), outputs stored float32
 	// like the D3D vertex buffer.
@@ -760,7 +760,7 @@ void water_noise_normal_pixels(uint32_t *out_pixels, const uint32_t *color_pixel
 }
 
 WaterDepthCurve water_depth_curve(float fog_distance_world) {
-	// [orig: render_water_surface @ 0x5c332d..0x5c3362; the w / (w - 0.2)
+	// [orig: Render_WaterSurface @ 0x5c332d..0x5c3362; the w / (w - 0.2)
 	// divide @ 0x5c3348].
 	WaterDepthCurve curve;
 	// w = the INTEGER part of the (smoothed) fog distance — the original
@@ -891,7 +891,7 @@ void water_strip_view_from_camera(const float right[3], const float up[3],
 
 void water_project_plane_to_screen(const WaterStripView &view, int32_t plane_height_fp,
                                    WaterScreenBlock &out) {
-	// [orig: terrain_project_sector_to_screen @ 0x5c0bf0] — structural
+	// [orig: Terrain_ProjectSectorToScreen @ 0x5c0bf0] — structural
 	// translation; the camera block converts fild * 2^-16 (@ 0x5c0c08).
 	const float cam_x = view.cam_x_fp * kWaterFixedToFloat;
 	const float cam_z = view.cam_z_fp * kWaterFixedToFloat;
@@ -1003,7 +1003,7 @@ void water_project_plane_to_screen(const WaterStripView &view, int32_t plane_hei
 
 void water_clip_row_to_viewport(const WaterStripView &view, float x0, float y0,
                                 float dx_over_dy, WaterRowClip &out) {
-	// [orig: clip_line_to_viewport @ 0x5c0a30] — endpoints seed at the left
+	// [orig: Water_ClipLineToViewport @ 0x5c0a30] — endpoints seed at the left
 	// and right rect edges through inv = dy/dx, then clamp vertically through
 	// the dx/dy slope; the rect is [min_x, max_x + 1] x [min_y, max_y + 1].
 	const float left = static_cast<float>(view.vp_min_x);
@@ -1073,9 +1073,9 @@ WaterRowColors water_strip_row_colors(float row_view_depth, const float right_de
                                       int32_t fog_end_fp, float water_murk,
                                       uint32_t water_color_lit_packed,
                                       bool underwater_view, bool nightvision) {
-	// [orig: render_water_strip_detailed @ 0x5c2d3f..0x5c2ef6] — the header
+	// [orig: Render_WaterStripDetailed @ 0x5c2d3f..0x5c2ef6] — the header
 	// block maps the chain; every constant below is the cited literal.
-	float base = 1.0f - water_murk; // [orig: fsub Env_WaterMurk @ 0x5c2d46]
+	float base = 1.0f - water_murk; // [orig: fsub g_EnvWaterMurk @ 0x5c2d46]
 	if (underwater_view) {
 		base = 1.0f; // the murk term is skipped [orig: @ 0x5c2d4c..0x5c2d50]
 	}
@@ -1145,7 +1145,7 @@ WaterRowColors water_strip_row_colors(float row_view_depth, const float right_de
 
 int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &params,
                            WaterStripRows &out) {
-	// [orig: render_water_strip_detailed @ 0x5c27d0] — structural translation
+	// [orig: Render_WaterStripDetailed @ 0x5c27d0] — structural translation
 	// of the march loop; the device/VB setup and the batch submits stay with
 	// the embedder (water_strip_batches expresses the submit shape). x87
 	// intermediates approximated as double, stored float32 like the original
@@ -1180,7 +1180,7 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
 	const float half_height = height * 0.5f;
 	const float center_x = static_cast<float>(view.vp_center_x);
 	const float center_y = static_cast<float>(view.vp_center_y);
-	const float inv_m00 = 1.0f / view.proj[0]; // var_54 (mat @ 0x2721980)
+	const float inv_m00 = 1.0f / view.proj[0]; // var_54 (g_ProjectionMatrix @ 0x2721980)
 	const float inv_m11 = 1.0f / view.proj[5]; // var_48 (flt_2721994)
 	const float *inv = view.view_inv;
 
@@ -1393,7 +1393,7 @@ std::vector<WaterStripBatch> water_strip_batches(int row_count) {
 // Sun glare
 
 GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
-	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]: dot^32 -> glare
+	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]: dot^32 -> glare
 	// (x192, clamp 255); dot^128 -> fog whitening (x40, clamp 40); both scaled
 	// by the occlusion brightness (0..255).
 	GlareResult result;
@@ -1414,7 +1414,7 @@ GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
 
 SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
                           int sun_dim_fixed, int overcast_blend_fixed) {
-	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610] — the exact 16.16
+	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610] — the exact 16.16
 	// chain: five squarings to dot^32, two more to dot^128, brightness >> 8,
 	// the x192 / x40 scales, then the SunDim (x(0x640000 - dim)>>8,
 	// /25600) and overcast (x(1 - overcast)) folds on BOTH outputs.
@@ -1483,7 +1483,7 @@ bool sun_veil_draws(int glare) {
 }
 
 int glare_brightness_step(int current, int target) {
-	// [orig: render_skybox_sun_glow @ 0x5acf5d..0x5acf7f] — +-16 per frame
+	// [orig: Render_SkyboxSunGlow @ 0x5acf5d..0x5acf7f] — +-16 per frame
 	// with a +-16 DEAD-BAND HOLD (the original never snaps onto the target;
 	// the earlier port's snap+255-clamp was unwitnessed).
 	if (current > target - 16) {
@@ -1496,7 +1496,7 @@ int glare_brightness_step(int current, int target) {
 }
 
 int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed) {
-	// [orig: render_celestial_bodies @ 0x5acbc1..0x5acbfa].
+	// [orig: Render_CelestialBodies @ 0x5acbc1..0x5acbfa].
 	const int64_t fold = static_cast<int64_t>(0x10000 - overcast_blend_fixed) *
 			((0x640000 - sun_dim_fixed) / 100);
 	const int alpha = static_cast<int>((fold + 0x8000) >> 16);
@@ -1505,7 +1505,7 @@ int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed) {
 
 int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixed,
                                bool fog_shader_path) {
-	// [orig: render_celestial_bodies @ 0x5acc40..0x5acccd] — float chain off
+	// [orig: Render_CelestialBodies @ 0x5acc40..0x5acccd] — float chain off
 	// the fog-distance INT word; result clamped 0..1 then scaled 0x10000.
 	const double fog_int = static_cast<double>(static_cast<int16_t>(fog_distance_world));
 	const double base = fog_shader_path
@@ -1523,7 +1523,7 @@ int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixe
 }
 
 void water_glint_tick(WaterGlintState &state, bool visible) {
-	// [orig: update_sun_glare @ 0x5ad1cd..0x5ad356] — one sample per frame
+	// [orig: Environment_UpdateSunGlare @ 0x5ad1cd..0x5ad356] — one sample per frame
 	// into the 4-bit window (bit 8), then the plain +-16 step toward
 	// popcount * 64 (no dead-band, no fog scale — unlike the sky glow).
 	state.frame_index += 1;
@@ -1571,7 +1571,7 @@ bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
 
 int water_glint_alpha_fixed(int view_dot_fixed, int brightness,
                             int sun_dim_fixed) {
-	// [orig: update_sun_glare @ 0x5ad395..0x5ad41c] — (dot^4 - 28672/65536)
+	// [orig: Environment_UpdateSunGlare @ 0x5ad395..0x5ad41c] — (dot^4 - 28672/65536)
 	// x brightness >> 8, the SunDim fold (/25600), >> 2; the negative
 	// dot^4 region clamps to 0. No overcast fold.
 	int factor = 0;
@@ -1588,7 +1588,7 @@ int water_glint_alpha_fixed(int view_dot_fixed, int brightness,
 }
 
 GlareRayJitter glare_ray_jitter(uint32_t jitter_index) {
-	// [orig: render_skybox_sun_glow @ 0x5ace3b..0x5ace61].
+	// [orig: Render_SkyboxSunGlow @ 0x5ace3b..0x5ace61].
 	GlareRayJitter jitter;
 	jitter.offset_eng_y = ((jitter_index & 1u) ? 16.0f : -16.0f) +
 			((jitter_index & 4u) ? 8.0f : -8.0f);
@@ -1598,7 +1598,7 @@ GlareRayJitter glare_ray_jitter(uint32_t jitter_index) {
 
 void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visible_b,
                           float fog_distance_world) {
-	// [orig: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f] — two samples per
+	// [orig: Render_SkyboxSunGlow @ 0x5acdfb..0x5acf7f] — two samples per
 	// frame into the sliding window, then the dead-band brightness step
 	// toward popcount * 32 * fog/1000 (truncating like the original ftol).
 	state.jitter_index += 1;
@@ -1620,7 +1620,7 @@ void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visib
 
 namespace {
 
-// dot_view^4 / 2 in 16.16 [orig: render_skybox_sun_glow @ 0x5acfb8..0x5acff7].
+// dot_view^4 / 2 in 16.16 [orig: Render_SkyboxSunGlow @ 0x5acfb8..0x5acff7].
 int glare_dot_factor(int view_dot_fixed) {
 	if (view_dot_fixed <= 0) {
 		return 0;
@@ -1651,7 +1651,7 @@ int glare_alpha_tail(int scaled, int overcast_blend_fixed, int sun_dim_fixed,
 
 int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
                            int sun_dim_fixed, bool frame_effects_quarter) {
-	// [orig: render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9] — dot^4 / 2 in
+	// [orig: Render_SkyboxSunGlow @ 0x5acfb8..0x5ad0a9] — dot^4 / 2 in
 	// 16.16, scaled by the occlusion brightness >> 8.
 	const int scaled = (brightness * glare_dot_factor(view_dot_fixed)) >> 8;
 	return glare_alpha_tail(scaled, overcast_blend_fixed, sun_dim_fixed,
@@ -1662,8 +1662,8 @@ int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
                          int overcast_blend_fixed, int sun_dim_fixed,
                          bool frame_effects_quarter) {
 	// The no-occlusion path FrameFX_RenderGlowSource drives
-	// (render_skybox_sun_glow(0, 0)): brightness = (fog_km + 1.0) * 0.5 *
-	// dot_factor [orig: @ 0x5ad013..0x5ad027 - fog_km = Env_FogDistCurrent *
+	// (Render_SkyboxSunGlow(0, 0)): brightness = (fog_km + 1.0) * 0.5 *
+	// dot_factor [orig: @ 0x5ad013..0x5ad027 - fog_km = g_EnvFogDistCurrent *
 	// flt_7DA0C4 (1/65536000) @ 0x5acd8e..0x5acd98; flt_7C3280 = 1.0;
 	// flt_7C3B94 = 0.5]. fog in float world units like glare_occlusion_tick:
 	// world * 65536 * (1/65536000) == world / 1000.
@@ -1832,7 +1832,7 @@ float iris_luminance(const Rgb &c) {
 int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
               float dir_x, float dir_y, float dir_z,
               float iris_center, float iris_percent) {
-    // [orig: terrain_sector_compute_lighting @ 0x5c7550] exact curve.
+    // [orig: Terrain_SectorComputeLighting @ 0x5c7550] exact curve.
     const float dir_lum = iris_luminance(directional);
     const float sky_lum = iris_luminance(sky);
     const float gnd_lum = iris_luminance(ground);
@@ -1901,7 +1901,7 @@ uint32_t terrain_color_recip_from_rgb(const Rgb &terrain_rgb) {
 }
 
 uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint) {
-	// [orig: sample_terrain_colormap_tinted @ 0x606030] per channel
+	// [orig: Terrain_SampleColorMapTinted @ 0x606030] per channel
 	// min((texel * FULL) >> 7, 255); alpha passthrough.
 	uint32_t out = texel_argb & 0xFF000000u;
 	for (int shift = 0; shift <= 16; shift += 8) {

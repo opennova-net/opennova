@@ -119,7 +119,7 @@ std::vector<uint8_t> build_join_request(
 	};
 	if (!expansion.empty()) append_string_tlv("EXP", expansion);
 	// The checksum rides as SIGNED decimal — retail formats its
-	// g_expansion_checksum with "%ld", so a CRC with bit 31 set goes out
+	// g_ExpansionChecksum with "%ld", so a CRC with bit 31 set goes out
 	// negative [orig: the sprintf @0x42a287, format "%ld" @0x7c3818]. A
 	// checksum-less caller (no game root / base game / no loose version.txt)
 	// keeps the golden "0" byte-for-byte (D-NET-166).
@@ -133,7 +133,7 @@ std::vector<uint8_t> build_join_request(
 	// the [name\0][value\0] packing of the blob itself is capture-witnessed
 	// (an unnamed global feeds the writer). [orig: the "CD" TLV emit in
 	// NapiNP_WriteClientAuthPayload @0x42a180 = NapiNP_WriteTLV(&unk_24CFDB8,
-	// size); the gather config_query_matching_entries @0x64eb70; the host read
+	// size); the gather Config_QueryMatchingEntries @0x64eb70; the host read
 	// NapiNPServer_HandlePlayerJoinMessage @0x512aa0 "CD" -> the cookie buffer]
 	// [wire: the stock .204 join capture 2026-08-31 — the blob's packing]
 	if (!cd_cookie.empty()) {
@@ -215,8 +215,8 @@ LoadoutSubmit build_retail_default_loadout_submit(uint8_t team, bool alternate) 
 	submit.player_class = 0x08;
 	// First submission: the fixed Primary-key slot 195 (pre-Player_InitPlayer the slot table is
 	// empty, so the builder's side-mask resolution returns the argument raw). Second: the live
-	// g_currentWeaponSlot after the spawn fill — the golden kit's primary landed at category 3
-	// rank 17 = 212. [orig: Game_StartMission @0x525836 (195) / @0x525c2e (g_currentWeaponSlot)]
+	// g_CurrentWeaponSlot after the spawn fill — the golden kit's primary landed at category 3
+	// rank 17 = 212. [orig: Game_StartMission @0x525836 (195) / @0x525c2e (g_CurrentWeaponSlot)]
 	submit.weapon_slot_index = alternate ? 212u : 195u;
 	for (uint8_t adm : {
 			uint8_t{0x18}, uint8_t{0x03}, uint8_t{0x2C}, uint8_t{0x28},
@@ -676,14 +676,14 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 	case SESSION_OPCODE_SERVER_GOODBYE:
 		// Dispatched only for an ACTIVE connection (retail: `is_response && !conn_flag0` drops
 		// it; our Driving/InMatch phases are the accepted-0x82 state 5).
-		// [orig: g_np_opcode_handlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye @0x624310
+		// [orig: g_NPOpcodeHandlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye @0x624310
 		//  -> Nwu_HandleDisconnect(type 2) @0x623CE0, the active gate @0x623df2]
 		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_goodbye(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_PING:
 		// The outer connection ping rides the same active-connection gate as
 		// the goodbye (retail resolves the type-2 connection and drops the
-		// datagram unless conn_flag0 is set) [orig: g_np_opcode_handlers
+		// datagram unless conn_flag0 is set) [orig: g_NPOpcodeHandlers
 		// @0x849D90 entry 11 -> Nwu_HandleServerPing @0x6242E0 ->
 		// Nwu_HandlePing @0x623A70, the FindConnection + conn_flag0 gate].
 		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_ping(body, out);
@@ -834,7 +834,7 @@ void JoinerConnection::retain_terrain_load_page(
 	// The canonical retail writer advances a signed 16-bit cursor. Enforcing its
 	// exact contiguous output shape rejects gaps/overlaps that retail's trusting
 	// reader would otherwise overwrite, without changing valid-host behavior.
-	// [orig: serialize_terrain_tiles @0x6080F0]
+	// [orig: Terrain_SerializeTiles @0x6080F0]
 	constexpr uint32_t kMaxTileCount =
 			static_cast<uint32_t>(std::numeric_limits<int16_t>::max());
 	if (batch.has_header) {
@@ -884,9 +884,9 @@ void JoinerConnection::retain_terrain_load_page(
 }
 
 // The VarList walk retail runs over the reassembled server-info stream
-// [orig: parse_server_session_variables @0x520440 — per entry a NUL-terminated
+// [orig: Client_ParseServerSessionVariables @0x520440 — per entry a NUL-terminated
 // key, a u32 length, the value bytes; EXP_FANFARE lands as the u16 at
-// g_sessionvar_exp_fanfare @0x520478].
+// g_SessionVarExpFanfare @0x520478].
 uint16_t session_vars_exp_fanfare(const uint8_t *data, size_t len) {
 	size_t pos = 0;
 	while (pos < len) {
@@ -1099,14 +1099,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		    m.tag == s2c::WORLD_STATE_LOAD && m.payload.size() > 22) {
 			// The S2C 0x0F world-state-load is the deployment-policy marker that
 			// (with both initial 0x5A grants) completes initial admission. Its
-			// game_flags bit0 (payload[22] & 1) raises g_deploy_screen_active.
+			// game_flags bit0 (payload[22] & 1) raises g_DeployScreenActive.
 			// Completing admission must preserve the user's later selection:
 			// a spawn-zone host can still require C2S 0x0E to release its hold.
 			// [orig: NapiNPClientMsg_0x00F @0x42e2ed]
 			deployment_policy_seen_ = true;
 			// The authority's ammo-pool image rides the fixed span at body offset
 			// 23, ahead of the off-wire waypoint gate, so it reads without the
-			// gametype hint. Retail copies all 128 dwords into g_localAmmoPools
+			// gametype hint. Retail copies all 128 dwords into g_LocalAmmoPools
 			// (a short body reads zeros for the missing tail @0x42e337).
 			// [orig: @0x42e324..0x42e34a]
 			out.ammo_pools_set = true;
@@ -1162,7 +1162,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		// than the host (D-NET-178).
 		// Retail switched the ONE global mount onto the host's expansion BEFORE
 		// connecting, so its Expansion_LoadAssets pass has already stamped
-		// g_expansion_checksum for exactly this name; computing it here from the
+		// g_ExpansionChecksum for exactly this name; computing it here from the
 		// binding-supplied install root and the latched SUS2 name reads the same
 		// loose file at the same point in the exchange [orig: Expansion_SwitchTo
 		// @0x5688c0 -> Expansion_LoadAssets @0x4a4885; the JOIN write @0x42a2b4].
@@ -1222,7 +1222,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		// handlers that need no connection-level response. A selective list here
 		// silently lost text commands, chat, and full-entity repair replies while
 		// reducer-only and loopback tests still passed.
-		// [orig: g_np_msginfo_client @0x82AE28]
+		// [orig: g_NPMsgInfoClient @0x82AE28]
 		out.inbound_reducer.emplace_back(m.tag, m.payload);
 
 		// Dispatch records in wire order. Keeping this out of the metadata pre-pass
@@ -1464,7 +1464,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// latch only that witnessed shape and keep the golden default otherwise.
 			// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499]
 			// Byte 17 is this joiner's OWN roster slot id — retail's
-			// g_local_player_slot_id, and the same value the host keeps at its
+			// g_LocalPlayerSlotId, and the same value the host keeps at its
 			// per-player record slot+20 [orig: the write side
 			// NetPacket_WriteSlotAssignment @0x502b30]. It is NOT cosmetic: the client
 			// packs it into the high 7 bits of every fired round's hit_part word, which
@@ -1493,7 +1493,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//   (3) the player-slot team byte mirrors it @0x431a0b;
 			//   (4) player (Flags & 0x100) + self -> per-side profile reselect and ONE
 			//       C2S 0x2F re-submission @0x431a9e carrying the NEW team and slot 195
-			//       RAW (the pre-Player_InitPlayer form, NOT g_currentWeaponSlot).
+			//       RAW (the pre-Player_InitPlayer form, NOT g_CurrentWeaponSlot).
 			// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910]
 			TeamAssign assign;
 			std::size_t assign_consumed = 0;
@@ -1527,7 +1527,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					    post_auth_stage_ == PostAuthStage::Complete) {
 						// [orig: @0x431a9e passes slot 195 RAW — the
 						//  pre-Player_InitPlayer form, NOT the live
-						//  g_currentWeaponSlot]
+						//  g_CurrentWeaponSlot]
 						const LoadoutSubmit resubmit =
 								build_profile_loadout_submit(
 										assigned_team_, false);
@@ -1609,7 +1609,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//  0x28,0x29,0x2D,0x32,0x22,0x23; the one caller @0x51a84c]
 			// The reducer folds the 0x0F's retained client globals (the
 			// deploy-map overlay arm) in this same wire position
-			// [orig: g_deploy_screen_active @0x42e2d8/@0x42e2f8].
+			// [orig: g_DeployScreenActive @0x42e2d8/@0x42e2f8].
 			uint32_t world_state_tick = 0;
 			std::size_t consumed = 0;
 			decode_u32_scalar(m.payload.data(), m.payload.size(),
@@ -1744,7 +1744,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//
 			// The default remains deliberately silent: a guessed value can only mismatch,
 			// and the host punts on a difference [orig:
-			// handle_anti_cheat_crc_check @0x502050, "PUNT ACRC"]. A named profile may
+			// NapiNPServerMsg_HandleAntiCheatCRCCheck @0x502050, "PUNT ACRC"]. A named profile may
 			// answer only sources independently reproduced from that exact retail corpus.
 			// Uncovered individual ADM rows remain silent. This preserves the 2026-07-26
 			// live safety witness while allowing the revx02 table CRC proved on 2026-08-01
@@ -1863,7 +1863,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// monotonic millisecond clock is the equivalent.)
 			// [orig: NapiNPClientMsg_0x043 @0x42FA90 — echo @0x42faa7, local stamp
 			//  @0x42fac4, QueueReliableMessage(tag 8, len 8) @0x42fad8; the host-side
-			//  validator validate_time_sync @0x502210]
+			//  validator NapiNPServerMsg_ValidateTimeSync @0x502210]
 			uint32_t server_stamp = 0;
 			std::size_t scalar_consumed = 0;
 			decode_u32_scalar(m.payload.data(), m.payload.size(), server_stamp,
@@ -2234,7 +2234,7 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 		submit.player_class = loadout_kit_.player_class;
 		submit.entries = loadout_kit_.rows;
 	}
-	// [orig: @0x525836 passes 195, @0x525c2e passes g_currentWeaponSlot]
+	// [orig: @0x525836 passes 195, @0x525c2e passes g_CurrentWeaponSlot]
 	submit.weapon_slot_index = alternate && loadout_kit_.equipped_combo >= 0
 			? static_cast<uint32_t>(loadout_kit_.equipped_combo)
 			: 195u;
@@ -2253,7 +2253,7 @@ bool JoinerConnection::prepare_loadout_resubmit(
 		ProtocolMessage &message_out) const {
 	// The armory-ACCEPT re-send [orig: WeaponLoadout_ApplyFromBuffer @0x565d94 ->
 	// NetPacket_SendLoadoutSubmit]: one 0x2F, current team + class + kit, slot = the
-	// live equipped combo (retail passes g_currentWeaponSlot). Only meaningful once
+	// live equipped combo (retail passes g_CurrentWeaponSlot). Only meaningful once
 	// the initial submission has gone out — the armory opens in-world.
 	// This leg does NOT re-read the profile side blocks: retail hands the ARMORY's
 	// own edited buffer and the armory's class to the builder, so the applied kit

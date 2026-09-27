@@ -22,7 +22,7 @@ inline uint64_t saturating_add(uint64_t lhs, uint64_t rhs) {
 }
 
 // The per-axis 16.16 squared-distance term the object select and the
-// terrain pass both sort by [orig: collect_nearby_zones_by_aabb @ 0x5aa37a —
+// terrain pass both sort by [orig: Light_CollectNearbyZonesByAABB @ 0x5aa37a —
 // ((d * d + 0x8000) >> 16) per axis, 16.16 squared distance in world^2].
 inline uint64_t axis_distance_term(int64_t delta) {
 	const uint64_t magnitude = delta < 0

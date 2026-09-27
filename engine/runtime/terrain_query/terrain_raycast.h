@@ -26,7 +26,7 @@
 // which lives behind TerrainRaycastSampler here, so this core marches in
 // world axes throughout. Consequences, called out where they land:
 //   - the per-sample y step is computed from the world dy with NO negation
-//     (retail stores the V-flipped y step in Terrain_LastRayStepY @ 0x319a29c
+//     (retail stores the V-flipped y step in g_TerrainLastRayStepY @ 0x319a29c
 //     and negates it back in the refine);
 //   - the coarse point sample retail takes at the biased coordinate (i.e. the
 //     NEAREST texel of the world coordinate) is the embedder point callback's

@@ -341,7 +341,7 @@ bool test_attached_rows_retain_subdegree_frame() {
     decoded.type_id = 1871;
     decoded.cls = opennova::EntityClass::NoNetworkCallback;
     // The 0x0D form: the carrier rides the TARGET (groundEntity), the parent is
-    // the gunner back-reference (+0x170) [orig: serialize_entity_pool_to_packet_0
+    // the gunner back-reference (+0x170) [orig: NetPacket_SerializeEntityPoolToPacket_0
     // +0x170 @0x503BC9, +0x28 @0x503C22].
     decoded.target_handle = parent->handle.packed;
     decoded.parent_handle = 0x0003;
@@ -816,7 +816,7 @@ bool test_rows_publish_the_person_overlays() {
 
 // Retail's collector never draws an entity whose Flags carry bit 0 — the
 // carried object is hidden on the host exactly as on a joiner.
-// [orig: collect_visible_entities_for_terrain @0x5c8cef..0x5c8cf4;
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5c8cef..0x5c8cf4;
 //  Entity_AttachCarriedObject @0x43c14a]
 bool test_world_rows_hide_the_carried_object() {
 	opennova::mission::MissionKernel kernel;

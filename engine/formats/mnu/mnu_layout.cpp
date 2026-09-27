@@ -7,7 +7,7 @@
 
 namespace opennova::mnu {
 
-// [orig: init_border_materials @ 0x646f70 — the SIZE x SIZE grid slices]
+// [orig: CUIElement_InitBorderMaterials @ 0x646f70 — the SIZE x SIZE grid slices]
 FrameTileRect frame_tile_rect(int size, int col, int row) {
 	FrameTileRect r;
 	r.x = col * size;
@@ -94,7 +94,7 @@ bool window_type_is_text_sized(WindowType t) {
 			t == WindowType::Marquee;
 }
 
-// [orig: adjust_rect_to_text_size @ 0x6575f0]
+// [orig: CStaticWnd_AdjustRectToTextSize @ 0x6575f0]
 RectEdges adjust_rect_to_text_size(const RectEdges &rect, int text_w,
 		int text_h, const std::string &justify, const std::string &vjustify) {
 	RectEdges r = rect;

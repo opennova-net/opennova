@@ -1,5 +1,5 @@
 // The HUD's game-text compositions — see hud_game_text.h for the witnesses.
-// [orig: get_waypoint_name @0x594630; HUD_DisplayTriggeredText @0x51f190]
+// [orig: HUD_GetWaypointName @0x594630; HUD_DisplayTriggeredText @0x51f190]
 
 #include <runtime/hud/hud_game_text.h>
 

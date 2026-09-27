@@ -178,7 +178,7 @@ void handler_idle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     // UNGUARDED, deliberately: the original plays this on EVERY owner, local or not
     // [orig: AnimMap_PlayAnimBySlot(weaponDefPtr->field_174, 241) @ 0x542955 — no
     // owner test]. Every sibling play onto that object IS gated on
-    // `ownerEntity == g_local_player_entity` [orig: ActionSlot_ExecuteActionWithEffect
+    // `ownerEntity == g_LocalPlayerEntity` [orig: ActionSlot_ExecuteActionWithEffect
     // @0x541893/@0x54195A/@0x5419B8], so retail's omission here is a defect — and a
     // live A/B on a stock host confirmed it: with two retail players on the SAME
     // weapon, the host's own first-person gun visibly reacted to the other player's
@@ -192,20 +192,20 @@ void handler_idle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     slot.phase = weapon_phase::kDone;
     if (def.clip_capacity < 0) return;   // [orig: @ 0x54296c infinite -> effects only]
     if (has_rounds(def, slot)) return;   // [orig: @ 0x542981]
-    if (slot.reserve > 0 && in.auto_reload) { // [orig: @ 0x5429ac g_autoReloadEnabled]
+    if (slot.reserve > 0 && in.auto_reload) { // [orig: @ 0x5429ac g_AutoReloadEnabled]
         weapon_fsm_request_reload(slot);
         return;
     }
     slot.next = weapon_action::kEmptyIdle; // [orig: @ 0x5429cf]
     // One-shot weapons drop the scope with the last round — unless ForceScoped
-    // (0x20000000) pins the sight view. [orig: @ 0x5429ee g_weaponScopeActive = 0]
+    // (0x20000000) pins the sight view. [orig: @ 0x5429ee g_WeaponScopeActive = 0]
     if (in.is_local && def.clip_capacity == 1 && (def.flags & weapon_flag::kForceScoped) == 0)
         out.unscope = true;
 }
 
 // [orig: WeaponAction_EmptyIdle @ 0x542a20] Same LOOP shape on the global
 // wpn_empty_idle clip (slot 242); reserve available -> auto reload (unconditional,
-// no g_autoReloadEnabled gate here); else keep holding (next = self).
+// no g_AutoReloadEnabled gate here); else keep holding (next = self).
 void handler_emptyidle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                        WeaponSlotState &slot, const WeaponFsmInputs &in,
                        WeaponFsmEvents &out) {
@@ -251,7 +251,7 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     }
     out.fired_clip_before_consume = slot.clip;
     out.fired = true; // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
-    if (def.clip_capacity >= 0) { // [orig: consume_weapon_ammo @ 0x542c75, clip leg]
+    if (def.clip_capacity >= 0) { // [orig: Weapon_ConsumeAmmo @ 0x542c75, clip leg]
         if (slot.clip > 0) --slot.clip;
     }
     if (def.burst3) // Flags & 0x20 [orig: @ 0x542c8a]
@@ -352,11 +352,11 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
             if ((def.flags & weapon_flag::kForceCrouch) != 0) {
                 // The keep-scope reload class (ForceCrouch 0x40000 — the mortars):
                 // no stash, no unscope; the sight view rides through the reload.
-                // [orig: @ 0x543126 -> g_rescopeAfterReload = 0 @ 0x54313d]
+                // [orig: @ 0x543126 -> g_RescopeAfterReload = 0 @ 0x54313d]
                 slot.rescope_after_reload = false;
             } else {
                 // Stash the scope across the reload; the pump rescopes on completion.
-                // [orig: @ 0x54312f g_rescopeAfterReload = g_weaponScopeActive]
+                // [orig: @ 0x54312f g_RescopeAfterReload = g_WeaponScopeActive]
                 slot.rescope_after_reload = in.scope_active;
                 if (in.scope_active) out.unscope = true; // [orig: Player_ToggleWeaponScope @ 0x543136]
             }
@@ -415,7 +415,7 @@ void handler_switchto(const WeaponFsmDef &, const WeaponFsmAction &desc,
 }
 
 // [orig: WeaponAction_SwitchFrom @ 0x5433b0] The holster: timer runs 0 -> -930 by
-// -30/tick; past -900 the original swaps EquippedSlot from g_pendingWeaponSlot and
+// -30/tick; past -900 the original swaps EquippedSlot from g_PendingWeaponSlot and
 // queues SWITCHTO on the NEW slot. The swap itself is the weapon-switch seam
 // (priority-3 loadout work); this port runs the timing shape on the one slot.
 void handler_switchfrom(const WeaponFsmDef &, const WeaponFsmAction &desc,
@@ -855,7 +855,7 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     }
 
     // Rescope after a completed reload [orig: @ 0x54139e..0x5413ab — the pump toggles
-    // the scope back on and clears g_rescopeAfterReload].
+    // the scope back on and clears g_RescopeAfterReload].
     if (slot.current == weapon_action::kReload && slot.next == weapon_action::kIdle &&
         in.is_local && slot.rescope_after_reload) {
         out.rescope = true;

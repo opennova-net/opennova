@@ -28,7 +28,7 @@
 // REN-3 extended the set with section 3: draw-order vectors (sort keys,
 // technique-class selection, the water bracket + priority ladder) pinning
 // engine/runtime/renderer/render_order against docs/render/render-order-re.md
-// [orig: RenderBatch_QuickSort @ 0x5d8b40; collect_render_objects_for_batch
+// [orig: RenderBatch_QuickSort @ 0x5d8b40; Render_CollectRenderObjectsForBatch
 // @ 0x5d8f20; Terrain_RenderWorldScene @ 0x5c93a0].
 //
 // REN-5 added section 5: lighting scalars over engine/runtime/renderer/light_runtime
@@ -44,7 +44,7 @@
 // bloom-copy capability [orig: probe @ 0x5ae690; Q3 gate @ 0x5d93b5]) and
 // vfade= (the vsTracer view-angle fade, D-RMAT-2), and added section 4:
 // uv-anim vectors over engine/runtime/renderer/uv_anim
-// [orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0].
+// [orig: Material_ComputeUVTransformMatrix @ 0x5b1990; CWaveformTable_WaveLookup @ 0x5de6b0].
 
 #include <runtime/renderer/light_runtime.h>
 #include <runtime/renderer/material_classify.h>
@@ -279,7 +279,7 @@ std::string generate() {
 
 	// Technique-class selection: every stack-default state x a submit-flag
 	// sweep including the multi-flag precedence cases
-	// [orig: collect_render_objects_for_batch @ 0x5d90d7..0x5d9145].
+	// [orig: Render_CollectRenderObjectsForBatch @ 0x5d90d7..0x5d9145].
 	const uint32_t stack_states[] = { 0, kStackDefaultClip, kStackDefaultProjShadow,
 	                                  kStackDefaultDepthMask };
 	const uint32_t submit_states[] = {
@@ -351,8 +351,8 @@ std::string generate() {
 
 	// Section 4 (REN-4): uv-anim vectors over engine/runtime/renderer/uv_anim — the
 	// time-driven MatTexCoord1 transform
-	// [orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0;
-	//  bound in apply_shader_parameters @ 0x58db80 with
+	// [orig: Material_ComputeUVTransformMatrix @ 0x5b1990; CWaveformTable_WaveLookup @ 0x5de6b0;
+	//  bound in Material_ApplyShaderParameters @ 0x58db80 with
 	//  time = (tick_ms << 8)/1000]. docs/render/render-material-re.md.
 	out << "# uv-anim v1 (REN-4: scroll/rotate/waveform/controlled channels)\n";
 

@@ -29,13 +29,13 @@ namespace opennova::renderer {
 inline constexpr int kLockedFrameEffectsLevel = 3;
 
 // The two square work targets ([fx+4] / [fx+8], 256 x 256).
-// [orig: create_frame_effect_render_targets @0x583cf7..0x583d04]
+// [orig: FrameFX_CreateRenderTargets @0x583cf7..0x583d04]
 inline constexpr int kFrameFxWorkSide = 256;
 
 // The capture target [fx+0] per axis: the highest power of two not above
 // (backbuffer - 1), found by clearing the lowest set bit until one remains.
 // A 1920 x 1080 frame captures at 1024 x 1024, 1024 x 768 at 512 x 512.
-// [orig: create_frame_effect_render_targets @0x583c7f..0x583c97]
+// [orig: FrameFX_CreateRenderTargets @0x583c7f..0x583c97]
 int frame_fx_capture_side(int backbuffer_side);
 
 // DrawPass's degree-to-radian factor (the float the binary stores, not pi/180)
@@ -148,18 +148,18 @@ struct FrameFxStep {
 // The frame's view facts the dispatch reads.
 // [orig: Render_ProcessMainSceneFrame @0x5ca8f6..0x5caad5]
 struct FrameFxViewInputs {
-	bool in_session = false;          // g_napi_np_ctx.is_in_session
+	bool in_session = false;          // g_NapiNPCtx.is_in_session
 	bool local_dead = false;          // local player Flags & 2 ([ent+24h] & 2)
-	std::int32_t red_word = 0;        // g_screenFlashRedDamage, the raw word
-	int camera_mode = 0;              // g_camera_mode
-	// tick - g_camera_lerp_start_tick (the death stamp), as the int32 retail
+	std::int32_t red_word = 0;        // g_ScreenFlashRedDamage, the raw word
+	int camera_mode = 0;              // g_CameraMode
+	// tick - g_CameraLerpStartTick (the death stamp), as the int32 retail
 	// subtracts.
 	std::int32_t death_elapsed_ticks = 0;
 	bool thermal_view = false;        // the frame's latch: CanFire && flags2 & 4
 	bool monitor_view = false;        // the frame's latch: CanFire && flags2 & 8
 	bool nvg_active = false;          // g_NVGActive
-	bool death_screen_active = false; // g_death_screen_active
-	bool binoculars_view_active = false; // g_binocularsViewActive
+	bool death_screen_active = false; // g_DeathScreenActive
+	bool binoculars_view_active = false; // g_BinocularsViewActive
 	// The frame's Scoped selector byte: CanFire, a Scoped non-Inset def, not a
 	// vehicle-attack seat, never on the death screen. [orig: @0x5ca2be..0x5ca304]
 	bool scoped_selector = false;
@@ -213,7 +213,7 @@ FrameFxNvgPlan frame_fx_nvg_view(const FrameFxViewInputs &view);
 // NVG.tga and its gain scale draw at the end of the full-screen composite,
 // never on the death screen, and never under the lens (whose arm skips that
 // composite). [orig: NVG_Composite @0x5d1077..0x5d1080
-//  (NVG_DrawMaskAndGain unless g_death_screen_active)]
+//  (NVG_DrawMaskAndGain unless g_DeathScreenActive)]
 bool frame_fx_nvg_mask_visible(const FrameFxViewInputs &view);
 
 struct FrameFxFramePlan {
@@ -293,7 +293,7 @@ inline constexpr int kNvgSceneSide = 512;
 inline constexpr int kNvgGlowSide = 256;
 
 // Tint: d = dot(scene, (0.5, 1.0, 0.5)); out = d (0.2, 0.9, 0.2) + (0, 0.2, 0),
-// replacing the frame. [orig: init_view_effect_shaders_and_textures @0x5cfab6
+// replacing the frame. [orig: ViewFx_InitShadersAndTextures @0x5cfab6
 // (ps text 0x7DC3D8, state dword_2BDFAB8)]
 inline constexpr FrameFxRgb kNvgTintDot = {0.50f, 1.00f, 0.50f};
 inline constexpr FrameFxRgb kNvgTintScale = {0.20f, 0.90f, 0.20f};
@@ -304,7 +304,7 @@ FrameFxRgb nvg_tint_color(const FrameFxRgb &scene);
 // - 0.15); out = g (0.2, 0.6, 0.2) at alpha 0.16, blended ONE/INVSRCALPHA
 // into the persistent target twice a frame: diagonal taps at +-1.5/512, then
 // axial taps at +-3/512. The composite adds it MODULATE2X by 0x808080.
-// [orig: init_view_effect_shaders_and_textures @0x5cfb60 (ps text 0x7DC228,
+// [orig: ViewFx_InitShadersAndTextures @0x5cfb60 (ps text 0x7DC228,
 //  state dword_2BDFABC); NVG_AccumulateGlow @0x5d032e..0x5d0453;
 //  NVG_Composite @0x5d0f90..0x5d1059]
 inline constexpr FrameFxRgb kNvgGlowLuma = {0.30f, 0.60f, 0.10f};

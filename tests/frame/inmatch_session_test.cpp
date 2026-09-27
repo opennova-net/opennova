@@ -166,7 +166,7 @@ int main() {
 	// The session hands the FR counter to the role once per banked frame,
 	// ahead of that frame's ticks: 0 until the first 2000 ms window closes
 	// (a steady 16 ms stream closes it on frame 118), then its average
-	// [orig: Game_MainLoop g_statsAvgFps @0x52B98F, drain @0x52BA08].
+	// [orig: Game_MainLoop g_StatsAvgFps @0x52B98F, drain @0x52BA08].
 	{
 		TickProbe target;
 		Session session(target);

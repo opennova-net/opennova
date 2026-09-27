@@ -1,5 +1,5 @@
 // The compiled-menu interaction runtime — see menu_runtime.h for the witness
-// map. [orig: CUIWidget_HandleScriptedAction @0x6497f0; dispatch_mouse_event
+// map. [orig: CUIWidget_HandleScriptedAction @0x6497f0; UI_DispatchMouseEvent
 // @0x63ab00]
 
 #include <runtime/menu/menu_runtime.h>
@@ -828,8 +828,8 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down) {
 	const bool down_edge = button_down && !mouse_down_;
 	mouse_down_ = button_down;
 
-	// An open dropdown owns the mouse exclusively [orig: dispatch_mouse_event
-	// @0x63ab00 g_ui_open_popup_wnd gate; combobox_handle_event @0x65c190,
+	// An open dropdown owns the mouse exclusively [orig: UI_DispatchMouseEvent
+	// @0x63ab00 g_UIOpenPopupWnd gate; CComboWnd_HandleEvent @0x65c190,
 	// outside check @0x65c290 — D-MNU-11/12]: a press picks a popup row or
 	// dismisses (the dismissing click is consumed either way; a press on the
 	// input-dead closed cell does nothing).
@@ -849,7 +849,7 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down) {
 			}
 			// The popup-exclusive pump hovers the row under the mouse (style 2)
 			// [orig: the per-frame pump runs ONLY on the popup while open —
-			// scene_end_frame @0x63e600 gate @0x63e691; the row mouseover style
+			// CUIScene_EndFrame @0x63e600 gate @0x63e691; the row mouseover style
 			// = CListWnd_DrawItems @0x643f30].
 			frame_->set_widget_hover_item(combo_index,
 					frame_->combo_popup_row_at(combo_index, x, y));
@@ -900,7 +900,7 @@ bool MenuRuntime::process_wheel(float x, float y, int steps) {
 
 void MenuRuntime::on_claim_changed_(int previous, int current) {
 	// The hover sound edges ride the visual-state transitions
-	// [orig: widget_process_mouse_event @0x647a00 — MOUSEIN on entering state
+	// [orig: CWnd_ProcessMouseEvent @0x647a00 — MOUSEIN on entering state
 	// 2/3, MOUSEOUT on leaving the widget].
 	if (previous >= 0) {
 		const int prev_id = id_at_index(previous);
@@ -1044,7 +1044,7 @@ void MenuRuntime::table_click_(int id, int row, uint32_t now_ms, bool ctrl_down)
 
 void MenuRuntime::open_combo_popup_(int id) {
 	// One dropdown per menu: opening one closes the previous
-	// [orig: g_ui_active_combo_wnd @0x31C16D0, single-open toggle @0x65c210].
+	// [orig: g_UIActiveComboWnd @0x31C16D0, single-open toggle @0x65c210].
 	close_active_combo_popup();
 	open_combo_id_ = id;
 	const int index = frame_index(id);
@@ -1064,8 +1064,8 @@ void MenuRuntime::close_active_combo_popup() {
 // ---- edit focus + keyboard --------------------------------------------------
 
 void MenuRuntime::focus_edit(int id) {
-	// Click focuses unless read-only [orig: edit_widget_handle_input_event
-	// @0x661510 — g_ui_focus_wnd = this unless widget[194]].
+	// Click focuses unless read-only [orig: CEditWnd_HandleInputEvent
+	// @0x661510 — g_UIFocusWnd = this unless widget[194]].
 	const mnu::Window *w = index_.window(id);
 	if (w != nullptr && w->readonly) return;
 	if (focus_id_ == id) return;
@@ -1136,7 +1136,7 @@ bool MenuRuntime::route_edit_key_(const MenuKeyInput &key) {
 		const int result = frame_->edit_key(index, vk, key.shift);
 		if (result == static_cast<int>(EditKeyResult::kCommit)) {
 			// Enter commits: the value fires and focus releases (menu_edit.h
-			// EditKeyResult::kCommit — clears g_ui_focus_wnd and fires the commit
+			// EditKeyResult::kCommit — clears g_UIFocusWnd and fires the commit
 			// event 0x7000002).
 			clear_edit_focus_();
 			play_widget_state_sound(id, "SELECTED");

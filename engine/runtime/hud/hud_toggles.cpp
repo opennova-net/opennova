@@ -109,7 +109,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 			events |= respawn_init_keeping(s, &s.scoreboard_open, k.in_session);
 	}
 	// The Recent Messages window, then the respawn init keeping it [orig:
-	// `xor g_showMessageLog, 1` @0x49b55a; the wrapper call @0x49b566]
+	// `xor g_ShowMessageLog, 1` @0x49b55a; the wrapper call @0x49b566]
 	if (s.old_messages.step(k.old_messages, k.active, k.chorded)) {
 		s.message_log_open = !s.message_log_open;
 		events |= kMessageLogToggled | respawn_init_keeping(s, &s.message_log_open, k.in_session);

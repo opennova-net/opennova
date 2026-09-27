@@ -3,7 +3,7 @@
 // The placer's retained static entity facts. Device resources are stable,
 // embedder-owned asset ids; transforms are three basis rows followed by the presentation origin.
 // [orig: Terrain_CollectAndRenderTileModels pool scans/admission
-// @0x60D421..0x60D450; collect_render_objects_for_batch @0x5d8ff7]
+// @0x60D421..0x60D450; Render_CollectRenderObjectsForBatch @0x5d8ff7]
 
 #include <array>
 #include <cstdint>

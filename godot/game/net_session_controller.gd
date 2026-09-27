@@ -154,7 +154,7 @@ func join_lan_server(target: JoinTarget) -> void:
 # from racing the prompt.
 func _start_lan_join(target: JoinTarget) -> void:
 	# Joiner: the retail client obtains the full session-variable set from the
-	# connect stream before wire-header world load [orig: parse_server_session_variables
+	# connect stream before wire-header world load [orig: Client_ParseServerSessionVariables
 	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
 	# them with the authoritative post-auth record before starting MissionRoot.
 	# Retail also holds the screen through the post-world-load connection/game-start
@@ -521,7 +521,7 @@ func _resource_root() -> ResourceRoot:
 
 
 # MISSIONNAME for the loading screen = the mission text .bin's [info]/title
-# [orig: serialize_mission_info_to_datastream @ 0x523620 ->
+# [orig: Game_SerializeMissionInfoToDataStream @ 0x523620 ->
 # TextResource_FindEntryBySectionAndKey(g_TextMission, "info", "title"); an
 # empty title falls back to the mission-header title]. Our fallback: the
 # mission basename.

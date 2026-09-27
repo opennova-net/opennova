@@ -40,7 +40,7 @@ static_assert(kMaxFrameUpdateBodyBytes == 1278);
 // The advertised player-cap ceiling: a dialog cap above 65 publishes 65 (the
 // test is on the PRE-increment cap, so a dedicated 65 publishes 66); there is
 // no lower clamp. The dialog itself caps its edit at 64.
-// [orig: apply_session_settings_to_globals @0x551b43..0x551b48 -> game_settings
+// [orig: Game_ApplySessionSettingsToGlobals @0x551b43..0x551b48 -> game_settings
 //  +0xC0; HostDialog_ReadSettings @0x555c25..0x555c2d — see host_player_slot_limit]
 inline constexpr uint32_t kMaxPlayersCap = 65;
 
@@ -58,10 +58,10 @@ enum class GameSessionChannel : uint8_t {
 struct GameConfig {
 	// --- §6.4 identity (lobby name + wire server name + join-gate passwords) -----------------------
 	// server_name feeds the lobby/session name [orig create_session -> np_protocol.session_name /
-	// nstmout_path @proto+0x288] AND the wire bodies [orig g_server_name_str @0x24D1FC4: the S2C 0x2C
+	// nstmout_path @proto+0x288] AND the wire bodies [orig g_ServerNameStr @0x24D1FC4: the S2C 0x2C
 	// NetPacket_WriteServerNameAndMapFile @0x505780 + the 0x7B/0x60 serverName]; the original keeps
 	// several synced copies, unified here.
-	std::string server_name = "OpenNova Dev";  // [orig g_server_name_str @0x24D1FC4 / game_settings +0x00]
+	std::string server_name = "OpenNova Dev";  // [orig g_ServerNameStr @0x24D1FC4 / game_settings +0x00]
 	std::string server_password;               // [orig game_settings +0x20] BuildFlags |0x8
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
@@ -90,7 +90,7 @@ struct GameConfig {
 	uint32_t game_type = 0;                     // [orig g_GameType @0x24D2128 == game_settings +0xCC]
 	// Process-global side count. Only TDM/TKOTH/FlagBall honor four; every
 	// other team mode remains two-sided in the retail scoreboards.
-	// [orig: g_MpNumTeams @0x2550B40 -> g_num_teams_config @0x24D2150;
+	// [orig: g_GameConfigState.multiplayerTeamCount_488 @0x2550B40 -> g_NumTeamsConfig @0x24D2150;
 	// Server_BuildAndBroadcastScoreboard @0x50D960]
 	uint8_t num_teams = 2;
 	// mpattrib bitmask — the BuildFlags team-branch input [orig game_settings +0xD0] AND the 0x64
@@ -102,7 +102,7 @@ struct GameConfig {
 	static constexpr uint32_t kMpAttribNoFriendlyFire = 0x200;
 	static constexpr uint32_t kMpAttribNoFriendlyTag = 0x400;
 	static constexpr uint32_t kMpAttribClaymorePref = 0x8000;
-	// Read only by the scope-zero -1 floor [orig: `test g_rules_flags,10000h`
+	// Read only by the scope-zero -1 floor [orig: `test g_RulesFlags,10000h`
 	// @0x4dbd15 in Player_AdjustWeaponZoomLevel]. No retail writer sets it:
 	// mp_allowsniperscopezoom feeds the 0x08 flags dword bit 16 (byte_A821F0,
 	// read by WeaponSlot_InitFromDef @0x53ef17) and never this word, so the
@@ -120,7 +120,7 @@ struct GameConfig {
 	// The host-global class availability word sent to every joining client as
 	// S2C 0x76. Retail derives its ten low bits from the per-class host settings
 	// and the selected mission-list entry; all classes enabled is the stock
-	// default. [orig: g_hostClassAllowMask @0x24D59FC;
+	// default. [orig: g_HostClassAllowMask @0x24D59FC;
 	// NetPacket_WriteClassAllowMask @0x510350]
 	uint16_t class_allow_mask = 0x03FFu;
 	// Authoritative projectile game-option globals. These do not alter the
@@ -136,7 +136,7 @@ struct GameConfig {
 	// [orig: g_GameConfigState.unlimitedVehicles_4D0 (Config_SetDefaults
 	//  @0x54D352, Config_ParseSettingsLine @0x551297, Game_SaveConfig
 	//  @0x54CBEB) -> dword_24D2258 (Game_ApplySessionSettingsToGlobals
-	//  @0x551D80..0x551D91) -> mission-data block +0x30, dword_24D1E38
+	//  @0x551D80..0x551D91) -> mission-data block +0x30, g_RulesUnlimitedVehicles
 	//  (Client_BuildMissionDataRequestBlock @0x51E8C5..0x51E8CB, called from
 	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E8F4 in Game_StartMission
 	//  @0x5248A7); readers AI_TickState_VehicleDead @0x467EE9,
@@ -150,27 +150,27 @@ struct GameConfig {
 	// order. Default 0 for a dev host; a real host / the golden seeds them (retail frame 146:
 	// [respawn 30, timelimit 10, _, gametype, _, score 50, _, startdelay, _, _]).
 	// The five formerly-UNWITNESSED words were named 2026-07-01 by tracing each 0x08-block global to
-	// its Config_ParseSettingsLine @0x54f740 setting-name compare (via apply_session_settings_to_globals
+	// its Config_ParseSettingsLine @0x54f740 setting-name compare (via Game_ApplySessionSettingsToGlobals
 	// @0x551500, which copies the parsed cfg global into the live rule global).
-	uint32_t respawn_time = 0;         // [orig g_respawn_time @0x24D2140]      dword[0]; SET `GameTime`
-	uint32_t time_limit_minutes = 0;  // [orig g_time_limit_minutes @0x24D2144] dword[1]; SET `KOTHLimit`
-	uint32_t replay_enabled = 0;      // [orig g_replay_enabled @0x24D2120 <- cfg `replay` @0x2550B24]      dword[2]
+	uint32_t respawn_time = 0;         // [orig g_RespawnTime @0x24D2140]      dword[0]; SET `GameTime`
+	uint32_t time_limit_minutes = 0;  // [orig g_TimeLimitMinutes @0x24D2144] dword[1]; SET `KOTHLimit`
+	uint32_t replay_enabled = 0;      // [orig g_ReplayEnabled @0x24D2120 <- cfg `replay` @0x2550B24]      dword[2]
 	// Retail carries this setting through cfg/global/S2C 0x08 but never reads
 	// the live global in gameplay (whole-image xrefs: serializer + settings
 	// apply only). Keep its wire value; do not invent a team-lives system.
-	uint32_t max_team_lives = 0;      // [orig g_max_team_lives @0x24D2130 <- cfg `max_team_lives` @0x2550ABC] dword[4]
-	uint32_t score_limit = 0;         // [orig g_score_limit @0x24D2134]       dword[5]; SET `KillLimit` (name-swap)
+	uint32_t max_team_lives = 0;      // [orig g_MaxTeamLives @0x24D2130 <- cfg `max_team_lives` @0x2550ABC] dword[4]
+	uint32_t score_limit = 0;         // [orig g_ScoreLimit @0x24D2134]       dword[5]; SET `KillLimit` (name-swap)
 	// Gameplay-only rule globals omitted from S2C 0x08 but consumed by the
 	// witnessed KOTH/flag win and return paths.
-	uint32_t max_score = 0;           // [orig g_kill_limit @0x24D2138] SET `MaxScore`
+	uint32_t max_score = 0;           // [orig g_KillLimit @0x24D2138] SET `MaxScore`
 	uint32_t koth_delta = 5;          // [orig dword_24D2148] cfg `koth_delta`
-	uint32_t flag_return_ticks = 210; // [orig g_FlagReturnTime_2 @0x24D2174]
+	uint32_t flag_return_ticks = 210; // [orig g_FlagReturnTime2 @0x24D2174]
 	// The flag CARRY limit in periodic seconds (CTF / FlagBall / Flag Me): a
 	// carrier holding a flag this long drops it, the flag snaps home, and the
 	// carrier is killed. The IDB global name is a misnomer; the config field is
 	// the sibling of flagReturnTime above.
-	// [orig g_GameConfigState.flagResetTime_420 -> g_weapon_violation_limit
-	//  @0x24D2178 via apply_session_settings_to_globals @0x551d0a; default
+	// [orig g_GameConfigState.flagResetTime_420 -> g_WeaponViolationLimit
+	//  @0x24D2178 via Game_ApplySessionSettingsToGlobals @0x551d0a; default
 	//  Config_SetDefaults @0x54D400; consumer Server_CheckPlayerViolations
 	//  @0x51ac75]
 	int32_t flag_reset_seconds = 420;
@@ -202,7 +202,7 @@ struct GameConfig {
 	// [orig: g_GameConfigState.checkMinPing_54C / minPing_548 / checkMaxPing_554
 	//  / maxPing_550 -> g_DoMinPingCheck @0x24D21B0 / g_MinPing @0x24D21AC /
 	//  g_DoMaxPingCheck @0x24D21B8 / g_MaxPing @0x24D21B4 via
-	//  apply_session_settings_to_globals @0x551C3E..0x551C5D;
+	//  Game_ApplySessionSettingsToGlobals @0x551C3E..0x551C5D;
 	//  NapiNPServerMsg_HandlePingResponse @0x515183..0x51521A]
 	bool do_min_ping_check = false;
 	uint32_t min_ping = 0;
@@ -223,25 +223,25 @@ struct GameConfig {
 	//  @0x833380, default "1300" @0x7D268C; Config_SetDefaults clamp
 	//  @0x54D060..0x54D090; read by CNapiNetwork_Init @0x4CAA53]
 	int32_t max_packet_size = 1300;
-	int32_t capture_duration_seconds = 15; // [orig g_capture_duration @0x24D2248] `TakeoverTime`
-	int32_t capture_speed_setting = 1;     // [orig g_capture_speed_setting @0x24D2254]
-	int32_t spawn_wave_time_base = 0;      // [orig g_spawn_wave_time_base @0x24D224C]
-	int32_t spawn_wave_time_zone = 10;     // [orig g_spawn_wave_time_zone @0x24D2250]
+	int32_t capture_duration_seconds = 15; // [orig g_CaptureDuration @0x24D2248] `TakeoverTime`
+	int32_t capture_speed_setting = 1;     // [orig g_CaptureSpeedSetting @0x24D2254]
+	int32_t spawn_wave_time_base = 0;      // [orig g_SpawnWaveTimeBase @0x24D224C]
+	int32_t spawn_wave_time_zone = 10;     // [orig g_SpawnWaveTimeZone @0x24D2250]
 	// True limits target-less deployment to the absence of an eligible same-team
 	// spawn zone. The clean name reflects the actual predicate; retail's global
-	// g_respawn_requires_team_dead and cfg key `nodefaultspawnpoints` are
+	// g_RespawnRequiresTeamDead and cfg key `nodefaultspawnpoints` are
 	// historical misnomers and are retained only as provenance.
-	// [orig: apply_session_settings_to_globals @0x551D96;
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551D96;
 	// Server_ProcessClientRequestRespawn @0x519C8E;
 	// Entity_HasAliveEntityOfTeam @0x4FC7B0]
 	uint32_t default_spawn_requires_no_team_zone = 0;
-	uint32_t respawn_timeout = 0;     // [orig g_respawn_timeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
+	uint32_t respawn_timeout = 0;     // [orig g_RespawnTimeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
 	                                  //   read by GameEvent_PlayerDeath @0x516dd0 / Server_UpdateBotMovement
 	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160] dword[7]; SET `StartDelay`;
-	                                  //   reset_round_counters @0x516C50 copies it to g_preround_delay_timer @0xC8D824 (store @0x516C8D)
-	uint32_t destroy_buildings = 0;   // [orig g_destroy_buildings @0x24D2164 <- cfg `destroybuild` @0x2550ACC] dword[8];
+	                                  //   Server_ResetRoundCounters @0x516C50 copies it to g_PreRoundDelayTimer @0xC8D824 (store @0x516C8D)
+	uint32_t destroy_buildings = 0;   // [orig g_DestroyBuildings @0x24D2164 <- cfg `destroybuild` @0x2550ACC] dword[8];
 	                                  //   read by Entity_ApplyWeaponDamage @0x4e6820
-	uint32_t death_messages = 0;      // [orig g_death_messages @0x24D2168 <- cfg `deathmes` @0x2550AD0]    dword[9];
+	uint32_t death_messages = 0;      // [orig g_DeathMessages @0x24D2168 <- cfg `deathmes` @0x2550AD0]    dword[9];
 	                                  //   read x3 by GameEvent_PlayerDeath @0x516dd0
 	uint8_t config_bytes[7] = {0, 0, 0, 0, 0, 0, 0}; // [orig byte_24D234C..byte_24D2360 + dword_24D2110 low byte]
 
@@ -261,7 +261,7 @@ struct GameConfig {
 	// verbatim in the S2C 0x56 end-round board.
 	std::vector<std::pair<uint8_t, uint8_t>> scoreboard_fields;
 
-	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_rules_flags bitfield
+	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_RulesFlags bitfield
 	// sources): the trailing flags dword of the 0x08 block. `MaxScore` is retained
 	// above for gameplay/session-status, but retail does not put it in this 0x08 block.
 	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000
@@ -278,10 +278,10 @@ struct GameConfig {
 	// (server_message_dispatch.h). The replicated-entity / spawn-point inputs are NOT here — the
 	// faithful world-stream burst sources those from World + bms::File.
 	std::string mission_name = "AS - Dormant Volcano Isle"; // [orig title: MissionText "info"/"title" / dword_24D1FA4]
-	std::string mission_file = "ASH_I5A.BMS";               // [orig g_map_file_name @0x24D1F3E]
-	std::string custom_text = "Put your message here.";     // [orig g_sessionvar_custom_text @0x522123]
+	std::string mission_file = "ASH_I5A.BMS";               // [orig g_MapFileName @0x24D1F3E]
+	std::string custom_text = "Put your message here.";     // [orig g_SessionVarCustomText @0x522123]
 	std::string expansion = "jox01";                        // [orig g_ExpansionName @0xB4C584] (0x7B)
-	// The active expansion's version checksum — retail's g_expansion_checksum
+	// The active expansion's version checksum — retail's g_ExpansionChecksum
 	// @0xB4C5A4: 0 unless a loose expansion/<name>/version.txt exists, else its
 	// CRC (vfs_expansion_version_checksum ports the producer
 	// [orig: Expansion_LoadAssets @0x4a4781/@0x4a4885]). The join gate compares
@@ -302,7 +302,7 @@ struct GameConfig {
 	uint32_t spawn_z = 0x003a5e6au;
 	std::vector<std::string> spawn_names;
 	std::vector<uint8_t> mission_header_blob;
-	// The per-frame 0x0A byte cap [orig: g_entity_send_budget @0xC8FC50, the
+	// The per-frame 0x0A byte cap [orig: g_EntitySendBudget @0xC8FC50, the
 	// BANDWIDTH server command — atol/5 clamped 100-1600 @0x50b884/@0x50b890;
 	// the round-start initializer resets retail to 600 @0x51ca7c].
 	// start_host_session applies it to the replication global at bring-up.
@@ -361,7 +361,7 @@ struct GameConfig {
 // Seed a config with the fresh-host rule defaults the retail config path
 // applies before a mission starts -- the one place the game_rules baseline
 // lands on the live wire fields (a dev host that skips this stays inert at
-// zero). [orig: Config_SetDefaults @0x54D030 -> apply_session_settings_to_globals
+// zero). [orig: Config_SetDefaults @0x54D030 -> Game_ApplySessionSettingsToGlobals
 // @0x551500; GameType_CreateDefaultSettings @0x52dd00]
 inline void apply_fresh_host_rule_defaults(GameConfig &config) {
 	config.respawn_time = game_rules::kDefaultRespawnTime;

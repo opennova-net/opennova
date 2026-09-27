@@ -436,8 +436,8 @@ func test_local_player_first_person_drape_gates() -> void:
 ## shadowztex depth stage: a bound silhouette slot publishes a non-degenerate
 ## world patch of side 6..20 u around the caster, its depth-clip texgen rows,
 ## and the shared 32x4 step texture [orig: RenderSlot_RebuildPatchVertexBuffer
-##  @0x5d5130; build_shadow_cascade_uv_matrices @0x58cf10;
-##  shadow_system_init_resources @0x5d6260 — renderer::slot_patch_bounds,
+##  @0x5d5130; RenderSlot_BuildShadowCascadeUVMatrices @0x58cf10;
+##  Shadow_SystemInitResources @0x5d6260 — renderer::slot_patch_bounds,
 ##  slot_depth_clip, shadowztex_pixels].
 func test_bound_slot_publishes_its_patch_and_depth_clip() -> void:
 	var environment := _environment()
@@ -767,7 +767,7 @@ func test_windowed_skinned_caster_silhouette_follows_the_posed_bone() -> void:
 
 func test_windowed_capture_draws_the_caster_black_over_the_white_clear() -> void:
 	# The retail slot RT: cleared 0x00FFFFFF, the PROJSHAD pass draws the
-	# caster black (render_shadow_pass @0x5d7b70; vscPostBlackT1). Needs a live
+	# caster black (Render_ShadowPass @0x5d7b70; vscPostBlackT1). Needs a live
 	# RenderingDevice (a windowed forward_plus run); headless stays pending.
 	if RenderingServer.get_rendering_device() == null:
 		pending("RenderingDevice unavailable under this Godot renderer")
@@ -1010,7 +1010,7 @@ func _crate_slot_matrix(shadow: SlotShadow, crate: ObjectModel) -> Projection:
 ## The capture camera is retail's look-at mapped into presentation axes
 ## (renderer::slot_capture_view_axes): a right-handed frame, so the device's
 ## back-face cull keeps the light-facing faces like retail's CULLMODE CCW over
-## its view (setup_shadow_cascade_matrices @0x58d31e). The drape samples through
+## its view (RenderSlot_SetupShadowCascadeMatrices @0x58d31e). The drape samples through
 ## the same pose: its u row is the camera x axis and its v row the negated y, so
 ## u x v points along the camera forward, the downward slot direction. The
 ## mirrored (det -1) frame points it up.

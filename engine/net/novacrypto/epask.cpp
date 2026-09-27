@@ -52,7 +52,7 @@ bool is_prime(uint64_t n) {
 // modulus must exceed 258 (so every byte+2 has a distinct residue) and the
 // exponent must be strictly positive. A bundle that fails it is rejected
 // outright — retail returns -1 and the form submit fails; it never reaches
-// modular_exponentiation, so a zero modulus can never divide.
+// Crypto_ModularExponentiation, so a zero modulus can never divide.
 // [orig: EPASK_ModexpEncrypt @0x666600 — `*(__int64 *)this <= 258 ||
 //  exponent <= 0` -> -1 @0x66668a]
 void require_modexp_params(uint32_t exponent, uint32_t modulus) {
@@ -94,7 +94,7 @@ std::vector<uint8_t> modexp_decrypt_bf(const std::vector<uint8_t> &data,
 	return out;
 }
 
-// [orig: EPASK_ModexpEncrypt @ 0x666600 (retail) — per byte modular_exponentiation(byte+2,exp,mod)
+// [orig: EPASK_ModexpEncrypt @ 0x666600 (retail) — per byte Crypto_ModularExponentiation(byte+2,exp,mod)
 //        @ 0x666470, stored as a 32-bit little-endian word. The "+2" is byte-confirmed.]
 std::vector<uint8_t> modexp_encrypt(const std::vector<uint8_t> &data,
                                     uint32_t exponent, uint32_t modulus) {
@@ -169,7 +169,7 @@ std::string epask_to_string(const EpaskParams &p) {
 	return std::to_string(p.exponent) + ":" + std::to_string(p.modulus) + ":" + p.key;
 }
 
-// [orig: parse_colon_delimited_string @ 0x666710 (retail) — splits 'exp:mod:key'.
+// [orig: EPASK_ParseColonDelimitedString @ 0x666710 (retail) — splits 'exp:mod:key'.
 //  Each numeric field is copied into a 512-byte temp and atoi64'd; the walk
 //  returns -1 when the first (@0x66679b) or second (@0x6667e3) ':' is missing
 //  or a numeric field reaches 512 bytes (@0x66678e / @0x6667d5). A missing
@@ -215,8 +215,8 @@ std::string epask_decrypt(const std::string &ciphertext, const EpaskParams &para
 std::string epask_encrypt(const std::string &plaintext, const EpaskParams &params) {
 	// [orig: EPASK_Encrypt @ 0x6669a0 (retail) — NWU(NapiNP_EncryptBufferAlt@0x6668e0, == 0x6187b0)
 	//        -> modexp(EPASK_ModexpEncrypt) -> NWU -> A-P(NapiNP_EncodeToHexAlpha@0x666570). Dispatched from the
-	//        edit-widget vtable +0x38 build_form_field_query_string@0x657760 (out buf = 8*len) <-
-	//        build_url_and_submit_request@0x63e3f0 ("?EPASK=exp:mod:key"). grill wave 3 NW-C2, MATCHING.]
+	//        edit-widget vtable +0x38 CWnd_BuildFormFieldQueryString@0x657760 (out buf = 8*len) <-
+	//        UI_BuildURLAndSubmitRequest@0x63e3f0 ("?EPASK=exp:mod:key"). grill wave 3 NW-C2, MATCHING.]
 	// Mirror onnw/protocol/crypto.py::epask_encrypt:
 	//   step1 = nwu_encrypt(plaintext, key)
 	//   step2 = epask_modexp_encrypt(step1, exp, mod)

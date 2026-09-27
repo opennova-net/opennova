@@ -60,8 +60,8 @@ public:
 	int get_mission_time_fixed24() const;
 
 	// --- the weather-home reads --------------------------------------------
-	// Env_QuakeTicks, Env_RainPctCurrent / 65536, Env_OvercastBlend / 65536,
-	// Env_PrecipitationKind (0 rain, 1 snow), and the > 48 drop gate — read
+	// g_EnvQuakeTicks, g_EnvRainPctCurrent / 65536, g_EnvOvercastBlend / 65536,
+	// g_EnvPrecipitationKind (0 rain, 1 snow), and the > 48 drop gate — read
 	// through the bound weather (0 / clear without one).
 	int get_quake_ticks() const;
 	float get_rain_current() const;
@@ -145,8 +145,8 @@ public:
 	// The two particle tints the effect world refreshes every tick from the
 	// environment, as per-channel factors where retail byte 128 = 1.0:
 	// AMBIENTCOLOR (and any blend-mode-0 graphic) draws through
-	// Env_TerrainLightCombined; everything else through the modulator block
-	// doubled and saturated at 255 (retail render_emitter_effect @ 0x5f70c0
+	// g_EnvTerrainLightCombined; everything else through the modulator block
+	// doubled and saturated at 255 (retail Render_EmitterEffect @ 0x5f70c0
 	//  (world+0x3E8 / +0x3F0); CParticleEmitter_AdvanceFrame @ 0x5e6600..0x5e661c).
 	Vector3 get_particle_ambient_tint() const;
 	Vector3 get_particle_modulator_tint() const;

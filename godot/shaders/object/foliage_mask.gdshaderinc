@@ -16,7 +16,7 @@
 // Terrain_RenderWorldScene @ 0x5c953e..0x5c9567 (far wave:
 // MATCHTERRAIN subpass, then the wave with its masks), @ 0x5c9600..0x5c9647
 // (camera wave); Terrain_RenderSectorEntitiesBySide @ 0x5c7ddf..0x5c7f11
-// (masks) before render_sector_entity @ 0x5c7ffc.
+// (masks) before Render_SectorEntity @ 0x5c7ffc.
 global uniform sampler2D opennova_foliage_mask_depth;
 global uniform bool opennova_foliage_mask_active;
 global uniform vec3 opennova_foliage_mask_eye;

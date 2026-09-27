@@ -51,7 +51,7 @@ constexpr uint32_t kDepthspinColor = 0xFF16476Bu;
 // the compring band reads ~0.76 alpha over sky).
 constexpr uint32_t kBackingColor = 0xC0000000u;
 // Special-bank icon quads are a fixed 6px half-extent, resolution-independent
-// [orig: draw_billboard_decal size_override = 6.0 @0x5be297; floor 6.0
+// [orig: Minimap_DrawBillboardDecal size_override = 6.0 @0x5be297; floor 6.0
 // @0x597666]
 constexpr float kSpecialIconHalfPx = 6.0f;
 // Compass ring spans the map radius x1.25 [orig: flt_7C6F18 @0x59c9df]
@@ -59,7 +59,7 @@ constexpr float kCompassScale = 1.25f;
 // Retail samples only the centered 90% of COMPRING. Cropping five percent
 // from each edge removes authored transparent padding, so the visible ring
 // reaches 1/0.9 farther than a full-texture sample on the same quad.
-// [orig: draw_compass_indicator @0x59ca8a — UV center 0.5 +/-
+// [orig: HUD_DrawCompassIndicator @0x59ca8a — UV center 0.5 +/-
 //  flt_7D93A8 (0.45)]
 constexpr float kCompassUvMin = 0.05f;
 constexpr float kCompassUvMax = 0.95f;
@@ -97,12 +97,12 @@ constexpr float kDiscInsetDesignPx = 2.0f;
 // TSDicon.tga is a 30-cell vertical strip of square icon cells. Retail
 // uploads the source at its authored resolution (stock JO ships 16x480,
 // JOTAC's RevX02 authors 64x1920), box-generates its mip chain, and
-// render_tiled_image_strip derives the half-texel inset from the loaded
+// Render_TiledImageStrip derives the half-texel inset from the loaded
 // tile's PHYSICAL dimensions — so the input carries the device-measured
 // size (HudMinimapInput::icon_strip_*). The badges commonly draw near the
 // 16px mip level.
 // [orig: Texture_LoadFromFile_0 @0x59e060 -> GTexture_CreateFromPixelData_0
-//  @0x6876c0; render_tiled_image_strip @0x67b540 — uv_half_texel =
+//  @0x6876c0; Render_TiledImageStrip @0x67b540 — uv_half_texel =
 //  0.5 / (double)tile_dim]
 constexpr int kIconStripCells = 30;
 // WPIndctr.tga is a 4-cell vertical strip: 0 up-triangle (waypoint above),
@@ -166,7 +166,7 @@ struct MapView {
 	float rect_h = 0.0f;
 	// Modes 2/3 clip to the view RECT — the circular stencil belongs to the
 	// corner spinmap alone (retail's fullscreen/window map is rectangular;
-	// the box clip is clip_triangle_and_emit_vertices @0x688e30).
+	// the box clip is Vertex_ClipTriangleAndEmitVertices @0x688e30).
 	bool rect_clip = false;
 	float px_x1 = 0.0f;
 	float px_y1 = 0.0f;
@@ -178,7 +178,7 @@ struct MapView {
 	// The pre-fold view angle (heading or the modes-2/3 north-up base, plus
 	// the flip term). Marker sprites rotate relative to THIS, not the player
 	// heading — on the north-up map a blip's facing must stay world-stable.
-	// [orig: draw_minimap_blip's angle rides the same map transform the view
+	// [orig: Minimap_DrawBlip's angle rides the same map transform the view
 	//  set up @0x607ac1..0x607b13]
 	uint32_t base_angle_bam = 0;
 };
@@ -186,7 +186,7 @@ struct MapView {
 // The authored rect through the hudpos design-space scaler, then the retail
 // transform: screen centers truncated to ints, scale = zoom / (width * 200),
 // rotation = heading (+180 on the mission attrib) - 90 degrees, folded to
-// BAM16. [orig: HUD_DrawMapOverlay @0x5a5f40 setup + render_terrain_decal
+// BAM16. [orig: HUD_DrawMapOverlay @0x5a5f40 setup + Render_TerrainDecal
 // tail @0x607ac1..0x607b13 (the live twin of MapView_SetTransform @0x607130)]
 MapView make_view(const HudMinimapInput &input) {
 	MapView view;
@@ -247,7 +247,7 @@ MapView make_view(const HudMinimapInput &input) {
 	uint32_t angle_bam = input.map_mode != 0
 			? 0x40000000u
 			: static_cast<uint32_t>(input.player_heading_bam);
-	if (input.flip_180) angle_bam += 0x80000000u; // [orig: g_mapYaw180 @0x2723EB0]
+	if (input.flip_180) angle_bam += 0x80000000u; // [orig: g_MapYaw180 @0x2723EB0]
 	view.base_angle_bam = angle_bam;
 	angle_bam -= 0x40000000u; // [orig: MapView_SetTransform @0x607144 sub esi, 40000000h]
 	const double rad = static_cast<double>(angle_bam >> 16) * kBam16ToRadians;
@@ -372,7 +372,7 @@ void marker_uv(const HudMinimapInput &input, uint8_t icon, float &u0,
 	// tile's stored PHYSICAL dimensions. The right and bottom coordinates
 	// intentionally reach half a texel past the cell; the device's clamp
 	// sampler holds the final edge texel.
-	// [orig: render_tiled_image_strip @0x67b540 — 0.5 / tile_dim insets,
+	// [orig: Render_TiledImageStrip @0x67b540 — 0.5 / tile_dim insets,
 	//  uv_right = w/w + 0.5/w, rows in source pixels]
 	const float strip_w = std::max(1.0f, input.icon_strip_w_px);
 	const float strip_h = std::max(1.0f, input.icon_strip_h_px);
@@ -386,7 +386,7 @@ void marker_uv(const HudMinimapInput &input, uint8_t icon, float &u0,
 // Ordinary TSDicon blips submit the raw team color to the strip renderer,
 // whose texture stage is MODULATE2X. Canvas modulates only once, so fold the
 // missing output stage into the diffuse RGB. Alpha is not doubled.
-// [orig: draw_minimap_blip @0x597f48..0x597f73 ->
+// [orig: Minimap_DrawBlip @0x597f48..0x597f73 ->
 //  Render_DrawIconStripCell_Debug @0x67bae0; TSS MODULATE2X]
 uint32_t marker_modulate2x_color(uint32_t argb) {
 	const auto doubled = [](uint32_t channel) {
@@ -451,10 +451,10 @@ bool clip_map_segment(const MapView &view, float &x0, float &y0,
 
 // The footprint draw submits the entity-team-color fills clipped by the map
 // stencil. Retail also builds 0x80000000 boundary vertices inside
-// render_collision_wireframe, but completed-pass captures show those lines
+// Render_CollisionWireframe, but completed-pass captures show those lines
 // contribute no visible stroke; submitting them through Godot's ordinary
 // alpha line pass produced the black outlines absent from retail.
-// [orig: render_collision_wireframe @0x596800; flush @0x596780]
+// [orig: Render_CollisionWireframe @0x596800; flush @0x596780]
 void emit_footprint(const MapView &view, const HudMinimapInput &input,
 		const HudMinimapFootprint &footprint, Polygon &poly, Polygon &scratch,
 		HudMapPass &pass) {
@@ -498,7 +498,7 @@ void emit_footprint(const MapView &view, const HudMinimapInput &input,
 }
 
 // The 64-frame triangle color pulse toward white
-// [orig: render_minimap_slot_blip @0x5be3f4 — phase=((frame-8)&0x3F,
+// [orig: Render_MinimapSlotBlip @0x5be3f4 — phase=((frame-8)&0x3F,
 // fold >0x20 to 63-phase), channel += phase*(255-channel)>>5].
 uint32_t pulse_color(uint32_t argb, int ticks) {
 	uint32_t phase = static_cast<uint32_t>(ticks - 8) & 0x3Fu;
@@ -686,11 +686,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// enable_fog_pass=1; bit9 only selects the adjacent use_alt_blend argument.
 	// [orig: HUD_DrawMapOverlay tests bit9 @0x5a6670, pushes enable_fog_pass=1
 	//  @0x5a6677, pushes use_alt_blend=1/0 @0x5a6684/@0x5a6696, then calls
-	//  render_terrain_decal @0x5a66a5; its water leg gates only on that
+	//  Render_TerrainDecal @0x5a66a5; its water leg gates only on that
 	//  enable_fog_pass value and generated vertices @0x6079DC. Bound =
 	//  diag*0.8*scale, tile snap 0x2000000 Q16, row index
 	//  (-0x1000000 - y)>>25, sector =
-	//  Terrain_SectorGrid[16*(row&0xF)+(col&0xF)] - 1]
+	//  g_TerrainSectorGrid[16*(row&0xF)+(col&0xF)] - 1]
 	if (input.terrain.present &&
 			input.terrain.sector_count > 0 && input.terrain.sector_rows > 0) {
 		const float player_x = static_cast<float>(input.player_x) / io::kFp16One;
@@ -801,7 +801,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	//  19660800*(center/19660800 - half) with the unk_960000 column fold;
 	//  letters HUD_FormatGridCoordinate(line_x - origin) / rows "%d" from
 	//  (start - origin)/19660800 - 1, both HUD_DrawTextCentered_HalfBright
-	//  on g_hudLabelFontLarge; rule color unk_FFFF7F + ctx[+0x38] alpha
+	//  on g_HUDLabelFontLarge; rule color unk_FFFF7F + ctx[+0x38] alpha
 	//  @0x5a6722, label color unk_FFFF7F + ctx[+0x40] alpha @0x5a68a9 —
 	//  HUD_BuildMapOverlayView seeds the quartet (alpha, +0x38, +0x3C,
 	//  +0x40) = 128/64/96/128 for modes 1-3 and 255/128/255/255 for the
@@ -886,7 +886,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		// [orig: @0x5a5f40 grid-branch tail — "(%s,%d)" from
 		//  HUD_FormatGridCoordinate(ctx+4 - origin - unk_960000) and the
 		//  row - 1 (+1 above zero) fold, HUD_DrawTextCentered_HalfBright on
-		//  g_hudLabelFontLarge at (x - 50, y - 25), unk_FFFF7F + ctx alpha]
+		//  g_HUDLabelFontLarge at (x - 50, y - 25), unk_FFFF7F + ctx alpha]
 		{
 			char column[8] = {};
 			format_grid_column(column, sizeof(column),
@@ -945,7 +945,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			const HudMinimapMarker &marker = *keyed.m;
 			const bool special = (marker.flags & 0x40u) != 0;
 			// Regular markers render from the live entity only.
-			// [orig: render_minimap_slot_blip @0x5be4b8 entity[538] gate]
+			// [orig: Render_MinimapSlotBlip @0x5be4b8 entity[538] gate]
 			if (!special && !marker.entity_known) continue;
 			// Special slots keep their handle after expiry (the bank floors
 			// the lifetime at zero) but the render walk skips them.
@@ -956,7 +956,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			// never draw an icon quad — their OOBJ occlusion ground-slice
 			// polygons draw instead, clipped like the terrain tiles.
 			// [orig: the Building leg @0x597a84 ->
-			//  render_collision_wireframe @0x596800]
+			//  Render_CollisionWireframe @0x596800]
 			if (!special && marker.footprint != 0) {
 				const HudMinimapFootprint *footprint = nullptr;
 				for (const HudMinimapFootprint *candidate : footprint_index_) {
@@ -980,7 +980,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				// blip: the rect (px - 3.5, py - 3.5)..(px + 4.5, py + 4.5) in
 				// map pixels, through the shared white-field + two-red-bars
 				// primitive at the overlay pass's opaque alpha
-				// [orig: draw_entity_labels_and_markers @0x5a49e0 — the
+				// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 — the
 				//  AnimMap_IsSlotActive(playerClass, 8) test @0x5a4ab3, the
 				//  rect @0x5a4cd6..0x5a4d24 (flt_7C44B8 = 4.0, flt_7C691C = 4.5,
 				//  flt_7C3B94 = 0.5), HUD_DrawMedicCrossQuad @0x5a4d40, then
@@ -1009,13 +1009,13 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			if (special && (marker.icon == 253 || marker.icon == 254)) {
 				// Pulse markers: the MAIN ring sized by the slot height,
 				// colors pulsing toward white; ring colors submit OPAQUE
-				// (minimap_draw_ring_blip ORs 0xFF000000). The secondary
+				// (Minimap_DrawRingBlip ORs 0xFF000000). The secondary
 				// rings draw AFTER retail zeroes the slot z, so their radii
 				// are just the min args at the marker CENTER — icon 254 =
 				// three tiny yellow rings (2/1/0 px), icon 253 = one 1-px
 				// ring in the pulse color. (The 49152/65536 folds multiply
 				// the already-zeroed z — dead code, not a shrink stack.)
-				// [orig: render_minimap_slot_blip 254 arm @0x5be337,
+				// [orig: Render_MinimapSlotBlip 254 arm @0x5be337,
 				//  z := 0 @0x5be34f, rings @0x5be357/@0x5be393/@0x5be3ca;
 				//  253 arm @0x5be46a, z := 0 @0x5be47a, ring @0x5be482;
 				//  radius = max(arg, projected z) @0x597357..0x597366,
@@ -1066,7 +1066,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			sprite.center_y = my;
 			if (special) {
 				// Fixed 6px half-extent, unrotated.
-				// [orig: draw_billboard_decal call @0x5be297, angle 0]
+				// [orig: Minimap_DrawBillboardDecal call @0x5be297, angle 0]
 				sprite.half_w = kSpecialIconHalfPx;
 				sprite.half_h = kSpecialIconHalfPx;
 				sprite.rotation_rad = 0.0f;
@@ -1078,7 +1078,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				// upright badges (armory, non-vehicle EWEAPs, cells 6/2,
 				// dead persons, ...) hold angle 0.
 				// (witness at world::minimap_blip_draw_policy;
-				//  [orig: draw_minimap_blip @0x597890 branch table])
+				//  [orig: Minimap_DrawBlip @0x597890 branch table])
 				float half_x_wu;
 				float half_y_wu;
 				if (marker.half_x_q16 > 0 || marker.half_y_q16 > 0) {
@@ -1117,7 +1117,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			// Special billboards ignore the slot alpha: retail's caller
 			// passes drawMode 0xFF as the final alpha, so table entries
 			// with authored 0x7F alpha still draw opaque.
-			// [orig: draw_billboard_decal @0x597775..0x59778f; drawMode
+			// [orig: Minimap_DrawBillboardDecal @0x597775..0x59778f; drawMode
 			//  0xFF pushed @0x5a6d20/@0x5a5a02]
 			sprite.color = marker_modulate2x_color(
 					special ? (marker.color | 0xFF000000u) : marker.color);
@@ -1236,7 +1236,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				// [orig: inset setup @0x5a64c0..0x5a650d; slot sum/store
 				//  @0x5995c7..0x599616 (ctx[17]/[18]); label draw
 				//  @0x5a7a51..0x5a7ab5 ->
-				//  HUD_DrawTextCentered_HalfBright(g_hudLabelFontBold)]
+				//  HUD_DrawTextCentered_HalfBright(g_HUDLabelFontBold)]
 				const int pointer_span_px = static_cast<int>(scale_axis(
 						kWaypointPointerSpanDesignPx, input.surface_h,
 						kDesignHeight));
@@ -1268,7 +1268,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// nudged -8/+8 design px for above/below, in the raw state color.
 	// [orig: bit20 leg @0x5a79b1..0x5a7a10 — y_base = y1 - rect_h/32, half
 	//  10 & shift 8 through Viewport_ScaleToVirtualCoords,
-	//  CEffect_Begin_Debug(WPIndctr handle, rect, g_waypointAltitudeColor, extra)]
+	//  CEffect_Begin_Debug(WPIndctr handle, rect, g_WaypointAltitudeColor, extra)]
 	if (input.waypoint_present && (flags & 0x100000u)) {
 		const float sx = view.rect_w > 0.0f ? view.rect_w /
 				std::max(1.0f, input.rect_x2 - input.rect_x1) : 1.0f;
@@ -1329,7 +1329,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// north, spanning the rect x1.25. The gate needs bit9 AND bit6 — the
 	// big-map masks carry neither.
 	// [orig: the @0x5a5f40 walk — (ctx & 0x200) && (ctx & 0x40) around
-	//  draw_compass_indicator @0x59c900; retail rotation
+	//  HUD_DrawCompassIndicator @0x59c900; retail rotation
 	//  (0x3FFFFFC0 - yaw) >> 16, size x flt_7C6F18 = 1.25]. The draw list is
 	//  consumed in a +Y-down canvas, whose positive visual rotation is the
 	//  opposite of retail's matrix convention, so negate that BAM delta here.

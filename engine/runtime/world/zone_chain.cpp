@@ -231,7 +231,7 @@ void ZoneSystem::latch_control() {
 }
 
 uint8_t zone_chain_zone_info_byte(const ZoneChain &chain, const Entity &zone) {
-    // [orig: serialize_entity_pool_to_packet_0 @0x503940 (the ZoneSlotChain_GetZoneInfo
+    // [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940 (the ZoneSlotChain_GetZoneInfo
     //  call @0x503EEB) — the registered entry's zoneNumber +
     //  32 * rank; rank parallels chain.zones (ZoneSlotChain_AssignZoneRanks @0x4A27F0).
     //  An unregistered numbered entity carries rank 0 (bare zone number).]

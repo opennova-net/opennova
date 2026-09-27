@@ -106,7 +106,7 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	{ "environment_nodes", FrameStats::WORLD_ENV_NODES, &GameWorld::leg_environment_nodes, kLegNone },
 	// Terrain samples the viewport camera directly and tracks the visible
 	// terrain bounds the water leg's g_WaterActive test reads, so it runs
-	// first: in the original frame terrain_setup_view_and_lighting precedes
+	// first: in the original frame Terrain_SetupViewAndLighting precedes
 	// the reflection prerender and the water pass draws after the terrain
 	// pass (the witnessed order is cited at the engine's render frame,
 	// docs/render/render-order-re.md); the water noise the terrain binds is
@@ -625,7 +625,7 @@ void GameWorld::render_foliage_frame() {
 		// The scene core's thermal byte is the environment's world gate
 		// (the engine foliage runtime carries the witness).
 		dispatcher_->set_thermal_view(env_ != nullptr && env_->state().thermal_view());
-		// Env_WaterHeightFixed (0 = no water): the detail passes, the MODEL
+		// g_EnvWaterHeightFixed (0 = no water): the detail passes, the MODEL
 		// masks and their person consumers split by it.
 		const float water_height = water_ != nullptr ? water_->get_water_height() : 0.0f;
 		dispatcher_->set_water_height(water_height);
@@ -654,7 +654,7 @@ bool GameWorld::drive_network_frame() {
 
 // The precipitation presenter leg: the kernel re-floors the drop pool for
 // this frame's camera and the renderer compiles the streaks (retail
-// render_weather_trail_particles @ 0x5dee10 -- after the camera-side particle
+// Render_WeatherTrailParticles @ 0x5dee10 -- after the camera-side particle
 // pass, before the foliage billboards).
 void GameWorld::render_precipitation_frame() {
 	MissionRoot *runtime = get_runtime();
@@ -754,7 +754,7 @@ void GameWorld::render_scene_overlay_frame() {
 }
 
 // The NVG laser beams, the tail's first slot (retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0,
-// called @ 0x5c9695): the local view's g_NVGActive and g_camera_mode gate
+// called @ 0x5c9695): the local view's g_NVGActive and g_CameraMode gate
 // every beam (the defaults with no local player or for a spectator), the
 // frame's render camera builds the ribbons and the frame's scene fog folds
 // into them; the entity presenter's third-person guns carry the action
@@ -817,7 +817,7 @@ void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) 
 // scene tail with the SELFLUM combine, ONE / ONE, fogged to black under the
 // frame's fog, depth ALWAYS (submit 0x110), so their meshes leave every
 // camera (the Q3 redraw reads the node, not the layers). The glint leg runs
-// only while the mission water height is nonzero (retail update_sun_glare
+// only while the mission water height is nonzero (retail Environment_UpdateSunGlare
 // @ 0x5c96c0 behind the test @ 0x5c96b5) and draws under the frame's own
 // light scale; the glare draws last, under the forced 0xFF404040 modulator
 // (light scale 1.0, retail @ 0x5c96fd..0x5c9722). The glare's own gate is
@@ -1045,7 +1045,7 @@ void GameWorld::render_environment_nodes_frame() {
 // (ex-self-clocked Water._process), under retail's per-frame water-active
 // test: the terrain leg just tracked the visible terrain bounds, and the
 // occlusion frame's Blink water verdict is last frame's, as retail reads it
-// [orig: terrain_setup_view_and_lighting @ 0x60fe40].
+// [orig: Terrain_SetupViewAndLighting @ 0x60fe40].
 void GameWorld::render_water_frame() {
 	if (water_ == nullptr) {
 		return;
@@ -1184,7 +1184,7 @@ void GameWorld::render_sun_veil_frame() {
 // frame: render_light_frame pushed this frame's LightScene and light context
 // into the device, the material frame may have rebuilt the model subtrees
 // the capture channels are stamped on, and slot priority plus the capture
-// poses are camera-relative) [orig: render_shadow_pass @ 0x5d7b70 once per
+// poses are camera-relative) [orig: Render_ShadowPass @ 0x5d7b70 once per
 // main scene frame].
 void GameWorld::render_slot_shadow_frame() {
 	if (slot_shadow_ != nullptr) {
@@ -1195,7 +1195,7 @@ void GameWorld::render_slot_shadow_frame() {
 // Retail refreshes TexCubeEnvironment during the offscreen preparation leg:
 // all six 256-square faces together initially/when forced and every 128
 // render frames, centered on the simulation player and clamped above
-// terrain. [orig: update_environment_cubemap @ 0x6106a0].
+// terrain. [orig: EnvCube_Update @ 0x6106a0].
 void GameWorld::render_environment_cube_frame() {
 	if (!world_ready_ || environment_cube_ == nullptr) {
 		return;
@@ -1398,7 +1398,7 @@ void GameWorld::render_light_frame() {
 //
 // Retail re-draws each terrain batch once more per passing pool light,
 // additively, through the two-stage projected-texture pass
-// [orig: render_terrain_sector_batch @0x6092A0, the per-light else-arm
+// [orig: Terrain_RenderSectorBatch @0x6092A0, the per-light else-arm
 // @0x609870..0x6098BC -> Light_SetupTerrainProjectedPass @0x5AA830]. The
 // collect (<= 16 per batch, both light groups cleared, the authored
 // terrain-disable flag), the projection contract and the pixel constants are
@@ -1537,7 +1537,7 @@ void GameWorld::stop_water_render_stats() {
 // The marched iris-exposure feed (D-RLIT-2): three camera-ray samples from
 // the sim each render frame, consumed by Weather's exposure re-target on its
 // next tick [orig: Environment_ApplyFogAndAmbient @ 0x57e512 ->
-// compute_ambient_light_along_direction @ 0x5c7a00 -- retail re-targets from
+// Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00 -- retail re-targets from
 // the local player's view every render pass]. The render-occlusion frame it
 // used to share a section with (blink letter gates + the section-mask/portal
 // apply) is OcclusionFrame (godot/src/world/occlusion_frame.cpp); the iris
@@ -1570,13 +1570,13 @@ void GameWorld::restore_idle_frame_clear_color() {
 // horizon-blended skyfog while the eye is strictly above the water, the lit
 // water color at or below it [orig: Render_ProcessMainSceneFrame
 // @ 0x5ca771..0x5ca792 - clear color = thermal ? 0x808080 : cam above water ?
-// skyfog[0] : Env_WaterColorLit, the `jle` inclusive of the waterline; no
+// skyfog[0] : g_EnvWaterColorLit, the `jle` inclusive of the waterline; no
 // blink letter reaches the beauty clear]. The selection is the engine's
 // frame_clear_color_for, and the thermal latch reaches it through
 // MissionEnvironment::set_thermal_view, whose generation bump re-runs this
 // leg. Every branch serves RENDER-SPACE (x2-gained) colors, consumed
 // VERBATIM by the modulate2x-path Clear this renderer reproduces (D-RMAT-7):
-// above water the post-blend DOUBLED skyfog, underwater Env_WaterColorLit =
+// above water the post-blend DOUBLED skyfog, underwater g_EnvWaterColorLit =
 // water x light >> 7; the halving branch [orig: @ 0x67715d] is the
 // non-modulate2x fallback with no Godot analog. The ClearColor Environment
 // must stay BG_COLOR with ambient disabled - BG_SKY with no sky renders black

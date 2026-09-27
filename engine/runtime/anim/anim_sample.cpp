@@ -240,7 +240,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
         // over the BadBone.position field, which is a lossy export (roughly half the .bad corpus
         // triplicates X into all three slots, destroying Y/Z). The original engine likewise sources
         // bone pivots from the model, not the .bad. [orig: BoneAnim_BuildWorldMatrices @0x40c400 /
-        // build_world_bone_matrices @0x40c770 read the model bone table (modelDef+56); the .bad
+        // Bone_BuildWorldMatrices @0x40c770 read the model bone table (modelDef+56); the .bad
         // supplies only rotations via AnimChannel_ComputeBoneMatrices @0x410da0.]
         const Vec3 origin = use_shared
                 ? shared_rest_origins[b]

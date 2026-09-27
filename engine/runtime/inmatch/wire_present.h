@@ -5,7 +5,7 @@
 // handles encode the original entity pool in their high nibble; that pool —
 // not a decoded PF_KIND, which a joiner intentionally lacks (-1) — drives the
 // retail item-effect gates. [orig: pools 0/1/2/3 = organic/item/building/
-// marker, the g_pool_list walk bound @0x431910; kind families per
+// marker, the g_PoolList walk bound @0x431910; kind families per
 // Entity_SpawnFromBMSRecord's record taxonomy]
 
 #include <cstdint>

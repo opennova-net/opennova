@@ -2,8 +2,8 @@
 // emplacement seat frame from the carrier model's authored userpoint posed
 // through its own PANM — the sim-parse counterpart of the shell binding's
 // model-bound resolver. [orig: UseGun Entity_AttachToBoneAndUpdateTransform
-// @ 0x5463d0; the addeweap attachment frame build_bone_attachment_matrix
-// @ 0x56C630 over build_direction_look_at_matrix @ 0x612C90]
+// @ 0x5463d0; the addeweap attachment frame Bone_BuildAttachmentMatrix
+// @ 0x56C630 over Math_BuildDirectionLookAtMatrix @ 0x612C90]
 #pragma once
 
 #include <formats/threedi/threedi_3di3.h>

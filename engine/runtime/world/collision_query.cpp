@@ -107,7 +107,7 @@ bool collision_test_blink(const CollisionTargetView &target, const CollisionPoin
 // Ray record + segment-vs-solid clip. [orig: Entity_RaycastCollisionModel @ 0x413060]
 // ----------------------------------------------------------------------------
 void CollisionRay::refresh() {
-    // [orig: the prologue of raycast_entity_collision @ 0x4137c1-0x413890 and the
+    // [orig: the prologue of Entity_RaycastCollision @ 0x4137c1-0x413890 and the
     // 0x413060 hit tail @ 0x41370c — midpoint/half extents + float-normalized dir]
     int32_t d[3];
     for (int i = 0; i < 3; ++i) {

@@ -16,7 +16,7 @@ namespace opennova::inmatch {
 // zeroes it for its own local slot, pushes it through the eleven-dword ring
 // (cursor aliasing included), and applies the min/max-ping strike policy —
 // strictly over 20 consecutive violations punts the player with chat code
-// 36 "minping" / 37 "maxping". `in_session` is g_napi_np_ctx.is_in_session;
+// 36 "minping" / 37 "maxping". `in_session` is g_NapiNPCtx.is_in_session;
 // the local slot and a joiner whose DB join tag is nonzero (NetPlayer+216 =
 // NapiNetConfig::db; stock clients send 0) are exempt from the policy.
 // [orig: NapiNPServerMsg_HandlePingResponse @0x515070 — measure @0x515116,
@@ -36,7 +36,7 @@ void Server_StoreClientQuality(NapiNPConnection &conn, uint8_t reported);
 // in-session / no pre-round / no spawn gate, a persistent slot cursor walks
 // the roster and re-sends field 0x0400 for every active, dirty, connected
 // slot — at most eight per second, the cursor carrying over. Mask 128.
-// [orig: Server_TickUpdate @0x51DE79..0x51DF4A; g_weapon_broadcast_slot_cursor]
+// [orig: Server_TickUpdate @0x51DE79..0x51DF4A; g_WeaponBroadcastSlotCursor]
 void Server_EmitQualityResends(NapiNPServerCtx &ctx, const world::World &world);
 
 // The host CNetQuality SEND window: every 62 frames while in session, sample

@@ -19,17 +19,17 @@ this record.
 | Component | Verdict | Evidence |
 |---|---|---|
 | Shader-tag registry (46 tags: 24 FF built-ins + shipped file effects + #UV twins) | MATCHING | table arithmetic + flag authorship witnessed at `@ 0x5af790`/`@ 0x5ae690`; `renderer_material_classify` + `renderer_state_vectors` ctests |
-| Tag resolution + unknown fallback | MATCHING | case-insensitive lookup `[orig: HLSLEffect_FindByName @ 0x5ade70]`; unknown → effect 0 = FF_ST_OP `[orig: convert_material_definition @ 0x5b0670]`; our unknown-family path composes the same single-texture lit-opaque look |
+| Tag resolution + unknown fallback | MATCHING | case-insensitive lookup `[orig: HLSLEffect_FindByName @ 0x5ade70]`; unknown → effect 0 = FF_ST_OP `[orig: Material_ConvertDefinition @ 0x5b0670]`; our unknown-family path composes the same single-texture lit-opaque look |
 | Material flag byte → device state (alpha test / invert / two-sided) | MATCHING (after D-RMAT-1/-3 fixes) | `[orig: CRenderBatchQueue_FlushBatches @ 0x5da3a9..0x5da401; CGfxDevice_SetAlphaTestRef @ 0x6770a0]`; `renderer_state_vectors` golden |
 | Blend classification per tag (Opaque/AlphaBlend/Additive) | MATCHING | `RSAlphaMode` pass states per shipped `.fx` (`_FFP.fx` `BLEND_NONE/ALPHA/ADD` = FALSE,ONE,ZERO / SRCALPHA,INVSRCALPHA / ONE,ONE; Glass/SkGlass/Tracer = ONE,ONE only); Multiplicative (DESTCOLOR,SRCCOLOR) appears only in non-NORMAL techniques and no registry row claims it |
 | Depth policy for blended materials | MATCHING | blended FF variants force ZMODE_NOWRITE across technique slots `[orig: @ 0x5afc92..0x5afcaa]`; applied as `D3DRS_ZWRITEENABLE=0` `[orig: @ 0x5da320]` — mirrored by the typed descriptor and checked-in `depth_draw_never` policies for non-opaque, non-alpha-test techniques |
 | Per-effect capability/sort flag words (file effects) | MATCHING (after D-RMAT-4 fixes) | the probe REPLICATED over the shipped localres text (REN-4): booleans are unions over ALL techniques `[orig: technique loop @ 0x5ae690]`; 14/19 tags matched the OED dump, 5 drift rows corrected on the renderer descriptor table (catalog below); `renderer_material_classify` pins the corrected words |
-| Object lighting math | MATCHING (after D-RMAT-5 fix, REN-5; per-vertex saturation and the saturated emissives FIXED 2026-09-24, "Port the object combiner rules the render-parity review found diverging") | checked-in technique resources implement the witnessed FF model: `tex × sat(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L) + points) × 2`, summed and saturated PER VERTEX and Gouraud-interpolated (Fixed, FixedDetail, FixedSkinned, Flag); SELFLUM = `tex × sat(SelfLumColor × ColorSrcGlobalGain) × 2`; FFP_GLASS = `cube × sat(ReflectColor × ColorSrcGlobalGain) × 2` `[orig: _FFP.fx TBoringFFP / SELFLUM block; Glass.fx TGlassFFP; Flag.fx vsFlag; SkBasic.fx vsSkinBasic; gain bind apply_shader_parameters @ 0x58E050..0x58E06A]`, on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` pins the typed descriptors, GUT `shader_resource_validation_test` loads all 132 object shader entry points (128 generated + four postmultiply auxiliaries) and `object_shader_response_test` rasters the SELFLUM, Gouraud, CLIP and sampler rules (the transitive-source golden was retired 2026-09-21) |
+| Object lighting math | MATCHING (after D-RMAT-5 fix, REN-5; per-vertex saturation and the saturated emissives FIXED 2026-09-24, "Port the object combiner rules the render-parity review found diverging") | checked-in technique resources implement the witnessed FF model: `tex × sat(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L) + points) × 2`, summed and saturated PER VERTEX and Gouraud-interpolated (Fixed, FixedDetail, FixedSkinned, Flag); SELFLUM = `tex × sat(SelfLumColor × ColorSrcGlobalGain) × 2`; FFP_GLASS = `cube × sat(ReflectColor × ColorSrcGlobalGain) × 2` `[orig: _FFP.fx TBoringFFP / SELFLUM block; Glass.fx TGlassFFP; Flag.fx vsFlag; SkBasic.fx vsSkinBasic; gain bind Material_ApplyShaderParameters @ 0x58E050..0x58E06A]`, on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` pins the typed descriptors, GUT `shader_resource_validation_test` loads all 132 object shader entry points (128 generated + four postmultiply auxiliaries) and `object_shader_response_test` rasters the SELFLUM, Gouraud, CLIP and sampler rules (the transitive-source golden was retired 2026-09-21) |
 | Technique-class pass system (6 classes) | MATCHING for the locked highest-quality path | all 57 typed declarations and 138 total pass declarations are decoded and pinned in `retail_effect_inventory.json`; NORMAL maps to 24 runtime techniques, CLIP to the live reflection plane/fallback rules, PROJSHAD to the twelve slot captures plus terrain-page silhouettes, MATCHTERRAIN to the skinned stance/page fold, and GLOW to typed LUM-copy plus Glass's rotated specular in the compositor-owned focused Q3 target. The exact PROJSHAD state audit preserves `_FFP` material blending, forces all 15 shader declarations opaque, and admits no fallback for tracer/flag/glass; the portable terrain raster also honors CCW culling, z writes, and skinned identical-matrix collapse. DEPTHMASK is correctly absent because its sole spot-projector producer is caller-less. `auxiliary_technique_validation.json` pins every disposition and D3D12 raster mode; `FrameFx` reproduces the Q3 target and FrameFX draw sequence directly. CLIP bodies re-witnessed 2026-09-24 (§2026-09-24 rendering parity pass): the `_FFP` families draw `TBoringFFPClip` (Diffuse1 only, FF lighting without point lights or SELFLUM, alpha `Diffuse1.a × AlphaGenValue` tested GREATER 128, BLEND_ALPHA fogged to 0x7F7F7F), ported as `obj_evaluate_ffp_clip_surface`; the VS effects with a CLIP block (Dot3DiffT, Dot3DiffO, BDiffT2, PhongT) draw three fixed-function DOT3 passes, ported as `obj_evaluate_dot3_clip_surface` (`OBJ_CLIP_DOT3`, "Draw the fixed-function DOT3 CLIP technique for VS effects in reflections"); the mirror arms CLIP per draw, not per pass ("Arm the water mirror's CLIP technique per draw, as retail does"; [env-tod-re.md](../env/env-tod-re.md) #30) |
-| UV animation (MatTexCoord1) | MATCHING deterministic math, live full-matrix bridge; stochastic lifetime partial | `renderer::uv_anim` structurally ports `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]`; `ObjectData` now carries the complete row-vector 2×3 result into two shader `vec3` uniforms, preserving controlled set and shear as well as scroll/scale/rotation. Table/dispatch math is pinned by `renderer_state_vectors` section 4 and `renderer_material_eval`; retail's process-wide CRT RNG lifetime and cross-model submit/flush order remain D-3DI-2. Evaluated only for the `#UV` twins (2026-09-24, "Evaluate material parameters only where the effect reads them"): the MatTexCoord1 handle exists only under `TEX_UVXFORM` and `apply_shader_parameters` skips the call when it is zero (`@ 0x58DE4F..0x58DE56`), so non-`#UV` materials keep identity rows and draw no UV noise sample; unauthored types 0x12..0x1F / 0x22..0x2F write no row (memset-zero diagonal) `[orig: compute_uv_transform_matrix @ 0x5B1A27..0x5B1A2D, @ 0x5B1A84..0x5B1A86, @ 0x5B1C88..0x5B1C8B, @ 0x5B1CCD..0x5B1CD0]` |
-| Controlled flipbook | MATCHING for the witnessed fractional and discrete-selector branches | `[orig: apply_shader_parameters @ 0x58db80]` reads a signed CTRL value and keeps 32-bit `IMUL`'s low product before `SAR 16` when the adjacent state is zero; the retail image statically seeds `TEX_TEAM` and `TEX_CAMO1/2/3` state to one, selecting `value % frame_count`; `renderer_material_eval` pins exact generic `0x10000`/negative/wrap cases plus the RevX02 IndoArms selector `0/1/3 -> 0/1/1`. The time flipbook divides by the unsigned frame word, loader-rewritten 0 -> 1 `[orig: convert_material_definition @ 0x5B06F6..0x5B070A; apply_shader_parameters @ 0x58DBD8..0x58DBEC]`; types other than 0/1 keep frame zero (`@ 0x58DBF0..0x58DBF2`) (2026-09-24) |
-| RGB/alpha generators and point-light color | MATCHING deterministic/controlled math, live; stochastic lifetime partial | consumer-specific branches are preserved: RGB/light 113/114 `[orig: RgbGen_EvaluateColor @ 0x5b23d0]`, alpha 113 `[orig: AlphaGen_EvaluateValue @ 0x5b2320]`, and waveform fallback otherwise. The signed/wrapping evaluator and live point-light CTRL feed are pinned by `renderer_material_eval`; noise samples retain D-3DI-2's process-wide RNG/order gap. Routing (2026-09-24): an inactive style (no high nibble) gives AlphaGen 1.0 (`@ 0x5B2328`) and RgbGen zero (`@ 0x5B23D5` -> `@ 0x5B2506`); each RgbGen channel runs only when its emissive_type byte routes (1 -> ReflectColor, 2 -> SelfLumColor `[orig: convert_material_definition @ 0x5B059E..0x5B05B5]`) to a colour the effect reads (`@ 0x58DDE0..0x58DDF4`); AlphaGen runs for every effect (`@ 0x58DDA6`) and uploads only where AlphaGenValue exists (`@ 0x58DDAB`). Stock: every LUM row has emissive 2 and an active RgbGen; no row routes to ReflectColor |
-| Static colours | MATCHING (2026-09-24, "Evaluate material parameters only where the effect reads them") | each of the two static colours routes by its is_glass byte (1 -> ReflectColor, 2 -> SelfLumColor `[orig: convert_material_definition @ 0x5B0563..0x5B057B]`) and uploads (R,G,B)/255 with W forced to 1 (`[orig: apply_shader_parameters @ 0x58DD23..0x58DD83]`, `fld1 @ 0x58DD7D`) before the generators run; an unrouted ReflectColor keeps `_BaseInc.fx`'s 0.75 default. `renderer::material_static_runtime` / `eval_material_runtime` / `material_color_target`; ctest `renderer_material_eval`. The former Q3 glass copy read a colour the registry rejected and used a 0.7/0.8/0.9 placeholder; it now takes the routed ReflectColor |
+| UV animation (MatTexCoord1) | MATCHING deterministic math, live full-matrix bridge; stochastic lifetime partial | `renderer::uv_anim` structurally ports `[orig: Material_ComputeUVTransformMatrix @ 0x5b1990; CWaveformTable_WaveLookup @ 0x5de6b0]`; `ObjectData` now carries the complete row-vector 2×3 result into two shader `vec3` uniforms, preserving controlled set and shear as well as scroll/scale/rotation. Table/dispatch math is pinned by `renderer_state_vectors` section 4 and `renderer_material_eval`; retail's process-wide CRT RNG lifetime and cross-model submit/flush order remain D-3DI-2. Evaluated only for the `#UV` twins (2026-09-24, "Evaluate material parameters only where the effect reads them"): the MatTexCoord1 handle exists only under `TEX_UVXFORM` and `Material_ApplyShaderParameters` skips the call when it is zero (`@ 0x58DE4F..0x58DE56`), so non-`#UV` materials keep identity rows and draw no UV noise sample; unauthored types 0x12..0x1F / 0x22..0x2F write no row (memset-zero diagonal) `[orig: Material_ComputeUVTransformMatrix @ 0x5B1A27..0x5B1A2D, @ 0x5B1A84..0x5B1A86, @ 0x5B1C88..0x5B1C8B, @ 0x5B1CCD..0x5B1CD0]` |
+| Controlled flipbook | MATCHING for the witnessed fractional and discrete-selector branches | `[orig: Material_ApplyShaderParameters @ 0x58db80]` reads a signed CTRL value and keeps 32-bit `IMUL`'s low product before `SAR 16` when the adjacent state is zero; the retail image statically seeds `TEX_TEAM` and `TEX_CAMO1/2/3` state to one, selecting `value % frame_count`; `renderer_material_eval` pins exact generic `0x10000`/negative/wrap cases plus the RevX02 IndoArms selector `0/1/3 -> 0/1/1`. The time flipbook divides by the unsigned frame word, loader-rewritten 0 -> 1 `[orig: Material_ConvertDefinition @ 0x5B06F6..0x5B070A; Material_ApplyShaderParameters @ 0x58DBD8..0x58DBEC]`; types other than 0/1 keep frame zero (`@ 0x58DBF0..0x58DBF2`) (2026-09-24) |
+| RGB/alpha generators and point-light color | MATCHING deterministic/controlled math, live; stochastic lifetime partial | consumer-specific branches are preserved: RGB/light 113/114 `[orig: RgbGen_EvaluateColor @ 0x5b23d0]`, alpha 113 `[orig: AlphaGen_EvaluateValue @ 0x5b2320]`, and waveform fallback otherwise. The signed/wrapping evaluator and live point-light CTRL feed are pinned by `renderer_material_eval`; noise samples retain D-3DI-2's process-wide RNG/order gap. Routing (2026-09-24): an inactive style (no high nibble) gives AlphaGen 1.0 (`@ 0x5B2328`) and RgbGen zero (`@ 0x5B23D5` -> `@ 0x5B2506`); each RgbGen channel runs only when its emissive_type byte routes (1 -> ReflectColor, 2 -> SelfLumColor `[orig: Material_ConvertDefinition @ 0x5B059E..0x5B05B5]`) to a colour the effect reads (`@ 0x58DDE0..0x58DDF4`); AlphaGen runs for every effect (`@ 0x58DDA6`) and uploads only where AlphaGenValue exists (`@ 0x58DDAB`). Stock: every LUM row has emissive 2 and an active RgbGen; no row routes to ReflectColor |
+| Static colours | MATCHING (2026-09-24, "Evaluate material parameters only where the effect reads them") | each of the two static colours routes by its is_glass byte (1 -> ReflectColor, 2 -> SelfLumColor `[orig: Material_ConvertDefinition @ 0x5B0563..0x5B057B]`) and uploads (R,G,B)/255 with W forced to 1 (`[orig: Material_ApplyShaderParameters @ 0x58DD23..0x58DD83]`, `fld1 @ 0x58DD7D`) before the generators run; an unrouted ReflectColor keeps `_BaseInc.fx`'s 0.75 default. `renderer::material_static_runtime` / `eval_material_runtime` / `material_color_target`; ctest `renderer_material_eval`. The former Q3 glass copy read a colour the registry rejected and used a 0.7/0.8/0.9 placeholder; it now takes the routed ReflectColor |
 | Object texture sampler | MATCHING (2026-09-24, "Port the object combiner rules the render-parity review found diverging"; the Q3 copies and slot captures follow in "Sample object stages the retail way in the Q3 copies and slot captures") | at the highest texture-filter tier every object effect compiles with ANISO `[orig: Render_InitAllSubsystems @ 0x586413..0x586427; HLSLEffect_LoadFromFile @ 0x5AE6C5..0x5AE6D8]`: `sampLinearWrap2D` = ANISOTROPIC min / LINEAR mag / LINEAR mip, MaxAnisotropy 2. Godot's anisotropy level is project-global (the terrain's), so the object wrappers run `obj_sample_aniso2` (LOD from the major axis shortened by the ratio capped at 2, two trilinear taps along the major axis) for Diffuse1/Diffuse2/normal maps and the BmTxMirrT P3 post-multiply; GUT `object_shader_response_test` pins level 0 on a 2:1 footprint. Each stage stops at its texture's last retail mip level (§2026-09-24 rendering parity pass, "Stage mip chains") |
 | Tracer soft edge (VS_TRACER look) | MATCHING (after D-RMAT-2 fix) | `OSCAP_VIEW_FADE` composes `color x \|dot(eye, normal)\|^2` `[orig: vsTracer in Tracer.fx]`; `renderer_material_classify` + the vectors golden pin it |
 | Color pipeline (gamma space end to end) | MATCHING (after D-RMAT-7/-8/-9 fixes) | no-sRGB sampler/render-state/effect-state sweeps + identity display ramp (§Color pipeline witness); raw sampling and scene math/blends remain in gamma-domain numeric values until one terminal display decode. The D3D12 calibrate probe proves byte identity 256/256 plus exact SRCALPHA/INVSRCALPHA and ONE/ONE results; the shared checked-in fog math follows the re-witnessed table `[orig: @ 0x58a950 → @ 0x677960]` |
@@ -65,7 +65,7 @@ there is no duplicate proxy shader family.
 ## Witness map
 
 **Boot and registry.** `HLSLEffect_InitAndLoadAll @ 0x5b0080` (renamed from
-`HLSLEffect_InitAndLoadAll`): queries device caps, sets `HLSLEffect_PassClassGates @ 0x27e569c`
+`HLSLEffect_InitAndLoadAll`): queries device caps, sets `g_HLSLEffectPassClassGates @ 0x27e569c`
 (low byte forced 1 = vertex shaders assumed; high byte = adapter caps bit for
 pixel-shader techniques), registers the fixed-function set, then loads `.fx`
 from an override directory (`FindFirstFileA` — loose files only,
@@ -73,8 +73,8 @@ from an override directory (`FindFirstFileA` — loose files only,
 (`HLSLEffect_LoadAllFromPFFArchive @ 0x5afed0`, walking the 36-byte entry
 directory; archives via `FS_GetSecondaryArchiveByIndex @ 0x75ad60`, renamed
 from `AudioChannel_GetVolumeByIndex` — it indexes `g_FS_SecondaryArchives`).
-Registry: 1004-byte records in `HLSLEffect_Registry @ 0x27e56a0`, count
-`HLSLEffect_RegistryCount @ 0x28e06a8`.
+Registry: 1004-byte records in `g_HLSLEffectRegistry @ 0x27e56a0`, count
+`g_HLSLEffectRegistryCount @ 0x28e06a8`.
 
 **Fixed-function built-ins.** `HLSLEffect_InitFixedFunctionShaders @ 0x5af790`
 compiles `_FFP.fx` 24 times: `{_ST,_MT} × {"",_LUM} × {_OP,_AB,_AD} × {base,#UV}`
@@ -88,7 +88,7 @@ first pass (`@ 0x5afc92..0x5afcaa`).
 **File effects.** `HLSLEffect_LoadFromFile @ 0x5ae690`: VFS read + SCR layer
 (`ScriptFile_LoadAndDecrypt @ 0x5ae060`, key 0xA55B1EED — see
 [scr](../../engine/formats/scr/scr.h)); `D3DXCreateEffect` with
-`TRILINEAR/ANISO` (from `HLSLEffect_TextureFilterMode @ 0x27e5698`) +
+`TRILINEAR/ANISO` (from `g_HLSLEffectTextureFilterMode @ 0x27e5698`) +
 `FFPTRANSPOSE` (+ `TEX_UVXFORM` for the UVGen twin); reads the `EffectInfo`
 annotations (`EffectTag`, `EffectName`, `EffectSpecial`, `EffectAlt_UV`,
 `MinToolVersion` — default 256, >256 rejects); duplicate names reject; the
@@ -113,12 +113,12 @@ rules), zmode<<6 (0xC0), amode<<8 (0x300). Blocks land in the registry at
 +176/+256/+336/+416/+496/+576 (NORMAL/DEPTHMASK/PROJSHAD/CLIP/GLOW/
 MATCHTERRAIN); a missing CLIP block falls back to NORMAL's (`@ 0x5aebc8`).
 
-**3DI material → effect.** `convert_material_definition @ 0x5b03c0` copies
+**3DI material → effect.** `Material_ConvertDefinition @ 0x5b03c0` copies
 the runtime material record, remaps the channel blend/alpha enum bytes,
 resolves the tag (`HLSLEffect_FindByName @ 0x5ade70`, `stricmp`), clamps
 missing tags to index 0 (= FF_ST_OP, first registered), copies the flag byte
 bits 0/1/2 (alpha-test/invert/two-sided) and the alpha ref byte;
-`resolve_effect_subobjects_and_shader @ 0x5b1870` caches the registry entry
+`Material_ResolveEffectSubobjectsAndShader @ 0x5b1870` caches the registry entry
 pointer + the six pass blocks into the material def (+600..+1000).
 
 **Draw-time state.** `CRenderBatchQueue_FlushBatches @ 0x5d9f50`
@@ -138,13 +138,13 @@ AlphaBlendEnable/SrcBlend/DestBlend, D3DX-applied);
 `CD3DDevice_SetFogAndBlendMode @ 0x677740` is fog-side only: fogmode bits 0-1
 pick the fog COLOR (scene / gray 0x7F7F7F7F / black / white — black fades
 additive surfaces out, white multiplicative, gray-0.5 mod2x), bits 2-3 pick
-primary/secondary/off fog parameter sets. `apply_shader_parameters @ 0x58db80`
+primary/secondary/off fog parameter sets. `Material_ApplyShaderParameters @ 0x58db80`
 (sole caller: FlushBatches) binds constants: flipbook frame
 (`GetTickCount()/rate % count` or the controlled-animation slot), evaluated
 RgbGen/AlphaGen channels (`AlphaGenValue`), the complete UV matrix
-(`compute_uv_transform_matrix @ 0x5b1990`, time-driven), world/view matrix
+(`Material_ComputeUVTransformMatrix @ 0x5b1990`, time-driven), world/view matrix
 family, `FogStart`/`FogRangeRecip`, `MatRotSpecular` from the live light
-direction, and `ColorSrcGlobalGain` ← `Render_LightScaleR @ 0x8409f4` (the
+direction, and `ColorSrcGlobalGain` ← `g_RenderLightScaleR @ 0x8409f4` (the
 env #17 modulator triple's shader-path consumer — REN-5). A control slot is
 8 bytes: the even dword at `0x83FCE8 + 8·ordinal` is a **signed `int32`**
 value and the odd state dword at `0x83FCEC + 8·ordinal` selects
@@ -156,7 +156,7 @@ the retail image does not initialize every state to zero: ordinals 0..91 are
 zero while `TEX_TEAM` and `TEX_CAMO1/2/3` (92..95, state dwords
 `0x83FFCC/0x83FFD4/0x83FFDC/0x83FFE4`) are statically one. Those four texture
 selectors therefore take the signed modulo branch at
-`apply_shader_parameters @ 0x58DC36..0x58DC42`; ordinary controls take the
+`Material_ApplyShaderParameters @ 0x58DC36..0x58DC42`; ordinary controls take the
 fractional branch. The 2026-08-17 PR-503 T3 arm comparison exposed the old
 all-zero assumption: RevX02 `IndoArms.3di` has two diffuse frames controlled
 by `TEX_CAMO1`, so raw avatar selector 1 must choose frame 1, not frame 0.
@@ -210,27 +210,27 @@ Scene projection depth range: `Render_SetProjectionDepthRange @ 0x58abe0`
 `GfxShader_Create1TexModeId(tex, modeWord) @ 0x679030` family builds its
 0xF4 state block from ONE word (`CGfxShader_SetRenderStateByModeId @ 0x6835c0`
 → `RenderState_CacheFindOrAddByModeId @ 0x6832f0` →
-`find_or_create_render_state_permutation(word & 0x3FFF | 0x80000) @ 0x681d00`,
+`RenderState_FindOrCreatePermutation(word & 0x3FFF | 0x80000) @ 0x681d00`,
 the first `ValidateDevice`-passing substate wins). The word's upper bits ARE
 the pass-flag word above (the shader stores the whole word at +60, so
 `combined = word | passFlags`); the low 14 bits are three fields:
-- bits 0-3, the framebuffer blend (`decode_blend_mode_to_d3d_states
+- bits 0-3, the framebuffer blend (`RenderState_DecodeBlendModeToD3DStates
   @ 0x680f00`): 0 = blend OFF (ONE/ZERO); 1 = SRCALPHA/INVSRCALPHA;
   2 = ONE/ONE (later variants SRCALPHA/ONE, SRCALPHA/INVSRCALPHA);
   3 = ZERO/INVSRCALPHA; 4 = DESTCOLOR/ONE; 5 = SRCALPHA/ZERO;
   6 = ZERO/SRCCOLOR; 7 = ZERO/ONE; 8 = DESTCOLOR/SRCCOLOR; 9 = SRCCOLOR/ZERO;
   10 = SRCCOLOR/ONE; 11 = ONE/SRCALPHA; 12 = ONE/INVSRCALPHA;
   13 = SRCALPHA/SRCCOLOR.
-- bits 4-7, the stage-0 alpha op, first substate (`decode_mode_alpha_stage
+- bits 4-7, the stage-0 alpha op, first substate (`RenderState_DecodeModeAlphaStage
   @ 0x680b00`): 0x00/0x10 = SELECTARG2(TFACTOR); 0x20 = SELECTARG2(DIFFUSE);
   0x30 = SELECTARG1(TEXTURE); 0x40 = MODULATE(TEXTURE, TFACTOR);
   0x50 = MODULATE(TEXTURE, DIFFUSE); 0x60 = SELECTARG1(TEXTURE) with the
   CURRENT/stage-1 variants behind it; 0xD0 = ADD; 0xE0 = SUBTRACT;
   0xF0 = MODULATE(CURRENT, TEXTURE).
-- bits 8-13, the stage-0 colour op (`decode_mode_color_stage @ 0x681080`;
+- bits 8-13, the stage-0 colour op (`RenderState_DecodeModeColorStage @ 0x681080`;
   "MOD(2X)" = MODULATE2X because `GfxDevice_Modulate2XEnabled` (ex
   `dword_32656AC`, renamed 2026-08-21) is set to 1 unconditionally by
-  `CGfxDevice_CreateDevice @ 0x67eb5f` — `CGfxTextOverlay_Draw @ 0x67715d`
+  `CGfxDevice_CreateDevice @ 0x67eb5f` — `CGfxDevice_Clear @ 0x67715d`
   halves clear colours only when it is 0): 0x100 = SELECTARG1(TFACTOR);
   0x200 = SELECTARG2(DIFFUSE); 0x300 = MOD(2X)(DIFFUSE, TFACTOR);
   0x400 = SELECTARG1(TEXTURE); 0x500 = MOD(2X)(TEXTURE, TFACTOR);
@@ -350,14 +350,14 @@ override); else pass zmode bit 0x80 picks ALWAYS/LESSEQUAL. Pass gating
 0x04 run-if-pointlights, 0x08 run-if-spots; then flags & 4 = ONE DRAW PER
 POINTLIGHT (`Light_GetPointLightParams @ 0x5a9180` →
 PointLightCoord/Color/Atten + CommitChanges per light), flags & 8 = ONE DRAW
-PER SPOTLIGHT (`get_light_projection_info @ 0x5aa5c0` →
+PER SPOTLIGHT (`Light_GetProjectionInfo @ 0x5aa5c0` →
 SpotLightProjMatrix/TexCurProj; the spot plane cached at ctx+824), flags & 2
 = POINTLIGHT_VARIATIONS (fills the PointLight*Array set +
 CurNumPointLights); tech flag bit 3 `useffplights` enables real D3D lights
 (`Light_ApplyAsD3DLight @ 0x5abd50`). MATCHTERRAIN-class entries bind THE
 TERRAIN TILE TEXTURE under the object (`floor` of strip world x/z →
-`terrain_tile_cache_lookup @ 0x604140`; fallback texture at effect+164).
-`setup_entity_lighting_and_shader_constants @ 0x5d98a0` pushes
+`TerrainTile_CacheLookup @ 0x604140`; fallback texture at effect+164).
+`Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0` pushes
 **AlphaTestFlag (slot 250) ← matdef+514 bit 0x1** (the shader-path alpha
 test; the invert bit does not reach the shader path), DirLightColor ←
 ctx+116..128 **x the state-stack effectScale** (entry[9] = the per-entity
@@ -374,8 +374,8 @@ shared constants MatTexClipPlane ← base x ctx+756, FloatTicks and
 DirLightVector. Full writer/reader decode:
 [render-lighting-re.md](render-lighting-re.md).
 
-**UV animation (REN-4).** `apply_shader_parameters` binds MatTexCoord1 (slot
-216) from `compute_uv_transform_matrix((tick_ms << 8)/1000, matdef+524)`
+**UV animation (REN-4).** `Material_ApplyShaderParameters` binds MatTexCoord1 (slot
+216) from `Material_ComputeUVTransformMatrix((tick_ms << 8)/1000, matdef+524)`
 `[orig: @ 0x58dd49]` when the effect resolves it (the #UV twins / TEX_UVXFORM
 — FFP applies it as TextureTransform COUNT2, VS effects via
 `CalcAnimatedUV`). Channel blocks (8 B: `{u8 type, u8 phase, i16 speed,
@@ -384,11 +384,11 @@ time*speed` (wrapping u16); type high nibble = mode — 0x10 time-scroll
 (16 +, 17 −; translate = phase16/65536), 0x20 rotation about UV center
 (angle = phase16 x 2π/65536; 32 +, 33 −), 0x30/0x40/0x50/0x60 with
 type ≤ 0x70 = WAVEFORM set/scroll/shear/scale (value =
-`wave_lookup(type, phase16)/65535 x range + base`, base/range signed 8.8),
+`CWaveformTable_WaveLookup(type, phase16)/65535 x range + base`, base/range signed 8.8),
 types 'q'..'u' (113..117) = CONTROLLED-ANIM set/scroll/shear/scale/rotation
-(value = base + range x `dword_83FCE8[2*phase]`/65536). `wave_lookup
+(value = base + range x `dword_83FCE8[2*phase]`/65536). `CWaveformTable_WaveLookup
 @ 0x5de6b0` indexes the SAME 2816-byte waveform table PANM uses
-(`WaveformTable @ 0x2bf8ed0` = engine/formats/threedi `threedi_panm_wave_table()`);
+(`g_WaveformTable @ 0x2bf8ed0` = engine/formats/threedi `threedi_panm_wave_table()`);
 bands per type {1→0, 2→256, 3→768, 4→1024, 5→1280, 6→rand, 7→1536 lerped,
 8→1792, 9→2048, 0xA→2304 lerped, 0xF→2560}. Ported as
 `renderer::uv_anim` (vectors section 4). The live bridge feeds the parsed U/V
@@ -400,14 +400,14 @@ offset/scale/rotation decomposition, so controlled set (zero diagonal) and
 shear survive intact.
 
 **RgbGen / AlphaGen (REN-4 — closes the channel-remap question).** The
-`convert_material_definition` remaps (`src[16]`: file 3..7 → runtime 8..12,
+`Material_ConvertDefinition` remaps (`src[16]`: file 3..7 → runtime 8..12,
 `src[17]` identity) are the RGBGEN/ALPHAGEN TYPE bytes — the file's wave-type
-ids shifted to the runtime `wave_lookup` band ids.
+ids shifted to the runtime `CWaveformTable_WaveLookup` band ids.
 `[orig: RgbGen_EvaluateColor @ 0x5b23d0]` evaluates a 12-byte gen block per
 channel:
 type 24 = constant color; types 113 **and 114** interpolate from
 `dword_83FCE8[2*phase]`; every other type uses
-`base + (delta × wave_lookup(type, phase16 + speed × (tick<<8)/1000)) >> 16`.
+`base + (delta × CWaveformTable_WaveLookup(type, phase16 + speed × (tick<<8)/1000)) >> 16`.
 Thus RGB types 115–117 are waveform fallbacks, not controlled
 shear/scale/rotation operations. Both the controlled and waveform
 interpolations keep the low 32 bits of `delta × fraction` before arithmetic
@@ -457,7 +457,7 @@ fixed-function path is vertex fog with `D3DRS_RANGEFOGENABLE`
 EXP fog on view depth, picked by the device caps (`@ 0x6779e4..0x677a48`).
 A FOGMODE_SHADER pass (SetFogAndBlendMode modes 8..11 turn table and vertex
 fog off, `@ 0x677783`) fogs from the VS `oFog = 1 - (z - FogStart) x
-FogRangeRecip` `[orig: apply_shader_parameters @ 0x58e20d..0x58e26f]`: linear
+FogRangeRecip` `[orig: Material_ApplyShaderParameters @ 0x58e20d..0x58e26f]`: linear
 in view depth for every fog type, type 0 included, from the caller's start 0.5
 (`Environment_ApplyFogAndAmbient @ 0x57e4d2`, stored `@ 0x58a992`). Per
 wrapper family, by the retail NORMAL P0:
@@ -493,7 +493,7 @@ and the framebuffer byte is the displayed value:
   uses `texfilter_level=3`, whose per-stage selection is anisotropic with
   linear mip filtering and the device capability's maximum anisotropy
   (`CGfxDevice_ApplyRenderStates`; trilinear/aniso = modes 2/3-4, cf.
-  `HLSLEffect_TextureFilterMode @ 0x27e5698`). The older cfg-0/driver-forced
+  `g_HLSLEffectTextureFilterMode @ 0x27e5698`). The older cfg-0/driver-forced
   explanation described invalidated captures and is not a publication path.
 - **No sRGB framebuffer writes.** The SetRenderState immediate sweep (state
   ids at every `[vtbl+0xE4]`-load site) covers the standard FF set (7, 14,
@@ -558,18 +558,18 @@ change. This closes D-RMAT-8 rather than bounding it to opaque surfaces.
 | D-RMAT-8 | Framebuffer blending happened on per-shader blit-encoded (linear) values | blending on gamma bytes (`out = src_g op dst_g` per the blend mode tables `@ 0x680f00`) | **FIXED (2026-08-22)** — all retail 3D and particle passes now write and blend gamma-domain numeric values in the scene target; `FrameFxCompositorEffect` performs the only display decode after the final blend. The D3D12 calibration is zero-tolerance: 256/256 transfer bytes, SRCALPHA/INVSRCALPHA byte 128, ONE/ONE byte 96 |
 | D-RMAT-9 | Object composer fog was a linear ramp with an invented `smoothstep` for type 3 | the device fog table: type 0 exponential `ln(64)/end`, types 1/2/3 linear with start = 0.5 / `(1−density)·end·0.5` / `(1−density)·end·0.25` (`[orig: Render_SetFogState @ 0x58a950 → CD3DDevice_SetFogParameters @ 0x677960]`; env-tod-re.md §Fog policy) | **FIXED (2026-07-06, the model-parity slice)**: the composer emits the witnessed table (one text with `terrain_lighting.gdshaderinc`/`water.gdshader`); covered by the same T1 re-dump. 2026-09-24 (R9-9/R1-8, "Fog objects by their retail pass path and keep the overcast fog start"): the distance now follows the pass path (§Fog parameter sets); the composer had used the radial distance for every family and type |
 | D-RMAT-10 | The `_MT` secondary (detail) stage ran HALF the witnessed combine: the composer emitted `base.rgb *= detail.rgb` — ×1, no alpha touch — so resolved MT surfaces (RckS05's `W_Rck1_o`, gray avg 93/255) modulated ×0.365 where retail runs ×0.73 (MT objects too dark in detail regions, the REN-7 T3 "W_RCK1_O watch item"), and the stage never alpha-modulated; a missing secondary bound a white ×1 fallback (neutral then, a ×2 brightener under the fix) | stage 1 = `TSSColor(1, Modulate2x, Texture, Current)` + `TSSAlpha(1, Modulate, Texture, Current)` (§FF technique tables — "the same on stage 1 vs Current for `_MT`"), and the combine is CORPUS-UNIFORM across every second-diffuse family (REN-7 sweep, the .fx re-derived from retail `localres.pff` via `engine/formats/pff`+`engine/formats/scr`, never committed): `BDiffT2.fx` (`EffectTag "VS_DOT3DIFF2"`) carries the identical stage-1 pair, and `SkBDiffO2.fx` (`EffectTag "VS_SKBUMPDIFFOBJ2"`) applies BOTH diffuses in its NORMAL P3 "post multiply" pass — same TSS pair under `RSAlphaMode(TRUE, DESTCOLOR, SRCCOLOR)` (the ×2-onto-framebuffer form); a NULL-texture stage is dropped; the sample set is the SECOND authored UV channel — the .3di v8 vertex carries TWO UV sets unconditionally (stride 40 = pos+normal+uv0+uv1; RckS05 uv1 distinct on 48/48 verts, FOUNTAIN M4 on 455/455; FVF 0x212 TEX2 corroborates the D3D FF stage-N→texcoord-N default) | **FIXED (REN-7, 2026-07-07)**: composer emits `base.rgb *= detail.rgb * 2.0; base.a *= detail.a;` `[orig: _FFP.fx TECHNIQUE_NORMAL _MT stage 1]`; the reimpl masks `OSCAP_DETAIL` off the composed key when the secondary fails to resolve (exact stage-drop identity, retail-shaped; the white fallback deleted; `classify()` stays pure — 0 classification rows moved). T1 re-dump: exactly the 224 OSCAP_DETAIL composed hashes moved (+27 bytes each = the two text edits), everything else byte-identical; handoff pins unchanged (`FF_MT_OP/base → 0x00001004`) |
-| D-RMAT-11 | Controlled flipbooks treated every CTRL as a state-zero signed 16.16 fraction, so RevX02 `IndoArms.3di` consumed raw `TEX_CAMO1 = 1` as frame zero (`A_Arm1st.tga`, tattooed) | the retail image statically seeds the adjacent state dwords for `TEX_TEAM` and `TEX_CAMO1/2/3` (ordinals 92–95) to one; `apply_shader_parameters` therefore uses signed `value % frame_count` for those four selectors `[orig: @ 0x58DC36..0x58DC42]` | **FIXED (2026-08-17, PR-503 adversarial T3)**: `compute_anim_frame` selects modulo only for exact ordinals 92–95 and preserves the generic 16.16 path; literal pins cover two-frame `IndoArms.3di` and three-frame `APLFP1.3DI` Jflag1/Jflag2/Jflag3, including the signed negative remainder |
+| D-RMAT-11 | Controlled flipbooks treated every CTRL as a state-zero signed 16.16 fraction, so RevX02 `IndoArms.3di` consumed raw `TEX_CAMO1 = 1` as frame zero (`A_Arm1st.tga`, tattooed) | the retail image statically seeds the adjacent state dwords for `TEX_TEAM` and `TEX_CAMO1/2/3` (ordinals 92–95) to one; `Material_ApplyShaderParameters` therefore uses signed `value % frame_count` for those four selectors `[orig: @ 0x58DC36..0x58DC42]` | **FIXED (2026-08-17, PR-503 adversarial T3)**: `compute_anim_frame` selects modulo only for exact ordinals 92–95 and preserves the generic 16.16 path; literal pins cover two-frame `IndoArms.3di` and three-frame `APLFP1.3DI` Jflag1/Jflag2/Jflag3, including the signed negative remainder |
 | D-RMAT-12 | FIXED 2026-09-18: dedicated height/volume/chunk resources replace raw loads | Original dispatch and pixel producers, 14 original horizon vectors; NQ8B/HRZ8/AOC8 formats and Godot dimensionality tests | Producer/resource parity established; no special-type stock material was found in jo-c's 2717-model scan, and no live visual comparison is claimed. |
 
 ## IDB changes made during the session
 
 | Address | Old | New | Basis |
 |---|---|---|---|
-| 0x27e56a0 | byte_27E56A0 | HLSLEffect_Registry | 1004-byte records, memset 0x3EC, indexed ×1004 |
-| 0x28e06a8 | dword_28E06A8 | HLSLEffect_RegistryCount | post-increment allocator |
-| 0x28e06a0 | dword_28E06A0 | HLSLEffect_hTestRelayParam | TestRelay handle cache |
-| 0x27e569c | word_27E569C | HLSLEffect_PassClassGates | gates passData[12] bits 0/1; written @ 0x5b00e5 |
-| 0x27e5698 | dword_27E5698 | HLSLEffect_TextureFilterMode | selects TRILINEAR/ANISO macro |
+| 0x27e56a0 | byte_27E56A0 | g_HLSLEffectRegistry | 1004-byte records, memset 0x3EC, indexed ×1004 |
+| 0x28e06a8 | dword_28E06A8 | g_HLSLEffectRegistryCount | post-increment allocator |
+| 0x28e06a0 | dword_28E06A0 | g_HLSLEffectHTestRelayParam | TestRelay handle cache |
+| 0x27e569c | word_27E569C | g_HLSLEffectPassClassGates | gates passData[12] bits 0/1; written @ 0x5b00e5 |
+| 0x27e5698 | dword_27E5698 | g_HLSLEffectTextureFilterMode | selects TRILINEAR/ANISO macro |
 | 0x5b0080 | sub_5B0080 | HLSLEffect_InitAndLoadAll | caps + FFP init + dir/PFF loads |
 | 0x75ad60 | AudioChannel_GetVolumeByIndex | FS_GetSecondaryArchiveByIndex | indexes g_FS_SecondaryArchives; consumed as archive handle |
 | 0x6770a0 | CGfxDevice_SetBrightness | CGfxDevice_SetAlphaTestRef | sets ALPHAFUNC/ALPHAREF; sign encodes invert |
@@ -580,8 +580,8 @@ REN-4 session (the shader/TSS grill):
 |---|---|---|---|
 | 0x683420 | sub_683420 | RenderState_CacheFindOrAdd | the 1024×252-B state cache; memcmp 0xF4 payload; applies via RenderState_ApplyToDevice |
 | 0x6832F0 | sub_6832F0 | RenderState_CacheFindOrAddByModeId | mode-id (0x3FFF) lookup; builds via the permutation cache |
-| 0x680b00 | decode_blend_state | decode_mode_alpha_stage | writes stage ALPHAOP/ARG1/ARG2 from the 0xF0 nibble |
-| 0x681080 | decode_blend_state_extended | decode_mode_color_stage | writes stage COLOROP/ARG1/ARG2 from bits 8-13 |
+| 0x680b00 | decode_blend_state | RenderState_DecodeModeAlphaStage | writes stage ALPHAOP/ARG1/ARG2 from the 0xF0 nibble |
+| 0x681080 | decode_blend_state_extended | RenderState_DecodeModeColorStage | writes stage COLOROP/ARG1/ARG2 from bits 8-13 |
 | 0x683650 | sub_683650 | CGfxShader_SetRenderStateDesc | stores the flags word (+60), resolves the 0xF4 desc through the cache into +68 |
 | 0x6835C0 | sub_6835C0 | CGfxShader_SetRenderStateByModeId | same via the mode-id path |
 | 0x679030 | sub_679030 | GfxShader_Create1TexModeId | factory: 1 texture slot + mode id |
@@ -593,19 +593,19 @@ REN-4 session (the shader/TSS grill):
 | 0x5a9180 | sub_5A9180 | Light_GetPointLightParams | fills coord/color/atten for the per-light passes |
 | 0x5abd50 | sub_5ABD50 | Light_ApplyAsD3DLight | useffplights path — enables real D3D lights |
 | 0x28e0990 | flt_28E0990 | g_MatTexCoord1 | the composed UV matrix block |
-| 0x2bf8ed0 | table | WaveformTable | the shared 2816-B wave table (PANM + UV anim + RgbGen) |
-| 0x2721a40 | dword_2721A40 | Render_ShaderTickMs | the shader clock (ms); (tick<<8)/1000 feeds the anim paths |
+| 0x2bf8ed0 | table | g_WaveformTable | the shared 2816-B wave table (PANM + UV anim + RgbGen) |
+| 0x2721a40 | dword_2721A40 | g_RenderShaderTickMs | the shader clock (ms); (tick<<8)/1000 feeds the anim paths |
 
 ## Open questions
 
 - **Closed at REN-4**: the channel enum remaps (= the RgbGen/AlphaGen wave-type
   ids, §RgbGen/AlphaGen); the UV-scroll path (§UV animation — ported as
   `renderer::uv_anim`); `AlphaTestFlag` (slot 250 ← matdef+514 bit 0x1,
-  pushed in `setup_entity_lighting_and_shader_constants @ 0x5d98a0`); the
+  pushed in `Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0`); the
   secondary fog parameter set (= the dormant LITE 1/3-density block,
   §Fog parameter sets).
 - **Closed 2026-07-29**: the parsed MTRL U/V blocks (matdef+524/+532 in
-  retail, copied by `[orig: convert_material_definition @ 0x5b03c0]`) now
+  retail, copied by `[orig: Material_ConvertDefinition @ 0x5b03c0]`) now
   feed the full live 2×3 object-shader transform; signed RGB/alpha/flipbook
   consumers and the point-light register feed are also live. This closes the
   consumer integration, not the still-partial set of gameplay CTRL producers
@@ -614,7 +614,7 @@ REN-4 session (the shader/TSS grill):
   it is authored at load (`[orig: @ 0x5af14b..0x5af1a4]`), no xref reaches
   registry+0xA4, and the `+0A4h` reads in FlushBatches are handle slot 205
   off entry+0x290. The batch sort uses the registry INDEX.
-- **Closed 2026-09-24**: `PolyTrn_UsePixelShaderPath` is cleared WHEN the
+- **Closed 2026-09-24**: `g_PolyTrnUsePixelShaderPath` is cleared WHEN the
   device word `g_GfxRenderDeviceState+0x4C` (`dword_32655B4`) is 80 or 73
   (`[orig: PolyTrn_LoadTerrainConfig @ 0x60E565..0x60E584]`: edi = 0 on every
   incoming path, the 80/73 compare jumps to the store; the earlier "unless"
@@ -623,7 +623,7 @@ REN-4 session (the shader/TSS grill):
 - **Closed 2026-09-24**: ctx+0x349 (ctx+841) is a per-flush FIRST-ENTRY
   latch, not a mirror gate. `RenderBatchCtx_BeginFrame @ 0x5D89C4` and
   `CRenderBatchQueue_SortAndFlush @ 0x5DAE4E` set it;
-  `setup_entity_lighting_and_shader_constants` tests it `@ 0x5D98C9` and
+  `Render_SetupEntityLightingAndShaderConstants` tests it `@ 0x5D98C9` and
   clears it `@ 0x5D9F34`. On the first entry of every flush it uploads
   MatTexClipPlane, FloatTicks and DirLightVector = -(ctx+0x84..0x8C) with
   w = 0.8 (`flt_7C6F9C` = 0x3F4CCCCD) `@ 0x5D995F..0x5D99A6`, so Flag.fx and
@@ -639,8 +639,8 @@ REN-4 session (the shader/TSS grill):
 | --- | --- | --- |
 | DOT3 request types 4/5 | MATCHING on supported decoded images | Native texture preprocessing golden bytes |
 | Terrain detail coefficients | MATCHING | terrain_texture_preprocess, signed gradients and preserved alpha |
-| Missing/unsupported texture fallback | MATCHING (corrected 2026-09-24): authored types 3, 9..15 and > 18 keep the record memset's zero and load as ordinary diffuse rows `[orig: ThreediGp_LoadFromFile memset @ 0x5B59E5; convert_material_definition switch @ 0x5B045B..0x5B04A0 over byte_5B0778]`; the dispatcher's checkerboard default (`@ 0x5B17F4`) is reached only by a failed load. `ObjectData` hands the dispatcher `renderer::material_texture_runtime_type(row.type)`. Types 6/7/16/17/18 are the dedicated producers below (D-RMAT-12); the missing-MDT case is the port's bounded checkerboard, not retail's result | resource_root_contract_test, native checkerboard bytes; jpt_5B1737 cases `@ 0x5B179A` / `@ 0x5B17B7` / `@ 0x5B17D4` / `@ 0x5B17DD` / `@ 0x5B17E6`; the missing-MDT walk `jz @ 0x58C586` then D3DX 0-to-1 `@ 0x690A2B` / `@ 0x690A37` then the nonzero-handle skip `@ 0x5B17F2` |
-| Diffuse file resolution | MATCHING (2026-09-24, "Resolve object diffuse textures exactly as retail's loaders do") | `Texture_LoadByNameWithChannel` (runtime 0/2/8) cuts the name 3 chars after the first '.' (`@ 0x58B4E1..0x58B4FA`), takes the plain path for a loose-first hit or a case-sensitive '.MDT' query, else an existing '.dds' sibling wins and decodes as DDS with its file mips (no fallback when broken), else .TGA/.MDT -> TGA reader, .PCX -> PCX reader, anything else fails (`@ 0x58B4FE..0x58B6E6`); `load_texture_and_register` (runtime 1) is the plain path on the full name (`@ 0x58B80E..0x58B881`). No `_O` suffix, no png/jpg/bmp alternates. `renderer::material_texture_query` / `material_dds_sibling` / `material_image_source` / `plain_material_image_source`; ctest `renderer_material_texture`, GUT `resource_root_contract_test` |
+| Missing/unsupported texture fallback | MATCHING (corrected 2026-09-24): authored types 3, 9..15 and > 18 keep the record memset's zero and load as ordinary diffuse rows `[orig: ThreediGp_LoadFromFile memset @ 0x5B59E5; Material_ConvertDefinition switch @ 0x5B045B..0x5B04A0 over byte_5B0778]`; the dispatcher's checkerboard default (`@ 0x5B17F4`) is reached only by a failed load. `ObjectData` hands the dispatcher `renderer::material_texture_runtime_type(row.type)`. Types 6/7/16/17/18 are the dedicated producers below (D-RMAT-12); the missing-MDT case is the port's bounded checkerboard, not retail's result | resource_root_contract_test, native checkerboard bytes; jpt_5B1737 cases `@ 0x5B179A` / `@ 0x5B17B7` / `@ 0x5B17D4` / `@ 0x5B17DD` / `@ 0x5B17E6`; the missing-MDT walk `jz @ 0x58C586` then D3DX 0-to-1 `@ 0x690A2B` / `@ 0x690A37` then the nonzero-handle skip `@ 0x5B17F2` |
+| Diffuse file resolution | MATCHING (2026-09-24, "Resolve object diffuse textures exactly as retail's loaders do") | `Texture_LoadByNameWithChannel` (runtime 0/2/8) cuts the name 3 chars after the first '.' (`@ 0x58B4E1..0x58B4FA`), takes the plain path for a loose-first hit or a case-sensitive '.MDT' query, else an existing '.dds' sibling wins and decodes as DDS with its file mips (no fallback when broken), else .TGA/.MDT -> TGA reader, .PCX -> PCX reader, anything else fails (`@ 0x58B4FE..0x58B6E6`); `Texture_LoadAndRegister` (runtime 1) is the plain path on the full name (`@ 0x58B80E..0x58B881`). No `_O` suffix, no png/jpg/bmp alternates. `renderer::material_texture_query` / `material_dds_sibling` / `material_image_source` / `plain_material_image_source`; ctest `renderer_material_texture`, GUT `resource_root_contract_test` |
 | Stage mip chains | MATCHING (2026-09-24, "Stop object stage sampling at each texture's last retail mip level") | every pixel-built texture (TGA/MDT/PCX diffuse rows, every normal map, the checkerboard) goes through `GTexture_FindOrCreateFromData @ 0x676CC0` -> `GTexture_CreateFromPixelData_0`: MipLevels = halvings while the smaller side exceeds 2 (`@ 0x6877BC..0x6877D8`; 256 -> 7 levels ending at 4x4; <= 2 -> the D3DX full chain), BOX filtered (`@ 0x6878B9`); DDS diffuse rows keep their file chain. The port builds full Godot chains and clamps the sampled level at the retail last level (`renderer::pixel_texture_mip_levels`, `texture_path_resolver` `material_texture_max_lod`, the `u_*_max_lod` bounds in `obj_sample_aniso2`); GUT `object_shader_response_test` |
 
 Object DOT3 conversion reads alpha as height, uses 1/64 slopes and summed
@@ -667,7 +667,7 @@ selects `AOC8` as alpha-only 2D data. Chunk dimensions start at payload +12/+16
 `Texture2D` otherwise. Cache keys separate generated types, and the selected
 TGA/DDS source never silently falls through after a decode failure.
 [orig: dispatch @ 0x5B179A, @ 0x5B17B7, @ 0x5B17D4, @ 0x5B17DD, @ 0x5B17E6;
-generate_environment_map @ 0x58A220; AO producer @ 0x58CB90;
+Texture_GenerateEnvironmentMap @ 0x58A220; AO producer @ 0x58CB90;
 chunk loaders @ 0x58F350, @ 0x58F470, @ 0x58F590]
 
 `renderer_material_texture` compares every pixel of 14 original-executable
@@ -680,7 +680,7 @@ reachability limitation are in [the report](../jo-c-validation-2026-09-18.md).
 Original IDB comments at `@ 0x58A220` and `@ 0x58CB90` were appended and saved.
 
 One bounded fallback remains: a
-missing `.MDT` is not a retail checkerboard: `load_texture_as_normalmap`'s
+missing `.MDT` is not a retail checkerboard: `Texture_LoadAsNormalMap`'s
 absent-file leg jumps into the null-data kernel walk (`jz` @ 0x58C586) with
 zero dimensions, the pixel loop is skipped (`jle` @ 0x58C901), and
 `GTexture_FindOrCreateFromData` (call @ 0x58CB56) succeeds because the
@@ -691,7 +691,7 @@ sees a nonzero handle and retail binds a never-filled 1x1 managed texture.
 The port keeps the checkerboard as its bounded fallback for that row (an
 unfilled device texture is garbage under ADR 0003); whether that carve-out is
 registered as a class-D entry is the maintainer's call.
-[orig: Material_LoadStageTexture @ 0x5B16F0; load_texture_as_normalmap @ 0x58C480;
+[orig: Material_LoadStageTexture @ 0x5B16F0; Texture_LoadAsNormalMap @ 0x58C480;
 GTexture_CreateFromPixelData_0 @ 0x6876C0]
 
 ## 2026-09-24 rendering parity pass
@@ -729,7 +729,7 @@ the mirror arms the technique per draw (env-tod-re.md #30).
 
 **Texture-row flag bit 1 is STATE_OVERRIDE, not a clamp.** The bit binds the
 batch's render-state override texture instead of the row's
-`[orig: apply_shader_parameters @ 0x58DC92..0x58DCC1]`. The state stack is
+`[orig: Material_ApplyShaderParameters @ 0x58DC92..0x58DCC1]`. The state stack is
 `g_RenderStateStack @ 0x843580` (16-byte records, top at
 `g_RenderStateStackTop`); the only pusher of the +0xC override is
 `PlayerInfo_RenderPlayerPreview3D @ 0x560F43`, from the preview blip's +0x18

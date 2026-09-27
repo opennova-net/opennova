@@ -25,7 +25,7 @@ int check_bank() {
     }
 
     // The logic update runs on the FIRST 4 ms quantum of each 16 ms group
-    // (g_tickPhase & 3 == 0): an 8 ms frame already ticks, the next 8 ms
+    // (g_TickPhase & 3 == 0): an 8 ms frame already ticks, the next 8 ms
     // frame completes the group without a second tick.
     {
         TickAccumulator acc;

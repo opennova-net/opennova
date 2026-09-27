@@ -250,7 +250,7 @@ bool terrain_raycast_refined(const TerrainRaycastSampler &sampler,
 	int32_t cur_z = out_hit[2];
 	// Refine steps = the march per-sample step, arithmetic >> 2 (quarter-unit
 	// steps) [orig: @ 0x60e769..0x60e778]. Retail negates the stored y step
-	// first (the Terrain_LastRayStepY global holds the V-flipped axis); this
+	// first (the g_TerrainLastRayStepY global holds the V-flipped axis); this
 	// core stores world-axis steps, so NO negation here (see the header).
 	int32_t rstep_x = step[0] >> TERRAIN_RAYCAST_REFINE_STEP_SHIFT;
 	int32_t rstep_y = step[1] >> TERRAIN_RAYCAST_REFINE_STEP_SHIFT;

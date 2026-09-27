@@ -28,7 +28,7 @@ static uint32_t float_bits(float f) {
 
 int main() {
 	// --- technique_class_for_submit: stack defaults win, in bit order
-	// [orig: collect_render_objects_for_batch @ 0x5d90d7..0x5d9145].
+	// [orig: Render_CollectRenderObjectsForBatch @ 0x5d90d7..0x5d9145].
 	CHECK(technique_class_for_submit(0, 0) == TechniqueClass::Normal);
 	CHECK(technique_class_for_submit(kStackDefaultClip, 0) == TechniqueClass::Clip);
 	CHECK(technique_class_for_submit(kStackDefaultProjShadow, 0) == TechniqueClass::ProjShadow);
@@ -81,8 +81,8 @@ int main() {
 	// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 — the sky pass SkyDome_RenderWithSkyfog
 	// @ 0x5ca81a, then Player_RenderViewModelIfAlive @ 0x5ca829, then
 	// Terrain_RenderWorldScene @ 0x5c93a0].
-	// Inside render_skybox the gradient pass precedes the bodies, which
-	// precede the cloud layers [orig: render_skybox @ 0x579080: gradient
+	// Inside Render_Skybox the gradient pass precedes the bodies, which
+	// precede the cloud layers [orig: Render_Skybox @ 0x579080: gradient
 	// draw @ 0x5798dc, bodies @ 0x5798e0, clouds @ 0x5798f1..0x579b15].
 	CHECK(kRungSkyDome < kRungSkyBody);
 	CHECK(kRungSkyBody < kRungSkyClouds);
@@ -122,7 +122,7 @@ int main() {
 	CHECK(kRungParticleFarSide < kRungFoliageFarSide);
 	CHECK(kRungFoliageFarSide < kRungWater);
 	// The wake decals inside the water pass, after the surface strip
-	// [orig: render_water_surface @ 0x5c3426 then WaterRing_DrawAll @ 0x5c3432].
+	// [orig: Render_WaterSurface @ 0x5c3426 then WaterRing_DrawAll @ 0x5c3432].
 	CHECK(kRungWater < kRungWaterDecals);
 	// The camera person wave's masks @ 0x5c9638 -> the Scar_DrawBatches call
 	// @ 0x5c9658 -> foliage pass 1 @ 0x5c9665 -> camera-side alpha flush @ 0x5c967a ->
@@ -149,7 +149,7 @@ int main() {
 	CHECK(scene_far_plane(1000.0f) == 1001.0f);
 
 	// --- the blink/waterline pass gates [orig: Render_ProcessMainSceneFrame
-	// @ 0x5ca192..0x5ca1bd; render_main_scene @ 0x5c1342..0x5c1353]: the
+	// @ 0x5ca192..0x5ca1bd; Render_MainScene @ 0x5c1342..0x5c1353]: the
 	// indoors letter 0x2 skips the terrain pass and the MIRROR's sky, the sky
 	// letter 0x4 and an eye at/below the water skip the main frame's sky.
 	{

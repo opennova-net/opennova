@@ -58,7 +58,7 @@ Retail resolves names while loading model CTRL records and publishes into
 numeric slots: `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` calls
 `[orig: CtrlName_ToOrdinal @ 0x57B290]`. Its six destruction stores are in
 `[orig: Entity_PublishSwapFadePhases @ 0x5C3F40]`, called before the later subpixel
-rejection by `[orig: render_sector_entity @ 0x5C4190]`. See the
+rejection by `[orig: Render_SectorEntity @ 0x5C4190]`. See the
 [CTRL witness and jo-c provenance](../threedi/3di-gp-format-re.md#native-ctrl-publication-2026-09-21).
 Retail's global persistent bus differs from our per-model owner lifetime;
 **D-3DI-2 remains open**.
@@ -74,7 +74,7 @@ frames reuse storage and compare exact row identities in place. Nested
 snapshot requests use fresh storage while an earlier lease is alive. Script
 and tooling callers still receive independent packed arrays at their actual
 boundary. Retail's native pool traversal is witnessed at
-`[orig: collect_visible_entities_for_terrain @ 0x5C8C60]`; the lease itself
+`[orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5C8C60]`; the lease itself
 is host code, not a retail snapshot object. See the
 [ownership contract](../runtime-architecture.md#godot-adapter-and-presentation).
 

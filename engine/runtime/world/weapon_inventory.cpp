@@ -33,7 +33,7 @@ int classrounds_index(int player_class) {
 }
 
 // The switch/cycle eligibility ammo term shared with the deny walks
-// [orig: calculate_kill_score @ 0x5407E0 as the slot predicate — nonzero selects].
+// [orig: Score_CalculateKillScore @ 0x5407E0 as the slot predicate — nonzero selects].
 int32_t ammo_score(const WeaponTable &table, const WeaponInventory &inv, int32_t combo) {
     const WeaponTableEntry *def = entry_at(table, inv, combo);
     const WeaponInventorySlot *s = inv.slot(combo);
@@ -69,7 +69,7 @@ void weapon_inventory_set_loaded_rounds(const WeaponTable &table,
 void weapon_availability_apply_pairs(
         WeaponAvailability &avail, const WeaponTable &table,
         const std::vector<std::pair<std::string, int32_t>> &pairs) {
-    // The name-list mode of build_item_restriction_table @ 0x54DDB0: default 1,
+    // The name-list mode of WeaponDef_BuildItemRestrictionTable @ 0x54DDB0: default 1,
     // matched names take the pair value (-1 -> 3), sub-entries inherit the parent's
     // value through the loadout_subclasses skip walk.
     int32_t value = weapon_availability_value::kAllowed;
@@ -169,7 +169,7 @@ std::vector<std::string> weapon_kit_expand_display_list(
 
 int32_t weapon_pool_get(const WeaponInventory &inv, int class_id) {
     // [orig: Entity_GetScoreValueBySlotType @ 0x5406E0 pool leg — class 1 reads
-    //  entity+288, others g_localAmmoPools[class]; one array here (see header)]
+    //  entity+288, others g_LocalAmmoPools[class]; one array here (see header)]
     if (class_id < 0 || class_id >= static_cast<int>(inv.pools.size())) return 0;
     return inv.pools[static_cast<size_t>(class_id)];
 }
@@ -496,7 +496,7 @@ WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
             out.kind = WeaponSwitchOutcome::kMount;
             out.combo = handle;
             out.same_category = false;
-            inv.pending_combo = handle; // [orig: MountWeaponSlot g_pendingWeaponSlot]
+            inv.pending_combo = handle; // [orig: MountWeaponSlot g_PendingWeaponSlot]
             return out;
         }
         current_rank = 0;
@@ -550,7 +550,7 @@ WeaponSwitchOutcome weapon_cycle_slot(const WeaponTable &table, WeaponInventory 
         }
         if (!candidate) continue;
         // EVERY cycle candidate needs the ammo score — no weapon_class exemption
-        // [orig: calculate_kill_score gate @ 0x4dff39].
+        // [orig: Score_CalculateKillScore gate @ 0x4dff39].
         if (ammo_score(table, inv, idx) != 0) {
             if (idx != start) {
                 out.kind = WeaponSwitchOutcome::kMount;

@@ -214,7 +214,7 @@ public:
 		FRIENDLY_TAGS_FULL = static_cast<int>(opennova::hud::FriendlyTagMode::kFull),
 		FRIENDLY_TAGS_BRIEF = static_cast<int>(opennova::hud::FriendlyTagMode::kBrief),
 	};
-	// The friendly-tags mode (retail g_friendlyTagsMode; the witnessed rules
+	// The friendly-tags mode (retail g_FriendlyTagsMode; the witnessed rules
 	// live in hud_math). Out-of-range values clamp to the last mode.
 	void set_friendly_tag_mode(FriendlyTagMode p_mode);
 	FriendlyTagMode get_friendly_tag_mode() const;

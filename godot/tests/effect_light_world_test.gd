@@ -119,7 +119,7 @@ func test_select_caps_at_the_witnessed_three() -> void:
 	var selected := scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null)
 	# The batch entry stores three handles and breaks the visible walk there;
 	# the 4 of Light_SelectAndEnableForDraw is the transient D3D enable count
-	# FlushBatches tears down per entry (retail: collect_render_objects_for_batch
+	# FlushBatches tears down per entry (retail: Render_CollectRenderObjectsForBatch
 	# @0x5d9229; CRenderBatchQueue_FlushBatches @0x5da26b / @0x5da5de, see
 	# docs/render/render-lighting-re.md).
 	assert_eq(selected, 3,
@@ -559,7 +559,7 @@ func test_director_reset_retires_pool_and_published_output() -> void:
 ## active row's lane; a lane left zero is effectScale 0, which drew every
 ## static model of a reloaded CP01 without its sun. Retail derives the factor
 ## per draw, every frame: 1.0 for an entity with no proximity slice
-## [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
+## [orig: Terrain_SetupEffectForEntity @ 0x5c74a0 ->
 ## Entity_ComputeSunVisibility @ 0x5c6800].
 func test_static_row_lanes_republish_after_the_director_clears_its_output() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene

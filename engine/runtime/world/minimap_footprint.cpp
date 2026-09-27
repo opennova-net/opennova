@@ -98,7 +98,7 @@ MinimapFootprintMesh minimap_footprint_from_occlusion(
 }
 
 uint32_t minimap_footprint_fill_argb(const Entity &entity) {
-	// [orig: render_collision_wireframe @0x596848..0x596880]
+	// [orig: Render_CollisionWireframe @0x596848..0x596880]
 	if (entity.team == 1) return 0xFF4050A0u;
 	if (entity.team == 2) return 0xFFA05040u;
 	if ((entity.item_attrib & kItemAttribChangeTeam) != 0) return 0xFF609F60u;
@@ -115,8 +115,8 @@ void minimap_footprint_place(const MinimapFootprintMesh &mesh,
 	// to retail's reflected screen matrix instead of leaving every asymmetric
 	// silhouette 90 degrees out of phase.
 	// [orig: HUD_DrawMapOverlay @0x5a636e passes the unfurled map heading;
-	//  render_minimap_slot_blip @0x5be55b subtracts entity[0x10];
-	//  render_collision_wireframe @0x596844..0x596bbb]
+	//  Render_MinimapSlotBlip @0x5be55b subtracts entity[0x10];
+	//  Render_CollisionWireframe @0x596844..0x596bbb]
 	const int32_t pos_q16[3] = {
 		static_cast<int32_t>(entity.position.x * 65536.0f),
 		static_cast<int32_t>(entity.position.y * 65536.0f),

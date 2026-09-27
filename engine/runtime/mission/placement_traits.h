@@ -157,7 +157,7 @@ inline bool item_casts_static_terrain_shadow(int entity_kind,
 // and static items). [orig: Terrain_CollectVisibleEntitiesForReflection
 // @ 0x5c90a0 (mask = below-water ? 0 : 0x400) -> collect_visible_sector_
 // userpoints @ 0x5c6c32..0x5c6c39 + Terrain_CollectVisibleEntities_0
-// @ 0x5c6f20 + collect_visible_entities_for_terrain @ 0x5c8c60 pools 0/1;
+// @ 0x5c6f20 + Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 pools 0/1;
 // consumed by Water_RenderReflectedWorldScene @ 0x5c8510 (sector models
 // @ 0x5c8576 -> Terrain_RenderSectorModels @ 0x5c5d30, entity waves
 // @ 0x5c857b/0x5c8590/0x5c8599); writers Entity_InitFromModel
@@ -229,11 +229,11 @@ PlacementBasis bms_to_presentation_basis(float pitch_deg, float yaw_deg,
 //  - portal buildings render per-section from per-instance visibility masks,
 //    so they cannot join a pooled static batch
 //    [orig: g_BuildingSectionVisMask consumption + Terrain_RenderSectorModels
-//    @ 0x5c5d30; collect_render_objects_for_batch @ 0x5d9156..0x5d9170;
+//    @ 0x5c5d30; Render_CollectRenderObjectsForBatch @ 0x5d9156..0x5d9170;
 //    docs/render/render-occlusion-re.md]
 //  - the MODEL is the rig source for bone matrices, never the lossy .bad
 //    records [orig: BoneAnim_BuildWorldMatrices @ 0x40c400 walks modelDef+56]
 //  - every entity is relit from the current lighting block each frame
-//    [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
+//    [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0]
 
 } // namespace opennova::mission

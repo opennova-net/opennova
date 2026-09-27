@@ -315,7 +315,7 @@ int test_pitch_draws_and_channel_pool() {
 	TEST_EXPECT(keyed.acquire(1234, 1, 10) == 13);
 	// An entity re-firing its wave while a quieter voice is live retakes its
 	// OWN channel; an id-less refire of the same wave opens a new one instead
-	// [orig: audio_find_and_open_channel @0x766F46 / @0x766F8E].
+	// [orig: Audio_FindAndOpenChannel @0x766F46 / @0x766F8E].
 	OneshotChannelPool own;
 	TEST_EXPECT(own.acquire(500, 10) == 12);
 	TEST_EXPECT(own.acquire(777, 100, 5) == 13);

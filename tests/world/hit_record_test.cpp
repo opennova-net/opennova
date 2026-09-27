@@ -1,4 +1,4 @@
-// The global hit record and the script kills that read it [orig: hitRecord
+// The global hit record and the script kills that read it [orig: g_ProjectileHitRecord
 // @0xB7C620 via Projectile_GetHitRecord @0x4E7000]. The BMS kills clear only
 // the damage word (and the owner on a KillSingle pool-0 row or any KillGroup
 // row), so a person's class callback still runs the round legs of the last

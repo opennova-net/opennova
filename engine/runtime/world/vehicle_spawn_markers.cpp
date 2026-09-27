@@ -8,7 +8,7 @@
 namespace opennova::world {
 namespace {
 // The x87 planar norm clamps before truncation. Subtractions wrap in 32 bits.
-// [orig: build_spawn_marker_budget_list @0x529D30; selector @0x529EDD]
+// [orig: Spawn_BuildMarkerBudgetList @0x529D30; selector @0x529EDD]
 int32_t planar_distance(const Entity &a, const Entity &b) {
 	const double dx = io::bam_sub(to_fixed(a.position.x), to_fixed(b.position.x));
 	const double dy = io::bam_sub(to_fixed(a.position.y), to_fixed(b.position.y));
@@ -23,7 +23,7 @@ bool vehicle_or_untyped(const Entity &e) {
 } // namespace
 
 // [orig: Game_StartMission @0x52527A..0x525301; sub_529A80 @0x529A80;
-// build_spawn_marker_budget_list @0x529B40]
+// Spawn_BuildMarkerBudgetList @0x529B40]
 void VehicleSystem::build_spawn_markers() {
 	spawn_markers_enabled_ = false;
 	spawn_markers_.clear();
@@ -84,7 +84,7 @@ void VehicleSystem::build_spawn_markers() {
 	}
 }
 
-// [orig: assign_overlay_spawn_points @0x529E60; its every-32 gate is
+// [orig: Spawn_AssignOverlaySpawnPoints @0x529E60; its every-32 gate is
 //  Server_TickUpdate's `test tick,1Fh` @0x51D8C4]
 void VehicleSystem::tick_spawn_markers() {
 	if (!spawn_markers_enabled_)

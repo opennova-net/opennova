@@ -1,7 +1,7 @@
 /* MUS bytecode VM (interpreter).
 
    Witnessed dispatch loop: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720.
-   Witnessed opcode table: Jointops.exe!AudioVM_OpcodeDispatchTable @ 0x0084F220
+   Witnessed opcode table: Jointops.exe!g_AudioVMOpcodeDispatchTable @ 0x0084F220
    (65 entries, 0x00..0x40). Stack element size = 4 bytes (int32).
    Two stacks: data (EBP-tracked, 256 entries here) + call (EDI-tracked,
    64 frames here). 32-instruction budget per dispatch loop call.
@@ -752,7 +752,7 @@ static inline uint32_t mus_rol32(uint32_t v, int s) {
 }
 
 /* Jointops.exe!AudioVM_Intrinsic_GGRnd @ 0x672320 (byte-exact port).
-   Pops 2 (NOS=lo, TOS=hi). The process-global seed AudioVM_GGRndSeed @ 0x84F210 is
+   Pops 2 (NOS=lo, TOS=hi). The process-global seed g_AudioVMGGRndSeed @ 0x84F210 is
    statically initialised to 0xBABEFACE in the binary and updated in place:
        seed = rol32(seed + rol32(seed, 11), 2)
    Then (asm `and eax,0FFFFh; idiv ecx`): rnd = (seed & 0xFFFF) % span, span = hi-lo+1

@@ -83,7 +83,7 @@ void for_each_routed_sector(const TerrainSceneSnapshot &scene,
 			// The empty-sector branch reuses quadrant 1 topology with the
 			// packed key's high bit; view +100 is its only skip policy.
 			// [orig: PolyTrn_RenderFrame @ 0x60EAC0, routing @ 0x60EC94..0x60ECBD;
-			// terrain_render_visible_sectors @ 0x6090C0, routing @ 0x609238..0x609263]
+			// Terrain_RenderVisibleSectors @ 0x6090C0, routing @ 0x609238..0x609263]
 			const bool zero_height = sector_id == 0;
 			if (zero_height && view.skip_empty_sectors) continue;
 
@@ -123,7 +123,7 @@ VisibleBounds track_terrain_visible_bounds(const TerrainSceneSnapshot &scene,
 // as the original decoder. Normals are device metadata for the debug normal
 // view (terrain.gdshader debug mode 3); retail's packed vertices have no
 // normal channel.
-// [orig: decode_terrain_tile_vertices @ 0x602AA0, zero-height store @ 0x602DC9]
+// [orig: Terrain_DecodeTileVertices @ 0x602AA0, zero-height store @ 0x602DC9]
 std::vector<TerrainTileVertex> build_terrain_tile_vertices(
 		const CptFile &cpt, const TrnConfig &trn, int tile_index, bool zero_height) {
 	constexpr int atlas_size = 1024;
@@ -373,7 +373,7 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 	draw_list_.debug = TerrainFrameDebugCounters{};
 	draw_list_.debug.compile_index = compile_index_;
 	// The bare retail compare: an unguarded signed cameraY <
-	// Env_WaterHeightFixed (no zero test on either side; terrain heights are
+	// g_EnvWaterHeightFixed (no zero test on either side; terrain heights are
 	// non-negative, so a dry map's 0 height never fires in practice).
 	// [orig: setl @ 0x60fea5, store @ 0x60FEE0 -> dword_319FB3C @ 0x60915F]
 	draw_list_.below_water = view.cam_y < view.water_height;
@@ -443,7 +443,7 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 	// Retail draws the visible list in emission order: the batch's bubble
 	// sort keys on entry +0x14, which no writer fills (the traversal stores
 	// +0/+4/+8/+0xC/+0x10/+0x18 only), so it never reorders.
-	// [orig: render_terrain_sector_batch sort @ 0x6093C0..0x609550;
+	// [orig: Terrain_RenderSectorBatch sort @ 0x6093C0..0x609550;
 	// Terrain_TraverseQuadtreeNode list stores @ 0x608FDA..0x609006]
 	draw_list_.debug.visible_patches = static_cast<int>(visible_.size());
 	const int count = std::min(static_cast<int>(visible_.size()), kPatchBudget);

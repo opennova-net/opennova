@@ -221,7 +221,7 @@ void ClientRuntime::adopt_tracked_window(const ZoneTimerWindow &window) {
 	} else {
 		// Another entity: adopted only when at least as near as the tracked one
 		// and within 20.0 u of the local player. The local position is the
-		// recipient's 0x0A anchor (retail reads g_local_player_entity->Position).
+		// recipient's 0x0A anchor (retail reads g_LocalPlayerEntity->Position).
 		const replication::ClientState &cs = view_.state();
 		auto dist_to = [&](uint16_t handle) -> double {
 			const replication::ClientEntityState *row = cs.find(handle);
@@ -427,7 +427,7 @@ bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
 	    round.shooter_handle != joiner_->self_handle())
 		return false;
 	// NO freshness gate on this path. Retail's fire action splits on is_authority
-	// (`cmp g_napi_np_ctx.is_authority / jz loc_42BF41` @0x42bdfd..0x42be03): only the
+	// (`cmp g_NapiNPCtx.is_authority / jz loc_42BF41` @0x42bdfd..0x42be03): only the
 	// AUTHORITY arm runs PlayerSlot_IsActive @0x4fc760 for its own local player and bails
 	// at @0x42be44. A joiner (is_authority == 0) jumps straight to the client arm, spawns
 	// its predicted round (RoundData_SpawnRound @0x42c030) and queues the 0x06
@@ -512,8 +512,8 @@ bool ClientRuntime::queue_chat_message(uint8_t channel, const std::string &text)
 	// peer [orig: Chat_SendAllMessage @0x49AC70 / sub_49ABA0 @0x49ABA0 —
 	//  `if (!is_mp_session_peer)`]; a joiner is always the peer.
 	if (channel == 4 || channel == 5) return false;
-	// `(!g_death_screen_active || g_spawn_success_gate)`; the admin key tests
-	// `!g_death_screen_active` alone [orig: @0x49A6B0 / @0x49A780 first tests].
+	// `(!g_DeathScreenActive || g_SpawnSuccessGate)`; the admin key tests
+	// `!g_DeathScreenActive` alone [orig: @0x49A6B0 / @0x49A780 first tests].
 	// authoritative_spawn_released_ models the spawn-success gate's clear.
 	const bool death_screen = view_.state().death_screen_active;
 	if (channel == 11 ? death_screen : (death_screen && authoritative_spawn_released_))
@@ -538,10 +538,10 @@ bool ClientRuntime::queue_chat_message(uint8_t channel, const std::string &text)
 
 // [orig: Game_ProcessMainFrame — `if (--dword_24D1DDC <= 0) { dword_24D1DDC =
 //  62; if (is_in_session) { CNetQuality_UpdateMetrics(); CNetQuality_SetLevel
-//  (&g_netQuality, level); } }`, ahead of the client net frame]. The peer
+//  (&g_NetQuality, level); } }`, ahead of the client net frame]. The peer
 // (RECEIVE) half of CNetQuality_UpdateMetrics @0x4C52C0: cleared while any of
-// g_net_spawn_suspended / dword_81474C / g_spawn_success_gate /
-// g_preround_delay_timer holds the peer, else one sample of frame pressure,
+// g_NetSpawnSuspended / dword_81474C / g_SpawnSuccessGate /
+// g_PreRoundDelayTimer holds the peer, else one sample of frame pressure,
 // the ping ring's mean and the loss counter; the combined scalar is
 // max(host, client) and the host window never runs on a non-authority, so it
 // folds as 0. The loss counter (stru_A86920.aimPoint.Y) is read-and-zeroed
@@ -909,7 +909,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	if (role_ == Role::Joiner) {
 		stage_reload_notifications_before_body_tick();
 		// The session var the 0x81 tone ladder reads, mirrored from the
-		// connection's server-info landing [orig: g_sessionvar_exp_fanfare].
+		// connection's server-info landing [orig: g_SessionVarExpFanfare].
 		view_.state().exp_fanfare = joiner_->exp_fanfare();
 	}
 
@@ -1022,7 +1022,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				send_messages.push_back(std::move(resubmit));
 		}
 		// The witnessed deploy gate the 0x2C RTT ping and the 0x0C uplink share: is_in_session &&
-		// !is_authority && !dword_81474C && !g_spawn_success_gate. A Joiner is always !is_authority;
+		// !is_authority && !dword_81474C && !g_SpawnSuccessGate. A Joiner is always !is_authority;
 		// deployed_ and authoritative_spawn_released_ model those two independent gates.
 		const bool deployed_joiner =
 				joiner_->in_match() && is_deployed() && joiner_->has_self_handle();

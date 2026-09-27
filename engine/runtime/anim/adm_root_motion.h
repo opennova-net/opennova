@@ -88,7 +88,7 @@ public:
 	// the FLOOR keyframe, AnimChannel_InterpolateKeyframe @0x40b32f].
 	//
 	// Retail's own consume is a per-TICK floor-frame sample (out[5] ->
-	// g_animEventTriggerBits @0x40b8a3) parity-gated to every other tick
+	// g_AnimEventTriggerBits @0x40b8a3) parity-gated to every other tick
 	// (org1 odd @0x4bf144 / org2 even @0x4b76e6), which at the authored-30fps
 	// vs 62 Hz ratio fires each entered frame once — that per-tick form is
 	// the authority path (infantry_anim_sound_pass). This scan serves the

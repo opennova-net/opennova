@@ -102,7 +102,7 @@ void PlayerWeaponEffects::on_viewmodel_refresh() {
 
 // A committed weapon switch from the sim: reinstall the FP viewmodel/FSM for
 // the newly equipped def [orig: the mount's model re-resolve -- the FP render
-// model follows the equipped slot, count_weapon_effects_and_update_viewmodel
+// model follows the equipped slot, Player_CountWeaponEffectsAndUpdateViewModel
 // @ 0x4dc9e0]. Redundant reinstalls (the installed def already IS the target
 // and its viewmodel exists) are skipped so the queued SWITCHTO draw-in
 // survives.

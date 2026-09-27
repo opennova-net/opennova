@@ -119,8 +119,8 @@ void WeatherCore::set_wind_duration_ticks(int ticks) {
 void WeatherCore::set_exposure_from_outdoor_iris(float light_x, float light_y,
 		float light_z, float iris_percent, float iris_center) {
 	// The iris inputs are the blocks' [1] slots (step + lightning additive,
-	// pre modulation) / 255 [orig: terrain_sector_compute_lighting @ 0x5c7550
-	// reads Env_LightBlock[1]/Env_SkyBlock[1]/Env_GroundBlock[1]]; the outdoor
+	// pre modulation) / 255 [orig: Terrain_SectorComputeLighting @ 0x5c7550
+	// reads g_EnvLightBlock[1]/g_EnvSkyBlock[1]/g_EnvGroundBlock[1]]; the outdoor
 	// directional term keeps full sun visibility (8/8 rays).
 	const int gain = iris_gain(
 			packed_to_rgb01(sun_block.pre_mod_color),
@@ -139,7 +139,7 @@ void WeatherCore::set_exposure_from_iris_samples(const int32_t *samples,
 	// camera ray, each classified by the embedder (indoor / indoor-without-
 	// interior-data / outdoor sun level 0..8), each run through the iris
 	// curve, the INT gains averaged /3 [orig:
-	// compute_ambient_light_along_direction @ 0x5c7a00 — samples at hit,
+	// Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00 — samples at hit,
 	// hit+(cam-hit)/3, hit+2(cam-hit)/3; (s0+s1+s2)/3 @ 0x5c7b45].
 	if (samples == nullptr || count <= 0) {
 		set_exposure_from_outdoor_iris(light_x, light_y, light_z,
@@ -159,7 +159,7 @@ void WeatherCore::set_exposure_from_iris_samples(const int32_t *samples,
 		} else if (sample == kIrisSampleIndoor) {
 			// Indoors: directional zeroed, sky/ground replaced by the static
 			// ceiling/floor indoor ambient blocks
-			// [orig: @ 0x5c7660..0x5c76fe — Env_CeilingBlock/Env_FloorBlock].
+			// [orig: @ 0x5c7660..0x5c76fe — g_EnvCeilingBlock/g_EnvFloorBlock].
 			gain = iris_gain(zero_rgb, ceiling, floor,
 					light_x, light_y, light_z, iris_center, iris_percent);
 		} else {

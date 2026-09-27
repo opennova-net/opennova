@@ -69,8 +69,8 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kRadiansPerDegree = kPi / 180.0;
 constexpr double kDegreesPerRadian = 180.0 / kPi;
 
-// The retail 1024-entry Q22 sine table (g_bam_sin_table_q22 @0x31bfbc0) and
-// its cosine view (off_849934 = &g_bam_sin_table_q22[256]): one entry per
+// The retail 1024-entry Q22 sine table (g_BamSinTableQ22 @0x31bfbc0) and
+// its cosine view (off_849934 = &g_BamSinTableQ22[256]): one entry per
 // 2^22 BAM, indexed by `angle >> 22`, each read as `entry * (1 / 4194304)`.
 // The entries are the truncated Q22 sines.
 constexpr int kBamTableEntries = 1024;

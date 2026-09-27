@@ -38,8 +38,8 @@ struct SceneOverlaySubmission {
 // The SELFLUM surfaces of one model for the overlay tail: the sun glare and
 // the water glint, whose placement, UPL_INTENSITY submit value and Q3 copy
 // env/Celestial keeps while this stage draws them (retail submits both with
-// flags 0x110 at the scene tail: render_skybox_sun_glow @ 0x5ad0f7,
-// update_sun_glare @ 0x5ad470). Each mesh's triangle list is read once (the
+// flags 0x110 at the scene tail: Render_SkyboxSunGlow @ 0x5ad0f7,
+// Environment_UpdateSunGlare @ 0x5ad470). Each mesh's triangle list is read once (the
 // authored geometry never changes) and placed by its instance's global
 // transform every frame; the SelfLumColor (u_rgb_mod) and the diffuse
 // texture (u_diffuse) come from the surface's live material.

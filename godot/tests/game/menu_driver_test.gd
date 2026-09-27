@@ -563,7 +563,7 @@ func test_scroll_press_never_ghost_clicks_another_widget() -> void:
 
 func test_combo_popup_row_hover_tracks_mouse() -> void:
 	# The popup-exclusive pump hovers the row under the mouse (row style 2)
-	# [orig: scene_end_frame @ 0x63e600 gate @ 0x63e691; CListWnd_DrawItems
+	# [orig: CUIScene_EndFrame @ 0x63e600 gate @ 0x63e691; CListWnd_DrawItems
 	# @ 0x643f30 mouseover row style].
 	var frame := MenuFrame.new()
 	add_child_autofree(frame)
@@ -689,7 +689,7 @@ func test_combo_outside_click_dismisses_and_is_consumed() -> void:
 	assert_true(driver.is_combo_popup_open(combo), "popup open")
 	watch_signals(driver)
 	# A press outside the popup (over the OTHER button) dismisses; the
-	# dismissing click is consumed [orig: combobox_handle_event @ 0x65c190,
+	# dismissing click is consumed [orig: CComboWnd_HandleEvent @ 0x65c190,
 	# outside check @ 0x65c290 — D-MNU-11/12].
 	_click_widget(driver, "OTHER")
 	assert_false(driver.is_combo_popup_open(combo), "outside click dismissed the popup")
@@ -714,8 +714,8 @@ func test_edit_click_focus_type_and_enter_commit() -> void:
 	assert_eq(driver.get_widget_text(edit), "A", "the character landed")
 	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
 			["NAME_EDIT", "edit", -1, "A"])
-	# Enter commits and releases focus [orig: edit_widget_handle_key_event
-	# @ 0x6623a0 — clears g_ui_focus_wnd and fires the commit event].
+	# Enter commits and releases focus [orig: CEditWnd_HandleKeyEvent
+	# @ 0x6623a0 — clears g_UIFocusWnd and fires the commit event].
 	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "Enter consumed")
 	assert_eq(driver.get_focused_widget(), -1, "commit released focus")
 	assert_eq(driver.get_widget_text(edit), "A", "committed text persists")

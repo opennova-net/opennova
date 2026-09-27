@@ -65,7 +65,7 @@ opennova::renderer::ObjectProjectionSphere collision_projection_sphere_from_3di(
     bool zero_center = false);
 
 // Build the runtime occlusion model from the parsed OCCL tables
-// [orig: load_occlusion_model_data @ 0x5b4a00].
+// [orig: ThreediGp_LoadOcclusionModelData @ 0x5b4a00].
 bool occlusion_model_from_3di(const opennova::threedi::Threedi3di3 &model,
                               opennova::world::OcclusionModel &out);
 

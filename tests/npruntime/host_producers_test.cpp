@@ -9,7 +9,7 @@
 //   - C2S 0x0D chat: strip, throttle, the int-triplet sender-only rule and the
 //     per-channel fan [orig: NapiNPServer_HandleChatMessage @0x513760];
 //   - C2S 0x3D stamps the frame clock [orig: NapiNPServerMsg_0x03D @0x500EC0];
-//   - C2S 0x42 -> S2C 0x70 from the limit table [orig: serialize_weapon_overlay_slots_0 @0x5105A0];
+//   - C2S 0x42 -> S2C 0x70 from the limit table [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0];
 //   - C2S 0x51 permanent-death spectator convert + S2C 0x32 [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840];
 //   - the medic revive transaction 0x3A / 0x61 / 0x1E ev 38 with victim then
 //     healer [orig: GameEvent_RevivePlayer @0x517CD0].
@@ -283,7 +283,7 @@ bool check_host_quality_window() {
 	if (!expect(f.ctx.host_network_quality == 13,
 			"0x79 carries the send window's folded quality"))
 		return false;
-	// Frame pressure reads the FR counter [orig: @0x4C531B g_statsAvgFps]:
+	// Frame pressure reads the FR counter [orig: @0x4C531B g_StatsAvgFps]:
 	// 8 fps scores 256 - 128 = 128, 0 (before the first 2 s window) the
 	// ceiling 255. One sample each into a fresh window averages /5.
 	HostFixture slow(2);
@@ -410,7 +410,7 @@ bool check_vehicle_spawn_availability() {
 			"the live deployable counts"))
 		return false;
 	// The stock host config's unlimited_vehicles reads every row unlimited.
-	// [orig: dword_24D1E38 @0x5105F5..0x5105FF; Config_SetDefaults @0x54D352]
+	// [orig: g_RulesUnlimitedVehicles @0x5105F5..0x5105FF; Config_SetDefaults @0x54D352]
 	std::vector<ProtocolMessage> replies = f.dispatch(0, c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {});
 	const std::vector<uint8_t> unlimited = {3, 7, 0, 0xFF, 0xFF, 9, 0, 0xFF, 0xFF, 0, 0};
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::VEHICLE_SPAWN_AVAILABILITY &&

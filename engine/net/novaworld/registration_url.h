@@ -6,7 +6,7 @@
 namespace opennova {
 
 // Parsed registration URL emitted by the NovaLogic launcher and consumed by
-// parse_connection_query_string @0x54dfb0 in retail Jointops.exe (jodemo:
+// URL_ParseConnectionQueryString @0x54dfb0 in retail Jointops.exe (jodemo:
 // Auth_ParseRegistrationURL @0x514c40). Two mutually exclusive shapes on
 // the wire:
 //
@@ -23,10 +23,10 @@ namespace opennova {
 //      LAN-discovered endpoint instead of the NK relay pair and reports the
 //      number as the session's "Lan" var. GS is copied by the parser but no
 //      retail code ever reads the buffer (a single xref: the parse call).
-//      [orig: LN `atol` @0x54e33e; GS `strcpy(gs_buf, ..)` @0x54e38a;
+//      [orig: LN `atol` @0x54e33e; GS `strcpy(g_GsBuf, ..)` @0x54e38a;
 //       consumers CNapiGameSession_InitTransportConnection @0x4c9e6c
-//       (`if (g_lobby_num)` selects byte_C8FE7C/byte_C8FEBC over nk_buf /
-//       nk_extra_buf) and CNapiGameSession_ConnectOrHost @0x4d5418 ("Lan")]
+//       (`if (g_LobbyNum)` selects byte_C8FE7C/byte_C8FEBC over g_NkBuf /
+//       g_NkExtraBuf) and CNapiGameSession_ConnectOrHost @0x4d5418 ("Lan")]
 //
 // Only the NK= and CK= values are cipher-obfuscated (novacrypto::
 // url_cipher_decode with the respective key literals). NI/NP/BK/LN/GS are
@@ -50,9 +50,9 @@ struct RegistrationUrl {
 	std::string gs;                 // GS= plaintext; parsed, inert in retail
 };
 
-// NK-split separator, witnessed: `strstr(nk_buf, delimiters)` with
-// delimiters @0x7c3b58 == ":", and the tail copied with a single-byte skip
-// (`sprintf(nk_extra_buf, "%s", ni_len + 1)`). Overridable at call-time
+// NK-split separator, witnessed: `strstr(g_NkBuf, delimiters)` with
+// asc_7C3B58 @0x7c3b58 == ":", and the tail copied with a single-byte skip
+// (`sprintf(g_NkExtraBuf, "%s", ni_len + 1)`). Overridable at call-time
 // for synthetic tests only.
 inline constexpr const char *DEFAULT_NK_SEPARATOR = ":";
 

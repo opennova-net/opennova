@@ -577,7 +577,7 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 // "ServerPlayResult" -> CNapiGameSession_HandleVerifyResponse @0x4d1e00,
 // "ServerStopPlaying" -> CNapiGameSession_HandleServerDisconnectMsg @0x4d1fa0,
 // "ServerLeaveNovaWorld" -> CNapiGameSession_HandlePuntNotification @0x4d20b0,
-// "ServerCommand" -> loc_4D22F0, "ServerGLSVSSResults" -> CNapiGameSession_HandleGLSVSSResults
+// "ServerCommand" -> CNapiGameSession_HandleServerCommand, "ServerGLSVSSResults" -> CNapiGameSession_HandleGLSVSSResults
 // @0x4d3380; the four ServerNWUStat* entries are empty in retail.
 void ClientSession::dispatch_server_container(const NapiMessage &container,
                                               std::vector<std::vector<uint8_t>> &out) {
@@ -660,7 +660,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 	}
 	if (strutil::iequals(name, "ServerStopPlaying")) {
 		// [orig: CNapiGameSession_HandleServerDisconnectMsg @0x4d1fa0 — the triple, state 4,
-		//  g_mission_exit_reason = 12]
+		//  g_MissionExitReason = 12]
 		Notice notice;
 		notice.kind = Notice::Kind::StopPlaying;
 		notice.fields = parse_server_result_fields(container);
@@ -673,7 +673,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 	}
 	if (strutil::iequals(name, "ServerLeaveNovaWorld")) {
 		// [orig: CNapiGameSession_HandlePuntNotification @0x4d20b0 — the triple, state 0,
-		//  RequestDisconnect, g_mission_exit_reason = 12, ERR_PUNTEDFROMNOVAWORLD]
+		//  RequestDisconnect, g_MissionExitReason = 12, ERR_PUNTEDFROMNOVAWORLD]
 		Notice notice;
 		notice.kind = Notice::Kind::LeaveNovaWorld;
 		notice.fields = parse_server_result_fields(container);

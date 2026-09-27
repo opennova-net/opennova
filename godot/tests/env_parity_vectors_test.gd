@@ -44,7 +44,7 @@ extends GutTest
 #   @ 0x57e9fc..0x57ea16; seed @ Environment_SnapStateToTargets @ 0x57d1e0],
 #   lightning SET-per-epoch + integer additives [orig: @ 0x57ec6f/@ 0x57ed0a;
 #   Environment_SetLightningFlash @ 0x57d320], the witnessed ambient
-#   Env_WindScale 256 + stable-envelope strength scale
+#   g_EnvWindScale 256 + stable-envelope strength scale
 #   [orig: Environment_InitDefaults @ 0x57c1d1], and keyframe-target chasing
 #   [orig: Environment_ComputeTimeOfDayColors @ 0x57de40]. wa/* is now the
 #   witnessed ambient-256 series, byte-equal to the env_render_unit ctest
@@ -63,7 +63,7 @@ extends GutTest
 #   refreshes only the target @ 0x57d2da; smooth-eighth @ 0x57eecc), integer
 #   accumulators [orig: @ 0x57f1a5..0x57f1d1], and the render-side UV
 #   translation with the accumulator NEGATIVE on U
-#   [orig: render_skybox @ 0x5791de..0x579260] (the old float port added it
+#   [orig: Render_Skybox @ 0x5791de..0x579260] (the old float port added it
 #   positively on both axes and skipped the ramp). Key shape is now the four
 #   pushed offsets. sky/verts re-dumped: the mesh comes from
 #   engine/formats/env build_sky_dome_mesh (float32-stored, v22.z last-digit shift);
@@ -72,13 +72,13 @@ extends GutTest
 #   minted): NEW water/noise (the per-frame noise color + DuDv texture heads
 #   [orig: Water_GenerateNoiseTextures @ 0x5c0360], cross-pinned byte-equal
 #   to the env_render_unit ctest landmarks) and NEW water/uv_state [orig:
-#   render_water_surface @ 0x5c3348..0x5c33db] — both keys moved to the
+#   Render_WaterSurface @ 0x5c3348..0x5c33db] — both keys moved to the
 #   env_render_unit ctest with the ADR 0043 d10 env-core sweep (the WaterCore
 #   / WeatherCore bindings that served them are C++-only now);
 #   c*/water_params re-shaped: the u_scroll_speed magic-factor float died with
 #   the invented waves; the u_water_uv tail that replaced it died too
 #   (2026-09-24, R10-1): the noise texcoords are the strip's absolute world/32
-#   pair [retail render_water_strip_detailed @ 0x5c2aec..0x5c2b00], the
+#   pair [retail Render_WaterStripDetailed @ 0x5c2aec..0x5c2b00], the
 #   scale/bias pair only feeds the strip depth (env_render_unit pins it) and
 #   the cloud-scroll offsets are never read back. Every
 #   other water key (mesh, mission-height ladder, snap, per-cell lit colors) stayed
@@ -86,12 +86,12 @@ extends GutTest
 #   free cell (the terrain rung needs a loaded .trn - see NOT PINNED).
 #   Celestial leg 2026-07-06 (env #14 CLOSED, #32 minted-and-closed, #33
 #   minted): NEW celestial/body_distance (camera + dir * 64 [orig:
-#   render_celestial_bodies @ 0x5acaa0] - the retired dome_distance key pinned
+#   Render_CelestialBodies @ 0x5acaa0] - the retired dome_distance key pinned
 #   the invented dir*2000*height_scale model), celestial/body_alpha (the
 #   witnessed sun overcast/SunDim and moon fog-distance folds), celestial/glow
 #   (the dot^4/2 glare chain) and celestial/occlusion (the #14 window +
 #   dead-band hysteresis + jitter pattern, asset-free [orig:
-#   render_skybox_sun_glow @ 0x5acd00]; the key moved to the env_render_unit
+#   Render_SkyboxSunGlow @ 0x5acd00]; the key moved to the env_render_unit
 #   ctest with the ADR 0043 d10 sweep, like the smoother/* ColorSmoother keys).
 #   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
 #   still live via its sub_5AD8B0 caller) stayed byte-identical.
@@ -100,7 +100,7 @@ extends GutTest
 #   the witnessed order [orig: Environment_UpdateWeatherTick block sequence
 #   @ 0x57ef97..0x57f03c] with the modulator chasing the outdoor iris gain
 #   over 62 ticks [orig: @ 0x57e512..0x57e538; ColorBlock_SetStepDeltas
-#   @ 0x57d940; curve terrain_sector_compute_lighting @ 0x5c7550]. Exactly
+#   @ 0x57d940; curve Terrain_SectorComputeLighting @ 0x5c7550]. Exactly
 #   the weather checkpoint rows re-dumped under that witness (wa/k016,
 #   wa/k064, wa/k256, wb/k016..k096 - the smoothed colors
 #   now carry the exposure; hand-check: wb/k064 0x31*61/64 = 0x2E); every
@@ -123,24 +123,24 @@ extends GutTest
 #   rows, and sky/flat moves to the same scaled cloud byte; the focused
 #   envscale_runtime_test pins ceiling/floor plus lightning separately
 #   [orig: Color_ScaleRGBAndPack @ 0x57f890].
-#   R9-14 re-grill 2026-09-24: Env_TerrainLightCombined is an MMX word lane,
+#   R9-14 re-grill 2026-09-24: g_EnvTerrainLightCombined is an MMX word lane,
 #   light byte x 0xB5 plus the sky byte unpacked WITH ITSELF (x 257), added
 #   with unsigned word saturation, then >> 8 [orig: Environment_UpdateWeatherTick
 #   @ 0x57f0c2..0x57f0ce]; the old (light x 0xB5 >> 8) + sky ran one LSB low.
-#   Exactly the nine c*/t*/water rows (Env_WaterColorLit = water x combined
+#   Exactly the nine c*/t*/water rows (g_EnvWaterColorLit = water x combined
 #   >> 7) moved, each by one step in one or two channels; every other key
 #   UNCHANGED.
 #   2026-09-26: the c*/t*/water rows lost their trailing murk byte with the
 #   retired u_water_murk feed. The murk rides the strip's per-vertex COLOR.a
-#   (the angle-weighted murk x distance chain [orig: render_water_strip_detailed
+#   (the angle-weighted murk x distance chain [orig: Render_WaterStripDetailed
 #   @ 0x5c2d3f..0x5c2ef6], pinned by the env_render_unit ctest's
 #   water_strip_row_colors cases); the env murk itself stays in c*/consts. No
 #   value was re-dumped: every lit-colour token is UNCHANGED.
 #   OT-E6 re-grill 2026-09-27: retail draws the dome in the render basis the
 #   builder authors it in (world matrix = the anchor translation alone
-#   [orig: render_skybox @ 0x5790e8..0x579146]; UV1/UV2 = render x/z scaled
-#   [orig: build_sky_dome_mesh @ 0x578db0]) and the scroll's camera term runs
-#   on the same render axes [orig: render_skybox @ 0x5791de..0x579260]. The
+#   [orig: Render_Skybox @ 0x5790e8..0x579146]; UV1/UV2 = render x/z scaled
+#   [orig: SkyDome_BuildMesh @ 0x578db0]) and the scroll's camera term runs
+#   on the same render axes [orig: Render_Skybox @ 0x5791de..0x579260]. The
 #   dome drawn identity into Godot laid texture u along render z: a mirrored
 #   cloud field. sky/verts re-dumped as the x/z swap of the old samples and
 #   sky/k001 + sky/k064 as the render-basis camera term (render x = Godot z,
@@ -189,7 +189,7 @@ const FLOAT_EPSILON := 1e-4
 const GRID_TIMES: Array[int] = [0, 550, 600, 615, 1200, 1830, 1845, 1900, 2200]
 
 # Glare sweep inputs (EnvFile.compute_sun_glare pins the dot^32 curve
-# [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]).
+# [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]).
 const GLARE_DOTS: Array[float] = [-1.0, -0.5, 0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 1.0]
 const GLARE_BRIGHTNESS: Array[int] = [0, 32, 64, 128, 192, 255]
 
@@ -611,7 +611,7 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 	sky.environment_path = NodePath("../EnvSky0")
 	add_child_autofree(sky)
 
-	# Dome mesh invariants [orig: build_sky_dome_mesh @ 0x578db0]: 21x21 =
+	# Dome mesh invariants [orig: SkyDome_BuildMesh @ 0x578db0]: 21x21 =
 	# 441 vertices, 20*20*2 = 800 triangles (2400 indices).
 	var mesh: ArrayMesh = sky.get_mesh_instance().mesh
 	var arrays := mesh.surface_get_arrays(0)
@@ -644,12 +644,12 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 		var off1: Vector2 = sky.get_cloud_material().get_shader_parameter("u_scroll_offset1")
 		var off2: Vector2 = sky.get_cloud_material().get_shader_parameter("u_scroll_offset2")
 		floats["sky/k%03d" % checkpoint] = [off1.x, off1.y, off2.x, off2.y]
-	# Dome anchor rides at half camera height [orig: render_skybox @ 0x5790d0].
+	# Dome anchor rides at half camera height [orig: Render_Skybox @ 0x5790d0].
 	var dome_pos: Vector3 = sky.get_mesh_instance().global_position
 	var sky_height: float = sky.get_sky_material().get_shader_parameter("u_sky_height")
 	floats["sky/anchor"] = [dome_pos.x, dome_pos.y, dome_pos.z, sky_height, cam.global_position.y]
 
-	# advanced_clouds 0 flat pass [orig: render_skybox @ 0x579b42]: the dome
+	# advanced_clouds 0 flat pass [orig: Render_Skybox @ 0x579b42]: the dome
 	# flat-shades with cloud_tint (cfg1).
 	var env_flat := _add_env_node(_make_cfg(1), "EnvSkyFlat")
 	env_flat.time_of_day = 1200.0
@@ -667,8 +667,8 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 
 func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	# Strip-mesh semantics (env #29 LIVE): the surface rebuilds per frame from
-	# the witnessed screen march [orig: render_water_strip_detailed @ 0x5c27d0
-	# under render_water_surface @ 0x5c32c0; <=5-row batches through the static
+	# the witnessed screen march [orig: Render_WaterStripDetailed @ 0x5c27d0
+	# under Render_WaterSurface @ 0x5c32c0; <=5-row batches through the static
 	# strip table word_841328, walk @ 0x5c3164..0x5c329e] — the 65x65 grid
 	# stand-in and its camera-snap positioning died with it, so the pins here
 	# are the no-camera rung, the batch-unroll index head, and the first/last
@@ -690,8 +690,8 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	water.advance_frame(TICK)
 	# No camera in strip_vp -> no strip surface: the march needs the projected
 	# screen block, and retail only runs it inside the camera pass
-	# [orig: render_water_strip_detailed @ 0x5c27d0 projects via
-	#  terrain_project_sector_to_screen @ 0x5c0bf0 before emitting rows].
+	# [orig: Render_WaterStripDetailed @ 0x5c27d0 projects via
+	#  Terrain_ProjectSectorToScreen @ 0x5c0bf0 before emitting rows].
 	var pre_surfaces: int = (water.get_mesh_instance().mesh as ArrayMesh).get_surface_count()
 
 	# Height ladder, mission/BMS rung: world-driven height wins; clearing (NAN)
@@ -758,7 +758,7 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 		occlusion.append("%02X%02X" % [glare.glare, glare.fog_whiten])
 	bytes["celestial/glare_occlusion"] = " ".join(occlusion)
 
-	# Bodies place at camera + direction * 64 [orig: render_celestial_bodies
+	# Bodies place at camera + direction * 64 [orig: Render_CelestialBodies
 	# @ 0x5acaa0] — the old dome_distance key pinned the invented dir*2000
 	# model (env #32).
 	floats["celestial/body_distance"] = [EnvFile.celestial_body_distance()]
@@ -775,7 +775,7 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 	]
 
 	# The glow alpha chain (dot^4/2 x brightness x folds) [orig:
-	# render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9].
+	# Render_SkyboxSunGlow @ 0x5acfb8..0x5ad0a9].
 	floats["celestial/glow"] = [
 		EnvFile.glare_glow_alpha(1.0, 256, 0.0, 0.0),
 		EnvFile.glare_glow_alpha(0.5, 256, 0.0, 0.0),
@@ -895,7 +895,7 @@ func test_environment_parity_vectors() -> void:
 # The env-node sky getter serves the weather writeback (the smoothed,
 # modulated block), falling back to the raw keyframe until a tick has
 # written — the same contract as fill/sun/fog [orig: entity constants read
-# Env_SkyBlock[0] @ 0x5c8090; writeback = the weather tick's block pass].
+# g_EnvSkyBlock[0] @ 0x5c8090; writeback = the weather tick's block pass].
 func test_sky_ambient_serves_smoothed_writeback() -> void:
 	var env := _add_env_node(_make_cfg(0), "EnvSkyWB")
 	env.time_of_day = 1200.0
@@ -932,7 +932,7 @@ func test_sky_ambient_serves_smoothed_writeback() -> void:
 # The NVG hemisphere rewrite lives in the published object lighting block
 # alone; the env colour getters (water, particles, scars, the slot drape)
 # keep serving the raw blocks [orig: CTerrainRenderer_BuildLightingShaderConstants
-# @ 0x5c820b..0x5c82e9; Env_WaterColorLit @ 0x57f177 from the raw blocks].
+# @ 0x5c820b..0x5c82e9; g_EnvWaterColorLit @ 0x57f177 from the raw blocks].
 func test_nvg_view_rewrites_only_the_object_block() -> void:
 	var env := _add_env_node(_make_cfg(0), "EnvNvg")
 	env.time_of_day = 1200.0

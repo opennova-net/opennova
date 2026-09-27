@@ -2,7 +2,7 @@
 // the loadout service (C2S 0x2F -> S2C 0x5A), the extended-uplink equipped-weapon gate, and the
 // player spawn default read. POD and def-parser-free: weapon_table_build.h (this directory)
 // builds it from a parsed DefWeaponsFile; the engine feeds it from the resource root
-// (Simulation::load_weapon_table). [orig: the AdmDefs table @0x24E7FE0, 255 x 1120 B;
+// (Simulation::load_weapon_table). [orig: the g_AdmDefs table @0x24E7FE0, 255 x 1120 B;
 // docs/net/novaworld-net-re.md §5.57]
 #pragma once
 
@@ -55,7 +55,7 @@ struct WeaponTableEntry {
     // it against the Gametext "Overlays" section at parse and keeps the char* at
     // AdmDef+0x3A0; we keep the key and the HUD resolves at draw. Empty = key absent ->
     // the STROVER_USEGUN default label. [orig: @0x544d6c parse; consumer
-    // draw_vehicle_seat_and_armory_labels @0x5a3538]
+    // HUD_DrawVehicleSeatAndArmoryLabels @0x5a3538]
     std::string attach_text_id;
 	std::string hud_icon, crosshair, commanders_x, hud_loadout_select;
 	int32_t hud_splash_radius = 0; // engine units [orig: AdmDef+0x454 @0x4DEBBD]
@@ -103,7 +103,7 @@ struct WeaponTableEntry {
     // model poses its launch point on it through the carrier instead of the
     // carrier's own slot bytes. [orig: parse @0x544FCE..0x545092 (load) and
     //  @0x544479..0x5444AC (name); WeaponDef_ResolveAllReferences
-    //  @0x5402C2..0x540316 -> modelgpm_FindUserpointByName @0x5B2170; consumers
+    //  @0x5402C2..0x540316 -> ModelGPM_FindUserpointByName @0x5B2170; consumers
     //  Entity_ComputeUserpointWorldTransform @0x545D06..0x545D85,
     //  Entity_ComputeUserpointTransform @0x545AEF..0x545BA5]
     std::shared_ptr<const threedi::Threedi3di3> third_person_model_asset;
@@ -113,7 +113,7 @@ struct WeaponTableEntry {
     // read @0x4e0294; keyword 'weapon_class' -> +0x3A4].
     int32_t weapon_class_slot = 0;
     // The THIRD-PERSON body-channel triple. The original keeps no per-player copy of
-    // these: the body updater indexes the AdmDefs table by the entity's OWN equipped
+    // these: the body updater indexes the g_AdmDefs table by the entity's OWN equipped
     // index every selection pass (`dword_24E8084[280 * entityData->equippedAdmIndex]`),
     // which is what lets every observer re-derive any player's upper-body pose from the
     // one wire byte at entity+0x2B0. Keeping them here rather than on a per-player
@@ -141,7 +141,7 @@ struct WeaponTableEntry {
     bool has_switchcategory = false;
     // The resolved ammo-class id for the per-class carried pools. The original resolves
     // the 'ammoclass' name to a byte id at parse (builtins @0x830F10) and keys the pool
-    // arrays by it [orig: AdmDef+0xD8; pools g_localAmmoPools @0xB75FE8 / serverPlayer
+    // arrays by it [orig: AdmDef+0xD8; pools g_LocalAmmoPools @0xB75FE8 / serverPlayer
     // +88664]. The ids share retail's global score-slot namespace: fixed built-ins
     // occupy 0..10 and weapon.def registrations begin at 11. They are wire-visible
     // when S2C 0x0F copies the authority player's 128 score-slot values.

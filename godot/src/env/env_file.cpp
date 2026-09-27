@@ -321,8 +321,8 @@ void EnvFile::_load_sky_textures() {
 // synthesizes the PCX alpha channel from the image's own palette luminance —
 // the cloud combine's alpha (a1 = t0.a*t1.a*2) rides it, so a plain opaque
 // decode makes the cloud pass cover the whole dome
-// [orig: terrain_init_rendering_resources @ 0x578a97/0x578aa5 ->
-// load_texture_from_archive @ 0x58b980, PCX alpha loop @ 0x58bc35..0x58bcee, see docs/env/env-tod-re.md].
+// [orig: Terrain_InitRenderingResources @ 0x578a97/0x578aa5 ->
+// Texture_LoadFromArchive @ 0x58b980, PCX alpha loop @ 0x58bc35..0x58bcee, see docs/env/env-tod-re.md].
 // Non-PCX names (DDS/TGA) keep the generic decode like retail's DDS-first path.
 Ref<Texture2D> EnvFile::_load_sky_map_texture(const String &name) {
 	if (name.get_extension().to_lower() == "pcx") {
@@ -540,7 +540,7 @@ Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 }
 
 Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
-	// [orig: build_sky_dome_mesh @ 0x578db0, see docs/env/env-tod-re.md] — engine/formats/env owns the math; this
+	// [orig: SkyDome_BuildMesh @ 0x578db0, see docs/env/env-tod-re.md] — engine/formats/env owns the math; this
 	// repacks the plain vectors into Mesh.ARRAY_* surface arrays.
 	const opennova::env::SkyDomeMesh mesh = opennova::env::build_sky_dome_mesh(p_sky_height);
 	const int vertex_count = static_cast<int>(mesh.positions.size() / 3);
@@ -658,7 +658,7 @@ Dictionary EnvFile::get_field_consumption() {
 	add("timeofday", "unconsumed", true, "classification string only",
 			"A label for this file. The game never reads it.");
 	add("curtime", "honored", false, "Environment_SetCurrentTime @ 0x57c4b0", "");
-	add("envscale", "honored", false, "Env_ParseEnvScale @ 0x840950", "");
+	add("envscale", "honored", false, "g_EnvParseEnvScale @ 0x840950", "");
 	add("fog_level", "honored", false, "Render_SetFogState @ 0x58a950", "");
 	add("fog_type", "honored", false, "Render_SetFogState @ 0x58a950", "");
 	add("terrain_tint", "honored", false,
@@ -670,30 +670,30 @@ Dictionary EnvFile::get_field_consumption() {
 	add("water_height", "honored", false, "water_height << 15 parse", "");
 	add("water_murk", "honored", false, "Environment_SetWaterMurk @ 0x57d4f0", "");
 	add("iris_percent", "honored", false,
-			"terrain_sector_compute_lighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
+			"Terrain_SectorComputeLighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
 			"The game's automatic exposure - how the view brightens in dark scenes, indoors and out.");
 	add("iris_center", "honored", false,
-			"terrain_sector_compute_lighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
+			"Terrain_SectorComputeLighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
 			"The game's automatic exposure - how the view brightens in dark scenes, indoors and out.");
-	add("ceiling_color", "honored", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
+	add("ceiling_color", "honored", false, "indoor exposure inputs @ 0x5c7646; g_EnvCeilingFloorBlend @ 0x5f7163",
 			"Indoor light color: lights things inside buildings and sets the indoor exposure.");
-	add("floor_color", "honored", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
+	add("floor_color", "honored", false, "indoor exposure inputs @ 0x5c7646; g_EnvCeilingFloorBlend @ 0x5f7163",
 			"Indoor light color: lights things inside buildings and sets the indoor exposure.");
 	add("lightning_color", "honored", false, "Environment_SetLightningFlash @ 0x57d320",
 			"Lightning flash color.");
-	add("cloud_tint", "honored", false, "render_skybox @ 0x579b42",
+	add("cloud_tint", "honored", false, "Render_Skybox @ 0x579b42",
 			"Colors the whole sky only when advanced clouds are off. With advanced clouds on, the sky uses the cloud keyframe colors instead.");
-	add("sky_speed", "honored", false, "render_skybox @ 0x5791de", "");
-	add("sky_height", "honored", false, "build_sky_dome_mesh @ 0x578db0", "");
+	add("sky_speed", "honored", false, "Render_Skybox @ 0x5791de", "");
+	add("sky_height", "honored", false, "SkyDome_BuildMesh @ 0x578db0", "");
 	add("sky_map1", "honored", false, "Path_ReplaceOrAppendExtension @ 0x57cc4b", "");
 	add("sky_map2", "honored", false, "Path_ReplaceOrAppendExtension @ 0x57cc4b", "");
-	add("advanced_clouds", "honored", false, "render_skybox fixed-function pass @ 0x579b42", "");
+	add("advanced_clouds", "honored", false, "Render_Skybox fixed-function pass @ 0x579b42", "");
 	add("sun_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
 	add("moon_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
 	add("star_3di", "unconsumed", true,
-			"EffectWorld_LoadCelestialModels @ 0x5adcd6; Star_RenderField_unused @ 0x5ad9c0 has no caller",
+			"EffectWorld_LoadCelestialModels @ 0x5adcd6; Star_RenderField_Unused @ 0x5ad9c0 has no caller",
 			"The game loads the star model but never draws it.");
-	add("glare_3di", "honored", false, "render_skybox_sun_glow @ 0x5acd00", "");
+	add("glare_3di", "honored", false, "Render_SkyboxSunGlow @ 0x5acd00", "");
 	return table;
 }
 

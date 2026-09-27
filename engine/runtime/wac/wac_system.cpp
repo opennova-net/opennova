@@ -18,7 +18,7 @@ void WacSystem::on_load(opennova::world::World &world) {
 
 void WacSystem::prepare_tick(opennova::world::World &world) {
     // This is a projection, not another clock: only vm_.time() is serialized.
-    // [orig: mutable wac_var_ticks @0xC6EAD8; shared gate @0x51D8BD]
+    // [orig: mutable g_WacVarTicks @0xC6EAD8; shared gate @0x51D8BD]
     world.cached.wac_ticks = static_cast<int32_t>(vm_.time());
 }
 

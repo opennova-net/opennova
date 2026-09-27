@@ -51,10 +51,10 @@ bool capture_scoring_applies(const World &world, EntityHandle capturer,
 
 } // namespace
 
-// [orig: calculate_capture_zone_control_delta @0x501120]
+// [orig: CaptureZone_CalculateControlDelta @0x501120]
 int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input) {
     if (input.presence == 0) return 0; // [orig: `test v20` @0x501278]
-    // [orig: g_capture_speed_setting 1 -> 24, 2 -> 48, else 12 @0x50128A..0x5012A4]
+    // [orig: g_CaptureSpeedSetting 1 -> 24, 2 -> 48, else 12 @0x50128A..0x5012A4]
     const int base = input.speed_setting == 1 ? 24 : input.speed_setting == 2 ? 48 : 12;
     // The side whose player count sizes the speed: the owner's when friendlies
     // lead, the attacker's otherwise, by the zone team's 1/2 value.
@@ -132,7 +132,7 @@ ZoneCaptureEvents::TimerWindow timer_window(const Entity &zone,
 // complete six-byte 0x50 semantic payload at mutation time: instant captures
 // deliberately call this twice (old owner -> 0 -> capturer), and a later entity
 // lookup would erase the neutral record. [orig: Server_ChangeEntityTeam
-// @0x518D70; write_entity_handle_packet @0x506AD0]
+// @0x518D70; NetPacket_WriteEntityHandlePacket @0x506AD0]
 bool change_entity_team(World &world, ZoneCaptureEvents &out,
                         EntityHandle handle, uint8_t team) {
     Entity *entity = world.registry.get(handle);
@@ -217,7 +217,7 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
     const MatchRules &rules = world.match.rules();
 
     // The in-game census the delta walks: every registered Player whose body is
-    // neither carried nor dead. [orig: calculate_capture_zone_control_delta
+    // neither carried nor dead. [orig: CaptureZone_CalculateControlDelta
     // @0x501120 — slot active, `test byte [ent+24h], 3`, state 6 @0x501173..0x501199]
     std::vector<const Entity *> census;
     for (const MatchPlayer &row : world.match.players()) {
@@ -272,7 +272,7 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
             // Presence: same-team Players count for the owner; every other
             // Player in radius counts as an enemy and, when its team may
             // capture the zone, against the owner.
-            // [orig: calculate_capture_zone_control_delta @0x50120D..0x501248]
+            // [orig: CaptureZone_CalculateControlDelta @0x50120D..0x501248]
             int presence = 0;
             int friendlies = 0;
             int enemies = 0;

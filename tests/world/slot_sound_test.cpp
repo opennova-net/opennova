@@ -155,7 +155,7 @@ void test_npc_feet_odd_ticks_only() {
 // The pool-0 walk runs the bodies in slot order, whatever order their brains
 // were attached in: the body whose brain holds the lower AI index but sits in
 // the higher slot updates second, so its footstep lands second.
-// [orig: Entity_UpdateAllEntities @0x4C2426..0x4C245C (the g_pool_list[0]
+// [orig: Entity_UpdateAllEntities @0x4C2426..0x4C245C (the g_PoolList[0]
 //  base/used/stride walk)]
 void test_bodies_update_in_slot_order() {
     Rig rig;

@@ -67,7 +67,7 @@ enum class BlendMode : std::uint8_t {
 const char *blend_mode_name(BlendMode mode) noexcept;
 BlendMode parse_blend_mode(std::string_view raw) noexcept;
 
-// FlagTable @ 0x848800, 5 entries (flagCount @ 0x848d28). Stored as bitfield
+// FlagTable @ 0x848800, 5 entries (g_ParticleMoveFlagTableCount @ 0x848d28). Stored as bitfield
 // because FlagTable_ParseFromString @ 0x5df970 ORs matched bits — typical use
 // is one bit set, but the engine never enforces.
 //

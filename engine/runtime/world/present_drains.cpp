@@ -203,7 +203,7 @@ void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow>
 		// def+676 in the order of the suffix table, so def+684 IS slot 2, and our
 		// weapon_action::kFire is the same ordinal.
 		// [orig: array base/stride @0x54203d/@0x542231, bound @0x542239; suffix table
-		//  g_weaponActionTable @0x830B90; the +684 call @0x42f777/@0x42f98f; the glow
+		//  g_WeaponActionTable @0x830B90; the +684 call @0x42f777/@0x42f98f; the glow
 		//  gate @0x40205e/@0x402080 with the context stamped 2 @0x42f8a0]
 		const WeaponTableEntry *fired_def = world.tables.weapons.by_index(fe.adm_index);
 		const WeaponFsmAction *fire_row =
@@ -237,7 +237,7 @@ void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces)
 		d.item_id = p.item_id;
 		d.section = static_cast<int32_t>(p.section);
 		// The debris-type row names the trail effect through the ONE native
-		// table (death_piece_trail_effect) [orig: g_death_piece_types
+		// table (death_piece_trail_effect) [orig: g_DeathPieceTypes
 		// @ 0x8404f0 +0x2C]; "" = no trail authored.
 		d.type_index = static_cast<int32_t>(p.type_index);
 		d.scale = p.render_scale;

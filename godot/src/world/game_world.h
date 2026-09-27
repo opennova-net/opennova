@@ -741,7 +741,7 @@ private:
 	Ref<EffectLightDirector> light_director_;
 	// The mission attribute that forces the indoors accum bit every frame.
 	// Stays on the world (mission state); handed to the occlusion frame's
-	// entries as an argument. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
+	// entries as an argument. [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 	bool mission_forces_indoors_ = false;
 	Color idle_frame_clear_color_ = Color(0, 0, 0);
 	// A shell-injected resource root (main_game hands its boot mount over;

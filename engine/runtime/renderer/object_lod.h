@@ -10,14 +10,14 @@ namespace opennova::renderer {
 // Retail's sub-pixel floor: the sector-entity draw returns before the RLOD
 // selector when the projected bound-sphere radius is at most 0.75 px
 // (Q16.16 49152), so such an entity is not drawn at any level.
-// [orig: render_sector_entity @ 0x5c42de]
+// [orig: Render_SectorEntity @ 0x5c42de]
 inline constexpr int32_t kObjectLodSubPixelCullQ16 = 49152;
 
 // The sub-pixel floor as a predicate over a projected radius: TRUE = the
 // entity is not drawn. The sector-entity draw tests it before the RLOD walk,
 // the person collector before its latch.
-// [orig: render_sector_entity `cmp edi,0C000h; jle` @ 0x5c42d8..0x5c42de;
-//  collect_visible_entities_for_terrain @ 0x5c8e5e]
+// [orig: Render_SectorEntity `cmp edi,0C000h; jle` @ 0x5c42d8..0x5c42de;
+//  Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8e5e]
 inline constexpr bool object_subpixel_culled(int32_t projected_radius_q16) {
   return projected_radius_q16 <= kObjectLodSubPixelCullQ16;
 }
@@ -62,7 +62,7 @@ ObjectProjectionSphere scale_object_projection_sphere_q16(
 
 // Infantry project the entity position and entity+0 bound radius. A deployed
 // parachute substitutes its own model radius; head/body share this one sphere.
-// [orig: collect_visible_entities_for_terrain @ 0x5C8C60,
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5C8C60,
 // person radius @ 0x5C8DF3..0x5C8E10, entity-position transform @ 0x5C8E21]
 ObjectProjectionSphere person_projection_sphere_q16(
     int32_t entity_bound_radius_q16, bool parachute_deployed = false,
@@ -106,7 +106,7 @@ struct ObjectLodSelection {
 // [orig: Model_SelectRlodLevel @ 0x5c3b20 (the level in EAX; the walk
 //  from slot 0 @ 0x5c3b3b..0x5c3b5a, the back-off @ 0x5c3b5d..0x5c3b8c; the dead
 //  fraction store @ 0x5c3bb3/0x5c3bc2 -> dword_29ACD9C, read only by the
-//  orphan stub @ 0x5c38c0); null fallback at render_sector_entity
+//  orphan stub @ 0x5c38c0); null fallback at Render_SectorEntity
 //  @ 0x5c4303]
 ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
                                      int32_t projected_radius_q16,

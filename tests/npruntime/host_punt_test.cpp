@@ -1368,7 +1368,7 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	if (!expect(entity != nullptr, "dead-age fixture retains its player entity"))
 		return false;
 
-	// The counter lives inside the g_periodic_second_timer block: it advances
+	// The counter lives inside the g_PeriodicSecondTimer block: it advances
 	// once per periodic SECOND, never per tick [orig: Server_TickUpdate
 	// @0x51DB93 reload 62; @0x51E066..0x51E07D; @0x51E187].
 	auto tick_to_periodic_second = [&]() {
@@ -1558,7 +1558,7 @@ bool reply_body(const inmatch::JoinerConnection::PollResult &result, uint8_t tag
 // The anti-cheat CRC challenges stay SILENT unless an exact, named corpus profile is
 // selected. A guessed value cannot be right, and this is the one challenge pair whose
 // mismatch arm disconnects: the host recomputes the checksum over its own tables and punts
-// on a difference [orig: handle_anti_cheat_crc_check @0x502050], where an unanswered
+// on a difference [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck @0x502050], where an unanswered
 // challenge costs nothing. Witnessed live 2026-07-26 against a stock retail co-op host —
 // a single placeholder C2S 0x20 / 0x21 drew "PUNT WCRC" / "PUNT ACRC" (DC=2, DPC=46) and
 // ended the session mid-join, while the same client sending nothing stayed connected.

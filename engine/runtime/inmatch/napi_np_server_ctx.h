@@ -63,7 +63,7 @@ enum class SocketMode : uint32_t {
 	NovaWorldSocket = 4,  // NovaWorld-routed socket
 };
 
-// [orig: g_napi_np_ctx.np_protocol @+0xE5C] NapiNPProtocol (§6.5) — the host state block reached
+// [orig: g_NapiNPCtx.np_protocol @+0xE5C] NapiNPProtocol (§6.5) — the host state block reached
 // from the singleton. Only the fields the in-match runtime needs now are modeled; offsets cited.
 struct NapiNPProtocol {
 	bool reject_new_connections = false; // [orig +0x1F7, JFC6 @0x62be8f]
@@ -107,7 +107,7 @@ struct NapiNPProtocol {
 	uint32_t roster_generation = 1;
 };
 
-// [orig: g_napi_np_ctx @0xB5CBC8] NapiNPServerCtx (§6.3) — the game-level singleton, the full
+// [orig: g_NapiNPCtx @0xB5CBC8] NapiNPServerCtx (§6.3) — the game-level singleton, the full
 // in-match game-server state. CNapiNetwork-shaped header + game fields + np_protocol. Named
 // fields with cited offsets; idiomatic C++ types (no byte-exact padding — see fidelity decision).
 // The host-side rtxt "Server" strings (GameText section "Server"). Each is the
@@ -134,7 +134,7 @@ struct NapiNPServerCtx {
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, the compare @0x4c6210]
 	bool join_locked = false;
 	std::vector<uint32_t> banned_join_addresses;
-	GameConfig config;             // [orig g_napi_np_ctx.game_settings @+0xE68 + the scattered g_* rule globals]
+	GameConfig config;             // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)
 
 	// [§5.2a] The advertised weapon-restriction set (S2C 0x66). The original reads a 255-entry
@@ -148,13 +148,13 @@ struct NapiNPServerCtx {
 	// (retail's +0x119C target player / +0x11A0 target state) is not modelled.
 	uint32_t send_mask = 0;
 
-	// [orig: g_scoreboard_broadcast_timer @0xC8D80C] One global mission
+	// [orig: g_ScoreboardBroadcastTimer @0xC8D80C] One global mission
 	// counter shared by the 0x16 scoreboard and 0x30/0x31 integrity broadcast.
 	// Server_TickUpdate increments first; a value >0x136 fires and resets to 0,
 	// so a fresh mission reaches its first boundary after 311 calls. Mission
 	// start resets it through create_session; round init does not.
 	uint32_t scoreboard_broadcast_timer = 0;
-	// NOT MODELLED: retail's g_endround_linger_timer [orig: @0xc8d820] -- MP-only,
+	// NOT MODELLED: retail's g_EndRoundLingerTimer [orig: @0xc8d820] -- MP-only,
 	// set to 2790 (45 s at the 62 Hz tick) BEFORE the per-slot round-end loop and
 	// gated on is_in_session [orig: @0x5166c4], drained by Server_TickUpdate
 	// (authority) / the client frame; SP never drains it (the epilog owns the SP
@@ -187,12 +187,12 @@ struct NapiNPServerCtx {
 	// the send window's frame-pressure input and, copied at the head of every
 	// Server_TickUpdate, the 0x0A server-status fps byte. 0 = retail's
 	// mode-init value, until the first 2 s window closes.
-	// [orig: g_statsAvgFps; Server_TickUpdate @0x51D7E0..0x51D7E5 -> g_serverFps]
+	// [orig: g_StatsAvgFps; Server_TickUpdate @0x51D7E0..0x51D7E5 -> g_ServerFps]
 	int32_t stats_avg_fps = 0;
 	// The persistent slot cursor of the 1 Hz S2C 0x46 quality resend walk.
-	// [orig: g_weapon_broadcast_slot_cursor, Server_TickUpdate @0x51DE79]
+	// [orig: g_WeaponBroadcastSlotCursor, Server_TickUpdate @0x51DE79]
 	int32_t quality_broadcast_slot_cursor = 0;
-	// [orig: g_network_quality_broadcast_timer] One global explicit countdown,
+	// [orig: g_NetworkQualityBroadcastTimer] One global explicit countdown,
 	// reset to zero by Server_InitNewRoundState @0x51CA9E. Server_TickUpdate
 	// decrements a positive value, emits when it reaches/is zero, then reloads
 	// 0x136. This state must not be derived from World::logic_tick: round reset
@@ -202,7 +202,7 @@ struct NapiNPServerCtx {
 	// The team-change list a late joiner's C2S 0x29 walk reads back as S2C
 	// 0x51: every entity Server_ChangeEntityTeam retargeted (a player at an
 	// admin ChangeTeam, a capture zone at its flip), each once, cleared at the
-	// new-round init. [orig: g_team_change_entity_list — CBufferList_AddOrFind
+	// new-round init. [orig: g_TeamChangeEntityList — CBufferList_AddOrFind
 	//  @0x518EEC; the clear in Server_InitNewRoundState @0x51C911; the read
 	//  NapiNPServerMsg_0x029 @0x514F7C]
 	std::vector<world::EntityHandle> team_change_entities;
@@ -244,10 +244,10 @@ struct NapiNPServerCtx {
 
 	// The mission's raw terrain-tile (.til) file bytes: `[u32 'til0'][u32 count][u32 res0][u32 res1]`
 	// then count × 12-B entries. Streamed to a joiner as the S2C 0x45 terrain-tile load (phase 5) so the
-	// client's g_loading_progress climbs 5 -> 6 and its terrain finishes loading [orig: serialize_terrain_tiles
+	// client's g_LoadingProgress climbs 5 -> 6 and its terrain finishes loading [orig: Terrain_SerializeTiles
 	// @0x6080F0 reads g_TerrainTileData; the 0x45 header magic/count/hdr2/hdr3 map 1:1 onto the .til
 	// header]. Owning copy set by the host at mission load (Godot-free: the caller resolves the .til via
-	// engine/formats/til). EMPTY => 0x45 is faithfully skipped (serialize_terrain_tiles returns 0 with no tile data).
+	// engine/formats/til). EMPTY => 0x45 is faithfully skipped (Terrain_SerializeTiles returns 0 with no tile data).
 	std::vector<uint8_t> terrain_til_data;
 
 	// The current mission text table's raw cp1252 briefing strings. The Godot/resource
@@ -273,12 +273,12 @@ struct NapiNPServerCtx {
 	// two process-global mission counters, each incremented once per mission
 	// start, so a fresh process's first mission serves id 1 on both. A C2S
 	// 0x33 / 0x37 carrying another token restarts its transfer at offset 0.
-	// [orig: g_replayBlockMagic @0xC86FC4 (`++` in Game_StartMission @0x5247F3);
+	// [orig: g_ReplayBlockMagic @0xC86FC4 (`++` in Game_StartMission @0x5247F3);
 	//  dword_C86FC8 (`++` in CNapiGameSession_InitRandomSeedOrRequest @0x51E9C1)]
 	uint32_t server_info_transfer_id = 0;
 	uint32_t mission_metadata_transfer_id = 0;
 
-	// Retail's overloaded g_spawn_success_gate is deliberately not copied into
+	// Retail's overloaded g_SpawnSuccessGate is deliberately not copied into
 	// this host context. Per-connection InitialStateBurst owns load progress;
 	// world::Match owns the round-over latch. The client retains the 0x1D header
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]
@@ -326,7 +326,7 @@ struct NapiNPServerCtx {
 	// transport retail's string is the constant "PUB", so the key is the
 	// PUBJOINTICKET cookie; the shell installs kNovaWorldLocalAddress when it arms.
 	// [orig: CNapiGameSession_SendPlayEnterRequest @0x4D0312..0x4D0362;
-	//  CNapiNetwork_GetLocalAddress @0x4C4F60 copies g_local_net_address_str @0x7CA298]
+	//  CNapiNetwork_GetLocalAddress @0x4C4F60 copies g_LocalNetAddressStr @0x7CA298]
 	static constexpr const char *kNovaWorldLocalAddress = "PUB";
 	std::string host_local_address;
 	// One ClientPlayerEnterRequest: the joiner's connection id, its UDP source
@@ -346,8 +346,8 @@ struct NapiNPServerCtx {
 	// A ServerCommand Cycle / EndMission / GameOver ends the round and then
 	// overrides the linger Server_ProcessRoundEnd stored (2790) with 620 ticks;
 	// nonzero here is consumed by the announcing pass, then cleared.
-	// [orig: the ServerCommand handler loc_4D22F0 — Server_ProcessRoundEnd
-	//  @0x4D31C0, g_endround_linger_timer = 0x26C @0x4D31CA]
+	// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand — Server_ProcessRoundEnd
+	//  @0x4D31C0, g_EndRoundLingerTimer = 0x26C @0x4D31CA]
 	uint32_t round_end_linger_override_ticks = 0;
 
 	// The host EntityLimit table behind the vehicle-spawn availability reply
@@ -356,9 +356,9 @@ struct NapiNPServerCtx {
 	// (row[1], -1 = unlimited), the per-team flag (row[2], -1 = no per-team
 	// cap) and the per-team slot counts (row[3 + team], -1 = unlimited).
 	// Empty = no limit table loaded: the reply carries only its terminator and
-	// every spawn is refused, exactly as an empty g_entityLimitTable.
-	// [orig: g_entityLimitTable @0xC7B480 / g_entityLimitCount @0xC84680;
-	//  serialize_weapon_overlay_slots_0 @0x5105A0; sub_5104C0 @0x5104C0]
+	// every spawn is refused, exactly as an empty g_EntityLimitTable.
+	// [orig: g_EntityLimitTable @0xC7B480 / g_EntityLimitCount @0xC84680;
+	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; sub_5104C0 @0x5104C0]
 	struct VehicleSpawnLimitRow {
 		uint16_t type_id = 0;
 		int32_t type_cap = -1;                // row[1]
@@ -367,7 +367,7 @@ struct NapiNPServerCtx {
 	};
 	// The table is bypassed while the host config's unlimited_vehicles is set
 	// (GameConfig::unlimited_vehicles, stock 1): 0xFF/0xFF rows on the wire and
-	// no limit check. [orig: dword_24D1E38 @0x5105F5..0x5105FF, @0x51C5E2..0x51C5E9]
+	// no limit check. [orig: g_RulesUnlimitedVehicles @0x5105F5..0x5105FF, @0x51C5E2..0x51C5E9]
 	std::vector<VehicleSpawnLimitRow> vehicle_spawn_limits;
 	// The world-side spawner Entity_SpawnDeployable @0x51C2B0 delegates to: the
 	// embedder that owns the items.def traits sweep installs it; the C2S 0x40

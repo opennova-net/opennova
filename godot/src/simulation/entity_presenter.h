@@ -536,7 +536,7 @@ private:
 		int32_t latch = 0;
 	};
 
-	// Mirrors the retail per-entity lighting fields (setup_terrain_effect_for_entity
+	// Mirrors the retail per-entity lighting fields (Terrain_SetupEffectForEntity
 	// @0x5c74a0; sun visibility Entity_ComputeSunVisibility @0x5c6800 -
 	// docs/render/render-lighting-re.md).
 	struct LightingContext {

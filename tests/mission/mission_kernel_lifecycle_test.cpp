@@ -74,9 +74,9 @@ int main() {
 	// A PreMission action that hands the lowest zone to team 2 does not reorder
 	// the markers: the list was built with that zone on team 1, where a
 	// marker's priority is its own zone number.
-	// [orig: Game_StartMission — the build_spawn_marker_budget_list call
+	// [orig: Game_StartMission — the Spawn_BuildMarkerBudgetList call
 	//  @0x5252C6 precedes the EventTrigger_UpdateAllWithFlag2 call @0x525B86;
-	//  build_spawn_marker_budget_list @0x529B40]
+	//  Spawn_BuildMarkerBudgetList @0x529B40]
 	{
 		std::array<def::DefItemDef, 2> rows{};
 		rows[0].id = ms::kItemIdOffset + 900;

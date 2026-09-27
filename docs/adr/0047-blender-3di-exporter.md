@@ -187,8 +187,8 @@ the same text transport, the same add-on.
    and a missing name places the child at the parent's root. The child takes
    the point's look-at frame as retail builds it, the matrix's rows being the
    child's axes (a level point faces the child along its direction; a pitched
-   one tips it the other way) [orig: build_bone_attachment_matrix @ 0x56C630;
-   build_direction_look_at_matrix @ 0x612C90]. Both the arms' drive and a mount
+   one tips it the other way) [orig: Bone_BuildAttachmentMatrix @ 0x56C630;
+   Math_BuildDirectionLookAtMatrix @ 0x612C90]. Both the arms' drive and a mount
    bind with the rigs at rest. Export reads skinned meshes in their rest pose
    with their Armature modifiers off, and every model in its own root's frame.
 10. **Standing from ADR 0038.** No other Python product code, Qt importer, or

@@ -854,7 +854,7 @@ void LocalPlayerPresenter::feed_virtual_display(bool p_live) {
 
 // The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted
 // defs, eased by the 15-tick interp, suppressed in third person --
-// engine/runtime/world player_view [orig: g_cameraFovTargetQ16 @0x26C6848;
+// engine/runtime/world player_view [orig: g_CameraFovTargetQ16 @0x26C6848;
 // Player_ToggleWeaponScope @0x4df401; @0x4df3fa]); the frame's projection over
 // the surface -- the mode-invariant horizontal fov, the vertical half-extent
 // of the SELECTED ratio -- is the engine's world::view_projection [orig:

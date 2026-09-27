@@ -427,8 +427,8 @@ void EntityCommands::remove_placed_devices_by_owner(EntityHandle owner) {
     // live on the row's PlacedDevice record.
     // [orig: Entity_RemovePlacedDevicesByOwner @0x546E00 — the +0x1C gate
     //  @0x546E2D, the +0x170 owner compare @0x546E37, the def attrib skips
-    //  @0x546E46 / @0x546E50, the g_ammo_satchel / g_ammo_claymore /
-    //  g_ammo_AV_Mine compares @0x546E68 / @0x546E8B / @0x546EAE, each with its
+    //  @0x546E46 / @0x546E50, the g_AmmoSatchel / g_AmmoClaymore /
+    //  g_AmmoAVMine compares @0x546E68 / @0x546E8B / @0x546EAE, each with its
     //  Server_RemoveEntityAndNotify call @0x546E71 / @0x546E94 / @0x546EBB]
     const Entity *owner_row = world_.registry.get(owner);
     if (owner_row == nullptr) return;
@@ -456,7 +456,7 @@ bool EntityCommands::remove_bms_ref(int32_t ssn) {
     // SSN 0 and a non-authority peer do nothing; otherwise the first row
     // carrying the SSN, walking pools 0..3 in slot order, goes through the
     // notifying removal. An SSN past 16 bits matches no DcbId we carry.
-    // [orig: find_entity_by_parent_and_dispatch @0x43e210 — SSN 0 @0x43e214,
+    // [orig: Entity_FindByParentAndDispatch @0x43e210 — SSN 0 @0x43e214,
     //  the authority gate @0x43e21c, the pool scans @0x43e249/@0x43e279/
     //  @0x43e2a9/@0x43e2d9 tail-jumping to Server_RemoveEntityAndNotify]
     if (ssn <= 0 || ssn > 0xFFFF || !world_.rules.logic_authority) return false;
@@ -1423,7 +1423,7 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
 // never reaches Score_ProcessKillEvent). The player bodies (org2) still take
 // their transaction from this record.
 // [orig: Entity_UpdateInfantryAI edge @0x4B9D4D / Entity_UpdateInfantryPlayerBody
-//  edge @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550 -> BuildDeathNotifyPayload
+//  edge @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550 -> NetPacket_BuildDeathNotifyPayload
 //  @0x5036E0 (the +0x2C0 word @0x503733), send_mask 0x90]
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
     if (org1_owns_death_transaction(world, h)) {

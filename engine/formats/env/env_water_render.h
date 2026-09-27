@@ -9,19 +9,19 @@
 namespace opennova::env {
 
 // ---------------------------------------------------------------------------
-// Water surface — the witnessed pipeline of render_water_surface @ 0x5c32c0
+// Water surface — the witnessed pipeline of Render_WaterSurface @ 0x5c32c0
 // (the frame pass: FrameFX_RenderGlowSource @ 0x582a5d / @ 0x610650 call it per
-// side; camera-side gate against Env_WaterHeightFixed). Per frame it
+// side; camera-side gate against g_EnvWaterHeightFixed). Per frame it
 // regenerates the animated noise texture pair [orig: Water_GenerateNoiseTextures
 // @ 0x5c0360], derives the strip depth curve from the SMOOTHED fog distance
 // [orig: @ 0x5c332d..0x5c3362], then draws the screen-marched water strips
-// (render_water_strip @ 0x5c1d60 low detail with sin-table Y displacement;
-// render_water_strip_detailed @ 0x5c27d0 high detail, FLAT strips — the
+// (Render_WaterStrip @ 0x5c1d60 low detail with sin-table Y displacement;
+// Render_WaterStripDetailed @ 0x5c27d0 high detail, FLAT strips — the
 // animated textures carry the look). Both tiers texture the noise pair at the
 // ABSOLUTE render-basis world x/32, z/32 (texcoords 0 and 3, see
 // WaterStripRows::uv0): no scale, bias, offset or scroll reaches a texcoord.
-// render_water_surface also stores two cloud-scroll "offsets" and a zero pair
-// [orig: Water_UvOffsetU_Unread/V @ 0x5c33b9/@ 0x5c33db, flt_29169E8/EC @ 0x5c3379/
+// Render_WaterSurface also stores two cloud-scroll "offsets" and a zero pair
+// [orig: g_WaterUVOffsetUUnread/V @ 0x5c33b9/@ 0x5c33db, flt_29169E8/EC @ 0x5c3379/
 // @ 0x5c3385] that nothing in the binary reads back; they are not ported.
 // This section owns the texture + depth math both paths share.
 
@@ -34,8 +34,8 @@ inline constexpr int kWaterNoiseSize = 128; // 128x128 field and textures
 // shader/material set)]: a normalized random field and the 128 + 64*sin(2*pi*i/256)
 // byte LUT (truncating float->int like the original ftol).
 struct WaterNoiseTables {
-	uint8_t field[kWaterNoiseSize * kWaterNoiseSize]; // Water_NoiseField
-	uint8_t sine_lut[256];                            // Water_SineLut
+	uint8_t field[kWaterNoiseSize * kWaterNoiseSize]; // g_WaterNoiseField
+	uint8_t sine_lut[256];                            // g_WaterSineLut
 };
 
 // One step of the init PRNG [orig: PRNG_Next16 @ 0x6130a0]:
@@ -62,9 +62,9 @@ void water_noise_color_pixels(uint32_t *out_pixels, const WaterNoiseTables &tabl
 // B = 0xFF, A = 0; rows and columns wrap toroidally.
 void water_noise_normal_pixels(uint32_t *out_pixels, const uint32_t *color_pixels);
 
-// The strip depth curve [orig: render_water_surface @ 0x5c332d..0x5c3362]:
+// The strip depth curve [orig: Render_WaterSurface @ 0x5c332d..0x5c3362]:
 // scale = 0.99996948 * w / (w - 0.2) with w = the INTEGER part of the smoothed
-// fog distance (movsx of the word at Env_FogDistCurrent+2 @ 0x5c332d);
+// fog distance (movsx of the word at g_EnvFogDistCurrent+2 @ 0x5c332d);
 // bias = 0.2 * scale; stored to flt_8412B0 @ 0x5c3356 / flt_8412B4 @ 0x5c3362.
 // Their only readers are the per-vertex depth chains of both strip tiers
 // (water_strip_depth; detailed @ 0x5c2c0e/@ 0x5c2c8b/@ 0x5c2cf7, low tier
@@ -85,15 +85,15 @@ WaterDepthCurve water_depth_curve(float fog_distance_world);
 
 // ---------------------------------------------------------------------------
 // Water strip tessellation (env #29) — the screen-space row march of the
-// DETAILED water surface tier [orig: render_water_strip_detailed @ 0x5c27d0,
-// substrate terrain_project_sector_to_screen @ 0x5c0bf0 + clip_line_to_viewport
-// @ 0x5c0a30; caller render_water_surface @ 0x5c3492/@ 0x5c3542]. The water
+// DETAILED water surface tier [orig: Render_WaterStripDetailed @ 0x5c27d0,
+// substrate Terrain_ProjectSectorToScreen @ 0x5c0bf0 + Water_ClipLineToViewport
+// @ 0x5c0a30; caller Render_WaterSurface @ 0x5c3492/@ 0x5c3542]. The water
 // plane projects to a screen block, rows advance along the screen march
 // direction with an adaptive per-row stride, each row's screen line clips to
 // the viewport, and the row emits 3 vertices (left / mid / right of the
 // clipped span) unprojected through the cached inverted view matrix
 // [orig: Math_InvertMatrix4x4_Float_ToStatic @ 0x611960]. The LOW tier
-// (render_water_strip @ 0x5c1d60, water detail <= 1: 40-byte verts, sin-table
+// (Render_WaterStrip @ 0x5c1d60, water detail <= 1: 40-byte verts, sin-table
 // Y displacement, the dbl_7DBF70 = 229.5 alpha-scale swap) is the remaining
 // unported variant — the reimpl runs the detailed path (detail > 1).
 //
@@ -109,13 +109,13 @@ WaterDepthCurve water_depth_curve(float fog_distance_world);
 // row-vector (v' = v * M), so world-space camera basis vectors sit in the
 // view matrix COLUMNS.
 struct WaterStripView {
-	float view[16];     // world->view [orig: viewMatrix @ 0xA7845C]
+	float view[16];     // world->view [orig: g_ViewportViewMatrixFloat @ 0xA7845C]
 	float view_inv[16]; // its inverse, cached per pass [orig: @ 0x611960 result]
 	// Embedder projection converted to the render basis/row-vector convention.
 	// X/Y clip rows and clip-W are complete: perspective/frustum use depth W,
 	// orthographic uses constant W, and the translation/shear terms preserve
 	// off-center embedder projections. The witnessed retail path is the centered
-	// perspective subset [orig: mat @ 0x2721980; m11 @ 0x2721994].
+	// perspective subset [orig: g_ProjectionMatrix @ 0x2721980; m11 @ 0x2721994].
 	float proj[16];
 	// Camera world-basis rows of the render context's camera matrix
 	// [orig: flt_27219C0 row 0 (right) / row 2 (forward), Math_CopyVec3Row0/2
@@ -149,7 +149,7 @@ struct WaterStripView {
 // embedder's 4x4 flattened column by column ([input][output]).
 //  - view: the D3D row-vector view matrix, the camera's world-basis vectors in
 //    the COLUMNS (0 right / 1 up / 2 forward) and row 3 = -dot(axis, eye)
-//    [orig: viewMatrix @ 0xA7845C, consumed row-vector by
+//    [orig: g_ViewportViewMatrixFloat @ 0xA7845C, consumed row-vector by
 //    Math_TransformPoint4ByMatrix4x4_Float @ 0x612e80];
 //  - view_inv: retail inverts the cached view numerically per pass [orig:
 //    Math_InvertMatrix4x4_Float_ToStatic @ 0x611960]; for the rigid camera
@@ -157,7 +157,7 @@ struct WaterStripView {
 //    from the same source data;
 //  - proj: the complete embedder matrix (orthographic and off-center frustums
 //    included) with the view-Z input sign flipped, since the embedder looks
-//    down -Z while the D3D/render view measures +forward [orig: mat
+//    down -Z while the D3D/render view measures +forward [orig: g_ProjectionMatrix
 //    @ 0x2721980; m11 read @ 0x2721994];
 //  - cam_right / cam_forward: the basis rows for the texm3x2 bump rows [orig:
 //    flt_27219C0 row 0 / row 2, Math_CopyVec3Row0/2 @ 0x611fb0 / @ 0x611f70];
@@ -173,7 +173,7 @@ void water_strip_view_from_camera(const float right[3], const float up[3],
                                   int viewport_h, float fog_end_world,
                                   WaterStripView &out);
 
-// The 40-byte screen block [orig: terrain_project_sector_to_screen @ 0x5c0bf0]:
+// The 40-byte screen block [orig: Terrain_ProjectSectorToScreen @ 0x5c0bf0]:
 // the water plane at the strip's height projected at camera +
 // horizontal-forward x 2000 -> origin [0..1]; the screen delta of a
 // 1000-unit horizontal RIGHT step (view matrix column 0) -> row_delta [2..3]
@@ -199,7 +199,7 @@ void water_project_plane_to_screen(const WaterStripView &view, int32_t plane_hei
                                    WaterScreenBlock &out);
 
 // One row's screen line clipped to the viewport rect
-// [orig: clip_line_to_viewport @ 0x5c0a30]. The line passes through (x0, y0)
+// [orig: Water_ClipLineToViewport @ 0x5c0a30]. The line passes through (x0, y0)
 // with slope dx_over_dy (the block's row_delta ratio [orig: @ 0x5c291e]);
 // endpoints seed at x = min_x and x = max_x + 1 through the 1/slope form,
 // then clamp against y = min_y / max_y + 1 through the slope form; crossed
@@ -230,7 +230,7 @@ float water_strip_depth(float view_depth, float depth_scale, float depth_bias);
 
 // Depth clamp bounds, the same pair in both tiers [orig: flt_7DBF7C
 // @ 0x5c2c35 and flt_7C4658 @ 0x5c2c1f; low tier @ 0x5c2212/@ 0x5c2226].
-// The upper bound is the scene viewport MaxZ (the render_main_scene clear
+// The upper bound is the scene viewport MaxZ (the Render_MainScene clear
 // depth reads the same constant @ 0x5c15af).
 inline constexpr float kWaterStripDepthMin = 4.0e-5f;     // 0x3827C5AC
 inline constexpr float kWaterStripDepthMax = 0.99996948f; // 0x3F7FFE00 = 1 - 2^-15
@@ -268,11 +268,11 @@ WaterRowColors water_strip_row_colors(float row_view_depth, const float right_de
 
 // Inputs the strip builder reads beside the view block.
 struct WaterStripParams {
-	int32_t plane_height_fp = 0;     // Env_WaterHeightFixed (16.16 render y)
+	int32_t plane_height_fp = 0;     // g_EnvWaterHeightFixed (16.16 render y)
 	bool underwater_view = false;    // caller arg 2 [orig: @ 0x5c3540]
 	bool nightvision = false;        // caller arg 3 [orig: @ 0x5c348e/@ 0x5c353f]
-	float water_murk = 0.8f;         // Env_WaterMurk @ 0x26c6458
-	uint32_t water_color_lit = 0;    // Env_WaterColorLit @ 0x26c6804 (0x00RRGGBB)
+	float water_murk = 0.8f;         // g_EnvWaterMurk @ 0x26c6458
+	uint32_t water_color_lit = 0;    // g_EnvWaterColorLit @ 0x26c6804 (0x00RRGGBB)
 	float depth_scale = 1.0f;        // flt_8412B0 (WaterDepthCurve::scale)
 	float depth_bias = 0.0f;         // flt_8412B4 (WaterDepthCurve::bias)
 };
@@ -303,7 +303,7 @@ struct WaterStripRows {
 	std::vector<float> t2; // 3 per vertex                     (+0x2C)
 };
 
-// The march loop of the detailed tier [orig: render_water_strip_detailed
+// The march loop of the detailed tier [orig: Render_WaterStripDetailed
 // @ 0x5c27d0]: project the plane, march rows from the block origin along
 // march_dir by the adaptive stride, clip each row (hunting backward by
 // single steps up to stride-1 when the line left the viewport

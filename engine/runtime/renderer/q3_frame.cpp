@@ -106,7 +106,7 @@ bool resource_leases_valid(const Q3SubmissionSnapshot &submission) {
 // walk collects a glow-capable duplicate, Glass rows re-shade through the
 // rotated-specular technique, and the FFP LUM rows re-shade as the SELFLUM
 // NORMAL block; a multiplicative LUM row never glows.
-// [orig: collect_render_objects_for_batch @ 0x5d8f20 (the Q3 copy
+// [orig: Render_CollectRenderObjectsForBatch @ 0x5d8f20 (the Q3 copy
 // @ 0x5d93b5..0x5d9447); Glass.fx TGlassFFP TECHNIQUE_GLOW; _FFP.fx LUM
 // GLOW copy @ 0x5afc7f]
 std::optional<Q3Technique> technique_for(
@@ -152,8 +152,8 @@ std::optional<Q3Technique> technique_for(
 // discs, sun glow — in call order.
 // [orig: FrameFX_RenderGlowSource @ 0x582940 —
 // CRenderBatchQueue_SortAndFlush(4) @ 0x582a54;
-// render_water_surface(0, 1) @ 0x582a5d; render_celestial_bodies(1) /
-// render_skybox_sun_glow(0, 0) @ 0x582a77..0x582a80]
+// Render_WaterSurface(0, 1) @ 0x582a5d; Render_CelestialBodies(1) /
+// Render_SkyboxSunGlow(0, 0) @ 0x582a77..0x582a80]
 int technique_stage(Q3Technique technique) {
 	switch (technique) {
 		case Q3Technique::NormalCopy:

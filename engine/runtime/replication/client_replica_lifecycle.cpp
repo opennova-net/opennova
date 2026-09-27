@@ -126,7 +126,7 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 	// the list, so a member is one of those.
 	// [orig: NapiNPClientMsg_0x012 @0x425F8F -> Entity_Destroy @0x43E810 — the
 	//  list removal @0x43E840..0x43E858, the def / def type != 3 / refNum
-	//  gates @0x43E9B6..0x43E9CA, the call @0x43E9CD; CStreamingMem_Destroy
+	//  gates @0x43E9B6..0x43E9CA, the call @0x43E9CD; EntityReference_DestroyEWeapGroup
 	//  @0x546F30 — the list copy @0x546F73, the member tests
 	//  @0x546F8A..0x546FA0, Entity_Destroy @0x546FA3; the list joins (def
 	//  type != 3, refNum != 0, DynArray_AddOrFind) NapiNPClientMsg_0x00D

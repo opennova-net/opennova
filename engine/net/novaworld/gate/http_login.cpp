@@ -139,7 +139,7 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 	// into the game-session BT join field; a NovaWorld host rejects a wrong BT
 	// with code 9. Re-serialize through atol like retail so leading zeros / stray
 	// bytes normalize; a missing/garbage CK keeps the "0" LAN default.
-	// [orig: parse_connection_query_string @0x54dfb0 CK arm; net_config.bt =
+	// [orig: URL_ParseConnectionQueryString @0x54dfb0 CK arm; net_config.bt =
 	//  atol(decoded CK) @0x569b8e]
 	if (!out.ck.empty()) {
 		const std::string decoded_ck = url_cipher_decode(out.ck, URL_CIPHER_KEY_CK);

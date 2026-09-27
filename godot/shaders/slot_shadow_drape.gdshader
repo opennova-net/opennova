@@ -53,8 +53,8 @@ stencil_mode read, compare_equal, 1;
 //                    the silhouette term, so its white half (toward the light
 //                    / in front of the caster plane) and its far row suppress
 //                    the shadow and its black half keeps it (retail:
-//                    build_shadow_cascade_uv_matrices @0x58cf10,
-//                    shadow_system_init_resources @0x5d6260;
+//                    RenderSlot_BuildShadowCascadeUVMatrices @0x58cf10,
+//                    Shadow_SystemInitResources @0x5d6260;
 //                    renderer::slot_depth_clip, shadowztex_pixels)
 // Both texgens run per patch vertex like retail's texture-transformed
 // camera-space coordinates. Shadowed terrain = terrain * fog(sat(sat(rt +

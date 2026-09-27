@@ -6,7 +6,7 @@ extends GutTest
 # the visibility as its colour. A wall perpendicular to the view at a constant
 # view depth: the vertex-shader families fog on that planar depth (retail
 # oFog = 1 - (z - FogStart) * FogRangeRecip, _BaseInc.fx CalcFogSegmented;
-# FogStart/FogRangeRecip [orig: apply_shader_parameters @ 0x58e20d..0x58e26f]),
+# FogStart/FogRangeRecip [orig: Material_ApplyShaderParameters @ 0x58e20d..0x58e26f]),
 # so the view centre and a corner fog alike; a fixed-function pass fogs its
 # linear types on the radial eye distance (vertex RANGE fog [orig:
 # CD3DDevice_SetFogParameters @ 0x677a50..0x677a69]), so the corner fogs more,

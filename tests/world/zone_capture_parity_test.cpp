@@ -5,11 +5,11 @@
 // the A&S/C&C-only all-owned arm, the live FARP masks, and the sorted
 // auto-deploy walk.
 // [orig: Server_UpdateCaptureZoneEntities @0x519690;
-// calculate_capture_zone_control_delta @0x501120; Server_UpdateCaptureZones
+// CaptureZone_CalculateControlDelta @0x501120; Server_UpdateCaptureZones
 // @0x53B8F0; GameEvent_FlagCapture @0x50F6F0; CaptureZone_CheckProximityScoring
 // @0x500C50; ZoneSlotChain_IsZoneCapturableByTeam @0x4A2450;
 // ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920; Server_EnforceZoneEntityTeams
-// @0x519600; find_spawn_entity_for_team @0x4FC810]
+// @0x519600; Spawn_FindEntityForTeam @0x4FC810]
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/match.h>
 #include <runtime/world/world.h>
@@ -127,7 +127,7 @@ void test_secure_pass_latches_before_reading_control() {
 // Every other-team Player in radius counts in the enemies byte; only one whose
 // team may capture the zone counts against the owner. A zone number above 30
 // never joins the chain but is still walked.
-// [orig: calculate_capture_zone_control_delta @0x50121D..0x501248;
+// [orig: CaptureZone_CalculateControlDelta @0x50121D..0x501248;
 // ZoneSlotChain_AddZoneEntity @0x4A2D90; the walk @0x5196A0..0x51973F]
 void test_secure_pass_counts_every_enemy() {
     auto world = make_world(gt::kAdvanceAndSecure);
@@ -352,7 +352,7 @@ void test_masks_refresh_only_on_numbered_flips() {
 
 // Objective gametypes pick the LAST team-matching unnumbered entry of the
 // SORTED spawn list: a vehicle (type priority 2) sorts after a building.
-// [orig: find_spawn_entity_for_team @0x4FC834..0x4FC864;
+// [orig: Spawn_FindEntityForTeam @0x4FC834..0x4FC864;
 // Entity_BuildSpawnZoneList @0x43EAE0]
 void test_objective_auto_deploy_walks_the_sorted_list() {
     auto world = make_world(gt::kObjectiveCoop);

@@ -389,7 +389,7 @@ void VehicleSystem::tick_dead(Entity &e, AiEntity &ai) {
 	ai.team = e.team;
 }
 // This is the refNum attachment group, independent of the team byte.
-// [orig: Vehicle_CleanupTeamEntitiesOnDestruction @0x547040]
+// [orig: Vehicle_ReleaseEWeapGroupOnDestruction @0x547040]
 void VehicleSystem::cleanup_destroyed_ref_group(Entity &vehicle) {
 	// A vehicle def only [orig: Vehicle_ReleaseEWeapGroupOnDestruction
 	// @0x54707C].
@@ -489,7 +489,7 @@ void VehicleSystem::setup_gunner_attachments(Entity &vehicle) {
 	AiBrain &b = ai->brain;
 
 	// Every OTHER pool-1 entity whose refNum byte equals this entity's nonzero
-	// refNum, in pool slot order, sixteen at most [orig: the g_pool_list[1]
+	// refNum, in pool slot order, sixteen at most [orig: the g_PoolList[1]
 	// walk @0x468130..0x468173: self skip @0x468154, refNum nonzero @0x46815E,
 	// the +533 compare @0x468166, the slot store @0x468168, the 16 cap @0x468173].
 	int32_t count = 0;

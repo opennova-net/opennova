@@ -605,7 +605,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	#  @0x438811..0x4388b5]. Nothing selects the mode here: boarding a control
 	# seat with the default chase preference resolves third person by itself
 	# [orig: the arbiter Render_ProcessMainSceneFrame @0x5ca1d2..0x5ca1f2 over
-	#  g_camera_third_person_selected @0xA860DF, 1 from the session reset].
+	#  g_CameraThirdPersonSelected @0xA860DF, 1 from the session reset].
 	for _tick in range(62):
 		var settle := MissionFrameInput.new()
 		settle.delta_seconds = Simulation.tick_dt()

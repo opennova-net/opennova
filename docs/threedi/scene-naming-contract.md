@@ -103,7 +103,7 @@ game combines them, but the assembly settings never reach a `.3di`:
   builds it: the direction read mirrored against the position, and the
   look-at matrix's rows as the child's axes, so a level point faces the child
   along it and a pitched one tips it the other way [orig:
-  build_bone_attachment_matrix @ 0x56C630; build_direction_look_at_matrix @
+  Bone_BuildAttachmentMatrix @ 0x56C630; Math_BuildDirectionLookAtMatrix @
   0x612C90].
 - Both settings bind with every rig of the two models at rest, so the pose a
   clip holds when they are set is not baked in.

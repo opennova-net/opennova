@@ -46,8 +46,8 @@ int armory_selected_clips(const MenuRuntime &menu, const std::string &control) {
 
 } // namespace
 
-// [orig: populate_ammo_combo_boxes @0x55def0; the ACCESSORY leg is the same
-//  logic inlined in populate_weapon_accessory_ammo_ui @0x55e8b0]
+// [orig: PlayerInfo_PopulateAmmoComboBoxes @0x55def0; the ACCESSORY leg is the same
+//  logic inlined in PlayerInfo_PopulateWeaponAccessoryAmmoUI @0x55e8b0]
 int player_info_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const std::string &control, int parent, int saved_primary, int saved_secondary,
 		int saved_type, const hud::GameTextLookup &text) {
@@ -73,7 +73,7 @@ int player_info_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 			menu.set_widget_disabled(type, locked);
 			if (locked) saved_type = 0;
 			// Retail selects the ROW INDEX of the saved type
-			// (set_row_visibility_0 @0x55e0af) from the byte read BEFORE the
+			// (CListWnd_SetRowVisibility @0x55e0af) from the byte read BEFORE the
 			// NOAMMOTYPES reset; this selects by authored value after it. The
 			// two agree because player.mnu authors FMJ/AP/SP as 0/1/2 in row
 			// order, and a locked combo then shows the reset row (D-MNU-9's
@@ -100,7 +100,7 @@ int player_info_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 }
 
 // First three selectable class-3 definitions in table order; hide leftovers.
-// Counts include zero [orig: populate_ammo_combo_boxes @0x55def0, the >= 3 leg].
+// Counts include zero [orig: PlayerInfo_PopulateAmmoComboBoxes @0x55def0, the >= 3 leg].
 std::vector<int> player_info_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		int class_mask, int team_mask, const LoadoutAmmoCounts &saved, const hud::GameTextLookup &text) {
 	const auto indices = grenade_indices(weapons, class_mask, team_mask);
@@ -160,7 +160,7 @@ void armory_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 // Preserve the companion's grouping: sub-weapon terms first, then ONE parent
 // sum, then grenade terms. Parent counts <=0 use maxclips; sub-weapons also
 // treat zero as default, but a chosen grenade zero weighs nothing.
-// [orig: calculate_loadout_weight @0x55f1f0 -- weaponweight + clips*clipweight;
+// [orig: PlayerInfo_CalculateLoadoutWeight @0x55f1f0 -- weaponweight + clips*clipweight;
 //  sub-weapons/grenades contribute the clip term ONLY]
 double player_info_screen_weight(const MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const LoadoutParentIndices &parents, const std::vector<int> &grenades,
@@ -192,8 +192,8 @@ double player_info_screen_weight(const MenuRuntime &menu, const def::DefWeaponsF
 // The WEAPON screen still defers its ammo-TYPE/sub-weapon cascade. Parent
 // weights come first; extra-ammo terms read positive selected rows. An
 // absent grenade control contributes zero clips.
-// [orig: calculate_equipped_weapons_weight @0x565490 -- adm[85]/65536 +
-//  (row+1)*ammoDef[84]/65536; calculate_loadout_weight @0x55f1f0 sibling;
+// [orig: UI_CalculateEquippedWeaponsWeight @0x565490 -- adm[85]/65536 +
+//  (row+1)*ammoDef[84]/65536; PlayerInfo_CalculateLoadoutWeight @0x55f1f0 sibling;
 //  the grenade selected_row*adm[84] arm @0x5655c9..0x56561c]
 // NOT yet the retail gates (D-MNU-9): retail reads each AMMO1 / TYPE /
 // GRENADE arm only while its control IsShown (@0x565504 / @0x56556d /

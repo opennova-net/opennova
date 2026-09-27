@@ -142,7 +142,7 @@ int tokenize(const char *s, size_t len, Token *tokens, int max_tok) {
    items.def 'husk_sub_part_types' stores per husk sub-part. Mirrors the 13 named
    rows of the 80-B static table; the full row data (velocities/effects/sounds)
    lives in engine/runtime/world/destruction.cpp, both citing the same original.
-   [orig: g_death_piece_types @ 0x8404f0; DeathPieceType_FindByName @ 0x57b310] */
+   [orig: g_DeathPieceTypes @ 0x8404f0; DeathPieceType_FindByName @ 0x57b310] */
 static const char *const k_death_piece_type_names[13] = {
     "HULL",      "WHEEL",     "CHUNK_S",   "CHUNK_M",   "CHUNK_L",
     "ROCK_S",    "ROCK_M",    "ROCK_L",    "CHUNKNP_S", "CHUNKNP_M",

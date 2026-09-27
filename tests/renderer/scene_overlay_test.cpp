@@ -34,7 +34,7 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 	CHECK(kSceneOverlayOrder[3] == SceneOverlaySlot::WaterGlint);
 	CHECK(kSceneOverlayOrder[4] == SceneOverlaySlot::UnderwaterMurk);
 	CHECK(kSceneOverlayOrder[5] == SceneOverlaySlot::SunGlare);
-	// The mirror draws the coronas (@ 0x5c85fd), then render_main_scene's dim
+	// The mirror draws the coronas (@ 0x5c85fd), then Render_MainScene's dim
 	// (@ 0x5c186c) and the far-band sun/moon and glow redraw (@ 0x5c18fb,
 	// @ 0x5c1904).
 	CHECK(kMirrorOverlayOrder.size() == 4);
@@ -169,7 +169,7 @@ void test_the_inset_tail_draws_its_own_walks_and_no_glare() {
 }
 
 void test_the_murk_gate_includes_the_waterline() {
-	// cmp [eye+0Ch], Env_WaterHeightFixed @ 0x5c96ca / jg @ 0x5c96d1.
+	// cmp [eye+0Ch], g_EnvWaterHeightFixed @ 0x5c96ca / jg @ 0x5c96d1.
 	SceneOverlayFrame frame;
 	const float rgb[3] = {0.1f, 0.2f, 0.3f};
 	append_underwater_murk_overlay(rgb, 0x80 + 96, 10.0f, frame);
@@ -252,7 +252,7 @@ void test_the_builders_carry_the_pass_states() {
 
 void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
 	// The dim: one viewport quad under 0xFF404040, DESTCOLOR / ZERO, ALWAYS
-	// [orig: render_main_scene @ 0x5c1856..0x5c189e].
+	// [orig: Render_MainScene @ 0x5c1856..0x5c189e].
 	SceneOverlayFrame frame;
 	const float tri[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
 	const float uv[6] = {0, 0, 1, 0, 0, 1};

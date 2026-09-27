@@ -16,7 +16,7 @@ inline constexpr int ADM_MAX_VARIANTS = 8;
 // whatever those are (`anim_` in every retail table), which the runtime
 // compares without case against its 252 slot names, "reset" being slot 0
 // [orig: AnimMap_FindSlotByName @0x40cfa0, stricmp on key + 5, over
-// g_animStateNameTable @0x8135F0]. A key of five characters or fewer names no
+// g_AnimStateNameTable @0x8135F0]. A key of five characters or fewer names no
 // slot here. That is our rule: retail's lookup reads on past such a key's end
 // into the rest of its line, which the tokenizer cuts in place
 // (Terrain_TokenizeConfigLine @0x53CB60), and no table carries one.

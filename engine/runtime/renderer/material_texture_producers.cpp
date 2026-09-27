@@ -27,7 +27,7 @@ Span find_chunk(Span s, const char *tag, int depth = 0) {
 }
 // Sixteen azimuth slices; source alpha, quarter-size XY, 256 wrapped samples.
 // Direction Y and distance step round to binary32; the X accumulator stays PC53.
-// [orig: generate_environment_map @0x58A220..0x58A42B]
+// [orig: Texture_GenerateEnvironmentMap @0x58A220..0x58A42B]
 MaterialTexturePixels horizon_volume_from_height(const uint8_t *source, uint32_t w, uint32_t h) {
     MaterialTexturePixels result;
     if (!source || !dimensions(w,h,1) || w<4 || h<4) return result;
@@ -56,7 +56,7 @@ MaterialTexturePixels horizon_volume_from_height(const uint8_t *source, uint32_t
     return result;
 }
 // Retail computes temporary sample directions but fills the final image white.
-// [orig: generate_normal_map_from_sphere_samples @0x58CB90..0x58CDF5]
+// [orig: Texture_GenerateNormalMapFromSphereSamples @0x58CB90..0x58CDF5]
 MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *source, uint32_t w, uint32_t h) {
     if (!source || !dimensions(w,h,1)) return {};
     return {w,h,1,std::vector<uint8_t>(size_t(w)*h*4,255)};

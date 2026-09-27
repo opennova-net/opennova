@@ -257,7 +257,7 @@ uint32_t feed_event_color(uint8_t event_type, bool own, uint8_t team) {
 			return own ? kFeedColorWhite : kFeedColorGrey;
 		// The friendly-fire trio is white for everyone [orig: 7/8/9
 		// @0x4265FF pass -1 unconditionally], as are 16/17/18 (they pass
-		// g_hudColorTable[0], initialized to -1 [orig: HUD_InitTeamColorTable
+		// g_HUDColors[0], initialized to -1 [orig: HUD_InitTeamColorTable
 		// @0x51F245]) and the announcement lines 27-31/35/36/37.
 		case 7: case 8: case 9:
 		case 16: case 17: case 18:
@@ -425,11 +425,11 @@ ChatSink chat_channel_sink(int channel) {
 }
 
 uint32_t chat_channel_color(int channel) {
-	// [orig: the per-case colour pushes — 1/4/5 g_hudColorLightBlue
+	// [orig: the per-case colour pushes — 1/4/5 g_HUDColors.palette[3]
 	//  @0x42ba5c; 9 dword_24C184C @0x42b9a5; 2 dword_24C183C @0x42b9c2;
 	//  11 dword_24C1860 @0x42ba26; 3 `color` @0x42ba43; 7 dword_24C1854
 	//  @0x42baa2; 12 dword_24C1850 @0x42baea; 0/6/10/13/14 and the default
-	//  g_hudColorTable[0] @0x42bb0c/@0x42ba86/@0x42b9de/@0x42bb01]
+	//  g_HUDColors[0] @0x42bb0c/@0x42ba86/@0x42b9de/@0x42bb01]
 	switch (channel) {
 		case 1: case 4: case 5:
 			return kHudColorLightBlue;

@@ -51,7 +51,7 @@ uint64_t hash_alpha_pyramid(uint64_t hash,
 	return hash;
 }
 
-// The four framebuffer blend classes [orig: decode_blend_mode_to_d3d_states @0x680f00].
+// The four framebuffer blend classes [orig: RenderState_DecodeBlendModeToD3DStates @0x680f00].
 TerrainStaticShadowBlend map_blend(opennova::renderer::ObjectBlendMode blend) {
 	switch (blend) {
 		case opennova::renderer::ObjectBlendMode::Opaque:

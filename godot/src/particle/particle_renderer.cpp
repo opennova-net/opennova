@@ -678,9 +678,9 @@ public:
 	float mirror_fog_end = 100000.0f;
 	std::int32_t mirror_fog_type = 1;
 	// The manager's two per-frame particle tints (retail byte 128 = 1.0):
-	// +0x3E8 = Env_TerrainLightCombined for AMBIENTCOLOR emitters, +0x3F0 =
+	// +0x3E8 = g_EnvTerrainLightCombined for AMBIENTCOLOR emitters, +0x3F0 =
 	// the modulator block doubled+saturated for the rest
-	// (retail render_emitter_effect @ 0x5f70c0; CParticleEmitter_AdvanceFrame
+	// (retail Render_EmitterEffect @ 0x5f70c0; CParticleEmitter_AdvanceFrame
 	//  @ 0x5e6600..0x5e661c selects into emitter+200). Neutral until an
 	// environment source is attached.
 	std::array<float, 3> ambient_tint{1.0f, 1.0f, 1.0f};

@@ -38,7 +38,7 @@ namespace opennova::world {
 //  Entity_RenderVehicleModel @0x440852..0x440866,
 //  Entity_ComputeUserpointWorldTransform @0x545CA3..0x545CAE,
 //  Entity_ComputeUserpointTransform @0x545A89..0x545A94,
-//  build_bone_attachment_matrix @0x56C6DC..0x56C6F3; the seat call
+//  Bone_BuildAttachmentMatrix @0x56C6DC..0x56C6F3; the seat call
 //  Entity_AttachToBoneAndUpdateTransform @ 0x546424..0x54652B (the call
 //  @0x546517..0x546518), reached for parentSlot 3 from
 //  Entity_UpdateInfantryPlayerBody @ 0x4B63BF..0x4B63C7 and
@@ -296,7 +296,7 @@ inline void advance_emplaced_gun_channel(EmplacedGunChannel &channel,
 	if (gunner.is_local_player) {
 		// The local player's own yaw is pulled back to within +-90 deg of the
 		// turret and the look-yaw global mirrors it. [orig: `cmp edx,
-		// g_local_player_entity` @0x440a76; clamp @0x440a7e..0x440a93;
+		// g_LocalPlayerEntity` @0x440a76; clamp @0x440a7e..0x440a93;
 		// occ.Yaw = gun.Yaw - eax - edi @0x440a98..0x440a9c;
 		// g_LocalPlayerLookYaw = occ.Yaw @0x440aa8]
 		yaw_step = emplaced_clamp_symmetric(yaw_step, kEmplacedLocalGunnerYawTether);
@@ -605,7 +605,7 @@ inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 		// occupant of the row becomes the child's carrier.
 		// [orig: Entity_Destroy memset(entity, 0, 0x2B4) @0x43EA70, Flags +0x24,
 		//  def +0x20, model +0x30 all inside it, its refNum walk @0x43E9CD ->
-		//  CStreamingMem_Destroy @0x546F30; Entity_UpdateTransformAndTurret
+		//  EntityReference_DestroyEWeapGroup @0x546F30; Entity_UpdateTransformAndTurret
 		//  def test @0x440EA6..0x440EAB, root copy @0x4410EA..0x4411BC]
 		if (emplaced_slot_def(world, mount) == nullptr) return;
 		mount.position = Vec3{};

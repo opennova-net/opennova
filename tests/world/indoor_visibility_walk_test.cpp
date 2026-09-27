@@ -1147,7 +1147,7 @@ int main(int argc, char **argv) {
 	// from the eye, each crossing the box boundary once, and the pass gates
 	// follow the letters. [orig: Entity_MovementCollisionResolver — the
 	// letter OR inside the first-pass candidate loop @ 0x4b34c0..0x4b3502;
-	// build_sector_visibility_masks — the camera query at the render eye
+	// Terrain_BuildSectorVisibilityMasks — the camera query at the render eye
 	// byte_A78364 @ 0x5c8674..0x5c8679]
 	expect(in_flips.letters <= 1 && out_flips.letters <= 1,
 			"(B) the local letters flip at most once per doorway crossing");
@@ -1160,8 +1160,8 @@ int main(int argc, char **argv) {
 	// retail law here — the 14-slot clamp over collection order (the zero
 	// OOBJ weights) and the outdoors-only bit-31 marker that arms every type-1
 	// hull when the camera leaves the box [orig: Terrain_SortPortalSlotsByPriority
-	// @ 0x5c449f..0x5c44a4; build_sector_visibility_masks @ 0x5c86e7..0x5c871b;
-	// test_sector_entity_occlusion's type-1 gate @ 0x5c4764].
+	// @ 0x5c449f..0x5c44a4; Terrain_BuildSectorVisibilityMasks @ 0x5c86e7..0x5c871b;
+	// Terrain_TestSectorEntityOcclusion's type-1 gate @ 0x5c4764].
 	std::printf("walk: diagnostic max flips building %d/%d entity %d/%d (in/out)\n",
 			in_flips.max_building, out_flips.max_building, in_flips.max_entity, out_flips.max_entity);
 

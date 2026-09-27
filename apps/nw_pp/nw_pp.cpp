@@ -419,7 +419,7 @@ size_t load_items_def(const char *path) {
 	// Buggy", wire 0x14B9=5305 ↔ id 105305 "Player #1 (Multiplayer)",
 	// wire 0x04b0=1200 ↔ id 101200 "Drivable Indonesian LCT"). Engine
 	// loader presumably folds the 100000 offset out before storing the
-	// runtime `gItemDefs[i].id` field that `ItemList_FindIndexByTypeId
+	// runtime `g_ItemDefs[i].id` field that `ItemList_FindIndexByTypeId
 	// @ 0x49E100` compares against.
 	for (size_t i = 0; i < items.count; ++i) {
 		const DefItemDef &it = items.entries[i];
@@ -1420,7 +1420,7 @@ void print_tag_7b(const std::vector<uint8_t> &body) {
 }
 
 // S2C 0x0F world-state-load. The 128-entry ammo-pool table (the authority's
-// serverPlayer+88664 image -> client g_localAmmoPools) is summarized (non-zero
+// serverPlayer+88664 image -> client g_LocalAmmoPools) is summarized (non-zero
 // count); the spawn pose + waypoint/location-name counts + names are shown.
 void print_tag_0f(const std::vector<uint8_t> &body) {
 	WorldStateLoad ws;
@@ -1500,7 +1500,7 @@ void print_tag_28_c2s(const std::vector<uint8_t> &body) {
 }
 
 // C2S 0x29 team/spawn ack (client 0x51 apply @0x431c99 sends team_index+1; the server
-// reads it as a g_team_change_entity_list index @0x514f7c — D-NET-148).
+// reads it as a g_TeamChangeEntityList index @0x514f7c — D-NET-148).
 void print_tag_29_c2s(const std::vector<uint8_t> &body) {
 	TeamSpawnAck r;
 	size_t used = 0;

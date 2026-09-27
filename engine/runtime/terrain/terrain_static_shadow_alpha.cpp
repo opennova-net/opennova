@@ -36,7 +36,7 @@ bool TerrainStaticShadowAlphaPage::is_valid() const noexcept {
 			pixel_count(width, height, count) && alpha.size() == count;
 }
 
-// [orig: Terrain_CollectAndRenderTileModels @0x60D250 temp-blue composite: PolyTrn_PSDepthAlpha
+// [orig: Terrain_CollectAndRenderTileModels @0x60D250 temp-blue composite: g_PolyTrnPSDepthAlpha
 //  (0,0,0,tempBlue) drawn ONE/ONE with COLORWRITEENABLE 0xF, GfxBlend_ApplyToDevice @0x6818E5/0x6818FB;
 //  docs/terrain/terrain-re.md]
 std::array<uint8_t, 4> composite_terrain_static_shadow_pixel(

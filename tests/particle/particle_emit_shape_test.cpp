@@ -14,7 +14,7 @@
 // Velocity is seeded separately for ALL shapes: the direction helper draws a
 // polar angle uniform in [spread_skip, spread] and a uniform azimuth around
 // the spawn direction, × (speed + speed_adj × rand_signed)
-// [orig: compute_cone_direction_vector @ 0x5e1f10 / generate_random_direction_basis
+// [orig: CParticleSystem_ComputeConeDirectionVector @ 0x5e1f10 / CParticleSystem_GenerateRandomDirectionBasis
 //  @ 0x5e22a0; the post-switch call + def+3892/+3896 multiply @ 0x5e7c41..0x5e7d1e].
 // We test the geometric properties (dominance, range bounds, shell radii)
 // rather than byte-exact matches against the FPU stream.
@@ -300,7 +300,7 @@ bool test_burst_distribute_spaces_the_azimuth_evenly() {
 	// the sequential helper: azimuth += 2*pi / emit_burst per particle, so a
 	// burst of 4 at a pinned polar angle lands on four quarter-turn headings
 	// [orig: CEffectEmitter_AdvanceEmission @ 0x5e1e0d..0x5e1e3e ->
-	//  compute_cone_direction_vector @ 0x5e1f6e].
+	//  CParticleSystem_ComputeConeDirectionVector @ 0x5e1f6e].
 	using namespace opennova::particle;
 	ParticleDef def = base_def();
 	def.speed = 10.0f;
@@ -335,7 +335,7 @@ bool test_emit_vector_selects_the_emission_axis() {
 	// Only EMITVECTOR (0x10000) defs emit around the spawn direction; every
 	// other def's axis is zero and the helper's fallback emits around world
 	// +Y [orig: CEffectEmitter_Initialize @ 0x5e60f9..0x5e612e;
-	//  compute_cone_direction_vector @ 0x5e203a].
+	//  CParticleSystem_ComputeConeDirectionVector @ 0x5e203a].
 	using namespace opennova::particle;
 	ParticleDef def = base_def();
 	def.speed = 10.0f;

@@ -365,7 +365,7 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     // NOT-Berserk (xor 1) reads 0x201. No brain reads 0
                     // (retail dereferences the runtime pointer unchecked).
                     // [orig: EventTrigger_EvaluateCondition @0x453b85..0x453b99
-                    //  g_local_player_entity->aiRuntime[1] & 0x200]
+                    //  g_LocalPlayerEntity->aiRuntime[1] & 0x200]
                     const world::AiEntity *ai = w.ai.for_handle(w.cached.local_player);
                     return ai != nullptr ? (ai->slot.f[world::AiSlot::kBehaviorFlags] & 0x200) : 0;
                 }
@@ -427,7 +427,7 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     // the registered area carries. Inclusive compares.
                     // [orig: EventTrigger_AnySatchelInArea @0x547160: record
                     //  @0x54716d, z gate @0x547196, populated-row gate @0x5471cc,
-                    //  == g_ammo_satchel @0x5471ea, x/y/z @0x5471f9/@0x547208/@0x547215]
+                    //  == g_AmmoSatchel @0x5471ea, x/y/z @0x5471f9/@0x547208/@0x547215]
                     const world::Area *area = w.registry.area(t.param1);
                     if (area == nullptr) return false;
                     for (const world::PlacedDevice &d : w.throwables.devices) {
@@ -564,7 +564,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         case bms::ActionType::KillSingle: cmds.kill_ssn(static_cast<uint16_t>(a.param1)); break;
         case bms::ActionType::VaporizeSingle:
             // [orig: EventAction_Dispatch case 22 @0x454828 ->
-            //  find_entity_by_parent_and_dispatch @0x43E210]
+            //  Entity_FindByParentAndDispatch @0x43E210]
             cmds.remove_bms_ref(a.param1);
             break;
         case bms::ActionType::KillGroup: cmds.kill_group(a.param1); break;
@@ -610,7 +610,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // latch holds only when param2 == 1 forces it; a skipped play never
             // reaches the dialog registry the PLYRDIALOG subs read.
             // [orig: EventAction_Dispatch @0x4542E0 case 7 — the is_mp_session_peer
-            //  test @0x45443d, param2 == 1 @0x45444a, the g_spawn_success_gate test
+            //  test @0x45443d, param2 == 1 @0x45444a, the g_SpawnSuccessGate test
             //  @0x454450, the Dialog_PlayByIndex call @0x454461]
             if (w.rules.mp_session_peer && (a.param2 == 1 || !w.match.outcome().ended))
                 w.out.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
@@ -619,7 +619,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // The engine flag the waypoint HUD label + SP cycle key gate on
             // (init 1 at HUD bring-up); the effect stays as the presentation log.
             // [orig: action 40 -> Game_SetShowWaypoints @0x58fb50 ->
-            //  g_showWaypoints @0x27238BC, init @0x5a4913]
+            //  g_ShowWaypoints @0x27238BC, init @0x5a4913]
             w.script.waypoints.show = (a.param1 != 0);
             w.out.effects.push({"show_waypoints", a.param1, 0, 0, 0, std::string()});
             break;
@@ -659,7 +659,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
         // @0x4542E0 (the Server_ProcessRoundEnd(1/2/0) calls @0x45447b/@0x454495/
         // @0x4544af)]; the round-over gate sits inside the callee [orig:
-        // Server_ProcessRoundEnd @0x5164F6, `cmp g_spawn_success_gate, ebx`],
+        // Server_ProcessRoundEnd @0x5164F6, `cmp g_SpawnSuccessGate, ebx`],
         // which process_round_end's own latch ports. The "win" effect stays as
         // the presentation signal.
         case bms::ActionType::BlueWin:
@@ -942,7 +942,7 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     }
     // An empty host does not advance the mission. Retail wraps the WAC tick, the
     // idle sweep and this pump in one condition whose live half is
-    // `wac_var_humans || !wac_var_ticks` — see World::script_may_advance. The
+    // `g_WacVarHumans || !g_WacVarTicks` — see World::script_may_advance. The
     // pre-mission pass above is deliberately OUTSIDE it, matching retail, where
     // that pass runs from Game_StartMission rather than the server tick.
     const bool admitted = ctx.script_admitted.has_value()

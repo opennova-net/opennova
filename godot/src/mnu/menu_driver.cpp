@@ -419,7 +419,7 @@ Ref<RtxtStringFile> MenuDriver::load_text_rsrc_(const String &p_file) {
 // Marquee DATASOURCE routing: a marquee_wnd DATASOURCE is either a
 // CBIN-encrypted credits config (ENV scroll settings + TEXT entries — routed
 // to the dedicated CreditsPlayer scroller) or plain text fed to the compiled
-// roll (the retail loader is marquee_load_credits_from_ini; the CBIN scroller
+// roll (the retail loader is CMarqueeWnd_LoadCreditsFromIni; the CBIN scroller
 // is godot/src/cbin).
 void MenuDriver::seed_marquee_widgets_() {
 	clear_credits_();

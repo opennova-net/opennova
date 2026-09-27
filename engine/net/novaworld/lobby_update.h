@@ -23,7 +23,7 @@ struct GateResponse;
 // every key and value is lobby-sanitized (String_SanitizeForLobby
 // @0x4fe750: ' ', '?', '@', '=' -> '+'; empty -> "---"), and the player
 // suffix is the PlayerList's PlayerName values when the send-players flag
-// (dword_24D2188) is set, else absent.
+// (g_NWSendPlayerList) is set, else absent.
 struct LobbyStatusBlob {
 	std::string lobby_name;
 	std::string host_key;
@@ -32,7 +32,7 @@ struct LobbyStatusBlob {
 	std::vector<std::pair<std::string, std::string>> host_vars;
 	// PlayerName values of the PlayerList.
 	std::vector<std::string> player_names;
-	// dword_24D2188: emit the " p=" suffix at all.
+	// g_NWSendPlayerList: emit the " p=" suffix at all.
 	bool send_player_names = true;
 };
 

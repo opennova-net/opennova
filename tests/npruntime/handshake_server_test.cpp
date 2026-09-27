@@ -920,7 +920,7 @@ bool run_reactive_replies() {
 		            "0x0A -> 0x19 ack")) return false;
 	}
 	// 0x29 team/spawn ack -> NO 0x51 on a plain join. [orig: NapiNPServerMsg_0x029 @0x514F10]
-	// only replies 0x51 for a pending g_team_change_entity_list entry (team-change flow,
+	// only replies 0x51 for a pending g_TeamChangeEntityList entry (team-change flow,
 	// unmodeled); the golden session's deploy-time C 0x29 draws no 0x51 anywhere. The old
 	// unconditional zero-id 0x51 made the client REBIND its own player's CharacterEntity
 	// (@0x431BB0 field-parses it) onto a vehicle archetype — the DBuggy1 shadow (D-NET-148).
@@ -965,7 +965,7 @@ bool run_reactive_replies() {
 }
 
 // A plain-join C2S 0x29 draws no S2C 0x51 even with a bound player: the original replies 0x51
-// only for a pending g_team_change_entity_list entry [orig: NapiNPServerMsg_0x029 @0x514F10
+// only for a pending g_TeamChangeEntityList entry [orig: NapiNPServerMsg_0x029 @0x514F10
 // @0x514f7c], and the client field-parses 0x51 (@0x431BB0 CharacterEntity rebind) — an
 // invented zero-id confirm re-bound the joiner to a vehicle archetype (D-NET-148).
 bool run_plain_join_tag29_draws_no_tag51() {
@@ -1558,7 +1558,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	}
 
 	// D-NET-166: the expansion version-checksum gate. An EXPANSION host compares
-	// atol(VERSIONCRCSTRING) against its own g_expansion_checksum and rejects a
+	// atol(VERSIONCRCSTRING) against its own g_ExpansionChecksum and rejects a
 	// mismatch; a matching nonzero (and negative — "%ld" of a bit-31 CRC) value
 	// admits [orig: Server_ValidatePlayerJoinRequest — gate @0x51231e, compare
 	// @0x512331, reject DPC=48 @0x512341].

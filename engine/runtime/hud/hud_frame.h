@@ -49,7 +49,7 @@ enum HudTexture : int32_t {
 	kHudTexMapWpIndicator, // WPIndctr.tga [orig: HUD_LoadAllTextures @0x59e079]
 	// The Tab board's stdbox: the 4x4 border stencil atlas and the tiled
 	// interior brush [orig: the panel call @0x423a72 -> HUD_DrawLabelBox
-	// @0x51efd0 -> render_hud_box_overlay @0x56b700, "stdbox" registered
+	// @0x51efd0 -> Render_HUDBoxOverlay @0x56b700, "stdbox" registered
 	// @0x51effa]. Inserted BEFORE the sights
 	// sentinel, which sizes the device slot array.
 	kHudTexBoxBorder,
@@ -68,9 +68,9 @@ enum HudTexture : int32_t {
 	kHudTexLfpNeutral,
 	// The marker's 36x36 team tile behind the letter: one texture for the
 	// viewer's own zones, another for everyone else's [orig: the pick
-	//  @0x5989b9..0x5989d1 — textureId @0x27239D4 for team == local,
+	//  @0x5989b9..0x5989d1 — g_HUDZoneTileOwnTexture @0x27239D4 for team == local,
 	//  dword_27239C4 otherwise; the latter is lfp_alf.tga, HUD_LoadAllTextures
-	//  @0x59e10e]. WITNESS PENDING: the loader of textureId @0x27239D4 (no
+	//  @0x59e10e]. WITNESS PENDING: the loader of g_HUDZoneTileOwnTexture @0x27239D4 (no
 	//  visible writer in HUD_LoadAllTextures' xrefs) — an unresolved slot
 	//  draws no tile, the same degradation as the silhouette.
 	kHudTexLfpTileOwn,
@@ -96,7 +96,7 @@ enum HudTexture : int32_t {
 // not scale — it is the atlas cell's own size (texW/4, 32 px for the shipped
 // 128 px border.tga), because retail's fill is one wrap-addressed quad of the
 // EXTRACTED cell (3,0) with UV = (screen_px + 0.5) / cell
-// [orig: stdbox_draw_fill_wrap_tiled @0x56b5d0; the extraction + zeroing of
+// [orig: HUD_StdboxDrawFillWrapTiled @0x56b5d0; the extraction + zeroing of
 // the source cell @0x56adbd-0x56ae44]. Insets 16*s / 24*s are the ctor's
 // literals [orig: the 16/24 stores @0x56b342/@0x56b351, read as rec+0x180 /
 // rec+0x184 by the fill arm @0x56b7bd-0x56b80d]; the bottom-row crop is 0.9
@@ -218,7 +218,7 @@ struct HudLayout {
 	HudPosRecord game_info;
 	HudPosRecord wpd_info;
 	HudPosRecord chat_text;
-	// The chat box's x1/x2 columns — g_hudChatBoxCoords rows 1 and 2, the
+	// The chat box's x1/x2 columns — g_HUDChatBoxCoords rows 1 and 2, the
 	// source of the chat wrap width `x2 - (x1 - 4)` [orig: HUD_GetChatBoxCoord
 	//  @0x5bbe90 reads dword_28E4DF8[index]; Chat_AddMessageChannel1 reads
 	//  rows 2 and 1 @0x498673/@0x498688]. The table's ONLY writer is the
@@ -253,7 +253,7 @@ struct HudLayout {
 	bool net_icon_texture_valid = false;
 	// The AAS zone status panel: the LFP_FLAGS anchor (the panel's right edge
 	// and its row base) and the three team-icon atlases + the two tile slots
-	// [orig: the hudpos writes g_hudZonePanelX/Y @0x5a0563/@0x5a057b; the
+	// [orig: the hudpos writes g_HUDZonePanelX/Y @0x5a0563/@0x5a057b; the
 	//  icon loads HUD_LoadAllTextures @0x59dda0].
 	int lfp_anchor_x = 0;
 	int lfp_anchor_y = 0;
@@ -367,7 +367,7 @@ struct HudWeaponState {
 	std::string display_name;
 	// The clip-indicator flash key: the original stamps on the (ammo class,
 	// reserve, pool) triple; the single-pool port keys (round_type, reserve)
-	// [orig: draw_hud_ammo_indicator restamp; D-HUD-5].
+	// [orig: HUD_DrawAmmoIndicator restamp; D-HUD-5].
 	std::string round_type;
 	// The HUDCLIPGFX/HUDRNDGFX placement (per-weapon authored offsets/step)
 	// and the registered textures' dims.
@@ -422,7 +422,7 @@ struct HudFriendlyTag {
 	uint16_t entity_id = 0; // the fallback-name index [orig: (pool<<12)|slot]
 	int32_t health_ratio_fp16 = 0x10000;
 	bool medic = false;     // CharAttr class flag 8 [orig: charattr.def Medic]
-	bool speaking = false;  // entity == g_voicePlaybackEntity @ 0xC6EC38
+	bool speaking = false;  // entity == g_VoicePlaybackEntity @ 0xC6EC38
 	bool player = false;    // slot-walk entry (empty callsign draws the bar leg)
 	// The DOWNED legs [orig: HUD_DrawEntityLabel — dead = `Flags & 2`
 	// @0x5a3c1c; slot present + slot+0x10 revive seconds + slot+0x2C medic
@@ -480,7 +480,7 @@ struct HudEndRoundOverlayState {
 // tables. [orig: HUD_DrawEndRoundStatistics @0x5b7600 while dword_24C18AC]
 struct HudEndRoundStatisticsState {
 	bool shown = false;
-	bool raised = false; // [orig: g_spawn_success_gate && winner == 1 @0x5b763b]
+	bool raised = false; // [orig: g_SpawnSuccessGate && winner == 1 @0x5b763b]
 	std::string title;   // gametext ("Score", "SCORE_TITLE")
 	std::array<std::string, 4> labels;
 	std::array<std::string, 4> values;
@@ -501,8 +501,8 @@ struct HudScoreboardState {
 	std::vector<ScoreboardEntry> rows;   // wire order; the server sorts
 	// The 4-team page inputs (hud_scoreboard.h scoreboard_team_page): the
 	// session's side count — a joiner reads it off the 0x16 team table the
-	// host serializes from its g_num_teams_config [orig: @0x50db3a ->
-	// g_scoreboard_team_count @0x42fdda] — and the HUD frame counter, the
+	// host serializes from its g_NumTeamsConfig [orig: @0x50db3a ->
+	// g_ScoreboardTeamCount @0x42fdda] — and the HUD frame counter, the
 	// per-main-frame clock the LFP panel blinks on too [orig: dword_A87060,
 	// Game_TickHudFrameCounters @0x434c14].
 	int team_count = 0;
@@ -586,7 +586,7 @@ struct HudLfpZone {
 struct HudLfpPanelState {
 	bool shown = false;
 	int local_team = 0;
-	// The HUD frame counter the blink masks (g_hudFrameCounter & 0x18).
+	// The HUD frame counter the blink masks (g_HUDFrameCounter & 0x18).
 	int frame_counter = 0;
 	// The game's AAS-vs-conquest arm: the conquest arm is unmodelled and the
 	// element draws nothing under it [orig: g_GameType == 0x50010 @0x5a24a1].
@@ -601,7 +601,7 @@ struct HudFrameState {
 	int ticks = 0;
 	// THE RECENT MESSAGES (J) WINDOW: the OldMessages toggle and its stdbox
 	// title (Overlays/STROVER43, resolved by the embedder like the scoreboard's)
-	// [orig: g_showMessageLog @0x24C18C0; the title @0x5b9e54].
+	// [orig: g_ShowMessageLog @0x24C18C0; the title @0x5b9e54].
 	bool message_log_shown = false;
 	std::string message_log_title;
 	KillAnnouncement kill_announcement;
@@ -655,7 +655,7 @@ struct HudFrameState {
 	// THE END-OF-ROUND OVERLAY (net-re §5.68): the resolved Impact38 text
 	// ladder the presenter built from hud/end_round_overlay.h, drawn inside
 	// the stdbox (8, top+8, 1015, bottom-8) of the overlay safe area
-	// [orig: draw_endround_stats_overlay @0x5b7cd0 — HUD_DrawLabelBox
+	// [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0 — HUD_DrawLabelBox
 	//  @0x5b7d3e, each line HUD_DrawTextCentered_HalfBright(Impact38, 512, y)
 	//  through HUD_DrawTextCenteredScaled (ex sub_580B80) @0x580b80].
 	HudEndRoundOverlayState end_round;
@@ -665,8 +665,8 @@ struct HudFrameState {
 	std::vector<HudAttachLabel> attach_labels;
 	// Friendly tags (D-HUD-20). Mode default 2 = FULL [orig: Game_Run
 	// @ 0x4a7fed]; fog cull against the environment's current fog distance
-	// [orig: Env_FogDistCurrent @ 0x5a3b28]; one speaking level shared by the
-	// (single) speaking entity [orig: g_audioOutLevelStage1].
+	// [orig: g_EnvFogDistCurrent @ 0x5a3b28]; one speaking level shared by the
+	// (single) speaking entity [orig: g_AudioOutLevelStage1].
 	std::vector<HudFriendlyTag> friendly_tags;
 	int friendly_tag_mode = 2;
 	int32_t fog_dist_q16 = INT32_MAX;
@@ -708,9 +708,9 @@ struct HudFrameState {
 	// THE BREATH BAR (element_breath_bar): the underwater breath samples the
 	// host counts four a second and ships in the S2C 0x0A player state
 	// [orig: word_A85B7C, written only by NapiNPClientMsg_0x00A @0x430104], the
-	// drown limit's seconds [orig: wac_var_breathtime, from the same message
+	// drown limit's seconds [orig: g_WacVarBreathTime, from the same message
 	// @0x4301A1; 20 from WacScript_FreeAll @0x4f6381], the round-over latch the
-	// caller skips the bar under [orig: g_spawn_success_gate, tested
+	// caller skips the bar under [orig: g_SpawnSuccessGate, tested
 	// @0x5BDECA..0x5BDED1], and the label the embedder resolves from gametext
 	// (Overlays/STROVER91).
 	int breath_samples = 0;
@@ -750,10 +750,10 @@ struct HudDrawList {
 // slot * FNT_MAX_PAGES, so one flat draw list mixes faces and the device leg
 // indexes its page-texture table the same way.
 inline constexpr int kHudFontSlotHud = 0;       // the hudpos-named HUD font
-inline constexpr int kHudFontSlotLabel = 1;     // g_hudLabelFont (Arial normal)
+inline constexpr int kHudFontSlotLabel = 1;     // g_HUDLabelFont (Arial normal)
 inline constexpr int kHudFontSlotLabelBold = 2; // the bold slot (fontObj @ 0xB4C394)
-inline constexpr int kHudFontSlotLabelLarge = 3; // g_hudLabelFontLarge (Impac22b)
-inline constexpr int kHudFontSlotImpact38 = 4;   // g_hudLabelFontImpact38 (Impac38b)
+inline constexpr int kHudFontSlotLabelLarge = 3; // g_HUDLabelFontLarge (Impac22b)
+inline constexpr int kHudFontSlotImpact38 = 4;   // g_HUDLabelFontImpact38 (Impac38b)
 inline constexpr int kHudFontSlotCount = 5;
 // The device leg sizes its page-texture table by the count; a slot past it
 // writes Ref<> handles off the end of that table (the 2026-08-24 load crash).
@@ -772,9 +772,9 @@ public:
 
 	// The overlay label fonts + their resolution scales — the Arial pair and
 	// the large slot retail loads beside the hudpos HUD font
-	// [orig: HUD_InitAllFonts @ 0x51ee20: g_hudLabelFont = Arial14n/16n, the
+	// [orig: HUD_InitAllFonts @ 0x51ee20: g_HUDLabelFont = Arial14n/16n, the
 	// bold slot (fontObj @ 0xB4C394) = Arial12b/14b/16b at scale
-	// (screenW<<16)/{640,800,1024}; g_hudLabelFontLarge @0xB4C3A0 =
+	// (screenW<<16)/{640,800,1024}; g_HUDLabelFontLarge @0xB4C3A0 =
 	// Impac22b.fnt at the over-800 scale; the slot carries
 	// {font, scale_x, scale_y} @ 0x580453..0x580468]. Friendly tags draw
 	// with the normal face [orig: @ 0x5a3a0c], attach labels with the bold
@@ -828,7 +828,7 @@ public:
 	// @0x59dd40]. Of that routine the compiler holds state for exactly two
 	// words: stance_.stamp is dword_2723D38 and flash_stamp_ is dword_2723D48
 	// (cleared @0x59dd8f / @0x59dd89), the stamp stores of
-	// HUD_DrawStanceIndicator @0x599f98 and draw_hud_ammo_indicator @0x599aca;
+	// HUD_DrawStanceIndicator @0x599f98 and HUD_DrawAmmoIndicator @0x599aca;
 	// their prev/cur bytes (byte_2723D3C/D3D @0x599f8c/@0x599f92,
 	// byte_2723D4C @0x599ac5) are retained as in retail. The rest of the
 	// routine has no compiler-side state: the damage-direction ring
@@ -874,7 +874,7 @@ private:
 	// The three-quad progress bar in surface pixels: the border rect, the
 	// opaque black rect one pixel in, then the fill two pixels in, `fraction`
 	// of the inner width, centred on the bar's integer midpoint or anchored at
-	// its left [orig: draw_progress_bar @0x59B340].
+	// its left [orig: HUD_DrawProgressBar @0x59B340].
 	void emit_progress_bar(int xl, int yt, int xr, int yb, uint32_t fill, uint32_t border,
 			float fraction, bool centered);
 	void emit_text(const char *text, float design_x, float design_y,
@@ -939,7 +939,7 @@ private:
 	// heap-cloning it every frame.
 	HudMinimapInput minimap_input_;
 	StanceFade stance_;
-	// The clip-indicator flash latch [orig: draw_hud_ammo_indicator flash
+	// The clip-indicator flash latch [orig: HUD_DrawAmmoIndicator flash
 	// @ 0x599af9]: the round count drop stamps the flash start.
 	int flash_prev_rounds_ = -1;
 	int flash_stamp_ = 0;

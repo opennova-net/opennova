@@ -3,9 +3,9 @@
 // completion, and the mission-scripted show/hide gate.
 //
 // In the original this is client-side player state over pool-3 marker entities:
-// the list [orig: g_waypointList @ 0xB76570, count @ 0xB76568], the current
-// entry [orig: g_currentWaypoint @ 0xB7656C], the visibility flag
-// [orig: g_showWaypoints @ 0x27238BC], and per-marker fields on the entity
+// the list [orig: g_WaypointList @ 0xB76570, count @ 0xB76568], the current
+// entry [orig: g_CurrentWaypoint @ 0xB7656C], the visibility flag
+// [orig: g_ShowWaypoints @ 0x27238BC], and per-marker fields on the entity
 // (radius +0, name id +672, linked event +528, chain-back +535, done +536).
 // Our container rebase copies those marker fields into track entries at build
 // time (markers are immutable post-spawn). The MP POI variant of the same
@@ -41,9 +41,9 @@ struct WaypointEntry {
 class WaypointTrack {
 public:
     std::vector<WaypointEntry> entries;
-    // Current entry index; -1 = none (the original's null g_currentWaypoint).
+    // Current entry index; -1 = none (the original's null g_CurrentWaypoint).
     int32_t current = -1;
-    // The mission-scripted visibility gate [orig: g_showWaypoints @ 0x27238BC,
+    // The mission-scripted visibility gate [orig: g_ShowWaypoints @ 0x27238BC,
     // init 1 @ 0x5a4913; BMS ShowWaypoints -> Game_SetShowWaypoints @ 0x58fb50].
     bool show = true;
 
@@ -101,7 +101,7 @@ struct WaypointHudView {
 };
 
 // The fill, from the live track. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
-// (hudInfo+373 number, +400/404/408 position) + g_showWaypoints @ 0x27238BC]
+// (hudInfo+373 number, +400/404/408 position) + g_ShowWaypoints @ 0x27238BC]
 WaypointHudView waypoint_hud_view(const WaypointTrack &track);
 
 } // namespace opennova::world

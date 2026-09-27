@@ -135,7 +135,7 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   ChuteFlap/FreeFall voice coalescing (audibly equivalent), and the per-load SndProf.def
   parse (same file, same table). (Ratified 2026-08-29. D-SND-10 was superseded 2026-09-11:
   the coalescing is gone and the ledger closes it `FIXED` on retail's own-channel score-0
-  reuse in `audio_find_and_open_channel @0x766E80`.)
+  reuse in `Audio_FindAndOpenChannel @0x766E80`.)
 - **D-LOADSCR-1 / D-LOADSCR-6 / D-LOADSCR-7** — the loading-screen structural choices
   tabled 2026-08-04: the coarser progress granularity (same values, same pump), the
   unmodulated background (MODULATE2X-neutral, net-identical), and the uninterruptible

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the relative-position metrics witnesses from the pinned JO executable.
 
-Executes the original compute_relative_position_metrics @0x545710 (the frame
+Executes the original Entity_ComputeRelativePositionMetrics @0x545710 (the frame
 transpose, the Q22 point transform, both fild/fsqrt/fistp distances and the two
 fpatan angles) under the game's nearest-even control word on synthetic frames
 and points. Each frame is a quarter-turn yaw placement, whose Q22 rotation the

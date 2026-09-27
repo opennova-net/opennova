@@ -11,7 +11,7 @@ int OptionsScreen::control_table(const MenuRuntime &menu) const {
 
 // Presence gates keep same-named controls on SP/session screens out of the
 // options handlers. game.mnu has sliders but no remapping table.
-// [orig: UI_PopulateControlMappingList @0x55c0c0; options_screen_init @0x554800]
+// [orig: UI_PopulateControlMappingList @0x55c0c0; UI_OptionsScreenInit @0x554800]
 void OptionsScreen::prepare(MenuRuntime &menu, const controls::BindingSet &bindings) {
 	end_remap(menu, bindings, false);
 	const int table = control_table(menu);
@@ -33,7 +33,7 @@ void OptionsScreen::prepare(MenuRuntime &menu, const controls::BindingSet &bindi
 // The table mirrors the live catalog's class/action/control rows. Capture
 // blanks only the armed cell, preserving the action's row identity.
 // [orig: UI_PopulateControlMappingList @0x55c0c0;
-// update_control_mapping_display @0x55b700]
+// UI_UpdateControlMappingDisplay @0x55b700]
 void OptionsScreen::fill(MenuRuntime &menu, const controls::BindingSet &bindings,
 		int table, int blank) {
 	menu.table_clear_rows(table);
@@ -54,7 +54,7 @@ void OptionsScreen::switch_device(MenuRuntime &menu, const controls::BindingSet 
 
 // The shell applies the snapshot copy/update after the returned preview
 // request, before showing MAIN_WRAPPER. Storage remains its device leg.
-// [orig: ingame_options_dialog_event_handler @0x554e40;
+// [orig: UI_IngameOptionsDialogEventHandler @0x554e40;
 // UI_RegisterIngameCallbacks @0x555510, OPT_ACCEPT @0x555597 / OPT_CANCEL @0x5555b5;
 // OPTIONS DEFAULTS @0x55bd90; CLEAR_KEY @0x55bfd0]
 int OptionsScreen::activate(MenuRuntime &menu, controls::BindingSet &bindings,
@@ -146,7 +146,7 @@ int OptionsScreen::consume(MenuRuntime &menu, controls::BindingSet &bindings,
 
 // Screen/document changes cancel the screen-owned capture. Save the row
 // before clearing the capture registers, then restore its display if asked.
-// [orig: update_control_mapping_display @0x55b700]
+// [orig: UI_UpdateControlMappingDisplay @0x55b700]
 void OptionsScreen::end_remap(MenuRuntime &menu, const controls::BindingSet &bindings,
 		bool refill) {
 	if (action_ < 0) return;

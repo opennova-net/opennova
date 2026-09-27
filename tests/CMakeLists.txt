@@ -1753,7 +1753,7 @@ target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
 target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)
 add_test(NAME movement_brain_parity COMMAND movement_brain_parity_test)
 
-# compute_relative_position_metrics @0x545710 against original-x86 vectors
+# Entity_ComputeRelativePositionMetrics @0x545710 against original-x86 vectors
 # (scripts/oracles/aim_metrics_parity.py).
 add_executable(aim_metrics_parity_test world/aim_metrics_parity_test.cpp)
 target_link_libraries(aim_metrics_parity_test PRIVATE opennova_runtime)
@@ -1974,9 +1974,9 @@ target_compile_features(player_loadout_test PRIVATE cxx_std_17)
 add_test(NAME player_loadout COMMAND player_loadout_test)
 
 # Rendering occlusion (Terrain_InitBuildingPortals @0x5c7480 register/weld/flags,
-# build_sector_visibility_masks @0x5c8610 + render_visibility_portal_traversal
-# @0x5c4ae0, test_sector_entity_occlusion @0x5c4610, the entity-collector gates +
-# terrain_occlusion_check_three_rays @0x610ed0, Entity_QueryBlinkBoxesAtPoint
+# Terrain_BuildSectorVisibilityMasks @0x5c8610 + Render_VisibilityPortalTraversal
+# @0x5c4ae0, Terrain_TestSectorEntityOcclusion @0x5c4610, the entity-collector gates +
+# Terrain_OcclusionCheckThreeRays @0x610ed0, Entity_QueryBlinkBoxesAtPoint
 # @0x4af350): render-float math, the weld pass, outdoor/indoor mask rules,
 # outside-in viewthru banking, TOC shadow-wedge culling, the blink-hits render
 # gate + three-ray latch — over hand-built portal/collision models.
@@ -2812,7 +2812,7 @@ target_include_directories(nw_ingame_c2s_uplink_test PRIVATE ${CMAKE_CURRENT_SOU
 add_test(NAME nw_ingame_c2s_uplink COMMAND nw_ingame_c2s_uplink_test)
 
 # In-match S2C encoders — loopback identity (encode -> decode field-identical),
-# ADR 0011 §4. encode side ports serialize_entity_pool_to_packet @0x503460; the
+# ADR 0011 §4. encode side ports NetPacket_SerializeEntityPoolToPacket @0x503460; the
 # decode side is verified vs NapiNPClientMsg_0x020 @0x425C00. No capture dep.
 add_executable(nw_ingame_encode_test novaworld/nw_ingame_encode_test.cpp)
 target_link_libraries(nw_ingame_encode_test PRIVATE opennova_net)
@@ -3142,7 +3142,7 @@ target_link_libraries(npruntime_placed_device_relay_test PRIVATE opennova_net op
 add_test(NAME npruntime_placed_device_relay COMMAND npruntime_placed_device_relay_test)
 
 # D-NET-152: the C2S 0x06 client-fired-round pipeline — anti-spoof, clip authority (+ the 0x25
-# refill), and the g_round_ring append behind the §5.9.1 tag-2 echo
+# refill), and the g_RoundRing append behind the §5.9.1 tag-2 echo
 # [orig: @0x513310 -> Server_ClientFiredRound @0x50baa0 -> RoundData_AddRound @0x4fdb40].
 add_executable(npruntime_client_fire_test npruntime/client_fire_test.cpp)
 target_link_libraries(npruntime_client_fire_test PRIVATE opennova_net opennova_runtime)
@@ -3313,7 +3313,7 @@ add_test(NAME npruntime_host_punt COMMAND npruntime_host_punt_test)
 # C&C / handle-0 admission. [orig: Server_UpdateAllActivePlayerSlots @0x518820; sub_517B20
 # @0x517b20; Server_CheckPlayerViolations @0x51abd0; Server_TickUpdate @0x51e2d0;
 # NapiNPServerMsg_HandlePlayerLoadout @0x515790; EntityPool_ClearDirtyFlags @0x508e30;
-# recalculate_all_player_scores @0x5014e0; SpawnWaveList_TryQueuePlayer @0x52a490;
+# Server_RecalculateAllPlayerScores @0x5014e0; SpawnWaveList_TryQueuePlayer @0x52a490;
 # Server_ProcessClientRequestRespawn @0x519af0]
 add_executable(npruntime_server_tick_maintenance_test npruntime/server_tick_maintenance_test.cpp)
 target_link_libraries(npruntime_server_tick_maintenance_test PRIVATE opennova_net opennova_runtime)

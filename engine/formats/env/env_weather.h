@@ -29,7 +29,7 @@ struct FogParams {
 // fog_type 0: exponential, density ln(64)/end. 1: linear from 0.5 world units
 // (the caller's constant). 2/3: linear from (1-overcast)*end*{0.5, 0.25}.
 // start == end disables fog. `overcast` is the 0..1 weather blend
-// (Env_OvercastBlend / 65536); pass 0 while no weather system drives it.
+// (g_EnvOvercastBlend / 65536); pass 0 while no weather system drives it.
 FogParams compute_fog_params(int fog_type, float fog_end_distance, float overcast = 0.0f);
 
 // Above water the live fog end is the smoothed distance scaled by
@@ -143,7 +143,7 @@ struct EnvScalarChannels {
 
 // Per-channel 12.20 color smoothing toward a packed 0x00RRGGBB target with
 // per-channel max step and +0x80000 rounding on repack
-// [orig: interpolate_weather_color @ 0x57d9e0].
+// [orig: Environment_InterpolateWeatherColor @ 0x57d9e0].
 struct ColorChannelState {
 	int32_t b_fp = 0;
 	int32_t g_fp = 0;
@@ -210,8 +210,8 @@ LightningAdditivesPacked lightning_additives_packed(uint32_t lightning_packed, i
 // [orig: Environment_UpdateWeatherTick @ 0x57ec6f (A) / @ 0x57ed0a (B);
 //  reset Environment_SnapStateToTargets @ 0x57d1e0]
 struct LightningSequencers {
-	int timer_a = 0; // Env_LightningTimerA @ 0x26c68b8
-	int timer_b = 0; // Env_LightningTimerB @ 0x26c68bc
+	int timer_a = 0; // g_EnvLightningTimerA @ 0x26c68b8
+	int timer_b = 0; // g_EnvLightningTimerB @ 0x26c68bc
 	int level = 0;   // last SET flash level, 0..255
 	// The thunder epochs this tick: sequencer A reaching 0 plays the THUNDER
 	// set at 1 m, centred (@ 0x57ecfb); B reaching 0 plays it at 10 m from
@@ -233,7 +233,7 @@ struct LightningSequencers {
 //  step @ 0x57e9fc..0x57ea16, amplitude + 256-entry rings + spring smoothing
 //  @ 0x57ea42..0x57eaed; seed 0x12333333 at mission start (the mov imm32 at
 //  @ 0x57d2ff — 0x12345633 was a reimpl transcription error, env #25)
-//  Environment_SnapStateToTargets @ 0x57d1e0; Env_WindScale default 256
+//  Environment_SnapStateToTargets @ 0x57d1e0; g_EnvWindScale default 256
 //  Environment_InitDefaults @ 0x57c1d1. The quake path re-rolls the PRNG per
 //  displaced entity (@ 0x57eb8e) — reroll() is that step.]
 //
@@ -242,15 +242,15 @@ struct LightningSequencers {
 // silently forks the sequence from the first negative rotate — the GDScript
 // port carried exactly that bug until this port (docs/env/env-tod-re.md).
 struct WeatherOscillator {
-	uint32_t prng = 0x12333333u; // Env_WeatherPrng [orig: seed imm32 @ 0x57d2ff]
-	int intensity = 256;         // Env_WindScale [orig: default @ 0x57c1d1]
+	uint32_t prng = 0x12333333u; // g_EnvWeatherPRNG [orig: seed imm32 @ 0x57d2ff]
+	int intensity = 256;         // g_EnvWindScale [orig: default @ 0x57c1d1]
 	int prev_noise = 0;          // dword_26C7764
 	int pos = 0;                 // dword_26C7758 (spring position, 0x8000 rest)
 	int smoothed = 0;            // dword_26C775C (clamped 0..0xFFFF)
 	int velocity = 0;            // dword_26C7760
-	uint8_t ring_index = 0;      // Env_WaveRingIndex
-	int32_t amp_ring[256] = {};  // Env_WaveAmpRing (0xFFFF - 2*amp, floor 0)
-	int32_t osc_ring[256] = {};  // Env_WaveOscRing (smoothed history)
+	uint8_t ring_index = 0;      // g_EnvWaveRingIndex
+	int32_t amp_ring[256] = {};  // g_EnvWaveAmpRing (0xFFFF - 2*amp, floor 0)
+	int32_t osc_ring[256] = {};  // g_EnvWaveOscRing (smoothed history)
 
 	// Advances the PRNG one step and returns the new word.
 	uint32_t reroll();
@@ -274,14 +274,14 @@ struct WeatherOscillator {
 //  @ 0x4af764..0x4af77e (rate 0x8000 / ((124 * mult) >> 2)), enemy hit
 //  @ 0x4af724..0x4af73e (rate (mult << 13) / ((310 * mult) >> 2)), mult 4 or
 //  3 when the source is within 90 degrees of the yaw; the per-tick decay
-//  @ 0x57eaf9; the factor consumed per block in interpolate_weather_color
+//  @ 0x57eaf9; the factor consumed per block in Environment_InterpolateWeatherColor
 //  @ 0x57d9e0; zeroed by Game_InitNewRound @ 0x422796 and the mission-start
 //  snap @ 0x57d2f5]. Nothing weather-related writes it.
 
 struct HitDimState {
 	static constexpr int kHitIntensity = 0xA000;
-	int intensity = 0; // Env_HitDimIntensity (ex Env_RainIntensity @ 0x26c68b0)
-	int fade_rate = 0; // Env_HitDimFadeRate (ex Env_RainFadeRate @ 0x26c68b4)
+	int intensity = 0; // g_EnvHitDimIntensity (ex Env_RainIntensity @ 0x26c68b0)
+	int fade_rate = 0; // g_EnvHitDimFadeRate (ex Env_RainFadeRate @ 0x26c68b4)
 
 	// The damage-impulse arm: `facing` = the source within 90 degrees of the
 	// victim's yaw (multiplier 3, else 4); `friendly` = self or same-group
@@ -301,13 +301,13 @@ struct HitDimState {
 };
 
 // (0x8000 - intensity), zeroed when intensity exceeds 0x8000 unsigned —
-// the per-block modulator blend factor [orig: interpolate_weather_color
+// the per-block modulator blend factor [orig: Environment_InterpolateWeatherColor
 // @ 0x57d9e0].
 int hit_dim_factor(int hit_dim_intensity);
 
 // ---------------------------------------------------------------------------
 // Weather color block — the full per-block pipeline of
-// [orig: interpolate_weather_color @ 0x57d9e0] (16 such blocks tick per
+// [orig: Environment_InterpolateWeatherColor @ 0x57d9e0] (16 such blocks tick per
 // frame @ 0x57ef9c..0x57f032): 12.20 step toward the packed target under
 // PER-CHANNEL max rates, saturating add of the lightning additive slot
 // (paddusb), then the modulator x hit-dim blend
@@ -340,7 +340,7 @@ struct WeatherColorBlock {
 	// 0x57e3c9 — light/sky/ground/fog/skyfog/skybase/skybright/skyhighlight/
 	// cloudbase/cloudhighlight/cloudedge, every tick a keyframe table exists].
 	void snap_keyframe(uint32_t packed);
-	// One 62 Hz tick [orig: interpolate_weather_color @ 0x57d9e0].
+	// One 62 Hz tick [orig: Environment_InterpolateWeatherColor @ 0x57d9e0].
 	void tick(uint32_t modulator_packed, int hit_dim_intensity);
 	// Sets the per-channel max step rates so the current accumulators reach
 	// `target` in `frames` ticks (rounded division; frames 0 clamps to 1)
@@ -388,7 +388,7 @@ struct SkyWeatherColorBlocks {
 // The modulator's target is the player's iris auto-exposure sample replicated
 // to gray (0x10101 * gain) and chased over 62 ticks (1 s)
 // [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538 —
-//  compute_ambient_light_along_direction @ 0x5c7a00 averages the iris gain at
+//  Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00 averages the iris gain at
 //  3 points marched from the camera-ray hit back toward the camera; the pure
 //  outdoor sample is iris_gain() below]. Consumers: every block's [0] render
 //  color (the multiply in WeatherColorBlock::tick), and the /64 render scales
@@ -450,10 +450,10 @@ struct ModulatorChain {
 // ---------------------------------------------------------------------------
 // Cloud scroll accumulators
 // [orig: Environment_UpdateWeatherTick — rate smoothing toward
-//  Env_SkySpeedFixed (sky_speed << 10) @ 0x57eecc (the mission-start SNAP
+//  g_EnvSkySpeedFixed (sky_speed << 10) @ 0x57eecc (the mission-start SNAP
 //  @ 0x57d2da refreshes only the TARGET — the rate always ramps); the four
 //  accumulators advance {1, 1, 2/3, 4/3} x rate with TRUNCATING integer /3
-//  @ 0x57f1a5..0x57f1d1. render_skybox consumes them as texture-transform
+//  @ 0x57f1a5..0x57f1d1. Render_Skybox consumes them as texture-transform
 //  translations (@ 0x5791de..0x579260): layer 1
 //  U = -(camY_eng + acc_26C6810) * 2^-28, V = +(camX_eng + acc_26C680C) * 2^-28;
 //  layer 2 U = -(camY + acc_26C6818[4/3]) * 2^-29, V = +(camX + acc_26C6814[2/3])
@@ -463,7 +463,7 @@ struct ModulatorChain {
 //  on U.]
 
 struct CloudScrollState {
-	int rate = 0;         // Env_CloudScrollRate (ramps toward the target)
+	int rate = 0;         // g_EnvCloudScrollRate (ramps toward the target)
 	int32_t acc_l1_v = 0; // dword_26C680C (render V axis, layer 1)
 	int32_t acc_l1_u = 0; // dword_26C6810 (render U axis, layer 1, negated)
 	int32_t acc_l2_v = 0; // dword_26C6814 (rate - rate/3, render V axis)
@@ -483,7 +483,7 @@ struct CloudScrollState {
 };
 
 // The final per-layer UV translations for a camera at (cam_x, cam_z) render/
-// world units [orig: render_skybox @ 0x5791de..0x579260 — see the axis map
+// world units [orig: Render_Skybox @ 0x5791de..0x579260 — see the axis map
 // above; 2^-12 = the 16.16 camera fixed value / 2^28].
 struct CloudUvOffsets {
 	float u1 = 0.0f, v1 = 0.0f; // layer 1 (UV1, 1/320 world scale)
@@ -498,7 +498,7 @@ CloudUvOffsets cloud_scroll_uv_offsets(const CloudScrollState &scroll,
 // 2^28" factor the water surface derives its scroll speed from.
 float cloud_uv_rate_per_second(const CloudScrollState &scroll);
 
-// Cloud UV scroll [orig: render_skybox @ 0x5791de..0x579260 + weather tick]:
+// Cloud UV scroll [orig: Render_Skybox @ 0x5791de..0x579260 + weather tick]:
 // four accumulators advance per tick by rate * {1, 1, 2/3, 4/3}; layer 1 UV =
 // (camera + acc) / 2^28, layer 2 UV = (camera + acc) / 2^29.
 inline constexpr double kCloudUvScaleLayer1 = 1.0 / 268435456.0; // 2^-28
@@ -541,7 +541,7 @@ Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
 inline constexpr uint32_t kFogDistReferenceDefault = 1024u << 16;
 
 // ---------------------------------------------------------------------------
-// Iris auto-exposure [orig: terrain_sector_compute_lighting @ 0x5c7550]
+// Iris auto-exposure [orig: Terrain_SectorComputeLighting @ 0x5c7550]
 // The engine's global auto-exposure gain (0..255; 64 = identity, 6.6 fixed /
 // modulator units). A pure function of the outdoor light blocks + the .env
 // iris_center / iris_percent. The modulator CHAIN that applies this gain to the
@@ -565,7 +565,7 @@ int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
 // ---------------------------------------------------------------------------
 // Terrain tint (terrain_rgb)
 // [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; sole caller Terrain_Init
-//  @ 0x60fc42, source Env_TerrainColorPacked @ 0x26c67f4]
+//  @ 0x60fc42, source g_EnvTerrainColorPacked @ 0x26c67f4]
 // Two globals derived once from the packed terrain color: FULL = c|FF000000
 // (@ 0x31a1824), HALF = ((c>>1)&0x7F7F7F)|FF000000 (@ 0x31a1828). Retail has
 // three consumers, one of them dead: the 256x256 quarter-res texture-bake
@@ -591,7 +591,7 @@ TerrainTint terrain_tint_from_packed(uint32_t terrain_color_packed);
 // HALF 0xFF7F7F7F.
 TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb);
 
-// Foliage lightmap tint [orig: sample_terrain_colormap_tinted @ 0x606030]: per
+// Foliage lightmap tint [orig: Terrain_SampleColorMapTinted @ 0x606030]: per
 // channel min((texel_c * FULL_c) >> 7, 255), alpha passthrough. 128 is
 // identity; the default 0xFF tint is a ~2x saturating brighten.
 uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint);
@@ -603,22 +603,22 @@ uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint);
 Rgb tile_overlay_tint_factor(const TerrainTint &tint);
 
 // ---------------------------------------------------------------------------
-// Terrain colour reciprocal (Env_TerrainColorRecip)
+// Terrain colour reciprocal (g_EnvTerrainColorRecip)
 // [orig: TimeOfDay_ParseProperty @ 0x57ca60..0x57cae3 — right after the
-//  terrain_rgb bytes are packed into Env_TerrainColorPacked @ 0x57ca71, each
+//  terrain_rgb bytes are packed into g_EnvTerrainColorPacked @ 0x57ca71, each
 //  channel byte c becomes `c == 0 ? 0x80 : 0x7F80 / c` (signed idiv, i.e.
 //  truncating; @ 0x57ca6f..0x57cab2), each result is clamped `> 0xFF -> 0xFF`
 //  (@ 0x57cab2..0x57cad3), and the three are re-packed (r << 16 | g << 8 | b)
-//  into Env_TerrainColorRecip @ 0x26c67f8 (@ 0x57cad8..0x57cae3). The boot
+//  into g_EnvTerrainColorRecip @ 0x26c67f8 (@ 0x57cad8..0x57cae3). The boot
 //  default, before any .env loads, is 0x808080 — the same immediate that seeds
-//  Env_CloudColorTarget and Env_LightningColor
+//  g_EnvCloudColorTarget and g_EnvLightningColor
 //  [orig: Environment_InitDefaults @ 0x57c050..0x57c065].]
 //
 // The recip's ONLY consumer is EffectWorld_TickInstancesAndLightScale
 // @ 0x5aa21d..0x5aa23f, which unpacks its bytes x 1/128 (flt_7C3DD4) into
 // the terrain light pass's per-channel factor flt_2732DA{C,8,4}
 // (renderer::terrain_per_channel_factor). It is NOT the EffectWorld ambient
-// scale: that triple (EffectWorld_AmbientScale{R,G,B} @ 0x840b24..0x840b2c)
+// scale: that triple (g_EffectWorldAmbientScale{R,G,B} @ 0x840b24..0x840b2c)
 // is the fog/ambient modulator's packed colour x 1/64
 // [orig: EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaf1d..0x5aaf37, sole
 //  caller Environment_ApplyFogAndAmbient @ 0x57e464] — the env light-state

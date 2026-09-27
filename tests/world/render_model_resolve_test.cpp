@@ -4,7 +4,7 @@
 // the block), one whose graphic does not load is not, and a decoded wire
 // row's resolved shape carries the same sphere. [orig: the entity+0x30 gates
 // Terrain_CollectVisibleEntities_0 @ 0x5c6fd8..0x5c6fe1 /
-// collect_visible_entities_for_terrain @ 0x5c8cf6..0x5c8cff;
+// Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8cf6..0x5c8cff;
 // Entity_ComputeBoundingSphere @ 0x5c69a0, its null-block early out
 // @ 0x5c69be; Entity_InitFromModel @ 0x40df06..0x40dfac] Driven by a manual
 // World and the model cache over a loose temp root holding copies of the

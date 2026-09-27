@@ -2,8 +2,8 @@ class_name PlayerCharacterSelectionState
 extends RefCounted
 
 # The in-process PLAYER_INFO character memory for OpenNova's active profile
-# slot: retail's per-(slot, team) selection globals (g_charSelClass /
-# g_charSelNationality / g_charSelDivision / g_charSelCombo @0x2551130.., strides
+# slot: retail's per-(slot, team) selection globals (g_CharSelClass /
+# g_CharSelNationality / g_CharSelDivision / g_CharSelCombo @0x2551130.., strides
 # 67596 per slot and 32774 per team) collapsed to slot 0 with both team sides
 # kept. It hides authored-id packing, the per-side retail default, and ACCEPT's
 # shared-class rule behind the menu-facing interface.
@@ -103,7 +103,7 @@ func player_class(side: int) -> int:
 
 # Build one side's canonical selection. avatar_a/avatar_b are authored
 # nationality/division ids, not visible rows; the packed word also carries the
-# authored combo id and side bit [orig: lookup_entity_slot_and_pack_entry
+# authored combo id and side bit [orig: EntitySlot_LookupAndPackEntry
 # @0x57AD40; packed store @0x57AE47].
 func make_selection(team: int, nat_index: int, div_index: int,
 		combo_index: int, selected_class: int = 8) -> Selection:
@@ -142,7 +142,7 @@ func remember(selection: Selection) -> void:
 # Produce the character half of ACCEPT. The selected class is stamped across
 # both side snapshots while avatar bytes stay per-side, matching retail's two
 # side-block class loop followed by its selected-side avatar stores
-# [orig: save_player_info_from_dialog @0x55EE3F..0x55EF38].
+# [orig: PlayerInfo_SaveFromDialog @0x55EE3F..0x55EF38].
 func snapshot(team: int, nat_index: int, div_index: int, combo_index: int,
 		selected_class: int, player_name: String, voice_row: int) -> Dictionary:
 	var current := make_selection(
@@ -169,7 +169,7 @@ func snapshot(team: int, nat_index: int, div_index: int, combo_index: int,
 
 
 # Retail's per-side default: the first Avatars.def combo of the side's alignment
-# [orig: lookup_entity_slot_and_pack_entry @0x57AD40 -- PlayerProfile_InitDefaults
+# [orig: EntitySlot_LookupAndPackEntry @0x57AD40 -- PlayerProfile_InitDefaults
 # @0x54BB40 seeds it, and PlayerSession_InitFromProfile @0x50ca80 reallocates a
 # saved id the registry no longer resolves to it].
 func _first_selection(side: int, selected_class: int) -> Selection:

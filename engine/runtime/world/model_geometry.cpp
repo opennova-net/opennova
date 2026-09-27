@@ -282,7 +282,7 @@ int32_t entity_bound_radius_q16(const EntityBoundRadiusInputs &inputs) {
 // Build the runtime occlusion model from the parsed OCCL tables — the 60 B
 // portal-face records with their sequential slices (the per-record starts are
 // running prefixes over the OOBJ counts, mirroring the arena assignment of
-// [orig: load_occlusion_model_data @ 0x5b4a00]). The OFAC dwords decode as the
+// [orig: ThreediGp_LoadOcclusionModelData @ 0x5b4a00]). The OFAC dwords decode as the
 // 12 B record: bytes 0-2 = vertex indices, byte 3 = plane index, then the 3
 // edge words (bit 15 = winding).
 bool occlusion_model_from_3di(const Threedi3di3 &model,

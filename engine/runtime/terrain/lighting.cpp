@@ -1,7 +1,7 @@
 #include <runtime/terrain/lighting.h>
 
-// [orig: init_terrain_lighting_color_ramps @0x604ee0; sample_terrain_colormap_tinted @0x606030;
-//  generate_foliage_instances_0 @0x5ffdd0 — lighting.h carries the per-function sites]
+// [orig: Terrain_InitLightingColorRamps @0x604ee0; Terrain_SampleColorMapTinted @0x606030;
+//  Foliage_GenerateInstances_0 @0x5ffdd0 — lighting.h carries the per-function sites]
 
 #include <algorithm>
 #include <cmath>

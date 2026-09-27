@@ -3,7 +3,7 @@
 
 // Expanded detail foliage. Retail emits the source model once per accepted
 // candidate and bends every transformed vertex onto the terrain before this
-// shader runs [orig: generate_foliage_instances_0 @ 0x5ffdd0].
+// shader runs [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0].
 uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_fd_texture = false;
 uniform sampler2D u_colormap : filter_linear, repeat_disable;
@@ -22,7 +22,7 @@ instance uniform float u_alpha_ref = 0.0;
 instance uniform bool u_instance_tile_cache_ready = false;
 instance uniform float u_instance_tile_cache_layer = 0.0;
 // Exact max-quality retail c7/c8 reduction: world origin X/Z, inverse world
-// span, and span. Foliage_WindSwayVS projects the original pre-wind vertex.
+// span, and span. g_FoliageWindSwayVS projects the original pre-wind vertex.
 instance uniform vec4 u_instance_tile_cache_projection = vec4(0.0);
 // Nonzero only on the near LOW resubmission: retail selects strict
 // D3DCMP_LESS there, so identical geometry only lands where the preceding
@@ -37,7 +37,7 @@ global uniform vec3 opennova_sun_light;
 global uniform vec3 opennova_sun_direction;
 // Do not add EffectWorld point-light uniforms here. Retail does call
 // Light_SelectAndEnableForDraw for each patch @ 0x60a5dc, but the selected
-// highest-quality path binds Foliage_WindSwayVS @ 0x60087a..0x600883. Its
+// highest-quality path binds g_FoliageWindSwayVS @ 0x60087a..0x600883. Its
 // complete vs_1_1 source declares no normal/light input and writes oD0 = c6;
 // the blend PS therefore receives only the emitter/fade vertex color below.
 // D3D SetLight/LightEnable state can affect only the failed-VS fixed-function
@@ -53,13 +53,13 @@ varying vec2 v_tile_cache_uv;
 varying vec3 v_heightfield_normal;
 varying float v_fog;
 
-// Foliage_WindSwayVS ends `dp4 r1, r1, c2; add r1, r1, -c5.x; mad oFog,
+// g_FoliageWindSwayVS ends `dp4 r1, r1, c2; add r1, r1, -c5.x; mad oFog,
 // -r1.x, c5.y, c5.z`: c2 is the view-projection's clip-z row (linear in eye
 // depth) and c5 = (start*zs + zo, 1/(zs*(end - start)), 1) comes from the
 // device fog pair Render_SetFogState stored, so the vertex fog is
 // (end - eye_depth) / (end - start) for EVERY fog type, clamped per vertex
 // and interpolated; the fog-mode-8 draw selects that vertex fog (table and
-// vertex fog modes off). Retail Foliage_WindSwayVS literal @ 0x7de648;
+// vertex fog modes off). Retail g_FoliageWindSwayVS literal @ 0x7de648;
 // Foliage_SetupVertexShaderConstants @ 0x6005ee..0x600652;
 // CD3DDevice_SetFogAndBlendMode(8) @ 0x677768..0x67779a.
 float foliage_vertex_fog(float eye_depth) {
@@ -86,7 +86,7 @@ void vertex() {
 	// v5.x is the source-height bend byte. The retail VS takes the sine of
 	// the pre-wind vertex's render x (Godot Z, sector-local) plus c24.x and
 	// displaces render z (Godot X) by sine * bend * c25.x (0.03): retail
-	// Foliage_WindSwayVS literal @ 0x7de648 (copied @ 0x5ff691).
+	// g_FoliageWindSwayVS literal @ 0x7de648 (copied @ 0x5ff691).
 	world_pos.x += sin((pre_wind_world_pos.z - u_wind_sector_origin_z) +
 			u_wind_phase) * COLOR.r * 0.03;
 

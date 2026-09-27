@@ -103,7 +103,7 @@ bool Server_HandleVehicleSpawnRequest(NapiNPServerCtx &ctx, NapiNPConnection &co
 	const uint8_t team = player->team;
 	if (source->team != 0 && source->team != team) return false; // @0x51C5C6..0x51C5F6
 	// The unlimited-vehicles word skips the EntityLimit table [orig:
-	// dword_24D1E38 @0x51C5E2..0x51C5E9].
+	// g_RulesUnlimitedVehicles @0x51C5E2..0x51C5E9].
 	if (!ctx.config.unlimited_vehicles &&
 			!Server_VehicleSpawnAllowed(ctx, world, item_id, team, /*consume=*/true))
 		return false;

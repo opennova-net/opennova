@@ -99,14 +99,14 @@ MenuFlow::ExpansionPick MenuFlow::request_expansion(const std::string &name,
 // Menu_UpdateFrame tail: if (request && !video_mode_state) reload, then
 // clear. OpenNova has no video-mode transition machine, so only the request
 // gates this port. Consuming before the device call prevents a re-entry from
-// repeating it. [orig: @0x552906..0x55291d; apply_video_mode_change @0x55a590;
+// repeating it. [orig: @0x552906..0x55291d; UI_ApplyVideoModeChange @0x55a590;
 // sub_555710 seeds the video-mode state to zero @0x555734]
 std::string MenuFlow::take_expansion_reload() {
 	return std::exchange(expansion_request_, {});
 }
 
 // The host population excludes stock Co-op and resets the rotation.
-// [orig: init_host_settings_dialog @0x558960, skip @0x558a70;
+// [orig: UI_InitHostSettingsDialog @0x558960, skip @0x558a70;
 // GAME_TYPE ALL=255 @0x558aee]
 void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows) {
 	pool_.clear();
@@ -119,8 +119,8 @@ void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows)
 	sync_start(menu);
 }
 
-// [orig: filter_mission_list_by_game_type @0x556fe0, walk @0x557072;
-// init_host_settings_dialog title/filename row @0x558a48]
+// [orig: HostDialog_FilterMissionListByGameType @0x556fe0, walk @0x557072;
+// UI_InitHostSettingsDialog title/filename row @0x558a48]
 void HostDialog::filter(MenuRuntime &menu) {
 	const int list = menu.widget_id("MISSION_LIST");
 	if (list < 0) return;
@@ -147,7 +147,7 @@ void HostDialog::filter(MenuRuntime &menu) {
 // Resolve every selected visible row before rebuilding its mapping. Each
 // table row stores the mission, localized GateTypeAbbrev and rotation bit.
 // [orig: HostDialog_AddRemoveSelectedMissions @0x557c10,
-// add branch @0x557e27..0x557ef1; get_game_type_abbreviation @0x520fd0]
+// add branch @0x557e27..0x557ef1; GameType_GetAbbreviation @0x520fd0]
 void HostDialog::add_selected(MenuRuntime &menu, const hud::GameTextLookup &text) {
 	const int list = menu.widget_id("MISSION_LIST");
 	const int table = menu.widget_id("SELECTED_MISSIONS");

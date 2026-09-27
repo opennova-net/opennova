@@ -1,7 +1,7 @@
 extends GutTest
 
 # C7 driver-contract pins for the recovered two-pass dome spec
-# [orig: render_skybox @ 0x579080]. The per-fragment combine itself is shader
+# [orig: Render_Skybox @ 0x579080]. The per-fragment combine itself is shader
 # code (verified by visual A/B); these pin what SkyDome pushes into it.
 
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
@@ -36,10 +36,10 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	# celestial-axis correction).
 	assert_eq(mat.get_shader_parameter("u_sun_dir"),
 		ctx.env_node.get_sun_direction(),
-		"pass 1 is always sun-driven [orig: render_skybox @ 0x579287]")
+		"pass 1 is always sun-driven [orig: Render_Skybox @ 0x579287]")
 	assert_eq(mat.get_shader_parameter("u_light_dir"),
 		ctx.env_node.get_light_direction(),
-		"pass 2 follows the active light [orig: render_skybox @ 0x579291]")
+		"pass 2 follows the active light [orig: Render_Skybox @ 0x579291]")
 	assert_eq(mat.get_shader_parameter("u_fog_color"), ctx.env_node.get_skyfog_color(),
 		"the dome fogs with the dedicated skyfog block [orig: sky fog wrapper @ 0x579cb0]")
 	assert_eq(float(mat.get_shader_parameter("u_fog_end")), ctx.env_node.get_fog_level(), "dome fog end distance")
@@ -107,7 +107,7 @@ func test_dome_fog_uses_skyfog_instead_of_world_fog() -> void:
 
 
 func test_underwater_dome_keeps_the_smoothed_fog_end_without_rewriting_sky_wrapper() -> void:
-	# render_skybox loads c9.x from the raw smoothed Env_FogDistCurrent with no
+	# Render_Skybox loads c9.x from the raw smoothed g_EnvFogDistCurrent with no
 	# underwater leg (env-tod-re.md, the VS-constant table), so the dome's fog
 	# end is the same unscaled distance on both sides of the water plane while
 	# the world passes fog to the murk-derived end.
@@ -146,7 +146,7 @@ func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
 	assert_eq(mat.get_shader_parameter("u_flat_pass"), true, "advanced_clouds 0 takes the flat pass")
 	assert_eq(mat.get_shader_parameter("u_flat_color"), ctx.env_node.get_cloud_tint(),
-		"the flat dome color is cloud_rgb [orig: render_skybox @ 0x579b42]")
+		"the flat dome color is cloud_rgb [orig: Render_Skybox @ 0x579b42]")
 	assert_eq(mat.get_shader_parameter("u_sky_base"), keyframed_base,
 		"the flat pass no longer overwrites the keyframed uniforms")
 
@@ -188,7 +188,7 @@ func test_dome_rides_at_half_camera_height() -> void:
 	cam.make_current()
 	ctx.sky.advance_frame(0.016)
 	assert_eq(ctx.sky.get_mesh_instance().global_position, Vector3(10.0, 4.0, 6.0),
-		"dome anchor = camera xz at HALF the camera height [orig: render_skybox @ 0x5790d0]")
+		"dome anchor = camera xz at HALF the camera height [orig: Render_Skybox @ 0x5790d0]")
 
 
 func test_dome_mesh_comes_from_the_libs_builder() -> void:
@@ -198,7 +198,7 @@ func test_dome_mesh_comes_from_the_libs_builder() -> void:
 	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
 	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-	assert_eq(positions.size(), 441, "441 dome vertices [orig: build_sky_dome_mesh @ 0x578db0]")
+	assert_eq(positions.size(), 441, "441 dome vertices [orig: SkyDome_BuildMesh @ 0x578db0]")
 	assert_eq(indices.size(), 2400, "800 triangles")
 	assert_eq(normals.size(), 441, "the witnessed FVF 0x212 normals ride along")
 	# The witnessed winding head (i, i+22, i+21), (i, i+1, i+22).
@@ -223,7 +223,7 @@ func test_scroll_offsets_come_from_the_weather_core() -> void:
 	assert_eq(off2, weather.get_cloud_uv_offset2(0.0, 0.0),
 		"sky reads layer 2 from the weather core")
 	# The accumulator rides U NEGATIVELY, V positively (no camera here, so the
-	# offsets are the pure accumulator terms) [orig: render_skybox @ 0x5791de].
+	# offsets are the pure accumulator terms) [orig: Render_Skybox @ 0x5791de].
 	assert_lt(off1.x, 0.0, "layer-1 U accumulator term is negative (env #26)")
 	assert_gt(off1.y, 0.0, "layer-1 V accumulator term is positive")
 
@@ -341,7 +341,7 @@ func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 
 func test_world_beyond_the_dome_surface_draws_over_the_sky() -> void:
 	# Retail draws the dome with z-write off and ZFUNC ALWAYS before any world
-	# geometry (pass flags 0x300000 [orig: render_skybox @ 0x579883]), so the
+	# geometry (pass flags 0x300000 [orig: Render_Skybox @ 0x579883]), so the
 	# world overdraws it wherever it is. From 300 u up the dome (anchored at
 	# half the eye height) meets a horizontal view ray ~400 u out; a surface
 	# 600 u out must still draw over it.
@@ -388,8 +388,8 @@ func test_world_beyond_the_dome_surface_draws_over_the_sky() -> void:
 
 
 func test_cloud_pass_draws_after_the_bodies_on_the_sky_cloud_rung() -> void:
-	# Retail draws the gradient, then render_celestial_bodies(0), then the
-	# cloud pass [orig: render_skybox @ 0x5798e0 / @ 0x5798f1..0x579b15]: the
+	# Retail draws the gradient, then Render_CelestialBodies(0), then the
+	# cloud pass [orig: Render_Skybox @ 0x5798e0 / @ 0x5798f1..0x579b15]: the
 	# cloud pass is its own transparent draw one rung after the sky bodies.
 	var ctx := _make()
 	ctx.sky.advance_frame(0.016)
@@ -458,8 +458,8 @@ func _sky_view(clouds_opaque: bool, body_color: Color = Color(0, 0, 0, 0)) -> Di
 
 
 func test_the_gradient_pass_opens_the_sky_pass() -> void:
-	# The gradient draw precedes the bodies and the clouds inside render_skybox
-	# [orig: render_skybox @ 0x5798dc, @ 0x5798e0, @ 0x5798f1..0x579b15]. The
+	# The gradient draw precedes the bodies and the clouds inside Render_Skybox
+	# [orig: Render_Skybox @ 0x5798dc, @ 0x5798e0, @ 0x5798f1..0x579b15]. The
 	# pass writes no depth, so Godot orders it in the transparent list by its
 	# rung; on rung 0 it painted over both.
 	var ctx := _make()
@@ -486,7 +486,7 @@ func test_the_gradient_pass_opens_the_sky_pass() -> void:
 
 
 func test_flat_pass_drops_the_cloud_pass() -> void:
-	# advanced_clouds 0 draws the single flat dome [orig: render_skybox
+	# advanced_clouds 0 draws the single flat dome [orig: Render_Skybox
 	# @ 0x579b42..0x579c76] and no cloud pass.
 	var ctx := _make()
 	ctx.env.set_advanced_clouds(0)

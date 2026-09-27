@@ -17,10 +17,10 @@
 // cleanup Entity_RemovePlacedDevicesByOwner @ 0x546e00 via
 // Server_RemoveEntityAndNotify @ 0x50a270 (S2C 0x12); the per-tick think cadence
 // in Entity_UpdatePool1Slot @ 0x4b8dd0 (age -1/tick, think at <= 0); the
-// PowerThrow charge chain g_fireChargeStartTick @ 0xB76800 ->
+// PowerThrow charge chain g_FireChargeStartTick @ 0xB76800 ->
 // WeaponSlot_RequestFire @ 0x53efa0 -> RoundData_SpawnRound charge scale
 // @ 0x4ec5bb; interned ammo pairs WeaponDef_ResolveAllReferences @ 0x540270 ->
-// g_ammo_satchel/..boom/claymore/..killzone/..shrapnel/AV_Mine/..killzone
+// g_AmmoSatchel/..boom/claymore/..killzone/..shrapnel/AV_Mine/..killzone
 // @ 0x24E7DC0..0x24E7DD8.]
 //
 // The host presents; this module simulates and RECORDS (the RoundSim/Destruction

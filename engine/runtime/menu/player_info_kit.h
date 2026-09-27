@@ -20,7 +20,7 @@ namespace opennova::menu {
 // One row of the voice table: enabled, the CHARVOICE id, and the sex it
 // belongs to (0 male / 1 female — the head part's `sex` keyword).
 // [orig: the 11 12-byte rows based at 0x83C7A8; the walk starts at the id
-//  word 0x83C7AC, strides 12 and stops at ammoDef @ 0x83C830, testing
+//  word 0x83C7AC, strides 12 and stops at g_PlayerPreviewAnimTable @ 0x83C830, testing
 //  `*(ptr - 1) != 0 && avatar_sex == ptr[1]`; row id 9 is the one DISABLED row]
 struct PlayerVoiceRow {
 	bool enabled;
@@ -40,7 +40,7 @@ inline constexpr int32_t kDefaultVoiceValue = 0;
 
 // The values the PLAYERVOICE list carries for a head's sex byte: DEFAULT_VOICE
 // first, then every ENABLED table row of that sex, in table order
-// [orig: populate_player_voice_combo @ 0x55dce0].
+// [orig: PlayerInfo_PopulatePlayerVoiceCombo @ 0x55dce0].
 std::vector<int32_t> player_info_voice_values(int32_t sex);
 
 // The list selection: the persisted override when the list carries it, else
@@ -87,15 +87,15 @@ using WeaponNameLookup = std::function<std::string(int32_t index)>;
 
 // The kit page exactly as retail serializes it: the side's knife, the medic's
 // medpack, the three loadout categories, then ALWAYS three grenade slots
-// [orig: serialize_weapon_loadout @ 0x55e4b0 — knife first (@0x55e4dc picks
-//  the blade off g_playerInfoTeamMask: the BLUE mask 2, and the defensive
+// [orig: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0 — knife first (@0x55e4dc picks
+//  the blade off g_PlayerInfoTeamMask: the BLUE mask 2, and the defensive
 //  mask-zero leg, take WPN_KNIFE, the RED mask 1 WPN_KNIFE2), the class-5
 //  medpack block (@0x55e624), the PRIMARY/SECONDARY/ACCESSORY selections
-//  (@0x55e6bb), then the fixed g_playerInfoGrenadeSlots[0..2] walk (@0x55e7e0,
-//  bounded by g_playerInfoAmmoPriCounts @ 0x25DC560); the three grenade slots
+//  (@0x55e6bb), then the fixed g_PlayerInfoGrenadeSlots[0..2] walk (@0x55e7e0,
+//  bounded by g_PlayerInfoAmmoPriCounts @ 0x25DC560); the three grenade slots
 //  are zeroed before the ammo fill, so an empty slot serializes weapon-table
 //  entry 0 (the zero store @ 0x55e8d0-0x55e8da in
-//  populate_weapon_accessory_ammo_ui @ 0x55e8b0)].
+//  PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8b0)].
 std::vector<playersav::KitEntry> player_info_kit_entries(const PlayerInfoKitSelection &selection,
 		const WeaponNameLookup &weapon_name);
 

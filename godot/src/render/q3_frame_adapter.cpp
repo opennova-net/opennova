@@ -511,7 +511,7 @@ Q3DeviceBlend blend_for(const Q3DrawCommand &p_command) {
 			return Q3DeviceBlend::Add;
 		case Q3Technique::WaterNightVision:
 			// The bloom pass's redraw is the above-water call only
-			// (Water_ShaderBlendNV, ONE + dst*SRCALPHA); the Water producer
+			// (g_WaterShaderBlendNV, ONE + dst*SRCALPHA); the Water producer
 			// never publishes it underwater.
 			return Q3DeviceBlend::Water;
 		case Q3Technique::CelestialBody:

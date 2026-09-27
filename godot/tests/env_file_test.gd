@@ -292,7 +292,7 @@ func test_the_viewmodel_keeps_the_dry_pass_fog_underwater() -> void:
 
 func test_the_water_mirror_keeps_the_dry_weather_fog_on_either_side() -> void:
 	# The reflected scene applies ApplyFogAndAmbient(0, 0) whatever side the
-	# eye is on (retail render_main_scene @ 0x5c1648..0x5c164c,
+	# eye is on (retail Render_MainScene @ 0x5c1648..0x5c164c,
 	# Water_RenderReflectedWorldScene @ 0x5c8515..0x5c8519): the weather fog
 	# block, never the underwater lit water.
 	var env_node := MissionEnvironment.new()
@@ -452,7 +452,7 @@ func test_field_consumption_table_mirrors_the_matrix() -> void:
 
 	# The matrix's other rows the pass settled: ceiling/floor, lightning and
 	# glare are honored; the star model is faithfully unconsumed (env #33,
-	# retail Star_RenderField_unused @ 0x5ad9c0 has no caller).
+	# retail Star_RenderField_Unused @ 0x5ad9c0 has no caller).
 	for field in ["ceiling_color", "floor_color", "lightning_color", "glare_3di"]:
 		assert_eq(String((table.get(field, {}) as Dictionary).get("status", "")), "honored",
 				"%s is honored in the matrix" % field)

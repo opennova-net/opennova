@@ -131,7 +131,7 @@ struct HostConfig {
 	// same fields a joiner uploads in ClientAuth. Retail fills its local player
 	// record from the profile the same way [orig: PlayerSession_InitFromProfile
 	// @0x50ca80 validates + stores both side ids; Player_InitPlayer @0x4e15f0 <-
-	// g_avatarTeam1/2, g_charClassTeam1/2 <- apply_session_settings_to_globals
+	// g_AvatarTeam1/2, g_CharClassTeam1/2 <- Game_ApplySessionSettingsToGlobals
 	// @0x551500]. Defaults to the stock fresh-profile seed; the shell replaces it
 	// from the mounted Avatars.def + weapon.sav.
 	CharacterJoinVars local_character_vars = retail_fresh_profile_character_vars();

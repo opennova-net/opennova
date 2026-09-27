@@ -297,7 +297,7 @@ void test_keyframe_snap_writes_channels_render_and_target_only() {
 }
 
 void test_negative_color_fade_pins_a_static_block_to_plus_rate_and_wraps() {
-	// [orig: interpolate_weather_color @ 0x57da2c..0x57da6b — the two-compare
+	// [orig: Environment_InterpolateWeatherColor @ 0x57da2c..0x57da6b — the two-compare
 	//  clamp with the negate; @ 0x57da85..0x57da8e the low-byte repack]
 	w::WeatherState ws;
 	ws.seed(seed_800());

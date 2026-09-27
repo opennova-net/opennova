@@ -100,12 +100,12 @@ appear only where a record says so. Known scales, each owned by its record:
 ### Timing
 
 - The engine logic tick is **62 Hz**: `[orig: Game_ProcessMainFrame @ 0x5263f0]`
-  increments `tick @ 0x24c1968` once per call (not while the in-game menu pause
+  increments `g_CurrentTick @ 0x24c1968` once per call (not while the in-game menu pause
   flag is set, `@0x5265A0..0x5265B4`), before the entity update, and
   `Game_StartMission @0x524360` zeroes it on every peer (`@0x525B9F`), so the first mission frame runs
   at tick 1 on the host and on every client
   ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)).
-- `g_entity_update_counter` is the ENTITY-UPDATE counter, not a render frame counter: its
+- `g_EntityUpdateCounter` is the ENTITY-UPDATE counter, not a render frame counter: its
   one writer is the tail of a non-epilog `Entity_UpdateAllEntities @0x4C2100`
   (`@0x4C2639`) and nothing resets it, so it runs one behind `tick`, holds on a
   skipped or epilog frame and keeps counting across missions. The ground-link

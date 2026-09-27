@@ -653,7 +653,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         // [orig: WeaponAction_Fire @0x542B10 (the Entity_CalcWeaponFirePosition
         //  call @0x542bf7) -> Entity_CalcWeaponFirePosition @0x4dc750 parentSlot 3
         //  (the Entity_ComputeUserpointWorldTransform call @0x4dc7f6; barrel =
-        //  slot[+0x10] & 3 @0x545D40..0x545D4B, read before the consume_weapon_ammo
+        //  slot[+0x10] & 3 @0x545D40..0x545D4B, read before the Weapon_ConsumeAmmo
         //  call @0x542C75); the fire command copies out[0..2] and out[3]/out[4]
         //  @0x42be84..0x42bef2]. The point is the
         //  slot's FIRE field (b): the host's own re-derivation names field 0

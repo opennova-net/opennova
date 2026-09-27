@@ -242,7 +242,7 @@ void EntityRegistry::set_script_group_members(int group, const std::vector<Entit
 // of entity+284's BMS command group, and retain pool-slot order and dead rows.
 // The walk covers the pool's high-water `used` count and skips a row whose
 // +0x20 itemDef pointer is null [orig: @0x4f9809]: a populated-slot gate, since
-// every spawn stores &gItemDefs[idx] (an unknown type resolves to row 0,
+// every spawn stores &g_ItemDefs[idx] (an unknown type resolves to row 0,
 // ItemList_FindIndexByTypeId @0x49E100) and Entity_Destroy @0x43E810 zeros the
 // row. The registry's live-slot walk is that gate; the type id is not tested.
 void EntityRegistry::script_groups(std::vector<std::vector<EntityHandle>> &out) const {
@@ -263,7 +263,7 @@ void EntityRegistry::script_groups(std::vector<std::vector<EntityHandle>> &out) 
 }
 
 // The def test reads the row's ItemDef pointer, which only a free row lacks:
-// every spawn links &gItemDefs[ItemList_FindIndexByTypeId(type)], and the
+// every spawn links &g_ItemDefs[ItemList_FindIndexByTypeId(type)], and the
 // lookup answers row 0 (retail's Null row) for a type items.def lacks. So the
 // live walk is that test; has_item_def (false for a type without a row) is
 // not, and a player whose type has no row still counts.

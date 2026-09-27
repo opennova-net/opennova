@@ -552,7 +552,7 @@ int LightScene::select_model_frame(const TypedArray<Node3D> &p_models,
 					// the model collector re-scopes the OWNER section per ROBJ. The
 					// group gate falls back from interior section zero to this value.
 					// [orig: Terrain_RenderSectorModels @0x5c5e07;
-					// collect_render_objects_for_batch @0x5d8ff7, see
+					// Render_CollectRenderObjectsForBatch @0x5d8ff7, see
 					// docs/render/render-lighting-re.md]
 					const opennova::renderer::SubmitOwnerGroup owner =
 							opennova::renderer::submit_owner_group(owner_entity, false, false,

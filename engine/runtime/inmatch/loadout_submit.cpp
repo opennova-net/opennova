@@ -126,7 +126,7 @@ void build_joiner_loadout_kit(const world::World &world,
 			profile.side(playersav::side_for_team(team));
 	// ONE integer: the wire class byte AND the page index [orig: eax = *(u8*)esi, the
 	// switch(class-5) page map]. The [5,9] clamp is retail's own per-side session-start
-	// clamp [orig: apply_session_settings_to_globals @0x5516ab..@0x5516ec]; 8
+	// clamp [orig: Game_ApplySessionSettingsToGlobals @0x5516ab..@0x5516ec]; 8
 	// (rifleman) is the shipped profile default [orig: PlayerProfile_InitDefaults
 	// @0x54bbe0/@0x54bbe3] and also what the host's 0x2F envelope requires — it aborts
 	// on a nonzero class outside [5,9] [orig: @0x5158b1 -> @0x515fa5].

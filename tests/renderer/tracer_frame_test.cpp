@@ -63,7 +63,7 @@ bool style_table_contract() {
 	// Rocket/AT4 smoke: quadratic alpha fade a = ((255-2i)^2) >> 8 over 112
 	// grays; linear width growth [orig: @ 0x5db4f8-0x5db5f6]; the smoke
 	// material, the cross-section, the wave words and the distortion flag
-	// [orig: g_TracerStyle_Rocket @ 0x2BF4A40, g_TracerStyle_AT4 @ 0x2BF4210].
+	// [orig: g_TracerStyleRocket @ 0x2BF4A40, g_TracerStyleAT4 @ 0x2BF4210].
 	const auto &rocket = r::tracer_style(3);
 	const auto &at4 = r::tracer_style(4);
 	if (!check(rocket.color_count == 112 && !rocket.fog_black &&
@@ -108,7 +108,7 @@ bool style_table_contract() {
 
 	// Sniper: width 0.04 -> 0.1 over 10 [orig: .data @ 0x8458C8]; the static
 	// block's +4 and +0x828 words are set, the material is the stock slot
-	// [orig: g_TracerStyle_SniperRed @ 0x8458B0]. DF1: 32-entry fades at
+	// [orig: g_TracerStyleSniperRed @ 0x8458B0]. DF1: 32-entry fades at
 	// constant width 0.006 [orig: @ 0x5db3d9-0x5db4d6].
 	const auto &sniper = r::tracer_style(9);
 	if (!check(sniper.color_count == 20 && sniper.colors[0] == 0xFF180000 &&

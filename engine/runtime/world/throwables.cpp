@@ -513,7 +513,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
         } else {
             const double depth = from_fixed(water) - r.pos.z;
             // Tags 27 and 26 sit at the water surface, tag 25 at the round
-            // [orig: the descriptor z = Env_WaterHeightFixed @0x4449BE for
+            // [orig: the descriptor z = g_EnvWaterHeightFixed @0x4449BE for
             //  the calls @0x4449CC (26) / @0x4449DE (27); the round z
             //  restored @0x4449EE for @0x4449F2 (25)].
             const Vec3 surface{r.pos.x, r.pos.y, static_cast<float>(from_fixed(water))};

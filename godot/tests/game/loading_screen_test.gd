@@ -3,8 +3,8 @@ extends GutTest
 ## The mission loading screen (LoadingScreen): the sidecar-image rule, the
 ## game-type text mapping, exact stage progress and fill arithmetic, and
 ## the SP-vs-MP text split — each against the witnessed original behavior
-## [orig: render_loading_screen @ 0x521d10, HUD_GetLoadingScreenTextByGameType
-## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, draw_progress_bar_0
+## [orig: Render_LoadingScreen @ 0x521d10, HUD_GetLoadingScreenTextByGameType
+## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, HUD_DrawProgressBar_0
 ## @ 0x5d4c40].
 
 const LoadingScreen := preload("res://game/ui/loading_screen.gd")

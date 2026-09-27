@@ -50,7 +50,7 @@ public:
     int ssn_wave(World &world, EntityHandle speaker, const std::string &filename,
             int32_t max_distance, bool radio);
     bool ready() const { return !state_.channel_active; }
-    EntityHandle speaker() const { return state_.portrait; } // g_voicePlaybackEntity
+    EntityHandle speaker() const { return state_.portrait; } // g_VoicePlaybackEntity
 
     // Physical completion uses both the generation and clip identity: an old
     // callback cannot finish a replacement voice or a newly loaded mission.

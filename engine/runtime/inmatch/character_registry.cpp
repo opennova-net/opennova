@@ -74,7 +74,7 @@ const CharacterEntry *CharacterRegistry::find_by_indices(int nationality_index,
 	return nullptr;
 }
 
-// [orig: lookup_entity_slot_and_pack_entry @0x57ad40 — the loop
+// [orig: EntitySlot_LookupAndPackEntry @0x57ad40 — the loop
 // @0x57ad6b..0x57ad80 returns the first side match, the entry-0 fallback
 // @0x57ad84..0x57adda]
 uint16_t CharacterRegistry::first_character_id(int alignment) const {

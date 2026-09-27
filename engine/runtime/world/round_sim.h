@@ -416,7 +416,7 @@ struct RoundImpact {
     // The descriptor's owner tag is the struck entity (0 on terrain and water),
     // so an entity impact's group takes the building-section gate
     // [orig: AmmoDef_ProcessImpactEffect @ 0x40A240 passes the hit record's
-    //  entity (+4) as submit_effect_descriptor's tag]; the knife leaf spawns
+    //  entity (+4) as Effect_SubmitDescriptor's tag]; the knife leaf spawns
     // with a zero tag [orig: Weapon_RaycastAndSpawnImpact @ 0x4E8950].
     bool section_tagged = false;
     uint32_t tick = 0;      // authoritative presentation tick for catch-up aging
@@ -436,7 +436,7 @@ struct RoundHit {
 };
 
 // The one global hit record the damage passes fill for the class event
-// callbacks [orig: hitRecord @0xB7C620, 80 bytes, Projectile_GetHitRecord
+// callbacks [orig: g_ProjectileHitRecord @0xB7C620, 80 bytes, Projectile_GetHitRecord
 // @0x4E7000]. Projectile_CopyEntityToHitRecord @0x4E7010 zeroes it and
 // copies the striking round: its position and angles (+0x00..+0x14), its
 // velocity (+0x18..+0x2C), the round itself (+0x40), its owner (+0x44) and
@@ -595,7 +595,7 @@ public:
 
     // The presenting client's identity, for the friendly/enemy style select AT SPAWN
     // [orig: RoundData_SpawnRound @ 0x4ec740 compares the round team byte to
-    // g_local_player_entity->Team, shooter == local player counts friendly]. The host
+    // g_LocalPlayerEntity->Team, shooter == local player counts friendly]. The host
     // stamps these before ticking (SP listen-server: the local avatar); remote-client
     // presentation re-runs its own select when it re-fires ring records (net-re §5.60).
     EntityHandle local_player;

@@ -11,13 +11,13 @@
 // constants, so the two cannot drift. Meaning, coverage, and per-tag witness notes
 // stay in the catalog + the §4 dispatch tables / §5.x field maps of
 // docs/net/novaworld-net-re.md — the authorities these names come from.
-// [orig: S2C table g_np_msginfo_client @0x82AE28; C2S table g_np_msginfo_server @0x82B5D8]
+// [orig: S2C table g_NPMsgInfoClient @0x82AE28; C2S table g_NPMsgInfoServer @0x82B5D8]
 //
 // The high-table (settings) control tags H:0x00..0x03 / full tag 0x100..0x103 are NOT
 // in-game msg ids and do not live here — they sit beside the full_tag machinery in
 // npwire/protocol_message.h.
 
-namespace opennova::s2c { // server -> client [orig: g_np_msginfo_client @0x82AE28]
+namespace opennova::s2c { // server -> client [orig: g_NPMsgInfoClient @0x82AE28]
 
 inline constexpr uint8_t INIT = 0x00;                       // session-layer init
 inline constexpr uint8_t SYNC_STATE = 0x01;                 // u32 sync state
@@ -90,7 +90,7 @@ inline constexpr uint8_t ZONE_PRESENCE_COUNT = 0x6C;        // §5.61 [u16 activ
 inline constexpr uint8_t SPAWN_WAVE_STATUS = 0x6E;          // §5.31 deploy-screen wave groups
 inline constexpr uint8_t ZONE_TIMER_VALUE = 0x6F;           // §5.49 zone timer value (NOT cinematic camera)
 inline constexpr uint8_t SPECTATOR_FLAGS = 0x75;            // 2 B [death-screen/spectator bit, player team]
-inline constexpr uint8_t CLASS_ALLOW_MASK = 0x76;           // u16 g_hostClassAllowMask [orig: NetPacket_WriteClassAllowMask @0x510350]
+inline constexpr uint8_t CLASS_ALLOW_MASK = 0x76;           // u16 g_HostClassAllowMask [orig: NetPacket_WriteClassAllowMask @0x510350]
 inline constexpr uint8_t NETWORK_QUALITY = 0x79;             // host CNetQuality scalar, broadcast every 0x136 ticks
 inline constexpr uint8_t PLAYER_NAME = 0x7A;                // player name -> server-info struct
 inline constexpr uint8_t FULL_PLAYER_INFO = 0x7B;           // §5.32 full player/session info
@@ -150,14 +150,14 @@ inline constexpr uint8_t TELEPORT = 0x67;
 // [cstr name <=64][cstr tag <=8]; action 2 removes. Action 3 is the reply to
 // the c2s::GAME_START_ACK roster walk and re-queues it with the node's id.
 // [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; serializer
-//  serialize_minimap_slot @0x5073B0]
+//  NetPacket_SerializeMinimapSlot @0x5073B0]
 inline constexpr uint8_t CLAN_ROSTER = 0x6A;
 inline constexpr uint8_t TRACKED_PLAYER_VOICE = 0x6D;
 // Per-vehicle-type spawn availability for the requester's team, from the
 // host's EntityLimit table: [u8 3] + rows [u16 typeId][u8 avail][u8 max] +
 // u16 0. Requester-only reply to c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST.
 // [orig: NapiNPClientMsg_HandleWeaponLoadoutList @0x429A30;
-//  serialize_weapon_overlay_slots_0 @0x5105A0]
+//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0]
 inline constexpr uint8_t VEHICLE_SPAWN_AVAILABILITY = 0x70;
 inline constexpr uint8_t SQUAD_JOIN = 0x71;
 inline constexpr uint8_t TEAM_NAME = 0x72;
@@ -173,7 +173,7 @@ inline constexpr uint8_t PLAYER_PROFILE_REFRESH = 0x83;
 
 } // namespace opennova::s2c
 
-namespace opennova::c2s { // client -> server [orig: g_np_msginfo_server @0x82B5D8]
+namespace opennova::c2s { // client -> server [orig: g_NPMsgInfoServer @0x82B5D8]
 
 inline constexpr uint8_t JOIN = 0x00;                       // join request
 inline constexpr uint8_t JOIN_FORM_POST = 0x01;             // §6.4 early-join side-password compare

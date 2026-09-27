@@ -440,7 +440,7 @@ bool test_overlay_atlas_flags_tint_clipping_and_order() {
 // The page passes are XYZRHW quads whose positions are copied unbiased, so
 // page pixel x samples at position x: a 1:1 LOD-2 page takes base texel
 // coordinate x - 0.5 in its quadrant texture, blending texels x-1 and x.
-// [orig: fill_fullscreen_quad_vertices @ 0x678DFE..0x678E4B (positions
+// [orig: GDynamicVB_FillFullscreenQuadVertices @ 0x678DFE..0x678E4B (positions
 // unbiased); PolyTrn_RenderTile quad (0,0)-(dim,dim) @ 0x60DC1A..0x60DC7E,
 // UV local/512 @ 0x60DB86..0x60DC02]
 bool test_base_pass_samples_integer_pixel_positions() {
@@ -471,7 +471,7 @@ bool test_base_pass_samples_integer_pixel_positions() {
 // A LOD-1 page draws 512 units over 256 pixels: two colormap texels per
 // pixel, so the quadrant texture's MIPFILTER POINT selects box level 1.
 // [orig: Colormap0..3 flags 0x100001 @ 0x60B51C (bit 3 clear: MIPFILTER
-// POINT, bit 1 clear: LINEAR) decoded by apply_texture_stages
+// POINT, bit 1 clear: LINEAR) decoded by CGfxShader_ApplyTextureStages
 // @ 0x68084C..0x680870 into CGfxDevice_ApplyRenderStates @ 0x67E463..0x67E4A7;
 // box levels GTexture_CreateFromPixelData_0 @ 0x6877BA..0x6878BE]
 bool test_base_pass_coarse_page_samples_box_level_one() {
@@ -538,7 +538,7 @@ bool test_til_line_is_point_sampled_one_to_one() {
 // A LOD-3 page draws a 16-unit tile over 32 pixels: two atlas texels per
 // pixel, so the point sample takes the tile-set atlas box level 1.
 // [orig: atlas levels GTexture_CreateFromPixelData_0 @ 0x6877BA..0x6878BE;
-// point min/mag/mip @ 0x604B24 via apply_texture_stages @ 0x68084C..0x680870]
+// point min/mag/mip @ 0x604B24 via CGfxShader_ApplyTextureStages @ 0x68084C..0x680870]
 bool test_til_coarse_page_takes_box_level() {
 	const auto colormap = quadrants(solid_image(2, 2, {0, 0, 0, 255}));
 	const auto normal = quadrants(solid_image(2, 2, {128, 128, 255, 128}));

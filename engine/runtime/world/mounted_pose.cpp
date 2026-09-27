@@ -311,14 +311,14 @@ bool resolve_model_mounted_pose_from_parts(
 		// An addeweap child owns the complete EWeap userpoint frame. Build the
 		// same direction look-at frame retail multiplies through the live
 		// bone (renderer::direction_look_at, the one engine home of
-		// build_direction_look_at_matrix @ 0x612C90: forward = direction;
+		// Math_BuildDirectionLookAtMatrix @ 0x612C90: forward = direction;
 		// right = (forward.z, 0, -forward.x); up = forward x right, the
 		// vertical degeneracy substituting the world x axis). Retail's result
 		// is a row-vector render matrix, so transpose and conjugate by the
 		// loader's X mirror before composing in the model world frame; the
 		// rest-bone inverse then makes that authored frame part-local; the
 		// live bone carries both position and orientation through PANM.
-		// [orig: build_bone_attachment_matrix @ 0x56C630]
+		// [orig: Bone_BuildAttachmentMatrix @ 0x56C630]
 		const renderer::DirectionLookAt<double> frame = renderer::direction_look_at(
 				std::array<double, 3>{authored_model_direction.x,
 						authored_model_direction.y, authored_model_direction.z});

@@ -48,7 +48,7 @@ EndRoundLine literal_line(const char *fmt, int y) {
 } // namespace
 
 std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in) {
-	// [orig: draw_endround_stats_overlay @0x5b7cd0]
+	// [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0]
 	std::vector<EndRoundLine> out;
 	const bool team_mode = (in.game_type & 0x10000u) != 0;
 	// "is_team_game" in the decompile is the two-name TIE of a non-team mode:

@@ -9,7 +9,7 @@ namespace opennova::world {
 // Re-drive the gamemus vars from the local player each frame, the way the
 // original does from the local player's body update [orig:
 // Entity_UpdateInfantryPlayerBody @ 0x4b40e0, gate entity ==
-// g_local_player_entity @ 0x4b6234; full map docs/audio/mus-sbf-re.md §Game
+// g_LocalPlayerEntity @ 0x4b6234; full map docs/audio/mus-sbf-re.md §Game
 // music driving]. Pumped here: Var7 = health % (cur*100/max, 100 when max <=
 // cur [orig: @ 0x4b6315-0x4b6324]) and Var10 = team [orig: @ 0x4b62fc]. The
 // health pair is the shared local_player_health / local_player_max_health

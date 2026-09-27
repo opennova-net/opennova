@@ -162,7 +162,7 @@ private:
 	// precedent), and render_frame re-draws every patch with the <= 16 pool
 	// lights its own draw list overlaps — packed into one RGBAF rows texture
 	// indexed by the pool slot each patch instance carries [orig: the
-	// per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
+	// per-light else-arm of Terrain_RenderSectorBatch @0x6092A0 ->
 	// Light_SetupTerrainProjectedPass @0x5AA830; the collect/gates/constants
 	// are portable in opennova::renderer::LightScene::collect_terrain_pass_rows, see
 	// docs/render/render-lighting-re.md]. Godot instance uniforms carry

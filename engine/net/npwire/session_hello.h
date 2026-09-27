@@ -230,7 +230,7 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);
 // tears the active connection down) or, mid-connect, a pending-disconnect latch.
 // [orig: builder NapiNPDataTransfer_SendDescription @0x628c80 ->
 //  NapiNPMessage_Create(msg_id 3, msg_class 1) @0x627fc0; receiver
-//  CNapiNPConnection_HandleDescriptionPacket @0x621ae0 (g_np_msginfo_highbit @0x849e80 row 3),
+//  CNapiNPConnection_HandleDescriptionPacket @0x621ae0 (g_NPMsgInfoHighBit @0x849e80 row 3),
 //  TLV walk @0x621b8c..0x621c7d, terminal state @0x621d53..0x621d6b]
 // The tag constant PROTOCOL_TAG_CONNECTION_DESCRIPTION lives in
 // npwire/protocol_message.h (the full_tag/high-bit home); only the TLV body

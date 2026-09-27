@@ -171,7 +171,7 @@ bool run_pool1_spawn_non_ai() {
 	if (!expect(out.records.size() == 1, "one decoded item")) return false;
 	const nw::PoolSpawnRecord &r = out.records[0];
 	if (!check_pool1_common(r)) return false;
-	// The name rides only for an AIData def [orig: serialize_entity_pool_to_packet_0
+	// The name rides only for an AIData def [orig: NetPacket_SerializeEntityPoolToPacket_0
 	// @0x503A64..0x503ADF].
 	if (!expect(r.entity_name.empty(), "a non-AI record carries the empty name")) return false;
 	if (!expect((r.spawn_flags & 0x0800) == 0, "0x0800 AI-trailer absent for non-AI item")) return false;
@@ -231,7 +231,7 @@ bool run_pool1_spawn_mount_handles() {
 // The 0x0D PARENT is the occupantEntity (+0x170) back-reference and the
 // TARGET the groundEntity (+0x28): a driven hull names its driver, and an
 // addeweap child names its gunner (or nothing) while its hull rides the target.
-// [orig: serialize_entity_pool_to_packet_0 `mov eax, [ebp+170h]` @0x503BC9
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 `mov eax, [ebp+170h]` @0x503BC9
 //  (flag 0x100 @0x503BD3), `mov eax, [ebp+28h]` @0x503C22]
 bool run_pool1_spawn_parent_is_the_occupant() {
 	w::World world;
@@ -414,7 +414,7 @@ bool run_full_entity_spawn_player() {
 
 // Every S2C 0x18 field whose retail source now exists on world::Entity is copied
 // directly, including the fixed retail mount slots and raw low/high-word truncations.
-// [orig: serialize_object_to_buffer @0x504d10; net-re §5.46]
+// [orig: NetPacket_SerializeObjectToBuffer @0x504d10; net-re §5.46]
 bool run_full_entity_spawn_rich_fields() {
 	w::Entity entity;
 	entity.handle = w::EntityHandle::make(1, 2);
@@ -561,7 +561,7 @@ bool run_full_entity_spawn_itemdef_gates() {
 // The 0x0D zone block rides its sources, not its values: a SpawnPoint def with
 // no zone number emits 0x8000 and its radius word even at radius 0, and a zone
 // number emits 0x2000 with the packed info byte and radius.
-// [orig: serialize_entity_pool_to_packet_0 `cmp byte [ebp+21Ah],0`
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 `cmp byte [ebp+21Ah],0`
 //  @0x503ECC..0x503ED3, `test dword [def+54h],40000h` @0x503F1F..0x503F43]
 bool run_pool1_zone_block_rides_its_sources() {
 	w::World world;
@@ -605,8 +605,8 @@ bool run_pool1_zone_block_rides_its_sources() {
 // A palm (its def's damage callback) or a psec mover streams its entity+0x270
 // byte whatever its value: field 0x4000 on the 0x0D record and field 0x100 on
 // the 0x10 record, a standing palm's 0 included.
-// [orig: serialize_entity_pool_to_packet_0 @0x503F4C..0x503F80;
-//  serialize_pool2_static_to_buffer @0x504554..0x504588]
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503F4C..0x503F80;
+//  NetPacket_SerializePool2StaticToBuffer @0x504554..0x504588]
 bool run_palm_state_rides_its_callbacks() {
 	w::World world;
 	world.registry.configure_pool(1, 4);
@@ -653,8 +653,8 @@ bool run_palm_state_rides_its_callbacks() {
 
 // A child whose carrier row was destroyed still streams that row's handle: the
 // 0x0D target and the 0x18 ground field ride the stored pointer, whose pool
-// handle needs no live entity. [orig: serialize_entity_pool_to_packet_0
-//  @0x503C22..0x503C49; serialize_object_to_buffer @0x504e8c..0x504fb4]
+// handle needs no live entity. [orig: NetPacket_SerializeEntityPoolToPacket_0
+//  @0x503C22..0x503C49; NetPacket_SerializeObjectToBuffer @0x504e8c..0x504fb4]
 bool run_freed_carrier_row_keeps_the_target_handle() {
 	w::World world;
 	world.registry.configure_pool(1, 8);

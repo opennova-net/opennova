@@ -157,7 +157,7 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
 // Local-point world position: the same local rotate the per-tick pose applies
 // (pose_mounted_occupant) through the carrier's FULL orientation frame, our
 // stand-in for the posed bone transform
-// [orig: build_bone_attachment_matrix @0x56c630 in the scan @0x435fe7].
+// [orig: Bone_BuildAttachmentMatrix @0x56c630 in the scan @0x435fe7].
 Vec3 local_point_world_pos(const Entity &veh, const Vec3 &local) {
     return entity_local_point_world(veh, local);
 }
@@ -169,7 +169,7 @@ Vec3 seat_world_pos(World &world, const Entity &veh, const Seat &s) {
     // attachment-frame form, whatever the seat's own kind. A rest-only point
     // targets the wrong hatch when a turret is animated.
     // [orig: Entity_FindNearestSeatOrArmory seat kinds @0x435F6C..0x435FDF ->
-    //  build_bone_attachment_matrix @0x435FFA (its def+0x144 call
+    //  Bone_BuildAttachmentMatrix @0x435FFA (its def+0x144 call
     //  @0x56C6DC..0x56C6F3); labels @0x5A3553]
     Seat query = s;
     query.type = SeatType::Gunner;
@@ -504,7 +504,7 @@ namespace {
 // Both queries start at Position. Only scan scoring reads CameraOffset.
 // The scan's sixth argument is allowAllTypes=1; labels use the sector query.
 // [orig: Entity_FindNearestSeatOrArmory @0x436174..0x436188;
-// draw_vehicle_seat_and_armory_labels @0x5A35F6..0x5A360E (the label ray endpoint
+// HUD_DrawVehicleSeatAndArmoryLabels @0x5A35F6..0x5A360E (the label ray endpoint
 // is groundEntity, else the player; HUD_DrawEntityLabel @0x5a39b0 is the friendly
 // tag drawer, not this site)]
 bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &point,
@@ -733,7 +733,7 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
     };
 
     for_each_scan_candidate(world, player, [&](const Entity &cand) {
-        // A ready weapon limits labels to the nearest entity [orig: !Player_CanFireWeapon()
+        // A ready weapon limits labels to the nearest entity [orig: !Player_IsOpticalViewVisible()
         // || entity == nearest_entity @0x5a3354].
         if (can_fire && cand.handle != nearest.vehicle) return;
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;

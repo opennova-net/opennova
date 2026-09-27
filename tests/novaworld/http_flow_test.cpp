@@ -235,7 +235,7 @@ static bool test_login_failures() {
 	}
 	// A malformed EPASK cookie (missing separator) or one whose params the
 	// modexp gate rejects fails the login before any POST is built.
-	// [orig: parse_colon_delimited_string @0x666710 -1; EPASK_ModexpEncrypt @0x66668a -1]
+	// [orig: EPASK_ParseColonDelimitedString @0x666710 -1; EPASK_ModexpEncrypt @0x66668a -1]
 	for (const char *bad : {"7", "0:0:k", "3:258:k"}) {
 		nw::LobbyHttpFlow f;
 		f.set_context(concrete_ctx());

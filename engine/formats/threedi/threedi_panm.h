@@ -162,7 +162,7 @@ inline constexpr int THREEDI_STYLE_CONTROL_ROTATE = 0x75;
 // differs: UV reads the CTRL value for the whole range, RGB/light for
 // SET/ADD, alpha and PANM for SET only — everything else in the range falls
 // back to the waveform selected by the low nibble.
-// [orig: compute_uv_transform_matrix @ 0x5B1990; RgbGen_EvaluateColor
+// [orig: Material_ComputeUVTransformMatrix @ 0x5B1990; RgbGen_EvaluateColor
 //  @ 0x5B23D0; AlphaGen_EvaluateValue @ 0x5B2320; PANM_SampleTrack @ 0x5B2270]
 typedef enum ThreediGeneratorConsumer {
     THREEDI_GENERATOR_CONSUMER_UV = 0,

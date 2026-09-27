@@ -118,7 +118,7 @@ public:
     // body tick restamps, the candidate's own hull never occludes its seats (the USE LOS
     // walker skips the endpoint entity and both parent slots, so a mounted USE swaps to
     // any free seat in reach and dismounts only when the scan is empty [orig:
-    // raycast_against_entity_pool ctx[17..20] @0x538832..0x538859]), and an emplaced
+    // Physics_RaycastAgainstEntityPool ctx[17..20] @0x538832..0x538859]), and an emplaced
     // gun's LOS endpoint is its carrier (def attrib 0x20 ->
     // groundEntity) with the reject legs in place. Regressions: vehicle_mount_test.
     bool find_nearest_free_seat(const Entity &player, VehicleSeatSelection &out, bool armory_mode, const VehicleOccupancySource *source = nullptr);
@@ -129,11 +129,11 @@ public:
     // @0x4368CF..0x43691A]
     bool find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source = nullptr);
     // The floating seat/armory label list for the local player, a structural translation of
-    // the selection half of [orig: draw_vehicle_seat_and_armory_labels @0x5a3290]:
+    // the selection half of [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290]:
     //  - no nearest scan hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory
     //    gate @0x5a32e2];
     //  - can_fire limits labels to the nearest entity; when the player cannot fire, every
-    //    in-range candidate labels [orig: !Player_CanFireWeapon() || entity == nearest
+    //    in-range candidate labels [orig: !Player_IsOpticalViewVisible() || entity == nearest
     //    @0x5a3354];
     //  - per entity: dead/destroyed skip, enemy-occupant reject [orig: @0x5a3373/@0x5a3395];
     //  - armory_mode false: every FREE seat within 4.0 u 3D of the player position
@@ -152,7 +152,7 @@ public:
     //  - unmounted otherwise (deck standers included) -> the nearest-seat scan;
     //  - mounted -> a seat in scan reach swaps [orig: @0x4369ac], else detach.
     // The weapon-busy gate (EquippedSlot currentAction @0x436958) and the WAC no-dismount
-    // global (wac_var_seatbelt @0x43698b) are the caller's/session's concern (D-AI-11).
+    // global (g_WacVarSeatbelt @0x43698b) are the caller's/session's concern (D-AI-11).
     // Returns true iff a mount/swap/detach was applied.
     bool player_toggle_mount(EntityHandle player);
     // Host-facing lifecycle for effects that exist only while a vehicle has its single

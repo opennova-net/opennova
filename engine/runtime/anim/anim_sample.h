@@ -9,7 +9,7 @@
 // skin's global-rest-inverse bind keeps mesh and bones consistent.
 //
 // [orig: the runtime pose chain is BoneAnim_TransformBones @0x410360 ->
-//  AnimChannel_ComputeBoneMatrices @0x410da0 -> build_world_bone_matrices @0x40c770
+//  AnimChannel_ComputeBoneMatrices @0x410da0 -> Bone_BuildWorldMatrices @0x40c770
 //  (world entities) / BoneAnim_BuildWorldMatrices @0x40c400 (first-person viewmodel)
 //  (whose "X negated, Y/Z kept" is exactly the mesh's (-x,y,z) relationship).]
 //

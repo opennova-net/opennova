@@ -1007,7 +1007,7 @@ func test_cleared_water_strip_leaves_the_q3_draw_list() -> void:
 	# The g_WaterActive gate (every tracked visible terrain sector above the
 	# water height) clears the beauty strip, but the bloom pass's nightvision
 	# redraw is not gated on it (retail FrameFX_RenderGlowSource @ 0x582a59..
-	# 0x582a5d calls render_water_surface(0, 1) unconditionally): its strip
+	# 0x582a5d calls Render_WaterSurface(0, 1) unconditionally): its strip
 	# stays in the Q3 draw list.
 	water.set_visible_terrain_bounds(true, 100.0, 200.0)
 	water.advance_frame(1.0 / 62.0)
@@ -1019,7 +1019,7 @@ func test_cleared_water_strip_leaves_the_q3_draw_list() -> void:
 			"the nightvision redraw ignores g_WaterActive: %s" % ungated)
 
 	# Below the plane the redraw has no side: the view-0 call requires the
-	# camera strictly above the water (retail render_water_surface @ 0x5c3304).
+	# camera strictly above the water (retail Render_WaterSurface @ 0x5c3304).
 	# Its strip clears and names the source, so the last publication is never
 	# drawn again.
 	camera.position = Vector3(100.3, 5.0, -33.7)
@@ -1464,7 +1464,7 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 			+ diagnostic)
 	assert_gt(full_peak, 0.02 * alone_peak,
 			"the redraw weights the copy instead of erasing it; " + diagnostic)
-	# The redraw marches the nightvision rows (retail render_water_surface(0, 1)
+	# The redraw marches the nightvision rows (retail Render_WaterSurface(0, 1)
 	# @ 0x582a59): the flat 0.1 base caps the row alpha at 0.1 x 229.5 / 255,
 	# so even a full noise alpha keeps under a fifth of the copy (the beauty
 	# rows' 1 - murk base would keep most of it).
@@ -1569,7 +1569,7 @@ func test_alpha_blend_lum_strip_contributes_nothing_to_q3() -> void:
 
 
 func test_skinned_lum_model_never_reaches_q3() -> void:
-	# Retail's bone path (collect_render_batches_for_entity) appends only the
+	# Retail's bone path (Render_CollectRenderBatchesForEntity) appends only the
 	# opaque list and the two alpha queues; the Q3 copy is the rigid object
 	# path's alone. A per-vertex skinned model wearing a LUM material is
 	# therefore never a Q3 producer (renderer::q3_object_source_admitted),

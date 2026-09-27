@@ -131,7 +131,7 @@ bool FoliageFrameCompiler::expand_detail_instance(
 	// Retail writes render x = keyLo + B + sx*sin + sz*cos (the Godot-Z
 	// axis) and render z = keyHi + A + sx*cos - sz*sin (Godot X) for source
 	// (sx, sz); the 3DI import negates source X (vertex.x = -sx).
-	// [orig: generate_foliage_instances_0 @ 0x600112..0x60014d]
+	// [orig: Foliage_GenerateInstances_0 @ 0x600112..0x60014d]
 	const float cos_a = std::cos(instance.yaw_radians);
 	const float sin_a = std::sin(instance.yaw_radians);
 

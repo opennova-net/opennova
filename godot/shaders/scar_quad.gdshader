@@ -17,7 +17,7 @@ shader_type spatial;
 //   NO ALPHATESTENABLE (no 0x40000): the drawer's SetAlphaTestRef(128)
 //       @0x5CCDAE latches ALPHAFUNC/ALPHAREF only, so it is INERT here
 //   stage 0: COLOROP MODULATE2X(TEXTURE, DIFFUSE), ALPHAOP MODULATE(TEXTURE,
-//       DIFFUSE); DIFFUSE = Env_TerrainLightCombined | FF000000 on every
+//       DIFFUSE); DIFFUSE = g_EnvTerrainLightCombined | FF000000 on every
 //       vertex; the strip's TGA with clamp wrap.
 // The scorch TGAs are black RGB under an alpha falloff (max ~0.75): the mark
 // IS the blend. An alpha scissor here (the 2026-08-21 first cut) dropped the
@@ -51,12 +51,12 @@ void vertex() {
 
 void fragment() {
 	vec4 tex = texture(albedo_tex, UV);
-	// MODULATE2X(TEXTURE, DIFFUSE), saturating [orig: decode_mode_color_stage
+	// MODULATE2X(TEXTURE, DIFFUSE), saturating [orig: RenderState_DecodeModeColorStage
 	// @0x681080 family 0x600 under GfxDevice_Modulate2XEnabled].
 	vec3 rgb = min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0));
 	ALBEDO = scene_output(effect_fog_scene(rgb,
 			effect_fog_visibility(v_eye_depth, v_radial_distance)));
-	// MODULATE(TEXTURE, DIFFUSE) alpha [orig: decode_mode_alpha_stage @0x680B00
+	// MODULATE(TEXTURE, DIFFUSE) alpha [orig: RenderState_DecodeModeAlphaStage @0x680B00
 	// nibble 0x50]; DIFFUSE alpha is the vertex's FF.
 	ALPHA = tex.a * COLOR.a;
 }

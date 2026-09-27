@@ -4,16 +4,16 @@
 // retail draws every HUD frame from the round-end announcement until stat.mnu
 // opens — the headline, the game-type second line, the score lines and the
 // game-time line — plus the stat-field column layout of the first pass.
-// The key selection here is the exact port of draw_endround_stats_overlay
+// The key selection here is the exact port of HUD_DrawEndRoundStatsOverlay
 // @0x5b7cd0; the strings themselves are the embedder's gametext Overlays
 // table, so each line carries its KEY + fallback and the printf-style
 // arguments, and the presenter resolves them.
 // [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (called every HUD frame
-//  while g_spawn_success_gate && is_in_session from HUD_DrawOverlayPanels @0x5c0072):
+//  while g_SpawnSuccessGate && is_in_session from HUD_DrawOverlayPanels @0x5c0072):
 //  first pass Server_ResetBalanceCounters + Game_InitRespawnState +
 //  Overlay_ComputeStatFieldColumnLayout(40, 984) + byte_28E561C = 1; every
-//  pass UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then draw_endround_stats_overlay
-//  @0x5b7cd0; once g_scoreboardDirty && now - t0 >= 6000 ms ->
+//  pass UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay
+//  @0x5b7cd0; once g_ScoreboardDirty && now - t0 >= 6000 ms ->
 //  UI_OpenMenuScreen("stat.mnu", "STAT") once (byte_28E561D)]
 
 #include <cstdint>
@@ -39,7 +39,7 @@ struct EndRoundArg {
 // the headline re-looks-up Overlays/STROVER1 with the "!Mission Completed"
 // fallback, and the second line is dropped with every later line moving up
 // 32 px (retail's y stays 350, so the score lines start at 382).
-// [orig: draw_endround_stats_overlay @0x5B7CD0 — the empty-headline test
+// [orig: HUD_DrawEndRoundStatsOverlay @0x5B7CD0 — the empty-headline test
 //  @0x5b7e59 -> GameText_GetStringWithFallback @0x5b7e5b; the empty-second-line
 //  test @0x5b83e5 — draw @0x5b83fe / y=382 store @0x5b8406 only when
 //  text_buf[0]]
@@ -62,24 +62,24 @@ struct EndRoundLine {
 
 struct EndRoundOverlayInput {
 	uint32_t game_type = 0;
-	bool draw = false;            // g_endround_draw_flag
-	int winner_team = 0;          // g_endround_winner_team
+	bool draw = false;            // g_EndRoundDrawFlag
+	int winner_team = 0;          // g_EndRoundWinnerTeam
 	uint8_t local_team = 0;       // byte_A85B48
-	bool death_screen = false;    // g_death_screen_active
-	int32_t team_scores[2] = {0, 0}; // g_scoreTeamScore0/1
+	bool death_screen = false;    // g_DeathScreenActive
+	int32_t team_scores[2] = {0, 0}; // g_ScoreTeamScore0/1
 	// The non-team form's three named players (byte_24C1A98/B7C/C60 + the
 	// i16 triple @0x24C1AD4/BB8/C9C); empty names = absent.
 	std::string player_names[3];
 	int32_t player_scores[3] = {0, 0, 0};
-	int32_t round_time_remaining_ticks = 0; // g_round_time_remaining
+	int32_t round_time_remaining_ticks = 0; // g_RoundTimeRemaining
 };
 
-// The text ladder [orig: draw_endround_stats_overlay @0x5b7cd0]: headline at
+// The text ladder [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0]: headline at
 // y 300 (STROVER34 draw / STROVER35 the two-name tie / STROVER32..33,61,62
 // per winner team in team modes / STROVER_PLAYERWIN with the first name /
 // STROVER1 "!Mission Completed"), the game-type second line at y 350 (the
 // STROVER100..120 family with BLUETEAM/REDTEAM names and the
-// g_round_time_remaining arm; the objective-family STROVER1/2 arm), then from
+// g_RoundTimeRemaining arm; the objective-family STROVER1/2 arm), then from
 // y+32 the "%s : %ld" score lines stepping 40 (the team pair, or up to three
 // named players) followed by +24 and STROVER_GAMETIME "%s : %d:%02d:%02d".
 std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in);
@@ -131,12 +131,12 @@ inline constexpr int kEndRoundStatScreenDelayMsec = 6000;
 // UI_ProcessEndRoundScreenTransition, stepped once per HUD frame by the
 // presenter, which owns the device work each verdict names (the UI scene
 // teardown, the overlay element, opening stat.mnu, the cursor).
-// [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — gate g_scoreboardDirty
+// [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — gate g_ScoreboardDirty
 //  @0x5b8600, then `now - t0` against 0x1770 unsigned @0x5b860f..0x5b8615; t0
 //  (dword_A81B2C) is stamped by the 0x1D handler NapiNPClientMsg_0x01D
 //  @0x430a4b (Server_ProcessRoundEnd @0x516912 on the host) and the
 //  first pass here stamps byte_28E561C; every PRE-STAT pass tears the UI scene
-//  down (UI_TeardownScene @0x5b8674) and draws the overlay; g_scoreboardDirty
+//  down (UI_TeardownScene @0x5b8674) and draws the overlay; g_ScoreboardDirty
 //  && now - t0 >= 6000 ms opens stat.mnu once (byte_28E561D, one more
 //  teardown on the open pass @0x5b862a); once that byte is set the transition
 //  returns immediately each frame (the locret @0x5b864a) — no teardown, no
@@ -181,7 +181,7 @@ struct EndRoundResolvedLine {
 // Resolve the ladder: every line's key through the Overlays table (a missing
 // key takes the "!..." fallback with its marker stripped, a present-but-empty
 // key takes the line's EndRoundEmptyFold), then the printf arguments in
-// retail's sprintf forms (%s, %d, %ld, %02d) [orig: draw_endround_stats_overlay
+// retail's sprintf forms (%s, %d, %ld, %02d) [orig: HUD_DrawEndRoundStatsOverlay
 // @0x5b7cd0 — GameText_GetStringWithFallback per line/argument, the sprintf
 // per arm; LABEL_30 @0x5b7e59 -> the STROVER1 re-lookup @0x5b7e5b; LABEL_144
 // @0x5b83e5 — the second line draws nothing and the score lines start at 382].

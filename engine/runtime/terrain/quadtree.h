@@ -21,7 +21,7 @@ namespace opennova {
 //  ctx[3] @0x60eaf6, far override `ctx[6] > 0` @0x60eb7e..0x60eb8d;
 //  flt_8493E8 = 2000.0 static initializer]
 inline constexpr float kTerrainDefaultFarDistance = 2000.0f;
-// The retail camera FOV default (g_cameraFovTargetQ16 = 0x500000 = 80 deg,
+// The retail camera FOV default (g_CameraFovTargetQ16 = 0x500000 = 80 deg,
 // horizontal); embedders pass the live value.
 inline constexpr float kTerrainDefaultFovDeg = 80.0f;
 inline constexpr float kTerrainVerticalFovRatio = 0.83333331f; // @0x603dc4
@@ -122,7 +122,7 @@ struct TraversalStats {
 // Select one of the eight terrain mesh families from the recovered 0..15 LOD
 // sublevel: family = family_count * lod_sub / 16 over the tile's eight.
 // [orig: Terrain_GetLodSlotFamily @ 0x60288E..0x6028B1, called from
-// render_terrain_sector_batch @ 0x609581]
+// Terrain_RenderSectorBatch @ 0x609581]
 int terrain_lod_family(int lod_sub) noexcept;
 
 // Distance from point to AABB (used for LOD selection).
@@ -163,9 +163,9 @@ struct VisibleBounds {
 // noise pair, strip march) runs only while the lowest tracked visible terrain
 // sits at or below the water height, or the previous frame's Blink walk saw
 // the water; untracked bounds keep the pass live.
-// [orig: terrain_setup_view_and_lighting @ 0x60fe40 (compare
+// [orig: Terrain_SetupViewAndLighting @ 0x60fe40 (compare
 //  @ 0x60ff12..0x60ff1a, the Blink force @ 0x60ff31); the tracked bounds
-//  come from terrain_render_visible_sectors @ 0x6090c0 with trackBounds = 1
+//  come from Terrain_RenderVisibleSectors @ 0x6090c0 with trackBounds = 1
 //  @ 0x609263]
 inline bool water_pass_active(bool bounds_valid, float min_height,
                               float max_height, float water_height,

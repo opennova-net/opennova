@@ -10,8 +10,8 @@
 // retail viewport build.
 // [orig: g_CameraFrustumPlanes5 @ 0xA7849C (D-OCC-12 host mapping); the fixed
 //  view matrix @ 0xA7841C; position @ 0xA78364 / flt_27219C0;
-//  Env_FogDistCurrent @ 0x26C681C; Env_WaterHeightFixed @ 0x26C6454; the
-//  force-indoors attribute Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
+//  g_EnvFogDistCurrent @ 0x26C681C; g_EnvWaterHeightFixed @ 0x26C6454; the
+//  force-indoors attribute g_BmsAttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
 
 #include <runtime/renderer/object_lod.h> // object_lod_focal_pixels
 #include <runtime/world/collision.h> // kBlinkIndoorsBit

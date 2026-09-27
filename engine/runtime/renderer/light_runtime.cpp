@@ -144,7 +144,7 @@ EntityLightingUniforms compute_entity_lighting(const WorldLightingBlock &block,
 		// (ground/sky) by the interior's daylight openness, and the
 		// directional color scales by it too — a closed building gets pure
 		// floor/ceiling ambience with no sun
-		// [orig: setup_entity_lighting_and_shader_constants @ 0x5d9a6a..0x5d9c71].
+		// [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d9a6a..0x5d9c71].
 		const float t = interior_daylight;
 		for (int c = 0; c < 3; ++c)
 			out.dir_color[c] = block.dir_color[c] * effect_scale * t;
@@ -168,7 +168,7 @@ EntityLightingState static_row_entity_lighting(bool is_building, int32_t robj_in
 	if (is_building) {
 		// The building batch: its own daylight aux, the lerp on ROBJ 1+
 		// [orig: Terrain_RenderSectorModels @ 0x5c5df2..0x5c5e00;
-		// collect_render_objects_for_batch @ 0x5d9156..0x5d9162].
+		// Render_CollectRenderObjectsForBatch @ 0x5d9156..0x5d9162].
 		out.interior_lerp = robj_index != 0;
 		out.interior_daylight = light_transfer;
 		return out;
@@ -233,7 +233,7 @@ std::array<float, 3> terrain_surface_light(float sun_mask,
                                            const std::array<float, 3> &light,
                                            const std::array<float, 3> &sky) {
 	// (t0.a * c1 + c0) / 2 then MODULATE2X — the halving and doubling cancel
-	// [orig: compile_terrain_pixel_shaders @ 0x605260 shape;
+	// [orig: Terrain_CompilePixelShaders @ 0x605260 shape;
 	//  c0/c1 push @ 0x604420].
 	return {
 		sun_mask * light[0] + sky[0],

@@ -80,11 +80,11 @@ std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const Hos
 	if (cfg.round_time_remaining_ticks < 0) {
 		set_or_create(host, "TimeLeft", text.no_time_limit);
 	} else {
-		// "%i" of g_round_time_remaining / 3720 (62 ticks * 60 s: whole minutes) @0x4fedc5.
+		// "%i" of g_RoundTimeRemaining / 3720 (62 ticks * 60 s: whole minutes) @0x4fedc5.
 		set_or_create(host, "TimeLeft", std::to_string(cfg.round_time_remaining_ticks / 3720));
 	}
 	set_or_create(host, "Password", cfg.password ? text.yes : text.no);
-	// (g_rules_flags & 1) is the tracers-OFF rule bit @0x4feec2.
+	// (g_RulesFlags & 1) is the tracers-OFF rule bit @0x4feec2.
 	set_or_create(host, "Tracers", cfg.tracers ? text.yes : text.no);
 	// Mod = the expansion name, or the literal " " (word_7C11E4) when none @0x4feee8.
 	set_or_create(host, "Mod", cfg.expansion.empty() ? " " : cfg.expansion);

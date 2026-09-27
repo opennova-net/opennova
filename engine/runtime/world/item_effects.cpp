@@ -34,7 +34,7 @@ void push_alias(std::vector<std::string> &out, const char *prefix, long long val
 
 } // namespace
 
-// [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 — pool 1
+// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0 — pool 1
 //  skips attrib 0x42, pools 2/3 skip attrib 0x2, pool 0 is never walked]
 bool item_effect_pool_allows(int kind, uint32_t attrib) {
 	if (kind == kKindItem) {
@@ -96,7 +96,7 @@ bool item_effect_aliases_intersect(const std::vector<std::string> &left,
 // [orig: ItemDef_GetBoneMaskByName @ 0x49ea40; duplicate names all set their
 // bit]; a name matching nothing (or no authored name) still spawns ONE
 // emitter at the entity origin — the spawn_count==0 leg
-// [orig: Entity_SpawnBoneTrailEffect @ 0x43c097 -> submit_effect_descriptor
+// [orig: Entity_SpawnBoneTrailEffect @ 0x43c097 -> Effect_SubmitDescriptor
 //  @ 0x43c0a4 at entity->Position].
 ItemEffectAttachPlan item_effect_attach_plan(const Threedi3di3 &model,
 		const char *userpoint_name) {

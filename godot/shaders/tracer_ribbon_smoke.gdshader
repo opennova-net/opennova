@@ -7,7 +7,7 @@ shader_type spatial;
 // colour (SetFogAndBlendMode mode 0, retail CEffectChannel_RenderRibbon
 // @ 0x5DC85E). The pass flags 0x10520000: lighting off, cull none, z-write
 // off, fog on. The texture's alpha is its palette luminance (retail
-// load_texture_from_archive @ 0x58B980), mipmapped (GTexture_CreateFromPixelData_0
+// Texture_LoadFromArchive @ 0x58B980), mipmapped (GTexture_CreateFromPixelData_0
 // @ 0x6876C0) with wrap addressing.
 render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
 

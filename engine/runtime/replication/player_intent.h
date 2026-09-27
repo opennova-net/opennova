@@ -31,7 +31,7 @@ struct PlayerIntent {
 	                                  // `flags ^= (flags ^ wire) & 0x1C`; the old flags_xor
 	                                  // xor-delta reading was wrong — D-NET-151]
 	uint8_t  equipped_adm_index = 0xFF; // entity+0x2B0 equipped-weapon AdmDef index — ingested
-	                                    // from the extended uplink gated AdmDefs[idx].category
+	                                    // from the extended uplink gated g_AdmDefs[idx].category
 	                                    // < 11, echoed at 0x0A off-16 [orig: @0x4C20A3]
 	                                    // (D-NET-143). 0xFF = none.
 	int8_t   analog_x = 0;            // entity+0x130..+0x132 analog control axes (uplink

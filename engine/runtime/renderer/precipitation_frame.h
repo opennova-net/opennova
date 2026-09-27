@@ -7,8 +7,8 @@
 // triangle build an embedding renderer uploads verbatim. No Godot or
 // simulator dependencies.
 //
-// [orig: render_weather_trail_particles @ 0x5dee10 — gated on
-// Env_RainPctCurrent > 48; camera velocity = the camera's delta since the
+// [orig: Render_WeatherTrailParticles @ 0x5dee10 — gated on
+// g_EnvRainPctCurrent > 48; camera velocity = the camera's delta since the
 // drawer's last call under the same camera mode, else zero (clamped to 0.2),
 // the fall vector = the accumulated per-tick
 // fall since the last draw (clamped to 0.1, then zeroed @ 0x5deee8); snow:
@@ -16,7 +16,7 @@
 // (0, 0.1, 0) + velocity - fall, right = camera right x 0.01, width
 // 1 + dist x 0.1, length 1 + dist x 0.05; per slot with z >= floor one
 // triangle {pos + trail x length (uv 0.5, 0); pos - right x width (0, 1);
-// pos + right x width (1, 1)}, diffuse Env_TerrainLightCombined | 0xFF000000,
+// pos + right x width (1, 1)}, diffuse g_EnvTerrainLightCombined | 0xFF000000,
 // 768-vertex TRIANGLELIST batches under an identity world matrix; textures
 // eraindrp.tga / jsnwflk.tga (WeatherParticle_LoadTextures @ 0x5de840), the
 // one-texture mode word 0x651 (SRCALPHA / INVSRCALPHA, alpha MODULATE, color
@@ -61,7 +61,7 @@ struct PrecipitationDrawState {
 struct PrecipitationDrawFrame {
 	std::vector<float> vertices;
 	int drops = 0;
-	uint32_t color_argb = 0xFF000000u; // Env_TerrainLightCombined | 0xFF000000
+	uint32_t color_argb = 0xFF000000u; // g_EnvTerrainLightCombined | 0xFF000000
 	bool snow = false;                 // selects the texture (jsnwflk vs eraindrp)
 
 	void clear() {

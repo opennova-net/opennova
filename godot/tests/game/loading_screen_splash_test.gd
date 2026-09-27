@@ -4,7 +4,7 @@ extends GutTest
 ## the dismissal edges (fresh key, mouse button, held-button mask — never the
 ## sound), input consumption, the closing background-only frame, and the
 ## coordinator's gate seams + dismissal forward
-## [orig: show_start_mission_splash @ 0x520820; gate @ 0x525d38].
+## [orig: Game_ShowStartMissionSplash @ 0x520820; gate @ 0x525d38].
 
 const LoadingScreen := preload("res://game/ui/loading_screen.gd")
 static var ARROW_FIXTURE := RuntimeFixture.file("newarow1.tga")

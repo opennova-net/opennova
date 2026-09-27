@@ -10,7 +10,7 @@
 // [orig: return value of EntityPool_FindByNetId @ 0x4f0a20; 0xFFFF == not found]
 //
 // Live pools 0..4 = organics / items / buildings / markers / effects
-// [orig: the g_pool_list walk bound @0x431910; pool taxonomy per the
+// [orig: the g_PoolList walk bound @0x431910; pool taxonomy per the
 // EntityPool_Allocate capacity stores @0x442168 (D-NET-207)].
 //
 // The batch-end / validity idiom every spawn-batch decoder shares: a slot id of
@@ -28,7 +28,7 @@ inline constexpr uint16_t kSlotMask = 0xFFF;
 inline constexpr uint16_t kInvalid = 0xFFFF;
 inline constexpr int kPoolCount = 5;
 
-// Pool indices (the g_pool_list order; capacities witnessed per D-NET-207).
+// Pool indices (the g_PoolList order; capacities witnessed per D-NET-207).
 inline constexpr int kPoolOrganic = 0;
 inline constexpr int kPoolItem = 1;
 inline constexpr int kPoolBuilding = 2;

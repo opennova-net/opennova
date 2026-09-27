@@ -127,7 +127,7 @@ void test_stepping() {
 }
 
 // Neutral is GREEN — an un-owned objective is not "no colour". The three
-// values are the g_hudColorTable immediates HUD_InitTeamColorTable writes.
+// values are the g_HUDColors immediates HUD_InitTeamColorTable writes.
 void test_colors() {
 	CHECK(kLfpColorTeam1 == 0xFF80A0FFu, "team 1 = table[3] @0x51f26d");
 	CHECK(kLfpColorTeam2 == 0xFFFF5050u, "team 2 = table[5] @0x51f259");
@@ -154,7 +154,7 @@ void test_offsets() {
 
 // The MARKERS sit on the group's Y (the anchor for the first group); only the
 // STATUS TEXT takes the +12 [orig: the marker pushes the Y accumulator
-// [esp+y] @0x5a2799, seeded from g_hudZonePanelY @0x5a249d; the text draws
+// [esp+y] @0x5a2799, seeded from g_HUDZonePanelY @0x5a249d; the text draws
 // from ebx = y + 0Ch @0x5a25b9..0x5a25bd]. Putting the +12 on the markers
 // drops every icon 12 px below its authored row.
 void test_row_offset() {

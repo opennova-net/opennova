@@ -51,7 +51,7 @@ bool expect(bool cond, const char *msg) {
 // steady state the captures witness (a measured frame rate at or above 16, so
 // frame-pressure floor 1 in all five send samples and S2C 0x79 carries 1).
 // [orig: CNetQuality_UpdateMetrics @0x4C52C0 — sums / 5 @0x4C5555..0x4C557B;
-//  the frame-rate read of g_statsAvgFps @0x4C531B]
+//  the frame-rate read of g_StatsAvgFps @0x4C531B]
 void prime_steady_host_quality(opennova::inmatch::NapiNPServerCtx &ctx) {
 	for (int32_t &sample : ctx.host_quality_window.bandwidth) sample = 1;
 	ctx.stats_avg_fps = 62;
@@ -2640,7 +2640,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 
 	// The two reply handlers clear their independent silence counters at
 	// dispatch, not after validating body contents. In particular, retail's
-	// validate_time_sync performs this store before the shape/sequence/timing
+	// NapiNPServerMsg_ValidateTimeSync performs this store before the shape/sequence/timing
 	// gates, so malformed or stale 0x08 traffic cannot advance the 1,1,2,2 phase
 	// but still proves the peer is answering. The 0x1C body is ignored outright.
 	auto &reply_state = ctx.np_protocol.connection_list.front().reply;
@@ -4258,7 +4258,7 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 // ordinary 62 Hz clock and network maintenance continue, while the World
 // systems stay frozen through the boundary that changes 1 -> 0. Gameplay
 // resumes on the following frame.
-// [orig: reset_round_counters @0x516C8D; Server_TickUpdate
+// [orig: Server_ResetRoundCounters @0x516C8D; Server_TickUpdate
 // @0x51D8BD and @0x51DC20..0x51DC33]
 bool check_preround_delay_phase_boundary() {
 	struct CountingSystem final : opennova::world::ISystem {

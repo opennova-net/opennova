@@ -226,7 +226,7 @@ int32_t local_player_scope_zoom_floor(const World &world, const ScopeZoomLimits 
 bool local_player_adjust_scope_zoom(World &world, LocalPlayerWeapon &w, const PlayerViewState &v,
                                     WeaponSlotState &slot, const ScopeZoomLimits &limits,
                                     int32_t delta) {
-    // [orig: Player_AdjustWeaponElevation @0x4dbdf0 -- Player_CanFireWeapon
+    // [orig: Player_AdjustWeaponElevation @0x4dbdf0 -- Player_IsOpticalViewVisible
     //  @0x4dbdfc, EquippedSlot @0x4dbe07, Def @0x4dbe0e]
     if (!w.active || !local_player_scope_view_visible(world, w, v)) return false;
     const int32_t maximum = static_cast<int32_t>(w.scope_max_mag);
@@ -268,10 +268,10 @@ WeaponCycleRoute local_player_weapon_cycle_route(World &world, LocalPlayerWeapon
                                                  const ScopeZoomLimits &limits,
                                                  int32_t direction) {
     // [orig: Input_HandleActionBinding_0 case 0xD4 @0x4e130c / 0xD6 @0x4e1364:
-    //  g_binocularsViewActive || g_fireChargeStartTick -> return]
+    //  g_BinocularsViewActive || g_FireChargeStartTick -> return]
     if (v.binoculars_view_active || w.power_throw_start_tick != 0)
         return WeaponCycleRoute::kRefused;
-    // EquippedSlot && Def && Def+0x98 != Def+0x90 && Player_CanFireWeapon()
+    // EquippedSlot && Def && Def+0x98 != Def+0x90 && Player_IsOpticalViewVisible()
     // @0x4e1312..0x4e1333 / @0x4e136a..0x4e138b
     WeaponSlotState *slot = active_local_weapon_slot(world, w);
     if (w.active && slot != nullptr &&
@@ -313,7 +313,7 @@ int32_t sighted_fov_target(int32_t zoom) {
 
 // Despite its original name, this is the optical-view gate. Its target writes
 // run at each body/weapon/HUD/render query, including frames with no simulation tick.
-// [orig: Player_CanFireWeapon @0x5CF780..0x5CF8D5]
+// [orig: Player_IsOpticalViewVisible @0x5CF780..0x5CF8D5]
 bool scope_view_visible(World &world, const LocalPlayerWeapon &w, const PlayerViewState &v,
                         const Entity &player, WeaponSlotState &slot) {
     if (!w.active || (player.mounted && is_vehicle_control_seat(player.mount_type)))
@@ -322,7 +322,7 @@ bool scope_view_visible(World &world, const LocalPlayerWeapon &w, const PlayerVi
     const bool no_card = (w.def.flags & weapon_flag::kNoCardSwitch) != 0 && !force;
     if (reloading_card_switch_weapon(w, &slot) && !no_card) return false;
     // The PROMOTED byte [orig: Player_IsEquippedWeaponScoped reads
-    // g_weaponScopeActive], never the target or the ease.
+    // g_WeaponScopeActive], never the target or the ease.
     const bool active = player_view_scope_settled(v);
     const bool scoped = active && (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0;
     const bool sighted = active && (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
@@ -384,21 +384,21 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
     // view/definition gates. [orig: Player_ToggleWeaponScope @0x4df0c0]
     if (!weapon_fsm_scope_toggle_allowed(w.def, active_slot)) return false;
     // The toggle branches on the PROMOTED byte, not the target: a promoted
-    // sight disengages, anything else engages [orig: the g_weaponScopeActive
+    // sight disengages, anything else engages [orig: the g_WeaponScopeActive
     // branch @0x4df17f].
     const bool promoted = player_view_scope_settled(v);
     // ForceScoped pins the raised sight: un-scoping is refused once promoted
-    // [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @0x4df12d].
+    // [orig: (flags1 & 0x20000000) == 0 || !g_WeaponScopeActive @0x4df12d].
     if (promoted && (w.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0) return false;
     // Inset optics cannot be raised under NVG. Non-Inset sights retain the
     // original independent behavior.
     if (!promoted && v.nvg_active && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0)
         return false;
     // Every toggle is refused while the previous ease runs
-    // [orig: (flags & 3) && !g_fpCameraInterp.activeFlag @0x4df177].
+    // [orig: (flags & 3) && !g_FpCameraInterp.activeFlag @0x4df177].
     if (player_view_scope_ease_active(v)) return false;
     // Scope-UP is refused while a movement key is held on a Scoped weapon
-    // [orig: the engage branch's g_movementKeyHeld && (flags & 1) -> return @0x4df29c].
+    // [orig: the engage branch's g_MovementKeyHeld && (flags & 1) -> return @0x4df29c].
     if (!promoted && player_view_scope_up_blocked(v, w.def.flags)) return false;
     // The toggle latches this ease's step count (7 for Inset weapons, else 15;
     // 1 on the hipfire-return leg) [orig: Setup @0x4df1b3..0x4df36e].
@@ -407,8 +407,8 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
     // The engage leg forces the promoted byte to 1 around its seat-flag
     // queries, so an OnlyScoped AbsorbPitch weapon levels the body pitch as
     // the sight comes up; the tube elevation then rides the offset alone.
-    // [orig: g_weaponScopeActive = 1 @0x4DF2A2; AbsorbPitch query @0x4DF302
-    //  -> Pitch = 0 @0x4DF314; g_weaponScopeActive = 0 @0x4DF31D]
+    // [orig: g_WeaponScopeActive = 1 @0x4DF2A2; AbsorbPitch query @0x4DF302
+    //  -> Pitch = 0 @0x4DF314; g_WeaponScopeActive = 0 @0x4DF31D]
     if (!promoted && (w.def.flags & DEF_WEAPON_FLAG_ABSORBPITCH) != 0)
         local_player_level_pitch(world);
     if (!promoted)
@@ -424,7 +424,7 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
     if (local == nullptr) return false;
     // Retail refuses binoculars while a PowerThrow charge is live. Allowing the
     // view to rise would suppress held weapon input and turn the charge into an
-    // unintended release [orig: g_fireChargeStartTick @0xB76800; action 26 gate].
+    // unintended release [orig: g_FireChargeStartTick @0xB76800; action 26 gate].
     if (w.power_throw_start_tick != 0) return false;
     // An active scope also blocks binoculars in a gunner parent slot.
     if (v.scope_engaged && local->mounted && local->mount_type == SeatType::Gunner)
@@ -532,7 +532,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     }
     v.mount = mount;
     // The remaining arbiter inputs [orig: Render_ProcessMainSceneFrame
-    // @0x5ca1f4..0x5ca24b; see player_view.h]. The two g_rules_flags bits are
+    // @0x5ca1f4..0x5ca24b; see player_view.h]. The two g_RulesFlags bits are
     // admin `set` commands with no wire fold yet: carried false.
     v.local_dead = s.local_dead;
     v.death_screen_active = s.death_screen_active;
@@ -542,7 +542,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     v.on_foot = !e->mounted;
     v.in_session = s.in_session;
     v.view_tick = world->logic_tick;
-    // The death stamp (retail: g_camera_lerp_start_tick = current_tick on the
+    // The death stamp (retail: g_CameraLerpStartTick = current_tick on the
     // local death path @0x4b4d00 / the 0x13 self record @0x42ec0f): the local
     // dead EDGE.
     if (v.local_dead && !t.camera_local_dead_seen) v.death_cam.start_tick = world->logic_tick;
@@ -774,7 +774,7 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     out.mounted = local != nullptr && local->mounted;
     fill_hud_context(world, local, w, out);
     // The RESOLVED camera mode and the chase preference behind it
-    // [orig: g_camera_mode @0xA890C8; g_camera_third_person_selected @0xA860DF].
+    // [orig: g_CameraMode @0xA890C8; g_CameraThirdPersonSelected @0xA860DF].
     out.third_person = v.third_person;
     out.third_person_selected = v.third_person_selected;
     // The resolved mode word (0 first person, 1 chase, 4 the death lerp camera).
@@ -953,7 +953,7 @@ bool compose_ground_leg(World &world, const AiEntity &p, const Entity &e,
 }
 
 // The Inset scene's own slot offsets on its composed camera.
-// [orig: Render_RadarCompassOverlay @0x5C9841..0x5C9903]
+// [orig: Render_WeaponInsetScene @0x5C9841..0x5C9903]
 void apply_inset_slot_offsets(World &world, LocalPlayerWeapon &w, LocalPlayerViewFrame &out) {
     const WeaponSlotState *slot = active_local_weapon_slot(world, w);
     constexpr double degrees_per_bam = 360.0 / 4294967296.0;
@@ -1019,7 +1019,7 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
     // block @0x43803C..0x4380DF, the >> 6 applies @0x4380B0..0x4380D9]; the
     // chase applies the STATELESS sin/cos chain over the raw counter and the
     // engine tick [orig: the mode-1 block @0x438939..0x4389E5]; the mode-4
-    // lerp takes neither. Both add to the BAM HEADING (`add g_view_rot_yaw`
+    // lerp takes neither. Both add to the BAM HEADING (`add g_ViewRotYaw`
     // @0x4380D9 / @0x43898B), so the mission yaw (90 - heading) takes the
     // negated delta.
     int32_t d_yaw = 0;
@@ -1053,7 +1053,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, PlayerViewState
     out.inset_camera = out.camera;
     if (out.inset_scope_active) {
         // The Inset scene composes once more — a second shake step — then
-        // takes its own slot offsets [orig: Render_RadarCompassOverlay
+        // takes its own slot offsets [orig: Render_WeaponInsetScene
         //  @0x5C9841].
         bool inset_mounted = false;
         local_player_camera_compose(*world, v, t, out.inset_camera, inset_mounted);

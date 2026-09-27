@@ -157,7 +157,7 @@ func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> 
 			"saving slot 0 does not normalize another slot's class bytes")
 	assert_false(FileAccess.file_exists("%s.tmp.%d" % [path, OS.get_process_id()]),
 			"the atomic temp sibling is renamed away")
-	# [orig: save_player_info_from_dialog @0x55EE3F-0x55EE6D class loop,
+	# [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EE6D class loop,
 	#  @0x55EE93-0x55EF38 selected-side avatar fields]
 
 
@@ -219,7 +219,7 @@ func test_an_unlatched_team_commits_no_page() -> void:
 # side's page as consecutive (name, primary, secondary, flags) entries (knife first,
 # then the class-5 medpack, the three category picks, three grenade slots) and retail
 # writes that block into the side's CLASS page before PlayerProfile_SaveToFiles.
-# retail: serialize_weapon_loadout @ 0x55e4b0; see docs/playerinfo/avatars-re.md.
+# retail: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0; see docs/playerinfo/avatars-re.md.
 func test_player_info_accept_writes_the_edited_sides_class_page() -> void:
 	var path := _write_weapon_sav()
 	var kit := [

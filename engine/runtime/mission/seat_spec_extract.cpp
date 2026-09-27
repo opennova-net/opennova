@@ -214,7 +214,7 @@ void extract_attachments(const DefItemDef &def, const Threedi3di3 *model,
 		// The authored anchor resolves its model userpoint case-insensitively
 		// (whole name), first match; a missing anchor copies the parent root
 		// (bone 0, zero local). [orig: docs/world/itemdef-re.md
-		// §child-emplacements; build_bone_attachment_matrix @ 0x56C630]
+		// §child-emplacements; Bone_BuildAttachmentMatrix @ 0x56C630]
 		if (model != nullptr && model->user_points != nullptr) {
 			const std::string wanted = trimmed(row.userpoint);
 			for (size_t u = 0; u < model->user_point_count; ++u) {

@@ -296,7 +296,7 @@ bool compose_terrain_scorches(
 		// bilinear on the level nearest the pixel footprint.
 		// [orig: Terrain_LoadScorchTextures @ 0x604CE0 via
 		// Texture_LoadByNameWithChannel flags @ 0x58B728; flag decode
-		// apply_texture_stages @ 0x68084C..0x680870]
+		// CGfxShader_ApplyTextureStages @ 0x68084C..0x680870]
 		const float texels_per_pixel = static_cast<float>(std::max(
 				texture.mips.front().width / width,
 				texture.mips.front().height / height));

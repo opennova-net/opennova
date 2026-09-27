@@ -142,7 +142,7 @@ uint64_t DoorSystem::passable_sections(const Entity &entity) const {
     return mask;
 }
 
-// [orig: build_bone_transforms @0x4E3070; BoneCallback_AnimatedBones_World @0x4E3180]
+// [orig: BoneCallback_BuildBoneTransforms @0x4E3070; BoneCallback_AnimatedBones_World @0x4E3180]
 int DoorSystem::write_phases(const Entity &entity, int32_t *out, int capacity) const {
     if (!entity.door_motion || out == nullptr) return 0;
     const int count = std::max(0, std::min<int>(entity.door_count, capacity));

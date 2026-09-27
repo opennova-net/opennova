@@ -57,7 +57,7 @@
 namespace opennova::inmatch {
 
 // The server-info VarList walk for EXP_FANFARE (u16, 0 when absent)
-// [orig: parse_server_session_variables @0x520440, store @0x520478].
+// [orig: Client_ParseServerSessionVariables @0x520440, store @0x520478].
 uint16_t session_vars_exp_fanfare(const uint8_t *data, size_t len);
 
 enum class TerrainTilState : uint8_t {
@@ -130,11 +130,11 @@ public:
 		bool gameplay_hold_rearmed = false;
 		// S2C 0x61 — the per-player TICK SEED (not an SCRK exchange). The client's whole
 		// network-role clock is anchored to it: retail stores it into BOTH currentTick and
-		// g_lastKeepaliveTick, and the host stamps the same value into the player slot's
+		// g_LastKeepaliveTick, and the host stamps the same value into the player slot's
 		// fire-freshness expiration. `set` distinguishes "no 0x61 this poll" from a
 		// witnessed seed of ZERO (the round-end/disarm form ships four zero bytes).
 		// [orig: dispatch row 0x61 (table @0x82ae28) -> NapiNPClientMsg_HandleSessionKey
-		//  @0x4297c0: currentTick @0xA8229C <- @0x4297f8, g_lastKeepaliveTick @0xA822A0
+		//  @0x4297c0: g_ClientCurrentTick @0xA8229C <- @0x4297f8, g_LastKeepaliveTick @0xA822A0
 		//  <- @0x4297fd; a short body seeds 0 @0x4297eb]
 		bool tick_seed_set = false;
 		uint32_t tick_seed = 0;
@@ -143,7 +143,7 @@ public:
 		std::vector<WeaponLoadout> loadout_grants;
 		// S2C 0x0F — the authority's per-ammo-class pool image (serverPlayer+88664),
 		// the fixed 128-dword span at body offset 23 that retail copies straight into
-		// g_localAmmoPools before re-drawing every clip. `set` marks a 0x0F seen this
+		// g_LocalAmmoPools before re-drawing every clip. `set` marks a 0x0F seen this
 		// poll (a later one in the same poll wins, as the last handler run would).
 		// [orig: NapiNPClientMsg_0x00F @0x42e324..0x42e34a -> @0x42e424]
 		bool ammo_pools_set = false;
@@ -252,7 +252,7 @@ public:
 	// The shell's kit for the retail loadout-submission pair the world-stream terminator (S2C 0x1A)
 	// releases. Retail sends the SAME per-side profile kit twice: first with the fixed Primary-key
 	// slot 195 (pre-Player_InitPlayer, the empty slot table leaves the argument unresolved), then
-	// with the live g_currentWeaponSlot (the equipped combo after the spawn fill). The wire team
+	// with the live g_CurrentWeaponSlot (the equipped combo after the spawn fill). The wire team
 	// byte is NOT part of this seam — it is latched from the host's S2C 0x04 tail byte, exactly
 	// like retail's byte_A85B48. Unset keeps the capture-default kit, so headless callers (ctests,
 	// seed_in_match) preserve today's auto behavior byte-for-byte.
@@ -264,14 +264,14 @@ public:
 	// [orig: WeaponLoadout_ApplyFromBuffer @0x565d94].
 	struct LoadoutKit {
 		uint8_t player_class = 8;    // wire byte 1 — the profile's class for the assigned side (5..9)
-		int32_t equipped_combo = -1; // g_currentWeaponSlot after the spawn fill; < 0 = none (195)
+		int32_t equipped_combo = -1; // g_CurrentWeaponSlot after the spawn fill; < 0 = none (195)
 		std::vector<LoadoutSubmitEntry> rows; // ADM-resolved kit tuples (unknown names pre-skipped)
 
 		// ONE side block of the player profile: that side's CLASS byte and the kit page
 		// the class selects. Retail keeps BOTH sides resident and re-reads the side the
 		// wire team byte names every time it submits FROM THE PROFILE — at join
 		// [orig: Game_StartMission @0x525767: esi = (team == 1 || team == 3)
-		//  ? &g_charSelClass[slot*0x1080C] : &byte_2559136[slot*0x1080C]; the class is
+		//  ? &g_CharSelClass[slot*0x1080C] : &byte_2559136[slot*0x1080C]; the class is
 		//  *(u8*)esi and the page is esi + {6,0x806,0x1006,0x1806,0x2006}[class-5]] and
 		// again on the S2C 0x50 team assign [orig: NapiNPClientMsg_TeamAssign
 		//  @0x431a35..0x431a9a]. ONE integer selects BOTH the wire class byte and the kit
@@ -322,7 +322,7 @@ public:
 	// (D-NET-166): at JOIN-build time the joiner CRCs the loose
 	// expansion/<SUS2>/version.txt under this root, exactly the file retail's
 	// pre-connect expansion switch had already checksummed into
-	// g_expansion_checksum [orig: Expansion_LoadAssets @0x4a4885;
+	// g_ExpansionChecksum [orig: Expansion_LoadAssets @0x4a4885;
 	// NapiNP_WriteClientAuthPayload @0x42a287]. Unset (empty) keeps the golden
 	// "0" — the no-version.txt install every capture used.
 	void set_expansion_version_root(std::string game_root) {
@@ -389,7 +389,7 @@ public:
 	// Valid only after the initial 0x1A pair went out (retail's armory exists only
 	// in-world); returns an empty vector otherwise. [orig: WeaponLoadout_ApplyFromBuffer
 	// @0x565d94 -> NetPacket_SendLoadoutSubmit(entity Team, armory class, buffer,
-	// g_currentWeaponSlot); a non-authority client resets its slot pool first and the
+	// g_CurrentWeaponSlot); a non-authority client resets its slot pool first and the
 	// S2C 0x5A grant refills it]
 	std::vector<uint8_t> frame_loadout_resubmit();
 	// Semantic-message form for ClientRuntime's shared send boundary. This performs the same stage
@@ -531,7 +531,7 @@ public:
 	// replacement, its answer to our own leave) is the third cause, handled like (1).
 	//
 	// Neither raises an in-world dialog in retail: the disconnect handler clears the
-	// session strings and maps the reason code onto g_mission_exit_reason / an error
+	// session strings and maps the reason code onto g_MissionExitReason / an error
 	// screen, i.e. it EXITS THE MISSION with a reason. Our shell's analog is
 	// return-to-menu with the reason surfaced the way a join failure is.
 	// [orig: the punt path Server_LogCRCMismatchPunt @0x517ed0 ->
@@ -556,13 +556,13 @@ public:
 	// stage a stalled join is parked in). Not a wire surface.
 	const char *post_auth_stage_name() const;
 	bool in_match() const { return phase_ == Phase::InMatch; }
-	// The authenticated session (retail g_napi_np_ctx.is_in_session): Driving
+	// The authenticated session (retail g_NapiNPCtx.is_in_session): Driving
 	// or InMatch — a dead player re-entering the deploy flow is still in it.
 	bool in_session() const { return phase_ == Phase::Driving || phase_ == Phase::InMatch; }
 	// The host VarList's EXP_FANFARE u16 (lo byte = the KILLTONE threshold, hi
 	// byte = the HEADSHOTTONE threshold) landed from the reassembled S2C 0x60
-	// server-info transfer [orig: parse_server_session_variables @0x520440,
-	// the store @0x520478 -> g_sessionvar_exp_fanfare @0x24d5a10]. 0 = unset.
+	// server-info transfer [orig: Client_ParseServerSessionVariables @0x520440,
+	// the store @0x520478 -> g_SessionVarExpFanfare @0x24d5a10]. 0 = unset.
 	uint16_t exp_fanfare() const { return exp_fanfare_; }
 	bool has_self_handle() const { return has_self_handle_; }
 	uint16_t self_handle() const { return self_handle_; } // the wire handle H
@@ -581,7 +581,7 @@ public:
 	// [orig: NapiNPClientMsg_HandleClassAllowMask @0x42d540]
 	uint16_t class_allow_mask() const { return class_allow_mask_; }
 	// This joiner's own roster slot id, latched from S2C 0x04 body byte 17 (retail's
-	// g_local_player_slot_id; the host's mirror is its per-player record slot+20
+	// g_LocalPlayerSlotId; the host's mirror is its per-player record slot+20
 	// [orig: NetPacket_WriteSlotAssignment @0x502b30]). The fired-round hit_part word
 	// carries it in bits 9..15, so 0 attributes our shots to the HOST's own slot.
 	uint8_t local_player_slot() const { return local_player_slot_; }
@@ -746,7 +746,7 @@ private:
 	uint8_t local_player_slot_ = 0; // S2C 0x04 body byte 17 (see local_player_slot())
 	// Inclusive final roster slot for the S2C 0x46 queue-ack walk, supplied by
 	// the same S2C 0x04 body at byte 18. A value of 4 walks slots 0..4.
-	// [orig: g_max_player_slots read at NapiNPClientMsg_PlayerSync @0x431370]
+	// [orig: g_MaxPlayerSlots read at NapiNPClientMsg_PlayerSync @0x431370]
 	uint8_t max_player_slot_ = 0;
 	// Client net-frame counter echoed as the padding echo's third dword. Retail increments its
 	// global once per client net pump and never resets it for a rejoin.

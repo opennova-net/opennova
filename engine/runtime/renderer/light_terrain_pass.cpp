@@ -1,7 +1,7 @@
 // The terrain leg of the dynamic light pool: the per-patch collect + gate +
 // pixel-constant build, the projection contract, and the procedural textures
 // the light passes sample. Witness map in light_terrain_pass.h.
-// [orig: render_terrain_sector_batch @0x6095f9..0x6098bc;
+// [orig: Terrain_RenderSectorBatch @0x6095f9..0x6098bc;
 //  Light_SetupTerrainProjectedPassPS @0x5aab30; Light_SetupTerrainProjectedPass
 //  @0x5aa830; Lighting_InitTextures @0x5a94f0;
 //  Texture_GenerateProceduralFalloffTexture @0x5a92c0;
@@ -218,7 +218,7 @@ TerrainLightPatchBounds terrain_patch_light_bounds(const float aabb_min[3],
 
 namespace opennova::renderer {
 
-// [orig: collect_nearby_zones_by_aabb @0x5aa37a — ((d * d + 0x8000) >> 16)
+// [orig: Light_CollectNearbyZonesByAABB @0x5aa37a — ((d * d + 0x8000) >> 16)
 //  per axis, 16.16 squared distance in world^2] — the same metric the object
 // pass sorts by (light_scene.cpp); both live in light_scene_internal.h.
 using detail::axis_distance_term;
@@ -236,13 +236,13 @@ size_t LightScene::collect_terrain_pass_rows(
 		out[p].count = 0;
 	}
 	// The whole light leg is gated off with the pixel-shader terrain path
-	// [orig: PolyTrn_UsePixelShaderPath == 0 @0x6095e4] and by the render
+	// [orig: g_PolyTrnUsePixelShaderPath == 0 @0x6095e4] and by the render
 	// mode that skips the per-light loop [orig: dword_319FB84 @0x60983f].
 	if (!inputs.pixel_shader_path || inputs.light_pass_disabled) {
 		return 0;
 	}
 	// One pass snapshots the collection inputs in SLOT ORDER — the order the
-	// witnessed first-16 cap depends on [orig: collect_nearby_zones_by_aabb
+	// witnessed first-16 cap depends on [orig: Light_CollectNearbyZonesByAABB
 	// @0x5aa250 scans the table forward; hidden flag bit 2 skipped @0x5aa2a4].
 	struct CompactSlot {
 		LightHandle handle;

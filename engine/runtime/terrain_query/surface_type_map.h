@@ -44,8 +44,8 @@ struct SurfaceTypeMap {
 	int32_t width = 0;
 	int32_t height = 0;
 	// 16x16 sector grid, row-major ints (0 = empty, 1..4 = quadrant), plus the
-	// grid origin in 512-unit sector coordinates [orig: Terrain_SectorGrid
-	// @ 0x319fc10, Terrain_SectorOriginY/X @ 0x319b2e0/0x319b2e4].
+	// grid origin in 512-unit sector coordinates [orig: g_TerrainSectorGrid
+	// @ 0x319fc10, g_TerrainSectorOriginY/X @ 0x319b2e0/0x319b2e4].
 	const int *sector_grid = nullptr;
 	int32_t origin_x = 0;
 	int32_t origin_y = 0;

@@ -205,7 +205,7 @@ bool run_team_assign_relatches_self_and_resubmits() {
 	if (!expect(submitted.player_class == 6,
 			"0x50-self: the re-submission carries the applied kit's class"))
 		return false;
-	// [orig: @0x431a9e passes 195 RAW, not the live g_currentWeaponSlot (212 here)]
+	// [orig: @0x431a9e passes 195 RAW, not the live g_CurrentWeaponSlot (212 here)]
 	if (!expect(submitted.weapon_slot_index == 195,
 			"0x50-self: the re-submission uses slot 195 raw, not the equipped combo"))
 		return false;
@@ -669,7 +669,7 @@ bool run_entity_death_notify_reaches_the_sim() {
 			"0x13: no death surfaced before the notify"))
 		return false;
 
-	// The 4-byte notify [orig: BuildDeathNotifyPayload @0x5036e0].
+	// The 4-byte notify [orig: NetPacket_BuildDeathNotifyPayload @0x5036e0].
 	std::vector<uint8_t> body13;
 	body13.push_back(static_cast<uint8_t>(kBarrel & 0xFFu));
 	body13.push_back(static_cast<uint8_t>(kBarrel >> 8));

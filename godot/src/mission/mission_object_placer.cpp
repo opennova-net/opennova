@@ -1203,7 +1203,7 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 // D-PLAYERINFO-1 (FIXED; the row keeps this note): with a
 // populated registry retail's client 0x0C fold re-stamps an UNKNOWN id to the
 // first combo of the entity's team side (NapiNPClientMsg 0x0C @0x42eae4..
-// @0x42eb03 -> lookup_entity_slot_and_pack_entry side = team != 1) — the
+// @0x42eb03 -> EntitySlot_LookupAndPackEntry side = team != 1) — the
 // reimpl has no registry validation yet (D-NET-137) and shows the item model.
 Ref<PlayerVisualSpec> MissionObjectPlacer::resolve_player_visual_spec(
 		int p_runtime_type_id, int p_character_id) {
@@ -1559,7 +1559,7 @@ void MissionObjectPlacer::_configure_item_lighting(ObjectModel *p_model,
 	// pushes its own ItemDef+0x218 daylight and submits with 0x40; the rigid
 	// collector marks ROBJ 1+ as interior-lighting entries while ROBJ 0 stays
 	// the exterior shell -- portal or not (retail Terrain_RenderSectorModels
-	// @0x5c5df2..0x5c5e00, push 40h @0x5c5f1f; collect_render_objects_for_batch
+	// @0x5c5df2..0x5c5e00, push 40h @0x5c5f1f; Render_CollectRenderObjectsForBatch
 	// @0x5d9156..0x5d9162; the rule is renderer::static_row_entity_lighting).
 	if (item_db_->get_item_type(p_item_id) != ItemDatabase::TYPE_BUILDING) {
 		return;

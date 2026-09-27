@@ -28,7 +28,7 @@ namespace opennova::env {
 
 // The world lighting/fog record stamped onto lit materials — the engine
 // mirror of the shell's EnvLightValues (ADR 0017 typed record)
-// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0;
+// [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0;
 //  CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090;
 //  ColorSrcGlobalGain bind @ 0x58e05d].
 struct WorldLightValues {
@@ -53,9 +53,9 @@ struct EnvShaderGlobals {
 	Rgb sun_light;
 	Rgb sky_ambient;
 	// The RAW light block: the environment cube's rotated specular sphere is
-	// lit by Env_LightBlock whatever the terrain ramps or the thermal grey
+	// lit by g_EnvLightBlock whatever the terrain ramps or the thermal grey
 	// select [orig: the cube face callback EnvCube_RenderFaceCallback
-	// pushes Env_LightBlock @ 0x5c3863 into render_sky_mesh @ 0x5ac680].
+	// pushes g_EnvLightBlock @ 0x5c3863 into Render_SkyMesh @ 0x5ac680].
 	Rgb light_block;
 	Vec3 sun_direction{};
 	Rgb fog_color;
@@ -66,7 +66,7 @@ struct EnvShaderGlobals {
 
 // The fog state selected for one rendered scene pass. Retail re-applies this
 // block for every pass; the underwater branch is derived from water murk and
-// Env_WaterColorLit without mutating the authored/current weather state.
+// g_EnvWaterColorLit without mutating the authored/current weather state.
 // [orig: Environment_ApplyFogAndAmbient @ 0x57e440]
 struct SceneFogValues {
 	Rgb color;
@@ -78,8 +78,8 @@ struct SceneFogValues {
 // The env-derived terrain lighting + fog uniforms used by terrain.gdshader:
 // c1 <- the light block, c0 <- the sky block — the witnessed terrain PS
 // constants (fill/ground does not reach the terrain surface)
-// [orig: terrain_setup_lighting_and_shader @ 0x604420;
-//  init_terrain_lighting_color_ramps @ 0x604ee0].
+// [orig: Terrain_SetupLightingAndShader @ 0x604420;
+//  Terrain_InitLightingColorRamps @ 0x604ee0].
 struct TerrainEnvUniforms {
 	Rgb sun_light;
 	Rgb sky_ambient;
@@ -114,7 +114,7 @@ public:
 	// The overcast table: the .trn + overcast.def keyframes the overcast blend
 	// cross-fades the .env colors against (env #16) [orig:
 	// Environment_LoadTimeOfDayConfig @ 0x57db30 — the first parse pass into
-	// Env_TrnSnapshotTable @ 0x26c7414]. Null = no table (a clear-weather
+	// g_EnvTrnSnapshotTable @ 0x26c7414]. Null = no table (a clear-weather
 	// mission renders the .env table alone).
 	void set_overcast_config(const Config *overcast);
 	// The weather view this state reads its scalars, fog type, precipitation
@@ -148,7 +148,7 @@ public:
 	const Config *config() const { return config_; }
 	bool is_loaded() const { return config_ != nullptr && loaded_; }
 	// True once update_tod found a .env keyframe table — retail's
-	// Env_EnvSnapshotCount != 0, the gate on the per-tick keyframe write into
+	// g_EnvEnvSnapshotCount != 0, the gate on the per-tick keyframe write into
 	// the eleven TOD blocks [orig: Environment_ComputeTimeOfDayColors
 	// @ 0x57de8a].
 	bool has_tod_keyframes() const { return tod_valid_; }
@@ -161,7 +161,7 @@ public:
 	// 06:00/18:45 sun-vs-moon phase select, keyframe interpolation of BOTH
 	// tables cross-faded by the weather's overcast blend [orig:
 	// Environment_ComputeTimeOfDayColors @ 0x57de40 -> Environment_LerpKeyframeSet
-	// @ 0x57c3b0 over (env, trn, clamp(Env_OvercastBlend))], the
+	// @ 0x57c3b0 over (env, trn, clamp(g_EnvOvercastBlend))], the
 	// standalone-owner raw color writes vs weather-driven target-only refresh,
 	// the fog/skyfog undoubled-blend-then-double derivation, and the
 	// generation bump. The shell decides afterwards whether to push shader
@@ -192,10 +192,10 @@ public:
 	// owner pushes it through set_time_of_day each tick.
 	void sync_clock_from_weather();
 	int quake_ticks() const;
-	float rain_current() const;          // Env_RainPctCurrent / 65536
-	float overcast_blend() const;        // Env_OvercastBlend / 65536
+	float rain_current() const;          // g_EnvRainPctCurrent / 65536
+	float overcast_blend() const;        // g_EnvOvercastBlend / 65536
 	int precipitation_kind() const;      // 0 rain, 1 snow
-	bool raining() const;                // Env_RainPctCurrent > 48
+	bool raining() const;                // g_EnvRainPctCurrent > 48
 
 	// --- HHMM conversion statics ------------------------------------------
 
@@ -253,8 +253,8 @@ public:
 	// argument (build_terrain_uniforms); water, the combined terrain light,
 	// particles, scars and the slot drape read the blocks raw [orig:
 	// CTerrainRenderer_BuildLightingShaderConstants @ 0x5c820b..0x5c82e9;
-	// Render_TerrainScene @ 0x610d16..0x610e36; Env_TerrainLightCombined
-	// @ 0x57f0d5 and Env_WaterColorLit @ 0x57f177 from the raw blocks;
+	// Render_TerrainScene @ 0x610d16..0x610e36; g_EnvTerrainLightCombined
+	// @ 0x57f0d5 and g_EnvWaterColorLit @ 0x57f177 from the raw blocks;
 	// RenderSlot_DrawSilhouetteDrape @ 0x5d5f66..0x5d5f6d].
 	Rgb sun_light() const { return sun_light_; }
 	Rgb fill_light() const { return fill_light_; }
@@ -278,7 +278,7 @@ public:
 	// water surface renders with [orig: @ 0x5ca78b; the `jle` @ 0x5ca790
 	// keeps the water color at exact equality]. No blink letter reaches the beauty clear
 	// (the black @ 0x5c1474 / skyfog @ 0x5c1597 clear is the water mirror's,
-	// render_main_scene; see water_mirror_clear_color).
+	// Render_MainScene; see water_mirror_clear_color).
 	// Every branch serves RENDER-SPACE (x2-gained) colors for the
 	// modulate2x-path device Clear (D-RMAT-7).
 	Rgb frame_clear_color_for(bool eye_above_water) const;
@@ -289,8 +289,8 @@ public:
 	Rgb nvg_scene_clear_color(bool eye_above_water) const;
 	// The water mirror's clear: the prerender picks black, then the skyfog on
 	// its outdoors path, the path the indoors blink letter (0x2) turns off
-	// [orig: render_main_scene @ 0x5c1342..0x5c1353 (the outdoors flag),
-	// @ 0x5c1474 (black), @ 0x5c1597 (Env_SkyfogBlock)], and the RTT select
+	// [orig: Render_MainScene @ 0x5c1342..0x5c1353 (the outdoors flag),
+	// @ 0x5c1474 (black), @ 0x5c1597 (g_EnvSkyfogBlock)], and the RTT select
 	// clears colour and depth with it [orig: GTexRT_Select @ 0x67fcd2]. No
 	// thermal, waterline or NVG leg reaches it; under the letter the mirror
 	// draws no sky or terrain either, so the water reflects this black.
@@ -304,7 +304,7 @@ public:
 	Rgb sky_bright() const { return sky_bright_rt_; }
 	Rgb sky_highlight() const { return sky_highlight_rt_; }
 	// Cloud-pass color blocks (sky dome VS constants c24/c27/c26)
-	// [orig: render_skybox uploads @ 0x57934a..0x57936f].
+	// [orig: Render_Skybox uploads @ 0x57934a..0x57936f].
 	Rgb cloud_base() const { return cloud_base_rt_; }
 	Rgb cloud_highlight() const { return cloud_highlight_rt_; }
 	Rgb cloud_edge() const { return cloud_edge_rt_; }
@@ -357,7 +357,7 @@ public:
 	// dark). [orig: PolyTrn_SetTerrainTintColors @ 0x605e20;
 	//  PolyTrn_RenderTile @ 0x60df0d]
 	Rgb tile_overlay_tint() const;
-	// The packed Env_TerrainColorRecip the loaded terrain_rgb parses to (the
+	// The packed g_EnvTerrainColorRecip the loaded terrain_rgb parses to (the
 	// 0x808080 boot default without a config) — the terrain light pass's
 	// per-channel factor source, bytes x 1/128 at the consumer.
 	// [orig: TimeOfDay_ParseProperty @ 0x57ca60..0x57cae3;
@@ -388,7 +388,7 @@ public:
 	void set_sun_light(const Rgb &value);
 	void set_fog_color_rt(const Rgb &value);
 	// The sky block joins the writeback set — entity hemi_sky serves the
-	// smoothed+modulated block like fill/sun/fog [orig: Env_SkyBlock[0]
+	// smoothed+modulated block like fill/sun/fog [orig: g_EnvSkyBlock[0]
 	// consumed by the entity-constants writer @ 0x5c8090].
 	void set_sky_ambient_rt(const Rgb &value);
 	void set_static_colors_rt(const Rgb &ceiling, const Rgb &cloud,
@@ -413,7 +413,7 @@ public:
 
 	// The SMOOTHED fog distance when a live weather drives it (env #27):
 	// the authored value is the spring TARGET, the served value ramps
-	// [orig: Env_FogDistCurrent @ 0x26c681c <- the (d+31)>>5 spring
+	// [orig: g_EnvFogDistCurrent @ 0x26c681c <- the (d+31)>>5 spring
 	// @ 0x57edd7; targets-only snap @ 0x57d1e0]. Every consumer (dome c9,
 	// water UV state, object/terrain fog ends, the frame clear) reads through
 	// here, so the ramp reaches them all.
@@ -432,7 +432,7 @@ public:
 	float sky_speed() const;
 	// The SMOOTHED sky height when the weather tick drives it (env #27):
 	// retail eighth-snaps toward the parsed value and rebuilds the dome only
-	// as the SMOOTHED height moves [orig: Env_SkyHeightCurrent @ 0x26c6858
+	// as the SMOOTHED height moves [orig: g_EnvSkyHeightCurrent @ 0x26c6858
 	// eighth-snap @ 0x57ee97; the dome rebuild gate @ 0x57e4f4].
 	float sky_height() const;
 	float sky_height_target() const;
@@ -476,18 +476,18 @@ public:
 	// The first-person viewmodel's pass fog. The frame applies the DRY pass
 	// before the sky dome and the viewmodel and re-applies the eye's own pass
 	// only after the viewmodel, so the gun never takes the underwater fog; the
-	// dome wrapper restores Env_FogBlock once it drew, so under the thermal
+	// dome wrapper restores g_EnvFogBlock once it drew, so under the thermal
 	// view the gun fogs toward the fog block when the dome drew and toward the
 	// thermal grey when it did not [orig: Render_ProcessMainSceneFrame
 	// @ 0x5ca3bf..0x5ca3ce (ApplyFogAndAmbient(0, thermal)), @ 0x5ca81a
-	// (SkyDome_RenderWithSkyfog, the Env_FogBlock restore @ 0x579ce6..0x579cf6), the
+	// (SkyDome_RenderWithSkyfog, the g_EnvFogBlock restore @ 0x579ce6..0x579cf6), the
 	// viewmodel @ 0x5ca829, the eye's pass @ 0x5ca82e..0x5ca841].
 	SceneFogValues build_viewmodel_fog(bool sky_dome_drawn) const;
 	// The water mirror pass's fog: the reflected scene applies the DRY pass
 	// with no alternate fog whatever side the eye is on [orig:
-	// render_main_scene @ 0x5c1648..0x5c164c and Water_RenderReflectedWorldScene
+	// Render_MainScene @ 0x5c1648..0x5c164c and Water_RenderReflectedWorldScene
 	// @ 0x5c8515..0x5c8519 -> Environment_ApplyFogAndAmbient(0, 0)], and the sky
-	// pass puts the device fog color back to Env_FogBlock before the terrain
+	// pass puts the device fog color back to g_EnvFogBlock before the terrain
 	// [orig: SkyDome_RenderWithSkyfog @ 0x579ce7..0x579cf6]: the weather fog block, never the
 	// thermal grey or the underwater lit water.
 	SceneFogValues build_water_mirror_fog() const;

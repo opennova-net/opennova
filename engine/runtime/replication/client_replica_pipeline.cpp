@@ -908,7 +908,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// [orig: Entity_UpdateInfantryPlayerBody call @0x4B7CF4 and lift
 	// @0x4B7CFE..0x4B7D0A; Entity_UpdateInfantryAI caller @0x4BF7FA;
 	// Entity_MovementCollisionResolver probe/return @0x4B3D6E..0x4B3DA9;
-	// raycast_entity_collision terrain window @0x413785..0x4137CB, reached by
+	// Entity_RaycastCollision terrain window @0x413785..0x4137CB, reached by
 	// Entity_RaycastGroundHeightAndObject @0x414320]
 	if (terrain != nullptr && terrain->valid()) {
 		const float world_x = static_cast<float>(es.x) / 65536.0f;
@@ -944,7 +944,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 // bucket runs, then the 512-progress cap with the starved idle force — a
 // movement state parked past the progress cap walks its root motion forever,
 // so retail reads AND writes the arbitration current (+0x2BC)
-// [orig: @0x4b464f/@0x4b465f, g_animStateFlagsTable bit0 gate; the org1
+// [orig: @0x4b464f/@0x4b465f, g_AnimStateFlagsTable bit0 gate; the org1
 //  twin is §5.38a cap 512 -> idle 43, the same shape].
 static void row_chase_step_and_cap(ClientEntityState &es, int16_t progress) {
 	if (progress < es.net_interp_steps) {
@@ -1746,7 +1746,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		--state_.hud_hit_feedback_frames;
 	// The deploy-map overlay follows the host every frame — set AND cleared
 	// by assignment, not edges [orig: NapiNPClientMsg_0x00A @0x42ff82 —
-	// g_deploy_screen_active = (flags1 >> 1) & 1].
+	// g_DeployScreenActive = (flags1 >> 1) & 1].
 	state_.deploy_overlay_active = (fu.flags1 & 0x02u) != 0;
 	if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
 	// The death-screen edges on flags1 bit 0 [orig: @0x42ff88..0x43002b].
@@ -1766,7 +1766,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		++state_.health_updates_applied;
 	}
 	if (fu.weapon.present) {
-		// Phase 0 is the sole retail mirror of g_preround_delay_timer.
+		// Phase 0 is the sole retail mirror of g_PreRoundDelayTimer.
 		// Retain it between phase cycles, exactly like the client global.
 		// [orig: NapiNPClientMsg_0x00A @0x430064]
 		state_.preround_delay_seconds = fu.weapon.preround_timer;
@@ -1820,7 +1820,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.fallmps = fu.timer.state1;
 		// The round clock: 62 x the wire's whole seconds, negative = untimed
 		// -1. [orig: NapiNPClientMsg_0x00A @0x430219..0x430235 —
-		//  g_round_time_remaining]
+		//  g_RoundTimeRemaining]
 		state_.round_time_remaining_ticks = fu.timer.timer_seconds < 0
 				? -1
 				: 62 * static_cast<int32_t>(fu.timer.timer_seconds);
@@ -2014,7 +2014,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// Reconstruct world position: decompress the compact (per-axis) and add the
 		// frame anchor — or, for a CARRIER-LOCAL player record (vehicle/ground handle !=
 		// 0xFFFF, D-NET-151), lift the local offset through the carrier's pose from this
-		// view's own state [orig: op2 resolves the carrier from g_pool_list and runs
+		// view's own state [orig: op2 resolves the carrier from g_PoolList and runs
 		// Entity_TransformLocalToWorld @0x4c10d4; a carrier with no itemDef DROPS the
 		// record and queues a C2S 0x0F entity request — request plumbing an in-process
 		// view does not need, so an unknown carrier just skips the position sample].

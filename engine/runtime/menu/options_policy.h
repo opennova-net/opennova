@@ -18,7 +18,7 @@ namespace opennova::menu {
 // The named Options CScrollWnd setup: {min, max, page}, page being the
 // original inclusive-page field. PlayerOptions supplies the persisted current
 // values after these ranges are installed through the driver's range setter.
-// [orig: options_screen_init @0x554800;
+// [orig: UI_OptionsScreenInit @0x554800;
 // UI_PopulateRenderAndAudioSettings @0x55c830; the untouched page=10 default
 // in CScrollWnd_Construct @0x64c450]
 struct OptionsScrollRange {
@@ -55,7 +55,7 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"OBJECTPOLY", "3"},
     // game.mnu's older alias for the same highest object-detail rung; the
     // in-game options Accept reads the control by this name
-    // [orig: ingame_options_dialog_event_handler @0x554e40 — "OBJECTDETAIL"
+    // [orig: UI_IngameOptionsDialogEventHandler @0x554e40 — "OBJECTDETAIL"
     //  read @0x554efb].
     {"OBJECTDETAIL", "3"},
     {"OBJECTTEX", "3"},
@@ -87,7 +87,7 @@ inline constexpr const char *kVideoPresetButtons[] = {
 // WDM channel/rate radios -> the Audio_ShutdownAll / Audio_InitSubsystems
 // re-init, the joystick fields, the Mr-Clippy pair, PunkBuster and the
 // auto-reload / auto-medic profile bytes all read by the dialog's Accept
-// [orig: ingame_options_dialog_event_handler @0x554e40]). The shell shows
+// [orig: UI_IngameOptionsDialogEventHandler @0x554e40]). The shell shows
 // them read-only until each device leg lands — a tracked stand-in
 // (D-MNU-21), never an invention. The JOYSTICK device radio is NOT here:
 // it is served (the table shows the seeded joystick defaults, D-CTRL-1).

@@ -10,7 +10,7 @@ namespace opennova::renderer {
 
 std::array<float, 3> slot_projection_direction(
 		const std::array<float, 3> &sun_surface_to_light) {
-	// [orig: render_shadow_pass @ 0x5d7bdc..0x5d7c30 — `if (y < 0.25)
+	// [orig: Render_ShadowPass @ 0x5d7bdc..0x5d7c30 — `if (y < 0.25)
 	// y = 0.25`, then negate x/y/z into RenderSlot_DefaultLightDir*].
 	const float y = std::max(sun_surface_to_light[1], 0.25f);
 	return {-sun_surface_to_light[0], -y, -sun_surface_to_light[2]};
@@ -51,8 +51,8 @@ float silhouette_half_extent(float bound_radius_units) {
 
 SlotCaptureViewAxes slot_capture_view_axes(const std::array<float, 3> &direction) {
 	// The slot view frame is the shared retail look-at
-	// [orig: build_direction_look_at_matrix @ 0x612c90 via
-	// setup_shadow_cascade_matrices @ 0x58d31e], its right row mapped
+	// [orig: Math_BuildDirectionLookAtMatrix @ 0x612c90 via
+	// RenderSlot_SetupShadowCascadeMatrices @ 0x58d31e], its right row mapped
 	// through the render<->presentation reflection (the header derives it).
 	const DirectionLookAt<float> frame = direction_look_at(direction);
 	SlotCaptureViewAxes axes;
@@ -142,7 +142,7 @@ std::array<float, 3> drape_shadow_term(const std::array<float, 3> &sun_rgb,
 		const std::array<float, 3> &sky_rgb, float dir_y) {
 	// q_c = sun_c*|y| / (sun_c*|y| + sky_c)
 	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5f63..0x5d6008 — fabs of the slot
-	// direction vertical, Env_LightBlock / Env_SkyBlock bytes; the byte
+	// direction vertical, g_EnvLightBlock / g_EnvSkyBlock bytes; the byte
 	// scale cancels in the ratio].
 	const float ay = std::fabs(dir_y);
 	std::array<float, 3> q{};
@@ -425,7 +425,7 @@ void slot_patch_indices(int lod, std::vector<uint16_t> &out) {
 }
 
 std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> shadowztex_pixels() {
-	// [orig: shadow_system_init_resources @ 0x5d6260..0x5d62a7 — 4 rows of
+	// [orig: Shadow_SystemInitResources @ 0x5d6260..0x5d62a7 — 4 rows of
 	//  32 ARGB texels: row 3 white, rows 0..2 white below column 16, the one
 	//  gray texel at column 16 (0xFF808080), black beyond].
 	std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> px{};
@@ -448,9 +448,9 @@ SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
 	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d66..0x5d5de1 — two copies
 	//  of the slot direction; the second's VERTICAL x 4.0 (flt_7C44B8) for
 	//  itemdef type 3 @ 0x5d5d7e..0x5d5d91; light_pos = slot pos - dir1
-	//  @ 0x5d5d95..0x5d5dd4; build_shadow_cascade_uv_matrices @ 0x58cf10 —
+	//  @ 0x5d5d95..0x5d5dd4; RenderSlot_BuildShadowCascadeUVMatrices @ 0x58cf10 —
 	//  k = 0.5 / half_size @ 0x58cf2f, the look-ats normalize their direction
-	//  (build_direction_look_at_matrix @ 0x612c90), the detail u row is the
+	//  (Math_BuildDirectionLookAtMatrix @ 0x612c90), the detail u row is the
 	//  dir2 look-at's forward column scaled k with + 0.5 @ 0x58d1cc..0x58d204,
 	//  the detail v row is the primary's ALREADY k-scaled depth column times
 	//  0.333 k with + 0.5 @ 0x58d222..0x58d249].

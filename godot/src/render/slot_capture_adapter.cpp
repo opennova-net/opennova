@@ -330,7 +330,7 @@ public:
 
 	// The per-order MSAA colour/depth pair and its framebuffer; the capture
 	// resolves into the request's target. Retail's slot RT carries its own z
-	// (render_shadow_pass clears the slot RT per capture), so the pass depth
+	// (Render_ShadowPass clears the slot RT per capture), so the pass depth
 	// tests and writes inside the target alone.
 	struct Target {
 		int size = 0;
@@ -606,7 +606,7 @@ RID SlotCaptureAdapter::Impl::make_texture(int p_size,
 	// MSAA on the capture is a device fold, not a retail property: retail's
 	// slot RT chain is single-sampled (RenderSlot_InitTextureChain creates a
 	// plain D3DUSAGE_RENDERTARGET texture and a D3DMULTISAMPLE_NONE depth
-	// surface, create_render_target_surfaces @ 0x67f7b0) and its drape reads
+	// surface, GRenderTarget_CreateSurfaces @ 0x67f7b0) and its drape reads
 	// that RT bilinearly. The 4x resolve keeps a partial-coverage RGB edge in
 	// the resolve target so a hard-aliased 1-2 px silhouette line does not
 	// scintillate against the breathing first-person camera (the eye rides

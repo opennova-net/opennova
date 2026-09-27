@@ -1451,7 +1451,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			}
 			if (door_work) {
 				// Retail writes exactly num_doors slots of the ordinal bus and
-				// never clears [orig: build_bone_transforms @0x4E3070 loop
+				// never clears [orig: BoneCallback_BuildBoneTransforms @0x4E3070 loop
 				// @0x4e312a..0x4e3145; BoneCallback_AnimatedBones_World @0x4E3180
 				// loop @0x4e3201..0x4e3218]; releasing a shrunk row is the port's
 				// retained-override bookkeeping. A cold row cannot enumerate what

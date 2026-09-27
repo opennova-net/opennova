@@ -4,7 +4,7 @@
 // engine slurps it into a malloc'd buffer `dword_24E3E84`, freed by
 // [orig: ScoreConfig_FreeBuffer @ 0x52D2E0], and indexes it as a table of
 // FIXED 452-BYTE ROWS: one row per GAMETYPE block, in FILE ORDER
-// [orig: load_scoring_table_for_game_type @ 0x52D300 — `score_type_index *= 452`].
+// [orig: ScoreConfig_LoadScoringTableForGameType @ 0x52D300 — `score_type_index *= 452`].
 //
 // The row index is chosen from the session's g_GameType, and the shipped file's
 // block order matches that ladder exactly:
@@ -27,7 +27,7 @@
 //
 // Individual values are read as `row + 300 + 4 * entryIndex`
 // [orig: ScoreConfig_GetRowEntry (ex sub_52D430) @ 0x52D430], and `row + 24` holds the block's team count
-// (`g_scoreTeamCount` @0x52D300). Per ADR 0030 only the file knowledge lives
+// (`g_ScoreTeamCount` @0x52D300). Per ADR 0030 only the file knowledge lives
 // here; the retail consumers are the scoring dispatch
 // [orig: GameEvent_ProcessScoring @ 0x52F550] and the change-gated S2C 0x81
 // score mirror [orig: Server_UpdateCaptureZoneProximity @ 0x5086A0].
@@ -84,7 +84,7 @@ struct File {
 	std::vector<GameTypeBlock> blocks;
 };
 
-// The witnessed row-index ladder [orig: load_scoring_table_for_game_type
+// The witnessed row-index ladder [orig: ScoreConfig_LoadScoringTableForGameType
 // @ 0x52D300]. Returns the score-table row for a g_GameType code word, or -1
 // when the loader's `<= 11` guard would reject it. The 0 -> 2 remap is applied
 // here exactly as the original applies it (`if (!score_type_index) index = 2`).

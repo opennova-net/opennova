@@ -10,7 +10,7 @@
 namespace opennova::replication {
 
 // The witnessed transport mode a connection carries [orig: CGameSession_SetConnectionMode
-// @0x4c49f0 -> g_napi_np_ctx.transport_mode +0x50; CNapiNetwork_SetTransportMode @0x4c8750
+// @0x4c49f0 -> g_NapiNPCtx.transport_mode +0x50; CNapiNetwork_SetTransportMode @0x4c8750
 // opens a socket only for 2/3/4 — mode 1 is in-process]. A connection's mode IS the
 // original's mode, not an invented type (ADR 0011).
 enum class TransportMode : uint8_t {
@@ -36,14 +36,14 @@ struct Connection {
 
 	// The pool-0 player entity this connection drives — the SUBJECT its S2C 0x0A frame is
 	// anchored to, and the owner the host verifies a C2S 0x0C uplink against [orig:
-	// dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx`]. The host spawns it for
+	// NetPacket_DispatchEntityPacketCallback @0x4D6A80 `entity == *owner_ctx`]. The host spawns it for
 	// a joiner (spawn_remote_player, bound by the host driver). An INVALID handle = pre-spawn
 	// (still handshaking), which cannot enter the per-player 0x0A writer. The host's own
 	// loopback binds its local player through the same host spawn path.
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate]
 	world::EntityHandle owned_entity{};
 
-	// Per-connection visibility/filter descriptor [orig: g_napi_np_ctx send_mask +0x1198].
+	// Per-connection visibility/filter descriptor [orig: g_NapiNPCtx send_mask +0x1198].
 	// PRESENT but UNREAD this increment — the 2-peer co-op MVP broadcasts the whole world to
 	// every connection (faithful to a filter==1 send [orig: @0x510ED0]). The per-connection
 	// SendFiltered cull is a deferred optimization; the field is here so it slots in without an
@@ -119,7 +119,7 @@ struct Connection {
 	// cleared only by the deploy leg [orig: Server_ProcessPlayerDeath @0x517791
 	// `and 0xEF`]. While set: the connection's 0x0A header flags1 carries bit1 EVERY frame
 	// (the client's deploy screen is held open by it — one flags1 bit1=0 frame closes it
-	// [orig: NetPacket_WritePlayerState @0x4ff7bd; client g_deploy_screen_active = (flags1 & 2) != 0
+	// [orig: NetPacket_WritePlayerState @0x4ff7bd; client g_DeployScreenActive = (flags1 & 2) != 0
 	// @0x42ff82]; a spectator client's free-fly ignores the held bit), the pre-deploy
 	// player entity carries the hidden bit0, the 0x0E handler accepts a deploy from an
 	// alive-but-undeployed player (the dead-or-pending gate @0x519cc7 — retail places no

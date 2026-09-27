@@ -154,7 +154,7 @@ int main() {
 	make_quadrant_mipchain(quadrants, quadrant_height, quadrant_height);
 	// The leaf also carries its source-atlas minimum, the quadrant origin
 	// plus the local offset, which the retail key's low ten bits hold.
-	// [orig: quadtree_node_init_recursive @ 0x6082fc..0x608302;
+	// [orig: Terrain_QuadtreeNodeInitRecursive @ 0x6082fc..0x608302;
 	// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a]
 	const struct {
 		int sector_id;

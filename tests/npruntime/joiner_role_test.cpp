@@ -791,7 +791,7 @@ bool run_guided_fire_preserves_selected_target() {
 // (@0x42c052 -> @0x42a7da), fire_flags at off33 (@0x42a7ed) and weaponSlot at
 // off34 (@0x42a800). fire_flags = Weapon_GetScopeZoomLevel(can_fire, 12) |
 // (can_fire ? 0x80 : 0) [orig: Entity_FireWeaponAndSendPacket @0x42bdd6..
-// 0x42bdf9] with can_fire = Player_CanFireWeapon() = 0 for a seated pilot
+// 0x42bdf9] with can_fire = Player_IsOpticalViewVisible() = 0 for a seated pilot
 // (parentSlot 2/5 @0x5cf7a8..0x5cf7b6), and weaponActive 0 returns the default
 // 12 [orig: @0x422fd1/@0x422fd5]. Expected bytes derived by hand from those
 // legs: off6 = 1, off7 = the flare index, off32 = the handheld's ammo-def index
@@ -1088,7 +1088,7 @@ bool run_local_replica_turret_channel() {
 
 // Every in-match pump stamps World::rules from the joiner's session: the
 // session opens, and auto_scope_zero follows bit 0x10000 of the S2C
-// 0x64 +44 mpattrib word (g_rules_flags @0x24D1E34, the
+// 0x64 +44 mpattrib word (g_RulesFlags @0x24D1E34, the
 // Player_AdjustWeaponZoomLevel test @0x4dbd15). The runtime view carries
 // that word once the 0x64 transfer lands; here it is set on the view.
 bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowed) {
@@ -1107,8 +1107,8 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 
 // A folded S2C 0x1D latches the joiner's round-over gate, so the frame that
 // folds it holds its entity update, as retail's client does.
-// [orig: NapiNPClientMsg_0x01D @0x430858 (`mov g_spawn_success_gate,1`);
-//  Game_ProcessMainFrame -- the is_in_session / g_spawn_success_gate tests
+// [orig: NapiNPClientMsg_0x01D @0x430858 (`mov g_SpawnSuccessGate,1`);
+//  Game_ProcessMainFrame -- the is_in_session / g_SpawnSuccessGate tests
 //  @0x526734..0x526742 ahead of the Entity_UpdateAllEntities call @0x52674B]
 bool run_end_round_header_holds_the_entity_update() {
 	Harness h;

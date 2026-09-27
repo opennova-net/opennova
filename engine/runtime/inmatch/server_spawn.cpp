@@ -33,8 +33,8 @@ namespace {
 // owner_connection_id. [orig: Server_PlayerAdd @0x51cbc0 / Entity_SpawnFromAnimSlotProperty @0x43c390]
 
 // [orig: Server_AssignPlayerTeam @0x4FE310; D-NET-113] One assignment policy for every mode.
-// Retail's misleading g_team1_name/g_team2_name symbols are the live SidePasswordA/B strings
-// (apply_session_settings_to_globals @0x552043/@0x552054), not a second team-name domain.
+// Retail's misleading g_Team1Name/g_Team2Name symbols are the live SidePasswordA/B strings
+// (Game_ApplySessionSettingsToGlobals @0x552043/@0x552054), not a second team-name domain.
 // The submitted JSP credential selects a matching protected side before balancing.
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
@@ -207,14 +207,14 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 // [orig: Server_InitNewRoundState @0x51c8e0] — local-player/round context for an authority host.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// The team-change list starts every round empty
-	// [orig: CBufferList_Free(g_team_change_entity_list) @0x51C911..0x51C92A].
+	// [orig: CBufferList_Free(g_TeamChangeEntityList) @0x51C911..0x51C92A].
 	ctx.team_change_entities.clear();
 	if (!ctx.is_authority) return;
-	// reset_round_counters copies the configured StartDelay seconds into the
+	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority
 	// phase predicate and the source of the phase-0 0x0A projection, rather
 	// than a second connection-local countdown.
-	// [orig: reset_round_counters @0x516C50, store @0x516C8D]
+	// [orig: Server_ResetRoundCounters @0x516C50, store @0x516C8D]
 	if (ctx.world != nullptr)
 		ctx.world->preround_delay_seconds = ctx.config.start_delay;
 	// The stock round initializer clears the global S2C 0x79 countdown. Its next
@@ -308,10 +308,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// mounted profile's per-side selection on the type-2 loopback (stock fresh-profile
 		// seed when nothing is saved: side A 0x0200/avatar 1 = the golden host record). Retail
 		// stamps the SAME profile fields on its LOCAL path, picked by the assigned team's side:
-		// animSlot <- g_avatarTeam1/2, the packed character/minimap id from the validated
-		// profile ids, playerClass <- g_charClassTeam1/2 (clamped [5,9] at session start).
-		// [orig: Player_InitPlayer @0x4e15f0 (@0x4e1843) <- g_avatarTeam1/2 + g_charClassTeam1/2
-		// <- apply_session_settings_to_globals @0x551500 (class clamp @0x5516ab..0x5516ec, avatar
+		// animSlot <- g_AvatarTeam1/2, the packed character/minimap id from the validated
+		// profile ids, playerClass <- g_CharClassTeam1/2 (clamped [5,9] at session start).
+		// [orig: Player_InitPlayer @0x4e15f0 (@0x4e1843) <- g_AvatarTeam1/2 + g_CharClassTeam1/2
+		// <- Game_ApplySessionSettingsToGlobals @0x551500 (class clamp @0x5516ab..0x5516ec, avatar
 		// via Avatars_ResolveSelectionIndex (ex sub_57AE60)); ids validated + stored by PlayerSession_InitFromProfile @0x50ca80]
 		spawn.anim_slot = conn.char_vars.avatar[side];
 		spawn.minimap_net_id = conn.char_vars.char_id[side];
@@ -373,7 +373,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// The join writes the whole +89912 state byte: bit 1 (the pre-round loadout
 	// latch) iff the pre-round timer runs, and zeroes the +356 armory cooldown on
 	// the first state-6 entry. [orig: Server_OnPlayerJoin @0x51a6d3/@0x51a6e2
-	//  (byte = 1, or 3 while g_preround_delay_timer); slot[89] = 0 @0x51a752]
+	//  (byte = 1, or 3 while g_PreRoundDelayTimer); slot[89] = 0 @0x51a752]
 	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
 	conn.link.armory_reuse_seconds = 0;
 	// SetGameState(10) then sets 0x04 (the frontier hint) and clears 0x08 (the
@@ -521,7 +521,7 @@ bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &con
 } // namespace
 
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
-// !g_spawn_success_gate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
+// !g_SpawnSuccessGate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
 // Game_StartMission @0x524360); the original does NOT process spawns until the load completes and the
 // pool-3 start markers are promoted. [D-NET-116] The reimpl maps the retail
 // round-over gate to world::Match's sole outcome latch but has no dword_24D1DE0
@@ -738,7 +738,7 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 	}
 	if (ctx.is_in_session != 0) {
 		// S2C 0x50 to every in-match slot (mask 0x80), the identity pair zero
-		// for a non-player [orig: @0x518EA5..0x518EE1; write_entity_handle_packet
+		// for a non-player [orig: @0x518EA5..0x518EE1; NetPacket_WriteEntityHandlePacket
 		// @0x506AD0, the Flags & 0x100 gate @0x506B3D].
 		TeamAssign assign;
 		assign.entity_handle = handle.packed;
@@ -753,7 +753,7 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 			c.link.transport->host_send(s2c::TEAM_ASSIGN, body);
 		}
 	}
-	// [orig: CBufferList_AddOrFind(g_team_change_entity_list, entity) @0x518EEC]
+	// [orig: CBufferList_AddOrFind(g_TeamChangeEntityList, entity) @0x518EEC]
 	if (std::find(ctx.team_change_entities.begin(), ctx.team_change_entities.end(), handle) ==
 			ctx.team_change_entities.end())
 		ctx.team_change_entities.push_back(handle);

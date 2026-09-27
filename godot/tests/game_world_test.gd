@@ -1229,7 +1229,7 @@ func test_water_mirror_camera_filters_entity_waves_and_never_draws_the_body() ->
 	# no player-render leg) [orig: Terrain_CollectVisibleEntitiesForReflection
 	# @ 0x5c90a0 filterMask 0x400; Entity_InitFromModel @ 0x40e20a;
 	# Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b;
-	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240;
+	# Water_ReflectionPrerender @ 0x5c2780 -> Render_MainScene @ 0x5c1240;
 	# Player_RenderFirstPersonViewModel @ 0x4ded60].
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
@@ -2531,7 +2531,7 @@ func test_effect_warm_temporarily_lifts_and_restores_the_particle_switch() -> vo
 func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	# Mission kinds preserve the original pool mapping. Pool 0 is not walked;
 	# pool 1 skips attrib 0x42; pools 2/3 skip only powerup bit 0x2.
-	# [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0,
+	# [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0,
 	#  gates @ 0x523233 / @ 0x523272 / @ 0x5232af]
 	# Every case is a mission record the REAL placer presents as an individual
 	# ObjectModel (mount.3di: MFlash01 + a live PANM track) and the world's own
@@ -2987,8 +2987,8 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	# the WATER MIRROR's sky bracket, while the main
 	# frame keeps its sky (gated only by the sky letter 0x4 and the eye's
 	# waterline side) [orig: Render_ProcessMainSceneFrame @ 0x5ca192..0x5ca1bd;
-	# render_main_scene @ 0x5c1342..0x5c1353]. Driven end-to-end through the
-	# REAL sim by the mission's force-indoors attribute [orig: Bms_AttribFlags
+	# Render_MainScene @ 0x5c1342..0x5c1353]. Driven end-to-end through the
+	# REAL sim by the mission's force-indoors attribute [orig: g_BmsAttribFlags
 	# & 0x10 @ 0x5ca1c8]; the attribute is mission state the load latches, so
 	# the outdoors edge is the next load of the same pack without it. The
 	# sky/water letter legs need authored blink boxes, which no fixture model

@@ -62,7 +62,7 @@ int facial_expression_index(const std::string &name) {
 
 void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
 		uint32_t wall_time_ms) {
-	// [orig: scar_decal_update @0x57FA50]
+	// [orig: CScarDecal_Update @0x57FA50]
 	slot.blend += 0.125f;
 	if ((display_frame & 63u) == 0) {
 		// Render-family draw: the thread-local effects stream, not
@@ -107,7 +107,7 @@ std::vector<grm::Point> evaluate_facial_mesh(const grm::File &file,
 	for (const auto &v : file.vertices) {
 		grm::Point p = v.uv;
 		// "xxx" is the group-zero sentinel even when authored in a gesture.
-		// [orig: collect_unique_material_names @0x588D90; sub_5890F0]
+		// [orig: Model_CollectUniqueMaterialNames @0x588D90; sub_5890F0]
 		if (!strutil::iequals(v.group, "xxx")) {
 			const auto da = offset(a, v.group), db = offset(b, v.group);
 			p.x = static_cast<float>((1.0 - blend) * da.x + blend * db.x + p.x);

@@ -250,7 +250,7 @@ What `.mus` is, per the RE record: a **bank of tracks** (`.sbf`) plus a
 **script** (`.bin`) of sections — a flat, variable-driven state machine. The VM
 sits in one section at a time; it advances **only when the playing track
 finishes** (witnessed pacing: one `play` per track completion,
-`audio_stream_update @ 0x671c60`), so a section is best understood as *a
+`AudioStream_Update @ 0x671c60`), so a section is best understood as *a
 playlist with decisions between tracks*, and transitions always land on track
 boundaries. The game drives it by writing **dials** (the 17 shared variables):
 menu screens push their MUSICVAR, missions pump health %, threat distance,
@@ -608,7 +608,7 @@ along seams that already exist as signal boundaries in the code.
   scroll offset over the roll's full extent and follows playback, wheel, and
   card-selection seeks. Cadence-citation verdict: **UNCITED — R5 is OPEN.**
   The SCROLL_RATE format side is witnessed
-  ([orig: marquee_load_credits_from_ini @ 0x65c5a0]), but
+  ([orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0]), but
   `CreditsPlayer::_process_scroll` converts the per-frame rate to
   per-second with an assumed 60 fps cadence (`* 60.0f`) and the ~F overlay
   fade zone is a bare 50 px (`kFadeZonePixels`) — neither carries a witness

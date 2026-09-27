@@ -135,7 +135,7 @@ int main() {
 	CHECK(!world::minimap_overlay_entity_enabled(entity),
 			"producer disabled bit suppresses an otherwise eligible entity");
 
-	// The draw policy table [orig: draw_minimap_blip @0x597890].
+	// The draw policy table [orig: Minimap_DrawBlip @0x597890].
 	{
 		world::Entity e = base_entity();
 		e.item_attrib = world::kItemAttribArmory;
@@ -207,7 +207,7 @@ int main() {
 	// wireframe renderer promotes to 0xFF before emitting its fill vertices.
 	// The screenshot's large exact 0xA0A0A0 runs are the pixel witness.
 	// [orig: MapOverlay_DrawView @0x5a5abc pushes 0; the zero -> 0xFF branch
-	//  in render_collision_wireframe @0x596884..0x596891]
+	//  in Render_CollisionWireframe @0x596884..0x596891]
 	{
 		world::Entity e = base_entity();
 		e.team = 0;
@@ -229,7 +229,7 @@ int main() {
 	// not CDTA collision. An asymmetric roof (two up-facing tris) keeps its
 	// fills and only the outer boundary edges survive the authored edge-word
 	// parity toggle. OOBJ position is portal metadata and is not applied.
-	// [orig: render_collision_wireframe @0x596800: model +0xDC/+0xE0,
+	// [orig: Render_CollisionWireframe @0x596800: model +0xDC/+0xE0,
 	//  record +24/+32/+36/+40]
 	{
 		world::OcclusionModel model;
@@ -292,7 +292,7 @@ int main() {
 	// Retail owns the edge parity list per OOBJ record and suppresses a
 	// record with fewer than four survivors. Two independent triangular
 	// sections therefore keep their fills but must not combine into a
-	// six-edge outline. [orig: render_collision_wireframe @0x596800]
+	// six-edge outline. [orig: Render_CollisionWireframe @0x596800]
 	{
 		world::OcclusionModel model;
 		world::OcclusionPlane up;

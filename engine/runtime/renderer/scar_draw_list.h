@@ -67,7 +67,7 @@ struct ScarDrawList {
 // [orig: `|p.x - camX| <= fog + r && |p.y - camY| <= fog + r` before the view
 // transform; entity-local slots are culled by the presenter with their
 // owner's node], the terrain light colour folded onto every vertex [orig:
-// Env_TerrainLightCombined | 0xFF000000], and the owner visibility predicate
+// g_EnvTerrainLightCombined | 0xFF000000], and the owner visibility predicate
 // [orig: a building owner draws when `g_BuildingSectionVisMask[idx] &
 // 0xFFFFFFF` is nonzero; another owner when any of its four containing
 // buildings (+464..+476) is visible, or outright when +464 == 0]. A null
@@ -95,10 +95,10 @@ void compile_scar_draws(const opennova::world::ScarCache &cache,
 // [orig: CGfxShader_ApplyPass @0x683190 — `combined = modeWord | passFlags`,
 //  the drawer passes 0x10000000 (LIGHTING off @ CGfxShader_ApplyPassRenderStates (ex sub_6808A0)): bit 0x40000 ->
 //  ALPHATESTENABLE, 0x20000 -> FOGENABLE, 0x100000 -> z-write OFF, 0x400000 ->
-//  CULLMODE NONE (else CCW); decode_blend_mode_to_d3d_states @0x680F00 —
-//  bits 0-3, nibble 1 = SRCALPHA/INVSRCALPHA; decode_mode_alpha_stage
+//  CULLMODE NONE (else CCW); RenderState_DecodeBlendModeToD3DStates @0x680F00 —
+//  bits 0-3, nibble 1 = SRCALPHA/INVSRCALPHA; RenderState_DecodeModeAlphaStage
 //  @0x680B00 — bits 4-7, nibble 5 = MODULATE(TEXTURE, DIFFUSE);
-//  decode_mode_color_stage @0x681080 — bits 8-13, family 0x600 =
+//  RenderState_DecodeModeColorStage @0x681080 — bits 8-13, family 0x600 =
 //  MODULATE2X(TEXTURE, DIFFUSE) under GfxDevice_Modulate2XEnabled, which
 //  CGfxDevice_CreateDevice @0x67EB5F sets to 1 unconditionally]. The alpha
 // test compares GREATER against the drawer's latched ref

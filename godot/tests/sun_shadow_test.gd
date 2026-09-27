@@ -19,7 +19,7 @@ func _expected_emission(environment: MissionEnvironment) -> Vector3:
 	# component to 0.25 and negates — renderer::slot_projection_direction,
 	# which SunShadow applies
 	# [orig: Environment_GetLightDirectionFloat @ 0x57d870;
-	#  render_shadow_pass @ 0x5d7b70].
+	#  Render_ShadowPass @ 0x5d7b70].
 	var g := environment.get_light_direction()
 	return -Vector3(g.x, maxf(g.y, 0.25), g.z).normalized()
 
@@ -100,7 +100,7 @@ func test_low_sun_projection_clamps_the_vertical_component() -> void:
 	# 06:30 sunrise: the getter tuple's vertical is ~0.1227, well under the
 	# witnessed 0.25 slot-projection clamp, so retail projects entity shadows
 	# as if the sun sat at ~14.5 deg — silhouettes never stretch past 4x
-	# height [orig: render_shadow_pass @ 0x5d7b70 clamp; same constant as the
+	# height [orig: Render_ShadowPass @ 0x5d7b70 clamp; same constant as the
 	# static collector @ 0x60d33f..0x60d341].
 	var environment := _environment_at(630, "SunriseEnvironment")
 	var light := SunShadow.new()

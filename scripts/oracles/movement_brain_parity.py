@@ -63,7 +63,7 @@ class Machine:
         self.u.reg_write(UC_X86_REG_EFLAGS, 2)
         self.u.reg_write(UC_X86_REG_ESP, STACK)
         self.wr(0xB75FC8, 0)  # authority serving a remote driver
-        self.wr(0xB5CC28, 1)  # g_napi_np_ctx.is_authority
+        self.wr(0xB5CC28, 1)  # g_NapiNPCtx.is_authority
 
     def run(self, start, stop):
         self.u.emu_start(start, stop, count=10000)

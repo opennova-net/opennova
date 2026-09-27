@@ -16,7 +16,7 @@ namespace opennova::foliage {
 // deterministic candidate generation, key decoding, quadrant walks, and the
 // eight-sample silhouette ground fit.
 //
-// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 // Foliage_GenerateModelTileInstances @ 0x600980;
 // Foliage_UpdateModelTiles @ 0x601f50]
 
@@ -62,9 +62,9 @@ struct DetailCell {
 	// integer x/z: the routed quadrant origin plus the sector-local offset).
 	// Retail's key halves carry it in their low ten bits and the generator
 	// samples the detail foliage map there, not at the world position.
-	// [orig: quadtree_node_init_recursive @ 0x6082fc..0x608302 (node x/z);
+	// [orig: Terrain_QuadtreeNodeInitRecursive @ 0x6082fc..0x608302 (node x/z);
 	// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a (key);
-	// generate_foliage_instances_0 @ 0x5ffddb..0x5ffdee (& 0x3FF)]
+	// Foliage_GenerateInstances_0 @ 0x5ffddb..0x5ffdee (& 0x3FF)]
 	int32_t atlas_x = 0;
 	int32_t atlas_z = 0;
 };
@@ -86,7 +86,7 @@ struct FrameRequest {
 	// The local player's thermal view (the scene core's fourth argument):
 	// every detail patch draws the primary LOW pass at one tenth fade.
 	bool thermal_view = false;
-	// Env_WaterHeightFixed in world units and the camera's side of it: the
+	// g_EnvWaterHeightFixed in world units and the camera's side of it: the
 	// two detail passes split patches by their maximum height against it.
 	float water_height = 0.0f;
 	bool camera_below_water = false;
@@ -233,7 +233,7 @@ public:
 	void reset();
 	const RuntimeStats &get_stats() const { return stats_; }
 
-	// [orig: terrain_tile_init_buffers @ 0x5ff920]
+	// [orig: TerrainTile_InitBuffers @ 0x5ff920]
 	// Up to 128 cells fit while n * (36 * source vertices) < 0xffff.
 	static size_t detail_cache_capacity(uint32_t source_vertex_count);
 

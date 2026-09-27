@@ -60,7 +60,7 @@ static func weapon_profile_path(root: ResourceRoot) -> String:
 # Restore both side-specific character selections and expose the blue side as
 # the initially active PLAYER_INFO page (SIDE_BLUE is authored CHECKED). Packed
 # ids are resolved back through Avatars.def because their bit fields contain
-# authored ids, not UI row indices [orig: lookup_entity_slot_and_pack_entry
+# authored ids, not UI row indices [orig: EntitySlot_LookupAndPackEntry
 # @0x57AD40, packed write @0x57AE47].
 static func load_character_profile(root: ResourceRoot) -> Dictionary:
 	var profile := {

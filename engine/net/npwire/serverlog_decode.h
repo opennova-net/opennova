@@ -29,7 +29,7 @@
 //   "DNE."   .END      CServerLog_CloseAndFree          @ 0x4e1a10 (end-of-file)
 //
 // The per-frame write loop lives in Game_ProcessMainFrame @ 0x5263f0 and
-// iterates g_pool_list[0] (POOL 0 = players) — an independent witness that pool
+// iterates g_PoolList[0] (POOL 0 = players) — an independent witness that pool
 // 0 is the player pool.
 
 #include <cstddef>

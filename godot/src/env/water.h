@@ -90,7 +90,7 @@ public:
 	// deinitialization.
 	void release_runtime_renderer_resources();
 
-	// Env_WaterHeightFixed == 0 is retail's no-water sentinel. Signed
+	// g_EnvWaterHeightFixed == 0 is retail's no-water sentinel. Signed
 	// nonzero heights remain valid for terrain below the world origin.
 	bool is_water_active() const { return water_height_ != 0.0f; }
 	// The authored height can remain valid while the world retains this node

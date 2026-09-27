@@ -120,7 +120,7 @@ void WeatherState::seed(const WeatherSeed &seed) {
     quake_ticks = 0;
     precipitation_kind = static_cast<uint32_t>(PrecipitationKind::Rain);
     fog_type = seed.fog_type;
-    // Env_FogDistReference: 1024.0 at init, re-set at terrain init to 768.0 or
+    // g_EnvFogDistReference: 1024.0 at init, re-set at terrain init to 768.0 or
     // 1024.0 by adapter-caps bit 0x40 and forced to 1024.0 on the session
     // authority [orig: Environment_InitDefaults @ 0x57c0b0; Terrain_Init
     //  @ 0x60fc9a/0x60fca3].
@@ -246,7 +246,7 @@ void WeatherState::command_move_fog_q16(int32_t distance_q16, int32_t seconds) {
 }
 
 void WeatherState::command_sky_speed(int32_t rate) {
-    // [orig: WacCmd_SkySpeed @ 0x4edeb0] Env_CloudScrollRateTarget = n << 10.
+    // [orig: WacCmd_SkySpeed @ 0x4edeb0] g_EnvCloudScrollRateTarget = n << 10.
     cloud_scroll_rate_target = static_cast<uint32_t>(rate) << 10;
     bump_command();
 }
@@ -266,7 +266,7 @@ void WeatherState::command_sky_height(int32_t height_raw) {
 }
 
 void WeatherState::command_quake(int32_t seconds) {
-    // [orig: WacCmd_Quake @ 0x4ed4c0] Env_QuakeTicks = 6 * value, raw: a
+    // [orig: WacCmd_Quake @ 0x4ed4c0] g_EnvQuakeTicks = 6 * value, raw: a
     // negative argument wraps to a huge count the tick counts down (@ 0x57ec61).
     quake_ticks = static_cast<uint32_t>(seconds) * 6u;
     bump_command();
@@ -287,7 +287,7 @@ void WeatherState::debug_set_time_of_day_minutes(double minute_of_day) {
 }
 
 void WeatherState::command_fog_type(int32_t type) {
-    // [orig: WacCmd_FogType @ 0x4eded0] Env_FogType = n (the immediate
+    // [orig: WacCmd_FogType @ 0x4eded0] g_EnvFogType = n (the immediate
     // Render_SetFogState refresh is the render owner's next fog push).
     fog_type = type;
     bump_command();
@@ -397,7 +397,7 @@ void WeatherState::tick_sim(World *world, WeatherTickEvents &events) {
 
 void WeatherState::apply_quake_jitter(World &world, WeatherTickEvents &events) {
     // [orig: Environment_UpdateWeatherTick @ 0x57eb12..0x57ec61] — the tick's
-    // oscillator draw (Env_WeatherPrng & 0xFFF) is the first jitter word; every
+    // oscillator draw (g_EnvWeatherPRNG & 0xFFF) is the first jitter word; every
     // displaced entity re-rolls the PRNG for the next.
     uint32_t rand = core.oscillator.prng & 0xFFFu;
     const EntityHandle local_player = world.cached.local_player;

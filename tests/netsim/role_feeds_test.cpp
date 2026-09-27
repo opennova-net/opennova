@@ -4,7 +4,7 @@
 // roster with the local row resolved through the board index, the tab
 // filter, the DEATH screen status off the joiner's 0x0A / 0x6E facts, and the
 // bare-role fallbacks.
-// [orig: NapiNPClientMsg_0x01D @0x430840; populate_stat_results_list
+// [orig: NapiNPClientMsg_0x01D @0x430840; StatScreen_PopulateStatResultsList
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>

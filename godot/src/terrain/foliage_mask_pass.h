@@ -94,7 +94,7 @@ struct FoliageMaskReport {
 // drawn before do not (retail Terrain_RenderWorldScene
 // @ 0x5c953e..0x5c9567 far wave, @ 0x5c9600..0x5c9647 camera wave;
 // Terrain_RenderSectorEntitiesBySide @ 0x5c7ddf..0x5c7f11 masks, before
-// render_sector_entity @ 0x5c7ffc). Godot draws those persons in its opaque
+// Render_SectorEntity @ 0x5c7ffc). Godot draws those persons in its opaque
 // pass, before any transparent-pass mask instance, so this PRE_OPAQUE pass
 // rasterizes the same masks for each view that runs it into a texture the
 // view's opaque pass then samples: R = the nearest far-wave mask depth, G =

@@ -650,7 +650,7 @@ Vector3 MissionEnvironment::get_viewmodel_fog_range() const {
 }
 
 Vector3 MissionEnvironment::get_underwater_overlay_color() const {
-	// The overlay always uses Env_WaterColorLit, including exact waterline
+	// The overlay always uses g_EnvWaterColorLit, including exact waterline
 	// equality where the independently selected device-fog pass remains dry.
 	return to_vector3(state_.build_scene_fog(true).color);
 }
@@ -753,7 +753,7 @@ Vector3 MissionEnvironment::get_color_src_gain() const {
 }
 
 Vector3 MissionEnvironment::get_particle_ambient_tint() const {
-	// Env_TerrainLightCombined's bytes over 128.
+	// g_EnvTerrainLightCombined's bytes over 128.
 	const opennova::env::Rgb combined = opennova::env::combine_terrain_light(
 			state_.sun_light(), state_.sky_ambient());
 	constexpr float kByteOver128 = 255.0f / 128.0f;

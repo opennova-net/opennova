@@ -37,7 +37,7 @@ class Simulation;
 // (hip) / `tpos` (ADS). The original adds the equipped weapon's view-bias
 // offset to the eye in view-local space, rotated by the view orientation,
 // then draws the gun (gfx1) + character arms at that view root [orig:
-// Player_UpdateFirstPersonCamera @0x4dd380 -> g_view_euler_translation_out;
+// Player_UpdateFirstPersonCamera @0x4dd380 -> g_ViewEulerTranslationOut;
 // Player_RenderFirstPersonViewModel @0x4ded60]. The weapon.def parser stores
 // the pos/tpos POSITION as `atof(str) * 256.0` (a 16.16 fixed-point world
 // coord; scale flt_7D1D70 @0x544770) and the ROTATION as degrees -> 32-bit

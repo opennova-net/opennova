@@ -10,10 +10,10 @@
 // from (the ENG-4/FNT pattern: policy + constants native, the CanvasItem
 // draws stay shell-side). The fill arithmetic already lives in hud_math.h
 // (loading_bar_fill_span).
-// [orig: background + text compositing render_loading_screen @ 0x521d10;
+// [orig: background + text compositing Render_LoadingScreen @ 0x521d10;
 //  session text provider HUD_GetLoadingScreenTextByGameType @ 0x51f300;
 //  throttle + retail creep + bar draw LoadingScreen_UpdateAndPresent @ 0x586be0;
-//  bar primitive draw_progress_bar_0 @ 0x5d4c40]
+//  bar primitive HUD_DrawProgressBar_0 @ 0x5d4c40]
 // Witness record: docs/interface/loading-screen-re.md.
 
 namespace opennova::hud {
@@ -115,7 +115,7 @@ inline constexpr const char *kLoadingServerMessageLabelFallback =
 
 // <mission>.bms -> <mission>.pcx: the sidecar image name for a mission file
 // — the file part with its extension replaced (or appended) [orig:
-// PathRemoveExtension + Path_ReplaceOrAppendExtension(path, "pcx")
+// Path_RemoveExtension + Path_ReplaceOrAppendExtension(path, "pcx")
 // @ 0x521d66/0x521dab; resolution is case-insensitive through the VFS].
 inline std::string loading_sidecar_image_name(const std::string &mission_file) {
 	const size_t slash = mission_file.find_last_of("/\\");
@@ -133,7 +133,7 @@ inline std::string loading_sidecar_image_name(const std::string &mission_file) {
 // mouse button dismisses it (the key queue is flushed at entry so presses
 // made during the blocking load do not skip it; the START_MISSION sound is
 // fire-and-forget and never dismisses)
-// [orig: show_start_mission_splash @ 0x520820 — queue flush
+// [orig: Game_ShowStartMissionSplash @ 0x520820 — queue flush
 //  Input_ResetKeyQueue @ 0x760e00, exit test input_mask/@ 0x520a2d +
 //  Input_DequeueKeyEvent @ 0x520a36; caller gate @ 0x525d38].
 
@@ -154,7 +154,7 @@ inline constexpr const char *kSplashSoundSet = "START_MISSION";
 // half-bright text fold (hud_math.h half_bright_argb), color alternating on
 // GetTickCount() bit 0x200 — a 512 ms two-color pulse, white / light red
 // [orig: fetch @ 0x520975; HUD_DrawTextAtVirtualPos(ctx, 512, 730, 0, text,
-//  g_hudLabelFontLarge, color, mode=2 centered) @ 0x5209da; blink select
+//  g_HUDLabelFontLarge, color, mode=2 centered) @ 0x5209da; blink select
 //  @ 0x5209b0-0x5209be; font slot Impac22b.fnt @ HUD_InitAllFonts 0x51ef4e;
 //  centered dispatch HUD_DrawTextCentered_HalfBright @ 0x580680].
 inline constexpr const char *kSplashContinueTextKey = "LT_Continue";
@@ -167,7 +167,7 @@ inline constexpr uint32_t kSplashContinueColorOff = 0xFFFF8080u;
 inline constexpr int kSplashBlinkMaskMs = 0x200;
 
 // --- the wrapped text block (loading_screen.cpp) --------------------------------
-// The original composites its text blocks with render_draw_wrapped_text_block_ex
+// The original composites its text blocks with Render_DrawWrappedTextBlockEx
 // @ 0x580eb0: a line breaker and a line placer over one width measure. The
 // measure is the embedder's (today the FontFile view of the .fnt; D-LOADSCR-2
 // carries the CGameFont metric residual), so the rules take it as a callback:

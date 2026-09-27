@@ -90,7 +90,7 @@ void GameWorld::_ready() {
 		// surface textures through this wired owner (never a parent probe).
 		dispatcher_->set_terrain(terrain_);
 		// The detail sway phase reads the weather oscillator's ring slot 0
-		// (retail Env_WaveOscRing[0] in Foliage_SetupVertexShaderConstants).
+		// (retail g_EnvWaveOscRing[0] in Foliage_SetupVertexShaderConstants).
 		dispatcher_->set_weather(weather_);
 	}
 	// The two shadow nodes live in game_world.tscn (after Celestial) like the
@@ -578,7 +578,7 @@ void GameWorld::_bind_methods() {
 	// during the pre-load wait: server/mission names + the exact wire-header
 	// world about to be constructed. The shell refreshes its loading screen
 	// from this -- retail's connect stream fills the same session vars before
-	// its header-backed load [orig: parse_server_session_variables @ 0x5202f0].
+	// its header-backed load [orig: Client_ParseServerSessionVariables @ 0x5202f0].
 	ADD_SIGNAL(MethodInfo(kSignalJoinSessionIdentified,
 			PropertyInfo(Variant::OBJECT, "info", PROPERTY_HINT_RESOURCE_TYPE, "LoadingScreenInfo")));
 	// A joiner crossed the authoritative admission edge. Wire-header world
@@ -595,7 +595,7 @@ void GameWorld::_bind_methods() {
 	// An ESTABLISHED in-match session went silent past the witnessed
 	// connection reap window (JO cs_dir0.timeout_ms = 120000 ms). Retail does
 	// not raise an in-world dialog for this: its transport reaps the peer and
-	// the disconnect event maps an error code onto g_mission_exit_reason, i.e.
+	// the disconnect event maps an error code onto g_MissionExitReason, i.e.
 	// it EXITS THE MISSION with a reason. The shell's analog is return-to-menu
 	// with `reason` surfaced the same way a join failure is. Emitted at most
 	// ONCE per session.

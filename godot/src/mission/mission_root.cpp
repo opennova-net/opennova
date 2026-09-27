@@ -155,7 +155,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// The listen host stamps its own type-2 connection during role bring-up, so
 	// its two per-side character selections must already be present here. The
 	// same profile is what a joiner uploads through ClientAuth.
-	// [orig: apply_session_settings_to_globals @0x551500;
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551500;
 	//  Server_PlayerAdd @0x51CBC0 -> packed id @0x51D0B1]
 	if (options->get_local_character_profile().is_valid()) {
 		sim_->set_local_character_profile(options->get_local_character_profile());
@@ -250,7 +250,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 				session_options->set_spawn_names(spawn_names);
 			}
 		}
-		// The host's expansion version checksum (retail's g_expansion_checksum) is
+		// The host's expansion version checksum (retail's g_ExpansionChecksum) is
 		// CRC'd from the loose expansion/<name>/version.txt under the install root;
 		// the join gate compares it against each joiner's VERSIONCRCSTRING while an
 		// expansion is active (D-NET-166).

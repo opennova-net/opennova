@@ -264,7 +264,7 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 		opennova::io::float_to_fp16_16_round_sat(p_camera.y),
 	};
 	// The per-render update precedes the compile (retail the drawer calls
-	// update_weather_particle_positions first @ 0x5dee65).
+	// WeatherParticle_UpdatePositions first @ 0x5dee65).
 	if (weather.raining()) kernel_->update_precipitation(cam_q16[0], cam_q16[1], cam_q16[2]);
 	opennova::renderer::PrecipitationCamera camera;
 	for (int i = 0; i < 3; ++i) camera.position_q16[i] = cam_q16[i];
@@ -333,7 +333,7 @@ bool Simulation::native_environment_snapshot(
 	out.ground_rgb = rgb(core.fill_block.render_color);
 	out.ceiling_rgb = rgb(core.sky_color_blocks.ceiling.render_color);
 	out.floor_rgb = rgb(core.sky_color_blocks.floor.render_color);
-	// Env_TerrainLightCombined = light x 0xB5/256 + sky; Env_CeilingFloorBlend
+	// g_EnvTerrainLightCombined = light x 0xB5/256 + sky; g_EnvCeilingFloorBlend
 	// = ceiling x 0xB5/256 + floor x 0xB5/256 (retail @ 0x57f0b3..0x57f110).
 	const auto combine = [](uint32_t a, uint32_t a_scale, uint32_t b, uint32_t b_scale) {
 		uint32_t out_rgb = 0;

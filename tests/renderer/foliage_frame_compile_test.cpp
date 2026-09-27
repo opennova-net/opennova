@@ -78,7 +78,7 @@ const r::FoliageMeshBuild *first_detail_build(const r::FoliageDrawList &list) {
 // A + sx*cos - sz*sin (Godot X), y = ground + sy*0.5; the 3DI import stores
 // vertex.x = -sx. Candidate 0 of key 0x00100030 has centre (keyHi + A,
 // keyLo + B) = (18.63215637, 49.69863892) and yaw 4.83126879.
-// [orig: generate_foliage_instances_0 @ 0x600112..0x60014d, 0x600121 (y)]
+// [orig: Foliage_GenerateInstances_0 @ 0x600112..0x60014d, 0x600121 (y)]
 void test_detail_vertex_placement_matches_retail() {
 	r::FoliageFrameCompiler compiler = one_triangle_compiler();
 	const f::WorldSamplers world = flat_world();
@@ -389,7 +389,7 @@ void test_entity_water_side() {
 	// Camera below: the above-water entity is the far one.
 	CHECK(r::foliage_entity_far_side(1.5f, 0.0f, 0.5f));
 	CHECK(!r::foliage_entity_far_side(1.49f, 0.0f, 0.5f));
-	// Env_WaterHeightFixed 0 (no water) still splits at z - 1 < 0.
+	// g_EnvWaterHeightFixed 0 (no water) still splits at z - 1 < 0.
 	CHECK(!r::foliage_entity_far_side(1.0f, 20.0f, 0.0f));
 	CHECK(r::foliage_entity_far_side(0.99f, 20.0f, 0.0f));
 }

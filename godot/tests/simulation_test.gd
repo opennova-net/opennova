@@ -1139,7 +1139,7 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 	# HUD ERROR is selected from two stance triplets. Air/water/mount overrides
 	# live in the body; this public seam pins the ordinary stance order and the
 	# settled-first-person +3 verdict. [orig: HUD_DrawCrosshair
-	# @0x592b35..0x592b87; Player_CanFireWeapon @0x5cf780]
+	# @0x592b35..0x592b87; Player_IsOpticalViewVisible @0x5cf780]
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
@@ -1201,7 +1201,7 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 
 
 func test_aimed_shot_verdict_uses_both_promoted_optic_predicates() -> void:
-	# Player_CanFireWeapon calls both helpers: Scoped is Flags bit 0, while the
+	# Player_IsOpticalViewVisible calls both helpers: Scoped is Flags bit 0, while the
 	# misleadingly named second helper is simply Sighted bit 1 outside SWITCHFROM.
 	# Both read the same post-ease promoted active bit. [orig: @0x4dcc80/@0x4dcd30]
 	for case in [
@@ -1246,7 +1246,7 @@ func test_ordinary_aimed_shot_rejects_water_and_movement() -> void:
 
 
 	# The normal Scoped move path also requests an unscope, but its public result
-	# pins Player_CanFireWeapon's MoveOrder&8 rejection end-to-end.
+	# pins Player_IsOpticalViewVisible's MoveOrder&8 rejection end-to-end.
 	sim = _aim_verdict_sim(0x1)
 	sim.step()
 	assert_true(sim.request_local_player_scope_toggle())
@@ -1261,7 +1261,7 @@ func test_ordinary_aimed_shot_rejects_water_and_movement() -> void:
 
 func test_forcescoped_overrides_ordinary_gates_but_not_card_switch_reload() -> void:
 	# ForceScoped overwrites the ordinary scope/movement/air/water verdict in
-	# first person. The reload test sits earlier in Player_CanFireWeapon and is
+	# first person. The reload test sits earlier in Player_IsOpticalViewVisible and is
 	# therefore still terminal. [orig: @0x5cf7c7 and @0x5cf845..0x5cf874]
 	var sim := _aim_verdict_sim(0x20000001)
 	sim.step()
@@ -1305,7 +1305,7 @@ func test_decoded_round_stance_uses_retail_animation_flags() -> void:
 	# transition rows that the former hand-maintained list missed, plus
 	# idle_mortar, which it incorrectly called crouched. Live IDA table reads:
 	# 46=0x008, 169..171=0x18D, 172=0x28D.
-	# [orig: g_animStateFlagsTable @0x8139E8]
+	# [orig: g_AnimStateFlagsTable @0x8139E8]
 	for row in [
 		{"anim": 46, "flags": 0x008, "category": 2},
 		{"anim": 169, "flags": 0x18D, "category": 1},
@@ -2880,7 +2880,7 @@ end
 
 
 
-# The floating attach labels [orig: draw_vehicle_seat_and_armory_labels @0x5a3290
+# The floating attach labels [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290
 # selection half]: free seats in the 4.0 u radius label with exactly one nearest
 # highlight; the unarmed local player sees every candidate; the armory zone flag is
 # absent here so seat mode applies and no armory labels appear.
@@ -2920,9 +2920,9 @@ end
 
 
 func test_attach_labels_share_complete_can_fire_verdict() -> void:
-	# The label pass consumes the same live Player_CanFireWeapon verdict as the
+	# The label pass consumes the same live Player_IsOpticalViewVisible verdict as the
 	# body/HUD spread row: owning an equipped slot alone is not sufficient.
-	# [orig: Player_CanFireWeapon @0x5cf780; label branch @0x5a32df]
+	# [orig: Player_IsOpticalViewVisible @0x5cf780; label branch @0x5a32df]
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101294,
@@ -4057,7 +4057,7 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 		"the anchors are the last occlusion frame's, not the tick's")
 	# The collector gates the local player like any other person: turned
 	# away, the crouched body is not collected and anchors nothing
-	# [orig: collect_visible_entities_for_terrain @ 0x5c8c60, no
+	# [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60, no
 	# local-player exception].
 	_occlusion_frame(sim, Transform3D(Basis(Vector3.UP, PI), _ANCHOR_CAMERA.origin))
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
@@ -4363,7 +4363,7 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 		assert_eq(int(visibility[0]), placed.bms_id)
 		var packed := int(visibility[1])
 		# Outdoors a windowless batch member draws its exterior section only
-		# (retail build_sector_visibility_masks @0x5c87d7..0x5c8830: the
+		# (retail Terrain_BuildSectorVisibilityMasks @0x5c87d7..0x5c8830: the
 		# +0x2CD flag clear -> mask 1), the same word every batched building
 		# carries; the fixture item authors no forced sections.
 		assert_eq(Simulation.building_visibility_mask(packed), 1,

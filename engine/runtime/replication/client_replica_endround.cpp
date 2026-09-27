@@ -94,7 +94,7 @@ void ClientReplicaPipeline::apply_end_round_stats_chunk(
 	if (end < static_cast<size_t>(chunk.total_size)) return;
 
 	// Decode the stream AS IT STANDS and leave it standing [orig: the parse
-	// from @0x431E0B; g_scoreboardDirty = 1 @0x4321BE]. A board our decoder
+	// from @0x431E0B; g_ScoreboardDirty = 1 @0x4321BE]. A board our decoder
 	// rejects is dropped, leaving the last good one: retail's parser clips
 	// every read to the stream end and cannot reject, so the drop is the
 	// port-side policy for input retail would have read as zeros.

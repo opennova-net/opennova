@@ -9,7 +9,7 @@ extends Node
 ## remain available until the server releases its pending hold because invalid
 ## or contested picks can be silently dropped.
 ## [orig: death.mnu <NAME>DEATH</NAME>; DeathScreen_UpdateShroudReveal @0x554730 (shroud reveal:
-##  immediate on g_deploy_screen_active, 240 ticks after death; content refresh
+##  immediate on g_DeployScreenActive, 240 ticks after death; content refresh
 ##  every 16 ticks); UI_UpdateDeathScreenContent @0x5536a0 (list populate:
 ##  row 0 "'<DEFAULT_SPAWN_KEY>' <HOME>" node 0, then per zone
 ##  "'<A+idx>' <WPNames/STRWPNAME%03d>" node idx+1, team color tags <c4040FF>/
@@ -19,7 +19,7 @@ extends Node
 ##  STATIC_PSPRESPAWN_MSG1 hold, the STATIC_MEDIC_MSG1/STATIC_CALLMEDIC_MSG
 ##  revive-window pair); UI_RegisterDeathScreenCallbacks @0x554610 (SPAWNPOINTS_LIST
 ##  select -> Input_QueueEvent(12, node) @0x55364d, guarded on node != -1);
-##  update_death_screen_ui @0x553150 (map zoom fit from the zone AABB,
+##  DeathScreen_UpdateUI @0x553150 (map zoom fit from the zone AABB,
 ##  SWAP_TEAMS/BUTTON_TEAMLIST only in the TDM family)]
 ##
 ## The MAP window's terrain/zone/blip draw (the windowed map renderer
@@ -194,7 +194,7 @@ func _process(delta: float) -> void:
 	# longer play. Tear the screen down instead and leave the exit to the session-loss leg:
 	# retail's disconnect exits the mission outright on this edge, it never resumes play.
 	# [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 -> Input_QueueEvent(3)
-	#  @0x4c67a4 -> g_mission_exit_reason = 1 (Input_HandleActionBinding case 3 @0x49af2c),
+	#  @0x4c67a4 -> g_MissionExitReason = 1 (Input_HandleActionBinding case 3 @0x49af2c),
 	#  the nav-push "MainMenu" teardown every abort leg takes @0x568654]
 	if bool(sim.is_session_lost()):
 		teardown()
@@ -300,7 +300,7 @@ func _populate_spawn_list(sim: Simulation) -> void:
 
 
 # The team-change service is unmodeled: hide the swap/team buttons (retail
-# shows them only for the TDM family). [orig: update_death_screen_ui @0x553150]
+# shows them only for the TDM family). [orig: DeathScreen_UpdateUI @0x553150]
 func _hide_team_service_buttons() -> void:
 	for control_name in ["SWAP_TEAMS", "BUTTON_TEAMLIST"]:
 		# A -1 id means this screen simply does not author the control.

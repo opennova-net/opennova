@@ -51,7 +51,7 @@ inline constexpr int kNvgLensStripVertices = 130;
 //  dword_2BDFAB0 and the scene on stages 0/1 @0x5d0a41..0x5d0a5b, the base
 //  angle 0x2200000 @0x5d0a75 and its 0x800000 step @0x5d0e8c, the radii and
 //  colour @0x5d0a93..0x5d0af2, the stops @0x5d0b01..0x5d0e5c, the draw
-//  @0x5d0e7f; init_view_effect_shaders_and_textures @0x5cf960 (the ps text)
+//  @0x5d0e7f; ViewFx_InitShadersAndTextures @0x5cf960 (the ps text)
 //  and @0x5cf9de..0x5cf9ea (blend ONE/ZERO, off);
 //  ViewFx_CreateRenderTargets @0x5cf6c1..0x5cf6de (64 x 16)]
 inline constexpr int kNvgPolarWidth = 64;
@@ -79,7 +79,7 @@ std::array<NvgLensStrip, kNvgPolarPasses> nvg_polar_unwrap_passes();
 //  q @0x5d200c..0x5d2023, the texel offsets @0x5d2076..0x5d20a0, the shrink
 //  @0x5d20b6, the stops @0x5d2179..0x5d2305 (rotation @0x5d21af..0x5d21ce), the
 //  draw @0x5d2328; the glow state GfxShader_Create1TexModeId(0, 0x602)
-//  init_view_effect_shaders_and_textures @0x5cfc23..0x5cfc34]
+//  ViewFx_InitShadersAndTextures @0x5cfc23..0x5cfc34]
 inline constexpr int kNvgLensPasses = 5;
 inline constexpr int kNvgLensBands = 4;
 inline constexpr std::uint32_t kNvgLensTintColor = 0xFF408040u;
@@ -91,7 +91,7 @@ inline constexpr std::uint32_t kNvgLensGlowColor = 0xFF202020u;
 // [orig: NVG_DrawScopedLens -- the state dword_2BDFAB4 and the polar
 //  target on stages 0/1 @0x5d2354..0x5d2380, the stops @0x5d23be..0x5d2770,
 //  the draw @0x5d2793; the state sub_6790E0(0, 0, 0x400600, 2)
-//  init_view_effect_shaders_and_textures @0x5cf92a..0x5cf94a]
+//  ViewFx_InitShadersAndTextures @0x5cf92a..0x5cf94a]
 inline constexpr std::uint32_t kNvgLensRingInnerColor = 0xFF181820u;
 inline constexpr std::uint32_t kNvgLensRingOuterColor = 0xFF040408u;
 

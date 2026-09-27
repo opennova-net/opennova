@@ -64,7 +64,7 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 	// A running pre-round countdown holds every sample. The second test,
 	// dword_A87050 @0x50D77F, repeats the frame's own gate on the
 	// Server_TickUpdate call (Game_ProcessMainFrame @0x5266AE), so it never
-	// holds here. [orig: `cmp g_preround_delay_timer,ebx; jnz` @0x50D773]
+	// holds here. [orig: `cmp g_PreRoundDelayTimer,ebx; jnz` @0x50D773]
 	if (world.preround_delay_seconds != 0) return;
 	const int32_t limit = breath_sample_limit(world);
 	// The surfaced-dive split, 160% of breathtime: `lea edx,[edx+edx*4]; shl
@@ -90,7 +90,7 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 		// The eye (entity Z + entity+0x74) against the raw water plane,
 		// signed; retail carries no authored-water test at this site.
 		// [orig: @0x50D7CD..0x50D7D9 `add eax,[ecx+0Ch]; cmp eax,
-		//  Env_WaterHeightFixed; jge`]
+		//  g_EnvWaterHeightFixed; jge`]
 		if (world::to_fixed(player->position.z) + player->eye_offset_z >= world.env.water_z) {
 			// Surfacing after more than four samples plays the breath (a dive
 			// no longer than 160% of the breath value) or the gasp composite.

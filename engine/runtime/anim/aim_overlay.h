@@ -119,7 +119,7 @@ struct AimOverlayInputs {
     int32_t lean = 0;
     int32_t pitch_blend = 0;
     int32_t pitch_kick_accum = 0;
-    // g_animStateFlagsTable[animStateId] & 0x40: the aim-overlay branch. Prone walks
+    // g_AnimStateFlagsTable[animStateId] & 0x40: the aim-overlay branch. Prone walks
     // (0x603), rolls, and deaths lack it and take the reduced branch.
     bool aim_state = false;
     // animStateId 41/42 (roll_left/right): the clip owns the whole body -- roll overlays
@@ -166,7 +166,7 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
 // OVERWRITES the entity's own Yaw/Pitch/Roll with the triple below and builds a transform
 // from the entity, which is why the result reads as an entity orientation and not as an
 // overlay delta.
-//   aim state (g_animStateFlagsTable & 0x40):
+//   aim state (g_AnimStateFlagsTable & 0x40):
 //     yaw = aim yaw (PURE — not the 3/4 blend the arms use)
 //     pitch = aim pitch + pitchKickAccum + 2*pitchBlend      [orig: @ 0x4b1bdc..0x4b1bf8]
 //     roll = roll + lean

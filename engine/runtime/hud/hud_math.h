@@ -39,7 +39,7 @@ int32_t screen_to_design_y(int32_t y, int32_t surface_h);
 // left edge, u1 = 1 - u0 + 1 / (right - left) in on-screen pixels, and the
 // same on v; tex_w / tex_h are the caller's AUTHORED extents. The vertex
 // order puts (u0, v0) at the top-left and (u1, v1) at the bottom-right.
-// [orig: draw_textured_quad_with_border @0x590C40 -- 0.05 (flt_7C68E8)
+// [orig: HUD_DrawTexturedQuadWithBorder @0x590C40 -- 0.05 (flt_7C68E8)
 //  @0x590D36, u0 / v0 @0x590D3C..0x590D5A, u1 @0x590D5E..0x590D77,
 //  v1 @0x590D7B..0x590D8C]
 struct BorderedQuadUv {
@@ -59,7 +59,7 @@ inline constexpr double kSecondsToTicks = io::kTicksPerSecondInt;
 
 int fade_decay(int elapsed_ticks, int ramp_ticks);
 // The ammo/clip flash: base + decay clamped by the ALPHAFADE max
-// [orig: draw_hud_ammo_indicator @0x599af9].
+// [orig: HUD_DrawAmmoIndicator @0x599af9].
 int fade_flash_alpha(int elapsed_ticks, int ramp_ticks, int base_alpha,
 		int max_alpha);
 // The stance cross-fade pair: current = min(base + decay, 255); the previous
@@ -117,7 +117,7 @@ uint32_t half_bright_argb(uint32_t argb);
 uint32_t half_bright_keep_alpha(uint32_t argb);
 
 // ---------------------------------------------------------------------------
-// The ammo counter's text fold [orig: hud_draw_weapon_ammo_and_name @0x5939d0,
+// The ammo counter's text fold [orig: HUD_DrawWeaponAmmoAndName @0x5939d0,
 // @0x593a33..0x593ab0]: "clip/reserve" for a magazine weapon (clip valid,
 // capacity >= 2), plain "reserve" otherwise, empty on the -1 sentinels; and
 // the weapon-name x nudge on surfaces 640 wide or narrower (-4 left / +4
@@ -127,7 +127,7 @@ std::string format_ammo(int clip, int reserve, int capacity);
 int weapon_name_x_nudge(bool narrow_surface, int align);
 
 // ---------------------------------------------------------------------------
-// The clip indicator's round-icon count [orig: draw_hud_ammo_indicator
+// The clip indicator's round-icon count [orig: HUD_DrawAmmoIndicator
 // @0x599b9c..0x599bc1]: the magazine count (the carried pool for capacity-1
 // weapons), ceil-divided by a >1 rounds-per-icon divisor, capped at 40.
 
@@ -219,7 +219,7 @@ inline constexpr int kFriendlyTagModeFull = static_cast<int>(FriendlyTagMode::kF
 inline constexpr int kFriendlyTagModeBrief = static_cast<int>(FriendlyTagMode::kBrief);
 inline constexpr int kFriendlyTagModeCount = 4;
 // Boot default FULL, process-lifetime like retail's global
-// [orig: g_friendlyTagsMode @0x24C18C4; default @0x4a7fed].
+// [orig: g_FriendlyTagsMode @0x24C18C4; default @0x4a7fed].
 inline constexpr FriendlyTagMode kFriendlyTagModeDefault = FriendlyTagMode::kFull;
 // The cycle 0 -> 1 -> 2 -> 3 -> 0 [orig: input action case 30 @0x49b573].
 inline FriendlyTagMode next_friendly_tag_mode(FriendlyTagMode mode) {
@@ -239,8 +239,8 @@ int friendly_tag_alpha(int32_t dist_q16);
 bool friendly_tag_text_visible(int mode, int32_t dist_q16);
 
 // The speaking-entity pulse: each channel saturates at c/2 + level/4
-// [orig: the MMX blend @0x5a3e98..0x5a3ebf against g_audioOutLevelStage1;
-// the speaking entity is g_voicePlaybackEntity @0xC6EC38, stamped at scripted
+// [orig: the MMX blend @0x5a3e98..0x5a3ebf against g_AudioOutLevelStage1;
+// the speaking entity is g_VoicePlaybackEntity @0xC6EC38, stamped at scripted
 // positional voice start @0x4ece03]. Alpha byte passes through.
 uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255);
 
@@ -248,10 +248,10 @@ uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255);
 // triangle wave on the HUD frame counter lifts every RGB channel toward white
 // and back — `t = (frame - 8) & 0x3F; if (t > 0x20) t = 0x3F - t;
 // c += ((255 - c) * t) >> 5` per channel, alpha untouched
-// [orig: HUD_DrawEntityLabel @0x5a3dfb..0x5a3e6d over g_hudColorLightBlue].
+// [orig: HUD_DrawEntityLabel @0x5a3dfb..0x5a3e6d over g_HUDColors.palette[3]].
 uint32_t friendly_tag_revive_pulse(uint32_t argb, int frame_counter);
 
-// The two g_hudColorTable entries the downed legs read [orig:
+// The two g_HUDColors entries the downed legs read [orig:
 // HUD_InitTeamColorTable @0x51f26d table[3] light blue, @0x51f295 table[8]
 // gray; read @0x5a3deb / @0x5a3e77].
 inline constexpr uint32_t kFriendlyTagDownedLightBlue = 0xFF80A0FFu;
@@ -262,12 +262,12 @@ inline constexpr uint32_t kFriendlyTagDownedGray = 0xFFA0A0A0u;
 // -> HUD_DrawRotatedIconQuad @0x599630 (corners x -/+ size, y -/+ size
 // @0x599670..0x5996c2; `color | 0xFF000000` @0x5996ef); the palette+0Ch
 // read @0x5a417e; the same cell is the map blip icon 23 of
-// draw_entity_labels_and_markers @0x5a49e0].
+// HUD_DrawEntityLabelsAndMarkers @0x5a49e0].
 inline constexpr uint8_t kFriendlyTagRadioRequestIcon = 0x17;
 
 // The unnamed-entity fallback: a literal '^' + the compiled-in 36-name table
 // indexed by the pool-encoded entity id [orig: @0x5a4047..0x5a40cd;
-// g_fallbackPeopleNames @0x840a78, count @0x840a0c].
+// g_FallbackPeopleNames @0x840a78, count @0x840a0c].
 std::string friendly_tag_fallback_name(uint16_t encoded_entity_id);
 
 // The overlay label-font selection by surface width: the Arial pair and the
@@ -280,12 +280,12 @@ struct HudLabelFontChoice {
 	const char *normal_fnt;
 	const char *bold_fnt;
 	// The single-file large slot the big-map grid labels ride
-	// [orig: HUD_InitAllFonts — g_hudLabelFontLarge @0xB4C3A0 = Impac22b.fnt
+	// [orig: HUD_InitAllFonts — g_HUDLabelFontLarge @0xB4C3A0 = Impac22b.fnt
 	//  at the over-800 scale for every width].
 	const char *large_fnt;
 	// The Impact38 slot the end-round overlay / death screen / disconnect
 	// dialog draw with, loaded at the SAME over-800 scale as the large slot
-	// [orig: HUD_InitAllFonts — g_hudLabelFontImpact38 @0xB4C3AC = Impac38b.fnt
+	// [orig: HUD_InitAllFonts — g_HUDLabelFontImpact38 @0xB4C3AC = Impac38b.fnt
 	//  @0x51ef7b..0x51ef94, the scale register shared with Impac22b].
 	const char *impact38_fnt = nullptr;
 	float scale = 1.0f;

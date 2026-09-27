@@ -40,7 +40,7 @@ EpaskParams generate_epask();
 // Serialize / parse the cookie + form-field representation. Parsing throws
 // std::runtime_error when either ':' is missing or a numeric field is 512+
 // bytes — retail's parser returns -1 there and the bundle is unusable
-// [orig: parse_colon_delimited_string @0x666710]. Numeric fields use atoi
+// [orig: EPASK_ParseColonDelimitedString @0x666710]. Numeric fields use atoi
 // prefixes ("123abc" -> 123, "" -> 0) like the retail _atoi64.
 std::string epask_to_string(const EpaskParams &p);
 EpaskParams epask_from_string(const std::string &s);

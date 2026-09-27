@@ -114,7 +114,7 @@ void test_wac_layers_execute_in_retail_order() {
 
 	w::World world;
     // A mission only advances while a human is in the world - retail holds the
-    // WAC tick on `wac_var_humans || !wac_var_ticks` (World::script_may_advance).
+    // WAC tick on `g_WacVarHumans || !g_WacVarTicks` (World::script_may_advance).
 	world.cached.humans = 1;
 	wc::WacSystem wac;
 	std::string error;

@@ -5,8 +5,8 @@ extends GutTest
 # MnuDocument (the compiled-menu surface; the Control tree is gone). Pins the witnessed
 # wiring [orig: WeaponDef_RegisterUICallbacks @0x567020 registers PLAYER_CLASS / PRIMARY /
 # SECONDARY / ACCESSORY / *_AMMO / ACCEPT / CANCEL on the "WEAPON" screen; population
-# populate_three_category_lists @0x566db0 (sorted rows, NONE at 0); class resolution
-# Armory_ResolveSelectedClass @0x5642f0; weight update_weapon_weight_display @0x565640;
+# UI_PopulateThreeCategoryLists @0x566db0 (sorted rows, NONE at 0); class resolution
+# Armory_ResolveSelectedClass @0x5642f0; weight UI_UpdateWeaponWeightDisplay @0x565640;
 # ACCEPT WeaponLoadout_ApplyFromBuffer @0x565cd0]. The zone-gated OPEN path (the
 # useitem key, action 177, on entity Flags 0x400000 @0x4e0b4d) lives in main_game +
 # the collision resolver (ctest collision_test) — here the screen itself is the unit.
@@ -133,7 +133,7 @@ func _items(driver: MenuDriver, name: String) -> Array:
 
 # The armory row label = LOADOUT_MENU_TEXTID resolved in the gametext table's WepDes
 # section [orig: WeaponDef_ParseProperty @0x54d730 — GameText_GetString("WepDes",
-# textid) -> g_loadoutWeaponTable entry+40, raw weapon name fallback; g_TextGameText
+# textid) -> g_LoadoutWeaponTable entry+40, raw weapon name fallback; g_TextGameText
 # loads gametext.bin @0x4a6cd0 — NOT Game.bin, the separate menu resource @0x552510].
 func test_weapon_labels_resolve_from_gametext_wepdes() -> void:
 	var t := RtxtStringFile.new()
@@ -219,7 +219,7 @@ func test_populates_classes_slots_and_ammo() -> void:
 
 	# Retail rows are zero-based UI indices for one-based clip counts: row 0 means
 	# one clip and row maxclips-1 means a full load
-	# [orig: populate_ammo_type_combo_boxes @0x564c7d..0x564ce4].
+	# [orig: UI_PopulateAmmoTypeComboBoxes @0x564c7d..0x564ce4].
 	var ammo := driver.widget_id("PRIMARY_AMMO1")
 	var weapon := companion.selected_weapon("PRIMARY")
 	var maxclips := weapon.maxclips
@@ -233,7 +233,7 @@ func test_populates_classes_slots_and_ammo() -> void:
 		"the first zero-based UI row serializes as one clip")
 
 
-# update_weapon_weight_display updates the three blank *_ICON windows from the
+# UI_UpdateWeaponWeightDisplay updates the three blank *_ICON windows from the
 # selected weapon.def row's loadout_menu_icon (+144); selecting NONE clears it
 # [orig: @0x5657a8..0x5658a3].
 func test_selected_primary_mounts_and_clears_its_weapon_icon() -> void:
@@ -303,7 +303,7 @@ func test_class_change_refilters_slots() -> void:
 
 	# Sniper (index 1, value 6): the class mask re-filters it out. select_row
 	# emits the "spinlist" value change — the driver relay of the spin flip.
-	# [orig: handle_team_class_selection @0x566f60 -> populate_three_category_lists @0x566db0]
+	# [orig: UI_HandleTeamClassSelection @0x566f60 -> UI_PopulateThreeCategoryLists @0x566db0]
 	driver.select_row(driver.widget_id("PLAYER_CLASS"), 1)
 	assert_false(_items(driver, "PRIMARY").has("WPN_M4AUTO"), "M4 is hidden for Sniper")
 
@@ -317,8 +317,8 @@ func test_weight_updates_from_selection() -> void:
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
 	# weight = weaponweight + clips * clipweight summed over selected slots, rendered
 	# "<TOTAL_WEIGHT> <w> <LBS> (<encumbrance>)" with bands <33.3/<66.6
-	# [orig: calculate_equipped_weapons_weight @0x565490;
-	#  update_weapon_weight_display @0x565640 "%s %.1f %s (%s)"]
+	# [orig: UI_CalculateEquippedWeaponsWeight @0x565490;
+	#  UI_UpdateWeaponWeightDisplay @0x565640 "%s %.1f %s (%s)"]
 	assert_false(companion.weight_line().is_empty(), "the weight readout renders")
 	var w := companion.selected_weapon("PRIMARY")
 	assert_not_null(w, "the equipped primary is selected")
@@ -451,8 +451,8 @@ func test_accept_emits_loadout_and_cancel_closes() -> void:
 # The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding row's
 # runtime keys (the armory opener — Shift) on the ACCEPT control, debounced until the
 # opener press releases once [orig: UI_InitTeamClassSelection @0x567370 adds
-# g_useItemBindingKey0/1 to control "ACCEPT" via CUIWidget_AddScreenHotkey
-# @0x5674a8/@0x5674c0; the open stamps g_weaponScreenOpenDebounce @0x4e0b21,
+# g_UseItemBindingKey0/1 to control "ACCEPT" via CUIWidget_AddScreenHotkey
+# @0x5674a8/@0x5674c0; the open stamps g_WeaponScreenOpenDebounce @0x4e0b21,
 # cleared only by the row's KEYUP — Input_HandleMenuKeyRelease @0x4de2d0].
 # on_menu_built = the on-show: it stamps the debounce; ArmoryPresenter routes the
 # key edges here while its overlay is open.

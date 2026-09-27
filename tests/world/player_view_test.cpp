@@ -396,7 +396,7 @@ void test_mode_arbiter() {
     v.local_dead = true;
     player_view_tick(v, eye);
     CHECK(v.camera_mode == 4 && !v.third_person);
-    // g_rules_flags bit 0 keeps the seat-derived mode instead.
+    // g_RulesFlags bit 0 keeps the seat-derived mode instead.
     v.rules_no_death_cam = true;
     player_view_tick(v, eye);
     CHECK(v.camera_mode == 0);
@@ -549,7 +549,7 @@ void test_nvg_toggle_gain_and_first_person_visibility() {
     v.camera_mode = 0;
     CHECK(player_view_nvg_visible(v));
     // The death lerp camera (mode 4) is not third person, yet retail's NVG
-    // world/post legs all need g_camera_mode == 0 [orig:
+    // world/post legs all need g_CameraMode == 0 [orig:
     // CTerrainRenderer_BuildLightingShaderConstants @ 0x5c81fe; Render_TerrainScene
     // @ 0x610d09; Render_ProcessMainSceneFrame @ 0x5ca6b8].
     v.local_dead = true;
@@ -750,10 +750,10 @@ void test_input_dispatch_gates() {
 void test_toggle_latch_refusal_and_inset() {
     // The witnessed toggle protocol [orig: Player_ToggleWeaponScope — the
     // !activeFlag refusal @ 0x4df177; Setup 15 @ 0x4df36e / 7 Inset @ 0x4df355 /
-    // 1 hipfire-return @ 0x4df1c3; g_scopeHipfire writes @ 0x4df212/@ 0x4df373].
+    // 1 hipfire-return @ 0x4df1c3; g_ScopeHipfire writes @ 0x4df212/@ 0x4df373].
     PlayerViewState v = bound_view();
     const float eye[3] = {0, 0, 0};
-    CHECK(v.scope_hipfire); // [orig: g_scopeHipfire init 1]
+    CHECK(v.scope_hipfire); // [orig: g_ScopeHipfire init 1]
     CHECK(player_view_set_engaged(v, true, false));
     CHECK(v.weapon_pose_interp.velocity.position_q16[0] == -21.0f); // 15 steps, hip -> tpos
     CHECK(!v.scope_hipfire);
@@ -783,7 +783,7 @@ void test_toggle_latch_refusal_and_inset() {
 
 void test_unscope_on_move_and_up_refusal() {
     // The movement-held latch legs [orig: Player_PackInputStateToEntity @ 0x4df450]:
-    // g_movementKeyHeld blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while
+    // g_MovementKeyHeld blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while
     // PROMOTED at scope on a Scoped (flags 1) weapon, forces the toggle
     // (@ 0x4df4c9..0x4df4ec).
     const int32_t kScoped = 1;         // weapon.def flags: Scoped
@@ -814,7 +814,7 @@ void test_unscope_on_move_and_up_refusal() {
     CHECK(player_view_scope_settled(v));
 
     // Promoted + movement: the auto-unscope fires, Scoped weapons only
-    // [orig: g_weaponScopeActive && Def->Flags & 1 @ 0x4df4c9..0x4df4ea].
+    // [orig: g_WeaponScopeActive && Def->Flags & 1 @ 0x4df4c9..0x4df4ea].
     CHECK(!player_view_move_input(v, true, kSighted));
     CHECK(player_view_move_input(v, true, kScoped));
     // The caller then runs the standard disengage (the full 15-step return —

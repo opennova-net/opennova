@@ -130,7 +130,7 @@ struct CollisionFace {
 // center @+92..+100 + radius @+104.]
 // The COBJ parent is not carried: section matrix i pairs with COBJ i strictly
 // by ordinal, even when several rows share one parent. [orig: runtime COBJ +40
-// = disk parent @0x5B3FCD; read only by build_world_bone_matrices @0x40C770
+// = disk parent @0x5B3FCD; read only by Bone_BuildWorldMatrices @0x40C770
 // behind the 'bfst' bone callback (@0x4E33D0, table row @0x82CF90), which no
 // JO/revx02 RMDL selects]
 struct CollisionSection {
@@ -306,12 +306,12 @@ bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t
 // mountedChild); `parent_cleared` models a caller that nulls +0x16C around
 // its query, leaving only the carried object [orig:
 // Physics_RaycastTerrainAndSectors @0x5399C6..0x539A12;
-// raycast_find_collision_entity @0x539AB8..0x539B10].
+// Physics_RaycastFindCollisionEntity @0x539AB8..0x539B10].
 EntityHandle los_walker_parent(const Entity *e, bool parent_cleared = false);
 
 // Terrain clip of a segment: on a hit writes the refined hit point to out_hit
 // and returns true; on clear out_hit is untouched. The iris camera-ray clip's
-// terrain leg [orig: raycast_entity_collision @ 0x413760 ->
+// terrain leg [orig: Entity_RaycastCollision @ 0x413760 ->
 // Terrain_RaycastHeightmapHiRes_0 @ 0x60e710 — called (start, end, end), the
 // ray end clipping in place].
 bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],
@@ -449,7 +449,7 @@ struct CollisionRay {
     int32_t half[3] = {};  // abs half extents
     int32_t dir[3] = {};   // normalized 16.16 direction (float-normalized like the orig)
 
-    // Build mid/half/dir from start/end. [orig: prologue of raycast_entity_collision
+    // Build mid/half/dir from start/end. [orig: prologue of Entity_RaycastCollision
     // @ 0x413760 / Entity_FindNearestByRay @ 0x413af0 (float normalize, ftol)]
     void refresh();
     // Recompute mid/half only — dir is built ONCE at ray construction and never
@@ -1074,7 +1074,7 @@ public:
     // material; the caller maps it to the effect row (person material 1 =
     // flesh). [orig: Weapon_RaycastAndSpawnImpact @0x4e8460 ->
     // Projectile_RaycastProximitySlots @0x4e5340 slot types 0/2/1]
-    // [orig: physics_raycast_entity_pools_and_update @0x539580]
+    // [orig: Physics_RaycastEntityPoolsAndUpdate @0x539580]
     ProjectileHit trace_aim(const World &world, const ProjectileTrace &trace) const;
     // Squib uses the general TYPE-1 solid / whole-person sphere query.
     // [orig: Entity_ProcessProjectileTravel @0x448D50 -> sub_539530 @0x539530]
@@ -1109,10 +1109,10 @@ public:
     // entries in `source`'s fixed proximity-candidate slice. This is a
     // different retail function from query_blink_boxes_at_point: the latter
     // walks the global building prefix for camera/occlusion callers, while
-    // terrain_sector_compute_lighting reuses the local player's
+    // Terrain_SectorComputeLighting reuses the local player's
     // entity+0x1BC/+0x1C0 slice for all three marched samples.
-    // [orig: terrain_sector_compute_lighting @ 0x5c7550, caller passes
-    // g_local_player_entity from Environment_ApplyFogAndAmbient @ 0x57e51d]
+    // [orig: Terrain_SectorComputeLighting @ 0x5c7550, caller passes
+    // g_LocalPlayerEntity from Environment_ApplyFogAndAmbient @ 0x57e51d]
     void query_candidate_blink_boxes_at_point(World &world, EntityHandle source,
                                               const int32_t pos[3], BlinkAccum &accum);
 
@@ -1149,8 +1149,8 @@ public:
     // TRUE = an eligible pool-1 dynamic or pool-2 static type-1 solid clips
     // the segment at `radius` (negative radius reads the planes thinner). The
     // iris/entity-sun callers use allowAllTypes=1, so there is no building-kind
-    // gate. [orig: raycast_find_collision_entity @ 0x539a70 ->
-    // raycast_against_entity_pool @ 0x538720]
+    // gate. [orig: Physics_RaycastFindCollisionEntity @ 0x539a70 ->
+    // Physics_RaycastAgainstEntityPool @ 0x538720]
     bool candidate_segment_hits_solid(World &world, EntityHandle source,
                                       const int32_t a[3], const int32_t b[3],
                                       int32_t radius);
@@ -1178,7 +1178,7 @@ public:
     // @ 0x5c6808, origin = position + (entity+0x1FC..+0x204)
     // @ 0x5c681f..0x5c6847, end = origin + 200*lightdir @ 0x5c6850..0x5c6876,
     // one decrement per blocked cast @ 0x5c689e..0x5c68ea;
-    // raycast_find_collision_entity @ 0x539a70 walks entity_a's
+    // Physics_RaycastFindCollisionEntity @ 0x539a70 walks entity_a's
     // +0x1BC/+0x1C0 slice]
     int sun_visibility_blocked_rays(World &world, const Entity &e,
                                     const int32_t sun_step_q16[3]);
@@ -1197,8 +1197,8 @@ public:
     // solid in `source`'s candidate slice. The returned handle identifies the
     // nearest entity hit; invalid means terrain-only or no hit. Terrain is
     // skipped for an indoors source. This is the single hosted form of
-    // raycast_entity_collision used by both the ground-column wrappers and the
-    // iris camera ray. [orig: raycast_entity_collision @ 0x413760]
+    // Entity_RaycastCollision used by both the ground-column wrappers and the
+    // iris camera ray. [orig: Entity_RaycastCollision @ 0x413760]
     EntityHandle clip_segment_to_nearest_collision(World &world, EntityHandle source,
                                                    const int32_t start[3],
                                                    int32_t inout_end[3]);
@@ -1207,7 +1207,7 @@ public:
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain
     // column, clips against candidate solids; returns the resolved ground Z and
     // (optionally) the hit entity. [orig: Entity_RaycastGroundHeight @ 0x4142c0 /
-    // Entity_RaycastGroundHeightAndObject @ 0x414320 -> raycast_entity_collision
+    // Entity_RaycastGroundHeightAndObject @ 0x414320 -> Entity_RaycastCollision
     // @ 0x413760]
     int32_t raycast_ground(World &world, EntityHandle source, const int32_t pos[3],
                            int32_t dx, int32_t dy, int32_t z_up, int32_t z_drop,
@@ -1217,7 +1217,7 @@ public:
     // seam. [orig: Physics_RaycastTerrainAndSectors @ 0x539910: terrain leg via
     // Terrain_RaycastHeightmapHiRes @ 0x60c760 (skipped when BOTH endpoint entities
     // carry Flags & 0x800000 INDOORS — the heightmap has no interiors), then the
-    // sector walk (raycast_against_entity_pool @ 0x538720) over pool 2 statics, then
+    // sector walk (Physics_RaycastAgainstEntityPool @ 0x538720) over pool 2 statics, then
     // pool 1 dynamics; LOS callers pass ray radius 0.] The walk skips the endpoint
     // entities A/B, their parent slots (los_walker_parent; the AI LOS passes both,
     // other callers may leave them null) and any candidate standing on A or B
@@ -1270,7 +1270,7 @@ public:
     // paths precheck both endpoints above the bilinear surface, an
     // under-surface endpoint reading as clear] then entity leg [orig:
     // Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130 ->
-    // raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 0 —
+    // Physics_RaycastFindCollisionEntity @ 0x539a70 with allowAllTypes = 0 —
     // only building-kind candidates from the LISTENER's slice block, via the
     // type-1 solid clip]. `source` may be invalid when the host has no emitter
     // identity; identified ambient/fire sources preserve exclusion and the
@@ -1322,9 +1322,9 @@ public:
     // entry/chase gates (@ 0x4b3271 / @ 0x4b32a5 / @ 0x4b33aa) and the exit
     // push — for local and remote bodies alike; only the local side-writes
     // (g_LocalPlayerLookYaw @ 0x4b33ca, the blink mirror @ 0x4b34ce, the pitch
-    // restore @ 0x4b3cdc / @ 0x4b3cfe) add `entity == g_local_player_entity`,
+    // restore @ 0x4b3cdc / @ 0x4b3cfe) add `entity == g_LocalPlayerEntity`,
     // and those ride LadderResolveIO::is_local_player.
-    // anim_state_flags = the state's g_animStateFlagsTable word (bit 0 forces a
+    // anim_state_flags = the state's g_AnimStateFlagsTable word (bit 0 forces a
     // full update; the id itself picks the repulsion-exempt states).
     // out_ground (optional) receives the ground probe's hit entity — the same
     // value the resolver stores into a registered source's groundEntity.
@@ -1418,7 +1418,7 @@ public:
     // The witnessed on-ladder person probe: 1.25u ahead of the climber, a live
     // pool-0 person within 1.125u on both axes whose Z band overlaps holds the
     // climb (org1 stamps climb_idle 32 and skips the press/select).
-    // [orig: the g_pool_list[0] scan @ 0x4bf9b7-0x4bfa2b]
+    // [orig: the g_PoolList[0] scan @ 0x4bf9b7-0x4bfa2b]
     bool ladder_person_ahead(World &world, EntityHandle self, int32_t probe_x,
                              int32_t probe_y, int32_t self_z, int32_t self_bound);
 
@@ -1573,7 +1573,7 @@ private:
         // ground probes collide with the wreck, not the intact model. -1 = the
         // def authors no husk (the intact model keeps serving, the witnessed
         // fallback). [orig: the +52 huskModel substitution in the pool walk
-        // raycast_against_entity_pool @ 0x538720 and the ray/contact picks
+        // Physics_RaycastAgainstEntityPool @ 0x538720 and the ray/contact picks
         // @ 0x413086 / @ 0x4ae233; D-AI-7 residual closed §24]
         int32_t husk_model_id = -1;
         // Entity::registry_spawn_id at assignment. Zero preserves the legacy

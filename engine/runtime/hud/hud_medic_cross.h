@@ -10,7 +10,7 @@ namespace opennova::hud {
 //
 // One primitive, three callers: the friendly-tag medic plate
 // (HUD_DrawEntityLabel, the call @0x5a436c), the MAP medic marker for a
-// teammate whose AnimMap slot 8 is active (draw_entity_labels_and_markers, the
+// teammate whose AnimMap slot 8 is active (HUD_DrawEntityLabelsAndMarkers, the
 // call @0x5a4d40), and the help-screen icons (HUD_DrawHelpScreenIcons, the call
 // @0x497620). It is NOT a map "target bracket" — an earlier reading of this
 // routine (and the file it first landed in, hud_map_bracket.h) mistook the two

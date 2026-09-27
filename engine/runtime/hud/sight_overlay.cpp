@@ -1,5 +1,5 @@
 // The SIGHTS card's per-row draw modes and the sight-scale cycle
-// [orig: draw_weapon_sight_overlays @0x4dce00; Input_HandleActionBinding_0
+// [orig: HUD_DrawWeaponSightOverlays @0x4dce00; Input_HandleActionBinding_0
 //  case 216 @0x4e0c31].
 
 #include <runtime/hud/sight_overlay.h>

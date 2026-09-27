@@ -1,5 +1,5 @@
 // The sun-glare occlusion ray sequence (runtime/environment/glare_occlusion.h)
-// [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f]: the coarse gate ray
+// [orig: Render_SkyboxSunGlow @ 0x5acd9e..0x5acf7f]: the coarse gate ray
 // lifted by glare_coarse_start_lift, the two jittered fine rays cast only
 // behind a clear gate, and the window tick they feed.
 

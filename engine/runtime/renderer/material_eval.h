@@ -10,11 +10,11 @@
 
 namespace opennova::renderer {
 
-// The effect parameters apply_shader_parameters writes per draw. Each field
+// The effect parameters Material_ApplyShaderParameters writes per draw. Each field
 // starts at the effect's own default and is written only where retail
 // resolves a handle for it: an effect that never references MatTexCoord1,
 // SelfLumColor or ReflectColor keeps the default.
-// [orig: apply_shader_parameters @ 0x58DB80; _BaseInc.fx parameter defaults]
+// [orig: Material_ApplyShaderParameters @ 0x58DB80; _BaseInc.fx parameter defaults]
 struct MaterialRuntime {
     UvAnimTransform uv;
     // SelfLumColor (_FFP.fx SELFLUM emissive), default {1, 1, 1}.
@@ -29,7 +29,7 @@ struct MaterialRuntime {
 // The two colour routes a material channel can address. The loader keeps the
 // authored routing byte only for 1 (ReflectColor) and 2 (SelfLumColor); any
 // other byte routes nowhere.
-// [orig: convert_material_definition @ 0x5B0563..0x5B057B (static colour
+// [orig: Material_ConvertDefinition @ 0x5B0563..0x5B057B (static colour
 //  by is_glass) and @ 0x5B059E..0x5B05B5 (RgbGen by emissive_type)]
 enum class MaterialColorTarget : uint8_t { None, ReflectColor, SelfLumColor };
 MaterialColorTarget material_color_target(uint8_t routing_byte);

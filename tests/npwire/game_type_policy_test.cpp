@@ -3,7 +3,7 @@
 // bit-pack, the witnessed session rule defaults, and the BMS game-mode
 // single-select. The values were previously pinned by a GUT test against
 // GDScript twins; the engine home is the truth now.
-// [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0; lookup_entity_slot_and_pack_entry
+// [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0; EntitySlot_LookupAndPackEntry
 //  @ 0x57AD40; Config_SetDefaults; dfx2med sub_402770]
 
 #include <formats/mission/bms.h>
@@ -51,7 +51,7 @@ int main() {
 			"no multiplayer attrib falls to the stock/training Co-op word");
 
 	// The character_id pack [alignment:1 | combo:6 | division:4 | nat:5]
-	// [orig: lookup_entity_slot_and_pack_entry @ 0x57AD40]: round-trips, and
+	// [orig: EntitySlot_LookupAndPackEntry @ 0x57AD40]: round-trips, and
 	// the witnessed fresh-profile defaults reproduce.
 	const uint16_t packed = character_id::pack(3, 2, 5, 1);
 	CHECK(character_id::nationality(packed) == 3, "nationality round-trips");
@@ -100,8 +100,8 @@ int main() {
 			"set_game_mode rejects multi-bit input");
 
 	// The MULTI_PLAYER_HOST dialog rules (D-MNU-17)
-	// [orig: init_host_settings_dialog @ 0x558960; the shared 13-way switch;
-	//  get_game_type_abbreviation @ 0x520fd0; the add branch @ 0x557e79].
+	// [orig: UI_InitHostSettingsDialog @ 0x558960; the shared 13-way switch;
+	//  GameType_GetAbbreviation @ 0x520fd0; the add branch @ 0x557e79].
 	CHECK(!game_type::host_list_visible(game_type::kCoop),
 			"stock co-op never lists on the host screen");
 	CHECK(game_type::host_list_visible(game_type::kObjectiveCoop),

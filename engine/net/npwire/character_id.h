@@ -11,7 +11,7 @@
 // are the authored `nationality N` / `division D` numbers (they index retail's
 // fixed 32/16-entry arrays), the combo field the authored `combo <id>`; the
 // registry lookup matches all three plus the alignment bit against the combo
-// entry (+0/+4/+8/+276) [orig: packer lookup_entity_slot_and_pack_entry
+// entry (+0/+4/+8/+276) [orig: packer EntitySlot_LookupAndPackEntry
 // @0x57AD40 (@0x57ae47); decoder MinimapSlot_FindByPackedId @0x57a270;
 // PlayerProfile_InitDefaults @0x54BB40; serialized by
 // CNapiServerInfo_SerializeToSession @0x4C3650]. The companion avatar byte is

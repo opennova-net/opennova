@@ -116,7 +116,7 @@ int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
 // @0x52A9BB/@0x52AA85, the control-loss flush @0x52A372, the team-flip reset
 // @0x52A5E1), so its tick decrement @0x52A339 never runs and its two ETA
 // reads (@0x52A2FF, @0x52A66E) add nothing.
-// [orig: g_spawn_wave_list @0x24E0E48; SpawnWaveList_AppendEntry @0x52AB60;
+// [orig: g_SpawnWaveList @0x24E0E48; SpawnWaveList_AppendEntry @0x52AB60;
 // SpawnWaveList_TickEntry @0x52A330]
 struct SpawnWaveEntry {
     EntityHandle zone;

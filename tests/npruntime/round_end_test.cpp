@@ -5,7 +5,7 @@
 // auto-lose win condition [orig: Server_CheckWinConditions @0x51ad40, SP leg
 // @0x51ad6f — dead local player without the SinglePlayerRespawn attrib (0x40)], the
 // round-end latch + host effect [orig: Server_ProcessRoundEnd @0x5164f0], and the
-// post-round respawn hold [orig: the g_spawn_success_gate check @0x519af6].
+// post-round respawn hold [orig: the g_SpawnSuccessGate check @0x519af6].
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>

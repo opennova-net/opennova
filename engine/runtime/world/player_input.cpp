@@ -9,7 +9,7 @@ PlayerBodyInput pack_player_body_input(const PlayerInput &in) {
     body.look_heading = in.look_heading;
     body.look_pitch = in.look_pitch;
     // Lean keys map to MoveOrder bits 6/7 [orig: Player_PackInputStateToEntity
-    // @0x4df708-0x4df741 — g_inputFlags 0x2000 -> 0x40, 0x4000 -> 0x80].
+    // @0x4df708-0x4df741 — g_InputFlags 0x2000 -> 0x40, 0x4000 -> 0x80].
     body.lean_left = in.lean_left;
     body.lean_right = in.lean_right;
     body.stance = in.prone ? InfantryState::Stance::kProne

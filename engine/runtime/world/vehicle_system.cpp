@@ -104,7 +104,7 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                         // not respond.
                         // [orig: Entity_UpdateAircraftPhysics @0x490310 — the
                         //  input gate is `(occ->Flags & 0x100) && (occ ==
-                        //  g_local_player_entity || is_authority)`, not a
+                        //  g_LocalPlayerEntity || is_authority)`, not a
                         //  separate mover]
                         world.vehicles.aircraft_client_tick(*veh, *traits);
                     } else {

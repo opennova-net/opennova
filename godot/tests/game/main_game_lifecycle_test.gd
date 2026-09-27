@@ -640,7 +640,7 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 # public surface, so this drives the shell leg without reaching into shell state; the
 # mission it happens to be in is irrelevant to the shell boundary under test.
 # [orig: the cs_dir0.timeout_ms = 120000 reap CNapiNetwork_Init @ 0x4ca4a0 ->
-#  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0 -> g_mission_exit_reason]
+#  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0 -> g_MissionExitReason]
 func test_in_match_session_loss_returns_to_the_menu() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
@@ -1053,7 +1053,7 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 # effect and the "round_end" host effect (the Server_ProcessRoundEnd tail)
 # reach the shell over the world's mission_effects signal, the MISSION FAILED
 # screen mounts after the lead-in beat with the banner line, and ESC through
-# the real input path leaves to the menu [orig: ESC -> g_mission_exit_reason=1
+# the real input path leaves to the menu [orig: ESC -> g_MissionExitReason=1
 # -> the "Post Menu" push @0x526867]. The sim half (kill tally -> WAC lose ->
 # round end, winner 2) is ctest lose_flow_04tr on the retail mission.
 func test_round_end_effect_mounts_the_failed_screen_and_esc_returns_to_the_menu() -> void:

@@ -17,9 +17,9 @@ namespace opennova {
 // shows is that expectation, not a fixed length. The random source is the
 // only substitution (retail seeds its 16-bit LCG from the manager).
 // [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0 — `chars_remaining = 63`
-//  @0x61e040, NextInRange(0, g_txkey_charset_len) @0x61e05b, sprintf "%c"
+//  @0x61e040, NextInRange(0, g_TxKeyCharsetLen) @0x61e05b, sprintf "%c"
 //  @0x61e075, Napi_CopyString(conn+204, key, 64) @0x61e0c9; charset
-//  g_txkey_charset @0x849f10 -> 0x7dfa10; NapiPRNG_NextInRange @0x62e450
+//  g_TxKeyCharset @0x849f10 -> 0x7dfa10; NapiPRNG_NextInRange @0x62e450
 //  `min + state % (max - min + 1)` @0x62e460]
 namespace {
 constexpr int kScrkDraws = 63;

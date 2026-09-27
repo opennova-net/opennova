@@ -23,7 +23,7 @@ uniform vec3 u_flat_color = vec3(0.5, 0.5, 0.5); // cloud_rgb, flat path only
 
 void fragment() {
 	// advanced_clouds == 0: flat cloud-color dome, no texture
-	// (retail render_skybox @ 0x579b42); otherwise the pass-1 gradient.
+	// (retail Render_Skybox @ 0x579b42); otherwise the pass-1 gradient.
 	vec3 col = u_flat_pass ? u_flat_color : v_pass1;
 	// Gamma-space output (D-RMAT-7): the gradient/fog combine ran on raw byte
 	// values; encode once so the displayed dome bytes equal the computed ones.

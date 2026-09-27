@@ -107,7 +107,7 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	drape_material_->set_render_priority(opennova::renderer::kRungSlotDrape);
 	// The depth-clip stage's texture: the witnessed 32x4 ARGB step, sampled
 	// CLAMP + bilinear by the shader's sampler hints [orig:
-	// shadow_system_init_resources @0x5d6260..0x5d62d7 — the planner carries
+	// Shadow_SystemInitResources @0x5d6260..0x5d62d7 — the planner carries
 	// the fill law, opennova::renderer::shadowztex_pixels].
 	const auto px = opennova::renderer::shadowztex_pixels();
 	PackedByteArray bytes;
@@ -633,8 +633,8 @@ void SlotShadow::_invalidate_uniform_stamps() {
 // World -> (u, v) projector for a camera-style pose (local -Z forward): the
 // drape samples the capture along the same slot direction it was rendered
 // from [orig: the shared unscaled direction of the capture and drape
-// matrices, setup_shadow_cascade_matrices @0x58d300 /
-// build_shadow_cascade_uv_matrices @0x58cf10 lookat_dir1; the person 4x
+// matrices, RenderSlot_SetupShadowCascadeMatrices @0x58d300 /
+// RenderSlot_BuildShadowCascadeUVMatrices @0x58cf10 lookat_dir1; the person 4x
 // belongs to the separate depth-clip stage — render_slot_shadow.h]. The
 // stage-0 texgen has no depth bound: the capture's own near/far band never
 // clips the drape (the clamped sampler covers the rest of the patch).
@@ -797,7 +797,7 @@ void SlotShadow::advance_frame() {
 	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
 	// planner law only clamps and negates it
 	// [orig: Environment_GetLightDirectionFloat @0x57d870 into
-	// render_shadow_pass @0x5d7b70, see docs/render/render-lighting-re.md].
+	// Render_ShadowPass @0x5d7b70, see docs/render/render-lighting-re.md].
 	const Vector3 tuple = env->get_light_direction();
 	const std::array<float, 3> sun_dir = opennova::renderer::slot_projection_direction(
 			{float(tuple.x), float(tuple.y), float(tuple.z)});
@@ -809,7 +809,7 @@ void SlotShadow::advance_frame() {
 	// toward WHITE (retail: RenderSlot_DrawAllDrapes @0x5d6ea1 selects
 	// CD3DDevice_SetFogAndBlendMode mode 3 = primary fog, white fog colour;
 	// the drape technique's intrinsic pass flags 0x1520000 carry FOGENABLE,
-	// shadow_system_init_resources @0x5d62f7). The shader shares the
+	// Shadow_SystemInitResources @0x5d62f7). The shader shares the
 	// terrain's fog law and uniforms.
 	env->apply_terrain_uniforms(drape);
 

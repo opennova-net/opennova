@@ -620,7 +620,7 @@ int count_mounted_entities(const World &world, const Entity &veh);
 
 // A PLAYER driver whose head is under the water plane hands the boat to the
 // AI leg [orig: Entity_UpdateWatercraftPhysics @0x48DFD3..0x48DFDF —
-// `occupant->Position.z + CameraOffset.z <= Env_WaterHeightFixed`]. Body in
+// `occupant->Position.z + CameraOffset.z <= g_EnvWaterHeightFixed`]. Body in
 // ai_waypoints.cpp.
 bool watercraft_driver_submerged(const World &world, const Entity &occ);
 
@@ -670,7 +670,7 @@ struct GroundClearance {
 //   result = (N + S + E + W + 2*(C + 2*max)) / 10, clamped >= C, then the worldY water
 //   clamp (when has_occupant) and the def alive/dead offset.
 // Tracked deviation: the original per-tap sampler is the hi-res down-raycast
-// raycast_entity_collision -> Terrain_RaycastHeightmapHiRes_0 @0x60e710; we use the
+// Entity_RaycastCollision -> Terrain_RaycastHeightmapHiRes_0 @0x60e710; we use the
 // renderer-accurate bilinear column height (the near-vertical raycast's result),
 // deferring the sub-cell along-ray refinement. Returns INT32_MIN when the field is
 // invalid (faithful "no terrain" fallback — leave the entity's Z untouched).
@@ -800,7 +800,7 @@ public:
 
     AiEventQueue events;
     NavNodeTable nav;         // channel/node table the waypoint mover walks
-    bool is_authority = true; // [orig: g_napi_np_ctx.is_authority]
+    bool is_authority = true; // [orig: g_NapiNPCtx.is_authority]
     bool is_in_session = false;
 
     // The mission's terrain field (MissionKernel::wire_terrain). Null (the default) is a
@@ -822,7 +822,7 @@ public:
     // per loaded .adm (infantry.h AnimVariantRings). Rewound with the brains.
     AnimVariantRings anim_rings;
     // (The fall-damage tolerance is the WAC named value World::wac_values.fallmps
-    //  [orig: wac_var_fallmps]; the landing leg in infantry.cpp reads it there.)
+    //  [orig: g_WacVarFallMps]; the landing leg in infantry.cpp reads it there.)
     int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // diagnostic trace of the applied mover side effects
 
@@ -852,7 +852,7 @@ public:
     // pool 1 helo-brained then pool 0 players; 1 = pool 1 non-helo; 2 = pool 0 non-player;
     // 3 = pool 2) — into a scratch list, then the scoring core with the lazy LOS probe.
     // Entry gates: teamless-without-see-all and the round-end latch [orig:
-    // g_spawn_success_gate @0x24C1928] return null. `variant_a` runs
+    // g_SpawnSuccessGate @0x24C1928] return null. `variant_a` runs
     // AI_FindBestTarget @0x465A50 instead, instruction-identical but for
     // the two arc bytes read signed (movsx @0x465A8C/0x465A9B against B's
     // movzx @0x466FBC/0x466FCB): the aircraft sites always, and
@@ -967,7 +967,7 @@ public:
     // miss, LOS block, or no valid solve). `out` = {pos xyz 16.16, yaw, pitch,
     // roll BAM}.
     // Relative aim metrics and angular envelope shared by threat scans and
-    // weapon validation. [orig: compute_relative_position_metrics @0x545710]
+    // weapon validation. [orig: Entity_ComputeRelativePositionMetrics @0x545710]
     static uint32_t weapon_relative_metrics(const int32_t pose[6], const int32_t aim[3],
                                              int32_t metrics[6]);
 	bool weapon_target_metrics(World &world, AiEntity &e, const Entity &target,

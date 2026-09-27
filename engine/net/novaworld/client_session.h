@@ -301,7 +301,7 @@ public:
 	// ---- notifications ------------------------------------------------------
 	// Notices accumulated by handle_datagram, oldest first; the call drains them.
 	std::vector<Notice> take_notices();
-	// g_mission_exit_reason = 12 once a ServerStopPlaying / ServerLeaveNovaWorld landed.
+	// g_MissionExitReason = 12 once a ServerStopPlaying / ServerLeaveNovaWorld landed.
 	int mission_exit_reason() const { return mission_exit_reason_; }
 	// The peer's / reap's latched disconnect record once the session Closed on it.
 	bool disconnected_by_peer() const { return disconnected_by_peer_; }

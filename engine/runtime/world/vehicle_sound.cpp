@@ -104,7 +104,7 @@ void anchor_residual_lanes(World &world, const Entity &vehicle) {
 
 // `lifetime_ticks` is the registration's effect_params word +16: 30 for the
 // ground fold's loops, 15 for the helicopter's three. [orig: SoundEmitter_Register
-// @0x529270 packs its fifth argument @0x5292A6; update_vehicle_effect_emissions
+// @0x529270 packs its fifth argument @0x5292A6; VehicleEffect_UpdateEmissions
 // @0x528F94 stores 15; SoundEmitter_RegisterSetLayers copies +16 into slot word
 // 21 @0x528471]
 void emit_emitter(World &world, Entity &vehicle, uint8_t lane, int slot,
@@ -523,7 +523,7 @@ void VehicleSystem::update_claimant_engine_sound(Entity &vehicle, const VehicleT
 // [orig: Entity_UpdateHeloRotorSpin @0x48FA70, start @0x48FAA1..0x48FB0C]
 // The helicopter's three simultaneous loops use rotor speed and climb intensity.
 // The aircraft caller runs this while the rotor coasts after its claimant leaves.
-// [orig: update_vehicle_effect_emissions @ 0x528F20;
+// [orig: VehicleEffect_UpdateEmissions @ 0x528F20;
 //  Entity_UpdateHeloRotorSpin @ 0x48FA70]
 void VehicleSystem::update_rotor_sound(Entity &vehicle, const VehicleTraits &traits) {
 	// The same last-tick gate fronts the rotor loops.
@@ -550,7 +550,7 @@ void VehicleSystem::update_rotor_sound(Entity &vehicle, const VehicleTraits &tra
 	// Invalid ranges leave the destination untouched. The cruise volume reuses
 	// the medium-volume scratch word, including this authored-degenerate case.
 	// Keep the float reciprocal: even an exact upper endpoint loses one unit
-	// before the original ftol chop. [orig: interpolate_value_in_range @ 0x527EA0]
+	// before the original ftol chop. [orig: Math_InterpolateValueInRange @ 0x527EA0]
 	const auto interpolate = [](int32_t &out, int32_t current, int32_t start, int32_t end,
 									 int32_t low, int32_t high) {
 		if (start >= end)
@@ -596,7 +596,7 @@ void VehicleSystem::update_rotor_sound(Entity &vehicle, const VehicleTraits &tra
 	// (effect_params +16 @0x528F94). Retail sndprof.def helicopter profiles
 	// author only soundloop_2 (*_ILP) and soundloop_3 (*_DLP), so the lateral
 	// lane is normally empty and Soundloop_4..7 are never consulted here.
-	// [orig: update_vehicle_effect_emissions @0x52919D..0x5291CE (lane 21),
+	// [orig: VehicleEffect_UpdateEmissions @0x52919D..0x5291CE (lane 21),
 	//  @0x5291ED..0x52921D (lane 11), @0x529235..0x529260 (lane 1)]
 	constexpr uint16_t kRotorLifetimeTicks = 15;
 	const auto emit = [&](uint8_t lane, int slot, int32_t pitch, uint16_t level) {

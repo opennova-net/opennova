@@ -221,7 +221,7 @@ public:
 	// seam for the Terrain device: patch bounds in mission 16.16 (the helper
 	// opennova::renderer::terrain_patch_light_bounds folds the render frame), the env
 	// light-state gain, the time + weather the flicker reads, and the packed
-	// Env_TerrainColorRecip the recip factor unpacks. Returns the row total.
+	// g_EnvTerrainColorRecip the recip factor unpacks. Returns the row total.
 	size_t collect_terrain_light_rows(
 			const opennova::renderer::TerrainLightPatchBounds *p_patches,
 			size_t p_patch_count, const Vector3 &p_ambient_scale, int p_time_ms,

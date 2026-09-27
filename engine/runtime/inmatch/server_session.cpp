@@ -58,7 +58,7 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	ctx.round_end_board_stream.clear();
 	// Every mission start advances both transfer counters; the first mission of
 	// this context serves id 1 on 0x60 and 0x64, the map cycle's next one 2.
-	// [orig: Game_StartMission @0x5247F3 `++g_replayBlockMagic`;
+	// [orig: Game_StartMission @0x5247F3 `++g_ReplayBlockMagic`;
 	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E9C1 `++dword_C86FC8`]
 	++ctx.server_info_transfer_id;
 	++ctx.mission_metadata_transfer_id;

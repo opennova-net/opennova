@@ -67,7 +67,7 @@ class Water;
 //  * water.visible has TWO writers in one frame: GameWorld.
 //    render_water_frame reads LAST frame's blink-water verdict
 //    (Water.set_blink_water_visible, exactly as retail reads it — the
-//    terrain_setup_view_and_lighting 0x60fe40 witness cited on that leg),
+//    Terrain_SetupViewAndLighting 0x60fe40 witness cited on that leg),
 //    then apply_frame below rewrites the node's visibility from THIS
 //    frame's verdict. Both stay.
 //  * the world's is_water_render_active() gate decides the water_z handed to

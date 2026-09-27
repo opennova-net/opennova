@@ -23,7 +23,7 @@ constexpr float kGridStep = 2.6f;
 constexpr float kGridBase = 1.0f;
 constexpr float kJitterScale = 1.8f / 65536.0f;
 // flt_7CD4DC = 0x38C90FD0, retail's yaw step: slightly below the float
-// nearest 2*pi/65536 (0x38C90FDB). [orig: generate_foliage_instances_0
+// nearest 2*pi/65536 (0x38C90FDB). [orig: Foliage_GenerateInstances_0
 // @ 0x5fff7a; Foliage_GenerateModelTileInstances @ 0x600aeb]
 constexpr float kYawScale = 0x1.921FA0p-14f;
 constexpr float kPathRange = 2.0f;
@@ -44,7 +44,7 @@ uint32_t rol32(uint32_t value, uint32_t amount) {
 }
 
 uint32_t seed_for_key(uint32_t key) {
-	// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+	// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 	// Foliage_GenerateModelTileInstances @ 0x600980]
 	return (key & 0x01FF01FFu) + rol32(kSeedConstant, key & 31u);
 }
@@ -111,7 +111,7 @@ Candidate next_candidate(int index, uint32_t &state) {
 	// Both retail generators draw local A (grid column) then local B (grid
 	// row) then the yaw from the one stream. The tiers place them on
 	// different key frames (detail_candidate / model_candidate).
-	// [orig: generate_foliage_instances_0 @ 0x5ffe88..0x5fff80;
+	// [orig: Foliage_GenerateInstances_0 @ 0x5ffe88..0x5fff80;
 	// Foliage_GenerateModelTileInstances @ 0x600a17..0x600af1]
 	const uint16_t draw_a = next_draw(state);
 	const uint16_t draw_b = next_draw(state);
@@ -133,7 +133,7 @@ Candidate detail_candidate(uint32_t key, int index, uint32_t &state) {
 	// Godot plane (the collector packs PolyTrn's -camera_y sector, FB20, into
 	// the low half); local A and local B both ADD. Retail's blocker, map and
 	// height samples all take (keyHi + A, keyLo + B).
-	// [orig: generate_foliage_instances_0 @ 0x5fff84..0x5fffa2 (placement),
+	// [orig: Foliage_GenerateInstances_0 @ 0x5fff84..0x5fffa2 (placement),
 	// 0x5fffb8..0x60000e (blocker), 0x600021..0x600065 (samples);
 	// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a (key)]
 	Candidate candidate = next_candidate(index, state);
@@ -237,12 +237,12 @@ std::vector<DetailInstance> generate_detail_cell(
 	// The detail tier expands the def model's full source geometry for every
 	// accepted transform. This module returns the transforms; the render
 	// binding samples terrain height per transformed source vertex.
-	// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+	// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 	// Terrain_CollectNearFoliagePatches @ 0x603e60]
 	std::vector<DetailInstance> result;
 	// Flat-sector keys remain ordinary cache residents, but their generator
 	// writes zero index/vertex counts before any placement or terrain sample.
-	// [orig: generate_foliage_instances_0 @ 0x5FFDD0, flag gate @ 0x5FFE05,
+	// [orig: Foliage_GenerateInstances_0 @ 0x5FFDD0, flag gate @ 0x5FFE05,
 	// zero counts @ 0x5FFE10..0x5FFE16; Foliage_UpdateDetailCellSlots @ 0x601B30]
 	if ((cell_key & 0x80000000u) != 0u) return result;
 	uint32_t state = seed_for_key(cell_key);
@@ -251,7 +251,7 @@ std::vector<DetailInstance> generate_detail_cell(
 		if (candidate_is_blocked(slot, world, candidate)) continue;
 		// The map gate takes the key's atlas halves (& 0x3FF) plus the same
 		// local offsets, while the blocker takes the world position.
-		// [orig: generate_foliage_instances_0 @ 0x5fff84..0x5fff9d (atlas
+		// [orig: Foliage_GenerateInstances_0 @ 0x5fff84..0x5fff9d (atlas
 		// sample coordinates), 0x5fffb8..0x60000e (world blocker),
 		// @ 0x600065 (Terrain_GetSurfaceTypeAtFixedPoint)]
 		const uint32_t mask =

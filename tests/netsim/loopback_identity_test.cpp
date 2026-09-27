@@ -924,7 +924,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 // Prove that production 0x0D -> ClientState relationship drives later carrier
 // motion, and that the carrier's replicated death hides the child in place (the
 // authority keeps it) until the carrier lives again.
-// [orig: serialize_entity_pool_to_packet_0 +0x170 @0x503BC9, +0x28 @0x503C22]
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9, +0x28 @0x503C22]
 bool run_parented_pool_spawn_follows_and_hides() {
 	w::World world;
 	world.registry.configure_pool(1, 8);
@@ -1217,7 +1217,7 @@ std::vector<uint8_t> make_built_0c_uplink(
 // The host read-applies a remote peer's C2S 0x0C uplink: the authority drain (drain_connection_c2s)
 // reads it and EntityWireBridge::apply_player_intent SNAPS the registry Entity (the store the S2C 0x0A
 // frame re-broadcasts), mirrors the engine-frame AiEntity, and stages the smooth-target.
-// [orig: dispatch_entity_packet_callback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
+// [orig: NetPacket_DispatchEntityPacketCallback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
 // @0x4c2042-0x4c20a9; §5.10/§5.38]
 bool run_apply_player_intent_stages_remote_peer() {
 	w::World world;

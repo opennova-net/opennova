@@ -7,7 +7,7 @@
 // voice). A side that is absent or no longer resolves takes the retail
 // default: the first combo of its alignment, class 8 (rifleman).
 // [orig: PlayerProfile_InitDefaults @0x54BB40 (the fresh profile),
-//  lookup_entity_slot_and_pack_entry @0x57AD40 (the per-side default),
+//  EntitySlot_LookupAndPackEntry @0x57AD40 (the per-side default),
 //  Avatars_ResolveSelectionIndex @0x57AE60,
 //  CNapiServerInfo_SerializeToSession @0x4C3650 <- the profile's two 0x8006
 //  side blocks; a saved id the registry no longer resolves is reallocated to

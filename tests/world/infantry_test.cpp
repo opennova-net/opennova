@@ -15,7 +15,7 @@
 //   * gravity (org1 -416 + pos += 2*vel on even key ticks through the +0xAC
 //     quarter-step tail; org2 -208 + pos += vel every tick) to terminal
 //     -32768, landing snap + fall damage excess>>4 with the injectable scale
-//     [orig: wac_var_fallmps], the player jump (cooldown 32 / no auto-repeat / prone gate),
+//     [orig: g_WacVarFallMps], the player jump (cooldown 32 / no auto-repeat / prone gate),
 //   * the slope pass: the conform selector (prone family / corpse / def attrib), the
 //     org1 2048/8-tick slide + eighth-step body_pitch/roll chase, the org2 atan2
 //     quarter-step leg, the non-conform decay — and the regression that a standing
@@ -239,7 +239,7 @@ uint32_t run_to_next_selection(AiSystem &ai, World &w, uint32_t from) {
 }
 
 // Give a motor soldier the registry Entity and ADM table row the weapon channel reads its
-// hold kind through. The original keeps no per-player hold-kind copy: it indexes AdmDefs
+// hold kind through. The original keeps no per-player hold-kind copy: it indexes g_AdmDefs
 // by the posed entity's OWN equipped index every selection pass, which is exactly what
 // lets a remote player's pose resolve from one replicated byte [orig: @0x4b5dba].
 void give_held_weapon(World &w, AiEntity *e, uint8_t adm, int special_hold) {
@@ -4488,7 +4488,7 @@ static void test_reselecting_current_state_arbitrates_player_but_skips_org1() {
 }
 
 // The detour-state clear rides the ATTACK-STANCE aim block only. Retail's two
-// aim blocks split on the anim's flag-table bits [data: g_animStateFlagsTable
+// aim blocks split on the anim's flag-table bits [data: g_AnimStateFlagsTable
 // @0x8139e8; no state carries both]: block 1 (flag 0x8; walk 1 = 0x449) writes
 // the aim and the walking-fire latch and never touches entity+0x369 [orig:
 // @0x4bc555..0x4bc948]; block 2 (flag 0x10; attack 155 = 0x14) is entered only
@@ -4688,7 +4688,7 @@ static void test_walking_aim_gates_on_the_body_cone() {
         // Due east: the candidate (bearing 0 + the error) sits on the body. The
         // approach arm writes only the goal; the stale target heading stays for
         // the moving selection's detour to replace [orig: the approach
-        // @0x4BC2F5..0x4BC316; ai_find_cover_position +0x1A8 @0x4AFF2C].
+        // @0x4BC2F5..0x4BC316; AI_FindCoverPosition +0x1A8 @0x4AFF2C].
         Rig r(2 * 65536, 0);
         r.think();
         CHECK(r.blue->inf.move_mode == 1 && r.blue->inf.target_heading == 0x20000000);
@@ -5473,7 +5473,7 @@ int main() {
     // then the quarter-step tail keeps a quarter of it); landing + fall damage ----
     // [orig: Entity_UpdateInfantryAI gravity @0x4bf7bf, pos @0x4bf7ec, tail
     //  @0x4BFC65..0x4BFC86; damage when vel_z <= -1057*scale @0x4BF839, health -=
-    //  excess >> 4 @0x4BF848..0x4BF864 (wac_var_fallmps = the fallmps named value)]
+    //  excess >> 4 @0x4BF848..0x4BF864 (g_WacVarFallMps = the fallmps named value)]
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
         const int32_t floor_z = fx(50) + kFloorStand;
@@ -6133,7 +6133,7 @@ int main() {
     // ---- idle root output is still entity root motion: the movement flag gates state commits,
     //      not position integration. [orig: AnimMap_UpdateEntity @0x40b82f produces root output;
     //      Entity_UpdateInfantryAI @0x4BF684 integrates it on the authoritative path without a
-    //      g_animStateFlagsTable movement-bit gate.] ----
+    //      g_AnimStateFlagsTable movement-bit gate.] ----
     {
         World w;
         AiSystem ai;

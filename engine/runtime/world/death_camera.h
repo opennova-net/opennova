@@ -32,7 +32,7 @@ struct DeathCameraState {
     bool valid = false;
     DeathCameraPose from;
     DeathCameraPose to;
-    uint32_t start_tick = 0; // g_camera_lerp_start_tick @0xA8A1F8
+    uint32_t start_tick = 0; // g_CameraLerpStartTick @0xB76470
 };
 
 // The clear-distance probe along a unit 16.16 direction from `origin`

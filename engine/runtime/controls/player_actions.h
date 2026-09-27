@@ -59,7 +59,7 @@ struct PlayerActionFrame {
 //  g_MouseState.wheelRemainder` @ 0x7614AB..0x7614AE, the +120 walk firing
 //  event 0x100 @ 0x761575..0x7615AA, the -120 walk firing 0x200
 //  @ 0x7615AC..0x7615DB; the events map to masks 0x400 / 0x800 in
-//  try_dispatch_binding_by_weapon_type @ 0x4992FC / @ 0x499311]
+//  Input_TryDispatchBindingByWeaponType @ 0x4992FC / @ 0x499311]
 inline constexpr int32_t kWheelDelta = 120;
 class WheelRemainder {
 public:

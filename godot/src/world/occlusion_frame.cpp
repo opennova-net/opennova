@@ -107,7 +107,7 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 	}
 	// The mission force-indoors attribute ORs the indoors letter into the frame
 	// view for BOTH consumers, matching run_occlusion_frame's camera input
-	// [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
+	// [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
 	const int flags = s->local_player_blink_flags() |
 			(p_forces_indoors ? static_cast<int>(Simulation::BLINK_INDOORS) : 0);
 	// The letters latch per sim tick; the pass gates combine them with the
@@ -272,7 +272,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	// wire identities share this feed; wire rays use the separately keyed
 	// 17-tick candidate arena, and the entity presenter retains the context for
 	// cold bodies/weapons (inmatch/role_feeds.h EntityLightingFeed carries the
-	// witnesses: retail setup_terrain_effect_for_entity @0x5c74a0, the per
+	// witnesses: retail Terrain_SetupEffectForEntity @0x5c74a0, the per
 	// entity stack push @0x5c7bff, the 0x80 submit flag @0x5c7c05 /
 	// @0x5c7fb6 and the person wave's daylight aux @0x5c7f93).
 	if (env != nullptr) {

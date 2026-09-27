@@ -487,7 +487,7 @@ void Water::build() {
 	add_child(mesh_instance_);
 	// The FrameFX bloom pass redraws the strip with the nightvision row
 	// colors into the Q3 target (retail FrameFX_RenderGlowSource @ 0x582a59..
-	// 0x582a5d -> render_water_surface(0, 1)): its own surface, drawn by no
+	// 0x582a5d -> Render_WaterSurface(0, 1)): its own surface, drawn by no
 	// camera (layer mask 0), only by the typed Q3 WaterNightVision pass.
 	Ref<ArrayMesh> night_vision_mesh;
 	night_vision_mesh.instantiate();
@@ -571,7 +571,7 @@ void Water::build() {
 		// particles and coronas (runtime/renderer/scene_overlay.h
 		// kMirrorOverlayOrder; GameWorld's scene_overlay leg). The second
 		// fullscreen quad retail draws after the far band
-		// (Water_ShaderAdditiveFlat, ONE/ONE of 0xFF000000, render_main_scene
+		// (g_WaterShaderAdditiveFlat, ONE/ONE of 0xFF000000, Render_MainScene
 		// @ 0x5c190c..0x5c1990) only saturates the RTT alpha, which neither
 		// water program reads, so the mirror draws no counterpart.
 	}
@@ -620,7 +620,7 @@ void Water::advance_frame(double) {
 	// global_position does not. Classify and march from the same effective
 	// eye the drawing viewport actually renders.
 	const Vector3 cam_pos = view_cam->get_camera_transform().get_origin();
-	// The two callers of render_water_surface: the beauty pass per side, gated
+	// The two callers of Render_WaterSurface: the beauty pass per side, gated
 	// on g_WaterActive (no visible terrain at or below the water and no
 	// Blink-visible water last frame means no prerender and no strip), and the
 	// FrameFX bloom pass's nightvision redraw, which is the above-water call
@@ -652,9 +652,9 @@ void Water::advance_frame(double) {
 
 	// Regenerate the animated noise pair once per rendered water frame, at
 	// the world's entity-update count when one is fed (set_noise_frame_counter),
-	// else at this Water's own render-frame count. Both render_water_surface
+	// else at this Water's own render-frame count. Both Render_WaterSurface
 	// calls regenerate it at the same counter, so one update serves the frame.
-	// [orig: render_water_surface @0x5c3326 -> Water_GenerateNoiseTextures
+	// [orig: Render_WaterSurface @0x5c3326 -> Water_GenerateNoiseTextures
 	//  @0x5C0360, its counter @0x5C0366]
 	if (!frame_counter_fed_) frame_counter_ += 1;
 	water_core_->update(frame_counter_);
@@ -706,10 +706,10 @@ void Water::advance_frame(double) {
 		}
 	}
 	if (night_vision_active) {
-		// The bloom pass's call is render_water_surface(0, 1): the above-water
+		// The bloom pass's call is Render_WaterSurface(0, 1): the above-water
 		// march with the nightvision row colors (flat 0.1 base, no specular
 		// RGB) (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d;
-		// render_water_surface @ 0x5c3489..0x5c3492).
+		// Render_WaterSurface @ 0x5c3489..0x5c3492).
 		const int rows = _march_strip(drawing, false, true, murk, fog_end, depth_curve,
 				lit, env_data);
 		if (rows < 2) {

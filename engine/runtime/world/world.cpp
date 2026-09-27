@@ -39,7 +39,7 @@ static void pose_emplacement_attachments(World &world) {
     // occupant.
     // [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1 (the hide),
     //  @0x440EB3 (the clear), the root copy @0x4410EA..0x4411BC; Entity_Destroy
-    //  @0x43E810 (the refNum walk @0x43E9CD -> CStreamingMem_Destroy @0x546F30,
+    //  @0x43E810 (the refNum walk @0x43E9CD -> EntityReference_DestroyEWeapGroup @0x546F30,
     //  memset @0x43EA70)]
     lap.mark(devtools::Slot::SIM_ATTACHMENT_ORPHANS);
     world.registry.for_each([&](const Entity &snapshot) {
@@ -118,7 +118,7 @@ void World::add_system(ISystem *sys) {
 // or the SP epilog screen, holds them too. The spawn markers run first, then
 // the host's player idle timers.
 // [orig: Server_TickUpdate — the admission @0x51D89F..0x51D8BD, `test
-//  tick,1Fh` @0x51D8C4, the assign_overlay_spawn_points call @0x51D8D2, the
+//  tick,1Fh` @0x51D8C4, the Spawn_AssignOverlaySpawnPoints call @0x51D8D2, the
 //  Server_UpdatePlayerBreathTimers call @0x51D8D7]
 void ServerIdleLegs::tick(World &world, const TickContext &ctx) {
     if (!ctx.is_authority || ctx.phase != TickPhase::Gameplay) return;
@@ -211,8 +211,8 @@ static void claim_standing_vehicle(World &world, const Entity &body) {
 // walk, then the update's count -- unless the epilog screen is up, whose tail
 // runs the epilog cine instead (re-read here, after the walk).
 // [orig: Entity_UpdateAllEntities -- the walk @0x4C2426..0x4C2474, `cmp
-//  g_epilog_screen_active,0` @0x4C2624 (the Cinematic_EpilogUpdate tail
-//  @0x4C2634), `add g_entity_update_counter,esi` @0x4C2639]
+//  g_EpilogScreenActive,0` @0x4C2624 (the Cinematic_EpilogUpdate tail
+//  @0x4C2634), `add g_EntityUpdateCounter,esi` @0x4C2639]
 static void finish_entity_update(World &world, const TickContext &ctx, devtools::ProfileLap &lap) {
     // Rebuild the pool-0/1 proximity tables once per tick, ahead of the pool-0
     // walk (the pool-2 statics table rebuilds only on its registry/instance
@@ -368,7 +368,7 @@ void World::update_all_entities(const TickContext &ctx) {
     // and a joiner, never for single player: the SP launch leaves it clear
     // while it runs the in-process listen server, so rules.mp_session carries
     // it.
-    // [orig: g_napi_np_ctx.is_in_session -- SinglePlayer_StartMission
+    // [orig: g_NapiNPCtx.is_in_session -- SinglePlayer_StartMission
     //  @0x561AF0 (read back @0x561E73); the death-event arm
     //  EntityAI_ProcessAirStateMachine @0x458273]
     ai.is_in_session = rules.mp_session;
@@ -382,7 +382,7 @@ void World::update_all_entities(const TickContext &ctx) {
     // carries Flags 0x100) is visited, with no visited clear and no parent
     // chain; HeliLift through the pool-3 walk is skipped, and the shared tail
     // follows. [orig: Entity_UpdateAllEntities -- `cmp
-    //  g_epilog_screen_active,0` @0x4C211D (the jnz @0x4C2128), the walk
+    //  g_EpilogScreenActive,0` @0x4C211D (the jnz @0x4C2128), the walk
     //  @0x4C239A..0x4C2408 (the Entity_UpdatePool1Slot call @0x4C2400)]
     if (epilog_screen_active()) {
         const size_t rows = registry.pool_capacity(1);
@@ -476,7 +476,7 @@ void World::update_all_entities(const TickContext &ctx) {
             is_authority || (rules.mp_session && !rules.projectile_authority);
     // The water plane: env.water_z (16.16, the #265 sound-profile home) —
     // zero means "no water authored", the same read the wreck gates use
-    // [orig: Env_WaterHeightFixed @0x26c6454].
+    // [orig: g_EnvWaterHeightFixed @0x26c6454].
     const float water_z =
             env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
     // [orig: DeathPiece_TickAll @0x57b900, the call @0x4c221c]
@@ -546,7 +546,7 @@ TickContext World::begin_tick(bool is_authority, TickPhase phase) {
     rules.logic_authority = is_authority;
     // The presenting-client identity for the spawn-time tracer style select — stamped
     // before the system loop so out.rounds spawned THIS tick (AI fire, local fire) select
-    // against fresh values [orig: g_local_player_entity->Team read @ 0x4ec740].
+    // against fresh values [orig: g_LocalPlayerEntity->Team read @ 0x4ec740].
     round_sim.local_player = cached.local_player;
     if (const Entity *lp = registry.get(cached.local_player))
         round_sim.local_team = static_cast<uint8_t>(lp->team);
@@ -594,7 +594,7 @@ void World::run_entity_pass(const TickContext &ctx) {
     // the server tick's periodic second (Server_TickUpdate @ 0x51db6d, reload
     // 0x3E @ 0x51db93 -> the EntityPool_RecountLiveByGroup call @ 0x51dc02).
     if (ctx.is_authority && pre_mission) recount_group_initials();
-	++logic_tick; // [orig: tick @0x24c1968 advances once per frame tick]
+	++logic_tick; // [orig: g_CurrentTick @0x24c1968 advances once per frame tick]
 	// Audio-less/headless hosts never drain presentation. Retire their bounded
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.

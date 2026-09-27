@@ -299,7 +299,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 
 	loaded_mission_ = p_mission;
 	// The mission attribute that forces the indoors accum bit every frame.
-	// [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]
+	// [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8]
 	mission_forces_indoors_ =
 			(p_mission->get_info()->get_attrib_flags() & MissionData::ATTRIB_FORCE_INDOORS) != 0;
 	timeline->span("objects");
@@ -999,11 +999,11 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// own-player spawn; main_game skips the HUD when there is no local player.
 	// Diagnostic previews opt out via playable_.
 	// Terrain-tile (.til) bytes for the S2C 0x45 terrain-tile load a listen
-	// host streams to joiners so their g_loading_progress climbs 5 -> 6 and
+	// host streams to joiners so their g_LoadingProgress climbs 5 -> 6 and
 	// terrain finishes loading (net-re §5.37). The tile-overlay .til is named
 	// after the MISSION (localres.pff: ASH_I5A.til), not the terrain tileinfo
 	// [orig: Terrain_LoadTileInfoFile @ 0x60a740;
-	// serialize_terrain_tiles @ 0x6080f0]. Reuse the payload parsed before
+	// Terrain_SerializeTiles @ 0x6080f0]. Reuse the payload parsed before
 	// terrain build.
 	if (!mission_til_bytes_.is_empty()) {
 		opts->set_terrain_til(mission_til_bytes_);
@@ -1254,7 +1254,7 @@ void GameWorld::start_effect_world() {
 		effect_world->set_water_plane(water_->get_water_height(), water_->get_reflection_camera());
 		// The sim-side water plane (env.water_z): the footstep water pick, the
 		// landing legs, AND the destruction paths (submerged wrecks skip pieces,
-		// the wreck fire steams out) all gate on it [orig: Env_WaterHeightFixed
+		// the wreck fire steams out) all gate on it [orig: g_EnvWaterHeightFixed
 		// @ 0x26C6454; world-wac-ai-re §24]. Idempotent; re-pushed after runtime
 		// start too (either side may come up first).
 		Ref<Simulation> water_sim = get_sim();

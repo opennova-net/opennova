@@ -115,7 +115,7 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 				occlusion_id = deps.occlusion.add_model(std::move(occ));
 			bound_radius_q16 = world::model_bound_radius_q16_from_3di(*m3);
 			// The minimap blip-size source: the CMDL bound-block ground-axis
-			// half extents. [orig: draw_minimap_blip @0x5979a2..0x5979b8 —
+			// half extents. [orig: Minimap_DrawBlip @0x5979a2..0x5979b8 —
 			//  model+176: half = (max - min) >> 1 per ground axis]
 			if (m3->collision != nullptr) {
 				const ThreediCollisionModelData &bd =
@@ -160,7 +160,7 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 // the 1-based table index (0 = none). The weapon-def userpoint (+0x333) is
 // not carried (weapon.def+856 is unparsed).
 // [orig: Entity_InitBoneReferences @0x441470 (@0x4414e0..0x4415aa);
-//  Entity_ResolveBoneUserpoints @0x545940; modelgpm_FindUserpointByName
+//  Entity_ResolveBoneUserpoints @0x545940; ModelGPM_FindUserpointByName
 //  @0x5b21ef]
 static uint8_t userpoint_index_by_name(const Threedi3di3 &model, const char *name) {
 	if (name == nullptr || name[0] == '\0' || model.user_points == nullptr) return 0;
@@ -650,7 +650,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				const Threedi3di3 *piece_m3 =
 						final_husk_m3 != nullptr ? final_husk_m3 : first_husk_m3;
 				// The interned death masks and all three banks use final-husk first.
-				// [orig: resolve_item_materials_and_spawn_bone_trails @0x522EE0]
+				// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0]
 				if (piece_m3 != nullptr) {
 					const char *names[3] = { "Dead", "Fire", "Other" };
 					for (int bank = 0; bank < 3; ++bank) {
@@ -886,7 +886,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		e->has_minimap_model_marker = occ_id >= 0;
 		// The blip drawer reads the raw model bound block rather than the entity
 		// placement matrix, so authored scale deliberately does not fold here.
-		// [orig: draw_minimap_blip @0x5979a2..0x5979b8]
+		// [orig: Minimap_DrawBlip @0x5979a2..0x5979b8]
 		const std::pair<float, float> &half_xy = state.half_xy_by_graphic[key];
 		e->minimap_half_x_q16 = static_cast<int32_t>(half_xy.first * 65536.0f);
 		e->minimap_half_y_q16 = static_cast<int32_t>(half_xy.second * 65536.0f);
@@ -929,7 +929,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 	}
 	// The person collector's parachute radius: the special item-185 model's
 	// GHDR radius, unscaled. [orig: Entity_PreloadSpecialItems @ 0x43C220 loads
-	// the model; collect_visible_entities_for_terrain reads model+0x14
+	// the model; Terrain_CollectVisibleEntitiesForTerrain reads model+0x14
 	// @ 0x5c8e10]
 	if (deps.models.has_source()) {
 		const DefItemDef *chute = find_item_def(

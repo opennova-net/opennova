@@ -278,7 +278,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		return outcome;
 	}
 	if (ieq(verb, "Earthquake")) {
-		// Env_QuakeTicks = 6 * seconds; the argument is clamped 0..40 and
+		// g_EnvQuakeTicks = 6 * seconds; the argument is clamped 0..40 and
 		// defaults to 30 [orig: @0x4D2AC2..0x4D2B13].
 		outcome.handled = true;
 		int32_t seconds = 30;

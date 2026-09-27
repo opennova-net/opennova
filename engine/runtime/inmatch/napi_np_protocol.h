@@ -141,7 +141,7 @@ bool frame_in_match_s2c_batch(NapiNPServerCtx &ctx, const PeerAddr &peer,
 // Server_TickUpdate (D-NET-125), so the consumer stages into that drain rather than applying inline
 // (which would be a double-apply trap). A null/unbound owning transport or a non-0x0C inner message
 // is skipped. Returns the number of 0x0C uplinks staged. [D-NET-126; orig: NapiNPServerMsg_0x00C
-// @0x501c30 -> dispatch_entity_packet_callback @0x4D6A80; docs/net/novaworld-net-re.md §5.44]
+// @0x501c30 -> NetPacket_DispatchEntityPacketCallback @0x4D6A80; docs/net/novaworld-net-re.md §5.44]
 std::size_t apply_in_match_c2s(NapiNPServerCtx &ctx, const HostAcceptEvent &event);
 
 // Test seams: the handshake/spawn tests read and pin a node through these three; no production

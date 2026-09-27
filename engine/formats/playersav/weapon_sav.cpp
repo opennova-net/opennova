@@ -292,8 +292,8 @@ bool update_avatar_selection(File &file, size_t slot, SideId selected_side,
 
     Record &record = file.slots[slot];
     // The dialog walks the two 0x8006-byte side blocks for PLAYERCLASS, then
-    // indexes only teamIndex (@0x25dc548) for the avatar fields.
-    // [orig: save_player_info_from_dialog @0x55EE3F-0x55EE6D,
+    // indexes only g_PlayerInfoTeamIndex (@0x25dc548) for the avatar fields.
+    // [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EE6D,
     //  @0x55EE93-0x55EF38]
     record.blue.player_class = player_class;
     record.red.player_class = player_class;
@@ -306,7 +306,7 @@ bool update_avatar_selection(File &file, size_t slot, SideId selected_side,
 
 void clamp_classes(File &f)
 {
-    // [orig: apply_session_settings_to_globals @0x5516d0-@0x5516ec —
+    // [orig: Game_ApplySessionSettingsToGlobals @0x5516d0-@0x5516ec —
     // `for (side = 0; side < 2; ++side, p += 0x8006) { if (*p < 5) *p = 5;
     //  else if (*p > 9) *p = 9; }`].
     for (Record &rec : f.slots) {

@@ -25,7 +25,7 @@ static bool near_f(float a, float b, float eps = 1.0e-5f) {
 
 int main() {
 	// --- slot_projection_direction: the 0.25 vertical clamp then negation
-	// [orig: render_shadow_pass @ 0x5d7bdc..0x5d7c30].
+	// [orig: Render_ShadowPass @ 0x5d7bdc..0x5d7c30].
 	{
 		const auto noon = slot_projection_direction({0.0f, 1.0f, 0.0f});
 		CHECK(near_f(noon[0], 0.0f) && near_f(noon[1], -1.0f) &&
@@ -60,8 +60,8 @@ int main() {
 	CHECK(near_f(silhouette_half_extent(1.0f), 1.25f));   // r*1.25
 	CHECK(near_f(silhouette_half_extent(8.0f), 8.75f));   // clamp r+0.75
 
-	// --- capture view axes [orig: build_direction_look_at_matrix @ 0x612c90
-	// via setup_shadow_cascade_matrices @ 0x58d31e]: the retail look-at
+	// --- capture view axes [orig: Math_BuildDirectionLookAtMatrix @ 0x612c90
+	// via RenderSlot_SetupShadowCascadeMatrices @ 0x58d31e]: the retail look-at
 	// (forward = the slot direction, right = (fwd.z, 0, -fwd.x) normalized,
 	// up = fwd x right) in render axes, mapped to presentation axes through
 	// the x/z swap: camera x = -right, y = up, z = -forward, a proper
@@ -403,8 +403,8 @@ int main() {
 		CHECK(indices[indices.size() - 1] == 48);
 	}
 
-	// --- the depth-clip stage [orig: shadow_system_init_resources
-	// @ 0x5d6260..0x5d62a7; build_shadow_cascade_uv_matrices @ 0x58cf10].
+	// --- the depth-clip stage [orig: Shadow_SystemInitResources
+	// @ 0x5d6260..0x5d62a7; RenderSlot_BuildShadowCascadeUVMatrices @ 0x58cf10].
 	{
 		const auto px = shadowztex_pixels();
 		CHECK(px.size() == 128);

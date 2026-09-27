@@ -58,7 +58,7 @@ bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 	out.scale = static_cast<float>(static_cast<int32_t>(piece.render_scale * io::kFp16OneD)) *
 			io::kInvFp16One;
 	// Transparents go to the below-water queue unless the piece is strictly
-	// above the water plane [orig: `cmp ecx, Env_WaterHeightFixed; setnle`
+	// above the water plane [orig: `cmp ecx, g_EnvWaterHeightFixed; setnle`
 	// @ 0x57b7fb..0x57b80e].
 	out.below_water = !(to_fixed(piece.pos.z) > water_z_q16);
 	out.projected_radius_q16 = projected_radius_q16;

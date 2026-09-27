@@ -15,12 +15,12 @@ extends Node
 ## through the Simulation feeds); this node owns only the device work: the
 ## HUD element, the compiled stat.mnu frame, its widgets and the cursor.
 ## [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (every HUD frame while
-##  g_spawn_success_gate && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
+##  g_SpawnSuccessGate && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
 ##  Server_ResetBalanceCounters + Game_InitRespawnState +
 ##  Overlay_ComputeStatFieldColumnLayout(40, 984); every pass
-##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then draw_endround_stats_overlay
+##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay
 ##  @0x5b7cd0; UI_OpenMenuScreen("stat.mnu", "STAT") once; the STAT show
-##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); stat_filter_tab_handler
+##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); StatScreen_StatFilterTabHandler
 ##  @0x562140]
 
 const MENU_FILE := "stat.mnu"
@@ -266,7 +266,7 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 		exit_to_menu_requested.emit()
 		return
 	# The tab radios map onto the engine's tab index [orig:
-	# stat_filter_tab_handler @0x562140, registered with params 0/1/2 by
+	# StatScreen_StatFilterTabHandler @0x562140, registered with params 0/1/2 by
 	# HUD_CacheStatPanelValues @0x5627a8..0x5627f5]; the filter itself is the
 	# sim feed's.
 	if widget_name.begins_with("RADIO_TAB_"):

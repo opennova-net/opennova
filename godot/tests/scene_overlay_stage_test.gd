@@ -146,8 +146,8 @@ func _mirror_overlay_report(world: GameWorld) -> Dictionary:
 # The water mirror closes its target in its own overlay pass: the dim over
 # the finished mirror after its coronas, then the sun/moon discs and the glow
 # redrawn at the mirror camera inside the far depth band [orig:
-# render_main_scene @ 0x5c186c (dim), @ 0x5c18fb (render_celestial_bodies(0)),
-# @ 0x5c1904 (render_skybox_sun_glow(0, 0))]. The glow's no-occlusion alpha
+# Render_MainScene @ 0x5c186c (dim), @ 0x5c18fb (Render_CelestialBodies(0)),
+# @ 0x5c1904 (Render_SkyboxSunGlow(0, 0))]. The glow's no-occlusion alpha
 # follows the MIRROR camera's view of the sun.
 func test_the_mirror_closes_with_the_dim_and_the_sky_redraw() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_mirror", true)
@@ -371,7 +371,7 @@ func _meshes(node: Node, out: Array[MeshInstance3D]) -> void:
 # The sun glare closes the tail: the stage takes the glow model out of every
 # camera and draws its SELFLUM surfaces after the murk, under the forced
 # 1.0 light scale [orig: Terrain_RenderWorldScene @ 0x5c96fd..0x5c9722,
-# render_skybox_sun_glow(1, 1) @ 0x5c9714].
+# Render_SkyboxSunGlow(1, 1) @ 0x5c9714].
 func test_the_sun_glare_draws_in_the_overlay_pass_and_leaves_the_cameras() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_glare", true)
 	_staged_dirs.append(root_dir)

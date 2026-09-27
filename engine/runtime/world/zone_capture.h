@@ -3,14 +3,14 @@
 // performs secure/control updates, instant numbered flips, timed unnumbered
 // captures, zone-team enforcement, and produces the exact wire-facing events.
 // All of it models the retail
-// `Server_TickUpdate @0x51D7E0` g_periodic_second_timer block (@0x51DF50..0x51DF8C):
+// `Server_TickUpdate @0x51D7E0` g_PeriodicSecondTimer block (@0x51DF50..0x51DF8C):
 // proximity -> secure pass (0x6F + 0x1E 0x3B/0x3C) -> team enforcement -> the
 // timed-capture engine's queue drain (instant numbered flips + GameEvent_FlagCapture).
 //
 // The world side PRODUCES events; the host (inmatch Server_TickUpdate) encodes them
 // onto the wire (0x6F / 0x50 / 0x53 / 0x6C / 0x1E). [orig: Server_UpdateCaptureZoneProximity
 // @0x5086A0; Server_UpdateCaptureZoneEntities @0x519690;
-// calculate_capture_zone_control_delta @0x501120; Server_UpdateCaptureZones @0x53B8F0;
+// CaptureZone_CalculateControlDelta @0x501120; Server_UpdateCaptureZones @0x53B8F0;
 // GameEvent_FlagCapture @0x50F6F0; Server_ChangeEntityTeam @0x518D70;
 // Server_EnforceZoneEntityTeams @0x519600]
 // Contact production deliberately lives beside the host movement snapshots: a
@@ -95,7 +95,7 @@ struct ZoneCaptureEvents {
     // would collapse two distinct records into the final team. The identity
     // pair is live only for Flags & 0x100 Players and zero for every objective.
     // [orig: Server_ChangeEntityTeam @0x518D70;
-    // write_entity_handle_packet @0x506AD0]
+    // NetPacket_WriteEntityHandlePacket @0x506AD0]
     struct TeamChange {
         EntityHandle entity;
         uint8_t team = 0;
@@ -188,27 +188,27 @@ struct ZoneCaptureEvents {
     }
 };
 
-// The inputs calculate_capture_zone_control_delta reads once its player census
+// The inputs CaptureZone_CalculateControlDelta reads once its player census
 // is done: the signed presence, the zone's owner, the in-game census by team,
 // the capture speed setting, the sorted SpawnZoneList's numbered ownership
 // counts and this zone's shared-number count, and the round clock.
-// [orig: calculate_capture_zone_control_delta @0x501120]
+// [orig: CaptureZone_CalculateControlDelta @0x501120]
 struct ZoneCaptureDeltaInput {
     int presence = 0;                  // same-team minus capturable others in radius
     uint8_t zone_team = 0;             // entity+354
     std::array<int, 5> team_players{}; // in-game Players by team
-    int speed_setting = -1;            // g_capture_speed_setting
+    int speed_setting = -1;            // g_CaptureSpeedSetting
     int spawn_zone_count = 0;          // SpawnZoneList_GetCount()
     int team1_zones = 0;               // numbered list entries owned by team 1
     int team2_zones = 0;               // numbered list entries owned by team 2
     int numbered_zones = 0;            // numbered list entries
     int shared_zone_entities = 0;      // numbered entries carrying this zone's number
-    int32_t remaining_ticks = -1;      // g_round_time_remaining
-    uint32_t game_time_minutes = 0;    // g_respawn_time (SET GameTime)
+    int32_t remaining_ticks = -1;      // g_RoundTimeRemaining
+    uint32_t game_time_minutes = 0;    // g_RespawnTime (SET GameTime)
 };
 
 // The complete control-delta formula [orig:
-// calculate_capture_zone_control_delta @0x501120]: the capturing side, its
+// CaptureZone_CalculateControlDelta @0x501120]: the capturing side, its
 // player-count shaping, the late-round acceleration for the side holding more
 // numbered zones, the shared-number division, the x87 conversion, and the
 // minimum signed delta. Exposed as one input value for exact formula pins.

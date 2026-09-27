@@ -96,7 +96,7 @@ public:
 	// A HostOnly (dedicated) host reports the mission exit once its round-end
 	// linger has closed the session; a listen host's shell observes the closed
 	// session itself (_maybe_exit_round_cycle) and never sees this.
-	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_mission_exit_reason 4/3]
+	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_MissionExitReason 4/3]
 	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;
 	// The host's mission exit: the round-reset 0x25 to every in-match remote,

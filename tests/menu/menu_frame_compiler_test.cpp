@@ -2,7 +2,7 @@
 // draw list — widget draw order, state-driven appearance/color selection, text
 // placement, the edit caret, the frame pieces, and the per-element int
 // truncation. [orig: CUIElement_Draw @ 0x64a8a0; CStaticWnd_Render @ 0x657b10;
-//  CStaticWnd_DrawLabel @ 0x656fb0; draw_text_with_cursor @ 0x6533b0;
+//  CStaticWnd_DrawLabel @ 0x656fb0; CFontCache_DrawTextWithCursor @ 0x6533b0;
 //  CEditWnd_Render @ 0x6619e0; CRadioWnd_Render @ 0x656e20; CCheckWnd_Render
 //  @ 0x64ae20; CListWnd_DrawItems @ 0x643f30]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
@@ -155,7 +155,7 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	// The frame: the stencil atlas fill cell + 8 stencil/brush material
 	// pieces follow the appearance fill. Retail copies stencil cell (3, 0)
 	// into border_fill_material, then builds border_material from STENCIL and
-	// BRUSH as two texture stages [orig: init_border_materials @ 0x646f70].
+	// BRUSH as two texture stages [orig: CUIElement_InitBorderMaterials @ 0x646f70].
 	CHECK(dl.quads.size() >= 10, "frame quads follow");
 	CHECK(dl.quads[1].texture == border && dl.quads[1].tiled,
 			"the stencil fill cell tiles right after the appearance fill");
@@ -301,7 +301,7 @@ void test_image_appearance_crops_authored_map_state(const fnt_font_t *font) {
 // CScrollWnd_Construct @ 0x64c450; CScrollWnd_Render @ 0x64c5c0;
 // scroll COLOR sink @ 0x64ce70; scroll IMAGE sink @ 0x64cf70;
 // CUIScrollbar_CreateChildWindows @ 0x64d330;
-// CUIScrollbar_CalcThumbRect @ 0x64cba0; options_screen_init @ 0x554800]
+// CUIScrollbar_CalcThumbRect @ 0x64cba0; UI_OptionsScreenInit @ 0x554800]
 void test_scroll_draws_authored_visual_parts(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>
@@ -1110,8 +1110,8 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 	CHECK(swatch, "the spinlist color item draws the opaque swatch");
 }
 
-// The mouse pump [orig: scene_end_frame @ 0x63e600 ->
-// widget_process_mouse_event @ 0x647a00]: front-most claim, disabled keeps
+// The mouse pump [orig: CUIScene_EndFrame @ 0x63e600 ->
+// CWnd_ProcessMouseEvent @ 0x647a00]: front-most claim, disabled keeps
 // state 1, hit+down -> pressed, hit+up -> hovered, misses clear.
 void test_mouse_pump(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
@@ -1245,7 +1245,7 @@ void test_table_interior(const fnt_font_t *font) {
 			"the scroll window drops rows above first-visible");
 }
 
-// The marquee credits roll [orig: render_scrolling_credits @ 0x65ca00]:
+// The marquee credits roll [orig: CMarqueeWnd_RenderScrollingCredits @ 0x65ca00]:
 // seeded lines draw centered, the roll advances with time_ms, and the whole
 // roll resets after the last line passes the top.
 void test_marquee_roll(const fnt_font_t *font) {
@@ -1369,8 +1369,8 @@ void test_draw_frame_gate(const fnt_font_t *font) {
 			"an omitted STENCIL inset uses retail's 12x8 constructor defaults");
 }
 
-// The witnessed edit-input operations [orig: edit_widget_insert_char
-// @ 0x661ee0; edit_widget_handle_key_event @ 0x6623a0].
+// The witnessed edit-input operations [orig: CEditWnd_InsertChar
+// @ 0x661ee0; CEditWnd_HandleKeyEvent @ 0x6623a0].
 void test_edit_input_ops() {
 	using opennova::menu::EditField;
 	using opennova::menu::EditKeyResult;
@@ -1751,7 +1751,7 @@ void test_hotkey_widget(const fnt_font_t *font) {
 	// The mnemonic rides retail's caret leg: no underline markup, one extra
 	// '_' glyph stretched to the marked char, at prefix width + the two gap
 	// terms (8 + 2 + 2 = 12 -> vertex 11.5)
-	// [orig: draw_text_with_cursor @0x6533b0 — gated adds @0x6534dc/0x653562].
+	// [orig: CFontCache_DrawTextWithCursor @0x6533b0 — gated adds @0x6534dc/0x653562].
 	CHECK(draw.underlines.empty(),
 			"the label mnemonic draws a glyph, not an underline segment");
 	CHECK(draw.glyphs.size() == 5, "the four label glyphs plus the mnemonic '_'");
@@ -1785,7 +1785,7 @@ void test_hotkey_widget(const fnt_font_t *font) {
 }
 
 // The wrapped multiline-edit drawer [orig: CMEditWnd_Render @ 0x6608e0 ->
-// draw_text_wrapped_clipped @ 0x653D60 -> draw_text_wrapped @ 0x653710]:
+// CFontCache_DrawTextWrappedClipped @ 0x653D60 -> CFontCache_DrawTextWrapped @ 0x653710]:
 // word wrap at the last space, explicit LF, the line-based scroll window,
 // the bottom clip, and the count twin [orig: @ 0x653b90].
 void test_multiline_wrap(const fnt_font_t *font) {
@@ -2123,7 +2123,7 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
 // them — the scene draw defers the registered open popup to the end of the
 // walk, it is NOT painted inline at tree position.
 // [orig: CUIElement_Draw @ 0x64a8a0 (the popup-flagged re-register);
-//  g_ui_open_popup_wnd @ 0x31C16D8]
+//  g_UIOpenPopupWnd @ 0x31C16D8]
 void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>
@@ -2265,7 +2265,7 @@ void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
 // An OPEN combo popup's scrollbar child is interactive through the same
 // pump: arrows step scroll_row, the shuttle captures and drags, and the
 // pressed part owns the sample so it can never become a popup row pick.
-// [orig: dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd gate routes to
+// [orig: UI_DispatchMouseEvent @ 0x63ab00 g_UIOpenPopupWnd gate routes to
 //  the popup; CListWnd child walk @ 0x643f30 gives its scrollbar the event
 //  first; CScrollWnd_HandleEvent @ 0x64d050 is the part interaction]
 void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {

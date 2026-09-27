@@ -43,7 +43,7 @@ inline int32_t bam_mul_wrap(int32_t lhs, int32_t rhs) {
 
 // The occupant whose input this machine should consume (defined in
 // vehicle_motor.cpp beside the controller resolve; the air TU consumes it).
-// Retail's gate is `(occ->Flags & 0x100) && (occ == g_local_player_entity ||
+// Retail's gate is `(occ->Flags & 0x100) && (occ == g_LocalPlayerEntity ||
 // is_authority)` [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the
 // ground twin is Entity_UpdateVehiclePhysics @0x48b0ff].
 Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits);

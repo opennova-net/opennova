@@ -45,7 +45,7 @@ inline constexpr double kFixed16 = io::kFp16OneD;
 // carry attach sets it), an undeployed or spectating player, a blocked spawn
 // marker, an SSN hide — so the host row is hidden exactly as the decoded
 // joiner row is.
-// [orig: collect_visible_entities_for_terrain @0x5c8cef..0x5c8cf4;
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5c8cef..0x5c8cf4;
 //  Entity_AttachCarriedObject @0x43c14a]
 bool pool_row_hidden(const Entity &e) {
 	return e.hidden || ((e.flags | e.engine_flags) & kEntityFlagCarried) != 0;
@@ -464,7 +464,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		const EntityHandle h{es.handle};
 		const Entity *ent = (!joiner) ? kernel.world.registry.get(h) : nullptr;
 		// Retail's terrain collector sends pool-1 model rows through
-		// render_sector_entity; pool-2 statics and pool-3 marker models join the
+		// Render_SectorEntity; pool-2 statics and pool-3 marker models join the
 		// same sector list through their dedicated collectors. Pool-0 skeletal
 		// organics take the general/body list and do not execute this writer.
 		// Keep validity independent of whether this client resolves the row to a
@@ -559,7 +559,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// Values come from the decoded client row for BOTH authority and joiner:
 		// this preserves the exact 0x0D/0x10/0x20 bytes and later S2C 0x50 team
 		// mutations instead of reaching around the replica pipeline.
-		// [orig: render_sector_entity @0x5C424F..0x5C425F;
+		// [orig: Render_SectorEntity @0x5C424F..0x5C425F;
 		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB]
 		const bool zone_ctrl = es.zone_number_rank != 0;
 		const int32_t signed_team = es.team < 0x80u
@@ -717,7 +717,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				// (ticked + contact-driven locally) exactly as the authority
 				// collector does; write_phases self-gates on door_motion.
 				// [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307,
-				//  loop exit @0x4c2278); build_bone_transforms @0x4E3070 (the
+				//  loop exit @0x4c2278); BoneCallback_BuildBoneTransforms @0x4E3070 (the
 				//  loop @0x4e312a..0x4e3145); BoneCallback_AnimatedBones_World
 				//  @0x4E3180 (@0x4e3201..0x4e3218)]
 				write_present_doors(r, i, kernel.world, *local, door_phases);
@@ -759,7 +759,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 	// no door entry); keep decoded organics on their receive-side animation
 	// path. Only the fragment rows touch the shared lifecycle map.
 	// [orig: Entity_CloneFromTemplateByType @ 0x4398A0;
-	// collect_visible_entities_for_terrain @ 0x5C8C60]
+	// Terrain_CollectVisibleEntitiesForTerrain @ 0x5C8C60]
 	if (!joiner) return;
 	DoorPhaseTable unused_doors;
 	kernel.world.registry.for_each([&](const Entity &entity) {
@@ -791,7 +791,7 @@ void build_world_present_rows(const PresentRowsContext &context,
 	// One row per live pool slot, in registry order — the set the host's own
 	// ClientState held before D-NET-140 closed (every slot the 0x0C/0x0D/0x10/
 	// 0x20 spawn batches stream plus every 0x0A record), now read straight
-	// from the pools [orig: collect_visible_entities_for_terrain @0x5c8c60
+	// from the pools [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5c8c60
 	// walks the pools; see docs/net/novaworld-net-re.md D-NET-140]. A row
 	// without a def keeps PF_TYPE_ID 0, which the wire pass skips.
 	int count = 0;
@@ -915,7 +915,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	// reaches its model callback. The generic-world callback publishes the
 	// same TEX_TEAM plus TEAMSWING for a nonzero packed zone byte, and writes
 	// LFP only when the client-side shared timer-list entry exists.
-	// [orig: render_sector_entity @0x5C424F..0x5C425F;
+	// [orig: Render_SectorEntity @0x5C424F..0x5C425F;
 	//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB; see docs/world/world-wac-ai-re.md]
 	const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
 	const bool zone_ctrl = e.zone_number != 0 &&

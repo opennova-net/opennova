@@ -276,7 +276,7 @@ void test_infantry_detour_cache_and_arrival() {
 
 // The detour's two rays admit every entity type: a pool-1 item across the -30
 // degree candidate's leg to the goal hands the equal-cost tie to +30 degrees.
-// [orig: ai_find_cover_position @0x4AFAB0, `push 1` @0x4AFD9B / @0x4AFE10]
+// [orig: AI_FindCoverPosition @0x4AFAB0, `push 1` @0x4AFD9B / @0x4AFE10]
 void test_infantry_detour_rays_see_items() {
     Rig rig(box_model(1, 0, 2.0, 2.0, 3.0), 100.0, 100.0);
     rig.world.registry.configure_pool(1, 8);
@@ -333,7 +333,7 @@ void test_infantry_detour_one_leg_fallback() {
 // A normal route walker must consume a real collision-produced state and get
 // around the wall through its root-motion motor, without staging a detour point.
 // The walker stands on the field: the resolver's ground probe clips against the
-// terrain for any source that is not indoors [orig: raycast_entity_collision
+// terrain for any source that is not indoors [orig: Entity_RaycastCollision
 // @0x41377E..0x413791], so a walker on a heightfield never goes airborne and
 // its think is not held by the airborne skip [orig: Entity_UpdateInfantryAI
 // @0x4BAA57..0x4BAA66]. The entity pass re-syncs the collision world's terrain
@@ -1483,7 +1483,7 @@ void test_idle_skip_throttle() {
     // tick the caller passes: tick 64 on counter 13 still skips, and counter 64
     // forces the full update (the skip counter restarts).
     // [orig: Entity_MovementCollisionResolver @0x4B2CAF, `test byte ptr
-    //  g_entity_update_counter,3Fh`]
+    //  g_EntityUpdateCounter,3Fh`]
     {
         Rig crig(box_model(1, 0, 2.0, 2.0, 3.0));
         crig.move_soldier(30.0, 30.0, 0.0);
@@ -2260,7 +2260,7 @@ void test_ladder_class_bit_climber_remote_and_local() {
     // heading toward the frame yaw, and still takes the exit push, but never
     // arms the pitch restore. The LOCAL twin does all of that plus the view
     // yaw ease and the restore. [orig: Flags & 0x100 @ 0x4b33aa / @ 0x4b3c78;
-    // g_local_player_entity @ 0x4b33ca / @ 0x4b3cdc]
+    // g_LocalPlayerEntity @ 0x4b33ca / @ 0x4b3cdc]
     auto climb = [](bool local, int32_t &heading_after, bool &restore_armed,
                     int32_t &view_yaw_after, int32_t &exit_dx) {
         Rig rig(ladder_slab());
@@ -3473,7 +3473,7 @@ void test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink() {
     // 0.5u THINNER and the ray clears thin/near-miss volumes — but only on flag-0
     // planes. A nonzero BPLN flags word substitutes the max(radius, 0) clamp, so
     // flagged geometry keeps its true extent on ray 2.
-    // [orig: raycast_against_entity_pool @ 0x538720, flag branch @ 0x538bd8-0x538e1b]
+    // [orig: Physics_RaycastAgainstEntityPool @ 0x538720, flag branch @ 0x538bd8-0x538e1b]
     for (int flagged = 0; flagged <= 1; ++flagged) {
         World world;
         world.registry.configure_pool(0, 4);
@@ -5581,7 +5581,7 @@ void test_idle_round_tick_clears_stale_terrain() {
 // is empty (or that never gets one, such as a static) keeps full sun regardless
 // of geometry.
 // [orig: Entity_ComputeSunVisibility @ 0x5c6800 — the +0x1C0 gate @ 0x5c6808;
-//  raycast_find_collision_entity @ 0x539a70 — the +0x1BC slice walk]
+//  Physics_RaycastFindCollisionEntity @ 0x539a70 — the +0x1BC slice walk]
 void test_entity_sun_visibility_rays_and_eligibility() {
     World world;
     world.registry.configure_pool(0, 8);
@@ -5721,8 +5721,8 @@ void test_entity_sun_visibility_rays_and_eligibility() {
 // emplacement fold of line_of_sight_clear: a mounted recipient (or target)
 // sees through its own hull on both the live pool walk and the prepared
 // stable index, while an unmounted body at the same spot is occluded by it.
-// [orig: raycast_find_collision_entity @0x539a70 endpoint resolve
-//  @0x539aba..0x539b10; raycast_against_entity_pool @0x538720 skips
+// [orig: Physics_RaycastFindCollisionEntity @0x539a70 endpoint resolve
+//  @0x539aba..0x539b10; Physics_RaycastAgainstEntityPool @0x538720 skips
 //  entity_a/entity_b/parent_a/parent_b]
 void test_cached_los_excludes_the_endpoint_carrier() {
     static Field flat(0);

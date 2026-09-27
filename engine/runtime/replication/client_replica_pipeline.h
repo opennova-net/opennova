@@ -79,8 +79,8 @@ public:
 	// keep their slot's lifetime refreshed and clear it when they lapse.
 	// Regular (non-special) markers refresh pose/known from the decoded
 	// entity, mirroring retail's draw-time pool read.
-	// [orig: update_map_overlay_timers @0x5BFCE0;
-	//  render_minimap_slot_blip @0x5be4ac]
+	// [orig: MapOverlay_UpdateTimers @0x5BFCE0;
+	//  Render_MinimapSlotBlip @0x5be4ac]
 	void tick_minimap_overlays();
     using GuidedRoundResolver = std::function<world::LiveRound *(int16_t)>;
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
@@ -167,7 +167,7 @@ public:
 
 	// Mission water plane for the replica water/float channel (16.16;
 	// has_water false = no water in this world). Fed per pump by the
-	// embedder from the env state [orig: Env_WaterHeightFixed @ 0x26C6454].
+	// embedder from the env state [orig: g_EnvWaterHeightFixed @ 0x26C6454].
 	void set_water_z(int32_t z, bool has_water) {
 		water_z_ = z;
 		has_water_ = has_water;
@@ -303,7 +303,7 @@ public:
 	bool game_type_known() const { return game_type_known_; }
 
 	// The 0x1D header-form discriminator's session half: retail reads
-	// g_napi_np_ctx.is_in_session; a joiner is always in-session, while the
+	// g_NapiNPCtx.is_in_session; a joiner is always in-session, while the
 	// listen host's loopback replica passes world.mp_session (retail SP never
 	// runs this client path at all). [orig: NapiNPClientMsg_0x01D @0x43086c]
 	void set_mp_session(bool mp_session) { mp_session_ = mp_session; }

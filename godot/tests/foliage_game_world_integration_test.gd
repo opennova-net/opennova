@@ -61,7 +61,7 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	# sector grid, and detail grass samples the leaf's source-atlas position
 	# (the key's low ten bits plus the local offsets), which is the same
 	# routed pixel; the world position's own low ten bits (the flat witness)
-	# never match. [orig: generate_foliage_instances_0 @ 0x5ffddb..0x5ffdee,
+	# never match. [orig: Foliage_GenerateInstances_0 @ 0x5ffddb..0x5ffdee,
 	# @ 0x5fff84..0x5fff9d; Foliage_SampleFoliageMapMask @ 0x606620]
 	var foliage_map: TerrainFoliageMap = data.get_foliage_map()
 	assert_not_null(foliage_map)

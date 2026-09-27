@@ -8,7 +8,7 @@
 
 namespace opennova::renderer {
 
-// [orig: load_texture_as_normalmap @0x58C480]
+// [orig: Texture_LoadAsNormalMap @0x58C480]
 std::string normal_material_filename(std::string_view name,
         bool loose_tga_preferred, bool dds_exists) {
     const std::string upper = strutil::to_upper(name);
@@ -45,7 +45,7 @@ namespace {
 
 // The plain loaders dispatch on the upper-cased path in this order.
 // [orig: Texture_LoadByNameWithChannel @0x58B66F..0x58B6E6;
-// load_texture_and_register @0x58B80E..0x58B881]
+// Texture_LoadAndRegister @0x58B80E..0x58B881]
 MaterialImageSource plain_source(std::string_view file) {
 	const std::string upper = strutil::to_upper(file);
 	MaterialImageSource source{std::string(file), MaterialImageDecoder::None};
@@ -83,7 +83,7 @@ uint32_t pixel_texture_mip_levels(uint32_t width, uint32_t height) {
 	return levels;
 }
 
-// [orig: convert_material_definition @0x5B045B..0x5B04A0]
+// [orig: Material_ConvertDefinition @0x5B045B..0x5B04A0]
 uint8_t material_texture_runtime_type(uint8_t authored_type) {
 	if (authored_type == 3 || (authored_type >= 9 && authored_type <= 15) ||
 			authored_type > 18)
@@ -112,7 +112,7 @@ MaterialTextureTransform material_texture_transform(
 	return MaterialTextureTransform::Checkerboard;
 }
 
-// [orig: load_texture_as_normalmap @0x58C985..0x58CAED (the live type-4/5
+// [orig: Texture_LoadAsNormalMap @0x58C985..0x58CAED (the live type-4/5
 // kernel); Texture_ApplyNormalMapFilter @0x58BD90..0x58C06C (its uncalled
 // twin)]
 std::vector<uint8_t> normal_map_from_height_rgba(const uint8_t *rgba,

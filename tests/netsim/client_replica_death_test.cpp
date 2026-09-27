@@ -123,11 +123,11 @@ std::vector<uint8_t> world_state_load_body(uint8_t game_flags) {
 	return b;
 }
 
-// The deploy-map OVERLAY global (retail g_deploy_screen_active): armed by the
+// The deploy-map OVERLAY global (retail g_DeployScreenActive): armed by the
 // 0x0F game_flags bit0 UNLESS the death screen is already up, then host-
 // ASSIGNED every per-frame 0x0A from flags1 bit1 — set and cleared, no edge
 // latch. [orig: NapiNPClientMsg_0x00F zero @0x42e2d8 + arm @0x42e2f8;
-//  NapiNPClientMsg_0x00A @0x42ff82 g_deploy_screen_active = (flags1 >> 1) & 1]
+//  NapiNPClientMsg_0x00A @0x42ff82 g_DeployScreenActive = (flags1 >> 1) & 1]
 void test_deploy_overlay_follows_the_host() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;

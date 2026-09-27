@@ -70,7 +70,7 @@ public:
     // SETTLED at scope on a Scoped weapon, any direction key routes through
     // the full unscope; the ForceScoped pin keeps pinned sights raised), and
     // refreshes the view aggregates. [orig: Player_PackInputStateToEntity
-    // @0x4df450 — g_movementKeyHeld @0x4df29c; the unscope route
+    // @0x4df450 — g_MovementKeyHeld @0x4df29c; the unscope route
     // @0x4df4c9..0x4df4ec; the ForceScoped pin @0x4df12d]
     void set_movement_keys(bool forward, bool back, bool left, bool right,
             bool lean_left, bool lean_right, bool jump);
@@ -117,7 +117,7 @@ public:
     // The same frame OBSERVED: the camera is the last composed view and
     // nothing advances (weapon-event placement, mode refresh, diagnostics).
     LocalPlayerViewFrame view_frame();
-    // The Player_CanFireWeapon verdict the body updater and the HUD share
+    // The Player_IsOpticalViewVisible verdict the body updater and the HUD share
     // [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
     // @0x4dcd30].
     bool local_player_can_fire();
@@ -167,7 +167,7 @@ public:
     // weapon-action walk (World::pump_weapon_actions calls it at the local
     // player's own pool-0 slot), after run_local_view_tick.
     // [orig: WeaponAction_ProcessAllEntities @0x542690 -> WeaponAction_ProcessFrame
-    //  @0x540E60 for g_local_player_entity's slot]
+    //  @0x540E60 for g_LocalPlayerEntity's slot]
     void pump_local_weapon();
     // One 62.5 Hz tick of the view state over view_session_inputs, then the
     // aim acquisition and the quantum's camera compose, before the weapon

@@ -541,7 +541,7 @@ bool run_death_feed_classifier_matrix() {
 	}
 
 	// The timer pass holds itself while a pre-round countdown runs.
-	// [orig: Server_UpdatePlayerBreathTimers `cmp g_preround_delay_timer,ebx`
+	// [orig: Server_UpdatePlayerBreathTimers `cmp g_PreRoundDelayTimer,ebx`
 	//  @0x50D773]
 	reset();
 	world.env.water_z = 1 << 16;
@@ -1641,7 +1641,7 @@ int main() {
 		// that slot before retail's send, so an infantry death ships 0 (every
 		// 0x13 in the retail capture carries 0) even though the bullet kill
 		// staged a nonzero selection for the edge.
-		// [orig: BuildDeathNotifyPayload @0x5036E0 (@0x503733); edge zero
+		// [orig: NetPacket_BuildDeathNotifyPayload @0x5036E0 (@0x503733); edge zero
 		//  @0x4B9D38 -> Entity_CheckAndProcessDeath @0x4B9D4D]
 		if (!expect(victim == hc.packed && death_anim_slot == 0,
 		            "0x13 carries the victim handle + the post-edge zero death-anim slot"))

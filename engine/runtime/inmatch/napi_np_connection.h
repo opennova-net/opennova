@@ -221,7 +221,7 @@ struct CharacterJoinVars {
 // of the matching alignment, packed {nat=0,div=0,combo=1,good}=0x0200 and
 // {nat=7,div=0,combo=1,evil}=0x8207, class 8 (rifleman) on both sides, the two
 // selected heads' voice/avatar bytes 1/10, and no side request (TR 0xFF).
-// [orig: PlayerProfile_InitDefaults @0x54bbe0..0x54bc24 -> lookup_entity_slot_and_pack_entry
+// [orig: PlayerProfile_InitDefaults @0x54bbe0..0x54bc24 -> EntitySlot_LookupAndPackEntry
 //  @0x57ad40; the avatar byte via Avatars_ResolveSelectionIndex (ex sub_57AE60) @0x57ae60; wire: retail join f=199140 (the
 //  captured VCB=4 is a saved profile override, not the fresh default)]
 inline CharacterJoinVars retail_fresh_profile_character_vars() {
@@ -241,7 +241,7 @@ inline CharacterJoinVars retail_fresh_profile_character_vars() {
 // below) by the weapon-slot combo = category*65 + rank [orig: the per-player 100-B
 // weapon-slot array playerSlot+464, index roundSlotIndex = adm[4] + 65*adm[0]
 // (Server_ClientFiredRound @0x50c0d7); the u16 clip = slot+16 (WeaponSlot_CanFire
-// @0x541ba0 reads it, consume_weapon_ammo @0x540850 decrements it, WeaponSlot_ReloadAmmo
+// @0x541ba0 reads it, Weapon_ConsumeAmmo @0x540850 decrements it, WeaponSlot_ReloadAmmo
 // @0x541720 refills it)]. The shared ammo pools (adm+220 belt / adm+216 ammo-point
 // classes) and the +96472 fire-rate stamp are deferred — D-NET-152 tails.
 struct WeaponSlotState {

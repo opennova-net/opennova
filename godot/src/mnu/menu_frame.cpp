@@ -322,7 +322,7 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 	}
 
 	if (p_quad.tiled) {
-		// draw_textured_quad_from_rect feeds absolute device coordinates as UVs,
+		// CUIElement_DrawTexturedQuadFromRect feeds absolute device coordinates as UVs,
 		// so the native-pixel fill pattern is screen-aligned rather than
 		// restarting at each window's top-left.
 		const int phase_x = positive_mod(

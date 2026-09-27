@@ -22,7 +22,7 @@ int Server_CountEntitiesByTypeAndTeam(const world::World &world, uint16_t type_i
 // unlimited_vehicles set, or a row whose type cap and per-team flag are both -1, the pair is
 // 0xFF/0xFF; a row with a type cap but no per-team flag is (cap - live, 0xFF);
 // otherwise max = the team's slot count and avail = min(cap - live, max), or
-// max alone when the cap is -1. [orig: serialize_weapon_overlay_slots_0 @0x5105A0]
+// max alone when the cap is -1. [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0]
 std::vector<uint8_t> Server_BuildVehicleSpawnAvailability(
 		const NapiNPServerCtx &ctx, const world::World &world, uint8_t team);
 

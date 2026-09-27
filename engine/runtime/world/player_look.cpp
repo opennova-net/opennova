@@ -14,7 +14,7 @@ PlayerLookDelta player_look_delta(const PlayerLookSettings &s,
     // The setting dword is read RAW here — no clamp on the per-frame path. The
     // [1, 0x1FF] range belongs to the 'mousescale' +/- adjust that WRITES the
     // setting [orig: @0x49b19b-0x49b1b9]; the profile apply copies it unclamped
-    // [orig: apply_session_settings_to_globals @0x55161e]. (x2048 == the
+    // [orig: Game_ApplySessionSettingsToGlobals @0x55161e]. (x2048 == the
     // witnessed `shl 11` @0x4996dd, spelled as a multiply so a negative setting
     // is defined arithmetic here too.)
     int64_t sens = static_cast<int64_t>(s.sensitivity) * 2048; // [orig: @ 0x4996dd]

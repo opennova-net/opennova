@@ -1,7 +1,7 @@
 // The SIGHTS card row modes and the sight-scale cycle (runtime/hud/sight_overlay.h):
 // the scaled half-extent formula about the row centre, the slide y offset, the
 // plain rect, the dotsize cycle with its signed `< 3` wrap, and the scope-zero
-// slide multiplier's three arms. [orig: draw_weapon_sight_overlays @0x4dce00;
+// slide multiplier's three arms. [orig: HUD_DrawWeaponSightOverlays @0x4dce00;
 //  Input_HandleActionBinding_0 case 216 @0x4e0c31; Player_InitPlayer @0x4e178c]
 
 #include <runtime/hud/scope_circle_mask.h>

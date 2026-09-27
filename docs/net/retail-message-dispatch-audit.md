@@ -6,8 +6,8 @@ The previous wire coverage catalog contained 113. This audit adds the missing
 complete host/client fidelity; the remaining runtime work is D-NET-218.
 
 Witness: Joint Operations executable, image base `0x400000`, client table
-`g_np_msginfo_client @0x82AE28` and server table
-`g_np_msginfo_server @0x82B5D8`. Entries are 16 bytes; each table ends in one
+`g_NPMsgInfoClient @0x82AE28` and server table
+`g_NPMsgInfoServer @0x82B5D8`. Entries are 16 bytes; each table ends in one
 sentinel. Handler addresses below are resolved function starts. No executable
 bytes or decompiler output are included in this record.
 
@@ -85,7 +85,7 @@ catalog records decoded, printer-only and uncharacterized coverage explicitly.
 | S2C | `0x07` | `NapiNPClientMsg_0x007` | `0x422730` |
 | S2C | `0x33` | `NapiNPClientMsg_0x033` | `0x425FA0` |
 | S2C | `0x1B` | `NapiNPClientMsg_HandleRandomSeed` | `0x426080` |
-| S2C | `0x38` | `handle_weapon_switch_packet` | `0x4260B0` |
+| S2C | `0x38` | `NapiNPClientMsg_HandleWeaponSwitchPacket` | `0x4260B0` |
 | S2C | `0x36` | `NapiNPClientMsg_0x036` | `0x426120` |
 | S2C | `0x35` | `NapiNPClientMsg_0x035` | `0x4261A0` |
 | S2C | `0x1F` | `NapiNPClientMsg_0x01F` | `0x427CB0` |

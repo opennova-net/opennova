@@ -8,7 +8,7 @@
 // nodes. The watercraft W3/W4 lanes route separately through the portable
 // vehicle motor and fixed-tick presenter; fxs/W1/W2 and the death/fire/other
 // family remain movement/damage-state threads (ptl-format-re.md §8).
-// [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 (mission
+// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0 (mission
 //  start, entity pools 1-3) -> ItemDef_GetBoneMaskByName @ 0x49ea40 (first
 //  16, stricmp) -> Entity_SpawnBoneTrailEffect @ 0x43bef0 (one mode-2 attached
 //  emitter per masked userpoint: pos = the userpoint, forward = its
@@ -31,7 +31,7 @@ struct ItemDeathTraits;
 
 // The emit class owns a live group at entity+0x1CC. The scene is shared with
 // the embedder's particle renderer; its ordinary fixed-tick advance reaps groups.
-// [orig: entity_spawn_bone_trail_effect @ 0x43F8F0;
+// [orig: Entity_SpawnBoneTrailEffect_0 @ 0x43F8F0;
 // Entity_ClearOwnerSessionIfMatches @ 0x453580]
 class ItemEmitterSystem {
 public:
@@ -63,7 +63,7 @@ private:
 // Organic=3, any other value admits nothing). Pool 0 organics are excluded;
 // pool 1 items skip attrib 0x42 (POWERUP | PLAYERCONTROL); pools 2/3 —
 // buildings and markers — skip only the powerup bit 0x2.
-// [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 — the
+// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0 — the
 //  three per-pool attrib gates of its pool walk]
 bool item_effect_pool_allows(int kind, uint32_t attrib);
 
@@ -98,7 +98,7 @@ bool item_effect_aliases_intersect(const std::vector<std::string> &left,
 // entity pose; the origin leg keeps the entity basis.
 // [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 (formats/threedi
 //  threedi_3di3_user_point_mask carries the scan); the spawn_count==0 leg
-//  Entity_SpawnBoneTrailEffect @ 0x43c097 -> submit_effect_descriptor
+//  Entity_SpawnBoneTrailEffect @ 0x43c097 -> Effect_SubmitDescriptor
 //  @ 0x43c0a4 at entity->Position]
 struct ItemEffectAttachPlan {
 	uint16_t mask = 0;             // the first-16 match mask

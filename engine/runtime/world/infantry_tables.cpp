@@ -1,8 +1,8 @@
 // Infantry anim-state tables, extracted from Jointops.exe (IDB 2026-06-10;
 // extended to the full 252 entries 2026-07-16 — AnimMap_FindSlotByName @0x40cfa0
 // scans exactly 252).
-// Names: [orig: g_animStateNameTable @0x8135F0] (the .adm clip keys, "anim_<name>").
-// Flags: [orig: g_animStateFlagsTable @0x8139E8]; bit semantics in infantry.h. All
+// Names: [orig: g_AnimStateNameTable @0x8135F0] (the .adm clip keys, "anim_<name>").
+// Flags: [orig: g_AnimStateFlagsTable @0x8139E8]; bit semantics in infantry.h. All
 // entries dumped index-by-index from the IDB (173..239 = the uniform death-family
 // value 0x82; the wpn_* rows 240..251 are 0).
 

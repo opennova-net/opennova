@@ -85,8 +85,8 @@ bool check_empty_cases() {
 
 // The key walk is LINEAR over the 21-byte key plus its NUL slot: position 21
 // is keyed by 0 (cipher = plain - '0'), and anything past it is cut (retail
-// reads uninitialised stack there). [orig: parse_connection_query_string
-// @0x54dfb0 — `char cipher_key[128]` + sprintf, `ni_src[cipher_key - nk_buf]`]
+// reads uninitialised stack there). [orig: URL_ParseConnectionQueryString
+// @0x54dfb0 — `char cipher_key[128]` + sprintf, `ni_src[cipher_key - g_NkBuf]`]
 bool check_key_nul_slot_and_cut() {
 	using opennova::url_cipher_decode;
 	using opennova::url_cipher_encode;
@@ -110,7 +110,7 @@ bool check_key_nul_slot_and_cut() {
 
 // Multi-byte golden vectors from the production-proven onnw _encode_token
 // (grill wave 3 NW-C4): NK = host:port, CK = app_id. Byte-identical to retail
-// parse_connection_query_string@0x54dfb0 and to the onnw Python reference.
+// URL_ParseConnectionQueryString@0x54dfb0 and to the onnw Python reference.
 // e.g. NK[0]: '1'(49) + 'd'(100) - '0'(48) = 101 = 'e'.
 bool check_python_golden_vectors() {
 	using opennova::url_cipher_decode;

@@ -1319,7 +1319,7 @@ func test_person_body_and_late_held_weapon_share_the_thermal_wave_lane() -> void
 	_assert_entity_light(weapon, expected, "the held model preserves that same wave")
 	# A contained wire draw also declares the containing building's interior
 	# light group on the body and its held weapon (retail
-	# setup_terrain_effect_for_entity -> Lighting_SetInteriorLightGroup @0x5a90e0).
+	# Terrain_SetupEffectForEntity -> Lighting_SetInteriorLightGroup @0x5a90e0).
 	p.set_entity_lighting_context(0x0004, 1.0, true, 0.2, 77, 3)
 	for model: ObjectModel in [body, weapon]:
 		assert_eq(model.get_interior_light_group_bms(), 77, "the contained draw names its building")

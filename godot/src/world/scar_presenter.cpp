@@ -436,7 +436,7 @@ void ScarPresenter::present_frame(Simulation *p_sim, const Vector3 &p_camera,
 	Color terrain_light(1, 1, 1);
 	if (p_environment != nullptr) {
 		fog_distance = p_environment->get_fog_distance();
-		// Env_TerrainLightCombined = light * 0xB5/256 + sky (env-tod-re.md
+		// g_EnvTerrainLightCombined = light * 0xB5/256 + sky (env-tod-re.md
 		// "Derived render colors"; the same chain the water surface lights by).
 		const Vector3 sun = p_environment->get_sun_light();
 		const Vector3 sky = p_environment->get_sky_ambient();

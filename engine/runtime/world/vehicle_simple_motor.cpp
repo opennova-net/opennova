@@ -289,7 +289,7 @@ void VehicleSystem::tick_simple_motor(
 			// water plane loses the wheel on the ground selector-zero mover too,
 			// not only the boat [orig: Entity_ProcessInfantryPhysics @0x46E100
 			// (site @0x46EA2E..0x46EA3A `add eax,[ecx+0Ch]; cmp eax,
-			// Env_WaterHeightFixed; jle loc_46ECB1` — the AI waypoint leg)].
+			// g_EnvWaterHeightFixed; jle loc_46ECB1` — the AI waypoint leg)].
 			stage_player_vehicle_input(world_, e, *controller, t);
 			m.stuck_ticks = 0;
 		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {

@@ -4,7 +4,7 @@
 // override reset, and the weapon.sav kit page order — the side's knife, the
 // medic's medpack, the three categories with their flags, the fixed three
 // grenade slots with the entry-0 quirk.
-// [orig: populate_player_voice_combo @ 0x55dce0; serialize_weapon_loadout @ 0x55e4b0]
+// [orig: PlayerInfo_PopulatePlayerVoiceCombo @ 0x55dce0; PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0]
 #include <runtime/menu/player_info_kit.h>
 
 #include <cstdio>

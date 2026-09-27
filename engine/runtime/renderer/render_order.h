@@ -21,7 +21,7 @@ namespace opennova::renderer {
 // Person entities (ItemDef type 3) enter the two BySide waves. The queued
 // alpha draws flush after the world block is restored; the opaque draws use
 // the flat block. Held models inherit their owner's wave.
-// [orig: collect_visible_entities_for_terrain @0x5C8C60;
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5C8C60;
 // Terrain_RenderWorldScene @0x5C9511..0x5C9616]
 inline bool entity_uses_thermal_wave(int item_type) { return item_type == 3; }
 
@@ -83,8 +83,8 @@ constexpr uint32_t kStackDefaultDepthMask = 0x4;
 
 // Technique-class selection for a submitted batch entry: the state stack's
 // class defaults win over the submit flags; NORMAL otherwise
-// [orig: collect_render_objects_for_batch @ 0x5d90d7..0x5d9145;
-// collect_render_batches_for_entity @ 0x5d95c0..0x5d961f].
+// [orig: Render_CollectRenderObjectsForBatch @ 0x5d90d7..0x5d9145;
+// Render_CollectRenderBatchesForEntity @ 0x5d95c0..0x5d961f].
 TechniqueClass technique_class_for_submit(uint32_t stack_default_flags,
                                           uint32_t submit_flags);
 
@@ -142,18 +142,18 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // Values keep the sky group
 // before all world alpha and leave the camera-side rung at Godot's default 0
 // so unclassified transparents land there naturally.
-// The dome's gradient pass opens the sky pass [orig: render_skybox @ 0x579080,
-// its first DrawIndexedPrimitive @ 0x5798dc, before render_celestial_bodies
+// The dome's gradient pass opens the sky pass [orig: Render_Skybox @ 0x579080,
+// its first DrawIndexedPrimitive @ 0x5798dc, before Render_CelestialBodies
 // @ 0x5798e0]. It writes no depth (pass flags 0x300000 @ 0x579883), and
 // Godot draws every no-depth-write surface in its transparent list, where it
 // is ordered by this rung: without it the gradient (rung 0) would paint over
 // the bodies, the clouds and every sky-group and far-side draw below it.
 constexpr int kRungSkyDome = -16;
-// The sun/moon bodies inside the dome pass [orig: render_skybox @ 0x579080 ->
-// render_celestial_bodies @ 0x5acaa0].
+// The sun/moon bodies inside the dome pass [orig: Render_Skybox @ 0x579080 ->
+// Render_CelestialBodies @ 0x5acaa0].
 constexpr int kRungSkyBody = -15;
 // The dome's cloud layers, drawn after the bodies inside the same pass
-// [orig: render_skybox cloud pass @ 0x5798f1..0x579b15].
+// [orig: Render_Skybox cloud pass @ 0x5798f1..0x579b15].
 constexpr int kRungSkyClouds = -14;
 // The first-person viewmodel flushes whole (its alpha strips included) after
 // the sky pass and before every world draw [orig: SkyDome_RenderWithSkyfog @ 0x5ca81a then
@@ -168,7 +168,7 @@ constexpr int kRungViewmodel = -13;
 // RenderSlot_DrawAllDrapes @ 0x610c47 behind the enabled > 0 gate
 // @ 0x610c3c..0x610c45) -> Terrain_RenderWorldScene @ 0x5ca8ec]. The drape
 // technique writes no depth (intrinsic flags 0x1520000 [orig:
-// shadow_system_init_resources @ 0x5d6362, stored @ 0x5d636c], applied pass
+// Shadow_SystemInitResources @ 0x5d6362, stored @ 0x5d636c], applied pass
 // 0x100000 [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e30, applied
 // @ 0x5d5e4b]), so every later draw that passes
 // depth against the terrain overwrites the drape: the drape survives only
@@ -218,7 +218,7 @@ constexpr int kRungParticleFarSide = -7;
 constexpr int kRungFoliageFarSide = -6;
 constexpr int kRungWater = -5;           // the water surface (drawn between the side brackets)
 // The water decals (the vehicle wake rings) inside the water pass, right
-// after the surface strip [orig: render_water_surface @ 0x5c3426 strip then
+// after the surface strip [orig: Render_WaterSurface @ 0x5c3426 strip then
 // the wake bank scanner WaterRing_DrawAll @ 0x5c3432].
 constexpr int kRungWaterDecals = -4;
 // The foliage MODEL depth masks of the camera-side person wave, drawn inside

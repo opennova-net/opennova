@@ -189,7 +189,7 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 	}
 
 	// Palette luminance table, then the per-pixel alpha plane
-	// [orig: load_texture_from_archive @ 0x58b980 — table build
+	// [orig: Texture_LoadFromArchive @ 0x58b980 — table build
 	// @ 0x58bc35..0x58bca9, per-pixel A @ 0x58bcee].
 	uint8_t lum[256];
 	for (int i = 0; i < 256; ++i) {

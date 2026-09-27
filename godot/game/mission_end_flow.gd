@@ -5,7 +5,7 @@ extends RefCounted
 ## world keeps ticking underneath (the SP world runs through the epilog —
 ## humans >= 1 keeps the run gate open); player input idles once the round is
 ## over [orig: the post-round input gate — the client input uplinks stop
-## against g_spawn_success_gate @0x42c410]. The shell reads is_round_ended() /
+## against g_SpawnSuccessGate @0x42c410]. The shell reads is_round_ended() /
 ## has_screen() for its input and mouse policy and drives tick() and
 ## show_screen() from its frame.
 
@@ -71,7 +71,7 @@ func show_screen(sim: Simulation, banner: String, root: ResourceRoot, mount: Nod
 
 ## ESC during the epilog leaves the mission: routed through the screen while it
 ## is up; false when no screen is mounted yet, so the caller exits directly
-## [orig: ESC (0x1B) sets g_mission_exit_reason = 1 during the epilog,
+## [orig: ESC (0x1B) sets g_MissionExitReason = 1 during the epilog,
 ## Input_HandleSpecialKeys @0x49c8e2].
 func request_screen_exit() -> bool:
 	if _screen == null:

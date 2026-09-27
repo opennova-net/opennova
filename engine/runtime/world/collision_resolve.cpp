@@ -1202,7 +1202,7 @@ CollisionWorld::debug_person_sections(World &world, const int32_t anchor[3],
 // minus half their bound, while my feet stay at or below theirs (someone on the
 // ladder above me). The person set is the same staged pool-0 slice repulsion
 // walks; positions re-read live, as retail reads the pool entity directly.
-// [orig: the g_pool_list[0] scan @ 0x4bf9b7-0x4bfa2b — live (ItemTypeIndex),
+// [orig: the g_PoolList[0] scan @ 0x4bf9b7-0x4bfa2b — live (ItemTypeIndex),
 //  not dead (Flags & 2), not self; |Δ| <= 73728 per axis; the band
 //  @ 0x4bfa08-0x4bfa29]
 bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,

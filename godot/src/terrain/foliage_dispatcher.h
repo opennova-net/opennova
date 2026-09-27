@@ -75,7 +75,7 @@ private:
 // MultiMesh per MODEL submission over the slot's normalized mesh, retained
 // scenario-instance pooling, material binding, and the opaque-pass depth
 // masks (FoliageMaskPass).
-// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 // Foliage_GenerateModelTileInstances @ 0x600980, see docs/foliage/foliage-re.md]
 class FoliageDispatcher : public Node3D {
   GDCLASS(FoliageDispatcher, Node3D)
@@ -156,7 +156,7 @@ public:
   // detail-cell handoff and composed surface textures when available.
   void set_terrain(Terrain *p_terrain);
   // The weather whose oscillator ring feeds the detail sway phase (retail
-  // Env_WaveOscRing[0] in Foliage_SetupVertexShaderConstants @ 0x60075e);
+  // g_EnvWaveOscRing[0] in Foliage_SetupVertexShaderConstants @ 0x60075e);
   // null leaves the clock term alone.
   void set_weather(Weather *p_weather);
   // Tests and raster probes pin the detail sway clock (the wall-clock
@@ -165,7 +165,7 @@ public:
   // The local player's thermal view, fed per frame by the GameWorld leg from
   // the environment's world gate (the engine compiler carries the witness).
   void set_thermal_view(bool p_thermal);
-  // Env_WaterHeightFixed in world units (0 = no water), fed per frame by the
+  // g_EnvWaterHeightFixed in world units (0 = no water), fed per frame by the
   // GameWorld leg: the detail passes and the MODEL masks split by it (the
   // engine compiler carries the witness).
   void set_water_height(float p_height);

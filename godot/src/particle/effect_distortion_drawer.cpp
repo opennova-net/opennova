@@ -42,7 +42,7 @@ static_assert(sizeof(opennova::renderer::TracerVertex) == 32 &&
 // SRCALPHA/INVSRCALPHA. Its coordinates are generated from the camera-space
 // position through the projective screen matrix (state 14 = the
 // TCI_CAMERASPACEPOSITION + COUNT3|PROJECTED texgen and transform 8,
-// retail set_texture_stage_state @ 0x680A2E), i.e. each pixel samples its own
+// retail CGfxShader_SetTextureStageState @ 0x680A2E), i.e. each pixel samples its own
 // screen position; the pass fogs toward the scene fog colour.
 const char *kRibbonVertexShader = R"GLSL(#version 450
 layout(location = 0) in vec3 a_position;

@@ -505,7 +505,7 @@ void JoinerRole::tick_local_weapon() {
 		fired.round.mode_flags = 1;
 		// off33 is fire_flags = Weapon_GetScopeZoomLevel(can_fire, 12) |
 		// (can_fire ? 0x80 : 0) for the local shooter [orig: @0x42bdd6..
-		// 0x42bdf9]; a seated pilot (parentSlot 2/5) fails Player_CanFireWeapon
+		// 0x42bdf9]; a seated pilot (parentSlot 2/5) fails Player_IsOpticalViewVisible
 		// [orig: @0x5cf7a8..0x5cf7b6], and with weaponActive 0 the zoom helper
 		// returns its default 12 [orig: Weapon_GetScopeZoomLevel @0x422fd1/
 		// @0x422fd5]. The on-foot pump stamps the same 12 on its own witnessed leg.
@@ -551,7 +551,7 @@ void JoinerRole::tick_local_weapon() {
 		// fix. The actual mechanism is D-NET-184 and is not packet-driven.
 		fire.hit_part = opennova::pack_fired_round_hit_part(rt.local_player_slot(), fired.shot_seq);
 		// entity+0x160 — the shooter's current AMMO-DEFINITION index, a u16 index
-		// into g_ammoDefTable (stride 276). The host stores it onto the remote
+		// into g_AmmoDefTable (stride 276). The host stores it onto the remote
 		// shooter's entity [orig: the send-side read Entity_FireWeaponAndSendPacket
 		// @0x42C01A; the equip-time source WeaponSlot_InitFromEntityDef @0x54673B
 		// copies admEntry[1]'s low word; retail seeds 3 beside the WPN_M4AUTO
@@ -735,9 +735,9 @@ void JoinerRole::pump() {
 	// A folded S2C 0x1D raises this client's round-over gate before the
 	// frame's entity update, which the gate then holds; a fresh runtime (a
 	// reset counter) latches nothing.
-	// [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_spawn_success_gate,1`
+	// [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_SpawnSuccessGate,1`
 	//  @0x430858; Game_ProcessMainFrame -- the is_in_session /
-	//  g_spawn_success_gate tests @0x526734..0x526742]
+	//  g_SpawnSuccessGate tests @0x526734..0x526742]
 	const uint32_t end_round_headers = rt.state().end_round.header_updates;
 	if (end_round_headers > end_round_headers_seen_) world.match.latch_round_over();
 	end_round_headers_seen_ = end_round_headers;
@@ -745,7 +745,7 @@ void JoinerRole::pump() {
 
 	const bool preround_active = world.preround_delay_seconds != 0;
     world.rules.cease_fire = rt.state().cease_fire;
-    // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_rules_flags
+    // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_RulesFlags
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
 	world.rules.mpattrib = rt.view().mp_attributes();
@@ -874,7 +874,7 @@ void JoinerRole::wire_frame_providers() {
     };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
 	// The replica water/float channel reads the mission water plane
-	// [orig: Env_WaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
+	// [orig: g_EnvWaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
 	// water in this world).
 	rt.view().set_water_z(
 			world.env.water_z, world.env.water_z != 0);
@@ -1414,7 +1414,7 @@ void JoinerRole::apply_authoritative_health() {
 }
 
 // The S2C 0x0F world-state landing on L, once per decoded 0x0F. Retail writes
-// the pose straight onto g_local_player_entity from the handler — Position,
+// the pose straight onto g_LocalPlayerEntity from the handler — Position,
 // Yaw (+ g_LocalPlayerLookYaw), Pitch, Roll — and clears its hidden bit unless
 // the death screen is up; the host sends it right after Server_PositionPlayer-
 // ForSpawn, so it is the authoritative admission pose (a later 0x0F re-snaps a
@@ -1423,9 +1423,9 @@ void JoinerRole::apply_authoritative_health() {
 // route list is rebuilt from the wire's pool-3 slots (the host's team-1
 // filtered blue route, <= 128) with the host's name ids, keeping the locally
 // promoted marker facts (radius, linked event, chain-back) of a re-listed node.
-// [orig: NapiNPClientMsg_0x00F @0x42E200 — `if (!g_local_player_entity)` skip,
+// [orig: NapiNPClientMsg_0x00F @0x42E200 — `if (!g_LocalPlayerEntity)` skip,
 //  the pose stores (Pitch @0x42E3E9, Roll @0x42E3F2), `Flags &= ~1` when
-//  !g_death_screen_active; the g_waypointList rebuild @0x42E47F..0x42E4A3
+//  !g_DeathScreenActive; the g_WaypointList rebuild @0x42E47F..0x42E4A3
 //  (Pool_GetEntryUnchecked(3, slot), STRWPNAME%03i name); Server_OnPlayerJoin
 //  positions @0x51A786 then serializes 0x0F @0x51A864]
 void JoinerRole::apply_world_state_load() {
@@ -2241,7 +2241,7 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 		// The category follows the retail animation-flags table, not a
 		// hand-maintained list of familiar locomotion clips. In particular,
 		// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
-		// neither. [orig: g_animStateFlagsTable @0x8139E8; category read in
+		// neither. [orig: g_AnimStateFlagsTable @0x8139E8; category read in
 		// RoundData_SpawnRound @0x4EC252..0x4EC27A]
 		const uint32_t anim_flags = world::infantry_anim_flags(anim);
 		const bool prone = (anim_flags & world::kAnimStanceFlagProne) != 0;

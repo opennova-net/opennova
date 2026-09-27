@@ -25,7 +25,7 @@ namespace opennova::world {
 
 // Every non-first-person mode presents the body and hides the FP arms -- the
 // chase (1) and the death lerp camera (4) alike [orig: the FP viewmodel gate
-// g_camera_mode == 0 in Entity_ComputeActionTransform @0x40133e].
+// g_CameraMode == 0 in Entity_ComputeActionTransform @0x40133e].
 bool presents_third_person(bool third_person, int camera_mode);
 
 // --- the first-person submit ----------------------------------------------------
@@ -38,7 +38,7 @@ struct FpViewmodelSubmitGates {
     bool fp_weapon_view_flag = true;     // g_FpWeaponViewFlags bit 0 (showhud)
     bool seat_hides_weapon = false;      // world::mount_hides_fp_viewmodel
     bool local_dead = false;             // the local entity's Flags & 2
-    bool round_winner_set = false;       // g_endround_winner_team != 0
+    bool round_winner_set = false;       // g_EndRoundWinnerTeam != 0
     bool emplaced = false;               // equipped def flags1 & Emplaced
     bool inset_scoped = false;           // CanFire && Scoped && flags2 & Inset
 };
@@ -47,7 +47,7 @@ struct FpViewmodelSubmitGates {
 //   * the alive gate: a dead local entity (Flags & 2) or a decided round
 //     winner draws no viewmodel at all [orig: Player_RenderViewModelIfAlive
 //     @0x4E0145 (test [entity+24h], 2) and @0x4E014B
-//     (g_endround_winner_team)];
+//     (g_EndRoundWinnerTeam)];
 //   * the card switch: while the SIGHTS card is up, the FP model does not
 //     draw -- the frame shows one or the other [orig: selectors/clear
 //     @0x5ca299..0x5ca304; the card path @0x5caaf3..0x5cab15 and the
@@ -64,7 +64,7 @@ struct FpViewmodelSubmitGates {
 //     Player_RenderFirstPersonViewModel @0x4DEDD9..0x4DEDF1 -- def flags1
 //     & 0x80 jumps past the `test g_FpWeaponViewFlags, 1` @0x4DEDEA];
 //   * the Inset gate: a scoped Inset weapon draws the aperture instead
-//     [orig: @0x4DEDF7..0x4DEE19 -- Player_CanFireWeapon &&
+//     [orig: @0x4DEDF7..0x4DEE19 -- Player_IsOpticalViewVisible &&
 //     Player_IsEquippedWeaponScoped && def flags2 & 0x200 skips the draw];
 //   * third person presents the body instead (presents_third_person).
 bool fp_viewmodel_retail_submit(const FpViewmodelSubmitGates &gates);
@@ -78,7 +78,7 @@ bool fp_viewmodel_retail_submit(const FpViewmodelSubmitGates &gates);
 // interior group from blink_hits[0]. Updating on every presentation frame
 // makes portal crossings live.
 // [orig: Player_RenderFirstPersonViewModel @0x4DEEA4..0x4DEF52 -- the
-//  setup_terrain_effect_for_entity return is dropped on the FP leg;
+//  Terrain_SetupEffectForEntity return is dropped on the FP leg;
 //  Terrain_RenderSectorEntities stacks it for the world body @0x5c7bff]
 struct LocalPlayerLightingContext {
     bool interior = false;          // blink_hits[0] names a building
@@ -100,11 +100,11 @@ LocalPlayerLightingContext local_player_lighting_context(int interior_item_id,
 // local begin routes through the no-effect shim @0x5419e0 (no casing ejects
 // in your own FP view; remote views spawn them via the remote leg @0x541a83,
 // an MP seam) [orig: @0x541b17]. The suppression reads the event's SETTLED
-// scope state: retail promotes g_weaponScopeActive before weapon actions on
+// scope state: retail promotes g_WeaponScopeActive before weapon actions on
 // every tick; one render frame can drain several ticks spanning that
 // boundary, so the final render snapshot is not a valid substitute [orig:
 // promoter @0x4de4f7 before weapon pump call @0x526786; gate @0x541aba
-// !g_weaponScopeActive] -- settled-scoped FP fire shows no muzzle flash
+// !g_WeaponScopeActive] -- settled-scoped FP fire shows no muzzle flash
 // [orig: @0x541aba]. `fire_action` is the FIRE slot id (weapon_action::kFire).
 bool local_fire_effect_admitted(int action_started, int fire_action, bool has_particle,
                                 bool scope_settled, bool third_person,
@@ -133,7 +133,7 @@ FireEffectPlan fire_effect_plan(const FirePresentationRow &row);
 // Retail keeps two resolved indices for one authored userpoint name --
 // ActionDef+56 against gfx1 and +57 against gfx3 -- and picks by the
 // first-person bit, which requires the camera to be in first person at all
-// [orig: the FP bit gate @0x540e8c..0x540eca requires g_camera_mode == 0;
+// [orig: the FP bit gate @0x540e8c..0x540eca requires g_CameraMode == 0;
 // the gfx1/gfx3 resolvers @0x54039e/@0x54040f]. True = resolve the point
 // against the third-person world gun (gfx3); false = the FP viewmodel (gfx1).
 bool action_particle_uses_third_person_gun(bool third_person);
