@@ -1286,25 +1286,22 @@ def draw_weapon(layout, model):
 
 
 def draw_animations(layout, model):
-    """The model's clip set: its rig, the table's rows, and what writes them."""
+    """The model's clip set: the table's rows, what writes them, and a
+    first-person gun's weapon side. A model borrowing another's rig (arms on
+    a gun) has none, and one without a rig gets it from its parts (the model
+    box's Add Animation Rig)."""
     p = model.o3d
     arm = rig.rig_of(model)
+    if arm is not None and rig.model_of(arm) is not model:
+        return
     box = layout.box()
     box.label(text="Animations", icon="ARMATURE_DATA")
     if arm is None:
-        box.label(text="No rig: clips pose the BN## bones of a rig")
-        box.operator("opennova_3di.add_rig", icon="ARMATURE_DATA")
-        return
-    owner = rig.model_of(arm)
-    if owner is not model:
-        box.label(text=f"Deforms with {owner.name}'s rig: {owner.name}'s clips pose it")
+        box.label(text="No rig: Add Animation Rig makes one of the parts")
         return
     box.prop(p, "adm_path")
     if not p.adm_path:
         box.label(text=f"Writes {animation.adm_default(model)}")
-    row = box.row()
-    row.label(text=f"Rig {arm.name}")
-    row.operator("opennova_3di.number_parts")
     try:
         grounded = animation.root_of(arm) is not None
     except ExportError:
