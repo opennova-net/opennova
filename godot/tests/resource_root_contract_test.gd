@@ -180,9 +180,9 @@ func test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archi
 
 func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 	var root := _make_flat_root("texture_precedence")
-	TestFs.write_bytes(self, root.path_join("mission.pcx"), _solid_test_pcx(Color.BLUE))
+	TestFs.write_bytes(self, root.path_join("mission.pcx"), TestPcx.solid_2x2(Color.BLUE))
 	WorldFixture.write_pff(self, root.path_join("language.pff"), [
-		{"name": "mission.pcx", "bytes": _solid_test_pcx(Color.RED)},
+		{"name": "mission.pcx", "bytes": TestPcx.solid_2x2(Color.RED)},
 	])
 
 	var resources := ResourceRoot.new()
@@ -208,10 +208,10 @@ func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 func test_texture_cache_separates_policy_and_full_query() -> void:
 	var root := _make_flat_root("texture_policy_cache")
 	DirAccess.make_dir_recursive_absolute(root.path_join("Nested"))
-	TestFs.write_bytes(self, root.path_join("swatch.pcx"), _solid_test_pcx(Color.BLUE))
-	TestFs.write_bytes(self, root.path_join("Nested/swatch.pcx"), _solid_test_pcx(Color.GREEN))
+	TestFs.write_bytes(self, root.path_join("swatch.pcx"), TestPcx.solid_2x2(Color.BLUE))
+	TestFs.write_bytes(self, root.path_join("Nested/swatch.pcx"), TestPcx.solid_2x2(Color.GREEN))
 	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
-		{"name": "swatch.pcx", "bytes": _solid_test_pcx(Color.RED)},
+		{"name": "swatch.pcx", "bytes": TestPcx.solid_2x2(Color.RED)},
 	])
 
 	var resources := ResourceRoot.new()
@@ -298,12 +298,12 @@ func test_runtime_remount_in_place_switches_expansion() -> void:
 	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "shared.env", "bytes": "base env"},
 		{"name": "baseonly.trn", "bytes": "base trn"},
-		{"name": "briefing.pcx", "bytes": _solid_test_pcx(Color.RED)},
+		{"name": "briefing.pcx", "bytes": TestPcx.solid_2x2(Color.RED)},
 	])
 	WorldFixture.write_pff(self, root.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "shared.env", "bytes": "exp env"},
 		{"name": "exponly.3di", "bytes": "exp model"},
-		{"name": "briefing.pcx", "bytes": _solid_test_pcx(Color.BLUE)},
+		{"name": "briefing.pcx", "bytes": TestPcx.solid_2x2(Color.BLUE)},
 	])
 
 	var resources := ResourceRoot.new()
@@ -533,33 +533,6 @@ func _make_flat_root(name: String) -> String:
 	var root := OS.get_cache_dir().path_join("opennova_resource_root_contract").path_join("%s_%d" % [name, Time.get_ticks_usec()])
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
 	return root
-
-
-func _solid_test_pcx(color: Color) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(128)
-	bytes[0] = 0x0A  # manufacturer
-	bytes[1] = 5     # version
-	bytes[2] = 1     # RLE
-	bytes[3] = 8     # bits per pixel
-	# xmin/ymin = 0, xmax/ymax = 1 (little-endian u16 pairs at 4..11)
-	bytes[8] = 1
-	bytes[10] = 1
-	bytes[65] = 1    # planes
-	bytes[66] = 2    # bytes per line
-	for _pixel in range(4):
-		bytes.append(1)  # palette index 1; values below 0xC0 are RLE literals
-	bytes.append(0x0C)  # palette marker
-	for index in range(256):
-		if index == 1:
-			bytes.append(int(color.r * 255.0))
-			bytes.append(int(color.g * 255.0))
-			bytes.append(int(color.b * 255.0))
-		else:
-			bytes.append(0)
-			bytes.append(0)
-			bytes.append(0)
-	return bytes
 
 
 func _norm(path: String) -> String:
