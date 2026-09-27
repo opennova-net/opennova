@@ -1,0 +1,119 @@
+name: Package apps
+
+on:
+  workflow_call:
+    outputs:
+      artifact_id:
+        description: ID of the Windows apps zip
+        value: ${{ jobs.package.outputs.artifact_id }}
+      artifact_url:
+        description: Download URL of the Windows apps zip
+        value: ${{ jobs.package.outputs.artifact_url }}
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      # The apps build from the root CMake project without godot-cpp or GUT,
+      # so the submodules stay uninitialized.
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Package apps
+        shell: bash
+        run: scripts/package_apps.sh dist/opennova-apps-windows.zip
+
+      # Every exe runs without an installed VC++ runtime and reaches its usage
+      # exit; the server boots from the unpacked folder on the shipped
+      # migrations and seed.
+      - name: Smoke-test the packaged apps
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $unpacked = (New-Item -ItemType Directory -Force build/apps-package-smoke).FullName
+          Expand-Archive -LiteralPath dist/opennova-apps-windows.zip -DestinationPath $unpacked -Force
+          # Each CLI's usage call and the exit code it documents for it.
+          $clis = @(
+            @{ Exe = "opennova-3di.exe"; Arguments = @(); Code = 2 },
+            @{ Exe = "opennova-extract.exe"; Arguments = @("--help"); Code = 2 },
+            @{ Exe = "nw_pp.exe"; Arguments = @(); Code = 1 },
+            @{ Exe = "nw-lan-probe.exe"; Arguments = @("--help"); Code = 0 }
+          )
+          $server = "opennova-novaworld.exe"
+          $expected = @($clis.Exe + $server | Sort-Object)
+          $shipped = @(Get-ChildItem -LiteralPath $unpacked -Filter *.exe | ForEach-Object Name | Sort-Object)
+          if (Compare-Object $shipped $expected) {
+            throw "Packaged exes ($($shipped -join ', ')) differ from the smoke list ($($expected -join ', '))"
+          }
+          foreach ($name in $expected) {
+            $dependencies = & dumpbin /DEPENDENTS (Join-Path $unpacked $name) | Out-String
+            if ($LASTEXITCODE -ne 0) { throw "Could not inspect $name dependencies" }
+            if ($dependencies -match '(?i)\b(?:MSVCP|VCRUNTIME)\w*\.dll\b') {
+              throw "$name requires an unbundled Visual C++ runtime DLL"
+            }
+          }
+          foreach ($cli in $clis) {
+            $arguments = $cli.Arguments
+            & (Join-Path $unpacked $cli.Exe) @arguments
+            if ($LASTEXITCODE -ne $cli.Code) {
+              throw "$($cli.Exe) exited $LASTEXITCODE, expected its usage exit $($cli.Code)"
+            }
+          }
+          $log = Join-Path $unpacked "novaworld.log"
+          $process = Start-Process -FilePath (Join-Path $unpacked $server) -WorkingDirectory $unpacked `
+            -RedirectStandardOutput $log -RedirectStandardError "$log.err" -NoNewWindow -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            do {
+              Start-Sleep -Milliseconds 250
+              $output = Get-Content -Raw -LiteralPath $log -ErrorAction SilentlyContinue
+            } until ($output -match '\[boot\] ready' -or $process.HasExited -or (Get-Date) -gt $deadline)
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+          Write-Host $output
+          Get-Content -Raw -LiteralPath "$log.err" -ErrorAction SilentlyContinue | Write-Host
+          if ($output -notmatch '\[boot\] migrations: [1-9]\d* applied') {
+            throw "Packaged NovaWorld server applied no migrations"
+          }
+          if ($output -notmatch '\[boot\] ready') { throw "Packaged NovaWorld server did not boot" }
+          # The last CLI's usage exit would otherwise become the step's exit code.
+          exit 0
+
+      # Upload the zip directly, without a second archive wrapper.
+      - name: Upload apps zip
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-apps-windows.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats

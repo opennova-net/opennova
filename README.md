@@ -99,6 +99,12 @@ Tagged [releases](https://github.com/opennova-net/opennova/releases) include
 Blender 4.2 or newer using **Preferences > Get Extensions > Install from Disk**.
 The add-on currently supports Windows x64.
 
+The native apps ship together in `opennova-apps-windows.zip` (on a PR's build
+comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
+`opennova-3di`, `opennova-extract`, `nw_pp` and `nw-lan-probe` command-line
+tools and the NovaWorld server, for Windows x64. Its `README.txt` describes each
+one.
+
 ## Documentation
 
 Start with [docs/README.md](docs/README.md) for the architecture, format notes,
