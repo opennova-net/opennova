@@ -34,18 +34,20 @@ def arguments():
 
 def load():
     """(the add-on package, the opennova-3di it runs), on an empty scene."""
+    import addon_utils
     args = arguments()
     if args[:1] == ["--installed"]:
-        import addon_utils
         addon_utils.enable(INSTALLED, default_set=True)
         addon = importlib.import_module(INSTALLED)
         cli = addon.o3dtext.bundled_cli_path()
     elif args:
+        # Enabled as Blender enables an add-on, so its preferences exist: they
+        # name the opennova-3di it runs.
         sys.path.insert(0, os.path.join(ROOT, "tools", "blender"))
+        addon_utils.enable("opennova_3di", default_set=True)
         addon = importlib.import_module("opennova_3di")
-        addon.register()
         cli = os.path.abspath(args[0])
-        bpy.context.scene.o3d.cli_path = cli
+        bpy.context.preferences.addons["opennova_3di"].preferences.cli_path = cli
     else:
         raise SystemExit("usage: blender -b --factory-startup --python-exit-code 1 --python <test> -- "
                          "<opennova-3di.exe> | --installed")
