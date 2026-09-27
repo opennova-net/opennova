@@ -861,8 +861,8 @@ private:
 	void install_join_cd_cookie();
 	// The per-load host bring-up record: mode 3 -> create_session(&host_loop) [connection-table
 	// reset + Server_InitNewRoundState] -> the faithful host-player auto-spawn, over the kernel's
-	// world/mission. Mirrors apps/nw_server; the Godot-fed context installs (mission text,
-	// .til bytes, GameConfig from the UI host config) sit beside the shared core. Staged on the
+	// world/mission. The Godot-fed context installs (mission text, .til bytes, GameConfig from
+	// the UI host config) sit beside the shared core. Staged on the
 	// host role right before the kernel boots; the role's bring_up consumes it.
 	opennova::inmatch::HostBringup host_bringup();
 	// The per-frame host owner loop: the ONE inmatch::HostRole::run_tick over the kernel

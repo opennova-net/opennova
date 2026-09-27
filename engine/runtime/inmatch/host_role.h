@@ -77,8 +77,6 @@ public:
 	// The SP listen server: SINGLEPLAYERGAME, one player, the mission's own
 	// game type, socketless [orig: SinglePlayer_StartMission @0x561af0].
 	void bring_up_singleplayer();
-	// A HostOnly dedicated host: no local-player connection, no local player.
-	void bring_up_dedicated(const inmatch::HostConfig &host_cfg);
 	// The shell's general bring-up (the LAN host or its SP listen server with
 	// the shell's mission text and terrain tiles).
 	void bring_up(const HostBringup &bringup);

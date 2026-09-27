@@ -108,8 +108,7 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 }
 
 bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
-		const std::string &terrain_name, std::string &error,
-		std::vector<uint8_t> *til_bytes) {
+		const std::string &terrain_name, std::string &error) {
 	if (terrain_name.empty()) {
 		error = "the mission names no terrain";
 		return false;
@@ -152,7 +151,6 @@ bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &ind
 	terrain_field_store_build(store, cpt, trn,
 			charmap.empty() ? nullptr : charmap.indices.data(),
 			charmap.width, charmap.height);
-	if (til_bytes != nullptr) (void)index.read_file(terrain_name + ".til", *til_bytes);
 	return store.valid();
 }
 

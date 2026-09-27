@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include <base/gameprofile/game_type.h> // game_rules::kDefault* (the Config_SetDefaults baseline)
 #include <net/npwire/protocol_message.h>
 
 // GameConfig — the ONE consolidated in-match server-state config (ADR 0013, D-NET-132; §6.9). It
@@ -357,31 +356,5 @@ struct GameConfig {
 		}
 	}
 };
-
-// Seed a config with the fresh-host rule defaults the retail config path
-// applies before a mission starts -- the one place the game_rules baseline
-// lands on the live wire fields (a dev host that skips this stays inert at
-// zero). [orig: Config_SetDefaults @0x54D030 -> Game_ApplySessionSettingsToGlobals
-// @0x551500; GameType_CreateDefaultSettings @0x52dd00]
-inline void apply_fresh_host_rule_defaults(GameConfig &config) {
-	config.respawn_time = game_rules::kDefaultRespawnTime;
-	config.time_limit_minutes = game_rules::kDefaultTimeLimitMinutes;
-	config.replay_enabled = game_rules::kDefaultReplayEnabled;
-	config.max_team_lives = game_rules::kDefaultMaxTeamLives;
-	config.score_limit = game_rules::kDefaultScoreLimit;
-	config.max_score = game_rules::kDefaultMaxScore;
-	config.koth_delta = game_rules::kDefaultKothDelta;
-	config.flag_return_ticks = game_rules::kDefaultFlagReturnTicks;
-	config.capture_duration_seconds = game_rules::kDefaultCaptureDurationSeconds;
-	config.capture_speed_setting = game_rules::kDefaultCaptureSpeedSetting;
-	config.spawn_wave_time_base = game_rules::kDefaultSpawnWaveTimeBase;
-	config.spawn_wave_time_zone = game_rules::kDefaultSpawnWaveTimeZone;
-	config.default_spawn_requires_no_team_zone = game_rules::kDefaultSpawnRequiresNoTeamZone;
-	config.num_teams = static_cast<uint8_t>(game_rules::kDefaultNumTeams);
-	config.respawn_timeout = game_rules::kDefaultRespawnTimeout;
-	config.start_delay = game_rules::kDefaultStartDelay;
-	config.destroy_buildings = game_rules::kDefaultDestroyBuildings;
-	config.death_messages = game_rules::kDefaultDeathMessages;
-}
 
 } // namespace opennova::inmatch

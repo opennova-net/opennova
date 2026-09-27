@@ -3,7 +3,7 @@
 // The engine's ONE mission boot + state + no-net authoritative tick (ADR 0042
 // d3): the promoted body of the retail-mission test rig, now the single
 // implementation every embedder drives — the Godot Simulation binding (the
-// shell's session roles, which bind a kernel), the dedicated host, and the ctests
+// shell's session roles, which bind a kernel) and the ctests
 // (tests/common/retail_mission_files supplies retail paths only). It owns the
 // world and its systems (AI, WAC, BMS events, collision, occlusion), the sim
 // asset caches (models, collision pose, root motion, clip index), the seat
@@ -72,23 +72,14 @@ struct KernelBootOptions {
 	// A world presenter seeds weather after boot, then completes mission start.
 	// Native boots with their weather already seeded finish here.
 	bool defer_mission_start = false;
-	// A WAC literal that misses the mounted FX, SOUNDSET or AMMO catalog fails
-	// the boot (the dedicated golden host's policy: the port's catalogs are
-	// where a compile could part from retail's). false = the game's policy,
-	// retail's: the program always installs with its first error recorded.
-	// Feeds wac_layered_load's strict_diagnostics flag.
-	bool wac_strict_diagnostics = false;
 	bool collision = true;
 	bool seat_specs = true; // the native seat/mount table (S16); off = the bare promote
 	// The mission's .cpt/.trn(+charmap) height field: when the embedder built
 	// no store before the boot (the shell hands its parsed documents over
 	// through terrain_field_store_build), the kernel loads it through its own
-	// asset index -- the file entry of the one builder (the dedicated host,
-	// the ctests). Off = never load (the shell owns the parsed-document entry).
+	// asset index -- the file entry of the one builder (the ctests). Off =
+	// never load (the shell owns the parsed-document entry).
 	bool terrain = true;
-	// Receives the raw .til bytes beside that load (the S2C 0x45 terrain-tile
-	// stream a wire joiner streams, net-re 5.37); null = not wanted.
-	std::vector<uint8_t> *terrain_til_bytes = nullptr;
 	// A joiner world: never spawns its own player here (L spawns on the
 	// name-match inside the joiner pump — the joiner ROLE stays with the
 	// embedder, ADR 0042 d3; this only gates the boot's spawn step).
@@ -109,8 +100,8 @@ struct KernelBootOptions {
 	// Authored display names for promote's name_index resolve (the embedder's
 	// parsed [PeopleNames] STRNAME%03i table; D-HUD-20). Empty = no names.
 	std::function<std::string(int32_t)> people_name_resolver;
-	// The net half's session bring-up (inmatch::HostRole::bring_up_singleplayer, or
-	// bringup_dedicated for a HostOnly embedder),
+	// The net half's session bring-up (inmatch::HostRole::bring_up_singleplayer,
+	// or HostRole::bring_up for a LAN host, serve-and-play or dedicated),
 	// invoked between the world wiring and the system registration — exactly
 	// where the SP listen host stands up inside the load
 	// [orig: SinglePlayer_StartMission @0x561af0]. Null = the bare no-net

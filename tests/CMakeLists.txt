@@ -3341,8 +3341,8 @@ target_link_libraries(npruntime_joiner_handshake_retry_test PRIVATE opennova_net
 target_include_directories(npruntime_joiner_handshake_retry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_joiner_handshake_retry COMMAND npruntime_joiner_handshake_retry_test)
 
-# P6 — two endpoints over REAL UDP sockets: a ClientRuntime joiner and the apps/nw_server host
-# owner-loop (npruntime/host_session.h, the SAME loop apps/nw_server runs), each on its own bound UDP
+# P6 — two endpoints over REAL UDP sockets: a ClientRuntime joiner and a dedicated host's
+# owner-loop (npruntime/host_session.h, the SAME loop the game's host runs), each on its own bound UDP
 # over the wire (single-thread poll-pump). Asserts mirror npruntime_client_runtime but over real
 # sockets, and adds the §5.2a S2C tag-order check (always-on, our host). opennova_runtime for the
 # minimal World/bms; opennova_app_common for net_sockets + net_datagram_socket (ws2_32 on WIN32).

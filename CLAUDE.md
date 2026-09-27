@@ -18,10 +18,10 @@ easier to relay than to rediscover.
   `probes/` (the registered `game_probe` runtime probes, source-only and
   excluded from the runtime export preset, ADR 0041; see `docs/mcp.md`),
   `tests/` (GUT suite).
-- `apps/` — `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
-  in-match host; never shipped), `nw_lan_probe/`, `nw_pp/`, `extract/` (`opennova-extract`,
-  ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047), `common/` (shared socket helpers,
-  deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
+- `apps/` — `novaworld_server/` (the NovaWorld service), `nw_lan_probe/`, `nw_pp/`,
+  `extract/` (`opennova-extract`, ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047),
+  `common/` (shared socket helpers, deliberately app-layer; pcap I/O lives in
+  `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service

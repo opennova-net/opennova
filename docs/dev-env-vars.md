@@ -97,7 +97,6 @@ the normal map spawn selection.
 
 | Tool | Option |
 |---|---|
-| `nw-server` | `--mission --env --resource-root --port --game-type --num-teams --capture-duration-seconds --capture-speed-setting --spawn-wave-time-base --spawn-wave-time-zone --default-spawn-requires-no-team-zone --log-debug` (`apps/nw_server/README.md`) |
 | `nw_pp` | `--hexcap-max <n>` |
 | `opennova-extract` | `--game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...` |
 | `renderer_state_vectors_test`, `nw_codec_identity_test` | `--dump` (print the replacement vector table) |
