@@ -62,7 +62,7 @@ bool reseed_session_kit_on_side_change(world::World &world,
 // both the wire class and the page pick, the resident-buffer rows, and both
 // side blocks for the S2C 0x50 resubmission path. `equipped_combo` is the
 // live equipped slot for the pair's SECOND submit (-1 = none)
-// [orig: Game_StartMission @0x525c2e passes g_currentWeaponSlot].
+// [orig: Game_StartMission @0x525c2e passes g_CurrentWeaponSlot].
 // The S2C 0x5A authoritative grant -> spawn-kit rows: names resolve through
 // the weapon table (retail drops failed AdmDef lookups); the wire bytes are
 // SIGNED clip counts — 0xFF is the authored/default sentinel, not 255 clips

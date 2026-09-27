@@ -1,6 +1,6 @@
 // Pins the witnessed .mnu widget-geometry solves
 // [orig: CUIElement_DrawFrame @ 0x64a210; the POSITION parse tail @ 0x648120;
-// adjust_rect_to_text_size @ 0x6575f0; CSpinListWnd_CreateUpDownChildren
+// CStaticWnd_AdjustRectToTextSize @ 0x6575f0; CSpinListWnd_CreateUpDownChildren
 // @ 0x64b8b0; the ITEM color parse @ 0x64bd10/@ 0x64b220].
 
 #include <formats/mnu/mnu_layout.h>
@@ -24,7 +24,7 @@ bool near(float actual, float expected) {
 }
 
 void frame_contract() {
-	// The stencil grid slices SIZE x SIZE tiles [orig: init_border_materials
+	// The stencil grid slices SIZE x SIZE tiles [orig: CUIElement_InitBorderMaterials
 	// @ 0x646f70]; the authored STENCIL attr wins, else width/4.
 	const opennova::mnu::FrameTileRect tile = opennova::mnu::frame_tile_rect(16, 2, 1);
 	check(tile.x == 32 && tile.y == 16 && tile.size == 16,
@@ -83,7 +83,7 @@ void position_contract() {
 }
 
 void text_adjust_contract() {
-	// [orig: adjust_rect_to_text_size @ 0x6575f0] — the authored point is the
+	// [orig: CStaticWnd_AdjustRectToTextSize @ 0x6575f0] — the authored point is the
 	// anchor the JUSTIFY/VJUSTIFY flags align to.
 	opennova::mnu::RectEdges base;
 	base.left = 100;

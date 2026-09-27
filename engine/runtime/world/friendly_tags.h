@@ -84,15 +84,15 @@ struct PlayerSlotFacts {
 using PlayerSlotLookup =
     std::function<bool(EntityHandle entity, PlayerSlotFacts &out)>;
 
-// The pass-level facts both walks read [orig: g_death_screen_active
+// The pass-level facts both walks read [orig: g_DeathScreenActive
 // @0x5a44df/@0x5a4564, g_GameType @0x5a44e8/@0x5a456d].
 struct FriendlyTagPassContext {
     const PlayerSlotLookup *slot_lookup = nullptr;
     bool death_screen = false;
     uint32_t game_type = 0;
     // The session's rules word bit 0x400 (host option FriendlyTag 0): the
-    // whole pass returns before either walk [orig: `test g_rules_flags,400h;
-    // jnz locret` @0x5a4480..0x5a448a — g_rules_flags @0x24D1E34 is the
+    // whole pass returns before either walk [orig: `test g_RulesFlags,400h;
+    // jnz locret` @0x5a4480..0x5a448a — g_RulesFlags @0x24D1E34 is the
     // session descriptor's +44 word: the host's mp_attributes, a joiner's
     // S2C 0x64 fixed block]. The same bit nulls Entity_GetDisplayName
     // @0x59BF70 for the map labels.

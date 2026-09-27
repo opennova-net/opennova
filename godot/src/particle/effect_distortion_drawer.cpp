@@ -22,6 +22,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include "particle/particle_compositor.h"
+#include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
 
 namespace godot {
@@ -41,7 +42,7 @@ static_assert(sizeof(opennova::renderer::TracerVertex) == 32 &&
 // SRCALPHA/INVSRCALPHA. Its coordinates are generated from the camera-space
 // position through the projective screen matrix (state 14 = the
 // TCI_CAMERASPACEPOSITION + COUNT3|PROJECTED texgen and transform 8,
-// retail set_texture_stage_state @ 0x680A2E), i.e. each pixel samples its own
+// retail CGfxShader_SetTextureStageState @ 0x680A2E), i.e. each pixel samples its own
 // screen position; the pass fogs toward the scene fog colour.
 const char *kRibbonVertexShader = R"GLSL(#version 450
 layout(location = 0) in vec3 a_position;
@@ -96,14 +97,10 @@ float fog_visibility() {
 				pc.camera_forward_fog_start.xyz), 0.0);
 		return clamp(exp(-depth * (4.1588830833596715 / fog_end)), 0.0, 1.0);
 	}
-	float start = fog_start;
-	if (fog_type == 2) {
-		start = fog_end * 0.5;
-	} else if (fog_type == 3) {
-		start = fog_end * 0.25;
-	}
+	// The linear types run from the pass start, which is already
+	// Render_SetFogState's per-type start with the overcast fold.
 	float distance_to_eye = length(v_world_position - camera_position);
-	return clamp((fog_end - distance_to_eye) / (fog_end - start), 0.0, 1.0);
+	return clamp((fog_end - distance_to_eye) / (fog_end - fog_start), 0.0, 1.0);
 }
 
 void main() {
@@ -205,16 +202,8 @@ bool EffectDistortionDrawer::ensure_ribbon_device(RenderingDevice *p_rd) {
 	rd_ = p_rd;
 	if (shader_.is_valid() && vertex_format_ != RenderingDevice::INVALID_FORMAT_ID)
 		return true;
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX, String::utf8(kRibbonVertexShader));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(kRibbonFragmentShader));
-	Ref<RDShaderSPIRV> spirv = rd_->shader_compile_spirv_from_source(source);
-	if (spirv.is_null() ||
-			!spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-			!spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty())
+	Ref<RDShaderSPIRV> spirv;
+	if (!compile_rd_spirv(rd_, kRibbonVertexShader, kRibbonFragmentShader, spirv).empty())
 		return false;
 	shader_ = rd_->shader_create_from_spirv(spirv, "OpenNova tracer distortion ribbons");
 	if (!shader_.is_valid())

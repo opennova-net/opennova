@@ -10,7 +10,7 @@
 namespace godot {
 
 struct SimulationPlayerState {
-	// The ACTIVE player weapon profile record — retail's g_charSelClass slot: two
+	// The ACTIVE player weapon profile record — retail's g_CharSelClass slot: two
 	// side blocks (blue/red), each carrying the class byte that selects both the wire
 	// class and one of five 2048-byte kit pages, plus the single-player page.
 	// (engine: base/gameprofile/required_resources.c)

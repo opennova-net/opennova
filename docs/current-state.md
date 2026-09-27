@@ -1,52 +1,9 @@
 # Where the project is, and what is next
 
-The [03TR frame-cost fixes](perf/03tr-frame-costs.md) remove repeated CTRL name
-conversion, the native-to-packed snapshot round trip, and per-glyph HUD draw
-submission. The record contains clean measurements, the jo-c/live-IDA witnesses,
-regression results and remaining frame-time variation; D-3DI-2 remains open.
-
-PR #663 also fixes 03TR mounted aiming: the shared PANM evaluator now
-retains authored animation frames ([D-3DI-3](threedi/3di-gp-format-re.md#retail-panm-animation-frames-2026-09-21)),
-and mounted bodies/guns retain fractional carrier attitude through camera and
-presentation ([D-INF-27](world/world-wac-ai-re.md#37-mounted-pose-precision-2026-09-21)).
-The objective minigun now publishes its witnessed barrel-spin phase while
-firing and coasting down ([D-3DI-4](threedi/3di-gp-format-re.md#retail-emplaced-barrel-spin-2026-09-21)).
-
-The [2026-09-18 JO-C validation and fixes](jo-c-validation-2026-09-18.md) cover
-guided round lifecycles/motors, shared loaded ammo, blast/indoor collision state,
-parachute descent, writable night, reverb selection, specialized textures,
-AI callback/controller ownership, player steering/brake transitions, and
-unseated helicopter carry with authored NPC boarding/stop orders
-([world section 35](world/world-wac-ai-re.md#35-unseated-helicopter-riders-and-reserved-route-orders-2026-09-18)).
-Mission saves are excluded; the report distinguishes remaining wider gaps.
-
 The one-page router for "what phase are we in, and where is the next step written
 down". It holds no facts of its own: every number and every next step below is a
 pointer into the tracked instrument that owns it. When they disagree, the
 instrument wins and this page is stale.
-
-The [NPC AI and mission scripting completion work](world/npc-mission-completion.md)
-tracks the current shared-engine implementation and normal mission playthrough
-gates. Its focused tests and remaining gaps are separate from mission acceptance.
-The first playthrough acceptance landed 2026-09-12: `00TRa.bms` played through its
-authored sequence on the real input path by the `mission_playthrough` runtime probe
-([docs/mcp.md](mcp.md)), the ten gates and the dated verdict in that record. The two
-divergences the run surfaced are fixed in the same slice (the HUD declutter level
-persisting a death's blank across missions, [interface/hud-re.md](interface/hud-re.md);
-the script tick running on through the SP lose epilog,
-[world/world-wac-ai-re.md §20.8a](world/world-wac-ai-re.md)).
-The [2026-09-23 AI, NPC and script parity pass](world/world-wac-ai-re.md#38-ai-npc-and-script-parity-pass-2026-09-23)
-ported the retail WAC compiler and command bodies, the BMS trigger and action
-legs, the brain dispatch, the state-17 combat tick, the org1 motor and think
-legs, the route data, the entity-update order and the match scoring producers;
-its ledger closures and narrowings are dated 2026-09-23.
-
-The #645 follow-ups are implemented in the active parity slice: [class events and squib](world/world-wac-ai-re.md#243b-squib-and-shared-class-effects-2026-09-11), [channel timing](anim/adm-bad-format-re.md#playback-clock-follow-up-2026-09-11), [ordered network effects](net/novaworld-net-re.md#item-explosion-and-state-receive-order-2026-09-11), and [texture conversion](render/render-material-re.md#texture-preprocessing-follow-up-2026-09-11). Their records distinguish the ported scope from pre-existing wider domain gaps.
-
-The [2026-09-13 jo-c audit](jo-c-parity-audit-2026-09-13.md) covers the full active
-backlog and adds the untabled material-loader, reverb, particle and savegame gaps.
-It orders implementation by state ownership and runtime consumers; the
-[ledger](divergence-ledger.md) retains current dispositions.
 
 ## The phase
 
@@ -60,85 +17,21 @@ structural (move code, draw boundaries, add gates) and had a schedule. The
 current phase is behavioral (make it act like retail) and is driven by the
 ledger's open rows rather than by a wave calendar.
 
-THE structural program since 2026-09-02 is the **hard cut to canonical C++ and
-Godot** ([ADR 0043](adr/0043-canonical-cpp-and-godot-hard-cut.md), the one
-current-architecture record: behavior onto owning systems, one session with
-roles, `net/` means wire, the Godot world as C++ Nodes, tests over real
-fixtures), landing as one PR of committed-as-we-go slices.
-[ADR 0044](adr/0044-shared-native-assets.md) (2026-09-18, PR #653) is its first
-follow-on record: one shared `assets::AssetStore` per mounted resource source
-for simulation and presentation alike, `runtime/simassets` dissolved into its
-owning systems. What led to ADR 0043,
-in order: the **rearchitecture**
-([ADR 0033](adr/0033-engine-owned-loops-device-shells.md), approved
-2026-08-09, replacing the ADR 0031/0032 adapter-seam regime in full): the
-engine takes ownership of the main/tick/render loops behind a device
-boundary. As of 2026-08-10 (trunk PR #460): R1 (the frame port) and R2
-(draw-list presentation — terrain, foliage, HUD, and menus, whose cutover
-deleted the MnuMenu Control tree for the compiled MenuFrame + MenuDriver
-path) LANDED — and R1 was then superseded by
-[ADR 0035](adr/0035-mission-session-game-frame-pipeline.md) (ADR 0033's
-ladder state records it): PR #465 first rearchitected the lifecycle and
-frame pipeline. [ADR 0036](adr/0036-one-inmatch-session-wire-first.md) then
-completed the no-compat cutover to portable `opennova::inmatch::Session` in
-`engine/runtime/inmatch`, made `world::Match` the shared all-retail-mode/co-op gameplay
-owner, and demoted `npruntime`/`netsim` from public layers to implementation
-directories. Flag-family gameplay now consumes the collision owner's exact
-MoveCB/non-Powerup contact stream; the former gameplay radius scan is deleted
-(`Entity_MovementCollisionResolver @0x4B2F8D..0x4B2FF5`). The same typed host
-request now carries every mode's rule inputs
-(including flag limit/return time, KOTH delta, and two/four-side selection),
-with an explicit Flag Me route for retail's otherwise-unreachable task-12
-launch branch. `godot/src/world/game_world_frame.cpp`'s leg table (ADR 0043 slice G10) is the
-device-order owner, superseding ADR 0033's R1 callback-bus design; PR #468 moved local-player camera placement plus
-the ObjectModel material loop onto pipeline legs. The P1 rewrite queue that
-followed (env/weather, placer,
-present facades, composition, avatar, menus), the task-12
-no-magic-in-the-godot-layer sweep, and the engine layout flatten (ADR
-0024's amendment) are complete; R3 (the render frame) CLOSED not taken at its
-2026-08-10 spike — the one-scene screenshot diff vs retail showed no
-ordering-attributable delta (ADR 0033 §R3 spike result); R4 (a second
-backend) CLOSED by [ADR 0042](adr/0042-godot-permanent-shell-one-mission-kernel.md)
-(2026-08-28): no second backend, ever. **The next structural program is the
-push-down campaign** opened by [ADR 0040](adr/0040-the-engine-is-one-namespace.md)
-(2026-08-26, PR #580): with the names and include roots settled, the witnessed
-behavior still living Godot-side moves home — the `godot_orig_cites` ratchet
-(ONE count over `godot/src` and the game-level GDScript since ADR 0043; one
-marker since ADR 0042 d7) is the gauge, and it runs as one commit per slice.
-PR #580 landed thirteen of them: the pattern-setting moves (the local-player
-view cluster, the minimap feed, LAN browse, the boot/pack/options policies, the
-seat mirror + volume law + weapon-category rows), two `godot/src/simulation/`
-slices (the occlusion frame camera, the iris march), and the game-level
-GDScript presentation math (the mission load plan, the HUD config tokens, the
-presenter and viewmodel frame math, the light-director constants, the loading
-screen, the character registry). The remainder is queued in
-[ADR 0040](adr/0040-the-engine-is-one-namespace.md)'s ladder, which is that
-queue's only home: the Godot-only witnessed half of Train B (the present
-rows, the sun feed, the scar gate, the joiner pump; A3 and the rig-twinned half
-landed with ADR 0042), the Train C tail, Train D, and the E-rows added by the
-2026-09-20 push-down census (a Claude three-agent census reconciled with a
-Codex read-only review: the `Simulation` builders, the record bindings only
-GUT reads, the loading-screen layout, the HUD latches, the kit model, the
-compiled-menu interaction runtime, the remote-body machine, the terrain and
-audio lifecycles, the joiner-side client facts, the presentation clocks). The
-counter (read it from the baseline, not here) is not yet at a seam-contract
-floor; the campaign is finished when it holds only documented seam contracts.
-[ADR 0042](adr/0042-godot-permanent-shell-one-mission-kernel.md) (2026-08-28)
-closed the boundary question: Godot is the permanent sole shell (ADR 0033 R4
-CLOSED), and its campaign LANDED (PR #587): the mission kernel
-(`engine/runtime/mission/mission_kernel`) + listen-host frame
-(`engine/runtime/inmatch/host_role`, ex `listen_host`) promoted from the retail-mission rig with
-`Simulation`, `nw_server` and the ctests as the three embedders, the
-`world::inspect` typed records + the typed debug-control table behind MCP and
-F3, and the F3 Entities window as the records-in/requests-out template. The
-0040 ladder rows A3/B carry the hashes; the Godot-only witnessed remainder is
-on-touch.
-It subsumes the structural slot earlier programs
-held: the **2026-07 quality campaign** closed at W4 (#310–#375; its W5
-residue is absorbed: the perf-span unify became ADR 0039's `FrameStatsBoard`,
-the debug-snapshot narrowing went with that hard cut, and the runtime
-push-downs are this ladder), and the 2026-08-08 adapter-shape round
-(#451–#456) was this program's census and ground-clearing.
+The current architecture is [ADR 0043](adr/0043-canonical-cpp-and-godot-hard-cut.md),
+the hard cut to canonical C++ and Godot (landed in PR #626): behavior on its
+owning systems, one `inmatch::Session` with roles, `net/` meaning wire, the
+Godot world as C++ Nodes and tests over real fixtures. The records it
+supersedes (ADRs 0031 to 0033, 0035 and 0036) and
+[ADR 0042](adr/0042-godot-permanent-shell-one-mission-kernel.md) (Godot the
+permanent sole shell, one mission kernel) carry their own round histories;
+[ADR 0044](adr/0044-shared-native-assets.md) (shared native assets) and
+[ADR 0047](adr/0047-blender-3di-exporter.md) (the Blender `.3di` add-on and
+`opennova-3di`) follow it. The remaining structural queue is the push-down
+campaign in [ADR 0040](adr/0040-the-engine-is-one-namespace.md)'s ladder, its
+only home: witnessed behavior still living Godot-side moves into `engine/`, one
+commit per slice, gauged by the `godot_orig_cites` ratchet (read the count from
+the baseline, not here); the campaign is finished when that count holds only
+documented seam contracts.
 
 ## The standing loop for a fidelity slice
 
@@ -162,23 +55,26 @@ Every recent slice ran this same shape, and a new one should too:
 
 Counts come from the [ledger's generated scoreboard](divergence-ledger.md#count-to-zero-scoreboard),
 maintained by `scripts/lint/ledger_check.py --check`. The
-[dated audit inventory](jo-c-parity-audit-2026-09-13.json) assigns the IDs active at
-its master baseline to implementation packages; it is a snapshot, and the ledger
+[2026-09-13 jo-c audit](jo-c-parity-audit-2026-09-13.md) and its
+[dated inventory](jo-c-parity-audit-2026-09-13.json) assign the IDs active at
+its master baseline to implementation packages; they are a snapshot, and the ledger
 carries every status change since (the PR that landed it already closed part of it).
 
 Each domain's next step is named in its own record, not centrally:
 
 | Domain | Open rows live in | The record that names the next step |
 |---|---|---|
-| World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) (§14–§33); the #403 client mover/prediction record is [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology); 2026-09-05: numbered seat keys share the mounted panel list and send confirmed joiner requests (world-wac-ai-re section 23.1, D-AI-11 d); live retail LAN ATV drive/seat changes and restored vehicle panel verified; panel/rider HP lookups translate authored definition IDs (D-NET-157, 2026-09-05); 2026-09-07, PR #640: the full vehicle attempt adds selector-zero and full family motors, amphibious routing, model contact/traction/chassis, mounted and renderer controls, aircraft AI/countermeasures, death/respawn, dedicated sound, wreck bone banks, W1 through W4 trails, rotor wash, foliage sway and water rings. See vehicle-client-movers-re sections 11 through 37; D-ITEM-15 and D-AI-11 are FIXED; the 2026-09-08 review re-grilled the traction, lean, selector-zero, aircraft-brain, sound and dispatcher legs and left D-NET-161 and D-SND-17 OPEN but narrowed to witnessed residuals (pool-3 deck-marker localization, flare off28 target, selector-zero boat part spin, ground-height tap ray kinds, `entity+684` mirror, emplacement brain dispatch; tank fold extra-effect argument, sound-ready gate; D-SND-17 closed 2026-09-22 when both were ported); D-VEH-2 is the bounded full-bank retirement guard proposed in PR #640 and ratified by its merge. PR #645: blast-seat semantics, once-per-tick turret slew, parent aircraft weapon limits and non-drivable hover validated. Placement admission and loadout sanitization are now covered by bms-event-runtime-re sections 6.3a/6.4a; the malformed-tail boundary D-EVT-7 is a class-D permanent entry proposed in PR #646 and ratified by its merge. The bike off-contact launch vector, D-NET-161's former residual (a), is ported (vehicle record §38). 2026-09-11 follow-up: model-aware infantry slopes, global stance sounds and player/NPC burn selection implemented; world record sections 3.5, 17.3b and 17.4b. Vehicle record §38 covers #645 crash-height, bike axle, wheelie and launch-direction corrections. 2026-09-12: the first SP playthrough acceptance (00TRa, ten gates on the real input path) is recorded in [world/npc-mission-completion.md](world/npc-mission-completion.md); the retail in-game RESTART stays unported under the SP epilog/respawn flow (D-AI-10 / D-LOADSCR-8). 2026-09-13: D-WPN-36..39, D-WAC-7..10, D-EVT-8/9 and D-AI-13 FIXED (scoped drift, ADS bias/rotation/optical clock, the shared WAC clock, auto DWORD, V#/M# operands, the post-PreMission variable reset, the signed action count, avoidance quantization); D-WPN-40, the pending-slot pose binding, open; [2026-09-18 movement parity](jo-c-validation-2026-09-18.md#ai-and-player-movement-follow-through): D-AI-14 / D-VEH-3 fixed in PR #652; PR #652 [animation timing audit](world/world-wac-ai-re.md#36-animation-and-relative-motion-timing-audit-2026-09-18): D-INF-26 fixed; current-tick local head and spectator preparation order aligned; visual trails await user comparison; 2026-09-21 scar owner-visibility re-grill and native predicate: world record section 24.9; [2026-09-22 tank audit](world/tank-parity-re.md) (PR #671 and its review fix round): wheel signs and notch remainder, the optic zoom seed, the tank contact solve's support, crash, wreck and wall machinery, the tank mover's impulse, crash-stop, trail, slope and per-family chase gates, camera composition and precision, the shared HUD snapshot, pivot and tread sound with the last-tick gate (D-SND-17 closed), the AI boarder hold, route writers and vehicle AI slots, the kill-zone producers, blast, knife and run-over legs, the seat walk, the mounted weapons (the ewep CTRL publication, the gfx3 launch point and fire pose, turret windows, live seat points), and the joiner legs (organic-only 0x13 with the vehicle 0x26 kill record, the wreck pose form and reader tail, remote claimants, joiner motion controls, the 0x0D parent/target split, the first-frame tick); stock/JOTAC assisted course passes; live retail matrix unverified; [2026-09-23 AI, NPC and script parity pass](world/world-wac-ai-re.md#38-ai-npc-and-script-parity-pass-2026-09-23): D-AI-1, D-WAC-6, D-COL-2 and D-ITEM-8 FIXED, D-NET-161 (e)/(g) closed, D-INF-2 re-scoped to command 126's uninitialized goal, and D-AI-2/4/6/7/10, D-EVT-3, D-INF-3/11/17 narrowed (the ledger rows carry the residuals); the vehicle record's §1.13, §26 and section 41 carry the vehicle-side findings; 2026-09-24 [rendering parity pass](world/world-wac-ai-re.md#39-rendering-parity-pass-2026-09-24): the person callback's overlays, the held-weapon cull and ammo leg, the tracer ribbons and distortion, scar fog; D-WPN-32, D-AI-12 and D-ITEM-4 narrowed; the death-piece meshes and the NVG laser followed on 2026-09-25 |
-| Item class events | none open (D-ITEM-7 / D-DOOR-2 FIXED 2026-09-11; D-ITEM-8, the crane, re-notify and regional-shot legs, reconciled FIXED 2026-09-23; ledger closure lines) | [World §24.3a](world/world-wac-ai-re.md#243a-class-clocks-regional-shots-barrels-buildings-flags-and-targets) and §24.3b record all #645 class follow-ups; invalid target/model/section limits remain explicit |
-| Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `engine/runtime/inmatch/ROADMAP.md`; §5.10 covers joiner vehicle confirmation and shared seat/overlay occupancy; 2026-09-13: numeric self-identity and side-password admission ported; squad challenge remains D-NET-167; [2026-09-19 tank training switch fix](world/special-weapons-parity.md#tank-training-right-click-follow-up) in PR #655; 2026-09-20: the cross-checked netcode parity slice (wire codec/hello, lobby session, service, host registration, in-match cadence/ordering/producers) landed — the corrected rows are D-NET-1/16/17/18/23/26/28/31/38/120/127/139/165/173/182/202/218 in net-re §8; 2026-09-21: [remote-body arbitration re-grill](net/novaworld-net-re.md#remote-body-arbitration-re-grill-2026-09-21) fixes the model-side same-state pending cancellation through a shared native rule |
-| UI (HUD, menus, sound, player info) | ledger § UI | [interface/hud-re.md](interface/hud-re.md), [interface/loading-screen-re.md](interface/loading-screen-re.md), [mnu/menu-re.md](mnu/menu-re.md), [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) PR #645: native-aspect sights-card correction ported; live zero/rangefinder feeds and scope camera/readouts are ported (D-HUD-27, PR #650 review). Host rule readback/sentinels and explicit aspect selection are ported; see the host dialog section in menu-re. One-shot layers follow the live listener view before selection and pitch draws (D-SND-19, 2026-09-13). 2026-09-22: every localized HUD template runs through CRT sprintf semantics with its own call's arguments, fixing the installed `Distance: %ldm` scope/mortar text (D-HUD-30); the vehicle panel's seat-slot gate, emplacement labels and silhouette window and the integer screen mapping are ported (hud-re); D-SND-17 closed (the tank record). 2026-09-24 (the rendering parity pass): the binocular/NVG view-effect layout, the scope circle mask's inclusive rect, the NVG lens reticle and Sighted card, and the FP draw gates (hud-re); the underwater murk and the NVG image moved to the render pipeline. |
-| Render (materials, order, lighting, occlusion) | ledger § Render — occlusion (materials/state, draw order and lighting hold no open rows) | [render/README.md](render/README.md); D-RORD-12, D-RLIT-11 and D-OCC-16 minted and closed 2026-09-13; the 2026-09-24 rendering parity pass (PR #678) closed D-RORD-7 and D-OCC-9/-10/-14/-15 (render order holds no open rows; D-OCC-12 remains, a bounded stand-in), and each record carries an "Open after the 2026-09-24 pass" list |
-| Terrain / foliage / tiles | ledger § Terrain, Foliage (§ Tiles holds no open rows: D-TIL-1/-2/-4 FIXED, D-TIL-3 FIXED for the ordered RGB with its alpha facet refuted 2026-09-24) | [terrain/terrain-re.md](terrain/terrain-re.md), [foliage/foliage-re.md](foliage/foliage-re.md); D-TERRAIN-12 (the empty-sector flat fallback) and D-FOLIAGE-14 (collector capacity) FIXED 2026-09-13; the 2026-09-24 rendering parity pass ported the terrain page record cache, the D3D9 page raster and the DXT codec (D-TERRAIN-7 narrowed to the page address mode at the draw), closed D-FOLIAGE-9/-10, corrected D-FOLIAGE-12's premise and narrowed D-FOLIAGE-7 to the detail page-edge addressing (each record's section 2026-09-24 rendering parity pass) |
-| Environment | ledger § Environment | [env/env-tod-re.md](env/env-tod-re.md), [env/env-honored-matrix.md](env/env-honored-matrix.md) PR #650 review: BG_COLOR conversion fixes the 00TRa/00TRg dome seam; see the sky-dome device bridge and windowed regression. 2026-09-24 rendering parity pass (PR #678): the dome writes no depth with its cloud pass after the bodies, stars re-graded never drawn (env #33), bodies through their SELFLUM material, fog by pass path, the water strip and mirror ports; env-honored-matrix iris and ceiling/floor rows HONORED; carried residuals in env-tod-re.md 'Open after the 2026-09-24 pass'. |
-| Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md); 2026-09-24: the particle record's rendering parity section carries the effect-group callers still to stamp ([ptl-format-re.md](particles/ptl-format-re.md#rendering-parity-pass-2026-09-24)) |
-| Mission savegames | ledger § Mission savegames | [mission/savegame-re.md](mission/savegame-re.md); schema, runtime state restoration and slot lifecycle, D-SAVE-1 |
+| World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md); the vehicle authority and prediction record [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology); [world/tank-parity-re.md](world/tank-parity-re.md); [world/itemdef-re.md](world/itemdef-re.md); [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) |
+| Mission acceptance (playthroughs) | ledger § World | [world/npc-mission-completion.md](world/npc-mission-completion.md): the playthrough gates, the dated acceptance verdicts and what stays unported |
+| Item class events | none open (the ledger's closure lines) | [World §24.3a](world/world-wac-ai-re.md#243a-class-clocks-regional-shots-barrels-buildings-flags-and-targets) and §24.3b |
+| Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8 (the D-NET catalog), with the [dispatch-table audit](net/retail-message-dispatch-audit.md) for D-NET-218; the build record behind it is `engine/runtime/inmatch/ROADMAP.md` |
+| UI (HUD, menus, sound, player info) | ledger § UI | [interface/hud-re.md](interface/hud-re.md), [interface/loading-screen-re.md](interface/loading-screen-re.md), [mnu/menu-re.md](mnu/menu-re.md), [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) |
+| Render (materials, order, lighting, occlusion) | ledger § Render — occlusion (D-OCC-12; materials/state, draw order and lighting hold no open rows) | [render/README.md](render/README.md) and each render record's catalog |
+| Terrain / foliage / tiles | none open (the ledger's closure lines) | [terrain/terrain-re.md](terrain/terrain-re.md) (its pending list: CDEP/traversal documentation depth and the single-detail binding), [foliage/foliage-re.md](foliage/foliage-re.md), [tiles/til-re.md](tiles/til-re.md) |
+| Environment | none open (the ledger's closure lines) | [env/env-tod-re.md](env/env-tod-re.md) (its "Open after the 2026-09-24 pass" list: the two water-mirror measurements), [env/env-honored-matrix.md](env/env-honored-matrix.md) |
+| Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md); the particle record's open list follows its [rendering parity section](particles/ptl-format-re.md#rendering-parity-pass-2026-09-24) |
+| Mission savegames | ledger § Mission savegames | [mission/savegame-re.md](mission/savegame-re.md): the schema, runtime state restoration and slot lifecycle (D-SAVE-1) |
+| Performance | not a divergence (the [`TODO.md`](../TODO.md) perf rows) | [perf/03tr-frame-costs.md](perf/03tr-frame-costs.md), [perf/mission-load-baseline.md](perf/mission-load-baseline.md), [perf/reground-baseline.md](perf/reground-baseline.md) |
 
 Work that is **not** a parity divergence — OpenNova Launcher UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
@@ -229,5 +125,3 @@ for the evidence and tests. Select further research from the ledger's current
 It is not a priority order and not a commitment. Which slice runs next is the
 maintainer's call; this page only makes sure that once that call is made, the
 next step is already written down somewhere tracked.
-
-HUD follow-ups from #645 now include runtime flag/SSKB keys, flag-event audio, the retained centre kill banner, and both death-screen instruction statics. See the [HUD #645 follow-up](interface/hud-re.md#645-follow-ups-flag-feed-announcement-banner-and-death-instructions-2026-09-11) for remaining HUD work.

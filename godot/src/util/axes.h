@@ -24,11 +24,10 @@ namespace godot {
 // Composing: (x, y, z)_render -> (z, y, x)_godot — a pure x/z swap (its own
 // inverse; the handedness flip between the two worlds).
 //
-// Consumers that keep the RAW render-float tuple deliberately do their own
-// mapping downstream and must NOT route through this seam: the
-// opennova_sun_direction shader global and the terrain u_sun_direction
-// uniform (terrain_lighting.gdshaderinc / foliage_detail.gdshaderinc
-// re-swizzle into the engine texture basis).
+// The consumer that keeps the RAW render-float tuple deliberately does its
+// own mapping downstream and must NOT route through this seam: the
+// opennova_sun_direction shader global (foliage_detail.gdshaderinc
+// re-swizzles it into the engine texture basis).
 inline Vector3 render_float_to_godot(const opennova::env::Vec3 &v) {
 	return Vector3(v.z, v.y, v.x);
 }

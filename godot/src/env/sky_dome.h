@@ -1,7 +1,6 @@
 #pragma once
 
 #include <godot_cpp/classes/camera3d.hpp>
-#include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
@@ -25,8 +24,8 @@ class Weather;
 // ArrayMesh/ShaderMaterial ownership (the gradient pass and its cloud-pass
 // next_pass on the sky-cloud rung), per-frame shader-parameter pushes from
 // the typed SkyFrameState, the camera-anchored dome position, change-detected
-// cloud Texture2D binds, the per-scene-pass draw gates, and the
-// owner-supplied BG_COLOR Environment mirror.
+// cloud Texture2D binds, and the per-scene-pass draw gates. The frame clear is
+// not the dome's: GameWorld::update_frame_clear_color issues it.
 // Ported from sky.gd (2026-08-10 de-scripting); RE record:
 // docs/env/env-tod-re.md.
 class SkyDome : public Node3D {
@@ -42,18 +41,8 @@ public:
 		return environment_capture_layer_mask_;
 	}
 
-	// Optional owner-supplied BG_COLOR resource. WorldContextPreview supplies
-	// this so the dome's faithful below-rim region clears to skyfog instead
-	// of black.
-	void set_frame_clear_environment(const Ref<Environment> &p_environment);
-	Ref<Environment> get_frame_clear_environment() const {
-		return frame_clear_environment_;
-	}
-
 	void build();
 	bool is_built() const { return built_; }
-	// The below-rim clear mirror used by the runtime environment pass.
-	void sync_frame_clear_color();
 	Ref<ShaderMaterial> get_sky_material() const { return sky_material_; }
 	// The cloud pass (dome pass 2) rides the gradient material's next_pass
 	// while the environment authors cloud layers on the shader path.
@@ -87,7 +76,6 @@ private:
 
 	NodePath environment_path_;
 	NodePath weather_path_;
-	Ref<Environment> frame_clear_environment_;
 	MeshInstance3D *mesh_instance_ = nullptr;
 	Ref<ShaderMaterial> sky_material_;
 	Ref<ShaderMaterial> cloud_material_;

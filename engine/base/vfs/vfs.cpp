@@ -731,7 +731,7 @@ int32_t vfs_version_crc(const uint8_t *data, size_t size) {
 
 int32_t vfs_expansion_version_checksum(const std::string &game_root,
                                        const std::string &expansion) {
-    // [orig: Expansion_LoadAssets — g_expansion_checksum = 0 @ 0x4a4781; only a
+    // [orig: Expansion_LoadAssets — g_ExpansionChecksum = 0 @ 0x4a4781; only a
     //  live expansion probes the loose file @ 0x4a4787..0x4a488a]
     if (game_root.empty() || expansion.empty()) return 0;
     const fs::path path =

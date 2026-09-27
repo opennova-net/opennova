@@ -6,7 +6,7 @@
 // and the counter-rotating compass ring. The embedder only binds the
 // colormap/icon textures and submits these primitives.
 // [orig: HUD_RenderAllOverlays @0x5A8070 -> HUD_DrawMapOverlay @0x5A5F40;
-//  render_terrain_decal @0x6071C0; MapOverlay_RenderAllLayers @0x5BE840]
+//  Render_TerrainDecal @0x6071C0; MapOverlay_RenderAllLayers @0x5BE840]
 
 #include <array>
 #include <cstdint>
@@ -25,11 +25,11 @@ namespace opennova::hud {
 //  bit5 entity labels, bit6 compass ring (draws only with bit9 too —
 //   the gate is bit9 && bit6),
 //  bit7 tracked-target pointer (line off, tip cell when ahead; color
-//   g_hudActiveColor; no tracked-target source in this runtime yet),
+//   g_HUDColors.active; no tracked-target source in this runtime yet),
 //  bit8 waypoint state line (line + tip cell; altitude tricolor),
 //  bit9 enables the terrain water-pass variant, the compass (with bit6),
 //   and the MAPCOORDS grid label (with !bit12) — the terrain tiles
-//   themselves draw UNCONDITIONALLY (render_terrain_decal is unmasked),
+//   themselves draw UNCONDITIONALLY (Render_TerrainDecal is unmasked),
 //  bit10 radar tick + weapon-direction + timer box,
 //  bit12 the 300-wu grid leg: rules + letters/numbers + the on-map player
 //   readout run BEFORE the marker walk when set (and mode != 1); it does
@@ -77,7 +77,7 @@ struct HudMinimapTerrain {
 	// The base pass samples the original 1024x1024 colormap atlas through its
 	// four 512x512 quadrant ids. Retail binds Colormap0..3 directly; the device
 	// keeps one atlas and clamps each quadrant with a half-texel inset.
-	// [orig: PolyTrn_InitTextures @0x60B91D; render_terrain_decal @0x607761]
+	// [orig: PolyTrn_InitTextures @0x60B91D; Render_TerrainDecal @0x607761]
 	int atlas_px = 1024;
 	int cell_px = 512;
 	// Retail redraws the same terrain geometry through the separate 256x256
@@ -110,7 +110,7 @@ struct HudMinimapMarker {
 	uint8_t source = 0;
 	uint16_t remaining_ticks = 0;
 	// Regular (non-special) markers render from the live entity and only when
-	// it is decoded and alive. [orig: render_minimap_slot_blip @0x5be4b8
+	// it is decoded and alive. [orig: Render_MinimapSlotBlip @0x5be4b8
 	// entity[538] gate]
 	uint8_t entity_known = 0;
 	// The client-side draw policy resolved from the local entity's def class
@@ -126,7 +126,7 @@ struct HudMinimapMarker {
 	// A LOCAL-TEAM player whose class carries the charattr Medic attribute
 	// draws the red-cross plate IN PLACE of its blip. The producer resolves it
 	// (enemies never carry it — retail forces the bit off for the other team)
-	// [orig: draw_entity_labels_and_markers @0x5a49e0 — the team gate
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 — the team gate
 	//  @0x5a4ac6/@0x5a4acf, AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3,
 	//  the cross @0x5a4cd6..0x5a4d48 replacing the blip].
 	uint8_t medic = 0;
@@ -134,7 +134,7 @@ struct HudMinimapMarker {
 
 // One footprint-class entity's baked WORLD-SPACE polygon set (static
 // entities; baked once per mission by the embedder's feed).
-// [orig: render_collision_wireframe @0x596800 — fills in the team color and
+// [orig: Render_CollisionWireframe @0x596800 — fills in the team color and
 //  builds boundary vertices; the completed pass leaves no observable stroke]
 struct HudMinimapFootprint {
 	uint16_t handle = 0xFFFF;
@@ -179,8 +179,8 @@ struct HudMinimapInput {
 	int32_t zoom_q16 = kSpinmapZoomDefault;
 	uint32_t flags = kSpinmapRetailFlags;
 	// Mission attrib bit5 rotates the map 180 degrees.
-	// [orig: HUD_InitOverlaySystem @0x5a49bc — Bms_AttribFlags & 0x20 ->
-	//  g_mapYaw180(0x2723EB0) = 0x80000000]
+	// [orig: HUD_InitOverlaySystem @0x5a49bc — g_BmsAttribFlags & 0x20 ->
+	//  g_MapYaw180(0x2723EB0) = 0x80000000]
 	bool flip_180 = false;
 	int ticks = 0;
 	// HUD item flash timer 5, the waypoint state line's blink gate
@@ -201,8 +201,8 @@ struct HudMinimapInput {
 	// The frame overlay color (the hud_color_index scheme) colors the
 	// distance and grid labels; the waypoint state line uses the altitude
 	// tricolor instead. [orig: bit18 label + grid label color
-	//  g_hudFrameOverlayColor @0x5a7ab5/@0x5a7a3a; bit8 line color
-	//  g_waypointAltitudeColor @0x5a7878]
+	//  g_HUDFrameOverlayColor @0x5a7ab5/@0x5a7a3a; bit8 line color
+	//  g_WaypointAltitudeColor @0x5a7878]
 	uint32_t overlay_color = 0xFFFFFFFFu;
 	// Player grid label: authored MAPCOORDS position (design px) and its
 	// suppressor (BSS-zero -> LIVE by default; authored nonzero suppresses).
@@ -221,7 +221,7 @@ struct HudMinimapInput {
 	// half-texel cell inset from the loaded tile's stored source size, so
 	// the device stamps whatever asset it actually mounted — stock JO ships
 	// 16x480, JOTAC's RevX02 authors 64x1920, both 30 square cells.
-	// [orig: render_tiled_image_strip @0x67b540 — uv_half_texel =
+	// [orig: Render_TiledImageStrip @0x67b540 — uv_half_texel =
 	//  0.5 / (double)tile_dim]
 	float icon_strip_w_px = 64.0f;
 	float icon_strip_h_px = 1920.0f;
@@ -261,7 +261,7 @@ struct HudMapSprite {
 	// Offset from the icon-strip slot: 0 TSDicon, 1 compass ring,
 	// 2 radar slice, 3 WPIndctr strip.
 	// [orig: HUD_LoadAllTextures — TSDicon.tga @0x27231AC,
-	//  compring via draw_compass_indicator, WPIndctr.tga @0x27231A8]
+	//  compring via HUD_DrawCompassIndicator, WPIndctr.tga @0x27231A8]
 	uint8_t texture = 0;
 	uint8_t layer = 0;
 };
@@ -287,8 +287,8 @@ struct HudMapLabel {
 	uint8_t align = 0;
 	// 0 the bold label slot (corner-map distance/MAPCOORDS labels),
 	// 1 the large slot — the grid letters/numbers and the big map's player
-	// readout draw with g_hudLabelFontLarge, still through the half-bright
-	// drawer. [orig: HUD_DrawTextCentered_HalfBright(g_hudLabelFontLarge,...)
+	// readout draw with g_HUDLabelFontLarge, still through the half-bright
+	// drawer. [orig: HUD_DrawTextCentered_HalfBright(g_HUDLabelFontLarge,...)
 	//  in the @0x5a5f40 grid branch]
 	uint8_t font = 0;
 };
@@ -334,7 +334,7 @@ int32_t spinmap_zoom_step(int32_t zoom_q16, int direction);
 // the loaded strip's physical size) and the MODULATE2X diffuse fold the strip
 // renderer's texture stage implies -- shared by the map blips and the
 // friendly-tag radio-request icon, which both submit through
-// Render_DrawIconStripCell_Debug [orig: render_tiled_image_strip @0x67b540;
+// Render_DrawIconStripCell_Debug [orig: Render_TiledImageStrip @0x67b540;
 // Render_DrawIconStripCell_Debug @0x67bae0].
 void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
 		float &u0, float &v0, float &u1, float &v1);
@@ -369,7 +369,7 @@ private:
 // radar-zoom values, with the retail globals' lifecycle. The mode clears on
 // round init, respawn-state init, and while the local player is dead; the
 // zooms reset to the spawn defaults with the player init.
-// [orig: g_mapOverlayMode — cycle HUD_CycleMapMode @0x520bc0 (0->2->3->0),
+// [orig: g_MapOverlayMode — cycle HUD_CycleMapMode @0x520bc0 (0->2->3->0),
 //  clears @0x42275a (Game_InitNewRound), @0x499395 (Game_InitRespawnState),
 //  @0x5cac67..0x5cac6d (dead-player gate in Render_ProcessMainSceneFrame);
 //  zoom defaults Player_InitPlayer @0x4e1741..0x4e1763, big zoom
@@ -384,10 +384,10 @@ struct HudMapControl {
 	// probe resolves the ambiguous FPU ordering directly: 00TRa authors 0.61
 	// and retail submits zoom 25559 (0.39 Q16). Zero/unauthored map_zoom keeps
 	// X = 1, matching the plain defaults a joiner sees.
-	// [orig: Player_InitPlayer @0x4e1693..0x4e1763 — Bms_MapZoom @0xA7640C
+	// [orig: Player_InitPlayer @0x4e1693..0x4e1763 — g_BmsMapZoom @0xA7640C
 	//  (g_BmsHeaderBlock+0x23C, bulk fread), floor flt_7C486C = 0.0625,
-	//  x flt_7CD424 = 524288 -> g_bigMapZoom, x flt_7C32BC = 65536 ->
-	//  g_spinmapZoom]
+	//  x flt_7CD424 = 524288 -> g_BigMapZoom, x flt_7C32BC = 65536 ->
+	//  g_SpinmapZoom]
 	int32_t spawn_zoom_q16 = kSpinmapZoomDefault;
 	int32_t spawn_big_zoom_q16 = kBigMapZoomDefault;
 
@@ -440,11 +440,11 @@ struct HudMapControl {
 		big_zoom_q16 = spawn_big_zoom_q16;
 	}
 	// The render gate zeroes the mode whenever the local player is dead.
-	// [orig: @0x5cac67..0x5cac6d — g_mapOverlayMode = 0 on Flags & 2]
+	// [orig: @0x5cac67..0x5cac6d — g_MapOverlayMode = 0 on Flags & 2]
 	void on_local_player_dead() { mode = 0; }
 	// The respawn init every overlay-window action runs zeroes the mode
 	// (hud_toggles.h kOverlayWindowsCleared) [orig: Game_InitRespawnState
-	// @0x499360, g_mapOverlayMode = 0 @0x499395].
+	// @0x499360, g_MapOverlayMode = 0 @0x499395].
 	void on_respawn_init() { mode = 0; }
 };
 

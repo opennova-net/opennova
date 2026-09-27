@@ -1,9 +1,9 @@
 // The EffectWorld dynamic light pool (D-RLIT-4 implementation): spawn/query/select
 // semantics pinned against the witnessed originals —
 // [orig: LightPool_SpawnGlowEffect @ 0x5a8d50;
-//  collect_nearby_zones_by_aabb @ 0x5aa250; Light_PassesActiveGroups @ 0x5a9120;
+//  Light_CollectNearbyZonesByAABB @ 0x5aa250; Light_PassesActiveGroups @ 0x5a9120;
 //  Light_SelectAndEnableForDraw @ 0x5ab9d0; the batch-entry 3-cap
-//  collect_render_objects_for_batch @ 0x5d9229;
+//  Render_CollectRenderObjectsForBatch @ 0x5d9229;
 //  Light_GetPointLightParams @ 0x5a9180; Light_TickGenBlock @ 0x5a8ae0].
 #include <runtime/renderer/light_scene.h>
 
@@ -263,8 +263,8 @@ int main() {
 
     // Select cap: exactly three of six pass — the batch entry stores three
     // handles and breaks the visible walk there [orig:
-    // collect_render_objects_for_batch @ 0x5d9226..0x5d9229;
-    // collect_render_batches_for_entity @ 0x5d96e6..0x5d96e9]. The > 4 clamp
+    // Render_CollectRenderObjectsForBatch @ 0x5d9226..0x5d9229;
+    // Render_CollectRenderBatchesForEntity @ 0x5d96e6..0x5d96e9]. The > 4 clamp
     // @ 0x5abbeb is the transient D3D LightEnable count FlushBatches tears
     // down per entry (@ 0x5da5de), never a lit-strip count.
     {
@@ -980,7 +980,7 @@ int main() {
 
     // The interior group admits a blink-box-owned light onto the draws of the
     // entities standing in that building section, and nothing else
-    // [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
+    // [orig: Terrain_SetupEffectForEntity @ 0x5c74a0 ->
     // Lighting_SetInteriorLightGroup @ 0x5a90e0; the gate
     // Light_PassesActiveGroups @ 0x5a9120].
     {
@@ -1206,7 +1206,7 @@ int main() {
         indoors.blink_section = 4;
         const auto i = static_light_row_groups(indoors);
         // Every static row is a rigid submit: the rigid collector re-scopes the
-        // owner group to (0, robjIndex) [orig: collect_render_objects_for_batch
+        // owner group to (0, robjIndex) [orig: Render_CollectRenderObjectsForBatch
         // @ 0x5d8ff7], so a static's own owned light never lights its draw.
         expect(i.owner_group_entity == 0 && i.owner_group_section == 9,
                "a non-building row declares the rigid (0, robj) owner group");
@@ -1219,7 +1219,7 @@ int main() {
                "outdoors the interior group stays empty");
     }
     // The owner group a submit declares [orig: Terrain_RenderSectorEntitiesBySide
-    // @ 0x5c7fb1 / @ 0x5c8004; collect_render_objects_for_batch @ 0x5d8ff7;
+    // @ 0x5c7fb1 / @ 0x5c8004; Render_CollectRenderObjectsForBatch @ 0x5d8ff7;
     // Render_SubmitEntity @ 0x5daddc]: the drawn entity only for a skinned
     // draw inside the person wave; the rigid collector re-scopes to
     // (0, robjIndex); a skinned draw outside the person wave keeps entity 0.

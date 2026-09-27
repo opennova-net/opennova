@@ -10,7 +10,7 @@
 //
 // The client runs this for EVERY vehicle it is not driving, seeding the drive
 // command straight from the wire [orig: Entity_UpdateVehiclePhysics @0x48AF00
-//  — `if (driver != g_local_player_entity)` @0x48B7F0, ctrl_forward (+0x220)
+//  — `if (driver != g_LocalPlayerEntity)` @0x48B7F0, ctrl_forward (+0x220)
 //  from wire +0x2C4 and the steer target (+0x210) from wire +0x2CC
 //  @0x48B7F8..0x48B80A]. So a peer integrating the same wire fields IS the
 // retail mechanism, not a stand-in.

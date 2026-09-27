@@ -22,7 +22,7 @@ The IDA anchor in the old CONTEXT (`AnimMap_PlayAnimBySlot @0x40bda0`) is the we
 plus the **player-avatar** 252-entry slot table `off_8135F0`, NOT the skeletal evaluator. The real pose
 chain is `BoneFile_Load @0x40fff0` → `BoneAnim_FindKeyframeAtTime @0x410220` → `Math_QuaternionSlerp
 @0x615e20` → `BoneAnim_TransformBones @0x410360` → `AnimChannel_ComputeBoneMatrices @0x410da0` →
-`build_world_bone_matrices @0x40c770` → `Entity_BuildBoneTransformMatrices @0x4b1290`.
+`Bone_BuildWorldMatrices @0x40c770` → `Entity_BuildBoneTransformMatrices @0x4b1290`.
 
 ## Decision
 
@@ -39,7 +39,7 @@ rigid-gun view model.
 
 **Three conventions** (validated visually against the proven oscarmike port, then IDA-confirmed):
 1. Engine-native **Y-up**, not Blender Z-up: bone position as-is `(x,y,z)`, channel quaternion read directly
-   `Quaternion(qx,qy,qz,qw)`; the mesh carries the `(-x,y,z)` handedness (`build_world_bone_matrices`
+   `Quaternion(qx,qy,qz,qw)`; the mesh carries the `(-x,y,z)` handedness (`Bone_BuildWorldMatrices`
    negates X — a left/right flip, not a Y flip).
 2. Skeleton bind/REST from the `.bad` **BadBone bind matrix** (`rotation[9]` 3×3 + `position`,
    `mat3_to_basis(bone_mat · parent_mat⁻¹)`), NOT a sampled clip frame — the `.3di` mesh is skinned to it

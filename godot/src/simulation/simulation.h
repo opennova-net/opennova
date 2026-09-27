@@ -605,17 +605,9 @@ private:
 	// the caller's choice waits for the next load). Binds it to the kernel,
 	// sets the typed views, follows the live runtime pointer and applies the
 	// kind-derived world rules.
-	bool install_role(std::unique_ptr<opennova::inmatch::LocalRole> p_role) {
-		return adopt_role(std::move(p_role), nullptr, nullptr);
-	}
-	bool install_role(std::unique_ptr<opennova::inmatch::HostRole> p_role) {
-		opennova::inmatch::HostRole *host = p_role.get();
-		return adopt_role(std::move(p_role), host, nullptr);
-	}
-	bool install_role(std::unique_ptr<opennova::inmatch::JoinerRole> p_role) {
-		opennova::inmatch::JoinerRole *joiner = p_role.get();
-		return adopt_role(std::move(p_role), nullptr, joiner);
-	}
+	bool install_role(std::unique_ptr<opennova::inmatch::LocalRole> p_role);
+	bool install_role(std::unique_ptr<opennova::inmatch::HostRole> p_role);
+	bool install_role(std::unique_ptr<opennova::inmatch::JoinerRole> p_role);
 	bool adopt_role(std::unique_ptr<opennova::inmatch::Role> p_role,
 			opennova::inmatch::HostRole *p_host, opennova::inmatch::JoinerRole *p_joiner);
 	// The offline role by the shell's listen_server_ choice: the SP listen
@@ -844,12 +836,12 @@ private:
 	// A binding member (ADR 0042 d3: no headless joiner consumer; the binding also folds the
 	// host's own view with its perf clocks).
 	opennova::inmatch::ClientRuntime *runtime_ = nullptr;
-	// The decode-view item-class resolver over the retained catalog (empty before
-	// resolve_item_traits built one): what a host role is constructed with.
-	opennova::replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver() const;
-	// Install the catalog resolver on the host role and runtime_'s view (no-op until the
-	// catalog exists). Called from resolve_item_traits, the boot's role hook, and enable_join.
-	void install_item_class_resolver();
+	// Install the retained items.def catalog (assets_.item_replication_catalog)
+	// on the host role and runtime_'s view: their record classes and the def
+	// facts the view's destroy reads (no-op until resolve_item_traits built
+	// it). A host role is constructed with the same catalog. Called from
+	// resolve_item_traits, the boot's role hook, and enable_join.
+	void install_item_catalog();
 	// Install or clear the retained boot charattr table on the current Joiner runtime.
 	void install_charattr_challenge_table();
 	// Copy the per-class ATTRIBUTES words into World::class_attribute_flags -- the
@@ -897,7 +889,6 @@ private:
 
 	void reset_world();
 
-
 public:
 	// --- the weather home (world::WeatherState, ADR 0042 d2/d5) --------------
 	// The World's weather, the ONE home the WAC handlers write, the kernel's
@@ -919,7 +910,7 @@ public:
 	// an empty frame without a world. C++-only, the node is its one consumer.
 	const opennova::renderer::PrecipitationDrawFrame &compile_precipitation_frame(
 			const Vector3 &p_camera, const Vector3 &p_camera_right,
-			const Vector3 &p_camera_up, int p_terrain_light_rgb);
+			const Vector3 &p_camera_up, int p_terrain_light_rgb, int p_camera_mode);
 	// Thunder one-shots since the last drain (weather_state.h carries the cites).
 	// NOT ClassDB-bound: MissionAudio plays the engine rows.
 	void drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events);
@@ -1018,7 +1009,7 @@ public:
 	bool is_listen_server() const { return listen_server_; }
 
 	// Feed the mission's raw terrain-tile (.til) file bytes so the listen host streams the S2C 0x45
-	// terrain-tile load to joiners (climbs the client's g_loading_progress 5 -> 6; §5.37). The Godot
+	// terrain-tile load to joiners (climbs the client's g_LoadingProgress 5 -> 6; §5.37). The Godot
 	// shell owns the resource root, so it read_file()s the .til (named by the .trn tileinfo) and passes
 	// the bytes here BEFORE loading the mission. Empty / not-called => 0x45 is faithfully skipped.
 	void set_terrain_til_data(const PackedByteArray &p_til_bytes);
@@ -1058,6 +1049,7 @@ public:
 		String team;                // "%ld" of the assigned team; empty until assigned
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
+	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
 	// A NovaWorld ServerCommand (the NovaWorldHost `server_command` signal's verb,
 	// target selector and argument tokens) run against the in-match host through
 	// inmatch::Server_ExecuteServerCommand. The caller owns the two shell legs:
@@ -1122,7 +1114,7 @@ public:
 	// Live player-slot spectator state: joiner = S2C 0x75 latch; authority = Server_SetPlayerSpectator.
 	bool is_local_spectator() const;
 	bool set_local_spectator(bool p_spectator);
-	// The client-local death screen latch (retail g_death_screen_active): gates the
+	// The client-local death screen latch (retail g_DeathScreenActive): gates the
 	// friendly-tags walks + camera arbiter sub-mode; fed by simulation_player_view.cpp.
 	bool local_death_screen_active() const;
 	// True while a live net session owns this sim: the world tick is the ONLY pump for the
@@ -1296,7 +1288,7 @@ public:
 	// and the in-match arm.
 	bool is_join_deploy_hold_ready() const;
 	bool is_join_in_match_ready(bool p_auto_deploy) const;
-	// The deploy-map overlay signal (retail g_deploy_screen_active). UI only.
+	// The deploy-map overlay signal (retail g_DeployScreenActive). UI only.
 	bool is_join_deploy_overlay_active() const;
 	// The frame loop's open decision for death.mnu's DEATH screen: true once
 	// per arming of the overlay (the engine-side open latch stamps itself and
@@ -1354,7 +1346,6 @@ public:
 	// The rows, filtered by stat.mnu's tab (0 all, 1 team 2, 2 team 1 — the
 	// engine's stat_screen_row_visible).
 	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
-	// hud::kEndRoundStatScreenDelayMsec — the 6 s stat.mnu delay.
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
 	// The SP Show Score statistics counters (hud/end_round_statistics.h):
@@ -1762,7 +1753,7 @@ public:
 	// `profile.player_class` (5..9) is written to BOTH side blocks and each
 	// non-empty `profile.side_profiles[side]` {avatar_a, avatar_b, avatar_packed}
 	// to its own block — playersav::update_avatar_selection carries the
-	// save_player_info_from_dialog witness. The other four slots and every kit
+	// PlayerInfo_SaveFromDialog witness. The other four slots and every kit
 	// page survive; the file is replaced atomically.
 	// ERR_INVALID_PARAMETER when the snapshot carries no committable side.
 	static Error save_weapon_profile_selection(const String &p_path,
@@ -1813,8 +1804,8 @@ public:
 	// Inventory snapshot for hosts/tests (simulation/player_inventory.h).
 	Ref<PlayerInventory> get_local_player_inventory() const;
 	// Canonical, unexpanded current tuples for the armory host. Retail preselects
-	// visible parent rows from g_armoryLoadoutBufferByClass, never from the expanded
-	// weaponSlotArrayBase [orig: populate_ammo_type_combo_boxes @ 0x564930].
+	// visible parent rows from g_ArmoryLoadoutBufferByClass, never from the expanded
+	// weaponSlotArrayBase [orig: UI_PopulateAmmoTypeComboBoxes @ 0x564930].
 	TypedArray<WeaponKitEntry> get_local_player_loadout() const;
 
 	// --- WAC scripts ------------------------------------------------------
@@ -2139,9 +2130,9 @@ public:
 	// A subsequent build/reset cannot overwrite a frame still being consumed.
 	std::shared_ptr<const SimulationPresentSnapshot> build_present_snapshot() const;
 	PackedFloat32Array get_present_snapshot() const;
-	// The door side table the most recent get_present_snapshot() built beside
-	// its rows: (row index, count, phase[count]) int32 entries in row order,
-	// only for rows whose PF_DOOR_COUNT is nonzero (runtime/inmatch/present_rows.h).
+	// The door side table the last build_present_snapshot() built beside its rows,
+	// empty after a world reset until the next build: (row index, count, phase[count])
+	// int32 entries in row order for rows with a nonzero PF_DOOR_COUNT (present_rows.h).
 	PackedInt32Array get_present_door_phases() const;
 	// Revision for the exact ordered identity layout of the most recently
 	// returned snapshot. Pose-only changes keep this stable.
@@ -2228,12 +2219,16 @@ public:
 	// occluder planes + the section-mask build + the per-entity render gates
 	// (blink-hits + the outdoors three-ray latch). Camera in Godot space; fov_y in
 	// degrees; fog/water in mission units; force_indoors mirrors the mission
-	// attribute override (engine: formats/mission/bms.h).
+	// attribute override (engine: formats/mission/bms.h). No near distance:
+	// the occlusion planes pass through the eye (engine: world/occlusion_camera.h).
 	// (engine: runtime/world/occlusion.cpp)
 	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
-	                         double p_aspect, double p_viewport_width, double p_near,
+	                         double p_aspect, double p_viewport_width,
 	                         double p_fog_dist_units, double p_water_z_units,
 	                         bool p_force_indoors);
+	// The weapon Inset pass's own collect, after the main one (simulation_present_state.h).
+	const InsetOcclusionView &run_inset_occlusion(const InsetOcclusionRequest &p_request);
+	void release_inset_occlusion();
 
 	// Frame results: [bms_id, packed, forced] triples for the buildings the
 	// occlusion frame touched; the packed word is world/occlusion_feed.h's
@@ -2341,7 +2336,7 @@ public:
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's
-	// camera (Godot space), fog distance and Env_TerrainLightCombined
+	// camera (Godot space), fog distance and g_EnvTerrainLightCombined
 	// (EnvFile.combine_terrain_light(sun, sky) — the sun+sky combine).
 	// { vertices (PackedVector3Array, Godot axes; world space for shared-ring
 	//   batches, SECTION-LOCAL for entity-ring batches), uvs, colors,
@@ -2349,6 +2344,9 @@ public:
 	//   first/count, batch_bms_id, batch_spawn_origin, strip_names,
 	//   slots_live, slots_culled, rings_leased }. Empty without a world.
 	Ref<ScarDrawList> get_scar_draw_list(const Vector3 &p_camera_godot, float p_fog_distance,
+			const Color &p_terrain_light) const;
+	// The same list over the weapon Inset view's section masks (world/occlusion.h OcclusionView).
+	Ref<ScarDrawList> get_scar_draw_list_inset(const Vector3 &p_camera_godot, float p_fog_distance,
 			const Color &p_terrain_light) const;
 	// The Scar_RenderCache owner gate over OcclusionWorld's section masks and
 	// the entity's blink-box quad (see simulation_scars.cpp).
@@ -2465,6 +2463,7 @@ public:
 	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
 	// False without a kernel or a local player.
 	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
+	opennova::inmatch::BreathBarFacts breath_bar_facts() const; // role_feeds.h; NOT bound
 	// The radio-request icon's viewer gate over the local player (world::
 	// friendly_tag_radio_request_viewer): a driver/controller seat or an own latch.
 	bool local_player_radio_request_icon_viewer() const;

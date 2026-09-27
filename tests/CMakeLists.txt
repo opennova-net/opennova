@@ -82,7 +82,6 @@ foreach(fixture spinner skinned building)
                          FIXTURES_REQUIRED threedi_scene_${fixture} FIXTURES_SETUP threedi_rebuild_${fixture})
     set_tests_properties(threedi_cli_roundtrip_${fixture} PROPERTIES FIXTURES_REQUIRED threedi_rebuild_${fixture})
 endforeach()
-# Command regressions, including invalid inputs and semantic differences.
 # The anim commands over the same handlers the CLI dispatches: the clip-set
 # round trip, what compare calls the same animation, and the scenes build refuses.
 add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp)
@@ -101,6 +100,7 @@ add_test(NAME threedi_cli_info_flag COMMAND opennova_3di info unread.3di --bogus
 set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "info takes --verbose, --planes or --verts")
 
+# Command regressions, including invalid inputs and semantic differences.
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
@@ -841,12 +841,15 @@ target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
-# native world: the sim-side .3di derivations (ADR 0028)
+# The presented-model lookup (world/entity_index.h): the BMS-id and origin
+# candidates, groups and area-trigger zones an embedder resolves its presented
+# models by.
 add_executable(world_entity_index_test world/entity_index_test.cpp)
 target_link_libraries(world_entity_index_test PRIVATE opennova_runtime)
 target_include_directories(world_entity_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME world_entity_index COMMAND world_entity_index_test)
 
+# native world: the sim-side .3di derivations (ADR 0028)
 add_executable(world_model_geometry_test world/model_geometry_test.cpp)
 target_link_libraries(world_model_geometry_test PRIVATE opennova_runtime)
 target_include_directories(world_model_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1058,6 +1061,13 @@ target_link_libraries(precipitation_test PRIVATE opennova_runtime)
 target_include_directories(precipitation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME precipitation COMMAND precipitation_test)
 
+# The sun glare's occlusion ray sequence (runtime/environment/glare_occlusion.h):
+# one coarse unjittered ray gating two jittered fine rays, then the window tick.
+add_executable(glare_occlusion_test environment/glare_occlusion_test.cpp)
+target_link_libraries(glare_occlusion_test PRIVATE opennova_runtime)
+target_include_directories(glare_occlusion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME glare_occlusion COMMAND glare_occlusion_test)
+
 # The HUD view-helper math cluster (engine/runtime/hud, S15): design-space
 # scaling, ALPHAFADE decay + quirk, stance Q16 scale/centering, health bands,
 # message tick policy, half-bright, ammo fold + nudge, round icons, crosshair
@@ -1082,13 +1092,15 @@ add_executable(hud_config_tokens_test hud/hud_config_tokens_test.cpp)
 target_link_libraries(hud_config_tokens_test PRIVATE opennova_runtime)
 add_test(NAME hud_config_tokens COMMAND hud_config_tokens_test)
 
-# The loading screen spec (hud/loading_screen.h): the sidecar name rule, the
-# present-due rule and the composited resource names.
+# The HUD's key-driven toggles (hud/hud_toggles.h): the gated down-edge latch,
+# the shared-key cycles, the view actions, the overlay windows and the resets.
 add_executable(hud_toggles_test hud/hud_toggles_test.cpp)
 target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
 target_compile_features(hud_toggles_test PRIVATE cxx_std_17)
 add_test(NAME hud_toggles COMMAND hud_toggles_test)
 
+# The loading screen spec (hud/loading_screen.h): the sidecar name rule, the
+# present-due rule and the composited resource names.
 add_executable(hud_loading_screen_test hud/loading_screen_test.cpp)
 target_link_libraries(hud_loading_screen_test PRIVATE opennova_runtime)
 add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
@@ -1328,10 +1340,6 @@ target_link_libraries(script_remote_command_test PRIVATE opennova_net opennova_r
 target_include_directories(script_remote_command_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME script_remote_command COMMAND script_remote_command_test)
 
-# The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
-# witnessed .mnu widget draw walk — order, state-driven appearance/color
-# selection, text placement/truncation, the edit caret, frame pieces, and the
-# per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
 # The compiled-menu interaction runtime (menu/menu_runtime.h) over a fake frame seam
 # and a synthetic document: the id tree, navigation, the state store and its replay,
 # ACTION dispatch, radio groups, the spin wrap, the combo popup, the input machine.
@@ -1360,6 +1368,10 @@ add_executable(player_info_avatars_test menu/player_info_avatars_test.cpp)
 target_link_libraries(player_info_avatars_test PRIVATE opennova_runtime)
 add_test(NAME player_info_avatars COMMAND player_info_avatars_test)
 
+# The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
+# witnessed .mnu widget draw walk — order, state-driven appearance/color
+# selection, text placement/truncation, the edit caret, frame pieces, and the
+# per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1741,7 +1753,7 @@ target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
 target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)
 add_test(NAME movement_brain_parity COMMAND movement_brain_parity_test)
 
-# compute_relative_position_metrics @0x545710 against original-x86 vectors
+# Entity_ComputeRelativePositionMetrics @0x545710 against original-x86 vectors
 # (scripts/oracles/aim_metrics_parity.py).
 add_executable(aim_metrics_parity_test world/aim_metrics_parity_test.cpp)
 target_link_libraries(aim_metrics_parity_test PRIVATE opennova_runtime)
@@ -1793,6 +1805,14 @@ target_link_libraries(item_death_traits_resolve_test PRIVATE opennova_runtime op
 target_include_directories(item_death_traits_resolve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(item_death_traits_resolve_test PRIVATE cxx_std_17)
 add_test(NAME item_death_traits_resolve COMMAND item_death_traits_resolve_test)
+
+# The collectors' render model, stamped where the model resolves (placed
+# entities) and carried on the decoded wire row's resolved shape.
+add_executable(render_model_resolve_test world/render_model_resolve_test.cpp)
+target_link_libraries(render_model_resolve_test PRIVATE opennova_runtime opennova_base)
+target_include_directories(render_model_resolve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(render_model_resolve_test PRIVATE cxx_std_17)
+add_test(NAME render_model_resolve COMMAND render_model_resolve_test)
 
 add_executable(husk_section_origins_test world/husk_section_origins_test.cpp)
 target_link_libraries(husk_section_origins_test PRIVATE opennova_runtime opennova_base)
@@ -1954,9 +1974,9 @@ target_compile_features(player_loadout_test PRIVATE cxx_std_17)
 add_test(NAME player_loadout COMMAND player_loadout_test)
 
 # Rendering occlusion (Terrain_InitBuildingPortals @0x5c7480 register/weld/flags,
-# build_sector_visibility_masks @0x5c8610 + render_visibility_portal_traversal
-# @0x5c4ae0, test_sector_entity_occlusion @0x5c4610, the entity-collector gates +
-# terrain_occlusion_check_three_rays @0x610ed0, Entity_QueryBlinkBoxesAtPoint
+# Terrain_BuildSectorVisibilityMasks @0x5c8610 + Render_VisibilityPortalTraversal
+# @0x5c4ae0, Terrain_TestSectorEntityOcclusion @0x5c4610, the entity-collector gates +
+# Terrain_OcclusionCheckThreeRays @0x610ed0, Entity_QueryBlinkBoxesAtPoint
 # @0x4af350): render-float math, the weld pass, outdoor/indoor mask rules,
 # outside-in viewthru banking, TOC shadow-wedge culling, the blink-hits render
 # gate + three-ray latch — over hand-built portal/collision models.
@@ -2072,7 +2092,7 @@ target_compile_features(special_weapon_parity_test PRIVATE cxx_std_17)
 add_test(NAME special_weapon_parity COMMAND special_weapon_parity_test)
 
 # The attach-command seat-selection mirror (world/vehicle_attach.h
-# predict_seat_selection) and the shared weight table.
+# seat_selection_mode_for_command) and the shared weight table.
 add_executable(seat_prediction_test world/seat_prediction_test.cpp)
 target_link_libraries(seat_prediction_test PRIVATE opennova_runtime)
 target_include_directories(seat_prediction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2284,7 +2304,7 @@ opennova_add_gated_test(root_motion COMMAND root_motion_test)
 # binary) exercises only the format half (engine/formats/wac); VM behavior (var
 # math, entity mutation, temporal/edge firing, env, authority) and the shipped
 # .wac corpus, compiled to the original compiler's listings, run against the
-# world (dirs via argv, else the dev defaults; absent dirs skip).
+# world (dirs via argv, else OPENNOVA_JO_ASSETS; Skipped without it).
 add_executable(wac_registry_oracle_test wac/wac_registry_oracle_test.cpp)
 target_link_libraries(wac_registry_oracle_test PRIVATE opennova_formats)
 target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2792,7 +2812,7 @@ target_include_directories(nw_ingame_c2s_uplink_test PRIVATE ${CMAKE_CURRENT_SOU
 add_test(NAME nw_ingame_c2s_uplink COMMAND nw_ingame_c2s_uplink_test)
 
 # In-match S2C encoders — loopback identity (encode -> decode field-identical),
-# ADR 0011 §4. encode side ports serialize_entity_pool_to_packet @0x503460; the
+# ADR 0011 §4. encode side ports NetPacket_SerializeEntityPoolToPacket @0x503460; the
 # decode side is verified vs NapiNPClientMsg_0x020 @0x425C00. No capture dep.
 add_executable(nw_ingame_encode_test novaworld/nw_ingame_encode_test.cpp)
 target_link_libraries(nw_ingame_encode_test PRIVATE opennova_net)
@@ -3122,7 +3142,7 @@ target_link_libraries(npruntime_placed_device_relay_test PRIVATE opennova_net op
 add_test(NAME npruntime_placed_device_relay COMMAND npruntime_placed_device_relay_test)
 
 # D-NET-152: the C2S 0x06 client-fired-round pipeline — anti-spoof, clip authority (+ the 0x25
-# refill), and the g_round_ring append behind the §5.9.1 tag-2 echo
+# refill), and the g_RoundRing append behind the §5.9.1 tag-2 echo
 # [orig: @0x513310 -> Server_ClientFiredRound @0x50baa0 -> RoundData_AddRound @0x4fdb40].
 add_executable(npruntime_client_fire_test npruntime/client_fire_test.cpp)
 target_link_libraries(npruntime_client_fire_test PRIVATE opennova_net opennova_runtime)
@@ -3164,6 +3184,25 @@ foreach(port
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
     opennova_add_gated_test(${port_name} COMMAND ${port_name}_test)
 endforeach()
+
+# The indoor-visibility walk (the "occlusion issues in a building" report):
+# the local player walked through a retail building's doorway on the shared
+# rig, the render-occlusion frame run over the game's camera every tick
+# (00TRa's armory door), and CP03's authored spawn (a doorway of HN_Bld1)
+# held still and swept. Gated: OPENNOVA_JO_DIR.
+add_executable(indoor_visibility_walk_test world/indoor_visibility_walk_test.cpp)
+target_link_libraries(indoor_visibility_walk_test PRIVATE opennova_test_rig)
+opennova_add_gated_test(indoor_visibility_walk_00tra
+    COMMAND indoor_visibility_walk_test --bms 00TRa.bms --bms-id 20 --door 5)
+opennova_add_gated_test(indoor_visibility_spawn_cp03
+    COMMAND indoor_visibility_walk_test --bms CP03.bms --spawn --idle 120 --yaw-step 45 --retail-truth)
+# The blink rules those walks surfaced (synthetic rigs, no data gate): the
+# first-pass-only blink letters, and the parent blink-quad copies (the dropped
+# object, the ewep class callback and move function, a seated rider).
+add_executable(indoor_visibility_fixes_test world/indoor_visibility_fixes_test.cpp)
+target_link_libraries(indoor_visibility_fixes_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(indoor_visibility_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME indoor_visibility_fixes COMMAND indoor_visibility_fixes_test)
 
 # The witnessed SP lose flow on the retail data, one executable per training
 # mission's WAC: 04TR carries both team legs, 00TRa only `true(bluekills) ->
@@ -3274,7 +3313,7 @@ add_test(NAME npruntime_host_punt COMMAND npruntime_host_punt_test)
 # C&C / handle-0 admission. [orig: Server_UpdateAllActivePlayerSlots @0x518820; sub_517B20
 # @0x517b20; Server_CheckPlayerViolations @0x51abd0; Server_TickUpdate @0x51e2d0;
 # NapiNPServerMsg_HandlePlayerLoadout @0x515790; EntityPool_ClearDirtyFlags @0x508e30;
-# recalculate_all_player_scores @0x5014e0; SpawnWaveList_TryQueuePlayer @0x52a490;
+# Server_RecalculateAllPlayerScores @0x5014e0; SpawnWaveList_TryQueuePlayer @0x52a490;
 # Server_ProcessClientRequestRespawn @0x519af0]
 add_executable(npruntime_server_tick_maintenance_test npruntime/server_tick_maintenance_test.cpp)
 target_link_libraries(npruntime_server_tick_maintenance_test PRIVATE opennova_net opennova_runtime)

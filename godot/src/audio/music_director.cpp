@@ -177,7 +177,7 @@ void MusicDirector::_process(double p_delta) {
 		return;
 	}
 	// Pace the VM the way the original engine does: AudioVM advances the script
-	// only when the current track has finished streaming -- audio_stream_update
+	// only when the current track has finished streaming -- AudioStream_Update
 	// @0x671c60 steps the VM (sub_672EE0) solely on `remaining_bytes <= 0`, never
 	// once per frame. While the track the last `play` started is still sounding,
 	// leave the VM halted where that `play` stopped it. Without this gate the VM
@@ -338,7 +338,7 @@ void MusicDirector::_on_play_sound(void *user, uint32_t sbf_entry_index, int wai
 					self->_playbacks.push_back(ObjectID(playback->get_instance_id()));
 				}
 				// Gate the VM on this track finishing (see _process). The original
-				// streams exactly one music context at a time (audio_stream_update),
+				// streams exactly one music context at a time (AudioStream_Update),
 				// so the most-recently started player is THE active track.
 				self->_active_play = p;
 			}

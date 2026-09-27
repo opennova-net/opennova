@@ -16,7 +16,7 @@
 // docs/interface/loading-screen-re.md]; the waypoint-family selector
 // [orig: NapiNPMsg_0x7B_BuildPayload selector @0x507822, §5.32]; the objective
 // bit gate on the 0x0A sub-block 3 [orig: 0x430361..0x4303D0, §5.9]; the
-// two-part stock-Co-op test [orig: serialize_mission_info_to_datastream
+// two-part stock-Co-op test [orig: Game_SerializeMissionInfoToDataStream
 // @0x523620, §5.32/D-NET-205]. The Godot layer consumes this vocabulary
 // through the NetProtocol binding (godot/src/network/net_protocol.h).
 
@@ -89,7 +89,7 @@ constexpr bool is_retail_code_word(uint32_t game_type) {
 // that the consumers normalize to Co-op row 2; it is distinct from Deathmatch
 // row 11. Flag Me deliberately maps to 12 even though the table has only rows
 // 0..11, so its event scorer, FIELD loader, and status-value copy all fail
-// closed. [orig: load_scoring_table_for_game_type @0x52D300;
+// closed. [orig: ScoreConfig_LoadScoringTableForGameType @0x52D300;
 // GameEvent_ProcessScoring @0x52F550; Server_BuildStatusReport @0x530A60]
 constexpr uint8_t score_table_index(uint32_t game_type) {
     if (game_type == kDeathmatch)
@@ -212,7 +212,7 @@ inline uint32_t for_mission_attribs(uint32_t attrib_flags) {
 
 // --- The MULTI_PLAYER_HOST dialog's witnessed game-type rules (D-MNU-17) ----
 
-// The GAME_TYPE spin's ALL-types value [orig: init_host_settings_dialog
+// The GAME_TYPE spin's ALL-types value [orig: UI_InitHostSettingsDialog
 // @ 0x558aee selects 255; the filter's show-all test @ 0x55717c].
 inline constexpr int kHostFilterAll = 255;
 
@@ -226,7 +226,7 @@ constexpr bool host_list_visible(uint32_t g) {
 
 // The 13-way code -> GAME_TYPE spin item value map the host dialog filters
 // with (255 = ALL; 0 = unmapped) [orig: the shared switch —
-// init_host_settings_dialog @ 0x558b16, filter_mission_list_by_game_type
+// UI_InitHostSettingsDialog @ 0x558b16, HostDialog_FilterMissionListByGameType
 // @ 0x5570a6, HostDialog_AddRemoveSelectedMissions @ 0x557cd9].
 constexpr int host_filter_category(uint32_t g) {
 	if (g == 0) return 11;
@@ -247,7 +247,7 @@ constexpr int host_filter_category(uint32_t g) {
 }
 
 // The SELECTED_MISSIONS type cell's gametext key in the GateTypeAbbrev
-// section [orig: get_game_type_abbreviation @ 0x520fd0 host arm — the DM/TDM/
+// section [orig: GameType_GetAbbreviation @ 0x520fd0 host arm — the DM/TDM/
 // KOTH/TKOTH/CTF/SD/AD/FB/FM/AAS/CAC literals + COOP for the waypoint family].
 constexpr const char *host_abbreviation_key(uint32_t g) {
 	if (is_waypoint_family(g)) return "COOP";
@@ -329,24 +329,24 @@ inline constexpr uint32_t kDefaultFlagReturnTicks = 210;
 // Unnumbered ChangeTeam triggers capture over this many 1 Hz passes; setting
 // zero or negative selects the retail instant branch. TakeoverSpeed 1 selects
 // the control-delta base 24. [orig: Config_SetDefaults @0x54D030 writes
-// dword_2550B78=15 / dword_2550B84=1; applied to g_capture_duration and
-// g_capture_speed_setting @0x551D3E..0x551D55]
+// dword_2550B78=15 / dword_2550B84=1; applied to g_CaptureDuration and
+// g_CaptureSpeedSetting @0x551D3E..0x551D55]
 inline constexpr int32_t kDefaultCaptureDurationSeconds = 15;
 inline constexpr int32_t kDefaultCaptureSpeedSetting = 1;
 // Deploy waves are asymmetric by default: unnumbered/base spawns deploy
 // immediately, while numbered zones release one player every ten seconds.
 // [orig: Config_SetDefaults @0x54D030 writes dword_2550B7C=0 and
-// dword_2550B80=10; apply_session_settings_to_globals @0x551D3E..0x551D55]
+// dword_2550B80=10; Game_ApplySessionSettingsToGlobals @0x551D3E..0x551D55]
 inline constexpr int32_t kDefaultSpawnWaveTimeBase = 0;
 inline constexpr int32_t kDefaultSpawnWaveTimeZone = 10;
 // Retail names the parsed setting `nodefaultspawnpoints` and the live global
-// g_respawn_requires_team_dead, but the gameplay predicate checks spawn-zone
+// g_RespawnRequiresTeamDead, but the gameplay predicate checks spawn-zone
 // availability, not living players: Default Spawn is denied while the team has
 // an unnumbered zone or a fully controlled numbered zone.
 // [orig: Config_SetDefaults @0x54D34C writes dword_2550B94=0;
 // Config_ParseSettingsLine @0x550C73; Entity_HasAliveEntityOfTeam @0x4FC7B0]
 inline constexpr uint32_t kDefaultSpawnRequiresNoTeamZone = 0;
-// [orig: Config_SetDefaults @0x54D030 writes g_MpNumTeams = 2]
+// [orig: Config_SetDefaults @0x54D030 writes g_GameConfigState.multiplayerTeamCount_488 = 2]
 inline constexpr uint32_t kDefaultNumTeams = 2;
 inline constexpr uint32_t kDefaultRespawnTimeout = 5;
 inline constexpr uint32_t kDefaultStartDelay = 0;
@@ -354,7 +354,7 @@ inline constexpr uint32_t kDefaultDestroyBuildings = 0;
 inline constexpr uint32_t kDefaultDeathMessages = 1;
 
 // The retail host's custom-message default, echoed by the 0x7B reply body.
-// [orig: g_sessionvar_custom_text @ 0x522123]
+// [orig: g_SessionVarCustomText @ 0x522123]
 inline constexpr char kCustomTextDefault[] = "Put your message here.";
 
 // The wire callsign cap: the roster/entity name rides a Name[16] cstring

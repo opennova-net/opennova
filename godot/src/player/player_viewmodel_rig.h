@@ -37,7 +37,7 @@ class Simulation;
 // (hip) / `tpos` (ADS). The original adds the equipped weapon's view-bias
 // offset to the eye in view-local space, rotated by the view orientation,
 // then draws the gun (gfx1) + character arms at that view root [orig:
-// Player_UpdateFirstPersonCamera @0x4dd380 -> g_view_euler_translation_out;
+// Player_UpdateFirstPersonCamera @0x4dd380 -> g_ViewEulerTranslationOut;
 // Player_RenderFirstPersonViewModel @0x4ded60]. The weapon.def parser stores
 // the pos/tpos POSITION as `atof(str) * 256.0` (a 16.16 fixed-point world
 // coord; scale flt_7D1D70 @0x544770) and the ROTATION as degrees -> 32-bit
@@ -112,9 +112,9 @@ public:
 	// Render_SetViewportDepth01 @0x58a7b0; default 80.0 = flt_7D1898 stored by
 	// AdmDef_InitEntryDefaults @0x53ff31; parser key 'renderfov' @0x54482a].
 	// Ported as a fold into the beauty pass: the viewmodel parts ride their own
-	// visual layer (the beauty camera admits it; the mirror/capture cameras and
-	// the focused Q3 adapter's world-layer test exclude it, there is no Q3
-	// camera) and every flagged instance applies the renderfov focal ratio plus
+	// visual layer (the beauty camera and the focused Q3 adapter admit it, the
+	// rigid glow strips copying under the world projection; the mirror/capture
+	// cameras exclude it) and every flagged instance applies the renderfov focal ratio plus
 	// the near depth band in the object shaders
 	// (shaders/viewmodel_pass.gdshaderinc, fed by update_viewmodel_projection)
 	// -- the depth-remap's visible equivalent, drawn into the same frame as the

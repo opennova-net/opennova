@@ -1,8 +1,8 @@
 shader_type spatial;
 // Dome pass 2 (both cloud layers), alpha-blended srcAlpha/invSrcAlpha over
-// pass 1 and the sun/moon discs, with z-write off like pass 1
+// pass 1 and the sun/moon discs, with z-write off and the culling of pass 1
 // (sky.gdshaderinc carries the witnesses and the shared vertex stage).
-render_mode unshaded, cull_front, depth_draw_never, blend_mix;
+render_mode unshaded, cull_back, depth_draw_never, blend_mix;
 
 #include "res://shaders/sky.gdshaderinc"
 

@@ -35,7 +35,7 @@ public:
 	void set_environment_path(const NodePath &p_path);
 	NodePath get_environment_path() const { return environment_path_; }
 
-	// 100 = the witnessed retail constant (Env_WindScale 256, always on — the
+	// 100 = the witnessed retail constant (g_EnvWindScale 256, always on — the
 	// ambient foliage sway every retail map has), which is also the default.
 	void set_wind_strength(float p_value);
 	float get_wind_strength() const;
@@ -115,7 +115,7 @@ public:
 	float get_sway_amount() const;
 	float get_sway_phase() const;
 	float get_lightning_intensity() const;
-	// Env_TerrainLightCombined packed 0x00RRGGBB — the precipitation color.
+	// g_EnvTerrainLightCombined packed 0x00RRGGBB — the precipitation color.
 	int get_terrain_light_combined_rgb() const;
 
 	Vector3 get_smooth_fill() const;
@@ -134,12 +134,13 @@ public:
 	Vector3 get_smooth_cloud_edge() const;
 
 	// The witnessed cloud-scroll UV translations for a camera at
-	// (cam_x, cam_z) world units — U carries the accumulator NEGATIVELY, V
-	// positively (weather_runtime.h carries the cites). The sky dome
-	// consumes these through this seam, like the terrain consumes
-	// get_smooth_sun.
-	Vector2 get_cloud_uv_offset1(float p_cam_x, float p_cam_z) const;
-	Vector2 get_cloud_uv_offset2(float p_cam_x, float p_cam_z) const;
+	// (render_x, render_z) — the RENDER basis the dome's UVs use, so
+	// render_x is the Godot z and render_z the Godot x (util/axes.h). U
+	// carries the accumulator NEGATIVELY, V positively (weather_runtime.h
+	// carries the cites). The sky dome consumes these through this seam,
+	// like the terrain consumes get_smooth_sun.
+	Vector2 get_cloud_uv_offset1(float p_render_x, float p_render_z) const;
+	Vector2 get_cloud_uv_offset2(float p_render_x, float p_render_z) const;
 	float get_cloud_uv_rate_per_second() const;
 
 	// C++-only seams for sibling native appliers.

@@ -15,12 +15,12 @@ extends Node
 ## through the Simulation feeds); this node owns only the device work: the
 ## HUD element, the compiled stat.mnu frame, its widgets and the cursor.
 ## [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (every HUD frame while
-##  g_spawn_success_gate && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
+##  g_SpawnSuccessGate && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
 ##  Server_ResetBalanceCounters + Game_InitRespawnState +
 ##  Overlay_ComputeStatFieldColumnLayout(40, 984); every pass
-##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then draw_endround_stats_overlay
+##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay
 ##  @0x5b7cd0; UI_OpenMenuScreen("stat.mnu", "STAT") once; the STAT show
-##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); stat_filter_tab_handler
+##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); StatScreen_StatFilterTabHandler
 ##  @0x562140]
 
 const MENU_FILE := "stat.mnu"
@@ -235,10 +235,8 @@ func _fill_table(sim: Simulation, list_id: int, tab: int) -> void:
 
 func close() -> void:
 	set_process(false)
-	if not is_open():
-		return
-	_frame.visible = false
-	closed.emit()
+	if MenuFrameSurface.hide_frame(_frame):
+		closed.emit()
 
 
 func teardown() -> void:
@@ -268,7 +266,7 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 		exit_to_menu_requested.emit()
 		return
 	# The tab radios map onto the engine's tab index [orig:
-	# stat_filter_tab_handler @0x562140, registered with params 0/1/2 by
+	# StatScreen_StatFilterTabHandler @0x562140, registered with params 0/1/2 by
 	# HUD_CacheStatPanelValues @0x5627a8..0x5627f5]; the filter itself is the
 	# sim feed's.
 	if widget_name.begins_with("RADIO_TAB_"):
@@ -285,22 +283,16 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
-	var root: ResourceRoot = _view.resource_root()
-	if root == null:
+	var surface := MenuFrameSurface.open_surface(_view.resource_root(), _ui_parent,
+			_layout_control, MENU_FILE, MENU_SCREEN, "EndRoundMenu", "EndRoundPresenter",
+			_on_frame_gui_input,
+			func(driver: MenuDriver) -> void:
+				driver.widget_activated.connect(_on_widget_activated))
+	if surface == null:
 		return false
-	var doc := MenuFrameSurface.load_document(root, MENU_FILE, "EndRoundPresenter")
-	if doc == null:
-		return false
-	var surface := MenuFrameSurface.build(root, _ui_parent, _layout_control,
-			"EndRoundMenu", _on_frame_gui_input)
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
-	_driver.widget_activated.connect(_on_widget_activated)
-	if not MenuFrameSurface.open_document(_driver, doc, root, MENU_FILE, MENU_SCREEN,
-			"EndRoundPresenter"):
-		teardown()
-		return false
 	return true
 
 

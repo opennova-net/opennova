@@ -35,7 +35,7 @@ inline bool friendly_tag_entry_bails(bool is_local, uint32_t flags,
 // entity team with the local player's after its death-screen arm has drawn
 // every team [orig: HUD_DrawEntityLabel death arm @0x5a3c33..0x5a3c3a; team
 // compare @0x5a3c6b..0x5a3c7d]: an unequal team, neutral 0 included, draws
-// magenta only under `g_enemyTagsVisible` and otherwise bails
+// magenta only under `g_EnemyTagsVisible` and otherwise bails
 // [orig: @0x5a3c7f..0x5a3c95]. The grant's S2C 0x0A edge only rises with the
 // death screen here, whose arm already admits every team; its spectator-mode
 // and action-130 writers are unported, so the drawer's ordinary-play leg is

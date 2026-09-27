@@ -42,7 +42,7 @@ enum class SessionErrorCode : uint8_t {
 	TickFailed,
 	// A dedicated host's round-end linger expired: retail stores the mission
 	// exit reason and leaves the mission; a headless host exits its loop.
-	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_mission_exit_reason 4/3]
+	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_MissionExitReason 4/3]
 	RoundEnded,
 };
 
@@ -198,6 +198,12 @@ public:
 	virtual ClientRuntime *client_runtime() { return nullptr; }
 	// The last tick's wire leg, for the shell's stats board.
 	virtual int64_t last_net_us() const { return 0; }
+	// The main loop's measured frame rate (the FR counter's g_StatsAvgFps,
+	// world::TickAccumulator::average_fps), handed over by the session once
+	// per banked frame before that frame's ticks run. The base passes it to the
+	// role's replica runtime (the client quality window's frame-pressure term);
+	// a host also hands it to its server context.
+	virtual void observe_frame_rate(int32_t fps);
 	// The kernel boot's net bring-up (KernelBootOptions::bringup_net_session),
 	// run between the world wiring and the system registration [orig:
 	// SinglePlayer_StartMission @0x561af0]: the host stands its session up
@@ -250,12 +256,6 @@ public:
 	RoleKind kind() const { return kind_; }
 	Role *role() const { return role_; }
 	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
-	// How advance() banks wall-clock into ticks. The game and the dedicated
-	// host both select the retail main-loop bank (world::TickBankPolicy);
-	// WallClock stays the accumulator default. Selecting a policy drops the
-	// banked time.
-	void set_tick_bank_policy(world::TickBankPolicy policy) { accumulator_.set_policy(policy); }
-	world::TickBankPolicy tick_bank_policy() const { return accumulator_.policy(); }
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
 

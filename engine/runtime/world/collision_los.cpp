@@ -19,7 +19,7 @@ using namespace detail; // the shared fixed-point helpers, unqualified as before
 EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
         World &world, EntityHandle source, const int32_t start[3],
         int32_t inout_end[3]) {
-    // [orig: raycast_entity_collision @ 0x413760]
+    // [orig: Entity_RaycastCollision @ 0x413760]
     EntityHandle nearest;
     const int32_t requested_end[3] = {inout_end[0], inout_end[1], inout_end[2]};
 
@@ -109,7 +109,7 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
                                        int32_t dx, int32_t dy, int32_t z_up, int32_t z_drop,
                                        EntityHandle *out_hit_entity) {
     // [orig: Entity_RaycastGroundHeight(AndObject) @ 0x4142c0/0x414320 ->
-    // raycast_entity_collision @ 0x413760]
+    // Entity_RaycastCollision @ 0x413760]
     const int32_t start[3] = {pos[0] + dx, pos[1] + dy, pos[2] + z_up};
     int32_t end[3] = {start[0], start[1], start[2] - z_drop};
     const RayDebugScope ray_scope(*this, RayDebugCategory::kGroundProbe);
@@ -228,7 +228,7 @@ bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t
 
 bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],
                           const int32_t b[3], int32_t out_hit[3]) {
-    // [orig: raycast_entity_collision @ 0x413760 -> Terrain_RaycastHeightmapHiRes_0
+    // [orig: Entity_RaycastCollision @ 0x413760 -> Terrain_RaycastHeightmapHiRes_0
     // @ 0x60e710, called (start, end, end) so the ray end clips in place]
     LosSamplerCtx ctx;
     ctx.field = &field;
@@ -243,7 +243,7 @@ namespace {
 
 // The radiused segment clip, boolean-only: does any TYPE-1 solid volume of
 // `target` contain a span of [ray.start, ray.end] under the per-plane radius
-// term? [orig: raycast_against_entity_pool @ 0x538720 — plane eval
+// term? [orig: Physics_RaycastAgainstEntityPool @ 0x538720 — plane eval
 // (dot >> 14) + dist - radius with strict > 0 = outside (0 counts inside,
 // unlike the 0x413060 clip's >= 0); both-outside-a-plane = miss @ 0x538e37;
 // a straddle splits at |d0u| / (|d0u| + |d1u|) computed on the UNRADIUSED
@@ -388,7 +388,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
             cache_target_views ? world.profile : nullptr,
             devtools::Slot::SIM_REPLICATION_ENTITY_LOS_SECTOR);
 
-    // Sector leg [orig: raycast_against_entity_pool @ 0x538720, pool 2 then pool 1
+    // Sector leg [orig: Physics_RaycastAgainstEntityPool @ 0x538720, pool 2 then pool 1
     // @ 0x539a3a]. Degenerate segments (< 1 u) skip the walk entirely
     // [orig: Physics_RaycastIntContext @ 0x5385e0 returns 1 -> clear on len < 16].
     const int64_t sdx = static_cast<int64_t>(b[0]) - a[0];
@@ -511,7 +511,7 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
     const Entity *se = source.valid() ? world.registry.get(source) : nullptr;
     // The walker's two parent slots: per endpoint entity, parentEntity (+0x16C,
     // the seat mount) wins over mountedChild (+0x268) [orig:
-    // raycast_find_collision_entity @0x539ab8..0x539b10 -> ctx[19]/ctx[20]].
+    // Physics_RaycastFindCollisionEntity @0x539ab8..0x539b10 -> ctx[19]/ctx[20]].
     // The blast sweep nulls the query entity's parentEntity for the call
     // (`mov [edi+16Ch], 0` @0x4eb158, restored @0x4eb16c), so its slot holds
     // only the mountedChild there.
@@ -550,8 +550,8 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
     }
 
 	// --- Entity leg: listener candidates; sound filters to buildings, USE admits all types.
-	// [orig: raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 0 —
-	// the def-type-5 filter @ 0x539baf; walker raycast_against_entity_pool
+	// [orig: Physics_RaycastFindCollisionEntity @ 0x539a70 with allowAllTypes = 0 —
+	// the def-type-5 filter @ 0x539baf; walker Physics_RaycastAgainstEntityPool
 	// @ 0x538720.] The segment is the UNSHIFTED one (the z shift was
 	// terrain-leg-internal); the height offset instead reaches the walker as
 	// its clip RADIUS (the arg-slot reuse witnessed at the @ 0x53b166 push),
@@ -579,7 +579,7 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
 			// The walker's exclusion set is ctx[17..20]: the query entity, the
 			// endpoint entity and both parent slots. The endpoint skip is
 			// unconditional: a USE ray is never blocked by the hull of the
-			// vehicle it targets [orig: raycast_against_entity_pool
+			// vehicle it targets [orig: Physics_RaycastAgainstEntityPool
 			// @0x538832..0x538859]. The EWeap clause @0x539B85..0x539B98 gates
 			// a candidate whose groundEntity (+0x28) IS the endpoint (the gun
 			// standing on it), which the ground skips below already cover.
@@ -607,8 +607,8 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
 bool CollisionWorld::candidate_segment_hits_solid(
         World &world, EntityHandle source, const int32_t a[3],
         const int32_t b[3], int32_t radius) {
-    // [orig: raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 1
-    // -> raycast_against_entity_pool @ 0x538720. entity_a and entity_b are both
+    // [orig: Physics_RaycastFindCollisionEntity @ 0x539a70 with allowAllTypes = 1
+    // -> Physics_RaycastAgainstEntityPool @ 0x538720. entity_a and entity_b are both
     // the local/query entity, and the walker consumes entity_a's fixed
     // +0x1BC/+0x1C0 slice in stored order.]
     int32_t slice_count = 0;
@@ -624,7 +624,7 @@ bool CollisionWorld::candidate_segment_hits_solid(
 
 // The candidate-walk skip gate shared by the sound and sun ray walkers:
 // the query entity itself, dead rows, flag-27 rows, and (because
-// raycast_find_collision_entity passes source as both exclusion entities) a
+// Physics_RaycastFindCollisionEntity passes source as both exclusion entities) a
 // direct child standing on the source are never blockers.
 static bool segment_candidate_skipped(World &world, EntityHandle candidate,
                                       EntityHandle source_registry_twin) {
@@ -765,7 +765,7 @@ int CollisionWorld::sun_visibility_blocked_rays(World &world, const Entity &e,
     // slice (statics, ineligible pool-1 rows, or the 16 sliceless
     // mission-start ticks) blocks nothing and keeps quality 4, which is exactly
     // retail's +0x1C0 == 0 skip. [orig: Entity_ComputeSunVisibility @ 0x5c6800
-    // — the +0x1C0 gate @ 0x5c6808; raycast_find_collision_entity @ 0x539a70 —
+    // — the +0x1C0 gate @ 0x5c6808; Physics_RaycastFindCollisionEntity @ 0x539a70 —
     // the entity_a[+0x1BC]/[+0x1C0] entry walk]
     int32_t slice_count = 0;
     const EntityHandle *slice = candidate_slice(e.handle, slice_count);

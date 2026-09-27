@@ -107,7 +107,7 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id,
 // (spawn_player publishes cached.local_player) takes retail's header-only 0x0A
 // — no priority build, no records, no terminator — which only the first case
 // pins [orig: Server_SendEntityStateToPlayer @0x517c1b;
-// serialize_entity_states_to_packet @0x50f07e] (D-NET-140 closed).
+// NetPacket_SerializeEntityStatesToPacket @0x50f07e] (D-NET-140 closed).
 bool run_fanout_and_per_connection_anchor() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
@@ -410,7 +410,7 @@ bool run_self_uplink_rejected() {
 //     DIFFERENT peer (spoofed or stale) is silently ignored — even though that handle resolves to a
 //     live, non-local entity — and the gate ADMITS the same connection's uplink for its own entity, so
 //     it discriminates by owner rather than rejecting unconditionally [orig:
-//     dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx`].
+//     NetPacket_DispatchEntityPacketCallback @0x4D6A80 `entity == *owner_ctx`].
 bool run_cross_peer_uplink_rejected() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
@@ -610,7 +610,7 @@ bool run_0a_subblock_phase_cycle() {
 	// With the pre-round countdown over and a configured game clock, phase 1
 	// projects whole seconds = ticks / 62 and the client fold restores ticks
 	// [orig: the /62 magic-multiply @0x4ffa97..0x4ffab3; the x62 restore
-	//  @0x430219..0x430235 — g_round_time_remaining].
+	//  @0x430219..0x430235 — g_RoundTimeRemaining].
 	world.preround_delay_seconds = 0;
 	{
 		opennova::world::MatchRules timed_rules;
@@ -788,7 +788,7 @@ bool run_0a_health_class_byte_packed() {
 }
 
 // (h) [D-NET-134 step 2] The 0x0A entity loop: pool-1 vehicles replicate as Vehicle compact
-//     records, the byte budget caps each frame [orig: g_entity_send_budget @0xC8FC50 = 600,
+//     records, the byte budget caps each frame [orig: g_EntitySendBudget @0xC8FC50 = 600,
 //     soft cap @0x50f34b], and AGING gives budget-starved entities the next frame's slots
 //     [orig: paddusb sweep @0x50e60f, age reset @0x50f168] — the original's round-robin has
 //     no cursor; it is emergent from the age term of the priority key.
@@ -1294,7 +1294,7 @@ bool run_0a_player_record_field_sources() {
 }
 
 // (i2) D-NET-156 — the deploy-screen hold: a respawn-pending connection's 0x0A header carries
-//      flags1 bit1 EVERY frame (the client's deploy screen is g_deploy_screen_active = (flags1 & 2) each
+//      flags1 bit1 EVERY frame (the client's deploy screen is g_DeployScreenActive = (flags1 & 2) each
 //      frame [orig: NetPacket_WritePlayerState @0x4ff7bd / NapiNPClientMsg_0x00A @0x42ff82]),
 //      and dropping the flag closes it. The recipient's own stance echoes in the tail state
 //      byte bits 0-1 [orig: tail read @0x4303e5 -> latches @0x430562/@0x430570].

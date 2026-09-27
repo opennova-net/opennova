@@ -39,8 +39,6 @@ struct EntityMarkerQuery {
 	float range_units = 0.0f;   // 0 = the selection alone
 	int32_t cap = 64;           // nearest first
 	uint16_t selected = EntityHandle::kInvalid;
-	bool skip_hidden = true;
-	bool skip_local_player = true;
 	bool with_brains = true;    // a joiner's tooling leaves the AI pool out
 };
 

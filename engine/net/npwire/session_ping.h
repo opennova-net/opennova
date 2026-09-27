@@ -60,10 +60,7 @@ inline std::vector<uint8_t> build_session_ping_body(uint32_t remote_key, bool wa
 	const uint8_t wr = wants_reply ? 1 : 0;
 	append_flat_tlv(body, "WR", &wr, 1);
 	uint8_t ms[4];
-	ms[0] = static_cast<uint8_t>(timestamp_ms & 0xFFu);
-	ms[1] = static_cast<uint8_t>((timestamp_ms >> 8) & 0xFFu);
-	ms[2] = static_cast<uint8_t>((timestamp_ms >> 16) & 0xFFu);
-	ms[3] = static_cast<uint8_t>((timestamp_ms >> 24) & 0xFFu);
+	io::write_u32_le(ms, timestamp_ms);
 	append_flat_tlv(body, "MS", ms, 4);
 	return body;
 }

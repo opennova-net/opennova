@@ -708,12 +708,12 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	// ADR 0011 Decision 1 (as amended, D-NET-140 closed): every authoritative live mission is an
 	// in-process listen server in standalone MainGame/GameWorld, and the listen host presents
 	// from its OWN pools — retail's local client reads process memory and its loopback 0x0A is
-	// header-only [orig: serialize_entity_states_to_packet @0x50f07e;
-	// collect_visible_entities_for_terrain @0x5c8c60]. A joiner renders the host's stream
+	// header-only [orig: NetPacket_SerializeEntityStatesToPacket @0x50f07e;
+	// Terrain_CollectVisibleEntitiesForTerrain @0x5c8c60]. A joiner renders the host's stream
 	// wire-direct from the state its ClientReplicaPipeline decoded (ClientState).
 	// Empty when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the
 	// AI pool for tooling.
-	if (!present_.snapshot || !present_.snapshot.unique())
+	if (!present_.snapshot || present_.snapshot.use_count() != 1)
 		present_.snapshot = std::make_shared<SimulationPresentSnapshot>();
 	auto &frame = *present_.snapshot;
 	frame.rows.clear();

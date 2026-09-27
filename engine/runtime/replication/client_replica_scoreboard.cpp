@@ -110,7 +110,7 @@ void ClientReplicaPipeline::apply_player_list(const std::vector<uint8_t> &body) 
 		}
 		sb.rows.push_back(std::move(row));
 	}
-	sb.team_count = list.team_count;  // [orig: g_scoreboard_team_count @0x42fdda]
+	sb.team_count = list.team_count;  // [orig: g_ScoreboardTeamCount @0x42fdda]
 	sb.teams.clear();
 	sb.teams.reserve(list.teams.size());
 	for (const PlayerListTeamRow &t : list.teams) {

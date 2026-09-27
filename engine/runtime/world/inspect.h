@@ -226,8 +226,6 @@ struct AiDetail {
 	int32_t s38 = 0;
 	int32_t fires_aimed = 0;
 	int32_t fires_body = 0;
-	int32_t ground_cache = 0;
-	bool ground_valid = false;
 	bool airborne = false;
 	int32_t anim_state = -1;
 	std::string anim_key;

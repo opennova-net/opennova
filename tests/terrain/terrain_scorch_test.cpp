@@ -422,7 +422,7 @@ bool test_scorch_texture_rows_run_from_maximum_z() {
 // Scorch textures load with flags 0 (WRAP, LINEAR, MIPFILTER POINT), so a
 // record drawn at four texels per page pixel samples box level 2.
 // [orig: Terrain_LoadScorchTextures @ 0x604CE0 (Texture_LoadByNameWithChannel
-// flags @ 0x58B728); apply_texture_stages @ 0x68084C..0x680870]
+// flags @ 0x58B728); CGfxShader_ApplyTextureStages @ 0x68084C..0x680870]
 bool test_scorch_samples_the_nearest_box_level() {
 	const auto colormap = opennova::terrain::build_terrain_tile_quadrant_source(
 			solid(2, 2, {255, 255, 255, 255}));

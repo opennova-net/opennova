@@ -7,12 +7,12 @@ extends GameProbe
 ##                   line, custom text) held at a fixed progress for
 ##                   `hold_seconds`, captured, then the SP splash raised over
 ##                   the same mission and captured
-##                   [orig: render_loading_screen @ 0x521d10 /
+##                   [orig: Render_LoadingScreen @ 0x521d10 /
 ##                   LoadingScreen_UpdateAndPresent @ 0x586be0 /
-##                   show_start_mission_splash @ 0x520820]
+##                   Game_ShowStartMissionSplash @ 0x520820]
 ##   splash_capture  the splash over retail briefing art at both blink
 ##                   phases, then a synthesized key press and the dismissed
-##                   state [orig: show_start_mission_splash @ 0x520820]
+##                   state [orig: Game_ShowStartMissionSplash @ 0x520820]
 ## The mounted root (the launch's) must carry the mission's sidecar art; the
 ## shell's menu has registered gametext already. Needs a window.
 

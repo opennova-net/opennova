@@ -10,7 +10,9 @@
 #include <runtime/inmatch/role_feeds.h> // EntityLightingFeed
 
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
 #include <runtime/world/death_piece_draw.h> // DeathPieceDraw
@@ -27,6 +29,42 @@ struct SimulationPresentSnapshot {
 	std::vector<float> rows;
 	opennova::inmatch::DoorPhaseTable door_phases;
 	uint64_t layout_revision = 0;
+};
+
+// The weapon Inset pass's own collector (Simulation::run_inset_occlusion):
+// retail's Inset scene core re-runs Terrain_CollectVisibleEntities over the
+// Inset camera after the main scene's (engine: world/occlusion.h
+// OcclusionView). The request is the Inset camera plus the frame's shared
+// fog, water and forced-indoors terms, in run_occlusion_frame's units.
+struct InsetOcclusionRequest {
+	Transform3D camera;
+	double fov_y_deg = 70.0;
+	double aspect = 1.0;
+	double viewport_width = 0.0;
+	double fog_dist_units = 1000.0;
+	double water_z_units = -100000.0;
+	bool force_indoors = false;
+};
+
+// One Inset collect's verdicts: the same walk as the main view's (placed
+// non-building entities, decoded wire rows, the local player), then the
+// changes against what the shell last applied, in the main view's forms
+// (get_building_visibility_changes triples, get_render_culled_changes
+// deltas). The MODEL-tier anchors are the Inset collect's own.
+struct InsetOcclusionView {
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	PackedVector3Array foliage_mask_anchors;
+	// The death pieces the Inset collect draws (DeathPiece_CollectVisible runs
+	// inside every collect) and the Inset pass's g_BlinkWaterVisible.
+	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
+	bool water_visible = false;
+	PackedInt64Array building_changes;
+	PackedInt32Array culled_changes;
+	PackedInt32Array culled_wire_changes;
+	std::unordered_map<uint32_t, int64_t> building_last;
+	std::vector<int32_t> culled_last;
+	std::vector<int32_t> culled_wire_last;
 };
 
 struct SimulationPresentState {
@@ -119,6 +157,8 @@ struct SimulationPresentState {
 	// (OcclusionWorld::build_frame) and the per-entity render-gate probe loop.
 	uint64_t last_occlusion_build_us = 0;
 	uint64_t last_occlusion_probe_us = 0;
+	// The weapon Inset view's collect and its applied baselines.
+	InsetOcclusionView inset_occlusion;
 };
 
 } // namespace godot

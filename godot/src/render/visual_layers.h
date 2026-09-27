@@ -43,6 +43,27 @@ enum : uint32_t {
 	// excludes it above and below water (docs/terrain/terrain-re.md,
 	// "Empty-sector flat fallback", the view +100 witnesses).
 	TERRAIN_FLAT_FALLBACK = 1u << 18,
+	// The per-view world bits, code-only (outside the 20 editor layers; the
+	// scene culler tests all 32 bits of camera mask & instance mask). Retail
+	// runs the collector, the section masks, the sub-pixel floor and the RLOD
+	// walk once per scene pass, so the weapon Inset pass can draw an entity at
+	// another level, other sections or at all where the main view does not.
+	// Where the two views' verdicts differ, the entity's node draws the main
+	// view's with WORLD / WORLD_NO_MIRROR swapped for MAIN_VIEW /
+	// MAIN_VIEW_NO_MIRROR (the beauty camera and the mirror keep it: the
+	// mirror is the main view's reflection) and a twin instance draws the
+	// Inset's on INSET_VIEW, the one bit only the Inset camera admits. Equal
+	// verdicts keep the one node on the world bits (object/object_model.h,
+	// mission/mission_object_placer.h).
+	MAIN_VIEW = 1u << 20,
+	INSET_VIEW = 1u << 21,
+	MAIN_VIEW_NO_MIRROR = 1u << 22,
+	// The water strip drawn by the main view alone: the mirror never draws
+	// the water surface above or below the plane (its masks omit WATER),
+	// where MAIN_VIEW_NO_MIRROR returns below it, so the strip's main-only
+	// state takes a bit no mirror mask carries (env/water.h
+	// set_blink_water_views).
+	MAIN_VIEW_WATER = 1u << 23,
 	SHADOW_CASTER_MASK = STATIC_SHADOW_CASTER | DYNAMIC_SHADOW_CASTER,
 	// The mirror camera's above-water mask; a below-water view adds
 	// WORLD_NO_MIRROR back (retail collects unfiltered there). The mirror is
@@ -50,16 +71,24 @@ enum : uint32_t {
 	// water surface), which is how the object and terrain shaders recognise
 	// the reflected pass (its clip and fog block). The render-slot captures
 	// draw through SlotShadow's RenderingDevice pass and reserve no visual
-	// layer.
-	REFLECTION_CULL_MASK = 0xFFFFFu &
+	// layer. The mirror reflects the main view, so it admits MAIN_VIEW (and
+	// its below-water mask adds MAIN_VIEW_NO_MIRROR beside WORLD_NO_MIRROR).
+	REFLECTION_CULL_MASK = (0xFFFFFu &
 			~(WATER | VIEWMODEL | FP_BODY_SHADOW_ONLY | SHADOW_CASTER_MASK |
-					WORLD_NO_MIRROR | TERRAIN_FOLIAGE | TERRAIN_FLAT_FALLBACK),
+					WORLD_NO_MIRROR | TERRAIN_FOLIAGE | TERRAIN_FLAT_FALLBACK)) |
+			MAIN_VIEW,
 	// What a second view of the beauty scene (the weapon Inset pass) takes out
 	// of the gameplay camera's mask: the first-person viewmodel, which retail
 	// draws in the main frame's viewmodel-first step and never inside the
 	// inset's own terrain/sky/scene pass, plus -- as for the mirror -- the
-	// layer-hidden first-person body and the caster markers.
-	SECOND_SCENE_VIEW_EXCLUDED = VIEWMODEL | FP_BODY_SHADOW_ONLY | SHADOW_CASTER_MASK,
+	// layer-hidden first-person body and the caster markers, and the main
+	// view's own world bits (the Inset camera adds INSET_VIEW instead). The
+	// main view's foliage and flat-fallback terrain leave too: the Inset pass
+	// compiles its own foliage and terrain, drawn on INSET_VIEW
+	// (terrain/foliage_dispatcher and terrain/terrain render_inset_frame).
+	SECOND_SCENE_VIEW_EXCLUDED = VIEWMODEL | FP_BODY_SHADOW_ONLY | SHADOW_CASTER_MASK |
+			MAIN_VIEW | MAIN_VIEW_NO_MIRROR | MAIN_VIEW_WATER | TERRAIN_FOLIAGE |
+			TERRAIN_FLAT_FALLBACK,
 };
 } // namespace visual_layers
 

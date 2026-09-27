@@ -284,7 +284,7 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 
 	# v4's medic bit: a LOCAL-TEAM medic's marker is the red-cross plate IN
 	# PLACE of its blip — three overlay quads (six tris), no sprite
-	# [orig: draw_entity_labels_and_markers @0x5a49e0 — the cross
+	# [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 — the cross
 	#  @0x5a4cd6..0x5a4d48 replacing the blip].
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
@@ -586,7 +586,7 @@ func test_friendly_tag_mode_clamps() -> void:
 
 # The end-of-round overlay element: the resolved Impact38 ladder centred on x
 # 512 inside the safe-area stdbox; hidden draws nothing.
-# [orig: draw_endround_stats_overlay @0x5b7cd0]
+# [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0]
 func test_end_round_overlay_draws_the_ladder() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"fonthud1_hi Gunpl22b.fnt",

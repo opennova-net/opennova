@@ -30,28 +30,28 @@ struct WeatherState;
 // the BMS clock, in native units. Built by env::weather_seed_from_config (the
 // ONE derivation every embedder runs), applied by WeatherState::seed.
 struct WeatherSeed {
-    int32_t fog_level_q16 = 1024 << 16;      // Env_FogDistTarget/Current @ 0x26c6820/0x26c681c
+    int32_t fog_level_q16 = 1024 << 16;      // g_EnvFogDistTarget/Current @ 0x26c6820/0x26c681c
     int32_t sky_height_q16 = 175 << 16;      // Env_SkyHeightTarget @ 0x26c685c
-    uint32_t cloud_scroll_rate_target = 0;   // Env_CloudScrollRateTarget (sky_speed << 10)
-    uint32_t tod_fixed24 = 12u << 24;        // Env_CurTimeFixed24 (BMS start_time << 16)
-    uint32_t tod_advance_per_tick = 0;       // Env_TodAdvancePerTick
-    bool tod_keyframed = false;             // Env_EnvSnapshotCount != 0
-    int32_t fog_type = 1;                    // Env_FogType @ 0x26c6808
-    uint32_t lightning_color = 0x00FFFFFFu;  // Env_LightningColor @ 0x26c646c (.env lightning_rgb)
-    int32_t wind_scale = 256;                // Env_WindScale @ 0x26c68c0 (Environment_InitDefaults @ 0x57c1d1)
+    uint32_t cloud_scroll_rate_target = 0;   // g_EnvCloudScrollRateTarget (sky_speed << 10)
+    uint32_t tod_fixed24 = 12u << 24;        // g_EnvCurTimeFixed24 (BMS start_time << 16)
+    uint32_t tod_advance_per_tick = 0;       // g_EnvTodAdvancePerTick
+    bool tod_keyframed = false;             // g_EnvEnvSnapshotCount != 0
+    int32_t fog_type = 1;                    // g_EnvFogType @ 0x26c6808
+    uint32_t lightning_color = 0x00FFFFFFu;  // g_EnvLightningColor @ 0x26c646c (.env lightning_rgb)
+    int32_t wind_scale = 256;                // g_EnvWindScale @ 0x26c68c0 (Environment_InitDefaults @ 0x57c1d1)
 };
 
 // One decoded S2C 0x0A phase-2 ENV sub-block in WIRE units (the client
 // writes these into the TARGET globals; the local currents keep chasing)
 // [orig: NapiNPClientMsg_0x00A case 2 @ 0x430244..0x43034c].
 struct WeatherWireSample {
-    int fog_dist = 0;           // u16, whole metres -> Env_FogDistTarget << 16
-    int fog_accel = 0;          // u16 8.8 -> Env_FogDistAccelClamp << 8
-    int tod_fixed = 0;          // u16 -> Env_CurTimeFixed24 << 13
+    int fog_dist = 0;           // u16, whole metres -> g_EnvFogDistTarget << 16
+    int fog_accel = 0;          // u16 8.8 -> g_EnvFogDistAccelClamp << 8
+    int tod_fixed = 0;          // u16 -> g_EnvCurTimeFixed24 << 13
     int quake_ticks = 0;        // u8
-    int cloud_scroll = 0;       // u8 -> Env_CloudScrollRateTarget << 10
-    int rain_pct = 0;           // u8 8.8 -> Env_RainPctTarget << 8
-    int overcast = 0;           // u8 8.8 -> Env_OvercastBlendTarget << 8
+    int cloud_scroll = 0;       // u8 -> g_EnvCloudScrollRateTarget << 10
+    int rain_pct = 0;           // u8 8.8 -> g_EnvRainPctTarget << 8
+    int overcast = 0;           // u8 8.8 -> g_EnvOvercastBlendTarget << 8
     int precipitation_kind = 0; // u8 (0 rain, 1 snow)
 };
 
@@ -93,7 +93,7 @@ class IWeatherRenderTick {
 public:
     virtual ~IWeatherRenderTick() = default;
     virtual void weather_render_tick(WeatherState &weather) = 0;
-    // Whether the mission carries a TOD keyframe table (Env_EnvSnapshotCount
+    // Whether the mission carries a TOD keyframe table (g_EnvEnvSnapshotCount
     // != 0): the TOD compute then re-snaps the keyframed blocks every tick
     // and the WAC sun/sky/ground/fogcolor/skyfogcolor handlers are inert —
     // what the dev tools show as read-only rows.
@@ -115,30 +115,30 @@ struct WeatherState {
     uint32_t generation = 0;          // bumped on every mutation (commands and ticks)
     uint32_t command_generation = 0;  // bumped by commands only
 
-    // The mission clock [orig: Env_CurTimeFixed24 @ 0x26c6448 (8.24 hours),
-    // Env_TodAdvancePerTick @ 0x26c644c, Env_TodEpochTickdown @ 0x26c6064,
-    // Env_TodEpoch @ 0x26c6450].
+    // The mission clock [orig: g_EnvCurTimeFixed24 @ 0x26c6448 (8.24 hours),
+    // g_EnvTodAdvancePerTick @ 0x26c644c, g_EnvTodEpochTickdown @ 0x26c6064,
+    // g_EnvTodEpoch @ 0x26c6450].
     static constexpr uint32_t kTodDayFixed24 = 24u << 24;
-    static constexpr int32_t kTodMinuteTicks = 310;
+    static constexpr int32_t kTodEpochTicks = 310;
     // The 62 ticks-per-second scale every WAC seconds argument multiplies by
     // [orig: WacCmd_Rain @ 0x4edf60 `imul 62`; WacCmd_ColorFade @ 0x4edcb0].
     static constexpr int32_t kWacTicksPerSecond = 62;
     uint32_t tod_fixed24 = 12u << 24;
     uint32_t tod_advance_per_tick = 0;
-    int32_t tod_minute_tickdown = kTodMinuteTicks;
+    int32_t tod_epoch_tickdown = kTodEpochTicks;
     uint32_t tod_epoch = 0;
     // Script lvalue, preserved until a keyframed TOD computation writes 0/1.
     // [orig: WacCmd_Set @ 0x4ED520; Environment_ComputeTimeOfDayColors @ 0x57DE40]
-    int32_t night_phase = 0; // Env_IsNightPhase @ 0x26C645C
+    int32_t night_phase = 0; // g_EnvIsNightPhase @ 0x26C645C
     bool tod_keyframed = false;
     void compute_night_phase();
 
-    uint32_t quake_ticks = 0;              // Env_QuakeTicks @ 0x26c68ac
-    uint32_t cloud_scroll_rate_target = 0; // Env_CloudScrollRateTarget @ 0x26c6870
-    uint32_t precipitation_kind = 0;       // Env_PrecipitationKind (ex dword_2C059D0)
-    int32_t fog_type = 1;                  // Env_FogType @ 0x26c6808
-    int32_t fog_reference_q16 = 1024 << 16; // Env_FogDistReference @ 0x26c68a8
-    uint32_t lightning_color = 0x00FFFFFFu; // Env_LightningColor @ 0x26c646c
+    uint32_t quake_ticks = 0;              // g_EnvQuakeTicks @ 0x26c68ac
+    uint32_t cloud_scroll_rate_target = 0; // g_EnvCloudScrollRateTarget @ 0x26c6870
+    uint32_t precipitation_kind = 0;       // g_EnvPrecipitationKind (ex dword_2C059D0)
+    int32_t fog_type = 1;                  // g_EnvFogType @ 0x26c6808
+    int32_t fog_reference_q16 = 1024 << 16; // g_EnvFogDistReference @ 0x26c68a8
+    uint32_t lightning_color = 0x00FFFFFFu; // g_EnvLightningColor @ 0x26c646c
     int32_t color_fade_ticks = 0;          // Env_ColorFadeTicks (ex frameCount @ 0xc60dd0)
     // The iris exposure re-target gate the render pass tests every frame: a
     // local player entity and the WAC `autogain` named value nonzero. The
@@ -146,7 +146,7 @@ struct WeatherState {
     // script pass; a home without a World keeps it open. Closed, the
     // modulator keeps chasing its last target.
     // [orig: Environment_ApplyFogAndAmbient @0x57E50B `mov eax,
-    //  g_local_player_entity` / `jz` @0x57E512, `cmp wac_var_autogain,0`
+    //  g_LocalPlayerEntity` / `jz` @0x57E512, `cmp g_WacVarAutoGain,0`
     //  @0x57E514 / `jz` @0x57E51B]
     bool iris_retarget_enabled = true;
     // The overcast blend the TOD color compute reads THIS tick — retail runs
@@ -170,11 +170,11 @@ struct WeatherState {
     int32_t sky_height_target_q16() const { return core.scalar_channels.sky_height_target_fp; }
     int32_t cloud_scroll_rate() const { return core.cloud_scroll.rate; }
     int32_t wind_scale() const { return core.oscillator.intensity; }
-    // Env_RainPctCurrent > 48 (the drop gate) [orig: @ 0x5de92e; @ 0x5dee48].
+    // g_EnvRainPctCurrent > 48 (the drop gate) [orig: @ 0x5de92e; @ 0x5dee48].
     bool raining() const { return core.scalar_channels.rain_pct_fp > env::PrecipitationField::kRainGateQ16; }
     // The clock as HHMM (the TOD compute's parameter space).
     double tod_hhmm() const;
-    // Env_IsNightPhase — the 06:00/18:45 sun-vs-moon select over the clock
+    // g_EnvIsNightPhase — the 06:00/18:45 sun-vs-moon select over the clock
     // [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 ->
     //  Environment_GetLightDirectionFloat @ 0x57d870]; the `night` WAC value.
     bool is_night_phase() const;
@@ -222,7 +222,7 @@ struct WeatherState {
     void command_flash();                                       // [orig: Env_TriggerLightningFlashA @ 0x4ed500]
     void command_far_flash();                                   // [orig: Env_TriggerLightningFlashB @ 0x4ed510]
     void command_block_color(WeatherColorTarget target, uint32_t rgb); // [orig: WacCmd_Sun.. @ 0x4edcd0..]
-    // Env_WindScale (the `wind` named value; retail's only writer is
+    // g_EnvWindScale (the `wind` named value; retail's only writer is
     // Environment_InitDefaults @ 0x57c1d1).
     void set_wind_scale(int32_t value);
 

@@ -42,12 +42,12 @@ struct ClientHello {
 	std::string pv3;  // Optional third version string
 	uint32_t ci = 0;  // Client/Connection Index
 	uint32_t pm = 0;  // transport player count; a NONZERO PM is also the host-side
-	                  // identity bypass (see client_hello_admits)
-	bool pm_present = false; // parse-side marker only: the tag was on the wire. The
-	                         // writer never emits a zero PM — retail writes the tag
-	                         // only for a non-enumerator transport with a nonzero
-	                         // count [orig: NapiNPSession_SendAnnouncePacket
-	                         // @0x61fa00 gates @0x61fcca / @0x61fcda]
+	                  // identity bypass (see client_hello_admits). An absent and a
+	                  // zero PM are the same state: the writer never emits a zero PM
+	                  // [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 gates
+	                  // @0x61fcca / @0x61fcda] and the reader keeps no presence
+	                  // marker [orig: NapiNPProtocol_HandleClientHello @0x6213B0 —
+	                  // PM dword @0x62173C, zero-initialised @0x621504]
 	uint32_t eip = 0; // External IP (as uint32, big-endian wire form per inet)
 	uint32_t epn = 0; // External Port Number
 	uint32_t et = 0;  // optional extra parameter
@@ -87,9 +87,6 @@ struct ServerHello {
 	std::string pv3 = "1.6.4r opennova";
 	uint32_t hk = 0x0FE0E112u; // host key (opaque to the client beyond echo in ClientJoin)
 	std::string sn = kServerHelloServerName;
-	std::string pl = "WIN32";  // parse-side only: NEVER written (no PL tag exists in the
-	                           // retail builder); kept so a stray PL from a foreign capture
-	                           // still decodes
 	// The locale block: CN (country name), LNG (language) and TZB (time-zone
 	// bias) are written together, unconditionally, when the protocol object's
 	// enable at +0xD48 is set; the two strings ship their NUL even when empty.
@@ -161,11 +158,12 @@ ServerHello build_server_hello(const ClientHello &client,
 std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg);
 
 // Parse a ServerHello TLV payload (the bytes AFTER the 0x81 opcode and
-// AFTER NWU-decryption). The client uses this to recover the server's host
-// key `hk` (which it must echo in ClientAuth.hk) plus the reflected
-// IP/port. Inverse of server_hello_to_bytes; ignores unknown tags and is
-// tolerant of either the matchmaking field set (with PL) or the
-// game-server set (SF/P1/P2/NP/MP + SUS1/SUS2). Returns true on success.
+// AFTER NWU-decryption) into a zeroed record: the tags are walked
+// case-insensitively, the walk stops at the first malformed or empty-named
+// tag and keeps what it gathered, and an absent tag reads as zero/empty.
+// There is one flat tag set, the writer's. Returns true when HK was seen
+// (the value the client echoes in ClientAuth).
+// [orig: Nwu_HandleServerHello @0x626d20]
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out);
 
 // ---- ClientAuth / ServerAuth (NP connection admission) -----------------
@@ -186,9 +184,10 @@ struct ClientAuth {
 	// unless NVS == the Milota string && PN == proto+220 && PG == proto+284
 	// (16 B) && PV1 == proto+300; its is_server branch additionally rejects
 	// unless PV2 == proto+364 ("1"). Retail's own 0x42 builder
-	// (CNapiNPConnection_SendClientJoin @ 0x61fe20 — a Kong misnomer; the
-	// packet type is 0x42='B', not 0x41) emits this whole identity block
-	// ahead of the auth fields, with the same values as the ClientHello.
+	// (CNapiNPConnection_SendClientJoin @ 0x61fe20, renamed from the Kong
+	// misnomer SendClientHello; the packet type is 0x42='B', not 0x41) emits
+	// this whole identity block ahead of the auth fields, with the same
+	// values as the ClientHello.
 	// [orig: gate @ 0x62b750, builder @ 0x61fe20, identity @ 0x4d3be0]
 	std::string nvs;  // NAPI version string (== Milota @ 0x7DFCF0; gate-checked)
 	std::string co;   // Company (parsed, never validated — free)
@@ -214,7 +213,7 @@ struct ClientAuth {
 bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 
 // Serialize a ClientAuth to flat-TLV bytes (inverse of parse_client_auth).
-// Field order mirrors retail's 0x42 builder NapiNPConnection_SendClientHello
+// Field order mirrors retail's 0x42 builder CNapiNPConnection_SendClientJoin
 // @ 0x61fe20: the identity block NVS/CO/AP/BDAT/PN/PG/PV1/PV2 FIRST, then
 // CI/HK/CK/NA/PW, SIP/SPN (each omitted when 0, as retail does), the CU blobs,
 // and SCRK last. The identity block is MANDATORY: the real NovaWorld server
@@ -231,7 +230,7 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);
 // tears the active connection down) or, mid-connect, a pending-disconnect latch.
 // [orig: builder NapiNPDataTransfer_SendDescription @0x628c80 ->
 //  NapiNPMessage_Create(msg_id 3, msg_class 1) @0x627fc0; receiver
-//  CNapiNPConnection_HandleDescriptionPacket @0x621ae0 (g_np_msginfo_highbit @0x849e80 row 3),
+//  CNapiNPConnection_HandleDescriptionPacket @0x621ae0 (g_NPMsgInfoHighBit @0x849e80 row 3),
 //  TLV walk @0x621b8c..0x621c7d, terminal state @0x621d53..0x621d6b]
 // The tag constant PROTOCOL_TAG_CONNECTION_DESCRIPTION lives in
 // npwire/protocol_message.h (the full_tag/high-bit home); only the TLV body
@@ -297,8 +296,11 @@ std::vector<uint8_t> disconnect_packet_body_to_bytes(uint32_t peer_key,
 // record (a user leave latches {2, 2, 0, 0, "I.C:CIDEMIS", 0, ""}; a host punt/goodbye is echoed).
 std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key,
 		const DisconnectEvent &event);
-// The zero-record form: only the NOVAWORLDUDP lobby ClientSession, whose leave record is
-// unwitnessed, still ships all-zero stats with empty strings.
+// The zero-record form: the NOVAWORLDUDP lobby ClientSession, whose user leave latches nothing
+// (the zero record), ships all-zero stats with empty strings.
+// [orig: CNapiGameSession_ResetToDisconnected @0x4D0890 -> CNapiNPConnection_RequestDisconnect
+//  @0x61E0F0 (no latch) -> CNapiNPConnection_Destroy @0x62A4B0 -> TeardownActiveConnection
+//  @0x6253C0 -> SendDisconnectPacket @0x61F2A0 (writes disconnect_event unconditionally)]
 std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key);
 
 // S2C 0x86 ServerGoodBye: `client_ck` = the departing client's CK (its local key), `event` =
@@ -360,8 +362,8 @@ bool client_hello_admits(const ClientHello &hello);
 // NovaLogic NW (see docs/net §8 NW-S3).
 //
 // Wire shape of one CU chunk's value (the inner bytes after the "CU" flat-TLV
-// name+size), mirroring NapiNPChunk_Create @ 0x624720 + SendClientHello's
-// writer: [type:1B][name + NUL][LE16 data_len][value + NUL], where
+// name+size), mirroring NapiNPChunk_Create @ 0x624720 + the
+// CNapiNPConnection_SendClientJoin writer: [type:1B][name + NUL][LE16 data_len][value + NUL], where
 // data_len = value.size()+1 (retail stores strlen(value)+1). `type` is 1 or 2
 // (the only values HandleClientJoin @ 0x62B750's CU loop accepts).
 std::vector<uint8_t> make_client_cu_chunk(uint8_t type, std::string_view name,
@@ -373,12 +375,13 @@ bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
                            std::string &out_name, std::string &out_value);
 
 // Control-setting entry — (direction_byte, field_index, uint32 value).
-// CLIENT_* direction=1, SERVER_* direction=0. TWO templates exist, identical across their own two
-// directions: the NOVAWORLDUDP SERVICE protocol's {0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,
-// 8:2048,9:128,10:100,11:500,12:1,13:1300(MTU),14:0xFFFFFFFF} (the `default_*` pair; [orig:
+// CLIENT_* direction=1, SERVER_* direction=0. TWO templates exist, each identical across its own
+// two directions, so ServerAuth.client_cs and .server_cs take the same list: the NOVAWORLDUDP
+// SERVICE protocol's {0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,8:2048,9:128,10:100,11:500,12:1,
+// 13:1300(MTU),14:0xFFFFFFFF} (novaworld_service_cs_fields; [orig:
 // CNapiGameSession_InitNPConnection @0x4d3e1f]) and the JOINTOPERATIONS in-game protocol's
 // {0:120000,1:4,4:30000,5:10000,6:0xFFFFFFFF,8:512,9:256,10:100,11:1200,12:1,13:1300,
-// 14:0xFFFFFFFF} (the `jointoperations_*` pair; [orig: CNapiNetwork_Init @0x4ca4a0]); idx 2/3/7
+// 14:0xFFFFFFFF} (jointoperations_cs_fields; [orig: CNapiNetwork_Init @0x4ca4a0]); idx 2/3/7
 // = 0. A GAME host's 0x82 carries the latter [orig: CNapiNPConnection_Create @0x62acb0 copies
 // the protocol object's +0xE44/+0xE80 blocks; CNapiNPConnection_SendSessionInit @0x620ef0].
 struct CsField {
@@ -386,22 +389,21 @@ struct CsField {
 	uint32_t value;
 };
 // Field 13 (the datagram ceiling) is the one configured entry: both templates derive it from the
-// game.cfg `mpmaxpacketsize` value — 0 -> 1300, below 100 -> 100, above the ceiling -> the
-// ceiling — and the ceiling differs per template: 0x4000 for the JOINTOPERATIONS game session,
-// 0x10000 for the NOVAWORLDUDP service. `max_packet_bytes` is that configured value; 0 (the
-// default, and the unconfigured game.cfg) yields the 1300 every existing caller relied on.
-// [orig: CNapiNetwork_Init @0x4ca4a0 clamp @0x4caa53..0x4caa76 (0x4000);
-//  CNapiGameSession_InitNPConnection @0x4d3be0 clamp @0x4d3df4..0x4d3e17 (0x10000);
-//  source g_GameConfigState.maxPacketSize_338, game.cfg key `mpmaxpacketsize`]
-inline constexpr uint32_t kCsMaxPacketDefault = 1300u;
-inline constexpr uint32_t kCsMaxPacketFloor = 100u;
-inline constexpr uint32_t kCsMaxPacketCeilingGame = 0x4000u;
-inline constexpr uint32_t kCsMaxPacketCeilingService = 0x10000u;
-uint32_t cs_max_packet_bytes(uint32_t configured, uint32_t ceiling);
-std::vector<CsField> default_client_cs_fields(uint32_t max_packet_bytes = 0);          // NOVAWORLDUDP service
-std::vector<CsField> default_server_cs_fields(uint32_t max_packet_bytes = 0);          // NOVAWORLDUDP service
-std::vector<CsField> jointoperations_client_cs_fields(uint32_t max_packet_bytes = 0);  // the in-game session
-std::vector<CsField> jointoperations_server_cs_fields(uint32_t max_packet_bytes = 0);  // the in-game session
+// game.cfg `mpmaxpacketsize` value through the same SIGNED ladder — 0 -> 1300, below 100 (a
+// negative value included) -> 100, above the ceiling -> the ceiling — and the ceiling differs per
+// template: 0x4000 for the JOINTOPERATIONS game session, 0x10000 for the NOVAWORLDUDP service.
+// `max_packet_bytes` is that configured value; 0 (the default) yields 1300.
+// [orig: CNapiNetwork_Init @0x4ca4a0 clamp @0x4caa53..0x4caa76 (`jge` @0x4caa66, `jle`
+//  @0x4caa74, 0x4000); CNapiGameSession_InitNPConnection @0x4d3be0 clamp @0x4d3df4..0x4d3e17
+//  (`jge` @0x4d3e07, `jle` @0x4d3e15, 0x10000); source g_GameConfigState.maxPacketSize_338,
+//  game.cfg key `mpmaxpacketsize`]
+inline constexpr int32_t kCsMaxPacketDefault = 1300;
+inline constexpr int32_t kCsMaxPacketFloor = 100;
+inline constexpr int32_t kCsMaxPacketCeilingGame = 0x4000;
+inline constexpr int32_t kCsMaxPacketCeilingService = 0x10000;
+uint32_t cs_max_packet_bytes(int32_t configured, int32_t ceiling);
+std::vector<CsField> novaworld_service_cs_fields(int32_t max_packet_bytes = 0); // NOVAWORLDUDP service
+std::vector<CsField> jointoperations_cs_fields(int32_t max_packet_bytes = 0);   // the in-game session
 
 struct ServerAuth {
 	uint32_t ci = 0;      // echo client.ci

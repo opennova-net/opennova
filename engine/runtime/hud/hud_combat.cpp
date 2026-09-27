@@ -25,7 +25,7 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 	constexpr uint32_t warning = uint32_t(-44976), aim_color = uint32_t(-8347393);
 	// Every cue here draws with clipToScreen: a quad that would cross a design
 	// edge is slid fully back on-screen and recoloured auxiliaryColors[1].
-	// [orig: draw_textured_quad_centered @0x5909E0 -- gate @0x590A37, left
+	// [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- gate @0x590A37, left
 	//  @0x590A45..0x590A5F, right @0x590A70..0x590A87, top @0x590A8B..0x590AA9,
 	//  bottom @0x590AB4..0x590ACB]
 	constexpr uint32_t edge_color = uint32_t(-32736);
@@ -173,7 +173,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 		sprite(l.vehicle, l.icon_x, l.icon_y, kHudTexVehicleStatus, tint());
 		// The gear label rides the LARGE slot (Impac22b), left-aligned at the
 		// scaled design anchor.
-		// [orig: hud_draw_target_entity_overlay -- anchor @0x59A6C1..0x59A6E6,
+		// [orig: HUD_DrawTargetEntityOverlay -- anchor @0x59A6C1..0x59A6E6,
 		//  slot 0xB4C3A0 @0x59A6F9, HUD_DrawTextLeft_HalfBright @0x59A6FE]
 		emit_slot_text(label_font_large_, label_large_scale_,
 				c.gear_text[std::clamp(c.gear, 0, 2)].c_str(), sx(float(l.gear_x), w),
@@ -219,7 +219,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 	// This rectangle is a colour-target CLEAR, not the readout's wire outline:
 	// a device clear ignores the authored alpha (stock AGLCOLOR carries 0x41) and
 	// writes the colour opaque.
-	// [orig: sub_5D48E0 @0x5D48E0 -> CGfxTextOverlay_Draw(rect, 1) @0x5D493D ->
+	// [orig: sub_5D48E0 @0x5D48E0 -> CGfxDevice_Clear(rect, 1) @0x5D493D ->
 	//  the device vtbl+0xAC clear @0x67719B]
 	emit_rect(sx(float(l.agl_left), w), float(marker - bar_height), float(right), float(marker),
 			l.agl_color | 0xFF000000u, true);

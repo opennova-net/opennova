@@ -7,7 +7,7 @@
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/world.h>
 namespace opennova::world {
-// [orig: draw_weapon_sight_crosshair @0x59ECA0; HUD_draw_crosshair @0x59EA20]
+// [orig: HUD_DrawWeaponSightCrosshair @0x59ECA0; HUD_DrawCrosshair_0 @0x59EA20]
 void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlayerViewFrame &view) {
 	auto &v = view.hud_combat;
 	auto &s = v.state;

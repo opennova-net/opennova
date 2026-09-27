@@ -67,7 +67,7 @@ func _body_materials(body: Node) -> Array[ShaderMaterial]:
 
 
 func test_bodies_draw_their_authored_material_through_the_sky_hook() -> void:
-	# Retail renders every body through its own material (render_celestial_bodies
+	# Retail renders every body through its own material (Render_CelestialBodies
 	# @ 0x5acaa0 submits the model; celestial_frame.h): the ObjectModel's
 	# surface materials stay, taking only the sky placement hook.
 	var fixture := _make_fixture("", SKY_BODY_NAME)
@@ -107,6 +107,53 @@ func test_bodies_draw_their_authored_material_through_the_sky_hook() -> void:
 				"the mirror's base pass never submits the glow")
 		assert_eq(material.render_priority, ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE,
 				"the overlay stage draws the glow; its mesh keeps the default rung")
+
+
+func test_view_aligned_bodies_turn_with_the_camera() -> void:
+	# Every stock body's parts pose view-aligned (PANM rotation type 3): retail
+	# copies the pass camera's inverse view rotation into each part, so the
+	# quads face the camera at any view (celestial_frame.h). The body turns
+	# with the camera: render +X/+Y/+Z (imported as -X/+Y/+Z) land on the
+	# camera's right/up/forward. A model with a static part keeps the identity
+	# render rotation, the +90 degree yaw, whatever the view.
+	var identity_render := Basis(Vector3.UP, PI * 0.5)
+	var eps := Vector3.ONE * 1.0e-4
+	var fixture := _make_fixture("", "panm_live_02_view3.3di")
+	var celestial: Celestial = fixture.celestial
+	var camera: Camera3D = fixture.camera
+	var sun := celestial.get_node_or_null("Celestial_sun") as ObjectModel
+	assert_not_null(sun, "the one-part view-aligned shed loads as the sun")
+	if sun == null:
+		return
+	camera.look_at(camera.global_position + Vector3.RIGHT, Vector3.UP)
+	celestial.advance_frame(TICK)
+	assert_almost_eq(sun.global_basis.x, identity_render.x, eps,
+			"a level camera looking east is the build's reference turn")
+	assert_almost_eq(sun.global_basis.z, identity_render.z, eps)
+	camera.look_at(camera.global_position + Vector3(-0.6, 0.5, -0.62), Vector3.UP)
+	celestial.advance_frame(TICK)
+	var body := sun.global_basis
+	var view := camera.global_basis
+	assert_almost_eq(body * Vector3.LEFT, view.x, eps, "render +X lands on the camera's right")
+	assert_almost_eq(body * Vector3.UP, view.y, eps, "render +Y lands on the camera's up")
+	assert_almost_eq(body * Vector3.BACK, -view.z, eps, "render +Z looks along the view")
+
+
+func test_a_static_part_body_keeps_the_identity_render_rotation() -> void:
+	# The crate's one PANM row is inert (rotation type 0): no camera turn.
+	var identity_render := Basis(Vector3.UP, PI * 0.5)
+	var eps := Vector3.ONE * 1.0e-4
+	var fixture := _make_fixture("", MODEL_NAME)
+	var camera: Camera3D = fixture.camera
+	var crate := (fixture.celestial as Celestial).get_node_or_null("Celestial_sun") as ObjectModel
+	assert_not_null(crate)
+	if crate == null:
+		return
+	camera.look_at(camera.global_position + Vector3(-0.6, 0.5, -0.62), Vector3.UP)
+	(fixture.celestial as Celestial).advance_frame(TICK)
+	assert_almost_eq(crate.global_basis.x, identity_render.x, eps,
+			"a static-part body keeps the identity render rotation")
+	assert_almost_eq(crate.global_basis.z, identity_render.z, eps)
 
 
 func test_a_rebuilt_body_scene_rebinds_the_sky_hook() -> void:
@@ -151,11 +198,11 @@ func test_upl_intensity_drives_the_authored_self_lum() -> void:
 
 
 func test_each_disc_keeps_its_own_alpha_through_the_shared_flush() -> void:
-	# render_celestial_bodies writes the sun alpha, submits the sun, writes the
+	# Render_CelestialBodies writes the sun alpha, submits the sun, writes the
 	# moon alpha, submits the moon and flushes ONCE [orig: @ 0x5acbfa,
 	# @ 0x5acc1c, @ 0x5accc1, @ 0x5accdd, @ 0x5acce9], but each submit
 	# snapshots its material's registers and the flush restores them before
-	# that batch's RgbGen [orig: collect_render_objects_for_batch
+	# that batch's RgbGen [orig: Render_CollectRenderObjectsForBatch
 	# @ 0x5d91c0..0x5d91de; CRenderBatchQueue_FlushBatches
 	# @ 0x5da1d6..0x5da1fd]: the sun stays at its own 1.0 beside a moon at
 	# (700 - 400) / 600 = 0.5.
@@ -246,7 +293,7 @@ func test_additive_source_material_keeps_black_as_transparent_zero() -> void:
 
 func test_no_star_field_is_drawn() -> void:
 	# Retail loads the star 3DI but its only renderer has no caller in the
-	# image [orig: Star_RenderField_unused @ 0x5ad9c0]: a named star_3di draws nothing.
+	# image [orig: Star_RenderField_Unused @ 0x5ad9c0]: a named star_3di draws nothing.
 	var fixture := _make_fixture()
 	for child in fixture.celestial.get_children():
 		assert_false(child is MultiMeshInstance3D, "no star instances: %s" % child.name)
@@ -255,7 +302,7 @@ func test_no_star_field_is_drawn() -> void:
 
 func test_glare_submits_only_a_positive_alpha() -> void:
 	# The glow's beauty submit is skipped at a non-positive alpha
-	# [orig: render_skybox_sun_glow @ 0x5ad0ae]; the view dot is the MAIN
+	# [orig: Render_SkyboxSunGlow @ 0x5ad0ae]; the view dot is the MAIN
 	# camera's, folded on the CPU.
 	var fixture := _make_fixture("", SKY_BODY_NAME)
 	var celestial: Celestial = fixture.celestial
@@ -293,7 +340,7 @@ func test_glare_submits_only_a_positive_alpha() -> void:
 func test_settle_glare_occlusion_reaches_the_dead_band_hold() -> void:
 	# The capture-refresh seam (the D-RLIT-2 fixture starvation): the glare
 	# brightness steps +-16 per frame toward popcount * 32 * fog/1000 with a
-	# +-16 dead-band hold [orig: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f],
+	# +-16 dead-band hold [orig: Render_SkyboxSunGlow @ 0x5acdfb..0x5acf7f],
 	# so one zero-delta advance leaves a fresh accumulator dark. With no
 	# terrain loaded both jittered rays are clear every frame; the settle must
 	# fill the window (0xFF) and hold inside the dead-band around the
@@ -374,7 +421,7 @@ func test_sun_veil_publishes_the_dot32_alpha_global_when_facing_the_sun() -> voi
 
 
 func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
-	# The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130]: with
+	# The water-reflected sun glint [orig: Environment_UpdateSunGlare @ 0x5ad130]: with
 	# a water height authored and no terrain (every visibility ray clear),
 	# the settle must chase the glint accumulator to the full 4 * 64 and
 	# place the glare 3DI mirrored BELOW the eye (camera + sun * 128 with the
@@ -412,6 +459,74 @@ func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
 			"the glint places at camera + sun * 128 with the height negated")
 	var bodies: Dictionary = diag.get("bodies", {})
 	assert_gt(int((bodies.get("glint", {}) as Dictionary).get("upl", 0)), 0)
+
+
+func _glint_state(celestial: Celestial) -> Dictionary:
+	return celestial.get_diagnostics().get("water_glint", {}) as Dictionary
+
+
+# The weapon Inset pass calls the glint's leg again at its own camera, after
+# the main scene's call, on the one accumulator (engine
+# renderer/scene_overlay.h kInsetOverlayOrder carries the witness): the
+# counter steps twice a frame while it renders, the Inset's draw sits at its
+# own eye with its own view dot, and the body keeps its main placement.
+func test_the_inset_pass_calls_the_glint_leg_again_at_its_camera() -> void:
+	var fixture := _make_fixture()
+	var celestial: Celestial = fixture.celestial
+	var camera: Camera3D = fixture.camera
+	var env: MissionEnvironment = fixture.environment
+	var glint := celestial.get_node_or_null("Celestial_glint") as Node3D
+	assert_not_null(glint)
+	if glint == null:
+		return
+	env.environment_data.set_water_height(-200.0)
+	var sun_dir: Vector3 = env.get_sun_direction()
+	var mirrored := Vector3(sun_dir.x, -sun_dir.y, sun_dir.z)
+	var up := Vector3.RIGHT if absf(mirrored.y) > 0.9 else Vector3.UP
+	camera.look_at(camera.global_position + mirrored, up)
+	celestial.settle_glare_occlusion()
+	celestial.advance_frame(TICK)
+	var before := int(_glint_state(celestial).get("frame_index", 0))
+	celestial.advance_frame(TICK)
+	var state := _glint_state(celestial)
+	assert_eq(int(state.get("frame_index", 0)) - before, 1, "one scene pass, one call")
+	assert_false(bool(state.get("inset_drawn", true)), "no Inset pass, no Inset draw")
+	# The Inset pass renders from an eye beside the main one, facing away from
+	# the mirrored sun.
+	var inset := Camera3D.new()
+	add_child_autofree(inset)
+	inset.global_position = camera.global_position + Vector3(3.0, 0.0, 0.0)
+	inset.look_at(inset.global_position - mirrored, up)
+	celestial.set_inset_view(inset)
+	before = int(state.get("frame_index", 0))
+	celestial.advance_frame(TICK)
+	state = _glint_state(celestial)
+	assert_eq(int(state.get("frame_index", 0)) - before, 2,
+			"both passes call the leg on the one accumulator")
+	assert_eq(int(state.get("brightness", 0)), 256, "clear rays hold the settled brightness")
+	assert_true(bool(state.get("inset_drawn", false)), "the brightness draws the Inset's glint")
+	assert_true((state.get("inset_eye", Vector3.ZERO) as Vector3).is_equal_approx(
+			inset.global_position), "from the Inset's own eye")
+	assert_eq(int(state.get("inset_upl", -1)), 0,
+			"facing away, the Inset's view dot submits nothing")
+	var bodies: Dictionary = celestial.get_diagnostics().get("bodies", {})
+	assert_gt(int((bodies.get("glint", {}) as Dictionary).get("upl", 0)), 0,
+			"while the main view, facing it, still does")
+	assert_true(glint.global_position.is_equal_approx(camera.global_position + mirrored * 128.0),
+			"the body keeps the main pass's placement")
+	# The capture settle steps the calls the live frame makes, per frame.
+	before = int(_glint_state(celestial).get("frame_index", 0))
+	celestial.settle_glare_occlusion(1)
+	assert_eq(int(_glint_state(celestial).get("frame_index", 0)) - before, 2,
+			"one settled frame steps both passes' calls")
+	celestial.set_inset_view(null)
+	celestial.advance_frame(TICK)
+	assert_false(bool(_glint_state(celestial).get("inset_drawn", true)),
+			"the pass stops: no Inset call")
+	before = int(_glint_state(celestial).get("frame_index", 0))
+	celestial.settle_glare_occlusion(1)
+	assert_eq(int(_glint_state(celestial).get("frame_index", 0)) - before, 1,
+			"and the settle steps the main call alone")
 
 
 static func _collect_meshes(node: Node, out: Array[MeshInstance3D]) -> void:
@@ -524,7 +639,7 @@ func _q3_glare_peak(glare_name: String, occluder_distance: float = -1.0) -> Dict
 
 func test_q3_glow_blends_as_its_material_is_classified() -> void:
 	# The glow's submit flags (0x100 in the bloom pass, 0x110 in the beauty
-	# pass) never override the material blend [orig: render_skybox_sun_glow
+	# pass) never override the material blend [orig: Render_SkyboxSunGlow
 	# @ 0x5ad0f5..0x5ad0fe]: the bloom redraw of an FF_ST_AD_LUM glow adds its
 	# SelfLumColor, while an FF_ST_AB_LUM glow's SELFLUM alpha 0 leaves the
 	# Q3 target untouched under SRCALPHA / INVSRCALPHA.

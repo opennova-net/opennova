@@ -509,7 +509,7 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 func test_mission_end_screen_lose_form_and_exit() -> void:
 	# The MISSION FAILED form composes the failed line + the WAC Lose banner and
 	# exits over exit_requested [orig: the Cinematic_EpilogUpdate mode-2 leg; ESC ->
-	# g_mission_exit_reason=1].
+	# g_MissionExitReason=1].
 	var screen := MissionEndScreen.new()
 	add_child_autofree(screen)
 	watch_signals(screen)
@@ -526,7 +526,7 @@ func test_mission_end_screen_lose_form_and_exit() -> void:
 
 func test_mission_end_screen_win_form_counts() -> void:
 	# The win form's count lines follow the witnessed sums [orig:
-	# epilog_cinematic_state_machine_update @0x576240 case 4 — TEAMUNITS =
+	# Cine_EpilogStateMachineUpdate @0x576240 case 4 — TEAMUNITS =
 	# by-player + by-others, FRIENDLYUNITS likewise].
 	var screen := MissionEndScreen.new()
 	add_child_autofree(screen)

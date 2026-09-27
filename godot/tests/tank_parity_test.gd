@@ -66,12 +66,8 @@ func test_installed_tanks_seats_optics_and_hud() -> void:
 	if RetailData.install().is_empty():
 		pending("OPENNOVA_JO_DIR is required")
 		return
-	var root := ResourceRoot.new()
-	if "revx02" in RetailData.expansions():
-		assert_eq(root.mount_runtime(RetailData.install(), "revx02"), OK)
-	else:
-		root = RetailData.mount_install_with("07TR.bms")
-	assert_not_null(root)
+	var root := RetailData.mount_tank_training()
+	assert_not_null(root, "the installed base or an expansion must serve 07TR.bms")
 	if root == null:
 		return
 	var weapons := WeaponDatabase.new()
@@ -106,7 +102,7 @@ func test_installed_tanks_seats_optics_and_hud() -> void:
 			hull = sim.entity_card_by_net_id(placed_id)
 			var target := hull.get_mission_position() + seat.get_local().rotated(
 					Vector3(0, 0, 1), deg_to_rad(-hull.get_yaw_deg()))
-			MountLook.face(sim, target, target + Vector3(1, 0, 0))
+			MountLook.face(self, sim, target, target + Vector3(1, 0, 0))
 			if attempt == 0:
 				_advance(sim, 18)
 		var boarded := sim.local_player_toggle_mount()

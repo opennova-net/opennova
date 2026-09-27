@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -519,7 +520,7 @@ static void test_leaving_guard_plays_guard_leave() {
 // and aim headings. The route leg itself writes only the goal; a moving
 // selection's detour publishes the bearing. [orig: the entry local
 // @0x4BA9B4..0x4BA9BA; the restore @0x4BBE11..0x4BBE1E; the marker wait
-// @0x4BAD1E..0x4BAD48; the detour's +0x1A8 write ai_find_cover_position
+// @0x4BAD1E..0x4BAD48; the detour's +0x1A8 write AI_FindCoverPosition
 // @0x4AFF2C]
 static void test_guard_keeps_the_think_entry_heading() {
     {
@@ -991,6 +992,30 @@ static void test_scripted_idle_watches_the_local_player() {
     CHECK(r.blue().inf.path_state == 0);
 }
 
+// Every idle conversion is the CRT call, whose SSE2 leg turns a planar length
+// past int32 into 0x80000000; the pitch is solved over that value, not over a
+// wrapped low dword. [orig: _ftol2_sse @0x76BC00 (SSE2 leg @0x76BC15), called
+// @0x4BD09F (the planar length) and @0x4BD0B0 (the pitch)]
+static void test_scripted_idle_far_player_takes_the_sse2_indefinite() {
+    Rig r(fx(60), 0, 0);
+    const int32_t delta = 0x60000000; // dx = dy = 24576 u
+    const EntityHandle player = r.make(2, 1, delta, delta, fx(1));
+    r.w.cached.local_player = player;
+    r.blue().inf.combat_target = {};
+    r.blue().slot.f[3] = 0;
+    r.blue().inf.anim_state = 131;
+    r.think();
+    const double planar = std::sqrt(double(delta) * delta + double(delta) * delta);
+    CHECK(io::retail_ftol_sse2(planar) == INT32_MIN);
+    const int32_t pitch =
+            io::retail_ftol_sse2(std::atan2(double(fx(1)), -2147483648.0) * kBamPerRadian);
+    CHECK(r.blue().inf.aim_pitch == pitch);
+    // The inputs discriminate: the low-dword wrap would have solved over h - 2^32.
+    CHECK(pitch != chop(std::atan2(double(fx(1)), double(chop(planar))) * kBamPerRadian));
+    CHECK(r.blue().inf.aim_heading ==
+          io::retail_ftol_sse2(std::atan2(double(delta), double(delta)) * kBamPerRadian));
+}
+
 // A coward with no team scans as team 2: a team-1 body is its enemy and a
 // team-2 body its friend. [orig: Entity_UpdateInfantryAI @0x4BBEB5..0x4BBED8]
 static void test_teamless_coward_scans_as_team_two() {
@@ -1091,6 +1116,7 @@ int main() {
     test_swimming_selects_the_swim_clips();
     test_combat_approach_runs_as_run_attack();
     test_scripted_idle_watches_the_local_player();
+    test_scripted_idle_far_player_takes_the_sse2_indefinite();
     test_teamless_coward_scans_as_team_two();
     test_stop_is_arbitrated_raw();
     test_attachment_publishes_the_move_mode_and_consumes_the_hit();

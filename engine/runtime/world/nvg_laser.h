@@ -8,7 +8,7 @@
 //  dword_2984890, count dword_2984888) from Terrain_RenderWorldScene
 //  @ 0x5c9695 -> Entity_RenderNVGLaserBeam @ 0x5c6090 ->
 //  Render_DrawTrailOrBeamSegments @ 0x5dcb80 (style 8, the NVG laser block
-//  g_TracerStyle_NVGLaser); the draw is renderer::append_tracer_beam and the
+//  g_TracerStyleNVGLaser); the draw is renderer::append_tracer_beam and the
 //  overlay slot renderer::SceneOverlaySlot::NvgLaserBeams]
 #pragma once
 
@@ -37,7 +37,7 @@ inline constexpr int kNvgLaserMaxPoints = kNvgLaserMaxSamples + 2;
 // The draw gate of one person: not seat-mounted (entity+0x157, the attach
 // bone, zero), a held weapon definition (entity+0x298) whose flags carry
 // LaserBeam (def+8 & 0x40000000), the local player's night vision on
-// (g_NVGActive), the first-person camera (g_camera_mode 0), and not the local
+// (g_NVGActive), the first-person camera (g_CameraMode 0), and not the local
 // player itself. [orig: Entity_RenderNVGLaserBeam @ 0x5c609a..0x5c60e6]
 struct NvgLaserGate {
 	uint8_t attach_bone = 0;

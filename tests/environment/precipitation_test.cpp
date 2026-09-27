@@ -1,6 +1,6 @@
 // The precipitation drop pool [orig: Precipitation_SeedPool @ 0x5debb0;
 // Precipitation_Reset @ 0x5df3a0; Precipitation_FallTick @ 0x5de8f0;
-// update_weather_particle_positions @ 0x5dec40].
+// WeatherParticle_UpdatePositions @ 0x5dec40].
 
 #include <runtime/environment/precipitation.h>
 

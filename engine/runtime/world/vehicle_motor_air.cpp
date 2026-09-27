@@ -139,7 +139,13 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
     // [orig: the class-table dispatch -> Entity_UpdateAircraftPhysics @0x490310]
     const bool player_piloted =
             resolve_piloting_player(world, veh, traits) != nullptr;
-    if (!m.net_predicted && !ai_drive && !player_piloted) return;
+    // A row the guard skips still ran retail's mover to its matrix-build tail,
+    // which sets Flags 0x20000 (kEntityFlagMatrixBuilt, homed on engine_flags)
+    // [orig: @0x49275E, OR @0x492766].
+    if (!m.net_predicted && !ai_drive && !player_piloted) {
+        veh.engine_flags |= kEntityFlagMatrixBuilt;
+        return;
+    }
     if (!m.yaw_seeded) {
         // The entry copy reads the row's Yaw/Pitch/Roll as they stand: an
         // unmoved row's placement angles in the spawn form. A predicted row's
@@ -288,9 +294,11 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	}
 
 	// Dead hulls finish the carried/interpolated pose but skip their live
-	// controls, velocity and gear servos [orig: @0x490CD0 -> @0x49274C].
+	// controls, velocity and gear servos [orig: @0x490CD0 -> @0x49274C]; the
+	// tail still sets Flags 0x20000 [orig: @0x492766].
 	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
 		veh.position = { float(from_fixed(px)), float(from_fixed(py)), float(from_fixed(pz)) };
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
 		return;
 	}
 
@@ -318,7 +326,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	// machine adopts the received commands verbatim; the LOCAL PILOT'S
 	// machine runs the input block instead and reconciles BOTH air commands
 	// with the received mirrors — ([544]+[708])>>1 fwd, ([540]+[712])>>1
-	// lateral [orig: the occupantEntity == g_local_player_entity leg —
+	// lateral [orig: the occupantEntity == g_LocalPlayerEntity leg —
 	// `([2C4]+[220])>>1 -> [220]; ([2C8]+[21C])>>1 -> [21C]`
 	// @0x491546..0x491568; the input block is stage_air_vehicle_input above].
 	if (ai_drive) {
@@ -701,6 +709,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
             static_cast<double>(m.air_pitch_bam) * kDegreesPerBam));
     veh.roll = static_cast<int16_t>(std::lround(
             static_cast<double>(m.air_roll_bam) * kDegreesPerBam));
+    // The matrix-build tail sets Flags 0x20000 (kEntityFlagMatrixBuilt, homed on
+    // engine_flags) [orig: Entity_UpdateAircraftPhysics @0x49275E, OR @0x492766].
+    veh.engine_flags |= kEntityFlagMatrixBuilt;
 }
 
 } // namespace opennova::world

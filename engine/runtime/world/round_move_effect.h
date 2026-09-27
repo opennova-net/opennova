@@ -43,7 +43,7 @@ inline bool round_effect_clips_water(uint32_t ammo_flags) {
 
 // A `useownmove` round carrying ClipWaterFx whose z reaches the water plane
 // RELEASES its emitter instead of re-posing it [orig: @0x4EA01D..0x4EA036 —
-//  `z > Env_WaterHeightFixed` re-poses via CEffect_UpdateEmitterTransform
+//  `z > g_EnvWaterHeightFixed` re-poses via CEffect_UpdateEmitterTransform
 //  @0x4EA039, else ammo flags (+0x114) & 0x20000000 detaches via
 //  Entity_ReleaseEffectEmitter @0x4EA031; the ballistic leg's handle branch
 //  @0x4EA963..0x4EA96D only re-poses]. The release CLEARS the handle

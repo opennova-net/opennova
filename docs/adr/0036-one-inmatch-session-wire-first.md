@@ -105,6 +105,6 @@ that ownership invariant at compile time.
   `tests/netsim/two_peer_fanout_test.cpp` pin StartDelay as one explicit World
   phase: the 62-tick authority decrement and transition frame, frozen match
   clock, phase-0 `0x0A` low byte, retained client mirror, and C2S
-  drain-without-apply. The witnesses are `reset_round_counters @0x516C8D`,
+  drain-without-apply. The witnesses are `Server_ResetRoundCounters @0x516C8D`,
   `Server_TickUpdate @0x51D8BD/@0x51DC20..0x51DC33`, and
   `NetPacket_WritePlayerState @0x4FF82D`.

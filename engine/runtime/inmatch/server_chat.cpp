@@ -50,7 +50,7 @@ std::vector<uint8_t> chat_body(uint8_t sender_slot, int8_t channel,
 // The nearest type-2044 location marker whose radius contains the sender
 // (2-D distance), by the marker's spawn-order index [orig: @0x51394C..0x5139D9:
 // pool 3, def type 2044, sqrt(dx^2 + dy^2) < entity+0 (the marker bound),
-// nearest wins; the label is g_location_names[64 * entity+640]].
+// nearest wins; the label is g_LocationNames[64 * entity+640]].
 int nearest_location_index(const world::World &world, const world::Entity &sender) {
 	int best = -1;
 	int index = 0;
@@ -124,7 +124,10 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	const world::Entity *requester = world->registry.get(conn.link.owned_entity);
 	if (requester == nullptr || conn.link.downed_revive_seconds == 0u) return replies;
 	world->zones.spawn_waves.remove_player(conn.link.owned_entity);
-	const std::string message = format_medic_request(*format, requester->name);
+	// The name is the player record's own (+0x28), the string Server_PlayerAdd
+	// copies into the entity's Name (+0xF4). [orig: Server_BroadcastMedicRequest
+	//  `lea eax,[esi+28h]` @0x515417 -> sprintf @0x515421]
+	const std::string message = format_medic_request(*format, conn.reply.player_name);
 	if (!conn.link.auto_medic_enabled && !conn.link.medic_request_active) {
 		PlayerDownedState state;
 		state.entity_handle = conn.link.owned_entity.packed;
@@ -208,7 +211,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	const world::Entity *sender_entity = world.registry.get(sender.link.owned_entity);
 	if (sender_entity == nullptr) return replies;
 	const bool local_slot = sender.link.mode == replication::TransportMode::Loopback;
-	// (state 10/11 || slot+5) && (!spectator || g_spawn_success_gate) [orig: @0x5137D7]
+	// (state 10/11 || slot+5) && (!spectator || g_SpawnSuccessGate) [orig: @0x5137D7]
 	if (!(is_in_match(sender) || local_slot)) return replies;
 	if (sender.link.spectator) return replies;
 	// The 1000 ms per-sender throttle [orig: slot+100360 @0x5137FF..0x513820].

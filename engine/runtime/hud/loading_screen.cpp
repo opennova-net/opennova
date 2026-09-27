@@ -1,5 +1,5 @@
 // The loading screen's wrapped text block (loading_screen.h): the line breaker
-// and the line placer of render_draw_wrapped_text_block_ex, ported break rule
+// and the line placer of Render_DrawWrappedTextBlockEx, ported break rule
 // for break rule. Pushed down from the Godot shell (ADR 0040 ladder E2); the
 // embedder supplies the width measure and paints the placed lines.
 #include <runtime/hud/loading_screen.h>
@@ -27,7 +27,7 @@ std::size_t utf8_sequence_length(const std::string &text, std::size_t at) {
 
 } // namespace
 
-// The line breaker [orig: render_draw_wrapped_text_block_ex @ 0x580eb0 — the
+// The line breaker [orig: Render_DrawWrappedTextBlockEx @ 0x580eb0 — the
 // 32 / 13 / 10 tests @0x580f88, @0x580fdf, @0x581128]. The two kerning
 // parameters offset the first (`use_kerning_start`) and the wrapped
 // (`use_kerning_wrap`) lines by the font's tab-width field font+0x168; every
@@ -83,7 +83,7 @@ std::vector<std::string> wrap_text_lines(const TextExtent &extent, const std::st
 }
 
 // The line placer, the drawing half of the same routine [orig:
-// render_draw_wrapped_text_block_ex @ 0x580eb0 — the alignment fold (4 =
+// Render_DrawWrappedTextBlockEx @ 0x580eb0 — the alignment fold (4 =
 // centred on left + width/2 @0x5810ab, 5 = right aligned on rect_right
 // @0x581094, else left @0x58107f), the half advance `extent >> 1`
 // @0x580f40/@0x581005 against the full advance @0x5810d7, the skip_lines jump

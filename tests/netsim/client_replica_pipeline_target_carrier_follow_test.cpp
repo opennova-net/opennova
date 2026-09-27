@@ -249,26 +249,34 @@ int main() {
 	}
 
 	// --- The dead-carrier leg. Retail's client HIDES the child in place
-	// (carrier Flags & 2 -> child Flags |= 1 @0x440cdb..0x440cdd) pending the
-	// authority's destroy transaction; our decoded view RETIRES the subtree
-	// instead — presentation-equivalent, and the authority truth on this seam
-	// (the loopback-identity test pins the same retire through the parent
-	// relation). A zero health word is the death signal; the wire flags bit 1
-	// alone must NOT retire (an overloaded spawn/movement gate).
+	// (carrier Flags & 2 -> child Flags |= 1 @0x440cdb..0x440cdd) and the live
+	// carrier's vehicle block clears it again (Flags &= ~7 @0x440EB3); the row
+	// persists, as it does on the authority. A zero health word is the death
+	// signal; the wire flags bit 1 alone must NOT hide (an overloaded
+	// spawn/movement gate).
 	{
 		nw::FrameUpdate flagged = hull_frame(ax, ay, az, true_x, true_y, 0x6000);
 		flagged.records[0].vehicle.flags_byte = 0x02; // gate bit, health alive
 		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(flagged));
 		view.tick_remote_motion(0xFFFF);
-		ok &= expect(view.state().find(kGunHandle) != nullptr,
-		             "the overloaded flags bit alone never retires the child");
+		const auto *gun = view.state().find(kGunHandle);
+		ok &= expect(gun != nullptr && (gun->state_flags & 0x01u) == 0,
+		             "the overloaded flags bit alone never hides the child");
 		nw::FrameUpdate dead = hull_frame(ax, ay, az, true_x, true_y, 0x6000);
 		dead.records[0].vehicle.health_word = 0;
 		dead.records[0].vehicle.is_dead_pose = true;
 		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dead));
 		view.tick_remote_motion(0xFFFF);
-		ok &= expect(view.state().find(kGunHandle) == nullptr,
-		             "a zero-health carrier retires the target-carried child");
+		gun = view.state().find(kGunHandle);
+		ok &= expect(gun != nullptr && gun->state_flags_known &&
+		                     (gun->state_flags & 0x01u) != 0,
+		             "a zero-health carrier hides the target-carried child in place");
+		nw::FrameUpdate revived = hull_frame(ax, ay, az, true_x, true_y, 0x6000);
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(revived));
+		view.tick_remote_motion(0xFFFF);
+		gun = view.state().find(kGunHandle);
+		ok &= expect(gun != nullptr && (gun->state_flags & 0x07u) == 0,
+		             "a living carrier clears the child's hide again");
 	}
 	return ok ? 0 : 1;
 }

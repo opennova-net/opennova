@@ -193,6 +193,9 @@ void test_vehicle_trail_rows() {
 	CHECK(near_f(rows[0].dir.y, 1.0f));
 	CHECK(rows[1].point == 1);
 	CHECK(rows[1].effect == "wake");
+	// Every trail lane spawns with the vehicle as its descriptor tag [orig:
+	// Entity_UpdateBoneTrailEffects @ 0x458C5F].
+	CHECK(rows[0].section_tagged && rows[1].section_tagged);
 
 	// A dead vehicle draws nothing either.
 	e.flags |= kEntityFlagDead;

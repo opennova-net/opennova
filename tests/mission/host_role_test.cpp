@@ -23,6 +23,7 @@
 #include <runtime/inmatch/null_datagram_socket.h>
 
 #include "../common/boot_file_source.h"
+#include "../common/synthetic_mission.h"
 
 #include <cstdio>
 #include <map>
@@ -46,27 +47,8 @@ static int failures = 0;
 
 namespace {
 
-bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Organic;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	e.yaw = 90;
-	e.team = team;
-	return e;
-}
-
-bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Item;
-	e.type_id = type_id;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	return e;
-}
-
+using test_mission::item;
+using test_mission::organic;
 using test_boot::source_over;
 
 // The synthetic mission mission_kernel_test boots: two placed entities and
@@ -75,7 +57,7 @@ bms::File synthetic_mission() {
 	bms::File m{};
 	m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
 	m.items[0].id = 21;
-	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 	m.organics[0].id = 31;
 	m.events.push_back(bms::Event{});
 	return m;
@@ -136,6 +118,11 @@ int main() {
 		// [orig: SinglePlayer_StartMission @0x561bb7 -> @0x561cdb].
 		CHECK(host.host_owner.ctx.config.mp_attributes == 0x3A06u);
 		CHECK(host.host_owner.ctx.config.game_type == options.game_type);
+		// The config's unlimited_vehicles word, stock 1, reaches the world:
+		// destroyed hulls respawn. [orig: Config_SetDefaults @0x54D352;
+		//  Client_BuildMissionDataRequestBlock @0x51E8C5..0x51E8CB]
+		CHECK(host.host_owner.ctx.config.unlimited_vehicles);
+		CHECK(kernel.world.rules.vehicle_respawns);
 		CHECK(host.client_runtime != nullptr);
 		if (host.client_runtime) {
 			CHECK(host.client_runtime->role() == inmatch::ClientRuntime::Role::HostClient);
@@ -317,6 +304,7 @@ int main() {
 			cfg.config.server_name = "listen_host_test";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
+			cfg.config.unlimited_vehicles = false; // game.cfg unlimited_vehicles = 0
 			cfg.socket_mode = inmatch::SocketMode::Lan;
 			cfg.serve_and_play = true; // the dedicated bring-up forces this OFF
 			role.bring_up_dedicated(cfg);
@@ -325,6 +313,9 @@ int main() {
 		CHECK(kernel.boot(options, error));
 		CHECK(error.empty());
 
+		// A host config without unlimited vehicles removes destroyed hulls.
+		CHECK(!host.host_owner.ctx.config.unlimited_vehicles);
+		CHECK(!kernel.world.rules.vehicle_respawns);
 		CHECK(!host.host_owner.serve_and_play);
 		CHECK(host.host_owner.host_loopback == nullptr);
 		CHECK(host.client_runtime == nullptr);

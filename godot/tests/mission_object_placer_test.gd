@@ -463,7 +463,7 @@ func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> v
 	# authored-Reflective one must not hitchhike into the RTT.
 	# [orig: Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b (BMS attrib
 	# 0x800000 -> flags 0x400); Terrain_CollectVisibleEntitiesForReflection
-	# @ 0x5c90a0 mask 0x400 above water -> collect_visible_sector_userpoints
+	# @ 0x5c90a0 mask 0x400 above water -> Terrain_CollectVisibleSectorUserpoints
 	# @ 0x5c6c32 + collectors @ 0x5c6f20/@0x5c8c60; vehicle writer @ 0x40e208]
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
@@ -677,7 +677,7 @@ func test_godot_to_bms_position_axis_remap() -> void:
 # though items.def gives it no anim_def: a MultiMesh batch captures the rest pose once
 # and never evaluates PANM again, while the engine re-poses PANM from the global clock
 # every rendered frame [orig: PANM_SampleTrack @0x5b2270 idle gate, clock
-# Render_ShaderTickMs @0x2721A40]. DFX2's "Oil Pump" (graphic pump,
+# g_RenderShaderTickMs @0x2721A40]. DFX2's "Oil Pump" (graphic pump,
 # type decoration, control-0x32 sine tracks) is the witnessed case. Inert PANM
 # blocks (armory as shipped: entries
 # present, every control idle) must keep the perf-tier static batching.
@@ -997,7 +997,7 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 	assert_eq(_live_populations(placer, second_bms), ["Batch_StaticCrate1_0"])
 
 	# Retail's sub-pixel floor: at ~0.14 px neither instance is drawn at any
-	# level (render_sector_entity's 0.75 px gate, ported as the engine's
+	# level (Render_SectorEntity's 0.75 px gate, ported as the engine's
 	# kObjectLodSubPixelCullQ16).
 	var distant_camera := Transform3D(Basis.IDENTITY, Vector3(10, 0, 5010))
 	assert_eq(placer.update_static_lods(distant_camera, 70.0, 640.0, 480.0), 2)
@@ -1208,7 +1208,7 @@ func test_occlusion_verdict_drops_a_batched_static_at_every_level() -> void:
 	# and building-batch verdicts land on its retained instance: a culled
 	# instance carries no row at any level until released (retail
 	# Terrain_CollectVisibleEntities_0 @0x5c7022..0x5c708a / @0x5c7118..0x5c7162,
-	# collect_visible_sector_userpoints @0x5c6cd1..0x5c6d0d).
+	# Terrain_CollectVisibleSectorUserpoints @0x5c6cd1..0x5c6d0d).
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 	var fixture := _dense_fixture(parent, false)

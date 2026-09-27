@@ -541,7 +541,7 @@ bool run_death_feed_classifier_matrix() {
 	}
 
 	// The timer pass holds itself while a pre-round countdown runs.
-	// [orig: Server_UpdatePlayerBreathTimers `cmp g_preround_delay_timer,ebx`
+	// [orig: Server_UpdatePlayerBreathTimers `cmp g_PreRoundDelayTimer,ebx`
 	//  @0x50D773]
 	reset();
 	world.env.water_z = 1 << 16;
@@ -1572,8 +1572,9 @@ int main() {
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
 	// The 0x0A is a PRE-motor snapshot, so the death-family animation the motor
 	// selected on the last tick above rides the NEXT tick's frame.
-	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate's 0x0A
-	//  @0x51E3D6..0x51E450 precedes Entity_UpdateAllEntities @0x52674B]
+	// [orig: Game_ProcessMainFrame @0x5263F0 — the 0x0A of Server_TickUpdate
+	//  @0x51D7E0 (@0x51E3D6..0x51E450) precedes the Entity_UpdateAllEntities call
+	//  @0x52674B]
 	inmatch::Server_TickUpdate(ctx);
 	const Drained after_kill_b = drain_all(udp_b);
 	const Drained after_kill_c = drain_all(udp_c);
@@ -1640,7 +1641,7 @@ int main() {
 		// that slot before retail's send, so an infantry death ships 0 (every
 		// 0x13 in the retail capture carries 0) even though the bullet kill
 		// staged a nonzero selection for the edge.
-		// [orig: BuildDeathNotifyPayload @0x5036E0 (@0x503733); edge zero
+		// [orig: NetPacket_BuildDeathNotifyPayload @0x5036E0 (@0x503733); edge zero
 		//  @0x4B9D38 -> Entity_CheckAndProcessDeath @0x4B9D4D]
 		if (!expect(victim == hc.packed && death_anim_slot == 0,
 		            "0x13 carries the victim handle + the post-edge zero death-anim slot"))

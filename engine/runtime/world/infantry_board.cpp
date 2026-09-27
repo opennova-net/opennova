@@ -29,13 +29,6 @@ int32_t board_dist(const int32_t pos[3], const int32_t tgt[3]) {
 	const double dz = std::max(0.0, std::abs(double(tgt[2]) - pos[2]) - 65536.0);
 	return static_cast<int32_t>(std::min(2147483647.0, std::sqrt(dx * dx + dy * dy + dz * dz)));
 }
-SeatSelectionMode seat_mode_for_command(int32_t command) {
-	if (command == 123)
-		return SeatSelectionMode::PassengerOnly;
-	if (command == 124)
-		return SeatSelectionMode::RejectController;
-	return SeatSelectionMode::Any;
-}
 // [orig: Entity_GetBoneWorldPosition_0 @0x434DF0]
 void seat_world_position(World &world, const Entity &carrier, const Seat &seat, int32_t out[3]) {
 	MountedPose pose;
@@ -417,7 +410,9 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 	int32_t radius = board_to_fixed(target->bound_radius) + 0x10000;
 	if (entry_type && pc && vehicle_can_enter(world, self, *target)) {
 		VehicleSeatSelection best;
-		if (find_best_vehicle_seat(world, th, e.handle, best, seat_mode_for_command(command))) {
+		SeatSelectionMode mode = SeatSelectionMode::Any; // a non-attach command keeps Any
+		seat_selection_mode_for_command(command, mode);
+		if (find_best_vehicle_seat(world, th, e.handle, best, mode)) {
 			const Entity *carrier = world.registry.get(best.vehicle);
 			if (carrier)
 				seat_world_position(world, *carrier, carrier->seats[best.seat_index], goal);

@@ -336,7 +336,7 @@ bool test_invalid_views_fail_closed() {
 
 // D3D9 samples a pixel at its integer screen coordinate and maps clip -1 onto
 // screen 0, so the temp target's pixel i samples page_u = i / temp_width
-// [orig: setup_shadow_cascade_matrices_0 plain ortho @0x58D5CF..0x58D5EE,
+// [orig: RenderSlot_SetupShadowCascadeMatrices_0 plain ortho @0x58D5CF..0x58D5EE,
 // temp viewport @0x60D5E0]. A 4x4 page has an 8-wide temp: a sliver over
 // temp x in [0.24, 0.72] covers no integer centre, one over [0.9, 1.1]
 // covers temp column 1, and page column 0 averages temp columns 0 and 1.

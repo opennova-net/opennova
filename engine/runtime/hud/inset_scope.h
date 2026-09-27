@@ -9,7 +9,7 @@ namespace opennova::hud {
 // circle. The second strip fills the disc opaque with the fog / water colour at
 // far depth. The shell clips by drawing the scene target through the inner
 // polygon only.
-// [orig: Render_RadarCompassOverlay @0x5C9740; bounds @0x5C9753..0x5C9821;
+// [orig: Render_WeaponInsetScene @0x5C9740; bounds @0x5C9753..0x5C9821;
 // fov @0x5C98EA; near @0x5C992D; strips @0x5C9AE8..0x5C9CD2 (mask strip render
 // state 6 = mode 0x222 with pass flags 0x600000, CGfxShader_ApplyPass
 // @0x683221..0x683249; the scene pass @0x5C9DE9 runs after both)]

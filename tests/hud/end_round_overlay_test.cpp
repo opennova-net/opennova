@@ -1,7 +1,7 @@
 // The end-of-round overlay ladder (hud/end_round_overlay.h): the headline /
 // second-line key selection per game type x draw x winner, the y ladder, the
 // score lines, the game-time quirk, and the stat-field column arithmetic of
-// draw_endround_stats_overlay @0x5b7cd0 / Overlay_ComputeStatFieldColumnLayout
+// HUD_DrawEndRoundStatsOverlay @0x5b7cd0 / Overlay_ComputeStatFieldColumnLayout
 // @0x5b7a10.
 #include <cstdio>
 #include <string>

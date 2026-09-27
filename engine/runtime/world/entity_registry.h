@@ -46,7 +46,7 @@ struct EntityLifetime {
 
 class EntityRegistry {
 public:
-    // [orig: g_pool_list @0xA892E0 — pools 0..3 are "actor" pools searched by
+    // [orig: g_PoolList @0xA892E0 — pools 0..3 are "actor" pools searched by
     // EntityPool_FindByNetId (mask &0xF); pool 4 holds static props.]
     static constexpr int kPoolCount = 5;
     static constexpr int kActorPoolMask = 0xF; // pools 0..3
@@ -81,7 +81,6 @@ public:
     Entity *by_bms_id(int32_t bms_id);
 
     void by_group(uint8_t group, std::vector<EntityHandle> &out) const;
-    void in_area(const Aabb &zone, std::vector<EntityHandle> &out) const;
 
     // Named, first-class non-entity addressables.
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
@@ -113,7 +112,7 @@ public:
     uint64_t spawn_serial() const { return next_spawn_id_; }
 
     // Configured slot capacity of `pool` (0 for an unconfigured/invalid pool) — the bound
-    // the original validates wire handles against [orig: g_pool_list[pool].capacity reads,
+    // the original validates wire handles against [orig: g_PoolList[pool].capacity reads,
     // e.g. NapiNPServerMsg_HandlePlayerInfoRequest @0x514180].
     size_t pool_capacity(int pool) const {
         return (pool >= 0 && pool < kPoolCount) ? pools_[pool].slots.size() : 0;
@@ -129,7 +128,7 @@ public:
     }
 
     // One pool's used slots in slot order — the retail per-pool array walk
-    // (g_pool_list[pool].used entries) the per-tick systems take instead of
+    // (g_PoolList[pool].used entries) the per-tick systems take instead of
     // the whole registry [orig: Entity_UpdateAllEntities @0x4c2100 walks pool
     // 1 @0x4c2140.., pool 0 @0x4c244c..; Entity_BuildProximityLists_Pool01
     // @0x4b9340 walks pools 1 then 0].

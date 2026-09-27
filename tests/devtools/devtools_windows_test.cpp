@@ -230,11 +230,16 @@ void test_render_particles_audio_net_windows() {
 	rs.device.viewport_width = 1280;
 	rs.device.viewport_height = 720;
 	rs.device.visible_draw_calls = 900;
+	rs.device.shadow_draw_calls = 12;
+	rs.device.shadow_objects = 7;
+	rs.device.shadow_primitives = 3400;
 	rs.terrain_valid = true;
 	rs.terrain.emitted_patches = 120;
 	rs.terrain.traversal.budget_drops = 3;
 	render.set_snapshot(rs);
 	CHECK(render.device_text().find("1280x720 | visible 900 draws") == 0, "the device line");
+	CHECK(render.device_text().find("shadows 12 draws, 7 objects, 3400 prims") != std::string::npos,
+			"the shadow counters");
 	CHECK(render.terrain_text().find("120 emitted") != std::string::npos &&
 					render.terrain_text().find("budget drops 3") != std::string::npos,
 			"the terrain traversal line");
@@ -291,7 +296,6 @@ void test_render_particles_audio_net_windows() {
 	ns.wall_seconds = 1.0;
 	ns.role = opennova::devtools::StatusRole::ListenServer;
 	ns.state = opennova::devtools::StatusState::Running;
-	ns.bank_policy = "wall clock";
 	ns.fps = 60.0;
 	ns.traffic_valid = true;
 	ns.traffic.tx_packets = 100;

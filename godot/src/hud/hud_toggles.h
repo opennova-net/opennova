@@ -50,7 +50,6 @@ public:
 	void cycle_hud_detail();
 	void cycle_showhud();
 	void toggle_objectives();
-	void close_message_log();
 
 	int get_hud_color_index() const;
 	void set_hud_color_index(int p_index);
@@ -60,7 +59,6 @@ public:
 	void set_showhud_flags(int p_flags);
 	int get_friendly_tag_mode() const;
 	bool is_objectives_visible() const;
-	void set_objectives_visible(bool p_visible);
 	bool is_scoreboard_open() const;
 	bool is_message_log_open() const;
 	bool is_end_round_stats_open() const;

@@ -49,12 +49,12 @@ struct TerrainTilePageLayout {
 };
 
 // Highest-quality retail c7/c8 page projection reduced into presentation
-// world. Foliage_WindSwayVS transforms the original (pre-wind) vertex into
+// world. g_FoliageWindSwayVS transforms the original (pre-wind) vertex into
 // D3D world (Godot Z, Y, X), then c7/c8 undo the packed page origin and scale
 // by 1/(1024 >> lod). The reduced result is therefore exactly
 // ((world_x-origin_x), (world_z-origin_z)) * inverse_world_span.
 // [orig: Foliage_RenderDetailPatches @0x60A1DE..0x60A34F; c7/c8 uploads
-// @0x6006AB..0x600704; Foliage_WindSwayVS source @0x7DE648 (assembled @0x5ff691)]
+// @0x6006AB..0x600704; g_FoliageWindSwayVS source @0x7DE648 (assembled @0x5ff691)]
 struct TerrainTilePageProjection {
 	float world_origin_x = 0.0f;
 	float world_origin_z = 0.0f;
@@ -167,7 +167,7 @@ public:
 			const TerrainTilePageKey &page, bool zero_primary_uv = false) noexcept;
 
 	// One PolyTrn_RenderFrame: the frame counter advances, and the records the
-	// frame claims stamp `tod_epoch` (Env_TodEpoch).
+	// frame claims stamp `tod_epoch` (g_EnvTodEpoch).
 	// [orig: dword_319FC04 += 1 @ 0x60EAE8]
 	void begin_frame(uint32_t tod_epoch) noexcept;
 	uint32_t frame() const noexcept { return frame_; }
@@ -195,7 +195,7 @@ public:
 	// (refreshing its last use), or null when the page is not composed.
 	std::optional<TerrainTilePageBinding> bind(
 			const TerrainTileCompositionRequest &request) noexcept;
-	// terrain_tile_cache_lookup (MATCHTERRAIN) / Terrain_FindSectorPatchRT
+	// TerrainTile_CacheLookup (MATCHTERRAIN) / Terrain_FindSectorPatchRT
 	// (detail foliage): the first resident record, in record order, whose
 	// packed coordinate matches the point's at granularity 32, then 64 ... 512
 	// units within the point's sector. The record may be coarser or finer than

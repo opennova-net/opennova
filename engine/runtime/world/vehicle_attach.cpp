@@ -138,9 +138,11 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mounted = true;
     occ.mounted_config_valid = veh.emplaced_config_valid;
     occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;
-    // Armed ctrlx seats borrow the persistent carrier slot too. Retail mounts
-    // it immediately and saves the personal slot for detach.
-    // [orig: Entity_AttachToVehicleSlot @0x49480F..0x494883]
+    // Armed ctrlx seats borrow the carrier slot too: a non-local body (or one
+    // with no slot) stores it at once, the local player queues the switch
+    // through Player_MountWeaponSlot; both save the personal slot for detach.
+    // [orig: Entity_AttachToVehicleSlot @0x49480B..0x494883; UseGun:
+    //  Entity_AttachToUseGunSlot @0x546C27..0x546C4E]
     if (occ.mount_type == SeatType::Gunner ||
             (occ.mount_type == SeatType::Controller &&
              (veh.item_attrib & kItemAttribEweap) != 0))
@@ -155,7 +157,7 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
 // Local-point world position: the same local rotate the per-tick pose applies
 // (pose_mounted_occupant) through the carrier's FULL orientation frame, our
 // stand-in for the posed bone transform
-// [orig: build_bone_attachment_matrix @0x56c630 in the scan @0x435fe7].
+// [orig: Bone_BuildAttachmentMatrix @0x56c630 in the scan @0x435fe7].
 Vec3 local_point_world_pos(const Entity &veh, const Vec3 &local) {
     return entity_local_point_world(veh, local);
 }
@@ -167,7 +169,7 @@ Vec3 seat_world_pos(World &world, const Entity &veh, const Seat &s) {
     // attachment-frame form, whatever the seat's own kind. A rest-only point
     // targets the wrong hatch when a turret is animated.
     // [orig: Entity_FindNearestSeatOrArmory seat kinds @0x435F6C..0x435FDF ->
-    //  build_bone_attachment_matrix @0x435FFA (its def+0x144 call
+    //  Bone_BuildAttachmentMatrix @0x435FFA (its def+0x144 call
     //  @0x56C6DC..0x56C6F3); labels @0x5A3553]
     Seat query = s;
     query.type = SeatType::Gunner;
@@ -214,32 +216,6 @@ int32_t seat_priority_weight(SeatType type, bool root_seat) {
         default:
             return 0x20000;
     }
-}
-
-int predict_seat_selection(const std::vector<SeatCandidate> &seats,
-                           const SeatSelectionMode *mode,
-                           std::vector<SeatVerdict> &verdicts) {
-    verdicts.assign(seats.size(), SeatVerdict::kSkippedCommand);
-    int best = -1;
-    int32_t best_weight = 0x7fffffff;
-    for (size_t i = 0; i < seats.size(); ++i) {
-        const SeatCandidate &s = seats[i];
-        if (s.occupied) {
-            verdicts[i] = SeatVerdict::kSkippedOccupied;
-            continue;
-        }
-        const bool allowed = mode != nullptr && s.type != SeatType::None &&
-                             seat_allowed_for_selection(s.type, *mode);
-        if (!allowed) continue; // kSkippedCommand
-        verdicts[i] = SeatVerdict::kEligible;
-        const int32_t weight = seat_priority_weight(s.type, true);
-        if (weight < best_weight) {
-            best_weight = weight;
-            best = static_cast<int>(i);
-        }
-    }
-    if (best >= 0) verdicts[static_cast<size_t>(best)] = SeatVerdict::kSelected;
-    return best;
 }
 
 VehicleSeatOccupancy vehicle_seat_occupancy(
@@ -528,7 +504,7 @@ namespace {
 // Both queries start at Position. Only scan scoring reads CameraOffset.
 // The scan's sixth argument is allowAllTypes=1; labels use the sector query.
 // [orig: Entity_FindNearestSeatOrArmory @0x436174..0x436188;
-// draw_vehicle_seat_and_armory_labels @0x5A35F6..0x5A360E (the label ray endpoint
+// HUD_DrawVehicleSeatAndArmoryLabels @0x5A35F6..0x5A360E (the label ray endpoint
 // is groundEntity, else the player; HUD_DrawEntityLabel @0x5a39b0 is the friendly
 // tag drawer, not this site)]
 bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &point,
@@ -757,7 +733,7 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
     };
 
     for_each_scan_candidate(world, player, [&](const Entity &cand) {
-        // A ready weapon limits labels to the nearest entity [orig: !Player_CanFireWeapon()
+        // A ready weapon limits labels to the nearest entity [orig: !Player_IsOpticalViewVisible()
         // || entity == nearest_entity @0x5a3354].
         if (can_fire && cand.handle != nearest.vehicle) return;
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;

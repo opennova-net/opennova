@@ -78,7 +78,7 @@ const r::FoliageMeshBuild *first_detail_build(const r::FoliageDrawList &list) {
 // A + sx*cos - sz*sin (Godot X), y = ground + sy*0.5; the 3DI import stores
 // vertex.x = -sx. Candidate 0 of key 0x00100030 has centre (keyHi + A,
 // keyLo + B) = (18.63215637, 49.69863892) and yaw 4.83126879.
-// [orig: generate_foliage_instances_0 @ 0x600112..0x60014d, 0x600121 (y)]
+// [orig: Foliage_GenerateInstances_0 @ 0x600112..0x60014d, 0x600121 (y)]
 void test_detail_vertex_placement_matches_retail() {
 	r::FoliageFrameCompiler compiler = one_triangle_compiler();
 	const f::WorldSamplers world = flat_world();
@@ -333,6 +333,48 @@ void test_water_sides() {
 	}
 }
 
+// Indoors the scene core skips both detail passes while the BySide waves
+// still draw the MODEL masks: a closed gate commands no detail draw and keeps
+// every MODEL submission; reopening it draws the resident cell again.
+// [orig: Terrain_RenderWorldScene @ 0x5C93D5..0x5C93E0, the skips
+// @ 0x5C95BD..0x5C95BF / @ 0x5C965D..0x5C965F; BySide @ 0x5C951F..0x5C9638]
+void test_detail_pass_gate_keeps_the_model_masks() {
+	const auto count_tier = [](const r::FoliageDrawList &list, r::FoliageTier tier) {
+		size_t count = 0;
+		for (const r::FoliageDrawCommand &command : list.commands) {
+			count += command.tier == tier ? 1u : 0u;
+		}
+		return count;
+	};
+	r::FoliageViewInput view = silhouette_view(10.0f, -1000.0f);
+	view.detail_cells = detail_view().detail_cells;
+
+	r::FoliageFrameCompiler open_compiler = one_triangle_compiler(2.0f);
+	const r::FoliageDrawList &open =
+			open_compiler.compile(view, flat_world(), r::FoliageExpansionSamplers{});
+	const size_t open_detail = count_tier(open, r::FoliageTier::Detail);
+	const size_t open_model = count_tier(open, r::FoliageTier::Silhouette);
+	const size_t open_instances = open.model_instances.size();
+	CHECK(open_detail == 2); // the near HIGH draw and its LOW secondary
+	CHECK(open_model > 0);
+
+	r::FoliageFrameCompiler gated_compiler = one_triangle_compiler(2.0f);
+	view.detail_passes = false;
+	const r::FoliageDrawList &gated =
+			gated_compiler.compile(view, flat_world(), r::FoliageExpansionSamplers{});
+	CHECK(count_tier(gated, r::FoliageTier::Detail) == 0);
+	CHECK(first_detail_build(gated) == nullptr);
+	CHECK(gated.debug.detail_high_instances == 0 && gated.debug.detail_low_instances == 0);
+	CHECK(count_tier(gated, r::FoliageTier::Silhouette) == open_model);
+	CHECK(gated.model_instances.size() == open_instances);
+
+	view.detail_passes = true;
+	const r::FoliageDrawList &reopened =
+			gated_compiler.compile(view, flat_world(), r::FoliageExpansionSamplers{});
+	CHECK(count_tier(reopened, r::FoliageTier::Detail) == open_detail);
+	CHECK(first_detail_build(reopened) != nullptr);
+}
+
 // The BySide wave split every mask consumer shares: the camera is above at
 // or over the water (setnl), and an entity whose z - 1.0 is below the water
 // rides the far wave exactly while the camera is above.
@@ -347,7 +389,7 @@ void test_entity_water_side() {
 	// Camera below: the above-water entity is the far one.
 	CHECK(r::foliage_entity_far_side(1.5f, 0.0f, 0.5f));
 	CHECK(!r::foliage_entity_far_side(1.49f, 0.0f, 0.5f));
-	// Env_WaterHeightFixed 0 (no water) still splits at z - 1 < 0.
+	// g_EnvWaterHeightFixed 0 (no water) still splits at z - 1 < 0.
 	CHECK(!r::foliage_entity_far_side(1.0f, 20.0f, 0.0f));
 	CHECK(r::foliage_entity_far_side(0.99f, 20.0f, 0.0f));
 }
@@ -363,6 +405,7 @@ int main() {
 	test_detail_vertex_placement_matches_retail();
 	test_new_detail_cell_draws_in_its_generation_frame();
 	test_thermal_view_commands_one_faint_low_pass();
+	test_detail_pass_gate_keeps_the_model_masks();
 	if (failures == 0) std::printf("foliage_frame_compile_test: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

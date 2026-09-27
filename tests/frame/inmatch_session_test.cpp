@@ -22,6 +22,7 @@ struct TickProbe final : Role {
 	opennova::mission::MissionKernel kernel;
 	std::vector<TickInput> inputs;
 	std::vector<bool> rules_batch_flags; // World::rules.last_tick_of_batch as the tick saw it
+	std::vector<int32_t> frame_rates;     // every FR-counter value the session handed over
 	int32_t logic_tick = 100;
 	int reset_calls = 0;
 	int close_calls = 0;
@@ -47,6 +48,7 @@ struct TickProbe final : Role {
 		return true;
 	}
 	void close() override { ++close_calls; }
+	void observe_frame_rate(int32_t fps) override { frame_rates.push_back(fps); }
 };
 
 bool load(Session &session) {
@@ -120,64 +122,65 @@ int main() {
 				"only the batch's last tick carries last_tick_of_batch")) return 1;
 	}
 
-	// A zero-tick frame retains edge input until a tick actually runs.
+	// A zero-tick frame retains edge input until a tick actually runs: a cold
+	// bank drains nothing under 4 ms (16 + 32 units), and the next 14 ms frame
+	// drains one quantum on the tick phase.
 	{
 		TickProbe target;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput first;
-		first.delta_seconds = TickAccumulator::kTickDt / 2.0;
+		first.delta_seconds = 0.002;
 		first.player.pressed_action_bits = 0x8u;
 		first.player.look_delta_y = -3.0f;
 		if (!expect(session.advance(first).ticks_run() == 0 && target.inputs.empty(),
-				"half quantum runs no tick")) return 1;
+				"a sub-quantum frame runs no tick")) return 1;
 		FrameInput second;
-		second.delta_seconds = TickAccumulator::kTickDt / 2.0;
+		second.delta_seconds = 0.014;
 		const FrameOutcome out = session.advance(second);
 		if (!expect(out.ticks_run() == 1 && target.inputs[0].player.pressed_action_bits == 0x8u &&
 				target.inputs[0].player.look_delta_y == -3.0f,
 				"zero-tick edges survive to the next tick")) return 1;
 	}
 
-	// The hitch clamp is owned here and, under the shell's default wall-clock
-	// bank, drops the clamped backlog.
-	{
-		TickProbe target;
-		Session session(target);
-		if (!load(session)) return 1;
-		FrameInput hitch;
-		hitch.delta_seconds = 1.0;
-		if (!expect(session.advance(hitch).ticks_run() ==
-					TickAccumulator::kMaxCatchupTicks,
-				"hitch clamps to the fixed maximum")) return 1;
-		target.inputs.clear();
-		FrameInput tiny;
-		tiny.delta_seconds = 0.001;
-		if (!expect(session.advance(tiny).ticks_run() == 0,
-				"clamped backlog is dropped")) return 1;
-	}
-
-	// The dedicated host's policy is the retail main-loop bank: a stall caps at
-	// 500 ms of bank, and the frame after it is smoothed against that clamped
-	// history — retail's post-stall fast-forward, not a dropped backlog
+	// The hitch clamp is owned here: a stall caps at 500 ms of bank, and the
+	// frame after it is smoothed against that clamped history — retail's
+	// post-stall fast-forward, not a dropped backlog
 	// [orig: Game_MainLoop @0x52B630 — clamp @0x52B83E, EMA @0x52B85B].
 	{
 		TickProbe target;
 		Session session(target);
-		session.set_tick_bank_policy(opennova::world::TickBankPolicy::RetailMainLoop);
 		if (!load(session)) return 1;
-		if (!expect(session.tick_bank_policy() == opennova::world::TickBankPolicy::RetailMainLoop,
-				"loading keeps the selected bank policy")) return 1;
 		FrameInput hitch;
 		hitch.delta_seconds = 1.0;
 		if (!expect(session.advance(hitch).ticks_run() ==
 					TickAccumulator::kRetailMaxCatchupTicks,
-				"retail bank: a hitch clamps to 500 ms of quanta")) return 1;
+				"a hitch clamps to 500 ms of quanta")) return 1;
 		FrameInput tiny;
 		tiny.delta_seconds = 0.001;
 		// (7 * 8000 + 16 + 4) >> 3 = 7002 units -> 109 quanta from phase 125 -> 27.
 		if (!expect(session.advance(tiny).ticks_run() == 27,
-				"retail bank: the frame after a stall fast-forwards")) return 1;
+				"the frame after a stall fast-forwards")) return 1;
+	}
+
+	// The session hands the FR counter to the role once per banked frame,
+	// ahead of that frame's ticks: 0 until the first 2000 ms window closes
+	// (a steady 16 ms stream closes it on frame 118), then its average
+	// [orig: Game_MainLoop g_StatsAvgFps @0x52B98F, drain @0x52BA08].
+	{
+		TickProbe target;
+		Session session(target);
+		if (!load(session)) return 1;
+		FrameInput frame;
+		frame.delta_seconds = TickAccumulator::kTickDt;
+		for (int i = 0; i < 117; ++i) (void)session.advance(frame);
+		if (!expect(target.frame_rates.size() == 117 && target.frame_rates.back() == 0,
+				"the rate reads 0 until the first window closes")) return 1;
+		(void)session.advance(frame);
+		if (!expect(target.frame_rates.size() == 118 && target.frame_rates.back() == 58,
+				"the closed window's average reaches the role")) return 1;
+		if (!expect(session.drive_one().ticks_run() == 1 && target.frame_rates.size() == 118,
+				"an external single-tick drive banks nothing and hands over nothing")) return 1;
 	}
 
 	// The mission start never banks the load, and the three frames drawn
@@ -196,7 +199,10 @@ int main() {
 			if (!expect(session.advance(slow).ticks_run() == 0,
 					"a re-based frame banks only the time since the last render")) return 1;
 		}
-		if (!expect(session.advance(slow).ticks_run() == 10,
+		// The full 160 ms banks again, smoothed against the start frames'
+		// seed-only history: (7 * 16 + 2576 + 4) >> 3 = 336 units, 5 quanta,
+		// 2 ticks.
+		if (!expect(session.advance(slow).ticks_run() == 2,
 				"after the start frames the full frame time banks again")) return 1;
 
 		// An unsampled render clock falls back to the frame delta.
@@ -208,14 +214,15 @@ int main() {
 				"no render sample: the frame delta banks")) return 1;
 	}
 
-	// Pause clears banked time; manual step and reset stay local-only.
+	// Pause clears the bank and its smoothing history; manual step and reset
+	// stay local-only.
 	{
 		TickProbe target;
 		Session session(target);
 		if (!load(session)) return 1;
-		FrameInput half;
-		half.delta_seconds = TickAccumulator::kTickDt / 2.0;
-		(void)session.advance(half);
+		FrameInput hitch;
+		hitch.delta_seconds = 1.0;
+		(void)session.advance(hitch);
 		if (!expect(session.pause().applied(), "pause applies")) return 1;
 		if (!expect(session.step_once().ticks_run() == 1,
 				"paused local session can step once")) return 1;
@@ -223,8 +230,12 @@ int main() {
 				session.state() == State::Paused,
 				"reset restores baseline and remains paused")) return 1;
 		if (!expect(session.resume().applied(), "resume after reset")) return 1;
-		if (!expect(session.advance(half).ticks_run() == 0,
-				"pause/reset discarded the old half quantum")) return 1;
+		// Without the resets this 1 ms frame would fast-forward 27 ticks
+		// through the stall's clamped history; a cold bank drains nothing.
+		FrameInput tiny;
+		tiny.delta_seconds = 0.001;
+		if (!expect(session.advance(tiny).ticks_run() == 0,
+				"pause/reset discarded the stall's bank history")) return 1;
 	}
 
 	// Network roles cannot pause, step, or reset.

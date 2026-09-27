@@ -72,7 +72,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	}
 	// The PowerThrow windup for the HUD charge bar [orig: HUD_DrawPowerThrowChargeBar
 	// @ 0x599830 (ex kong "HUD_DrawWeaponReloadBar" misnomer — it only draws the
-	// windup): gates = def+8 sign bit, g_fireChargeStartTick != 0, ammo available;
+	// windup): gates = def+8 sign bit, g_FireChargeStartTick != 0, ammo available;
 	// the drawer derives the fill from held ticks].
 	const bool windup_active = (w.def.flags & weapon_flag::kPowerThrow) != 0 &&
 			w.power_throw_start_tick != 0 && (active_slot.clip > 0 || w.def.clip_capacity < 0);
@@ -99,7 +99,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	// presentation edge: choose the stance triplet, then add the two arithmetic
 	// shifts. Category order is prone/crouch/stand; airborne or submerged forces
 	// stand, and a parent attachment finally forces crouch. The +3 triplet is the
-	// shared Player_CanFireWeapon verdict stamped before the body tick.
+	// shared Player_IsOpticalViewVisible verdict stamped before the body tick.
 	// [orig: HUD_DrawCrosshair @0x592b07..0x592b87]
 	{
 		int32_t recoil_pitch = 0;
@@ -157,6 +157,12 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	}
 	v.borrowed_usegun_slot = w.usegun_slot_active;
 	v.usegun_mount_handle = w.usegun_slot_active ? w.usegun_mount.packed : EntityHandle::kInvalid;
+	// The def half of the pump's FP bit: the weapon's gfx1 model loaded
+	// (first_person_model_adm is stamped only once the GUN model loaded) and
+	// its anim object built from `animadm` (the installed anim_map).
+	// [orig: WeaponAction_ProcessFrame FP bit @0x540E8C..0x540ECF: Def+0x16C
+	//  @0x540EA5, Def+0x174 @0x540EC3]
+	v.first_person_action_model = w.first_person_model_adm != 0xFF && !w.anim_map.empty();
 	v.emplaced_controls_valid = false;
 	v.emplaced_gun_yaw = 0;
 	v.emplaced_gun_pitch = 0;

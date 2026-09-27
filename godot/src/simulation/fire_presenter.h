@@ -45,7 +45,7 @@ struct NvgLaserSource {
 
 // The frame the beams draw for: the eye (Godot space), the projection's _11,
 // the millisecond clock, the scene fog the beams fold, and the local view's
-// g_NVGActive and g_camera_mode.
+// g_NVGActive and g_CameraMode.
 struct NvgLaserView {
 	Transform3D eye;
 	float projection_x_scale = 1.0f;
@@ -53,6 +53,9 @@ struct NvgLaserView {
 	opennova::renderer::SceneOverlayFog fog;
 	bool nvg_active = false;
 	int camera_mode = 0;
+	// The weapon Inset pass's walk: the persons that view draws (its own
+	// collect's verdicts), in its own overlay slot.
+	bool inset_view = false;
 };
 
 // THE viewing-client fire-presentation pass (the former fire_present_pass.gd,
@@ -193,7 +196,9 @@ private:
 	ObjectID mesh_instance_id_;
 	// One material per (normal-pass shader, fog-black) pair, created on first use.
 	std::array<Ref<ShaderMaterial>, 6> materials_;
-	Ref<Texture2D> smoke_texture_; // smoktest.pcx [orig: pool+0x3000]
+	// smoktest.pcx, the pool+0x3000 texture
+	// [orig: CEffectEmitterPool_CreateShaders @ 0x5DC8F0 (the store @ 0x5dc926)].
+	Ref<Texture2D> smoke_texture_;
 	bool smoke_texture_loaded_ = false;
 	opennova::renderer::TracerRibbonFrame frame_;
 	opennova::renderer::TracerRibbonFrame distortion_frame_;

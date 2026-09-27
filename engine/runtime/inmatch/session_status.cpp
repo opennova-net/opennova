@@ -216,7 +216,7 @@ std::vector<uint8_t> serialize_session_status(
 	// The four authored-target globals are populated by the round-start entity
 	// census. Their option order and asymmetric keys are the literal status
 	// writer order: S&D/A&D 3 then 4; CTF 7 then 6; zero targets are omitted.
-	// [orig: reset_round_counters @0x516C50; Server_BuildStatusReport
+	// [orig: Server_ResetRoundCounters @0x516C50; Server_BuildStatusReport
 	// @0x530A60, target rows @0x530B7C..0x530C04]
 	if (match_world != nullptr &&
 			(game_type == gtype::kSearchAndDestroy ||

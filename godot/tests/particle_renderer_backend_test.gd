@@ -29,7 +29,7 @@ func _live_fog_source() -> MissionEnvironment:
 
 
 func _live_world_scene_at_heights(heights: PackedFloat32Array) -> EffectScene:
-	var file := ParticleFixture.catalog("GPU particle",
+	var file := ParticleFixture.catalog(self, "GPU particle",
 			"emit_dur = 0.1;\nemit_rate = 20;\nemit_burst = 1;\nage = 2;\nalpha = 1;\nscale = 1;\ngraphic1 = gpu_contract_fallback.tga, blend;\ng1_alpha = 1;\ng1_scale = 1;",
 			["GPU effect"])
 
@@ -613,7 +613,7 @@ func _live_lit_scene() -> EffectScene:
 
 # One live quad at (0, 1, 0), through the same PTL loader as mounted effects.
 func _single_quad_scene(name: String, blend: int, properties: String = "") -> EffectScene:
-	var file := ParticleFixture.parse(_overlap_document(name, blend, properties))
+	var file := ParticleFixture.parse(self, _overlap_document(name, blend, properties))
 	var scene := EffectScene.new()
 	scene.open([file])
 	_overlap_spawn(scene, name, 0.0)
@@ -1015,7 +1015,7 @@ void fragment() {
 	viewport.add_child(wall)
 	var fx := FrameFx.new()
 	viewport.add_child(fx)
-	var file := ParticleFixture.parse(_overlap_document("impact", 0)
+	var file := ParticleFixture.parse(self, _overlap_document("impact", 0)
 			+ _overlap_document("haze", 7))
 	var scene := EffectScene.new()
 	scene.open([file])
@@ -1126,7 +1126,7 @@ func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
 	background.environment.background_mode = Environment.BG_COLOR
 	background.environment.background_color = Color.BLACK
 	viewport.add_child(background)
-	var file := ParticleFixture.parse(_overlap_document("dirt", 0, "g1_scale = 2;"))
+	var file := ParticleFixture.parse(self, _overlap_document("dirt", 0, "g1_scale = 2;"))
 	var scene := EffectScene.new()
 	scene.open([file])
 	var renderer := ParticleRenderer.new()

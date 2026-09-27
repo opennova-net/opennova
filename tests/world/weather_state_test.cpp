@@ -172,7 +172,7 @@ void test_tick_advances_the_clock_and_fires_thunder() {
 	const uint32_t tod = ws.tod_fixed24;
 	ws.tick_sim(nullptr, events);
 	CHECK(ws.tod_fixed24 == tod + 0x1234u);
-	CHECK(ws.tod_minute_tickdown == w::WeatherState::kTodMinuteTicks - 1);
+	CHECK(ws.tod_epoch_tickdown == w::WeatherState::kTodEpochTicks - 1);
 	CHECK(!events.thunder_a && !events.thunder_b && !events.quake_shake_local);
 	// 310 ticks later the minute counter wraps and counts one elapsed minute.
 	for (int i = 0; i < 310; ++i) ws.tick_sim(nullptr, events);
@@ -297,7 +297,7 @@ void test_keyframe_snap_writes_channels_render_and_target_only() {
 }
 
 void test_negative_color_fade_pins_a_static_block_to_plus_rate_and_wraps() {
-	// [orig: interpolate_weather_color @ 0x57da2c..0x57da6b — the two-compare
+	// [orig: Environment_InterpolateWeatherColor @ 0x57da2c..0x57da6b — the two-compare
 	//  clamp with the negate; @ 0x57da85..0x57da8e the low-byte repack]
 	w::WeatherState ws;
 	ws.seed(seed_800());

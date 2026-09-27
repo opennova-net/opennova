@@ -83,20 +83,20 @@ struct ClientScoreboardTeam {
 
 struct ClientScoreboard {
 	bool known = false;
-	bool team_mode = false;   // flags bit0 -> g_scoreboard_flags
+	bool team_mode = false;   // flags bit0 -> g_ScoreboardFlags
 	bool timed = false;       // flags bit1 — set only for solo KOTH (game type 1)
 	                          // [orig: @0x50dd54]
 	uint8_t in_game_count = 0;
 	uint8_t spectator_count = 0;
-	// Despite the IDB name g_scoreboardDeadRowCount, this counts live,
+	// Despite the IDB name g_ScoreboardDeadRowCount, this counts live,
 	// nonspectating entities only, at 0x16 parse time in permanent-death mode.
 	// [orig: NapiNPClientMsg_PlayerList @ 0x42FAE0, increment @ 0x42FD2A]
 	int alive_player_count = 0;
 	std::vector<ClientScoreboardRow> rows;
 	std::vector<ClientScoreboardTeam> teams;  // T0 neutral + one per team
 	// The team-table count byte — the host serializes it from its configured
-	// side count, so on a joiner it IS g_num_teams_config
-	// [orig: g_scoreboard_team_count @0x42fdda <- @0x50db3a].
+	// side count, so on a joiner it IS g_NumTeamsConfig
+	// [orig: g_ScoreboardTeamCount @0x42fdda <- @0x50db3a].
 	uint8_t team_count = 0;
 	// Rows skipped because their connection slot has no roster binding yet.
 	// Retail drops these too and queues one reliable C2S 0x22 {slot, 0x1CF7}
@@ -165,6 +165,12 @@ struct ClientChatLine {
 // is_dead_pose = (flags_byte & 4)].
 inline constexpr uint8_t kVehicleFlagDeadPose = 0x04;
 
+// The carried-objective ids: the flags whose client state S2C 0x2F writes.
+// [orig: NapiNPClientMsg_0x02F @0x430F19 (the 4091/4093/4095 gate)]
+inline bool is_carry_objective(uint16_t item_id) {
+	return item_id == 4091 || item_id == 4093 || item_id == 4095;
+}
+
 // renders exactly the state a networked peer would see.
 struct ClientEntityState {
 	uint16_t handle = 0;                          // (pool<<12)|slot
@@ -175,7 +181,13 @@ struct ClientEntityState {
 	// it never participates in compact record sizing. Keeping it on the decoded
 	// row lets every consumer use one entity model instead of decoding spawn
 	// batches twice.
-	std::string name;
+	// The entity Name (entity+0xF4, world::Entity::display_name) as the spawn
+	// handlers store it: 0x0C copies at most 15 characters for every organic,
+	// 0x0D and 0x18 copy it whole for an AIData def (the only records whose
+	// serializer writes one).
+	// [orig: NapiNPClientMsg_0x00C @0x42E867..0x42E8EA; NapiNPClientMsg_0x00D
+	//  @0x433320..0x43334A; NapiNPClientMsg_FullEntitySpawn @0x433D37..0x433D61]
+	std::string display_name;
 	uint16_t net_id = 0xFFFF;
 	uint8_t spawn_tag = 0;
 	int32_t x = 0;                                // world i32 16.16 (decompressed
@@ -376,6 +388,24 @@ struct ClientEntityState {
 	//  'ewep' move fn Entity_UpdateTransformAndTurret @0x440ca0 via the class
 	//  table row @0x82abe0]
 	uint16_t target_handle = 0xFFFF;
+	// The S2C 0x2F states a flag row took. A client writes a flag's pose,
+	// flags byte and carry links from a new state only: its own drop, fall
+	// and ride move the flag between states (ClientWorldMaterializer). The
+	// destroy of the flag's person carrier makes a state too.
+	// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
+	//  flag's pose]
+	uint32_t objective_state_serial = 0;
+	// The dying carrier's last pose, taken when the client destroys the row
+	// of the person carrying this flag: Entity_Destroy drops the carried
+	// object off it before its fields are wiped. Valid for the state that
+	// destroy made (objective_drop_serial == objective_state_serial).
+	// [orig: Entity_Destroy @0x43E8B1..0x43E8B8 -> Entity_DropCarriedObject]
+	int32_t objective_drop_x = 0;
+	int32_t objective_drop_y = 0;
+	int32_t objective_drop_z = 0;
+	int32_t objective_drop_heading_bam = 0;
+	int32_t objective_drop_pitch_bam = 0;
+	uint32_t objective_drop_serial = 0;
 	uint16_t fire_target_handle = 0xFFFF; // shooter AI lock from the tag-2 fire descriptor
 	// The pure-client stale-carrier sweep's run length: consecutive mover
 	// ticks this no-callback child's persistent carrier stayed unresolvable.
@@ -601,7 +631,7 @@ struct ClientMountedAmmoState {
 // original fixed tables; keeping them bounded makes refresh, clear, and expiry
 // behavior independent from presentation.
 // [orig: MapOverlay_UpdateOrCreateSlot @0x5BEA60; MapOverlay_AllocSlot @0x5BE970;
-//  update_map_overlay_timers @0x5BFCE0]
+//  MapOverlay_UpdateTimers @0x5BFCE0]
 inline constexpr std::size_t kMinimapTransientCapacity = 328;
 inline constexpr std::size_t kMinimapPersistentCapacity = 328;
 inline constexpr std::size_t kMinimapSpecialCapacity = 504;
@@ -623,13 +653,13 @@ struct ClientMinimapOverlaySlot {
 	uint16_t remaining_ticks = 0;
 	// Regular (non-special) markers draw from the live decoded entity; this
 	// mirrors retail's entity[538] draw gate and is refreshed each tick.
-	// [orig: render_minimap_slot_blip @0x5be4b8]
+	// [orig: Render_MinimapSlotBlip @0x5be4b8]
 	bool entity_known = false;
 };
 
 // One 0x6B keep-alive link: while it lives it refreshes its special slot's
 // lifetime and handle each tick; its expiry clears the slot.
-// [orig: linked table @0x28E1B28, update_map_overlay_timers @0x5bfd3a..]
+// [orig: linked table @0x28E1B28, MapOverlay_UpdateTimers @0x5bfd3a..]
 struct ClientMinimapLinkedSlot {
 	// The nearest-designation query reads the retained link, even if its
 	// special map slot could not be allocated. [orig: @0x5BEC95..0x5BECB5]
@@ -660,7 +690,7 @@ struct ClientMinimapState {
 // authoritative value.
 // The reassembly stream plus the decoded board. The stream is per-session
 // state whose lifetime the decoder does not own, so it lives here -- retail
-// keeps the same thing in one global stream [orig: g_scoreReassemblyStream
+// keeps the same thing in one global stream [orig: g_ScoreReassemblyStream
 // @0xA82324, reset only by an offset-0 chunk @0x431D79 and otherwise kept
 // across completed decodes].
 struct ClientEndRoundStats {
@@ -721,10 +751,10 @@ struct ClientDeathCameraTarget {
 // right after Server_PositionPlayerForSpawn, and — for a waypoint gametype
 // only, the off-wire hint the decoder is given — the host-filtered route the
 // waypoint track walks. Retail writes both straight from the handler onto
-// g_local_player_entity / g_waypointList; our reducer keeps no entity, so the
+// g_LocalPlayerEntity / g_WaypointList; our reducer keeps no entity, so the
 // role lands them [orig: NapiNPClientMsg_0x00F @0x42E200 — the pose stores
 //  (Position, Yaw, g_LocalPlayerLookYaw, Pitch @0x42E3E9, Roll @0x42E3F2);
-//  the g_waypointList rebuild (slot @0x42E47F, name id @0x42E492, the skipped
+//  the g_WaypointList rebuild (slot @0x42E47F, name id @0x42E492, the skipped
 //  byte @0x42E49F, Pool_GetEntryUnchecked(3, slot) @0x42E4A3)].
 struct ClientWorldStateLoad {
 	std::uint32_t revision = 0; // advances once per decoded 0x0F
@@ -742,7 +772,7 @@ struct ClientWorldStateLoad {
 // The connection quality the client itself measures: the last completed S2C
 // 0x57 round trip, the ten-entry ring's mean, and the bucketed 0..4 level the
 // C2S 0x4C report carries [orig: dword_A860D4 / CNetStats_GetAveragePing
-//  @0x4C2750 / g_netQuality @0x82BF88 via CNetQuality_SetLevel @0x4C3060].
+//  @0x4C2750 / g_NetQuality @0x82BF88 via CNetQuality_SetLevel @0x4C3060].
 struct ClientNetQuality {
 	std::uint32_t ping_ms = 0;
 	std::uint32_t average_ping_ms = 0;
@@ -787,7 +817,7 @@ struct ClientState {
 	// folded from the 0x0A sub-block-1 timer snapshot: 62 x the wire's whole
 	// seconds, or -1 when the wire value is negative. Feeds the end-round
 	// ladder's game-time line and timed/untimed arm picks (D-HUD-25).
-	// [orig: g_round_time_remaining @0x24C1958 — the store
+	// [orig: g_RoundTimeRemaining @0x24C1958 — the store
 	//  NapiNPClientMsg_0x00A @0x430219..0x430235; mission-start seed -1
 	//  @0x524A89]
 	std::int32_t round_time_remaining_ticks = -1;
@@ -795,10 +825,17 @@ struct ClientState {
 	// named values the same sub-block-1 timer state carries, zero-extended
 	// from their wire bytes; until the first one lands they hold the
 	// WacScript_FreeAll seeds 20 / 13.
-	// [orig: NapiNPClientMsg_0x00A `mov wac_var_breathtime,edx` @0x4301A1, `mov
-	//  wac_var_fallmps,eax` @0x4301BC; seeds @0x4F6381 / @0x4F638B]
+	// [orig: NapiNPClientMsg_0x00A `mov g_WacVarBreathTime,edx` @0x4301A1, `mov
+	//  g_WacVarFallMps,eax` @0x4301BC; seeds @0x4F6381 / @0x4F638B]
 	std::int32_t breathtime = 20;
 	std::int32_t fallmps = 13;
+	// The local player's underwater breath samples (four per submerged second;
+	// the drown limit is 4 * breathtime): the host's playerSlot+460 crossing
+	// as the phase-0 sub-block byte, the breath bar's counter. Retained
+	// between phase cycles like the client global.
+	// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C; the host's write
+	//  NetPacket_WritePlayerState @0x4FF8D5; reader HUD_DrawBreathBar @0x59D6F0]
+	std::uint16_t breath_samples = 0;
 	// The other three phase-0 0x0A sub-block-0 whole-second timers the DEATH
 	// screen reads [orig: NapiNPClientMsg_0x00A stores @0x430084 dword_A85B5C
 	// (slot+360, the respawn penalty — STROVER_PENALTYTIMER), @0x43009f
@@ -806,11 +843,11 @@ struct ClientState {
 	// STROVER_CALLMEDIC), @0x4300c3 dword_A85B68 (slot+364, the spawn-target
 	// hold — STROVER_PSPRESPAWN); consumer UI_UpdateDeathScreenContent
 	// @0x5536a0]. Retained between phase cycles like the client globals.
-	// The client-local death screen (retail g_death_screen_active): the 0x0A
+	// The client-local death screen (retail g_DeathScreenActive): the 0x0A
 	// header's flags1 bit 0 EDGES — a rising edge opens it and zeroes the
 	// sub-mode / kill-cam target and arms the enemy-tag grant; a falling edge
 	// closes it and clears the grant [orig: NapiNPClientMsg_0x00A
-	// @0x42ff88..0x43002b — dword_A860F0/A860F4 = 0 @0x42ffa6, g_enemyTagsVisible
+	// @0x42ff88..0x43002b — dword_A860F0/A860F4 = 0 @0x42ffa6, g_EnemyTagsVisible
 	// @0x42ffb2/@0x430025]. The sub-mode is written by the spectate actions
 	// (unported) and stays 0 here.
 	uint8_t hud_hit_feedback_frames = 0; // [orig: dword_A8235C @0x42FF60..0x42FF74]
@@ -826,7 +863,7 @@ struct ClientState {
 	// The self row's respawn_revision the latch clear last consumed.
 	std::uint32_t local_respawn_revision_seen = 0;
 	bool enemy_tags_visible = false;
-	// The deploy-map OVERLAY (retail g_deploy_screen_active @0xA860DC): armed by
+	// The deploy-map OVERLAY (retail g_DeployScreenActive @0xA860DC): armed by
 	// the S2C 0x0F game_flags bit0 unless the death screen is already up, then
 	// host-maintained — set AND cleared — every per-frame 0x0A from flags1 bit1.
 	// It is a UI signal only (the frame loop opens death.mnu's DEATH screen once
@@ -835,7 +872,7 @@ struct ClientState {
 	// @0x42ff82; the death.mnu open latch Render_ProcessMainSceneFrame
 	// @0x5cab5e..0x5cab8b]
 	bool deploy_overlay_active = false;
-	// The death.mnu DEATH screen's open latch (retail g_death_menu_open_latch
+	// The death.mnu DEATH screen's open latch (retail g_DeathMenuOpenLatch
 	// @0x24C1894): the frame loop opens the screen once per arming and stamps
 	// the latch result-blind; only the trigger falling clears it (the
 	// close-on-clear leg -> Game_CloseInGameScreens), never the player's own
@@ -886,7 +923,7 @@ struct ClientState {
 	ClientScoreboard scoreboard;
 	ClientScoreFeedback score_feedback;
 	// The host VarList's EXP_FANFARE u16 (lo/hi thresholds of the 0x81 tone
-	// ladder, hud/score_fanfare.h) [orig: g_sessionvar_exp_fanfare @0x24d5a10].
+	// ladder, hud/score_fanfare.h) [orig: g_SessionVarExpFanfare @0x24d5a10].
 	uint16_t exp_fanfare = 0;
 	ClientSpawnWaveStatus spawn_waves;
 	ClientDeathCameraTarget death_camera;
@@ -931,7 +968,7 @@ bool client_minimap_grid_origin(const ClientState &state, int32_t &out_x_q16,
 // mapping so an embedder restoring a client-local row (the deployed local
 // player) cannot fork the palette.
 // [orig: the team switch @0x5becb8..0x5bece4 over
-//  g_minimap_overlay_color_table @0x840A10]
+//  g_MinimapOverlayColorTable @0x840A10]
 uint32_t minimap_team_argb(uint8_t team);
 
 } // namespace opennova::replication

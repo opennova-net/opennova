@@ -39,7 +39,7 @@ public:
 	virtual ~TerrainStaticShadowPageRasterizer() = default;
 	virtual std::shared_ptr<const opennova::terrain::TerrainStaticShadowCompilationSnapshot>
 	compilation_snapshot() const = 0;
-	// The frame-shared Render_ShaderTickMs the provider's begin_frame received.
+	// The frame-shared g_RenderShaderTickMs the provider's begin_frame received.
 	// The device stamps it on every composition job it enqueues so a worker
 	// samples caster material animation at the requesting frame, exactly as
 	// retail evaluates tile-model materials inside the tile render.
@@ -62,7 +62,7 @@ public:
 			bool p_tile_overlay_enabled);
 	void clear();
 	// One PolyTrn_RenderFrame: the cache frame advances and this frame's
-	// claims stamp the given TOD epoch (Env_TodEpoch).
+	// claims stamp the given TOD epoch (g_EnvTodEpoch).
 	void begin_frame(uint64_t p_frame_id, uint32_t p_tod_epoch);
 	// Byte-level capture diagnostics (full-page FNV output hash, pre/post
 	// shadow byte diffs) copy and re-walk every composed 256 KB page — that

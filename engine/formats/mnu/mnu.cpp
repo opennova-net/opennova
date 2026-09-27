@@ -599,7 +599,7 @@ Window parse_window(const mnu_xml::Node *window_node);
 
 // Parse WINDOW element recursively.
 // [orig: CUIElement_ParseXMLDefinition @ 0x648120 (base attrs); edit attrs in
-//  parse_edit_widget_xml_properties @ 0x661d10; checkbox attrs @ 0x64ad90]
+//  CEditWnd_ParseXMLProperties @ 0x661d10; checkbox attrs @ 0x64ad90]
 // The original splits attributes across a base parser + per-widget-class overrides;
 // this reimpl flattens them onto every window (harmless superset), including the
 // per-class FORM (int -> widget+0x124 @0x6482a6), GLOBAL_VAR (@0x648323) and PASSWORD
@@ -766,7 +766,7 @@ Window parse_window(const mnu_xml::Node *window_node) {
 
 // Parse SCREEN element.
 // MNU format: <SCREEN><NAME>STARTUP</NAME><MUSICVAR>1</MUSICVAR>...
-// [orig: parse_scene_node_attributes @ 0x639630; SCREEN node callback @ 0x63b800]
+// [orig: CUIScene_ParseNodeAttributes @ 0x639630; SCREEN node callback @ 0x63b800]
 // SCREEN is the only document root the original handles (no <sc> script tag exists);
 // the reimpl's optional <MNU>/<MENU> wrapper is a harmless superset.
 Screen parse_screen(const mnu_xml::Node *screen_node) {

@@ -920,7 +920,7 @@ bool run_reactive_replies() {
 		            "0x0A -> 0x19 ack")) return false;
 	}
 	// 0x29 team/spawn ack -> NO 0x51 on a plain join. [orig: NapiNPServerMsg_0x029 @0x514F10]
-	// only replies 0x51 for a pending g_team_change_entity_list entry (team-change flow,
+	// only replies 0x51 for a pending g_TeamChangeEntityList entry (team-change flow,
 	// unmodeled); the golden session's deploy-time C 0x29 draws no 0x51 anywhere. The old
 	// unconditional zero-id 0x51 made the client REBIND its own player's CharacterEntity
 	// (@0x431BB0 field-parses it) onto a vehicle archetype — the DBuggy1 shadow (D-NET-148).
@@ -965,7 +965,7 @@ bool run_reactive_replies() {
 }
 
 // A plain-join C2S 0x29 draws no S2C 0x51 even with a bound player: the original replies 0x51
-// only for a pending g_team_change_entity_list entry [orig: NapiNPServerMsg_0x029 @0x514F10
+// only for a pending g_TeamChangeEntityList entry [orig: NapiNPServerMsg_0x029 @0x514F10
 // @0x514f7c], and the client field-parses 0x51 (@0x431BB0 CharacterEntity rebind) — an
 // invented zero-id confirm re-bound the joiner to a vehicle archetype (D-NET-148).
 bool run_plain_join_tag29_draws_no_tag51() {
@@ -1401,6 +1401,39 @@ bool run_never_template_disables_reap_and_is_advertised() {
 	              "the silent peer survives ten minutes under a NEVER template");
 }
 
+// The host's configured `mpmaxpacketsize` rides CS field 13 of both 0x82 blocks.
+// [orig: CNapiNetwork_Init @0x4ca4a0 — field 13 @0x4caa53..0x4caa76; SendSessionInit
+//  @0x620ef0 emits the live blocks]
+bool run_configured_max_packet_size_lands_in_cs_field_13() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
+	config.max_packet_size = 2000;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			kHostKey, nullptr, config);
+	const PeerAddr peer{0x0100007Fu, 30741};
+	const std::string client_scrk = "MTUSCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
+	ClientHello hello = make_jointoperations_client_hello(1);
+	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
+	ClientAuth auth = make_valid_client_auth(1, 0xC0FFEE56u, kHostKey, "TestJoiner", client_scrk);
+	auto adg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+	auto ra = inmatch::handle_server_datagram(ctx, peer, adg.data(), adg.size(), 2);
+	uint8_t op = 0;
+	std::vector<uint8_t> body;
+	ServerAuth sa;
+	if (!expect(!ra.outbound.empty() &&
+	                    nw_decode_inbound(ra.outbound[0].data(), ra.outbound[0].size(), op, body) &&
+	                    op == SESSION_OPCODE_SERVER_AUTH && parse_server_auth(body.data(), body.size(), sa),
+	            "the configured host admits the join")) return false;
+	int field13_blocks = 0;
+	for (const std::vector<CsField> *block : {&sa.client_cs, &sa.server_cs}) {
+		for (const CsField &field : *block)
+			if (field.field_index == 13 && field.value == 2000u) ++field13_blocks;
+	}
+	return expect(field13_blocks == 2,
+	              "a configured mpmaxpacketsize of 2000 lands in CS field 13 of both 0x82 blocks");
+}
+
 bool run_game_environment_and_admission_fsm_are_enforced() {
 	const std::string scrk =
 			"FSMCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
@@ -1436,6 +1469,24 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 				event.ds == 1 && event.dc == 2 && event.dpc == bad.reason,
 				"game JOIN retains the connection and stages the exact compatibility DPC")) return false;
 		conn.link.transport = nullptr;
+	}
+
+	// The DB (debug build) tag loads into the stored join environment like the
+	// other environment tags. [orig: NapiNetConfig_LoadFromConnTags @0x4C7260,
+	//  the DB leg @0x4C733E]
+	{
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey);
+		ClientAuth auth = make_valid_client_auth(1, 0xA0000001u,
+				kHostKey, "DebugBuild", scrk);
+		auth.cu.push_back(make_client_cu_chunk(2, "DB", "1"));
+		const PeerAddr peer{0x0100007Fu, 31301};
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		(void)inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		if (!expect(inmatch::connection_count(ctx) == 1 &&
+				ctx.np_protocol.connection_list.front().join_environment.db == 1,
+				"the DB join tag loads into the connection's join environment")) return false;
 	}
 
 	// A form post cannot skip the JOIN request. The protocol violation tears
@@ -1507,7 +1558,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	}
 
 	// D-NET-166: the expansion version-checksum gate. An EXPANSION host compares
-	// atol(VERSIONCRCSTRING) against its own g_expansion_checksum and rejects a
+	// atol(VERSIONCRCSTRING) against its own g_ExpansionChecksum and rejects a
 	// mismatch; a matching nonzero (and negative — "%ld" of a bit-31 CRC) value
 	// admits [orig: Server_ValidatePlayerJoinRequest — gate @0x51231e, compare
 	// @0x512331, reject DPC=48 @0x512341].
@@ -1727,7 +1778,7 @@ bool run_expansion_join_reasons_and_tlv_order() {
 		auto &conn = roster.front();
 		conn.type = inmatch::NapiNPConnection::kTypeServerSide;
 		conn.admission_stage = inmatch::GameAdmissionStage::AwaitJoinRequest;
-		conn.join_environment = {0, 2, 1, 20042002, 180};
+		conn.join_environment = {0, 2, 1, 0, 20042002, 180};
 		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 		conn.link.transport = &transport;
 		auto replies = inmatch::dispatch_session_replies(config, conn,
@@ -2054,7 +2105,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 	}
 
 	if (!expect(
-				inmatch::drop_connection(ctx, first_peer),
+				inmatch::destroy_connection(ctx, first_peer, nullptr),
 				"disconnect releases the first remote roster identity")) {
 		return false;
 	}
@@ -2075,7 +2126,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 		return false;
 	}
 	if (!expect(
-				inmatch::drop_connection(ctx, replacement_peer),
+				inmatch::destroy_connection(ctx, replacement_peer, nullptr),
 				"pre-spawn teardown releases an advertised reservation")) {
 		return false;
 	}
@@ -2639,7 +2690,7 @@ bool run_spectator_admission_codes_match_retail() {
 		conn.type = inmatch::NapiNPConnection::kTypeServerSide;
 		conn.phase = inmatch::ConnectionPhase::Joined;
 		conn.admission_stage = inmatch::GameAdmissionStage::AwaitJoinRequest;
-		conn.join_environment = {0, 2, 1, 20042002, 180};
+		conn.join_environment = {0, 2, 1, 0, 20042002, 180};
 		conn.join_spectator_request = spectator_request;
 		conn.join_spectator_password = std::move(password);
 		return conn;
@@ -3507,6 +3558,7 @@ int main() {
 	ok = run_inactive_peer_is_reaped() && ok;
 	ok = run_disconnect_removes_leaver_from_spawn_waves() && ok;
 	ok = run_never_template_disables_reap_and_is_advertised() && ok;
+	ok = run_configured_max_packet_size_lands_in_cs_field_13() && ok;
 	ok = run_game_environment_and_admission_fsm_are_enforced() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	ok = run_expansion_join_reasons_and_tlv_order() && ok;

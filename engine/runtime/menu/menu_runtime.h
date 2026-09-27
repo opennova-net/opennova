@@ -15,9 +15,9 @@
 // the document under a widget activation), so no document pointer is held
 // across a sink call.
 // [orig: CUIWidget_HandleScriptedAction @0x6497f0; CUIScene_SelectNodeByName
-//  @0x63b6b0; UI_DispatchScreenEvent @0x54e6a0; dispatch_mouse_event
-//  @0x63ab00; widget_process_mouse_event @0x647a00; combobox_handle_event
-//  @0x65c190; edit_widget_handle_input_event @0x661510]
+//  @0x63b6b0; UI_DispatchScreenEvent @0x54e6a0; UI_DispatchMouseEvent
+//  @0x63ab00; CWnd_ProcessMouseEvent @0x647a00; CComboWnd_HandleEvent
+//  @0x65c190; CEditWnd_HandleInputEvent @0x661510]
 
 #include <formats/mnu/mnu.h>
 
@@ -234,7 +234,7 @@ public:
 
 	// Show a screen (no stack change); unknown screen -> false. Closes the open
 	// dropdown first [orig: CUIScene_SelectNodeByName @0x63b6b0 closes
-	// g_ui_active_combo_wnd].
+	// g_UIActiveComboWnd].
 	bool show_screen(const std::string &name);
 	// The in-menu forward move (same-file SCREEN actions): pushes the current
 	// screen for pop_screen.
@@ -383,9 +383,9 @@ private:
 	std::vector<int> id_of_index_;
 	std::unordered_map<int, int> index_of_id_;
 
-	// keyboard/edit focus [orig: g_ui_focus_wnd @0x31C16D4]
+	// keyboard/edit focus [orig: g_UIFocusWnd @0x31C16D4]
 	int focus_id_ = -1;
-	// single open dropdown [orig: g_ui_active_combo_wnd @0x31C16D0]
+	// single open dropdown [orig: g_UIActiveComboWnd @0x31C16D0]
 	int open_combo_id_ = -1;
 	int last_claim_ = -1;
 	float last_mouse_x_ = 0.0f, last_mouse_y_ = 0.0f;

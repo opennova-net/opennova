@@ -17,8 +17,8 @@ outer frame
   Render_ProcessMainSceneFrame           one variable-rate render
 ```
 
-OpenNova keeps that shape with retail's own bank (`world::TickAccumulator`'s
-`RetailMainLoop` policy, selected by the game and the dedicated host): a long
+OpenNova keeps that shape with retail's own bank (`world::TickAccumulator`,
+the one bank the game and the dedicated host both drive): a long
 frame's backlog is low-passed over the following frames by the 7/8 frame-time
 smoother instead of run as one burst of catch-up ticks, a bank over 500 ms
 clamps, and the mission start banks neither the load nor the render time of
@@ -68,14 +68,14 @@ section 26.1.
 
 The whole entity update is admitted in `Game_ProcessMainFrame @0x5263F0`
 (`@0x526703..0x526742`): a client skips to the second half; a playing host on its
-death screen skips the humans test (`is_mp_session_peer`, `g_death_screen_active`);
-no human and a started script clock skip the update (`wac_var_humans`,
-`wac_var_ticks`); the retained pre-round byte skips it; and in session the
-round-over latch `g_spawn_success_gate` skips it (raised by
+death screen skips the humans test (`is_mp_session_peer`, `g_DeathScreenActive`);
+no human and a started script clock skip the update (`g_WacVarHumans`,
+`g_WacVarTicks`); the retained pre-round byte skips it; and in session the
+round-over latch `g_SpawnSuccessGate` skips it (raised by
 `Server_ProcessRoundEnd @0x5164F0`, the S2C 0x1D handler `NapiNPClientMsg_0x01D
 @0x430840` and `Cine_StartPlayback @0x577840`, cleared at
 `Game_StartMission @0x524360`).
-`wac_var_humans` counts live pool-0 rows with Flags 0x100 and not Flags 1
+`g_WacVarHumans` counts live pool-0 rows with Flags 0x100 and not Flags 1
 (`Server_BuildEntitySlotLists @0x4F97A0`, `@0x4F9815` / `@0x4F9820`): a dead
 player counts, a hidden or not-yet-deployed one does not. Its definition test
 (`@0x4F9809`) only tests for an allocated row, because every spawn links an
@@ -83,7 +83,7 @@ items.def row, row 0 for a type items.def lacks (`ItemList_FindIndexByTypeId
 @0x49E100`, the miss `@0x49E131`).
 Port: `World::entity_update_admitted`, with the death-screen exemption stamped by
 `HostRole` (`CachedFrameState::peer_death_screen`). The update also returns at its head,
-on every peer, while there is no local player entity (`cmp g_local_player_entity,0`
+on every peer, while there is no local player entity (`cmp g_LocalPlayerEntity,0`
 `@0x4C2110`, to the epilogue `@0x4C2642`), before the epilog branch: a retail world with no
 local player never runs its entity update even when the frame admits it. A running retail
 mission always has one (`Game_StartMission` calls `Player_InitPlayer` on every peer,
@@ -97,7 +97,7 @@ the MISSION FAILED screen; the pass then joins the proximity tables and the
 pool-0 walk and tail-calls `Cinematic_EpilogUpdate @0x577950` in place of the entity-update
 counter's add (`@0x4C2624` / `@0x4C2634`).
 
-The round clock is not frozen by the round end: `g_round_time_remaining` is
+The round clock is not frozen by the round end: `g_RoundTimeRemaining` is
 decremented in `Game_ProcessMainFrame` (`@0x5265DA..0x526602`) under the authority,
 no pause, no epilog, no pre-round delay and time left only, so it keeps counting
 through the post-round linger. `tick` itself advances only while the in-game
@@ -106,7 +106,7 @@ every frame, paused or not, while the camera and the WeaponAction pump do not.
 
 Mission start: `Game_StartMission @0x524360` collects the spawn vehicles and
 builds the spawn-marker list right after the mission load (the
-`build_spawn_marker_budget_list @0x529B40` call `@0x5252C6`), ahead of
+`Spawn_BuildMarkerBudgetList @0x529B40` call `@0x5252C6`), ahead of
 `Entity_InitAllFromModels @0x40E460` (`@0x52567F`), the authority-gated PreMission
 pass (the `EventTrigger_UpdateAllWithFlag2 @0x454DC0` call `@0x525B86`) and the WAC's first
 execution; `MissionKernel::boot` builds it once the definitions are attached and
@@ -290,14 +290,18 @@ revision travel together. `Simulation` reuses its storage only when no reader
 holds the previous snapshot. A nested callback that requests another snapshot
 gets fresh storage, so the outer walk remains valid; reset also leaves an
 outstanding lease valid. Row identity comparison reuses storage and compares
-fields, not a hash. Only the bound `get_present_snapshot()` /
+fields, not a hash. The bound `get_present_snapshot()` /
 `get_present_door_phases()` script/tooling boundary copies into Godot packed
-arrays. Both paths share the same native builders and consume-once joiner
-animation pulses.
+arrays, and two native cold paths also take that full build-and-copy route:
+`MissionRoot::for_each_present_node` and
+`LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions`. Each such
+call is an extra build, and on a joiner it also consumes that frame's
+animation pulses: every path shares the same native builders and the
+consume-once joiner animation pulses.
 
 This lease is host implementation, not a reconstructed retail object. Retail
 walks its native pool base, used count and stride directly
-`[orig: collect_visible_entities_for_terrain @ 0x5C8C60]`
+`[orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5C8C60]`
 (`@ 0x5C8CAA`, `@ 0x5C8CB2`, `@ 0x5C8CB6`). The change removes the extra
 packed-array allocation/copy between two native consumers. See
 [03TR frame costs](perf/03tr-frame-costs.md) for measurement and the real
@@ -428,7 +432,7 @@ load stream carries that raw field so joining clients materialize the same
 marker. This remains one entity-data path rather than a KOTH-specific network
 adapter. `[orig: Entity_SpawnFromBMSRecord @0x40F157..0x40F173;
 Server_UpdateCaptureZoneProximity @0x5089E8..0x508A68;
-serialize_entity_pool_to_packet @0x503593..0x5035A9;
+NetPacket_SerializeEntityPoolToPacket @0x503593..0x5035A9;
 NapiNPClientMsg_0x020 @0x425D07..0x425D1B]`
 Its winner check implements the all-zones-owned rule (which answers only in
 A&S and C&C, `ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920`) and

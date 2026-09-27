@@ -15,27 +15,12 @@
 #include <memory>
 #include <vector>
 
+#include "item_pool_step.h"
+
 using namespace opennova::world;
+using test_world::step_item_pool;
 
 static int failures = 0;
-
-// One entity-update step of an item row's pool: every pool-1 row's own visit
-// (World::update_pool1_slot), or the pool-2/3 cohort walk.
-// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
-//  @0x4C230C]
-static void step_item_pool(World &w, int pool) {
-    if (pool != 1) {
-        tick_item_event_pool(w, pool);
-        return;
-    }
-    TickContext ctx;
-    ctx.world = &w;
-    ctx.is_authority = true;
-    ctx.logic_tick = w.logic_tick;
-    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
-        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
-            w.update_pool1_slot(*row, ctx);
-}
 
 #define CHECK(c)                                                                                   \
     do {                                                                                           \
@@ -483,7 +468,7 @@ void test_deathmatch_and_hill_outcomes() {
     // while inside a type-6006 hill and decays it one service step outside.
     // Its timer starts at zero, so the first match tick runs immediately and
     // subsequent runs are exactly 62 ticks apart.
-    // [orig: g_periodic_second_timer in Server_TickUpdate @0x51D7E0;
+    // [orig: g_PeriodicSecondTimer in Server_TickUpdate @0x51D7E0;
     // Server_UpdateCaptureZoneProximity @0x5086A0]
     world->match.configure(koth);
     world->match.upsert_player({solo, 0, "Solo"});
@@ -928,7 +913,7 @@ void test_demolition_flag_and_flagball_gameplay() {
 
     // FlagReturnTime uses the flag's pool-1 class clock. A moved flag first
     // rearms its return counter; subsequent idle callbacks consume it.
-    // [orig: flag update callback @0x408430; g_FlagReturnTime_2 @0x24D2174]
+    // [orig: flag update callback @0x408430; g_FlagReturnTime2 @0x24D2174]
     MatchRules timed_return;
     timed_return.game_type = gt::kFlagBall;
     timed_return.flag_return_ticks = 5;
@@ -1088,8 +1073,9 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
 // ahead of the next server tick. The handler returns at once off the
 // authority, so a peer without it picks nothing up.
 // [orig: Entity_ProcessWaypointInteraction @0x4AD820 (the is_authority test
-//  @0x4AD823), its caller @0x4B2FF5; Game_ProcessMainFrame runs
-//  Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6]
+//  @0x4AD823), its caller @0x4B2FF5; Game_ProcessMainFrame @0x5263F0 runs
+//  the Entity_UpdateAllEntities call @0x52674B after the Server_TickUpdate
+//  call @0x5266B6]
 void test_entity_update_consumes_its_movement_contacts() {
     for (const bool authority : {false, true}) {
         auto world = std::make_unique<World>();

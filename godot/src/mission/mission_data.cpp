@@ -117,7 +117,6 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mission_name"), &MissionData::get_mission_name);
 	ClassDB::bind_method(D_METHOD("get_terrain_ref"), &MissionData::get_terrain_ref);
 	ClassDB::bind_method(D_METHOD("get_environment_ref"), &MissionData::get_environment_ref);
-	ClassDB::bind_method(D_METHOD("get_tile_set_ref"), &MissionData::get_tile_set_ref);
 	ClassDB::bind_method(D_METHOD("get_info"), &MissionData::get_info);
 	ClassDB::bind_method(D_METHOD("get_environment_overrides"), &MissionData::get_environment_overrides);
 	ClassDB::bind_method(D_METHOD("get_entity_count", "kind"), &MissionData::get_entity_count);

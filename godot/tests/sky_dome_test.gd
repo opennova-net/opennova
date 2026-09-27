@@ -1,7 +1,7 @@
 extends GutTest
 
 # C7 driver-contract pins for the recovered two-pass dome spec
-# [orig: render_skybox @ 0x579080]. The per-fragment combine itself is shader
+# [orig: Render_Skybox @ 0x579080]. The per-fragment combine itself is shader
 # code (verified by visual A/B); these pin what SkyDome pushes into it.
 
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
@@ -36,10 +36,10 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	# celestial-axis correction).
 	assert_eq(mat.get_shader_parameter("u_sun_dir"),
 		ctx.env_node.get_sun_direction(),
-		"pass 1 is always sun-driven [orig: render_skybox @ 0x579287]")
+		"pass 1 is always sun-driven [orig: Render_Skybox @ 0x579287]")
 	assert_eq(mat.get_shader_parameter("u_light_dir"),
 		ctx.env_node.get_light_direction(),
-		"pass 2 follows the active light [orig: render_skybox @ 0x579291]")
+		"pass 2 follows the active light [orig: Render_Skybox @ 0x579291]")
 	assert_eq(mat.get_shader_parameter("u_fog_color"), ctx.env_node.get_skyfog_color(),
 		"the dome fogs with the dedicated skyfog block [orig: sky fog wrapper @ 0x579cb0]")
 	assert_eq(float(mat.get_shader_parameter("u_fog_end")), ctx.env_node.get_fog_level(), "dome fog end distance")
@@ -107,7 +107,7 @@ func test_dome_fog_uses_skyfog_instead_of_world_fog() -> void:
 
 
 func test_underwater_dome_keeps_the_smoothed_fog_end_without_rewriting_sky_wrapper() -> void:
-	# render_skybox loads c9.x from the raw smoothed Env_FogDistCurrent with no
+	# Render_Skybox loads c9.x from the raw smoothed g_EnvFogDistCurrent with no
 	# underwater leg (env-tod-re.md, the VS-constant table), so the dome's fog
 	# end is the same unscaled distance on both sides of the water plane while
 	# the world passes fog to the murk-derived end.
@@ -146,7 +146,7 @@ func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
 	assert_eq(mat.get_shader_parameter("u_flat_pass"), true, "advanced_clouds 0 takes the flat pass")
 	assert_eq(mat.get_shader_parameter("u_flat_color"), ctx.env_node.get_cloud_tint(),
-		"the flat dome color is cloud_rgb [orig: render_skybox @ 0x579b42]")
+		"the flat dome color is cloud_rgb [orig: Render_Skybox @ 0x579b42]")
 	assert_eq(mat.get_shader_parameter("u_sky_base"), keyframed_base,
 		"the flat pass no longer overwrites the keyframed uniforms")
 
@@ -188,7 +188,7 @@ func test_dome_rides_at_half_camera_height() -> void:
 	cam.make_current()
 	ctx.sky.advance_frame(0.016)
 	assert_eq(ctx.sky.get_mesh_instance().global_position, Vector3(10.0, 4.0, 6.0),
-		"dome anchor = camera xz at HALF the camera height [orig: render_skybox @ 0x5790d0]")
+		"dome anchor = camera xz at HALF the camera height [orig: Render_Skybox @ 0x5790d0]")
 
 
 func test_dome_mesh_comes_from_the_libs_builder() -> void:
@@ -198,7 +198,7 @@ func test_dome_mesh_comes_from_the_libs_builder() -> void:
 	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
 	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-	assert_eq(positions.size(), 441, "441 dome vertices [orig: build_sky_dome_mesh @ 0x578db0]")
+	assert_eq(positions.size(), 441, "441 dome vertices [orig: SkyDome_BuildMesh @ 0x578db0]")
 	assert_eq(indices.size(), 2400, "800 triangles")
 	assert_eq(normals.size(), 441, "the witnessed FVF 0x212 normals ride along")
 	# The witnessed winding head (i, i+22, i+21), (i, i+1, i+22).
@@ -223,7 +223,7 @@ func test_scroll_offsets_come_from_the_weather_core() -> void:
 	assert_eq(off2, weather.get_cloud_uv_offset2(0.0, 0.0),
 		"sky reads layer 2 from the weather core")
 	# The accumulator rides U NEGATIVELY, V positively (no camera here, so the
-	# offsets are the pure accumulator terms) [orig: render_skybox @ 0x5791de].
+	# offsets are the pure accumulator terms) [orig: Render_Skybox @ 0x5791de].
 	assert_lt(off1.x, 0.0, "layer-1 U accumulator term is negative (env #26)")
 	assert_gt(off1.y, 0.0, "layer-1 V accumulator term is positive")
 
@@ -238,6 +238,54 @@ func test_scroll_falls_back_to_a_private_core_without_weather() -> void:
 	assert_ne(off1, first, "the fallback core keeps ticking the accumulators")
 	assert_lt(off1.x, 0.0, "fallback layer-1 U is negative too")
 	assert_ne(second, Vector2.ZERO, "layer 2 advances as well")
+
+
+func test_cloud_texture_axes_follow_the_render_basis() -> void:
+	# The builder's UVs are the render x/z scaled (layer 1 by 1/320, layer 2 by
+	# 3/2048) and retail draws the dome in that basis, so texture u runs along
+	# render x = Godot z and v along render z = Godot x. Drawn identity, u ran
+	# along Godot x: a mirrored cloud field drifting the other way (OT-E6,
+	# 2026-09-27).
+	var ctx := _make()
+	var mesh: ArrayMesh = ctx.sky.get_mesh_instance().mesh
+	var arrays := mesh.surface_get_arrays(0)
+	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var uv1: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+	var uv2: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV2]
+	var worst1 := 0.0
+	var worst2 := 0.0
+	for i in positions.size():
+		var along := Vector2(positions[i].z, positions[i].x)
+		worst1 = maxf(worst1, (uv1[i] - along * 0.003125).length())
+		worst2 = maxf(worst2, (uv2[i] - along * (3.0 / 2048.0)).length())
+	assert_lt(worst1, 1.0e-4, "layer-1 u follows Godot z (render x), v Godot x")
+	assert_lt(worst2, 1.0e-4, "layer-2 u follows Godot z (render x), v Godot x")
+	assert_gt(Vector2(positions[25].x, positions[25].z).length(), 50.0,
+			"the probe vertices sit off the dome axis")
+
+
+func test_cloud_scroll_camera_term_rides_the_render_axes() -> void:
+	# The scroll's camera term is +camera/4096 on layer 1 along the RENDER axes
+	# (the same basis as the dome UVs): an eye moved along Godot z (render x)
+	# scrolls U, one moved along Godot x (render z) scrolls V.
+	var ctx := _make()
+	var weather: Node3D = Weather.new()
+	weather.environment_path = ctx.env_node.get_path()
+	add_child_autofree(weather)
+	ctx.sky.weather_path = weather.get_path()
+	weather.advance_frame(TICK)
+	var cam := Camera3D.new()
+	add_child_autofree(cam)
+	cam.make_current()
+	var offsets: Array[Vector2] = []
+	for eye in [Vector3(0.0, 8.0, 0.0), Vector3(0.0, 8.0, 409.6), Vector3(409.6, 8.0, 0.0)]:
+		cam.global_position = eye
+		ctx.sky.advance_frame(0.0)
+		offsets.append(ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset1"))
+	assert_almost_eq(offsets[1].x - offsets[0].x, 0.1, 1.0e-5, "Godot z (render x) scrolls U")
+	assert_almost_eq(offsets[1].y - offsets[0].y, 0.0, 1.0e-5, "Godot z leaves V")
+	assert_almost_eq(offsets[2].x - offsets[0].x, 0.0, 1.0e-5, "Godot x leaves U")
+	assert_almost_eq(offsets[2].y - offsets[0].y, 0.1, 1.0e-5, "Godot x (render z) scrolls V")
 
 
 func test_rendered_dome_fog_matches_the_exposed_background() -> void:
@@ -266,9 +314,13 @@ func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 	camera.make_current()
 	var sky := SkyDome.new()
 	sky.environment_path = NodePath("../SkyTestEnv")
-	sky.frame_clear_environment = clear.environment
 	viewport.add_child(sky)
 	sky.advance_frame(0.0)
+	# GameWorld.update_frame_clear_color is the one frame-clear writer: above
+	# water outside thermal it writes the env's frame clear, pre-encoded to sRGB
+	# (game_world_test pins that writer). Stage the same device write here.
+	var skyfog: Vector3 = env_node.get_frame_clear_color()
+	clear.environment.background_color = Color(skyfog.x, skyfog.y, skyfog.z).linear_to_srgb()
 	# Fully fogged dome pixels and the open area beneath it must be the same
 	# color. Comparing rendered pixels catches Godot's background sRGB decode;
 	# comparing uniforms alone cannot detect that device conversion.
@@ -289,7 +341,7 @@ func test_rendered_dome_fog_matches_the_exposed_background() -> void:
 
 func test_world_beyond_the_dome_surface_draws_over_the_sky() -> void:
 	# Retail draws the dome with z-write off and ZFUNC ALWAYS before any world
-	# geometry (pass flags 0x300000 [orig: render_skybox @ 0x579883]), so the
+	# geometry (pass flags 0x300000 [orig: Render_Skybox @ 0x579883]), so the
 	# world overdraws it wherever it is. From 300 u up the dome (anchored at
 	# half the eye height) meets a horizontal view ray ~400 u out; a surface
 	# 600 u out must still draw over it.
@@ -336,8 +388,8 @@ func test_world_beyond_the_dome_surface_draws_over_the_sky() -> void:
 
 
 func test_cloud_pass_draws_after_the_bodies_on_the_sky_cloud_rung() -> void:
-	# Retail draws the gradient, then render_celestial_bodies(0), then the
-	# cloud pass [orig: render_skybox @ 0x5798e0 / @ 0x5798f1..0x579b15]: the
+	# Retail draws the gradient, then Render_CelestialBodies(0), then the
+	# cloud pass [orig: Render_Skybox @ 0x5798e0 / @ 0x5798f1..0x579b15]: the
 	# cloud pass is its own transparent draw one rung after the sky bodies.
 	var ctx := _make()
 	ctx.sky.advance_frame(0.016)
@@ -406,8 +458,8 @@ func _sky_view(clouds_opaque: bool, body_color: Color = Color(0, 0, 0, 0)) -> Di
 
 
 func test_the_gradient_pass_opens_the_sky_pass() -> void:
-	# The gradient draw precedes the bodies and the clouds inside render_skybox
-	# [orig: render_skybox @ 0x5798dc, @ 0x5798e0, @ 0x5798f1..0x579b15]. The
+	# The gradient draw precedes the bodies and the clouds inside Render_Skybox
+	# [orig: Render_Skybox @ 0x5798dc, @ 0x5798e0, @ 0x5798f1..0x579b15]. The
 	# pass writes no depth, so Godot orders it in the transparent list by its
 	# rung; on rung 0 it painted over both.
 	var ctx := _make()
@@ -434,7 +486,7 @@ func test_the_gradient_pass_opens_the_sky_pass() -> void:
 
 
 func test_flat_pass_drops_the_cloud_pass() -> void:
-	# advanced_clouds 0 draws the single flat dome [orig: render_skybox
+	# advanced_clouds 0 draws the single flat dome [orig: Render_Skybox
 	# @ 0x579b42..0x579c76] and no cloud pass.
 	var ctx := _make()
 	ctx.env.set_advanced_clouds(0)

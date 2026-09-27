@@ -6,9 +6,9 @@
 // document), radio groups, the spin wrap, the exclusive combo popup, the
 // hover edges, the double-click latch, CTRL multi-select, edit focus and the
 // key routing.
-// [orig: CUIWidget_HandleScriptedAction @0x6497f0; dispatch_mouse_event
-//  @0x63ab00; widget_process_mouse_event @0x647a00;
-//  edit_widget_handle_input_event @0x661510]
+// [orig: CUIWidget_HandleScriptedAction @0x6497f0; UI_DispatchMouseEvent
+//  @0x63ab00; CWnd_ProcessMouseEvent @0x647a00;
+//  CEditWnd_HandleInputEvent @0x661510]
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_flow.h>

@@ -40,7 +40,6 @@
 
 import contextlib
 import math
-import os
 import re
 
 import bpy
@@ -51,7 +50,7 @@ from .animation import (ANIM_FLAG_BIT3, ANIM_FLAG_LOOP, ANIM_FLAG_TRANSLATION, b
                         ground_under, head_of, part_bone, rig_of, root_of, slot_of, trigger_value)
 from .export import (ATTACH_RE, BONE_RE, CENTER_RE, PART_RE, Exporter, active_model, clean_name, descendants,
                      is_lod_root, model_roots)
-from .o3dtext import (ImportFailed, axis_basis, blender_axes, cli_notes, num, run_cli, scratch, strip_comment,
+from .o3dtext import (ImportFailed, Notes, axis_basis, blender_axes, import_text, num, playing, strip_comment,
                       tokens)
 
 # A rigid model's part follows its `!Rig` bone through this constraint.
@@ -113,15 +112,6 @@ def read_o3a(path):
                     "top": num(parts[6]),
                 })
     return set_
-
-
-def run_scene(context, path):
-    """The clip set's text, read, and the CLI's notes."""
-    with scratch() as tmp:
-        o3a = os.path.join(tmp, "set.o3a")
-        result = run_cli(context, ["anim", "scene", path, "-o", o3a], ImportFailed)
-        set_ = read_o3a(o3a)
-    return set_, cli_notes(result, "scene drops ")
 
 
 def linear(action):
@@ -196,7 +186,7 @@ def bone_name(index, name):
     return f"BN{index + 1:02d} {label}".strip()
 
 
-class Loader:
+class Loader(Notes):
     def __init__(self, context, model, set_, op=None):
         self.context = context
         self.scene = context.scene
@@ -209,10 +199,6 @@ class Loader:
         # What the run changed, each with its inverse: a failure puts the scene
         # back as it found it (never a half-built rig).
         self.undo = []
-
-    def note(self, text):
-        if text not in self.notes:
-            self.notes.append(text)
 
     def blender_rot(self, quat):
         """A mission-axes key as a Blender rotation in the model root's frame.
@@ -356,20 +342,11 @@ class Loader:
     def redrive(self):
         """A skinned model whose bones follow another model's parts (arms on a
         gun) rides sockets made at its rest; make them again at the rest the
-        rig has now (assembly.drive), the parts at theirs."""
+        rig has now, the parts at theirs (assembly.drive binds with every rig
+        of both models at rest)."""
         rig = self.model.o3d.drive_rig
-        if rig is None:
-            return
-        held = [(a.data, a.data.pose_position) for a in assembly.armatures(rig)]
-        for data, _ in held:
-            data.pose_position = "REST"
-        self.context.view_layer.update()
-        try:
+        if rig is not None:
             assembly.drive(self.model, rig)
-        finally:
-            for data, position in held:
-                data.pose_position = position
-            self.context.view_layer.update()
 
     # --- the clips ----------------------------------------------------------
     def shape_notes(self, clip):
@@ -417,11 +394,7 @@ class Loader:
         travel = Vector((0.0, 0.0, 0.0))
         worst = (0.0, 0)
         data = arm.animation_data or arm.animation_data_create()
-        slotted = hasattr(data, "action_slot")
-        held = (data.action, data.use_nla, data.action_slot if slotted else None)
-        try:
-            data.use_nla = False
-            data.action = action
+        with playing(data, action):
             # The pose that shows what the game draws: a key IS the bone's
             # rotation in the model's frame, and the rig's rest pose is the bind
             # the runtime measures it against, so the key poses the bone
@@ -464,11 +437,7 @@ class Loader:
                     travel += Vector((step.x, step.y, 0.0))
             self.write_triggers(arm, clip, frames)
             linear(action)
-            slot = data.action_slot if slotted else None
-        finally:
-            data.action, data.use_nla = held[0], held[1]
-            if slotted and held[0] is not None and held[2] is not None:
-                data.action_slot = held[2]
+            slot = getattr(data, "action_slot", None)
         # A known gap, not a fault: retail's exporter measured most tops at the
         # head, but not all (a death fall, a crawl; 64 of the 204 first-person
         # registrations carry a top above the bottom by a rule nothing has
@@ -929,7 +898,7 @@ def import_file(context, path, model=None, op=None):
     model = model or active_model(context)
     if model is None:
         raise ImportFailed("select an object of the model whose rig these clips animate")
-    set_, notes = run_scene(context, path)
+    set_, notes = import_text(context, ["anim", "scene"], path, "set.o3a", read_o3a)
     loader = Loader(context, model, set_, op)
     message, own = loader.run()
     return message, notes + own

@@ -49,7 +49,7 @@ void append_bank(const Bank &bank, hud::HudMinimapBank bank_id, world::World *wo
             policy = world::minimap_blip_draw_policy(*entity, slot.param);
             // v4: the map medic marker -- a LOCAL-TEAM entity whose class
             // carries the charattr Medic attribute; the other team's bit is
-            // forced off at the producer [orig: draw_entity_labels_and_markers
+            // forced off at the producer [orig: HUD_DrawEntityLabelsAndMarkers
             // @0x5a49e0 -- the team gate @0x5a4ac6/@0x5a4acf,
             // AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3].
             medic = local_player != nullptr && entity->team == local_player->team &&
@@ -98,7 +98,7 @@ void build_minimap_markers(const MinimapMarkerInputs &in,
     // restore it here unless a decoded regular row already covers the same wire
     // handle. The draw-call probe confirms cell 3, team-table blue, and the
     // ordinary 6px-floor path at map center.
-    // [orig: render_minimap_slot_blip @0x5BE240 -> draw_minimap_blip, the regular
+    // [orig: Render_MinimapSlotBlip @0x5BE240 -> Minimap_DrawBlip, the regular
     //  TSDicon submit @0x597F73; see hud-re.md]
     if (local_player == nullptr || local_marker_handle == world::EntityHandle::kInvalid ||
         retained_local_player)

@@ -421,7 +421,7 @@ void test_tracer_item_binding_fallbacks() {
 
 // Zero is the environment's no-water sentinel, not a plane at mission Z=0.
 // A grenade below zero in a dry mission therefore takes the above-water
-// gravity branch [orig: Env_WaterHeightFixed authoring gate + motor @ 0x443ffa].
+// gravity branch [orig: g_EnvWaterHeightFixed authoring gate + motor @ 0x443ffa].
 void test_zero_water_is_dry_below_altitude_zero() {
     Rig rig;
     const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, -10}, 0, 0);
@@ -683,7 +683,7 @@ void test_smoke_grenade_expiry_presents_no_second_obj_row() {
 // 0). Within 3 u of the surface it presents tag 26 at the water surface;
 // deeper, tag 27 at the surface and tag 25 at the round.
 // [orig: Entity_UpdateGrenadePhysics — the depth test @0x4449A4, the
-//  descriptor z = Env_WaterHeightFixed @0x4449BE, tag 26 @0x4449CC, tag 27
+//  descriptor z = g_EnvWaterHeightFixed @0x4449BE, tag 26 @0x4449CC, tag 27
 //  @0x4449DE, the round z @0x4449EE for tag 25 @0x4449F2, the push @0x444A0F]
 void test_submerged_fuse_presents_at_the_water_surface() {
     for (const float start_z : {8.0f, 5.0f}) {

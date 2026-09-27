@@ -14,7 +14,7 @@ namespace opennova::hud {
 // [orig: HUD_DrawMessageLog @0x5B9D70 (IDB-renamed 2026-08-21, ex the kong
 //  misnomer `draw_credits_scroll`), called from Server_DrawStatusScreen
 //  @0x50A2D0 (the call @0x50B21F) when the `OldMessages` toggle
-//  g_showMessageLog @0x24C18C0 is set (`xor g_showMessageLog, 1` @0x49B55A in
+//  g_ShowMessageLog @0x24C18C0 is set (`xor g_ShowMessageLog, 1` @0x49B55A in
 //  Input_HandleActionBinding, jumptable case 29; cleared by
 //  Game_InitRespawnState @0x49939A; catalog action 56 "OldMessages", default
 //  VK 0x4A = 'J').]
@@ -45,7 +45,7 @@ inline int message_log_step_px(int surface_w) {
 // The panel's top, SCREEN px [orig: (width * 0x78) >> 10 @0x5B9DA3..0x5B9DED].
 //
 // Retail adds two more terms here, both provably zero, so they are not carried:
-// fixedZ @0x24C18F4 has exactly ONE writer in the image and it stores a zeroed
+// g_OverlayOriginY @0x24C18F4 has exactly ONE writer in the image and it stores a zeroed
 // register [orig: Renderer_SetDisplayModeWithFallback @0x587370 — the store
 // @0x587622 with edi zeroed @0x58761A], and the chat box table's Y[1]
 // (dword_28E51FC) is never authored.

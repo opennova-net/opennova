@@ -42,7 +42,7 @@ struct WeatherCore {
 	EnvScalarChannels scalar_channels;
 	// OpenNova authoring extension: an ARMED wind timer whose expiry decays
 	// the oscillator intensity (x31 >> 5 per tick) back to zero. Unarmed
-	// wind never decays — retail's Env_WindScale is a constant
+	// wind never decays — retail's g_EnvWindScale is a constant
 	// (Environment_InitDefaults @ 0x57c1d1 is its only writer), so a set
 	// strength holds until the author changes it. Marked as an extension in
 	// docs/env/env-tod-re.md.
@@ -74,7 +74,7 @@ struct WeatherCore {
 	// The sim tail: both lightning sequencers with their additive rewrites
 	// [orig: @ 0x57ec6f..0x57edc4], the scalar springs [orig: @ 0x57ede2..
 	// 0x57ef92] and the cloud-scroll rate ramp [orig: @ 0x57eecc];
-	// cloud_rate_target = Env_CloudScrollRateTarget (sky_speed << 10).
+	// cloud_rate_target = g_EnvCloudScrollRateTarget (sky_speed << 10).
 	void tick_sim_tail(uint32_t lightning_packed, int cloud_rate_target);
 	// The render legs: modulator-2, the modulator, every color block against
 	// the fresh modulator [orig: @ 0x57ef97..0x57f03c], then the cloud-scroll
@@ -92,7 +92,7 @@ struct WeatherCore {
 	// colors (the standalone-sky fallback path).
 	void tick_cloud_scroll(float sky_speed);
 
-	// Raw Env_WindScale units; arming semantics per the extension note above.
+	// Raw g_EnvWindScale units; arming semantics per the extension note above.
 	void set_wind_intensity(int value);
 	void set_wind_duration_ticks(int ticks);
 
@@ -100,8 +100,8 @@ struct WeatherCore {
 	// iris_gain(light[1], sky[1], ground[1], light_dir, iris params) —
 	// full sun visibility (8/8 rays), no cover — chased into the modulator
 	// [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
-	//  terrain_sector_compute_lighting @ 0x5c7550 reads
-	//  Env_LightBlock[1]/Env_SkyBlock[1]/Env_GroundBlock[1]].
+	//  Terrain_SectorComputeLighting @ 0x5c7550 reads
+	//  g_EnvLightBlock[1]/g_EnvSkyBlock[1]/g_EnvGroundBlock[1]].
 	void set_exposure_from_outdoor_iris(float light_x, float light_y,
 			float light_z, float iris_percent, float iris_center);
 
@@ -111,7 +111,7 @@ struct WeatherCore {
 	// (oscillator.smoothed - 0x8000) / 0x8000 * 2, sway_phase =
 	// oscillator.ring_index * (2*pi / 256), lightning_intensity = the last
 	// SET flash level / 255. No shader reads the sway pair: retail's wind
-	// consumers are the detail foliage phase (Env_WaveOscRing[0], the
+	// consumers are the detail foliage phase (g_EnvWaveOscRing[0], the
 	// renderer's FoliageFrameCompiler), the light gen block and the HUD's
 	// CTRL FLICKER/SWING registers (WeatherOscillator::ring_slot).
 	float sway_amount() const;
@@ -124,8 +124,8 @@ struct WeatherCore {
 	// indoor ambient with a zeroed directional, outdoors against
 	// light[1]*level/8, sky[1], ground[1] — and the INT gains average into the
 	// modulator target. No samples -> the outdoor form above.
-	// [orig: compute_ambient_light_along_direction @ 0x5c7a00;
-	//  terrain_sector_compute_lighting @ 0x5c7550 — indoor swap @ 0x5c7660..,
+	// [orig: Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00;
+	//  Terrain_SectorComputeLighting @ 0x5c7550 — indoor swap @ 0x5c7660..,
 	//  no-interior-data 255 @ 0x5c7652, sun level @ 0x5c7784..0x5c77e9;
 	//  average @ 0x5c7b45]
 	void set_exposure_from_iris_samples(const int32_t *samples, int count,

@@ -85,8 +85,8 @@ import struct
 import bpy
 from mathutils import Euler, Vector
 
-from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, at_world_origin, cli_notes, fmt, quoted,
-                      run_cli, scratch)
+from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
+                      export_text, fmt, quoted)
 
 
 # Shader capability bits (runtime/renderer/material_descriptor.h), read per
@@ -144,7 +144,8 @@ def shader_table():
 def shader_flags(tag):
     """A tag's capability word, matched without case as the runtime's effect
     lookup does; a tag outside the table reads row 0's, as OED's lookup did
-    (lookup_material_info_flags)."""
+    (lookup_material_info_flags, 5fc5b4f6a^ engine/formats/oed/
+    material_utils.cpp)."""
     table = shader_table()
     for name, flags in table:
         if name.lower() == tag.lower():
@@ -155,9 +156,9 @@ def shader_flags(tag):
 def default_shader(map_count, skinned):
     """The shader of a material whose name carries none: the first table row
     of the model's kind (skinned or not) drawing that many texture maps
-    (diffuse, detail), OED's find_material_index_by_flags: FF_ST_OP for one
-    map, FF_MT_OP for two, FFP_GLASS for none; VS_SKBASIC / VS_SKGLASS on a
-    skinned model."""
+    (diffuse, detail), OED's find_material_index_by_flags (5fc5b4f6a^
+    engine/formats/oed/convert_internal.cpp): FF_ST_OP for one map, FF_MT_OP
+    for two, FFP_GLASS for none; VS_SKBASIC / VS_SKGLASS on a skinned model."""
     wanted = max(0, min(2, map_count))
     table = shader_table()
     for name, flags in table:
@@ -342,7 +343,7 @@ class Lod:
         self.bone_count = 0   # skinned: parts past the bones are the meshes
 
 
-class Exporter:
+class Exporter(Notes):
     def __init__(self, context, model):
         self.context = context
         self.scene = context.scene
@@ -362,10 +363,6 @@ class Exporter:
         self.notes = []
 
     # --- helpers ------------------------------------------------------------
-    def note(self, text):
-        if text not in self.notes:
-            self.notes.append(text)
-
     def register(self, name, what):
         """A CTRL register's index, declaring it on first use. An empty name is
         a register too (retail's IBlock02 declares one and drives a door by
@@ -1361,12 +1358,7 @@ class Exporter:
             for tex_name, image in self.textures.values():
                 write_tga(image, os.path.join(out_dir, tex_name))
         # The scene text is the CLI's input only.
-        with scratch() as tmp:
-            o3d_path = os.path.join(tmp, "scene.o3d")
-            with open(o3d_path, "w", encoding="utf-8", newline="\n") as f:
-                f.write("\n".join(text) + "\n")
-            result = run_cli(self.context, ["build", o3d_path, "-o", out_path], ExportError,
-                             hide=((o3d_path, "scene text"),))
+        result = export_text(self.context, ["build"], text, "scene.o3d", "scene text", out_path)
         tris = sum(1 for line in lod_lines if line.startswith("t "))
         # The builder's notes (a non-convex volume, collinear faces, ...),
         # without the scene-file prefix.

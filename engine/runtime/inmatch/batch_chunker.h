@@ -14,8 +14,8 @@
 // InitialStateStep / InitialStateBurst coupling; emit_paged_pool is a thin wrapper over it).
 //
 // [orig] The per-pool serializers own the cap: each fills a 4096 B caller buffer but self-limits with a
-// guard checked AFTER writing a full record — serialize_entity_states_to_buffer @0x5030a0 (0x0C) breaks
-// when `written + 100 > 650`; serialize_entity_pool_to_packet @0x503460 (0x20) breaks when
+// guard checked AFTER writing a full record — NetPacket_SerializeEntityStatesToBuffer @0x5030a0 (0x0C) breaks
+// when `written + 100 > 650`; NetPacket_SerializeEntityPoolToPacket @0x503460 (0x20) breaks when
 // `written + 30 > 650`. The common budget is 650; the headroom margin is the pool's max single-record
 // size (0x0C carries a variable name string → 100; 0x20's records are small → 30). BatchPageLimit
 // preserves that post-write guard while retaining the conventional pre-write cap used by 0x45 tiles.

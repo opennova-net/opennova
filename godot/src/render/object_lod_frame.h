@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <runtime/renderer/object_lod.h>
 
@@ -58,6 +59,10 @@ struct ObjectLodFrame {
 	// The largest axis scale of a basis: the uniform entity scale a bound
 	// sphere radius is multiplied by.
 	static float uniform_scale(const Basis &p_basis);
+
+	// A COBJ row's 16.16 centre in the model node's own axes: the source
+	// model's (x, y, z) maps to Godot (y, z, x).
+	static Vector3 cobj_center_local(const std::array<int32_t, 3> &p_center_q16);
 
 	// CMDL coordinates are source model axes: (x,y,z) maps to Godot (y,z,x).
 	// The native sphere already includes the authored scale, so remove that

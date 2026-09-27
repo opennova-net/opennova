@@ -20,17 +20,17 @@ namespace opennova::devtools {
 struct EnvironmentSnapshot {
 	bool valid = false;
 	uint64_t logic_tick = 0;
-	std::string env_name;   // Bms_EnvironmentName
-	std::string trn_name;   // Bms_MapBaseName
+	std::string env_name;   // g_BmsEnvironmentName
+	std::string trn_name;   // g_BmsMapBaseName
 	// g_LocalPlayerBlinkFlags — bits 2/4/8/0x10/0x20 print V/S/W/L/O.
 	uint32_t blink_flags = 0;
 	int32_t fog_type = 0;
-	int32_t fog_dist_metres = 0;    // Env_FogDistCurrent hi word
+	int32_t fog_dist_metres = 0;    // g_EnvFogDistCurrent hi word
 	int32_t fog_target_metres = 0;
 	int32_t color_fade_seconds = 0; // (Env_ColorFadeTicks + 31) / 62
-	int32_t sun_fade_pct = 0;       // Env_SunDimPctCurrent hi word (never leaves 0 in retail)
+	int32_t sun_fade_pct = 0;       // g_EnvSunDimPctCurrent hi word (never leaves 0 in retail)
 	int32_t sun_fade_target_pct = 0; // the sun-dim channel's target hi word (what sunfade wrote)
-	bool night = false;             // Env_IsNightPhase
+	bool night = false;             // g_EnvIsNightPhase
 	// The block CURRENT render colors, packed 0x00RRGGBB.
 	uint32_t fog_rgb = 0;
 	uint32_t skyfog_rgb = 0;
@@ -41,17 +41,17 @@ struct EnvironmentSnapshot {
 	uint32_t ground_rgb = 0;
 	uint32_t ceiling_rgb = 0;
 	uint32_t floor_rgb = 0;
-	uint32_t outdoor_rgb = 0;       // Env_TerrainLightCombined
-	uint32_t indoor_rgb = 0;        // Env_CeilingFloorBlend
-	uint32_t gain_rgb = 0;          // Env_ModulatorBlock
-	uint32_t iris_rgb = 0;          // Env_Modulator2Block
+	uint32_t outdoor_rgb = 0;       // g_EnvTerrainLightCombined
+	uint32_t indoor_rgb = 0;        // g_EnvCeilingFloorBlend
+	uint32_t gain_rgb = 0;          // g_EnvModulatorBlock
+	uint32_t iris_rgb = 0;          // g_EnvModulator2Block
 	int32_t fov_degrees = 0;
-	int32_t sky_height_metres = 0;  // Env_SkyHeightCurrent hi word
-	int32_t sky_speed = 0;          // Env_CloudScrollRate >> 10
-	int32_t sky_speed_target = 0;   // Env_CloudScrollRateTarget >> 10 (the ramp's goal)
-	int32_t rain_pct = 0;           // (100 * Env_RainPctCurrent) >> 16
+	int32_t sky_height_metres = 0;  // g_EnvSkyHeightCurrent hi word
+	int32_t sky_speed = 0;          // g_EnvCloudScrollRate >> 10
+	int32_t sky_speed_target = 0;   // g_EnvCloudScrollRateTarget >> 10 (the ramp's goal)
+	int32_t rain_pct = 0;           // (100 * g_EnvRainPctCurrent) >> 16
 	int32_t rain_target_pct = 0;
-	int32_t overcast_pct = 0;       // (100 * Env_OvercastBlend) >> 16
+	int32_t overcast_pct = 0;       // (100 * g_EnvOvercastBlend) >> 16
 	int32_t overcast_target_pct = 0;
 	int32_t complexity = 0;         // g_ProxCandidateArenaUsed
 	// The live weather state beyond the retail page (the control strip's

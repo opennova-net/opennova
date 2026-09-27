@@ -19,7 +19,7 @@ struct EntityHandle;
 }
 
 // P8 — the reactive in-match gameplay-message reply path.
-// This is the faithful translation of the gameplay-layer C2S dispatch table [orig: g_np_msginfo_server
+// This is the faithful translation of the gameplay-layer C2S dispatch table [orig: g_NPMsgInfoServer
 // @0x82B5D8 → NapiNPServerMsg_0x0NN]: a 0x43 SESSION packet carries gameplay messages, each routed to
 // its server handler, which queues reactive replies via NapiNPServer_SendFiltered. It produces the
 // §5.1 handshake / server-info / mission-metadata / loadout / spawn-confirm replies a retail joiner
@@ -41,8 +41,7 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // nonzero session id are minted once by create_session; callers then retain the
 // returned block for every chunk request. [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
-MissionMetadataBlob build_mission_metadata_blob(
-		const GameConfig &config, bool is_mp_session_peer);
+MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config);
 
 // Build the second, pending-player-spawn boundary of a retail join. The C2S
 // 0x02 handler deliberately does not return these records: retail processes an
@@ -91,7 +90,7 @@ struct ServerDispatchInputs {
 	// The live transfer identities the 0x60 / 0x64 chunk headers carry and the
 	// C2S 0x33 / 0x37 re-requests must echo (a foreign token restarts at 0):
 	// retail's per-process mission counters, 1 for a fresh process's first
-	// mission. [orig: g_replayBlockMagic @0xC86FC4 (++ in Game_StartMission
+	// mission. [orig: g_ReplayBlockMagic @0xC86FC4 (++ in Game_StartMission
 	//  @0x5247F3); dword_C86FC8 (++ in CNapiGameSession_InitRandomSeedOrRequest
 	//  @0x51E9C1)]
 	uint32_t server_info_transfer_id = 1;

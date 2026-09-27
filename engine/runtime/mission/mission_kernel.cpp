@@ -702,7 +702,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// the definitions are attached and ahead of the class inits, the
 	// PreMission pass and the WAC's initial execution.
 	// [orig: Game_StartMission — the per-vehicle sub_529A80 walk
-	//  @0x52527A..0x5252BF and the build_spawn_marker_budget_list call
+	//  @0x52527A..0x5252BF and the Spawn_BuildMarkerBudgetList call
 	//  @0x5252C6 precede the Entity_InitAllFromModels call @0x52567F and the
 	//  EventTrigger_UpdateAllWithFlag2 call @0x525B86]
 	world.vehicles.build_spawn_markers();
@@ -715,7 +715,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	});
 	// Only authority runs the PreMission whole-list pass. A joiner can
 	// carry a full BMS in a tool session without replaying its actions.
-	// [orig: Game_StartMission @0x525b86, g_napi_np_ctx.is_authority gate]
+	// [orig: Game_StartMission @0x525b86, g_NapiNPCtx.is_authority gate]
 	if (!options.joiner) {
 		step("premission");
 		world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
@@ -733,6 +733,23 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	mission_start_pending = true;
 	if (!options.defer_mission_start) complete_mission_start();
 	return true;
+}
+
+// --- the cross-mission carry --------------------------------------------------
+
+void MissionKernel::carry_across_load_from(MissionKernel &previous) {
+	seat_specs = std::move(previous.seat_specs);
+	mounted_graphics = std::move(previous.mounted_graphics);
+	local.look_settings = previous.local.look_settings;
+	local.carry_scoped_aim_drift_from(previous.local);
+	world.script.vars.carry_declared_from(previous.world.script.vars);
+	// [orig: g_EntityUpdateCounter, whose one writer is
+	// Entity_UpdateAllEntities @0x4C2639]
+	world.entity_update_counter = previous.world.entity_update_counter;
+	// [orig: dword_2C05A14 (the mode) and dword_2C05A18..20 (the camera),
+	// zero-initialized data whose only writer is Render_WeatherTrailParticles
+	// @0x5DEEB4..0x5DEED8]
+	precipitation_draw = previous.precipitation_draw;
 }
 
 // --- the tick ---------------------------------------------------------------
@@ -762,7 +779,7 @@ bool MissionKernel::complete_mission_start() {
 	// [orig: Game_StartMission @0x525B86 (the EventTrigger_UpdateAllWithFlag2
 	// call, authority-gated @0x525B78) -> Game_StartMission @0x525CB3 (the
 	// WacScript_InitAndLoad call); WacScript_InitAndLoad @0x4F95EE (V0..V255
-	// memset), @0x4F976B (initial execute), @0x4F9770 (++wac_var_ticks)]
+	// memset), @0x4F976B (initial execute), @0x4F9770 (++g_WacVarTicks)]
 	world.script.vars.clear_numbered_mission_vars();
 	// The environment has been seeded before this boundary. Initial WAC can
 	// change its targets and entity poses before the 255-tick settle and the
@@ -800,7 +817,7 @@ bool precipitation_entity_hit(void *ctx, int32_t x, int32_t y, int32_t z_top,
 	if (kernel->world.collision == nullptr) return false;
 	// The ray from floor + 200 m down to the floor through the local player's
 	// candidate slice [orig: Physics_RaycastIntContext @ 0x5385e0 +
-	// raycast_proximity_entities @ 0x538350 — the end clips to the first hit].
+	// Physics_RaycastProximityEntities @ 0x538350 — the end clips to the first hit].
 	const int32_t start[3] = {x, y, z_top};
 	int32_t end[3] = {x, y, z_bottom};
 	const w::CollisionWorld::RayDebugScope ray_scope(
@@ -1022,7 +1039,7 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 		sources.part_anim_phase0 = carrier_ai->brain.f[w::AiBrain::kPartAnimPhase0];
 		sources.part_anim_phase1 = carrier_ai->brain.f[w::AiBrain::kPartAnimPhase0 + 1];
 	}
-	// An addeweap attachment frame is posed through build_bone_attachment_matrix,
+	// An addeweap attachment frame is posed through Bone_BuildAttachmentMatrix,
 	// which runs the carrier's own render-class CTRL callback first (the ewep
 	// writer only for an 'ewep' class; another class leaves the words its
 	// UseGun rider's seat call wrote). A UseGun rider's attachment never calls
@@ -1030,7 +1047,7 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 	// its class. Registers neither call writes read the global CTRL bus as the
 	// carrier's last class publication left it, which the vehicle projection
 	// below stands for.
-	// [orig: build_bone_attachment_matrix def+0x144 @0x56C6DC..0x56C6F3, reached
+	// [orig: Bone_BuildAttachmentMatrix def+0x144 @0x56C6DC..0x56C6F3, reached
 	//  from Entity_UpdateTransformAndTurret @0x44109D;
 	//  Entity_AttachToBoneAndUpdateTransform @0x546517..0x546518]
 	w::EmplacedWeaponControls emplaced;

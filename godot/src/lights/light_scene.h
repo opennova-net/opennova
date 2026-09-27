@@ -107,6 +107,22 @@ public:
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			const PackedVector3Array &p_entity_positions = PackedVector3Array(),
 			const PackedInt32Array &p_entity_bound_radii_q16 = PackedInt32Array());
+	// The weapon Inset pass's draws (renderer/scene_overlay.h
+	// kInsetOverlayOrder: retail runs the scene core again for that view, and
+	// each draw selects its lights there): the same selection over the same
+	// parallel arrays for the models the Inset draws through their own twins
+	// (ObjectModel's view twins), a building's rows over the ROBJs the twins
+	// draw, written to the twins. Models drawn the same in both views keep
+	// the main pass's selection on their node. The report stays the main
+	// pass's. Returns the models that received at least one light.
+	int render_inset_model_frame(const TypedArray<Node3D> &p_models,
+			const PackedInt64Array &p_owner_entities,
+			const PackedInt64Array &p_interior_owners,
+			const PackedInt32Array &p_interior_sections,
+			const PackedByteArray &p_robj_scoped,
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
+			const PackedVector3Array &p_entity_positions,
+			const PackedInt32Array &p_entity_bound_radii_q16);
 
 	// The same entity-cube selection for static MultiMesh rows. Each row carries
 	// its ENTITY origin and initialized Q16 bound radius, shared by every ROBJ
@@ -179,6 +195,18 @@ public:
 	const std::vector<opennova::renderer::LightCoronaQuad> &last_corona_quads() const {
 		return corona_quads_scratch_;
 	}
+	// The weapon Inset pass's own corona walk (renderer/scene_overlay.h
+	// kInsetOverlayOrder carries the witness) into r_quads: the same walk over
+	// the Inset camera and its phase, each drawn owner gated on its Inset
+	// section mask (ObjectModel::get_inset_view_section_mask). Returns the
+	// quad count.
+	int collect_inset_corona_rows(const Vector3 &p_camera_pos,
+			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
+			int p_time_ms, int p_frame_index, Weather *p_weather,
+			const TypedArray<Node3D> &p_models,
+			const PackedInt64Array &p_owner_entities,
+			const Ref<EnvLightValues> &p_fog,
+			std::vector<opennova::renderer::LightCoronaQuad> &r_quads);
 	// Test seam: the last collect as kCoronaRowFloats per row (the Godot-world
 	// centre xyz, the half size, the colour rgb).
 	static constexpr int kCoronaRowFloats = 7;
@@ -186,15 +214,14 @@ public:
 
 	// The terrain leg of the pool: per terrain patch, the <= 16 world lights
 	// whose AABB overlaps the patch and which the authored terrain flag admits,
-	// as the rows the terrain shader re-draws the patch with [orig: the
-	// per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
-	// Light_SetupTerrainProjectedPass @0x5AA830 — the collect, the gates and
-	// the pixel constants live portable in opennova::renderer::LightScene::
-	// collect_terrain_pass_rows, see docs/render/render-lighting-re.md]. A C++
+	// as the rows the terrain shader re-draws the patch with (the collect, the
+	// gates and the ps.1.1 pass's constant live portable in
+	// opennova::renderer::LightScene::collect_terrain_pass_rows, witness map in
+	// renderer/light_terrain_pass.h). A C++
 	// seam for the Terrain device: patch bounds in mission 16.16 (the helper
 	// opennova::renderer::terrain_patch_light_bounds folds the render frame), the env
 	// light-state gain, the time + weather the flicker reads, and the packed
-	// Env_TerrainColorRecip the recip factor unpacks. Returns the row total.
+	// g_EnvTerrainColorRecip the recip factor unpacks. Returns the row total.
 	size_t collect_terrain_light_rows(
 			const opennova::renderer::TerrainLightPatchBounds *p_patches,
 			size_t p_patch_count, const Vector3 &p_ambient_scale, int p_time_ms,
@@ -202,22 +229,27 @@ public:
 			opennova::renderer::TerrainLightPatchRows *r_rows) const;
 	// The same leg over Godot-world AABBs (one per patch), rows as
 	// Dictionaries {position (Vector3 Godot world), inv_scale, color (Vector3,
-	// the c4..c6 pixel constants), handle} — the GUT seam the terrain device
+	// the pass's c0 colour), handle} — the GUT seam the terrain device
 	// test drives without a built Terrain.
 	Array collect_terrain_light_rows_for_bounds(
 			const TypedArray<AABB> &p_world_aabbs, const Vector3 &p_ambient_scale,
 			int p_time_ms, Weather *p_weather, int p_recip_packed) const;
 
-	// The two procedural textures the terrain pass samples, as RGBA8 bytes:
-	// "texlight2d" (terrain_light_texture_size() square, the disc on the ground
-	// plane) and "texlightspot1d" (terrain_light_texture_size() x
-	// terrain_light_strip_rows(), the height strip). The laws live portable in
-	// opennova::renderer::falloff_texture_light2d_argb / _spot1d_argb; this only unpacks
-	// the words for Image::create_from_data.
+	// The falloff texture of the terrain light pass, as RGBA8 bytes:
+	// "texlight2d" (terrain_light_texture_size() square — the ps.1.1 pass
+	// samples it on both falloff stages, the ground-plane disc and the height
+	// coordinate; the "texlightspot1d" retail also builds sits in a texture
+	// slot no terrain pass reads). The law lives portable in
+	// opennova::renderer::falloff_texture_light2d_argb; this only unpacks the
+	// words for Image::create_from_data.
 	static int terrain_light_texture_size();
-	static int terrain_light_strip_rows();
 	static PackedByteArray terrain_light_disc_rgba8();
-	static PackedByteArray terrain_light_strip_rgba8();
+	// The cube-normalize map the ps.1.1 pass's stage 0 samples: one face of
+	// terrain_light_cube_size() square per call, faces in the +X, -X, +Y, -Y,
+	// +Z, -Z layer order (Cubemap.create_from_images). The law is portable in
+	// opennova::renderer::cube_normalize_texel_argb.
+	static int terrain_light_cube_size();
+	static PackedByteArray terrain_light_cube_face_rgba8(int p_face);
 
 	// The pool's diagnostic snapshot (lights/effect_light_report.h).
 	Ref<EffectLightReport> get_report() const;
@@ -261,15 +293,25 @@ private:
 		size_t last_count = 0;
 	};
 	// The corona frame-input build behind collect_corona_rows (owner masks
-	// live in the caller's vector for the call).
+	// live in the caller's vector for the call); `p_inset_view` reads each
+	// owner's Inset section mask instead of the main view's.
 	void build_corona_inputs(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
 			const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
-			const Ref<EnvLightValues> &p_fog,
+			const Ref<EnvLightValues> &p_fog, bool p_inset_view,
 			std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
 			opennova::renderer::LightCoronaFrameInputs &r_inputs) const;
+	// render_model_frame and render_inset_model_frame: one pass over one view.
+	int select_model_frame(const TypedArray<Node3D> &p_models,
+			const PackedInt64Array &p_owner_entities,
+			const PackedInt64Array &p_interior_owners,
+			const PackedInt32Array &p_interior_sections,
+			const PackedByteArray &p_robj_scoped,
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
+			const PackedVector3Array &p_entity_positions,
+			const PackedInt32Array &p_entity_bound_radii_q16, bool p_inset_view);
 
 	opennova::renderer::LightScene scene_;
 	// Reused per-frame corona scratch (the fill path runs every frame).

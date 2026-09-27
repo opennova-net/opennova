@@ -131,7 +131,7 @@ bool FoliageFrameCompiler::expand_detail_instance(
 	// Retail writes render x = keyLo + B + sx*sin + sz*cos (the Godot-Z
 	// axis) and render z = keyHi + A + sx*cos - sz*sin (Godot X) for source
 	// (sx, sz); the 3DI import negates source X (vertex.x = -sx).
-	// [orig: generate_foliage_instances_0 @ 0x600112..0x60014d]
+	// [orig: Foliage_GenerateInstances_0 @ 0x600112..0x60014d]
 	const float cos_a = std::cos(instance.yaw_radians);
 	const float sin_a = std::sin(instance.yaw_radians);
 
@@ -262,7 +262,11 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 			foliage_detail_wind_phase(view.time_ms, view.wind_osc_ring0);
 
 	// --- Detail submissions ------------------------------------------------
-	for (size_t begin = 0; begin < output.detail.size();) {
+	// Skipped whole under the indoors letter: neither detail pass runs, so
+	// no identity is built or drawn (view.detail_passes carries the witness).
+	const size_t detail_submissions =
+			view.detail_passes ? output.detail.size() : 0u;
+	for (size_t begin = 0; begin < detail_submissions;) {
 		const opennova::foliage::DetailInstance &first = output.detail[begin];
 		size_t end = begin + 1;
 		while (end < output.detail.size() &&

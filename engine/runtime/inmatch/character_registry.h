@@ -46,7 +46,7 @@ public:
 	// the entry (a side-B id never matches a good entry and vice versa); when
 	// `expected_alignment` is 0/1 an id whose bit contradicts it resolves to
 	// nothing. [orig: MinimapSlot_FindByPackedId @0x57a270; packer
-	// lookup_entity_slot_and_pack_entry @0x57ad40 (@0x57ae47)]
+	// EntitySlot_LookupAndPackEntry @0x57ad40 (@0x57ae47)]
 	const CharacterEntry *find_by_packed_id(uint16_t packed_id,
 			int expected_alignment = -1) const;
 
@@ -58,7 +58,7 @@ public:
 	// matches the side; no side match packs entry 0; an empty registry packs
 	// 0. The fresh-profile seed AND the reallocation an unknown id gets at
 	// session start / on the client 0x0C fold. [orig:
-	// lookup_entity_slot_and_pack_entry @0x57ad40 (loop @0x57ad6b..0x57ad80,
+	// EntitySlot_LookupAndPackEntry @0x57ad40 (loop @0x57ad6b..0x57ad80,
 	// entry-0 fallback @0x57ad84..0x57adda); callers
 	// PlayerSession_InitFromProfile @0x50cada/@0x50cb08, NapiNPClientMsg 0x0C
 	// @0x42eafb]

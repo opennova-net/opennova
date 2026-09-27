@@ -3108,7 +3108,7 @@ void test_same_projectile_second_player_kill_latches_0x100() {
 // hit but restages no death, and a lethal hit on a dead-flagged body stages
 // its death without the kill event. [orig: Projectile_ProcessDamageOnTarget
 // @0x4E80F7..0x4E8101 pre-hit health > 0, @0x4E810A damage >= health,
-// @0x4E811F Flags & 2 skipping Score_ProcessKillEvent @0x4E8133]
+// @0x4E811F Flags & 2 skipping the Score_ProcessKillEvent call @0x4E8133]
 void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     HeapWorldFixture fixture;
     World &world = fixture.world;

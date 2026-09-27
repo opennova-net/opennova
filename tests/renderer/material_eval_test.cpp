@@ -70,7 +70,7 @@ void expect_uv(const opennova::renderer::UvAnimTransform& actual,
 // A material wearing the named effect. The evaluator only runs the
 // parameters that effect reads: the UV rows for #UV twins, SelfLumColor for
 // the SELFLUM rows (routed by emissive_type 2), ReflectColor for the glass
-// and mirror rows. [orig: apply_shader_parameters @ 0x58DB80]
+// and mirror rows. [orig: Material_ApplyShaderParameters @ 0x58DB80]
 ThreediMaterial tagged(const char* tag, uint8_t emissive_type = 0) {
     ThreediMaterial material{};
     std::snprintf(material.shader_name, sizeof(material.shader_name), "%s", tag);
@@ -98,12 +98,12 @@ int main() {
     }
 
     {
-        // Each noise wave_lookup consumes the next sample from the shared
+        // Each noise CWaveformTable_WaveLookup consumes the next sample from the shared
         // ported MSVC-formula stream. U and V cannot share one sample. This
         // pins local consumer order, not retail's whole-process CRT call order.
         // srand(1) yields 41, 18467, 6334...
-        // [orig: wave_lookup @ 0x5DE6B0 low-nibble-6 branch;
-        //  apply_shader_parameters @ 0x58DB80 evaluates U then V]
+        // [orig: CWaveformTable_WaveLookup @ 0x5DE6B0 low-nibble-6 branch;
+        //  Material_ApplyShaderParameters @ 0x58DB80 evaluates U then V]
         material = tagged("FF_ST_OP#UV");
         material.u_params.style = 0x36;
         material.u_params.end = 1.0f;
@@ -478,7 +478,7 @@ int main() {
         // Only the #UV twins read MatTexCoord1: a plain FF_ST_OP keeps the
         // identity rows and draws no noise sample for its UV channels.
         // J_Tre15.3di materials 1/2 are FF_ST_OP with u 0x52 / v 0x42.
-        // [orig: apply_shader_parameters @ 0x58DE4F..0x58DE56]
+        // [orig: Material_ApplyShaderParameters @ 0x58DE4F..0x58DE56]
         material = tagged("FF_ST_OP");
         material.u_params.style = 0x52;
         material.u_params.gen_rate = 1.0f;
@@ -505,7 +505,7 @@ int main() {
         // RgbGen runs only when the effect reads the colour its emissive
         // byte routes to; otherwise SelfLumColor keeps the effect default and
         // no noise sample is drawn.
-        // [orig: apply_shader_parameters @ 0x58DDE0..0x58DDF4]
+        // [orig: Material_ApplyShaderParameters @ 0x58DDE0..0x58DDF4]
         material = tagged("FF_ST_OP_LUM");  // emissive_type 0 routes nowhere
         material.rgb_gen.style = 0x36;
         material.rgb_gen.end_color[0] = 1.0f;
@@ -537,7 +537,7 @@ int main() {
     {
         // Static colours route by is_glass: 1 -> ReflectColor as (R, G, B, 1)
         // from the BGRA bytes, 2 -> SelfLumColor; a later RgbGen overrides.
-        // [orig: apply_shader_parameters @ 0x58DD23..0x58DD83 (W = fld1 @ 0x58DD7D)]
+        // [orig: Material_ApplyShaderParameters @ 0x58DD23..0x58DD83 (W = fld1 @ 0x58DD7D)]
         material = tagged("FFP_GLASS");
         material.is_glass = 1;
         material.reflect_color[0] = 32.0f * kInv255;   // B
@@ -617,7 +617,7 @@ int main() {
     {
         // Unauthored scroll/rotate types (0x12..0x1F, 0x22..0x2F) write no
         // row, so the memset-zero diagonal survives.
-        // [orig: compute_uv_transform_matrix @ 0x5B1A27..0x5B1A2D,
+        // [orig: Material_ComputeUVTransformMatrix @ 0x5B1A27..0x5B1A2D,
         //  @ 0x5B1A84..0x5B1A86 (U); @ 0x5B1C88..0x5B1C8B, @ 0x5B1CCD..0x5B1CD0 (V)]
         opennova::renderer::UvAnimChannel scroll_u;
         scroll_u.type = 0x12;
@@ -638,8 +638,8 @@ int main() {
     {
         // A time flipbook divides by the unsigned frame-time word, which the
         // loader rewrote from 0 to 1; types other than 0/1 keep frame zero.
-        // [orig: convert_material_definition @ 0x5B06F6..0x5B070A;
-        //  apply_shader_parameters @ 0x58DBD8..0x58DBF2]
+        // [orig: Material_ConvertDefinition @ 0x5B06F6..0x5B070A;
+        //  Material_ApplyShaderParameters @ 0x58DBD8..0x58DBF2]
         material = {};
         material.animation.num_frames = 4;
         material.animation.animation_type = 0;
@@ -689,7 +689,7 @@ int main() {
         // zero-extended selector byte, and the TEX_CAMO adjacent-state dword
         // is statically 1, selecting retail's modulo-frame branch.
         // [orig: Avatar_SetArmsCamoCtrl @ 0x57A3B0;
-        //  apply_shader_parameters @ 0x58DC36..0x58DC42]
+        //  Material_ApplyShaderParameters @ 0x58DC36..0x58DC42]
         material.animation.num_frames = 2;
         material.animation.cycle_frame_time = 0;
         const std::vector<std::string> indo_arms_names = {"TEX_CAMO1"};

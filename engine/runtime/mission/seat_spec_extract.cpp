@@ -214,7 +214,7 @@ void extract_attachments(const DefItemDef &def, const Threedi3di3 *model,
 		// The authored anchor resolves its model userpoint case-insensitively
 		// (whole name), first match; a missing anchor copies the parent root
 		// (bone 0, zero local). [orig: docs/world/itemdef-re.md
-		// §child-emplacements; build_bone_attachment_matrix @ 0x56C630]
+		// §child-emplacements; Bone_BuildAttachmentMatrix @ 0x56C630]
 		if (model != nullptr && model->user_points != nullptr) {
 			const std::string wanted = trimmed(row.userpoint);
 			for (size_t u = 0; u < model->user_point_count; ++u) {
@@ -320,6 +320,16 @@ void stamp_seat_spec_turret_limits(world::World &world,
 	}
 }
 
+void stamp_minus_one_slot_window(world::Entity &child, float carrier_light_transfer,
+		int32_t slot4_down, int32_t slot4_up, int32_t slot4_right) {
+	int32_t light_transfer_bits = 0;
+	std::memcpy(&light_transfer_bits, &carrier_light_transfer, sizeof(light_transfer_bits));
+	child.emplacement_down_limit_bam = light_transfer_bits; // +0x218
+	child.emplacement_up_limit_bam = slot4_down;            // +0x228
+	child.emplacement_right_limit_bam = slot4_up;           // +0x238
+	child.emplacement_left_limit_bam = slot4_right;         // +0x248
+}
+
 void refresh_item_seat_spec(world::World &world,
 		const std::vector<mission::ItemSeatSpec> &specs,
 		world::Entity &p_entity, bool p_wire_header_world) {
@@ -331,15 +341,21 @@ void refresh_item_seat_spec(world::World &world,
 
 	// A promoted child (authority or complete-BMS joiner) already owns the exact
 	// stored addeweap slot; keep that identity across definition refreshes even
-	// when sibling types repeat. A stock streamed 0x0D row carries only child type
-	// + parent handle, so it may recover metadata only when that type is unique in
-	// the parent's definition.
+	// when sibling types repeat. A streamed 0x0D row names its slot by its
+	// subType (field 0x80, the slot index the spawn stamped; absent = slot 0),
+	// which is the key the ewep class init reads the carrier def's slot anchor
+	// by, on every peer at mission start.
+	// [orig: Entity_SpawnWeaponOverlays subType = slot @0x40F40E;
+	//  Entity_InitBoneReferences @0x4415E1..0x4415FF; Game_StartMission ->
+	//  Entity_InitAllFromModels @0x52567F]
 	// Clear first so a later definition refresh cannot leave stale pose/capability
 	// metadata on an existing row.
-	const bool preserve_authored_slot = !p_wire_header_world &&
-			p_entity.emplacement_pose_metadata_resolved &&
-			p_entity.emplacement_slot != 0;
-	const uint8_t authored_slot = p_entity.emplacement_slot;
+	const bool preserve_authored_slot = p_wire_header_world ||
+			(p_entity.emplacement_pose_metadata_resolved &&
+			 p_entity.emplacement_slot != 0);
+	const uint8_t authored_slot = p_wire_header_world
+			? static_cast<uint8_t>(p_entity.sub_type + 1u)
+			: p_entity.emplacement_slot;
 	p_entity.emplacement_pose_metadata_resolved = false;
 	p_entity.emplacement_local = {};
 	p_entity.emplacement_yaw_offset = 0;
@@ -357,6 +373,30 @@ void refresh_item_seat_spec(world::World &world,
 		const world::Entity *parent =
 				world.registry.get(p_entity.emplacement_parent);
 		if (parent != nullptr && parent->registry_spawn_id ==
+					p_entity.emplacement_parent_spawn_id &&
+				p_entity.sub_type == 0xFF) {
+			// An hp-0 child def's init leaves subType 0xFF before the class init
+			// reads it: the anchor read at subType -1 names no userpoint, so on
+			// every peer the child rides its carrier's root, with no anchor
+			// offset and no designation slot.
+			// [orig: Entity_InitFromModel subType = -1 @0x40DCAF ahead of
+			//  Entity_InitBoneReferences @0x4415F1..0x44164A]
+			p_entity.emplacement_anchor_subobject = -1;
+			p_entity.emplacement_pose_metadata_resolved = true;
+			// Its window reads the carrier def's tables at -1 as well.
+			const mission::ItemSeatSpec *parent_spec =
+					item_seat_spec_for_type(specs, static_cast<uint16_t>(parent->item_id));
+			const mission::ItemEmplacementAttachmentSpec *slot4 = nullptr;
+			if (parent_spec != nullptr) {
+				for (const mission::ItemEmplacementAttachmentSpec &attachment :
+						parent_spec->emplacement_attachments)
+					if (attachment.stored_slot == 4) slot4 = &attachment;
+			}
+			stamp_minus_one_slot_window(p_entity, parent->light_transfer,
+					slot4 != nullptr ? slot4->down_limit_bam : 0,
+					slot4 != nullptr ? slot4->up_limit_bam : 0,
+					slot4 != nullptr ? slot4->right_limit_bam : 0);
+		} else if (parent != nullptr && parent->registry_spawn_id ==
 					p_entity.emplacement_parent_spawn_id) {
 			const mission::ItemSeatSpec *parent_spec =
 					item_seat_spec_for_type(specs,

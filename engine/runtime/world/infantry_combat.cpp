@@ -6,11 +6,13 @@
 #include <cstdint>
 
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/collision_detail.h>
 #include <runtime/world/collision_force.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
@@ -46,7 +48,7 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     // The range/arc metrics frame is the scanner's own position and
     // orientation (ctx[0] = entity+4) [orig: Entity_FindNearestThreat
     // @0x4B09D0..0x4B09D3; Entity_FindTargets @0x53A67C..0x53A687;
-    // compute_relative_position_metrics @0x545723..0x545735]. The LOS rays
+    // Entity_ComputeRelativePositionMetrics @0x545723..0x545735]. The LOS rays
     // start at its weapon fire position, which for a UseGun gunner is the
     // gun's own point, not the eye inside the hull; anything but a posed
     // point takes the fire-origin recipe [orig: @0x53A658..0x53A679].
@@ -135,17 +137,11 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     return {};
 }
 
-// The low dword of the x87 _ftol2 chop: an out-of-range double wraps through
-// the 64-bit result instead of C++'s undefined narrowing.
-int32_t ftol32(double value) {
-    return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
-}
-
 // sqrt over wrapping Q16 deltas under the flt_7C19E0 upper clamp, chopped
 // (the _ftol2 and the RC=chop fistp sites both truncate).
 int32_t clamped_distance(int32_t dx, int32_t dy, int32_t dz) {
     return static_cast<int32_t>(std::min(
-            std::sqrt(double(dx) * dx + double(dy) * dy + double(dz) * dz), 2147418112.0));
+            std::sqrt(double(dx) * dx + double(dy) * dy + double(dz) * dz), detail::kFtolClamp));
 }
 
 // The registry Position in the Q16 lanes the target's savedLivePose stamp uses
@@ -183,7 +179,7 @@ bool ground_at_position(AiSystem &sys, World &world, const Entity &probe, const 
 }
 
 // The aim blocks' sawtooth error unit and its two phases, in the 32-bit
-// registers retail computes them in: `imul reg,wac_var_accuracyspread; imul
+// registers retail computes them in: `imul reg,g_WacVarAccuracySpread; imul
 // reg,1D208h; sar reg,5` [orig: block 1 @0x4bc5ea..0x4bc60e; block 2
 // @0x4bc9ce..0x4bc9f2], then (32 - phase) * err with the HEADING phase
 // (key>>2)&63 [orig: block 1 `and ebp,3Fh` @0x4bc630 -> [esp+60h] @0x4bc669;
@@ -206,13 +202,17 @@ void aim_error(int32_t accuracy, int32_t spread, uint32_t key, int32_t &heading_
 // 3 u of the body (planar) moves the eye only a quarter of the way from the body
 // origin to that point on X/Y [orig: block 1 @0x4BC7B1..0x4BC825 (clamped h);
 // block 2 @0x4BCB7B..0x4BCD0C (unclamped h)].
+// Every aim-block float-to-int conversion is the CRT call, whose shipped SSE2
+// leg turns a value outside int32 into 0x80000000 [orig: _ftol2_sse @0x76BC00
+// (SSE2 leg @0x76BC15), called @0x4BC7CA/@0x4BCBC1, @0x4BC85C, @0x4BC8AB,
+// @0x4BC8BE, @0x4BCEE1/@0x4BCEF7/@0x4BCF0E, @0x4BCF68/@0x4BCF7B/@0x4BCF92].
 void aim_eye(const int32_t body[3], const int32_t muzzle[3], const int32_t aim[3], bool clamp,
              int32_t eye[3]) {
     const double hx = double(io::bam_sub(aim[0], body[0]));
     const double hy = double(io::bam_sub(aim[1], body[1]));
     double h = std::sqrt(hx * hx + hy * hy);
-    if (clamp) h = std::min(h, 2147418112.0);
-    if (ftol32(h) > 0x30000) {
+    if (clamp) h = std::min(h, detail::kFtolClamp);
+    if (io::retail_ftol_sse2(h) > 0x30000) {
         std::copy_n(muzzle, 3, eye);
         return;
     }
@@ -523,7 +523,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
 
     // --- The aim solution. [orig: §17.5 — lead + sawtooth error] ---
     // Retail runs TWO aim blocks over the same lead + sawtooth math, keyed by the
-    // anim's g_animStateFlagsTable bits @0x8139e8 (no state carries both):
+    // anim's g_AnimStateFlagsTable bits @0x8139e8 (no state carries both):
     //   block 1 [orig: @0x4bc555..0x4bc948] on a flag-0x8 anim (the walks, the
     //     plain idles 43/44) with a target: the aim writes, aimFlag @0x4bc894
     //     and the walking-fire latch; it never writes the detour byte +0x369;
@@ -567,7 +567,8 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         // dbl_7C57B8 negated] plus the heading error [orig: `mov ecx,[esp+60h];
         // sub ecx,eax` @0x4bc861..0x4bc865].
         const int32_t candidate = io::bam_add(
-                ftol32(std::atan2(double(ady), double(adx)) * io::kBamPerRadian), err_heading);
+                io::retail_ftol_sse2(std::atan2(double(ady), double(adx)) * io::kBamPerRadian),
+                err_heading);
         // The body cone: the candidate must lie within ~85 deg of the BODY heading
         // (+0x8C) or the block writes nothing -- no aim, no aimFlag, no latch
         // [orig: `sub eax,[esi+8Ch]` @0x4bc869, cdq/xor/sub, `cmp eax,3C71C6E0h;
@@ -580,10 +581,10 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             inf.aim_valid = true;
             // The elevation over the truncated, UNCLAMPED planar length
             // [orig: @0x4BC89B..0x4BC8BE]; the pitch store @0x4bc8da.
-            const int32_t horiz = ftol32(std::sqrt(double(adx) * adx + double(ady) * ady));
-            inf.aim_pitch = io::bam_add(
-                    ftol32(std::atan2(double(adz), double(horiz)) * io::kBamPerRadian),
-                    err_pitch);
+            const int32_t horiz =
+                    io::retail_ftol_sse2(std::sqrt(double(adx) * adx + double(ady) * ady));
+            const double pitch = std::atan2(double(adz), double(horiz)) * io::kBamPerRadian;
+            inf.aim_pitch = io::bam_add(io::retail_ftol_sse2(pitch), err_pitch);
             inf.aim_established = true;
             inf.aim_override = true; // [orig: the override local set @0x4BC8E0]
             // The walking-fire latch: the yaw within ~5 deg of the solution, the
@@ -652,16 +653,18 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         const int32_t ady = io::bam_sub(inf.aim_point[1], eye[1]);
         const int32_t adz = io::bam_sub(inf.aim_point[2], eye[2]);
         // Bearing = chopped fpatan(dy, dx) in BAM; elevation = chopped fpatan(dz,
-        // h) where h is the horizontal length clamped to 2147418112.0 and
+        // h) where h is the horizontal length clamped to flt_7C19E0 and
         // TRUNCATED to an integer first. [orig: the world arm @0x4BCF2D..0x4BCF92]
         const auto solve_bearing_elevation = [](int32_t dx, int32_t dy, int32_t dz,
                 int32_t &bearing_out, int32_t &elevation_out) {
             const double fdx = static_cast<double>(dx);
             const double fdy = static_cast<double>(dy);
-            const int32_t horiz = ftol32(std::min(std::sqrt(fdx * fdx + fdy * fdy), 2147418112.0));
-            bearing_out = ftol32(std::atan2(fdy, fdx) * io::kBamPerRadian);
-            elevation_out = ftol32(std::atan2(static_cast<double>(dz),
-                                              static_cast<double>(horiz)) * io::kBamPerRadian);
+            const int32_t horiz = io::retail_ftol_sse2(
+                    std::min(std::sqrt(fdx * fdx + fdy * fdy), detail::kFtolClamp));
+            bearing_out = io::retail_ftol_sse2(std::atan2(fdy, fdx) * io::kBamPerRadian);
+            elevation_out = io::retail_ftol_sse2(std::atan2(static_cast<double>(dz),
+                                                            static_cast<double>(horiz)) *
+                                                 io::kBamPerRadian);
         };
         int32_t bearing = 0;
         int32_t elevation = 0;
@@ -722,7 +725,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         // Block 2's tail [orig: @0x4bcfa3..0x4bcff5]. The body re-face when the
         // aim drifts far off the target heading (> 262470208, ~22 deg) [orig:
         // @0x4bcfa3..0x4bcfcf]; the detour-state clear, whether or not the
-        // re-face fired, ahead of the selector's ai_find_cover_position calls
+        // re-face fired, ahead of the selector's AI_FindCoverPosition calls
         // [orig: @0x4bcfdb; the calls @0x4bd490..0x4bd5a4]; then the hold:
         // every move mode but the combat approach (1) and 5 collapses to 7 with
         // a zero goal distance [orig: @0x4bcfd5..0x4bcff5 — `cmp al, 5`
@@ -739,7 +742,9 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // A scripted idle (130..136) watches the local player: the aim heading and
     // pitch toward its Position (the planar length truncated, no clamp), aimFlag
     // down and the override up, the body re-faced past 45 degrees, no move and
-    // the detour cleared. [orig: @0x4BCFF5..0x4BD0F4]
+    // the detour cleared. [orig: @0x4BCFF5..0x4BD0F4] Each conversion is the CRT
+    // call, so a planar length past int32 reaches the pitch as 0x80000000
+    // [orig: _ftol2_sse @0x76BC00, called @0x4BD076/@0x4BD09F/@0x4BD0B0].
     if (inf.anim_state >= 130 && inf.anim_state <= 136) {
         if (const Entity *player = world.registry.get(world.cached.local_player)) {
             int32_t at[3];
@@ -748,10 +753,12 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             const int32_t dy = io::bam_sub(at[1], e.pos[1]);
             const int32_t dz = io::bam_sub(at[2], e.pos[2]);
             const int32_t heading =
-                    ftol32(std::atan2(double(dy), double(dx)) * io::kBamPerRadian);
-            const int32_t planar = ftol32(std::sqrt(double(dx) * dx + double(dy) * dy));
+                    io::retail_ftol_sse2(std::atan2(double(dy), double(dx)) * io::kBamPerRadian);
+            const int32_t planar =
+                    io::retail_ftol_sse2(std::sqrt(double(dx) * dx + double(dy) * dy));
             inf.aim_heading = heading;
-            inf.aim_pitch = ftol32(std::atan2(double(dz), double(planar)) * io::kBamPerRadian);
+            inf.aim_pitch = io::retail_ftol_sse2(std::atan2(double(dz), double(planar)) *
+                                                 io::kBamPerRadian);
             inf.aim_valid = false;
             inf.aim_override = true;
             if (io::bam_abs(io::bam_sub(heading, inf.target_heading)) > 0x1FFFFFE0)

@@ -367,7 +367,7 @@ func test_wire_body_draws_its_overlays_in_its_own_context() -> void:
 	assert_true(nvg.visible, "the other overlays keep drawing")
 
 	# Drawn inside the owner's bone callback, an overlay goes with its owner's
-	# sub-pixel return (render_sector_entity @0x5c42d8..0x5c42de), as the held weapon.
+	# sub-pixel return (Render_SectorEntity @0x5c42d8..0x5c42de), as the held weapon.
 	p.present_wire_snapshot(_row(fields), Simulation.PF_STRIDE, 1)
 	assert_true(nvg.visible)
 	var far := Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, 1000000.0))

@@ -76,7 +76,8 @@ bool find_numbered_vehicle_seat(const World &world, const Entity &player, int in
 inline constexpr int kCommandAttachPassengerOnly = 123;
 inline constexpr int kCommandAttachSkipController = 124;
 inline constexpr int kCommandAttachAnySeat = 125;
-// The seat filter an attach command selects; false = not an attach command.
+// The seat filter an attach command selects; false = not an attach command
+// (`out` is left unchanged).
 bool seat_selection_mode_for_command(int command_id, SeatSelectionMode &out);
 
 // The witnessed seat priority weights (lower wins): root control/driver
@@ -84,21 +85,6 @@ bool seat_selection_mode_for_command(int command_id, SeatSelectionMode &out);
 // 0x2000000 — the table find_best_vehicle_seat walks.
 // [orig: Entity_FindBestSeatSlot @0x4351F0]
 int32_t seat_priority_weight(SeatType type, bool root_seat);
-
-// The tooling mirror of that selection over a flat seat list (root seats,
-// no child walk) for the MCP mission tools and probes: each candidate's
-// verdict (an occupied seat is skipped before the command filter; a None
-// type or a non-attach command never qualifies) and the pick — the lowest
-// weight, the first on a tie; -1 when none. `mode` null = not an attach
-// command.
-struct SeatCandidate {
-    SeatType type = SeatType::None;
-    bool occupied = false;
-};
-enum class SeatVerdict : uint8_t { kEligible = 0, kSkippedOccupied, kSkippedCommand, kSelected };
-int predict_seat_selection(const std::vector<SeatCandidate> &seats,
-                           const SeatSelectionMode *mode,
-                           std::vector<SeatVerdict> &verdicts);
 
 // FindBestSeatSlot's weighted root+child walk. The requested root is considered
 // first, followed by live entities whose ground_target is that root. Controller
@@ -125,7 +111,7 @@ bool vehicle_can_enter(const World &, const Entity *rider, const Entity &carrier
 bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_action);
 
 
-// One floating attach label [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the
+// One floating attach label [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290 — the
 // selection half; projection and drawing stay host-side]. world_pos carries the witnessed
 // +0.1875 u label lift [orig: point.z = boneZ + 12288 @0x5a3585].
 struct AttachLabel {

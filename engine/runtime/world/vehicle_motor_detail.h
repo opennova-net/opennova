@@ -1,15 +1,14 @@
 #pragma once
 
 // Internal to engine/runtime/world's vehicle-motor TUs — not part of world/vehicle_motor.h.
-// Split out of vehicle_motor.cpp (the oversize-TU ratchet). Motion only — every
-// body is unchanged, and each original-code citation moved with the code it
-// annotates.
+// Split out of vehicle_motor.cpp (the oversize-TU ratchet).
 //
 // The shared platform-solve sub-contract — the x87 trig pair, the Q22 Euler
-// basis, the bilinear terrain probe force, and the 4-normal plane fit — that
-// the watercraft platform solve (vehicle_motor.cpp) and the air/ground contact
-// solves (vehicle_contact_solve.cpp) both consume, plus the contact-solve entry
-// points the movers call at their witnessed call sites.
+// basis, the probe placement, the bilinear terrain probe force, the severity
+// speed response and the 4-normal plane fit — that the watercraft platform
+// solve (vehicle_motor.cpp) and the aircraft, tracked, wheeled and light
+// contact solves (vehicle_contact_solve.cpp) consume, plus the contact-solve
+// entry points the movers call at their witnessed call sites.
 
 #include <cmath>
 #include <algorithm>
@@ -44,7 +43,7 @@ inline int32_t bam_mul_wrap(int32_t lhs, int32_t rhs) {
 
 // The occupant whose input this machine should consume (defined in
 // vehicle_motor.cpp beside the controller resolve; the air TU consumes it).
-// Retail's gate is `(occ->Flags & 0x100) && (occ == g_local_player_entity ||
+// Retail's gate is `(occ->Flags & 0x100) && (occ == g_LocalPlayerEntity ||
 // is_authority)` [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the
 // ground twin is Entity_UpdateVehiclePhysics @0x48b0ff].
 Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits);
@@ -201,6 +200,29 @@ inline bool strongest_probe_beyond_hull(const PlatProbeForce (&forces)[N],
     const int64_t ddx = int64_t(probes[strongest][0]) - px;
     const int64_t ddy = int64_t(probes[strongest][1]) - py;
     return ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000;
+}
+
+// The speed response every contact solve runs on its first-pass severity:
+// severities 1 and 3 decay the speed by >> (torque + 2), severity 2 by
+// >> (torque + 1); a terrain-only severity 3 whose strongest planar probe among
+// the first `scan` lies beyond the hull (strongest_probe_beyond_hull) then cuts
+// the speed to one quarter (flt_7C333C). The impact fold (damage, sound,
+// momentum) is vehicle_contact_impact's. Each solve cites its own sites.
+template <int N>
+inline void contact_speed_response(Entity::VehicleMotorState &m, const VehicleTraits &traits,
+                                   int32_t sev, EntityHandle hit_entity,
+                                   const PlatProbeForce (&forces)[N],
+                                   const int32_t (&probes)[N][3], int scan, int32_t px,
+                                   int32_t py) {
+    if (sev == 1) {
+        m.speed -= m.speed >> ((traits.torque + 2) & 31);
+    } else if (sev == 2) {
+        m.speed -= m.speed >> ((traits.torque + 1) & 31);
+    } else if (sev == 3) {
+        m.speed -= m.speed >> ((traits.torque + 2) & 31);
+        if (!hit_entity.valid() && strongest_probe_beyond_hull(forces, probes, scan, px, py))
+            m.speed = int32_t(m.speed * 0.25);
+    }
 }
 
 // The shared second contact pass averages forces after the planar probe shift and applies the

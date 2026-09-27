@@ -170,7 +170,7 @@ const char *object_projected_shadow_coverage_name(
 // binding. [orig: HLSLEffect_LoadFromFile @ 0x5af417..0x5af49e; _FFP.fx
 // TBoringFFP / TECHNIQUE_NORMAL / SELFLUM variants; alpha-test state at
 // CRenderBatchQueue_FlushBatches @ 0x5da3a9..0x5da401; environment-cube
-// refresh at update_environment_cubemap @ 0x6106a0].
+// refresh at EnvCube_Update @ 0x6106a0].
 ObjectShaderPipelineDescriptor describe_object_shader_pipeline(ObjectShaderKey key) {
 	ObjectShaderPipelineDescriptor descriptor;
 	descriptor.key = key;

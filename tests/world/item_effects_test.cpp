@@ -2,7 +2,7 @@
 // pool-walk attrib gates, the occupied-controller bypass, the identity
 // aliases a vehicle_control_* event names an entity by, and the
 // matched-userpoint / origin-fallback attach plan
-// [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 ->
+// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0 ->
 //  ItemDef_GetBoneMaskByName @ 0x49ea40 -> Entity_SpawnBoneTrailEffect
 //  @ 0x43bef0; the spawn_count==0 leg @ 0x43c097 -> @ 0x43c0a4].
 

@@ -20,7 +20,7 @@ std::vector<uint8_t> rgba_from_bgra_hex(const char *text) {
 
 // Synthetic images executed by the retail x86 kernel (all pixel math intact).
 // Kernel SHA256 0be6f2d7022549d57ccb3955007c20bef9b31f35aa7accf3886551be24e702a6.
-// [orig: load_texture_as_normalmap @0x58C985..0x58CAED (the live type-4/5
+// [orig: Texture_LoadAsNormalMap @0x58C985..0x58CAED (the live type-4/5
 // kernel); Texture_ApplyNormalMapFilter @0x58BD90..0x58C06C (its uncalled
 // instruction-for-instruction twin)]
 int main() {
@@ -97,7 +97,7 @@ int main() {
 			"pixel-built mip chains end at the last level above min-dim 2");
 	// Texture_LoadByNameWithChannel's single-file resolution.
 	// [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B6E6;
-	// load_texture_and_register @0x58B80E..0x58B881]
+	// Texture_LoadAndRegister @0x58B80E..0x58B881]
 	expect(material_texture_query("Jbark_2.dds.tga") == "Jbark_2.dds" &&
 			material_texture_query("wall.tga") == "wall.tga" &&
 			material_texture_query("noext") == "noext",
@@ -129,7 +129,7 @@ int main() {
 	}
 	// The loader never stores those runtime values: authored 3, 9..15 and
 	// > 18 keep the memset zero and load as ordinary diffuse rows.
-	// [orig: convert_material_definition @0x5B045B..0x5B04A0]
+	// [orig: Material_ConvertDefinition @0x5B045B..0x5B04A0]
 	for (unsigned authored = 0; authored < 256; ++authored) {
 		const bool dropped = authored == 3 || (authored >= 9 && authored <= 15) || authored > 18;
 		const uint8_t runtime = material_texture_runtime_type(static_cast<uint8_t>(authored));

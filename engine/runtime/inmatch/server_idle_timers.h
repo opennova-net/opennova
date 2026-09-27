@@ -8,7 +8,7 @@
 namespace opennova::inmatch {
 
 // The drown limit: four samples per `breathtime` second, the WAC named value
-// wac_var_breathtime (20 from WacScript_FreeAll @0x4F6381; the named-value table
+// g_WacVarBreathTime (20 from WacScript_FreeAll @0x4F6381; the named-value table
 // row @0x82EFEC lets a script write it), scaled in 32 bits and compared
 // signed by both readers.
 // [orig: Server_UpdatePlayerBreathTimers `lea edi,[edx*4]` @0x50D7F2;

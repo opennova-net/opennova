@@ -18,7 +18,7 @@
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 
-#include <base/io/fixed.h>               // kFp16OneD
+#include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
 
 #include <runtime/mission/collision_resolve.h> // find_item_def (a rider's authored hp)
@@ -140,9 +140,11 @@ void JoinerRole::set_join_proxy(const JoinProxyOptions &options) {
 // enumerator stops once a session answered, so a later phase sends nothing.
 // [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 — the interval
 //  @0x6290ed (3000 for a dialing host), the `!last_send || elapsed > interval`
-//  arm @0x629119, the all-six gate + SendPingPacket @0x62914f..0x629159, then
-//  NapiNPSession_SendAnnouncePacket @0x629170; the enumerator's active flag
-//  enum_info+44 is read as "the hello is still being announced" here]
+//  arm @0x629119, the all-six gate ending @0x62914f, then
+//  CNapiNPConnection_SendPingPacket @0x61F8C0 (the call @0x629159), then
+//  NapiNPSession_SendAnnouncePacket @0x61FA00 (the call @0x629170); the
+//  enumerator's active flag enum_info+44 is read as "the hello is still being
+//  announced" here]
 void JoinerRole::pump_proxy_rendezvous() {
 	if (socket_ == nullptr || !runtime || !proxy_.enabled()) return;
 	if (started_ && runtime->phase() != JoinerConnection::Phase::Hello) return;
@@ -299,8 +301,8 @@ bool JoinerRole::remote_claimant(const world::Entity &carrier, world::Entity &ou
 	out = world::Entity{};
 	out.handle = world::EntityHandle{rider->handle};
 	out.item_id = rider->type_id;
-	out.position = {static_cast<float>(rider->x) / 65536.0f,
-			static_cast<float>(rider->y) / 65536.0f, static_cast<float>(rider->z) / 65536.0f};
+	out.position = {opennova::io::fp16_16_to_float(rider->x),
+			opennova::io::fp16_16_to_float(rider->y), opennova::io::fp16_16_to_float(rider->z)};
 	out.team = rider->team_known ? rider->team : 0;
 	out.flags = rider->state_flags;
 	if (rider->cls == EntityClass::Player) {
@@ -423,6 +425,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	// definitions. Item/model resolution above installs them, then this
 	// idempotent fold projects the retained 0x0D mountHandles image by each
 	// seat's fixed retail_slot.
+	materializer_.set_local_player(self_wire_handle(), kernel.world.cached.local_player);
 	(void)materializer_.sync(runtime->state(), kernel.world);
 	kernel.refresh_collision_instances();
 }
@@ -502,7 +505,7 @@ void JoinerRole::tick_local_weapon() {
 		fired.round.mode_flags = 1;
 		// off33 is fire_flags = Weapon_GetScopeZoomLevel(can_fire, 12) |
 		// (can_fire ? 0x80 : 0) for the local shooter [orig: @0x42bdd6..
-		// 0x42bdf9]; a seated pilot (parentSlot 2/5) fails Player_CanFireWeapon
+		// 0x42bdf9]; a seated pilot (parentSlot 2/5) fails Player_IsOpticalViewVisible
 		// [orig: @0x5cf7a8..0x5cf7b6], and with weaponActive 0 the zoom helper
 		// returns its default 12 [orig: Weapon_GetScopeZoomLevel @0x422fd1/
 		// @0x422fd5]. The on-foot pump stamps the same 12 on its own witnessed leg.
@@ -548,7 +551,7 @@ void JoinerRole::tick_local_weapon() {
 		// fix. The actual mechanism is D-NET-184 and is not packet-driven.
 		fire.hit_part = opennova::pack_fired_round_hit_part(rt.local_player_slot(), fired.shot_seq);
 		// entity+0x160 — the shooter's current AMMO-DEFINITION index, a u16 index
-		// into g_ammoDefTable (stride 276). The host stores it onto the remote
+		// into g_AmmoDefTable (stride 276). The host stores it onto the remote
 		// shooter's entity [orig: the send-side read Entity_FireWeaponAndSendPacket
 		// @0x42C01A; the equip-time source WeaponSlot_InitFromEntityDef @0x54673B
 		// copies admEntry[1]'s low word; retail seeds 3 beside the WPN_M4AUTO
@@ -732,9 +735,9 @@ void JoinerRole::pump() {
 	// A folded S2C 0x1D raises this client's round-over gate before the
 	// frame's entity update, which the gate then holds; a fresh runtime (a
 	// reset counter) latches nothing.
-	// [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_spawn_success_gate,1`
+	// [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_SpawnSuccessGate,1`
 	//  @0x430858; Game_ProcessMainFrame -- the is_in_session /
-	//  g_spawn_success_gate tests @0x526734..0x526742]
+	//  g_SpawnSuccessGate tests @0x526734..0x526742]
 	const uint32_t end_round_headers = rt.state().end_round.header_updates;
 	if (end_round_headers > end_round_headers_seen_) world.match.latch_round_over();
 	end_round_headers_seen_ = end_round_headers;
@@ -742,7 +745,7 @@ void JoinerRole::pump() {
 
 	const bool preround_active = world.preround_delay_seconds != 0;
     world.rules.cease_fire = rt.state().cease_fire;
-    // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_rules_flags
+    // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_RulesFlags
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
 	world.rules.mpattrib = rt.view().mp_attributes();
@@ -871,7 +874,7 @@ void JoinerRole::wire_frame_providers() {
     };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
 	// The replica water/float channel reads the mission water plane
-	// [orig: Env_WaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
+	// [orig: g_EnvWaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
 	// water in this world).
 	rt.view().set_water_z(
 			world.env.water_z, world.env.water_z != 0);
@@ -1161,6 +1164,7 @@ void JoinerRole::materialize_replica_world() {
 	if (wire_world_topology_revision_seen_ == state.topology_revision &&
 			wire_world_stream_revision_seen_ == state.world_stream_revision)
 		return;
+	materializer_.set_local_player(self_wire_handle(), world.cached.local_player);
 	const replication::ClientWorldSyncResult sync =
 			materializer_.sync(state, world);
 	wire_world_topology_revision_seen_ = state.topology_revision;
@@ -1410,7 +1414,7 @@ void JoinerRole::apply_authoritative_health() {
 }
 
 // The S2C 0x0F world-state landing on L, once per decoded 0x0F. Retail writes
-// the pose straight onto g_local_player_entity from the handler — Position,
+// the pose straight onto g_LocalPlayerEntity from the handler — Position,
 // Yaw (+ g_LocalPlayerLookYaw), Pitch, Roll — and clears its hidden bit unless
 // the death screen is up; the host sends it right after Server_PositionPlayer-
 // ForSpawn, so it is the authoritative admission pose (a later 0x0F re-snaps a
@@ -1419,9 +1423,9 @@ void JoinerRole::apply_authoritative_health() {
 // route list is rebuilt from the wire's pool-3 slots (the host's team-1
 // filtered blue route, <= 128) with the host's name ids, keeping the locally
 // promoted marker facts (radius, linked event, chain-back) of a re-listed node.
-// [orig: NapiNPClientMsg_0x00F @0x42E200 — `if (!g_local_player_entity)` skip,
+// [orig: NapiNPClientMsg_0x00F @0x42E200 — `if (!g_LocalPlayerEntity)` skip,
 //  the pose stores (Pitch @0x42E3E9, Roll @0x42E3F2), `Flags &= ~1` when
-//  !g_death_screen_active; the g_waypointList rebuild @0x42E47F..0x42E4A3
+//  !g_DeathScreenActive; the g_WaypointList rebuild @0x42E47F..0x42E4A3
 //  (Pool_GetEntryUnchecked(3, slot), STRWPNAME%03i name); Server_OnPlayerJoin
 //  positions @0x51A786 then serializes 0x0F @0x51A864]
 void JoinerRole::apply_world_state_load() {
@@ -1677,6 +1681,23 @@ void JoinerRole::mirror_mission_entities() {
 		if (local == nullptr ||
 				static_cast<uint16_t>(local->item_id) != es.type_id)
 			continue;
+		// A flag's pose is the client's own between S2C 0x2F states: the
+		// materializer lands each state on the registry row and the drop's
+		// fall and ride move it after, so the presented row follows the
+		// registry row here, not the other way round.
+		// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
+		//  flag's pose]
+		if (kernel_->wire_header_world && replication::is_carry_objective(es.type_id)) {
+			es.x = world::to_fixed(local->position.x);
+			es.y = world::to_fixed(local->position.y);
+			es.z = world::to_fixed(local->position.z);
+			if (local->veh.yaw_seeded) {
+				es.heading_bam = local->veh.yaw_bam;
+				es.pitch_bam = local->veh.air_pitch_bam;
+				es.roll_bam = local->veh.air_roll_bam;
+			}
+			continue;
+		}
 		// Pools 1..3 are live client rows, not just presentation records. Keep
 		// every world-side collision/seat consumer on the same full wire pose.
 		const world::Entity *attachment_parent =
@@ -1733,9 +1754,9 @@ void JoinerRole::mirror_mission_entities() {
 					if ((es.state_flags & world::kEntityFlagDead) != 0u &&
 							((local->flags | local->engine_flags) &
 									world::kEntityFlagDead) == 0u) {
-						local->position.x = static_cast<float>(es.x) / 65536.0f;
-						local->position.y = static_cast<float>(es.y) / 65536.0f;
-						local->position.z = static_cast<float>(es.z) / 65536.0f;
+						local->position.x = opennova::io::fp16_16_to_float(es.x);
+						local->position.y = opennova::io::fp16_16_to_float(es.y);
+						local->position.z = opennova::io::fp16_16_to_float(es.z);
 						if (m.yaw_seeded) m.yaw_bam = es.heading_bam;
 						local->yaw = static_cast<int16_t>(std::lround(
 								world::mission_yaw_deg_from_bam_heading(es.heading_bam)));
@@ -1806,9 +1827,9 @@ void JoinerRole::mirror_mission_entities() {
 					m.plat_porpoise = false;
 					m.plat_planing = false;
 					m.plat_bob_phase = 0.0f;
-					local->position.x = static_cast<float>(es.x) / 65536.0f;
-					local->position.y = static_cast<float>(es.y) / 65536.0f;
-					local->position.z = static_cast<float>(es.z) / 65536.0f;
+					local->position.x = opennova::io::fp16_16_to_float(es.x);
+					local->position.y = opennova::io::fp16_16_to_float(es.y);
+					local->position.z = opennova::io::fp16_16_to_float(es.z);
 					continue;
 				}
 				if (es.compact_revision != m.net_seen_revision) {
@@ -1860,9 +1881,9 @@ void JoinerRole::mirror_mission_entities() {
 				continue; // the world mover owns the registry position now
 			}
 		}
-		local->position.x = static_cast<float>(es.x) / 65536.0f;
-		local->position.y = static_cast<float>(es.y) / 65536.0f;
-		local->position.z = static_cast<float>(es.z) / 65536.0f;
+		local->position.x = opennova::io::fp16_16_to_float(es.x);
+		local->position.y = opennova::io::fp16_16_to_float(es.y);
+		local->position.z = opennova::io::fp16_16_to_float(es.z);
 	}
 }
 
@@ -2220,7 +2241,7 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 		// The category follows the retail animation-flags table, not a
 		// hand-maintained list of familiar locomotion clips. In particular,
 		// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
-		// neither. [orig: g_animStateFlagsTable @0x8139E8; category read in
+		// neither. [orig: g_AnimStateFlagsTable @0x8139E8; category read in
 		// RoundData_SpawnRound @0x4EC252..0x4EC27A]
 		const uint32_t anim_flags = world::infantry_anim_flags(anim);
 		const bool prone = (anim_flags & world::kAnimStanceFlagProne) != 0;

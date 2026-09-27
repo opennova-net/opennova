@@ -587,7 +587,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.occlusion_init_mission()
 	assert_true(sim.step())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
 	# The full verdict set through the delta forms: a baseline reset re-arms
 	# the complete emission (the same walk the occlusion frame consumes).
@@ -605,7 +605,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.set_runtime_profiling_enabled(true)
 	assert_true(sim.is_runtime_profiling_enabled())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	sim.reset_occlusion_apply_baseline()
 	assert_eq(sim.get_building_visibility_changes(), unprofiled_buildings,
 			"profiling does not change building submission")
@@ -664,7 +664,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	_assert_native_runtime_timings_zero(sim.get_runtime_perf_counters())
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	assert_true(sim.step())
 	sim.get_present_snapshot()
 	counters = sim.get_runtime_perf_counters()
@@ -1139,7 +1139,7 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 	# HUD ERROR is selected from two stance triplets. Air/water/mount overrides
 	# live in the body; this public seam pins the ordinary stance order and the
 	# settled-first-person +3 verdict. [orig: HUD_DrawCrosshair
-	# @0x592b35..0x592b87; Player_CanFireWeapon @0x5cf780]
+	# @0x592b35..0x592b87; Player_IsOpticalViewVisible @0x5cf780]
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
@@ -1201,7 +1201,7 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 
 
 func test_aimed_shot_verdict_uses_both_promoted_optic_predicates() -> void:
-	# Player_CanFireWeapon calls both helpers: Scoped is Flags bit 0, while the
+	# Player_IsOpticalViewVisible calls both helpers: Scoped is Flags bit 0, while the
 	# misleadingly named second helper is simply Sighted bit 1 outside SWITCHFROM.
 	# Both read the same post-ease promoted active bit. [orig: @0x4dcc80/@0x4dcd30]
 	for case in [
@@ -1246,7 +1246,7 @@ func test_ordinary_aimed_shot_rejects_water_and_movement() -> void:
 
 
 	# The normal Scoped move path also requests an unscope, but its public result
-	# pins Player_CanFireWeapon's MoveOrder&8 rejection end-to-end.
+	# pins Player_IsOpticalViewVisible's MoveOrder&8 rejection end-to-end.
 	sim = _aim_verdict_sim(0x1)
 	sim.step()
 	assert_true(sim.request_local_player_scope_toggle())
@@ -1261,7 +1261,7 @@ func test_ordinary_aimed_shot_rejects_water_and_movement() -> void:
 
 func test_forcescoped_overrides_ordinary_gates_but_not_card_switch_reload() -> void:
 	# ForceScoped overwrites the ordinary scope/movement/air/water verdict in
-	# first person. The reload test sits earlier in Player_CanFireWeapon and is
+	# first person. The reload test sits earlier in Player_IsOpticalViewVisible and is
 	# therefore still terminal. [orig: @0x5cf7c7 and @0x5cf845..0x5cf874]
 	var sim := _aim_verdict_sim(0x20000001)
 	sim.step()
@@ -1305,7 +1305,7 @@ func test_decoded_round_stance_uses_retail_animation_flags() -> void:
 	# transition rows that the former hand-maintained list missed, plus
 	# idle_mortar, which it incorrectly called crouched. Live IDA table reads:
 	# 46=0x008, 169..171=0x18D, 172=0x28D.
-	# [orig: g_animStateFlagsTable @0x8139E8]
+	# [orig: g_AnimStateFlagsTable @0x8139E8]
 	for row in [
 		{"anim": 46, "flags": 0x008, "category": 2},
 		{"anim": 169, "flags": 0x18D, "category": 1},
@@ -2595,7 +2595,7 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	# this player exists.
 	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 
 	var weapon_root := ResourceRoot.new()
 	assert_eq(weapon_root.set_root_dir(RetailData.def_root()), OK)
@@ -2662,7 +2662,7 @@ VEHICLE_END
 	sim.resolve_item_traits(item_db)
 	# Two units off the carrier, facing it: its seats sit inside the scan cone.
 	assert_true(sim.spawn_local_player(Vector3(-2, 0, 0), 90.0, 1))
-	MountLook.face(sim, Vector3.ZERO)
+	MountLook.face(self, sim, Vector3.ZERO)
 	assert_true(sim.local_player_toggle_mount())
 	# Pick a different seat first so key 1 exercises the driver's request.
 	sim.local_player_select_seat(1)
@@ -2880,7 +2880,7 @@ end
 
 
 
-# The floating attach labels [orig: draw_vehicle_seat_and_armory_labels @0x5a3290
+# The floating attach labels [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290
 # selection half]: free seats in the 4.0 u radius label with exactly one nearest
 # highlight; the unarmed local player sees every candidate; the armory zone flag is
 # absent here so seat mode applies and no armory labels appear.
@@ -2920,9 +2920,9 @@ end
 
 
 func test_attach_labels_share_complete_can_fire_verdict() -> void:
-	# The label pass consumes the same live Player_CanFireWeapon verdict as the
+	# The label pass consumes the same live Player_IsOpticalViewVisible verdict as the
 	# body/HUD spread row: owning an equipped slot alone is not sufficient.
-	# [orig: Player_CanFireWeapon @0x5cf780; label branch @0x5a32df]
+	# [orig: Player_IsOpticalViewVisible @0x5cf780; label branch @0x5a32df]
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101294,
@@ -2946,7 +2946,7 @@ end
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
 	# Facing the +x gun: the nearest scan wants one candidate inside its cone;
 	# the label list itself has no cone, only its 4.0 u radius.
-	MountLook.face(sim, Vector3(14, 0, 0))
+	MountLook.face(self, sim, Vector3(14, 0, 0))
 	var def_6 := WeaponDef.new()
 	def_6.name = "WPN_LABEL_SCOPE"
 	def_6.set_actions([
@@ -3163,7 +3163,7 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded the one-truck mission")
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	var def_7 := WeaponDef.new()
 	def_7.name = "WPN_GATE"
 	def_7.animadm = "gate.adm"
@@ -3227,7 +3227,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3326,7 +3326,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	# Listen-host player creation rebuilds the authoritative registry. Bind the
 	# collision instance to that final registry identity, as GameWorld does.
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
@@ -3557,7 +3557,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3682,7 +3682,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			break
 	# A dismount leaves the player standing on the seat point (retail never
 	# displaces the rider); step a unit back and look at the gun to remount.
-	MountLook.face(sim, Vector3(2, 0, 0), Vector3(1, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0), Vector3(1, 0, 0))
 	assert_true(sim.local_player_toggle_mount())
 	var remount_event: PlayerWeaponEvent = null
 	for _tick in range(120):
@@ -3749,7 +3749,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3798,7 +3798,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 
 	# Look down the row at the second gun's seat point (the same seat offset,
 	# 3.5 u further along +y from this seat).
-	MountLook.face(sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
+	MountLook.face(self, sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
 	assert_true(sim.local_player_toggle_mount(),
 			"a second gun inside the seated 5 deg cone is a direct mounted-seat swap")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
@@ -3837,7 +3837,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	# so let it refresh before looking down the row.
 	for _tick in range(17):
 		sim.step()
-	MountLook.face(sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
+	MountLook.face(self, sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
 	assert_true(sim.local_player_toggle_mount(),
 			"a third gun down the row drives a second direct mounted-seat swap")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
@@ -3888,7 +3888,7 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	sim.set_local_player_weapon(personal_def, {})
 	sim.drain_local_player_weapon_events()
 
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
 	var mount_event: PlayerWeaponEvent = null
@@ -3930,7 +3930,7 @@ func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	sim.clear_local_player_weapon()
 	assert_false(sim.local_player_toggle_mount(),
 			"retail rejects offline player UseGun attach without EquippedSlot")
@@ -3957,7 +3957,7 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	MountLook.face(sim, Vector3(2, 0, 0))
+	MountLook.face(self, sim, Vector3(2, 0, 0))
 	sim.clear_local_player_weapon()
 	assert_true(sim.local_player_toggle_mount(),
 			"the null EquippedSlot gate is UseGun-only, not a generic seat gate")
@@ -4018,7 +4018,7 @@ const _ANCHOR_CAMERA := Transform3D(Basis(), Vector3(24.0, 2.0, 0.0))
 
 
 func _occlusion_frame(sim: Simulation, camera: Transform3D = Transform3D.IDENTITY) -> void:
-	sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 
 
 func test_foliage_mask_anchors_track_local_player_stance() -> void:
@@ -4057,7 +4057,7 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 		"the anchors are the last occlusion frame's, not the tick's")
 	# The collector gates the local player like any other person: turned
 	# away, the crouched body is not collected and anchors nothing
-	# [orig: collect_visible_entities_for_terrain @ 0x5c8c60, no
+	# [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60, no
 	# local-player exception].
 	_occlusion_frame(sim, Transform3D(Basis(Vector3.UP, PI), _ANCHOR_CAMERA.origin))
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
@@ -4356,14 +4356,14 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 3, "collision-backed no-OOBJ building stays in the host batch")
 	if visibility.size() == 3:
 		assert_eq(int(visibility[0]), placed.bms_id)
 		var packed := int(visibility[1])
 		# Outdoors a windowless batch member draws its exterior section only
-		# (retail build_sector_visibility_masks @0x5c87d7..0x5c8830: the
+		# (retail Terrain_BuildSectorVisibilityMasks @0x5c87d7..0x5c8830: the
 		# +0x2CD flag clear -> mask 1), the same word every batched building
 		# carries; the fixture item authors no forced sections.
 		assert_eq(Simulation.building_visibility_mask(packed), 1,
@@ -4397,7 +4397,7 @@ end
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 3)
 	if visibility.size() == 3:
@@ -4427,14 +4427,14 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 
 	var first: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(first.size(), 3, "the first delta call emits the building's state")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
 			"no entities to cull in this mission")
 
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 0.05, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
 	assert_eq(sim.get_building_visibility_changes().size(), 0,
 			"an unchanged frame emits no building deltas")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
@@ -4802,33 +4802,50 @@ func test_listen_snapshot_attachment_holds_its_resting_userpoint() -> void:
 		assert_lt(final_position.distance_to(anchor_info.position), 0.002,
 				"host snapshot uses the authoritative mounted child pose on the resting userpoint")
 
-	# A zero-health vehicle compact legitimately retires the decoded attachment
-	# subtree. Stop restores the authoritative baseline; its fresh decoded view
-	# must replay the load stream because this child has no live compact of its own.
+	# A scripted kill zeroes the carrier's health and its brain's death transition
+	# later sets its dead bit. The attachment is never retired: it stays presented,
+	# and its hide follows the carrier's dead bit, not its health (the ewep class
+	# update's dead-hull exit reads Flags & 2), so it is hidden exactly while the
+	# carrier row is flagged dead. Stop restores the authoritative baseline; its
+	# fresh decoded view must replay the load stream because this child has no
+	# live compact of its own, and the living carrier shows its attachment.
 	sim.set_mission_variable(7, 1)
-	var retired := false
+	var kept := true
+	var hide_follows_carrier := true
 	for _tick in range(80):
 		sim.step()
 		snapshot = sim.get_present_snapshot()
-		retired = true
+		var child_seen := false
+		var child_hidden := false
+		var carrier_dead := false
 		for record in range(snapshot.size() / stride):
-			if int(snapshot[record * stride + Simulation.PF_TYPE_ID]) == 1419:
-				retired = false
-				break
-		if retired:
-			break
-	assert_true(retired,
-			"decoded zero-health carrier retires the synthetic child subtree")
+			var base := record * stride
+			var type_id := int(snapshot[base + Simulation.PF_TYPE_ID])
+			if type_id == 1419:
+				child_seen = true
+				child_hidden = snapshot[base + Simulation.PF_HIDDEN] > 0.5
+			elif type_id == 1291:
+				carrier_dead = snapshot[base + Simulation.PF_ALIVE] < 0.5
+		kept = kept and child_seen
+		hide_follows_carrier = hide_follows_carrier and child_hidden == carrier_dead
+	assert_true(sim.has_event_fired(1), "the scripted kill ran")
+	assert_true(kept, "a killed carrier never retires its attachment")
+	assert_true(hide_follows_carrier,
+			"the attachment is hidden exactly while its carrier is flagged dead")
 
 	sim.reset_session()
 	snapshot = sim.get_present_snapshot()
 	var restored := false
+	var restored_hidden := true
 	for record in range(snapshot.size() / stride):
-		if int(snapshot[record * stride + Simulation.PF_TYPE_ID]) == 1419:
+		var base := record * stride
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1419:
 			restored = true
+			restored_hidden = snapshot[base + Simulation.PF_HIDDEN] > 0.5
 			break
 	assert_true(restored,
 			"restart immediately replays restored NoNetworkCallback attachments")
+	assert_false(restored_hidden, "the living carrier shows its attachment again")
 
 	# The first live 0x0A after replay must use the re-applied authoritative
 	# items.def classes. If restore had reverted the carrier callback width, this

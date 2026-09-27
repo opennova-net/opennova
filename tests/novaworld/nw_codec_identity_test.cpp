@@ -128,6 +128,7 @@ std::vector<Case> build_corpus() {
 		r.ammo_count = 30;
 		r.bone_a = 5;
 		r.bone_b = 6;
+		r.has_score_flag = true;
 		r.score_flag = 1;
 		r.weapon_byte = 3;
 		r.attach_ref = 0x7788;
@@ -169,14 +170,18 @@ std::vector<Case> build_corpus() {
 		r.mount_handle_8 = 0x4001;
 		r.mount_handle_9 = 0x4002;
 		r.bone_byte = 2;
+		r.has_ai_trailer = true;
 		r.ai_profile_1 = 0x11112222;
 		r.ai_profile_2 = 0x33334444;
 		r.ai_name = "patrol_a";
 		r.alert_byte = 7;
 		r.action_byte = 9;
-		r.weapon_type_byte = 3;
+		r.has_sound_latch_byte = true;
+		r.sound_latch_byte = 3;
+		r.has_zone_number_rank = true;
 		r.zone_number_rank = 80;
 		r.zone_radius = 1000;
+		r.has_difficulty_byte = true;
 		r.difficulty_byte = 4;
 		in.records.push_back(r);
 		add("pool_spawn_full", encode_pool_spawn_batch(in));

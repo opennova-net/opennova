@@ -221,7 +221,7 @@ bool Simulation::enable_host_listen(int p_port) {
 	// ensure_session_role) -- the contract the armory's MP open rides.
 	const bool installed = install_role(std::make_unique<opennova::inmatch::HostRole>(
 			net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost,
-			item_class_resolver()));
+			assets_.item_replication_catalog));
 	net_.lan_host_pending = !installed;
 	if (net_.pump.is_null()) net_.pump.instantiate();
 	net_.pump->set_capture_path(net_.capture_pcap_path);
@@ -386,7 +386,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.time_of_day_continuity = in.time_of_day_continuity;
 	config.spectator_password = in.spectator_password;
 	config.spectator_slots = std::max(in.spectator_slots, -1);
-	// D-NET-166: the host's g_expansion_checksum analog. When the caller names
+	// D-NET-166: the host's g_ExpansionChecksum analog. When the caller names
 	// its install root, compute the CRC of the loose
 	// expansion/<name>/version.txt so the join gate can run retail's compare
 	// (the witnessed producer/gate live in vfs_expansion_version_checksum and
@@ -441,7 +441,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.death_messages = in.death_messages;
 	// The witnessed BANDWIDTH server command (100-1600, clamped at apply):
 	// lowers the per-frame 0x0A byte cap so entity records rotate across frames
-	// [orig: g_entity_send_budget @0xC8FC50].
+	// [orig: g_EntitySendBudget @0xC8FC50].
 	config.entity_send_budget = in.entity_send_budget;
 	// Retail selects its default send divider from the session family, then
 	// from g_LanMode for an authority LAN host. Explicit test/tool overrides
@@ -452,6 +452,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.send_holdoff_ticks = in.send_holdoff_ticks;
 	config.fat_bullets = in.fat_bullets;
 	config.one_shot_kill = in.one_shot_kill;
+	config.unlimited_vehicles = in.unlimited_vehicles;
 	config.spawn_x = in.spawn_x;
 	config.spawn_y = in.spawn_y;
 	config.spawn_z = in.spawn_z;
@@ -467,6 +468,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	if (kernel_ && is_host_listening()) {
 		kernel_->world.rules.fat_bullets = net_.host_session_config.fat_bullets;
 		kernel_->world.rules.one_shot_kill = net_.host_session_config.one_shot_kill;
+		kernel_->world.rules.vehicle_respawns = net_.host_session_config.unlimited_vehicles;
 	}
 	// A LAN host role follows the server type it was just given.
 	ensure_session_role();
@@ -584,7 +586,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_expansion_version_root();
 	install_app_id();
 	install_join_cd_cookie();
-	install_item_class_resolver();
+	install_item_catalog();
 	// The kind-derived world rules (no authority, an mp session) applied with
 	// the role install.
 	joiner_role_->reset_for_join();
@@ -797,7 +799,7 @@ String Simulation::get_join_error() const {
 
 // The in-match analog of get_join_error: the host closed the session on its own terms
 // (the punt record), or an established session went silent past the witnessed connection
-// reap window. Either way the disconnect event maps a reason code onto g_mission_exit_reason
+// reap window. Either way the disconnect event maps a reason code onto g_MissionExitReason
 // — retail EXITS THE MISSION with a reason rather than raising an in-world dialog, so the
 // shell's analog is return-to-menu with the reason surfaced.
 // [orig: CNapiNetwork_Init @0x4ca4a0 (timeout stores @0x4caa81/@0x4cab54) and
@@ -897,7 +899,7 @@ bool Simulation::is_join_in_match_ready(bool p_auto_deploy) const {
 }
 
 bool Simulation::is_join_deploy_overlay_active() const {
-	// The deploy-map overlay (retail g_deploy_screen_active): armed by the S2C
+	// The deploy-map overlay (retail g_DeployScreenActive): armed by the S2C
 	// 0x0F game_flags bit0, then host-maintained per frame from the 0x0A flags1
 	// bit1. A UI signal only — it never gates the spawn. [orig: the folds
 	// @0x42e2f8/@0x42ff82]
@@ -1028,7 +1030,7 @@ TypedArray<FeedRow> Simulation::drain_feed_events() {
 			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
 	const auto actor_of = [&cs](uint8_t index) -> opennova::hud::FeedActor {
 		const auto *e = cs.find(static_cast<uint16_t>(index));
-		return e != nullptr ? opennova::hud::FeedActor{e->name, e->team}
+		return e != nullptr ? opennova::hud::FeedActor{e->display_name, e->team}
 		                    : opennova::hud::FeedActor{};
 	};
 	std::vector<opennova::hud::FeedEventInput> inputs;

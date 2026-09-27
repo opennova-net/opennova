@@ -44,7 +44,7 @@ extends GutTest
 #   @ 0x57e9fc..0x57ea16; seed @ Environment_SnapStateToTargets @ 0x57d1e0],
 #   lightning SET-per-epoch + integer additives [orig: @ 0x57ec6f/@ 0x57ed0a;
 #   Environment_SetLightningFlash @ 0x57d320], the witnessed ambient
-#   Env_WindScale 256 + stable-envelope strength scale
+#   g_EnvWindScale 256 + stable-envelope strength scale
 #   [orig: Environment_InitDefaults @ 0x57c1d1], and keyframe-target chasing
 #   [orig: Environment_ComputeTimeOfDayColors @ 0x57de40]. wa/* is now the
 #   witnessed ambient-256 series, byte-equal to the env_render_unit ctest
@@ -63,7 +63,7 @@ extends GutTest
 #   refreshes only the target @ 0x57d2da; smooth-eighth @ 0x57eecc), integer
 #   accumulators [orig: @ 0x57f1a5..0x57f1d1], and the render-side UV
 #   translation with the accumulator NEGATIVE on U
-#   [orig: render_skybox @ 0x5791de..0x579260] (the old float port added it
+#   [orig: Render_Skybox @ 0x5791de..0x579260] (the old float port added it
 #   positively on both axes and skipped the ramp). Key shape is now the four
 #   pushed offsets. sky/verts re-dumped: the mesh comes from
 #   engine/formats/env build_sky_dome_mesh (float32-stored, v22.z last-digit shift);
@@ -72,13 +72,13 @@ extends GutTest
 #   minted): NEW water/noise (the per-frame noise color + DuDv texture heads
 #   [orig: Water_GenerateNoiseTextures @ 0x5c0360], cross-pinned byte-equal
 #   to the env_render_unit ctest landmarks) and NEW water/uv_state [orig:
-#   render_water_surface @ 0x5c3348..0x5c33db] — both keys moved to the
+#   Render_WaterSurface @ 0x5c3348..0x5c33db] — both keys moved to the
 #   env_render_unit ctest with the ADR 0043 d10 env-core sweep (the WaterCore
 #   / WeatherCore bindings that served them are C++-only now);
 #   c*/water_params re-shaped: the u_scroll_speed magic-factor float died with
 #   the invented waves; the u_water_uv tail that replaced it died too
 #   (2026-09-24, R10-1): the noise texcoords are the strip's absolute world/32
-#   pair [retail render_water_strip_detailed @ 0x5c2aec..0x5c2b00], the
+#   pair [retail Render_WaterStripDetailed @ 0x5c2aec..0x5c2b00], the
 #   scale/bias pair only feeds the strip depth (env_render_unit pins it) and
 #   the cloud-scroll offsets are never read back. Every
 #   other water key (mesh, mission-height ladder, snap, per-cell lit colors) stayed
@@ -86,12 +86,12 @@ extends GutTest
 #   free cell (the terrain rung needs a loaded .trn - see NOT PINNED).
 #   Celestial leg 2026-07-06 (env #14 CLOSED, #32 minted-and-closed, #33
 #   minted): NEW celestial/body_distance (camera + dir * 64 [orig:
-#   render_celestial_bodies @ 0x5acaa0] - the retired dome_distance key pinned
+#   Render_CelestialBodies @ 0x5acaa0] - the retired dome_distance key pinned
 #   the invented dir*2000*height_scale model), celestial/body_alpha (the
 #   witnessed sun overcast/SunDim and moon fog-distance folds), celestial/glow
 #   (the dot^4/2 glare chain) and celestial/occlusion (the #14 window +
 #   dead-band hysteresis + jitter pattern, asset-free [orig:
-#   render_skybox_sun_glow @ 0x5acd00]; the key moved to the env_render_unit
+#   Render_SkyboxSunGlow @ 0x5acd00]; the key moved to the env_render_unit
 #   ctest with the ADR 0043 d10 sweep, like the smoother/* ColorSmoother keys).
 #   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
 #   still live via its sub_5AD8B0 caller) stayed byte-identical.
@@ -100,7 +100,7 @@ extends GutTest
 #   the witnessed order [orig: Environment_UpdateWeatherTick block sequence
 #   @ 0x57ef97..0x57f03c] with the modulator chasing the outdoor iris gain
 #   over 62 ticks [orig: @ 0x57e512..0x57e538; ColorBlock_SetStepDeltas
-#   @ 0x57d940; curve terrain_sector_compute_lighting @ 0x5c7550]. Exactly
+#   @ 0x57d940; curve Terrain_SectorComputeLighting @ 0x5c7550]. Exactly
 #   the weather checkpoint rows re-dumped under that witness (wa/k016,
 #   wa/k064, wa/k256, wb/k016..k096 - the smoothed colors
 #   now carry the exposure; hand-check: wb/k064 0x31*61/64 = 0x2E); every
@@ -110,8 +110,9 @@ extends GutTest
 #   and per-tick writeback. Fog and skyfog chase the undoubled authored bytes;
 #   the horizon blend precedes the saturating render-space double
 #   [orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f1b1], and SkyDome
-#   consumes that same final skyfog as the frame clear [orig: SkyDome_RenderWithSkyfog
-#   @ 0x579cb0]. The 12 listed weather rows moved only in their fog tokens;
+#   fogs toward that same final skyfog, the above-water frame clear
+#   [orig: SkyDome_RenderWithSkyfog @ 0x579cb0]. The 12 listed weather rows
+#   moved only in their fog tokens;
 #   ten low-fog grid rows moved only the skyfog token to the already-pinned
 #   horizon-blended frame-clear value. D-RLIT-1 records the same witness.
 #   docs/render/render-lighting-re.md.
@@ -122,13 +123,28 @@ extends GutTest
 #   rows, and sky/flat moves to the same scaled cloud byte; the focused
 #   envscale_runtime_test pins ceiling/floor plus lightning separately
 #   [orig: Color_ScaleRGBAndPack @ 0x57f890].
-#   R9-14 re-grill 2026-09-24: Env_TerrainLightCombined is an MMX word lane,
+#   R9-14 re-grill 2026-09-24: g_EnvTerrainLightCombined is an MMX word lane,
 #   light byte x 0xB5 plus the sky byte unpacked WITH ITSELF (x 257), added
 #   with unsigned word saturation, then >> 8 [orig: Environment_UpdateWeatherTick
 #   @ 0x57f0c2..0x57f0ce]; the old (light x 0xB5 >> 8) + sky ran one LSB low.
-#   Exactly the nine c*/t*/water rows (Env_WaterColorLit = water x combined
+#   Exactly the nine c*/t*/water rows (g_EnvWaterColorLit = water x combined
 #   >> 7) moved, each by one step in one or two channels; every other key
 #   UNCHANGED.
+#   2026-09-26: the c*/t*/water rows lost their trailing murk byte with the
+#   retired u_water_murk feed. The murk rides the strip's per-vertex COLOR.a
+#   (the angle-weighted murk x distance chain [orig: Render_WaterStripDetailed
+#   @ 0x5c2d3f..0x5c2ef6], pinned by the env_render_unit ctest's
+#   water_strip_row_colors cases); the env murk itself stays in c*/consts. No
+#   value was re-dumped: every lit-colour token is UNCHANGED.
+#   OT-E6 re-grill 2026-09-27: retail draws the dome in the render basis the
+#   builder authors it in (world matrix = the anchor translation alone
+#   [orig: Render_Skybox @ 0x5790e8..0x579146]; UV1/UV2 = render x/z scaled
+#   [orig: SkyDome_BuildMesh @ 0x578db0]) and the scroll's camera term runs
+#   on the same render axes [orig: Render_Skybox @ 0x5791de..0x579260]. The
+#   dome drawn identity into Godot laid texture u along render z: a mirrored
+#   cloud field. sky/verts re-dumped as the x/z swap of the old samples and
+#   sky/k001 + sky/k064 as the render-basis camera term (render x = Godot z,
+#   render z = Godot x) over the same accumulators; every other key UNCHANGED.
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -173,7 +189,7 @@ const FLOAT_EPSILON := 1e-4
 const GRID_TIMES: Array[int] = [0, 550, 600, 615, 1200, 1830, 1845, 1900, 2200]
 
 # Glare sweep inputs (EnvFile.compute_sun_glare pins the dot^32 curve
-# [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]).
+# [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]).
 const GLARE_DOTS: Array[float] = [-1.0, -0.5, 0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 1.0]
 const GLARE_BRIGHTNESS: Array[int] = [0, 32, 64, 128, 192, 255]
 
@@ -182,59 +198,59 @@ const GLARE_BRIGHTNESS: Array[int] = [0, 32, 64, 128, 192, 255]
 
 const EXPECTED_BYTES := {
 	"c0/t0000": "2F4256 0E1D2D 23243B 02040C 000000 2F4256 23243B 23243B 000000 23243B 0E1D2D 0E1D2D 02040C 02040C 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t0000/water": "1D2524 CC",
+	"c0/t0000/water": "1D2524",
 	"c0/t0550": "18222C 1F2A2D 3B3D4A 4C5A8C 535351 18222C 3B3D4A 3B3D4A 535351 3B3D4A 1F2A2D 1F2A2D 4C5A8C 4C5A8C 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t0550/water": "21271F CC",
+	"c0/t0550/water": "21271F",
 	"c0/t0600": "555554 202A2E 3C3E4A 4E5E90 555554 18212B 3C3E4A 3C3E4A 555554 3C3E4A 202A2E 202A2E 4E5E90 4E5E90 383B27 FFFFFF FFFFFF 808080 00 02",
-	"c0/t0600/water": "343828 CC",
+	"c0/t0600/water": "343828",
 	"c0/t0615": "595957 202B2E 3D3F4B 526096 595957 172029 3D3F4B 3D3F4B 595957 3D3F4B 202B2E 202B2E 526096 526096 383B27 FFFFFF FFFFFF 808080 00 02",
-	"c0/t0615/water": "363A29 CC",
+	"c0/t0615/water": "363A29",
 	"c0/t1200": "AAAAA7 31372E 545859 9AB6FF AAAAA7 000000 545859 545859 AAAAA7 545859 31372E 31372E 9AB6FF 9AB6FF 383B27 FFFFFF FFFFFF 808080 00 02",
-	"c0/t1200/water": "595F3F CC",
+	"c0/t1200/water": "595F3F",
 	"c0/t1830": "4E4E4C 1E292D 393C49 485684 4E4E4C 19242F 393C49 393C49 4E4E4C 393C49 1E292D 1E292D 485684 485684 383B27 FFFFFF FFFFFF 808080 00 02",
-	"c0/t1830/water": "313526 CC",
+	"c0/t1830/water": "313526",
 	"c0/t1845": "1A2530 1D282D 383B48 445280 4A4A49 1A2530 383B48 383B48 4A4A49 383B48 1D282D 1D282D 445280 445280 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t1845/water": "202720 CC",
+	"c0/t1845/water": "202720",
 	"c0/t1900": "1B2732 1D282D 373A47 424E7A 474745 1B2732 373A47 373A47 474745 373A47 1D282D 1D282D 424E7A 424E7A 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t1900/water": "202720 CC",
+	"c0/t1900/water": "202720",
 	"c0/t2200": "273748 14212C 2B2D40 1C2238 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C 1C2238 1C2238 383B27 FFFFFF FFFFFF 808080 01 02",
-	"c0/t2200/water": "1E2623 CC",
+	"c0/t2200/water": "1E2623",
 	"c1/t0000": "17212B 070E16 11121D 000206 000000 17212B 11121D 11121D 000000 11121D 070E16 070E16 000006 000006 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t0000/water": "020C1B 80",
+	"c1/t0000/water": "020C1B",
 	"c1/t0550": "0C1116 0F1416 1D1F24 242C46 292928 0C1116 1D1F24 1D1F24 292928 1D1F24 0F1416 0F1416 242C46 242C46 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t0550/water": "020D17 80",
+	"c1/t0550/water": "020D17",
 	"c1/t0600": "2B2B2A 101517 1E1F25 262E48 2B2B2A 0C1116 1E1F25 1E1F25 2B2B2A 1E1F25 101517 101517 262E48 262E48 0A283C C89664 FFFFFF 2D3C4B 00 03",
-	"c1/t0600/water": "04131E 80",
+	"c1/t0600/water": "04131E",
 	"c1/t0615": "2C2C2B 101517 1E2025 28304A 2C2C2B 0B1015 1E2025 1E2025 2C2C2B 1E2025 101517 101517 28304A 28304A 0A283C C89664 FFFFFF 2D3C4B 00 03",
-	"c1/t0615/water": "04131F 80",
+	"c1/t0615/water": "04131F",
 	"c1/t1200": "555553 181B17 2A2C2C 4C5A8A 555553 000000 2A2C2C 2A2C2C 555553 2A2C2C 181B17 181B17 4C5A8A 4C5A8A 0A283C C89664 FFFFFF 2D3C4B 00 03",
-	"c1/t1200/water": "07202F 80",
+	"c1/t1200/water": "07202F",
 	"c1/t1830": "272726 0F1416 1C1E24 222A42 272726 0C1217 1C1E24 1C1E24 272726 1C1E24 0F1416 0F1416 222A42 222A42 0A283C C89664 FFFFFF 2D3C4B 00 03",
-	"c1/t1830/water": "04111D 80",
+	"c1/t1830/water": "04111D",
 	"c1/t1845": "0D1318 0E1416 1C1D24 222840 252524 0D1318 1C1D24 1C1D24 252524 1C1D24 0E1416 0E1416 222840 222840 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t1845/water": "020D18 80",
+	"c1/t1845/water": "020D18",
 	"c1/t1900": "0D1319 0E1316 1B1D23 20263C 232323 0D1319 1B1D23 1B1D23 232323 1B1D23 0E1316 0E1316 20263C 20263C 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t1900/water": "020D18 80",
+	"c1/t1900/water": "020D18",
 	"c1/t2200": "131C24 0A1016 15161F 0C101C 0E0E0E 131C24 15161F 15161F 0E0E0E 15161F 0A1016 0A1016 0C101C 0C101C 0A283C C89664 FFFFFF 2D3C4B 01 03",
-	"c1/t2200/water": "020C1A 80",
+	"c1/t2200/water": "020C1A",
 	"c2/t0000": "2F4256 0E1D2D 23243B FFFFFF 000000 2F4256 23243B 23243B 000000 23243B 0E1D2D 0E1D2D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t0000/water": "0F2654 59",
+	"c2/t0000/water": "0F2654",
 	"c2/t0550": "18222C 1F2A2D 3B3D4A FFFFFF 535351 18222C 3B3D4A 3B3D4A 535351 3B3D4A 1F2A2D 1F2A2D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t0550/water": "112749 59",
+	"c2/t0550/water": "112749",
 	"c2/t0600": "555554 202A2E 3C3E4A FFFFFF 555554 18212B 3C3E4A 3C3E4A 555554 3C3E4A 202A2E 202A2E FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
-	"c2/t0600/water": "1C395D 59",
+	"c2/t0600/water": "1C395D",
 	"c2/t0615": "595957 202B2E 3D3F4B FFFFFF 595957 172029 3D3F4B 3D3F4B 595957 3D3F4B 202B2E 202B2E FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
-	"c2/t0615/water": "1D3B5F 59",
+	"c2/t0615/water": "1D3B5F",
 	"c2/t1200": "AAAAA7 31372E 545859 FFFFFF AAAAA7 000000 545859 545859 AAAAA7 545859 31372E 31372E FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
-	"c2/t1200/water": "2F6191 59",
+	"c2/t1200/water": "2F6191",
 	"c2/t1830": "4E4E4C 1E292D 393C49 FFFFFF 4E4E4C 19242F 393C49 393C49 4E4E4C 393C49 1E292D 1E292D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
-	"c2/t1830/water": "1A3559 59",
+	"c2/t1830/water": "1A3559",
 	"c2/t1845": "1A2530 1D282D 383B48 FFFFFF 4A4A49 1A2530 383B48 383B48 4A4A49 383B48 1D282D 1D282D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t1845/water": "11274A 59",
+	"c2/t1845/water": "11274A",
 	"c2/t1900": "1B2732 1D282D 373A47 FFFFFF 474745 1B2732 373A47 373A47 474745 373A47 1D282D 1D282D FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t1900/water": "11274A 59",
+	"c2/t1900/water": "11274A",
 	"c2/t2200": "273748 14212C 2B2D40 FFFFFF 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
-	"c2/t2200/water": "102750 59",
+	"c2/t2200/water": "102750",
 	"celestial/glare_occlusion": "0000 1805 300A 6014 901E C028",
 	"celestial/glare_sweep": "0000 0000 0000 0000 0000 0000 0600 2500 5501 8B0B C028",
 	"envfile/derived": "9AFFFF 9A9A9A 7A5F43",
@@ -309,9 +325,9 @@ const EXPECTED_FLOATS := {
 	"envfile/fog_type0": [0.500000000, 0.004158883, 1000.000000000],
 	"sky/anchor": [512.000000000, 32.000000000, -256.000000000, 175.000000000, 64.000000000],
 	"sky/flat": [250.000000000],
-	"sky/k001": [0.124992847, -0.062492847, 0.062495232, -0.031247616],
-	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
-	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
+	"sky/k001": [-0.062507153, 0.125007153, -0.031254768, 0.062502384],
+	"sky/k064": [-0.065762319, 0.128262311, -0.033424839, 0.063587479],
+	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 48.694095612, 175.263931274, 15.821670532, -512.000000000, 132.723480225, -0.000044760, 1024.000000000, -0.000005395, 0.000179042],
 	"water/mission_override": [42.500000000, 7.000000000],
 	"water/strip": [-2521.397949219, 7.000000000, -2033.695800781, 134.420776367, 7.000000000, -59.729457855],
 }
@@ -514,10 +530,7 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			# statics; pinned at the Water output).
 			water.advance_frame(TICK)
 			var lit: Vector3 = water.get_water_material().get_shader_parameter("u_water_color")
-			# u_water_murk (REN-4 rename from u_water_alpha; the same env murk
-			# value flows through, so the pinned byte is unchanged).
-			var alpha: float = water.get_water_material().get_shader_parameter("u_water_murk")
-			bytes[cell + "/water"] = "%s %s" % [_hex_color(lit), _hex_byte(_byte_of(alpha))]
+			bytes[cell + "/water"] = _hex_color(lit)
 
 		# Restore the environment-resolved height before recording that
 		# separate precedence vector (cfg0 returns to the zero sentinel).
@@ -598,7 +611,7 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 	sky.environment_path = NodePath("../EnvSky0")
 	add_child_autofree(sky)
 
-	# Dome mesh invariants [orig: build_sky_dome_mesh @ 0x578db0]: 21x21 =
+	# Dome mesh invariants [orig: SkyDome_BuildMesh @ 0x578db0]: 21x21 =
 	# 441 vertices, 20*20*2 = 800 triangles (2400 indices).
 	var mesh: ArrayMesh = sky.get_mesh_instance().mesh
 	var arrays := mesh.surface_get_arrays(0)
@@ -631,12 +644,12 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 		var off1: Vector2 = sky.get_cloud_material().get_shader_parameter("u_scroll_offset1")
 		var off2: Vector2 = sky.get_cloud_material().get_shader_parameter("u_scroll_offset2")
 		floats["sky/k%03d" % checkpoint] = [off1.x, off1.y, off2.x, off2.y]
-	# Dome anchor rides at half camera height [orig: render_skybox @ 0x5790d0].
+	# Dome anchor rides at half camera height [orig: Render_Skybox @ 0x5790d0].
 	var dome_pos: Vector3 = sky.get_mesh_instance().global_position
 	var sky_height: float = sky.get_sky_material().get_shader_parameter("u_sky_height")
 	floats["sky/anchor"] = [dome_pos.x, dome_pos.y, dome_pos.z, sky_height, cam.global_position.y]
 
-	# advanced_clouds 0 flat pass [orig: render_skybox @ 0x579b42]: the dome
+	# advanced_clouds 0 flat pass [orig: Render_Skybox @ 0x579b42]: the dome
 	# flat-shades with cloud_tint (cfg1).
 	var env_flat := _add_env_node(_make_cfg(1), "EnvSkyFlat")
 	env_flat.time_of_day = 1200.0
@@ -654,8 +667,8 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 
 func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	# Strip-mesh semantics (env #29 LIVE): the surface rebuilds per frame from
-	# the witnessed screen march [orig: render_water_strip_detailed @ 0x5c27d0
-	# under render_water_surface @ 0x5c32c0; <=5-row batches through the static
+	# the witnessed screen march [orig: Render_WaterStripDetailed @ 0x5c27d0
+	# under Render_WaterSurface @ 0x5c32c0; <=5-row batches through the static
 	# strip table word_841328, walk @ 0x5c3164..0x5c329e] — the 65x65 grid
 	# stand-in and its camera-snap positioning died with it, so the pins here
 	# are the no-camera rung, the batch-unroll index head, and the first/last
@@ -677,8 +690,8 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	water.advance_frame(TICK)
 	# No camera in strip_vp -> no strip surface: the march needs the projected
 	# screen block, and retail only runs it inside the camera pass
-	# [orig: render_water_strip_detailed @ 0x5c27d0 projects via
-	#  terrain_project_sector_to_screen @ 0x5c0bf0 before emitting rows].
+	# [orig: Render_WaterStripDetailed @ 0x5c27d0 projects via
+	#  Terrain_ProjectSectorToScreen @ 0x5c0bf0 before emitting rows].
 	var pre_surfaces: int = (water.get_mesh_instance().mesh as ArrayMesh).get_surface_count()
 
 	# Height ladder, mission/BMS rung: world-driven height wins; clearing (NAN)
@@ -745,7 +758,7 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 		occlusion.append("%02X%02X" % [glare.glare, glare.fog_whiten])
 	bytes["celestial/glare_occlusion"] = " ".join(occlusion)
 
-	# Bodies place at camera + direction * 64 [orig: render_celestial_bodies
+	# Bodies place at camera + direction * 64 [orig: Render_CelestialBodies
 	# @ 0x5acaa0] — the old dome_distance key pinned the invented dir*2000
 	# model (env #32).
 	floats["celestial/body_distance"] = [EnvFile.celestial_body_distance()]
@@ -762,7 +775,7 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 	]
 
 	# The glow alpha chain (dot^4/2 x brightness x folds) [orig:
-	# render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9].
+	# Render_SkyboxSunGlow @ 0x5acfb8..0x5ad0a9].
 	floats["celestial/glow"] = [
 		EnvFile.glare_glow_alpha(1.0, 256, 0.0, 0.0),
 		EnvFile.glare_glow_alpha(0.5, 256, 0.0, 0.0),
@@ -882,7 +895,7 @@ func test_environment_parity_vectors() -> void:
 # The env-node sky getter serves the weather writeback (the smoothed,
 # modulated block), falling back to the raw keyframe until a tick has
 # written — the same contract as fill/sun/fog [orig: entity constants read
-# Env_SkyBlock[0] @ 0x5c8090; writeback = the weather tick's block pass].
+# g_EnvSkyBlock[0] @ 0x5c8090; writeback = the weather tick's block pass].
 func test_sky_ambient_serves_smoothed_writeback() -> void:
 	var env := _add_env_node(_make_cfg(0), "EnvSkyWB")
 	env.time_of_day = 1200.0
@@ -919,7 +932,7 @@ func test_sky_ambient_serves_smoothed_writeback() -> void:
 # The NVG hemisphere rewrite lives in the published object lighting block
 # alone; the env colour getters (water, particles, scars, the slot drape)
 # keep serving the raw blocks [orig: CTerrainRenderer_BuildLightingShaderConstants
-# @ 0x5c820b..0x5c82e9; Env_WaterColorLit @ 0x57f177 from the raw blocks].
+# @ 0x5c820b..0x5c82e9; g_EnvWaterColorLit @ 0x57f177 from the raw blocks].
 func test_nvg_view_rewrites_only_the_object_block() -> void:
 	var env := _add_env_node(_make_cfg(0), "EnvNvg")
 	env.time_of_day = 1200.0

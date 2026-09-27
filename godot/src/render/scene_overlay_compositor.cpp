@@ -1,4 +1,5 @@
 #include "render/scene_overlay_compositor.h"
+#include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
 #include "util/string_convert.h"
 
@@ -104,25 +105,11 @@ void main() {
 }
 )GLSL";
 
-std::string glsl_float(float p_value) {
-	char buffer[64];
-	std::snprintf(buffer, sizeof(buffer), "%.9g", static_cast<double>(p_value));
-	std::string text(buffer);
-	if (text.find_first_of(".eE") == std::string::npos)
-		text += ".0";
-	return text;
-}
-
 std::string vertex_shader_source() {
 	std::string source(kVertexShaderTemplate);
-	const auto splice = [&source](const char *p_token, const std::string &p_value) {
-		const std::string token(p_token);
-		for (std::size_t at = source.find(token); at != std::string::npos;
-				at = source.find(token, at + p_value.size()))
-			source.replace(at, token.size(), p_value);
-	};
-	splice("@FAR_BAND_REV_MIN@", glsl_float(1.0f - opennova::renderer::kQ3FarBandMaxZ));
-	splice("@FAR_BAND_REV_SPAN@", glsl_float(opennova::renderer::kQ3FarBandMaxZ -
+	splice_token(source, "@FAR_BAND_REV_MIN@",
+			glsl_float(1.0f - opennova::renderer::kQ3FarBandMaxZ));
+	splice_token(source, "@FAR_BAND_REV_SPAN@", glsl_float(opennova::renderer::kQ3FarBandMaxZ -
 			opennova::renderer::kQ3FarBandMinZ));
 	return source;
 }
@@ -448,20 +435,10 @@ bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 				"RenderingDevice is unavailable; the overlay stage requires Forward+ or Mobile");
 		return false;
 	}
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(vertex_shader_source().c_str()));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(kFragmentShader));
-	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
-	if (spirv.is_null() ||
-			!spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-			!spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
-		const std::string errors = spirv.is_null() ? std::string("no SPIR-V") :
-				opennova::to_std(spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_VERTEX) +
-						spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_FRAGMENT));
+	Ref<RDShaderSPIRV> spirv;
+	const std::string errors =
+			compile_rd_spirv(rd, vertex_shader_source(), kFragmentShader, spirv);
+	if (!errors.empty()) {
 		set_status("shader_compile_failed", errors);
 		release_all();
 		return false;
@@ -705,11 +682,15 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 				"the overlay stage requires RenderSceneBuffersRD and RenderSceneData");
 		return;
 	}
-	const bool mirror = view_kind.load(std::memory_order_acquire) == VIEW_MIRROR;
-	if (mirror) {
+	const int kind = view_kind.load(std::memory_order_acquire);
+	if (kind == VIEW_MIRROR) {
 		opennova::renderer::compile_scene_overlay(p_submission.frame,
 				opennova::renderer::kMirrorOverlayOrder.data(),
 				opennova::renderer::kMirrorOverlayOrder.size(), draw_list);
+	} else if (kind == VIEW_INSET) {
+		opennova::renderer::compile_scene_overlay(p_submission.frame,
+				opennova::renderer::kInsetOverlayOrder.data(),
+				opennova::renderer::kInsetOverlayOrder.size(), draw_list);
 	} else {
 		opennova::renderer::compile_scene_overlay(p_submission.frame,
 				opennova::renderer::kSceneOverlayOrder.data(),
@@ -812,10 +793,6 @@ void SceneOverlayCompositorEffect::set_view_kind(ViewKind p_kind) {
 	impl_->view_kind.store(p_kind, std::memory_order_release);
 }
 
-SceneOverlayCompositorEffect::ViewKind SceneOverlayCompositorEffect::get_view_kind() const {
-	return static_cast<ViewKind>(impl_->view_kind.load(std::memory_order_acquire));
-}
-
 void SceneOverlayCompositorEffect::publish(
 		const std::shared_ptr<const SceneOverlaySubmission> &p_submission) {
 	if (impl_->shutdown_requested.load(std::memory_order_acquire))
@@ -853,10 +830,12 @@ void SceneOverlayCompositorEffect::write_backend_report(Dictionary &result) cons
 	const Impl::Diagnostics &d = impl_->diagnostics;
 	result["backend"] = "rendering_device_compositor";
 	result["callback"] = "post_transparent";
-	result["view_kind"] = impl_->view_kind.load(std::memory_order_acquire) == VIEW_MIRROR ?
-			String("mirror") : String("scene");
-	result["status"] = String::utf8(d.status.c_str());
-	result["failure"] = String::utf8(d.failure.c_str());
+	const int kind = impl_->view_kind.load(std::memory_order_acquire);
+	result["view_kind"] = kind == VIEW_MIRROR ? String("mirror")
+			: kind == VIEW_INSET ? String("inset")
+								: String("scene");
+	result["status"] = opennova::to_gd(d.status);
+	result["failure"] = opennova::to_gd(d.failure);
 	result["shutdown"] = impl_->shutdown_requested.load(std::memory_order_acquire);
 	result["callback_seen"] = d.callback_seen;
 	result["submitted_frame_id"] = static_cast<int64_t>(d.submitted_frame_id);

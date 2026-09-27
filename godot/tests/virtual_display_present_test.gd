@@ -392,7 +392,7 @@ func _board_installed_m1a1() -> Installed:
 	var seat: EntityCardSeat = fixture.hull.get_seats()[0]
 	var target := fixture.hull.get_mission_position() + seat.get_local().rotated(
 			Vector3(0, 0, 1), deg_to_rad(-fixture.hull.get_yaw_deg()))
-	MountLook.face(fixture.sim, target, target + Vector3(1, 0, 0))
+	MountLook.face(self, fixture.sim, target, target + Vector3(1, 0, 0))
 	assert_true(fixture.sim.local_player_toggle_mount(), "board the training tank")
 	_frames(fixture, 30)
 	var view := fixture.world.local_player_view()

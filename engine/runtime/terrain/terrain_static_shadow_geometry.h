@@ -83,7 +83,7 @@ struct TerrainStaticShadowResolvedMaterial {
 
 // Exact evaluated state for one caster/material at the frame-shared retail
 // GetTickCount value and global CTRL-bus snapshot [orig: Render_SubmitEntity @0x5dad9d tick;
-//  collect_render_objects_for_batch @0x5d91ab..0x5d91de and CRenderBatchQueue_FlushBatches
+//  Render_CollectRenderObjectsForBatch @0x5d91ab..0x5d91de and CRenderBatchQueue_FlushBatches
 //  @0x5da1b8..0x5da1fd CTRL snapshot/restore]. This is computed once and
 // then shared by draw classification and rasterization so stochastic/channel
 // evaluation cannot disagree within one page job.
@@ -129,7 +129,7 @@ struct TerrainStaticShadowResolvedGeometry {
 // animation selector used by ordinary object rendering. The caller supplies
 // the frame-shared tick and the already-snapshotted global CTRL values.
 // [orig: Render_SubmitEntity @0x5DAD80 tick stamp; batch CTRL snapshot
-// @0x5D91AB..0x5D91DE; apply_shader_parameters @0x58DB80]
+// @0x5D91AB..0x5D91DE; Material_ApplyShaderParameters @0x58DB80]
 TerrainStaticShadowMaterialState terrain_static_shadow_evaluate_material(
 		const TerrainStaticShadowResolvedGeometry &geometry,
 		const TerrainStaticShadowResolvedMaterial &material,

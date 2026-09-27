@@ -2,8 +2,11 @@
 
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/visual_instance3d.hpp>
+#include <godot_cpp/classes/world3d.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -93,6 +96,23 @@ void ScarPresenter::_bind_methods() {
 			&ScarPresenter::get_stats_record);
 	ClassDB::bind_method(D_METHOD("reset_runtime_state"),
 			&ScarPresenter::reset_runtime_state);
+	ClassDB::bind_method(D_METHOD("set_inset_view", "active", "camera"),
+			&ScarPresenter::set_inset_view);
+	ClassDB::bind_method(D_METHOD("present_inset", "draw_list", "owner_nodes"),
+			&ScarPresenter::present_inset);
+	ClassDB::bind_method(D_METHOD("get_inset_world_surface_count"),
+			&ScarPresenter::get_inset_world_surface_count);
+	ClassDB::bind_method(D_METHOD("get_inset_entity_twin_count"),
+			&ScarPresenter::get_inset_entity_twin_count);
+}
+
+void ScarPresenter::present_inset(const Ref<ScarDrawList> &p_draw_list,
+		const Dictionary &p_owner_nodes) {
+	if (p_draw_list.is_null()) {
+		release_inset_();
+		return;
+	}
+	present_inset_(p_draw_list, p_owner_nodes);
 }
 
 void ScarPresenter::_notification(int p_what) {
@@ -100,6 +120,7 @@ void ScarPresenter::_notification(int p_what) {
 		// Entity-ring meshes live under OTHER nodes (the owner models); free
 		// them with the presenter so a torn-down pass leaves no scar behind.
 		free_entity_meshes_();
+		release_inset_();
 	}
 }
 
@@ -355,18 +376,22 @@ void ScarPresenter::present(const Ref<ScarDrawList> &p_draw_list, const Dictiona
 			instance = memnew(MeshInstance3D);
 			instance->set_name(String("Scars_") + String::num_int64(group.owner) +
 					"_s" + String::num_int64(group.section));
-			// The ring renders wherever its section renders: inherit the
-			// section mesh's layer stamps (mirror policy, the slot-capture
-			// bit SlotShadow stamps once per scene build) from a sibling.
-			for (int i = 0; i < mount->get_child_count(); ++i) {
-				VisualInstance3D *sibling =
-						Object::cast_to<VisualInstance3D>(mount->get_child(i));
-				if (sibling != nullptr) {
-					instance->set_layer_mask(sibling->get_layer_mask());
-					break;
-				}
-			}
 			mount->add_child(instance);
+		}
+		// The ring renders wherever its section renders: it takes the section
+		// mesh's layer stamps (mirror policy, the slot-capture bit SlotShadow
+		// stamps once per scene build, the main-view bits while the owner's
+		// views differ) from a sibling, every frame, so a split owner's ring
+		// follows its node.
+		for (int i = 0; i < mount->get_child_count(); ++i) {
+			VisualInstance3D *sibling = Object::cast_to<VisualInstance3D>(mount->get_child(i));
+			if (sibling != nullptr && sibling != instance &&
+					!String(sibling->get_name()).begins_with("Scars_")) {
+				if (instance->get_layer_mask() != sibling->get_layer_mask()) {
+					instance->set_layer_mask(sibling->get_layer_mask());
+				}
+				break;
+			}
 		}
 		instance->set_mesh(group.mesh);
 		kept[key] = instance->get_instance_id();
@@ -411,7 +436,7 @@ void ScarPresenter::present_frame(Simulation *p_sim, const Vector3 &p_camera,
 	Color terrain_light(1, 1, 1);
 	if (p_environment != nullptr) {
 		fog_distance = p_environment->get_fog_distance();
-		// Env_TerrainLightCombined = light * 0xB5/256 + sky (env-tod-re.md
+		// g_EnvTerrainLightCombined = light * 0xB5/256 + sky (env-tod-re.md
 		// "Derived render colors"; the same chain the water surface lights by).
 		const Vector3 sun = p_environment->get_sun_light();
 		const Vector3 sky = p_environment->get_sky_ambient();
@@ -420,6 +445,204 @@ void ScarPresenter::present_frame(Simulation *p_sim, const Vector3 &p_camera,
 	}
 	present_draw_list(p_sim->get_scar_draw_list(camera, fog_distance, terrain_light),
 			p_index, p_wire);
+	if (inset_active_) {
+		present_inset_draw_list(
+				p_sim->get_scar_draw_list_inset(inset_camera_, fog_distance, terrain_light),
+				p_index, p_wire);
+	} else {
+		release_inset_();
+	}
+}
+
+void ScarPresenter::set_inset_view(bool p_active, const Vector3 &p_camera) {
+	inset_active_ = p_active;
+	if (p_camera.is_finite()) {
+		inset_camera_ = p_camera;
+	}
+	if (!p_active) {
+		release_inset_();
+	}
+}
+
+void ScarPresenter::present_inset_draw_list(const Ref<ScarDrawList> &p_draw_list,
+		EntityIndex *p_index, EntityPresenter *p_wire) {
+	if (p_draw_list.is_null()) {
+		release_inset_();
+		return;
+	}
+	// The owner resolve counts into the main pass's diagnostic; keep it.
+	const int unresolved = stat_owners_unresolved_;
+	Dictionary owner_nodes;
+	resolve_owner_nodes_(p_draw_list, p_index, p_wire, owner_nodes);
+	stat_owners_unresolved_ = unresolved;
+	present_inset_(p_draw_list, owner_nodes);
+}
+
+void ScarPresenter::apply_world_mesh_view_(bool p_split) {
+	MeshInstance3D *world_instance = ensure_world_mesh_();
+	const uint32_t layer = p_split ? uint32_t(ObjectModel::LAYER_MAIN_VIEW)
+								   : uint32_t(ObjectModel::LAYER_WORLD);
+	if (world_instance->get_layer_mask() != layer) {
+		world_instance->set_layer_mask(layer);
+	}
+}
+
+// The Inset list: its world batches on the Inset's own mesh, and each
+// entity-ring group of an owner whose views differ on a twin the owner poses
+// with its Inset part pose (ObjectModel::attach_inset_section_twin); a group
+// of an owner whose views agree is the node ring the main list already drew.
+void ScarPresenter::present_inset_(const Ref<ScarDrawList> &p_draw_list,
+		const Dictionary &p_owner_nodes) {
+	const PackedVector3Array &vertices = p_draw_list->get_vertices();
+	const PackedVector2Array &uvs = p_draw_list->get_uvs();
+	const PackedColorArray &colors = p_draw_list->get_colors();
+	const PackedInt32Array &owners = p_draw_list->get_batch_owner();
+	const PackedInt32Array &textures = p_draw_list->get_batch_texture();
+	const PackedInt32Array &sections = p_draw_list->get_batch_section();
+	const PackedInt32Array &flags = p_draw_list->get_batch_flags();
+	const PackedInt32Array &firsts = p_draw_list->get_batch_first();
+	const PackedInt32Array &counts = p_draw_list->get_batch_count();
+	const PackedStringArray &strip_names = p_draw_list->get_strip_names();
+	const PackedInt32Array &strip_mode_words = p_draw_list->get_strip_mode_words();
+	const int64_t batch_count = owners.size();
+	const bool rows_ok = textures.size() == batch_count && sections.size() == batch_count &&
+			flags.size() == batch_count && firsts.size() == batch_count &&
+			counts.size() == batch_count;
+	Ref<ArrayMesh> world_mesh;
+	world_mesh.instantiate();
+	HashMap<uint32_t, Ref<ArrayMesh>> groups;
+	HashMap<uint32_t, int> group_owner;
+	for (int64_t i = 0; rows_ok && i < batch_count; ++i) {
+		BatchRow row;
+		row.owner = owners[i];
+		row.texture = textures[i];
+		row.section = sections[i];
+		row.entity_local = (flags[i] & 1) != 0;
+		row.building = (flags[i] & 2) != 0;
+		row.first = firsts[i];
+		row.count = counts[i];
+		const String texture_name = row.texture >= 0 && row.texture < strip_names.size()
+				? strip_names[row.texture]
+				: String();
+		const uint32_t mode_word = row.texture >= 0 && row.texture < strip_mode_words.size()
+				? static_cast<uint32_t>(strip_mode_words[row.texture])
+				: opennova::world::kScarModeWordScorch;
+		const Ref<ShaderMaterial> material =
+				material_for_strip_(row.texture, texture_name, mode_word).material;
+		if (!row.entity_local) {
+			append_surface(world_mesh, vertices, uvs, colors, row, material);
+			continue;
+		}
+		const uint32_t key = (static_cast<uint32_t>(row.owner & 0xFFFF) << 8) |
+				static_cast<uint32_t>(row.section & 0xFF);
+		Ref<ArrayMesh> *mesh = groups.getptr(key);
+		if (mesh == nullptr) {
+			Ref<ArrayMesh> created;
+			created.instantiate();
+			groups[key] = created;
+			group_owner[key] = row.owner;
+			mesh = groups.getptr(key);
+		}
+		append_surface(*mesh, vertices, uvs, colors, row, material);
+	}
+
+	// The world batches: the Inset's own mesh on its own bit, the main
+	// view's mesh on the main-view bit.
+	MeshInstance3D *inset_world = Object::cast_to<MeshInstance3D>(
+			ObjectDB::get_instance(inset_world_mesh_id_));
+	if (inset_world == nullptr) {
+		inset_world = memnew(MeshInstance3D);
+		inset_world->set_name("ScarWorldInset");
+		inset_world->set_as_top_level(true);
+		inset_world->set_layer_mask(ObjectModel::LAYER_INSET_VIEW);
+		add_child(inset_world);
+		inset_world_mesh_id_ = inset_world->get_instance_id();
+	}
+	stat_inset_world_surfaces_ = world_mesh->get_surface_count();
+	inset_world->set_mesh(stat_inset_world_surfaces_ > 0 ? world_mesh : Ref<ArrayMesh>());
+	inset_world->set_visible(stat_inset_world_surfaces_ > 0);
+	apply_world_mesh_view_(true);
+
+	// The entity rings of split owners.
+	RenderingServer *rs = RenderingServer::get_singleton();
+	HashSet<uint32_t> live;
+	for (const KeyValue<uint32_t, Ref<ArrayMesh>> &kv : groups) {
+		if (kv.value->get_surface_count() == 0) {
+			continue;
+		}
+		const Variant owner_v = p_owner_nodes.get(group_owner[kv.key], Variant());
+		ObjectModel *model = Object::cast_to<ObjectModel>(static_cast<Object *>(owner_v));
+		if (model == nullptr || !model->is_view_split() || !model->is_inside_tree() ||
+				model->get_world_3d().is_null()) {
+			continue;
+		}
+		InsetScarTwin *twin = inset_twins_.getptr(kv.key);
+		if (twin != nullptr && twin->owner != ObjectID(model->get_instance_id())) {
+			if (ObjectModel *previous =
+							Object::cast_to<ObjectModel>(ObjectDB::get_instance(twin->owner))) {
+				previous->detach_inset_section_twin(twin->instance);
+			}
+			rs->free_rid(twin->instance);
+			inset_twins_.erase(kv.key);
+			twin = nullptr;
+		}
+		if (twin == nullptr) {
+			InsetScarTwin created;
+			created.instance = rs->instance_create();
+			created.owner = ObjectID(model->get_instance_id());
+			rs->instance_set_scenario(created.instance, model->get_world_3d()->get_scenario());
+			rs->instance_set_layer_mask(created.instance, ObjectModel::LAYER_INSET_VIEW);
+			rs->instance_geometry_set_cast_shadows_setting(
+					created.instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
+			inset_twins_[kv.key] = created;
+			twin = inset_twins_.getptr(kv.key);
+		}
+		rs->instance_set_base(twin->instance, kv.value->get_rid());
+		twin->mesh = kv.value;
+		model->attach_inset_section_twin(twin->instance, static_cast<int>(kv.key & 0xFFu));
+		live.insert(kv.key);
+	}
+	Vector<uint32_t> stale;
+	for (const KeyValue<uint32_t, InsetScarTwin> &kv : inset_twins_) {
+		if (!live.has(kv.key)) {
+			stale.push_back(kv.key);
+		}
+	}
+	for (const uint32_t key : stale) {
+		const InsetScarTwin &twin = inset_twins_[key];
+		if (ObjectModel *owner = Object::cast_to<ObjectModel>(ObjectDB::get_instance(twin.owner))) {
+			owner->detach_inset_section_twin(twin.instance);
+		}
+		rs->free_rid(twin.instance);
+		inset_twins_.erase(key);
+	}
+}
+
+void ScarPresenter::release_inset_() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (const KeyValue<uint32_t, InsetScarTwin> &kv : inset_twins_) {
+		if (ObjectModel *owner = Object::cast_to<ObjectModel>(ObjectDB::get_instance(kv.value.owner))) {
+			owner->detach_inset_section_twin(kv.value.instance);
+		}
+		if (rs != nullptr && kv.value.instance.is_valid()) {
+			rs->free_rid(kv.value.instance);
+		}
+	}
+	inset_twins_.clear();
+	stat_inset_world_surfaces_ = 0;
+	if (MeshInstance3D *inset_world = Object::cast_to<MeshInstance3D>(
+				ObjectDB::get_instance(inset_world_mesh_id_))) {
+		inset_world->set_mesh(Ref<Mesh>());
+		inset_world->set_visible(false);
+	}
+	if (world_mesh_id_.is_valid()) {
+		if (MeshInstance3D *world_instance = Object::cast_to<MeshInstance3D>(
+					ObjectDB::get_instance(world_mesh_id_))) {
+			if (world_instance->get_layer_mask() != uint32_t(ObjectModel::LAYER_WORLD)) {
+				world_instance->set_layer_mask(ObjectModel::LAYER_WORLD);
+			}
+		}
+	}
 }
 
 void ScarPresenter::present_draw_list(const Ref<ScarDrawList> &p_draw_list,
@@ -437,6 +660,7 @@ void ScarPresenter::present_draw_list(const Ref<ScarDrawList> &p_draw_list,
 
 void ScarPresenter::reset_runtime_state() {
 	clear();
+	release_inset_();
 	stat_textures_missing_ = 0;
 	stat_strips_unsupported_ = 0;
 	stat_slots_live_ = 0;

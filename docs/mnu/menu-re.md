@@ -29,7 +29,7 @@ and the type factory is `CUIScene_CreateWidgetByType @ 0x64f630`.
 |---|---|---|
 | Element parse | `CUIElement_ParseXMLDefinition @ 0x648120` | `engine/formats/mnu` parse; layout in `MenuFrameCompiler::solve_rect` (`engine/runtime/menu/menu_frame.cpp`) |
 | Type factory | `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_window_type` / `window_type_name` |
-| Scene node attrs | `parse_scene_node_attributes @ 0x639630` | `mnu::Screen` (NA/MU + WI children) |
+| Scene node attrs | `CUIScene_ParseNodeAttributes @ 0x639630` | `mnu::Screen` (NA/MU + WI children) |
 | `%VAR%` expand | `NapiXML_ExpandVariablesInText @ 0x63a000` | `substitute_var` per field (ADR 0005) |
 | XML entities | `XML_ParseCharEntity @ 0x769cc0`, table @ 0x85a628 | `decode_entity` in `mnu_xml.cpp` |
 | Char entity emit | (table @ 0x85a628, 4 decodable) | `escape_xml` in `mnu.cpp` |
@@ -63,7 +63,7 @@ are still format data and must round-trip and remain available to their hosts.
 `QUIT` is not a parsed Action type; exit buttons are shell Commands bound by
 Window name (ADR 0001).
 
-## Layout `[orig: @ 0x648120 parse tail; adjust_rect_to_text_size @ 0x6575f0]`
+## Layout `[orig: @ 0x648120 parse tail; CStaticWnd_AdjustRectToTextSize @ 0x6575f0]`
 
 POSITION is absolute parent-relative edges (`LEFT/TOP/RIGHT/BOTTOM`, with
 `ULX/ULY/WIDTH/HEIGHT` aliases folding to the same fields); missing edges read 0.
@@ -74,7 +74,7 @@ Three stages, no per-type default sizes:
    IMAGE appearance: width from the texture, height from the `HEIGHT` attr (sprite
    frame height) else the texture.
 3. Text widgets (the vtable family sharing the text-widget parse `@ 0x657c30` ->
-   `adjust_rect_to_text_size @ 0x6575f0`) size a still-degenerate axis from the
+   `CStaticWnd_AdjustRectToTextSize @ 0x6575f0`) size a still-degenerate axis from the
    measured string, anchored per `JUSTIFY`/`VJUSTIFY` (left/centre/right edge;
    top/centre/bottom).
 
@@ -90,7 +90,7 @@ UVs; checkboxes stretch like every other element (the old keep-aspect was a
 reference-repo choice). With no resolvable font the compiler measures a nominal
 8x16 glyph box so headless layout stays deterministic.
 
-## Frame `[orig: CUIElement_DrawFrame @ 0x64a210; init_border_materials @ 0x646f70]`
+## Frame `[orig: CUIElement_DrawFrame @ 0x64a210; CUIElement_InitBorderMaterials @ 0x646f70]`
 
 The stencil is a grid of `SIZE x SIZE` tiles (canonically 4*SIZE square):
 row 0 = top corners + top edge (+ fill tile at col 3), row 1 = left/right edges,
@@ -107,9 +107,9 @@ elem+0x288/+0x28C). `CWnd_Construct` initializes those fields to `12.0` and
 Every frame quad is submitted with diffuse `0xFF7F7F7F`. In material mode
 `0x651`, the first MODULATE2X stage cancels that half-intensity diffuse and the
 second yields the effective RGB equation `(508/255) * STENCIL * BRUSH`; alpha
-is the product of both texture alphas. `[orig: init_border_materials @ 0x646f70
+is the product of both texture alphas. `[orig: CUIElement_InitBorderMaterials @ 0x646f70
 creates `border_material` from both texture handles and copies the fill cell;
-CUIElement_DrawFrame @ 0x64a210; decode_mode_color_stage @ 0x681080]`. Reimpl:
+CUIElement_DrawFrame @ 0x64a210; RenderState_DecodeModeColorStage @ 0x681080]`. Reimpl:
 `MenuFrameCompiler::emit_frame` carries the stencil fill region and the paired
 border texture slots; the Godot device leg caches the phased fill tile and
 rasterized two-stage pieces.
@@ -160,7 +160,7 @@ scene.scaleY = screenHeight * 0.0016666667 // = 1/600
 
 and propagated to every widget by `CWnd_SetScaleRecursive @ 0x646c60` (writes
 `elem+264`=scaleX, `elem+268`=scaleY, recursing to children); the caller is
-`apply_video_mode_change @ 0x55a590`, which passes the real new resolution. At draw, each
+`UI_ApplyVideoModeChange @ 0x55a590`, which passes the real new resolution. At draw, each
 element rect is multiplied by the scale and truncated to int
 (`CUIElement_DrawStretchedTexture @ 0x647d40`), with ancestor offsets accumulated up the
 parent chain (`CWnd_AccumulateAncestorOffset @ 0x6465e0`).
@@ -181,10 +181,10 @@ in this section).
 
 **Frame entry.** The menu is a game MODE (struct `@ 0x83b404`): init =
 `Menu_InitShellResources @ 0x552500`, update = `Menu_UpdateFrame @ 0x5528a0`
-(nav push, message pump, `scene_end_frame` on `g_GameMenu @ 0x2551100`, LAN/
+(nav push, message pump, `CUIScene_EndFrame` on `g_GameMenu @ 0x2551100`, LAN/
 preview/admin pumps, then the deferred expansion reload below), render =
 `Menu_RenderFrame @ 0x54b7c0`: device-lost
-handling, gate on `g_GameMenu` + `g_menu_render_dirty @ 0x2551114`, clear,
+handling, gate on `g_GameMenu` + `g_MenuRenderDirty @ 0x2551114`, clear,
 BeginScene, Bink update, `CUIScene_DrawScreensAndCursor @ 0x63bf60`, Present.
 
 **Deferred expansion reload (witnessed + PORTED 2026-09-16).** Choosing an
@@ -204,9 +204,9 @@ if ( dword_252DD90 && !dword_25C7708 ) {
 
 The second flag is the VIDEO-MODE-CHANGE state machine's state, not a second
 reload latch: `0` idle, `2` apply pending, `3` awaiting confirm
-(`[orig: apply_video_mode_change @ 0x55a590]`; seeded `0` by
+(`[orig: UI_ApplyVideoModeChange @ 0x55a590]`; seeded `0` by
 `[orig: sub_555710 @ 0x555734]`, also read by `[orig: sub_55C450 @ 0x55c464]`
-and gated on by `options_screen_init @ 0x554820` and
+and gated on by `UI_OptionsScreenInit @ 0x554820` and
 `Game_CloseInGameScreens @ 0x54b942`). A resolution change in flight therefore
 SUPPRESSES the remount until it settles; the request stays raised.
 
@@ -219,13 +219,13 @@ the request flag gates there.
 **Scene walk** `[orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]`: every screen
 in the scene container (`scene+20`: `{+4 array, +8 count}`) draws via vtable+24
 in FORWARD index order (each screen gates on its own shown flag; the input pump
-`scene_end_frame @ 0x63e600` walks the same array in REVERSE, so front-most =
+`CUIScene_EndFrame @ 0x63e600` walks the same array in REVERSE, so front-most =
 last drawn = first picked). Then the MOUSE CURSOR: texture = the override
-`@ 0x31C16E4`, else `g_ui_frame_cursor_texture @ 0x31C16E0` (stamped per frame
-by `widget_process_mouse_event` from the hovered widget's inherited `+276`
+`@ 0x31C16E4`, else `g_UIFrameCursorTexture @ 0x31C16E0` (stamped per frame
+by `CWnd_ProcessMouseEvent` from the hovered widget's inherited `+276`
 cursor, else the screen default), drawn at the raw mouse position at native
 texture size with **scale 1.0 — the cursor never scales with the menu** —
-white, or `0xFF7F7F7F` under `g_ui_half_bright_mode @ 0x31C3760`.
+white, or `0xFF7F7F7F` under `g_UIHalfBrightMode @ 0x31C3760`.
 
 **Draw vtable (+24) per widget type** (vtables via
 `CUIScene_CreateWidgetByType @ 0x64f630` ctors):
@@ -277,13 +277,13 @@ the APPEARANCE STATE attribute parse (`@ 0x6483d4..0x64845e`), the runtime
 setter `CWnd_SetVisualState @ 0x646340` (writes `+232`/`+236`; availability
 mask at `+4` — a state with no authored appearance falls back to 0, and with
 no default appearance to −1 = no appearance pass at all, text keeps default
-colors), and the FONT color-pair switch in `draw_text_with_cursor @ 0x6533b0`
+colors), and the FONT color-pair switch in `CFontCache_DrawTextWithCursor @ 0x6533b0`
 (case 1 -> pair [6,7] disabled, 2 -> [2,3] mouseover, 3 -> [4,5] selected,
 else [0,1] default — pairs in FONT parse order). The per-frame writer is
-`widget_process_mouse_event @ 0x647a00` (vtable+20): disabled (`+228 == 0`)
+`CWnd_ProcessMouseEvent @ 0x647a00` (vtable+20): disabled (`+228 == 0`)
 -> 1; hit + button down -> 3; hit + button up -> 2; else 0; front-most sibling
 wins via the reverse child walk + the per-frame claim `scene+16`; the hovered
-widget lands in `g_ui_mouseover_wnd @ 0x31C16DC`. (The transient sound states
+widget lands in `g_UIMouseoverWnd @ 0x31C16DC`. (The transient sound states
 MOUSEIN=1/MOUSEOUT=2/SELECTED=3 at `+240` are a separate vocabulary.)
 
 **Text pass** `[orig: CStaticWnd_DrawLabel @ 0x656fb0]` (static family; button
@@ -296,10 +296,10 @@ below the span (the prefix-measure loop `@ 0x657199`); justify word `+744`
 (low nibble 1=center/2=right else left, high 0x10=vcenter/0x20=vbottom else
 top) anchors from the (truncated) width; x += EDGE + xoff(`+748`), y +=
 yoff(`+752`); the wrap flag `+760` routes to the wrapped drawer
-(`draw_text_wrapped_clipped @ 0x653D60` — walked 2026-08-10, see the
-multiline paragraph). The sink `font_cache_draw_text_scaled
+(`CFontCache_DrawTextWrappedClipped @ 0x653D60` — walked 2026-08-10, see the
+multiline paragraph). The sink `CFontCache_DrawTextScaled
 @ 0x653170` forces alpha 0xFF (unless flags&0x10000), halves the color under
-`g_ui_half_bright_mode`, scales the ANCHOR by the element scale pair, and
+`g_UIHalfBrightMode`, scales the ANCHOR by the element scale pair, and
 forwards scaleX/scaleY into `CGameFont_DrawText @ 0x6752c0` (via the cdecl
 trampoline `@ 0x676290`) — **menu glyphs scale with the anamorphic 800x600
 pair**, so text stretches with the screen like every quad. Only the
@@ -307,19 +307,19 @@ foreground color of the selected pair is consumed (BG preservation-only, as
 already recorded).
 
 **Edit widgets** `[orig: CEditWnd_Render @ 0x6619e0]`: keyboard focus is
-`g_ui_focus_wnd @ 0x31C16D4` (set `UI_SetFocusWnd @ 0x646420`, cleared
+`g_UIFocusWnd @ 0x31C16D4` (set `UI_SetFocusWnd @ 0x646420`, cleared
 `@ 0x646430`, keyboard events route to it in
-`dispatch_keyboard_event_to_children @ 0x63ad10`, cleared on screen switch
+`UI_DispatchKeyboardEventToChildren @ 0x63ad10`, cleared on screen switch
 `@ 0x63b7be` — this closes the 2026-07-16 open item: `0x31C16D4` is the FOCUS
 widget, `0x31C16DC` the mouseover widget, per the debug formatter
 `@ 0x6394f0`). A focused, non-readonly (`+776`) edit FORCES visual state 2 —
 mouseover appearance and colors are the retail "active field" look. PASSWORD
 (`+780`) swaps in a cached all-`'*'` mask buffer (`+788`). The caret: char
-index `+764`, kept visible by the scroll window (`update_edit_scroll_range
+index `+764`, kept visible by the scroll window (`CEditWnd_UpdateScrollRange
 @ 0x661790` over start `+792`/end `+796`, fitting via
 `EditWnd_CountCharsFitting @ 0x6616b0`); blinks on a 1024 ms `GetTickCount`
 cycle — drawn only while `(tick & 0x3FF) > 0x200`; drawn by
-`draw_text_with_cursor @ 0x6533b0` as an UNDERSCORE at the caret char's x
+`CFontCache_DrawTextWithCursor @ 0x6533b0` as an UNDERSCORE at the caret char's x
 (left-run width + `spacing+1` gap terms), x-stretched to that char's width
 (`charW / underscoreW`); the caret at end-of-text measures as `'_'` itself.
 
@@ -334,8 +334,8 @@ viewport restore -> children. PASSWORD (`+780`) swaps the cached `'*'` mask
 `(GetTickCount() & 0x3FF) > 0x200`.
 
 `sub_653D60` is NOT the drawer — it is an arg-marshaling wrapper appending
-`flags=0x40000` (bottom clip); renamed `draw_text_wrapped_clipped @ 0x653D60`.
-The core is **`draw_text_wrapped @ 0x653710`** (its decompiler parameter names
+`flags=0x40000` (bottom clip); renamed `CFontCache_DrawTextWrappedClipped @ 0x653D60`.
+The core is **`CFontCache_DrawTextWrapped @ 0x653710`** (its decompiler parameter names
 are historical mislabels — the IDB function comment carries the true mapping).
 The wrap loop, exactly: chars accumulate into one static line buffer, the
 prefix measured at the WIDGET scale pair against `trunc(wrapW * scaleX)`; a
@@ -347,13 +347,13 @@ consumed), else at the char exclusively (the overflowing char starts the next
 line). Line flush: lines numbered from 1, `lineNo <= firstVisibleLine` lines
 are consumed silently with NO y advance; a drawn line measures at scale 1.0
 for justify (4=center, 5=right, else left) and the y advance, draws through
-`font_cache_draw_text_scaled @ 0x653170` (colorA only, opaque), then the
+`CFontCache_DrawTextScaled @ 0x653170` (colorA only, opaque), then the
 `0x40000` mode returns when `curY + lineH` would pass the bottom. The caret
 pass draws `"|"` centered at `x + accum - w("|")/2` BEFORE the char appends —
 it mixes the scaled accumulator into the design-space pen and ignores
 line-skipping (both original quirks, preserved). A `0x20000` mode (break at
 width then discard the rest of the source line to the next LF, no bottom
-clip) serves the TABLE cell path (`calculate_aligned_text_rect @ 0x63ec50` ->
+clip) serves the TABLE cell path (`CTableWnd_CalculateAlignedTextRect @ 0x63ec50` ->
 `CTableWnd_DrawCell @ 0x640be0` / `CUITable_Render @ 0x6411d0`); MARQUEE does
 not use the drawer.
 
@@ -364,7 +364,7 @@ right-edge strip `(parentW-22, 0, parentW, parentH)`; skinned by `SCROLLBAR`
 child nodes forwarded from `CMEditWnd_ParseXmlProperties @ 0x660890`). The
 range recomputes ONLY on Init/SetText (`CMEditWnd_UpdateScrollRange
 @ 0x661180` — typing does not refresh it, a witnessed staleness quirk) via the
-measure twin **`font_cache_count_wrapped_lines @ 0x653b90`** (identical break
+measure twin **`CFontCache_CountWrappedLines @ 0x653b90`** (identical break
 rules at scale 1.0): page = `fit-1`, range `[0, total-fit]`
 (`CScrollWnd_SetPageSize @ 0x64CE10`, `CScrollWnd_SetRangeAndClamp
 @ 0x64D490`), scrollbar hidden when the content fits; scroll events
@@ -446,7 +446,7 @@ and `MenuDriver.set_widget_scroll_range` retains and forwards it. `MenuShell`
 seeds the witnessed Options controls (page is retail's inclusive page field)
 as GAMMA **5..20, page 2**;
 SOUNDFXVOLUME, DIALOGVOLUME, and MUSICVOLUME **0..255, page 10**; and
-MOUSE_SENSITIVITY **4..511, page 10** `[orig: options_screen_init @ 0x554800;
+MOUSE_SENSITIVITY **4..511, page 10** `[orig: UI_OptionsScreenInit @ 0x554800;
 UI_PopulateRenderAndAudioSettings @ 0x55c830]`. Persisted render/audio/input
 values are not yet modeled, so each current value temporarily starts at its
 minimum; that is an explicit reimpl fallback, not a claim about retail's saved
@@ -487,7 +487,7 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   MARQUEE interiors and the wrapped-text drawer are now walked AND compiled
   (their paragraphs below). Still unwalked: the RADIOEDIT render
   (`@ 0x65d310`; its event interaction IS witnessed —
-  `RadioEditWnd_handle_event @ 0x65d540`, first activation selects the radio,
+  `CRadioEditWnd_HandleEvent @ 0x65d540`, first activation selects the radio,
   re-activation swaps radio->edit with focus + caret at end, leaving copies
   the edit text back to the radio label — no shipped JO menu authors a
   RADIOEDIT, so neither half is compiled). Compiled-path follow-ups: table
@@ -514,7 +514,7 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
 
   Standalone min/max/page/value now crosses `MenuWidgetState` -> `MenuFrame` ->
   `MenuDriver`; `OptionsMenuController` seeds the five named Options controls
-  witnessed ranges/pages `[orig: options_screen_init @ 0x554800;
+  witnessed ranges/pages `[orig: UI_OptionsScreenInit @ 0x554800;
   UI_PopulateRenderAndAudioSettings @ 0x55c830]`. `PlayerOptions` supplies the
   persisted current values for volume and mouse-sensitivity controls.
   Arrow clicks, track paging, and the shuttle drag/capture are PORTED into
@@ -525,7 +525,7 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   popup scrollbar joins the same pump (2026-08-11 — `pump_popup_mouse`
   restricted to the open combo mirrors the popup-exclusive dispatch, and
   the popup's scrollbar child sees the sample ahead of row picking `[orig:
-  dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd; CListWnd child walk
+  UI_DispatchMouseEvent @ 0x63ab00 g_UIOpenPopupWnd; CListWnd child walk
   @ 0x643f30]`). Remaining scrollbar residue is the constructed child
   BUTTONs' independent hover/selected/pressed states and named scroll
   events. Spin arrows compile with their default-state art (their
@@ -542,7 +542,7 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   callback maps BOTH tick masks to the same `WM 0x20A`, discarding the
   direction `[orig: Menu_ShellMouseCallback @ 0x54b8c6]`; the scene
   dispatcher turns that into widget event `0x100000B`
-  `[orig: dispatch_mouse_event @ 0x63ab72]`, and NO handler consumes it —
+  `[orig: UI_DispatchMouseEvent @ 0x63ab72]`, and NO handler consumes it —
   exhaustive image scans for direct and relative event-id compares find
   only move/L-down/L-up/dblclk decoding in every named handler (list
   @ 0x643cb0, table @ 0x642400 `CTableWnd_HandleNamedEvent` — defined
@@ -573,11 +573,11 @@ into the void, the region stays unpainted, and three looping Bink movies
 drawn BEFORE the widget scene walk show through (the shipped fixtures comment
 them `<!-- bink panels begin-->`). Mechanism, all witnessed:
 
-- **Slots** (`g_bink_slots @ 0x25E5758`, 72-byte stride, max 4; handles
-  `g_bink_slot_main/header/footer @ 0x252DD9C/98/94`): created by
+- **Slots** (`g_BinkVideoState.slots_08 @ 0x25E5758`, 72-byte stride, max 4; handles
+  `g_BinkSlotMain/Header/Footer @ 0x252DD9C/98/94`): created by
   `UI_CreateMenuBinkVideos @ 0x54b590` from `Menu_InitShellResources
   @ 0x552500` (fresh boot AND return-from-game, BEFORE the first .mnu parse)
-  and from `apply_video_mode_change @ 0x55a590` (recreate at the new scale):
+  and from `UI_ApplyVideoModeChange @ 0x55a590` (recreate at the new scale):
   `main.bik` (0,75)-(800,525), `header.bik` (0,0)-(800,75), `footer.bik`
   (0,525)-(800,600), loop=1 each; `expansion\<exp>\<file>` preferred when
   `File_ExistsOnDisk @ 0x562d80`; a failed `BinkOpen` leaves the slot empty
@@ -591,7 +591,7 @@ them `<!-- bink panels begin-->`). Mechanism, all witnessed:
   a frame is due, `BinkVideoSlot_RenderFrameToTexture @ 0x567540`
   (`BinkDoFrame` → LockRect → `BinkCopyToBufferRect`) then
   `BinkVideoSlot_Draw @ 0x5674d0` — shader apply, SetTexture, ONE stretched
-  quad (`fill_fullscreen_quad_vertices @ 0x678db0`); loop = the
+  quad (`GDynamicVB_FillFullscreenQuadVertices @ 0x678db0`); loop = the
   `FrameNum = 0` poke when the last frame passes; texture is movie-native
   size (pow2-padded with UV crop when the device requires).
 - **Per-screen visibility** (draw-only gate — `BinkVideoSlot_Draw` checks
@@ -680,10 +680,10 @@ Complete event-1 consumer roster (registrar census):
 | --- | --- | --- |
 | CMAP / MAP, ORDERS_MAP | `CMapWindow_HandleEvent @ 0x5497f0` | the command map view (mouse-class events pan/zoom/place) |
 | CMAP / CHAT_MSGS | `CMap_OnChatMsgsCustomDraw @ 0x5482d0` | `HUD_DrawConsoleMessages()` in the widget slot |
-| DEATH / MAP | `command_map_overlay_input_handler @ 0x554310` | the deploy-screen map view (D-HUD-19) |
+| DEATH / MAP | `CMap_OverlayInputHandler @ 0x554310` | the deploy-screen map view (D-HUD-19) |
 | ITEM_DATABASE / ITEM_DISPLAY | `UI_RenderEntityModelPreview @ 0x552a80` | 3D item model preview |
-| VEHICLE / ITEM_DISPLAY | `render_avatar_preview_3d @ 0x563c10` | 3D vehicle preview |
-| PLAYER_INFO / PLAYER_PREVIEW | `PlayerInfo_RenderPlayerPreview3D @ 0x5609c0` | the avatar 3D preview (zoom/spin from `update_player_preview_animation @ 0x55dba0`) |
+| VEHICLE / ITEM_DISPLAY | `Render_AvatarPreview3D @ 0x563c10` | 3D vehicle preview |
+| PLAYER_INFO / PLAYER_PREVIEW | `PlayerInfo_RenderPlayerPreview3D @ 0x5609c0` | the avatar 3D preview (zoom/spin from `PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0`) |
 
 The menu screens (STARTUP MAIN, LOGO_SPLASH_HDR/FTR, OPTIONS CREDITS) have NO
 registration — verified by extracting every registrar's rows. jo_options
@@ -699,9 +699,9 @@ negative), then walks:
 
 - **Header:** per column (180-byte column defs; width at `col+124`, cell type
   at `col+108`, rule string at `col+176`): type 0/1/4 draws the aligned header
-  label (`calculate_aligned_text_rect @ 0x63ec50`); when the column leaves
+  label (`CTableWnd_CalculateAlignedTextRect @ 0x63ec50`); when the column leaves
   more than 16px of headroom past the label, the RULE DIVIDER draws in
-  `0xFF7F7F7F` via `draw_rule_line @ 0x6410a0` — per character `c` of the rule
+  `0xFF7F7F7F` via `CTableWnd_DrawRuleLine @ 0x6410a0` — per character `c` of the rule
   string, one centered horizontal segment of width `rect_w - (c - 'a' + 1)`
   at successive y rows starting `strlen/2` above the anchor: a
   character-PROFILED taper. Type 2 dispatches the custom draw event
@@ -716,7 +716,7 @@ negative), then walks:
   widget-level mouseover visual (`@ 0x64189a..0x6418da`); the header always
   pushes state 0 (`@ 0x641446`). `row+28 & 4` swaps a per-row COLOR override
   (`row+32`, into the `row+24` slot) around the row's draw. Per cell by
-  column type: 0 text, 1/4 image (`draw_aligned_texture @ 0x6409e0`,
+  column type: 0 text, 1/4 image (`CTableWnd_DrawAlignedTexture @ 0x6409e0`,
   per-column alignment array), 2 custom callback. Row ITEM appearance
   records (28-byte at `this+824`, keyed by `row+24`: COLOR fill / IMAGE /
   OUTLINE bits — options.mnu CONTROL_MAPPING authors the default-state
@@ -725,7 +725,7 @@ negative), then walks:
   one row height.
 - Then the viewport restores and children draw (vtable+24).
 
-## Marquee credits scroller `[orig: CMarqueeWnd_Render @ 0x65cf90 -> render_scrolling_credits @ 0x65ca00]`
+## Marquee credits scroller `[orig: CMarqueeWnd_Render @ 0x65cf90 -> CMarqueeWnd_RenderScrollingCredits @ 0x65ca00]`
 
 Three passes over the node linked list (next at `node+220`):
 
@@ -798,8 +798,8 @@ The FONT parser stores four foreground/background pairs (default, mouseover,
 selected, and disabled) at element offsets `+0x7c..+0x98`
 `[orig: CUIElement_ParseXMLDefinition @ 0x648d14..0x648e64]`, and inherited
 fonts copy all eight values `[orig: CWnd_GetFontAndColors @ 0x646a70]`.
-`draw_text_with_cursor @ 0x6533b0` selects the pair for the active state, but
-the common `font_cache_draw_text_scaled @ 0x653170` path consumes only the
+`CFontCache_DrawTextWithCursor @ 0x6533b0` selects the pair for the active state, but
+the common `CFontCache_DrawTextScaled @ 0x653170` path consumes only the
 foreground member and never reads the paired background. Shipped JO menus
 normally author black BG values. The reimplementation therefore preserves every
 BG field for lossless round-tripping but intentionally does not paint a text
@@ -837,7 +837,7 @@ the combo (`player.mnu` PLAYERVOICE authors a negative `TOP` to open upward).
 The list render `[orig: CListWnd_DrawItems @ 0x643f30]` lays rows out inside `row_rect =
 this+13`, advancing by `row_height` per row and truncating each row's text to the rect
 width, with a `<SCROLLBAR>` child for overflow. The row height is the font "W" glyph
-height `[orig: font_cache_measure_text_default @ 0x653680]`, overridden by `this+201` (the `<MI>` /
+height `[orig: CFontCache_MeasureTextDefault @ 0x653680]`, overridden by `this+201` (the `<MI>` /
 `<MIN_ITEM_HEIGHT>` value; ctor default `-1` `[orig: CListWnd ctor @ 0x643bb0]`) only when
 `>= 0`.
 
@@ -863,31 +863,31 @@ the combo instead of using the authored rect — see **D-MNU-7** and **D-MNU-8**
 While a dropdown is open, the original gives it **exclusive ownership of the mouse**
 through three scene-wide globals (renamed in the IDB this session):
 
-- `g_ui_open_popup_wnd @ 0x31C16D8` — the shown popup widget. `CWnd_SetShown @ 0x6480e0`
+- `g_UIOpenPopupWnd @ 0x31C16D8` — the shown popup widget. `CWnd_SetShown @ 0x6480e0`
   writes the widget's shown flag (`+224`) and, for popup-flagged widgets (`+660` — the
   combo's embedded `CListWnd` is one), registers/unregisters it here; `CUIElement_Draw
   @ 0x64a8a0` re-registers a drawn popup-flagged widget. While it is set:
   - the WM-message dispatch routes every mouse event ONLY to the open popup's
     dispatcher — the rest of the widget tree never sees the event
-    `[orig: dispatch_mouse_event @ 0x63ab00, gate @ 0x63abb5; WM 0x200..0x20A map to
+    `[orig: UI_DispatchMouseEvent @ 0x63ab00, gate @ 0x63abb5; WM 0x200..0x20A map to
     event ids 0x1000001..0x100000B, screen coords scaled into design space]`;
   - the per-frame hover/press/click/sound pump runs ONLY on the popup
-    `[orig: scene_end_frame @ 0x63e600, gate @ 0x63e691]`;
+    `[orig: CUIScene_EndFrame @ 0x63e600, gate @ 0x63e691]`;
   - visible-in-hierarchy holds only for the popup and its descendants (a parent walk
     that reaches the root without passing the popup returns 0)
     `[orig: CWnd_IsVisibleInHierarchy @ 0x646290, gate @ 0x646299]`.
-- `g_ui_active_combo_wnd @ 0x31C16D0` — the combo owning the open dropdown
+- `g_UIActiveComboWnd @ 0x31C16D0` — the combo owning the open dropdown
   (`UI_SetActiveComboWnd @ 0x6463e0` / `UI_ClearActiveComboWnd @ 0x646400`). The
   dispatcher gives it a priority peek of every event `[orig:
-  dispatch_mouse_event_to_children @ 0x647900, peek @ 0x647917]`, which drives the
+  CWnd_DispatchMouseEventToChildren @ 0x647900, peek @ 0x647917]`, which drives the
   combo's outside-close check.
-- `g_ui_mouse_capture_wnd @ 0x31C16CC` — transient press-capture: a button press sets
+- `g_UIMouseCaptureWnd @ 0x31C16CC` — transient press-capture: a button press sets
   it, release clears it, and while set the dispatch bypasses hit-testing entirely
   `[orig: CButtonWnd_HandleNamedEvent @ 0x658340 (set @ 0x65839c, clear @ 0x6583ed);
   bypass @ 0x647932]`. Capture set mid-iteration is also what gives the front-most hit
   widget priority among overlapping siblings in the frame pump.
 
-The combo protocol `[orig: combobox_handle_event @ 0x65c190]` (vtable+32, fed by the
+The combo protocol `[orig: CComboWnd_HandleEvent @ 0x65c190]` (vtable+32, fed by the
 anonymous sink `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` re-dispatching with
 the widget's own name):
 
@@ -921,7 +921,7 @@ overdraw the open popup, yet retail renders it on top. **The retail topmost mech
 remains unwalked** (2026-08-11 sweep ruled out: a scene/frame overlay pass
 (`Menu_RenderFrame @ 0x54b7c0` is gate → clear → walk → present), a draw-path
 `IsVisibleInHierarchy` gate (input-only xrefs), tree reordering at toggle
-(`combobox_handle_event @ 0x65c190`), and the `+0x290` dirty flag (no menu-range
+(`CComboWnd_HandleEvent @ 0x65c190`), and the `+0x290` dirty flag (no menu-range
 reader)). The reimpl defers open popups to a post-walk overlay pass — the D-MNU-12
 menu-top decision the Control-tree overlay carried.
 
@@ -961,7 +961,7 @@ matches the only authored value. Port the table when a data set authors anything
 button's ACTION list first and its registered control callback last
 (`CUIWidget_HandleScriptedAction @ 0x6497f0` walks the list, then calls
 `widget[63]->vtable+32`), but its scene keeps every loaded screen alive, so PLAYER_INFO's
-ACCEPT callback (`save_player_info_from_dialog @ 0x55ee10`) still reads its controls after
+ACCEPT callback (`PlayerInfo_SaveFromDialog @ 0x55ee10`) still reads its controls after
 the OK button's cross-.mnu jump to `main.mnu`. The reimpl shell REPLACES the document on a
 cross-file ACTION, and the companion guard (`get_menu_file() != wired file`) then dropped
 the activation — ACCEPT never reached `commit`, so nothing was ever saved from the live
@@ -983,13 +983,13 @@ and before that a z-lifted child of the combo whose clicks siblings stole, so
 See **D-MNU-11** (fixed) and **D-MNU-12** (dissolved into the compiled path). Pinned by
 the `menu_frame_compiler` ctest and the menu-driver GUT legs.
 
-## Marquee / credits `[orig: CMarqueeWnd @ 0x65c430; marquee_load_credits_from_ini @ 0x65c5a0]`
+## Marquee / credits `[orig: CMarqueeWnd @ 0x65c430; CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0]`
 
 A `marquee_wnd`'s `<DATASOURCE>` (e.g. `nlist.kda`) is a CBIN-encrypted credits config,
 NOT plain text: `ConfigFile_LoadGlobal` reads an `[ENV]` section (`SCROLL_RATE`,
 `CENTER_X`, `VERTICAL_SPACE`) and a `[TEXT]` section whose lines are AES-decrypted and
 carry formatting codes (`~C` colour, `~F` font, `~I`/`~F` image, `~J` justify, `<CR>`
-newline) `[orig: marquee_load_credits_from_ini @ 0x65c5a0]`. Reimpl: a CBIN datasource is
+newline) `[orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0]`. Reimpl: a CBIN datasource is
 routed to the existing `CreditsPlayer` (fed by a `CbinCreditsResource` decoded from
 the file's bytes via `CbinCreditsResource::from_cbin_bytes`, so it works from a PFF); a
 plain-text datasource keeps the simple `MnuMarquee`. The old code read the binary
@@ -1026,10 +1026,10 @@ name via `KeyHelp_GetStringWithFallback("Text", "<KEY>", "!<Name>")` — `0` Nul
 **Population.** `UI_PopulateControlMappingList @ 0x55c0c0` finds the widget by name
 (`UI_FindScreenControl(…, "CONTROL_MAPPING") @ 0x63ae80`), clears it (`CTableWnd_RemoveRow(-1) @ 0x641a40`), and for the
 active device `dword_25db7d8` (`0` keyboard / `1` mouse / `2` joystick) inserts a row per entry
-(`table_insert_row @ 0x641c30`) and sets the cells (`@ 0x63edf0`). Each device has its own runtime
+(`CTableWnd_InsertRow @ 0x641c30`) and sets the cells (`@ 0x63edf0`). Each device has its own runtime
 binding array (kb `dword_25c7724` / mouse `byte_25c784c` / joy `byte_25c7740`).
-`refresh_control_mapping_list @ 0x55b320` recomputes per-row conflict state
-(`check_weapon_slot_conflict @ 0x55ae60`, a kong-misnomer for *binding* conflict) and tints
+`UI_RefreshControlMappingList @ 0x55b320` recomputes per-row conflict state
+(`KeyBinding_CheckWeaponSlotConflict @ 0x55ae60`, a kong-misnomer for *binding* conflict) and tints
 conflicting rows yellow (`sub_640110(row, …, -256)`). The device radios call
 `UI_SelectControlsInputDevice(mode) @ 0x55bcd0` (sets `dword_25db7d8`, swaps the REMAP_INSTRUCTIONS text id
 `REMAP_Keyboard`/`REMAP_Mouse`/`REMAP_Joystick`, repopulates).
@@ -1065,7 +1065,7 @@ repopulate. The earlier reimpl left the table empty — `menu_shell` had no popu
 
 The table render itself was also corrected this pass (see Table render below). This pass is
 **read-only**: it reproduces what the Controls tab DISPLAYS. Live double-click rebinding
-(`update_control_mapping_display @ 0x55b700`), DEFAULTS (`sub_55bd90`) / CLEAR_KEY (`loc_55bfd0`),
+(`UI_UpdateControlMappingDisplay @ 0x55b700`), DEFAULTS (`sub_55bd90`) / CLEAR_KEY (`loc_55bfd0`),
 and profile persistence are deferred (D-CTRL-3), gated on a real game input-action layer.
 
 ### Table render `[orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0]`
@@ -1105,15 +1105,15 @@ compiled-path follow-ups):
   Per-part states and direct manipulation remain D-MNU-13 residue. The ITEMS
   `%TRIM_COLOR%` outline now draws as a header rule + per-row grid line.
 
-## Sound `[orig: widget_process_mouse_event @ 0x647a00]`
+## Sound `[orig: CWnd_ProcessMouseEvent @ 0x647a00]`
 
 A `<SOUND>` element stores `{trigger, bank-id}` in a per-STATE slot, keyed by the
 STATE attribute (`MOUSEIN=1`, `MOUSEOUT=2`, `SELECTED=3`), with `1<<state` OR'd into
 a mask. The element TEXT names a `.lwf` bank; `TRIGGER` names a sound SET inside it.
 Banks add-ref into a refcounted collection
-(`sound_bank_collection_add_or_ref @ 0x652b40`, stricmp dedup, from
+(`SoundBank_CollectionAddOrRef @ 0x652b40`, stricmp dedup, from
 `CUIElement_ParseXMLDefinition @ 0x648ada`); a visual-state transition fires the slot
-via the collection play path (`sound_collection_play_trigger @ 0x652de0` ->
+via the collection play path (`Sound_CollectionPlayTrigger @ 0x652de0` ->
 `SoundBank_FindTriggerAndPlay @ 0x75d010` -> `SoundBank_PlayTriggerEntries @ 0x75ccd0`).
 A set play services every layer (one member each via the global selection RNG; see
 `docs/audio/lwf-dbf-sound-re.md`). UI channel volume is the `CGameMenu` master volume
@@ -1158,12 +1158,12 @@ literal). OpenNova keeps raw tokens in the document and expands per consumed fie
 build time (colors/fonts/textures/text) - see ADR 0005. Documented gap: shell variables
 in non-themed fields need a shell var map plumbed into the builder.
 
-## MNS stylesheet format `[orig: Menu_InitShellResources @ 0x552500; parse_key_value_buffer @ 0x639870]`
+## MNS stylesheet format `[orig: Menu_InitShellResources @ 0x552500; NapiConfigMap_ParseKeyValueBuffer @ 0x639870]`
 
 The substitution table lives in `menu_style.mns` ("named menu_style.mns for the
 game to find it"). Menu initialization calls
 `NapiConfigMap_LoadIncludeFile @ 0x63b970`, which reads the file and passes its
-buffer to `parse_key_value_buffer @ 0x639870`; menu XML expansion later uses
+buffer to `NapiConfigMap_ParseKeyValueBuffer @ 0x639870`; menu XML expansion later uses
 `NapiXML_ExpandVariablesInText @ 0x63a000`. This resolves the previously
 unwitnessed loader chain.
 
@@ -1220,10 +1220,10 @@ NATIONALITY list over the sibling DIVISION/COMBO_LIST combos (text bled through)
 `::test_combo_popup_fallback_when_no_listbox_rect`.
 
 **matching** (2026-07-16 dropdown-input grill): while a dropdown is open the original
-routes mouse input exclusively to the open list (three gates: `dispatch_mouse_event
-@ 0x63ab00`, `scene_end_frame @ 0x63e600`, `CWnd_IsVisibleInHierarchy @ 0x646290` over
-`g_ui_open_popup_wnd @ 0x31C16D8`), keeps at most one dropdown open per scene
-(`combobox_handle_event @ 0x65c190 @ 0x65c210` over `g_ui_active_combo_wnd @ 0x31C16D0`),
+routes mouse input exclusively to the open list (three gates: `UI_DispatchMouseEvent
+@ 0x63ab00`, `CUIScene_EndFrame @ 0x63e600`, `CWnd_IsVisibleInHierarchy @ 0x646290` over
+`g_UIOpenPopupWnd @ 0x31C16D8`), keeps at most one dropdown open per scene
+(`CComboWnd_HandleEvent @ 0x65c190 @ 0x65c210` over `g_UIActiveComboWnd @ 0x31C16D0`),
 closes on an outside press with the press consumed (`@ 0x65c261`, closed cell dead while
 open), and clears the dropdown on screen switches (`CUIScene_SelectNodeByName @ 0x63b6b0`).
 Ported (post-cutover) as the MenuDriver popup gate: while a popup is open the driver
@@ -1261,7 +1261,7 @@ truncation restored.
 CUIElement_DrawTextureNative @ 0x647e40 -> CTextureManager_DrawScaledRect
 @ 0x654e60]`; frame BRUSH/STENCIL quads translate retail's neutral
 `0x7F7F7F` modulate-2x input to effective white for Godot's ordinary multiply
-`[orig: CUIElement_DrawFrame @ 0x64a210; init_border_materials @ 0x646f70]`;
+`[orig: CUIElement_DrawFrame @ 0x64a210; CUIElement_InitBorderMaterials @ 0x646f70]`;
 and `MenuDrawList::draw_ops` preserves quad/line/font-run interleaving across
 the forward painter walk `[orig: CUIScene_DrawScreensAndCursor @ 0x63bf60;
 CUIElement_Draw @ 0x64a8a0; CStaticWnd_Render @ 0x657b10]`. Authored
@@ -1279,7 +1279,7 @@ Standalone min/max/page/value now crosses `MenuWidgetState`, `MenuFrame`, and
 `MenuDriver`; `OptionsMenuController` seeds GAMMA 5..20/page 2, the three
 volume controls
 0..255/page 10, and MOUSE_SENSITIVITY 4..511/page 10 `[orig:
-options_screen_init @ 0x554800; UI_PopulateRenderAndAudioSettings @ 0x55c830]`.
+UI_OptionsScreenInit @ 0x554800; UI_PopulateRenderAndAudioSettings @ 0x55c830]`.
 `PlayerOptions` supplies each modeled control's persisted current value;
 GAMMA remains pinned read-only. Per-part state remains D-MNU-13 residue.
 
@@ -1303,11 +1303,11 @@ capture writes 17 iff the queued event flag word is EXACTLY Ctrl-held-alone
 
 **matching** (2026-08-10 multiline grill + shell cutover): the multiline edit render
 (`CMEditWnd_Render @ 0x6608e0` — no focus forcing), the wrapped-text drawer
-(`draw_text_wrapped @ 0x653710` via `draw_text_wrapped_clipped @ 0x653D60`: last-space
+(`CFontCache_DrawTextWrapped @ 0x653710` via `CFontCache_DrawTextWrappedClipped @ 0x653D60`: last-space
 word wrap, LF-only explicit breaks, the 1.0-scale per-line justify/advance vs
 widget-scale threshold, the first-visible-line window that advances nothing while
 skipping, the `0x40000` bottom clip, the caret quirks) and the line-based scroll model
-(`font_cache_count_wrapped_lines @ 0x653b90`, `CMEditWnd_UpdateScrollRange @ 0x661180`,
+(`CFontCache_CountWrappedLines @ 0x653b90`, `CMEditWnd_UpdateScrollRange @ 0x661180`,
 `widget[978]`) — ported as `emit_multiline_edit`/`emit_wrapped_text` +
 `multiline_line_counts`, pinned by `test_multiline_wrap`. With this, the game shell
 and the armory/deploy presenters cut over to the one
@@ -1343,7 +1343,7 @@ Accepted/divergent (each a documented decision, not a defect):
   cycleweaponP/N wheel 0x400/0x800, ScopeZeroDec/Inc wheel + Ctrl mouse modifier, attack_1 LMB,
   FreeLook RMB-hold (row 97, MoveOrder 0x10), scope RMB, spectator rows 110-112 MMB/LMB/RMB,
   joystick axes 0x81-0x84 on rows 12-15; dispatch `Input_DispatchMouseEvent @0x761470` ->
-  `process_input_bindings @0x4DDA50` -> `try_dispatch_binding_by_weapon_type @0x499180`
+  `Input_ProcessBindings @0x4DDA50` -> `Input_TryDispatchBindingByWeaponType @0x499180`
   (256/512 per wheel notch). The port is a shell slice (data + router), still open.
   2026-09-05: the keyboard slot-1 MODIFIER column is byte-exact too — the catalog row's +24
   word is VK_CONTROL (17) on seat1..seat10, ScopeZeroInc, nvggainup/nvggaindown, gtalk,
@@ -1426,7 +1426,7 @@ Accepted/divergent (each a documented decision, not a defect):
   rect when present (which also gives PLAYERVOICE its upward open), else the below-combo
   fallback for shell-built combos.
 - **D-MNU-8 (combo row-height default) — FIXED 2026-06-23c:** the list row height is the
-  font "W" glyph height `[orig: CListWnd_DrawItems @ 0x643f30 -> font_cache_measure_text_default @ 0x653680]`,
+  font "W" glyph height `[orig: CListWnd_DrawItems @ 0x643f30 -> CFontCache_MeasureTextDefault @ 0x653680]`,
   overridden by `this+201` (the `<MI>`/`<MIN_ITEM_HEIGHT>` value; ctor default `-1`
   `[orig: CListWnd ctor @ 0x643bb0]`) only when `>= 0`. The reimpl defaulted to a hardcoded
   16px. Fixed (historical fix site `MnuCombo::effective_item_height`; the compiled
@@ -1508,7 +1508,7 @@ Accepted/divergent (each a documented decision, not a defect):
   screen's populate/filter chain is split off as D-MNU-17.
 - **D-MNU-17 (host-screen mission population — FIXED 2026-08-10, core):** the
   full chain is witnessed and the populate/filter/selection core is ported.
-  `init_host_settings_dialog @ 0x558960` (one-shot, guard `@ 0x25C76DC`):
+  `UI_InitHostSettingsDialog @ 0x558960` (one-shot, guard `@ 0x25C76DC`):
   clears the per-mission selected flags (entry+4412), registers the 17
   control handlers, selects the GENERAL tab, populates settings/weapon/class
   lists, DISABLES `START_GAME`, clears both mission widgets, then fills
@@ -1519,7 +1519,7 @@ Accepted/divergent (each a documented decision, not a defect):
   least one mission maps to (the shared 13-way code→category switch:
   0→11, TDM→1, objective-Co-op→2, TKOTH→3, KOTH→4, SD→5, AD→6, CTF→7, FB→8,
   8→12, AAS→9, CAC→10; 255 = ALL, always on, selected at init).
-  `filter_mission_list_by_game_type @ 0x556fe0` (the spin event): hide all
+  `HostDialog_FilterMissionListByGameType @ 0x556fe0` (the spin event): hide all
   rows, re-show those whose mapped category matches (or 255) minus the
   already-selected set (+4412). `HostDialog_AddRemoveSelectedMissions
   @ 0x557c10` (ADD_MISSIONS +1 / REMOVE_MISSIONS −1; was an unowned shared
@@ -1527,8 +1527,8 @@ Accepted/divergent (each a documented decision, not a defect):
   decompiled; boundaries repaired 2026-08-10): ADD walks the SELECTED list
   rows into `SELECTED_MISSIONS` — cells = title-else-filename /
   `GameText("GateTypeAbbrev", key)` (keys DM/TDM/KOTH/TKOTH/CTF/SD/AD/FB/FM/
-  AAS/CAC + COOP for the waypoint family, `get_game_type_abbreviation
-  @ 0x520fc0`) / the rotation "Switch" cell defaulting ON for team games
+  AAS/CAC + COOP for the waypoint family, `GameType_GetAbbreviation
+  @ 0x520fd0`) / the rotation "Switch" cell defaulting ON for team games
   without the objective bit (`(code & 0x10000) && !(code & 0x20000)`,
   entry+4416) — marks +4412 and hides the list row; REMOVE restores through
   the same category filter. `HostDialog_MissionListDoubleClick @ 0x557f70` =
@@ -1537,7 +1537,7 @@ Accepted/divergent (each a documented decision, not a defect):
   The common tail arms `START_GAME` only while the table has rows (plus the
   `0x25510A4..CC` config-word gate). `UI_HandleHostSessionStart @ 0x556d00`:
   queues every table row into the rotation (`sub_501960` +
-  `Server_QueueEntityAction`), the FIRST row stamps `g_map_file_name` /
+  `Server_QueueEntityAction`), the FIRST row stamps `g_MapFileName` /
   `missionData` / its rotation flag / `g_GameType`(+4392), then the
   SERVERTYPE arm (1 = NovaWorld HTTP hosting, 2 = LAN session).
   **Port:** the witnessed rules live engine-side in `base/gameprofile/game_type.h`
@@ -1586,6 +1586,22 @@ Accepted/divergent (each a documented decision, not a defect):
   jump, and it guards the dispatch against a document swap during the emit
   (`MenuRuntime::activate`). The full story is the
   "Activation vs scripted ACTION order" paragraph in the popup section above.
+- **D-MNU-20 (front-end OPTIONS BACK revert, OPEN):** the front-end OPTIONS
+  scene's BACK arm restores only the saved gamma, the saved music volume and a
+  menu byte (`sub_55A710 @ 0x55a710`, the BACK leg `@ 0x55adcf`); the reimpl
+  re-seeds the whole front surface per document open instead of that narrower
+  revert. Witness: "The in-game options dialog" section below.
+- **D-MNU-21 (unserviced Options controls shown read-only, OPEN):** the
+  authored Options controls the reimpl does not service yet are locked
+  read-only (`engine/runtime/menu/options_policy.h`
+  `kOptionsUnsupportedControls`: UPDATE → `UI_LaunchUpdateProcess @ 0x55b0b0`,
+  the WDM channel/rate radios, the joystick fields, Mr-Clippy, PunkBuster,
+  auto-reload / auto-medic) where retail services each; a stand-in until every
+  device leg lands, with the checked states pinned to what the ported paths do
+  (`kOptionsForcedChecks`). The JOYSTICK device page itself is served (its
+  column shows the seeded catalog defaults since 2026-09-11; joystick capture
+  stays unwired per D-CTRL-1 / D-CTRL-3). Witness: "The in-game options
+  dialog" section below.
 
 **IDB changes (2026-08-10, the D-MNU-17 host-dialog walk; saved):** repaired
 the function boundaries at `0x557c10..0x557f6a` (an unowned tail chunk shared
@@ -1598,7 +1614,7 @@ SetRowSelected`, `sub_644580/6445F0/644A00/645150 → CListWnd_GetRowCount/
 GetRowValue/SetRowEnabled/IsRowSelected`, `sub_642750 → CTableWnd_AddRow`,
 and the misnomer `CPreprocessor_SetCellTexture @ 0x63edf0 →
 CTableWnd_SetCellText`; entry comments on the four HostDialog handlers +
-`init_host_settings_dialog` + `UI_HandleHostSessionStart`.
+`UI_InitHostSettingsDialog` + `UI_HandleHostSessionStart`.
 
 ## Scroll interaction `[orig: CScrollWnd_HandleEvent @ 0x64d050]` (2026-08-11)
 
@@ -1656,7 +1672,7 @@ capture global, flushes the input queue, CLEARS the row's Control cell
 (`CTableWnd_SetCellText @ 0x63edf0`), takes focus, and for the mouse device
 registers a button callback (`sub_7613B0`). The pump (`@ 0x55c67c`, inside
 `sub_55C450`) then consumes input by device: Esc restores the display and ends
-the capture (`update_control_mapping_display @ 0x55b700` — formats the bound
+the capture (`UI_UpdateControlMappingDisplay @ 0x55b700` — formats the bound
 control per device, resets both capture globals to -1); keyboard keys drain
 into `KeyBinding_HandleKeyAssignment @ 0x55bb20`; the joystick page polls the
 button bitfield and writes `button+1` into the record byte (`@ 0x55c712`).
@@ -1714,7 +1730,7 @@ Deferred (unwitnessed or out of bar; backlog, not blocking):
   mouse/joystick defaults and their event dispatch, witnessed 2026-09-10, unported), the player.sav
   profile-record format (only its geometry is witnessed), and the
   refresh pass's yellow active-binding highlight
-  (`refresh_control_mapping_list @ 0x55b320`, unwalked interior).
+  (`UI_RefreshControlMappingList @ 0x55b320`, unwalked interior).
 - Live data/behavior for `GLB_TABLE`, `LAN_LIST`, and `GOPHER` remains owned by
   the multiplayer/news hosts. Their authored menu structure and Action payloads
   are preserved; this menu-contained pass does not invent offline services.
@@ -1723,7 +1739,7 @@ Deferred (unwitnessed or out of bar; backlog, not blocking):
 
 ---
 
-## The in-game options dialog (grilled 2026-09-01) `[orig: ingame_options_dialog_event_handler @ 0x554e40; UI_RegisterIngameCallbacks @ 0x555510]`
+## The in-game options dialog (grilled 2026-09-01) `[orig: UI_IngameOptionsDialogEventHandler @ 0x554e40; UI_RegisterIngameCallbacks @ 0x555510]`
 
 The INGAME scene registers `OPT_ACCEPT` (param 1) and `OPT_CANCEL` (param 0)
 onto ONE handler (`@ 0x555597/@ 0x5555b5`). Retail's options edits are staged
@@ -1737,11 +1753,11 @@ in the widgets with live device previews; the dialog decides their fate:
   MOUSE_SENSITIVITY/`profile+1424`, joystick fields, XHAIR_APPEARANCE
   (`sprintf("cross%02d.tga", sel+1)`), XHAIR_COLOR/SPREAD,
   OPTIONS_AUTORELOAD/`profile+1524`, OPTIONS_AUTOMEDIC/`profile+1660`
-  (INVERTED store), the Mr-Clippy pair — then `apply_video_mode_change`,
+  (INVERTED store), the Mr-Clippy pair — then `UI_ApplyVideoModeChange`,
   `PlayerProfile_SaveToFiles @ 0x54be00`, `Game_SaveConfig @ 0x54c490`,
   `Game_CloseInGameScreens`, the OPTIONS_WRAPPER→MAIN_WRAPPER swap, and
   `Input_InitBindingSystem`.
-- **Cancel (param 0)** commits NOTHING: `options_screen_init @ 0x554800`
+- **Cancel (param 0)** commits NOTHING: `UI_OptionsScreenInit @ 0x554800`
   re-seeds the whole screen from the saved settings, the live gamma preview
   rolls back (`flt_25A39C0` saved → `flt_B4C298` live → `GLib_SetGammaRamp
   @ 0x677be0`), and the GAMMA slider resets.
@@ -1767,13 +1783,14 @@ shell to lock, the checked states from `kOptionsForcedChecks`)
 force-disables the authored controls retail services (UPDATE →
 `UI_LaunchUpdateProcess @ 0x55b0b0`, ENABLE_JOYSTICK, the WDM family,
 Mr-Clippy, PunkBuster) — a deliberate stand-in until each device leg lands
-(D-MNU-21); the JOYSTICK device page itself is served (its column blank per
-D-CTRL-1). The select-by-value seed and the slider ranges are the engine's
+(D-MNU-21); the JOYSTICK device page itself is served (its column shows the
+seeded catalog defaults since 2026-09-11, PR #646; joystick capture stays
+unwired, D-CTRL-1 / D-CTRL-3). The select-by-value seed and the slider ranges are the engine's
 too (`spinlist_row_for_value`, `kOptionsScrollRanges`; the options model
 clamps by control name through `MenuFrame.options_scroll_ranges`). The
 XHAIR_COLOR /
 XHAIR_SPREAD pair left the locked set 2026-09-01: both are live user options
-now (persisted RGB selected BY VALUE like retail `[orig: options_screen_init
+now (persisted RGB selected BY VALUE like retail `[orig: UI_OptionsScreenInit
 @ 0x554cec/@ 0x554d15]`; defaults `[orig: Config_SetDefaults @ 0x54d461/
 @ 0x54d472]`; the draw side is hud-re.md's crosshair section and D-HUD-8).
 
@@ -1802,15 +1819,15 @@ The INGAME command registrations `[orig: UI_RegisterIngameCallbacks
 | ABORT | `UI_IngameAbortArmConfirm @ 0x555450` | arms the confirm-pending latch only (`dword_25A39C8 = 2`); the panel itself is the authored actions' |
 | CONFIRM_YES | `UI_IngameConfirmExitCommand @ 0x555460` | `if (latch == 2) { Game_CloseInGameScreens(); Input_HandleActionBinding(3); }` — the mission exit |
 | HIDDEN_BACK | `UI_IngameBackResumeCommand @ 0x555490` | close screens (resume); out-of-session also clears the pause flag |
-| RESTART | `UI_IngameRestartCommand @ 0x555410` | SP-only immediate restart (`g_mission_exit_reason = 4`); MP disables the button `[orig: options_screen_init @ 0x5548a6]`; its authored confirm actions ship commented out |
-| OPT_ACCEPT / OPT_CANCEL | `ingame_options_dialog_event_handler @ 0x554e40` | the options dialog section above |
+| RESTART | `UI_IngameRestartCommand @ 0x555410` | SP-only immediate restart (`g_MissionExitReason = 4`); MP disables the button `[orig: UI_OptionsScreenInit @ 0x5548a6]`; its authored confirm actions ship commented out |
+| OPT_ACCEPT / OPT_CANCEL | `UI_IngameOptionsDialogEventHandler @ 0x554e40` | the options dialog section above |
 
 The same CONFIRM_EXIT idiom ships on stat.mnu STAT and death.mnu DEATH, both
 raised by their screens' HIDDEN_BACK authored actions:
 
 - STAT `[orig: HUD_CacheStatPanelValues @ 0x5627a8..0x562809]`: the
   RADIO_TAB_OVERALL/REDTEAM/BLUETEAM trio registers
-  `stat_filter_tab_handler @ 0x562140` with params 0/1/2, and CONFIRM_YES
+  `StatScreen_StatFilterTabHandler @ 0x562140` with params 0/1/2, and CONFIRM_YES
   registers `UI_StatConfirmExitCommand @ 0x562210` — byte-identical to the
   INGAME exit pair (close screens + action 3): the stat board's Yes LEAVES
   THE MISSION, it does not merely hide the board.
@@ -1840,7 +1857,7 @@ no confirmation ever appeared
 pins the flow). The DEATH deploy screen's ESC→CONFIRM_EXIT leg (with MODAL)
 remains unported.
 
-## Button label mnemonics — dispatch and draw (grilled 2026-09-01) `[orig: dispatch_keyboard_event_to_children @ 0x63ad10; draw_text_with_cursor @ 0x6533b0]`
+## Button label mnemonics — dispatch and draw (grilled 2026-09-01) `[orig: UI_DispatchKeyboardEventToChildren @ 0x63ad10; CFontCache_DrawTextWithCursor @ 0x6533b0]`
 
 The `{hot}` registration (`CButtonWnd_SetLabel @ 0x6572F0`, parse twin
 `CUIButtonWidget_ParseXMLAttributes @ 0x657c30`) is `strstr`-based — CASE
@@ -1856,7 +1873,7 @@ accelerator array (+284/count +288). The three halves witnessed 2026-09-01:
   VISIBLE match wins (`CWnd_IsVisibleInHierarchy @ 0x63ad90`), then the event
   still broadcasts to every child.
 - **Draw**: the mnemonic underline is NOT markup. `CStaticWnd_DrawLabel
-  @ 0x656fb0` passes widget+740 (`@ 0x657270`) into `draw_text_with_cursor
+  @ 0x656fb0` passes widget+740 (`@ 0x657270`) into `CFontCache_DrawTextWithCursor
   @ 0x6533b0` — the same path the edit caret rides: draw the label, then
   draw ONE `'_'` glyph at prefix-width (+ the two gated `(spacing-1)+1`
   terms `@ 0x6534dc/@ 0x653562`), x-scaled by charWidth/underscoreWidth so
@@ -1892,18 +1909,18 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `MnuDocument` + `godot/game/menu_shell.gd` |
 | `Menu_RenderFrame @ 0x54b7c0` -> `CUIScene_DrawScreensAndCursor @ 0x63bf60` | the scene draw walk -> `MenuFrameCompiler::compile` + interleaved `MenuDrawList::draw_ops` — `engine/runtime/menu/menu_frame.cpp` |
 | `CUIElement_Draw @ 0x64a8a0` / `CStaticWnd_Render @ 0x657b10` (the Draw vtable family) | the per-widget and cross-kind painter order — `MenuFrameCompiler::walk_widget` -> `draw_ops` -> `MenuFrame::_draw` |
-| `CWnd_SetVisualState @ 0x646340` + `widget_process_mouse_event @ 0x647a00` (state write +236) | `MenuFrameCompiler::pump_visual_state` + `MenuWidgetState` |
+| `CWnd_SetVisualState @ 0x646340` + `CWnd_ProcessMouseEvent @ 0x647a00` (state write +236) | `MenuFrameCompiler::pump_visual_state` + `MenuWidgetState` |
 | `CWnd_GetFontAndColors @ 0x646a70` (vtable+64 draw-time font/color inheritance) | `MenuFrameCompiler` `WidgetNode::font/colors` |
-| `CStaticWnd_DrawLabel @ 0x656fb0` + `draw_text_with_cursor @ 0x6533b0` + `font_cache_draw_text_scaled @ 0x653170` | `MenuFrameCompiler::emit_widget_text` / `emit_caret` over `opennova::hud::GameFont` |
-| `CEditWnd_Render @ 0x6619e0` (focus state-2, blink, password, scroll window `update_edit_scroll_range @ 0x661790`) | the compiler's edit leg + `MenuWidgetState.focused/caret` |
+| `CStaticWnd_DrawLabel @ 0x656fb0` + `CFontCache_DrawTextWithCursor @ 0x6533b0` + `CFontCache_DrawTextScaled @ 0x653170` | `MenuFrameCompiler::emit_widget_text` / `emit_caret` over `opennova::hud::GameFont` |
+| `CEditWnd_Render @ 0x6619e0` (focus state-2, blink, password, scroll window `CEditWnd_UpdateScrollRange @ 0x661790`) | the compiler's edit leg + `MenuWidgetState.focused/caret` |
 | `CRadioWnd_Render @ 0x656e20` / `CCheckWnd_Render @ 0x64ae20` + `CCheckWnd_DrawLabel @ 0x64aa20` | checked-state forcing + label placement in the compiler |
-| `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `engine/formats/mns/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless document model (ADR 0014) |
+| `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `NapiConfigMap_ParseKeyValueBuffer @ 0x639870` | `mns::Document::evaluate` — `engine/formats/mns/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless document model (ADR 0014) |
 | `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `engine/formats/mnu/mnu_xml.cpp` |
 | `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `engine/formats/mnu/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
 | `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/src/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |
-| `parse_scene_node_attributes @ 0x639630` | `mnu::parse_screen` — `engine/formats/mnu/mnu.cpp` |
+| `CUIScene_ParseNodeAttributes @ 0x639630` | `mnu::parse_screen` — `engine/formats/mnu/mnu.cpp` |
 | `CUIElement_ParseXMLDefinition @ 0x648120` | `mnu::parse_window` — `engine/formats/mnu/mnu.cpp`; layout in `MenuFrameCompiler::solve_rect` — `engine/runtime/menu/menu_frame.cpp` |
-| `parse_edit_widget_xml_properties @ 0x661d10` | EDIT attrs (`NUMBER/MINVAL/MAXVAL/MAXCHAR/READONLY/PASSWORD`) in `mnu::parse_window` |
+| `CEditWnd_ParseXMLProperties @ 0x661d10` | EDIT attrs (`NUMBER/MINVAL/MAXVAL/MAXCHAR/READONLY/PASSWORD`) in `mnu::parse_window` |
 | `sub_64AD90 @ 0x64ad90` (CHECKBOX attr parse) | CHECKBOX attrs (`AS_BUTTON/CHECKED`) in `mnu::parse_window` |
 | `CScrollWnd_Construct @ 0x64c450` + `CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0` | SCROLL orientation and one along-axis part extent: constructor default 20, with authored `WIDTH`/`HEIGHT` override; texture size is not the extent source |
 | `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_type_string` / `window_type_name` — `engine/formats/mnu/mnu.cpp` |
@@ -1913,10 +1930,10 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CListWnd_DrawItems @ 0x643f30` (rows inside `this+13`; row height = font "W" or `this+201`; per-row text truncation) | `MenuFrameCompiler::emit_combo_popup` (`engine/runtime/menu/menu_frame_scrollbar.cpp`) + `row_height_` (`menu_frame.cpp`) (D-MNU-7/8) |
 | `CScrollWnd_Render @ 0x64c5c0` (COLOR sink `@ 0x64ce70`, IMAGE sink `@ 0x64cf70`, outline via `CUIElement_DrawOutlineRect @ 0x647fc0`) + `CUIScrollbar_CreateChildWindows @ 0x64d330` | `MenuFrameCompiler::emit_scrollbar` (`engine/runtime/menu/menu_frame_scrollbar.cpp`) — COLOR/OUTLINE full rect, IMAGE middle inset, then SHUTTLE/SCROLLUP/SCROLLDOWN painter order |
 | `CUIScrollbar_CalcThumbRect @ 0x64cba0` + `CScrollWnd_SetPageSize @ 0x64ce10` + `CScrollWnd_SetRangeAndClamp @ 0x64d490` + `CScrollWnd_SetScrollPos @ 0x64ce20` | proportional thumb with 20px minimum and clamped min/max/page/value; embedded owners hide-on-fit, while standalone state crosses `MenuWidgetState` -> `MenuFrame::set_widget_scroll_range` -> `MenuDriver.set_widget_scroll_range`; direct input/per-part state remains D-MNU-13 |
-| `options_screen_init @ 0x554800` + `UI_PopulateRenderAndAudioSettings @ 0x55c830` | `MenuOptionScrollPolicy.apply` (`godot/game/menu_option_scroll_policy.gd`, invoked by `OptionsMenuController`) — GAMMA 5..20/page 2; SOUNDFXVOLUME/DIALOGVOLUME/MUSICVOLUME 0..255/page 10; MOUSE_SENSITIVITY 4..511/page 10; `PlayerOptions` supplies modeled controls' persisted current values while GAMMA remains pinned read-only |
+| `UI_OptionsScreenInit @ 0x554800` + `UI_PopulateRenderAndAudioSettings @ 0x55c830` | `MenuOptionScrollPolicy.apply` (`godot/game/menu_option_scroll_policy.gd`, invoked by `OptionsMenuController`) — GAMMA 5..20/page 2; SOUNDFXVOLUME/DIALOGVOLUME/MUSICVOLUME 0..255/page 10; MOUSE_SENSITIVITY 4..511/page 10; `PlayerOptions` supplies modeled controls' persisted current values while GAMMA remains pinned read-only |
 | `CListWnd_CreateScrollChild @ 0x6444c0` / `CMEditWnd_CreateScrollChild @ 0x661260` / `CTableWnd_Init @ 0x640790` | an absent/zero-width embedded scrollbar POSITION falls back to the rightmost 22px of the owner's full height |
 | `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `mnu::parse_window`'s LIST_BOX + `MenuFrameCompiler::combo_popup_rect` (authored combo-relative POSITION; `SB_EDGE_PAD` narrows content only, not scrollbar geometry) (D-MNU-7) |
-| `CUIElement_DrawFrame @ 0x64a210` + `init_border_materials @ 0x646f70` | `MenuFrameCompiler::emit_frame` — 8 border quads + tiled fill; retail-neutral 0x7F modulate-2x becomes effective white for Godot ordinary multiply; draws nothing when textures are absent; no monogram |
+| `CUIElement_DrawFrame @ 0x64a210` + `CUIElement_InitBorderMaterials @ 0x646f70` | `MenuFrameCompiler::emit_frame` — 8 border quads + tiled fill; retail-neutral 0x7F modulate-2x becomes effective white for Godot ordinary multiply; draws nothing when textures are absent; no monogram |
 | `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); the frame pass is gated on the DRAW_FRAME flag (`elem+0x134`) -> the compiler's draw walk gates `emit_frame` on `w.draw_frame`; confirms the menu monogram is never drawn |
 | `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `menu_shell.gd` |
 | `CWnd_SetScaleRecursive @ 0x646c60` | scale propagation (root CanvasItem `set_scale`) |
@@ -1926,19 +1943,19 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CSpinListWnd_Render @ 0x64b220` + `CUISpinList_ParseXMLDefinition @ 0x64bd10` | `resolve_item` + `mnu_render_item_cell` (`mnu_item_cell.{h,cpp}`) + `build_spinlist` |
 | `CSpinListWnd_CreateUpDownChildren @ 0x64b8b0` | `MenuFrameCompiler::emit_spin_arrows` + the shared `spin_arrow_hit_` claim (parent-relative SPINUP/SPINDOWN) — `engine/runtime/menu/menu_frame.cpp` (D-MNU-16) |
 | `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | the compiled combo face + popup — `MenuFrameCompiler::emit_combo_popup`/`combo_popup_rect` (dropdown geometry from authored LIST_BOX POSITION, D-MNU-7; the closed face pins D-MNU-15) |
-| `dispatch_mouse_event @ 0x63ab00` (WM `0x200..0x20A` -> ids `0x1000001..0x100000B`; exclusive route to `g_ui_open_popup_wnd` `@ 0x63abb5`) | an open dropdown owns the mouse exclusively — `MenuDriver.process_mouse`'s popup branch over `MenuFrameCompiler::combo_popup_row_at`/`combo_popup_contains` (`engine/runtime/menu/menu_runtime.cpp`, D-MNU-11) |
-| `scene_end_frame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | `MenuFrameCompiler::pump_mouse` — the per-frame single-claim walk (`engine/runtime/menu/menu_frame.cpp`) |
+| `UI_DispatchMouseEvent @ 0x63ab00` (WM `0x200..0x20A` -> ids `0x1000001..0x100000B`; exclusive route to `g_UIOpenPopupWnd` `@ 0x63abb5`) | an open dropdown owns the mouse exclusively — `MenuDriver.process_mouse`'s popup branch over `MenuFrameCompiler::combo_popup_row_at`/`combo_popup_contains` (`engine/runtime/menu/menu_runtime.cpp`, D-MNU-11) |
+| `CUIScene_EndFrame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | `MenuFrameCompiler::pump_mouse` — the per-frame single-claim walk (`engine/runtime/menu/menu_frame.cpp`) |
 | `CWnd_IsVisibleInHierarchy @ 0x646290` (popup-subtree-only while a popup is open `@ 0x646299`) | popup-open frames bypass the widget claim walk entirely (`MenuDriver.process_mouse` returns from the popup branch); hidden subtrees never hit in the claim walk |
-| `combobox_handle_event @ 0x65c190` (toggle `0x3000001`; single-open `@ 0x65c210`; outside-press close `@ 0x65c261`; `LISTBOX_WND` `0x5000001` pick `@ 0x65c2fd`) | `MenuDriver` combo handling — toggle on activate, `_open_combo_popup`/`close_active_combo_popup` single-open, outside-press close, row pick -> `_combo_select` (D-MNU-11) |
-| `CWnd_SetShown @ 0x6480e0` (shown flag `+224`; popup flag `+660` registers `g_ui_open_popup_wnd`; was `sub_6480E0`) | popup lifecycle = `set_widget_popup_open` on the frame state (`MenuDriver._open_combo_popup`/`close_active_combo_popup`) |
+| `CComboWnd_HandleEvent @ 0x65c190` (toggle `0x3000001`; single-open `@ 0x65c210`; outside-press close `@ 0x65c261`; `LISTBOX_WND` `0x5000001` pick `@ 0x65c2fd`) | `MenuDriver` combo handling — toggle on activate, `_open_combo_popup`/`close_active_combo_popup` single-open, outside-press close, row pick -> `_combo_select` (D-MNU-11) |
+| `CWnd_SetShown @ 0x6480e0` (shown flag `+224`; popup flag `+660` registers `g_UIOpenPopupWnd`; was `sub_6480E0`) | popup lifecycle = `set_widget_popup_open` on the frame state (`MenuDriver._open_combo_popup`/`close_active_combo_popup`) |
 | `CUIScene_SelectNodeByName @ 0x63b6b0` (screen switch clears the popup + capture globals `@ 0x63b6b8/0x63b7c4`) | `MenuDriver` screen changes -> `close_active_combo_popup` |
-| `dispatch_mouse_event_to_children @ 0x647900` (active-combo priority peek `@ 0x647917`; press-capture bypass `@ 0x647932`) + `widget_process_mouse_event @ 0x647a00` (reverse child walk; per-frame claim `scene+16`) | Godot viewport GUI picking (reverse tree order) — reimpl code / not grillable |
-| `CButtonWnd_HandleNamedEvent @ 0x658340` (press sets `g_ui_mouse_capture_wnd` `@ 0x65839c`, release clears `@ 0x6583ed`; pressed-texture swap; was `sub_658340`) | Godot `BaseButton` press capture — reimpl code / not grillable |
+| `CWnd_DispatchMouseEventToChildren @ 0x647900` (active-combo priority peek `@ 0x647917`; press-capture bypass `@ 0x647932`) + `CWnd_ProcessMouseEvent @ 0x647a00` (reverse child walk; per-frame claim `scene+16`) | Godot viewport GUI picking (reverse tree order) — reimpl code / not grillable |
+| `CButtonWnd_HandleNamedEvent @ 0x658340` (press sets `g_UIMouseCaptureWnd` `@ 0x65839c`, release clears `@ 0x6583ed`; pressed-texture swap; was `sub_658340`) | Godot `BaseButton` press capture — reimpl code / not grillable |
 | `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — reimpl code / not grillable |
 | `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — reimpl code / not grillable |
-| `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `CreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `MnuMarquee` (plain text) |
+| `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0` | `build_marquee` -> `CreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `MnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x6497f0` | `MenuRuntime::activate` + the shell action signals — `engine/runtime/menu/menu_runtime.cpp` |
-| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/controls.cpp`) + `OptionsScreen::fill` (`engine/runtime/menu/options_screen.cpp`) |
+| `UI_PopulateControlMappingList @ 0x55c0c0` + `UI_RefreshControlMappingList @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/controls.cpp`) + `OptionsScreen::fill` (`engine/runtime/menu/options_screen.cpp`) |
 | `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `engine/runtime/controls` `k_catalog` — `controls.cpp` |
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
 | `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> binding name + display fallback) | `controls::key_binding_names` / `controls::key_name` |
@@ -1950,8 +1967,8 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f` (useitem armory leg) + `Input_HandleActionBinding case 218 @ 0x49b83d` | the shell armory key (SHIFT) + `_try_open_armory` — `main_game.gd` |
 | `UI_InitWeaponClassSelection @ 0x567250` (CHARCLASS_* rows, values 5..9) | `ArmoryMenuCompanion._populate_classes` |
 | `Armory_ResolveSelectedClass @ 0x5642f0` + `SpinList_SelectItemByValue @ 0x64ba50` | `ArmoryMenuCompanion._resolve_selected_class` + select-by-value |
-| `populate_three_category_lists @ 0x566db0` (+ `ListWidget_SortRows @ 0x644990` / `cmp @ 0x6448a0`) | `ArmoryMenuCompanion._populate_slots/_fill_slot` (sorted rows, NONE at 0) |
-| `update_weapon_weight_display @ 0x565640` + `calculate_equipped_weapons_weight @ 0x565490` | `ArmoryMenuCompanion._update_weight/_update_icons` (witnessed format, encumbrance bands, and selected-weapon icon swaps; D-MNU-9 on the ammo model) |
+| `UI_PopulateThreeCategoryLists @ 0x566db0` (+ `ListWidget_SortRows @ 0x644990` / `cmp @ 0x6448a0`) | `ArmoryMenuCompanion._populate_slots/_fill_slot` (sorted rows, NONE at 0) |
+| `UI_UpdateWeaponWeightDisplay @ 0x565640` + `UI_CalculateEquippedWeaponsWeight @ 0x565490` | `ArmoryMenuCompanion._update_weight/_update_icons` (witnessed format, encumbrance bands, and selected-weapon icon swaps; D-MNU-9 on the ammo model) |
 | `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (ACCEPT/CANCEL, `skip_apply` arg) | `ArmoryMenuCompanion._on_accept/_on_cancel` -> the shell's SP apply |
 
 IDB state note (2026-06-23): the 2026-06-23 render grill renamed `sub_639480 ->
@@ -1982,10 +1999,10 @@ the misnamed `CWnd_SetEnabled -> CWnd_SetChecked` (`0x656e80`, writes +772),
 `sub_63BF60 -> CUIScene_DrawScreensAndCursor`, `sub_54B7C0 -> Menu_RenderFrame`,
 `0x5528a0` newly defined as `Menu_UpdateFrame`, `sub_676290 -> CGameFont_DrawText_Cdecl`,
 `sub_6461F0 -> UI_EmitEventToFocusWnd`, `sub_646420 -> UI_SetFocusWnd`,
-`sub_646430 -> UI_ClearFocusWnd`, `sub_653680 -> font_cache_measure_text_default`;
-data `dword_31C16D4 -> g_ui_focus_wnd`, `dword_31C16DC -> g_ui_mouseover_wnd`,
-`dword_31C16E0 -> g_ui_frame_cursor_texture`, `dword_2551100 -> g_GameMenu`,
-`dword_2551114 -> g_menu_render_dirty`, `dword_31C3760 -> g_ui_half_bright_mode`.
+`sub_646430 -> UI_ClearFocusWnd`, `sub_653680 -> CFontCache_MeasureTextDefault`;
+data `dword_31C16D4 -> g_UIFocusWnd`, `dword_31C16DC -> g_UIMouseoverWnd`,
+`dword_31C16E0 -> g_UIFrameCursorTexture`, `dword_2551100 -> g_GameMenu`,
+`dword_2551114 -> g_MenuRenderDirty`, `dword_31C3760 -> g_UIHalfBrightMode`.
 Witness comments at `0x64a8a0`, `0x646340`, `0x647a00`, `0x6533b0`, `0x653170`,
 `0x656fb0`, `0x6619e0`, `0x64ae20`, `0x64aa20`, `0x656e20`, `0x63bf60`, `0x54b7c0`,
 `0x647e40`, `0x6483d4`, `0x646a70`, `0x643f30`; `idb_save` done.
@@ -1999,9 +2016,9 @@ IDB state note (2026-07-16 dropdown-input grill): renamed, all anchored —
 `sub_6480A0 -> CWnd_SetParentAndAttach`, `sub_658340 -> CButtonWnd_HandleNamedEvent`,
 `sub_64AB80 -> CCheckboxWnd_HandleNamedEvent`, `CWnd_EmitEventToNamedHandlerAndCallbacks ->
 CWnd_EmitEventToNamedHandlerAndCallbacks`, `sub_6471C0 -> CWnd_MarkDirtyWithChildren`;
-data `dword_31C16CC -> g_ui_mouse_capture_wnd`, `dword_31C16D0 -> g_ui_active_combo_wnd`,
-`dword_31C16D8 -> g_ui_open_popup_wnd`, and (2026-08-09 draw-walk grill) `dword_31C16D4 ->
-g_ui_focus_wnd` (keyboard focus — the caret gate), `dword_31C16DC -> g_ui_mouseover_wnd`
+data `dword_31C16CC -> g_UIMouseCaptureWnd`, `dword_31C16D0 -> g_UIActiveComboWnd`,
+`dword_31C16D8 -> g_UIOpenPopupWnd`, and (2026-08-09 draw-walk grill) `dword_31C16D4 ->
+g_UIFocusWnd` (keyboard focus — the caret gate), `dword_31C16DC -> g_UIMouseoverWnd`
 (the per-frame hovered widget; both cleared alongside capture by scripted actions
 `@ 0x6498c8/0x6498d4`, witnessed via the debug formatter `@ 0x6394f0` and the keyboard
 dispatch `@ 0x63ad10` — see "Widget render dispatch"). Witness comments at `0x65c190`,
@@ -2051,7 +2068,7 @@ over it `[orig: Render_ProcessMainSceneFrame @ 0x5cae1c]`):**
    `[orig: Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f]`: gated on a local
    player, NOT seated (parentSlot == 0), entity Flags 0x400000 (inside a type-6
    armory collision volume — world-wac-ai-re.md §15.4), the repeat debounce
-   `g_weaponScreenOpenDebounce @ 0x24C18E8`, and the host weapons rule
+   `g_WeaponScreenOpenDebounce @ 0x24C18E8`, and the host weapons rule
    `dword_A85B6C` (BSS ⇒ 0 at boot: SP allows; the WPN_ARMORY / WPN_NEVER /
    WPN_MISSION radios on MULTI_PLAYER_HOST are its setter `[orig: @ 0x5580f0]`).
    Flags 0x800 (type-11 vehicle-loadout volume) -> `vehicle.mnu` VEHICLE
@@ -2070,18 +2087,18 @@ over it `[orig: Render_ProcessMainSceneFrame @ 0x5cae1c]`):**
 "Menu"-section `CHARCLASS_MEDIC/SNIPER/GUNNER/RIFLEMAN/ENGINEER` rows, values
 5..9. ON SHOW `[orig: @ 0x567370]`: the selected class =
 `Armory_ResolveSelectedClass @ 0x5642f0` — the player's current `playerClass`
-when `g_hostClassAllowMask @ 0x24D59FC` allows it, else the next allowed class
+when `g_HostClassAllowMask @ 0x24D59FC` allows it, else the next allowed class
 scanning up through 9, else **7 (gunner)**; a class outside 5..9 (an unclassed
 SP spawn) filters NOTHING (switch default mask = −1). Per-item enable rides the
 mask bits 5..9; the spin selects **by value** (`SpinList_SelectItemByValue
 @ 0x64ba50`, row 0 on no match); the spin + its label are enabled **only
 in-session** (SP: disabled). ACCEPT gains hotkeys from binding row 177's
-runtime keys (`g_useItemBindingKey0/1 @ 0x81A468/6A`, writer still unwalked):
+runtime keys (`g_UseItemBindingKey0/1 @ 0x81A468/6A`, writer still unwalked):
 the on-show clears then re-adds them on the ACCEPT control
 (`CUIWidget_ResetScreenHotkeys @ 0x649ce0`, `CUIWidget_AddScreenHotkey
 @ 0x649e20 -> the screen's key->widget table @ 0x63a8e0`), so the armory-opener
 key doubles as ACCEPT while the screen is up. The opener press must RELEASE
-once first: the open stamps `g_weaponScreenOpenDebounce` `[orig: @ 0x4e0b21]`
+once first: the open stamps `g_WeaponScreenOpenDebounce` `[orig: @ 0x4e0b21]`
 and only the row's KEYUP clears it (`Input_HandleMenuKeyRelease @ 0x4de2d0`).
 PORTED 2026-07-11 (the weapon round): `ArmoryMenuCompanion.accept_hotkey_edge`
 (armed-on-release debounce; `on_menu_built` = the on-show stamp) routed by
@@ -2097,30 +2114,30 @@ PORTED 2026-07-11 (the weapon round): `ArmoryMenuCompanion.accept_hotkey_edge`
 | PRIMARY_AMMO1 / _AMMO2 | `sub_566620` (arg 0/1) | clip-count combos |
 | PRIMARY_AMMO1_TYPE | `sub_566650` | round-type combo |
 | SECONDARY (+ ammo/type) | `UI_OnSecondaryWeaponChanged @ 0x566670`, `sub_5669C0/…F0` | |
-| ACCESSORY (+ ammo) | `ui_on_weapon_ammo_slot_changed @ 0x566a10`, `sub_566D40` | |
+| ACCESSORY (+ ammo) | `UI_OnWeaponAmmoSlotChanged @ 0x566a10`, `sub_566D40` | |
 | GRENADE_AMMO1..3 | `WeaponDef_UISlotSelectCallback` (arg 0/1/2) | |
-| PLAYER_CLASS | `handle_team_class_selection @ 0x566f60` (kind 0x40 spinlist) | MP-only flip; host fills the authored-empty items |
+| PLAYER_CLASS | `UI_HandleTeamClassSelection @ 0x566f60` (kind 0x40 spinlist) | MP-only flip; host fills the authored-empty items |
 | ACCEPT / CANCEL | `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (arg 0/1) | kind 8 buttons |
 
-**Population** `[orig: populate_three_category_lists @ 0x566db0]` — the WEAPON
-screen's own populate (the similar `populate_weapon_slot_lists @ 0x560430`
+**Population** `[orig: UI_PopulateThreeCategoryLists @ 0x566db0]` — the WEAPON
+screen's own populate (the similar `PlayerInfo_PopulateWeaponSlotLists @ 0x560430`
 serves player.mnu's PLAYER_INFO): filter = def valid && class mask && team mask
-&& `g_armoryWeaponAvailability @ 0x24D5600` (per-adm-index byte table; writers:
+&& `g_ArmoryWeaponAvailability @ 0x24D5600` (per-adm-index byte table; writers:
 `Mission_LoadBMSFile @ 0x40f834` — SP missions author the armory list —
 `NapiNPClientMsg_HandleWeaponRestrictions @ 0x42d4cc`,
-`apply_session_settings_to_globals`, `Game_StartMission`,
+`Game_ApplySessionSettingsToGlobals`, `Game_StartMission`,
 `CAdminServer_HandleWeaponCommand`); category dword +17 routes 1->PRIMARY,
 2->SECONDARY, 0->ACCESSORY; rows **sorted case-insensitively ascending**
 (`ListWidget_SortRows @ 0x644990` -> `cmp @ 0x6448a0`, params (string, asc));
 `Menu/NONE` prepended at row 0. The tail parses the canonical, unexpanded
 `{name, ammoPri, ammoSec, flags}` tuples from the **per-class** loadout buffer
-(`populate_ammo_type_combo_boxes @ 0x564930`), resolves each parent name to its
+(`UI_PopulateAmmoTypeComboBoxes @ 0x564930`), resolves each parent name to its
 catalog index `@ 0x564A00..0x564A06`, routes it by the parent's category
 (`ACCESSORY` case 0 `@ 0x564B47`), selects that visible row by adm index via
 `UIList_SelectByValue @ 0x645240 (the calls @ 0x564B26..0x564B33)`, and fills the ammo/type combos from it. It
 does not reconstruct the selection from the expanded runtime weapon-slot table,
-then `update_weapon_weight_display @ 0x565640` renders STATIC_TOTAL_WEIGHT as
-`sprintf "%s %.1f %s (%s)"` = TOTAL_WEIGHT / `calculate_equipped_weapons_weight
+then `UI_UpdateWeaponWeightDisplay @ 0x565640` renders STATIC_TOTAL_WEIGHT as
+`sprintf "%s %.1f %s (%s)"` = TOTAL_WEIGHT / `UI_CalculateEquippedWeaponsWeight
 @ 0x565490` / LBS / encumbrance (`< 33.3 LIGHT_ENCUMBRANCE`, `< 66.6 NORMAL_`,
 else `HEAVY_`), and swaps PRIMARY/SECONDARY/ACCESSORY_ICON from the 192-byte
 icon table `@ 0x2540D70`. Reimpl: `_update_icons` mounts a `TextureRect` over
@@ -2129,16 +2146,16 @@ each blank authored `*_ICON` window, resolves the selected weapon's
 weight sum: selected weapon `adm[85]/65536` per
 slot + `(ammoRow+1) × selectedAmmoDef[84]/65536` per ammo combo — the ammo
 TYPE's own def carries the clip weight. A class flip
-`[orig: handle_team_class_selection @ 0x566f60]` (MP-only) first serializes the
+`[orig: UI_HandleTeamClassSelection @ 0x566f60]` (MP-only) first serializes the
 outgoing class's selections into its buffer, then swaps + repopulates.
 
 **ACCEPT** `[orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0]` (CANCEL = arg 1 =
 the `skip_apply` param; both legs clear the latch + `Server_ResetBalanceCounters
-@ 0x54b940`; guard = `!g_weaponScreenOpenDebounce && g_WeaponScreenOpen`):
+@ 0x54b940`; guard = `!g_WeaponScreenOpenDebounce && g_WeaponScreenOpen`):
 serialize the UI into the **per-class** (5..9) 2048-byte loadout string buffer
 `{name\0 ammoPri\0 ammoSec\0 flags\0}*`
 `[orig: WeaponLoadout_SerializeSelectionsToBuffer @ 0x5658b0 ->
-g_armoryLoadoutBufferByClass @ 0x25DD740 + 2048*g_armorySelectedClass
+g_ArmoryLoadoutBufferByClass @ 0x25DD740 + 2048*g_ArmorySelectedClass
 @ 0x25DCF34]`; in an MP session the CLIENT resets its slots and sends the buffer
 to the host (the C2S 0x2F seam `[orig: @ 0x42cdc0]`, already byte-golden in
 npruntime — net-re §5.56/5.57); offline/SP it parses the tuples back
@@ -2170,7 +2187,7 @@ one-through-max parent-ammo rows with quantity/round labels and canonical count
 preselect, the `GRENADE_AMMO1..3` count selectors backed by class/team/selectable
 grenade defs in table order (an unavailable definition keeps its control as
 zero-only; canonical count preselect + ACCEPT serialization are live), the
-`g_armoryWeaponAvailability` filter term (mission-authored via the .bms
+`g_ArmoryWeaponAvailability` filter term (mission-authored via the .bms
 item_availability promote; values in net-re §5.63), the witnessed weight
 format, and the offline ACCEPT collect/apply seam — now the full multi-slot
 kit into the sim's slot pool with requested-ammo pool fills (net-re §5.63).
@@ -2195,10 +2212,10 @@ Armory_ResolveSelectedClass`, `sub_424390 -> UI_OpenWeaponScreenSinglePlayer`,
 `sub_64BA50 -> SpinList_SelectItemByValue`, `sub_644990 -> ListWidget_SortRows`,
 `WeaponLoadout_SerializeToBufferTeamBased ->
 WeaponLoadout_SerializeSelectionsToBuffer` (the buffer is per-CLASS, not
-per-team), `unused6 -> g_armoryWeaponAvailability`, `team2 ->
-g_armorySelectedClass`, `unk_25DD740 -> g_armoryLoadoutBufferByClass`,
-`dword_24C18E8 -> g_weaponScreenOpenDebounce`, `dword_24D59FC ->
-g_hostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
+per-team), `unused6 -> g_ArmoryWeaponAvailability`, `team2 ->
+g_ArmorySelectedClass`, `unk_25DD740 -> g_ArmoryLoadoutBufferByClass`,
+`dword_24C18E8 -> g_WeaponScreenOpenDebounce`, `dword_24D59FC ->
+g_HostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
 `skip_apply`. (2026-07-09: `UI_OpenMenuScreen @ 0x54e520` renamed, ex
 "renderer init" misnomer.)
 
@@ -2224,7 +2241,7 @@ g_hostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| Host dialog readback and live-rule sentinels | MATCHING (read-only grill) | `HostDialog_ReadSettings @ 0x555940`, `apply_session_settings_to_globals @ 0x551500`; `npruntime_host_settings`; GUT `mp_lan_menu_seam_test` |
+| Host dialog readback and live-rule sentinels | MATCHING (read-only grill) | `HostDialog_ReadSettings @ 0x555940`, `Game_ApplySessionSettingsToGlobals @ 0x551500`; `npruntime_host_settings`; GUT `mp_lan_menu_seam_test` |
 | Aspect control selection and persistence | MATCHING (read-only grill) | `UI_SyncRenderSettingsToWidgets @ 0x55a140`; GUT `menu_shell_test` restores the authored semantic value, persists a change and applies it to the simulation |
 | Aspect projection and the first-launch seed | MATCHING | `Render_SetAspectRatioMode @ 0x58d870`, `Render_SetViewAndProjectionMatrices @ 0x58d900`, `Game_RunVideoTestDialog @ 0x53ed3e`; ctest `player_view` (`view_projection`, `fresh_profile_aspect_seed`), GUT `local_player_presenter_test` (the stretched target), `player_options_test` / `menu_shell_test` (the desktop-ratio seed, persisted once) |
 
@@ -2239,8 +2256,8 @@ CEditWnd_GetIntValue @ 0x6575d0]
 
 | Control | Live setting |
 | --- | --- |
-| `DELAY` / `RESPAWN` / `TIME` | Start delay / respawn timeout / round time (`g_respawn_time`) |
-| `MAX_KOTH` | KOTH limit (`g_time_limit_minutes`); nonpositive becomes `0x2222222` |
+| `DELAY` / `RESPAWN` / `TIME` | Start delay / respawn timeout / round time (`g_RespawnTime`) |
+| `MAX_KOTH` | KOTH limit (`g_TimeLimitMinutes`); nonpositive becomes `0x2222222` |
 | `KILL_LIMIT` / `MAX_SCORE` | Score / flag-score limit; exactly 500 becomes 65000 |
 | `TAKEOVER_TIME` / `LFP_TAKEOVER` | Capture duration / capture speed |
 | `TEAM_FF`, `FRIENDLY_TAG`, `FF_WARNING`, `TRACERS` | Inverted attribute bits `0x200`, `0x400`, `0x8`, `0x1` |
@@ -2248,7 +2265,7 @@ CEditWnd_GetIntValue @ 0x6575d0]
 | `ALLOW_SPECTATORS` | Off clears the signed limit; on changes zero to -1 while preserving an existing positive limit |
 
 [orig: HostDialog_ReadSettings @ 0x555940;
-apply_session_settings_to_globals @ 0x551500]
+Game_ApplySessionSettingsToGlobals @ 0x551500]
 
 Name/message/password reads use capacities 32/128/17 bytes. `GAME_LOCATION`
 reads the selected item's name (for example `US`), not its numeric value.
@@ -2311,7 +2328,7 @@ card already assumed the retail stretch.
 @ 0x53ed62 (fcom), @ 0x53ed69 (jnp), @ 0x53ed6b (0), @ 0x53ed77..0x53ed88 (the
 recommended block), @ 0x53edb6 (Game_SaveConfig); Config_ParseSettingsLine
 @ 0x54fd4b; the options apply (sub_55A710) @ 0x55a8b4;
-apply_session_settings_to_globals @ 0x551574; Game_StartMission @ 0x524732;
+Game_ApplySessionSettingsToGlobals @ 0x551574; Game_StartMission @ 0x524732;
 Render_SetAspectRatioMode @ 0x58d8a7; Render_SetViewAndProjectionMatrices
 @ 0x58d9b2; Render_SetViewProjectionWithDefaults @ 0x58f6b0; the FP pass
 @ 0x4dee7f]

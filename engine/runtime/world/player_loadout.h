@@ -29,7 +29,7 @@ class World;
 struct LocalPlayerLoadout {
     // [orig: the all-1 default @ 0x551c86]
     WeaponAvailability availability{};
-    // The resident kit buffer [orig: restrictionData @ 0x24D4E00 — ONE buffer
+    // The resident kit buffer [orig: g_SpawnLoadoutBuffer @ 0x24D4E00 — ONE buffer
     // serves the local slot pool, the respawn refill, and the joiner's 0x2F
     // serialization alike].
     std::vector<WeaponKitEntry> spawn_kit;
@@ -135,7 +135,7 @@ inline constexpr ArmoryClassCatalogEntry kArmoryClassCatalog[kArmoryClassCount] 
 };
 
 // The host class-allow mask default — every wire class bit 0..9 set, i.e. no
-// restriction until an S2C 0x76 narrows it. [orig: g_hostClassAllowMask
+// restriction until an S2C 0x76 narrows it. [orig: g_HostClassAllowMask
 // default 0x3FF]
 inline constexpr uint32_t kClassAllowMaskAll = 0x3FF;
 // The five-class FILTER mask union (classes 5..9 mapped to bits 1<<0..1<<4) —
@@ -146,7 +146,7 @@ inline constexpr int32_t kClassFilterMaskAll = 0x1F;
 // host's S2C 0x76 allow mask permits it, else the next allowed class scanning
 // up through 9, else gunner (7). The resolver indexes the class-id bits (5..9)
 // of the complete wire u16 directly. [orig: Armory_ResolveSelectedClass
-// @0x5642f0 against g_hostClassAllowMask]
+// @0x5642f0 against g_HostClassAllowMask]
 int armory_resolve_selected_class(int player_class, uint32_t class_allow_mask);
 
 // The armory class filter bit: 1 << (class - 5) for the five soldier classes;
@@ -163,7 +163,7 @@ int32_t player_info_team_mask(int team);
 int32_t player_info_class_mask(int playerclass_value);
 
 // The weapons that belong in `slot` for the class + team masks, in table
-// order [orig: populate_weapon_slot_lists @0x560430]: a row is included only
+// order [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430]: a row is included only
 // when loadout_selectable != 0 AND (charfilter & class_mask) AND
 // (teamfilter & team_mask). The caller prepends its own "NONE" row.
 void weapon_slot_indices(const opennova::def::DefWeaponDef *rows, size_t count, int slot,
@@ -172,7 +172,7 @@ void weapon_slot_indices(const opennova::def::DefWeaponDef *rows, size_t count, 
 
 // The ammo combo's default-select row [orig: the
 // `saved == i || (saved == -1 && i == maxclips)` select in
-// populate_ammo_combo_boxes @0x55def0 and the armory fill @0x565cd0]: a saved
+// PlayerInfo_PopulateAmmoComboBoxes @0x55def0 and the armory fill @0x565cd0]: a saved
 // count picks its own row (clamped into 1..maxclips), the -1/absent sentinel
 // picks the full maxclips row. Returns the selected CLIP COUNT (1..maxclips;
 // 0 on a degenerate maxclips).
@@ -182,7 +182,7 @@ int player_info_default_clip_row(int saved, int maxclips);
 // INCLUDING the zero row, so the row IS the clip count: the -1/absent
 // sentinel picks the full maxclips row, a saved count its own row (a saved 0
 // stays 0) [orig: `saved == i || (saved == -1 && i == maxclips)` — the >= 3
-// leg of populate_ammo_combo_boxes @0x55def0 (@0x55e412) and the WEAPON
+// leg of PlayerInfo_PopulateAmmoComboBoxes @0x55def0 (@0x55e412) and the WEAPON
 // screen's category-3 fill @0x5647a4..0x5648a6 (@0x564880)]. The clamp of an
 // out-of-domain saved count into 0..maxclips is ours: retail selects no row
 // for it.

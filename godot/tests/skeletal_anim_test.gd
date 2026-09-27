@@ -39,9 +39,7 @@ func _clear_viewmodel_rig_fixture() -> void:
 
 func test_skinned_model_emits_bone_arrays() -> void:
 	var data := _open(PERSON)
-	if not data.is_skinned(0):
-		pass_test("person.3di is not flagged skinned; skin-array assertions skipped.")
-		return
+	assert_true(data.is_skinned(0), "the synthetic person rig is skinned")
 	var submeshes: Array = data.build_lod_submeshes(0)
 	assert_false(submeshes.is_empty(), "Skinned model should build submeshes.")
 	var found_skinned := false
@@ -170,9 +168,6 @@ func test_load_from_bad_files_binds_raw_bads() -> void:
 	# skeletal set from explicit raw .bad files with no .adm. Uses the committed idle.bad as
 	# both the rest/skeleton source and the clip, registered under the canonical idle key.
 	var sk := SkeletalAnim.new()
-	if not sk.has_method("load_from_bad_files"):
-		fail_test("SkeletalAnim exposes load_from_bad_files(root, skeleton_bad, key_to_bad)")
-		return
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	assert_true(sk.load_from_bad_files(root, "idle.bad", {"anim_idle": "idle.bad"}),
@@ -187,9 +182,6 @@ func test_load_from_bad_files_binds_raw_bads() -> void:
 
 func test_load_from_bad_files_fails_gracefully() -> void:
 	var sk := SkeletalAnim.new()
-	if not sk.has_method("load_from_bad_files"):
-		fail_test("SkeletalAnim exposes load_from_bad_files")
-		return
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	# Missing skeleton .bad -> false + error, not loaded.
@@ -494,16 +486,13 @@ func test_body_clip_change_blends_primary_pose_over_retail_window() -> void:
 		add_child_autofree(model)
 		model.set_skeletal_anim(skeletal)
 		model.set_object_data(_open(SHED))
-		if not model.has_method("play_body_blend_at"):
-			fail_test("ObjectModel exposes the shared blend-aware body-clip seam")
-			return
 		var skeleton: Skeleton3D = model.get_skeleton()
 		var idle_phase := 4
 		model.play_body_clip_at("anim_idle", idle_phase)
 		var old_at_switch: Array = skeletal.eval_pose(
 				"anim_idle", float(idle_phase) / (2.0 * idle_fps))
 
-		model.call("play_body_blend_at",
+		model.play_body_blend_at(
 				"anim_idle", idle_phase,
 				"anim_walk_forward", 0, 0.0)
 		_assert_skeleton_pose_matches(
@@ -513,7 +502,7 @@ func test_body_clip_change_blends_primary_pose_over_retail_window() -> void:
 		var total_ticks := int(case.ticks)
 		for tick in range(1, total_ticks + 1):
 			var weight := float(tick) / float(total_ticks)
-			model.call("play_body_blend_at",
+			model.play_body_blend_at(
 					"anim_idle", idle_phase + tick,
 					"anim_walk_forward", tick, weight)
 			var old_pose: Array = skeletal.eval_pose(
@@ -744,16 +733,13 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
-	if not model.has_method("play_body_clip_at"):
-		fail_test("ObjectModel exposes play_body_clip_at(key, phase_ticks)")
-		return
 	var sk = model.get_skeletal_anim()
 	var fps: float = sk.get_clip_fps("anim_walk_forward")
 	assert_gt(fps, 0.0, "fixture clip has a valid fps")
 	var phase_ticks := 5
 	var expected_time: float = sk.get_clip_phase_seconds("anim_walk_forward", phase_ticks)
 
-	model.call("play_body_clip_at", "anim_walk_forward", phase_ticks)
+	model.play_body_clip_at("anim_walk_forward", phase_ticks)
 	var skeleton: Skeleton3D = model.get_skeleton()
 	assert_eq(skeleton.modifier_callback_mode_process,
 			Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL,

@@ -179,6 +179,17 @@ directories beneath those boundaries, not peer layers or extension seams.
 _Avoid_: "the netcode" (name the wire transaction, session behavior, or match rule);
 "net seam" / "net runtime layer" as public architecture
 
+**Retail tick bank**:
+The one fixed-tick accumulator (`world::TickAccumulator`,
+`engine/runtime/world/tick_accumulator.h`), a port of `Game_MainLoop`'s frame-time
+bank: each frame banks its elapsed time in 1/16 ms units, a 7/8 EMA smooths the bank
+(one over 500 ms is clamped and skips the smoothing), and the bank drains in 4 ms
+quanta with a logic tick on every fourth, so a hitch is repaid over the next frames
+rather than in one burst. The in-match session banks through it and re-bases the
+clock at mission start (the load and the first three frames' render time are never
+banked); the same bank feeds the FR counter (`average_fps`).
+_Avoid_: frame pacing, catch-up loop, a second tick clock
+
 **Packet / Draw list**:
 A **packet** is wire data — bytes on the network, and nothing else. What a frame
 compiler hands a renderer/applier is a **draw list** (`*DrawList` types, "draw-list
@@ -300,6 +311,35 @@ _Avoid_: generic player-only solid
 The three authored contact-damage volume grades, from high through low.
 _Avoid_: numbered hurt volume, damage tier 16/17/18
 
+## Model and animation tools (ADR 0047)
+
+**`.o3d` scene text**:
+The line-based text form of one `.3di` model (`docs/threedi/o3d-scene-format.md`).
+`opennova-3di build` mints a `.3di` from it through the engine's construction API and
+parity writer; `opennova-3di scene` writes any `.3di`, retail ones included, back out
+as it (build's exact inverse).
+_Avoid_: scene file (a Godot `.tscn` is a scene), ASE/OED (the retired authoring
+formats)
+
+**`.o3a` clip-set text**:
+The text form of one rig's clip set: its `.adm` table and every `.bad` clip the table
+names (`docs/anim/o3a-scene-format.md`). `opennova-3di anim build` mints the set from
+it; `opennova-3di anim scene` writes a set, retail ones included, back out as it.
+_Avoid_: animation file, clip file (a `.bad` is one clip)
+
+**`opennova-3di`**:
+The command-line tool (`apps/threedi_cli`) over the engine's one `.3di` reader and
+writer: `build` / `scene` over the `.o3d` text, `info`, `compare` and `catalog`, and
+`anim build|scene|info|compare` for a rig's `.bad` clips and `.adm` table over the
+`.o3a` text. The Blender add-on bundles it.
+_Avoid_: the exporter (the add-on is the front end; the CLI mints the files)
+
+**Blender add-on**:
+`tools/blender/opennova_3di`: exports and imports `.3di` models and their animations
+by the ASE/OED object-naming convention (`docs/threedi/scene-naming-contract.md`),
+through the bundled `opennova-3di` and the two texts. Import stashes no source data.
+_Avoid_: plugin, DCC pipeline (the Python/DCC authoring layer ADR 0038 retired)
+
 ## Products & modes
 
 **Godot product**:
@@ -355,6 +395,32 @@ ADR 0039): the Stats window over the frame-stats board, and every inspection
 or control window added later. Debug builds only; the Godot side is one
 `DevTools` node plus the imgui-godot addon.
 _Avoid_: debug overlay, F3 overlay (the retired GDScript surface), editor
+
+**F3 control board**:
+The read side of the one debug-control table F3 and MCP share
+(`engine/runtime/devtools/control_board.h`, ADR 0043 d12): each row's definition
+(label, tooltip, kind, range, enum choices) pushed once, and the live state (value,
+writable, the refusal reason) of the rows the visible windows declare, pushed on a
+short cadence. A window draws a row through `draw_control` and writes it through a
+`ControlRequest`, so F3 shows exactly what MCP's `game_debug op=list` reports.
+_Avoid_: a window-local copy of a row's range, choices or refusal text
+
+**FrameFX**:
+Retail's post-scene frame-effect system (the IDB's `FrameFX_*` family): after the
+scene and before the HUD, the distortion pass (type 0), the death or damage blur
+(4 / 1), the bloom (2), then the thermal (8) and monitor (9) views; the first-person
+NVG view replaces the whole chain. The portable planner is
+`engine/runtime/renderer/frame_fx_effects`, the device `godot/src/render/frame_fx`.
+Record: `docs/render/render-order-re.md`.
+_Avoid_: post-processing, screen shaders (as names for this system)
+
+**Scene overlay stage**:
+The post-particle tail of the retail scene frame (`engine/runtime/renderer/scene_overlay.h`):
+after particle pass B and before FrameFX, in the witnessed order, the NVG laser beams,
+precipitation, the light coronas, the water glint, the underwater murk and the sun
+glare. The engine emits it as a typed draw list the device runs after its own pass-B
+composite.
+_Avoid_: HUD overlay (the HUD draws later), post pass
 
 **Spinmap**:
 The heading-up gameplay map element in the authored `HUDSPINMAP*` rect (retail

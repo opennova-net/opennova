@@ -94,8 +94,8 @@ bool accept_with_cs(inmatch::JoinerConnection &joiner, uint32_t timeout_ms, uint
 	ServerAuth server_auth = build_server_auth(
 			client_auth, 0x7F000001u, 32769, kServerKey, kServerScrk, "", "", "", false);
 	server_auth.mi = 3;
-	server_auth.client_cs = jointoperations_client_cs_fields();
-	server_auth.server_cs = jointoperations_server_cs_fields();
+	server_auth.client_cs = jointoperations_cs_fields();
+	server_auth.server_cs = jointoperations_cs_fields();
 	for (CsField &field : server_auth.client_cs) {
 		if (field.field_index == 0) field.value = timeout_ms;
 		if (field.field_index == 11) field.value = msg_out_max;

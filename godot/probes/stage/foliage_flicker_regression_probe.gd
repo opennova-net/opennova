@@ -45,9 +45,14 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	_ctx = ctx
 	_out_dir = ProbeOutput.resolve(ctx, String(ctx.args.get("output_dir", "")))
 	for name in PINNED_GLOBALS:
-		var previous: Variant = RenderingServer.global_shader_parameter_get(name)
-		ctx.defer_restore(func() -> void:
-			RenderingServer.global_shader_parameter_set(name, previous))
+		# Restored to the project's registered default: reading the live value
+		# back (global_shader_parameter_get) is an editor-only call.
+		var setting: Variant = ProjectSettings.get_setting("shader_globals/" + String(name), {})
+		var project_default: Variant = \
+				(setting as Dictionary).get("value") if setting is Dictionary else null
+		if project_default != null:
+			ctx.defer_restore(func() -> void:
+				RenderingServer.global_shader_parameter_set(name, project_default))
 		RenderingServer.global_shader_parameter_set(name, PINNED_GLOBALS[name])
 
 	var stage := _make_stage()
@@ -105,9 +110,9 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		[_make_cross_mesh()],
 		[_solid_texture(Color(0.92, 0.48, 0.12, 1.0), 8)])
 
-	# Retail fills detail cache misses after the current draw. First call fills;
-	# second call creates visible draw meshes. Shader compilation gets four more
-	# frames before bytes become part of the verdict.
+	# Retail fills detail cache misses before the patches draw, so the first
+	# call already draws; the second warms the resident meshes. Shader
+	# compilation gets four more frames before bytes become part of the verdict.
 	dispatcher.render_preview(camera.global_transform, GameWorld.current_frame_clock_ms())
 	dispatcher.render_preview(camera.global_transform, GameWorld.current_frame_clock_ms())
 	_pin_wind(dispatcher)

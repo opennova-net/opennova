@@ -332,6 +332,10 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         effect.attach_wire_handle = entity.handle.packed;
         effect.attach_spawn_origin = entity.spawn_origin;
         effect.family = 1;
+        // The corpse is the descriptor's tag, so the decay group takes the
+        // section gate [orig: Entity_UpdateInfantryAI, the store of esi
+        // @ 0x4B9F0F ahead of the spawn @ 0x4B9F36].
+        effect.section_tagged = true;
         entity.death_effect_active[0] = 1;
         world.out.destruction.effects.push_back(std::move(effect));
     }

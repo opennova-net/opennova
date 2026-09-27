@@ -8,6 +8,17 @@ var _fixture_root := ""
 var _resources: ResourceRoot
 var _items: ItemDatabase
 
+# The per-view bits (render/visual_layers.h): the world bits a split node
+# swaps for the main-view bits, and the bit only the Inset camera admits.
+const WORLD_BITS := (1 << 0) | (1 << 16)
+const MAIN_VIEW_BITS := (1 << 20) | (1 << 22)
+const INSET_VIEW := 1 << 21
+# The beauty camera (FrameFx kBeautyCameraMask) and the Inset camera it
+# derives (HudInsetScope: minus the viewmodel, FP body, caster, main-view and
+# main-view foliage bits, plus INSET_VIEW).
+const MAIN_MASK := 0x00D78C01
+const INSET_MASK := 0x00258401
+
 
 func before_all() -> void:
 	_fixture_root = WorldFixture.stage_minimal_root("entity_projection_lod", false, {
@@ -132,7 +143,7 @@ func test_live_object_uses_scaled_cmdl_diagonal_instead_of_ghdr_radius() -> void
 
 func test_sub_pixel_world_models_are_not_drawn_at_any_level_count() -> void:
 	# Retail's sector-entity draw returns before the RLOD walk when the bound
-	# sphere projects to at most 0.75 px (retail render_sector_entity
+	# sphere projects to at most 0.75 px (retail Render_SectorEntity
 	# @0x5c42d8..0x5c42de), whatever the model's level count: the two-level
 	# pump and the one-level crate both drop, and come back when near.
 	var placer := _placer()
@@ -352,3 +363,236 @@ func test_static_husk_retains_primary_sphere_with_nonunit_scale() -> void:
 	var placed := _place(placer, 106403)
 	assert_eq(placed.stats.batched, 1)
 	_present_husk(placer, placed, false)
+
+
+# --- the weapon Inset view -----------------------------------------------------
+# Retail runs the whole scene pass per view (Render_WeaponInsetScene's own
+# Terrain_RenderWorldScene: collector, section masks, sub-pixel floor, RLOD
+# walk, each on the pass's frame scale). Where the two views disagree the node
+# draws the main view's on the main-view bits and a twin draws the Inset's.
+
+func _view_camera(size: Vector2i, fov: float, depth: float, mask := 0xFFFFF) -> Camera3D:
+	var view := SubViewport.new()
+	view.size = size
+	view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(view)
+	var camera := Camera3D.new()
+	camera.keep_aspect = Camera3D.KEEP_WIDTH
+	camera.fov = fov
+	camera.cull_mask = mask
+	view.add_child(camera)
+	camera.current = true
+	camera.global_transform = _camera(depth)
+	return camera
+
+
+func _slot_layers(model: ObjectModel) -> int:
+	var layers := 0
+	for node in model.find_children("*", "MeshInstance3D", true, false):
+		layers |= (node as MeshInstance3D).layers
+	return layers
+
+
+func test_each_view_selects_its_own_level_and_the_inset_draws_a_twin() -> void:
+	var placer := _placer()
+	var placed := _place(placer, 106401)
+	assert_eq(placed.stats.animated, 1)
+	var model := placer.get_placed_models()[0] as ObjectModel
+	# The main image: 90 deg KEEP_WIDTH over 640 px (focal 320, frame scale
+	# 2) puts the 4.9 u pump sphere 200 u out at 15.7 px, under pump_lod20's
+	# 20 px row. The Inset: 10 deg over 256 px (focal 1463, frame scale 5)
+	# puts it at 179 px.
+	var main := _view_camera(Vector2i(640, 480), 90.0, 200.0)
+	var inset := _view_camera(Vector2i(256, 256), 10.0, 200.0)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_eq(model.get_active_lod(), 1, "the node keeps the main view's coarse level")
+	assert_eq(model.get_inset_view_lod(), 0, "the narrow Inset selects the fine level")
+	assert_true(model.is_view_split(), "the views differ")
+	assert_gt(model.get_view_twin_count(), 0, "a twin draws the Inset's level")
+	var layers := _slot_layers(model)
+	assert_eq(layers & WORLD_BITS, 0, "the split node leaves the world bits")
+	assert_ne(layers & MAIN_VIEW_BITS, 0, "and draws for the main view only")
+	# A node another owner hides directly draws in neither view.
+	model.visible = false
+	assert_eq(model.get_view_twin_count(), 0, "no twin outlives a direct hide")
+	model.visible = true
+	assert_gt(model.get_view_twin_count(), 0, "and it returns with the node")
+	# The Inset closes: one node on the world bits again, no twin.
+	ObjectModel.update_authored_lods_for_views(main, 640.0, null, 0.0)
+	assert_false(model.is_view_split())
+	assert_eq(model.get_view_twin_count(), 0)
+	assert_eq(model.get_inset_view_lod(), model.get_active_lod())
+	layers = _slot_layers(model)
+	assert_ne(layers & WORLD_BITS, 0)
+	assert_eq(layers & MAIN_VIEW_BITS, 0)
+
+
+func test_a_sub_pixel_model_in_the_main_view_stays_drawn_in_the_inset_only() -> void:
+	var placer := _placer()
+	var placed := _place(placer, 106401)
+	assert_eq(placed.stats.animated, 1)
+	var model := placer.get_placed_models()[0] as ObjectModel
+	# 3000 u out the main view projects the 4.9 u sphere to 0.52 px (at or
+	# below the 0.75 px floor: the sector draw returns before the RLOD walk);
+	# a 2 deg Inset over 256 px (focal 7333) projects it to 12 px.
+	var main := _view_camera(Vector2i(640, 480), 90.0, 3000.0)
+	var inset := _view_camera(Vector2i(256, 256), 2.0, 3000.0)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_true(model.is_subpixel_hidden())
+	assert_false(model.visible, "the main view does not draw it")
+	assert_false(model.is_inset_view_subpixel_hidden(), "the Inset does")
+	assert_true(model.is_view_split())
+	assert_gt(model.get_view_twin_count(), 0, "on its twin")
+	ObjectModel.update_authored_lods_for_views(main, 640.0, null, 0.0)
+	assert_false(model.is_view_split())
+	assert_eq(model.get_view_twin_count(), 0, "the twin goes with the Inset")
+
+
+func test_static_instance_moves_into_view_twin_populations_while_the_views_differ() -> void:
+	var placer := _static_placer()
+	var placed := _place(placer, 106403)
+	assert_eq(placed.stats.batched, 1)
+	var bms_id: int = placed.entities[0].bms_id
+	# The scale-2 crate sphere (1.73 u) 60 u out: 18.5 px in the main image,
+	# under the 20 px row; about 210 px in the 10 deg Inset.
+	var main := _view_camera(Vector2i(640, 480), 90.0, 60.0)
+	var inset := _view_camera(Vector2i(256, 256), 10.0, 60.0)
+	placer.update_static_lods_for_views(main, 640.0, inset, 256.0)
+	assert_eq(placer.get_static_instance_lod(bms_id), 1)
+	assert_eq(placer.get_static_instance_inset_lod(bms_id), 0)
+	var names: Array = placer.get_static_instance_live_populations(bms_id)
+	var main_rows := 0
+	var inset_rows := 0
+	for population_name in names:
+		if String(population_name).ends_with("_MainView"):
+			main_rows += 1
+		elif String(population_name).ends_with("_InsetView"):
+			inset_rows += 1
+	assert_eq(names.size(), 2, "no shared row while the views differ: %s" % [names])
+	assert_eq(main_rows, 1, "the main view's level in its main-view twin")
+	assert_eq(inset_rows, 1, "the Inset's level in its Inset-view twin")
+	var parent: Node3D = placed.parent
+	for twin in parent.find_children("*_InsetView", "MultiMeshInstance3D", true, false):
+		assert_eq((twin as MultiMeshInstance3D).layers, INSET_VIEW)
+	for twin in parent.find_children("*_MainView", "MultiMeshInstance3D", true, false):
+		assert_eq((twin as MultiMeshInstance3D).layers & WORLD_BITS, 0)
+		assert_ne((twin as MultiMeshInstance3D).layers & MAIN_VIEW_BITS, 0)
+	# The views converge when the Inset closes: back in the shared population.
+	placer.update_static_lods_for_views(main, 640.0, null, 0.0)
+	names = placer.get_static_instance_live_populations(bms_id)
+	assert_eq(names.size(), 1)
+	assert_false(String(names[0]).ends_with("View"), "the shared population: %s" % [names])
+
+
+func test_a_wire_row_the_main_collect_culls_draws_in_the_inset_only() -> void:
+	var sim := Simulation.new()
+	var placer := _placer()
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup_wire(sim, placer, parent)
+	var row := PackedFloat32Array()
+	row.resize(Simulation.PF_STRIDE)
+	row[Simulation.PF_TYPE_ID] = 6402
+	row[Simulation.PF_WIRE_HANDLE] = 0x2001
+	row[Simulation.PF_KIND] = 255
+	row[Simulation.PF_INDEX] = 0xFFFFFF
+	row[Simulation.PF_ALIVE] = 1
+	row[Simulation.PF_ANIM_STATE] = -1
+	row[Simulation.PF_WPN_ANIM_STATE] = -1
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	var model := presenter.resolve_wire_handle(0x2001)
+	assert_not_null(model)
+	if model == null:
+		presenter.teardown()
+		return
+	var main := _view_camera(Vector2i(640, 480), 90.0, 200.0)
+	var inset := _view_camera(Vector2i(256, 256), 10.0, 200.0)
+	# The main collect culls the row; the Inset's own collect draws it.
+	presenter.set_render_culled(0x2001, true)
+	presenter.set_wire_inset_view(true)
+	presenter.set_render_culled_inset(0x2001, false)
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_false(model.visible, "the main view does not draw the culled row")
+	assert_true(model.is_view_split())
+	assert_gt(model.get_view_twin_count(), 0, "the Inset draws it on its twin")
+	# Both collects cull it: no view draws it, no twin.
+	presenter.set_render_culled_inset(0x2001, true)
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_eq(model.get_view_twin_count(), 0)
+	# The Inset closes and the main collect releases the row: one node again.
+	presenter.set_wire_inset_view(false)
+	presenter.set_render_culled(0x2001, false)
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, null, 0.0)
+	assert_true(model.visible)
+	assert_false(model.is_view_split())
+	presenter.teardown()
+
+
+func _grab(camera: Camera3D) -> Image:
+	for _frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	return (camera.get_viewport() as SubViewport).get_texture().get_image()
+
+
+func test_captures_draw_each_views_own_level() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice capture: run windowed")
+		return
+	var placer := _placer()
+	var placed := _place(placer, 106401)
+	assert_eq(placed.stats.animated, 1)
+	var model := placer.get_placed_models()[0] as ObjectModel
+	var main := _view_camera(Vector2i(160, 120), 90.0, 200.0, MAIN_MASK)
+	var inset := _view_camera(Vector2i(256, 256), 10.0, 200.0, INSET_MASK)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_eq(model.get_active_lod(), 1)
+	assert_eq(model.get_inset_view_lod(), 0)
+	var split_main: Image = await _grab(main)
+	var split_inset: Image = await _grab(inset)
+	# References: the Inset closed and the one node posed at each level.
+	ObjectModel.update_authored_lods_for_views(main, 640.0, null, 0.0)
+	model.set_active_lod(1)
+	var level1_main: Image = await _grab(main)
+	var level1_inset: Image = await _grab(inset)
+	model.set_active_lod(0)
+	var level0_inset: Image = await _grab(inset)
+	assert_ne(level0_inset.get_data(), level1_inset.get_data(),
+			"the two levels draw differently through the Inset (level 1 drops the post)")
+	assert_eq(split_main.get_data(), level1_main.get_data(),
+			"the main capture draws the main view's level 1")
+	assert_eq(split_inset.get_data(), level0_inset.get_data(),
+			"the Inset capture draws its own level 0 on the twin")
+
+
+func test_capture_of_a_main_view_sub_pixel_model_draws_in_the_inset_only() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice capture: run windowed")
+		return
+	var main := _view_camera(Vector2i(160, 120), 90.0, 3000.0, MAIN_MASK)
+	var inset := _view_camera(Vector2i(256, 256), 2.0, 3000.0, INSET_MASK)
+	# The reference with nothing placed.
+	var empty_main: Image = await _grab(main)
+	var empty_inset: Image = await _grab(inset)
+	var placer := _placer()
+	var placed := _place(placer, 106401)
+	assert_eq(placed.stats.animated, 1)
+	var model := placer.get_placed_models()[0] as ObjectModel
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_true(model.is_subpixel_hidden())
+	var split_main: Image = await _grab(main)
+	var split_inset: Image = await _grab(inset)
+	# The reference with the Inset view's own selection as the only view (its
+	# level, drawn by the one node).
+	ObjectModel.update_authored_lods_for_views(inset, 256.0, null, 0.0)
+	assert_false(model.is_subpixel_hidden())
+	var alone_inset: Image = await _grab(inset)
+	assert_eq(split_main.get_data(), empty_main.get_data(), "the main view draws nothing")
+	assert_ne(split_inset.get_data(), empty_inset.get_data(), "the Inset draws the model")
+	assert_eq(split_inset.get_data(), alone_inset.get_data(),
+			"exactly as the one node draws it at the Inset's level")

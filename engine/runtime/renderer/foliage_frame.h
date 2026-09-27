@@ -8,7 +8,7 @@
 // identities that became resident this frame), per-submission uniform state,
 // and both retail wind clocks live here; the embedder keeps GPU uploads,
 // retained scenario-instance RID pooling, and material binding.
-// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 //  Foliage_GenerateModelTileInstances @ 0x600980;
 //  Foliage_RenderDetailPatches @ 0x60a659..0x60a694]
 
@@ -63,28 +63,35 @@ struct FoliageViewInput {
 	// floor and each anchor's water side.
 	std::vector<std::array<float, 3>> silhouette_anchors;
 	std::vector<opennova::foliage::DetailCell> detail_cells;
-	// Env_WaterHeightFixed in world units: the detail passes and the BySide
+	// g_EnvWaterHeightFixed in world units: the detail passes and the BySide
 	// waves split by it.
 	float water_height = 0.0f;
 	// The detail tier's sway phase inputs: the wall clock in milliseconds
-	// (retail GetTickCount) and the weather oscillator's Env_WaveOscRing[0]
+	// (retail GetTickCount) and the weather oscillator's g_EnvWaveOscRing[0]
 	// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60076f].
 	uint32_t time_ms = 0;
 	int32_t wind_osc_ring0 = 0;
 	// The local player's thermal view (foliage::FrameRequest::thermal_view).
 	bool thermal_view = false;
+	// The scene core's detail-pass gate (ScenePassGates::detail_foliage):
+	// false skips both detail passes, so the compile commands no detail draw,
+	// while the BySide waves and the MODEL masks inside them still run
+	// [orig: Terrain_RenderWorldScene @ 0x5C93D5..0x5C93E0 -> the skips
+	// @ 0x5C95BD..0x5C95BF / @ 0x5C965D..0x5C965F]. The cache update the
+	// cells feed is the traversal's (PolyTrn_RenderFrame), gated upstream.
+	bool detail_passes = true;
 };
 
 // The detail tier's c24.x sway phase: the ms clock x 0.003 plus the weather
 // oscillator's ring slot 0 / 655360 (`fild` the GetTickCount word, `fmul`
-// flt_7DE9D4 = 0.003; `fild Env_WaveOscRing`, `fmul` flt_7DE9D0 =
+// flt_7DE9D4 = 0.003; `fild g_EnvWaveOscRing`, `fmul` flt_7DE9D0 =
 // 0x35CCCCCD = 1/655360; `faddp`), uploaded as c24 = (phase, 1, 0, -) with
-// c25 = (0.03, ...) (flt_7C9B90) for Foliage_WindSwayVS:
+// c25 = (0.03, ...) (flt_7C9B90) for g_FoliageWindSwayVS:
 // `mad r0.w, v0.x, c24.y, c24.x` (v0.x = the pre-wind vertex's render x,
 // the Godot Z relative to the patch's sector origin) -> polynomial sine ->
 // `mad r1.z, sin*bend, c25.x, v0.z` (render z = Godot X).
 // [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x6007b4;
-// Foliage_WindSwayVS literal @ 0x7de648]. The clock term folds modulo 2 pi
+// g_FoliageWindSwayVS literal @ 0x7de648]. The clock term folds modulo 2 pi
 // so a long session keeps the sine's float precision — the sine is
 // periodic, nothing observable moves.
 float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0);
@@ -101,7 +108,7 @@ float foliage_detail_wind_sector_origin_z(uint32_t cell_key);
 float foliage_model_wind_offset(double angle);
 
 // The camera's side of the water: retail compares the camera z against
-// Env_WaterHeightFixed with setnl (camera >= water is above).
+// g_EnvWaterHeightFixed with setnl (camera >= water is above).
 // [orig: Terrain_RenderWorldScene @ 0x5c93a1..0x5c93b0]
 bool foliage_camera_above_water(float camera_y, float water_height);
 
@@ -120,7 +127,8 @@ bool foliage_entity_far_side(float entity_y, float camera_y, float water_height)
 // inside the BySide entity waves: the far wave's inside BySide(far, 0)
 // @ 0x5c955f, before the far-side alpha flush @ 0x5c9596; the camera wave's
 // inside BySide(camera, 0) @ 0x5c9638, after the water pass @ 0x5c95dc and
-// before Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderWorldScene].
+// before the scars [orig: Terrain_RenderWorldScene @ 0x5c93a0 (the
+// Scar_DrawBatches call @ 0x5c9658)].
 // They lead the first rung drawn after them, sorted ahead of everything in
 // it by a sorting offset beyond any view depth.
 inline constexpr int kFoliageMaskFarSideRung = kRungAlphaFarSide;
@@ -275,6 +283,18 @@ struct FoliageDrawList {
 // instance blocks, forms per-submission commands with their uniform state,
 // advances both wind clocks, and mirrors the runtime's detail eviction
 // lifecycle. The returned draw list remains valid until the next compile call.
+// A frame compiles once per scene pass on the ONE compiler, so every pass
+// stamps the same detail cache and model pool and advances the same clocks:
+// the main view, then, while the weapon Inset renders, the Inset pass, which
+// runs its own traversal (its own detail cells and cache update), its own
+// Render_TerrainScene (the model scene counter) and its own scene core (its
+// own collector's anchors, BySide masks and detail passes)
+// [orig: Render_ProcessMainSceneFrame -> Render_WeaponInsetScene @ 0x5CA949;
+// Render_WeaponInsetScene: sub_60FF50 @ 0x5C9A2F, Render_TerrainScene
+// @ 0x5C99B7, Terrain_RenderWorldScene @ 0x5C9DE9; the counters
+// Foliage_UpdateDetailCellSlots `add g_FoliageFarSlotFrameCounter, 1`
+// @ 0x601B36 and Render_TerrainScene -> Foliage_AdvanceModelSceneCounter
+// @ 0x610CF7].
 class FoliageFrameCompiler {
 public:
 	// The MODEL-tier view-depth floor for silhouette anchors — the near bound

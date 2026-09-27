@@ -5,13 +5,13 @@ extends RefCounted
 ## loading-screen presentation, progress/session signal wiring, completed-frame
 ## barrier, loader invocation, and deferred settlement. MainGame owns only shell
 ## mode and the decision to reveal or tear down the world.
-## [orig: render_loading_screen @ 0x521d10; LoadingScreen_UpdateAndPresent
+## [orig: Render_LoadingScreen @ 0x521d10; LoadingScreen_UpdateAndPresent
 ## @ 0x586be0; LoadingScreen_ReleaseEffect @ 0x525d52]
 
 signal load_failed(reason: String)
 
 ## Forwarded from the screen when the SP start-mission splash finishes its
-## final background-only frame [orig: show_start_mission_splash returns ->
+## final background-only frame [orig: Game_ShowStartMissionSplash returns ->
 ## LoadingScreen_ReleaseEffect @ 0x525d45].
 signal splash_dismissed
 
@@ -110,7 +110,7 @@ func is_session_load() -> bool:
 	return _load_info != null and _load_info.in_session
 
 
-## The screen's custom-background flag (the retail g_loadscreen_has_custom_bg
+## The screen's custom-background flag (the retail g_LoadScreenHasCustomBg
 ## analog); false once the presentation is down.
 func has_custom_background() -> bool:
 	return _screen != null and _screen.has_custom_background()
@@ -149,8 +149,8 @@ func begin_start_mission_splash() -> bool:
 ## dismissal edge) and fire the one-shot START_MISSION (fire-and-forget;
 ## playback never gates dismissal [orig: play @ 0x5208fd; the exit tests
 ## read only the input state @ 0x520a2d/0x520a36])
-## [orig: show_start_mission_splash @ 0x520820, called @ 0x525d42, gated
-## @ 0x525d38 on g_loadscreen_has_custom_bg + single player]. The headless
+## [orig: Game_ShowStartMissionSplash @ 0x520820, called @ 0x525d42, gated
+## @ 0x525d38 on g_LoadScreenHasCustomBg + single player]. The headless
 ## skip is deliberate shell policy, not witnessed behavior: fixture SP loads
 ## resolve a sidecar image and would otherwise hold the presentation forever
 ## with no input to dismiss it.
@@ -217,7 +217,7 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 	if _root == null:
 		return
 	# A missing sidecar/loadscrn image leaves the screen dark; LoadingScreen owns
-	# that exact texture-miss path [orig: render_loading_screen @ 0x521eb0].
+	# that exact texture-miss path [orig: Render_LoadingScreen @ 0x521eb0].
 	if _layer == null:
 		_layer = CanvasLayer.new()
 		_layer.name = "LoadingLayer"
@@ -235,7 +235,7 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 
 func _on_join_session_identified(info: LoadingScreenInfo) -> void:
 	# The joiner's 0x7B record fills the same session strings retail resolves
-	# before its wire-header world load [orig: parse_server_session_variables
+	# before its wire-header world load [orig: Client_ParseServerSessionVariables
 	# @ 0x5202f0 -> loading title/mission buffers @ 0x51f533/0x51f53a].
 	if _screen != null and _presentation_active:
 		_screen.update_session_info(_root, info)

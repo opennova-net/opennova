@@ -127,6 +127,7 @@ Dictionary HostSessionOptions::to_json_value() const {
 	out["game_type_auto"] = game_type_auto_;
 	out["fat_bullets"] = config_.fat_bullets;
 	out["one_shot_kill"] = config_.one_shot_kill;
+	out["unlimited_vehicles"] = config_.unlimited_vehicles;
 	out["spawn_x"] = get_spawn_x();
 	out["spawn_y"] = get_spawn_y();
 	out["spawn_z"] = get_spawn_z();
@@ -225,6 +226,7 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::INT, send_holdoff_ticks)
 	HOST_SESSION_PROPERTY(Variant::BOOL, fat_bullets)
 	HOST_SESSION_PROPERTY(Variant::BOOL, one_shot_kill)
+	HOST_SESSION_PROPERTY(Variant::BOOL, unlimited_vehicles)
 	HOST_SESSION_PROPERTY(Variant::INT, spawn_x)
 	HOST_SESSION_PROPERTY(Variant::INT, spawn_y)
 	HOST_SESSION_PROPERTY(Variant::INT, spawn_z)

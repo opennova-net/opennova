@@ -46,28 +46,27 @@ hardening, and project health. Divergences from the original engine belong in
       03TR (frame_stats "env" row = WORLD_WEATHER, 2026-08-30) — batch or cache the
       entity-raycast half (the terrain/water half is cheap) without changing the
       witnessed floor semantics; re-measure via `perf_mission_rows`
-- [ ] Env/water/sky/weather singleton `_process` set: re-measure at the ASH_I5A
-      vantage before slicing — the #403 present-side rework (parked idle models,
-      `env_generation_changed`, the staggered per-model light restamp) invalidated
-      the earlier ~1 ms reading. The F3 "Outside shell spans" row went with ADR 0039's
-      hard cut; the metric survives as the `outside_shell` summary
-      the `perf_mission_rows` runtime probe reports, and that is where the next
-      attribution round reads it (the #403 live sessions observed the remaining frame
-      cost concentrated outside the model system after the park/submission gates)
-- [ ] Main-loop order grill: `docs/runtime-architecture.md` cites the exact main-loop /
-      entity-render order from existing RE notes; a focused grill-ida pass to pin
-      `WacScript_AdvanceTick`'s surroundings + the original entity-render function would
-      witness it directly
+- [ ] Environment/water frame-leg cost: re-measure at the ASH_I5A vantage before
+      slicing. The env/water work runs as `GameWorld` frame legs
+      (`godot/src/world/game_world_frame.cpp`: `environment_nodes`, `water`, and the
+      `weather_settle` / `sky_settle` / `water_settle` tail), timed by the Stats window's
+      `env_nodes` (`WORLD_ENV_NODES`) and `water` (`WORLD_WATER`) rows; the #403
+      present-side rework (parked idle models, the staggered per-model light restamp)
+      invalidated the earlier ~1 ms reading. The metric also survives as the
+      `outside_shell` summary the `perf_mission_rows` runtime probe reports, and that
+      is where the next attribution round reads it (the #403 live sessions observed the
+      remaining frame cost concentrated outside the model system after the
+      park/submission gates)
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface) and cpt (a real migration, tracked as its own row below)
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
 - [ ] Converge `engine/formats/cpt`'s bit codec on `engine/base/io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) stays green AND a by-hand retail-corpus byte diff still reports byte-identical CPT output after cpt drops its private copy; the corpus diff is not in ctest, so it has to be run by hand (`engine/CLAUDE.md` § migration exceptions).
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
       recipe) still open: the occlusion decision inspector (portal walk,
       culled entities), rounds, animation (the FP-weapon half is the Weapon
-      window), the pose dump the retired `DebugSnapshotWriter` produced for
-      `pose_replay_probe` / `terrain_seam_probe`, and the `PerfTimeline`
-      ring. Data the shell alone has crosses as VALUE slots or typed records,
-      never Godot objects.
+      window), the pose dump the retired `DebugSnapshotWriter` produced, and
+      the last mission load's `LoadTimeline` (`GameWorld::last_load_timeline`).
+      Data the shell alone has crosses as VALUE slots or typed records, never
+      Godot objects.
 - [ ] World-space overlays not yet returned as window layers (the Game-view
       layer framework is `overlay_canvas.h`; entity selection/labels, AI, rays,
       contacts and hit meshes landed): collision boxes and the player
@@ -75,7 +74,7 @@ hardening, and project health. Divergences from the original engine belong in
       markers, particle effect boxes.
 - [ ] Stats window info cells not carried over from the retired page (they read
       Godot objects at refresh): the a11y flag on Flush tail,
-      fire/destruction/throwable/wire present stats, occlusion counts (`occl`).
+      fire/destruction/throwable present stats, occlusion counts (`occl`).
       Each returns as a VALUE slot fed by the shell sampler that owns the
       source (the draws/objects/primitives/nodes and the live effect counts
       are the Render and Particles windows' now).

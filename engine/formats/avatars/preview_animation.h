@@ -3,7 +3,7 @@
 // The menu player-preview animation constants — witnessed values the shell's
 // avatar preview device animates with.
 //
-// Preview motion [orig: update_player_preview_animation @ 0x55dba0]: a damped
+// Preview motion [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0]: a damped
 // zoom on hover (blend += (target - blend) * 0.05 per ~62.5 Hz tick) plus a
 // continuous idle rotation (0x800000 BAM per frame; BAM angles map 2^32 =
 // 360 deg) that gains a sinusoidal sway on hover (sin(GetTickCount * 0.0008)

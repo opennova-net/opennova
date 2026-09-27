@@ -33,6 +33,8 @@ inline int next_hud_color_index(int index) {
 // @0x550339, default 0 @0x54d3d8, applied to the live level @0x55154d, saved
 // @0x54c80d; the level drives CRenderState_SetLayerVisibility @0x59B0F0; the
 // level-3 early-out @0x5A80C4]
+// kHudDetailLevelMax is the AUTHORED range 0..3 (one visibility bit per level
+// in each HUDDECLUT mask) and the huddetail cycle's wrap point, not a clamp.
 inline constexpr int kHudDetailLevelDefault = 0;
 inline constexpr int kHudDetailLevelMax = 3;
 inline constexpr int kHudDetailLevelBlank = 3;
@@ -41,7 +43,11 @@ inline constexpr int kHudDetailLevelBlank = 3;
 // layerIndex, edx` @0x55154d), so a hand-edited cfg level outside 0..3 reaches
 // CRenderState_SetLayerVisibility unaltered and blanks every gated element until
 // the huddetail cycle wraps it (hud_declutter.cpp rebuild models the 8-bit shift).
-// The `huddetail` cycle (dispatch code 19): 0 -> 1 -> 2 -> 3 -> 0.
+// The `huddetail` cycle (dispatch code 19): 0 -> 1 -> 2 -> 3 -> 0. The compare
+// is signed and runs on the SUM, so a level the cfg parked above 3 wraps to 0
+// on the first press. [orig: Input_HandleActionBinding_0 @ 0x4E0601..0x4E0624:
+// `mov eax,layerIndex; add eax,ebx; cmp eax,3; mov layerIndex,eax; jle short;
+//  xor eax,eax; mov layerIndex,eax`]
 inline int next_hud_detail_level(int level) {
 	return level >= kHudDetailLevelMax ? 0 : level + 1;
 }

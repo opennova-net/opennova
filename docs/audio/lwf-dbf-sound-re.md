@@ -113,7 +113,7 @@ The mission co-named `.lwf` is NOT one of the six slots: `DialogSystem_Init @ 0x
 (falling back to `<base>.pwf` @ 0x44e7f5) into the dedicated dialog bank @ 0xA8A348 — only when
 the `.dbf` exists. The menu UI has its own banks: `menu.lwf` loads at profile-selector init
 (@ 0x5613bf into `g_MenuSoundBank @ 0x25DC3E0`), and menu XML elements add-ref further banks by
-name through a 212-byte-entry collection (`sound_bank_collection_add_or_ref @ 0x652b40`, called
+name through a 212-byte-entry collection (`SoundBank_CollectionAddOrRef @ 0x652b40`, called
 from `CUIElement_ParseXMLDefinition @ 0x648ada`) — menu-slice grill scope.
 
 `MissionAudio` loads one merged chain instead: co-named bank first (it carries the dialog
@@ -230,7 +230,7 @@ Existing shutdown caveats remain.
 A WAC mission script triggers voice/wav lines separately from the BMS `PlayWavList`
 dialog system. The `wave` and `pwave` commands both target `Wac_PlayScriptedVoiceWave`:
 
-- guards on `g_local_player_entity` (no-op without a local player, like
+- guards on `g_LocalPlayerEntity` (no-op without a local player, like
   `Dialog_PlayByName`);
 - `AudioChannel_ResetByHandle(dword_C6EC30)` — **resets the single scripted-voice
   channel first**, so a new `wave` *interrupts* the previous one (it is NOT a queue) —
@@ -241,7 +241,7 @@ dialog system. The `wave` and `pwave` commands both target `Wac_PlayScriptedVoic
 - `Audio_LoadWavFileFromArchive @ 0x766480` loads the named `.wav` from the archive (RIFF
   fmt/data, 8-bit→signed / 16-bit / IMA-ADPCM, `'AOA1'`), then plays it at
   `volume = (voiceVolume * 0xD2 + 0x80) >> 8`, pitch 1.0 (0x10000) — `0x24d20c8` is a
-  settings-written volume option (written by `apply_session_settings_to_globals
+  settings-written volume option (written by `Game_ApplySessionSettingsToGlobals
   @ 0x5515a2` and the in-game options dialog `@ 0x554f83`; one slot below the SFX
   option `g_SoundVolumeOption @ 0x24D20CC`), so the ~0.82 factor rides the option→bus
   mapping our reimpl makes (D-SND-8).
@@ -276,7 +276,7 @@ first-match search of the six loaded bank slots (renamed 2026-07-10; the kong na
 XML-loaded layer whose category names include the unrelated `Soundloop_1..7` string table
 @ 0x7d0788). Slot USE is per entity class: for `envsnd` markers slots 1..4 are the
 time-of-day variants (next section); vehicles read slots 1..3 as skid/spray/dust loop sets
-(`update_vehicle_effect_emissions @ 0x528f20` reads +0x82C/+0x830/+0x834), the movement
+(`VehicleEffect_UpdateEmissions @ 0x528f20` reads +0x82C/+0x830/+0x834), the movement
 driver reads 1..3 (`Entity_ProcessMovementSoundEffects @ 0x5294a0`). Entity-attached sounds
 use a separate composite-name path (`SoundProfile_FindByEntityAndType @ 0x528180`,
 `"<EntityDefName>_<SoundType>"`).
@@ -356,7 +356,7 @@ updaters (all slots 7-29 + 15/16, witnessed in
 `SoundProfile_FindByEntityAndType @ 0x528180` is a SEPARATE mechanism —
 and NOT def-name-keyed (the earlier `"<DefName>_<Type>"` gloss was wrong,
 corrected by the 2026-08-11 decompile): it walks the 9-entry {suffix, type}
-pair table `g_entity_sound_type_table @ 0x82F548` (0 `DEATH`,
+pair table `g_EntitySoundTypeTable @ 0x82F548` (0 `DEATH`,
 1 `MEDIC_REQUEST`, 2 `SURFACE_BREATH`, 3 `SURFACE_GASP`, 4 `WATER_GAG`,
 5 `DEATH_K`, 6 `RECRUIT_ACCEPT`, 7 `RECRUIT`, 8 `TANK_COMAND`) and composes
 `sprintf("%s_%s", Entity_GetBodyModelPrefix(entity), suffix)` — the prefix is
@@ -374,12 +374,12 @@ consumed by the death edge's `is_local_player` branch.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-10 | FIXED 2026-09-11 (own-channel reuse added 2026-09-12): entity-sourced refires run the finite 26-channel allocator keyed on the source entity (`audio::oneshot_sound_id`: the packed handle, BMS-id fallback), carried by `ReadyFireSound` and the slot-sound drain into the open; the exclusive-voice shortcut is removed | the open scores a channel already playing the same wave for the same entity at ZERO, so a refire retakes its OWN channel and kills the previous instance instead of stealing the quietest other one (`audio_find_and_open_channel @ 0x766F46` / `@ 0x766F8E`; the entity rides `Sound_Play3DPositional @ 0x527E4A` -> `SoundBank_PlayTriggerEntries @ 0x75CE4F` -> the open `@ 0x75CFD4` / `@ 0x75CFE3`); id-less plays (interface `@ 0x527C04`, weather `@ 0x527BB4`, delayed slots `@ 0x52937B`) steal normally | Supersedes the 2026-08-29 permanent mechanism choice; ctests `audio_oneshot_play` + `audio_fire_sound_peer_gate`, GUT `sound_runtime_test` |
+| D-SND-10 | FIXED 2026-09-11 (own-channel reuse added 2026-09-12): entity-sourced refires run the finite 26-channel allocator keyed on the source entity (`audio::oneshot_sound_id`: the packed handle, BMS-id fallback), carried by `ReadyFireSound` and the slot-sound drain into the open; the exclusive-voice shortcut is removed | the open scores a channel already playing the same wave for the same entity at ZERO, so a refire retakes its OWN channel and kills the previous instance instead of stealing the quietest other one (`Audio_FindAndOpenChannel @ 0x766F46` / `@ 0x766F8E`; the entity rides `Sound_Play3DPositional @ 0x527E4A` -> `SoundBank_PlayTriggerEntries @ 0x75CE4F` -> the open `@ 0x75CFD4` / `@ 0x75CFE3`); id-less plays (interface `@ 0x527C04`, weather `@ 0x527BB4`, delayed slots `@ 0x52937B`) steal normally | Supersedes the 2026-08-29 permanent mechanism choice; ctests `audio_oneshot_play` + `audio_fire_sound_peer_gate`, GUT `sound_runtime_test` |
 | D-SND-11 | FIXED 2026-08-13: the pick reads the live `Entity::ground_target` — the `entity+0x28 groundEntity` link the collision resolve's ground probe stores unconditionally every tick (null on a miss) — and the terrain-cache fallback (no collision world) clears it, mirroring the probe's null store. The never-set `InfantryState::standing_on_entity` mirror is deleted | `entity+0x28 groundEntity` (written by the ground probes, `Entity_RaycastGroundHeightAndObject @ 0x414320` — the unconditional `+0x28` store `@ 0x414370`; the resolver call `@ 0x525fd0`) selects `SS*FootOBJ` when standing on an entity; the sound block runs BEFORE the tick's resolve in both bodies (org1 `@ 0x4bf23e` precedes the resolve tail `@ 0x4bf7b8`), so the read is last tick's link — matched | a single generic OBJ pair, no per-object material (a wooden dock plays the walker's `SS*FootOBJ` — retail behavior); ctest `slot_sound` (`test_foot_obj_pick`: pick, water>OBJ>snow order, fallback staleness clear) |
 | D-SND-12 | FIXED 2026-08-15: both items.def profiles resolve, and player slot sounds choose the female profile when the reset-stable `CharacterTraitsTable` marks the entity's packed avatar id female; unknown ids and NPCs stay on primary | the character entity's female byte picks def+2152 `@ 0x52831c` | `AvatarDatabase` projects packed character id + `combo.head.sex` through `Simulation::set_character_avatar_database`; `slot_sound` pins female selection, unknown fallback, and the NPC packed-id collision guard, while `avatars_data_test` pins the retail projection |
 | D-SND-13 | SndProf.def parses per mission load off the mission resource root | one boot-time load + expansion reloads | same file, same table; no observable difference — PERMANENT 2026-08-29 (ADR 0022 register) |
 | D-SND-14 | FIXED 2026-08-11: the local player's death edge emits the body-model composite (`"<prefix>_DEATH"` / `"_DEATH_K"` from the entity anim-slot byte) as a named `SoundSlotEvent`; NPCs keep slots 7/8 | org2 plays `SoundProfile_FindByEntityAndType(entity, 5/0)` `@ 0x4b4c61` — `Entity_GetBodyModelPrefix @ 0x5280F0` + the `@ 0x82F548` suffix table, bank-name lookup, miss = id-0 silence with no slot fallback | ported as `audio::compose_entity_sound_set` + the death-edge `is_local_player` branch; the by-name drain reproduces the miss-silence (ctest `slot_sound`) |
-| D-SND-15 | FIXED 2026-08-12 (premise corrected): `surface_type_at_fixed` walks the mission `.til` array after the charmap sample — the FIRST tile whose inclusive 16x16-unit square contains the position returns the tileset `.TSD` table's entry for its tile index (`SurfaceTypeMap::tiles/tile_surface`; Simulation parses the same til0 bytes the S2C 0x45 stream carries and probes `<tilestrip base>.tsd` at terrain install; `engine/formats/til/til_tsd.*` is the structural INDEX_-row parser incl. the CRLF tail-byte clobber) | the walk `@ 0x6065ca-0x606601` returns `byte_319F7D8[entry+8]` `@ 0x60660c`; the table is memset-0 at texture init `@ 0x60c5c9` and filled only from `<tileset>.TSD` `INDEX_<n> <TSD_NAME>` rows (`Terrain_ParseTsdRow @ 0x604c00` over the 20-name table `@ 0x8493f0`; probe `@ 0x60c5d3`; the `.TSD` pairing off the tilestrip copy `@ 0x610a1c`). **No shipped JO install carries a `.TSD`**, so retail tile-covered positions read 0 = TSD_NULL — the old "reads the underlying charmap" premise described OUR divergence, not a retail fallback | ctests `til_tsd` (parser) + `slot_sound` (walk, inclusive edges, first-wins, no-table -> 0, early returns precede the walk). The BMS tile-set-name override of the tilestrip pair (`Bms_TileSetName @ 0xa762e8`, header +0x118; `Terrain_LoadEnvironmentConfig` copies it over the atlas slot `@ 0x6109c8..0x6109e2` and the TSD slot `@ 0x610a00..0x610a1c`) is PORTED 2026-09-24 ("Draw .til tiles from the mission's BMS tile set": `MissionInfo.tile_set` -> `formats/trn` `trn_mission_tilestrip` -> the `TerrainData` tilestrip, so the `.TSD` surface table follows the mission; ctest `trn_config_roundtrip`). Residue: the reimpl bounds the name walk at the 20 real entries and skips OOB INDEX_ slots where retail reads adjacent data / writes out of bounds |
+| D-SND-15 | FIXED 2026-08-12 (premise corrected): `surface_type_at_fixed` walks the mission `.til` array after the charmap sample — the FIRST tile whose inclusive 16x16-unit square contains the position returns the tileset `.TSD` table's entry for its tile index (`SurfaceTypeMap::tiles/tile_surface`; Simulation parses the same til0 bytes the S2C 0x45 stream carries and probes `<tilestrip base>.tsd` at terrain install; `engine/formats/til/til_tsd.*` is the structural INDEX_-row parser incl. the CRLF tail-byte clobber) | the walk `@ 0x6065ca-0x606601` returns `byte_319F7D8[entry+8]` `@ 0x60660c`; the table is memset-0 at texture init `@ 0x60c5c9` and filled only from `<tileset>.TSD` `INDEX_<n> <TSD_NAME>` rows (`Terrain_ParseTsdRow @ 0x604c00` over the 20-name table `@ 0x8493f0`; probe `@ 0x60c5d3`; the `.TSD` pairing off the tilestrip copy `@ 0x610a1c`). **No shipped JO install carries a `.TSD`**, so retail tile-covered positions read 0 = TSD_NULL — the old "reads the underlying charmap" premise described OUR divergence, not a retail fallback | ctests `til_tsd` (parser) + `slot_sound` (walk, inclusive edges, first-wins, no-table -> 0, early returns precede the walk). The BMS tile-set-name override of the tilestrip pair (`g_BmsTileSetName @ 0xa762e8`, header +0x118; `Terrain_LoadEnvironmentConfig` copies it over the atlas slot `@ 0x6109c8..0x6109e2` and the TSD slot `@ 0x610a00..0x610a1c`) is PORTED 2026-09-24 ("Draw .til tiles from the mission's BMS tile set": `MissionInfo.tile_set` -> `formats/trn` `trn_mission_tilestrip` -> the `TerrainData` tilestrip, so the `.TSD` surface table follows the mission; ctest `trn_config_roundtrip`). Residue: the reimpl bounds the name walk at the 20 real entries and skips OOB INDEX_ slots where retail reads adjacent data / writes out of bounds |
 
 ## Ground vehicle movement sounds (grilled 2026-07-29)
 
@@ -438,12 +438,12 @@ command becomes positive; either edge plays sound-profile slot 32
 zero-calls `Entity_ProcessMovementSoundEffects` (`@ 0x435709..0x435716`), clearing the
 forward/reverse lanes through zero registrations, then plays slot 31
 (`enginestop`) on the departing OCCUPANT only while the occupant's eye
-(`+0x74` + Z) is strictly above `Env_WaterHeightFixed` (`@ 0x43571B..0x43573E`)
+(`+0x74` + Z) is strictly above `g_EnvWaterHeightFixed` (`@ 0x43571B..0x43573E`)
 and releases the `+0x1CC` smoke emitter (`@ 0x435746..0x435759`) before clearing
 the primary occupant [orig: `Entity_DetachFromVehicle @ 0x4355f0`]. The detach
 writes no `+0x318` bit, so the mover's own leave edge plays a second slot 31 on
 the hull at Z + 0x18000 above water the next tick (tank `@ 0x48ADE9..0x48AE33`,
-cveh `@ 0x48D3DA..0x48D421`). `entity_detach_from_parent @ 0x4949D0` has no
+cveh `@ 0x48D3DA..0x48D421`). `Entity_DetachFromParent @ 0x4949D0` has no
 references and is dead. (Corrected 2026-09-22; the earlier text gated the stop on
 the vehicle's Z and the port cleared the latch, suppressing the second stop.)
 
@@ -478,7 +478,7 @@ wire lane — crossed frames report in order and are never coalesced, a fresh
 clip fires frame 0, a mid-clip attach back-fires nothing — alongside
 `capsule_bottom_at` for the foot-level dip `[orig: the AnimMap out[3] cell
 @0x4b77d3]`. (Grilled 2026-08-19: retail's own consume is a per-TICK sample of
-the FLOOR keyframe's word — `g_animEventTriggerBits = out[5]` `[orig:
+the FLOOR keyframe's word — `g_AnimEventTriggerBits = out[5]` `[orig:
 @0x40b8a3; unlerped read @0x40b32f]` — gated to alternating ticks `[orig: org1
 odd @0x4bf144 / org2 even @0x4b76e6]`, which at 30fps-authored vs the 62 Hz
 tick fires each entered frame once; that per-tick form IS the authority path.
@@ -590,7 +590,7 @@ attached/vehicle emitters re-register per tick through the direct legs
 caller defines the cadence.
 
 **Time of day (`Entity_CalcTimeOfDayRegion @ 0x408110`).** The env clock
-(`Env_GetTimeOfDayHoursQ16 @ 0x57d5b0` = `Env_CurTimeFixed24 >> 8`, hours Q16.16) is cut at
+(`Env_GetTimeOfDayHoursQ16 @ 0x57d5b0` = `g_EnvCurTimeFixed24 >> 8`, hours Q16.16) is cut at
 4h / 10h / 17h / 21h into regions 0..3; the intervals are OPEN at the low cut (unsigned
 range-check idiom starting one tick past each cut @ 0x408175/0x4081b0), so the exact cut
 instant classifies as night at full blend for that single tick. Each region fades IN over
@@ -609,7 +609,7 @@ slot per LAYER of the registered set. Param block: `{+0 entity, +4 set, +8 pos p
 (hi byte = 0..255), +26 flag, +27 slot type}`. Registering with pitch 0 OR volume 0 CLEARS
 the (entity, type) slots — the witnessed unregister (`SoundEmitter_ClearByEntityAndSlot
 @ 0x527a50`; `SoundEmitter_ClearAllByEntity @ 0x527a90` on entity death). The MP-session
-gate `g_napi_np_ctx.is_mp_session_peer` guards registration like the rest of the sound
+gate `g_NapiNPCtx.is_mp_session_peer` guards registration like the rest of the sound
 stack (our D-MUS-SPGATE decision applies: we play in ALL sessions).
 
 **The per-frame mix (`SoundEmitter_UpdateAndMixTop8 @ 0x5284a0`, called once per RENDER
@@ -642,7 +642,7 @@ pan amplitude); returns `(volume << 8) | pan`. `g_SoundMasterFadeQ24 @ 0x85A3E4`
 mission-start fade ramp to 0xFF0000 (so steady state = `(vol * 255) >> 8`), stepped by
 `Audio_UpdateListenerPosition @ 0x527960`, which also maintains the listener position/yaw/
 velocity globals and the underwater flag (`g_SoundListenerUnderwater @ 0x33429A8` = listener
-Z under `Env_WaterHeightFixed`) that HALVES volume and pan (@ 0x75ca7d). The two-radius
+Z under `g_EnvWaterHeightFixed`) that HALVES volume and pan (@ 0x75ca7d). The two-radius
 model in the emitter path (@ 0x528667..0x5286df): `min_distance` set and `d >= min` runs the
 falloff REBASED over min..falloff; `d < min` runs the rising proximity fade `(d/min)^2`;
 no min runs plain 0..falloff; BOTH radii zero is silent as an emitter (the packed volume
@@ -716,10 +716,10 @@ slots / crossfade), and the `dialog_vs_ambient` probe's bed-vs-dialog gate
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-6 | **STALE ROW CORRECTED 2026-08-20 — no longer a divergence.** `MissionAudio` runs the TRANSIENT model: at most `MIX_CHANNELS` = 8 physical voices (the ambient Top8 budget, mixer channels 4..11 of retail's 26 — channel 0 is the scripted voice, 1/2 the SBF music split, 3 the DBF dialog, 12..25 the trigger-set one-shots: `audio_find_and_open_channel @0x766E80` scans from 12; witnessed 2026-09-10); a drop-out `stop()`s, nulls its stream and releases the slot; a re-entrant is rebound and `play()`ed from the wave start. The native loop model: `AudioChannel_LoadNextFrame @0x7BF0F9` reloads the mixing block from `g_AudioChannelActiveParameters @0x33458B0` when the per-channel 16-entry ring is empty; `AudioChannel_Open @0x7668F0` sets Active = `aAud1` (a one-shot ends into silence at wrap) while `sub_766AA0` sets Active = the descriptor (ambient/emitter channels loop natively) — that ring drain IS the "sub_766AA0 queue consumer" the record left unwalked. The old "persistent per-marker players; a re-entrant RESUMES its loop position" text described the pre-D-SND-16 architecture and survived the port that replaced it | transient emitter slots re-registered per tick; a drop-out's channel is STOPPED and a re-entrant reopens from the wave start (`AudioChannel_ResetByHandle @ 0x767160` / `AudioChannel_OpenSlotChecked @ 0x767060`) | MATCHES. Pinned by GUT `mission_audio_test` ("a dropout releases its bound stream"; the eight-candidate replacement). The row's original open question stands: whether a retail channel loops NATIVELY off an AUD1 descriptor flag or is re-registered per wrap is still unwalked here. Lead worth following, NOT verified: a second-hand report places the per-wrap pending-block reload inside the mix kernel `sub_7BD671 @0x7BD671`; the kong carries no banner at the cited offset, so this needs an IDA pass before it is written down as witnessed. |
+| D-SND-6 | **STALE ROW CORRECTED 2026-08-20 — no longer a divergence.** `MissionAudio` runs the TRANSIENT model: at most `MIX_CHANNELS` = 8 physical voices (the ambient Top8 budget, mixer channels 4..11 of retail's 26 — channel 0 is the scripted voice, 1/2 the SBF music split, 3 the DBF dialog, 12..25 the trigger-set one-shots: `Audio_FindAndOpenChannel @0x766E80` scans from 12; witnessed 2026-09-10); a drop-out `stop()`s, nulls its stream and releases the slot; a re-entrant is rebound and `play()`ed from the wave start. The native loop model: `AudioChannel_LoadNextFrame @0x7BF0F9` reloads the mixing block from `g_AudioChannelActiveParameters @0x33458B0` when the per-channel 16-entry ring is empty; `AudioChannel_Open @0x7668F0` sets Active = `g_AudioSilentAud1Header` (a one-shot ends into silence at wrap) while `sub_766AA0` sets Active = the descriptor (ambient/emitter channels loop natively) — that ring drain IS the "sub_766AA0 queue consumer" the record left unwalked. The old "persistent per-marker players; a re-entrant RESUMES its loop position" text described the pre-D-SND-16 architecture and survived the port that replaced it | transient emitter slots re-registered per tick; a drop-out's channel is STOPPED and a re-entrant reopens from the wave start (`AudioChannel_ResetByHandle @ 0x767160` / `AudioChannel_OpenSlotChecked @ 0x767060`) | MATCHES. Pinned by GUT `mission_audio_test` ("a dropout releases its bound stream"; the eight-candidate replacement). The row's original open question stands: whether a retail channel loops NATIVELY off an AUD1 descriptor flag or is re-registered per wrap is still unwalked here. Lead worth following, NOT verified: a second-hand report places the per-wrap pending-block reload inside the mix kernel `sub_7BD671 @0x7BD671`; the kong carries no banner at the cited offset, so this needs an IDA pass before it is written down as witnessed. |
 | D-SND-7 | **PORTED 2026-07-16** (reviewed 2026-07-17): `CollisionWorld::sound_occlusion_inflate` (engine/runtime/world/collision_los.cpp) + `terrain_raycast_los_clear` (engine/runtime/terrain_query) implement the compounding two-ray form; `Simulation.sound_occlusion_distance_q16` feeds the emitter mix (`MissionAudio.tick`, rays only for markers already audible at the raw distance) and the one-shot cull recheck + volume snapshot (`SoundBank.play_oneshot_3d`). Authored marker ids, remote-fire ids, and the local-player sentinel now preserve source exclusion and the both-indoors terrain bypass. 2026-08-26: the source identity resolves through `Simulation::handle_for_bms_id` (an index rebuilt on the registry spawn serial) instead of a whole-registry scan per audible marker per frame, and a static's blink/indoors state is no longer refreshed at this query: it rides the pool stagger think in `AiSystem` (one cohort of eight statics per tick, age 62/-8, i.e. every 72 ticks per static) `[orig: Entity_UpdateAllEntities @ 0x4c2299..0x4c22ba -> Entity_BuildProximityList @ 0x4b3dc0]`, the same walk that runs a destroyed enclosing building through the marker's indoors state. | compounding two-LOS-ray distance inflation (`Sound_ApplyOcclusionDistance @ 0x529970` — the corrected form above; terrain leg + building-only entity leg with the -0x8000 radius-slot reuse on ray 2) in both the emitter mix and positional one-shots | evidence: `collision` ctest sound-occlusion cases (both-blocked/one-blocked/clear/clamp), `collision` nearest-point bias, `terrain_raycast` LOS cases, and GUT ambient/one-shot provider wiring; the D-SND-9 plane-flag residue closed 2026-08-12. |
 | D-SND-9 | FIXED 2026-08-12: the BPLN flags word rides the collision feed (`CollisionPlane::flags`, fed by `collision_model_from_3di` from the parse's retained `+0` word) and the entity-leg clip selects per plane — a nonzero flags BYTE substitutes `max(radius, 0)` for the raw radius | flagged planes clamp the clip radius at 0, so only flag-0 planes read 0.5u thin on ray 2 (`@ 0x538d00` byte test; flagged arm subtracts the clamped register `@ 0x538d4b`, flag-0 the raw arg `@ 0x538dd6`) | ctest `collision` `test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink` pins the exact inflate split (flag-0 thin slab clears ray 2; flagged stays solid). The LOS terrain callback reads the witnessed nearest 0.5u-quantized texel. |
-| D-SND-8 | master fade ramp, underwater vol/pan halving, options SFX volume, and the bearing-byte pan map to reimpl territory (Ambient bus volume, Godot's spatial panner); doppler (emitter/listener velocity feed) unported | `g_SoundMasterFadeQ24 @ 0x85A3E4` (255/256 steady), `g_SoundListenerUnderwater @ 0x33429A8` halving @ 0x75ca7d, `g_SoundVolumeOption @ 0x24D20CC` per channel write, atan2 bearing pan @ 0x5289c0, `calculate_3d_sound_attenuation @ 0x527f60` doppler | reimpl playback/bus routing (not grillable address-by-address); the underwater duck and doppler are candidates once an underwater/vehicle pass needs them. |
+| D-SND-8 | master fade ramp, underwater vol/pan halving, options SFX volume, and the bearing-byte pan map to reimpl territory (Ambient bus volume, Godot's spatial panner); doppler (emitter/listener velocity feed) unported | `g_SoundMasterFadeQ24 @ 0x85A3E4` (255/256 steady), `g_SoundListenerUnderwater @ 0x33429A8` halving @ 0x75ca7d, `g_SoundVolumeOption @ 0x24D20CC` per channel write, atan2 bearing pan @ 0x5289c0, `Sound_Calculate3DAttenuation @ 0x527f60` doppler | reimpl playback/bus routing (not grillable address-by-address); the underwater duck and doppler are candidates once an underwater/vehicle pass needs them. |
 | D-SND-16 | **PORTED 2026-07-28** (`engine/runtime/audio` `AmbientMixer` + the `AmbientMixer` binding): marker eval/registration runs on the logic-tick clock through the witnessed `tick & 7` cohort walk (each placed marker every 8th tick), layers register into a faithful 767-slot transient table with TICK-unit keep-alives (marker default 10; vol-0 register clears), and the per-render-frame call is only the live-slot mix — lazy range cache, axis+euclid cull, one lazy LOS per raw-audible marker, member-0 two-radius volume, loudest-first ranking. `MissionAudio` keeps stream resolution, decode-failure fallback, and the eight persistent voices (D-SND-6/8); a diagnostic host with no ticking runtime can free-run an autonomous 62.5 Hz eval clock (the weather world-driven/autonomous split). The curve statics (`calc_distance_volume`/`emitter_layer_volume`/`crossfade_volume_byte`/`time_of_day_region`) moved to engine/runtime/audio; the GDScript seams delegate | registration and mix on split clocks (§driver cadence): the pool-2 `tick & 7` stagger @ 0x4c225a (attached emitters per tick), tick-unit lifetimes, the per-frame render-lane mix @ 0x521341 | evidence: `ambient_mixer` ctest (curve integer pins, cohort stagger, tick-lifetime expiry/revisit, region-flip overlap, same-set suppress, occlusion-once, ranking, vol-0 clear, autonomous clock); GUT `mission_audio_test.gd` / `sound_runtime_test.gd` on the new seam. Measured A/B (ASH_I5A spawn, 143 markers, 10 s windows, same box): the world tick's audio leg 1.19 ms -> 0.21 ms avg per frame (p95 1.41 -> 0.29 ms); frame wall 10.4 -> 8.8 ms. Reimpl residues: candidate-id tie-break for deterministic membership (retail ties by slot order), the range cull compares reimpl-float axes (Q16 at the curve boundary), and min-only layers cull like retail (zero JOX layers are min-only). Was: the full marker x layer eval every render frame in GDScript — the measured 1.2-1.5 ms/frame F3 "Audio" row. |
 | D-SND-18 | FIXED 2026-09-18: the world selects the live region/building/mission value and Godot no longer invents room size from it | Original preset selection and counterfactual mixer output executed for all 20 indices; see the reverb witness below | Selector test and 40 original mixer cases pass; this proves the preset boundary, not full audio-backend equivalence. |
 | D-SND-19 | **FIXED 2026-09-13:** one-shot planning filters layers by the live listener view before member selection and pitch randomness. Residual, documented not ported: retail performs the two ROL3 pitch draws only when the picked member's wave handle is non-null (`@0x75CE1A` guards the set jitter `@0x75CE81` and member jitter `@0x75CEBA`); the planner draws them for every admitted layer with a member because the shell resolves the wave later. Shipped banks resolve every wave, so the stream matches on real data | `SoundBank_PlayTriggerEntries @ 0x75CCD0`, view gate `@0x75CD54`; internal/external bits 2/4 and optional set-bit0 / layer-bit0x20 match; null-wave guard `@0x75CE1A` | `audio_oneshot_play` covers neutral/absent view bits, special set gating, suppressed cursor/RNG state, and shipped GS_TANK/GF_TANK_RL; GUT `sound_runtime_test` verifies live Simulation view changes through SoundBank |
@@ -751,7 +751,7 @@ source), `0x766735` (AOA1 device-relative pitch ratio / 44100 device rate). IDB 
 
 **IDB changes (2026-07-28 cadence session):** renamed `sub_43B400 ->
 Audio_UpdateListenerFromView @ 0x43b400` (the render-cb listener leg: cinematic/fade
-camera transform else `g_view_pos_x`, MP-session-gated); cadence witness comments at
+camera transform else `g_ViewPosX`, MP-session-gated); cadence witness comments at
 `0x4a8080` (pool-2 stagger + tick-unit lifetimes), `0x5284a0` (`current_tick` time
 base), `0x521310` (the "Game Loop" mode-table witness + misnomer note), and the class
 table `0x82abc8` (layout + `def+0x158 -> entity+0x1C4` plumbing). Applied with
@@ -919,7 +919,7 @@ at the dialog module's fixed frequency, with no set/member pitch composition
 and none of its two ROL3 draws (the port's per-layer member pick still draws
 for random layers: the older, separately tracked selector divergence).
 [orig: SoundBank_PlayTriggerEntries @ 0x75CCD0;
-audio_find_and_open_channel @ 0x766E80, own-channel score @ 0x766F46 / @ 0x766F8E;
+Audio_FindAndOpenChannel @ 0x766E80, own-channel score @ 0x766F46 / @ 0x766F8E;
 Sound_Play3DPositional @ 0x527E4A; Dialog_LoadAudioClip @ 0x44DE8B ->
 AudioChannel_PlaySound, the name lookup @ 0x44DD0B -> @ 0x75BDD4]
 

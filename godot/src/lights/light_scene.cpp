@@ -89,6 +89,30 @@ void collect_entity_light_models(ObjectModel *model, std::vector<ObjectModel *> 
 			collect_entity_light_models(part, out);
 }
 
+// The same entity's models the weapon Inset pass draws through their own
+// twins; a model it draws on its node shares the main pass's selection.
+void collect_inset_entity_light_models(ObjectModel *model, std::vector<ObjectModel *> &out) {
+	if (model->get_view_twin_count() > 0) out.push_back(model);
+	for (int i = 0; i < model->get_child_count(); ++i)
+		if (ObjectModel *part = Object::cast_to<ObjectModel>(model->get_child(i)))
+			collect_inset_entity_light_models(part, out);
+}
+
+// A building's per-ROBJ rows in one view: the parts its node draws, or the
+// parts its Inset twins draw (the ROBJ alone selects; the bounds are unread).
+void collect_view_draw_parts(ObjectModel *model, bool inset_view,
+		std::vector<ObjectModel::PointLightDrawPart> &out) {
+	if (!inset_view) {
+		model->collect_point_light_draw_parts(out);
+		return;
+	}
+	std::vector<int32_t> robjs;
+	model->collect_inset_point_light_draw_parts(robjs);
+	out.clear();
+	for (const int32_t robj : robjs)
+		out.push_back(ObjectModel::PointLightDrawPart{robj, AABB()});
+}
+
 void fill_flicker(opennova::renderer::LightFlickerInputs &flicker, int p_time_ms,
 		const Weather *p_weather) {
 	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
@@ -429,6 +453,35 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 		const PackedVector3Array &p_entity_positions,
 		const PackedInt32Array &p_entity_bound_radii_q16) {
+	return select_model_frame(p_models, p_owner_entities, p_interior_owners,
+			p_interior_sections, p_robj_scoped, p_ambient_scale, p_time_ms, p_weather,
+			p_entity_positions, p_entity_bound_radii_q16, false);
+}
+
+int LightScene::render_inset_model_frame(const TypedArray<Node3D> &p_models,
+		const PackedInt64Array &p_owner_entities,
+		const PackedInt64Array &p_interior_owners,
+		const PackedInt32Array &p_interior_sections,
+		const PackedByteArray &p_robj_scoped,
+		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
+		const PackedVector3Array &p_entity_positions,
+		const PackedInt32Array &p_entity_bound_radii_q16) {
+	return select_model_frame(p_models, p_owner_entities, p_interior_owners,
+			p_interior_sections, p_robj_scoped, p_ambient_scale, p_time_ms, p_weather,
+			p_entity_positions, p_entity_bound_radii_q16, true);
+}
+
+// One view's per-draw selection. The selection is a function of the entity
+// query and the groups alone, so a ROBJ selects the same in either view; the
+// Inset pass only covers the draws the main view does not make (its twins).
+int LightScene::select_model_frame(const TypedArray<Node3D> &p_models,
+		const PackedInt64Array &p_owner_entities,
+		const PackedInt64Array &p_interior_owners,
+		const PackedInt32Array &p_interior_sections,
+		const PackedByteArray &p_robj_scoped,
+		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
+		const PackedVector3Array &p_entity_positions,
+		const PackedInt32Array &p_entity_bound_radii_q16, bool p_inset_view) {
 	// The shared objects-target select inputs (object_select_inputs).
 	const ObjectSelectInputs sel = object_select_inputs(p_time_ms, p_weather, p_ambient_scale);
 	const opennova::renderer::LightFlickerInputs &flicker = sel.flicker;
@@ -475,13 +528,17 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		const bool robj_scoped = i < p_robj_scoped.size() &&
 				p_robj_scoped[i] != 0;
 		std::vector<ObjectModel *> entity_models;
-		collect_entity_light_models(model, entity_models);
+		if (p_inset_view) {
+			collect_inset_entity_light_models(model, entity_models);
+		} else {
+			collect_entity_light_models(model, entity_models);
+		}
 		for (ObjectModel *part_model : entity_models) {
 			++filtered_models;
 			if (robj_scoped) {
 				any_robj_scoped = true;
 				std::vector<ObjectModel::PointLightDrawPart> parts;
-				part_model->collect_point_light_draw_parts(parts);
+				collect_view_draw_parts(part_model, p_inset_view, parts);
 				// A rigid building has one row per visible ROBJ. Retain a section-0
 				// fallback for malformed/skinned building data so it never falls back
 				// to the broader entity-owner admission rule.
@@ -495,7 +552,7 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 					// the model collector re-scopes the OWNER section per ROBJ. The
 					// group gate falls back from interior section zero to this value.
 					// [orig: Terrain_RenderSectorModels @0x5c5e07;
-					// collect_render_objects_for_batch @0x5d8ff7, see
+					// Render_CollectRenderObjectsForBatch @0x5d8ff7, see
 					// docs/render/render-lighting-re.md]
 					const opennova::renderer::SubmitOwnerGroup owner =
 							opennova::renderer::submit_owner_group(owner_entity, false, false,
@@ -521,14 +578,15 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 			draw.groups.interior_group_entity = interior_owner;
 			draw.groups.interior_group_section = interior_section;
 			const bool person_wave = part_model->is_slot_shadow_person();
-			const bool skinned = part_model->is_active_level_skinned();
+			const bool skinned = p_inset_view ? part_model->is_inset_view_level_skinned()
+											  : part_model->is_active_level_skinned();
 			// A rigid draw's owner section is read only when an owned light's
 			// owner is the interior entity AND the interior section is zero (the
 			// gate falls back to the owner section); only then do its ROBJs
 			// select apart.
 			if (!skinned && interior_owner != 0 && interior_section == 0) {
 				std::vector<ObjectModel::PointLightDrawPart> parts;
-				part_model->collect_point_light_draw_parts(parts);
+				collect_view_draw_parts(part_model, p_inset_view, parts);
 				if (!parts.empty()) {
 					for (const ObjectModel::PointLightDrawPart &part : parts) {
 						auto part_draw = draw;
@@ -569,17 +627,24 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 			color[light] = Vector4(selected.color[0], selected.color[1],
 					selected.color[2], selected.range);
 		}
-		if (targets[i].robj_scoped) {
+		const int count = static_cast<int>(selection.count);
+		if (p_inset_view && targets[i].robj_scoped) {
+			targets[i].model->apply_inset_point_light_selection_to_robj(
+					targets[i].robj_index, count, posr, color);
+		} else if (p_inset_view) {
+			targets[i].model->apply_inset_point_light_selection(count, posr, color);
+		} else if (targets[i].robj_scoped) {
 			targets[i].model->apply_point_light_selection_to_robj(
-					targets[i].robj_index,
-					static_cast<int>(selection.count), posr, color);
+					targets[i].robj_index, count, posr, color);
 		} else {
-			targets[i].model->apply_point_light_selection(
-					static_cast<int>(selection.count), posr, color);
+			targets[i].model->apply_point_light_selection(count, posr, color);
 		}
 		if (selection.count > 0) {
 			lit_model_set.insert(targets[i].model);
 		}
+	}
+	if (p_inset_view) {
+		return static_cast<int>(lit_model_set.size());
 	}
 	selection_mode_ = "per_model_objects";
 	owner_isolation_ = any_robj_scoped ? "per_robj_buildings" : "per_model";
@@ -881,6 +946,7 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 		int p_time_ms, int p_frame_index, Weather *p_weather,
 		const TypedArray<Node3D> &p_models,
 		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog,
+		bool p_inset_view,
 		std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
 		opennova::renderer::LightCoronaFrameInputs &r_inputs) const {
 	opennova::renderer::LightCoronaFrameInputs &inputs = r_inputs;
@@ -901,7 +967,9 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 		if (model == nullptr) {
 			continue;
 		}
-		const int64_t mask = model->get_occlusion_section_mask();
+		// The Inset's walk gates on the masks the Inset's own collect wrote.
+		const int64_t mask = p_inset_view ? model->get_inset_view_section_mask()
+										  : model->get_occlusion_section_mask();
 		if (mask == -1) {
 			continue;
 		}
@@ -923,7 +991,8 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	inputs.camera_fixed = mission_fixed_from_godot(p_camera_pos);
 	// The camera depth plane in mission space: depth grows in front of the
 	// camera, zero at the camera origin (the batch-sort plane retail feeds
-	// the fade [orig: @0x5ab2f8..0x5ab33c]; the engine also tests the light
+	// the fade [orig: EffectWorld_RenderLightCoronas @0x5aaf40 (the plane
+	// reads @0x5ab2f8..0x5ab33c)]; the engine also tests the light
 	// centre against the viewport near depth on this axis).
 	const Vector3 forward = p_camera_forward.normalized();
 	const std::array<float, 3> normal_mission = {
@@ -963,10 +1032,25 @@ int LightScene::collect_corona_rows(const Vector3 &p_camera_pos,
 	opennova::renderer::LightCoronaFrameInputs inputs;
 	build_corona_inputs(p_camera_pos, p_camera_forward, p_ambient_scale,
 			p_time_ms, p_frame_index, p_weather, p_models, p_owner_entities,
-			p_fog, corona_masks_scratch_, inputs);
+			p_fog, false, corona_masks_scratch_, inputs);
 	corona_quads_scratch_.clear();
 	scene_.collect_corona_quads(inputs, corona_quads_scratch_);
 	return static_cast<int>(corona_quads_scratch_.size());
+}
+
+int LightScene::collect_inset_corona_rows(const Vector3 &p_camera_pos,
+		const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
+		int p_time_ms, int p_frame_index, Weather *p_weather,
+		const TypedArray<Node3D> &p_models,
+		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog,
+		std::vector<opennova::renderer::LightCoronaQuad> &r_quads) {
+	opennova::renderer::LightCoronaFrameInputs inputs;
+	build_corona_inputs(p_camera_pos, p_camera_forward, p_ambient_scale,
+			p_time_ms, p_frame_index, p_weather, p_models, p_owner_entities,
+			p_fog, true, corona_masks_scratch_, inputs);
+	r_quads.clear();
+	scene_.collect_corona_quads(inputs, r_quads);
+	return static_cast<int>(r_quads.size());
 }
 
 PackedFloat32Array LightScene::get_last_corona_rows() const {
@@ -1004,11 +1088,10 @@ size_t LightScene::collect_terrain_light_rows(
 	inputs.terrain_factor =
 			opennova::renderer::terrain_per_channel_factor(p_recip_packed);
 	fill_flicker(inputs.flicker, p_time_ms, p_weather);
-	// The normal pass: the pixel-shader terrain path is the one we render, the
-	// per-light loop is never skipped, and the 0.4/r alternate projection rides
-	// render-mode bit 0x100, which this shell never sets [orig: @0x6095e4,
-	// @0x60983f, @0x609890].
-	inputs.alt_pass = false;
+	// The reference adapter: the pixel-shader terrain path, the per-light loop
+	// never skipped, and caps bit 0x100 with four stages, so the ps.1.1 light
+	// pass (light_terrain_pass.h carries the witness).
+	inputs.ps_light_pass = true;
 	inputs.pixel_shader_path = true;
 	inputs.light_pass_disabled = false;
 	return scene_.collect_terrain_pass_rows(p_patches, p_patch_count, inputs,
@@ -1062,10 +1145,6 @@ int LightScene::terrain_light_texture_size() {
 	return opennova::renderer::kFalloffTextureSize;
 }
 
-int LightScene::terrain_light_strip_rows() {
-	return opennova::renderer::kFalloffSpot1DRows;
-}
-
 namespace {
 
 PackedByteArray argb_words_to_rgba8(int width, int height,
@@ -1094,10 +1173,30 @@ PackedByteArray LightScene::terrain_light_disc_rgba8() {
 			&opennova::renderer::falloff_texture_light2d_argb);
 }
 
-PackedByteArray LightScene::terrain_light_strip_rgba8() {
-	return argb_words_to_rgba8(opennova::renderer::kFalloffTextureSize,
-			opennova::renderer::kFalloffSpot1DRows,
-			&opennova::renderer::falloff_texture_spot1d_argb);
+int LightScene::terrain_light_cube_size() {
+	return opennova::renderer::kCubeNormalizeSize;
+}
+
+PackedByteArray LightScene::terrain_light_cube_face_rgba8(int p_face) {
+	PackedByteArray bytes;
+	if (p_face < 0 || p_face >= opennova::renderer::kCubeNormalizeFaces) {
+		return bytes;
+	}
+	const int size = opennova::renderer::kCubeNormalizeSize;
+	bytes.resize(static_cast<int64_t>(size) * size * 4);
+	uint8_t *out = bytes.ptrw();
+	for (int row = 0; row < size; ++row) {
+		for (int col = 0; col < size; ++col) {
+			const uint32_t argb =
+					opennova::renderer::cube_normalize_texel_argb(p_face, col, row, size);
+			uint8_t *px = out + (static_cast<size_t>(row) * size + col) * 4;
+			px[0] = static_cast<uint8_t>((argb >> 16) & 0xFFu);
+			px[1] = static_cast<uint8_t>((argb >> 8) & 0xFFu);
+			px[2] = static_cast<uint8_t>(argb & 0xFFu);
+			px[3] = static_cast<uint8_t>(argb >> 24);
+		}
+	}
+	return bytes;
 }
 
 Ref<EffectLightReport> LightScene::get_report() const {
@@ -1181,6 +1280,11 @@ void LightScene::_bind_methods() {
 			"robj_scoped", "ambient_scale", "time_ms", "weather",
 			"entity_positions", "entity_bound_radii_q16"),
 			&LightScene::render_model_frame, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()));
+	ClassDB::bind_method(D_METHOD("render_inset_model_frame", "models",
+			"owner_entities", "interior_owners", "interior_sections",
+			"robj_scoped", "ambient_scale", "time_ms", "weather",
+			"entity_positions", "entity_bound_radii_q16"),
+			&LightScene::render_inset_model_frame);
 	ClassDB::bind_method(D_METHOD("render_static_frame",
 			"entity_positions", "entity_bound_radii_q16", "owner_entities", "owner_sections",
 			"interior_owners", "interior_sections", "active",
@@ -1207,14 +1311,14 @@ void LightScene::_bind_methods() {
 			D_METHOD("terrain_light_texture_size"),
 			&LightScene::terrain_light_texture_size);
 	ClassDB::bind_static_method("LightScene",
-			D_METHOD("terrain_light_strip_rows"),
-			&LightScene::terrain_light_strip_rows);
-	ClassDB::bind_static_method("LightScene",
 			D_METHOD("terrain_light_disc_rgba8"),
 			&LightScene::terrain_light_disc_rgba8);
 	ClassDB::bind_static_method("LightScene",
-			D_METHOD("terrain_light_strip_rgba8"),
-			&LightScene::terrain_light_strip_rgba8);
+			D_METHOD("terrain_light_cube_size"),
+			&LightScene::terrain_light_cube_size);
+	ClassDB::bind_static_method("LightScene",
+			D_METHOD("terrain_light_cube_face_rgba8", "face"),
+			&LightScene::terrain_light_cube_face_rgba8);
 	ClassDB::bind_method(D_METHOD("get_report"), &LightScene::get_report);
 	ClassDB::bind_method(D_METHOD("get_static_light_rows_image"),
 			&LightScene::get_static_light_rows_image);

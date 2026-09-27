@@ -1697,16 +1697,17 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		            persist_cookie.empty() ? "(none)" : persist_cookie.c_str(),
 		            persist_cookie.size() > 16 ? ".." : "");
 
-		s.relay        = field_or("relay",       "jop_2_relay.htm");
+		// The relay template renders this response only; nothing reads it back
+		// from the stored session.
+		const std::string relay_template = field_or("relay", "jop_2_relay.htm");
 		s.msgbase      = field_or("msgbase",     "jop_2_msg.htm");
 		s.success      = field_or("success",     "jop_2_main.htm");
 		s.failure      = field_or("failure",     "jop_2_main.htm");
 
 		// Capture everything we need from `s` BEFORE moving it into the
-		// session map — use-after-move on s.relay was returning empty
-		// strings → empty response bodies → retail re-POST'd until GOODBYE.
+		// session map — a use-after-move here once returned empty strings →
+		// empty response bodies → retail re-POST'd until GOODBYE.
 		const std::string tag            = s.session_tag;
-		const std::string relay_template = s.relay;
 		const int64_t user_id_for_active = s.user_id;
 		const std::string username_for_active = s.username;
 
@@ -2081,13 +2082,13 @@ void HttpListener::register_legacy_host_join_routes(
 			s.session_tag = sessions_.generate_tag("NWJoin.dll");
 			s.success     = req.url_params.get("success")    ? req.url_params.get("success")    : "jop_2_join.joi";
 			s.failure     = req.url_params.get("failure")    ? req.url_params.get("failure")    : "jop_2_main.htm";
-			s.relay       = req.url_params.get("relay")      ? req.url_params.get("relay")      : "jop_2_relay.htm";
+			const std::string relay_template =
+					req.url_params.get("relay") ? req.url_params.get("relay") : "jop_2_relay.htm";
 			s.msgbase     = req.url_params.get("msgbase")    ? req.url_params.get("msgbase")    : "jop_2_msg.htm";
 			s.needexpkey  = req.url_params.get("needexpkey") ? req.url_params.get("needexpkey") : "";
 			s.pfid        = req.url_params.get("pfid")       ? req.url_params.get("pfid")       : "";
 			s.rid         = req.url_params.get("rid")        ? req.url_params.get("rid")        : "";
 			const std::string tag = s.session_tag;
-			const std::string relay_template = s.relay;
 			sessions_.put_join(tag, std::move(s));
 
 			std::printf("[http] /NWJoin.dll (first call) rid=%s success=%s -> tag %s cookies=[%s]\n",
@@ -2404,11 +2405,10 @@ void HttpListener::register_legacy_host_join_routes(
 			}
 			s.host_key   = std::move(hk);
 			s.success    = field_or("success",    "jop_2_host2.htm");
-			s.relay      = field_or("relay",      "jop_2_relay.htm");
+			const std::string relay_tpl = field_or("relay", "jop_2_relay.htm");
 			s.pfid       = field_or("pfid",       "28");
 
 			const std::string new_tag    = s.session_tag;
-			const std::string relay_tpl  = s.relay;
 			sessions_.put_host(new_tag, std::move(s));
 
 			std::printf("[http] /NWHost.dll (first call) -> tag %s host_key=%.16s...\n",

@@ -276,7 +276,7 @@ WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w);
 const WeaponSlotState *active_local_weapon_slot(const World &world,
                                                const LocalPlayerWeapon &w);
 
-// g_local_player_entity->Pitch = 0, shared by the AbsorbPitch mount stamp and
+// g_LocalPlayerEntity->Pitch = 0, shared by the AbsorbPitch mount stamp and
 // the scope-up leg. [orig: @0x4DFAB7; @0x4DF314]
 void local_player_level_pitch(World &world);
 
@@ -394,7 +394,7 @@ void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
 // own gate (dead, a pending UseGun switch, a Controller/Driver seat) evaluated
 // as a value, so a tool can refuse a trigger with the reason instead of
 // queueing input the pump silently zeroes.
-// [orig: Player_CanFireWeapon @0x5cf780 rejects a Controller or Driver seat;
+// [orig: Player_IsOpticalViewVisible @0x5cf780 rejects a Controller or Driver seat;
 //  the dead/switch legs are the pump's own early-outs]
 enum class LocalWeaponInputBlock : uint8_t {
     kNone,
@@ -482,6 +482,9 @@ struct LocalPlayerWeaponView {
     int32_t heat_glow = 0;
     bool borrowed_usegun_slot = false;
     int32_t usegun_mount_handle = EntityHandle::kInvalid;
+    // The def half of the pump's FP bit: the gfx1 model loaded and its
+    // animadm installed (player_weapon_view.cpp carries the witness).
+    bool first_person_action_model = false;
     bool emplaced_controls_valid = false;
     int32_t emplaced_gun_yaw = 0;
     int32_t emplaced_gun_pitch = 0;

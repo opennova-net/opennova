@@ -57,7 +57,7 @@ int EntityCommands::fire_ammo_in_area(int32_t ammo, int32_t area_id) {
     p.z = io::bam_add(to_fixed(area.script_bounds.min.z), 0x1900000); // area bottom + 400u
     const int32_t rise = random_offset(0x320000); // 0..50u, third draw
     // This is the existing CFAC/terrain support query, despite the old
-    // decompiler's unrelated name compute_clamped_displacement.
+    // decompiler's unrelated name Entity_ComputeClampedDisplacement.
     CollisionWorld fallback;
     fallback.terrain = world_.ai.terrain;
     const CollisionWorld &collision = world_.collision ? *world_.collision : fallback;

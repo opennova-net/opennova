@@ -178,8 +178,8 @@ void test_owner_visibility() {
 
 // The strip table's drawer state: the two mode words the loader builds from
 // the modeId selector and their decode [orig: Scar_LoadTextures @0x5CC315 /
-// @0x5CC321; CGfxShader_ApplyPass @0x683190; decode_blend_mode_to_d3d_states
-// @0x680F00; decode_mode_alpha_stage @0x680B00; decode_mode_color_stage
+// @0x5CC321; CGfxShader_ApplyPass @0x683190; RenderState_DecodeBlendModeToD3DStates
+// @0x680F00; RenderState_DecodeModeAlphaStage @0x680B00; RenderState_DecodeModeColorStage
 // @0x681080].
 void test_strip_mode_words() {
 	for (int strip = 0; strip < kScarTextureStripCount; ++strip) {

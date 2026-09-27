@@ -9,7 +9,7 @@ namespace opennova::hud {
 namespace {
 // Four radial stops: transparent fringe, two solid edges, transparent fringe.
 // The original ring uses at most 95 segments and Q22 table samples.
-// [orig: draw_ring_overlay @0x5D4270]
+// [orig: Render_DrawRingOverlay @0x5D4270]
 void ring(HudDrawList &draw, float x, float y, float radius, float aspect, float thickness,
 		uint32_t color) {
 	const int n = std::clamp(int(radius * 0.3333333432674408f * 12.56637954711914f), 4, 95);
@@ -76,7 +76,7 @@ void HudFrameCompiler::element_inset_cues(const HudFrameState &s, float w, float
 								y + sy * dy, 1, 0xFFFF0000u });
 				// The friendly name centres on the aperture in the BOLD slot
 				// (Arial bold), half-bright red.
-				// [orig: Render_RadarCompassOverlay -- slot 0xB4C394 @0x5CA0C0,
+				// [orig: Render_WeaponInsetScene -- slot 0xB4C394 @0x5CA0C0,
 				//  HUD_DrawTextAligned_HalfBright mode 2 @0x5CA0CF]
 				emit_slot_text(label_font_bold_, label_scale_, c.target_name.c_str(), x, y,
 						0xFF7F0000u, kFontAlignCenter);
@@ -98,8 +98,8 @@ void HudFrameCompiler::element_optical_cues(const HudFrameState &s, float w, flo
 		draw_list_.lines.push_back({ x, y, x, y - radius, 1, c.designator_color });
 		// Marker type 0 hands the ring a width scale of 2.0 beside its 2.0
 		// stroke: the LollyPop head is an ellipse twice as wide as it is tall.
-		// [orig: draw_entity_marker @0x593140 -- ring record +0x1C @0x59327B,
-		//  +0x10 @0x59327F; draw_ring_overlay applies +0x1C to x @0x5D4513]
+		// [orig: HUD_DrawEntityMarker @0x593140 -- ring record +0x1C @0x59327B,
+		//  +0x10 @0x59327F; Render_DrawRingOverlay applies +0x1C to x @0x5D4513]
 		ring(draw_list_, x, y - 2 * radius, float(radius), 2, 2, c.designator_color);
 	}
 	if (c.impact_distance) {

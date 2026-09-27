@@ -121,7 +121,7 @@ int32_t vehicle_ground_height_at(
 
 // Ground/tank/bike test the entity-update counter; boat/air stagger the tick
 // by 36 * DcbId.
-// [orig: `test byte ptr g_entity_update_counter,7` in Entity_UpdateVehiclePhysics
+// [orig: `test byte ptr g_EntityUpdateCounter,7` in Entity_UpdateVehiclePhysics
 //  @0x48AFB9..0x48AFD6, Entity_UpdateLightVehiclePhysics @0x484099,
 //  Entity_UpdateTankVehiclePhysics @0x488B69 and Entity_ProcessInfantryPhysics
 //  @0x46E178; the tick + 36 * DcbId stagger in Entity_UpdateWatercraftPhysics

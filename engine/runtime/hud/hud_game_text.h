@@ -61,7 +61,7 @@ std::string service_prompt_text(int prompt, const std::string &use_key, int32_t 
 // RAW authored id — the +1 remap belongs to the non-co-op MP gametypes,
 // unported with them. The armory/target/flag specials key off MP POI entity
 // types, not SP route markers.
-// [orig: get_waypoint_name @0x594630 — index remap @0x594678; mission-table
+// [orig: HUD_GetWaypointName @0x594630 — index remap @0x594678; mission-table
 //  fallback @0x59473d ("STRWPNAME%03i" in WPNames); empty or "null" ->
 //  gametext WPNames/STRWPNAMEDEFAULT @0x59477b]
 std::string waypoint_display_name(int name_id, const GameTextLookup &mission,

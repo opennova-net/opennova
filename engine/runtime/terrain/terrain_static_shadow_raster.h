@@ -9,7 +9,7 @@
 // resolve into the destination-resolution light-alpha carrier. It never
 // changes RGB.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D5BF..0x60DA4F;
-// the ortho depth row setup_shadow_cascade_matrices_0 @0x58D5F8..0x58D60C;
+// the ortho depth row RenderSlot_SetupShadowCascadeMatrices_0 @0x58D5F8..0x58D60C;
 // PROJSHAD submits @0x60D960..0x60D97D; temp-blue composite
 // @0x60E0C6..0x60E19D]
 

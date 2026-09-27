@@ -16,9 +16,9 @@ namespace {
 // stack held, which no two runs share. The contract is therefore "at most
 // key length + 1 characters": the NUL slot is modeled, anything past it is
 // refused (both directions stop there).
-// [orig: parse_connection_query_string @0x54dfb0 — `char cipher_key[128]`,
+// [orig: URL_ParseConnectionQueryString @0x54dfb0 — `char cipher_key[128]`,
 //  sprintf(cipher_key, "diheijefhgcdjcgcjcfbd") / "cfhdcegjigecjehcgjdhe";
-//  NK loop `*ni_src = ni_ptr - ni_src[cipher_key - nk_buf] + 48` @0x54e173,
+//  NK loop `*ni_src = ni_ptr - ni_src[cipher_key - g_NkBuf] + 48` @0x54e173,
 //  CK loop @0x54e1fd]
 bool key_byte_at(std::string_view key, size_t i, uint8_t &out) {
 	if (i < key.size()) {
@@ -34,7 +34,7 @@ bool key_byte_at(std::string_view key, size_t i, uint8_t &out) {
 
 } // namespace
 
-// [orig: parse_connection_query_string @ 0x54dfb0 (retail) — NK=/CK= loops: plain[i]=cipher[i]-key[i]+'0',
+// [orig: URL_ParseConnectionQueryString @ 0x54dfb0 (retail) — NK=/CK= loops: plain[i]=cipher[i]-key[i]+'0',
 //        '&'(38)-terminated. Keys NK@0x7d3f30, CK@0x7d3f04. grill wave 3 NW-C4, MATCHING.
 //        (jodemo: Auth_ParseRegistrationURL@0x514c40, keys 0x74d8a0/0x74d874.)]
 std::string url_cipher_decode(std::string_view cipher, std::string_view key) {

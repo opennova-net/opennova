@@ -4,10 +4,11 @@ extends GutTest
 ## terrain patch (an AABB), the pool lights whose volume overlaps it, gated by
 ## the authored terrain-disable flag, as the rows the terrain shader re-draws
 ## the patch with — the terrain twin of per_model_light_isolation_test
-## [orig: the per-light else-arm of render_terrain_sector_batch @0x6092A0
+## [orig: the per-light arm of Terrain_RenderSectorBatch @0x6092A0
 ## (the <= 16 collect @0x609658, both light groups cleared @0x60967c /
 ## @0x609685, LightInstance_IsAliveAndLightsTerrain @0x609880) ->
-## Light_SetupTerrainProjectedPass @0x5AA830].
+## Light_SetupTerrainProjectedPassPS @0x5aab30, the reference adapter's
+## ps.1.1 pass].
 
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
 # assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
@@ -44,13 +45,13 @@ func test_a_world_light_reaches_only_the_patch_it_overlaps() -> void:
 	assert_almost_eq(position.x, 0.0, 0.01)
 	assert_almost_eq(position.y, 1.0, 0.01, "the row position is Godot world")
 	assert_almost_eq(position.z, 0.0, 0.01)
-	# The normal pass projects at 0.5 / radius: the disc's 0..1 span covers
-	# one diameter [orig: 32768 / range @0x5AA864..0x5AA873].
-	assert_almost_eq(float(row.get("inv_scale", 0.0)), 0.5 / 8.0, 0.0001)
-	# c4..c6 = rgb (255/256) x blend 1 x ambient 1 x recip factor 1 (0x808080
-	# divides to exactly one) x 0.66 x 0.5 [orig: @0x5AA9C8..0x5AAAB3].
+	# The ps.1.1 pass projects at 0.4 / radius: the disc's 0..1 span covers
+	# 2.5 radii [orig: 26214.4 / range @0x5aab76].
+	assert_almost_eq(float(row.get("inv_scale", 0.0)), 0.4 / 8.0, 0.0001)
+	# c0 = rgb (255/256) x blend 1 x ambient 1 x recip factor 1 (0x808080
+	# divides to exactly one), with no 0.66 / 0.5 fold [orig: @0x5aad93..0x5aae8c].
 	var color: Vector3 = row.get("color", Vector3.ZERO)
-	var expected := (255.0 / 256.0) * 0.66000003 * 0.5
+	var expected := 255.0 / 256.0
 	assert_almost_eq(color.x, expected, 0.002)
 	assert_almost_eq(color.y, expected, 0.002)
 	assert_almost_eq(color.z, expected, 0.002)
@@ -125,7 +126,14 @@ func test_a_built_terrain_collects_rows_for_the_patches_a_light_overlaps() -> vo
 	assert_not_null(material.get_shader_parameter("u_terrain_light_rows"),
 			"the rows texture is bound")
 	assert_not_null(material.get_shader_parameter("u_terrain_light_disc"))
-	assert_not_null(material.get_shader_parameter("u_terrain_light_strip"))
+	assert_true(material.get_shader_parameter("u_terrain_light_cube") is Cubemap,
+			"the cube-normalize map is bound for stage 0")
+	# t1: the generated detail coefficient map the surface inputs build from
+	# polytrn_detailmap (retail texture slot 8).
+	var coefficient: Texture2D = terrain.get_surface_inputs().get_detail_coefficient_texture()
+	assert_not_null(coefficient, "the Tmap fixture authors a detailmap")
+	assert_same(material.get_shader_parameter("u_terrain_light_normal"), coefficient,
+			"the coefficient map is bound for stage 1")
 
 	# No pool: the leg retires and the gate closes. (The pixel end of the leg
 	# cannot be pinned here — the headless GUT runner rasterizes nothing, so a
@@ -144,11 +152,11 @@ func test_a_built_terrain_collects_rows_for_the_patches_a_light_overlaps() -> vo
 			"a re-armed light scene re-opens the shader gate")
 
 
-func test_the_two_procedural_textures_have_the_witnessed_shape() -> void:
+func test_the_falloff_texture_has_the_witnessed_shape() -> void:
+	# The ps.1.1 pass samples texlight2d on both falloff stages; the
+	# texlightspot1d retail also builds sits in a slot no terrain pass reads.
 	var size: int = LightScene.terrain_light_texture_size()
-	var strip_rows: int = LightScene.terrain_light_strip_rows()
 	assert_eq(size, 64)
-	assert_eq(strip_rows, 8)
 	var disc: PackedByteArray = LightScene.terrain_light_disc_rgba8()
 	assert_eq(disc.size(), size * size * 4)
 	# The border texels are 0; the centre texel is the exp(-4x^2) peak
@@ -157,10 +165,3 @@ func test_the_two_procedural_textures_have_the_witnessed_shape() -> void:
 	var centre := (32 * size + 32) * 4
 	assert_eq(disc[centre], 254, "the disc centre is the truncated peak")
 	assert_eq(disc[centre + 3], 255, "mode 2 texels carry an opaque alpha")
-	var strip: PackedByteArray = LightScene.terrain_light_strip_rgba8()
-	assert_eq(strip.size(), size * strip_rows * 4)
-	# Column 0 is white, interior texel = (col * (row + 1)) >> 1 gray
-	# [orig: Lighting_InitTextures @0x5a95a6..0x5a9612].
-	assert_eq(strip[0], 255, "the strip's end columns are white")
-	var texel := (4 * size + 32) * 4
-	assert_eq(strip[texel], (32 * 5) >> 1, "the strip ramps with column x row")

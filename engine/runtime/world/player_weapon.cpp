@@ -267,8 +267,8 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
         // The local attach resets before its mount; a detach does not take this
         // leg. The reset includes the binocular clears, so a wire-echoed attach
         // drops a raised toggle too. [orig: Entity_AttachToUseGunSlot @0x546B80
-        // -> Player_ResetCameraAndMovementState @0x546ba4; the ctrlx attach's
-        // local reset @0x4947AE]
+        // (the Player_ResetCameraAndMovementState call @0x546ba4); the ctrlx
+        // attach's local reset @0x4947AE]
 		local_player_camera_reset(&world, w, view);
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
@@ -309,7 +309,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 		if (w.usegun_switch == LocalUseGunSwitch::kNone) {
 			if (!active_matches) stage_parent(*mounted_parent, mounted_adm);
 		} else if (!pending_matches) {
-			// A later attach overwrites g_pendingWeaponSlot without changing the
+			// A later attach overwrites g_PendingWeaponSlot without changing the
 			// outgoing slot. This includes direct old-gun -> new-gun swaps.
 			stage_parent(*mounted_parent, mounted_adm);
 		}
@@ -326,7 +326,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 		WeaponInventory *inventory) {
 	// The pending -> equipped commit [orig: the switchfrom/switchrank completion
-	// consumes g_pendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
+	// consumes g_PendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
 	// @ 0x4dd727; the FP model re-resolve runs shell-side off the event].
 	w.switch_in_flight = false;
 	w.switch_deferred_action = -1;
@@ -543,13 +543,13 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
     const int installed = world.tables.weapons.index_of(data.name.c_str());
     if (installed >= 0)
         w.def.scope_zero = world.tables.weapons.entries[installed].action_fsm.scope_zero;
-	// The 3P fire attack-stamp kind [orig: weapon.def attack_anim -> the AdmDefs record
+	// The 3P fire attack-stamp kind [orig: weapon.def attack_anim -> the g_AdmDefs record
 	// +0xA8; world-wac-ai-re.md §14.8.4]. The sibling special_hold (+0xA4) is NOT cached
 	// here: the body updater re-reads it from the ADM table by the posed entity's own
 	// equipped index every selection pass [orig: @ 0x4b5dba], which is the single source
 	// both the local player and every remote player resolve through.
 	w.attack_kind = data.attack_anim;
-	// The run-gait class [orig: 'run_anim' -> AdmDefs +0xAC; promotion @ 0x4b729d] and
+	// The run-gait class [orig: 'run_anim' -> g_AdmDefs +0xAC; promotion @ 0x4b729d] and
 	// ForceCrouch (0x40000): idle_mortar promotion + stance-change refusal.
 	w.run_anim = data.run_anim;
 	w.force_crouch = (flags & weapon_flag::kForceCrouch) != 0;
@@ -557,7 +557,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	// that edge pre-tick and stamps its own 20-tick arms-dip window. Compare the
 	// resolved map identity, not the weapon name: two weapon records sharing one
 	// AnimMap do NOT dip. A fresh mount advances even when the map key is empty.
-	// [orig: previous/current AdmDefs record +0 comparison @0x4b46d0..0x4b4701].
+	// [orig: previous/current g_AdmDefs record +0 comparison @0x4b46d0..0x4b4701].
 	if (!w.active || !strutil::iequals(data.animadm, w.anim_map)) {
 		w.anim_map = data.animadm;
 		++w.anim_map_serial;
@@ -634,7 +634,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	if (w.switch_in_flight)
 		w.switch_deferred_action = weapon_action::kSwitchFrom;
 	// The mount is the charge epoch [orig: Player_SwitchToWeaponByHandle zeroes
-	// g_fireChargeStartTick on the walk, before the mount].
+	// g_FireChargeStartTick on the walk, before the mount].
 	w.power_throw_start_tick = 0;
 	w.pending_throw_charge = 0;
 	w.play_serial = 0;
@@ -910,7 +910,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// PowerThrow: the press never fires — it starts the windup; the release
 	// converts the held time into the charge byte and fires. [orig: press gate
 	// @ 0x4e08fd (def Flags sign bit 0x80000000, fireable + ammo ->
-	// g_fireChargeStartTick = tick), release @ 0x4e07e9 -> WeaponSlot_RequestFire
+	// g_FireChargeStartTick = tick), release @ 0x4e07e9 -> WeaponSlot_RequestFire
 	// with the computed charge; world-wac-ai-re §27.]
 	bool power_throw_release = false;
 	if ((w.def.flags & weapon_flag::kPowerThrow) != 0) {
@@ -964,10 +964,10 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			weapon_fsm_reload_allowed(w.def, active_slot);
 	in.is_local = true;
 	in.is_authority = io.is_authority; // the joiner defers the refill to the §5.58 round-trip
-	in.auto_reload = true;             // [orig: g_autoReloadEnabled @ 0x24D2118, default on]
+	in.auto_reload = true;             // [orig: g_AutoReloadEnabled @ 0x24D2118, default on]
 	// The weapon FSM consumes the promoted/settled scope bit, not the raw
 	// requested-engagement bit. Player_UpdatePerFrame runs before the weapon
-	// pump in retail and only promotes g_weaponScopeActive after the ease has
+	// pump in retail and only promotes g_WeaponScopeActive after the ease has
 	// completed [orig: promoter @ 0x4de4f7; weapon pump @ 0x526786].
 	in.scope_active = player_view_scope_settled(view);
 	in.instant_emplaced_switch = local_usegun_switch_is_instant(world, w);
@@ -976,7 +976,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	in.current_tick = static_cast<int32_t>(world.logic_tick);
 	// The window's water gate is the owner's BODY Z against the global water
 	// plane, not the drowning bit and not the eye height: `Position.Z >
-	// Env_WaterHeightFixed` keeps the window, at-or-below (with no Underwater def
+	// g_EnvWaterHeightFixed` keeps the window, at-or-below (with no Underwater def
 	// flag) clears it. No authored water (env.water_z == 0) never submerges.
 	// [orig: WeaponAction_ProcessFrame @ 0x540e60, the gate @ 0x54101c]
 	in.submerged = player != nullptr && world.env.water_z != 0 &&
@@ -1155,7 +1155,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// the low six bits its zero elevation (RoundSim::spawn); the
 				// server's bit-6-clearing composite preserves both.
 				// [orig: Entity_FireWeaponAndSendPacket @0x42bdcb..0x42bdfb --
-				//  Player_CanFireWeapon @0x42bdd8, Weapon_GetScopeZoomLevel(can,
+				//  Player_IsOpticalViewVisible @0x42bdd8, Weapon_GetScopeZoomLevel(can,
 				//  12) @0x42bde2, `neg; sbb; and 80h; add` @0x42bdee..0x42bdfb]
 				const bool can_fire = local_player_scope_view_visible(world, w, view);
 				const WeaponSlotState *fire_zero_slot = active_local_weapon_slot(world, w);
@@ -1343,14 +1343,14 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			}
 		}
 		// A queued manual switch commits at the outgoing SWITCHFROM/SWITCHRANK
-		// swap seam [orig: the completion consumes g_pendingWeaponSlot].
+		// swap seam [orig: the completion consumes g_PendingWeaponSlot].
 		if (w.switch_in_flight && ev.switch_completed) {
 			commit_pending_weapon_switch(world, w, io.inventory);
 		}
 	}
 	// The FSM's scope side effects land on the sim-owned engaged bit: forced
 	// unscope (one-shot / reload stash) and the pump's rescope-after-reload
-	// [orig: g_weaponScopeActive writes; the rescope block @ 0x54139e].
+	// [orig: g_WeaponScopeActive writes; the rescope block @ 0x54139e].
 	if (ev.unscope) {
 		++w.unscope_serial;
 		// The forced paths run the same refusing toggle — a mid-ease unscope keeps

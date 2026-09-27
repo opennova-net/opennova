@@ -115,7 +115,7 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
     }
 
     if (in.aim_state) {
-        // The aim branch (g_animStateFlagsTable & 0x40). [orig: @ 0x4b1bbe..0x4b1ce4]
+        // The aim branch (g_AnimStateFlagsTable & 0x40). [orig: @ 0x4b1bbe..0x4b1ce4]
         // elbow (arms): 3/4 aim yaw, full aim pitch + pitch-kick + 2x pitch blend.
         out[kOverlayArm] = {bam_add(A, bam_sar(bam_sub(B, A), 2)),
                             bam_add(bam_add(P, HLD), bam_dbl(PB)),

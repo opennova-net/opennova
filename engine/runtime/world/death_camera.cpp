@@ -15,7 +15,7 @@ constexpr double kBamPerRadian = 683565275.5764316;
 // flt_7C32BC = 65536.0: the float normalise scale [orig: @0x7c32bc].
 constexpr double kQ16 = 65536.0;
 
-// g_bam_sin_table_q22 / the cos table (off_849934): 1024 Q22 entries indexed
+// g_BamSinTableQ22 / the cos table (off_849934): 1024 Q22 entries indexed
 // by (angle + 0x200000) >> 22 [orig: @0x438c4e / @0x438c5b].
 inline int32_t sin_q22(uint32_t index) {
     return static_cast<int32_t>(std::sin(static_cast<double>(index & 0x3FFu) * (2.0 * kPi / 1024.0)) * io::kQ22One);

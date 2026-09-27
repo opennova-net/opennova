@@ -25,7 +25,7 @@ static int32_t retail_imul_sar8(int32_t lhs, int32_t rhs) {
     return result;
 }
 
-// [orig: wave_lookup @ 0x5DE6B0]
+// [orig: CWaveformTable_WaveLookup @ 0x5DE6B0]
 static int32_t panm_wave_lookup(const uint8_t *table, uint8_t func, int16_t a3) {
     uint8_t idx = (uint8_t)(a3 >> 8);
     switch (func & 0x0F) {
@@ -82,7 +82,7 @@ int32_t threedi_panm_sample_track_raw(const ThreediTransform *track,
     }
 
     // Retail PANM recognizes only 113 as a control-register sampler. Codes
-    // 114..117 deliberately fall through to wave_lookup by their low nibble.
+    // 114..117 deliberately fall through to CWaveformTable_WaveLookup by their low nibble.
     if (track->control == 113) {
         const uint8_t ordinal = track->control_param;
         const int32_t ctrl =
@@ -93,7 +93,7 @@ int32_t threedi_panm_sample_track_raw(const ThreediTransform *track,
     }
 
     // a3 = (param << 8) + (time_ms << 8) / 1000 * rate. Only the
-    // low word reaches wave_lookup; keep the accumulation unsigned so the
+    // low word reaches CWaveformTable_WaveLookup; keep the accumulation unsigned so the
     // original 32-bit wrap is defined under optimization.
     const uint32_t a3_bits =
             (static_cast<uint32_t>(track->control_param) << 8) +

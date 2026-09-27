@@ -1,80 +1,32 @@
 #include <net/npwire/session_hello.h>
 
-#include <cctype>
 #include <cstring>
 #include <base/io/le.h>
+#include <base/io/strutil.h>
 #include <net/napi/tlv.h>
+#include <net/npwire/flat_tlv.h>
 
 namespace opennova {
 
 namespace {
 
-// Parse one flat-TLV field at offset `pos`. Returns the next offset, or
-// npos on malformed input.
-size_t read_tlv_field(const uint8_t *data, size_t len, size_t pos,
-                      std::string &out_name, const uint8_t *&out_value, uint16_t &out_size) {
-	if (pos >= len) {
-		return static_cast<size_t>(-1);
-	}
-	// Name: null-terminated ASCII.
-	size_t p = pos;
-	while (p < len && data[p] != 0) {
-		++p;
-	}
-	if (p >= len) {
-		return static_cast<size_t>(-1);
-	}
-	out_name.assign(reinterpret_cast<const char *>(data + pos), p - pos);
-	++p; // skip null
-	if (p + 2 > len) {
-		return static_cast<size_t>(-1);
-	}
-	out_size = static_cast<uint16_t>(data[p]) | (static_cast<uint16_t>(data[p + 1]) << 8);
-	p += 2;
-	if (p + out_size > len) {
-		return static_cast<size_t>(-1);
-	}
-	out_value = data + p;
-	return p + out_size;
-}
-
-void append_name(std::vector<uint8_t> &buf, const char *name) {
-	while (*name) {
-		buf.push_back(static_cast<uint8_t>(*name++));
-	}
-	buf.push_back(0);
-}
-
-void append_size(std::vector<uint8_t> &buf, uint16_t sz) {
-	buf.push_back(static_cast<uint8_t>(sz & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((sz >> 8) & 0xFFu));
-}
-
-// Append a string field. onnet's build_tlv appends the ASCII bytes plus a
-// trailing NUL, with the size reflecting string.len + 1.
+// The field writers over the one flat-TLV grammar (npwire/flat_tlv.h). A
+// string field carries its NUL inside the size (string.len + 1).
 void append_string_field(std::vector<uint8_t> &buf, const char *name, const std::string &value) {
-	append_name(buf, name);
-	const uint16_t sz = static_cast<uint16_t>(value.size() + 1);
-	append_size(buf, sz);
-	buf.insert(buf.end(), value.begin(), value.end());
-	buf.push_back(0);
+	append_flat_tlv(buf, name, reinterpret_cast<const uint8_t *>(value.c_str()),
+			static_cast<uint16_t>(value.size() + 1));
 }
 
-// Append a uint32 field as 4 LE bytes.
+// A uint32 field as 4 LE bytes.
 void append_u32_field(std::vector<uint8_t> &buf, const char *name, uint32_t value) {
-	append_name(buf, name);
-	append_size(buf, 4);
-	buf.push_back(static_cast<uint8_t>(value & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
+	uint8_t le[4];
+	io::write_u32_le(le, value);
+	append_flat_tlv(buf, name, le, 4);
 }
 
-// Append a raw byte field.
+// A raw byte field.
 void append_bytes_field(std::vector<uint8_t> &buf, const char *name, const uint8_t *data, size_t len) {
-	append_name(buf, name);
-	append_size(buf, static_cast<uint16_t>(len));
-	buf.insert(buf.end(), data, data + len);
+	append_flat_tlv(buf, name, data, static_cast<uint16_t>(len));
 }
 
 std::string strip_nul(const uint8_t *data, size_t len) {
@@ -97,26 +49,13 @@ std::array<uint8_t, 16> jointoperations_protocol_guid() {
 	        0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 }
 
-namespace {
-// ASCII case-insensitive compare — the retail identity gate compares every string
-// field through Napi_StrCaseEqual, not exact equality.
-// [orig: Napi_StrCaseEqual @0x616e70, used by HandleClientJoin @0x62B750]
-bool str_case_equal(std::string_view a, std::string_view b) {
-	if (a.size() != b.size()) return false;
-	for (size_t i = 0; i < a.size(); ++i) {
-		if (std::tolower(static_cast<unsigned char>(a[i])) !=
-		    std::tolower(static_cast<unsigned char>(b[i])))
-			return false;
-	}
-	return true;
-}
-} // namespace
-
 bool is_jointoperations_protocol_name(std::string_view protocol_name) {
 	// The retail PN compare is case-insensitive, which subsumes the two spellings the
 	// established NovaWorld PN router accepted; keep the policy in the neutral
-	// game-wire layer so inmatch does not reimplement service routing.
-	return str_case_equal(protocol_name, "JOINTOPERATIONS");
+	// game-wire layer so inmatch does not reimplement service routing. The retail
+	// identity gate compares every string field through Napi_StrCaseEqual, not exact
+	// equality. [orig: Napi_StrCaseEqual @0x616e70, used by HandleClientJoin @0x62B750]
+	return strutil::iequals(protocol_name, "JOINTOPERATIONS");
 }
 
 ClientHello make_jointoperations_client_hello(uint32_t client_index) {
@@ -159,18 +98,18 @@ ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t clie
 // raw 16-byte compare. [orig: HandleClientJoin @0x62B750 via Napi_StrCaseEqual @0x616e70]
 bool matches_jointoperations_identity(const ClientHello &hello) {
 	const ClientHello expected = make_jointoperations_client_hello(hello.ci);
-	return str_case_equal(hello.nvs, expected.nvs) &&
+	return strutil::iequals(hello.nvs, expected.nvs) &&
 			is_jointoperations_protocol_name(hello.pn) &&
 			hello.pg_present && hello.pg == expected.pg &&
-			str_case_equal(hello.pv1, expected.pv1);
+			strutil::iequals(hello.pv1, expected.pv1);
 }
 
 bool matches_jointoperations_identity(const ClientAuth &auth) {
 	const ClientHello expected = make_jointoperations_client_hello(auth.ci);
-	return str_case_equal(auth.nvs, expected.nvs) &&
+	return strutil::iequals(auth.nvs, expected.nvs) &&
 			is_jointoperations_protocol_name(auth.pn) &&
 			auth.pg_present && auth.pg == expected.pg &&
-			str_case_equal(auth.pv1, expected.pv1);
+			strutil::iequals(auth.pv1, expected.pv1);
 }
 
 // [orig: NapiNPProtocol_HandleClientHello @0x6213b0 — the PM TLV lands in
@@ -186,35 +125,35 @@ bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 	out = ClientHello{};
 	size_t pos = 0;
 	while (pos < len) {
-		std::string name;
-		const uint8_t *value = nullptr;
-		uint16_t size = 0;
-		const size_t next = read_tlv_field(data, len, pos, name, value, size);
-		if (next == static_cast<size_t>(-1)) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(data, len, pos, field);
+		if (next == kFlatTlvEnd) {
 			// The retail walk exits on the first read failure and keeps what
 			// it gathered.
 			break;
 		}
-		if (str_case_equal(name, "NVS")) out.nvs = strip_nul(value, size);
-		else if (str_case_equal(name, "CO")) out.co = strip_nul(value, size);
-		else if (str_case_equal(name, "AP")) out.ap = strip_nul(value, size);
-		else if (str_case_equal(name, "BDAT")) out.bdat = strip_nul(value, size);
-		else if (str_case_equal(name, "DE")) out.de = read_u32_le(value, size);
-		else if (str_case_equal(name, "PN")) out.pn = strip_nul(value, size);
-		else if (str_case_equal(name, "PG") && size == 16) {
+		const std::string_view name = field.name;
+		const uint8_t *value = field.value;
+		const uint16_t size = field.size;
+		if (strutil::iequals(name, "NVS")) out.nvs = strip_nul(value, size);
+		else if (strutil::iequals(name, "CO")) out.co = strip_nul(value, size);
+		else if (strutil::iequals(name, "AP")) out.ap = strip_nul(value, size);
+		else if (strutil::iequals(name, "BDAT")) out.bdat = strip_nul(value, size);
+		else if (strutil::iequals(name, "DE")) out.de = read_u32_le(value, size);
+		else if (strutil::iequals(name, "PN")) out.pn = strip_nul(value, size);
+		else if (strutil::iequals(name, "PG") && size == 16) {
 			std::memcpy(out.pg.data(), value, 16);
 			out.pg_present = true;
-		} else if (str_case_equal(name, "PV1")) out.pv1 = strip_nul(value, size);
-		else if (str_case_equal(name, "PV2")) out.pv2 = strip_nul(value, size);
-		else if (str_case_equal(name, "PV3")) out.pv3 = strip_nul(value, size);
-		else if (str_case_equal(name, "CI")) out.ci = read_u32_le(value, size);
-		else if (str_case_equal(name, "PM")) {
-			out.pm = read_u32_le(value, size);
-			out.pm_present = true;
-		}
-		else if (str_case_equal(name, "EIP")) out.eip = read_u32_le(value, size);
-		else if (str_case_equal(name, "EPN")) out.epn = read_u32_le(value, size);
-		else if (str_case_equal(name, "ET")) out.et = read_u32_le(value, size);
+		} else if (strutil::iequals(name, "PV1")) out.pv1 = strip_nul(value, size);
+		else if (strutil::iequals(name, "PV2")) out.pv2 = strip_nul(value, size);
+		else if (strutil::iequals(name, "PV3")) out.pv3 = strip_nul(value, size);
+		else if (strutil::iequals(name, "CI")) out.ci = read_u32_le(value, size);
+		// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 — PM dword @0x62173C,
+		//  zero-initialised @0x621504]
+		else if (strutil::iequals(name, "PM")) out.pm = read_u32_le(value, size);
+		else if (strutil::iequals(name, "EIP")) out.eip = read_u32_le(value, size);
+		else if (strutil::iequals(name, "EPN")) out.epn = read_u32_le(value, size);
+		else if (strutil::iequals(name, "ET")) out.et = read_u32_le(value, size);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
@@ -279,37 +218,38 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 	out = ClientAuth{};
 	size_t pos = 0;
 	while (pos < len) {
-		std::string name;
-		const uint8_t *value = nullptr;
-		uint16_t size = 0;
-		const size_t next = read_tlv_field(data, len, pos, name, value, size);
-		if (next == static_cast<size_t>(-1)) break;
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(data, len, pos, field);
+		if (next == kFlatTlvEnd) break;
+		const std::string_view name = field.name;
+		const uint8_t *value = field.value;
+		const uint16_t size = field.size;
 		// Identity block — the real server validates these in HandleClientJoin
 		// @ 0x62B750 (NVS/PN/PG/PV1 + PV2); parse them so the round-trip is
 		// exact and our own server records what the client claimed. Every tag
 		// compares case-insensitively, as the retail walk does
 		// [orig: Napi_StrCaseEqual(tag, "NVS") @0x62b915 .. "SCRK" @0x62bc30].
-		if      (str_case_equal(name, "NVS"))  out.nvs  = strip_nul(value, size);
-		else if (str_case_equal(name, "CO"))   out.co   = strip_nul(value, size);
-		else if (str_case_equal(name, "AP"))   out.ap   = strip_nul(value, size);
-		else if (str_case_equal(name, "BDAT")) out.bdat = strip_nul(value, size);
-		else if (str_case_equal(name, "PN"))   out.pn   = strip_nul(value, size);
-		else if (str_case_equal(name, "PG") && size == 16) {
+		if      (strutil::iequals(name, "NVS"))  out.nvs  = strip_nul(value, size);
+		else if (strutil::iequals(name, "CO"))   out.co   = strip_nul(value, size);
+		else if (strutil::iequals(name, "AP"))   out.ap   = strip_nul(value, size);
+		else if (strutil::iequals(name, "BDAT")) out.bdat = strip_nul(value, size);
+		else if (strutil::iequals(name, "PN"))   out.pn   = strip_nul(value, size);
+		else if (strutil::iequals(name, "PG") && size == 16) {
 			std::memcpy(out.pg.data(), value, 16);
 			out.pg_present = true;
 		}
-		else if (str_case_equal(name, "PV1"))  out.pv1  = strip_nul(value, size);
-		else if (str_case_equal(name, "PV2"))  out.pv2  = strip_nul(value, size);
+		else if (strutil::iequals(name, "PV1"))  out.pv1  = strip_nul(value, size);
+		else if (strutil::iequals(name, "PV2"))  out.pv2  = strip_nul(value, size);
 		// Auth fields.
-		else if (str_case_equal(name, "CI"))   out.ci   = read_u32_le(value, size);
-		else if (str_case_equal(name, "HK"))   out.hk   = read_u32_le(value, size);
-		else if (str_case_equal(name, "CK"))   out.ck   = read_u32_le(value, size);
-		else if (str_case_equal(name, "NA"))   out.na   = strip_nul(value, size).substr(0, 63);
-		else if (str_case_equal(name, "PW"))   out.pw   = strip_nul(value, size).substr(0, 511);
-		else if (str_case_equal(name, "SIP"))  out.sip  = read_u32_le(value, size);
-		else if (str_case_equal(name, "SPN"))  out.spn  = read_u32_le(value, size);
-		else if (str_case_equal(name, "SCRK")) out.scrk = strip_nul(value, size);
-		else if (str_case_equal(name, "CU"))   out.cu.emplace_back(value, value + size);
+		else if (strutil::iequals(name, "CI"))   out.ci   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "HK"))   out.hk   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "CK"))   out.ck   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "NA"))   out.na   = strip_nul(value, size).substr(0, 63);
+		else if (strutil::iequals(name, "PW"))   out.pw   = strip_nul(value, size).substr(0, 511);
+		else if (strutil::iequals(name, "SIP"))  out.sip  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "SPN"))  out.spn  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "SCRK")) out.scrk = strip_nul(value, size);
+		else if (strutil::iequals(name, "CU"))   out.cu.emplace_back(value, value + size);
 		// Unknown tags (DE/PV3/NF/DCNT/RCNT/etc.) intentionally ignored.
 		pos = next;
 	}
@@ -320,8 +260,8 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	std::vector<uint8_t> buf;
 	buf.reserve(512);
-	// Identity block first, in retail's 0x42 order (NapiNPConnection_
-	// SendClientHello @ 0x61fe20). NVS/PN/PG/PV1/PV2 are validated by the real
+	// Identity block first, in retail's 0x42 order (CNapiNPConnection_
+	// SendClientJoin @ 0x61fe20). NVS/PN/PG/PV1/PV2 are validated by the real
 	// server in HandleClientJoin @ 0x62B750; CO/AP/BDAT are free but retail
 	// still emits them. Omit a string tag when empty / PG when absent, exactly
 	// as the retail builder gates each NapiNP_WriteTLV on a non-empty field.
@@ -377,10 +317,7 @@ std::vector<uint8_t> disconnect_packet_body_to_bytes(uint32_t peer_key,
 		const DisconnectEvent &event) {
 	std::vector<uint8_t> buf;
 	buf.reserve(96);
-	buf.push_back(static_cast<uint8_t>(peer_key & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((peer_key >> 8) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((peer_key >> 16) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((peer_key >> 24) & 0xFFu));
+	io::append_u32_le(buf, peer_key);
 	const std::vector<uint8_t> record = connection_description_to_bytes(event);
 	buf.insert(buf.end(), record.begin(), record.end());
 	return buf;
@@ -416,24 +353,25 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 	while (pos < len) {
 		// An empty name terminates the walk BEFORE its length is read @0x621b96.
 		if (data[pos] == 0) break;
-		std::string name;
-		const uint8_t *value = nullptr;
-		uint16_t size = 0;
-		const size_t next = read_tlv_field(data, len, pos, name, value, size);
-		if (next == static_cast<size_t>(-1)) break;
-		if (str_case_equal(name, "DS")) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(data, len, pos, field);
+		if (next == kFlatTlvEnd) break;
+		const std::string_view name = field.name;
+		const uint8_t *value = field.value;
+		const uint16_t size = field.size;
+		if (strutil::iequals(name, "DS")) {
 			out.ds = read_u32_le(value, size);
-		} else if (str_case_equal(name, "DC")) {
+		} else if (strutil::iequals(name, "DC")) {
 			out.dc = read_u32_le(value, size);
-		} else if (str_case_equal(name, "DP1")) {
+		} else if (strutil::iequals(name, "DP1")) {
 			out.dp1 = read_u32_le(value, size);
-		} else if (str_case_equal(name, "DP2")) {
+		} else if (strutil::iequals(name, "DP2")) {
 			out.dp2 = read_u32_le(value, size);
-		} else if (str_case_equal(name, "DSTR")) {
+		} else if (strutil::iequals(name, "DSTR")) {
 			out.dstr = strip_nul(value, size);
-		} else if (str_case_equal(name, "DPC")) {
+		} else if (strutil::iequals(name, "DPC")) {
 			out.dpc = read_u32_le(value, size);
-		} else if (str_case_equal(name, "DDSTR")) {
+		} else if (strutil::iequals(name, "DDSTR")) {
 			out.ddstr = strip_nul(value, size);
 		}
 		pos = next;
@@ -449,9 +387,7 @@ std::vector<uint8_t> make_client_cu_chunk(uint8_t type, std::string_view name,
 	blob.push_back(type);
 	blob.insert(blob.end(), name.begin(), name.end());
 	blob.push_back(0);
-	const uint16_t data_len = static_cast<uint16_t>(value.size() + 1);
-	blob.push_back(static_cast<uint8_t>(data_len & 0xFFu));
-	blob.push_back(static_cast<uint8_t>((data_len >> 8) & 0xFFu));
+	io::append_u16_le(blob, static_cast<uint16_t>(value.size() + 1));
 	blob.insert(blob.end(), value.begin(), value.end());
 	blob.push_back(0);
 	return blob;
@@ -468,8 +404,7 @@ bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
 	out_name.assign(reinterpret_cast<const char *>(data + name_start), p - name_start);
 	++p; // skip name NUL
 	if (p + 2 > len) return false;
-	const uint16_t data_len = static_cast<uint16_t>(data[p]) |
-			(static_cast<uint16_t>(data[p + 1]) << 8);
+	const uint16_t data_len = io::read_u16_le(data + p);
 	p += 2;
 	if (p + data_len > len) return false;
 	out_value = strip_nul(data + p, data_len);
@@ -477,30 +412,33 @@ bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
 }
 
 // Field 13: the configured `mpmaxpacketsize` folded through the retail clamp
-// ladder. Both template builders run the same three compares against the
-// game.cfg value; only the ceiling differs.
+// ladder. Both template builders run the same three SIGNED compares against
+// the game.cfg value (a negative value lands on the floor); only the ceiling
+// differs.
 // [orig: CNapiNetwork_Init @0x4ca4a0 — `if (!v) v = 1300` @0x4caa53,
-//  `if (v < 100) v = 100` @0x4caa5f, `if (v > 0x4000) v = 0x4000` @0x4caa6a;
-//  CNapiGameSession_InitNPConnection @0x4d3be0 — the same ladder @0x4d3df4
+//  `if (v < 100) v = 100` @0x4caa5f (`jge` @0x4caa66), `if (v > 0x4000)
+//  v = 0x4000` @0x4caa6a (`jle` @0x4caa74); CNapiGameSession_InitNPConnection
+//  @0x4d3be0 — the same ladder @0x4d3df4 (`jge` @0x4d3e07, `jle` @0x4d3e15)
 //  with 0x10000 @0x4d3e0b]
-uint32_t cs_max_packet_bytes(uint32_t configured, uint32_t ceiling) {
-	uint32_t v = configured;
+uint32_t cs_max_packet_bytes(int32_t configured, int32_t ceiling) {
+	int32_t v = configured;
 	if (v == 0) v = kCsMaxPacketDefault;
-	if (v < kCsMaxPacketFloor) v = kCsMaxPacketFloor;
-	if (v > ceiling) v = ceiling;
-	return v;
+	else if (v < kCsMaxPacketFloor) v = kCsMaxPacketFloor;
+	else if (v > ceiling) v = ceiling;
+	return static_cast<uint32_t>(v);
 }
 
-// Engine CS template, witnessed in IDA: CNapiGameSession_InitNPConnection writes
-// two IDENTICAL 15-entry [field_index]=timeout_ms blocks (dir1 @ proto+3652,
-// dir0 @ proto+3712); CNapiNPConnection_Create copies them into the connection and
-// SendSessionInit emits cs_dirN[i].timeout_ms verbatim. Both directions are
-// identical — there is NO client/server difference at index 12. index13 is the
-// runtime MTU (dword_25509F0, clamp 100..0x10000, default 1300).
+// The NOVAWORLDUDP service template, witnessed in IDA:
+// CNapiGameSession_InitNPConnection writes two IDENTICAL 15-entry
+// [field_index]=timeout_ms blocks (dir1 @ proto+3652, dir0 @ proto+3712);
+// CNapiNPConnection_Create copies them into the connection and SendSessionInit
+// emits cs_dirN[i].timeout_ms verbatim. Both directions are identical — there
+// is NO client/server difference at index 12. index13 is the runtime MTU
+// (dword_25509F0, clamp 100..0x10000, default 1300).
 // [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / CNapiNPConnection_Create @ 0x62acb0 / CNapiNPConnection_SendSessionInit @ 0x620ef0]
 // (Prior values were onnet-derived guesses, wrong at idx 4/8/9/10/12/13 —
 //  docs/net/novaworld-net-re.md D-NET-1.)
-static std::vector<CsField> engine_cs_fields(uint32_t max_packet_bytes) {
+std::vector<CsField> novaworld_service_cs_fields(int32_t max_packet_bytes) {
 	return {
 		{0, 240000u}, {1, 4u}, {2, 0u}, {3, 0u},
 		{4, 60000u}, {5, 1000u}, {6, 0xFFFFFFFFu}, {7, 0u},
@@ -508,13 +446,6 @@ static std::vector<CsField> engine_cs_fields(uint32_t max_packet_bytes) {
 		{12, 1u}, {13, cs_max_packet_bytes(max_packet_bytes, kCsMaxPacketCeilingService)},
 		{14, 0xFFFFFFFFu},
 	};
-}
-
-std::vector<CsField> default_client_cs_fields(uint32_t max_packet_bytes) {
-	return engine_cs_fields(max_packet_bytes);
-}
-std::vector<CsField> default_server_cs_fields(uint32_t max_packet_bytes) {
-	return engine_cs_fields(max_packet_bytes);
 }
 
 // The JOINTOPERATIONS in-game template — what a retail GAME host's 0x82 carries.
@@ -531,7 +462,7 @@ std::vector<CsField> default_server_cs_fields(uint32_t max_packet_bytes) {
 //  @0x4cab60, 30000 @0x4caab5/@0x4cab88, 10000 @0x4caac5/@0x4cab98, -1, 0, 512
 //  @0x4caaf0/@0x4cabc0, 256 @0x4cab00/@0x4cabd0, 100 @0x4cab10, 1200 (0x4B0)
 //  @0x4cab20, 1 @0x4cab2c, MTU @0x4cab3c, -1 @0x4cab48; dir 1 identical]
-static std::vector<CsField> jointoperations_cs_fields(uint32_t max_packet_bytes) {
+std::vector<CsField> jointoperations_cs_fields(int32_t max_packet_bytes) {
 	return {
 		{0, 120000u}, {1, 4u}, {2, 0u}, {3, 0u},
 		{4, 30000u}, {5, 10000u}, {6, 0xFFFFFFFFu}, {7, 0u},
@@ -539,13 +470,6 @@ static std::vector<CsField> jointoperations_cs_fields(uint32_t max_packet_bytes)
 		{12, 1u}, {13, cs_max_packet_bytes(max_packet_bytes, kCsMaxPacketCeilingGame)},
 		{14, 0xFFFFFFFFu},
 	};
-}
-
-std::vector<CsField> jointoperations_client_cs_fields(uint32_t max_packet_bytes) {
-	return jointoperations_cs_fields(max_packet_bytes);
-}
-std::vector<CsField> jointoperations_server_cs_fields(uint32_t max_packet_bytes) {
-	return jointoperations_cs_fields(max_packet_bytes);
 }
 
 ServerAuth build_server_auth(const ClientAuth &client,
@@ -561,8 +485,8 @@ ServerAuth build_server_auth(const ClientAuth &client,
 	a.ci = client.ci;
 	a.ck = client.ck;
 	a.sk = server_sk;
-	a.client_cs = default_client_cs_fields();
-	a.server_cs = default_server_cs_fields();
+	a.client_cs = novaworld_service_cs_fields();
+	a.server_cs = novaworld_service_cs_fields();
 	// [D-NET Wave 3] CU is sourced from the host's type-3 msg_out queue (@0x620ef0); only the NovaWorld
 	// lobby flow populates it. A LAN/SP host queues none -> emits NO CU (verified vs the retail LAN golden).
 	if (include_novaworld_cu) {
@@ -581,14 +505,11 @@ namespace {
 
 void append_cs_field(std::vector<uint8_t> &buf, uint8_t direction, const CsField &f) {
 	// TLV name "CS" + 6-byte value: [direction][field_index][LE uint32].
-	append_name(buf, "CS");
-	append_size(buf, 6);
-	buf.push_back(direction);
-	buf.push_back(f.field_index);
-	buf.push_back(static_cast<uint8_t>(f.value & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((f.value >> 8) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((f.value >> 16) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((f.value >> 24) & 0xFFu));
+	uint8_t value[6];
+	value[0] = direction;
+	value[1] = f.field_index;
+	io::write_u32_le(value + 2, f.value);
+	append_flat_tlv(buf, "CS", value, 6);
 }
 
 void append_cu_field(std::vector<uint8_t> &buf, const std::string &name, const std::string &value) {
@@ -597,14 +518,10 @@ void append_cu_field(std::vector<uint8_t> &buf, const std::string &name, const s
 	inner.push_back(0x03);
 	inner.insert(inner.end(), name.begin(), name.end());
 	inner.push_back(0);
-	const uint16_t vlen = static_cast<uint16_t>(value.size() + 1);
-	inner.push_back(static_cast<uint8_t>(vlen & 0xFFu));
-	inner.push_back(static_cast<uint8_t>((vlen >> 8) & 0xFFu));
+	io::append_u16_le(inner, static_cast<uint16_t>(value.size() + 1));
 	inner.insert(inner.end(), value.begin(), value.end());
 	inner.push_back(0);
-	append_name(buf, "CU");
-	append_size(buf, static_cast<uint16_t>(inner.size()));
-	buf.insert(buf.end(), inner.begin(), inner.end());
+	append_flat_tlv(buf, "CU", inner.data(), static_cast<uint16_t>(inner.size()));
 }
 
 } // namespace
@@ -670,8 +587,7 @@ bool parse_cu_inner(const uint8_t *data, size_t len,
 	out_name.assign(reinterpret_cast<const char *>(data + name_start), p - name_start);
 	++p; // skip name NUL
 	if (p + 2 > len) return false;
-	const uint16_t vlen = static_cast<uint16_t>(data[p]) |
-			(static_cast<uint16_t>(data[p + 1]) << 8);
+	const uint16_t vlen = io::read_u16_le(data + p);
 	p += 2;
 	if (p + vlen > len) return false;
 	out_value = strip_nul(data + p, vlen);
@@ -690,38 +606,39 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 	bool saw_rejection_detail = false;
 	size_t pos = 0;
 	while (pos < len) {
-		std::string name;
-		const uint8_t *value = nullptr;
-		uint16_t size = 0;
-		const size_t next = read_tlv_field(data, len, pos, name, value, size);
-		if (next == static_cast<size_t>(-1)) break;
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(data, len, pos, field);
+		if (next == kFlatTlvEnd) break;
+		const std::string_view name = field.name;
+		const uint8_t *value = field.value;
+		const uint16_t size = field.size;
 		// Case-insensitive tag walk, as the retail 0x82 reader does
 		// [orig: NapiNP_HandleServerJoinResponse @0x629840 via Napi_StrCaseEqual @0x616e70].
-		if      (str_case_equal(name, "CI"))  out.ci  = read_u32_le(value, size);
-		else if (str_case_equal(name, "MI"))  out.mi  = read_u32_le(value, size);
-		else if (str_case_equal(name, "CK"))  out.ck  = read_u32_le(value, size);
-		else if (str_case_equal(name, "CR"))  { out.cr  = read_u32_le(value, size); saw_cr = true; }
-		else if (str_case_equal(name, "JFC")) { out.jfc = read_u32_le(value, size); saw_rejection_detail = true; }
-		else if (str_case_equal(name, "JFP")) { out.jfp = read_u32_le(value, size); saw_rejection_detail = true; }
-		else if (str_case_equal(name, "JFS")) { out.jfs = strip_nul(value, size); saw_rejection_detail = true; }
-		else if (str_case_equal(name, "SK"))  out.sk  = read_u32_le(value, size);
-		else if (str_case_equal(name, "CS") && size == 6) {
+		if      (strutil::iequals(name, "CI"))  out.ci  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "MI"))  out.mi  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "CK"))  out.ck  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "CR"))  { out.cr  = read_u32_le(value, size); saw_cr = true; }
+		else if (strutil::iequals(name, "JFC")) { out.jfc = read_u32_le(value, size); saw_rejection_detail = true; }
+		else if (strutil::iequals(name, "JFP")) { out.jfp = read_u32_le(value, size); saw_rejection_detail = true; }
+		else if (strutil::iequals(name, "JFS")) { out.jfs = strip_nul(value, size); saw_rejection_detail = true; }
+		else if (strutil::iequals(name, "SK"))  out.sk  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "CS") && size == 6) {
 			// [direction][field_index][LE uint32]. direction 1 = client, 0 = server.
 			const uint8_t direction = value[0];
 			CsField f{value[1], read_u32_le(value + 2, 4)};
 			if (direction == 1) out.client_cs.push_back(f);
 			else                out.server_cs.push_back(f);
 		}
-		else if (str_case_equal(name, "CU")) {
+		else if (strutil::iequals(name, "CU")) {
 			std::string cu_name, cu_value;
 			if (parse_cu_inner(value, size, cu_name, cu_value)) {
 				out.cu.emplace_back(std::move(cu_name), std::move(cu_value));
 			}
 		}
-		else if (str_case_equal(name, "SCRK")) out.scrk = strip_nul(value, size);
-		else if (str_case_equal(name, "NA"))   out.na   = strip_nul(value, size);
-		else if (str_case_equal(name, "RIP"))  out.rip  = read_u32_le(value, size);
-		else if (str_case_equal(name, "RPN"))  out.rpn  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "SCRK")) out.scrk = strip_nul(value, size);
+		else if (strutil::iequals(name, "NA"))   out.na   = strip_nul(value, size);
+		else if (strutil::iequals(name, "RIP"))  out.rip  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "RPN"))  out.rpn  = read_u32_le(value, size);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
@@ -813,65 +730,69 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 //  Napi_StrCaseEqual, zero defaults, the walk stops at an empty name]
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 	if (!data) return false;
+	// The reader zeroes EVERY field before the walk, so an absent tag reads as
+	// zero/empty: clear exactly the builder defaults ServerHello{} carries (the
+	// numeric fields and the other strings already default to zero/empty).
+	// [orig: Nwu_HandleServerHello @0x626d20 — every field zeroed before the walk
+	//  @0x626E3B..0x626F20]
 	out = ServerHello{};
-	// Gated fields that are absent on the wire parse as absent. Keep this
-	// explicit so future builder defaults cannot leak into decoded discovery
-	// rows (for example, an empty dedicated host omits NP).
-	out.pl.clear();
-	out.p1 = 0;
-	out.p2 = 0;
-	out.np = 0;
-	out.mp = 0;
-	out.sus1.clear();
-	out.sus2.clear();
+	out.co.clear();
+	out.ap.clear();
+	out.bdat.clear();
+	out.pn.clear();
+	out.pv1.clear();
+	out.pv2.clear();
+	out.pv3.clear();
+	out.hk = 0;
+	out.sn.clear();
 	bool saw_hk = false;
 	size_t pos = 0;
 	while (pos < len) {
-		std::string name;
-		const uint8_t *value = nullptr;
-		uint16_t size = 0;
-		const size_t next = read_tlv_field(data, len, pos, name, value, size);
-		if (next == static_cast<size_t>(-1)) break;
-		if (name.empty()) break;
-		if      (str_case_equal(name, "CI"))   out.ci   = read_u32_le(value, size);
-		else if (str_case_equal(name, "CO"))   out.co   = strip_nul(value, size);
-		else if (str_case_equal(name, "AP"))   out.ap   = strip_nul(value, size);
-		else if (str_case_equal(name, "BDAT")) out.bdat = strip_nul(value, size);
-		else if (str_case_equal(name, "DE"))   out.de   = read_u32_le(value, size);
-		else if (str_case_equal(name, "UT"))   out.ut   = read_u32_le(value, size);
-		else if (str_case_equal(name, "PN"))   out.pn   = strip_nul(value, size);
-		else if (str_case_equal(name, "PG") && size == 16) std::memcpy(out.pg.data(), value, 16);
-		else if (str_case_equal(name, "PV1"))  out.pv1  = strip_nul(value, size);
-		else if (str_case_equal(name, "PV2"))  out.pv2  = strip_nul(value, size);
-		else if (str_case_equal(name, "PV3"))  out.pv3  = strip_nul(value, size);
-		else if (str_case_equal(name, "HK")) { out.hk = read_u32_le(value, size); saw_hk = true; }
-		else if (str_case_equal(name, "SN"))   out.sn   = strip_nul(value, size);
-		else if (str_case_equal(name, "PL"))   out.pl   = strip_nul(value, size);
-		else if (str_case_equal(name, "CN")) { out.cn = strip_nul(value, size); out.locale_block = true; }
-		else if (str_case_equal(name, "LNG")) { out.lng = strip_nul(value, size); out.locale_block = true; }
-		else if (str_case_equal(name, "TZB")) { out.tzb = read_u32_le(value, size); out.locale_block = true; }
-		else if (str_case_equal(name, "SF")) { out.sf = read_u32_le(value, size); out.is_game_server = true; }
-		else if (str_case_equal(name, "P1"))   out.p1   = read_u32_le(value, size);
-		else if (str_case_equal(name, "P2"))   out.p2   = read_u32_le(value, size);
-		else if (str_case_equal(name, "P3"))   out.p3   = read_u32_le(value, size);
-		else if (str_case_equal(name, "P4"))   out.p4   = read_u32_le(value, size);
-		else if (str_case_equal(name, "P5"))   out.p5   = read_u32_le(value, size);
-		else if (str_case_equal(name, "P6"))   out.p6   = read_u32_le(value, size);
-		else if (str_case_equal(name, "P7"))   out.p7   = read_u32_le(value, size);
-		else if (str_case_equal(name, "P8"))   out.p8   = read_u32_le(value, size);
-		else if (str_case_equal(name, "NP"))   out.np   = read_u32_le(value, size);
-		else if (str_case_equal(name, "MP"))   out.mp   = read_u32_le(value, size);
-		else if (str_case_equal(name, "NPW"))  out.npw  = read_u32_le(value, size);
-		else if (str_case_equal(name, "NC"))   out.nc   = read_u32_le(value, size);
-		else if (str_case_equal(name, "RIP"))  out.rip  = read_u32_le(value, size);
-		else if (str_case_equal(name, "RPN"))  out.rpn  = read_u32_le(value, size);
-		else if (str_case_equal(name, "SUS1")) out.sus1 = strip_nul(value, size);
-		else if (str_case_equal(name, "SUS2")) out.sus2 = strip_nul(value, size);
-		else if (str_case_equal(name, "SUS3")) out.sus3 = strip_nul(value, size);
-		else if (str_case_equal(name, "SUS4")) out.sus4 = strip_nul(value, size);
-		else if (str_case_equal(name, "EIP"))  out.eip  = read_u32_le(value, size);
-		else if (str_case_equal(name, "EPN"))  out.epn  = read_u32_le(value, size);
-		else if (str_case_equal(name, "ET"))   out.et   = read_u32_le(value, size);
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(data, len, pos, field);
+		if (next == kFlatTlvEnd) break;
+		if (field.name.empty()) break;
+		const std::string_view name = field.name;
+		const uint8_t *value = field.value;
+		const uint16_t size = field.size;
+		if      (strutil::iequals(name, "CI"))   out.ci   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "CO"))   out.co   = strip_nul(value, size);
+		else if (strutil::iequals(name, "AP"))   out.ap   = strip_nul(value, size);
+		else if (strutil::iequals(name, "BDAT")) out.bdat = strip_nul(value, size);
+		else if (strutil::iequals(name, "DE"))   out.de   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "UT"))   out.ut   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "PN"))   out.pn   = strip_nul(value, size);
+		else if (strutil::iequals(name, "PG") && size == 16) std::memcpy(out.pg.data(), value, 16);
+		else if (strutil::iequals(name, "PV1"))  out.pv1  = strip_nul(value, size);
+		else if (strutil::iequals(name, "PV2"))  out.pv2  = strip_nul(value, size);
+		else if (strutil::iequals(name, "PV3"))  out.pv3  = strip_nul(value, size);
+		else if (strutil::iequals(name, "HK")) { out.hk = read_u32_le(value, size); saw_hk = true; }
+		else if (strutil::iequals(name, "SN"))   out.sn   = strip_nul(value, size);
+		else if (strutil::iequals(name, "CN")) { out.cn = strip_nul(value, size); out.locale_block = true; }
+		else if (strutil::iequals(name, "LNG")) { out.lng = strip_nul(value, size); out.locale_block = true; }
+		else if (strutil::iequals(name, "TZB")) { out.tzb = read_u32_le(value, size); out.locale_block = true; }
+		else if (strutil::iequals(name, "SF")) { out.sf = read_u32_le(value, size); out.is_game_server = true; }
+		else if (strutil::iequals(name, "P1"))   out.p1   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "P2"))   out.p2   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "P3"))   out.p3   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "P4"))   out.p4   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "P5"))   out.p5   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "P6"))   out.p6   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "P7"))   out.p7   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "P8"))   out.p8   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "NP"))   out.np   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "MP"))   out.mp   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "NPW"))  out.npw  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "NC"))   out.nc   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "RIP"))  out.rip  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "RPN"))  out.rpn  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "SUS1")) out.sus1 = strip_nul(value, size);
+		else if (strutil::iequals(name, "SUS2")) out.sus2 = strip_nul(value, size);
+		else if (strutil::iequals(name, "SUS3")) out.sus3 = strip_nul(value, size);
+		else if (strutil::iequals(name, "SUS4")) out.sus4 = strip_nul(value, size);
+		else if (strutil::iequals(name, "EIP"))  out.eip  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "EPN"))  out.epn  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "ET"))   out.et   = read_u32_le(value, size);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}

@@ -35,7 +35,7 @@ namespace opennova::hud {
 // The label box, design space (x1, y1, x2, y2 like every HUD_DrawLabelBox
 // call): x 128..896, 340 tall from the panel top [orig: the call @0x5b7671 —
 // (128, top, 896, bottom - 140) with top/bottom 280/760, or 140/620 when
-// g_spawn_success_gate && g_endround_winner_team == 1 @0x5b763b..0x5b7644].
+// g_SpawnSuccessGate && g_EndRoundWinnerTeam == 1 @0x5b763b..0x5b7644].
 inline constexpr int kEndRoundStatsBoxX1 = 128;
 inline constexpr int kEndRoundStatsBoxX2 = 896;
 inline constexpr int kEndRoundStatsBoxHeight = 340;
@@ -54,7 +54,7 @@ inline constexpr int kEndRoundStatsValueX = 620;
 // (world::MissionKillStats plus the subgoal pair).
 struct EndRoundStatisticsInput {
 	// Raised box: the between-rounds gate with a team-1 (player) win
-	// [orig: g_spawn_success_gate && g_endround_winner_team == 1 @0x5b763b].
+	// [orig: g_SpawnSuccessGate && g_EndRoundWinnerTeam == 1 @0x5b763b].
 	bool raised = false;
 	int32_t subgoals_won = 0;        // [orig: 0xC846D0 — one per first SubGoalWon]
 	int32_t subgoals_defined = 0;    // [orig: 0xC8468C — the leading win-condition scan]

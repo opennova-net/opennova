@@ -109,7 +109,7 @@ EntityHandle seed_heat_lock(LocalWorld &lw, LocalPlayer &local) {
 
 // The scope-zero elevation comes back OUT of the weapon-view ray while the
 // weapon can fire, and drops when it cannot.
-// [orig: Player_CanFireWeapon @0x4b4ea7 -> offsetY = -MountSlot+4
+// [orig: Player_IsOpticalViewVisible @0x4b4ea7 -> offsetY = -MountSlot+4
 //  @0x4b4eb0..0x4b4eb9, 0 when it cannot fire @0x4b4ebd;
 //  Entity_BuildCameraFromWeaponView pitch += offsetY @0x4b0f56]
 void test_weapon_view_ray_takes_the_scope_zero_back_out() {

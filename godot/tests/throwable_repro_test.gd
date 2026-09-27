@@ -408,7 +408,7 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 			"without a kill-zone class the expiry presents no second obj-row event")
 
 
-# The windup exposure the HUD charge bar reads [orig: g_fireChargeStartTick ->
+# The windup exposure the HUD charge bar reads [orig: g_FireChargeStartTick ->
 # HUD_DrawPowerThrowChargeBar @0x599830]: active only while held with ammo on a
 # PowerThrow weapon, with the held tick count.
 func test_windup_state_feeds_the_charge_bar() -> void:

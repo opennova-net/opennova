@@ -13,7 +13,7 @@ namespace opennova::audio {
 //
 // The tests run in this order and the FIRST match wins:
 //   1. water — a nonzero water plane with the FEET under it (one slot for both
-//      feet) [orig: Env_WaterHeightFixed @0x26C6454 read @0x4b77d3];
+//      feet) [orig: g_EnvWaterHeightFixed @0x26C6454 read @0x4b77d3];
 //   2. on-entity — the body is standing on another entity, i.e. its
 //      `groundEntity` link (entity+0x28) is set [orig: the +0x28 store by
 //      Entity_RaycastGroundHeightAndObject @0x525fd0 / @0x414370];

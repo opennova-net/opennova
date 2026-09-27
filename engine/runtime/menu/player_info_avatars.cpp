@@ -71,7 +71,7 @@ struct Fill {
 		combos();
 	}
 
-	// [orig: populate_avatar_combo_list @0x560210] Head display precedes body.
+	// [orig: PlayerInfo_PopulateAvatarComboList @0x560210] Head display precedes body.
 	void combos() {
 		const int id = menu.widget_id("COMBO_LIST");
 		if (id < 0) return;
@@ -87,7 +87,7 @@ struct Fill {
 		state.preview_changed = true;
 	}
 
-	// [orig: populate_player_voice_combo @0x55dce0; sub_57AE90 @0x57ae90
+	// [orig: PlayerInfo_PopulatePlayerVoiceCombo @0x55dce0; sub_57AE90 @0x57ae90
 	//  resolves combo+280, stored from the head sex @0x57aad2; miss @0x57aeb5
 	//  gives male; invalid override resets profile[team+1532] before select-by-value]
 	void voices() {

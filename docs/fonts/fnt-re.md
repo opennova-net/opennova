@@ -107,7 +107,7 @@ loader, its page shaders, and the drawer's calls to the dynamic vertex buffer:
 | Glyph buffer | `[orig: CGameFont_DrawText @ 0x6752C0]` appends six triangle-list vertices per glyph for the current texture page. It flushes at 384 vertices (`@ 0x675A6E..0x675AC7`), submits the remainder (`@ 0x675CFA..0x675D39`), then advances pages (`@ 0x675D8A..0x675DAA`). |
 | Underline buffer | The same drawer appends two line vertices per underline, flushes at 128 (`@ 0x675BB3..0x675C17`), and submits remaining lines after remaining glyphs (`@ 0x675D43..0x675D85`). Capacity flushes can interleave these kinds. |
 | Device submission | `[orig: GDynamicVB_DrawPrimitive @ 0x6788E0]` copies 40-byte vertices into a dynamic buffer and submits a primitive list (`@ 0x67892C..0x6789B9`), with a `DrawPrimitiveUP` fallback. |
-| Font blend | `[orig: GameFont_LoadFromBlob @ 0x674740]` selects page shader mode `0x651` (`@ 0x674830..0x67483B`); `[orig: decode_blend_mode_to_d3d_states @ 0x680F00]` selects source-alpha / inverse-source-alpha (`@ 0x680F2C..0x680F3A`). Material modulation is documented in [render-material-re.md](../render/render-material-re.md). |
+| Font blend | `[orig: GameFont_LoadFromBlob @ 0x674740]` selects page shader mode `0x651` (`@ 0x674830..0x67483B`); `[orig: RenderState_DecodeBlendModeToD3DStates @ 0x680F00]` selects source-alpha / inverse-source-alpha (`@ 0x680F2C..0x680F3A`). Material modulation is documented in [render-material-re.md](../render/render-material-re.md). |
 
 `~/Development/jo-c` at `f2f7c22dbec6c3d1dab31ad1c6a516a6edb45a3c`
 corroborates these instructions: `Jointops.exe.kong.c:645826` (drawer),

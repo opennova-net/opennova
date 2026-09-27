@@ -59,8 +59,10 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 `anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`),
 `particle/gorehit.ptu` (the gore-set half of the effect catalog, written in the
 retail `.ptu` grammar with our own effect), `grm/person.grm` (an authored facial
-rig; `grm_roundtrip` pins it byte-for-byte through the writer), the `novaworld/*_manifest.txt`
-records, and this README.
+rig; `grm_roundtrip` pins it byte-for-byte through the writer),
+`threedi/o3d/*.o3d` (the authored `.o3d` scenes the `opennova-3di` ctests and
+the Blender add-on's package smoke test build), the
+`novaworld/run_*/manifest.txt` records, and this README.
 
 ## threedi/synth — the synthetic 3DI model set (minted)
 
@@ -73,7 +75,7 @@ after what those tests key on:
 | Model | Shape |
 |---|---|
 | `crate` | one part, one box; COBJ 0 with a 12-face box and one CB volume; user point `ground` |
-| `gun` | receiver + barrel parts, no collision block (a held weapon); `MFlash01` on the barrel (row 1 sits on a drawing part off the root), `Bullet01` and `bcasing` on the root (a one-bone rig can carry the muzzle), `ground` |
+| `gun` | receiver + barrel parts, a CMDL block with no usable collision geometry (a held weapon); `MFlash01` on the barrel (row 1 sits on a drawing part off the root), `Bullet01` and `bcasing` on the root (a one-bone rig can carry the muzzle), `ground` |
 | `shed` | one part: an opaque hut plus one alpha bulb strip; exactly ONE light (style 24, atten 0..3 at mission (0, 0, 1.25), subobject 0); CTRL `FLICKER`; two CB volumes |
 | `house` | one inert part, three opaque `FF_ST_OP` strips, no lights; 3 CB + one octagonal prism (a multi-plane hull); no OOBJ |
 | `bird` | nine skinned parts (the Bird1 hierarchy), two collision faces per COBJ (18), no BVOL |

@@ -90,12 +90,27 @@ static void test_visual_item_resolution() {
     CHECK(resolve_visual_item_id(kPlayerRuntimeTypeId, bare) == kPlayerRuntimeTypeId);
 }
 
+// A placed record is a building to the renderer and the light spawner only by
+// its items.def type: a pool-2 decoration (def type 2) is an entity, a
+// Building-type def in either family is a building, and a record without a
+// resolved def keeps its family. [orig: Entity_BuildProximityLists_Pool2
+// @ 0x4b946e / 0x4b9502; Entity_SpawnGlowEffects @ 0x56c7e8..0x56c7ec]
+static void test_building_identity_is_the_def_type() {
+    CHECK(placed_record_is_building(kEntityKindBuilding, true, kItemTypeBuilding));
+    CHECK(!placed_record_is_building(kEntityKindBuilding, true, 2)); // decoration / foliage
+    CHECK(placed_record_is_building(kEntityKindItem, true, kItemTypeBuilding));
+    CHECK(!placed_record_is_building(kEntityKindItem, true, kItemTypeVehicle));
+    CHECK(placed_record_is_building(kEntityKindBuilding, false, 0));
+    CHECK(!placed_record_is_building(kEntityKindItem, false, 0));
+}
+
 int main() {
     test_dynamic_shadow_admission();
     test_static_shadow_admission();
     test_mirror_admission();
     test_individual_node_admission();
     test_visual_item_resolution();
+    test_building_identity_is_the_def_type();
     if (failures == 0) {
         std::printf("placement_traits_test: all checks passed\n");
     }

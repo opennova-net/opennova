@@ -4,12 +4,12 @@
 // inmatch because it reads the npwire EndRoundStats board): what stat.mnu's RESULTLIST table shows
 // after the 6-second end-round overlay — the column set and the per-player
 // rows, computed from the reassembled S2C 0x56 board the way
-// populate_stat_results_list @0x562240 builds the CTableWnd. The embedder
+// StatScreen_PopulateStatResultsList @0x562240 builds the CTableWnd. The embedder
 // resolves the header keys (Overlays/STROVER_STATFIELD%02d or ...SMALL%02d
 // through the dword_83C840 field->string map) and feeds the menu driver.
-// [orig: populate_stat_results_list @0x562240; the STAT show callback
+// [orig: StatScreen_PopulateStatResultsList @0x562240; the STAT show callback
 //  StatScreen_ShowCallback (ex sub_562840) @0x562840 (hides RADIO_TAB_* when non-team, selects OVERALL);
-//  stat_filter_tab_handler @0x562140 (tab 1 = team 2 rows, tab 2 = team 1)]
+//  StatScreen_StatFilterTabHandler @0x562140 (tab 1 = team 2 rows, tab 2 = team 1)]
 
 #include <net/npwire/ingame_decode.h>
 
@@ -70,7 +70,7 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 		const std::vector<StatScreenPlayer> &players, bool show_disabled,
 		int local_slot);
 
-// The tab filter [orig: stat_filter_tab_handler @0x562140]: tab 0 shows every
+// The tab filter [orig: StatScreen_StatFilterTabHandler @0x562140]: tab 0 shows every
 // row, tab 1 only team 2, tab 2 only team 1.
 bool stat_screen_row_visible(int tab_index, uint8_t team);
 

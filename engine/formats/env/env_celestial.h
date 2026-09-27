@@ -13,8 +13,8 @@
 namespace opennova::env {
 
 // ---------------------------------------------------------------------------
-// Sun glare [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]
-//           [orig: render_skybox_sun_glow @ 0x5acd00]
+// Sun glare [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]
+//           [orig: Render_SkyboxSunGlow @ 0x5acd00]
 
 struct GlareResult {
 	int glare = 0;      // 0..255 additive glare intensity
@@ -26,11 +26,11 @@ struct GlareResult {
 GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness);
 
 // The sun-glare screen veil + exposure stop-down pair — the exact integer
-// chain of [orig: compute_sun_glare_and_fog_blend @ 0x5ad610], consumed once
+// chain of [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610], consumed once
 // per main scene frame by [orig: Environment_ApplySunVeilAndExposureStopdown
 // @ 0x5ad8b0 (ex sub_5AD8B0)]: `glare` (dot^32 x 192 x brightness/256, SunDim
 // and overcast folds) is the ALPHA byte of a fullscreen WHITE quad drawn over
-// the scene when > 2 ((glare << 24) + 0xFFFFFF -> render_fullscreen_decal_quad
+// the scene when > 2 ((glare << 24) + 0xFFFFFF -> Render_FullscreenDecalQuad
 // @ 0x5ad94f), and `stopdown` (dot^128 x 40 x brightness/256, same folds) is
 // the modulator-2 exposure stop-down input (ModulatorChain::
 // set_sun_veil_stopdown). compute_sun_glare above is the earlier float
@@ -60,9 +60,9 @@ int glare_brightness_step(int current, int target);
 
 // ---------------------------------------------------------------------------
 // Celestial bodies + glare occlusion — witnessed at the ENG-2 celestial leg
-// [orig: render_celestial_bodies @ 0x5acaa0 (the LIVE sun/moon renderer,
-//  was misnamed render_skybox_fog_layers); render_skybox_sun_glow @ 0x5acd00].
-//  The old render_skybox_layers @ 0x5ac230 is a caller-less dead variant (its
+// [orig: Render_CelestialBodies @ 0x5acaa0 (the LIVE sun/moon renderer,
+//  was misnamed render_skybox_fog_layers); Render_SkyboxSunGlow @ 0x5acd00].
+//  The old Render_SkyboxLayers @ 0x5ac230 is a caller-less dead variant (its
 //  +64/+16 fixed offsets never run).
 
 // Sun/moon bodies place at camera + direction * 64 world units, identity
@@ -86,9 +86,9 @@ int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixe
 // @ 0x5adc50) and its instance table regenerates per load
 // [orig: Star_GenerateInstanceTable @ 0x5ac850], but the only renderer that
 // reads the table has no caller in the image (no code xref, no rel32 call, no
-// absolute pointer) [orig: Star_RenderField_unused @ 0x5ad9c0], so nothing is ported.
+// absolute pointer) [orig: Star_RenderField_Unused @ 0x5ad9c0], so nothing is ported.
 
-// Glare occlusion (env #14) [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f]:
+// Glare occlusion (env #14) [orig: Render_SkyboxSunGlow @ 0x5acd9e..0x5acf7f]:
 // TWO jittered rays per frame feed an 8-bit SLIDING window (>>1 per sample,
 // bit 0x80 = sample visible), so the window spans the last 4 frames. The ray
 // is camera -> camera + sun_dir * 1024 world units, jittered per sample from
@@ -96,29 +96,33 @@ int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixe
 // (bit 1). Brightness steps +-16 (dead-band hold) toward
 // popcount(window) * 32 * (fog_distance / 1000)  (flt_7DA0C4 = 1/65536000).
 struct GlareOcclusionState {
-	uint8_t window = 0;        // Glare_OcclusionWindow @ 0x27E2E34
-	int brightness = 0;        // Glare_OcclusionBrightness @ 0x27E2E30
-	uint32_t jitter_index = 0; // Glare_JitterFrameIndex @ 0x27E5690
+	uint8_t window = 0;        // g_GlareOcclusionWindow @ 0x27E2E34
+	int brightness = 0;        // g_GlareOcclusionBrightness @ 0x27E2E30
+	uint32_t jitter_index = 0; // g_GlareJitterFrameIndex @ 0x27E5690
 };
 
 // The coarse (unjittered) glare gate ray's start-height lift
-// [orig: render_skybox_sun_glow @ 0x5acde4 — start.z = camera_z + 1.0 +
-// 0.5 * (Glare_JitterFrameIndex & 3) world units; the two jittered fine rays
+// [orig: Render_SkyboxSunGlow @ 0x5acde4 — start.z = camera_z + 1.0 +
+// 0.5 * (g_GlareJitterFrameIndex & 3) world units; the two jittered fine rays
 // start at the exact camera height (@ 0x5ace37)].
 inline float glare_coarse_start_lift(uint32_t frame_index) {
 	return 1.0f + 0.5f * static_cast<float>(frame_index & 3u);
 }
 
 // ---------------------------------------------------------------------------
-// The water-reflected sun glint [orig: update_sun_glare @ 0x5ad130, once per
-// main scene render from Terrain_RenderWorldScene @ 0x5c96c0]: its
-// own 4-bit visibility window (dword_27E2E2C, >> 1 per frame, bit 3
-// (value 8) = visible) and +-16 brightness chase toward popcount * 64 (no
-// dead-band, no fog scale — dword_27E2E28). The settled brightness draws the glare model
-// mirrored below the eye (camera + sun * 128 with the HEIGHT term negated)
-// and, right-shifted 2, feeds the sun veil's secondary term
+// The water-reflected sun glint [orig: Environment_UpdateSunGlare @ 0x5ad130, once per
+// scene pass from Terrain_RenderWorldScene @ 0x5c96c0 — the main scene's,
+// then, while it renders, the weapon Inset pass's over its own camera, both
+// on this one accumulator (runtime/renderer/scene_overlay.h
+// kInsetOverlayOrder)]: its own 4-bit visibility window (dword_27E2E2C, >> 1
+// per call, bit 3 (value 8) = visible) and +-16 brightness chase toward
+// popcount * 64 (no dead-band, no fog scale — dword_27E2E28). The settled
+// brightness draws the glare model mirrored below the eye (camera + sun * 128
+// with the HEIGHT term negated) and, right-shifted 2, feeds the sun veil's
+// secondary term, which the frame computes after both passes
 // [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8dc..0x5ad916 —
-// both veil sums clamp 192].
+// both veil sums clamp 192; its call @ 0x5cac4b follows the Inset's
+// @ 0x5ca949 in Render_ProcessMainSceneFrame].
 struct WaterGlintState {
 	uint8_t window = 0;        // dword_27E2E2C
 	int brightness = 0;        // dword_27E2E28
@@ -171,7 +175,7 @@ int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blen
                            int sun_dim_fixed, bool frame_effects_quarter);
 
 // The BLOOM-SOURCE (Q3) glow alpha, 16.16: FrameFX_RenderGlowSource calls
-// render_skybox_sun_glow(0, 0) - no occlusion test - so the Q3 draw uses the
+// Render_SkyboxSunGlow(0, 0) - no occlusion test - so the Q3 draw uses the
 // fog-based brightness (fog_km + 1) * 0.5 * dot_factor instead of the
 // occlusion accumulator [orig: @ 0x5ad013..0x5ad027; flt_7C3280 = 1.0,
 // flt_7C3B94 = 0.5, flt_7DA0C4 = 1/65536000], then the same quarter and
@@ -182,7 +186,7 @@ int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
                          bool frame_effects_quarter);
 
 // The 21x21 sky dome: 441 vertices / 800 triangles per pass
-// [orig: render_skybox draw @ 0x5798dc].
+// [orig: Render_Skybox draw @ 0x5798dc].
 inline constexpr int kSkyDomeVertices = 441;
 inline constexpr int kSkyDomeTriangles = 800;
 
@@ -190,10 +194,10 @@ inline constexpr int kSkyDomeTriangles = 800;
 // (radius 1024 = 20 rows x 51.2) sits at y = 0: 3072^2 - 1024^2 = 2^23, so
 // y(r) = sqrt(3072^2 - r^2) - sqrt(2^23) and the apex reference height is
 // 3072 - sqrt(2^23) ~= 175.6906 — the "175.69" the height scale divides by
-// [orig: build_sky_dome_mesh @ 0x578ed4 — v14 = skyHeight / (3072.0 - sqrt(8388608.0))].
+// [orig: SkyDome_BuildMesh @ 0x578ed4 — v14 = skyHeight / (3072.0 - sqrt(8388608.0))].
 inline const double kSkyDomeReferenceHeight = 3072.0 - std::sqrt(8388608.0);
 
-// The sky dome mesh [orig: build_sky_dome_mesh @ 0x578db0] — 21 rings x 21
+// The sky dome mesh [orig: SkyDome_BuildMesh @ 0x578db0] — 21 rings x 21
 // columns, FVF 0x212 (XYZ|NORMAL|TEX2, stride 40). Per vertex: radius =
 // row * 51.2, theta = col * pi/10, x = sin(theta)*radius, z = cos(theta)*radius,
 // y = v14 * (sqrt(3072^2 - radius^2) - sqrt(2^23)) — the Y-only height scale is

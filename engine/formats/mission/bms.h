@@ -76,7 +76,7 @@ enum class AttribFlags : uint32_t {
     FogColorOverrideEnable = 0x4,
     WeatherOverrideEnable = 0x8,
     ForceIndoors = 0x10, // forces the indoors blink bit every frame — a game-side witness, not a dfx2med
-                         // option checkbox [orig: Bms_AttribFlags & 0x10 -> accum |= 2,
+                         // option checkbox [orig: g_BmsAttribFlags & 0x10 -> accum |= 2,
                          // Render_ProcessMainSceneFrame @0x5ca1c8-0x5ca1cd; docs/render/render-occlusion-re.md §4]
     RotateMap180 = 0x20,
     SinglePlayerRespawn = 0x40,
@@ -770,7 +770,7 @@ struct BoundingBox {
 
 // One weapon-loadout chunk tuple, kept as the four raw chunk strings so unusual authored
 // text round-trips byte-exactly. The format is the engine-wide kit tuple
-// {name\0 ammoPri\0 ammoSec\0 flags\0} [orig: restrictionData @ 0x24D4E00, sanitized on SP
+// {name\0 ammoPri\0 ammoSec\0 flags\0} [orig: g_SpawnLoadoutBuffer @ 0x24D4E00, sanitized on SP
 // load by AIProfile_SanitizeConfigData @ 0x40cfe0; net-re §5.63]: ammo_primary/ammo_secondary
 // are requested clip counts (-1 = the weapon's default fill), and flags is the per-ammo
 // damage-class request byte (1 = x0.9, 2 = x1.1, every other value neutral).
@@ -787,7 +787,7 @@ struct WeaponLoadout {
 
 // One {name, status} pair of the item-availability chunk: the per-map weapon rules
 // the mission-list scanners compile into the availability template
-// [orig: build_item_restriction_table @0x54DDB0 name-list mode over the chunk].
+// [orig: WeaponDef_BuildItemRestrictionTable @0x54DDB0 name-list mode over the chunk].
 // The original reads the status byte SIGNED: a -1 pair maps to 3 mission-allowed
 // at apply [orig: @0x54de3f..0x54de49].
 struct ItemAvailabilityEntry {

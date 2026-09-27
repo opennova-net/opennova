@@ -4,7 +4,7 @@
 
 namespace opennova::world {
 
-// [orig: compute_ambient_light_along_direction @ 0x5c7a00]
+// [orig: Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00]
 void compute_iris_march(World &world, CollisionWorld &collision,
 		const OcclusionWorld &occlusion, const int32_t cam[3], int32_t end[3],
 		const int32_t sun[3], IrisMarch &out) {
@@ -17,7 +17,7 @@ void compute_iris_march(World &world, CollisionWorld &collision,
 	// The full retail clip: terrain first unless the local player is indoors,
 	// then every eligible solid in that player's candidate slice. The mutable
 	// endpoint retains the nearest hit across the complete walk.
-	// [orig: raycast_entity_collision @ 0x413760]
+	// [orig: Entity_RaycastCollision @ 0x413760]
 	collision.clip_segment_to_nearest_collision(world, local_player, cam, end);
 
 	// The three ray clip radii — the shared witnessed triple
@@ -61,7 +61,7 @@ void compute_iris_march(World &world, CollisionWorld &collision,
 		// iterates only that player's own +0x1BC/+0x1C0 slice (the 17-tick
 		// arena), skips candidates owner-linked to the player, requires an
 		// ItemDef, and reports BLOCKED on the first obstructed candidate
-		// [orig: raycast_find_collision_entity @0x539a70 — slice walk
+		// [orig: Physics_RaycastFindCollisionEntity @0x539a70 — slice walk
 		// @0x539b5d..0x539bc4, pushed @0x5c7765..0x5c77c6 at radii
 		// -0x2000/-0x5000/-0x8000, see docs/render/render-lighting-re.md].
 		int32_t level = 8;

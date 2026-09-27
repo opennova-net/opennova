@@ -191,8 +191,8 @@ trigger 0 alone.
   param1 (rewritten by the load-time resolver) into the 32-byte area table
   `unk_A32D10`; x +4/+8 and y +12/+16 always, z +20/+24 only when the record's
   flag byte +28 has bit 2 (else -0x40000000..0x40000000); every pool-1 row with
-  +28 nonzero whose ammo def (+620 into `g_ammoDefTable`, 276-byte rows) is
-  `g_ammo_satchel` and whose position +4/+8/+12 satisfies the inclusive
+  +28 nonzero whose ammo def (+620 into `g_AmmoDefTable`, 276-byte rows) is
+  `g_AmmoSatchel` and whose position +4/+8/+12 satisfies the inclusive
   compares -> 1. **PORTED 2026-09-12** over `ThrowableSim::devices` (the placed
   satchels), their registry rows and the registered area bounds.
 - The chain fold is FLAT and left-to-right (`EventTrigger_EvaluateChain @0x454050`,
@@ -214,10 +214,10 @@ Verified case map (ours matches): case 5 MisvarChange sub 1..5 = Set/Add/Sub/Inc
 `dword_C6B240`, the add/sub being dword ops that wrap (@0x4543B7/@0x4543D4/@0x4543EE/
 @0x454409); cases 8/9/0xA = Blue/Red/Green win via `Server_ProcessRoundEnd(1/2/0)` with
 no gate at the call sites (@0x45447B/@0x454495/@0x4544AF): the round-over latch sits
-inside the callee (`cmp g_spawn_success_gate, ebx` @0x5164F6), which drops a second
+inside the callee (`cmp g_SpawnSuccessGate, ebx` @0x5164F6), which drops a second
 end; case 7 PlayWavList plays only where `is_mp_session_peer` is set (@0x45443D: every
 playing peer, single player included; a dedicated host clears it), and once the
-round-over / cinematic latch `g_spawn_success_gate` is set only when param2 == 1 forces
+round-over / cinematic latch `g_SpawnSuccessGate` is set only when param2 == 1 forces
 it (@0x45444A/@0x454450, `Dialog_PlayByIndex` @0x454461). That latch is raised by the
 round end (`Server_ProcessRoundEnd @0x5168E4`) and by the SP lose cinematic the round
 end starts (`Cine_StartPlayback @0x577848`), so `world::Match`'s round-over latch
@@ -253,9 +253,10 @@ fires UPDATE only on `(phase & 3) == 0` (@0x52ba47), i.e. every 4×4 ms. It then
 RENDER callback once per outer iteration (`Render_ProcessMainSceneFrame @0x5ca0f0`, the scene
 descriptor's +0x28 slot @0x52bac6) at the **variable render rate**. So the simulation is
 **decoupled from rendering**: a long frame runs **multiple** sim ticks (catch-up), a short frame
-runs **zero**; the accumulator is clamped at **500 ms / ~31 ticks** (`0x1F40` units @0x52b83e)
+runs **zero**; the accumulator is clamped at **500 ms** (`0x1F40` units @0x52b83e: 125 quanta
+of 4 ms, so at most **32 ticks** from a tick-aligned phase)
 against the spiral of death. Below the clamp the bank itself is low-passed in place,
-`(7*g_frameTimeSmoothedFp4 + bank + 4) >> 3` (@0x52b85b), before the drain, so a long frame's
+`(7*g_FrameTimeSmoothedFp4 + bank + 4) >> 3` (@0x52b85b), before the drain, so a long frame's
 backlog is paid back over the following frames rather than in one burst; the optional
 `lock_framerate` `Sleep(1)` cap (@0x52b8a6..0x52b8b2) is the only wait. The mission start never
 banks the load (the "Game Loop" mode @0x82f340 runs `Game_StartMission` as its initialize and
@@ -274,11 +275,11 @@ callback; `current_tick @0x24c1968` increments once per call):
    - `WacScript_AdvanceTick @0x51d8bf` — the **WAC executor**: 14-instruction wrapper that gates
      on `dword_C6EB28` (script disable), counts `dword_C6EAD4` up to **0x3E (62)**
      (@0x4f81b1), then runs `WacScript_ExecuteBytecode` once and increments the mutable
-     clock `wac_var_ticks` (@0x4f81d3). One VM execution per 62 admitted ticks.
+     clock `g_WacVarTicks` (@0x4f81d3). One VM execution per 62 admitted ticks.
    - every 32nd tick (`test tick,1Fh` @0x51D8C4), under the same admission: the
-     spawn-marker pass (`assign_overlay_spawn_points`, the call @0x51D8D2) and
+     spawn-marker pass (`Spawn_AssignOverlaySpawnPoints`, the call @0x51D8D2) and
      `Server_UpdatePlayerBreathTimers` (the call @0x51D8D7, the drowning producer).
-   - every 16th tick (`++g_quarter_roundrobin_counter > 15`, ex `dword_C8D808`, @0x51D8DC..0x51D8F4): the **normal-event quarter pass**
+   - every 16th tick (`++g_QuarterRoundRobinCounter > 15`, ex `dword_C8D808`, @0x51D8DC..0x51D8F4): the **normal-event quarter pass**
      `@0x454d50` (kong-misnamed "Entity_SetStateWreckage") — processes ¼ of the event
      list (entries with `(flags & 6) == 0`), cursor `dword_AE06FC` cycling 0..3. Each
      normal event is therefore evaluated once per **64 ticks**, which is exactly the
@@ -288,7 +289,7 @@ callback; `current_tick @0x24c1968` increments once per call):
    the authority skips it when no human is present and the WAC clock has started,
    unless its own playing peer sits on the death screen; every peer skips it while the
    retained pre-round byte `dword_A85B64` is set and, in a session, once the round-over
-   latch `g_spawn_success_gate` is up) (the infantry motor's 2/8/16-tick stagger lives
+   latch `g_SpawnSuccessGate` is up) (the infantry motor's 2/8/16-tick stagger lives
    inside it).
 
 So the authoritative order is **WAC → BMS events → AI**, each with its own divider.
@@ -345,7 +346,7 @@ events in the 116 shipped BMS carry `flags & 4` (flag distribution 0x0 3002, 0x1
 | `event_runtime`: cat-3 Event trigger reads the latch window (`active && delay elapsed`), exposed as `event_fired()`; Simulation `has_event_fired` rerouted | @0x453a75 |
 | `event_runtime`: ResetEvent clears only the latch | @0x454974 |
 | `wac_system`: the 62-tick divider lives in WacSystem (accum `dword_C6EAD4`, pause `dword_C6EB28`); publishes the mutable VM clock and shares admission with BMS; skips the pre-mission pass | @0x4f81a0..@0x4f81d3 |
-| `wac/vm`: mutable WAC time base (`time_`, [orig: wac_var_ticks @0xC6EAD8]) for `past`/`ontick`/`elapse`/Ticks; incremented after execution and writable through Ticks | @0x4f81d3 |
+| `wac/vm`: mutable WAC time base (`time_`, [orig: g_WacVarTicks @0xC6EAD8]) for `past`/`ontick`/`elapse`/Ticks; incremented after execution and writable through Ticks | @0x4f81d3 |
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
 | the system registration (`MissionKernel::finish_load`, formerly `mission_systems.h`): grill-gate comment replaced with the witnessed order | @0x5263f0 |
@@ -368,7 +369,7 @@ integrates a fixed displacement per tick, so locomotion/animation ran fast at hi
 at low FPS).
 
 `inmatch::Session::advance(FrameInput)` now owns the original's accumulator: it banks `delta`
-through the retail bank (`world::TickAccumulator`'s `RetailMainLoop` policy: the 7/8 smoother,
+through the retail bank (`world::TickAccumulator`, the one bank: the 7/8 smoother,
 the 500 ms clamp, the 4 ms quanta; the mission-start re-base banks the time since the last
 render instead, from the shell's `frame_post_draw` stamp), runs the due single ticks, and
 the Godot presentation owner presents **once** after the batch — sim at a
@@ -655,9 +656,19 @@ bit flip it.
    for marker defs 0xFFB/0xFFD/0xFFF/0x1002/0x1004/0x1006/0x1007), and the
    joiner-side net appliers `NapiNPClientMsg_0x00A @ 0x42fec0` /
    `NapiNPClientMsg_0x02F @ 0x430e10`. Cleared by `Entity_DropCarriedObject
-   @ 0x439df0` (renamed from the misnomer Entity_InitSpawnedChild — nulls the
-   link and back-link, clears child Flags bit0/0x800000, terrain-snaps, tosses
-   with the dropper's yaw, plays the def-name drop sound, authority broadcasts),
+   @ 0x439df0` (renamed from the misnomer Entity_InitSpawnedChild: it nulls the
+   link and back-link; clears child Flags bits 0 and 0x800000 (the carrier's
+   0x800000 copy @0x439e1d and a terrain-height Z @0x439e2e..0x439e51 are both
+   overwritten before any read); zeroes the X/Y velocity and sets the vertical
+   one to ftol(sin(carrier Pitch · dbl_7C3608) · 2^22) >> 12
+   @0x439e54..0x439e88; sets +0x155 = 0x10 (the S2C 0x35 pickup refusal byte,
+   `sub_4E03D0 @0x4e03f0`); installs `Entity_UpdatePositionAndTransform
+   @0x4adef0` as +0x1C4 @0x439e95; poses the child at the carrier's X/Y,
+   Z + 0x4000 and Yaw + 0x40000000 @0x439e9f..0x439ec3; copies the carrier's
+   blink quad @0x439ec6..0x439ef1 and re-runs its proximity query @0x439ef7;
+   plays the def's +0x6F3 sound (`door_open_sound_id`) at the carrier; the
+   authority broadcasts 0x2F; the fall and the ride are world-wac-ai-re.md
+   §24.3a's),
    the capture-zone clear @0x4ada07, and `Entity_Destroy @ 0x43ea03`. The
    savegame restore `SaveFile_ApplyEntityRecord @ 0x4abb00` (renamed from
    sub_4ABB00; caller `SaveFile_ReadOrWriteEntityRecord @ 0x4ac0c0`) resolves
@@ -717,7 +728,7 @@ bit flip it.
 | `BmsEventSystem::tick` (pre + normal passes) / `run_post_mission_pass` (post) | `@0x454dc0` / `@0x454d50` + the 16-tick gate in `Server_TickUpdate @0x51d7e0` / `@0x454e00`, run once by `MissionKernel::run_post_mission_pass` from `HostRole::close` / `LocalRole::close` [orig: Game_TeardownMission @0x522350 (the call @0x52266c)] |
 | `BmsEventSystem::load` | `EventTrigger_LoadAllData @0x453eb0` |
 | `WacSystem::tick` (62-divider) | `WacScript_AdvanceTick @0x4f81a0` |
-| `WacVm::time()` | `wac_var_ticks` (@0xC6EAD8) |
+| `WacVm::time()` | `g_WacVarTicks` (@0xC6EAD8) |
 | `World::logic_tick` | `current_tick @0x24c1968`; `Game_StartMission` zeroes it on every peer past the authority-gated pre pass (`mov tick, ebx` @0x525b9f, gate @0x525b78) and `Game_ProcessMainFrame` adds one before `Entity_UpdateAllEntities` (@0x5265b4, call @0x52674b), so the first mission frame runs at tick 1 on the host and on every client; `MissionKernel::boot` sets `logic_tick = 1` for every role, the post-increment equivalent (2026-09-22, `mission_kernel::test_first_frame_tick_matches_on_host_and_joiner`) |
 | `World::run_logic_tick` system order (`run_script_pass` then `run_entity_pass`, split by the host's server tick around its 0x0A) | `Game_ProcessMainFrame @0x5263f0` (Server_TickUpdate, then the gated Entity_UpdateAllEntities, the call @0x52674b) |
 | `promote_mission` | `Mission_LoadBMSFile @0x40f4e0` spawn loops |
@@ -890,7 +901,7 @@ pools 1..3 Pool_SetUsed @ 0x40f9db/@ 0x40fa4a/@ 0x40faba]
 The host menu caps its requested player count at 64; dedicated hosting adds the
 reserved host slot. The resulting network limit is also fed into admission.
 [orig: HostDialog_ReadSettings @ 0x555940;
-apply_session_settings_to_globals @ 0x551500;
+Game_ApplySessionSettingsToGlobals @ 0x551500;
 Server_InitNewRoundState @ 0x51c8e0]
 
 ### 6.5 Load-time fixups (runtime-only; disk bytes unchanged)
@@ -956,7 +967,7 @@ missions without WAC files. `Game_StartMission` runs PreMission (the
 `EventTrigger_UpdateAllWithFlag2` call at `0x525B86`, authority-gated at `0x525B78`)
 before its `WacScript_InitAndLoad` call at `0x525CB3`; that initializer compiles its
 layers, clears exactly 0x400 bytes at `0x4F95EE`, executes the initial VM at
-`0x4F976B` and increments `wac_var_ticks` at `0x4F9770` [orig: Game_StartMission
+`0x4F976B` and increments `g_WacVarTicks` at `0x4F9770` [orig: Game_StartMission
 @0x525B86, @0x525CB3; WacScript_InitAndLoad @0x4F95EE, @0x4F976B, @0x4F9770].
 PreMission actions can therefore communicate through numbered variables during
 the pass, but those writes are absent from the initial WAC input and the saved
@@ -971,7 +982,7 @@ Absent WAC layers still install the compiler's terminator-only program, includin
 rootless BMS boots. Retail writes the final terminator before the variable reset
 and initial VM call (`WacScript_InitAndLoad @0x4F91F0`, reset `0x4F95EE`, initial
 execution `0x4F976B`), then increments
-`wac_var_ticks` at `0x4F9770`; an empty script therefore still executes entry/exit
+`g_WacVarTicks` at `0x4F9770`; an empty script therefore still executes entry/exit
 maintenance and leaves the clock at one. An empty host's BMS pump must hold from
 its first gameplay tick. The explicit `KernelBootOptions::wac = false` tool option
 retains the unloaded-program behavior. `mission_kernel` covers missing, rootless,
@@ -1192,7 +1203,7 @@ evaluated in `event_runtime.cpp` since 2026-09-12.
 | 19 | RedirectSingleTo | `Entity_SetWaypointForTeam(p1,p2,p3)` | ENTITY | wp-type | WAYPOINT | — |
 | 20 | KillSingle | `Entity_KillByNetId(p1)` @0x43DBD0: the first matching row of pools 0..3, no item or dead gate: Health 0; pool 0 also zeroes lastAttacker (@0x43DC15) and the staged clip +0x2C0 (@0x43DC1B); the hit record's damage +0x30 is cleared on every pool leg and its owner +0x44 on pool 0 only; pools 0..2 fire the class event with phase 1, pool 3 with phase 4 (@0x43DCE6) (§11.3) | ENTITY | — | — | — |
 | 21 | ChangeSingleAI | `Entity_HandleAlertStateEvent(block)` @0x43DEE0: sub 0 (@0x43DEEF) and SSN 0 (@0x43DEFC) no-op; the first full-dword match in pools 0, 1, 2 (@0x43DF20/@0x43DF41/@0x43DF69) takes `Entity_ApplyCommand` (@0x43DF70), then a non-player's alert byte is re-stamped (@0x43DF78..0x43DFB2) | ENTITY | value | — | AI sub-type |
-| 22 | VaporizeSingle | `find_entity_by_parent_and_dispatch(p1)` @0x43E210: SSN 0 (@0x43E214) and a non-authority peer (@0x43E21C) return; the first full-dword +0x7C match in pools 0..3 tail-jumps to `Server_RemoveEntityAndNotify @0x50A270` (S2C 0x12, then `Entity_Destroy`; §11.4) | ENTITY | — | — | — |
+| 22 | VaporizeSingle | `Entity_FindByParentAndDispatch(p1)` @0x43E210: SSN 0 (@0x43E214) and a non-authority peer (@0x43E21C) return; the first full-dword +0x7C match in pools 0..3 tail-jumps to `Server_RemoveEntityAndNotify @0x50A270` (S2C 0x12, then `Entity_Destroy`; §11.4) | ENTITY | — | — | — |
 | 23 | SingleVelocity | `sub_43DEA0(p1)` — witnessed retail no-op | ENTITY | SPEED_KPH | — | — |
 | 24 | ChangeSteamAction | `Entity_FindByDCBAndSetFlag(p1)` | ENTITY | TEAM {0,1,2} | — | — |
 | 25 | SingleChangeGroup | `Entity_SetNetIdByParentRef(p1,p2)` | ENTITY | GROUP | — | — |
@@ -1615,7 +1626,7 @@ VaporizeSingle and VaporizeGroup remove through `Server_RemoveEntityAndNotify
 @0x50A270`: send mask 0x90 and S2C 0x12 `[u16 handle]` (@0x50A2AC), a player's
 (Flags & 0x100) placed devices through `Entity_RemovePlacedDevicesByOwner`
 (@0x50A2BB), then `Entity_Destroy` (@0x50A2C4). The single form
-(`find_entity_by_parent_and_dispatch @0x43E210`: SSN 0 @0x43E214, the authority
+(`Entity_FindByParentAndDispatch @0x43E210`: SSN 0 @0x43E214, the authority
 gate @0x43E21C, the first full-dword match in pools 0..3 @0x43E249 / @0x43E279 /
 @0x43E2A9 / @0x43E2D9, then a tail jump) and the group form
 (`Entity_TeleportAllByNetId @0x43D5D0`, §10) both return at once off the
@@ -1692,8 +1703,8 @@ lines in the SYSTEM ring (`Chat_AddMessageChannel2 @0x4987F0`; D-HUD-6). ctests
 
 Follow-up (spec only): SubGoalWon also tallies `win_scores[slot] * 100` (the header
 byte `byte_A763FB[slot]`, @0x454526) through `Score_TallySubGoalWon @0x4FD100`: on
-an authority outside a session `g_subgoals_won_count` (0xC846D0) increments and
-`g_subgoal_bonus_score` (0xC846D4) adds the value scaled by the difficulty
+an authority outside a session `g_SubGoalsWonCount` (0xC846D0) increments and
+`g_SubGoalBonusScore` (0xC846D4) adds the value scaled by the difficulty
 `dword_24D2110` (-1: (3v) >> 2; 1: (3v) >> 1; else v). Its consumers, the SP
 epilog and `HUD_DrawEndRoundStatistics`, are unported (the D-HUD-18 residual).
 
@@ -1719,7 +1730,7 @@ gate, so the whole bar blinks) and [1] @0x59F340 (its tail only calls
 `sub_6770F0(0)`, a setter of `g_GfxDeviceState+0x24`, not a draw);
 `HUD_DrawCompassStrip` [5] @0x595CAC and [14] @0x5958D0; `HUD_DrawMapOverlay`
 [14] @0x5A77FE (the tracked-target pointer) and [5] @0x5A785B (the waypoint state
-line), both drawing only when the timer is 0 or has bit 0x10; `draw_minimap_blip`
+line), both drawing only when the timer is 0 or has bit 0x10; `Minimap_DrawBlip`
 [12] @0x597E0A (0xFF204080 blips), [13] @0x597E29 (0xFF802020 blips), [15]
 @0x597E45 (class 5), [10] @0x597E65 (class 3) and [11] @0x597E84 (class 0), each
 SKIPPING the blip while the timer has bit 0x10.
@@ -1733,7 +1744,7 @@ untouched), and the HUD ticks the timers on the logic tick each HUD frame
 the altitude bar (`engine/runtime/hud/hud_combat.cpp`). Not wired (follow-up): [1]
 (no draw), the compass strip's [5]/[14] (the element is unported), the
 tracked-target pointer [14] (no tracked-target source in the runtime), and the
-`draw_minimap_blip` gates, which key on the blip color argument (0xFF204080 ->
+`Minimap_DrawBlip` gates, which key on the blip color argument (0xFF204080 ->
 [12], 0xFF802020 -> [13]) and the class argument (5 -> [15], 3 -> [10], 0 -> [11])
 and need those two arguments mapped onto `HudMinimapMarker` first.
 
@@ -1741,9 +1752,9 @@ and need those two arguments mapped onto `HudMinimapMarker` first.
 
 Case 38 (@0x4549BC) calls `sub_5A8C80 @0x5A8C80`: `(unsigned)p1 <= 3`
 (@0x5A8C84), then `dword_272ED88[p1] = p2 ? 0x10000 : 0` (@0x5A8C97).
-`sub_5A9F70 @0x5A9F70` copies the four words each frame into
+`EffectWorld_BeginScenePass @0x5A9F70` copies the four words each frame into
 `dword_83FDF0` / `dword_83FDF8` / `dword_83FE00` / `dword_83FE08`
-(@0x5A9F92..0x5A9FB4, every other dword after `g_CtrlGlobal_UplIntensity @0x83FDE8`);
+(@0x5A9F92..0x5A9FB4, every other dword after `g_CtrlGlobalUplIntensity @0x83FDE8`);
 `CEffectWorld_GetViewPosition @0x5A8CA0` (a misnomer) and `sub_5A8CD0 @0x5A8CD0`
 copy the four words out and in (a save/restore pair);
 `EffectWorld_ResetPoolAndInitLighting` (@0x5AB8C2) and `sub_60FD70` (its chunk

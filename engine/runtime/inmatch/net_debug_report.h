@@ -87,7 +87,6 @@ struct NetPeerRow {
 struct NetDebugReport {
 	RoleKind role = RoleKind::SinglePlayer;
 	State state = State::Unloaded;
-	world::TickBankPolicy bank_policy = world::TickBankPolicy::WallClock;
 	FramePerf last_perf{};
 	std::vector<NetPeerRow> peers;
 	JoinerNetworkDiagnostics joiner;

@@ -54,19 +54,23 @@ int32_t replica_parent_profile_type(const world::World &world, const world::Enti
 // The ewep class update's parent publication, the joiner's form: through the
 // same gates (an ewep class child with a slot Def, riding the unique authored
 // attachment row of its carrier on an authored userpoint of the carrier's
-// root subobject) the child's words land on the carrier's replica row.
+// root subobject) the child's words land on the carrier's replica row. The
+// carrier is the child's 0x0D TARGET (groundEntity), resolved by the one
+// persistent-carrier rule; the 0x0D parent is the occupant back-reference.
 // [orig: Entity_UpdateTransformAndTurret @0x440ca0 — Def gate
 //  @0x440E8C..0x440EA0, userpoint gates @0x440f04..0x440f50, profile type
-//  @0x440f65..0x440f6b, values @0x440f70..0x441020]
+//  @0x440f65..0x440f6b, values @0x440f70..0x441020; groundEntity carrier read
+//  @0x440CBF; NapiNPClientMsg_0x00D target store @0x4332D7]
 void publish_replica_gun_words(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, const world::World &world) {
 	for (const replication::ClientEntityState &child : state.entities) {
-		if (child.parent_handle == world::EntityHandle::kInvalid) continue;
+		const uint16_t carrier_handle = replication::persistent_carrier_handle(child);
+		if (carrier_handle == wire_handle::kInvalid) continue;
 		const world::Entity *child_twin = world.registry.get(world::EntityHandle{child.handle});
 		if (child_twin == nullptr || static_cast<uint16_t>(child_twin->item_id) != child.type_id ||
 				!child_twin->emplaced_update || world::emplaced_slot_def(world, *child_twin) == nullptr)
 			continue;
-		replication::ClientEntityState *carrier = state.find(child.parent_handle);
+		replication::ClientEntityState *carrier = state.find(carrier_handle);
 		if (carrier == nullptr) continue;
 		const mission::ItemSeatSpec *carrier_spec =
 				mission::item_seat_spec_for_type(specs, carrier->type_id);

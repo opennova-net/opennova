@@ -116,7 +116,7 @@ public:
 	}
 	void set_light(const TerrainStaticShadowLightDirection &world_light,
 			const TerrainTileLightEpoch &light_epoch);
-	// Frame-shared Render_ShaderTickMs. Stored only: animated material state
+	// Frame-shared g_RenderShaderTickMs. Stored only: animated material state
 	// (AlphaGen, the UV transform, diffuse flipbook frame) is evaluated from
 	// this tick when a page is classified or rasterized, so advancing time
 	// never walks the casters, never changes the state revision, and never

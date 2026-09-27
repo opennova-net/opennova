@@ -57,7 +57,7 @@ class Simulation;
 //    standing, the witnessed fallback);
 //  pieces: Entity_SpawnDeathPieces @ 0x493400 -> the 256-slot pool ticked by
 //    DeathPiece_TickAll @ 0x57b900 (each piece renders ONE husk section with a
-//    per-type trail effect from g_death_piece_types @ 0x8404f0); the draw is
+//    per-type trail effect from g_DeathPieceTypes @ 0x8404f0); the draw is
 //    the occlusion frame's collect (world/death_piece_draw.h) applied by
 //    apply_piece_draws;
 //  section debris: Entity_SpawnSectionDebris @ 0x43f580 — collision-face
@@ -112,6 +112,9 @@ public:
 	// placed by the section draw's matrix; every other piece model hides.
 	// Rows whose slot generation is not the presented one are skipped.
 	void apply_piece_draws(const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	// The weapon Inset pass's own piece draws (its collect's; the models'
+	// Inset state, drawn by twins where the views differ).
+	void apply_piece_draws_inset(const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	// A piece slot's model (null when the slot presents none).
 	ObjectModel *piece_model(int p_slot) const;
 	// The section draw's matrix in Godot space: the piece pose (the BAM

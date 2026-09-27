@@ -5,7 +5,7 @@ extends RefCounted
 ## and the toggled window flag are the engine's (hud/hud_toggles.h, through
 ## the presenter's HudToggles: retail keeps the window up until the next
 ## press, the respawn init clears it, and the ShowScore flip closes it
-## [orig: `xor g_showMessageLog, 1` @0x49b55a in Input_HandleActionBinding
+## [orig: `xor g_ShowMessageLog, 1` @0x49b55a in Input_HandleActionBinding
 ## (jumptable case 29); the clear in Game_InitRespawnState @0x49939a; the
 ## drawer HUD_DrawMessageLog @0x5b9d70 called from Server_DrawStatusScreen
 ## @0x50b21f when the flag is set]). This lane shows or hides the window for

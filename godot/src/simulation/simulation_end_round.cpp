@@ -143,7 +143,7 @@ Ref<EndRoundStatistics> Simulation::get_end_round_statistics() const {
 	in.friendly_unit_kills = w.kill_stats.greenkills_by_player +
 			w.kill_stats.friendly_kills_by_others; // @0x5b783c
 	// The raised box: the between-rounds gate with a team-1 win
-	// [orig: g_spawn_success_gate && g_endround_winner_team == 1 @0x5b763b].
+	// [orig: g_SpawnSuccessGate && g_EndRoundWinnerTeam == 1 @0x5b763b].
 	in.raised = w.match.outcome().ended && w.match.outcome().winner_team == 1;
 	opennova::hud::EndRoundStatisticsPanel panel;
 	panel.raised = in.raised;

@@ -31,6 +31,22 @@ inline constexpr int kEntityKindItem = static_cast<int>(EntityKind::Item);
 inline constexpr int kEntityKindBuilding = static_cast<int>(EntityKind::Building);
 inline constexpr int kEntityKindOrganic = static_cast<int>(EntityKind::Organic);
 
+// Whether a placed record is a BUILDING to the renderer and the light spawner:
+// its items.def type is Building. Every pool-2 record is a BMS "building" by
+// family, but a decoration or foliage there is an entity: the statics table's
+// non-building tail, collected by its own blink quad, drawn in the first
+// entity wave (that wave's lighting lane and mirror-clip form), and its LGHT
+// records run the spawner's blink query like any entity's. A record whose def
+// does not resolve keeps its family (world::building_def_row is the twin over a
+// world Entity).
+// [orig: Entity_BuildProximityLists_Pool2 `def->type == ItemType_Building`
+//  @ 0x4b946e / `!=` @ 0x4b9502; the tail's collector
+//  Terrain_CollectVisibleEntities_0 @ 0x5c6f48..0x5c721e; Entity_SpawnGlowEffects
+//  `cmp dword ptr [eax+5Ch], 5` @ 0x56c7e8..0x56c7ec]
+inline bool placed_record_is_building(int entity_kind, bool has_def, int item_type) {
+	return has_def ? item_type == kItemTypeBuilding : entity_kind == kEntityKindBuilding;
+}
+
 // Attrib bits (DEF_ITEM_ATTRIB_NOSHADOW mirrors engine/formats/def).
 inline constexpr uint32_t kItemAttribNoShadow = 0x04000000u;
 inline constexpr uint32_t kItemAttrib2DynamicShadow = 0x10u;
@@ -141,7 +157,7 @@ inline bool item_casts_static_terrain_shadow(int entity_kind,
 // and static items). [orig: Terrain_CollectVisibleEntitiesForReflection
 // @ 0x5c90a0 (mask = below-water ? 0 : 0x400) -> collect_visible_sector_
 // userpoints @ 0x5c6c32..0x5c6c39 + Terrain_CollectVisibleEntities_0
-// @ 0x5c6f20 + collect_visible_entities_for_terrain @ 0x5c8c60 pools 0/1;
+// @ 0x5c6f20 + Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 pools 0/1;
 // consumed by Water_RenderReflectedWorldScene @ 0x5c8510 (sector models
 // @ 0x5c8576 -> Terrain_RenderSectorModels @ 0x5c5d30, entity waves
 // @ 0x5c857b/0x5c8590/0x5c8599); writers Entity_InitFromModel
@@ -213,11 +229,11 @@ PlacementBasis bms_to_presentation_basis(float pitch_deg, float yaw_deg,
 //  - portal buildings render per-section from per-instance visibility masks,
 //    so they cannot join a pooled static batch
 //    [orig: g_BuildingSectionVisMask consumption + Terrain_RenderSectorModels
-//    @ 0x5c5d30; collect_render_objects_for_batch @ 0x5d9156..0x5d9170;
+//    @ 0x5c5d30; Render_CollectRenderObjectsForBatch @ 0x5d9156..0x5d9170;
 //    docs/render/render-occlusion-re.md]
 //  - the MODEL is the rig source for bone matrices, never the lossy .bad
 //    records [orig: BoneAnim_BuildWorldMatrices @ 0x40c400 walks modelDef+56]
 //  - every entity is relit from the current lighting block each frame
-//    [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
+//    [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0]
 
 } // namespace opennova::mission

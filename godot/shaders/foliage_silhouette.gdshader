@@ -14,7 +14,7 @@ render_mode unshaded, cull_disabled, blend_add, depth_draw_always, fog_disabled;
 // per-submission instance uniforms.
 // [orig: Foliage_LoadDefAssets @ 0x6015b7;
 //  GfxBlend_ApplyToDevice @ 0x681823;
-//  Terrain_CreateFoliageVertexShaders @ 0x5ff6a5 (the Foliage_GridPlacementVS @ 0x2c25e60 source copy);
+//  Terrain_CreateFoliageVertexShaders @ 0x5ff6a5 (the g_FoliageGridPlacementVS @ 0x2c25e60 source copy);
 //  Foliage_DrawModelTileSlot @ 0x601d90].
 // Retail GridPlacementVS literal @ 0x7de3a0; the blocks from
 // Foliage_UploadModelTileVSConstants @ 0x6010e6..0x601209.

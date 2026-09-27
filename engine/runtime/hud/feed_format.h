@@ -68,7 +68,7 @@ bool feed_event_suppressed(uint8_t event_type);
 // without posting when `!g_MpVerbose2` [orig: types 1-6/10-15 e.g. @0x426472
 // (case 1) and @0x426547 (case 4); the bonus trio 32/33/34 @0x42668C]. The
 // toggle lives at g_MpVerbose2 @0x24D2154 — seeded from the session settings
-// [orig: apply_session_settings_to_globals @0x551D0F] and flipped by the
+// [orig: Game_ApplySessionSettingsToGlobals @0x551D0F] and flipped by the
 // keybind that announces STRMISC_VERBOSE_ON/OFF [orig: @0x49B78F].
 bool feed_event_verbose_only(uint8_t event_type);
 
@@ -77,7 +77,7 @@ bool feed_event_verbose_only(uint8_t event_type);
 // part in (attacker or victim); `team` is the camp events' team byte
 // (1 = blue, 2 = red).
 //   * kill/death families 1-6, 10-15, 22-26, 49: own white / other grey
-//   * friendly-fire trio 7/8/9 and 16-18 (g_hudColorTable[0] = -1
+//   * friendly-fire trio 7/8/9 and 16-18 (g_HUDColors[0] = -1
 //     [orig: HUD_InitTeamColorTable @0x51F245]) and 27-31/35-37: white
 //   * multi-kill bonus 32/33/34: yellow [orig: push -256 @0x4266C5]
 //   * medic pair 38/45 (+ the emitterless 39) and SSKB 46/47: 0xFF008CEE
@@ -104,17 +104,17 @@ std::string feed_format_line(const std::string &tmpl, const std::string &attacke
 // THE PLAYER-CHAT CHANNEL TABLE — where an S2C 0x14 line lands and which
 // colour it carries, by its channel byte [orig: Chat_DispatchToChannel
 // @0x42b910 — the 0..0xE switch @0x42b95d/@0x42ba17; every colour is a
-// g_hudColorTable entry written by HUD_InitTeamColorTable @0x51f245..0x51f2b3].
+// g_HUDColors entry written by HUD_InitTeamColorTable @0x51f245..0x51f2b3].
 enum class ChatSink : uint8_t {
 	System = 0,   // Chat_AddMessageChannel2 — the SYSTEM ring [orig: @0x42bb0c]
 	Chat = 1,     // Chat_AddMessageChannel1 — the CHAT ring
 	Queue = 2,    // channel 8: CMessageQueue_Enqueue @0x42bab8 (not a ring)
 	Channel3 = 3, // channel 14: Chat_AddMessageChannel3 @0x42bb01 (unported ring)
 };
-// The g_hudColorTable immediates the dispatcher reads [orig: @0x51f245..0x51f2b3].
+// The g_HUDColors immediates the dispatcher reads [orig: @0x51f245..0x51f2b3].
 inline constexpr uint32_t kHudColorWhite = 0xFFFFFFFFu;     // table[0]
 inline constexpr uint32_t kHudColorGreen = 0xFF00FF00u;     // table[1]  dword_24C183C
-inline constexpr uint32_t kHudColorLightBlue = 0xFF80A0FFu; // table[3]  g_hudColorLightBlue
+inline constexpr uint32_t kHudColorLightBlue = 0xFF80A0FFu; // table[3]  g_HUDColors.palette[3]
 inline constexpr uint32_t kHudColorYellow = 0xFFF0F000u;    // table[4]  `color` @0x24C1848
 inline constexpr uint32_t kHudColorSalmon = 0xFFFF5050u;    // table[5]  dword_24C184C
 inline constexpr uint32_t kHudColorMagenta = 0xFFFF40FFu;   // table[6]  dword_24C1850

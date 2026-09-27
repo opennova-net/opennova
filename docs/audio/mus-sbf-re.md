@@ -15,16 +15,16 @@ catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
 | SBF bank codec (`engine/formats/sbf`) | **MATCHING** | 12 citations: `Sbf_OpenFile_Gamemus @0x4ED6C0`, `Sbf_StartEntry @0x4ED910`, `Audio_StreamNextChunk @0x4ED7D0`, mix coefficients `@0x7BD4B0`; `sbf_roundtrip` et al. |
 | SCR container codec (`engine/formats/scr`) | **MATCHING** (grilled 2026-06-09) | keystream + reverse pass byte-exact vs `Scr_DecryptBuffer @0x53D090`; two documented policy divergences (D-SCR-1/2 below) |
 | PFF entry encryption | **MATCHING** (pre-existing) | flag bit 0 + rol-7 XOR keystream vs `PFF_LoadFileToMemory @0x768920`, cited in `engine/formats/pff` |
-| `godot/src/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
+| `godot/src/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `AudioVM_Op_Play @0x672CB0` (ex `VmOp_Play`), `AudioVM_Op_SetState @0x672C70` (ex `VmOp_SetState`), `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
 
 ## AudioVM playback pacing — the VM advances on track completion (grilled 2026-06-15; re-verified 2026-07-11)
 
 The MUS VM is **not** stepped per frame; the original advances it only when the
-currently-playing track finishes streaming. `audio_stream_update @ 0x671c60` (the
+currently-playing track finishes streaming. `AudioStream_Update @ 0x671c60` (the
 per-update streaming pump) is:
 
 ```
-if (g_audiovm_context_active) {
+if (g_AudioVMContextActive) {
     if (remaining_bytes (dword_31C37EC) <= 0)   // current track drained
         AudioVM_StepScript();                    // sub_672EE0 -> sub_672E50 -> AudioVM_DispatchLoop @0x672720
     else if (Audio_GetPendingBufferCount() < 7)  // else keep streaming this track
@@ -34,7 +34,7 @@ if (g_audiovm_context_active) {
 
 `remaining_bytes` is seeded from the entry's `total_size` in `sub_671BC0` (the context
 selector, which `SetFilePointer`s back to the entry's `data_offset` — so a fresh
-`VmOp_Play`/`AudioVM_StartSound @0x671ff0` **restarts** the stream from the start; it is not
+`AudioVM_Op_Play`/`AudioVM_StartSound @0x671ff0` **restarts** the stream from the start; it is not
 idempotent). A `play` op halts the dispatch loop (STC), so each step runs to exactly one
 `play`. Net: **one `play` per track completion** — the script plays a track, waits for it
 to finish, then steps to the next `play`/`setstate`. Section transitions therefore land on
@@ -56,7 +56,7 @@ device rate** — one-shot wavs carry a device-relative pitch ratio
 `(nSamplesPerSec << 16 + 22050) / 44100` (the +22050 is the rounding half-add)
 [orig: Audio_LoadWavFileFromArchive @ 0x766735], so 22050-content wavs play at ratio 0.5 —
 and the music stream pump submits split L/R buffers at queue pitch 0x10000 through an inline
-ADPCM-decode/interpolate stage (`play_stereo_sample @ 0x7bcf95`, stepper
+ADPCM-decode/interpolate stage (`Audio_PlayStereoSample @ 0x7bcf95`, stepper
 `Audio_AdpcmDecodeNibbleStep @ 0x7bf250`, ex kong "noop_stub"), netting the same 22050 Hz
 content rate in real time. The decoded PCM itself is pinned byte-exact by the `sbf_roundtrip`
 golden tests; the prior reimpl 1:1 frame mapping played SBF content at half speed on the 44100 Hz
@@ -91,7 +91,7 @@ section/track loop plays, and its var **index is per-script** (golden test
   `P2..P8` theme loop; `var2=2` → `P2`+volume loop).
 
 The original starts each context with the var at 0: `AudioVM_InitMenuMusicStreaming @0x56aa60`
-opens the menumus context (`g_path_menu_sbf` + `g_path_menu_bin` via
+opens the menumus context (`g_PathMenuSbf` + `g_PathMenuBin` via
 `AudioVM_OpenMusicContext @0x6722a0`) and sets volume only — **no initial var**. The selecting
 var is set later by the shell when a `.mnu` screen is shown (its `MUSICVAR` → the discriminator
 var). The JO main-menu screen `STARTUP` has `MUSICVAR=1`, selecting the menumus `var2=1` theme.
@@ -115,8 +115,8 @@ below (exhaustive xref sweep of 0x671fa0).
 expansion (re)load:
 
 - Base names are constants: `GAMEMUS.BIN/SBF`, `MENUMUS.BIN/SBF`
-  (const table `@ 0x7C8D50`, copied into `g_path_menu_sbf/bin`,
-  `g_path_game_sbf/bin` `@ 0x4a4798-0x4a4801`). They are VFS basenames — the
+  (const table `@ 0x7C8D50`, copied into `g_PathMenuSbf/Bin`,
+  `g_PathGameSbf/Bin` `@ 0x4a4798-0x4a4801`). They are VFS basenames — the
   `.bin` resolves from PFF archives; the `.sbf` streams loose.
 - The ONLY reselect is the expansion `.pff` existence check:
   `File_CheckExists("expansion\\<n>\\<n>.pff") @ 0x4a4767`; missing → the
@@ -141,11 +141,11 @@ expansion (re)load:
 ### Context lifecycle
 
 - Menu context: opened once at boot — `AudioVM_InitMenuMusicStreaming @ 0x56aa60`
-  calls `AudioVM_OpenMusicContext(g_path_menu_sbf, g_path_menu_bin, "music")` +
+  calls `AudioVM_OpenMusicContext(g_PathMenuSbf, g_PathMenuBin, "music")` +
   `AudioVM_SetGlobalVolume` (no initial var).
 - Game context: `Game_StartMission @ 0x524360` at `@ 0x525581` tests
-  `g_napi_np_ctx.is_mp_session_peer`: MP peer →
-  `AudioVM_OpenMusicContext(g_path_game_sbf, g_path_game_bin, "music")` +
+  `g_NapiNPCtx.is_mp_session_peer`: MP peer →
+  `AudioVM_OpenMusicContext(g_PathGameSbf, g_PathGameBin, "music")` +
   `AudioVM_SetGlobalVolume` (`@ 0x525589-0x5255a4`); NOT a peer →
   `AudioVM_StopMusicContext @ 0x671e00` (`@ 0x5255ae`). **Corrected 2026-09-12:**
   `is_mp_session_peer` is the `is_client` bit of the connection mode
@@ -155,7 +155,7 @@ expansion (re)load:
   early-returns on the bit, so it is set whenever the local player runs). So
   gamemus IS opened and active in SP; only a dedicated server (mode 1) takes
   the Stop branch (which also kills the menu context that was still streaming).
-  The stop clears `g_audiovm_context_active` and frees the stream but does NOT
+  The stop clears `g_AudioVMContextActive` and frees the stream but does NOT
   clear `chunk_04`: the loaded script survives it.
 - Var seeding then runs on BOTH branches (`@ 0x5255b3-0x52561b+`):
   `Var1 = dword_A762E0`, `Var2..Var6 = 0`, `Var7 = 100`, `Var8..Var12 = 0`.
@@ -194,15 +194,15 @@ win/lose stings" reading was wrong.
   `mov esi,[chunk+40h]; jnz dispatch` (IP = the MessageHandler; a null pointer
   falls into `mov esi,[esi+18h]` with esi = 0); `call AudioVM_DispatchLoop
   @ 0x672720; mov [ctx+18h],esi`. The step tests only the byte and the chunk
-  pointer, never `g_audiovm_context_active`.
+  pointer, never `g_AudioVMContextActive`.
 - **The driver.** `MusicCtx_SelectEndTrack(value) @ 0x672fd0` (thunk
   `j_MusicCtx_SelectEndTrack @ 0x671ba0`): `if (g_AudioVmInstance.chunk_04)
   { restart_20 = value; sub_672E50(&g_AudioVmInstance); }`; the byte never
   outlives the call. Its only callers are `Server_ProcessRoundEnd @ 0x5164f0`'s
   `!is_in_session` tail: value 1 after `Cine_InitPlayback` (win) `@ 0x51696b`,
   value 2 after `Cine_StartPlayback` (lose) `@ 0x51698f`.
-- **The shipped handler** (gamemus chunk+0x91, decoded with the `mus_decode.h`
-  widths): `enter 2` (locals msgtype @0x20, source @0x24); `method 4` (GFB,
+- **The shipped handler** (gamemus chunk+0x91, decoded with the operand widths
+  of the decoder's opcode table in `engine/formats/mus/mus_decompile.cpp`): `enter 2` (locals msgtype @0x20, source @0x24); `method 4` (GFB,
   pushes 0); `empty`; `push_l 0x20`; `tablexec 3` (inner 0x3b, 2-byte entries)
   = `[setstate 1 | setstate 2 | setstate 4]`. Section 2 `Missionwin`: `setstate
   3`; section 3: `play 2,3,4,5,6,7; setstate 1`; section 4 `Missionlose`:
@@ -233,11 +233,11 @@ win/lose stings" reading was wrong.
 ### Per-frame var writes (local player only)
 
 `Entity_UpdateInfantryPlayerBody @ 0x4b40e0`, gated
-`entity == g_local_player_entity` (`@ 0x4b6234`; a second gate `@ 0x4b635b`):
+`entity == g_LocalPlayerEntity` (`@ 0x4b6234`; a second gate `@ 0x4b635b`):
 
 | Var | Value | Witness |
 | --- | --- | --- |
-| Var5 | distance to the nearest threat in whole units + 1 (`sqrt(dpos²) >> 16 + 1`), 0 when none. Threat = `Entity_FindNearestThreat @ 0x4b0990` (ex kong "Entity_SpawnProjectile" — it SEARCHES via `Entity_FindTargets @ 0x53a610`, range `min(fog_dist/2, 40u)`, and on authority side-writes spotted/enemy relation bits) called with `Env_FogDistCurrent` | `@ 0x4b6240-0x4b62a9` |
+| Var5 | distance to the nearest threat in whole units + 1 (`sqrt(dpos²) >> 16 + 1`), 0 when none. Threat = `Entity_FindNearestThreat @ 0x4b0990` (ex kong "Entity_SpawnProjectile" — it SEARCHES via `Entity_FindTargets @ 0x53a610`, range `min(fog_dist/2, 40u)`, and on authority side-writes spotted/enemy relation bits) called with `g_EnvFogDistCurrent` | `@ 0x4b6240-0x4b62a9` |
 | Var6 | that threat's current target is the local player (bool) | `@ 0x4b62b3-0x4b62c9` |
 | Var2 | local-player view pitch | `@ 0x4b62d8` |
 | Var3 / Var4 | body-update stack args (orientation/state; low confidence) | `@ 0x4b62e4 / 0x4b62f0` |
@@ -265,7 +265,7 @@ Session teardown writes `Var10 = (reason==1 ? 2 : 1)` when not in session
 - WAC `music N` (command-table entry `@ 0x82e1f0`) = `Sbf_StartEntry @ 0x4ed910`:
   seeks a **separate** gamemus SBF stream (globals `0xC60Dxx`) to entry N. That
   stream's opener `Sbf_OpenFile_Gamemus @ 0x4ed6c0` (CreateFileA on
-  `g_path_game_sbf`, header+entry parse) has **zero references** in
+  `g_PathGameSbf`, header+entry parse) has **zero references** in
   Jointops.exe — the stream never opens, `dword_C60D80` stays null, and
   `Sbf_StartEntry` early-returns success. The per-frame pump exists and runs
   (`Audio_StreamNextChunk @ 0x4ed7d0` from `Audio_UpdateAmbientStream
@@ -285,7 +285,7 @@ Session teardown writes `Var10 = (reason==1 ? 2 : 1)` when not in session
 
 | ID | Ours | Original | Why / consequence |
 | --- | --- | --- | --- |
-| D-MUS-SPGATE | the gamemus context opens at mission start in every session that has a local client (our headless/dedicated host carries no music context at all) | opens when `g_napi_np_ctx.is_mp_session_peer` = the `is_client` bit of the connection mode (`CGameSession_SetConnectionMode @0x4c49f0`; retail single player is mode 3 = host+client, so SP opens gamemus); only a dedicated server (mode 1) takes the `AudioVM_StopMusicContext` branch `@0x5255ae` | **CLOSED 2026-09-12 (witness correction).** The 2026-07-09 row read the branch as "retail SP is music-silent" and recorded the always-open port as a maintainer divergence; the bit is set in SP, so opening in every session with a local client IS retail behavior and no divergence exists. Consequence: the SP round end reaches the gamemus MessageHandler (`Missionwin`/`Missionlose` stings, section above). |
+| D-MUS-SPGATE | the gamemus context opens at mission start in every session that has a local client (our headless/dedicated host carries no music context at all) | opens when `g_NapiNPCtx.is_mp_session_peer` = the `is_client` bit of the connection mode (`CGameSession_SetConnectionMode @0x4c49f0`; retail single player is mode 3 = host+client, so SP opens gamemus); only a dedicated server (mode 1) takes the `AudioVM_StopMusicContext` branch `@0x5255ae` | **CLOSED 2026-09-12 (witness correction).** The 2026-07-09 row read the branch as "retail SP is music-silent" and recorded the always-open port as a maintainer divergence; the bit is set in SP, so opening in every session with a local client IS retail behavior and no divergence exists. Consequence: the SP round end reaches the gamemus MessageHandler (`Missionwin`/`Missionlose` stings, section above). |
 
 ## SCR container codec — witness map (grill of 2026-06-09)
 

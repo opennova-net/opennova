@@ -20,7 +20,7 @@ namespace opennova::world {
 
 // One crossing. The position is the entity's horizontal position at the WATER
 // PLANE height — retail places the effect on the surface, not at the entity's
-// own Z [orig: `dest[6] = Env_WaterHeightFixed` in the water block].
+// own Z [orig: `dest[6] = g_EnvWaterHeightFixed` in the water block].
 struct WaterCrossEvent {
     int32_t x = 0; // 16.16 world
     int32_t y = 0;

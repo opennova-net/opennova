@@ -10,7 +10,7 @@ float scene_far_plane(float fog_distance) { return std::floor(fog_distance) + 1.
 TechniqueClass technique_class_for_submit(uint32_t stack_default_flags,
                                           uint32_t submit_flags) {
 	// Stack-frame class defaults first, then the per-submit requests, in the
-	// original's exact test order [orig: collect_render_objects_for_batch
+	// original's exact test order [orig: Render_CollectRenderObjectsForBatch
 	// @ 0x5d90d7..0x5d9145 (identical chain in the bone-path collector
 	// @ 0x5d95c0..0x5d961f)].
 	if (stack_default_flags & kStackDefaultClip)

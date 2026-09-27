@@ -58,7 +58,7 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	ctx.round_end_board_stream.clear();
 	// Every mission start advances both transfer counters; the first mission of
 	// this context serves id 1 on 0x60 and 0x64, the map cycle's next one 2.
-	// [orig: Game_StartMission @0x5247F3 `++g_replayBlockMagic`;
+	// [orig: Game_StartMission @0x5247F3 `++g_ReplayBlockMagic`;
 	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E9C1 `++dword_C86FC8`]
 	++ctx.server_info_transfer_id;
 	++ctx.mission_metadata_transfer_id;
@@ -84,8 +84,7 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 					: GameSessionChannel::Lan;
 	ctx.config.send_holdoff_ticks =
 			config.effective_send_holdoff_ticks(transport_fallback);
-	ctx.mission_metadata_blob = build_mission_metadata_blob(
-			ctx.config, ctx.is_mp_session_peer != 0);
+	ctx.mission_metadata_blob = build_mission_metadata_blob(ctx.config);
 	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
 	ctx.np_protocol.max_players = config.max_players;
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)

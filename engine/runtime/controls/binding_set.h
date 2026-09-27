@@ -117,7 +117,7 @@ class BindingSet {
 
   // The Control-column text for one action on one device: the formatted
   // keyboard binding, the mouse button name, or "JOYBUTTONn"
-  // [orig: update_control_mapping_display @ 0x55b700].
+  // [orig: UI_UpdateControlMappingDisplay @ 0x55b700].
   std::string control_text(int index, Device device) const;
 
   // The Class/Action/Control rows for a device from the LIVE records
@@ -153,7 +153,7 @@ class BindingSet {
   // Held mouse rows are polled independently. Event rows dispatch the FIRST
   // eligible match, modified rows before unmodified, in catalog order.
   // [orig: Input_ProcessMouseAxisBindings @0x499680;
-  //  process_input_bindings @0x4dda50; Input_InitBindingSystem @0x499ab0]
+  //  Input_ProcessBindings @0x4dda50; Input_InitBindingSystem @0x499ab0]
   bool pressed_mouse(int index, uint16_t held_mask,
       const std::function<bool(int)> &key_down, bool dead = false) const;
   int mouse_event_action(uint16_t mask,

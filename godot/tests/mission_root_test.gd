@@ -94,7 +94,7 @@ const FLASHBANG_MOVE_EFFECT := "Effect_FlashBangToss"
 # interns and spawns it without a resource root and the round-bound group
 # stays live until the throwable pass stops it.
 func _catalog_file() -> ParticleFile:
-	return ParticleFixture.catalog("toss dots",
+	return ParticleFixture.catalog(self, "toss dots",
 			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", [FLASHBANG_MOVE_EFFECT])
 
 

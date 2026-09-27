@@ -50,7 +50,7 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 // NapiNPProtocol.connection_list (each node's embedded replication::Connection `link`) and, for every
 // in-match connection (`burst.spawned`) that has a transport:
 //   (1) drain its queued C2S 0x0C player uplinks and read-apply each (the SNAP)
-//       [orig: PumpRecvQueues -> DispatchOpcode -> dispatch_entity_packet_callback @0x4D6A80].
+//       [orig: PumpRecvQueues -> DispatchOpcode -> NetPacket_DispatchEntityPacketCallback @0x4D6A80].
 //   (2) run the world's script pass (World::run_script_pass: the WAC tick, the every-32
 //       legs, the BMS quarter pass), then this tick's own maintenance legs.
 //   (3) fan ONE per-connection-anchored S2C 0x0A frame to each connection
@@ -80,7 +80,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx);
 // host's own player from its local inventory, a remote player from its
 // granted combos + live clips over the authority pool table. The last
 // statement of the periodic-second block and the tail of every accepted
-// LOADOUT_SUBMIT. [orig: recalculate_all_player_scores @0x5014E0; callers
+// LOADOUT_SUBMIT. [orig: Server_RecalculateAllPlayerScores @0x5014E0; callers
 // Server_TickUpdate @0x51e1ab, NapiNPServerMsg_HandlePlayerLoadout @0x515f9d]
 void Server_RecalculateAllPlayerKitWeights(
 		std::vector<NapiNPConnection> &roster, world::World &world);

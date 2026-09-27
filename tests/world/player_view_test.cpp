@@ -396,7 +396,7 @@ void test_mode_arbiter() {
     v.local_dead = true;
     player_view_tick(v, eye);
     CHECK(v.camera_mode == 4 && !v.third_person);
-    // g_rules_flags bit 0 keeps the seat-derived mode instead.
+    // g_RulesFlags bit 0 keeps the seat-derived mode instead.
     v.rules_no_death_cam = true;
     player_view_tick(v, eye);
     CHECK(v.camera_mode == 0);
@@ -549,7 +549,7 @@ void test_nvg_toggle_gain_and_first_person_visibility() {
     v.camera_mode = 0;
     CHECK(player_view_nvg_visible(v));
     // The death lerp camera (mode 4) is not third person, yet retail's NVG
-    // world/post legs all need g_camera_mode == 0 [orig:
+    // world/post legs all need g_CameraMode == 0 [orig:
     // CTerrainRenderer_BuildLightingShaderConstants @ 0x5c81fe; Render_TerrainScene
     // @ 0x610d09; Render_ProcessMainSceneFrame @ 0x5ca6b8].
     v.local_dead = true;
@@ -628,8 +628,9 @@ void test_view_projection_retail_stretch() {
 }
 
 // The NVG scene's pass [orig: NVG_RenderScene @0x5d2954..0x5d296d; NVG_RenderScopedScene
-// @0x5d29e4..0x5d2a2a]: the frame's frustum in 512 rows at its own aspect, or
-// the Scoped arm's square frustum in the 512 square.
+// @0x5d29e4..0x5d2a2a]: every arm rasterises the 512 square, the frame-shaped
+// arms at the frame's frustum (its aspect kept: non-square texels), the Scoped
+// arm at its square frustum.
 void test_nvg_view_projection() {
     opennova::renderer::FrameFxNvgPlan frame_arm;
     frame_arm.scene = frame_arm.composite = true;
@@ -641,10 +642,11 @@ void test_nvg_view_projection() {
     const ViewProjection nvg = nvg_view_projection(wide, frame_arm, 0.75f, 1);
     CHECK(nvg.fov_h_deg == wide.fov_h_deg && nvg.fov_v_deg == wide.fov_v_deg);
     CHECK(nvg.aspect == wide.aspect);
-    CHECK(nvg.target_h == 512 && nvg.target_w == 683); // lround(512 x 4/3)
+    CHECK(nvg.target_h == 512 && nvg.target_w == 512); // retail's columns, not 512 x 4/3
     const ViewProjection native = view_projection(80.0f, -1, 1920, 1080);
     const ViewProjection native_nvg = nvg_view_projection(native, frame_arm, 0.5625f, 1);
-    CHECK(native_nvg.target_h == 512 && native_nvg.target_w == 910);
+    CHECK(native_nvg.target_h == 512 && native_nvg.target_w == 512);
+    CHECK(native_nvg.aspect == native.aspect && native_nvg.fov_v_deg == native.fov_v_deg);
     const ViewProjection lens = nvg_view_projection(wide, lens_arm, 0.75f, 4);
     CHECK(lens.fov_h_deg == 15.0f && lens.fov_v_deg == 15.0f && lens.aspect == 1.0f);
     CHECK(lens.target_w == 512 && lens.target_h == 512);
@@ -653,7 +655,7 @@ void test_nvg_view_projection() {
     const ViewProjection sighted = nvg_view_projection(wide, sighted_arm, 0.75f, 4);
     CHECK(sighted.fov_h_deg == 20.0f && sighted.aspect == wide.aspect);
     CHECK(std::fabs(sighted.fov_v_deg - fov_vertical_from_horizontal_deg(20.0f, wide.aspect)) < 1e-5f);
-    CHECK(sighted.target_w == 683 && sighted.target_h == 512);
+    CHECK(sighted.target_w == 512 && sighted.target_h == 512);
 }
 
 // [orig: Game_RunVideoTestDialog @0x53ed3e..0x53ed6b] The first launch's video
@@ -748,10 +750,10 @@ void test_input_dispatch_gates() {
 void test_toggle_latch_refusal_and_inset() {
     // The witnessed toggle protocol [orig: Player_ToggleWeaponScope — the
     // !activeFlag refusal @ 0x4df177; Setup 15 @ 0x4df36e / 7 Inset @ 0x4df355 /
-    // 1 hipfire-return @ 0x4df1c3; g_scopeHipfire writes @ 0x4df212/@ 0x4df373].
+    // 1 hipfire-return @ 0x4df1c3; g_ScopeHipfire writes @ 0x4df212/@ 0x4df373].
     PlayerViewState v = bound_view();
     const float eye[3] = {0, 0, 0};
-    CHECK(v.scope_hipfire); // [orig: g_scopeHipfire init 1]
+    CHECK(v.scope_hipfire); // [orig: g_ScopeHipfire init 1]
     CHECK(player_view_set_engaged(v, true, false));
     CHECK(v.weapon_pose_interp.velocity.position_q16[0] == -21.0f); // 15 steps, hip -> tpos
     CHECK(!v.scope_hipfire);
@@ -781,7 +783,7 @@ void test_toggle_latch_refusal_and_inset() {
 
 void test_unscope_on_move_and_up_refusal() {
     // The movement-held latch legs [orig: Player_PackInputStateToEntity @ 0x4df450]:
-    // g_movementKeyHeld blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while
+    // g_MovementKeyHeld blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while
     // PROMOTED at scope on a Scoped (flags 1) weapon, forces the toggle
     // (@ 0x4df4c9..0x4df4ec).
     const int32_t kScoped = 1;         // weapon.def flags: Scoped
@@ -812,7 +814,7 @@ void test_unscope_on_move_and_up_refusal() {
     CHECK(player_view_scope_settled(v));
 
     // Promoted + movement: the auto-unscope fires, Scoped weapons only
-    // [orig: g_weaponScopeActive && Def->Flags & 1 @ 0x4df4c9..0x4df4ea].
+    // [orig: g_WeaponScopeActive && Def->Flags & 1 @ 0x4df4c9..0x4df4ea].
     CHECK(!player_view_move_input(v, true, kSighted));
     CHECK(player_view_move_input(v, true, kScoped));
     // The caller then runs the standard disengage (the full 15-step return —

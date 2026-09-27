@@ -36,17 +36,19 @@ namespace opennova::inmatch {
 // Lightning (the flash + the S2C 0x24 "SETFLASH1 16" text command),
 // TimeOfDay (HHMM), SetServerName / SetServerMsg / SetMPReset (config;
 // config_changed asks the shell to save game.cfg and republish the NovaWorld
-// HostSetup / Host vars). ChangeTeam / SwapTeam (Server_ChangeEntityTeam),
+// HostSetup / Host vars), ChangeTeam / SwapTeam (the team 1 <-> 2 swap through
+// Server_ChangeEntityTeam, then the "Changing team...." chat to the slot).
 // ReloadPlayer (Entity_UpdateWeaponOverlayFrameState) and DisarmPlayer are
 // not modeled on this host and return handled = false.
-// [orig: the ServerCommand handler loc_4D22F0 — gates @0x4D23C0..0x4D23E7,
+// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand — gates @0x4D23C0..0x4D23E7,
 //  the target suffixes @0x4D23F2..0x4D2505, PuntPlayer @0x4D2515..0x4D254D,
 //  TextChatServer @0x4D25A5..0x4D25E6, TextChatPlayer @0x4D2738..0x4D2765,
 //  CmdEchoPlayer @0x4D287F..0x4D28AC, KillPlayer @0x4D29C6..0x4D29EC,
 //  Cycle/EndMission/GameOver @0x4D30DE..0x4D31CA, Earthquake
 //  @0x4D2AC2..0x4D2B13, Lightning @0x4D2B5D..0x4D2BAC, TimeOfDay
 //  @0x4D2BE3..0x4D2CA1, SetServerName @0x4D2CF5..0x4D2DDF, SetServerMsg
-//  @0x4D2D8A..0x4D2DDF, SetMPReset @0x4D2E1B..0x4D2E2D]
+//  @0x4D2D8A..0x4D2DDF, SetMPReset @0x4D2E1B..0x4D2E2D, ChangeTeam / SwapTeam
+//  @0x4D31EA..0x4D3360]
 struct ServerCommandOutcome {
 	bool handled = false;        // the verb matched and passed its gates
 	bool stop_hosting = false;   // PuntPlayer aimed at the host's own slot

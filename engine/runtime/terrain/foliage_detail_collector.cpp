@@ -130,7 +130,7 @@ private:
 		// PolyTrn sector of -camera_y (FB20, the Godot-Z axis) plus the
 		// node's minimum into the low half, and the generator adds local B
 		// to it. [orig: Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a;
-		// generate_foliage_instances_0 @ 0x5fff84..0x5fffa2]
+		// Foliage_GenerateInstances_0 @ 0x5fff84..0x5fffa2]
 		const uint32_t x_min = static_cast<uint32_t>(world_x) & 0x7fffu;
 		const uint32_t z_min = static_cast<uint32_t>(world_z) & 0x7fffu;
 		patches.push_back({key_flags | (x_min << 16) | z_min, distance, maximum_y,
@@ -187,7 +187,7 @@ void collect_foliage_detail_patches(
 
 	// The flat flag survives collection and consumes the same 128-entry
 	// budget. Distance still uses raw node +52, before the generator turns
-	// flagged keys into empty cache entries. [orig: terrain_render_visible_sectors
+	// flagged keys into empty cache entries. [orig: Terrain_RenderVisibleSectors
 	// @ 0x6090C0, flag @ 0x60924A; Terrain_CollectNearFoliagePatches
 	// @ 0x603E60, raw center @ 0x603F46, packed flag @ 0x603F7E..0x603F8A]
 	const uint32_t key_flags = sector_id == 0 ? 0x80000000u : 0u;

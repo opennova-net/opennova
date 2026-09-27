@@ -35,13 +35,13 @@ void compile_scene_overlay(const SceneOverlayFrame &frame, const SceneOverlaySlo
 }
 
 bool scene_overlay_view_draws(const SceneOverlayBatch &batch, float eye_height) {
-	// [orig: @ 0x5c96ca cmp [eye+0Ch], Env_WaterHeightFixed; @ 0x5c96d1 jg
+	// [orig: @ 0x5c96ca cmp [eye+0Ch], g_EnvWaterHeightFixed; @ 0x5c96d1 jg
 	//  skips only a strictly-higher eye]
 	return !batch.eye_at_or_below_water_gate || eye_height <= batch.water_height;
 }
 
 void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
-		uint32_t texture, SceneOverlayFrame &out) {
+		uint32_t texture, SceneOverlayFrame &out, SceneOverlaySlot slot) {
 	if (precipitation.drops <= 0) {
 		return;
 	}
@@ -50,14 +50,14 @@ void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
 	if (count < 3) {
 		return;
 	}
-	// The one diffuse of the frame [orig: Env_TerrainLightCombined | 0xFF000000].
+	// The one diffuse of the frame [orig: g_EnvTerrainLightCombined | 0xFF000000].
 	const uint32_t argb = precipitation.color_argb;
 	const float r = static_cast<float>((argb >> 16) & 0xFFu) / 255.0f;
 	const float g = static_cast<float>((argb >> 8) & 0xFFu) / 255.0f;
 	const float b = static_cast<float>(argb & 0xFFu) / 255.0f;
 	const float a = static_cast<float>((argb >> 24) & 0xFFu) / 255.0f;
 	SceneOverlayBatch batch;
-	batch.slot = SceneOverlaySlot::Precipitation;
+	batch.slot = slot;
 	batch.shading = SceneOverlayShading::Modulate2xBlend;
 	batch.depth = SceneOverlayDepth::TestNoWrite;
 	batch.geometry = SceneOverlayGeometry::World;
@@ -79,12 +79,12 @@ void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
 }
 
 void append_corona_overlay(const std::vector<LightCoronaQuad> &quads, uint32_t texture,
-		SceneOverlayFrame &out) {
+		SceneOverlayFrame &out, SceneOverlaySlot slot) {
 	if (quads.empty()) {
 		return;
 	}
 	SceneOverlayBatch batch;
-	batch.slot = SceneOverlaySlot::LightCoronas;
+	batch.slot = slot;
 	batch.shading = SceneOverlayShading::AdditiveModulate;
 	batch.depth = SceneOverlayDepth::TestNoWrite;
 	batch.geometry = SceneOverlayGeometry::Billboard;
@@ -183,13 +183,13 @@ void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, cons
 }
 
 void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture,
-		const SceneOverlayFog &fog, SceneOverlayFrame &out) {
+		const SceneOverlayFog &fog, SceneOverlayFrame &out, SceneOverlaySlot slot) {
 	for (const TracerDraw &draw : ribbons.draws) {
 		if (draw.index_count < 3) {
 			continue;
 		}
 		SceneOverlayBatch batch;
-		batch.slot = SceneOverlaySlot::NvgLaserBeams;
+		batch.slot = slot;
 		batch.shading = SceneOverlayShading::NvgLaser;
 		batch.depth = SceneOverlayDepth::TestNoWrite;
 		batch.geometry = SceneOverlayGeometry::World;
@@ -237,7 +237,7 @@ void append_mirror_dim_overlay(float factor, SceneOverlayFrame &out) {
 	batch.geometry = SceneOverlayGeometry::Screen;
 	batch.texture = kSceneOverlayNoTexture;
 	batch.first_vertex = vertex_index(out);
-	// The full target, one colour on all four corners [orig: render_main_scene
+	// The full target, one colour on all four corners [orig: Render_MainScene
 	// @ 0x5c1882..0x5c1897, the strip's four diffuse stores].
 	static constexpr float kCorner[6][2] = {
 		{-1.0f, -1.0f}, {1.0f, -1.0f}, {-1.0f, 1.0f},

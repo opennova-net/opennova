@@ -84,7 +84,7 @@ int main(void) {
                     threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), -8388864);
 
     // Despite its shared catalog name, PANM code 114 is not a second control
-    // operation in retail. It follows wave_lookup (low nibble 2: sine) and
+    // operation in retail. It follows CWaveformTable_WaveLookup (low nibble 2: sine) and
     // ignores the supplied control table.
     memset(&t_ctrl_add, 0, sizeof(t_ctrl_add));
     t_ctrl_add.control = 114;

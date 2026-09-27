@@ -51,7 +51,7 @@ Weapon Next" (`cycleweaponN`, row `0x816A88`: VK 0xDD `]`, mask 0x800). Action
 @ 0x4DBDF0` (push `@ 0x4E13D5`, call `@ 0x4E13D7`). Action 214 passes -2 (push
 `@ 0x4E1394`, call `@ 0x4E1396`) or -1 (call `@ 0x4E13A4`). The elevation leg is
 the variable optic: it is taken only when the equipped def's +0x98 and +0x90
-differ and `Player_CanFireWeapon` passes, and the slot word it steps is clamped
+differ and `Player_IsOpticalViewVisible` passes, and the slot word it steps is clamped
 to [`scope_min_mag`, `scope_max_mag`] with a click on change. Binoculars and a
 fire charge refuse both actions. Our action signs were inverted; the fix sits in
 action resolution, so remapping and keyboard use keep working.
@@ -68,7 +68,7 @@ dispatches event 0x100 (call `@ 0x76158F`) and every whole -120 event 0x200
 (call `@ 0x7615C0`). The remainder survives across messages and is cleared only
 at process start (`Input_ResetMouseState @ 0x761260`, `@ 0x76127B`). The in-game
 callback maps 0x100 to binding mask 0x400 and 0x200 to 0x800
-(`try_dispatch_binding_by_weapon_type @ 0x4992FC..0x499327`).
+(`Input_TryDispatchBindingByWeaponType @ 0x4992FC..0x499327`).
 `controls::WheelRemainder` feeds `lround(factor * 120)` per Godot wheel event and
 dispatches one binding per whole notch. [orig: Input_DispatchMouseEvent
 @ 0x761470, `@ 0x761575..0x7615DB`]
@@ -395,7 +395,7 @@ HUD_RenderAllOverlays @ 0x5A8070, sprintf @ 0x5A8972]
 The panel draws only on the slot-1, slot-2/5 and slot-3-with-weapon-group arms
 (`HUD_RenderOverlays @ 0x5A7CAE..0x5A7D23`). The emplacement digit redraws once
 per following list entry, the silhouette takes the bordered texture window
-(`draw_textured_quad_with_border @ 0x590C40`), and projected cues map to the
+(`HUD_DrawTexturedQuadWithBorder @ 0x590C40`), and projected cues map to the
 1024x768 design space with integer rounding (`Viewport_ScreenToVirtual
 @ 0x5D2C70`). The [HUD record](../interface/hud-re.md) owns the witnesses.
 
@@ -443,7 +443,7 @@ per following list entry, the silhouette takes the bordered texture window
   outside the hull. The port had cast them from the jittered eye, which sits
   inside the gunner's own hull, and the LOS walk does not skip that hull (it
   skips only the endpoints, their parents and candidates linked to an
-  endpoint, `raycast_find_collision_entity @ 0x539ABA..0x539B10`), so 07TR's
+  endpoint, `Physics_RaycastFindCollisionEntity @ 0x539ABA..0x539B10`), so 07TR's
   AI tank gunners never acquired a target or fired their cannons. The range
   and arc metrics stay on the scanner's raw position (`@ 0x4B09D0..0x4B09D3`,
   `@ 0x53A67C..0x53A687`). In the native 07TR harness tanks 32/34/35 now fire
@@ -510,7 +510,7 @@ per following list entry, the silhouette takes the bordered texture window
   `Entity_RenderVehicleModel @ 0x440852..0x440866`,
   `Entity_ComputeUserpointWorldTransform @ 0x545CA3..0x545CAE`,
   `Entity_ComputeUserpointTransform @ 0x545A89..0x545A94` and
-  `build_bone_attachment_matrix @ 0x56C6DC..0x56C6F3`; a UseGun rider's seat
+  `Bone_BuildAttachmentMatrix @ 0x56C6DC..0x56C6F3`; a UseGun rider's seat
   attach also calls the writer directly (`@ 0x546517..0x546518`). Nothing
   clears the words on a detach: their only writers are the producer
   (`@ 0x440B23`, `@ 0x440B45`, `@ 0x440B58`), the window clamp (`@ 0x44125C`,
@@ -520,7 +520,7 @@ per following list entry, the silhouette takes the bordered texture window
   publication (`@ 0x440F04..0x441020`, behind the Def gate
   `@ 0x440E8C..0x440EA0`) keeps driving the hull turret after the gunner
   leaves, and an emptied turret holds its last traverse.
-- **The carrier-destruction reset.** `Vehicle_CleanupTeamEntitiesOnDestruction`
+- **The carrier-destruction reset.** `Vehicle_ReleaseEWeapGroupOnDestruction`
   zeroes the child's gun words (+0x324 pitch, +0x322 yaw;
   `@ 0x5470F9..0x547100`), not its clip and reserve, which only the optional
   ammo split touches (`@ 0x547107..0x54710E`). Both death legs lead with the
@@ -579,9 +579,9 @@ per following list entry, the silhouette takes the bordered texture window
   Entity_GetWeaponTurretLimits @ 0x540E2C..0x540E58; Math_ClampAngleToBounds
   calls @ 0x44123C / @ 0x44128C; AdmDef_InitEntryDefaults @ 0x53FEFF]
 - **Seat points.** The USE scan and the attach labels pose every seat kind at
-  its live bone through `build_bone_attachment_matrix` (seat kinds
+  its live bone through `Bone_BuildAttachmentMatrix` (seat kinds
   `@ 0x435F6C..0x435FDF`, call `@ 0x435FFA`; labels
-  `draw_vehicle_seat_and_armory_labels @ 0x5A3553`); the rider pose for
+  `HUD_DrawVehicleSeatAndArmoryLabels @ 0x5A3553`); the rider pose for
   non-gunner seats is unchanged.
 
 ### Joiner replication
@@ -648,8 +648,8 @@ per following list entry, the silhouette takes the bordered texture window
 - **Full-width attitude on the wire.** The compact heading is the rounded high
   half of the eulerZ dword (`Entity_SerializeVehicleState @ 0x460CEC..0x460D0A`),
   the 0x0D spawn carries the three dwords whole
-  (`serialize_entity_pool_to_packet_0 @ 0x503B37`, `@ 0x503B53`, `@ 0x503B6F`)
-  and the 0x18 rebuild truncates their high words (`serialize_object_to_buffer
+  (`NetPacket_SerializeEntityPoolToPacket_0 @ 0x503B37`, `@ 0x503B53`, `@ 0x503B6F`)
+  and the 0x18 rebuild truncates their high words (`NetPacket_SerializeObjectToBuffer
   @ 0x505166`, `@ 0x505179`). The host reads a seeded mover's own BAM; for an
   unseeded entity it sends the placement angles in the spawn form,
   `((deg << 16) / 360) << 16` with the low half zero (`Entity_SpawnFromBMSRecord

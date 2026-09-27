@@ -50,7 +50,7 @@ class Weather;
 // [orig: Game_StartMission @ 0x525d19 -> Game_SpawnAllEntityGlowEffects @0x5227b0 ->
 // Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
 // group-passing three [orig: Light_SelectAndEnableForDraw @ 0x5ab9d0 ->
-// collect_nearby_zones_by_aabb @ 0x5aa250; the batch collectors' group gate
+// Light_CollectNearbyZonesByAABB @ 0x5aa250; the batch collectors' group gate
 // @ 0x5d91f8 / @ 0x5d96b8 and 3-cap @ 0x5d9229]. The object pass runs per
 // rendered model: one draw context per visible ObjectModel carrying BOTH
 // witnessed groups — the owner group its submit declares, and the building
@@ -134,8 +134,22 @@ public:
 	// the skipped select re-runs with the last frame's camera, so an
 	// MCP/diagnostics read stays exact without the per-frame report cost.
 	void run_census_now();
+	// The weapon Inset pass's own legs, once per frame while it renders
+	// (GameWorld's material leg, after the Inset collect and both views' level
+	// walks settled the twins): retail runs the scene core again for that
+	// view (renderer/scene_overlay.h kInsetOverlayOrder carries the witness),
+	// so the draws it makes that the main view does not (ObjectModel's view
+	// twins) select their own lights, and its corona walk runs over the Inset
+	// camera at the next phase, owned coronas gated on each drawn owner's
+	// Inset section mask. release_inset_frame drops the walk when the pass
+	// stops.
+	void render_inset_frame(Camera3D *p_camera, int64_t p_time_ms);
+	void release_inset_frame();
+	// The Inset walk's quad count this frame (the typed read-back).
+	int get_inset_corona_count() const { return static_cast<int>(inset_coronas_.size()); }
 	// This frame's corona billboards into the post-particle overlay tail
-	// (renderer/scene_overlay.h). Not bound to Godot.
+	// (renderer/scene_overlay.h): the main walk's, and the Inset walk's in its
+	// own slot. Not bound to Godot.
 	void append_overlay(SceneOverlaySubmission &r_submission);
 	// The 62 Hz lifecycle decay [orig: EffectWorld_TickInstancesAndLightScale
 	// @ 0x5aa170 from the main loop] — beside EffectWorld.advance_fixed_tick.
@@ -218,15 +232,23 @@ private:
 			int64_t p_owner_id, const BlinkOwner &p_blink_owner, bool p_spawner_is_building);
 	BlinkOwner _blink_owner_at(const Vector3 &p_world_pos);
 	int64_t _owner_id_for_bms(int p_bms_id);
+	// A placed record's BUILDING identity: its items.def type, not its BMS
+	// record family (engine: mission::placed_record_is_building).
+	bool _record_is_building(int p_kind, int p_item_id) const;
 	void _render_static_light_rows(const Vector3 &p_gain, Weather *p_weather, int p_time_ms);
 	void _rebuild_static_light_rows();
 	void _ensure_model_registry(Node *p_container);
 	void _rebuild_model_registry(Node *p_container);
 	BlinkOwner _local_player_interior_group();
+	// One registry row's draw context into the frame arrays (the entity
+	// query, the owner, the ROBJ scope and the interior group).
+	void _push_model_draw(ObjectModel *p_model, int64_t p_reg_index);
+	void _clear_frame_draws();
 	void _render_coronas(Camera3D *p_camera, const Vector3 &p_gain, int p_time_ms,
 			Weather *p_weather,
 			const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 			MissionEnvironment *p_env);
+	Ref<EnvLightValues> _corona_fog(MissionEnvironment *p_env) const;
 	void _clear_coronas();
 	Ref<ImageTexture> _corona_texture();
 
@@ -267,6 +289,11 @@ private:
 	// portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 —
 	// the witness map lives on renderer::LightScene::collect_corona_quads].
 	std::vector<opennova::renderer::LightCoronaQuad> coronas_;
+	// The weapon Inset pass's own walk this frame (render_inset_frame).
+	std::vector<opennova::renderer::LightCoronaQuad> inset_coronas_;
+	// The frame & 3 jitter phase: every walk advances it, as retail's
+	// effect-world prologue does once per scene pass (scene_overlay.h
+	// kInsetOverlayOrder).
 	int corona_frame_ = 0;
 	// The procedural corona texture "texlightcrn": the law (the 128x128
 	// 0.4 - 0.45 d falloff, truncated, the transparent border) lives

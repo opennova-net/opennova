@@ -44,7 +44,7 @@ WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 }
 
 WaterSurfaceSides water_surface_sides(float eye_y, float water_height) {
-	// [orig: render_water_surface @ 0x5c32f6 (underwater: cmp cam.z, wh;
+	// [orig: Render_WaterSurface @ 0x5c32f6 (underwater: cmp cam.z, wh;
 	// jge skip) / @ 0x5c3304 (above: cmp cam.z, wh; jle skip)].
 	WaterSurfaceSides sides;
 	sides.above = eye_y > water_height;

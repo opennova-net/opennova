@@ -39,13 +39,6 @@ void SkyDome::_bind_methods() {
 			PROPERTY_HINT_LAYERS_3D_RENDER),
 			"set_environment_capture_layer_mask",
 			"get_environment_capture_layer_mask");
-	ClassDB::bind_method(D_METHOD("set_frame_clear_environment", "environment"),
-			&SkyDome::set_frame_clear_environment);
-	ClassDB::bind_method(D_METHOD("get_frame_clear_environment"),
-			&SkyDome::get_frame_clear_environment);
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "frame_clear_environment",
-						 PROPERTY_HINT_RESOURCE_TYPE, "Environment"),
-			"set_frame_clear_environment", "get_frame_clear_environment");
 	ClassDB::bind_method(D_METHOD("build"), &SkyDome::build);
 	ClassDB::bind_method(D_METHOD("is_built"), &SkyDome::is_built);
 	ClassDB::bind_method(D_METHOD("get_sky_material"),
@@ -82,10 +75,6 @@ void SkyDome::set_environment_capture_layer_mask(uint32_t p_mask) {
 		mesh_instance_->set_layer_mask(
 				mesh_instance_->get_layer_mask() | p_mask);
 	}
-}
-
-void SkyDome::set_frame_clear_environment(const Ref<Environment> &p_environment) {
-	frame_clear_environment_ = p_environment;
 }
 
 MissionEnvironment *SkyDome::_env_node() {
@@ -210,7 +199,6 @@ void SkyDome::advance_frame(double p_delta) {
 		mesh_instance_->set_global_position(to_vector3(anchor));
 	}
 
-	sync_frame_clear_color();
 	MissionEnvironment *env = _env_node();
 	const opennova::env::SkyFrameState frame = env != nullptr
 			? opennova::env::build_sky_frame(env->state())
@@ -232,11 +220,11 @@ void SkyDome::advance_frame(double p_delta) {
 					to_vector3(frame.cloud_highlight));
 			_set_dome_parameter("u_cloud_edge", to_vector3(frame.cloud_edge));
 		}
-		// The dome mesh is the engine layout drawn identity into the Godot
-		// world, so its shader dots GODOT-world sun/light vectors: route the
-		// render-float tuples through the util/axes.h swap (2026-08-20 — the
-		// identity mapping put the sun-proximity highlight 90 degrees off in
-		// yaw, the 03tr-sun-sky dome half).
+		// The dome mesh reaches the Godot world through the util/axes.h swap
+		// (EnvFile::build_sky_dome_arrays), so its shader dots GODOT-world
+		// sun/light vectors: route the render-float tuples through the same
+		// swap (2026-08-20 — the identity mapping put the sun-proximity
+		// highlight 90 degrees off in yaw, the 03tr-sun-sky dome half).
 		_set_dome_parameter("u_sun_dir", render_float_to_godot(frame.sun_dir));
 		_set_dome_parameter("u_light_dir",
 				render_float_to_godot(frame.light_dir));
@@ -244,7 +232,7 @@ void SkyDome::advance_frame(double p_delta) {
 		// The sky wrapper keeps its dedicated skyfog color and its own fog end
 		// on both sides of the water plane: the engine frame's fog_end is the
 		// raw smoothed distance the dome VS constant c9.x carries unconditionally
-		// (sky_frame.cpp cites render_skybox @ 0x5792c2); the murk-derived
+		// (sky_frame.cpp cites Render_Skybox @ 0x5792c2); the murk-derived
 		// world end is the object/terrain passes' alone.
 		_set_dome_parameter("u_fog_end", frame.fog_end);
 		_set_dome_parameter("u_sky_height", frame.sky_height);
@@ -254,26 +242,29 @@ void SkyDome::advance_frame(double p_delta) {
 
 	// Cloud scroll: the weather runtime owns the ramping rate and the four
 	// integer accumulators (weather_runtime.h carries the cites); standalone
-	// owners tick the engine fallback core at the same 62 Hz cadence.
-	double cam_x = 0.0;
-	double cam_z = 0.0;
+	// owners tick the engine fallback core at the same 62 Hz cadence. The
+	// camera term is in the render basis, like the dome's UVs (render x =
+	// Godot z, render z = Godot x).
+	float cam_render_x = 0.0f;
+	float cam_render_z = 0.0f;
 	if (cam != nullptr) {
-		const Vector3 cam_pos = cam->get_global_position();
-		cam_x = cam_pos.x;
-		cam_z = cam_pos.z;
+		const opennova::env::Vec3 cam_render =
+				godot_to_render_float(cam->get_global_position());
+		cam_render_x = cam_render.x;
+		cam_render_z = cam_render.z;
 	}
 	Weather *weather = _weather_node();
 	if (weather != nullptr) {
 		cloud_material_->set_shader_parameter("u_scroll_offset1",
-				weather->get_cloud_uv_offset1(cam_x, cam_z));
+				weather->get_cloud_uv_offset1(cam_render_x, cam_render_z));
 		cloud_material_->set_shader_parameter("u_scroll_offset2",
-				weather->get_cloud_uv_offset2(cam_x, cam_z));
+				weather->get_cloud_uv_offset2(cam_render_x, cam_render_z));
 	} else {
 		fallback_scroll_.advance(p_delta, frame.sky_speed);
 		const opennova::env::CloudUvOffsets offsets =
 				opennova::env::cloud_scroll_uv_offsets(
 						fallback_scroll_.core.cloud_scroll,
-						static_cast<float>(cam_x), static_cast<float>(cam_z));
+						cam_render_x, cam_render_z);
 		cloud_material_->set_shader_parameter("u_scroll_offset1",
 				Vector2(offsets.u1, offsets.v1));
 		cloud_material_->set_shader_parameter("u_scroll_offset2",
@@ -304,7 +295,7 @@ void SkyDome::_set_dome_parameter(const StringName &p_name,
 }
 
 // The cloud pass exists only on the shader path with a bound cloud layer
-// (retail render_skybox pass 2 @ 0x5798f1..0x579b15; the flat
+// (retail Render_Skybox pass 2 @ 0x5798f1..0x579b15; the flat
 // advanced_clouds=0 path @ 0x579b42 draws the single flat dome).
 void SkyDome::_apply_cloud_pass(bool p_drawn) {
 	if (sky_material_.is_null()) {
@@ -336,23 +327,6 @@ void SkyDome::_update_cloud_textures(MissionEnvironment *p_env) {
 		cloud_material_->set_shader_parameter("u_cloud_tex2",
 				tex2.is_valid() ? tex2 : tex1);
 	}
-}
-
-// The faithful sky dome is open below its rim. Retail clears that region to
-// the horizon-blended skyfog block; the shell provides the BG_COLOR resource.
-void SkyDome::sync_frame_clear_color() {
-	if (frame_clear_environment_.is_null()) {
-		return;
-	}
-	MissionEnvironment *env = _env_node();
-	if (env == nullptr || !env->is_loaded()) {
-		return;
-	}
-	const opennova::env::Rgb rgb = env->state().frame_clear_color();
-	// Environment decodes its sRGB color before clearing the scene target.
-	// Our spatial passes write retail gamma-domain values (D-RMAT-7), so
-	// pre-encode this device input to preserve those same values in the clear.
-	frame_clear_environment_->set_bg_color(Color(rgb.r, rgb.g, rgb.b).linear_to_srgb());
 }
 
 } // namespace godot

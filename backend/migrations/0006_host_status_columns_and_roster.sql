@@ -2,9 +2,10 @@
 --
 -- A retail host's Host var list carries every browser column
 -- (Lobby_UpdateServerInfo @0x4fe8c0): TimeLeft, TimeOfDay, Msg, Mod, Age,
--- PBServer, LevelRange, BBMode, Skins, Tracers (plus the ones 0003 added).
--- The GSB row used to ship gsb.h defaults for these; now the host-reported
--- value is stored and projected.
+-- PBServer, LevelRange, BBMode, Skins, Tracers (plus the ones 0003 added);
+-- pix keeps the PIX column for a host whose list carries one. The GSB row
+-- used to ship gsb.h defaults for these; now the host-reported value is
+-- stored and projected.
 --
 -- The PlayerList arrives as VarFNum-indexed entries, one slot per player
 -- (Server_PlayerAdd @0x51d441..0x51d4aa: PlayerName, PlayerIpAndPort,

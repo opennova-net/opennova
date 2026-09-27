@@ -461,6 +461,39 @@ void test_player_jump_uses_current_slope() {
     }
 }
 
+// Neither organic motor samples the ground ahead of its vertical block: the
+// clearance is the resolver's ground-settle tail at every resolve, so ground
+// that drops 3 u between two ticks off any 8-tick phase puts the body in the
+// air on the next resolve; there is no stale sample to snap back to.
+// [orig: org2 resolver call @0x4B7CF4 (every tick), org1 @0x4BF7F2 (even key
+//  ticks); the tail @0x4B3D6E..0x4B3DA9]
+void test_ground_drop_goes_airborne_without_a_resample() {
+    for (bool player : {false, true}) {
+        Motor m(0, 0, player);
+        m.ai().pos[2] = 5000 * 256; // stand on the raw16=5000 terrain
+        const uint32_t first = player ? 1u : 2u; // org1 resolves on even keys only
+        m.tick(first);
+        CHECK(!m.ai().inf.airborne);
+        std::fill(m.field.heights.begin(), m.field.heights.end(),
+                  static_cast<uint16_t>(5000 - 3 * 256));
+        m.tick(first + (player ? 1u : 2u)); // key & 7 still nonzero
+        CHECK(m.ai().inf.airborne);
+    }
+}
+
+// No ground gate either: over an invalid height field the player body still
+// takes its gravity step and integrates on its first tick instead of freezing.
+// [orig: Entity_UpdateInfantryPlayerBody gravity @0x4B7AC8..0x4B7ACF,
+//  `add [esi+0Ch],eax` @0x4B7CEF, resolver @0x4B7CF4]
+void test_invalid_field_keeps_the_gravity_step() {
+    Motor m(0, 0, true);
+    m.field.field.heightmap = nullptr;
+    CHECK(!m.field.field.valid());
+    m.tick(1);
+    CHECK(m.ai().inf.vel[2] == -208);
+    CHECK(m.ai().pos[2] == q16(60) + 3333 - 208);
+}
+
 void test_slope_arms_route_detour_before_think() {
     Motor m(768, 0);
     auto &ai = m.w->ai;
@@ -492,6 +525,8 @@ int main() {
     test_slope_arms_route_detour_before_think();
     test_player_jump_uses_current_slope();
     test_standing_carrier_motion();
+    test_ground_drop_goes_airborne_without_a_resample();
+    test_invalid_field_keeps_the_gravity_step();
     if (failures == 0) std::puts("infantry terrain: OK");
     return failures == 0 ? 0 : 1;
 }

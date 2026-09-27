@@ -572,7 +572,7 @@ bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
 		return false;
 	}
 	// A popup-exclusive pump restricts owner resolution to the open combo
-	// [orig: dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd — while a
+	// [orig: UI_DispatchMouseEvent @ 0x63ab00 g_UIOpenPopupWnd — while a
 	// popup is open only the popup window sees the event].
 	const int index = restrict_index >= 0
 			? (scroll_hit_at(restrict_index, io_state, mouse_x, mouse_y,
@@ -636,12 +636,12 @@ bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
 // Input_DispatchMouseEvent @ 0x761571..0x7615d0], the shell bridge collapses
 // BOTH masks into the direction-less widget event 0x100000B that no widget
 // handler consumes [orig: Menu_ShellMouseCallback @ 0x54b8c6;
-// dispatch_mouse_event @ 0x63ab72], and the in-game bridge (the armory's)
+// UI_DispatchMouseEvent @ 0x63ab72], and the in-game bridge (the armory's)
 // drops the ticks entirely [orig: Menu_InGameMouseCallback @ 0x568760]. By
 // the 2026-08-12 maintainer decision the reimpl scrolls anyway: one tick =
 // one row (the CScrollWnd arrow step), routed the way the witnessed dispatch
 // routes every mouse event — the open popup exclusively [orig:
-// g_ui_open_popup_wnd gate @ 0x63abb5], else the front-most row owner under
+// g_UIOpenPopupWnd gate @ 0x63abb5], else the front-most row owner under
 // the point (the reverse child walk @ 0x63abd3).
 bool MenuFrameCompiler::pump_mouse_wheel(MenuFrameState &io_state,
 		float mouse_x, float mouse_y, int steps, float scale_x, float scale_y,
@@ -726,7 +726,7 @@ bool MenuFrameCompiler::pump_mouse_wheel(MenuFrameState &io_state,
 // The open-dropdown pump: the popup's scrollbar child sees the sample ahead
 // of row picking, restricted to the open combo — while a popup is open only
 // the popup window receives events, and its scrollbar child claims before
-// the row strip [orig: dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd
+// the row strip [orig: UI_DispatchMouseEvent @ 0x63ab00 g_UIOpenPopupWnd
 // gate; CListWnd child walk @ 0x643f30; CScrollWnd_HandleEvent @ 0x64d050].
 // The claim reports whether the scrollbar owns the sample; row hover/pick
 // stays with the caller when it does not.

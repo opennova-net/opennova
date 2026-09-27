@@ -1,10 +1,11 @@
 #pragma once
 
-// Internal to engine/runtime/world's collision TUs — not part of world/collision.h.
+// Internal to engine/runtime/world — not part of world/collision.h.
 //
 // The fixed-point math every collision TU shares: the retail sqrt/ftol chain, the
 // BAM conversion constants, and the two lookups the queries and the resolvers both
-// need. Header-inline because each is a handful of lines on a hot path.
+// need (the motors and the userpoint pose reuse its flt_7C19E0 clamp).
+// Header-inline because each is a handful of lines on a hot path.
 
 #include <runtime/world/collision.h>
 
@@ -43,7 +44,7 @@ inline int32_t sqrt_ftol(double squared_len) {
 
 // Distance of `p` from the ray line through `start` along normalized `dir`
 // (16.16), computed exactly like the original: project (float sqrt + ftol).
-// [orig: the shared projection block in raycast_entity_collision @ 0x4139a4 /
+// [orig: the shared projection block in Entity_RaycastCollision @ 0x4139a4 /
 // Entity_RaycastCollisionModel @ 0x4131a1 / Entity_FindNearestByRay @ 0x413d02]
 inline int32_t ray_line_distance(const int32_t start[3], const int32_t dir[3], const int32_t p[3]) {
     const int64_t t = (static_cast<int64_t>(dir[1]) * (p[1] - start[1]) +

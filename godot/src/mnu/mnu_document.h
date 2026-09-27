@@ -170,10 +170,6 @@ public:
 	// The window-level <ITEMS multiselect=...> flag (the driver's CTRL-select gate).
 	bool is_widget_multiselect(int p_id) const;
 	int get_item_count(int p_id) const;
-	// Retail's select-by-value seed: the row whose authored `value=` equals
-	// p_value, row 0 on a miss; -1 only when the widget has no item list
-	// (engine/runtime/menu/options_policy.h spinlist_row_for_value).
-	int find_item_row_by_value(int p_id, const String &p_value) const;
 	String get_item_text(int p_id, int p_index) const;
 	String get_item_value(int p_id, int p_index) const;
 
@@ -182,7 +178,6 @@ public:
 	String get_widget_texture(int p_id, int p_slot) const;
 
 	int get_widget_flags(int p_id) const;
-	int get_widget_group(int p_id) const;
 
 	// Native access for the loader/saver.
 	const opennova::mnu::Document &get_native() const { return doc_; }

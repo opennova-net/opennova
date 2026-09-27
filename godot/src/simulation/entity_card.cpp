@@ -139,8 +139,6 @@ Dictionary ai_json(const AiDetail &d) {
 	out["s38"] = d.s38;
 	out["fires_aimed"] = d.fires_aimed;
 	out["fires_body"] = d.fires_body;
-	out["ground_cache"] = d.ground_cache;
-	out["ground_valid"] = d.ground_valid;
 	out["airborne"] = d.airborne;
 	out["anim_state"] = d.anim_state;
 	out["anim_key"] = String(d.anim_key.c_str());

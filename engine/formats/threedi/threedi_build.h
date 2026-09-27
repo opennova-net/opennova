@@ -67,8 +67,9 @@ uint32_t threedi_build_panm_flags(const ThreediPartAnimation &row, uint8_t trans
 // A LGHT colour generator's rate (per second) and phase as WriteLGHT packs
 // them: times 256 in float, truncated, the phase wrapped to its byte (styles
 // up to 0x70; above, the phase byte is a CTRL register index)
-// [orig: WriteLGHT @ 0x456DF0; 5fc5b4f6a^:engine/formats/oed/export_3di.cpp
-// pack_rate, pack_phase]; and the values those words hold.
+// [orig: WriteLGHT @ 0x456DF0 (ModSuperOed.exe)] (the retired port's
+// pack_rate and pack_phase, 5fc5b4f6a^:engine/formats/oed/export_3di.cpp);
+// and the values those words hold.
 inline uint16_t threedi_build_light_rate(double rate) {
 	return static_cast<uint16_t>(static_cast<int32_t>(static_cast<float>(rate) * 256.0f));
 }
@@ -86,10 +87,12 @@ inline float threedi_byte_unit(int c) { return static_cast<float>(c) / 255.0f; }
 // The quantizers of the collision fields the retired OED writer derives: it
 // truncates toward zero where the helpers above round (CVRT 8.8, BPLN Q14,
 // and the 16.16 CFAC, BPLN, BVOL, COBJ and CMDL values) [orig: WriteCVRT @
-// 0x454450, WriteCFAC @ 0x454830, WriteBPLN @ 0x455A80, WriteBVOL @ 0x455CE0,
-// WriteCOBJ @ 0x454E70, WriteCDTA @ 0x456050; 5fc5b4f6a^:engine/formats/oed/
-// export_3di.cpp]. A value already on the grid (a scene of a retail model)
-// quantizes to itself either way.
+// 0x454450 (ModSuperOed.exe), WriteCFAC @ 0x454830 (ModSuperOed.exe),
+// WriteBPLN @ 0x455A80 (ModSuperOed.exe), WriteBVOL @ 0x455CE0
+// (ModSuperOed.exe), WriteCOBJ @ 0x454E70 (ModSuperOed.exe), WriteCDTA @
+// 0x456050 (ModSuperOed.exe)] (the retired port:
+// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp). A value already on the grid
+// (a scene of a retail model) quantizes to itself either way.
 inline int32_t threedi_q16_trunc(double v) { return static_cast<int32_t>(v * io::kFp16OneD); }
 inline float threedi_q8f_trunc(double v) {
 	return static_cast<float>(static_cast<int16_t>(static_cast<float>(v) * 256.0f)) / 256.0f;
@@ -207,8 +210,9 @@ struct ThreediBuildModel {
 	std::vector<std::string> control_registers;
 	std::vector<ThreediBuildCollisionObject> collision;
 	// CXLT (mission axes): the rows WriteCXLT writes, the collision LOD's
-	// attach points in order, truncated to 16.16 [orig: WriteCXLT @ 0x455920;
-	// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp]. The runtime reads them
+	// attach points in order, truncated to 16.16 [orig: WriteCXLT @ 0x455920
+	// (ModSuperOed.exe)] (the retired port:
+	// 5fc5b4f6a^:engine/formats/oed/export_3di.cpp). The runtime reads them
 	// by row (a palm item's broken pieces pivot on rows 0 and 1). When
 	// `translations_given` is false the builder derives the table by our own
 	// rule, not retail's: one row per non-root section on a rigid model and one
@@ -252,9 +256,10 @@ struct ThreediBuildModel {
 			const std::vector<ThreediBoundingPlane> &volume_planes);
 	// A bounding volume from an authored triangle mesh (mission axes; each
 	// triangle wound counter-clockwise about its outward normal) by the OED
-	// rule [orig: ConvertToInternal @ 0x4268B3, its -colonly branch;
-	// 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp]: the vertex box's six
-	// planes (+x -x +y -y +z -z), then each triangle's own plane unless one
+	// rule [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe), its -colonly
+	// branch] (the retired port:
+	// 5fc5b4f6a^:engine/formats/oed/convert_internal.cpp): the vertex box's
+	// six planes (+x -x +y -y +z -z), then each triangle's own plane unless one
 	// already matches it (normal within 0.005 per axis, distance within 0.03;
 	// the last match wins). A triangle whose edge cross product is at most
 	// 0.0001 long takes plane 0. A ladder (CL, type 4) then swaps plane 0 with
@@ -277,7 +282,7 @@ struct ThreediBuildModel {
 	bool add_face(int cobj, uint16_t a, uint16_t b, uint16_t c, uint8_t poly_type = 1, uint32_t material_flags = 0,
 			const ThreediBuildVec3 *given = nullptr);
 	// A collision vertex on the 8.8 grid, truncated as WriteCVRT stores it
-	// [orig: WriteCVRT @ 0x454450].
+	// [orig: WriteCVRT @ 0x454450 (ModSuperOed.exe)].
 	uint16_t add_collision_vertex(int cobj, ThreediBuildVec3 p);
 
 	// --- occlusion (authored in mission axes, stored in model axes) ---------
@@ -289,9 +294,10 @@ struct ThreediBuildModel {
 	// OED rule pick one: the six bounding-box planes first (+x -x +y -y +z -z),
 	// then each face's own plane unless one already matches it (normal within
 	// 0.005 per axis and distance within 0.03; the LAST match wins), at most 32
-	// planes [orig: ConvertToInternal @ 0x4268B3, the collision/occlusion plane
-	// table; witnessed on Armry01's OCCL]. `planes` given explicitly (mission
-	// axes, n . p + d == 0) replace the rule. False when the rule overflows 32.
+	// planes [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe), the
+	// collision/occlusion plane table; witnessed on Armry01's OCCL]. `planes`
+	// given explicitly (mission axes, n . p + d == 0) replace the rule. False
+	// when the rule overflows 32.
 	bool add_occ_record(uint8_t type, int section_a, int section_b, const std::vector<ThreediBuildVec3> &verts,
 			const std::vector<std::array<int, 4>> &faces, const std::vector<std::array<double, 4>> &explicit_planes = {});
 };

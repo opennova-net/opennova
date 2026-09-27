@@ -16,6 +16,7 @@
 
 #include "common/boot_file_source.h"
 #include "common/file_io.h"
+#include "common/synthetic_mission.h"
 #include "common/test_paths.h"
 
 #include <algorithm>
@@ -42,27 +43,8 @@ static int failures = 0;
 
 namespace {
 
-bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Organic;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	e.yaw = 90;
-	e.team = team;
-	return e;
-}
-
-bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
-	bms::Entity e{};
-	e.type = bms::ItemType::Item;
-	e.type_id = type_id;
-	e.x = x;
-	e.y = y;
-	e.z = z;
-	return e;
-}
-
+using test_mission::item;
+using test_mission::organic;
 using test_boot::source_over;
 
 bool near_equal(float a, float b, float tolerance) { return std::fabs(a - b) <= tolerance; }
@@ -107,7 +89,7 @@ static void run_boot_trace_gates() {
 	std::map<std::string, std::string> files;
 	{
 		bms::File m{};
-		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 		ms::MissionKernel kernel;
 		kernel.open_document(std::move(m), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -122,7 +104,7 @@ static void run_boot_trace_gates() {
 	}
 	{
 		bms::File m{};
-		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 		ms::MissionKernel kernel;
 		kernel.open_document(std::move(m), "synth", ms::BootFileSource{});
 		ms::KernelBootOptions options;
@@ -144,7 +126,7 @@ static void test_joiner_installs_only_the_wac_terminator() {
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then inc(v1) endif\n";
 		bms::File m{};
-		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 		ms::MissionKernel kernel;
 		kernel.open_document(std::move(m), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -501,7 +483,7 @@ static void test_board_walk_reaches_a_kernel_named_point() {
 		bms::File m{};
 		m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 0));
 		m.items[0].id = 21;
-		m.organics.push_back(organic(20 << 16, 20 << 16, 0, /*team=*/1));
+		m.organics.push_back(organic(20 << 16, 20 << 16, 0, /*team=*/1, /*yaw=*/90));
 		m.organics[0].id = 31;
 		ms::MissionKernel kernel;
 		kernel.set_items_table(&items);
@@ -574,7 +556,7 @@ int main() {
 	bms::File m{};
 	m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
 	m.items[0].id = 21;
-	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+	m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 	m.organics[0].id = 31;
 	m.events.push_back(bms::Event{});
 

@@ -316,7 +316,7 @@ world::WeaponTable build_weapon_table(
 		// [orig: WeaponDefs_ParseLineCallback load @0x544FCE, store @0x545092;
 		//  WeaponDef_ResolveAllReferences +0x2D4 reset @0x5402CA, gfx3 gate
 		//  @0x5402D8, lookup @0x5402EF, store @0x540316;
-		//  modelgpm_FindUserpointByName @0x5B21E0..0x5B21EF]
+		//  ModelGPM_FindUserpointByName @0x5B21E0..0x5B21EF]
 		if (resources != nullptr && d.gfx3[0] != '\0') {
 			e.third_person_model_asset = resources->model(d.gfx3);
 			const threedi::Threedi3di3 *gfx3 = e.third_person_model_asset.get();

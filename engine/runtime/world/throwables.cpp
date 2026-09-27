@@ -513,7 +513,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
         } else {
             const double depth = from_fixed(water) - r.pos.z;
             // Tags 27 and 26 sit at the water surface, tag 25 at the round
-            // [orig: the descriptor z = Env_WaterHeightFixed @0x4449BE for
+            // [orig: the descriptor z = g_EnvWaterHeightFixed @0x4449BE for
             //  the calls @0x4449CC (26) / @0x4449DE (27); the round z
             //  restored @0x4449EE for @0x4449F2 (25)].
             const Vec3 surface{r.pos.x, r.pos.y, static_cast<float>(from_fixed(water))};
@@ -1014,8 +1014,8 @@ void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
         break;
     }
     default:
-        // kNade never places; kLandmine (mission minefield items) stays
-        // unported — D-THROW-6.
+        // kNade never places; kLandmine (mission minefield items) thinks in
+        // world/minefield.cpp (MinefieldSystem), not here.
         if (dead) remove_device(world, d);
         break;
     }
@@ -1065,7 +1065,7 @@ void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
 // unconditional decrement, wrapping like x86 -- the ever-falling negative
 // value is the oldest-armed ordering key the device cap reads.
 // [orig: Entity_UpdatePool1Slot @0x4B8DD0 -- the gate @0x4B8E1B (cmp/jg
-//  before the decrement), Entity_BuildProximityList @0x4B8E25, the +0x1C8
+//  before the decrement), the Entity_BuildProximityList call @0x4B8E25, the +0x1C8
 //  think @0x4B8E3C, the +0x1C4 motor @0x4B8E53, `add [esi+2ACh],-1`
 //  @0x4B8EA0]
 void ThrowableSim::update_device(World &world, PlacedDevice &d,

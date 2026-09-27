@@ -9,7 +9,7 @@ namespace opennova::world {
 namespace {
 
 // The cell-9 x1.2 scale rides the tail of every icon branch.
-// [orig: draw_minimap_blip @0x597d5a..0x597d64]
+// [orig: Minimap_DrawBlip @0x597d5a..0x597d64]
 MinimapBlipDrawPolicy finish_blip_policy(MinimapBlipDrawPolicy policy,
 		uint8_t icon) {
 	if (icon == 9) {
@@ -140,7 +140,7 @@ MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
 			(entity.item_attrib2 & 1u) == 0) {
 		// Building with the marker model: the icon path is skipped entirely —
 		// the OOBJ occlusion ground-slice footprint draws instead.
-		// [orig: @0x597a84..0x597b3f -> render_collision_wireframe @0x596800]
+		// [orig: @0x597a84..0x597b3f -> Render_CollisionWireframe @0x596800]
 		if (entity.has_minimap_model_marker) {
 			out.footprint = true;
 			out.rotate = false;

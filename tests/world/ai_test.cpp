@@ -816,7 +816,7 @@ struct DeathTransitionRootSource final : IRootMotionSource {
 // rules: a joiner's brain then takes the in-session death arm (the death tick,
 // then the type-20 event), and single player, the in-process listen server,
 // stays outside the session.
-// [orig: g_napi_np_ctx.is_in_session -- SinglePlayer_StartMission @0x561AF0
+// [orig: g_NapiNPCtx.is_in_session -- SinglePlayer_StartMission @0x561AF0
 //  leaves it clear (read back @0x561E73); EntityAI_ProcessAirStateMachine
 //  @0x458273 (the death-event arm)]
 static void test_entity_update_stamps_the_session_fact() {
@@ -4295,7 +4295,7 @@ int main() {
             CHECK(sys.acquire_target(w, e, out) == false);
         }
 
-        // The round-end latch nulls acquisition [orig: g_spawn_success_gate @0x24C1928].
+        // The round-end latch nulls acquisition [orig: g_SpawnSuccessGate @0x24C1928].
         {
             auto w_heap = std::make_unique<World>();
             World &w = *w_heap;
@@ -4645,7 +4645,7 @@ int main() {
     // [witness: world-wac-ai-re §17; net-re §5.60]
     {
         // A root-motion double whose attack clip carries the .bad fire trigger (bit 0x4)
-        // every frame; idle carries none. [orig: g_animEventTriggerBits @0xA2ED08]
+        // every frame; idle carries none. [orig: g_AnimEventTriggerBits @0xA2ED08]
         struct FiringSource : IRootMotionSource {
             bool has_clip(int, int id) const override {
                 return id == anim_state::kIdle || id == anim_state::kAttack;

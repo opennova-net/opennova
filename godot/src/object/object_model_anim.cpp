@@ -45,7 +45,7 @@ bool ObjectModel::has_muzzle() const {
 // The def names the muzzle: items.def launchups_closeattack authors the launch
 // userpoint (JO NPC riflemen: mflash01), pushed here by the placer. Resolve it
 // case-insensitively against the model's userpoint table — retail's by-name
-// lookup [orig: modelgpm_FindUserpointByName @ 0x5b2170 via Entity_ResolveBoneUserpoints (ex sub_545940)]. The
+// lookup [orig: ModelGPM_FindUserpointByName @ 0x5b2170 via Entity_ResolveBoneUserpoints (ex sub_545940)]. The
 // rig is index-driven, so the userpoint's subobject row IS the bone index; no
 // authored name (or no match) means no AI muzzle.
 void ObjectModel::set_muzzle_point_name(const String &p_name) {
@@ -545,18 +545,6 @@ double ObjectModel::get_animation_time() const {
 }
 
 // --- Part-animation channel device application ----------------------------
-
-String ObjectModel::resolve_anim_channel_register(int p_slot) const {
-	if (p_slot < 0 || p_slot > 1) return String();
-	const int ordinal = opennova::renderer::ModelControls::part_register(p_slot + 1);
-	return ordinal < 0 ? String() : String(opennova::threedi::threedi_ctrl_register_name(
-			static_cast<size_t>(ordinal)));
-}
-
-String ObjectModel::resolve_anim_channel_owner(int p_slot) const {
-	if (p_slot < 0 || p_slot > 1) return String();
-	return String(opennova::renderer::ModelControls::part_owner(p_slot + 1));
-}
 
 void ObjectModel::play_part_anim(int p_channel, int p_play_type, double p_time_s) {
 	for (ObjectModel *linked : live_presentation_links()) {

@@ -245,7 +245,7 @@ Rgba8Image compose_terrain_tile_page(
 	// bilinearly samples the level nearest its texel footprint.
 	// [orig: PolyTrn_RenderTile UV build @ 0x60DB62..0x60DC16 (1/512 =
 	// flt_7D83A4), quad @ 0x60DC1A..0x60DC7E drawn @ 0x60DD5A / 0x60E39E;
-	// apply_texture_stages flag decode @ 0x68084C..0x680870;
+	// CGfxShader_ApplyTextureStages flag decode @ 0x68084C..0x680870;
 	// CGfxDevice_ApplyRenderStates per-stage filters @ 0x67E463..0x67E4A7;
 	// levels GTexture_CreateFromPixelData_0 @ 0x6877BA..0x6877D8, box filter
 	// @ 0x6878B7..0x6878BE]
@@ -281,13 +281,13 @@ Rgba8Image compose_terrain_tile_page(
 			// The base pass draws MODULATE2X(TEXTURE=colormap, DIFFUSE=
 			// 0x808080): c * (128/255) * 2 = c * 256/255; DIFFUSE alpha 0
 			// zeroes the RT alpha. [orig: PolyTrn_RenderTile base quad @
-			// 0x60DCE5..0x60DCF9, pass PolyTrn_TileBakeBasePass]
+			// 0x60DCE5..0x60DCF9, pass g_PolyTrnTileBakeBasePass]
 			output.pixels[offset] = byte(colormap.r * (256.0f / 255.0f));
 			output.pixels[offset + 1] = byte(colormap.g * (256.0f / 255.0f));
 			output.pixels[offset + 2] = byte(colormap.b * (256.0f / 255.0f));
 			output.pixels[offset + 3] = 0;
 			// D3D DOTPRODUCT3 semantics: 4 * sum((a-0.5)(b-0.5)), saturated,
-			// blended ONE/ONE into A. [orig: PolyTrn_TileBakeDot3LightPass @
+			// blended ONE/ONE into A. [orig: g_PolyTrnTileBakeDot3LightPass @
 			// 0x60E38A; light dir packed (d+1)*127.5 @ 0x60E231..0x60E331]
 			dot3_alpha[static_cast<size_t>(y) * dimension + x] =
 					byte(4.0f * dot);

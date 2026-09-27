@@ -375,12 +375,12 @@ func _apply_menu_camera() -> void:
 
 
 # Hover toggles the zoom + sway, matching the original's "active when over the preview/lists"
-# test [orig: update_player_preview_animation @ 0x55dba0].
+# test [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0].
 func set_hovered(value: bool) -> void:
 	_hovered = value
 
 
-# Per-frame PLAYER_INFO portrait animation [orig: update_player_preview_animation @ 0x55dba0]:
+# Per-frame PLAYER_INFO portrait animation [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0]:
 # a damped zoom toward the hover target, a continuous idle rotation, and a sinusoidal sway
 # that fades in on hover.
 func _process(delta: float) -> void:

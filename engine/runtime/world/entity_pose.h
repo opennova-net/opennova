@@ -46,7 +46,7 @@ namespace opennova::world {
 //    placed .3di (weapon models are authored muzzle +Z / up +Y).
 //  * The HAND frame: bone 16's own matrix with a fixed calibration,
 //    `Ry_e · Rz_e · M16` — selected when the WEAPON-channel hold state
-//    carries g_animStateFlagsTable bit 0x80 (knife/grenade/designator holds,
+//    carries g_AnimStateFlagsTable bit 0x80 (knife/grenade/designator holds,
 //    melee, binoculars, BOTH reloads, the death family). The calibration
 //    angles survive to Godot unchanged in SIGN: the rotation builder stores
 //    -sin θ (each block rotates by -θ) and conjugating through the loader's

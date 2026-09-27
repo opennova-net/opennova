@@ -48,7 +48,7 @@ void test_own_other_colors() {
         CHECK(feed_event_color(t, /*own=*/false, 0) == kFeedColorGrey);
     }
     // The friendly-fire trio is white for EVERYONE [orig: 7/8/9 @0x4265FF
-    // pass -1 unconditionally], as are 16/17/18 (g_hudColorTable[0] = -1
+    // pass -1 unconditionally], as are 16/17/18 (g_HUDColors[0] = -1
     // [orig: HUD_InitTeamColorTable @0x51F245]) and the announcement lines.
     for (uint8_t t : { 7, 8, 9, 16, 17, 18, 27, 31, 35, 36, 37 })
         CHECK(feed_event_color(t, /*own=*/false, 0) == kFeedColorWhite);

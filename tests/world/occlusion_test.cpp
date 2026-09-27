@@ -1,8 +1,8 @@
 // Rendering-occlusion unit tests [orig: the Jointops.exe consumer set —
 // Terrain_InitBuildingPortals @0x5c7480 (register/weld/flags),
-// build_sector_visibility_masks @0x5c8610, render_visibility_portal_traversal
-// @0x5c4ae0, test_sector_entity_occlusion @0x5c4610, the entity-collector gates
-// @0x5c6f20/0x5c8c60, terrain_occlusion_check_three_rays @0x610ed0] over
+// Terrain_BuildSectorVisibilityMasks @0x5c8610, Render_VisibilityPortalTraversal
+// @0x5c4ae0, Terrain_TestSectorEntityOcclusion @0x5c4610, the entity-collector gates
+// @0x5c6f20/0x5c8c60, Terrain_OcclusionCheckThreeRays @0x610ed0] over
 // hand-built occlusion + collision models (docs/render/render-occlusion-re.md).
 //
 // Authoring convention used by the fixtures (derived from the witnessed side
@@ -14,11 +14,20 @@
 #include <cstring>
 #include <vector>
 
+#include <map>
+#include <memory>
+#include <string>
+
+#include <formats/mission/bms.h>
+#include <runtime/mission/mission_kernel.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
+#include <runtime/world/occlusion_camera.h>
 #include <runtime/world/occlusion_feed.h>
 #include <runtime/world/world.h>
+
+#include "common/boot_file_source.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -530,7 +539,7 @@ void test_weld_and_flags() {
 
     const OcclusionFrameCamera cam = rig.camera(10.0, 10.0, 1.0, 0x2);
     rig.ow.build_frame(rig.world, rig.cw, cam);
-    // [orig: render_visibility_portal_traversal — the type-5 track leg's
+    // [orig: Render_VisibilityPortalTraversal — the type-5 track leg's
     // `jmp loc_5C560C` @ 0x5c5519 joins the recurse-windows gate @ 0x5c560c
     // and the recursion @ 0x5c5619]
     CHECK((rig.ow.section_mask(a) & (1u << 2)) != 0);
@@ -855,7 +864,7 @@ void test_toc_occlusion() {
     CHECK(rig.ow.slot_count() >= 1);
     CHECK(rig.ow.building_visible(occluder));
     // The candidate is fully inside the slab's shadow wedge -> TOC culls it.
-    // [orig: test_sector_entity_occlusion @ 0x5c4610]
+    // [orig: Terrain_TestSectorEntityOcclusion @ 0x5c4610]
     CHECK(!rig.ow.building_visible(candidate));
     CHECK(rig.ow.section_mask(candidate) == 0u);
     // The debug introspection split: TOC-culled = batched but not visible; the
@@ -979,13 +988,15 @@ void test_forced_visible_bits() {
     rig.ow.build_frame(rig.world, rig.cw, cam);
     CHECK(rig.ow.section_mask(building) == 0u);
     CHECK(rig.ow.forced_section_mask(building) == (0xFFFFFFFFu << 5));
-    CHECK(rig.ow.section_draw_mask(building) == (0xFFFFFFFFu << 5));
+    CHECK((rig.ow.section_mask(building) | rig.ow.forced_section_mask(building)) ==
+          (0xFFFFFFFFu << 5));
 
     const OcclusionFrameCamera near_cam = rig.camera(5.0, 30.0, 1.5);
     rig.ow.build_frame(rig.world, rig.cw, near_cam);
     CHECK(rig.ow.building_visible(windowless));
     CHECK(rig.ow.section_mask(windowless) == 1u);
-    CHECK(rig.ow.section_draw_mask(windowless) == 0xFFFFFFFFu);
+    CHECK((rig.ow.section_mask(windowless) | rig.ow.forced_section_mask(windowless)) ==
+          0xFFFFFFFFu);
     // Both bytes merge; a zero byte forces nothing; the pair clears.
     rig.ow.assign_forced_sections(windowless, 0, 4);
     CHECK(rig.ow.forced_section_mask(windowless) == (0xFFFFFFFFu << 4));
@@ -1006,7 +1017,7 @@ void raise_ridge(Rig &rig, double height_units) {
 }
 
 // The three rays start ONE unit above the eye. [orig:
-// terrain_occlusion_check_three_rays `add edx, 10000h` @ 0x610eef] A 0.9 u
+// Terrain_OcclusionCheckThreeRays `add edx, 10000h` @ 0x610eef] A 0.9 u
 // sphere 55 u out behind a 1.5 u crest: from eye + 0.25 every ray dips below
 // the crest (the top ray at most 1.39 u over it), from eye + 1.0 the top ray
 // clears it (at least 1.67 u).
@@ -1024,7 +1035,7 @@ void test_three_rays_start_one_unit_up() {
 
 // The person leg: the entity position with the entity+0 bound radius, the
 // item-185 radius under the parachute flag, and the sub-pixel floor ahead of
-// the latch. [orig: collect_visible_entities_for_terrain @ 0x5c8dd7..0x5c8e10,
+// the latch. [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8dd7..0x5c8e10,
 // @ 0x5c8e5e, the latch @ 0x5c8e7b..0x5c8eab]
 void test_person_collector_leg() {
     Rig rig;
@@ -1120,7 +1131,7 @@ void test_portal_slot_sort_and_clamp() {
 }
 
 // render_TOC measures the candidate by its entity+0 bound radius. [orig:
-// test_sector_entity_occlusion `mov eax,[esi]; fild dword ptr [eax]`
+// Terrain_TestSectorEntityOcclusion `mov eax,[esi]; fild dword ptr [eax]`
 // @ 0x5c463e..0x5c4640] A 1 u bound sphere 1.5 u inside the slab's shadow
 // wedge is fully inside it; the wide collision box's corner length would
 // reach past the wedge and let the 8-corner refinement keep it visible.
@@ -1159,7 +1170,7 @@ void test_render_wave_toc_skips_contained_entities() {
 
     // Indoors: a blink room with no occlusion records. The camera inside it
     // latches camera-inside mode with no exterior plane, where render_TOC
-    // culls every candidate outright. [orig: test_sector_entity_occlusion
+    // culls every candidate outright. [orig: Terrain_TestSectorEntityOcclusion
     // @ 0x5c4693..0x5c46b0]
     {
         Rig rig;
@@ -1228,7 +1239,7 @@ void test_render_wave_toc_skips_contained_entities() {
 
 // A weld-linked building straddles the water plane by its bound SPHERE (z +
 // center z +- radius), not its collision header. [orig:
-// build_sector_visibility_masks @ 0x5c8985..0x5c89a9] The linked box spans z
+// Terrain_BuildSectorVisibilityMasks @ 0x5c8985..0x5c89a9] The linked box spans z
 // 0..3 (header: below 3.5 u water) while its sphere (center 1.5, radius 3.2)
 // reaches above it.
 void test_link_water_straddle_uses_bound_sphere() {
@@ -1265,7 +1276,7 @@ void test_link_water_straddle_uses_bound_sphere() {
 
 // The collectors place the sphere center through the full Euler pose.
 // [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40 from
-// collect_visible_sector_userpoints @ 0x5c6c6a] A building whose bounds sit
+// Terrain_CollectVisibleSectorUserpoints @ 0x5c6c6a] A building whose bounds sit
 // 10..12 u ahead of its origin is admitted yaw-only; pitched 180 deg the
 // center swings 11 u behind the camera and the batch drops it.
 void test_collector_center_uses_full_euler_pose() {
@@ -1342,7 +1353,368 @@ void test_building_visibility_feed_word() {
     CHECK(pack_building_visibility(0x80000001u, false) == int64_t(0x80000001u));
 }
 
+// The model leg's render model: an entity without one is never collected (its
+// latch untouched); without a usable collision instance the render model's
+// CMDL sphere stands, placed through the entity pose and scaled by the entity
+// scale; a model without the collision block keeps the zero spawn words, a
+// radius-0 sphere at the position. The camera at x = 5 looks down +X with its
+// near plane at x = 4.95. [orig: the entity+0x30 gates
+// Terrain_CollectVisibleEntities_0 @ 0x5c6fd8..0x5c6fe1 /
+// Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8cf6..0x5c8cff;
+// Entity_ComputeBoundingSphere @ 0x5c69a0, the null-block early out @ 0x5c69be]
+void test_model_leg_render_model_sphere() {
+    Rig rig;
+    // Floating 1 u up, so every three-ray probe over the flat field clears.
+    auto spawn_item = [&](double x) {
+        Entity e;
+        e.kind = EntityKind::Item;
+        e.net_id = rig.next_net_id++;
+        e.position = {static_cast<float>(x), 10.0f, 1.0f};
+        e.yaw = 90; // identity heading
+        e.alive = true;
+        return rig.world.registry.spawn(2, e);
+    };
+    const EntityHandle modelless = spawn_item(60.0);
+    const EntityHandle behind = spawn_item(3.0);
+    const EntityHandle blockless = spawn_item(4.5);
+    const EntityHandle blockless_far = spawn_item(60.0);
+    rig.rebuild();
+    // A CMDL sphere 11 u ahead of the origin: the entity at x = 3 is behind the
+    // near plane (a position-centred unit sphere there is culled), its sphere
+    // centre at x = 14 is not.
+    opennova::renderer::ObjectProjectionSphere ahead;
+    ahead.valid = true;
+    ahead.center_q16 = {fx(11.0), 0, 0};
+    ahead.radius_q16 = fx(1.0);
+    rig.ow.assign_render_model(behind, ahead);
+    // No collision block: the zero spawn words. A unit sphere at x = 4.5 would
+    // still touch the near plane; radius 0 does not.
+    opennova::renderer::ObjectProjectionSphere unstamped;
+    unstamped.valid = true;
+    rig.ow.assign_render_model(blockless, unstamped);
+    rig.ow.assign_render_model(blockless_far, unstamped);
+
+    const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    Entity *m = rig.world.registry.get(modelless);
+    Entity *b = rig.world.registry.get(behind);
+    Entity *z = rig.world.registry.get(blockless);
+    Entity *f = rig.world.registry.get(blockless_far);
+    CHECK(m != nullptr && b != nullptr && z != nullptr && f != nullptr);
+    if (m == nullptr || b == nullptr || z == nullptr || f == nullptr) return;
+    CHECK(!rig.ow.has_render_model(modelless));
+    CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *m, cam));
+    CHECK(m->occlusion_latch == 0); // never collected: the latch never ran
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *b, cam));
+    CHECK(b->occlusion_latch >= 16 && b->occlusion_latch <= 23);
+    CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *z, cam));
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *f, cam));
+    // The entity scale applies to the stamped (unscaled) sphere: at scale
+    // 0.25 the centre sits 2.75 u ahead (x = 5.75) with radius 0.25, in view.
+    b->uniform_scale_q16 = 0x4000;
+    b->occlusion_latch = 0;
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *b, cam));
+    // Retiring the instance drops the render model with it.
+    rig.ow.remove_entity_instance(behind);
+    CHECK(!rig.ow.has_render_model(behind));
+    b->occlusion_latch = 0;
+    CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *b, cam));
+}
+
+// The collector per view: the weapon Inset pass re-runs the whole collect
+// over its own camera (Render_WeaponInsetScene @ 0x5c9740 ->
+// Terrain_RenderWorldScene @ 0x5c9de9 -> Terrain_CollectVisibleEntities
+// @ 0x5c94f0), so each view carries its own batch and section masks while the
+// entity latches tick once per collect, whichever view collects.
+void test_collector_runs_per_view() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.net_id = rig.next_net_id++;
+    npc.position = {60.0f, 10.0f, 0.0f};
+    npc.bound_radius = 1.5625f;
+    npc.alive = true;
+    const EntityHandle nh = rig.world.registry.spawn(0, npc);
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    Entity *n = rig.world.registry.get(nh);
+    CHECK(n != nullptr);
+    if (n == nullptr) return;
+
+    const OcclusionFrameCamera main_cam = rig.camera(5.0, 10.0, 1.5);
+    CHECK(rig.ow.selected_view() == OcclusionView::kMain);
+    rig.ow.build_frame(rig.world, rig.cw, main_cam);
+    CHECK(rig.ow.building_visible(building));
+    const uint32_t main_mask = rig.ow.section_mask(building);
+    CHECK(main_mask == 0xFFFFFFFu); // the windowed building, outdoors
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *n, main_cam));
+    const uint8_t armed = n->occlusion_latch;
+    CHECK(armed >= 16 && armed <= 23);
+
+    // The Inset pass looks from far out with the fog pulled in: the building
+    // leaves its batch, while the person still draws there.
+    OcclusionFrameCamera inset_cam = rig.camera(20.0, 480.0, 1.5);
+    inset_cam.fog_dist = fx(50.0);
+    rig.ow.select_view(OcclusionView::kInset);
+    rig.ow.build_frame(rig.world, rig.cw, inset_cam);
+    CHECK(!rig.ow.building_batched(building));
+    CHECK(!rig.ow.building_visible(building));
+    CHECK(rig.ow.section_mask(building) == 0u);
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *n, main_cam));
+    CHECK(n->occlusion_latch == armed - 1); // the second collect ticks it again
+
+    // Back on the main view: its own words, untouched by the Inset pass.
+    rig.ow.select_view(OcclusionView::kMain);
+    CHECK(rig.ow.building_batched(building));
+    CHECK(rig.ow.building_visible(building));
+    CHECK(rig.ow.section_mask(building) == main_mask);
+    CHECK(rig.ow.exterior_visible());
+    // And the parked Inset words are the Inset's.
+    rig.ow.select_view(OcclusionView::kInset);
+    CHECK(rig.ow.section_mask(building) == 0u);
+    rig.ow.select_view(OcclusionView::kMain);
+}
+
+// A round restart never re-runs the portal register + weld: the kernel's
+// OcclusionWorld outlives MissionKernel::restore_baseline, so the weld
+// registry, the retyped shared records and the building flags stay the first
+// start's (Game_RestartRoundSP passes 1 @ 0x5263d9, so Game_StartMission's
+// portal arg is 0 and Terrain_InitBuildingPortals skips register + weld;
+// render-occlusion-re.md §2, D-OCC-4).
+void test_round_restart_keeps_the_first_weld() {
+    opennova::bms::File m{};
+    for (int i = 0; i < 2; ++i) {
+        opennova::bms::Entity bldg{};
+        bldg.type = opennova::bms::ItemType::Building;
+        bldg.id = 50 + i;
+        m.buildings.push_back(bldg);
+    }
+    m.events.push_back(opennova::bms::Event{});
+    std::map<std::string, std::string> files;
+    auto kernel = std::make_unique<opennova::mission::MissionKernel>();
+    kernel->open_document(std::move(m), "synth", test_boot::source_over(&files));
+    opennova::mission::KernelBootOptions options;
+    options.playable = false;
+    std::string error;
+    CHECK(kernel->boot(options, error));
+    Entity *a = kernel->world.registry.by_net_id(50);
+    Entity *b = kernel->world.registry.by_net_id(51);
+    CHECK(a != nullptr && b != nullptr);
+    if (a == nullptr || b == nullptr) return;
+    // The test_weld_and_flags pair: A's +X window 0.1 u from B's -X window.
+    a->position = {10.0f, 10.0f, 0.0f};
+    b->position = {14.1f, 10.0f, 0.0f};
+    a->yaw = b->yaw = 90.0f; // identity heading
+    a->pitch = b->pitch = a->roll = b->roll = 0.0f;
+    QuadSpec qb;
+    qb.type = kOccRecWindow;
+    qb.section_a = 1;
+    qb.section_b = 0;
+    const double cb[4][3] = {
+        {-2.0, -1.0, 1.0}, {-2.0, 1.0, 1.0}, {-2.0, 1.0, 2.5}, {-2.0, -1.0, 2.5}};
+    std::memcpy(qb.corners, cb, sizeof(cb));
+    qb.normal[0] = -1.0;
+    OcclusionWorld::EntityDefBits weldable;
+    weldable.weldable = true;
+    const EntityHandle ha = a->handle;
+    const EntityHandle hb = b->handle;
+    kernel->collision.assign_entity(ha, kernel->collision.add_model(building_collision(2, 2, 3)));
+    kernel->collision.assign_entity(hb, kernel->collision.add_model(building_collision(2, 2, 3)));
+    kernel->occlusion.assign_entity(ha, kernel->occlusion.add_model(one_room_window()), weldable);
+    kernel->occlusion.assign_entity(hb, kernel->occlusion.add_model(occ_model({qb})), weldable);
+    // The first start's portal init over the attached models, then the seal.
+    kernel->occlusion_init_mission();
+    const std::vector<OcclusionWorld::WeldRecord> first_welds = kernel->occlusion.weld_records();
+    CHECK(first_welds.size() == 2);
+    const OcclusionWorld::BuildingFlags first_a = kernel->occlusion.building_flags(ha);
+    const OcclusionWorld::BuildingFlags first_b = kernel->occlusion.building_flags(hb);
+    CHECK(first_a.has_links && first_b.has_links);
+    kernel->capture_baseline();
+
+    auto same_as_first = [&]() {
+        const std::vector<OcclusionWorld::WeldRecord> &welds = kernel->occlusion.weld_records();
+        CHECK(welds.size() == first_welds.size());
+        for (size_t i = 0; i < welds.size() && i < first_welds.size(); ++i) {
+            CHECK(welds[i].own_entity == first_welds[i].own_entity);
+            CHECK(welds[i].other_entity == first_welds[i].other_entity);
+            CHECK(welds[i].own_section == first_welds[i].own_section);
+            CHECK(welds[i].other_section == first_welds[i].other_section);
+        }
+        const OcclusionWorld::BuildingFlags fa = kernel->occlusion.building_flags(ha);
+        const OcclusionWorld::BuildingFlags fb = kernel->occlusion.building_flags(hb);
+        CHECK(fa.has_open == first_a.has_open && fa.has_windows == first_a.has_windows &&
+              fa.has_links == first_a.has_links);
+        CHECK(fb.has_open == first_b.has_open && fb.has_windows == first_b.has_windows &&
+              fb.has_links == first_b.has_links);
+    };
+    CHECK(kernel->restore_baseline());
+    same_as_first();
+    // A second restart keeps them too (no register + weld on any restart).
+    CHECK(kernel->restore_baseline());
+    same_as_first();
+}
+
 } // namespace
+
+// The occlusion frustum's five planes pass through the eye (retail's
+// g_CameraFrustumPlanes5): an eye 0.1 u inside a window's plane still clips the
+// window in, banks its wedge, and an outdoor person beyond it draws. A near
+// plane ahead of the eye (the shell camera's 0.2 u near, the old anchor) left
+// every window vertex behind it: the window was skipped as fully clipped, no
+// wedge and no exterior plane came out, and the camera-inside rule culled the
+// whole exterior — the Ghost Harvest spawn / doorway report.
+// [orig: Viewport_BuildProjectionMatrix — the forward plane through the eye
+//  @ 0x411577..0x4115c6; render_VPT's all-below skip @ 0x5c4d63..0x5c4df2;
+//  Terrain_TestSectorEntityOcclusion's camera-inside rule @ 0x5c4662..0x5c4721]
+void test_eye_in_front_of_a_window_keeps_the_exterior() {
+    Rig rig;
+    rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    Entity p;
+    p.kind = EntityKind::Organic;
+    p.net_id = 7;
+    p.position = {40.0f, 10.0f, 0.0f};
+    p.bound_radius = 1.0f;
+    p.alive = true;
+    const EntityHandle person = rig.world.registry.spawn(0, p);
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    Entity *out = rig.world.registry.get(person);
+    CHECK(out != nullptr);
+    if (out == nullptr) return;
+    rig.cw.refresh_blink(rig.world, *out);
+    CHECK(out->blink_hits[0] == 0);
+
+    // The shell's hand-over: the eye 0.1 u inside the window plane (x = 22),
+    // at the window's height, looking out along mission +X.
+    OcclusionViewSpec view;
+    const float eye_mission[3] = {21.9f, 10.0f, 1.75f};
+    view.eye[0] = eye_mission[0];  // presentation = mission (x, z, -y)
+    view.eye[1] = eye_mission[2];
+    view.eye[2] = -eye_mission[1];
+    view.forward[0] = 1.0f; view.forward[1] = 0.0f; view.forward[2] = 0.0f;  // mission +X
+    view.right[0] = 0.0f; view.right[1] = 0.0f; view.right[2] = 1.0f;        // mission -Y
+    view.up[0] = 0.0f; view.up[1] = 1.0f; view.up[2] = 0.0f;                 // mission +Z
+    view.fov_y_deg = 53.4468f;
+    view.aspect = 1.6667f;
+    view.viewport_width = 640.0f;
+    view.fog_dist_units = 500.0f;
+    view.water_z_units = -100.0f;
+    OcclusionFrameCamera cam;
+    occlusion_camera_from_view(view, cam);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.camera_indoors());
+    CHECK(rig.ow.window_frustum_group_count() == 1);
+    CHECK(rig.ow.exterior_visible());
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *out, cam));
+
+    // The divergence it replaced: the same camera with its forward plane moved
+    // 0.2 u ahead of the eye drops the window, and the whole exterior with it.
+    OcclusionFrameCamera near_cam = cam;
+    near_cam.frustum[0][3] -= 0.2f;
+    rig.ow.build_frame(rig.world, rig.cw, near_cam);
+    CHECK(rig.ow.window_frustum_group_count() == 0);
+    CHECK(!rig.ow.exterior_visible());
+    CHECK(!rig.ow.entity_render_visible(rig.world, rig.cw, *out, near_cam));
+}
+
+// The statics table splits pool 2 on the items.def TYPE: a decoration (def type
+// 2) inside a building stays out of the building prefix and batch, takes its
+// own blink quad at the mission-start refresh, and is entity-collected by that
+// quad — so from inside its room it draws while the camera faces away from
+// every window, where the building batch's render_TOC (camera-inside rule, no
+// window wedge) would cull it. [orig: Entity_BuildProximityLists_Pool2 pass 1
+//  `def->type == ItemType_Building` @ 0x4b946e, pass 2 @ 0x4b9502; the
+//  mission-start refresh's pool-2 filter @ 0x5240f3; Terrain_CollectVisibleEntities_0
+//  @ 0x5c6f48..0x5c708a; the render wave's contained skip @ 0x5c7b92..0x5c7b99]
+void test_decoration_rows_are_entity_collected() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    if (Entity *b = rig.world.registry.get(building)) {
+        b->has_item_def = true;
+        b->item_type = kItemDefTypeBuilding;
+    }
+    // A crate stack inside the room: a pool-2 row (the BMS building record
+    // family), def type 2, a solid half-unit box of its own.
+    CollisionModel crate_cm;
+    {
+        const double h = 0.5;
+        const int nx[6] = {16384, -16384, 0, 0, 0, 0};
+        const int ny[6] = {0, 0, 16384, -16384, 0, 0};
+        const int nz[6] = {0, 0, 0, 0, 16384, -16384};
+        const double d[6] = {-h, -h, -h, -h, -2.0 * h, 0.0};
+        for (int i = 0; i < 6; ++i) {
+            CollisionPlane pl;
+            pl.nx = static_cast<int16_t>(nx[i]);
+            pl.ny = static_cast<int16_t>(ny[i]);
+            pl.nz = static_cast<int16_t>(nz[i]);
+            pl.dist = fx(d[i]);
+            crate_cm.planes.push_back(pl);
+        }
+        CollisionVolume v;
+        v.type = 1;
+        v.min_x = fx(-h);
+        v.max_x = fx(h);
+        v.min_y = fx(-h);
+        v.max_y = fx(h);
+        v.min_z = 0;
+        v.max_z = fx(2.0 * h);
+        v.plane_start = 0;
+        v.plane_count = 6;
+        crate_cm.volumes.push_back(v);
+        CollisionSection s0;
+        s0.volume_start = 0;
+        s0.volume_count = 1;
+        crate_cm.sections.push_back(s0);
+        crate_cm.finalize_sections();
+    }
+    Entity c;
+    c.kind = EntityKind::Building;
+    c.net_id = rig.next_net_id++;
+    c.position = {19.0f, 10.0f, 0.5f};
+    c.yaw = 90;
+    c.alive = true;
+    c.has_item_def = true;
+    c.item_type = 2;
+    c.bound_radius = 0.9f;
+    const EntityHandle crate = rig.world.registry.spawn(2, c);
+    // Its twin authored with a Building-type def: the row the port made of
+    // EVERY pool-2 record before the split keyed on the def type.
+    Entity cb = c;
+    cb.net_id = rig.next_net_id++;
+    cb.position = {19.0f, 11.0f, 0.5f};
+    cb.item_type = kItemDefTypeBuilding;
+    const EntityHandle crate_as_building = rig.world.registry.spawn(2, cb);
+    const int32_t crate_model = rig.cw.add_model(std::move(crate_cm));
+    rig.cw.assign_entity(crate, crate_model);
+    rig.cw.assign_entity(crate_as_building, crate_model);
+    rig.rebuild();
+    CHECK(rig.cw.static_building_count() == 2);
+    CHECK(rig.cw.static_count() == 3);
+    rig.cw.refresh_mission_start_blink(rig.world);
+    rig.ow.init_mission(rig.world, rig.cw);
+    Entity *ce = rig.world.registry.get(crate);
+    CHECK(ce != nullptr);
+    if (ce == nullptr) return;
+    CHECK(EntityHandle::make(2, BlinkAccum::hit_pool_entity_index(ce->blink_hits[0])) == building);
+    CHECK(BlinkAccum::hit_section(ce->blink_hits[0]) == 1);
+
+    // Camera in the room facing mission -X, the window behind it.
+    const OcclusionFrameCamera cam = rig.camera(21.0, 10.0, 1.5, 0x2, -1);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.camera_indoors());
+    CHECK((rig.ow.section_mask(building) & 0x2u) != 0);
+    CHECK(rig.ow.window_frustum_group_count() == 0);
+    CHECK(!rig.ow.building_batched(crate)); // not a building-batch member
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *ce, cam));
+    // The Building-typed twin: a batch member, culled from inside its own
+    // room by render_TOC's camera-inside rule (no window wedge) — how the
+    // decoration drew before the split.
+    CHECK(rig.ow.building_batched(crate_as_building));
+    CHECK(!rig.ow.building_visible(crate_as_building));
+}
 
 int main() {
     test_bound_sphere();
@@ -1368,6 +1740,11 @@ int main() {
     test_collector_center_uses_full_euler_pose();
     test_mission_start_blink_stamp();
     test_building_visibility_feed_word();
+    test_model_leg_render_model_sphere();
+    test_collector_runs_per_view();
+    test_round_restart_keeps_the_first_weld();
+    test_eye_in_front_of_a_window_keeps_the_exterior();
+    test_decoration_rows_are_entity_collected();
     if (failures == 0) std::printf("occlusion_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

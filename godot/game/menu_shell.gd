@@ -51,7 +51,7 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var main_menu_file := "main.mnu"
 @export var ingame_menu_file := "game.mnu"
 @export var menu_text_file := "menutxt.BIN"
-# The gametext table (the original's g_TextGameText — in-game strings + the Strings.SECTION_WEPDES
+# The gametext table (the original's g_TextGameText — in-game strings + the "WepDes"
 # weapon names the HUD/armory/killfeed resolve) [orig: Game_InitSubsystems @0x4a6cd0
 # loads "gametext.bin"].
 @export var game_text_file := "gametext.bin"
@@ -285,7 +285,7 @@ func _assemble_assets() -> void:
 	_text = _load_text(menu_text_file)
 	# Register the engine text tables into the shared Strings registry, the way the
 	# original loads its TextResource globals: menutxt (UI/voice labels), gametext =
-	# gametext.bin (g_TextGameText — the Strings.SECTION_WEPDES weapon names + in-game strings
+	# gametext.bin (g_TextGameText — the "WepDes" weapon names + in-game strings
 	# [orig: Game_InitSubsystems @0x4a6cd0]), and gameui = Game.bin (the menu shell's
 	# own resource: options/menu + "Avatars" sections [orig: the menu boot @0x552510
 	# -> the menu resource @0x25510F8]).

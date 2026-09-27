@@ -38,8 +38,8 @@ struct SceneOverlaySubmission {
 // The SELFLUM surfaces of one model for the overlay tail: the sun glare and
 // the water glint, whose placement, UPL_INTENSITY submit value and Q3 copy
 // env/Celestial keeps while this stage draws them (retail submits both with
-// flags 0x110 at the scene tail: render_skybox_sun_glow @ 0x5ad0f7,
-// update_sun_glare @ 0x5ad470). Each mesh's triangle list is read once (the
+// flags 0x110 at the scene tail: Render_SkyboxSunGlow @ 0x5ad0f7,
+// Environment_UpdateSunGlare @ 0x5ad470). Each mesh's triangle list is read once (the
 // authored geometry never changes) and placed by its instance's global
 // transform every frame; the SelfLumColor (u_rgb_mod) and the diffuse
 // texture (u_diffuse) come from the surface's live material.
@@ -98,13 +98,15 @@ public:
 	enum ViewKind {
 		VIEW_SCENE = 0,  // the main view and the scope aperture: the full tail
 		VIEW_MIRROR = 1, // the water mirror: the coronas, the dim and the sky redraw
+		// The weapon Inset pass: the tail without the glare, its own coronas
+		// (runtime/renderer/scene_overlay.h kInsetOverlayOrder).
+		VIEW_INSET = 2,
 	};
 
 	SceneOverlayCompositorEffect();
 	~SceneOverlayCompositorEffect() override;
 
 	void set_view_kind(ViewKind p_kind);
-	ViewKind get_view_kind() const;
 	void publish(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
 	void clear_submission();
 	// Release RenderingDevice objects only while the owner knows the server

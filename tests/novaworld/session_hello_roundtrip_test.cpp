@@ -81,7 +81,6 @@ int test_client_hello_roundtrip() {
 	src.pv3  = "third-version";
 	src.ci   = 0xCAFEBABEu;
 	src.pm   = 7;
-	src.pm_present = true;
 	src.eip  = 0x7F000001u;
 	src.epn  = 32768;
 	src.et   = 0x55667788u;
@@ -104,7 +103,6 @@ int test_client_hello_roundtrip() {
 	TEST_EXPECT(round.pv3  == src.pv3);
 	TEST_EXPECT(round.ci   == src.ci);
 	TEST_EXPECT(round.pm   == src.pm);
-	TEST_EXPECT(round.pm_present);
 	TEST_EXPECT(round.eip  == src.eip);
 	TEST_EXPECT(round.epn  == src.epn);
 	TEST_EXPECT(round.et   == src.et);
@@ -135,16 +133,19 @@ int test_client_hello_minimal() {
 
 	// PM is written only for a NONZERO count: retail's announce builder has no
 	// "present but zero" state [orig: NapiNPSession_SendAnnouncePacket
-	// @0x61fa00 @0x61fcca/@0x61fcda]. The parse-side presence marker stays.
-	src.pm_present = true;
-	bytes = client_hello_to_bytes(src);
+	// @0x61fa00 @0x61fcca/@0x61fcda], and the reader keeps no presence marker,
+	// so a PM omitted at zero parses as 0 [orig: NapiNPProtocol_HandleClientHello
+	// @0x6213B0 — PM dword @0x62173C, zero-initialised @0x621504].
 	TEST_EXPECT(!has_tlv_field(bytes, "PM"));
+	ClientHello zero_pm;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), zero_pm));
+	TEST_EXPECT(zero_pm.pm == 0);
 	src.pm = 3;
 	bytes = client_hello_to_bytes(src);
 	TEST_EXPECT(has_tlv_field(bytes, "PM"));
 	ClientHello with_pm;
 	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), with_pm));
-	TEST_EXPECT(with_pm.pm_present && with_pm.pm == 3);
+	TEST_EXPECT(with_pm.pm == 3);
 
 	// No tag is required to parse: a PM-only announce (no PN at all) is a
 	// valid hello whose admission is decided by client_hello_admits.
@@ -234,22 +235,26 @@ int test_client_and_server_auth_tag_names_are_case_insensitive() {
 	return 0;
 }
 
-// [orig: CNapiNetwork_Init @0x4caa53..0x4caa76 (0x4000 ceiling);
-//  CNapiGameSession_InitNPConnection @0x4d3df4..0x4d3e17 (0x10000 ceiling)]
+// [orig: CNapiNetwork_Init @0x4caa53..0x4caa76 (0x4000 ceiling, the signed
+//  `jge` @0x4caa66); CNapiGameSession_InitNPConnection @0x4d3df4..0x4d3e17
+//  (0x10000 ceiling, the signed `jge` @0x4d3e07)]
 int test_cs_field13_follows_the_mpmaxpacketsize_clamp() {
 	auto field13 = [](const std::vector<opennova::CsField> &cs) {
 		for (const auto &f : cs) if (f.field_index == 13) return f.value;
 		return 0u;
 	};
-	TEST_EXPECT(field13(opennova::jointoperations_client_cs_fields()) == 1300u);
-	TEST_EXPECT(field13(opennova::jointoperations_server_cs_fields(0)) == 1300u);
-	TEST_EXPECT(field13(opennova::jointoperations_client_cs_fields(50)) == 100u);
-	TEST_EXPECT(field13(opennova::jointoperations_client_cs_fields(4000)) == 4000u);
-	TEST_EXPECT(field13(opennova::jointoperations_client_cs_fields(20000)) == 16384u);
-	TEST_EXPECT(field13(opennova::default_client_cs_fields()) == 1300u);
-	TEST_EXPECT(field13(opennova::default_server_cs_fields(20000)) == 20000u);
-	TEST_EXPECT(field13(opennova::default_client_cs_fields(70000)) == 65536u);
-	TEST_EXPECT(field13(opennova::default_client_cs_fields(7)) == 100u);
+	TEST_EXPECT(field13(opennova::jointoperations_cs_fields()) == 1300u);
+	TEST_EXPECT(field13(opennova::jointoperations_cs_fields(0)) == 1300u);
+	TEST_EXPECT(field13(opennova::jointoperations_cs_fields(50)) == 100u);
+	TEST_EXPECT(field13(opennova::jointoperations_cs_fields(4000)) == 4000u);
+	TEST_EXPECT(field13(opennova::jointoperations_cs_fields(20000)) == 16384u);
+	// The ladder compares SIGNED: a negative value lands on the floor.
+	TEST_EXPECT(field13(opennova::jointoperations_cs_fields(-5)) == 100u);
+	TEST_EXPECT(field13(opennova::novaworld_service_cs_fields()) == 1300u);
+	TEST_EXPECT(field13(opennova::novaworld_service_cs_fields(20000)) == 20000u);
+	TEST_EXPECT(field13(opennova::novaworld_service_cs_fields(70000)) == 65536u);
+	TEST_EXPECT(field13(opennova::novaworld_service_cs_fields(7)) == 100u);
+	TEST_EXPECT(field13(opennova::novaworld_service_cs_fields(-5)) == 100u);
 	return 0;
 }
 
@@ -369,7 +374,6 @@ int test_server_hello_omitted_metadata_parses_empty() {
 	TEST_EXPECT(parsed.mp == 0);
 	TEST_EXPECT(parsed.sus1.empty());
 	TEST_EXPECT(parsed.sus2.empty());
-	TEST_EXPECT(parsed.pl.empty());
 	return 0;
 }
 
@@ -426,9 +430,14 @@ int test_server_hello_zero_and_empty_fields_are_omitted() {
 	TEST_EXPECT(!has_tlv_field(bytes, "ET"));
 	ServerHello parsed;
 	TEST_EXPECT(parse_server_hello(bytes.data(), bytes.size(), parsed));
-	// SN is unconditional, so its empty value round-trips; an absent PN leaves
-	// the record's default in place (the reader zero-inits its own record).
+	// SN is unconditional, so its empty value round-trips; every field the bytes
+	// omit parses as zero/empty, never as a builder default (the bytes carry only
+	// CI/HK/SN/SF) [orig: Nwu_HandleServerHello @0x626d20 — every field zeroed
+	// before the walk @0x626E3B..0x626F20].
 	TEST_EXPECT(parsed.sn.empty() && !has_tlv_field(bytes, "PN") && !parsed.locale_block);
+	TEST_EXPECT(parsed.co.empty() && parsed.ap.empty() && parsed.bdat.empty() &&
+	            parsed.pn.empty() && parsed.pv1.empty() && parsed.pv2.empty() &&
+	            parsed.pv3.empty());
 	return 0;
 }
 

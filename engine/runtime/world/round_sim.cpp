@@ -817,7 +817,7 @@ RoundSourceState resolve_round_source(World &world,
 // byte_24D217C gate has no writer in the image (hud/sight_overlay.h).
 // [orig: RoundData_SpawnRound @0x4ec155 (& 0x3F), sourceEntity && step
 //  @0x4ec16a, entity+0x2B0 @0x4ec16f; Score_GetMultiplierValue @0x4fc440 --
-//  the 39 clamp @0x4fc44f..0x4fc451, AdmDefs+0x3B0 @0x4fc46d]
+//  the 39 clamp @0x4fc44f..0x4fc451, g_AdmDefs+0x3B0 @0x4fc46d]
 int32_t round_zero_elevation(const World &world, const RoundSpawnParams &params) {
     uint8_t adm = 0;
     if (params.source_state != nullptr) {
@@ -1627,8 +1627,9 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         // @0x517188..0x517206]; the sim snapshots them here.
                         d.event_flags = target->cause_flags & 0xF00u;
                         // The kill accounting skips a body already flagged
-                        // dead [orig: `test byte ptr [esi+24h], 2` @0x4E811F
-                        // around Score_ProcessKillEvent @0x4E8133].
+                        // dead [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0,
+                        // `test byte ptr [esi+24h], 2` @0x4E811F around the
+                        // Score_ProcessKillEvent call @0x4E8133].
                         d.kill_event = target_not_dead;
                         deaths.push_back(d);
                     }
@@ -2376,7 +2377,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // the damage call @0x4E99E6 zeroes lifetime only on a 1 @0x4E99EE, the
         // kill-zone push @0x4E9B26..0x4E9B2E; Projectile_ProcessDamageOnTarget
         // returns 0 for 19 @0x4E823F..0x4E8266; the park
-        // Projectile_UpdatePhysics @0x4EA7BE..0x4EA829]
+        // Projectile_UpdatePhysics @0x4EA7BE..0x4EA829 (the t - 0x800 store
+        // @0x4EA603; `lea ecx,[eax+edx+1000h]` @0x4EA7CB)]
         if (person_collision && !kill_zone_pushed && !submerged_stall &&
                 !has_dud_replacement) {
             const int32_t inverse =

@@ -92,7 +92,7 @@ void Simulation::add_local_player_look(float p_dx_px, float p_dy_px) {
 
 void Simulation::set_local_player_mouse(int p_sensitivity, bool p_invert_y) {
 	// The profile apply copies the setting dword UNCLAMPED (the retail
-	// apply_session_settings_to_globals leg; the [1, 0x1FF] range belongs to the
+	// Game_ApplySessionSettingsToGlobals leg; the [1, 0x1FF] range belongs to the
 	// mousescale +/- adjust, a binding the shell does not service, D-CTRL-1 — see
 	// engine player_look.h for the witnesses). The options control's own range is
 	// the shell's (player_options.gd).

@@ -6,22 +6,29 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <cstdint>
 
 #include "devtools/frame_stats.h"
 
+namespace opennova::renderer {
+struct ScenePassGateEdges;
+} // namespace opennova::renderer
+
 namespace godot {
 
 class Celestial;
 class EntityIndex;
 class EntityPresenter;
+class FoliageDispatcher;
 class MissionEnvironment;
 class MissionObjectPlacer;
 class ObjectModel;
 class Simulation;
 class SkyDome;
+class SlotShadow;
 class Terrain;
 class Water;
 
@@ -60,16 +67,16 @@ class Water;
 //  * water.visible has TWO writers in one frame: GameWorld.
 //    render_water_frame reads LAST frame's blink-water verdict
 //    (Water.set_blink_water_visible, exactly as retail reads it — the
-//    terrain_setup_view_and_lighting 0x60fe40 witness cited on that leg),
+//    Terrain_SetupViewAndLighting 0x60fe40 witness cited on that leg),
 //    then apply_frame below rewrites the node's visibility from THIS
 //    frame's verdict. Both stay.
 //  * the world's is_water_render_active() gate decides the water_z handed to
 //    run_occlusion_frame: an inactive water (no load, a load in progress)
 //    passes the -100000 sentinel, never its retained authored height.
-//  * the terrain hides its foliage by PARENTING (game_world.tscn keeps the
-//    FoliageDispatcher under Terrain, so the near-detail and far-foliage
-//    tiers ride the terrain node's visibility): there is no explicit foliage
-//    hide anywhere in the blink gates.
+//  * the FoliageDispatcher sits BESIDE the Terrain (game_world.tscn), so the
+//    terrain hide never reaches the MODEL masks: the indoors letter closes
+//    the dispatcher's detail passes alone (set_detail_passes_drawn), while
+//    the masks and their anchors keep running, as retail's BySide waves do.
 //  * the 11 OCCL_* FrameStats slots land here while the Stats tab captures,
 //    OCCL_GLUE as the bound-call REMAINDER (native span minus the sim's
 //    build + probe split) so the pane's Occlusion group still sums to the
@@ -83,12 +90,12 @@ class OcclusionFrame : public RefCounted {
 	GDCLASS(OcclusionFrame, RefCounted)
 
 public:
-	// One-time wiring to the world's retained scene nodes (the terrain, sky
-	// dome, celestial and water renders the blink letters gate, and the
-	// environment the frame reads fog distance + light direction off). Any
-	// may be null (a code-built world without that node).
-	void setup(Terrain *p_terrain, SkyDome *p_sky, Celestial *p_celestial,
-			Water *p_water, MissionEnvironment *p_env);
+	// One-time wiring to the world's retained scene nodes (the terrain,
+	// foliage, sky dome, celestial and water renders the blink letters gate,
+	// and the environment the frame reads fog distance + light direction
+	// off). Any may be null (a code-built world without that node).
+	void setup(Terrain *p_terrain, FoliageDispatcher *p_foliage, SkyDome *p_sky,
+			Celestial *p_celestial, Water *p_water, MissionEnvironment *p_env);
 	// The per-mission members, re-handed on every runtime start (the pass
 	// re-read them off the world's runtime per frame; they only change at a
 	// load, and reset() forgets them at unload). Held by ObjectID and
@@ -111,7 +118,10 @@ public:
 	// Re-apply the letter gates after a sim tick. `forces_indoors` is
 	// GameWorld._mission_forces_indoors, passed per call — the mission
 	// attribute is mission state and stays (test-pinned) on the world.
-	void apply_blink_gates(bool p_forces_indoors);
+	// Returns the passes the new letters reopen (renderer::
+	// scene_pass_gate_edges): the frame's terrain and water legs already ran
+	// under the old letters, so the caller re-runs the reopened ones.
+	opennova::renderer::ScenePassGateEdges apply_blink_gates(bool p_forces_indoors);
 
 	// --- The render-occlusion frame (render-occlusion-re.md §3/§5) ---------
 	// Per render frame: run the sim's occlusion pipeline (camera blink query ->
@@ -128,6 +138,24 @@ public:
 	// iris stamp.)
 	void apply_frame(Camera3D *p_camera, float p_viewport_width,
 			const Transform3D &p_camera_xform, bool p_forces_indoors);
+	// The weapon Inset pass's own collect, after this frame's main one
+	// (engine: world/occlusion.h OcclusionView carries the witness): the sim
+	// runs it over `camera` on the Inset view's frame words, and its verdicts
+	// land as changes on the models' and the batched statics' Inset state
+	// (ObjectModel::set_inset_occlusion_*, MissionObjectPlacer::
+	// set_static_instance_inset_occlusion_hidden); an entity the Inset collect
+	// gives no verdict follows the main view's. `viewport_width` is the Inset
+	// target's width, the projector's focal source for that view.
+	void apply_inset_frame(Camera3D *p_camera, float p_viewport_width, bool p_forces_indoors);
+	// The Inset stopped rendering (or the world unloads): every Inset verdict
+	// releases onto the main view's and the sim forgets the Inset baselines.
+	void release_inset();
+	// The last Inset collect's MODEL foliage anchors (Godot space; the main
+	// collect's are Simulation::get_foliage_mask_anchor_positions), empty
+	// while the Inset is closed.
+	const PackedVector3Array &get_inset_foliage_mask_anchors() const {
+		return inset_foliage_mask_anchors_;
+	}
 
 	// The probe A/B seam, entering the occlusion skip: restore the water to
 	// the authored blink state, then release every occlusion override.
@@ -188,10 +216,14 @@ private:
 	EntityPresenter *entities() const;
 	MissionObjectPlacer *placer() const;
 	Terrain *terrain() const;
+	FoliageDispatcher *foliage() const;
 	SkyDome *sky() const;
 	Celestial *celestial() const;
 	Water *water() const;
 	MissionEnvironment *environment() const;
+	// The world's slot-shadow device (the terrain's sibling, resolved at
+	// setup): its drapes ride the terrain gate.
+	SlotShadow *slot_shadow() const;
 	// Resolve (and cache) the ObjectModel a bms_id drives. Cache entries
 	// revalidate through ObjectDB (LIVENESS); a freed node re-resolves
 	// through the registry (reloads recreate nodes under the same ids).
@@ -211,19 +243,21 @@ private:
 	// The retained scene nodes (setup) and the per-mission members
 	// (bind_mission), every one an ObjectID re-resolved on use.
 	ObjectID terrain_id_;
+	ObjectID foliage_id_;
 	ObjectID sky_id_;
 	ObjectID celestial_id_;
 	ObjectID water_id_;
 	ObjectID env_id_;
+	ObjectID slot_shadow_id_;
 	ObjectID sim_id_;
 	ObjectID index_id_;
 	ObjectID entities_id_;
 	ObjectID placer_id_;
 	Ref<FrameStats> frame_stats_;
 	// The local player's latched blink letters (render-occlusion-re.md §4):
-	// accum bit 0x2 hides the terrain render (near detail + far foliage ride
-	// the terrain node) and the mirror's sky bracket, bit 0x4 the main
-	// frame's sky bracket (apply_scene_pass_gates), bit 0x8 the water passes.
+	// accum bit 0x2 hides the terrain render, the detail-foliage passes (not
+	// the MODEL masks) and the mirror's sky bracket, bit 0x4 the main frame's
+	// sky bracket (apply_scene_pass_gates), bit 0x8 the water passes.
 	uint32_t blink_letters_ = 0;
 	bool blink_indoors_ = false;
 	// The last terrain gate written (edge-triggered).
@@ -235,6 +269,11 @@ private:
 	// seam, unload) finds the bits it set. Entries revalidate through
 	// ObjectDB on use (LIVENESS, not typing); reset on unload/A-B seams.
 	HashMap<int64_t, ObjectID> occlusion_node_cache_;
+	// The models an Inset collect gave a verdict since the Inset opened (the
+	// release walk's set), and whether an Inset collect ran since then.
+	HashMap<uint64_t, ObjectID> inset_nodes_;
+	bool inset_active_ = false;
+	PackedVector3Array inset_foliage_mask_anchors_;
 	// The two apply_frame halves, valid while probe/stats timing runs: the
 	// native run_occlusion_frame call and the node application.
 	int64_t perf_occl_native_us_ = 0;

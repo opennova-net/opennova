@@ -36,7 +36,6 @@ int main() {
 	view.eye[2] = -20.0f;
 	view.fov_y_deg = 90.0f; // tan_v = 1
 	view.aspect = 2.0f;     // tan_h = 2
-	view.near_units = 1.0f;
 	view.viewport_width = 640.0f;
 	view.fog_dist_units = 300.0f;
 	view.water_z_units = 2.5f;
@@ -62,25 +61,29 @@ int main() {
 	check(near_eq(f[0], -1.0f) && near_eq(f[1], 0.0f) && near_eq(f[2], 0.0f),
 			"forward -z presentation -> render -x");
 
-	// Five planes; the near plane's normal is the forward, anchored one near
-	// unit ahead; the side planes are unit and inward.
+	// Five planes, retail's g_CameraFrustumPlanes5: the forward plane (the
+	// forward normal) and the four unit inward side planes, EVERY one through
+	// the eye — no near distance, so a point a hair ahead of the eye is inside.
+	// [orig: Viewport_BuildProjectionMatrix @ 0x411577..0x4115c6]
 	check(cam.frustum_count == 5, "five planes");
 	check(near_eq(cam.frustum[0][0], f[0]) && near_eq(cam.frustum[0][1], f[1]) &&
 					near_eq(cam.frustum[0][2], f[2]),
-			"near plane normal = forward");
-	float near_point[3] = { cam.pos_float[0] + f[0], cam.pos_float[1] + f[1], cam.pos_float[2] + f[2] };
-	check(near_eq(plane_eval(cam.frustum[0], near_point), 0.0f), "near plane passes through eye + near");
+			"forward plane normal = forward");
+	check(near_eq(plane_eval(cam.frustum[0], cam.pos_float), 0.0f), "forward plane passes through the eye");
+	float hair[3] = { cam.pos_float[0] + 0.01f * f[0], cam.pos_float[1] + 0.01f * f[1],
+			cam.pos_float[2] + 0.01f * f[2] };
+	check(plane_eval(cam.frustum[0], hair) > 0.0f, "a point 0.01 u ahead of the eye is inside the forward plane");
 	for (int i = 1; i < 5; ++i) {
 		const float len = std::sqrt(cam.frustum[i][0] * cam.frustum[i][0] +
 				cam.frustum[i][1] * cam.frustum[i][1] + cam.frustum[i][2] * cam.frustum[i][2]);
 		check(near_eq(len, 1.0f), "side normal is unit");
 		check(near_eq(plane_eval(cam.frustum[i], cam.pos_float), 0.0f), "side plane passes through the eye");
 	}
-	// A point five units ahead is inside every plane; one behind fails the near.
+	// A point five units ahead is inside every plane; one behind fails the forward plane.
 	float ahead[3] = { cam.pos_float[0] + 5.0f * f[0], cam.pos_float[1] + 5.0f * f[1], cam.pos_float[2] + 5.0f * f[2] };
 	for (int i = 0; i < 5; ++i) check(plane_eval(cam.frustum[i], ahead) >= 0.0f, "point ahead inside");
 	float behind[3] = { cam.pos_float[0] - 5.0f * f[0], cam.pos_float[1] - 5.0f * f[1], cam.pos_float[2] - 5.0f * f[2] };
-	check(plane_eval(cam.frustum[0], behind) < 0.0f, "point behind fails the near plane");
+	check(plane_eval(cam.frustum[0], behind) < 0.0f, "point behind fails the forward plane");
 	// The horizontal half-angle is wider than the vertical (aspect 2): a point
 	// 5 ahead and 8 to the right is inside the side planes, 8 up is not.
 	float r[3], u[3];

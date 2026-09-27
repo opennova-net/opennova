@@ -80,7 +80,7 @@ class PendingHudMessage:
 		text_id = p_text_id
 		chat = p_chat
 # The end-of-round banner line (the WAC Lose cause). Persists until teardown so the
-# MISSION FAILED screen can compose it. [orig: g_banner_text @0x28E3DA0, written by
+# MISSION FAILED screen can compose it. [orig: g_BannerText @0x28E3DA0, written by
 # GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
 var _endround_banner := ""
 # The HUD color-scheme index is persisted like retail's config token (read at
@@ -183,6 +183,8 @@ func teardown() -> void:
 	if _game_hud != null:
 		_game_hud.queue_free()
 		_game_hud = null
+	if _world != null:
+		_world.set_inset_scope(null)
 	_inset_scope = null
 	_sync_second_scene_camera()
 	_sights_card = null
@@ -220,7 +222,10 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 ## while that pass is not rendering (scope down, HUD torn down): the original
 ## renders the aperture through its one scene routine, particle passes
 ## included, so the second view needs the world's particles compiled for its
-## own eye. A world that unloaded has no effect world left to tell.
+## own eye. A world that unloaded has no effect world left to tell. While the
+## world ticks, its local-view leg has already handed over this same camera
+## from this frame's view; this keeps the HUD-only paths (teardown, a frame
+## that skips the world) in step.
 func _sync_second_scene_camera() -> void:
 	var effects: EffectWorld = _world.get_effect_world() if _world != null else null
 	if effects == null:
@@ -296,6 +301,10 @@ func ensure_game_hud() -> void:
 	_inset_scope.visible = false
 	_game_hud.add_child(_inset_scope)
 	_inset_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# The world's local-view leg stamps and hands over the Inset camera from the
+	# view it just composed, before every Inset leg of the frame reads it.
+	if _world != null:
+		_world.set_inset_scope(_inset_scope)
 	_sights_card = HudSightsCardScript.new()
 	_sights_card.name = "SightsCard"
 	_sights_card.show_behind_parent = true
@@ -356,7 +365,7 @@ func ensure_game_hud() -> void:
 		_game_hud.set_objectives_header(
 				t.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"))
 	# The presenter-held friendly-tags mode survives the per-mission rebuild
-	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
+	# like retail's process-lifetime global [orig: g_FriendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
 	_game_hud.set_hud_color_index(_toggles.get_hud_color_index())
 	# The HUD build stamps the LIVE declutter level, mirroring the round-init
@@ -494,6 +503,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 
 	var probe_t1 := Time.get_ticks_usec() if stats_on else 0
 	_apply_attach_labels()
+	# The breath bar, from the same sim and gametext table (HudOverlay.set_breath_bar
+	# carries the witness).
+	_game_hud.set_breath_bar(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_apply_friendly_tags()
 	var probe_t2 := Time.get_ticks_usec() if stats_on else 0
 	var waypoint := _build_waypoint_entry()
@@ -574,9 +586,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# accumulators — the simulation owns the stance/aimed-shot row (body-state
 	# predicates), the HUD owns only projection [orig: @0x592b07..0x592bf5];
 	# the sim's promoted aimed-shot verdict gates the reticle [orig: the
-	# @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780], with the equipped
+	# @0x4de4f7 promoter; Player_IsOpticalViewVisible @0x5cf780], with the equipped
 	# weapon's Inset keep-up predicate from the native view frame; and
-	# the PowerThrow windup driving the charge bar [orig: g_fireChargeStartTick
+	# the PowerThrow windup driving the charge bar [orig: g_FireChargeStartTick
 	# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
 	var live := wv != null and wv.active
 	_game_hud.set_weapon_state(weapon_active and weapon != null, clip, reserve,
@@ -683,9 +695,9 @@ func _hud_ticks() -> int:
 # name resolved and the 2D ground distance in meters. Null = the label hides
 # (no track, ShowWaypoints off, or no current selection) — the compiler treats
 # absence as the original's null-current / flag-off gates.
-# [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 gates @0x5a7daf (g_showWaypoints
+# [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 gates @0x5a7daf (g_ShowWaypoints
 #  + a current present in the list); distance @0x5947e5..0x594836 = 2D fixed sqrt
-#  >> 16; name get_waypoint_name @0x594630]
+#  >> 16; name HUD_GetWaypointName @0x594630]
 func _build_waypoint_entry() -> WaypointHudEntry:
 	if _world == null:
 		return null
@@ -708,7 +720,7 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	return entry
 
 
-# The waypoint display name (the engine's get_waypoint_name rule with its
+# The waypoint display name (the engine's HUD_GetWaypointName rule with its
 # STRWPNAMEDEFAULT fallback; hud_game_text.h) over the mission and gametext tables.
 func _resolve_waypoint_name(name_id: int) -> String:
 	return HudPos.waypoint_display_name(Strings.get_table(Strings.TABLE_MISSION),
@@ -1080,12 +1092,6 @@ func apply_death_screen_hud_detail() -> void:
 	_push_hud_detail_level()
 
 
-## The showhud edge poll (the seam the tests drive); every other row idle.
-func poll_showhud_edge(showhud_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, false, false, showhud_down, false, false,
-			false, false, false, false, false, false, chorded, active, false))
-
-
 ## The showhud cycle (the engine's flags rule): bit 1 feeds the overlay's
 ## corner spinmap block, bit 0 the FP viewmodel rig through the player presenter.
 func cycle_showhud() -> void:
@@ -1097,12 +1103,6 @@ func _push_showhud_flags() -> void:
 	if _game_hud != null:
 		_game_hud.set_showhud_flags(_toggles.get_showhud_flags())
 	_apply_fp_gun_visible()
-
-
-## The dotsize edge poll (the seam the tests drive); every other row idle.
-func poll_dotsize_edge(dotsize_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, false, false, false, dotsize_down, false,
-			false, false, false, false, false, false, chorded, active, false))
 
 
 ## The dotsize cycle: the overlay advances its per-player sight-scale index
@@ -1135,21 +1135,6 @@ func _push_sight_state() -> void:
 		return
 	_sights_card.set_sight_state(_game_hud.get_sight_scale_index(),
 			_sight_slide_multiplier)
-
-
-## The Goals edge poll (the seam the tests drive); every other row idle.
-func poll_goals_edge(goals_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, false, false, false, false, goals_down,
-			false, false, false, false, false, false, chorded, active, false))
-
-
-## The view-action rows (view1st / viewwithgun / viewchase) poll over
-## pre-sampled state (the seam the tests drive); every other row idle.
-func poll_view_action_edges(view1st_down: bool, viewwithgun_down: bool,
-		viewchase_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, false, false, false, false, false,
-			view1st_down, viewwithgun_down, viewchase_down, false, false, false, chorded,
-			active, false))
 
 
 func _apply_view_action(action: int) -> void:

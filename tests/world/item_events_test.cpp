@@ -7,7 +7,9 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/mission/item_traits.h>
 #include <cstring>
+#include "item_pool_step.h"
 using namespace opennova::world;
+using test_world::step_item_pool;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n",__LINE__,#c);return 1; } } while(0)
 EntityHandle spawn(World &w, int pool, int id, ItemDeathClass cls) {
     Entity e;
@@ -613,24 +615,6 @@ int test_class_scoring_and_explosion_draws() {
     CHECK(w.out.destruction.effects.back().effect == "Effect_AirExp");
     CHECK(w.out.destruction.effects.back().pos.z == 3);
     return 0;
-}
-
-// One entity-update step of an item row's pool: every pool-1 row's own visit
-// (World::update_pool1_slot), or the pool-2/3 cohort walk.
-// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2244 /
-//  @0x4C230C]
-static void step_item_pool(World &w, int pool) {
-    if (pool != 1) {
-        tick_item_event_pool(w, pool);
-        return;
-    }
-    TickContext ctx;
-    ctx.world = &w;
-    ctx.is_authority = true;
-    ctx.logic_tick = w.logic_tick;
-    for (size_t slot = 0; slot < w.registry.pool_capacity(1); ++slot)
-        if (Entity *row = w.registry.get(EntityHandle::make(1, static_cast<int>(slot))))
-            w.update_pool1_slot(*row, ctx);
 }
 
 int main() {

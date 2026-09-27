@@ -9,7 +9,7 @@
 // pixels whose position lies in [start, end) on each axis, and each source
 // texture samples with the filter its creation flags select.
 // [orig: PolyTrn_RenderTile @ 0x60DA70 — base colormap MODULATE2X pass, .til
-// overlay quads, DOT3 light pass; fill_fullscreen_quad_vertices @ 0x678DB0
+// overlay quads, DOT3 light pass; GDynamicVB_FillFullscreenQuadVertices @ 0x678DB0
 // copies the quad positions unbiased; the .cpp carries the per-pass witnesses.]
 
 #include <runtime/terrain/terrain_tile_composition_cache.h>

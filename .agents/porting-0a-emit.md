@@ -12,17 +12,17 @@ Read first: `docs/net/novaworld-net-re.md` §5.9 (wire format), §5.46 (the 0x0F
 Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 
 - `Server_SendEntityStateToPlayer @0x517ba0` — gate on `playerSlot.state(+0x20) == 6` (DEPLOYED); set
-  `g_priority_ref_{x,y,z}` = the recipient's **eye** position (`entity.pos + camera_offset`);
+  `g_PriorityRef{X,Y,Z}` = the recipient's **eye** position (`entity.pos + camera_offset`);
   `Server_BuildEntityPriorityList @0x50e590` (distance-sorted); write header + entity loop; send via
   `NapiNPServer_SendFiltered` mask `0xA0`, tag `0x0A`. New/stale recipient (`uptime > 2000t`) →
-  `g_entity_send_budget >> 1` (ramp-up). The per-slot phase byte `playerSlot+100566` is `++`'d here
+  `g_EntitySendBudget >> 1` (ramp-up). The per-slot phase byte `playerSlot+100566` is `++`'d here
   (`@0x517be8`).
 - `NetPacket_WritePlayerState @0x4ff6b0` — header: `[i32 ref x/y/z][u8 state_flags][u8 phase]`, then
   `phase & 3` selects the sub-block (**0** weapon/ammo/uniform · **1** server-status · **2** env · **3**
   gametype), then the recipient tail; `phase & 0xF == 8` adds a mounted-vehicle/turret tail every 16th
   frame. Env scales: `wire_tod = time_of_day(hours·2^16) >> 5`, `wire_fog = fog_dist(16.16) >> 16`
   (verified vs golden `todFixed=0x7905`).
-- `serialize_entity_states_to_packet @0x50f070` — entity loop: for EVERY priority-list entity with a
+- `NetPacket_SerializeEntityStatesToPacket @0x50f070` — entity loop: for EVERY priority-list entity with a
   serialize callback (`itemDef+0x164` — players, vehicles, AI), `[1][handle][type=*(itemDef+0x50)]
   [compact]`; projectiles `[2]…`; `[0]` terminator. **Budget-limited round-robin** across frames.
 
@@ -58,7 +58,7 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | deploy gate / eye-pos ref / budget ramp | partial | the deploy-screen HOLD + release are DONE (D-NET-156: `Connection::respawn_pending` → flags1 bit1 + hidden bit; 0x0E dead-or-pending gate; the 0x5A+0x61+0x1E release bundle — D-NET-156 tail); eye-pos anchor + budget ramp still not ported |
 | victim death cycle (tail health + dead bit) | DONE (D-NET-160; verify v34) | the 0x0A tail carries the recipient's LIVE health (`FrameHeaderState::tail_health` [orig: @0x4305df]); `route_round_deaths` sets the entity dead bit (flags\|=2 → record byte13 0x02 [orig: @0x4c1005]; the 1→0 edge = the client spawn hook [orig: @0x4c1109]), lifted by the deploy/respawn reset |
 | vehicle attach/detach (C2S 0x26/0x27) | DONE (D-NET-157; emplacements live-verified v33) | dispatch → `world::entity_process_vehicle_attach/_detach` [orig: @0x502390/@0x4FC980 → @0x435AA0/@0x4946D0]; the 0x0A mounted branch echoes bone byte0 + carrier + the tail mount handle |
-| **vehicle DRIVE (host motor off the driver's replicated input)** | DONE — ground family (D-NET-161; verify v35). The round-15 witness REFUTED the prior model: NO vehicle uplink exists (modes 3/4 return −1; the client serializes only g_local_player_entity @0x42c482; golden 344/344), the §5.13 flags&4 short form is the DEAD-pose (wreck) form, and vehicle +0x1CC is an effect-emitter handle, not a session grant | `world::tick_vehicle_motor` [orig: @0x48af00] per pool-1 traits entity in the AiSystem tick; items.def physics parse [orig: @0x49d870] -> `world::VehicleTraits`; `drain_connection_c2s` stays player-only (CORRECT). Deferred: air/helo family (Super Pumas parked), skid, vehicle collision, water, autopilot, engine states, wheel-contact pitch/roll |
+| **vehicle DRIVE (host motor off the driver's replicated input)** | DONE — ground family (D-NET-161; verify v35). The round-15 witness REFUTED the prior model: NO vehicle uplink exists (modes 3/4 return −1; the client serializes only g_LocalPlayerEntity @0x42c482; golden 344/344), the §5.13 flags&4 short form is the DEAD-pose (wreck) form, and vehicle +0x1CC is an effect-emitter handle, not a session grant | `world::tick_vehicle_motor` [orig: @0x48af00] per pool-1 traits entity in the AiSystem tick; items.def physics parse [orig: @0x49d870] -> `world::VehicleTraits`; `drain_connection_c2s` stays player-only (CORRECT). Deferred: air/helo family (Super Pumas parked), skid, vehicle collision, water, autopilot, engine states, wheel-contact pitch/roll |
 | **AS capture loop (slice 2: contact/control/timed capture/0x6F/0x53/0x6C/0x1E/0x40/0x81)** | DONE (D-NET-162; exact CT producer 2026-08-23) | `CollisionWorld` publishes exact authored type-10 contacts from authority player-body resolves; `world::zone_capture_contact_tick` + `ZoneSystem::capture_second_tick` own requests, active timed entries, conversion, scoring, takeover options, requester-local Points refresh, and host/client wire. Spawn waves/0x6E and proximity bits are also ported. Residual mandate: only the documented 0x40 overlay tails and unwitnessed 0x6F recipient filter remain |
 | body motor for net-snapped peers | DONE (D-NET-159; live: death anims seen by others in v33) | `AiSystem::remote_player_body_anim` runs the anim selection for wire-snapped peers on the authority (position stays wire-owned); hidden entities skip [orig: @0x4b411b] |
 | platform physics (host-side grounding) | not ported (D-NET-151 residual) | retail sets `Flags\|=0x100000` + `groundEntity` in the collision pass [orig: @0x4b3291]; our motor has no platform pass, so OUR OWN player never reports grounded and peer ground links mirror the owner's uplink |
@@ -103,7 +103,7 @@ target) in net-re D-NET-146.
   admEntry+676, suffix table 0x830B94 → `WeaponAction_Fire @0x542b10`); a net primary fire
   re-enters `Server_ClientFiredRound` in LOCAL mode via `Entity_FireWeaponAndSendPacket
   @0x42bd80` and lands in `RoundData_AddRound @0x4fdb40` → the 256-record ring
-  `g_round_ring @0xC8D848` → per-recipient tag-2 (`Server_BuildRoundEventListForPlayer
+  `g_RoundRing @0xC8D848` → per-recipient tag-2 (`Server_BuildRoundEventListForPlayer
   @0x4ffee0` + `NetPacket_SerializeRoundEvent @0x504820`). §5.9.1 was systematically
   mis-read ("weapon-hit"): the record is a ROUND-FIRED event — SHOOTER handle (not target),
   fire origin + direction (not impact), optional word = the shooter's live target; the
@@ -150,7 +150,7 @@ target) in net-re D-NET-146.
   team 2 wholly owns zone 3) + 0x40/0x6F/0x53/0x6E; the pick = C2S 0x0E [i16 handle]
   (0xFFFE=frontier auto) gated on team + control≥1.0; placement = zone origin/6007
   scatter/per-team markers (Server_PositionPlayerForSpawn, ex-CMap misnomer); waves =
-  g_spawn_wave_list drip (base default 0, numbered-zone default 10 seconds); the whole capture loop runs in the
+  g_SpawnWaveList drip (base default 0, numbered-zone default 10 seconds); the whole capture loop runs in the
   1 Hz Server_TickUpdate block (control delta formula pinned incl. the underdog catch-up).
   ASH_I5A authors zones 1(t1)/2×2(neutral)/3(t2) as type-1359 bunkers. PORTED slice 1:
   `world::ZoneChain` + zone fields + 0x0E handler (deploy at pick, dead-only, computed 0x1E
@@ -167,7 +167,7 @@ target) in net-re D-NET-146.
   leads: the 0x0A phase-0 mask can't reach a deploy-screen client (state==6 gate in
   Server_SendEntityStateToPlayer @0x517BA0, D-NET-134) → the pre-deploy carrier is likely
   the 0x0F BODY (`NetPacket_WriteWorldStateLoad0x0F @0x502D10` — UNWITNESSED, reads
-  g_respawn_requires_team_dead); the 1359 zone objects' 0x0D records may lack the D-NET-70
+  g_RespawnRequiresTeamDead); the 1359 zone objects' 0x0D records may lack the D-NET-70
   team-gated `spawn_flags & 0x10` bit; the CLIENT deploy-list builder is unwitnessed.
   (2) Vehicle attach dead: 2 C2S 0x26 on the wire (bodies `02 00 | 04 10 | 01 00` /
   `2d 10`), NO dispatch case 0x26/0x27 exists — port HandleVehicleAttach @0x502390 /
@@ -186,7 +186,7 @@ target) in net-re D-NET-146.
   session (D-NET-156..159; net-re §5.9/§5.10/§5.11/§5.20/§5.29/§5.33/§5.61 refreshed).**
   (1) **Deploy screen (D-NET-156)**: the picker is HELD by the 0x0A header `flags1` bit1
   (`slot+89912 & 0x10`, set at join iff `SpawnZoneList_GetCount() > 0` @0x51a6f2, cleared on
-  deploy @0x517791) re-asserted EVERY frame (`g_deploy_screen_active = flags1 & 2` @0x42ff82) —
+  deploy @0x517791) re-asserted EVERY frame (`g_DeployScreenActive = flags1 & 2` @0x42ff82) —
   our hardcoded `flags1 = 0x00` was the whole defect; the picker ROWS are client-side
   (`Entity_BuildSpawnZoneList @0x43EAE0` over pools 2+1). **Later D-NET-194
   correction:** a network join fills those pools from S2C `0x10`/`0x0D`, never a
@@ -200,7 +200,7 @@ target) in net-re D-NET-146.
   bone byte0 + carrier + the header-tail mount handle — NO confirm tag exists.
   (3) **HUD count (D-NET-158)**: `count = accepted 0x16 rows − spectatorCount`; rows accepted
   only for 0x46-known slots. Fixed the trifecta: live 0x04 capacity byte (the walk terminator
-  `g_max_player_slots` — was hardcoded 2), the join-time 0x46 broadcast (0x1CF7 @0x51D296),
+  `g_MaxPlayerSlots` — was hardcoded 2), the join-time 0x46 broadcast (0x1CF7 @0x51D296),
   live 0x16 trailer counts (was `{2,0}`); 0x46 now answers the requested fieldFlags verbatim.
   (4) **Body anims (D-NET-159)**: the server RECOMPUTES anims — `Entity_UpdateInfantryPlayerBody
   @0x4B40E0` runs the selection for every player on the authority from the REPLICATED input;
@@ -268,7 +268,7 @@ target) in net-re D-NET-146.
 - **Round 15 (2026-07-04): the VEHICLE DRIVE round — the task's assumed chain REFUTED, the
   real chain witnessed AND ported, + slice 2 landed the same session (D-NET-161/162).**
   Witness keystones: `Client_ProcessNetworkFrame @0x42c180` uplinks exactly ONE entity
-  (g_local_player_entity, @0x42c482) — vehicles NEVER ride a C2S 0x0C (modes 3/4 return −1
+  (g_LocalPlayerEntity, @0x42c482) — vehicles NEVER ride a C2S 0x0C (modes 3/4 return −1
   @0x460578; golden 344/344 player-handle uplinks); the §5.13 `flags&4` short form is the
   DEAD-pose form (death sets `Flags |= 6`; golden f=237868 = 16 buggies dying in one frame;
   the golden's RIDDEN vehicle streams the 21-B full form its whole drive) — serializer

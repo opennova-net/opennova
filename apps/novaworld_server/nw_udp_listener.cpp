@@ -553,7 +553,7 @@ void NwUdpListener::run_loop() {
 			// decrypt our replies.
 			//
 			// Addr-keyed (G.7): auth.ci collides between two retail
-			// processes — using id-keyed mark_active aliased instance 1's
+			// processes — an id-keyed promote aliased instance 1's
 			// connection record onto instance 2's, so subsequent
 			// find_by_addr(instance_1) returned instance 2's scrk and
 			// retail #1 got "INCOMING PACKET ERROR" on every reply.

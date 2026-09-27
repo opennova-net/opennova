@@ -4,6 +4,7 @@
 //  CGameFont_DrawText @ 0x6752c0]
 
 #include <runtime/hud/game_font.h>
+#include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_message_log.h>
@@ -163,7 +164,7 @@ void test_declutter_rebuild_and_cycle() {
 	HudDeclutter d;
 	// The construction default (no hudpos): all-bits masks, visible at every
 	// level.
-	for (int level = 0; level <= kDeclutterLevelMax; ++level) {
+	for (int level = 0; level <= kHudDetailLevelMax; ++level) {
 		d.set_level(level);
 		CHECK(d.visible()[kDeclutterDmgBar] &&
 						d.visible()[kDeclutterSpinmap],
@@ -172,7 +173,7 @@ void test_declutter_rebuild_and_cycle() {
 
 	// The authored table: an UNAUTHORED slot is hidden at every level.
 	d.begin_authoring();
-	for (int level = 0; level <= kDeclutterLevelMax; ++level) {
+	for (int level = 0; level <= kHudDetailLevelMax; ++level) {
 		d.set_level(level);
 		for (int slot = 0; slot < kDeclutterSlotCount; ++slot) {
 			CHECK(!d.visible()[static_cast<size_t>(slot)],
@@ -186,19 +187,13 @@ void test_declutter_rebuild_and_cycle() {
 	d.set_mask(kDeclutterDmgBar, 0x7);
 	const bool spinmap_expect[4] = {true, true, false, false};
 	const bool dmgbar_expect[4] = {true, true, true, false};
-	for (int level = 0; level <= kDeclutterLevelMax; ++level) {
+	for (int level = 0; level <= kHudDetailLevelMax; ++level) {
 		d.set_level(level);
 		CHECK(d.visible()[kDeclutterSpinmap] == spinmap_expect[level],
 				"SPINMAP 1 1 0 0 follows (1 << level) & mask");
 		CHECK(d.visible()[kDeclutterDmgBar] == dmgbar_expect[level],
 				"DMGBAR 1 1 1 0 follows (1 << level) & mask");
 	}
-
-	// The huddetail cycle: 0 -> 1 -> 2 -> 3 -> 0.
-	d.set_level(0);
-	CHECK(d.cycle_level() == 1 && d.cycle_level() == 2 &&
-					d.cycle_level() == 3 && d.cycle_level() == 0,
-			"the level cycle wraps past 3 to 0");
 
 	// Retail's rebuild shifts a 32-bit register and keeps the LOW BYTE
 	// (`shl edx, cl` @0x59B0FB, `and cl, dl` @0x59B106), and the level word is
@@ -223,11 +218,13 @@ void test_declutter_rebuild_and_cycle() {
 	d.set_level(32);
 	CHECK(d.visible()[kDeclutterSpinmap] && d.visible()[kDeclutterDmgBar],
 			"level 32 aliases level 0 through the masked shift count");
-	// The stored level is verbatim, and the cycle's signed `cmp eax,3` on the
-	// SUM wraps any out-of-range level back to 0.
+	// The stored level is verbatim, and the huddetail cycle's signed `cmp eax,3`
+	// on the SUM (next_hud_detail_level) wraps any out-of-range level back to 0.
 	d.set_level(9);
 	CHECK(d.level() == 9, "the level is stored verbatim, never clamped");
-	CHECK(d.cycle_level() == 0, "huddetail wraps a parked out-of-range level to 0");
+	d.set_level(next_hud_detail_level(d.level()));
+	CHECK(d.level() == 0 && d.visible()[kDeclutterSpinmap] && d.visible()[kDeclutterDmgBar],
+			"huddetail wraps a parked out-of-range level to 0 and the table recovers");
 }
 
 // The per-element declutter gates at their compile sites, the CHAT double
@@ -491,7 +488,7 @@ void test_compiler_crosshair_user_options(const fnt_font_t *font) {
 // The hud_color_index scheme swap (the D-HUD-20 good-tier residue + the
 // master overlay color). [orig: HUD_InitTeamColorTable @ 0x51f240 table
 // immediates; the good-tier index test @ 0x5a3c9e (== 2 -> tagcolor_good,
-// else g_hudColorTable[index]); the attach labels' g_hudActiveColor reads
+// else g_HUDColors[index]); the attach labels' g_HUDColors.active reads
 // @ 0x5a362d; table[2] sourced per frame from the hudpos hud_textcolor
 // @ 0x5a8100]
 void test_compiler_hud_color_schemes(const fnt_font_t *font) {
@@ -740,7 +737,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	low.x = -(32 << 16);
 	state.minimap.markers.push_back(low);
 	// An unknown-entity regular marker stays retained but does not draw.
-	// [orig: render_minimap_slot_blip @0x5be4b8 entity[538] gate]
+	// [orig: Render_MinimapSlotBlip @0x5be4b8 entity[538] gate]
 	opennova::hud::HudMinimapMarker hidden = high;
 	hidden.entity_known = 0;
 	state.minimap.markers.push_back(hidden);
@@ -939,7 +936,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		CHECK(player_readout,
 				"the big map draws the large-font player readout");
 		// Every grid label rides the LARGE slot.
-		// [orig: HUD_DrawTextCentered_HalfBright(g_hudLabelFontLarge, ...)]
+		// [orig: HUD_DrawTextCentered_HalfBright(g_HUDLabelFontLarge, ...)]
 		bool all_large = true;
 		for (const auto &lab : big.big_map.labels) {
 			if (lab.font != 1) all_large = false;
@@ -994,8 +991,8 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 
 	// Footprint markers skip the icon quad for their polygon feed; markers
 	// on the upright policy hold angle zero regardless of heading.
-	// [orig: the Building leg @0x597a84 -> render_collision_wireframe
-	//  @0x596800; the upright branches of draw_minimap_blip @0x597890]
+	// [orig: the Building leg @0x597a84 -> Render_CollisionWireframe
+	//  @0x596800; the upright branches of Minimap_DrawBlip @0x597890]
 	{
 		HudFrameState fp_state = state;
 		fp_state.minimap.markers.clear();
@@ -1055,7 +1052,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		// stock JO install mounts the 16x480 strip, and the same cell must
 		// derive its bounds from those dimensions. (compile() reuses the
 		// internal list, so this re-compile ends fp_list's scope of use.)
-		// [orig: render_tiled_image_strip @0x67b540 — 0.5 / tile_dim]
+		// [orig: Render_TiledImageStrip @0x67b540 — 0.5 / tile_dim]
 		fp_state.minimap.icon_strip_w_px = 16.0f;
 		fp_state.minimap.icon_strip_h_px = 480.0f;
 		const HudDrawList &stock_list = compiler.compile(fp_state, 1024.0f,
@@ -1365,9 +1362,11 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 // The overlay label fonts: friendly tags draw with the NORMAL label font,
 // attach labels with the BOLD one, both at the slot scale, each in its own
 // draw-list page namespace. [orig: HUD_InitAllFonts @ 0x51ee20; tag font
-// g_hudLabelFont @ 0x5a3a0c; attach font (the bold slot) @ 0x5a3680; the slot
-// scales enter the draw/measure/char-height helpers @ 0x580680/@ 0x580ab0/
-// @ 0x580a80]
+// g_HUDLabelFont @0xB4C388 (HUD_DrawEntityLabel @0x5A39B0, the load
+// @0x5a3a0c); attach font g_HUDLabelFontBold @0xB4C394
+// (HUD_DrawVehicleSeatAndArmoryLabels @0x5A3290, the HUD_MeasureTextWH call
+// @0x5a3680); the slot scales enter the draw/measure/char-height helpers
+// @ 0x580680/@ 0x580ab0/@ 0x580a80]
 void test_compiler_label_fonts(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	HudLayout layout;
@@ -1432,7 +1431,7 @@ void test_compiler_label_fonts(const fnt_font_t *font) {
 // The stdbox panel geometry: pieces and the fill inset scale with the surface,
 // the fill tiles at a fixed 32 px screen period off the BORDER atlas's own
 // cell (3,0), and the bottom row is cropped rather than squashed.
-// [orig: render_hud_box_overlay @0x56b700; flt_7CFE3C = 0.000625; rec+0x180/+0x184;
+// [orig: Render_HUDBoxOverlay @0x56b700; flt_7CFE3C = 0.000625; rec+0x180/+0x184;
 //  the bottom-row crop flag1 @0x56b456 with flt_7C459C = 0.9]
 void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	using opennova::hud::HudQuad;
@@ -1510,7 +1509,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	// The fill tiles at the cell's own 32 px period, anchored to the ABSOLUTE
 	// screen grid — retail's fill is one wrap-addressed quad, so every tile
 	// boundary sits on a multiple of 32 regardless of where the inset rect
-	// starts [orig: stdbox_draw_fill_wrap_tiled @0x56b5d0, UV=(dest+0.5)/32].
+	// starts [orig: HUD_StdboxDrawFillWrapTiled @0x56b5d0, UV=(dest+0.5)/32].
 	std::vector<HudQuad> fill;
 	float fill_min_x = 1e9f;
 	float fill_max_x = -1e9f;
@@ -1662,7 +1661,7 @@ void test_static_frame_pick() {
 // (index + 2) / 8 of its box about its centre and follows the per-player
 // sight-scale index, a `slide` row shifts by frames * multiplier in y only,
 // a plain row keeps its authored rect; the binocular view suppresses the
-// card. [orig: draw_weapon_sight_overlays @0x4dce00 — the mode gates
+// card. [orig: HUD_DrawWeaponSightOverlays @0x4dce00 — the mode gates
 //  @0x4dce8d / @0x4dcf42, the plain arm @0x4dd050]
 void test_sights_card_element(const fnt_font_t *font) {
 	using opennova::hud::HudQuad;
@@ -1721,7 +1720,7 @@ void test_sights_card_element(const fnt_font_t *font) {
 	}
 	// Native widescreen aspect: scale the rounded viewport Y coordinates
 	// around the viewport centre by 3 / (4 * height/width).
-	// [orig: draw_weapon_sight_overlays @0x4dd0cd..0x4dd0f7]
+	// [orig: HUD_DrawWeaponSightOverlays @0x4dd0cd..0x4dd0f7]
 	{
 		const auto quads = sight_quads(compiler.compile(state, 1920.0f, 1080.0f));
 		CHECK(quads.size() == 3, "widescreen preserves every sights row");
@@ -1804,7 +1803,7 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 	// above the box centre by half the label height (centre + 1 - h/2), not
 	// AT the centre with the glyph hanging below it
 	// [orig: @0x5a52f0..0x5a5322 -- HUD_MeasureTextWH then
-	//  HUD_DrawTextCentered_HalfBright(&g_hudLabelFontBold, cx, cy + 1 - h/2)].
+	//  HUD_DrawTextCentered_HalfBright(&g_HUDLabelFontBold, cx, cy + 1 - h/2)].
 	// Both labels here share centre y 418 (base 406 + seat y 7 + 11/2).
 	{
 		opennova::hud::GameFont gf;
@@ -1833,7 +1832,7 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 		CHECK(std::fabs(q.y0 - 406.0f) < 1.0f, "silhouette y rides the stance offset");
 		// The bordered quad's texture window: 0.05 / authored extent inside
 		// the top-left, 1 - that + 1 / (on-screen extent) at the far edge
-		// [orig: draw_textured_quad_with_border @0x590D2F..0x590D85].
+		// [orig: HUD_DrawTexturedQuadWithBorder @0x590D2F..0x590D85].
 		CHECK(q.u0 == static_cast<float>(0.05f / 64.0), "u0 is the border over the authored width");
 		CHECK(q.v0 == static_cast<float>(0.05f / 32.0), "v0 is the border over the authored height");
 		CHECK(q.u1 == static_cast<float>(1.0 - 0.05f / 64.0 + 1.0 / 64.0),
@@ -2081,7 +2080,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 
 // The map medic marker: a local-team medic's blip is REPLACED by the
 // red-cross plate — three overlay quads (six tris), no sprite.
-// [orig: draw_entity_labels_and_markers @0x5a49e0 — the cross @0x5a4cd6..0x5a4d48]
+// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 — the cross @0x5a4cd6..0x5a4d48]
 void test_spinmap_medic_marker(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	HudLayout layout;
@@ -2388,6 +2387,113 @@ void test_stance_obeys_weapon_group_declutter(const fnt_font_t *font) {
     CHECK(compiler.compile(state, 1024, 768).quads.empty(), "on-foot stance hides with WPNGRP");
 }
 
+// The breath bar [orig: HUD_DrawBreathBar @0x59D6F0, called from
+// HUD_DrawGameplayOverlays @0x5BDED3]: the gates (round over @0x5BDECA, the
+// BREATHTIME slot @0x59D6F3, breathtime @0x59D70F, a zero count @0x59D742),
+// red over the last 40 samples, the bar skipped once the integer
+// `100 - 100 * count / limit` is not positive while the label stays
+// (@0x59D763), the three HUD_DrawProgressBar @0x59B340 quads (border, black
+// inner, centred fill) over each alignment's 200 x 10 design rect with every
+// corner scaled on its own, and the half-bright bold label 15 design px below.
+void test_compiler_breath_bar(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	HudLayout layout;
+	layout.breath_time = {300, 100, 0, 0, true};
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	HudFrameState state;
+	state.breath_time = 20; // the drown limit: 80 samples
+	state.breath_label = "Breath";
+	const uint32_t bold_page = static_cast<uint32_t>(kHudFontSlotLabelBold) * FNT_MAX_PAGES;
+	const auto bold_glyphs = [&](const HudDrawList &list) {
+		std::vector<GameFontQuad> out;
+		for (const GameFontQuad &g : list.glyphs) {
+			if (g.page == bold_page) out.push_back(g);
+		}
+		return out;
+	};
+	const auto quad_is = [](const HudQuad &q, float x0, float y0, float x1, float y1,
+								 uint32_t color) {
+		return q.x0 == x0 && q.y0 == y0 && q.x1 == x1 && q.y1 == y1 && q.color == color &&
+				q.filled && q.texture == kHudTexNone;
+	};
+
+	state.breath_samples = 0;
+	const HudDrawList idle = compiler.compile(state, 1024, 768);
+	CHECK(bold_glyphs(idle).empty(), "a zero breath count draws nothing");
+
+	// 40 of 80 samples: green, the fill half the inner width about the midpoint.
+	state.breath_samples = 40;
+	HudDrawList list = compiler.compile(state, 1024, 768);
+	CHECK(list.quads.size() == idle.quads.size() + 3, "the bar is three quads");
+	CHECK(list.quads.size() >= 3 &&
+					quad_is(list.quads[0], 300, 100, 500, 110, 0xFF00FF00u) &&
+					quad_is(list.quads[1], 301, 101, 499, 109, 0xFF000000u) &&
+					quad_is(list.quads[2], 351, 102, 449, 108, 0xFF00FF00u),
+			"border, black inner, centred half fill");
+	std::vector<GameFontQuad> label = bold_glyphs(list);
+	CHECK(label.size() == 6 && label[0].x_top_left == 299.5f && label[0].y_top == 114.5f &&
+					label[0].color == 0xFF007F00u,
+			"the half-bright bold label 15 design px below the anchor");
+
+	// 41 samples: past limit - 40, the bar and its label turn red.
+	state.breath_samples = 41;
+	list = compiler.compile(state, 1024, 768);
+	label = bold_glyphs(list);
+	CHECK(list.quads.size() >= 3 && list.quads[0].color == 0xFFFF0000u &&
+					list.quads[2].color == 0xFFFF0000u && !label.empty() &&
+					label[0].color == 0xFF7F0000u,
+			"the last 40 samples draw red");
+
+	// 80 samples: 100 - 100 * 80 / 80 = 0, the bar goes and the label stays.
+	state.breath_samples = 80;
+	list = compiler.compile(state, 1024, 768);
+	CHECK(list.quads.size() == idle.quads.size() && bold_glyphs(list).size() == 6,
+			"a spent breath keeps the label without the bar");
+
+	// Right and centre alignment place the 200-wide rect left of or about x.
+	state.breath_samples = 40;
+	layout.breath_time.align = 1;
+	compiler.update_layout(layout);
+	list = compiler.compile(state, 1024, 768);
+	CHECK(list.quads.size() >= 3 && quad_is(list.quads[0], 100, 100, 300, 110, 0xFF00FF00u) &&
+					quad_is(list.quads[2], 151, 102, 249, 108, 0xFF00FF00u) &&
+					bold_glyphs(list).size() == 6,
+			"align right ends the bar at the anchor");
+	layout.breath_time.align = 2;
+	compiler.update_layout(layout);
+	list = compiler.compile(state, 1024, 768);
+	CHECK(list.quads.size() >= 3 && quad_is(list.quads[0], 200, 100, 400, 110, 0xFF00FF00u) &&
+					quad_is(list.quads[2], 251, 102, 349, 108, 0xFF00FF00u),
+			"align centre straddles the anchor");
+
+	// Every corner scales on its own: 1280 x 960 rounds x 300 -> 375, 500 -> 625,
+	// y 100 -> 125, 110 -> 138; the fill centres on (375 + 625) / 2.
+	layout.breath_time.align = 0;
+	compiler.update_layout(layout);
+	list = compiler.compile(state, 1280, 960);
+	CHECK(list.quads.size() >= 3 && quad_is(list.quads[0], 375, 125, 625, 138, 0xFF00FF00u) &&
+					quad_is(list.quads[1], 376, 126, 624, 137, 0xFF000000u) &&
+					quad_is(list.quads[2], 438.5f, 127, 561.5f, 136, 0xFF00FF00u),
+			"the scaled corners and the integer midpoint");
+
+	// The gates: each one alone hides the bar and the label.
+	const auto hidden = [&](HudFrameState s) {
+		const HudDrawList &out = compiler.compile(s, 1024, 768);
+		return out.quads.size() == idle.quads.size() && bold_glyphs(out).empty();
+	};
+	HudFrameState gated = state;
+	gated.spawn_success_gate = true;
+	CHECK(hidden(gated), "the round-over latch skips the bar");
+	gated = state;
+	gated.declutter_visible[kDeclutterBreathTime] = false;
+	CHECK(hidden(gated), "a hidden BREATHTIME slot skips the bar");
+	gated = state;
+	gated.breath_time = 0;
+	CHECK(hidden(gated), "breathtime 0 skips the bar");
+}
+
 // The mounted dispatch in HUD_RenderOverlays is intentionally asymmetric:
 // pilots/drivers use category > 9, passengers retain their stance/panel, and
 // gunners follow WPNGRP. XHAIRS remains a separate gate in every seat.
@@ -2472,6 +2578,7 @@ int main() {
 	test_seat_weapon_and_stance_transitions(&font);
 	test_launcher_reload_keeps_ammo_flash(&font);
 	test_stance_obeys_weapon_group_declutter(&font);
+	test_compiler_breath_bar(&font);
 	test_scope_details(&font);
 	test_optical_distance_long_format(&font);
 	test_kill_announcement(&font);

@@ -4,8 +4,8 @@ extends Control
 ## The standard SIGHTS card: one child control per authored weapon.def SIGHTS
 ## row (order preserved, per-row blend mode), mounted behind the HudOverlay's
 ## compiled draw list — the original draws the card at scene end and the HUD
-## overlays after [orig: draw_weapon_sight_overlays @0x4dce00 from
-## render_hud_overlay @0x5d82da; HUD_RenderAllOverlays runs later in the
+## overlays after [orig: HUD_DrawWeaponSightOverlays @0x4dce00 from
+## Render_HUDOverlay @0x5d82da; HUD_RenderAllOverlays runs later in the
 ## frame]. Row rects live in the virtual 1024x768 design space and scale to the
 ## live viewport per draw [orig: Viewport_ScaleToVirtualCoords @0x5d2b20].
 ## Rows carry the six-mode retail material map, including the doubled-source

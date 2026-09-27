@@ -3,7 +3,7 @@
 // The witnessed menu UI sound math — the per-play channel volume and pitch
 // decisions of the LWF set player, pure over ints/doubles so the embedder
 // only routes the selected members into its audio device
-// [orig: the <SOUND> element play path widget_process_mouse_event @ 0x647a00
+// [orig: the <SOUND> element play path CWnd_ProcessMouseEvent @ 0x647a00
 //  -> collection play @ 0x652de0 -> SoundBank_FindTriggerByName @ 0x75be90
 //  -> SoundBank_PlayTriggerEntries @ 0x75ccd0]. Member selection per layer
 // rides audio/sound_selector.h; the per-play jitter draws stay an accepted

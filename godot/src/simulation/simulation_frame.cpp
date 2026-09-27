@@ -88,13 +88,27 @@ bool Simulation::adopt_role(std::unique_ptr<opennova::inmatch::Role> p_role,
 	return true;
 }
 
+bool Simulation::install_role(std::unique_ptr<opennova::inmatch::LocalRole> p_role) {
+	return adopt_role(std::move(p_role), nullptr, nullptr);
+}
+
+bool Simulation::install_role(std::unique_ptr<opennova::inmatch::HostRole> p_role) {
+	opennova::inmatch::HostRole *host = p_role.get();
+	return adopt_role(std::move(p_role), host, nullptr);
+}
+
+bool Simulation::install_role(std::unique_ptr<opennova::inmatch::JoinerRole> p_role) {
+	opennova::inmatch::JoinerRole *joiner = p_role.get();
+	return adopt_role(std::move(p_role), nullptr, joiner);
+}
+
 // The SP listen server keeps the SinglePlayer kind so the session's
 // pause/step/reset stay available; a LAN host is ListenHost or DedicatedHost
 // by serve_and_play (enable_host_listen / ensure_session_role).
 bool Simulation::install_offline_role() {
 	if (listen_server_) {
 		return install_role(std::make_unique<opennova::inmatch::HostRole>(
-				opennova::inmatch::RoleKind::SinglePlayer, item_class_resolver()));
+				opennova::inmatch::RoleKind::SinglePlayer, assets_.item_replication_catalog));
 	}
 	return install_role(std::make_unique<opennova::inmatch::LocalRole>());
 }
@@ -113,7 +127,7 @@ void Simulation::ensure_session_role() {
 		net_.lan_host_pending = false;
 		if (install_role(std::make_unique<opennova::inmatch::HostRole>(
 					net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost,
-					item_class_resolver())) &&
+					assets_.item_replication_catalog)) &&
 				net_.pump_socket != nullptr) {
 			host_role_->set_socket(net_.pump_socket.get());
 		}

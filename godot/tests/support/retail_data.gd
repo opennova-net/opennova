@@ -119,6 +119,18 @@ static func mount_install_with(witness: String, game: String = "jo") -> Resource
 	return null
 
 
+## The tank-training course mount: the configured JOTAC course (the revx02
+## expansion) when the install carries it, else the first mount that serves
+## 07TR.bms (stock Combined Arms packs it only in jox01); null without an
+## install or when nothing serves it.
+static func mount_tank_training() -> ResourceRoot:
+	if "revx02" in expansions():
+		var mount := ResourceRoot.new()
+		if mount.mount_runtime(install(), "revx02") == OK and mount.has_file("07TR.bms"):
+			return mount
+	return mount_install_with("07TR.bms")
+
+
 static func _dir(variable: String) -> String:
 	var value := OS.get_environment(variable).strip_edges()
 	if value.is_empty() or not DirAccess.dir_exists_absolute(value):

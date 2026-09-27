@@ -6,9 +6,6 @@ extends GutTest
 
 func test_dbf_resolves_dialog_to_def_id() -> void:
 	var path := ProjectSettings.globalize_path("res://").path_join("../fixtures/dbf/synth_bank.dbf")
-	if not FileAccess.file_exists(path):
-		pass_test("repo fixture fixtures/dbf/synth_bank.dbf not present; skipping")
-		return
 	var dbf := DbfData.new()
 	assert_eq(dbf.open_file(path), OK, "DBF parses")
 	assert_eq(dbf.get_dialog_count(), 11, "the synthetic bank has 11 dialog groups")

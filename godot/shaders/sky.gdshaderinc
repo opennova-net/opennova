@@ -1,20 +1,20 @@
 // Sky-dome pass shared by the two retail dome passes over the same 441-vertex
-// dome (retail render_skybox @ 0x579080):
+// dome (retail Render_Skybox @ 0x579080):
 //   pass 1 - textureless sky gradient, always sun-driven
-//            (retail SkyVS_GradientPassSource @ 0x7d7338) -> sky.gdshader
+//            (retail g_SkyVSGradientPassSource @ 0x7d7338) -> sky.gdshader
 //   pass 2 - both cloud layers in one multi-stage pass, driven by the ACTIVE
 //            light (sun by day, moon at night), alpha-blended over pass 1
-//            (retail SkyVS_CloudPassSource @ 0x7d6fc0 + the 3-stage TSS table
+//            (retail g_SkyVSCloudPassSource @ 0x7d6fc0 + the 3-stage TSS table
 //            decoded against RenderState_ApplyToDevice @ 0x681920)
 //            -> sky_clouds.gdshader
 // Retail draws the sun/moon discs BETWEEN the two passes
-// (render_celestial_bodies(0) @ 0x5798e0, flushed @ 0x5acce9, before the
+// (Render_CelestialBodies(0) @ 0x5798e0, flushed @ 0x5acce9, before the
 // cloud-pass constants @ 0x5798f1), so the clouds veil the discs: the cloud
 // pass is a separate transparent draw on the sky-cloud rung, after the
 // sky-body rung (renderer/render_order).
 // advanced_clouds=0 instead draws a flat cloud-color dome with the pass-1
 // (NULL-texture) effect and no cloud pass: material ambient = cloud_rgb
-// against D3DRS_AMBIENT 0xFFFFFF (retail render_skybox @ 0x579b42..0x579bb6).
+// against D3DRS_AMBIENT 0xFFFFFF (retail Render_Skybox @ 0x579b42..0x579bb6).
 // Full spec: docs/env/env-tod-re.md "Sky dome".
 
 // Gamma-domain scene-target contract.
@@ -37,7 +37,7 @@ uniform float u_sky_height = 175.0;
 // bracket only while blink letter 0x4 is clear and the eye is strictly above
 // the water (retail Render_ProcessMainSceneFrame @ 0x5ca1a3..0x5ca1bd ->
 // @ 0x5ca7c4); the water mirror draws its own while blink letter 0x2 is clear
-// (retail render_main_scene @ 0x5c1342..0x5c1353 -> @ 0x5c166b). The
+// (retail Render_MainScene @ 0x5c1342..0x5c1353 -> @ 0x5c166b). The
 // environment-cube capture cameras always draw it.
 uniform bool u_beauty_pass_drawn = true;
 uniform bool u_mirror_pass_drawn = true;
@@ -48,6 +48,11 @@ varying vec3 v_sky_behind; // pass-2 oD1
 varying float v_fog; // oFog = 1 - dist/(0.9*fogEnd)
 varying vec2 v_uv1;
 varying vec2 v_uv2;
+#ifdef SKY_GATED_PASS_KEEPS_STENCIL
+// 1 while this pass draws its sky bracket, 0 while the bracket is closed and
+// the dome only marks the slot-drape stencil (sky.gdshader).
+varying flat float v_sky_pass_drawn;
+#endif
 
 // The capture cameras cull to the environment-capture layer ALONE (the water
 // layer's alias, render/visual_layers.h); the water mirror culls the water
@@ -83,18 +88,18 @@ float prox_to(vec4 clip, vec3 eye, vec3 dir, mat4 view_proj) {
 void vertex() {
 	// Y-only dome scale: the mesh bakes the 175.69-unit reference dome and only
 	// the height stretches with sky_height; x/z stay at the 1024-unit rim
-	// (retail build_sky_dome_mesh @ 0x578ed4 - v14 = skyHeight / (3072 - sqrt(8388608))).
+	// (retail SkyDome_BuildMesh @ 0x578ed4 - v14 = skyHeight / (3072 - sqrt(8388608))).
 	// (epsilon floor: a hand-authored sky_height 0 must not NaN-poison the dome)
 	float height_scale = max(u_sky_height, 0.01) / 175.69;
 	vec3 scaled = vec3(VERTEX.x, VERTEX.y * height_scale, VERTEX.z);
 
 	// Dome normal: the builder's anisotropic normal, NOT the vertex direction -
-	// normalize(x, y_unscaled/scale, z) (retail build_sky_dome_mesh @ 0x578fbb).
+	// normalize(x, y_unscaled/scale, z) (retail SkyDome_BuildMesh @ 0x578fbb).
 	// The dome never rotates, so the world normal equals the local normal.
 	vec3 dome_normal = normalize(vec3(VERTEX.x, VERTEX.y / height_scale, VERTEX.z));
 
 	vec3 eye = INV_VIEW_MATRIX[3].xyz;
-	// Anchor from THIS render pass: retail re-enters render_skybox for the
+	// Anchor from THIS render pass: retail re-enters Render_Skybox for the
 	// mirrored water camera, so the reflection cannot reuse the main-camera
 	// dome transform (retail @ 0x5790d0; reflection pass @ 0x5c2780).
 	vec3 world_pos = vec3(eye.x, eye.y * 0.5, eye.z) + scaled;
@@ -122,26 +127,40 @@ void vertex() {
 	v_cloud_ramp = clamp(mix(mix(u_cloud_base, u_cloud_edge, p4_light), u_cloud_highlight, p8_light), vec3(0.0), vec3(1.0));
 
 	// Per-vertex dome fog (retail SkyVS oFog = 1 - dist(world, eye)/(0.9*fogDist),
-	// c9 upload @ 0x5792c2).
+	// c9 upload @ 0x5792c2). vs_1_1 oFog, like oD0/oD1, is saturated per
+	// vertex before the rasterizer interpolates it (the D3D9 output-register
+	// contract), so a triangle that straddles the fog end blends from 0, not
+	// from a negative factor clamped per pixel.
 	// (divisor floor keeps the varying defined when fog is off; the fragment
 	// guard never reads it in that case)
-	v_fog = 1.0 - distance(world_pos, eye) / max(0.9 * u_fog_end, 0.001);
+	v_fog = clamp(1.0 - distance(world_pos, eye) / max(0.9 * u_fog_end, 0.001), 0.0, 1.0);
 
 	v_uv1 = UV + u_scroll_offset1;
 	v_uv2 = UV2 + u_scroll_offset2;
 	POSITION = clip;
 	// Both passes draw with z-write OFF and ZFUNC ALWAYS (pass flags
-	// 0x300000 from every beauty/mirror caller, retail render_skybox
+	// 0x300000 from every beauty/mirror caller, retail Render_Skybox
 	// @ 0x579883 / @ 0x579ac1 / @ 0x579c3e, the bits decoded by
 	// CGfxShader_ApplyPass @ 0x68322b..0x68324f) before any world geometry,
 	// so the whole world overdraws the dome. Pin the dome to the exact far
 	// plane (reverse-Z 0) and never write depth: every nearer surface wins
 	// the depth test whatever the draw order, while the cleared sky passes.
 	POSITION.z = 0.0;
+#ifdef SKY_GATED_PASS_KEEPS_STENCIL
+	v_sky_pass_drawn = 1.0;
+#endif
 	if (!IN_SHADOW_PASS && !sky_pass_drawn(CAMERA_VISIBLE_LAYERS)) {
+#ifdef SKY_GATED_PASS_KEEPS_STENCIL
+		// The gradient pass keeps rasterizing at alpha 0: the clear colour
+		// stays, but its pixels still carry the slot-drape stencil mark, as
+		// retail's drape multiplies whatever the frame holds there
+		// (sky.gdshader).
+		v_sky_pass_drawn = 0.0;
+#else
 		// This pass skips its sky bracket: park every vertex outside the
 		// clip volume so no triangle rasterizes.
 		POSITION = vec4(2.0, 2.0, 2.0, 1.0);
+#endif
 	}
 	VERTEX = scaled;
 }
@@ -152,7 +171,8 @@ void vertex() {
 // restore ordinary fog afterward (retail sky fog wrapper @ 0x579cb0).
 vec3 sky_apply_fog(vec3 col) {
 	if (u_fog_end > 0.0) {
-		return mix(u_fog_color, col, clamp(v_fog, 0.0, 1.0));
+		// v_fog interpolates per-vertex factors already in [0, 1].
+		return mix(u_fog_color, col, v_fog);
 	}
 	return col;
 }

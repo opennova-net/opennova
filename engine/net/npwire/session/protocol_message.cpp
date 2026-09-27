@@ -630,4 +630,37 @@ bool reassemble_protocol_payload(ProtocolReassemblyState &state,
 	return true;
 }
 
+// [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940]
+CsConfigUpdate decode_cs_config_update(const uint8_t *data, size_t len) {
+	CsConfigUpdate out;
+	size_t pos = 0;
+	// The direction byte, 0 when the body is empty (@0x62194C..0x62195C).
+	uint8_t direction = 0;
+	if (len >= 1) direction = data[pos++];
+	out.to_dir0 = direction != 0;
+	// The mask only when four bytes follow it (@0x62197C..0x621989).
+	if (len - pos >= 4) {
+		out.mask = read_u32_le(data + pos);
+		pos += 4;
+	}
+	// Low bit first while the mask has bits left and bytes remain
+	// (@0x6219A0..0x6219A6, `sar ebx, 1` @0x6219D4, @0x6219DC).
+	for (uint32_t bit = 0; bit < 32 && (out.mask >> bit) != 0; ++bit) {
+		if (pos >= len) break;
+		if (((out.mask >> bit) & 1u) == 0) continue;
+		// Four bytes when they fit, else 0 without advancing (@0x6219AD..0x6219BA).
+		int32_t value = 0;
+		if (len - pos >= 4) {
+			value = static_cast<int32_t>(read_u32_le(data + pos));
+			pos += 4;
+		}
+		// Slots 0..14 are stored; higher bits are consumed and dropped (@0x6219C3 / @0x6219CD).
+		if (bit < static_cast<uint32_t>(kCsConfigSlots)) {
+			out.value[bit] = value;
+			out.written = static_cast<uint16_t>(out.written | (1u << bit));
+		}
+	}
+	return out;
+}
+
 } // namespace opennova

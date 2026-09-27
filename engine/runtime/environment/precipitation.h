@@ -5,8 +5,8 @@
 // Precipitation_SeedPool (ex sub_5DEBB0) @ 0x5debb0;
 // Precipitation_Reset (ex sub_5DF3A0) @ 0x5df3a0 from Game_StartMission
 // @ 0x5249d4; Precipitation_FallTick (ex sub_5DE8F0) @ 0x5de8f0 from
-// Entity_UpdateAllEntities @ 0x4c2214; update_weather_particle_positions
-// @ 0x5dec40 from the drawer render_weather_trail_particles @ 0x5dee10].
+// Entity_UpdateAllEntities @ 0x4c2214; WeatherParticle_UpdatePositions
+// @ 0x5dec40 from the drawer Render_WeatherTrailParticles @ 0x5dee10].
 //
 // Every slot is one drop in the mission frame (16.16, Z up): the drawer walks
 // the first `active` slots, the fall tick lowers every slot each logic tick
@@ -33,7 +33,7 @@ struct PrecipitationSlot {
 // [orig: Terrain_SampleHeightBilinear @ 0x6067b0]. entity_hit: the first
 // entity surface between z_top and z_bottom under (x, y); returns true and
 // the hit height [orig: Physics_RaycastIntContext @ 0x5385e0 +
-// raycast_proximity_entities @ 0x538350, the ray from floor + 200 m down to
+// Physics_RaycastProximityEntities @ 0x538350, the ray from floor + 200 m down to
 // the floor]. Null callbacks skip that query.
 struct PrecipitationFloorSampler {
     int32_t (*terrain_height)(void *ctx, int32_t x, int32_t y) = nullptr;
@@ -44,7 +44,7 @@ struct PrecipitationFloorSampler {
 
 struct PrecipitationField {
     static constexpr int kSlots = 3072;
-    // The rain gate: Env_RainPctCurrent > 48 (16.16) [orig: @ 0x5de92e; @ 0x5dee48].
+    // The rain gate: g_EnvRainPctCurrent > 48 (16.16) [orig: @ 0x5de92e; @ 0x5dee48].
     static constexpr int32_t kRainGateQ16 = 48;
     // Per-tick fall in 16.16 [orig: @ 0x5de938 rain, @ 0x5de93f snow].
     static constexpr int32_t kRainFallPerTick = 12288;
@@ -79,7 +79,7 @@ struct PrecipitationField {
     // (3072 * rain + 0x8000) >> 16, only when > 1, capped at 3072
     // [orig: @ 0x5dec92..0x5deca6; @ 0x5df15d..0x5df170].
     static int active_count(int32_t rain_pct_q16);
-    // update_weather_particle_positions: wrap every active slot into the
+    // WeatherParticle_UpdatePositions: wrap every active slot into the
     // camera volume; a slot that wrapped on any axis is re-floored.
     void update(int32_t cam_x, int32_t cam_y, int32_t cam_z,
             int32_t rain_pct_q16, int32_t water_height_q16,

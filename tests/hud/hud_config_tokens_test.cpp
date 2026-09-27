@@ -32,12 +32,17 @@ int main() {
 	check(next_hud_color_index(0) == 1, "color next 0 -> 1");
 	check(next_hud_color_index(5) == 0, "color next 5 -> 0");
 
-	// The hud_detail token: default 0, 0..3, level 3 is the blank HUD.
+	// The hud_detail token: default 0, 0..3, level 3 is the blank HUD; the
+	// huddetail cycle 0 -> 1 -> 2 -> 3 -> 0, whose signed compare on the SUM
+	// wraps a level the cfg parked above 3 to 0 on the first press.
 	check(kHudDetailLevelDefault == 0, "detail default 0");
+	check(kHudDetailLevelMax == 3, "detail authored range 0..3");
 	check(kHudDetailLevelBlank == 3, "detail blank 3");
 	check(next_hud_detail_level(0) == 1, "detail next 0 -> 1");
+	check(next_hud_detail_level(1) == 2, "detail next 1 -> 2");
 	check(next_hud_detail_level(2) == 3, "detail next 2 -> 3");
 	check(next_hud_detail_level(3) == 0, "detail next 3 -> 0");
+	check(next_hud_detail_level(9) == 0, "detail next wraps a parked out-of-range level to 0");
 
 	// The showhud flags: default both bits, cycle (flags + 1) & 3.
 	check(kShowHudFlagsDefault == 3, "showhud default 3");

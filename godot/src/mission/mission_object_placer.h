@@ -153,12 +153,28 @@ public:
 	int update_static_lods(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees, float p_viewport_width,
 			float p_viewport_height);
-	// The same walk over every view drawing the world this frame (the frame's
-	// image and, while it renders, the weapon Inset pass): the instances share
-	// one row per level across the views, so each takes the finest level any
-	// view selects and drops to no level only when every view that sees it
-	// projects it below the sub-pixel floor.
+	// The same walk per view drawing the world this frame: view 0 the frame's
+	// image, view 1 (present while it renders) the weapon Inset pass, which
+	// retail runs as its own scene pass (ObjectModel::update_authored_lod_views).
+	// An instance whose two views agree keeps its row in the shared
+	// population of its level; one whose views differ moves to a main-view
+	// population of the main view's level and an Inset-view population of the
+	// Inset's (the same row rewrite a level switch takes, into view twins of
+	// the source population minted on first use), and moves back when the
+	// views converge or the Inset closes.
 	int update_static_lod_views(const ObjectLodFrame *p_frames, int p_frame_count);
+	// The two-camera form (a null Inset camera = no Inset view), for tools
+	// and tests.
+	int update_static_lods_for_views(Camera3D *p_main, float p_main_width,
+			Camera3D *p_inset, float p_inset_width);
+	// The Inset collect's verdict for a batched static (OcclusionFrame::
+	// apply_inset_frame) and its release; an instance without one follows
+	// the main view's. The next static LOD walk applies them.
+	void set_static_instance_inset_occlusion_hidden(int p_bms_id, bool p_hidden);
+	void clear_static_instance_inset_occlusion();
+	// The level the Inset view draws a placed static at (its main level while
+	// the views agree; -1 below the floor, -2 not a retained static).
+	int get_static_instance_inset_lod(int p_bms_id) const;
 	// The render-occlusion frame's verdict for a batched (node-less) static:
 	// the collector gates (blink hits, the three-ray latch) and the building
 	// batch/TOC verdicts retail applies before any draw. A hidden instance
@@ -319,6 +335,13 @@ private:
 	// emitted over, live rows packed [0, live) (visible_instance_count) in
 	// swap-remove order. The row tables name the retained instance/binding
 	// and the population-local slot each live row draws.
+	// Which views a population's rows draw for: both (the shared population,
+	// on the world bits), the main view only, or the weapon Inset only.
+	enum : uint8_t {
+		kStaticViewShared = 0,
+		kStaticViewMain = 1,
+		kStaticViewInset = 2,
+	};
 	struct StaticPopulation {
 		Ref<MultiMesh> multimesh;
 		uint64_t instance_node = 0; // MultiMeshInstance3D ObjectID
@@ -330,6 +353,14 @@ private:
 		Vector<int> row_instance;
 		Vector<int> row_binding;
 		Vector<int> row_slot;
+		// The retained instance and its binding per population-local slot
+		// (the view twins mint their bindings from these).
+		Vector<int> slot_instance;
+		Vector<int> slot_binding;
+		uint8_t view = kStaticViewShared;
+		// A shared visible population's view twins (-1 until first needed).
+		int main_twin = -1;
+		int inset_twin = -1;
 	};
 	// One slot of a retained static instance in one population: the row it
 	// occupies while its level is live (-1 otherwise) and what that row is
@@ -343,6 +374,7 @@ private:
 		Color custom_data; // the light-atlas row (visible populations)
 		bool shadow_only = false; // the filtered shadow twin
 		bool casts = true; // whether the slot is ever live in a shadow twin
+		uint8_t view = kStaticViewShared;
 	};
 	// One retained static entity: its world bound sphere, the level live for
 	// it, and every population slot it occupies across levels/populations.
@@ -356,6 +388,13 @@ private:
 		int active_lod = 0; // -1 = below the sub-pixel floor / none available
 		bool carved = false;
 		bool occlusion_hidden = false; // the occlusion frame's verdict
+		// The weapon Inset view's own verdicts (unset = the main view's) and
+		// whether they differ from the main view's (rows in the view twins).
+		int inset_lod = 0;
+		bool inset_lod_own = false;
+		bool inset_occlusion_hidden = false;
+		bool inset_occlusion_own = false;
+		bool view_split = false;
 		Vector<StaticLodBinding> bindings;
 	};
 	void _check_epoch();
@@ -394,17 +433,23 @@ private:
 	StaticLodProfile _static_lod_profile_for(const String &p_graphic) const;
 	static void _complete_static_lod_profile(StaticLodProfile &r_profile,
 			const Vector<StaticBatch> &p_batches);
-	// Whether one emitted slot is live when `p_live_lod` is the instance's
-	// level: its population's level matches, and a shadow twin only carries
-	// slots that cast.
+	// Whether one emitted slot is live when `p_main_lod` is the instance's
+	// main-view level: its population's level matches, a shadow twin only
+	// carries slots that cast, and while the views differ (`p_split`) the
+	// visible rows live in the view twins (the Inset's at `p_inset_lod`).
 	static bool _static_slot_live(const StaticLodBinding &p_binding,
-			int p_live_lod);
+			int p_main_lod, int p_inset_lod, bool p_split);
 	// Move one retained instance's rows so it is live exactly in the
-	// populations of `p_live_lod`: removed (swap-remove, the last live row
-	// fills the hole) where it no longer belongs, appended where it now
-	// does. Every population touched is collected for the flush below.
+	// populations of `p_live_lod` (and, while its views differ, its Inset
+	// level's view twins): removed (swap-remove, the last live row fills the
+	// hole) where it no longer belongs, appended where it now does. Every
+	// population touched is collected for the flush below.
 	void _write_static_instance_slots(int p_instance_row, int p_live_lod,
 			HashSet<int> &r_touched);
+	// The main-view or Inset-view twin of a shared visible population, minted
+	// on first use beside it with every one of its slots bound (no row live).
+	int _static_view_twin(int p_population, uint8_t p_view);
+	void _ensure_static_view_twins(int p_instance_row);
 	void _static_population_append(int p_population, int p_instance_row,
 			int p_binding);
 	void _static_population_remove(int p_population, int p_instance_row,

@@ -57,7 +57,7 @@ std::size_t count_kind(const std::vector<FrameFxStep> &steps, FrameFxStepKind ki
 	return count;
 }
 
-// [orig: create_frame_effect_render_targets @0x583c7f..0x583c97]
+// [orig: FrameFX_CreateRenderTargets @0x583c7f..0x583c97]
 void capture_side_is_the_power_of_two_floor_of_one_less() {
 	CHECK(frame_fx_capture_side(1024) == 512);
 	CHECK(frame_fx_capture_side(1025) == 1024);

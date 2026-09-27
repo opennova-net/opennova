@@ -54,9 +54,9 @@ enum class EntityKind : uint8_t {
     Organic = 3,
 };
 
-// Live entity pools 0..4 [orig: the g_pool_list walk bound @0x431910].
+// Live entity pools 0..4 [orig: the g_PoolList walk bound @0x431910].
 inline constexpr int kEntityPoolCount = 5;
-// Fixed g_pool_list capacities, used by mission promotion and as the memory-safe
+// Fixed g_PoolList capacities, used by mission promotion and as the memory-safe
 // bound behind the retail load handlers' unchecked pool indexing
 // (Pool_GetEntryUnchecked walks a fixed-capacity pool; the serving side never
 // exceeds its own capacity). Witnessed per pool: organics 256, items 1200,
@@ -148,7 +148,7 @@ struct Seat {
     // that frame distinct while reusing the mounted-pose provider for its
     // position/PANM walk.
     // [orig: Entity_UpdateTransformAndTurret @0x440CA0 -> attachment call
-    // @0x44109D; build_bone_attachment_matrix @0x56C630]
+    // @0x44109D; Bone_BuildAttachmentMatrix @0x56C630]
     bool attachment_frame = false;
     EntityHandle occupant;      // [orig: vehicle[400+2*slot]] kInvalid = empty
 };
@@ -169,6 +169,21 @@ enum class DeathMotionMode : uint8_t {
     PalmPiece = 8, // psec @0x53BE10
     SectionFalling = 9, // towr @0x4A8340
     SectionSettled = 10, // @0x4A8220
+};
+
+// The update callback a drop installs on the dropped carried object, then its
+// landing's successor: the fall until the clamped ground stops it; on a
+// ground entity the parent follow, which drops back into the fall when that
+// entity dies; a non-flag landing on a dead entity takes the plain follow.
+// [orig: Entity_DropCarriedObject @0x439e95 -> Entity_UpdatePositionAndTransform
+//  @0x4adef0, the successor select @0x4adfc9..0x4ae00e;
+//  Entity_UpdateParentTransform @0x4a88b0; Entity_InterpolateFromParentDelta
+//  @0x4a8d60]
+enum class DropMotion : uint8_t {
+    None = 0,
+    Fall = 1,
+    Ride = 2,
+    Follow = 3,
 };
 
 // Minimal live-entity state the scripting evaluators read and mutate. This is a
@@ -210,8 +225,8 @@ inline constexpr uint32_t kEntityFlagDead = 0x2;              // [orig: kill wri
 inline constexpr uint32_t kEntityFlagHusk = 0x4;              // items/buildings: husk swap [orig: @0x43fbf6]
 inline constexpr uint32_t kEntityFlagNVGWorn = 0x4;           // organics: NVG draw, same bit kind-dependent
                                                               // [orig: draw @0x4e3b54; refresh of bits 2-4 §13.1]
-inline constexpr uint32_t kEntityFlagBinoculars = 0x8;        // [orig: draw @0x4e3c04; g_binocularsRaised refresh]
-inline constexpr uint32_t kEntityFlagScopeRaised = 0x10;      // [orig: g_weaponScopeActive refresh; test @0x4b5deb]
+inline constexpr uint32_t kEntityFlagBinoculars = 0x8;        // [orig: draw @0x4e3c04; g_BinocularsRaised refresh]
+inline constexpr uint32_t kEntityFlagScopeRaised = 0x10;      // [orig: g_WeaponScopeActive refresh; test @0x4b5deb]
 inline constexpr uint32_t kEntityFlagParachute = 0x20;        // deployed chute (D-INF-20) [orig: radius leg @0x4b3aac]
 inline constexpr uint32_t kEntityFlagAiClimb = 0x80;          // org1 ladder-climb chase mode: gravity becomes the
                                                               // sixteenth-step Z chase to the AI move target (floor
@@ -238,7 +253,16 @@ inline constexpr uint32_t kEntityFlagInAir = 0x2000;          // airborne/swimmi
 inline constexpr uint32_t kEntityFlagPriorityTarget = 0x4000; // set on every fire, decays per perception scan
                                                               // [orig: @0x4bf370 set; @0x4BBF88 clear; §16.2 x6 scoring]
 inline constexpr uint32_t kEntityFlagDrowning = 0x8000;       // zeroes vertical swim input [orig: §7 movement]
-inline constexpr uint32_t kEntityFlagBuilding = 0x20000;      // [orig: Entity_InitFromModel @0x40e105]
+inline constexpr uint32_t kEntityFlagMatrixBuilt = 0x20000;   // the entity matrix is current: set after every
+                                                              // Math_BuildFixedPointMatrixFromEulerAngles of the
+                                                              // entity (each mover tail, e.g. @0x48D451; respawn
+                                                              // @0x46017E; the ewep update @0x4411C2) and at model
+                                                              // init for a decoration, building or powerup def
+                                                              // [orig: Entity_InitFromModel @0x40e0d4..0x40e105];
+                                                              // a teleport or the no-row death clears it
+                                                              // [orig: Entity_DispatchDeathCallback @0x493F3F]; the
+                                                              // ewep update rebuilds a carrier matrix without it
+                                                              // [orig: Entity_UpdateTransformAndTurret @0x44102D]
 inline constexpr uint32_t kEntityFlagNoEngage = 0x80000;      // org1 combat think: skips the attack-stance aim
                                                               // block [orig: @0x4bc958] and the reaction/approach
                                                               // arm [orig: @0x4bc054, unported there]; the writer
@@ -367,7 +391,7 @@ struct Entity {
     // The graphic model's XY half-extents (mission axes, 16.16), stamped by
     // the same model-resolve seam. The minimap blip drawer sizes footprint-
     // class blips from these; 0 = unstamped (the 10-wu class fallback).
-    // [orig: draw_minimap_blip @0x5979a2..0x5979b8 — model+176 bound block,
+    // [orig: Minimap_DrawBlip @0x5979a2..0x5979b8 — model+176 bound block,
     //  half = (max - min) >> 1 per axis; fallback 655360 @0x5979cb]
     int32_t minimap_half_x_q16 = 0;
     int32_t minimap_half_y_q16 = 0;
@@ -473,6 +497,12 @@ struct Entity {
     // [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; read
     //  HUD_DrawEntityLabel @0x5a4021]
     std::string display_name;
+    // The AI slot's +156 name: the BMS record's raw 8-byte ai_textfile (name2),
+    // copied as two dwords for an AIData def and never rewritten; the 0x0D
+    // record's AI trailer streams it. The port's .aip resolver reads its own
+    // trimmed, lowercased copy. [orig: Entity_SpawnFromBMSRecord
+    //  @0x40ED66..0x40ED8C; NetPacket_SerializeEntityPoolToPacket_0 @0x503D85..0x503DAB]
+    std::string ai_text_file;
     uint8_t group_id = 0;     // BMS commandGroup (+284), not the WAC named-group table
     uint8_t waypoint_id = 0;  // wplist / route this entity follows
     int32_t wp_number = 0;    // position along that route
@@ -640,7 +670,7 @@ struct Entity {
     static constexpr uint32_t kMoveOrderDirMask = 0x7;    // 8-way dir F=0..FR=7 (§5.38)
     static constexpr uint32_t kMoveOrderMoving = 0x8;
     static constexpr uint32_t kMoveOrderFreeLook = 0x10;  // [orig: steer-source pick @0x48b4a8]
-    static constexpr uint32_t kMoveOrderJump = 0x20;      // held jump key [orig: g_inputFlags
+    static constexpr uint32_t kMoveOrderJump = 0x20;      // held jump key [orig: g_InputFlags
                                                           //  0x1000 -> bit 5 @0x4df6fa; the
                                                           //  jump gate @0x4b7eaf]
     static constexpr uint32_t kMoveOrderLeanLeft = 0x40;  // [orig: lean ramp @0x4b7dbf]
@@ -651,7 +681,7 @@ struct Entity {
     // (§5.10 extended C2S 0x0C) and the host echoes it in that player's 0x0A compact record —
     // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2
     // apply @0x4c11ec; consumers Entity_UpdateLightVehiclePhysics @0x483fe0 (leg @0x48496d),
-    // check_bone_ground_contact @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
+    // Entity_LandmineThink @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
     // remote peers; mirrored from the packed local input for the host's own player (bits 0-2 =
     // 8-way move_direction_index, bit 3 = moving [orig: Player_PackInputStateToEntity @0x4df68f]).
     uint8_t net_move_input = 0;
@@ -689,7 +719,7 @@ struct Entity {
 	// Equipped-weapon AdmDef index (entity+0x2B0), echoed at this player's 0x0A off-16
 	// (anim_def_index). 0xFF = none — the apply-skip sentinel the client honors (0 is a VALID
 	// index: the "null" def). Ingested from the owner's extended C2S 0x0C uplink gated
-	// AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; host-spawned players default
+	// g_AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; host-spawned players default
 	// to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
 	// (D-NET-143)
 	uint8_t equipped_adm_index = 0xFF;
@@ -742,6 +772,12 @@ struct Entity {
     bool item_section_piece = false; // locally allocated class fragment
     bool palm_sections = false; // palm/psec model callback @0x53BF10
     int32_t palm_state = 0; // entity+0x270
+    // The def's damage callback is the palm row's (WeaponOverlay_HandleDamage)
+    // or its update is psec's physics step (Entity_UpdatePhysicsStep): the load
+    // serializers then stream entity+0x270 (palm_state), whatever its value.
+    // [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503F4C..0x503F80;
+    //  NetPacket_SerializePool2StaticToBuffer @0x504554..0x504588]
+    bool palm_state_streamed = false;
     // The per-section damage bytes at entity+0x2BA+section. Retail indexes
     // them unchecked; this bank grows on first write (the caller bounds the
     // section by the def's int8 huskSubPartCount, the authority bound
@@ -814,6 +850,16 @@ struct Entity {
     uint8_t sub_type = 0;
     // entity+533 refNum <- BMS record byte 153; the 0x10 record's flag-0x40 byte (D-NET-94).
     uint8_t ref_num = 0;
+    // Whether the row is in its refNum's group list, the list the destroy's
+    // EWeap walk reads: a spawn from a record carrying a nonzero refNum joins
+    // it (a BMS row, and an addeweap child, whose record carries its
+    // carrier's refNum); the refNum the addeweap spawner hands a carrier that
+    // had none does not, and the destroy's list removal clears it.
+    // [orig: Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45 (the join);
+    //  Entity_SpawnWeaponOverlays @0x40F389 (the carrier's refNum, occupied
+    //  only @0x40F4C7), the child record's refNum @0x40F3B1..0x40F3CF;
+    //  Entity_Destroy @0x43E840..0x43E858 (the removal)]
+    bool ref_group_member = false;
 	// BMS team_budget byte165 -> entity+356, distinct from spawn team +357.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0]
 	int8_t vehicle_spawn_team = 0;
@@ -833,8 +879,8 @@ struct Entity {
     // entity+350 (0x15E) <- BMS record word 14 (wp_distance low u16) — the capture-zone /
     // proximity radius. Streamed as the 0x0D record's 0x2000/0x8000-gated u16 (golden ASH_I5A
     // bunkers: 70) and read by the client's zone-radius consumers (CaptureZone_* /
-    // render_minimap_slot_blip). [orig: Entity_SpawnFromBMSRecord @0x40e9f0; 0x0D writer
-    // serialize_entity_pool_to_packet_0 @0x503ecc/@0x503f29; net-re §5.11/§5.61]
+    // Render_MinimapSlotBlip). [orig: Entity_SpawnFromBMSRecord @0x40e9f0; 0x0D writer
+    // NetPacket_SerializeEntityPoolToPacket_0 @0x503ecc/@0x503f29; net-re §5.11/§5.61]
     uint16_t zone_radius = 0;
     // entity+540 — the 16.16 SECURE/control fraction 0..0x10000. A numbered zone accepts
     // spawns only at >= 0x10000; flips reset it to 0 and the owner re-secures. Seeded by the
@@ -866,7 +912,7 @@ struct Entity {
     // items.def 'primary_weapon' — the weapon.def entry this ewep emplacement mounts (the
     // gun entity's slot-0 weapon; the USEGUN attach label resolves its attachtextid).
     // Empty for non-emplacements. [orig: ItemDef+0x54B primaryWeapon; label consumer
-    // draw_vehicle_seat_and_armory_labels @0x5a351d via Entity_GetWeaponSlots slot0]
+    // HUD_DrawVehicleSeatAndArmoryLabels @0x5a351d via Entity_GetWeaponSlots slot0]
     std::string primary_weapon;
     // Child entity created from its parent's items.def addeweap* slot. All
     // variants share the parent/userpoint carry relation; G/C remain explicit
@@ -1031,6 +1077,9 @@ struct Entity {
     // Entity_AttachCarriedObject @0x43c130; cleared Entity_DropCarriedObject
     // @0x439df0, the capture-zone clear @0x4ada07, Entity_Destroy @0x43ea03]
     EntityHandle mounted_child;         // kInvalid = carrying nothing
+    // The +0x1C4 update callback a drop installs on the carried object and
+    // the landing's successor (Match::update_dropped_object).
+    DropMotion drop_motion = DropMotion::None;
 
     // The shooter's last claimed fire target (entity+104 -> +12): stamped per accepted
     // C2S 0x06 [orig: Server_ClientFiredRound @0x50c2ad stores the resolved target ptr],

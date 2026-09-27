@@ -29,8 +29,8 @@ What is here:
 ## The control board
 
 `control_board.h` is the read side of the debug-control table: the embedder
-pushes the table's catalog once (label, tooltip, kind, range, enum choices,
-authority) and, every 0.25 s, the live state (value, writable, the refusal
+pushes the table's catalog once (label, tooltip, kind, range, enum choices)
+and, every 0.25 s, the live state (value, writable, the refusal
 reason) of the rows the visible windows declare through
 `Window::wanted_controls`. A window draws a row with `draw_control(board, id,
 queue)` — a checkbox, a slider queued on release, an enum combo, or an

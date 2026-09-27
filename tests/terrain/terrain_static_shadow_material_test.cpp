@@ -49,7 +49,7 @@ int main() {
 	material.samples_diffuse_alpha = true;
 	material.uses_material_alpha = true;
 	material.diffuse_alpha_frames.push_back(alpha_identity());
-	// The #UV twin: only it reads MatTexCoord1 [orig: apply_shader_parameters
+	// The #UV twin: only it reads MatTexCoord1 [orig: Material_ApplyShaderParameters
 	// @ 0x58DE4F..0x58DE56].
 	std::snprintf(material.runtime_material.shader_name,
 			sizeof(material.runtime_material.shader_name), "%s", "FF_ST_OP#UV");

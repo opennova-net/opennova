@@ -3,8 +3,8 @@ extends GutTest
 # =============================================================================
 # Water surface pins (env #29, docs/env/env-tod-re.md "Water surface"):
 # the witnessed per-side material swap (camera-above -> the BLEND material,
-# underwater -> the OPAQUE one [orig: selection in render_water_surface
-# @ 0x5c33e6..0x5c34ea; Water_ShaderOpaque @ 0x28ee8c8]) and the retirement of
+# underwater -> the OPAQUE one [orig: selection in Render_WaterSurface
+# @ 0x5c33e6..0x5c34ea; g_WaterShaderOpaque @ 0x28ee8c8]) and the retirement of
 # the invented terrain-fog-curve uniforms (the water fog is the per-row
 # spec-alpha factor). ADR 0018 discipline: everything pins through PUBLIC
 # seams only — exported/public properties and shader parameters.
@@ -84,7 +84,7 @@ func test_water_pass_follows_the_visible_terrain_height_range() -> void:
 	# Retail runs the reflection prerender, the noise pair and the strip only
 	# while the lowest visible terrain sits at or below the water height, or
 	# the Blink walk saw the water last frame [orig:
-	# terrain_setup_view_and_lighting @ 0x60fe40 @ 0x60ff12..0x60ff33].
+	# Terrain_SetupViewAndLighting @ 0x60fe40 @ 0x60ff12..0x60ff33].
 	var fixture := _make_water_fixture(4.0)
 	var water: Node = fixture["water"]
 	assert_true(water.is_water_pass_active(),
@@ -143,12 +143,13 @@ func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:
 	water.terrain_data = terrain
 	assert_eq(water.water_height, 6.0, "ENV is the final fallback")
 
-func test_reflection_rtt_covers_the_main_field_at_512_rows() -> void:
+func test_reflection_rtt_is_the_512_square_at_the_main_field() -> void:
 	# Retail's 512 x 512 RTT renders with the main view's projection (the
-	# target's h/w as the vertical scale, retail render_main_scene
-	# @ 0x5c1255..0x5c163e): 512 rows across the main vertical field. Godot
-	# renders square pixels, so the mirror keeps the source projection over a
-	# round(512 x aspect) x 512 target.
+	# target's h/w as the vertical scale over the square viewport, retail
+	# Render_MainScene @ 0x5c1255..0x5c163e): the main field over the square,
+	# non-square texels. The raster is served that frustum
+	# (TargetProjectionXrInterface); the mirror camera node keeps the source's
+	# frame, so its own projection is the source camera's.
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
 	var strip_vp: SubViewport = fixture["viewport"]
@@ -156,24 +157,31 @@ func test_reflection_rtt_covers_the_main_field_at_512_rows() -> void:
 
 	cam.fov = 60.0
 	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().size, Vector2i(874, 512),
-			"512 rows, round(512 x 1024 / 600) columns")
+	var mirror_vp: SubViewport = water.get_reflection_viewport()
+	assert_eq(mirror_vp.size, Vector2i(512, 512), "retail's 512 square")
+	assert_true(mirror_vp.use_xr, "the square is served the main view's frustum")
+	assert_eq(mirror_vp.size_2d_override, Vector2i(1024, 600),
+			"the mirror camera's frame is the source's")
+	var served := TargetProjectionXrInterface.served_projection(mirror_vp)
+	assert_almost_eq(served.y.y / served.x.x, 1024.0 / 600.0, 0.0001,
+			"the source's aspect over the square")
 	assert_almost_eq(water.get_reflection_camera().fov, 60.0, 0.001,
 			"the mirror takes the source's own field")
 	assert_eq(water.get_reflection_camera().keep_aspect, cam.keep_aspect)
-	_assert_reflection_projection_registered(
-			water, cam, strip_vp, Vector3(100.3, 12.0, -133.7))
+	_assert_reflection_projection_registered(water, cam, Vector3(100.3, 12.0, -133.7))
 
 	strip_vp.size = Vector2i(1600, 900)
 	cam.keep_aspect = Camera3D.KEEP_WIDTH
 	cam.fov = 72.0
 	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().size, Vector2i(910, 512),
-			"a display resize keeps the 512 rows at the new aspect")
+	assert_eq(mirror_vp.size, Vector2i(512, 512), "a display resize keeps the square")
+	assert_eq(mirror_vp.size_2d_override, Vector2i(1600, 900))
+	served = TargetProjectionXrInterface.served_projection(mirror_vp)
+	assert_almost_eq(served.y.y / served.x.x, 1600.0 / 900.0, 0.0001,
+			"at the new aspect")
 	assert_almost_eq(water.get_reflection_camera().fov, 72.0, 0.001)
 	assert_eq(water.get_reflection_camera().keep_aspect, Camera3D.KEEP_WIDTH)
-	_assert_reflection_projection_registered(
-			water, cam, strip_vp, Vector3(100.3, 12.0, -133.7))
+	_assert_reflection_projection_registered(water, cam, Vector3(100.3, 12.0, -133.7))
 
 
 func test_releasing_the_renderer_takes_its_water_split_with_it() -> void:
@@ -289,8 +297,7 @@ func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
 	assert_almost_eq(water.get_reflection_camera().h_offset, 2.5, 0.000001)
 	assert_almost_eq(water.get_reflection_camera().v_offset, 1.25, 0.000001,
 			"the mirror-up basis requires the vertical camera offset to flip")
-	_assert_reflection_projection_registered(
-			water, cam, fixture["viewport"], Vector3(100.3, 12.0, -133.7))
+	_assert_reflection_projection_registered(water, cam, Vector3(100.3, 12.0, -133.7))
 
 	cam.set_frustum(45.0, Vector2(3.0, -4.0), 0.5, 800.0)
 	water.advance_frame(TICK)
@@ -304,8 +311,7 @@ func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
 	assert_almost_eq(water.get_reflection_camera().far, 800.0, 0.000001)
 	assert_almost_eq(water.get_reflection_camera().h_offset, 2.5, 0.000001)
 	assert_almost_eq(water.get_reflection_camera().v_offset, 1.25, 0.000001)
-	_assert_reflection_projection_registered(
-			water, cam, fixture["viewport"], Vector3(100.3, 12.0, -133.7))
+	_assert_reflection_projection_registered(water, cam, Vector3(100.3, 12.0, -133.7))
 
 	cam.keep_aspect = Camera3D.KEEP_WIDTH
 	cam.set_frustum(30.0, Vector2(-2.0, 1.5), 0.75, 900.0)
@@ -313,8 +319,7 @@ func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
 	assert_almost_eq(water.get_reflection_camera().size, 30.0, 0.0001)
 	assert_eq(water.get_reflection_camera().keep_aspect, Camera3D.KEEP_WIDTH)
 	assert_eq(water.get_reflection_camera().frustum_offset, Vector2(-2.0, -1.5))
-	_assert_reflection_projection_registered(
-			water, cam, fixture["viewport"], Vector3(100.3, 12.0, -133.7))
+	_assert_reflection_projection_registered(water, cam, Vector3(100.3, 12.0, -133.7))
 
 
 func test_collapsed_source_viewport_never_builds_an_invalid_mirror_projection() -> void:
@@ -327,8 +332,11 @@ func test_collapsed_source_viewport_never_builds_an_invalid_mirror_projection() 
 	# range, even though the source camera itself remains ordinary.
 	strip_vp.size = Vector2i(1024, 2)
 	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().size, Vector2i(16384, 32),
-			"a drawable extreme aspect keeps its ratio inside the device width")
+	var mirror_vp: SubViewport = water.get_reflection_viewport()
+	assert_eq(mirror_vp.size, Vector2i(512, 512), "the raster stays retail's square")
+	var served := TargetProjectionXrInterface.served_projection(mirror_vp)
+	assert_true(is_finite(served.x.x) and served.x.x > 0.0 and is_finite(served.y.y),
+			"a drawable extreme aspect still serves a finite projection")
 	assert_almost_eq(water.get_reflection_camera().fov,
 			(fixture["camera"] as Camera3D).fov, 0.001)
 
@@ -374,45 +382,70 @@ func test_reflection_lookup_stays_registered_while_view_rotates() -> void:
 	var real_world_point := Vector3(100.3, 12.0, -133.7)
 
 	water.advance_frame(TICK)
-	_assert_reflection_projection_registered(
-			water, cam, strip_vp, real_world_point)
+	_assert_reflection_projection_registered(water, cam, real_world_point)
 
 	cam.rotation_degrees = Vector3(-12.0, 20.0, 0.0)
 	water.advance_frame(TICK)
-	_assert_reflection_projection_registered(
-			water, cam, strip_vp, real_world_point)
+	_assert_reflection_projection_registered(water, cam, real_world_point)
 
 
+# A world point through a view transform and projection, as a (0..1) texture
+# coordinate of the raster that projection draws.
+func _project_uv(eye: Transform3D, projection: Projection, point: Vector3) -> Vector2:
+	var view := eye.affine_inverse() * point
+	var clip := projection * Vector4(view.x, view.y, view.z, 1.0)
+	return Vector2(clip.x / clip.w * 0.5 + 0.5, -clip.y / clip.w * 0.5 + 0.5)
+
+
+# The mirror RTT's raster as drawn: the transform and projection served to
+# its 512 square.
+func _mirror_uv(water: Node, point: Vector3) -> Vector2:
+	var mirror_vp: SubViewport = water.get_reflection_viewport()
+	return _project_uv(TargetProjectionXrInterface.served_transform(mirror_vp),
+			TargetProjectionXrInterface.served_projection(mirror_vp), point)
+
+
+# `source_projection` is the projection the source view draws with (the
+# camera's own when null).
 func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
-		source_viewport: SubViewport, world_point: Vector3) -> void:
-	# A planar reflection projects a real point through the mirror camera at
-	# the same location where the main camera sees its virtual point below the
-	# water plane. Compare those two PUBLIC camera projections; this catches
-	# view-dependent swimming without requiring a raster readback.
+		world_point: Vector3, source_projection: Variant = null) -> void:
+	# A planar reflection projects a real point through the mirror's raster at
+	# the same location where the main view sees its virtual point below the
+	# water plane. Compare the source projection with the one the mirror RTT
+	# is served; this catches view-dependent swimming without requiring a
+	# raster readback.
 	var virtual_point := world_point
 	virtual_point.y = 2.0 * water.water_height - world_point.y
 	assert_false(cam.is_position_behind(virtual_point),
 			"the virtual reflection point must be in front of the source camera")
 	assert_false(water.get_reflection_camera().is_position_behind(world_point),
 			"the real point must be in front of the mirror camera")
-	var source_size := Vector2(float(source_viewport.size.x),
-			float(source_viewport.size.y))
-	var mirror_size := Vector2(float(water.get_reflection_viewport().size.x),
-			float(water.get_reflection_viewport().size.y))
-	var main_uv := cam.unproject_position(virtual_point) / source_size
+	var mirror_vp: SubViewport = water.get_reflection_viewport()
+	assert_true(TargetProjectionXrInterface.is_serving(mirror_vp),
+			"the mirror RTT is served its frustum")
+	var projection: Projection = source_projection if source_projection != null \
+			else cam.get_camera_projection()
+	var main_uv := _project_uv(cam.get_camera_transform(), projection, virtual_point)
 	var sampled_uv := Vector2(main_uv.x, 1.0 - main_uv.y)
-	var mirror_uv: Vector2 = (
-			water.get_reflection_camera().unproject_position(world_point) / mirror_size)
-	var one_rtt_texel := 1.0 / float(water.get_reflection_viewport().size.x)
+	var mirror_uv := _mirror_uv(water, world_point)
+	var one_rtt_texel := 1.0 / float(TargetProjectionXrInterface.TARGET_SIDE)
 	assert_almost_eq(sampled_uv.x, mirror_uv.x, one_rtt_texel,
 			"reflection U stays registered to the mirrored world point")
 	assert_almost_eq(sampled_uv.y, mirror_uv.y, one_rtt_texel,
 			"reflection V stays registered to the mirrored world point")
+	# The mirror camera node projects through the source's frame, so its own
+	# projection meets the served raster.
+	var node_uv: Vector2 = (water.get_reflection_camera().unproject_position(world_point)
+			/ mirror_vp.get_visible_rect().size)
+	assert_almost_eq(node_uv.x, mirror_uv.x, one_rtt_texel,
+			"the mirror camera node's U meets the served raster")
+	assert_almost_eq(node_uv.y, mirror_uv.y, one_rtt_texel,
+			"the mirror camera node's V meets the served raster")
 
 	# Exercise the exact strip payload consumed by the shader too. Sample each
 	# row's LEFT vertex because vbase is built from that vertex's rhw and then
 	# copied across the row. vbase = 1 - min(300 * rhw + 0.15, 2) / 256
-	# (flt_7DBF68 = 300.0, retail render_water_strip_detailed @ 0x5c2f04).
+	# (flt_7DBF68 = 300.0, retail Render_WaterStripDetailed @ 0x5c2f04).
 	var mesh := water.get_mesh_instance().mesh as ArrayMesh
 	assert_gt(mesh.get_surface_count(), 0,
 			"the reflected projection fixture must produce water strip rows")
@@ -432,9 +465,7 @@ func _assert_reflection_projection_registered(water: Node, cam: Camera3D,
 		var q := minf(300.0 * custom0[base + 1] + 0.15, 2.0)
 		var vbase_bias := q / 256.0
 		var sampled_strip_uv := Vector2(custom0[base + 2], custom0[base + 3])
-		var mirror_strip_uv: Vector2 = (
-				water.get_reflection_camera().unproject_position(positions[vertex_index])
-				/ mirror_size)
+		var mirror_strip_uv := _mirror_uv(water, positions[vertex_index])
 		assert_almost_eq(sampled_strip_uv.x, mirror_strip_uv.x, one_rtt_texel,
 				"strip reflection U stays registered to its mirrored water point")
 		assert_almost_eq(sampled_strip_uv.y,
@@ -468,7 +499,7 @@ func test_underwater_swaps_to_opaque_side() -> void:
 	water.set_mission_water_height_override(7.0)
 	water.advance_frame(TICK)
 	# Drop the camera below the 7.0 plane: the pass swaps to the OPAQUE
-	# material [orig: Water_ShaderOpaque @ 0x28ee8c8; selection
+	# material [orig: g_WaterShaderOpaque @ 0x28ee8c8; selection
 	# @ 0x5c33e6..0x5c34ea].
 	cam.global_position = Vector3(100.3, 1.0, -33.7)
 	env.set_underwater_view(true)
@@ -478,6 +509,58 @@ func test_underwater_swaps_to_opaque_side() -> void:
 	assert_true(Vector3(water.get_water_material().get_shader_parameter("u_fog_color"))
 			.is_equal_approx(env.get_scene_fog_color()),
 			"the underwater surface strip fogs toward the selected lit-water color")
+
+
+func test_mirror_clears_to_the_skyfog_or_black_under_the_indoors_letter() -> void:
+	# The mirror RTT has its own clear: the skyfog on the prerender's outdoors
+	# path, black under the indoors blink letter, and no thermal, waterline or
+	# NVG leg (EnvironmentState::water_mirror_clear_color; retail
+	# Render_MainScene @ 0x5c1342..0x5c1353, @ 0x5c1474, @ 0x5c1597). The
+	# mirror camera carries it in its own BG_COLOR environment, pre-encoded
+	# like the beauty clear, whatever the beauty clear shows.
+	var fixture := _make_water_fixture()
+	var water: Water = fixture["water"]
+	var cam: Camera3D = fixture["camera"]
+	water.advance_frame(TICK)
+	assert_null(water.get_reflection_camera().environment,
+			"an envless water keeps the World's clear")
+	var env_data := EnvFile.new()
+	env_data.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	assert_eq(env_data.load(), OK)
+	var env := MissionEnvironment.new()
+	env.name = "MirrorClearEnv"
+	env.environment_data = env_data
+	fixture["viewport"].add_child(env)
+	water.environment_path = NodePath("../MirrorClearEnv")
+	water.set_mission_water_height_override(7.0)
+	water.advance_frame(TICK)
+	var mirror_env: Environment = water.get_reflection_camera().environment
+	assert_not_null(mirror_env, "a loaded environment gives the mirror its own clear")
+	if mirror_env == null:
+		return
+	assert_eq(mirror_env.background_mode, Environment.BG_COLOR)
+	assert_eq(mirror_env.ambient_light_source, Environment.AMBIENT_SOURCE_DISABLED)
+	var skyfog: Vector3 = env.get_frame_clear_color()
+	var outdoors := Color(skyfog.x, skyfog.y, skyfog.z).linear_to_srgb()
+	assert_true(mirror_env.background_color.is_equal_approx(outdoors),
+			"outdoors the mirror clears to the skyfog")
+
+	# The eye below the water (the beauty clear turns to the lit water) and
+	# the thermal view (the beauty clear's 0x808080) leave the mirror's alone.
+	cam.global_position = Vector3(100.3, 1.0, -33.7)
+	env.set_underwater_view(true)
+	env.set_thermal_view(true, true)
+	water.advance_frame(TICK)
+	assert_true(mirror_env.background_color.is_equal_approx(outdoors),
+			"no waterline or thermal leg reaches the mirror clear")
+	env.set_thermal_view(false, false)
+
+	water.set_mirror_scene_outdoors(false)
+	assert_false(water.is_mirror_scene_outdoors())
+	assert_true(mirror_env.background_color.is_equal_approx(Color.BLACK),
+			"the indoors letter clears the mirror to black")
+	water.set_mirror_scene_outdoors(true)
+	assert_true(mirror_env.background_color.is_equal_approx(outdoors))
 
 
 func test_water_material_has_no_far_discard_uniforms() -> void:
@@ -538,12 +621,13 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 			+ "never the surface camera's culling superset")
 	var target_vp := through.get_viewport()
 	var target_size := Vector2(target_vp.get_visible_rect().size)
-	assert_eq(water.get_reflection_viewport().size,
-			Vector2i(roundi(512.0 * target_size.x / target_size.y), 512),
-			"the mirror target takes the TARGET's ratio (the selected mode)")
-	assert_almost_eq(float(water.get_reflection_viewport().size.x), 512.0 / selected,
-			maxf(2.0, 0.01 * 512.0 / selected),
-			"whole-pixel targets round the selected ratio")
+	var mirror_vp: SubViewport = water.get_reflection_viewport()
+	var served := TargetProjectionXrInterface.served_projection(mirror_vp)
+	assert_eq(mirror_vp.size, Vector2i(512, 512), "the mirror raster is retail's square")
+	assert_almost_eq(served.y.y / served.x.x, target_size.x / target_size.y, 0.0001,
+			"the mirror frustum takes the TARGET's ratio (the selected mode)")
+	assert_almost_eq(served.y.y / served.x.x, 1.0 / selected,
+			maxf(0.01, 2.0 / target_size.y), "whole-pixel targets round the selected ratio")
 
 	# Back to the surface's own ratio: the target goes away and the surface
 	# camera draws the water again.
@@ -554,20 +638,76 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 	assert_null(presenter.projection_viewport(), "a native mode releases the target")
 	water.set_visible_terrain_bounds(false, 0.0, 0.0)
 	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().size,
-			Vector2i(roundi(512.0 / surface_ratio), 512),
-			"a native mode sizes the mirror to the surface's own ratio again")
+	served = TargetProjectionXrInterface.served_projection(mirror_vp)
+	assert_eq(mirror_vp.size, Vector2i(512, 512))
+	assert_almost_eq(served.y.y / served.x.x, 1.0 / surface_ratio, 0.0001,
+			"a native mode serves the mirror the surface's own ratio again")
+	presenter.teardown()
+
+
+func test_strip_and_mirror_register_to_the_nvg_raster() -> void:
+	# While the NVG composite is up the world draws into the NVG raster: the
+	# 512 square at the frame's frustum (LocalPlayerPresenter.view_projection,
+	# served through TargetProjectionXrInterface). The strip marches over that
+	# square under that projection, and the mirror takes the same frustum over
+	# its own square (retail NVG_RenderScene @ 0x5d2954..0x5d296d; the mirror,
+	# Render_MainScene @ 0x5c1619..0x5c163e).
+	var world := WorldFixture.boot_minimal(self)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	camera.current = true
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no NVG raster can be live")
+		return
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, ControlsModel.new())
+	var sim := world.get_sim()
+	sim.set_local_player_aspect_mode(-1)
+	assert_true(sim.request_local_player_nvg_toggle())
+	for i in 2:
+		var frame_input := presenter.before_world_tick(TICK, false, true)
+		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+		presenter.after_world_tick()
+	var target: SubViewport = presenter.projection_viewport()
+	assert_true(presenter.is_nvg_raster_active(), "the NVG composite takes the world pass")
+	if target == null:
+		presenter.teardown()
+		return
+	var water: Water = world.get_water_node()
+	water.set_mission_water_height_override(7.0)
+	water.set_visible_terrain_bounds(false, 0.0, 0.0)
+	water.advance_frame(TICK)
+	var frame_projection: Projection = presenter.view_projection()
+	var mirror_vp: SubViewport = water.get_reflection_viewport()
+	var served := TargetProjectionXrInterface.served_projection(mirror_vp)
+	assert_eq(target.size, Vector2i(512, 512), "the NVG raster is retail's square")
+	assert_true(target.use_xr and TargetProjectionXrInterface.is_serving(target),
+			"served the frame's frustum")
+	assert_eq(frame_projection, TargetProjectionXrInterface.served_projection(target),
+			"the presenter's frame projection is the served one")
+	var half_h := tan(deg_to_rad(40.0))
+	assert_almost_eq(frame_projection.x.x, 1.0 / half_h, 0.0001, "cot(fov_h/2) across the columns")
+	assert_almost_eq(frame_projection.y.y, (size.x / size.y) / half_h, 0.0001,
+			"the frame's vertical half-extent across the rows")
+	assert_eq(mirror_vp.size, Vector2i(512, 512))
+	assert_almost_eq(served.y.y / served.x.x, size.x / size.y, 0.0001,
+			"the mirror takes the frame frustum's aspect, not the NVG square's")
+	assert_almost_eq(served.x.x, frame_projection.x.x, 0.0001,
+			"the mirror frustum is the frame's")
+	assert_almost_eq(served.y.y, frame_projection.y.y, 0.0001)
 	presenter.teardown()
 
 
 func test_strip_texcoords_are_the_render_basis_world_over_32() -> void:
 	# Retail's texcoord 0 (duplicated into texcoord 3) is the unprojected
 	# ABSOLUTE render-basis world x/32, z/32 of each strip vertex (retail
-	# render_water_strip_detailed @ 0x5c2aec..0x5c2b00, flt_7DBFAC = 1/32). The
+	# Render_WaterStripDetailed @ 0x5c2aec..0x5c2b00, flt_7DBFAC = 1/32). The
 	# render basis is the util/axes.h x/z swap of the Godot world, so every
 	# vertex carries TEX_UV = (godot z, godot x) / 32, and no scale, bias,
 	# offset or cloud scroll reaches the texcoords (the scroll "offsets"
-	# render_water_surface stores @ 0x5c33b9 / @ 0x5c33db are never read).
+	# Render_WaterSurface stores @ 0x5c33b9 / @ 0x5c33db are never read).
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
 	water.advance_frame(TICK)
@@ -658,10 +798,10 @@ func _strip_arrays(instance: MeshInstance3D) -> Array:
 
 
 func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() -> void:
-	# The FrameFX bloom pass redraws the strip as render_water_surface(0, 1)
+	# The FrameFX bloom pass redraws the strip as Render_WaterSurface(0, 1)
 	# (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d): the above-water
 	# march with the nightvision row colors — the flat 0.1 base and no
-	# specular RGB (retail render_water_strip_detailed @ 0x5c2d5a / @ 0x5c2ef8)
+	# specular RGB (retail Render_WaterStripDetailed @ 0x5c2d5a / @ 0x5c2ef8)
 	# — on the same geometry as the beauty strip.
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
@@ -696,7 +836,7 @@ func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() ->
 	assert_true(any_beauty_specular, "the beauty rows do carry specular RGB")
 
 	# Underwater the bloom pass's view-0 call has no side (retail
-	# render_water_surface @ 0x5c3304): no redraw, while the beauty strip
+	# Render_WaterSurface @ 0x5c3304): no redraw, while the beauty strip
 	# swaps to the underwater side.
 	cam.global_position = Vector3(100.3, 1.0, -33.7)
 	water.advance_frame(TICK)
@@ -706,7 +846,7 @@ func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() ->
 
 
 func test_eye_exactly_on_the_plane_draws_neither_water_side() -> void:
-	# render_water_surface's gates are strict on both sides: the view-0 call
+	# Render_WaterSurface's gates are strict on both sides: the view-0 call
 	# skips cam.z <= wh (jle @ 0x5c330a) and the underwater call cam.z >= wh
 	# (jge @ 0x5c32fc), so an eye exactly on the plane draws no surface.
 	var fixture := _make_water_fixture()
@@ -734,9 +874,9 @@ func test_night_vision_redraw_is_not_gated_on_the_visible_terrain() -> void:
 
 
 func test_reflected_scene_mirrors_above_the_plane_and_keeps_the_live_eye_below() -> void:
-	# render_main_scene mirrors the camera block only while the camera is at or
+	# Render_MainScene mirrors the camera block only while the camera is at or
 	# above the water (z' = 2wh - z, pitch/roll negated) and copies it
-	# unchanged below (retail render_main_scene @ 0x5c1361..0x5c1370 jl,
+	# unchanged below (retail Render_MainScene @ 0x5c1361..0x5c1370 jl,
 	# @ 0x5c13f6..0x5c1414). Below the plane the collectors run unfiltered.
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
@@ -757,7 +897,7 @@ func test_reflected_scene_mirrors_above_the_plane_and_keeps_the_live_eye_below()
 	assert_true(mirror.global_basis.is_equal_approx(cam.global_basis),
 			"below the plane the reflected scene keeps the live orientation")
 	assert_eq(mirror.cull_mask,
-			Water.REFLECTION_CULL_MASK | Water.VISUAL_LAYER_WORLD_NO_MIRROR,
+			Water.REFLECTION_CULL_MASK | Water.VISUAL_LAYER_WORLD_NO_MIRROR | (1 << 22),
 			"below the plane the reflected collectors run unfiltered")
 	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_WATER, 0,
 			"the reflected pass never draws the water layer on either side")
@@ -812,7 +952,7 @@ func _render_water_frame(fixture: Dictionary, fog_color: Vector3,
 
 func test_water_beyond_the_far_plane_reaches_the_horizon() -> void:
 	# The pre-transformed strip is never far-clipped: rows past the scene far
-	# plane clamp to the viewport MaxZ (retail render_water_strip_detailed
+	# plane clamp to the viewport MaxZ (retail Render_WaterStripDetailed
 	# @ 0x5c2c1f..0x5c2c4a) and draw fully fogged water up to the horizon.
 	var fixture := _depth_fixture(Vector3(0.0, 107.0, 0.0), -5.0)
 	var image: Image = await _render_water_frame(fixture, Vector3(0.0, 1.0, 0.0))
@@ -823,7 +963,7 @@ func test_water_beyond_the_far_plane_reaches_the_horizon() -> void:
 		return
 	var cam: Camera3D = fixture["camera"]
 	# The strip's first row is the plane point 2000 units ahead
-	# (terrain_project_sector_to_screen @ 0x5c0c7c..0x5c0d25); 1500 units out
+	# (Terrain_ProjectSectorToScreen @ 0x5c0c7c..0x5c0d25); 1500 units out
 	# lies between the 1001 far plane and that row.
 	var far_px := cam.unproject_position(Vector3(0.0, 7.0, -1500.0))
 	var far_pixel := image.get_pixelv(Vector2i(far_px))

@@ -32,7 +32,7 @@ int32_t screen_to_design_y(int32_t y, int32_t surface_h) {
 
 BorderedQuadUv bordered_quad_uv(int tex_w, int tex_h, double left, double top, double right,
 		double bottom) {
-	// [orig: draw_textured_quad_with_border @0x590D2F..0x590D8C] The x87 walk
+	// [orig: HUD_DrawTexturedQuadWithBorder @0x590D2F..0x590D8C] The x87 walk
 	// keeps u0 / v0 unrounded for the far-edge sums and stores each as float.
 	BorderedQuadUv uv;
 	if (tex_w == 0 || tex_h == 0 || right == left || bottom == top) return uv;
@@ -46,7 +46,7 @@ BorderedQuadUv bordered_quad_uv(int tex_w, int tex_h, double left, double top, d
 	return uv;
 }
 
-// [orig: draw_hud_ammo_indicator @0x599af9; draw-stance @0x599fc0] Exact
+// [orig: HUD_DrawAmmoIndicator @0x599af9; draw-stance @0x599fc0] Exact
 // integer translation, including the elapsed-0 u16 underflow quirk (elapsed 0
 // reads fully decayed — one 62 Hz tick of latency).
 int fade_decay(int elapsed_ticks, int ramp_ticks) {
@@ -114,7 +114,7 @@ uint32_t half_bright_keep_alpha(uint32_t argb) {
 	return (argb & 0xFF000000u) + ((argb >> 1) & 0x7F7F7Fu);
 }
 
-// [orig: hud_draw_weapon_ammo_and_name @0x593a33..0x593ab0]
+// [orig: HUD_DrawWeaponAmmoAndName @0x593a33..0x593ab0]
 std::string format_ammo(int clip, int reserve, int capacity) {
 	if (reserve == -1 || capacity == -1) return std::string();
 	if (clip != -1 && capacity >= 2) {
@@ -132,7 +132,7 @@ int weapon_name_x_nudge(bool narrow_surface, int align) {
 	return 0;
 }
 
-// [orig: draw_hud_ammo_indicator @0x599b9c..0x599bc1]
+// [orig: HUD_DrawAmmoIndicator @0x599b9c..0x599bc1]
 int round_icon_count(int clip, int reserve, int capacity, int divisor) {
 	int n = capacity == 1 ? reserve : clip;
 	if (divisor > 1) n = (n + 1) / divisor;
@@ -267,7 +267,7 @@ uint32_t friendly_tag_revive_pulse(uint32_t argb, int frame_counter) {
 	return out;
 }
 
-// [orig: g_fallbackPeopleNames @0x840a78 — the 36 compiled-in name strings,
+// [orig: g_FallbackPeopleNames @0x840a78 — the 36 compiled-in name strings,
 // verbatim including the double-space rank padding; count @0x840a0c]
 static const char *const kFallbackPeopleNames[] = {
 	"PFC  Mitchell", "PVT  Neibauer", "PFC  Daly", "SPC  Berg",
@@ -296,7 +296,7 @@ std::string friendly_tag_fallback_name(uint16_t encoded_entity_id) {
 // the 16.16 truncation]
 HudLabelFontChoice hud_label_font_choice(int surface_w) {
 	// The large slot is one file at the over-800 divisor for every width
-	// [orig: g_hudLabelFontLarge = Impac22b.fnt "over 800" @0x51ee20].
+	// [orig: g_HUDLabelFontLarge = Impac22b.fnt "over 800" @0x51ee20].
 	const float large_scale = static_cast<float>(surface_w) / 800.0f;
 	if (surface_w > 800) {
 		return {"Arial16n.fnt", "Arial16b.fnt", "Impac22b.fnt", "Impac38b.fnt",

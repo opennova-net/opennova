@@ -27,7 +27,7 @@ struct HostLobbyText {
 	std::string no;                           // "NovaWorld"/"STRNOVA12"
 	std::string no_time_limit;                // "NovaWorld"/"STRNOVA10"
 	std::array<std::string, 3> region{};      // "NovaWorld"/"STRNOVA07".."STRNOVA09"
-	// Index = Env_TimeOfDayEnum: 0 UNKNOWN, 1 DAWN, 2 DAY, 3 DUSK, 4 NIGHT.
+	// Index = g_EnvTimeOfDayEnum: 0 UNKNOWN, 1 DAWN, 2 DAY, 3 DUSK, 4 NIGHT.
 	std::array<std::string, 5> time_of_day{"Unknown", "Dawn", "Day", "Dusk", "Night"};
 };
 
@@ -47,32 +47,39 @@ struct HostRegistration {
 	int lan_only = 0;                         // LAN (hostLanOnly_340)
 	// --- Host extras [orig: Lobby_UpdateServerInfo @0x4fe8c0] ---
 	std::string host_key;                     // HostKey (byte_C867B0, the NWHost relay HOSTKEY)
-	std::string game_type;                    // GameType (get_game_type_abbreviation(g_GameType, 1))
+	std::string game_type;                    // GameType (GameType_GetAbbreviation(g_GameType, 1))
 	std::string mission_name;                 // MissionName (the mission "info"/"title", else the file)
 	int region_index = 0;                     // Region: lod_level 0/1/2 -> STRNOVA07/08/09, else "?"
 	int player_count = 1;                     // Players (active slots; the host itself is one)
 	int mi1 = 0, mi2 = 0, mi3 = 0;            // MI1..MI3 (dword_82BEEC..F4)
-	bool locked = false;                      // Locked (g_server_join_locked)
+	bool locked = false;                      // Locked (g_ServerJoinLocked)
 	bool skins = false;                       // Skins (dword_24D218C)
-	int round_time_remaining_ticks = -1;      // TimeLeft: ticks / 3720 (minutes); < 0 -> STRNOVA10
-	bool tracers = true;                      // Tracers: (g_rules_flags & 1) == 0
+	// TimeLeft: the LIVE round clock, re-read at every refresh, / 3720 (whole
+	// minutes); < 0 -> STRNOVA10. The embedder feeds world::Match's clock.
+	// [orig: Lobby_UpdateServerInfo `mov ecx, g_RoundTimeRemaining` @0x4FED57]
+	int round_time_remaining_ticks = -1;
+	bool tracers = true;                      // Tracers: (g_RulesFlags & 1) == 0
 	std::string country = "XX";               // Country (str1; "XX" while locked; "XX"/empty -> " ")
-	bool allow_ping = false;                  // AllowPing 'y'/'n' (dword_24D2184)
+	// AllowPing 'y'/'n': game.cfg `ping`, default 1, copied to g_NWAllowPing.
+	// OpenNova has no game.cfg surface, so the stock default holds.
+	// [orig: Config_SetDefaults @0x54D324 (ping = 1); Game_ApplySessionSettingsToGlobals
+	//  @0x551D4F -> g_NWAllowPing; Lobby_UpdateServerInfo read @0x4FEF72]
+	bool allow_ping = true;
 	uint32_t uptime_ms = 0;                   // Age: GetTickCount() - dword_C8FC74
-	int time_of_day = 0;                      // TimeOfDay (Env_TimeOfDayEnum 0..4)
+	int time_of_day = 0;                      // TimeOfDay (g_EnvTimeOfDayEnum 0..4)
 	uint32_t pcid_key = 0;                    // PCIDKey (the SessionIdRing's current key)
 	uint32_t game_server_baffle_key = 0;      // GameServerBaffleKey (dword_C8FC70)
 	int bb_mode = 0;                          // BBMode (dword_24D21A4)
 	std::string gcc;                          // GCC (byte_C87044)
 	std::string version;                      // GV and Version (byte_B4C0B0)
-	bool dedicated_server = false;            // g_is_dedicated_server: the CountryName/Lang/TZB block
+	bool dedicated_server = false;            // g_IsDedicatedServer: the CountryName/Lang/TZB block
 	std::string country_name;                 // CountryName (GetLocaleInfoA LOCALE_SENGCOUNTRY)
 	std::string language;                     // Lang (LOCALE_SENGLANGUAGE)
 	int tz_bias = 0;                          // TZB (TIME_ZONE_INFORMATION.Bias)
 	bool pb_server = false;                   // PBServer "1"/"0" (game_settings.reserved_D4)
-	// game.cfg `sendplayerlist` (default 1) -> dword_24D2188: the POST status blob
+	// game.cfg `sendplayerlist` (default 1) -> g_NWSendPlayerList: the POST status blob
 	// carries the " p=<name>" suffix at all. [orig: the config apply @0x54e2c4 region
-	//  (dword_24D2188 = g_GameConfigState+0x4BC); Lobby_UpdateServerInfo @0x4ff560]
+	//  (g_NWSendPlayerList = g_GameConfigState+0x4BC); Lobby_UpdateServerInfo @0x4ff560]
 	bool send_player_list = true;
 };
 
@@ -144,7 +151,7 @@ std::string az_fingerprint(uint32_t seed, int len);
 // discovery (GetVolumeInformation/GetAdaptersInfo in the original) stays in
 // the binding; these byte transforms are portable and testable.
 // [orig: CDKey_GenerateHardwareFingerprint @ 0x4a4a00 /
-// generate_hardware_fingerprint @ 0x4a4d00]
+// CDKey_GenerateHardwareFingerprint_0 @ 0x4a4d00]
 struct RetailMachineInputs {
 	uint32_t volume_serial = 0;
 	uint32_t maximum_component_length = 0;
@@ -182,7 +189,7 @@ struct LobbyIdentityParams {
 // token encoders always emit exactly these many [A-Z] characters, and any
 // fallback generator must match or the verify Cookie is malformed.
 // [orig: CDKey_GenerateHardwareFingerprint @ 0x4a4a00 /
-// generate_hardware_fingerprint @ 0x4a4d00 output widths]
+// CDKey_GenerateHardwareFingerprint_0 @ 0x4a4d00 output widths]
 inline constexpr int kNwpsskLen = 23;
 inline constexpr int kNwusidLen = 16;
 

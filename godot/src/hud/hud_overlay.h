@@ -201,6 +201,11 @@ public:
 	// seat or the player's own S2C 0x6D latch); the compiler ANDs it with
 	// each tag's own fold before drawing the icon cell.
 	void set_radio_request_icon_viewer(bool p_viewer);
+	// The breath bar (the compiler's element_breath_bar): this frame's samples,
+	// breath seconds and round-over latch from the sim's role view
+	// (Simulation::breath_bar_facts) plus the Overlays/STROVER91 label; no sim
+	// leaves the bar empty.
+	void set_breath_bar(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
 	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
 	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
 	enum FriendlyTagMode {
@@ -209,7 +214,7 @@ public:
 		FRIENDLY_TAGS_FULL = static_cast<int>(opennova::hud::FriendlyTagMode::kFull),
 		FRIENDLY_TAGS_BRIEF = static_cast<int>(opennova::hud::FriendlyTagMode::kBrief),
 	};
-	// The friendly-tags mode (retail g_friendlyTagsMode; the witnessed rules
+	// The friendly-tags mode (retail g_FriendlyTagsMode; the witnessed rules
 	// live in hud_math). Out-of-range values clamp to the last mode.
 	void set_friendly_tag_mode(FriendlyTagMode p_mode);
 	FriendlyTagMode get_friendly_tag_mode() const;

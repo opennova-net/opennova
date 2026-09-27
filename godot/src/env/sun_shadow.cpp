@@ -79,7 +79,7 @@ void SunShadow::_update_direction() {
 	// entity shadow projection additionally clamps the vertical component to
 	// 0.25 before negating into the slot's light->surface direction, so a
 	// grazing sun never stretches an entity silhouette past 4x height
-	// [orig: render_shadow_pass @0x5d7b70 — GetLightDirectionFloat into
+	// [orig: Render_ShadowPass @0x5d7b70 — GetLightDirectionFloat into
 	// RenderSlot_DefaultLightDir*, `if (y < 0.25) y = 0.25`, then negate all
 	// three; opennova::renderer::slot_projection_direction is the one owner of that
 	// law — see docs/render/render-lighting-re.md]. A DirectionalLight3D

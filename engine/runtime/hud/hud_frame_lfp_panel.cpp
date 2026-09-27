@@ -71,14 +71,14 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	const uint32_t viewer_color = lfp_team_color(lp.local_team);
 	const uint32_t opposing_color = lfp_opposing_team_color(lp.local_team);
 
-	// The group cursor [orig: x = g_hudZonePanelX - 98 * count[team]
-	// @0x5a2589..0x5a259d; the markers' y = g_hudZonePanelY + 86 * group
+	// The group cursor [orig: x = g_HUDZonePanelX - 98 * count[team]
+	// @0x5a2589..0x5a259d; the markers' y = g_HUDZonePanelY + 86 * group
 	// (@0x5a249d, @0x5a2667), the status text's y = that + 12 (@0x5a25bd)].
 	int current_team = lp.zones[start].team;
 	int group = 0;
 	int index_in_group = 0;
-	int status_kind = 0;          // [orig: g_hudZoneStatusKind, 0 at group start]
-	uint32_t status_color = 0;    // [orig: g_hudZoneStatusColor]
+	int status_kind = 0;          // [orig: g_HUDZoneStatusKind, 0 at group start]
+	uint32_t status_color = 0;    // [orig: g_HUDZoneStatusColor]
 	char text[32];
 
 	const auto flush_status = [&]() {
@@ -141,7 +141,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 			}
 		}
 		// 2. The 36x36 tile behind the letter, half-bright point colour, own
-		// vs other texture [orig: @0x5989b9..0x5989de — draw_textured_quad_centered
+		// vs other texture [orig: @0x5989b9..0x5989de — HUD_DrawTexturedQuadCentered
 		//  (x+34, y+52, 36, 36, tex, (point>>1 & 0x7F7F7F) | 0xFF000000)].
 		{
 			const bool own = z.team == lp.local_team;

@@ -228,7 +228,7 @@ void initialize_class_brain(AiEntity &ae, const aip::Profile *profile, bool heli
 
 namespace {
 
-// Kind -> g_pool_list index: the BMS loader places each record list in its own pool.
+// Kind -> g_PoolList index: the BMS loader places each record list in its own pool.
 // [orig: Mission_LoadBMSFile @0x40F4E0 — pool 1 @0x40f9bb..0x40f9c6, pool 2
 //  @0x40fa28..0x40fa34, pool 3 @0x40fa98..0x40faa4, pool 0 @0x40fb0d..0x40fb19]
 int pool_for_kind(EntityKind k) {
@@ -281,9 +281,10 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // The retail entity Flags dword (entity+36), BMS-attribute part — the 0x10 static record
     // streams it raw (D-NET-147/150). [orig: Entity_SpawnFromBMSRecord @0x40e9f0: attrib
     // 0x200000 -> 0x4000000 (Indestructible), 0x800000 -> 0x400 (Reflective),
-    // 0x1000000 -> 0x1000000 (NoShadow)]. The item-def part (Building 0x20000 is kind-known
-    // here; hp==0 -> 0x4000000 + subType 0xFF needs the item db) completes in the embedder's
-    // item-traits sweep [orig: Entity_InitFromModel @0x40e105 / @0x40dc8e].
+    // 0x1000000 -> 0x1000000 (NoShadow)]. The item-def part (the matrix bit 0x20000 for a
+    // decoration/building/powerup def; hp==0 -> 0x4000000 + subType 0xFF) needs the def and
+    // completes in the embedder's item-traits sweep [orig: Entity_InitFromModel @0x40e105 /
+    // @0x40dc8e].
     using bms::BmsiAttributeFlags;
     const uint32_t attrib = e.bmsi_attributes;
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Indestructible)) s.engine_flags |= kEntityFlagIndestructible;
@@ -294,9 +295,11 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // Guarding / EngineRunning / FlyingOrganic entity bits sit inside the AI
     // branch (fold_ai_entity_flags).
     if (attrib & 0x2000000u) s.cause_flags |= 0x80u;
-    if (kind == EntityKind::Building) s.engine_flags |= kEntityFlagBuilding;
     s.ammo_count = e.map_symbol; // BMS byte 81 -> entity+290 [orig: @0x40e9f0]
     s.ref_num = e.ref_num;       // BMS byte 153 -> entity+533 [orig: @0x40e9f0]
+    // A record refNum joins the row to that refNum's group list [orig:
+    // Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45].
+    s.ref_group_member = e.ref_num != 0;
     // BMS byte 155 (.mis "lfp_group") -> entity+538 — the AS zone number (net-re §5.61).
     // [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
     s.zone_number = e.lfp_group;
@@ -543,93 +546,148 @@ void initialize_item_seats(Entity &entity, const std::vector<ItemSeatSpec> &spec
     }
 }
 
+namespace {
+
+// The reference registry: every refNum a spawned entity already holds. A
+// carrier without one takes the lowest free id (1..255, else 0) when its first
+// child spawns, and every child joins the carrier's group.
+// [orig: Entity_SpawnWeaponOverlays @0x40F361..0x40F389, the walk over
+//  g_EntityReferenceRegistry.occupied]
+std::array<bool, 256> reference_registry(const World &world) {
+    std::array<bool, 256> occupied{};
+    world.registry.for_each([&](const Entity &e) {
+        if (e.ref_num != 0) occupied[e.ref_num] = true;
+    });
+    return occupied;
+}
+
+// One carrier's addeweap slots: one pool-1 child per authored slot, in slot
+// order. The public metadata already normalized the authored full item id to
+// the raw type id; G/C flags and angle fallback presence remain separate.
+// Children use a non-BMS origin sentinel so the listen-server EntityPresenter
+// wire walk cannot defer them to an unrelated placed node with the same
+// (kind,index). A failed allocation ends the carrier's walk.
+// [orig: Entity_SpawnWeaponOverlays @0x40F300 — the pool allocation @0x40F393,
+//  its failure exit @0x40F39F]
+void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
+        const std::vector<ItemSeatSpec> &specs, std::array<bool, 256> &ref_occupied,
+        ItemAttachmentSpawns &result) {
+    Entity *carrier = world.registry.get(carrier_handle);
+    if (carrier == nullptr) return;
+    const ItemSeatSpec *carrier_spec = seat_spec_for_type(specs, carrier->item_id);
+    if (carrier_spec == nullptr) return;
+    for (const ItemEmplacementAttachmentSpec &attachment :
+         carrier_spec->emplacement_attachments) {
+        if (attachment.child_type_id == 0) continue;
+        if (carrier->ref_num == 0) {
+            uint8_t free_id = 0;
+            for (int id = 1; id < 256; ++id) {
+                if (ref_occupied[static_cast<size_t>(id)]) continue;
+                free_id = static_cast<uint8_t>(id);
+                ref_occupied[static_cast<size_t>(id)] = true;
+                break;
+            }
+            // The spawner only marks the id taken: the carrier itself never
+            // joins that refNum's group list [orig: @0x40F389, @0x40F4C7].
+            carrier->ref_num = free_id;
+        }
+        Entity child_seed;
+        child_seed.kind = EntityKind::Item;
+        child_seed.item_id = attachment.child_type_id;
+        child_seed.position = carrier->position;
+        child_seed.yaw = carrier->yaw;
+        child_seed.pitch = carrier->pitch;
+        child_seed.roll = carrier->roll;
+        child_seed.team = carrier->team;
+        // The child's record takes the carrier's command group and refNum;
+        // the spawn then copies the carrier's Flags over the child's and
+        // stamps the slot index as its subType, the key the ewep class init
+        // looks its anchor up by (a joiner's too).
+        // [orig: Entity_SpawnWeaponOverlays — group +0x11C @0x40F3BB, refNum
+        //  +0x215 @0x40F3B1, Flags @0x40F404..0x40F408, subType = slot
+        //  @0x40F40E; Entity_InitBoneReferences @0x4415E1..0x4415FF]
+        child_seed.group_id = carrier->group_id;
+        child_seed.ref_num = carrier->ref_num;
+        // The child spawns from a record carrying that refNum, so it joins
+        // the group list [orig: @0x40F3B1..0x40F3CF -> Entity_SpawnFromBMSRecord
+        //  @0x40F3FF, the join @0x40EC23..0x40EC45].
+        child_seed.ref_group_member = child_seed.ref_num != 0;
+        child_seed.engine_flags = carrier->engine_flags;
+        child_seed.flags = carrier->flags;
+        child_seed.sub_type = attachment.stored_slot != 0
+                ? static_cast<uint8_t>(attachment.stored_slot - 1) : uint8_t{0};
+        child_seed.spawn_origin = 0xFFFFFFFFu;
+        const EntityHandle child_handle =
+                world.registry.spawn(pool_for_kind(EntityKind::Item), child_seed);
+        if (!child_handle.valid()) {
+            ++result.dropped;
+            return;
+        }
+        result.handles.push_back(child_handle);
+        Entity *child = world.registry.get(child_handle);
+        carrier = world.registry.get(carrier_handle);
+        if (child == nullptr || carrier == nullptr) continue;
+        child->emplacement_parent = carrier_handle;
+        child->emplacement_parent_spawn_id = carrier->registry_spawn_id;
+        // NoNetworkCallback addeweap children also carry their host in the
+        // ordinary groundEntity field; retail's shared MountSlot resolver
+        // follows +0x28, not the attachment metadata pointer.
+        child->ground_target = carrier_handle;
+        child->emplacement_local = attachment.anchor.seat_local;
+        child->emplacement_yaw_offset = attachment.anchor.yaw_offset;
+        child->emplacement_bone =
+                attachment.anchor_found ? attachment.anchor.bone_index : 0;
+        child->emplacement_anchor_subobject =
+                attachment.anchor_found ? attachment.anchor_subobject : int16_t{-1};
+        child->emplacement_kind = static_cast<uint8_t>(attachment.kind);
+        child->emplacement_slot = attachment.stored_slot;
+        child->emplacement_attachment_flags = attachment.attachment_flags;
+        child->emplacement_angle_count = attachment.angle_count;
+        child->emplacement_down_limit_bam = attachment.down_limit_bam;
+        child->emplacement_up_limit_bam = attachment.up_limit_bam;
+        child->emplacement_right_limit_bam = attachment.right_limit_bam;
+        child->emplacement_left_limit_bam = attachment.left_limit_bam;
+        // Promotion is the authority-side source of the exact addeweap
+        // row, including its stored slot even when sibling types repeat.
+        child->emplacement_pose_metadata_resolved = true;
+        initialize_item_seats(*child, specs);
+        Seat anchor = attachment.anchor;
+        anchor.type = SeatType::Gunner;
+        anchor.bone_index = child->emplacement_bone;
+        anchor.attachment_frame = true;
+        world.vehicles.pose_mounted_occupant(*child, *carrier, anchor);
+    }
+}
+
+} // namespace
+
 ItemAttachmentSpawns spawn_item_attachments(World &world, const std::vector<EntityHandle> &carriers,
         const std::vector<ItemSeatSpec> &specs) {
     ItemAttachmentSpawns result;
-    // Every stored items.def addeweap* slot creates a pool-1 child. The public
-    // metadata already normalized the authored full item id to the raw type id;
-    // G/C flags and angle fallback presence remain separate. Children use a
-    // non-BMS origin sentinel so the listen-server WirePresentPass cannot defer
-    // them to an unrelated placed node with the same (kind,index).
-    struct AttachmentWork {
-        EntityHandle carrier;
-        std::vector<int32_t> lineage;
-    };
-    std::vector<AttachmentWork> attachment_work;
-    attachment_work.reserve(carriers.size());
-    for (EntityHandle h : carriers) {
-        const Entity *carrier = world.registry.get(h);
-        if (carrier != nullptr)
-            attachment_work.push_back(AttachmentWork{h, {carrier->item_id}});
-    }
-    for (size_t work_index = 0; work_index < attachment_work.size(); ++work_index) {
-        const AttachmentWork work = attachment_work[work_index];
-        Entity *carrier = world.registry.get(work.carrier);
-        if (carrier == nullptr) continue;
-        const ItemSeatSpec *carrier_spec =
-                seat_spec_for_type(specs, carrier->item_id);
-        if (carrier_spec == nullptr) continue;
-        if (work.lineage.size() >= 8) continue;
-        for (const ItemEmplacementAttachmentSpec &attachment :
-             carrier_spec->emplacement_attachments) {
-            if (attachment.child_type_id == 0 ||
-                std::find(work.lineage.begin(), work.lineage.end(),
-                          attachment.child_type_id) != work.lineage.end())
-                continue;
-            Entity child_seed;
-            child_seed.kind = EntityKind::Item;
-            child_seed.item_id = attachment.child_type_id;
-            child_seed.position = carrier->position;
-            child_seed.yaw = carrier->yaw;
-            child_seed.pitch = carrier->pitch;
-            child_seed.roll = carrier->roll;
-            child_seed.team = carrier->team;
-            child_seed.spawn_origin = 0xFFFFFFFFu;
-            const EntityHandle child_handle =
-                    world.registry.spawn(pool_for_kind(EntityKind::Item), child_seed);
-            if (!child_handle.valid()) {
-                ++result.dropped;
-                break;
-            }
-            result.handles.push_back(child_handle);
-            Entity *child = world.registry.get(child_handle);
-            carrier = world.registry.get(work.carrier);
-            if (child == nullptr || carrier == nullptr) continue;
-            child->emplacement_parent = work.carrier;
-            child->emplacement_parent_spawn_id =
-                    carrier->registry_spawn_id;
-            // NoNetworkCallback addeweap children also carry their host in the
-            // ordinary groundEntity field; retail's shared MountSlot resolver
-            // follows +0x28, not the attachment metadata pointer.
-            child->ground_target = work.carrier;
-            child->emplacement_local = attachment.anchor.seat_local;
-            child->emplacement_yaw_offset = attachment.anchor.yaw_offset;
-            child->emplacement_bone =
-                    attachment.anchor_found ? attachment.anchor.bone_index : 0;
-            child->emplacement_anchor_subobject =
-                    attachment.anchor_found ? attachment.anchor_subobject : int16_t{-1};
-            child->emplacement_kind = static_cast<uint8_t>(attachment.kind);
-            child->emplacement_slot = attachment.stored_slot;
-            child->emplacement_attachment_flags = attachment.attachment_flags;
-            child->emplacement_angle_count = attachment.angle_count;
-            child->emplacement_down_limit_bam = attachment.down_limit_bam;
-            child->emplacement_up_limit_bam = attachment.up_limit_bam;
-            child->emplacement_right_limit_bam = attachment.right_limit_bam;
-            child->emplacement_left_limit_bam = attachment.left_limit_bam;
-            // Promotion is the authority-side source of the exact addeweap
-            // row, including its stored slot even when sibling types repeat.
-            child->emplacement_pose_metadata_resolved = true;
-            initialize_item_seats(*child, specs);
-            Seat anchor = attachment.anchor;
-            anchor.type = SeatType::Gunner;
-            anchor.bone_index = child->emplacement_bone;
-            anchor.attachment_frame = true;
-            world.vehicles.pose_mounted_occupant(*child, *carrier, anchor);
+    std::array<bool, 256> ref_occupied = reference_registry(world);
+    for (EntityHandle carrier : carriers)
+        spawn_carrier_attachments(world, carrier, specs, ref_occupied, result);
+    return result;
+}
 
-            std::vector<int32_t> lineage = work.lineage;
-            lineage.push_back(attachment.child_type_id);
-            attachment_work.push_back(
-                    AttachmentWork{child_handle, std::move(lineage)});
+ItemAttachmentSpawns spawn_mission_item_attachments(World &world,
+        const std::vector<ItemSeatSpec> &specs) {
+    ItemAttachmentSpawns result;
+    std::array<bool, 256> ref_occupied = reference_registry(world);
+    // Each walk takes its pool's row count once, up front, and visits the rows
+    // below it as they stand when reached: a child is allocated at the lowest
+    // free row, so it is walked only if it filled a hole below that count.
+    // [orig: Mission_LoadBMSFile — `mov edi, g_PoolList.used+10h` @0x40FD4F and
+    //  the pool-1 walk @0x40FD60..0x40FD71; pool 2 @0x40FD79..0x40FD96]
+    for (const int pool : {1, 2}) {
+        int used = 0;
+        world.registry.for_each_in_pool(pool, [&](const Entity &e) {
+            used = std::max(used, e.handle.slot() + 1);
+        });
+        for (int slot = 0; slot < used; ++slot) {
+            const EntityHandle handle = EntityHandle::make(pool, slot);
+            if (world.registry.get(handle) == nullptr) continue;
+            spawn_carrier_attachments(world, handle, specs, ref_occupied, result);
         }
     }
     return result;
@@ -639,7 +697,7 @@ namespace {
 
 // The record is temporary: retail remaps a 5305 teammate before the item lookup.
 // Its class selector has one runtime writer, the settings copy of the constant
-// default 1. [orig: Config_SetDefaults @0x54d400; apply_session_settings_to_globals
+// default 1. [orig: Config_SetDefaults @0x54d400; Game_ApplySessionSettingsToGlobals
 // @0x551a2a; Entity_SpawnFromBMSRecord @0x40ea5c]
 constexpr int32_t kBmsTeammateClass = 1;
 
@@ -900,7 +958,6 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         return opts.ai_profile_defaults(type_id).known &&
                (opts.item_attributes(type_id) & kItemAttribAIData) != 0;
     };
-    std::vector<EntityHandle> promoted_item_handles;
     // dword_A77638, zeroed by the mission reset every load runs [orig: the
     // reset Mission_ResetBmsState @0x40DBD1, called
     // from Mission_LoadBMSFile @0x40F50E]
@@ -961,7 +1018,6 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             EntityHandle h = world.registry.spawn_at(want, seed);
             if (!h.valid()) { ++r.dropped; continue; }
             ++r.spawned;
-            if (kind == EntityKind::Item) promoted_item_handles.push_back(h);
             if (Entity *spawned = world.registry.get(h)) {
                 initialize_item_seats(*spawned, opts.item_seat_specs);
                 // The spawn-phase stagger: every spawned record takes the load
@@ -984,8 +1040,18 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             const bool ai_class = ai_capable ||
                     (opts.item_attributes &&
                      (opts.item_attributes(e.type_id) & kItemAttribAIData) != 0);
-            if (ai_class)
-                if (Entity *spawned = world.registry.get(h)) fold_ai_entity_flags(*spawned, e);
+            if (ai_class) {
+                if (Entity *spawned = world.registry.get(h)) {
+                    fold_ai_entity_flags(*spawned, e);
+                    // The AI slot's +156 takes the record's raw 8-byte ai_textfile
+                    // (two dwords over the zeroed 16-byte name, so at most 8
+                    // characters before a NUL), case and padding kept.
+                    // [orig: Entity_SpawnFromBMSRecord @0x40ED66..0x40ED8C]
+                    size_t length = 0;
+                    while (length < sizeof(e.name2) && e.name2[length] != '\0') ++length;
+                    spawned->ai_text_file.assign(e.name2, length);
+                }
+            }
             if (ai_capable) {
                 int ai_idx = ai.attach(h);
                 AiEntity &ae = *ai.at(ai_idx);
@@ -1014,15 +1080,19 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         }
     };
     promote_vec(m.items, EntityKind::Item, /*ai_capable=*/false);
-
-    const ItemAttachmentSpawns attachments =
-            spawn_item_attachments(world, promoted_item_handles, opts.item_seat_specs);
-    r.spawned += int(attachments.handles.size());
-    r.dropped += attachments.dropped;
-
     promote_vec(m.buildings, EntityKind::Building, /*ai_capable=*/false);
     promote_vec(m.markers, EntityKind::Marker, /*ai_capable=*/false);
     promote_vec(m.organics, EntityKind::Organic, /*ai_capable=*/true);
+
+    // The loader spawns the addeweap children once every record is in, so the
+    // reference registry a refNum-less carrier allocates from already holds
+    // every authored refNum; the children fill pool 1 after its records.
+    // [orig: Mission_LoadBMSFile, the pool-1 and pool-2 walks
+    //  @0x40FD49..0x40FD96 after the file closes @0x40FD30..0x40FD44]
+    const ItemAttachmentSpawns attachments =
+            spawn_mission_item_attachments(world, opts.item_seat_specs);
+    r.spawned += int(attachments.handles.size());
+    r.dropped += attachments.dropped;
 
     return r;
 }
@@ -1037,7 +1107,7 @@ void stash_mission_loadout_rules(
         if (row.name.empty()) continue;
         // The status byte is SIGNED in retail: -1 is the "mission allowed"
         // sentinel the availability builder maps to 3 [orig:
-        // build_item_restriction_table @0x54ddb0 reads `(char)name[strlen+1]`,
+        // WeaponDef_BuildItemRestrictionTable @0x54ddb0 reads `(char)name[strlen+1]`,
         // `== -1 -> 3`]; an unsigned widen (255) would never hit that arm.
         r_availability_rows.emplace_back(row.name,
                                          static_cast<int32_t>(static_cast<int8_t>(row.status)));

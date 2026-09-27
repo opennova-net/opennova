@@ -1,7 +1,5 @@
 #include <net/novacrypto/nwu.h>
 
-#include <cstring>
-
 namespace opennova {
 
 namespace {

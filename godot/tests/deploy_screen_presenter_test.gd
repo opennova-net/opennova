@@ -30,6 +30,7 @@ func should_skip_script():
 
 const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)
 const SPAWN_ZONE_TYPE := 1359  # pool-1 fixture; ItemDef supplies SpawnPoint
+const ZONE_ITEMS_FILE := "deploy_spawn_zone_items.def"
 
 
 var _overlay: Control = null
@@ -47,45 +48,13 @@ func after_each() -> void:
 
 func after_all() -> void:
 	PresenterFixture.unstage(TMP_DIR, STAGED_FIXTURES)
-	var zone_def := ProjectSettings.globalize_path(
-			"res://.godot/deploy_spawn_zone_items.def")
-	if FileAccess.file_exists(zone_def):
-		DirAccess.remove_absolute(zone_def)
+	ItemDbFixture.release(ZONE_ITEMS_FILE)
 
 
-# The fixture items.def plus one deploy-selectable SpawnPoint row (the
-# coop_two_sim recipe; mission id 1359 promotes to ItemDef 101359).
+# The fixture items.def plus one deploy-selectable SpawnPoint row (mission id
+# 1359 promotes to ItemDef 101359).
 func _spawn_zone_item_db() -> ItemDatabase:
-	var base_path := ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")
-	var base_file := FileAccess.open(base_path, FileAccess.READ)
-	assert_not_null(base_file)
-	if base_file == null:
-		return null
-	var base_items := base_file.get_as_text().replace("\r\n", "\n")
-	base_file.close()
-	var path := ProjectSettings.globalize_path(
-			"res://.godot/deploy_spawn_zone_items.def")
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return null
-	file.store_string(base_items)
-	if not base_items.ends_with("\n"):
-		file.store_string("\n")
-	file.store_string("""begin "Deploy Spawn Zone Fixture"
-  id 101359
-  type object
-  graphic MrkAlpha
-  sid deploy_spawn_zone
-  hp 100
-  attrib: SpawnPoint
-end
-""")
-	file.close()
-	var result := ItemDatabase.new()
-	assert_eq(result.load(path), OK)
-	return result
+	return ItemDbFixture.with_rows(self, ZONE_ITEMS_FILE, ItemDbFixture.SPAWN_ZONE_ROW)
 
 
 func _spawn_zone_mission() -> MissionData:

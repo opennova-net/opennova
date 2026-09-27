@@ -327,6 +327,12 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     if (!entity) return false;
     // The shared destroy primitive, including script and teammate removals.
     // [orig: Entity_Destroy @0x43E810; reference walk @0x465670]
+    // The row leaves its refNum group list first (Entity::ref_group_member),
+    // so no member's destroy below walks back to it; its refNum byte stays.
+    // [orig: Entity_Destroy @0x43E840..0x43E858 — DynArray_RemoveById on the
+    //  refNum list]
+    const uint8_t ref = entity->ref_num;
+    entity->ref_group_member = false;
     if (entity->item_type == 3) world_.match.drop_carried_object(world_, h);
     world_.facials.release(*entity);
     world_.out.scars.clear_entity(h);
@@ -335,6 +341,19 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
         if (entity->death_effect_active[family - 1] != 0)
             release_death_effect_bank(*entity, family, world_.out.destruction);
     world_.ai.clear_entity_references(world_, h);
+    // A destroyed non-person row that holds a refNum takes every member of its
+    // refNum group whose def carries EWeap with it, each through this same
+    // destroy (so without a notify of its own): an addeweap child, which shares
+    // its carrier's refNum, never outlives the carrier's row. A member without
+    // EWeap stays.
+    // [orig: Entity_Destroy @0x43E9B6..0x43E9CD — the def, def type != 3 and
+    //  refNum (+0x215) != 0 gates, the EntityReference_DestroyEWeapGroup call
+    //  @0x43E9CD]
+    if (entity->has_item_def && entity->item_type != 3 && ref != 0) {
+        destroy_eweap_group(h);
+        entity = world_.registry.get(h);
+        if (entity == nullptr) return true;
+    }
     if (Entity *carrier = world_.registry.get(entity->primary_occupant)) {
         if (entity->item_type != 3) world_.vehicles.detach(carrier->handle);
         if (carrier->mounted_child == h) carrier->mounted_child = {};
@@ -349,6 +368,38 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     if (world_.collision) world_.collision->remove_entity_instance(h);
     world_.registry.despawn(h);
     return true;
+}
+
+void EntityCommands::destroy_eweap_group(EntityHandle h) {
+    Entity *entity = world_.registry.get(h);
+    if (entity == nullptr) return;
+    const uint8_t ref = entity->ref_num;
+    // The group list is copied once and each member is tested again when
+    // reached: not the row itself, still in the list under the same refNum,
+    // and a def carrying EWeap. A member an earlier member's destroy already
+    // took is skipped.
+    // [orig: EntityReference_DestroyEWeapGroup @0x546F30 — the list copy
+    //  (DynArray_CopyConstruct) @0x546F73, the member tests @0x546F8A..0x546FA0,
+    //  Entity_Destroy @0x546FA3]
+    std::vector<EntityHandle> members;
+    world_.registry.for_each([&](const Entity &other) {
+        if (other.ref_group_member && other.ref_num == ref) members.push_back(other.handle);
+    });
+    for (EntityHandle member : members) {
+        if (member == h) continue;
+        const Entity *row = world_.registry.get(member);
+        if (row != nullptr && row->ref_group_member && row->ref_num == ref &&
+                row->has_item_def && (row->item_attrib & kItemAttribEweap) != 0)
+            remove_ssn(member);
+    }
+    // Then the row leaves its list and gives up its refNum. The port reads an
+    // id's occupancy off the live rows, so that store has nothing to clear.
+    // [orig: @0x546FBC..0x547001 (the list removal), occupied[refNum] = 0
+    //  @0x54700A, refNum = 0 @0x547017]
+    if ((entity = world_.registry.get(h)) != nullptr) {
+        entity->ref_group_member = false;
+        entity->ref_num = 0;
+    }
 }
 
 bool EntityCommands::server_remove_and_notify(EntityTarget ssn) {
@@ -376,8 +427,8 @@ void EntityCommands::remove_placed_devices_by_owner(EntityHandle owner) {
     // live on the row's PlacedDevice record.
     // [orig: Entity_RemovePlacedDevicesByOwner @0x546E00 — the +0x1C gate
     //  @0x546E2D, the +0x170 owner compare @0x546E37, the def attrib skips
-    //  @0x546E46 / @0x546E50, the g_ammo_satchel / g_ammo_claymore /
-    //  g_ammo_AV_Mine compares @0x546E68 / @0x546E8B / @0x546EAE, each with its
+    //  @0x546E46 / @0x546E50, the g_AmmoSatchel / g_AmmoClaymore /
+    //  g_AmmoAVMine compares @0x546E68 / @0x546E8B / @0x546EAE, each with its
     //  Server_RemoveEntityAndNotify call @0x546E71 / @0x546E94 / @0x546EBB]
     const Entity *owner_row = world_.registry.get(owner);
     if (owner_row == nullptr) return;
@@ -405,7 +456,7 @@ bool EntityCommands::remove_bms_ref(int32_t ssn) {
     // SSN 0 and a non-authority peer do nothing; otherwise the first row
     // carrying the SSN, walking pools 0..3 in slot order, goes through the
     // notifying removal. An SSN past 16 bits matches no DcbId we carry.
-    // [orig: find_entity_by_parent_and_dispatch @0x43e210 — SSN 0 @0x43e214,
+    // [orig: Entity_FindByParentAndDispatch @0x43e210 — SSN 0 @0x43e214,
     //  the authority gate @0x43e21c, the pool scans @0x43e249/@0x43e279/
     //  @0x43e2a9/@0x43e2d9 tail-jumping to Server_RemoveEntityAndNotify]
     if (ssn <= 0 || ssn > 0xFFFF || !world_.rules.logic_authority) return false;
@@ -1372,7 +1423,7 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
 // never reaches Score_ProcessKillEvent). The player bodies (org2) still take
 // their transaction from this record.
 // [orig: Entity_UpdateInfantryAI edge @0x4B9D4D / Entity_UpdateInfantryPlayerBody
-//  edge @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550 -> BuildDeathNotifyPayload
+//  edge @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550 -> NetPacket_BuildDeathNotifyPayload
 //  @0x5036E0 (the +0x2C0 word @0x503733), send_mask 0x90]
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
     if (org1_owns_death_transaction(world, h)) {
@@ -1603,8 +1654,8 @@ void sync_teleported_ai(World &world, const Entity &entity) {
 // (pool 0), @0x43e13c/@0x43e1df (pools 1/2)]; the group action clears
 // 0x20000 on pools 1/2 only [orig: @0x43d47f/@0x43d4e3 — the pool-0 arm
 // @0x43d404..0x43d426 goes straight to the spawn reset]. Our split homes the
-// bits: Building (0x20000) lives on engine_flags alone — it is outside the
-// organic low byte `flags` mirrors — while the chute bit is legacy-mirrored,
+// bits: the matrix bit (0x20000) lives on engine_flags alone — it is outside
+// the organic low byte `flags` mirrors — while the chute bit is legacy-mirrored,
 // so that one is written on both views and read merged.
 void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
                       bool single_action) {
@@ -1613,7 +1664,7 @@ void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
     entity.pitch = marker.pitch;
     entity.roll = marker.roll;
     if (single_action || entity.handle.pool() != 0)
-        entity.engine_flags &= ~kEntityFlagBuilding;
+        entity.engine_flags &= ~kEntityFlagMatrixBuilt;
     if (single_action && entity.handle.pool() == 0 &&
         ((marker.flags | marker.engine_flags) & kEntityFlagParachute) != 0) {
         entity.flags |= kEntityFlagParachute;
@@ -1783,8 +1834,8 @@ bool EntityCommands::wac_teleport_ssn(EntityTarget source, int32_t marker_wp_num
     if (marker.item_type == 3) {
         entity_reset_to_spawn_state(world_, marker);
     } else {
-        marker.flags &= ~kEntityFlagBuilding;
-        marker.engine_flags &= ~kEntityFlagBuilding;
+        marker.flags &= ~kEntityFlagMatrixBuilt;
+        marker.engine_flags &= ~kEntityFlagMatrixBuilt;
         if (world_.collision != nullptr)
             world_.collision->refresh_after_registry_change(world_);
     }
@@ -1869,18 +1920,7 @@ bool EntityCommands::mount(EntityTarget occupant_ssn, EntityTarget target_ssn, S
 bool EntityCommands::mount_boarding_command(EntityTarget occupant_ssn, EntityTarget target_ssn,
                                             uint8_t command_id) {
     SeatSelectionMode mode = SeatSelectionMode::Any;
-    switch (command_id) {
-        case 123:
-            mode = SeatSelectionMode::PassengerOnly;
-            break;
-        case 124:
-            mode = SeatSelectionMode::RejectController;
-            break;
-        case 125:
-            break;
-        default:
-            return false;
-    }
+    if (!seat_selection_mode_for_command(command_id, mode)) return false;
     return mount(occupant_ssn, target_ssn, mode);
 }
 
@@ -1928,9 +1968,8 @@ bool EntityCommands::use_boarding_target(EntityTarget occupant) {
     if (entity == nullptr || entity->item_type_index == 0 || ai == nullptr ||
             ai->slot.f[36] == 0 || entity->mount_target.valid()) return false;
     const EntityHandle target{uint16_t(ai->slot.f[36] - 1)};
-    SeatSelectionMode mode = SeatSelectionMode::Any;
-    if (ai->slot.f[37] == 123) mode = SeatSelectionMode::PassengerOnly;
-    else if (ai->slot.f[37] == 124) mode = SeatSelectionMode::RejectController;
+    SeatSelectionMode mode = SeatSelectionMode::Any; // a non-attach command keeps Any
+    seat_selection_mode_for_command(ai->slot.f[37], mode);
     VehicleSeatSelection selected;
     const bool available = find_best_vehicle_seat(world_, target, handle, selected, mode);
     ai->slot.f[36] = available ? int32_t(selected.vehicle.packed) + 1 : 0;

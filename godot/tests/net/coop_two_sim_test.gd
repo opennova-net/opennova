@@ -184,14 +184,9 @@ func _net_watercraft_item_db() -> ItemDatabase:
 	# resolve_item_traits sweeps every live entity, so this test database must be
 	# a complete items table rather than a one-row replacement. Otherwise the
 	# second resolve turns the mission's player and Dune Buggy rows Unknown.
-	var base_path := ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")
-	var base_file := FileAccess.open(base_path, FileAccess.READ)
-	assert_not_null(base_file)
-	if base_file == null:
+	var base_items := ItemDbFixture.fixture_text(self)
+	if base_items.is_empty():
 		return null
-	var base_items := base_file.get_as_text().replace("\r\n", "\n")
-	base_file.close()
 	# The shared compact fixture intentionally omits most vehicle-physics fields.
 	# This real-UDP case needs the Dune Buggy to materialize a VehicleTraits row so
 	# it can prove that move_function cveh wins over ai_function chel.
@@ -206,16 +201,8 @@ func _net_watercraft_item_db() -> ItemDatabase:
 	assert_true(base_items.contains("  graphic Dbuggy1\n"))
 	base_items = base_items.replace(
 			"  graphic Dbuggy1\n", "  graphic carrierzero\n")
-	var path := ProjectSettings.globalize_path(
-			"res://.godot/net_watercraft_items.def")
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return null
-	file.store_string(base_items)
-	if not base_items.ends_with("\n"):
-		file.store_string("\n")
-	file.store_string("""begin "Net Watercraft Fixture"
+	return ItemDbFixture.load_with(self, "net_watercraft_items.def", base_items,
+			"""begin "Net Watercraft Fixture"
   id 105008
   type vehicle
   graphic carrierzero
@@ -235,46 +222,13 @@ func _net_watercraft_item_db() -> ItemDatabase:
   torque 3
 end
 """)
-	file.close()
-	var result := ItemDatabase.new()
-	assert_eq(result.load(path), OK)
-	return result
 
 
 func _net_spawn_zone_item_db() -> ItemDatabase:
 	# Keep the normal compact table intact, then add one deploy-selectable pool-1
-	# row. The mission stores id 1359 and promotion applies ITEM_ID_OFFSET, so the
-	# ItemDef identity is 101359.
-	var base_path := ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")
-	var base_file := FileAccess.open(base_path, FileAccess.READ)
-	assert_not_null(base_file)
-	if base_file == null:
-		return null
-	var base_items := base_file.get_as_text().replace("\r\n", "\n")
-	base_file.close()
-	var path := ProjectSettings.globalize_path(
-			"res://.godot/net_spawn_zone_items.def")
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return null
-	file.store_string(base_items)
-	if not base_items.ends_with("\n"):
-		file.store_string("\n")
-	file.store_string("""begin "Net Spawn Zone Fixture"
-  id 101359
-  type object
-  graphic MrkAlpha
-  sid net_spawn_zone
-  hp 100
-  attrib: SpawnPoint
-end
-""")
-	file.close()
-	var result := ItemDatabase.new()
-	assert_eq(result.load(path), OK)
-	return result
+	# row (ItemDbFixture.SPAWN_ZONE_ROW, ItemDef 101359).
+	return ItemDbFixture.with_rows(self, "net_spawn_zone_items.def",
+			ItemDbFixture.SPAWN_ZONE_ROW)
 
 
 func _install_combat_tables(sim: Simulation) -> void:
@@ -496,7 +450,7 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 		OS.delay_msec(2)
 	assert_true(learned, "joiner learned the host mission through the post-auth 0x7B")
 	assert_eq(joiner.get_join_server_name(), "Preload Host")
-	# Retail LAN duplicates g_map_file_name in 0x7B fields 4 AND 5 — field 4 is
+	# Retail LAN duplicates g_MapFileName in 0x7B fields 4 AND 5 — field 4 is
 	# NOT the MissionText display title, so the configured "Preload Island" can
 	# never reach a LAN joiner pre-load. [orig: NapiNPMsg_0x7B_BuildPayload
 	# @0x507740; the PR #403 live retail-LAN witness]
@@ -1043,7 +997,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_eq(def_root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(host.load_weapon_table(def_root, "weapon.def"), OK)
 	assert_true(host.spawn_local_player(Vector3.ZERO, 120.0, 1))
-	MountLook.face(host, Vector3(2, 0, 0))
+	MountLook.face(self, host, Vector3(2, 0, 0))
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
@@ -1203,7 +1157,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		OS.delay_msec(1)
 	assert_false(joiner.get_local_player_view().mounted)
 
-	MountLook.face(joiner, Vector3(2, 0, 0))
+	MountLook.face(self, joiner, Vector3(2, 0, 0))
 	assert_true(joiner.local_player_toggle_mount(),
 			"Shift queues the joiner's C2S 0x26 attach")
 	assert_false(joiner.get_local_player_view().mounted,
@@ -1745,7 +1699,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	# then drive the zero-offset control seat. On every frame where the predicted
 	# carrier advances, joiner_pump must run its pose-only carrier follow after the
 	# vehicle mover; the old pre-prediction pose trails by exactly one motor step.
-	MountLook.face(joiner, Vector3(2, 0, 0))
+	MountLook.face(self, joiner, Vector3(2, 0, 0))
 	assert_true(joiner.local_player_toggle_mount(),
 			"the nearby synthetic watercraft queues a real C2S attach")
 	var mounted_echoed := false
@@ -2018,14 +1972,11 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 			"arm_age is not an authoritative detonation")
 	assert_eq(joiner.get_local_player_health(), joiner_health_before,
 			"the visual-only client cannot apply a grenade consequence")
-	assert_true(joiner.has_method("get_joiner_network_diagnostics"),
-			"the live diagnostic has a public observation seam")
-	if joiner.has_method("get_joiner_network_diagnostics"):
-		var diagnostics: Dictionary = joiner.call("get_joiner_network_diagnostics")
-		assert_eq(int(diagnostics.get("gap_depth", -1)), 0,
-				"the steady replicated session has no ordered sequence gap")
-		assert_false(bool(diagnostics.get("freeze_suspected", true)),
-				"flat idle records without a gap are not a replication freeze")
+	var diagnostics: Dictionary = joiner.get_joiner_network_diagnostics()
+	assert_eq(int(diagnostics.get("gap_depth", -1)), 0,
+			"the steady replicated session has no ordered sequence gap")
+	assert_false(bool(diagnostics.get("freeze_suspected", true)),
+			"flat idle records without a gap are not a replication freeze")
 
 	var host_fuse_sounds := 0
 	var joiner_fuse_sounds := 0

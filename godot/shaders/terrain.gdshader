@@ -1,5 +1,13 @@
 shader_type spatial;
 render_mode unshaded;
+// The slot-drape mark (renderer::kRungSlotDrape carries the witness): retail
+// draws the drapes right after this batch with Z-write off, so a later model
+// in front of the terrain overwrites them. Godot applies material stencil in
+// the colour pass only, where an opaque surface compares depth EQUAL against
+// the prepass: this REPLACE lands exactly where the terrain is the front-most
+// surface, and slot_shadow_drape.gdshader draws only there (and over the sky
+// dome, which writes the same mark).
+stencil_mode write, compare_always, 1;
 
 // Shared terrain surface shading + fog (uniforms u_detail*/u_blendmap/
 // u_detailmap*/lighting/fog all live here): terrain_surface_color_from_colormap(), apply_terrain_fog().
@@ -90,7 +98,7 @@ void fragment() {
 	}
 	// The flat mode zeros stage 2's blend transform as well as the primary
 	// source coordinates. The independent detail/noise stream stays live.
-	// [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0]
+	// [orig: Terrain_RenderSectorBatch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0]
 	vec2 source_uv = u_instance_zero_height ? vec2(0.0) : v_colormap_uv;
 	// A patch whose page the cache could not claim this frame draws with t0
 	// unbound, which D3D9 samples as (0, 0, 0, 1) (retail
@@ -113,10 +121,10 @@ void fragment() {
 	// the unfogged light passes build the saturated pool, one unfogged
 	// DESTCOLOR/SRCCOLOR pass multiplies it by 2 * saturate(2 * page), and the
 	// fogged ordinary pass adds on top (renderer::terrain_light_pool_composite;
-	// retail render_terrain_sector_batch @0x60984C..0x609AB6).
+	// retail Terrain_RenderSectorBatch @0x60984C..0x609AB6).
 	if (terrain_point_light_count(u_instance_light_slot) > 0) {
-		vec3 pool = clamp(terrain_point_light_pool(v_world_pos, u_instance_light_slot),
-			vec3(0.0), vec3(1.0));
+		vec3 pool = clamp(terrain_point_light_pool(v_world_pos, v_detail_uv,
+			u_instance_light_slot), vec3(0.0), vec3(1.0));
 		vec3 lit_by_pool = clamp(
 			2.0 * clamp(2.0 * colormap.rgb, vec3(0.0), vec3(1.0)) * pool,
 			vec3(0.0), vec3(1.0));

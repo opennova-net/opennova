@@ -198,9 +198,10 @@ public:
 	// use this. GameWorld is the sole live real-time owner and advances the
 	// native session.
 	bool tick();
-	// Real-time frame entry: bank `delta`, drain it in fixed tick_dt quanta, run that many single logic
-	// ticks (clamped to the native kMaxCatchupTicks), and present ONCE after the batch — the faithful
-	// fixed-62.5 Hz accumulator, with a zero-tick frame still presenting current render-only entity
+	// Real-time frame entry: bank `delta` through the native retail bank (the 500 ms clamp, the 7/8
+	// EMA, 4 ms drain quanta with a logic tick on every fourth; a mission-start frame banks only the
+	// time since its render), run that many single logic ticks, and present ONCE after the batch, with
+	// a zero-tick frame still presenting current render-only entity
 	// rows (camera and local attach/detach change between fixed ticks). The native
 	// session owns bank/clamp, input retention, and per-tick order; the GameWorld leg table
 	// owns the concrete Godot device order [orig: Game_MainLoop @ 0x52b630].

@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -226,7 +227,8 @@ void Q3SourceRegistry::invalidate_object_material(const Ref<Material> &p_materia
 }
 
 void Q3SourceRegistry::register_object_source(GeometryInstance3D *p_source,
-		const Ref<Material> &p_material) {
+		const Ref<Material> &p_material, Skeleton3D *p_rigid_skeleton,
+		int p_rigid_bone) {
 	if (p_source == nullptr)
 		return;
 	std::lock_guard<std::recursive_mutex> lock(g_mutex);
@@ -253,6 +255,11 @@ void Q3SourceRegistry::register_object_source(GeometryInstance3D *p_source,
 	record.source = Q3Source::Object;
 	record.material_id = p_material->get_instance_id();
 	record.active = true;
+	// A level swap re-registers the node with the level's binding: a strip
+	// that moved off the skeleton drops its bone.
+	const bool bone_bound = p_rigid_skeleton != nullptr && p_rigid_bone >= 0;
+	record.rigid_skeleton_id = bone_bound ? p_rigid_skeleton->get_instance_id() : 0;
+	record.rigid_bone = bone_bound ? p_rigid_bone : -1;
 }
 
 void Q3SourceRegistry::unregister_source(GeometryInstance3D *p_source) {
@@ -268,6 +275,17 @@ void Q3SourceRegistry::set_celestial_self_lum(GeometryInstance3D *p_source,
 	std::lock_guard<std::recursive_mutex> lock(g_mutex);
 	if (Q3SourceRecord *record = find_record(p_source))
 		record->celestial_self_lum = p_self_lum;
+}
+
+void Q3SourceRegistry::set_celestial_pose(GeometryInstance3D *p_source,
+		const Transform3D &p_global_transform) {
+	if (p_source == nullptr)
+		return;
+	std::lock_guard<std::recursive_mutex> lock(g_mutex);
+	if (Q3SourceRecord *record = find_record(p_source)) {
+		record->celestial_pose = p_global_transform;
+		record->celestial_pose_valid = true;
+	}
 }
 
 void Q3SourceRegistry::register_source(GeometryInstance3D *p_source,
@@ -369,6 +387,29 @@ const std::vector<Q3SourceRecord *> &Q3SourceRegistry::live_records() {
 
 std::size_t Q3SourceRegistry::record_count() {
 	return g_records.size();
+}
+
+bool Q3SourceRegistry::source_transform(const Q3SourceRecord &p_record,
+		Transform3D &r_transform) {
+	if ((p_record.source == Q3Source::CelestialBody || p_record.source == Q3Source::SunGlow) &&
+			p_record.celestial_pose_valid) {
+		r_transform = p_record.celestial_pose;
+		return true;
+	}
+	r_transform = p_record.node->get_global_transform();
+	if (p_record.rigid_bone < 0)
+		return true;
+	// The strip's skin weights every vertex 1 to this bone, so the node's
+	// skinned draw is node x (global pose x bind) over the bind-space
+	// arrays the cache packs: one rigid matrix, the skin palette entry the
+	// slot capture reads for the same instance.
+	const Skeleton3D *skeleton = Object::cast_to<Skeleton3D>(
+			ObjectDB::get_instance(p_record.rigid_skeleton_id));
+	if (skeleton == nullptr || p_record.rigid_bone >= skeleton->get_bone_count())
+		return false;
+	r_transform = r_transform * skeleton->get_bone_global_pose(p_record.rigid_bone) *
+			skeleton->get_bone_global_rest(p_record.rigid_bone).affine_inverse();
+	return true;
 }
 
 void Q3SourceRegistry::refresh_surfaces(Q3SourceRecord &r_record,

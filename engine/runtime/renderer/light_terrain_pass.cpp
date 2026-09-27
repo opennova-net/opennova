@@ -1,9 +1,11 @@
 // The terrain leg of the dynamic light pool: the per-patch collect + gate +
 // pixel-constant build, the projection contract, and the procedural textures
-// the two stages sample. Witness map in light_terrain_pass.h.
-// [orig: render_terrain_sector_batch @0x6095f9..0x6098bc;
-//  Light_SetupTerrainProjectedPass @0x5aa830; Lighting_InitTextures @0x5a94f0;
-//  Texture_GenerateProceduralFalloffTexture @0x5a92c0]
+// the light passes sample. Witness map in light_terrain_pass.h.
+// [orig: Terrain_RenderSectorBatch @0x6095f9..0x6098bc;
+//  Light_SetupTerrainProjectedPassPS @0x5aab30; Light_SetupTerrainProjectedPass
+//  @0x5aa830; Lighting_InitTextures @0x5a94f0;
+//  Texture_GenerateProceduralFalloffTexture @0x5a92c0;
+//  GTexture_GenerateNormalMapCubeMap @0x685570]
 #include <runtime/renderer/light_terrain_pass.h>
 
 #include <runtime/renderer/light_scene_internal.h>
@@ -61,6 +63,69 @@ TerrainLightUv terrain_light_uv_height(const std::array<float, 3> &point_mission
 	uv.u = (point_mission[2] - light_mission[2]) * inv_scale + 0.5f;
 	uv.v = 0.5f;
 	return uv;
+}
+
+std::array<float, 3> terrain_light_cube_vector(const std::array<float, 3> &point_mission,
+		const std::array<float, 3> &light_mission, float inv_scale) {
+	// Transform 16 negates every term of the camera-matrix columns 2, 0, 1
+	// and their translations [orig: Light_SetupTerrainProjectedPassPS
+	// @0x5aab99..0x5aaca5]: (u, v, w) = (light - point).(d3d.z, d3d.x, d3d.y)
+	// * inv, with d3d = (-mission.y, mission.z, mission.x) [orig: @0x611210].
+	return {
+		(light_mission[0] - point_mission[0]) * inv_scale,
+		(point_mission[1] - light_mission[1]) * inv_scale,
+		(light_mission[2] - point_mission[2]) * inv_scale,
+	};
+}
+
+uint32_t cube_normalize_texel_argb(int face, int col, int row, int size) {
+	// The per-face axis C and row-0 axis U [orig:
+	// GTexture_GenerateNormalMapCubeMap @0x685644..0x6858b2, the six switch
+	// arms over faces 0..5].
+	static constexpr float kAxis[kCubeNormalizeFaces][3] = {
+		{1.0f, 0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+		{0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, -1.0f},
+	};
+	static constexpr float kUp[kCubeNormalizeFaces][3] = {
+		{0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, -1.0f},
+		{0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+	};
+	if (face < 0 || face >= kCubeNormalizeFaces || size < 2) {
+		return 0u;
+	}
+	const float *c = kAxis[face];
+	const float *u = kUp[face];
+	// X = C x U [orig: @0x6858ba..0x68590b].
+	const float x[3] = {
+		c[1] * u[2] - c[2] * u[1],
+		c[2] * u[0] - c[0] * u[2],
+		c[0] * u[1] - c[1] * u[0],
+	};
+	// (size - (size >> 31)) >> 1 is size / 2 for the positive sides
+	// [orig: @0x6859e8..0x6859ee]; rt and ct are fild / fidiv quotients.
+	const int half = size / 2;
+	const double rt = static_cast<double>(half - row) / static_cast<double>(half);
+	const double ct = static_cast<double>(half - col) / static_cast<double>(half);
+	// The face terms are 0 or +-1, so every product below is exact; the
+	// components are stored as floats before the normalize
+	// [orig: @0x685a66..0x685aab].
+	const float dir[3] = {
+		static_cast<float>(c[0] + u[0] * rt + x[0] * ct),
+		static_cast<float>(c[1] + u[1] * rt + x[1] * ct),
+		static_cast<float>(c[2] + u[2] * rt + x[2] * ct),
+	};
+	// D3DXVec3Normalize [orig: sub_68B032 @0x685aaf]: a platform primitive,
+	// a standard normalize here.
+	const float length = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+	uint32_t bytes[3] = {};
+	for (int axis = 0; axis < 3; ++axis) {
+		const float n = length > 0.0f ? dir[axis] / length : 0.0f;
+		// trunc(n * 127.5 + 128.0) under the truncating control word
+		// [orig: @0x685ab4..0x685b48]; the range stays inside 0.5..255.5.
+		const int encoded = static_cast<int>(static_cast<double>(n) * 127.5 + 128.0);
+		bytes[axis] = static_cast<uint32_t>(std::clamp(encoded, 0, 255));
+	}
+	return 0xFF000000u | (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
 }
 
 uint32_t falloff_texture_light2d_argb(int x, int y) {
@@ -153,7 +218,7 @@ TerrainLightPatchBounds terrain_patch_light_bounds(const float aabb_min[3],
 
 namespace opennova::renderer {
 
-// [orig: collect_nearby_zones_by_aabb @0x5aa37a — ((d * d + 0x8000) >> 16)
+// [orig: Light_CollectNearbyZonesByAABB @0x5aa37a — ((d * d + 0x8000) >> 16)
 //  per axis, 16.16 squared distance in world^2] — the same metric the object
 // pass sorts by (light_scene.cpp); both live in light_scene_internal.h.
 using detail::axis_distance_term;
@@ -171,13 +236,13 @@ size_t LightScene::collect_terrain_pass_rows(
 		out[p].count = 0;
 	}
 	// The whole light leg is gated off with the pixel-shader terrain path
-	// [orig: PolyTrn_UsePixelShaderPath == 0 @0x6095e4] and by the render
+	// [orig: g_PolyTrnUsePixelShaderPath == 0 @0x6095e4] and by the render
 	// mode that skips the per-light loop [orig: dword_319FB84 @0x60983f].
 	if (!inputs.pixel_shader_path || inputs.light_pass_disabled) {
 		return 0;
 	}
 	// One pass snapshots the collection inputs in SLOT ORDER — the order the
-	// witnessed first-16 cap depends on [orig: collect_nearby_zones_by_aabb
+	// witnessed first-16 cap depends on [orig: Light_CollectNearbyZonesByAABB
 	// @0x5aa250 scans the table forward; hidden flag bit 2 skipped @0x5aa2a4].
 	struct CompactSlot {
 		LightHandle handle;
@@ -262,25 +327,43 @@ size_t LightScene::collect_terrain_pass_rows(
 			}
 			const float radius_world =
 					static_cast<float>(params.radius_fixed) / 65536.0f;
+			// 26214.4 / range on the ps.1.1 pass [orig:
+			// Light_SetupTerrainProjectedPassPS @0x5aab76], 32768 / range on
+			// the fixed-function one [orig: @0x5aa873].
 			row.inv_scale = terrain_project_scale(
-					radius_world, inputs.alt_pass);
+					radius_world, inputs.ps_light_pass);
 			// Record bytes /256 at spawn [orig: @0x5a8e51] x the live blend
-			// (f14) x the modulator ambient scale x the recip factor x 0.66,
-			// the gen multiply, then x 0.5 into the pixel constants
-			// [orig: Light_SetupTerrainProjectedPass @0x5aa9c8..0x5aaab3].
+			// (f14) x the modulator ambient scale x the recip factor, then the
+			// gen multiply.
 			std::array<float, 3> rgb = {
 				static_cast<float>(params.rgb[0]) / 256.0f,
 				static_cast<float>(params.rgb[1]) / 256.0f,
 				static_cast<float>(params.rgb[2]) / 256.0f,
 			};
 			for (int channel = 0; channel < 3; ++channel) {
-				rgb[channel] = terrain_light_ambient(
-						rgb[channel], slot.blend, inputs.ambient_scale[channel],
-						inputs.terrain_factor[channel]);
+				// The ps.1.1 pass uploads the product as c0 unfolded [orig:
+				// Light_SetupTerrainProjectedPassPS @0x5aad93..0x5aae8c]; the
+				// fixed-function pass adds x 0.66 and, into c4..c6, x 0.5
+				// [orig: Light_SetupTerrainProjectedPass @0x5aa9c8..0x5aaab3].
+				rgb[channel] = inputs.ps_light_pass
+						? terrain_light_ps_constant(rgb[channel], slot.blend,
+								  inputs.ambient_scale[channel],
+								  inputs.terrain_factor[channel])
+						: terrain_light_ambient(rgb[channel], slot.blend,
+								  inputs.ambient_scale[channel],
+								  inputs.terrain_factor[channel]);
 			}
-			// The gen multiply sits between the 0.66 and the 0.5 in retail;
-			// both are plain scalars, so the order does not change the product.
+			// The gen multiply follows the colour on both passes (between the
+			// 0.66 and the 0.5 on the fixed-function one; plain scalars, so the
+			// order does not change the product) [orig: @0x5aade5..0x5aae4c;
+			// @0x5aaa05..0x5aaa5f].
 			detail::apply_rgb_gen(params, inputs.flicker, rgb);
+			if (inputs.ps_light_pass) {
+				// The program reads c0 through the ps_1_x constant range.
+				for (float &channel : rgb) {
+					channel = terrain_light_ps_constant_register(channel);
+				}
+			}
 			row.pixel_rgb = rgb;
 			row.handle = candidates[i].entry->handle;
 			++rows.count;

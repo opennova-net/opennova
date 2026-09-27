@@ -1,5 +1,5 @@
 // The relative-position metrics against the original x86
-// [orig: compute_relative_position_metrics @0x545710]: quarter-turn yaw frames
+// [orig: Entity_ComputeRelativePositionMetrics @0x545710]: quarter-turn yaw frames
 // (exact in Q22 on both sides) with synthetic points. Both distances come from
 // `fild; fsqrt; fistp` under the nearest-even control word
 // (@0x5457CD..0x5457D3, @0x5457EC..0x5457F2); the two angles truncate through

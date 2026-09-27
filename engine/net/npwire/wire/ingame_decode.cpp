@@ -166,7 +166,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		// (@ 0x4330b1) reads both before falling through to the teamByte read.
 		// D-NET-56: an earlier reading put the extras inside `if (mask)`, which
 		// under-read by 4 B on the (0x400 set, mask==0) path. Retail servers
-		// never emit that case (serialize_entity_pool_to_packet_0 only sets
+		// never emit that case (NetPacket_SerializeEntityPoolToPacket_0 only sets
 		// 0x400 when the mask is non-zero), so the byte-witness capture didn't
 		// exercise it — but the client handler reads it, so the port must too.
 		// [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 LABEL_110)]
@@ -185,21 +185,30 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		rec.bone_byte = c.u8();  // entity+290, unconditional bone/other byte — NOT team (D-NET-58)
 
 		if (rec.spawn_flags & kPoolSpawnHasAiTrailer) {
+			rec.has_ai_trailer = true;
 			rec.ai_profile_1 = c.u32();
 			rec.ai_profile_2 = c.u32();
 			rec.ai_name = c.cstr();
 		}
 		if (rec.spawn_flags & kPoolSpawnHasRefNum) rec.alert_byte = c.u8();
 		if (rec.spawn_flags & kPoolSpawnHasSubType) rec.action_byte = c.u8();
-		if (rec.spawn_flags & kPoolSpawnHasWeaponTypeByte) rec.weapon_type_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasSoundLatchByte) {
+			rec.has_sound_latch_byte = true;
+			rec.sound_latch_byte = c.u8();
+		}
 
 		if (rec.spawn_flags & kPoolSpawnHasZoneNumberRank) {
+			rec.has_zone_number_rank = true;
 			rec.zone_number_rank = c.u8();
 			rec.zone_radius = c.u16();
 		} else if (rec.spawn_flags & kPoolSpawnHasZoneRadiusAlt) {
+			rec.has_zone_radius_alt = true;
 			rec.zone_radius = c.u16();
 		}
-		if (rec.spawn_flags & kPoolSpawnHasDifficultyByte) rec.difficulty_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasDifficultyByte) {
+			rec.has_difficulty_byte = true;
+			rec.difficulty_byte = c.u8();
+		}
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
@@ -307,7 +316,10 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		rec.ammo_count = c.u8();                                  // entity+290, unconditional
 		if (rec.field_flags & kStaticEntityHasRefNum) rec.bone_a = c.u8();
 		if (rec.field_flags & kStaticEntityHasSubType) rec.bone_b = c.u8();
-		if (rec.field_flags & kStaticEntityHasScoreFlag) rec.score_flag = c.u8();
+		if (rec.field_flags & kStaticEntityHasScoreFlag) {
+			rec.has_score_flag = true;
+			rec.score_flag = c.u8();
+		}
 		rec.weapon_byte = c.u8();                                 // entity+538, unconditional
 		if (rec.weapon_byte != 0 || (rec.field_flags & kStaticEntityHasAttachRef)) rec.attach_ref = c.u16();
 
@@ -617,7 +629,7 @@ bool decode_infantry_compact_record(const uint8_t *body, size_t len,
 }
 
 // 5-B entity-packet sub-header used by S2C 0x0C and C2S 0x0C alike.
-// [orig: dispatch_entity_packet_callback @ 0x4D6A80] reads it on the host side;
+// [orig: NetPacket_DispatchEntityPacketCallback @ 0x4D6A80] reads it on the host side;
 // [orig: Pool_SerializeEntityViaVTable @ 0x4D64E0] writes it on the sender side.
 bool decode_entity_packet_sub_header(const uint8_t *body, size_t len,
                                      EntityPacketSubHeader &out,
@@ -701,7 +713,7 @@ bool decode_client_fired_round(const uint8_t *body, size_t len,
 // C2S 0x21 anti-cheat CRC reply. Handler reads u8 + u32 = 5 B effective; the
 // 9-B body observed in capture has 4 trailing zero bytes that the handler
 // never touches. We expose `consumed` so the caller can see the 5 vs 9 split.
-// [orig: handle_anti_cheat_crc_check @ 0x502050]
+// [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck @ 0x502050]
 bool decode_client_checksum_reply(const uint8_t *body, size_t len,
                                   ClientChecksumReply &out, size_t &consumed) {
 	consumed = 0;
@@ -1154,7 +1166,7 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 	out.pitch = c.i16();
 	out.roll  = c.i16();
 	out.game_flags = c.u8();
-	// Fixed 128-entry ammo-pool table (loop fills [g_localAmmoPools, data) @ 0x42e324).
+	// Fixed 128-entry ammo-pool table (loop fills [g_LocalAmmoPools, data) @ 0x42e324).
 	for (int i = 0; i < kWorldStateAmmoPoolCount; ++i)
 		out.ammo_pools[i] = int32_t(c.u32());
 	out.waypoint_count = c.u16();
@@ -1249,7 +1261,7 @@ bool decode_burst_loadout_request(const uint8_t *body, size_t len,
 }
 
 // C2S 0x29 team/spawn ack. [orig: emitted with team_index+1 by the client's 0x51 apply
-// @0x431c99 and at deploy/team pick; the server reads it as a g_team_change_entity_list
+// @0x431c99 and at deploy/team pick; the server reads it as a g_TeamChangeEntityList
 // index — NapiNPServerMsg_0x029 @0x514F10 @0x514f7c — replying 0x51 only for a pending
 // team-change entry (D-NET-148)]
 bool decode_team_spawn_ack(const uint8_t *body, size_t len,
@@ -1396,7 +1408,7 @@ bool decode_medic_request(const uint8_t *body, size_t len,
 }
 
 // S2C 0x13 entity death (second path) — [u16 handle][i16 deathAnimStateId] (4 B).
-// [orig: BuildDeathNotifyPayload @0x5036E0; NapiNPClientMsg_EntityDeath @ 0x42EB50]
+// [orig: NetPacket_BuildDeathNotifyPayload @0x5036E0; NapiNPClientMsg_EntityDeath @ 0x42EB50]
 bool decode_entity_death(const uint8_t *body, size_t len,
                          EntityDeathRecord &out, size_t &consumed) {
 	consumed = 0;
@@ -1643,7 +1655,7 @@ bool decode_entity_routed_packet(const uint8_t *body, size_t len,
 // Witnessed byte-exact against the writer + reader (52-tile header chunk = 644 B,
 // 53-tile chunk = 640 B in operation_whitenoise). The 12-B tile entries are
 // opaque copies the network layer never interprets (D-NET-83).
-// [orig: serialize_terrain_tiles @ 0x6080F0 / PolyTrn_LoadTileData @ 0x6081D0 /
+// [orig: Terrain_SerializeTiles @ 0x6080F0 / PolyTrn_LoadTileData @ 0x6081D0 /
 //  NapiNPClientMsg_0x045 @ 0x422890]
 bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch &out) {
 	out = TerrainLoadBatch{};

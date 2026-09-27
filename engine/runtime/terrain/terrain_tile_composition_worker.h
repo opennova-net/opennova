@@ -167,7 +167,7 @@ private:
 		TerrainTileLightEpoch light{};
 		TerrainScorchPagePlan scorch;
 		std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> shadow;
-		// The requesting frame's Render_ShaderTickMs: the shared snapshot
+		// The requesting frame's g_RenderShaderTickMs: the shared snapshot
 		// never carries time, the job does.
 		uint32_t shadow_material_time_ms = 0;
 		bool capture_diagnostics = false;

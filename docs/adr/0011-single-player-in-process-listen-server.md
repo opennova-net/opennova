@@ -54,7 +54,7 @@ this, so MP/co-op is the same loop with the transport swapped rather than a late
    client-decoded state on every role. Retail does not: the listen host's own player receives a
    **header-only** 0x0A (anchor, flags1, phase byte, and the phase-0 block when `phase & 3 == 0`;
    no priority build `@0x517c1b`, no records/rounds/terminator `@0x50f07e`, parser return
-   `@0x430174`) and its local client **reads process memory** (`collect_visible_entities_for_terrain
+   `@0x430174`) and its local client **reads process memory** (`Terrain_CollectVisibleEntitiesForTerrain
    @0x5c8c60` walks the pools). The port now does the same: the host's loopback carries the
    session/lifecycle stream (the 0x0C/0x0D/0x10/0x20 spawn batches, 0x50, kill feed, chat, timers)
    plus that header-only 0x0A, and **the host's present pass reads its own pools**

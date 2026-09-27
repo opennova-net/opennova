@@ -9,7 +9,7 @@ const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
 
 
 func _catalog_file() -> ParticleFile:
-	return ParticleFixture.catalog("wake dots",
+	return ParticleFixture.catalog(self, "wake dots",
 			"emit_dur = 0.1;\nemit_rate = 30;\nemit_rate_adj = 30;\nemit_burst = 1;\ny_offset = 2;\nz_offset = 4;\nage = 1;\nflags = FOREVEREMIT;\n", [W3_EFFECT, W4_EFFECT])
 
 
@@ -74,6 +74,9 @@ func test_points_follow_sampled_pose_and_tune_without_respawn() -> void:
 		return
 	var a_id := int(a.id)
 	var b_id := int(b.id)
+	# Every trail lane spawns with the vehicle as its descriptor tag, so each
+	# group takes the building-section gate (the engine row carries the witness).
+	assert_true(a.section_tagged and b.section_tagged, "trail groups are section-tagged")
 	assert_almost_eq(_emitter(a).emit_rate, 45.0, 0.0001)
 	assert_almost_eq(_emitter(b).emit_rate, 15.0, 0.0001)
 	# The offset control turns the authored y_offset 2 + z_offset 4 * (2 * magnitude - 1)

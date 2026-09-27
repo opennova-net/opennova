@@ -115,12 +115,16 @@ int main() {
 		inmatch::Session session(rig.role());
 		if (!expect(session.begin_load().applied() && session.complete_load().applied(), "the session loads")) return 1;
 		inmatch::FrameInput frame;
+		// The retail bank: the cold first frame is unsmoothed (16 + 512 units, 8
+		// quanta); the 1 ms frame is smoothed against it ((7 * 528 + 32 + 4) >> 3
+		// = 466 units, 7 quanta from phase 8); the stall clamps to 8000 units,
+		// 125 quanta from phase 15.
 		frame.delta_seconds = 0.032;
 		expect(session.advance(frame).ticks_run() == 2, "inmatch::Session::advance(0.032) runs 2 ticks");
 		frame.delta_seconds = 0.001;
-		expect(session.advance(frame).ticks_run() == 0, "inmatch::Session::advance(0.001) runs 0 ticks");
+		expect(session.advance(frame).ticks_run() == 2, "inmatch::Session::advance(0.001) runs 2 ticks (EMA carry)");
 		frame.delta_seconds = 2.0;
-		expect(session.advance(frame).ticks_run() == 31, "inmatch::Session::advance(2.0) runs 31 ticks (spiral clamp)");
+		expect(session.advance(frame).ticks_run() == 31, "inmatch::Session::advance(2.0) runs 31 ticks (500 ms clamp)");
 	}
 
 	// --- The S9 boot on the retail data through the engine's boot policy: the

@@ -28,20 +28,24 @@ namespace {
 struct FrameHeaderState {
 	// flags1 [orig: NetPacket_WritePlayerState @0x4ff793-0x4ff7dd]: bit0 = spectator
 	// (slot+100567), bit1 = RESPAWN-PENDING (slot+89912 & 0x10) — re-asserted
-	// EVERY frame; the client's deploy screen is g_deploy_screen_active = (flags1 & 2) != 0 each frame,
+	// EVERY frame; the client's deploy screen is g_DeployScreenActive = (flags1 & 2) != 0 each frame,
 	// so one bit1=0 frame closes it [orig: NapiNPClientMsg_0x00A @0x42ff82]. bit2 = the
 	// owned entity's hit-feedback latch (entity+44 & 0x1000, consumed once per
 	// recipient under the hitFeedback option — modeled in emit_connection_s2c)
 	// [orig: NetPacket_WritePlayerState @0x4FF7C5..0x4FF7D9]. (D-NET-156)
 	uint8_t flags1 = 0;
 	// The live fall-damage tolerance and breath seconds the sub-block-1 timer
-	// state carries (World::wac_values.fallmps = wac_var_fallmps, .breathtime =
-	// wac_var_breathtime): a value above 0xFF crosses as 0xFF, anything else (a
+	// state carries (World::wac_values.fallmps = g_WacVarFallMps, .breathtime =
+	// g_WacVarBreathTime): a value above 0xFF crosses as 0xFF, anything else (a
 	// negative one included, the compares are signed) as its low byte.
 	// [orig: NetPacket_WritePlayerState breathtime @0x4FF9DB..0x4FFA0A,
 	//  fallmps @0x4ffa14..0x4FFA48]
 	uint8_t fallmps = 13;
 	uint8_t breathtime = 20;
+	// The host's measured frame rate, crossing as its low byte (g_ServerFps,
+	// copied from g_StatsAvgFps at the head of every Server_TickUpdate).
+	// [orig: NetPacket_WritePlayerState `mov cl, byte ptr g_ServerFps` @0x4FFA5C]
+	uint8_t server_fps = 0;
 	// Tail state byte bits 0-1 = the recipient's OWN [prone, crouch] echo — the client
 	// re-latches its stance from this EVERY frame [orig: tail read @0x4303e5 (byte << 8 ->
 	// MoveOrder bits 8-9) -> latches @0x430562/@0x430570]; a hardcoded 0 force-stands a
@@ -50,7 +54,7 @@ struct FrameHeaderState {
 	// Tail mount handle = the recipient's OWN carrier (its ridden vehicle), 0xFFFF free.
 	uint16_t tail_mount_handle = 0xFFFF;
 	// Tail health = the recipient's LIVE Health — the client STORES it as its own
-	// (g_local_player_entity->Health @0x4305df); 0 is the victim's death signal (with the
+	// (g_LocalPlayerEntity->Health @0x4305df); 0 is the victim's death signal (with the
 	// record byte13 dead bit). The pre-v34 hardcoded 150 meant a killed client never
 	// learned it died. A decrease also fires the brief damage flash [orig: @0x43059a].
 	int16_t tail_health = 150;
@@ -58,7 +62,7 @@ struct FrameHeaderState {
 	// derived once before budgeting so the conditional header width and bytes agree.
 	uint8_t preround_delay_seconds = 0;
 	// The authority's round clock in 62 Hz ticks (-1 = untimed), for the
-	// phase-1 timer projection [orig: g_round_time_remaining read @0x4ffa8d].
+	// phase-1 timer projection [orig: g_RoundTimeRemaining read @0x4ffa8d].
 	int32_t round_time_remaining_ticks = -1;
 	uint8_t respawn_delay_seconds = 0;
 	uint8_t downed_revive_seconds = 0;
@@ -86,7 +90,7 @@ struct FrameHeaderState {
 // position compressed relative to the anchor). Faithful port of the header writer
 // [orig: NetPacket_WritePlayerState @0x4ff6b0]: `flags2` is the per-connection phase byte and
 // `flags2 & 3` selects the sub-block (0 weapon / 1 server-status / 2 env / 3 gametype). The entity
-// loop mirrors serialize_entity_states_to_packet @0x50f070 (priority/budget port = step 2).
+// loop mirrors NetPacket_SerializeEntityStatesToPacket @0x50f070 (priority/budget port = step 2).
 // [orig: NapiNPClientMsg_0x00A @0x42FEC0 (reader) / NetPacket_SerializePlayerState case 1 @0x4C09C0]
 std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
                                     const std::vector<GameEntitySnapshot> &entities, uint8_t flags2,
@@ -131,7 +135,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		break;
 	case 1:
 		// Server-status block [orig: @0x4ff9d5 phase-1]. LOAD-BEARING — carries the client's
-		// fall-damage tolerance wac_var_fallmps. Left at its BSS default 0, the body motor's landing check
+		// fall-damage tolerance g_WacVarFallMps. Left at its BSS default 0, the body motor's landing check
 		// `velZ <= C6EAE4 * -1057` has threshold 0, so per-frame micro-gravity trips fall damage EVERY
 		// grounded frame -> constant screen-red + shake + minimap-red (Player_OnDamageReceived), though
 		// the player never dies (health loss is authority-gated). The client PERSISTS these between
@@ -139,20 +143,20 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// landing check @0x4b7cf4-0x4b7d2d; NapiNPClientMsg_0x00A phase-1 read @0x4301a1-0x4301bc;
 		// defaults @0x4f638b C6EAE0=20/C6EAE4=13; grill 2026-06-28.]
 		fu.timer.present = true;
-		// wac_var_breathtime is the breath-seconds named value (20 from
+		// g_WacVarBreathTime is the breath-seconds named value (20 from
 		// WacScript_FreeAll @0x4F6381; a script may set it), capped to the byte
 		// [orig: @0x4FF9DB..0x4FFA0A]; the host's breath timer reads the same value.
 		fu.timer.state0 = hdr.breathtime;
-		fu.timer.state1 = hdr.fallmps; // wac_var_fallmps = fallmps, the fall-damage tolerance (0 => constant fall dmg)
-		// g_serverFps / g_serverCpuPct are the host's measured frame statistics
-		// [orig: @0x4FFA62/@0x4FFA7C]; this headless host runs a fixed 62.5 Hz
-		// tick and carries no CPU measurement, so it reports its nominal rate.
-		fu.timer.state2 = 62;
+		fu.timer.state1 = hdr.fallmps; // g_WacVarFallMps = fallmps, the fall-damage tolerance (0 => constant fall dmg)
+		// g_ServerFps / g_ServerCpuPct are the host's measured frame statistics
+		// [orig: @0x4FFA62/@0x4FFA7C]: the fps byte is the main loop's FR
+		// counter; the port carries no CPU measurement, so that byte stays 0.
+		fu.timer.state2 = hdr.server_fps;
 		fu.timer.state3 = 0;
 		// The round clock's wire projection: whole seconds (ticks / 62) only
 		// while no pre-round countdown runs and time remains; else -1.
 		// [orig: NetPacket_WritePlayerState @0x4ffa81..0x4ffaca —
-		//  g_preround_delay_timer gate, jle on g_round_time_remaining,
+		//  g_PreRoundDelayTimer gate, jle on g_RoundTimeRemaining,
 		//  the /62 magic-multiply, 0xFFFF otherwise]
 		fu.timer.timer_seconds =
 				(hdr.preround_delay_seconds == 0 &&
@@ -182,7 +186,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	// re-latches from it every frame) + its own carrier handle. See FrameHeaderState.
 	fu.state_flag_byte = hdr.tail_state_byte;
 	fu.mount_handle = hdr.tail_mount_handle;
-	// TAIL health (v121) -> g_local_player_entity->Health [orig: @0x4305df] — the recipient's
+	// TAIL health (v121) -> g_LocalPlayerEntity->Health [orig: @0x4305df] — the recipient's
 	// LIVE health (FrameHeaderState.tail_health): the client STORES it as its own, so damage
 	// reads red (the decrease-detector flash [orig: @0x43059a]) and 0 is the authoritative
 	// death signal (paired with the record byte13 dead bit — the v33 "killee never knows"
@@ -267,7 +271,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			                                            // bit0 = hidden while respawn-pending
 			                                            // (the golden pre-deploy 0x01 byte13)]
 			// Body-anim state id, pending-wins [orig: @0x4c0cc7 reads +0x2B8 ?: +0x2BC; client
-			// apply @0x4c1153 arbitrates vs the g_animStateFlagsTable table]. Live states come from the
+			// apply @0x4c1153 arbitrates vs the g_AnimStateFlagsTable table]. Live states come from the
 			// infantry motor's wire mirror — the authority selection pass drives remote
 			// players from their replicated input (D-NET-159; the 43-hardcode was v31's
 			// frozen-body defect).
@@ -435,7 +439,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		fu.records.push_back(std::move(rec));
 	}
 	// Tag-2 fired-round events, already recipient-selected + wire-converted by
-	// select_round_events [orig: the g_round_event_refs interleave @0x50f312].
+	// select_round_events [orig: the g_RoundEventRefs interleave @0x50f312].
 	fu.round_events = std::move(round_events);
 	return encode_frame_update(fu, authority_recipient);
 }
@@ -470,10 +474,10 @@ PlayerReplicationState anchor_for_owned_entity(const world::Entity &entity) {
 // Per-frame entity SELECTION for one recipient — the priority + aging + budget
 // half of the original per-recipient send [orig: Server_BuildEntityPriorityList
 // @ 0x50e590 (build + shell-sort the priority pairlist) and the budget-limited
-// loop of serialize_entity_states_to_packet @ 0x50f070].
+// loop of NetPacket_SerializeEntityStatesToPacket @ 0x50f070].
 // ---------------------------------------------------------------------------
 
-// g_entity_send_budget @0xC8FC50: the per-frame 0x0A byte cap, INCLUDING the header
+// g_EntitySendBudget @0xC8FC50: the per-frame 0x0A byte cap, INCLUDING the header
 // bytes (the original measures packet[3]-packet[0] where the header is already
 // written). Default 600, set in Server_InitNewRoundState @0x51ca7c; runtime-writable
 // via the BANDWIDTH server command (100-1600). Per-recipient backoff is
@@ -492,7 +496,7 @@ int g_view_distance_units = 0;
 
 void set_entity_send_budget(int bytes) {
 	// The witnessed BANDWIDTH server-command clamp [orig: 100-1600 onto
-	// g_entity_send_budget @0xC8FC50].
+	// g_EntitySendBudget @0xC8FC50].
 	if (bytes < 100) bytes = 100;
 	if (bytes > 1600) bytes = 1600;
 	g_entity_send_budget = bytes;
@@ -888,7 +892,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 	std::stable_sort(scored.begin(), scored.end(),
 	                 [](const ScoredRound &a, const ScoredRound &b) { return a.score > b.score; });
 
-	// Convert to wire records — capped at 255 [orig: the g_round_event_refs array
+	// Convert to wire records — capped at 255 [orig: the g_RoundEventRefs array
 	// @0x500190] and by the remaining frame budget (soft cap, like the tag-1 walk
 	// [orig: @0x50f34b]).
 	std::size_t written = 0;
@@ -913,7 +917,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		}
 		rec.shot_seq = ev.shot_seq;
 		// Fire origin compressed against the SAME anchor the frame header carries
-		// [orig: @0x504994 subtracts g_priority_ref_x/y/z — the recipient refs].
+		// [orig: @0x504994 subtracts g_PriorityRefX/Y/Z — the recipient refs].
 		rec.pos_x_compressed = network_compress_fixedpoint(int32_t(ev.origin_x - int32_t(ax)));
 		rec.pos_y_compressed = network_compress_fixedpoint(int32_t(ev.origin_y - int32_t(ay)));
 		rec.pos_z_compressed = network_compress_fixedpoint(int32_t(ev.origin_z - int32_t(az)));
@@ -974,7 +978,7 @@ bool apply_connection_uplink(world::World &world, Connection &conn,
 	// naming any other entity is silently ignored — no apply, rejection, or disconnect (returns
 	// 0 @0x4d6b7e). An invalid owner (the host's own loopback, or a pre-spawn joiner) matches
 	// nothing, mirroring the original's `owner_ctx != null` guard @0x4d6ad3. [orig:
-	// dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx` @0x4d6b08; owner_ctx <-
+	// NetPacket_DispatchEntityPacketCallback @0x4D6A80 `entity == *owner_ctx` @0x4d6b08; owner_ctx <-
 	// NapiNPServerMsg_0x00C @0x501c30 connCtx+0x160 -> +0xC0 -> *.]
 	if (world::EntityHandle{hdr.handle} != conn.owned_entity) return false;
 
@@ -1060,9 +1064,11 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type,
-                         std::size_t max_frame_body_bytes) {
+                         std::size_t max_frame_body_bytes,
+                         int32_t server_fps) {
 	std::vector<uint8_t> frame;
-	if (!build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes))
+	if (!build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes,
+	                          server_fps))
 		return false;
 	devtools::ProfileLap lap(w.profile);
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
@@ -1075,7 +1081,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           const std::vector<GameEntitySnapshot> &ents,
                           std::vector<uint8_t> &frame_out,
                           uint32_t game_type,
-                          std::size_t max_frame_body_bytes) {
+                          std::size_t max_frame_body_bytes,
+                          int32_t server_fps) {
 	devtools::ProfileLap lap(w.profile);
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
@@ -1128,11 +1135,12 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			? uint8_t{0xFF}
 			: static_cast<uint8_t>(w.script.wac_values.breathtime);
 	hs.round_time_remaining_ticks = w.match.remaining_ticks();
+	hs.server_fps = static_cast<uint8_t>(server_fps);
 	// The weather home's native globals narrowed exactly once here
-	// [orig: NetPacket_WritePlayerState @0x4ff6b0 — Env_FogDistTarget hi word,
-	// (Env_FogDistAccelClamp capped 0xFF0000 + 0xFF) >> 8, (Env_CurTimeFixed24
-	// + 0x1000) >> 13, Env_QuakeTicks byte, Env_CloudScrollRateTarget >> 10,
-	// Env_RainPctCurrent >> 8, Env_OvercastBlend >> 8, the kind byte].
+	// [orig: NetPacket_WritePlayerState @0x4ff6b0 — g_EnvFogDistTarget hi word,
+	// (g_EnvFogDistAccelClamp capped 0xFF0000 + 0xFF) >> 8, (g_EnvCurTimeFixed24
+	// + 0x1000) >> 13, g_EnvQuakeTicks byte, g_EnvCloudScrollRateTarget >> 10,
+	// g_EnvRainPctCurrent >> 8, g_EnvOvercastBlend >> 8, the kind byte].
 	const world::WeatherState &env = w.weather;
 	hs.env.present = true;
 	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16() >> 16);
@@ -1192,8 +1200,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// build (@0x517c1b), no records/rounds/terminator (@0x50f07e) — its local
 	// client presents from the pools the host already owns (D-NET-140 closed;
 	// ADR 0011 Decision 1). The recipient is local iff its owned entity IS
-	// g_local_player_entity [orig: Server_SendEntityStateToPlayer @0x517c11
-	// compares the recipient entity against g_local_player_entity].
+	// g_LocalPlayerEntity [orig: Server_SendEntityStateToPlayer @0x517c11
+	// compares the recipient entity against g_LocalPlayerEntity].
 	const bool local_recipient = w.cached.local_player.valid() &&
 			conn.owned_entity == w.cached.local_player;
 	if (local_recipient) {
@@ -1207,7 +1215,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	}
 
 	// Priority + aging + byte-budget selection of this frame's tag-1 records [orig:
-	// Server_BuildEntityPriorityList @ 0x50e590 + the serialize_entity_states_to_packet
+	// Server_BuildEntityPriorityList @ 0x50e590 + the NetPacket_SerializeEntityStatesToPacket
 	// @ 0x50f070 budget loop].
 	const std::size_t header_bytes = frame_header_bytes(flags2, game_type, hs);
 	const std::size_t hard_event_bytes = max_frame_body_bytes == 0

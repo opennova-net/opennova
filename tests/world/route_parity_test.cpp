@@ -217,7 +217,7 @@ void test_player_pilot_holds_pretty() {
 // row and the lookup scans from row 0.
 // [orig: Entity_SpawnFromBMSRecord `mov [esi+1Ch],ebp` @0x40EBFC;
 //  ItemList_FindIndexByTypeId @0x49E100; ItemDef_AllocateWithDefaults bumps
-//  gItemCount @0x49E3BE]
+//  g_ItemCount @0x49E3BE]
 void test_item_type_index_is_the_first_row_ordinal() {
     static const char kItems[] = R"(begin "Null"
   id 100000
@@ -316,7 +316,7 @@ void test_avoid_brake_item_index_gates() {
         // keyed on the entity-update counter, which here differs from the tick.
         // [orig: Entity_UpdateWatercraftPhysics @0x48E712,
         //  Entity_UpdateAircraftPhysics @0x491B2D, Entity_UpdateVehiclePhysics
-        //  @0x48BF26 (the g_entity_update_counter reads)]
+        //  @0x48BF26 (the g_EntityUpdateCounter reads)]
         r.w.entity_update_counter = 5;
         const int32_t braked = static_cast<int32_t>(
                 ((static_cast<uint32_t>(r.helo().net_id) +

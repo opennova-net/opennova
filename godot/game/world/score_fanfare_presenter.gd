@@ -6,7 +6,7 @@ extends RefCounted
 ## key `enable_slotmachine` (default 0). The tone itself is the sim's decision
 ## (engine/runtime/hud/score_fanfare.h); this lane only plays it.
 ## [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0 -> Sound_PlayInterfaceTriggerSet
-##  @0x527be0 (ex "PlaySoundOnDedicatedServer") when g_EnableSlotMachine
+##  @0x527be0 (ex "PlaySoundOnDedicatedServer") when g_GameConfigState.enableSlotMachine_1F4
 ##  @0x25508ac; Config_SetDefaults @0x54d165 stores 0; parsed by atol @0x54fdfb]
 
 const CONFIG_PATH := "user://settings.cfg"

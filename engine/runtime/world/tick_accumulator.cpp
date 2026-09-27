@@ -5,24 +5,6 @@
 namespace opennova::world {
 
 int TickAccumulator::bank(double delta) {
-	return policy_ == TickBankPolicy::WallClock ? bank_wall_clock(delta)
-	                                            : bank_retail_main_loop(delta);
-}
-
-int TickAccumulator::bank_wall_clock(double delta) {
-	accum_ += delta;
-	int n = static_cast<int>(accum_ / kTickDt);
-	if (n <= 0) return 0;
-	accum_ -= static_cast<double>(n) * kTickDt;
-	if (n > kMaxCatchupTicks) {
-		n = kMaxCatchupTicks;
-		// Drop the backlog so a load hitch doesn't spiral into the next frames.
-		accum_ = 0.0;
-	}
-	return n;
-}
-
-int TickAccumulator::bank_retail_main_loop(double delta) {
 	// GetTickCount is a millisecond clock; keep the sub-unit remainder so a
 	// steady sub-millisecond frame stream still conserves time.
 	const double units = delta * 1000.0 * kUnitsPerMs + carry_;
@@ -38,6 +20,17 @@ int TickAccumulator::bank_retail_main_loop(double delta) {
 		bank_ = kBankClampUnits;
 	}
 	smoothed_ = bank_;
+
+	// The FR counter: count the frame and sum its smoothed bank; a full window
+	// publishes frames * 16000 / sum (unsigned) and restarts both counters
+	// [orig: @0x52B8ED, @0x52B8F4, @0x52B91A, @0x52B952..0x52B98F].
+	++frame_count_;
+	frame_time_sum_ += static_cast<uint32_t>(bank_);
+	if (frame_time_sum_ >= kFrameRateWindowUnits) {
+		average_fps_ = static_cast<int32_t>(frame_count_ * kUnitsPerSecond / frame_time_sum_);
+		frame_count_ = 0;
+		frame_time_sum_ = 0;
+	}
 
 	// Drain 4 ms quanta while at least 4 ms remain; the logic update runs on
 	// every fourth phase [orig: @0x52BA08..0x52BA6B].

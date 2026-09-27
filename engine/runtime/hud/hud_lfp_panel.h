@@ -27,8 +27,8 @@ namespace opennova::hud {
 // own row (Y += 86 per marker @0x5a2781) with the status text drawn per
 // marker — not modelled here.
 
-// Team colours, ARGB — the three g_hudColorTable entries the marker reads
-// [orig: team 1 g_hudColorLightBlue @0x24C1844 = table[3], team 2
+// Team colours, ARGB — the three g_HUDColors entries the marker reads
+// [orig: team 1 g_HUDColors.palette[3] @0x24C1844 = table[3], team 2
 //  dword_24C184C = table[5], neutral / other dword_24C183C = table[1] —
 //  selected @0x598746..0x598751 in HUD_DrawZoneMarker; the immediates written
 //  by HUD_InitTeamColorTable @0x51f26d / @0x51f259 / @0x51f263].
@@ -67,14 +67,14 @@ inline constexpr int kLfpBarY2 = 0x52;
 // differ, so one shared step would drift.
 //
 // A group is RIGHT-ANCHORED to the panel X: its first marker sits at
-// `g_hudZonePanelX - 98 * zonesInGroup` (`esi = g_hudZonePanelX - 0x62*count`
+// `g_HUDZonePanelX - 98 * zonesInGroup` (`esi = g_HUDZonePanelX - 0x62*count`
 // @0x5a2589..0x5a259d, where count is that team's zone count from the first
 // pass @0x5a24c5..0x5a24ea), so the group ends one pitch short of the anchor.
-// The panel anchor is the hudpos-authored pair g_hudZonePanelX/Y
+// The panel anchor is the hudpos-authored pair g_HUDZonePanelX/Y
 // [orig: the hudpos writes @0x5a0563 / @0x5a057b].
 //
 // Every marker row AND its status text sit 12 px below the group's row base:
-// the Y cursor starts at `g_hudZonePanelY + 12` (`x_position = x_base + 12`
+// the Y cursor starts at `g_HUDZonePanelY + 12` (`x_position = x_base + 12`
 // @0x5a25bd) and both the marker call (arg 1 @0x5a2799) and the text call take
 // that cursor, while the 86 step advances both [orig: @0x5a2667..0x5a2676].
 //
@@ -92,7 +92,7 @@ inline constexpr int kLfpRowDy = 12;   // the STATUS TEXT's +12 over its group's
 inline constexpr int kLfpStatusTextDx = -4;
 
 // The icon quad's constant modulate [orig: CEffect_Begin_Debug @0x67BB50, a
-// thunk to draw_tiled_texture_strip @0x67AED0 (effect, rect[4], colour, frame);
+// thunk to Render_DrawTiledTextureStrip @0x67AED0 (effect, rect[4], colour, frame);
 // the colour push 0xFF7F7F7F @0x598975, the call @0x59898B]. The three LFP
 // textures already carry their own team colours, so this is a flat BRIGHTNESS
 // term, not a tint — replacing it with the team colour would double-apply it.
@@ -100,7 +100,7 @@ inline constexpr uint32_t kLfpIconModulate = 0xFF7F7F7Fu;
 
 // The icon textures are VERTICAL FRAME ATLASES (retail ships 64x256 = four
 // 64x64 frames) and the strip renderer selects one row by the strip's
-// per-row pixel height [orig: render_tiled_image_strip @0x67B540 —
+// per-row pixel height [orig: Render_TiledImageStrip @0x67B540 —
 //  row_start = row * this[5] @0x67B5C2, bounded against this[4] (the total
 //  height) @0x67B5D8; this[5] equals the width only because the LFP frames
 //  are square].
@@ -136,7 +136,7 @@ inline bool lfp_zone_under_attack(int zone_team, int viewer_team, int rate) {
 
 // THE BLINK PHASE. Retail's HUD frame counter advances once per main frame
 // (gated on no suicide / no epilog) and the marker tests `counter & 0x18`
-// [orig: g_hudFrameCounter @0xA87064, ++ in Game_TickHudFrameCounters
+// [orig: g_HUDFrameCounter @0xA87064, ++ in Game_TickHudFrameCounters
 //  @0x434C00 from Game_ProcessMainFrame @0x5265d5; the tests @0x5988E8 /
 //  @0x5988FB / @0x59891D]. That mask is not a 50/50 blink: phase A is 8
 // counts of every 32 and phase B the remaining 24.
@@ -234,7 +234,7 @@ inline int lfp_format_distance(char *buf, size_t len, int metres) {
 // A marker's origin: the group is right-anchored to the panel X and steps
 // across by kLfpStepX per marker; each group steps down by kLfpStepY from the
 // PANEL Y. The marker takes the group's Y accumulator itself, NOT the status
-// text's row: the drawer seeds the stack slot from g_hudZonePanelY, adds 86
+// text's row: the drawer seeds the stack slot from g_HUDZonePanelY, adds 86
 // per group and pushes that slot as the marker's y, while the +12 lives in a
 // separate register that only the status-text call reads
 // [orig: seed @0x5a249d; `add [esp+y], 56h` @0x5a2667 vs `add ebx, 56h`

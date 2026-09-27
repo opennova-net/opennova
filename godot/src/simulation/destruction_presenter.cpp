@@ -18,6 +18,7 @@
 #include "lights/effect_light_director.h"
 #include "mission/mission_data.h"
 #include "particle/effect_world.h"
+#include "render/object_lod_frame.h"
 #include "render/visual_layers.h"
 #include "simulation/effect_owner_keys.h"
 #include "simulation/entity_presenter.h"
@@ -509,8 +510,11 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 	const int wire_handle = static_cast<int>(p_effect.attach_wire_handle);
 	const bool dynamic_identity = uses_dynamic_husk_identity(
 			bms_id, spawn_origin, wire_handle);
+	// The row's descriptor tag (the engine producer sets it) decides whether
+	// the group takes the building-section gate.
 	if (family == 0 || (net_id == 0 && !dynamic_identity)) {
-		fx_world->spawn_effect(effect, pos, mission_to_godot(p_effect.dir));
+		fx_world->spawn_effect(effect, pos, mission_to_godot(p_effect.dir),
+				p_effect.section_tagged);
 		++stat_effects_;
 		return;
 	}
@@ -531,8 +535,24 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 		burning_.erase(key);
 		return;
 	}
-	attached_groups_[key] =
-			fx_world->spawn_effect_owned(key, effect, pos, mission_to_godot(p_effect.dir));
+	if (p_effect.positioned) {
+		// The slot holds the group for its next release only: a world-bound
+		// spawn under the slot key, with no owner pose to follow.
+		unregister_effect_anchor(key);
+		wreck_anchor_keys_.erase(key);
+		Ref<EffectSpawnOptions> options;
+		options.instantiate();
+		options->set_admission(EffectWorld::ADMISSION_REPLACE_OWNED);
+		options->set_slot_key(key);
+		options->set_section_tagged(p_effect.section_tagged);
+		const Ref<EffectSpawnReceipt> receipt = fx_world->spawn_effect_request(effect,
+				EffectWorld::descriptor_pose(pos, mission_to_godot(p_effect.dir)), options);
+		attached_groups_[key] = receipt.is_valid() ? receipt->get_group_id() : 0;
+		++stat_effects_;
+		return;
+	}
+	attached_groups_[key] = fx_world->spawn_effect_owned(key, effect, pos,
+			mission_to_godot(p_effect.dir), p_effect.section_tagged);
 	++stat_effects_;
 	if (anchors_.is_valid()) {
 		Node3D *node = nullptr;
@@ -645,10 +665,12 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 		if (is_new_generation) {
 			// The type's trail effect from the ONE native table
 			// (world/destruction death_piece_trail_effect, S12b)
-			// [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+			// [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C].
 			const String trail(opennova::world::death_piece_trail_effect(piece.type_index));
 			if (fx_world != nullptr && !trail.is_empty()) {
 				const String key = piece_owner_key(slot);
+				// Untagged: every death-piece submit carries tag 0 (the engine
+				// table death_piece_trail_effect carries the witness).
 				fx_world->spawn_effect_owned(key, trail, pos, Vector3(0, 1, 0));
 				if (anchors_.is_valid()) {
 					anchors_->register_effect_anchor(key,
@@ -684,9 +706,9 @@ ObjectModel *DestructionPresenter::build_piece_model(int p_slot, int p_item_id) 
 		return nullptr;
 	}
 	const int def_id = p_item_id + MissionData::ITEM_ID_OFFSET; // wire type id -> items.def id
-	const std::string husk = item_db_->get_husk(def_id).utf8().get_data();
-	const std::string huskfinal = item_db_->get_huskfinal(def_id).utf8().get_data();
-	const String graphic(opennova::world::death_piece_graphic(husk, huskfinal).c_str());
+	const std::string husk = opennova::to_std(item_db_->get_husk(def_id));
+	const std::string huskfinal = opennova::to_std(item_db_->get_huskfinal(def_id));
+	const String graphic = opennova::to_gd(opennova::world::death_piece_graphic(husk, huskfinal));
 	if (graphic.is_empty()) {
 		return nullptr;
 	}
@@ -694,7 +716,7 @@ ObjectModel *DestructionPresenter::build_piece_model(int p_slot, int p_item_id) 
 			graphic, String(), parent, String(), String(), true);
 	if (model == nullptr && !huskfinal.empty() && !husk.empty()) {
 		model = placer_->build_model_from_graphic(
-				String(husk.c_str()), String(), parent, String(), String(), true);
+				opennova::to_gd(husk), String(), parent, String(), String(), true);
 	}
 	if (model == nullptr) {
 		return nullptr;
@@ -724,7 +746,7 @@ ObjectModel *DestructionPresenter::piece_model(int p_slot) const {
 // ftol(scale * 65536)) * T(-centre of the drawn section's COBJ row), every
 // bone matrix the same. The pose converts like every entity's (the BAM heading
 // is 90 - the mission yaw); the COBJ centre is in the model's own axes, (x, y,
-// z) -> the model node's (y, z, x) (render/object_lod_frame projection_center).
+// z) -> the model node's (y, z, x) (ObjectLodFrame::cobj_center_local).
 Transform3D DestructionPresenter::piece_draw_transform(
 		const opennova::world::DeathPieceDraw &p_draw) {
 	const Basis basis = bms_to_godot_basis(
@@ -732,8 +754,7 @@ Transform3D DestructionPresenter::piece_draw_transform(
 								.scaled(Vector3(p_draw.scale, p_draw.scale, p_draw.scale));
 	Transform3D transform(basis, mission_to_godot(p_draw.pos));
 	if (p_draw.pivoted) {
-		const Vector3 centre(p_draw.pivot_q16[1] / 65536.0f, p_draw.pivot_q16[2] / 65536.0f,
-				p_draw.pivot_q16[0] / 65536.0f);
+		const Vector3 centre = ObjectLodFrame::cobj_center_local(p_draw.pivot_q16);
 		transform = transform * Transform3D(Basis(), -centre);
 	}
 	return transform;
@@ -759,6 +780,46 @@ void DestructionPresenter::apply_piece_draws(
 		model->set_destroyed_section_mask(draw.hidden_mask);
 		model->set_transform(piece_draw_transform(draw));
 		model->set_present_visible(true);
+		model->set_occlusion_hidden(false);
+		drawn.insert(draw.slot);
+	}
+	// A piece this view's collect did not draw is the view's verdict (the
+	// occlusion bit), so the weapon Inset's own collect can still draw it
+	// (apply_piece_draws_inset).
+	for (const KeyValue<int, ObjectID> &kv : piece_models_) {
+		if (drawn.has(kv.key)) {
+			continue;
+		}
+		if (ObjectModel *model = piece_model(kv.key)) {
+			model->set_occlusion_hidden(true);
+		}
+	}
+}
+
+// The weapon Inset pass's own piece draws: its collect runs the piece
+// collect again over the Inset camera, and its draws carry their own level
+// (the engine's collect_death_piece_draws carries the witness). A piece the
+// Inset draws takes that level as the model's Inset state, drawn by its twin
+// where the main view's differs; a piece it does not draw is hidden there.
+void DestructionPresenter::apply_piece_draws_inset(
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	HashSet<int> drawn;
+	for (const opennova::world::DeathPieceDraw &draw : p_draws) {
+		const int64_t *generation = piece_generation_.getptr(draw.slot);
+		if (generation == nullptr || *generation != static_cast<int64_t>(draw.generation)) {
+			continue;
+		}
+		ObjectModel *model = piece_model(draw.slot);
+		if (model == nullptr) {
+			continue;
+		}
+		// The piece's own pose and collapsed sections are the piece's state,
+		// not the view's: a piece only the Inset draws still needs them.
+		model->set_destroyed_section_mask(draw.hidden_mask);
+		model->set_transform(piece_draw_transform(draw));
+		model->set_present_visible(true);
+		model->set_inset_view_lod(draw.lod_level);
+		model->set_inset_occlusion_hidden(false);
 		drawn.insert(draw.slot);
 	}
 	for (const KeyValue<int, ObjectID> &kv : piece_models_) {
@@ -766,7 +827,7 @@ void DestructionPresenter::apply_piece_draws(
 			continue;
 		}
 		if (ObjectModel *model = piece_model(kv.key)) {
-			model->set_present_visible(false);
+			model->set_inset_occlusion_hidden(true);
 		}
 	}
 }

@@ -31,7 +31,7 @@ constexpr float kDegenerateArea = 1.0e-12f;
 // [orig: float clamp @ 0x60D33F..0x60D341, fixed twin (0x4000)
 // @ 0x60d325..0x60d32c].
 constexpr float kMinimumVerticalLight = 0.25f;
-// Projected depth h*0.0005 - 0.00005 [orig: setup_shadow_cascade_matrices_0
+// Projected depth h*0.0005 - 0.00005 [orig: RenderSlot_SetupShadowCascadeMatrices_0
 // @ 0x58D4D3..0x58D618].
 constexpr float kProjectedDepthScale = 0.00050000002f;
 constexpr float kProjectedDepthBias = -0.000050000002f;
@@ -98,7 +98,7 @@ bool edge_admits(float value, bool inclusive) noexcept {
 // temp target therefore samples pixel i at page_u = i / width, half a temp
 // pixel before the texel centre the page composite later reads
 // [orig: the collector's plain ortho, no half-pixel bias,
-// setup_shadow_cascade_matrices_0 @0x58D5CF..0x58D5EE; viewport = the temp
+// RenderSlot_SetupShadowCascadeMatrices_0 @0x58D5CF..0x58D5EE; viewport = the temp
 // dimension @0x60D5E0].
 int first_pixel_centre(float value, int limit) noexcept {
 	if (value <= 0.0f) return 0;
@@ -513,12 +513,12 @@ bool project_terrain_static_shadow_vertex(
 		const TerrainStaticShadowProjectionInput &input,
 		const TerrainStaticShadowWorldVertex &world,
 		TerrainStaticShadowRasterVertex &projected) noexcept {
-	// setup_shadow_cascade_matrices_0 divides horizontal light components by
+	// RenderSlot_SetupShadowCascadeMatrices_0 divides horizontal light components by
 	// the collector-clamped vertical component, renders in a page-centered
 	// orthographic view, and writes depth `h*0.0005 - 0.00005`.
 	// [orig: clamp @0x60D33F..0x60D341; caster terrain-relative translation
 	// @0x60D8FA; page recenter @0x60D901..0x60D91A;
-	// setup_shadow_cascade_matrices_0 @0x58D4D3..0x58D618]
+	// RenderSlot_SetupShadowCascadeMatrices_0 @0x58D4D3..0x58D618]
 	const std::optional<TerrainTilePageProjection> page_projection =
 			TerrainTileCompositionCache::page_projection(input.page);
 	if (!page_projection.has_value() ||
@@ -602,7 +602,7 @@ bool rasterize_terrain_static_shadow_alpha(
 				// triangle keeps only its part above the plane, with every
 				// attribute interpolated linearly along the cut edges
 				// (Sutherland-Hodgman, exactly the clipper's arithmetic).
-				// [orig: setup_shadow_cascade_matrices_0 @0x58D5F8 (P[10] =
+				// [orig: RenderSlot_SetupShadowCascadeMatrices_0 @0x58D5F8 (P[10] =
 				// 0.0005), @0x58D602 (P[14] = -0.00005), @0x58D60C (P[15] = 1);
 				// the temp RT clear depth 0.99995 @0x60D5BF places the far side
 				// likewise]

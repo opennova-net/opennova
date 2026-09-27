@@ -650,7 +650,7 @@ const std::vector<Recipe> &recipes() {
 			controlled_track(m, 1)->control = 114;
 		}},
 		// The RgbGen writes SelfLumColor, so the row wears the SELFLUM effect
-		// with emissive_type 2 (apply_shader_parameters skips an RgbGen whose
+		// with emissive_type 2 (Material_ApplyShaderParameters skips an RgbGen whose
 		// routed colour the effect never reads).
 		{"mount_mtrl0_rgbgen113_reg1", make_mount, [](Model &m) {
 			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_OP_LUM");

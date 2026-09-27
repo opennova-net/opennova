@@ -402,7 +402,7 @@ static func realized_reflection_pose_matches(diagnostics: Dictionary) -> bool:
 	if not is_finite(height):
 		return false
 	# Mirrored at or above the plane, the live eye unchanged below it
-	# (environment/water_mirror.h, retail render_main_scene @ 0x5c1361..0x5c1370).
+	# (environment/water_mirror.h, retail Render_MainScene @ 0x5c1361..0x5c1370).
 	var source_origin := (camera_transform as Transform3D).origin
 	var expected_origin := source_origin
 	if source_origin.y >= height:

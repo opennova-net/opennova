@@ -32,6 +32,7 @@ class Camera3D;
 class Compositor;
 class GeometryInstance3D;
 class Material;
+class Skeleton3D;
 class Texture2D;
 class Viewport;
 class WorldEnvironment;
@@ -59,7 +60,7 @@ struct FrameFxScreenFrame {
 // place (Render_ProcessMainSceneFrame @0x5ca8f6..0x5caad5 / @0x5ca6ab; the
 // bloom kernel FrameFX_BloomKernel @0x5841d0 over the Q3 source FrameFX_RenderGlowSource
 // @0x582940 draws and FrameFX_CaptureAltBuffer @0x584020 captures; targets
-// create_frame_effect_render_targets @0x583c40).
+// FrameFX_CreateRenderTargets @0x583c40).
 // The Q3 source is an effect-owned full-resolution color target sharing the
 // resolved beauty depth; the capture is the power-of-two floor of the frame.
 class FrameFxCompositorEffect : public CompositorEffect {
@@ -163,14 +164,22 @@ public:
 	// record, its swapped mesh is re-read once); any other material, or
 	// unregister_q3_source, parks the record inactive without losing its
 	// generations (the ObjectModel level swap re-registers the same node
-	// many times).
+	// many times). A strip whose skin binds every vertex to one bone (the
+	// first-person gun's rigid parts) names that skeleton and bone, so its
+	// copy draws at the bone's part matrix.
 	static void register_q3_object_source(GeometryInstance3D *p_source,
-			const Ref<Material> &p_material);
+			const Ref<Material> &p_material, Skeleton3D *p_rigid_skeleton = nullptr,
+			int p_rigid_bone = -1);
 	static void unregister_q3_source(GeometryInstance3D *p_source);
 	// A celestial source's bloom-pass SelfLumColor (runtime/renderer/q3_frame.h
 	// Q3CelestialMaterialParameters), written by the producer every frame.
 	static void set_q3_celestial_self_lum(GeometryInstance3D *p_source,
 			const Vector3 &p_self_lum);
+	// A celestial source's bloom-pass world transform: its model's parts
+	// posed at the bloom pass's own register value, written by the producer
+	// every frame (Q3SourceRecord::celestial_pose).
+	static void set_q3_celestial_pose(GeometryInstance3D *p_source,
+			const Transform3D &p_global_transform);
 	// The classification an object material was registered with (false and
 	// untouched for a material outside the registry): the typed blend/family
 	// facts another producer may need about an ObjectModel surface.

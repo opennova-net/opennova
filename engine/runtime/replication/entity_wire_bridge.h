@@ -64,17 +64,17 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 // (encode_*_batch) gates them out. The orientation field is the engine-frame heading BAM
 // (90 - yaw)*kBamPerDegree, the same convention snapshot_of / decode_* use (D-NET-86).
 
-// pool-0 organics (AI infantry + players) -> S2C 0x0C [orig: serialize_entity_states_to_buffer @0x5030a0].
+// pool-0 organics (AI infantry + players) -> S2C 0x0C [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0].
 // `recipient_own` is the handle of THIS recipient's owned player entity: its 0x0C record gets minimap_flags
 // bit 0x01 (the "recipient's own player" marker), every OTHER player gets 0x0100 — the per-recipient split a
 // same-map retail capture confirmed (2026-07-01). Pass an invalid handle for a recipient-agnostic batch.
 OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own = {});
-// pool-1 destructibles / items / vehicles -> S2C 0x0D [orig: serialize_entity_pool_to_packet_0 @0x503940].
+// pool-1 destructibles / items / vehicles -> S2C 0x0D [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940].
 PoolSpawnBatch build_pool1_spawn_batch(const world::World &w);
-// pool-2 static structures -> S2C 0x10 [orig: serialize_pool2_static_to_buffer @0x5042f0]. Slot-aligned (start_index 0, empty-slot
+// pool-2 static structures -> S2C 0x10 [orig: NetPacket_SerializePool2StaticToBuffer @0x5042f0]. Slot-aligned (start_index 0, empty-slot
 // sentinels for holes) because the 0x10 record carries no slot id — the client's slot = start+index.
 StaticEntityBatch build_pool2_static_batch(const world::World &w);
-// pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: serialize_entity_pool_to_packet @0x503460].
+// pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: NetPacket_SerializeEntityPoolToPacket @0x503460].
 Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 
 // One S2C 0x18 FULL-ENTITY-SPAWN record (§5.46) for a live World entity — the host's
@@ -86,7 +86,7 @@ Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 // the modeled tail bytes. Remaining source and admission gaps are catalogued under
 // docs/net/novaworld-net-re.md D-NET-133.
 // [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180 →
-// serialize_object_to_buffer @0x504d10]
+// NetPacket_SerializeObjectToBuffer @0x504d10]
 FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
                                               world::EntityHandle recipient_own = {});
 

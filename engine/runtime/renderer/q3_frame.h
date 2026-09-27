@@ -23,8 +23,8 @@ namespace opennova::renderer {
 // beauty depth-stencil still bound; the compiled list is that altbuffer's
 // content.
 // [orig: FrameFX_RenderGlowSource @ 0x582a54 (CRenderBatchQueue_SortAndFlush(4)),
-// @ 0x582a5d (render_water_surface(0, 1)), @ 0x582a77 (render_celestial_bodies(1)),
-// @ 0x582a80 (render_skybox_sun_glow(0, 0));
+// @ 0x582a5d (Render_WaterSurface(0, 1)), @ 0x582a77 (Render_CelestialBodies(1)),
+// @ 0x582a80 (Render_SkyboxSunGlow(0, 0));
 // FrameFX_CreateAltBufferTexture @ 0x582120 (format 22 -> 21 @ 0x582141,
 // IDirect3DDevice9::CreateRenderTarget, vtable +0x70, @ 0x58217e)].
 enum class Q3Technique : std::uint8_t {
@@ -59,10 +59,34 @@ enum class Q3GeometryKind : std::uint8_t {
 // always rigid geometry under one transform (or a MultiMesh population);
 // no producer carries a bone palette.
 // [orig: Render_SubmitEntity @ 0x5dade0 (modelData+16 & 1 selects the bone
-//  path); collect_render_batches_for_entity @ 0x5d94b0 appends only the
+//  path); Render_CollectRenderBatchesForEntity @ 0x5d94b0 appends only the
 //  opaque list and the Q1/Q2 alpha queues (@ 0x5d97ca, @ 0x5d983b); the Q3
-//  copy @ 0x5d93b5..0x5d9447 lives only in collect_render_objects_for_batch
+//  copy @ 0x5d93b5..0x5d9447 lives only in Render_CollectRenderObjectsForBatch
 //  @ 0x5d8f20]
+//
+// The first-person pass is an object-path producer like the world pass. It
+// submits the equipped weapon's model, then the arms, with render flags 0x80
+// while the player holds a weapon-slot reference and 0 otherwise, never
+// kSubmitNoGlowCopy, so the collector copies every glow-capable strip of the
+// rigid gun into Q3 at its part matrix exactly as it does a world object's,
+// while the bone-path arms never reach it. The pass's own flush (mode 0)
+// drains Q0, Q2 and Q1 alone: the copies wait in Q3 for FrameFX's mode-4
+// flush, which draws them under the WORLD projection over the full scene
+// viewport against the beauty depth (the part matrices stay in the batch
+// context until the next frame begins). With the world fov equal to the
+// weapon's renderfov a copy covers its own strip and the gun's depth band
+// rejects it; otherwise it lands at tan(renderfov/2) / tan(fov/2) times the
+// gun's offset from the view centre and glows wherever it leaves the gun's
+// footprint. So a viewmodel strip is an ordinary object source drawn with
+// the world camera's view-projection, and a rigid strip riding one bone of
+// the viewmodel skeleton takes that bone's part matrix.
+// [orig: Player_RenderFirstPersonViewModel @ 0x4def5c..0x4def6a (the flags),
+//  @ 0x4defc1 / @ 0x4df032 (the gun submits), @ 0x4df09b (the mode-0 flush);
+//  Render_CollectRenderObjectsForBatch @ 0x5d93b5..0x5d9449 (0x100 the only
+//  gate); CRenderBatchQueue_SortAndFlush @ 0x5dae5b..0x5daeb4;
+//  FrameFX_RenderGlowSource @ 0x582a45..0x582a54; RenderBatchCtx_BeginFrame
+//  @ 0x5d8990, called once per frame from Render_ProcessMainSceneFrame
+//  @ 0x5ca156]
 inline constexpr bool q3_object_source_admitted(bool skinned_mesh) {
 	return !skinned_mesh;
 }
@@ -73,8 +97,8 @@ inline constexpr bool q3_object_source_admitted(bool skinned_mesh) {
 // warm (1, 248/255, 240/255) pow-40 lobe at intensity 1.0, summed and
 // clamped; the adapter evaluates that generator analytically against the
 // live sun direction. [orig: Glass.fx TGlassFFP TECHNIQUE_GLOW;
-// Render_FillStaticCubemaps @ 0x58f290; generate_cubemap_lighting
-// @ 0x685bb0; apply_shader_parameters @ 0x58e14b (the MatRotSpecular
+// Render_FillStaticCubemaps @ 0x58f290; GTexture_GenerateCubeMapLighting
+// @ 0x685bb0; Material_ApplyShaderParameters @ 0x58e14b (the MatRotSpecular
 // upload)].
 inline constexpr float kQ3GlassWhiteLobeGain = 1.4f;
 inline constexpr float kQ3GlassWhiteLobePower = 800.0f;
@@ -82,11 +106,11 @@ inline constexpr std::array<float, 3> kQ3GlassWarmLobeColor{
 	1.0f, 248.0f / 255.0f, 240.0f / 255.0f};
 inline constexpr float kQ3GlassWarmLobePower = 40.0f;
 
-// The NV water redraw's bright pass: Water_PSBumpReflectNV keeps
+// The NV water redraw's bright pass: g_WaterPSBumpReflectNV keeps
 // saturate(luma(0.25, 0.60, 0.15)^2 - 0.15) of the reflected colour, with
-// the device fog colour forced black. [orig: render_water_surface(view, 1)
+// the device fog colour forced black. [orig: Render_WaterSurface(view, 1)
 // @ 0x5c3311..0x5c3320 (detail gate), @ 0x5c3442..0x5c3458
-// (SetFogAndBlendMode(2) + Water_ShaderBlendNV); Water_PSBumpReflectNV
+// (SetFogAndBlendMode(2) + g_WaterShaderBlendNV); g_WaterPSBumpReflectNV
 // source @ 0x7dbd28, assembled in Water_InitSurfaceShaders @ 0x5c1bc4; NV
 // descriptors @ 0x5c1c27..0x5c1c81 (blend 1/2/5 and opaque 0x20000);
 // CD3DDevice_SetFogAndBlendMode @ 0x677740 case 2 @ 0x6778ed].
@@ -100,8 +124,8 @@ inline constexpr float kQ3WaterNvBrightBias = 0.15f;
 // z-tested flush, so both survive only where the beauty depth is at (or
 // within the band of) the far plane: cleared sky and the farthest terrain.
 // [orig: FrameFX_RenderGlowSource @ 0x582940 (Render_SetViewportFarDepth
-// @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77 ->
-// render_skybox_sun_glow(0, 0) @ 0x582a80); Render_SetViewportFarDepth
+// @ 0x582a70 -> Render_CelestialBodies(1) @ 0x582a77 ->
+// Render_SkyboxSunGlow(0, 0) @ 0x582a80); Render_SetViewportFarDepth
 // @ 0x58a840 (MinZ 0.98000002 @ 0x58a859, MaxZ 0.99996948 @ 0x58a86b); the
 // z-tested flushes CRenderBatchQueue_SortAndFlush(0) @ 0x5acce9 / 0x5ad118].
 inline constexpr float kQ3FarBandMinZ = 0.98000002f;
@@ -188,7 +212,7 @@ struct Q3Matrix4 {
 // brightens a colour below 1 until it saturates.
 // [orig: _FFP.fx SELFLUM MaterialEmissive = SelfLumColor*ColorSrcGlobalGain;
 //  Glass.fx MaterialEmissive = ReflectColor*ColorSrcGlobalGain;
-//  apply_shader_parameters @ 0x58E050..0x58E06A (ColorSrcGlobalGain bind)]
+//  Material_ApplyShaderParameters @ 0x58E050..0x58E06A (ColorSrcGlobalGain bind)]
 inline std::array<float, 3> q3_emissive_modulate2x(const Q3Vec4 &color,
 		const std::array<float, 3> &gain) {
 	const auto saturate = [](float value) {
@@ -244,7 +268,7 @@ struct Q3ObjectMaterialParameters {
 	};
 };
 
-// Dynamic water inputs consumed by Water_PSBumpReflectNV. Per-vertex diffuse,
+// Dynamic water inputs consumed by g_WaterPSBumpReflectNV. Per-vertex diffuse,
 // specular, fog, and projective rows remain in the leased geometry.
 struct Q3WaterMaterialParameters {
 	Q3ResourceLease reflection_texture{};
@@ -269,7 +293,7 @@ struct Q3WaterMaterialParameters {
 // runtime/environment/celestial_frame.h). `blend` is the blend the material
 // was classified with, mapped like NormalCopy's (_OP replace, _AB alpha,
 // _AD add): the glow's submit flags (0x100 in the bloom pass, 0x110 in the
-// beauty pass [orig: render_skybox_sun_glow @ 0x5ad0f5..0x5ad0fe]) never
+// beauty pass [orig: Render_SkyboxSunGlow @ 0x5ad0f5..0x5ad0fe]) never
 // override the material blend, so SunGlow follows it like the discs.
 struct Q3CelestialMaterialParameters {
 	Q3ResourceLease diffuse_texture{};
@@ -281,7 +305,7 @@ struct Q3CelestialMaterialParameters {
 
 // The disc/glow bloom copy's colour: the GLOW slot is the SELFLUM NORMAL
 // block, so it takes the NormalCopy emissive, sat(SelfLumColor x gain) x 2
-// [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f; apply_shader_parameters
+// [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f; Material_ApplyShaderParameters
 // @ 0x58E050..0x58E06A (ColorSrcGlobalGain)]. A gain above 1 lifts the
 // body's colour; the bodies' low bloom alphas never reach the clamp.
 inline std::array<float, 3> q3_celestial_emissive(const Q3CelestialMaterialParameters &p,

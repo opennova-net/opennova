@@ -1,5 +1,5 @@
 // Pins the detail tier's c24.x wind sway phase: ms clock x 0.003 plus the
-// weather oscillator's Env_WaveOscRing[0] x flt_7DE9D0 (0x35CCCCCD, the float
+// weather oscillator's g_EnvWaveOscRing[0] x flt_7DE9D0 (0x35CCCCCD, the float
 // nearest 1/655360), folded modulo 2 pi on the clock term, and the patch's
 // sector origin the sway's v0.x is measured from
 // [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d;

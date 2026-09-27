@@ -1,4 +1,5 @@
 #include <runtime/world/ai.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 
 // P2 ground combat: target acquisition and the perception gates, engagement
@@ -50,7 +51,7 @@ void AiSystem::queue_death_event(const World *world, AiEntity &e) {
 bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool variant_a) {
     scan_candidates_.clear();
     // Entry gates [orig: 0x466f60 head]. The round-end latch nulls acquisition outright
-    // [orig: g_spawn_success_gate @0x24C1928 nonzero -> return null @0x466fba]; the
+    // [orig: g_SpawnSuccessGate @0x24C1928 nonzero -> return null @0x466fba]; the
     // teamless gate is mirrored in the scoring core (it is part of @0x466f60) — here it
     // only skips the wasted pool walk.
     if (world.match.outcome().ended) return false;
@@ -85,7 +86,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
                 if (check_player_flag) {
                     // The class-0 pool-0 leg: Player-flagged only; the LOCAL player is
                     // excluded while the local cheat word's 0x800 bit is up [orig:
-                    // `test ebx,100h` @0x46712D; candidate == g_local_player_entity
+                    // `test ebx,100h` @0x46712D; candidate == g_LocalPlayerEntity
                     // @0x467139 && `test dword_24C1930,800h` @0x467141].
                     if ((c->engine_flags & kEntityFlagPlayer) == 0) continue;
                     if (h == world.cached.local_player && world.rules.ai_rules_skip_local_player)
@@ -585,7 +586,7 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
 // Entity_FireWeaponAndSendPacket @0x42bd80 authority leg -> Server_ClientFiredRound
 // @0x50baa0 (RoundData_AddRound @0x4fdb40 + RoundData_SpawnRound @0x4ec0d0); §5.60.
 // The ammo id rides the ring's adm byte as in the retail fire_cmd; the fire sound and
-// muzzle effect (g_ammoDefTable +64/+68) ride the spawn's FireEvent.]
+// muzzle effect (g_AmmoDefTable +64/+68) ride the spawn's FireEvent.]
 bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
                              int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index) {
     if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
@@ -627,7 +628,7 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
 
 // The fire validator's full local-frame metrics, shared by the aircraft
 // movement visibility check and its weapon solver. [orig: sub_53AFC0 @0x53AFC0;
-// Entity_ValidateWeaponTarget @0x53A400; compute_relative_position_metrics @0x545710]
+// Entity_ValidateWeaponTarget @0x53A400; Entity_ComputeRelativePositionMetrics @0x545710]
 uint32_t AiSystem::weapon_relative_metrics(const int32_t pose[6], const int32_t aim[3],
                                             int32_t metrics[6]) {
 	CollisionMatrix frame = collision_matrix_from_euler(pose[3], pose[4], pose[5], pose), inverse;
@@ -642,7 +643,7 @@ uint32_t AiSystem::weapon_relative_metrics(const int32_t pose[6], const int32_t 
 	};
 	const int32_t xy = io::bam_add(sq(local[0]), sq(local[1]));
 	// `fild; fsqrt; fistp` under the game's nearest-even control word: the
-	// root rounds, it does not truncate [orig: compute_relative_position_metrics
+	// root rounds, it does not truncate [orig: Entity_ComputeRelativePositionMetrics
 	// @0x5457CD..0x5457D3 and @0x5457EC..0x5457F2]. A wrapped (negative) sum
 	// is an invalid fsqrt whose integer indefinite shifts out to zero.
 	const auto root = [](int32_t x) {
@@ -674,7 +675,7 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 	// A Player target is out while the local cheat word's 0x800 bit is up
 	// (World::rules.ai_rules_skip_local_player) and once the round has
 	// ended [orig: `test dword_24C1930,800h` @0x53A46E..0x53A478;
-	// g_spawn_success_gate @0x53A482..0x53A489].
+	// g_SpawnSuccessGate @0x53A482..0x53A489].
 	if ((target_flags & kEntityFlagPlayer) != 0 &&
 			(world.rules.ai_rules_skip_local_player || world.match.outcome().ended))
 		return false;
@@ -1010,10 +1011,7 @@ bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &
         double value = static_cast<double>(ev.f[3]);
         if (value < 0.0) value += 4294967296.0;
         const double scaled = value * 1000.0 * 4.444444584805751e-06 * io::kFp16OneD;
-        const int32_t fixed =
-                (scaled >= 2147483648.0 || scaled < -2147483648.0)
-                        ? static_cast<int32_t>(0x80000000u)
-                        : static_cast<int32_t>(scaled);
+        const int32_t fixed = io::retail_ftol_sse2(scaled);
         e.brain.f[t == 10 ? AiBrain::kSpeedA : AiBrain::kSpeedB] = fixed;
         return true;
     }

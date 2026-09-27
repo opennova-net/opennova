@@ -74,7 +74,7 @@ void emit_quad(const ScarSlot &slot, const ScarViewContext &ctx, ScarDrawList &o
 		v.x = corner[order[k]][0];
 		v.y = corner[order[k]][1];
 		v.z = corner[order[k]][2];
-		// [orig: Env_TerrainLightCombined | 0xFF000000 on every vertex]
+		// [orig: g_EnvTerrainLightCombined | 0xFF000000 on every vertex]
 		v.argb = ctx.terrain_light_argb | 0xFF000000u;
 		v.u = uv[order[k]][0];
 		v.v = uv[order[k]][1];
@@ -163,14 +163,14 @@ void emit_entity_ring(const ScarRing &ring, const ScarViewContext &ctx, ScarDraw
 
 ScarStripState decode_scar_strip_mode(std::uint32_t mode_word) {
 	ScarStripState s;
-	// Bits 0-3: the framebuffer blend [orig: decode_blend_mode_to_d3d_states
+	// Bits 0-3: the framebuffer blend [orig: RenderState_DecodeBlendModeToD3DStates
 	// @0x680F00 — case 1 writes SRCBLEND 5, DESTBLEND 6, ALPHABLENDENABLE 1].
 	s.src_alpha_blend = (mode_word & 0xFu) == 1u;
-	// Bits 4-7: the stage-0 alpha op [orig: decode_mode_alpha_stage @0x680B00
+	// Bits 4-7: the stage-0 alpha op [orig: RenderState_DecodeModeAlphaStage @0x680B00
 	// — nibble 0x50 substate 0: ALPHAOP 4 (MODULATE), ARG1 TEXTURE, ARG2
 	// DIFFUSE].
 	s.alpha_modulate_texture_diffuse = ((mode_word >> 4) & 0xFu) == 5u;
-	// Bits 8-13: the stage-0 colour op [orig: decode_mode_color_stage @0x681080
+	// Bits 8-13: the stage-0 colour op [orig: RenderState_DecodeModeColorStage @0x681080
 	// — family 0x600 sub-pass 0: COLOROP 4 + GfxDevice_Modulate2XEnabled,
 	// ARG1 TEXTURE, ARG2 DIFFUSE].
 	s.color_modulate2x_texture_diffuse = (mode_word & 0x3F00u) == 0x600u;

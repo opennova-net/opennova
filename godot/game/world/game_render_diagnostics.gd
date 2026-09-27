@@ -233,8 +233,9 @@ static func _weather_state(weather: Weather, camera: Camera3D) -> Dictionary:
 		"sway_phase": weather.get_sway_phase(),
 		"lightning_intensity": weather.get_lightning_intensity(),
 		"cloud_uv_rate_per_second": weather.get_cloud_uv_rate_per_second(),
-		"cloud_uv_offset1": weather.get_cloud_uv_offset1(position.x, position.z),
-		"cloud_uv_offset2": weather.get_cloud_uv_offset2(position.x, position.z),
+		# The scroll's camera term is in the render basis (render x = Godot z).
+		"cloud_uv_offset1": weather.get_cloud_uv_offset1(position.z, position.x),
+		"cloud_uv_offset2": weather.get_cloud_uv_offset2(position.z, position.x),
 		"smooth_fill": weather.get_smooth_fill(),
 		"smooth_sun": weather.get_smooth_sun(),
 		"smooth_fog": weather.get_smooth_fog(),
@@ -312,9 +313,11 @@ static func _water_state(water: Water, camera: Camera3D) -> Dictionary:
 		"surface_count": (
 				mesh.mesh.get_surface_count()
 				if mesh != null and mesh.mesh != null else 0),
+		# The murk output: the strip's per-vertex COLOR.a (water.gdshader).
+		"strip_alpha_range": _strip_alpha_range(mesh),
 		"shader": _shader_parameters(material, [
 			"u_water_color", "u_has_reflection",
-			"u_fog_color", "u_water_murk",
+			"u_fog_color",
 			"u_underwater_view", "u_reflection", "u_noise_color",
 			"u_noise_normal",
 		]),
@@ -326,6 +329,25 @@ static func _water_state(water: Water, camera: Camera3D) -> Dictionary:
 					water.get_reflection_camera(), reflection_viewport),
 		},
 	}
+
+
+## [min, max] of the last marched strip's per-vertex COLOR.a; empty with no
+## strip surface.
+static func _strip_alpha_range(mesh: MeshInstance3D) -> Array:
+	if mesh == null or mesh.mesh == null or mesh.mesh.get_surface_count() == 0:
+		return []
+	var column: Variant = mesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	if typeof(column) != TYPE_PACKED_COLOR_ARRAY:
+		return []
+	var colors: PackedColorArray = column
+	if colors.is_empty():
+		return []
+	var low := colors[0].a
+	var high := low
+	for color in colors:
+		low = minf(low, color.a)
+		high = maxf(high, color.a)
+	return [low, high]
 
 
 static func _shader_parameters(

@@ -150,7 +150,7 @@ struct PromoteOptions {
     // TextResource_FindEntryBySectionAndKey("PeopleNames") -> strncpy(+0xF4, 15)]
     std::function<std::string(int32_t)> people_name_resolver;
 
-    // Per-pool registry capacities, defaulted to the witnessed retail g_pool_list
+    // Per-pool registry capacities, defaulted to the witnessed retail g_PoolList
     // sizes [orig: EntityPool_Allocate @0x442168].
     size_t pool_capacities[world::kEntityPoolCount] = {
             world::kRetailPoolCapacity[0], world::kRetailPoolCapacity[1],
@@ -202,8 +202,16 @@ struct ItemAttachmentSpawns {
     std::vector<world::EntityHandle> handles;
     int dropped = 0;
 };
+// Each listed carrier's own addeweap slots, one child per slot; a child is never
+// walked for children of its own (a deployable's spawn calls it for one entity).
+// [orig: Entity_SpawnWeaponOverlays @0x40F300; Entity_SpawnDeployable @0x51C49A]
 ItemAttachmentSpawns spawn_item_attachments(world::World &world,
         const std::vector<world::EntityHandle> &carriers, const std::vector<ItemSeatSpec> &specs);
+// The mission loader's pass: pool 1 then pool 2, each over the rows its count
+// held before the pass, so children spawned past that count are never walked.
+// [orig: Mission_LoadBMSFile @0x40FD49..0x40FD96]
+ItemAttachmentSpawns spawn_mission_item_attachments(world::World &world,
+        const std::vector<ItemSeatSpec> &specs);
 
 struct PromoteResult {
     int spawned = 0;      // entities placed into the actor/static pools

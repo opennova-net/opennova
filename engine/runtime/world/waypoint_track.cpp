@@ -117,7 +117,7 @@ void WaypointTrack::skip_done() {
 
 // The current-waypoint slice of the per-frame HUD info rebuild, plus the
 // mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
-// (hudInfo+373 number, +400/404/408 position) + g_showWaypoints @ 0x27238BC]
+// (hudInfo+373 number, +400/404/408 position) + g_ShowWaypoints @ 0x27238BC]
 WaypointHudView waypoint_hud_view(const WaypointTrack &track) {
     WaypointHudView v;
     v.show = track.show;

@@ -73,7 +73,6 @@ struct NetSnapshot {
 	double wall_seconds = 0.0; // the push's clock (the window's rate deltas)
 	StatusRole role = StatusRole::SinglePlayer;
 	StatusState state = StatusState::Unloaded;
-	std::string bank_policy;
 	int64_t frame_tick_us = 0; // the last session frame's tick cost
 	int32_t frame_ticks = 0;
 	double fps = 0.0;

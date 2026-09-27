@@ -246,7 +246,7 @@ catalog/loader/writer audit on 2026-07-29.
 | Loader-compatible name resolution | **MATCHING** | ordinary lookup reports a miss unambiguously, while `threedi_ctrl_register_loader_ordinal` deliberately reproduces retail's miss → ordinal-0 alias `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; ordinal store @ 0x5B46E6]` |
 | Structural loader remap | witnessed / represented | model-local CTRL references in material/texture animation, PANM, and lights become global ordinals during `ThreediGp_LoadFromFile` `[orig: @ 0x5B5C80..0x5B5DA2; @ 0x5B5E0B..0x5B5EF6; @ 0x5B5F4F..0x5B5F62]` |
 | PANM scalar-track sampler (`engine/formats/threedi/threedi_panm_runtime.cpp`) | **MATCHING MATH / PARTIAL RNG LIFETIME** | `threedi_panm_sample_track_raw` structurally translates `[orig: PANM_SampleTrack @ 0x5b2270]`; controlled and deterministic waveform paths are pinned, and noise dispatch consumes per submitted instance, but its LCG is not yet retail's whole-process CRT stream |
-| Controlled PANM mode catalog | **MATCHING** | only type 113 reads a control register; 114–117 remain ordinary waveform types `[orig: PANM_SampleTrack @ 0x5b2270; wave_lookup @ 0x5de6b0]`; all known shipped controlled PANM tracks are type 113 |
+| Controlled PANM mode catalog | **MATCHING** | only type 113 reads a control register; 114–117 remain ordinary waveform types `[orig: PANM_SampleTrack @ 0x5b2270; CWaveformTable_WaveLookup @ 0x5de6b0]`; all known shipped controlled PANM tracks are type 113 |
 | Runtime slot layout and consumer math | **MATCHING** | each global slot is an 8-byte pair: signed value dword at `0x83FCE8 + 8·ordinal`, adjacent state dword at `0x83FCEC + 8·ordinal`; PANM reads the signed value with retail low-dword `IMUL`/arithmetic-shift behavior |
 | Process-global bus lifetime/arbitration | **OPEN** | retail keeps one persistent 96-slot array shared by every model draw; the retained OpenNova path currently samples each model's own `ModelControls` array, so unwritten values do not flow across models in retail draw order. Retail's later batch snapshot/restore preserves written material values but does not erase that submission-time persistence requirement (D-3DI-2) |
 | Noise RNG lifetime/call order | **OPEN** | retail `CWaveformTable_Build @0x5DE360` consumes 256 calls from the same process CRT `rand()` later used by PANM/material/light noise, interleaved with unrelated engine callers. OpenNova shares one MSVC-formula stream only among the ported waveform consumers and uses a precomputed table, so dispatch/math and intra-consumer order match but the runtime sample sequence does not (D-3DI-2) |
@@ -343,12 +343,12 @@ rather than widening the product.
 
 Sorted material rendering does not simply observe whichever writer happened to
 touch the global bus last. During submission,
-`[orig: collect_render_objects_for_batch @ 0x5D8F20]` walks the four register
+`[orig: Render_CollectRenderObjectsForBatch @ 0x5D8F20]` walks the four register
 ordinal bytes in the render-material record and copies each nonzero ordinal's
 current value into the 68-byte batch entry
 `[orig: snapshot @ 0x5D91AB..0x5D91DE]`. The sorted flush restores those
 captured values to the global slots before calling
-`apply_shader_parameters`
+`Material_ApplyShaderParameters`
 `[orig: CRenderBatchQueue_FlushBatches @ 0x5D9F50; restore
 @ 0x5DA1B8..0x5DA1FD; shader call @ 0x5DA436]`. Ordinal zero is the byte-level
 sentinel and is not copied by that loop. This explains why a retained
@@ -362,9 +362,9 @@ slot or the submission/flush RNG schedule.
 Type 113 then treats the track parameter as a control-register ordinal and
 interpolates the signed start/end window from the slot's even value dword.
 Every other active type, including 114–117, evaluates
-`wave_lookup(type, phase + time * rate)` instead. The low-nibble waveform
+`CWaveformTable_WaveLookup(type, phase + time * rate)` instead. The low-nibble waveform
 dispatch is shared with material animation through
-`[orig: wave_lookup @ 0x5de6b0]`;
+`[orig: CWaveformTable_WaveLookup @ 0x5de6b0]`;
 the fact that the UV-matrix consumer assigns special meanings to all five
 types 113–117 does **not** extend those meanings to PANM.
 
@@ -444,7 +444,7 @@ The currently hosted writer-value families are:
   @ 0x4E32ED..0x4E3306; def+0x144 callers Entity_RenderVehicleModel
   @ 0x440852..0x440866, Entity_ComputeUserpointWorldTransform
   @ 0x545CA3..0x545CAE, Entity_ComputeUserpointTransform @ 0x545A89..0x545A94,
-  build_bone_attachment_matrix @ 0x56C6DC..0x56C6F3;
+  Bone_BuildAttachmentMatrix @ 0x56C6DC..0x56C6F3;
   Player_RenderFirstPersonViewModel @ 0x4DED60]`.
 - `TALK` (5) and `DEATH` (6) have exactly one retail writer, the org0 skin
   bone-callback `BoneCallback_org0_Skin @ 0x4E3620` (world-wac-ai-re §13.6):
@@ -475,7 +475,7 @@ The currently hosted writer-value families are:
   mixed S2C `0x53`/`0x6F` updates in wire order and advances the shared entry
   once after the complete client receive pump. Sector-model and first-person
   submissions also retain their separate signed `TEX_TEAM` writers
-  `[orig: BoneCallback_gnrc_World @ 0x4E2860; render_sector_entity
+  `[orig: BoneCallback_gnrc_World @ 0x4E2860; Render_SectorEntity
   @ 0x5C4190; Player_RenderFirstPersonViewModel @ 0x4DED60]`.
 
 OpenNova now has the exact catalog, lookup/loader alias, global-reference
@@ -510,8 +510,8 @@ linked-part lists. The relevant retail facts were rechecked in live
 | Surface | Verdict | Anchored witness |
 |---|---|---|
 | Load-time name resolution | MATCHING (read-only grill) of the existing catalog contract | `[orig: CtrlName_ToOrdinal @ 0x57B290]` scans the case-insensitive descriptor table; `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` calls it at `@ 0x5B46D7` and stores the ordinal in record `+0x18` at `@ 0x5B46E6`. Names need not be resolved at every publication. |
-| Destruction stores and timing | MATCHING (read-only grill) of the direct-store witness; retained ownership remains D-3DI-2 | `[orig: Entity_PublishSwapFadePhases @ 0x5C3F40]` zeroes six signed dword slots at `@ 0x5C3F48..0x5C3F66`, then computes destruction/husk phases. `[orig: render_sector_entity @ 0x5C4190]` calls it at `@ 0x5C4200`, before the later subpixel rejection at `@ 0x5C42DE`. The curated function name is retained; an older foliage/LOD description does not describe these stores. |
-| Part phases and door/team stores | MATCHING (read-only grill) of the existing publication contract | `[orig: HUD_CacheEntityDisplayInfo @ 0x4A3D90]` writes channels at `@ 0x4A3E2D` / `@ 0x4A3E38`; `[orig: build_bone_transforms @ 0x4E3070]` indexes consecutive door ordinals at `@ 0x4E3145`; `[orig: render_sector_entity @ 0x5C4190]` writes signed team at `@ 0x5C425F`. These are direct values, without a same-value publication gate. |
+| Destruction stores and timing | MATCHING (read-only grill) of the direct-store witness; retained ownership remains D-3DI-2 | `[orig: Entity_PublishSwapFadePhases @ 0x5C3F40]` zeroes six signed dword slots at `@ 0x5C3F48..0x5C3F66`, then computes destruction/husk phases. `[orig: Render_SectorEntity @ 0x5C4190]` calls it at `@ 0x5C4200`, before the later subpixel rejection at `@ 0x5C42DE`. The curated function name is retained; an older foliage/LOD description does not describe these stores. |
+| Part phases and door/team stores | MATCHING (read-only grill) of the existing publication contract | `[orig: HUD_CacheEntityDisplayInfo @ 0x4A3D90]` writes channels at `@ 0x4A3E2D` / `@ 0x4A3E38`; `[orig: BoneCallback_BuildBoneTransforms @ 0x4E3070]` indexes consecutive door ordinals at `@ 0x4E3145`; `[orig: Render_SectorEntity @ 0x5C4190]` writes signed team at `@ 0x5C425F`. These are direct values, without a same-value publication gate. |
 | Native bridge and linked retained models | host code / not grillable | `ObjectModel` consumes catalog ordinals and native owner tags; linked-part masks resolve once when linked. Every propagation revalidates its ObjectID. `renderer_model_controls`, `mission_present_pass_test.gd`, `object_model_part_anim_test.gd`, and `player_visual_resolver_test.gd` cover the retained semantics. |
 
 Jo-c corroboration: `app/reconstruction_infantry_native.inc:31429`
@@ -559,7 +559,7 @@ store model axes on disk.
 | CFAC | The plane distance is `-(n . v0)`: the runtime tests `n . p + plane_dist` (`collision_query.cpp`) | 600,378 of 600,378 unambiguous faces (2026-09-24 sweep) |
 | CMDL | The box envelops the collision LOD's faces and LOD 0's triangles; the radii and height (`radii[2]`) are the collision LOD's alone | Derived from the stored corners the box comes back for 679 of 958 models (Dblkhwk1, Armry01, CNet01; not Dtruck2 or ArmsG) and the radii for 24: the retail tool read the authored corners, which the file does not keep. CNet01 (no face) stores radii 0, 0, -20000 |
 | MTRL | A GLASS shader is glass with reflection 128 grey; an EMISSIVE (`*_LUM`) shader is emissive 2; no other material is either | every material of the 958 JO models |
-| BPLN | The plane flag word marks a seam. ModSuperOed's rule (the retired port): each volume triangle's box, shrunk by 0.01, inside another `CB` volume's box flags its plane; retail's own tool is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: raycast_against_entity_pool @ 0x538720, flag test @ 0x538d00]`) | 19,695 of 132,856 planes flagged; the OED rule over rebuilt faces agrees on 89.2% of 116,716 |
+| BPLN | The plane flag word marks a seam. ModSuperOed's rule (the retired port): each volume triangle's box, shrunk by 0.01, inside another `CB` volume's box flags its plane; retail's own tool is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: Physics_RaycastAgainstEntityPool @ 0x538720, flag test @ 0x538d00]`) | 19,695 of 132,856 planes flagged; the OED rule over rebuilt faces agrees on 89.2% of 116,716 |
 | BPLN | A ladder (`CL`) volume's plane 0 is its facing, OED's swap of plane 0 with the last triangle's plane | 82 of 102 retail ladders lead with a non-`+x` plane |
 | LGHT | An omni light stores rotation `{+0, -1, 0, 1}` (straight down, no cone), falloff 0, and a `view_proj` whose first two columns are NaN (the perspective of a zero cone); the retired OED exporter's `build_light_view_proj` reproduces the record to within one ulp in two entries | Armry01's three lights (styles 55 and 24) |
 | LGHT | The flag byte carries `0x40`, a bit the retired exporter never set (meaning unknown, §2.14) | Armry01 (`0x40`, `0x41`) |
@@ -600,7 +600,7 @@ witnessed in retail `Jointops.exe`:
   (render-occlusion-re.md §1, D-OCC-13).
 - **Texture-row flag bit 1** (`THREEDI_TEX_FLAG_STATE_OVERRIDE` = 0x02,
   beside bit 0 `ANIMATED`): binds the batch's render-state override texture in
-  place of the row's `[orig: apply_shader_parameters @ 0x58DC92..0x58DCC1]`;
+  place of the row's `[orig: Material_ApplyShaderParameters @ 0x58DC92..0x58DCC1]`;
   the only pusher of the override (`PlayerInfo_RenderPlayerPreview3D
   @ 0x560F43`) always pushes zero, so every draw binds the row texture. It is
   not a clamp flag. Stock carriers: the soldier camo body flipbooks

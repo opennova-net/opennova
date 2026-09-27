@@ -29,7 +29,7 @@ bool local_player_dead(const RoleView &view) {
 namespace {
 
 // Authority: the Match clock; joiner: the folded 0x0A sub-block-1 copy
-// [orig: g_round_time_remaining @0x24C1958, the joiner store
+// [orig: g_RoundTimeRemaining @0x24C1958, the joiner store
 // @0x430219..0x430235].
 int32_t round_ticks_remaining(const RoleView &view) {
 	const int32_t remaining = view.joiner
@@ -39,7 +39,7 @@ int32_t round_ticks_remaining(const RoleView &view) {
 }
 
 // The local player's team the end-round overlay compares the winner against
-// [orig: draw_endround_stats_overlay @0x5b7cd0 reads byte_A85B48 @0x5b7f56].
+// [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0 reads byte_A85B48 @0x5b7f56].
 // A joiner latches it from S2C 0x04 (ClientRuntime::assigned_team); the
 // listen host's HostClient runtime never receives that record (the latch
 // stays 0), so the authority reads its own player entity — retail's host
@@ -73,7 +73,7 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 	v.team_mode = game_type::is_team(view.runtime->game_type());
 	// The round-cycle handoff's session half: the host's post-round linger
 	// expiry closes the session [orig: Server_TickUpdate's drain sets
-	// g_mission_exit_reason = 3 @0x51db63 — the map cycle]; a joiner's session
+	// g_MissionExitReason = 3 @0x51db63 — the map cycle]; a joiner's session
 	// dies with the host's exit.
 	v.session_open = view.joiner ? !view.runtime->session_lost()
 								 : view.host != nullptr && view.host->is_in_session != 0;
@@ -98,10 +98,25 @@ hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view) {
 		in.player_names[i] = er.header.player_names[i];
 		in.player_scores[i] = er.header.player_scores[i];
 	}
-	// [orig: g_round_time_remaining @0x24C1958 — the game-time line and the
+	// [orig: g_RoundTimeRemaining @0x24C1958 — the game-time line and the
 	// timed/untimed arm picks read it on every role].
 	in.round_time_remaining_ticks = round_ticks_remaining(view);
 	return in;
+}
+
+BreathBarFacts breath_bar_facts(const RoleView &view) {
+	BreathBarFacts out;
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		out.samples = cs.breath_samples;             // word_A85B7C
+		out.spawn_success_gate = cs.end_round.header_known;
+		if (view.joiner) out.breath_time = cs.breathtime;
+	}
+	// The authority's frame carries no sub-block 1 to its own loopback, and
+	// its HUD reads the host's own named value [orig: g_WacVarBreathTime].
+	if (!view.joiner && view.kernel != nullptr)
+		out.breath_time = view.kernel->world.script.wac_values.breathtime;
+	return out;
 }
 
 std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
@@ -146,7 +161,7 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 	world::World &w = view.kernel->world;
 	const world::Entity *player = w.registry.get(w.cached.local_player);
 	if (player == nullptr) return false;
-	// The pass-level facts (retail g_death_screen_active / g_GameType): the
+	// The pass-level facts (retail g_DeathScreenActive / g_GameType): the
 	// death screen bit is the client's local latch, the game type every role's
 	// view carries.
 	world::FriendlyTagPassContext ctx;
@@ -181,7 +196,7 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 		// over ClientState supplies them (replication/client_roster_tags.h).
 		// Both walks compare with the local player's entity Team, not the S2C
 		// latch; spawn_from_self seeds it before any 0x04/0x50 lands
-		// [orig: g_local_player_entity+0x162 @0x5a455c / @0x5a3c71].
+		// [orig: g_LocalPlayerEntity+0x162 @0x5a455c / @0x5a3c71].
 		const int32_t player_hp = w.tables.player.item_hp;
 		replication::collect_roster_tags(view.runtime->state(),
 				view.runtime->has_self_handle() ? view.runtime->self_handle() : 0xFFFFu,
@@ -422,7 +437,7 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 					}
 					if (name.empty()) {
 						if (const replication::ClientEntityState *row_state = cs.find(member))
-							name = row_state->name;
+							name = row_state->display_name;
 					}
 					o.name = name;
 					o.self = member == self_handle;
@@ -492,7 +507,15 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 	local_quality = local != nullptr ? entity_lighting(*local).quality : 4;
 
 	w.registry.for_each([&](const world::Entity &e) {
-		if (e.kind == world::EntityKind::Building || e.kind == world::EntityKind::Marker) return;
+		// The pool-2 decorations and foliage are entity-collected, so the
+		// entity wave lights them too; only the Building-type defs draw in the
+		// building pass. [orig: Terrain_RenderSectorEntities walks
+		// g_SectorEntityList — which Terrain_CollectVisibleEntities_0 fills from
+		// the non-building statics — and sets each one's context
+		// (Terrain_SetupEffectForEntity @ 0x5c7bf1); world::building_def_row]
+		if ((e.kind == world::EntityKind::Building && world::building_def_row(e)) ||
+				e.kind == world::EntityKind::Marker)
+			return;
 		// Only authored placements have a placed node addressed by BMS id.
 		// Runtime-spawned rows can also carry a nonzero bms_id (players use
 		// their net id), but the wire walk owns their rendering.
@@ -520,7 +543,7 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 	// frame; only the candidate SLICE the walker iterates refreshes on the
 	// 17-tick arena edge, which CollisionWorld::build_tick_tables already
 	// mirrors for wire rows [orig: Terrain_RenderSectorEntities @0x5c7bf1 /
-	// Terrain_RenderSectorEntitiesBySide @0x5c7f9a -> setup_terrain_effect_for_entity
+	// Terrain_RenderSectorEntitiesBySide @0x5c7f9a -> Terrain_SetupEffectForEntity
 	// @0x5c74a0 -> Entity_ComputeSunVisibility @0x5c6800 per frame; the slice
 	// gate g_ProxSliceRefreshCounter >= 0x10 @0x4c240f ->
 	// Entity_BuildProximityListsFromPools @0x4c2418, see

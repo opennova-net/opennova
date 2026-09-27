@@ -25,13 +25,15 @@ struct SceneOverlaySubmission;
 // resource root, handed to the post-particle overlay stage
 // (renderer/scene_overlay.h), which draws them under the drawer's pass state
 // after particle pass B and before the coronas (retail
-// render_weather_trail_particles @ 0x5dee10 refills one vertex stream per
-// frame under a fixed layout, 768-vertex batches, from
-// Terrain_RenderWorldScene @ 0x5c96a6 — its only caller, so the
-// water mirror never draws it; WeatherParticle_LoadTextures @ 0x5de840 from
+// Render_WeatherTrailParticles @ 0x5dee10 refills one vertex stream per
+// call under a fixed layout, 768-vertex batches, from
+// Terrain_RenderWorldScene @ 0x5c96a6 — its only caller, the scene passes
+// (the main scene's and the weapon Inset pass's), so the water mirror never
+// draws it; WeatherParticle_LoadTextures @ 0x5de840 from
 // Render_InitMissionTextures @ 0x587120). Drives nothing itself: GameWorld's
 // render ladder calls render_frame once per display frame after the particle
-// leg, and the overlay leg appends the frame.
+// leg, then render_inset_frame while the Inset renders, and the overlay leg
+// appends both frames.
 class Precipitation : public Node3D {
 	GDCLASS(Precipitation, Node3D)
 
@@ -44,16 +46,25 @@ public:
 	NodePath get_weather_path() const { return weather_path_; }
 
 	// One display frame: update + compile the drops for `camera` (its
-	// global transform supplies position / right / up).
-	void render_frame(Object *p_sim, Camera3D *p_camera);
+	// global transform supplies position / right / up) under the frame's
+	// camera mode (the drawer's mode test, renderer/precipitation_frame.h).
+	void render_frame(Object *p_sim, Camera3D *p_camera, int p_camera_mode);
+	// The weapon Inset pass's own call, after render_frame in the same frame:
+	// the same update + compile at the Inset camera, over the one drop pool
+	// and draw state (renderer/precipitation_frame.h PrecipitationDrawState;
+	// renderer/scene_overlay.h kInsetOverlayOrder carries the witness).
+	// release_inset_frame drops it while that pass does not render.
+	void render_inset_frame(Object *p_sim, Camera3D *p_camera, int p_camera_mode);
+	void release_inset_frame();
+	// The drops each view's last call compiled (the typed read-back).
+	int get_drop_count() const { return frame_.drops; }
+	int get_inset_drop_count() const { return inset_frame_.drops; }
 	// Below the rain gate the drawer never touches the device (retail
-	// returns @ 0x5dee48): the frame keeps no streaks.
+	// returns @ 0x5dee48): neither view keeps streaks.
 	void hide_frame();
 	// This frame's streaks into the post-particle overlay tail. Not bound to
 	// Godot.
 	void append_overlay(SceneOverlaySubmission &r_submission);
-	// The streak count of the last compiled frame (0 below the rain gate).
-	int get_drop_count() const { return frame_.drops; }
 
 protected:
 	static void _bind_methods();
@@ -69,6 +80,10 @@ private:
 	bool textures_loaded_ = false;
 	// The last compiled frame (its vertex storage is reused frame to frame).
 	opennova::renderer::PrecipitationDrawFrame frame_;
+	// The weapon Inset pass's call of the same frame.
+	opennova::renderer::PrecipitationDrawFrame inset_frame_;
+	void compile_into_(Object *p_sim, Camera3D *p_camera, int p_camera_mode,
+			opennova::renderer::PrecipitationDrawFrame &r_frame);
 };
 
 } // namespace godot

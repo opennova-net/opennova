@@ -11,7 +11,7 @@ namespace {
 // The six packed dome constants unpack through one helper
 // [orig: Color_UnpackToFloat4 @ 0x578900]. The plain leg is byte * 2/255,
 // unclamped [orig: @ 0x578985..0x5789bb]. With NVG on in first person
-// (g_NVGActive && g_camera_mode == 0 [orig: @ 0x578901..0x578911]) every
+// (g_NVGActive && g_CameraMode == 0 [orig: @ 0x578901..0x578911]) every
 // channel dims to byte * a * 2/255 + b with f = (level + 1) * 0.2, a = 0.25 * f,
 // b = f * 0.0015625 [orig: @ 0x578913..0x57897b]; alpha stays 1 either way.
 Rgb sky_constant(const Rgb &value, bool nvg_view, int nvg_level) {
@@ -30,7 +30,7 @@ Rgb sky_constant(const Rgb &value, bool nvg_view, int nvg_level) {
 
 // The thermal dome: after the unpack the shader path overwrites sky base,
 // bright and highlight with 1.0 and the three cloud blocks with 0.9
-// [orig: render_skybox @ 0x579377..0x579447 (flt_7C459C = 0.9)], and the sky
+// [orig: Render_Skybox @ 0x579377..0x579447 (flt_7C459C = 0.9)], and the sky
 // wrapper fogs toward 0x808080 instead of the skyfog block
 // [orig: SkyDome_RenderWithSkyfog @ 0x579cbc].
 constexpr float kThermalSkyWhite = 1.0f;
@@ -72,17 +72,16 @@ SkyFrameState build_sky_frame(const EnvironmentState &env) {
 	// thermal byte) -> SkyDome_RenderWithSkyfog @ 0x5ca81a].
 	frame.skyfog_color = env.thermal_view() ? kThermalSkyFog : env.skyfog_color();
 	// The dome's fog constant c9.x is the RAW smoothed fog distance
-	// (Env_FogDistCurrent x 0.9 / 65536; the shader applies the 0.9), never
+	// (g_EnvFogDistCurrent x 0.9 / 65536; the shader applies the 0.9), never
 	// Environment_GetFogEndDistance's overcast-scaled end that the object and
 	// terrain passes fog with: the dome rim keeps converging on the frame
 	// clear's skyfog at the authored distance while overcast pulls the world
-	// fog in. [orig: render_skybox @ 0x5792c2 (Env_FogDistCurrent *
+	// fog in. [orig: Render_Skybox @ 0x5792c2 (g_EnvFogDistCurrent *
 	// 0.00001373291 into c9.x, uploaded @ 0x579751 / @ 0x579991);
 	// Environment_GetFogEndDistance @ 0x57e40e..0x57e435 is the world end]
 	frame.fog_end = env.fog_level();
 	frame.sky_speed = env.sky_speed();
 	frame.sky_height = env.sky_height();
-	frame.frame_clear = env.frame_clear_color();
 	return frame;
 }
 

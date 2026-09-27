@@ -1,9 +1,13 @@
-# opennova-3di — build a .3di from an authored .o3d scene, or inspect one.
+# opennova-3di — build a .3di from an authored .o3d scene, write one back out
+# as a scene, inspect or compare models; the same for a rig's .bad/.adm clip
+# set through the .o3a text (`anim build|scene|info|compare`); and `catalog`,
+# the engine tables a front end offers.
 #
-# The native half of the Blender exporter (tools/blender/opennova_3di): the
-# add-on writes the scene text, this tool mints the model through the
-# engine's own construction API and parity writer (formats/threedi), so there
-# is one 3DI3 encoder. Ships inside the add-on's bin/ directory.
+# The native half of the Blender add-on (tools/blender/opennova_3di): the
+# add-on writes and reads the scene text, this tool reads and writes every
+# model and clip through the engine's own construction API and parity writers
+# (formats/threedi, formats/bad, formats/adm), so there is one encoder and one
+# decoder. Ships inside the add-on's bin/ directory.
 
 # The command handlers, one translation unit per command: the exe dispatches
 # them and the command tests (tests/threedi, tests/anim) call them directly.

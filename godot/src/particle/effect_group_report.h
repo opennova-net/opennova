@@ -66,7 +66,8 @@ private:
 // document's file name; forever = an attached group carrying a FOREVEREMIT
 // emitter; admission / binding / render_domain = EffectScene's enums;
 // detached = stopped and draining; transform = the group pose; source_tick /
-// source_order = the spawn's tick provenance.
+// source_order = the spawn's tick provenance; section_tagged = the spawn
+// carried an owner tag, so the group takes the building-section gate.
 #define EFFECT_GROUP_REPORT_FIELDS(X)         \
 	X(int64_t, id, 0)                         \
 	X(String, name, String())                 \
@@ -78,7 +79,8 @@ private:
 	X(bool, detached, false)                  \
 	X(Transform3D, transform, Transform3D())  \
 	X(int64_t, source_tick, 0)                \
-	X(int64_t, source_order, 0)
+	X(int64_t, source_order, 0)               \
+	X(bool, section_tagged, false)
 
 class EffectGroupReport : public RefCounted {
 	GDCLASS(EffectGroupReport, RefCounted)

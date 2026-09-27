@@ -125,7 +125,7 @@ struct EnvState {
     int32_t fog_type = 0;
     // Mission water plane, 16.16 (0 = no water). Host-fed from the .env at
     // load; the infantry footstep water pick and the landing legs read it
-    // sim-side. [orig: Env_WaterHeightFixed @ 0x26C6454]
+    // sim-side. [orig: g_EnvWaterHeightFixed @ 0x26C6454]
     int32_t water_z = 0;
     int32_t fog_dist = 0;      // legacy whole-metre mirror; WeatherState owns the Q16 target
     int32_t sky_speed = 0;
@@ -175,20 +175,20 @@ struct CachedFrameState {
     // waiting to deploy is hidden); the item-def test is the allocated-row
     // test (EntityRegistry::count_humans). Doubles in the original as the
     // empty-server world-run gate (entities/WAC advance while humans > 0 ||
-    // ticks == 0). [orig: wac_var_humans @0xC6EB14 — Server_BuildEntitySlotLists
+    // ticks == 0). [orig: g_WacVarHumans @0xC6EB14 — Server_BuildEntitySlotLists
     // @0x4f97a0: zero @0x4f97c6, the def test @0x4F9809, `test eax,100h`
     // @0x4F9815, `test bl,al` @0x4F9820, +1 @0x4f98b1]
     int32_t humans = 0;
     // Derived view of the VM's mutable clock, published before admission and
     // after execution/restore. Only the VM clock is serialized; this projection
-    // lets the world gate read retail's shared word. [orig: wac_var_ticks @0xC6EAD8]
+    // lets the world gate read retail's shared word. [orig: g_WacVarTicks @0xC6EAD8]
     int32_t wac_ticks = 0;
     // A host that also plays (the listen host and single player,
     // is_mp_session_peer) whose own player is on the death screen: the
     // entity-update gate skips its empty-world hold. The host role stamps it
     // each frame from its local client's death-screen latch.
     // [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
-    //  `cmp g_death_screen_active,0` @0x526713]
+    //  `cmp g_DeathScreenActive,0` @0x526713]
     bool peer_death_screen = false;
 };
 
@@ -198,15 +198,15 @@ struct CachedFrameState {
 // [orig: the 24-row table @0x82EEF0; WacScript_ResolveParameter @0x4f2920]
 struct WacNamedValues {
     // Seeded 10 at every mission load and teardown [orig: WacScript_FreeAll @0x4f6395
-    // `mov wac_var_accuracyspread, 0Ah`, called from GameMode_CreateDefaultDefs @0x4f9061
+    // `mov g_WacVarAccuracySpread, 0Ah`, called from GameMode_CreateDefaultDefs @0x4f9061
     // / Game_TeardownMission @0x5226f0].
     static constexpr int32_t kDefaultAccuracySpread = 10;
     // Global multiplier in the infantry sawtooth aim-error formula.
-    // [orig: wac_var_accuracyspread @0xC6EAE8; read @0x4bc5ea]
+    // [orig: g_WacVarAccuracySpread @0xC6EAE8; read @0x4bc5ea]
     int32_t accuracy_spread = kDefaultAccuracySpread;
-    // The fall-damage tolerance `fallmps` [orig: wac_var_fallmps, the named-value row
+    // The fall-damage tolerance `fallmps` [orig: g_WacVarFallMps, the named-value row
     // beside accuracyspread]. Seeded 13 at every mission load and teardown [orig:
-    // WacScript_FreeAll @0x4f638b `mov wac_var_fallmps, 0Dh`, called from
+    // WacScript_FreeAll @0x4f638b `mov g_WacVarFallMps, 0Dh`, called from
     // GameMode_CreateDefaultDefs @0x4f9061 / Game_TeardownMission @0x5226f0]; the
     // authority writes it into the 0x0A sub-block-1 timer state
     // (NetPacket_WritePlayerState @0x4ffa14, connection_fan.cpp state1) and a joiner
@@ -219,14 +219,15 @@ struct WacNamedValues {
     static constexpr int32_t kDefaultFallmps = 13;
     int32_t fallmps = kDefaultFallmps;
 	// USE cannot change the mounted local player's seat while this is nonzero.
-	// Forced script detaches still apply. [orig: wac_var_seatbelt @0xC6EADC;
+	// Forced script detaches still apply. [orig: g_WacVarSeatbelt @0xC6EADC;
 	// WacScript_FreeAll @0x4F637B; Entity_ToggleVehicleMount @0x43698B]
 	int32_t seatbelt = 0;
 	// Two more rows of the named-value table @0x82EEF0. breathtime: the host's
 	// drown limit is four samples per second of it (Server_UpdatePlayerBreathTimers
 	// @0x50d7e6, GameEvent_PlayerDeath @0x5172f6), the 0x0A player-state wire
 	// carries it to the joiners (@0x4ff9db / @0x4301a1), and HUD_DrawBreathBar
-	// @0x59d70f reads it (that bar is not ported). autogain is the iris
+	// @0x59d70f reads it (the port's bar is hud::HudFrameCompiler::
+	// element_breath_bar). autogain is the iris
 	// re-target switch (Environment_ApplyFogAndAmbient @0x57E514, sampled into
 	// WeatherState::iris_retarget_enabled). Both seeded by WacScript_FreeAll
 	// [orig: @0x4f6381 = 20; @0x4f6371 = 1].
@@ -239,9 +240,9 @@ struct WacNamedValues {
 };
 
 // The epilog/debrief exit timeout: both end screens (WIN score epilog and the
-// LOSE debrief) force g_mission_exit_reason = 1 after 18600 ticks (~297.6 s at
+// LOSE debrief) force g_MissionExitReason = 1 after 18600 ticks (~297.6 s at
 // the 62.5 Hz tick) when the player never presses ESC.
-// [orig: epilog_cinematic_state_machine_update @0x576240 — the tick compares
+// [orig: Cine_EpilogStateMachineUpdate @0x576240 — the tick compares
 //  @0x57621d/@0x5744ea]
 inline constexpr int32_t kEpilogExitTimeoutTicks = 18600;
 
@@ -468,7 +469,7 @@ struct MissionTables {
     // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
     WeaponTable weapons;
     // The ammo.def ballistics/damage table (empty until the host feeds it —
-    // Simulation::load_ammo_table, beside the weapon table). [orig: g_ammoDefTable
+    // Simulation::load_ammo_table, beside the weapon table). [orig: g_AmmoDefTable
     // @0xA2ECE8, AmmoDef_LoadAll @0x40b0b0; §5.60]
     AmmoTable ammo;
     // items.def display names per item type (the def row's `name`), filled by
@@ -518,7 +519,7 @@ struct MissionTables {
     // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn). Read by the
     // SP auto-lose win-condition leg and by the infantry death scream's night
     // gate (0x100000 EnableNVG -> slot 8 SSNightDead @ 0x4b9ca3).
-    // [orig: Bms_AttribFlags @0xa76258]
+    // [orig: g_BmsAttribFlags @0xa76258]
     // The named bits below mirror bms::AttribFlags (engine/runtime/world stays
     // mission-parser-free; parity pinned by static_asserts in
     // engine/runtime/mission/promote.cpp).
@@ -536,11 +537,11 @@ struct MissionTables {
 // The session/game-option bits the host stamps at bring-up; the SP defaults
 // hold otherwise.
 struct SessionRules {
-	uint32_t mpattrib = 0; // [orig: g_rules_flags @0x24D1E34, HUD target gates @0x5926DC]
+	uint32_t mpattrib = 0; // [orig: g_RulesFlags @0x24D1E34, HUD target gates @0x5926DC]
 	bool hit_feedback = true; // [orig: Config_SetDefaults @0x54D18B]
     // Session + game-option state the BMS Teammate trigger family reads. Hosts
     // stamp these at bring-up; the SP defaults hold otherwise.
-    // [orig: g_napi_np_ctx.is_in_session gate @0x453b53; option dword_24D1E34
+    // [orig: g_NapiNPCtx.is_in_session gate @0x453b53; option dword_24D1E34
     // bit 0x20 = teammates disabled @0x453b67 — the same gate that suppresses
     // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
     bool mp_session = false;
@@ -548,13 +549,13 @@ struct SessionRules {
     // The retail is_mp_session_peer bit, the is_client half of the session's
     // connection mode: clear only on a HostOnly (dedicated) host, where no
     // dialog plays and no objective line posts. SP, the listen host and a
-    // joiner keep it set. [orig: g_napi_np_ctx +0x64 (server_session.cpp
+    // joiner keep it set. [orig: g_NapiNPCtx +0x64 (server_session.cpp
     //  stamps it from the mode's is_client bit); readers EventAction_Dispatch
     //  case 7 @0x45443d and HUD_ShowObjectiveNotification @0x5ba382]
     bool mp_session_peer = true;
     // The per-tick authority role consulted by World&-only callbacks. The
     // suspension role pick and both post-death blast writers read the same
-    // g_napi_np_ctx.is_authority bit in retail
+    // g_NapiNPCtx.is_authority bit in retail
     // [orig: @0x46B1B9..0x46B1DB; @0x48F6A0..0x48F71E; @0x4941BE].
     // run_logic_tick stamps it once so every callback sees the tick's role.
     bool logic_authority = true;
@@ -577,16 +578,16 @@ struct SessionRules {
     // The mpattrib rules word's 0x10000 bit: in session the scope-zero -1
     // (auto rangefinder) floor needs it, hence the name. Hosts stamp it from their config's
     // mpattrib value, joiners from the S2C 0x64 fixed block's +44 word
-    // [orig: `test g_rules_flags,10000h` @0x4dbd15 in Player_AdjustWeaponZoomLevel;
-    // g_rules_flags @0x24D1E34 = mpattrib]. Retail's mp_allowsniperscopezoom
+    // [orig: `test g_RulesFlags,10000h` @0x4dbd15 in Player_AdjustWeaponZoomLevel;
+    // g_RulesFlags @0x24D1E34 = mpattrib]. Retail's mp_allowsniperscopezoom
     // option never reaches this word (it feeds the 0x08 flags bit 16 that
     // WeaponSlot_InitFromDef @0x53ef17 reads), so the bit is live only when a
     // host cfg carries it in mpattrib.
     bool auto_scope_zero = false;
     // The mpattrib rules word's 0x200 bit (host option NoFriendlyFire): in
     // session it suppresses the self/friendly-hit blackout arm
-    // [orig: `test g_rules_flags,200h` @0x4af752 in Entity_ApplyCollisionForce;
-    // g_rules_flags @0x24D1E34 = mpattrib]. Hosts stamp it from their config's
+    // [orig: `test g_RulesFlags,200h` @0x4af752 in Entity_ApplyCollisionForce;
+    // g_RulesFlags @0x24D1E34 = mpattrib]. Hosts stamp it from their config's
     // mpattrib value, joiners from the S2C 0x64 fixed block's +44 word.
     bool no_friendly_fire = false;
     // The host's allowSniperScopeZoom option as the SESSION sees it (byte_A821F0):
@@ -597,17 +598,26 @@ struct SessionRules {
     // server_initial_state.cpp emits from the option); offline it stays 0, which
     // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom,
     // joiners from their session-config bitflags.
-    // [orig: apply_session_settings_to_globals @0x552284 (the reset) / @0x5522b9
+    // [orig: Game_ApplySessionSettingsToGlobals @0x552284 (the reset) / @0x5522b9
     //  (the authority stamp); NapiNPClientMsg_HandleSessionConfig @0x428392;
     //  readers Player_AdjustWeaponElevation @0x4dbe36, Player_MountWeaponSlot
     //  @0x4dfaf9, WeaponSlot_InitFromDef @0x53ef17]
     bool allow_sniper_scope_zoom = false;
     // Multiplayer blast damage to Building ItemDefs is disabled unless the
     // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
-    // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
+    // [orig: g_DestroyBuildings gate in Entity_ApplyWeaponDamage
     // @0x4E682E..0x4E6860]
     bool destroy_buildings = false;
-	// [orig: dword_24D1E38, initially -1; AI_TickState_VehicleDead @0x467EE9]
+	// A destroyed PlayerControl hull respawns (true) or is removed at its first
+	// dead tick (false): the host config's `unlimited_vehicles`, stock 1
+	// (inmatch::GameConfig::unlimited_vehicles, stamped by the host bring-up).
+	// Retail reads it as the mission-data block's +0x30 word, zero until every
+	// Game_StartMission rebuilds the block from the config.
+	// [orig: g_RulesUnlimitedVehicles = block unk_24D1E08 +0x30, stored by
+	//  Client_BuildMissionDataRequestBlock @0x51E8C5..0x51E8CB from dword_24D2258
+	//  = g_GameConfigState.unlimitedVehicles_4D0 (Game_ApplySessionSettingsToGlobals
+	//  @0x551D80..0x551D91; Config_SetDefaults @0x54D352); AI_TickState_VehicleDead
+	//  @0x467EE9, Entity_UpdateVehicleAIMovement @0x461246]
 	bool vehicle_respawns = true;
     // The local debug/cheat word's 0x800 bit (dword_24C1930): the SM feed's
     // class-0 player leg skips the LOCAL player and the weapon validator
@@ -650,7 +660,7 @@ struct WorldOutbox {
     std::vector<HudRelay> hud_relays;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
-    // replication emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
+    // replication emit. [orig: g_RoundRing @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
     RoundRing rounds;
 	std::vector<RoundSpawnParams> source_fires; // local source fire awaiting C2S emission
 	// Water-surface crossings recorded this tick; the host fan drains them
@@ -706,7 +716,7 @@ public:
 // the WAC tick and the BMS quarter pass: the vehicle spawn markers, then the
 // player idle timers. The kernel registers it between the two script systems.
 // [orig: Server_TickUpdate — WacScript_AdvanceTick call @0x51D8BF, then
-//  `test tick,1Fh` @0x51D8C4, assign_overlay_spawn_points call @0x51D8D2,
+//  `test tick,1Fh` @0x51D8C4, Spawn_AssignOverlaySpawnPoints call @0x51D8D2,
 //  Server_UpdatePlayerBreathTimers call @0x51D8D7, then the quarter counter
 //  @0x51D8DC]
 class ServerIdleLegs final : public ISystem {
@@ -847,7 +857,7 @@ public:
 
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
-    // [orig: tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
+    // [orig: g_CurrentTick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
     //  Per-system cadences divide it: the WAC VM executes every 62nd tick
     //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
@@ -860,7 +870,7 @@ public:
     // loads (the embedder carries it into the next kernel). The ground
     // vehicles' ground-link cadence, the vehicle avoid-brake factor, the
     // movement resolver's full-update cadence and the water decal scroll read
-    // it. [orig: g_entity_update_counter, `add g_entity_update_counter,esi` in
+    // it. [orig: g_EntityUpdateCounter, `add g_EntityUpdateCounter,esi` in
     //  Entity_UpdateAllEntities @0x4C2639]
     uint32_t entity_update_counter = 0;
     // The tick process_round_end ran on (the SP epilog gate's reference).
@@ -868,7 +878,7 @@ public:
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that
-    // matters here is `wac_var_humans || !wac_var_ticks`: a nonzero mutable WAC
+    // matters here is `g_WacVarHumans || !g_WacVarTicks`: a nonzero mutable WAC
     // clock holds the script until a human player is in the world. Scripts may
     // write ticks back to zero; completed-execution diagnostics do not gate it.
     //
@@ -876,12 +886,12 @@ public:
     // firing into an empty session: 05TRcoop kills ten AI a fifth of a second in,
     // and without this an unattended host runs that before anyone can join.
     //
-    // The pre-round half of the same condition (`!g_preround_delay_timer`) is
+    // The pre-round half of the same condition (`!g_PreRoundDelayTimer`) is
     // the PreRound tick phase (WAC frozen with the entities). The epilog half
     // is epilog_screen_active() below.
     // [orig: Server_TickUpdate @0x51d7e0, the gate @0x51d8bd — `if
-    //  (!g_preround_delay_timer && (wac_var_humans || !wac_var_ticks) &&
-    //  !g_epilog_screen_active)` around the WacScript_AdvanceTick call @0x51d8bf +
+    //  (!g_PreRoundDelayTimer && (g_WacVarHumans || !g_WacVarTicks) &&
+    //  !g_EpilogScreenActive)` around the WacScript_AdvanceTick call @0x51d8bf +
     //  Server_UpdatePlayerBreathTimers + EventTrigger_UpdateQuarterRoundRobin
     //  @0x454d50]
     bool script_may_advance() const {
@@ -894,7 +904,7 @@ public:
     // end raises). The pre-round byte half is the PreRound tick phase.
     // [orig: Game_ProcessMainFrame @0x526703..0x526742 -- `cmp is_authority`
     //  @0x526703, the humans/ticks tests @0x52671C..0x52672A, `cmp
-    //  is_in_session` @0x526734, `cmp g_spawn_success_gate` @0x52673C;
+    //  is_in_session` @0x526734, `cmp g_SpawnSuccessGate` @0x52673C;
     //  the latch writer Server_ProcessRoundEnd @0x5168E4]
     bool entity_update_admitted(bool is_authority) const {
         if (is_authority && !cached.peer_death_screen && cached.humans == 0 &&
@@ -907,13 +917,13 @@ public:
     // winner but 1) starts the LOSE cine on the spot (`Cine_StartPlayback
     // @0x577840`, the SP tail @0x51691d..0x51698f); the next frame's cine
     // dispatch enters lose state 1 and the frame after builds the MISSION
-    // FAILED screen, raising `g_epilog_screen_active @0xA87054`
+    // FAILED screen, raising `g_EpilogScreenActive @0xA87054`
     // (`Cinematic_EpilogUpdate @0x577950`, the mode-2 leg @0x5744fd..0x57450c).
     // From then on the WAC and the BMS quarter pass never run again, so a
     // `Lose` line reaches the chat exactly once. The WIN epilog raises the flag
     // only after its flyaway (state 4 @0x5764ec) — that flow is unported
     // (D-AI-10), so a won SP round keeps the script running as before.
-    // [orig: g_epilog_screen_active writers @0x57450c (lose) / @0x5764ec (win);
+    // [orig: g_EpilogScreenActive writers @0x57450c (lose) / @0x5764ec (win);
     //  the gate read @0x51d8b7]
     bool epilog_screen_active() const {
         return !rules.mp_session && match.outcome().ended && match.outcome().winner_team != 1 &&
@@ -923,7 +933,7 @@ public:
     // clock remain live while World gameplay systems are frozen; phase-0 0x0A
     // projects its low byte to each client. Joiners retain the same field from
     // that wire projection, giving host and client one phase predicate.
-    // [orig: g_preround_delay_timer @0xC8D824; seed @0x516C8D;
+    // [orig: g_PreRoundDelayTimer @0xC8D824; seed @0x516C8D;
     // decrement @0x51DC20..0x51DC33; writer @0x4FF82D]
     uint32_t preround_delay_seconds = 0;
 
@@ -932,7 +942,7 @@ public:
     // host tick is their only reader/writer.
     // The 744-tick priority-target sweep countdown: zero-armed, so the first
     // authority tick of every mission sweeps entity Flags 0x4000 off pools 0/1
-    // and reloads 744. [orig: g_dirtyflag_clear_timer @0xC8D810; zeroed per
+    // and reloads 744. [orig: g_DirtyFlagClearTimer @0xC8D810; zeroed per
     // mission by Nbstat_StartupInit @0x4fde30 <- Game_StartMission @0x526108;
     // Server_TickUpdate @0x51d82b..0x51d840]
     uint32_t priority_target_clear_countdown = 0;
@@ -941,7 +951,7 @@ public:
     // resets it. [orig: dword_24C10D4, read/written only by sub_517B20 @0x517B20]
     uint32_t flag_refresh_cursor = 0;
     // The team-mode 62-tick countdown behind the per-second S2C 0x46 field-0x0008
-    // (downed state) resend to a dead teammate's side. [orig: g_weapon_resend_timer
+    // (downed state) resend to a dead teammate's side. [orig: g_WeaponResendTimer
     // @0xC947A0; Server_TickUpdate @0x51e2db..0x51e307]
     uint32_t team_downed_resend_countdown = 0;
 
@@ -973,8 +983,8 @@ public:
     // per frame after their weather and view legs, whatever the phase; a
     // joiner walks its replica slots instead. It reads the frame's own tick,
     // one behind logic_tick once the entity pass's tail has run.
-    // [orig: Game_ProcessMainFrame -- Environment_UpdateWeatherTick @0x526774,
-    //  Camera_ComputeThirdPersonView @0x526781, then the
+    // [orig: Game_ProcessMainFrame @0x5263F0 -- the Environment_UpdateWeatherTick
+    //  call @0x526774, the Camera_ComputeThirdPersonView call @0x526781, then the
     //  WeaponAction_ProcessAllEntities call @0x526786;
     //  WeaponAction_ProcessAllEntities @0x542690..0x542724]
     void pump_weapon_actions();

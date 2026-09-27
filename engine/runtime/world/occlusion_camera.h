@@ -2,15 +2,16 @@
 
 // The occlusion frame camera built from the presenting scene's view: the
 // mission-fixed eye, the render-float eye, the five inward-facing frustum
-// planes (near + four sides) the batch cull tests, the Q22 world->view rows
-// the three-ray probe offsets along, and the fog/water/blink words. The
-// shell hands over its camera as presentation-frame vectors
-// (presentation_frame.h) and the numbers below are the engine's — the
-// reimpl stand-in for the retail viewport projector.
+// planes through the eye (forward + four sides) the portal traversal is
+// seeded with and the batch cull tests, the Q22 world->view rows the
+// three-ray probe offsets along, and the fog/water/blink words. The shell
+// hands over its camera as presentation-frame vectors (presentation_frame.h)
+// and the numbers below are the engine's — the reimpl stand-in for the
+// retail viewport build.
 // [orig: g_CameraFrustumPlanes5 @ 0xA7849C (D-OCC-12 host mapping); the fixed
 //  view matrix @ 0xA7841C; position @ 0xA78364 / flt_27219C0;
-//  Env_FogDistCurrent @ 0x26C681C; Env_WaterHeightFixed @ 0x26C6454; the
-//  force-indoors attribute Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
+//  g_EnvFogDistCurrent @ 0x26C681C; g_EnvWaterHeightFixed @ 0x26C6454; the
+//  force-indoors attribute g_BmsAttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
 
 #include <runtime/renderer/object_lod.h> // object_lod_focal_pixels
 #include <runtime/world/collision.h> // kBlinkIndoorsBit
@@ -27,8 +28,10 @@ namespace opennova::world {
 
 // The shell's view, presentation frame: a unit forward/right/up triad, the
 // eye, the vertical field of view, the aspect (tan_h / tan_v of the drawn
-// frustum), the near distance and the viewport width in pixels, plus the
-// environment words the occlusion frame carries.
+// frustum) and the viewport width in pixels, plus the environment words the
+// occlusion frame carries. No near distance: retail's occlusion planes pass
+// through the eye and its projector carries its own near word
+// (kViewportNearQ16, world/occlusion.h).
 struct OcclusionViewSpec {
 	float eye[3] = { 0.0f, 0.0f, 0.0f };
 	float forward[3] = { 0.0f, 0.0f, -1.0f };
@@ -36,7 +39,6 @@ struct OcclusionViewSpec {
 	float up[3] = { 0.0f, 1.0f, 0.0f };
 	float fov_y_deg = 90.0f;
 	float aspect = 1.0f;
-	float near_units = 0.05f;
 	float viewport_width = 0.0f;
 	float fog_dist_units = 0.0f;
 	float water_z_units = 0.0f;
@@ -87,7 +89,22 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 	render_dir_from_presentation(view.right, r);
 	render_dir_from_presentation(view.up, u);
 
-	// The 5-plane view frustum (near + 4 sides), inward normals, render float.
+	// The 5-plane view frustum, inward normals, render float: retail's
+	// g_CameraFrustumPlanes5 (viewport+0x13C..+0x188), the planes the portal
+	// traversal is seeded with. EVERY plane passes through the eye,
+	// d = -(n . eye) — the forward plane too: it rejects only what lies
+	// behind the eye, never a near distance, so an exterior door a hair in
+	// front of the eye still clips in and banks its window wedge. (With the
+	// shell camera's 0.2 u near here, the camera's own door vanished inside
+	// that band and every outdoor candidate failed the camera-inside rule —
+	// the Ghost Harvest spawn and every doorway crossing.) Retail stores the
+	// forward plane last; it sits at index 0 here — the traversal's clip test
+	// and wedge assembly read the planes as a set.
+	// [orig: Viewport_BuildProjectionMatrix — the side planes
+	//  @ 0x4113b4..0x411571, the forward plane (0,0,1) through the inverse
+	//  view @ 0x411577..0x41158c with d = -(n . eye) @ 0x4115b0..0x4115c6;
+	//  the seeds Terrain_TraversePortalsFromSection @ 0x5c7448..0x5c745b /
+	//  Terrain_TraversePortalsFromExterior @ 0x5c7377]
 	const double half_v = static_cast<double>(view.fov_y_deg) * io::kRadiansPerDegree * 0.5;
 	const double tan_v = std::tan(half_v);
 	const double tan_h = tan_v * (view.aspect > 0.0f ? static_cast<double>(view.aspect) : 1.0);
@@ -104,16 +121,10 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 	for (int i = 1; i < 5; ++i) detail::normalize3(normals[i]);
 	cam.frustum_count = 5;
 	for (int i = 0; i < 5; ++i) {
-		float anchor[3] = { cam.pos_float[0], cam.pos_float[1], cam.pos_float[2] };
-		if (i == 0) {
-			anchor[0] += f[0] * view.near_units;
-			anchor[1] += f[1] * view.near_units;
-			anchor[2] += f[2] * view.near_units;
-		}
 		cam.frustum[i][0] = normals[i][0];
 		cam.frustum[i][1] = normals[i][1];
 		cam.frustum[i][2] = normals[i][2];
-		cam.frustum[i][3] = -detail::dot3(normals[i], anchor);
+		cam.frustum[i][3] = -detail::dot3(normals[i], cam.pos_float);
 	}
 
 	// World->view rotation rows (mission axes, Q22): row 0 = forward (the

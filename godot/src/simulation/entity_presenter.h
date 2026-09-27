@@ -190,6 +190,13 @@ public:
 	// Forget every render-gate verdict (paired with the sim's applied-state
 	// baseline reset: the next frame re-emits the full set).
 	void clear_render_culled() { wire_render_culled_.clear(); }
+	// The weapon Inset pass's own collector verdicts for the wire rows, live
+	// while that pass renders (OcclusionFrame::apply_inset_frame): a row
+	// either view draws runs its presentation legs, and the body and its held
+	// gun take each view's verdict (the Inset's drawn by an ObjectModel twin,
+	// object/object_model.h).
+	void set_render_culled_inset(int p_handle, bool p_culled);
+	void set_wire_inset_view(bool p_active);
 
 	// Cold rows the budget deferred on the last presented frame.
 	int pending_spawn_count() const { return pending_spawn_count_; }
@@ -330,6 +337,9 @@ public:
 	void present_death_piece_draws_native(
 			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	void present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws);
+	// The weapon Inset pass's own piece draws (OcclusionFrame::apply_inset_frame).
+	void present_death_piece_draws_inset(
+			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	// A death-piece slot's model (null when none) — the draw leg's read seam.
 	ObjectModel *death_piece_model(int p_slot) const;
 	// The frame's NVG laser beams into the overlay tail (FirePresenter::
@@ -337,10 +347,11 @@ public:
 	int append_nvg_laser_beams(Simulation *p_sim, const NvgLaserView &p_view,
 			SceneOverlaySubmission &r_submission);
 	// The data leg: one candidate row through the same beam path into a
-	// throwaway frame; returns the NvgLaserBeams batches it drew.
+	// throwaway frame; returns the batches it drew in the view's slot
+	// (NvgLaserBeams, or InsetNvgLaserBeams for the weapon Inset view's walk).
 	int nvg_laser_beam_batches(int p_handle, int p_attach_bone, int p_weapon_flags,
 			int p_launch_userpoint, bool p_local_player, bool p_nvg_active, int p_camera_mode,
-			const Transform3D &p_eye);
+			const Transform3D &p_eye, bool p_inset_view = false);
 	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
 	void present_vehicle_trail_visuals(const TypedArray<VehicleTrailVisualRow> &p_visuals);
 	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);
@@ -496,7 +507,7 @@ private:
 		// construction (rows rebuild with invalid caches). The CTRL field list
 		// lives beside its leg in entity_presenter_wire.cpp; the aim cache is
 		// the same contiguous payload the placed walk compares.
-		static constexpr int kCtrlCacheCount = 42;
+		static constexpr int kCtrlCacheCount = 55;
 		float ctrl_cache[kCtrlCacheCount];
 		std::array<float, kAimPayloadFloats> aim_cache = {};
 		bool ctrl_cache_valid = false;
@@ -525,7 +536,7 @@ private:
 		int32_t latch = 0;
 	};
 
-	// Mirrors the retail per-entity lighting fields (setup_terrain_effect_for_entity
+	// Mirrors the retail per-entity lighting fields (Terrain_SetupEffectForEntity
 	// @0x5c74a0; sun visibility Entity_ComputeSunVisibility @0x5c6800 -
 	// docs/render/render-lighting-re.md).
 	struct LightingContext {
@@ -589,6 +600,10 @@ private:
 			int tick_delta);
 	void present_one_wire_row(WireRow &row, ObjectModel *model,
 			PresentRowsView snap, int tick_delta);
+	// Each view's collector verdict on a row's body and its held gun (the
+	// models' owner bits; the Inset's through their Inset state).
+	void apply_wire_row_views(const WireRow &row, ObjectModel *model, bool p_present_visible,
+			bool p_main_culled, bool p_inset_culled);
 	void present_wire_row_body_sounds(WireRow &row, PresentRowsView snap);
 	void apply_wire_procedural_part(const WireRow &row, ObjectModel *model,
 			PresentRowsView snap);
@@ -597,6 +612,12 @@ private:
 	void store_wire_remote_body_cache(const WireRow &row);
 	void update_wire_held_weapon(WireRow &row, Node3D *node,
 			PresentRowsView snap, bool body_visible);
+	// The same third-person gun leg for a placed person row (the host's and
+	// SP's mission NPCs are placed models the wire walk defers), keyed by the
+	// row's wire handle; frees the guns of placed rows the walk no longer visits.
+	void update_placed_held_weapon(const Row &row, ObjectModel *body,
+			PresentRowsView snap, bool body_visible);
+	void retire_unvisited_placed_held_weapons();
 	void update_wire_person_overlays(const WireRow &row, ObjectModel *body,
 			PresentRowsView snap, bool body_visible);
 	// A freed/swapped wire node invalidates the plan and its per-handle caches.
@@ -647,8 +668,14 @@ private:
 	HashMap<int32_t, RemoteBodyCache> wire_remote_body_;
 	HashMap<int32_t, int32_t> wire_respawn_revisions_;
 	HashMap<int32_t, bool> wire_render_culled_;
+	HashMap<int32_t, bool> wire_render_culled_inset_;
+	bool wire_inset_view_ = false;
 	HashMap<int32_t, int32_t> wire_held_weapon_adm_;
 	HashMap<int32_t, ObjectID> wire_held_weapon_ids_;
+	// Placed person rows holding a third-person gun: handle -> the placed walk
+	// serial that last visited the row.
+	HashMap<int32_t, uint64_t> placed_held_weapons_;
+	uint64_t placed_walk_serial_ = 0;
 	int64_t wire_plan_revision_ = -1;
 	int wire_plan_stride_ = 0;
 	int64_t wire_plan_snapshot_size_ = -1;

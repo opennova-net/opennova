@@ -19,9 +19,12 @@ The **3DI executable** field automatically shows the bundled converter's path;
 no manual setup is needed. Choosing another executable overrides it for that
 scene. Clearing the field uses the bundled converter again.
 
-To build locally, `scripts/package_blender_addon.sh [out.zip]` builds the CLI
-and the installable zip (default `build/opennova_3di.zip`). PRs and releases
-use the same packaging workflow and smoke-test the CLI extracted from the zip.
+To build locally, `scripts/package_blender_addon.sh [out.zip] [version]` builds
+the CLI and the installable zip (default `build/opennova_3di.zip`). A version
+(a release tag such as `v0.0.10`, the leading `v` dropped) is stamped into the
+zipped `blender_manifest.toml`, which Blender reports as the add-on's version;
+without one the zip keeps the tracked manifest's version. PRs and releases use
+the same packaging workflow and smoke-test the CLI extracted from the zip.
 The CLI links the Visual C++ runtime statically, so no separate runtime
 installation is needed. Its dedicated build directory is `build/blender-addon`.
 
@@ -167,10 +170,13 @@ with), 3 and 4 normal maps. Write TGA writes `.tga` entries only.
 
 ## Panels
 
-- **3D viewport sidebar > OpenNova**: Import and Add Model, the forward axis,
-  then the active object's model: its name, output `.3di`, the collision LOD
-  (whose meshes also become the bullet faces; 0 = the most detailed), Bones
-  follow, Mount on, and Export Model. Export All Models writes every model.
+- **3D viewport sidebar > OpenNova**: Import .3di, Import Animations and Add
+  Model, the forward axis, Write textures and the 3DI executable, then the
+  active object's model: its name, output `.3di`, the collision LOD (whose
+  meshes also become the bullet faces; 0 = the most detailed), Bones follow,
+  Mount on, Export Model, and its Animations box (the output `.adm`, the head
+  bone, the table's rows and Export Animations). Export All Models writes every
+  model, and Export All Animations every rig's clip set.
 - **Object properties** on a model root: the same model settings. On a LOD root: the LOD threshold (projected radius
   in pixels; 0 = the coarsest) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##`
   part: part animation tracks (rotation about the part's up, side or forward

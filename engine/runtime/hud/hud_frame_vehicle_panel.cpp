@@ -55,7 +55,7 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 		const uint32_t tint =
 				band_color(layout_, seat_health_band(vp.hull_health, vp.hull_max_health));
 		// The bordered quad: its texture window reads the authored extent
-		// against the scaled corners [orig: draw_textured_quad_with_border
+		// against the scaled corners [orig: HUD_DrawTexturedQuadWithBorder
 		// @0x590C40, the panel's call @0x5A50D1 passes the silhouette size as
 		// both the texture and the quad extent].
 		const float x0 = sx(static_cast<float>(base_x), w);
@@ -91,8 +91,8 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 	// centre + 1 - h/2 of the measured label (CGameFont_DrawText takes y as
 	// the top; the half-bright wrapper passes x/y straight through @0x580680).
 	// Retail draws the digit white through that half-bright path, which lands
-	// grey [orig: HUD_MeasureTextWH(&g_hudLabelFontBold, buf, &w, &h), then
-	//  HUD_DrawTextCentered_HalfBright(&g_hudLabelFontBold, cx, cy + 1 - h/2,
+	// grey [orig: HUD_MeasureTextWH(&g_HUDLabelFontBold, buf, &w, &h), then
+	//  HUD_DrawTextCentered_HalfBright(&g_HUDLabelFontBold, cx, cy + 1 - h/2,
 	//  buf, 0xFFFFFFFF) @0x5a52f0..0x5a5322; the driver digit @0x5a57ee.. and
 	//  the "X" @0x5a586b.. take the same road; white x half-bright = 0x7F7F7F].
 	const bool have_bold = label_font_bold_.font() != nullptr;

@@ -22,12 +22,12 @@ struct ProjectileHit;
 //  -> Impact_SpawnGlassEffectsOrScar @0x5CF1B0 (kind = the ammo's `scar_type`
 //  word +0x76); the slot writer Scar_AddEntry @0x5CC830; the ring renderer
 //  Scar_RenderCache @0x5CD830 under Scar_RenderAllCaches @0x5CDF70;
-//  g_scarTable @0x8417A8 with its 32-byte texture-name strip @0x8413A8].
+//  g_ScarTable @0x8417A8 with its 32-byte texture-name strip @0x8413A8].
 //
 // The GLASS userpoint leg is a SEPARATE mechanism: when the struck model has
 // a GLASS userpoint of the 35-row surface-material table @0x841980 within the
 // row's radius of the hit, Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEA90
-// takes the projected-decal path (scar_project_decal_onto_entity @0x5CE4A0)
+// takes the projected-decal path (Scar_ProjectDecalOntoEntity @0x5CE4A0)
 // plus the four effects rolled on the table's MAIN probability column, and the
 // ring scar is SKIPPED. Every row keys a building model, so vehicle glass
 // always takes the ring scar. RESIDUAL (the one open item of this port): the
@@ -136,7 +136,7 @@ inline bool scar_needs_texture_roll(int scar_id) {
 
 // THE GATES the slot writer applies before it touches the ring
 // [orig: Scar_AddEntry @0x5CC830]: the hit must sit above the water
-// plane (`hit_z > Env_WaterHeightFixed` @0x5CC865), the struck entity must not
+// plane (`hit_z > g_EnvWaterHeightFixed` @0x5CC865), the struck entity must not
 // be a husk (`Flags & 4` clear @0x5CC894 — the bit Flags |= 6 sets on death),
 // and the struck face must not carry flag 0x400 (@0x5CC92B). The face flag is
 // the collision model's business; the two entity-level gates are here.

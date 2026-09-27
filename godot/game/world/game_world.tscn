@@ -16,7 +16,7 @@ environment_path = NodePath("../MissionEnvironment")
 weather_path = NodePath("../Weather")
 water_path = NodePath("../Water")
 
-[node name="FoliageDispatcher" type="FoliageDispatcher" parent="Terrain"]
+[node name="FoliageDispatcher" type="FoliageDispatcher" parent="."]
 
 [node name="MissionEnvironment" type="MissionEnvironment" parent="."]
 

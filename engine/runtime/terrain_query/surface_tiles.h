@@ -35,7 +35,7 @@ struct SurfaceTileFileSource {
 // [orig: PolyTrn_InitTextures — table memset @ 0x60c5c9, exists probe
 // @ 0x60c5d3, File_ParseASCIIFile @ 0x60c5ef with the Terrain_ParseTsdRow row
 // callback; the .TSD extension pairing off the tilestrip copy @ 0x610a1c
-// (Terrain_LoadEnvironmentConfig); the BMS override Bms_TileSetName
+// (Terrain_LoadEnvironmentConfig); the BMS override g_BmsTileSetName
 // @ 0xa762e8, applied @ 0x6109ce]
 void resolve_tileset_surface_table(const SurfaceTileFileSource &files,
 		const std::string &tilestrip, uint8_t out_table[256]);

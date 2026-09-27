@@ -39,9 +39,11 @@ void stop_slot(Entity &e, uint8_t family, uint8_t slot, DestructionEvents &event
 	e.death_effect_active[family - 1] &= uint8_t(~(1u << slot));
 }
 void spawn_slot(Entity &e, const CollisionMatrix &matrix, uint8_t family, uint8_t slot,
-		const std::string &effect, const DeathEffectPoint &point, DestructionEvents &events) {
+		const std::string &effect, const DeathEffectPoint &point, DestructionEvents &events,
+		bool section_tagged) {
 	auto event = attached(e, family, slot);
 	event.effect = effect;
+	event.section_tagged = section_tagged;
 	event.attach_local_pos = point.local_pos;
 	event.pos = transformed(matrix, point.local_pos, true);
 	event.dir = transformed(matrix, point.local_dir, false);
@@ -82,11 +84,38 @@ void spawn_death_effect_banks(
 		if (effects[bank]->empty())
 			continue;
 		const auto &points = traits.effect_banks[bank].points;
+		// The masked bank tags every spawn with the entity; the death family's
+		// origin fallback submits with tag 0.
+		// [orig: Entity_SpawnMaskedEffectBank calls @ 0x493A9C / 0x493AEF /
+		//  0x493B80 / 0x493BD4 push esi, the entity @ 0x4939B3; the fallback
+		//  Effect_SubmitDescriptor(0, 0, ...) @ 0x493ABB / 0x493B0E]
 		for (size_t i = 0; i < points.size(); ++i)
-			spawn_slot(e, matrix, bank + 1, uint8_t(i), *effects[bank], points[i], events);
+			spawn_slot(e, matrix, bank + 1, uint8_t(i), *effects[bank], points[i], events,
+					true);
 		if (bank == 0 && points.empty())
-			spawn_slot(e, matrix, 1, 0, *effects[0], {}, events);
+			spawn_slot(e, matrix, 1, 0, *effects[0], {}, events, false);
 	}
+}
+
+// The victim's +0x1CC emitter is released when the victim owns it (every
+// spawn into that slot tags the victim), then the ammo's secondary effect
+// spawns there: at the victim position, oriented (0, 0, -0.5), tagged with the
+// victim, and never re-posed (only pool 1 refreshes +0x1CC each tick,
+// Entity_UpdateAllEntities @0x4C22EC -> CEffect_UpdateEmitterTransform).
+// [orig: Projectile_ProcessExplosionQueue @0x4EB1FA..0x4EB292 — the release
+// @0x4EB20A..0x4EB224, the descriptor @0x4EB22A..0x4EB283 (flags 1, tag
+// @0x4EB263, orientation z 0xFFFF8000 @0x4EB278), the store @0x4EB292]
+void spawn_victim_hit_emitter(Entity &victim, const std::string &effect,
+		DestructionEvents &events) {
+	if ((victim.death_effect_active[0] & 1u) != 0)
+		stop_slot(victim, 1, 0, events);
+	auto event = attached(victim, 1, 0);
+	event.effect = effect;
+	event.dir = { 0.0f, 0.0f, -0.5f };
+	event.section_tagged = true;
+	event.positioned = true;
+	victim.death_effect_active[0] |= 1u;
+	events.effects.push_back(std::move(event));
 }
 
 // [orig: Entity_TransitionToGroundDeath @0x493080; Entity_RespawnVehicle @0x45FF40]

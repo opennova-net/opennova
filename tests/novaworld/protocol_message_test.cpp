@@ -777,8 +777,56 @@ bool check_split_fills_partial_packet_and_clears_expiry() {
 			"without room for a prefix and one byte, the entire record moves to the next packet");
 }
 
+// The H:0x00 CS_CONFIG_UPDATE receiver has no length rule: a nonzero direction
+// byte is cs_dir0, a set bit reads four bytes while they fit (0 without advancing
+// on a 1..3-byte tail), slots 0..14 are stored and higher bits consumed.
+// [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940 — dir @0x62195A, mask
+//  @0x621987, loop @0x6219A0..0x6219DE, short value = 0 @0x6219B4]
+bool check_cs_config_update_decoder() {
+	using namespace opennova;
+	auto body = [](uint8_t dir, uint32_t mask, std::vector<uint32_t> values, size_t tail = 0) {
+		std::vector<uint8_t> out{dir};
+		for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(mask >> (8 * i)));
+		for (uint32_t v : values)
+			for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+		out.insert(out.end(), tail, uint8_t{0xAB});
+		return out;
+	};
+	auto decode = [](const std::vector<uint8_t> &b) {
+		return decode_cs_config_update(b.data(), b.size());
+	};
+	CsConfigUpdate u = decode(body(1, 0x2000u, {1300u}));
+	if (!expect(u.to_dir0 && u.written == 0x2000u && u.value[13] == 1300,
+			"an exact [1][0x2000][1300] stores slot 13 into cs_dir0")) return false;
+	u = decode(body(0, 0x0008u, {12u}));
+	if (!expect(!u.to_dir0 && (u.written & 0x8u) != 0 && u.value[3] == 12,
+			"a zero direction byte selects cs_dir1")) return false;
+	u = decode(body(2, 0x0008u, {12u}));
+	if (!expect(u.to_dir0 && u.value[3] == 12, "any nonzero direction byte is cs_dir0")) return false;
+	u = decode(body(1, 0x0009u, {7u}));
+	if (!expect(u.written == 0x1u && u.value[0] == 7,
+			"the walk stops when the bytes run out: slot 0 stored, slot 3 not")) return false;
+	u = decode(body(1, 0x0009u, {7u}, 2));
+	if (!expect(u.written == 0x9u && u.value[0] == 7 && u.value[3] == 0,
+			"a 1..3-byte tail stores 0 into the next set slot")) return false;
+	u = decode(body(1, 0x0001u, {5u, 6u, 7u}));
+	if (!expect(u.written == 0x1u && u.value[0] == 5, "an overlong tail is ignored")) return false;
+	u = decode(body(1, (1u << 20) | 0x1u, {5u, 9u}));
+	if (!expect(u.written == 0x1u && u.value[0] == 5,
+			"a bit above slot 14 is consumed and not stored")) return false;
+	u = decode(body(1, 0x80000001u, {5u}, 2));
+	if (!expect(u.written == 0x1u && u.value[0] == 5,
+			"a bit-31 mask over a short tail terminates with the same stored slots")) return false;
+	u = decode(body(1, 0u, {5u}));
+	if (!expect(u.mask == 0 && u.written == 0, "a mask of 0 is a no-op")) return false;
+	u = decode_cs_config_update(nullptr, 0);
+	return expect(!u.to_dir0 && u.mask == 0 && u.written == 0,
+			"an empty body reads direction 0 and mask 0");
+}
+
 int main() {
 	bool ok = true;
+	ok = check_cs_config_update_decoder() && ok;
 	ok = check_split_fills_partial_packet_and_clears_expiry() && ok;
 	ok = check_session_retransmit_retention_and_current_ack() && ok;
 	ok = check_session_resend_list_wire_and_gap_selection() && ok;

@@ -68,7 +68,7 @@ opennova::cbin::Justify to_cbin_justify(CbinJustify j) {
 // Build a credits resource from raw CBIN bytes. Mirrors the ENV + entry conversion in
 // KdaResourceFormatLoader::_load (collapsing Color/Justify control codes into per-text
 // state) but without disk-relative font/texture resolution, so it works from a PFF
-// datasource [orig: marquee_load_credits_from_ini @ 0x65c5a0: [ENV] SCROLL_RATE/CENTER_X/
+// datasource [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0: [ENV] SCROLL_RATE/CENTER_X/
 // VERTICAL_SPACE + [TEXT] ~C/~F/~I/~J/<CR>, see docs/credits/cbin-re.md].
 Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteArray &p_data) {
 	if (p_data.is_empty() || !opennova::cbin::is_cbin(p_data.ptr(), static_cast<size_t>(p_data.size()))) {

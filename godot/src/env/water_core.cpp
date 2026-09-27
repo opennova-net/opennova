@@ -90,13 +90,13 @@ int WaterCore::strip_build(float p_plane_height_world, float p_murk,
 		return 0;
 	}
 	opennova::env::WaterStripParams params;
-	// Env_WaterHeightFixed is 16.16 render y (== godot y).
+	// g_EnvWaterHeightFixed is 16.16 render y (== godot y).
 	params.plane_height_fp =
 			opennova::io::float_to_fp16_16_round_sat(p_plane_height_world);
 	params.underwater_view = p_underwater;
 	params.nightvision = p_nightvision;
 	params.water_murk = p_murk;
-	// Env_WaterColorLit @ 0x26c6804 is packed 0x00RRGGBB bytes.
+	// g_EnvWaterColorLit @ 0x26c6804 is packed 0x00RRGGBB bytes.
 	params.water_color_lit = p_water_color_lit.to_argb32() & 0x00FFFFFFu;
 	params.depth_scale = p_depth_scale;
 	params.depth_bias = p_depth_bias;

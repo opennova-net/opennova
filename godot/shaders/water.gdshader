@@ -1,19 +1,19 @@
 shader_type spatial;
 // blend_premul_alpha with ALPHA = 1 - a expresses the witnessed framebuffer
 // blend EXACTLY: retail's above-water surface draws with SrcBlend=ONE,
-// DestBlend=SRCALPHA (blend mode 11 in decode_blend_mode_to_d3d_states
+// DestBlend=SRCALPHA (blend mode 11 in RenderState_DecodeBlendModeToD3DStates
 // @ 0x680f00) - out = src + dst * a - and Godot's premul pass computes
 // out = src + dst * (1 - ALPHA). [orig: Water_InitSurfaceShaders @ 0x5c19b0
-// builds Water_ShaderBlend with SrcBlend 2/DestBlend 5/enable 1]
+// builds g_WaterShaderBlend with SrcBlend 2/DestBlend 5/enable 1]
 // depth_draw_always = the witnessed water z-write: pass flags 0x30000/0x20000
 // leave bit 0x100000 (zwrite-off) clear [orig: CGfxShader_ApplyPass @ 0x683232;
 // RS14 commit @ 0x67e265], so retail water writes depth and later passes test
 // against it.
 render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 
-// Water surface: structural port of the witnessed render_water_surface pass
+// Water surface: structural port of the witnessed Render_WaterSurface pass
 // [orig: @ 0x5c32c0, docs/env/env-tod-re.md "Water surface"]. The look is the
-// HIGH-DETAIL strip model [orig: render_water_strip_detailed @ 0x5c27d0]:
+// HIGH-DETAIL strip model [orig: Render_WaterStripDetailed @ 0x5c27d0]:
 // flat geometry, the animated 128x128 noise ridge texture + its DuDv map
 // (regenerated per frame in engine/formats/env - Water_GenerateNoiseTextures
 // @ 0x5c0360), per-vertex diffuse/alpha from the row color chain, and the
@@ -26,11 +26,11 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 // (t1.xy, t2.xy). The reflection RTT consumer is LIVE too (env #30):
 // Water owns the mirrored-scene SubViewport and the fragment below
 // runs the witnessed texm3x2 lookup against it (the fog term rides the
-// per-row spec-alpha factor — see v_fog). The LOW tier (render_water_strip
+// per-row spec-alpha factor — see v_fog). The LOW tier (Render_WaterStrip
 // @ 0x5c1d60) is unreachable at the shipped water detail.
 //
 // The water material set was decoded at REN-4 [orig: Water_InitSurfaceShaders
-// @ 0x5c19b0; selection in render_water_surface @ 0x5c33e6..0x5c34ea]:
+// @ 0x5c19b0; selection in Render_WaterSurface @ 0x5c33e6..0x5c34ea]:
 // - camera ABOVE water: the BLENDED material (ONE + dst*SRCALPHA, ported via
 //   the premul trick above); camera BELOW (underwater view of the surface):
 //   the OPAQUE material - ported as the u_underwater_view branch below
@@ -58,13 +58,13 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"
-// Env_WaterColorLit — since env #30 this is only the reflection-LESS
+// g_EnvWaterColorLit — since env #30 this is only the reflection-LESS
 // stand-in for the t2 sample (headless owners/tests, u_has_reflection false).
 uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
 // The reflection RTT (env #30): Water's mirror-camera SubViewport
 // texture, the chain's t2 [orig: texm3x2pad/texm3x2tex t2 —
 // Water_InitSurfaceShaders @ 0x5c19b0; the mirror scene RTT
-// render_main_scene @ 0x5c1240]. Sampled WITHOUT source_color on purpose:
+// Render_MainScene @ 0x5c1240]. Sampled WITHOUT source_color on purpose:
 // under the gamma-space convention (D-RMAT-7) the RTT's stored bytes are
 // the display-encoded scene, consumed raw exactly like retail's t2 texels.
 uniform sampler2D u_reflection : filter_linear;
@@ -72,8 +72,7 @@ uniform bool u_has_reflection = false;
 // water_murk [orig: SetWaterMurk @ 0x57d4f0] no longer has a uniform: the
 // witnessed angle-weighted murk x distance chain arrives per vertex in
 // COLOR.a now that the strip march is live (env #29) — the former flat
-// (1 - u_water_murk) knob is retired (Water still sets the parameter for
-// probe compatibility; a ShaderMaterial ignores unknown names).
+// (1 - u_water_murk) knob is retired.
 uniform sampler2D u_noise_color : filter_linear, repeat_enable;
 uniform sampler2D u_noise_normal : filter_linear, repeat_enable;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
@@ -85,7 +84,7 @@ uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 // shadow passes leave CAMERA_VISIBLE_LAYERS unset.
 const uint NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u; // 0x00000400
 // The underwater pass swaps to the OPAQUE material — blend OFF, flags 0x20000
-// [orig: Water_ShaderOpaque @ 0x28ee8c8; selection @ 0x5c33e6..0x5c34ea]. Under
+// [orig: g_WaterShaderOpaque @ 0x28ee8c8; selection @ 0x5c33e6..0x5c34ea]. Under
 // the premul pass, ALPHA = 1.0 expresses blend-off exactly (out = src + dst*0);
 // the ps.1.1 color chain is IDENTICAL on both materials (same 4-tex desc), so one
 // shader serves both sides. The ladder position does not change by side (REN-3).
@@ -163,12 +162,12 @@ void fragment() {
 	}
 	// The witnessed texcoords: t0 is the unprojected ABSOLUTE render-basis
 	// world x/32, z/32 of each strip vertex (Godot world z/32, x/32), and t3
-	// duplicates it (retail render_water_strip_detailed @ 0x5c2aec..0x5c2b00,
+	// duplicates it (retail Render_WaterStripDetailed @ 0x5c2aec..0x5c2b00,
 	// the t3 copy @ 0x5c3095..0x5c30bf). The pre-transformed XYZRHW strip
 	// takes no texture transform, so both noise textures sample UV verbatim:
 	// fixed in the world, animated only through the per-frame regenerated
 	// noise. (flt_8412B0/B4 feed only the depth chain, and the cloud-scroll
-	// "offsets" render_water_surface stores are never read back.)
+	// "offsets" Render_WaterSurface stores are never read back.)
 	vec2 uv = UV;
 
 	// Ridge intensity + its alpha mask (A = 255 - i*i/512, more opaque where
@@ -182,7 +181,7 @@ void fragment() {
 	// over the DuDv sample (t0): u = dot(t1row, t0_bx2),
 	// v = dot(t2row, t0_bx2), _bx2 = c*2 - 1 [orig: tex t0 / texm3x2pad t1,
 	// t0_bx2 / texm3x2tex t2, t0_bx2 — Water_InitSurfaceShaders @ 0x5c19b0;
-	// the mirror scene RTT render_main_scene @ 0x5c1240]. The DuDv map's
+	// the mirror scene RTT Render_MainScene @ 0x5c1240]. The DuDv map's
 	// blue byte is the constant 0xFF (engine/formats/env water_noise_normal_pixels),
 	// so _bx2 passes the rows' screen component through at weight 1 while
 	// R/G perturb it. The dots remain the witnessed lookup verbatim: the mirror

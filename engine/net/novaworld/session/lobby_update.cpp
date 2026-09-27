@@ -45,8 +45,9 @@ std::string lobby_update_build(const LobbyStatusBlob &blob) {
 		out += lobby_sanitize_value(kv.second);
 	}
 
-	// dword_24D2188 @0x4ff560: one " p=%s" per PlayerName @0x4ff5c5, or a
-	// lone " p=" when the PlayerList carries none @0x4ff5ff.
+	// Gated on g_NWSendPlayerList (the test @0x4ff559, the jz @0x4ff560): one
+	// " p=%s" per PlayerName @0x4ff5c5, or a lone " p=" when the PlayerList
+	// carries none @0x4ff5ff.
 	if (blob.send_player_names) {
 		if (blob.player_names.empty()) {
 			out += " p=";

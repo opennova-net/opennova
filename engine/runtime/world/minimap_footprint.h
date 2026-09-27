@@ -7,7 +7,7 @@
 // captures show no observable stroke; entities on the footprint policy never
 // draw an icon quad. OVRT source space is X/Y-up/Z, so the slice tests OPLN
 // normal Y and projects vertex X/Z.
-// [orig: render_collision_wireframe @0x596800 — the model's OOBJ count/pointer
+// [orig: Render_CollisionWireframe @0x596800 — the model's OOBJ count/pointer
 //  at +0xDC/+0xE0, 60-byte records, and OVRT/OPLN/OFAC pointers at
 //  +24/+32/+40 are walked @0x59690f..0x597185.]
 
@@ -36,7 +36,7 @@ MinimapFootprintMesh minimap_footprint_from_occlusion(
 // ChangeTeam green, gray otherwise — opaque because the map-overlay caller's
 // zero alpha override is promoted to 0xFF. The byte-547 zone-state recolor
 // under caps flag 0x20 is an unported residual.
-// [orig: MapOverlay_DrawView @0x5a5abc; render_collision_wireframe
+// [orig: MapOverlay_DrawView @0x5a5abc; Render_CollisionWireframe
 //  @0x596884..0x596891 and @0x596848..0x596880 —
 //  0x4050A0 / 0xA05040 / itemAttrib bit17 -> 0x609F60 / 0xA0A0A0,
 //  each | 0xFF << 24]

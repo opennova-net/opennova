@@ -486,7 +486,7 @@ int main(void) {
 	// build without a resource source) loads no model.
 	// [orig: WeaponDefs_ParseLineCallback load @0x544FCE, store @0x545092,
 	//  launchuserpoint @0x544479..0x5444AC; WeaponDef_ResolveAllReferences
-	//  @0x5402C2..0x540316 -> modelgpm_FindUserpointByName @0x5B2170]
+	//  @0x5402C2..0x540316 -> ModelGPM_FindUserpointByName @0x5B2170]
 	{
 		static const char kLaunch[] =
 				"weapon \"WPN_GFX3_CAMERA\"\n"

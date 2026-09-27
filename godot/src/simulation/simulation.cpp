@@ -117,10 +117,6 @@ opennova::bms::File make_demo_mission() {
 
 Simulation::Simulation() {
 	session_.set_tick_observer(this);
-	// Retail's frame-time bank (world::TickBankPolicy::RetailMainLoop carries
-	// the witness): a long frame's backlog is low-passed over the next frames
-	// instead of run as a burst of catch-up ticks in one.
-	session_.set_tick_bank_policy(opennova::world::TickBankPolicy::RetailMainLoop);
 	// The bare local role from construction; the shell's session choices
 	// (enable_listen_server / enable_host_listen / enable_join) replace it.
 	(void)install_role(std::make_unique<opennova::inmatch::LocalRole>());
@@ -132,14 +128,17 @@ Simulation::~Simulation() {
 	(void)session_.close();
 }
 
+// The live round clock in logic ticks (world::Match, -1 = untimed): the
+// NovaWorld host's TimeLeft column re-reads it at every refresh.
+int32_t Simulation::round_time_remaining_ticks() const {
+	return kernel_ ? kernel_->world.match.remaining_ticks() : -1;
+}
+
 void Simulation::reset_world() {
 	// The bound Weather node points into this kernel's World (its
 	// WeatherState is the environment's live view): release it before the
 	// kernel is replaced.
 	_release_weather_owner();
-	// The drawer's last-camera latch is mission-scoped: a stale one would
-	// hand the next mission's first rain frame a bogus (clamped) streak.
-	assets_.precipitation_draw = opennova::renderer::PrecipitationDrawState{};
 	if (joiner_role_ != nullptr) joiner_role_->reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
@@ -149,40 +148,14 @@ void Simulation::reset_world() {
 	// One fresh kernel per load (ADR 0042 d3): the world, its systems, the
 	// sim asset caches, the local-player weapon/loadout/view state and the
 	// terrain field store all reset inside it. Retail reloads its model cache
-	// per mission too, so the parse-once caches dying here is faithful.
-	// The retained pieces SURVIVE the swap, as they survived reset_world
-	// before the kernel: the seat/mount table (it installs before mission
-	// promotion — the wire-header join prewarms it pre-load), its graphic
-	// sources, the player's mouse settings and scoped aim oscillators, and
-	// the declared half of the script's mission-variable bank (the retail bank is process-global and
-	// no load path zeroes the compiler-declared slots, so a restart or the
-	// next mission reads slot n at the previous run's value; V# and G# start
-	// at zero per load, ScriptVarStore::carry_declared_from), and the
-	// entity-update counter (process-global and never reset: the next
-	// mission's staggers continue its phase [orig: g_entity_update_counter, whose one
-	// writer is Entity_UpdateAllEntities @0x4C2639]).
-	std::vector<opennova::mission::ItemSeatSpec> kept_seat_specs;
-	std::unordered_map<int32_t, std::string> kept_mounted_graphics;
-	opennova::world::PlayerLookSettings kept_look_settings;
-	opennova::world::ScriptVarStore kept_script_vars;
-	uint32_t kept_entity_update_counter = 0;
-	if (kernel_ != nullptr) {
-		kept_seat_specs = std::move(kernel_->seat_specs);
-		kept_mounted_graphics = std::move(kernel_->mounted_graphics);
-		kept_look_settings = kernel_->local.look_settings;
-		kept_script_vars = kernel_->world.script.vars;
-		kept_entity_update_counter = kernel_->world.entity_update_counter;
-	}
+	// per mission too, so the parse-once caches dying here is faithful. The
+	// retained pieces cross over through the kernel's own carry
+	// (MissionKernel::carry_across_load_from) before the old kernel dies.
 	auto next_kernel = std::make_unique<opennova::mission::MissionKernel>();
 	if (kernel_ != nullptr)
-		next_kernel->local.carry_scoped_aim_drift_from(kernel_->local);
+		next_kernel->carry_across_load_from(*kernel_);
 	kernel_ = std::move(next_kernel);
 	role_->bind(*kernel_);
-	kernel_->seat_specs = std::move(kept_seat_specs);
-	kernel_->mounted_graphics = std::move(kept_mounted_graphics);
-	kernel_->local.look_settings = kept_look_settings;
-	kernel_->world.script.vars.carry_declared_from(kept_script_vars);
-	kernel_->world.entity_update_counter = kept_entity_update_counter;
 	kernel_->set_assets(
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
@@ -277,7 +250,7 @@ bool Simulation::complete_mission_start() {
 
 const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitation_frame(
 		const Vector3 &p_camera, const Vector3 &p_camera_right, const Vector3 &p_camera_up,
-		int p_terrain_light_rgb) {
+		int p_terrain_light_rgb, int p_camera_mode) {
 	if (!world_installed_ || kernel_ == nullptr) {
 		assets_.precipitation_frame.clear();
 		assets_.precipitation_frame.snow = false;
@@ -291,7 +264,7 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 		opennova::io::float_to_fp16_16_round_sat(p_camera.y),
 	};
 	// The per-render update precedes the compile (retail the drawer calls
-	// update_weather_particle_positions first @ 0x5dee65).
+	// WeatherParticle_UpdatePositions first @ 0x5dee65).
 	if (weather.raining()) kernel_->update_precipitation(cam_q16[0], cam_q16[1], cam_q16[2]);
 	opennova::renderer::PrecipitationCamera camera;
 	for (int i = 0; i < 3; ++i) camera.position_q16[i] = cam_q16[i];
@@ -301,10 +274,11 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 	camera.up[0] = p_camera_up.x;
 	camera.up[1] = p_camera_up.y;
 	camera.up[2] = p_camera_up.z;
+	camera.mode = p_camera_mode;
 	opennova::renderer::PrecipitationDrawFrame &frame = assets_.precipitation_frame;
 	opennova::renderer::compile_precipitation_frame(weather.precipitation,
 			weather.core.scalar_channels.rain_pct_fp, weather.precipitation_kind,
-			static_cast<uint32_t>(p_terrain_light_rgb), camera, assets_.precipitation_draw, frame);
+			static_cast<uint32_t>(p_terrain_light_rgb), camera, kernel_->precipitation_draw, frame);
 	return frame;
 }
 
@@ -359,7 +333,7 @@ bool Simulation::native_environment_snapshot(
 	out.ground_rgb = rgb(core.fill_block.render_color);
 	out.ceiling_rgb = rgb(core.sky_color_blocks.ceiling.render_color);
 	out.floor_rgb = rgb(core.sky_color_blocks.floor.render_color);
-	// Env_TerrainLightCombined = light x 0xB5/256 + sky; Env_CeilingFloorBlend
+	// g_EnvTerrainLightCombined = light x 0xB5/256 + sky; g_EnvCeilingFloorBlend
 	// = ceiling x 0xB5/256 + floor x 0xB5/256 (retail @ 0x57f0b3..0x57f110).
 	const auto combine = [](uint32_t a, uint32_t a_scale, uint32_t b, uint32_t b_scale) {
 		uint32_t out_rgb = 0;
@@ -578,7 +552,7 @@ std::function<void()> Simulation::role_bringup_hook() {
 			// when the shell's load_weapon_table lands.
 			push_joiner_loadout_kit();
 		}
-		install_item_class_resolver();
+		install_item_catalog();
 	};
 }
 

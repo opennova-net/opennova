@@ -224,7 +224,7 @@ unaffected; full ctest 223/223.
 ### ✅ P4 — Per-frame host loop (SP) (DONE)
 `Server_TickUpdate` (`server_tick.{h,cpp}`): **(1)** drain C2S (`NapiNPProtocol_Pump` →
 `PumpRecvQueues` → `DispatchOpcode` → `DispatchMessage`; in-match `0x0C` →
-`dispatch_entity_packet_callback` → `NetPacket_SerializePlayerState` SNAP) **(2)** `World::run_logic_tick`
+`NetPacket_DispatchEntityPacketCallback` → `NetPacket_SerializePlayerState` SNAP) **(2)** `World::run_logic_tick`
 **(3)** per-connection S2C `0x0A` fan **(4)** flush.
 
 **Single-owner decision:** `NapiNPProtocol.connection_list` is the one connection table (each node's
@@ -313,14 +313,16 @@ popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43
   (29760-tick, both roles), `0x4C` net-quality (310-tick, Joiner in-match), `0x2C` RTT ping (every
   deployed frame), and the `send_holdoff_countdown` send-block gate — all `[orig @0x42c1a9..0x42c4bc]`,
   via a new public `JoinerConnection::frame_inner(tag,body)` so they ride the same `0x43`/SCRK envelope
-  as the `0x0C`. **Witness correction (re-doc §5.44):** `g_tag2CSendCooldown` (`@0xA860D8`) is set-to-62
+  as the `0x0C`. **Witness correction (re-doc §5.44):** `g_Tag2CSendCooldown` (`@0xA860D8`) is set-to-62
   + self-decremented but is **NOT read as a send gate** (the only three xrefs are this fn's read/dec/set)
   — so the `0x2C` fires every deployed frame, NOT throttled 62-tick as §5.44 first phrased. `seed_session`
   sets a `replay_mode_` that suppresses the housekeeping so a seeded golden replay reproduces only the
   captured `0x0C` (`npruntime_golden_client` byte-parity preserved). HostClient emits no housekeeping
   (recv-only loopback) — deferred-and-logged.
 - **`inmatch::drop_connection(ctx, peer)`** added — owner-initiated eviction for the recv-timeout / dead-peer
-  path (no `0x46`); mirrors the goodbye teardown without surfacing an event.
+  path (no `0x46`); mirrors the goodbye teardown without surfacing an event. It is gone since: the
+  owner's dead-endpoint eviction is `inmatch::destroy_connection(ctx, peer, nullptr)`, the same
+  complete teardown with no goodbye burst (`napi_np_protocol.h`).
 
 Bar met: **`npruntime_two_endpoint_socket`** (always-on) — a `ClientRuntime` joiner and the
 `apps/nw_server` owner loop, each on its own bound loopback UDP socket, run a full join → spawn → play
@@ -453,7 +455,7 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
 - 0x45 terrain-delta + 0x7E briefing are emitted by the original ONLY when present; both `return 0` and
   the orig skips otherwise, so they are faithfully ABSENT on the headless host (not deferrals).
 - IDB hygiene: `WriteTypeNameAndBaseName → NetPacket_WriteServerNameAndMapFile`; `byte_24D1FC4 →
-  g_server_name_str`; `baseName → g_map_file_name` (the wire proved serverName+mapFile, not type/base).
+  g_ServerNameStr`; `baseName → g_MapFileName` (the wire proved serverName+mapFile, not type/base).
 - Tests: `npruntime_initial_state_burst` (full order + per-body byte assertions, including a
   non-default configured 0x76), `npruntime_golden_lan_join` (retail 0x2A/0x76 byte-parity +
   0x2C/0x08/0x66 structure-parity), and `npruntime_client_runtime` (retail-host 0x76 receive plus
@@ -463,7 +465,7 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
 ## Test harness (built up across phases)
 
 - **GoldenSession loader** (`tests/npruntime/`): load a golden via
-  `apps/common/pcap_reader::stream_pcap_udp_file` → `engine/net/npwire/wire_capture`
+  `stream_pcap_udp_file` (then `apps/common/pcap_reader`, today `engine/base/pcapio/pcap_reader`) → `engine/net/npwire/wire_capture`
   (`CaptureDecoder::push`) → ordered `(direction, tag, decoded-fields, raw-payload, ts, port)`
   events, partitioned host vs joiner by port. Env-gate on the golden path with a `DEFAULT_*_PCAP`
   fallback; skip if absent. New env vars: `NW_GOLDEN_LAN_JOIN`, `NW_GOLDEN_LAN_JOIN_SESSION`,

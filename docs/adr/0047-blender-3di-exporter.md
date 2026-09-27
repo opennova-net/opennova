@@ -57,14 +57,16 @@ the same text transport, the same add-on.
    reads, beyond storage noise, is a difference; heuristic derived values and
    moves within tolerance print as `drift:` lines with counts, which `--strict`
    also fails), and `catalog` prints
-   the engine's CTRL register and generator-style tables. The CLI owns both
+   the engine's CTRL register and generator-style tables (with the shader tags
+   and their capability words, decision 8, and the anim slot keys and event
+   trigger bits, decision 12, one kind per line). The CLI owns both
    winding conversions: render triangles flip (retail winds counter-clockwise
    in model axes, the mirror of mission); collision and occlusion faces keep
    the scene's counter-clockwise-about-the-normal order, which is retail's
    (Dtruck2 905 of 906 bullet faces, Armry01 all of them and its OCCL faces).
 3. **The Blender add-on** (`tools/blender/opennova_3di`, a Blender 4.2+
    extension) reads the scene by the NovaLogic ASE/OED object-naming convention
-   (`classify_name`, [orig: ConvertToInternal @ 0x4268B3], as the retired
+   (`classify_name`, [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)], as the retired
    importer/exporter used it: `_lod_index` LOD roots, `PN##`, `## Mesh<n>`,
    `_## center`, `~PPx attach`, `UP<c>## <label>`, `LP##` lights,
    `<code>##[a..]-colonly`, `OB/OS/OP/OH##[-MM]-occonly`,
@@ -98,7 +100,7 @@ the same text transport, the same add-on.
    (an industry format, not a 3DI concern).
 4. **Collision follows the OED rules** (ModSuperOed, as the retired
    `engine/formats/oed` port carried them, 5fc5b4f6a^). A volume is the solid
-   its authored faces bound [orig: ConvertToInternal @ 0x4268B3]: its vertex
+   its authored faces bound [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: its vertex
    box's six planes, then each triangle's plane unless one matches it (0.005
    per normal axis, 0.03 distance, the last match wins); a ladder (`CL`) faces
    the plane of its last triangle (plane 0 after OED's swap). A volume mesh
@@ -185,8 +187,8 @@ the same text transport, the same add-on.
    and a missing name places the child at the parent's root. The child takes
    the point's look-at frame as retail builds it, the matrix's rows being the
    child's axes (a level point faces the child along its direction; a pitched
-   one tips it the other way) [orig: build_bone_attachment_matrix @ 0x56C630;
-   build_direction_look_at_matrix @ 0x612C90]. Both the arms' drive and a mount
+   one tips it the other way) [orig: Bone_BuildAttachmentMatrix @ 0x56C630;
+   Math_BuildDirectionLookAtMatrix @ 0x612C90]. Both the arms' drive and a mount
    bind with the rigs at rest. Export reads skinned meshes in their rest pose
    with their Armature modifiers off, and every model in its own root's frame.
 10. **Standing from ADR 0038.** No other Python product code, Qt importer, or

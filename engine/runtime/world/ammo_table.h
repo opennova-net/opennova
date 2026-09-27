@@ -1,7 +1,7 @@
 // The ammo.def table — the fired-round ballistics + damage knowledge the authoritative
 // round sim consumes. POD and def-parser-free: ammo_table_build.h (this directory) builds it
 // from a parsed DefAmmoFile; the engine feeds it beside the weapon table
-// (Simulation::load_ammo_table). [orig: g_ammoDefTable @ 0xA2ECE8 — 276-B records,
+// (Simulation::load_ammo_table). [orig: g_AmmoDefTable @ 0xA2ECE8 — 276-B records,
 // loaded per mission from literally "ammo.def" by AmmoDef_LoadAll @ 0x40B0B0 (same
 // encrypted-ASCII parse as weapon.def), token map AmmoDef_ParseProperty @ 0x40A2D0;
 // docs/net/novaworld-net-re.md §5.60]
@@ -156,6 +156,12 @@ struct AmmoTableEntry {
     // @0x40a8c8/@0x40a8f6]; we carry the names and the host resolves at play time.
     std::string ai_launch_set;      // +64 `ai_launch` fire sound-set name
     std::string ai_launch_effect;   // +68 `ai_launcheffect` muzzle effect name
+    // The blast's per-victim presentation, names as above (the original
+    // resolves the handle / set pointer at parse) [orig: AmmoDef_ParseProperty
+    // @0x40aa15 / @0x40a92a; consumer Projectile_ProcessExplosionQueue
+    // @0x4EB1A3 / @0x4EB1DD].
+    std::string secondary_effect;   // +72 `secondary_effect`
+    std::string kz_sound;           // +76 `kz_sound`
     int32_t mf_light = 0;           // +36 `MF_Light` presence flag [orig: @0x40a81b]
     int32_t mf_light_value = 0;     // +40 `MF_Light` value
     int32_t tracer_type_friendly = 0; // +232 `tracer_type` first style id
@@ -201,7 +207,7 @@ struct AmmoTable {
     // authored tag in ascending tag order (row 0 is the always-copied slot 0), i.e.
     // tag 5 itself when def 0 authors tags 1..5 as shipped AT_NULL does. Empty when
     // def 0 authors fewer than five tags (the static bank stays zero).
-    // [orig: AmmoDef_InitEffectsTable @0x409F20 — `ammoDef == g_ammoDefTable` ->
+    // [orig: AmmoDef_InitEffectsTable @0x409F20 — `ammoDef == g_AmmoDefTable` ->
     //  word_A2EB28 @0x409f62, the `*srcEffect || entryIndex <= 0` copy gate @0x409fe8;
     //  AmmoDef_GetExplosionRadius @0x409770 — `radius = dword_A2EB80` @0x40978c]
     std::string default_explosion_sound;

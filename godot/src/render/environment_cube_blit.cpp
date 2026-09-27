@@ -1,5 +1,6 @@
 #include "render/environment_cube_blit.h"
 #include "render/rd_fullscreen.h"
+#include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
 #include "util/string_convert.h"
 
@@ -90,27 +91,11 @@ void EnvironmentCubeBlit::finish(bool ok) {
 bool EnvironmentCubeBlit::ensure_shader(RenderingDevice *rd) {
 	if (shader_.is_valid() && sampler_.is_valid())
 		return true;
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kRdFullscreenVertexShader));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(kLayerFragmentShader));
-	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
-	if (spirv.is_null()) {
-		set_failure("RenderingDevice returned no SPIR-V for the environment "
-				"cube blit");
-		return false;
-	}
-	const String vertex_error = spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_VERTEX);
-	const String fragment_error = spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_FRAGMENT);
-	if (!vertex_error.is_empty() || !fragment_error.is_empty()) {
-		set_failure("environment cube blit shader compilation failed: vertex=" +
-				opennova::to_std(vertex_error) + "; fragment=" +
-				opennova::to_std(fragment_error));
+	Ref<RDShaderSPIRV> spirv;
+	const std::string compile_errors =
+			compile_rd_spirv(rd, kRdFullscreenVertexShader, kLayerFragmentShader, spirv);
+	if (!compile_errors.empty()) {
+		set_failure("environment cube blit shader compilation failed: " + compile_errors);
 		return false;
 	}
 	shader_ = rd->shader_create_from_spirv(spirv,

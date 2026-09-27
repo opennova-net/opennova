@@ -101,12 +101,14 @@ add_library(${TARGET_NAME} SHARED
     render/retained_array_mesh.cpp
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
+    render/target_projection_xr_interface.cpp
     object/entity_index.cpp
     object/entity_ref.cpp
     object/object_model.cpp
     object/object_model_anim.cpp
     object/object_model_materials.cpp
     object/object_model_scene.cpp
+    object/object_model_views.cpp
     object/object_data.cpp
     object/object_data_bind.cpp
     object/object_data_state.cpp

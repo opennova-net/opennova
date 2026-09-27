@@ -12,6 +12,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/collision_detail.h>
 #include <runtime/world/dir_table.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_part_anim.h>
@@ -411,7 +412,7 @@ void stage_player_vehicle_input(
 }
 
 // The occupant whose input this machine should consume. Retail's gate is
-// `(occ->Flags & 0x100) && (occ == g_local_player_entity || is_authority)` — the
+// `(occ->Flags & 0x100) && (occ == g_LocalPlayerEntity || is_authority)` — the
 // AUTHORITY runs the input block for ANY player occupant, not only its own local
 // player. That distinction is invisible on a listen host flying its own
 // aircraft, and decisive when a JOINER is the pilot: the host owns the mover, so
@@ -554,7 +555,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
         } else if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
 			// A player driver whose eye (CameraOffset.z + Z) sits at or below the
 			// water plane drops to the AI leg like the boat twin [orig: `mov
-			// eax,[ecx+74h]; add eax,[ecx+0Ch]; cmp eax, Env_WaterHeightFixed;
+			// eax,[ecx+74h]; add eax,[ecx+0Ch]; cmp eax, g_EnvWaterHeightFixed;
 			// jle loc_48BC12` @0x48B9A0..0x48B9AC].
 			stage_player_vehicle_input(world_, veh, *occ, traits);
 		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
@@ -858,7 +859,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 			const int32_t *dir = m.chassis_impulse_direction;
 			const double length = std::sqrt(double(dir[0]) * dir[0] + double(dir[1]) * dir[1] +
 					double(dir[2]) * dir[2]);
-			if (static_cast<int32_t>(std::min(length, 2147418112.0)) > 0) {
+			if (static_cast<int32_t>(std::min(length, detail::kFtolClamp)) > 0) {
 				const int32_t scale = static_cast<int32_t>(
 						double(m.chassis_impulse_amplitude) * double(28.16f)); // flt_7C6FA0
 				m.vel_x = io::bam_add(m.vel_x, q16_mul_rhu(dir[0], scale));
@@ -975,6 +976,14 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		world.vehicles.update_tread_sound(veh, traits);
     if (traits.family == VehicleFamily::Bike)
         m.wheelie_request = 0; // [orig: Entity_UpdateLightVehiclePhysics @ 0x4869F9]
+	// Every mover ends by rebuilding the entity matrix and setting the matrix bit
+	// (Flags 0x20000, homed on engine_flags); the dead-hull bail jumps to this
+	// same tail. The load stream carries it on
+	// every live vehicle. [orig: cveh Entity_UpdateVehiclePhysics @0x48D449,
+	// OR @0x48D451 (dead bail @0x48B810); ctan Entity_UpdateTankVehiclePhysics
+	// @0x48AEC9 (bail @0x4893E9); cbik Entity_UpdateLightVehiclePhysics
+	// @0x486A17 (bail @0x484936)]
+	veh.engine_flags |= kEntityFlagMatrixBuilt;
 }
 
 namespace {
@@ -1381,19 +1390,12 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
 	const int32_t sev =
 			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
-	if (sev == 1) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4821E7]
-	} else if (sev == 2) {
-		m.speed -= m.speed >> ((traits.torque + 1) & 31); // [orig: @0x4822A4]
-	} else if (sev == 3) {
-		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4822C9]
-		// The shared contact fold applies authority damage, sound and momentum. The quarter-speed
-		// cut requires a terrain-only hit beyond the hull. The original yaw-kick arm is
-		// unreachable.
-		// Witness sites: [orig: @0x482546, @0x4825DD, @0x4825E3, @0x48262D, @0x4826EB]
-		if (!hit_entity.valid() && strongest_probe_beyond_hull(forces, probes, 7, px, py))
-			m.speed = int32_t(m.speed * 0.25); // [orig: flt_7C333C @0x4826EB]
-	}
+	// The decay per severity [orig: @0x4821E7 (1), @0x4822A4 (2), @0x4822C9 (3)]. The shared
+	// contact fold applies authority damage, sound and momentum. The quarter-speed cut requires
+	// a terrain-only hit beyond the hull [orig: flt_7C333C @0x4826EB]. The original yaw-kick arm
+	// is unreachable.
+	// Witness sites: [orig: @0x482546, @0x4825DD, @0x4825E3, @0x48262D, @0x4826EB]
+	contact_speed_response(m, traits, sev, hit_entity, forces, probes, 7, px, py);
 
 	// ---- §7 position push + second pass (severity >= 1 only). zc[] mirrors
 	// the SHARED force buffer the grounded leg reads [orig: §10-A
@@ -2106,9 +2108,12 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
 	// A DEAD hull skips everything to the matrix-build tail — no input, no
 	// integration [orig: `test Flags, 2 -> jnz 0x48EF4B` @0x48DDFA]. Retail has
 	// ONE flags word; our death chain latches the dead bit on engine_flags
-	// (destruction.cpp), so read the established combined view.
-	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0)
+	// (destruction.cpp), so read the established combined view. The tail still
+	// sets Flags 0x20000 [orig: @0x48EF63].
+	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
 		return;
+	}
 
 	// Capsize damage, authority-only: past ~100 deg of roll OR pitch the hull
 	// drains 200 health per tick to zero [orig: @0x48DE84..0x48DECD —
@@ -2173,6 +2178,9 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
     world.vehicles.update_ground_sound(veh, traits, wrecked, /*collided=*/false);
     // The part-animation tick is the core's (@0x48E9F0..0x48E9F9 runs once
     // per mover pass); a second call here would double the wheel phase.
+    // The matrix-build tail sets Flags 0x20000 (kEntityFlagMatrixBuilt, homed on
+    // engine_flags) [orig: Entity_UpdateWatercraftPhysics @0x48EF5B, OR @0x48EF63].
+    veh.engine_flags |= kEntityFlagMatrixBuilt;
 }
 
 // Ground-family prediction runs the shared chase, stages local-driver input or remote commands,

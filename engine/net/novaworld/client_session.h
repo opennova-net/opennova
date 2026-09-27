@@ -301,7 +301,7 @@ public:
 	// ---- notifications ------------------------------------------------------
 	// Notices accumulated by handle_datagram, oldest first; the call drains them.
 	std::vector<Notice> take_notices();
-	// g_mission_exit_reason = 12 once a ServerStopPlaying / ServerLeaveNovaWorld landed.
+	// g_MissionExitReason = 12 once a ServerStopPlaying / ServerLeaveNovaWorld landed.
 	int mission_exit_reason() const { return mission_exit_reason_; }
 	// The peer's / reap's latched disconnect record once the session Closed on it.
 	bool disconnected_by_peer() const { return disconnected_by_peer_; }
@@ -424,13 +424,18 @@ struct NovaWorldJoinCu {
 	std::string met_tag;         // MetTag   <- gate VAR METLABEL  (byte_B5F4BC)
 	std::string udp_code1;       // UdpCode1 <- gate VAR UDPCODE1  (byte_B5F8E8)
 	std::string udp_code2;       // UdpCode2 <- gate VAR UDPCODE2  (byte_B5F908)
-	std::string max_packet_size = "1300";
+	// MaxPacketSize: the game.cfg `mpmaxpacketsize` value printed raw with "%ld"
+	// (no clamp; the stock value is 1300) — the same configured value a host
+	// advertises as CS field 13 (inmatch::GameConfig::max_packet_size).
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4913..0x4d493e — sprintf of
+	//  g_GameConfigState.maxPacketSize_338 -> CU "MaxPacketSize"]
+	int32_t max_packet_size = 1300;
 };
 
 // Build the 0x42-join CU var set exactly as
 // [orig: CNapiGameSession_ConnectToNovaWorld @ 0x4d4640] does: the session+316
 // var list (CNapiVarList_SetOrCreate @ 0x6318c0), emitted as CU chunks by
-// SendClientHello @ 0x61fe20. Retail order is fixed: Application,
+// CNapiNPConnection_SendClientJoin @ 0x61fe20. Retail order is fixed: Application,
 // BuildDateAndTime, Debug, CountryName, Language, TimeZoneBias, GateTag, MetTag,
 // UdpCode1, UdpCode2, MaxPacketSize. CountryName/Language/TimeZoneBias are EMPTY
 // on the join (retail fills locale only in the verify "Cookie"). All chunks use

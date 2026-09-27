@@ -28,7 +28,7 @@ TypedArray<NovaWorldServerRow> pick(const TypedArray<NovaWorldServerRow> &p_rows
 } // namespace
 
 String NovaWorldServerBrowser::ping_text(int p_ping) {
-	return String(opennova::browser_ping_text(p_ping).c_str());
+	return opennova::to_gd(opennova::browser_ping_text(p_ping));
 }
 
 PackedStringArray NovaWorldServerBrowser::row_cells(const Ref<NovaWorldServerRow> &p_row, int p_ping) {

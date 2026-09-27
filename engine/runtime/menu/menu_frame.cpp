@@ -103,7 +103,7 @@ std::string MenuFrameCompiler::resolve_var(const std::string &value) const {
 
 // A FONT color string -> 0xAARRGGBB with alpha forced opaque (the text sink
 // forces 0xFF alpha; menus never pass the 0x10000 keep-alpha flag)
-// [orig: font_cache_draw_text_scaled @ 0x653170]. An unparsed value keeps the
+// [orig: CFontCache_DrawTextScaled @ 0x653170]. An unparsed value keeps the
 // zeroed ctor field: opaque black.
 uint32_t MenuFrameCompiler::resolve_text_color(const std::string &value) const {
 	uint8_t r = 0;
@@ -415,7 +415,7 @@ const MenuWidgetState *MenuFrameCompiler::state_for(
 	return nullptr;
 }
 
-// The pump verdict [orig: widget_process_mouse_event @ 0x647a00 — disabled
+// The pump verdict [orig: CWnd_ProcessMouseEvent @ 0x647a00 — disabled
 // -> 1; hit + button down -> 3; hit + button up -> 2; else 0].
 int MenuFrameCompiler::pump_visual_state(const mnu::Window &w,
 		const MenuWidgetState *ws) const {
@@ -446,7 +446,7 @@ int MenuFrameCompiler::appearance_state_with_fallback(const WidgetNode &node,
 }
 
 // The element rect: the three-stage POSITION solve in design space
-// [orig: the parse tail @ 0x648120 -> adjust_rect_to_text_size @ 0x6575f0].
+// [orig: the parse tail @ 0x648120 -> CStaticWnd_AdjustRectToTextSize @ 0x6575f0].
 mnu::RectEdges MenuFrameCompiler::solve_rect(const WidgetNode &node,
 		const MenuWidgetState *ws) const {
 	const mnu::Window &w = *node.window;
@@ -649,8 +649,8 @@ void MenuFrameCompiler::emit_appearance(const WidgetNode &node,
 // cell as texture stage 0 and the brush as stage 1. Retail submits 0x7F7F7F;
 // stage 0's modulate-2x cancels that tint, then stage 1 produces the effective
 // 2 * stencil * brush material carried here as texture + texture2.
-// [orig: init_border_materials @ 0x646f70; CUIElement_DrawFrame @ 0x64a210;
-// decode_mode_color_stage @ 0x681080 for material mode 0x651].
+// [orig: CUIElement_InitBorderMaterials @ 0x646f70; CUIElement_DrawFrame @ 0x64a210;
+// RenderState_DecodeModeColorStage @ 0x681080 for material mode 0x651].
 void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s) {
 	if (node.frame_owner < 0) {
@@ -736,7 +736,7 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 
 // Glyph runs: layout in design space at the anamorphic pair — the anchor is
 // scaled with the per-element truncation, and the glyphs scale by the same
-// pair [orig: font_cache_draw_text_scaled @ 0x653170 scales the anchor and
+// pair [orig: CFontCache_DrawTextScaled @ 0x653170 scales the anchor and
 // forwards scaleX/scaleY into CGameFont_DrawText @ 0x6752c0].
 void MenuFrameCompiler::emit_glyph_run(const WidgetNode &node,
 		const std::string &text, int design_x, int design_y,
@@ -775,7 +775,7 @@ void MenuFrameCompiler::emit_glyph_run(const WidgetNode &node,
 
 // The caret: an underscore drawn at the caret character's x, x-stretched to
 // that character's width; the char at end-of-text measures as '_' itself
-// [orig: draw_text_with_cursor @ 0x6533b0 — the left-run measure, the
+// [orig: CFontCache_DrawTextWithCursor @ 0x6533b0 — the left-run measure, the
 //  (spacing-1)*design_scale + 1 gap terms (CGameFont_GetSpacingPad
 //  @ 0x6741e0), then the stretched '_' strike].
 void MenuFrameCompiler::emit_caret(hud::GameFont &gf, const std::string &text,
@@ -879,10 +879,10 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
 	// The button mnemonic is drawn by retail's caret leg — the '_' glyph
 	// stretched to the marked character's width at its prefix offset, the
-	// same draw_text_with_cursor path the edit caret rides (emit_caret).
+	// same CFontCache_DrawTextWithCursor path the edit caret rides (emit_caret).
 	// Only when the marked byte survived prefix truncation.
 	// [orig: CStaticWnd_DrawLabel passes the +740 offset @0x657270 ->
-	//  draw_text_with_cursor @0x6533b0 — prefix measure + pad @0x6534b7..
+	//  CFontCache_DrawTextWithCursor @0x6533b0 — prefix measure + pad @0x6534b7..
 	//  0x6534eb, '_' @0x6534f7/@0x653550, char-width stretch
 	//  @0x6535d8..0x65360f]
 	int drawn_caret = caret;
@@ -910,7 +910,7 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 	const bool blink_on = (frame.time_ms & 0x3FFu) > 0x200u;
 	if (text.empty()) {
 		// An empty focused edit still blinks its caret at the text anchor
-		// [orig: the cursor leg of draw_text_with_cursor @ 0x6533b0 runs for
+		// [orig: the cursor leg of CFontCache_DrawTextWithCursor @ 0x6533b0 runs for
 		//  the empty string — the char at the caret is the NUL -> '_'].
 		if (focused && blink_on) {
 			const fnt_font_t *font = font_for(node);
@@ -947,7 +947,7 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 		}
 		return;
 	}
-	// The scroll window [orig: update_edit_scroll_range @ 0x661790 over
+	// The scroll window [orig: CEditWnd_UpdateScrollRange @ 0x661790 over
 	// start +792 / end +796, fitting via EditWnd_CountCharsFitting
 	// @ 0x6616b0]: caret before the window scrolls back; past the window
 	// scrolls forward so the caret is the last visible char.
@@ -1039,8 +1039,8 @@ void MenuFrameCompiler::emit_multiline_edit(const WidgetNode &node,
 			caret);
 }
 
-// The wrapped-text drawer, clip-bottom mode [orig: draw_text_wrapped
-// @ 0x653710 via the 0x40000 wrapper draw_text_wrapped_clipped @ 0x653D60].
+// The wrapped-text drawer, clip-bottom mode [orig: CFontCache_DrawTextWrapped
+// @ 0x653710 via the 0x40000 wrapper CFontCache_DrawTextWrappedClipped @ 0x653D60].
 // Break rules, exactly: the line accumulates chars measured at the widget
 // scale pair against trunc(wrapW * scaleX); an explicit LF (only 0x0A — CR
 // is a drawn glyph) or the terminator breaks at the char; overflow breaks at
@@ -1618,7 +1618,7 @@ bool MenuFrameCompiler::widget_edit_limits(int index, EditLimits *out) const {
 	}
 	// [orig: the parsed edit constraints — read-only widget[194], numeric
 	//  widget[196] with the [min widget[202], max widget[201]] range, max len
-	//  widget[200]; edit_widget_insert_char @ 0x661ee0]
+	//  widget[200]; CEditWnd_InsertChar @ 0x661ee0]
 	const mnu::Window &w = *nodes_[static_cast<size_t>(index)].window;
 	*out = EditLimits{};
 	out->read_only = w.readonly;
@@ -1858,7 +1858,7 @@ bool MenuFrameCompiler::multiline_line_counts(int index,
 	}
 	const int rect_h = rect.bottom - rect.top;
 	// The measure twin replays the drawer's break rules at scale 1.0
-	// [orig: font_cache_count_wrapped_lines @ 0x653b90].
+	// [orig: CFontCache_CountWrappedLines @ 0x653b90].
 	std::vector<int> heights;
 	int line_start = 0;
 	int last_space = 0;
@@ -2000,7 +2000,7 @@ int MenuFrameCompiler::hotkey_widget(const std::string &key, bool virtual_key,
 		// The registered label mnemonic joins the same character walk, and the
 		// compare is case-insensitive on both sides — retail's WM_CHAR arm
 		// tolower()s the table char and the typed char before comparing;
-		// visibility gates the match [orig: dispatch_keyboard_event_to_children
+		// visibility gates the match [orig: UI_DispatchKeyboardEventToChildren
 		// @0x63ad10 — char rows @0x63ad63, tolower pair @0x63ad78/@0x63ad84,
 		// CWnd_IsVisibleInHierarchy gate @0x63ad90].
 		if (!virtual_key && w.type == mnu::WindowType::Button) {
@@ -2236,7 +2236,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 }
 
 // The witnessed credits scroller [orig: CMarqueeWnd_Render @ 0x65cf90 ->
-// render_scrolling_credits @ 0x65ca00; docs/mnu/menu-re.md "Marquee credits
+// CMarqueeWnd_RenderScrollingCredits @ 0x65ca00; docs/mnu/menu-re.md "Marquee credits
 // scroller"]: per-frame scroll off the widget's rate with a whole-roll reset
 // when the last line passes the top. The compiled path drives text lines
 // (the shipped credits datasource is text); image nodes and the 50px edge

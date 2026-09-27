@@ -15,7 +15,7 @@ using namespace opennova::defscan; // the shared .def scanner, unqualified as be
 namespace opennova::def {
 
 double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n) {
-    /* [orig: calculate_loadout_weight @ 0x55f1f0] per weapon:
+    /* [orig: PlayerInfo_CalculateLoadoutWeight @ 0x55f1f0] per weapon:
        weaponweight + (ammo_count > 0 ? ammo_count : maxclips) * clipweight. */
     if (!weapons) return 0.0;
     double total = 0.0;
@@ -39,7 +39,7 @@ double def_extra_ammo_weight(const DefWeaponDef *w, int count) {
 }
 
 DefEncumbrance def_encumbrance_class(double weight) {
-    /* [orig: update_player_info_weight_and_weapon_icons @ 0x55f480] the exact
+    /* [orig: PlayerInfo_UpdateWeightAndWeaponIcons @ 0x55f480] the exact
        witnessed thresholds: >= 66.6 HEAVY, >= 33.3 NORMAL, else LIGHT. */
     if (weight >= 66.6) return DEF_ENCUMBRANCE_HEAVY;
     if (weight >= 33.3) return DEF_ENCUMBRANCE_NORMAL;

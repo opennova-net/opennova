@@ -23,7 +23,7 @@ stands confirmed.
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Boot mount (6-slot name table → 16 secondary slots) | **witnessed** | [orig: PFF_OpenAllArchives @ 0x4a4310; table @ 0x829f90 stride 260, count @ 0x82a5a8; FileSystem_SetSecondaryArchive @ 0x75ad40 → slots @ 0x3341818] |
-| Resolution order + the `/d` gate | **witnessed — corrects R8's "loose always first"** | default archive-only (`g_FS_SearchLooseFirst @ 0x334180c`, static 0); `/D` sets it once at boot [orig: @ 0x4a7667 → @ 0x4a6fa3 → FileSystem_SetSearchLooseFirst @ 0x75a5a0]; consumers force it per call (§ resolution) |
+| Resolution order + the `/d` gate | **witnessed — corrects R8's "loose always first"** | default archive-only (`g_FileSystemState.searchLooseFirst_014 @ 0x334180c`, static 0); `/D` sets it once at boot [orig: @ 0x4a7667 → @ 0x4a6fa3 → FileSystem_SetSearchLooseFirst @ 0x75a5a0]; consumers force it per call (§ resolution) |
 | The by-name front door (6 functions, ~190 callsites) | **witnessed** | FileSystem_FileExists @ 0x75aa50 / OpenFile @ 0x75b1c0 / GetFileSize @ 0x75b390 / File_LoadResource @ 0x75b540 / ReadFileWithSearchPaths @ 0x75b700 / ReadFileEx @ 0x75b870 — one shared skeleton |
 | PFF container open + entry lookup | **witnessed** | PFF_Open @ 0x7682e0; PFF_SortEntries @ 0x768280 (in-place `strupr` + qsort); PFF_FindEntry @ 0x7685d0 (bsearch); no header validation at all |
 | Read disciplines (streaming vs whole-file; XOR entries) | **witnessed** | FileSystem_Read @ 0x75abe0 (raw, no decrypt); PFF_ReadFile @ 0x768a30 / PFF_LoadFileToMemory @ 0x768920 (XOR-decrypt on entry flags bit0 via Buffer_XorDecrypt @ 0x768760, seed 0x0312A4CE, ROL 7/byte) |
@@ -57,7 +57,7 @@ stands confirmed.
    sibling `PFF_OpenLegacyArchive @ 0x7683f0` (16-byte XOR-0xACEDDEAD
    records) has zero callers in JO.
 3. **Resolution order** — the shared front-door skeleton:
-   `if (!g_FS_SearchLooseFirst && any archive mounted)`: primary (transient;
+   `if (!g_FileSystemState.searchLooseFirst_014 && any archive mounted)`: primary (transient;
    normally NULL) → secondary slots 0..15 ascending, first hit wins, miss =
    fail, **loose never consulted**. `else`: each search path
    (`_lopen("path\name")`), then bare `name` CWD-relative, then primary, then
@@ -128,7 +128,7 @@ entry · +168 read cursor · +172 open flag · +176 last whole-load size ·
 
 **Globals:** `0x33417F8` shared raw handle · `0x3341800` primary ptr
 (transient) · `0x3341804` strip-to-basename flag (DEAD — setter @ 0x75a590
-unreferenced) · `0x334180C` `g_FS_SearchLooseFirst` (default 0) ·
+unreferenced) · `0x334180C` `g_FileSystemState.searchLooseFirst_014` (default 0) ·
 `0x3341818` secondary slots[16] + count @ 0x3341864 · `0x3341868` search
 paths (16×16 B) · `0x33428C0` /FRISK gate · `0x829F90` name table[6][260] ·
 `0xB49A54` handles[6] · `0xB4C4D4` /D flag · `0xB4C584` expansion name.

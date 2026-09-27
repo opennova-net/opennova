@@ -15,7 +15,7 @@
 //   * gravity (org1 -416 + pos += 2*vel on even key ticks through the +0xAC
 //     quarter-step tail; org2 -208 + pos += vel every tick) to terminal
 //     -32768, landing snap + fall damage excess>>4 with the injectable scale
-//     [orig: wac_var_fallmps], the player jump (cooldown 32 / no auto-repeat / prone gate),
+//     [orig: g_WacVarFallMps], the player jump (cooldown 32 / no auto-repeat / prone gate),
 //   * the slope pass: the conform selector (prone family / corpse / def attrib), the
 //     org1 2048/8-tick slide + eighth-step body_pitch/roll chase, the org2 atan2
 //     quarter-step leg, the non-conform decay — and the regression that a standing
@@ -239,7 +239,7 @@ uint32_t run_to_next_selection(AiSystem &ai, World &w, uint32_t from) {
 }
 
 // Give a motor soldier the registry Entity and ADM table row the weapon channel reads its
-// hold kind through. The original keeps no per-player hold-kind copy: it indexes AdmDefs
+// hold kind through. The original keeps no per-player hold-kind copy: it indexes g_AdmDefs
 // by the posed entity's OWN equipped index every selection pass, which is exactly what
 // lets a remote player's pose resolve from one replicated byte [orig: @0x4b5dba].
 void give_held_weapon(World &w, AiEntity *e, uint8_t adm, int special_hold) {
@@ -2857,6 +2857,73 @@ void test_slope_pass_org1_wraps_its_32_bit_slopes() {
     }
 }
 
+// The player body's dead in-air tumble: on every 4th raw tick the two
+// tick-phase ramps pull body pitch and roll an eighth of the way, spin the
+// heading and the look yaw by b >> 3 and aim at a + b; every tick the pitch
+// chases that aim a quarter step (unclamped upward, floored at -0x2800000) and
+// the look pitch carries it. No probe, no slide.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B6CCB..0x4B6D90]
+void test_slope_pass_org2_airborne_corpse_tumbles() {
+    Field flat([](int) { return static_cast<uint16_t>(0); });
+    {
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 0;
+        e->inf.airborne = true;
+        e->inf.vel[0] = 0x100;
+        e->inf.vel[1] = -0x80;
+        e->inf.vel[2] = -0x2000;
+
+        ai.infantry_slope_pass(*e, w, 0, 0); // tick 0: a = b = 32 * 0xFFFFFF
+        CHECK(e->inf.aim_pitch == 0x3FFFFFC0);
+        CHECK(e->body_pitch == 0x3FFFFFC && e->roll == 0x3FFFFFC);
+        CHECK(e->heading == 0x3FFFFFC && e->inf.target_heading == 0x3FFFFFC);
+        CHECK(e->pitch == 0x0FFFFFF0 && e->inf.look_pitch == 0x0FFFFFF0);
+        CHECK(e->inf.vel[0] == 0x100 && e->inf.vel[1] == -0x80 && e->inf.vel[2] == -0x2000);
+
+        ai.infantry_slope_pass(*e, w, 1, 1); // no ramp, no decay; the chase only
+        CHECK(e->body_pitch == 0x3FFFFFC && e->roll == 0x3FFFFFC);
+        CHECK(e->pitch == 0x1BFFFFE4 && e->inf.look_pitch == 0x1BFFFFE4);
+
+        e->pitch = 0x10000000;
+        e->inf.aim_pitch = -0x10000000;
+        ai.infantry_slope_pass(*e, w, 5, 5); // the downward step floors
+        CHECK(e->pitch == 0x0D800000);
+
+        // Tick 4: b = -28 * 0xFFFFFF, so the arithmetic b >> 3 spins backward.
+        const int32_t heading = e->heading;
+        const int32_t look_yaw = e->inf.target_heading;
+        ai.infantry_slope_pass(*e, w, 4, 4);
+        const int32_t b = -28 * 0xFFFFFF;
+        CHECK(e->heading == opennova::io::bam_add(heading, opennova::io::bam_sar(b, 3)));
+        CHECK(e->inf.target_heading ==
+              opennova::io::bam_add(look_yaw, opennova::io::bam_sar(b, 3)));
+    }
+    // Through the motor: the tumbled pitch survives the post-pass republish
+    // (e.pitch = look_pitch) on the local body.
+    {
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        TestSource src;
+        src.clips = {anim_state::kDeathFire};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->health = 0;
+        e->inf.is_local_player = true;
+        e->inf.airborne = true;
+        e->inf.anim_state = anim_state::kDeathFire;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(80);
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->pitch == 0x0FFFFFF0 && e->inf.look_pitch == 0x0FFFFFF0);
+    }
+}
+
 } // namespace
 
 // P1c death presentation (world-wac-ai-re §19). In its own function: a new block
@@ -3158,13 +3225,18 @@ void test_npc_silent_cleanup_and_corpse_effect_lifetime() {
         const auto &effects = r.storage->out.destruction.effects;
         CHECK(effects.size() == 1 && effects[0].effect == "corpse_decay");
         CHECK(effects[0].family == 1 && effects[0].attach_wire_handle == r.handle.packed);
+        // The corpse is the decay's descriptor tag [orig: Entity_UpdateInfantryAI
+        // @ 0x4B9F0F]; the respawn effect below carries tag 0 [orig:
+        // Entity_ResetToSpawnState `xor ebx, ebx` @ 0x4B962C].
+        CHECK(!effects.empty() && effects[0].section_tagged);
         CHECK(r.entity().death_effect_active[0] == 1);
         r.entity().corpse_timer = 1;
         r.tick(3, 4);
         bool released = false, spawned = false;
         for (const auto &effect : effects) {
             released |= effect.release && effect.attach_wire_handle == r.handle.packed;
-            spawned |= effect.effect == "npc_spawn" && effect.family == 0;
+            spawned |= effect.effect == "npc_spawn" && effect.family == 0 &&
+                    !effect.section_tagged;
         }
         CHECK(released && spawned && r.entity().death_effect_active[0] == 0);
         CHECK(r.entity().health == 125);
@@ -4416,7 +4488,7 @@ static void test_reselecting_current_state_arbitrates_player_but_skips_org1() {
 }
 
 // The detour-state clear rides the ATTACK-STANCE aim block only. Retail's two
-// aim blocks split on the anim's flag-table bits [data: g_animStateFlagsTable
+// aim blocks split on the anim's flag-table bits [data: g_AnimStateFlagsTable
 // @0x8139e8; no state carries both]: block 1 (flag 0x8; walk 1 = 0x449) writes
 // the aim and the walking-fire latch and never touches entity+0x369 [orig:
 // @0x4bc555..0x4bc948]; block 2 (flag 0x10; attack 155 = 0x14) is entered only
@@ -4616,7 +4688,7 @@ static void test_walking_aim_gates_on_the_body_cone() {
         // Due east: the candidate (bearing 0 + the error) sits on the body. The
         // approach arm writes only the goal; the stale target heading stays for
         // the moving selection's detour to replace [orig: the approach
-        // @0x4BC2F5..0x4BC316; ai_find_cover_position +0x1A8 @0x4AFF2C].
+        // @0x4BC2F5..0x4BC316; AI_FindCoverPosition +0x1A8 @0x4AFF2C].
         Rig r(2 * 65536, 0);
         r.think();
         CHECK(r.blue->inf.move_mode == 1 && r.blue->inf.target_heading == 0x20000000);
@@ -5060,6 +5132,7 @@ int main() {
     test_slope_prone_body_conforms_org2();
     test_slope_pass_org1_selector_and_chase();
     test_slope_pass_org1_wraps_its_32_bit_slopes();
+    test_slope_pass_org2_airborne_corpse_tumbles();
     // ---- body heading: quarter-step toward the target, clamped ±69273360/tick ----
     // [orig: 0x4b9910 dump 4600-4611 — step = (diff + 2) >> 2, clamp]
     {
@@ -5400,7 +5473,7 @@ int main() {
     // then the quarter-step tail keeps a quarter of it); landing + fall damage ----
     // [orig: Entity_UpdateInfantryAI gravity @0x4bf7bf, pos @0x4bf7ec, tail
     //  @0x4BFC65..0x4BFC86; damage when vel_z <= -1057*scale @0x4BF839, health -=
-    //  excess >> 4 @0x4BF848..0x4BF864 (wac_var_fallmps = the fallmps named value)]
+    //  excess >> 4 @0x4BF848..0x4BF864 (g_WacVarFallMps = the fallmps named value)]
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
         const int32_t floor_z = fx(50) + kFloorStand;
@@ -6060,7 +6133,7 @@ int main() {
     // ---- idle root output is still entity root motion: the movement flag gates state commits,
     //      not position integration. [orig: AnimMap_UpdateEntity @0x40b82f produces root output;
     //      Entity_UpdateInfantryAI @0x4BF684 integrates it on the authoritative path without a
-    //      g_animStateFlagsTable movement-bit gate.] ----
+    //      g_AnimStateFlagsTable movement-bit gate.] ----
     {
         World w;
         AiSystem ai;

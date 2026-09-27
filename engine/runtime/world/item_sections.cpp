@@ -146,7 +146,7 @@ bool tick_tower_section(World &world, Entity &entity) {
     entity.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
     // Every InitFloatingPhysics contact/settle effect is the interned def+0x412
     // handle: particledeath, the word the SectionSettled leg above reads too.
-    // [orig: submit_effect_descriptor(.., word def+0x412) @0x4A84B8 (bottom),
+    // [orig: Effect_SubmitDescriptor(.., word def+0x412) @0x4A84B8 (bottom),
     //  @0x4A8565 (top), @0x4A8880 (the settle loop)]
     if (bottom_contact && !(old_flags & 1))
         section_effect(world, traits->particledeath, entity.position);
@@ -214,7 +214,7 @@ void palm_transition(World &world, Entity &entity, int section) {
         type = 17;
     }
     if (!type) return;
-    // [orig: spawn_projectile_from_tile @ 0x53C1C0]
+    // [orig: Projectile_SpawnFromTile @ 0x53C1C0]
     const auto *traits = world.tables.item_death_traits.get(entity.item_id);
     const size_t pivot = type == 17 ? 1 : 0;
     if (traits && pivot < traits->model_pivots_q16.size()) {
@@ -394,7 +394,7 @@ Vec3 item_section_render_position(const World &world, const Entity &entity) {
     return {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
 }
 
-// [orig: update_entity_physics_step @ 0x53BE10]
+// [orig: Entity_UpdatePhysicsStep @ 0x53BE10]
 bool tick_item_section_motion(World &world, Entity &entity) {
     if (entity.death_motion == DeathMotionMode::SectionFalling ||
             entity.death_motion == DeathMotionMode::SectionSettled)

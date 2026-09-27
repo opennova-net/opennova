@@ -312,7 +312,7 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         // [orig: |Yaw - ang - 0x7FFFFF80| <= 357913920 @0x48bf05-0x48bf0f].
         if (iabs32(io::bam_sub(io::bam_sub(heading, ang), 0x7FFFFF80)) > 357913920) continue;
         // The brake factor ((id + (counter << 8)) & 0x7FFF) + 0x4000 — keyed
-        // off DcbId and the entity-update counter (g_entity_update_counter)
+        // off DcbId and the entity-update counter (g_EntityUpdateCounter)
         // [orig: @0x48bf17-0x48bf26; the counter reads in
         //  Entity_UpdateVehiclePhysics @0x48BF26, Entity_UpdateTankVehiclePhysics
         //  @0x489AEF, Entity_UpdateLightVehiclePhysics @0x4850CC,
@@ -367,7 +367,7 @@ int count_mounted_entities(const World &world, const Entity &veh) {
 }
 
 // See ai.h. [orig: @0x48DFD3..0x48DFDF — `occupant->Position.z +
-// CameraOffset.z <= Env_WaterHeightFixed`]. Retail's CameraOffset.z is always
+// CameraOffset.z <= g_EnvWaterHeightFixed`]. Retail's CameraOffset.z is always
 // live (the body updater writes it every tick); our eye offset is derived by
 // the infantry body legs, so a body that never derived one (0) has no head
 // height to test and keeps the wheel — a seated eye sits above the deck, never

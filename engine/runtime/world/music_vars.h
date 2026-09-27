@@ -2,7 +2,7 @@
 
 // The gamemus var-pump projections from the local player body update [orig:
 // Entity_UpdateInfantryPlayerBody @ 0x4b40e0, gate entity ==
-// g_local_player_entity @ 0x4b6234; the full var map is
+// g_LocalPlayerEntity @ 0x4b6234; the full var map is
 // docs/audio/mus-sbf-re.md §Game music driving].
 
 #include <runtime/audio/music_policy.h>

@@ -3,7 +3,7 @@
 // WeaponSlots_SeedAmmoPoolsFromDefs @ 0x541690, WeaponSlots_RecalculateAmmoFromCapacity
 // @ 0x542280, Player_SelectWeaponSlot @ 0x4dd680, Player_SwitchToWeaponByHandle
 // @ 0x4e0170, Player_CycleWeaponSlot @ 0x4dfe70, Mission_LoadBMSFile loadout filter
-// @ 0x40f7ae, build_item_restriction_table @ 0x54ddb0].
+// @ 0x40f7ae, WeaponDef_BuildItemRestrictionTable @ 0x54ddb0].
 #include <cstdio>
 #include <cstring>
 
@@ -452,7 +452,7 @@ void test_kit_damage_classes() {
 // equip it. WPN_KNIFE authors no `weapon_class` and no `ammoclass` line at all, so
 // weapon_class_slot is 0 and its ammo pool is the classless byte-0 bucket, and it is
 // a no-clip weapon (clipsize -1). Retail's manual-switch predicate is
-// `weapon_class == 1 || weapon_class == 2 || calculate_kill_score(slot, entity, 0, 0)`
+// `weapon_class == 1 || weapon_class == 2 || Score_CalculateKillScore(slot, entity, 0, 0)`
 // [orig: Player_SwitchToWeaponByHandle @0x4e0294..0x4e02c3], so the knife rides
 // entirely on that score term.
 static int test_knife_is_selectable() {

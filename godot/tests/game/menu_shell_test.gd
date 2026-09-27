@@ -68,7 +68,7 @@ func after_each() -> void:
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
 # stub mission), and a shell pointed at it. Returns null when a real temp root is
-# unavailable in this environment (the caller pass_test-skips, as mnu_menu_test does).
+# unavailable in this environment (the caller pends).
 func _make_shell(dir: String, options: PlayerOptions = null):
 	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
@@ -121,7 +121,7 @@ func test_hidden_menu_suspends_shell_frame_processing() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp root unavailable in this environment")
+		pending("temp root unavailable in this environment")
 		return
 	assert_true(shell.is_processing(), "the visible menu drives its frame model")
 	shell.hide_menu()
@@ -168,7 +168,7 @@ func test_boots_into_main_menu_startup() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable in this environment")
+		pending("temp resource root unavailable in this environment")
 		_cleanup(dir)
 		return
 	assert_eq(shell.get_current_menu_file(), "main.mnu", "main menu opened on setup")
@@ -182,7 +182,7 @@ func test_boots_into_main_menu_startup() -> void:
 # The shell seeds the five named Options sliders with the exact original
 # ranges/pages. Audio/input retain deterministic minimum fallbacks; gamma is
 # pinned to the registered high-quality retail comparison profile and locked.
-# [orig: options_screen_init @ 0x554800;
+# [orig: UI_OptionsScreenInit @ 0x554800;
 # UI_PopulateRenderAndAudioSettings @ 0x55c830]
 func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 	var config := ConfigFile.new()
@@ -197,7 +197,7 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
 	var shell = _make_shell(dir, options)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	assert_true(shell.open_menu("options.mnu", ""), "Options fixture opens")
@@ -249,7 +249,7 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	assert_true(shell.open_menu("options.mnu", ""), "Options fixture opens")
@@ -284,7 +284,7 @@ func test_startup_drives_music_var() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	# jo_main STARTUP declares MUSICVAR 1; the menu pushes it into the menumus
@@ -300,7 +300,7 @@ func test_cross_mnu_jump_and_back_stack() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
@@ -319,7 +319,7 @@ func test_failed_cross_mnu_jump_does_not_change_back_stack() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	shell.get_driver().menu_requested.emit("missing.mnu", "")
@@ -334,7 +334,7 @@ func test_top_level_quit_requests_exit() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	watch_signals(shell)
@@ -347,7 +347,7 @@ func test_in_game_back_requests_resume() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	# Enter the pause context. game.mnu is absent so the overlay fails to load, but
@@ -391,7 +391,7 @@ func test_ingame_hidden_back_button_resumes() -> void:
 		f.close()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	assert_true(shell.open_ingame_menu(), "the in-game overlay loads")
@@ -414,7 +414,7 @@ func test_start_emits_selected_mission() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	watch_signals(shell)
@@ -431,7 +431,7 @@ func test_start_without_selection_is_a_no_op() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	watch_signals(shell)
@@ -466,7 +466,7 @@ func test_companion_released_when_document_changes_hands() -> void:
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	var stub := _RecordingCompanion.new()
@@ -493,7 +493,7 @@ func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> v
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
@@ -522,7 +522,7 @@ func test_aspect_spinlist_restores_and_persists_the_selected_mode() -> void:
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
@@ -563,7 +563,7 @@ func test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio() -> void:
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
@@ -590,7 +590,7 @@ func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
@@ -636,7 +636,7 @@ func test_front_options_accept_keeps_immediate_changes_and_returns_to_main() -> 
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
 	var shell = _make_shell(dir, options)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
@@ -669,7 +669,7 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 	_copy(GAME_FIXTURE, dir.path_join("game.mnu"))
 	var shell = _make_shell(dir, options)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	assert_true(shell.open_ingame_menu(), "the retail pause document opens")
@@ -742,7 +742,7 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		ResourceDirSettings.set_expansion(saved)
 		TestFs.remove_dir_recursive(dir)
 		return
@@ -800,7 +800,7 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		ResourceDirSettings.set_expansion(saved)
 		TestFs.remove_dir_recursive(dir)
 		return
@@ -890,7 +890,7 @@ func test_sp_mission_list_titles_briefing_and_accept_gate() -> void:
 	_write_bms(dir.path_join("charlie.bms"), "Charlie Header", BMS_ATTRIB_COOP)
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp root unavailable in this environment")
+		pending("temp root unavailable in this environment")
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var list_id := driver.widget_id("IA_LIST")
@@ -930,7 +930,7 @@ func test_play_screen_accept_still_launches() -> void:
 		f.close()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		DirAccess.remove_absolute(dir.path_join("main.mnu"))
 		DirAccess.remove_absolute(dir.path_join("alpha.bms"))
 		DirAccess.remove_absolute(dir)
@@ -969,7 +969,7 @@ func test_options_controls_inert_without_control_table() -> void:
 		f.close()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		DirAccess.remove_absolute(dir.path_join("main.mnu"))
 		DirAccess.remove_absolute(dir.path_join("alpha.bms"))
 		DirAccess.remove_absolute(dir)
@@ -1020,7 +1020,7 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 	])
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		DirAccess.remove_absolute(dir.path_join("resource.pff"))
 		DirAccess.remove_absolute(dir)
 		return
@@ -1073,7 +1073,7 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 			f.close()
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
 	var shell = MenuShellScript.new()
@@ -1136,7 +1136,7 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 		stub.close()
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
 	var shell = MenuShellScript.new()
@@ -1180,7 +1180,7 @@ func test_music_incomplete_expansion_bank_only_stays_expansion() -> void:
 			stub.close()
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
 	var shell = MenuShellScript.new()
@@ -1215,7 +1215,7 @@ func test_musicless_expansion_does_not_reselect_base_pair() -> void:
 		stub.close()
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
-		pass_test("runtime resource root unavailable in this environment")
+		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
 	var shell = MenuShellScript.new()
@@ -1243,7 +1243,7 @@ func test_missing_assets_degrade_without_crashing() -> void:
 	_copy(MAIN_FIXTURE, dir.path_join("main.mnu"))
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		DirAccess.remove_absolute(dir.path_join("main.mnu"))
 		DirAccess.remove_absolute(dir)
 		return
@@ -1326,10 +1326,9 @@ func test_multiple_companions_first_owner_drives_menu() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable in this environment")
+		pending("temp resource root unavailable in this environment")
 		_cleanup(dir)
 		return
-	assert_true(shell.has_method("add_companion"), "the shell exposes the multi-companion hook")
 	var skipped := _FakeCompanion.new(false)
 	var owner := _FakeCompanion.new(true)
 	shell.add_companion(skipped)
@@ -1462,7 +1461,7 @@ func test_ingame_abort_raises_confirm_and_only_yes_returns() -> void:
 	_copy(GAME_FIXTURE, dir.path_join("game.mnu"))
 	var shell = _make_shell(dir)
 	if shell == null:
-		pass_test("temp resource root unavailable")
+		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	assert_true(shell.open_ingame_menu(), "the retail pause document opens")

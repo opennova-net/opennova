@@ -155,7 +155,7 @@ int main() {
     }
 
     // The static-row lane [orig: Terrain_RenderSectorModels @ 0x5c5df2..
-    // 0x5c5e00 + collect_render_objects_for_batch @ 0x5d9156..0x5d9162 for
+    // 0x5c5e00 + Render_CollectRenderObjectsForBatch @ 0x5d9156..0x5d9162 for
     // buildings; Terrain_RenderSectorEntities @ 0x5c7c05..0x5c7c14 over the
     // zeroed stack-base aux for every other static].
     {

@@ -53,7 +53,6 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_tile_info_override", "tile_info"), &Terrain::set_tile_info_override);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"), &Terrain::get_tile_info_override);
-	ClassDB::bind_method(D_METHOD("rebuild_tile_overlay"), &Terrain::rebuild_tile_overlay);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override", PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
 		"set_tile_info_override", "get_tile_info_override");
 
@@ -100,10 +99,17 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
+	ClassDB::bind_method(D_METHOD("render_inset_frame", "camera"), &Terrain::render_inset_frame);
+	ClassDB::bind_method(D_METHOD("release_inset_frame"), &Terrain::release_inset_frame);
+	ClassDB::bind_method(D_METHOD("is_inset_frame_live"), &Terrain::is_inset_frame_live);
+	ClassDB::bind_method(D_METHOD("get_visible_patch_layers", "inset"),
+		&Terrain::get_visible_patch_layers);
 
 	// Debug API
 	ClassDB::bind_method(D_METHOD("get_visible_patch_count"), &Terrain::get_visible_patch_count);
 	ClassDB::bind_method(D_METHOD("get_patches_active"), &Terrain::get_patches_active);
+	ClassDB::bind_method(D_METHOD("has_visible_terrain_bounds"),
+			&Terrain::has_visible_terrain_bounds);
 
 	ClassDB::bind_method(D_METHOD("set_debug_no_frustum", "enabled"), &Terrain::set_debug_no_frustum);
 	ClassDB::bind_method(D_METHOD("get_debug_no_frustum"), &Terrain::get_debug_no_frustum);
@@ -140,6 +146,18 @@ void Terrain::_bind_methods() {
 
 Terrain::Terrain() {
 	surface_inputs.instantiate();
+	// Authored terrain rides the ordinary world layer; the flat fallback its
+	// own bit alone, like the foliage blanket: the beauty camera admits it and
+	// the water mirror excludes it, because the retail mirror prerender view
+	// skips empty sectors whenever the mission has water while the live view
+	// draws them (docs/terrain/terrain-re.md, "Empty-sector flat fallback").
+	// The Inset's own pool rides INSET_VIEW whole; the Inset camera excludes
+	// the flat-fallback bit, and the main pool swaps WORLD for MAIN_VIEW while
+	// the Inset renders (render_inset_frame).
+	main_pool.world_layer = visual_layers::WORLD;
+	main_pool.flat_layer = visual_layers::TERRAIN_FLAT_FALLBACK;
+	inset_pool.world_layer = visual_layers::INSET_VIEW;
+	inset_pool.flat_layer = visual_layers::INSET_VIEW;
 }
 
 Terrain::~Terrain() {
@@ -326,10 +344,6 @@ Ref<TerrainTileInfo> Terrain::get_tile_info_override() const {
 	return tile_info_override;
 }
 
-void Terrain::rebuild_tile_overlay() {
-	_rebuild_tile_overlay_pages();
-}
-
 void Terrain::set_environment_path(const NodePath& p_path) {
 	environment_path = p_path;
 	terrain_node_cache_valid = false;
@@ -402,9 +416,10 @@ void Terrain::render_frame() {
 	// cells rather than leaving a prior camera's draw list live for the
 	// foliage dispatcher.
 	frame_draw_list_live = false;
-	if (!is_visible_in_tree()) {
+	frame_bounds_live = false;
+	const bool hidden = !is_visible_in_tree();
+	if (hidden) {
 		_hide_visible_patches();
-		return;
 	}
 	if (!built) {
 		return;
@@ -416,14 +431,35 @@ void Terrain::render_frame() {
 	if (!cam || !cam->is_inside_tree()) {
 		return;
 	}
+	const opennova::TerrainViewInput view_input = _view_input_for(cam);
+	if (hidden) {
+		// A hidden terrain draws nothing (the indoors letter skips the
+		// traversal and the sector pass), but the frame's bounds walk still
+		// feeds the water leg's water-active test
+		// (opennova::track_terrain_visible_bounds).
+		frame_bounds = opennova::track_terrain_visible_bounds(scene_snapshot, view_input);
+		frame_bounds_live = true;
+		return;
+	}
+	const opennova::TerrainDrawList &draw_list =
+			frame_compiler.compile(scene_snapshot, view_input);
+	frame_draw_list_live = true;
+	frame_bounds = draw_list.visible_bounds;
+	frame_bounds_live = true;
+	_apply_frame_draw_list(draw_list);
+}
+
+// The camera sample the compiler needs, for the main frame and the weapon
+// Inset pass's own traversal alike.
+opennova::TerrainViewInput Terrain::_view_input_for(Camera3D *p_camera) {
 	// The RENDER eye (get_camera_transform includes h/v offsets), so the
 	// below-water classification stays coherent with Water's surface flip and
 	// the frame clear — the same eye those classifiers sample. Offsets are
 	// zero for common cameras, so traversal is unchanged in practice.
-	const Transform3D cam_xform = cam->get_camera_transform();
+	const Transform3D cam_xform = p_camera->get_camera_transform();
 	const Vector3 cam_pos = cam_xform.origin;
 	const Transform3D view = cam_xform.affine_inverse();
-	const Projection proj = cam->get_camera_projection();
+	const Projection proj = p_camera->get_camera_projection();
 
 	if (!terrain_node_cache_valid)
 		_cache_env_weather_nodes();
@@ -433,10 +469,10 @@ void Terrain::render_frame() {
 	view_input.cam_y = static_cast<float>(cam_pos.y);
 	view_input.cam_z = static_cast<float>(cam_pos.z);
 	// The map's live water height, unconditionally: retail's compare reads
-	// Env_WaterHeightFixed with no render gate, so the engine side gets the
+	// g_EnvWaterHeightFixed with no render gate, so the engine side gets the
 	// authored value whenever a Water node exists (a missing node passes 0,
 	// and non-negative terrain keeps a dry map's compare inert).
-	// [orig: cameraY < Env_WaterHeightFixed @0x60fea5, no zero guard —
+	// [orig: cameraY < g_EnvWaterHeightFixed @0x60fea5, no zero guard —
 	//  see docs/terrain/terrain-re.md, the underwater selector section]
 	view_input.water_height = cached_water_node != nullptr
 			? cached_water_node->get_water_height()
@@ -465,163 +501,134 @@ void Terrain::render_frame() {
 
 	traversal_config.quality = lod_quality;
 	view_input.config = traversal_config;
+	return view_input;
+}
 
-	const opennova::TerrainDrawList &draw_list =
-			frame_compiler.compile(scene_snapshot, view_input);
-	frame_draw_list_live = true;
-
-	// The portable cache owns page identity/composition decisions; the device
-	// supplies the environment bytes that are actually baked into each page.
-	// Quantization inside the adapter prevents sub-byte weather drift from
-	// invalidating the whole working set. The page path consumes the RAW
-	// getter tuple: the static projector's (g2,g1,g0) reduction and the DOT3
-	// (g2,g0,g1) byte pack are both ports of retail's packing of that tuple
-	// [orig: Environment_GetLightDirectionFloat @0x57D870 read by the
-	// collector @0x60D2F5/0x60D2FF and the tile DOT3 pack @0x60E231..0x60E331;
-	// see docs/terrain/terrain-re.md] — never the Godot-axes vector
-	// get_light_direction() serves, which would swap x/z a second time.
-	Vector3 page_tile_tint(1.0f, 1.0f, 1.0f);
-	// The unseeded 45-degree default in GODOT axes; EnvironmentState's
-	// kDefaultSunDirRender is the same numbers in the render basis, which after
-	// the x/z swap points up+east while this points up+south (open grill item).
-	Vector3 page_light_direction(0.0f, 0.70710678f, 0.70710678f);
-	if (cached_env_node && cached_env_node->is_loaded()) {
-		page_tile_tint = cached_env_node->get_tile_overlay_tint();
-		page_light_direction =
-				cached_env_node->get_light_direction_render_tuple();
+// The weapon Inset pass's own terrain frame (the engine compiler carries the
+// witness order): its traversal on the second compiler, its page sweep as its
+// own frame of the shared cache, its own pool and light rows on INSET_VIEW,
+// and the main pool moved to MAIN_VIEW for as long as the Inset renders. The
+// traversal takes the main frame's indoors gate, as the Inset's does: a hidden
+// terrain draws no Inset patches.
+void Terrain::render_inset_frame(Camera3D *p_camera) {
+	if (!is_visible_in_tree() || !built || terrain_material.is_null() ||
+			p_camera == nullptr || !p_camera->is_inside_tree()) {
+		release_inset_frame();
+		return;
 	}
-	static_shadow_rasterizer.begin_frame(page_light_direction,
-			light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
-	// The page claims stamp the weather clock's TOD epoch (Env_TodEpoch,
-	// one step per 311 logic ticks); a page whose stamp falls behind is
-	// refreshed on an all-hit frame.
-	const uint32_t tod_epoch = cached_env_node != nullptr &&
-					cached_env_node->state().weather() != nullptr
-			? cached_env_node->state().weather()->tod_epoch
-			: 0u;
-	tile_cache_device.begin_frame(draw_list.frame_id, tod_epoch);
-	// Every missing visible page composes before the patches draw.
-	const std::vector<opennova::TerrainTilePageBinding> &pages =
-			tile_cache_device.compose_frame(draw_list, page_tile_tint,
-					page_light_direction);
+	const opennova::TerrainDrawList &draw_list =
+			inset_frame_compiler.compile(scene_snapshot, _view_input_for(p_camera));
+	inset_draw_list_live = true;
+	_sync_inset_material();
+	if (!inset_pool.instances[0].is_valid()) {
+		_create_pool_instances(inset_pool, inset_material->get_rid());
+	}
+	_set_pool_world_layer(main_pool, visual_layers::MAIN_VIEW);
+	_apply_pool(inset_pool, draw_list, _compose_pages(draw_list, false));
+	int rows_total = 0;
+	_render_light_rows(draw_list, inset_pool.rows, inset_material, rows_total);
+	// The Inset eye's own below-water side (its traversal's flag).
+	inset_material->set_shader_parameter("u_below_water", draw_list.below_water);
+}
 
-	// Apply the draw list onto the instance pool: draw-list index == pool slot.
-	RenderingServer* rs = RenderingServer::get_singleton();
-	const int count = static_cast<int>(draw_list.patches.size());
+void Terrain::release_inset_frame() {
+	inset_draw_list_live = false;
+	_set_pool_world_layer(main_pool, visual_layers::WORLD);
+	if (inset_pool.instances[0].is_valid()) {
+		_free_pool_instances(inset_pool);
+	}
+}
 
-	for (int i = 0; i < count; i++) {
-		const opennova::TerrainPatchDraw &draw = draw_list.patches[i];
-		const auto& ti = tile_infos[draw.tile_index];
-		const Ref<ArrayMesh> &mesh = draw.zero_height
-				? ti.flat_lod_meshes[draw.lod_family] : ti.lod_meshes[draw.lod_family];
-		if (mesh.is_null()) {
-			// The compiler resolved the family against the same index counts
-			// the mesh build used; a null here means the two went out of sync.
-			if (patch_visible[i]) {
-				rs->instance_set_visible(patch_instances[i], false);
-				patch_visible[i] = false;
-			}
+// The main pool's authored patches swap layers in place (the flat fallback
+// keeps its own bit); a slot reused later takes the pool's layer on its next
+// stamp.
+void Terrain::_set_pool_world_layer(PatchPool &r_pool, uint32_t p_layer) {
+	if (r_pool.world_layer == p_layer) {
+		return;
+	}
+	r_pool.world_layer = p_layer;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return;
+	}
+	for (int i = 0; i < r_pool.active; ++i) {
+		if (!r_pool.instances[i].is_valid() || !r_pool.uniforms_stamped[i] ||
+				r_pool.last_zero_height[i]) {
 			continue;
 		}
+		rs->instance_set_layer_mask(r_pool.instances[i], p_layer);
+		r_pool.last_layer[i] = p_layer;
+	}
+}
 
-		// Only update mesh if changed
-		RID mesh_rid = mesh->get_rid();
-		if (mesh_rid != last_mesh_rid[i]) {
-			rs->instance_set_base(patch_instances[i], mesh_rid);
-			last_mesh_rid[i] = mesh_rid;
-		}
-
-		// Only update transform if changed
-		Transform3D xform(Basis(), Vector3(draw.sector_ox, 0.0f, draw.sector_oz));
-		if (xform != last_transform[i]) {
-			rs->instance_set_transform(patch_instances[i], xform);
-			last_transform[i] = xform;
-		}
-
-		// Per-instance uniforms: written on change only (the mesh/transform
-		// gates above already work that way).
-		const bool fresh = !patch_uniforms_stamped[i];
-		if (fresh || draw.zero_height != last_zero_height[i]) {
-			rs->instance_geometry_set_shader_parameter(
-					patch_instances[i], "u_instance_zero_height", draw.zero_height);
-			// The flat fallback rides its own visual layer alone, like the
-			// foliage blanket: the beauty camera admits it and the water
-			// mirror excludes it, because the retail mirror prerender view
-			// skips empty sectors whenever the mission has water while the
-			// live view draws them (docs/terrain/terrain-re.md,
-			// "Empty-sector flat fallback").
-			rs->instance_set_layer_mask(patch_instances[i], draw.zero_height
-					? static_cast<uint32_t>(visual_layers::TERRAIN_FLAT_FALLBACK)
-					: static_cast<uint32_t>(visual_layers::WORLD));
-			last_zero_height[i] = draw.zero_height;
-		}
-		const Vector2 quadrant(static_cast<float>(draw.quadrant_x),
-				static_cast<float>(draw.quadrant_z));
-		if (fresh || quadrant != last_quadrant[i]) {
-			rs->instance_geometry_set_shader_parameter(
-				patch_instances[i], "u_instance_source_quadrant", quadrant);
-			last_quadrant[i] = quadrant;
-		}
-
-		const opennova::TerrainTilePageBinding &page = pages[i];
-		const std::optional<opennova::TerrainTilePageProjection> projection =
-				page.ready
-						? opennova::TerrainTileCompositionCache::page_projection(
-								page.page, draw.zero_height)
-						: std::nullopt;
-		const bool ready = projection.has_value();
-		if (fresh || ready != last_page_ready[i]) {
-			rs->instance_geometry_set_shader_parameter(
-					patch_instances[i], "u_instance_tile_cache_ready", ready);
-			last_page_ready[i] = ready;
-		}
-		if (ready) {
-			const float layer = static_cast<float>(page.layer);
-			const Vector4 projection_row(projection->world_origin_x,
-					projection->world_origin_z,
-					projection->inverse_world_span,
-					projection->world_span);
-			if (fresh || layer != last_page_layer[i]) {
-				rs->instance_geometry_set_shader_parameter(
-						patch_instances[i], "u_instance_tile_cache_layer", layer);
-				last_page_layer[i] = layer;
-			}
-			if (fresh || projection_row != last_page_projection[i]) {
-				rs->instance_geometry_set_shader_parameter(
-						patch_instances[i], "u_instance_tile_cache_projection",
-						projection_row);
-				last_page_projection[i] = projection_row;
+// The Inset pool's material follows the main one: every parameter the main
+// frame wrote (surface inputs, pages, light textures, fog/env, debug mode,
+// water noise) syncs on change, except the view's own light rows and
+// below-water flag.
+void Terrain::_sync_inset_material() {
+	const ObjectID source(terrain_material->get_instance_id());
+	if (inset_material.is_null() || inset_material_source != source) {
+		inset_material = terrain_material->duplicate();
+		inset_material_source = source;
+		inset_synced_parameters.clear();
+		if (terrain_shader.is_valid()) {
+			const Array uniforms = terrain_shader->get_shader_uniform_list();
+			for (int64_t index = 0; index < uniforms.size(); ++index) {
+				const Dictionary uniform = uniforms[index];
+				const StringName name = uniform.get("name", StringName());
+				if (name == StringName("u_terrain_light_rows") ||
+						name == StringName("u_terrain_light_enabled") ||
+						name == StringName("u_below_water")) {
+					continue;
+				}
+				inset_synced_parameters.push_back(name);
 			}
 		}
-		patch_uniforms_stamped[i] = true;
-
-		// Per-instance debug data (only set when a debug mode is active)
-		if (debug_mode != DEBUG_MODE_NORMAL) {
-			rs->instance_geometry_set_shader_parameter(patch_instances[i],
-				"u_instance_lod", static_cast<float>(draw.lod_family));
-			rs->instance_geometry_set_shader_parameter(patch_instances[i],
-				"u_instance_sector_x", draw.sector_ox / 512.0f);
-			rs->instance_geometry_set_shader_parameter(patch_instances[i],
-				"u_instance_sector_z", draw.sector_oz / 512.0f);
-		}
-
-		if (!patch_visible[i]) {
-			rs->instance_set_visible(patch_instances[i], true);
-			patch_visible[i] = true;
+		inset_pool.rows.enabled_written = -1;
+		_ensure_light_rows(inset_pool.rows);
+		inset_material->set_shader_parameter("u_terrain_light_rows", inset_pool.rows.texture);
+		inset_material->set_shader_parameter("u_terrain_light_enabled", false);
+		inset_pool.rows.enabled_written = 0;
+		if (RenderingServer *rs = RenderingServer::get_singleton()) {
+			for (int i = 0; i < PATCH_POOL_SIZE; ++i) {
+				if (inset_pool.instances[i].is_valid()) {
+					rs->instance_geometry_set_material_override(inset_pool.instances[i],
+							inset_material->get_rid());
+				}
+			}
 		}
 	}
-
-	// Hide unused pool entries
-	for (int i = count; i < patches_active; i++) {
-		if (patch_visible[i]) {
-			rs->instance_set_visible(patch_instances[i], false);
-			patch_visible[i] = false;
+	for (const StringName &name : inset_synced_parameters) {
+		const Variant value = terrain_material->get_shader_parameter(name);
+		if (inset_material->get_shader_parameter(name) != value) {
+			inset_material->set_shader_parameter(name, value);
 		}
 	}
-	patches_active = count;
+}
 
+const std::vector<FoliageDetailPatch> &Terrain::get_inset_foliage_detail_patches_native() const {
+	static const std::vector<FoliageDetailPatch> empty;
+	return inset_draw_list_live ? inset_frame_compiler.last_draw_list().detail_cells : empty;
+}
+
+PackedInt32Array Terrain::get_visible_patch_layers(bool p_inset) const {
+	const PatchPool &pool = p_inset ? inset_pool : main_pool;
+	PackedInt32Array layers;
+	for (int i = 0; i < PATCH_POOL_SIZE; ++i) {
+		if (pool.visible[i]) {
+			layers.push_back(static_cast<int32_t>(pool.last_layer[i]));
+		}
+	}
+	return layers;
+}
+
+// The device half of the main terrain frame: the composed pages, the patch
+// pool, the light rows and the shared material's per-frame inputs.
+void Terrain::_apply_frame_draw_list(const opennova::TerrainDrawList &draw_list) {
+	_apply_pool(main_pool, draw_list, _compose_pages(draw_list, true));
 	// The light-pool re-draw rows for exactly this draw list's patches.
-	_render_light_rows(draw_list);
+	light_patches_lit = _render_light_rows(draw_list, main_pool.rows, terrain_material,
+			light_rows_total);
 
 	// Update shader parameters on the single shared material
 	if (terrain_material.is_valid()) {
@@ -655,12 +662,169 @@ void Terrain::render_frame() {
 			// uniforms). With a weather node the env already holds the tick's
 			// written-back smoothed currents, and its per-pass builder adds
 			// what the raw smoother lacks: the NVG sky blend, the thermal
-			// ramps, the underwater Env_WaterColorLit fog. The terrain surface
+			// ramps, the underwater g_EnvWaterColorLit fog. The terrain surface
 			// consumes only c1 = light + c0 = sky [orig: @ 0x604420, see
 			// docs/terrain/terrain-re.md].
 			cached_env_node->apply_terrain_uniforms(terrain_material);
 		}
 	}
+}
+
+// One traversal's page sweep over the shared cache: each is its own PolyTrn
+// frame (the engine cache's begin_frame carries the witness).
+const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
+		const opennova::TerrainDrawList &draw_list, bool p_display_frame_start) {
+	// The portable cache owns page identity/composition decisions; the device
+	// supplies the environment bytes that are actually baked into each page.
+	// Quantization inside the adapter prevents sub-byte weather drift from
+	// invalidating the whole working set. The page path consumes the RAW
+	// getter tuple: the static projector's (g2,g1,g0) reduction and the DOT3
+	// (g2,g0,g1) byte pack are both ports of retail's packing of that tuple
+	// [orig: Environment_GetLightDirectionFloat @0x57D870 read by the
+	// collector @0x60D2F5/0x60D2FF and the tile DOT3 pack @0x60E231..0x60E331;
+	// see docs/terrain/terrain-re.md] — never the Godot-axes vector
+	// get_light_direction() serves, which would swap x/z a second time.
+	Vector3 page_tile_tint(1.0f, 1.0f, 1.0f);
+	// The unseeded 45-degree default in GODOT axes; EnvironmentState's
+	// kDefaultSunDirRender is the same numbers in the render basis, which after
+	// the x/z swap points up+east while this points up+south (open grill item).
+	Vector3 page_light_direction(0.0f, 0.70710678f, 0.70710678f);
+	if (cached_env_node && cached_env_node->is_loaded()) {
+		page_tile_tint = cached_env_node->get_tile_overlay_tint();
+		page_light_direction =
+				cached_env_node->get_light_direction_render_tuple();
+	}
+	if (p_display_frame_start) {
+		static_shadow_rasterizer.begin_frame(page_light_direction,
+				light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
+	}
+	// The page claims stamp the weather clock's TOD epoch (g_EnvTodEpoch,
+	// one step per 311 logic ticks); a page whose stamp falls behind is
+	// refreshed on an all-hit frame.
+	const uint32_t tod_epoch = cached_env_node != nullptr &&
+					cached_env_node->state().weather() != nullptr
+			? cached_env_node->state().weather()->tod_epoch
+			: 0u;
+	tile_cache_device.begin_frame(++page_sweep_id, tod_epoch);
+	// Every missing visible page composes before the patches draw.
+	return tile_cache_device.compose_frame(draw_list, page_tile_tint, page_light_direction);
+}
+
+// Apply one view's draw list onto its instance pool: draw-list index == pool
+// slot.
+void Terrain::_apply_pool(PatchPool &r_pool, const opennova::TerrainDrawList &draw_list,
+		const std::vector<opennova::TerrainTilePageBinding> &pages) {
+	RenderingServer* rs = RenderingServer::get_singleton();
+	const int count = static_cast<int>(draw_list.patches.size());
+
+	for (int i = 0; i < count; i++) {
+		const opennova::TerrainPatchDraw &draw = draw_list.patches[i];
+		const auto& ti = tile_infos[draw.tile_index];
+		const Ref<ArrayMesh> &mesh = draw.zero_height
+				? ti.flat_lod_meshes[draw.lod_family] : ti.lod_meshes[draw.lod_family];
+		const RID instance = r_pool.instances[i];
+		if (mesh.is_null()) {
+			// The compiler resolved the family against the same index counts
+			// the mesh build used; a null here means the two went out of sync.
+			if (r_pool.visible[i]) {
+				rs->instance_set_visible(instance, false);
+				r_pool.visible[i] = false;
+			}
+			continue;
+		}
+
+		// Only update mesh if changed
+		RID mesh_rid = mesh->get_rid();
+		if (mesh_rid != r_pool.last_mesh_rid[i]) {
+			rs->instance_set_base(instance, mesh_rid);
+			r_pool.last_mesh_rid[i] = mesh_rid;
+		}
+
+		// Only update transform if changed
+		Transform3D xform(Basis(), Vector3(draw.sector_ox, 0.0f, draw.sector_oz));
+		if (xform != r_pool.last_transform[i]) {
+			rs->instance_set_transform(instance, xform);
+			r_pool.last_transform[i] = xform;
+		}
+
+		// Per-instance uniforms: written on change only (the mesh/transform
+		// gates above already work that way).
+		const bool fresh = !r_pool.uniforms_stamped[i];
+		if (fresh || draw.zero_height != r_pool.last_zero_height[i]) {
+			rs->instance_geometry_set_shader_parameter(
+					instance, "u_instance_zero_height", draw.zero_height);
+			r_pool.last_zero_height[i] = draw.zero_height;
+		}
+		// The pool's layer for this patch (the constructor documents them).
+		const uint32_t layer_mask = draw.zero_height ? r_pool.flat_layer : r_pool.world_layer;
+		if (fresh || layer_mask != r_pool.last_layer[i]) {
+			rs->instance_set_layer_mask(instance, layer_mask);
+			r_pool.last_layer[i] = layer_mask;
+		}
+		const Vector2 quadrant(static_cast<float>(draw.quadrant_x),
+				static_cast<float>(draw.quadrant_z));
+		if (fresh || quadrant != r_pool.last_quadrant[i]) {
+			rs->instance_geometry_set_shader_parameter(
+				instance, "u_instance_source_quadrant", quadrant);
+			r_pool.last_quadrant[i] = quadrant;
+		}
+
+		const opennova::TerrainTilePageBinding &page = pages[i];
+		const std::optional<opennova::TerrainTilePageProjection> projection =
+				page.ready
+						? opennova::TerrainTileCompositionCache::page_projection(
+								page.page, draw.zero_height)
+						: std::nullopt;
+		const bool ready = projection.has_value();
+		if (fresh || ready != r_pool.last_page_ready[i]) {
+			rs->instance_geometry_set_shader_parameter(
+					instance, "u_instance_tile_cache_ready", ready);
+			r_pool.last_page_ready[i] = ready;
+		}
+		if (ready) {
+			const float layer = static_cast<float>(page.layer);
+			const Vector4 projection_row(projection->world_origin_x,
+					projection->world_origin_z,
+					projection->inverse_world_span,
+					projection->world_span);
+			if (fresh || layer != r_pool.last_page_layer[i]) {
+				rs->instance_geometry_set_shader_parameter(
+						instance, "u_instance_tile_cache_layer", layer);
+				r_pool.last_page_layer[i] = layer;
+			}
+			if (fresh || projection_row != r_pool.last_page_projection[i]) {
+				rs->instance_geometry_set_shader_parameter(
+						instance, "u_instance_tile_cache_projection",
+						projection_row);
+				r_pool.last_page_projection[i] = projection_row;
+			}
+		}
+		r_pool.uniforms_stamped[i] = true;
+
+		// Per-instance debug data (only set when a debug mode is active)
+		if (debug_mode != DEBUG_MODE_NORMAL) {
+			rs->instance_geometry_set_shader_parameter(instance,
+				"u_instance_lod", static_cast<float>(draw.lod_family));
+			rs->instance_geometry_set_shader_parameter(instance,
+				"u_instance_sector_x", draw.sector_ox / 512.0f);
+			rs->instance_geometry_set_shader_parameter(instance,
+				"u_instance_sector_z", draw.sector_oz / 512.0f);
+		}
+
+		if (!r_pool.visible[i]) {
+			rs->instance_set_visible(instance, true);
+			r_pool.visible[i] = true;
+		}
+	}
+
+	// Hide unused pool entries
+	for (int i = count; i < r_pool.active; i++) {
+		if (r_pool.visible[i]) {
+			rs->instance_set_visible(r_pool.instances[i], false);
+			r_pool.visible[i] = false;
+		}
+	}
+	r_pool.active = count;
 }
 
 void Terrain::set_light_context(const Ref<LightScene> &p_scene, int p_time_ms) {
@@ -672,61 +836,75 @@ void Terrain::set_light_context(const Ref<LightScene> &p_scene, int p_time_ms) {
 		terrain_material->set_shader_parameter("u_terrain_light_enabled", false);
 		// The direct write IS the latched value: a later re-arm must push the
 		// enable again, not compare against the stale 1.
-		light_rows_enabled_written = 0;
+		main_pool.rows.enabled_written = 0;
 		light_patches_lit = 0;
 		light_rows_total = 0;
+		if (inset_material.is_valid()) {
+			inset_material->set_shader_parameter("u_terrain_light_enabled", false);
+			inset_pool.rows.enabled_written = 0;
+		}
 	}
+}
+
+void Terrain::_ensure_light_rows(LightRows &r_rows) {
+	if (r_rows.texture.is_valid()) {
+		return;
+	}
+	r_rows.bytes.resize(static_cast<int64_t>(LIGHT_ROWS_TEXELS) * PATCH_POOL_SIZE * 16);
+	r_rows.bytes.fill(0);
+	r_rows.image = Image::create_from_data(LIGHT_ROWS_TEXELS,
+			PATCH_POOL_SIZE, false, Image::FORMAT_RGBAF, r_rows.bytes);
+	r_rows.texture = ImageTexture::create_from_image(r_rows.image);
+	r_rows.uploaded = r_rows.bytes.duplicate();
+	r_rows.enabled_written = -1;
 }
 
 void Terrain::_bind_light_textures() {
 	if (light_textures_bound || terrain_material.is_null()) {
 		return;
 	}
-	// The two procedural textures, built once per process like the corona
-	// texture [orig: Lighting_InitTextures @0x5a94f0 creates "texlight2d"
-	// 64x64 and "texlightspot1d" 64x8, both without mips; the 0x600 shader
-	// they bind gets GfxShader_SetFfpLightingSources (ex sub_680720)(this, 1,
-	// 0, 0, 0) @0x5a98eb..0x5a98f4, FFP lighting on with the material
-	// sources on MATERIAL (not a sampler address mode); the shader samplers
-	// carry filter_linear, repeat_disable hints].
+	// The procedural textures of the ps.1.1 terrain light pass, built once per
+	// node: "texlight2d" 64x64 (both falloff stages sample it; clamped,
+	// bilinear, no mips) and the cube-normalize map stage 0 samples
+	// (renderer/light_terrain_pass.h carries the witness and the stage map).
 	const int size = LightScene::terrain_light_texture_size();
-	const int rows = LightScene::terrain_light_strip_rows();
 	if (light_disc_texture.is_null()) {
 		light_disc_texture = ImageTexture::create_from_image(
 				Image::create_from_data(size, size, false, Image::FORMAT_RGBA8,
 						LightScene::terrain_light_disc_rgba8()));
 	}
-	if (light_strip_texture.is_null()) {
-		light_strip_texture = ImageTexture::create_from_image(
-				Image::create_from_data(size, rows, false, Image::FORMAT_RGBA8,
-						LightScene::terrain_light_strip_rgba8()));
+	if (light_cube_texture.is_null()) {
+		const int cube_size = LightScene::terrain_light_cube_size();
+		TypedArray<Ref<Image>> faces;
+		for (int face = 0; face < 6; ++face) {
+			faces.push_back(Image::create_from_data(cube_size, cube_size, false,
+					Image::FORMAT_RGBA8, LightScene::terrain_light_cube_face_rgba8(face)));
+		}
+		light_cube_texture.instantiate();
+		light_cube_texture->create_from_images(faces);
 	}
-	// The rows texture: one row per pool slot, two RGBAF texels per light —
-	// (position.xyz Godot world, inv_scale) then (c4..c6, the patch's count).
-	light_rows_bytes.resize(
-			static_cast<int64_t>(LIGHT_ROWS_TEXELS) * PATCH_POOL_SIZE * 16);
-	light_rows_bytes.fill(0);
-	light_rows_image = Image::create_from_data(LIGHT_ROWS_TEXELS,
-			PATCH_POOL_SIZE, false, Image::FORMAT_RGBAF, light_rows_bytes);
-	light_rows_texture = ImageTexture::create_from_image(light_rows_image);
-	light_rows_uploaded = light_rows_bytes.duplicate();
-	light_rows_enabled_written = -1;
+	// The main view's rows texture, fresh for this material (the Inset
+	// material carries its own, render_inset_frame).
+	main_pool.rows = LightRows();
+	_ensure_light_rows(main_pool.rows);
 	terrain_material->set_shader_parameter("u_terrain_light_disc",
 			light_disc_texture);
-	terrain_material->set_shader_parameter("u_terrain_light_strip",
-			light_strip_texture);
+	terrain_material->set_shader_parameter("u_terrain_light_cube",
+			light_cube_texture);
 	terrain_material->set_shader_parameter("u_terrain_light_rows",
-			light_rows_texture);
+			main_pool.rows.texture);
 	light_textures_bound = true;
 }
 
-void Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list) {
-	light_patches_lit = 0;
-	light_rows_total = 0;
-	if (light_scene.is_null() || terrain_material.is_null()) {
-		return;
+int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, LightRows &r_rows,
+		const Ref<ShaderMaterial> &p_material, int &r_total) {
+	r_total = 0;
+	if (light_scene.is_null() || terrain_material.is_null() || p_material.is_null()) {
+		return 0;
 	}
 	_bind_light_textures();
+	_ensure_light_rows(r_rows);
+	int patches_lit = 0;
 	const int count = static_cast<int>(draw_list.patches.size());
 	light_patch_bounds.resize(static_cast<size_t>(count));
 	light_patch_rows.resize(static_cast<size_t>(count));
@@ -759,7 +937,7 @@ void Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list) {
 	}
 	// EffectWorld_AmbientScale = the env light-state gain (the modulator
 	// unpack the object pass feeds too); the recip factor unpacks the loaded
-	// Env_TerrainColorRecip [orig: @0x5aa1ef..0x5aa23f].
+	// g_EnvTerrainColorRecip [orig: @0x5aa1ef..0x5aa23f].
 	Vector3 gain(1.0f, 1.0f, 1.0f);
 	uint32_t recip_packed = opennova::renderer::kTerrainFactorDefaultPacked;
 	if (cached_env_node != nullptr) {
@@ -775,14 +953,14 @@ void Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list) {
 			light_patch_bounds.data(), light_patch_bounds.size(), gain,
 			light_time_ms, cached_weather_node, recip_packed,
 			light_patch_rows.data());
-	light_rows_total = static_cast<int>(total);
+	r_total = static_cast<int>(total);
 	// Rewrite the whole rows image: a slot that lost its lights reads count 0.
-	light_rows_bytes.fill(0);
-	float *texels = reinterpret_cast<float *>(light_rows_bytes.ptrw());
+	r_rows.bytes.fill(0);
+	float *texels = reinterpret_cast<float *>(r_rows.bytes.ptrw());
 	for (int i = 0; i < count; i++) {
 		const opennova::renderer::TerrainLightPatchRows &rows = light_patch_rows[i];
 		if (rows.count > 0) {
-			++light_patches_lit;
+			++patches_lit;
 		}
 		float *row = texels + static_cast<size_t>(i) * LIGHT_ROWS_TEXELS * 4;
 		for (size_t k = 0; k < rows.count; ++k) {
@@ -803,23 +981,23 @@ void Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list) {
 	}
 	// Upload only when the rows moved: a still camera under steady lights
 	// rebuilds identical bytes every frame.
-	const int64_t byte_count = light_rows_bytes.size();
-	if (light_rows_uploaded.size() != byte_count ||
-			std::memcmp(light_rows_uploaded.ptr(), light_rows_bytes.ptr(),
+	const int64_t byte_count = r_rows.bytes.size();
+	if (r_rows.uploaded.size() != byte_count ||
+			std::memcmp(r_rows.uploaded.ptr(), r_rows.bytes.ptr(),
 					static_cast<size_t>(byte_count)) != 0) {
-		light_rows_image->set_data(LIGHT_ROWS_TEXELS, PATCH_POOL_SIZE, false,
-				Image::FORMAT_RGBAF, light_rows_bytes);
-		light_rows_texture->update(light_rows_image);
-		light_rows_uploaded.resize(byte_count);
-		std::memcpy(light_rows_uploaded.ptrw(), light_rows_bytes.ptr(),
+		r_rows.image->set_data(LIGHT_ROWS_TEXELS, PATCH_POOL_SIZE, false,
+				Image::FORMAT_RGBAF, r_rows.bytes);
+		r_rows.texture->update(r_rows.image);
+		r_rows.uploaded.resize(byte_count);
+		std::memcpy(r_rows.uploaded.ptrw(), r_rows.bytes.ptr(),
 				static_cast<size_t>(byte_count));
 	}
-	const int enabled = light_rows_total > 0 ? 1 : 0;
-	if (enabled != light_rows_enabled_written) {
-		terrain_material->set_shader_parameter("u_terrain_light_enabled",
-				enabled != 0);
-		light_rows_enabled_written = enabled;
+	const int enabled = r_total > 0 ? 1 : 0;
+	if (enabled != r_rows.enabled_written) {
+		p_material->set_shader_parameter("u_terrain_light_enabled", enabled != 0);
+		r_rows.enabled_written = enabled;
 	}
+	return patches_lit;
 }
 
 void Terrain::_cache_env_weather_nodes() {
@@ -919,45 +1097,88 @@ void Terrain::_on_tile_info_changed() {
 }
 
 void Terrain::_hide_visible_patches() {
+	_hide_pool(main_pool);
+	_hide_pool(inset_pool);
+}
+
+void Terrain::_hide_pool(PatchPool &r_pool) {
 	RenderingServer* rs = RenderingServer::get_singleton();
 	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
-		if (!patch_visible[i]) {
+		if (!r_pool.visible[i]) {
 			continue;
 		}
-		if (rs && patch_instances[i].is_valid()) {
-			rs->instance_set_visible(patch_instances[i], false);
+		if (rs && r_pool.instances[i].is_valid()) {
+			rs->instance_set_visible(r_pool.instances[i], false);
 		}
-		patch_visible[i] = false;
+		r_pool.visible[i] = false;
 	}
+}
+
+void Terrain::_create_pool_instances(PatchPool &r_pool, const RID &p_material) {
+	RenderingServer* rs = RenderingServer::get_singleton();
+	if (rs == nullptr || get_world_3d().is_null()) {
+		return;
+	}
+	const RID scenario = get_world_3d()->get_scenario();
+	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
+		RID inst = rs->instance_create();
+		rs->instance_set_scenario(inst, scenario);
+		rs->instance_geometry_set_material_override(inst, p_material);
+		// Static terrain silhouettes are already carried in the composed page A;
+		// authored terrain participates only in its view's layer (_apply_pool
+		// stamps each patch's).
+		rs->instance_set_layer_mask(inst, r_pool.world_layer);
+		rs->instance_set_visible(inst, false);
+		// Draw-list index == pool slot == the light rows texture row this
+		// instance reads; fixed for the instance's lifetime.
+		rs->instance_geometry_set_shader_parameter(inst,
+				"u_instance_light_slot", static_cast<float>(i));
+		r_pool.instances[i] = inst;
+		r_pool.visible[i] = false;
+		r_pool.uniforms_stamped[i] = false;
+		r_pool.last_layer[i] = r_pool.world_layer;
+	}
+}
+
+void Terrain::_free_pool_instances(PatchPool &r_pool) {
+	RenderingServer* rs = RenderingServer::get_singleton();
+	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
+		if (rs && r_pool.instances[i].is_valid()) {
+			rs->free_rid(r_pool.instances[i]);
+		}
+		r_pool.instances[i] = RID();
+		r_pool.last_mesh_rid[i] = RID();
+		r_pool.last_transform[i] = Transform3D();
+		r_pool.visible[i] = false;
+		// A fresh instance carries no instance uniforms: every per-slot latch
+		// forgets this build's values, or a page that comes ready later on the
+		// next build with the same layer/projection would never be written.
+		r_pool.uniforms_stamped[i] = false;
+		r_pool.last_page_ready[i] = false;
+		r_pool.last_page_layer[i] = -1.0f;
+		r_pool.last_page_projection[i] = Vector4();
+	}
+	r_pool.active = 0;
 }
 
 void Terrain::_clear_patch_pool() {
 	frame_draw_list_live = false;
-	RenderingServer* rs = RenderingServer::get_singleton();
-	if (!rs) {
+	frame_bounds_live = false;
+	inset_draw_list_live = false;
+	if (!RenderingServer::get_singleton()) {
 		return;
 	}
-	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
-		if (patch_instances[i].is_valid()) {
-			rs->free_rid(patch_instances[i]);
-			patch_instances[i] = RID();
-		}
-		last_mesh_rid[i] = RID();
-		last_transform[i] = Transform3D();
-		patch_visible[i] = false;
-		// A fresh instance carries no instance uniforms: every per-slot latch
-		// forgets this build's values, or a page that comes ready later on the
-		// next build with the same layer/projection would never be written.
-		patch_uniforms_stamped[i] = false;
-		last_page_ready[i] = false;
-		last_page_layer[i] = -1.0f;
-		last_page_projection[i] = Vector4();
-	}
-	patches_active = 0;
+	_free_pool_instances(main_pool);
+	_free_pool_instances(inset_pool);
+	main_pool.world_layer = visual_layers::WORLD;
 }
 
 void Terrain::_clear_terrain() {
 	_clear_patch_pool();
+	inset_material.unref();
+	inset_material_source = ObjectID();
+	inset_synced_parameters.clear();
+	inset_pool.rows = LightRows();
 	tile_cache_device.clear();
 	if (terrain_material.is_valid()) {
 		terrain_material->set_shader_parameter("u_tile_cache", Variant());
@@ -995,28 +1216,9 @@ void Terrain::build() {
 		return;
 	}
 
-	// Create lightweight RenderingServer instances for the patch pool
-	RenderingServer* rs = RenderingServer::get_singleton();
-	RID scenario = get_world_3d()->get_scenario();
-	RID mat_rid = terrain_material->get_rid();
-
-	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
-		RID inst = rs->instance_create();
-		rs->instance_set_scenario(inst, scenario);
-		rs->instance_geometry_set_material_override(inst, mat_rid);
-		// Static terrain silhouettes are already carried in the composed page A;
-		// authored terrain participates only in the ordinary world-visible
-		// layer (render_frame moves flat fallback draws to their own layer).
-		rs->instance_set_layer_mask(inst, visual_layers::WORLD);
-		rs->instance_set_visible(inst, false);
-		// Draw-list index == pool slot == the light rows texture row this
-		// instance reads; fixed for the instance's lifetime.
-		rs->instance_geometry_set_shader_parameter(inst,
-				"u_instance_light_slot", static_cast<float>(i));
-		patch_instances[i] = inst;
-		patch_visible[i] = false;
-		patch_uniforms_stamped[i] = false;
-	}
+	// Create lightweight RenderingServer instances for the main view's pool
+	// (the Inset's is created when it first renders).
+	_create_pool_instances(main_pool, terrain_material->get_rid());
 
 	_load_textures();
 	light_textures_bound = false;
@@ -1139,30 +1341,25 @@ bool Terrain::_build_terrain() {
 // ---------------------------------------------------------------------------
 
 bool Terrain::has_visible_terrain_bounds() const {
-	return frame_draw_list_live &&
-			frame_compiler.last_draw_list().visible_bounds.valid;
+	return frame_bounds_live && frame_bounds.valid;
 }
 
 float Terrain::get_visible_terrain_min_height() const {
-	return has_visible_terrain_bounds()
-			? frame_compiler.last_draw_list().visible_bounds.min[1]
-			: 0.0f;
+	return has_visible_terrain_bounds() ? frame_bounds.min[1] : 0.0f;
 }
 
 float Terrain::get_visible_terrain_max_height() const {
-	return has_visible_terrain_bounds()
-			? frame_compiler.last_draw_list().visible_bounds.max[1]
-			: 0.0f;
+	return has_visible_terrain_bounds() ? frame_bounds.max[1] : 0.0f;
 }
 
 int Terrain::get_patches_active() const {
-	return patches_active;
+	return main_pool.active;
 }
 
 int Terrain::get_visible_patch_count() const {
 	int visible_count = 0;
 	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
-		if (patch_visible[i]) {
+		if (main_pool.visible[i]) {
 			visible_count++;
 		}
 	}

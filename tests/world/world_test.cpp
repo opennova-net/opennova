@@ -133,7 +133,7 @@ int main() {
     // The entity-update counter counts completed entity updates: a gameplay
     // tick's update adds one, a pre-round tick (no entity update) adds none,
     // and a restore keeps it (it is not in the Snapshot).
-    // [orig: g_entity_update_counter, `add g_entity_update_counter,esi` in
+    // [orig: g_EntityUpdateCounter, `add g_EntityUpdateCounter,esi` in
     //  Entity_UpdateAllEntities @0x4C2639]
     {
         World cw;

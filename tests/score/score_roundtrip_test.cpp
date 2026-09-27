@@ -45,7 +45,7 @@ int main() {
 	TEST_EXPECT(file.exp_fanfare[0] == 0 && file.exp_fanfare[1] == 0);
 	TEST_EXPECT(file.blocks.size() == 3);
 
-	// Block ORDER is the engine's row index [orig: load_scoring_table_for_game_type
+	// Block ORDER is the engine's row index [orig: ScoreConfig_LoadScoringTableForGameType
 	// @ 0x52D300 — `score_type_index *= 452`].
 	TEST_EXPECT(file.blocks[0].name == "COOP");
 	TEST_EXPECT(file.blocks[1].name == "TDM");

@@ -8,7 +8,7 @@ extends GutTest
 # the displayed pixels back. Beauty values are gamma-domain numbers, so a
 # readback pixel is the FrameFX output value.
 
-const BEAUTY_MASK := 494593
+const BEAUTY_MASK := 14126081
 
 
 func _beauty_material(color: Color) -> ShaderMaterial:
@@ -19,7 +19,7 @@ render_mode unshaded, depth_draw_opaque, cull_disabled;
 uniform vec3 u_beauty;
 
 void fragment() {
-	if (CAMERA_VISIBLE_LAYERS == 494593u) {
+	if (CAMERA_VISIBLE_LAYERS == 14126081u) {
 		ALBEDO = u_beauty;
 	} else {
 		discard;
@@ -105,7 +105,7 @@ func _near(color: Color, expected: Vector3, tolerance: float) -> bool:
 			and abs(color.b - expected.z) <= tolerance
 
 
-# [orig: create_frame_effect_render_targets @0x583c7f..0x583c97]: the capture
+# [orig: FrameFX_CreateRenderTargets @0x583c7f..0x583c97]: the capture
 # is the highest power of two not above the frame side minus one.
 func test_capture_is_the_power_of_two_floor_of_the_frame() -> void:
 	var view := _view(Vector2i(200, 100))
@@ -226,7 +226,7 @@ func test_nvg_scoped_arm_draws_the_lens_over_a_black_clear() -> void:
 
 
 # The NVG view's Sighted arm [orig: NVG_RenderSceneToTarget @0x5d08cb..0x5d0952 ->
-# draw_weapon_sight_overlays @0x4dce00]: the SIGHTS card draws INTO the 512
+# HUD_DrawWeaponSightOverlays @0x4dce00]: the SIGHTS card draws INTO the 512
 # scene before its glow and tint, so a white row over the scene's left half
 # tints to (0.4, 1, 0.4) where the 0.3 grey right half tints to
 # (0.12, 0.74, 0.12); off the arm the published card does not draw.

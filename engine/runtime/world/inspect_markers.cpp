@@ -27,8 +27,10 @@ std::vector<EntityMarker> entity_markers(const World &world, const EntityMarkerQ
 		const float dy = e.position.y - query.anchor.y;
 		const float dz = e.position.z - query.anchor.z;
 		const float dist_sq = dx * dx + dy * dy + dz * dz;
+		// A hidden row and the local player never enter by range; the
+		// selection alone brings them in.
 		const bool in_range = query.range_units > 0.0f && dist_sq <= range_sq &&
-				!(query.skip_hidden && e.hidden) && !(query.skip_local_player && is_local);
+				!e.hidden && !is_local;
 		if (!is_selected && !in_range) return;
 		EntityMarker m;
 		m.handle = e.handle.packed;

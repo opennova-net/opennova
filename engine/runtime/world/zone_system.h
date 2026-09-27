@@ -40,7 +40,7 @@ public:
     SpawnWaveList spawn_waves;
     // One mission-global round-robin shared by default spawn selection and a
     // picked numbered zone's type-6007 scatter choices.
-    // [orig: g_spawn_cycle_counter @0x24C10D0;
+    // [orig: g_SpawnCycleCounter @0x24C10D0;
     // Server_PositionPlayerForSpawn @0x50CF60]
     uint32_t spawn_cycle_counter = 0;
 
@@ -126,7 +126,7 @@ public:
     // cached mask continues and the walk retries while the stepped number stays
     // owned. Objective gametypes (game_type & 0x20000) take the LAST team-matching
     // UN-numbered list entry instead. nullptr = no zone spawn (the caller falls
-    // back to the marker chain). [orig: find_spawn_entity_for_team @0x4fc810]
+    // back to the marker chain). [orig: Spawn_FindEntityForTeam @0x4fc810]
     const Entity *find_spawn_zone_for_team(uint8_t team, uint32_t game_type_value) const;
 
 private:

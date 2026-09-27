@@ -94,7 +94,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	sim.set_local_player_weapon(weapons.get_weapon(personal_index), {})
 	sim.drain_local_player_weapon_events()
 
-	MountLook.face(sim, gun.position)
+	MountLook.face(self, sim, gun.position)
 	assert_true(sim.local_player_toggle_mount(), "the 00TRc spawn can mount E50triB")
 	sim.step()
 	sim.set_local_player_mouse(511, false)

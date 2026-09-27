@@ -23,6 +23,13 @@ void damage_effect(World &world, Entity &e, uint8_t family, const char *effect, 
 	event.attach_wire_handle = e.handle.packed;
 	event.attach_spawn_origin = e.spawn_origin;
 	event.release = release;
+	// Every motor-effect submit passes the vehicle as the descriptor tag, so
+	// the smoke and fire groups take the section gate [orig:
+	// Entity_UpdateVehiclePhysics `push esi` @ 0x48B0BB / @ 0x48B0F0 ahead of
+	// the submits @ 0x48B0BC / 0x48B0F1, and the sibling pairs @ 0x46FBC9,
+	// 0x478151, 0x47AC65, 0x47DDD9, 0x48093C, 0x48352B, 0x48419C, 0x488C8A,
+	// 0x48D671, 0x49050C (esi = the entity, e.g. @ 0x475DF7)].
+	event.section_tagged = true;
 	world.out.destruction.effects.push_back(std::move(event));
 	active = !release;
 }

@@ -68,7 +68,7 @@ public:
 	// Standard SIGHTS-card contents. The simulation owns the dynamic card
 	// selector; this record only preserves every authored row (WeaponSightRow)
 	// in draw order and virtual 1024x768 space.
-	// [orig: draw_weapon_sight_overlays @0x4dce00]
+	// [orig: HUD_DrawWeaponSightOverlays @0x4dce00]
 	TypedArray<WeaponSightRow> get_sights() const { return sights_; }
 	void set_sights(const TypedArray<WeaponSightRow> &p_value) { sights_ = p_value; }
 	// The card's `slide` multiplier at the def's default zero

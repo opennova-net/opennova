@@ -5,6 +5,7 @@
 // No fixtures, runs in CI.
 
 #include <base/pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_writer.h> // build_pcap_udp
 
 #include <cstdint>
 #include <cstdio>

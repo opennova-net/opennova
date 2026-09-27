@@ -1,6 +1,6 @@
 // The loadout screens' shared text compositions — see loadout_labels.h for
-// the witnesses. [orig: populate_weapon_slot_lists @0x560430;
-// update_weapon_weight_display @0x565640]
+// the witnesses. [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430;
+// UI_UpdateWeaponWeightDisplay @0x565640]
 
 #include <runtime/menu/loadout_labels.h>
 

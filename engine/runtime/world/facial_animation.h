@@ -1,5 +1,5 @@
 // Mission-owned facial slots and GRM texture animation.
-// [orig: CScarDecal_Init @0x57F900; sub_57FDF0; scar_decal_update @0x57FA50]
+// [orig: CScarDecal_Init @0x57F900; sub_57FDF0; CScarDecal_Update @0x57FA50]
 #pragma once
 
 #include <formats/grm/grm.h>
@@ -42,7 +42,7 @@ struct FacialSlot {
 // The gaze pair is gated on the display counter, so it draws from the
 // thread-local render/effects CRT stream (base/crt/crt_rng.h), never from the
 // session-seeded World::crt_rand (D-NET-115).
-// [orig: scar_decal_update @0x57FA50, caller @0x4C21FB]
+// [orig: CScarDecal_Update @0x57FA50, caller @0x4C21FB]
 void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
 		uint32_t wall_time_ms);
 
@@ -80,7 +80,7 @@ public:
 	void automatic_expression(const Entity &entity, int32_t expression);
 
 	// Stable nearest-first sort; only three visible slots have live targets.
-	// [orig: sort_scar_slots_by_distance @0x57FE60; sub_580360; render_scar_slot @0x580170]
+	// [orig: Scar_SortSlotsByDistance @0x57FE60; sub_580360; Render_ScarSlot @0x580170]
 	void compile_draws(World &world, int32_t camera_x, int32_t camera_y,
 			bool first_person, std::vector<FacialDraw> &out);
 

@@ -59,7 +59,7 @@ public:
 	bool valid() const { return field_.valid(); }
 	// The occupant water clamp's plane: the mission water height in the SAME
 	// 16.16 world units the ground solve compares (the retail global the
-	// clamp reads [orig: worldY @0x26C6454 -- Env_WaterHeightFixed]); 0 = no
+	// clamp reads [orig: worldY @0x26C6454 -- g_EnvWaterHeightFixed]); 0 = no
 	// authored water. The kernel feeds it from World::env.water_z whenever
 	// the environment changes; build() resets it to none.
 	void set_water_plane(int32_t water_y_q16) {

@@ -4,7 +4,7 @@
 
 // The one runtime mission time-of-day clock: the 8.24 hour accumulator every
 // 62 Hz tick advances by the exact integer rate
-// [orig: Env_TodAdvancePerTick = 0x18000000 / (3720 * minutes_per_day)
+// [orig: g_EnvTodAdvancePerTick = 0x18000000 / (3720 * minutes_per_day)
 //  @0x57d108, set by Environment_SetTodAdvanceRate @0x57d170 with the
 //  60-minute day floor; the BMS header's Q8.8 start hour widens into the
 //  accumulator at Game_StartMission @0x525371]. Pure integer math — the shell

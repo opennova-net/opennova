@@ -1,7 +1,7 @@
 // Per-frame player input -> the player body state: the portable, Godot-free port of the
 // engine's input front end (docs/net/novaworld-net-re.md section 5.38). The host's input layer
 // fills a PlayerInput; this maps it onto the player entity's infantry state as the original
-// packs g_inputFlags into entity+0x12C.
+// packs g_InputFlags into entity+0x12C.
 #pragma once
 
 #include <cstdint>
@@ -22,7 +22,7 @@ struct PlayerInput {
     bool back = false;
     bool left = false;
     bool right = false;
-    // Lean/roll keys (catalog ids 6/7, Q/E): g_inputFlags 0x2000/0x4000 -> MoveOrder
+    // Lean/roll keys (catalog ids 6/7, Q/E): g_InputFlags 0x2000/0x4000 -> MoveOrder
     // bits 6/7 [orig: cases 148/147 @0x4e10d9/@0x4e10c8; packer @0x4df708-0x4df741].
     bool lean_left = false;
     bool lean_right = false;

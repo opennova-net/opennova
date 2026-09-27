@@ -2,6 +2,7 @@
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/ai.h>
 #include <runtime/devtools/tick_profile.h>
+#include <base/io/crt_ftol.h>
 
 // The AI event queue and the AiSystem core: registration, per-entity rows, and the
 // tick that drives every handler above.
@@ -652,7 +653,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         // [orig: WeaponAction_Fire @0x542B10 (the Entity_CalcWeaponFirePosition
         //  call @0x542bf7) -> Entity_CalcWeaponFirePosition @0x4dc750 parentSlot 3
         //  (the Entity_ComputeUserpointWorldTransform call @0x4dc7f6; barrel =
-        //  slot[+0x10] & 3 @0x545D40..0x545D4B, read before the consume_weapon_ammo
+        //  slot[+0x10] & 3 @0x545D40..0x545D4B, read before the Weapon_ConsumeAmmo
         //  call @0x542C75); the fire command copies out[0..2] and out[3]/out[4]
         //  @0x42be84..0x42bef2]. The point is the
         //  slot's FIRE field (b): the host's own re-derivation names field 0
@@ -676,6 +677,17 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
 		if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index))
 			gunner->inf.aim_ref0 = gunner->inf.combat_target;
     }
+}
+
+// A seated person rides its parent's blink quad every seated tick: groundEntity
+// takes parentEntity, then the parent's entity+0x1D0..0x1DC is copied, or the
+// quad is zeroed once no parent is left (the authority's failed-seat detach).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b662f..0x4b667e;
+//  Entity_UpdateInfantryAI @0x4beee7..0x4bef30 — reached from every seated
+//  path and after Entity_DetachFromVehicleIfServer @0x4b6627 / @0x4beedf]
+static void ride_parent_blink_quad(const World &world, Entity &occ) {
+    const Entity *parent = occ.mounted ? world.registry.get(occ.mount_target) : nullptr;
+    for (int i = 0; i < 4; ++i) occ.blink_hits[i] = parent != nullptr ? parent->blink_hits[i] : 0u;
 }
 
 bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
@@ -731,6 +743,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
             world.vehicles.detach(e.handle);
             occ->ground_target = {};
         }
+        ride_parent_blink_quad(world, *occ);
         // The seat block's tail still runs for the rider it left unposed: the
         // legs and their targets snap to the body heading and the look takes the
         // mounted chase. A client keeps the rider, so the +-90 degree look clamp
@@ -774,6 +787,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     const int32_t saved_look_pitch = e.pitch;
     const int32_t seat_heading = apply_resolved_mounted_seat_frame(
             e, world, *occ, *veh, seat);
+    ride_parent_blink_quad(world, *occ);
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
         // carry writes bodyHeading/headLook from the seat bone but leaves entity->Yaw
@@ -924,12 +938,7 @@ bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate) {
 // [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9, `fdivr ds:flt_7C3B40` @0x43B1D8]
 int32_t part_anim_rate_from_seconds(double seconds) {
     const double rate_f = (static_cast<double>(0.016f) / seconds) * 65536.0; // +inf when seconds==0
-    int32_t rate;
-    if (rate_f != rate_f || rate_f >= 2147483648.0 || rate_f < -2147483648.0) {
-        rate = static_cast<int32_t>(0x80000000); // ftol integer-indefinite
-    } else {
-        rate = static_cast<int32_t>(rate_f);     // truncate toward zero
-    }
+    int32_t rate = io::retail_ftol_sse2(rate_f); // [orig: _ftol2_sse @0x76BC00]
     if (rate == 0) rate = 1; // min-1 guard (does NOT fire for INT_MIN)
     return rate;
 }

@@ -107,7 +107,7 @@ bool collision_test_blink(const CollisionTargetView &target, const CollisionPoin
 // Ray record + segment-vs-solid clip. [orig: Entity_RaycastCollisionModel @ 0x413060]
 // ----------------------------------------------------------------------------
 void CollisionRay::refresh() {
-    // [orig: the prologue of raycast_entity_collision @ 0x4137c1-0x413890 and the
+    // [orig: the prologue of Entity_RaycastCollision @ 0x4137c1-0x413890 and the
     // 0x413060 hit tail @ 0x41370c — midpoint/half extents + float-normalized dir]
     int32_t d[3];
     for (int i = 0; i < 3; ++i) {
@@ -767,9 +767,10 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                 continue; // [orig: @ 0x4ae43b-0x4ae4a6]
 
             blink_volume_counter = section_entry_counter;
-            // Vehicle-collision pass start index. A section with VC/VK starts at
-            // that specialized run; a section without one falls back to its
-            // ordinary CB/default solids. [orig: @ 0x4ae4b8-0x4ae4df]
+            // Vehicle-collision pass start index. A section with a VC (type 7)
+            // starts at its first one and walks only VC/VK from there; a section
+            // without one falls back to its ordinary CB/default solids.
+            // [orig: @ 0x4ae4b8-0x4ae4df]
             const bool vehicle_pass = (q.mask & 8) != 0;
             int32_t vi = 0;
             bool vehicle_scoped = false;

@@ -207,23 +207,11 @@ bool NvgViewDevice::initialize(RenderingDevice *p_rd, std::string &r_failure) {
 			vertex_uniform_.is_valid())
 		return true;
 	release(p_rd);
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kLensVertexShader));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(lens_fragment_source().c_str()));
-	Ref<RDShaderSPIRV> spirv = p_rd->shader_compile_spirv_from_source(source);
-	if (spirv.is_null() ||
-			!spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-			!spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
-		r_failure = "NVG lens shader compilation failed: " +
-				(spirv.is_null() ? std::string("no SPIR-V") :
-						opennova::to_std(spirv->get_stage_compile_error(
-								RenderingDevice::SHADER_STAGE_VERTEX)) + "; " +
-								opennova::to_std(spirv->get_stage_compile_error(
-										RenderingDevice::SHADER_STAGE_FRAGMENT)));
+	Ref<RDShaderSPIRV> spirv;
+	const std::string compile_errors =
+			compile_rd_spirv(p_rd, kLensVertexShader, lens_fragment_source(), spirv);
+	if (!compile_errors.empty()) {
+		r_failure = "NVG lens shader compilation failed: " + compile_errors;
 		return false;
 	}
 	shader_ = p_rd->shader_create_from_spirv(spirv, "OpenNova NVG lens");

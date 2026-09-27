@@ -18,7 +18,7 @@ struct RoundDeath;
 // score.ini FIELD records use these one-based IDs and retain their byte-sized
 // visibility flag in file order. They are both the match's board schema and the
 // exact {field, enabled} pairs serialized in S2C 0x56.
-// [orig: ScoreConfig_LoadFile @0x52D8A0; load_scoring_table_for_game_type
+// [orig: ScoreConfig_LoadFile @0x52D8A0; ScoreConfig_LoadScoringTableForGameType
 // @0x52D300; Server_BuildEndOfRoundScoreboard @0x508F30]
 struct MatchScoreField {
     uint8_t field = 0;
@@ -33,14 +33,14 @@ struct MatchScoreField {
 struct MatchRules {
     uint32_t game_type = 0;
     uint32_t game_time_minutes =
-        0;                    // SET GameTime / g_respawn_time, despite the old host-field name
-    uint32_t score_limit = 0; // SET KillLimit / g_score_limit
-    uint32_t hill_limit_minutes = 0; // cfg koth_limit / g_time_limit_minutes
+        0;                    // SET GameTime / g_RespawnTime, despite the old host-field name
+    uint32_t score_limit = 0; // SET KillLimit / g_ScoreLimit
+    uint32_t hill_limit_minutes = 0; // cfg koth_limit / g_TimeLimitMinutes
     uint32_t hill_delta = 5;         // cfg koth_delta / dword_24D2148
-    uint32_t max_score = 0;          // SET MaxScore / g_kill_limit
+    uint32_t max_score = 0;          // SET MaxScore / g_KillLimit
     uint32_t flag_return_ticks = 210;
-    int32_t capture_duration_seconds = 15;  // SET TakeoverTime / g_capture_duration
-    int32_t capture_speed_setting = 1;       // cfg takeover speed / g_capture_speed_setting
+    int32_t capture_duration_seconds = 15;  // SET TakeoverTime / g_CaptureDuration
+    int32_t capture_speed_setting = 1;       // cfg takeover speed / g_CaptureSpeedSetting
     // Absent means the exact GameType_CreateDefaultSettings row. Present is a
     // fully materialized score.ini overlay and may intentionally contain zero
     // in every slot; absence is therefore not encoded as a magic all-zero row.
@@ -204,9 +204,10 @@ struct MatchPlayer {
     //  WacCmd_OnPlayerTick @0x4F0E65]
     uint32_t play_ticks = 0;
     // WAC pisvar/psetvar address player-slot bytes +392..+408. A new
-    // player-add clears them; team changes and death do not.
+    // player-add clears them, a team change clears the last one (the dword
+    // at +408), death clears none.
     // [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0;
-    // Server_PlayerAdd @0x51D51C]
+    // Server_PlayerAdd @0x51D51C; Server_ChangeEntityTeam @0x518DE5]
     std::array<uint8_t, 17> script_vars{};
     // Player-slot +100567, the live spectator latch. The scorer refuses
     // every event for a spectator-flagged slot, so the round winner awards
@@ -237,9 +238,9 @@ struct MatchPlayerPunt {
 
 // One outcome latch for every producer: automatic multiplayer rules and the
 // WAC/BMS Co-op/SP actions all converge here. Team 0 is a draw/no-team outcome.
-// [orig: g_spawn_success_gate @0x24c1928 (latched by Server_ProcessRoundEnd
+// [orig: g_SpawnSuccessGate @0x24c1928 (latched by Server_ProcessRoundEnd
 // @0x5164F0 at @0x5168e4, cleared by Game_StartMission @0x524a1f),
-// g_round_winning_team @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D
+// g_RoundWinningTeam @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D
 // payload byte 0; memset 0 at mission start, so it stays 0 until the round ends)]
 struct MatchOutcome {
     bool ended = false;
@@ -371,7 +372,7 @@ class Match {
 
     // Authored objective totals used both by win evaluation and the pre-match
     // status report. The first read freezes the round census, as retail's
-    // reset_round_counters does before play.
+    // Server_ResetRoundCounters does before play.
     int32_t flag_capture_target(const World &world, uint8_t scoring_team);
     int32_t demolition_target(const World &world, uint8_t scoring_team);
 
@@ -444,7 +445,7 @@ class Match {
     // host's Server_TickUpdate consumes this same countdown for its own 1 Hz
     // legs (StartDelay, win conditions, waves, the capture transaction), so
     // the world and the wire can never sit a frame apart.
-    // [orig: g_periodic_second_timer @0xC8D83C; reload 62 @0x51DB93]
+    // [orig: g_PeriodicSecondTimer @0xC8D83C; reload 62 @0x51DB93]
     bool periodic_second() const { return periodic_second_fired_; }
 
     std::vector<MatchGameplayEvent> drain_gameplay_events();
@@ -459,7 +460,7 @@ class Match {
     // A client's round-over latch: S2C 0x1D raises the gate the host's round
     // end raises (the entity update and the target filters read it), with no
     // scoring pass and no board; the next mission start's fresh Match clears it.
-    // [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_spawn_success_gate,1`
+    // [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_SpawnSuccessGate,1`
     //  @0x430858 under !is_authority; cleared by Game_StartMission @0x524A1F]
     void latch_round_over() { outcome_.ended = true; }
 
@@ -481,6 +482,10 @@ class Match {
         int32_t return_ticks = 0;
         int32_t previous_x_q16 = 0;
         int32_t previous_y_q16 = 0;
+        // The authored heading as its whole-degree placement yaw: the
+        // definition pose's yaw word is its spawn angle, spawn_angle_bam(90 -
+        // yaw) (aiRuntime f0_7[7]).
+        int16_t home_yaw = 0;
     };
 
     void share_experience(const World &world, MatchPlayer &recipient, int32_t amount);
@@ -531,6 +536,40 @@ class Match {
     std::vector<MatchGameplayEvent> gameplay_events_;
 };
 
+
+// The carrier's words a drop reads: its position, its +0x10/+0x14 heading
+// and pitch, its Flags (the indoors bit), its blink quad, and its identity as
+// the drop sound's source (none for a replica-only carrier).
+struct DropCarrierPose {
+    Vec3 position;
+    int32_t heading_bam = 0;
+    int32_t pitch_bam = 0;
+    uint32_t flags = 0;
+    uint32_t blink_hits[4] = {};
+    int32_t bms_id = 0;
+    uint16_t handle = 0xFFFF;
+};
+
+// A native carrier's drop words: a person's live heading and pitch from its
+// body record, any other carrier's from its live euler.
+DropCarrierPose drop_carrier_pose(const World &world, const Entity &carrier);
+
+// The dropped object's own legs of a drop, over its carrier's words: the
+// carried and indoors bits, the motion, the installed fall, the pose off the
+// carrier (Z + 0x4000, a quarter turn) and the blink quad with its proximity
+// refresh. The host's Match::drop_carried_object runs it, and so does a
+// joiner whose 0x2F state takes the flag off its carrier.
+// [orig: Entity_DropCarriedObject @0x439df0; its joiner callers
+//  NapiNPClientMsg_0x02F @0x43105c / @0x4310dc]
+void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPose &carrier);
+
+// One pool-1 visit of a dropped object's installed callback (Entity::
+// drop_motion): the fall until the clamped ground stops it, then the ride on
+// the entity it landed on, which falls again when that entity dies.
+// [orig: Entity_UpdatePositionAndTransform @0x4adef0;
+//  Entity_UpdateParentTransform @0x4a88b0; Entity_InterpolateFromParentDelta
+//  @0x4a8d60]
+void update_dropped_object(World &world, Entity &object);
 
 // The sim-side end-of-round state plus the SP kill-stat buckets the epilog
 // score screen and the WAC bluekills/greenkills builtins read, as one value

@@ -7,7 +7,7 @@
 // the color legs against the SAME core right after each sim tick (the
 // kernel's world::IWeatherRenderTick hook): the TOD target refresh from the
 // advanced clock, the iris exposure retarget, modulator-2 -> modulator ->
-// every color block ([orig: interpolate_weather_color @ 0x57d9e0]), the
+// every color block ([orig: Environment_InterpolateWeatherColor @ 0x57d9e0]), the
 // cloud-scroll accumulators, and the writeback of the smoothed colors into
 // env::EnvironmentState. It also owns the standalone embedding (no
 // simulation: the GUT fixtures) — a private WeatherState
@@ -56,7 +56,7 @@ public:
 	// the runtime then runs the sim legs itself.
 	bool standalone() const { return standalone_; }
 
-	// Env_WindScale units: 100% maps to 256 [orig: Environment_InitDefaults
+	// g_EnvWindScale units: 100% maps to 256 [orig: Environment_InitDefaults
 	// @ 0x57c1d1, its only writer]. The oscillator's 15*prev feedback term is
 	// stable only for intensity <= 273 — a 0..8192 mapping drove the 32-bit
 	// state divergent (docs/env/env-tod-re.md).
@@ -147,7 +147,7 @@ public:
 	// The marched iris-exposure samples (D-RLIT-2): the in-world shell stamps
 	// per-sample classification codes each frame; empty keeps the outdoor
 	// fallback sample when no world supplies classification codes
-	// [orig: compute_ambient_light_along_direction @ 0x5c7a00].
+	// [orig: Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00].
 	void set_iris_samples(const int32_t *samples, int count);
 
 	float sway_amount() const;
@@ -176,12 +176,13 @@ public:
 	// The modulator's render color / 64 — ColorSrcGlobalGain
 	// [orig: Render_UnpackModulatorToLightScale @ 0x58db30].
 	Rgb color_src_gain() const;
-	// Env_TerrainLightCombined packed 0x00RRGGBB — light x 0xB5/256 + sky,
+	// g_EnvTerrainLightCombined packed 0x00RRGGBB — light x 0xB5/256 + sky,
 	// saturating [orig: @ 0x57f0b3..0x57f0d5]; the precipitation drops' color.
 	uint32_t terrain_light_combined_rgb() const;
 
 	// The witnessed cloud-scroll UV translations for a camera at
-	// (cam_x, cam_z) world units [orig: render_skybox @ 0x5791de..0x579260].
+	// (cam_x, cam_z) in the render basis the dome's UVs use (render x =
+	// -mission y, render z = mission x) [orig: Render_Skybox @ 0x5791de..0x579260].
 	CloudUvOffsets cloud_uv_offsets(float cam_x, float cam_z) const;
 	float cloud_uv_rate_per_second() const;
 

@@ -9,7 +9,6 @@
 
 #include <runtime/inmatch/wire_present.h>
 #include <runtime/world/present_rows.h>
-#include <runtime/world/tick_accumulator.h>
 
 #include "simulation/simulation.h"
 #include "object/object_data.h"
@@ -58,7 +57,7 @@ inline int32_t wfield_i(const float *p, int base, int field) {
 // over 876 mostly-static rows). Mirrors WireRow::kCtrlCacheCount (the struct
 // is class-private); the static_assert in present_one_wire_row pins the
 // mirror.
-constexpr int kCtrlLegFieldCount = 42;
+constexpr int kCtrlLegFieldCount = 55;
 
 constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_EMPLACED_CONTROLS_VALID,
@@ -106,6 +105,21 @@ constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_VEHICLE_TIRE12,
 	Simulation::PF_VEHICLE_TIRE13,
 	Simulation::PF_VEHICLE_GEAR,
+	// The focal sway the leg's wire_controls_apply also writes (a sway item
+	// under rotor wash moves every tick while its CTRL words hold still).
+	Simulation::PF_FOCAL_SWAY_VALID,
+	Simulation::PF_FOCAL_SWAY_BASIS_0,
+	Simulation::PF_FOCAL_SWAY_BASIS_1,
+	Simulation::PF_FOCAL_SWAY_BASIS_2,
+	Simulation::PF_FOCAL_SWAY_BASIS_3,
+	Simulation::PF_FOCAL_SWAY_BASIS_4,
+	Simulation::PF_FOCAL_SWAY_BASIS_5,
+	Simulation::PF_FOCAL_SWAY_BASIS_6,
+	Simulation::PF_FOCAL_SWAY_BASIS_7,
+	Simulation::PF_FOCAL_SWAY_BASIS_8,
+	Simulation::PF_FOCAL_SWAY_X,
+	Simulation::PF_FOCAL_SWAY_Y,
+	Simulation::PF_FOCAL_SWAY_Z,
 };
 
 // Compare-and-refresh one leg's input cache. Returns true when every field is
@@ -169,6 +183,21 @@ void EntityPresenter::set_render_culled(int p_handle, bool p_culled) {
 		wire_render_culled_[p_handle] = true;
 	} else {
 		wire_render_culled_.erase(p_handle);
+	}
+}
+
+void EntityPresenter::set_render_culled_inset(int p_handle, bool p_culled) {
+	if (p_culled) {
+		wire_render_culled_inset_[p_handle] = true;
+	} else {
+		wire_render_culled_inset_.erase(p_handle);
+	}
+}
+
+void EntityPresenter::set_wire_inset_view(bool p_active) {
+	wire_inset_view_ = p_active;
+	if (!p_active) {
+		wire_render_culled_inset_.clear();
 	}
 }
 
@@ -558,8 +587,10 @@ int EntityPresenter::consume_present_logic_tick_delta() {
 	}
 	const int64_t delta = now - last_present_logic_tick_;
 	last_present_logic_tick_ = now;
-	return int(MIN(delta,
-			int64_t(opennova::world::TickAccumulator::kMaxCatchupTicks)));
+	// Every logic tick the sim ran is one blend step: the remote body blend
+	// advances once per tick, like the engine's per-entity anim update
+	// (replication::ClientEntityState::rm_blend_weight), so no batch is clamped.
+	return int(delta);
 }
 
 bool EntityPresenter::wire_node_matches_row(ObjectModel *p_node,
@@ -742,6 +773,7 @@ void EntityPresenter::reset_wire_plan_state() {
 	wire_rows_.clear();
 	wire_deferred_ids_.clear();
 	wire_render_culled_.clear();
+	wire_render_culled_inset_.clear();
 	wire_remote_body_.clear();
 	wire_respawn_revisions_.clear();
 	wire_held_weapon_adm_.clear();
@@ -783,8 +815,13 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// sounds still walk the wire playhead (retail triggers them from the entity
 	// update, not the draw), and the respawn revision stays unconsumed so the
 	// reset lands on the first drawn frame. The compare-gated legs re-assert
-	// exactly what changed when the gate releases the row.
-	if (wire_render_culled_.has(row.handle)) {
+	// exactly what changed when the gate releases the row. While the weapon
+	// Inset renders its own collect decides that view, so a row either view
+	// draws runs the legs and each view takes its own verdict below.
+	const bool main_culled = wire_render_culled_.has(row.handle);
+	const bool inset_culled =
+			!wire_inset_view_ || wire_render_culled_inset_.has(row.handle);
+	if (main_culled && inset_culled) {
 		if (model->is_visible()) {
 			model->set_visible(false);
 		}
@@ -794,6 +831,10 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		// [see RenderSlot_RenderEntityAndChildren in the engine's witness map]).
 		update_wire_held_weapon(row, model, snap, false);
 		update_wire_person_overlays(row, model, snap, false);
+		// Neither view's twin may outlive the verdict either.
+		if (wire_inset_view_) {
+			apply_wire_row_views(row, model, model->is_present_visible(), true, true);
+		}
 		// A pending remote body blend is entity-update work, not draw work
 		// (retail advances it in AnimMap_UpdateEntity): keep consuming the
 		// tick delta so the blend finishes on schedule while occluded. Only a
@@ -863,8 +904,8 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		row.aim_valid = aim_valid;
 	}
 	// The CTRL/PART block is input-gated as one unit: every field all four
-	// semantic writers and both procedural part channels consume sits in
-	// kCtrlLegFields, so an unchanged set means the node's presenter-owned
+	// semantic writers, the focal sway and both procedural part channels
+	// consume sits in kCtrlLegFields, so an unchanged set means the node's presenter-owned
 	// controls and part phases are already exactly this state (the release
 	// legs included — one release is as absent as a re-released one).
 	if (!leg_inputs_unchanged(p, base, kCtrlLegFields,
@@ -948,8 +989,64 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	update_wire_held_weapon(row, model, snap, next_visible);
 	update_wire_person_overlays(row, model, snap, next_visible);
 	wire_respawn_revisions_.insert(row.handle, respawn_revision);
-	if (model->is_visible() != next_visible) {
-		model->set_visible(next_visible);
+	// Each view's collector verdict on the body and its held gun (drawn
+	// inside the body's submit): the node keeps the main view's, the Inset's
+	// rides the model's Inset state. Written on edges only, so the rows no
+	// Inset ever renders keep the one flag below.
+	apply_wire_row_views(row, model, next_visible, main_culled, inset_culled);
+	// The node flag is the product of its owner bits, so the RLOD walk's
+	// sub-pixel floor (ObjectModel::set_subpixel_hidden) and this walk agree:
+	// a wire body at or below 0.75 px is not drawn, like every placed model
+	// (renderer::object_subpixel_culled carries the witness).
+	const bool node_visible = next_visible && !main_culled && !model->is_subpixel_hidden();
+	if (model->is_visible() != node_visible) {
+		model->set_visible(node_visible);
+	}
+}
+
+void EntityPresenter::apply_wire_row_views(const WireRow &row, ObjectModel *model,
+		bool p_present_visible, bool p_main_culled, bool p_inset_culled) {
+	const auto apply = [&](ObjectModel *p_model, bool p_present) {
+		if (p_model->is_present_visible() != p_present) {
+			p_model->set_present_visible(p_present);
+		}
+		if (p_model->is_occlusion_hidden() != p_main_culled) {
+			p_model->set_occlusion_hidden(p_main_culled);
+		}
+		if (wire_inset_view_) {
+			p_model->set_inset_occlusion_hidden(p_inset_culled);
+		}
+	};
+	apply(model, p_present_visible);
+	if (const ObjectID *weapon_id = wire_held_weapon_ids_.getptr(row.handle)) {
+		if (ObjectModel *weapon =
+						Object::cast_to<ObjectModel>(ObjectDB::get_instance(*weapon_id))) {
+			// The held-weapon leg just wrote whether the gun draws at all.
+			const bool gun_drawn = weapon->is_visible();
+			apply(weapon, gun_drawn);
+			const bool gun_node = gun_drawn && !p_main_culled && !weapon->is_subpixel_hidden();
+			if (weapon->is_visible() != gun_node) {
+				weapon->set_visible(gun_node);
+			}
+		}
+	}
+	// The item overlays draw inside the body's submit too: their leg wrote
+	// the draw intent (present_visible), each view's verdict is the body's.
+	if (const Ref<PersonOverlayModels> *overlays = person_overlays_.getptr(row.handle)) {
+		for (int kind = 0; kind < PersonOverlayModels::KIND_COUNT; ++kind) {
+			for (int pass = 0; pass < PersonOverlayModels::PASS_COUNT; ++pass) {
+				ObjectModel *overlay = (*overlays)->node(kind, pass);
+				if (overlay == nullptr) {
+					continue;
+				}
+				if (overlay->is_occlusion_hidden() != p_main_culled) {
+					overlay->set_occlusion_hidden(p_main_culled);
+				}
+				if (wire_inset_view_) {
+					overlay->set_inset_occlusion_hidden(p_inset_culled);
+				}
+			}
+		}
 	}
 }
 
@@ -1158,8 +1255,9 @@ void EntityPresenter::store_wire_remote_body_cache(const WireRow &row) {
 	wire_remote_body_.insert(row.handle, cache);
 }
 
-// This body's third-person gun — retail's draw 5, for a remote player. The sim
-// already folded the draw gate in (ADM 0 = unarmed/hidden). Drawn RIGID: posed
+// This body's third-person gun — retail's draw 5, for a remote player or, on
+// the host and in SP, a seat-1 org1 rider. The sim already folded the draw gate
+// in (ADM 0 = unarmed/hidden). Drawn RIGID: posed
 // entirely by bone 16's joint plus the weapon's own attach basis. The graphic
 // resolve is edged on the ADM (get_weapon_third_person_model is a pure table
 // lookup, so an unchanged ADM cannot change the graphic); the rebuild itself —

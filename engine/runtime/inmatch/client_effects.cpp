@@ -61,8 +61,8 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
 // minimap slot. The NEAREST qualifying entry (strict < on the truncated 2D
 // distance) decides, and its Q16 coverage ((radius - dist) << 16) / radius is
 // what the caller tests, zero on the radius itself.
-// [orig: find_nearest_proximity_entity @0x5380C0 (nearest store @0x5381C6,
-//  coverage tail @0x5381F8..0x538225); caller build_shader_pass_name @0x5BF5D0 -
+// [orig: Entity_FindNearestProximityEntity @0x5380C0 (nearest store @0x5381C6,
+//  coverage tail @0x5381F8..0x538225); caller VMacros_BuildShaderPassName @0x5BF5D0 -
 //  push 7 @0x5BF918, call @0x5BF925, consumed only by the 0x10010 arm
 //  @0x5BF9D4..0x5BF9DE]
 bool in_active_radio_zone(const world::World &world, const world::Entity &speaker,

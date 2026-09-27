@@ -19,7 +19,7 @@
 //   - the armory-reuse cooldown and pre-round latch around C2S 0x2F
 //     [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790];
 //   - the 744-tick priority-target sweep [orig: EntityPool_ClearDirtyFlags @0x508E30];
-//   - the 1 Hz / accept-time kit-weight recompute [orig: recalculate_all_player_scores
+//   - the 1 Hz / accept-time kit-weight recompute [orig: Server_RecalculateAllPlayerScores
 //     @0x5014E0];
 //   - the unconditional other-row eviction of SpawnWaveList_TryQueuePlayer @0x52A490;
 //   - the C2S 0x0E Conquer & Control auto-pick rejection and the handle-0 admission

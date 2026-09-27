@@ -10,7 +10,8 @@
     runtime-fused: ADR 0030), 32 today: adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt,
     cbin, threedi, bad, def, avatars, mission, trn, cpt, til, foliage, env,
     mnu, mns, sbf, lwf, dbf, mus, grm, playersav, particle (.ptl), score, bink,
-    wac (front end; compiler/VM stay runtime).
+    wac (the bytecode/program model, the command table and help; the compiler and
+    VM are runtime).
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,

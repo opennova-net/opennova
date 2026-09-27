@@ -2,7 +2,7 @@
 
 // [orig: jodemo Terrain_LoadTileInfoFile @0x5CA730]
 // [orig: Terrain_LoadTileInfoFile @0x60a740 ('til0' magic, entries at +16, count at +4; ex kong
-//  Terrain_LoadFoliageFile); PolyTrn_LoadTileData @0x6081d0 / serialize_terrain_tiles @0x6080f0 are
+//  Terrain_LoadFoliageFile); PolyTrn_LoadTileData @0x6081d0 / Terrain_SerializeTiles @0x6080f0 are
 //  the network form; the overlay render is PolyTrn_RenderTile @0x60df0d, docs/tiles/til-re.md]
 
 #include <base/io/le.h>

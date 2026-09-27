@@ -126,7 +126,7 @@ func test_interior_parts_carry_the_authored_light_transfer_as_instance_state() -
 	# uniform on top of the pass-global lighting block, so a material index
 	# shared across that boundary stays one material.
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30 (the model+536 daylight
-	#  push per visible building); setup_entity_lighting_and_shader_constants
+	#  push per visible building); Render_SetupEntityLightingAndShaderConstants
 	#  @ 0x5d98a0]
 	var m := ObjectModel.new()
 	add_child_autofree(m)

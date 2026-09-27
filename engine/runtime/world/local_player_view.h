@@ -61,7 +61,7 @@ struct LocalPlayerViewTracker {
     float tick_delta[3] = {0.0f, 0.0f, 0.0f};
     float tick_prev_pos[3] = {0.0f, 0.0f, 0.0f};
     bool tick_prev_valid = false;
-    // The death stamp's edge detector [orig: g_camera_lerp_start_tick =
+    // The death stamp's edge detector [orig: g_CameraLerpStartTick =
     // current_tick on the local death path @0x4b4d00 / @0x42ec0f].
     bool camera_local_dead_seen = false;
     // The last composed view: retail's g_view_pos / g_view_rot, which every
@@ -92,7 +92,7 @@ struct LocalViewSessionInputs {
     int death_screen_submode = 0;
     bool end_round_known = false;
     // The folded S2C 0x1D header's winner team (0 before any header)
-    // [orig: NapiNPClientMsg_0x01D @0x430840 -> g_endround_winner_team].
+    // [orig: NapiNPClientMsg_0x01D @0x430840 -> g_EndRoundWinnerTeam].
     int32_t end_round_winner_team = 0;
     bool local_dead = false;
     // The joiner's death-camera triple is only meaningful with a live
@@ -110,8 +110,8 @@ struct LocalViewSessionInputs {
 // (iff its def is optical, Flags & 3), the fov target back to 80 degrees, and
 // the two binocular clears. `world` may be null (no fov channel to write).
 // [orig: Player_ResetCameraAndMovementState @0x4DE1F0: fov @0x4de202, the
-//  rebind @0x4de287..0x4de2a7, g_binocularsViewActive = 0 @0x4de2ad,
-//  g_binocularsToggle = 0 @0x4de2b3]
+//  rebind @0x4de287..0x4de2a7, g_BinocularsViewActive = 0 @0x4de2ad,
+//  g_BinocularsToggle = 0 @0x4de2b3]
 void local_player_camera_reset(World *world, const LocalPlayerWeapon &w, PlayerViewState &v);
 
 void local_player_view_reset(World *world, LocalPlayerWeapon &w,
@@ -218,9 +218,9 @@ void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimi
 // The weapon-cycle actions' dispatcher leg [orig: Input_HandleActionBinding_0
 // cases 0xD4 (212, cycleweaponP "Cycle Weapon Prev": +1 / +2) / 0xD6 (214,
 // cycleweaponN "Cycle Weapon Next": -1 / -2) @0x4e130c..0x4e13ae]: refused while
-// the binocular view is up or a PowerThrow charge is live (g_fireChargeStartTick);
+// the binocular view is up or a PowerThrow charge is live (g_FireChargeStartTick);
 // on an equipped def whose scope_min_mag != scope_max_mag while the optical view
-// is up (Player_CanFireWeapon) the action steps the zoom by +2 / -2 in place of a
+// is up (Player_IsOpticalViewVisible) the action steps the zoom by +2 / -2 in place of a
 // cycle; otherwise the caller runs Player_CycleWeaponSlot(direction)
 // (weapon_cycle_slot). Action 215 (0xD7) is the bare step -- its fifth argument
 // picks -2 / +2 -- and calls local_player_adjust_scope_zoom directly.
@@ -256,7 +256,7 @@ int local_player_max_health(const World &world);
 // input and turn the charge into an unintended release) and while a scope is
 // engaged in a gunner seat. The render latch in LocalPlayer::present_view_frame
 // owns the displacement and PRNG draw. Returns the new requested state (false
-// also = refused). [orig: g_fireChargeStartTick @0xB76800; the action 26 gate]
+// also = refused). [orig: g_FireChargeStartTick @0xB76800; the action 26 gate]
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
                                     PlayerViewState &v, LocalPlayerViewTracker &t);
 
@@ -303,7 +303,7 @@ inline Vec3 player_eye_position(const Entity &entity) {
 // resolved camera mode and its gates, the NoCardSwitch bias suppression, the
 // SIGHTS-card selector, the fov, the chase anchor, and the composed camera
 // pose (the shell converts frames and stamps the Camera3D node).
-// [orig: g_camera_mode @0xA890C8; Player_UpdateFirstPersonCamera @0x4dd439;
+// [orig: g_CameraMode @0xA890C8; Player_UpdateFirstPersonCamera @0x4dd439;
 //  Player_IsReloadingCardSwitchWeapon @0x4dcdd0; Render_ProcessMainSceneFrame
 //  @0x5ca299..0x5ca304; Camera_ComputeThirdPersonView @0x437d10 — the
 //  MOUNTED local eye leg @0x4b6908 re-anchored to the live position]
@@ -311,7 +311,7 @@ struct LocalPlayerViewFrame {
 	HudCombatView hud_combat;
 	// Separate scene camera: Inset consumes another shake sample and
 	// its own slot-zero offsets after the main scene has sampled its camera.
-	// [orig: Render_RadarCompassOverlay @0x5C9841..0x5C9903]
+	// [orig: Render_WeaponInsetScene @0x5C9841..0x5C9903]
 	bool inset_scope_active = false;
 	PlayerCameraPose inset_camera;
 	float inset_fov_over_zoom = 0;
@@ -329,8 +329,8 @@ struct LocalPlayerViewFrame {
     // HUD_BuildEntityInfo @0x4B8440 and HUD_RenderOverlays @0x5A7BB0.
     int hud_stance = 0, hud_mount_slot = 0, hud_weapon_category = 0;
     bool hud_keep_crosshair_while_aimed = false;
-    bool scope_engaged = false; // the TARGET (g_scopeEngaged)
-    bool scope_settled = false; // the PROMOTED byte (g_weaponScopeActive)
+    bool scope_engaged = false; // the TARGET (g_ScopeEngaged)
+    bool scope_settled = false; // the PROMOTED byte (g_WeaponScopeActive)
     bool binoculars_requested = false;
     bool binoculars_raised = false;
     bool binoculars_view_active = false;
@@ -354,7 +354,7 @@ struct LocalPlayerViewFrame {
     // `thermal_terrain_view` is the def bit in first person alone, the
     // terrain-ramp gate. The only shipped trigger is WPN_EMP50BD (Emplaced +
     // Thermal + ForceScoped), on which the two coincide.
-    // [orig: Render_ProcessMainSceneFrame @0x5ca290 (Player_CanFireWeapon)
+    // [orig: Render_ProcessMainSceneFrame @0x5ca290 (Player_IsOpticalViewVisible)
     //  -> @0x5ca2da..0x5ca2e3 (the latch), read @0x5ca363;
     //  CTerrainRenderer_BuildLightingShaderConstants @0x5c837c..0x5c8389;
     //  Render_TerrainScene @0x610e51..0x610e5b]
@@ -441,8 +441,15 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
 // The RENDERED frame: the view read plus the main scene's compose and, with
 // the Inset scene up, its second compose and slot offsets. Advances the
 // composition state; the presenter's per-frame leg is its one live caller.
-// [orig: Render_ProcessMainSceneFrame @0x5CA34D; Render_RadarCompassOverlay
-//  @0x5C9841..0x5C9903]
+// Each pose serves the pass of the frame that composed it: the Inset pass
+// composes its camera inside itself, after the main scene and right before
+// its own scene, so everything that pass draws reads this frame's Inset pose
+// and the frame's own verdict on whether the pass renders; an embedder
+// places both cameras before any leg of either pass reads them.
+// [orig: Render_ProcessMainSceneFrame @0x5CA34D (the main compose), the
+//  Inset gate @0x5CA290..0x5CA2C5 and call @0x5CA949 after the main scene
+//  @0x5CA8EC; Render_WeaponInsetScene @0x5C9841..0x5C9903 (its compose and
+//  slot offsets), @0x5C997F (its view) and @0x5C9DE9 (its scene)]
 void local_player_view_frame(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
                              LocalPlayerViewTracker &t, LocalPlayerViewFrame &out);
 

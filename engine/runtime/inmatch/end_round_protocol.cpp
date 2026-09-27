@@ -57,9 +57,9 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 		EndRoundPlayerRow row;
 		row.slot = player.identity.slot;
 		// The producer first stores these in 32/16/16-byte fixed buffers. The
-		// second string is ALWAYS g_empty_str (@0x5090E3); the third is the
+		// second string is ALWAYS g_EmptyStr (@0x5090E3); the third is the
 		// NovaWorld clan-list node tag when the slot's account netId finds one
-		// (CLinkedList_FindByTag @0x509100), else g_empty_str.
+		// (CLinkedList_FindByTag @0x509100), else g_EmptyStr.
 		// [orig: Server_BuildEndOfRoundScoreboard @0x5090D3..@0x509116]
 		row.name = capped(player.identity.name, 31);
 		row.clan.clear();
@@ -87,7 +87,7 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 	}
 	// The trailing matrix is NOT gated on the active-column flags: every
 	// configured column is filled and written for every team row
-	// (g_scoreTeamCount words per row), while the declared count byte above
+	// (g_ScoreTeamCount words per row), while the declared count byte above
 	// stays the ACTIVE count. Column id 5 reads the TeamRecord hold word
 	// (+0x150) directly; every other id resolves through
 	// CPlayerStats_GetFieldByIndex on the team stats. The score table is
@@ -95,7 +95,7 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 	// narrows it. [orig: Server_BuildEndOfRoundScoreboard — the fill
 	// @0x5092D0..0x509327 (id 5 @0x5092E5..0x5092E7, GetFieldByIndex
 	// @0x5092F3), the write @0x509581..0x5095CC (no Block[] gate);
-	// load_scoring_table_for_game_type @0x508FE5 -> @0x52D3F8..0x52D42C]
+	// ScoreConfig_LoadScoringTableForGameType @0x508FE5 -> @0x52D3F8..0x52D42C]
 	const size_t team_row_count = std::min<size_t>(
 			result.team_row_count, result.team_stats.size());
 	out.team_rows.resize(team_row_count);

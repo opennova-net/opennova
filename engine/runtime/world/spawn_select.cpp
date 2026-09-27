@@ -172,7 +172,7 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
 // The picked-zone placement [orig: Server_ResolveSpawnTargetHandle @0x4FE110 and
 // the Server_ProcessClientRequestRespawn placement it feeds -- net-re §5.61: the
 // first-32 radius-gated type-6007 scatter markers within the zone, the shared
-// g_spawn_cycle_counter % (count+1) round-robin (0 = the zone entity itself, else
+// g_SpawnCycleCounter % (count+1) round-robin (0 = the zone entity itself, else
 // the (i-1)th 6007 marker parent-transformed), and the +0x10000 no-userpoint z arm].
 // The runtime-set model-userpoint name remains unrecovered; retain the exact
 // no-userpoint +1 z arm rather than inventing a name.
@@ -567,7 +567,7 @@ void SpawnWaveList::reset_on_zone_team_change(const World &world,
 
 const Entity *ZoneSystem::find_spawn_zone_for_team(uint8_t team, uint32_t game_type_value) const {
     const World &world = world_;
-    // [orig: find_spawn_entity_for_team @0x4fc810 — both branches walk the
+    // [orig: Spawn_FindEntityForTeam @0x4fc810 — both branches walk the
     //  sorted SpawnZoneList (SpawnZoneList_GetByIndex @0x43B930)]
     const SpawnZoneRegistry list = build_spawn_zone_list();
     if (game_type::is_objective(game_type_value)) {

@@ -408,7 +408,7 @@ bool run_owner_devices_live_until_the_deploy() {
 	ctx.np_protocol.connection_list.push_back(std::move(leaver));
 	const w::EntityHandle mine = place_device(world, owner, 0);
 	world.out.entity_events.clear();
-	if (!expect(inmatch::drop_connection(ctx, leaver_peer), "the leaver's connection drops"))
+	if (!expect(inmatch::destroy_connection(ctx, leaver_peer, nullptr), "the leaver's connection drops"))
 		return false;
 	return expect(world.registry.get(mine) == nullptr && world.registry.get(owner) == nullptr &&
 			queued_removals(world) == (std::vector<uint16_t>{mine.packed}),

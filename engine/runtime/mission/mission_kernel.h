@@ -38,6 +38,7 @@
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/particle/effect_catalog_names.h>
+#include <runtime/renderer/precipitation_frame.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -210,6 +211,22 @@ public:
 	bool boot(const KernelBootOptions &options, std::string &error);
 	std::vector<std::string> boot_trace;
 
+	// --- the cross-mission carry ---------------------------------------------
+	// A load swaps in a fresh kernel (ADR 0042 d3); the embedder hands this
+	// fresh kernel the one it retires, and the pieces that survive the swap
+	// come across: the seat/mount table (moved out: it installs before mission
+	// promotion — the wire-header join prewarms it pre-load) and its graphic
+	// sources, the player's mouse settings and scoped aim oscillators, the
+	// declared half of the script's mission-variable bank (the retail bank is
+	// process-global and no load path zeroes the compiler-declared slots, so a
+	// restart or the next mission reads slot n at the previous run's value;
+	// V# and G# start at zero per load, ScriptVarStore::carry_declared_from),
+	// and the entity-update counter (process-global and never reset: the next
+	// mission's staggers continue its phase [orig: g_EntityUpdateCounter,
+	// whose one writer is Entity_UpdateAllEntities @0x4C2639]), and the
+	// precipitation drawer's memory (precipitation_draw).
+	void carry_across_load_from(MissionKernel &previous);
+
 
 	// --- the weather tick (ADR 0042 d2: ONE engine function) ------------------
 	// The retail weather tick after the logic tick [orig:
@@ -234,8 +251,14 @@ public:
 	// The precipitation pool's per-render update for a camera at (x, y, z)
 	// mission 16.16: the wrap into the camera volume and the re-floor of every
 	// wrapped drop on terrain / water / the first entity under it
-	// [orig: update_weather_particle_positions @ 0x5dec40 from the drawer].
+	// [orig: WeatherParticle_UpdatePositions @ 0x5dec40 from the drawer].
 	void update_precipitation(int32_t cam_x, int32_t cam_y, int32_t cam_z);
+	// The precipitation drawer's call-to-call memory, the last call's camera
+	// mode and position (renderer/precipitation_frame.h PrecipitationDrawState):
+	// retail keeps it in zero-initialized data only the drawer writes, so it
+	// crosses every load (carry_across_load_from) and the next mission's first
+	// rainy call measures from the previous mission's last camera.
+	renderer::PrecipitationDrawState precipitation_draw;
 
 	// --- the per-tick legs a session frame orders around its pump -----------
 	// Ground every soldier that appeared since the previous sweep on its OWN

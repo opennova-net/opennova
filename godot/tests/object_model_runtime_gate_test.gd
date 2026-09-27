@@ -89,7 +89,7 @@ func test_entity_lighting_context_stamps_every_surface_instance() -> void:
 	# pass-global lighting block. Here they are ONE instance uniform, written
 	# on every surface instance at each context edge, never per frame, and
 	# instances recreated by a rebuild come up already stamped.
-	# [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
+	# [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0]
 	var expected := Vector4(0.25, 1.0, 0.4, 0.0)
 	var rigid := _spy_model(PMP_3DI)
 	rigid.set_entity_lighting_context(0.25, true, 0.4)
@@ -146,7 +146,7 @@ func test_gameplay_keeps_the_editor_local_lght_uniforms_disabled() -> void:
 	model.set_object_data(data)
 	var materials: Array = model.get_surface_materials()
 	if materials.is_empty():
-		pass_test("fixture built no surface materials under this renderer")
+		pending("fixture built no surface materials under this renderer")
 		return
 	var material := materials[0] as ShaderMaterial
 	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
@@ -194,7 +194,7 @@ func test_dynamic_material_typed_runtime_matches_public_evaluator() -> void:
 func test_glass_static_colour_reaches_reflect_color_as_a_vec4_with_w_one() -> void:
 	# armory material 4 is FFP_GLASS with is_glass 1 and the stock 0x80808000
 	# colour. The routed static colour is ReflectColor (R, G, B) / 255 with W
-	# forced to 1 (apply_shader_parameters, retail), and it must be the vec4
+	# forced to 1 (Material_ApplyShaderParameters, retail), and it must be the vec4
 	# the Q3 glass copy reads, not a Color with the authored zero alpha.
 	var model := ObjectModel.new()
 	add_child_autofree(model)
@@ -482,7 +482,7 @@ func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -
 		# Entity ground shadows drape TERRAIN ONLY: retail's render-slot
 		# patches are terrain-following meshes, so a live silhouette never
 		# lands on another model (RenderSlot_DrawAllDrapes @0x5d6e20 /
-		# render_sector_model @0x5d5ca0 — docs/render/render-lighting-re.md).
+		# RenderSlot_DrawSilhouetteDrape @0x5d5ca0 — docs/render/render-lighting-re.md).
 		# The drape next pass lives on the terrain material (SlotShadow).
 		assert_null((material as ShaderMaterial).next_pass,
 				"world-model materials carry no shadow-receiver next pass")

@@ -16,7 +16,7 @@ namespace opennova::hud {
 // the drawer puts box corners and text through the same integer scaler every
 // other hudpos coordinate uses [orig: Viewport_ScaleToVirtualCoords @0x5d2b20;
 // the text path @0x5d3f30/@0x5d3ec0], which is `hud::scale_axis` here. All of
-// the board's text rides g_hudLabelFontBold [orig: every HUD_DrawTextAligned (ex sub_5D3F30) /
+// the board's text rides g_HUDLabelFontBold [orig: every HUD_DrawTextAligned (ex sub_5D3F30) /
 // HUD_DrawTextAtVirtualPos site in the drawer passes @0xB4C394].
 
 // The panel rect, as CORNERS (not extents)
@@ -79,7 +79,7 @@ inline constexpr int kFooterX = 502;
 inline constexpr int kFooterY = 510;
 
 // Packed ARGB. The rank is a literal yellow the drawer pushes directly
-// [orig: -256 @0x4241b0]; the two team colors are g_hudColorTable[3] and [5]
+// [orig: -256 @0x4241b0]; the two team colors are g_HUDColors[3] and [5]
 // — the cells 0x24c1844 / 0x24c184c the scheme writer fills
 // [orig: HUD_InitTeamColorTable @0x51f240, stores @0x51f26d/@0x51f259].
 inline constexpr uint32_t kRankColor = 0xFFFFFF00u;
@@ -97,7 +97,7 @@ inline constexpr uint32_t kTeamDColor = 0xFFFF027Fu;
 // the blink masks read [orig: Game_TickHudFrameCounters @0x434c14
 // ++dword_A87060] — and the 3/4 page swaps in kTeamC/DColor
 // [orig: HUD_DrawKillList @0x423cd0-0x423cf1: esi=1/edi=2 with the palette
-// pair, then `g_num_teams_config > 2 && (dword_A87060 & 0x80)` -> esi=3,
+// pair, then `g_NumTeamsConfig > 2 && (dword_A87060 & 0x80)` -> esi=3,
 // edi=4, ecx=0xFFFFFF00, edx=0xFFFF027F].
 struct ScoreboardTeamPage {
 	uint8_t team_a = 1;
@@ -144,7 +144,7 @@ struct ScoreboardEntry {
 // finally a trailing `S` for bit 0x400 AFTER the bracket
 // [orig: the append chain @0x423ef1-0x4240e8; " [" @0x423f1c, "]" @0x4240c8].
 // Retail's append runs under the per-recipient SU gate
-// [orig: g_scoreboardStatusSuffixEnabled test @0x423ef8] and, when that gate
+// [orig: g_ScoreboardStatusSuffixEnabled test @0x423ef8] and, when that gate
 // is ON, a zero word still yields the empty bracket pair " []". The gate is
 // an unported residual (D-HUD-24); until it lands, "zero word, no suffix"
 // reproduces the gate-OFF default exactly (the parser zeroes every word when
@@ -171,7 +171,7 @@ int scoreboard_column_x(const ScoreboardEntry &e, bool non_team, int ordinal,
 // The row's color: team modes take the team palette, non-team rows and
 // spectators take the active HUD color (passed in, since the scheme is a
 // client setting rather than wire data)
-// [orig: g_hudActiveColor @0x423d00/@0x423df8; the palette picks @0x423cb9].
+// [orig: g_HUDColors.active @0x423d00/@0x423df8; the palette picks @0x423cb9].
 uint32_t scoreboard_row_color(const ScoreboardEntry &e, bool non_team,
                               uint32_t hud_color,
                               const ScoreboardTeamPage &page = ScoreboardTeamPage{});

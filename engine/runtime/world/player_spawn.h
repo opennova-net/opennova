@@ -77,7 +77,7 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn);
 // uplinks (replication EntityWireBridge::apply_player_intent) and the motor skips once the entity is
 // net-snapped. Pass a distinct net_id per joiner (the default 0xFFF0 is the host's own player).
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0 registers a
-// joined player's entity without assigning g_local_player_entity; net-re §5.2a/§5.2b.]
+// joined player's entity without assigning g_LocalPlayerEntity; net-re §5.2a/§5.2b.]
 EntityHandle spawn_remote_player(World &world, const PlayerSpawn &spawn);
 
 } // namespace opennova::world

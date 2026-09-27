@@ -51,6 +51,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <base/io/strutil.h>
 #include <runtime/particle/emitter.h>
 #include <runtime/renderer/particle_atlas.h>
 #include <runtime/renderer/particle_color.h>
@@ -99,14 +100,6 @@ using opennova::particle::BlendMode;
 using opennova::particle::CurveRef;
 using opennova::particle::GraphicLayer;
 using opennova::particle::Particle;
-
-std::string lower_ascii(std::string value) {
-	for (char &c : value) {
-		if (c >= 'A' && c <= 'Z')
-			c = static_cast<char>(c - 'A' + 'a');
-	}
-	return value;
-}
 
 Ref<Image> load_particle_image(const Callable &provider,
 		const String &texture_dir, const std::string &name) {
@@ -685,9 +678,9 @@ public:
 	float mirror_fog_end = 100000.0f;
 	std::int32_t mirror_fog_type = 1;
 	// The manager's two per-frame particle tints (retail byte 128 = 1.0):
-	// +0x3E8 = Env_TerrainLightCombined for AMBIENTCOLOR emitters, +0x3F0 =
+	// +0x3E8 = g_EnvTerrainLightCombined for AMBIENTCOLOR emitters, +0x3F0 =
 	// the modulator block doubled+saturated for the rest
-	// (retail render_emitter_effect @ 0x5f70c0; CParticleEmitter_AdvanceFrame
+	// (retail Render_EmitterEffect @ 0x5f70c0; CParticleEmitter_AdvanceFrame
 	//  @ 0x5e6600..0x5e661c selects into emitter+200). Neutral until an
 	// environment source is attached.
 	std::array<float, 3> ambient_tint{1.0f, 1.0f, 1.0f};
@@ -739,6 +732,10 @@ public:
 		// The mirror's reflected scene draws only its coronas after its
 		// particle passes.
 		reflection_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
+		// The second scene view is the weapon Inset pass: its tail draws its
+		// own corona walk and no glare (runtime/renderer/scene_overlay.h
+		// kInsetOverlayOrder).
+		second_scene_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_INSET);
 		// The distortion subset draws inside FrameFX's type-0 row through the
 		// drawer, never as a camera compositor pass.
 		distortion_drawer->set_particle_effect(distortion_effect);
@@ -989,7 +986,7 @@ public:
 		auto mark_unresolved = [&](const std::string &name) {
 			if (name.empty())
 				return;
-			const std::string key = lower_ascii(name);
+			const std::string key = opennova::strutil::to_lower(name);
 			if (unresolved_lookup.insert(key).second)
 				unresolved_names.push_back(name);
 		};
@@ -997,7 +994,7 @@ public:
 		auto register_frame = [&](const std::string &name,
 				std::uint8_t type) -> std::size_t {
 			const std::string key = std::to_string(static_cast<int>(type)) +
-					"|" + lower_ascii(name);
+					"|" + opennova::strutil::to_lower(name);
 			const auto found = entry_lookup.find(key);
 			if (found != entry_lookup.end())
 				return found->second;

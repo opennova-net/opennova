@@ -34,22 +34,22 @@ void before_server_tick(void *context) {
 HostRole::HostRole() = default;
 
 HostRole::HostRole(RoleKind kind,
-		replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver)
-		: kind_(kind), item_class_resolver_(std::move(item_class_resolver)) {}
+		std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog)
+		: kind_(kind), item_catalog_(std::move(item_catalog)) {}
 
 // The boot hook's bring-up: the staged record through the general bring-up
-// (the HostClient view follows on serve-and-play, taking the resolver this
+// (the HostClient view follows on serve-and-play, taking the catalog this
 // role holds).
 bool HostRole::bring_up() {
 	bring_up(staged_bringup_);
 	return false;
 }
 
-void HostRole::set_item_class_resolver(
-		replication::ClientReplicaPipeline::ItemClassResolver resolver) {
-	item_class_resolver_ = std::move(resolver);
-	if (state.client_runtime && item_class_resolver_)
-		state.client_runtime->view().set_item_class_resolver(item_class_resolver_);
+void HostRole::set_item_catalog(
+		std::shared_ptr<const replication::ItemReplicationCatalog> catalog) {
+	item_catalog_ = std::move(catalog);
+	if (state.client_runtime && item_catalog_)
+		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
 // The shared bring-up preamble: a fresh loopback + owner over the kernel's
@@ -67,8 +67,12 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	state.host_owner.ctx.mission_text_loaded = false;
 	kernel.world.rules.fat_bullets = config.fat_bullets;
 	kernel.world.rules.one_shot_kill = config.one_shot_kill;
+	// The mission-data block's unlimited-vehicles word, rebuilt from the host
+	// config at every mission start [orig: Client_BuildMissionDataRequestBlock
+	// @0x51E8C5..0x51E8CB from dword_24D2258 = unlimitedVehicles_4D0].
+	kernel.world.rules.vehicle_respawns = config.unlimited_vehicles;
 	// The mpattrib word's 0x10000 bit the scope-zero -1 floor reads in session
-	// [orig: `test g_rules_flags,10000h` @0x4dbd15; g_rules_flags @0x24D1E34 is
+	// [orig: `test g_RulesFlags,10000h` @0x4dbd15; g_RulesFlags @0x24D1E34 is
 	// the host's mpattrib word, the S2C 0x64 +44 dword on a joiner].
 	kernel.world.rules.mpattrib = config.mp_attributes;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
@@ -78,7 +82,7 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 			(config.mp_attributes & GameConfig::kMpAttribNoFriendlyFire) != 0;
 	// The is_mp_session_peer bit is the is_client half of the connection
 	// mode: set for the SP/listen HostClient, clear for a HostOnly dedicated
-	// host. [orig: g_napi_np_ctx +0x64; napi_np_server_ctx.h connection modes]
+	// host. [orig: g_NapiNPCtx +0x64; napi_np_server_ctx.h connection modes]
 	kernel.world.rules.mp_session_peer = serve_and_play;
 }
 
@@ -91,8 +95,8 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
-	if (item_class_resolver_)
-		state.client_runtime->view().set_item_class_resolver(item_class_resolver_);
+	if (item_catalog_)
+		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
 GameConfig singleplayer_game_config(uint32_t game_type) {
@@ -245,7 +249,7 @@ void HostRole::run_tick(const TickInput &input) {
 	// client's death-screen latch, folded at the end of the previous frame as
 	// retail's client receive sets it at the head of this one.
 	// [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
-	//  `cmp g_death_screen_active,0` @0x526713]
+	//  `cmp g_DeathScreenActive,0` @0x526713]
 	kernel.world.cached.peer_death_screen = state.host_owner.ctx.is_mp_session_peer != 0 &&
 			state.client_runtime != nullptr && state.client_runtime->state().death_screen_active;
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
@@ -295,6 +299,11 @@ void HostRole::run_tick(const TickInput &input) {
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;
 	if (kernel.world.profile != nullptr)
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);
+}
+
+void HostRole::observe_frame_rate(int32_t fps) {
+	Role::observe_frame_rate(fps);
+	state.host_owner.ctx.stats_avg_fps = fps;
 }
 
 bool HostRole::session_lost(SessionError &error) const {

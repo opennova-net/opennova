@@ -7,9 +7,9 @@
 // rect solves live here.
 //
 // [orig: the frame pass CUIElement_DrawFrame @ 0x64a210 over the
-// init_border_materials @ 0x646f70 tile grid; the three-stage POSITION parse
+// CUIElement_InitBorderMaterials @ 0x646f70 tile grid; the three-stage POSITION parse
 // tail in CUIElement_ParseXMLDefinition @ 0x648120 ending in
-// adjust_rect_to_text_size @ 0x6575f0 (via the shared text-widget parse
+// CStaticWnd_AdjustRectToTextSize @ 0x6575f0 (via the shared text-widget parse
 // @ 0x657c30 and the edit override @ 0x661d10); the spin up/down child
 // windows CSpinListWnd_CreateUpDownChildren @ 0x64b8b0; the ITEM color parse
 // CUISpinList_ParseXMLDefinition @ 0x64bd10 + CSpinListWnd_Render @ 0x64b220.]
@@ -27,7 +27,7 @@ namespace opennova::mnu {
 // One tile of the SIZE x SIZE stencil grid (canonically 4*SIZE on a side):
 // row 0 = TL / top edge / TR (+ the fill tile at column 3), row 1 = left /
 // right edges (columns 0 and 2), row 2 = BL / bottom edge / BR
-// [orig: init_border_materials @ 0x646f70 slices these UV rects].
+// [orig: CUIElement_InitBorderMaterials @ 0x646f70 slices these UV rects].
 struct FrameTileRect {
 	int x = 0;
 	int y = 0;
@@ -87,7 +87,7 @@ int appearance_extent_height(bool has_height, int height, int texture_height);
 // and the edit override @ 0x661d10].
 bool window_type_is_text_sized(WindowType t);
 
-// Stage 3 [orig: adjust_rect_to_text_size @ 0x6575f0]: a still-degenerate
+// Stage 3 [orig: CStaticWnd_AdjustRectToTextSize @ 0x6575f0]: a still-degenerate
 // axis sizes from the measured string, with the authored point as the anchor
 // the JUSTIFY/VJUSTIFY flags align to ("center" -> centred on it, "right"/
 // "bottom" -> trailing edge stays at it, anything else -> leading edge).

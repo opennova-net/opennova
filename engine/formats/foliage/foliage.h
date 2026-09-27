@@ -10,7 +10,7 @@ namespace opennova {
 // Foliage-def sync into placement/render globals and the world->foliagemap helpers.
 // [orig: jodemo Foliage_BuildPatchData @0x5C0240, Terrain_GetFoliageMapValue @0x5C65E0]
 // [orig: Foliage_SampleFoliageMapMask @0x606620; Foliage_GenerateModelTileInstances @0x600980;
-//  generate_foliage_instances_0 @0x5ffdd0 — the retail map sampler and the two tier builders]
+//  Foliage_GenerateInstances_0 @0x5ffdd0 — the retail map sampler and the two tier builders]
 
 constexpr int FOLIAGE_MAX_DEFS = 4;
 constexpr int FOLIAGE_HEIGHTMAP_SIZE = 1024;

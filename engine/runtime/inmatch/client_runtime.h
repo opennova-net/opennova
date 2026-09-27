@@ -8,7 +8,6 @@
 #include <runtime/inmatch/session_transport.h>        // ISessionTransport
 
 #include <net/npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
-#include <base/io/tick_rate.h>            // kTicksPerSecondInt (the default frame-rate sample)
 
 #include <cstddef>
 #include <cstdint>
@@ -228,8 +227,8 @@ public:
 	// caller's sender picked (retail's per-key senders: 2 global, 1 team on a
 	// peer, 12 squad on a peer, 11 admin, 13 the squad-alt key; 4 all / 5 team
 	// exist only for a non-peer, so a joiner drops them). The retail sender
-	// gates: in session, non-empty, `!g_death_screen_active || g_spawn_success_
-	// gate` (the admin key: `!g_death_screen_active` alone), the 1280 ms
+	// gates: in session, non-empty, `!g_DeathScreenActive || g_spawn_success_
+	// gate` (the admin key: `!g_DeathScreenActive` alone), the 1280 ms
 	// per-identical-line flood table, then the `<...>` strip; queued reliable
 	// with the 310-flush finite lifetime. False = gated/flooded, nothing sent.
 	// [orig: Chat_SendGlobalMessage @0x49A6B0, Chat_SendAdminMessage
@@ -237,9 +236,12 @@ public:
 	//  Chat_SendSquadMessage @0x49AA50, sub_49ABA0 @0x49ABA0,
 	//  Chat_SendAllMessage @0x49AC70 -> CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
 	bool queue_chat_message(uint8_t channel, const std::string &text);
-	// The embedder's measured frame rate for the quality metric's frame-pressure
-	// term [orig: dword_24E1F10]; the default is the logic rate (no pressure —
-	// any rate at or above 16 scores the floor). Joiner only.
+	// The main loop's measured frame rate for the quality metric's
+	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
+	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its
+	// FR counter once per banked frame (Role::observe_frame_rate). 0 is
+	// retail's mode-init value (the ceiling metric 255) until the first 2 s
+	// window closes; any rate at or above 16 scores the floor. Joiner only.
 	void set_observed_frame_rate(int32_t fps) { observed_frame_rate_ = fps; }
 	// The bucketed 0..4 quality level the C2S 0x4C report carries and the
 	// client's own ping readings (0 before the first completed round trip).
@@ -550,7 +552,7 @@ public:
 		return authoritative_loadout_;
 	}
 	// The last S2C 0x0F ammo-pool image (the authority's serverPlayer+88664 copy
-	// retail lands in g_localAmmoPools) and its monotonic revision; the embedder
+	// retail lands in g_LocalAmmoPools) and its monotonic revision; the embedder
 	// applies it to the local inventory after the 0x5A slot rebuild.
 	uint64_t authoritative_ammo_pools_revision() const {
 		return authoritative_ammo_pools_revision_;
@@ -595,7 +597,7 @@ private:
 	// The client-side 1 Hz revive countdown over the roster: every 63rd frame
 	// each active slot with an entity and a nonzero revive window loses one
 	// second [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA —
-	// g_slotRefreshTimer > 62 -> PlayerSlot_SetDownedState(slot+0x10 - 1,
+	// g_SlotRefreshTimer > 62 -> PlayerSlot_SetDownedState(slot+0x10 - 1,
 	// slot+0x2C) per slot, then the timer resets to 0]. The host's own
 	// loopback view runs it too (retail's client frame is role-agnostic).
 	void tick_roster_revive_countdown();
@@ -645,20 +647,20 @@ private:
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT
 	// emits and the send-holdoff send-block gate, deferred-and-logged at P5, ported here. ---
-	uint32_t current_tick_ = 0;          // [orig: currentTick @0xA8229C] bumped once per run_frame
-	uint32_t slot_refresh_frames_ = 0;   // [orig: g_slotRefreshTimer @0xA85B80] the 1 Hz revive countdown
-	uint32_t last_keepalive_tick_ = 0;   // [orig: g_lastKeepaliveTick @0xA822A0] 0x34 send latch
-	uint32_t net_quality_timer_ = 0;     // [orig: g_netQualityReportTimer @0xA85B84] 0x4C cadence
-	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
+	uint32_t current_tick_ = 0;          // [orig: g_ClientCurrentTick @0xA8229C] bumped once per run_frame
+	uint32_t slot_refresh_frames_ = 0;   // [orig: g_SlotRefreshTimer @0xA85B80] the 1 Hz revive countdown
+	uint32_t last_keepalive_tick_ = 0;   // [orig: g_LastKeepaliveTick @0xA822A0] 0x34 send latch
+	uint32_t net_quality_timer_ = 0;     // [orig: g_NetQualityReportTimer @0xA85B84] 0x4C cadence
+	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_Tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
 	                                     // and decremented, but never compared in @0x42C180;
 	                                     // vestigial/telemetry state, not a send throttle.
-	uint8_t  net_quality_ = 0;           // [orig: g_netQuality byte @0x82BF88] the 0..4 level
+	uint8_t  net_quality_ = 0;           // [orig: g_NetQuality byte @0x82BF88] the 0..4 level
 	                                     // CNetQuality_SetLevel folds every 62 frames; 0 = best
 	// The client (RECEIVE) window of the CNetQuality object and its inputs
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0, the `is_mp_session_peer &&
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.
 	replication::NetQualityWindow client_quality_window_;
-	int32_t observed_frame_rate_ = io::kTicksPerSecondInt; // [orig: dword_24E1F10]
+	int32_t observed_frame_rate_ = 0;                    // [orig: dword_24E1F10, 0 @0x52B727]
 	int32_t quality_update_countdown_ = 62;              // [orig: dword_24D1DDC]
 	std::array<ChatFloodEntry, 16> chat_flood_{};       // [orig: @0xB3B788]
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)

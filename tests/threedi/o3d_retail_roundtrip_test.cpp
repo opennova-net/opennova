@@ -28,21 +28,12 @@
 #include <formats/threedi/threedi_3di3.h>
 
 #include "common/retail_paths.h"
+#include "common/run_command.h"
 
 namespace {
 
-int run(const std::string &cmd) {
-	std::fflush(stdout);
-#ifdef _WIN32
-	// cmd.exe strips one pair of outer quotes: wrap the whole command.
-	const std::string line = "\"" + cmd + "\"";
-	return std::system(line.c_str());
-#else
-	return std::system(cmd.c_str());
-#endif
-}
-
-std::string quoted(const std::string &s) { return "\"" + s + "\""; }
+using test_cmd::quoted;
+using test_cmd::run;
 
 // The DRIFT categories a retail round trip may show (compare.cpp's names).
 const char *const kDerivedDrift[] = {

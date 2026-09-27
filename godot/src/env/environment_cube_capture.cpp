@@ -12,7 +12,7 @@ namespace godot {
 namespace {
 
 const Vector3 kFaceDirections[EnvironmentCubeCapture::kFaceCount] = {
-	// Retail face order 0..5 = +X -X +Y -Y +Z -Z (update_environment_cubemap
+	// Retail face order 0..5 = +X -X +Y -Y +Z -Z (EnvCube_Update
 	// @0x6106a0 -> GTexture_RenderCubeMapFace @0x6864d0 - docs/render/render-lighting-re.md).
 	// The retail render-float -> Godot world map swaps X/Z. Therefore Godot's
 	// cube layers LEFT/RIGHT/FRONT/BACK receive retail faces 5/4/1/0. The

@@ -29,7 +29,7 @@ the format and transforms against the **retail** render path
 | Half-texel UV shift | **MATCHING** | retail `u += ±0.5·flt_319F7C8`, `v += ±0.5·flt_319F7CC` (one uniform sign pair from the post-flag corner min/max comparison, applied to all four corners), like `til_build_entry_render_uv_quad`'s half-texel |
 | Z world-convention negation | **MATCHING** | retail stores `z` and reads `-z` (`waterOverlayCount = -*(v20-1)`); our `til_world_z_from_fixed` returns `-z_fixed/…` |
 | Tile-cache render-target alpha | **MATCHING (D-TIL-3 alpha facet REFUTED 2026-09-24)** | base, `.til` and scorch passes run under `COLORWRITEENABLE = 7` (`PolyTrn_RenderTile @ 0x60DD04..0x60DD12`, `@ 0x60DD6B..0x60DD73`; `0xF` restored `@ 0x60E0EA` / `@ 0x60E1B6`); page A is the Clear's 0 (`@ 0x60DC9D..0x60DCC5` -> `GTexRT_Select` Clear `@ 0x67FC32..0x67FC5B`) plus the additive DOT3 term. Overlays never write A. `compose_overlay_rgba` has written RGB only since #560 (2026-08-25); ctest `terrain_tile_composer` (the overlay oracles assert no alpha contribution) |
-| Atlas sampling | **MATCHING 2026-09-24** | each page pass is an XYZRHW quad whose positions `fill_fullscreen_quad_vertices @ 0x678DFE..0x678E4B` copies unbiased, so page pixel x samples at position x; the atlas (flags `0x100203` @ 0x604B24) samples CLAMP + POINT min/mag/mip on its box level set, the level nearest the pixel footprint (a LOD-4 page reads level 0, a LOD-1 page level 3), and `PolyTrn_DrawTileOverlayQuad`'s half-texel bias (@ 0x604808..0x6048FD) lands each pixel on a texel centre. Commit "Compose terrain pages with the retail D3D9 raster and texture filters"; ctest `terrain_tile_composer` (1:1 `.til` line point-sampled, LOD-3 `.til` takes box level 1) |
+| Atlas sampling | **MATCHING 2026-09-24** | each page pass is an XYZRHW quad whose positions `GDynamicVB_FillFullscreenQuadVertices @ 0x678DFE..0x678E4B` copies unbiased, so page pixel x samples at position x; the atlas (flags `0x100203` @ 0x604B24) samples CLAMP + POINT min/mag/mip on its box level set, the level nearest the pixel footprint (a LOD-4 page reads level 0, a LOD-1 page level 3), and `PolyTrn_DrawTileOverlayQuad`'s half-texel bias (@ 0x604808..0x6048FD) lands each pixel on a texel centre. Commit "Compose terrain pages with the retail D3D9 raster and texture filters"; ctest `terrain_tile_composer` (1:1 `.til` line point-sampled, LOD-3 `.til` takes box level 1) |
 | Atlas texture format | **PORTED 2026-09-24** | the atlas is created DXT5 on the reference adapter (`GTexture_CreateFromPixelData_0 @ 0x687717..0x687766`) through the statically linked D3DX9 codec, each level the box halving of the previous level's decoded blocks; the composer samples the DXT5 decode (`renderer/texture_dxt`, terrain-re texture creation). Commit "Encode the terrain atlas and detail layers with retail's D3DX DXT codec"; ctest `renderer_texture_dxt`, `terrain_tile_composer` |
 | Mission tile-set atlas | **PORTED 2026-09-24** | a non-empty BMS tile-set name replaces the `.trn` `polytrn_tilestrip` (`Terrain_LoadEnvironmentConfig @ 0x6109C8..0x610A1C`); `trn_mission_tilestrip` feeds `TerrainData`'s tilestrip and `.TSD` table. Commit "Draw .til tiles from the mission's BMS tile set"; ctest `trn_config_roundtrip`, `mission_bms` |
 | 128-entry tile cache (LRU) | **MATCHING** | `dword_319A2E4` 128-slot cache, LRU eviction by `dword_319FC04 - age`, matching the reference note (128-LRU). The record array is ported as `TerrainTileCompositionCache` (2026-09-24; claim rule, TOD cadence and lookup in [terrain-re.md](../terrain/terrain-re.md)) |
@@ -38,10 +38,10 @@ the format and transforms against the **retail** render path
 ## The witnessed overlay + render (`PolyTrn_RenderTile @ 0x60df0d`)
 
 `g_TerrainTileArray` (count `g_TerrainTileCount`) is the overlay array — the same
-data streamed S2C by `serialize_terrain_tiles @ 0x6080F0` (§5.37, D-NET-83). Each
+data streamed S2C by `Terrain_SerializeTiles @ 0x6080F0` (§5.37, D-NET-83). Each
 12-B entry, when its fixed-point AABB (`x .. x+0x100000`, `z .. z+0x100000`,
 `0x100000` = one 16-unit cell) intersects the sector, is drawn as a
-**water quad** via `PolyTrn_DrawTileOverlayQuad(uv, pos, PolyTrn_TerrainTintHalf, flags)` —
+**water quad** via `PolyTrn_DrawTileOverlayQuad(uv, pos, g_PolyTrnTerrainTintHalf, flags)` —
 the HALF terrain tint (env #19) copied into vertex diffuse and applied under the
 terrain's MODULATE2X combine. The render marches the tile-sized quad, resolves
 the atlas cell from `tile_index`, and
@@ -76,8 +76,8 @@ applies the flip/rotate flags to the UV corners.
   span and north-edge `v_lo` both match retail exactly.
 
 The overlays write RGB only. Overlay view mode `0x631` decodes to
-`SRCALPHA/INVSRCALPHA` (`decode_blend_mode_to_d3d_states @ 0x680f2c..0x680f3a`)
-with the stage alpha selecting texture A (`decode_mode_alpha_stage
+`SRCALPHA/INVSRCALPHA` (`RenderState_DecodeBlendModeToD3DStates @ 0x680f2c..0x680f3a`)
+with the stage alpha selecting texture A (`RenderState_DecodeModeAlphaStage
 @ 0x680c8a..0x680c95`), but the base pass and both ordered overlay loops (the
 `.til` entries, then the scorches) run under `COLORWRITEENABLE = 7`
 (`PolyTrn_RenderTile @ 0x60DD04..0x60DD12` before the base quad,
@@ -85,14 +85,14 @@ with the stage alpha selecting texture A (`decode_mode_alpha_stage
 `@ 0x60E1B6` for the DOT3 and static-model alpha passes), so the source alpha
 only weights the RGB blend. Page A is the page Clear's 0 (`@ 0x60DC9D..0x60DCC5`
 -> `GTexRT_Select` Clear `@ 0x67FC32..0x67FC5B`) plus the tile DOT3 pass's
-`ONE/ONE` light term (`PolyTrn_TileBakeDot3LightPass @ 0x60e385`). The exact
+`ONE/ONE` light term (`g_PolyTrnTileBakeDot3LightPass @ 0x60e385`). The exact
 pass order is base RGB → ordered `.til` RGB → ordered scorch RGB → additive
 DOT3 A. The 2026-08-17 reading that the device updates target alpha as
 `srcA² + dstA·(1-srcA)` (D-TIL-3) missed the write mask and is refuted.
 
 Each `.til` quad samples the DXT5 atlas CLAMP + POINT on the box level nearest
 the page pixel's footprint, at integer page positions (the XYZRHW positions are
-copied unbiased by `fill_fullscreen_quad_vertices @ 0x678DFE..0x678E4B`), so the
+copied unbiased by `GDynamicVB_FillFullscreenQuadVertices @ 0x678DFE..0x678E4B`), so the
 half-texel bias lands every pixel on a texel centre. The asset-gated
 `terrain_tile_composer` oracles pin CP12 entries 53 (tile 42, flags 7) and 1013
 (tile 41, flags 7) and 00TRa entries 761 (`0x05`) and 781 (`0x06`): every page
@@ -143,14 +143,14 @@ the 128-LRU cache, and foliage AABB scan) is byte/behaviour-exact against retail
 The overlay pass samples the texture `Terrain_LoadTileSetAtlas @ 0x604a90`
 loads — the **tile-set strip**, not a lightmap. `Terrain_LoadEnvironmentConfig @ 0x610940`
 parses the environment/`.trn` config, which leaves the `.trn`'s `polytrn_tilestrip`
-in the terrain-config string slot `configData+0xD00`; when `Bms_TileSetName`
+in the terrain-config string slot `configData+0xD00`; when `g_BmsTileSetName`
 (the BMS header's `+0x118` name, e.g. `trntile10`) is non-empty (@ 0x6109C8) it
 is copied over that slot (@ 0x6109D2..0x6109E2) and its extension from the
 first `.` replaced by, or else appended as, `TGA` (`Path_ReplaceOrAppendExtension
 @ 0x53C780`, called @ 0x6109EE); the `.TSD` slot takes the same name with `TSD`
 (@ 0x610A00..0x610A1C).
 `PolyTrn_InitTextures @ 0x60aaa0` passes that slot (@ 0x60c5b9) to the loader,
-which derives `Terrain_TileSetTilesX = width/64` and the `flt_319F7C0/C4`
+which derives `g_TerrainTileSetTilesX = width/64` and the `flt_319F7C0/C4`
 UV steps plus the `flt_319F7C8/CC` half-texel factors — the exact atlas math
 the overlay draw consumes (@ 0x60dec3..0x60dee5). The cluster's historical
 `Terrain_Lightmap*` misnomer names were renamed to `Terrain_TileSet*` in the
@@ -216,6 +216,6 @@ of which contributes authored `.til` content:
   2026-09-24 ("Retire the hosted 1024 .til overlay bake"); nothing else read it.
 - Page composition, the record cache and the DXT codec: [terrain/terrain-re.md](../terrain/terrain-re.md).
 - Wire form of the same array: [net/novaworld-net-re.md](../net/novaworld-net-re.md)
-  §5.37 / D-NET-83 (`serialize_terrain_tiles @ 0x6080F0`).
+  §5.37 / D-NET-83 (`Terrain_SerializeTiles @ 0x6080F0`).
 - The HALF tint the overlay renders under is [env/env-tod-re.md](../env/env-tod-re.md)
-  #19 (`PolyTrn_TerrainTintHalf`, `tile_overlay_tint_factor`).
+  #19 (`g_PolyTrnTerrainTintHalf`, `tile_overlay_tint_factor`).

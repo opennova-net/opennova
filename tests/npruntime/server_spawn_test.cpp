@@ -262,7 +262,7 @@ int main() {
 		                    slot_ctx.np_protocol.connection_list[2].reply.player_slot == 2,
 		            "first three players occupy roster slots 0, 1, 2")) return 1;
 
-		if (!expect(inmatch::drop_connection(slot_ctx, peers[1]),
+		if (!expect(inmatch::destroy_connection(slot_ctx, peers[1], nullptr),
 		            "non-tail player disconnects")) return 1;
 		inmatch::NapiNPConnection replacement;
 		replacement.peer = peers[3];
@@ -442,10 +442,10 @@ int main() {
 	// --- D-NET-146: the character stamp — per-side CU vars picked by ASSIGNED team. ---
 	// A team-based session (golden ASH_I5A gameType 0x10010): the host's own player takes its
 	// installed profile's side-A values on the local path [orig: Player_InitPlayer @0x4e15f0 <-
-	// g_avatarTeam1/2 + g_charClassTeam1/2; PlayerSession_InitFromProfile @0x50ca80]; the team-2
+	// g_AvatarTeam1/2 + g_CharClassTeam1/2; PlayerSession_InitFromProfile @0x50ca80]; the team-2
 	// joiner takes its uploaded SIDE-B values (VCB/CI1) and its playerClass from the TR pick
 	// [orig: Server_PlayerAdd @0x51cbc0 @0x51cff7/@0x51d0b1]. The 0x0C organic batch echoes
-	// entity+0x374 / entity+0x15C raw [orig: serialize_entity_states_to_buffer @0x5030a0].
+	// entity+0x374 / entity+0x15C raw [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0].
 	{
 		w::World cw;
 		w::AiSystem &cai = cw.ai;

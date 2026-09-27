@@ -132,7 +132,7 @@ void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *
 
 // smoktest.pcx, the pool's one texture, with its palette-luminance alpha
 // [orig: CEffectEmitterPool_CreateShaders @ 0x5DC8F0 ->
-// load_texture_from_archive("smoktest.pcx", "smoktest.pcx") @ 0x58B980].
+// Texture_LoadFromArchive("smoktest.pcx", "smoktest.pcx") @ 0x58B980].
 Ref<Texture2D> FirePresenter::smoke_texture() {
 	if (smoke_texture_loaded_ || resource_root_.is_null()) {
 		return smoke_texture_;
@@ -258,7 +258,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 			Vector3 glow_pos = mission_to_godot(ev.origin);
 			if (plan.glow_at_muzzle) {
 				const Vector3 glow_anchor = owner_->muzzle_world_for(
-						ev.shooter_handle, String::utf8(plan.userpoint.c_str()));
+						ev.shooter_handle, opennova::to_gd(plan.userpoint));
 				if (glow_anchor.is_finite()) {
 					glow_pos = glow_anchor;
 				}
@@ -274,7 +274,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 			// The rendered gun's own userpoint is the anchor (the muzzle-authority
 			// decision); an unresolvable anchor keeps the row's origin.
 			const Vector3 anchored = owner_->muzzle_world_for(
-					ev.shooter_handle, String::utf8(plan.userpoint.c_str()));
+					ev.shooter_handle, opennova::to_gd(plan.userpoint));
 			if (anchored.is_finite()) {
 				origin = anchored;
 			}
@@ -282,7 +282,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 		if (fx_world != nullptr && plan.spawn) {
 			// The shooter is the descriptor tag (retail
 			// WeaponSlot_FireAndSpawnEffects @ 0x53F582): the section gate applies.
-			fx_world->spawn_effect(String::utf8(plan.effect.c_str()), origin,
+			fx_world->spawn_effect(opennova::to_gd(plan.effect), origin,
 					mission_to_godot(ev.forward), true);
 			++stat_effects_;
 		}
@@ -479,8 +479,16 @@ int FirePresenter::append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_s
 		}
 		ObjectModel *body = owner_->resolve_wire_handle(source.handle);
 		ObjectModel *weapon = owner_->held_weapon_node(source.handle);
-		if (body == nullptr || !body->is_visible_in_tree() || weapon == nullptr ||
-				!weapon->is_visible_in_tree()) {
+		// The view's own draw: the main view the nodes, the Inset view the
+		// nodes while the two views agree, else the twins its collect's
+		// verdicts built (ObjectModel's view split); the gun is posed for
+		// either view.
+		const auto view_draws = [&p_view](ObjectModel *p_model) {
+			return p_view.inset_view && p_model->is_view_split()
+					? p_model->get_view_twin_count() > 0
+					: p_model->is_visible_in_tree();
+		};
+		if (body == nullptr || !view_draws(body) || weapon == nullptr || !view_draws(weapon)) {
 			continue;
 		}
 		const Ref<ObjectData> data = weapon->get_object_data();
@@ -520,7 +528,9 @@ int FirePresenter::append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_s
 		opennova::renderer::append_tracer_beam(points, count,
 				opennova::world::kNvgLaserTracerStyle, view, laser_frame_);
 		opennova::renderer::append_nvg_laser_overlay(laser_frame_,
-				r_submission.texture_index(smoke_texture()), p_view.fog, r_submission.frame);
+				r_submission.texture_index(smoke_texture()), p_view.fog, r_submission.frame,
+				p_view.inset_view ? opennova::renderer::SceneOverlaySlot::InsetNvgLaserBeams
+								  : opennova::renderer::SceneOverlaySlot::NvgLaserBeams);
 		++drawn;
 	}
 	return drawn;

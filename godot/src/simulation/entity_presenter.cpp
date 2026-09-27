@@ -136,6 +136,10 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::set_render_culled);
 	ClassDB::bind_method(D_METHOD("clear_render_culled"),
 			&EntityPresenter::clear_render_culled);
+	ClassDB::bind_method(D_METHOD("set_render_culled_inset", "wire_handle", "culled"),
+			&EntityPresenter::set_render_culled_inset);
+	ClassDB::bind_method(D_METHOD("set_wire_inset_view", "active"),
+			&EntityPresenter::set_wire_inset_view);
 	ClassDB::bind_method(D_METHOD("get_wire_stats_record"),
 			&EntityPresenter::get_wire_stats_record);
 	ClassDB::bind_method(D_METHOD("resolve_wire_handle", "wire_handle"),
@@ -172,8 +176,6 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup_passes", "container", "item_db",
 			"resource_root", "audio", "fx", "lights", "environment", "anchors"),
 			&EntityPresenter::setup_passes);
-	ClassDB::bind_method(D_METHOD("set_listener_position", "position"),
-			&EntityPresenter::set_listener_position);
 	ClassDB::bind_method(D_METHOD("present_passes"), &EntityPresenter::present_passes);
 	ClassDB::bind_method(D_METHOD("get_fire_present_stats"),
 			&EntityPresenter::get_fire_present_stats);
@@ -205,8 +207,8 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::death_piece_model);
 	ClassDB::bind_method(D_METHOD("nvg_laser_beam_batches", "handle", "attach_bone",
 			"weapon_flags", "launch_userpoint", "local_player", "nvg_active", "camera_mode",
-			"eye"),
-			&EntityPresenter::nvg_laser_beam_batches);
+			"eye", "inset_view"),
+			&EntityPresenter::nvg_laser_beam_batches, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("present_throwable_visuals", "visuals"),
 			&EntityPresenter::present_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("present_vehicle_trail_visuals", "visuals"),
@@ -478,6 +480,11 @@ void EntityPresenter::present_death_piece_draws_native(
 	destruction_->apply_piece_draws(p_draws);
 }
 
+void EntityPresenter::present_death_piece_draws_inset(
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	destruction_->apply_piece_draws_inset(p_draws);
+}
+
 void EntityPresenter::present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws) {
 	destruction_->apply_piece_draws(
 			unwrap_rows<opennova::world::DeathPieceDraw, DeathPieceDraw>(p_draws));
@@ -499,7 +506,7 @@ int EntityPresenter::append_nvg_laser_beams(Simulation *p_sim, const NvgLaserVie
 
 int EntityPresenter::nvg_laser_beam_batches(int p_handle, int p_attach_bone,
 		int p_weapon_flags, int p_launch_userpoint, bool p_local_player, bool p_nvg_active,
-		int p_camera_mode, const Transform3D &p_eye) {
+		int p_camera_mode, const Transform3D &p_eye, bool p_inset_view) {
 	NvgLaserSource source;
 	source.handle = p_handle;
 	source.gate.attach_bone = static_cast<uint8_t>(p_attach_bone);
@@ -511,11 +518,15 @@ int EntityPresenter::nvg_laser_beam_batches(int p_handle, int p_attach_bone,
 	view.eye = p_eye;
 	view.nvg_active = p_nvg_active;
 	view.camera_mode = p_camera_mode;
+	view.inset_view = p_inset_view;
 	SceneOverlaySubmission submission;
 	fire_->append_nvg_laser_beams({source}, view, submission);
+	const opennova::renderer::SceneOverlaySlot slot = p_inset_view
+			? opennova::renderer::SceneOverlaySlot::InsetNvgLaserBeams
+			: opennova::renderer::SceneOverlaySlot::NvgLaserBeams;
 	int batches = 0;
 	for (const opennova::renderer::SceneOverlayBatch &batch : submission.frame.batches) {
-		batches += batch.slot == opennova::renderer::SceneOverlaySlot::NvgLaserBeams ? 1 : 0;
+		batches += batch.slot == slot ? 1 : 0;
 	}
 	return batches;
 }
@@ -1134,6 +1145,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 	if (!row_plan_is_current(size, stride, layout_revision)) {
 		rebuild_row_plan(p, size, stride, layout_revision);
 	}
+	++placed_walk_serial_;
 	for (Row &row : rows_) {
 		// Main-thread Node destruction advances this stamp in PREDELETE. Once
 		// a planned model was freed by a notification dispatched during this
@@ -1439,7 +1451,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			}
 			if (door_work) {
 				// Retail writes exactly num_doors slots of the ordinal bus and
-				// never clears [orig: build_bone_transforms @0x4E3070 loop
+				// never clears [orig: BoneCallback_BuildBoneTransforms @0x4E3070 loop
 				// @0x4e312a..0x4e3145; BoneCallback_AnimatedBones_World @0x4E3180
 				// loop @0x4e3201..0x4e3218]; releasing a shrunk row is the port's
 				// retained-override bookkeeping. A cold row cannot enumerate what
@@ -1642,6 +1654,54 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			p_profile->body_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
+		// A placed person's third-person gun, drawn with its body. Only a row
+		// that publishes one (or still holds one) pays the leg.
+		if (row.entity_kind == static_cast<int32_t>(opennova::world::EntityKind::Organic) &&
+				(field_i(p, base, Simulation::PF_HELD_WEAPON_ADM) != 0 ||
+						placed_held_weapons_.has(row.handle))) {
+			update_placed_held_weapon(row, model, snap,
+					present_visible && !model->is_occlusion_hidden());
+		}
+	}
+	retire_unvisited_placed_held_weapons();
+}
+
+void EntityPresenter::update_placed_held_weapon(const Row &row, ObjectModel *body,
+		PresentRowsView snap, bool body_visible) {
+	const ObjectModel *before = held_weapon_node(row.handle);
+	WireRow held;
+	held.handle = row.handle;
+	held.base = row.base;
+	update_wire_held_weapon(held, body, snap, body_visible);
+	ObjectModel *weapon = held_weapon_node(row.handle);
+	if (weapon == nullptr) {
+		placed_held_weapons_.erase(row.handle);
+		return;
+	}
+	placed_held_weapons_[row.handle] = placed_walk_serial_;
+	if (weapon != before) {
+		// rebuild_held_weapon keys its owner hookups on the wire node, which a
+		// placed body is not: the fresh gun takes this body's render slot,
+		// light owner and LOD owner, exactly as a wire body's gun takes its own.
+		weapon->set_slot_shadow_capture_with(body);
+		weapon->set_entity_light_owner(body);
+		ObjectModel *head = MissionObjectPlacer::avatar_head_part(body);
+		weapon->set_authored_lod_owner(head != nullptr ? head : body);
+	}
+}
+
+void EntityPresenter::retire_unvisited_placed_held_weapons() {
+	std::vector<int32_t> retired;
+	for (const KeyValue<int32_t, uint64_t> &kv : placed_held_weapons_) {
+		if (kv.value != placed_walk_serial_) {
+			retired.push_back(kv.key);
+		}
+	}
+	for (const int32_t handle : retired) {
+		free_held_weapon(handle);
+		wire_held_weapon_adm_.erase(handle);
+		wire_held_weapon_ids_.erase(handle);
+		placed_held_weapons_.erase(handle);
 	}
 }
 

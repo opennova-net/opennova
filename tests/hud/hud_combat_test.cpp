@@ -147,7 +147,7 @@ static void mortar_map_and_world_cues() {
 			[](const auto &l) { return l.color == 0x60FF0000u; }));
 	// The LollyPop head is a 2:1 ellipse: radius 20 with the 2.0 stroke spans
 	// +-21 vertically and twice that horizontally around (512, 384 - 40).
-	// [orig: draw_entity_marker ring record +0x1C = 2.0 @0x59327B]
+	// [orig: HUD_DrawEntityMarker ring record +0x1C = 2.0 @0x59327B]
 	float min_x = 1e9f, max_x = -1e9f, min_y = 1e9f, max_y = -1e9f;
 	for (const auto &t : designator.tris)
 		for (const auto *v : { &t.a, &t.b, &t.c }) {
@@ -341,7 +341,7 @@ static void world_feeds() {
 	// same admitted target draws nothing in a non-team type, and its brackets
 	// and friendly inset come back in a team one. Outside a session (single
 	// player) every type admits it.
-	// [orig: HUD_DrawCrosshair -- `cmp g_napi_np_ctx.is_in_session` @0x5926C0,
+	// [orig: HUD_DrawCrosshair -- `cmp g_NapiNPCtx.is_in_session` @0x5926C0,
 	//  `test g_GameType,10000h` @0x5926C4, the clear @0x5926D0]
 	world.rules.mpattrib = 0x100;
 	read();

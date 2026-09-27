@@ -12,10 +12,11 @@ namespace {
 // The g_GameType code words the ladder tests, named here so the switch reads
 // like the original. These mirror engine/base/gameprofile/game_type.h, which the
 // formats layer may not include (ADR 0030: formats depends only on base/io and
-// other formats libs). [orig: load_scoring_table_for_game_type @0x52D300 —
+// other formats libs). [orig: ScoreConfig_LoadScoringTableForGameType @0x52D300 —
 // the 0x10000 test @0x52d324 and the (g & 0xFFFDFFFF) == 0x10020 &&
 // (g & 0x20000) family test @0x52d345; the same ladder is repeated in
-// GameEvent_ProcessScoring @0x52f56c/@0x52f58c and sub_52D430 @0x52d45a/@0x52d47b]
+// GameEvent_ProcessScoring @0x52f56c/@0x52f58c and ScoreConfig_GetRowEntry
+// @0x52D430 (@0x52d45a/@0x52d47b)]
 constexpr uint32_t kTeamDeathmatch = 0x10000;
 constexpr uint32_t kWaypointFamilyMask = 0xFFFDFFFFu;
 constexpr uint32_t kWaypointFamilyValue = 0x10020u;
@@ -106,7 +107,7 @@ bool entries_equal(const std::vector<Entry> &a, const std::vector<Entry> &b) {
 } // namespace
 
 int row_for_game_type(uint32_t game_type) {
-	// [orig: load_scoring_table_for_game_type @ 0x52D300 — the ladder is tested
+	// [orig: ScoreConfig_LoadScoringTableForGameType @ 0x52D300 — the ladder is tested
 	// in this exact order; the `<= 11` guard and the 0 -> 2 remap are its own.]
 	int index;
 	if (game_type == 0) {

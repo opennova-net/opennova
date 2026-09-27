@@ -68,7 +68,7 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	input.back = back;
 	input.left = left;
 	input.right = right;
-	// Lean keys -> MoveOrder bits 6/7 [orig: g_inputFlags 0x2000/0x4000 packed
+	// Lean keys -> MoveOrder bits 6/7 [orig: g_InputFlags 0x2000/0x4000 packed
 	// @0x4df708-0x4df741]; jump is a per-frame edge the motor consumes once
 	// grounded.
 	input.lean_left = lean_left;
@@ -80,7 +80,7 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	input.prone = stance_latch_ == 2;
 	// The movement-held latch and the unscope-on-move [orig:
 	// Player_PackInputStateToEntity @0x4df450 — any of the four direction keys
-	// sets g_movementKeyHeld (blocks scope-UP on Scoped weapons @0x4df29c)
+	// sets g_MovementKeyHeld (blocks scope-UP on Scoped weapons @0x4df29c)
 	// and, while SETTLED at scope on a Scoped (flags 1) weapon, routes through
 	// Player_ToggleWeaponScope @0x4df4c9..0x4df4ec = the full unscope. The
 	// toggle's ForceScoped pin (@0x4df12d) keeps pinned sights raised].
@@ -97,7 +97,7 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 
 // [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 -- the CanFire, equipped-slot
 //  and zero-table gates @0x4dbcc3..0x4dbcf7, then the clamp (the -1 floor
-//  outside a session, `cmp g_napi_np_ctx.is_in_session` @0x4dbd0c), the click,
+//  outside a session, `cmp g_NapiNPCtx.is_in_session` @0x4dbd0c), the click,
 //  the pitch delta and the yaw term]
 bool LocalPlayer::request_scope_zero(int delta) {
     if (!weapon.active || !local_player_can_fire()) return false;
@@ -243,7 +243,7 @@ bool LocalPlayer::toggle_mount() {
 	// (force/script and NAPI authority paths bypass it); single player is
 	// outside the session [orig: Entity_AttachToUseGunSlot @0x546b80, reject
 	// `!is_in_session && Flags&0x100 && !EquippedSlot` -- `cmp
-	// g_napi_np_ctx.is_in_session` @0x546BF6, the slot test @0x546c07].
+	// g_NapiNPCtx.is_in_session` @0x546BF6, the slot test @0x546c07].
 	if (!world.rules.mp_session && !weapon.active) {
 		w::VehicleSeatSelection hit;
 		if (world.vehicles.find_mount_toggle_candidate(*toggle_player, hit) && hit.type == w::SeatType::Gunner)
@@ -505,7 +505,7 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	}
 	if (w::Entity *entity = world.registry.get(world.cached.local_player)) {
 		// The per-frame view-flag restamp onto the body's Flags word
-		// [orig: the g_NVGActive / g_binocularsRaised / g_weaponScopeActive
+		// [orig: the g_NVGActive / g_BinocularsRaised / g_WeaponScopeActive
 		// refresh in Player_PackInputStateToEntity @0x4df450].
 		uint32_t view_flags = 0;
 		if (view.nvg_active) view_flags |= w::kEntityFlagNVGWorn;
@@ -543,8 +543,8 @@ void LocalPlayer::tick_view() {
 	w::local_player_view_tick(&world, view, view_tracker, view_session_inputs);
 	// Retail acquires the aim inside the entity update, BEFORE the quantum's
 	// camera compose, so its camera leg reads the view the previous compose
-	// left [orig: Game_ProcessMainFrame -- Entity_UpdateAllEntities @0x52674B
-	//  precedes Camera_ComputeThirdPersonView @0x526781].
+	// left [orig: Game_ProcessMainFrame @0x5263F0 -- the Entity_UpdateAllEntities
+	//  call @0x52674B precedes the Camera_ComputeThirdPersonView call @0x526781].
 	update_aim_target();
 	// The quantum's own compose: it advances the shake filters and the chase
 	// look-ahead once per logic tick and leaves g_view_pos / g_view_rot for

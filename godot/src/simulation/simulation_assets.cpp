@@ -81,26 +81,16 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 						: opennova::EntityClass::Unknown);
 			});
 
-	install_item_class_resolver();
+	install_item_catalog();
 }
 
-opennova::replication::ClientReplicaPipeline::ItemClassResolver
-Simulation::item_class_resolver() const {
-	if (!assets_.item_replication_catalog) return {};
-	return [catalog = assets_.item_replication_catalog](uint16_t type_id) {
-		return catalog->resolve_wire_entity_class(type_id);
-	};
-}
-
-void Simulation::install_item_class_resolver() {
+void Simulation::install_item_catalog() {
 	if (!assets_.item_replication_catalog) return;
-	opennova::replication::ClientReplicaPipeline::ItemClassResolver resolver =
-			item_class_resolver();
-	// A host role is constructed with the resolver of its time and retains it
+	// A host role is constructed with the catalog of its time and retains it
 	// for every HostClient view it rebuilds (the baseline restore); the catalog
 	// built after a role installed lands here. The live runtime takes it now.
-	if (host_role_ != nullptr) host_role_->set_item_class_resolver(resolver);
-	if (runtime_) runtime_->view().set_item_class_resolver(std::move(resolver));
+	if (host_role_ != nullptr) host_role_->set_item_catalog(assets_.item_replication_catalog);
+	if (runtime_) runtime_->view().set_item_catalog(assets_.item_replication_catalog);
 }
 
 void Simulation::install_charattr_challenge_table() {

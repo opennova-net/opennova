@@ -2,8 +2,8 @@
 // the 0x6B linked pulse markers, and their per-tick aging.
 // [orig: NapiNPClientMsg_0x040_Impl @0x425a54 (0x40) -> MapOverlay_DecodeOverlayEntries @0x5BEBB0 ->
 //  MapOverlay_UpdateOrCreateSlot @0x5BEA60 / MapOverlay_AllocSlot @0x5BE970;
-//  NapiNPClientMsg_0x06B @0x425520 -> update_minimap_overlay_entity @0x5BEC10;
-//  update_map_overlay_timers @0x5BFCE0]
+//  NapiNPClientMsg_0x06B @0x425520 -> Minimap_UpdateOverlayEntity @0x5BEC10;
+//  MapOverlay_UpdateTimers @0x5BFCE0]
 
 #include <runtime/replication/client_replica_pipeline.h>
 
@@ -18,7 +18,7 @@ namespace opennova::replication {
 namespace {
 
 // The 32-entry overlay color table, byte-witnessed.
-// [orig: g_minimap_overlay_color_table @0x840A10]
+// [orig: g_MinimapOverlayColorTable @0x840A10]
 constexpr uint32_t kOverlayColorTable[32] = {
 	0xFF707070u, 0xFF204080u, 0xFF204080u, 0xFF204080u,
 	0xFF802020u, 0xFF802020u, 0xFF808000u, 0xFF008000u,
@@ -88,7 +88,7 @@ void ClientReplicaPipeline::apply_capture_zone_overlay(
 		// byte. Any pool 0..4 handle passing those is accepted whether or not
 		// an entity currently lives there.
 		// [orig: @0x5beac0 handle != 0xFFFF && pool < 5; @0x5beade
-		//  (handle & 0xFFF) < g_pool_list[pool].capacity; color resolve
+		//  (handle & 0xFFF) < g_PoolList[pool].capacity; color resolve
 		//  @0x5beb16..0x5beb3e ahead of the flags-0x20 branch @0x5beb4b]
 		if (entry.handle == 0xFFFF || (entry.handle & 0xF000u) >= 0x5000u)
 			continue;
@@ -179,7 +179,7 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 		// slot reads team 0 -> neutral). Records must not drop just because
 		// the entity is not in this view yet.
 		// [orig: @0x425573..0x42559d — handle != 0xFFFF, pool < 5,
-		//  index < capacity; update_minimap_overlay_entity @0x5becb8 reads
+		//  index < capacity; Minimap_UpdateOverlayEntity @0x5becb8 reads
 		//  entity+354 unconditionally]
 		if (entry.handle == 0xFFFF || (entry.handle & 0xF000u) >= 0x5000u)
 			continue;
@@ -342,7 +342,7 @@ void ClientReplicaPipeline::tick_minimap_overlays() {
 	// and the known/alive gate each tick (retail reads the pool slot at draw
 	// time — O(1) pool arithmetic there, so the per-slot lookup here rides
 	// a handle index built once per tick instead of a per-slot linear scan).
-	// [orig: render_minimap_slot_blip @0x5be4ac..0x5be515]
+	// [orig: Render_MinimapSlotBlip @0x5be4ac..0x5be515]
 	std::unordered_map<uint16_t, const ClientEntityState *> entity_index;
 	entity_index.reserve(state_.entities.size());
 	for (const ClientEntityState &entity : state_.entities) {

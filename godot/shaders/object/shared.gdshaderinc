@@ -58,7 +58,7 @@ global uniform vec3 opennova_env_light_block;
 // [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 ->
 // RenderBatchCtx_StoreLightingConstants @ 0x5d89e0 (ctx+116 light,
 // +144 sky, +160 ground, +176 floor, +192 ceiling); the gain is
-// Render_LightScaleRGB bound per draw by apply_shader_parameters @ 0x58db80]
+// Render_LightScaleRGB bound per draw by Material_ApplyShaderParameters @ 0x58db80]
 global uniform bool opennova_thermal_view;
 uniform bool u_thermal_wave_draw = true;
 global uniform vec3 opennova_light_block_dir;
@@ -84,7 +84,7 @@ global uniform int opennova_fog_type;
 // presenters on change; a static MultiMesh row reads the same four floats
 // from its atlas row's last texel instead (obj_entity_light below; pool-2
 // statics have no proximity slice, so effectScale 1).
-// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0 (lerp branch
+// [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0 (lerp branch
 // @ 0x5d9a6a.., direct branch @ 0x5d9db5..)]
 instance uniform vec4 u_entity_light = vec4(1.0, 0.0, 1.0, 0.0);
 // ReflectColor keeps _BaseInc.fx's default unless a material routes a colour to it.
@@ -128,7 +128,7 @@ instance uniform vec4 u_point_light_color_3 = vec4(0.0);
 // binding safe; per-instance state carries the live stance and resident page.
 // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50, entity+300 & 0x300;
 // _tSkFolg.fx Simple_MatchTerrain_PS; _vsSkFolg.fx vscSkMatchTerrain;
-// terrain_tile_cache_lookup @ 0x604140].
+// TerrainTile_CacheLookup @ 0x604140].
 uniform sampler2DArray u_match_terrain_cache : filter_linear, repeat_disable;
 uniform bool u_has_match_terrain_cache = false;
 instance uniform bool u_match_terrain_enabled = false;
@@ -231,7 +231,7 @@ void obj_apply_water_reflection_clip(vec3 camera_position_world) {
 }
 
 // Full D3D COUNT2 affine transform. Coefficient rows preserve SET, shear,
-// scroll, scale, and center rotation. [orig: compute_uv_transform_matrix @ 0x5B1990]
+// scroll, scale, and center rotation. [orig: Material_ComputeUVTransformMatrix @ 0x5B1990]
 vec2 obj_transform_uv(vec2 uv) {
 	vec3 uv1 = vec3(uv, 1.0);
 	return vec2(dot(uv1, u_uv_transform_u), dot(uv1, u_uv_transform_v));
@@ -268,7 +268,7 @@ vec4 obj_sample_aniso2(sampler2D tex, vec2 uv, float max_lod) {
 // the interior flag additionally by t with the hemisphere pair lerped from
 // the indoor (floor/ceiling) to the outdoor (ground/sky) block by t. This is
 // renderer::compute_entity_lighting evaluated at draw time.
-// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
+// [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0]
 bool obj_uses_static_point_light_row() {
 	return v_static_point_light_row > 0.5;
 }
@@ -720,17 +720,17 @@ vec3 obj_environment_cube_approx(vec3 reflection_ws) {
 	// reflection is a Godot-world vector, so the axis is the light block's
 	// Godot-world -normalize(light dir), never the raw render-float tuple
 	// (whose x/z are swapped against Godot's): retail
-	// apply_shader_parameters @ 0x58e146..0x58e1cb ->
-	// build_direction_look_at_matrix(Environment_GetLightDirectionFloat).
+	// Material_ApplyShaderParameters @ 0x58e146..0x58e1cb ->
+	// Math_BuildDirectionLookAtMatrix(Environment_GetLightDirectionFloat).
 	float aligned = max(dot(direction, normalize(opennova_light_block_dir)), 0.0);
 	vec3 static_lobe = clamp(
 			vec3(1.4) * pow(aligned, 800.0) +
 			vec3(1.0, 248.0 / 255.0, 240.0 / 255.0) *
 					pow(aligned, 40.0),
 			vec3(0.0), vec3(1.0));
-	// render_sky_mesh binds Env_LightBlock and the fixed-function MODULATE2X
+	// Render_SkyMesh binds g_EnvLightBlock and the fixed-function MODULATE2X
 	// descriptor, then submits the rotated CubeRotSpecular sphere additively.
-	// [orig: render_sky_mesh @ 0x5ac680; sub_5AC600 (the sky-mesh descriptor)].
+	// [orig: Render_SkyMesh @ 0x5ac680; sub_5AC600 (the sky-mesh descriptor)].
 	return clamp(dimmed_sky + static_lobe * opennova_env_light_block * 2.0,
 			vec3(0.0), vec3(1.0));
 }
@@ -788,7 +788,7 @@ vec3 obj_ff_lighting(vec3 base_rgb) {
 
 // The SELFLUM emissive is SelfLumColor x ColorSrcGlobalGain; fixed-function
 // lighting saturates it before MODULATE2X. retail _FFP.fx TBoringFFP SELFLUM
-// block, apply_shader_parameters @ 0x58E050..0x58E06A (ColorSrcGlobalGain).
+// block, Material_ApplyShaderParameters @ 0x58E050..0x58E06A (ColorSrcGlobalGain).
 vec3 obj_self_lit(vec3 base_rgb, vec3 self_lum) {
 	return base_rgb * clamp(self_lum * opennova_light_block_gain,
 			vec3(0.0), vec3(1.0)) * 2.0;
@@ -831,7 +831,7 @@ float obj_fog_visibility(float dist, float fog_start, float fog_end, int fog_typ
 //   so the fog factor is the VS oFog = 1 - (z - FogStart) * FogRangeRecip
 //   over clip z (_BaseInc.fx CalcFogSegmented / CalcFogSkinned) with
 //   FogStart / FogRangeRecip the start / end pushed through the projection
-//   (apply_shader_parameters @ 0x58e20d..0x58e26f): linear in view depth for
+//   (Material_ApplyShaderParameters @ 0x58e20d..0x58e26f): linear in view depth for
 //   EVERY fog type, from the pass start (0.5 for types 0/1, the caller's
 //   constant, Environment_ApplyFogAndAmbient @ 0x57e4d2).
 // - OBJ_FOG_VERTEX_SHADER_DEVICE: a vertex-shader pass on FOGMODE_NORMAL

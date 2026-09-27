@@ -152,10 +152,6 @@ public:
 	// and the play leg reports it as the "Lan" session var.
 	int get_join_lobby_number() const { return pending_join_.ln; }
 
-	// The retail error tag (NWECnn / the menutxt key) of the last failure reported
-	// through error_occurred / join_failed / disconnected, or empty.
-	String get_last_error_tag() const { return last_error_tag_; }
-
 	// Engine hooks.
 	void _ready() override;
 	void _process(double delta) override;
@@ -226,7 +222,6 @@ private:
 	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
 	// endpoint, and the connect deadlines all live in here.
 	NwuLobbySession lobby_;
-	String last_error_tag_;
 
 	// The CD-key/hardware identity set (CountryName..NWHWI), built once per
 	// session and used for BOTH the UDP verify var-list and the HTTP login

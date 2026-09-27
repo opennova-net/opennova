@@ -7,15 +7,15 @@
 // over the scoped view every scoped frame, plus the reticle cross and cardinal
 // grid ticks it chains when the equipped weapon authored no SIGHTS row.
 // [orig: Hud_DrawScopeCircleMask @0x5d17a0 (0x5d17a0..0x5d1d01);
-//  draw_minimap_crosshair_and_grid @0x5d1160 (0x5d1160..0x5d1723)]
+//  HUD_DrawMinimapCrosshairAndGrid @0x5d1160 (0x5d1160..0x5d1723)]
 //
 // The mask is NOT a fallback for a rowless weapon: `Hud_DrawScopeCircleMask`
 // is called unconditionally on the Scoped arm of the scene frame's overlay
 // fork, right after the SIGHTS card draws, and its ONLY argument gates the
 // inner cross/grid [orig: Render_ProcessMainSceneFrame
-//  @0x5cab08..0x5cab15 `v11 = draw_weapon_sight_overlays(...);
+//  @0x5cab08..0x5cab15 `v11 = HUD_DrawWeaponSightOverlays(...);
 //  Hud_DrawScopeCircleMask(!v11, ...)`; the same shape in the second caller
-//  render_hud_overlay @0x5d82e5..0x5d82f2 `xor ecx,ecx; cmp eax,ebx; setz cl`].
+//  Render_HUDOverlay @0x5d82e5..0x5d82f2 `xor ecx,ecx; cmp eax,ebx; setz cl`].
 //
 // Everything here is device-free geometry in PIXELS of the live viewport: the
 // embedder rasterises the three batches as flat vertex-coloured triangles.
@@ -39,7 +39,7 @@ namespace opennova::hud {
 // The four mutually exclusive overlays the frame picks between after the world
 // pass, in retail's test order.
 // [orig: Render_ProcessMainSceneFrame @0x5caae1..0x5cab26;
-//  render_hud_overlay @0x5d82c7..0x5d82f7]
+//  Render_HUDOverlay @0x5d82c7..0x5d82f7]
 enum class ScopedViewOverlay {
 	// Neither selector byte: the projected entity markers.
 	// [orig: Render_DrawEntityOverlayMarkers @0x5cab26]
@@ -48,7 +48,7 @@ enum class ScopedViewOverlay {
 	// [orig: Binoculars_DrawMask @0x5caaec]
 	kBinocularMask = 1,
 	// The Sighted selector: the SIGHTS card alone, never the circle mask.
-	// [orig: draw_weapon_sight_overlays @0x5caafa]
+	// [orig: HUD_DrawWeaponSightOverlays @0x5caafa]
 	kSightedCard = 2,
 	// The Scoped selector: the SIGHTS card, then the circle mask with
 	// draw_crosshair = (the card drew no row).
@@ -178,7 +178,7 @@ ScopeCircleMask build_scope_circle_mask(int32_t x0, int32_t y0, int32_t x1,
 // grid, about the same centre and ring size but at UNIT scale -- no aspect
 // stretch, no annulus. The result's ring is empty.
 // [orig: NVG_DrawScopedLens @0x5d2798..0x5d27bc:
-//  `if (!draw_weapon_sight_overlays()) draw_minimap_crosshair_and_grid(ring,
+//  `if (!HUD_DrawWeaponSightOverlays()) HUD_DrawMinimapCrosshairAndGrid(ring,
 //  cx, cy, 1.0, 1.0)`]
 ScopeCircleMask build_nvg_lens_reticle(int32_t x0, int32_t y0, int32_t x1,
 		int32_t y1, int32_t screen_width);

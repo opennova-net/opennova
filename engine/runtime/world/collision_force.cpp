@@ -111,7 +111,7 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
         LocalPlayer *local_state = world.local_player_state;
         if (friendly) {
             // Suppressed in session when the rules word carries NoFriendlyFire
-            // (g_rules_flags & 0x200) [orig: @0x4af752]; otherwise intensity
+            // (g_RulesFlags & 0x200) [orig: @0x4af752]; otherwise intensity
             // 0xA000, rate 0x8000 / ((124 * mult) >> 2) [orig: @0x4af764..0x4af77e]
             if (!world.rules.mp_session || !world.rules.no_friendly_fire) {
                 world.weather.core.hit_dim.arm(damage_multiplier == 3, /*friendly=*/true);
@@ -150,7 +150,7 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
 //  wasHit/damageTimer/lastAttacker tail is ported on the RoundHit drain]
 void entity_on_damage_received(World &world, const Entity &victim,
         const AmmoTableEntry *ammo) {
-    // [orig: `entity == g_local_player_entity && ammoSource` @0x4af812]
+    // [orig: `entity == g_LocalPlayerEntity && ammoSource` @0x4af812]
     if (!(victim.handle == world.cached.local_player) || ammo == nullptr) return;
     LocalPlayer *local_state = world.local_player_state;
     if (local_state == nullptr) return;

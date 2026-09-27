@@ -11,8 +11,11 @@ extends RefCounted
 ## The shell owns the strings because it owns the string tables: the title
 ## from gametext Overlays (with retail's literal fallback), the game-type
 ## label from the witnessed Overlays row map, the two count lines from
-## Client, and the paging hint from Text. Server name and mission title ride
-## the session decode through get_scoreboard.
+## Client, and the paging hint from keyhelp's Text section. Server name and
+## mission title ride the session decode through get_scoreboard.
+
+# The paging hint's literal fallback (the KeyHelp lookup's default string).
+const PAGE_HINT_FALLBACK := "!PgUp and PgDn to change pages"
 
 var _pushed := false      # so the board clears exactly once on close
 
@@ -41,7 +44,7 @@ func update(hud: HudOverlay, world: GameWorld, open: bool, frame_counter: int) -
 		"title": "!Kill List",
 		# [orig: KeyHelp_GetStringWithFallback("Text", "CHANGE_SCREEN",
 		#  "!PgUp and PgDn to change pages") @0x424272]
-		"footer": "!PgUp and PgDn to change pages",
+		"footer": PAGE_HINT_FALLBACK,
 		"server": board.server,
 		"mission": board.mission,
 	}
@@ -58,15 +61,17 @@ func update(hud: HudOverlay, world: GameWorld, open: bool, frame_counter: int) -
 		# count is replication's witnessed rows-minus-spectators header arithmetic
 		# (scoreboard_header); this lane only pairs them with the strings.
 		var spectators := board.spectators
-		if table.has_string_in_section("Client", "STRCLI04"):
+		if table.has_string_in_section(Strings.SECTION_CLIENT, "STRCLI04"):
 			strings["players"] = "%s %d" % [
-					table.get_string_in_section("Client", "STRCLI04"),
+					table.get_string_in_section(Strings.SECTION_CLIENT, "STRCLI04"),
 					board.players]
-		if spectators > 0 and table.has_string_in_section("Client", "STRCLI23"):
+		if spectators > 0 and table.has_string_in_section(Strings.SECTION_CLIENT, "STRCLI23"):
 			strings["spectators"] = "%s %d" % [
-					table.get_string_in_section("Client", "STRCLI23"), spectators]
-		if table.has_string_in_section("Text", "CHANGE_SCREEN"):
-			strings["footer"] = table.get_string_in_section("Text", "CHANGE_SCREEN")
+					table.get_string_in_section(Strings.SECTION_CLIENT, "STRCLI23"), spectators]
+		# The paging hint is a keyhelp lookup (the KeyHelp fallback getter reads
+		# g_TextKeyHelp), which answers only once gametext is loaded: this gate.
+		strings["footer"] = Strings.lookup_or(Strings.TABLE_KEYHELP, "Text", "CHANGE_SCREEN",
+				PAGE_HINT_FALLBACK)
 	# The rows never round-trip through script: the overlay pulls them (and the
 	# team count the 4-team page reads) natively from the sim
 	# (HudOverlay.set_scoreboard -> fill_scoreboard_rows); the frame counter is

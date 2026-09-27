@@ -1,7 +1,7 @@
 // The sky-pass placement of a celestial body (Celestial stamps these onto
 // its ObjectModels' materials; every other object keeps the defaults).
 // Retail submits the sun/moon at THIS pass camera + direction * 64
-// (render_celestial_bodies @ 0x5acaa0, re-entered by the water mirror) and
+// (Render_CelestialBodies @ 0x5acaa0, re-entered by the water mirror) and
 // the glow/glint at the main camera; the discs ride the sky bracket before
 // any world geometry, so they pin to the far plane and every nearer surface
 // overdraws them, and each scene pass gates its own bracket

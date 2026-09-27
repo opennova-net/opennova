@@ -51,7 +51,7 @@ world::WeatherSeed weather_seed_from_config(const Config &config, const bms::Hea
 	seed.tod_advance_per_tick = static_cast<uint32_t>(
 			tod_advance_per_tick(static_cast<int>(header.minutes_per_day)));
 	seed.fog_type = config.fog_type;
-	// Env_LightningColor takes the parser's envscaled byte color.
+	// g_EnvLightningColor takes the parser's envscaled byte color.
 	seed.lightning_color = pack_rgb(EnvironmentState::scale_global_color(
 			config.lightning_rgb, config.envscale));
 	seed.wind_scale = 256;

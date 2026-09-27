@@ -168,7 +168,7 @@ ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string
 // empty buffer.
 int32_t vfs_version_crc(const uint8_t *data, size_t size);
 
-// g_expansion_checksum's producer [orig: Expansion_LoadAssets — the reset to 0
+// g_ExpansionChecksum's producer [orig: Expansion_LoadAssets — the reset to 0
 // @ 0x4a4781, the loose expansion\<name>\version.txt size/load/CRC
 // @ 0x4a4858..0x4a488a]. Returns 0 when the expansion is empty or the loose
 // file is absent/unreadable; an EMPTY version.txt also returns 0 (retail would

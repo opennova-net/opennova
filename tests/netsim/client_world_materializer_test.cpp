@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <optional>
 
 namespace {
@@ -267,7 +268,7 @@ bool preoccupied_exact_slot_requires_a_fresh_wire_generation() {
 			fresh.spawned.front().registry_spawn_id != 0 &&
 			materializer.owned(world, handle) == world.registry.get(handle) &&
 			world.registry.get(handle) != nullptr &&
-			world.registry.get(handle)->name == "Fresh wire generation" &&
+			world.registry.get(handle)->display_name == "Fresh wire generation" &&
 			world.registry.get(handle)->registry_spawn_id != foreign_id,
 			"a later wire generation can claim the now-empty exact slot");
 }
@@ -296,7 +297,7 @@ bool wire_target_authors_ground_separately_from_parent() {
 	// must never let the parent author the structural carrier. [orig:
 	// NapiNPClientMsg_0x00D @0x432C40 — parent → occupantEntity (+368) store
 	// @0x433289; target → groundEntity resolve @0x4332bc, store @0x4332d7;
-	// serialize_entity_pool_to_packet_0 +0x170 @0x503BC9, +0x28 @0x503C22]
+	// NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9, +0x28 @0x503C22]
 	gun.parent_handle = occupant_ref.slot_id;
 	gun.target_handle = hull.slot_id;
 	nw::PoolSpawnBatch batch;
@@ -350,7 +351,7 @@ bool wire_target_authors_ground_separately_from_parent() {
 // orphan sweep removes it when the joiner dies. Only materialized pool-1..3
 // lifetimes resolve, and a vehicle takes no 0x0D carrier at all.
 // [orig: NapiNPClientMsg_0x00D occupantEntity store @0x433289;
-//  serialize_entity_pool_to_packet_0 +0x170 @0x503BC9]
+//  NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9]
 bool pool0_parent_never_aliases_the_native_body() {
 	ns::ClientReplicaPipeline pipeline;
 	static constexpr uint16_t kVehicleType = 5011;
@@ -603,6 +604,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 	vehicle.bone_byte = 0x7A;
 	vehicle.alert_byte = 0x17;
 	vehicle.action_byte = 0x33;
+	vehicle.has_zone_number_rank = true;
 	vehicle.zone_number_rank = 0x22;
 	vehicle.zone_radius = 70;
 	vehicle.seat_mask = 0x8Fu; // fixed slots 0..3 and 7 exist
@@ -663,9 +665,13 @@ bool decoded_world_stream_materializes_exact_rows() {
 
 	w::Entity *boat = world.registry.get(w::EntityHandle{0x1042});
 	if (!expect(boat != nullptr && boat->kind == w::EntityKind::Item &&
-			boat->item_id == 5008 && boat->name == "Wire Boat" &&
+			boat->item_id == 5008 && boat->display_name == "Wire Boat" &&
 			boat->net_id == 0 &&
-			boat->team == 1 && boat->engine_flags == 0x01004020u &&
+			boat->team == 1 &&
+			// The streamed dword lands whole, each bit in the word that owns it:
+			// 0x20 is a mover's runtime bit, so it rides `flags` alone.
+			(boat->flags | boat->engine_flags) == 0x01004020u &&
+			boat->flags == 0x01004020u && boat->engine_flags == 0x01004000u &&
 			boat->section_mask == 0x44u && boat->ammo_count == 0x7A &&
 			boat->ref_num == 0x17 && boat->sub_type == 0x33 &&
 			boat->zone_number == 2 && boat->zone_radius == 70 &&
@@ -784,7 +790,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 			repeated.retired.front().registry_spawn_id == repeated_spawn_id &&
 			repeated.spawned.front().handle == w::EntityHandle{0x1042} &&
 			repeated.spawned.front().registry_spawn_id != repeated_spawn_id &&
-			boat != nullptr && boat->name == "Repeated Boat" &&
+			boat != nullptr && boat->display_name == "Repeated Boat" &&
 			boat->engine_flags == 0x00001001u &&
 			boat->registry_spawn_id != repeated_spawn_id && boat->health == 100 &&
 			boat->alive && boat->spawned_piece_mask == 0 &&
@@ -875,7 +881,8 @@ bool pool2_tail_beyond_1024_materializes() {
 }
 
 // S2C 0x12 destroys ONE row and detaches dependents; a child attached to the
-// removed handle survives with its parent link cleared until its own remove.
+// removed handle (outside its EWeap refNum group, the next test) survives with
+// its parent link cleared until its own remove.
 // [orig: Entity_Destroy @0x43e810 — occupant/mount detach @0x43e9e9/
 //  @0x43ea38..0x43ea59, memset of the one row @0x43ea70]
 bool entity_remove_detaches_children_in_place() {
@@ -908,6 +915,141 @@ bool entity_remove_detaches_children_in_place() {
 			"0x12 removes only the named row; the child survives detached");
 }
 
+// The client's 0x12 runs the shared Entity_Destroy, refNum walk included: a
+// non-person row with a def and a refNum takes every member of its refNum
+// group whose def carries EWeap, and the members need no 0x12 of their own. A
+// member without EWeap and a gun of another refNum stay, a person's destroy
+// walks nothing, and without the embedder's items.def catalog no row has a def
+// and nothing walks.
+// [orig: NapiNPClientMsg_0x012 @0x425F8F -> Entity_Destroy @0x43E810 (the
+//  gates @0x43E9B6..0x43E9CA, the call @0x43E9CD) -> EntityReference_DestroyEWeapGroup
+//  @0x546F30 (member tests @0x546F8A..0x546FA0, Entity_Destroy @0x546FA3)]
+bool entity_remove_takes_the_eweap_refnum_group() {
+	const auto definition = [](uint16_t wire_type, int32_t item_type, uint32_t attrib) {
+		ns::ItemReplicationDefinition d;
+		d.definition_id = ns::ItemReplicationCatalog::kDefinitionIdOffset + wire_type;
+		d.item_type = item_type;
+		d.attrib = attrib;
+		return d;
+	};
+	constexpr uint32_t kEweap = 0x20u;         // ItemDef+0x54 EWeap
+	constexpr uint32_t kPlayerControl = 0x40u; // ItemDef+0x54 PlayerControl
+	const auto catalog = std::make_shared<const ns::ItemReplicationCatalog>(
+			ns::ItemReplicationCatalog::from_definitions({
+					definition(5010, 1, kPlayerControl | kEweap), // the carrier
+					definition(5011, 6, kEweap),                  // its guns
+					definition(5012, 6, 0),                       // a peer without EWeap
+					definition(5013, 3, 0)}));                    // a person
+	const auto record = [](uint16_t slot, uint16_t type, uint8_t ref) {
+		nw::PoolSpawnRecord r;
+		r.slot_id = slot;
+		r.item_type_id = type;
+		r.alert_byte = ref; // entity+533, the refNum
+		return r;
+	};
+	nw::PoolSpawnBatch batch;
+	batch.records = {record(0x1002, 5010, 9), record(0x1003, 5011, 9),
+			record(0x1004, 5011, 9), record(0x1005, 5012, 9), record(0x1006, 5011, 10),
+			record(0x1007, 5013, 11), record(0x1008, 5011, 11)};
+	nw::EntityRemove removal;
+
+	ns::ClientReplicaPipeline bare;
+	bare.apply(0x0D, nw::encode_pool_spawn_batch(batch));
+	removal.entity_handle = 0x1002;
+	bare.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
+	if (!expect(bare.state().find(0x1002) == nullptr && bare.state().find(0x1003) != nullptr &&
+			bare.state().find(0x1004) != nullptr,
+			"without a catalog no row has a def, so the 0x12 walks no group"))
+		return false;
+
+	ns::ClientReplicaPipeline pipeline;
+	pipeline.set_item_catalog(catalog);
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
+	const ns::ClientState &s = pipeline.state();
+	if (!expect(s.find(0x1003) != nullptr && s.find(0x1003)->spawn_ref_num == 9,
+			"the 0x0D rows carry their refNum"))
+		return false;
+	pipeline.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
+	if (!expect(s.find(0x1002) == nullptr && s.find(0x1003) == nullptr &&
+			s.find(0x1004) == nullptr,
+			"the carrier's 0x12 takes its EWeap refNum members"))
+		return false;
+	if (!expect(s.find(0x1005) != nullptr && s.find(0x1005)->spawn_ref_num == 9 &&
+			s.find(0x1006) != nullptr,
+			"a member without EWeap and another refNum's gun stay"))
+		return false;
+	removal.entity_handle = 0x1007;
+	pipeline.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
+	return expect(s.find(0x1007) == nullptr && s.find(0x1008) != nullptr,
+			"a person's destroy walks no refNum group");
+}
+
+// A joiner's twin joins its refNum's group list the way the client's 0x0D
+// handler joins the row: once its def resolves, a row whose def is not a
+// person's and whose refNum is nonzero. A person, a row without a refNum and a
+// row whose def never resolved stay off the list, the join is taken once per
+// lifetime, and a carrier's death then releases its gun on the joiner's twins.
+// [orig: NapiNPClientMsg_0x00D @0x433381..0x4333AD (NapiNPClientMsg_0x010
+//  @0x433684..0x4336B0 and NapiNPClientMsg_FullEntitySpawn @0x433E27..0x433E52
+//  join the same way); Vehicle_ReleaseEWeapGroupOnDestruction @0x547040 (the
+//  member tests @0x5470B9..0x5470D3, the gun words @0x5470F9..0x547100)]
+bool materialized_rows_join_their_refnum_group() {
+	const auto record = [](uint16_t slot, uint16_t type, uint8_t ref) {
+		nw::PoolSpawnRecord r;
+		r.slot_id = slot;
+		r.item_type_id = type;
+		r.alert_byte = ref; // entity+533, the refNum
+		return r;
+	};
+	nw::PoolSpawnBatch batch;
+	batch.records = {record(0x1002, 5010, 9), record(0x1003, 5011, 9),
+			record(0x1004, 5013, 9), record(0x1005, 5011, 0), record(0x1006, 5014, 9)};
+	ns::ClientReplicaPipeline pipeline;
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
+	auto world_heap = std::make_unique<w::World>();
+	w::World &world = *world_heap;
+	world.registry.configure_pool(1, 16);
+	ns::ClientWorldMaterializer materializer;
+	materializer.sync(pipeline.state(), world);
+	const auto twin = [&](uint16_t packed) {
+		return world.registry.get(w::EntityHandle{packed});
+	};
+	if (!expect(twin(0x1002) != nullptr && twin(0x1003) != nullptr &&
+			twin(0x1006) != nullptr && twin(0x1003)->ref_num == 9 &&
+			!twin(0x1002)->ref_group_member && !twin(0x1003)->ref_group_member,
+			"a twin whose def has not resolved is on no list"))
+		return false;
+	// The joiner's item-traits resweep resolves the defs, then the fold runs
+	// again (JoinerRole::on_replica_world_changed).
+	const auto stamp_def = [&](uint16_t packed, uint8_t item_type, uint32_t attrib) {
+		w::Entity *e = twin(packed);
+		e->has_item_def = true;
+		e->item_type = item_type;
+		e->item_attrib = attrib;
+	};
+	stamp_def(0x1002, 1, w::kItemAttribPlayerControl); // the carrier
+	stamp_def(0x1003, 6, w::kItemAttribEweap);         // its gun
+	stamp_def(0x1004, 3, 0);                           // a person
+	stamp_def(0x1005, 6, w::kItemAttribEweap);         // a gun without a refNum
+	materializer.sync(pipeline.state(), world);         // 0x1006 has no def row
+	if (!expect(twin(0x1002)->ref_group_member && twin(0x1003)->ref_group_member &&
+			!twin(0x1004)->ref_group_member && !twin(0x1005)->ref_group_member &&
+			!twin(0x1006)->ref_group_member,
+			"a resolved non-person twin with a refNum joins; a person, a zero refNum and an unresolved def do not"))
+		return false;
+	twin(0x1004)->item_type = 6;
+	materializer.sync(pipeline.state(), world);
+	if (!expect(!twin(0x1004)->ref_group_member,
+			"the join is taken once per lifetime: a later fold does not take it again"))
+		return false;
+	twin(0x1003)->emplaced_gun_yaw_word = 0x1234;
+	twin(0x1003)->emplaced_gun_pitch_word = -0x234;
+	w::entity_update_death_transforms(world, *twin(0x1002), /*silent=*/true);
+	return expect(twin(0x1003) != nullptr && twin(0x1003)->emplaced_gun_yaw_word == 0 &&
+			twin(0x1003)->emplaced_gun_pitch_word == 0,
+			"the carrier's death releases its gun in place on the joiner's twin");
+}
+
 // S2C 0x2F updates the flag itself, its occupantEntity pointer, the carrier's
 // mountedChild back-link, and groundEntity. A later detached record clears both
 // sides without respawning the flag. [orig: NapiNPClientMsg_0x02F @0x430E10;
@@ -924,15 +1066,20 @@ bool objective_state_attaches_and_detaches_flag() {
 	w::World world;
 	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
 		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
+	// The client's own player: wire handle 0x0002, its native row at slot 4.
+	// A remote carrier's wire handle 0x0004 names that native slot too, and
+	// must never resolve to it: a pool-0 carrier resolves to the native row
+	// only through the client's own wire handle.
 	w::Entity carrier_seed;
 	carrier_seed.kind = w::EntityKind::Organic;
 	carrier_seed.item_id = 1;
 	const w::EntityHandle carrier{0x0004};
 	if (!expect(world.registry.spawn_at(carrier, carrier_seed) == carrier,
-			"the objective carrier occupies its retail pool-0 handle"))
+			"the client's own player sits at native slot 4"))
 		return false;
 
 	ns::ClientWorldMaterializer materializer;
+	materializer.set_local_player(0x0002, carrier);
 	materializer.sync(pipeline.state(), world);
 
 	nw::ObjectiveEntityState carried;
@@ -941,20 +1088,29 @@ bool objective_state_attaches_and_detaches_flag() {
 	carried.pos_x = 12 * 65536;
 	carried.pos_y = -3 * 65536;
 	carried.pos_z = 5 * 65536;
-	carried.attach_handle = carrier.packed;
+	carried.attach_handle = 0x0004;
 	carried.ground_handle = 0xFFFF;
 	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE,
 			nw::encode_objective_entity_state(carried));
 	materializer.sync(pipeline.state(), world);
-
 	w::Entity *flag_entity = world.registry.get(w::EntityHandle{flag.slot_id});
 	w::Entity *carrier_entity = world.registry.get(carrier);
 	if (!expect(flag_entity != nullptr && carrier_entity != nullptr &&
-			flag_entity->primary_occupant == carrier &&
+			!flag_entity->primary_occupant.valid() &&
+			!carrier_entity->mounted_child.valid() &&
+			(flag_entity->flags & 0x01u) != 0,
+			"a remote carrier's wire handle never names the native row at its slot"))
+		return false;
+
+	carried.attach_handle = 0x0002;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE,
+			nw::encode_objective_entity_state(carried));
+	materializer.sync(pipeline.state(), world);
+	if (!expect(flag_entity->primary_occupant == carrier &&
 			carrier_entity->mounted_child == w::EntityHandle{flag.slot_id} &&
 			(flag_entity->flags & 0xFFu) == 0x01u &&
 			std::fabs(flag_entity->position.x - 12.0f) < 0.001f,
-			"0x2F attaches the flag and applies its low flags and fixed position"))
+			"0x2F attaches the flag to the client's own player and applies its low flags and fixed position"))
 		return false;
 
 	carried.flags_byte = 0;
@@ -969,11 +1125,249 @@ bool objective_state_attaches_and_detaches_flag() {
 			"a detached 0x2F clears both carry links and ignores an unresolved ground row");
 }
 
+// A client dropping the flag off its own player reads that player's own
+// native pose (position, body heading and pitch), not the host's echo row of
+// its wire handle.
+// [orig: NapiNPClientMsg_0x02F @0x4310DC -> Entity_DropCarriedObject over the
+//  client's own entity]
+bool objective_drop_off_the_local_player_reads_its_own_pose() {
+	ns::ClientReplicaPipeline pipeline;
+	nw::PoolSpawnRecord flag;
+	flag.slot_id = 0x1007;
+	flag.item_type_id = 4091;
+	nw::PoolSpawnBatch batch;
+	batch.records.push_back(flag);
+	pipeline.apply(nw::s2c::POOL_SPAWN, nw::encode_pool_spawn_batch(batch));
+	// The host's echo of the client's own wire handle, somewhere else.
+	ns::ClientEntityState &echo = pipeline.state().upsert(0x0002);
+	echo.type_id = 1;
+	echo.cls = nw::EntityClass::Player;
+	echo.x = 20 * 65536;
+	echo.y = 30 * 65536;
+	echo.z = 4 * 65536;
+	echo.heading_bam = 0x10000000;
+
+	w::World world;
+	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
+		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
+	w::Entity local_seed;
+	local_seed.kind = w::EntityKind::Organic;
+	local_seed.item_id = 1;
+	local_seed.position = {100.0f, 200.0f, 10.0f};
+	const w::EntityHandle local{0x0005};
+	world.registry.spawn_at(local, local_seed);
+	w::AiEntity *body = world.ai.at(world.ai.attach(local));
+	body->heading = 0x20000000;
+	body->pitch = 0;
+	ns::ClientWorldMaterializer materializer;
+	materializer.set_local_player(0x0002, local);
+	materializer.sync(pipeline.state(), world);
+
+	nw::ObjectiveEntityState state;
+	state.entity_handle = flag.slot_id;
+	state.flags_byte = 0x01;
+	state.pos_x = 20 * 65536;
+	state.pos_y = 30 * 65536;
+	state.pos_z = 4 * 65536;
+	state.attach_handle = 0x0002;
+	state.ground_handle = 0xFFFF;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE, nw::encode_objective_entity_state(state));
+	materializer.sync(pipeline.state(), world);
+	state.flags_byte = 0x00;
+	state.attach_handle = 0xFFFF;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE, nw::encode_objective_entity_state(state));
+	materializer.sync(pipeline.state(), world);
+	const w::Entity *flag_entity = world.registry.get(w::EntityHandle{flag.slot_id});
+	return expect(flag_entity != nullptr && flag_entity->position.x == 100.0f &&
+			flag_entity->position.y == 200.0f &&
+			w::to_fixed(flag_entity->position.z) == 10 * 65536 + 0x4000 &&
+			flag_entity->veh.yaw_bam == 0x60000000 &&
+			flag_entity->drop_motion == w::DropMotion::Fall &&
+			!world.registry.get(local)->mounted_child.valid(),
+			"the drop off the client's own player reads its native pose and body heading");
+}
+
+// Destroying a person carrier's row drops the flag it carries, off its last
+// pose, whether S2C 0x12 or the 0x5D sweep destroys it; a carrier of another
+// class only detaches.
+// [orig: Entity_Destroy @0x43E8AA..0x43E8B8 (def type 3 -> Entity_DropCarriedObject),
+//  reached from NapiNPClientMsg_0x012 @0x425EE0 and NapiNPClientMsg_DestroyEntityList
+//  @0x429730]
+bool carrier_destroy_drops_the_flag() {
+	for (int path = 0; path < 3; ++path) {
+		ns::ClientReplicaPipeline pipeline;
+		nw::PoolSpawnRecord flag;
+		flag.slot_id = 0x1007;
+		flag.item_type_id = 4093;
+		nw::PoolSpawnBatch batch;
+		batch.records.push_back(flag);
+		pipeline.apply(nw::s2c::POOL_SPAWN, nw::encode_pool_spawn_batch(batch));
+		ns::ClientEntityState &carrier = pipeline.state().upsert(0x0006);
+		carrier.type_id = 1;
+		carrier.cls = path == 2 ? nw::EntityClass::Vehicle : nw::EntityClass::Infantry;
+		carrier.x = 20 * 65536;
+		carrier.y = 30 * 65536;
+		carrier.z = 4 * 65536;
+		carrier.heading_bam = 0x10000000;
+		carrier.pitch_bam = 0x10000000;
+
+		w::World world;
+		for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
+			world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
+		ns::ClientWorldMaterializer materializer;
+		materializer.sync(pipeline.state(), world);
+		nw::ObjectiveEntityState state;
+		state.entity_handle = flag.slot_id;
+		state.flags_byte = 0x01;
+		state.pos_x = 20 * 65536;
+		state.pos_y = 30 * 65536;
+		state.pos_z = 4 * 65536;
+		state.attach_handle = 0x0006;
+		state.ground_handle = 0xFFFF;
+		pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE, nw::encode_objective_entity_state(state));
+		materializer.sync(pipeline.state(), world);
+
+		if (path == 1) {
+			nw::DestroyEntityList sweep;
+			sweep.pool0_indices.push_back(0x0006);
+			pipeline.apply(nw::s2c::EMPTY_SLOT_SWEEP, nw::encode_destroy_entity_list(sweep));
+		} else {
+			nw::EntityRemove removal;
+			removal.entity_handle = 0x0006;
+			pipeline.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
+		}
+		materializer.sync(pipeline.state(), world);
+		const w::Entity *flag_entity = world.registry.get(w::EntityHandle{flag.slot_id});
+		if (!expect(flag_entity != nullptr && pipeline.state().find(0x0006) == nullptr,
+				"the carrier's row is destroyed"))
+			return false;
+		if (path == 2) {
+			if (!expect(flag_entity->drop_motion == w::DropMotion::None &&
+					flag_entity->position.z == 4.0f,
+					"a destroyed carrier of another class only detaches the flag"))
+				return false;
+			continue;
+		}
+		if (!expect((flag_entity->flags & 0x01u) == 0 && flag_entity->position.x == 20.0f &&
+				flag_entity->position.y == 30.0f &&
+				w::to_fixed(flag_entity->position.z) == 4 * 65536 + 0x4000 &&
+				flag_entity->veh.yaw_bam == 0x50000000 && flag_entity->veh.slide_z == 391 &&
+				flag_entity->drop_motion == w::DropMotion::Fall,
+				path == 0 ? "0x12 destroying the person carrier drops the flag off its last pose"
+				          : "the 0x5D sweep destroying the person carrier drops the flag off its last pose"))
+			return false;
+	}
+	return true;
+}
+
+// A client runs the drop itself: the 0x2F that takes the flag off its
+// occupant drops it off that occupant's words (here a remote person, known
+// only as its decoded row) with the drop's own legs, Z + 0x4000, a quarter
+// turn and the lift from its pitch, and installs the fall. The fall owns the
+// flag's pose until the next 0x2F state lands its own.
+// [orig: NapiNPClientMsg_0x02F @0x4310DC -> Entity_DropCarriedObject
+//  @0x439DF0; the pose stores @0x430F68..0x430F74]
+bool objective_state_drop_runs_on_the_client() {
+	ns::ClientReplicaPipeline pipeline;
+	nw::PoolSpawnRecord flag;
+	flag.slot_id = 0x1007;
+	flag.item_type_id = 4091;
+	nw::PoolSpawnBatch batch;
+	batch.records.push_back(flag);
+	pipeline.apply(nw::s2c::POOL_SPAWN, nw::encode_pool_spawn_batch(batch));
+	ns::ClientEntityState &carrier_row = pipeline.state().upsert(0x0004);
+	carrier_row.type_id = 1;
+	carrier_row.x = 20 * 65536;
+	carrier_row.y = 30 * 65536;
+	carrier_row.z = 4 * 65536;
+	carrier_row.heading_bam = 0x10000000;
+	carrier_row.pitch_bam = 0x10000000;
+
+	w::World world;
+	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
+		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
+	ns::ClientWorldMaterializer materializer;
+	materializer.sync(pipeline.state(), world);
+
+	nw::ObjectiveEntityState state;
+	state.entity_handle = flag.slot_id;
+	state.flags_byte = 0x01;
+	state.pos_x = 20 * 65536;
+	state.pos_y = 30 * 65536;
+	state.pos_z = 4 * 65536;
+	state.attach_handle = 0x0004;
+	state.ground_handle = 0xFFFF;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE, nw::encode_objective_entity_state(state));
+	materializer.sync(pipeline.state(), world);
+	w::Entity *flag_entity = world.registry.get(w::EntityHandle{flag.slot_id});
+	if (!expect(flag_entity != nullptr && (flag_entity->flags & 0x01u) != 0 &&
+			flag_entity->drop_motion == w::DropMotion::None,
+			"a carried 0x2F state hides the flag on its remote carrier"))
+		return false;
+
+	state.flags_byte = 0;
+	state.pos_z = 4 * 65536 + 0x4000;
+	state.attach_handle = 0xFFFF;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE, nw::encode_objective_entity_state(state));
+	materializer.sync(pipeline.state(), world);
+	if (!expect((flag_entity->flags & 0x01u) == 0 &&
+			flag_entity->position.x == 20.0f && flag_entity->position.y == 30.0f &&
+			w::to_fixed(flag_entity->position.z) == 4 * 65536 + 0x4000 &&
+			flag_entity->veh.yaw_bam == 0x50000000 && flag_entity->veh.slide_z == 391 &&
+			flag_entity->drop_motion == w::DropMotion::Fall,
+			"the detached 0x2F drops the flag off its carrier's words and installs the fall"))
+		return false;
+
+	// The fall moves the flag; a sync without a new state leaves it there.
+	flag_entity->position.z = 1.0f;
+	pipeline.state().mark_topology_changed();
+	materializer.sync(pipeline.state(), world);
+	if (!expect(flag_entity->position.z == 1.0f,
+			"between 0x2F states the client's own fall owns the flag's pose"))
+		return false;
+
+	// The next state (the host's round-robin refresh) lands its pose; the
+	// installed callback stays.
+	state.pos_z = 2 * 65536;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE, nw::encode_objective_entity_state(state));
+	materializer.sync(pipeline.state(), world);
+	if (!expect(flag_entity->position.z == 2.0f &&
+			flag_entity->drop_motion == w::DropMotion::Fall,
+			"a new 0x2F state lands its pose and leaves the installed fall"))
+		return false;
+
+	// A pickup, then a carrier swap in one state: the flag drops off the first
+	// carrier and the second attaches it, hidden again with its fall gone.
+	// [orig: @0x43105C then Entity_AttachCarriedObject @0x43C14A / @0x43C191]
+	ns::ClientEntityState &second = pipeline.state().upsert(0x0005);
+	second.type_id = 1;
+	second.x = 50 * 65536;
+	state.flags_byte = 0x01;
+	state.attach_handle = 0x0004;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE, nw::encode_objective_entity_state(state));
+	materializer.sync(pipeline.state(), world);
+	if (!expect(flag_entity->drop_motion == w::DropMotion::None,
+			"a pickup state puts back the def's callback"))
+		return false;
+	state.flags_byte = 0x00;
+	state.attach_handle = 0x0005;
+	pipeline.apply(nw::s2c::OBJECTIVE_ENTITY_STATE, nw::encode_objective_entity_state(state));
+	materializer.sync(pipeline.state(), world);
+	return expect((flag_entity->flags & 0x01u) != 0 &&
+			flag_entity->drop_motion == w::DropMotion::None &&
+			flag_entity->position.x == 20.0f &&
+			w::to_fixed(flag_entity->position.z) == 4 * 65536 + 0x4000,
+			"a carrier swap drops the flag off the first carrier, then the attach hides it");
+}
+
 // The world-stream fence hands every materialized static a placed identity so
 // the shell presents it through the same batched placer path as the host's
 // own statics (retail draws the client-built pools through the one sector
-// renderer [orig: collect_visible_entities_for_terrain @0x5c8c60]). Kind
-// follows the streamed Flags Building bit, pool 3 is markers, the index is a
+// renderer [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5c8c60]). Kind
+// follows the row's item def as the host's BMS list does (a building def is a
+// Building, an object or a vehicle an Item), never the streamed Flags bit
+// 0x20000, which a live retail vehicle carries from its mover [orig:
+// Entity_UpdateVehiclePhysics @0x48D451]; pool 3 is markers, the index is a
 // per-kind ordinal in the witnessed pool order, and the BMS-attribute bits map
 // back off the Flags dword exactly [orig: Entity_SpawnFromBMSRecord @0x40ed14].
 bool streamed_rows_take_a_placed_identity_at_the_fence() {
@@ -992,16 +1386,18 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 	statics.records.push_back(static_row);
 	nw::StaticEntityRecord crate = static_row;
 	crate.item_type_id = 0x0601;
-	crate.entity_flags = 0x01000000u; // NoShadow, no Building bit: an Item
+	crate.entity_flags = 0x01020000u; // NoShadow + the matrix bit, but an object def: an Item
 	statics.records.push_back(crate);
 	pipeline.apply(0x10, nw::encode_static_entity_batch(statics));
 
+	// A live retail vehicle: REFLECTABLE plus its mover's per-tick 0x20000, as
+	// the retail load stream carries it (fixtures/novaworld/run_20260426_120859).
 	nw::PoolSpawnRecord vehicle;
 	vehicle.slot_id = 0x1042;
 	vehicle.item_type_id = 5008;
 	vehicle.pos_x = 2 * 65536;
 	vehicle.team_byte = 1;
-	vehicle.entity_flags = 0x00004020u;
+	vehicle.entity_flags = 0x00020400u;
 	nw::PoolSpawnBatch vehicles;
 	vehicles.records.push_back(vehicle);
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(vehicles));
@@ -1025,6 +1421,16 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 			world.registry.get(w::EntityHandle{0x2025})->bms_id == 0,
 			"materialization alone stamps no placed identity"))
 		return false;
+	// The joiner's item-traits resweep resolves every materialized row's def
+	// before the fence (JoinerRole::on_replica_world_changed).
+	const auto stamp_def = [&](uint16_t packed, uint8_t item_type) {
+		w::Entity *e = world.registry.get(w::EntityHandle{packed});
+		e->has_item_def = true;
+		e->item_type = item_type;
+	};
+	stamp_def(0x2025, 5); // a building def
+	stamp_def(0x2026, 6); // an object def
+	stamp_def(0x1042, 1); // a vehicle def
 
 	if (!expect(materializer.assign_placement_origins(world) == 4,
 			"the fence stamps every materialized pool-1..3 row once"))
@@ -1041,7 +1447,7 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 			boat->bms_id == 0x1043 &&
 			mark->spawn_origin == w::spawn_origin_pack(0, 0) &&
 			mark->bms_id == 0x300C,
-			"kind follows the Building flag, indices are per-kind ordinals in pool 2/1/3 slot order, bms ids are the packed handle + 1"))
+			"kind follows the item def (a live vehicle's 0x20000 keeps it an Item), indices are per-kind ordinals in pool 2/1/3 slot order, bms ids are the packed handle + 1"))
 		return false;
 	if (!expect(materializer.assign_placement_origins(world) == 0,
 			"a second fence pass stamps nothing"))
@@ -1061,7 +1467,7 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 			attribs_of(rows[1]) == 0x01000000u &&
 			kind_of(rows[2]) == 1 && index_of(rows[2]) == 1 &&
 			rows[2]->item_id == 5008 && rows[2]->team == 1 &&
-			attribs_of(rows[2]) == 0 &&
+			attribs_of(rows[2]) == 0x00800000u &&
 			kind_of(rows[3]) == 2 && rows[3]->bms_id == 0x2026 &&
 			rows[3]->item_id == 0x0600 && rows[3]->team == 2 &&
 			rows[3]->yaw == 37 &&
@@ -1133,7 +1539,12 @@ int main() {
 	if (!pool0_parent_never_aliases_the_native_body()) return 1;
 	if (!deployed_item_spawn_update_and_remove_materialize()) return 1;
 	if (!entity_remove_detaches_children_in_place()) return 1;
+	if (!entity_remove_takes_the_eweap_refnum_group()) return 1;
+	if (!materialized_rows_join_their_refnum_group()) return 1;
 	if (!objective_state_attaches_and_detaches_flag()) return 1;
+	if (!objective_state_drop_runs_on_the_client()) return 1;
+	if (!objective_drop_off_the_local_player_reads_its_own_pose()) return 1;
+	if (!carrier_destroy_drops_the_flag()) return 1;
 	if (!decoded_world_stream_materializes_exact_rows()) return 1;
 	if (!pool2_tail_beyond_1024_materializes()) return 1;
 	if (!streamed_rows_take_a_placed_identity_at_the_fence()) return 1;

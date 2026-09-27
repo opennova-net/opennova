@@ -33,6 +33,22 @@ bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
 			});
 }
 
+// The weapon Inset pass compiles the scar caches inside its own collect, so
+// its owner gate reads its own section masks and its fog box its own eye
+// (engine: world/occlusion.h OcclusionView carries the witness): the same
+// compile over the Inset view's frame words, the main view's back after.
+Ref<ScarDrawList> Simulation::get_scar_draw_list_inset(const Vector3 &p_camera_godot,
+		float p_fog_distance, const Color &p_terrain_light) const {
+	if (!kernel_) {
+		return get_scar_draw_list(p_camera_godot, p_fog_distance, p_terrain_light);
+	}
+	kernel_->occlusion.select_view(opennova::world::OcclusionView::kInset);
+	const Ref<ScarDrawList> out =
+			get_scar_draw_list(p_camera_godot, p_fog_distance, p_terrain_light);
+	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
+	return out;
+}
+
 Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		float p_fog_distance, const Color &p_terrain_light) const {
 	Ref<ScarDrawList> out;

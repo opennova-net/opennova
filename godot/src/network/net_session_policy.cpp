@@ -34,8 +34,7 @@ String NetSessionPolicy::describe_installed(const PackedStringArray &p_installed
 	for (int i = 0; i < p_installed.size(); ++i) {
 		installed.push_back(opennova::to_std(p_installed[i]));
 	}
-	return String::utf8(
-			opennova::inmatch::describe_installed_expansions(installed).c_str());
+	return opennova::to_gd(opennova::inmatch::describe_installed_expansions(installed));
 }
 
 void NetSessionPolicy::arm_preload(int64_t p_now_ms) {

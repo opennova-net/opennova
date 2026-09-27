@@ -9,6 +9,7 @@
 #include <runtime/audio/oneshot_play.h>
 #include <formats/mission/mission.h>
 #include <runtime/mission/placement_traits.h>
+#include <runtime/mission/seat_spec_extract.h> // stamp_minus_one_slot_window
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <runtime/terrain_query/height_field.h>
@@ -76,7 +77,7 @@ void bind_regional_sounds(world::World &world, const DefItemDef &def,
 // repeats 102044: "Map Named Location" first, "Power Up Med Pack Infinite"
 // later). [orig: ItemList_FindIndexByTypeId @0x49E100 — `cmp [ecx],esi; jz`
 // @0x49E120..0x49E122 returns the first hit; Entity_SpawnFromBMSRecord
-// ItemTypeIndex @0x40EBFC, ItemDef = gItemDefs + index @0x40EBFF..0x40EC07]
+// ItemTypeIndex @0x40EBFC, ItemDef = g_ItemDefs + index @0x40EBFF..0x40EC07]
 std::unordered_map<int, const DefItemDef *> index_items(
         const DefItemsFile &items) {
     std::unordered_map<int, const DefItemDef *> by_id;
@@ -173,7 +174,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // "Null" row is ordinal 0 too): each `begin` appends the next row.
         // [orig: entity+0x1C = ItemList_FindIndexByTypeId(type) @0x40EBFC; the
         //  `begin` arm of ItemDef_ParseProperty @0x49EBA8 allocates the row,
-        //  ItemDef_AllocateWithDefaults @0x49E3BE bumps gItemCount]
+        //  ItemDef_AllocateWithDefaults @0x49E3BE bumps g_ItemCount]
         e->item_type_index = def != nullptr ? static_cast<int32_t>(def - items.entries) : 0;
         // The org1 initializer seeds this magazine even without an ammo name.
         // Bind the definition value here; a later traits refresh must not refill it.
@@ -254,6 +255,42 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             e->sub_type = 0xFF;
             e->armor_impact = -1;
             e->armor_kz = -1;
+            // On an addeweap child this runs after the spawn stamped the slot
+            // subType and before the ewep class init reads it: the init then
+            // reads its anchor index at subType -1, the byte before the carrier
+            // def's slot table (the top byte of slot 4's raw child type, 0 for
+            // any id below 2^24; 0xFF when that id sits under 100000), neither a
+            // userpoint index, so the child rides its carrier's root with no
+            // anchor offset, and no C/G designation slot matches it.
+            // [orig: Entity_SpawnWeaponOverlays @0x40F40E then Entity_InitFromModel
+            //  @0x40F414 (subType = -1 @0x40DCAF) then the init callback @0x40F43E;
+            //  Entity_InitBoneReferences @0x4415F1..0x44164A; ItemDef_ParseProperty
+            //  addeweap type - 100000 @0x4A1BA3..0x4A1BAD]
+            if (e->emplacement_parent.valid()) {
+                e->emplacement_bone = 0;
+                e->emplacement_anchor_subobject = -1;
+                e->emplacement_local = {};
+                e->emplacement_yaw_offset = 0;
+                e->emplacement_attachment_flags = 0;
+                // Its turret window is the carrier def's slot tables read at -1
+                // (stamp_minus_one_slot_window): light_transfer's bits and slot
+                // 4's down/up/right, straight from the def rows.
+                const world::Entity *carrier = world.registry.get(e->emplacement_parent);
+                const DefItemDef *carrier_def = carrier != nullptr
+                        ? find_item(by_id, static_cast<int>(carrier->item_id) +
+                                  mission::kItemIdOffset)
+                        : nullptr;
+                const DefItemEmplacementAttachment *slot4 =
+                        carrier_def != nullptr && carrier_def->emplacement_attachments != nullptr &&
+                                carrier_def->emplacement_attachments_count > 3
+                        ? &carrier_def->emplacement_attachments[3]
+                        : nullptr;
+                stamp_minus_one_slot_window(*e,
+                        carrier_def != nullptr ? carrier_def->light_transfer : 0.0f,
+                        slot4 != nullptr ? slot4->down_angle : 0,
+                        slot4 != nullptr ? slot4->up_angle : 0,
+                        slot4 != nullptr ? slot4->right_angle : 0);
+            }
         }
         // Death-presentation timing: deathtime (def+0x890, parse-scaled ticks)
         // seeds the corpse timer at the death edge; LeaveCorpse rides the stamp
@@ -286,18 +323,43 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 e->death_motion = world::DeathMotionMode::BuildingEffects;
             else if (strutil::iequals(def->move_function, "psec"))
                 e->death_motion = world::DeathMotionMode::PalmPiece;
+            // The model init builds the entity matrix once and marks it built
+            // for a def no mover will rebuild: a decoration, building or
+            // powerup/object type, or an entity with no update callback — never
+            // true of a resolved def, whose callback lookup falls back to the
+            // "null" row [orig: Entity_InitFromModel @0x40E0D4..0x40E105;
+            //  EntityDef_LookupPhysicsCallback @0x4A9272]. Once per entity, as
+            //  the init runs once; a later clear (teleport, death) stays.
+            if (def->type == DEF_ITEM_TYPE_DECORATION || def->type == DEF_ITEM_TYPE_BUILDING ||
+                    def->type == DEF_ITEM_TYPE_POWERUP)
+                e->engine_flags |= world::kEntityFlagMatrixBuilt;
         }
         if (def && (strutil::iequals(def->ai_function, "palm") ||
                 strutil::iequals(def->ai_function, "psec")))
             e->palm_sections = true;
+        // The ai_function palm row's callback is WeaponOverlay_HandleDamage and
+        // the move_function psec row's update is Entity_UpdatePhysicsStep: the two
+        // callbacks the load serializers test before streaming entity+0x270.
+        // [orig: class rows palm @0x813268 (callback @0x813278), psec @0x82AD4C
+        //  (update @0x82AD5C); the tests @0x503F4C..0x503F65, @0x504554..0x50456D]
+        e->palm_state_streamed = def != nullptr &&
+                (strutil::iequals(def->ai_function, "palm") ||
+                 strutil::iequals(def->move_function, "psec"));
         e->door_event = def != nullptr && fourcc_prefix(def->ai_function) == "door";
         e->door_motion = def != nullptr && fourcc_prefix(def->move_function) == "door";
+        // Every def carries its two +0x6F3/+0x70B sound names; the door
+        // commands play them, and so does the drop of a carried object off
+        // its carrier (world::drop_object_from_carrier).
+        // [orig: ItemDef doorOpenSound +0x6F3 / doorCloseSound +0x70B;
+        //  Entity_DropCarriedObject @0x439f06]
+        if (def != nullptr) {
+            std::memcpy(e->door_open_sound, def->door_open_sound, sizeof(e->door_open_sound));
+            std::memcpy(e->door_close_sound, def->door_close_sound, sizeof(e->door_close_sound));
+        }
         if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
                 (def->type == DEF_ITEM_TYPE_BUILDING || def->type == DEF_ITEM_TYPE_DECORATION)) {
             e->door_count = static_cast<int8_t>(def->deathtime_ticks);
             e->door_first_bone = static_cast<int8_t>(static_cast<uint32_t>(def->deathtime_ticks) >> 8);
-            std::memcpy(e->door_open_sound, def->door_open_sound, sizeof(e->door_open_sound));
-            std::memcpy(e->door_close_sound, def->door_close_sound, sizeof(e->door_close_sound));
             world.doors.initialize(*e, def->door_open_rate_q16, def->door_max_angle_bam);
         }
         // The item's display name, once per distinct id (tooling: the
@@ -604,7 +666,7 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items,
             const int id = world.tables.ammo.index_of(ammo_names[slot]);
             weapons.ammo[slot] = static_cast<uint8_t>(id >= 0 ? id : 0);
         }
-        // modelgpm_FindUserpointByName returns the FIRST case-insensitive
+        // ModelGPM_FindUserpointByName returns the FIRST case-insensitive
         // match. The index-plus-one stores wrap to a byte, as in retail.
         // [orig: Entity_InitOrganicAI @0x4BFE8F..0x4BFF82]
         const auto *model = models != nullptr ? models->model(def->graphic).get() : nullptr;

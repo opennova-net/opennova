@@ -161,7 +161,7 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 
 // The local-player branch of retail's held-weapon draw gate — the policy is
 // world::local_held_weapon_visible [orig: Entity_CanFireWeapon @ 0x4dcb10,
-// the `entityPtr == g_local_player_entity` branch @ 0x4dcbcf..0x4dcc5d];
+// the `entityPtr == g_LocalPlayerEntity` branch @ 0x4dcbcf..0x4dcc5d];
 // this wrapper supplies the sim's own state aggregates.
 bool Simulation::local_held_weapon_visible(
 		const opennova::world::Entity &p_entity) const {

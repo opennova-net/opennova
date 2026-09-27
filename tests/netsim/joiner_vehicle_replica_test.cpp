@@ -276,7 +276,7 @@ bool run_remote_driver_is_the_claimant() {
 // An addeweap child whose authored slot the joiner could not resolve adopts the
 // rigid pose its decoded row recomposes from the carrier it follows: the 0x0D
 // TARGET (groundEntity), never the occupant back-reference in the parent field.
-// [orig: serialize_entity_pool_to_packet_0 +0x170 @0x503BC9, +0x28 @0x503C22;
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9, +0x28 @0x503C22;
 //  the ewep move fn Entity_UpdateTransformAndTurret reads groundEntity @0x440CBF]
 bool run_unresolved_attachment_follows_its_target_carrier() {
 	Harness h;

@@ -85,7 +85,7 @@ building reflections. This session's first reading — "the sector-model pass
 reflects all pool-2 buildings, independent of the entity filter" — was
 refuted at review: the sector-model pass (`Terrain_RenderSectorModels
 @ 0x5C5D30`, called at `0x5C8576`) renders `g_VisibleBuildingBatch`, and that
-list is populated by `collect_visible_sector_userpoints @ 0x5C6B60` under the
+list is populated by `Terrain_CollectVisibleSectorUserpoints @ 0x5C6B60` under the
 same reflection filterMask as every entity wave (`(flagMatch & entity+36) ==
 flagMatch` at `0x5C6C32..0x5C6C39`; mask = `camera_below_water ? 0 : 0x400`
 from `Terrain_CollectVisibleEntitiesForReflection @ 0x5C90A0`).
@@ -546,11 +546,11 @@ lifecycle fix.
 | Static shadow filtering/submission | Compare static model eligibility and submission separately from dynamic actors. `[orig: Terrain_CollectAndRenderTileModels @ 0x60D421..0x60D463; Render_SubmitEntity @ 0x60D971]` |
 | Terrain-tile shadow invocation/composite | Treat the retail tile render and composite as the reference destination for static sun shadows; do not infer whole-scene receiver behavior from a Godot directional light. `[orig: PolyTrn_RenderTile @ 0x60DC83..0x60DC99; @ 0x60E0C6..0x60E19D]` |
 | Per-entity sun visibility | Separate entity illumination/visibility from cast-shadow admission when interpreting lighting-only and shadow-off variants. `[orig: Entity_ComputeSunVisibility @ 0x5C6800..0x5C68FF]` |
-| Point-light attenuation | The fire-barrel comparison is bounded by the retail EffectWorld attenuation path. OpenNova now evaluates that color/range/attenuation math and feeds object shaders through an explicitly approximate camera-global four-light selection; retail instead selects per draw context. `[orig: Light_GetPointLightParams @ 0x5A9180..0x5A927A; update_light_slots @ 0x5ABC50]` |
-| Authored model lights | Retail instantiates authored `LGHT` records into EffectWorld at mission start. OpenNova does the same for mission-start sources and late ObjectModel nodes; static batched-object destruction/husk rebinding and bone-follow remain residual. `[orig: parse_lights_chunk @ 0x5B47B0; Entity_SpawnGlowEffects @ 0x56C7C0]` |
-| Sky | Compare the retail sky and its pass structure at the catalog poses/TODs; this session did not modify OpenNova sky behavior. `[orig: render_skybox @ 0x579080; passes @ 0x57988E / @ 0x579AC7]` |
+| Point-light attenuation | The fire-barrel comparison is bounded by the retail EffectWorld attenuation path. OpenNova now evaluates that color/range/attenuation math and feeds object shaders through an explicitly approximate camera-global four-light selection; retail instead selects per draw context. `[orig: Light_GetPointLightParams @ 0x5A9180..0x5A927A; Light_UpdateSlots @ 0x5ABC50]` |
+| Authored model lights | Retail instantiates authored `LGHT` records into EffectWorld at mission start. OpenNova does the same for mission-start sources and late ObjectModel nodes; static batched-object destruction/husk rebinding and bone-follow remain residual. `[orig: ThreediGp_ParseLightsChunk @ 0x5B47B0; Entity_SpawnGlowEffects @ 0x56C7C0]` |
+| Sky | Compare the retail sky and its pass structure at the catalog poses/TODs; this session did not modify OpenNova sky behavior. `[orig: Render_Skybox @ 0x579080; passes @ 0x57988E / @ 0x579AC7]` |
 | Water reflection | Every reflected-world leg — the sector-building pass included — draws only the collection filtered by flag `0x400` above water; the flag's writers are the vehicle item type and the mission-authored BMS `Reflective` attribute. OpenNova mirrors that admission. `[orig: Water_ReflectionPrerender @ 0x5C2780..0x5C27CE; Water_RenderReflectedWorldScene @ 0x5C8510; Terrain_RenderSectorModels @ 0x5C5D30; calls @ 0x5C8576/0x5C857B/0x5C8590/0x5C8599; collector filter @ 0x5C6C32..0x5C6C39; writers @ 0x40E208..0x40E20A / @ 0x40ED1D..0x40ED2B]` |
-| Dynamic environment cube | Normal environment-reflection comparisons are bounded by retail's live environment-cube update path. `[orig: update_environment_cubemap @ 0x6106A0..0x6107C6]` |
+| Dynamic environment cube | Normal environment-reflection comparisons are bounded by retail's live environment-cube update path. `[orig: EnvCube_Update @ 0x6106A0..0x6107C6]` |
 | Analytic glass/specular cube | Glass/specular highlights are also bounded by retail's static cubemap fill, distinct from the dynamic environment cube. `[orig: Render_FillStaticCubemaps @ 0x58F290..0x58F34C]` |
 
 The broader interpretation and current divergence statuses remain in

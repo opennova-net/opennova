@@ -169,7 +169,7 @@ enum PresentField : int {
 	// conditional write: the packed zone byte and a client timer-list entry
 	// must both exist, so its own validity bit cannot be collapsed into
 	// PF_ZONE_CTRL_VALID.
-	// [orig: render_sector_entity @0x5C424F..0x5C425F;
+	// [orig: Render_SectorEntity @0x5C424F..0x5C425F;
 	//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB]
 	PF_TEX_TEAM_VALID,
 	PF_TEX_TEAM,
@@ -201,7 +201,7 @@ enum PresentField : int {
 	PF_HELD_WEAPON_ROLL_DEG,
 	// Which of the original's TWO attach frames this body's weapon takes. Retail
 	// picks between them on one bit of the WEAPON-channel hold state:
-	// `g_animStateFlagsTable[entity+0x2C8] & 0x80` selects the hand-oriented frame
+	// `g_AnimStateFlagsTable[entity+0x2C8] & 0x80` selects the hand-oriented frame
 	// (bone 16's matrix with a fixed calibration) instead of the entity angle triple
 	// [orig: gate @ 0x4b21b6, branch @ 0x4b220f]. Bit 0x80 is set for the knife,
 	// grenade and designator holds, both melee attacks, binoculars, BOTH reload

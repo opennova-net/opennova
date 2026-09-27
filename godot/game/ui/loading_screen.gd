@@ -10,12 +10,12 @@ extends Control
 ## button.
 ##
 ## Structural translation of the witnessed originals:
-##  - background + text compositing  [orig: render_loading_screen @ 0x521d10]
+##  - background + text compositing  [orig: Render_LoadingScreen @ 0x521d10]
 ##  - session text provider          [orig: HUD_GetLoadingScreenTextByGameType @ 0x51f300]
 ##  - fullscreen stretch present     [orig: LoadingScreen_DrawEffectFullscreen @ 0x586ba0]
 ##  - throttle + exact bar draw      [orig: LoadingScreen_UpdateAndPresent @ 0x586be0]
-##  - bar primitive                  [orig: draw_progress_bar_0 @ 0x5d4c40]
-##  - SP start-mission splash        [orig: show_start_mission_splash @ 0x520820]
+##  - bar primitive                  [orig: HUD_DrawProgressBar_0 @ 0x5d4c40]
+##  - SP start-mission splash        [orig: Game_ShowStartMissionSplash @ 0x520820]
 ##
 ## The original composites text INTO the 800x600 background surface with the
 ## CGameFont bitmap fonts, then stretches the composite to the backbuffer with
@@ -37,10 +37,10 @@ extends Control
 var _texture: Texture2D = null
 var _has_custom_bg := false
 var _in_session := false
-var _title := ""          # server name [orig: g_sessionvar_server_name -> title buf @ 0x51f533]
-var _mission_name := ""   # [orig: g_sessionvar_mission_name -> mission buf @ 0x51f53a]
+var _title := ""          # server name [orig: g_SessionVarServerName -> title buf @ 0x51f533]
+var _mission_name := ""   # [orig: g_SessionVarMissionName -> mission buf @ 0x51f53a]
 var _game_type_text := "" # [orig: LoadingText LTGT_* lookup @ 0x51f3cf]
-var _custom_text := ""    # server message body [orig: g_sessionvar_custom_text @ 0x522123]
+var _custom_text := ""    # server message body [orig: g_SessionVarCustomText @ 0x522123]
 var _font_small: FontFile = null
 var _font_large: FontFile = null
 
@@ -110,8 +110,8 @@ static func load_background_texture(root: ResourceRoot, image_name: String) -> T
 ##   mission_file — the .bms name driving the sidecar lookup
 ##   in_session — MP session: draw the text overlay [orig: gate @ 0x521ebe]
 ##   server_name / mission_name / custom_text — the session variables
-##     [orig: SERVERNAME/MISSIONNAME/CUSTOMTEXT @ parse_server_session_variables
-##      0x5202f0 / serialize_mission_info_to_datastream 0x523620]
+##     [orig: SERVERNAME/MISSIONNAME/CUSTOMTEXT @ Client_ParseServerSessionVariables
+##      0x5202f0 / Game_SerializeMissionInfoToDataStream 0x523620]
 ##   game_type — the numeric session game type [orig: GAMETYPE]; not carried
 ##     (negative) reads as 0
 func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
@@ -137,7 +137,7 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 ## mission names, game type, and the mission file driving the sidecar
 ## background) from the post-auth S2C 0x7B AFTER the screen is already up.
 ## Retail fills the same buffers from the connect stream during its load
-## [orig: parse_server_session_variables @ 0x5202f0 -> the title/mission bufs
+## [orig: Client_ParseServerSessionVariables @ 0x5202f0 -> the title/mission bufs
 ## @ 0x51f533/0x51f53a]. Empty values keep the current ones.
 func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	if not info.mission_file.is_empty():
@@ -251,7 +251,7 @@ func has_background() -> bool:
 
 ## Whether setup resolved the per-mission sidecar art rather than the stock
 ## fallback — the retail custom-background flag the SP splash gate reads
-## [orig: g_loadscreen_has_custom_bg @ 0x24d4dfd, set @ 0x521e94, splash gate
+## [orig: g_LoadScreenHasCustomBg @ 0x24d4dfd, set @ 0x521e94, splash gate
 ## @ 0x525d38].
 func has_custom_background() -> bool:
 	return _has_custom_bg
@@ -395,7 +395,7 @@ func _sync_bar_fill() -> void:
 ## Raise the start-mission splash over the held background: the cursor-arrow
 ## art, the large HUD label font, and the LoadingText/LT_Continue line, each
 ## degrading to "element skipped" on a miss exactly like the original's
-## unguarded loads [orig: show_start_mission_splash @ 0x520820 — TGA
+## unguarded loads [orig: Game_ShowStartMissionSplash @ 0x520820 — TGA
 ## @ 0x520871, font slot Impac22b.fnt @ HUD_InitAllFonts 0x51ef4e, text fetch
 ## @ 0x520975]. Keys pressed DURING the blocking load never dismiss it — the
 ## original flushes its key queue at entry [orig: Input_ResetKeyQueue
@@ -458,7 +458,7 @@ func _viewport_to_local(point: Vector2) -> Vector2:
 func _process(_delta: float) -> void:
 	if _splash_state == SplashState.ACTIVE:
 		# A held mouse button dismisses without a fresh press — the original
-		# exit reads the live button mask each frame [orig: input_mask
+		# exit reads the live button mask each frame [orig: g_MouseState.rawWParam
 		# @ 0x3342e50 (WindowProc button bits), test @ 0x520a2d].
 		if Input.get_mouse_button_mask() != 0:
 			_splash_exit_edge()
@@ -520,7 +520,7 @@ func _draw() -> void:
 
 
 # The blinking centered continue line + the cursor arrow
-# [orig: show_start_mission_splash @ 0x520820].
+# [orig: Game_ShowStartMissionSplash @ 0x520820].
 func _draw_splash_overlay() -> void:
 	if _splash_font != null and not _splash_text.is_empty():
 		# Centered at virtual (512, 730) of the 1024x768 overlay space, in
@@ -528,7 +528,7 @@ func _draw_splash_overlay() -> void:
 		# color pulsing on the 512 ms tick bit. Top-anchored like the block
 		# draws; glyph metrics ride the FontFile view (D-LOADSCR-2)
 		# [orig: HUD_DrawTextAtVirtualPos(ctx, 512, 730, 0, text,
-		# g_hudLabelFontLarge, color, mode=2 centered) @ 0x5209da; centered
+		# g_HUDLabelFontLarge, color, mode=2 centered) @ 0x5209da; centered
 		# dispatch HUD_DrawTextCentered_HalfBright @ 0x580680; slot scale
 		# (w << 16) / 800 @ 0x51ef62].
 		var s := size / Vector2(HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
@@ -562,7 +562,7 @@ func _draw_splash_overlay() -> void:
 
 # The MP text overlay, drawn in image space under the image's stretch scale
 # (the original composites into the texture before stretching, so text scales
-# with the image) [orig: render_loading_screen @ 0x521fe1-0x522123].
+# with the image) [orig: Render_LoadingScreen @ 0x521fe1-0x522123].
 func _draw_session_text() -> void:
 	var tex_size := Vector2(_texture.get_width(), _texture.get_height())
 	if tex_size.x <= 0.0 or tex_size.y <= 0.0:
@@ -602,7 +602,7 @@ func _draw_session_text() -> void:
 
 
 # Word-wrapped text in a box: the engine breaks and places the lines
-# (runtime/hud/loading_screen.h, the ported render_draw_wrapped_text_block_ex)
+# (runtime/hud/loading_screen.h, the ported Render_DrawWrappedTextBlockEx)
 # against this font's measure and HudPos.draw_wrapped_text paints them.
 # `width` is the band width (retail's rect_right - rect_left). Line metrics
 # ride the FontFile view of the .fnt; exact CGameFont glyph spacing is the
@@ -622,7 +622,7 @@ func _draw_wrapped(font: FontFile, text: String, x: int, y: int, width: int,
 # The progress bar, scaled from the HudPos.DESIGN_* virtual overlay space onto
 # the display; the 1px border/inset steps stay in real pixels (the rect/color
 # witnesses live at the engine home, hud/loading_screen.h)
-# [orig: LoadingScreen_UpdateAndPresent @ 0x586c78 + draw_progress_bar_0 @ 0x5d4c40].
+# [orig: LoadingScreen_UpdateAndPresent @ 0x586c78 + HUD_DrawProgressBar_0 @ 0x5d4c40].
 func _draw_progress_bar() -> void:
 	var s := size / Vector2(HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
 	var bar_pos := HudPos.loading_bar_pos()
@@ -632,7 +632,7 @@ func _draw_progress_bar() -> void:
 	var w := int(bar_size.x * s.x)
 	var h := int(bar_size.y * s.y)
 	# Layered filled rects, each inset 1px: black, gray, black track, then the
-	# fill [orig: draw_progress_bar_0 — outer spans w+6/h+6, three inset border
+	# fill [orig: HUD_DrawProgressBar_0 — outer spans w+6/h+6, three inset border
 	# draws, fill right edge = pct*(inner width)/100 + left + 2, one last inset].
 	draw_rect(Rect2(x, y, w + 6, h + 6), Color.BLACK)
 	draw_rect(Rect2(x + 1, y + 1, w + 4, h + 4), HudPos.loading_bar_border_gray())

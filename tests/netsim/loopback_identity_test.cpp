@@ -124,6 +124,7 @@ bool run_world_stream_team_and_zone_fields_survive_client_fold() {
 	pool1.slot_id = 0x1007;
 	pool1.item_type_id = 0x054F;
 	pool1.team_byte = 2;
+	pool1.has_zone_number_rank = true;
 	pool1.zone_number_rank = 0x22; // zone 2, chain rank 1
 	pool1.zone_radius = 70;
 	nw::PoolSpawnBatch pool1_batch;
@@ -175,6 +176,7 @@ bool run_world_stream_team_and_zone_fields_survive_client_fold() {
 	// Re-encode the same rows with all flag-gated values zero. The encoders omit
 	// those fields and the decoders surface zero, which the client fold must apply.
 	pool1.team_byte = 0;
+	pool1.has_zone_number_rank = false; // no zone number: the block is omitted
 	pool1.zone_number_rank = 0;
 	pool1.zone_radius = 0;
 	pool1_batch.records[0] = pool1;
@@ -920,10 +922,10 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 // load-time 0x0D record's TARGET (its groundEntity) and the client keeps the
 // child attached locally; the PARENT field is only the occupant back-reference.
 // Prove that production 0x0D -> ClientState relationship drives later carrier
-// motion, and that the carrier's replicated death retires the child rather than
-// leaving its spawn pose in the presented replica state forever.
-// [orig: serialize_entity_pool_to_packet_0 +0x170 @0x503BC9, +0x28 @0x503C22]
-bool run_parented_pool_spawn_follows_and_retires() {
+// motion, and that the carrier's replicated death hides the child in place (the
+// authority keeps it) until the carrier lives again.
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9, +0x28 @0x503C22]
+bool run_parented_pool_spawn_follows_and_hides() {
 	w::World world;
 	world.registry.configure_pool(1, 8);
 
@@ -997,18 +999,31 @@ bool run_parented_pool_spawn_follows_and_retires() {
 	            "NoNetworkCallback child follows the decoded parent pose")) return false;
 
 	// A replicated vehicle death carries a zero health word in its ordinary
-	// compact. The authority retires the synthetic child, and the decoded parent
-	// relationship lets the client retire the same subtree without inventing a
-	// destroy packet for a message whose retail transaction is unrelated.
+	// compact. The authority keeps the attachment (nothing walks a dead
+	// carrier's children), and the client hides its row in place through the
+	// decoded parent relation, as retail's class update does (Flags |= 1), until
+	// the carrier lives again. [orig: Entity_UpdateTransformAndTurret
+	// @0x440cdb..0x440ce1, @0x440EB3]
 	parent->health = 0;
 	parent->alive = false;
 	world.run_logic_tick();
-	if (!expect(world.registry.get(child_h) == nullptr,
-	            "authoritative parent death despawned the attachment")) return false;
+	if (!expect(world.registry.get(child_h) != nullptr,
+	            "authoritative parent death keeps the attachment")) return false;
 	ns::test::emit_all(world, conns);
 	view.pump(channel);
-	if (!expect(view.state().find(child_h.packed) == nullptr,
-	            "decoded zero-health parent retires the attachment subtree")) return false;
+	const ns::ClientEntityState *hidden_child = view.state().find(child_h.packed);
+	if (!expect(hidden_child != nullptr && hidden_child->state_flags_known &&
+	                    (hidden_child->state_flags & w::kEntityFlagCarried) != 0,
+	            "decoded zero-health parent hides the attachment in place")) return false;
+	parent = world.registry.get(parent_h);
+	parent->health = 3000;
+	parent->alive = true;
+	world.run_logic_tick();
+	ns::test::emit_all(world, conns);
+	view.pump(channel);
+	const ns::ClientEntityState *shown_child = view.state().find(child_h.packed);
+	if (!expect(shown_child != nullptr && (shown_child->state_flags & 0x07u) == 0,
+	            "a living parent clears the attachment's hide again")) return false;
 	return true;
 }
 
@@ -1202,7 +1217,7 @@ std::vector<uint8_t> make_built_0c_uplink(
 // The host read-applies a remote peer's C2S 0x0C uplink: the authority drain (drain_connection_c2s)
 // reads it and EntityWireBridge::apply_player_intent SNAPS the registry Entity (the store the S2C 0x0A
 // frame re-broadcasts), mirrors the engine-frame AiEntity, and stages the smooth-target.
-// [orig: dispatch_entity_packet_callback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
+// [orig: NetPacket_DispatchEntityPacketCallback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
 // @0x4c2042-0x4c20a9; §5.10/§5.38]
 bool run_apply_player_intent_stages_remote_peer() {
 	w::World world;
@@ -1518,7 +1533,7 @@ int main() {
 	                run_no_callback_child_follows_live_parent_heading() &&
 	                run_attachment_refresh_indexes_large_client_state_once() &&
 	                run_carrier_pitch_roll_persists_across_live_records() &&
-	                run_parented_pool_spawn_follows_and_retires() &&
+	                run_parented_pool_spawn_follows_and_hides() &&
 	                run_mounted_infantry_pose_fields_round_trip() &&
 	                run_remote_lean_integrator_decays_before_ramping() &&
 	                run_header_only_records_are_ignored_by_replica_pipeline() &&

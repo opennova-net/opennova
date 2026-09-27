@@ -4,9 +4,8 @@ extends GutTest
 # compiler stamps TerrainDrawList.below_water from the RENDER eye vs the live
 # water height (the bare retail strict < with no zero guard), and the Terrain
 # node pushes the flag plus the water module's live noise texture onto the
-# shared surface material [orig: cameraY < Env_WaterHeightFixed @ 0x60FEE0 ->
-# dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2]. The shader-side
-# math contract lives in terrain_shader_contract_test.gd.
+# shared surface material [orig: cameraY < g_EnvWaterHeightFixed @ 0x60FEE0 ->
+# dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2].
 
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
 # assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
@@ -88,7 +87,7 @@ func test_zero_height_keeps_the_bare_retail_compare() -> void:
 	var cam: Camera3D = fixture["camera"]
 	var material: ShaderMaterial = terrain.get_terrain_material()
 
-	# The retail compare is UNGUARDED (cameraY < Env_WaterHeightFixed, no zero
+	# The retail compare is UNGUARDED (cameraY < g_EnvWaterHeightFixed, no zero
 	# test on either side [orig: @0x60fea5]): a sub-zero eye reads below even
 	# at height 0. Terrain heights are non-negative, so a dry map never fires
 	# this in practice.
@@ -204,8 +203,8 @@ func test_live_tile_info_mutation_invalidates_resident_page_sources() -> void:
 
 func test_reflected_pass_clips_terrain_below_the_plane_less_0_05() -> void:
 	# Retail's reflected pass arms a terrain clip plane of wh - 0.1 (retail
-	# render_main_scene @ 0x5c1561..0x5c1578) and the sector batch's texgen
-	# u = y + 0.45 - plane under AlphaRef 0x80 (render_terrain_sector_batch
+	# Render_MainScene @ 0x5c1561..0x5c1578) and the sector batch's texgen
+	# u = y + 0.45 - plane under AlphaRef 0x80 (Terrain_RenderSectorBatch
 	# @ 0x6092c6..0x60935b) keeps y >= wh - 0.05. The terrain shader's LOD
 	# debug colour marks every kept fragment green over a 2x2 card spanning
 	# y -1..1 across 64 rows: rows 32/33 sit at y = -0.016 / -0.047, rows
@@ -213,17 +212,11 @@ func test_reflected_pass_clips_terrain_below_the_plane_less_0_05() -> void:
 	if RenderingServer.get_rendering_device() == null:
 		pending("RenderingDevice unavailable under this Godot renderer")
 		return
-	var saved := {}
-	for name in ["opennova_water_active", "opennova_water_height"]:
-		var setting = ProjectSettings.get_setting("shader_globals/" + name, {})
-		saved[name] = (setting as Dictionary).get("value") if setting is Dictionary else null
 	RenderingServer.global_shader_parameter_set("opennova_water_active", true)
 	RenderingServer.global_shader_parameter_set("opennova_water_height", 0.0)
 	var reflected: Image = await _render_terrain_card(Water.REFLECTION_CULL_MASK)
 	var beauty: Image = await _render_terrain_card(0xFFFFF)
-	for name in saved:
-		if saved[name] != null:
-			RenderingServer.global_shader_parameter_set(name, saved[name])
+	ShaderGlobals.restore_defaults(["opennova_water_active", "opennova_water_height"])
 	assert_gt(reflected.get_pixel(32, 32).g, 0.5, "0.016 below the plane is kept")
 	assert_gt(reflected.get_pixel(32, 33).g, 0.5, "0.047 below the plane is kept")
 	assert_lt(reflected.get_pixel(32, 34).g, 0.05, "0.078 below the plane is clipped")

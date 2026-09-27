@@ -31,7 +31,7 @@ load and found loading-art pixels across the extended surface.
 | Load-flow case handling (SP / host / success / failure / return) | **MATCHING** (ported) | the case matrix below (`Game_StartMission @ 0x524360`): screen resident through the load, released at the end, failure/abort → menu; GUT `main_game_lifecycle_test.gd` (load, return, reload, failed-load rollback) + `game/loading_screen_test.gd` (SP-vs-session `load_info` split) |
 | Joiner spawn-gate hold | **MATCHING** (D-LOADSCR-3 fixed 2026-07-24) | local `world_loaded` leaves the loading presentation raised; `ClientRuntime` keeps pumping while hidden and `GameWorld.join_admission_ready` releases it only at authoritative in-match admission, or transitions it to DEATH when the host requests a player-paced deploy pick |
 | ESC / disconnect abort during load | **DIVERGENT** (D-LOADSCR-7) | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` aborts to `Post Menu`; our SP/host load is one synchronous call the SceneTree cannot interrupt — no reachable window on the synchronous path |
-| SP start-mission splash (`newarow1.tga` + START_MISSION + `LT_Continue`) | **MATCHING** (ported 2026-08-15; D-LOADSCR-4 fixed) | full witness set below (`show_start_mission_splash @ 0x520820`); GUT `godot/tests/game/loading_screen_splash_test.gd` (raise/degrade, dismissal edges, input consumption, coordinator seams); the epilog-stage re-show entry is D-LOADSCR-8 |
+| SP start-mission splash (`newarow1.tga` + START_MISSION + `LT_Continue`) | **MATCHING** (ported 2026-08-15; D-LOADSCR-4 fixed) | full witness set below (`Game_ShowStartMissionSplash @ 0x520820`); GUT `godot/tests/game/loading_screen_splash_test.gd` (raise/degrade, dismissal edges, input consumption, coordinator seams); the epilog-stage re-show entry is D-LOADSCR-8 |
 | Boot loading screen (`loading.pcx`) | confirm-only (separate boot-time variant) | `Game_ShowLoadingScreen @ 0x4a5420` (already rowed in `docs/required-resources.md`) |
 
 ## The sidecar rule
@@ -39,11 +39,11 @@ load and found loading-art pixels across the extended surface.
 A mission's loading image is the mission file's basename with the extension replaced by
 `.pcx` — `00TRg.bms` → `00trg.pcx` (VFS-case-insensitive) — probed with
 `FileSystem_FileExists`, falling back to the literal `loadscrn.pcx`
-[orig: render_loading_screen @ 0x521d10 — copy of the mission name, `PathRemoveExtension
+[orig: Render_LoadingScreen @ 0x521d10 — copy of the mission name, `Path_RemoveExtension
 @ 0x617510`, `Path_ReplaceOrAppendExtension(path, "pcx") @ 0x53c780`, probe @ 0x521db5,
-fallback @ 0x521e20]. The name source is `g_map_file_name` for the host and single player,
-and the client's received `MISSIONFILENAME` session variable (`g_sessionvar_mission_file_name
-@ 0x24c1178`) when joining. A global custom-background flag (`g_loadscreen_has_custom_bg
+fallback @ 0x521e20]. The name source is `g_MapFileName` for the host and single player,
+and the client's received `MISSIONFILENAME` session variable (`g_SessionVarMissionFileName
+@ 0x24c1178`) when joining. A global custom-background flag (`g_LoadScreenHasCustomBg
 @ 0x24d4dfd`) records which case hit; it later gates the SP start-mission splash. The
 `reason == 8` branch in the fallback path is behaviorally inert — both legs end at
 `loadscrn.pcx` (compiler artifact, not logic).
@@ -56,11 +56,11 @@ The wider sidecar family sharing a mission basename (witnessed elsewhere): `<bas
 (mission text, `TextResource_LoadMissionTextBin @ 0x51ed90`), `<base>.wac` (script,
 `WacScript_InitAndLoad @ 0x4f91f0`), `<base>.LWF`/`<base>.DBF` (mission sounds/dialog,
 audio records), `<base>.mis`, `<base>.til` — plus save files built from
-`g_map_file_name` (`SaveFile_BuildFilename @ 0x4aad60`).
+`g_MapFileName` (`SaveFile_BuildFilename @ 0x4aad60`).
 
 ## Witness map
 
-### Composition — render_loading_screen @ 0x521d10
+### Composition — Render_LoadingScreen @ 0x521d10
 
 Builds the composited screen once per call: picks the background (sidecar rule above), loads
 it via `Texture_LoadPCXFromPFF32 @ 0x56ea30` (a 0x30+0x100-byte slot: +0x20 w, +0x22 h,
@@ -70,21 +70,21 @@ a session: hands the texture straight to the effect (image only). In a session: 
 (`CGameFont_Init @ 0x673a60`) pointed **at the texture surface** — text is composited into
 the image pixels, then the composite is stretched. The per-call stage argument its callers
 push (2..7, 16) is never read. On the authority it first refreshes
-`Server_BuildStatusReport @ 0x530a60` (into `g_session_status @ 0x24e3e88` — a different
+`Server_BuildStatusReport @ 0x530a60` (into `g_SessionStatus @ 0x24e3e88` — a different
 struct from the sessionvar text cluster).
 
 Text layout (texture space, 800×600 retail art):
 
 - Top band, rect (21, 29) → (right, 500) where right = **661** with a custom background,
   **782** with the stock one [orig: @ 0x521ec4]. Three strings drawn into the same band via
-  `render_draw_wrapped_text_block_ex @ 0x580eb0` with alignment 3/4/5 = left/center/right
+  `Render_DrawWrappedTextBlockEx @ 0x580eb0` with alignment 3/4/5 = left/center/right
   [orig: the alignment switch @ 0x58106c/0x581071]: **server name** (left), **mission
   name** (center), **game type** (right), all Arial22, all prefixed `<cFFFFFF>` (white).
 - Server-message block, gated on a non-empty `CUSTOMTEXT`: label =
   gametext `LoadingText`/`LT_SERVERMSG` (fallback literal "Message from Game Server")
   formatted `<c80E0FF>%s:\r\n<cFFFFFF>` at (0.02·w, 0.87·h); body at (0.02·w, 0.90·h);
   box right/bottom edge (0.98·w, h). Constants are doubles at `0x7D01A0/0x7D0198/0x7D0190/0x7C4878`.
-### Wrapped text block — `render_draw_wrapped_text_block_ex @ 0x580eb0`
+### Wrapped text block — `Render_DrawWrappedTextBlockEx @ 0x580eb0`
 
 `(text, font, left, top, right, bottom, alignment, depth, skip_lines,
 use_kerning_start, use_kerning_wrap)`. Witnessed in full and PORTED 2026-09-16
@@ -156,25 +156,25 @@ Maps `g_GameType @ 0x24d2128` to a `LoadingText` string key, looked up via
 | 0x50010 | `LTGT_CAC` |
 | anything else | none (empty line) |
 
-Outputs three static buffers (renamed `g_loadscreen_title_buf/mission_buf/gametype_buf
-@ 0x24d5f28/0x24d5d28/0x24d5b28`): title ← `g_sessionvar_server_name`, mission ←
-`g_sessionvar_mission_name`, game type ← the lookup, each `<cFFFFFF>`-prefixed when color
+Outputs three static buffers (renamed `g_LoadScreenTitleBuf/MissionBuf/GameTypeBuf
+@ 0x24d5f28/0x24d5d28/0x24d5b28`): title ← `g_SessionVarServerName`, mission ←
+`g_SessionVarMissionName`, game type ← the lookup, each `<cFFFFFF>`-prefixed when color
 tags are requested.
 
 ### Session variables — parse @ 0x5202f0 / serialize @ 0x523620
 
-`parse_server_session_variables @ 0x5202f0` (client receive) and
-`serialize_mission_info_to_datastream @ 0x523620` (host send — which also mirrors every
+`Client_ParseServerSessionVariables @ 0x5202f0` (client receive) and
+`Game_SerializeMissionInfoToDataStream @ 0x523620` (host send — which also mirrors every
 field into the same globals) move a length-prefixed KV stream:
 
 | key | size | global | loading-screen use |
 |---|---|---|---|
-| `SERVERNAME` | 32 | `g_sessionvar_server_name @ 0x24c1400` | title line (host source: `g_server_name_str @ 0x24d1fc4`) |
-| `MISSIONNAME` | 64 | `g_sessionvar_mission_name @ 0x24c13c0` | mission line — host source: mission text .bin `[info]/title` via `g_TextMission`; coop game types use the override string `dword_24D1FA4`; an empty title falls back to `dword_A761D4` |
-| `GAMETYPE` | u32 | `g_sessionvar_game_type @ 0x24c13b8` | (the render path reads `g_GameType` for the key) |
-| `CUSTOMTEXT` | 512 | `g_sessionvar_custom_text @ 0x24c11b8` | the server-message body (host source: `g_server_custom_text @ 0x24d21c4`) |
-| `MISSIONFILENAME` | 64 | `g_sessionvar_mission_file_name @ 0x24c1178` | the client's sidecar basename |
-| `EXP_FANFARE` | u16 | `g_sessionvar_exp_fanfare @ 0x24d5a10` | (not loading-screen) |
+| `SERVERNAME` | 32 | `g_SessionVarServerName @ 0x24c1400` | title line (host source: `g_ServerNameStr @ 0x24d1fc4`) |
+| `MISSIONNAME` | 64 | `g_SessionVarMissionName @ 0x24c13c0` | mission line — host source: mission text .bin `[info]/title` via `g_TextMission`; coop game types use the override string `dword_24D1FA4`; an empty title falls back to `dword_A761D4` |
+| `GAMETYPE` | u32 | `g_SessionVarGameType @ 0x24c13b8` | (the render path reads `g_GameType` for the key) |
+| `CUSTOMTEXT` | 512 | `g_SessionVarCustomText @ 0x24c11b8` | the server-message body (host source: `g_ServerCustomText @ 0x24d21c4`) |
+| `MISSIONFILENAME` | 64 | `g_SessionVarMissionFileName @ 0x24c1178` | the client's sidecar basename |
+| `EXP_FANFARE` | u16 | `g_SessionVarExpFanfare @ 0x24d5a10` | (not loading-screen) |
 
 ### Effect lifecycle — LoadingScreen_{Ensure,Release,DrawEffectFullscreen} @ 0x586b20/0x586b80/0x586ba0
 
@@ -202,7 +202,7 @@ Bar geometry: virtual **1024×768** overlay coordinates x=368, y=732, w=286, h=1
 the real viewport via `Viewport_ScaleToVirtualCoords @ 0x5d2b20`); fill color override
 **0xEB0000** (red).
 
-### Bar primitive — draw_progress_bar_0 @ 0x5d4c40
+### Bar primitive — HUD_DrawProgressBar_0 @ 0x5d4c40
 
 Layered filled rects with 1-real-pixel insets: black outer frame spanning (w+6, h+6), gray
 `0xC0C0C0` frame, black track, then the fill after one more inset. Fill right edge =
@@ -218,7 +218,7 @@ inside the two model-load loops @ 0x524d9c/0x524e09 and 0x524f32/0x524fe0), 26, 
 34, 35, 36, 37, 38, 39, 40, 41, 45, 50, 60, 62..69 (slot++ per subsystem inside
 `CRenderManager_ShutdownAllSubsystems @ 0x587000`, base 0x3E), 70, 90, 95, 100.
 `Game_LoadTerrainDuringConnect @ 0x520710` reports 10 and 25 on the MP join path.
-`render_loading_screen` itself is re-invoked at nine points across the load (each rebuild
+`Render_LoadingScreen` itself is re-invoked at nine points across the load (each rebuild
 recomposites the text).
 
 ### The load-flow case matrix — Game_StartMission @ 0x524360
@@ -227,7 +227,7 @@ recomposites the text).
 (host) load**; the **joiner** enters the same function and diverges into a
 network-wait sub-path. The whole body runs with the loading screen resident —
 `LoadingScreen_UpdateAndPresent @ 0x586be0` is pumped at each progress value and
-`render_loading_screen @ 0x521d10` recomposites at nine points — and the effect
+`Render_LoadingScreen @ 0x521d10` recomposites at nine points — and the effect
 is released (`LoadingScreen_ReleaseEffect @ 0x586b80`) only at the very end,
 after the optional SP splash. Every case:
 
@@ -235,7 +235,7 @@ after the optional SP splash. Every case:
   weapons, anims, HUD, subsystems, spawn the player, then the final release
   `@ 0x525d52` (decompiler line ~1045). The world is built entirely behind the
   loading screen; nothing is presented until the release. Host is a session
-  (`g_napi_np_ctx.is_in_session`), single-player is not.
+  (`g_NapiNPCtx.is_in_session`), single-player is not.
 - **Joiner** (the `else` sub-path `@ 0x524..`, decompiler lines ~620–654): after
   the initial present, two blocking network waits bracket the terrain load:
   1. `NapiClient_WaitForDisconnect @ 0x42cb20` — the connect handshake. Return 1
@@ -243,9 +243,9 @@ after the optional SP splash. Every case:
      nav-push `Post Menu` (`scene_entry`), return ("aborted 2").
   2. `Game_LoadTerrainDuringConnect @ 0x520710` (reports 10, 25), then
   3. `NapiClient_WaitForGameStart @ 0x42cc10` — the SPAWN gate: pumps net + input
-     and returns 1 only when `g_spawn_success_gate @ 0x24c1928` is set (S2C 0x1D,
-     net-re §5.2), 3 on ESC/`g_loading_cancel_flag`, 4 on
-     `g_loading_timeout_flag`, 0 on reconnect. The caller nav-pushes `GameLoop`
+     and returns 1 only when `g_SpawnSuccessGate @ 0x24c1928` is set (S2C 0x1D,
+     net-re §5.2), 3 on ESC/`g_LoadingCancelFlag`, 4 on
+     `g_LoadingTimeoutFlag`, 0 on reconnect. The caller nav-pushes `GameLoop`
      on the spawn leg and `Post Menu` (`reason = 1`) on the cancel/timeout legs.
 
   So the joiner **holds the loading screen through the connect handshake AND the
@@ -255,7 +255,7 @@ after the optional SP splash. Every case:
   `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` (called at four model/asset
   points — decompiler "aborted 5..8") pumps window messages, and on `reason == 2`
   (a recorded disconnect) or a `27`/ESC keypress sets `reason = 1`,
-  `g_loading_cancel_flag = 1`, nav-pushes `Post Menu`, and returns 1 → the load
+  `g_LoadingCancelFlag = 1`, nav-pushes `Post Menu`, and returns 1 → the load
   aborts to the menu.
 - **Any load-step failure** (mission too large, missing asset, etc.): the same
   early return with `reason = 1` / `Post Menu`.
@@ -272,10 +272,10 @@ after the optional SP splash. Every case:
 | ESC / disconnect DURING load | `Client_CheckDisconnectOrEscDuringLoad` → abort to menu | our SP/host load is a single synchronous call the SceneTree cannot interrupt; ESC is swallowed while `_world_load_pending` — **D-LOADSCR-7** (unreachable window, not a behavioral loss on the synchronous path) |
 | Return to menu (pause → abort) | ABORT's authored actions raise the CONFIRM_EXIT "Are you sure?" panel (shipped game.mnu: `SHOW CONFIRM_EXIT` + `HIDE MAIN_WRAPPER`); the exit is the Command on CONFIRM_YES, then nav-push `Post Menu` | `MenuShell` binds CONFIRM_YES (not ABORT) as the return Command → `_on_return_to_menu` → `_teardown_world_to_menu`; CONFIRM_NO/ESC cancel through the authored actions — MATCHING (the pre-2026-09 port bound ABORT directly and skipped the confirmation) |
 
-### SP start-mission splash — show_start_mission_splash @ 0x520820 (ported 2026-08-15)
+### SP start-mission splash — Game_ShowStartMissionSplash @ 0x520820 (ported 2026-08-15)
 
 At the end of a **single-player** load with a custom background
-(`g_loadscreen_has_custom_bg` gate @ 0x525d38, call @ 0x525d48), before the effect
+(`g_LoadScreenHasCustomBg` gate @ 0x525d38, call @ 0x525d48), before the effect
 release @ 0x525d52 (0x525d42/0x525d45 are mid-instruction inside the cmp
 @ 0x525d40). The complete witnessed behavior (2026-08-15 session):
 
@@ -299,7 +299,7 @@ release @ 0x525d52 (0x525d42/0x525d45 are mid-instruction inside the cmp
     text-suppression flag, below), drawn CENTERED at virtual **(512, 730)** of the
     1024×768 overlay space via `HUD_DrawTextAtVirtualPos @ 0x5209da`
     (mode 2 → `HUD_DrawTextCentered_HalfBright @ 0x580680`) in
-    `g_hudLabelFontLarge` — **Impac22b.fnt** at the `(screen_w << 16) / 800` slot
+    `g_HUDLabelFontLarge` — **Impac22b.fnt** at the `(screen_w << 16) / 800` slot
     scale (`HUD_InitAllFonts @ 0x51ef4e/0x51ef62`) — through the half-bright fold,
     color alternating on `GetTickCount() & 0x200`: bit set → `0xFFFFFFFF`, clear →
     `0xFFFF8080` (a 512 ms two-color pulse, select @ 0x5209b0-0x5209be).
@@ -309,7 +309,7 @@ release @ 0x525d52 (0x525d42/0x525d45 are mid-instruction inside the cmp
     and read by the menu cursor draw (`CUIScene_DrawScreensAndCursor @ 0x63bf60`) —
     held in 640×480 space and scaled `·w/640, ·h/480` (@ 0x520920-0x520942); quad
     size = TGA dims `· (w/800, h/600)` (@ 0x52089d/0x5208ae).
-  - **Exit test** (@ 0x520a2d-0x520a3d): `input_mask @ 0x3342e50` non-zero (the
+  - **Exit test** (@ 0x520a2d-0x520a3d): `g_MouseState.rawWParam @ 0x3342e50` non-zero (the
     live mouse-button bitmask, OR-ed/cleared by `Game_WindowProc` button messages)
     OR a fresh key event dequeues — so any mouse button (pressed or still held)
     or any key (autorepeat WM_KEYDOWNs re-queue and count) dismisses.
@@ -325,13 +325,13 @@ untraced (follow-ups). Clear in single player — the reimpl models the gate as
 table presence in the shared text layer.
 
 **Second entry — the epilog-stage re-show (D-LOADSCR-8, not ported)**: from
-`Input_HandleSpecialKeys @ 0x49c5c0`, the `g_spawn_success_gate` branch
+`Input_HandleSpecialKeys @ 0x49c5c0`, the `g_SpawnSuccessGate` branch
 (the jnz @ 0x49c871): the start key (`dword_B3B744`) with
-`g_loadscreen_has_custom_bg && !is_in_session` clears `g_epilog_screen_active`,
-recomposites (`render_loading_screen`), re-runs the splash, releases the effect
-(re-show @ 0x49c88f, release @ 0x49c899; 0x49c887 is the `render_loading_screen`
+`g_LoadScreenHasCustomBg && !is_in_session` clears `g_EpilogScreenActive`,
+recomposites (`Render_LoadingScreen`), re-runs the splash, releases the effect
+(re-show @ 0x49c88f, release @ 0x49c899; 0x49c887 is the `Render_LoadingScreen`
 call), then queues deploy event 12 and sets
-`g_mission_exit_reason = 4`. This leg rides the SP epilog/respawn flow, which is
+`g_MissionExitReason = 4`. This leg rides the SP epilog/respawn flow, which is
 not ported; recorded as a residual rather than blocking the load-end port.
 
 **Port mapping** (2026-08-15): the splash is a mode of `LoadingScreen`
@@ -379,16 +379,16 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
 |---|---|---|---|
 | D-LOADSCR-1 | Nine actual-operation checkpoints (0..80), local-world-ready 90, and presentation-complete 100; repeated model pulses hold their stage value; no autonomous creep | ~30 call sites incl. per-subsystem slot++ ticks (62..69), separate 7/26 loop constants, and a displayed value that may creep up to reported+10 | our pipeline decomposes differently, and its user-facing bar deliberately never claims unfinished work. Stage progress is deterministic and exact; join admission owns the final 100 edge. — INTENTIONAL 2026-09-04 |
 | D-LOADSCR-2 | Godot FontFile view of the .fnt fonts, drawn under the image scale transform; the BREAK RULE is now the ported one (`hud::wrap_text_lines`/`layout_text_block`, ported 2026-09-16 and pushed into the engine 2026-09-20 — `draw_multiline_string` is gone), so only the glyph METRICS remain approximated | CGameFont glyph composite into the texture, `GameFont_LoadFromBlob`/`sub_6741C0` spacing params (120 small / 0 large, semantics unwitnessed) | glyph-exact spacing is the standing CGameFont follow-up shared with [hud-re.md](hud-re.md); positions/alignments/colors/wrap box are witnessed and ported |
-| D-LOADSCR-3 — **FIXED 2026-07-24** | `world_loaded` completes the wire-header world and available shared assets but does not release a joiner's presentation. `ClientRuntime` continues the real session under the hidden world; `Simulation::is_joined_in_match` / `is_join_deploy_pick_pending` feed edge-triggered `GameWorld.join_admission_ready` / `join_deploy_pick_required`, and `MainGame` releases only at one of those authoritative boundaries. The same deploy edge rearms after death without replaying the loading screen | retail holds through TWO blocking waits bracketing its header-driven terrain/assets load — `NapiClient_WaitForDisconnect @ 0x42cb20` (connect handshake) then `NapiClient_WaitForGameStart @ 0x42cc10` (spawn gate `g_spawn_success_gate @ 0x24c1928`, S2C 0x1D — net-re §5.2) — revealing on the spawn leg or entering the DEATH picker when a spawn choice is owed | real-UDP `main_game_lifecycle_test.gd::test_join_loading_stays_raised_until_authoritative_admission` proves the old early-reveal boundary and the fixed release |
-| D-LOADSCR-4 — **FIXED 2026-08-15** | The SP start-mission splash is ported as a `LoadingScreen` mode: same held background, the blinking centered LT_Continue line (Impac22b.fnt, half-bright, 512 ms white/`0xFF8080` pulse), the cursor-arrow quad at the live mouse position, key-queue-flush entry semantics, any-key/any-mouse-button dismissal, the final background-only frame, and the fire-and-forget START_MISSION one-shot; shell gate + world-tick hold in `main_game.gd` | `show_start_mission_splash @ 0x520820` (the full witness set above) | GUT `loading_screen_splash_test.gd`; the epilog-stage re-show entry split off as D-LOADSCR-8; the 2026-08-15 xref walk corrected the old "or the sound completes" gloss (input-only dismissal) |
+| D-LOADSCR-3 — **FIXED 2026-07-24** | `world_loaded` completes the wire-header world and available shared assets but does not release a joiner's presentation. `ClientRuntime` continues the real session under the hidden world; `Simulation::is_joined_in_match` / `is_join_deploy_pick_pending` feed edge-triggered `GameWorld.join_admission_ready` / `join_deploy_pick_required`, and `MainGame` releases only at one of those authoritative boundaries. The same deploy edge rearms after death without replaying the loading screen | retail holds through TWO blocking waits bracketing its header-driven terrain/assets load — `NapiClient_WaitForDisconnect @ 0x42cb20` (connect handshake) then `NapiClient_WaitForGameStart @ 0x42cc10` (spawn gate `g_SpawnSuccessGate @ 0x24c1928`, S2C 0x1D — net-re §5.2) — revealing on the spawn leg or entering the DEATH picker when a spawn choice is owed | real-UDP `main_game_lifecycle_test.gd::test_join_loading_stays_raised_until_authoritative_admission` proves the old early-reveal boundary and the fixed release |
+| D-LOADSCR-4 — **FIXED 2026-08-15** | The SP start-mission splash is ported as a `LoadingScreen` mode: same held background, the blinking centered LT_Continue line (Impac22b.fnt, half-bright, 512 ms white/`0xFF8080` pulse), the cursor-arrow quad at the live mouse position, key-queue-flush entry semantics, any-key/any-mouse-button dismissal, the final background-only frame, and the fire-and-forget START_MISSION one-shot; shell gate + world-tick hold in `main_game.gd` | `Game_ShowStartMissionSplash @ 0x520820` (the full witness set above) | GUT `loading_screen_splash_test.gd`; the epilog-stage re-show entry split off as D-LOADSCR-8; the 2026-08-15 xref walk corrected the old "or the sound completes" gloss (input-only dismissal) |
 | D-LOADSCR-8 | The epilog-stage splash re-show — the start key at the SP post-spawn stage re-runs the splash then queues the deploy event (branch jnz @ 0x49c871; recomposite @ 0x49c887, splash re-run @ 0x49c88f, release @ 0x49c899) — is not ported | `Input_HandleSpecialKeys @ 0x49c5c0` branch @ 0x49c871 | rides the unported SP epilog/respawn flow (and the configurable start-key binding, D-CTRL-1 territory); witnessed 2026-08-15, deferred with that flow |
 | D-LOADSCR-5 | seven-segment numeric percentage not ported | drawn only under the `g_ShowLoadBarCommandLineArg` command-line flag | debug-only surface; revisit if the launch-flag work wants it |
 | D-LOADSCR-6 | background drawn unmodulated | effect draw modulate `0xFF7F7F7F` = MODULATE2X neutral | net-identical color; documented so nobody "fixes" a half-bright that isn't there — PERMANENT 2026-08-29 (ADR 0022 register) |
-| D-LOADSCR-7 | ESC / disconnect during the SP/host **map load** cannot abort it — that load is a single synchronous `operation.call()` the SceneTree cannot interrupt; ESC is swallowed for its duration | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` polls at four asset points and aborts to `Post Menu` (`reason = 1`, `g_loading_cancel_flag = 1`) on ESC/disconnect | no reachable interruption window on a synchronous host load — the original's blocking `.bms`/model load is likewise uninterruptible except at its network-wait points. Scope corrected 2026-07-25: this row covers ONLY the synchronous map load. Both joiner waits are frame-polled state machines (one step per frame/tick), so both are interruptible and both honour ESC — the pre-load connect/session wait via `GameWorld.cancel_join_preload()` and the post-load admission tail via `GameWorld.cancel_join_admission()` (previously ESC was consumed and did nothing there for up to the 60 s ConnectOrHost window). Since S10b (2026-08-07) both windows, the abort legs, and their reason texts live in `inmatch::JoinSessionPolicy` (`engine/runtime/inmatch`); the drive node executes the returned edges. Revisit if the map load is ever chunked across frames. — PERMANENT 2026-08-29 (ADR 0022 register) |
+| D-LOADSCR-7 | ESC / disconnect during the SP/host **map load** cannot abort it — that load is a single synchronous `operation.call()` the SceneTree cannot interrupt; ESC is swallowed for its duration | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` polls at four asset points and aborts to `Post Menu` (`reason = 1`, `g_LoadingCancelFlag = 1`) on ESC/disconnect | no reachable interruption window on a synchronous host load — the original's blocking `.bms`/model load is likewise uninterruptible except at its network-wait points. Scope corrected 2026-07-25: this row covers ONLY the synchronous map load. Both joiner waits are frame-polled state machines (one step per frame/tick), so both are interruptible and both honour ESC — the pre-load connect/session wait via `GameWorld.cancel_join_preload()` and the post-load admission tail via `GameWorld.cancel_join_admission()` (previously ESC was consumed and did nothing there for up to the 60 s ConnectOrHost window). Since S10b (2026-08-07) both windows, the abort legs, and their reason texts live in `inmatch::JoinSessionPolicy` (`engine/runtime/inmatch`); the drive node executes the returned edges. Revisit if the map load is ever chunked across frames. — PERMANENT 2026-08-29 (ADR 0022 register) |
 
 ## Follow-ups / unknowns
 
-- Which wire message invokes `parse_server_session_variables @ 0x5202f0` (its callers were
+- Which wire message invokes `Client_ParseServerSessionVariables @ 0x5202f0` (its callers were
   not traced this session) — likely the mission-info leg of the load sequence; pin it from
   the net side.
 - `dword_24D1FA4` (the coop `MISSIONNAME` override string): writer unknown.
@@ -410,12 +410,12 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
 
 Renames (anchored, all previously auto-named): `LoadingScreen_EnsureEffect @ 0x586b20`,
 `LoadingScreen_ReleaseEffect @ 0x586b80`, `LoadingScreen_DrawEffectFullscreen @ 0x586ba0`;
-globals `g_sessionvar_mission_file_name @ 0x24c1178`, `g_sessionvar_custom_text @ 0x24c11b8`,
-`g_sessionvar_game_type @ 0x24c13b8`, `g_sessionvar_mission_name @ 0x24c13c0`,
-`g_sessionvar_server_name @ 0x24c1400`, `g_sessionvar_exp_fanfare @ 0x24d5a10`,
-`g_loadscreen_has_custom_bg @ 0x24d4dfd`, `g_loadscreen_title_buf @ 0x24d5f28`,
-`g_loadscreen_mission_buf @ 0x24d5d28`, `g_loadscreen_gametype_buf @ 0x24d5b28`,
-`g_server_custom_text @ 0x24d21c4`. Entry comments appended at 0x521d10 (sidecar rule +
+globals `g_SessionVarMissionFileName @ 0x24c1178`, `g_SessionVarCustomText @ 0x24c11b8`,
+`g_SessionVarGameType @ 0x24c13b8`, `g_SessionVarMissionName @ 0x24c13c0`,
+`g_SessionVarServerName @ 0x24c1400`, `g_SessionVarExpFanfare @ 0x24d5a10`,
+`g_LoadScreenHasCustomBg @ 0x24d4dfd`, `g_LoadScreenTitleBuf @ 0x24d5f28`,
+`g_LoadScreenMissionBuf @ 0x24d5d28`, `g_LoadScreenGameTypeBuf @ 0x24d5b28`,
+`g_ServerCustomText @ 0x24d21c4`. Entry comments appended at 0x521d10 (sidecar rule +
 layout), 0x586be0 (bar geometry + creep + schedule), 0x586b20 (release-then-create),
 0x587000 (slot++ ticks are the progress bar, not profiling), 0x523620 (KV source map).
 IDB saved.

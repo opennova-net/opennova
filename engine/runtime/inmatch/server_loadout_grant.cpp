@@ -66,7 +66,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 	if (req.player_class == 0) return grant; // avatar_class stays 0
 	// Class accept: a valid but disabled request scans the whole Soldier Class range from 5 and
 	// takes its first enabled bit. With no enabled bit the already-valid request survives; the
-	// final 8 clamp only covers an invalid value [orig: g_hostClassAllowMask @0x24D59FC,
+	// final 8 clamp only covers an invalid value [orig: g_HostClassAllowMask @0x24D59FC,
 	// @0x5158d6..@0x515915].
 	reply.avatar_class = req.player_class;
 	if ((class_allow_mask & (uint16_t{1} << reply.avatar_class)) == 0) {

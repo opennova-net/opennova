@@ -35,6 +35,21 @@ void ClientReplicaPipeline::set_item_class_resolver(ItemClassResolver resolver) 
 	item_resolver_ = std::move(resolver);
 }
 
+void ClientReplicaPipeline::set_item_catalog(std::shared_ptr<const ItemReplicationCatalog> catalog) {
+	item_catalog_ = std::move(catalog);
+	if (!item_catalog_) {
+		item_resolver_ = {};
+		return;
+	}
+	item_resolver_ = [catalog = item_catalog_](uint16_t type_id) {
+		return catalog->resolve_wire_entity_class(type_id);
+	};
+}
+
+const ItemReplicationProfile *ClientReplicaPipeline::item_def(uint16_t type_id) const {
+	return item_catalog_ ? item_catalog_->by_wire_type(type_id) : nullptr;
+}
+
 EntityClass ClientReplicaPipeline::classify(uint16_t type_id) const {
 	// items.def first — the retail client's own dispatch source [orig: itemDef+356
 	// @0x50f2e2]. It must outrank the 0x0D pool blanket: pool-1 holds no-callback
@@ -91,7 +106,9 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		if (type_changed) state_.mark_topology_changed();
 		es.type_id = rec.item_type_id;
 		es.cls = classify(rec.item_type_id);
-		es.name = rec.entity_name;
+		// The Name copy is bounded: at most 15 characters, then the NUL.
+		// [orig: NapiNPClientMsg_0x00C @0x42E860..0x42E8EA]
+		es.display_name = rec.entity_name.substr(0, 15);
 		es.net_id = rec.net_id;
 		es.spawn_tag = s2c::ENTITY_SPAWN_BATCH;
 		es.spawn_owner_connection_id = rec.owner_connection_id;
@@ -891,7 +908,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// [orig: Entity_UpdateInfantryPlayerBody call @0x4B7CF4 and lift
 	// @0x4B7CFE..0x4B7D0A; Entity_UpdateInfantryAI caller @0x4BF7FA;
 	// Entity_MovementCollisionResolver probe/return @0x4B3D6E..0x4B3DA9;
-	// raycast_entity_collision terrain window @0x413785..0x4137CB, reached by
+	// Entity_RaycastCollision terrain window @0x413785..0x4137CB, reached by
 	// Entity_RaycastGroundHeightAndObject @0x414320]
 	if (terrain != nullptr && terrain->valid()) {
 		const float world_x = static_cast<float>(es.x) / 65536.0f;
@@ -927,7 +944,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 // bucket runs, then the 512-progress cap with the starved idle force — a
 // movement state parked past the progress cap walks its root motion forever,
 // so retail reads AND writes the arbitration current (+0x2BC)
-// [orig: @0x4b464f/@0x4b465f, g_animStateFlagsTable bit0 gate; the org1
+// [orig: @0x4b464f/@0x4b465f, g_AnimStateFlagsTable bit0 gate; the org1
 //  twin is §5.38a cap 512 -> idle 43, the same shape].
 static void row_chase_step_and_cap(ClientEntityState &es, int16_t progress) {
 	if (progress < es.net_interp_steps) {
@@ -1312,7 +1329,10 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.handle = rec.slot_id;
 		es.type_id = rec.item_type_id;
 		es.cls = classify(rec.item_type_id);
-		es.name = rec.entity_name;
+		// entity+0xF4, which only an AIData record names (its serializer writes
+		// the empty string for any other def). [orig: NapiNPClientMsg_0x00D
+		//  @0x433320..0x43334A]
+		es.display_name = rec.entity_name;
 		// The 0x0D handler memsets the full slot and has no entity+124
 		// net-id field. Preserve retail's resulting zero, not ClientState's
 		// unknown/sentinel default.
@@ -1494,23 +1514,23 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			}
 			child.carrier_missing_ticks = 0;
 			// The dead-carrier leg. Retail's client HIDES the child in place —
-			// carrier Flags & 2 -> child Flags |= 1, return, row persists
-			// pending the authority's own destroy transaction [orig:
-			// @0x440cdb..0x440cdd]. Our decoded view RETIRES the subtree
-			// instead (the #403 substitute, kept deliberately): the hide is
-			// presentation-equivalent (bit 0 = invisible), our authority
-			// genuinely despawns the attachment on carrier death, and no
-			// destroy transaction exists on this seam to mirror — an erased
-			// row IS the authority truth here. The death signal stays the
-			// known-zero health word only: the wire flags bit 1 is an
-			// overloaded spawn/movement gate on 0x0D-fed rows, not a death
-			// verdict (the loopback-identity pin).
+			// carrier Flags & 2 -> child Flags |= 1, return, no pose follow — and
+			// the live carrier's vehicle block clears the child's low Flags bits
+			// again (Flags &= ~7) once it respawns; the row persists throughout,
+			// as it does on the authority. The row's state_flags byte is the
+			// entity Flags low byte, which no compact record writes for this
+			// family. The death signal stays the known-zero health word only: the
+			// wire flags bit 1 is an overloaded spawn/movement gate on 0x0D-fed
+			// rows, not a death verdict (the loopback-identity pin).
+			// [orig: Entity_UpdateTransformAndTurret @0x440cdb..0x440ce1 (the
+			//  hide), `and [child+24h],0FFFFFFF8h` @0x440EB3 (the clear)]
 			if (parent->health_known && parent->health_word == 0) {
-				if (std::find(sweep_destroyed.begin(), sweep_destroyed.end(),
-						child.handle) == sweep_destroyed.end())
-					sweep_destroyed.push_back(child.handle);
+				child.state_flags |= static_cast<uint8_t>(world::kEntityFlagCarried);
+				child.state_flags_known = true;
 				continue;
 			}
+			child.state_flags &= static_cast<uint8_t>(~(world::kEntityFlagCarried |
+					world::kEntityFlagDead | world::kEntityFlagHusk));
 
 			const int32_t parent_heading_bam = parent->heading_bam;
 			if (!child.parent_pose_valid) {
@@ -1726,7 +1746,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		--state_.hud_hit_feedback_frames;
 	// The deploy-map overlay follows the host every frame — set AND cleared
 	// by assignment, not edges [orig: NapiNPClientMsg_0x00A @0x42ff82 —
-	// g_deploy_screen_active = (flags1 >> 1) & 1].
+	// g_DeployScreenActive = (flags1 >> 1) & 1].
 	state_.deploy_overlay_active = (fu.flags1 & 0x02u) != 0;
 	if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
 	// The death-screen edges on flags1 bit 0 [orig: @0x42ff88..0x43002b].
@@ -1746,7 +1766,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		++state_.health_updates_applied;
 	}
 	if (fu.weapon.present) {
-		// Phase 0 is the sole retail mirror of g_preround_delay_timer.
+		// Phase 0 is the sole retail mirror of g_PreRoundDelayTimer.
 		// Retain it between phase cycles, exactly like the client global.
 		// [orig: NapiNPClientMsg_0x00A @0x430064]
 		state_.preround_delay_seconds = fu.weapon.preround_timer;
@@ -1757,6 +1777,9 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.respawn_penalty_seconds = fu.weapon.slot_state360;
 		state_.local_revive_seconds = fu.weapon.slot_state368;
 		state_.spawn_hold_seconds = fu.weapon.slot_state364;
+		// The underwater breath samples, the breath bar's counter
+		// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C].
+		state_.breath_samples = fu.weapon.slot_state460;
 	}
 	if (authority_recipient_) {
 		// The listen host's own frame carries nothing past the phase-0 block
@@ -1797,7 +1820,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.fallmps = fu.timer.state1;
 		// The round clock: 62 x the wire's whole seconds, negative = untimed
 		// -1. [orig: NapiNPClientMsg_0x00A @0x430219..0x430235 —
-		//  g_round_time_remaining]
+		//  g_RoundTimeRemaining]
 		state_.round_time_remaining_ticks = fu.timer.timer_seconds < 0
 				? -1
 				: 62 * static_cast<int32_t>(fu.timer.timer_seconds);
@@ -1991,7 +2014,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// Reconstruct world position: decompress the compact (per-axis) and add the
 		// frame anchor — or, for a CARRIER-LOCAL player record (vehicle/ground handle !=
 		// 0xFFFF, D-NET-151), lift the local offset through the carrier's pose from this
-		// view's own state [orig: op2 resolves the carrier from g_pool_list and runs
+		// view's own state [orig: op2 resolves the carrier from g_PoolList and runs
 		// Entity_TransformLocalToWorld @0x4c10d4; a carrier with no itemDef DROPS the
 		// record and queues a C2S 0x0F entity request — request plumbing an in-process
 		// view does not need, so an unknown carrier just skips the position sample].

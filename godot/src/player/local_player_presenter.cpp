@@ -6,6 +6,7 @@
 #include "object/item_database.h"
 #include "player/local_player_visuals.h"
 #include "player/player_viewmodel_def.h"
+#include "render/target_projection_xr_interface.h"
 #include "render/visual_layers.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/player_weapon_view.h"
@@ -151,6 +152,9 @@ SubViewport *LocalPlayerPresenter::projection_viewport() const {
 }
 
 Projection LocalPlayerPresenter::view_projection() const {
+	if (nvg_raster_served_ && projection_viewport() != nullptr) {
+		return nvg_raster_projection_;
+	}
 	if (Camera3D *through = projection_camera()) {
 		return through->get_camera_projection();
 	}
@@ -541,9 +545,10 @@ Vector2 LocalPlayerPresenter::aim_screen_point() const {
 	const Ref<Simulation> aim_sim = sim();
 	const Vector3 eye = eye_position(aim_sim.is_valid() ? aim_sim->get_local_player_position() : Vector3());
 	const Vector3 target = Simulation::aim_ray_endpoint(eye, angles.x, angles.y);
-	// Through the frame's projection (view_projection): the stretched target's
-	// camera while it is live -- its pixels reach the surface through the
-	// blit's stretch -- else the surface camera.
+	// Through the frame's projection (view_projection): the target's camera
+	// while it is live -- its pixels reach the surface through the blit's
+	// full-surface stretch, so its clip space maps straight onto the surface --
+	// else the surface camera.
 	Camera3D *through = projection_camera();
 	SubViewport *target_viewport = projection_viewport();
 	Viewport *surface = cam->get_viewport();
@@ -553,15 +558,17 @@ Vector2 LocalPlayerPresenter::aim_screen_point() const {
 	if (through->is_position_behind(target)) {
 		return kNoProjection;
 	}
-	Vector2 point = through->unproject_position(target);
-	if (through != cam) {
-		const Vector2 target_size = Vector2(target_viewport->get_size());
-		const Vector2 surface_size = surface->get_visible_rect().size;
-		if (target_size.x > 0.0f && target_size.y > 0.0f) {
-			point = Vector2(point.x * surface_size.x / target_size.x, point.y * surface_size.y / target_size.y);
-		}
+	if (through == cam) {
+		return cam->unproject_position(target);
 	}
-	return point;
+	const Vector3 view_point = through->get_camera_transform().xform_inv(target);
+	const Vector4 clip = view_projection().xform(Vector4(view_point.x, view_point.y, view_point.z, 1.0f));
+	if (clip.w <= 0.0f) {
+		return kNoProjection;
+	}
+	const Vector2 surface_size = surface->get_visible_rect().size;
+	return Vector2((clip.x / clip.w * 0.5f + 0.5f) * surface_size.x,
+			(-clip.y / clip.w * 0.5f + 0.5f) * surface_size.y);
 }
 
 int LocalPlayerPresenter::aim_range_units() const {
@@ -847,7 +854,7 @@ void LocalPlayerPresenter::feed_virtual_display(bool p_live) {
 
 // The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted
 // defs, eased by the 15-tick interp, suppressed in third person --
-// engine/runtime/world player_view [orig: g_cameraFovTargetQ16 @0x26C6848;
+// engine/runtime/world player_view [orig: g_CameraFovTargetQ16 @0x26C6848;
 // Player_ToggleWeaponScope @0x4df401; @0x4df3fa]); the frame's projection over
 // the surface -- the mode-invariant horizontal fov, the vertical half-extent
 // of the SELECTED ratio -- is the engine's world::view_projection [orig:
@@ -909,12 +916,13 @@ void LocalPlayerPresenter::update_scope_camera() {
 }
 
 // The stretched-mode target (view_projection): a SubViewport of the selected
-// aspect under this presenter, sharing the surface's World3D, its own camera
-// mirroring the gameplay camera at the mode-invariant horizontal fov, and a
-// CanvasLayer beneath the root canvas blitting the target over the whole
-// surface (whose own 3D draw is switched off meanwhile). Built on the first
-// stretched frame, sized and mirrored every frame, released when the mode
-// returns to the surface's ratio or the player goes away.
+// aspect (or the NVG raster's 512 square) under this presenter, sharing the
+// surface's World3D, its own camera mirroring the gameplay camera at the
+// mode-invariant horizontal fov, and a CanvasLayer beneath the root canvas
+// blitting the target over the whole surface (whose own 3D draw is switched
+// off meanwhile). Built on the first stretched frame, sized and mirrored
+// every frame, released when the mode returns to the surface's ratio or the
+// player goes away.
 void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection,
 		bool p_nvg_raster) {
 	Camera3D *cam = camera();
@@ -956,9 +964,28 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 		projection_camera_id_ = ObjectID(through->get_instance_id());
 		projection_blit_layer_id_ = ObjectID(blit_layer->get_instance_id());
 	}
+	// The NVG raster is retail's 512 square at the frame's frustum, its texels
+	// non-square: a projection the camera cannot draw on a square target, so
+	// the target is served through TargetProjectionXrInterface (below). The
+	// camera node's own frame (the target's visible rect, size_2d_override)
+	// keeps the frustum's aspect, so its node-side projection -- the LOD and
+	// occlusion tangents, picks -- meets the served matrix to within a pixel.
+	// A stretched mode's target draws through the camera's own frustum.
+	static_assert(opennova::renderer::kNvgSceneSide == TargetProjectionXrInterface::kTargetSide,
+			"the NVG raster is the XR projection interface's square");
+	if (!p_nvg_raster && target->is_using_xr()) {
+		TargetProjectionXrInterface::release(target);
+	}
 	const Vector2i target_size(p_projection.target_w, p_projection.target_h);
 	if (target->get_size() != target_size) {
 		target->set_size(target_size);
+	}
+	const Vector2i camera_frame = p_nvg_raster
+			? Vector2i(static_cast<int>(Math::round(static_cast<float>(target_size.y) * p_projection.aspect)),
+					  target_size.y)
+			: Vector2i();
+	if (target->get_size_2d_override() != camera_frame) {
+		target->set_size_2d_override(camera_frame);
 	}
 	mirror_viewport_quality(surface, target);
 	// The gameplay pose and everything of the camera but the frustum.
@@ -982,6 +1009,16 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 		surface->set_disable_3d(true);
 		projection_surface_id_ = ObjectID(surface->get_instance_id());
 	}
+	// The NVG raster's matrix: the horizontal fov across the 512 columns and
+	// the frame's vertical half-extent across the 512 rows -- the matrix
+	// Camera3D builds for this fov at the frame's aspect (world::ViewProjection).
+	nvg_raster_served_ = false;
+	if (p_nvg_raster) {
+		nvg_raster_projection_ = Projection::create_perspective(p_projection.fov_h_deg,
+				p_projection.aspect, through->get_near(), through->get_far(), true);
+		nvg_raster_served_ = TargetProjectionXrInterface::serve(target,
+				through->get_camera_transform(), nvg_raster_projection_);
+	}
 	projection_scale_y_ = p_projection.scale_y;
 	nvg_raster_active_ = p_nvg_raster;
 }
@@ -1003,7 +1040,8 @@ void LocalPlayerPresenter::release_view_projection() {
 	if (Node *blit_layer = Object::cast_to<Node>(ObjectDB::get_instance(projection_blit_layer_id_))) {
 		blit_layer->queue_free();
 	}
-	if (Node *target = Object::cast_to<Node>(ObjectDB::get_instance(projection_viewport_id_))) {
+	if (SubViewport *target = projection_viewport()) {
+		TargetProjectionXrInterface::release(target);
 		target->queue_free();
 	}
 	projection_blit_layer_id_ = ObjectID();
@@ -1011,6 +1049,7 @@ void LocalPlayerPresenter::release_view_projection() {
 	projection_camera_id_ = ObjectID();
 	projection_scale_y_ = 1.0f;
 	nvg_raster_active_ = false;
+	nvg_raster_served_ = false;
 }
 
 void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {

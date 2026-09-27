@@ -101,7 +101,7 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 		return;
 	}
 	// The "W" measure supplies the default row/header heights [orig: the
-	// font_cache_measure_text_default("W") probe; authored min_item_height
+	// CFontCache_MeasureTextDefault("W") probe; authored min_item_height
 	// wins when present].
 	int header_h = 0;
 	int row_h = 0;
@@ -136,7 +136,7 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 		emit_glyph_run(node, label, tx, rect.top, s, color, -1);
 		if (width - text_w > 16) {
 			// One divider segment centered in the headroom band [orig:
-			// draw_rule_line @ 0x6410a0 — 0xFF7F7F7F].
+			// CTableWnd_DrawRuleLine @ 0x6410a0 — 0xFF7F7F7F].
 			const int seg_left = x + text_w + 1;
 			const int seg_right = x + width - 1;
 			const int seg_y = rect.top + header_h / 2;

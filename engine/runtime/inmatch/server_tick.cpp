@@ -8,11 +8,13 @@
 #include <runtime/inmatch/server_entity_routes.h>    // the item events, crossings and guidance
 #include <runtime/inmatch/server_spawn.h>            // the admitted 0x51 spectator converts
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <vector>
 
 #include <base/gameprofile/game_type.h>        // the CTF / FlagBall / Flag Me carry-limit modes
+#include <base/io/le.h>                        // append_u16_le / append_u32_le (put_u16le / put_u32le)
 #include <base/io/strutil.h>                   // iequals (the JOINTICKET key lookup)
 #include <net/npwire/ingame_decode.h>          // kPlayerSyncHasDownedState (the 0x46 resend form)
 #include <net/npwire/ingame_encode.h>
@@ -172,15 +174,11 @@ PlayerDeathFeed classify_player_death(
 }
 
 void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
-	v.push_back(static_cast<uint8_t>(x & 0xFF));
-	v.push_back(static_cast<uint8_t>(x >> 8));
+	opennova::io::append_u16_le(v, x);
 }
 
 void put_u32le(std::vector<uint8_t> &v, uint32_t x) {
-	v.push_back(static_cast<uint8_t>(x & 0xFF));
-	v.push_back(static_cast<uint8_t>((x >> 8) & 0xFF));
-	v.push_back(static_cast<uint8_t>((x >> 16) & 0xFF));
-	v.push_back(static_cast<uint8_t>((x >> 24) & 0xFF));
+	opennova::io::append_u32_le(v, x);
 }
 
 constexpr uint32_t kPuntCharattrSilence = 16;
@@ -638,7 +636,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			// victim reports the post-edge zero here rather than the selection
 			// its edge still owns; every other kind ships the slot as stored.
 			// The retail receiver stores the word sign-extended into +0x2C0.
-			// [orig: BuildDeathNotifyPayload @0x5036E0 (movzx word [esi+2C0h]
+			// [orig: NetPacket_BuildDeathNotifyPayload @0x5036E0 (movzx word [esi+2C0h]
 			//  @0x503733, store @0x50374A); edges @0x4B9D38 -> @0x4B9D4D (AI)
 			//  and @0x4B4CD5 -> @0x4B4CEA (player body); direct sender
 			//  @0x4D29EC; receiver NapiNPClientMsg_EntityDeath @0x42EB8D/@0x42EBDF]
@@ -847,7 +845,7 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	ctx.round_end_announced = true;
 	ctx.round_end_linger_ticks = 2790;
 	// A ServerCommand Cycle / EndMission / GameOver overrides the stored
-	// linger right after the round end [orig: loc_4D22F0 @0x4D31CA].
+	// linger right after the round end [orig: CNapiGameSession_HandleServerCommand @0x4D31CA].
 	if (ctx.round_end_linger_override_ticks != 0) {
 		ctx.round_end_linger_ticks = ctx.round_end_linger_override_ticks;
 		ctx.round_end_linger_override_ticks = 0;
@@ -881,7 +879,7 @@ void release_expired_local_respawns(NapiNPServerCtx &ctx, world::World &world) {
 }
 
 // The original stores seconds, not tick deadlines. The per-slot decrements sit
-// inside the same g_periodic_second_timer block as the win check and the
+// inside the same g_PeriodicSecondTimer block as the win check and the
 // capture transaction, so they ride Match's countdown, not a second phase.
 // [orig: Server_TickUpdate @0x51DFB0..0x51E00B (slot +0x170/+0x168/+0x16C)]
 void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
@@ -911,7 +909,7 @@ void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 // never carries protection. Runs before the receive pump, so a deploy admitted
 // this tick keeps its full 620.
 // [orig: Server_UpdateAllActivePlayerSlots @0x518820 — gate @0x51888c
-//  (!g_spawn_success_gate && !g_preround_delay_timer), non-session zero
+//  (!g_SpawnSuccessGate && !g_PreRoundDelayTimer), non-session zero
 //  @0x51889c, latch -1 @0x5188ac, decrement @0x5188b8..0x5188c5; caller
 //  Server_TickUpdate @0x51d88b ahead of the recv pump @0x51d895]
 void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
@@ -1082,7 +1080,7 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 // [orig: sub_517B20 @0x517B20 — authority @0x517b27, def @0x517b55, ids
 //  @0x517b57..0x517b6d, cursor compare @0x517b71, ++ @0x517b81, reset
 //  @0x517b90; sender Server_SendDestructibleDeathPacket @0x50D900 (mask 0x80
-//  @0x50d922, SendFiltered(0x2F) @0x50d95a) -> serialize_entity_with_parent_and_target
+//  @0x50d922, SendFiltered(0x2F) @0x50d95a) -> NetPacket_SerializeEntityWithParentAndTarget
 //  @0x505810; caller Server_TickUpdate @0x51df64]
 void refresh_next_flag_state(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_authority) return;
@@ -1369,7 +1367,7 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
 // [orig: Server_TickUpdate @0x51D7E0 -> @0x508540; per-player quartet
 // Server_UpdateAllActivePlayerSlots @0x518820]
 // `periodic_second` is the shared one-second boundary: the dead-age counter
-// below lives inside retail's g_periodic_second_timer block and advances once
+// below lives inside retail's g_PeriodicSecondTimer block and advances once
 // per second, not once per tick.
 void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world,
 		bool periodic_second) {
@@ -1551,7 +1549,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 		}
 		// The dead-age arm owns an independent consecutive-SECOND counter. It
 		// does not derive elapsed time from Entity::death_tick: the counter and
-		// its compare sit inside the g_periodic_second_timer block (reload 62),
+		// its compare sit inside the g_PeriodicSecondTimer block (reload 62),
 		// so retail increments the player-slot dword once per periodic second
 		// while a state-6 entity has Flags bit 0x02 set, resets it as soon as
 		// the bit clears, and compares after the increment — punt type 7 lands
@@ -1678,7 +1676,7 @@ void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx) {
 	}
 }
 
-// The kit-weight recompute (the IDB's misnamed recalculate_all_player_scores):
+// The kit-weight recompute (the IDB's misnamed Server_RecalculateAllPlayerScores):
 // for every active slot with an entity — no state gate — walk the host-side
 // weapon-slot rows summing weaponweight + WeaponSlot_GetTotalClips (the LIVE
 // pool + loaded-clip count) x clipweight, plus the first sub-variant of a
@@ -1692,7 +1690,7 @@ void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx) {
 // kit are not modeled host-side (their pools never reach the 0x0F image), so
 // a remote weight omits the differing-class sub term; that is the D-NET-152
 // shared-pool tail, not a second mechanism.
-// [orig: recalculate_all_player_scores @0x5014E0 — slot walk @0x5014f9..0x501604,
+// [orig: Server_RecalculateAllPlayerScores @0x5014E0 — slot walk @0x5014f9..0x501604,
 //  byte+4 @0x501502, weaponweight @0x501538, WeaponSlot_GetTotalClips @0x501546
 //  (-> @0x5425F0), clipweight @0x501564, sub-variant loop @0x501568..0x5015cf,
 //  skip @0x5015d1, store entity+892 @0x5015f7; callers Server_TickUpdate
@@ -1963,7 +1961,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_TickUpdate @0x51DE79..0x51DF4A, before @0x51DF50].
 	if (periodic_second) Server_EmitQualityResends(ctx, world);
 
-	// (2c) Win conditions at 1 Hz [orig: the g_periodic_second_timer block in
+	// (2c) Win conditions at 1 Hz [orig: the g_PeriodicSecondTimer block in
 	// Server_TickUpdate @0x51D7E0 — reload 62 @0x51db93 — calls
 	// Server_CheckWinConditions @0x51AD40 (the call @0x51df5a) once per second].
 	if (periodic_second) check_win_conditions(ctx, world);
@@ -2015,7 +2013,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	}
 
 	// (2d) The capture transaction at 1 Hz [orig: the
-	// Server_TickUpdate g_periodic_second_timer block @0x51DF50..0x51DF8C: proximity ->
+	// Server_TickUpdate g_PeriodicSecondTimer block @0x51DF50..0x51DF8C: proximity ->
 	// Server_UpdateCaptureZoneEntities (0x6F + 0x1E 0x3B/0x3C) -> Server_EnforceZoneEntityTeams
 	// -> Server_UpdateCaptureZones (instant numbered flips + timed active entries)].
 	// The world side runs in zone_capture_second_tick; this block encodes its one
@@ -2027,7 +2025,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//   0x50 6 B [u16 handle][u8 team][u16 netId][u8 animSlot] for every actual
 	//     ownership mutation, including the ordered team-0/new-team instant pair;
 	//     non-player identity is zero [orig: Server_ChangeEntityTeam @0x518D70;
-	//     write_entity_handle_packet @0x506AD0];
+	//     NetPacket_WriteEntityHandlePacket @0x506AD0];
 	//   0x1E 8 B zone events [orig: GameEvent_BuildPayload @0x5054E0]: 0x3B/0x3C secure
 	//     edges (attacker = sorted spawn-zone-list index; victim = zone team); a
 	//     numbered flip's pair [zone number][rank] 51 to the capturer's team and 50
@@ -2155,6 +2153,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				assign.net_id = change->net_id;
 				assign.anim_slot = change->anim_slot;
 				send_all(s2c::TEAM_ASSIGN, encode_team_assign(assign));
+				// A zone flip runs the same Server_ChangeEntityTeam, so the zone
+				// joins the late-joiner team-change list too
+				// [orig: CBufferList_AddOrFind @0x518EEC].
+				std::vector<world::EntityHandle> &changed = ctx.team_change_entities;
+				if (std::find(changed.begin(), changed.end(), change->entity) == changed.end())
+					changed.push_back(change->entity);
 				continue;
 			}
 			if (const auto *window =
@@ -2268,7 +2272,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 
 	// The last statement of retail's periodic-second block: every player's kit
 	// weight is recomputed from its live rows [orig: Server_TickUpdate @0x51e1ab
-	// -> recalculate_all_player_scores @0x5014E0].
+	// -> Server_RecalculateAllPlayerScores @0x5014E0].
 	if (periodic_second)
 		Server_RecalculateAllPlayerKitWeights(ctx.np_protocol.connection_list, world);
 
@@ -2305,7 +2309,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		// The priority build runs only for recipients that take entity records:
 		// the listen host's own player gets the header-only frame and never
 		// walks the pools [orig: Server_SendEntityStateToPlayer @0x517c1b skips
-		// Server_BuildEntityPriorityList for g_local_player_entity]. Type-1 peers
+		// Server_BuildEntityPriorityList for g_LocalPlayerEntity]. Type-1 peers
 		// take one only at their open send boundary (see the fan below).
 		bool any_record_recipient = false;
 		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -2358,9 +2362,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			conn.link.receive_silence_ms = conn.receive_inactive_ms;
 			// Built here and queued just below: the frame's CONTENT is the world
 			// after the script pass and the maintenance, before the motor step.
+			// The server-fps byte is this tick's copy of the main loop's FR
+			// counter [orig: Server_TickUpdate @0x51D7E0..0x51D7E5].
 			conn.frame_update_staged = replication::build_connection_s2c(
 					world, conn.link, ents, conn.staged_frame_update, ctx.config.game_type,
-					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0);
+					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0,
+					ctx.stats_avg_fps);
 		}
 	}
 	// Queue the frames just built, retail's per-slot send.

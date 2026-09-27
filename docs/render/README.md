@@ -11,7 +11,7 @@ land here as the grill slices convert the three `UNAUDITED` render systems
 | [`render-order-re.md`](render-order-re.md) | **landed at REN-3** | D-RORD | batching, sort keys, technique-class selection, the render-state stack, and the frame pass sequence (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Terrain_RenderWorldScene @ 0x5c93a0); since the 2026-09-24 rendering parity pass also the post-particle overlay stage and the FrameFX screen effects |
 | [`render-lighting-re.md`](render-lighting-re.md) | **landed at REN-5** | D-RLIT | the iris/modulator chain (env #17), the world lighting block + per-entity uniforms and hemisphere D3D lights, dynamic point lights + group culling, terrain/foliage c0/c1, lighting textures, the cubemap sources (CubeRotSpecular = D-RORD-5's answer), the render-slot shadow lighting |
 | [`render-occlusion-re.md`](render-occlusion-re.md) | **landed 2026-07-16** (outside the original three REN slices) | D-OCC | blink-box visibility: section masks, portal traversal, occluder culling, indoor frame gates, the GPM `OVRT`/`OPLN`/`OFAC`/`OOBJ` occlusion chunks, and the sound-occlusion witness (which closed D-SND-7). Sound occlusion (2026-07-16, `CollisionWorld` + `engine/runtime/terrain_query`), the indoor frame gates (2026-07-16, `OcclusionFramePass`), and the section-mask/portal engine (init, mask build, traversal, occluder culling — 2026-07-17, `engine/runtime/world/occlusion.cpp`) are all ported; residuals ride the D-OCC rows |
-| [`shader-validation.md`](shader-validation.md) | **landed with the FrameFx slice (2026-08-23)** | shader provenance | the checked-in shader inventory, its citation coverage, the bounded parity statuses, and the light-response validation procedure; machine-readable twin `godot/shaders/provenance.json` |
+| [`shader-validation.md`](shader-validation.md) | **landed with the FrameFx slice (2026-08-23)** | shader provenance | the checked-in shader inventory, its citation coverage, the bounded parity statuses, and the light-response validation procedure; the hand-maintained object wrappers and what `object/pipeline_manifest.json` does and does not describe |
 | [`render-lighting-parity-2026-08-15.md`](render-lighting-parity-2026-08-15.md) | **evidence session 2026-08-15; settled max-quality publication refreshed 2026-08-22** | render fixture evidence | exact-pose catalogs, maximum-video frame-correlated capture tooling, [18 current comparisons](https://github.com/opennova-net/opennova/blob/8881f61d7cdf7f848cea85393a3858f6e2866dbd/screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md), shadow lifecycle repair, live retail IDA bounds, and comparison limitations |
 
 Terrain TSS findings grow [terrain/terrain-re.md](../terrain/terrain-re.md);
@@ -169,8 +169,8 @@ they are not placement evidence). The `00tra-tire-marks-retail` fixture (added
 2026-08-20 from a debug snapshot) measures the ordered `.til` overlay
 tire-mark composition; the corrected celestial axis map (#525) now lays the static tree
 silhouettes through this camera's view, so its full-frame MAE (`10.191796`)
-measures the open D-TERRAIN-7 low-sun silhouette-density divergence together
-with the tile-composition items. The
+measured the low-sun silhouette density together with the tile-composition
+items (D-TERRAIN-7, closed 2026-09-26). The
 `00tra-armory-lght-retail` fixture (added 2026-08-20 from a debug snapshot)
 measures model-authored `LGHT` lamp delivery inside the armory - the
 2026-08-20 slice landed vertex-rate point shading, static-source owner
@@ -189,7 +189,7 @@ env-tod-re.md §Celestial bodies) and found one global gain behind a ~15 %
 uniform lit-ground gap against the superseded 2026-08-20 frame: every iris
 sample at that pose lies inside the hangar's blink volume (bms 71), so all
 three take the indoor ceiling/floor branch `[orig:
-terrain_sector_compute_lighting @ 0x5c7660..0x5c76fe]` and the settled
+Terrain_SectorComputeLighting @ 0x5c7660..0x5c76fe]` and the settled
 modulator is 76/64 = 1.1875, while that frame was captured three frames
 after its fixture apply, before the modulator had chased its target
 (`ColorBlock_SetStepDeltas(62) @ 0x57e538`); no engine change followed.
@@ -241,7 +241,7 @@ leg pins retail's 0.2 world near plane on the render camera every frame
 water-mirror check (`realized_reflection_pose_matches`,
 `godot/probes/render/render_fixture_contract.gd`) expects the reflection
 camera to mirror the eye only at or above the water plane; below it the
-reflected pass keeps the live eye, as `render_main_scene` copies the camera
+reflected pass keeps the live eye, as `Render_MainScene` copies the camera
 block unchanged there (env-tod-re.md #30).
 
 Retail references carry the same settle obligation as OpenNova captures: a

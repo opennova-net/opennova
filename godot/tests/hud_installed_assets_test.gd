@@ -156,10 +156,6 @@ func test_installed_launcher_and_mortar_hud_transitions() -> void:
 						if absf(image.get_pixel(x, y).r - background.color.r) + absf(image.get_pixel(x, y).g - background.color.g) > 0.1:
 							changed += 1
 				assert_gt(changed, 15, name + " produces visible HUD pixels")
-				var capture := "user://hud-installed-captures"
-				if not capture.is_empty():
-					DirAccess.make_dir_recursive_absolute(capture)
-					assert_eq(image.save_png(capture.path_join("%s-%dx%d.png" % [name, size.x, size.y])), OK)
 		assert_true(sim.request_local_player_scope_toggle())
 		for _i in range(100):
 			sim.step()
@@ -202,7 +198,7 @@ func test_installed_tank_and_pilot_hud_entry_exit() -> void:
 		assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 		sim.set_local_player_weapon(weapons.get_weapon(weapons.find_weapon("WPN_M4AUTO")), {})
 		var seat_position := vehicle_position + control_seat.get_local()
-		MountLook.face(sim, seat_position, seat_position - Vector3(1, 0, 0))
+		MountLook.face(self, sim, seat_position, seat_position - Vector3(1, 0, 0))
 		assert_true(sim.local_player_toggle_mount(), "%d boards its control seat" % item_id)
 		for _i in range(50):
 			sim.step()

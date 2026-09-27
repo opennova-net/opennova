@@ -21,7 +21,7 @@ namespace opennova::renderer {
 // Person entities (ItemDef type 3) enter the two BySide waves. The queued
 // alpha draws flush after the world block is restored; the opaque draws use
 // the flat block. Held models inherit their owner's wave.
-// [orig: collect_visible_entities_for_terrain @0x5C8C60;
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5C8C60;
 // Terrain_RenderWorldScene @0x5C9511..0x5C9616]
 inline bool entity_uses_thermal_wave(int item_type) { return item_type == 3; }
 
@@ -83,8 +83,8 @@ constexpr uint32_t kStackDefaultDepthMask = 0x4;
 
 // Technique-class selection for a submitted batch entry: the state stack's
 // class defaults win over the submit flags; NORMAL otherwise
-// [orig: collect_render_objects_for_batch @ 0x5d90d7..0x5d9145;
-// collect_render_batches_for_entity @ 0x5d95c0..0x5d961f].
+// [orig: Render_CollectRenderObjectsForBatch @ 0x5d90d7..0x5d9145;
+// Render_CollectRenderBatchesForEntity @ 0x5d95c0..0x5d961f].
 TechniqueClass technique_class_for_submit(uint32_t stack_default_flags,
                                           uint32_t submit_flags);
 
@@ -126,7 +126,8 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // depth sort matches the per-queue ~float-bits keys above). The witnessed
 // frame [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0]: the sky pass
 // (dome -> bodies -> clouds, SkyDome_RenderWithSkyfog @ 0x5ca81a), then the first-person
-// viewmodel (@ 0x5ca829), then the scene core [orig:
+// viewmodel (@ 0x5ca829), then the terrain sector pass with its slot drapes
+// (@ 0x5ca867), then the scene core [orig:
 // Terrain_RenderWorldScene @ 0x5c93a0]: the non-person sector wave
 // (its opaque flush @ 0x5c9506 carries the post-multiply passes) -> the
 // far-side person waves with their foliage MODEL masks (@ 0x5c9548,
@@ -141,24 +142,47 @@ TransparentQueue transparent_queue_for(float world_height, float water_height);
 // Values keep the sky group
 // before all world alpha and leave the camera-side rung at Godot's default 0
 // so unclassified transparents land there naturally.
-// The dome's gradient pass opens the sky pass [orig: render_skybox @ 0x579080,
-// its first DrawIndexedPrimitive @ 0x5798dc, before render_celestial_bodies
+// The dome's gradient pass opens the sky pass [orig: Render_Skybox @ 0x579080,
+// its first DrawIndexedPrimitive @ 0x5798dc, before Render_CelestialBodies
 // @ 0x5798e0]. It writes no depth (pass flags 0x300000 @ 0x579883), and
 // Godot draws every no-depth-write surface in its transparent list, where it
 // is ordered by this rung: without it the gradient (rung 0) would paint over
 // the bodies, the clouds and every sky-group and far-side draw below it.
-constexpr int kRungSkyDome = -15;
-// The sun/moon bodies inside the dome pass [orig: render_skybox @ 0x579080 ->
-// render_celestial_bodies @ 0x5acaa0].
-constexpr int kRungSkyBody = -14;
+constexpr int kRungSkyDome = -16;
+// The sun/moon bodies inside the dome pass [orig: Render_Skybox @ 0x579080 ->
+// Render_CelestialBodies @ 0x5acaa0].
+constexpr int kRungSkyBody = -15;
 // The dome's cloud layers, drawn after the bodies inside the same pass
-// [orig: render_skybox cloud pass @ 0x5798f1..0x579b15].
-constexpr int kRungSkyClouds = -13;
+// [orig: Render_Skybox cloud pass @ 0x5798f1..0x579b15].
+constexpr int kRungSkyClouds = -14;
 // The first-person viewmodel flushes whole (its alpha strips included) after
 // the sky pass and before every world draw [orig: SkyDome_RenderWithSkyfog @ 0x5ca81a then
 // Player_RenderViewModelIfAlive @ 0x4e0140, called @ 0x5ca829]; its depth
 // band keeps later world alpha off it.
-constexpr int kRungViewmodel = -12;
+constexpr int kRungViewmodel = -13;
+// The render-slot ground-shadow drapes: after the viewmodel, the main frame
+// draws the terrain sector pass, whose batch is followed by every slot drape
+// before any model, foliage, water or transparent is submitted
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca829 (viewmodel) -> @ 0x5ca867
+// (Terrain_RenderMainSectorPass: Terrain_RenderSectorBatchLit @ 0x610c34, then
+// RenderSlot_DrawAllDrapes @ 0x610c47 behind the enabled > 0 gate
+// @ 0x610c3c..0x610c45) -> Terrain_RenderWorldScene @ 0x5ca8ec]. The drape
+// technique writes no depth (intrinsic flags 0x1520000 [orig:
+// Shadow_SystemInitResources @ 0x5d6362, stored @ 0x5d636c], applied pass
+// 0x100000 [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5e30, applied
+// @ 0x5d5e4b]), so every later draw that passes
+// depth against the terrain overwrites the drape: the drape survives only
+// where the terrain, or the sky/clear drawn before it, is the front-most
+// surface. The Godot layer reproduces that final pixel with a stencil mark the
+// terrain (opaque colour pass, depth EQUAL against the prepass, so only its
+// front-most fragments) and the sky dome write, which the drape reads at this
+// rung, after the viewmodel and before every world rung. The indoors letter
+// 0x2 skips the whole terrain sector pass and every drape with it
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca84d..0x5ca84f], while the slot
+// captures run earlier, outside that gate [orig: Render_TerrainScene ->
+// Render_ShadowPass @ 0x610cb5, from Render_ProcessMainSceneFrame @ 0x5ca504],
+// so the drapes follow scene_pass_gates' terrain gate and the captures do not.
+constexpr int kRungSlotDrape = -12;
 // BmTxMirrT's P3 post-multiply is a PASS of the strip's own technique, not a
 // second submit: FlushBatches runs every pass of one entry back to back
 // (the pass loop @ 0x5da20b..0x5da23d over technique+4 passes, fog/blend per
@@ -194,15 +218,17 @@ constexpr int kRungParticleFarSide = -7;
 constexpr int kRungFoliageFarSide = -6;
 constexpr int kRungWater = -5;           // the water surface (drawn between the side brackets)
 // The water decals (the vehicle wake rings) inside the water pass, right
-// after the surface strip [orig: render_water_surface @ 0x5c3426 strip then
+// after the surface strip [orig: Render_WaterSurface @ 0x5c3426 strip then
 // the wake bank scanner WaterRing_DrawAll @ 0x5c3432].
 constexpr int kRungWaterDecals = -4;
 // The foliage MODEL depth masks of the camera-side person wave, drawn inside
-// the camera wave @ 0x5c9638 after the water pass and before
-// Scar_DrawBatches @ 0x5c9658 [orig: Terrain_RenderWorldScene].
+// the camera wave @ 0x5c9638 after the water pass and before the scars
+// [orig: Terrain_RenderWorldScene @ 0x5c93a0 (the Scar_DrawBatches call
+// @ 0x5c9658)].
 constexpr int kRungFoliageMaskCameraSide = -3;
 // The impact scars, after the camera-side opaque wave and before foliage
-// pass 1 and the camera-side alpha [orig: Scar_DrawBatches @ 0x5c9658].
+// pass 1 and the camera-side alpha [orig: Scar_DrawBatches @ 0x5ccd10, from
+// Terrain_RenderWorldScene @ 0x5c93a0 (the call @ 0x5c9658)].
 constexpr int kRungScars = -2;
 // Detail foliage on the camera's side of the water, before the camera-side
 // alpha flush [orig: Foliage_RenderDetailPatchesPass(1) @ 0x5c9665].

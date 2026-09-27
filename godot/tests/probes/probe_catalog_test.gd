@@ -19,9 +19,6 @@ func test_definitions_are_unique_and_live_under_probes() -> void:
 
 
 func test_every_available_probe_loads_and_its_defaults_validate() -> void:
-	if ProbeDef.definitions().is_empty():
-		pass_test("the catalog is empty in this build")
-		return
 	for def in ProbeDef.definitions():
 		if not def.is_available():
 			fail_test("%s is listed but its script %s is missing" % [def.name, def.script_path])

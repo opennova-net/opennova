@@ -142,7 +142,7 @@ int tokenize(const char *s, size_t len, Token *tokens, int max_tok) {
    items.def 'husk_sub_part_types' stores per husk sub-part. Mirrors the 13 named
    rows of the 80-B static table; the full row data (velocities/effects/sounds)
    lives in engine/runtime/world/destruction.cpp, both citing the same original.
-   [orig: g_death_piece_types @ 0x8404f0; DeathPieceType_FindByName @ 0x57b310] */
+   [orig: g_DeathPieceTypes @ 0x8404f0; DeathPieceType_FindByName @ 0x57b310] */
 static const char *const k_death_piece_type_names[13] = {
     "HULL",      "WHEEL",     "CHUNK_S",   "CHUNK_M",   "CHUNK_L",
     "ROCK_S",    "ROCK_M",    "ROCK_L",    "CHUNKNP_S", "CHUNKNP_M",
@@ -459,6 +459,19 @@ void parse_pos_aligned(Token *vals, int n, int *out) {
         size_t ll = vals[3].len < 15 ? vals[3].len : 15;
         to_lower_buf(low, vals[3].s, ll);
         out[3] = parse_alignment(low, ll);
+    }
+}
+
+/* [orig: HUD_ParseHudposToken's BREATHTIME arm @0x59FB3B..0x59FB84 -- atof x,
+   atof y, then HUD_ParseTextAlignment on the THIRD token] */
+void parse_pos_align3(Token *vals, int n, int *out) {
+    if (n >= 1) out[0] = parse_int_n(vals[0].s, vals[0].len);
+    if (n >= 2) out[1] = parse_int_n(vals[1].s, vals[1].len);
+    if (n >= 3) {
+        char low[16];
+        size_t ll = vals[2].len < 15 ? vals[2].len : 15;
+        to_lower_buf(low, vals[2].s, ll);
+        out[2] = parse_alignment(low, ll);
     }
 }
 

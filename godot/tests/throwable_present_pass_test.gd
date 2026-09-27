@@ -55,7 +55,7 @@ func _thrown_models(root: Node) -> Array:
 # effect_world_test recipe): a FOREVEREMIT definition, so a round-bound group
 # stays live until the pass stops it and the report shows the detach.
 func _catalog_file() -> ParticleFile:
-	return ParticleFixture.catalog("toss dots",
+	return ParticleFixture.catalog(self, "toss dots",
 			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", [MOVE_EFFECT])
 
 

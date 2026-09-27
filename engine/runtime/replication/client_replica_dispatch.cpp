@@ -85,8 +85,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		// zeroed, then armed from game_flags bit0 UNLESS the death screen is
 		// already up. (The spawn pose / completion burst / waypoint legs live on
 		// JoinerConnection; this reducer owns only the retained client globals.)
-		// [orig: NapiNPClientMsg_0x00F — g_deploy_screen_active = 0 @0x42e2d8;
-		//  `if (game_flags & 1) g_deploy_screen_active = !g_death_screen_active`
+		// [orig: NapiNPClientMsg_0x00F — g_DeployScreenActive = 0 @0x42e2d8;
+		//  `if (game_flags & 1) g_DeployScreenActive = !g_DeathScreenActive`
 		//  @0x42e2f8]
 		WorldStateLoad wsl;
 		if (decode_world_state_load(body.data(), body.size(), wsl,
@@ -102,8 +102,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
 			// The authoritative local-player pose and (waypoint gametype only)
 			// the route list, retained for the joiner frame's once-per-revision
-			// landing on L — retail writes them onto g_local_player_entity and
-			// g_waypointList from this handler [orig: Pitch @0x42E3E9 / Roll
+			// landing on L — retail writes them onto g_LocalPlayerEntity and
+			// g_WaypointList from this handler [orig: Pitch @0x42E3E9 / Roll
 			// @0x42E3F2 (`raw << 16`); the waypoint walk @0x42E47F..0x42E4A3].
 			ClientWorldStateLoad &ws = state_.world_state;
 			ws.pos_x = wsl.pos_x;

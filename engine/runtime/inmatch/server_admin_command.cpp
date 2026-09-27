@@ -7,6 +7,7 @@
 #include <net/npwire/peer_addr.h>
 #include <net/npwire/session_hello.h>   // DisconnectEvent
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>     // compute_death_anim_state / death_cause
@@ -248,9 +249,24 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		return outcome;
 	}
 	if (ieq(verb, "ChangeTeam") || ieq(verb, "SwapTeam")) {
-		// Server_ChangeEntityTeam @0x518D70 (team 2 -> 1, 1 -> 2, then the
-		// "Changing team...." chat to the slot) is not modeled on this host
-		// (D-NET-148: the in-match team change is unported).
+		// A target token is required, the slot must be in the game with an
+		// entity; team 2 -> 1, 1 -> 2, any other team unchanged, then the
+		// "Changing team...." chat (channel 10, mask 0x20) to the slot even when
+		// the team did not change. [orig: loc_4D31EA — gates @0x4D31EA..0x4D320B,
+		//  the suffixes @0x4D321C..0x4D32D4, state 6 @0x4D32E6, entity @0x4D32EC,
+		//  the swap @0x4D32F2..0x4D330E, Server_ChangeEntityTeam @0x518D70 (the
+		//  call @0x4D3314), the chat @0x4D3319..0x4D3360]
+		if (args.empty()) return outcome;
+		NapiNPConnection *target = resolve_target(ctx, target_suffix, args[0]);
+		if (target == nullptr || !slot_in_game(*target)) return outcome;
+		const world::Entity *entity = world->registry.get(target->link.owned_entity);
+		if (entity == nullptr) return outcome;
+		outcome.handled = true;
+		const uint8_t team = entity->team == 2 ? uint8_t{1}
+		                   : entity->team == 1 ? uint8_t{2}
+		                                       : entity->team;
+		Server_ChangeEntityTeam(ctx, *world, target->link.owned_entity, team);
+		send_reliable(*target, s2c::CHAT_BROADCAST, chat_body(kServerChatChannel, "Changing team...."));
 		return outcome;
 	}
 	if (ieq(verb, "Cycle") || ieq(verb, "EndMission") || ieq(verb, "GameOver")) {
@@ -262,7 +278,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		return outcome;
 	}
 	if (ieq(verb, "Earthquake")) {
-		// Env_QuakeTicks = 6 * seconds; the argument is clamped 0..40 and
+		// g_EnvQuakeTicks = 6 * seconds; the argument is clamped 0..40 and
 		// defaults to 30 [orig: @0x4D2AC2..0x4D2B13].
 		outcome.handled = true;
 		int32_t seconds = 30;

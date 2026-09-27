@@ -108,7 +108,7 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     // zoom seed's sniper lock. The permission is World::rules'
     // session byte (byte_A821F0); offline retail reads the config's own
     // g_mp_allowsniperscopezoom instead, zero by default like the rule
-    // [orig: Config_SetDefaults @ 0x54D364; apply_session_settings_to_globals
+    // [orig: Config_SetDefaults @ 0x54D364; Game_ApplySessionSettingsToGlobals
     //  @ 0x552284].
     const uint8_t seed_class = loadout_seed_class(world, loadout);
     const WeaponFillResult fill = weapon_inventory_load_from_display(table, display,
@@ -230,7 +230,7 @@ void weapon_slot_indices(const DefWeaponDef *rows, size_t count, int slot,
     for (size_t i = 0; i < count; ++i) {
         const DefWeaponDef &w = rows[i];
         if (w.weapon_class_slot != slot) continue;
-        // [orig: populate_weapon_slot_lists @0x560430] gate.
+        // [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430] gate.
         if (w.loadout_selectable == 0) continue;
         if ((w.charfilter_mask & class_mask) == 0) continue;
         if ((w.teamfilter_mask & team_mask) == 0) continue;
@@ -257,7 +257,7 @@ int32_t armory_class_filter_mask(int selected_class) {
     return 1 << (selected_class - 5);
 }
 
-// [orig: PlayerInfo_SetTeamAndClassMask @0x55de60 — g_playerInfoTeamMask =
+// [orig: PlayerInfo_SetTeamAndClassMask @0x55de60 — g_PlayerInfoTeamMask =
 // 2 - (team != 0)]
 int32_t player_info_team_mask(int team) {
     return team == 0 ? 2 : 1;
@@ -270,7 +270,7 @@ int32_t player_info_class_mask(int playerclass_value) {
     return 1 << (playerclass_value - 5);
 }
 
-// [orig: populate_ammo_combo_boxes @0x55def0; armory fill @0x565cd0 — the
+// [orig: PlayerInfo_PopulateAmmoComboBoxes @0x55def0; armory fill @0x565cd0 — the
 // `saved == i || (saved == -1 && i == maxclips)` row select]
 int player_info_default_clip_row(int saved, int maxclips) {
     if (maxclips <= 0) return 0;

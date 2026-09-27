@@ -5,7 +5,7 @@
                   jointops!AudioVM_OpenContextFile @ 0x00672160
    Per-entry stream init: jointops!Sbf_StartEntry @ 0x004ED910
    Chunk decode: jointops!Audio_StreamNextChunk @ 0x004ED7D0 +
-                 jointops!audio_channel_compute_mix_coefficients @ 0x007BD4B0 */
+                 jointops!AudioChannel_ComputeMixCoefficients @ 0x007BD4B0 */
 
 #include <formats/sbf/sbf.h>
 

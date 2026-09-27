@@ -99,7 +99,7 @@ struct OneshotVoice {
 
 // Retail has 26 physical channels. The generic one-shot allocator scans
 // channels 12..25; the first twelve belong to voice/music/ambient owners.
-// [orig: audio_find_and_open_channel @0x766E80; AudioChannel_Open @0x7668F0]
+// [orig: Audio_FindAndOpenChannel @0x766E80; AudioChannel_Open @0x7668F0]
 inline constexpr size_t kAudioChannelCount = 26;
 inline constexpr size_t kFirstOneshotChannel = 12;
 class OneshotChannelPool {
@@ -117,7 +117,7 @@ private:
 // to the open call as its sound_id, and the allocator scores a channel already
 // playing the same wave for the same id at ZERO, so an entity re-firing a wave
 // restarts its own voice instead of stealing the quietest other one
-// [orig: audio_find_and_open_channel @0x766F46 / @0x766F8E (score 0 on the
+// [orig: Audio_FindAndOpenChannel @0x766F46 / @0x766F8E (score 0 on the
 // (wave, sound_id) match; the 12*vol floor @0x766F0A never beats it);
 // Sound_Play3DPositional @0x527E4A stores the entity, SoundBank_PlayTriggerEntries
 // @0x75CE4F carries it into the open call (push @0x75CFD4, call @0x75CFE3),
@@ -125,7 +125,7 @@ private:
 // handle is tagged into a nonzero word (pool 0 slot 0 packs to 0) and a
 // handle-less caller falls back to its tagged BMS id. 0 = no identity, the
 // retail NULL of the interface, weather and delayed-slot plays
-// [orig: play_positional_sound @0x528E02; Sound_PlayTriggerSetScaled @0x527BB4;
+// [orig: Sound_PlayPositional @0x528E02; Sound_PlayTriggerSetScaled @0x527BB4;
 // Sound_PlayInterfaceTriggerSet @0x527C04].
 inline constexpr uint16_t kNoSourceHandle = 0xFFFFu; // world::EntityHandle::kInvalid
 inline uint32_t oneshot_sound_id(uint16_t packed_handle, int32_t bms_id) {

@@ -47,7 +47,7 @@ bool applies_complete_prefix(
 	ns::ClientReplicaPipeline pipeline;
 	ns::ClientEntityState &sentinel = pipeline.state().upsert(0x4FFEu);
 	sentinel.type_id = 0x7EEFu;
-	sentinel.name = "preexisting";
+	sentinel.display_name = "preexisting";
 	sentinel.x = 0x12345678;
 
 	pipeline.apply(tag, body);
@@ -64,7 +64,7 @@ bool applies_complete_prefix(
 	}
 	const ns::ClientEntityState *kept = pipeline.state().find(0x4FFEu);
 	ok = expect(kept != nullptr && kept->type_id == 0x7EEFu &&
-	                    kept->name == "preexisting" && kept->x == 0x12345678,
+	                    kept->display_name == "preexisting" && kept->x == 0x12345678,
 	            "preexisting state changed after the malformed page", page) && ok;
 	return ok;
 }

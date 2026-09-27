@@ -306,7 +306,7 @@ void check_stale_geometry_leases_are_rejected() {
 void check_shading_constants_are_engine_homed() {
 	// The device adapter splices these into its GLSL; the witnessed values
 	// live here [orig: Glass.fx TGlassFFP TECHNIQUE_GLOW;
-	// Render_FillStaticCubemaps @ 0x58f290; Water_PSBumpReflectNV source
+	// Render_FillStaticCubemaps @ 0x58f290; g_WaterPSBumpReflectNV source
 	// @ 0x7dbd28].
 	CHECK(kQ3GlassWhiteLobeGain == 1.4f);
 	CHECK(kQ3GlassWhiteLobePower == 800.0f);
@@ -347,7 +347,7 @@ void check_emissive_copies_saturate_colour_times_gain() {
 	// SELFLUM / glass emissive: sat(colour x gain) x 2, so a gain above 1
 	// lifts a sub-1 colour (0.25 x 2 -> 1.0, 0.1 x 4 -> 0.8) instead of being
 	// clipped alone. [orig: _FFP.fx SELFLUM; Glass.fx TGlassFFP;
-	// apply_shader_parameters @ 0x58E050..0x58E06A]
+	// Material_ApplyShaderParameters @ 0x58E050..0x58E06A]
 	const std::array<float, 3> doubled =
 			q3_emissive_modulate2x({0.25f, 0.1f, 0.6f, 1.0f}, {2.0f, 4.0f, 2.0f});
 	CHECK(std::fabs(doubled[0] - 1.0f) < 1.0e-6f);
@@ -419,6 +419,43 @@ void check_far_band_matches_the_retail_depth_test() {
 	CHECK(disc >= 0.0);
 }
 
+// The first-person pass submits the gun with render flags 0x80 (a held
+// weapon-slot reference) or 0, never kSubmitNoGlowCopy, so its glow-capable
+// rigid strips join the world's copies in the one back-to-front object
+// queue FrameFX flushes; only 0x100 (the sky pass's celestial submits)
+// suppresses a copy. [orig: Player_RenderFirstPersonViewModel
+// @ 0x4def5c..0x4def6a; Render_CollectRenderObjectsForBatch
+// @ 0x5d93b5..0x5d9449]
+void check_first_person_copies_share_the_object_queue() {
+	CHECK(q3_object_source_admitted(false));
+	CHECK(!q3_object_source_admitted(true));
+	Q3FrameSnapshot snapshot{};
+	snapshot.transforms.resize(4);
+
+	snapshot.submissions.push_back(object_submission(70, "FF_ST_OP_LUM", 40.0f, 0, 1));
+	auto armed_gun = object_submission(71, "FF_ST_OP_LUM", 0.6f, 1, 1);
+	armed_gun.submit_flags = kSubmitAltStream;
+	snapshot.submissions.push_back(armed_gun);
+	auto scope_glass = object_submission(72, "FFP_GLASS", 0.4f, 2, 1);
+	snapshot.submissions.push_back(scope_glass);
+	auto celestial = object_submission(73, "FF_ST_AD_LUM", 500.0f, 3, 1);
+	celestial.submit_flags = kSubmitNoGlowCopy | kSubmitAltStream;
+	snapshot.submissions.push_back(celestial);
+
+	Q3FrameCompiler compiler;
+	const Q3DrawList &draw = compiler.compile(snapshot);
+	CHECK(draw.commands.size() == 3);
+	CHECK(draw.commands[0].submission_id == 70);
+	CHECK(draw.commands[1].submission_id == 71);
+	CHECK(draw.commands[1].technique == Q3Technique::NormalCopy);
+	CHECK(draw.commands[1].sort_key == transparent_sort_key(0.6f));
+	CHECK(draw.commands[2].submission_id == 72);
+	CHECK(draw.commands[2].technique == Q3Technique::RotatedSpecularGlass);
+	CHECK(draw.rejected.size() == 1);
+	CHECK(draw.rejected[0].submission_id == 73);
+	CHECK(draw.rejected[0].reason == Q3RejectReason::GlowCopySuppressed);
+}
+
 int main() {
 	check_shading_constants_are_engine_homed();
 	check_technique_derivation_and_ordering();
@@ -430,6 +467,7 @@ int main() {
 	check_emissive_copies_saturate_colour_times_gain();
 	check_mip_ceilings_pack_both_stages();
 	check_far_band_matches_the_retail_depth_test();
+	check_first_person_copies_share_the_object_queue();
 
 	if (failures != 0) {
 		std::printf("renderer_q3_frame: %d failure(s)\n", failures);

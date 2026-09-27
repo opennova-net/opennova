@@ -46,7 +46,7 @@ inline constexpr uint32_t THREEDI_TEX_FLAG_ANIMATED = 0x01u;  // Part of animati
 // one is pushed; with no override the row's own texture binds. The only
 // pusher is the player preview, and the blip field it pushes is only ever
 // written zero, so every draw binds the row's own texture.
-// [orig: apply_shader_parameters @ 0x58DC92..0x58DCC1;
+// [orig: Material_ApplyShaderParameters @ 0x58DC92..0x58DCC1;
 //  PlayerInfo_RenderPlayerPreview3D @ 0x560F43;
 //  MinimapSlot_InitBlipFromPackedId @ 0x57B12D]
 inline constexpr uint32_t THREEDI_TEX_FLAG_STATE_OVERRIDE = 0x02u;
@@ -868,7 +868,7 @@ inline constexpr int THREEDI_USER_POINT_SCAN_LIMIT = 16;
 // the item-effect attach scan every consumer shares (the ITEMS.DEF particlefx
 // resolve; the death/fire/other families mask the HUSK's fixed names).
 // [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 — the first-16 stricmp walk;
-//  consumed by resolve_item_materials_and_spawn_bone_trails @ 0x522ee0]
+//  consumed by Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0]
 static inline uint16_t threedi_3di3_user_point_mask(const Threedi3di3 *model,
                                                     const char *name) {
     if (model == NULL || name == NULL || name[0] == '\0') return 0;

@@ -33,9 +33,10 @@ struct EnvsMarker {
 	std::array<std::string, 4> slot_sets;
 };
 
-// The envs dispatch predicate: ai_function or move_function == "envs",
-// compared case-insensitively. Unknown ids are not envs.
-bool item_is_envs(const opennova::def::DefItemsFile &items, int32_t item_id);
+// The envs dispatch predicate on one items.def entry: ai_function or
+// move_function == "envs", compared case-insensitively. The walk below
+// applies it to every placed entity whose def it finds.
+bool item_is_envs(const opennova::def::DefItemDef &def);
 
 // Every envs-class placed entity across all pools, in the canonical entity
 // walk order (markers, items, buildings, organics), with its four authored

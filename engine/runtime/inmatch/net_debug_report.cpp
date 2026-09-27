@@ -90,7 +90,6 @@ NetDebugReport net_debug_report(const Session &session, const NapiNPServerCtx *s
 	NetDebugReport out;
 	out.role = session.kind();
 	out.state = session.state();
-	out.bank_policy = session.tick_bank_policy();
 	out.last_perf = session.last_perf();
 	if (socket != nullptr) {
 		out.traffic_valid = true;

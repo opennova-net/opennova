@@ -438,7 +438,7 @@ ServerCommandTarget parse_target_suffix(std::string_view token) {
 struct VerbRow {
 	ServerCommandVerb verb;
 	const char *name;
-	bool prefix_match; // StrStartsWithNoCase (player-targeted) vs Napi_StrCaseEqual
+	bool prefix_match; // String_StartsWithNoCase (player-targeted) vs Napi_StrCaseEqual
 };
 // In the witnessed dispatch order.
 constexpr VerbRow kVerbs[] = {

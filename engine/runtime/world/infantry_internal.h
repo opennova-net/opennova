@@ -22,7 +22,7 @@ void commit_player_body_state(InfantryState &inf, int resolved,
 // Returns whether carrier transport changed the position.
 bool infantry_follow_carrier(AiEntity &, World &, int32_t capsule_bottom, bool player_body);
 // Select/cache an obstacle detour and publish target_heading before gait selection.
-// [orig: ai_find_cover_position @0x4AFAB0]
+// [orig: AI_FindCoverPosition @0x4AFAB0]
 void infantry_detour(AiSystem &ai, AiEntity &e, World &world);
 // The think's entity LOS [orig: Entity_CheckLineOfSightTerrainAndEntities
 // @0x53B130]: the shared collision world, or its terrain leg alone when the

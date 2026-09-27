@@ -168,7 +168,7 @@ stop: it is not a bug in OpenNova.
   the shared per-weapon-type `WeaponDef+372` anim object
   [orig: `Player_RenderFirstPersonViewModel @0x4DEF75`], and `WeaponAction_Idle`
   re-seeds that object with **no owner guard** [orig: `@0x542955`] while all three
-  sibling plays ARE guarded on `ownerEntity == g_local_player_entity`
+  sibling plays ARE guarded on `ownerEntity == g_LocalPlayerEntity`
   [orig: `@0x541893`/`@0x54195A`/`@0x5419B8`]. Two entities holding one weapon
   share one `Def` pointer **inside the host's process** — the joiner's process is
   not involved at all; a script emitting valid C2S `0x06` reproduces it.

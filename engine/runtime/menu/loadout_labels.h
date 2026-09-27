@@ -19,7 +19,7 @@ namespace opennova::menu {
 
 // Weapon display name = loadout_menu_textid resolved in gametext's WepDes
 // section, else the raw weapon id
-// [orig: populate_weapon_slot_lists @ 0x560430: entry+40 textid else entry+0].
+// [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430: entry+40 textid else entry+0].
 std::string weapon_label(const def::DefWeaponDef &w, const hud::GameTextLookup &gametext);
 
 // "<rounds> - <round label>" for `clips` clips of `w`; a null (unavailable)
@@ -38,8 +38,8 @@ std::vector<int> armory_slot_order(const std::vector<std::string> &labels);
 // The weight readout "<TOTAL_WEIGHT> <w> <LBS> (<encumbrance>)": the band from
 // def_encumbrance_class (<33.3 LIGHT / <66.6 NORMAL / else HEAVY) names the
 // LIGHT_/NORMAL_/HEAVY_ENCUMBRANCE menu token; both lookups use the Menu
-// section with its fallback [orig: update_weapon_weight_display @0x565640 and
-// update_player_info_weight_and_weapon_icons @0x55f480 — sprintf
+// section with its fallback [orig: UI_UpdateWeaponWeightDisplay @0x565640 and
+// PlayerInfo_UpdateWeightAndWeaponIcons @0x55f480 — sprintf
 // "%s %.1f %s (%s)", keys TOTAL_WEIGHT / LBS / *_ENCUMBRANCE].
 // Menu tokens prefer menutxt, then gameui, then the built-in fallback.
 std::string loadout_weight_line(double total, const hud::GameTextLookup &menutxt,

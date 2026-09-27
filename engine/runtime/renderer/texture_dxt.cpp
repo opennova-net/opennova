@@ -29,7 +29,7 @@ constexpr float kInverseLuminanceB = 0x1.3d83bap+3f;
 
 // Endpoint weight tables. [orig: unk_7FB620/unk_7FB614 (three colors),
 // unk_7FB604/unk_7FB5F4 (four colors), unk_7FB5D4/unk_7FB5BC (six alphas),
-// unk_7FB59C/g_D3DXTex_AlphaD8 (eight alphas)]. The eight-alpha D table's last entry
+// unk_7FB59C/g_D3DXTexAlphaD8 (eight alphas)]. The eight-alpha D table's last entry
 // is 8/7 (0x3F924925), not 1.
 constexpr float kC3[] = {1.0f, 0.5f, 0.0f};
 constexpr float kD3[] = {0.0f, 0.5f, 1.0f};

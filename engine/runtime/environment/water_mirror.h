@@ -1,12 +1,12 @@
 // The water reflection mirror view (env #30) — the witnessed offscreen
 // prerender's camera derivation as a typed record.
 // Retail prerenders the reflected scene into
-// Water_ReflectionTexture BEFORE the main frame [orig: Render_TerrainScene
-// @ 0x610c80 -> Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
+// g_WaterReflectionTexture BEFORE the main frame [orig: Render_TerrainScene
+// @ 0x610c80 -> Water_ReflectionPrerender @ 0x5c2780 -> Render_MainScene
 // @ 0x5c1240]; the prerender packs the live camera block {x, y, z, yaw,
-// pitch, roll} and render_main_scene mirrors it ONLY while the camera is at
+// pitch, roll} and Render_MainScene mirrors it ONLY while the camera is at
 // or above the plane: z' = 2wh - z, yaw kept, pitch and roll negated
-// [orig: render_main_scene @ 0x5c1361..0x5c1370 (cmp cam.z, wh; jl),
+// [orig: Render_MainScene @ 0x5c1361..0x5c1370 (cmp cam.z, wh; jl),
 // mirror @ 0x5c1376..0x5c139c] — the UP-PRESERVED proper mirror (reflect
 // the basis about the plane, then negate the reflected up column; det +1,
 // so no winding flips). The texm3x2 rows sample the RTT at u = screen U and
@@ -31,14 +31,14 @@
 // offset: objects keep y >= wh (g_WaterMirrorMatrix row 3 = 0.5 - wh,
 // g_WaterMirrorActive = 1 [orig: Water_RenderReflectedWorldScene
 // @ 0x5c8540..0x5c856a]) and the terrain keeps y >= wh - 0.05 (u = y + 0.45 -
-// (wh - 0.1) [orig: render_main_scene @ 0x5c1561..0x5c1578 plane wh - 0.1,
-// armed while wh != 0; render_terrain_sector_batch @ 0x6092c6..0x60935b]).
+// (wh - 0.1) [orig: Render_MainScene @ 0x5c1561..0x5c1578 plane wh - 0.1,
+// armed while wh != 0; Terrain_RenderSectorBatch @ 0x6092c6..0x60935b]).
 // The shaders port it as a discard in the mirror pass (the one camera whose
 // mask omits the water layer, render/visual_layers.h). The reflected pass
 // fogs with the dry weather block whatever side the eye is on
 // (EnvironmentState::build_water_mirror_fog) and never swaps the terrain's
 // stage 3 to the water noise (the mirror context's below-water word is 0
-// [orig: render_main_scene @ 0x5c153d]).
+// [orig: Render_MainScene @ 0x5c153d]).
 #pragma once
 
 #include <formats/env/env.h>
@@ -51,66 +51,43 @@
 namespace opennova::env {
 
 // Retail sizes the square reflection RTT from the water detail level:
-// `if (dword_B4C3C0 || (size = 256, Water_DetailLevel >= 3)) size = 512;`
+// `if (dword_B4C3C0 || (size = 256, g_WaterDetailLevel >= 3)) size = 512;`
 // i.e. 256 at detail 2, 512 at detail >= 3 or under the capture override,
 // then `GTexRT_Construct(obj, size, size, 1, 1)` allocates it
 // [orig: Water_CreateReflectionRenderTarget @ 0x5c08b0, the allocation body
 // @ 0x5c08d1..0x5c0937, the size selector @ 0x5c08eb..0x5c08ed;
-// Water_DetailLevel @ 0x24d2050]. The shipped
+// g_WaterDetailLevel @ 0x24d2050]. The shipped
 // max-quality path (our locked target) runs detail 3: Game_StartMission copies
 // the adapter caps (`sub_5899E0(0)`/`sub_676850`) and with caps 0xFDF the
 // detail-1 downgrade never fires [orig: Game_StartMission @ 0x524662..0x524668;
 // downgrade @ 0x5c19da], so the live retail witness is a populated 512x512
 // target. The reimpl carries no detail selector; it fixes the max-quality size.
-// That square target renders with the MAIN view's projection: render_main_scene
+// That square target renders with the MAIN view's projection: Render_MainScene
 // hands the main target's h/w as the projection's vertical scale
-// [orig: render_main_scene @ 0x5c1255 (Render_GetTargetAspectRatio returns flt_8409EC), its
-// Render_SetViewAndProjectionMatrices call @ 0x5c163e], so the 512 x 512
-// texels cover exactly the main view's field (non-square texels, 512 rows
-// across the vertical field) and the strip rows sample it at (screen U,
-// 1 - screen V). A
-// Godot camera renders square pixels only, so the port keeps the source
-// projection and sizes the target round(512 x aspect) x 512
-// (reflection_rtt_size): the same field and the same 512 rows across it, with
-// round(512 x aspect) columns where retail has 512.
+// [orig: Render_MainScene @ 0x5c1255 (Render_GetTargetAspectRatio returns flt_8409EC), its
+// Render_SetViewAndProjectionMatrices call @ 0x5c163e] over the square
+// viewport [orig: Render_MainScene @ 0x5c1464..0x5c1482 (width = height =
+// the RTT side), Render_SetViewport @ 0x5c1614, the projection call
+// @ 0x5c1619..0x5c163e; Render_SetViewAndProjectionMatrices
+// @ 0x58d971..0x58d9de (vw = w x scaleX, vh = h x scaleY, aspect vw/vh)], so
+// the 512 x 512 texels cover exactly the main view's field, non-square: 512
+// columns across the horizontal field and 512 rows across the vertical one.
+// The strip rows sample it at (screen U, 1 - screen V). The mirror view
+// therefore keeps the source frustum's aspect (WaterMirrorView::aspect) over
+// this square; a shell whose camera couples its two fovs through the
+// target's own ratio must supply that projection explicitly.
 inline constexpr int kReflectionRttSize = 512;
-// A degenerate layout (a collapsed or very thin view) would ask for more
-// columns than a device texture holds; past this width the target keeps the
-// source aspect with fewer rows.
-inline constexpr int kReflectionRttMaxWidth = 16384;
-
-struct ReflectionRttSize {
-	int width = kReflectionRttSize;
-	int height = kReflectionRttSize;
-};
-
-inline ReflectionRttSize reflection_rtt_size(float source_width, float source_height) {
-	ReflectionRttSize size;
-	if (!(source_width > 0.0f) || !(source_height > 0.0f)) {
-		return size;
-	}
-	const double aspect = static_cast<double>(source_width) / source_height;
-	const double columns = std::round(kReflectionRttSize * aspect);
-	if (columns > kReflectionRttMaxWidth) {
-		size.width = kReflectionRttMaxWidth;
-		size.height = std::max(1, static_cast<int>(
-				std::round(kReflectionRttMaxWidth / aspect)));
-	} else {
-		size.width = std::max(1, static_cast<int>(columns));
-	}
-	return size;
-}
 
 // The witnessed reflected-scene dim (env #37's mechanism): after the mirrored
 // sky/terrain/world render into the RTT, detail >= 2 multiplies the WHOLE
 // target by vertex color 0x404040 — a fullscreen 4-vertex strip drawn with
 // SetRenderState(D3DRS_SRCBLEND = D3DBLEND_DESTCOLOR, D3DRS_DESTBLEND =
 // D3DBLEND_ZERO), i.e. out = dst * 64/255, then SRCALPHA/INVSRCALPHA restored
-// [orig: render_main_scene @ 0x5c1727 detail gate; blend states
+// [orig: Render_MainScene @ 0x5c1727 detail gate; blend states
 // @ 0x5c1856..0x5c186a; quad color 0xFF404040 + TRIANGLESTRIP draw
 // @ 0x5c186c..0x5c189e; restore @ 0x5c18a3..0x5c18bf]. The sun/moon discs
 // and the sun glow are redrawn AFTER the dim, inside the far depth band
-// [orig: render_main_scene @ 0x5c18fb / @ 0x5c1904], so retail's mirrored
+// [orig: Render_MainScene @ 0x5c18fb / @ 0x5c1904], so retail's mirrored
 // bodies over the sky stay bright. Both close the mirror's overlay pass
 // (runtime/renderer/scene_overlay.h kMirrorOverlayOrder).
 inline constexpr float kReflectionDimFactor = 64.0f / 255.0f;
@@ -138,8 +115,9 @@ struct MirrorSourceView {
 	float frustum_offset_x = 0.0f;
 	float frustum_offset_y = 0.0f;
 	bool keep_aspect_height = true;
-	float viewport_width = 0.0f;
-	float viewport_height = 0.0f;
+	// The drawn frustum's width over height (the main view's, whatever
+	// raster it is drawn into).
+	float aspect = 1.0f;
 	float v_offset = 0.0f;
 };
 
@@ -161,10 +139,11 @@ struct WaterMirrorView {
 	bool keep_aspect_height = true;
 	float frustum_offset_x = 0.0f;
 	float frustum_offset_y = 0.0f;
-	// The mirror target (reflection_rtt_size of the source viewport): its
-	// aspect is the source's, so the strip rows' (screen U, 1 - screen V)
-	// lookup lands on the reflected point without a rescale.
-	ReflectionRttSize rtt{};
+	// The mirror frustum's width over height: the source's, drawn over the
+	// kReflectionRttSize square (non-square texels), so the strip rows'
+	// (screen U, 1 - screen V) lookup lands on the reflected point without a
+	// rescale.
+	float aspect = 1.0f;
 	// The proper mirror negates the reflected UP column; the local vertical
 	// offset negates too so the effective camera origin is the geometric
 	// reflection of the source rather than shifted oppositely. The unmirrored
@@ -223,7 +202,7 @@ inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 	view.below_water = source.origin.y < water_height;
 	if (view.below_water) {
 		// Below the plane the camera block is copied unchanged
-		// [orig: render_main_scene @ 0x5c1370 jl -> @ 0x5c13f6..0x5c1414].
+		// [orig: Render_MainScene @ 0x5c1370 jl -> @ 0x5c13f6..0x5c1414].
 		view.basis_x = source.basis_x;
 		view.basis_y = source.basis_y;
 		view.basis_z = source.basis_z;
@@ -251,7 +230,9 @@ inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 	view.frustum_offset_x = source.frustum_offset_x;
 	view.frustum_offset_y = view.below_water ? source.frustum_offset_y
 											 : -source.frustum_offset_y;
-	view.rtt = reflection_rtt_size(source.viewport_width, source.viewport_height);
+	// The main view's aspect over the square RTT [orig: Render_MainScene
+	// @ 0x5c1619..0x5c163e].
+	view.aspect = source.aspect;
 	return view;
 }
 

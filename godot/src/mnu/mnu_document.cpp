@@ -249,13 +249,6 @@ int MnuDocument::get_item_count(int p_id) const {
 	return items ? static_cast<int>(items->items.size()) : 0;
 }
 
-int MnuDocument::find_item_row_by_value(int p_id, const String &p_value) const {
-	const opennova::mnu::Items *items = menu_items_container(index_.window(p_id));
-	if (items == nullptr) return -1;
-	return opennova::menu::spinlist_row_for_value(
-			*items, to_std(p_value));
-}
-
 String MnuDocument::get_item_text(int p_id, int p_index) const {
 	const opennova::mnu::Items *items = menu_items_container(index_.window(p_id));
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
@@ -343,11 +336,6 @@ int MnuDocument::get_widget_flags(int p_id) const {
 	return flags;
 }
 
-int MnuDocument::get_widget_group(int p_id) const {
-	const opennova::mnu::Window *w = index_.window(p_id);
-	return w ? w->group : 0;
-}
-
 // --- Structural mutation ---
 
 // --- Bindings ---
@@ -382,8 +370,6 @@ void MnuDocument::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("is_widget_multiselect", "id"), &MnuDocument::is_widget_multiselect);
 	ClassDB::bind_method(D_METHOD("get_item_count", "id"), &MnuDocument::get_item_count);
-	ClassDB::bind_method(D_METHOD("find_item_row_by_value", "id", "value"),
-			&MnuDocument::find_item_row_by_value);
 	ClassDB::bind_method(D_METHOD("get_widget_sounds", "id"), &MnuDocument::get_widget_sounds);
 	ClassDB::bind_method(D_METHOD("get_widget_actions", "id"), &MnuDocument::get_widget_actions);
 	ClassDB::bind_method(D_METHOD("get_item_text", "id", "index"), &MnuDocument::get_item_text);
@@ -393,7 +379,6 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_widget_color", "id", "slot"), &MnuDocument::get_widget_color);
 	ClassDB::bind_method(D_METHOD("get_widget_texture", "id", "slot"), &MnuDocument::get_widget_texture);
 	ClassDB::bind_method(D_METHOD("get_widget_flags", "id"), &MnuDocument::get_widget_flags);
-	ClassDB::bind_method(D_METHOD("get_widget_group", "id"), &MnuDocument::get_widget_group);
 
 
 

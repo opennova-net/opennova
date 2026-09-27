@@ -1,5 +1,5 @@
 // The general integer-ray variant used by squib, not the bullet face query.
-// [orig: Entity_ProcessProjectileTravel @0x448D50, raycast_against_entity_pool @0x538720]
+// [orig: Entity_ProcessProjectileTravel @0x448D50, Physics_RaycastAgainstEntityPool @0x538720]
 #include <runtime/world/collision.h>
 #include <base/io/fixed.h>
 #include <runtime/world/world.h>

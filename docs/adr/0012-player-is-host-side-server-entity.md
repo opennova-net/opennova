@@ -57,7 +57,7 @@ bit 1 clear. The host receives that uplink and applies it to the owned entity au
 R0 for the Phase-2 moving player decompiled the motor branch that handles the local player
 (`[orig: Entity_UpdateInfantryAI @ 0x4b9910 @ 0x4b9a74]`) and **corrects the input model in Decision 2
 and the receive-side half of Decision 4.** The branch jumps to the simulation path
-(`loc_4B9C3E`) when **`is_authority || entity == g_local_player_entity`**; the smooth-target
+(`loc_4B9C3E`) when **`is_authority || entity == g_LocalPlayerEntity`**; the smooth-target
 (`entity+0x234`) interpolation is the *fall-through*, reached only for a **remote entity on a client**
 (`!is_authority && entity != local`). So:
 
@@ -74,7 +74,7 @@ and the receive-side half of Decision 4.** The branch jumps to the simulation pa
   smooth-target interpolation as the client↔host layer on top.
 - **Decision 4 is corrected (receive side).** The `state flags & 2` → `Game_InitNewRound` /
   `Entity_ResetToSpawnState` spawn signal and the smooth-target staging are the **remote-player
-  receive path** (`dispatch_entity_packet_callback @ 0x4D6A80` read-apply → interpolation). The host's
+  receive path** (`NetPacket_DispatchEntityPacketCallback @ 0x4D6A80` read-apply → interpolation). The host's
   own player spawn-state is the **in-process** `Entity_ResetToSpawnState` (§5.2b step 5), and the host
   clears its own spawn-success gate in-process.
 

@@ -266,7 +266,7 @@ void test_org1_dragged_corpse_takes_one_death_edge() {
 // R3-4: the edge's own legs. [orig: Entity_UpdateInfantryAI drowning 175
 // @0x4B9CF6..0x4B9D0E; unstaged hit callback @0x4B9CDB..0x4B9CF1 ->
 // OrganicClass_HandleEvent @0x4073C8..0x4073EA; death tick @0x4B9D24..0x4B9D2F;
-// `and eax,0FFFFFF3Fh` @0x4B9D2A; Entity_CheckAndProcessDeath @0x4B9D4D]
+// `and eax,0FFFFFF3Fh` @0x4B9D2A; the Entity_CheckAndProcessDeath call @0x4B9D4D]
 void test_org1_death_edge_legs() {
     {   // an unstaged death afloat: death_drown, the hit callback's alert, the
         // death tick, the 0xC0 clear, and the authority's own transaction

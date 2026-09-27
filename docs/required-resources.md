@@ -91,7 +91,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `Arial12b/14n/14b/16n/16b.fnt`, `Impac22b.fnt`, `Impac38b.fnt` | menu+HUD fonts | [orig: HUD_InitAllFonts @ 0x51ee20 → HUD_LoadFontIntoSlot @ 0x580400] | missing → null font slot, scale 1.0, no crash (width breakpoints 640/800/1024) |
 | `menu.lwf` | menu (player screen) | [orig: PlayerInfo_InitProfileSelector @ 0x5613ba] | graceful |
 | `PI_Idle.BAD` (+ `PI_actv/PI_LookR/PI_lookL.BAD` table @ 0x83c830), `Dt1rst.bad`, `HwmCube.dds` | menu (player preview) | [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 (@ 0x560107/@ 0x560138)] | graceful |
-| `epass.bin`, `passgen.bin` | optional-fallback | [orig: load_stored_credentials @ 0x450b20 / EPass_LoadCredentials @ 0x450eb0] | silent skip |
+| `epass.bin`, `passgen.bin` | optional-fallback | [orig: EPass_LoadStoredCredentials @ 0x450b20 / EPass_LoadCredentials @ 0x450eb0] | silent skip |
 
 ### Mission start (Game_StartMission @ 0x524360)
 
@@ -104,7 +104,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `<missionbase>.bin` → `medmssn.bin` | mission text | [orig: TextResource_LoadMissionTextBin @ 0x51ed90] | mission-named exists-checked; literal fallback `medmssn.bin` |
 | `game.wac`, `server.wac`, `<missionbase>.wac` | mission scripts (authority) | [orig: WacScript_InitAndLoad @ 0x4f91f0 (game @ 0x4f9454, server @ 0x4f94bc)] | each exists-checked, silent skip; compiled game→server→mission into one buffer |
 | `GAMEMUS.SBF` + `GAMEMUS.BIN` | mission music (MP) | [orig: @ 0x525581–0x525598 → AudioVM_OpenMusicContext @ 0x6722a0; names @ 0x4a47da] | graceful; expansion form `G<n>.sbf`/`G<n>.bin`; SP stops the music context. Full driving witness (var writer map, the always-0 Var1, the dead WAC `music` stream via `Sbf_OpenFile_Gamemus @ 0x4ed6c0`): docs/audio/mus-sbf-re.md §Game music driving |
-| `<missionbase>.pcx` → `loadscrn.pcx`, `Arials18.fnt`, `Arial22.fnt` | mission-load screen | [orig: render_loading_screen @ 0x521d10 (sidecar probe @ 0x521db5, fallback @ 0x521e20)] | graceful; per-mission image exists-checked first — see [interface/loading-screen-re.md](interface/loading-screen-re.md) |
+| `<missionbase>.pcx` → `loadscrn.pcx`, `Arials18.fnt`, `Arial22.fnt` | mission-load screen | [orig: Render_LoadingScreen @ 0x521d10 (sidecar probe @ 0x521db5, fallback @ 0x521e20)] | graceful; per-mission image exists-checked first — see [interface/loading-screen-re.md](interface/loading-screen-re.md) |
 | `cmap.mnu` | mission UI | [orig: @ 0x526316/@ 0x526332; Input_HandleActionBinding @ 0x49b91b] | unchecked. Siblings: `game.mnu @ 0x49b3b1`, `weapon.mnu @ 0x49b8de/@ 0x4e0b44`, `vehicle.mnu @ 0x49b892/@ 0x4e0af8`, `stat.mnu` [orig: UI_ProcessEndRoundScreenTransition @ 0x5b8636] (checked 2026-08-24: `EndRoundPresenter` reads it from the mounted root; `mnu/jo_stat.mnu` in the reference fixture set, `OPENNOVA_JO_ASSETS/fixtures/`, is the test copy), `death.mnu` [orig: Render_ProcessMainSceneFrame @ 0x5cab7e], `mp.mnu` [orig: @ 0x5588fa] |
 | `hudfx.def`, `hudpos.def` | mission HUD | [orig: HUD_InitOverlaySystem @ 0x5a4620 (hudfx @ 0x5a462e, hudpos @ 0x5a4931)] | silent skip (default positions) |
 | `monogram.tga`, `boxtile.tga`, `border.tga` | mission UI textures | [orig: @ 0x525aa3–0x525aad] | graceful (plus the hardcoded HUD/effect texture sets: `MFD1.PCX @ 0x7d90dc`, `cross%02d.tga`, scorch/glass tables @ 0x8413a8+) |

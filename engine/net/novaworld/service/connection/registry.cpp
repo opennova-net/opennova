@@ -35,14 +35,6 @@ void ConnectionRegistry::add(Connection conn) {
 	by_addr_[addr] = id;
 }
 
-void ConnectionRegistry::touch(uint32_t id, uint64_t now_ms) {
-	std::lock_guard<std::mutex> lock(mu_);
-	auto it = by_id_.find(id);
-	if (it != by_id_.end()) {
-		it->second.last_seen_ms = now_ms;
-	}
-}
-
 void ConnectionRegistry::touch_addr(const PeerAddr &addr, uint64_t now_ms) {
 	std::lock_guard<std::mutex> lock(mu_);
 	auto addr_it = by_addr_.find(addr);
@@ -78,23 +70,6 @@ std::optional<Connection> ConnectionRegistry::drop_by_addr(const PeerAddr &addr)
 	Connection out = std::move(id_it->second);
 	by_id_.erase(id_it);
 	return out;
-}
-
-bool ConnectionRegistry::mark_active(uint32_t id, std::string identity,
-                                     std::string client_scrk, std::string server_scrk) {
-	std::lock_guard<std::mutex> lock(mu_);
-	auto it = by_id_.find(id);
-	if (it == by_id_.end()) {
-		return false;
-	}
-	if (it->second.state == ConnectionState::Active) {
-		return false;
-	}
-	it->second.state = ConnectionState::Active;
-	it->second.identity = std::move(identity);
-	it->second.client_scrk = std::move(client_scrk);
-	it->second.server_scrk = std::move(server_scrk);
-	return true;
 }
 
 bool ConnectionRegistry::mark_active_by_addr(const PeerAddr &addr,

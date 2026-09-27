@@ -22,6 +22,8 @@
 #include <utility>
 #include <vector>
 
+#include <runtime/renderer/render_order.h>
+
 #include "env/mission_environment.h"
 #include "env/weather.h"
 #include "render/world_environment_lookup.h"
@@ -94,15 +96,18 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	drape_material_.instantiate();
 	drape_material_->set_shader(shader);
 	reset_material_slots(drape_material_);
-	// Retail draws the drapes right after the terrain batch, before the
-	// sector models, entities and every transparent pass (retail:
-	// Terrain_RenderMainSectorPass — Terrain_RenderSectorBatchLit @0x610c34, then
-	// RenderSlot_DrawAllDrapes @0x610c47), so the multiply lands on the
-	// terrain alone: first among the transparents here.
-	drape_material_->set_render_priority(Material::RENDER_PRIORITY_MIN);
+	// Retail draws the drapes right after the terrain batch, after the sky
+	// and the viewmodel and before the sector models, entities and every
+	// transparent pass, with Z-write off, so every later draw in front of the
+	// terrain overwrites them (renderer::kRungSlotDrape carries the witness).
+	// Godot draws the drape in its transparent list, after every opaque: the
+	// drape shader reads the stencil mark only the terrain's front-most
+	// fragments and the sky dome write, which leaves exactly retail's final
+	// pixel, and this rung keeps it after the sky group and the viewmodel.
+	drape_material_->set_render_priority(opennova::renderer::kRungSlotDrape);
 	// The depth-clip stage's texture: the witnessed 32x4 ARGB step, sampled
 	// CLAMP + bilinear by the shader's sampler hints [orig:
-	// shadow_system_init_resources @0x5d6260..0x5d62d7 — the planner carries
+	// Shadow_SystemInitResources @0x5d6260..0x5d62d7 — the planner carries
 	// the fill law, opennova::renderer::shadowztex_pixels].
 	const auto px = opennova::renderer::shadowztex_pixels();
 	PackedByteArray bytes;
@@ -181,6 +186,10 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_local_player_first_person);
 	ClassDB::bind_method(D_METHOD("set_local_player_prone", "prone"),
 			&SlotShadow::set_local_player_prone);
+	ClassDB::bind_method(D_METHOD("set_terrain_pass_drawn", "drawn"),
+			&SlotShadow::set_terrain_pass_drawn);
+	ClassDB::bind_method(D_METHOD("is_terrain_pass_drawn"),
+			&SlotShadow::is_terrain_pass_drawn);
 	ClassDB::bind_method(D_METHOD("advance_frame"), &SlotShadow::advance_frame);
 	ClassDB::bind_method(D_METHOD("get_report"), &SlotShadow::get_report);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_capture_count"),
@@ -255,6 +264,17 @@ void SlotShadow::set_local_player_first_person(bool p_first_person) {
 
 void SlotShadow::set_local_player_prone(bool p_prone) {
 	local_prone_ = p_prone;
+}
+
+void SlotShadow::set_terrain_pass_drawn(bool p_drawn) {
+	if (terrain_pass_drawn_ == p_drawn) {
+		return;
+	}
+	terrain_pass_drawn_ = p_drawn;
+	if (!p_drawn) {
+		// No frame between the gate and the next plan shows a drape.
+		_hide_patches_from(0u);
+	}
 }
 
 void SlotShadow::_notification(int p_what) {
@@ -613,8 +633,8 @@ void SlotShadow::_invalidate_uniform_stamps() {
 // World -> (u, v) projector for a camera-style pose (local -Z forward): the
 // drape samples the capture along the same slot direction it was rendered
 // from [orig: the shared unscaled direction of the capture and drape
-// matrices, setup_shadow_cascade_matrices @0x58d300 /
-// build_shadow_cascade_uv_matrices @0x58cf10 lookat_dir1; the person 4x
+// matrices, RenderSlot_SetupShadowCascadeMatrices @0x58d300 /
+// RenderSlot_BuildShadowCascadeUVMatrices @0x58cf10 lookat_dir1; the person 4x
 // belongs to the separate depth-clip stage — render_slot_shadow.h]. The
 // stage-0 texgen has no depth bound: the capture's own near/far band never
 // clips the drape (the clamped sampler covers the rest of the patch).
@@ -777,7 +797,7 @@ void SlotShadow::advance_frame() {
 	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
 	// planner law only clamps and negates it
 	// [orig: Environment_GetLightDirectionFloat @0x57d870 into
-	// render_shadow_pass @0x5d7b70, see docs/render/render-lighting-re.md].
+	// Render_ShadowPass @0x5d7b70, see docs/render/render-lighting-re.md].
 	const Vector3 tuple = env->get_light_direction();
 	const std::array<float, 3> sun_dir = opennova::renderer::slot_projection_direction(
 			{float(tuple.x), float(tuple.y), float(tuple.z)});
@@ -789,7 +809,7 @@ void SlotShadow::advance_frame() {
 	// toward WHITE (retail: RenderSlot_DrawAllDrapes @0x5d6ea1 selects
 	// CD3DDevice_SetFogAndBlendMode mode 3 = primary fog, white fog colour;
 	// the drape technique's intrinsic pass flags 0x1520000 carry FOGENABLE,
-	// shadow_system_init_resources @0x5d62f7). The shader shares the
+	// Shadow_SystemInitResources @0x5d62f7). The shader shares the
 	// terrain's fog law and uniforms.
 	env->apply_terrain_uniforms(drape);
 
@@ -1120,8 +1140,12 @@ void SlotShadow::advance_frame() {
 		// RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31); every role's
 		// present rows carry that offset (renderer::slot_march_start_offset).
 		const Vector3 march_start = entity_pos + model->get_slot_march_offset();
-		_draw_patch(order, slot_patch(march_start, dir, patch_lod), patch_lod);
-		drawn_patch_mask |= 1u << order;
+		// A closed terrain sector pass skips its drapes; the capture above
+		// and the terms keep running (set_terrain_pass_drawn).
+		if (terrain_pass_drawn_) {
+			_draw_patch(order, slot_patch(march_start, dir, patch_lod), patch_lod);
+			drawn_patch_mask |= 1u << order;
+		}
 		// The depth-clip texgen from the stored direction, the capture half
 		// size and the person steepening (opennova::renderer::slot_depth_clip).
 		const opennova::renderer::SlotDepthClip clip = opennova::renderer::slot_depth_clip(

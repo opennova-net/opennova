@@ -43,7 +43,7 @@ struct HudCombatState {
 	// The client death-screen latch, the ONE flag the crosshair, instrument and
 	// scope passes test. The local dead bit and the death lerp camera are not
 	// HUD gates: between the death and the latch those passes still draw.
-	// [orig: g_death_screen_active @0xA860EC -- HUD_DrawCrosshair @0x592646,
+	// [orig: g_DeathScreenActive @0xA860EC -- HUD_DrawCrosshair @0x592646,
 	//  HUD_RenderOverlays @0x5A7BBC, HUD_RenderAllOverlays @0x5A850D]
 	bool death_screen = false;
 	// Armory/bay use one line; an eligible FARP replaces it later in the walk.
@@ -79,6 +79,6 @@ struct HudCombatState {
 };
 // Shared weapon/vehicle silhouette flash. The original keeps one stamp and
 // separate previous weapon/root identities. Zero elapsed is promoted to one.
-// [orig: sub_59A710 @0x59A74F..0x59A78F; hud_draw_target_entity_overlay @0x59A5E2]
+// [orig: sub_59A710 @0x59A74F..0x59A78F; HUD_DrawTargetEntityOverlay @0x59A5E2]
 int hud_silhouette_alpha(int elapsed, int ramp, int base, int maximum);
 } // namespace opennova::hud

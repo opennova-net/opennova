@@ -15,7 +15,7 @@ namespace opennova::world {
 
 // 252 entries: 0..239 body states (180..239 = the 15-group bullet death matrix),
 // 240..251 the wpn_* FP viewmodel states. [orig: AnimMap_FindSlotByName @0x40cfa0
-// scans exactly 252 entries of g_animStateNameTable @0x8135F0]
+// scans exactly 252 entries of g_AnimStateNameTable @0x8135F0]
 inline constexpr int kInfantryAnimStateCount = 252;
 
 // Foot-above-floor hysteresis shared by the simulated player motor and the
@@ -24,15 +24,15 @@ inline constexpr int kInfantryAnimStateCount = 252;
 // resolver return against 0xF000]
 inline constexpr int32_t kInfantryAirborneGap = 0xF000;
 
-// State id -> .adm key without the "anim_" prefix. [orig: g_animStateNameTable @0x8135F0]
+// State id -> .adm key without the "anim_" prefix. [orig: g_AnimStateNameTable @0x8135F0]
 extern const char *const kInfantryAnimNames[kInfantryAnimStateCount];
 // The .adm clip key for a state ("anim_" + the retail state name); empty for
 // an out-of-range or unnamed state. The ONE builder every consumer (the
 // kernel, the inspect records, the root-motion and collision-pose caches,
-// the shell) calls. [orig: g_animStateNameTable @0x8135F0]
+// the shell) calls. [orig: g_AnimStateNameTable @0x8135F0]
 std::string infantry_anim_key(int state);
 
-// Per-state behavior flags. [orig: g_animStateFlagsTable @0x8139E8]
+// Per-state behavior flags. [orig: g_AnimStateFlagsTable @0x8139E8]
 extern const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount];
 extern const uint8_t kInfantryFacialExpressions[kInfantryAnimStateCount];
 
@@ -74,7 +74,7 @@ enum : int {
     kIdleMortar = 46, // crouch idle for ForceCrouch (0x40000) weapons [orig: @0x4b726f]
     kIdleProne = 48,
     kIdle3 = 49,
-    // The weapon-channel hold-pose ladder [orig: g_animStateNameTable @ 0x8135F0
+    // The weapon-channel hold-pose ladder [orig: g_AnimStateNameTable @ 0x8135F0
     // indices 50-61; selected by the special_hold kind @ 0x4b5dc0..0x4b5e35].
     kHoldKnife = 50,
     kHoldPistol = 51,
@@ -101,7 +101,7 @@ enum : int {
     kDraggerWalk = 138,
     kGuard = 140,
     kGuardLook = 141,
-    kGuardAttack = 142, // [orig: g_animStateNameTable @0x8135F0 142..144 =
+    kGuardAttack = 142, // [orig: g_AnimStateNameTable @0x8135F0 142..144 =
     kGuardCover = 143,  //  guard_attack / guard_cover / guard_leave]
     kGuardLeave = 144,
     kWoundedWalk = 145,
@@ -240,7 +240,7 @@ inline int gait_stance_transition_clip(int current, int target) {
 
 // The two witnessed STANCE bits of the per-state anim-flags word (bits 8-9;
 // the wire player compact carries the same pair as its 2-bit stance lane).
-// [orig: g_animStateFlagsTable @0x8139E8; stance read in RoundData_SpawnRound
+// [orig: g_AnimStateFlagsTable @0x8139E8; stance read in RoundData_SpawnRound
 // @0x4EC251..0x4EC27A]
 inline constexpr uint32_t kAnimStanceFlagCrouched = 0x100;
 inline constexpr uint32_t kAnimStanceFlagProne = 0x200;
@@ -555,7 +555,6 @@ struct InfantryState {
         pitch_restore_active = false;
         pitch_restore_target = 0;
         pitch_restore_prev = 0;
-        ground_cache_valid = false;
     }
     // The SECONDARY (upper-body weapon) AnimMap channel's state pair + playhead:
     // target state, clip-end-deferred state, and its own playhead — the entity
@@ -631,7 +630,7 @@ struct InfantryState {
     // (66 reload2 when the hold kind is 2, pistol). [orig: entity+0x372 byte;
     // stamp WeaponSlot_ReloadAmmo @ 0x54173c, decrement @ 0x4b5cf9; §14.8.5]
     int32_t reload_anim_ticks = 0;
-    // The held weapon's 3P body-channel hold kind — the AdmDefs record dword +0xA4 the
+    // The held weapon's 3P body-channel hold kind — the g_AdmDefs record dword +0xA4 the
     // original reads through byte entity+0x2B0 each tick; mirrored from the equipped
     // def's special_hold key. 1..8 selects the 50-61 pose ladder (2 also selects
     // reload2); 0 = rifle default, mirror the primary. [orig: read @ 0x4b5dba;
@@ -643,8 +642,8 @@ struct InfantryState {
     // same equipped weapon across a world/player replacement.
     uint64_t wpn_anim_map_serial = 0;
     // Local-player Flags-bit mirrors, refreshed per tick by the host [orig: the
-    // @ 0x4b5d7f..0x4b5da9 refresh — Flags|0x10 from g_weaponScopeActive,
-    // Flags|8 from g_binocularsRaised (the case-26 input toggle @ 0x4e064c, forced
+    // @ 0x4b5d7f..0x4b5da9 refresh — Flags|0x10 from g_WeaponScopeActive,
+    // Flags|8 from g_BinocularsRaised (the case-26 input toggle @ 0x4e064c, forced
     // off when dead / spawn-gated / inputFlags&0x1E)].
     bool scope_raised = false;
     bool binoculars_raised = false;
@@ -663,7 +662,7 @@ struct InfantryState {
     // [orig: entity+0x380/+0x384; body updater + RoundData_SpawnRound @0x4EC0D0]
     int32_t recoil_pitch = 0;
     int32_t weapon_weight_spread = 0;
-    // Host-fed Player_CanFireWeapon analogue used by the weight multiplier and
+    // Host-fed Player_IsOpticalViewVisible analogue used by the weight multiplier and
     // by HUD ERROR's second stance triplet. It is true only for a settled aimed
     // shot in a camera mode that permits it.
     bool aimed_shot_available = false;
@@ -694,7 +693,7 @@ struct InfantryState {
     // Org2 carrier pitch awaiting the 1/32 look-follow step (entity+0x2E0).
     // [orig: @0x4B5715; @0x4B57CD..0x4B57E5]
     int32_t carrier_pitch_lag = 0;
-    // The held weapon's run-gait class (weapon.def run_anim -> AdmDefs +0xAC) and its
+    // The held weapon's run-gait class (weapon.def run_anim -> g_AdmDefs +0xAC) and its
     // ForceCrouch flag (weapon.def flags 0x40000), mirrored per tick like wpn_hold_kind.
     // run gait: forward-walk promotes to run_2/run_3 by 2 + run_anim [orig: @0x4b729d];
     // ForceCrouch: crouch idle promotes 45 -> 46 idle_mortar [orig: @0x4b723f] and
@@ -783,7 +782,7 @@ struct InfantryState {
     bool jump_requested = false;
     // The HELD jump-key level for the wire mirror: retail's packer writes the
     // held key into MoveOrder bit 5 every frame BEFORE the motor consumes it
-    // [orig: g_inputFlags 0x1000 -> MoveOrder 0x20 @0x4df6fa-0x4df701], so the
+    // [orig: g_InputFlags 0x1000 -> MoveOrder 0x20 @0x4df6fa-0x4df701], so the
     // uplink byte carries the level even on ticks the edge latch was consumed.
     bool jump_held = false;
     // The player body's jump cooldown/edge latch. The original REUSES entity+0x1A8
@@ -807,8 +806,6 @@ struct InfantryState {
     int32_t wait_cooldown = 0;            // entity[74]
     int32_t alert_timer = 0;              // entity[190]
     bool combat_reaction = false;         // entity+875
-    int32_t ground_cache = 0;             // entity+676
-    bool ground_cache_valid = false;
     int16_t max_health = 100;
 
     // ---- The infantry combat pass (org1 riflemen; world-wac-ai-re §17) ----

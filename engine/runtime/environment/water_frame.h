@@ -55,8 +55,8 @@ WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 // Render_DrawViewportColorQuad @ 0x5c38e0]
 uint8_t underwater_murk_overlay_alpha_byte(float murk);
 
-// The camera-side gate of render_water_surface's two calls
-// [orig: render_water_surface @ 0x5c32ed..0x5c330a]: the view-0 (above)
+// The camera-side gate of Render_WaterSurface's two calls
+// [orig: Render_WaterSurface @ 0x5c32ed..0x5c330a]: the view-0 (above)
 // call draws only while the camera is strictly above the plane
 // (jle skip @ 0x5c330a) and the underwater view only while it is strictly
 // below (jge skip @ 0x5c32fc); at exact equality neither side draws. The

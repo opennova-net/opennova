@@ -14,23 +14,14 @@ namespace opennova::audio {
 
 namespace {
 
-const DefItemDef *item_by_id(const DefItemsFile &items, int32_t item_id) {
-	for (size_t i = 0; i < items.count; ++i) {
-		if (items.entries[i].id == item_id) return &items.entries[i];
-	}
-	return nullptr;
-}
-
 bool tag_is_envs(const char *tag) {
 	return strutil::iequals(tag, "envs");
 }
 
 } // namespace
 
-bool item_is_envs(const DefItemsFile &items, int32_t item_id) {
-	const DefItemDef *def = item_by_id(items, item_id);
-	if (def == nullptr) return false;
-	return tag_is_envs(def->ai_function) || tag_is_envs(def->move_function);
+bool item_is_envs(const DefItemDef &def) {
+	return tag_is_envs(def.ai_function) || tag_is_envs(def.move_function);
 }
 
 std::vector<EnvsMarker> resolve_envs_markers(
@@ -52,8 +43,7 @@ std::vector<EnvsMarker> resolve_envs_markers(
 					by_id.find(entity.type_id + mission::kItemIdOffset);
 			if (found == by_id.end()) continue;
 			const DefItemDef &def = *found->second;
-			if (!tag_is_envs(def.ai_function) && !tag_is_envs(def.move_function))
-				continue;
+			if (!item_is_envs(def)) continue;
 			EnvsMarker marker;
 			marker.x = entity.get_x();
 			marker.y = entity.get_y();

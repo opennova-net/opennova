@@ -225,7 +225,7 @@ struct WeaponSlotState {
                                // Entity_GetScoreValueBySlotType @ 0x5406e0; single-class
                                // model, D-WPN-2)
     // Scope stash across a reload: reload unscoped us, rescope when it completes.
-    // [orig: g_rescopeAfterReload @ 0xB7647C; write @ 0x54312f, consume @ 0x54139e]
+    // [orig: g_RescopeAfterReload @ 0xB7647C; write @ 0x54312f, consume @ 0x54139e]
     bool rescope_after_reload = false;
     // The deferred fire re-queue — the port's slot for the original's
     // Input_QueueDeferredEvent(149, current_tick) events: set by the recoil window's
@@ -285,10 +285,10 @@ struct WeaponFsmInputs {
                                 // [orig: Input_IsBindingActive(149) @ 0x542e7f]
     bool reload_pressed = false; // the reload-key edge (case 0xD3 gates applied by caller)
     bool owner_present = true; // MountSlot+36; ownerless embedded slots still cool down
-    bool is_local = true;        // owner == g_local_player_entity paths
+    bool is_local = true;        // owner == g_LocalPlayerEntity paths
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately
-    bool auto_reload = true;     // [orig: g_autoReloadEnabled @ 0x24D2118]
-    bool scope_active = false;   // g_weaponScopeActive at reload time (the stash source)
+    bool auto_reload = true;     // [orig: g_AutoReloadEnabled @ 0x24D2118]
+    bool scope_active = false;   // g_WeaponScopeActive at reload time (the stash source)
     // SWITCHFROM bypasses its 30/tick holster timer when either the outgoing
     // or pending definition is Emplaced (Flags 0x80). The pending-slot owner
     // computes this because the standalone slot does not know its target def.
@@ -301,7 +301,7 @@ struct WeaponFsmInputs {
     // the firing entity's body Z is at or below the water plane, unless the def
     // carries Underwater (Flags 0x4). The local pump feeds it from
     // `env.water_z` (player_weapon.cpp).
-    // [orig: the Env_WaterHeightFixed compare @ 0x54101c -> the clear @ 0x54125f]
+    // [orig: the g_EnvWaterHeightFixed compare @ 0x54101c -> the clear @ 0x54125f]
     bool submerged = false;
     bool head_submerged = false;
     bool drowning = false;
@@ -368,7 +368,7 @@ struct WeaponFsmEvents {
     bool dry_fired = false;        // the EMPTY one-shot entered
     bool reload_requested = false; // C2S 0x25 seam [orig: @ 0x5430ff; net-re §5.58]
     bool reload_applied = false;   // authority refill ran (WeaponSlot_ReloadAmmo shape)
-    bool unscope = false;          // g_weaponScopeActive = 0 writes (one-shot/empty paths)
+    bool unscope = false;          // g_WeaponScopeActive = 0 writes (one-shot/empty paths)
     bool rescope = false;          // the pump's rescope-after-reload block [orig: @ 0x54139e]
 };
 

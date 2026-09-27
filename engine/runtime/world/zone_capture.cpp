@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 
+#include <base/io/crt_ftol.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
@@ -38,14 +39,6 @@ bool is_playing_player(const Entity &e) {
 
 uint32_t entity_flags(const Entity &e) { return e.flags | e.engine_flags; }
 
-// The x87 float-to-int conversion: truncation, with the integer indefinite
-// for an infinity, a NaN or an out-of-range value. [orig: _ftol2_sse @0x76BC00]
-int32_t ftol_indefinite(double value) {
-    if (value != value || value >= 2147483648.0 || value < -2147483648.0)
-        return static_cast<int32_t>(0x80000000u);
-    return static_cast<int32_t>(value);
-}
-
 // CaptureZone_CheckProximityScoring's gates: in-session team games only, a
 // registered capturer, and an owned zone. [orig: CaptureZone_CheckProximityScoring
 // @0x500C50 — @0x500C74 session, @0x500C87 team bit, @0x500C8E Entity_ValidatePtr,
@@ -58,10 +51,10 @@ bool capture_scoring_applies(const World &world, EntityHandle capturer,
 
 } // namespace
 
-// [orig: calculate_capture_zone_control_delta @0x501120]
+// [orig: CaptureZone_CalculateControlDelta @0x501120]
 int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input) {
     if (input.presence == 0) return 0; // [orig: `test v20` @0x501278]
-    // [orig: g_capture_speed_setting 1 -> 24, 2 -> 48, else 12 @0x50128A..0x5012A4]
+    // [orig: g_CaptureSpeedSetting 1 -> 24, 2 -> 48, else 12 @0x50128A..0x5012A4]
     const int base = input.speed_setting == 1 ? 24 : input.speed_setting == 2 ? 48 : 12;
     // The side whose player count sizes the speed: the owner's when friendlies
     // lead, the attacker's otherwise, by the zone team's 1/2 value.
@@ -95,7 +88,7 @@ int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input) {
                     x = ratio * clock;
                 }
                 x = std::clamp(x, 0.0, 1.0); // [orig: @0x501400..0x501439]
-                const int32_t reduction = ftol_indefinite(x * speed * 0.5);
+                const int32_t reduction = io::retail_ftol_sse2(x * speed * 0.5);
                 speed -= reduction; // [orig: `fisub` @0x501426]
             }
         }
@@ -104,7 +97,7 @@ int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input) {
     }
     // [orig: `fidiv presence; fdivr 65536.0` @0x501452..0x501456, _ftol2_sse
     //  @0x50145C; the minimum magnitude @0x50146B..0x501478]
-    const int32_t delta = ftol_indefinite(65536.0 / (speed / input.presence));
+    const int32_t delta = io::retail_ftol_sse2(65536.0 / (speed / input.presence));
     if (delta != 0) return delta;
     return input.presence > 0 ? 1 : -1;
 }
@@ -139,7 +132,7 @@ ZoneCaptureEvents::TimerWindow timer_window(const Entity &zone,
 // complete six-byte 0x50 semantic payload at mutation time: instant captures
 // deliberately call this twice (old owner -> 0 -> capturer), and a later entity
 // lookup would erase the neutral record. [orig: Server_ChangeEntityTeam
-// @0x518D70; write_entity_handle_packet @0x506AD0]
+// @0x518D70; NetPacket_WriteEntityHandlePacket @0x506AD0]
 bool change_entity_team(World &world, ZoneCaptureEvents &out,
                         EntityHandle handle, uint8_t team) {
     Entity *entity = world.registry.get(handle);
@@ -224,7 +217,7 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
     const MatchRules &rules = world.match.rules();
 
     // The in-game census the delta walks: every registered Player whose body is
-    // neither carried nor dead. [orig: calculate_capture_zone_control_delta
+    // neither carried nor dead. [orig: CaptureZone_CalculateControlDelta
     // @0x501120 — slot active, `test byte [ent+24h], 3`, state 6 @0x501173..0x501199]
     std::vector<const Entity *> census;
     for (const MatchPlayer &row : world.match.players()) {
@@ -279,7 +272,7 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
             // Presence: same-team Players count for the owner; every other
             // Player in radius counts as an enemy and, when its team may
             // capture the zone, against the owner.
-            // [orig: calculate_capture_zone_control_delta @0x50120D..0x501248]
+            // [orig: CaptureZone_CalculateControlDelta @0x50120D..0x501248]
             int presence = 0;
             int friendlies = 0;
             int enemies = 0;

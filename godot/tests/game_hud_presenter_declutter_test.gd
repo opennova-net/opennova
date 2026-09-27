@@ -14,7 +14,7 @@ const HudHiddenCaptureWitness := preload(
 # [orig: the huddetail cycle Input_HandleActionBinding_0 @0x4E0601..0x4E0624
 #  (the layer global only); the death force NapiNPClientMsg_0x00F
 #  @0x42E410..0x42E41C (the layer global only); the mission-start apply
-#  apply_session_settings_to_globals @0x55154d from the config struct that
+#  Game_ApplySessionSettingsToGlobals @0x55154d from the config struct that
 #  Game_SaveConfig @0x54c80d persists; the first-match key scan @0x49d42f]
 #
 # user:// settings hygiene: every test wraps its cycles back to the starting
@@ -394,15 +394,18 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 			# The Inset pass is a second view of the WORLD: whatever the source
 			# camera admits, minus the first-person viewmodel (the aimed gun must
 			# never render magnified inside the aperture), the layer-hidden
-			# first-person body and the caster markers.
+			# first-person body and the caster markers, and the main view's
+			# foliage and flat-fallback terrain (the Inset compiles its own onto
+			# its own layer).
 			var second_view_excluded: int = Water.VISUAL_LAYER_VIEWMODEL \
-					| Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY | Water.VISUAL_LAYER_SHADOW_CASTER_MASK
+					| Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY | Water.VISUAL_LAYER_SHADOW_CASTER_MASK \
+					| Water.VISUAL_LAYER_TERRAIN_FOLIAGE | Water.VISUAL_LAYER_TERRAIN_FLAT_FALLBACK
 			var inset_camera := inset_view.get_render_viewport().get_camera_3d()
 			assert_not_null(inset_camera)
 			assert_eq(camera.cull_mask & second_view_excluded, second_view_excluded,
 					"the source camera of this fixture admits every excluded layer")
-			assert_eq(inset_camera.cull_mask, camera.cull_mask & ~second_view_excluded,
-					"the Inset camera takes the source mask without the viewmodel/body/caster layers")
+			assert_eq(inset_camera.cull_mask, (camera.cull_mask & ~(second_view_excluded | (1 << 20) | (1 << 22) | (1 << 23))) | (1 << 21),
+					"the Inset camera takes the source mask without the viewmodel/body/caster and main-view layers, plus the Inset's own")
 			# While the pass renders, the particle renderer holds its camera and
 			# compiles the world's particles for it as a view group of its own.
 			assert_eq(inset_view.get_active_render_camera(), inset_camera)
@@ -539,6 +542,81 @@ func test_inset_camera_direction_keeps_precision_far_from_origin() -> void:
 					view.inset_camera_yaw_deg, view.inset_camera_pitch_deg)
 			assert_lt((-inset_camera.global_basis.z - expected).length(), 0.000001,
 					"the Inset camera's direction is independent of world-coordinate magnitude")
+	presenter.teardown()
+	player.teardown()
+
+
+# Retail composes the Inset camera inside the pass that draws it, so every
+# Inset leg of a frame reads that frame's pose (the engine's
+# local_player_view_frame carries the witness): the world's local-view leg
+# refreshes the HUD's scope from the view it just composed and hands the
+# effect world its camera, with no HUD tick in between, raising and taking
+# back the pass in the frame whose view decides it.
+func test_the_world_frame_hands_over_the_inset_camera_it_composed() -> void:
+	_stage_inset_weapons()
+	var world := WorldFixture.boot_minimal(self, _staged_dir)
+	world.set_process(false)
+	var sim := world.get_sim()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	camera.make_current()
+	var player: LocalPlayerPresenter = add_child_autofree(LocalPlayerPresenter.new())
+	player.setup(world, camera, null, ControlsModel.new())
+	var presenter: GameHudPresenter = add_child_autofree(GameHudPresenter.new())
+	presenter.setup(world, player, null)
+	presenter.ensure_game_hud()
+	presenter.set_hud_detail_level(0)
+	var hud := presenter.get_game_hud()
+	hud.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	hud.size = Vector2(1024, 768)
+	var effects := world.get_effect_world()
+	var scope := hud.get_node("InsetScope") as HudInsetScope
+	for _i in range(90):
+		sim.step()
+	assert_true(world.set_local_player_weapon_by_name("WPN_HUD_INSET"))
+	for _i in range(30):
+		sim.step()
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(30):
+		sim.step()
+	assert_false(scope.is_scope_active(), "no frame has presented the raised optic yet")
+	# One world frame at zero delta (no sim tick moves the player).
+	var frame := func() -> void:
+		world.tick(camera.global_position, camera.global_transform, 0.0,
+				player.before_world_tick(0.0, false, true))
+	frame.call()
+	assert_true(scope.is_scope_active(), "the local-view leg raised the Inset pass")
+	var inset_camera := scope.get_render_viewport().get_camera_3d() \
+			if scope.get_render_viewport() != null else null
+	assert_not_null(inset_camera)
+	if inset_camera == null:
+		presenter.teardown()
+		player.teardown()
+		return
+	assert_eq(effects.get_second_scene_camera(), inset_camera,
+			"and handed the effect world its camera in the same frame")
+	var view := player.presented_view()
+	assert_almost_eq((inset_camera.global_position - view.inset_camera_eye).length(), 0.0,
+			0.001, "the camera carries the pose this frame composed")
+	# The player turns and moves: the next frame's legs read the next pose.
+	assert_eq(sim.debug_teleport_local_player(Vector3(40.0, -40.0, 10.0), 123.456, 7.891), OK)
+	frame.call()
+	view = player.presented_view()
+	assert_true(view.inset_scope_active, "the optic stays raised")
+	assert_almost_eq((inset_camera.global_position - view.inset_camera_eye).length(), 0.0,
+			0.001, "this frame's eye, before any HUD tick")
+	var expected := Simulation.presentation_forward(
+			view.inset_camera_yaw_deg, view.inset_camera_pitch_deg)
+	assert_lt((-inset_camera.global_basis.z - expected).length(), 0.0001,
+			"and this frame's direction")
+	# The optic lowers: the frame that presents it takes the camera back.
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(30):
+		sim.step()
+	frame.call()
+	assert_false(scope.is_scope_active())
+	assert_null(effects.get_second_scene_camera(),
+			"the local-view leg took the Inset camera back in the same frame")
 	presenter.teardown()
 	player.teardown()
 

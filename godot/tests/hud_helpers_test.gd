@@ -89,7 +89,7 @@ func test_crosshair_error_row() -> void:
 
 
 func test_fade_decay_curve() -> void:
-	# [orig: draw_hud_ammo_indicator @0x599af9] — 255 right after the change, 0 at the
+	# [orig: HUD_DrawAmmoIndicator @0x599af9] — 255 right after the change, 0 at the
 	# ramp end, with the witnessed elapsed-0 u16 wrap quirk reading as fully decayed.
 	assert_eq(HudPos.fade_decay(0, 186), 0, "Elapsed 0 wraps to no flash (one-tick latency).")
 	assert_eq(HudPos.fade_decay(1, 186), 254)
@@ -130,7 +130,7 @@ func test_message_expiry_policy() -> void:
 
 
 func test_ammo_text_format() -> void:
-	# [orig: hud_draw_weapon_ammo_and_name @0x593a33..0x593ab0]
+	# [orig: HUD_DrawWeaponAmmoAndName @0x593a33..0x593ab0]
 	assert_eq(HudPos.format_ammo(30, 90, 30), "30/90")
 	assert_eq(HudPos.format_ammo(-1, 90, 30), "90", "No clip -> reserve only.")
 	assert_eq(HudPos.format_ammo(1, 4, 1), "4", "Capacity 1 -> reserve only.")
@@ -189,7 +189,7 @@ func test_stance_shared_scale() -> void:
 
 
 func test_round_icon_count() -> void:
-	# [orig: draw_hud_ammo_indicator @0x599b9c..0x599bc1]
+	# [orig: HUD_DrawAmmoIndicator @0x599b9c..0x599bc1]
 	assert_eq(HudPos.round_icon_count(12, 90, 30, 1), 12)
 	assert_eq(HudPos.round_icon_count(12, 90, 1, 1), 40, "Capacity 1 counts the pool, capped at 40.")
 	assert_eq(HudPos.round_icon_count(12, 90, 30, 3), 4, "Divisor rounds up: (12+1)/3.")

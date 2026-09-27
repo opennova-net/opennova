@@ -76,7 +76,7 @@ struct RampField {
 
 void make_rig(Rig &r) {
 	// A joiner's world: its AiSystem runs non-authoritative, the client motor
-	// path [orig: g_napi_np_ctx.is_authority == 0 on a client].
+	// path [orig: g_NapiNPCtx.is_authority == 0 on a client].
 	r.world.ai.is_authority = false;
 	r.world.registry.configure_pool(0, 8);
 	r.world.registry.configure_pool(1, 8);

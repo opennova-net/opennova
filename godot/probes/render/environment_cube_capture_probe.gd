@@ -10,7 +10,7 @@ extends GameProbe
 ## published TextureCubemapRD, on a ProbeStage of its own so the live world
 ## never enters the faces.
 ## [orig: GTexture_RenderCubeMapFace @ 0x6864d0;
-## update_environment_cubemap @ 0x6106a0; face callback @ 0x5c3700].
+## EnvCube_Update @ 0x6106a0; face callback @ 0x5c3700].
 
 const FACE_DIRECTIONS := [
 	Vector3.LEFT, Vector3.RIGHT, Vector3.DOWN, Vector3.UP,

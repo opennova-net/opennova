@@ -167,7 +167,7 @@
     X(TRACE_DYNAMIC_FACES, "VALUE: dynamic survivor face-set sizes") \
     X(EFFECTS_DRAIN, "sim.drain_effects, summed over ticks") \
     X(EFFECTS_TICK, "EffectWorld.advance_fixed_tick, summed over ticks") \
-    X(PRESENT_SNAPSHOT, "native get_present_snapshot build") \
+    X(PRESENT_SNAPSHOT, "native build_present_snapshot") \
     X(PRESENT_MISSION, "MissionPresentPass.present_snapshot") \
     X(PRESENT_MISSION_CORE, "row scan, transform, and submission gate") \
     X(PRESENT_MISSION_AIM, "right-hand collapse + aim-overlay publication") \
@@ -177,8 +177,8 @@
     X(PRESENT_MISSION_ROWS, "VALUE: rows visited by the mission presenter") \
     X(PRESENT_MISSION_SUBMITTED_ROWS, "VALUE: camera-submitted rows") \
     X(PRESENT_MISSION_BODY_ROWS, "VALUE: rows eligible for a body pose") \
-    X(PRESENT_WIRE, "WirePresentPass.present_snapshot") \
-    X(PRESENT_WIRE_LIVE, "VALUE: wire-direct nodes alive (WirePresentPass)") \
+    X(PRESENT_WIRE, "EntityPresenter wire walk (present_snapshot)") \
+    X(PRESENT_WIRE_LIVE, "VALUE: wire-direct nodes alive (EntityPresenter wire walk)") \
     X(PRESENT_WIRE_PENDING, "VALUE: wire rows still owed a cold spawn") \
     X(PRESENT_FIRE, "") \
     X(PRESENT_DESTRUCTION, "") \

@@ -856,32 +856,11 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
 			}
 		}
 	}
-	// The addeweap emplacement children (items.def addeweap*, a different list
-	// from the refNum peers above) keep the earlier stand-in kill until the
-	// world.cpp orphan cascade alone carries them (destruction_test pins it).
-	if (ctx.world != nullptr) {
-		World &world = *ctx.world;
-		const Entity *parent = world.registry.get(e.handle);
-		if (parent != nullptr) {
-			std::vector<EntityHandle> children;
-			world.registry.for_each_in_pool(1, [&](const Entity &child) {
-				if (child.emplacement_parent == e.handle &&
-						child.emplacement_parent_spawn_id == parent->registry_spawn_id &&
-						child.health > 0)
-					children.push_back(child.handle);
-			});
-			for (EntityHandle handle : children) {
-				Entity *child = world.registry.get(handle);
-				if (child == nullptr)
-					continue;
-				child->health = 0;
-				child->last_attacker = {};
-				if (AiEntity *brain = world.ai.for_handle(handle))
-					brain->health = 0;
-				destruction_notify_item_damage(world, *child, 1);
-			}
-		}
-	}
+	// Nothing else here touches the addeweap children: they share the carrier's
+	// refNum, so a `Parent` def reaches them through the list above, and the
+	// ewep class update hides them on a dead PlayerControl hull.
+	// [orig: AI_TransitionToDeath_GroundVehicle @0x467B20 — the only child walk
+	//  is the +576/+580 list @0x467B90..0x467BCC]
 	alert_block(ctx, e);
 	b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
     if (hull_death_speed(ctx.world, e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]

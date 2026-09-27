@@ -15,11 +15,11 @@
 
 namespace godot {
 
-// The per-frame water surface core of [orig: render_water_surface @ 0x5c32c0, see docs/env/env-tod-re.md]:
+// The per-frame water surface core of [orig: Render_WaterSurface @ 0x5c32c0, see docs/env/env-tod-re.md]:
 // the animated 128x128 ridge color/alpha texture and its DuDv/normal
 // derivative [orig: Water_GenerateNoiseTextures @ 0x5c0360, see docs/env/env-tod-re.md], plus the
 // screen-marched strip tessellation of the detailed tier (env #29)
-// [orig: render_water_strip_detailed @ 0x5c27d0, see docs/env/env-tod-re.md]. All math lives in engine/formats/env
+// [orig: Render_WaterStripDetailed @ 0x5c27d0, see docs/env/env-tod-re.md]. All math lives in engine/formats/env
 // (env/env_water_render.h); this C++-only device helper (Water's member — its
 // ClassDB row died with the ADR 0043 d10 env-core sweep; env_render_unit
 // pins the vectors it served GUT) owns the static tables (built once with
@@ -47,7 +47,7 @@ private:
 
 public:
 	// Regenerates both textures for the given 62 Hz frame counter
-	// [orig: called per frame from render_water_surface @ 0x5c3326, see docs/env/env-tod-re.md].
+	// [orig: called per frame from Render_WaterSurface @ 0x5c3326, see docs/env/env-tod-re.md].
 	void update(int p_frame_counter);
 
 	// RGBA8 bytes (128x128) for Image::create_from_data - the ridge
@@ -67,9 +67,9 @@ public:
 	void strip_set_view(const Transform3D &p_cam_transform, const Projection &p_cam_projection,
 			const Vector2i &p_viewport_px, float p_fog_end_world);
 
-	// Runs the witnessed row march [orig: render_water_strip_detailed
+	// Runs the witnessed row march [orig: Render_WaterStripDetailed
 	// @ 0x5c27d0] against the last strip_set_view; returns the row count
-	// (3 vertices per row). p_water_color_lit is Env_WaterColorLit as a
+	// (3 vertices per row). p_water_color_lit is g_EnvWaterColorLit as a
 	// Color (bytes / 255); p_depth_scale/p_depth_bias the WaterDepthCurve pair.
 	int strip_build(float p_plane_height_world, float p_murk, const Color &p_water_color_lit,
 			float p_depth_scale, float p_depth_bias, bool p_underwater, bool p_nightvision);
@@ -91,7 +91,7 @@ public:
 	// The witnessed texcoord 0 pair = render-basis world x/32, z/32 (Godot
 	// world z/32, x/32). Retail duplicates it into texcoord 3, so the color
 	// noise and the DuDv map both sample it verbatim
-	// (retail render_water_strip_detailed @ 0x5c2aec..0x5c2b00, the t3 copy
+	// (retail Render_WaterStripDetailed @ 0x5c2aec..0x5c2b00, the t3 copy
 	// @ 0x5c3095..0x5c30bf).
 	PackedVector2Array strip_uv0() const;
 	// 4 floats per vertex: [depth (the clamped fog W, vertex +0x08), rhw

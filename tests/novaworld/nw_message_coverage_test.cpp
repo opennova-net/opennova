@@ -85,8 +85,8 @@ int test_catalog_consistency() {
 // The retail dispatch tables contain more handlers than the old catalog.
 // Pin the original table membership independently of the catalog so omitting a
 // message cannot make its coverage disappear from the gate.
-// [orig: g_np_msginfo_client @0x82AE28 (122 handlers + sentinel),
-// g_np_msginfo_server @0x82B5D8 (71 handlers + sentinel)]
+// [orig: g_NPMsgInfoClient @0x82AE28 (122 handlers + sentinel),
+// g_NPMsgInfoServer @0x82B5D8 (71 handlers + sentinel)]
 int test_retail_dispatch_membership() {
 	static constexpr uint8_t client_tags[] = {
 		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C,
@@ -305,7 +305,7 @@ int check_S_26_kill() {
 // S2C 0x4E — one join-window kill-list page: [u16 resume][u16 slot...] to the
 // body end; the bare FF FF is a walk that found nothing. Round-trips through
 // encode_batch_kill (the host page builder's byte order).
-// [orig: NapiNPClientMsg_HandleBatchKill @0x431870; collect_valid_weapon_slots @0x516000]
+// [orig: NapiNPClientMsg_HandleBatchKill @0x431870; Server_CollectValidWeaponSlots @0x516000]
 int check_S_4E_batch_kill() {
 	LE w;
 	w.u16(0x1002);   // resume index (the iterator's current slot)
@@ -671,7 +671,7 @@ int check_door_slot_action_pair() {
 
 // S2C 0x6A — clan-roster update: actions 1/3 [u8][u32 id][cstr name][cstr tag] with the
 // 64 / 8 char caps, action 2 [u8 2][u32 id]; any other action is ignored (false).
-// [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; serialize_minimap_slot @0x5073B0]
+// [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; NetPacket_SerializeMinimapSlot @0x5073B0]
 int check_S_6A_clan_roster() {
 	ClanRosterUpdate add;
 	add.action = kClanRosterAdd;
@@ -752,7 +752,7 @@ int check_C_4E_clan_roster_walk() {
 
 // S2C 0x70 — vehicle-spawn availability: [u8 3] + rows [u16 typeId][u8 avail][u8 max]
 // + u16 0. Byte fixture pinned against the retail serializer's write order.
-// [orig: serialize_weapon_overlay_slots_0 @0x5105A0; NapiNPClientMsg_HandleWeaponLoadoutList @0x429a30]
+// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; NapiNPClientMsg_HandleWeaponLoadoutList @0x429a30]
 int check_S_70_vehicle_spawn_availability() {
 	VehicleSpawnAvailabilityList list;
 	list.rows.push_back({1300, 1, 3});                                            // (1300,1,3): one left of the allotment
@@ -1050,7 +1050,7 @@ int check_S_12_entity_remove() {
 }
 
 // S2C 0x2F — flag/carryable state: [u16 handle][u8 low flags][3xi32 pos]
-// [u16 occupant/carrier][u16 ground]. [orig: serialize_entity_with_parent_and_target
+// [u16 occupant/carrier][u16 ground]. [orig: NetPacket_SerializeEntityWithParentAndTarget
 // @0x505810; NapiNPClientMsg_0x02F @0x430E10]
 int check_S_2F_objective_entity_state() {
 	LE w;
@@ -1200,7 +1200,7 @@ int check_S_45_terrain_load() {
 
 // S2C 0x18 — full-entity-spawn (§5.46): the reply to a C2S 0x0F entity-info query.
 // A hand-built player record per the witnessed serializer layout
-// [orig: serialize_object_to_buffer @0x504d10]; asserts the client-handler field
+// [orig: NetPacket_SerializeObjectToBuffer @0x504d10]; asserts the client-handler field
 // order [orig: NapiNPClientMsg_FullEntitySpawn @0x433780] consumes cleanly.
 int check_S_18_full_entity_spawn() {
 	LE w;
@@ -1637,8 +1637,8 @@ int check_S_04_session_slot_config() {
 	LE w;
 	for (int i = 0; i < 4; ++i) w.u32(0x11111111u * unsigned(i + 1));
 	w.u8(5);                 // session config
-	w.u8(1);                 // the recipient's own roster slot (g_local_player_slot_id)
-	w.u8(32);                // max players (g_max_player_slots — the roster-walk terminator)
+	w.u8(1);                 // the recipient's own roster slot (g_LocalPlayerSlotId)
+	w.u8(32);                // max players (g_MaxPlayerSlots — the roster-walk terminator)
 	w.u32(0xAABBCCDD);
 	w.u8(9);
 	EXPECT(w.b.size() == 24);

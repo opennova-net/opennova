@@ -30,7 +30,7 @@ in place.
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
 | `.bad` runtime consumption — which clip binds the rig, and the translation gate | MATCHING (witnessed 2026-09-25, below); translation under a cross-fade is not ported | ctest `anim_sample` (the gate in the sampler, and the rig loader over synthetic tables); the 82-table scan below; the gated `anim_o3a_runtime_playback` |
 | `.bad` event record — the runtime's read, and what `bottom`, `top` and `velocity` measure | MATCHING (read-only grill of the read, 2026-09-25); the measure WITNESSED on the corpus (below) | ctests `anim_adm_root_motion`, `root_motion`; the 30 person tables and 477 clips below |
-| `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
+| `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `Bone_BuildWorldMatrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
 | `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; ctest `anim_sample` (synthetic) + the asset-gated ctest `anim_positions_from_model_corpus` (retail rigs) |
 
 ## The `.adm` format
@@ -151,7 +151,7 @@ bone 0 because the parser force-overrides it.
 The on-disk bone record (100 bytes, raw IEEE floats) and the runtime entity
 skeleton bone (108 bytes, fp16.16 with `parentIndex @ +40`, pivots
 `@ +56/60/64`) are distinct records — ADR 0007's boundary; the runtime record
-is consumed by the world-entity builder (`build_world_bone_matrices
+is consumed by the world-entity builder (`Bone_BuildWorldMatrices
 @ 0x40c770`), never parsed from disk by this lib.
 
 ## Runtime consumption semantics (witnessed elsewhere, summarized)
@@ -207,7 +207,7 @@ actually mean:
 **Which clip binds.** A row names its slot by its key past the first five
 characters, compared without case against the 252 slot names, and slot 0's
 name is `reset` [orig: `AnimMap_FindSlotByName @ 0x40CFA0`, the table
-`g_animStateNameTable @ 0x8135F0`, entry 0 `"reset" @ 0x7C3264`]: `anim_reset`
+`g_AnimStateNameTable @ 0x8135F0`, entry 0 `"reset" @ 0x7C3264`]: `anim_reset`
 and `ANIM_RESET` name slot 0, `anim_resetx` and `anim_idle_reset` do not. Every
 clip registered on slot 0 replaces the slot's head instead of joining a ring
 (`AnimMap_RegisterBoneNode @ 0x40C2D0`: a zero slot index takes the jump
@@ -309,7 +309,12 @@ rows, `frame_count + 1` of each) it counts and refuses when short:
   non-junk bones, and through the clip's OWN rotation in only 365: every clip of
   a set stores the reset clip's positions. The seam derives it that way, and
   `anim scene` recovers the pivots through the same bind, so every clip of a
-  table recovers the rig's one set of pivots.
+  table recovers the rig's one set of pivots. A bone past the reset clip's
+  bones (G17_1st's `g17_1f` and `g17_1d` carry one bone more than their reset)
+  turns its children through the clip's OWN first key, transposed: that is the
+  seam's rule, not a witness, since what retail reads for such a bone is
+  unwitnessed (`bad_derive_bind_rows`, `engine/formats/bad/bad_build.h`; a lone
+  clip, which no table binds, turns through its own first key the same way).
 - **`fps` is 30 in every clip.** `version` is 1 in 474 and 0 in 3 (a 20-byte
   event record with no trigger word), so the seam refuses any other version and
   a trigger on a version 0 event.
@@ -409,7 +414,7 @@ into the entity's root frame (the out-transform `@0x40B82F..0x40B8A3`, with
   the pending climb and death states 32..35 and 176..179 clear it `@0x40B637`).
   The vertical root motion is the change in `bottom`; `vel.y` is read only on
   a channel's first update after that reset;
-- the trigger word goes to `g_animEventTriggerBits @ 0xA2ED08` (`@0x40B8A3`).
+- the trigger word goes to `g_AnimEventTriggerBits @ 0xA2ED08` (`@0x40B8A3`).
 
 **How the port consumes it.** `anim::AdmRootMotion`
 (`engine/runtime/anim/adm_root_motion.{h,cpp}`) emits the out-transform as the
@@ -538,7 +543,10 @@ All existing ledger IDs — this record mints none:
   a writer-policy ADR, not a parser change.
 - `flags` bit 3 and the `top` of the head-less viewmodel clips that stand above
   their `bottom` are the two unwitnessed corners above: the first wants a look
-  at the loader, the second at whatever retail's exporter was.
+  at the loader, the second at whatever retail's exporter was. A third is the
+  bind a clip's bone past its reset clip's bones turns through (the writers
+  section): the seam uses the clip's own first key until the runtime's read
+  for such a bone is witnessed.
 - Translation under a cross-fade (witnessed 2026-09-25, not ported).
   `AnimChannel_BlendTwoChannels @ 0x410740` always blends the rotations, but
   fills the translation scratch by the two clips' flags: both translated, their

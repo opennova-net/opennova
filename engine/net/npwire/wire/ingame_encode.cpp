@@ -9,7 +9,7 @@
 // Encoders for the in-match S2C replication tags — the symmetric partners to
 // ingame_decode.cpp. Faithful structural ports of the original server-side
 // serializers. Verified inverse pair:
-//   encode_pool3_sync_batch  ← [orig: serialize_entity_pool_to_packet @ 0x503460]
+//   encode_pool3_sync_batch  ← [orig: NetPacket_SerializeEntityPoolToPacket @ 0x503460]
 //   decode_pool3_sync_batch  ← [orig: NapiNPClientMsg_0x020          @ 0x425C00]
 // Both handlers were decompiled and field-mapped (docs/net/novaworld-net-re.md
 // §5.12); the encode side writes exactly the byte stream the decode side reads.
@@ -47,7 +47,7 @@ struct Writer {
 
 } // namespace
 
-// [orig: serialize_entity_pool_to_packet @ 0x503460]
+// [orig: NetPacket_SerializeEntityPoolToPacket @ 0x503460]
 std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch) {
 	std::vector<uint8_t> out;
 	Writer w{out};
@@ -98,7 +98,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch) {
 	return out;
 }
 
-// [orig: serialize_entity_pool_to_packet_0 @ 0x503940]
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @ 0x503940]
 std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 	std::vector<uint8_t> out;
 	Writer w{out};
@@ -120,14 +120,17 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (rec.parent_handle != wire_handle::kInvalid) f |= kPoolSpawnHasParentHandle; // entity+368  [orig: 0x503bd1]
 		if (rec.target_handle != wire_handle::kInvalid) f |= kPoolSpawnHasTargetHandle; // entity+40   [orig: 0x503c27]
 		if (rec.seat_mask)                 f |= kPoolSpawnHasMountOccupancy; // itemDef+604 [orig: 0x503c83]
-		if (!rec.ai_name.empty() || rec.ai_profile_1 || rec.ai_profile_2)
-		                                   f |= kPoolSpawnHasAiTrailer; // aiSlot      [orig: 0x503d53]
+		// The two pointer gates ride their presence fields: the AI slot
+		// (entity+0x68) and the vehicle brain (entity+0x64), whatever the values.
+		if (rec.has_ai_trailer)            f |= kPoolSpawnHasAiTrailer; // aiSlot      [orig: 0x503d53]
 		if (rec.alert_byte)                f |= kPoolSpawnHasRefNum; // entity+533  [orig: 0x503e3c]
 		if (rec.action_byte)               f |= kPoolSpawnHasSubType; // entity+532  [orig: 0x503e60]
-		if (rec.weapon_type_byte)          f |= kPoolSpawnHasWeaponTypeByte; // entity+100  [orig: 0x503e7f]
-		if (rec.zone_number_rank)               f |= kPoolSpawnHasZoneNumberRank; // entity+538  [orig: 0x503ecc]
-		else if (rec.zone_radius)         f |= kPoolSpawnHasZoneRadiusAlt; // itemDef+0x40000 path [orig: 0x503f29]
-		if (rec.difficulty_byte)           f |= kPoolSpawnHasDifficultyByte; // entity+624  [orig: 0x503f4c]
+		if (rec.has_sound_latch_byte)      f |= kPoolSpawnHasSoundLatchByte; // entity+100  [orig: 0x503e7f]
+		// The zone block and the 0x4000 byte ride presence too: the zone number byte
+		// and the def's SpawnPoint attrib / callbacks gate them, not the written values.
+		if (rec.has_zone_number_rank)      f |= kPoolSpawnHasZoneNumberRank; // entity+538 != 0 [orig: 0x503ecc]
+		else if (rec.has_zone_radius_alt)  f |= kPoolSpawnHasZoneRadiusAlt; // itemDef+0x40000 path [orig: 0x503f29]
+		if (rec.has_difficulty_byte)       f |= kPoolSpawnHasDifficultyByte; // def callbacks [orig: 0x503f4c]
 
 		w.u16(f);                       // spawn_flags  [orig: *flags_write_pos @ 0x503f90]
 		w.u16(rec.slot_id);             // packed handle [orig: 0x503a3f]
@@ -168,7 +171,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		}
 		if (f & kPoolSpawnHasRefNum) w.u8(rec.alert_byte);        // [orig: 0x503e50]
 		if (f & kPoolSpawnHasSubType) w.u8(rec.action_byte);       // [orig: 0x503e77]
-		if (f & kPoolSpawnHasWeaponTypeByte) w.u8(rec.weapon_type_byte);  // [orig: 0x503ec0]
+		if (f & kPoolSpawnHasSoundLatchByte) w.u8(rec.sound_latch_byte);  // [orig: 0x503ec0]
 
 		if (f & kPoolSpawnHasZoneNumberRank) { // [orig: 0x503ee5 health block]
 			w.u8(rec.zone_number_rank);      // entity+538 (the break-out byte)
@@ -182,7 +185,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 	return out;
 }
 
-// [orig: serialize_pool2_static_to_buffer @0x5042f0] (the §5.2a world-stream phase-1 static serializer) — the inverse of
+// [orig: NetPacket_SerializePool2StaticToBuffer @0x5042f0] (the §5.2a world-stream phase-1 static serializer) — the inverse of
 // decode_static_entity_batch (§5.9). Header `[u16 start_index][u16 count]`, then per record
 // `[u16 item_type_id]` (0 ⇒ empty-slot sentinel, record ends), else `[u16 field_flags]
 // [i32 x][i32 y][i32 z]`, the flag-gated optionals, the ALWAYS ammo_count, more flag-gated
@@ -219,7 +222,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (rec.entity_flags) f |= kStaticEntityHasEntityFlags; // entity+36 Flags dword (D-NET-147)
 		if (rec.bone_a)       f |= kStaticEntityHasRefNum; // entity+533 (D-NET-94)
 		if (rec.bone_b)       f |= kStaticEntityHasSubType; // entity+532 (D-NET-94)
-		if (rec.score_flag)   f |= kStaticEntityHasScoreFlag; // entity+624
+		if (rec.has_score_flag) f |= kStaticEntityHasScoreFlag; // entity+624, the def callback gate [orig: 0x504554]
 		// attach_ref is written when `weapon_byte != 0 || flags & 0x200`; force the 0x200
 		// gate only when attach_ref is populated but weapon_byte is zero (else weapon_byte
 		// already triggers the write and 0x200 would be redundant).
@@ -247,7 +250,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 	return out;
 }
 
-// [orig: serialize_terrain_tiles @ 0x6080F0] — the inverse of decode_terrain_load_batch
+// [orig: Terrain_SerializeTiles @ 0x6080F0] — the inverse of decode_terrain_load_batch
 // (§5.37, D-NET-83). One paged chunk of the terrain-tile (.til) load stream. The header chunk
 // writes the wire start word 0xFFFF, end_index, then the `'til0'` magic + total tile_count +
 // hdr2/hdr3; continuation chunks write `[start_index][end_index]`. Every chunk then writes its
@@ -312,7 +315,7 @@ std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch) 
 	return out;
 }
 
-// [orig: serialize_object_to_buffer @ 0x504d10] — the S2C 0x18 reply body. The
+// [orig: NetPacket_SerializeObjectToBuffer @ 0x504d10] — the S2C 0x18 reply body. The
 // original recomputes the leading handle from the entity pointer (pool scan) and
 // resolves the three link pointers to handles (0xFFFF when null); here both arrive
 // pre-resolved on the record. An itemDef-null slot sends type_id/item_type 0 and
@@ -326,7 +329,7 @@ std::vector<uint8_t> encode_full_entity_spawn(const FullEntitySpawnRecord &rec) 
 	w.u8(rec.team);                // entity+354         [0x504dee]
 	w.u16(rec.minimap_flags);      // entity+36          [0x504e00]
 	w.u32(rec.entity_flags);       // entity+120         [0x504e12]
-	w.cstr(rec.entity_name);       // entity+244 / g_empty_str [0x504e5a / 0x504e7c]
+	w.cstr(rec.entity_name);       // entity+244 / g_EmptyStr [0x504e5a / 0x504e7c]
 	w.u16(rec.parent_vehicle_handle); // entity+368 → handle [0x504ec5]
 	w.u16(rec.ground_entity_handle);  // entity+40  → handle [0x504f3a]
 	w.u16(rec.parent_entity_handle);  // entity+364 → handle [0x504fb4]
@@ -515,7 +518,7 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 	if (authority_recipient) {
 		// The local gate: only the phase-0 weapon/reload/uniform block survives
 		// [orig: NetPacket_WritePlayerState @0x4ff81b writes it before the
-		//  local test @0x4ff9cd returns; serialize_entity_states_to_packet
+		//  local test @0x4ff9cd returns; NetPacket_SerializeEntityStatesToPacket
 		//  @0x50f07e writes nothing for the local player].
 		if ((fu.flags2 & kFrameFlags2SubBlockCycleMask) == 0) {
 			w.u8(fu.weapon.preround_timer); w.u8(fu.weapon.slot_state360); w.u8(fu.weapon.slot_state368);
@@ -570,7 +573,7 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 
 	// Event loop: tag=1 per-entity compacts, then tag=2 round events, then tag=0.
 	// (The original interleaves 1/2 pairs under the send budget
-	// [orig: serialize_entity_states_to_packet @0x50f070]; the retail decode loop
+	// [orig: NetPacket_SerializeEntityStatesToPacket @0x50f070]; the retail decode loop
 	// is tag-driven, so grouped order is read identically.)
 	for (const FrameUpdateRecord &rec : fu.records) {
 		switch (rec.cls) {
@@ -764,8 +767,8 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 }
 
 // (encode_player_spawn — the invented unconditional S2C 0x51 "spawn confirm" — was REMOVED,
-// D-NET-148: the original only sends 0x51 for a pending g_team_change_entity_list entry
-// [orig: NapiNPServerMsg_0x029 @0x514F10 -> write_entity_packet @0x506bb0], and the client
+// D-NET-148: the original only sends 0x51 for a pending g_TeamChangeEntityList entry
+// [orig: NapiNPServerMsg_0x029 @0x514F10 -> NetPacket_WriteEntityPacket @0x506bb0], and the client
 // FIELD-PARSES it (NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 rebinds CharacterEntity from
 // the packed char id) — a zeroed id re-bound the joiner to a vehicle archetype: the DBuggy1
 // shadow. Port the real record from @0x506bb0 when the team-change flow lands.)
@@ -774,7 +777,7 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 // @0x42FAE0 (read)] — round-trips through decode_player_list. Byte 0 is a FLAGS byte (bit0
 // team-mode, bit1 timed-scores — the old `max` reading was a misnomer); the trailer carries
 // the LIVE [inGameCount][spectatorCount] pair. The HUD "Number of players" = accepted rows −
-// spectatorCount (g_scoreboard_row_count − g_scoreboard_spectator_count) — a hardcoded trailer pinned
+// spectatorCount (g_ScoreboardRowCount − g_ScoreboardSpectatorCount) — a hardcoded trailer pinned
 // every client's count at 2 (the v31 HUD-count defect, D-NET-158). Rows are accepted only for
 // 0x46-known slots; bit0 of each row and the trailer count identify live spectators.
 std::vector<uint8_t> encode_player_list(const PlayerListFrame &frame) {
@@ -867,7 +870,7 @@ std::vector<uint8_t> encode_end_round_stats(const EndRoundStats &stats) {
 	}
 
 	// The trailing matrix writes every word each row carries (the producer
-	// fills g_scoreTeamCount CONFIGURED columns per row), not the declared
+	// fills g_ScoreTeamCount CONFIGURED columns per row), not the declared
 	// active count the player rows are gated on. The retail client reads the
 	// declared count per row (decode_end_round_stats), so rows after row 0
 	// misalign whenever a configured column is inactive; that asymmetry is
@@ -1083,7 +1086,7 @@ std::vector<uint8_t> encode_objective_notification(const ObjectiveNotification &
 	return out;
 }
 
-// [orig: serialize_entity_with_parent_and_target @0x505810]
+// [orig: NetPacket_SerializeEntityWithParentAndTarget @0x505810]
 std::vector<uint8_t> encode_objective_entity_state(
 		const ObjectiveEntityState &state) {
 	std::vector<uint8_t> out;
@@ -1131,13 +1134,44 @@ std::vector<uint8_t> encode_team_assign(const TeamAssign &assign) {
 	w.u16(assign.entity_handle);
 	w.u8(assign.team);
 	// Both zero for a non-player entity in retail (the Flags & 0x100 gate @0x506b3d);
-	// the caller owns that gate. [orig: write_entity_handle_packet @ 0x506ad0]
+	// the caller owns that gate. [orig: NetPacket_WriteEntityHandlePacket @ 0x506ad0]
 	w.u16(assign.net_id);
 	w.u8(assign.anim_slot);
 	return out;
 }
 
-// [orig: serialize_entity_event_to_buffer @0x5055A0]
+// [orig: NetPacket_WriteEntityPacket @0x506BB0 — the list index first @0x506BCE, then the
+//  0x50 record's own fields in its order]
+std::vector<uint8_t> encode_team_change_confirm(uint16_t index, const TeamAssign &assign) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(index);
+	const std::vector<uint8_t> record = encode_team_assign(assign);
+	out.insert(out.end(), record.begin(), record.end());
+	return out;
+}
+
+// [orig: NetPacket_WritePlayerChainLink @0x5106D0 — the link byte @0x510797, the member
+//  slot @0x5107A4]
+std::vector<uint8_t> encode_squad_join(const SquadJoin &join) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(join.leader);
+	w.u8(join.member);
+	return out;
+}
+
+// [orig: NetPacket_WriteByteAndCString @0x5107B0 — the byte @0x5107CD, then the
+//  string with its terminator]
+std::vector<uint8_t> encode_team_name(const TeamName &name) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(name.index);
+	w.cstr(name.name);
+	return out;
+}
+
+// [orig: NetPacket_SerializeEntityEventToBuffer @0x5055A0]
 std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event) {
     std::vector<uint8_t> out;
     Writer w{out}; w.u8(event.type); w.u8(event.count); w.u16(event.source);
@@ -1146,7 +1180,7 @@ std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event)
     return out;
 }
 
-// [orig: collect_valid_weapon_slots @0x516000 — the leading word is reserved
+// [orig: Server_CollectValidWeaponSlots @0x516000 — the leading word is reserved
 //  @0x51607f, each eligible slot appended @0x5160a9, and the iterator's current
 //  slot stored into the leading word after the loop @0x5160d7]
 std::vector<uint8_t> encode_batch_kill(const BatchKillBatch &page) {
@@ -1168,7 +1202,7 @@ std::vector<uint8_t> encode_burst_loadout_request(const BurstLoadoutRequest &req
 	return out;
 }
 
-// [orig: serialize_minimap_slot @0x5073B0 — `*buf = type` @0x5073dd; types 1/3
+// [orig: NetPacket_SerializeMinimapSlot @0x5073B0 — `*buf = type` @0x5073dd; types 1/3
 //  write the node id @0x50741a then name @0x507440 and tag @0x507470 as
 //  strlen+1 copies; type 2 writes the id only @0x5073fb (5 B); anything else
 //  returns 0 @0x507408 and the caller sends nothing]
@@ -1211,7 +1245,7 @@ std::vector<uint8_t> encode_door_slot_action(const DoorSlotAction &action) {
 	return out;
 }
 
-// [orig: serialize_weapon_overlay_slots_0 @0x5105A0 — the constant 3 @0x5105c3,
+// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0 — the constant 3 @0x5105c3,
 //  per row the type id @0x510660, avail @0x510674, max @0x510681, then the 0 word
 //  @0x5106b8]
 std::vector<uint8_t> encode_vehicle_spawn_availability(const VehicleSpawnAvailabilityList &list) {

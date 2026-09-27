@@ -152,7 +152,7 @@ public:
 			int expected_alignment = -1) const;
 	// Retail's per-side default character: the packed id of the first combo (file
 	// order) whose nationality alignment matches; no match -> the first combo of
-	// all; empty -> 0 [orig: lookup_entity_slot_and_pack_entry @0x57ad40, see docs/playerinfo/avatars-re.md].
+	// all; empty -> 0 [orig: EntitySlot_LookupAndPackEntry @0x57ad40, see docs/playerinfo/avatars-re.md].
 	int first_character_id(int alignment) const;
 	// The joiner's profile-to-wire projection (runtime/inmatch/
 	// join_character_profile.h): `selection` is the PLAYER_INFO profile shape

@@ -20,12 +20,15 @@
 #include <formats/mission/mission.h>
 
 #include <net/npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
+#include <net/npwire/ingame_encode.h> // encode_pool_spawn_batch
+#include <runtime/replication/entity_wire_bridge.h> // build_pool1_spawn_batch
 
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <iterator>
@@ -611,6 +614,227 @@ int main_impl() {
 	std::printf("OK\n");
 	return 0;
 }
+
+// The S2C 0x0D Flags field is the entity's live dword, raw: every vehicle
+// carries the REFLECTABLE 0x400 its init sets (the port's ItemDefType-1
+// trait), so its record always emits field 0x20, while a non-vehicle with a
+// clear dword keeps the gate clear. The live values are the retail load
+// stream's own (fixtures/novaworld/run_20260426_120859/server_load_packets.nwmsg):
+// 0x20400 for a vehicle whose motor has run, 0x406 for a wreck.
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503ae1..0x503aed;
+//  Entity_InitFromModel @0x40e204..0x40e20a]
+int pool1_flags_field_impl() {
+	w::World world;
+	world.registry.configure_pool(1, 8);
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 0x004A; // the capture's d_buggy
+	vehicle.item_type = 1;
+	const w::EntityHandle vehicle_h = world.registry.spawn(1, vehicle);
+	w::Entity crate;
+	crate.kind = w::EntityKind::Item;
+	crate.item_id = 0x050E;
+	const w::EntityHandle crate_h = world.registry.spawn(1, crate);
+	const auto record_of = [&](w::EntityHandle h, opennova::PoolSpawnRecord &out) {
+		const std::vector<uint8_t> wire =
+				opennova::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
+		opennova::PoolSpawnBatch decoded;
+		if (!opennova::decode_pool_spawn_batch(wire.data(), wire.size(), decoded)) return false;
+		for (const opennova::PoolSpawnRecord &r : decoded.records)
+			if (r.slot_id == h.packed) {
+				out = r;
+				return true;
+			}
+		return false;
+	};
+	opennova::PoolSpawnRecord rec;
+	if (!expect(vehicle_h.valid() && crate_h.valid() && record_of(vehicle_h, rec),
+	            "the pool-1 vehicle round-trips through 0x0D")) return 1;
+	if (!expect((rec.spawn_flags & opennova::kPoolSpawnHasEntityFlags) != 0 &&
+	                    rec.entity_flags == 0x00000400u,
+	            "a vehicle with a clear dword emits field 0x20 carrying 0x400")) return 1;
+	if (!expect(record_of(crate_h, rec) &&
+	                    (rec.spawn_flags & opennova::kPoolSpawnHasEntityFlags) == 0 &&
+	                    rec.entity_flags == 0u,
+	            "a non-vehicle with a clear dword keeps field 0x20 absent")) return 1;
+	// The motor sets the matrix bit every tick it runs (homed on engine_flags).
+	world.registry.get(vehicle_h)->engine_flags |= w::kEntityFlagMatrixBuilt;
+	if (!expect(record_of(vehicle_h, rec) && rec.entity_flags == 0x00020400u,
+	            "a live vehicle streams its matrix bit too: 0x20400")) return 1;
+	// A wreck holds the kill bits in both halves.
+	w::Entity *wreck = world.registry.get(vehicle_h);
+	wreck->flags = w::kEntityFlagDead | w::kEntityFlagHusk;
+	wreck->engine_flags = w::kEntityFlagDead | w::kEntityFlagHusk;
+	if (!expect(record_of(vehicle_h, rec) && rec.entity_flags == 0x00000406u,
+	            "a wreck streams its kill bits: 0x406")) return 1;
+	std::printf("PASS pool1_flags_field\n");
+	return 0;
+}
+
+std::vector<uint8_t> hex_bytes(const char *hex) {
+	std::vector<uint8_t> out;
+	const auto nibble = [](char c) {
+		return static_cast<uint8_t>(c <= '9' ? c - '0' : (c | 0x20) - 'a' + 10);
+	};
+	for (; hex[0] != '\0' && hex[1] != '\0'; hex += 2)
+		out.push_back(static_cast<uint8_t>((nibble(hex[0]) << 4) | nibble(hex[1])));
+	return out;
+}
+
+// Two retail 0x0D item records of the committed load stream
+// (fixtures/novaworld/run_20260426_120859/server_load_packets.nwmsg line 203, slots
+// 0x1046 and 0x1048), rebuilt byte for byte from entity state holding retail's values:
+// the live Flags dword (the matrix bit an object def's init sets), the entity+290
+// byte, the placement heading and no AIData name. Then a whole live retail vehicle
+// record (line 191, slot 0x101F), with the AI trailer's spawn x/y a vehicle that drove
+// away keeps streaming.
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940 — name @0x503A64..0x503ADF, Flags
+//  @0x503AE1, byte @0x503D27..0x503D38, trailer @0x503D3D..0x503DAB, brain byte
+//  @0x503E7F..0x503EC0; Entity_InitFromModel @0x40E10C..0x40E11E;
+//  Entity_SpawnFromBMSRecord @0x40ED80/@0x40ED8C]
+int pool1_fixture_bytes_impl() {
+	w::World world;
+	world.registry.configure_pool(1, 0x50);
+	const auto place = [&](int slot, w::Entity item) {
+		return world.registry.spawn_at(w::EntityHandle::make(1, slot), item);
+	};
+	w::Entity item;
+	item.kind = w::EntityKind::Item;
+	item.item_id = 0x00BF;
+	item.has_item_def = true;
+	item.item_type = 6;                         // an object def: no REFLECTABLE
+	item.engine_flags = w::kEntityFlagMatrixBuilt; // its init's matrix bit 0x20000
+	item.name = "never streamed";               // not an AIData def
+	item.position = {1058.0f, 592.0f, 60.0f};
+	item.yaw = 60;                              // heading 30 deg: 0x15550000
+	item.ammo_count = 0xFF;
+	if (!expect(place(0x46, item).valid(), "item 0x1046 spawns")) return 1;
+	item.position = {992.0f, -489.0f, static_cast<float>(0x00451200) / 65536.0f};
+	item.yaw = 0;                               // heading 90 deg: 0x40000000
+	item.ammo_count = 0x00;
+	if (!expect(place(0x48, item).valid(), "item 0x1048 spawns")) return 1;
+	const std::vector<uint8_t> wire =
+			opennova::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
+	const std::vector<uint8_t> want = hex_bytes(
+			"0200"
+			"21004610bf000000000200000022040000500200003c0000005515ff"
+			"21004810bf0000000002000000e003000017fe001245000000004000");
+	if (!expect(wire == want, "the two retail item records rebuild byte for byte")) return 1;
+
+	// A live retail d_buggy, whole record (line 191, slot 0x101F): its Flags
+	// 0x20400 (the mover's matrix bit plus REFLECTABLE), heading 270 deg, team 2,
+	// one empty passenger seat, the 0xFF byte, the AI trailer with its spawn x/y
+	// and ai_textfile "d_buggy", and the brain byte 0x00 — every one of them
+	// present exactly as retail gates it.
+	w::World vworld;
+	vworld.registry.configure_pool(1, 0x20);
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 0x004A;
+	vehicle.has_item_def = true;
+	vehicle.item_type = 1;
+	vehicle.item_attrib = w::kItemAttribAIData;
+	vehicle.is_ai_capable = true;
+	vehicle.engine_flags = w::kEntityFlagMatrixBuilt; // its mover's per-tick bit
+	vehicle.ammo_count = 0xFF;
+	vehicle.position = {989.0f, 578.0f, static_cast<float>(0x003C032C) / 65536.0f};
+	vehicle.spawn_position = vehicle.position;
+	vehicle.yaw = 180; // engine heading 270 deg: 0xC0000000
+	vehicle.team = 2;
+	w::Seat passenger;
+	passenger.type = w::SeatType::Passenger;
+	passenger.retail_slot = 0;
+	vehicle.seats.push_back(passenger);
+	vehicle.ai_text_file = "d_buggy";
+	const w::EntityHandle vh = vworld.registry.spawn_at(w::EntityHandle::make(1, 0x1F), vehicle);
+	if (!expect(vh.valid(), "the vehicle spawns")) return 1;
+	vworld.ai.attach(vh); // the vehicle brain (entity+0x64): a parked hull's byte 0x00
+	const std::vector<uint8_t> vwire =
+			opennova::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(vworld));
+	const std::vector<uint8_t> vwant = hex_bytes(
+			"0100"
+			"311c1f104a0000000402000000dd03000042022c033c00000000c00201ffffffffffffff"
+			"0000dd0300004202645f62756767790000");
+	if (!expect(vwire == vwant, "the retail vehicle record rebuilds byte for byte")) return 1;
+	// Driven away, it still streams where it spawned in the trailer.
+	vworld.registry.get(vh)->position = {1100.0f, -600.0f, 61.0f};
+	opennova::PoolSpawnBatch decoded;
+	const std::vector<uint8_t> moved =
+			opennova::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(vworld));
+	if (!expect(opennova::decode_pool_spawn_batch(moved.data(), moved.size(), decoded) &&
+	                    decoded.records.size() == 1 && decoded.records[0].pos_x == 1100 * 65536 &&
+	                    decoded.records[0].ai_profile_1 == 0x03DD0000u &&
+	                    decoded.records[0].ai_profile_2 == 0x02420000u,
+	            "the trailer keeps the spawn x/y after the vehicle moved")) return 1;
+
+	// A retail tank's second addeweap child (line 206, slot 0x1058, type 0xB6 on the
+	// M1A1 at 0x102A): its own matrix bit only (the carrier's Flags were copied
+	// before the carrier's init set REFLECTABLE), the turret's live attitude, team
+	// 1, the carrier as its target, the zero byte, the carrier's refNum 1 and its
+	// slot index 1 as subType. The position is float-exact near the record's.
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940; Entity_SpawnWeaponOverlays
+	//  refNum @0x40F3B1, Flags @0x40F404, subType @0x40F40E]
+	w::World cworld;
+	cworld.registry.configure_pool(1, 0x60);
+	w::Entity tank;
+	tank.kind = w::EntityKind::Item;
+	tank.item_id = 0x00A4;
+	const w::EntityHandle tank_h = cworld.registry.spawn_at(w::EntityHandle::make(1, 0x2A), tank);
+	w::Entity gun;
+	gun.kind = w::EntityKind::Item;
+	gun.item_id = 0x00B6;
+	gun.has_item_def = true;
+	gun.item_type = 6;
+	gun.engine_flags = w::kEntityFlagMatrixBuilt;
+	gun.position = {1148.75f, -278.5f, 75.0f};
+	gun.veh.yaw_seeded = true;
+	gun.veh.yaw_bam = 0x7FFF0090;
+	gun.veh.air_pitch_bam = 0x044E02FB;
+	gun.veh.air_roll_bam = 0x03E2D951;
+	gun.team = 1;
+	gun.ground_target = tank_h;
+	gun.ref_num = 1;
+	gun.sub_type = 1;
+	const w::EntityHandle gun_h = cworld.registry.spawn_at(w::EntityHandle::make(1, 0x58), gun);
+	if (!expect(tank_h.valid() && gun_h.valid(), "the tank and its gun spawn")) return 1;
+	opennova::PoolSpawnBatch children = ns::build_pool1_spawn_batch(cworld);
+	children.records.erase(std::remove_if(children.records.begin(), children.records.end(),
+			[&](const opennova::PoolSpawnRecord &r) { return r.slot_id != gun_h.packed; }),
+			children.records.end());
+	const std::vector<uint8_t> cwire = opennova::encode_pool_spawn_batch(children);
+	const std::vector<uint8_t> cwant = hex_bytes(
+			"0100"
+			"f7025810b600000000020000c07c040080e9fe00004b00"
+			"9000ff7ffb024e0451d9e203012a10000101");
+	if (!expect(cwire == cwant, "the retail child record's layout rebuilds byte for byte")) return 1;
+
+	// The 0x10 static record streams the same live dword: the runtime word joins
+	// the spawn-composed one. [orig: NetPacket_SerializePool2StaticToBuffer @0x5044E6]
+	w::World sworld;
+	sworld.registry.configure_pool(2, 4);
+	w::Entity building;
+	building.kind = w::EntityKind::Building;
+	building.item_id = 0x0057;
+	// Indestructible and its init's matrix bit, spawn-composed; the kill
+	// bits in the runtime word.
+	building.engine_flags = 0x04000000u | w::kEntityFlagMatrixBuilt;
+	building.flags = w::kEntityFlagDead | w::kEntityFlagHusk;
+	sworld.registry.spawn(2, building);
+	const std::vector<uint8_t> swire =
+			opennova::encode_static_entity_batch(ns::build_pool2_static_batch(sworld));
+	opennova::StaticEntityBatch statics;
+	if (!expect(opennova::decode_static_entity_batch(swire.data(), swire.size(), statics) &&
+	                    statics.records.size() == 1 &&
+	                    statics.records[0].entity_flags == 0x04020006u,
+	            "the 0x10 Flags field is the whole live dword")) return 1;
+	std::printf("PASS pool1_fixture_bytes\n");
+	return 0;
+}
 } // namespace
 
-int main() { return main_impl(); }
+int main() {
+	const int burst = main_impl();
+	const int flags = pool1_flags_field_impl();
+	const int bytes = pool1_fixture_bytes_impl();
+	return burst != 0 ? burst : (flags != 0 ? flags : bytes);
+}

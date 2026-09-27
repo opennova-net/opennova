@@ -245,11 +245,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.s38 = e.slot.f[38];
 	d.fires_aimed = e.inf.dbg_fires_aimed;
 	d.fires_body = e.inf.dbg_fires_body;
-	// The fall-through instrument: the sim's own ground value under this body
-	// and whether it is airborne (a body whose ground sits far below it every
-	// tick falls forever).
-	d.ground_cache = e.inf.ground_cache;
-	d.ground_valid = e.inf.ground_cache_valid;
+	// Whether the body is airborne (the fall-through instrument).
 	d.airborne = e.inf.airborne;
 	d.anim_state = e.inf.active ? e.inf.anim_state : -1;
 	d.anim_key = e.inf.active ? infantry_anim_key(e.inf.anim_state) : std::string();

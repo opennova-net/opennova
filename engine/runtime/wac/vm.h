@@ -63,7 +63,7 @@ public:
     // (about once per second), never the bytecode run itself, and scripts may
     // also write it through Ticks. Temporal commands and shared script
     // admission read this same clock, not engine ticks or diagnostic execution
-    // counts. [orig: wac_var_ticks @0xC6EAD8; WacScript_AdvanceTick @0x4F81D3
+    // counts. [orig: g_WacVarTicks @0xC6EAD8; WacScript_AdvanceTick @0x4F81D3
     // and WacScript_InitAndLoad @0x4F9770 increment it after their calls]
     uint32_t time() const { return time_; }
     void advance_time() { ++time_; }
@@ -85,7 +85,7 @@ private:
     uint32_t rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b — mov dword_C6EA40, 0x12333333]
     int32_t acc_ = 0;
     int cur_event_ = 0;
-    uint32_t time_ = 0; // [orig: wac_var_ticks]
+    uint32_t time_ = 0; // [orig: g_WacVarTicks]
     uint64_t dispatch_count_ = 0;
     std::vector<uint16_t> entity_bindings_;
     uint32_t auto_item_ = 0xFFFF; // mutable DWORD; entity selection changes only LOWORD

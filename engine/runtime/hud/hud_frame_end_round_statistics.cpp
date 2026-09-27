@@ -8,7 +8,7 @@
 //  HUD_DrawLabelBox(ctx, 128, top, 896, top + 340, SCORE_TITLE, -1) @0x5b7671,
 //  labels left at x 200 via HUD_DrawTextLeftScaled (ex sub_580B40) -> HUD_DrawTextLeft_HalfBright, values
 //  right-aligned at x 620 via HUD_DrawTextRightAlignedScaled (ex sub_580BC0) -> HUD_DrawTextRightAligned_HalfBright,
-//  all in g_hudLabelFontLarge.]
+//  all in g_HUDLabelFontLarge.]
 
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/end_round_statistics.h>
@@ -19,7 +19,7 @@ void HudFrameCompiler::element_end_round_statistics(const HudFrameState &state,
 		float w, float h) {
 	const HudEndRoundStatisticsState &st = state.end_round_statistics;
 	if (!st.shown) return;
-	// Every string rides the LARGE label slot [orig: g_hudLabelFontLarge at
+	// Every string rides the LARGE label slot [orig: g_HUDLabelFontLarge at
 	// every draw @0x5b76a8..0x5b7891]; layout-only embedders fall back.
 	const bool have_large = label_font_large_.font() != nullptr;
 	const bool have_bold = label_font_bold_.font() != nullptr;

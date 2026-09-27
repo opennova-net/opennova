@@ -160,6 +160,14 @@ typedef struct DefAmmoDef {
      * @0x40aeea..0x40af11 atol -> word +0x76; consumer AmmoDef_ProcessImpactEffect
      * @0x40a24e..0x40a264 -> Impact_SpawnGlassEffectsOrScar @0x5cf1b0] */
     int scar_type;                /* word +0x76 */
+    /* The blast's per-victim presentation (appended; layout stability):
+     * 'secondary_effect <name>' and 'kz_sound <set>'. The original resolves
+     * both at parse (the interned effect handle +0x48, the sound-set pointer
+     * +0x4C); we keep the names. [orig: AmmoDef_ParseProperty
+     * @0x40aa15..0x40aa36 / @0x40a92a..0x40a94b; consumer
+     * Projectile_ProcessExplosionQueue @0x4EB1DA..0x4EB292] */
+    char secondary_effect[64];    /* +0x48 */
+    char kz_sound[64];            /* +0x4C */
 } DefAmmoDef;
 
 typedef struct DefAmmoFile {
@@ -332,7 +340,7 @@ typedef struct DefWeaponDef {
     char (*raw_lines)[512];
     size_t raw_lines_count;
     /* PLAYER_INFO loadout fields. [orig: WeaponDef_ParseProperty @ 0x54d730;
-       consumer populate_weapon_slot_lists @ 0x560430]. Appended to keep the leading
+       consumer PlayerInfo_PopulateWeaponSlotLists @ 0x560430]. Appended to keep the leading
        struct offsets (and native layouts) stable. loadout_selectable (+32: a row
        appears only when non-zero), loadout_subclasses (+36: sub-entry expansion
        count), and maxclips (+136) live above with the §5.57 loadout keys. */
@@ -352,7 +360,7 @@ typedef struct DefWeaponDef {
     /* ADS zoom magnification ('scope_max_mag'; the JOX AK-47 ships 2). The scoped
        camera FOV divides the 80-degree default by the clamped zoom
        [orig: Player_ToggleWeaponScope @ 0x4df401 -> 80.0 / Player_GetClampedWeaponElevation
-       @ 0x4dc6b0; g_cameraFovTargetQ16 @ 0x26C6848]. 0 = key absent. */
+       @ 0x4dc6b0; g_CameraFovTargetQ16 @ 0x26C6848]. 0 = key absent. */
     float scope_max_mag;
     /* Third-person body-channel kinds, plain integers, 0 = key absent (rifle).
        special_hold (record +0xA4, read @ 0x4b5dba): 1..8 selects the body hold-pose
@@ -380,7 +388,7 @@ typedef struct DefWeaponDef {
        section AT PARSE and stores the char* at AdmDef+0x3A0; we keep the key and the
        HUD resolves at draw. Empty = key absent -> the STROVER_USEGUN default label.
        [orig: WeaponDefs_ParseLineCallback @ 0x544d6c -> GameText_GetString("overlays",
-       key) -> +0x3A0; consumer draw_vehicle_seat_and_armory_labels @ 0x5a3538]. */
+       key) -> +0x3A0; consumer HUD_DrawVehicleSeatAndArmoryLabels @ 0x5a3538]. */
     char attach_text_id[32];
     /* Per-char-class STARTROUNDS overrides ('classrounds <class> <n>', repeatable).
        Kept at the original's raw table indices: the class token resolves through the
@@ -455,7 +463,7 @@ typedef struct DefWeaponDef {
        `1 100 100 1`, `1 300 300`, `10 100 300 1`.
        [orig: WeaponDefs_ParseLineCallback @ 0x544e8b..0x544efd — stores @ 0x544eac /
         @ 0x544ec1 / @ 0x544ed9, the count gate @ 0x544edf, the fourth store
-        @ 0x544efd; consumers draw_weapon_sight_overlays @ 0x4dcf57..0x4dcff7
+        @ 0x544efd; consumers HUD_DrawWeaponSightOverlays @ 0x4dcf57..0x4dcff7
         (runtime/hud/sight_overlay.h sight_slide_multiplier),
         Weapon_GetScopeZoomLevel @ 0x422ff3] */
     int scope_max_zero_steps;  /* +0x84 */
@@ -527,7 +535,7 @@ typedef enum DefItemType {
    token; particlefx and particlefxw3/w4 never read one. The original copies
    each name unguarded into 32-char slots of the ItemDef+0x278 block; we
    truncate safely. [orig: ItemDef_ParseProperty @ 0x49eb00] */
-// Slot-A runtime attach witness: resolve_item_materials_and_spawn_bone_trails
+// Slot-A runtime attach witness: Game_ResolveItemMaterialsAndSpawnBoneTrails
 // [orig: @ 0x522ee0 -> Entity_SpawnBoneTrailEffect @ 0x43bef0].
 typedef struct DefItemParticleFx {
     char effect[32];
@@ -583,7 +591,7 @@ inline constexpr uint32_t DEF_ITEM_ATTRIB_EASY = 0x00004000u;
    the S&D/A&D objective target, counted per team by the round census and immune to
    same-team blast damage. The IDB types the token string as off_7C84E8; its bytes
    are 53 26 44 00. [orig: ItemDef_ParseProperty @0x4a084e..0x4a086d, token @0x7C84E8;
-   census reset_round_counters @0x516d3d/@0x516d89] */
+   census Server_ResetRoundCounters @0x516d3d/@0x516d89] */
 inline constexpr uint32_t DEF_ITEM_ATTRIB_SD = 0x00008000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_4TEAM = 0x00010000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_CHANGETEAM = 0x00020000u;
@@ -814,7 +822,7 @@ typedef struct DefItemDef {
        (the gun entity's slot-0 weapon; the attach label's text source). Appended
        (layout stability). [orig: ItemDef_ParseProperty -> def+0x54B primaryWeapon
        char[32] (docs/world/itemdef-re.md); consumers: the spawn weapon-slot build and
-       draw_vehicle_seat_and_armory_labels @ 0x5a351d via slot0->def+0x3A0] */
+       HUD_DrawVehicleSeatAndArmoryLabels @ 0x5a351d via slot0->def+0x3A0] */
     char primary_weapon[32];
     /* --- The destruction/husk block (docs/world/world-wac-ai-re.md §24). Appended
        (layout stability). [orig: ItemDef_ParseProperty @ 0x49eb00] --- */
@@ -1029,7 +1037,7 @@ typedef struct DefHudPosDef {
     /* The spinmap waypoint-distance-label SUPPRESSOR. 0 when unauthored —
        the retail global is BSS-zero, so the label draws by default; an
        authored NONZERO value suppresses it. [orig: HUD_ParseHudposToken
-       @0x59F370 -> g_spinmapWpDistLabelOff @0x27237C0 (.data, no file
+       @0x59F370 -> g_SpinmapWpDistLabelOff @0x27237C0 (.data, no file
        bytes); sole read @0x5a7a6a] */
     int spinmap_wp_dist_off;
 
@@ -1037,7 +1045,7 @@ typedef struct DefHudPosDef {
        x, y, hidden (0 = draw; the element draws only when this is 0), then the
        alignment word (left=0/right=1/center=2). [orig: AMMOCOUNTPOS parse
        @0x59fc3d writes x/y/hidden/align to 0x27235FC/600/604/608; the draw gates
-       on the hidden dword, hud_draw_weapon_ammo_and_name @0x5939d0] */
+       on the hidden dword, HUD_DrawWeaponAmmoAndName @0x5939d0] */
     int flag_carrier[4];
     int game_info[4];
     int wpd_info[4];
@@ -1050,7 +1058,12 @@ typedef struct DefHudPosDef {
     int weapon_name_pos[4];
     int map_coords[4];
     int time_clock[4];
-    int breath_time[4];
+    /* BREATHTIME is the one positioned token with THREE fields: x, y, then
+       the alignment word (left=0/right=1/center=2) as the third; there is no
+       hidden dword (JO authors `BREATHTIME 512,70,center`). [orig:
+       HUD_ParseHudposToken @0x59FB3B..0x59FB84 -> dword_2723810/14/18 via
+       atof, atof, HUD_ParseTextAlignment] */
+    int breath_time[3];
 
     int title_x, title_y;
     int ping_x, ping_y;
@@ -1154,15 +1167,15 @@ int def_parse_hudpos(const char *path, DefHudPosFile *out);
 int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out);
 void def_free_hudpos(DefHudPosFile *f);
 
-/* PLAYER_INFO loadout weight + encumbrance [orig: calculate_loadout_weight
-   @ 0x55f1f0; update_player_info_weight_and_weapon_icons @ 0x55f480]. */
+/* PLAYER_INFO loadout weight + encumbrance [orig: PlayerInfo_CalculateLoadoutWeight
+   @ 0x55f1f0; PlayerInfo_UpdateWeightAndWeaponIcons @ 0x55f480]. */
 typedef enum DefEncumbrance {
     DEF_ENCUMBRANCE_LIGHT = 0,
     DEF_ENCUMBRANCE_NORMAL = 1,
     DEF_ENCUMBRANCE_HEAVY = 2,
 } DefEncumbrance;
 
-/* Total loadout weight over a set of equipped weapons [orig: calculate_loadout_weight
+/* Total loadout weight over a set of equipped weapons [orig: PlayerInfo_CalculateLoadoutWeight
    @ 0x55f1f0]. Per weapon: weaponweight (+120) plus its ammo weight —
    (ammo_count > 0 ? ammo_count : maxclips) * clipweight (maxclips +136, clipweight
    +140). `ammo_counts[i] <= 0` selects the weapon's default clip count (maxclips),

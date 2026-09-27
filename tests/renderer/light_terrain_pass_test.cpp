@@ -1,12 +1,16 @@
-// The terrain leg of the dynamic light pool: the 0.66 factor, the 0.5 that
-// exists because of the stage-0 doubling, the per-channel factor's default,
-// the two projected-texture scales, the projection contract, the procedural
-// textures, and the per-patch collect + gate + constant build.
-// [orig: Light_SetupTerrainProjectedPass @0x5AA830 (ex render_foliage_instance
-//  — the arg is a Light_InstanceTable slot @0x5AA857); the literals @0x7D3E68 /
-//  @0x7C3618; the scale @0x5AA864..0x5AA873; render_terrain_sector_batch
+// The terrain leg of the dynamic light pool: the served ps.1.1 pass's unfolded
+// c0 and its cube-normalize lookup, the fixed-function pass's 0.66 factor and
+// the 0.5 that exists because of its stage-0 doubling, the per-channel
+// factor's default, the two projected-texture scales, the projection
+// contract, the procedural textures, and the per-patch collect + gate +
+// constant build.
+// [orig: Light_SetupTerrainProjectedPassPS @0x5aab30;
+//  Light_SetupTerrainProjectedPass @0x5AA830 (ex render_foliage_instance
+//  — the arg is a g_LightInstanceTable slot @0x5AA857); the literals @0x7D3E68 /
+//  @0x7C3618; the scale @0x5AA864..0x5AA873; Terrain_RenderSectorBatch
 //  @0x6095f9..0x6098bc; Lighting_InitTextures @0x5A94F0;
-//  Texture_GenerateProceduralFalloffTexture @0x5A92C0]
+//  Texture_GenerateProceduralFalloffTexture @0x5A92C0;
+//  GTexture_GenerateNormalMapCubeMap @0x685570]
 
 #include <runtime/renderer/light_terrain_pass.h>
 
@@ -71,6 +75,75 @@ void test_per_channel_factor_default_is_unity() {
 	CHECK(near(tinted[2], 0.0f), "blue from the low byte");
 }
 
+// THE PS PASS's c0 carries neither the 0.66 nor the 0.5: the ps.1.1 program
+// multiplies it in once [orig: Light_SetupTerrainProjectedPassPS
+// @0x5aad93..0x5aae8c]. The constant register holds [-1, 1].
+void test_ps_constant_is_unfolded() {
+	CHECK(near(terrain_light_ps_constant(1.0f, 1.0f, 1.0f, 1.0f), 1.0f),
+			"a white light at full blend is c0 = 1, not 0.66 or 0.33");
+	CHECK(near(terrain_light_ps_constant(0.5f, 0.5f, 1.0f, 1.0f), 0.25f),
+			"rgb x blend");
+	CHECK(near(terrain_light_ps_constant(0.5f, 1.0f, 2.0f, 0.5f), 0.5f),
+			"x the ambient scale x the recip factor");
+	CHECK(!near(terrain_light_ps_constant(1.0f, 1.0f, 1.0f, 1.0f),
+					terrain_light_ambient(1.0f, 1.0f, 1.0f, 1.0f)),
+			"the two passes' colours are NOT one term");
+	CHECK(near(terrain_light_ps_constant_register(1.75f), 1.0f),
+			"a c0 above one reads as one");
+	CHECK(near(terrain_light_ps_constant_register(-3.0f), -1.0f),
+			"and below minus one as minus one");
+	CHECK(near(terrain_light_ps_constant_register(0.3f), 0.3f),
+			"inside the range it is untouched");
+}
+
+// THE CUBE LOOKUP: (light - point) in D3D (z, x, y) order, i.e. mission
+// (x, -y, z) [orig: Light_SetupTerrainProjectedPassPS @0x5aab99..0x5aaca5].
+void test_cube_vector() {
+	const std::array<float, 3> light = {10.0f, 20.0f, 5.0f};
+	std::array<float, 3> v = terrain_light_cube_vector({10.0f, 20.0f, 1.0f}, light, 0.5f);
+	CHECK(near(v[0], 0.0f) && near(v[1], 0.0f) && near(v[2], 2.0f),
+			"a light straight above looks up the +Z (third) axis");
+	v = terrain_light_cube_vector({6.0f, 20.0f, 5.0f}, light, 0.5f);
+	CHECK(near(v[0], 2.0f) && near(v[1], 0.0f) && near(v[2], 0.0f),
+			"a light to the east (+mission x) looks up +X");
+	v = terrain_light_cube_vector({10.0f, 16.0f, 5.0f}, light, 0.5f);
+	CHECK(near(v[0], 0.0f) && near(v[1], -2.0f) && near(v[2], 0.0f),
+			"a light to the north (+mission y) looks up -Y: d3d.x = -mission.y");
+}
+
+// THE CUBE-NORMALIZE MAP: C + U * rt + (C x U) * ct per face, normalized,
+// trunc(n * 127.5 + 128) [orig: GTexture_GenerateNormalMapCubeMap
+// @0x685570]. Face centres are the six axes; the texel grid starts on the
+// face edge (rt, ct = 1 at row, col 0), and the faces carry the D3D
+// orientation (+X: column 0 is +Z, row 0 is +Y).
+void test_cube_normalize_texels() {
+	CHECK(kCubeNormalizeSize == 256 && kCubeNormalizeFaces == 6,
+			"the top object-detail setting builds 256-square faces");
+	const int s = kCubeNormalizeSize;
+	CHECK(cube_normalize_texel_argb(0, 128, 128, s) == 0xFFFF8080u, "+X centre");
+	CHECK(cube_normalize_texel_argb(1, 128, 128, s) == 0xFF008080u,
+			"-X centre (-1 * 127.5 + 128 truncates to 0)");
+	CHECK(cube_normalize_texel_argb(2, 128, 128, s) == 0xFF80FF80u, "+Y centre");
+	CHECK(cube_normalize_texel_argb(3, 128, 128, s) == 0xFF800080u, "-Y centre");
+	CHECK(cube_normalize_texel_argb(4, 128, 128, s) == 0xFF8080FFu, "+Z centre");
+	CHECK(cube_normalize_texel_argb(5, 128, 128, s) == 0xFF808000u, "-Z centre");
+	CHECK(cube_normalize_texel_argb(0, 0, 0, s) == 0xFFC9C9C9u,
+			"+X corner texel is the (1, 1, 1) diagonal");
+	CHECK(cube_normalize_texel_argb(0, 0, 128, s) == 0xFFDA80DAu,
+			"+X column 0 leans to +Z");
+	CHECK(cube_normalize_texel_argb(2, 128, 0, s) == 0xFF80DA25u,
+			"+Y row 0 leans to -Z");
+	CHECK(cube_normalize_texel_argb(3, 128, 0, s) == 0xFF8025DAu,
+			"-Y row 0 leans to +Z");
+	CHECK(cube_normalize_texel_argb(5, 0, 128, s) == 0xFFDA8025u,
+			"-Z column 0 leans to +X");
+	CHECK(cube_normalize_texel_argb(0, 255, 255, s) == 0xFFC93636u,
+			"the last texel stops one texel short of the far edge");
+	CHECK(cube_normalize_texel_argb(4, 127, 127, s) == 0xFF7F80FFu,
+			"a near-centre texel truncates asymmetrically");
+	CHECK(cube_normalize_texel_argb(6, 0, 0, s) == 0u, "no seventh face");
+}
+
 // The Ambient term composes all four factors, so a non-unity per-channel
 // factor tints it.
 void test_ambient_composition() {
@@ -94,7 +167,7 @@ void test_projection_scale() {
 			"the scale falls as radius grows");
 	CHECK(terrain_project_scale(0.0f) == 0.0f, "a zero radius is inert");
 	CHECK(near(terrain_project_scale(1.0f, true), 0.4f),
-			"the alternate pass is the 0.4 / r form");
+			"the ps.1.1 pass is the 0.4 / r form");
 	CHECK(terrain_project_scale(1.0f, true) < terrain_project_scale(1.0f),
 			"the two passes are NOT one scale");
 	CHECK(kLightFlagNoTerrain == 0x400u, "flag 1024 keeps a light off the terrain");
@@ -126,7 +199,7 @@ void test_projection_uv() {
 	CHECK(near(uv.u, 1.0f) && near(uv.v, 0.5f), "+r up -> strip u = 1, v stays 0.5");
 	uv = terrain_light_uv_height({10.0f, 20.0f, 1.0f}, light, inv);
 	CHECK(near(uv.u, 0.25f), "half a radius below -> u = 0.25");
-	// The alt pass stretches the same offset to fewer texels.
+	// The ps.1.1 pass stretches the same offset to fewer texels.
 	uv = terrain_light_uv_disc({18.0f, 20.0f, 5.0f}, light, terrain_project_scale(8.0f, true));
 	CHECK(near(uv.v, 0.9f), "the 0.4/r pass lands +r at v = 0.9");
 }
@@ -242,17 +315,35 @@ void test_patch_rows() {
 						near(row.pixel_rgb[2], expected),
 				"pixel constants = rgb/256 * 0.66 * 0.5");
 	}
-	// The alt pass and the two factor triples reach the row.
-	inputs.alt_pass = true;
+	// The two factor triples reach the fixed-function row.
 	inputs.ambient_scale = {2.0f, 1.0f, 1.0f};
 	inputs.terrain_factor = {1.0f, 0.5f, 1.0f};
 	scene.collect_terrain_pass_rows(&patch, 1, inputs, &rows);
-	CHECK(rows.count == 1 && near(rows.rows[0].inv_scale, 0.4f / 8.0f),
-			"the alt pass publishes 0.4 / radius");
+	CHECK(rows.count == 1 && near(rows.rows[0].inv_scale, 0.5f / 8.0f),
+			"the fixed-function pass publishes 0.5 / radius");
 	CHECK(near(rows.rows[0].pixel_rgb[0], rows.rows[0].pixel_rgb[2] * 2.0f),
 			"the ambient scale multiplies per channel");
 	CHECK(near(rows.rows[0].pixel_rgb[1], rows.rows[0].pixel_rgb[2] * 0.5f),
 			"the recip factor multiplies per channel");
+	// The ps.1.1 pass: 0.4 / radius and c0 without the 0.66 and the 0.5,
+	// read through the ps_1_x constant range [orig:
+	// Light_SetupTerrainProjectedPassPS @0x5aab76, @0x5aad93..0x5aae8c].
+	inputs.ps_light_pass = true;
+	scene.collect_terrain_pass_rows(&patch, 1, inputs, &rows);
+	CHECK(rows.count == 1 && near(rows.rows[0].inv_scale, 0.4f / 8.0f),
+			"the ps.1.1 pass publishes 0.4 / radius");
+	CHECK(near(rows.rows[0].pixel_rgb[0], 1.0f),
+			"255/256 x ambient 2 = 1.99 reads as the clamped constant 1");
+	CHECK(near(rows.rows[0].pixel_rgb[1], (255.0f / 256.0f) * 0.5f),
+			"the recip factor multiplies c0 with no fold");
+	CHECK(near(rows.rows[0].pixel_rgb[2], 255.0f / 256.0f),
+			"a unit factor leaves c0 = rgb / 256");
+	inputs = TerrainLightPassInputs{};
+	inputs.ps_light_pass = true;
+	scene.collect_terrain_pass_rows(&patch, 1, inputs, &rows);
+	CHECK(rows.count == 1 && near(rows.rows[0].pixel_rgb[0], 255.0f / 256.0f) &&
+					near(rows.rows[0].pixel_rgb[1], 255.0f / 256.0f),
+			"the default inputs publish c0 = rgb / 256 on every channel");
 	inputs = TerrainLightPassInputs{};
 
 	// A patch the light does not overlap collects nothing.
@@ -322,7 +413,7 @@ void test_patch_rows() {
 // A lit batch's pixel is the pool multiplied by twice the saturated doubled
 // page colour (the DESTCOLOR/SRCCOLOR page pass), unfogged, plus the fogged
 // ordinary pass: dark ground keeps a light dim, bright ground doubles it, and
-// the fog never reaches the light term. [orig: render_terrain_sector_batch
+// the fog never reaches the light term. [orig: Terrain_RenderSectorBatch
 // @0x60984C..0x609AB6]
 void test_pool_composite() {
 	// A mid-grey page (0.25) passes the pool unchanged: 2 * sat(0.5) = 1.
@@ -354,6 +445,9 @@ void test_pool_composite() {
 
 int main() {
 	test_pool_composite();
+	test_ps_constant_is_unfolded();
+	test_cube_vector();
+	test_cube_normalize_texels();
 	test_the_half_is_undone_by_modulate2x();
 	test_published_scales_with_inputs();
 	test_per_channel_factor_default_is_unity();

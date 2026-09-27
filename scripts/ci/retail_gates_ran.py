@@ -36,8 +36,11 @@ MUST_RUN = {
         "rtxt_jo_install_sweep", "env_jo_install", "bink_retail", "sbf_jo_install_sweep",
         "mission_ai_path_conformance", "truck_dismount", "ai_threat", "ladder_00tra",
         "truck_rest_00tra", "ai_muzzle_pose", "vehicle_ride_00tra", "defense_00trg",
-        "training_gameplay",
-        "lose_flow_04tr", "lose_flow_00tra", "particle_gore_set_catalog", "minefield_retail", "watercraft_02tr",
+        "training_gameplay", "buggy_01tr", "fire_hold_01tr",
+        "lose_flow_04tr", "lose_flow_00tra", "lose_flow_04tr_self_kill", "lose_flow_05tr_self_kill",
+        "particle_gore_set_catalog", "minefield_retail", "watercraft_02tr",
+        # The shipped Scrate1.3di the packed set serves (base mount or an expansion).
+        "threedi_retail_material_facts",
         # Served by the install (00TRg through revx02) or by the extracted tree.
         "npruntime_authored_payload_00trg",
     ],
@@ -47,17 +50,18 @@ MUST_RUN = {
         "ai_corpse", "parachute_09tr", "rock_collision_00trg", "soak_00trg", "native_assets_00trg",
         "npruntime_remote_body_state", "npruntime_held_weapon_attach",
         "npruntime_authored_payload_00trg",
-        # The shipped .bms missions loose at the tree's root.
-        "mission_corpus",
+        # The shipped .bms missions loose at the tree's root (06TR: the packed
+        # install serves it only when its base mount carries it).
+        "mission_corpus", "motorcycle_gravity_06tr",
         # The shipped models through `opennova-3di` scene -> build -> compare.
         "threedi_o3d_retail_roundtrip",
         # The clip sets through `opennova-3di anim` and back, and the same sets
         # played back through the runtime's own loader.
         "anim_o3a_retail_roundtrip", "anim_o3a_runtime_playback",
         # The reference fixture set (<assets>/fixtures/**): the fifteen revx02 menus,
-        # the shipped MP5 rig map, the BINOC rig and its twist.
+        # the shipped MP5 rig map, the BINOC rig and its twist, the ammo table.
         "mnu_compat", "mnu_coverage", "adm_parse", "anim_skeletal_clips_weapon_channel",
-        "def_parse_hudpos",
+        "def_parse_hudpos", "round_debug_trail",
     ],
 }
 
@@ -75,11 +79,13 @@ MIXED = {
         # missing file and passes once any one ran).
         "threedi_o3d_retail_roundtrip", "anim_o3a_retail_roundtrip", "anim_o3a_runtime_playback",
         "def_parse_items", "infantry", "minimap_overlay",
+        # 06TR.bms and G13.trn loose at the tree's root.
+        "trn_config_roundtrip",
         # The reference fixture set (<assets>/fixtures/**) legs.
         "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",
         "avatars_roundtrip", "mus_parse", "mus_compat", "mus_decompile", "mus_roundtrip",
         "mus_names_roundtrip", "mus_entry_roundtrip", "mus_encode_idempotence", "mus_vm",
-        "mns_document", "bad_parse", "anim_sample", "bad_roundtrip", "bad_build",
+        "mns_document", "bad_parse", "anim_sample", "bad_roundtrip", "bad_build", "hud_layout",
         # The shipped weapon.def / ammo.def pins.
         "def_parse_weapons", "def_parse_ammo", "npruntime_weapon_table", "npruntime_handshake_server",
     ],

@@ -1,7 +1,7 @@
 // Retained retail minimap banks: 0x40 routing/refresh/clear/expiry and 0x6B
 // linked markers over the one ClientReplicaPipeline reducer.
-// [orig: MapOverlay_UpdateOrCreateSlot @0x5BEA60; update_minimap_overlay_entity
-// @0x5BEC10; update_map_overlay_timers @0x5BFCE0]
+// [orig: MapOverlay_UpdateOrCreateSlot @0x5BEA60; Minimap_UpdateOverlayEntity
+// @0x5BEC10; MapOverlay_UpdateTimers @0x5BFCE0]
 
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -125,7 +125,7 @@ int main() {
 
 	// The full 32-entry color table is live: index 8 is the witnessed
 	// 0xFF907000, and the alpha-0 tail entries reject the marker.
-	// [orig: g_minimap_overlay_color_table @0x840A10; alpha gate @0x5beb3e]
+	// [orig: g_MinimapOverlayColorTable @0x840A10; alpha gate @0x5beb3e]
 	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
 			zone(entity.handle, 12, 8, 0x40));
 	slot = find_slot(view.state().minimap, entity.handle);
@@ -222,7 +222,7 @@ int main() {
 	// pose with the neutral team color, and the link lives purely on its own
 	// lifetime — the timer walk never consults the entity.
 	// [orig: NapiNPClientMsg_0x06B @0x425573 gate; team read @0x5becb8;
-	//  update_map_overlay_timers @0x5bfd3a..0x5bfe21]
+	//  MapOverlay_UpdateTimers @0x5bfd3a..0x5bfe21]
 	view.apply(opennova::s2c::MINIMAP_OVERLAY,
 			linked_record(0x2044, 5, 6, 0, 3, 1, 12));
 	slot = find_slot(view.state().minimap, 0x2044);

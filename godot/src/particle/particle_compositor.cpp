@@ -1,6 +1,7 @@
 #include "particle/particle_compositor.h"
 #include "particle/particle_convert.h"
 #include "render/rd_fullscreen.h"
+#include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
 #include "util/string_convert.h"
 
@@ -527,29 +528,12 @@ bool ParticleCompositorEffect::Impl::initialize_rd() {
 		return false;
 	}
 
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kVertexShader));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(kFragmentShader));
-	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
-	if (spirv.is_null()) {
-		set_failure("RenderingDevice returned no SPIR-V for the particle shader",
+	Ref<RDShaderSPIRV> spirv;
+	const std::string compile_errors =
+			compile_rd_spirv(rd, kVertexShader, kFragmentShader, spirv);
+	if (!compile_errors.empty()) {
+		set_failure("Particle shader compilation failed: " + compile_errors,
 				"shader_compile_failed");
-		return false;
-	}
-	const String vertex_error = spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_VERTEX);
-	const String fragment_error = spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_FRAGMENT);
-	if (!vertex_error.is_empty() || !fragment_error.is_empty() ||
-			spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-			spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
-		set_failure("Particle shader compilation failed: vertex=" +
-				opennova::to_std(vertex_error) + "; fragment=" +
-				opennova::to_std(fragment_error), "shader_compile_failed");
 		return false;
 	}
 	shader = rd->shader_create_from_spirv(spirv, "OpenNova particle compositor");
@@ -668,33 +652,12 @@ bool ParticleCompositorEffect::Impl::ensure_scene_snapshot_shader() {
 		return false;
 	}
 
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kRdFullscreenVertexShader));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(kSceneSnapshotFragmentShader));
-	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
-	if (spirv.is_null()) {
+	Ref<RDShaderSPIRV> spirv;
+	const std::string compile_errors = compile_rd_spirv(rd, kRdFullscreenVertexShader,
+			kSceneSnapshotFragmentShader, spirv);
+	if (!compile_errors.empty()) {
 		scene_snapshot_shader_initialization_failed = true;
-		set_failure("RenderingDevice returned no SPIR-V for the scene-color "
-				"snapshot shader", "scene_snapshot_shader_compile_failed");
-		return false;
-	}
-	const String vertex_error = spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_VERTEX);
-	const String fragment_error = spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_FRAGMENT);
-	if (!vertex_error.is_empty() || !fragment_error.is_empty() ||
-			spirv->get_stage_bytecode(
-					RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-			spirv->get_stage_bytecode(
-					RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
-		scene_snapshot_shader_initialization_failed = true;
-		set_failure("Scene-color snapshot shader compilation failed: vertex=" +
-				opennova::to_std(vertex_error) + "; fragment=" +
-				opennova::to_std(fragment_error),
+		set_failure("Scene-color snapshot shader compilation failed: " + compile_errors,
 				"scene_snapshot_shader_compile_failed");
 		return false;
 	}

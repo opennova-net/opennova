@@ -72,7 +72,7 @@ bool test_layout_and_projection() {
 	if (!expect(!cache.request(page_request(0, 0, 0, 5)).has_value(),
 			"a level outside 0..4 is not a page")) return false;
 
-	// The max-quality Foliage_WindSwayVS path uploads c7/c8 from the packed
+	// The max-quality g_FoliageWindSwayVS path uploads c7/c8 from the packed
 	// page record. After its D3D (Z,Y,X) model transform, those rows reduce to
 	// the same presentation-world projection used by terrain, foliage,
 	// MATCHTERRAIN, and the static-shadow raster.
@@ -206,9 +206,9 @@ bool test_bind() {
 					"the packed source coordinate is part of the identity");
 }
 
-// terrain_tile_cache_lookup walks granularity 32, 64 ... 512 and takes the
+// TerrainTile_CacheLookup walks granularity 32, 64 ... 512 and takes the
 // first resident record in record order whose masked coordinate matches.
-// [orig: terrain_tile_cache_lookup @ 0x6041A4..0x604206]
+// [orig: TerrainTile_CacheLookup @ 0x6041A4..0x604206]
 bool test_lookup_granularity_walk() {
 	TerrainTileCompositionCache cache;
 	cache.begin_frame(0);

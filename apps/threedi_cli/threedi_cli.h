@@ -2,8 +2,10 @@
 // main.cpp. `build` (build.cpp) mints a .3di from .o3d scene text, `scene`
 // (scene.cpp) writes a .3di back out as .o3d for an importer, `info`
 // (info.cpp) prints a model, `compare` (compare.cpp) tells whether two models
-// are the same model, and `catalog` (main.cpp) prints the engine's CTRL
-// register and generator-style tables for a front end.
+// are the same model, and `catalog` (main.cpp) prints the engine's tables a
+// front end offers: the CTRL registers, the generator styles, the shader tags,
+// the anim slot keys and the event trigger bits. The `anim` commands keep
+// their own surface (anim_cli.h).
 #pragma once
 
 #include <array>

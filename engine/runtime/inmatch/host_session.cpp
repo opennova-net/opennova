@@ -502,7 +502,7 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.pending_session_messages.clear();
 	owner.pending_session_datagrams.clear();
 	// Apply the configured 0x0A byte cap to the replication global (the retail
-	// BANDWIDTH command's target [orig: g_entity_send_budget @0xC8FC50]).
+	// BANDWIDTH command's target [orig: g_EntitySendBudget @0xC8FC50]).
 	replication::set_entity_send_budget(
 			static_cast<int>(cfg.config.entity_send_budget));
 	// Select the witnessed §5.0 table row: serve-and-play is mode 3 (host + local client);
@@ -531,7 +531,7 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	if (owner.ctx.world != nullptr) {
 		world::MatchRules match_rules;
 		match_rules.game_type = owner.ctx.config.game_type;
-		// SET GameTime feeds g_respawn_time in retail. The existing host model
+		// SET GameTime feeds g_RespawnTime in retail. The existing host model
 		// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.
 		// [orig: Game_StartMission seed @0x524F66]
 		match_rules.game_time_minutes = owner.ctx.config.respawn_time;
@@ -562,7 +562,7 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribClaymorePref) != 0;
 		// The MP NoTracers rule: bit 0 of the same rules word kills the tracer
 		// visual at round spawn unless the ammo is FORCETRACER; the lobby
-		// publishes its inverse as the "Tracers" key [orig: g_rules_flags
+		// publishes its inverse as the "Tracers" key [orig: g_RulesFlags
 		// @ 0x24D1E34 & 1 at RoundData_SpawnRound @ 0x4ec41f; admin set
 		// @ 0x405c80; Lobby_UpdateServerInfo "Tracers" @ 0x4fee4f]
 		owner.ctx.world->round_sim.no_tracers_rule =

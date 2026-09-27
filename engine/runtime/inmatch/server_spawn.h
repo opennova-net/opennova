@@ -83,6 +83,25 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		world::World &world, bool spectator);
 
+// Retarget an entity's team on the authority. A no-op unless the team
+// changes. A Player with a slot also gets its stats reset (field 35 = 1, the
+// script var at +408 cleared), its score-sound cache and armory cooldown
+// zeroed, its slot team set, its NetId / animSlot re-stamped from the new
+// side's character vars (side A for teams 1/3 or a non-team game), its squad
+// link cleared with S2C 0x71 [0xFF][slot] to its new team and 0x72 [0][""] /
+// [1][""] to itself. In a session every in-match slot then gets S2C 0x50
+// (the identity pair zero for a non-player), and the entity joins the
+// team-change list the C2S 0x29 walk reads. The zone half of retail's callers
+// is world::ZoneCapture's team change (its 0x50 rides the zone event fan).
+// [orig: Server_ChangeEntityTeam @0x518D70 — gates @0x518D84..0x518DAA, team
+//  @0x518DB7, Entity_ValidatePtr @0x518DC5, CPlayerStats_ResetAllArrays
+//  @0x518DD6, slot stores @0x518DDB..0x518DEF, side pick @0x518E27..0x518E71,
+//  NetId / animSlot @0x518E7E / @0x518E8C, Server_SendPlayerStateAndSquad
+//  @0x518B40 (the call @0x518E92), +356 @0x518E9A, 0x50 @0x518EA5..0x518EE1,
+//  CBufferList_AddOrFind @0x518EEC]
+void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
+		world::EntityHandle entity, uint8_t team);
+
 // Apply the C2S 0x51 requests the dispatcher admitted: the retail kill-and-
 // convert — the slot's spectator latch and hide byte, its team cleared, the
 // entity hidden with health 1 and damage disabled, its spawn-wave removal,

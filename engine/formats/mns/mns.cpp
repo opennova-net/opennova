@@ -5,7 +5,7 @@
 
 // [orig: NapiXML_ExpandVariablesInText @0x63a000 — the %VAR% expansion over the table that
 //  Menu_InitShellResources @0x552500 loads via NapiConfigMap_LoadIncludeFile @0x63b970 ->
-//  parse_key_value_buffer @0x639870; docs/mnu/menu-re.md]
+//  NapiConfigMap_ParseKeyValueBuffer @0x639870; docs/mnu/menu-re.md]
 
 #include <algorithm>
 #include <cctype>

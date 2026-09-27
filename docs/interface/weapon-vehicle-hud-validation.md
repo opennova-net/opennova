@@ -14,7 +14,7 @@ were changed. The starting PR revision was `c56ee9b8a`.
 
 The reference checks corrected these earlier interpretations:
 
-- `Render_RadarCompassOverlay @0x5C9740` belongs to **Scoped + FLAGS2 Inset**,
+- `Render_WeaponInsetScene @0x5C9740` (ex `Render_RadarCompassOverlay`) belongs to **Scoped + FLAGS2 Inset**,
   not mortar/base FLAGS `0x200`. The load at `@0x5CA2B1` reads definition
   `+0x0C`. The installed mortars author Sighted, OnlyScoped, UseDesignator,
   2DImpact and ShowImpactDist; they do not author Scoped/Inset.

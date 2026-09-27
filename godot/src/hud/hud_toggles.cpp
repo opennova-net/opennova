@@ -40,7 +40,6 @@ void HudToggles::cycle_showhud() {
 	state_.showhud_flags = opennova::hud::next_showhud_flags(state_.showhud_flags);
 }
 void HudToggles::toggle_objectives() { state_.objectives_visible = !state_.objectives_visible; }
-void HudToggles::close_message_log() { state_.message_log_open = false; }
 
 int HudToggles::get_hud_color_index() const { return state_.hud_color_index; }
 void HudToggles::set_hud_color_index(int p_index) {
@@ -55,7 +54,6 @@ void HudToggles::set_showhud_flags(int p_flags) {
 }
 int HudToggles::get_friendly_tag_mode() const { return static_cast<int>(state_.friendly_tag_mode); }
 bool HudToggles::is_objectives_visible() const { return state_.objectives_visible; }
-void HudToggles::set_objectives_visible(bool p_visible) { state_.objectives_visible = p_visible; }
 bool HudToggles::is_scoreboard_open() const { return state_.scoreboard_open; }
 bool HudToggles::is_message_log_open() const { return state_.message_log_open; }
 bool HudToggles::is_end_round_stats_open() const { return state_.end_round_stats_open; }
@@ -74,7 +72,6 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cycle_hud_detail"), &HudToggles::cycle_hud_detail);
 	ClassDB::bind_method(D_METHOD("cycle_showhud"), &HudToggles::cycle_showhud);
 	ClassDB::bind_method(D_METHOD("toggle_objectives"), &HudToggles::toggle_objectives);
-	ClassDB::bind_method(D_METHOD("close_message_log"), &HudToggles::close_message_log);
 	ClassDB::bind_method(D_METHOD("get_hud_color_index"), &HudToggles::get_hud_color_index);
 	ClassDB::bind_method(D_METHOD("set_hud_color_index", "index"), &HudToggles::set_hud_color_index);
 	ClassDB::bind_method(D_METHOD("get_hud_detail_level"), &HudToggles::get_hud_detail_level);
@@ -83,7 +80,6 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"), &HudToggles::set_showhud_flags);
 	ClassDB::bind_method(D_METHOD("get_friendly_tag_mode"), &HudToggles::get_friendly_tag_mode);
 	ClassDB::bind_method(D_METHOD("is_objectives_visible"), &HudToggles::is_objectives_visible);
-	ClassDB::bind_method(D_METHOD("set_objectives_visible", "visible"), &HudToggles::set_objectives_visible);
 	ClassDB::bind_method(D_METHOD("is_scoreboard_open"), &HudToggles::is_scoreboard_open);
 	ClassDB::bind_method(D_METHOD("is_message_log_open"), &HudToggles::is_message_log_open);
 	ClassDB::bind_method(D_METHOD("is_end_round_stats_open"), &HudToggles::is_end_round_stats_open);

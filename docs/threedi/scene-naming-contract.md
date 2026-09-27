@@ -2,7 +2,7 @@
 
 The NovaLogic ASE/OED object-naming convention: the scene-object names that
 carry a model's 3DI roles. OED classified them by `classify_name`
-([orig: ConvertToInternal @ 0x4268B3], ported in the retired
+([orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)], ported in the retired
 `engine/formats/oed/convert_internal.cpp`); the Blender add-on
 (`tools/blender/opennova_3di`, [ADR 0047](../adr/0047-blender-3di-exporter.md))
 reads them to export and lays a model out by them to import, and a future
@@ -103,7 +103,7 @@ game combines them, but the assembly settings never reach a `.3di`:
   builds it: the direction read mirrored against the position, and the
   look-at matrix's rows as the child's axes, so a level point faces the child
   along it and a pitched one tips it the other way [orig:
-  build_bone_attachment_matrix @ 0x56C630; build_direction_look_at_matrix @
+  Bone_BuildAttachmentMatrix @ 0x56C630; Math_BuildDirectionLookAtMatrix @
   0x612C90].
 - Both settings bind with every rig of the two models at rest, so the pose a
   clip holds when they are set is not baked in.

@@ -95,7 +95,7 @@ struct EmitterEnvironment {
 	const ParticleForceField *forces = nullptr;
 	// GLOBALWIND drift, effect-frame units per second — retail multiplies the
 	// mission wind's per-tick fixed-point vector by 62 into flt_848D40..48 every
-	// tick [orig: render_emitter_effect @ 0x5f70c0 (0x5f7112..0x5f7143)].
+	// tick [orig: Render_EmitterEffect @ 0x5f70c0 (0x5f7112..0x5f7143)].
 	Vec3 global_wind{};
 	// NOVISNOUPDATE gate; null (or !valid) means no visibility state — retail
 	// skips the test while the manager's clip state is unset (+108 == 0).
@@ -178,7 +178,7 @@ struct Emitter {
 	// spawn direction; every other def leaves it zero, and the helper's
 	// `|v|^2 < 0.99` fallback then emits around world +Y
 	// [orig: CEffectEmitter_Initialize @ 0x5e60f9..0x5e612e (flag 0x10000);
-	//  compute_cone_direction_vector @ 0x5e203a / generate_random_direction_basis @ 0x5e23d6].
+	//  CParticleSystem_ComputeConeDirectionVector @ 0x5e203a / CParticleSystem_GenerateRandomDirectionBasis @ 0x5e23d6].
 	Vec3 forward = {0.0f, 0.0f, 0.0f};
 	// The direction the group was spawned/re-oriented with, kept for every def
 	// (retail's group orientation input); reports read this, the simulator
@@ -348,8 +348,9 @@ void emitter_translate(Emitter &e, Vec3 new_pos) noexcept;
 // The mission wind as the particle world sees it: `wind_speed` and
 // `wind_direction` (degrees) from the mission header become a per-tick
 // fixed-point vector, which the effect world converts to its float frame and
-// scales by 62 into units per second [orig: sub_5DE970 @ 0x5de970 (Game_StartMission
-// @ 0x524aff); render_emitter_effect @ 0x5f70c0 @ 0x5f7112..0x5f7143].
+// scales by 62 into units per second [orig: Weather_SetMissionWind @ 0x5de970
+// (from Game_StartMission @ 0x524360, the call @ 0x524aff); Render_EmitterEffect
+// @ 0x5f70c0 @ 0x5f7112..0x5f7143].
 Vec3 mission_wind_vector(int wind_speed, int wind_direction_degrees) noexcept;
 
 } // namespace opennova::particle

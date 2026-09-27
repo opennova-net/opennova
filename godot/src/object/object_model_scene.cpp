@@ -28,8 +28,11 @@ namespace godot {
 
 void ObjectModel::rebuild_scene() {
 	// Every retained child is recreated below: per-instance stamps other
-	// devices hold on this subtree (slot-capture layers) are stale from here.
+	// devices hold on this subtree (slot-capture layers) are stale from here,
+	// and so are the Inset twins over the old meshes (the next reconcile
+	// rebuilds them).
 	++scene_build_serial_;
+	free_view_twins();
 	while (get_child_count() > 0) {
 		Node *child = get_child(0);
 		remove_child(child);
@@ -354,9 +357,17 @@ void ObjectModel::apply_level_surfaces() {
 		instance->set_visible(geometry_visible_);
 		// The level's collector decides the Q3 copy (never a per-vertex
 		// skinned level); the registration follows the material's glow
-		// capability and re-reads the swapped mesh once.
+		// capability and re-reads the swapped mesh once. A rigid strip bound
+		// to the skeleton (the first-person gun) rides the one bone its skin
+		// weights, the part clamped to the rig (renderer::prepare_model_mesh),
+		// so its copy takes that bone's part matrix.
 		if (surface.q3_admitted && geometry_visible_) {
-			FrameFx::register_q3_object_source(instance, surface.material);
+			const int rig_bones = surface.is_skinned && skeleton_ != nullptr
+					? skeleton_->get_bone_count()
+					: 0;
+			FrameFx::register_q3_object_source(instance, surface.material,
+					rig_bones > 0 ? skeleton_ : nullptr,
+					rig_bones > 0 ? std::clamp(surface.robj_index, 0, rig_bones - 1) : -1);
 		} else {
 			FrameFx::unregister_q3_source(instance);
 		}

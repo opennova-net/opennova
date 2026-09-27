@@ -483,7 +483,6 @@ void test_parser_roundtrip() {
 	       "parse_server_hello succeeds");
 	expect(sh_parsed.hk == 0xABAD1DEAu, "parse_server_hello recovers hk");
 	expect(sh_parsed.ci == 0x11223344u, "parse_server_hello recovers ci");
-	expect(sh_parsed.pl.empty(), "parse_server_hello leaves absent PL empty");
 
 	ClientAuth ca;
 	ca.ci = 0x11223344u;
@@ -1015,7 +1014,7 @@ int main() {
 
 	// 14) ServerCommand: the "Cmd" param is tokenized (quoted runs are one token)
 	// and the verb + target suffix resolved; an unknown verb yields no notice.
-	// [orig: the ServerCommand handler loc_4D22F0]
+	// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand]
 	{
 		NapiMessage cmd;
 		cmd.name = "ServerCommand";

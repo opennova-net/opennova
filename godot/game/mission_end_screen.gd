@@ -5,11 +5,11 @@ extends Control
 ## Server_ProcessRoundEnd @0x5164f0 -> Cinematic_EpilogUpdate @0x577950]:
 ## - WIN (winner 1): the epilog score screen — jo_Epil.tga backdrop + letterbox +
 ##   the Epilog/STREPILOG_* count lines fed by the kill-stat buckets
-##   [orig: epilog_cinematic_state_machine_update @0x576240 case 4].
+##   [orig: Cine_EpilogStateMachineUpdate @0x576240 case 4].
 ## - LOSE (anything else): the MISSION FAILED screen — jo_Epil2.tga backdrop +
 ##   Overlays/STROVER_MISSION_FAILED + the WAC Lose banner line + the key hint
-##   [orig: the Cinematic_EpilogUpdate g_cine_mode==2 leg @0x5744fd..].
-## Both exit on ESC or the 18600-tick (~300 s) timeout [orig: g_mission_exit_reason=1
+##   [orig: the Cinematic_EpilogUpdate g_CineMode==2 leg @0x5744fd..].
+## Both exit on ESC or the 18600-tick (~300 s) timeout [orig: g_MissionExitReason=1
 ## via Input_HandleSpecialKeys @0x49c8e2 (ESC 0x1B) / the state-machine timeout
 ## @0x57621d — the main loop then pushes the "Post Menu" scene @0x526867].
 ## Stand-ins (ledgered D-AI-10, docs/divergence-ledger.md): no flyaway cine /
@@ -73,7 +73,7 @@ func setup(outcome: RoundOutcome, banner: String, root: ResourceRoot) -> void:
 		_add_line(column, _epilog("STREPILOG_FRIENDLYUNITS"), str(friendly), 28)
 	else:
 		# MISSION FAILED + the WAC Lose cause [orig: Overlays/STROVER_MISSION_FAILED
-		# at y=120, the g_banner_text line at y=230].
+		# at y=120, the g_BannerText line at y=230].
 		_add_line(column,
 				Strings.lookup_display(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER_MISSION_FAILED"),
 				"", 40)

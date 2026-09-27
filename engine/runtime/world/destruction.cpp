@@ -41,7 +41,7 @@ void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *tr
 constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / 2pi
 
 // The environment water plane (env.water_z, 16.16 — the #265 sound-profile
-// home; 0 = no water authored) as float units [orig: Env_WaterHeightFixed
+// home; 0 = no water authored) as float units [orig: g_EnvWaterHeightFixed
 // @0x26c6454].
 float world_water_z(const World &world) {
     return world.env.water_z != 0 ? static_cast<float>(world.env.water_z) / io::kFp16One
@@ -82,7 +82,7 @@ int32_t death_random_spin_rate_bam(World &world, float min_deg, float max_deg) {
     return v < floor_bam ? floor_bam : v;
 }
 
-// [orig: g_death_piece_types @ 0x8404f0 — the 13 named rows, effect/sound slots
+// [orig: g_DeathPieceTypes @ 0x8404f0 — the 13 named rows, effect/sound slots
 // resolved to their interning names ({name, slot} pair tables @ 0x849150 /
 // @ 0x82F640). Field decode in world/destruction.h.]
 const DeathPieceType kDeathPieceTypes[kDeathPieceTypeCount] = {
@@ -103,7 +103,7 @@ const DeathPieceType kDeathPieceTypes[kDeathPieceTypeCount] = {
 };
 
 // The interned kz ammo names [orig: WeaponDef_ResolveAllReferences @ 0x540270 —
-// g_ammo_kz_OrganicBlast @ 0x24E7DBC etc.]. Resolved per queue push against
+// g_AmmoKzOrganicBlast @ 0x24E7DBC etc.]. Resolved per queue push against
 // World::ammo (the host loads ammo.def before missions run).
 constexpr const char *kAmmoKzOrganicBlast = "kz_OrganicBlast";
 constexpr const char *kAmmoKzMItemBlast = "kz_MItemBlast";
@@ -164,7 +164,6 @@ int32_t piece_physics_ground_probe_q16(
 
 struct PiecePhysicsSlope {
     int32_t forward_bam = 0;
-    int32_t lateral_bam = 0;
     int32_t ground_q16 = 0;
 };
 
@@ -188,10 +187,12 @@ int32_t piece_physics_rest_floor_q16(const World &world, const Entity &entity) {
     return vehicle != nullptr ? vehicle->box_z_lo : 0;
 }
 
-// Entity_CalcSlopeForces @0x4B0B00: four table-quantized probes around the
-// wreck, two independent slope clamps, then the picked model's Z-low rest
-// correction. Only the forward result is retained by DeathPiece_PhysicsUpdate,
-// but both lateral probes participate in the returned ground average.
+// Four table-quantized probes around the wreck, the clamped forward slope, then
+// the picked model's Z-low rest correction. [orig: Entity_CalcSlopeForces
+// @0x4B0B00 writes a clamped <<12 lateral slope @0x4B0BE0..0x4B0C0B that neither
+// caller reads (DeathPiece_PhysicsUpdate @0x48F640, AI_UpdateFallingPhysics
+// @0x457FEE take only its address); the lateral probes still feed the ground
+// average @0x4B0C38..0x4B0C44]
 PiecePhysicsSlope piece_physics_slope(
         const World &world, const Entity &entity,
         const terrain::TerrainHeightField *terrain, int32_t x_q16,
@@ -217,12 +218,8 @@ PiecePhysicsSlope piece_physics_slope(
     PiecePhysicsSlope out;
     const int32_t forward_delta = std::clamp(
             io::bam_sub(height_forward, height_backward), -655360, 655360);
-    const int32_t lateral_delta = std::clamp(
-            io::bam_sub(height_left, height_right), -163840, 163840);
     out.forward_bam = static_cast<int32_t>(
             static_cast<uint32_t>(forward_delta) << 10);
-    out.lateral_bam = static_cast<int32_t>(
-            static_cast<uint32_t>(lateral_delta) << 12);
 
     int32_t sum = io::bam_add(height_backward, height_left);
     sum = io::bam_add(sum, height_right);
@@ -475,8 +472,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
     // takes it only under the destroy-buildings rule. `World::mp_session` is
     // the retail session discriminator here: our socketless SP host still uses
     // loopback transport but must retain offline damage semantics.
-    // [orig: g_napi_np_ctx.is_in_session && (!is_authority || ItemType_Building
-    // && !g_destroy_buildings) @0x4E682E..0x4E6860]
+    // [orig: g_NapiNPCtx.is_in_session && (!is_authority || ItemType_Building
+    // && !g_DestroyBuildings) @0x4E682E..0x4E6860]
     if (world.rules.mp_session &&
         (!world.rules.logic_authority ||
          (target.kind == EntityKind::Building && !world.rules.destroy_buildings)))
@@ -907,10 +904,20 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 if (t->damage_state == 0) {
                     // Burn reacts before the damage callback's armor/team gates.
                     // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
-                    // Its attached hit emitter [orig: @0x4EB292] remains a separate
-                    // explosion-presentation gap recorded in world-wac-ai-re §24.
                     if (t->item_type == 3)
                         apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos, e.owner);
+                    // Then the victim's presentation, every pool-0 type: the
+                    // ammo's kz_sound full-volume at the victim, and its
+                    // secondary_effect into the victim's +0x1CC slot (the
+                    // witness sits on spawn_victim_hit_emitter).
+                    // [orig: @0x4EB1DA..0x4EB1EA (the +0x4C set ->
+                    //  Entity_PlaySound3D_FullVolume), @0x4EB1F2..0x4EB292 (the
+                    //  +0x48 effect)]
+                    if (!ammo->kz_sound.empty())
+                        world.out.fire_sounds.play_immediate(ammo->kz_sound.c_str(),
+                                t->position, t->bms_id, t->handle.packed);
+                    if (!ammo->secondary_effect.empty())
+                        spawn_victim_hit_emitter(*t, ammo->secondary_effect, events);
                     // An entry that deals no damage here stops after the burn:
                     // a zero kz_damage, or any entry on a non-authority session
                     // peer, where the damage read returns 0; the medic kit is
@@ -1030,7 +1037,7 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
 	spawn_death_effect_banks(target, *traits, submerged, ev);
 	// The kz blasts: one kz_OrganicBlast r=5.0 per husk KZ user point, else one
 	// at the entity with r = kz ?: bound radius [orig:
-	// Entity_QueueKzBlastAtUserPoints(g_ammo_kz_OrganicBlast, ..., "KZ", 1, ...)
+	// Entity_QueueKzBlastAtUserPoints(g_AmmoKzOrganicBlast, ..., "KZ", 1, ...)
 	// @ 0x493b57; the fallback radius legs @ 0x4ead12-0x4ead68].
 	const int kz_ammo = world.tables.ammo.index_of(kAmmoKzOrganicBlast);
     if (kz_ammo >= 0) {
@@ -1077,15 +1084,19 @@ void process_destructible_death(World &world, Entity &target) {
         const std::vector<SectionDebrisSample> samples =
                 world.collision->sample_section_debris(
                         world, target.handle, target.death_blast_center);
-        // Material 17 (foliage) spawns with the ENTITY as the emitter owner
-        // (descriptor +12); wood spawns unowned [orig: the two
-        // submit_effect_descriptor calls @0x43f825..0x43f84d]. The event
-        // carries no owner tag yet — world-wac-ai-re.md §24.3 follow-up.
+        // Material 17 (foliage) spawns with the ENTITY as the descriptor's
+        // owner tag (+12), so its group takes the section gate; wood spawns
+        // with tag 0 [orig: Entity_SpawnSectionDebris @ 0x43F580 — the entity
+        // (ecx) kept in ebp @ 0x43F588; the material-17 branch @ 0x43f825
+        // pushes it @ 0x43F838, the wood branch pushes eax, zeroed @ 0x43F80A,
+        // @ 0x43F84C; the one submit @ 0x43F84D].
         for (const SectionDebrisSample &sample : samples) {
-            ev.effects.push_back(DestructionEffectEvent{
+            DestructionEffectEvent debris{
                     sample.material == 17 ? kSectionDebrisFoliageEffect
                                           : kSectionDebrisWoodEffect,
-                    sample.pos, sample.dir});
+                    sample.pos, sample.dir};
+            debris.section_tagged = sample.material == 17;
+            ev.effects.push_back(std::move(debris));
         }
         ev.debris_triangles += static_cast<int32_t>(samples.size());
     }
@@ -1117,7 +1128,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     // A refNum group's children are cleaned up before any gate: their held
     // gun words reset, their ammo re-splits, their gunners detach.
     // [orig: Entity_SpawnDeathPieces @0x493409..0x49344D ->
-    //  Vehicle_CleanupTeamEntitiesOnDestruction @0x547040]
+    //  Vehicle_ReleaseEWeapGroupOnDestruction @0x547040]
     if (target.ref_num != 0) world.vehicles.cleanup_destroyed_ref_group(target);
     // [orig: Entity_SpawnDeathPieces @ 0x493400] Gate: not already husked, a
     // husk model exists, not fully underwater.
@@ -1335,7 +1346,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     // rows already snapshot net_saved_live_pose), then the unitType dispatch,
     // then the death sounds.]
     // The refNum group cleanup leads. [orig: @0x494669..0x494673 ->
-    // Vehicle_CleanupTeamEntitiesOnDestruction @0x547040]
+    // Vehicle_ReleaseEWeapGroupOnDestruction @0x547040]
     if (target.ref_num != 0) world.vehicles.cleanup_destroyed_ref_group(target);
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     const int unit_type = traits != nullptr ? traits->unit_type : 0;
@@ -1380,10 +1391,12 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         mask = spawn_death_pieces(world, target);
         // The callback emits directly in world space: transform every FIRST-
         // husk DEAD point through the complete authored pose, retain x/y, and
-        // force z to Env_WaterHeightFixed. Zero is a real raw plane here (not
+        // force z to g_EnvWaterHeightFixed. Zero is a real raw plane here (not
         // the no-water sentinel used by submerged-death selection), and an
-        // empty point bank has no entity-origin fallback.
-        // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0]
+        // empty point bank has no entity-origin fallback. Every shock carries
+        // the bridge as its descriptor tag, so it takes the section gate.
+        // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0, the tag store
+        //  @ 0x4945B4, the spawn @ 0x494635]
         if (!was_husked && traits != nullptr &&
             !traits->bridge_dead_points.empty()) {
             const CollisionMatrix orientation = destruction_orientation(target);
@@ -1391,11 +1404,13 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
                     static_cast<float>(world.env.water_z) / io::kFp16One;
             for (const Vec3 &point : traits->bridge_dead_points) {
                 const Vec3 offset = rotate_authored_point(orientation, point);
-                world.out.destruction.effects.push_back(DestructionEffectEvent{
+                DestructionEffectEvent shock{
                         "Effect_ShockWaterBrdg",
                         Vec3{target.position.x + offset.x,
                              target.position.y + offset.y, water_z},
-                        Vec3{}});
+                        Vec3{}};
+                shock.section_tagged = true;
+                world.out.destruction.effects.push_back(std::move(shock));
             }
         }
         break;
@@ -1403,7 +1418,14 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         mask = spawn_death_pieces(world, target);
         break;
     }
-    if (!matched_row) target.engine_flags &= ~kEntityFlagBuilding;
+    // The no-row arm's `(Flags & 0xFFFDFFFF) | 6` clears the matrix bit from
+    // the one retail dword, so both halves of the port's split word drop it
+    // (a joiner seeds both halves from the streamed dword).
+    // [orig: Entity_DispatchDeathCallback @0x493F3C..0x493F4B]
+    if (!matched_row) {
+        target.engine_flags &= ~kEntityFlagMatrixBuilt;
+        target.flags &= ~kEntityFlagMatrixBuilt;
+    }
     // The second death entry clears the scar ring the same way
     // [orig: Scar_ClearEntriesByEntity @ 0x5ccec0 ahead of the Flags |= 6].
     if (!was_husked) world.out.scars.clear_entity(target.handle);
@@ -1599,7 +1621,7 @@ void tick_item_death_motion(World &world, Entity &entity,
             events.sounds.push_back(DestructionSoundEvent{
                     "EXPLO_VEHCL_LG", e->position});
         }
-        e->engine_flags &= ~kEntityFlagBuilding;
+        e->engine_flags &= ~kEntityFlagMatrixBuilt;
         publish_piece_physics_angles(*e);
         return;
     }
@@ -1615,7 +1637,7 @@ void tick_item_death_motion(World &world, Entity &entity,
     }
     const bool routed_falling = e->death_motion == DeathMotionMode::Falling;
     const bool static_motion = e->death_motion == DeathMotionMode::Static;
-    if (routed_falling) e->engine_flags &= ~kEntityFlagBuilding;
+    if (routed_falling) e->engine_flags &= ~kEntityFlagMatrixBuilt;
     const Vec3 old_position = e->position;
     if (static_motion) {
         // Entity_UpdateStaticDeathPhysics @ 0x494230 samples the
@@ -1624,7 +1646,7 @@ void tick_item_death_motion(World &world, Entity &entity,
         if (terrain != nullptr && terrain->valid())
             ground = terrain::height_field_height_world_bilinear(
                     *terrain, e->position.x, -e->position.y);
-        e->engine_flags &= ~kEntityFlagBuilding;
+        e->engine_flags &= ~kEntityFlagMatrixBuilt;
         const float static_water =
                 water_height <= -1.0e8f ? 0.0f : water_height;
         const float water_above_ground = static_water - ground;
@@ -1885,7 +1907,7 @@ void DeathPieceSim::reset() noexcept {
 
 // The debris-type trail-effect column — the SAME kDeathPieceTypes rows the
 // piece spawner reads (one table, one impl); nullptr rows read as ""
-// [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+// [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C].
 const char *death_piece_trail_effect(uint8_t type_index) {
     if (type_index >= kDeathPieceTypeCount) return "";
     const char *trail = kDeathPieceTypes[type_index].trail_fx;

@@ -98,7 +98,7 @@ int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
 
 /* Decode one offset-binary u8 sample to int16 PCM at the channel's mix-coeff
    shift. Algebraically equivalent at unity gain to the engine's mix-time path
-   in audio_channel_compute_mix_coefficients @ 0x007BD4B0; we collapse the
+   in AudioChannel_ComputeMixCoefficients @ 0x007BD4B0; we collapse the
    shift into the sample-value domain since engine/formats/sbf's output target is int16
    PCM rather than the engine's 8-bit mix buffer. Caller passes scale_a for
    even bytes (L) and scale_b for odd bytes (R). Scales above the format's

@@ -14,7 +14,7 @@ bool valid_slice(int32_t start, int32_t count, std::size_t size) {
 
 } // namespace
 
-// [orig: load_occlusion_model_data type-0 OOBJ build @ 0x5b4a00]
+// [orig: ThreediGp_LoadOcclusionModelData type-0 OOBJ build @ 0x5b4a00]
 std::vector<AuthoredOccluderSection>
 build_authored_occluder_sections(const world::OcclusionModel &model) {
   std::vector<AuthoredOccluderSection> sections;

@@ -282,8 +282,17 @@ void VehicleSystem::respawn(Entity &e) {
 		for (auto &seat : e.seats)
 			seat.occupant = {};
 	}
-	e.engine_flags = ((e.engine_flags | e.flags) & 0x400u) | 0x22000u;
-	e.flags = e.engine_flags;
+	// Retail rewrites its one Flags dword: keep 0x400, set 0x2000 (airborne),
+	// later OR the matrix bit 0x20000, clear the kill bits. The port splits that
+	// word, so each set bit goes to the half whose clears own it: the airborne
+	// bit to the runtime word the movers clear on landing, the matrix bit to
+	// engine_flags, where every 0x20000 clear lands. Mirroring 0x2000 into
+	// engine_flags left it set forever, and the streamed dword with it.
+	// [orig: Entity_RespawnVehicle @0x45FFB2..0x45FFBD, store @0x460009,
+	//  OR @0x46017E, `and [esi+24h], 0FFFFFFF8h` @0x460064]
+	const uint32_t kept = (e.engine_flags | e.flags) & kEntityFlagReflective;
+	e.engine_flags = kept | kEntityFlagMatrixBuilt;
+	e.flags = kept | kEntityFlagInAir;
 	e.health = e.health_max;
 	e.alive = e.health > 0;
 	e.death_motion = DeathMotionMode::None;
@@ -380,14 +389,29 @@ void VehicleSystem::tick_dead(Entity &e, AiEntity &ai) {
 	ai.team = e.team;
 }
 // This is the refNum attachment group, independent of the team byte.
-// [orig: Vehicle_CleanupTeamEntitiesOnDestruction @0x547040]
+// [orig: Vehicle_ReleaseEWeapGroupOnDestruction @0x547040]
 void VehicleSystem::cleanup_destroyed_ref_group(Entity &vehicle) {
-	if (!vehicle.has_item_def || vehicle.item_type != 1 || (vehicle.item_attrib & 0x40) == 0)
+	// A vehicle def only [orig: Vehicle_ReleaseEWeapGroupOnDestruction
+	// @0x54707C].
+	if (!vehicle.has_item_def || vehicle.item_type != 1)
 		return;
+	// Without PlayerControl the death destroys the group's EWeap members and
+	// the vehicle gives up its refNum, so its wreck's later destroy walks
+	// nothing. [orig: the PlayerControl test @0x547086, the
+	//  EntityReference_DestroyEWeapGroup call @0x547143]
+	if ((vehicle.item_attrib & 0x40) == 0) {
+		world_.commands.destroy_eweap_group(vehicle.handle);
+		return;
+	}
+	// With PlayerControl the group stays: the refNum group list's other
+	// members whose def carries EWeap are released in place.
+	// [orig: DynArray_CopyConstruct @0x54709E, the member tests
+	//  @0x5470B9..0x5470D3 (not self, same refNum, def attrib 0x20)]
 	std::vector<EntityHandle> peers;
 	world_.registry.for_each([&](const Entity &other) {
-		if (other.handle != vehicle.handle && other.ref_num == vehicle.ref_num &&
-				other.has_item_def && (other.item_attrib & 0x20) != 0)
+		if (other.handle != vehicle.handle && other.ref_group_member &&
+				other.ref_num == vehicle.ref_num && other.has_item_def &&
+				(other.item_attrib & 0x20) != 0)
 			peers.push_back(other.handle);
 	});
 	for (EntityHandle handle : peers) {
@@ -465,7 +489,7 @@ void VehicleSystem::setup_gunner_attachments(Entity &vehicle) {
 	AiBrain &b = ai->brain;
 
 	// Every OTHER pool-1 entity whose refNum byte equals this entity's nonzero
-	// refNum, in pool slot order, sixteen at most [orig: the g_pool_list[1]
+	// refNum, in pool slot order, sixteen at most [orig: the g_PoolList[1]
 	// walk @0x468130..0x468173: self skip @0x468154, refNum nonzero @0x46815E,
 	// the +533 compare @0x468166, the slot store @0x468168, the 16 cap @0x468173].
 	int32_t count = 0;

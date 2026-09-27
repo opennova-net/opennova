@@ -60,7 +60,7 @@ func test_same_time_noise_calls_sample_each_graphic_instance_independently() -> 
 	# translation track authored as control 0x36 (control_param 0, rate 0,
 	# 0..32767); keep time, bus, and authored track identical across both calls
 	# so only the per-submission CRT sample can distinguish the two graphic
-	# instances. [orig: PANM_SampleTrack @ 0x5B2270; wave_lookup @ 0x5DE6B0]
+	# instances. [orig: PANM_SampleTrack @ 0x5B2270; CWaveformTable_WaveLookup @ 0x5DE6B0]
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(PMP_NOISE)), OK)
 	assert_gt(data.get_part_anim_count(0), 0,

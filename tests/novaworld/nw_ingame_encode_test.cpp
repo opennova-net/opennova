@@ -4,7 +4,7 @@
 //
 // The encode side is a faithful port of the original serializer; the decode
 // side is independently verified against the inverse handler in IDA:
-//   encode_pool3_sync_batch  <- [orig: serialize_entity_pool_to_packet @ 0x503460]
+//   encode_pool3_sync_batch  <- [orig: NetPacket_SerializeEntityPoolToPacket @ 0x503460]
 //   decode_pool3_sync_batch  <- [orig: NapiNPClientMsg_0x020          @ 0x425C00]
 // Because the two ports reference DIFFERENT binary functions (not each other),
 // a clean round-trip pins the wire format, not just internal consistency. The
@@ -193,7 +193,8 @@ int test_static_batch_all_flags() {
 	r.ammo_count   = 30;                  // always
 	r.bone_a       = 5;                   // 0x0040
 	r.bone_b       = 6;                   // 0x0080
-	r.score_flag   = 1;                   // 0x0100
+	r.has_score_flag = true;             // 0x0100 (the def callback gate)
+	r.score_flag   = 1;
 	r.weapon_byte  = 3;                   // always -> attach_ref follows
 	r.attach_ref   = 0x7788;
 	in.records.push_back(r);
@@ -310,15 +311,19 @@ int test_pool_spawn_roundtrip_full() {
 	r.mount_handle_8 = 0x4001;
 	r.mount_handle_9 = 0x4002;
 	r.bone_byte = 2;                 // unconditional +290 (D-NET-58)
-	r.ai_profile_1 = 0x11112222;     // -> 0x0800
+	r.has_ai_trailer = true;         // -> 0x0800 (the AI slot pointer gate)
+	r.ai_profile_1 = 0x11112222;
 	r.ai_profile_2 = 0x33334444;
 	r.ai_name = "patrol_a";
 	r.alert_byte = 7;                // -> 0x0040
 	r.action_byte = 9;               // -> 0x0080
-	r.weapon_type_byte = 3;          // -> 0x1000
-	r.zone_number_rank = 80;              // -> 0x2000 (+ zone_radius)
+	r.has_sound_latch_byte = true;   // -> 0x1000 (the vehicle brain pointer gate)
+	r.sound_latch_byte = 3;
+	r.has_zone_number_rank = true;   // -> 0x2000 (the zone number byte gate)
+	r.zone_number_rank = 80;
 	r.zone_radius = 1000;
-	r.difficulty_byte = 4;           // -> 0x4000
+	r.has_difficulty_byte = true;    // -> 0x4000 (the def callback gate)
+	r.difficulty_byte = 4;
 	in.records.push_back(r);
 
 	std::vector<uint8_t> wire = encode_pool_spawn_batch(in);
@@ -350,7 +355,7 @@ int test_pool_spawn_roundtrip_full() {
 	EXPECT(d.ai_name == "patrol_a");
 	EXPECT(d.alert_byte == 7);
 	EXPECT(d.action_byte == 9);
-	EXPECT(d.weapon_type_byte == 3);
+	EXPECT(d.sound_latch_byte == 3);
 	EXPECT(d.zone_number_rank == 80);
 	EXPECT(d.zone_radius == 1000);
 	EXPECT(d.difficulty_byte == 4);
@@ -382,11 +387,51 @@ int test_pool_spawn_minimal() {
 	return 0;
 }
 
+// The 0x0800 AI trailer and the 0x1000 brain byte are pointer-gated in the
+// serializer (the AI slot entity+0x68, the vehicle brain entity+0x64), so they
+// ride their presence fields whatever the values: an all-zero trailer and a
+// zero byte still emit, and values without presence emit nothing. Every retail
+// vehicle record carries 0x1000 with byte 0x00 (the 2026-04-26 load stream).
+// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503D3D..0x503D5C, @0x503E7F..0x503EC0]
+int test_pool_spawn_pointer_gated_fields() {
+	PoolSpawnBatch in;
+	PoolSpawnRecord r;
+	r.slot_id = 0x1017;
+	r.item_type_id = 0x004A;
+	r.has_ai_trailer = true;       // zero profiles, empty name
+	r.has_sound_latch_byte = true; // byte 0x00
+	in.records.push_back(r);
+	std::vector<uint8_t> wire = encode_pool_spawn_batch(in);
+	// count(2) + flags(2) + slot(2) + type(2) + name NUL(1) + pos(12) + bone(1)
+	// + trailer 4+4+NUL(9) + byte(1) = 32.
+	EXPECT(wire.size() == 32);
+	EXPECT(wire[2] == 0x00 && wire[3] == 0x18); // spawn_flags 0x1800
+	PoolSpawnBatch out;
+	EXPECT(decode_pool_spawn_batch(wire.data(), wire.size(), out));
+	EXPECT(out.records.size() == 1 && out.records[0].has_ai_trailer &&
+	       out.records[0].has_sound_latch_byte && out.records[0].sound_latch_byte == 0 &&
+	       out.records[0].ai_profile_1 == 0 && out.records[0].ai_name.empty());
+	EXPECT(encode_pool_spawn_batch(out) == wire); // decode -> encode is byte-identical
+
+	PoolSpawnBatch bare;
+	PoolSpawnRecord v;
+	v.slot_id = 0x1018;
+	v.ai_profile_1 = 0x11112222;
+	v.ai_name = "d_buggy";
+	v.sound_latch_byte = 3;
+	bare.records.push_back(v);
+	std::vector<uint8_t> bare_wire = encode_pool_spawn_batch(bare);
+	EXPECT(bare_wire.size() == 22); // the minimal record: no trailer, no byte
+	std::printf("PASS pool_spawn_pointer_gated_fields\n");
+	return 0;
+}
+
 int test_pool_spawn_health_alt_8000() {
-	// zone_number_rank 0 but zone_radius non-zero -> 0x8000 path (zone_radius only).
+	// A SpawnPoint def without a zone number -> the 0x8000 path (zone_radius only).
 	PoolSpawnBatch in;
 	PoolSpawnRecord r;
 	r.slot_id = 0x1003; r.item_type_id = 0x0100;
+	r.has_zone_radius_alt = true;
 	r.zone_number_rank = 0; r.zone_radius = 250;
 	r.bone_byte = 2;
 	in.records.push_back(r);
@@ -587,7 +632,7 @@ int test_weapon_reload_roundtrip() {
 }
 
 // S2C 0x4E page + C2S 0x28 request: the join-window kill-list walk's two bodies.
-// [orig: collect_valid_weapon_slots @0x516000 / NapiNPClientMsg_HandleBatchKill @0x431870;
+// [orig: Server_CollectValidWeaponSlots @0x516000 / NapiNPClientMsg_HandleBatchKill @0x431870;
 //  the 0x4E continuation @0x4318db..0x4318ff / NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550]
 int test_join_window_kill_walk_roundtrip() {
 	BatchKillBatch page;
@@ -622,7 +667,7 @@ int test_join_window_kill_walk_roundtrip() {
 	return 0;
 }
 
-// S2C 0x6A clan-roster + C2S 0x4E walk. [orig: serialize_minimap_slot @0x5073B0 /
+// S2C 0x6A clan-roster + C2S 0x4E walk. [orig: NetPacket_SerializeMinimapSlot @0x5073B0 /
 //  NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
 int test_clan_roster_roundtrip() {
 	for (uint8_t action : {kClanRosterAdd, kClanRosterWalkReply}) {
@@ -682,7 +727,7 @@ int test_door_slot_action_roundtrip() {
 }
 
 // C2S 0x42 -> S2C 0x70 availability list and the C2S 0x40 pick.
-// [orig: serialize_weapon_overlay_slots_0 @0x5105A0 / NapiNPClientMsg_HandleWeaponLoadoutList
+// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0 / NapiNPClientMsg_HandleWeaponLoadoutList
 //  @0x429a30; NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
 int test_vehicle_spawn_codec_roundtrip() {
 	VehicleSpawnAvailabilityList list;
@@ -1169,7 +1214,7 @@ static int test_terrain_load_continuation_chunk_roundtrip() {
 }
 
 // §5.46 S2C 0x18 FULL-ENTITY-SPAWN — the 0x0F-query reply record.
-// Byte layout pinned against the witnessed serializer [orig: serialize_object_to_buffer
+// Byte layout pinned against the witnessed serializer [orig: NetPacket_SerializeObjectToBuffer
 // @0x504d10]; the decode side is the independent inverse port of the client handler
 // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780].
 static int test_full_entity_spawn_player_layout() {
@@ -1449,6 +1494,7 @@ int main() {
 	rc |= test_static_batch_empty_slot_and_empty_batch();
 	rc |= test_pool_spawn_roundtrip_full();
 	rc |= test_pool_spawn_minimal();
+	rc |= test_pool_spawn_pointer_gated_fields();
 	rc |= test_pool_spawn_health_alt_8000();
 	rc |= test_decode_weapon_block_mask_zero_dnet56();
 	rc |= test_infantry_compact_roundtrip();

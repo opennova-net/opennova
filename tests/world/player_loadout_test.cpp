@@ -228,7 +228,7 @@ static void test_armory_class_policy() {
 }
 
 // The PLAYER_INFO screen policies [orig: PlayerInfo_SetTeamAndClassMask
-// @0x55de60; populate_ammo_combo_boxes @0x55def0]: team 0 masks 2, every
+// @0x55de60; PlayerInfo_PopulateAmmoComboBoxes @0x55def0]: team 0 masks 2, every
 // other team masks 1; classes 5..9 mask their bit and anything else masks
 // NOTHING (unlike the armory's all-weapons default); the ammo combo's
 // default select takes the saved count (clamped 1..maxclips) or the full

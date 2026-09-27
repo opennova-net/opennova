@@ -482,6 +482,23 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                         }
                     }
                     apply_touch_flags(ent, res.flags, health, is_authority);
+                    // The blink letters and the indoors bit, per FIRST-pass
+                    // candidate whose contact touched a blink box (outFlags
+                    // 0x10): the local Player body ORs the accum gathered so
+                    // far into its letters, and the indoors letter latches
+                    // Flags 0x800000. The relaxation pass adds its blink hits to
+                    // the quad only (stored after it, below).
+                    // [orig: Entity_MovementCollisionResolver @ 0x4b34c0..0x4b3502
+                    //  (the Player-bit + local leg @ 0x4b34c4..0x4b34ef, the
+                    //  other leg @ 0x4b34f4..0x4b3502), inside the first-pass
+                    //  candidate loop (back-edge @ 0x4b3530)]
+                    if ((res.flags & kTouchBlink) != 0) {
+                        if (is_local && is_player_class) local_player_blink_flags |= blink.flags;
+                        if ((blink.flags & kBlinkIndoorsBit) != 0) {
+                            if (ent != nullptr) ent->flags |= kEntityFlagIndoors;
+                            if (replica_flags_ != nullptr) *replica_flags_ |= kEntityFlagIndoors;
+                        }
+                    }
                     // The CD callback is peer-local and runs even with zero force.
                     // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4B3505]
                     if ((res.flags & kTouchDoor) != 0)
@@ -555,18 +572,15 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if (ladder_entity.valid() && replica_flags_ != nullptr)
         *replica_flags_ |= kEntityFlagLadderContact;
 
-    // Blink apply. [orig: @ 0x4b34c2-0x4b3502 — bit 2 -> Flags 0x800000; local
-    // player accumulates the flags word.]
+    // The blink quad, from both passes' hits; the letters and the indoors bit
+    // were applied in the first pass. [orig: g_BlinkHitSlot0..3 ->
+    // entity+0x1D0..0x1DC @ 0x4b36f0..0x4b3720, after the relaxation loop]
     if (ent != nullptr) {
         ent->blink_hits[0] = blink.hits[0];
         ent->blink_hits[1] = blink.hits[1];
         ent->blink_hits[2] = blink.hits[2];
         ent->blink_hits[3] = blink.hits[3];
-        if (is_local) local_player_blink_flags |= blink.flags;
-        if ((blink.flags & kBlinkIndoorsBit) != 0) ent->flags |= kEntityFlagIndoors;
     }
-    if (replica_flags_ != nullptr && (blink.flags & kBlinkIndoorsBit) != 0)
-        *replica_flags_ |= kEntityFlagIndoors;
 
     // The run-over kill and the bump sound [orig: @0x4b37c2..0x4b3a5c — gates,
     // the kill and the sound in vehicle_collision_damage.h]. The pusher's
@@ -1188,7 +1202,7 @@ CollisionWorld::debug_person_sections(World &world, const int32_t anchor[3],
 // minus half their bound, while my feet stay at or below theirs (someone on the
 // ladder above me). The person set is the same staged pool-0 slice repulsion
 // walks; positions re-read live, as retail reads the pool entity directly.
-// [orig: the g_pool_list[0] scan @ 0x4bf9b7-0x4bfa2b — live (ItemTypeIndex),
+// [orig: the g_PoolList[0] scan @ 0x4bf9b7-0x4bfa2b — live (ItemTypeIndex),
 //  not dead (Flags & 2), not self; |Δ| <= 73728 per axis; the band
 //  @ 0x4bfa08-0x4bfa29]
 bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,

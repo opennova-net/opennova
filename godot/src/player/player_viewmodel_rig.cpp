@@ -219,8 +219,8 @@ void PlayerViewmodelRig::update_viewmodel(const Ref<PlayerLocalView> &p_view,
 	// The FP overlay rides its own visual layer: the beauty camera admits it
 	// and every mesh instance applies the renderfov projection + depth band
 	// (retail's "viewmodel first" draw into the same backbuffer [orig:
-	// Player_RenderFirstPersonViewModel @ 0x4ded60]); the mirror, Q3, and
-	// capture cameras exclude the layer. The gameplay camera admits the world
+	// Player_RenderFirstPersonViewModel @ 0x4ded60]); the mirror and capture
+	// cameras exclude the layer; Q3 admits it. The gameplay camera admits the world
 	// shadow-caster marker layers; the viewmodel policy strips those markers
 	// so the gun never leaks into world shadows. Both stamps are edge-gated on
 	// the model (policy value / scene build serial), never per frame.

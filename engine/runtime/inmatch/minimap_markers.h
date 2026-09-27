@@ -8,8 +8,8 @@
 // world::minimap_blip_draw_policy) and its local-team medic bit, plus the
 // locally deployed player's own row restored into the regular persistent
 // bank when no decoded regular row already covers its wire handle.
-// [orig: render_minimap_slot_blip @0x5BE240 -> draw_minimap_blip, the regular
-//  TSDicon submit @0x597F73; the medic gate draw_entity_labels_and_markers
+// [orig: Render_MinimapSlotBlip @0x5BE240 -> Minimap_DrawBlip, the regular
+//  TSDicon submit @0x597F73; the medic gate HUD_DrawEntityLabelsAndMarkers
 //  @0x5a49e0 — AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3 under the
 //  local-team gate @0x5a4ac6/@0x5a4acf; see docs/interface/hud-re.md]
 

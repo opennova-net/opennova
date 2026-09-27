@@ -11,6 +11,7 @@
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
 #include "terrain/terrain_foliage_def.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -142,7 +143,13 @@ Vector2 foliage_detail_cell_center(uint32_t p_cell_key) {
 
 } // namespace
 
-FoliageDispatcher::FoliageDispatcher() = default;
+FoliageDispatcher::FoliageDispatcher() {
+  // Foliage rides its own visual layer, admitted by the beauty camera and
+  // excluded from the water mirror and the Inset camera (visual_layers.h);
+  // the Inset pass's own compile rides INSET_VIEW, which only it admits.
+  main_set_.layer_mask = visual_layers::TERRAIN_FOLIAGE;
+  inset_set_.layer_mask = visual_layers::INSET_VIEW;
+}
 FoliageDispatcher::~FoliageDispatcher() {
   _release_draw_pools();
   mask_pass_.release();
@@ -176,12 +183,14 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::set_wind_clock_override_ms);
   ClassDB::bind_method(D_METHOD("set_thermal_view", "thermal"),
                        &FoliageDispatcher::set_thermal_view);
-  ClassDB::bind_method(D_METHOD("is_thermal_view"),
-                       &FoliageDispatcher::is_thermal_view);
   ClassDB::bind_method(D_METHOD("set_water_height", "height"),
                        &FoliageDispatcher::set_water_height);
   ClassDB::bind_method(D_METHOD("get_water_height"),
                        &FoliageDispatcher::get_water_height);
+  ClassDB::bind_method(D_METHOD("set_detail_passes_drawn", "drawn"),
+                       &FoliageDispatcher::set_detail_passes_drawn);
+  ClassDB::bind_method(D_METHOD("is_detail_passes_drawn"),
+                       &FoliageDispatcher::is_detail_passes_drawn);
   ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
                        &FoliageDispatcher::set_terrain_data);
   ClassDB::bind_method(D_METHOD("get_terrain_data"),
@@ -214,6 +223,13 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::render_frame);
   ClassDB::bind_method(D_METHOD("render_preview", "camera_xform", "time_ms"),
                        &FoliageDispatcher::render_preview);
+  ClassDB::bind_method(
+      D_METHOD("render_inset_frame", "camera", "anchors", "time_ms"),
+      &FoliageDispatcher::render_inset_frame);
+  ClassDB::bind_method(D_METHOD("release_inset_frame"),
+                       &FoliageDispatcher::release_inset_frame);
+  ClassDB::bind_method(D_METHOD("is_inset_frame_live"),
+                       &FoliageDispatcher::is_inset_frame_live);
   ClassDB::bind_method(D_METHOD("reset"), &FoliageDispatcher::reset);
   ClassDB::bind_method(D_METHOD("get_total_instances"),
                        &FoliageDispatcher::get_total_instances);
@@ -392,6 +408,20 @@ void FoliageDispatcher::set_thermal_view(bool p_thermal) {
 
 void FoliageDispatcher::set_water_height(float p_height) {
   water_height_ = p_height;
+}
+
+void FoliageDispatcher::set_detail_passes_drawn(bool p_drawn) {
+  if (detail_passes_drawn_ == p_drawn) {
+    return;
+  }
+  detail_passes_drawn_ = p_drawn;
+  if (!p_drawn) {
+    // Hide and unbind every detail draw now, both views' (the resident
+    // meshes stay with the cache); the next compile commands none while the
+    // gate is closed.
+    _hide_pool_tail(main_set_.detail_pool, main_set_.detail_stamps, 0, false);
+    _hide_pool_tail(inset_set_.detail_pool, inset_set_.detail_stamps, 0, false);
+  }
 }
 
 Weather *FoliageDispatcher::_weather() const {
@@ -1167,9 +1197,11 @@ void FoliageDispatcher::_refresh_model_meshes() {
 }
 
 RID FoliageDispatcher::_ensure_draw_instance(
-    RenderingServer *p_server, std::vector<RID> &r_pool,
-    std::vector<DrawInstanceStamp> &r_stamps, size_t p_index,
+    RenderingServer *p_server, DrawSet &r_set, size_t p_index,
     bool p_model_tier) {
+  std::vector<RID> &r_pool = p_model_tier ? r_set.model_pool : r_set.detail_pool;
+  std::vector<DrawInstanceStamp> &r_stamps =
+      p_model_tier ? r_set.model_stamps : r_set.detail_stamps;
   if (r_stamps.size() <= p_index) {
     r_stamps.resize(p_index + 1);
   }
@@ -1192,12 +1224,13 @@ RID FoliageDispatcher::_ensure_draw_instance(
         instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
     // The generic attenuation catcher cannot reproduce foliage-card alpha,
     // two-sided rasterization, and wind deformation without dark rectangles.
-    // Foliage rides its own visual layer, admitted by every beauty camera and
-    // excluded from the water mirror: retail's reflection prerender hands
-    // PolyTrn a context with foliage collection OFF, so its mirror draws no
-    // near-foliage patches (see docs/env/env-tod-re.md #30 and
-    // visual_layers::TERRAIN_FOLIAGE).
-    server->instance_set_layer_mask(instance, visual_layers::TERRAIN_FOLIAGE);
+    // Foliage rides its own visual layer per view (the set's): the main
+    // view's is admitted by the beauty camera and excluded from the water
+    // mirror, since retail's reflection prerender hands PolyTrn a context with
+    // foliage collection OFF, so its mirror draws no near-foliage patches (see
+    // docs/env/env-tod-re.md #30 and visual_layers::TERRAIN_FOLIAGE); the
+    // Inset's rides INSET_VIEW.
+    server->instance_set_layer_mask(instance, r_set.layer_mask);
     server->instance_set_extra_visibility_margin(instance, 8.0f);
     frame_stats_.backend_configuration_writes += 4;
     server->instance_set_visible(instance, false);
@@ -1213,7 +1246,7 @@ RID FoliageDispatcher::_ensure_draw_instance(
       server->instance_set_base(instance, multimesh);
       frame_stats_.backend_configuration_writes += 2;
       ++frame_stats_.backend_base_writes;
-      model_multimesh_pool_.push_back(multimesh);
+      r_set.model_multimesh_pool.push_back(multimesh);
     }
     r_pool.push_back(instance);
   }
@@ -1245,8 +1278,10 @@ bool FoliageDispatcher::_bind_current_scenario() {
       ++frame_stats_.backend_scenario_writes;
     }
   };
-  rebind(detail_draw_pool_);
-  rebind(model_draw_pool_);
+  for (DrawSet *set : {&main_set_, &inset_set_}) {
+    rebind(set->detail_pool);
+    rebind(set->model_pool);
+  }
   draw_scenario_ = scenario;
   return scenario.is_valid();
 }
@@ -1270,32 +1305,34 @@ void FoliageDispatcher::_set_draw_pool_visibility(bool p_visible) {
       stamp.visible = visible;
     }
   };
-  update(detail_draw_pool_, detail_draw_stamps_);
-  update(model_draw_pool_, model_draw_stamps_);
+  for (DrawSet *set : {&main_set_, &inset_set_}) {
+    update(set->detail_pool, set->detail_stamps);
+    update(set->model_pool, set->model_stamps);
+  }
+}
+
+void FoliageDispatcher::_release_draw_set(RenderingServer *p_server, DrawSet &r_set) {
+  const auto release = [&](std::vector<RID> &r_pool) {
+    for (RID &instance : r_pool) {
+      if (p_server != nullptr && instance.is_valid()) {
+        p_server->free_rid(instance);
+      }
+      instance = RID();
+    }
+    r_pool.clear();
+  };
+  release(r_set.detail_pool);
+  release(r_set.model_pool);
+  release(r_set.model_multimesh_pool);
+  r_set.detail_stamps.clear();
+  r_set.model_stamps.clear();
 }
 
 void FoliageDispatcher::_release_draw_pools() {
   RenderingServer *server = RenderingServer::get_singleton();
-  if (server != nullptr) {
-    const auto release = [&](std::vector<RID> &r_pool) {
-      for (RID &instance : r_pool) {
-        if (instance.is_valid()) {
-          server->free_rid(instance);
-        }
-        instance = RID();
-      }
-      r_pool.clear();
-    };
-    release(detail_draw_pool_);
-    release(model_draw_pool_);
-    release(model_multimesh_pool_);
-  } else {
-    detail_draw_pool_.clear();
-    model_draw_pool_.clear();
-    model_multimesh_pool_.clear();
-  }
-  detail_draw_stamps_.clear();
-  model_draw_stamps_.clear();
+  _release_draw_set(server, main_set_);
+  _release_draw_set(server, inset_set_);
+  inset_live_ = false;
   draw_scenario_ = RID();
 }
 
@@ -1366,7 +1403,7 @@ Ref<FoliageFrameStats> FoliageDispatcher::get_frame_stats() const {
 #undef FOLIAGE_FRAME_COUNTER_COPY
   stats->set_foliage_backend("rendering_server_rid");
   stats->set_backend_pool_size(static_cast<int64_t>(
-      detail_draw_pool_.size() + model_draw_pool_.size()));
+      main_set_.detail_pool.size() + main_set_.model_pool.size()));
   int64_t backend_active_draws = 0;
   int64_t backend_visible_draws = 0;
   const auto count_draws = [&](const std::vector<DrawInstanceStamp> &p_stamps) {
@@ -1380,8 +1417,8 @@ Ref<FoliageFrameStats> FoliageDispatcher::get_frame_stats() const {
       }
     }
   };
-  count_draws(detail_draw_stamps_);
-  count_draws(model_draw_stamps_);
+  count_draws(main_set_.detail_stamps);
+  count_draws(main_set_.model_stamps);
   stats->set_backend_active_draws(backend_active_draws);
   stats->set_backend_visible_draws(backend_visible_draws);
   stats->set_backend_server_writes(backend_server_writes());
@@ -1396,18 +1433,18 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   result["backend"] = "rendering_server_rid";
   result["scenario_bound"] = draw_scenario_.is_valid();
   result["detail_pool_size"] =
-      static_cast<int64_t>(detail_draw_pool_.size());
+      static_cast<int64_t>(main_set_.detail_pool.size());
   result["model_pool_size"] =
-      static_cast<int64_t>(model_draw_pool_.size());
+      static_cast<int64_t>(main_set_.model_pool.size());
   result["pool_size"] = static_cast<int64_t>(
-      detail_draw_pool_.size() + model_draw_pool_.size());
+      main_set_.detail_pool.size() + main_set_.model_pool.size());
 
-  Array draws;
-  int64_t active_draws = 0;
-  int64_t visible_draws = 0;
-  const auto append_rows = [&](const std::vector<RID> &p_pool,
+  // `draws` is the main view's set; `inset` the weapon Inset pass's.
+  const auto append_rows = [&](Array &draws, int64_t &active_draws,
+                               int64_t &visible_draws,
+                               const std::vector<RID> &p_pool,
                                const std::vector<DrawInstanceStamp> &p_stamps,
-                               const StringName &p_tier) {
+                               const StringName &p_tier, uint32_t p_layer) {
     const size_t count = std::min(p_pool.size(), p_stamps.size());
     for (size_t index = 0; index < count; ++index) {
       const DrawInstanceStamp &stamp = p_stamps[index];
@@ -1440,8 +1477,7 @@ Dictionary FoliageDispatcher::get_backend_report() const {
       row["tile_cache_layer"] = stamp.tile_cache_layer;
       row["tile_cache_projection"] = stamp.tile_cache_projection;
       row["casts_shadows"] = false;
-      row["layer_mask"] =
-          static_cast<int64_t>(visual_layers::TERRAIN_FOLIAGE);
+      row["layer_mask"] = static_cast<int64_t>(p_layer);
       draws.append(row);
       ++active_draws;
       if (stamp.visible) {
@@ -1449,11 +1485,31 @@ Dictionary FoliageDispatcher::get_backend_report() const {
       }
     }
   };
-  append_rows(detail_draw_pool_, detail_draw_stamps_, StringName("detail"));
-  append_rows(model_draw_pool_, model_draw_stamps_, pass_name_silhouette());
+  Array draws;
+  int64_t active_draws = 0;
+  int64_t visible_draws = 0;
+  append_rows(draws, active_draws, visible_draws, main_set_.detail_pool,
+              main_set_.detail_stamps, StringName("detail"), main_set_.layer_mask);
+  append_rows(draws, active_draws, visible_draws, main_set_.model_pool,
+              main_set_.model_stamps, pass_name_silhouette(), main_set_.layer_mask);
   result["active_draws"] = active_draws;
   result["visible_draws"] = visible_draws;
   result["draws"] = draws;
+  Array inset_draws;
+  int64_t inset_active = 0;
+  int64_t inset_visible = 0;
+  append_rows(inset_draws, inset_active, inset_visible, inset_set_.detail_pool,
+              inset_set_.detail_stamps, StringName("detail"), inset_set_.layer_mask);
+  append_rows(inset_draws, inset_active, inset_visible, inset_set_.model_pool,
+              inset_set_.model_stamps, pass_name_silhouette(), inset_set_.layer_mask);
+  Dictionary inset;
+  inset["live"] = inset_live_;
+  inset["pool_size"] = static_cast<int64_t>(
+      inset_set_.detail_pool.size() + inset_set_.model_pool.size());
+  inset["active_draws"] = inset_active;
+  inset["visible_draws"] = inset_visible;
+  inset["draws"] = inset_draws;
+  result["inset"] = inset;
 
   result["instance_creates"] = frame_stats_.backend_instance_creates;
   result["scenario_writes"] = frame_stats_.backend_scenario_writes;
@@ -1468,8 +1524,8 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   const FoliageMaskReport mask = mask_pass_.get_report();
   Dictionary mask_row;
   mask_row["callback_seen"] = mask.callback_seen;
-  mask_row["status"] = String::utf8(mask.status.c_str());
-  mask_row["failure"] = String::utf8(mask.failure.c_str());
+  mask_row["status"] = opennova::to_gd(mask.status);
+  mask_row["failure"] = opennova::to_gd(mask.failure);
   mask_row["drawn_frame_id"] = static_cast<int64_t>(mask.drawn_frame_id);
   mask_row["drawn_draws"] = mask.drawn_draws;
   mask_row["views"] = mask.views;
@@ -1478,6 +1534,8 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   mask_row["target_size"] = mask.target_size;
   mask_row["draws"] = mask.draws;
   mask_row["instances"] = mask.instances;
+  mask_row["inset_active"] = mask.view_active;
+  mask_row["inset_eye"] = mask.view_eye;
   result["mask"] = mask_row;
   return result;
 }
@@ -1568,8 +1626,8 @@ Dictionary FoliageDispatcher::apply_probe_draw_control(
       }
     }
   };
-  apply(detail_draw_pool_, detail_draw_stamps_, true);
-  apply(model_draw_pool_, model_draw_stamps_, false);
+  apply(main_set_.detail_pool, main_set_.detail_stamps, true);
+  apply(main_set_.model_pool, main_set_.model_stamps, false);
 
   result["kept"] = kept;
   if (kept > 0) {
@@ -1632,6 +1690,7 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time
   }
   input.thermal_view = thermal_view_;
   input.water_height = water_height_;
+  input.detail_passes = detail_passes_drawn_;
 
   // Column-major view matrix from the camera's inverse transform (the same
   // construction Terrain feeds TerrainFrameCompiler).
@@ -1845,11 +1904,8 @@ Vector2 FoliageDispatcher::_terrain_uv(float p_world_x,
                  atlas.y / static_cast<float>(colormap->get_height()));
 }
 
-void FoliageDispatcher::_compile_and_apply(
-    const opennova::renderer::FoliageViewInput &p_view) {
-  _ensure_visuals();
-  _update_materials();
-
+opennova::renderer::FoliageExpansionSamplers
+FoliageDispatcher::_expansion_samplers() {
   opennova::renderer::FoliageExpansionSamplers expansion;
   expansion.terrain_uv_at = [this](float p_world_x, float p_world_z,
                                    float &r_u, float &r_v) {
@@ -1858,16 +1914,78 @@ void FoliageDispatcher::_compile_and_apply(
     r_v = static_cast<float>(uv.y);
     return uv != Vector2();
   };
+  return expansion;
+}
+
+void FoliageDispatcher::_compile_and_apply(
+    const opennova::renderer::FoliageViewInput &p_view) {
+  _ensure_visuals();
+  _update_materials();
 
   const opennova::renderer::FoliageDrawList &draw_list =
-      compiler_.compile(p_view, _world_samplers(), expansion);
+      compiler_.compile(p_view, _world_samplers(), _expansion_samplers());
   _refresh_model_meshes();
-  _apply_draw_list(draw_list);
+  _apply_draw_list(draw_list, main_set_, true);
   if (is_visible_in_tree()) {
     mask_pass_.publish(this, draw_list, compiler_, fd_textures_);
   } else {
     mask_pass_.clear();
   }
+}
+
+void FoliageDispatcher::render_inset_frame(Camera3D *p_camera,
+                                           const PackedVector3Array &p_anchors,
+                                           int64_t p_time_ms) {
+  if (p_camera == nullptr || !p_camera->is_inside_tree()) {
+    release_inset_frame();
+    return;
+  }
+  // The Inset view's input: its own eye and view, its own collector's MODEL
+  // anchors and its own traversal's detail cells; the letters, water and
+  // clocks are the frame's (the same globals retail's Inset pass reads).
+  const Transform3D eye = p_camera->get_camera_transform();
+  opennova::renderer::FoliageViewInput view = _view_input(eye, p_time_ms);
+  view.silhouette_anchors.clear();
+  view.silhouette_anchors.reserve(p_anchors.size());
+  for (int index = 0; index < p_anchors.size(); ++index) {
+    const Vector3 anchor = p_anchors[index];
+    view.silhouette_anchors.push_back({static_cast<float>(anchor.x),
+                                       static_cast<float>(anchor.y),
+                                       static_cast<float>(anchor.z)});
+  }
+  // The cells of the Inset's own terrain frame, which ran just before
+  // (Terrain::render_inset_frame; none while the terrain is hidden).
+  if (terrain_ != nullptr) {
+    for (const FoliageDetailPatch &patch :
+         terrain_->get_inset_foliage_detail_patches_native()) {
+      view.detail_cells.push_back(opennova::foliage::DetailCell{
+          patch.key, patch.distance, patch.max_height, patch.atlas_x, patch.atlas_z});
+    }
+  }
+  _ensure_visuals();
+  _update_materials();
+  // The same compiler, so both passes stamp the one detail cache and model
+  // pool, the Inset after the main view (the engine compiler's order).
+  const opennova::renderer::FoliageDrawList &draw_list =
+      compiler_.compile(view, _world_samplers(), _expansion_samplers());
+  _refresh_model_meshes();
+  _apply_draw_list(draw_list, inset_set_, false);
+  inset_live_ = true;
+  if (is_visible_in_tree()) {
+    mask_pass_.publish_view(p_camera, draw_list, compiler_, fd_textures_);
+  } else {
+    mask_pass_.clear_view();
+  }
+}
+
+void FoliageDispatcher::release_inset_frame() {
+  if (!inset_live_) {
+    return;
+  }
+  inset_live_ = false;
+  _hide_pool_tail(inset_set_.detail_pool, inset_set_.detail_stamps, 0, false);
+  _hide_pool_tail(inset_set_.model_pool, inset_set_.model_stamps, 0, true);
+  mask_pass_.clear_view();
 }
 
 Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
@@ -1933,7 +2051,8 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
 }
 
 void FoliageDispatcher::_apply_draw_list(
-    const opennova::renderer::FoliageDrawList &p_draw_list) {
+    const opennova::renderer::FoliageDrawList &p_draw_list, DrawSet &r_set,
+    bool p_mirror_debug) {
   // 1) Upload every detail mesh the compiler built this frame (empty builds
   // cache an empty entry so repeated submissions of a barren identity stay
   // cheap). The MODEL tier draws the slots' normalized meshes, instanced.
@@ -1986,9 +2105,9 @@ void FoliageDispatcher::_apply_draw_list(
     // finds for it; a patch with no resident page is not drawn at all (the
     // lookup's null result skips the patch's slot draw), so under a Terrain
     // there is no cold fallback. Only a terrain-less preview draws through
-    // the analytic colormap. Retail Foliage_RenderDetailPatches: the lookup
-    // Terrain_FindSectorPatchRT @ 0x60a1de, the null skip @ 0x60a1e6..0x60a1e8
-    // to the slot loop's next iteration @ 0x60a6a2.
+    // the analytic colormap. Retail Foliage_RenderDetailPatches @ 0x609de0:
+    // the Terrain_FindSectorPatchRT lookup (the call @ 0x60a1de), the null
+    // skip @ 0x60a1e6..0x60a1e8 to the slot loop's next iteration @ 0x60a6a2.
     bool page_ready = false;
     float page_layer = 0.0f;
     Vector4 page_projection;
@@ -2016,15 +2135,11 @@ void FoliageDispatcher::_apply_draw_list(
 
     const size_t draw_index = detail ? detail_draw_index++ : model_draw_index++;
     std::vector<DrawInstanceStamp> &stamps =
-        detail ? detail_draw_stamps_ : model_draw_stamps_;
+        detail ? r_set.detail_stamps : r_set.model_stamps;
     if (server == nullptr || !scenario_bound) {
       continue;
     }
-    const RID draw = detail
-                         ? _ensure_draw_instance(server, detail_draw_pool_,
-                                                 stamps, draw_index, false)
-                         : _ensure_draw_instance(server, model_draw_pool_,
-                                                 stamps, draw_index, true);
+    const RID draw = _ensure_draw_instance(server, r_set, draw_index, !detail);
     if (!draw.is_valid()) {
       continue;
     }
@@ -2048,7 +2163,7 @@ void FoliageDispatcher::_apply_draw_list(
     } else {
       // The MultiMesh content: the slot mesh and this submission's blocks.
       // A resident cache entry's blocks only change with its revision.
-      const RID multimesh = model_multimesh_pool_[draw_index];
+      const RID multimesh = r_set.model_multimesh_pool[draw_index];
       if (fresh || stamp.mesh != mesh) {
         server->multimesh_set_mesh(multimesh, mesh->get_rid());
         ++frame_stats_.backend_base_writes;
@@ -2180,16 +2295,20 @@ void FoliageDispatcher::_apply_draw_list(
   }
   // Pool instances past this frame's command count held the previous frame's
   // draws: hide them once (they stay hidden until rebound).
-  _hide_pool_tail(detail_draw_pool_, detail_draw_stamps_, detail_draw_index,
+  _hide_pool_tail(r_set.detail_pool, r_set.detail_stamps, detail_draw_index,
                   false);
-  _hide_pool_tail(model_draw_pool_, model_draw_stamps_, model_draw_index, true);
+  _hide_pool_tail(r_set.model_pool, r_set.model_stamps, model_draw_index, true);
 
   // 3) A regenerated identity may still have been submitted earlier in this
   // same draw_list. Draw instances retain its Ref<ArrayMesh>; remove cache ownership
   // only after every command has consumed the frame.
   _erase_cache_identities(p_draw_list.detail_evicted, detail_mesh_cache_);
 
-  // 4) Mirror the draw list's debug counters into the stable stats surface.
+  // 4) Mirror the draw list's debug counters into the stable stats surface
+  // (the main view's list only).
+  if (!p_mirror_debug) {
+    return;
+  }
   const opennova::renderer::FoliageFrameDebugCounters &debug = p_draw_list.debug;
   frame_stats_.detail_cells = debug.detail_cells;
   frame_stats_.silhouette_anchors_input = debug.silhouette_anchors_input;

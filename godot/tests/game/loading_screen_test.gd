@@ -3,8 +3,8 @@ extends GutTest
 ## The mission loading screen (LoadingScreen): the sidecar-image rule, the
 ## game-type text mapping, exact stage progress and fill arithmetic, and
 ## the SP-vs-MP text split — each against the witnessed original behavior
-## [orig: render_loading_screen @ 0x521d10, HUD_GetLoadingScreenTextByGameType
-## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, draw_progress_bar_0
+## [orig: Render_LoadingScreen @ 0x521d10, HUD_GetLoadingScreenTextByGameType
+## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, HUD_DrawProgressBar_0
 ## @ 0x5d4c40].
 
 const LoadingScreen := preload("res://game/ui/loading_screen.gd")
@@ -193,15 +193,9 @@ func test_background_availability_is_publicly_observable() -> void:
 func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
 	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	add_child(screen)
-	var preparable := screen.has_method("prepare_for_blocking_load")
-	assert_true(preparable,
-		"a mounted loading screen exposes the frame-registration handoff")
-	if not preparable:
-		return
 	var frame_before := Engine.get_process_frames()
 	var operation := WorldLoadOperation.new()
-	var prepared: bool = bool(await screen.call(
-			"prepare_for_blocking_load", operation))
+	var prepared: bool = bool(await screen.prepare_for_blocking_load(operation))
 	assert_true(prepared)
 	assert_gte(Engine.get_process_frames(), frame_before + 2,
 		"one ordinary frame must complete before the blocking load begins")
@@ -211,12 +205,8 @@ func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
 
 func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
 	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
-	var preparable := screen.has_method("prepare_for_blocking_load")
-	assert_true(preparable)
-	if not preparable:
-		return
 	var operation := WorldLoadOperation.new()
-	assert_false(bool(await screen.call("prepare_for_blocking_load", operation)),
+	assert_false(bool(await screen.prepare_for_blocking_load(operation)),
 		"there is no frame to present before the Control enters the SceneTree")
 
 

@@ -234,7 +234,7 @@ static void test_change_group_ai_fans_pools_2_0_1() {
 // shared destroy (a brain holding the row as its priority target lets go).
 // SSN 0, group 0 and a non-authority peer do nothing, and no live recount
 // follows the group removal.
-// [orig: find_entity_by_parent_and_dispatch @0x43e210 — SSN 0 @0x43e214,
+// [orig: Entity_FindByParentAndDispatch @0x43e210 — SSN 0 @0x43e214,
 //  authority @0x43e21c; Entity_TeleportAllByNetId @0x43d5d0 — group 0
 //  @0x43d5d5, authority @0x43d5dd, pools 2,0,1,3 @0x43d615/@0x43d646/
 //  @0x43d677/@0x43d6a8; Server_RemoveEntityAndNotify @0x50a270 — the 0x12 send

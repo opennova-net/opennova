@@ -65,7 +65,7 @@ static bms::Event simple_event(bms::EventFlags flags, int action_index) {
 static void test_bms_to_wac_shared_var() {
     World w;
     // A mission only advances while a human is in the world - retail holds the
-    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
+    // WAC tick and the BMS event pump on `g_WacVarHumans || !g_WacVarTicks`
     // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
     // so they stand a player up; the empty-server hold has its own test.
     w.cached.humans = 1;
@@ -137,7 +137,7 @@ static void test_wac_to_bms_shared_var() {
 // A mission WAC script can tune the global infantry aim spread, and the AI pass
 // consumes the new value. Retail resolves `accuracyspread` through the writable
 // named-value table, then reads that same dword in the sawtooth aim-error formula.
-// [orig: WacScript_ResolveParameter @0x4f2920 -> wac_var_accuracyspread
+// [orig: WacScript_ResolveParameter @0x4f2920 -> g_WacVarAccuracySpread
 // @0xC6EAE8; Entity_UpdateInfantryAI @0x4bc5ea]
 static void test_wac_accuracyspread_drives_npc_aim() {
     World w;
@@ -1988,7 +1988,7 @@ static void test_bluewin_ends_round() {
 
 // An EMPTY host must not burn through its mission. Retail wraps the WAC tick,
 // the idle sweep and the BMS event pump in one condition whose live half is
-// `wac_var_humans || !wac_var_ticks`: once the VM has run at all, the whole
+// `g_WacVarHumans || !g_WacVarTicks`: once the VM has run at all, the whole
 // script HOLDS until a human is in the world.
 //
 // This is not academic. 05TRcoop's event 40 is "group 1 is NOT within area 6"
@@ -2247,8 +2247,8 @@ static void test_structural_bms_actions() {
         entity.group_id = 2;
         entity.team = 1;
         entity.alive = true;
-        entity.flags = world::kEntityFlagBuilding;
-        entity.engine_flags = world::kEntityFlagBuilding;
+        entity.flags = world::kEntityFlagMatrixBuilt;
+        entity.engine_flags = world::kEntityFlagMatrixBuilt;
         entity.position = {-1.0f, -2.0f, -3.0f};
         return entity;
     };
@@ -2319,11 +2319,11 @@ static void test_structural_bms_actions() {
     }
     CHECK(w.registry.get(pool0_h)->spawn_position.x == 10.0f);
     CHECK((w.registry.get(pool0_h)->engine_flags &
-           world::kEntityFlagBuilding) != 0);
+           world::kEntityFlagMatrixBuilt) != 0);
     CHECK((w.registry.get(pool1_h)->engine_flags &
-           world::kEntityFlagBuilding) == 0);
+           world::kEntityFlagMatrixBuilt) == 0);
     CHECK((w.registry.get(pool2_h)->engine_flags &
-           world::kEntityFlagBuilding) == 0);
+           world::kEntityFlagMatrixBuilt) == 0);
     CHECK(pool1_ai.pos[0] == (10 << 16));
     CHECK(pool1_ai.pos[1] == (20 << 16));
     CHECK(pool1_ai.pos[2] == (30 << 16));
@@ -2336,12 +2336,12 @@ static void test_structural_bms_actions() {
     CHECK(w.registry.get(pool0_h)->group_id == 7);
 
     w.registry.get(pool0_h)->position = {};
-    w.registry.get(pool0_h)->engine_flags |= world::kEntityFlagBuilding;
+    w.registry.get(pool0_h)->engine_flags |= world::kEntityFlagMatrixBuilt;
     dispatch(bms::ActionType::SingleTeleportAction, 100, 9);
     CHECK(w.registry.get(pool0_h)->position.x == 10.0f);
     CHECK(w.registry.get(pool0_h)->spawn_position.z == 30.0f);
     CHECK((w.registry.get(pool0_h)->engine_flags &
-           world::kEntityFlagBuilding) == 0);
+           world::kEntityFlagMatrixBuilt) == 0);
     CHECK((w.registry.get(pool0_h)->flags & world::kEntityFlagParachute) != 0);
     CHECK((w.registry.get(pool0_h)->engine_flags &
            world::kEntityFlagParachute) != 0);

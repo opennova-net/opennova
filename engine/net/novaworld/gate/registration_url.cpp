@@ -7,7 +7,7 @@
 namespace opennova {
 
 // (jodemo Auth_ParseRegistrationURL @0x514c40 was the demo-era anchor.)
-// [orig: parse_connection_query_string @0x54dfb0 — HOSTKEY= preempts @0x54e0be; NK/CK are decoded
+// [orig: URL_ParseConnectionQueryString @0x54dfb0 — HOSTKEY= preempts @0x54e0be; NK/CK are decoded
 //  with the cipher keys @0x7d3f30 / @0x7d3f04 ('&'-terminated), NI/NP/BK/GS are copied plain,
 //  LN is `atol`'d @0x54e33e]
 
@@ -92,7 +92,7 @@ bool registration_url_parse(std::string_view url,
 		out.bank_key = extract_plain_value(url, bk);
 	}
 	// [orig: LN= copied '&'-terminated then `*lobby_num = atol(temp_str)` @0x54e33e;
-	//  GS= copied '&'-terminated into gs_buf @0x54e38a (never read afterwards)]
+	//  GS= copied '&'-terminated into g_GsBuf @0x54e38a (never read afterwards)]
 	if (const size_t ln = find_token(url, "LN="); ln != std::string_view::npos) {
 		out.ln = static_cast<int>(std::atol(extract_plain_value(url, ln).c_str()));
 	}

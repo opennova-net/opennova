@@ -1,8 +1,9 @@
 // The post-particle overlay tail (runtime/renderer/scene_overlay): the
-// witnessed slot order of the main scene and the mirror, the per-view murk
-// gate, and the four builders' pass states.
+// witnessed slot order of the main scene, the mirror and the weapon Inset
+// pass, the per-view murk gate, and the four builders' pass states.
 // [orig: Terrain_RenderWorldScene @ 0x5c9695..0x5c9714;
-//  Water_RenderReflectedWorldScene @ 0x5c85fd]
+//  Water_RenderReflectedWorldScene @ 0x5c85fd; Render_WeaponInsetScene
+//  @ 0x5c9de9]
 
 #include <runtime/renderer/scene_overlay.h>
 #include <runtime/renderer/tracer_frame.h>
@@ -33,7 +34,7 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 	CHECK(kSceneOverlayOrder[3] == SceneOverlaySlot::WaterGlint);
 	CHECK(kSceneOverlayOrder[4] == SceneOverlaySlot::UnderwaterMurk);
 	CHECK(kSceneOverlayOrder[5] == SceneOverlaySlot::SunGlare);
-	// The mirror draws the coronas (@ 0x5c85fd), then render_main_scene's dim
+	// The mirror draws the coronas (@ 0x5c85fd), then Render_MainScene's dim
 	// (@ 0x5c186c) and the far-band sun/moon and glow redraw (@ 0x5c18fb,
 	// @ 0x5c1904).
 	CHECK(kMirrorOverlayOrder.size() == 4);
@@ -78,8 +79,97 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 		CHECK(batch.slot == SceneOverlaySlot::LightCoronas);
 }
 
+// The weapon Inset pass runs the same scene core with (view, 0, 0, 0)
+// (@ 0x5c9de9): the main tail in the main order, every draw its own over its
+// own camera (the beams @ 0x5c9695, the precipitation @ 0x5c96a6, the
+// coronas @ 0x5c96ad, the glint @ 0x5c96c0), minus the glare its second
+// argument gates (@ 0x5c970e); the murk is the shared batch.
+void test_the_inset_tail_draws_its_own_walks_and_no_glare() {
+	CHECK(kInsetOverlayOrder.size() == 5);
+	CHECK(kInsetOverlayOrder[0] == SceneOverlaySlot::InsetNvgLaserBeams);
+	CHECK(kInsetOverlayOrder[1] == SceneOverlaySlot::InsetPrecipitation);
+	CHECK(kInsetOverlayOrder[2] == SceneOverlaySlot::InsetLightCoronas);
+	CHECK(kInsetOverlayOrder[3] == SceneOverlaySlot::InsetWaterGlint);
+	CHECK(kInsetOverlayOrder[4] == SceneOverlaySlot::UnderwaterMurk);
+
+	// One frame carries both views' draws, submitted main then Inset, the
+	// Inset's out of order: each view compiles only its own, in its order.
+	SceneOverlayFrame frame;
+	const float rgb[3] = {0.2f, 0.4f, 0.6f};
+	const float tri[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+	const float uv[6] = {0, 0, 1, 0, 0, 1};
+	const float unit[3] = {1.0f, 1.0f, 1.0f};
+	std::vector<LightCoronaQuad> main_quads(2);
+	std::vector<LightCoronaQuad> inset_quads(1);
+	PrecipitationDrawFrame rain;
+	rain.drops = 1;
+	rain.vertices = {0, 0, 0, 0.5f, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1};
+	TracerRibbonFrame ribbons;
+	ribbons.vertices.resize(4);
+	ribbons.indices = {0, 1, 2, 1, 3, 2};
+	TracerDraw beam;
+	beam.index_count = 6;
+	ribbons.draws.push_back(beam);
+	const SceneOverlayFog fog;
+	append_nvg_laser_overlay(ribbons, 1, fog, frame);
+	append_precipitation_overlay(rain, 2, frame);
+	append_corona_overlay(main_quads, 3, frame);
+	append_self_lum_overlay(SceneOverlaySlot::WaterGlint, tri, uv, 3, rgb, unit, 1.0f, 7, frame);
+	append_self_lum_overlay(SceneOverlaySlot::SunGlare, tri, uv, 3, rgb, unit, 1.0f, 7, frame);
+	append_self_lum_overlay(SceneOverlaySlot::InsetWaterGlint, tri, uv, 3, rgb, unit, 1.0f, 8,
+			frame);
+	append_corona_overlay(inset_quads, 3, frame, SceneOverlaySlot::InsetLightCoronas);
+	append_precipitation_overlay(rain, 2, frame, SceneOverlaySlot::InsetPrecipitation);
+	append_nvg_laser_overlay(ribbons, 1, fog, frame, SceneOverlaySlot::InsetNvgLaserBeams);
+	CHECK(frame.batches.size() == 9);
+	// Each Inset batch keeps the pass state of the main view's.
+	const auto first_of = [&frame](SceneOverlaySlot slot) -> const SceneOverlayBatch * {
+		for (const SceneOverlayBatch &batch : frame.batches)
+			if (batch.slot == slot)
+				return &batch;
+		return nullptr;
+	};
+	const std::pair<SceneOverlaySlot, SceneOverlaySlot> pairs[] = {
+		{SceneOverlaySlot::NvgLaserBeams, SceneOverlaySlot::InsetNvgLaserBeams},
+		{SceneOverlaySlot::Precipitation, SceneOverlaySlot::InsetPrecipitation},
+		{SceneOverlaySlot::LightCoronas, SceneOverlaySlot::InsetLightCoronas},
+		{SceneOverlaySlot::WaterGlint, SceneOverlaySlot::InsetWaterGlint},
+	};
+	for (const auto &pair : pairs) {
+		const SceneOverlayBatch *main = first_of(pair.first);
+		const SceneOverlayBatch *inset = first_of(pair.second);
+		CHECK(main != nullptr && inset != nullptr);
+		if (main == nullptr || inset == nullptr)
+			continue;
+		CHECK(inset->shading == main->shading);
+		CHECK(inset->depth == main->depth);
+		CHECK(inset->geometry == main->geometry);
+		CHECK(inset->texture == main->texture || pair.first == SceneOverlaySlot::WaterGlint);
+	}
+	std::vector<SceneOverlayBatch> list;
+	compile_scene_overlay(frame, kInsetOverlayOrder.data(), kInsetOverlayOrder.size(), list);
+	CHECK(list.size() == 4);
+	if (list.size() == 4) {
+		CHECK(list[0].slot == SceneOverlaySlot::InsetNvgLaserBeams);
+		CHECK(list[1].slot == SceneOverlaySlot::InsetPrecipitation);
+		CHECK(list[2].slot == SceneOverlaySlot::InsetLightCoronas && list[2].vertex_count == 6);
+		CHECK(list[3].slot == SceneOverlaySlot::InsetWaterGlint && list[3].texture == 8);
+	}
+	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
+	CHECK(list.size() == 5);
+	if (list.size() == 5) {
+		CHECK(list[0].slot == SceneOverlaySlot::NvgLaserBeams);
+		CHECK(list[1].slot == SceneOverlaySlot::Precipitation);
+		CHECK(list[2].slot == SceneOverlaySlot::LightCoronas);
+		CHECK(list[3].slot == SceneOverlaySlot::WaterGlint);
+		CHECK(list[4].slot == SceneOverlaySlot::SunGlare);
+	}
+	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
+	CHECK(list.size() == 1 && list[0].slot == SceneOverlaySlot::LightCoronas);
+}
+
 void test_the_murk_gate_includes_the_waterline() {
-	// cmp [eye+0Ch], Env_WaterHeightFixed @ 0x5c96ca / jg @ 0x5c96d1.
+	// cmp [eye+0Ch], g_EnvWaterHeightFixed @ 0x5c96ca / jg @ 0x5c96d1.
 	SceneOverlayFrame frame;
 	const float rgb[3] = {0.1f, 0.2f, 0.3f};
 	append_underwater_murk_overlay(rgb, 0x80 + 96, 10.0f, frame);
@@ -162,7 +252,7 @@ void test_the_builders_carry_the_pass_states() {
 
 void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
 	// The dim: one viewport quad under 0xFF404040, DESTCOLOR / ZERO, ALWAYS
-	// [orig: render_main_scene @ 0x5c1856..0x5c189e].
+	// [orig: Render_MainScene @ 0x5c1856..0x5c189e].
 	SceneOverlayFrame frame;
 	const float tri[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
 	const float uv[6] = {0, 0, 1, 0, 0, 1};
@@ -270,6 +360,7 @@ void test_the_nvg_laser_beam_overlay() {
 int main() {
 	test_the_main_scene_order_and_the_mirror_subset();
 	test_the_mirror_closes_with_the_dim_and_the_far_band_redraw();
+	test_the_inset_tail_draws_its_own_walks_and_no_glare();
 	test_the_murk_gate_includes_the_waterline();
 	test_the_builders_carry_the_pass_states();
 	test_the_nvg_laser_beam_overlay();

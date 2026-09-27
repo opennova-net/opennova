@@ -55,7 +55,7 @@ struct VehiclePanelSlotList {
 // [orig: `if (!(rootEntity->def+84 & 0x40)) vehicle = rootEntity->parent`
 //  @0x434c77..0x434c7e]. Invalid when the player is on foot, when the root
 // carries no vehicle def [orig: the def+613 test @0x434c91]. The writer of
-// rootEntity @0x27235BC is UNWITNESSABLE (all five xrefs read it; the HUD
+// g_HUDRootEntity @0x27235BC is UNWITNESSABLE (all five xrefs read it; the HUD
 // entity-info block is filled from outside the image), so this takes EVERY
 // mount — the list builder's own re-root implies as much — and the panel's
 // only witnessed gate is the interface-texture test in the element

@@ -4,15 +4,15 @@
 // overlays differ, so the surface-shading and fog math live here once.
 //
 // The surface chain is the witnessed TOP-TIER ps.1.4 splat shader
-// [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0, assembled by
-// compile_terrain_pixel_shaders @ 0x605260]:
+// [orig: g_PolyTrnPS14SplatNormalMap source text @ 0x7dece0, assembled by
+// Terrain_CompilePixelShaders @ 0x605260]:
 //   splat = c1*blend.r + c2*blend.g + c3*blend.b        (3-way detail splat)
 //   dp3   = dot(detail2(t3), blendmap)  — only in the SplatNormalMap variant,
 //           selected when polytrn_detailmap2 exists (PS14Splat otherwise)
 //   light = (tile.a*c1 + c0) / 2                        (c1 = LIGHT, c0 = SKY)
 //   out   = light *2 cm *2 dp3 *4 splat
 // EXACTLY ONE normal term: the dual-normal product belonged to the separate
-// ps.1.1 non-splat tier (PolyTrn_PSDualNormalMap) and was wrongly STACKED on
+// ps.1.1 non-splat tier (g_PolyTrnPSDualNormalMap) and was wrongly STACKED on
 // the splat here for years (the gobj-era "v23 dual-normal" chimera) — under
 // the gamma-faithful pipeline (D-RMAT-7) that squared bump contrast and
 // clipped whole regions to white. Corrected 2026-07-06 (D-TRN row in the
@@ -26,7 +26,7 @@
 // color once at their ALBEDO write.
 // The device-global texfilter mode applies to every stage whose texture
 // carries the mip-filter flag bit 3 (retail CGfxDevice_ApplyRenderStates
-// per-stage loop @ 0x67e3b5..0x67e50e; apply_texture_stages @ 0x68084c..
+// per-stage loop @ 0x67e3b5..0x67e50e; CGfxShader_ApplyTextureStages @ 0x68084c..
 // 0x680870), and the reference machine runs the anisotropic mode, so every
 // detail input samples anisotropically. The DBlendmap quadrants are
 // box-mipped in retail (created with flags 0x100001, retail
@@ -41,7 +41,7 @@ uniform sampler2D u_blendmap : filter_linear_mipmap_anisotropic, repeat_disable;
 // map belongs to the ps.1.1 tiers at stage 7.
 // [orig: stage bind @ 0x6043ff (dword_319F998); texcoord transform
 // density2/density @ 0x609810 (dword_31A1814 / dword_31A1810);
-// PolyTrn_PS14SplatNormalMap "dp3 r3, r3, r2; mul_x2" @ 0x605260]
+// g_PolyTrnPS14SplatNormalMap "dp3 r3, r3, r2; mul_x2" @ 0x605260]
 uniform sampler2D u_detail2 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_detail2 = false;
 uniform float u_detail2_density = 8.0;
@@ -57,7 +57,7 @@ uniform float u_detail2_density = 8.0;
 // partially-authored stage sets our top-tier chain does not model
 // (docs/terrain/terrain-re.md, underwater section).
 // [orig: below-water flag @ 0x60FEE0 -> dword_319FB3C @ 0x60915F; live t3
-//  slot swap @ 0x6043f2 (dword_3266E98 <- Water_NoiseColorTexture, authored
+//  slot swap @ 0x6043f2 (dword_3266E98 <- g_WaterNoiseColorTexture, authored
 //  dword_319F998 otherwise); shader select @ 0x6044b1..0x604556; 8/density
 //  texcoord @ 0x609786..0x6097D6]
 uniform sampler2D u_water_noise : filter_linear, repeat_enable;
@@ -71,7 +71,6 @@ uniform sampler2D u_detailmap : filter_nearest_mipmap, repeat_disable;
 // object-model/global defaults.
 uniform vec3 u_sun_light = vec3(0.666667, 0.666667, 0.654902);
 uniform vec3 u_sky_ambient = vec3(0.329412, 0.345098, 0.349020);
-uniform vec3 u_sun_direction = vec3(0.0, 0.70710678, 0.70710678);
 uniform float u_detail_density = 128.0;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 uniform float u_fog_start = 0.0;
@@ -81,10 +80,10 @@ uniform int u_fog_type = 0;
 // layer, render/visual_layers.h): the reflected scene fogs with the dry
 // weather block (EnvironmentState::build_water_mirror_fog), keeps the
 // authored stage 3 (the mirror context's below-water word is 0 — retail
-// render_main_scene @ 0x5c153d), and cuts the terrain at wh - 0.05: the GSysClip
+// Render_MainScene @ 0x5c153d), and cuts the terrain at wh - 0.05: the GSysClip
 // texgen u = y + 0.45 - (wh - 0.1) under AlphaRef 0x80 (retail
-// render_terrain_sector_batch @ 0x6092c6..0x60935b, plane wh - 0.1 from
-// render_main_scene @ 0x5c1561..0x5c1578, armed while wh != 0).
+// Terrain_RenderSectorBatch @ 0x6092c6..0x60935b, plane wh - 0.1 from
+// Render_MainScene @ 0x5c1561..0x5c1578, armed while wh != 0).
 global uniform bool opennova_water_active;
 global uniform float opennova_water_height;
 global uniform vec3 opennova_water_mirror_fog_color;
@@ -99,29 +98,33 @@ float terrain_water_mirror_pass_flag(uint camera_layers, bool in_shadow_pass) {
 // --- The terrain leg of the EffectWorld light pool --------------------------
 // Retail re-draws each terrain batch once more PER pool light (the first
 // opaquely, later ones additively; terrain.gdshader composites the pool with
-// the page and the fogged ordinary pass) through a two-stage projected-
-// texture shader: stage 0 samples the 64x64
-// "texlight2d" disc projected on the ground plane around the light, stage 1
-// the 64x8 "texlightspot1d" strip by height above/below it, both MODULATE2X
-// over the pixel constants c4..c6 the pass uploads (the light colour already
-// folded by 0.5 so stage 0's 2x restores it; stage 1's 2x stays).
-// (retail: the per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
-//  Light_SetupTerrainProjectedPass @0x5AA830; the collect, the 16-per-batch
-//  cap, the authored terrain-disable gate and the constants are portable in
-//  renderer::LightScene::collect_terrain_pass_rows; the two textures are
-//  renderer::falloff_texture_light2d_argb / _spot1d_argb; the projection
-//  contract terrain_light_uv_disc / _height — see
-//  docs/render/render-lighting-re.md.)
+// the page and the fogged ordinary pass). The reference adapter (caps bit
+// 0x100, four stages) draws it with the ps.1.1 program
+//   mov r0, t0; dp3_sat r0, r0_bx2, t1_bx2; mul r0, r0, t2; mul r0, r0, t3;
+//   mul r0, r0, c0
+// over t0 = the cube-normalize map along the light vector, t1 = the batch's
+// detail coefficient map at the detail coordinate, t2 = the 64x64
+// "texlight2d" disc projected on the ground plane around the light, t3 = the
+// same texture at the height above/below it, and c0 = the light colour
+// (retail: the per-light arm of Terrain_RenderSectorBatch @0x6098a5 ->
+//  Light_SetupTerrainProjectedPassPS @0x5aab30, the source @0x7d9fa0; the
+//  collect, the 16-per-batch cap, the authored terrain-disable gate and c0
+//  are portable in renderer::LightScene::collect_terrain_pass_rows, the
+//  textures in renderer::falloff_texture_light2d_argb /
+//  cube_normalize_texel_argb and terrain::build_detail_coefficient_map, the
+//  projections in terrain_light_uv_disc / _height / terrain_light_cube_vector
+//  — renderer/light_terrain_pass.h carries the stage map).
 // Device fold: Godot instance uniforms take neither arrays nor samplers, so
 // the <= 16 rows per patch ride one RGBAF texture row per pool slot (two
-// texels per light: position.xyz + inv_scale, then c4..c6 + the patch's
-// count) and each patch instance carries its slot. The 0x600 shader retail
-// binds addresses CLAMP (sub_680720(this, clamp=1, 0, 0, 0)
-// @0x5a98eb..0x5a98f4) and both textures are created without mips, hence
-// filter_linear + repeat_disable here.
+// texels per light: position.xyz + inv_scale, then c0 + the patch's count)
+// and each patch instance carries its slot. The disc texture is created
+// clamped, bilinear and without mips (flags 0x40001), the cube map as one
+// bilinear level; the coefficient map wraps with the detail textures' device
+// filter. An unbound coefficient map samples black like retail's empty stage.
 uniform sampler2D u_terrain_light_rows : filter_nearest, repeat_disable, hint_default_black;
 uniform sampler2D u_terrain_light_disc : filter_linear, repeat_disable, hint_default_black;
-uniform sampler2D u_terrain_light_strip : filter_linear, repeat_disable, hint_default_black;
+uniform samplerCube u_terrain_light_cube : filter_linear, hint_default_black;
+uniform sampler2D u_terrain_light_normal : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_black;
 uniform bool u_terrain_light_enabled = false;
 const int TERRAIN_LIGHT_ROWS_PER_PATCH = 16;
 
@@ -134,33 +137,38 @@ int terrain_point_light_count(float slot) {
 	return int(texelFetch(u_terrain_light_rows, ivec2(1, int(slot + 0.5)), 0).a + 0.5);
 }
 
-vec3 terrain_point_light_pool(vec3 world_pos, float slot) {
+vec3 terrain_point_light_pool(vec3 world_pos, vec2 detail_uv, float slot) {
 	vec3 sum = vec3(0.0);
 	if (!u_terrain_light_enabled) {
 		return sum;
 	}
 	int row = int(slot + 0.5);
 	int count = int(texelFetch(u_terrain_light_rows, ivec2(1, row), 0).a + 0.5);
+	// t1_bx2: the coefficient texel is the batch's, shared by every light.
+	vec3 normal = texture(u_terrain_light_normal, detail_uv).rgb * 2.0 - 1.0;
 	for (int k = 0; k < TERRAIN_LIGHT_ROWS_PER_PATCH; k++) {
 		if (k >= count) {
 			break;
 		}
 		vec4 posr = texelFetch(u_terrain_light_rows, ivec2(2 * k, row), 0);
-		vec4 pixel = texelFetch(u_terrain_light_rows, ivec2(2 * k + 1, row), 0);
+		vec4 c0 = texelFetch(u_terrain_light_rows, ivec2(2 * k + 1, row), 0);
 		vec3 d = world_pos - posr.xyz;
 		// The mission-space contract (d3d.x = -mission.y, d3d.y = mission.z,
 		// d3d.z = mission.x): disc u = (light.y - p.y) * inv + 0.5,
-		// v = (p.x - light.x) * inv + 0.5; strip u = (p.z - light.z) * inv +
-		// 0.5, v = 0.5. In the Godot frame (x, y-up, z = -mission.y) that is
-		// disc (p.z - light.z, p.x - light.x) and strip (p.y - light.y).
+		// v = (p.x - light.x) * inv + 0.5; height u = (p.z - light.z) * inv +
+		// 0.5, v = 0.5; the cube lookup (light - p) . (x, -y, z) * inv. In the
+		// Godot frame (x, y-up, z = -mission.y) that is disc
+		// (p.z - light.z, p.x - light.x), height (p.y - light.y) and the cube
+		// lookup (light - p).xzy.
 		vec2 disc_uv = vec2(d.z, d.x) * posr.w + 0.5;
-		vec2 strip_uv = vec2(d.y * posr.w + 0.5, 0.5);
+		vec2 height_uv = vec2(d.y * posr.w + 0.5, 0.5);
+		vec3 light_vec = texture(u_terrain_light_cube, -d.xzy * posr.w).rgb * 2.0 - 1.0;
+		// dp3_sat r0, t0_bx2, t1_bx2, then x t2 x t3 x c0 (no doubling
+		// anywhere in the program).
+		float n_dot_l = clamp(dot(light_vec, normal), 0.0, 1.0);
 		vec3 disc = texture(u_terrain_light_disc, disc_uv).rgb;
-		vec3 strip = texture(u_terrain_light_strip, strip_uv).rgb;
-		// Stage 0 MODULATE2X (c * disc) x2, stage 1 MODULATE2X (prev * strip)
-		// x2: the explicit 2 * 2 is the witnessed fold, with the 0.5 already
-		// inside pixel.rgb.
-		sum += 2.0 * 2.0 * pixel.rgb * disc * strip;
+		vec3 height = texture(u_terrain_light_disc, height_uv).rgb;
+		sum += n_dot_l * disc * height * c0.rgb;
 	}
 	return sum;
 }
@@ -202,14 +210,14 @@ vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {
 }
 
 // NovaLogic terrain surface shading — the witnessed ps.1.4 splat chain
-// [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0]. No fog/overlays — callers
+// [orig: g_PolyTrnPS14SplatNormalMap source text @ 0x7dece0]. No fog/overlays — callers
 // layer those on top. Colormap/detail UVs come from the caller's geometry
 // (runtime: baked patch mesh; editor: sculpted heightmap mesh).
 vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 		vec2 detail_uv, vec2 blendmap_uv, vec2 quadrant, bool below_water) {
 	// Stage 2 has its own transform: flat sectors collapse only this input,
 	// while stages 1 and 3 keep their independent detail/noise coordinates.
-	// [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0;
+	// [orig: Terrain_RenderSectorBatch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0;
 	// PolyTrn_InitTextures @ 0x60AAA0, stage 2/3 binds @ 0x60C400..0x60C411]
 	vec2 blend_uv = clamp_retail_quadrant_uv(
 		blendmap_uv, quadrant, textureSize(u_blendmap, 0));
@@ -225,7 +233,7 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	// authored density, dp3'd with the normalized blend and doubled. Maps
 	// without a second detail run the PS14Splat variant, which has no such
 	// stage — the factor is exactly 1.
-	// [orig: PolyTrn_PS14SplatNormalMap vs PS14Splat @ 0x605260; selection on
+	// [orig: g_PolyTrnPS14SplatNormalMap vs PS14Splat @ 0x605260; selection on
 	// detailmap2 presence @ 0x604544/0x6044e8; stage-3 bind @ 0x6043ff]
 	float normal_factor = 1.0;
 	if (u_has_detail2) {
@@ -249,10 +257,10 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	// overlays write RGB only); raw authored colormap alpha is cleared by the
 	// base pass and never reaches t0.
 	// [orig: PolyTrn_RenderTile @ 0x60da70; Terrain_GenerateNormalMap
-	// @ 0x603210; terrain_setup_lighting_and_shader @ 0x604420 pushes
-	//  c0 <- PolyTrn_PSConstC0_SkyColorR @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light
-	//  @ 0x31a182c; values from init_terrain_lighting_color_ramps @ 0x604ee0
-	//  <- Render_TerrainScene @ 0x610c80 (Env_LightBlock / Env_SkyBlock)]
+	// @ 0x603210; Terrain_SetupLightingAndShader @ 0x604420 pushes
+	//  c0 <- g_PolyTrnPSConstC0SkyColorR @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light
+	//  @ 0x31a182c; values from Terrain_InitLightingColorRamps @ 0x604ee0
+	//  <- Render_TerrainScene @ 0x610c80 (g_EnvLightBlock / g_EnvSkyBlock)]
 	vec3 ambient = (cm.a * u_sun_light + u_sky_ambient) * 0.5;
 
 	// mul_x2 twice, then mul_x4 [orig: @ 0x7dece0 tail]:

@@ -400,6 +400,22 @@ int main(void) {
         if (!correct) { fprintf(stderr, "FAIL: armor_density class columns\n"); return 1; }
     }
 
+    {
+        // The blast's per-victim presentation names [orig: AmmoDef_ParseProperty
+        // @0x40aa15 'secondary_effect' -> +0x48, @0x40a92a 'kz_sound' -> +0x4C].
+        static const char text[] =
+                "ammo BURN\n secondary_effect Effect_Burn\n kz_sound EXPLO_BURN\nend\n";
+        DefAmmoFile parsed{};
+        if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text)-1,
+                                  &parsed) != 0 || parsed.count != 1)
+            return 1;
+        const auto &row = parsed.entries[0];
+        const bool correct = strcmp(row.secondary_effect, "Effect_Burn") == 0 &&
+                strcmp(row.kz_sound, "EXPLO_BURN") == 0;
+        def_free_ammo(&parsed);
+        if (!correct) { fprintf(stderr, "FAIL: secondary_effect / kz_sound\n"); return 1; }
+    }
+
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/ammo.def (the shipped ammo table)");
     printf("PASS: ammo parsing OK\n");

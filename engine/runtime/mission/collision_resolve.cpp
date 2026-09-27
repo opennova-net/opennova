@@ -9,6 +9,7 @@
 #include <base/io/strutil.h>
 #include <formats/mission/mission.h> // kItemIdOffset
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
+#include <runtime/world/person_overlays.h> // kParachuteItemTypeId
 
 #include <algorithm>
 #include <cmath>
@@ -114,7 +115,7 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 				occlusion_id = deps.occlusion.add_model(std::move(occ));
 			bound_radius_q16 = world::model_bound_radius_q16_from_3di(*m3);
 			// The minimap blip-size source: the CMDL bound-block ground-axis
-			// half extents. [orig: draw_minimap_blip @0x5979a2..0x5979b8 —
+			// half extents. [orig: Minimap_DrawBlip @0x5979a2..0x5979b8 —
 			//  model+176: half = (max - min) >> 1 per ground axis]
 			if (m3->collision != nullptr) {
 				const ThreediCollisionModelData &bd =
@@ -159,7 +160,7 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 // the 1-based table index (0 = none). The weapon-def userpoint (+0x333) is
 // not carried (weapon.def+856 is unparsed).
 // [orig: Entity_InitBoneReferences @0x441470 (@0x4414e0..0x4415aa);
-//  Entity_ResolveBoneUserpoints @0x545940; modelgpm_FindUserpointByName
+//  Entity_ResolveBoneUserpoints @0x545940; ModelGPM_FindUserpointByName
 //  @0x5b21ef]
 static uint8_t userpoint_index_by_name(const Threedi3di3 &model, const char *name) {
 	if (name == nullptr || name[0] == '\0' || model.user_points == nullptr) return 0;
@@ -234,6 +235,18 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 	shape.model_id = collision_model_for_graphic(state, deps, key);
 	shape.uniform_scale_q16 = def->scale_q16;
 	shape.has_collision_block = state.collision_block_by_graphic[key];
+	// The row's render model, as resolve_collision_instances stamps a placed
+	// entity's (the same producer, the entity-init form).
+	if (const Threedi3di3 *render_model =
+				deps.models.has_source() ? deps.models.model(key).get() : nullptr) {
+		const renderer::ObjectProjectionSphere sphere =
+				world::collision_projection_sphere_from_3di(*render_model, 0, 0,
+						world::item_def_zero_bbox_center(def->type, def->attrib));
+		shape.has_render_model = true;
+		shape.render_sphere_center_q16 = world::FixedVec3{
+				sphere.center_q16[0], sphere.center_q16[1], sphere.center_q16[2]};
+		shape.render_sphere_radius_q16 = sphere.radius_q16;
+	}
 	if (!shape.has_collision_block) return shape;
 
 	world::EntityBoundRadiusInputs bound;
@@ -297,6 +310,21 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				? visual_item_id_for_runtime_type(e->item_id, items)
 				: static_cast<int>(e->item_id) + mission::kItemIdOffset;
 		const DefItemDef *def = find_item_def(items, def_id);
+		// The collectors' render model: every entity whose graphic loads carries
+		// its CMDL sphere (the entity-init form, radius 0 without a collision
+		// block), whatever its collision geometry; an entity without one is
+		// never collected. [orig: Entity_InitFromModel @ 0x40df06..0x40dfac;
+		// the entity+0x30 gates @ 0x5c6fd8..0x5c6fe1 / @ 0x5c8cf6..0x5c8cff]
+		const Threedi3di3 *render_model =
+				def != nullptr && def->graphic[0] != '\0' && deps.models.has_source()
+				? deps.models.model(std::string(def->graphic)).get()
+				: nullptr;
+		if (render_model != nullptr) {
+			deps.occlusion.assign_render_model(h, world::collision_projection_sphere_from_3di(
+					*render_model, 0, 0, world::item_def_zero_bbox_center(def->type, def->attrib)));
+		} else {
+			deps.occlusion.remove_render_model(h);
+		}
 		if (def == nullptr || def->graphic[0] == '\0') continue;
 		const std::string key(def->graphic);
 		const int32_t resolved_model = collision_model_for_graphic(state, deps, key);
@@ -622,7 +650,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				const Threedi3di3 *piece_m3 =
 						final_husk_m3 != nullptr ? final_husk_m3 : first_husk_m3;
 				// The interned death masks and all three banks use final-husk first.
-				// [orig: resolve_item_materials_and_spawn_bone_trails @0x522EE0]
+				// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0]
 				if (piece_m3 != nullptr) {
 					const char *names[3] = { "Dead", "Fire", "Other" };
 					for (int bank = 0; bank < 3; ++bank) {
@@ -858,7 +886,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		e->has_minimap_model_marker = occ_id >= 0;
 		// The blip drawer reads the raw model bound block rather than the entity
 		// placement matrix, so authored scale deliberately does not fold here.
-		// [orig: draw_minimap_blip @0x5979a2..0x5979b8]
+		// [orig: Minimap_DrawBlip @0x5979a2..0x5979b8]
 		const std::pair<float, float> &half_xy = state.half_xy_by_graphic[key];
 		e->minimap_half_x_q16 = static_cast<int32_t>(half_xy.first * 65536.0f);
 		e->minimap_half_y_q16 = static_cast<int32_t>(half_xy.second * 65536.0f);
@@ -901,11 +929,11 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 	}
 	// The person collector's parachute radius: the special item-185 model's
 	// GHDR radius, unscaled. [orig: Entity_PreloadSpecialItems @ 0x43C220 loads
-	// the model; collect_visible_entities_for_terrain reads model+0x14
+	// the model; Terrain_CollectVisibleEntitiesForTerrain reads model+0x14
 	// @ 0x5c8e10]
 	if (deps.models.has_source()) {
 		const DefItemDef *chute = find_item_def(
-				items, mission::kItemIdOffset + renderer::kParachuteProjectionTypeId);
+				items, mission::kItemIdOffset + world::kParachuteItemTypeId);
 		const Threedi3di3 *chute_model = chute != nullptr && chute->graphic[0] != '\0'
 				? deps.models.model(std::string(chute->graphic)).get()
 				: nullptr;

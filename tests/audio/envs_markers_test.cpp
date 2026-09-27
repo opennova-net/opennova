@@ -56,6 +56,14 @@ bms::Entity placed(int32_t type_id, int32_t id, int32_t x_fixed) {
 	return e;
 }
 
+// The fixture entry with this items.def id, or null.
+const DefItemDef *entry(const DefItemsFile &items, int32_t id) {
+	for (size_t i = 0; i < items.count; ++i) {
+		if (items.entries[i].id == id) return &items.entries[i];
+	}
+	return nullptr;
+}
+
 } // namespace
 
 int main() {
@@ -66,13 +74,16 @@ int main() {
 			"fixture items.def parses"))
 		return 1;
 
-	// item_is_envs: move_function OR ai_function, case-insensitive; unknown
-	// ids and untagged items are not envs.
+	// item_is_envs: move_function OR ai_function, case-insensitive; untagged
+	// items are not envs (an unknown id has no def: the walk below skips it).
+	const auto is_envs = [&](int32_t id) {
+		const DefItemDef *def = entry(items, id);
+		return def != nullptr && audio::item_is_envs(*def);
+	};
 	bool ok = true;
-	ok &= expect(audio::item_is_envs(items, 100001), "move_function envs");
-	ok &= expect(audio::item_is_envs(items, 100002), "ai_function ENVS (case)");
-	ok &= expect(!audio::item_is_envs(items, 100003), "untagged item");
-	ok &= expect(!audio::item_is_envs(items, 424242), "unknown id");
+	ok &= expect(is_envs(100001), "move_function envs");
+	ok &= expect(is_envs(100002), "ai_function ENVS (case)");
+	ok &= expect(entry(items, 100003) != nullptr && !is_envs(100003), "untagged item");
 	if (!ok) {
 		def_free_items(&items);
 		return 1;

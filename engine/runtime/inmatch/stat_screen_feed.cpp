@@ -12,7 +12,7 @@ using hud::stat_field_string_index;
 
 std::vector<StatScreenColumn> stat_screen_columns(const EndRoundStats &board,
 		bool show_disabled, int table_width) {
-	// [orig: populate_stat_results_list @0x562240 — the column count
+	// [orig: StatScreen_PopulateStatResultsList @0x562240 — the column count
 	//  @0x562290..0x5622b0, the width split @0x5622c7..0x5622e6, NAME @0x562318,
 	//  "Squad" @0x56236b, the field headers @0x562399..0x56249e]
 	std::vector<StatScreenColumn> out;
@@ -109,7 +109,7 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 }
 
 bool stat_screen_row_visible(int tab_index, uint8_t team) {
-	// [orig: stat_filter_tab_handler @0x562140]
+	// [orig: StatScreen_StatFilterTabHandler @0x562140]
 	if (tab_index == 1) return team == 2;
 	if (tab_index == 2) return team == 1;
 	return true;

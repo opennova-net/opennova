@@ -81,7 +81,8 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   fresh worktree) and run `"$GODOT_BIN" --headless --path godot --import` once, or engine
   classes appear missing.
 - `scripts/test_godot.sh` needs `GODOT_BIN` or a `Godot_v4.6.1-stable_*` binary in
-  `.godot-bin/` (worktrees don't have one — point `GODOT_BIN` at the main checkout's).
+  `.godot-bin/` (the resolver, `scripts/godot_bin.sh`, walks parent directories, so a
+  worktree borrows the main checkout's; export `GODOT_BIN` yourself for direct GUT runs).
 - The GUT suite shares `user://` state and is flaky in full runs. Before believing a
   failure, re-run that one file in isolation (see `godot/tests/CLAUDE.md`).
 - Full ctest is ~90 s. Scope during focused work:

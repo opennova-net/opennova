@@ -42,12 +42,15 @@ public:
 	static Ref<DestructionEffectEvent> make(const String &p_effect, const Vector3 &p_pos,
 			int p_family, const Vector3 &p_dir, int p_attach_net_id, int p_attach_bms_id,
 			int p_attach_wire_handle, int64_t p_attach_spawn_origin, bool p_release,
-			int p_bank_slot = 0, const Vector3 &p_local_pos = Vector3());
+			int p_bank_slot = 0, const Vector3 &p_local_pos = Vector3(),
+			bool p_section_tagged = false, bool p_positioned = false);
 
 	String get_effect() const;
 	Vector3 get_pos() const;
 	Vector3 get_dir() const;
 	bool get_release() const { return value_.release; }
+	bool get_section_tagged() const { return value_.section_tagged; }
+	bool get_positioned() const { return value_.positioned; }
 	int get_bank_slot() const { return value_.bank_slot; }
 	int get_family() const { return static_cast<int>(value_.family); }
 	int get_attach_net_id() const { return static_cast<int>(value_.attach_net_id); }

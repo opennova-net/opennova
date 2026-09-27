@@ -182,7 +182,7 @@ int main() {
 
 		// The CD identity blob the game-session 0x00 JOIN relays is every PUB*
 		// cookie packed [name\0][value\0] in insertion order (host codes 23/24/25).
-		// [orig: config_query_matching_entries @0x64eb70 gather("PUB*") ->
+		// [orig: Config_QueryMatchingEntries @0x64eb70 gather("PUB*") ->
 		//  NapiNP_WriteClientAuthPayload @0x42a180 "CD" TLV]
 		{
 			CookieJar pub_jar;

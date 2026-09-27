@@ -20,8 +20,8 @@
 #                  case, first match; a missing name leaves the child on the
 #                  parent root (engine/runtime/mission/seat_spec_extract.cpp).
 #                  Its frame is the user point's direction look-at through
-#                  the owning part [orig: build_bone_attachment_matrix @
-#                  0x56C630; build_direction_look_at_matrix @ 0x612C90].
+#                  the owning part [orig: Bone_BuildAttachmentMatrix @
+#                  0x56C630; Math_BuildDirectionLookAtMatrix @ 0x612C90].
 # Both bind with every rig of the models at rest, so a pose a clip holds when
 # they are set is not baked into the pairing.
 
@@ -215,7 +215,7 @@ def find_point(model, label):
 
 
 def look_at(direction):
-    """[orig: build_direction_look_at_matrix @ 0x612C90] (the engine's
+    """[orig: Math_BuildDirectionLookAtMatrix @ 0x612C90] (the engine's
     renderer/direction_look_at.h): forward = the direction, right = (f.z, 0,
     -f.x) normalized, up = forward x right; a vertical direction takes the x
     axis as right, as the engine substitutes. Retail stores right, up and
@@ -239,7 +239,7 @@ MIRROR_X = Matrix(((-1, 0, 0), (0, 1, 0), (0, 0, 1)))
 
 def mount_frame(parent, point, forward):
     """The world matrix a child mounted at `point` of `parent` takes, as
-    retail builds it [orig: build_bone_attachment_matrix @ 0x56C630]: the
+    retail builds it [orig: Bone_BuildAttachmentMatrix @ 0x56C630]: the
     position is the point's (-y, z, x), the model axes (@ 0x56c733), but the
     look-at direction is (y, z, x), unmirrored (@ 0x56c769); the look-at
     matrix then multiplies the part's as orient * bone (@ 0x56c786,

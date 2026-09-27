@@ -1,7 +1,7 @@
 /* MUS bytecode VM (interpreter).
 
    Witnessed dispatch loop: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720.
-   Witnessed opcode table: Jointops.exe!AudioVM_OpcodeDispatchTable @ 0x0084F220
+   Witnessed opcode table: Jointops.exe!g_AudioVMOpcodeDispatchTable @ 0x0084F220
    (65 entries, 0x00..0x40). Stack element size = 4 bytes (int32).
    Two stacks: data (EBP-tracked, 256 entries here) + call (EDI-tracked,
    64 frames here). 32-instruction budget per dispatch loop call.
@@ -142,8 +142,8 @@ int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     vm->last_error[0] = 0;
     vm->current_section_name[0] = 0;
 
-    /* Witnessed: Jointops.exe!AudioVM_ScriptInstanceInit @ 0x00672D20
-       initial_pc = section_table[entry_section_index]. */
+    /* Witnessed: Jointops.exe!ScriptInstance_Init @ 0x00672EF0
+       initial_pc = section_table[entry_section_index] (@0x672FB5..0x672FC3). */
     vm->pc = 0;
     if (s->section_count > 0 && s->entry_section_index < s->section_count) {
         const MusSection *entry = &s->sections[s->entry_section_index];
@@ -752,7 +752,7 @@ static inline uint32_t mus_rol32(uint32_t v, int s) {
 }
 
 /* Jointops.exe!AudioVM_Intrinsic_GGRnd @ 0x672320 (byte-exact port).
-   Pops 2 (NOS=lo, TOS=hi). The process-global seed AudioVM_GGRndSeed @ 0x84F210 is
+   Pops 2 (NOS=lo, TOS=hi). The process-global seed g_AudioVMGGRndSeed @ 0x84F210 is
    statically initialised to 0xBABEFACE in the binary and updated in place:
        seed = rol32(seed + rol32(seed, 11), 2)
    Then (asm `and eax,0FFFFh; idiv ecx`): rnd = (seed & 0xFFFF) % span, span = hi-lo+1
@@ -913,8 +913,9 @@ static void intrinsic_fisset(MusVM *vm) {
 
 /* Jointops.exe!AudioVM_Intrinsic_FIsClear @ 0x6723C0: pops 2 (NOS=mask, TOS=&var),
    returns -1 when NONE of the mask bits are set (`(mask & *var) == 0`), else 0.
-   This is a real bound handler in Jointops (idx 8), the inverse of FIsSet. */
-static void intrinsic_fisclear(MusVM *vm) {
+   The inverse of FIsSet. The handler exists in the image but its name never
+   resolves (see init_intrinsics), so it is kept only as the reference body. */
+[[maybe_unused]] static void intrinsic_fisclear(MusVM *vm) {
     int32_t var_addr = vm_pop(vm);
     int32_t mask     = vm_pop(vm);
     int32_t cur = read_tagged(vm, var_addr);
@@ -952,7 +953,6 @@ static void init_intrinsics(void) {
        bound @0x84F20C = 8; the table @0x84F0C8; AudioVM_Op_Method @0x672CF0
        NULL path] (jo-c cross-check 2026-09-10; intrinsic_fisclear stays as the
        reference body). */
-    (void)intrinsic_fisclear;
     kIntrinsics[8]  = intrinsic_unbound;
     kIntrinsics[9]  = intrinsic_unbound;   /* TStart: absent in this build */
     kIntrinsics[10] = intrinsic_unbound;   /* TStop:  absent in this build */

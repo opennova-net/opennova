@@ -9,7 +9,7 @@
 // on its next tick; the interior light group the last sample named rides
 // along for the renderer.
 // [orig: Environment_ApplyFogAndAmbient @ 0x57e512 ->
-//  compute_ambient_light_along_direction @ 0x5c7a00 — retail re-targets from
+//  Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00 — retail re-targets from
 //  the local player's view every render pass]
 
 #include <runtime/world/collision.h>

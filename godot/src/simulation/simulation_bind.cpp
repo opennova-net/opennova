@@ -90,7 +90,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_host_listening"), &Simulation::is_host_listening);
 	ClassDB::bind_method(D_METHOD("get_host_listen_port"), &Simulation::get_host_listen_port);
 	ClassDB::bind_method(D_METHOD("get_host_peer_count"), &Simulation::get_host_peer_count);
-	ClassDB::bind_method(D_METHOD("set_novaworld_gsid", "gsid"), &Simulation::set_novaworld_gsid);
 	ClassDB::bind_method(D_METHOD("configure_host_session", "options"), &Simulation::configure_host_session);
 	ClassDB::bind_method(D_METHOD("get_host_session_config"), &Simulation::get_host_session_config);
 	ClassDB::bind_method(D_METHOD("get_mission_header_size"), &Simulation::get_mission_header_size);
@@ -380,7 +379,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("occlusion_init_mission"),
 	                     &Simulation::occlusion_init_mission);
 	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_y_deg", "aspect",
-	                              "viewport_width", "near", "fog_dist_units", "water_z_units",
+	                              "viewport_width", "fog_dist_units", "water_z_units",
 	                              "force_indoors"),
 	                     &Simulation::run_occlusion_frame);
 	ClassDB::bind_method(D_METHOD("get_building_visibility_changes"),

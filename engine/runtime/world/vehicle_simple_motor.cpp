@@ -240,8 +240,13 @@ void VehicleSystem::tick_simple_motor(
 	vehicle_refresh_ground_link(world_, e, t);
 	vehicle_follow_carrier(world_, e);
 	tick_health(e, t);
-	if (((e.flags | e.engine_flags) & kEntityFlagDead) != 0)
+	// A dead hull jumps to the matrix-build tail, which still sets Flags
+	// 0x20000 [orig: ground @0x46E89D -> @0x46F9AF, OR @0x46F9C5; boat
+	// @0x470398 -> @0x471669, OR @0x471683].
+	if (((e.flags | e.engine_flags) & kEntityFlagDead) != 0) {
+		e.engine_flags |= kEntityFlagMatrixBuilt;
 		return;
+	}
 	Entity *controller = t.player_control ? resolve_controller(e) : nullptr;
 	if (controller != nullptr && (!controller->alive || controller->health <= 0))
 		controller = nullptr;
@@ -284,7 +289,7 @@ void VehicleSystem::tick_simple_motor(
 			// water plane loses the wheel on the ground selector-zero mover too,
 			// not only the boat [orig: Entity_ProcessInfantryPhysics @0x46E100
 			// (site @0x46EA2E..0x46EA3A `add eax,[ecx+0Ch]; cmp eax,
-			// Env_WaterHeightFixed; jle loc_46ECB1` — the AI waypoint leg)].
+			// g_EnvWaterHeightFixed; jle loc_46ECB1` — the AI waypoint leg)].
 			stage_player_vehicle_input(world_, e, *controller, t);
 			m.stuck_ticks = 0;
 		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
@@ -328,7 +333,11 @@ void VehicleSystem::tick_simple_motor(
 	e.yaw = int16_t(std::lround(mission_yaw_deg_from_bam_heading(m.yaw_bam)));
 	e.pitch = int16_t(std::lround(double(m.air_pitch_bam) * 360.0 / 4294967296.0));
 	e.roll = int16_t(std::lround(double(m.air_roll_bam) * 360.0 / 4294967296.0));
-	e.flags |= 0x20000u;
+	// The rebuilt entity matrix sets the matrix bit (Flags 0x20000), homed on
+	// engine_flags, where its clears land.
+	// [orig: Entity_ProcessInfantryPhysics @0x46F9BD, OR @0x46F9C5;
+	//  Entity_ProcessAirVehiclePhysics @0x47167B, OR @0x471683]
+	e.engine_flags |= kEntityFlagMatrixBuilt;
 	slew_turret(e, 34636833);
 	if (boat) {
 		const int32_t contacted_speed = m.speed;

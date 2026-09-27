@@ -44,9 +44,11 @@ void Server_RecordPingSample(const GameConfig &config, NapiNPConnection &conn,
 	uint32_t &cursor = st.rtt_ring[kPingRingCursor];
 	if (++cursor > kPingRingSamples) cursor = 0;  // @0x515141..0x515143
 	st.rtt_ring[cursor] = st.rtt_ms;              // @0x515155 (aliases the cursor at 10)
-	// The policy [orig: @0x515171]: in session, not the local slot, and the
-	// NetPlayer's +216 word clear (no writer on this host).
-	if (!in_session || local_slot) return;
+	// The policy: in session, not the local slot, and a joiner advertising the
+	// DB (debug build) join tag is exempt [orig: @0x515171 — NetPlayer+0xD8 =
+	// NapiNetConfig::db; a stock client uploads 0: CNapiGameSession_BuildAndCreateSession
+	// @0x5694D0 never sets it, CNapiServerInfo_SerializeToSession @0x4C3731 sends it].
+	if (!in_session || local_slot || conn.join_environment.db != 0) return;
 	if (config.do_min_ping_check) {               // @0x515183
 		if (st.rtt_ms >= config.min_ping) {
 			st.min_ping_strikes = 0;                  // @0x5151C9
@@ -81,8 +83,8 @@ void Server_StoreClientQuality(NapiNPConnection &conn, uint8_t reported) {
 }
 
 void Server_EmitQualityResends(NapiNPServerCtx &ctx, const world::World &world) {
-	// [orig: @0x51DE79] is_in_session && !g_preround_delay_timer &&
-	// !g_spawn_success_gate (the latter is not copied into this context).
+	// [orig: @0x51DE79] is_in_session && !g_PreRoundDelayTimer &&
+	// !g_SpawnSuccessGate (the latter is not copied into this context).
 	if (!ctx.is_in_session || world.preround_delay_seconds != 0) return;
 	std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 	const int32_t capacity = static_cast<int32_t>(roster.size());
@@ -122,8 +124,8 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	ctx.net_quality_sample_countdown = kNetQualitySampleFrames;
 	if (!ctx.is_in_session) return;
 	// The pre-round hold clears the send window instead of sampling it
-	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — `g_net_spawn_suspended ||
-	//  g_spawn_success_gate || g_preround_delay_timer` -> CNetStats_ClearSendCounters
+	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — `g_NetSpawnSuspended ||
+	//  g_SpawnSuccessGate || g_PreRoundDelayTimer` -> CNetStats_ClearSendCounters
 	//  @0x4C2F50]; the two spawn gates have no host-side model here.
 	if (ctx.world != nullptr && ctx.world->preround_delay_seconds != 0) {
 		replication::net_quality_window_clear(ctx.host_quality_window);
@@ -150,9 +152,10 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// The slots' loss counters (+100359) are unmodeled: an eligible slot reads 0,
 	// which the loss term floors to 1.
 	const uint32_t avg_ping = active != 0 ? ping_sum / active : 0u;
+	// The frame-pressure term reads the main loop's FR counter
+	// [orig: `mov ecx, g_StatsAvgFps` @0x4C531B].
 	replication::net_quality_window_push(ctx.host_quality_window,
-			replication::net_quality_bandwidth_metric(
-					static_cast<int32_t>(io::kTicksPerSecondInt)),
+			replication::net_quality_bandwidth_metric(ctx.stats_avg_fps),
 			active != 0 ? replication::net_quality_host_ping_metric(avg_ping) : 0,
 			active != 0 ? replication::net_quality_loss_metric(0.0) : 0);
 	// S2C 0x79 carries CNetQuality+0x0C, the send window's folded quality.

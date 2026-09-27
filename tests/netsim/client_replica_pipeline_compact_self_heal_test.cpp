@@ -121,7 +121,7 @@ bool run_matching_row_applies() {
 }
 
 // A slot index past the pool's capacity resolves to no slot at all: consumed
-// silently, no row, no request [orig: `slot < g_pool_list[pool].capacity`].
+// silently, no row, no request [orig: `slot < g_PoolList[pool].capacity`].
 bool run_out_of_capacity_handle_is_consumed_silently() {
 	ns::ClientReplicaPipeline view(classify);
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(0x0FFF, kPlayerType));

@@ -34,8 +34,8 @@ struct MenuFrameCompiler::WidgetNode {
 	int frame_owner = -1;
 	int32_t frame_stencil = kMenuTexNone;
 	int32_t frame_brush = kMenuTexNone;
-	// The inherited CURSOR texture [orig: widget_process_mouse_event
-	// @ 0x647a00 walks parents for +276 into g_ui_frame_cursor_texture].
+	// The inherited CURSOR texture [orig: CWnd_ProcessMouseEvent
+	// @ 0x647a00 walks parents for +276 into g_UIFrameCursorTexture].
 	int32_t cursor = kMenuTexNone;
 	// Spin arrows: default-state art (their independent hover states are
 	// child-widget state the compiled path defers — D-MNU-13).

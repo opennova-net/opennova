@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -11,6 +12,7 @@
 #include <net/npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
 
 #include <runtime/replication/client_state.h>
+#include <runtime/replication/item_replication_catalog.h>
 #include <runtime/inmatch/session_transport.h>
 
 namespace opennova::world {
@@ -77,8 +79,8 @@ public:
 	// keep their slot's lifetime refreshed and clear it when they lapse.
 	// Regular (non-special) markers refresh pose/known from the decoded
 	// entity, mirroring retail's draw-time pool read.
-	// [orig: update_map_overlay_timers @0x5BFCE0;
-	//  render_minimap_slot_blip @0x5be4ac]
+	// [orig: MapOverlay_UpdateTimers @0x5BFCE0;
+	//  Render_MinimapSlotBlip @0x5be4ac]
 	void tick_minimap_overlays();
     using GuidedRoundResolver = std::function<world::LiveRound *(int16_t)>;
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
@@ -165,7 +167,7 @@ public:
 
 	// Mission water plane for the replica water/float channel (16.16;
 	// has_water false = no water in this world). Fed per pump by the
-	// embedder from the env state [orig: Env_WaterHeightFixed @ 0x26C6454].
+	// embedder from the env state [orig: g_EnvWaterHeightFixed @ 0x26C6454].
 	void set_water_z(int32_t z, bool has_water) {
 		water_z_ = z;
 		has_water_ = has_water;
@@ -265,6 +267,12 @@ public:
 	// frame. nullopt falls through to the learned map, then the phase-1 resolver;
 	// a present Unknown is a known unresolved definition and fails closed.
 	void set_item_class_resolver(ItemClassResolver resolver);
+	// Install the embedder's items.def catalog, the one table the host's traits
+	// sweep reads too. Its wire classes become the classifier above, and each
+	// type's def facts (the def type +0x5C, the EWeap attrib +0x54 bit 0x20)
+	// feed the destroy's refNum walk (erase_entity_tree). Without a catalog a
+	// row has no def and the walk never runs. Null clears both.
+	void set_item_catalog(std::shared_ptr<const ItemReplicationCatalog> catalog);
 
 	// Inject the embedder's .adm root-motion source (JOINER role): armed rows
 	// (rm_adm_id >= 0, stamped by the embedder) advance their own AnimMap
@@ -295,7 +303,7 @@ public:
 	bool game_type_known() const { return game_type_known_; }
 
 	// The 0x1D header-form discriminator's session half: retail reads
-	// g_napi_np_ctx.is_in_session; a joiner is always in-session, while the
+	// g_NapiNPCtx.is_in_session; a joiner is always in-session, while the
 	// listen host's loopback replica passes world.mp_session (retail SP never
 	// runs this client path at all). [orig: NapiNPClientMsg_0x01D @0x43086c]
 	void set_mp_session(bool mp_session) { mp_session_ = mp_session; }
@@ -392,6 +400,10 @@ private:
 	int32_t water_z_ = 0;
 	bool has_water_ = false;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
+	std::shared_ptr<const ItemReplicationCatalog> item_catalog_; // the items.def def facts
+	// A row's def as the destroy reads it (entity+0x20): its wire type's
+	// catalog profile, or null without a catalog or a definition.
+	const ItemReplicationProfile *item_def(uint16_t type_id) const;
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;

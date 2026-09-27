@@ -1,5 +1,7 @@
 #pragma once
 
+#include <base/pcapio/pcap_reader.h> // PcapDatagram (build_pcap_udp's input)
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -38,10 +40,20 @@ void append_pcap_udp_record(std::vector<uint8_t> &out, uint32_t src_ip,
 		uint16_t src_port, uint32_t dst_ip, uint16_t dst_port,
 		const uint8_t *payload, size_t len, uint64_t ts_nanos);
 
+// Build a minimal legacy pcap (DLT_RAW: one synthetic IPv4+UDP frame per
+// datagram) in memory — for crafting tiny inline captures in tests. Only
+// srcport/dstport/ts_nanos/payload are used; src/dst IPs are 127.0.0.1. The
+// timestamp is written at microsecond resolution (ts_nanos truncated), so the
+// result round-trips through read_pcap_udp() at that resolution. The
+// whole-session-in-memory form of PcapUdpWriter below: both frame through the
+// two append_* functions above, so the record layout cannot drift between
+// what we write live and what tests assert against.
+std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams);
+
 // A capture file that grows as datagrams arrive, rather than buffering the
 // session and serializing at the end — a match runs for minutes at 62 Hz, so
-// the whole-session-in-memory shape build_pcap_udp() has (fine for the tiny
-// inline captures tests craft) is the wrong one here.
+// build_pcap_udp()'s whole-session-in-memory shape (fine for the tiny inline
+// captures tests craft) is the wrong one here.
 class PcapUdpWriter {
 public:
 	PcapUdpWriter() = default;

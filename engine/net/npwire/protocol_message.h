@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <base/io/tick_rate.h>
 #include <cstdint>
@@ -125,6 +126,31 @@ inline constexpr uint16_t PROTOCOL_TAG_CONNECTION_DESCRIPTION =
         PROTOCOL_FULL_TAG_HIGH_BASE | hightag::DESCRIPTION_PACKET;
 static_assert(PROTOCOL_TAG_CONNECTION_DESCRIPTION == 0x103,
               "witnessed wire value; the composition must not drift");
+
+// One hightag::CS_CONFIG_UPDATE body, `[dir:u8][mask:u32][u32 per set bit]`, read
+// the way the receiver reads it. The direction is the first byte (0 on an empty
+// body) and ANY nonzero byte selects cs_dir0; the mask is read only when four
+// bytes follow it (else 0, a no-op). The set bits are walked low bit first while
+// bytes remain: a set bit reads four bytes when they fit and stores 0 WITHOUT
+// advancing when they do not; slots 0..14 are stored, higher bits are consumed and
+// dropped. There is no length rule, so an overlong tail is ignored. Retail shifts
+// the mask arithmetically, so a mask with bit 31 set over a 1..3-byte tail never
+// terminates there; walking the 32 bit positions stores the same slots. The host's
+// allow gate (is_server && dir != 0 && cs_dir0 field 7 == 0 -> ignore) belongs to a
+// host-side receiver, not to this decoder. The retail sender writes `direction == 0`
+// as the byte and one u32 per set bit [orig: CNapiNPConnection_SendConfigUpdate
+// @0x6286E0 @0x628777].
+// [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940 — dir @0x62195A, mask
+//  @0x621987, loop @0x6219A0..0x6219DE, short value = 0 @0x6219B4; dir != 0 ->
+//  cs_dir0 @0x6219C8, dir 0 -> cs_dir1 @0x6219D2]
+inline constexpr int kCsConfigSlots = 15;
+struct CsConfigUpdate {
+	bool to_dir0 = false;                        // the direction byte was nonzero
+	uint32_t mask = 0;                           // the mask as read (0 = a no-op update)
+	uint16_t written = 0;                        // bit i: slot i was stored
+	std::array<int32_t, kCsConfigSlots> value{}; // meaningful where `written` has the bit
+};
+CsConfigUpdate decode_cs_config_update(const uint8_t *data, size_t len);
 
 // Per-packet connection header (13 bytes, little-endian dwords).
 struct ProtocolPacketHeader {

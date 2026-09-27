@@ -6,6 +6,7 @@
 #include "render/material_params.h"
 #include "render/q3_source_registry.h"
 #include "render/q3_vertex_format.h"
+#include "render/rd_glsl.h"
 #include "render/rd_timestamp_span.h"
 #include "render/rd_uniforms.h"
 #include "util/string_convert.h"
@@ -147,7 +148,7 @@ void main() {
 // reach the device (skipped at compile). The engine header carries the
 // witness for the per-technique table, the blend state and the alpha-test
 // compare; this shader only evaluates them.
-const char *kSlotCaptureFragmentShader = R"GLSL(#version 450
+const char *kSlotCaptureFragmentShaderTemplate = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D diffuse_texture;
 layout(set = 0, binding = 1) uniform sampler2D detail_texture;
 
@@ -161,30 +162,16 @@ layout(location = 0) in vec2 uv;
 layout(location = 1) in vec2 uv2;
 layout(location = 0) out vec4 frag_color;
 
-// TBoringFFPProjShad samples with sampLinearWrap2D, at retail's highest
-// filter tier the 2x anisotropic footprint of the beauty wrappers
-// (shared.gdshaderinc obj_sample_aniso2), clamped at the stage texture's last
-// retail mip level (max_lods.x Diffuse1, max_lods.y Diffuse2).
-vec4 slot_sample_aniso2(sampler2D tex, vec2 tex_uv, float max_lod) {
-	vec2 size = vec2(textureSize(tex, 0));
-	vec2 du = dFdx(tex_uv);
-	vec2 dv = dFdy(tex_uv);
-	float length_x = length(du * size);
-	float length_y = length(dv * size);
-	float major = max(length_x, length_y);
-	float minor = min(length_x, length_y);
-	float ratio = clamp(major / max(minor, 1.0e-8), 1.0, 2.0);
-	float lod = min(log2(max(major / ratio, 1.0e-8)), max_lod);
-	vec2 offset = (length_x >= length_y ? du : dv) * (0.5 - 0.5 / ratio);
-	return 0.5 * (textureLod(tex, tex_uv - offset, lod) +
-			textureLod(tex, tex_uv + offset, lod));
-}
+// TBoringFFPProjShad samples with sampLinearWrap2D (rd_glsl.h
+// kGlslSampleAniso2), clamped at the stage texture's last retail mip level
+// (max_lods.x Diffuse1, max_lods.y Diffuse2).
+@SAMPLE_ANISO2@
 
 void main() {
 	uint flags = uint(pc.params.z + 0.5);
-	float coverage = slot_sample_aniso2(diffuse_texture, uv, pc.max_lods.x).a;
+	float coverage = rd_sample_aniso2(diffuse_texture, uv, pc.max_lods.x).a;
 	if ((flags & 8u) != 0u) {
-		coverage *= slot_sample_aniso2(detail_texture, uv2, pc.max_lods.y).a;
+		coverage *= rd_sample_aniso2(detail_texture, uv2, pc.max_lods.y).a;
 	}
 	if ((flags & 4u) != 0u) {
 		coverage *= pc.params.y;
@@ -200,6 +187,12 @@ void main() {
 	frag_color = vec4(0.0, 0.0, 0.0, alpha);
 }
 )GLSL";
+
+std::string slot_capture_fragment_shader_source() {
+	std::string source(kSlotCaptureFragmentShaderTemplate);
+	splice_token(source, "@SAMPLE_ANISO2@", kGlslSampleAniso2);
+	return source;
+}
 
 struct SlotPush {
 	std::array<float, 16> mvp{};
@@ -337,7 +330,7 @@ public:
 
 	// The per-order MSAA colour/depth pair and its framebuffer; the capture
 	// resolves into the request's target. Retail's slot RT carries its own z
-	// (render_shadow_pass clears the slot RT per capture), so the pass depth
+	// (Render_ShadowPass clears the slot RT per capture), so the pass depth
 	// tests and writes inside the target alone.
 	struct Target {
 		int size = 0;
@@ -534,19 +527,11 @@ bool SlotCaptureAdapter::Impl::initialize(RenderingDevice *p_rd) {
 		set_failure("RenderingDevice does not support the slot capture push block");
 		return false;
 	}
-	Ref<RDShaderSource> source;
-	source.instantiate();
-	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kSlotCaptureVertexShader));
-	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(kSlotCaptureFragmentShader));
-	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
-	if (spirv.is_null() || !spirv->get_stage_compile_error(
-			RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
-			!spirv->get_stage_compile_error(
-					RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
-		set_failure("Slot capture shader compilation failed");
+	Ref<RDShaderSPIRV> spirv;
+	const std::string compile_errors = compile_rd_spirv(rd, kSlotCaptureVertexShader,
+			slot_capture_fragment_shader_source(), spirv);
+	if (!compile_errors.empty()) {
+		set_failure("Slot capture shader compilation failed: " + compile_errors);
 		return false;
 	}
 	shader = rd->shader_create_from_spirv(spirv, "OpenNova slot capture");
@@ -621,7 +606,7 @@ RID SlotCaptureAdapter::Impl::make_texture(int p_size,
 	// MSAA on the capture is a device fold, not a retail property: retail's
 	// slot RT chain is single-sampled (RenderSlot_InitTextureChain creates a
 	// plain D3DUSAGE_RENDERTARGET texture and a D3DMULTISAMPLE_NONE depth
-	// surface, create_render_target_surfaces @ 0x67f7b0) and its drape reads
+	// surface, GRenderTarget_CreateSurfaces @ 0x67f7b0) and its drape reads
 	// that RT bilinearly. The 4x resolve keeps a partial-coverage RGB edge in
 	// the resolve target so a hard-aliased 1-2 px silhouette line does not
 	// scintillate against the breathing first-person camera (the eye rides

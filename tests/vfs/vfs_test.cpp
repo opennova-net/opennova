@@ -497,7 +497,7 @@ static int test_list_files() {
 // CRC_ComputeCustomTable @ 0x53c820 (MSB-first CRC-32, poly 0x04C11DB7, init
 // -1, no reflection/final xor — "CRC-32/MPEG-2", whose standard check value
 // for "123456789" is 0x0376E6E7); vfs_expansion_version_checksum is
-// g_expansion_checksum's producer over the loose expansion/<name>/version.txt
+// g_ExpansionChecksum's producer over the loose expansion/<name>/version.txt
 // [orig: Expansion_LoadAssets @ 0x4a4781..0x4a488a].
 static int test_expansion_version_checksum() {
     const char *check = "123456789";

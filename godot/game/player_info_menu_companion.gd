@@ -45,12 +45,12 @@ var _slot_rows: Dictionary = {}         # control name -> Array[WeaponDef], row-
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
 # Per-def picked clip counts, keyed by weapon-table index; -1/absent = the def
 # default (the maxclips row). The interleaved saved-count pair of the original
-# [orig: g_playerInfoAmmoPriCounts @ 0x25DC560 / g_playerInfoAmmoSecCounts
+# [orig: g_PlayerInfoAmmoPriCounts @ 0x25DC560 / g_PlayerInfoAmmoSecCounts
 # @ 0x25DC564 — handlers store selected_row + 1].
 var _ammo_pri: Dictionary = {}
 var _ammo_sec: Dictionary = {}
 # The ammo-TYPE byte per team per slot (0=FMJ 1=AP 2=SP)
-# [orig: g_playerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68].
+# [orig: g_PlayerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68].
 var _ammo_type: Dictionary = {}         # "PRIMARY"/"SECONDARY" -> {team -> int}
 var _grenade_rows: Array[WeaponDef] = []  # the first 3 class-3 defs, table order
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
@@ -59,7 +59,7 @@ var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-z
 var _combo_handlers: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
 # The persisted voice override per side, 0 = DEFAULT_VOICE.
-# retail: the profile bytes g_curPlayerProfile[teamIndex + 1532] @ 0x25510FC.
+# retail: the profile bytes g_CurPlayerProfile[teamIndex + 1532] @ 0x25510FC.
 var _voice_override: Dictionary = {}
 signal avatar_chosen(profile: Dictionary)
 
@@ -100,7 +100,7 @@ func _wire(_file: String, _screen: String) -> void:
 	if not _driver.widget_value_changed.is_connected(_on_widget_value_changed):
 		_driver.widget_value_changed.connect(_on_widget_value_changed)
 	# Mousing over the preview button drives the zoom + sway, like the original
-	# [orig: update_player_preview_animation active test @ 0x55dba0].
+	# [orig: PlayerInfo_UpdatePlayerPreviewAnimation active test @ 0x55dba0].
 	if not _driver.widget_hover_changed.is_connected(_on_widget_hover_changed):
 		_driver.widget_hover_changed.connect(_on_widget_hover_changed)
 	# Re-place icon/preview mounts when the 800x600 design surface changes.
@@ -128,7 +128,7 @@ func _wire(_file: String, _screen: String) -> void:
 	_restore_character_selection(_team)
 	_wire_preview()
 	# Loadout: PLAYERCLASS drives the class mask, the team radios the team mask; both
-	# filter the weapon slot lists [orig: populate_weapon_slot_lists @ 0x560430].
+	# filter the weapon slot lists [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430].
 	_ensure_weapons()
 	_connect_combo("PLAYERCLASS", _on_class_selected)
 	# The witnessed per-control recompute graph [orig: PlayerInfo_RegisterAllControls
@@ -149,7 +149,7 @@ func _wire(_file: String, _screen: String) -> void:
 	if name_edit >= 0 and not saved_name.is_empty():
 		_driver.set_widget_text(name_edit, saved_name)
 	# OK saves the chosen avatar; the .mnu's own ACTION still navigates back to main.mnu.
-	_connect_pressed("ACCEPT", commit)  # [orig: save_player_info_from_dialog @ 0x55ee10]
+	_connect_pressed("ACCEPT", commit)  # [orig: PlayerInfo_SaveFromDialog @ 0x55ee10]
 
 
 # --- Avatars.def loading (best-effort; degrade to empty combos) ----------------
@@ -199,7 +199,7 @@ func _restore_player_class() -> void:
 	# The remembered per-side class (weapon.sav's side block, or an edit made
 	# before a team switch); nothing remembered keeps player.mnu's authored row
 	# [orig: PlayerInfo_PopulateAllControls @0x5606f0 selects PLAYERCLASS from
-	# g_charSelClass].
+	# g_CharSelClass].
 	var player_class := _character_state.player_class(_team)
 	if player_class < 5 or player_class > 9:
 		return
@@ -244,19 +244,19 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 # Load weapon.def into the loadout table (best-effort; absent -> empty slot lists).
 func _ensure_weapons() -> void:
 	if _weapons == null and _root != null:
-		_weapons = LoadoutLabels.load_weapon_database(_root, "PlayerInfoMenuCompanion",
+		_weapons = LoadoutWeaponTable.load_weapon_database(_root, "PlayerInfoMenuCompanion",
 				"loadout combos stay empty")
 
 
 # Fill PRIMARY/SECONDARY/ACCESSORY for the selected class + team, each led by a "NONE" row,
 # then the ammo combos, weight readout, and icons that hang off the selections.
-# [orig: populate_weapon_slot_lists @ 0x560430 -> populate_weapon_accessory_ammo_ui
-#  @ 0x55e8b0 -> update_player_info_weight_and_weapon_icons @ 0x55f480]
+# [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430 -> PlayerInfo_PopulateWeaponAccessoryAmmoUI
+#  @ 0x55e8b0 -> PlayerInfo_UpdateWeightAndWeaponIcons @ 0x55f480]
 func _populate_loadout() -> void:
 	if _weapons == null:
 		return
 	var class_mask := _selected_class_mask()
-	# [orig: g_playerInfoTeamMask = 2 - (team != 0) @0x55de60 — native policy]
+	# [orig: g_PlayerInfoTeamMask = 2 - (team != 0) @0x55de60 — native policy]
 	var team_mask := WeaponDatabase.player_info_team_mask(_team)
 	_fill_weapon_slot("PRIMARY", WeaponDatabase.SLOT_PRIMARY, class_mask, team_mask)
 	_fill_weapon_slot("SECONDARY", WeaponDatabase.SLOT_SECONDARY, class_mask, team_mask)
@@ -518,7 +518,7 @@ func _wire_preview() -> void:
 
 # Hover edges arrive from the driver's pump claim; only the PLAYER_PREVIEW widget
 # drives the zoom + sway, like the original
-# [orig: update_player_preview_animation active test @ 0x55dba0].
+# [orig: PlayerInfo_UpdatePlayerPreviewAnimation active test @ 0x55dba0].
 func _on_widget_hover_changed(id: int, hovered: bool) -> void:
 	if _driver == null or _driver.get_menu_file() != _wired_file:
 		return
@@ -643,7 +643,7 @@ func _remember_current_character_selection() -> void:
 # The current selection, including both side records, for main_game to persist
 # on ACCEPT. Class is stamped across both side snapshots because retail's dialog
 # walks both 0x8006 blocks before serializing; character bytes remain per-side
-# [orig: save_player_info_from_dialog @0x55EE3F-0x55EF38].
+# [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EF38].
 func snapshot() -> Dictionary:
 	var combo := _id("COMBO_LIST")
 	var player_class := _selected_player_class()
@@ -661,9 +661,9 @@ func snapshot() -> Dictionary:
 		var secondary := _selected_weapon("SECONDARY")
 		var accessory := _selected_weapon("ACCESSORY")
 		# Clip counts are the recorded picks, -1 = untouched default — the kit
-		# tuple's serialized semantic [orig: serialize_weapon_loadout @ 0x55e4b0
+		# tuple's serialized semantic [orig: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0
 		# writes the saved arrays; "-1" is the filler]. The type bytes are the
-		# tuple's flags field [orig: g_playerInfoAmmoTypePri/Sec].
+		# tuple's flags field [orig: g_PlayerInfoAmmoTypePri/Sec].
 		profile.merge({
 			"primary": primary.name if primary != null else "",
 			"primary_clips": selected_clips("PRIMARY"),
@@ -685,11 +685,11 @@ func snapshot() -> Dictionary:
 ## the playersav::KitEntry field names, so the profile writer can hand the page
 ## straight to the encoder.
 ##
-## retail: serialize_weapon_loadout @ 0x55e4b0 -- knife first (@0x55e4dc picks
-## the blade off g_playerInfoTeamMask), the class-5 medpack block (@0x55e624),
+## retail: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0 -- knife first (@0x55e4dc picks
+## the blade off g_PlayerInfoTeamMask), the class-5 medpack block (@0x55e624),
 ## the PRIMARY/SECONDARY/ACCESSORY selections (@0x55e6bb), then the fixed
-## g_playerInfoGrenadeSlots[0..2] walk (@0x55e7e0, bounded by
-## g_playerInfoAmmoPriCounts @ 0x25DC560 = three dwords past 0x25DC554).
+## g_PlayerInfoGrenadeSlots[0..2] walk (@0x55e7e0, bounded by
+## g_PlayerInfoAmmoPriCounts @ 0x25DC560 = three dwords past 0x25DC554).
 func kit_entries() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if _weapons == null or not _weapons.is_loaded():
@@ -727,7 +727,7 @@ func kit_entries() -> Array[Dictionary]:
 # Every weapon row carries its table index and the NONE row carries 0, so a
 # NONE slot serializes weapon-table entry 0 -- retail's own quirk.
 # retail: the NONE insert UIList_AddRow(list, "NONE", 0, 0, 0) @ 0x56058f in
-# populate_weapon_slot_lists @ 0x560430, read back through
+# PlayerInfo_PopulateWeaponSlotLists @ 0x560430, read back through
 # UIList_GetSelectedValue @ 0x644660 at 0x55e6e8.
 func _slot_weapon_index(control: String) -> int:
 	var w := _selected_weapon(control)

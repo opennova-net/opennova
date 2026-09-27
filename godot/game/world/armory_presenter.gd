@@ -24,7 +24,7 @@ const MENU_SCREEN := "WEAPON"
 # row's runtime keys (retail default: the Shifts — the same row 177 the shells'
 # open key mirrors) as ACCEPT accelerators on the ACCEPT control
 # [orig: UI_InitTeamClassSelection @0x567370 finds control "ACCEPT" (@0x7C7650)
-#  and adds word_81A468/g_useItemBindingKey1 @0x5674a8/@0x5674c0].
+#  and adds word_81A468/g_UseItemBindingKey1 @0x5674a8/@0x5674c0].
 const ACCEPT_HOTKEY := KEY_SHIFT
 
 signal opened
@@ -140,7 +140,7 @@ func open() -> bool:
 	# Retail resolves each visible parent tuple from the selected class's canonical
 	# buffer and routes it by that parent's weapon_class. It never scans the expanded
 	# runtime slot pool, whose hidden subclasses can occupy a different class.
-	# [orig: g_armoryLoadoutBufferByClass -> populate_ammo_type_combo_boxes
+	# [orig: g_ArmoryLoadoutBufferByClass -> UI_PopulateAmmoTypeComboBoxes
 	# @0x564930; name/catalog resolve @0x564A00; slot route @0x564B47]
 	var current_primary := fallback_primary
 	var current_secondary := ""
@@ -253,21 +253,14 @@ func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
 	var root: ResourceRoot = _view.resource_root()
-	if root == null:
+	var surface := MenuFrameSurface.open_surface(root, _ui_parent, _layout_control,
+			MENU_FILE, MENU_SCREEN, "ArmoryMenu", "ArmoryPresenter", _on_frame_gui_input,
+			func(_built: MenuDriver) -> void: _register_text_tables(root))
+	if surface == null:
 		return false
-	var doc := MenuFrameSurface.load_document(root, MENU_FILE, "ArmoryPresenter")
-	if doc == null:
-		return false
-	_register_text_tables(root)
-	var surface := MenuFrameSurface.build(root, _ui_parent, _layout_control,
-			"ArmoryMenu", _on_frame_gui_input)
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
-	if not MenuFrameSurface.open_document(_driver, doc, root, MENU_FILE, MENU_SCREEN,
-			"ArmoryPresenter"):
-		teardown()
-		return false
 	_menu_root = root
 	_armory.set_weapon_database(_view.weapon_database())
 	return true
@@ -348,8 +341,10 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 
 
 # The armory's text lookups (WepDes weapon names, CHARCLASS_* rows, TOTAL_WEIGHT)
-# ride the shared Strings registry; the game shell registers these at boot,
-# while direct/headless world owners may not — fill only the missing tables.
+# ride the shared Strings registry. The game shell registers these at boot, but
+# direct/headless world owners may not, so every menu build re-registers all
+# three from the world's current root, replacing what the registry held; a table
+# that root lacks is unregistered (register_table(null) erases it).
 # [orig: Game_InitSubsystems @0x4a6cd0 loads menutxt/gametext at boot]
 func _register_text_tables(root: ResourceRoot) -> void:
 	for spec in [[Strings.TABLE_MENUTXT, "menutxt.BIN"], [Strings.TABLE_GAMETEXT, "gametext.bin"],

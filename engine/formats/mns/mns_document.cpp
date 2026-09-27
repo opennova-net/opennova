@@ -69,10 +69,10 @@ std::string logical_value(const Node &node) {
 	return joined;
 }
 
-// Retail runtime value. parse_key_value_buffer scans over a doubled
+// Retail runtime value. NapiConfigMap_ParseKeyValueBuffer scans over a doubled
 // backslash so it cannot be mistaken for a continuation, but later copies the
 // original contiguous source range; it does not collapse the pair.
-// [orig: parse_key_value_buffer @ 0x639bba, scan @ 0x639c0e]
+// [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639bba, scan @ 0x639c0e]
 std::string retail_value(const Node &node) {
 	std::string joined;
 	for (const DefineLine &dl : node.define_lines) {
@@ -197,7 +197,7 @@ Document Document::parse(const char *data, size_t size) {
 
 	// Apply one directive whose '#' may be embedded in otherwise inactive source.
 	// Retail's false-branch scanner seeks the next '#' byte rather than requiring
-	// a line start [orig: parse_key_value_buffer @ 0x639870].
+	// a line start [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639870].
 	auto apply_directive = [&](const char *hash, int directive_line,
 			DirectiveKind &kind, std::string &arg) {
 		const char *line_end = line_end_from(hash);

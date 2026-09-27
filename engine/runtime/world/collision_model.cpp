@@ -1,4 +1,5 @@
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/world/collision.h>
 
 // CollisionModel bounds and the fixed-point matrix operations: the section AABB /
@@ -33,9 +34,12 @@ void CollisionModel::finalize_sections() {
     }
     for (CollisionSection &s : sections) {
         if (s.vehicle_volume_start < 0) {
+            // The vehicle-pass start is the FIRST TYPE-7 volume only; the scoped
+            // walk from it then keeps types 7 and 12.
+            // [orig: Threedi_BuildCollisionModelFromChunks @0x5B3BF0, first type-7
+            //  volume @0x5B4431, COBJ+32 store @0x5B4447]
             for (int32_t i = 0; i < s.volume_count; ++i) {
-                const int32_t type = volumes[s.volume_start + i].type;
-                if (type == 7 || type == 12) {
+                if (volumes[s.volume_start + i].type == 7) {
                     s.vehicle_volume_start = i;
                     break;
                 }
@@ -181,13 +185,11 @@ void CollisionMatrix::transform_point(const int32_t in[3], int32_t out[3]) const
 }
 
 // Yaw extraction retains the original paired atan terms. [orig: @0x61332C..0x61335D]
-// [orig: Math_FixedPointMatrixToEulerAngles @0x613310]
+// [orig: Math_FixedPointMatrixToEulerAngles @0x613310 (the _ftol2_sse calls
+//  @0x613358, @0x613382, @0x613391, @0x613414, @0x61342C, @0x61343D, @0x613476)]
 void collision_matrix_to_euler(const CollisionMatrix &matrix, int32_t out[3]) {
 	constexpr double angle_scale = 683565275.5764316; // dbl_7C19D8
 	constexpr double radians = 1.4629627251502471e-9; // dbl_7C3608
-	const auto chop = [](double value) {
-		return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
-	};
 	const auto product = [](int32_t a, int32_t b) {
 		return static_cast<int32_t>((int64_t(a) * b) >> 22);
 	};
@@ -196,17 +198,20 @@ void collision_matrix_to_euler(const CollisionMatrix &matrix, int32_t out[3]) {
 	const int32_t neg_up_y = io::bam_sub(0, m[6]);
 	// Negative scale is deliberate, including signed-zero quadrant behavior.
 	// [orig: dbl_7C57B8 = -683565275.5764316 @0x613352]
-	const int32_t yaw = chop(std::atan2(double(neg_y), double(m[0])) * -angle_scale);
-	const int32_t sy = chop(std::sin(double(yaw) * radians) * 4194304.0);
-	const int32_t cy = chop(std::cos(double(yaw) * radians) * 4194304.0);
+	const int32_t yaw =
+			io::retail_ftol_sse2(std::atan2(double(neg_y), double(m[0])) * -angle_scale);
+	const int32_t sy = io::retail_ftol_sse2(std::sin(double(yaw) * radians) * 4194304.0);
+	const int32_t cy = io::retail_ftol_sse2(std::cos(double(yaw) * radians) * 4194304.0);
 	const int32_t roll_y = io::bam_add(product(cy, neg_up_y), product(sy, m[2]));
 	const int32_t up_x = io::bam_sub(product(cy, m[2]), product(sy, neg_up_y));
 	const int32_t forward_x = io::bam_sub(product(cy, m[0]), product(sy, neg_y));
-	const int32_t pitch = chop(std::atan2(double(m[8]), double(forward_x)) * angle_scale);
-	const int32_t sp = chop(std::sin(double(pitch) * radians) * 4194304.0);
-	const int32_t cp = chop(std::cos(double(pitch) * radians) * 4194304.0);
+	const int32_t pitch =
+			io::retail_ftol_sse2(std::atan2(double(m[8]), double(forward_x)) * angle_scale);
+	const int32_t sp = io::retail_ftol_sse2(std::sin(double(pitch) * radians) * 4194304.0);
+	const int32_t cp = io::retail_ftol_sse2(std::cos(double(pitch) * radians) * 4194304.0);
 	const int32_t up_z = io::bam_sub(product(cp, m[10]), product(sp, up_x));
-	const int32_t roll = chop(std::atan2(double(roll_y), double(up_z)) * angle_scale);
+	const int32_t roll =
+			io::retail_ftol_sse2(std::atan2(double(roll_y), double(up_z)) * angle_scale);
 	out[0] = yaw;
 	out[1] = pitch;
 	out[2] = roll;

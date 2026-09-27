@@ -491,7 +491,7 @@ void print_event_table(testrig::RetailMissionRig &rig, const std::string &bms) {
 // SinglePlayerRespawn, so the death itself ends nothing either.
 // [orig: Entity_ApplyWeaponDamage @0x4E6BFE -> Score_ProcessKillEvent
 //  @0x4FD400, the victim `score` gate @0x4FD422; Server_CheckWinConditions
-//  SP leg @0x51AD68 (Bms_AttribFlags & 0x40)]
+//  SP leg @0x51AD68 (g_BmsAttribFlags & 0x40)]
 int run_self_kill(testrig::RetailMissionRig &rig) {
 	Run run{rig};
 	const w::EntityHandle player = rig.world.cached.local_player;
@@ -732,7 +732,7 @@ int main(int argc, char **argv) {
 	// The SP epilog: the lose cine raises the end-of-round screen within two
 	// frames and the script never runs again, so the WAC's `Lose` (its chat line
 	// and banner) lands exactly once however long the screen stays up
-	// [orig: the WAC tick gate @0x51d8bd on g_epilog_screen_active, raised by
+	// [orig: the WAC tick gate @0x51d8bd on g_EpilogScreenActive, raised by
 	//  the lose screen build @0x57450c].
 	run.tick(kTicksPerSecond * 4);
 	int lose_count = 0, round_end_count = 0;

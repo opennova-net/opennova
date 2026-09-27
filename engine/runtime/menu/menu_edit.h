@@ -2,10 +2,10 @@
 
 // The witnessed edit-field input operations — the text-mutation half of the
 // menu edit widget, pure over an (text, caret) pair so the shell only routes
-// keys. [orig: the event router edit_widget_handle_input_event @ 0x661510
-// (click -> g_ui_focus_wnd; iscntrl-filtered chars -> the insert; specials ->
-// the key handler); insert edit_widget_insert_char @ 0x661ee0; special keys
-// edit_widget_handle_key_event @ 0x6623a0. Field homes: caret at widget+764,
+// keys. [orig: the event router CEditWnd_HandleInputEvent @ 0x661510
+// (click -> g_UIFocusWnd; iscntrl-filtered chars -> the insert; specials ->
+// the key handler); insert CEditWnd_InsertChar @ 0x661ee0; special keys
+// CEditWnd_HandleKeyEvent @ 0x6623a0. Field homes: caret at widget+764,
 // text at widget+732.]
 
 #include <cstdlib>
@@ -33,7 +33,7 @@ struct EditLimits {
 // The router's printable filter: a character event reaches the insert only
 // when it is a printable 8-bit byte — controls below space, DEL, and anything
 // past the byte range are dropped before the insert is ever consulted
-// [orig: the iscntrl/8-bit gate of edit_widget_handle_input_event @ 0x661510].
+// [orig: the iscntrl/8-bit gate of CEditWnd_HandleInputEvent @ 0x661510].
 inline constexpr bool edit_char_insertable(int unicode) {
 	return unicode >= 0x20 && unicode != 0x7F && unicode <= 0xFF;
 }
@@ -64,7 +64,7 @@ inline bool edit_delete_at_caret(EditField &f, int count) {
 	return true;
 }
 
-// Insert `count` copies of `ch` at the caret [orig: edit_widget_insert_char
+// Insert `count` copies of `ch` at the caret [orig: CEditWnd_InsertChar
 // @ 0x661ee0]: read-only and CR/LF reject; numeric mode admits only digits
 // and rolls the WHOLE insert back when the resulting atol leaves
 // [min_value, max_value]; max_len clamps per char. The caret rides the
@@ -99,7 +99,7 @@ inline bool edit_insert_char(EditField &f, const EditLimits &lim, char ch,
 	return true;
 }
 
-// One special key [orig: edit_widget_handle_key_event @ 0x6623a0]. Backspace
+// One special key [orig: CEditWnd_HandleKeyEvent @ 0x6623a0]. Backspace
 // moves the caret back (clamped to 0) THEN deletes the run; Enter commits
 // (the embedder releases focus and fires its commit event); Left never moves
 // under Shift in the original (selection reserved); Up/Down only refresh the

@@ -18,7 +18,7 @@
 namespace opennova::replication::test {
 
 // The authority host's top-of-tick C2S drain over a connection table (a joiner, is_authority == 0,
-// never drains — the original gates on g_napi_np_ctx.is_authority).
+// never drains — the original gates on g_NapiNPCtx.is_authority).
 inline void drain_all(world::World &world, std::vector<Connection> &conns, bool is_authority) {
 	if (!is_authority) return;
 	for (Connection &c : conns) drain_connection_c2s(world, c);
@@ -36,7 +36,7 @@ inline void emit_all(const world::World &w, std::vector<Connection> &conns,
 
 // Spawn a joiner's owned pool-0 player (a REMOTE peer — spawn_remote_player leaves it non-local) and
 // bind it to conns[idx] [orig: Server_PlayerAdd @0x51cbc0 registers a joined player without assigning
-// g_local_player_entity]. Returns the spawned handle (invalid if idx is out of range or pool 0 full).
+// g_LocalPlayerEntity]. Returns the spawned handle (invalid if idx is out of range or pool 0 full).
 inline world::EntityHandle admit_peer(world::World &w, std::vector<Connection> &conns,
                                       std::size_t idx, const world::PlayerSpawn &spawn) {
 	if (idx >= conns.size()) return world::EntityHandle{};

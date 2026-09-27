@@ -6,7 +6,7 @@
 //
 // [orig: the runtime window walk is BoneAnim_FindKeyframeAtTime @0x410220
 //  (hold-last past the summed durations) feeding BoneAnim_TransformBones
-//  @0x410360; the bind layer is build_world_bone_matrices @0x40c770.]
+//  @0x410360; the bind layer is Bone_BuildWorldMatrices @0x40c770.]
 #pragma once
 
 #include <runtime/anim/anim_sample.h>
@@ -61,7 +61,7 @@ uint8_t overlay_class_for_bone_name(const std::string &name);
 // contributes a zero product (matching the binding's ignored-invert result),
 // which the determinant guard then turns into identity. r_rotation_rows is
 // row-major, column-vector convention (the same rows a Godot Basis exposes).
-// [orig: build_world_bone_matrices @0x40c770 bind layer]
+// [orig: Bone_BuildWorldMatrices @0x40c770 bind layer]
 void bind_rest_local(const ClipBone &bone, const ClipBone *parent,
                      float r_rotation_rows[9], Vec3 &r_origin);
 
