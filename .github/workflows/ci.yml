@@ -488,7 +488,7 @@ jobs:
               '| Build | Download |',
               '| --- | --- |',
               `| Runtime: opennova.exe; supply game data with --resource-dir | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
-              `| Blender 4.2+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
+              `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');

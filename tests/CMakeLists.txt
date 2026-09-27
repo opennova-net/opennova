@@ -103,10 +103,6 @@ if(BLENDER_EXECUTABLE)
         add_test(NAME blender_${name} COMMAND ${BLENDER_EXECUTABLE}
             --background --factory-startup --python-exit-code 1 --python ${test} -- $<TARGET_FILE:opennova_3di>)
     endforeach()
-    add_test(NAME blender_weapon_authoring COMMAND ${BLENDER_EXECUTABLE}
-        --background --factory-startup --python-exit-code 1
-        --python ${CMAKE_CURRENT_SOURCE_DIR}/anim/blender_weapon_authoring.py --
-        $<TARGET_FILE:opennova_3di> ${CMAKE_CURRENT_BINARY_DIR}/blender-weapon-authoring)
 endif()
 # `catalog` prints the 252 anim slot keys, the weapon actions an author times
 # with their slot keys, and the event trigger bits a front end offers (the

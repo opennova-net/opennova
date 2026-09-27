@@ -65,7 +65,7 @@ the same text transport, the same add-on.
    in model axes, the mirror of mission); collision and occlusion faces keep
    the scene's counter-clockwise-about-the-normal order, which is retail's
    (Dtruck2 905 of 906 bullet faces, Armry01 all of them and its OCCL faces).
-3. **The Blender add-on** (`tools/blender/opennova_3di`, a Blender 4.2+
+3. **The Blender add-on** (`tools/blender/opennova_3di`, a Blender 5.0+
    extension) reads a model's parts and what sits on each part (decision 15:
    `_lod_index` LOD roots, `PN##` empties or a rig's `BN##` bones), naming its
    helpers by the NovaLogic ASE/OED object-naming convention (`classify_name`,
