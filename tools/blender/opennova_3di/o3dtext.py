@@ -259,11 +259,11 @@ def bundled_cli_path():
 
 
 def cli_path(context=None):
-    scene = (context or bpy.context).scene
-    custom = scene.o3d.cli_path if scene is not None else ""
-    if custom:
-        return bpy.path.abspath(custom)
-    return bundled_cli_path()
+    """The opennova-3di the add-on runs: the one its preferences name, else
+    the one bundled with it."""
+    entry = (context or bpy.context).preferences.addons.get(__package__)
+    custom = entry.preferences.cli_path if entry is not None and entry.preferences is not None else ""
+    return bpy.path.abspath(custom) if custom else bundled_cli_path()
 
 
 def scratch():
