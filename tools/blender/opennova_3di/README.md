@@ -311,7 +311,7 @@ Culling, the Math node, the render method and Emission.
   or translation, driven by an engine register such as `HELO_ROTOR` or by a
   spin or wave), and in a closed "Stored as" panel its raw PANM flags word and
   stored Parent. On any other object of a model: the part it sits on, and on a
-  user point, light or occlusion mesh its export order.
+  user point, light, occlusion mesh or attach helper its export order.
 - **Bone properties** on a `BN##` bone: its part number, Hit sphere (a skinned
   model's) and part animation, as on a `PN##` part, plus the track frame.
 - **Light properties** on an `LP` light: the colour generator (style, rate,

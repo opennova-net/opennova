@@ -1537,8 +1537,9 @@ class O3D_PT_object(bpy.types.Panel):
             return
         part = rig.part_of(ob)
         layout.label(text=f"On part {part + 1:02d}" if part is not None else "On no part", icon="EMPTY_AXIS")
-        if (ob.type == "EMPTY" and export.POINT_RE.match(name)) or ob.type == "LIGHT" or \
-                export.OCCLUSION_RE.search(name):
+        helper = export.HELPER_RE.match(name)
+        if (ob.type == "EMPTY" and (export.POINT_RE.match(name) or (helper and helper.group(2) == "attach"))) or \
+                ob.type == "LIGHT" or export.OCCLUSION_RE.search(name):
             layout.prop(p, "order")
 
 
