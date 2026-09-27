@@ -166,6 +166,17 @@ void test_bake() {
     weapon_fsm_bake(&upper, 1, clip_resolves, clip_seconds, nullptr, def4);
     CHECK(def4.actions[wa::kReload].delay_start == 3);
     CHECK(def4.actions[wa::kReload].delay_end == 4);
+
+    // Repeated rows of a suffix: the last binds, as a later block replaces
+    // the row [orig: ActionDef_ParseScriptLine @ 0x4024a1 -> @ 0x4024da].
+    WeaponFsmActionRow twice[2];
+    set_row(twice[0], "fire", "anim_wpn_fire", 4, 6);
+    set_row(twice[1], "FIRE", "", 0, 2);
+    WeaponFsmDef def5;
+    weapon_fsm_bake(twice, 2, clip_resolves, clip_seconds, nullptr, def5);
+    CHECK(def5.actions[wa::kFire].delay_start == 0);
+    CHECK(def5.actions[wa::kFire].delay_end == 2);
+    CHECK(!def5.actions[wa::kFire].has_anim);
 }
 
 // The wpn_* slots run in suffix order from wpn_idle (241), the two the idle

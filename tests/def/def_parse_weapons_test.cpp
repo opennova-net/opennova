@@ -941,6 +941,35 @@ int main(void) {
         }
     }
 
+    /* A second block of a suffix finds the same row and re-initializes it, so
+       it replaces the first wholesale: its own keys over the defaults, nothing
+       of the first kept (not a key merge), whatever the name's case.
+       [orig: ActionDef_ParseScriptLine @0x4024A1 -> ActionDef_InitDefaults
+       @0x4024DA] */
+    {
+        static const char twice[] =
+            "weapon \"WPN_TWICE\"\n"
+            "\tACTION \"FIRE\"\n\t\tANIM anim_wpn_fire\n\t\tDELAYSTART 4\n\t\tDELAYEND 6\n"
+            "\t\tSOUNDSETEND GS_ONE\n\tEND\n"
+            "\tACTION \"RELOAD\"\n\t\tDELAYEND 9\n\tEND\n"
+            "\taction \"fire\"\n\t\tdelayend 2\n\tend\n"
+            "end\n";
+        DefWeaponsFile wt;
+        int ok = def_parse_weapons_memory((const uint8_t *)twice, sizeof(twice) - 1, &wt) == 0 &&
+                wt.count == 1 && wt.entries[0].actions_count == 2;
+        if (ok) {
+            const DefWeaponAction &fire = wt.entries[0].actions[0];
+            ok = strcmp(fire.name, "fire") == 0 && fire.anim[0] == '\0' && fire.delaystart == 0 &&
+                 fire.delayend == 2 && fire.soundsetend[0] == '\0' &&
+                 wt.entries[0].actions[1].delayend == 9;
+        }
+        def_free_weapons(&wt);
+        if (!ok) {
+            fprintf(stderr, "FAIL: a repeated ACTION block replaces the row\n");
+            return 1;
+        }
+    }
+
 
     {
         const char text[] =

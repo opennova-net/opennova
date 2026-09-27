@@ -195,7 +195,10 @@ using WeaponClipResolvesFn = int (*)(void *ctx, const char *anim_key);
 // structural translation. Rows bind by suffix name (the original registers each row as
 // "<weaponName>_<suffix>" in a global pool and looks the composite back up per slot
 // [orig: @ 0x4023d5 prefix concat / @ 0x5420c6 lookup]; per-weapon rows + bare-suffix
-// match is the same binding). Missing rows become generated defaults. 'auto' (-1)
+// match is the same binding). There is one row per name: a later block of a suffix
+// re-initializes the row it finds, so of repeated rows the LAST binds
+// [orig: ActionDef_ParseScriptLine @ 0x4024a1 -> @ 0x4024da]. Missing rows become
+// generated defaults. 'auto' (-1)
 // delays bake from the clip via ONE duration read PER auto field — an action with
 // both delays auto consumes TWO ring entries, and the two reads can serve different
 // variants: delaystart = ticks(read1); delayend = ticks(read2), or ticks(read2) -

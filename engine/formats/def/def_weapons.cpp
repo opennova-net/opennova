@@ -8,6 +8,7 @@
 #include "def_scan.h"
 
 #include <base/io/ascii_config.h>
+#include <base/io/strutil.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -586,7 +587,21 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 
         if (state == ST_ACTION) {
             if (ll == 3 && memcmp(lower, "end", 3) == 0) {
-                DA_PUSH(cw.actions, cw.actions_count, cw_act_cap, ca);
+                /* One row per suffix: a later block of the same name finds the
+                   row and re-runs ActionDef_InitDefaults on it, so it replaces
+                   the earlier block wholesale and nothing of that one survives.
+                   [orig: ActionDef_ParseScriptLine @0x4023C0 — the name lookup
+                   ActionDef_FindByNameInTable @0x402360, found @0x4024A1, both
+                   paths into InitDefaults @0x4024DA] */
+                size_t row = cw.actions_count;
+                for (size_t i = 0; i < cw.actions_count; ++i)
+                    if (strutil::iequals(cw.actions[i].name, ca.name)) row = i;
+                if (row < cw.actions_count) {
+                    free(cw.actions[row].raw_lines);
+                    cw.actions[row] = ca;
+                } else {
+                    DA_PUSH(cw.actions, cw.actions_count, cw_act_cap, ca);
+                }
                 memset(&ca, 0, sizeof(ca));
                 ca_raw_cap = 0;
                 state = ST_WEAPON;

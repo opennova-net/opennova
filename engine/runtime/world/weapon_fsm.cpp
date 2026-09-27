@@ -569,25 +569,30 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
         int32_t ds = 0;
         int32_t de = 0;
         const char *anim = nullptr;
-        for (size_t r = 0; r < row_count; ++r) {
-            if (!strutil::iequals(rows[r].name, kWeaponActionSuffixes[i])) continue;
-			a.map_command = strutil::iequals(rows[r].function, "wpn_std_scopeup_map") ? 1
-					: (strutil::iequals(rows[r].function, "wpn_std_scopedown_map") ||
-							  strutil::iequals(rows[r].function, "wpn_std_switchfrom_map"))
+		// One row per suffix: a later block of the name replaced an earlier one
+		// wholesale, so the last row given is the one that binds.
+		// [orig: ActionDef_ParseScriptLine @ 0x4023c0, found @ 0x4024a1 ->
+		//  ActionDef_InitDefaults @ 0x4024da]
+		const WeaponFsmActionRow *row = nullptr;
+		for (size_t r = 0; r < row_count; ++r)
+			if (strutil::iequals(rows[r].name, kWeaponActionSuffixes[i])) row = &rows[r];
+		if (row != nullptr) {
+			a.map_command = strutil::iequals(row->function, "wpn_std_scopeup_map") ? 1
+					: (strutil::iequals(row->function, "wpn_std_scopedown_map") ||
+							  strutil::iequals(row->function, "wpn_std_switchfrom_map"))
 					? -1
 					: 0;
-			a.action_value = rows[r].action_value;
-			ds = rows[r].delaystart;
-			de = rows[r].delayend;
-            if (rows[r].anim[0] != '\0') anim = rows[r].anim;
-            // The row's audio/effect legs ride the baked pool entry [orig: the
-            // ActionDef record carries the resolved references].
-            copy_str128(a.soundset, rows[r].soundset);
-            copy_str128(a.soundsetend, rows[r].soundsetend);
-            copy_str128(a.particle, rows[r].particle);
-            copy_str128(a.particle_userpoint, rows[r].particleuserpoint);
-            break;
-        }
+			a.action_value = row->action_value;
+			ds = row->delaystart;
+			de = row->delayend;
+			if (row->anim[0] != '\0') anim = row->anim;
+			// The row's audio/effect legs ride the baked pool entry [orig: the
+			// ActionDef record carries the resolved references].
+			copy_str128(a.soundset, row->soundset);
+			copy_str128(a.soundsetend, row->soundsetend);
+			copy_str128(a.particle, row->particle);
+			copy_str128(a.particle_userpoint, row->particleuserpoint);
+		}
         a.has_anim = false;
         a.anim_key[0] = '\0';
         // Existence is a pure LOOKUP [orig: AnimMap_FindSlotByName @ 0x40cfa0
