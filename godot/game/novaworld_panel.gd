@@ -16,8 +16,8 @@ extends Control
 # handshake against our server -> on a verified session the browser fills from
 # the server list -> Host a Game registers a row other clients can see.
 
-# Where to reach the server. Dev default is localhost (matching the launcher's
-# dev mode and the dev compose). Prod sets this from the resolved server IP.
+# Where to reach the server. Dev default is localhost (matching the dev
+# compose). Prod sets this from the resolved server IP.
 @export var server_host := "127.0.0.1"
 @export var gate_port := NovaWorldSettings.GATE_PORT
 @export var player_name := "Player"

@@ -23,11 +23,10 @@ namespace opennova::server {
 struct ServerConfig;
 class SessionStore;
 
-// Crow-backed HTTP listener. start() registers six route families, each in
+// Crow-backed HTTP listener. start() registers five route families, each in
 // its own private registrar (bodies in http_listener.cpp):
 //   admin REST API      — Bearer ADMIN_API_TOKEN /api/admin/* + dev host inject
-//   publish callbacks   — Bearer EXPANSION_PUBLISH_TOKEN /admin/internal/*
-//   public JSON API     — /api/* for the web portal + launcher
+//   public JSON API     — /api/* for the web portal
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -58,11 +57,8 @@ private:
 	// specific route registered after the /<path> wildcard). Parameters are
 	// the config-derived strings the handlers capture by value.
 	void register_admin_api_routes(const std::string &admin_token,
-	                               const std::string &public_host,
-	                               const std::string &expansion_github_token);
-	void register_publish_callback_routes(
-			const std::string &expansion_publish_token);
-	void register_public_api_routes(const std::string &public_host);
+	                               const std::string &public_host);
+	void register_public_api_routes();
 	void register_legacy_login_routes(const std::string &templates_dir);
 	void register_legacy_host_join_routes(
 			const std::string &templates_dir);

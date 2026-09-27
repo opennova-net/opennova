@@ -101,22 +101,6 @@ struct ServerConfig {
 	// constant-time string compare in `auth.cpp`.
 	std::string admin_api_token;
 
-	// Expansion-publish pipeline (ported from onnet). Both default empty:
-	//   expansion_github_token  (EXPANSION_GITHUB_TOKEN) — a GitHub PAT with
-	//     contents:write on the expansion repos. When empty, POST .../release
-	//     still records the release row but reports the tag step as failed
-	//     (onnet admin.py:71-74).
-	//   expansion_publish_token (EXPANSION_PUBLISH_TOKEN) — bearer token the
-	//     expansion repo's CI presents to /admin/internal/.../publish|fail.
-	//     When empty those routes return 500 (onnet admin_internal.py:18-19).
-	// These are distinct from admin_api_token.
-	std::string expansion_github_token;
-	std::string expansion_publish_token;
-
-	// The slug -> "owner/repo" mapping for the tag push is no longer held here:
-	// it lives in the expansions table's github_repo column, sourced from the
-	// Terraform-managed catalogue seed and read per-release in http_listener.
-
 	// Reflection override for the host/join flow (dev/NAT). NovaWorld tells a
 	// hosting client its reachable endpoint and advertises it to joiners. On the
 	// open internet the observed UDP source IS that endpoint, but behind a docker

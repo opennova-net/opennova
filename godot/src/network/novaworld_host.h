@@ -70,7 +70,7 @@ public:
 	NovaWorldHost();
 	~NovaWorldHost();
 
-	// Gate endpoint (the NovaWorld gate the launcher redirects to).
+	// Gate endpoint (the NovaWorld gate, gs.novaworld.net on retail).
 	void set_host(const String &host);
 	String get_host() const;
 	void set_gate_port(int port);

@@ -343,16 +343,17 @@ _Avoid_: plugin, DCC pipeline (the Python/DCC authoring layer ADR 0038 retired)
 ## Products & modes
 
 **Godot product**:
-The OpenNova game runtime built with Godot (ADR 0045). The
-separately distributed OpenNova Launcher, backend services, and development tools
-are outside this taxonomy (ADR 0015).
+The OpenNova game runtime built with Godot (ADR 0045, ADR 0048). Backend
+services and development tools are outside this taxonomy (ADR 0015).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
 
-**OpenNova Launcher**:
-The separately distributed Windows tray product that directs a stock NovaLogic
-installation to OpenNova's NovaWorld service. It is the only product called
-Launcher.
+**Bundled assets**:
+The `assets/` directory shipped beside `opennova.exe`: OpenNova's own game data,
+authored from scratch. Today it is only the placeholder main menu that says the
+OpenNova game is coming and offers **PLAY RETAIL**. The game mounts it when no
+`--resource-dir` is given (ADR 0048).
+_Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:
 `opennova.exe` hosting a match without being a player: the server-options menu path,

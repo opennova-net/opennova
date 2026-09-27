@@ -40,9 +40,6 @@ jobs:
           git lfs install --local
           git lfs pull --include="fixtures/novaworld/**"
 
-      - name: Install libcurl (server links it when HTTP is ON)
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
-
       - name: Configure (BUILD_NOVAWORLD_HTTP=ON)
         run: cmake -S . -B build-server -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
 
@@ -56,7 +53,7 @@ jobs:
             connection_registry_test connection_manager_test \
             db_sqlite_test session_hello_roundtrip_test lobby_session_test \
             backend_schema_test nw_codec_identity_test nw_self_capture_test \
-            unknown_tracker_test nwmsg_replay_test expansion_publish_test \
+            unknown_tracker_test nwmsg_replay_test \
             opennova_nw_server opennova_extract nw_pp \
             mission_kernel_test mission_kernel_lifecycle_test host_role_test \
             inspect_test terrain_field_store_test
@@ -64,4 +61,4 @@ jobs:
       - name: Run net ctests + the kernel smoke
         run: |
           ctest --test-dir build-server --output-on-failure --parallel "$(nproc)" -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|expansion_publish|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store)$"

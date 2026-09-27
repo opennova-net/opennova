@@ -490,4 +490,4 @@ Focused local coverage pins:
   frames.
 
 The PR CI matrix owns the exhaustive native, Godot, architecture-lint, web,
-launcher, and packaging run.
+and packaging run.

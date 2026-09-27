@@ -1,12 +1,21 @@
 # TODO
 
-Everything here is work that is **not** a parity divergence: OpenNova Launcher UX, code
-hardening, and project health. Divergences from the original engine belong in
+Everything here is work that is **not** a parity divergence: code hardening and project
+health. Divergences from the original engine belong in
 [docs/divergence-ledger.md](docs/divergence-ledger.md) instead, and
 [docs/current-state.md](docs/current-state.md) explains which is which.
 
 ## Cleanup & verification backlog
 
+- [ ] Retire the launcher and expansion-distribution infrastructure ADR 0048 left
+      standing: the `infra/aws` downloads bucket + CloudFront + ACM cert + Cloudflare
+      CNAME, the `launcher_ci` IAM user and its outputs, the unproxied `nw` record, the
+      whole `infra/github` stack (it manages the expansion repos and regenerates
+      `backend/seed/0002_expansions.generated.sql`, which would now break server boot, so
+      drop that output first), `deploy/bin/on-deploy github`,
+      `deploy/env/github.tfvars.json.tpl`, the `expansion_*` 1Password items, and
+      `docs/net/expansion-publish-workflow.yml.example`. Empty the bucket before `apply`,
+      and keep the expansion repos (`removed` blocks, not destroy).
 - [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness
       (`run_parity_matrix.ps1`/`generate_parity_manifest.ps1`/`verify_parity_matrix.ps1`
       over `export_parity_corpus.py`) was retired with the Python FFI (ADR 0038; last

@@ -17,7 +17,7 @@ Reproduce one client/server path without inventing protocol behavior.
 1. Record topology and exact env vars before launching.
 2. Start the scoped server/client path.
 3. Capture from process start through success/failure.
-4. Collect `/api/server-info`, `/api/hosts`, `/api/lobbies`, and
+4. Collect `/api/health`, `/api/hosts`, `/api/lobbies`, and
    `/api/unknowns` when using OpenNova backend.
 5. Collect `/PROFILE` `.sph` logs when applicable.
 6. Decode and compare to known fixtures/tests.
