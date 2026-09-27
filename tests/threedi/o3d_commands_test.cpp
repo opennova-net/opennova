@@ -295,8 +295,10 @@ int main(int argc, char **argv) {
 	edited("CXLT row", "CXLT", [](uint8_t *p) { add_s32(p + 8, 65536); }, 1, 1);
 	edited("CXLT row by one step", "CXLT", [](uint8_t *p) { add_s32(p + 8, 1); }, 0, 1);
 	// ROBJ records (52 bytes): ..., rel @12, abs @24, sphere centre @36, radius @48.
-	edited("part sphere radius", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 48, 0.5f); }, 1, 1);
-	edited("part sphere centre", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 36, 0.5f); }, 1, 1);
+	// A part's sphere stands in for the model radius only without GHDR; beside
+	// the GHDR radius every built model carries, nothing reads it: drift.
+	edited("part sphere radius", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 48, 0.5f); }, 0, 1);
+	edited("part sphere centre", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 36, 0.5f); }, 0, 1);
 	edited("part rel", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 52 + 12, 0.5f); }, 1, 1);
 	// GHDR: the model radius at +24.
 	edited("model radius", "GHDR", [](uint8_t *p) { add_s32(p + 24, 65536); }, 1, 1);

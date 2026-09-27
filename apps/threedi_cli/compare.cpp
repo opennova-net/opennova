@@ -7,11 +7,11 @@
 //
 //   DIFFERENT (a plain line, exit 1): anything that changes what the model
 //   means or how the runtime reads it beyond float and quantization noise.
-//   LOD types and thresholds; parts (parent, pivot, rel offset, bound
-//   sphere) and the GHDR radius; per part and material, the triangles as
-//   oriented corners (position, normal, UVs, the skin blend: retail's four
-//   influences per part, normalized) and the vertex layout; materials;
-//   registers; PANM rows in row order (the part,
+//   LOD types and thresholds; parts (parent, pivot, rel offset, and the
+//   bound sphere of a model without GHDR) and the GHDR radius; per part and
+//   material, the triangles as oriented corners (position, normal, UVs, the
+//   skin blend: retail's four influences per part, normalized) and the vertex
+//   layout; materials; registers; PANM rows in row order (the part,
 //   parent, flags, tracks and rotation frame of each); user points; lights;
 //   occlusion records (sphere, vertices, faces with their plane, planes);
 //   collision: the CMDL, the CXLT rows, and per section its parent, offset,
@@ -24,7 +24,8 @@
 //   heuristic of ours where retail's tool is unwitnessed (tangent and
 //   bitangent values, volume seam flags); a zero-length vertex normal (it has
 //   no direction to keep) given one; the dominant axis of a diagonal bullet
-//   face (either axis projects it); and any value above that moved by more
+//   face (either axis projects it); a part's bound sphere beside a GHDR
+//   radius (nothing reads it); and any value above that moved by more
 //   than float noise but by no more than its DIFFERENT tolerance (the storage
 //   noise of a Blender round trip; one 8.8, Q14 or 16.16 step after
 //   truncation).
@@ -805,7 +806,7 @@ void compare_geometry(Diff &d, const std::string &where, const std::map<std::str
 	for (const auto &kv : a) {
 		const auto it = b.find(kv.first);
 		const std::string label = where + " " + kv.first.substr(0, kv.first.find(' ', 5)) + " [" +
-				kv.first.substr(kv.first.find(' ', 5) + 1, 60) + "]";
+				kv.first.substr(kv.first.find(' ', 5) + 1) + "]";
 		if (it == b.end()) {
 			d.add(label + ": missing (" + std::to_string(kv.second.triangles) + " triangles)");
 			continue;
@@ -839,15 +840,17 @@ void compare_geometry(Diff &d, const std::string &where, const std::map<std::str
 	}
 	for (const auto &kv : b)
 		if (!a.count(kv.first))
-			d.add(where + " " + kv.first.substr(0, 60) + ": extra (" + std::to_string(kv.second.triangles) + " triangles)");
+			d.add(where + " " + kv.first + ": extra (" + std::to_string(kv.second.triangles) + " triangles)");
 }
 
 // Parts: hierarchy, pivot, the rel offset the pose builder reads
-// (entity_pose.cpp) and the bound sphere the husk pieces and a headerless
-// model's radius read (collision_resolve.cpp, model_geometry.cpp). The
-// builder derives rel and the sphere; retail's rule for the sphere is the
-// farthest vertex from the box centre.
-void compare_parts(Diff &d, const std::string &where, const ThreediLod &x, const ThreediLod &y) {
+// (entity_pose.cpp) and the bound sphere. The runtime reads a part's sphere
+// only for a model without GHDR, whose radius the LOD 0 spheres stand in for
+// (model_geometry.cpp model_bound_radius_q16_from_3di, which the husk pieces
+// read too); with GHDR on both sides (`headed`), nothing reads it, so a
+// sphere that moved is DRIFT. The builder derives rel and the sphere;
+// retail's rule for the sphere is the farthest vertex from the box centre.
+void compare_parts(Diff &d, const std::string &where, const ThreediLod &x, const ThreediLod &y, bool headed) {
 	for (size_t p = 0; p < x.render_object_count; ++p) {
 		const ThreediRenderObject &px = x.render_objects[p], &py = y.render_objects[p];
 		const std::string w = where + " part " + std::to_string(p);
@@ -857,10 +860,15 @@ void compare_parts(Diff &d, const std::string &where, const ThreediLod &x, const
 			d.add(w + ": pivot " + vs(mission(px.abs)) + " vs " + vs(mission(py.abs)));
 		if (!within(d, "part rel offsets (m)", w, gap(mission(px.rel), mission(py.rel)), kPlaceTol, kPlaceNoise))
 			d.add(w + ": rel offset " + vs(mission(px.rel)) + " vs " + vs(mission(py.rel)));
-		const bool centre_same = within(d, "part bound spheres (m)", w,
-				gap(mission(px.bounding_center), mission(py.bounding_center)), kPlaceTol, kPlaceNoise);
-		const bool radius_same =
-				within(d, "part bound spheres (m)", w, gap(px.bounding_radius, py.bounding_radius), kPlaceTol, kPlaceNoise);
+		const double centre_gap = gap(mission(px.bounding_center), mission(py.bounding_center));
+		const double radius_gap = gap(px.bounding_radius, py.bounding_radius);
+		if (headed) {
+			const double moved = std::max(centre_gap, radius_gap);
+			if (moved > kPlaceNoise) d.note("part bound spheres (m; nothing reads them beside a GHDR radius)", moved, w);
+			continue;
+		}
+		const bool centre_same = within(d, "part bound spheres (m)", w, centre_gap, kPlaceTol, kPlaceNoise);
+		const bool radius_same = within(d, "part bound spheres (m)", w, radius_gap, kPlaceTol, kPlaceNoise);
 		if (!centre_same || !radius_same)
 			d.add(w + ": bound sphere " + vs(mission(px.bounding_center)) + " r " + num(px.bounding_radius) + " vs " +
 					vs(mission(py.bounding_center)) + " r " + num(py.bounding_radius));
@@ -1464,7 +1472,7 @@ int cmd_compare(const char *expected_path, const char *actual_path, bool strict)
 			d.add(w + ": " + std::to_string(x.render_object_count) + " vs " + std::to_string(y.render_object_count) + " parts");
 			continue;
 		}
-		compare_parts(d, w, x, y);
+		compare_parts(d, w, x, y, a.header.has_header != 0 && b.header.has_header != 0);
 		compare_geometry(d, w, lod_geometry(d, w, a, x), lod_geometry(d, w, b, y));
 	}
 	// Materials are compared through the geometry that draws with them;
