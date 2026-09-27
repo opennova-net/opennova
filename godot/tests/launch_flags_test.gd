@@ -36,6 +36,7 @@ func test_runtime_flags_read_through_the_override() -> void:
 	assert_eq(LaunchFlags.capture_pcap(), "C:/cap/s.pcapng")
 	assert_eq(LaunchFlags.mcp_port(), 8975)
 	assert_eq(LaunchFlags.resource_dir(), "C:/Games/JO")
+	assert_true(LaunchFlags.resource_dir_given())
 	assert_eq(LaunchFlags.expansion("revx02"), "jox01")
 	assert_true(LaunchFlags.loose_override_enabled())
 	assert_true(LaunchFlags.loose_root_allowed())
@@ -58,7 +59,15 @@ func test_absent_flags_fall_back() -> void:
 	assert_eq(LaunchFlags.capture_pcap(), "")
 	assert_eq(LaunchFlags.mcp_port(), 0)
 	assert_eq(LaunchFlags.resource_dir(), "")
+	assert_false(LaunchFlags.resource_dir_given())
 	assert_false(LaunchFlags.loose_override_enabled())
+
+
+func test_resource_dir_without_a_value_is_given_but_empty() -> void:
+	# The shell's usage error, distinct from no flag (the bundled assets/ boot).
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir"]))
+	assert_eq(LaunchFlags.resource_dir(), "")
+	assert_true(LaunchFlags.resource_dir_given())
 
 
 func test_malformed_integers_read_the_sentinel() -> void:

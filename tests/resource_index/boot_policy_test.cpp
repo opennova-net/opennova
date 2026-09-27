@@ -23,12 +23,18 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(f.expansion == "jox01");
     CHECK(f.game == "jodemo");
     CHECK(f.resource_dir == "C:/Games/JO");
+    CHECK(f.resource_dir_given);
     CHECK(f.loose_mission == "00TRg.bms");
     CHECK(f.loose_root);
     // A trailing flag with no value token reads empty; absent flags read empty/false.
     const LaunchFlags g = parse_launch_flags({"game.exe", "/exp"});
     CHECK(!g.loose_override && g.expansion.empty() && g.game.empty() && !g.loose_root);
     CHECK(parse_launch_flags({}).resource_dir.empty());
+    CHECK(!parse_launch_flags({}).resource_dir_given);
+    // The flag with no value is present but empty: the shell's usage error,
+    // distinct from no flag at all (the bundled assets/ boot).
+    const LaunchFlags bare = parse_launch_flags({"game.exe", "--resource-dir"});
+    CHECK(bare.resource_dir.empty() && bare.resource_dir_given);
 }
 
 void test_runtime_launch_flags_parse() {

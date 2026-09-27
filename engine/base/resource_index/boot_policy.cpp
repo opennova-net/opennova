@@ -52,6 +52,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.expansion = value_after(args, "/exp");
     f.game = strutil::to_lower(value_after(args, "/game"));
     f.resource_dir = value_after(args, "--resource-dir");
+    f.resource_dir_given = has_flag(args, "--resource-dir");
     f.loose_mission = value_after(args, "--loose-mission");
     f.loose_root = has_flag(args, "--loose-root");
     f.mission = value_after(args, "--mission");

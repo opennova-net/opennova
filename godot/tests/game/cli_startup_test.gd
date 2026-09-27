@@ -42,14 +42,15 @@ func _launch(args: PackedStringArray, expected_exit: int) -> String:
 	return log_text
 
 
-func test_missing_path_reports_usage_even_with_a_saved_directory() -> void:
-	ConfigStore.write(ResourceDirSettings.CONFIG_PATH, "resources", "resource_dir", RuntimeFixture.directory())
-	var log_text := _launch([], 2)
-	assert_string_contains(log_text, "Usage: opennova.exe -- --resource-dir")
+func test_no_path_boots_the_bundled_menu() -> void:
+	# ADR 0048: no --resource-dir mounts the bundled assets/ placeholder menu.
+	var log_text := _launch([], 0)
+	assert_false(log_text.contains("bundled assets not found"), log_text)
+	assert_false(log_text.contains("no menu found in resource dir"), log_text)
 
 
 func test_missing_argument_value_reports_usage() -> void:
-	assert_string_contains(_launch(["--resource-dir"], 2), "--resource-dir")
+	assert_string_contains(_launch(["--resource-dir"], 2), "--resource-dir needs a path")
 
 
 func test_nonexistent_path_fails_without_starting_a_mission() -> void:
