@@ -40,10 +40,12 @@ struct Writer {
 		text += s;
 		text += '\n';
 	}
-	// What the text cannot carry, as a comment in the scene and on stderr.
+	// What the text cannot carry, as a comment in the scene and on stderr,
+	// marked as the `.o3d` scene marks what it drops, so a front end reading
+	// either scene surfaces both the same way.
 	void note(const std::string &s) {
 		notes.push_back(s);
-		line("# note: " + s);
+		line("# dropped: " + s);
 	}
 };
 
@@ -225,7 +227,7 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 		const std::string why = inexpressible(clip);
 		if (why.empty()) continue;
 		left_out.push_back(clip.name);
-		w.note("left out clip '" + clip.name + "': " + why);
+		w.note("clip '" + clip.name + "' (" + why + ")");
 	}
 	const auto written = [&](const std::string &stem) {
 		for (const std::string &name : left_out)
@@ -246,14 +248,14 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 			held.variants.push_back(variant);
 		}
 		if (held.variants.empty()) {
-			w.note("dropped row '" + row.key + "': it names no clip the scene holds");
+			w.note("row '" + row.key + "' (it names no clip the scene holds)");
 			continue;
 		}
 		w.line(line);
 		kept.push_back(held);
 	}
 	for (const AnimMissingClip &absent : set.missing)
-		w.note("dropped '" + absent.variant + "' from its rows: " + absent.reason);
+		w.note("'" + absent.variant + "' from its rows (" + absent.reason + ")");
 	// The set's reset clip, whose bind every clip's positions turn through: the
 	// last variant of the last reset row the scene writes, the one build binds
 	// to (a reset variant that did not load registers nothing in retail
@@ -261,8 +263,8 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 	// no reset row binds nothing: retail cannot load it and build refuses it,
 	// so it is noted, and its clips are written through their own first keys.
 	if (!set.table_name.empty() && bad_build_reset_stem(kept).empty())
-		w.note("the table has no reset row naming a clip the scene holds: `anim build` refuses "
-			   "it, as the game cannot load it");
+		w.note("the table's binding (it has no reset row naming a clip the scene holds: "
+			   "`anim build` refuses it, as the game cannot load it)");
 	const std::string reset_stem = bad_build_reset_stem(kept);
 	BadBuildClip reset_shape;
 	const BadBuildClip *reset = nullptr;
@@ -280,7 +282,7 @@ int cmd_anim_scene(const char *in_path, const char *out_path) {
 	// Whole or not at all, and LF on every platform (write_output).
 	if (!write_output(out_path, w.text.data(), w.text.size())) return 1;
 	for (const std::string &n : w.notes)
-		std::fprintf(stderr, "opennova-3di: note: %s\n", n.c_str());
+		std::fprintf(stderr, "opennova-3di: note: scene drops %s\n", n.c_str());
 	std::printf("wrote %s (%zu rows, %zu clips)\n", out_path, rows, clips);
 	return 0;
 }

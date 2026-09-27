@@ -119,7 +119,9 @@ path.
 
 ## What `scene` cannot carry
 
-`scene` comments these (`# note: ...`) and lists them on stderr: a variant
+`scene` comments these (`# dropped: ...`) and lists them on stderr as
+`opennova-3di: note: scene drops ...`, the `.o3d` scene's marker, so a front
+end surfaces both scenes' notes the same way: a variant
 whose clip is absent or does not parse, which is dropped from its rows (a row
 left with none is dropped whole, and a table left with no reset row is noted,
 since `build` refuses it), and a clip `build` could not mint again from

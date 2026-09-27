@@ -353,7 +353,7 @@ int main(int argc, char **argv) {
 				"scene of a table with no reset row");
 		std::string text_out;
 		check(read_file_text(scene, text_out) &&
-						text_out.find("# note: the table has no reset row") != std::string::npos,
+						text_out.find("# dropped: the table's binding (it has no reset row") != std::string::npos,
 				"a table with no reset row is noted");
 	}
 
@@ -374,7 +374,7 @@ int main(int argc, char **argv) {
 				"scene of a clip it cannot express");
 		std::string written;
 		check(read_file_text(scene, written), "read the scene");
-		check(written.find("# note: left out clip 'walk'") != std::string::npos &&
+		check(written.find("# dropped: clip 'walk' (") != std::string::npos &&
 						written.find("\nclip ") == std::string::npos,
 				"the clip is noted and left out");
 	}
