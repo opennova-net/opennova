@@ -949,8 +949,11 @@ fixture with extra_polys surfaces.
   lost); whether retail's tool differed is unwitnessed.
 - 3DI3: the LGHT flag bit `0x40` (Armry01's lights carry it); the retired
   exporter set only bits 0-3.
-- 3DI3: `[orig: LoadRenderVertexBuffer @ 0x474380]` was catalogued but not
-  decompiled; the loader side of the VERT stride/flag mapping is unverified.
+- 3DI3: OED's reader `[orig: LoadRenderVertexBuffer @ 0x474380]`
+  (ModSuperOed.exe) was catalogued but not decompiled. The retail runtime's
+  side is witnessed for the skinned layouts (§1 "Retail skinned vertex blend":
+  the 56 B and 80 B declarations and the verbatim copy); for the static
+  layouts it is unverified.
   The WRITER-variant selection is witnessed (2026-08-19): one flag word drives
   both writers — `[orig: ComputeVertexFormatFlags @ 0x457a10]` ORs in `0x14`
   iff ANY scene material slot's `gMaterialInfoTable` row carries the TANGENT
@@ -967,10 +970,14 @@ fixture with extra_polys surfaces.
   the TANGENT semantic (457/457), and SkinnedBasic (0x41, 56 B) otherwise
   (VS_SKBASIC / object-space bump only: Bird1, Boonie, ArmsGb — 147/147);
   static LODs carry Extended (0x15, 64 B) with the tangent-space VS shaders
-  (1005) and Basic (0x01, 40 B) with FF/VS_FLAG (4077/87). Every first-person
-  arms model referenced by `Avatars.def` is 0x55; a 0x41 arms model renders as
-  garbage in retail's first-person pass (observed live, 2026-08-17) while the
-  same model is fine in the world skinned pass. The since-retired OED conversion path
+  (1005) and Basic (0x01, 40 B) with FF/VS_FLAG (4077/87). The first-person
+  arms `Avatars.def` names are ArmGlove, ArmsG and ArmsR (0x55) and IndoArms
+  (0x41, object-space bump: `JO_ARMS_BARE`, `INDO_ARMS`, `INDO_ARMS_BARE`),
+  and the runtime declares both skinned layouts, so an arms model need not be
+  0x55. A 0x41 arms model was seen drawing as garbage in retail's first-person
+  pass (observed live, 2026-08-17) while the same model is fine in the world
+  skinned pass; its vertex layout alone does not explain that, since IndoArms
+  ships as 0x41. The since-retired OED conversion path
   implemented the witnessed rule over the D-RMAT-4-corrected descriptor rows
   (`oed/rdta.cpp build_render_geometry_skinned`, ctest `oed_skinned_tangents`; both went
   with ADR 0038, the runtime consumes the authored 3DI3 descriptors directly).
