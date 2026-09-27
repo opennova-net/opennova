@@ -102,16 +102,27 @@ int main() {
             std::ofstream bad(dir + "/idle.bad", std::ios::binary);
             bad.write(reinterpret_cast<const char *>(idle.data()), static_cast<std::streamsize>(idle.size()));
             std::ofstream f(dir + "/slots.adm", std::ios::binary);
-            f << "\r\nANIM_RESET\t\t\t\t\"idle\"\r\nxxxx_idle\t\t\t\t\"idle\"\r\n";
+            f << "\r\nANIM_RESET\t\t\t\t\"idle\"\r\nxxxx_idle\t\t\t\t\"idle\"\r\n"
+                 "anim_wpn_fire_long\t\t\t\t\"idle\"\r\nanim_notaslot\t\t\t\t\"idle\"\r\n";
             TEST_EXPECT(static_cast<bool>(bad) && static_cast<bool>(f));
         }
         opennova::ResourceIndex index;
         opennova::assets::AssetStore index_assets{&index};
         TEST_EXPECT(index.scan(dir));
         AdmClipIndex clips;
+        // A key naming none of the 252 slots registers nothing [orig:
+        // AnimMap_FindSlotByName @ 0x40cfa0 -1 @ 0x40cfce; the gate @ 0x40cba4].
         TEST_EXPECT(clips.load(&index_assets, "slots.adm") == 2);
         TEST_EXPECT(clips.lengths_for("anim_reset") != nullptr);
         TEST_EXPECT(clips.lengths_for("anim_idle") != nullptr);
+        TEST_EXPECT(clips.lengths_for("ANIM_IDLE") != nullptr);
+        TEST_EXPECT(clips.lengths_for("yyyy_idle") != nullptr); // the query names its slot too
+        TEST_EXPECT(clips.lengths_for("anim_notaslot") == nullptr);
+        TEST_EXPECT(clips.lengths_for("anim_wpn_fire_long") == nullptr);
+        TEST_EXPECT(opennova::anim::adm_slot_index("ANIM_WPN_SCOPEDOWN") == 251);
+        TEST_EXPECT(opennova::anim::adm_slot_index("xxxx_reset") == 0);
+        TEST_EXPECT(opennova::anim::adm_slot_index("anim_notaslot") == -1);
+        TEST_EXPECT(opennova::anim::adm_slot_index("anim_") == -1);
     }
 
     {

@@ -3,6 +3,7 @@
 #include <runtime/anim/skeletal_clips.h>
 
 #include <formats/adm/adm.h>
+#include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/aim_overlay.h>
 #include <formats/bad/bad.h>
 #include <base/io/strutil.h>
@@ -129,12 +130,13 @@ bool SkeletalClips::load_from_adm(
 	// Every authored token registers a variant, including repeated files, on the
 	// slot its row's key names past the first five characters, so a row keyed
 	// `ANIM_IDLE` or `xxxx_idle` registers under the `anim_idle` every lookup
-	// spells. [orig: AnimMap_ParseConfigLine @0x40cb60 -> AnimMap_FindSlotByName
-	// @0x40cfa0; AnimMap_RegisterBoneNode @0x40c2d0]
+	// spells; a key naming none of the 252 slots registers nothing.
+	// [orig: AnimMap_ParseConfigLine @0x40cb60 -> AnimMap_FindSlotByName
+	// @0x40cfa0, the found-slot gate @0x40cba4; AnimMap_RegisterBoneNode @0x40c2d0]
 	for (size_t i = 0; i < map->count; ++i) {
 		const auto &entry = map->entries[i];
+		if (adm_slot_index(entry.key) < 0) continue;
 		const std::string key = adm_slot_key(entry.key);
-		if (key.empty()) continue;
 		for (size_t v = 0; v < entry.variant_count; ++v)
 			if (entry.variants[v] && entry.variants[v][0])
 				clips.emplace_back(key, entry.variants[v]);

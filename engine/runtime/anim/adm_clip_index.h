@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -9,6 +10,13 @@ namespace assets { class AssetStore; }
 }
 
 namespace opennova::anim {
+
+// The anim slot a table row's key names: its tail past the first five
+// characters, without case, among the 252 slot names; -1 when it names none,
+// and such a row registers nothing: it never plays and serves no duration.
+// [orig: AnimMap_FindSlotByName @0x40cfa0 (the -1 miss @0x40cfce);
+//  AnimMap_ParseConfigLine @0x40cb60 registers only a found slot @0x40cba4]
+int adm_slot_index(std::string_view key);
 
 // Per-key clip VARIANT lengths for one .adm rig, in seconds — the native
 // source the weapon action FSM bakes its 'auto' delays and variant rings
@@ -37,8 +45,9 @@ public:
 	// AnimMap_RegisterBoneNode @ 0x40c2d0 links each into the slot ring].
 	// A variant whose .bad is missing is SKIPPED (continue-on-failure, the
 	// registration behavior); a parsed-but-degenerate clip contributes 0.0.
-	// nullptr when the key is unauthored or fully unresolvable.
-	// Case-insensitive.
+	// nullptr when the key is unauthored or fully unresolvable. The query
+	// names its slot as a row does, past its first five characters without
+	// case (`ANIM_WPN_FIRE` and `xxxx_wpn_fire` are anim_wpn_fire).
 	const std::vector<float> *lengths_for(const std::string &key) const;
 
 private:

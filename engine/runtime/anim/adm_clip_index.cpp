@@ -4,11 +4,22 @@
 #include <formats/bad/bad.h>
 #include <base/io/strutil.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/world/infantry.h>
 
 using namespace opennova::adm;
 using namespace opennova::bad;
 
 namespace opennova::anim {
+
+int adm_slot_index(std::string_view key) {
+	// [orig: AnimMap_FindSlotByName @0x40cfa0 — stricmp of key + 5 over the
+	//  252 names of g_AnimStateNameTable @0x8135F0]
+	const std::string_view name = adm_slot_name(key);
+	if (name.empty()) return -1;
+	for (int slot = 0; slot < world::kInfantryAnimStateCount; ++slot)
+		if (strutil::iequals(name, world::kInfantryAnimNames[slot])) return slot;
+	return -1;
+}
 
 void AdmClipIndex::clear() {
 	adm_name_.clear();
@@ -32,12 +43,14 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 
 	for (size_t i = 0; i < adm.count; ++i) {
 		// The slot the row's key names past its first five characters, as
-		// every lookup spells it (`ANIM_IDLE` and `xxxx_idle` are anim_idle)
-		// [orig: AnimMap_FindSlotByName @ 0x40cfa0, stricmp on key + 5].
-		const std::string key = adm_slot_key(adm.entries[i].key);
-		if (key.empty()) {
+		// every lookup spells it (`ANIM_IDLE` and `xxxx_idle` are anim_idle);
+		// a key naming none of the 252 slots registers nothing
+		// [orig: AnimMap_FindSlotByName @ 0x40cfa0, stricmp on key + 5;
+		//  AnimMap_ParseConfigLine's found-slot gate @ 0x40cba4].
+		if (adm_slot_index(adm.entries[i].key) < 0) {
 			continue;
 		}
+		const std::string key = adm_slot_key(adm.entries[i].key);
 		// Every quoted token on the row is a VARIANT of the same slot,
 		// registered in file order (authored duplication is the rotation
 		// weighting) [orig: AnimMap_ParseConfigLine @ 0x40cb60;
@@ -64,7 +77,9 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 }
 
 const std::vector<float> *AdmClipIndex::lengths_for(const std::string &key) const {
-	auto it = lengths_.find(strutil::to_lower(key));
+	// The query names its slot as a row does [orig: AnimMap_FindSlotByName
+	// @ 0x40cfa0, stricmp on key + 5].
+	auto it = lengths_.find(adm_slot_key(key));
 	return it != lengths_.end() ? &it->second : nullptr;
 }
 

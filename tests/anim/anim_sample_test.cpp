@@ -403,6 +403,8 @@ int main() {
         TEST_EXPECT(table("no_reset.adm", "anim_idle \"two\"\r\nanim_walk_forward \"walk\"\r\n"));
         TEST_EXPECT(table("upper_keys.adm", "ANIM_RESET \"three\"\r\nANIM_WALK_FORWARD \"walk\"\r\n"));
         TEST_EXPECT(table("other_prefix.adm", "xxxx_reset \"three\"\r\nxxxx_walk_forward \"walk\"\r\n"));
+        TEST_EXPECT(table("no_slot.adm", "anim_reset \"three\"\r\nanim_notaslot \"walk\"\r\n"
+                "anim_wpn_fire_x \"walk\"\r\n"));
 
         opennova::ResourceIndex index;
         TEST_EXPECT(index.scan(dir.string()));
@@ -450,6 +452,13 @@ int main() {
             TEST_EXPECT(rig.find_clip("anim_walk_forward") != nullptr);
             TEST_EXPECT(rig.find_clip("anim_reset") != nullptr);
         }
+        // A row whose key names none of the 252 slots registers nothing: it
+        // never plays [orig: AnimMap_FindSlotByName @0x40cfa0, the -1 miss
+        // @0x40cfce; AnimMap_ParseConfigLine's found-slot gate @0x40cba4].
+        TEST_EXPECT(rig.load_from_adm(&assets, "no_slot", {}, {}));
+        TEST_EXPECT(rig.find_clip("anim_notaslot") == nullptr);
+        TEST_EXPECT(rig.find_clip("anim_wpn_fire_x") == nullptr);
+        TEST_EXPECT(rig.clips().size() == 1);
         // A table with no reset row never binds, so the rig does not load.
         // [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16;
         //  AnimMap_RegisterEntity @0x40bb60, @0x40bbc4]
