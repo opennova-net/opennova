@@ -265,6 +265,12 @@ def test_merge_into_a_copy():
           "the copy takes the keys and keeps the rest", merged)
     why = refusal(lambda: weapon.merge(bpy.context, model, source, source))
     check(why is not None and "new file" in why, "the merge never writes over the def it reads", why)
+    os.remove(target)
+    bpy.context.view_layer.objects.active = model
+    check(bpy.ops.opennova_3di.merge_weapon_def("EXEC_DEFAULT", filepath=source) == {"FINISHED"} and
+          os.path.isfile(target), "Merge into weapon.def writes <def>_merged.def beside the def by default")
+    check(bpy.ops.opennova_3di.preview_weapon() == {"FINISHED"} and weapon.last_preview(model) is not None,
+          "Preview Game Timing keeps the preview")
     model.o3d.weapons[0].name = "WPN_ABSENT"
     why = refusal(lambda: weapon.merge(bpy.context, model, source, target))
     check(why is not None and "WPN_ABSENT" in why, "an entry the def lacks is refused", why)
