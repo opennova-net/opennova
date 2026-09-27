@@ -532,6 +532,63 @@ class O3D_OT_add_model(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class O3D_OT_add_rig(bpy.types.Operator):
+    bl_idname = "opennova_3di.add_rig"
+    bl_label = "Add Animation Rig"
+    bl_description = ("Turn the model's PN## parts into the BN## bones of an armature under its LOD 0 root, "
+                      "everything on a part hung from its bone, so clips can animate the model")
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        model = active_model(context)
+        return context.mode == "OBJECT" and model is not None and rig.rig_of(model) is None
+
+    def execute(self, context):
+        model = active_model(context)
+        try:
+            arm, notes = rig.make_rig(context, model)
+        except ExportError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        for note in notes:
+            self.report({"WARNING"}, note)
+        self.report({"INFO"}, f"{model.name}: its parts are {arm.name}'s bones")
+        return {"FINISHED"}
+
+
+class O3D_OT_number_parts(bpy.types.Operator):
+    bl_idname = "opennova_3di.number_parts"
+    bl_label = "Number Parts"
+    bl_description = ("Number the rig's parts BN01, BN02, ... in hierarchy order, parents first, keeping each "
+                      "bone's label: the bones already numbered and every other deforming bone but Root")
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        model = active_model(context)
+        arm = rig.rig_of(model) if model is not None else None
+        return arm is not None and rig.model_of(arm) is model
+
+    def execute(self, context):
+        arm = rig.rig_of(active_model(context))
+        mode = context.mode
+        if mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        try:
+            renamed = rig.number_parts(arm)
+        except ExportError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        finally:
+            if mode == "EDIT_ARMATURE":
+                bpy.ops.object.mode_set(mode="EDIT")
+            elif mode == "POSE":
+                bpy.ops.object.mode_set(mode="POSE")
+        self.report({"INFO"}, f"{arm.name}: {renamed} bones renumbered")
+        return {"FINISHED"}
+
+
 class O3D_OT_import(bpy.types.Operator, ImportHelper):
     bl_idname = "opennova_3di.import_3di"
     bl_label = "Import .3di"
@@ -1217,7 +1274,7 @@ class O3D_PT_material(bpy.types.Panel):
 CLASSES = (O3DTrack, O3DAdmVariant, O3DAdmRow, O3DActionProps, O3DObjectProps, O3DBoneProps, O3DTexture,
            O3DMaterialProps, O3DLightProps, O3DSceneProps,
            O3D_OT_add_track, O3D_OT_remove_track, O3D_OT_add_texture, O3D_OT_remove_texture, O3D_OT_export,
-           O3D_OT_export_all, O3D_OT_add_model, O3D_OT_import,
+           O3D_OT_export_all, O3D_OT_add_model, O3D_OT_add_rig, O3D_OT_number_parts, O3D_OT_import,
            O3D_OT_export_anim, O3D_OT_export_all_anim, O3D_OT_import_anim, O3D_OT_add_row,
            O3D_OT_remove_row, O3D_OT_add_variant, O3D_OT_remove_variant,
            O3D_OT_assign_weapon_action, O3D_OT_timing_marker, O3D_OT_edit_clip, O3D_OT_preview_weapon,

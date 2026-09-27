@@ -34,9 +34,11 @@
 # nearest PN## at or above it. Blender's `.001` duplicate suffixes are
 # stripped before a name is read, and an object named `!...` is ignored.
 
+import contextlib
 import re
 
-from mathutils import Matrix
+import bpy
+from mathutils import Matrix, Vector
 
 from .o3dtext import ExportError
 
@@ -432,3 +434,125 @@ def number_parts(rig):
     for temp, new in staged:
         rig.data.bones[temp].name = new
     return len(renames)
+
+
+@contextlib.contextmanager
+def editing(context, arm):
+    """The armature in Edit Mode for the block (its edit_bones), in the view
+    layer the caller runs in; Object Mode after, the active object kept."""
+    vl = context.view_layer
+    held = vl.objects.active
+    with context.temp_override(view_layer=vl, active_object=arm, object=arm, selected_objects=[arm]):
+        vl.objects.active = arm
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            yield arm.data.edit_bones
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+    if held is not None:
+        vl.objects.active = held
+
+
+def bone_parent_matrix(arm, bone):
+    """The world matrix a child parented to `bone` hangs from, at rest: the
+    bone's tail (Blender parents an object to a bone's tail)."""
+    return arm.matrix_world @ bone.matrix_local @ Matrix.Translation((0.0, bone.length, 0.0))
+
+
+def hang(ob, arm, bone, world=None):
+    """Parent `ob` to `bone` of `arm` where it stands, or at `world`. Blender
+    holds an object's own matrix as location, rotation and scale, which a
+    retail part frame is not quite (Mp5b_1st's scales run 0.9995 to 1.0005),
+    but keeps a parent inverse whole: standing where it stands, the object
+    keeps its own matrix and carries what it hung from before in its parent
+    inverse; placed at `world`, the bone's inverse is the parent inverse and
+    `world` its own matrix (the way Keep Transform parents)."""
+    if world is None:
+        above = ob.parent.matrix_world @ ob.matrix_parent_inverse if ob.parent is not None else Matrix.Identity(4)
+        inverse = bone_parent_matrix(arm, bone).inverted() @ above
+    else:
+        inverse = bone_parent_matrix(arm, bone).inverted()
+    ob.parent = arm
+    ob.parent_type = "BONE"
+    ob.parent_bone = bone.name
+    ob.matrix_parent_inverse = inverse
+    if world is not None:
+        ob.matrix_basis = world
+
+
+def make_rig(context, model):
+    """Turn a static model into the rig shape in place, so clips can animate
+    it: an Armature under its LOD 0 root whose bones BN01.. sit at the PN##
+    pivots in the PN## hierarchy (each tail toward its first child part), each
+    PN##'s part animation (tracks, flags, and its turn as the track frame) on
+    its bone, and everything that sat on a part hung from that part's bone
+    where it stood; the PN## empties go. Later LODs keep their own PN## parts.
+    Returns (the armature, notes); an ExportError when LOD 0 holds no PN##
+    parts or the model has a rig. Call it in Object Mode."""
+    root = lod_roots(model)[0]
+    lp = lod_parts(root)
+    if lp.rig is not None:
+        raise ExportError(f"{model.name} has a rig already ({lp.rig.name})")
+    if not lp.parts or lp.parts[0].empty is None:
+        raise ExportError(f"{model.name}: LOD 0 holds no PN## parts to make bones of")
+    notes = []
+    data = bpy.data.armatures.new(f"{clean_name(model.name)} Rig")
+    arm = bpy.data.objects.new(data.name, data)
+    for collection in root.users_collection:
+        collection.objects.link(arm)
+    arm.parent = root
+    arm.matrix_parent_inverse = Matrix.Identity(4)
+    arm.matrix_basis = Matrix.Identity(4)
+    context.view_layer.update()
+    to_arm = arm.matrix_world.inverted_safe()
+    empties = {p.index: p.empty for p in lp.parts}
+    index_of = {ob.name: i for i, ob in empties.items()}
+
+    def above(ob):
+        walk = ob.parent
+        while walk is not None and walk is not root and walk.name not in index_of:
+            walk = walk.parent
+        return index_of.get(walk.name) if walk is not None else None
+
+    parents = {i: above(ob) for i, ob in empties.items()}
+    frames = {i: to_arm @ ob.matrix_world for i, ob in empties.items()}
+    names = {i: f"BN{i + 1:02d}" for i in empties}
+    with editing(context, arm) as edit_bones:
+        made = {i: edit_bones.new(names[i]) for i in sorted(empties)}
+        for i, eb in made.items():
+            eb.head = frames[i].translation
+            eb.use_connect = False
+        for i, eb in made.items():
+            if parents[i] is not None:
+                eb.parent = made[parents[i]]
+        for i, eb in made.items():
+            kids = sorted(k for k, p in parents.items() if p == i)
+            far = [made[k].head for k in kids if (made[k].head - eb.head).length > 1e-3]
+            if far:
+                eb.tail = far[0]
+            elif parents[i] is not None and (eb.head - made[parents[i]].head).length > 1e-3:
+                eb.tail = eb.head + (eb.head - made[parents[i]].head).normalized() * 0.05
+            else:
+                eb.tail = eb.head + Vector((0.0, 0.0, 0.05))
+    for i, ob in empties.items():
+        p, q = ob.o3d, arm.data.bones[names[i]].o3d
+        q.panm_flags = p.panm_flags
+        for t in p.tracks:
+            u = q.tracks.add()
+            for field in ("target", "style", "register", "param", "rate", "start", "end", "axis"):
+                setattr(u, field, getattr(t, field))
+        turn = frames[i].to_3x3()
+        if turn.determinant() < 0:
+            notes.append(f"{ob.name}: its frame is mirrored, which a bone's track frame cannot hold; its tracks turn "
+                         "about the nearest rotation")
+        q.frame = turn.normalized().to_euler()
+    context.view_layer.update()
+    for i, ob in empties.items():
+        bone = arm.data.bones[names[i]]
+        for child in list(ob.children):
+            if child.name not in index_of:
+                hang(child, arm, bone)
+    for ob in empties.values():
+        bpy.data.objects.remove(ob)
+    context.view_layer.update()
+    return arm, notes
