@@ -68,7 +68,7 @@ is the record. Sizes are payload bytes (exclusive of the 8-byte header).
 | ROOT/CDTA/CMDL | 64 | no | find at `0x472358` | via `WriteCDTA` | 16 dwords of model totals: bbox (6 f32), radii (3 f32), num_vertices, num_normals, num_faces, num_objects, num_transforms, num_planes, num_volumes. |
 | ROOT/CDTA/CVRT | 104 | no | find `0x472373`, loop `0x47267B` | `[orig: WriteCVRT @ 0x454450]` | `{count, record_size, vertex_records[]}`; position as 16.16 fixed packed as 4 x i16. |
 | ROOT/CDTA/CNRM | 112 | no | find `0x47238F`, loop `0x47270B` | `[orig: WriteCNRM @ 0x454600]` | 8 B runtime each: 3 x i16 16.16 normal + i16 dominant axis. |
-| ROOT/CDTA/CFAC | 800 | no | find `0x4723AA`, loop `0x4727A9` | `[orig: WriteCFAC @ 0x454830]` | 44 B (11 dwords) per face: vert_idx[3] i16, normal_idx i16, plane_dist fp16.16, bbox min/max fp16.16, material_flags, poly_type u8. |
+| ROOT/CDTA/CFAC | 800 | no | find `0x4723AA`, loop `0x4727A9` | `[orig: WriteCFAC @ 0x454830]` | 44 B (11 dwords) per face: vert_idx[3] i16, normal_idx i16 (the runtime reads all four signed, §2.11), plane_dist fp16.16, bbox min/max fp16.16, material_flags, poly_type u8. |
 | ROOT/CDTA/BPLN | 80 | no | find `0x4723C5`, loop `0x472D0A` | `[orig: WriteBPLN @ 0x455A80]` | Per record: flags i16, normal 3 x i16 16.16, radius i32. 12 B runtime. |
 | ROOT/CDTA/BVOL | 44 | no | find `0x4723E1`, loop `0x472DF3` | `[orig: WriteBVOL @ 0x455CE0]` | 36 B disk -> 40 B runtime; collidable_type remapped via switch (cases 0,1,4..C,E,10..13) from `0x472E60`. |
 | ROOT/CDTA/COBJ | 96 | no | find `0x4723FC`, loop `0x4729A1` | `[orig: WriteCOBJ @ 0x454E70]` | 88 B disk -> 108 B runtime per object (pointer wiring at `0x473108..0x473272`). |
@@ -552,6 +552,7 @@ store model axes on disk.
 | OCCL | Occluder (0) and open (1) records carry a connecting byte the runtime never reads (Armry01's occluders say 2), the leftover the retired exporter's `classify_name` carried across objects | Armry01 |
 | CFAC | Bullet faces wind counter-clockwise about their CNRM normal in mission axes; the rare exception stores a normal against its own winding | Dtruck2 905/906, Armry01 250/250, Dblkhwk1 1594/1597 |
 | CVRT/CFAC | Collision vertices sit on the 8.8 grid, and faces the grid collapses keep valid normals: the normals were taken before quantization | Mp5b_1st 276 such faces, Dblkhwk1 13 |
+| CVRT/CFAC | A section holds at most 32,768 vertices: the runtime reads a face's corners as signed 16-bit indices (§2.11) | 13,780 of the 13,781 sections of the JOTAC archives with the revx02 expansion (bld1's is the largest, 30,734); Pinegr_L's holds 40,824 and is broken in retail too |
 | COBJ | A rigid model's section offset is its part's pivot | Dblkhwk1 (rotors), DAH62, Dtruck2 (wheels) |
 | CXLT | The rows are the collision LOD's attach points (`~PPx attach` helpers) in order, truncated to 16.16 `[orig: WriteCXLT @ 0x455920]`, not the section offsets; the runtime reads them by row (a palm item's broken pieces pivot on rows 0 and 1, `engine/runtime/world/item_sections.cpp`) | 917 of 958 models carry one row per non-root section (per section when skinned) and 723 of those rows equal the section offsets; Oiltnk2X's 15 rows sit near the origin while its sections reach 24 m out; Chair03X has 7 sections and no row; rlpad1ax 16 sections and 1 row |
 | COBJ | One section per part of the collision LOD (WriteCOBJ walks that LOD's subobjects), whatever LOD 0 holds; a model with no section still carries a CDTA | Dtruck2 LOD 0 8 parts, collision LOD 7 / 7 sections; APLFP1 1 / 1; CNet01 0 / 0 with a CMDL |
@@ -826,7 +827,7 @@ decoded at load time (physics/raycast functions consume them later).
 44 B CollisionFace layout:
 
 ```
-+0x00  vertex_indices[3]  u16 x 3
++0x00  vertex_indices[3]  i16 x 3
 +0x06  normal_index       i16
 +0x08  plane_d            i32
 +0x0C  bbox min/max x,y,z i32 x 6
@@ -835,6 +836,20 @@ decoded at load time (physics/raycast functions consume them later).
 +0x29  pad                u8
 +0x2A  pad_face_2A        i16
 ```
+
+The corner and normal indices are signed: every retail reader of the 3DI3
+CFAC record loads them with `movsx`. The loader copies the 44-byte record word
+for word `[orig: Threedi_BuildCollisionModelFromChunks @ 0x5B3BF0, corners and
+normal @ 0x5B3EC7..0x5B3EEA]`; the corners are read in the triangle test every
+ray path shares `[orig: Math_PointInTriangle2D @ 0x414071, @ 0x414079,
+@ 0x414095]` (the same pattern in its other two axis branches), the normal
+index in `[orig: Physics_RaycastAgainstBoneCollision @ 0x4E5079]`, and the
+corners again in the debris spawner `[orig: Entity_SpawnSectionDebris
+@ 0x43F5F6..0x43F5FE]`; no `movzx` reader exists. A section therefore
+addresses at most 32,768 vertices, and a corner past 32,767 reads before the
+section's vertex table: retail Pinegr_L's one 40,824-vertex section (13,608
+faces, 2,686 of them naming such corners) is broken in retail too.
+`opennova-3di build` refuses a section over 32,768 vertices.
 
 96 B CollisionVolume layout (offsets verified by counting the parser read
 sequence; an earlier plan spec was off by one field):

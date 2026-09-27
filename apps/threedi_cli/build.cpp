@@ -101,6 +101,7 @@ struct PendingVolume {
 bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 	std::string raw;
 	int lod = -1, part = -1, material = -1, cobj = -1, volume_open = -1;
+	int full_section = -1; // the last section told it holds too many vertices
 	bool uv1 = false;
 	ThreediBuildStrip *strip = nullptr;
 	int strip_lod = -1, strip_part = -1;
@@ -353,8 +354,14 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("a collision vertex lies 128 or more from the origin (8.8 in an int16)");
 				continue;
 			}
+			// Retail reads a bullet face's corners as signed 16-bit indices, so
+			// a section addresses at most 32,768 vertices (ThreediCollisionFace).
+			// Said once per section.
 			if (model.collision[cobj].vertices.size() > SHRT_MAX) {
-				ps.error("a collision section exceeds " + std::to_string(SHRT_MAX + 1) + " vertices (signed int16 face indices)");
+				if (full_section != cobj)
+					ps.error("collision section " + std::to_string(cobj) + " exceeds 32,768 vertices: retail reads a bullet "
+							"face's corners as signed 16-bit indices (simplify its collision mesh, or split it over more parts)");
+				full_section = cobj;
 				continue;
 			}
 			model.add_collision_vertex(cobj, ThreediBuildVec3{p[0], p[1], p[2]});

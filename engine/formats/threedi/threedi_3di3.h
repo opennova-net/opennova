@@ -296,6 +296,13 @@ typedef struct ThreediCollisionNormal {
     int16_t dominate_axis;
 } ThreediCollisionNormal;
 
+// The corner and CNRM indices are SIGNED 16-bit words, as every retail
+// reader takes them (movsx), so a section addresses at most 32,768 vertices:
+// a corner past 32,767 reads before the section's vertex table (retail
+// Pinegr_L's 40,824-vertex section is broken in retail too).
+// [orig: Math_PointInTriangle2D @ 0x414071..0x414095 (the corners, shared by
+// every ray path); Physics_RaycastAgainstBoneCollision @ 0x4E5079 (the normal
+// index); Entity_SpawnSectionDebris @ 0x43F5F6..0x43F5FE]
 typedef struct ThreediCollisionFace {
     int16_t vert_index[3];   // Local subobject vertex indices.
     int16_t normal_index;    // Index into CNRM for this subobject.

@@ -124,10 +124,13 @@ set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
-# build -> scene -> build over small scenes, and the records build refuses.
+# build -> scene -> build over small scenes, and the records build refuses
+# (the executable too, where a refusal must say why).
 add_executable(threedi_o3d_build_test threedi/o3d_build_test.cpp)
 target_link_libraries(threedi_o3d_build_test PRIVATE opennova_3di_commands)
-add_test(NAME threedi_o3d_build COMMAND threedi_o3d_build_test ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(threedi_o3d_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_o3d_build
+         COMMAND threedi_o3d_build_test ${CMAKE_CURRENT_BINARY_DIR} $<TARGET_FILE:opennova_3di>)
 # opennova-3di over paths the ANSI code page cannot hold (the exe's UTF-8
 # manifest); the test embeds the manifest so its own command line is UTF-8.
 add_executable(threedi_o3d_unicode_test threedi/o3d_unicode_test.cpp)

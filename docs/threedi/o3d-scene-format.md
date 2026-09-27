@@ -73,7 +73,7 @@ import; any other front end may.
 | `op` | nx ny nz d | a plane of the open `occ` (at most 32: the runtime's occlusion clip mask is a 32-bit word per record); without any, the OED rule picks them (below) |
 | `of` | a b c [plane] | a face of the open `occ`; its plane index with explicit `op` planes, none without |
 | `cobj` | parent [ox oy oz] | opens collision section i (pairs with part i of the collision LOD: one section per part, as WriteCOBJ walks it): its parent part and offset (the part pivot, as retail stores it) |
-| `cv` | x y z | a collision vertex (\|x\|, \|y\|, \|z\| under 128: CVRT stores 8.8 in an int16) |
+| `cv` | x y z | a collision vertex (\|x\|, \|y\|, \|z\| under 128: CVRT stores 8.8 in an int16), at most 32,768 per section: retail reads a bullet face's corners as signed 16-bit indices (docs/threedi/3di-gp-format-re.md §2.11) |
 | `cf` | a b c [poly_type [flags [nx ny nz]]] | a bullet face (poly_type = impact material, a byte; the effect row is material + 4; flags a 32-bit word, decimal or `0x`: 1 both sides, 0x100 bullets pass, 0x800 front only: without flag 1 a projectile stops at the face only when it crosses it from the front (`engine/runtime/world/collision_query.cpp`, [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0, the test @ 0x4e5139]; no JO face carries 0x800). The normal comes from the given (unquantized) corners; an explicit one is stored as given, for a face the 8.8 grid collapses or whose normal disagrees with its winding (`scene` writes retail's for both). The plane distance is `-(n . v0)` |
 | `csphere` | cx cy cz r [minx miny minz maxx maxy maxz] | the open section's hit sphere (a skinned model's bone sections) and the bounds of the vertices the bone moves (without them, the sphere's cube) |
 | `cvol` | type flags minx miny minz maxx maxy maxz | an axis-box volume (six planes) |
@@ -160,7 +160,8 @@ register that is not declared, more than 8 `sitex` seats in any case (the
 seat scan reads the prefix without case and stops at 8 [orig:
 Entity_GetBoneSlotType @ 0x434ED0; the scan end @ 0x43A5AF]), a volume with
 fewer than 4 planes, an occlusion record over 128 vertices or 32 planes, a
-collision vertex 128 or more from the origin, or a model the writer refuses; a
+collision vertex 128 or more from the origin, a collision section over 32,768
+vertices, or a model the writer refuses; a
 whole-model error names the file alone. Notes (not errors): a
 register outside the catalog, a shader outside the engine's table, a volume
 mesh that is not convex, more than 16 user points (the item-effect scan

@@ -1,9 +1,10 @@
 // opennova-3di `build` and `scene` over small scenes: what the scene text
 // carries through build -> scene -> build byte for byte, and the malformed
 // records build refuses (docs/threedi/o3d-scene-format.md "Validation").
-// Drives the command handlers the CLI dispatches (opennova_3di_commands).
+// Drives the command handlers the CLI dispatches (opennova_3di_commands), and
+// the executable itself where a refusal must say why.
 //
-//   o3d_build_test <scratch dir>
+//   o3d_build_test <scratch dir> <opennova-3di>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -17,6 +18,7 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
 
+#include "common/run_command.h"
 #include "threedi_cli.h"
 
 using namespace opennova::threedi;
@@ -65,6 +67,20 @@ void round_trip(const std::string &name, const std::string &text) {
 // Build must refuse `text` (one field changed from an accepted scene).
 void refuses(const std::string &name, const std::string &text) { check(!build(name, text), name + ": refused"); }
 
+std::string cli; // the opennova-3di executable
+
+// The CLI must refuse `text` and say `words` on stderr: the message an author
+// reads is part of the contract.
+void refuses_saying(const std::string &name, const std::string &text, const std::string &words) {
+	std::ofstream(path_of(name, ".o3d"), std::ios::binary) << text;
+	const std::string said_path = path_of(name, ".err");
+	const int status = test_cmd::run(test_cmd::quoted(cli) + " build " + test_cmd::quoted(path_of(name, ".o3d")) + " -o " +
+			test_cmd::quoted(path_of(name, ".3di")) + " 2> " + test_cmd::quoted(said_path));
+	check(status != 0, name + ": refused");
+	const std::string said = slurp(said_path);
+	check(said.find(words) != std::string::npos, name + ": says \"" + words + "\" (it said: " + said.substr(0, 400) + ")");
+}
+
 const std::string kSkinned =
 		"o3d 1\nmodel SKIN\nskinned 1\nmaterial VS_SKBASIC\ntexture skin.tga\nlod 128 gnrc\n"
 		"part 0 0 0 0\npart 0 0 0 1\npart 0 0 0 -1\nstrip 0 0\nbones 0 1\n"
@@ -77,11 +93,12 @@ const std::string kSkinned =
 } // namespace
 
 int main(int argc, char **argv) {
-	if (argc != 2) {
-		std::fprintf(stderr, "usage: o3d_build_test <scratch dir>\n");
+	if (argc != 3) {
+		std::fprintf(stderr, "usage: o3d_build_test <scratch dir> <opennova-3di>\n");
 		return 2;
 	}
 	dir = std::filesystem::path(argv[1]) / "o3d-build";
+	cli = argv[2];
 	std::filesystem::create_directories(dir);
 
 	// A skinned model's LOD with no parts (retail ships empty LODs) scenes and
@@ -390,6 +407,15 @@ int main(int argc, char **argv) {
 		refuses("strict-quote-in-name", base + "userpoint ab\"c 0 0 0 0 0 1 0\n");
 		refuses("strict-track-axis", base + "track trans 50 - 0 0 256 9\n");
 		refuses("strict-cv-range", swap(base, "cv 1 0 0", "cv 128 0 0"));
+		// Retail reads a bullet face's corners as signed 16-bit indices: a
+		// section holds at most 32,768 vertices, and the refusal says so once.
+		std::string full = head + "cobj 0\n";
+		full.reserve(full.size() + 32770 * 9);
+		for (int i = 0; i < 32770; ++i) full += "cv 0 0 0\n";
+		refuses_saying("strict-cv-count", full,
+				"collision section 0 exceeds 32,768 vertices: retail reads a bullet face's corners as signed 16-bit indices");
+		const std::string said = slurp(path_of("strict-cv-count", ".err"));
+		check(said.find("exceeds 32,768") == said.rfind("exceeds 32,768"), "strict-cv-count: said once");
 		refuses("strict-texture-name", swap(base, "texture skin.tga", "texture seventeen_chars.tga"));
 		std::string planes = base + "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
 		for (int i = 0; i < 33; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n";

@@ -182,9 +182,6 @@ int main(int argc, char **argv) {
 	const auto occ_a = build("occlusion", plain + occlusion);
 	const auto occ_b = build("occlusion-reversed", plain + replace(occlusion, "of 0 1 2", "of 0 2 1"));
 	check(threedi_cli::cmd_compare(occ_a.c_str(), occ_b.c_str()) == 1, "reversed occlusion faces");
-	std::string overflow = plain + "cobj 0\n";
-	for (int i = 0; i < 32769; ++i) overflow += "cv 0 0 0\n";
-	build("collision-index-overflow", overflow, false);
 
 	// Every check of compare, one field at a time against the rich model.
 	const auto rich_a = build("rich", rich);
