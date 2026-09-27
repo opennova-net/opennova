@@ -4,6 +4,7 @@
 #include "mission/mission_data.h"
 #include "mission/mission_root.h"
 #include "object/item_database.h"
+#include "object/object_data.h"
 #include "object/weapon_database.h"
 #include "player/local_player_presenter.h"
 #include "resource_index/resource_root.h"
@@ -13,11 +14,13 @@
 #include "simulation/weapon_kit_entry.h"
 #include "util/string_convert.h"
 
+#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/world/player_present.h>
 
 using namespace godot;
@@ -412,6 +415,23 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	}
 	if (gun != nullptr) {
 		local_viewmodel_parts_.push_back(ObjectID(gun->get_instance_id()));
+	}
+	// The arms pose by the gun's rig, part for part: arms that draw with a part
+	// past the rig's take no posed matrix in the game, so say so once a build
+	// (renderer::fp_arms_part_reach carries the witness).
+	if (arms != nullptr && arms->get_skeleton() != nullptr) {
+		const Ref<ObjectData> arms_data = arms->get_object_data();
+		const int rig_parts = arms->get_skeleton()->get_bone_count();
+		const int reach = arms_data.is_valid() && arms_data->has_document()
+				? opennova::renderer::fp_arms_part_reach(arms_data->native_model())
+				: 0;
+		if (reach > rig_parts) {
+			UtilityFunctions::push_warning(vformat(
+					"GameWorld: FP arms model '%s' draws with parts up to %d, but the gun rig '%s' has %d; "
+					"the game poses arms part i with the gun's part i, so arms parts %d and on take no posed "
+					"matrix",
+					arms_name, reach - 1, gun_name, rig_parts, rig_parts));
+		}
 	}
 	set_first_person_model_available(gun != nullptr);
 	if (show_arms && arms == nullptr) {
