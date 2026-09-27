@@ -10,6 +10,8 @@
 #include <runtime/hud/hud_message_log.h>
 #include <runtime/world/friendly_tags.h> // the viewer gate's feed
 
+#include "fixtures/minimal_fnt_builder.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -40,22 +42,6 @@ int failures = 0;
 			++failures;                                                        \
 		}                                                                      \
 	} while (0)
-
-// A synthetic 1-page font: every glyph 8x16 px on the 256-page grid,
-// spacing 2, design width 800 (scale 1).
-fnt_font_t make_font() {
-	fnt_font_t font{};
-	fnt_init_blank(&font, 1, 2);
-	font.design_width = 800;
-	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
-		font.glyphs[i].page = 0;
-		font.glyphs[i].uv.u0 = 0.0f;
-		font.glyphs[i].uv.v0 = 0.0f;
-		font.glyphs[i].uv.u1 = 8.0f / 256.0f;
-		font.glyphs[i].uv.v1 = 16.0f / 256.0f;
-	}
-	return font;
-}
 
 void test_measure_advance_and_trailing_pad(const fnt_font_t *font) {
 	GameFont gf;
@@ -143,13 +129,11 @@ void test_format_tags(const fnt_font_t *font) {
 void test_declutter_rebuild_and_cycle() {
 	using namespace opennova::hud;
 
-	// The token map, including the CTAPE dead token (no retail parse arm).
-	CHECK(declutter_slot_from_token("SPINMAP") == kDeclutterSpinmap,
-			"SPINMAP resolves to slot 17");
-	CHECK(declutter_slot_from_token("chat") == kDeclutterChat,
-			"token lookup is case-insensitive");
-	CHECK(declutter_slot_from_token("CTAPE") == -1,
-			"the dead JOX CTAPE token has no slot (no retail arm)");
+	// The token map.
+	CHECK(std::string(declutter_token_name(kDeclutterSpinmap)) == "SPINMAP",
+			"slot 17 names SPINMAP");
+	CHECK(std::string(declutter_token_name(kDeclutterChat)) == "CHAT",
+			"slot 23 names CHAT");
 	CHECK(std::string(declutter_token_name(kDeclutterMsnTitle)) == "MSNTITLE",
 			"slot 0 names MSNTITLE");
 
@@ -2574,7 +2558,7 @@ void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
 }
 
 int main() {
-	fnt_font_t font = make_font();
+	fnt_font_t font = minimal_fnt::uniform_test_font();
 	test_seat_weapon_and_stance_transitions(&font);
 	test_launcher_reload_keeps_ammo_flash(&font);
 	test_stance_obeys_weapon_group_declutter(&font);

@@ -1,14 +1,9 @@
 #include "simulation/hitbox_debug_report.h"
-#include "util/variant_type_of.h"
+#include "util/record_bind.h"
 
 using namespace godot;
 
-#define HITBOX_DEBUG_BIND_FIELD(m_type, m_name, m_default)                                         \
-	ClassDB::bind_method(D_METHOD("get_" #m_name), &self_type::get_##m_name);                      \
-	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &self_type::set_##m_name);             \
-	ADD_PROPERTY(PropertyInfo(variant_type_of<m_type>(), #m_name), "set_" #m_name, "get_" #m_name);
-
-void HitboxDebugEntity::_bind_methods() { HITBOX_DEBUG_ENTITY_FIELDS(HITBOX_DEBUG_BIND_FIELD) }
+void HitboxDebugEntity::_bind_methods() { HITBOX_DEBUG_ENTITY_FIELDS(OPENNOVA_RECORD_FIELD) }
 
 Ref<HitboxDebugOrganic> HitboxDebugOrganic::make(int p_entity_handle, int p_section,
 		const Vector3 &p_pos, float p_radius, float p_authored_radius, bool p_masked,
@@ -26,7 +21,7 @@ Ref<HitboxDebugOrganic> HitboxDebugOrganic::make(int p_entity_handle, int p_sect
 }
 
 void HitboxDebugOrganic::_bind_methods() {
-	HITBOX_DEBUG_ORGANIC_FIELDS(HITBOX_DEBUG_BIND_FIELD)
+	HITBOX_DEBUG_ORGANIC_FIELDS(OPENNOVA_RECORD_FIELD)
 	ClassDB::bind_static_method("HitboxDebugOrganic",
 			D_METHOD("make", "entity_handle", "section", "pos", "radius", "authored_radius",
 					"masked", "fallback"),
@@ -56,5 +51,3 @@ void HitboxDebugReport::_bind_methods() {
 			&HitboxDebugReport::make, DEFVAL(TypedArray<HitboxDebugEntity>()),
 			DEFVAL(TypedArray<HitboxDebugOrganic>()));
 }
-
-#undef HITBOX_DEBUG_BIND_FIELD

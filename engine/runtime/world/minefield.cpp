@@ -11,9 +11,9 @@
 
 namespace opennova::world {
 namespace {
-int32_t fixed(float v) { return static_cast<int32_t>(v * io::kFp16One); }
 FixedVec3 position(const Entity &e) {
-    return {fixed(e.position.x), fixed(e.position.y), fixed(e.position.z)};
+    return {io::float_to_fp16_16(e.position.x), io::float_to_fp16_16(e.position.y),
+            io::float_to_fp16_16(e.position.z)};
 }
 int32_t add(int32_t a, int32_t b) {
     return static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b));
@@ -94,7 +94,7 @@ void MinefieldSystem::think(World &world, Entity &field) {
     std::array<bool, count> contacts{};
     for (int i = 0; i < count; ++i) positions[i] = point(field, i);
     const FixedVec3 center = position(field);
-    const int32_t radius = fixed(field.bound_radius);
+    const int32_t radius = io::float_to_fp16_16(field.bound_radius);
     auto actor = [&](const MinefieldActor &body) {
         if (body.item_id == 0 || (body.flags & 1) ||
             distance(body.position, center) > radius) return;
@@ -118,7 +118,7 @@ void MinefieldSystem::think(World &world, Entity &field) {
     world.registry.for_each_in_pool(1, [&](const Entity &vehicle) {
         if (!vehicle.item_id || !vehicle.has_item_def ||
             vehicle.item_type != 1 || ((vehicle.engine_flags | vehicle.flags) & 1)) return;
-        const int32_t vehicle_radius = fixed(vehicle.bound_radius);
+        const int32_t vehicle_radius = io::float_to_fp16_16(vehicle.bound_radius);
         FixedVec3 probe = position(vehicle);
         if (distance(probe, center) > add(radius, vehicle_radius)) return;
         probe.z = add(probe.z, 4096);
@@ -130,9 +130,11 @@ void MinefieldSystem::think(World &world, Entity &field) {
             if (world.collision)
                 ground = world.collision->minefield_ground(world, vehicle.handle, probe, indoors);
             else if (!indoors)
-                ground = world.tables.terrain ? fixed(terrain::height_field_height_world_bilinear(
-                        *world.tables.terrain, probe.x * io::kInvFp16One,
-                        -probe.y * io::kInvFp16One)) : 0;
+                ground = world.tables.terrain
+                        ? io::float_to_fp16_16(terrain::height_field_height_world_bilinear(
+                                *world.tables.terrain, probe.x * io::kInvFp16One,
+                                -probe.y * io::kInvFp16One))
+                        : 0;
             contact.z = add(ground, 0x8000);
             if (distance(contact, positions[i]) - vehicle_radius / 2 < 49152)
                 contacts[i] = true;

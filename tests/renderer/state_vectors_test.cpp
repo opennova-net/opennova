@@ -71,6 +71,19 @@ using namespace opennova::threedi;
 
 namespace {
 
+const char *object_shader_family_name(opennova::renderer::ObjectShaderFamily family) {
+	switch (family) {
+		case opennova::renderer::ObjectShaderFamily::Unknown: return "unknown";
+		case opennova::renderer::ObjectShaderFamily::FixedFunction: return "fixed_function";
+		case opennova::renderer::ObjectShaderFamily::Phong: return "phong";
+		case opennova::renderer::ObjectShaderFamily::Flag: return "flag";
+		case opennova::renderer::ObjectShaderFamily::Dot3: return "dot3";
+		case opennova::renderer::ObjectShaderFamily::Environment: return "environment";
+		case opennova::renderer::ObjectShaderFamily::Glass: return "glass";
+	}
+	return "unknown";
+}
+
 const char *blend_name(opennova::renderer::ObjectBlendMode blend) {
 	switch (blend) {
 		case opennova::renderer::ObjectBlendMode::Opaque: return "opaque";
@@ -248,7 +261,7 @@ std::string generate() {
 		              "nuv2=%d nspace=%s detail=%d spec=%d skin=%d envtex=%d glass=%d vfade=%d "
 		              "envsrc=%s specsrc=%s\n",
 		              key,
-		              opennova::renderer::object_shader_family_name(pipeline.family),
+		              object_shader_family_name(pipeline.family),
 		              technique_name(pipeline.technique),
 		              blend_name(pipeline.blend),
 		              depth_policy_name(pipeline.depth),

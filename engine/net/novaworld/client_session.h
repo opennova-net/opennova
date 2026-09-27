@@ -9,7 +9,6 @@
 #include <array>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -287,7 +286,6 @@ public:
 	// [orig: HandleHostVerifyResponse @0x4d59d0 @0x4d5bd6..0x4d5c0f -> server_user_string1]
 	const std::string &host_gsid() const { return host_gsid_; }
 	int host_requires_join_ticket() const { return host_requires_join_ticket_; }
-	const std::map<std::string, std::string> &host_commands() const { return host_commands_; }
 
 	// ---- the play leg -------------------------------------------------------
 	// ClientPlayRequest (state 4 -> 7) with the PlaySetup vars (make_play_setup_vars).
@@ -371,12 +369,12 @@ private:
 	std::string last_error_;
 	ConnectionSettings cs_;
 
-	// The host / play legs' last results and the HostCommands.
+	// The host / play legs' last results and the two HostCommands values the
+	// host leg keeps.
 	ServerResultFields host_result_;
 	ServerResultFields play_result_;
 	std::string host_gsid_;
 	int host_requires_join_ticket_ = 0;
-	std::map<std::string, std::string> host_commands_;
 	std::vector<Notice> notices_;
 	int mission_exit_reason_ = 0;
 	DisconnectEvent disconnect_event_;

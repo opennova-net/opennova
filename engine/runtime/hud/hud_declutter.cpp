@@ -51,20 +51,6 @@ const char *declutter_token_name(int slot) {
 	return kTokenNames[slot];
 }
 
-int declutter_slot_from_token(const char *token) {
-	if (token == nullptr) {
-		return -1;
-	}
-	for (int slot = 0; slot < kDeclutterSlotCount; ++slot) {
-		if (strutil::iequals(token, kTokenNames[slot])) {
-			return slot;
-		}
-	}
-	// No parse arm — the token authors nothing (the dead JOX HUDDECLUT_CTAPE
-	// row lands here).
-	return -1;
-}
-
 std::array<bool, kDeclutterSlotCount> declutter_all_visible() {
 	std::array<bool, kDeclutterSlotCount> all{};
 	all.fill(true);

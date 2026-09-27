@@ -769,7 +769,7 @@ func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	DirAccess.make_dir_recursive_absolute(root)
 	# Pass the runtime archive gate so this fixture reaches the missing-environment contract.
 	WorldFixture.write_pff(self, root.path_join("resource.pff"), [])
-	_write_fixture_file(root.path_join("Tmap.trn"), "terrain_name \"Tmap\"\n")
+	TestFs.write_text(self, root.path_join("Tmap.trn"), "terrain_name \"Tmap\"\n")
 
 	var world := WorldFixture.make_world(self)
 	await get_tree().process_frame
@@ -1755,8 +1755,8 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 	assert_eq(DirAccess.copy_absolute(
 		ProjectSettings.globalize_path(RuntimeFixture.file("mnml.bms")),
 		root_dir.path_join(bms_name)), OK)
-	_write_fixture_file(root_dir.path_join("mnml.env"), "")
-	_write_fixture_file(root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
+	TestFs.write_text(self, root_dir.path_join("mnml.env"), "")
+	TestFs.write_text(self, root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 
@@ -1794,7 +1794,7 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	assert_eq(DirAccess.copy_absolute(
 		ProjectSettings.globalize_path(RuntimeFixture.file("mnml.env")),
 		root_dir.path_join("mnml.env")), OK)
-	_write_fixture_file(root_dir.path_join("mnml.trn"), "")
+	TestFs.write_text(self, root_dir.path_join("mnml.trn"), "")
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 
@@ -3148,14 +3148,6 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	world.set_frame_stats(null)
 	assert_false(world.is_water_render_stats_measured(),
 			"detaching the board also releases measurement immediately")
-
-
-func _write_fixture_file(path: String, text: String) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "Fixture file should be writable: %s" % path)
-	if file != null:
-		file.store_string(text)
-		file.close()
 
 
 func _make_fixture_root(name: String) -> String:

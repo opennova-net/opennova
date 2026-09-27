@@ -37,18 +37,6 @@ void expect_vector(const std::array<float, N>& actual,
 int main() {
     using namespace opennova::renderer;
 
-    {
-        const auto atten = build_point_light_attenuation(10.0f);
-        expect(nearly_equal(atten[0], 1.0f),
-               "point-light attenuation should keep the constant term at 1");
-        expect(nearly_equal(atten[1], 0.0f),
-               "point-light attenuation should keep the linear term at 0");
-        expect(nearly_equal(atten[2], 15.0f / (12.5f * 12.5f)),
-               "point-light attenuation should use the recovered 15/r^2 coefficient");
-        expect(nearly_equal(atten[3], 1.0f),
-               "point-light attenuation should preserve the trailing 1 term");
-    }
-
     expect_vector(unpack_modulator_scale(0x00804020u),
                   std::array<float, 3>{2.0f, 1.0f, 0.5f},
                   "modulator bytes should unpack with 64 as identity");
@@ -217,10 +205,6 @@ int main() {
                                     {1.0f, 0.5f, 0.25f}, true),
                   std::array<float, 3>{1.5f, 0.375f, 0.75f},
                   "D3D point-light path should add the witnessed 1.5 boost");
-    expect_vector(point_light_attenuation(10 * 65536),
-                  build_point_light_attenuation(10.0f),
-                  "runtime fixed-point attenuation should match the point-light shape",
-                  0.00001f);
 
     expect_vector(terrain_surface_light(0.25f, {0.8f, 0.4f, 0.2f},
                                         {0.1f, 0.2f, 0.3f}),

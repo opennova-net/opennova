@@ -34,10 +34,10 @@ struct StatScreenColumn {
 };
 
 // The columns [orig: @0x562280..0x5624a0]: NAME (150 px, the table's rtxt
-// "NAME" string or "!Name"), "Squad", then one per enabled field (every field
-// with the show-disabled toggle, using the SMALL keys), each of width
-// (table_width - 150) / (columns - 1); a field outside the map header reads
-// "Unk entry %d".
+// "NAME" string or "!Name"), "Squad", then one per enabled field with the
+// SMALL keys (with the show-disabled toggle: every field, with the large
+// keys), each of width (table_width - 150) / (columns - 1); a field outside
+// the map header reads "Unk entry %d".
 std::vector<StatScreenColumn> stat_screen_columns(const EndRoundStats &board,
 		bool show_disabled, int table_width);
 

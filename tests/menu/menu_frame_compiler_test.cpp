@@ -15,6 +15,8 @@
 #include <cstring>
 #include <string>
 
+#include "fixtures/minimal_fnt_builder.h"
+
 using namespace opennova::fnt;
 
 using opennova::menu::MenuDrawList;
@@ -35,22 +37,6 @@ int failures = 0;
 			++failures;                                                        \
 		}                                                                      \
 	} while (0)
-
-// A synthetic 1-page font: every glyph 8x16 px, spacing 2, design width 800
-// (scale 1) — glyph advance 9, measured width strips the trailing pad.
-fnt_font_t make_font() {
-	fnt_font_t font{};
-	fnt_init_blank(&font, 1, 2);
-	font.design_width = 800;
-	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
-		font.glyphs[i].page = 0;
-		font.glyphs[i].uv.u0 = 0.0f;
-		font.glyphs[i].uv.v0 = 0.0f;
-		font.glyphs[i].uv.u1 = 8.0f / 256.0f;
-		font.glyphs[i].uv.v1 = 16.0f / 256.0f;
-	}
-	return font;
-}
 
 opennova::mnu::Document parse_or_die(const char *xml) {
 	opennova::mnu::Document doc;
@@ -2485,7 +2471,7 @@ void test_degenerate_list_draws_no_dead_scrollbar(const fnt_font_t *font) {
 } // namespace
 
 int main() {
-	fnt_font_t font = make_font();
+	fnt_font_t font = minimal_fnt::uniform_test_font();
 	test_draw_order_and_state_selection(&font);
 	test_image_appearance_crops_authored_map_state(&font);
 	test_scroll_draws_authored_visual_parts(&font);

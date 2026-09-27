@@ -54,7 +54,7 @@ func test_background_decodes_sidecar_from_language_archive_without_loose_mode() 
 	var dir := _make_temp_dir("loadscreen_language_pff")
 	WorldFixture.write_pff(self, dir.path_join("language.pff"), [{
 		"name": "00trg.pcx",
-		"bytes": _test_pcx_bytes(),
+		"bytes": TestPcx.ramp_2x2(),
 	}])
 	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(dir, "", false, "jo"), OK,
@@ -67,10 +67,10 @@ func test_background_decodes_sidecar_from_language_archive_without_loose_mode() 
 
 func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> void:
 	var dir := _make_temp_dir("loadscreen_loose_first")
-	TestFs.write_bytes(self, dir.path_join("00trg.pcx"), _solid_test_pcx(Color.BLUE))
+	TestFs.write_bytes(self, dir.path_join("00trg.pcx"), TestPcx.solid_2x2(Color.BLUE))
 	WorldFixture.write_pff(self, dir.path_join("language.pff"), [{
 		"name": "00trg.pcx",
-		"bytes": _solid_test_pcx(Color.RED),
+		"bytes": TestPcx.solid_2x2(Color.RED),
 	}])
 	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(dir), OK,
@@ -209,8 +209,8 @@ func test_prepare_for_blocking_load_rejects_a_cancelled_operation() -> void:
 
 func _setup_screen(info: LoadingScreenInfo) -> LoadingScreen:
 	var dir := _make_temp_dir("loadscreen_setup")
-	_write_test_pcx(dir.path_join("00trg.pcx"))
-	_write_test_pcx(dir.path_join("loadscrn.pcx"))
+	TestFs.write_bytes(self, dir.path_join("00trg.pcx"), TestPcx.ramp_2x2())
+	TestFs.write_bytes(self, dir.path_join("loadscrn.pcx"), TestPcx.ramp_2x2())
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
@@ -232,59 +232,3 @@ func _touch(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_8(0)
 	f.close()
-
-
-# A minimal valid 8-bit palettized PCX (2x2) so ResourceRoot.load_texture
-# has something real to decode.
-func _write_test_pcx(path: String) -> void:
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_buffer(_test_pcx_bytes())
-	f.close()
-
-
-func _test_pcx_bytes() -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(128)
-	bytes[0] = 0x0A  # manufacturer
-	bytes[1] = 5     # version
-	bytes[2] = 1     # RLE
-	bytes[3] = 8     # bits per pixel
-	# xmin/ymin = 0, xmax/ymax = 1 (little-endian u16 pairs at 4..11)
-	bytes[8] = 1
-	bytes[10] = 1
-	bytes[65] = 1    # planes
-	bytes[66] = 2    # bytes per line
-	for p in [0, 1, 2, 3]:  # 4 literal pixels (values < 0xC0 pass through RLE)
-		bytes.append(p)
-	bytes.append(0x0C)  # palette marker
-	for i in range(256):
-		bytes.append(i)  # r
-		bytes.append(i)  # g
-		bytes.append(i)  # b
-	return bytes
-
-
-func _solid_test_pcx(color: Color) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(128)
-	bytes[0] = 0x0A
-	bytes[1] = 5
-	bytes[2] = 1
-	bytes[3] = 8
-	bytes[8] = 1
-	bytes[10] = 1
-	bytes[65] = 1
-	bytes[66] = 2
-	for _pixel in range(4):
-		bytes.append(1)
-	bytes.append(0x0C)
-	for index in range(256):
-		if index == 1:
-			bytes.append(int(color.r * 255.0))
-			bytes.append(int(color.g * 255.0))
-			bytes.append(int(color.b * 255.0))
-		else:
-			bytes.append(0)
-			bytes.append(0)
-			bytes.append(0)
-	return bytes

@@ -115,10 +115,9 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 | HTTP / API | `8080/tcp` | `/api/*`, the legacy `NW*.dll` routes |
 | web UI (Vite) | `http://localhost:5173` | the Vue site with **hot-reload**; Vite proxies `/api` to the server |
 
-Most dev values come from `deploy/env/app.dev.env` (committed, non-secret): `admin`/`admin`
-basic auth, `ADMIN_API_TOKEN=dev-admin-token`. The Docker dev override has
-machine-specific defaults for `ONNET_PUBLIC_HOST` and `ONNET_CLIENT_REFLECT_IP`; set them
-explicitly before retail host/join tests. Use `127.0.0.1` only when the retail client and
+The Docker dev override sets the dev values: `ADMIN_API_TOKEN=dev-admin-token`, the seeded
+test accounts, and machine-specific defaults for `ONNET_PUBLIC_HOST` and
+`ONNET_CLIENT_REFLECT_IP`; set those two explicitly before retail host/join tests. Use `127.0.0.1` only when the retail client and
 server run on the same Windows host, and use the reachable LAN IP for second-machine tests.
 Sanity check and DB reset:
 

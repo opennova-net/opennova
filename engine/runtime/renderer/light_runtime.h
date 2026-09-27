@@ -5,9 +5,6 @@
 
 namespace opennova::renderer {
 
-// Runtime point-light attenuation set [orig: Light_GetPointLightParams @ 0x5A9180].
-std::array<float, 4> build_point_light_attenuation(float light_range);
-
 // ---------------------------------------------------------------------------
 // The runtime lighting chain (REN-5), witnessed in retail Jointops.exe.
 // RE record: docs/render/render-lighting-re.md (D-RLIT catalog).
@@ -166,8 +163,9 @@ std::array<float, 3> point_light_color(const std::array<float, 3> &rgb,
                                        bool d3d_light_path);
 
 // Runtime point-light attenuation: {atten0 1, atten1 0, atten2 15 / range^2,
-// 1} with range = fixed_range * 1.25 / 65536 world units — byte-identical in
-// shape to the runtime point-light attenuation helper above.
+// 1} with range = fixed_range * 1.25 / 65536 world units. The ModSuperOed.exe
+// exporter preview computes the same set (PrepareLightParams @ 0x46A500 in
+// that image).
 // [orig: Light_GetPointLightParams @ 0x5a9251..0x5a9272;
 //  Light_FillD3DPointLight @ 0x5aa53b..0x5aa553]
 std::array<float, 4> point_light_attenuation(int32_t range_fixed);

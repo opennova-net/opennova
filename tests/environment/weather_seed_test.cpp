@@ -6,7 +6,6 @@
 #include "netsim/conn_fan_test_util.h"
 
 #include <formats/env/env.h>
-#include <runtime/inmatch/loopback_channel.h>
 #include <net/npwire/ingame_decode.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/world/world.h>
@@ -14,7 +13,6 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
-#include <vector>
 
 namespace {
 
@@ -49,31 +47,6 @@ bool seed_from_env(const char *text, const opennova::bms::Header &header, w::Wor
 	return true;
 }
 
-nw::FrameUpdate emit_phase2(w::World &world) {
-	world.registry.configure_pool(0, 1);
-	w::Entity recipient;
-	recipient.kind = w::EntityKind::Organic;
-	recipient.health = 150;
-	const w::EntityHandle recipient_h = world.registry.spawn(0, recipient);
-	// The server environment projection rides a real deployed player's 0x0A.
-	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate]
-	ns::LoopbackChannel channel;
-	std::vector<ns::Connection> connections;
-	connections.push_back(ns::Connection{
-			&channel, ns::TransportMode::Loopback, recipient_h, 0});
-	connections.back().s2c_phase = 1;
-	ns::test::emit_all(world, connections);
-
-	ns::Datagram datagram;
-	CHECK(channel.client_recv(datagram));
-	nw::FrameUpdate frame;
-	CHECK(nw::decode_frame_update(datagram.body.data(), datagram.body.size(),
-			ns::class_for_type_id, frame));
-	CHECK(frame.flags2 == 2);
-	CHECK(frame.env.present);
-	return frame;
-}
-
 void test_resource_values_reach_the_real_wire_projection() {
 	w::World world;
     // A mission only advances while a human is in the world - retail holds the
@@ -91,7 +64,8 @@ void test_resource_values_reach_the_real_wire_projection() {
 			header, world));
 	CHECK(world.weather.valid);
 
-	const nw::FrameUpdate frame = emit_phase2(world);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
 	CHECK(frame.env.fog_dist == 733);
 	CHECK(frame.env.fog_accel == 0xFF00);
 	CHECK(frame.env.tod_fixed == 0x5400);
@@ -116,7 +90,9 @@ void test_bms_fog_override_precedes_the_environment_resource() {
 	header.fog_override = 811;
 	header.minutes_per_day = 60;
 	CHECK(seed_from_env("fog_level 733\nsky_speed 19\n", header, world));
-	CHECK(emit_phase2(world).env.fog_dist == 811);
+	nw::FrameUpdate frame;
+	CHECK(ns::test::emit_phase2(world, frame));
+	CHECK(frame.env.fog_dist == 811);
 }
 
 void test_mission_start_prewarms_255_environment_ticks() {

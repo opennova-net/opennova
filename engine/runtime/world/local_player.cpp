@@ -532,9 +532,8 @@ void LocalPlayer::pump_local_weapon() {
 	io.is_authority = true;
 	w::local_weapon_pump_tick(world, weapon, io);
 	hud_map_control.weapon_command(io.map_command);
-	// The wire-facing outcomes for the embedder's relay legs (the local reload
-	// producer the listen drain consumes; a joiner's fired-round uplink).
-	last_fired = io.fired;
+	// The wire-facing outcome for the embedder's relay leg (the local reload
+	// producer the listen drain consumes).
 	last_reload = io.reload;
 }
 

@@ -42,9 +42,7 @@ var _native_fixture_dirs: Array[String] = []
 
 func after_each() -> void:
 	for dir in _native_fixture_dirs:
-		for file_name in DirAccess.get_files_at(dir):
-			DirAccess.remove_absolute(dir.path_join(file_name))
-		DirAccess.remove_absolute(dir)
+		TestFs.remove_dir_recursive(dir)
 	_native_fixture_dirs.clear()
 
 

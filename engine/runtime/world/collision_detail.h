@@ -22,12 +22,6 @@ namespace detail {
 
 inline int32_t abs32(int32_t v) { return opennova::io::bam_abs(v); }
 
-// [orig: dbl_7C19D8 = 2^31/pi — BAM per radian]
-constexpr double kBamPerRadian = 683565275.5764316;
-// [orig: dbl_7C57B8 = -2^31/pi — the NEGATED BAM-per-radian the ladder-contact
-// leg multiplies its atan2 results by (the target-relative subtraction then
-// yields target + atan*BAM).]
-constexpr double kNegBamPerRadian = -683565275.5764316;
 // Retail's x87 radians-per-BAM32 double, verbatim: 30.5 ppm off the exact
 // 2*pi/2^32 (io::kRadiansPerBam), and the value the ladder trig multiplies by.
 // [orig: dbl_7C3608 = 1.4629627251502471e-9; `fmul ds:dbl_7C3608` @0x4AE9D3]

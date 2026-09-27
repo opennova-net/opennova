@@ -1,5 +1,7 @@
 #include <runtime/terrain_query/terrain_raycast.h>
 
+#include <base/io/bam.h>
+
 // Structural translation of the retail heightmap raycast chain; see the
 // header for the model and the axis-convention / editor-guard notes.
 // [orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80,
@@ -8,11 +10,6 @@
 namespace opennova::terrain {
 
 namespace {
-
-// x86 abs idiom (cdq/xor/sub): wraps INT32_MIN to itself rather than UB.
-inline int32_t abs32(int32_t v) {
-	return v < 0 ? static_cast<int32_t>(0u - static_cast<uint32_t>(v)) : v;
-}
 
 // Resolve a BILINEAR sample to a surface height for the shortcut / confirm /
 // refine paths. kHeight -> the height; kEmpty -> 0, matching retail's
@@ -63,8 +60,8 @@ bool terrain_raycast_march(const TerrainRaycastSampler &sampler,
 	const int32_t dx = end[0] - start[0];
 	const int32_t dy = end[1] - start[1];
 	const int32_t dz = end[2] - start[2];
-	const int32_t abs_dx = abs32(dx);
-	const int32_t abs_dy = abs32(dy);
+	const int32_t abs_dx = io::bam_abs(dx);
+	const int32_t abs_dy = io::bam_abs(dy);
 
 	// Column-shortcut gate — the witnessed operator shapes kept [orig:
 	// @ 0x60cbe4..0x60cbf9]: with abs_dx != 0 the march is taken as soon as
@@ -337,8 +334,8 @@ bool terrain_raycast_los_clear(const TerrainRaycastSampler &sampler,
 	const int32_t dx = end[0] - start[0];
 	const int32_t dy = end[1] - start[1];
 	const int32_t dz = end[2] - start[2];
-	const int32_t abs_dx = abs32(dx);
-	const int32_t abs_dy = abs32(dy);
+	const int32_t abs_dx = io::bam_abs(dx);
+	const int32_t abs_dy = io::bam_abs(dy);
 
 	// Short segment (both axes under 2.0u): the START point decides
 	// [orig: @ 0x60c82e-0x60c86f].

@@ -16,7 +16,6 @@ extends GutTest
 # SubViewport and made current there.
 # =============================================================================
 
-const WATER_SHADER := "res://shaders/water.gdshader"
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 
 # The engine tick [docs/engine-primer.md: 62 Hz].

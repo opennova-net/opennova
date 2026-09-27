@@ -124,7 +124,6 @@ void DebugControlRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(DebugControlRow, Variant::INT, authority)
 	OPENNOVA_RECORD_READ_ONLY_ROWS(DebugControlRow, args, DebugArgSpec)
 	OPENNOVA_RECORD_READ_ONLY_OBJECT(DebugControlRow, state, DebugControlState)
-	ClassDB::bind_method(D_METHOD("kind_name"), &DebugControlRow::kind_name);
 	ClassDB::bind_method(D_METHOD("to_json_value"), &DebugControlRow::to_json_value);
 	BIND_ENUM_CONSTANT(CHECK);
 	BIND_ENUM_CONSTANT(SLIDER);

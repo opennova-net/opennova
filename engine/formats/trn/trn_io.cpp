@@ -1,5 +1,7 @@
 #include <formats/trn/trn_io.h>
 
+#include <base/io/strutil.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <sstream>
@@ -12,12 +14,7 @@ namespace opennova {
 
 namespace {
 
-static std::string unquote(const std::string &value) {
-	if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-		return value.substr(1, value.size() - 2);
-	}
-	return value;
-}
+using opennova::strutil::unquote;
 
 static void parse_foliage_attribs(std::istringstream &iss, FoliageDef &def) {
 	std::string token;

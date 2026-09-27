@@ -50,6 +50,7 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -62,14 +63,6 @@ w::PlayerSpawn player_spawn(uint16_t net_id) {
 	s.position = {0, 0, 0};
 	s.net_id = net_id;
 	return s;
-}
-
-inmatch::NapiNPConnection make_conn(uint32_t id, int type,
-        ns::ISessionTransport *transport, ns::TransportMode mode,
-        w::EntityHandle owned, bool spawned) {
-    auto connection = conn_fixture::make_conn(id, type, transport, mode, owned, spawned);
-    if (spawned) (void)inmatch::Server_RerollPlayerTickSeed(connection);
-    return connection;
 }
 
 void put_u16(std::vector<uint8_t> &b, uint16_t v) {
@@ -184,7 +177,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 	player->equipped_adm_index = 5;
 
 	std::vector<inmatch::NapiNPConnection> roster;
-	roster.push_back(make_conn(
+	roster.push_back(make_seeded_conn(
 			2, 1, nullptr, ns::TransportMode::Client, shooter, true));
 
 	MountedWeaponSlotSelection select_parent;
@@ -287,7 +280,7 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	inmatch::NapiNPConnection conn =
-			make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true);
+			make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true);
 	conn.peer = peer;
 	conn.client_scrk = client_scrk;
 	conn.server_scrk = server_scrk;
@@ -439,7 +432,7 @@ bool check_fire_owner_environment_and_origin() {
     weapon.ammo_class_id = 1;
     ns::UdpSessionTransport udp(ns::UdpSessionTransport::Role::Host);
     std::vector<inmatch::NapiNPConnection> roster;
-    roster.push_back(make_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
+    roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
     auto shoot = [&] {
         dispatch_fire(roster[0], roster, world,
                 fire_body(shooter.packed, 2, 1, 100 * 65536, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
@@ -557,9 +550,9 @@ int main() {
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	auto &roster = ctx.np_protocol.connection_list;
-	roster.push_back(make_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
-	roster.push_back(make_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
-	roster.push_back(make_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
+	roster.push_back(make_seeded_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
+	roster.push_back(make_seeded_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
+	roster.push_back(make_seeded_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
 
 	// --- 1. Valid primary fire: ring append + clip decrement + mirrors, no replies. ---
 	const std::vector<uint8_t> body =

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_tick.h>       // inmatch::Server_RerollPlayerTickSeed
 #include <runtime/replication/connection.h>        // replication::TransportMode
 #include <runtime/inmatch/session_transport.h> // replication::ISessionTransport
 #include <runtime/world/entity.h>         // world::EntityHandle
@@ -26,6 +27,17 @@ inline opennova::inmatch::NapiNPConnection make_conn(uint32_t id, int type,
 	c.burst.spawned = spawned;
 	c.spawned_announced = spawned;
 	c.phase = spawned ? opennova::inmatch::ConnectionPhase::InMatch : opennova::inmatch::ConnectionPhase::New;
+	return c;
+}
+
+// make_conn, with a spawned connection's tick seed re-rolled the way join and
+// deployment arm it (Server_RerollPlayerTickSeed).
+inline opennova::inmatch::NapiNPConnection make_seeded_conn(uint32_t id, int type,
+                                                opennova::replication::ISessionTransport *t,
+                                                opennova::replication::TransportMode mode,
+                                                opennova::world::EntityHandle owned, bool spawned) {
+	opennova::inmatch::NapiNPConnection c = make_conn(id, type, t, mode, owned, spawned);
+	if (spawned) (void)opennova::inmatch::Server_RerollPlayerTickSeed(c);
 	return c;
 }
 

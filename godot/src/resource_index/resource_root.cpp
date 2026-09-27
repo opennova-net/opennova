@@ -267,8 +267,8 @@ String ResourceRoot::expansion_name(const String &path, const String &expansion)
 	if (clean.is_empty()) {
 		return String();
 	}
-	return String::utf8(opennova::vfs_expansion_info(
-			clean.utf8().get_data(), expansion.utf8().get_data()).name.c_str());
+	return opennova::to_gd(opennova::vfs_expansion_info(
+			clean.utf8().get_data(), expansion.utf8().get_data()).name);
 }
 
 String ResourceRoot::expansion_description(const String &path, const String &expansion) const {
@@ -276,8 +276,8 @@ String ResourceRoot::expansion_description(const String &path, const String &exp
 	if (clean.is_empty()) {
 		return String();
 	}
-	return String::utf8(opennova::vfs_expansion_info(
-			clean.utf8().get_data(), expansion.utf8().get_data()).description.c_str());
+	return opennova::to_gd(opennova::vfs_expansion_info(
+			clean.utf8().get_data(), expansion.utf8().get_data()).description);
 }
 
 String ResourceRoot::get_root_dir() const {

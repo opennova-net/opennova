@@ -70,8 +70,6 @@ struct ObjectMaterialClassification {
 	ObjectNormalSpace normal_space = ObjectNormalSpace::None;
 };
 
-const char *object_shader_family_name(ObjectShaderFamily family);
-
 // Classify a material from its shader tag string + binary 3DI flag fields.
 // `material_flags` is the MTRL flags byte (THREEDI_MATERIAL_FLAG_*);
 // `emissive_type` is 2 for *_LUM variants; `is_glass_flag` mirrors the

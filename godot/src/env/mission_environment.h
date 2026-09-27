@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -268,5 +269,26 @@ private:
 	bool underwater_overlay_view_ = false;
 	bool sky_dome_drawn_ = true;
 };
+
+// The env appliers' (sky, water, celestial) cached sibling lookup of their
+// MissionEnvironment (and the sky's Weather): the cached node while it is live
+// and in the tree, else `p_path` resolved from `p_self` and re-cached (a miss
+// clears the cache). Lazy (re-)resolution supports owners that create the
+// target after the node; relative sibling paths also resolve off-tree.
+template <typename T>
+T *resolve_cached_node(const Node &p_self, const NodePath &p_path, ObjectID &r_cache) {
+	if (r_cache.is_valid()) {
+		T *node = Object::cast_to<T>(ObjectDB::get_instance(r_cache));
+		if (node != nullptr && node->is_inside_tree()) {
+			return node;
+		}
+	}
+	if (p_path.is_empty() || (!p_self.is_inside_tree() && p_path.is_absolute())) {
+		return nullptr;
+	}
+	T *node = Object::cast_to<T>(p_self.get_node_or_null(p_path));
+	r_cache = node != nullptr ? ObjectID(node->get_instance_id()) : ObjectID();
+	return node;
+}
 
 } // namespace godot

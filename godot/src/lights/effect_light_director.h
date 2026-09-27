@@ -145,8 +145,6 @@ public:
 	// stops.
 	void render_inset_frame(Camera3D *p_camera, int64_t p_time_ms);
 	void release_inset_frame();
-	// The Inset walk's quad count this frame (the typed read-back).
-	int get_inset_corona_count() const { return static_cast<int>(inset_coronas_.size()); }
 	// This frame's corona billboards into the post-particle overlay tail
 	// (renderer/scene_overlay.h): the main walk's, and the Inset walk's in its
 	// own slot. Not bound to Godot.

@@ -1,6 +1,7 @@
 #include "render/nvg_view_device.h"
 #include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
+#include "util/color_convert.h"
 #include "util/string_convert.h"
 
 #include <array>
@@ -141,11 +142,6 @@ std::string lens_fragment_source() {
 	splice_token(source, "@NVG_TINT_SCALE@", glsl_vec3(r::kNvgTintScale));
 	splice_token(source, "@NVG_TINT_BIAS@", glsl_vec3(r::kNvgTintBias));
 	return source;
-}
-
-Color color_from_argb(std::uint32_t p_argb) {
-	return Color(float((p_argb >> 16) & 0xFFu) / 255.0f, float((p_argb >> 8) & 0xFFu) / 255.0f,
-			float(p_argb & 0xFFu) / 255.0f, float((p_argb >> 24) & 0xFFu) / 255.0f);
 }
 
 void write_strip(PackedByteArray &p_bytes, int p_first, const r::NvgLensStrip &p_strip) {
@@ -465,7 +461,7 @@ bool NvgViewDevice::draw(RenderingDevice *p_rd, const Inputs &p_inputs, std::siz
 	// The polar unwrap: the target cleared to 0xFFFF0000, then the eight
 	// passes, blending off (retail NVG_RenderSceneToTarget @0x5d0a1e..0x5d0e7f).
 	PackedColorArray polar_clear;
-	polar_clear.push_back(color_from_argb(r::kNvgPolarClearColor));
+	polar_clear.push_back(opennova::color_from_argb(r::kNvgPolarClearColor));
 	const Vector2i polar_size(r::kNvgPolarWidth, r::kNvgPolarHeight);
 	int64_t list = p_rd->draw_list_begin(polar_framebuffer_,
 			RenderingDevice::DRAW_CLEAR_COLOR_0, polar_clear);

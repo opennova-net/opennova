@@ -116,8 +116,7 @@ bool TerrainTileCacheDevice::_refresh_shadow_snapshot() {
 bool TerrainTileCacheDevice::rebuild(
 		const Ref<TerrainData> &p_data,
 		const Ref<TerrainSurfaceInputs> &p_surface_inputs,
-		const Ref<TerrainTileInfo> &p_tile_info_override,
-		bool p_tile_overlay_enabled) {
+		const Ref<TerrainTileInfo> &p_tile_info_override) {
 	clear();
 	if (p_data.is_null() || p_surface_inputs.is_null()) {
 		return false;
@@ -182,15 +181,14 @@ bool TerrainTileCacheDevice::rebuild(
 	if (tile_info.is_null()) {
 		tile_info = p_data->get_tileinfo_resource();
 	}
-	if (p_tile_overlay_enabled && tile_info_declared && tile_info.is_null()) {
+	if (tile_info_declared && tile_info.is_null()) {
 		// A TRN-declared .til that could not be resolved or parsed is not the
 		// same as a mission authored without tile overlays. Publishing only the
 		// base sources here would make the missing overlay invisible to capture.
 		tile_overlay_required_ = true;
 		return false;
 	}
-	if (p_tile_overlay_enabled && tile_info.is_valid() &&
-			tile_info->get_entry_count() > 0) {
+	if (tile_info.is_valid() && tile_info->get_entry_count() > 0) {
 		tile_overlay_required_ = true;
 		opennova::terrain::Rgba8Image tilestrip;
 		if (!texture_to_rgba8(p_data->get_tilestrip_tex(), tilestrip)) {

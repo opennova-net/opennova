@@ -98,12 +98,6 @@ public:
 	// single-select game-mode bit picks the session code word; 0 / unknown
 	// resolves to GAME_TYPE_TRAINING_COOP (gameprofile game_type::for_mission_mode).
 	static int game_type_for_mission_mode(int p_attrib_mode);
-	// The MULTI_PLAYER_HOST dialog's witnessed game-type rules (D-MNU-17);
-	// the logic lives in engine/base/gameprofile/game_type.h.
-	static bool game_type_host_list_visible(int p_game_type);
-	static int game_type_host_filter_category(int p_game_type);
-	static String game_type_host_abbreviation_key(int p_game_type);
-	static bool game_type_host_rotation_default(int p_game_type);
 	// The Tab board header's game-type rung — the Overlays gametext key
 	// [orig: HUD_GetGameTypeOverlayLabel @0x5b8680; the map lives in
 	// base/gameprofile game_type.h overlay_label_key]. "" = blank rung.

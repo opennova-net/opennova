@@ -168,8 +168,8 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	// VFS load and the slot mapping key on the SAME resolved name.
 	std::vector<String> font_names;
 	for (const String &raw : raw_font_names) {
-		const String resolved = String::utf8(
-				compiler_.resolve_style_var(opennova::to_std(raw)).c_str());
+		const String resolved =
+				opennova::to_gd(compiler_.resolve_style_var(opennova::to_std(raw)));
 		bool seen = false;
 		for (const String &existing : font_names) {
 			if (existing.nocasecmp_to(resolved) == 0) {
@@ -1072,43 +1072,21 @@ void MenuFrame::_bind_methods() {
 					"text_lookup"),
 			&MenuFrame::configure);
 	ClassDB::bind_method(D_METHOD("is_configured"), &MenuFrame::is_configured);
-	ClassDB::bind_method(
-			D_METHOD("set_widget_shown_override", "index", "shown"),
-			&MenuFrame::set_widget_shown_override);
 	ClassDB::bind_method(D_METHOD("set_widget_disabled", "index", "disabled"),
 			&MenuFrame::set_widget_disabled);
 	ClassDB::bind_method(D_METHOD("set_widget_checked", "index", "checked"),
 			&MenuFrame::set_widget_checked);
-	ClassDB::bind_method(D_METHOD("set_widget_focused", "index", "focused"),
-			&MenuFrame::set_widget_focused);
-	ClassDB::bind_method(D_METHOD("set_widget_caret", "index", "caret"),
-			&MenuFrame::set_widget_caret);
 	ClassDB::bind_method(D_METHOD("set_widget_text", "index", "text"),
 			&MenuFrame::set_widget_text);
-	ClassDB::bind_method(D_METHOD("set_widget_hover_item", "index", "row"),
-			&MenuFrame::set_widget_hover_item);
 	ClassDB::bind_method(D_METHOD("get_widget_hover_item", "index"),
 			&MenuFrame::get_widget_hover_item);
 	ClassDB::bind_method(D_METHOD("scroll_hit_at", "index", "position"),
 			&MenuFrame::scroll_hit_at);
-	ClassDB::bind_method(
-			D_METHOD("set_widget_selection", "index", "selected_item",
-					"hover_item", "scroll_row"),
-			&MenuFrame::set_widget_selection);
 	ClassDB::bind_method(D_METHOD("set_widget_scroll_range", "index", "minimum",
 								 "maximum", "page", "value"),
 			&MenuFrame::set_widget_scroll_range);
-	ClassDB::bind_method(D_METHOD("set_widget_popup_open", "index", "open"),
-			&MenuFrame::set_widget_popup_open);
-	ClassDB::bind_method(D_METHOD("set_time_ms", "ms"),
-			&MenuFrame::set_time_ms);
 	ClassDB::bind_method(D_METHOD("process_mouse", "position", "button_down"),
 			&MenuFrame::process_mouse);
-	ClassDB::bind_method(D_METHOD("process_popup_mouse", "index", "position",
-								 "button_down"),
-			&MenuFrame::process_popup_mouse);
-	ClassDB::bind_method(D_METHOD("process_mouse_wheel", "position", "steps"),
-			&MenuFrame::process_mouse_wheel);
 	ClassDB::bind_method(D_METHOD("widget_index", "name"),
 			&MenuFrame::widget_index);
 	ADD_SIGNAL(MethodInfo("widget_clicked",
@@ -1118,18 +1096,10 @@ void MenuFrame::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("scroll_value_changed",
 			PropertyInfo(Variant::INT, "index"),
 			PropertyInfo(Variant::INT, "value")));
-	ClassDB::bind_method(D_METHOD("set_cursor_state", "visible", "position"),
-			&MenuFrame::set_cursor_state);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"),
 			&MenuFrame::get_draw_list_stats);
 	ClassDB::bind_method(D_METHOD("set_widget_items", "index", "items"),
 			&MenuFrame::set_widget_items);
-	ClassDB::bind_method(D_METHOD("set_widget_selected_set", "index", "rows"),
-			&MenuFrame::set_widget_selected_set);
-	ClassDB::bind_method(D_METHOD("set_widget_table_rows", "index", "rows"),
-			&MenuFrame::set_widget_table_rows);
-	ClassDB::bind_method(D_METHOD("set_widget_marquee_lines", "index", "lines"),
-			&MenuFrame::set_widget_marquee_lines);
 	ClassDB::bind_method(D_METHOD("widget_count"), &MenuFrame::widget_count);
 	ClassDB::bind_method(D_METHOD("widget_name", "index"),
 			&MenuFrame::widget_name);
@@ -1145,27 +1115,8 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::item_count);
 	ClassDB::bind_method(D_METHOD("get_widget_text", "index"),
 			&MenuFrame::get_widget_text);
-	ClassDB::bind_method(D_METHOD("get_widget_caret", "index"),
-			&MenuFrame::get_widget_caret);
 	ClassDB::bind_method(D_METHOD("hit_test", "position"),
 			&MenuFrame::hit_test);
-	ClassDB::bind_method(D_METHOD("list_row_at", "index", "position"),
-			&MenuFrame::list_row_at);
-	ClassDB::bind_method(
-			D_METHOD("combo_popup_contains", "index", "position"),
-			&MenuFrame::combo_popup_contains);
-	ClassDB::bind_method(D_METHOD("combo_popup_row_at", "index", "position"),
-			&MenuFrame::combo_popup_row_at);
-	ClassDB::bind_method(D_METHOD("spin_arrow_at", "index", "position"),
-			&MenuFrame::spin_arrow_at);
-	ClassDB::bind_method(D_METHOD("table_row_at", "index", "position"),
-			&MenuFrame::table_row_at);
-	ClassDB::bind_method(D_METHOD("hotkey_widget", "key", "is_virtual"),
-			&MenuFrame::hotkey_widget);
-	ClassDB::bind_method(D_METHOD("edit_char", "index", "unicode"),
-			&MenuFrame::edit_char);
-	ClassDB::bind_method(D_METHOD("edit_key", "index", "key", "shift"),
-			&MenuFrame::edit_key);
 	ClassDB::bind_method(D_METHOD("get_cursor_texture"),
 			&MenuFrame::get_cursor_texture);
 	ClassDB::bind_method(D_METHOD("get_unresolved_asset_count"),

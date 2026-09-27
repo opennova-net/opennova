@@ -295,16 +295,12 @@ public:
 	};
 	static int hud_color_index_default();
 	static int clamp_hud_color_index(int p_index);
-	static int next_hud_color_index(int p_index);
 	static int hud_detail_level_default();
 	static int hud_detail_level_blank();
 	static int next_hud_detail_level(int p_level);
-	static int showhud_flags_default();
-	static int next_showhud_flags(int p_flags);
 	// The sight-scale index policy (engine/runtime/hud/sight_overlay.h): the
 	// player-init default.
 	static int sight_scale_index_default();
-	static FriendlyTagMode friendly_tag_mode_default();
 	static FriendlyTagMode next_friendly_tag_mode(FriendlyTagMode p_mode);
 
 protected:

@@ -718,7 +718,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             const int32_t ang = static_cast<int32_t>(
                 std::atan2(static_cast<double>(pos[1] - live[1]),
                            static_cast<double>(pos[0] - live[0])) *
-                kBamPerRadian);
+                io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
             const uint32_t idx = (0x200000u - static_cast<uint32_t>(ang)) >> 22;
             const DirTable &t = dir_table();
             const int32_t sn = t.sin22[idx & 1023];
@@ -748,7 +748,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             const int32_t ang = static_cast<int32_t>(
                 std::atan2(static_cast<double>(pos[1] - p.y),
                            static_cast<double>(pos[0] - p.x)) *
-                kBamPerRadian);
+                io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
             const uint32_t idx = (0x200000u - static_cast<uint32_t>(ang)) >> 22;
             const DirTable &t = dir_table();
             const int32_t sn = t.sin22[idx & 1023];

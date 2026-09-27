@@ -207,8 +207,6 @@ void TerrainSurfaceInputs::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("apply_to_material", "material"),
 		&TerrainSurfaceInputs::apply_to_material);
 
-	ClassDB::bind_method(D_METHOD("get_colormap_texture"),
-		&TerrainSurfaceInputs::get_colormap_texture);
 	ClassDB::bind_method(D_METHOD("get_blend_texture"),
 		&TerrainSurfaceInputs::get_blend_texture);
 	ClassDB::bind_method(D_METHOD("get_detail_c1_texture"),
@@ -223,8 +221,6 @@ void TerrainSurfaceInputs::_bind_methods() {
 		&TerrainSurfaceInputs::get_detail2_texture);
 	ClassDB::bind_method(D_METHOD("has_detail2"),
 		&TerrainSurfaceInputs::has_detail2);
-	ClassDB::bind_method(D_METHOD("get_detail_density"),
-		&TerrainSurfaceInputs::get_detail_density);
 	ClassDB::bind_method(D_METHOD("has_normalized_blend"),
 		&TerrainSurfaceInputs::has_normalized_blend);
 	ClassDB::bind_method(D_METHOD("has_detail_coefficient"),
@@ -388,7 +384,6 @@ bool TerrainSurfaceInputs::apply_to_material(
 	if (p_material.is_null()) {
 		return false;
 	}
-	p_material->set_shader_parameter("u_detailmap", get_detailmap_texture());
 	p_material->set_shader_parameter("u_blendmap", get_blend_texture());
 	p_material->set_shader_parameter("u_detail_c1", get_detail_c1_texture());
 	p_material->set_shader_parameter("u_detail_c2", get_detail_c2_texture());

@@ -300,8 +300,3 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 	if _driver == null or not is_open():
 		return
 	MenuFrameSurface.forward_gui_input(event, _driver, _frame)
-
-
-func _recompute_fit() -> void:
-	# MenuFrameSurface.fit_frame (shared with the other presenters).
-	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)

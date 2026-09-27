@@ -339,11 +339,6 @@ String CbinImageEntry::get_texture_name() const {
 // ============================================================================
 
 void CbinCreditsResource::_bind_methods() {
-	// The decode entry (null on a non-CBIN payload) — the menu driver routes
-	// marquee DATASOURCE files through it.
-	ClassDB::bind_static_method("CbinCreditsResource",
-			D_METHOD("from_cbin_bytes", "data"),
-			&CbinCreditsResource::from_cbin_bytes);
 	// ENV properties.
 	ClassDB::bind_method(D_METHOD("set_scroll_rate", "rate"), &CbinCreditsResource::set_scroll_rate);
 	ClassDB::bind_method(D_METHOD("get_scroll_rate"), &CbinCreditsResource::get_scroll_rate);
@@ -970,7 +965,7 @@ Error CbinCreditsResource::save_to_path(const String &p_path) const {
 			item.text = space_to_underscore(text_entry->get_text());
 			String font_name = text_entry->get_font_name();
 			if (!font_name.is_empty()) {
-				item.font = font_name.utf8().get_data();
+				item.font = opennova::to_std(font_name);
 			}
 			item.color = color_to_cbin(text_entry->get_color());
 			item.justify = to_cbin_justify(text_entry->get_justify());
@@ -984,7 +979,7 @@ Error CbinCreditsResource::save_to_path(const String &p_path) const {
 			item.type = opennova::cbin::EntryType::Image;
 			String texture_path = image_entry->get_texture_path();
 			if (!texture_path.is_empty()) {
-				item.image_path = texture_path.utf8().get_data();
+				item.image_path = opennova::to_std(texture_path);
 			}
 			item.image_display_x = image_entry->get_display_x();
 			item.image_display_y = image_entry->get_display_y();

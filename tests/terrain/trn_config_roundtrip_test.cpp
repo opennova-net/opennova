@@ -7,10 +7,10 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
-#include <iterator>
 #include <sstream>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 
 namespace {
@@ -50,9 +50,7 @@ bool test_retail_06tr_draws_from_its_mission_tile_set() {
         retail::skip_leg("OPENNOVA_JO_ASSETS with 06TR.bms and G13.trn");
         return true;
     }
-    std::ifstream bms_file(bms_path, std::ios::binary);
-    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(bms_file)),
-                                     std::istreambuf_iterator<char>());
+    const std::vector<uint8_t> bytes = test_io::read_file(bms_path);
     opennova::bms::Header header;
     std::string error;
     if (!expect(bytes.size() >= opennova::bms::kHeaderSize &&

@@ -86,16 +86,16 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 	if (gametext.is_valid()) {
 		const String impact = gametext->get_string_in_section("Overlays", "STROVER_DIST");
 		if (!impact.is_empty())
-			s.impact_format = impact.utf8().get_data();
+			s.impact_format = opennova::to_std(impact);
 		const char *keys[] = { "STROVER_MEDGEAR", "STROVER_LOWGEAR", "STROVER_HIGEAR" };
 		for (int i = 0; i < 3; ++i) {
 			const String text = gametext->get_string_in_section("Overlays", keys[i]);
 			if (!text.is_empty())
-				s.gear_text[i] = text.utf8().get_data();
+				s.gear_text[i] = opennova::to_std(text);
 		}
 		const String text = gametext->get_string_in_section("hud", "altitude");
 		if (!text.is_empty())
-			s.altitude_text = text.utf8().get_data();
+			s.altitude_text = opennova::to_std(text);
 	}
 	compiler_.update_layout(layout_);
 	queue_redraw();

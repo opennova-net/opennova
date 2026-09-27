@@ -2,6 +2,7 @@
 #include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/world.h>
+#include <base/io/bam.h>
 
 #include <algorithm>
 #include <cmath>
@@ -37,13 +38,12 @@ void VehicleSystem::release_flares(Entity &vehicle) {
 		if (local[2] == 0)
 			local[2] = 24576;
 		matrix.rotate_point(local, d);
-		constexpr double angle_scale = 683565275.5764316;
 		const int32_t yaw = static_cast<int32_t>(static_cast<uint32_t>(
-				static_cast<int64_t>(std::atan2(double(d[1]), double(d[0])) * angle_scale)));
+				static_cast<int64_t>(std::atan2(double(d[1]), double(d[0])) * io::kBamPerRadian)));
 		const int32_t horizontal = static_cast<int32_t>(
 				std::min(2147418112.0, std::sqrt(double(d[0]) * d[0] + double(d[1]) * d[1])));
-		const int32_t pitch = static_cast<int32_t>(static_cast<uint32_t>(
-				static_cast<int64_t>(std::atan2(double(d[2]), double(horizontal)) * angle_scale)));
+		const int32_t pitch = static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(
+				std::atan2(double(d[2]), double(horizontal)) * io::kBamPerRadian)));
 		world_.round_sim.fire_source(
 				world_, &vehicle, { p[0], p[1], p[2] }, yaw, pitch, uint8_t(ammo));
 	}

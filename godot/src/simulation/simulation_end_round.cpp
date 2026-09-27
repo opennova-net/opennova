@@ -32,7 +32,7 @@ opennova::hud::EndRoundTextLookup overlays_lookup(const Ref<RtxtStringFile> &gam
 		if (gametext.is_null()) return false;
 		const String k = opennova::to_gd(key);
 		if (!gametext->has_string_in_section("Overlays", StringName(k))) return false;
-		value = gametext->get_string_in_section("Overlays", StringName(k)).utf8().get_data();
+		value = opennova::to_std(gametext->get_string_in_section("Overlays", StringName(k)));
 		return true;
 	};
 }
@@ -98,7 +98,7 @@ TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,
 	const opennova::hud::EndRoundTextLookup lookup = overlays_lookup(p_gametext);
 	for (opennova::inmatch::StatScreenColumn c :
 			opennova::inmatch::stat_screen_columns(er.board, false, p_table_width)) {
-		c.header = resolve_column_header(lookup, c).utf8().get_data();
+		c.header = opennova::to_std(resolve_column_header(lookup, c));
 		Ref<EndRoundColumn> column;
 		column.instantiate();
 		column->assign(c);

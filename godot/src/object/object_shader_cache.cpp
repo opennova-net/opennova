@@ -1,6 +1,7 @@
 #include "object/object_shader_cache.h"
 
 #include "object/object_model.h"
+#include "util/string_convert.h"
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/material_descriptor.h>
@@ -287,7 +288,7 @@ int32_t ObjectShaderCache::classify(const String &shader_tag,
 		int32_t emissive_type,
 		int32_t is_glass_flag,
 		int32_t alpha_test_byte) {
-	const std::string tag = shader_tag.utf8().get_data();
+	const std::string tag = opennova::to_std(shader_tag);
 	const auto cls = opennova::renderer::classify_object_material(
 			tag,
 			static_cast<uint8_t>(material_flags),

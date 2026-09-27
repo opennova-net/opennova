@@ -72,10 +72,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::set_underwater_overlay_view);
 	ClassDB::bind_method(D_METHOD("is_underwater_overlay_view"),
 			&MissionEnvironment::is_underwater_overlay_view);
-	ClassDB::bind_method(D_METHOD("get_underwater_overlay_color"),
-			&MissionEnvironment::get_underwater_overlay_color);
-	ClassDB::bind_method(D_METHOD("get_underwater_overlay_alpha_byte"),
-			&MissionEnvironment::get_underwater_overlay_alpha_byte);
 	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_color"),
 			&MissionEnvironment::get_viewmodel_fog_color);
 	ClassDB::bind_method(D_METHOD("get_viewmodel_fog_range"),
@@ -143,8 +139,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_terrain_tint);
 	ClassDB::bind_method(D_METHOD("get_terrain_lighting_attenuation"),
 			&MissionEnvironment::get_terrain_lighting_attenuation);
-	ClassDB::bind_method(D_METHOD("get_tile_overlay_tint"),
-			&MissionEnvironment::get_tile_overlay_tint);
 	ClassDB::bind_method(D_METHOD("apply_terrain_uniforms", "material"),
 			&MissionEnvironment::apply_terrain_uniforms);
 	ClassDB::bind_method(D_METHOD("get_water_color"),

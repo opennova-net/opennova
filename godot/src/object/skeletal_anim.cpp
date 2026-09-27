@@ -1,6 +1,7 @@
 #include "object/skeletal_anim.h"
 
 #include "resource_index/resource_root.h"
+#include "util/string_convert.h"
 
 #include <array>
 #include <godot_cpp/classes/skeleton3d.hpp>
@@ -94,11 +95,11 @@ const opennova::anim::SkeletalClips &SkeletalAnim::rig() const {
 }
 
 const SkeletalAnim::LoadedClip *SkeletalAnim::find_clip(const String &key) const {
-	return rig().find_clip(key.utf8().get_data());
+	return rig().find_clip(opennova::to_std(key));
 }
 
 const SkeletalAnim::LoadedClip *SkeletalAnim::find_clip_variant(const String &key, int variant) const {
-	return rig().find_clip_variant(key.utf8().get_data(), variant);
+	return rig().find_clip_variant(opennova::to_std(key), variant);
 }
 
 bool SkeletalAnim::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root,
@@ -110,7 +111,7 @@ bool SkeletalAnim::load_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 		last_error_ = "Resource root is null";
 		return false;
 	}
-	rig_ = p_resource_root->native_assets().skeletal_rig(p_adm_name.utf8().get_data(),
+	rig_ = p_resource_root->native_assets().skeletal_rig(opennova::to_std(p_adm_name),
 			to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents));
 	if (!rig_) last_error_ = "Animation rig missing or invalid: " + p_adm_name;
 	return rig_ != nullptr;
@@ -132,10 +133,10 @@ bool SkeletalAnim::load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
 		const String key = keys[i];
 		const String name = p_key_to_bad[keys[i]];
 		if (!key.is_empty() && !name.is_empty())
-			clips.emplace_back(key.utf8().get_data(), name.utf8().get_data());
+			clips.emplace_back(opennova::to_std(key), opennova::to_std(name));
 	}
 	rig_ = p_resource_root->native_assets().skeletal_rig_from_files(
-			p_skeleton_bad.utf8().get_data(), clips,
+			opennova::to_std(p_skeleton_bad), clips,
 			to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents));
 	if (!rig_) last_error_ = "Animation rig missing or invalid: " + p_skeleton_bad;
 	return rig_ != nullptr;
@@ -166,12 +167,12 @@ Array SkeletalAnim::get_skeleton_bones() const {
 }
 
 int SkeletalAnim::get_clip_variant_count(const String &p_key) const {
-	return rig().clip_variant_count(p_key.utf8().get_data());
+	return rig().clip_variant_count(opennova::to_std(p_key));
 }
 
 PackedFloat32Array SkeletalAnim::get_clip_variant_lengths(const String &p_key) const {
 	PackedFloat32Array out;
-	for (float seconds : rig().clip_variant_lengths(p_key.utf8().get_data())) out.push_back(seconds);
+	for (float seconds : rig().clip_variant_lengths(opennova::to_std(p_key))) out.push_back(seconds);
 	return out;
 }
 
@@ -182,15 +183,15 @@ int SkeletalAnim::get_clip_frame_count(const String &p_key, int p_variant) const
 
 double SkeletalAnim::get_clip_phase_seconds(const String &p_key, int p_ticks,
 		int p_variant) const {
-	return rig().clip_seconds_at_tick(p_key.utf8().get_data(), p_ticks, p_variant);
+	return rig().clip_seconds_at_tick(opennova::to_std(p_key), p_ticks, p_variant);
 }
 
 float SkeletalAnim::get_clip_fps(const String &p_key, int p_variant) const {
-	return rig().clip_fps(p_key.utf8().get_data(), p_variant);
+	return rig().clip_fps(opennova::to_std(p_key), p_variant);
 }
 
 float SkeletalAnim::get_clip_length(const String &p_key, int p_variant) const {
-	return rig().clip_length(p_key.utf8().get_data(), p_variant);
+	return rig().clip_length(opennova::to_std(p_key), p_variant);
 }
 
 bool SkeletalAnim::is_clip_looping(const String &p_key, int p_variant) const {
@@ -201,7 +202,7 @@ bool SkeletalAnim::is_clip_looping(const String &p_key, int p_variant) const {
 Array SkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds,
 		int p_variant) const {
 	std::vector<opennova::anim::PoseBone> pose;
-	rig().eval_pose(p_key.utf8().get_data(), p_playhead_seconds, p_variant, pose);
+	rig().eval_pose(opennova::to_std(p_key), p_playhead_seconds, p_variant, pose);
 	return pose_to_array(pose);
 }
 
@@ -210,8 +211,8 @@ Array SkeletalAnim::eval_pose_blended(const String &p_source_key,
 		double p_target_playhead_seconds, float p_weight,
 		int p_source_variant, int p_target_variant) const {
 	std::vector<opennova::anim::PoseBone> pose;
-	rig().eval_pose_blended(p_source_key.utf8().get_data(), p_source_playhead_seconds,
-			p_target_key.utf8().get_data(), p_target_playhead_seconds,
+	rig().eval_pose_blended(opennova::to_std(p_source_key), p_source_playhead_seconds,
+			opennova::to_std(p_target_key), p_target_playhead_seconds,
 			p_weight, pose, p_source_variant, p_target_variant);
 	return pose_to_array(pose);
 }
@@ -237,7 +238,7 @@ Array SkeletalAnim::eval_pose_overlay_deltas(const String &p_key, double p_playh
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
 		int p_wpn_variant, int p_wpn_prev_variant, int p_variant) const {
 	std::vector<opennova::anim::PoseBone> pose;
-	rig().eval_pose(p_key.utf8().get_data(), p_playhead_seconds, p_variant, pose);
+	rig().eval_pose(opennova::to_std(p_key), p_playhead_seconds, p_variant, pose);
 	return apply_pose_overlay(std::move(pose),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
 			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
@@ -254,8 +255,8 @@ Array SkeletalAnim::eval_pose_blended_overlay_deltas(
 		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant,
 		int p_source_variant, int p_target_variant) const {
 	std::vector<opennova::anim::PoseBone> pose;
-	rig().eval_pose_blended(p_source_key.utf8().get_data(), p_source_playhead_seconds,
-			p_target_key.utf8().get_data(), p_target_playhead_seconds, p_weight, pose,
+	rig().eval_pose_blended(opennova::to_std(p_source_key), p_source_playhead_seconds,
+			opennova::to_std(p_target_key), p_target_playhead_seconds, p_weight, pose,
 			p_source_variant, p_target_variant);
 	return apply_pose_overlay(std::move(pose),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
@@ -284,8 +285,8 @@ Array SkeletalAnim::apply_pose_overlay(std::vector<opennova::anim::PoseBone> nat
 		}
 	}
 	rig().apply_pose_overlay(native_pose, p_deltas ? deltas : nullptr, classes,
-			p_wpn_key.utf8().get_data(), p_wpn_playhead_seconds,
-			p_wpn_prev_key.utf8().get_data(), p_wpn_prev_playhead_seconds,
+			opennova::to_std(p_wpn_key), p_wpn_playhead_seconds,
+			opennova::to_std(p_wpn_prev_key), p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
 	Array pose = pose_to_array(native_pose);
 	apply_right_hand_local_collapse(pose, p_collapse_right_hand);

@@ -349,10 +349,7 @@ void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_string_in_section", "section", "key"), &RtxtStringFile::has_string_in_section);
 	ClassDB::bind_method(D_METHOD("get_entry_count"), &RtxtStringFile::get_entry_count);
 
-	ClassDB::bind_method(D_METHOD("get_section_count"), &RtxtStringFile::get_section_count);
 	ClassDB::bind_method(D_METHOD("get_section_names"), &RtxtStringFile::get_section_names);
-	ClassDB::bind_method(D_METHOD("get_section_name", "section_index"), &RtxtStringFile::get_section_name);
-	ClassDB::bind_method(D_METHOD("get_section_keys", "section_index"), &RtxtStringFile::get_section_keys);
 
 	ClassDB::bind_method(D_METHOD("get_entry_text", "index"), &RtxtStringFile::get_entry_text);
 
