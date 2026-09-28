@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <formats/def/def.h>
+#include <initializer_list>
 #include <string>
 
 #include "common/retail_paths.h"
@@ -28,9 +29,17 @@ int main(void) {
 
     const DefHudPosDef *hud = &hudpos.hud;
 
-    /* Font: fixture uses "fonthud1" which the parser expects as "fonthud1_hi".
-       Skip strict check, just verify the parse completed. */
-    printf("Parse OK (font_hi='%s')\n", hud->font_hi);
+    /* Fonts: retail hudpos.def names both faces on their own suffixed keys
+       (fonthud1_hi / fonthud1_lo; HUD_ParseHudposToken @0x59F370). */
+    for (const char *font : { hud->font_hi, hud->font_lo }) {
+        size_t n = strlen(font);
+        if (n < 5 || strcmp(font + n - 4, ".fnt") != 0) {
+            fprintf(stderr, "FAIL: font not resolved: hi='%s' lo='%s'\n", hud->font_hi, hud->font_lo);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+    }
+    printf("Fonts OK (hi='%s' lo='%s')\n", hud->font_hi, hud->font_lo);
 
     /* Test health rect */
     if (hud->health[0] != 2 || hud->health[1] != 739 ||
